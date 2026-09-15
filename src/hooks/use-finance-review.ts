@@ -2,6 +2,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { useAppSetting } from '@/hooks/use-app-settings';
 
 /**
  * Acima deste valor a proposta sai do lote e exige olhar individual (decisão do usuário,
@@ -11,17 +12,12 @@ import { toast } from 'sonner';
 export const LIMITE_LOTE = 500;
 
 export function useLimiteLote(): number {
-  const { data } = useQuery({
-    queryKey: ['finance-review-batch-limit'],
-    staleTime: 5 * 60_000,
-    queryFn: async (): Promise<number> => {
-      const { data } = await supabase
-        .from('app_settings').select('value').eq('key', 'finance_review_batch_limit').maybeSingle();
-      const n = parseFloat(String((data as any)?.value ?? '').replace(',', '.'));
-      return Number.isFinite(n) && n > 0 ? n : LIMITE_LOTE;
-    },
-  });
-  return data ?? LIMITE_LOTE;
+  // Lê do mesmo cache ['app-settings'] que Configurações > Financeiro invalida ao salvar.
+  // Antes tinha query própria com 5 min de validade: o gestor mudava o limite e a caixa
+  // de entrada continuava aprovando pelo valor antigo até o cache vencer.
+  const bruto = useAppSetting('finance_review_batch_limit', '');
+  const n = parseFloat(String(bruto).replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? n : LIMITE_LOTE;
 }
 
 export interface PropostaFinanceira {

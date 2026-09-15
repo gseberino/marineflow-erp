@@ -271,6 +271,7 @@ export default function SettingsPage() {
           {currencyContent}
           {cardFeesContent}
           <QuoteSettingsSection />
+          <FinanceReviewSettingsSection />
           <PaymentConditionsTab />
           <FiscalTab />
           <div>
@@ -1377,6 +1378,52 @@ const PAYMENT_METHOD_OPTIONS = [
   { value: 'check',         label: 'Cheque' },
 ];
 
+function FinanceReviewSettingsSection() {
+  // Limite de aprovação em lote da caixa de entrada financeira (decisão do dono em 14/09/2026:
+  // acima disso a proposta só é aprovada uma a uma). Mora em app_settings porque o edge
+  // finance-review também o lê — tela e servidor não podem discordar. Antes de 15/09 a chave
+  // existia e nada a expunha; mudar exigia SQL.
+  const { data: appSettings, isLoading } = useAppSettings();
+  const updateSettings = useUpdateAppSettings();
+  const [limite, setLimite] = useState<number | null>(null);
+  const valor = limite ?? (Number(appSettings?.finance_review_batch_limit) || 500);
+
+  const salvar = async () => {
+    try {
+      await updateSettings.mutateAsync({ finance_review_batch_limit: String(valor) });
+      setLimite(null);
+    } catch {
+      /* erro já exibido pelo hook */
+    }
+  };
+
+  if (isLoading) return null;
+
+  return (
+    <div className="rounded-xl border bg-card p-6 space-y-4">
+      <h3 className="text-sm font-semibold flex items-center gap-2">
+        <DollarSign className="h-4 w-4" /> Caixa de entrada financeira
+      </h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <Label>Limite para aprovar em lote (R$)</Label>
+          <Input type="number" min="0" step="50" value={valor}
+            onChange={e => setLimite(Math.max(0, Math.round(Number(e.target.value) || 0)))} />
+          <p className="text-xs text-muted-foreground">
+            Propostas de lançamento até este valor podem ser aprovadas em grupo ou em seleção. Acima dele, só uma a uma — o servidor também recusa.
+          </p>
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <Button onClick={salvar} disabled={updateSettings.isPending || limite === null} size="sm">
+          {updateSettings.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+          Salvar limite
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function QuoteSettingsSection() {
   // Lê/escreve via os hooks compartilhados (useAppSettings/useUpdateAppSettings) — antes
   // esta seção usava supabase.from() direto, então salvar aqui não invalidava o cache do
@@ -1392,6 +1439,7 @@ function QuoteSettingsSection() {
     quote_validity_days:      15,
     quote_expiry_days:        30,
     quote_followup_days:      7,
+    survey_valor_limiar:      3000,
   });
   const [initialized, setInitialized] = useState(false);
 
@@ -1406,6 +1454,8 @@ function QuoteSettingsSection() {
       quote_validity_days:      Number(m.quote_validity_days)      || 15,
       quote_expiry_days:        Number(m.quote_expiry_days)        || 30,
       quote_followup_days:      Number(m.quote_followup_days)      || 7,
+      // Mesmo padrão da função should_survey_service (3000) — a tela e o banco concordam.
+      survey_valor_limiar:      Number(m.survey_valor_limiar)      || 3000,
     });
     setInitialized(true);
   }, [appSettings, initialized]);
@@ -1493,6 +1543,15 @@ function QuoteSettingsSection() {
           <Input type="number" min="1" value={cfg.quote_followup_days}
             onChange={e => set('quote_followup_days', Number(e.target.value))} />
           <p className="text-xs text-muted-foreground">WhatsApp de follow-up automático enviado após esse prazo sem resposta</p>
+        </div>
+
+        {/* Limiar do levantamento técnico (NOVO-lev-32). Inteiro de propósito: o banco lê este
+            valor com parse_valor_ptbr, que trata "." como separador de milhar. */}
+        <div className="space-y-1.5">
+          <Label>Valor que exige levantamento técnico (R$)</Label>
+          <Input type="number" min="0" step="100" value={cfg.survey_valor_limiar}
+            onChange={e => set('survey_valor_limiar', Math.max(0, Math.round(Number(e.target.value) || 0)))} />
+          <p className="text-xs text-muted-foreground">Orçamento a partir deste valor pede levantamento antes do serviço (além dos outros motivos: serviço marcado, execuções que variaram, cliente novo)</p>
         </div>
       </div>
 
