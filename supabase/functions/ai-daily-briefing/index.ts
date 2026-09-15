@@ -226,6 +226,36 @@ Deno.serve(async (req) => {
       waitingLines.push(`💬 Esperando resposta: *0* ✅`);
     }
 
+    // ── "Deixar a IA acompanhar": o que espera o dono, quem respondeu, o que voltou ──
+    // Só aparece quando há missão em andamento; devolvidas só nos 3 primeiros dias, para o
+    // digest não repetir a mesma pendência todo dia. Best-effort: não derruba o briefing.
+    const missaoLines: string[] = [];
+    try {
+      const { data: missoes } = await admin
+        .from("ai_followup_missions")
+        .select("id, contraparte_label, status, toques_feitos, max_toques, resolucao, resolvida_em")
+        .in("status", ["active", "waiting_reply", "escalated"]);
+      const ms = ((missoes as any[]) || []).filter((m) =>
+        m.status !== "escalated" || (m.resolvida_em && now.getTime() - new Date(m.resolvida_em).getTime() < 3 * 86400000));
+      if (ms.length > 0) {
+        const { count: rascunhos } = await admin
+          .from("ai_operator_pending_actions")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "pending")
+          .eq("action_name", "followup_send_touch");
+        missaoLines.push(`🤖 IA acompanhando: *${ms.length}*`);
+        if ((rascunhos ?? 0) > 0) missaoLines.push(`   • ${rascunhos} mensagem(ns) redigida(s) esperando seu sim no sino`);
+        for (const m of ms.filter((x) => x.status === "waiting_reply").slice(0, 3)) {
+          missaoLines.push(`   • *${m.contraparte_label}* respondeu — leia antes de tocar de novo`);
+        }
+        for (const m of ms.filter((x) => x.status === "escalated").slice(0, 3)) {
+          missaoLines.push(`   • *${m.contraparte_label}* voltou para você: ${m.resolucao ?? "sem resposta"}`);
+        }
+      }
+    } catch (e) {
+      console.warn("[ai-daily-briefing] bloco IA acompanhando falhou:", (e as Error).message);
+    }
+
     const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
     const dateBR = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
 
@@ -372,6 +402,7 @@ Deno.serve(async (req) => {
       quickActions.push(`   • *Follow-up ${flaggedQuotes[0].nome}*`);
     }
     if (waiting.length > 0) quickActions.push(`   • *Quem está esperando resposta?*`);
+    if (missaoLines.length > 0) quickActions.push(`   • *Como estão os acompanhamentos da IA?*`);
     const quickActionLines = quickActions.length > 0
       ? ["", "⚡ *Ações rápidas* (responda com uma):", ...quickActions]
       : [];
@@ -391,6 +422,7 @@ Deno.serve(async (req) => {
       ...manutLines,
       ...stockLines,
       ...waitingLines,
+      ...missaoLines,
       ...(sugestaoLine ? ["", sugestaoLine] : []),
       ...quickActionLines,
       "",
