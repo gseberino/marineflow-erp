@@ -25,8 +25,25 @@ vi.mock('@/hooks/use-followup-missions', async (importOriginal) => {
     }),
     useCancelFollowupMission: () => ({ mutateAsync: vi.fn(), isPending: false }),
     useFollowupSwitch: () => ({ ligado: true, isLoading: false, alternar: vi.fn(), isPending: false }),
+    useFollowupMissionDaOrigem: () => ({ data: null, isLoading: false }),
+    useCreateFollowupMission: () => ({ mutateAsync: vi.fn(), isPending: false }),
   };
 });
+
+// "Depende deles": um fio solto de fornecedor sem missão vira candidato com o botão ao lado.
+vi.mock('@/hooks/use-agenda', () => ({
+  useOpenLoops: () => ({
+    data: [{
+      id: 'loop1', kind: 'entrega', source: 'conversation', title: 'Entrega das baterias LiFePO4',
+      detail: 'Vanderlei prometeu para a próxima semana', due_at: '2026-09-22T12:00:00Z', priority: 'high',
+      service_order_id: null, service_order_number: null, mentions: 2, evidence: null,
+      opened_at: '2026-09-10T12:00:00Z', last_seen_at: '2026-09-14T12:00:00Z', atrasado: false,
+      direction: 'theirs', entity_type: 'supplier', entity_id: 's1', entity_name: 'Vanderlei Andrade',
+    }],
+    isLoading: false,
+  }),
+}));
+vi.mock('@/hooks/use-suppliers', () => ({ useSuppliers: () => ({ data: [] }) }));
 
 function renderPainel() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -42,12 +59,16 @@ function renderPainel() {
 }
 
 describe('FollowupMissionsV2 — IA acompanhando', () => {
-  it('vazio ensina onde o botão fica e mostra o kill switch', () => {
+  it('vazio ensina onde o botão fica, mostra o kill switch e lista o que depende deles', () => {
     estado.missoes = [];
     renderPainel();
     expect(screen.getByRole('heading', { name: /IA acompanhando/ })).toBeInTheDocument();
-    expect(screen.getByText(/Deixar a IA acompanhar/)).toBeInTheDocument();
+    expect(screen.getByText(/clique em "Deixar a IA acompanhar"/)).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: /Acompanhamento pela IA/ })).toBeInTheDocument();
+    // o fio solto do fornecedor aparece como candidato, com o botão de acompanhar
+    expect(screen.getByText(/Depende deles/)).toBeInTheDocument();
+    expect(screen.getByText('Entrega das baterias LiFePO4')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Deixar a IA acompanhar/ })).toBeInTheDocument();
   });
 
   it('mostra a missão com status legível e abre a trilha', async () => {
@@ -59,7 +80,8 @@ describe('FollowupMissionsV2 — IA acompanhando', () => {
       resolucao: null, resolucao_evidencia: null, resolvida_em: null, created_at: '2026-09-14T12:00:00Z',
     }];
     renderPainel();
-    expect(screen.getByText('Vanderlei Andrade')).toBeInTheDocument();
+    // O nome aparece no cartão da missão E no candidato "depende deles" (fio de outra origem).
+    expect(screen.getAllByText('Vanderlei Andrade').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Cobrando')).toBeInTheDocument();
     expect(screen.getByText(/Toques 1\/3/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /Trilha/ }));

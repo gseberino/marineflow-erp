@@ -19,6 +19,8 @@ import {
   useCancelFollowupMission, useFollowupEvents, useFollowupMissions, useFollowupSwitch,
   type FollowupMission, type FollowupMissionStatus,
 } from '@/hooks/use-followup-missions';
+import { useOpenLoops } from '@/hooks/use-agenda';
+import { FollowupMissionButton } from '@/components/followups/FollowupMissionDialog';
 import '@/v2/tokens.css';
 
 const TONE: Record<FollowupMissionStatus, StatusTone> = {
@@ -117,6 +119,45 @@ function CartaoMissao({ m }: { m: FollowupMission }) {
   );
 }
 
+/**
+ * O que depende DELES (fios soltos com direction='theirs'): compromissos que um cliente ou
+ * fornecedor assumiu e o ERP ainda não viu cumprir. Até aqui não apareciam em tela nenhuma —
+ * a agenda só mostra o que depende de você. São exatamente os candidatos a missão.
+ */
+function DependeDeles({ missoes }: { missoes: FollowupMission[] }) {
+  const { data: fios = [], isLoading } = useOpenLoops('theirs');
+  const jaAcompanhados = new Set(missoes.filter((m) => m.origem_tipo === 'open_loop').map((m) => m.origem_id));
+  const candidatos = fios.filter((f) => !jaAcompanhados.has(f.id));
+  if (isLoading || candidatos.length === 0) return null;
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        Depende deles · sem acompanhamento ({candidatos.length})
+      </h2>
+      <div className="grid gap-3 md:grid-cols-2">
+        {candidatos.map((f) => (
+          <EntityCard
+            key={f.id}
+            id={f.entity_name || (f.entity_type === 'supplier' ? 'Fornecedor' : 'Cliente')}
+            badge={f.atrasado ? <StatusChip tone="critical" dot>atrasado</StatusChip> : f.due_at ? <StatusChip tone="neutral">até {fmtData(f.due_at)}</StatusChip> : null}
+            title={f.title}
+            lines={[f.detail || f.evidence || (f.service_order_number ? `OS ${f.service_order_number}` : '')].filter(Boolean)}
+            severity={f.atrasado ? 'critical' : 'neutral'}
+            actions={
+              <FollowupMissionButton
+                origem={{ tipo: 'open_loop', id: f.id, rotulo: f.title }}
+                contraparte={f.entity_type && f.entity_id ? { tipo: f.entity_type, id: f.entity_id, label: f.entity_name ?? null } : null}
+                sugestaoObjetivo={f.title}
+                sugestaoPrazo={f.due_at}
+              />
+            }
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function FollowupMissionsV2() {
   const [filtro, setFiltro] = useState<'andamento' | 'encerradas'>('andamento');
   const { data: missoes = [], isLoading, error } = useFollowupMissions(filtro);
@@ -163,6 +204,8 @@ export default function FollowupMissionsV2() {
         <div className="grid gap-3 md:grid-cols-2">
           {missoes.map((m) => <CartaoMissao key={m.id} m={m} />)}
         </div>
+
+        {filtro === 'andamento' && <DependeDeles missoes={missoes} />}
       </PageShell>
     </V2Shell>
   );

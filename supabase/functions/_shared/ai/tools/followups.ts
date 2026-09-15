@@ -9,7 +9,7 @@ import { blockTechnician, type ToolCtx, type ToolDef } from "./registry.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { registrarEnvio } from "../comms/send-log.ts";
 import { sendWhatsapp } from "./whatsapp.ts";
-import { proximoToqueApos, partesBrasilia } from "../followups/cadencia.ts";
+import { proximoToqueApos, partesBrasilia, proximaJanela } from "../followups/cadencia.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -96,7 +96,7 @@ export const followupTools: ToolDef[] = [
         tipo: "generico", audiencia, canal: "whatsapp",
         destinatarioIdentificado: Boolean(missao.contraparte_id), texto,
       });
-      if (guarda.bloqueado) {
+      if (guarda.bloqueado && guarda.codigoBloqueio !== "fora_de_horario") {
         await registrarEnvio(admin, { tipo: "followup", audiencia, entityKind: missao.contraparte_tipo, entityId: missao.contraparte_id, phone: missao.contraparte_phone, preview: texto, status: "blocked", blockCode: guarda.codigoBloqueio });
         return { error: guarda.motivo };
       }
@@ -105,6 +105,40 @@ export const followupTools: ToolDef[] = [
       const hoje = await toquesEnviadosHoje(admin);
       if (hoje >= cap) return { error: `Teto diário de ${cap} toques de acompanhamento já atingido hoje (proteção do número).` };
 
+      const agora = new Date();
+      const toque = Number(missao.toques_feitos || 0) + 1;
+
+      // O dono aprova à noite; o terceiro recebe de manhã. Fora do horário a mensagem vai para
+      // a fila com hora marcada (próximo dia útil, 9h) — nunca falha, nunca sai fora de hora.
+      // A fila não aplica wa_test_mode (o whatsapp-send aplica), então o desvio é feito aqui.
+      if (guarda.bloqueado && guarda.codigoBloqueio === "fora_de_horario") {
+        const quando = proximaJanela(agora);
+        const teste = await lerSettings(admin, ["wa_test_mode", "wa_test_number"]);
+        const testMode = (teste.wa_test_mode || "").trim() === "true";
+        const testNumber = (teste.wa_test_number || "").replace(/\D/g, "");
+        if (testMode && !testNumber) return { error: "Modo de teste do WhatsApp ligado sem número de teste." };
+        const { error: erroFila } = await admin.from("whatsapp_send_queue").insert({
+          phone_normalized: testMode ? testNumber : missao.contraparte_phone,
+          message: texto, source: "ai_followup_mission", source_ref_id: missao.id,
+          priority: 4, scheduled_for: quando.toISOString(),
+        });
+        if (erroFila) return { error: `Não deu para agendar o envio: ${erroFila.message}` };
+        const proximo = proximoToqueApos(toque, Number(missao.max_toques || 3), missao.prazo_final, quando);
+        await admin.from("ai_followup_events").insert({
+          mission_id: missao.id, tipo: "touch_sent", conteudo: texto,
+          meta: { draft_event_id: args.event_id, toque, de: missao.max_toques, agendado_para: quando.toISOString(), fila: true, avisos: guarda.avisos },
+          created_by: ctx.userId || null,
+        });
+        await admin.from("ai_followup_missions").update({
+          toques_feitos: toque, ultimo_toque_em: quando.toISOString(),
+          proximo_toque_em: proximo ? proximo.toISOString() : null, status: "active",
+        }).eq("id", missao.id);
+        return {
+          ok: true, toque, de: missao.max_toques, agendado_para: quando.toISOString(),
+          aviso: `Fora do horário comercial: a mensagem foi agendada para ${quando.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}.`,
+        };
+      }
+
       const envio = await sendWhatsapp(missao.contraparte_phone, texto, ctx.jwt);
       if ((envio as any).error) {
         await registrarEnvio(admin, { tipo: "followup", audiencia, entityKind: missao.contraparte_tipo, entityId: missao.contraparte_id, phone: missao.contraparte_phone, preview: texto, status: "failed" });
@@ -112,8 +146,6 @@ export const followupTools: ToolDef[] = [
       }
       await registrarEnvio(admin, { tipo: "followup", audiencia, entityKind: missao.contraparte_tipo, entityId: missao.contraparte_id, phone: missao.contraparte_phone, preview: texto, status: "sent" });
 
-      const agora = new Date();
-      const toque = Number(missao.toques_feitos || 0) + 1;
       const proximo = proximoToqueApos(toque, Number(missao.max_toques || 3), missao.prazo_final, agora);
       await admin.from("ai_followup_events").insert({
         mission_id: missao.id, tipo: "touch_sent", conteudo: texto,

@@ -90,17 +90,13 @@ function politicasVigentes(tabela: string): Politica[] {
 }
 
 /**
- * Políticas allow-all da era Lovable que os arquivos do repo criam e a PRODUÇÃO já não tem —
- * foram derrubadas pela migration perdida 20260706165104_remove_remaining_open_anon_policies
- * (MF-AUD-058). A migration de convergência que as derruba no repo
- * (`convergencia_politicas_orfas`) aguarda autorização do dono; até lá ficam nomeadas aqui,
- * e o teste abaixo obriga a esvaziar esta lista assim que a convergência entrar.
+ * Políticas allow-all da era Lovable que os arquivos do repo criavam e a PRODUÇÃO já não tinha
+ * (derrubadas pela migration perdida 20260706165104, MF-AUD-058). A convergência
+ * `20260914110000_convergencia_politicas_orfas` as derruba no repo desde 14/09/2026, então a
+ * lista está vazia — e o teste abaixo garante que ela só volte a ter nome se a convergência
+ * sumir.
  */
-const ORFAS_CONHECIDAS = new Set([
-  "Authenticated users can do everything on receivables",
-  "Authenticated users can do everything on payables",
-  "Authenticated users can do everything on invoices",
-]);
+const ORFAS_CONHECIDAS = new Set<string>([]);
 
 const barreiraNegativa = (t: string) => /not\s+(?:public\.)?is_technician\s*\(/.test(t);
 const barreiraPositiva = (t: string) => /(?:public\.)?is_admin_or_financial\s*\(\s*auth\.uid\(\)\s*\)/.test(t);

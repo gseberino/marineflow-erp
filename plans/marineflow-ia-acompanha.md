@@ -62,11 +62,16 @@ registrada antes da pesquisa · complementa `marineflow-agenda-autonoma.md` (Fas
 > - **Prova em produção (14/09)**: missão de teste para o `wa_test_number` → runner (disparo
 >   manual) → rascunho identificando-se como assistente da HBR → pendência "Toque 1/2" no sino,
 >   nenhuma mensagem enviada. Cadência coberta por `cadencia_test.ts` (7 testes Deno).
-> - **Limites conhecidos desta entrega**: aprovar fora do horário 8-20h falha o envio (a pendência
->   vira `failed` e o runner rearma para o dia seguinte) — a evolução é enfileirar para a próxima
->   janela; não há "Ajustar texto" (o payload da pendência é imutável): rejeitar com observação
->   faz a IA reescrever; Fase 2 (classificar `resolvido`/`nova_data`/`pare`), Fase 3 (autonomia
->   por tipo) e Fase 4 (botão no fio solto) ficam para depois dos 30 dias de copiloto.
+> - **Aprovação fora do horário** (desde a noite de 14/09): a mensagem vai para
+>   `whatsapp_send_queue` com hora marcada no próximo dia útil às 9h (`proximaJanela`), o toque
+>   conta como dado e a cadência segue a partir da hora agendada — o dono aprova à noite, o
+>   terceiro recebe de manhã.
+> - **"Depende deles" no painel**: os fios soltos com `direction='theirs'` (que não apareciam em
+>   tela nenhuma) são listados como candidatos com o botão de acompanhar ao lado — é a metade
+>   barata da Fase 4 (origem `open_loop`, `criterio_erp = open_loop_resolved`).
+> - **Limites conhecidos**: não há "Ajustar texto" (o payload da pendência é imutável): rejeitar
+>   com observação faz a IA reescrever; Fase 2 (classificar `resolvido`/`nova_data`/`pare`) e
+>   Fase 3 (autonomia por tipo) ficam para depois dos 30 dias de copiloto.
 
 ## 1. A ideia, na sua frase
 

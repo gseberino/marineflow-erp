@@ -41,6 +41,22 @@ export function jaTocouHoje(ultimoToqueEm: string | null | undefined, agora: Dat
 const DIA = 86_400_000;
 
 /**
+ * Próxima abertura da janela (dia útil, 9h de Brasília = 12:00Z; o Brasil não tem horário de
+ * verão desde 2019). Se agora ainda é antes das 9h de um dia útil, é hoje mesmo.
+ * É onde cai uma mensagem aprovada fora do horário: agendada, nunca perdida nem enviada à noite.
+ */
+export function proximaJanela(agora: Date = new Date()): Date {
+  for (let i = 0; i < 8; i++) {
+    const dia = new Date(agora.getTime() + i * DIA);
+    const { diaSemana, dataISO, hora } = partesBrasilia(dia);
+    if (diaSemana < 1 || diaSemana > 5) continue;
+    if (i === 0 && hora >= 9) continue;
+    return new Date(`${dataISO}T12:00:00Z`);
+  }
+  return new Date(agora.getTime() + DIA);
+}
+
+/**
  * Quando cai o próximo toque depois do toque de número `toqueFeito` (1-based).
  * Com prazo: os toques restantes se distribuem para trás do prazo (D-7, D-3, D-1); se o prazo
  * já está perto demais, o próximo é amanhã — nunca hoje de novo. Sem prazo: +2d, +4d, +7d.

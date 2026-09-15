@@ -1,5 +1,14 @@
 import { assertEquals, assert } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { dentroDaJanela, jaTocouHoje, proximoToqueApos, esperaFinalEsgotada, partesBrasilia } from "./cadencia.ts";
+import { dentroDaJanela, jaTocouHoje, proximoToqueApos, esperaFinalEsgotada, partesBrasilia, proximaJanela } from "./cadencia.ts";
+
+Deno.test("proximaJanela: à noite cai no dia útil seguinte às 9h BRT; sexta à noite pula para segunda; antes das 9h é hoje", () => {
+  // quarta 21:30 BRT (00:30Z de quinta) → quinta 09:00 BRT = 12:00Z
+  assertEquals(proximaJanela(new Date("2026-09-17T00:30:00Z")).toISOString(), "2026-09-17T12:00:00.000Z");
+  // sexta 19:00 BRT (22:00Z) → segunda 21/09 09:00 BRT
+  assertEquals(proximaJanela(new Date("2026-09-18T22:00:00Z")).toISOString(), "2026-09-21T12:00:00.000Z");
+  // quarta 07:30 BRT (10:30Z) → hoje 09:00 BRT
+  assertEquals(proximaJanela(new Date("2026-09-16T10:30:00Z")).toISOString(), "2026-09-16T12:00:00.000Z");
+});
 
 // 2026-09-16 é uma quarta-feira. 15:00 em Brasília = 18:00Z.
 const quartaTarde = new Date("2026-09-16T18:00:00Z");
