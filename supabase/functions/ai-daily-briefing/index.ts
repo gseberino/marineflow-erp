@@ -226,6 +226,28 @@ Deno.serve(async (req) => {
       waitingLines.push(`💬 Esperando resposta: *0* ✅`);
     }
 
+    // ── Caixa de entrada financeira: propostas de lançamento esperando o gestor ──
+    // O extrato vira despesa só quando alguém aprova; fila esquecida é DRE errado. Só aparece
+    // quando há algo, com o valor somado para dar noção do tamanho.
+    const filaFinanceiraLines: string[] = [];
+    let filaFinanceiraCount = 0;
+    try {
+      const { data: propostas } = await admin
+        .from("finance_review_queue")
+        .select("suggested_amount")
+        .eq("status", "pending")
+        .limit(1000);
+      const rows = (propostas as any[]) || [];
+      filaFinanceiraCount = rows.length;
+      if (rows.length > 0) {
+        const soma = rows.reduce((s, p) => s + Math.abs(Number(p.suggested_amount ?? 0)), 0);
+        const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+        filaFinanceiraLines.push(`🧾 Propostas de lançamento esperando você: *${rows.length}* (${fmtBRL.format(soma)})`);
+      }
+    } catch (e) {
+      console.warn("[ai-daily-briefing] bloco da fila financeira falhou:", (e as Error).message);
+    }
+
     // ── "Deixar a IA acompanhar": o que espera o dono, quem respondeu, o que voltou ──
     // Só aparece quando há missão em andamento; devolvidas só nos 3 primeiros dias, para o
     // digest não repetir a mesma pendência todo dia. Best-effort: não derruba o briefing.
@@ -403,6 +425,7 @@ Deno.serve(async (req) => {
     }
     if (waiting.length > 0) quickActions.push(`   • *Quem está esperando resposta?*`);
     if (missaoLines.length > 0) quickActions.push(`   • *Como estão os acompanhamentos da IA?*`);
+    if (filaFinanceiraCount > 0) quickActions.push(`   • *O que está esperando na caixa de entrada financeira?*`);
     const quickActionLines = quickActions.length > 0
       ? ["", "⚡ *Ações rápidas* (responda com uma):", ...quickActions]
       : [];
@@ -417,6 +440,7 @@ Deno.serve(async (req) => {
       ...recebLines,
       ...(upcomingCount > 0 ? [`🔜 A vencer (próx. 3 dias): *${upcomingCount}* (${fmt.format(upcomingSum)})`] : []),
       `✅ Aprovações da IA pendentes: *${pendingCount ?? 0}*`,
+      ...filaFinanceiraLines,
       ...conciliaLines,
       ...stuckLines,
       ...manutLines,

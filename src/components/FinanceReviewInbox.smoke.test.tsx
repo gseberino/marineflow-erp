@@ -62,6 +62,8 @@ vi.mock('@/hooks/use-finance-review', async (importOriginal) => {
     useMarcarDuplicata: () => ({ mutate: duplicataMock, isPending: false }),
     useReaplicarRegras: () => ({ mutate: reaplicarMock, isPending: false }),
     useClassificarComIA: () => ({ mutate: vi.fn(), isPending: false }),
+    // O limite vem de app_settings; aqui fixo, para o teste não depender de rede.
+    useLimiteLote: () => 500,
   };
 });
 

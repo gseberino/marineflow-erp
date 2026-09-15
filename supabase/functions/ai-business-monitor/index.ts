@@ -3,11 +3,14 @@
 // por WhatsApp. Deduplicado por dia via ai_operator_alerts_log, então mesmo rodando de
 // hora em hora, cada sinal alerta no máximo uma vez por dia.
 //
-// Sinais v1:
-//   (1) Recebíveis que venceram HOJE (precisam de cobrança).
-//   (2) Orçamentos parados há mais de 7 dias sem resposta.
+// Sinais: (1) recebíveis que venceram HOJE; (2) orçamentos parados há 7+ dias; (3) certificado
+// A1 vencendo; (4) cota fiscal do mês; (5) NF-e rejeitadas em 24h. Nenhum olha despesa,
+// fornecedor ou extrato — o "Vigilante" do Executivo Financeiro (anomalias de despesa) NÃO é
+// esta função e ainda não existe (plans/marineflow-executivo-financeiro.md, módulo IV).
 // Destinatários são INTERNOS → envio pela fila (whatsapp_send_queue).
-// Agendado via pg_cron (jobid 5, ai-business-monitor, hora em hora) — DESATIVADO até validação.
+// *** ESTÁ NO AR: *** pg_cron `ai-business-monitor` de hora em hora, ATIVO (conferido no snapshot
+// de produção em 14/09/2026 — supabase/schemas/producao/10-cron-e-storage.sql). O cabeçalho
+// antigo dizia "DESATIVADO até validação" e estava errado desde a Fase 5.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider } from "../_shared/fiscal/factory.ts";

@@ -37,7 +37,7 @@ import {
 import {
   useFinanceReviewQueue, useGerarPropostas, useAprovarPropostas, useRecusarPropostas,
   useMarcarDuplicata, useCriarCategoriaDespesa, useReaplicarRegras, useClassificarComIA,
-  LIMITE_LOTE, type PropostaFinanceira, type Correcao,
+  useLimiteLote, type PropostaFinanceira, type Correcao,
 } from '@/hooks/use-finance-review';
 import {
   Sparkles, Check, X, ChevronDown, ArrowLeftRight, TrendingDown, TrendingUp, Info, RefreshCw,
@@ -267,6 +267,7 @@ function LinhaProposta({
   mostrarAprovar,
 }: LinhaProps) {
   const { formatCurrency, formatDate } = useI18n();
+  const limiteLote = useLimiteLote();
   const [aberta, setAberta] = useState(false);
 
   const transferencia = p.kind === 'internal_transfer';
@@ -336,7 +337,7 @@ function LinhaProposta({
             )}
             {foraDoLote && !transferencia && (
               <Badge variant="outline" className="border-amber-500/50 text-xs text-amber-600">
-                Acima de {formatCurrency(LIMITE_LOTE)} — aprove aqui
+                Acima de {formatCurrency(limiteLote)} — aprove aqui
               </Badge>
             )}
           </div>
@@ -470,6 +471,7 @@ function CartaoDoFavorecido({
   children: ReactNode;
 }) {
   const { formatCurrency, formatDate } = useI18n();
+  const limiteLote = useLimiteLote();
   const [aberto, setAberto] = useState(false);
 
   const [confirmando, setConfirmando] = useState(false);
@@ -631,8 +633,8 @@ function CartaoDoFavorecido({
                 <div className="min-w-0">
                   <p className="mb-1 font-medium text-foreground">
                     {exigemOlhar.length === 1
-                      ? `1 passa de ${formatCurrency(LIMITE_LOTE)}:`
-                      : `${exigemOlhar.length} passam de ${formatCurrency(LIMITE_LOTE)}:`}
+                      ? `1 passa de ${formatCurrency(limiteLote)}:`
+                      : `${exigemOlhar.length} passam de ${formatCurrency(limiteLote)}:`}
                   </p>
                   <ul className="max-h-48 space-y-1.5 overflow-y-auto rounded-md border p-2">
                     {exigemOlhar.map((p) => (
@@ -689,6 +691,7 @@ export function FinanceReviewInbox({
   onCriarRegra?: (semente: SementeDeRegra) => void;
 } = {}) {
   const { formatCurrency } = useI18n();
+  const limiteLote = useLimiteLote();
   const { data: propostas = [], isLoading, error: erroDaFila } = useFinanceReviewQueue();
 
   const gerar = useGerarPropostas();
@@ -778,11 +781,11 @@ export function FinanceReviewInbox({
       totalValor += Number(p.suggested_amount ?? 0);
       // Transferência entre contas vai sempre para a revisão individual: confirmar que
       // dois lançamentos são o mesmo dinheiro é decisão de fato, não volume.
-      if (p.kind !== 'internal_transfer' && Number(p.suggested_amount ?? 0) < LIMITE_LOTE) lote.push(p);
+      if (p.kind !== 'internal_transfer' && Number(p.suggested_amount ?? 0) < limiteLote) lote.push(p);
       else individuais.push(p);
     }
     return { lote, individuais, totalValor };
-  }, [porOrigem]);
+  }, [porOrigem, limiteLote]);
 
   const marcar = (id: string, marcada: boolean) => {
     setSelecionadas((s) => {
@@ -809,7 +812,7 @@ export function FinanceReviewInbox({
   // Calculado nos dois modos: é uma passada só na lista, e o botão precisa saber quantos
   // favorecidos existem ANTES de alguém trocar de modo — senão ele oferece "Por favorecido
   // (0)" justamente quando o agrupamento seria útil.
-  const gruposBrutos = useMemo(() => agruparPorFavorecido(porOrigem, LIMITE_LOTE), [porOrigem]);
+  const gruposBrutos = useMemo(() => agruparPorFavorecido(porOrigem, limiteLote), [porOrigem, limiteLote]);
 
   /**
    * A ordem considera a categoria que o gestor ACABOU de escolher, não só a que veio do
@@ -1103,7 +1106,7 @@ export function FinanceReviewInbox({
             {[
               { rotulo: 'Propostas', valor: String(porOrigem.length) },
               { rotulo: 'Valor total', valor: formatCurrency(totalValor) },
-              { rotulo: agrupar ? 'Favorecidos' : `Até ${formatCurrency(LIMITE_LOTE)}`,
+              { rotulo: agrupar ? 'Favorecidos' : `Até ${formatCurrency(limiteLote)}`,
                 valor: String(agrupar ? grupos.length : lote.length) },
               { rotulo: agrupar ? 'Sem categoria' : 'Revisar uma a uma',
                 valor: String(agrupar ? resumo.semCategoria : individuais.length) },
@@ -1192,7 +1195,7 @@ export function FinanceReviewInbox({
                 aria-label="Selecionar todas do lote"
               />
               <span className="text-sm font-medium">
-                Aprovação em lote — até {formatCurrency(LIMITE_LOTE)} ({lote.length})
+                Aprovação em lote — até {formatCurrency(limiteLote)} ({lote.length})
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -1222,7 +1225,7 @@ export function FinanceReviewInbox({
         <div className="space-y-2">
           <div className="rounded-lg border bg-muted/30 p-2">
             <p className="text-sm font-medium">
-              Revisar uma a uma — acima de {formatCurrency(LIMITE_LOTE)} e transferências ({individuais.length})
+              Revisar uma a uma — acima de {formatCurrency(limiteLote)} e transferências ({individuais.length})
             </p>
           </div>
           {individuais.map((p) => (

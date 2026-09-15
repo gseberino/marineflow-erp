@@ -501,6 +501,73 @@ export const financeRulesTools: ToolDef[] = [
     },
   },
 
+  // A edge finance-review já sabe reclassificar, classificar por IA, sugerir regras e desfazer
+  // — só faltava o agente poder pedir. Nenhuma destas cria lançamento.
+  {
+    name: "reclassificar_propostas_de_lancamento",
+    description:
+      "Reaplica as regras financeiras vigentes às propostas ainda pendentes da caixa de entrada " +
+      "(categoria/favorecido). Use depois de criar ou mudar uma regra. Não lança nada.",
+    input_schema: { type: "object", properties: {} },
+    risk: "low",
+    roles: CARGOS_FINANCEIRO,
+    async execute(_args, ctx) {
+      const bloqueio = bloqueiaSemAcesso(ctx);
+      if (bloqueio) return bloqueio;
+      return await chamarFinanceReview(ctx, { action: "reclassify" });
+    },
+  },
+
+  {
+    name: "classificar_propostas_com_ia",
+    description:
+      "Pede à IA uma categoria para as propostas pendentes que as regras não classificaram, usando o " +
+      "plano de contas e as decisões anteriores do gestor como exemplo. Só sugere (confiança limitada a 80); " +
+      "nunca aprova. Custa uma chamada de modelo.",
+    input_schema: { type: "object", properties: {} },
+    risk: "low",
+    roles: CARGOS_FINANCEIRO,
+    async execute(_args, ctx) {
+      const bloqueio = bloqueiaSemAcesso(ctx);
+      if (bloqueio) return bloqueio;
+      return await chamarFinanceReview(ctx, { action: "classify_ai" });
+    },
+  },
+
+  {
+    name: "sugerir_regras_financeiras",
+    description:
+      "Olha os lançamentos já decididos pelo gestor e propõe regras de categoria para o que se repete " +
+      "(mínimo 3 casos, sem divergência). As regras nascem como 'proposta' e só valem depois de aceitas.",
+    input_schema: { type: "object", properties: {} },
+    risk: "low",
+    roles: CARGOS_FINANCEIRO,
+    async execute(_args, ctx) {
+      const bloqueio = bloqueiaSemAcesso(ctx);
+      if (bloqueio) return bloqueio;
+      return await chamarFinanceReview(ctx, { action: "suggest_rules" });
+    },
+  },
+
+  {
+    name: "desfazer_propostas_ignoradas",
+    description:
+      "Volta para a fila propostas que foram recusadas/ignoradas por engano (e desfaz o lançamento que o " +
+      "motor tiver criado para elas, se houver). Use quando o usuário disser que recusou sem querer.",
+    input_schema: {
+      type: "object",
+      properties: { ids: { type: "array", items: { type: "string" }, description: "Ids das propostas." } },
+      required: ["ids"],
+    },
+    risk: "medium",
+    roles: CARGOS_FINANCEIRO,
+    async execute(args, ctx) {
+      const bloqueio = bloqueiaSemAcesso(ctx);
+      if (bloqueio) return bloqueio;
+      return await chamarFinanceReview(ctx, { action: "undismiss", ids: args.ids });
+    },
+  },
+
   // ── CADASTRO DE FAVORECIDOS ───────────────────────────────────────────────────
   {
     name: "cadastrar_favorecido",

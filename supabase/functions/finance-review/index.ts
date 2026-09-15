@@ -49,8 +49,21 @@ function jr(body: unknown, status = 200) {
   });
 }
 
-/** Acima disto, a proposta exige olhar individual — decisão do usuário. */
-const LIMITE_LOTE = 500;
+/**
+ * Acima disto, a proposta exige olhar individual — decisão do usuário (29/07/2026). O valor
+ * vive em app_settings.finance_review_batch_limit (trava nº 2 do plano: limite no banco, não
+ * no código); a constante é só o padrão quando a chave não existe. A tela lê a mesma chave.
+ */
+const LIMITE_LOTE_PADRAO = 500;
+async function lerLimiteLote(admin: any): Promise<number> {
+  try {
+    const { data } = await admin.from("app_settings").select("value").eq("key", "finance_review_batch_limit").maybeSingle();
+    const n = parseFloat(String(data?.value ?? "").replace(",", "."));
+    return Number.isFinite(n) && n > 0 ? n : LIMITE_LOTE_PADRAO;
+  } catch {
+    return LIMITE_LOTE_PADRAO;
+  }
+}
 /** Janela da fila: o que é mais antigo vira mutirão separado, para não sepultar o dia. */
 const JANELA_DIAS = 90;
 
@@ -475,6 +488,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     lancadasSozinhas = Number(corpo?.aprovadas ?? 0);
   }
 
+  const limiteLote = await lerLimiteLote(admin);
   const partes = [
     criadas > 0 ? `${criadas - lancadasSozinhas} proposta(s) para revisar` : "Nada novo para propor",
     lancadasSozinhas > 0 ? `${lancadasSozinhas} lançada(s) pelas suas regras` : "",
@@ -487,7 +501,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     criadas,
     lancadas_por_regra: lancadasSozinhas,
     transferencias_internas: pares.length,
-    elegiveis_lote: linhas.filter((l) => Number(l.suggested_amount) < LIMITE_LOTE).length,
+    elegiveis_lote: linhas.filter((l) => Number(l.suggested_amount) < limiteLote).length,
+    limite_lote: limiteLote,
     // Quantas transações antigas sobraram para a próxima chamada. Zero = mutirão terminado.
     restantes,
     message: partes.join(" · "),

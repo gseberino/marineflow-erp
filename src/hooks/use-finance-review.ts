@@ -3,8 +3,26 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
-/** Acima deste valor a proposta sai do lote e exige olhar individual (decisão do usuário). */
+/**
+ * Acima deste valor a proposta sai do lote e exige olhar individual (decisão do usuário,
+ * 29/07/2026). O valor vigente vive em app_settings.finance_review_batch_limit — a mesma
+ * chave que a edge finance-review lê; esta constante é só o padrão até a chave chegar.
+ */
 export const LIMITE_LOTE = 500;
+
+export function useLimiteLote(): number {
+  const { data } = useQuery({
+    queryKey: ['finance-review-batch-limit'],
+    staleTime: 5 * 60_000,
+    queryFn: async (): Promise<number> => {
+      const { data } = await supabase
+        .from('app_settings').select('value').eq('key', 'finance_review_batch_limit').maybeSingle();
+      const n = parseFloat(String((data as any)?.value ?? '').replace(',', '.'));
+      return Number.isFinite(n) && n > 0 ? n : LIMITE_LOTE;
+    },
+  });
+  return data ?? LIMITE_LOTE;
+}
 
 export interface PropostaFinanceira {
   id: string;
