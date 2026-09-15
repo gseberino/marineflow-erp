@@ -1,6 +1,17 @@
 # MarineFlow — Executivo Financeiro (plano piloto)
 
-> 29/07/2026. Status: **PROPOSTA — aguardando 5 decisões do usuário.**
+> 29/07/2026. Status original: proposta aguardando 5 decisões.
+>
+> **STATUS EM 15/09/2026 — os 5 módulos estão em produção.**
+> - I Construtor, II Classificador, III Caixa de entrada: feitos (edge `finance-review`, tela `FinanceReviewInbox`, `finance_rules`).
+> - IV Vigilante: action `vigiar` em `finance-review`, cron `finance-vigilante` 09:30 UTC, seção "Alertas do vigilante"
+>   na caixa de entrada (só avisa, não lança) e bloco no briefing. 4 olhares: valor ≥2× a mediana, recebedor novo ≥R$ 500,
+>   recorrência que parou há 35 dias, duplicidade em ≤3 dias. Não repete o mesmo aviso por 45 dias.
+>   Primeira rodada real: 9 alertas (7 recorrências que pararam, 1 recebedor novo, 1 duplicidade).
+> - V Conselheiro: 3 constatações no briefing (resultado do mês até aqui, concentração por cliente, semana no vermelho).
+> - Decisões do dono em 14/09: limite de lote R$ 500 agora em `app_settings.finance_review_batch_limit`; aprovação em
+>   grupo NÃO passa do limite (o botão aprova só o que cabe); geração de propostas continua por clique (sem cron).
+> - Lição registrada: `.limit()` acima de 1.000 em edge function é cortado em silêncio pelo PostgREST — ler paginado.
 > Documento visual: https://claude.ai/code/artifact/36bfa3be-811e-4de3-9f14-06ae04708be7
 > Base: pesquisa em ~80 fontes (10 frentes) + auditoria do estado real do sistema.
 
