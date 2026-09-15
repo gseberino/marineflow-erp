@@ -85,7 +85,6 @@ vi.mock('@/hooks/use-financial', () => ({
   useImportBankTransactions: () => ({ mutateAsync: async () => ({ imported: 0, skipped: 0 }), isPending: false }),
   useReconcile: () => ({ mutateAsync: async () => ({}), isPending: false }),
   useDismissBankTransaction: () => ({ mutateAsync: async () => ({}), isPending: false }),
-  useUnignoreBankTransaction: () => ({ mutateAsync: async () => ({}), isPending: false }),
   useReceivables: () => ({ data: [] }),
   usePayables: () => ({ data: [] }),
   useCreateReceivable: () => ({ mutateAsync: async () => ({}) }),

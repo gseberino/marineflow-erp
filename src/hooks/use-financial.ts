@@ -425,26 +425,11 @@ export function useBankTransactions() {
   });
 }
 
-export function useUnignoreBankTransaction() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      // Limpa também o rastro da ignorada: uma transação de volta na fila que continuasse
-      // com motivo gravado apareceria nos dois lugares ao mesmo tempo.
-      const { error } = await supabase.from('bank_transactions')
-        .update({
-          reconciled: false, reconciled_payment_id: null, reconciled_service_order_id: null,
-          dismissed_reason: null, dismissed_kind: null, dismissed_at: null, dismissed_by: null,
-        } as never)
-        .eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['bank-transactions'] });
-      qc.invalidateQueries({ queryKey: ['bank-transactions-ignoradas'] });
-    },
-  });
-}
+// Desfazer uma transação ignorada é `useDesfazerIgnorada` (use-finance-review.ts), que passa
+// pela action `undismiss` do edge e reverte o EFEITO (proposta/lançamento) e não só as
+// colunas. O hook antigo que zerava as colunas direto na tabela foi removido em 15/09/2026
+// (item F3 do roteiro Open Finance): ninguém o chamava, e quem o achasse primeiro faria a
+// transação voltar à fila com o lançamento que ela gerou ainda de pé.
 
 export type ImportResult = { imported: number; skipped: number };
 
