@@ -305,6 +305,25 @@ describe('agrupado por favorecido', () => {
     expect(aprovarMock).not.toHaveBeenCalled();
   });
 
+  it('alerta do vigilante vive em seção própria, sem categoria, com "Ciente" no lugar de aprovar', async () => {
+    // Decisão do dono (14/09/2026): o vigilante SÓ AVISA. O alerta não pode cair no lote, no
+    // grupo por favorecido nem oferecer categoria — "Ciente" e "Descartar" tiram da lista.
+    estadoDaFila.dados = [
+      ...miudas,
+      {
+        ...miudas[0], id: 'al1', kind: 'anomaly', bank_transaction_id: null, bank_transactions: null,
+        title: 'Valor acima do padrão: UNIFIQUE — R$ 900,00 (costuma ser ~R$ 300,00)',
+        reasoning: '4 pagamentos anteriores, mediana R$ 300,00.', suggested_amount: 900, suggested_category: null,
+      },
+    ];
+    renderInbox();
+    expect(await screen.findByText(/Alertas do vigilante/)).toBeInTheDocument();
+    expect(screen.getByText(/UNIFIQUE — R\$ 900,00/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Ciente — tirar da lista/ })).toBeInTheDocument();
+    // O alerta não entra na contagem do lote nem do grupo: continuam as 22 miúdas.
+    expect(screen.getByText('22 propostas')).toBeInTheDocument();
+  });
+
   it('marca QUAIS linhas exigem revisão individual', async () => {
     // O cabeçalho dizia "1 exige revisão individual" e, ao abrir, a linha era idêntica às
     // outras 22. Contar um problema sem apontá-lo é dar trabalho de procurar.

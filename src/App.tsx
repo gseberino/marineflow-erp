@@ -12,6 +12,7 @@ import { AppLayout } from "@/components/AppLayout";
 import { DiagnosticFallback } from "@/components/DiagnosticFallback";
 import { GlobalErrorBoundary } from "@/components/GlobalErrorBoundary";
 import { queryClient } from "@/lib/query-client";
+import { useLegacyHit } from "@/hooks/use-legacy-hit";
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const ServiceOrderList = lazy(() => import("./pages/ServiceOrderList"));
 const ServiceOrderDetail = lazy(() => import("./pages/ServiceOrderDetail"));
@@ -135,7 +136,11 @@ function FinanceiroLegadoOuV2() {
 function LegadoOuV2({ to, legacy }: { to: string; legacy: ReactNode }) {
   const params = useParams();
   const location = useLocation();
-  if (new URLSearchParams(location.search).get('legacy') === '1') return <>{legacy}</>;
+  const querLegado = new URLSearchParams(location.search).get('legacy') === '1';
+  // Decisão do dono (14/09/2026): as telas legadas que ninguém abrir até 15/10 serão apagadas.
+  // Medir aqui é a única forma de saber quais são.
+  useLegacyHit(location.pathname, querLegado);
+  if (querLegado) return <>{legacy}</>;
   let path = to;
   for (const [k, v] of Object.entries(params)) path = path.replace(`:${k}`, v ?? '');
   return <Navigate to={path + location.search} replace />;

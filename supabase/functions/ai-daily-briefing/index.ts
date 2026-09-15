@@ -234,15 +234,23 @@ Deno.serve(async (req) => {
     try {
       const { data: propostas } = await admin
         .from("finance_review_queue")
-        .select("suggested_amount")
+        .select("suggested_amount, kind, title")
         .eq("status", "pending")
         .limit(1000);
-      const rows = (propostas as any[]) || [];
+      const todas = (propostas as any[]) || [];
+      const rows = todas.filter((p) => p.kind !== "anomaly");
+      const alertas = todas.filter((p) => p.kind === "anomaly");
       filaFinanceiraCount = rows.length;
+      const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
       if (rows.length > 0) {
         const soma = rows.reduce((s, p) => s + Math.abs(Number(p.suggested_amount ?? 0)), 0);
-        const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
         filaFinanceiraLines.push(`🧾 Propostas de lançamento esperando você: *${rows.length}* (${fmtBRL.format(soma)})`);
+      }
+      // Vigilante de despesas (módulo IV, decisão do dono de 14/09): só avisa, e avisa aqui.
+      if (alertas.length > 0) {
+        filaFinanceiraLines.push(`⚠️ Vigilante de despesas: *${alertas.length}* alerta(s)`);
+        for (const a of alertas.slice(0, 3)) filaFinanceiraLines.push(`   • ${String(a.title).slice(0, 110)}`);
+        if (alertas.length > 3) filaFinanceiraLines.push(`   …e mais ${alertas.length - 3} na caixa de entrada`);
       }
     } catch (e) {
       console.warn("[ai-daily-briefing] bloco da fila financeira falhou:", (e as Error).message);

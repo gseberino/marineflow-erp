@@ -79,7 +79,7 @@ const JANELA_DIAS = 90;
 const LOTE_HISTORICO = 200;
 
 interface Body {
-  action?: "generate" | "approve" | "reject" | "suggest_rules" | "reclassify" | "classify_ai" | "undismiss";
+  action?: "generate" | "approve" | "reject" | "suggest_rules" | "reclassify" | "classify_ai" | "undismiss" | "vigiar";
   /** generate: inclui o histórico inteiro, não só a janela. */
   incluir_historico?: boolean;
   ids?: string[];
@@ -142,6 +142,7 @@ Deno.serve(async (req) => {
 
   try {
     if (action === "generate") return await gerar(admin, !!body.incluir_historico);
+    if (action === "vigiar") return await vigiar(admin);
     if (action === "reclassify") return await reclassificar(admin);
     if (action === "classify_ai") return await classificarComIA(admin);
     if (action === "undismiss") return await desfazerIgnorada(admin, body.ids ?? [], userId);
@@ -154,6 +155,176 @@ Deno.serve(async (req) => {
     return jr({ error: "unexpected_error", detail: String((e as Error)?.message ?? e) }, 500);
   }
 });
+
+/**
+ * Vigilante de despesas (Executivo Financeiro, módulo IV — decisão do dono de 14/09/2026).
+ *
+ * Só AVISA: grava propostas de kind 'anomaly' na caixa de entrada, sem lançamento nenhum.
+ * Quatro olhares sobre as saídas do extrato dos últimos 12 meses, agrupadas por quem recebeu
+ * (documento quando há; senão o nome normalizado):
+ *   1. valor fora do padrão — ≥ 2× a mediana de ≥3 pagamentos anteriores (e ≥ R$ 200 acima);
+ *   2. quem recebeu pela primeira vez — sem histórico em 12 meses e ≥ R$ 500 nos últimos 30 dias;
+ *   3. recorrência que parou — presente em ≥3 dos 4 meses anteriores e nada nos últimos 35 dias;
+ *   4. duplicidade — mesmo valor para o mesmo recebedor em até 3 dias.
+ * Cada alerta tem uma chave (suggested_description = 'vigia:…') que impede repeti-lo por 45 dias.
+ * "Ciente" (aprovar) e "Descartar" (recusar) só tiram o alerta da lista.
+ */
+async function vigiar(admin: DbClient) {
+  const hoje = new Date();
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+  const d30 = iso(new Date(hoje.getTime() - 30 * 86400000));
+  const d35 = iso(new Date(hoje.getTime() - 35 * 86400000));
+  const d45 = new Date(hoje.getTime() - 45 * 86400000).toISOString();
+  const d365 = iso(new Date(hoje.getTime() - 365 * 86400000));
+
+  // Um ano de débitos passa de 1.000 linhas, e o PostgREST corta aí por padrão: com
+  // .limit() o vigilante enxergava só os meses mais antigos e achava "nada fora do
+  // padrão" olhando para o passado. Paginar é o que faz ele ver o mês corrente.
+  // Data futura é parcela de cartão ainda não cobrada: não é gasto, e entraria como
+  // "recente" em toda regra. Fica de fora até o dia chegar.
+  const hojeIso = iso(hoje);
+  const txs = await lerTudo<Record<string, unknown>>((de, ate) =>
+    admin
+      .from("bank_transactions")
+      .select("id, transaction_date, amount, description, counterparty_name, counterparty_document, merchant_name, merchant_document, dismissed_kind")
+      .eq("transaction_type", "debit")
+      .gte("transaction_date", d365)
+      .lte("transaction_date", hojeIso)
+      .order("transaction_date", { ascending: true })
+      .order("id")
+      .range(de, ate), 8000);
+
+  const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  const generico = (n: string) =>
+    /^(transf enviada( pix)?( c)?|transferencia enviada|debito de cartao|pagamento de pix|pix enviado|compra no (debito|credito))$/.test(n);
+  type Tx = { id: string; transaction_date: string; amount: number; rotulo: string };
+  const grupos = new Map<string, Tx[]>();
+  // O mesmo favorecido aparece ora com CNPJ, ora só pelo nome (extrato do cartão não
+  // traz documento). Sem isto viram dois grupos e o mesmo aviso sai em dobro.
+  const docPorNome = new Map<string, string>();
+  for (const t of (txs ?? []) as any[]) {
+    const doc = String(t.counterparty_document ?? t.merchant_document ?? "").replace(/\D/g, "");
+    const nome = norm(String(t.merchant_name || t.counterparty_name || "").trim()).slice(0, 40);
+    if (doc.length >= 11 && nome && !docPorNome.has(nome)) docPorNome.set(nome, `doc:${doc}`);
+  }
+  for (const t of (txs ?? []) as any[]) {
+    // Transferência entre contas e parcela já explicada não são despesa nova.
+    if (t.dismissed_kind === "transferencia" || t.dismissed_kind === "parcela") continue;
+    const doc = String(t.counterparty_document ?? t.merchant_document ?? "").replace(/\D/g, "");
+    const nome = String(t.merchant_name || t.counterparty_name || t.description || "").trim();
+    const chave = doc.length >= 11 ? `doc:${doc}` : (docPorNome.get(norm(nome).slice(0, 40)) ?? `nome:${norm(nome).slice(0, 40)}`);
+    if (chave === "nome:") continue;
+    // Sem favorecido e com descrição genérica ("TRANSF ENVIADA PIX", "DEBITO DE CARTAO")
+    // o grupo mistura dezenas de destinos: mediana, "novo" e "parou" não dizem nada.
+    if (doc.length < 11 && generico(norm(nome))) continue;
+    const tx: Tx = {
+      id: t.id, transaction_date: String(t.transaction_date).slice(0, 10),
+      amount: Math.abs(Number(t.amount || 0)), rotulo: nome.slice(0, 60) || chave,
+    };
+    const lista = grupos.get(chave);
+    if (lista) lista.push(tx); else grupos.set(chave, [tx]);
+  }
+
+  type Alerta = { tipo: string; chave: string; titulo: string; motivo: string; valor: number; data: string; txId: string | null };
+  const alertas: Alerta[] = [];
+  const fmt = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const ddmm = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+  const mediana = (v: number[]) => {
+    const s = [...v].sort((a, b) => a - b); const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  };
+  const mesDe = (d: string) => d.slice(0, 7);
+  const mesesAnteriores = [1, 2, 3, 4].map((n) => {
+    const d = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth() - n, 1));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  });
+
+  for (const [chave, lista] of grupos) {
+    const rotulo = lista[lista.length - 1].rotulo;
+    const recentes = lista.filter((t) => t.transaction_date >= d30);
+    const historico = lista.filter((t) => t.transaction_date < d30);
+
+    if (historico.length >= 3) {
+      const med = mediana(historico.map((t) => t.amount));
+      for (const t of recentes) {
+        if (med > 0 && t.amount >= 2 * med && t.amount - med >= 200) {
+          alertas.push({
+            tipo: "valor", chave: `vigia:valor:${t.id}`, txId: t.id, valor: t.amount, data: t.transaction_date,
+            titulo: `Valor acima do padrão: ${rotulo} — ${fmt(t.amount)} (costuma ser ~${fmt(med)})`,
+            motivo: `${historico.length} pagamentos anteriores a ${rotulo} nos últimos 12 meses, mediana ${fmt(med)}. Este é ${(t.amount / med).toFixed(1)}× o normal. Confira o valor antes de lançar.`,
+          });
+        }
+      }
+    }
+
+    if (historico.length === 0 && recentes.length > 0) {
+      const maior = recentes.reduce((m, t) => (t.amount > m.amount ? t : m), recentes[0]);
+      const soma = recentes.reduce((s, t) => s + t.amount, 0);
+      if (maior.amount >= 500) {
+        alertas.push({
+          tipo: "novo", chave: `vigia:novo:${chave}:${mesDe(maior.transaction_date)}`, txId: maior.id, valor: maior.amount, data: maior.transaction_date,
+          titulo: `Primeira vez no extrato: ${rotulo} — ${fmt(maior.amount)}`,
+          motivo: `Nenhum pagamento a ${rotulo} nos 12 meses anteriores; ${recentes.length} nos últimos 30 dias, somando ${fmt(soma)}. Vale confirmar que é um recebedor legítimo.`,
+        });
+      }
+    }
+
+    const meses = new Set(lista.map((t) => mesDe(t.transaction_date)));
+    const presentes = mesesAnteriores.filter((m) => meses.has(m));
+    const ultimo = lista[lista.length - 1];
+    if (presentes.length >= 3 && ultimo.transaction_date < d35) {
+      alertas.push({
+        tipo: "parou", chave: `vigia:parou:${chave}:${mesDe(iso(hoje))}`, txId: ultimo.id, valor: ultimo.amount, data: ultimo.transaction_date,
+        titulo: `${rotulo} aparecia todo mês e parou (último em ${ddmm(ultimo.transaction_date)})`,
+        motivo: `Pagamentos em ${presentes.slice().reverse().join(", ")}; nenhum nos últimos 35 dias. Pode ser cancelamento, atraso ou outra forma de pagamento — só vale saber.`,
+      });
+    }
+
+    for (let i = 0; i < recentes.length; i++) {
+      for (let j = i + 1; j < recentes.length; j++) {
+        const a = recentes[i], b = recentes[j];
+        const dias = Math.abs(new Date(a.transaction_date).getTime() - new Date(b.transaction_date).getTime()) / 86400000;
+        if (a.amount > 0 && Math.abs(a.amount - b.amount) < 0.01 && dias <= 3) {
+          alertas.push({
+            tipo: "duplicidade", chave: `vigia:dup:${a.id}:${b.id}`, txId: b.id, valor: b.amount, data: b.transaction_date,
+            titulo: `Possível duplicidade: ${rotulo} — ${fmt(a.amount)} em ${ddmm(a.transaction_date)} e ${ddmm(b.transaction_date)}`,
+            motivo: `Dois débitos iguais para o mesmo recebedor com ${Math.round(dias)} dia(s) de diferença. Se for cobrança em dobro, marque a segunda como duplicata na fila.`,
+          });
+        }
+      }
+    }
+  }
+
+  // Cinto e suspensório: dois grupos que ainda assim descrevam o mesmo fato não avisam duas vezes.
+  const vistos = new Set<string>();
+  for (let i = alertas.length - 1; i >= 0; i--) {
+    const t = alertas[i].titulo;
+    if (vistos.has(t)) alertas.splice(i, 1); else vistos.add(t);
+  }
+  if (alertas.length === 0) return jr({ ok: true, alertas: 0, message: "Nada fora do padrão." });
+  const { data: existentes } = await admin
+    .from("finance_review_queue")
+    .select("suggested_description")
+    .in("suggested_description", alertas.map((a) => a.chave))
+    .gte("created_at", d45);
+  const jaTem = new Set(((existentes ?? []) as any[]).map((r) => r.suggested_description));
+  const novos = alertas.filter((a) => !jaTem.has(a.chave)).slice(0, 40);
+  if (novos.length > 0) {
+    const { error: e } = await admin.from("finance_review_queue").insert(novos.map((a) => ({
+      kind: "anomaly", status: "pending", bank_transaction_id: null, related_transaction_id: a.txId,
+      title: a.titulo.slice(0, 200), reasoning: a.motivo, confidence: 55,
+      suggested_amount: a.valor, suggested_date: a.data, suggested_description: a.chave, dre_group: null,
+    })));
+    if (e) throw e;
+  }
+  const porTipo: Record<string, number> = {};
+  for (const a of novos) porTipo[a.tipo] = (porTipo[a.tipo] ?? 0) + 1;
+  return jr({
+    ok: true, alertas: novos.length, ja_avisados: alertas.length - novos.length, por_tipo: porTipo,
+    message: novos.length ? `${novos.length} alerta(s) novo(s) na caixa de entrada` : "Nada novo (já avisado antes).",
+  });
+}
 
 /**
  * Registra na trilha o que foi feito.

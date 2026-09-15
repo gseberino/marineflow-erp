@@ -267,6 +267,9 @@ function LinhaProposta({
   const [aberta, setAberta] = useState(false);
 
   const transferencia = p.kind === 'internal_transfer';
+  // Alerta do vigilante (decisão do dono, 14/09/2026): só avisa. Não tem categoria, não vira
+  // regra, não lança — "Ciente" e "Descartar" apenas tiram da lista.
+  const anomalia = p.kind === 'anomaly';
   const categoria = correcao?.category ?? p.suggested_category ?? '';
   const porRegra = !!p.applied_rule_id;
   // "3/10" → 10. O total é o que interessa aqui; qual parcela chegou primeiro é detalhe
@@ -297,7 +300,9 @@ function LinhaProposta({
                 ? <TrendingUp className="h-4 w-4 shrink-0 text-success" />
                 : <TrendingDown className="h-4 w-4 shrink-0 text-destructive" />}
             <span className="truncate font-medium">{p.title}</span>
-            {porRegra
+            {anomalia
+              ? <Badge variant="outline" className="shrink-0 border-amber-500/50 text-xs text-amber-600">Alerta — só avisa</Badge>
+              : porRegra
               ? <Badge variant="secondary" className="shrink-0 text-xs">Pela sua regra</Badge>
               : (
                 <Badge variant="outline" className={`shrink-0 text-xs ${corDaConfianca(p.confidence)}`}>
@@ -339,7 +344,7 @@ function LinhaProposta({
           </div>
 
           {/* A categoria é a decisão principal da tela: fica editável na linha, sempre. */}
-          {!transferencia && (
+          {!transferencia && !anomalia && (
             <div className="mt-2 max-w-sm">
               <CategoriaDespesaSelect
                 valor={categoria}
@@ -356,7 +361,7 @@ function LinhaProposta({
             </div>
           )}
 
-          {!transferencia && (
+          {!transferencia && !anomalia && (
             <VinculoDaCategoria
               categoria={categoria}
               favorecidoId={correcao?.payeeId ?? p.suggested_payee_id ?? null}
@@ -372,7 +377,7 @@ function LinhaProposta({
             <CollapsibleTrigger asChild>
               <button type="button" className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline">
                 <Info className="h-3 w-3" />
-                Por que o sistema propôs isto
+                {anomalia ? 'Por que o vigilante avisou' : 'Por que o sistema propôs isto'}
                 <ChevronDown className={`h-3 w-3 transition-transform ${aberta ? 'rotate-180' : ''}`} />
               </button>
             </CollapsibleTrigger>
@@ -393,15 +398,15 @@ function LinhaProposta({
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button size="sm" variant="outline" disabled={ocupado} onClick={onAprovar}
-                    aria-label="Aprovar e lançar">
+                    aria-label={anomalia ? 'Ciente — tirar da lista' : 'Aprovar e lançar'}>
                     <Check className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Aprovar e lançar</TooltipContent>
+                <TooltipContent>{anomalia ? 'Ciente — tirar da lista' : 'Aprovar e lançar'}</TooltipContent>
               </Tooltip>
             )}
 
-            {!transferencia && (
+            {!transferencia && !anomalia && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button size="sm" variant="ghost" disabled={ocupado} onClick={onCriarRegra}
@@ -413,15 +418,17 @@ function LinhaProposta({
               </Tooltip>
             )}
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button size="sm" variant="ghost" disabled={ocupado} onClick={onDuplicata}
-                  aria-label="É duplicata — tirar da fila">
-                  <CopyX className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>É duplicata — tirar da fila</TooltipContent>
-            </Tooltip>
+            {!anomalia && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="ghost" disabled={ocupado} onClick={onDuplicata}
+                    aria-label="É duplicata — tirar da fila">
+                    <CopyX className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>É duplicata — tirar da fila</TooltipContent>
+              </Tooltip>
+            )}
 
             <Tooltip>
               <TooltipTrigger asChild>
@@ -652,6 +659,11 @@ export function FinanceReviewInbox({
    */
   const ocupado = gerar.isPending || reaplicar.isPending;
 
+  // Alertas do vigilante não são propostas de lançamento: vivem numa seção própria, fora do
+  // lote, dos grupos e das contagens de "o que falta classificar".
+  const alertas = useMemo(() => propostas.filter((p) => p.kind === 'anomaly'), [propostas]);
+  const normais = useMemo(() => propostas.filter((p) => p.kind !== 'anomaly'), [propostas]);
+
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
   const [correcoes, setCorrecoes] = useState<Record<string, Correcao>>({});
   // Trabalhar cartão e conta separados é mais rápido: a fatura tem muitos gastos pequenos
@@ -667,7 +679,7 @@ export function FinanceReviewInbox({
    * dia a dia como sempre foi e liga o modo de mutirão sozinho, quando ele passa a valer.
    */
   const [modo, setModo] = useState<'favorecido' | 'lista' | null>(null);
-  const agrupar = modo === null ? propostas.length >= 20 : modo === 'favorecido';
+  const agrupar = modo === null ? normais.length >= 20 : modo === 'favorecido';
   const [ordem, setOrdem] = useState<OrdemDaFila>('decisoes');
 
   /**
@@ -682,32 +694,32 @@ export function FinanceReviewInbox({
 
   const porOrigem = useMemo(() => {
     const porFonte = origem === 'todas'
-      ? propostas
-      : propostas.filter((p) => p.bank_transactions?.source_type === origem);
+      ? normais
+      : normais.filter((p) => p.bank_transactions?.source_type === origem);
     if (direcao === 'todas') return porFonte;
     // Transferência entre contas não é nem entrada nem saída: some dos dois recortes, e
     // continua visível em "Tudo". Classificá-la num dos lados seria afirmar algo falso.
     const alvo = direcao === 'entrada' ? 'create_receivable' : 'create_payable';
     return porFonte.filter((p) => p.kind === alvo);
-  }, [propostas, origem, direcao]);
+  }, [normais, origem, direcao]);
 
   const contagem = useMemo(() => ({
-    todas: propostas.length,
-    bank: propostas.filter((p) => p.bank_transactions?.source_type === 'bank').length,
-    credit_card: propostas.filter((p) => p.bank_transactions?.source_type === 'credit_card').length,
-  }), [propostas]);
+    todas: normais.length,
+    bank: normais.filter((p) => p.bank_transactions?.source_type === 'bank').length,
+    credit_card: normais.filter((p) => p.bank_transactions?.source_type === 'credit_card').length,
+  }), [normais]);
 
   /** Contagem por direção respeita a origem já escolhida — senão o número mente. */
   const contagemPorDirecao = useMemo(() => {
     const base = origem === 'todas'
-      ? propostas
-      : propostas.filter((p) => p.bank_transactions?.source_type === origem);
+      ? normais
+      : normais.filter((p) => p.bank_transactions?.source_type === origem);
     return {
       todas: base.length,
       saida: base.filter((p) => p.kind === 'create_payable').length,
       entrada: base.filter((p) => p.kind === 'create_receivable').length,
     };
-  }, [propostas, origem]);
+  }, [normais, origem]);
 
   const { lote, individuais, totalValor } = useMemo(() => {
     const lote: PropostaFinanceira[] = [];
@@ -1085,6 +1097,27 @@ export function FinanceReviewInbox({
               Aprovar selecionadas
             </Button>
           </div>
+        </div>
+      )}
+
+      {alertas.length > 0 && (
+        <div className="space-y-2">
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-2">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              Alertas do vigilante — só avisam, não lançam ({alertas.length})
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Valor fora do padrão, recebedor novo, despesa mensal que parou e possível duplicidade.
+              "Ciente" ou "Descartar" tiram da lista; nenhum dos dois cria lançamento.
+            </p>
+          </div>
+          {alertas.map((p) => (
+            <LinhaProposta
+              key={p.id} {...propsComuns(p)} modoLote={false}
+              selecionada={false} onSelecionar={() => {}}
+            />
+          ))}
         </div>
       )}
 
