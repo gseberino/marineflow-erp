@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildHTMLDocument, buildPDFFilename, DEFAULT_PDF_OPTIONS, type PDFData } from './pdf-generator';
+import { buildHTMLDocument, buildPDFFilename, tituloParaImpressao, DEFAULT_PDF_OPTIONS, type PDFData } from './pdf-generator';
 
 /** `Partial` só afrouxa o primeiro nível: um override de `serviceOrder` continuava
  *  exigindo os ~30 campos do tipo cheio, e era daí que vinha o TS2740 deste arquivo.
@@ -232,5 +232,45 @@ describe('Observações para impressão (extra_notes)', () => {
   it('não vai na via de execução (sem valores): a observação é escrita para o cliente', () => {
     const html = buildHTMLDocument(comNota(), { ...DEFAULT_PDF_OPTIONS, hideFinancials: true });
     expect(html).not.toContain('Garantia de 90 dias');
+  });
+});
+
+/**
+ * Baixar e Imprimir têm que produzir o MESMO documento. O que diferia (16/09/2026):
+ * texto corrido num bloco só (partia no meio da linha no Baixar, ou descia inteiro e
+ * deixava meia folha em branco no Imprimir) e o nome do arquivo salvo pela impressão.
+ */
+describe('paridade entre Baixar e Imprimir', () => {
+  it('texto de várias linhas vira um <p> por linha, dentro de bloco que pode partir', () => {
+    const base = documentoCompleto();
+    const html = buildHTMLDocument(
+      { ...base, serviceOrder: { ...base.serviceOrder, extra_notes: 'linha 1\n\nlinha 3' } },
+      DEFAULT_PDF_OPTIONS,
+    );
+    const inicio = html.indexOf('<div class="section-title">Observações</div>');
+    const bloco = html.slice(inicio, html.indexOf('</div>', inicio + 60));
+    expect(bloco.match(/<p /g)?.length).toBe(3);
+    expect(bloco).toContain('&nbsp;');
+    expect(html).toMatch(/class="card pdf-texto" data-pdf-quebra="dentro"[^>]*>\s*<div class="section-title">Observações<\/div>/);
+  });
+
+  it('objetivo, conclusão técnica, observações financeiras e termos também partem entre linhas', () => {
+    const base = documentoCompleto({ documentType: 'service_order' });
+    const html = buildHTMLDocument(
+      {
+        ...base,
+        terms: 'primeira cláusula\nsegunda cláusula',
+        serviceOrder: { ...base.serviceOrder, technical_notes: 'ok', financial_notes: 'à vista' },
+      },
+      DEFAULT_PDF_OPTIONS,
+    );
+    // objetivo + conclusão + financeiras + termos
+    expect((html.match(/data-pdf-quebra="dentro"/g) ?? []).length).toBe(4);
+    expect(html).toContain('.pdf-texto { page-break-inside: auto; break-inside: auto; }');
+  });
+
+  it('o título da janela de impressão é o nome do arquivo sem a extensão', () => {
+    expect(tituloParaImpressao(makeData())).toBe('OrdemServico_OS-00123_Joao-da-Silva_Lancha-Azul');
+    expect(buildPDFFilename(makeData())).toBe(`${tituloParaImpressao(makeData())}.pdf`);
   });
 });

@@ -240,7 +240,12 @@ export type PDFData = {
 };
 
 export function generatePDF(data: PDFData, options: PDFOptions): void {
-  const html = buildHTMLDocument(data, options);
+  // O título da janela é o nome que "Salvar como PDF" sugere. Com "ORÇAMENTO ORÇ-00100"
+  // o arquivo salvo pela impressão não batia com o do botão Baixar; agora é o mesmo nome.
+  const html = buildHTMLDocument(data, options).replace(
+    /<title>[^<]*<\/title>/,
+    `<title>${esc(tituloParaImpressao(data, options))}</title>`,
+  );
 
   // Primary: open in a dedicated window so the OS always prints/saves from the
   // right context. The iframe approach causes iPadOS to save the main ERP page
@@ -342,18 +347,28 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
   // dele (NÃO `absolute`/`fixed`). Um container fora do fluxo não contribui para a
   // altura do documento, fazendo o html2canvas calcular altura 0 (PDF em branco) e
   // medir a largura errada (conteúdo encostado à esquerda → margem direita gigante).
-  const A4_WIDTH_PX = 794; // 210mm @ 96dpi
+  // LARGURA DO CONTEÚDO = 186mm (A4 menos 12mm de cada lado), NÃO os 210mm da folha.
+  //
+  // Até 16/09/2026 o container media 794px (210mm). O html2pdf recebia uma imagem mais
+  // larga que a área útil e a ENCOLHIA para caber nos 186mm (×0,885) — era por isso que o
+  // PDF baixado saía com letra menor que o mesmo documento impresso pelo navegador. E o
+  // pior ficava escondido: ele fatia a imagem a cada `canvas.width × 273/186` px, o que a
+  // 794px dá 1165px por folha, enquanto os espaçadores de quebra (abaixo) eram calculados
+  // para 1031. A quebra caía no meio da folha (espaço em branco seguido de bloco cortado) e
+  // o rodapé da última página saía decepado. A 703px as duas réguas coincidem e a
+  // geometria é exatamente a da impressão: mesma largura, mesmo corpo de letra.
+  const { LARGURA_UTIL_PX } = await import('./pdf-pagination');
   const wrapper = document.createElement('div');
   wrapper.style.cssText =
-    `position:fixed;top:0;left:0;width:${A4_WIDTH_PX}px;z-index:-1;` +
+    `position:fixed;top:0;left:0;width:${LARGURA_UTIL_PX}px;z-index:-1;` +
     'pointer-events:none;background:#ffffff;';
   const container = document.createElement('div');
-  container.style.cssText = `width:${A4_WIDTH_PX}px;background:#ffffff;`;
+  container.style.cssText = `width:${LARGURA_UTIL_PX}px;background:#ffffff;`;
   container.innerHTML = html;
   // Override para a captura, replicando a geometria do caminho de impressão
   // (@media print: `.container { padding: 0 }` + `@page { margin: 12mm }`):
   //  - max-width/margin:auto removidos: senão o clone do html2canvas, mais largo
-  //    que 794px, centraliza o `.container` (~35px à esq) e corta a direita.
+  //    que o container, centraliza o `.container` (~35px à esq) e corta a direita.
   //  - padding:0: a margem do PDF vem só dos 12mm do html2pdf (abaixo), evitando
   //    margem dupla (10mm + 40px de padding ≈ 20mm, grossa demais).
   const fix = document.createElement('style');
@@ -410,15 +425,33 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
       // toda geração) e NUNCA lido por planPageBreaks — todo bloco que não cabe
       // desce inteiro, card ou não. Só a altura decide.
       //
+      // Texto corrido (objetivo, observações, conclusão técnica, termos) é a exceção,
+      // marcada com `data-pdf-quebra="dentro"`: descer inteiro deixava meia folha em
+      // branco (o card de Observações de um orçamento passa de uma página) e, maior que
+      // a folha, ele era fatiado no meio de uma linha. Esses blocos entram na conta
+      // linha a linha — o gerador emite um <p> por linha — e o espaçador vai antes da
+      // linha que não cabe. Se for a primeira do card, vai antes do card, para a borda
+      // e o título acompanharem o texto.
+      //
       // E a altura é a OCUPADA, não a da caixa: `.height` do rect deixa a margem de
       // fora, e quase todo bloco de topo tem margin-bottom. Medida só pela caixa, a
       // conta de "quanto já usei da folha" ficava menor que a realidade e o último
       // bloco da página saía cortado ao meio.
+      type BlocoDom = { el: HTMLElement; topoDe: HTMLElement };
+      const blocosDom: BlocoDom[] = [];
+      for (const filho of filhos) {
+        const internos = filho.dataset.pdfQuebra === 'dentro'
+          ? (Array.from(filho.children).filter((c) => c instanceof HTMLElement) as HTMLElement[])
+          : [];
+        if (internos.length === 0) { blocosDom.push({ el: filho, topoDe: filho }); continue; }
+        internos.forEach((c, k) => blocosDom.push({ el: c, topoDe: k === 0 ? filho : c }));
+      }
+
       const rectDoContainer = alvoDaPaginacao.getBoundingClientRect();
-      const caixas = filhos.map((el) => {
-        const r = el.getBoundingClientRect();
-        return { top: r.top, bottom: r.bottom };
-      });
+      const caixas = blocosDom.map((b) => ({
+        top: b.topoDe.getBoundingClientRect().top,
+        bottom: b.el.getBoundingClientRect().bottom,
+      }));
       const blocos = alturasOcupadas(caixas, rectDoContainer.bottom).map((altura) => ({ altura }));
 
       // Em ordem CRESCENTE, medindo um por vez: cada espaçador desloca os blocos
@@ -427,14 +460,15 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
       // `legacy`, que invalida as próprias coordenadas enquanto insere.)
       const topoDoContainer = rectDoContainer.top;
       for (const i of planPageBreaks(blocos)) {
-        const topoDoBloco = filhos[i].getBoundingClientRect().top - topoDoContainer;
+        const alvo = blocosDom[i].topoDe;
+        const topoDoBloco = alvo.getBoundingClientRect().top - topoDoContainer;
         const altura = alturaDoEspacador(topoDoBloco);
         if (altura <= 0) continue;
         const espacador = document.createElement('div');
         espacador.className = 'mf-page-spacer';
         espacador.setAttribute('aria-hidden', 'true');
         espacador.style.cssText = `display:block;height:${altura}px;`;
-        filhos[i].parentNode?.insertBefore(espacador, filhos[i]);
+        alvo.parentNode?.insertBefore(espacador, alvo);
       }
     }
 
@@ -463,7 +497,7 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
     const MAX_CANVAS_MP = 12_000_000;
     const scale = Math.max(
       1,
-      Math.min(2, Math.sqrt(MAX_CANVAS_MP / (A4_WIDTH_PX * Math.max(captureHeight, 1)))),
+      Math.min(2, Math.sqrt(MAX_CANVAS_MP / (LARGURA_UTIL_PX * Math.max(captureHeight, 1)))),
     );
     if (scale < 2) {
       console.info(
@@ -484,9 +518,9 @@ export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promi
           scale,
           useCORS: true,
           backgroundColor: '#ffffff',
-          width: A4_WIDTH_PX,
+          width: LARGURA_UTIL_PX,
           height: captureHeight,
-          windowWidth: A4_WIDTH_PX,
+          windowWidth: LARGURA_UTIL_PX,
           windowHeight: captureHeight,
           scrollX: 0,
           scrollY: 0,
@@ -576,6 +610,11 @@ export function buildPDFFilename(data: PDFData, options?: PDFOptions): string {
  * de forma idêntica em desktop, celular e tablet — não depende do diálogo
  * de impressão do navegador.
  */
+/** Título da janela de impressão = nome do arquivo sem `.pdf`: é o que o navegador sugere ao salvar. */
+export function tituloParaImpressao(data: PDFData, options?: PDFOptions): string {
+  return buildPDFFilename(data, options).replace(/\.pdf$/i, '');
+}
+
 export async function downloadPDF(data: PDFData, options: PDFOptions): Promise<void> {
   const blob = await generatePDFBlob(data, options);
   const filename = buildPDFFilename(data, options);
@@ -671,6 +710,20 @@ const fmtDate = (iso?: string) => {
   return new Date(iso).toLocaleDateString('pt-BR');
 };
 
+/**
+ * Texto corrido em parágrafos: um <p> por linha do campo.
+ *
+ * Um único <div white-space:pre-wrap> era UM bloco para quem pagina. O navegador ainda
+ * quebra entre linhas, mas a captura do Baixar fatia a imagem onde calhar — inclusive no
+ * meio de uma linha. Com um elemento por linha, a paginação do Baixar mede e empurra
+ * linha a linha, e a impressão ganha orphans/widows de verdade.
+ */
+const paragrafos = (texto: unknown, estilo: string): string =>
+  String(texto ?? '')
+    .split(/\r?\n/)
+    .map((linha) => `<p style="margin:0;white-space:pre-wrap;${estilo}">${linha.trim() === '' ? '&nbsp;' : esc(linha)}</p>`)
+    .join('');
+
 const esc = (v: unknown): string => {
   if (v === null || v === undefined) return '';
   return String(v)
@@ -686,7 +739,7 @@ function companyHeaderHTML(company: PDFData['company'], docTypeLabel: string, do
   const logoHtml = company.logo_url
     ? `<img src="${esc(company.logo_url)}" alt="${esc(company.name)}"
         style="max-height:80px;max-width:220px;object-fit:contain;"
-        crossorigin="anonymous" />`
+        crossorigin="anonymous" onerror="this.style.display='none'" />`
     : `<div style="font-size:28px;font-weight:900;color:var(--pdf-primary);letter-spacing:-1px;line-height:1;">
         ${esc(company.name).toUpperCase()}
        </div>`;
@@ -813,6 +866,12 @@ function pageWrapper(title: string, body: string): string {
      caminhos — a impressão do navegador entende \`page-break-*\`, e o
      html2pdf lê as mesmas regras no modo \`css\`. */
   .card, .badge, .signature-box { page-break-inside: avoid; break-inside: avoid; }
+  /* Texto corrido (objetivo, observações, conclusão técnica, termos) PODE partir entre
+     linhas. Travá-lo inteiro empurrava o card para a folha seguinte e deixava meia página
+     em branco — e, maior que a folha, ele partia de qualquer jeito. O gerador emite um <p>
+     por linha justamente para a quebra cair ENTRE linhas nos dois caminhos. */
+  .pdf-texto { page-break-inside: auto; break-inside: auto; }
+  .pdf-texto p { orphans: 2; widows: 2; }
   table { page-break-inside: auto; }
   tr    { page-break-inside: avoid; break-inside: avoid; }
   /* Cabeçalho de tabela se repete em cada página: tabela longa sem cabeçalho
@@ -1202,9 +1261,9 @@ ${semValores ? `
   </div>
 </div>
 
-<div class="card">
+<div class="card pdf-texto" data-pdf-quebra="dentro">
   <div class="section-title">${isQuote ? 'Objetivo do Projeto / Diagnóstico' : 'Relato do Problema'}</div>
-  <div style="white-space:pre-wrap;font-size:11px;line-height:1.6;">${esc(data.serviceOrder.problem_description || 'Nenhuma descrição fornecida.')}</div>
+  ${paragrafos(data.serviceOrder.problem_description || 'Nenhuma descrição fornecida.', 'font-size:11px;line-height:1.6;')}
 </div>
 
 ${(data.survey?.answers?.length || 0) > 0 ? `
@@ -1275,9 +1334,9 @@ ${data.parts.length > 0 ? `
 ` : ''}
 
 ${!isQuote && data.serviceOrder.technical_notes ? `
-<div class="card" style="background:#F0F4F8;border-left:4px solid var(--pdf-primary);">
+<div class="card pdf-texto" data-pdf-quebra="dentro" style="background:#F0F4F8;border-left:4px solid var(--pdf-primary);">
   <div class="section-title">Conclusão Técnica / Recomendações</div>
-  <div style="white-space:pre-wrap;font-size:11px;font-style:italic;">${esc(data.serviceOrder.technical_notes)}</div>
+  ${paragrafos(data.serviceOrder.technical_notes, 'font-size:11px;font-style:italic;')}
 </div>
 ` : ''}
 
@@ -1302,9 +1361,9 @@ ${buildPaymentSection(data.serviceOrder)}
 ${buildPaymentHistorySection(data.serviceOrder)}
 
 ${data.serviceOrder.financial_notes ? `
-<div class="card" style="border-left:4px solid var(--pdf-border);margin-top:8px;">
+<div class="card pdf-texto" data-pdf-quebra="dentro" style="border-left:4px solid var(--pdf-border);margin-top:8px;">
   <div class="section-title">Observações Financeiras</div>
-  <div style="font-size:10px;line-height:1.6;color:var(--pdf-text-main);">${esc(data.serviceOrder.financial_notes)}</div>
+  ${paragrafos(data.serviceOrder.financial_notes, 'font-size:10px;line-height:1.6;color:var(--pdf-text-main);')}
 </div>
 ` : ''}`}
 
@@ -1350,16 +1409,16 @@ ${options.showSignature !== false ? `
 ${photoGallery}
 
 ${options.showExtraNotes !== false && !semValores && data.serviceOrder.extra_notes ? `
-<div class="card" style="border-left:4px solid var(--pdf-primary);margin-top:8px;">
+<div class="card pdf-texto" data-pdf-quebra="dentro" style="border-left:4px solid var(--pdf-primary);margin-top:8px;">
   <div class="section-title">Observações</div>
-  <div style="white-space:pre-wrap;font-size:10.5px;line-height:1.6;color:var(--pdf-text-main);">${esc(data.serviceOrder.extra_notes)}</div>
+  ${paragrafos(data.serviceOrder.extra_notes, 'font-size:10.5px;line-height:1.6;color:var(--pdf-text-main);')}
 </div>
 ` : ''}
 
 ${options.showTerms && data.terms ? `
-<div style="margin-top:30px;padding-top:10px;border-top:1px dashed var(--pdf-border);">
+<div class="pdf-texto" data-pdf-quebra="dentro" style="margin-top:30px;padding-top:10px;border-top:1px dashed var(--pdf-border);">
   <div style="font-size:9px;font-weight:700;color:var(--pdf-primary-light);text-transform:uppercase;margin-bottom:4px;">Condições Gerais e Garantia</div>
-  <div style="font-size:8.5px;color:var(--pdf-text-muted);white-space:pre-wrap;text-align:justify;">${esc(data.terms)}</div>
+  ${paragrafos(data.terms, 'font-size:8.5px;color:var(--pdf-text-muted);text-align:justify;')}
 </div>
 ` : ''}
 
@@ -1507,16 +1566,16 @@ ${data.serviceOrder.deposit_paid && data.serviceOrder.deposit_paid > 0 ? `
 ` : ''}
 
 ${data.serviceOrder.financial_notes ? `
-<div class="card" style="border-left:4px solid var(--pdf-border);">
+<div class="card pdf-texto" data-pdf-quebra="dentro" style="border-left:4px solid var(--pdf-border);">
   <div class="section-title">Observações Financeiras</div>
-  <div style="font-size:10px;line-height:1.6;color:var(--pdf-text-main);">${esc(data.serviceOrder.financial_notes)}</div>
+  ${paragrafos(data.serviceOrder.financial_notes, 'font-size:10px;line-height:1.6;color:var(--pdf-text-main);')}
 </div>
 ` : ''}
 
 ${options.showExtraNotes !== false && data.serviceOrder.extra_notes ? `
-<div class="card" style="border-left:4px solid var(--pdf-primary);">
+<div class="card pdf-texto" data-pdf-quebra="dentro" style="border-left:4px solid var(--pdf-primary);">
   <div class="section-title">Observações</div>
-  <div style="white-space:pre-wrap;font-size:10.5px;line-height:1.6;color:var(--pdf-text-main);">${esc(data.serviceOrder.extra_notes)}</div>
+  ${paragrafos(data.serviceOrder.extra_notes, 'font-size:10.5px;line-height:1.6;color:var(--pdf-text-main);')}
 </div>
 ` : ''}
 

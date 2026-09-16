@@ -21,6 +21,17 @@
 export const ALTURA_UTIL_PX = Math.round(((297 - 24) / 25.4) * 96); // ≈ 1032
 
 /**
+ * Largura em que o documento é renderizado para a captura: 186mm (A4 menos 12mm de cada
+ * lado) = 703px. É a MESMA largura que a impressão do navegador dá ao conteúdo com
+ * `@page { margin: 12mm }` — por isso Baixar e Imprimir saem com o mesmo corpo de letra.
+ *
+ * Com os 794px da folha inteira (o valor até 16/09/2026) o html2pdf encolhia a imagem
+ * ×0,885 para caber na área útil, e fatiava a cada `794 × 273/186 = 1165px` — não os 1031
+ * com que os espaçadores abaixo são calculados. A conta só fecha nesta largura.
+ */
+export const LARGURA_UTIL_PX = Math.round(((210 - 24) / 25.4) * 96); // = 703
+
+/**
  * A altura de página EXATAMENTE como o html2pdf a calcula.
  *
  * Ele faz `toPx(273mm, k) = Math.floor(273 * k / 72 * 96)` com `k = 72/25.4`, o que dá
