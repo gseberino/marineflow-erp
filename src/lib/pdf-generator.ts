@@ -25,6 +25,13 @@ export type PDFOptions = {
    * unitária e mantêm subtotal e total. Aqui não sobra número nenhum.
    */
   hideFinancials?: boolean;
+  /**
+   * "Observações para impressão" (service_orders.extra_notes). Até 16/09/2026 o campo era
+   * preenchido no formulário, entregue ao gerador em `serviceOrder.extra_notes` e IGNORADO
+   * pelo template — o texto nunca chegou a documento nenhum, e como não havia toggle o dono
+   * não tinha como perceber. Ligado por padrão: quem escreveu ali escreveu para o cliente ler.
+   */
+  showExtraNotes?: boolean;
   // Invoice-only
   showBankDetails?: boolean;
   showPaymentInstructions?: boolean;
@@ -44,6 +51,7 @@ export const DEFAULT_PDF_OPTIONS: PDFOptions = {
   showTerms: true,
   showSignature: true,
   showProductImages: false,
+  showExtraNotes: true,
   hideFinancials: false,
   showBankDetails: true,
   showPaymentInstructions: true,
@@ -1341,6 +1349,13 @@ ${options.showSignature !== false ? `
 
 ${photoGallery}
 
+${options.showExtraNotes !== false && !semValores && data.serviceOrder.extra_notes ? `
+<div class="card" style="border-left:4px solid var(--pdf-primary);margin-top:8px;">
+  <div class="section-title">Observações</div>
+  <div style="white-space:pre-wrap;font-size:10.5px;line-height:1.6;color:var(--pdf-text-main);">${esc(data.serviceOrder.extra_notes)}</div>
+</div>
+` : ''}
+
 ${options.showTerms && data.terms ? `
 <div style="margin-top:30px;padding-top:10px;border-top:1px dashed var(--pdf-border);">
   <div style="font-size:9px;font-weight:700;color:var(--pdf-primary-light);text-transform:uppercase;margin-bottom:4px;">Condições Gerais e Garantia</div>
@@ -1495,6 +1510,13 @@ ${data.serviceOrder.financial_notes ? `
 <div class="card" style="border-left:4px solid var(--pdf-border);">
   <div class="section-title">Observações Financeiras</div>
   <div style="font-size:10px;line-height:1.6;color:var(--pdf-text-main);">${esc(data.serviceOrder.financial_notes)}</div>
+</div>
+` : ''}
+
+${options.showExtraNotes !== false && data.serviceOrder.extra_notes ? `
+<div class="card" style="border-left:4px solid var(--pdf-primary);">
+  <div class="section-title">Observações</div>
+  <div style="white-space:pre-wrap;font-size:10.5px;line-height:1.6;color:var(--pdf-text-main);">${esc(data.serviceOrder.extra_notes)}</div>
 </div>
 ` : ''}
 

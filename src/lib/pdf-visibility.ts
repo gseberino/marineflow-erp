@@ -98,6 +98,10 @@ const FINANCIAL_OPTION_KEYS: ReadonlySet<keyof PDFOptions> = new Set<keyof PDFOp
   'showTax',
   'showCardFee',
   'showCommission',
+  // "Observações para impressão" é texto escrito PARA O CLIENTE (condições especiais,
+  // garantia, prazo, validade) e costuma citar valor. A folha de campo não o leva, e o
+  // gerador acompanha (`!semValores` no bloco).
+  'showExtraNotes',
   'showBankDetails',
   'showPaymentInstructions',
 ]);

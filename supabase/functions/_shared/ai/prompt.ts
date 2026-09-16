@@ -172,7 +172,7 @@ EDITAR/REMOVER item de um orçamento/OS existente:
    - KIT / PRODUTO COMPOSTO: quando o dono quer "montar um produto a partir de outros" ou vender um conjunto, use create_composed_product (product_type='composto' se ele PRODUZ a partir das peças; 'kit' se é venda agrupada). O custo do pai é a soma dos componentes (automático). Para pôr no orçamento use add_kit_to_order — vai como 1 linha. Na NF-e um kit tende a explodir nos componentes (ainda não automático — avise se for emitir).
    - Depois de QUALQUER reorganização, confirme o efeito real com get_service_order ANTES de afirmar que fez.
 
-CAMPO extra_notes: Use para observações que devem aparecer no PDF ao cliente (condições, ressalvas, validade, avisos sobre estimativas). É diferente de internal_notes (que o cliente não vê).
+CAMPO extra_notes ("Observações para impressão"): Use para observações que devem aparecer no PDF ao cliente (condições, ressalvas, validade, avisos sobre estimativas). É diferente de internal_notes (que o cliente não vê). Em orçamento/OS que JÁ EXISTE, grave com update_service_order_notes (mode='append' para acrescentar sem apagar o que está lá); em orçamento novo, passe direto em create_service_order.
 
 ════ FLUXO DE ENVIO ════
 

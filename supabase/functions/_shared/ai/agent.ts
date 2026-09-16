@@ -127,6 +127,7 @@ const TOOL_LABELS_PT: Record<string, string> = {
   followup_send_touch: "Enviar toque de acompanhamento (IA acompanha)",
   criar_missao_acompanhamento: "Deixar a IA acompanhar",
   cancelar_missao_acompanhamento: "Encerrar acompanhamento da IA",
+  update_service_order_notes: "Editar observações do orçamento/OS",
 };
 
 function humanizeToolNamePt(name: string): string {

@@ -200,3 +200,37 @@ describe('as colunas da tabela de itens somam 100% em qualquer combinação de t
     expect(html).toContain('<th style="width:55%;">Descrição Técnica</th>');
   });
 });
+
+/**
+ * "Observações para impressão" (extra_notes). Até 16/09/2026 o formulário gravava, o hook
+ * entregava ao gerador e o template ignorava: o texto nunca saiu em documento nenhum. Este
+ * bloco existe para o campo não voltar a sumir em silêncio.
+ */
+describe('Observações para impressão (extra_notes)', () => {
+  const texto = 'Garantia de 90 dias. Valores válidos até o fim do mês.';
+  const comNota = (documentType: PDFData['documentType'] = 'service_order'): PDFData => {
+    // documentoCompleto faz spread raso: sobrescrever serviceOrder inteiro apagaria o resto.
+    const base = documentoCompleto({ documentType });
+    return { ...base, serviceOrder: { ...base.serviceOrder, extra_notes: texto } };
+  };
+
+  it('aparece no orçamento, na OS e na fatura quando preenchido', () => {
+    for (const tipo of ['quote', 'service_order', 'invoice'] as const) {
+      const html = buildHTMLDocument(comNota(tipo), DEFAULT_PDF_OPTIONS);
+      expect(html, tipo).toContain('Garantia de 90 dias');
+      expect(html, tipo).toContain('<div class="section-title">Observações</div>');
+    }
+  });
+
+  it('some com o toggle showExtraNotes desligado e não deixa título órfão quando está vazio', () => {
+    const desligado = buildHTMLDocument(comNota(), { ...DEFAULT_PDF_OPTIONS, showExtraNotes: false });
+    expect(desligado).not.toContain('Garantia de 90 dias');
+    const vazio = buildHTMLDocument(documentoCompleto(), DEFAULT_PDF_OPTIONS);
+    expect(vazio).not.toContain('<div class="section-title">Observações</div>');
+  });
+
+  it('não vai na via de execução (sem valores): a observação é escrita para o cliente', () => {
+    const html = buildHTMLDocument(comNota(), { ...DEFAULT_PDF_OPTIONS, hideFinancials: true });
+    expect(html).not.toContain('Garantia de 90 dias');
+  });
+});

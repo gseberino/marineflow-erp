@@ -50,6 +50,7 @@ export const PDF_OPTION_CATALOG: readonly CatalogEntry[] = [
   { key: 'showCommission',         i18nKey: 'showCommission',    fallback: 'Comissão e total líquido',    docTypes: [...QUOTE_LIKE] },
   { key: 'showBankDetails',        i18nKey: 'showBankDetails',   fallback: 'Mostrar dados bancários',     docTypes: ['invoice'] },
   { key: 'showPaymentInstructions', i18nKey: 'showPaymentInstructions', fallback: 'Mostrar instruções de pagamento', docTypes: ['invoice'] },
+  { key: 'showExtraNotes',         i18nKey: 'showExtraNotes',    fallback: 'Observações para impressão',  docTypes: [...QUOTE_LIKE, 'invoice'] },
   { key: 'showTerms',              i18nKey: 'showTerms',         fallback: 'Termos e condições',          docTypes: [...QUOTE_LIKE, 'invoice'] },
   { key: 'showSignature',          i18nKey: 'showSignature',     fallback: 'Campo de assinatura',         docTypes: [...QUOTE_LIKE] },
   { key: 'showProductImages',      i18nKey: 'showProductImages', fallback: 'Incluir fotos dos produtos',  docTypes: [...QUOTE_LIKE, 'invoice'], requiresProductImages: true },

@@ -958,6 +958,63 @@ export const serviceOrderTools: ToolDef[] = [
     },
   },
   {
+    name: "update_service_order_notes",
+    description:
+      "Edita os TEXTOS de um orçamento/OS que já existe: extra_notes = 'Observações para impressão' (aparecem no PDF do cliente: condições, ressalvas, garantias, prazos) e internal_notes = notas internas (nunca vão ao PDF). Por padrão SUBSTITUI o texto; mode='append' acrescenta uma linha ao que já está lá. Para orçamento novo, passe os campos direto em create_service_order.",
+    input_schema: {
+      type: "object",
+      properties: {
+        service_order_id: { type: "string", description: "UUID do orçamento/OS." },
+        extra_notes: { type: "string", description: "Observações para impressão (visíveis ao cliente no PDF). String vazia limpa o campo." },
+        internal_notes: { type: "string", description: "Notas internas (não aparecem no PDF). String vazia limpa o campo." },
+        mode: { type: "string", enum: ["replace", "append"], description: "replace (padrão) troca o texto inteiro; append acrescenta ao final." },
+      },
+      required: ["service_order_id"],
+    },
+    risk: "low",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      // Até 16/09/2026 só create_service_order aceitava extra_notes: o agente sabia o que o
+      // campo era (o prompt explica) e não tinha COMO gravá-lo numa OS existente — respondia
+      // que tinha feito, ou tentava outra tool. Esta é a tool que faltava.
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
+      const guard = await assertEditableSo(sb, args.service_order_id);
+      if (guard) return guard;
+      if (args.extra_notes == null && args.internal_notes == null) {
+        return { error: "Informe extra_notes e/ou internal_notes." };
+      }
+      const { data: so } = await sb
+        .from("service_orders")
+        .select("id, service_order_number, extra_notes, internal_notes")
+        .eq("id", args.service_order_id)
+        .maybeSingle();
+      if (!so) return { error: "Orçamento/OS não encontrado." };
+
+      const append = args.mode === "append";
+      const junta = (atual: unknown, novo: unknown): string => {
+        const n = String(novo ?? "").trim();
+        if (!append) return n.slice(0, 8000);
+        const a = String(atual ?? "").trim();
+        return (a ? `${a}\n${n}` : n).slice(0, 8000);
+      };
+      const patch: Record<string, string> = {};
+      if (args.extra_notes != null) patch.extra_notes = junta(so.extra_notes, args.extra_notes);
+      if (args.internal_notes != null) patch.internal_notes = junta(so.internal_notes, args.internal_notes);
+
+      const { error } = await sb.from("service_orders").update(patch).eq("id", so.id);
+      if (error) throw error;
+      return {
+        ok: true,
+        os: so.service_order_number,
+        modo: append ? "acrescentado" : "substituído",
+        extra_notes: patch.extra_notes ?? String(so.extra_notes ?? ""),
+        internal_notes: patch.internal_notes ?? String(so.internal_notes ?? ""),
+      };
+    },
+  },
+  {
     name: "update_quote_status",
     description:
       "Altera o status do CICLO DE ORÇAMENTO (campo quote_status, separado do status geral da OS): draft → sent → awaiting_approval → approved → awaiting_deposit, ou rejected a qualquer momento (exceto de rejected, que só volta pra draft). Use para mover um orçamento no funil de aprovação do cliente — não confundir com update_service_order_status.",

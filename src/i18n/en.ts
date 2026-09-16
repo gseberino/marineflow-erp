@@ -878,6 +878,7 @@ export const en = {
     showPaymentInstructions: 'Payment instructions',
     hideFinancials: 'Execution copy (no prices)',
     showCommission: 'Commission & net total',
+    showExtraNotes: 'Notes for printing',
     showTerms: 'Terms and conditions',
     showSignature: 'Signature field',
     pdfHint: 'Download PDF generates the ready-made file, named after the client and vessel. Print opens the document in a new tab with the print dialog.',

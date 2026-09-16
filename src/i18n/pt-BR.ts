@@ -857,6 +857,7 @@ export const ptBR: TranslationKeys = {
     showPaymentInstructions: 'Mostrar instruções de pagamento',
     hideFinancials: 'Via de execução (sem valores)',
     showCommission: 'Comissão e total líquido',
+    showExtraNotes: 'Observações para impressão',
     showTerms: 'Termos e condições',
     showSignature: 'Campo de assinatura',
     pdfHint: 'Baixar PDF gera o arquivo pronto, com o nome do cliente e da embarcação. Imprimir abre o documento em uma nova aba com a caixa de diálogo de impressão.',
