@@ -338,8 +338,27 @@ async function importHtml2Pdf(): Promise<any> {
  * Gera o PDF como Blob (sem abrir janela de impressão).
  * Usa html2pdf.js (jsPDF + html2canvas) renderizando o HTML montado por buildHTMLDocument.
  */
-export async function generatePDFBlob(data: PDFData, options: PDFOptions): Promise<Blob> {
+export async function generatePDFBlob(
+  data: PDFData,
+  options: PDFOptions,
+  ctx?: { shareToken?: string },
+): Promise<Blob> {
   const html = buildHTMLDocument(data, options);
+
+  // Primeiro o servidor (/api/pdf, Chromium): texto real, o mesmo motor da impressão, sem
+  // limite de canvas do celular. Qualquer falha — sem sessão, offline, função desligada —
+  // cai no html2pdf abaixo, em silêncio. O portal manda o token do link em vez de sessão.
+  try {
+    const srv = await import('./pdf-server');
+    if (!srv.servidorDesligadoPeloUsuario()) {
+      const credencial = ctx?.shareToken ? { shareToken: ctx.shareToken } : await srv.credencialDaSessao();
+      const comTitulo = html.replace(/<title>[^<]*<\/title>/, `<title>${esc(tituloParaImpressao(data, options))}</title>`);
+      const remoto = await srv.renderizarNoServidor(comTitulo, buildPDFFilename(data, options), credencial);
+      if (remoto) return remoto;
+    }
+  } catch (e) {
+    console.warn('[generatePDFBlob] servidor indisponível, gerando no navegador', e);
+  }
 
   // html2canvas precisa do elemento renderizado on-screen para capturar certo —
   // a `left:-10000px` ele rende em branco. Usamos um wrapper `fixed` na origem,
@@ -615,8 +634,8 @@ export function tituloParaImpressao(data: PDFData, options?: PDFOptions): string
   return buildPDFFilename(data, options).replace(/\.pdf$/i, '');
 }
 
-export async function downloadPDF(data: PDFData, options: PDFOptions): Promise<void> {
-  const blob = await generatePDFBlob(data, options);
+export async function downloadPDF(data: PDFData, options: PDFOptions, ctx?: { shareToken?: string }): Promise<void> {
+  const blob = await generatePDFBlob(data, options, ctx);
   const filename = buildPDFFilename(data, options);
   const url = URL.createObjectURL(blob);
   try {

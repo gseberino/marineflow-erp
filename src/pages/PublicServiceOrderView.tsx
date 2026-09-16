@@ -262,7 +262,7 @@ export default function PublicServiceOrderView() {
   const handleDownloadPDF = async () => {
     setBaixandoPdf(true);
     try {
-      await downloadPDF(await montarPdf(), opcoesDoPdf());
+      await downloadPDF(await montarPdf(), opcoesDoPdf(), { shareToken: token });
     } catch (e: any) {
       console.error('[portal] falha ao baixar o PDF:', e);
       toast.error(e?.message || 'Não deu para gerar o PDF. Tente de novo.');
@@ -307,7 +307,7 @@ export default function PublicServiceOrderView() {
       // Gera o PDF imutável da OS no exato estado em que está sendo assinado
       let signedPdfBase64: string | undefined;
       try {
-        const pdfBlob = await generatePDFBlob(await montarPdf(), opcoesDoPdf());
+        const pdfBlob = await generatePDFBlob(await montarPdf(), opcoesDoPdf(), { shareToken: token });
         signedPdfBase64 = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(String(reader.result || ''));
