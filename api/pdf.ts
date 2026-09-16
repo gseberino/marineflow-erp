@@ -109,10 +109,40 @@ async function shareTokenValido(token: string): Promise<boolean> {
   return Array.isArray(linhas) && linhas.length === 1;
 }
 
-async function renderizar(html: string): Promise<Buffer> {
+/**
+ * O binário do Chromium vem comprimido no pacote e é extraído para /tmp na primeira
+ * chamada. Com Fluid Compute, duas requisições podem cair na MESMA instância ao mesmo
+ * tempo — e foi o que aconteceu no primeiro teste em produção: uma extraía enquanto a
+ * outra tentava executar o arquivo pela metade (`spawn ETXTBSY`). Uma promessa única por
+ * instância faz a segunda esperar a primeira.
+ */
+let caminhoDoChromium: Promise<string> | undefined;
+function executavel(): Promise<string> {
+  if (!caminhoDoChromium) {
+    caminhoDoChromium = chromium.executablePath().catch((e) => {
+      caminhoDoChromium = undefined; // deixa a próxima tentar de novo
+      throw e;
+    });
+  }
+  return caminhoDoChromium;
+}
+
+/** Um navegador por vez por instância: dois Chromiums simultâneos disputam memória à toa. */
+let fila: Promise<unknown> = Promise.resolve();
+function umPorVez<T>(tarefa: () => Promise<T>): Promise<T> {
+  const minha = fila.then(tarefa, tarefa);
+  fila = minha.catch(() => undefined);
+  return minha;
+}
+
+function renderizar(html: string): Promise<Buffer> {
+  return umPorVez(() => renderizarAgora(html));
+}
+
+async function renderizarAgora(html: string): Promise<Buffer> {
   const browser = await puppeteer.launch({
     args: chromium.args,
-    executablePath: await chromium.executablePath(),
+    executablePath: await executavel(),
     headless: true,
     // A4 a 96dpi: a mesma régua da impressão no navegador e do html2pdf (703px úteis).
     defaultViewport: { width: 794, height: 1123, deviceScaleFactor: 1 },
