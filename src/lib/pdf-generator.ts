@@ -737,11 +737,30 @@ const fmtDate = (iso?: string) => {
  * meio de uma linha. Com um elemento por linha, a paginação do Baixar mede e empurra
  * linha a linha, e a impressão ganha orphans/widows de verdade.
  */
-const paragrafos = (texto: unknown, estilo: string): string =>
-  String(texto ?? '')
-    .split(/\r?\n/)
-    .map((linha) => `<p style="margin:0;white-space:pre-wrap;${estilo}">${linha.trim() === '' ? '&nbsp;' : esc(linha)}</p>`)
+const paragrafos = (texto: unknown, estilo: string): string => {
+  // Parágrafo = bloco separado por linha em branco; as quebras de linha DENTRO dele ficam
+  // (pre-wrap). Uma linha por <p> — a primeira versão, 16/09 — deixava o navegador livre
+  // para cortar entre duas linhas quaisquer, e o título "CONDIÇÕES GERAIS" saiu sozinho
+  // no pé de uma página. Com o parágrafo inteiro num <p>, `orphans/widows` valem de
+  // verdade e um subtítulo em caixa alta gruda no parágrafo seguinte.
+  const blocos = String(texto ?? '')
+    .replace(/\r\n?/g, '\n')
+    .split(/\n[ \t]*\n+/)
+    .map((b) => b.replace(/^\n+|\n+$/g, ''))
+    .filter((b) => b.trim() !== '');
+  return blocos
+    .map((b) => {
+      const gruda = pareceSubtitulo(b) ? 'break-after:avoid;page-break-after:avoid;' : '';
+      return `<p style="margin:0 0 0.8em;white-space:pre-wrap;${gruda}${estilo}">${esc(b)}</p>`;
+    })
     .join('');
+};
+
+/** "GARANTIA", "CONDIÇÕES TÉCNICAS": uma linha curta, em caixa alta, sem pontuação final. */
+const pareceSubtitulo = (bloco: string): boolean => {
+  const t = bloco.trim();
+  return !t.includes('\n') && t.length <= 80 && /[A-ZÁ-Ú]/.test(t) && t === t.toUpperCase() && !/[.:;,!?]$/.test(t);
+};
 
 const esc = (v: unknown): string => {
   if (v === null || v === undefined) return '';
@@ -756,9 +775,11 @@ const esc = (v: unknown): string => {
 
 function companyHeaderHTML(company: PDFData['company'], docTypeLabel: string, docNumber: string): string {
   const logoHtml = company.logo_url
-    ? `<img src="${esc(company.logo_url)}" alt="${esc(company.name)}"
-        style="max-height:80px;max-width:220px;object-fit:contain;"
-        crossorigin="anonymous" onerror="this.style.display='none'" />`
+    // Fundo em vez de <img>: um logo que não carrega (URL do projeto antigo, rede fora) não
+    // deixa rastro — <img> quebrado imprime o texto alternativo no lugar, e o render no
+    // servidor roda sem JavaScript, então `onerror` não salvaria.
+    ? `<div role="img" aria-label="${esc(company.name)}"
+        style="width:220px;height:80px;background:url('${esc(company.logo_url)}') left center / contain no-repeat;"></div>`
     : `<div style="font-size:28px;font-weight:900;color:var(--pdf-primary);letter-spacing:-1px;line-height:1;">
         ${esc(company.name).toUpperCase()}
        </div>`;
@@ -848,6 +869,9 @@ function pageWrapper(title: string, body: string): string {
     padding-bottom: 4px;
     display: flex;
     justify-content: space-between;
+    /* Título de seção nunca fica sozinho no pé da página, longe do que ele nomeia. */
+    break-after: avoid;
+    page-break-after: avoid;
   }
 
   table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
@@ -890,7 +914,7 @@ function pageWrapper(title: string, body: string): string {
      em branco — e, maior que a folha, ele partia de qualquer jeito. O gerador emite um <p>
      por linha justamente para a quebra cair ENTRE linhas nos dois caminhos. */
   .pdf-texto { page-break-inside: auto; break-inside: auto; }
-  .pdf-texto p { orphans: 2; widows: 2; }
+  .pdf-texto p { orphans: 3; widows: 3; }
   table { page-break-inside: auto; }
   tr    { page-break-inside: avoid; break-inside: avoid; }
   /* Cabeçalho de tabela se repete em cada página: tabela longa sem cabeçalho
@@ -1436,7 +1460,7 @@ ${options.showExtraNotes !== false && !semValores && data.serviceOrder.extra_not
 
 ${options.showTerms && data.terms ? `
 <div class="pdf-texto" data-pdf-quebra="dentro" style="margin-top:30px;padding-top:10px;border-top:1px dashed var(--pdf-border);">
-  <div style="font-size:9px;font-weight:700;color:var(--pdf-primary-light);text-transform:uppercase;margin-bottom:4px;">Condições Gerais e Garantia</div>
+  <div style="font-size:9px;font-weight:700;color:var(--pdf-primary-light);text-transform:uppercase;margin-bottom:4px;break-after:avoid;page-break-after:avoid;">Condições Gerais e Garantia</div>
   ${paragrafos(data.terms, 'font-size:8.5px;color:var(--pdf-text-muted);text-align:justify;')}
 </div>
 ` : ''}

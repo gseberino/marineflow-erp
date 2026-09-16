@@ -241,17 +241,45 @@ describe('Observações para impressão (extra_notes)', () => {
  * deixava meia folha em branco no Imprimir) e o nome do arquivo salvo pela impressão.
  */
 describe('paridade entre Baixar e Imprimir', () => {
-  it('texto de várias linhas vira um <p> por linha, dentro de bloco que pode partir', () => {
+  it('linha em branco separa parágrafos; quebra de linha dentro do parágrafo fica', () => {
     const base = documentoCompleto();
     const html = buildHTMLDocument(
-      { ...base, serviceOrder: { ...base.serviceOrder, extra_notes: 'linha 1\n\nlinha 3' } },
+      { ...base, serviceOrder: { ...base.serviceOrder, extra_notes: 'linha 1\nlinha 2\n\n\nlinha 4' } },
       DEFAULT_PDF_OPTIONS,
     );
     const inicio = html.indexOf('<div class="section-title">Observações</div>');
     const bloco = html.slice(inicio, html.indexOf('</div>', inicio + 60));
-    expect(bloco.match(/<p /g)?.length).toBe(3);
-    expect(bloco).toContain('&nbsp;');
+    expect(bloco.match(/<p /g)?.length).toBe(2);
+    expect(bloco).toContain('linha 1\nlinha 2</p>');
+    expect(bloco).toContain('white-space:pre-wrap');
     expect(html).toMatch(/class="card pdf-texto" data-pdf-quebra="dentro"[^>]*>\s*<div class="section-title">Observações<\/div>/);
+  });
+
+  it('subtítulo em caixa alta gruda no parágrafo seguinte; texto comum não', () => {
+    const base = documentoCompleto();
+    const html = buildHTMLDocument(
+      { ...base, serviceOrder: { ...base.serviceOrder, extra_notes: 'GARANTIA\n\nOs produtos têm 90 dias.\n\nFIM.' } },
+      DEFAULT_PDF_OPTIONS,
+    );
+    expect(html).toMatch(/<p style="[^"]*break-after:avoid[^"]*">GARANTIA<\/p>/);
+    expect(html).toMatch(/<p style="(?:(?!break-after)[^"])*">Os produtos têm 90 dias\.<\/p>/);
+    // "FIM." termina com ponto: é frase, não título.
+    expect(html).toMatch(/<p style="(?:(?!break-after)[^"])*">FIM\.<\/p>/);
+  });
+
+  it('título de seção e título dos termos nunca ficam sozinhos no pé da página', () => {
+    const html = buildHTMLDocument(documentoCompleto({ terms: 'a\n\nb' }), DEFAULT_PDF_OPTIONS);
+    expect(html).toMatch(/\.section-title\s*\{[^}]*break-after:\s*avoid/);
+    expect(html).toMatch(/break-after:avoid;page-break-after:avoid;">Condições Gerais e Garantia</);
+  });
+
+  it('logo é fundo, não <img>: se a URL morrer, não sobra texto alternativo no cabeçalho', () => {
+    const html = buildHTMLDocument(
+      documentoCompleto({ company: { name: 'HBR', logo_url: 'https://x/logo.png' } } as never),
+      DEFAULT_PDF_OPTIONS,
+    );
+    expect(html).toContain("background:url('https://x/logo.png')");
+    expect(html).not.toMatch(/<img[^>]*logo\.png/);
   });
 
   it('objetivo, conclusão técnica, observações financeiras e termos também partem entre linhas', () => {
