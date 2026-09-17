@@ -1,4 +1,9 @@
-export const en = {
+import type { DeepPartialStrings, TranslationKeys } from './pt-BR';
+
+// D31 (decisão do dono, 17/09/2026): inglês não é requisito. Este dicionário está CONGELADO:
+// texto novo entra só em pt-BR e, para quem usa o app em inglês, cai no português. Chave que
+// exista aqui e não em pt-BR é erro de compilação — o contrário não.
+export const en: DeepPartialStrings<TranslationKeys> = {
   // Navigation
   nav: {
     dashboard: 'Dashboard',
@@ -906,9 +911,5 @@ export const en = {
   },
 };
 
-// Recursive type that mirrors the structure but allows any string values
-type StringifyLeaves<T> = {
-  [K in keyof T]: T[K] extends string ? string : StringifyLeaves<T[K]>;
-};
-
-export type TranslationKeys = StringifyLeaves<typeof en>;
+// O tipo mora em pt-BR desde 17/09/2026 (D31); fica reexportado aqui para quem importava de en.
+export type { TranslationKeys } from './pt-BR';

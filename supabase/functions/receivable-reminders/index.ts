@@ -38,8 +38,10 @@ Deno.serve(async (req) => {
       .from("app_settings")
       .select("key, value")
       .in("key", ["wa_test_mode", "wa_test_number", "zapi_test_mode", "zapi_test_number",
-                   "receivable_reminder_days_before", "company_name"]);
+                   "receivable_reminder_days_before", "company_name", "collection_min_amount"]);
     const settingsMap = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
+    // D21 (dono, 17/09/2026): abaixo do piso de materialidade não se manda lembrete.
+    const pisoCobranca = Number(settingsMap["collection_min_amount"]) || 0;
 
     const testMode   = (settingsMap["wa_test_mode"] ?? settingsMap["zapi_test_mode"]) === "true";
     const testNumber = ((settingsMap["wa_test_number"] ?? settingsMap["zapi_test_number"]) || "").replace(/\D/g, "");
@@ -94,6 +96,10 @@ Deno.serve(async (req) => {
       const soNumber = (rec as any).service_orders?.service_order_number || "";
       const description = rec.description || (soNumber ? `OS ${soNumber}` : "cobrança pendente");
       const balanceValue = Number(rec.balance_amount || rec.amount);
+      if (pisoCobranca > 0 && balanceValue < pisoCobranca) {
+        console.info(`[receivable-reminders] ${rec.id}: R$ ${balanceValue} abaixo do piso de R$ ${pisoCobranca}, sem lembrete.`);
+        continue;
+      }
 
       const message =
         `Olá ${clientFirstName}! 👋 Lembramos que o pagamento de *${fmt.format(balanceValue)}* ` +

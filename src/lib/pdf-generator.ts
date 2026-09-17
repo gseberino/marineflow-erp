@@ -773,7 +773,23 @@ const esc = (v: unknown): string => {
 };
 
 
-function companyHeaderHTML(company: PDFData['company'], docTypeLabel: string, docNumber: string): string {
+/** dd/mm/aaaa de uma data ISO; sem data válida, cai em hoje (documentos antigos sem created_at). */
+function dataCurta(iso?: string | null): string {
+  const d = iso ? new Date(iso) : new Date();
+  return (Number.isNaN(d.getTime()) ? new Date() : d).toLocaleDateString('pt-BR');
+}
+
+function companyHeaderHTML(
+  company: PDFData['company'],
+  docTypeLabel: string,
+  docNumber: string,
+  datas: { emissao?: string | null; agendado?: string | null } = {},
+): string {
+  // D14 (17/09/2026): a OS impressa mostra a data agendada quando houver.
+  const agendado = datas.agendado ? new Date(datas.agendado) : null;
+  const linhaAgendado = agendado && !Number.isNaN(agendado.getTime())
+    ? `<div style="margin-top:2px;font-size:10px;color:var(--pdf-text-muted);">Agendado para: ${agendado.toLocaleDateString('pt-BR')} ${agendado.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</div>`
+    : '';
   const logoHtml = company.logo_url
     // Fundo em vez de <img>: um logo que não carrega (URL do projeto antigo, rede fora) não
     // deixa rastro — <img> quebrado imprime o texto alternativo no lugar, e o render no
@@ -799,8 +815,8 @@ function companyHeaderHTML(company: PDFData['company'], docTypeLabel: string, do
         <h1 style="font-size:24px;margin-bottom:4px;color:var(--pdf-primary);">${docTypeLabel}</h1>
         <div style="font-size:16px;font-weight:700;color:var(--pdf-secondary);">${esc(docNumber)}</div>
         <div style="margin-top:8px;font-size:10px;color:var(--pdf-text-muted);">
-          Emissão: ${new Date().toLocaleDateString('pt-BR')}
-        </div>
+          Emissão: ${dataCurta(datas.emissao)}
+        </div>${linhaAgendado}
       </div>
     </header>
   `;
@@ -1177,7 +1193,10 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
     const v = options.validity;
     if (!v || v.mode === 'days') {
       const days = v?.days || 15;
-      const expiry = new Date();
+      // D13 (17/09/2026): a validade conta da EMISSÃO (created_at), não do dia em que
+      // alguém reimprimiu. Reimprimir um orçamento de 20 dias não o renova por mais 15.
+      const base = data.serviceOrder.created_at ? new Date(data.serviceOrder.created_at) : new Date();
+      const expiry = Number.isNaN(base.getTime()) ? new Date() : base;
       expiry.setDate(expiry.getDate() + days);
       return `Válido por ${days} dias (até ${expiry.toLocaleDateString('pt-BR')})`;
     }
@@ -1276,7 +1295,11 @@ function buildOrderHTML(data: PDFData, options: PDFOptions): string {
   ].filter(Boolean).join('');
 
   const body = `
-${companyHeaderHTML(data.company, docTypeLabel, docNumber)}
+${companyHeaderHTML(data.company, docTypeLabel, docNumber, {
+  // D13: a emissão é a data em que o documento nasceu, não a de cada reimpressão.
+  emissao: data.serviceOrder.created_at,
+  agendado: isQuote ? null : data.serviceOrder.scheduled_start_at,
+})}
 
 ${semValores ? `
 <div style="margin:0 0 12px;padding:8px 12px;border:1px dashed var(--pdf-border);border-radius:6px;background:var(--pdf-bg-light);font-size:10px;color:var(--pdf-text-muted);">

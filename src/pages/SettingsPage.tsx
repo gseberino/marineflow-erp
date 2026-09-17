@@ -327,7 +327,6 @@ function CompanyTab() {
     email: '',
     base_latitude: '-26.9189',
     base_longitude: '-48.6728',
-    cost_per_km: '3.50',
     default_hourly_rate: '150',
     travel_km_rate: '1.10',
     travel_hourly_1: '90',
@@ -367,7 +366,6 @@ function CompanyTab() {
           email: map.email || '',
           base_latitude: map.base_latitude || '-26.9189',
           base_longitude: map.base_longitude || '-48.6728',
-          cost_per_km: map.cost_per_km || '3.50',
           default_hourly_rate: map.default_hourly_rate || '150',
           travel_km_rate: map.travel_km_rate || '1.10',
           travel_hourly_1: map.travel_hourly_1 || '90',
@@ -662,6 +660,11 @@ function CompanyTab() {
                 onChange={e => set('travel_hourly_3', e.target.value)} className="mt-1" />
             </div>
           </div>
+          {/* D8 (17/09/2026): a regra acima de 3 técnicos deixa de ser "provisória" e passa a
+              ser a política oficial, escrita onde a tabela é editada. */}
+          <p className="text-[10px] text-muted-foreground -mt-1">
+            Acima de 3 técnicos: + R$ {Math.max(0, Number(form.travel_hourly_3) - Number(form.travel_hourly_2)).toFixed(0)}/h por técnico adicional (o passo entre 2 e 3). Com {form.travel_hourly_1}/{form.travel_hourly_2}/{form.travel_hourly_3}, o 4º técnico entra por R$ {(2 * Number(form.travel_hourly_3) - Number(form.travel_hourly_2)).toFixed(0)}/h.
+          </p>
           <div>
             <label className="text-xs font-medium text-muted-foreground">Multiplicador urgência (ex: 1.5 = +50%)</label>
             <Input type="number" step="0.05" value={form.travel_urgency_mult}

@@ -601,16 +601,24 @@ export const financialTools: ToolDef[] = [
           };
         })
         .filter((c) => c.dias_atraso >= minDias && c.saldo > 0)
-        .sort((a, b) => b.saldo - a.saldo)
-        .slice(0, limite);
+        .sort((a, b) => b.saldo - a.saldo);
 
-      const total = casos.reduce((a, c) => a + c.saldo, 0);
+      // D21 (dono, 17/09/2026): abaixo do piso de materialidade a IA LISTA, mas não cobra.
+      // Mandar mensagem por R$ 80 custa mais relação do que vale o dinheiro.
+      const { data: cfgPiso } = await ctx.admin.from("app_settings").select("value").eq("key", "collection_min_amount").maybeSingle();
+      const piso = Number((cfgPiso as { value?: string } | null)?.value) || 0;
+      const cobraveis = casos.filter((c) => c.saldo >= piso).slice(0, limite);
+      const abaixoDoPiso = casos.filter((c) => c.saldo < piso);
+
+      const total = cobraveis.reduce((a, c) => a + c.saldo, 0);
       return {
-        count: casos.length,
+        count: cobraveis.length,
         total_em_atraso: Math.round(total * 100) / 100,
         ordem_sugerida: "maior valor primeiro (impacto de caixa)",
-        casos,
-        nota: "Não cobre quem já foi cobrado hoje. Enviar cobrança é ação sensível — o sistema pede sua confirmação.",
+        casos: cobraveis,
+        piso_de_cobranca: piso,
+        abaixo_do_piso: abaixoDoPiso.map((c) => ({ cliente: c.cliente, saldo: c.saldo, dias_atraso: c.dias_atraso })),
+        nota: `Não cobre quem já foi cobrado hoje nem valores abaixo de R$ ${piso} (só listados). Enviar cobrança é ação sensível — o sistema pede sua confirmação.`,
       };
     },
   },

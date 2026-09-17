@@ -21,7 +21,25 @@ interface I18nContextType {
   setCurrency: (config: Partial<CurrencyConfig>) => void;
 }
 
-const translations: Record<Locale, TranslationKeys> = { en, 'pt-BR': ptBR };
+/**
+ * Inglês por cima do português: o que en não tiver, sai em pt-BR (D31, 17/09/2026). Antes
+ * uma chave nova sem tradução aparecia como `undefined` na tela em inglês.
+ */
+function completar(base: Record<string, unknown>, parcial: Record<string, unknown> | undefined): Record<string, unknown> {
+  const saida: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(parcial ?? {})) {
+    const b = base[k];
+    saida[k] = v !== null && typeof v === 'object' && b !== null && typeof b === 'object'
+      ? completar(b as Record<string, unknown>, v as Record<string, unknown>)
+      : v;
+  }
+  return saida;
+}
+
+const translations: Record<Locale, TranslationKeys> = {
+  en: completar(ptBR as unknown as Record<string, unknown>, en as unknown as Record<string, unknown>) as unknown as TranslationKeys,
+  'pt-BR': ptBR,
+};
 
 const LOCALE_KEY = 'nautitech-locale';
 const CURRENCY_KEY = 'nautitech-currency';

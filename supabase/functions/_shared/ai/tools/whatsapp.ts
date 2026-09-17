@@ -191,6 +191,12 @@ export const whatsappTools: ToolDef[] = [
         .eq("id", args.collection_id)
         .maybeSingle();
       if (error || !col) return { error: "Cobrança não encontrada" };
+      // D21 (dono, 17/09/2026): piso de materialidade — abaixo dele não se cobra por mensagem.
+      const { data: cfgPiso } = await admin.from("app_settings").select("value").eq("key", "collection_min_amount").maybeSingle();
+      const piso = Number((cfgPiso as { value?: string } | null)?.value) || 0;
+      if (piso > 0 && Number(col.amount) < piso) {
+        return { error: `Cobrança de R$ ${Number(col.amount).toFixed(2)} fica abaixo do piso de R$ ${piso} (Configurações): só listar, não cobrar por WhatsApp.` };
+      }
       // Perfil do contato: nome usado (display_name) e opt-out.
       let c: any = null;
       if (col.client_id) {

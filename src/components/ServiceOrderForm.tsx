@@ -346,7 +346,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     internal_notes: '',
     customer_visible_report: '',
     travel_distance_km: 0,
-    travel_cost_per_km: 3.5,
+    // D9 (17/09/2026): a única chave de km é travel_km_rate (1,10). O 3,5 que ficava aqui era
+    // a chave órfã cost_per_km, que nenhuma conta lia — só este campo, que a exibia.
+    travel_cost_per_km: 1.1,
     technician_count_for_travel: 1,
     travel_cost_total: 0,
     travel_hours: 0,
@@ -643,7 +645,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         internal_notes: d.internal_notes || '',
         customer_visible_report: d.customer_visible_report || '',
         travel_distance_km: d.travel_distance_km || 0,
-        travel_cost_per_km: d.travel_cost_per_km || 3.5,
+        travel_cost_per_km: d.travel_cost_per_km || Number(appSettings?.travel_km_rate) || 1.1,
         technician_count_for_travel: d.technician_count_for_travel || 1,
         travel_cost_total: d.travel_cost_total || 0,
         travel_hours: d.travel_hours || 0,

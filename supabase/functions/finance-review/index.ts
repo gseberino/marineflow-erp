@@ -413,6 +413,13 @@ async function idsDeTransacao(
 
 async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const desde = new Date(Date.now() - JANELA_DIAS * 86_400_000).toISOString().slice(0, 10);
+  // D2 (dono, 17/09/2026): regra autônoma lança sozinha SÓ até o limite de lote. Acima
+  // dele a proposta fica na caixa mesmo com regra "apply" — valor grande merece um olhar.
+  const limiteLote = await lerLimiteLote(admin);
+  // D4 (dono, 17/09/2026): contraparte com o CNPJ da própria empresa é transferência entre
+  // contas mesmo sem a outra perna no extrato (a conta de destino pode não estar conectada).
+  const { data: cfgCnpj } = await admin.from("app_settings").select("value").eq("key", "cnpj").maybeSingle();
+  const cnpjEmpresa = String((cfgCnpj as { value?: string } | null)?.value ?? "").replace(/\D/g, "");
 
   const transacoes = await lerTudo<TransacaoOrfa>((de, ate) => {
     let q = admin
@@ -532,7 +539,12 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   // lote entram em `naFila` e são excluídas na chamada seguinte, então repetir a chamada
   // avança sempre. Cortar a consulta em vez da fila devolveria sempre as mesmas 200 e o
   // mutirão nunca sairia do lugar.
-  const desteLote = incluirHistorico ? elegiveis.slice(0, LOTE_HISTORICO) : elegiveis;
+  // Mutirão do histórico ataca os MAIORES valores primeiro (D2): cada rodada de 200 é um
+  // clique do gestor, e os R$ que faltam no resultado estão concentrados em poucas linhas.
+  const ordenados = incluirHistorico
+    ? [...elegiveis].sort((a, b) => Math.abs(Number(b.amount)) - Math.abs(Number(a.amount)))
+    : elegiveis;
+  const desteLote = incluirHistorico ? ordenados.slice(0, LOTE_HISTORICO) : elegiveis;
   const restantes = elegiveis.length - desteLote.length;
 
   const linhas: Record<string, unknown>[] = [];
@@ -547,6 +559,24 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
         title: `Transferência entre contas: ${tx.description}`.slice(0, 160),
         reasoning: par.detail,
         confidence: 92,
+        suggested_amount: tx.amount,
+        suggested_date: tx.transaction_date,
+        suggested_category: "Transferência entre contas",
+        suggested_description: tx.description.slice(0, 200),
+        dre_group: "nao_operacional",
+      });
+      continue;
+    }
+
+    const docContraparte = String(tx.counterparty_document ?? "").replace(/\D/g, "");
+    if (cnpjEmpresa.length === 14 && docContraparte === cnpjEmpresa) {
+      linhas.push({
+        kind: "internal_transfer",
+        bank_transaction_id: tx.id,
+        related_transaction_id: null,
+        title: `Transferência entre contas: ${tx.description}`.slice(0, 160),
+        reasoning: "A contraparte é o CNPJ da própria HBR: o dinheiro mudou de conta, não de dono.",
+        confidence: 95,
         suggested_amount: tx.amount,
         suggested_date: tx.transaction_date,
         suggested_category: "Transferência entre contas",
@@ -633,7 +663,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     linhas.push(linha);
     // Regra com autonomia foi conferida pelo gestor no momento em que ele a criou; segurar
     // a proposta para ele confirmar de novo seria pedir a mesma decisão duas vezes.
-    if (p.autoAplicavel) autoAplicar.push(linha);
+    if (p.autoAplicavel && Math.abs(Number(tx.amount)) <= limiteLote) autoAplicar.push(linha);
   }
 
   let criadas = 0;
@@ -659,7 +689,6 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     lancadasSozinhas = Number(corpo?.aprovadas ?? 0);
   }
 
-  const limiteLote = await lerLimiteLote(admin);
   const partes = [
     criadas > 0 ? `${criadas - lancadasSozinhas} proposta(s) para revisar` : "Nada novo para propor",
     lancadasSozinhas > 0 ? `${lancadasSozinhas} lançada(s) pelas suas regras` : "",

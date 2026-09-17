@@ -342,12 +342,58 @@ function withTrailingCacheMark(messages: ClaudeMessage[]): ClaudeMessage[] {
 }
 
 /**
+ * D18 (decisão do dono, 17/09/2026) — perfil enxuto de tools.
+ *
+ * As 194 tools custavam ~35 mil tokens por chamada e 138 delas nunca tinham sido usadas.
+ * Com `app_settings.ai_tool_profile = 'operacao'`, só entram no turno as tools listadas em
+ * `ai_tool_profile_operacao` (as usadas nos últimos 60 dias mais as essenciais), as de risco
+ * alto (ações que o dono aprova no sino — e que o `confirm_action` precisa encontrar) e
+ * qualquer tool cujo nome apareça no pedido do usuário ("use a list_low_stock"). Qualquer
+ * outro valor no setting, ou erro de leitura, devolve a lista completa: o corte de custo
+ * nunca pode virar um agente sem mãos.
+ */
+const PERFIL_DE_TOOLS = { validoAte: 0, ativo: false, nomes: new Set<string>() };
+
+function textoDoUltimoPedido(messages: ClaudeMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== "user") continue;
+    return messages[i].content
+      .map((b) => ((b as { type?: string; text?: string }).type === "text" ? String((b as { text?: string }).text ?? "") : ""))
+      .join(" ");
+  }
+  return "";
+}
+
+async function aplicarPerfilDeTools(todas: ToolDef[], params: RunAgentLoopParams): Promise<ToolDef[]> {
+  try {
+    if (Date.now() > PERFIL_DE_TOOLS.validoAte) {
+      const { data } = await params.toolCtx.admin
+        .from("app_settings").select("key, value")
+        .in("key", ["ai_tool_profile", "ai_tool_profile_operacao"]);
+      const mapa = Object.fromEntries(((data ?? []) as { key: string; value: string }[]).map((r) => [r.key, r.value]));
+      let nomes: unknown = [];
+      try { nomes = JSON.parse(mapa.ai_tool_profile_operacao || "[]"); } catch { nomes = []; }
+      PERFIL_DE_TOOLS.ativo = mapa.ai_tool_profile === "operacao";
+      PERFIL_DE_TOOLS.nomes = new Set(Array.isArray(nomes) ? nomes.map(String) : []);
+      PERFIL_DE_TOOLS.validoAte = Date.now() + 5 * 60_000;
+    }
+  } catch {
+    return todas;
+  }
+  if (!PERFIL_DE_TOOLS.ativo || PERFIL_DE_TOOLS.nomes.size === 0) return todas;
+  const pedido = textoDoUltimoPedido(params.messages).toLowerCase();
+  return todas.filter((t) =>
+    t.risk === "high" || PERFIL_DE_TOOLS.nomes.has(t.name) || (pedido.length > 0 && pedido.includes(t.name))
+  );
+}
+
+/**
  * Loop de tool-calling agnóstico de canal. Recebe o histórico em formato nativo
  * Anthropic e devolve o resultado do turno (mensagem final, ou proposal/options
  * para a UI aguardar o usuário). Quem chama decide como renderizar cada canal.
  */
 export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTurnResult> {
-  const tools = params.tools ?? allTools;
+  const tools = await aplicarPerfilDeTools(params.tools ?? allTools, params);
   const model = params.model ?? MODEL_AGENT;
   const maxIterations = params.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   const messages: ClaudeMessage[] = params.messages.map((m) => ({ role: m.role, content: [...m.content] }));

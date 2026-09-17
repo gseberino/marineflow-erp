@@ -47,19 +47,18 @@ function placeholders(texto: string): string[] {
 const caminhosEn = caminhos(en as unknown as Arvore);
 const caminhosPt = caminhos(ptBR as unknown as Arvore);
 
-describe('paridade dos dicionários pt-BR × en', () => {
-  it('nenhuma chave existe só em pt-BR', () => {
-    const soEmPt = caminhosPt.filter(c => !caminhosEn.includes(c));
-    expect(soEmPt, `chaves sem tradução em inglês: ${soEmPt.join(', ')}`).toEqual([]);
-  });
-
+// D31 (decisão do dono, 17/09/2026): inglês não é requisito. O dicionário en ficou
+// CONGELADO — pt-BR pode crescer sem tradução, e o que faltar em en cai no português
+// (ver `completar` em context.tsx). O que continua proibido é o contrário: chave que só
+// existe em inglês seria texto que ninguém em português consegue ler.
+describe('pt-BR é a fonte; en é subconjunto congelado', () => {
   it('nenhuma chave existe só em en', () => {
     const soEmEn = caminhosEn.filter(c => !caminhosPt.includes(c));
     expect(soEmEn, `chaves sem texto em português: ${soEmEn.join(', ')}`).toEqual([]);
   });
 
-  it('as duas árvores têm exatamente a mesma forma', () => {
-    expect(caminhosPt).toEqual(caminhosEn);
+  it('pt-BR cobre tudo que en tem (pode ter mais)', () => {
+    expect(caminhosPt.length).toBeGreaterThanOrEqual(caminhosEn.length);
   });
 
   it('toda folha é string — nunca número, null ou objeto vazio', () => {

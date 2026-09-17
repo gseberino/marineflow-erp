@@ -1,6 +1,6 @@
-import type { TranslationKeys } from './en';
-
-export const ptBR: TranslationKeys = {
+// D31 (17/09/2026): o português é a fonte da verdade. O tipo das traduções nasce DAQUI;
+// o inglês virou dicionário parcial (ver en.ts) e o que faltar nele cai no português.
+export const ptBR = {
   nav: {
     dashboard: 'Painel',
     serviceOrders: 'Ordens de Serviço',
@@ -883,4 +883,16 @@ export const ptBR: TranslationKeys = {
     nov: 'Nov',
     dec: 'Dez',
   },
+};
+
+// Espelha a estrutura, mas aceita qualquer string nas folhas.
+type StringifyLeaves<T> = {
+  [K in keyof T]: T[K] extends string ? string : StringifyLeaves<T[K]>;
+};
+
+export type TranslationKeys = StringifyLeaves<typeof ptBR>;
+
+/** Mesma árvore, tudo opcional: é o contrato do inglês congelado (D31). */
+export type DeepPartialStrings<T> = {
+  [K in keyof T]?: T[K] extends string ? string : DeepPartialStrings<T[K]>;
 };
