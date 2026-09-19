@@ -16,11 +16,12 @@ import {
   pluggyAuth, fetchItem, fetchAccounts, fetchTransactions, listItems,
   mapTransaction, accountSourceType, motivoDeCreditoEmCartao,
 } from "../_shared/banking/pluggy.ts";
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
@@ -54,7 +55,7 @@ interface SyncBody {
   action?: "sync" | "list_items" | "backfill";
 }
 
-Deno.serve(async (req) => {
+servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jr({ error: "method_not_allowed" }, 405);
 

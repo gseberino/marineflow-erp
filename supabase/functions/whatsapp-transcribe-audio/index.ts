@@ -5,9 +5,10 @@
 // Requer o secret GROQ_API_KEY. Degrada com graça: se algo falhar, a mensagem segue "[audio]"
 // e o identify+forward continua valendo (nada quebra).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
@@ -15,7 +16,7 @@ function jr(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
-Deno.serve(async (req) => {
+servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");

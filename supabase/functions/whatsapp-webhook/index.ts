@@ -4,6 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { EVOLUTION_STATUS_MAP } from "../_shared/whatsapp/evolution-provider.ts";
 import { classificarResposta } from "../_shared/ai/comms/reply-router.ts";
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 // Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
 // fecha o loop no ai_comms_log (marca respondido + intenção) e HONRA OPT-OUT sozinho.
@@ -32,7 +33,7 @@ async function manejarRespostaAutomatica(admin: any, tabela: "clients" | "suppli
 }
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, client-token",
   "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
 };
@@ -456,4 +457,4 @@ export async function handler(req: Request): Promise<Response> {
   }
 }
 
-Deno.serve(handler);
+servirComCors(handler);

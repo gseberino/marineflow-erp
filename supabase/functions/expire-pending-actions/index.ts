@@ -9,9 +9,10 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
@@ -23,7 +24,7 @@ function jr(body: unknown, status = 200) {
   });
 }
 
-Deno.serve(async (req) => {
+servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   // Era fail-OPEN (`if (cronSecret) { ... }`): sem o env var, a função ficava aberta.

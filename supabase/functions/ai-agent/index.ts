@@ -8,6 +8,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { runAgentLoop, type Proposal } from "../_shared/ai/agent.ts";
 import { filtrarTools } from "../_shared/ai/intent-router.ts";
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 /** Roteador de intenção (Onda 5A), atrás do flag ai_intent_router=on. Filtra as tools ao
  *  domínio da última mensagem; em qualquer dúvida, filtrarTools devolve null e mandamos tudo. */
@@ -40,7 +41,7 @@ import { filtrarPorCanal } from "../_shared/ai/channel-scope.ts";
 import { carregarJanela } from "../_shared/ai/history-window.ts";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
@@ -578,7 +579,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
 }
 
 // ---------------- HANDLER ----------------
-Deno.serve(async (req) => {
+servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
     if (!Deno.env.get("OPENROUTER_API_KEY")) return jr({ error: "OPENROUTER_API_KEY não configurada no Supabase" }, 500);

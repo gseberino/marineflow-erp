@@ -14,9 +14,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider } from "../_shared/fiscal/factory.ts";
 import { applyStatusUpdate, recomputeInvoicingStatus } from "../_shared/fiscal/apply-status.ts";
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
@@ -31,7 +32,7 @@ function jr(body: unknown, status = 200) {
 const NON_TERMINAL = ["draft", "queued", "processing"];
 const SELECT_COLS = "id, document_type, provider_document_id, environment, status, xml_storage_path, pdf_storage_path, provider_status, origin_type, origin_id";
 
-Deno.serve(async (req) => {
+servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jr({ error: "method_not_allowed" }, 405);
 

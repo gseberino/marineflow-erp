@@ -36,6 +36,7 @@ import {
   type BuildNfsePayloadInput,
   type NfseStandard,
 } from "../_shared/fiscal/nfse-payload-builder.ts";
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 // SEFAZ exige justificativa com pelo menos 15 caracteres tanto no cancelamento
 // quanto na Carta de Correção Eletrônica.
@@ -46,7 +47,7 @@ const MAX_JUSTIFICATION_LENGTH = 255;
 const ACTIVE_STATUSES = ["draft", "queued", "processing", "authorized"];
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
@@ -261,7 +262,7 @@ async function buildBodyFromServiceOrder(admin: any, body: any): Promise<
   };
 }
 
-Deno.serve(async (req) => {
+servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jr({ error: "method_not_allowed" }, 405);
 

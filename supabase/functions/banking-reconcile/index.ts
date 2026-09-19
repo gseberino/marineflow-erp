@@ -19,6 +19,7 @@ import {
 } from "../_shared/banking/matching.ts";
 import { expectedDepositAmount } from "../_shared/banking/quote-deposit.ts";
 import type { BankTx, Candidate, Suggestion } from "../_shared/banking/types.ts";
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 /**
  * Cliente do banco.
@@ -32,7 +33,7 @@ import type { BankTx, Candidate, Suggestion } from "../_shared/banking/types.ts"
 type DbClient = SupabaseClient<any, "public", any>;
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
@@ -61,7 +62,7 @@ interface ReconcileBody {
   candidates?: Candidate[];
 }
 
-Deno.serve(async (req) => {
+servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jr({ error: "method_not_allowed" }, 405);
 

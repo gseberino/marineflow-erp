@@ -9,9 +9,10 @@ import { z } from "https://esm.sh/zod@3.23.8";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { normalizePhoneNumber } from "../_shared/whatsapp/normalize.ts";
 import { concluirEnvio, liberarEnvio, reservarEnvio } from "../_shared/whatsapp/idempotencia.ts";
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -46,7 +47,7 @@ function jr(body: unknown, status = 200) {
   });
 }
 
-Deno.serve(async (req) => {
+servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {

@@ -11,9 +11,10 @@ import {
   type ConversationMessage, type DetectorStats,
 } from "../_shared/ai/inbox-detector.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
@@ -24,7 +25,7 @@ function jr(body: unknown, status = 200) {
 const CURSOR_KEY = "agenda_detector_cursor";
 const MAX_CONVERSATIONS_PER_RUN = 12; // teto de custo por execução
 
-Deno.serve(async (req) => {
+servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   // Era fail-OPEN (`if (cronSecret && ...)`): sem o env var, a função ficava aberta.

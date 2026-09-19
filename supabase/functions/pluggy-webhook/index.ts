@@ -1,3 +1,4 @@
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 // Edge Function: pluggy-webhook
 // Receptor dos webhooks do Pluggy (item/created, item/updated, item/error, ...).
 // Chega SEM Authorization — verify_jwt=false no config.toml, como fiscal-webhook.
@@ -9,7 +10,7 @@
 // bank_transactions) fica para a banking-sync da Fase 1, que será disparada daqui.
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
@@ -32,7 +33,7 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-Deno.serve(async (req) => {
+servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jr({ error: "method_not_allowed" }, 405);
 

@@ -1,3 +1,4 @@
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 // Edge Function: pluggy-connect-token
 // Gera um Connect Token do Pluggy para o frontend abrir o widget Pluggy Connect
 // (fluxo de consentimento Open Finance). Substitui o exemplo Next.js do quickstart
@@ -11,7 +12,7 @@
 const PLUGGY_API = "https://api.pluggy.ai";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
@@ -23,7 +24,7 @@ function jr(body: unknown, status = 200) {
   });
 }
 
-Deno.serve(async (req) => {
+servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jr({ error: "method_not_allowed" }, 405);
 

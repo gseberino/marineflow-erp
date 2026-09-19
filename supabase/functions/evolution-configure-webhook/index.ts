@@ -10,9 +10,10 @@
 // recuperação do WhatsApp continua valendo (ele fala direto com a Evolution via
 // PowerShell); esta função é o mesmo gesto pela API do ERP, com auth.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
@@ -26,7 +27,7 @@ function jr(body: unknown, status = 200): Response {
 
 const EVENTOS = ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE", "SEND_MESSAGE", "CONNECTION_UPDATE"];
 
-Deno.serve(async (req: Request) => {
+servirComCors(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";

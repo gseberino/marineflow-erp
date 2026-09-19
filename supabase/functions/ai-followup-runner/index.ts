@@ -19,9 +19,10 @@ import { MODEL_LITE } from "../_shared/ai/models.ts";
 import { perfilDeVoz, perfilParaPrompt } from "../_shared/ai/comms/voice-profiles.ts";
 import { guardaDeEnvio } from "../_shared/ai/comms/send-guard.ts";
 import { dentroDaJanela, esperaFinalEsgotada, jaTocouHoje, partesBrasilia } from "../_shared/ai/followups/cadencia.ts";
+import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
@@ -122,7 +123,7 @@ async function montarContexto(admin: any, m: Missao) {
   return { partes, historico, enviados, feedback };
 }
 
-Deno.serve(async (req) => {
+servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const recusa = verificarCronSecret(req, corsHeaders, "ai-followup-runner");
   if (recusa) return recusa;
