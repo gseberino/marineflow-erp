@@ -12240,6 +12240,24 @@ export type Database = {
       }
       prune_app_error_logs: { Args: { p_days?: number }; Returns: number }
       recalc_po_total: { Args: { p_po_id: string }; Returns: undefined }
+      calc_so_totals: {
+        Args: { so_id: string }
+        Returns: {
+          labor_cost_total: number
+          parts_cost_total: number
+          labor_hours_total: number
+          operational_cost_total: number
+          travel_billable: number
+          subcontract_cost_total: number
+          discount_amount: number
+          tax_amount: number
+          subtotal: number
+          base: number
+          card_fee_percent: number
+          card_fee_amount: number
+          grand_total: number
+        }[]
+      }
       recalc_so_totals: { Args: { so_id: string }; Returns: undefined }
       receive_po: {
         Args: { p_due_days?: number; p_items: Json; p_po_id: string }

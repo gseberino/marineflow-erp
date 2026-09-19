@@ -1,7 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { computeCardFeeAmount } from '@/hooks/use-service-orders';
-import { updateReceivableFromSO } from '@/lib/cascade-updates';
+import { recalcTotals } from '@/hooks/use-service-orders';
 
 async function recalcExpenseTotals(soId: string) {
   const { data: expenses } = await supabase
@@ -14,37 +13,13 @@ async function recalcExpenseTotals(soId: string) {
     .filter((e) => e.billable_to_client !== false)
     .reduce((s, e) => s + Number(e.amount), 0);
 
-  const { data: so } = await supabase
-    .from('service_orders')
-    .select('labor_cost_total, parts_cost_total, travel_cost_total, is_travel_billable, subcontract_cost_total, discount_amount, tax_amount, card_fee_passthrough_enabled, card_installments')
-    .eq('id', soId)
-    .single();
-
-  const travelCost = so?.is_travel_billable !== false ? (so?.travel_cost_total || 0) : 0;
-
-  const base =
-    (so?.labor_cost_total || 0) +
-    (so?.parts_cost_total || 0) +
-    travelCost +
-    opCost +
-    (so?.subcontract_cost_total || 0) -
-    (so?.discount_amount || 0) +
-    (so?.tax_amount || 0);
-
-  // Onda 1C: repasse da taxa de cartão ao cliente, aplicado por cima do valor já ajustado.
-  const cardFeeAmount = await computeCardFeeAmount(base, so?.card_fee_passthrough_enabled, so?.card_installments);
-  const grand = base + cardFeeAmount;
-  const grandRounded = Math.round(grand * 100) / 100;
-
-  // Cascata para recebíveis ANTES de gravar o novo grand_total — ver
-  // recalcTotals (use-service-orders.ts) para a mesma lógica/motivo.
-  await updateReceivableFromSO(soId, grandRounded);
-
+  // D15 (17/09/2026): grava só o INSUMO (custo operacional faturável) e deixa a fórmula do
+  // total com o banco — recalcTotals pergunta a calc_so_totals, aplica a cascata dos
+  // recebíveis e manda gravar. Antes esta função tinha a terceira cópia da fórmula.
   await supabase.from('service_orders').update({
     operational_cost_total: Math.round(opCost * 100) / 100,
-    card_fee_amount: cardFeeAmount,
-    grand_total: grandRounded,
   }).eq('id', soId);
+  await recalcTotals(soId);
 }
 
 export function useServiceOrderExpenses(serviceOrderId: string | undefined) {

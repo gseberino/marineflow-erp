@@ -445,64 +445,58 @@ export async function computeCardFeeAmount(
   return Math.round((base * feePct / (100 - feePct)) * 100) / 100;
 }
 
+export interface TotaisDaOS {
+  labor_cost_total: number;
+  parts_cost_total: number;
+  labor_hours_total: number;
+  operational_cost_total: number;
+  travel_billable: number;
+  subcontract_cost_total: number;
+  discount_amount: number;
+  tax_amount: number;
+  subtotal: number;
+  base: number;
+  card_fee_percent: number;
+  card_fee_amount: number;
+  grand_total: number;
+}
+
+/**
+ * D15 (17/09/2026) / MF-AUD-011: a fórmula do total mora no banco (calc_so_totals). Aqui só
+ * se pergunta ao banco quanto dá, aplica-se a cascata dos recebíveis (com o piso do já
+ * pago, que continua em TS onde está testada) e pede-se para o banco gravar.
+ *
+ * Antes esta função somava linhas, calculava taxa de cartão e total por conta própria —
+ * uma cópia da SQL que o agente usa, e a terceira vivia no hook de despesas. Três cópias
+ * é a classe de bug "a tela diz um total e o PDF diz outro".
+ */
+export async function calcularTotais(soId: string): Promise<TotaisDaOS | null> {
+  const { data, error } = await supabase.rpc('calc_so_totals', { so_id: soId });
+  if (error) throw error;
+  const linha = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+  if (!linha) return null;
+  const n = (k: string) => Number(linha[k] ?? 0);
+  return {
+    labor_cost_total: n('labor_cost_total'), parts_cost_total: n('parts_cost_total'),
+    labor_hours_total: n('labor_hours_total'), operational_cost_total: n('operational_cost_total'),
+    travel_billable: n('travel_billable'), subcontract_cost_total: n('subcontract_cost_total'),
+    discount_amount: n('discount_amount'), tax_amount: n('tax_amount'), subtotal: n('subtotal'),
+    base: n('base'), card_fee_percent: n('card_fee_percent'), card_fee_amount: n('card_fee_amount'),
+    grand_total: n('grand_total'),
+  };
+}
+
 export async function recalcTotals(soId: string) {
-  const { data: parts } = await supabase
-    .from('service_order_parts')
-    .select('line_total_sale')
-    .eq('service_order_id', soId);
-  const partsCost = (parts || []).reduce((s, p) => s + (p.line_total_sale || 0), 0);
+  const totais = await calcularTotais(soId);
+  if (!totais) return;
 
-  const { data: serviceLines } = await supabase
-    .from('service_order_services')
-    .select('line_total')
-    .eq('service_order_id', soId);
-  const laborCost = (serviceLines || []).reduce((s, l) => s + (l.line_total || 0), 0);
+  // Cascata para recebíveis ANTES de gravar o novo grand_total — se o total ficaria abaixo
+  // do que o cliente já pagou, updateReceivableFromSO lança GrandTotalBelowPaidError e nada
+  // é gravado (o mutation chamador reverte a alteração de linha que originou esta chamada).
+  await updateReceivableFromSO(soId, totais.grand_total);
 
-  const { data: te } = await supabase
-    .from('time_entries')
-    .select('duration_minutes, billable')
-    .eq('service_order_id', soId);
-  const { data: so } = await supabase
-    .from('service_orders')
-    .select('travel_cost_total, is_travel_billable, subcontract_cost_total, discount_amount, tax_amount, operational_cost_total, card_fee_passthrough_enabled, card_installments')
-    .eq('id', soId)
-    .single();
-
-  const billableMinutes = (te || [])
-    .filter((e) => e.billable)
-    .reduce((s, e) => s + (e.duration_minutes || 0), 0);
-  const laborHours = Math.round((billableMinutes / 60) * 100) / 100;
-
-  // Onda 1D: deslocamento só entra no total do cliente se marcado como faturável.
-  const travelCost = so?.is_travel_billable !== false ? (so?.travel_cost_total || 0) : 0;
-
-  const base =
-    laborCost +
-    partsCost +
-    travelCost +
-    (so?.operational_cost_total || 0) +
-    (so?.subcontract_cost_total || 0) -
-    (so?.discount_amount || 0) +
-    (so?.tax_amount || 0);
-
-  // Onda 1C: repasse da taxa de cartão ao cliente, aplicado por cima do valor já ajustado.
-  const cardFeeAmount = await computeCardFeeAmount(base, so?.card_fee_passthrough_enabled, so?.card_installments);
-  const grand = base + cardFeeAmount;
-  const grandRounded = Math.round(grand * 100) / 100;
-
-  // Cascata para recebíveis ANTES de gravar o novo grand_total — se o total
-  // ficaria abaixo do que o cliente já pagou, updateReceivableFromSO lança
-  // GrandTotalBelowPaidError e nada é gravado aqui (o mutation chamador é
-  // responsável por reverter a alteração de linha que originou esta chamada).
-  await updateReceivableFromSO(soId, grandRounded);
-
-  await supabase.from('service_orders').update({
-    parts_cost_total: partsCost,
-    labor_hours_total: laborHours,
-    labor_cost_total: Math.round(laborCost * 100) / 100,
-    card_fee_amount: cardFeeAmount,
-    grand_total: grandRounded,
-  }).eq('id', soId);
+  const { error } = await supabase.rpc('recalc_so_totals', { so_id: soId });
+  if (error) throw error;
 }
 
 export function useAddServiceOrderPart() {

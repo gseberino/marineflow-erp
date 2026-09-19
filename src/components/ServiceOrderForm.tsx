@@ -799,8 +799,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       marina_id: uuidOrNull(form.marina_id),
       payment_conditions: form.payment_conditions || null,
       payment_condition_preset_id: uuidOrNull(form.payment_condition_preset_id),
-      grand_total: Math.round(grandTotal * 100) / 100,
-      card_fee_amount: passthroughCardFeeAmount,
+      // D15: grand_total e card_fee_amount NÃO vão no payload — o banco calcula
+      // (calc_so_totals) e useUpdateServiceOrder chama recalcTotals depois de gravar.
       discount_services_pct: discountServicesPct,
       discount_parts_pct: discountPartsPct,
       financial_notes: form.financial_notes || null,
@@ -828,10 +828,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         marina_id: uuidOrNull(form.marina_id),
         payment_conditions: form.payment_conditions || null,
         payment_condition_preset_id: uuidOrNull(form.payment_condition_preset_id),
-        // Always persist the computed grand_total so the PDF and receivables
-        // always reflect the current discount/tax/travel/card fee values.
-        grand_total: Math.round(grandTotal * 100) / 100,
-        card_fee_amount: passthroughCardFeeAmount,
+        // D15: grand_total e card_fee_amount NÃO vão no payload — o banco calcula
+        // (calc_so_totals); na criação, recalcTotals roda depois das linhas entrarem.
         discount_services_pct: discountServicesPct,
         discount_parts_pct: discountPartsPct,
         financial_notes: form.financial_notes || null,
@@ -899,6 +897,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             console.error('Failed to persist draft service', err);
           }
         }
+        // D15: o total nasce no banco — com as linhas já gravadas, uma passada fecha a conta.
+        await recalcTotals(result.id).catch((e) => console.warn('[ServiceOrderForm] recalc após criar falhou', e));
         toast.success('Ordem de serviço criada com sucesso');
         navigate(`/service-orders/${result.id}`);
       } else {
