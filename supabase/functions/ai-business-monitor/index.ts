@@ -96,6 +96,23 @@ Deno.serve(async (req) => {
       console.warn("[ai-business-monitor] checagem de certificado falhou (ignorada)");
     }
 
+    // (3b) Consentimento Open Finance vencendo (Pluggy: ~12 meses). Quando vence, o extrato
+    // simplesmente para de chegar, sem erro — e o financeiro fica cego sem saber (Open Finance D2).
+    try {
+      const { data: conexoes } = await admin
+        .from("bank_connections").select("id, consent_expires_at")
+        .not("consent_expires_at", "is", null);
+      for (const c of (conexoes ?? []) as { id: string; consent_expires_at: string }[]) {
+        const dias = Math.floor((new Date(c.consent_expires_at).getTime() - now.getTime()) / 864e5);
+        if (dias <= 30 && await claim(`consent_expiry:${c.id}:${todayISO}`, { dias })) {
+          const quando = dias < 0 ? "VENCEU" : `vence em ${dias} dia(s)`;
+          alerts.push(`🏦 Consentimento do extrato bancário ${quando} (${String(c.consent_expires_at).slice(0, 10)}). Renove a conexão no Pluggy antes que o extrato pare de chegar.`);
+        }
+      }
+    } catch (_e) {
+      console.warn("[ai-business-monitor] checagem de consentimento bancário falhou (ignorada)");
+    }
+
     // (4) Cota Contora do mês (plano Gratuito = 500 eventos/mês). Alerta em 80%.
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     const { count: fiscalEvents } = await admin

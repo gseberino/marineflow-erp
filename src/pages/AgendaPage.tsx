@@ -232,6 +232,15 @@ export default function AgendaPage() {
     downloadCSV(csv, `tarefas-${view}-${toLocalDateInput(new Date())}.csv`);
   };
 
+  // Export .ics da visão atual — abre no Google Agenda / Apple Calendário / Outlook.
+  // Só entram as tarefas com data (compromisso com hora, ou prazo como dia inteiro).
+  const handleExportIcs = async () => {
+    const rows = view === 'done' ? applyTaskFilters(doneTasks || []) : applyTaskFilters(liveTasks || []);
+    const { gerarIcs } = await import('@/lib/ics');
+    const { downloadText } = await import('@/lib/download');
+    downloadText(gerarIcs(rows as any), `agenda-${view}-${toLocalDateInput(new Date())}.ics`, 'text/calendar;charset=utf-8');
+  };
+
   // Atalhos do PWA e Share Target: consome os parâmetros e limpa a URL,
   // para um F5 não repetir a ação (ex.: reabrir o gravador).
   useEffect(() => {
@@ -337,6 +346,9 @@ export default function AgendaPage() {
           <InstallAgendaButton />
           <Button size="sm" variant="outline" onClick={handleExportCsv} title="Exportar CSV da visão atual">
             <Download className="h-4 w-4" />
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleExportIcs} title="Exportar para o calendário (.ics)">
+            <Download className="h-4 w-4 mr-1" />.ics
           </Button>
           <Button size="sm" variant="outline" onClick={() => setFocusOpen(true)}
             disabled={focusQueue.length === 0} title="Uma tarefa por vez, em sequência">
