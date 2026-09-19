@@ -650,3 +650,59 @@ export const QUOTE_STATUS_LABELS: Record<QuoteRequestStatus, string> = {
   closed: 'Fechada',
   cancelled: 'Cancelada',
 };
+
+// ─── Frete e desconto por fornecedor (persistidos) ────────────────────────────────────
+// Antes viviam só na memória da página de comparação: fechou a aba, perdeu. O comparador
+// (src/lib/quote-comparison.ts) já calcula "pacote = itens − desconto + frete".
+
+export interface QuoteSupplierTerms {
+  quote_request_id: string;
+  supplier_id: string;
+  freight: number;
+  discount: number;
+  notes: string | null;
+}
+
+export function useQuoteSupplierTerms(quoteRequestId: string | undefined) {
+  return useQuery({
+    queryKey: ['quote-request-terms', quoteRequestId],
+    enabled: !!quoteRequestId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('quote_request_supplier_terms')
+        .select('quote_request_id, supplier_id, freight, discount, notes')
+        .eq('quote_request_id', quoteRequestId!);
+      if (error) throw error;
+      return (data ?? []).map((t) => ({
+        ...t,
+        freight: Number(t.freight) || 0,
+        discount: Number(t.discount) || 0,
+      })) as QuoteSupplierTerms[];
+    },
+    staleTime: 15_000,
+  });
+}
+
+export function useSaveQuoteSupplierTerms() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (t: { quoteRequestId: string; supplierId: string; freight: number; discount: number }) => {
+      const { data: auth } = await supabase.auth.getUser();
+      const { error } = await supabase
+        .from('quote_request_supplier_terms')
+        .upsert({
+          quote_request_id: t.quoteRequestId,
+          supplier_id: t.supplierId,
+          freight: Math.max(0, Number(t.freight) || 0),
+          discount: Math.max(0, Number(t.discount) || 0),
+          updated_by: auth?.user?.id ?? null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'quote_request_id,supplier_id' });
+      if (error) throw error;
+    },
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['quote-request-terms', v.quoteRequestId] });
+    },
+    onError: (e: Error) => toast.error('Não gravei frete/desconto: ' + e.message),
+  });
+}

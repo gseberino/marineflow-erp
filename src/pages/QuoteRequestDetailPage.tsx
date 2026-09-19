@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle, ArrowLeft, Award, Check, CircleDollarSign, Clock, Handshake,
@@ -20,6 +20,7 @@ import {
   useApplyQuotePrice, useCloseQuoteRequest, useCreatePOsFromQuote, useQuoteRequest,
   useRecordQuoteResponse, useReopenQuoteRequest, useSendQuoteRequest,
   useQuoteRequestSends, QUOTE_STATUS_LABELS,
+  useQuoteSupplierTerms, useSaveQuoteSupplierTerms,
   type BasketChoice,
 } from '@/hooks/use-quote-requests';
 import { QuoteProgressStrip, type QuoteStep } from '@/components/purchasing/QuoteProgressStrip';
@@ -64,8 +65,33 @@ export default function QuoteRequestDetailPage() {
 
   /** item → fornecedor escolhido */
   const [chosen, setChosen] = useState<Record<string, string | undefined>>({});
-  /** custos de pacote informados na negociação (não persistidos — ver nota abaixo) */
+  /**
+   * Frete e desconto por fornecedor. Vivem no banco (quote_request_supplier_terms) desde
+   * 19/09/2026; antes eram só memória da página e sumiam ao fechar a aba. A tela carrega
+   * uma vez, edita local e grava ao sair do campo.
+   */
+  const { data: termos } = useQuoteSupplierTerms(id);
+  const saveTerms = useSaveQuoteSupplierTerms();
   const [freight, setFreight] = useState<Record<string, number>>({});
+  const [discount, setDiscount] = useState<Record<string, number>>({});
+  // Semeia pelo CONTEÚDO, não pela referência: um hook que devolve array novo a cada
+  // render (mock de teste, ou react-query sem structural sharing) entraria em laço.
+  const termosChave = JSON.stringify(termos ?? null);
+  useEffect(() => {
+    const lista = JSON.parse(termosChave) as typeof termos;
+    if (!lista) return;
+    setFreight(Object.fromEntries(lista.map(t => [t.supplier_id, t.freight])));
+    setDiscount(Object.fromEntries(lista.map(t => [t.supplier_id, t.discount])));
+  }, [termosChave]);
+  const gravarTermos = (supplierId: string) => {
+    if (!id) return;
+    const f = freight[supplierId] ?? 0;
+    const d = discount[supplierId] ?? 0;
+    const atual = termos?.find(t => t.supplier_id === supplierId);
+    if (atual && atual.freight === f && atual.discount === d) return;
+    if (!atual && f === 0 && d === 0) return;
+    saveTerms.mutate({ quoteRequestId: id, supplierId, freight: f, discount: d });
+  };
   const [confirmDirect, setConfirmDirect] = useState(false);
   const [salePriceItem, setSalePriceItem] = useState<{ itemId: string; serviceId: string; price: number; description: string } | null>(null);
 
@@ -94,9 +120,10 @@ export default function QuoteRequestDetailPage() {
         id: sid,
         name: supplierById.get(sid)?.name ?? 'Fornecedor',
         freight: freight[sid] ?? 0,
+        discount: discount[sid] ?? 0,
       })),
     );
-  }, [quote, supplierById, freight]);
+  }, [quote, supplierById, freight, discount]);
 
   const basket = useMemo(
     () => (comparison ? computeBasketTotal(comparison, chosen) : null),
@@ -430,6 +457,24 @@ export default function QuoteRequestDetailPage() {
                     onChange={e =>
                       setFreight(prev => ({ ...prev, [pkg.supplierId]: parseFloat(e.target.value) || 0 }))
                     }
+                    onBlur={() => gravarTermos(pkg.supplierId)}
+                    placeholder="0,00"
+                    className="h-7 w-24 text-right text-xs"
+                  />
+                  <label className="ml-2 text-xs text-muted-foreground" htmlFor={`discount-${pkg.supplierId}`}>
+                    Desconto
+                  </label>
+                  <Input
+                    id={`discount-${pkg.supplierId}`}
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="any"
+                    value={discount[pkg.supplierId] ?? ''}
+                    onChange={e =>
+                      setDiscount(prev => ({ ...prev, [pkg.supplierId]: parseFloat(e.target.value) || 0 }))
+                    }
+                    onBlur={() => gravarTermos(pkg.supplierId)}
                     placeholder="0,00"
                     className="h-7 w-24 text-right text-xs"
                   />

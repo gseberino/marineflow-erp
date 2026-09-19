@@ -62,6 +62,9 @@ vi.mock('@/hooks/use-quote-requests', () => ({
   // Sem envio registrado: é o estado das cotações reais em produção, e o que
   // faz a faixa de etapas mostrar "ainda não foi enviada".
   useQuoteRequestSends: () => ({ data: [] }),
+  // Frete/desconto por fornecedor gravados (19/09/2026): a tela lê e grava ao sair do campo.
+  useQuoteSupplierTerms: () => ({ data: [] }),
+  useSaveQuoteSupplierTerms: mut,
   QUOTE_STATUS_LABELS: { open: 'Aberta', closed: 'Fechada', cancelled: 'Cancelada' },
 }));
 

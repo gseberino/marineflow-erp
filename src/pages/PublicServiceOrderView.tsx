@@ -5,7 +5,7 @@ import { createShareClient } from '@/integrations/supabase/share-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, Ship, User, MapPin, FileText, Wrench, Package, Download, CheckCircle2, AlertTriangle, PenLine, Image as ImageIcon, CreditCard, ExternalLink } from 'lucide-react';
+import { Loader2, Ship, User, MapPin, FileText, Wrench, Package, Download, CheckCircle2, AlertTriangle, PenLine, CreditCard, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -574,26 +574,9 @@ export default function PublicServiceOrderView() {
           </Card>
         )}
 
-        {/* Photos Gallery */}
-        {order.photos && order.photos.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <ImageIcon className="h-5 w-5" />
-                Acompanhamento da Obra (Fotos)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {order.photos.map((url: string, i: number) => (
-                  <div key={i} className="aspect-square rounded-xl overflow-hidden border">
-                    <img src={url} alt={`Acompanhamento ${i+1}`} className="w-full h-full object-cover hover:scale-105 transition-transform" />
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {/* A galeria de fotos lia service_orders.photos, coluna que nada escreve (as fotos
+            reais vivem em service_order_photos, sem leitura anônima). Nunca aparecia; saiu
+            em 19/09/2026 junto com o pedido de apagar a coluna (fila do dono). */}
 
         {/* Totals */}
         <Card>

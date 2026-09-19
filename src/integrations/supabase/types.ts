@@ -6508,6 +6508,54 @@ export type Database = {
           },
         ]
       }
+      quote_request_supplier_terms: {
+        Row: {
+          created_at: string
+          discount: number
+          freight: number
+          notes: string | null
+          quote_request_id: string
+          supplier_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          discount?: number
+          freight?: number
+          notes?: string | null
+          quote_request_id: string
+          supplier_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          discount?: number
+          freight?: number
+          notes?: string | null
+          quote_request_id?: string
+          supplier_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_request_supplier_terms_quote_request_id_fkey"
+            columns: ["quote_request_id"]
+            isOneToOne: false
+            referencedRelation: "quote_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_request_supplier_terms_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quote_request_sends: {
         Row: {
           channel: string
