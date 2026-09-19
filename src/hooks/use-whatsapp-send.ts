@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { chaveDeEnvioDoPainel } from '@/lib/hash-curto';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
@@ -95,6 +96,12 @@ export function useWhatsAppSend() {
       invokeBody.document_caption = payload.caption || payload.message;
     }
 
+    // Idempotência: clique duplo ou repetição automática após resposta perdida não
+    // mandam a mesma mensagem duas vezes (janela de 10 min; reenviar depois continua livre).
+    invokeBody.dedupe_key = chaveDeEnvioDoPainel(
+      phoneClean,
+      [invokeBody.kind, invokeBody.message, invokeBody.link_url, invokeBody.document_filename, invokeBody.document_caption].join('|'),
+    );
     const { data, error } = await supabase.functions.invoke('whatsapp-send', { body: invokeBody });
     if (error) throw error;
     if ((data as any)?.error) throw new Error((data as any).error);

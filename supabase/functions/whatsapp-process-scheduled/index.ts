@@ -4,6 +4,7 @@
 // se for recorrente.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
+import { chaveDeEnvio, diaLocal } from "../_shared/whatsapp/idempotencia.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -101,6 +102,9 @@ Deno.serve(async (req) => {
           phone: job.phone,
           message: job.message,
           context: job.context || (job.target_kind === 'service_order' ? 'service_order' : 'billing'),
+          // Um envio por agendamento por dia: se a atualização de status falhar depois do
+          // envio, a próxima rodada (5 min) não manda a mesma mensagem de novo.
+          dedupe_key: chaveDeEnvio("agendada", job.id, diaLocal()),
         };
         if (job.service_order_id) payload.service_order_id = job.service_order_id;
         if (job.receivable_id) payload.receivable_id = job.receivable_id;

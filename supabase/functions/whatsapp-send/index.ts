@@ -8,6 +8,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { z } from "https://esm.sh/zod@3.23.8";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { normalizePhoneNumber } from "../_shared/whatsapp/normalize.ts";
+import { concluirEnvio, liberarEnvio, reservarEnvio } from "../_shared/whatsapp/idempotencia.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -33,6 +34,9 @@ const BodySchema = z.object({
   service_order_id: z.string().uuid().optional(),
   receivable_id: z.string().uuid().optional(),
   context: z.string().max(64).optional(),
+  // Idempotência: quem chama manda uma chave estável para "esta mensagem, para este
+  // destinatário, nesta ocasião". Chave já usada = já enviada = responde sem reenviar.
+  dedupe_key: z.string().min(4).max(200).optional(),
 });
 
 function jr(body: unknown, status = 200) {
@@ -93,6 +97,17 @@ Deno.serve(async (req) => {
       return jr({ error: "Telefone inválido (precisa incluir DDI+DDD)" }, 400);
     }
 
+    // Reserva a chave ANTES de chamar o provedor. Repetida: já foi; não envia de novo.
+    // Banco indisponível para a reserva: segue e envia (duplicado raro < cobrança que não sai).
+    const chave = body.dedupe_key || null;
+    if (chave) {
+      const reserva = await reservarEnvio(supabaseAdmin, chave, { phone: phoneClean, contexto: body.context });
+      if (reserva === "repetida") {
+        console.info(`[whatsapp-send] chave repetida, não reenviado: ${chave}`);
+        return jr({ success: true, deduplicated: true, kind: body.kind, messageId: null });
+      }
+    }
+
     const provider = createWhatsAppProvider();
 
     let sendResult;
@@ -128,6 +143,10 @@ Deno.serve(async (req) => {
     }
 
     const success = sendResult.ok;
+    if (chave) {
+      if (success) await concluirEnvio(supabaseAdmin, chave, sendResult.providerMessageId || null);
+      else await liberarEnvio(supabaseAdmin, chave);
+    }
 
     // Audit log — structure preserved from original; provider field updated.
     const auditTable = body.receivable_id ? "receivables" : "service_orders";

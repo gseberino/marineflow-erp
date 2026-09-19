@@ -7,6 +7,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { normalizePhoneNumber } from "../_shared/whatsapp/normalize.ts";
+import { chaveDeEnvio, liberarEnvio, reservarEnvio } from "../_shared/whatsapp/idempotencia.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -110,6 +111,14 @@ Deno.serve(async (req) => {
         console.log(`[receivable-reminders] TEST MODE: enviando para ${testNumber} (original: ${originalPhone})`);
       }
 
+      // Envio direto ao provedor (não passa pela fila): reserva a chave aqui. Se a gravação
+      // de reminder_sent_at falhar depois do envio, a rodada seguinte não cobra de novo.
+      const chave = chaveDeEnvio("lembrete-recebivel", rec.id, targetISO);
+      if ((await reservarEnvio(admin, chave, { phone: phoneClean, contexto: "receivable_reminder" })) === "repetida") {
+        console.info(`[receivable-reminders] ${rec.id}: lembrete de ${targetISO} já enviado, pulando.`);
+        skipped++;
+        continue;
+      }
       try {
         await provider.sendText(phoneClean, message);
         await admin
@@ -118,6 +127,7 @@ Deno.serve(async (req) => {
           .eq("id", rec.id);
         sent++;
       } catch (sendErr: any) {
+        await liberarEnvio(admin, chave);
         errors++;
         console.error(`[receivable-reminders] erro no envio ${rec.id}:`, sendErr?.message || sendErr);
       }

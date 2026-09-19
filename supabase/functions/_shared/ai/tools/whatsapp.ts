@@ -1,4 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { chaveDeEnvio, diaLocal, hashCurto } from "../../whatsapp/idempotencia.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { registrarEnvio } from "../comms/send-log.ts";
 
@@ -20,7 +21,7 @@ function prettyPreview(body?: string | null): string | null {
  * wa_test_mode/wa_test_number do app_settings. Lê env em tempo de chamada
  * (não no import do módulo) para não quebrar testes que nunca chamam isto.
  */
-export async function sendWhatsapp(phone: string, message: string, jwt: string) {
+export async function sendWhatsapp(phone: string, message: string, jwt: string, dedupeKey?: string) {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   // No canal WhatsApp não há JWT de usuário (o toolCtx traz jwt=""), então usamos a
   // service-role key: o whatsapp-send tem um bypass explícito (isServiceRoleCall) para
@@ -37,10 +38,14 @@ export async function sendWhatsapp(phone: string, message: string, jwt: string) 
       "Content-Type": "application/json",
       Authorization: `Bearer ${authToken}`,
     },
-    body: JSON.stringify({ phone, message, kind: "text" }),
+    body: JSON.stringify({ phone, message, kind: "text", ...(dedupeKey ? { dedupe_key: dedupeKey } : {}) }),
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) return { error: (data as any).error || `HTTP ${r.status}` };
+  if ((data as any).deduplicated) {
+    // A edge reconheceu a chave: esta mesma mensagem já saiu hoje para este número.
+    return { ok: true, messageId: null, deduplicated: true, aviso: "Esta mesma mensagem já tinha sido enviada hoje para este número; não reenviei." };
+  }
   return { ok: true, messageId: (data as any).messageId };
 }
 
@@ -71,7 +76,10 @@ export const whatsappTools: ToolDef[] = [
         phone = c?.whatsapp || c?.phone;
       }
       if (!phone) return { error: "Telefone não fornecido nem encontrado para o cliente." };
-      return await sendWhatsapp(phone, args.message, jwt);
+      // Idempotência: mesmo texto, mesmo número, mesmo dia = um envio (protege contra o
+      // laço do agente repetir a tool após um timeout).
+      const chave = chaveDeEnvio("agente-msg", String(phone).replace(/\D/g, ""), diaLocal(), hashCurto(String(args.message)));
+      return await sendWhatsapp(phone, args.message, jwt, chave);
     },
   },
   {
@@ -162,8 +170,8 @@ export const whatsappTools: ToolDef[] = [
           continue;
         }
         g.avisos.forEach((a) => avisos.add(a));
-        const r = await sendWhatsapp(sup.phone, msg, jwt);
-        resultados.push({ fornecedor: nomeForn, status: r.ok ? "enviado" : `falhou: ${r.error}` });
+        const r = await sendWhatsapp(sup.phone, msg, jwt, chaveDeEnvio("cotacao", codigo || hashCurto(itemLines), sid, diaLocal()));
+        resultados.push({ fornecedor: nomeForn, status: r.ok ? (r.deduplicated ? "já enviado hoje" : "enviado") : `falhou: ${r.error}` });
         await registrarEnvio(admin, { tipo: "cotacao", audiencia: "fornecedor", entityKind: "supplier", entityId: sid, phone: sup.phone, preview: msg, status: r.ok ? "sent" : "failed" });
       }
       const enviados = resultados.filter((r) => r.status === "enviado").length;
@@ -217,8 +225,8 @@ export const whatsappTools: ToolDef[] = [
         await registrarEnvio(admin, { tipo: "cobranca", audiencia: "cliente", entityKind: "client", entityId: col.client_id, phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });
         return { error: g.motivo };
       }
-      const r = await sendWhatsapp(phone, msg, jwt);
-      if (r.ok) {
+      const r = await sendWhatsapp(phone, msg, jwt, chaveDeEnvio("cobranca", col.id, diaLocal()));
+      if (r.ok && !r.deduplicated) {
         await admin.from("collections").update({ last_auto_sent_at: new Date().toISOString() }).eq("id", col.id);
       }
       await registrarEnvio(admin, { tipo: "cobranca", audiencia: "cliente", entityKind: "client", entityId: col.client_id, phone, preview: msg, status: r.ok ? "sent" : "failed" });
@@ -263,7 +271,7 @@ export const whatsappTools: ToolDef[] = [
         await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });
         return { error: g.motivo };
       }
-      const r = await sendWhatsapp(phone, msg, jwt);
+      const r = await sendWhatsapp(phone, msg, jwt, chaveDeEnvio("os-link", so.id, String(phone).replace(/\D/g, ""), diaLocal()));
       await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: msg, status: r.ok ? "sent" : "failed" });
       return { ...r, ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}) };
     },
