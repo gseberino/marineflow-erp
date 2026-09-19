@@ -37,9 +37,13 @@ Deno.serve(async (req) => {
     const { data: cn } = await admin.from("app_settings").select("value").eq("key", "company_name").maybeSingle();
     const companyName = (cn?.value as string) || "MarineFlow";
 
+    // Alerta de NEGÓCIO (orçamento parado, recebível vencido, cota da IA) é para quem decide:
+    // admin e financeiro. Em 19/09/2026 dois técnicos recém-cadastrados no canal receberam
+    // "orçamento parado há 7 dias" à meia-noite — o filtro por cargo não existia.
     const { data: recipients } = await admin
       .from("app_users").select("phone_normalized")
-      .eq("ai_whatsapp_enabled", true).eq("active", true).not("phone_normalized", "is", null);
+      .eq("ai_whatsapp_enabled", true).eq("active", true).not("phone_normalized", "is", null)
+      .in("role", ["admin", "financial"]);
     if (!recipients || recipients.length === 0) return jr({ ok: true, sent: 0, reason: "no_recipients" });
 
     const now = new Date();

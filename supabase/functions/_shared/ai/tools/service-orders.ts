@@ -535,6 +535,32 @@ export const serviceOrderTools: ToolDef[] = [
         .eq("id", args.id)
         .maybeSingle();
 
+      // D11 (dono, 17/09/2026): concluir exige levantamento respondido nos serviços marcados
+      // "exige levantamento" — a mesma trava do botão da tela, para o agente não passar por
+      // fora dela.
+      if (args.status === "completed") {
+        const { data: linhas } = await sb
+          .from("service_order_services")
+          .select("service_id, name_snapshot, services!inner(requires_survey)")
+          .eq("service_order_id", args.id);
+        const exigem = ((linhas ?? []) as any[]).filter((l) => l.services?.requires_survey);
+        if (exigem.length > 0) {
+          const { data: fechados } = await sb
+            .from("service_surveys")
+            .select("service_id")
+            .eq("service_order_id", args.id)
+            .eq("status", "closed");
+          const ok = new Set(((fechados ?? []) as any[]).map((s) => String(s.service_id)));
+          const pendentes = exigem.filter((l) => !ok.has(String(l.service_id))).map((l) => l.name_snapshot);
+          if (pendentes.length > 0) {
+            return {
+              error: `Não dá para concluir: falta responder o levantamento de ${pendentes.join(", ")} (marcados como "exige levantamento"). Use start_service_survey / record_survey_answer / close_service_survey primeiro.`,
+              levantamentos_pendentes: pendentes,
+            };
+          }
+        }
+      }
+
       const updatePayload: Record<string, any> = { status: args.status };
       if (args.cancellation_reason) updatePayload.cancellation_reason = args.cancellation_reason;
 

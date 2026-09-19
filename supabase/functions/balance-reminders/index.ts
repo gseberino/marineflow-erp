@@ -57,13 +57,14 @@ Deno.serve(async (req) => {
     const isoMinusDays = (n: number) => new Date(now.getTime() - n * 86400000).toISOString().slice(0, 10);
     const dry = new URL(req.url).searchParams.get("dry") === "1";
 
-    // Destinatários internos (mesmo critério do resumo matinal).
+    // Destinatários internos (mesmo critério do resumo matinal): admin e financeiro.
     const { data: recipients } = await admin
       .from("app_users")
       .select("id, phone_normalized")
       .eq("ai_whatsapp_enabled", true)
       .eq("active", true)
-      .not("phone_normalized", "is", null);
+      .not("phone_normalized", "is", null)
+      .in("role", ["admin", "financial"]);
     const users = recipients || [];
 
     // ── (A) WhatsApp de marco ──────────────────────────────────────────────

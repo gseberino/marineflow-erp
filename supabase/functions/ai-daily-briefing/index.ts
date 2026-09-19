@@ -65,13 +65,16 @@ Deno.serve(async (req) => {
     // app_settings.digest_show_low_stock = 'true' — sem precisar de deploy.
     const showLowStock = cfg["digest_show_low_stock"] === "true";
 
-    // Destinatários: quem usa a IA (canal habilitado) e está ativo, com número.
+    // Destinatários: quem DECIDE (admin/financeiro), com canal habilitado, ativo e com número.
+    // O resumo traz caixa, propostas, fila de aprovações e clientes — técnico não recebe
+    // (19/09/2026: filtro por cargo adicionado depois de dois técnicos entrarem no canal).
     const { data: recipients } = await admin
       .from("app_users")
       .select("id, full_name, phone_normalized")
       .eq("ai_whatsapp_enabled", true)
       .eq("active", true)
-      .not("phone_normalized", "is", null);
+      .not("phone_normalized", "is", null)
+      .in("role", ["admin", "financial"]);
 
     if (!recipients || recipients.length === 0) return jr({ ok: true, sent: 0, reason: "no_recipients" });
 

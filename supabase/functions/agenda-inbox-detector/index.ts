@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
 
     // Destinatário da caixa de entrada: piloto = o dono (admin ativo com canal IA)
     const { data: owner } = await db.from("app_users")
-      .select("id").eq("active", true).eq("ai_whatsapp_enabled", true)
+      .select("id").eq("active", true).eq("ai_whatsapp_enabled", true).eq("role", "admin")
       .order("created_at", { ascending: true }).limit(1).maybeSingle();
     const targetUserId = (owner as any)?.id ?? null;
 

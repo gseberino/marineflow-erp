@@ -52,6 +52,7 @@ import { useUpdateServiceOrderService } from '@/hooks/use-service-order-services
 import { useUpdateServiceOrderPart } from '@/hooks/use-service-order-parts';
 // NOVO-020b: o técnico lê da view sem valores; o que ele não leu não pode voltar no Salvar.
 import { payloadParaCargo } from '@/lib/service-orders-source';
+import { levantamentosPendentesParaConcluir } from '@/lib/levantamento-gate';
 import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { usePDFData } from '@/hooks/use-pdf';
@@ -1086,6 +1087,19 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const handleStatusChange = async (newStatus: string) => {
     if (!orderId) return;
     try {
+      // D11 (decisão do dono, 17/09/2026): concluir exige levantamento RESPONDIDO nos
+      // serviços marcados "exige levantamento". Só nesses — os outros fecham como sempre.
+      if (newStatus === 'completed') {
+        const pendentes = await levantamentosPendentesParaConcluir(orderId);
+        if (pendentes.length > 0) {
+          toast.error(
+            `Para concluir, responda o levantamento de: ${pendentes.join(', ')}. ` +
+            'Esses serviços estão marcados como "exige levantamento".',
+            { duration: 10000 },
+          );
+          return;
+        }
+      }
       await updateStatus.mutateAsync({ id: orderId, status: newStatus });
       toast.success(`Status alterado para ${(t.status as Record<string, string>)[newStatus]}`);
 
