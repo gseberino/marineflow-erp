@@ -185,6 +185,8 @@ const App = () => (
                         <Route path="/v2/dashboard" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><DashboardV2 /></ProtectedRoute>} />
                         <Route path="/v2/receivables" element={<ProtectedRoute roles={['admin','financial']}><ReceivablesV2 /></ProtectedRoute>} />
                         <Route path="/v2/financial" element={<ProtectedRoute roles={['admin','financial']}><FinancialV2 /></ProtectedRoute>} />
+                        {/* D6/F4: cada item do menu financeiro e uma rota de verdade (/v2/financial/extrato, ...); ?tab= antigo redireciona dentro da tela. */}
+                        <Route path="/v2/financial/:secao" element={<ProtectedRoute roles={['admin','financial']}><FinancialV2 /></ProtectedRoute>} />
                         <Route path="/v2/collections" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><CollectionsV2 /></ProtectedRoute>} />
                         <Route path="/v2/commissions" element={<ProtectedRoute roles={['admin','financial']}><CommissionsV2 /></ProtectedRoute>} />
                         {/* Dado sensível (CPF, conta, Pix): mesma restrição do financeiro. */}

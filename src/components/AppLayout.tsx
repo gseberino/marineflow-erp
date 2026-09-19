@@ -235,16 +235,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
         // "Extrato", igual à aba. Renomear a aba e esquecer o menu deixou os dois nomes
         // convivendo para o MESMO destino — que é a confusão que a reorganização veio
         // desfazer, agora causada por mim.
-        { label: 'Extrato', icon: Sparkles, path: '/v2/financial?tab=inbox', roles: ['admin', 'financial'] },
-        { label: 'Conciliação', icon: ArrowLeftRight, path: '/v2/financial?tab=reconciliation', roles: ['admin', 'financial'] },
+        { label: 'Extrato', icon: Sparkles, path: '/v2/financial/inbox', roles: ['admin', 'financial'] },
+        { label: 'Conciliação', icon: ArrowLeftRight, path: '/v2/financial/reconciliation', roles: ['admin', 'financial'] },
         // Tela inteira, não aba: tem filtros, régua de cobrança e recibo próprios.
         { label: 'Contas a Receber', icon: TrendingUp, path: '/v2/receivables', roles: ['admin', 'financial'] },
-        { label: 'Contas a Pagar', icon: TrendingDown, path: '/v2/financial?tab=payables', roles: ['admin', 'financial'] },
+        { label: 'Contas a Pagar', icon: TrendingDown, path: '/v2/financial/payables', roles: ['admin', 'financial'] },
         // Ficaram de fora na primeira reestruturação por serem "configuração revisitada
         // raramente". Mas raramente não é nunca — e sem entrada no menu o usuário não
         // achava as regras que ele mesmo precisa ensinar, nem a tela de conectar banco.
-        { label: 'Regras da IA', icon: Wand2, path: '/v2/financial?tab=rules', roles: ['admin', 'financial'] },
-        { label: 'Contas Bancárias', icon: Landmark, path: '/v2/financial?tab=banks', roles: ['admin', 'financial'] },
+        { label: 'Regras da IA', icon: Wand2, path: '/v2/financial/rules', roles: ['admin', 'financial'] },
+        { label: 'Contas Bancárias', icon: Landmark, path: '/v2/financial/banks', roles: ['admin', 'financial'] },
         { label: 'Comissões', icon: Users, path: '/v2/commissions', roles: ['admin', 'financial'] },
         // Sócios, diaristas, prestadores e comissionados — com CPF, Pix e conta.
         { label: 'Favorecidos', icon: Wallet, path: '/v2/payees', roles: ['admin', 'financial'] },
@@ -281,20 +281,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/';
 
-    // Vários itens do Financeiro moram na MESMA rota e se distinguem pela aba
-    // (/v2/financial?tab=inbox). Comparar só o pathname acenderia todos de uma vez, e o
-    // menu deixaria de dizer onde a pessoa está — que é a única coisa que ele faz aqui.
-    const [rota, query] = path.split('?');
-    const abaDoItem = query ? new URLSearchParams(query).get('tab') : null;
-    const abaAtual = new URLSearchParams(location.search).get('tab');
+    // D6/F4 (19/09/2026): os itens do Financeiro viraram rotas de verdade (/v2/financial/inbox),
+    // então o menu compara só o pathname. Um item por caminho; nada de ?tab= aqui.
+    const rota = path;
+    if (location.pathname === rota) return true;
 
-    if (location.pathname === rota) {
-      // Sem aba na URL, o item sem aba é quem representa a página (a "Visão Geral").
-      return abaDoItem ? abaDoItem === abaAtual : !abaAtual;
-    }
-
-    // Item mais específico ganha, para /v2/clients não acender junto de /v2/clients/:id.
-    const allPaths = groups.flatMap(g => g.items.map(i => i.path.split('?')[0]));
+    // Item mais específico ganha, para /v2/clients não acender junto de /v2/clients/:id
+    // (e /v2/financial não acender junto de /v2/financial/inbox).
+    const allPaths = groups.flatMap(g => g.items.map(i => i.path));
     const matchingPaths = allPaths.filter(p => location.pathname.startsWith(p) && (location.pathname.length === p.length || location.pathname.charAt(p.length) === '/'));
     const longestMatch = matchingPaths.reduce((a, b) => a.length > b.length ? a : b, '');
 
@@ -365,7 +359,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     // que faz a pessoa entrar. Recolhido, vira um ponto (não cabe número).
     const pendentes = item.path === '/v2/agenda'
       ? sugestoesPendentes
-      : item.path === '/v2/financial?tab=inbox' ? propostasPendentes : 0;
+      : item.path === '/v2/financial/inbox' ? propostasPendentes : 0;
     const ativo = isActive(item.path);
     return (
       <Link

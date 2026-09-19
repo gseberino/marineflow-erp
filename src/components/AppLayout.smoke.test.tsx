@@ -1,9 +1,9 @@
 // Smoke do menu lateral depois da reestruturação do Financeiro (30/07/2026).
 //
 // O menu tem uma função só: dizer para onde se vai e onde se está. Quando vários itens
-// moram na mesma rota e se distinguem pela aba (/v2/financial?tab=inbox), comparar apenas
-// o pathname acende todos ao mesmo tempo — e aí o menu deixa de cumprir a única coisa que
-// faz. tsc e build passam com isso; só o render mostra.
+// estão sob a mesma raiz (/v2/financial e /v2/financial/inbox), comparar por prefixo acende
+// todos ao mesmo tempo — e aí o menu deixa de cumprir a única coisa que faz. tsc e build
+// passam com isso; só o render mostra. (D6/F4, 19/09/2026: cada item virou rota de verdade.)
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -81,21 +81,21 @@ describe('menu lateral — Financeiro reestruturado', () => {
 
   it('o item do menu usa o MESMO nome da aba para onde aponta', async () => {
     // A classe de erro: renomeei a aba "Caixa de entrada" para "Extrato" e esqueci o menu.
-    // Os dois nomes passaram a conviver para o MESMO destino (?tab=inbox) — exatamente a
+    // Os dois nomes passaram a conviver para o MESMO destino (/inbox) — exatamente a
     // confusão que a reorganização veio desfazer. Nome antigo não pode voltar.
     renderMenu('/v2/financial');
     const links = (await screen.findAllByRole('link')).map((l) => l.textContent?.trim() ?? '');
     expect(links.some((l) => /Caixa de Entrada/i.test(l)), 'o nome antigo voltou ao menu').toBe(false);
   });
 
-  it('marca só o item da aba em que estou', () => {
-    renderMenu('/v2/financial?tab=inbox');
-    // Sem tratar a query, Visão Geral, Conciliação e Contas a Pagar acenderiam junto.
+  it('marca só o item da seção em que estou', () => {
+    renderMenu('/v2/financial/inbox');
+    // Por prefixo, Visão Geral acenderia junto; o item mais específico tem que ganhar.
     expect(ativos().filter((r) => r?.includes('Extrato'))).toHaveLength(1);
     expect(ativos().some((r) => r === 'Visão Geral')).toBe(false);
   });
 
-  it('sem aba na URL, quem representa a página é a Visão Geral', () => {
+  it('na raiz do financeiro, quem representa a página é a Visão Geral', () => {
     renderMenu('/v2/financial');
     expect(ativos()).toContain('Visão Geral');
   });

@@ -274,7 +274,7 @@ function AdminHome({
         <KPIStat
           label="A pagar"
           value={formatCurrency(totalPayable)}
-          onClick={() => navigate('/financial?tab=payables')}
+          onClick={() => navigate('/v2/financial/payables')}
         />
         <KPIStat
           label="OS concluídas no mês"

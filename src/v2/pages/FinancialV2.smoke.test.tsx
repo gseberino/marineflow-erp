@@ -12,16 +12,19 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { I18nProvider } from '@/i18n';
 import FinancialV2 from './FinancialV2';
 
-const { navigateMock } = vi.hoisted(() => ({ navigateMock: vi.fn() }));
-
-vi.mock('react-router-dom', async (importOriginal) => {
-  const real = await importOriginal<typeof import('react-router-dom')>();
-  return { ...real, useNavigate: () => navigateMock };
-});
+// D6/F4 (19/09/2026): a seção vive na rota (/v2/financial/inbox). O roteador é real aqui de
+// propósito: trocar de aba MUDA a URL, e o que se protege agora é que ela continue dentro
+// do Financeiro. Um mock de navigate esconderia exatamente isso.
+const rotaAtual = { caminho: '' };
+function EspiaoDeRota() {
+  const l = useLocation();
+  rotaAtual.caminho = l.pathname + l.search;
+  return null;
+}
 
 const vazio = { data: [], isLoading: false, error: null };
 vi.mock('@/hooks/use-financial', () => ({
@@ -53,13 +56,18 @@ vi.mock('@/components/PayableFormDialog', () => ({ PayableFormDialog: () => null
 vi.mock('@/components/PaymentDialog', () => ({ PaymentDialog: () => null }));
 vi.mock('@/components/ReimbursementsPanel', () => ({ ReimbursementsPanel: () => <div>painel reembolsos</div> }));
 
-function renderFinanceiro() {
+function renderFinanceiro(inicio = '/v2/financial') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider>
-        <MemoryRouter initialEntries={['/v2/financial']}>
-          <FinancialV2 />
+        <MemoryRouter initialEntries={[inicio]}>
+          <EspiaoDeRota />
+          <Routes>
+            <Route path="/v2/financial" element={<FinancialV2 />} />
+            <Route path="/v2/financial/:secao" element={<FinancialV2 />} />
+            <Route path="*" element={<div>fora do financeiro</div>} />
+          </Routes>
         </MemoryRouter>
       </I18nProvider>
     </QueryClientProvider>,
@@ -110,8 +118,19 @@ describe('FinancialV2 — paridade e navegação', () => {
     renderFinanceiro();
 
     await user.click(await screen.findByRole('tab', { name: /Conciliação|Reconciliation/i }));
-    // A regressão original: uma aba disparava navigate() e trocava a tela inteira.
-    expect(navigateMock).not.toHaveBeenCalled();
+    // A regressão original: uma aba levava para OUTRA tela. Hoje a aba muda a rota, mas
+    // sempre dentro do Financeiro; sair daqui é a regressão.
+    expect(rotaAtual.caminho).toBe('/v2/financial/reconciliation');
+    expect(screen.queryByText('fora do financeiro')).not.toBeInTheDocument();
+    expect(await screen.findByText('painel conciliação')).toBeInTheDocument();
+  });
+
+  it('link antigo com ?tab= vira a rota nova sem perder a seção', async () => {
+    // Favoritos, mensagens do agente e o menu de ontem apontam para ?tab=inbox. Quebrar
+    // esses links seria trocar um bug de navegação por outro.
+    renderFinanceiro('/v2/financial?tab=inbox');
+    expect(await screen.findByText('painel extrato')).toBeInTheDocument();
+    expect(rotaAtual.caminho).toBe('/v2/financial/inbox');
   });
 
   it('cada aba nova alcança o próprio painel', async () => {

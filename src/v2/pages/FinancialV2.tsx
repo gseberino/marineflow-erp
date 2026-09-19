@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Download, DollarSign, Paperclip, Pencil, Plus } from 'lucide-react';
 import {
   Bar, BarChart, CartesianGrid, ComposedChart, Line, ResponsiveContainer,
@@ -113,7 +113,7 @@ function groupPayables(payables: PayableRow[], groupBy: GroupBy): Record<string,
 export default function FinancialV2() {
   const { t, formatCurrency, formatDate } = useI18n();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
 
   const { data: recData, error: recError } = useReceivables();
   const { data: payData, isLoading: loadingPay, error: payError } = usePayables();
@@ -125,14 +125,27 @@ export default function FinancialV2() {
   const receivables = useMemo(() => (recData ?? []) as unknown as PayableRow[], [recData]);
   const payables = useMemo(() => (payData ?? []) as unknown as PayableRow[], [payData]);
 
-  const tab = searchParams.get('tab') || 'overview';
+  // D6/F4 (19/09/2026): a seção vive na ROTA (/v2/financial/inbox), não em ?tab=. Assim cada
+  // item do menu lateral é um destino de verdade e o item ativo acende sozinho. Link antigo
+  // com ?tab= continua valendo: é normalizado para a rota na primeira renderização.
+  const { secao } = useParams<{ secao?: string }>();
+  const tabDaQuery = searchParams.get('tab');
+  const tab = secao || tabDaQuery || 'overview';
+  useEffect(() => {
+    if (!secao && tabDaQuery) {
+      navigate(tabDaQuery === 'overview' ? '/v2/financial' : `/v2/financial/${tabDaQuery}`, { replace: true });
+    }
+  }, [secao, tabDaQuery, navigate]);
   // Toda aba se comporta como aba. A de Recebíveis costumava NAVEGAR para outra página, e
   // o efeito para quem usa era a tela inteira trocar ao clicar numa aba — parecia bug
   // porque, do lado de fora, é bug: aba que leva embora não é aba.
   const setTab = (v: string) =>
-    setSearchParams((prev) => { prev.set('tab', v); return prev; }, { replace: true });
+    navigate(v === 'overview' ? '/v2/financial' : `/v2/financial/${v}`, { replace: true });
 
-  const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters });
+  // D6/F5: contas a pagar abre em "em aberto" (pendente, parcial, vencida). 1.675 das 1.679 contas
+  // estão pagas; abrir com tudo obrigava a filtrar antes de qualquer trabalho. "Pago" continua
+  // a um clique no painel de filtros.
+  const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters, status: ['pending', 'partially_paid', 'overdue'] });
   const [payOsSearch, setPayOsSearch] = useState('');
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [paySort, setPaySort] = useState<SortState>({ key: 'due_date', dir: 'asc' });
