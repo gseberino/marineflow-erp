@@ -47,6 +47,7 @@ Deno.test("resposta pronta ganha o Allow-Origin da origem permitida e Vary: Orig
 Deno.test("origem alheia recebe a origem padrão (o navegador bloqueia); sem Origin também", () => {
   const alheia = new Request("https://x/f", { headers: { origin: "https://malicioso.example" } });
   assertEquals(aplicarCors(alheia, new Response(null)).headers.get("Access-Control-Allow-Origin"), ORIGEM_PADRAO);
+  assertEquals(ORIGEM_PADRAO, "https://marineflow-erp.vercel.app");
   const semOrigin = new Request("https://x/f");
   assertEquals(aplicarCors(semOrigin, new Response(null)).headers.get("Access-Control-Allow-Origin"), ORIGEM_PADRAO);
 });

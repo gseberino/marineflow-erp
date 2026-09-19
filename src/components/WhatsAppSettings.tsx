@@ -95,7 +95,7 @@ export function WhatsAppConnectionSettings() {
           '🚀 *MarineFlow ERP* — Teste de integração WhatsApp realizado com sucesso!\n\n_Este é um envio de verificação para o número autorizado no modo de teste._',
         mode: 'link',
         context: 'test',
-        publicUrl: 'https://hbrmarine.online',
+        publicUrl: window.location.origin,
         link_title: 'MarineFlow ERP',
         link_description: 'Sistema de Gestão Náutica',
       },

@@ -169,7 +169,7 @@ export const TEMPLATE_VARIABLES: TemplateVariableDoc[] = [
     key: 'link',
     label: 'Link público do documento',
     description: 'URL para o cliente abrir o documento (OS, orçamento ou cobrança) no navegador.',
-    example: 'https://hbrmarine.online/view/abc123…',
+    example: 'https://marineflow-erp.vercel.app/view/abc123…',
     contexts: ['service_order', 'quote', 'billing'],
   },
   {

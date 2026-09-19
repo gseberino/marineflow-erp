@@ -8304,7 +8304,6 @@ export type Database = {
           payment_method: string | null
           payment_method_preferred: string | null
           payment_status: string | null
-          photos: Json | null
           priority: string
           problem_description: string | null
           quote_status: string | null
@@ -8390,7 +8389,6 @@ export type Database = {
           payment_method?: string | null
           payment_method_preferred?: string | null
           payment_status?: string | null
-          photos?: Json | null
           priority?: string
           problem_description?: string | null
           quote_status?: string | null
@@ -8476,7 +8474,6 @@ export type Database = {
           payment_method?: string | null
           payment_method_preferred?: string | null
           payment_status?: string | null
-          photos?: Json | null
           priority?: string
           problem_description?: string | null
           quote_status?: string | null
@@ -11370,7 +11367,6 @@ export type Database = {
           is_travel_billable: boolean | null
           labor_hours_total: number | null
           marina_id: string | null
-          photos: Json | null
           priority: string | null
           problem_description: string | null
           quote_status: string | null
@@ -11425,7 +11421,6 @@ export type Database = {
           is_travel_billable?: boolean | null
           labor_hours_total?: number | null
           marina_id?: string | null
-          photos?: Json | null
           priority?: string | null
           problem_description?: string | null
           quote_status?: string | null
@@ -11480,7 +11475,6 @@ export type Database = {
           is_travel_billable?: boolean | null
           labor_hours_total?: number | null
           marina_id?: string | null
-          photos?: Json | null
           priority?: string | null
           problem_description?: string | null
           quote_status?: string | null

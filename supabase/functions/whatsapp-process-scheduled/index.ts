@@ -67,7 +67,7 @@ servirComCors(async (req) => {
       .select("value")
       .eq("key", "app_public_url")
       .maybeSingle();
-    const baseUrl = String(urlSetting?.value || Deno.env.get("APP_PUBLIC_URL") || "https://hbrmarine.online");
+    const baseUrl = String(urlSetting?.value || Deno.env.get("APP_PUBLIC_URL") || "https://marineflow-erp.vercel.app");
 
     let processed = 0;
     let succeeded = 0;

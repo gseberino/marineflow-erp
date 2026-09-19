@@ -12,12 +12,14 @@
 //
 // Origens extras sem redeploy: segredo CORS_ORIGENS_EXTRA="https://a.com,https://b.com".
 
-export const ORIGEM_PADRAO = "https://hbrmarine.online";
+// O app vivo. hbrmarine.online segue na lista (domínio da empresa), mas hoje serve um build
+// antigo; quando o DNS passar a apontar para o Vercel, nada aqui precisa mudar.
+export const ORIGEM_PADRAO = "https://marineflow-erp.vercel.app";
 
 const FIXAS = new Set<string>([
   ORIGEM_PADRAO,
+  "https://hbrmarine.online",
   "https://www.hbrmarine.online",
-  "https://marineflow-erp.vercel.app",
 ]);
 
 // Previews e deploys do Vercel (marineflow-erp-git-main-…, marineflow-abc123-gseberino-s-projects…),

@@ -339,7 +339,7 @@ function CompanyTab() {
     bank_account: '',
     pix_key: '',
     payment_link_url: '',
-    app_public_url: 'https://hbrmarine.online',
+    app_public_url: 'https://marineflow-erp.vercel.app',
   });
 
   useEffect(() => {
@@ -378,7 +378,7 @@ function CompanyTab() {
           bank_account: map.bank_account || '',
           pix_key: map.pix_key || '',
           payment_link_url: map.payment_link_url || '',
-          app_public_url: map.app_public_url || 'https://hbrmarine.online',
+          app_public_url: map.app_public_url || 'https://marineflow-erp.vercel.app',
         }));
         setLogoUrl(map.company_logo_url || '');
       }
@@ -730,7 +730,7 @@ function CompanyTab() {
               type="url"
               value={form.app_public_url}
               onChange={e => set('app_public_url', e.target.value)}
-              placeholder="https://hbrmarine.online"
+              placeholder="https://marineflow-erp.vercel.app"
               className="mt-1"
             />
             <p className="text-xs text-muted-foreground mt-1">

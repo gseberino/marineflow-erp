@@ -262,7 +262,7 @@ export const whatsappTools: ToolDef[] = [
       if (c?.opt_out_whatsapp) return { error: "Este cliente pediu para não receber mensagens no WhatsApp (opt-out)." };
       const phone = c?.whatsapp || c?.phone;
       if (!phone) return { error: "Cliente sem WhatsApp/telefone cadastrado." };
-      const origin = appOrigin || settings.app_public_url || "https://hbrmarine.online";
+      const origin = appOrigin || settings.app_public_url || "https://marineflow-erp.vercel.app";
       const link = `${origin}/view/${so.share_token}`;
       const nomeUsado = c?.display_name || (c?.name ? String(c.name).trim().split(/\s+/)[0] : "");
       const msg = args.custom_message || `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;

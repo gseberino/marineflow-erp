@@ -109,7 +109,7 @@ async function notifyAssignedReminder(
       .filter((p: string) => p.length >= 10);
     if (recipients.length === 0) return;
     const who = senderName ? `${senderName} (+${phone})` : `+${phone}`;
-    const message = `🆕 *Novo lead WhatsApp*\n\n${who}\n"${preview.slice(0, 160)}"\n\nResponda no painel hbrmarine.online`;
+    const message = `🆕 *Novo lead WhatsApp*\n\n${who}\n"${preview.slice(0, 160)}"\n\nResponda no painel do MarineFlow.`;
 
     const provider = createWhatsAppProvider();
     await Promise.all(

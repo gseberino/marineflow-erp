@@ -174,7 +174,7 @@ describe('a migration das views cumpre o que as listas em código prometem', () 
     for (const coluna of [
       'id', 'service_order_number', 'client_id', 'vessel_id', 'marina_id',
       'status', 'priority', 'problem_description', 'technician_notes',
-      'scheduled_start_at', 'check_in_at', 'check_out_at', 'photos', 'survey_id',
+      'scheduled_start_at', 'check_in_at', 'check_out_at', 'survey_id',
     ]) {
       expect(temColuna(os, coluna), `${coluna} sumiu da view`).toBe(true);
     }
