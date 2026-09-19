@@ -25,7 +25,9 @@ function jr(body: unknown, status = 200): Response {
   });
 }
 
-const EVENTOS = ["MESSAGES_UPSERT", "MESSAGES_UPDATE", "MESSAGES_DELETE", "SEND_MESSAGE", "CONNECTION_UPDATE"];
+// NOVO-002 (19/09/2026): só os eventos com consumidor no código. MESSAGES_DELETE, SEND_MESSAGE e
+// CONNECTION_UPDATE ninguém lia; cada um gerava uma chamada à edge à toa.
+const EVENTOS = ["MESSAGES_UPSERT", "MESSAGES_UPDATE"];
 
 servirComCors(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
