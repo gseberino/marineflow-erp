@@ -16,19 +16,19 @@ import { supabase } from '@/integrations/supabase/client';
 import { useSnoozeTask, type RelatedEntityType } from '@/hooks/use-agenda';
 
 const ENTITY_CONFIG: Record<RelatedEntityType, { label: string; Icon: typeof Briefcase; route: (id: string) => string }> = {
-  service_order:  { label: 'OS',         Icon: Briefcase,    route: (id) => `/service-orders/${id}` },
-  quote:          { label: 'Orçamento',  Icon: FileText,     route: (id) => `/service-orders/${id}` },
-  external_quote: { label: 'Orçamento',  Icon: FileText,     route: (id) => `/external-quotes/${id}` },
-  client:         { label: 'Cliente',    Icon: User,         route: (id) => `/clients/${id}` },
-  vessel:         { label: 'Embarcação', Icon: Anchor,       route: (id) => `/vessels/${id}` },
-  // Os três abaixo caem na LISTA, sem usar o id, porque não existe tela de detalhe de
-  // recebível, pagável nem de OC. Quando existir, é aqui que o chip passa a levar ao
-  // registro — e é o mesmo dia em que o EntityTasksPanel ganha onde ser embutido.
-  receivable:     { label: 'Recebível',  Icon: DollarSign,   route: () => '/financial' },
-  payable:        { label: 'Pagável',    Icon: DollarSign,   route: () => '/financial' },
-  purchase_order: { label: 'OC',         Icon: ShoppingCart, route: () => '/purchase-orders' },
-  collection:     { label: 'Cobrança',   Icon: DollarSign,   route: () => '/financial' },
-  stock_item:     { label: 'Estoque',    Icon: Package,      route: () => '/inventory' },
+  // Rotas da v2 (20/09/2026): as telas legadas saem em 15/10 e a OC ganhou detalhe próprio em
+  // 29/08. Recebível e pagável ainda não têm tela de detalhe: caem na lista certa da v2
+  // (Contas a Receber / Contas a Pagar), não mais no financeiro legado.
+  service_order:  { label: 'OS',         Icon: Briefcase,    route: (id) => `/v2/service-orders/${id}` },
+  quote:          { label: 'Orçamento',  Icon: FileText,     route: (id) => `/v2/service-orders/${id}` },
+  external_quote: { label: 'Orçamento',  Icon: FileText,     route: (id) => `/v2/external-quotes/${id}` },
+  client:         { label: 'Cliente',    Icon: User,         route: (id) => `/v2/clients/${id}` },
+  vessel:         { label: 'Embarcação', Icon: Anchor,       route: (id) => `/v2/vessels/${id}` },
+  receivable:     { label: 'Recebível',  Icon: DollarSign,   route: () => '/v2/receivables' },
+  payable:        { label: 'Pagável',    Icon: DollarSign,   route: () => '/v2/financial/payables' },
+  purchase_order: { label: 'OC',         Icon: ShoppingCart, route: (id) => `/v2/purchase-orders/${id}` },
+  collection:     { label: 'Cobrança',   Icon: DollarSign,   route: () => '/v2/collections' },
+  stock_item:     { label: 'Estoque',    Icon: Package,      route: () => '/v2/inventory' },
   quote_request:  { label: 'Cotação',    Icon: ClipboardList, route: (id) => `/purchasing/quotes/${id}` },
 };
 
@@ -89,7 +89,14 @@ function TaskActionButton({ task, onScheduleOs }: { task: any; onScheduleOs?: (t
   const actions: Partial<Record<RelatedEntityType, { label: string; onClick: (e: React.MouseEvent) => void }>> = {
     receivable: { label: 'Registrar pagamento', onClick: openPayment },
     payable: { label: 'Registrar pagamento', onClick: openPayment },
-    purchase_order: { label: 'Receber OC', onClick: (e) => { e.stopPropagation(); navigate('/purchase-orders'); } },
+    purchase_order: {
+      label: 'Receber OC',
+      onClick: (e) => {
+        e.stopPropagation();
+        // A tela de detalhe da OC tem o botão Receber (RPC receive_po); a lista não recebe nada.
+        navigate(task.related_entity_id ? `/v2/purchase-orders/${task.related_entity_id}` : '/v2/purchase-orders');
+      },
+    },
     stock_item: { label: 'Repor', onClick: (e) => { e.stopPropagation(); navigate('/inventory/smart-purchase'); } },
     quote_request: {
       label: 'Cobrar resposta',
@@ -105,7 +112,7 @@ function TaskActionButton({ task, onScheduleOs }: { task: any; onScheduleOs?: (t
           label: 'Resolver compra',
           onClick: (e) => {
             e.stopPropagation();
-            if (task.related_entity_id) navigate(`/service-orders/${task.related_entity_id}`);
+            if (task.related_entity_id) navigate(`/v2/service-orders/${task.related_entity_id}`);
           },
         }
       : task.automation_key?.startsWith('r1:') && onScheduleOs

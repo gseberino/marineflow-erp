@@ -613,4 +613,74 @@ export const whatsappTools: ToolDef[] = [
       return { ok: true, reativado: matches[0].name || matches[0].phone_normalized };
     },
   },
+  {
+    name: "link_whatsapp_lead_to_client",
+    description:
+      "VINCULAR um contato/lead do WhatsApp a um cliente cadastrado, para as mensagens dele passarem a aparecer no histórico do cliente. Use quando o usuário disser 'esse número é do fulano', 'liga esse contato ao cliente X', 'o lead tal é o cliente Y'. Informe o lead (telefone ou nome) e o cliente (id ou nome). Não cria cliente novo: se o cliente não existir, diga isso.",
+    input_schema: {
+      type: "object",
+      properties: {
+        phone: { type: "string", description: "Telefone do contato (só dígitos, DDI+DDD). Opcional se informar lead_name." },
+        lead_name: { type: "string", description: "Nome (ou parte) do contato na caixa de entrada. Opcional se informar phone." },
+        client_id: { type: "string", description: "Id do cliente. Opcional se informar client_name." },
+        client_name: { type: "string", description: "Nome (ou parte) do cliente cadastrado. Opcional se informar client_id." },
+      },
+    },
+    risk: "medium",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { admin } = ctx;
+      const phone = String(args.phone || "").replace(/\D/g, "");
+      const leadName = String(args.lead_name || "").trim();
+      const clientId = String(args.client_id || "").trim();
+      const clientName = String(args.client_name || "").trim();
+      if (!phone && !leadName) return { error: "Diga o telefone ou o nome do contato a vincular." };
+      if (!clientId && !clientName) return { error: "Diga o id ou o nome do cliente ao qual vincular." };
+
+      let ql = admin.from("whatsapp_leads").select("id, name, phone_normalized, status, linked_client_id");
+      ql = phone ? ql.eq("phone_normalized", phone) : ql.ilike("name", `%${leadName}%`);
+      const { data: leads } = await ql.limit(10);
+      if (!leads || leads.length === 0) return { error: "Não encontrei esse contato na caixa de entrada do WhatsApp." };
+      if (leads.length > 1) {
+        return { precisa_desambiguar: "contato", opcoes: leads.map((l: any) => ({ nome: l.name, phone: l.phone_normalized })) };
+      }
+      const lead = leads[0] as any;
+
+      let qc = admin.from("clients").select("id, name, display_name, whatsapp, phone").eq("active", true);
+      qc = UUID_RE.test(clientId) ? qc.eq("id", clientId) : qc.ilike("name", `%${clientName}%`);
+      const { data: clientes } = await qc.limit(10);
+      if (!clientes || clientes.length === 0) return { error: "Não encontrei esse cliente no cadastro. Se for cliente novo, cadastre antes de vincular." };
+      if (clientes.length > 1) {
+        return { precisa_desambiguar: "cliente", opcoes: clientes.map((c: any) => ({ id: c.id, nome: c.display_name || c.name })) };
+      }
+      const cliente = clientes[0] as any;
+
+      if (lead.linked_client_id === cliente.id) {
+        return { ok: true, ja_estava: true, contato: lead.name || lead.phone_normalized, cliente: cliente.display_name || cliente.name };
+      }
+      // Mesmo caminho da tela (useLinkLeadToClient): lead vira "linked" e as mensagens já
+      // recebidas desse telefone passam a pertencer ao cliente.
+      const { error: e1 } = await admin.from("whatsapp_leads")
+        .update({ status: "linked", linked_client_id: cliente.id, updated_at: new Date().toISOString() })
+        .eq("id", lead.id);
+      if (e1) return { error: `Falha ao vincular: ${e1.message}` };
+      const { count } = await admin.from("whatsapp_messages")
+        .update({ client_id: cliente.id }, { count: "exact" })
+        .eq("phone_normalized", lead.phone_normalized)
+        .is("client_id", null);
+      // Sem WhatsApp no cadastro, o telefone do contato vira o WhatsApp do cliente: é o que
+      // faz o próximo envio ao cliente sair pelo número certo.
+      if (!cliente.whatsapp && !cliente.phone) {
+        await admin.from("clients").update({ whatsapp: lead.phone_normalized }).eq("id", cliente.id);
+      }
+      return {
+        ok: true,
+        contato: lead.name || lead.phone_normalized,
+        cliente: cliente.display_name || cliente.name,
+        mensagens_vinculadas: count ?? 0,
+      };
+    },
+  },
 ];
