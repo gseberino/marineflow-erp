@@ -15,6 +15,7 @@ import { useProducts } from '@/hooks/use-products';
 import { useServices } from '@/hooks/use-services';
 import { useCardFees } from '@/hooks/use-card-fees';
 import { useAppSettings } from '@/hooks/use-app-settings';
+import { useViaDoTecnico } from '@/hooks/use-via-do-tecnico';
 import { useSOLinkedPOs, useUpdatePurchaseOrder } from '@/hooks/use-purchase-orders';
 import {
   useCreateServiceOrder,
@@ -129,6 +130,17 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: services } = useServices();
   const { data: cardFees } = useCardFees();
   const { data: appSettings } = useAppSettings();
+  // Via do técnico (job card): a folha de roteiro terminada — roteiro, materiais, serviços
+  // contratados e levantamento com fotos, sem preço. Mesmo documento do painel de Roteiro.
+  const viaDoTecnico = useViaDoTecnico(orderId, {
+    orderNumber: orderData?.service_order_number,
+    clientName: (orderData?.clients as any)?.name,
+    assetName: (orderData?.vessels as any)?.name,
+    marinaName: (orderData as any)?.marinas?.name,
+    technicianName: (orderData as any)?.service_order_technicians?.[0]?.app_users?.full_name,
+    scheduledAt: (orderData as any)?.scheduled_start_at,
+    shareUrl: orderData?.share_token ? `${window.location.origin}/view/${orderData.share_token}` : null,
+  });
   const issRatePct = Number(appSettings?.iss_rate_pct ?? 5) || 0;
   const defaultQuoteValidityDays = Number(appSettings?.quote_validity_days ?? 15) || 15;
   const travelRates = travelRatesFromSettings(appSettings);
@@ -1980,6 +1992,16 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       : <Printer className="h-4 w-4" />}
                     Imprimir / Baixar
                   </DropdownMenuItem>
+                  {orderId && (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        if (!viaDoTecnico.imprimir()) toast.error('O navegador bloqueou a janela de impressão. Libere o pop-up e tente de novo.');
+                      }}
+                      className="gap-2"
+                    >
+                      <Printer className="h-4 w-4" /> Via do técnico
+                    </DropdownMenuItem>
+                  )}
 
                   {(currentStatus === 'completed' || currentStatus === 'invoiced') && (
                     <DropdownMenuItem onClick={() => openPdfDialog('invoice')} className="gap-2">

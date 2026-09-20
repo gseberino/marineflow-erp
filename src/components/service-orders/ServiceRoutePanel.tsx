@@ -11,7 +11,7 @@ import {
 import { toast } from 'sonner';
 import { StepFocusMode } from './StepFocusMode';
 import { SheetEntryDialog } from './SheetEntryDialog';
-import { printRouteSheet } from '@/lib/route-sheet';
+import { useViaDoTecnico } from '@/hooks/use-via-do-tecnico';
 import { LineSystemPicker } from '@/components/service-order/line-system-picker';
 import {
   useServiceOrderSteps, useGenerateSteps, useReorderSteps, useDeleteStep,
@@ -71,6 +71,11 @@ export function ServiceRoutePanel({
   const { data: reasons = [] } = useStopReasons();
   const { data: materials = [] } = useRouteMaterials(serviceOrderId);
   const { data: settings } = useAppSettings();
+  // A via do técnico completa (roteiro + materiais + serviços + levantamento), a mesma que o
+  // menu Ações da OS imprime.
+  const viaDoTecnico = useViaDoTecnico(serviceOrderId, {
+    orderNumber, clientName, assetName, assetType, marinaName, technicianName, scheduledAt, shareUrl,
+  });
   // Serviço genérico ("diagnóstico no local") só ganha bloco de segurança
   // depois que alguém disser qual sistema ele toca NESTA OS.
   const { data: semSistema = [] } = useLinesMissingSystem(serviceOrderId);
@@ -132,15 +137,7 @@ export function ServiceRoutePanel({
   }
 
   function handlePrint() {
-    const ok = printRouteSheet(
-      { orderNumber: orderNumber || 'OS', clientName, assetName, assetType, marinaName,
-        technicianName, scheduledAt, shareUrl,
-        companyName: settings?.company_name || null,
-        companyLogoUrl: settings?.company_logo_url || null,
-        companyAddress: settings?.company_address || null },
-      steps,
-      materials,
-    );
+    const ok = viaDoTecnico.imprimir();
     if (!ok) toast.error('O navegador bloqueou a janela de impressão. Libere o pop-up e tente de novo.');
   }
 

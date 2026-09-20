@@ -18,6 +18,23 @@ export interface RouteSheetHeader {
   companyAddress?: string | null;
 }
 
+/** O que a via do técnico traz além do roteiro: serviços contratados e o levantamento. */
+export interface RouteSheetExtras {
+  services?: Array<{
+    name: string;
+    description?: string | null;
+    quantity?: number | null;
+    unit?: string | null;
+    notes?: string | null;
+  }>;
+  survey?: Array<{
+    question: string;
+    answer?: string | null;
+    skipped?: string | null;
+    photoUrl?: string | null;
+  }>;
+}
+
 /** Azul-marinho da HBR, o mesmo do PDF que o cliente já recebe. */
 const BRAND = '#002B5B';
 
@@ -73,6 +90,7 @@ export function buildRouteSheetHtml(
   header: RouteSheetHeader,
   steps: ServiceOrderStep[],
   materials: RouteMaterial[] = [],
+  extras: RouteSheetExtras = {},
 ): string {
   const groups = groupStepsByBlock(steps);
   const totalStandard = steps.reduce((sum, s) => sum + (s.standard_minutes || 0), 0);
@@ -164,6 +182,48 @@ export function buildRouteSheetHtml(
       </table>`;
   }).join('');
 
+  // ── Serviços contratados: o que foi vendido, sem preço (preço é do escritório) ─────
+  const servicos = extras.services ?? [];
+  const servicosHtml = servicos.length ? `
+    <table class="block">
+      <thead>
+        <tr><th colspan="2" class="blockname">Serviços contratados</th></tr>
+        <tr class="cols"><th></th><th>O que o cliente comprou. Marque ao concluir cada um.</th></tr>
+      </thead>
+      <tbody>
+        ${servicos.map((s) => `
+          <tr>
+            <td class="box"><span class="check"></span></td>
+            <td class="mat"><b>${escapeHtml(s.name)}</b>${
+              s.quantity && Number(s.quantity) !== 1 ? ` <span class="sku">× ${escapeHtml(String(s.quantity))}${s.unit ? ` ${escapeHtml(s.unit)}` : ''}</span>` : ''
+            }${s.description ? `<div class="detail">${escapeHtml(s.description)}</div>` : ''}${
+              s.notes ? `<div class="detail">${escapeHtml(s.notes)}</div>` : ''
+            }</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>` : '';
+
+  // ── Levantamento: as respostas inteiras, com as fotos marcadas (decisão do dono) ───────
+  const respostas = (extras.survey ?? []).filter((r) => r.question);
+  const levantamentoHtml = respostas.length ? `
+    <table class="block">
+      <thead>
+        <tr><th colspan="2" class="blockname">Levantamento</th></tr>
+        <tr class="cols"><th>Pergunta</th><th>Resposta no local</th></tr>
+      </thead>
+      <tbody>
+        ${respostas.map((r) => `
+          <tr>
+            <td class="qa">${escapeHtml(r.question)}</td>
+            <td class="qa">${
+              r.skipped
+                ? `<span class="pulada">pulada: ${escapeHtml(r.skipped)}</span>`
+                : escapeHtml(r.answer || '—')
+            }${r.photoUrl ? `<div><img class="foto" src="${escapeHtml(r.photoUrl)}" alt=""></div>` : ''}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>` : '';
+
   const logoHtml = header.companyLogoUrl
     ? `<img class="logo" src="${escapeHtml(header.companyLogoUrl)}" alt="">`
     : '';
@@ -234,6 +294,9 @@ export function buildRouteSheetHtml(
   .sign { margin-top: 7mm; display: flex; gap: 10mm; page-break-inside: avoid; }
   .sign div { flex: 1; border-top: .5pt solid #000; padding-top: 1.5mm; font-size: 8.5pt; }
   .empty { font-size: 10pt; padding: 6mm 0; }
+  td.qa { font-size: 9.5pt; width: 50%; }
+  .pulada { color: #666; font-style: italic; }
+  .foto { display: block; max-height: 45mm; max-width: 80mm; margin-top: 1.5mm; border: .5pt solid #999; }
 </style>
 </head>
 <body>
@@ -244,7 +307,7 @@ export function buildRouteSheetHtml(
         ${header.companyName ? `<span class="coname">${escapeHtml(header.companyName)}</span>` : ''}
       </div>
       <div class="doctype">
-        <div class="kind">Roteiro de execução</div>
+        <div class="kind">Via do técnico · roteiro de execução</div>
         <div class="num">${escapeHtml(header.orderNumber)}</div>
       </div>
     </div>
@@ -252,7 +315,9 @@ export function buildRouteSheetHtml(
     ${metaLine ? `<div class="meta">${metaLine}</div>` : ''}
   </div>
 
+  ${servicosHtml}
   ${materiaisHtml}
+  ${levantamentoHtml}
   ${steps.length ? blocksHtml : '<p class="empty">Esta OS ainda não tem roteiro gerado.</p>'}
 
   <div class="write">
@@ -290,10 +355,11 @@ export function printRouteSheet(
   header: RouteSheetHeader,
   steps: ServiceOrderStep[],
   materials: RouteMaterial[] = [],
+  extras: RouteSheetExtras = {},
 ): boolean {
   const win = window.open('', '_blank', 'width=900,height=1000');
   if (!win) return false; // bloqueador de pop-up; quem chama avisa o usuário
-  win.document.write(buildRouteSheetHtml(header, steps, materials));
+  win.document.write(buildRouteSheetHtml(header, steps, materials, extras));
   win.document.close();
   win.focus();
   // Deixa o layout (e o logo) assentarem antes de abrir o diálogo de impressão.

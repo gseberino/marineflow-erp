@@ -168,4 +168,33 @@ describe('folha do roteiro — marca, anotações e materiais', () => {
     expect(html).toContain('O que encontrei');
     expect(html).toContain('Material usado além do previsto');
   });
+
+  it('via do técnico: serviços contratados sem preço e levantamento com foto', () => {
+    const html = buildRouteSheetHtml(header, [step()], [], {
+      services: [
+        { name: 'Instalação de inversor', quantity: 2, unit: 'un', description: 'Victron 3000VA' },
+        { name: 'Diagnóstico elétrico', quantity: 1 },
+      ],
+      survey: [
+        { question: 'Qual a bitola do cabo atual?', answer: '35 mm²', photoUrl: 'https://x/foto.jpg' },
+        { question: 'Há espaço no painel?', skipped: 'não deu para abrir' },
+      ],
+    });
+    expect(html).toContain('Serviços contratados');
+    expect(html).toContain('Instalação de inversor');
+    expect(html).toContain('× 2 un');
+    expect(html).toContain('Victron 3000VA');
+    expect(html).not.toMatch(/R\$\s?\d/);
+    expect(html).toContain('Levantamento');
+    expect(html).toContain('35 mm²');
+    expect(html).toContain('src="https://x/foto.jpg"');
+    expect(html).toContain('pulada: não deu para abrir');
+    expect(html).toContain('Via do técnico');
+  });
+
+  it('sem serviços nem levantamento, as seções novas simplesmente não aparecem', () => {
+    const html = buildRouteSheetHtml(header, [step()], []);
+    expect(html).not.toContain('Serviços contratados');
+    expect(html).not.toContain('>Levantamento<');
+  });
 });
