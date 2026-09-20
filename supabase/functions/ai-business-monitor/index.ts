@@ -133,6 +133,20 @@ servirComCors(async (req) => {
       console.warn("[ai-business-monitor] checagem saldo × soma falhou (ignorada)");
     }
 
+    // (3d) Estoque: saldo em tela ≠ soma dos movimentos (fase E do ledger). Depois do gatilho
+    // de 20/09 isso só acontece quando algum caminho grava o saldo sem gravar movimento —
+    // exatamente a porta que abriu o estoque fantasma. Aviso diário enquanto houver.
+    try {
+      const { data: div } = await admin.rpc("estoque_saldos_divergentes");
+      const lista = (div ?? []) as Array<{ name: string; diferenca: number }>;
+      if (lista.length > 0 && await claim(`estoque_divergente:${todayISO}`, { n: lista.length })) {
+        const ex = lista.slice(0, 3).map((d) => `${d.name} (${Number(d.diferenca) > 0 ? "+" : ""}${Number(d.diferenca)})`).join(", ");
+        alerts.push(`📦 ${lista.length} produto(s) com saldo diferente da soma dos movimentos: ${ex}${lista.length > 3 ? "…" : ""}. Algum caminho gravou estoque sem registrar movimento; confira em Estoque › Variância.`);
+      }
+    } catch (_e) {
+      console.warn("[ai-business-monitor] checagem de saldo de estoque falhou (ignorada)");
+    }
+
     // (4) Cota Contora do mês (plano Gratuito = 500 eventos/mês). Alerta em 80%.
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     const { count: fiscalEvents } = await admin
