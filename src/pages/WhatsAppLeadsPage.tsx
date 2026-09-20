@@ -251,7 +251,6 @@ function InboxView() {
   useEffect(() => {
     scrollToBottom('auto');
     setShowScrollDown(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, activePhone]);
 
   const send = async () => {

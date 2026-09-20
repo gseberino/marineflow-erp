@@ -454,7 +454,7 @@ export function printSurveySheet(
   const autoPrint =
     '<script>window.addEventListener("load",function(){' +
     'requestAnimationFrame(function(){setTimeout(function(){window.print();},50);});' +
-    '});<\/script>';
+    '});</script>';
   win.document.write(html.replace('</body>', `${autoPrint}</body>`));
   win.document.close();
   win.focus();

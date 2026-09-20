@@ -452,7 +452,6 @@ export default function FiscalEmission() {
 
   // Carrega os rascunhos salvos ao montar (para o contador do botão "Rascunhos").
   // Degrada em silêncio se a tabela ainda não existir (loadDrafts ignora erro).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void loadDrafts(); }, []);
 
   const productOptions: EntityOption[] = useMemo(() => (products || [])

@@ -55,7 +55,7 @@ function onlyDigits(value: string): string {
  * silenciosamente, porque o resultado continua sendo um número válido.
  */
 export function parseAmount(raw: string): number {
-  const cleaned = (raw || '').replace(/[^\d,.\-]/g, '');
+  const cleaned = (raw || '').replace(/[^\d,.-]/g, '');
   if (!cleaned) return NaN;
   const lastComma = cleaned.lastIndexOf(',');
   const lastDot = cleaned.lastIndexOf('.');
@@ -143,7 +143,7 @@ export function parseOFX(content: string): BankTransaction[] {
 function parseDate(raw: string): string | null {
   const trimmed = raw.trim();
   // DD/MM/YYYY ou DD-MM-YYYY
-  let m = trimmed.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
+  let m = trimmed.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
   if (m) return `${m[3]}-${m[2]}-${m[1]}`;
   // YYYY-MM-DD
   m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);

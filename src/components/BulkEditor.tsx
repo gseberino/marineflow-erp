@@ -245,7 +245,7 @@ export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) 
                     <td className="px-2 py-1">
                       <Checkbox checked={isSelected} onCheckedChange={() => {
                         const next = new Set(selected);
-                        isSelected ? next.delete(item.id) : next.add(item.id);
+                        if (isSelected) next.delete(item.id); else next.add(item.id);
                         setSelected(next);
                       }} />
                     </td>

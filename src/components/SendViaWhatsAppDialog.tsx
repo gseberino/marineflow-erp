@@ -77,10 +77,10 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
   const createScheduled = useCreateScheduledSend();
 
   useEffect(() => {
-    try { localStorage.setItem('wa.autoRetry', autoRetry ? '1' : '0'); } catch {}
+    try { localStorage.setItem('wa.autoRetry', autoRetry ? '1' : '0'); } catch { /* sem localStorage (modo privado, cota): segue sem lembrar a preferência */ }
   }, [autoRetry]);
   useEffect(() => {
-    try { localStorage.setItem('wa.maxAttempts', String(maxAttempts)); } catch {}
+    try { localStorage.setItem('wa.maxAttempts', String(maxAttempts)); } catch { /* sem localStorage (modo privado, cota): segue sem lembrar a preferência */ }
   }, [maxAttempts]);
 
   const salesTemplates = useMemo(() => {

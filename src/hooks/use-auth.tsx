@@ -78,8 +78,6 @@ async function loadProfile(
       data = res.data;
     }
 
-    if (data) {
-    }
 
     return {
       id: authUser.id,

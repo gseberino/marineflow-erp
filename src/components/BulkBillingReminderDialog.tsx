@@ -77,10 +77,10 @@ export function BulkBillingReminderDialog({
   });
 
   useEffect(() => {
-    try { localStorage.setItem(THROTTLE_KEY, String(throttleMs)); } catch {}
+    try { localStorage.setItem(THROTTLE_KEY, String(throttleMs)); } catch { /* sem localStorage (modo privado, cota): segue sem lembrar a preferência */ }
   }, [throttleMs]);
   useEffect(() => {
-    try { localStorage.setItem(MAX_ATTEMPTS_KEY, String(maxAttempts)); } catch {}
+    try { localStorage.setItem(MAX_ATTEMPTS_KEY, String(maxAttempts)); } catch { /* sem localStorage (modo privado, cota): segue sem lembrar a preferência */ }
   }, [maxAttempts]);
 
   // Estado de execução

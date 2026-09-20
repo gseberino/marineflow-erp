@@ -129,7 +129,6 @@ export function FilterPresets<T extends Record<string, any>>({
       onApplyRef.current(defaultPreset.filter_config as T);
       appliedDefaultRef.current = true;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presets, hasActiveFilters, filterType, autoApplyDefault]);
 
   const handleSave = async () => {

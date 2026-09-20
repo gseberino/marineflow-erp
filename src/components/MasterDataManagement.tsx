@@ -147,7 +147,7 @@ export function MasterDataPanel() {
       Object.keys(processedData).forEach(table => {
         if (table === '_meta') return;
         processedData[table] = processedData[table].map((row: any) => {
-          let newRow = { ...row };
+          const newRow = { ...row };
           
           // Apply Table-Specific Mappings (Legacy -> Simple)
           if (TABLE_FIELD_MAP[table]) {

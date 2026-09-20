@@ -31,7 +31,7 @@ export function CategorySelect({ type, value, onChange, placeholder }: Props) {
       onChange(search.trim());
       setSearch('');
       setOpen(false);
-    } catch {}
+    } catch { /* criação cancelada ou falhou: o próprio hook já avisou */ }
   };
 
   return (

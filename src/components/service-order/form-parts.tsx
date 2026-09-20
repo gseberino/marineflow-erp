@@ -172,7 +172,6 @@ function useDiscountFields(raw: number, initialAmount: number) {
 
   useEffect(() => {
     setState((s) => computeDiscountState(raw, s.discountAmount));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [raw]);
 
   const setFromPct = (newPct: number): { pct: number; discountAmount: number } => {

@@ -48,7 +48,7 @@ function getStoredLocale(): Locale {
   try {
     const stored = localStorage.getItem(LOCALE_KEY);
     if (stored === 'en' || stored === 'pt-BR') return stored;
-  } catch {}
+  } catch { /* sem localStorage: usa o padrão */ }
   return 'pt-BR';
 }
 
@@ -56,7 +56,7 @@ function getStoredCurrency(): CurrencyConfig {
   try {
     const stored = localStorage.getItem(CURRENCY_KEY);
     if (stored) return JSON.parse(stored);
-  } catch {}
+  } catch { /* sem localStorage: usa o padrão */ }
   return { baseCurrency: 'BRL', displayCurrency: 'BRL' };
 }
 

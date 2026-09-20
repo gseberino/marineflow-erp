@@ -120,7 +120,7 @@ export function CompanyTab() {
         await supabase.storage.from('company-assets').remove(
           exts.filter(x => x !== ext).map(x => `company/logo.${x}`)
         );
-      } catch {}
+      } catch { /* limpar extensões antigas do logo é cortesia; falhar aqui não impede o envio */ }
       const { error: upErr } = await supabase.storage
         .from('company-assets')
         .upload(path, blob, { upsert: true, contentType: blob.type || `image/${ext}`, cacheControl: '3600' });

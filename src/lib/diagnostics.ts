@@ -60,9 +60,9 @@ function pushCapped<T>(buf: T[], item: T, max: number) {
 }
 
 // --- masking ---
-const JWT_RE = /\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{5,}\b/g;
-const BEARER_RE = /Bearer\s+[A-Za-z0-9._\-]+/gi;
-const LONG_TOKEN_RE = /\b[A-Za-z0-9_\-]{40,}\b/g;
+const JWT_RE = /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}\b/g;
+const BEARER_RE = /Bearer\s+[A-Za-z0-9._-]+/gi;
+const LONG_TOKEN_RE = /\b[A-Za-z0-9_-]{40,}\b/g;
 
 function mask(input: string): string {
   if (!input) return input;

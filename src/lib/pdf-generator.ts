@@ -272,7 +272,7 @@ export function generatePDF(data: PDFData, options: PDFOptions): void {
       '<script>window.addEventListener("load",function(){' +
       // Um quadro depois do load, para o layout assentar antes do diálogo.
       'requestAnimationFrame(function(){setTimeout(function(){window.print();},50);});' +
-      '});<\/script>';
+      '});</script>';
     win.document.write(html.replace('</body>', `${autoPrint}</body>`));
     win.document.close();
     win.focus();
@@ -1060,7 +1060,7 @@ function buildPaymentSection(so: PDFData['serviceOrder']): string {
         const partsTotal = Number(so.parts_cost_total || 0);
         const grandTotal = Number(so.grand_total || 0);
 
-        const svcMatch = (so.payment_conditions || '').match(/(\d+(?:[.,]\d+)?)\s*%\s*(?:m[aã]o[\s\-]de[\s\-]obra|servi[cç]os?|labor)/i);
+        const svcMatch = (so.payment_conditions || '').match(/(\d+(?:[.,]\d+)?)\s*%\s*(?:m[aã]o[\s-]de[\s-]obra|servi[cç]os?|labor)/i);
         const partsMatch = (so.payment_conditions || '').match(/(\d+(?:[.,]\d+)?)\s*%\s*(?:materiais?|pe[cç]as?|produtos?|parts?)/i);
         const totalPctMatch = (so.payment_conditions || '').match(/^(\d+(?:[.,]\d+)?)\s*%\s*(?:entrada|antecipado|adiantamento)/i);
 
