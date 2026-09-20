@@ -105,3 +105,12 @@ verify_jwt = false
 # UNAUTHORIZED_NO_AUTH_HEADER antes de o código rodar — o cron falharia em silêncio.
 [functions.ai-cost-reconcile]
 verify_jwt = false
+
+# Lembretes de recebível e de saldo: chamados só pelo pg_cron (x-cron-secret, sem JWT).
+# Sem esta entrada o deploy sobe com verify_jwt=true e o gateway devolve 401 antes do
+# código — o cron das 11:00 UTC falhou assim em 20/09/2026 e ficou sem lembrete.
+[functions.receivable-reminders]
+verify_jwt = false
+
+[functions.balance-reminders]
+verify_jwt = false
