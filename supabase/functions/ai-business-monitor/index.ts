@@ -114,6 +114,25 @@ servirComCors(async (req) => {
       console.warn("[ai-business-monitor] checagem de consentimento bancário falhou (ignorada)");
     }
 
+    // (3c) Saldo do banco × soma das transações (Open Finance D4). A sincronização grava uma
+    // conferência por conexão; se a mais recente não fecha por R$ 1 ou mais, alguém precisa
+    // olhar o extrato — lançamento que não entrou não vira despesa nem receita em lugar nenhum.
+    try {
+      const { data: conexoes } = await admin.from("bank_connections").select("id, label").eq("active", true);
+      for (const c of (conexoes ?? []) as { id: string; label: string }[]) {
+        const { data: ult } = await admin
+          .from("bank_balance_checks").select("fecha, diferenca, saldo_do_provedor, saldo_calculado, conferido_em")
+          .eq("bank_connection_id", c.id).order("conferido_em", { ascending: false }).limit(1).maybeSingle();
+        if (!ult || ult.fecha || Math.abs(Number(ult.diferenca)) < 1) continue;
+        if (await claim(`saldo_divergente:${c.id}:${todayISO}`, { diferenca: ult.diferenca })) {
+          const brl = (v: unknown) => Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+          alerts.push(`🏦 Extrato de ${c.label}: o saldo do banco (${brl(ult.saldo_do_provedor)}) não bate com a soma das transações importadas (${brl(ult.saldo_calculado)}), diferença ${brl(ult.diferenca)}. Pode faltar lançamento; confira em Financeiro › Fechamento.`);
+        }
+      }
+    } catch (_e) {
+      console.warn("[ai-business-monitor] checagem saldo × soma falhou (ignorada)");
+    }
+
     // (4) Cota Contora do mês (plano Gratuito = 500 eventos/mês). Alerta em 80%.
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     const { count: fiscalEvents } = await admin

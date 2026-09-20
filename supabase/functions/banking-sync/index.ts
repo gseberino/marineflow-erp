@@ -200,6 +200,59 @@ const PREENCHIVEIS = [
  * Grava sempre, feche ou não. A série de conferências é o que mostra se a integração
  * degradou — uma que fecha hoje e não fecha amanhã diz mais que qualquer alerta isolado.
  */
+/**
+ * Open Finance D4: saldo do banco × soma das transações, SEM depender do "saldo após a
+ * transação" (o C6 via Pluggy não manda esse campo, e a conferência acima ficou muda
+ * desde 08/08). Fixa uma linha de base por conexão na primeira passagem e, depois, espera
+ * que base + soma(transações efetivadas até hoje) = saldo do banco. Lançamento que deixou
+ * de entrar aparece como diferença — e a diferença não some sozinha na sincronização
+ * seguinte, o que é exatamente o que se quer de um verificador.
+ */
+async function conferirSaldoAcumulado(admin: DbClient, conexao: any, conta: any): Promise<void> {
+  try {
+    const saldoProvedor = Number(conta?.balance);
+    if (!Number.isFinite(saldoProvedor)) return;
+    const hoje = new Date().toISOString().slice(0, 10);
+    const { data: agg, error } = await admin.rpc("soma_transacoes_conexao", { p_conexao: conexao.id, p_ate: hoje });
+    if (error) throw error;
+    const linha = Array.isArray(agg) ? agg[0] : agg;
+    const soma = Number(linha?.soma ?? 0);
+    const quantidade = Number(linha?.quantidade ?? 0);
+
+    if (conexao.saldo_base == null) {
+      const base = Number((saldoProvedor - soma).toFixed(2));
+      await admin.from("bank_connections").update({ saldo_base: base, saldo_base_em: hoje }).eq("id", conexao.id);
+      await admin.from("bank_balance_checks").insert({
+        bank_connection_id: conexao.id,
+        saldo_do_provedor: saldoProvedor,
+        saldo_calculado: saldoProvedor,
+        diferenca: 0,
+        transacoes_no_periodo: quantidade,
+        fecha: true,
+        observacao: `Linha de base fixada em ${hoje}: saldo do banco ${saldoProvedor.toFixed(2)} − soma das transações ${soma.toFixed(2)} = base ${base.toFixed(2)}.`,
+      });
+      return;
+    }
+
+    const esperado = Number((Number(conexao.saldo_base) + soma).toFixed(2));
+    const diferenca = Number((saldoProvedor - esperado).toFixed(2));
+    const fecha = Math.abs(diferenca) < 0.05;
+    await admin.from("bank_balance_checks").insert({
+      bank_connection_id: conexao.id,
+      saldo_do_provedor: saldoProvedor,
+      saldo_calculado: esperado,
+      diferenca,
+      transacoes_no_periodo: quantidade,
+      fecha,
+      observacao: fecha
+        ? "Base + soma das transações = saldo do banco."
+        : `Base (${Number(conexao.saldo_base).toFixed(2)}, de ${conexao.saldo_base_em}) + soma das transações até hoje (${soma.toFixed(2)}) = ${esperado.toFixed(2)}, mas o banco mostra ${saldoProvedor.toFixed(2)}. Diferença ${diferenca.toFixed(2)}: pode faltar lançamento, ou entrou um fora da janela.`,
+    });
+  } catch (e) {
+    console.warn("[banking-sync] conferência acumulada falhou (ignorada):", (e as Error)?.message ?? e);
+  }
+}
+
 async function conferirSaldo(
   admin: DbClient,
   conexaoId: string,
@@ -449,6 +502,7 @@ async function sincronizarConexao(
       const origem = accountSourceType(conta);
       const transacoes = await fetchTransactions(apiKey, conta.id, desde);
       await conferirSaldo(admin, conexao.id, conta, transacoes);
+      if (origem === "bank") await conferirSaldoAcumulado(admin, conexao, conta);
       if (transacoes.length === 0) continue;
 
       const linhas = transacoes.map((t) => {
