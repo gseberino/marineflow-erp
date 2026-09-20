@@ -1,5 +1,15 @@
 # Agenda Autônoma — dossiê de pesquisa, diagnóstico e proposta
 
+> **Estado em 20/09/2026 (leia antes do plano).** Este é o dossiê de 26/07 (fases 9–11, sugestões e voz). Fases 0–11 estão em produção desde
+> 23–27/07 (motor de 15 regras a cada 15 min, caixa de sugestões com IA, voz, PWA); retomada de
+> 28–29/08 deployada (/agenda na v2, widget no painel, erro 23514 visível, aba Tarefas na
+> embarcação); "IA acompanha" F0+F1 no ar desde 14/09 (missões em modo copiloto); exportação .ics
+> desde 19/09; tarefas apontam para as telas v2 desde 20/09. **Medido em 20/09 (30 dias):** 21
+> tarefas criadas (todas por regra: r4=6, r6=4, r16=3, r2=3, r1=2), 7 concluídas, 31 atrasadas; 111
+> sugestões do detector e **zero aceitas ou rejeitadas** (ninguém abre a caixa; decisão pendente do
+> dono: olhar ou desligar). Sem efeito por falta de dado: r11/r12/r14 (zero planos de manutenção).
+> O texto abaixo é o plano original e vale como registro de intenção, não como estado.
+
 **26/07/2026** · pesquisa em 21 frentes (>100 fontes: repositórios, papers, docs de produto, fóruns, casos aplicados, dados de analistas) · complementa `marineflow-agenda-tarefas.md` (Fases 0-4) e `marineflow-agenda-benchmark-mercado.md` (Fases 5-8, 33 ferramentas).
 
 ---
