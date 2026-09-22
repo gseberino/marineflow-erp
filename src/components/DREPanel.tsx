@@ -16,7 +16,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/integrations/supabase/client';
 import { exportToCSV } from '@/lib/export';
 import { montarDRE, doMes, type LancamentoDRE, type GrupoDRE } from '@/lib/dre';
-import { Download, ChevronDown, AlertTriangle, Lock } from 'lucide-react';
+import { Download, ChevronDown, AlertTriangle, CheckCircle2, Lock } from 'lucide-react';
 
 /** Lançamentos do ano com o grupo já resolvido pelo plano de contas. */
 function useLancamentosDRE(ano: number) {
@@ -70,35 +70,37 @@ function useLancamentosDRE(ano: number) {
 }
 
 /**
- * Quanto entrou na conta e ainda não virou receita lançada.
+ * Cobertura: quanto do dinheiro que passou pelo banco este resultado explica.
  *
- * Existe porque este DRE nasce torto por construção: a caixa de entrada lança DESPESA
- * automaticamente, mas nunca receita — entrada quase sempre corresponde a um orçamento ou
- * OS que já existe, e criar receita avulsa duplicaria o faturamento na hora de faturar.
- * A consequência é um resultado com quase todas as despesas e quase nenhuma receita, que
- * mostra prejuízo onde não há. Sem este aviso, o número mente com cara de certo.
+ * Este DRE nasce torto por construção: a caixa de entrada lança DESPESA automaticamente, mas
+ * nunca receita — entrada quase sempre corresponde a um orçamento ou OS que já existe, e criar
+ * receita avulsa duplicaria o faturamento na hora de faturar. A consequência medida em
+ * 22/09/2026: 38% das entradas do ano viraram receita, contra 96% das saídas. O resultado
+ * mostra prejuízo onde não há.
+ *
+ * A conta vem da função `dre_cobertura` no banco (mesma base do DRE: lançamento por
+ * issue_date, banco por transaction_date), para painel, agente e briefing dizerem o mesmo
+ * número.
  */
-function useEntradasNaoLancadas(ano: number) {
+function useCoberturaDRE(ano: number) {
   return useQuery({
-    queryKey: ['dre-entradas-pendentes', ano],
+    queryKey: ['dre-cobertura', ano],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('bank_transactions')
-        .select('amount')
-        .eq('transaction_type', 'credit')
-        .eq('reconciled', false)
-        .eq('source_type', 'bank')
-        .gte('transaction_date', `${ano}-01-01`)
-        .lte('transaction_date', `${ano}-12-31`);
+      const { data, error } = await supabase.rpc('dre_cobertura', { p_ano: ano });
       if (error) throw error;
-      const linhas = (data ?? []) as { amount: number }[];
-      return {
-        quantidade: linhas.length,
-        valor: linhas.reduce((s, t) => s + Number(t.amount), 0),
-      };
+      return (data ?? []) as Array<{
+        mes: number; receita_lancada: number; entrada_banco: number;
+        despesa_lancada: number; saida_banco: number;
+      }>;
     },
     staleTime: 60_000,
   });
+}
+
+/** Percentual coberto, ou null quando não houve movimento no banco (nada a comparar). */
+function cobertura(lancado: number, banco: number): number | null {
+  if (!banco) return null;
+  return Math.round((100 * lancado) / banco);
 }
 
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
@@ -111,7 +113,25 @@ export function DREPanel() {
   const [mes, setMes] = useState<number | 'ano'>('ano');
 
   const { data: lancamentos = [], isLoading } = useLancamentosDRE(ano);
-  const { data: entradasPendentes } = useEntradasNaoLancadas(ano);
+  const { data: linhasCobertura = [] } = useCoberturaDRE(ano);
+
+  // O selo acompanha o recorte escolhido: olhar o ano inteiro quando a tela mostra março
+  // diria que o número está bom enquanto março está vazio.
+  const selo = useMemo(() => {
+    const linhas = mes === 'ano' ? linhasCobertura : linhasCobertura.filter((l) => l.mes === mes);
+    const soma = (f: (l: typeof linhas[number]) => number) => linhas.reduce((s, l) => s + Number(f(l) || 0), 0);
+    const receita = soma((l) => l.receita_lancada);
+    const entrada = soma((l) => l.entrada_banco);
+    const despesa = soma((l) => l.despesa_lancada);
+    const saida = soma((l) => l.saida_banco);
+    return {
+      receita, entrada, despesa, saida,
+      pctReceita: cobertura(receita, entrada),
+      pctDespesa: cobertura(despesa, saida),
+      faltaReceita: Math.max(0, entrada - receita),
+      semMovimento: entrada === 0 && saida === 0,
+    };
+  }, [linhasCobertura, mes]);
 
   const recorte = useMemo(
     () => (mes === 'ano' ? lancamentos : doMes(lancamentos, ano, mes)),
@@ -179,21 +199,10 @@ export function DREPanel() {
         </div>
       )}
 
-      {/* Primeiro aviso da tela, de propósito: quem lê um resultado precisa saber que ele
-          está torto ANTES de ler o número, não depois. */}
-      {!!entradasPendentes?.quantidade && (
-        <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            <strong>Este resultado está incompleto do lado da receita.</strong>{' '}
-            {entradasPendentes.quantidade} entrada(s) somando{' '}
-            <strong>{formatCurrency(entradasPendentes.valor)}</strong> caíram na conta e
-            ainda não viraram receita lançada — o sistema não cria receita sozinho para não
-            duplicar o que a OS vai faturar. Enquanto isso, quase toda a despesa já está
-            aqui, então o resultado abaixo <strong>parece pior do que é</strong>.
-            Concilie as entradas na aba Conciliação para o número fechar.
-          </span>
-        </div>
+      {/* Primeiro elemento da tela, de propósito: quem lê um resultado precisa saber o
+          quanto ele é confiável ANTES de ler o número, não depois. */}
+      {!selo.semMovimento && (
+        <SeloDeConfiabilidade selo={selo} formatCurrency={formatCurrency} />
       )}
 
       {dre.semGrupo !== 0 && (
@@ -283,6 +292,94 @@ export function DREPanel() {
           </div>
         </Card>
       )}
+    </div>
+  );
+}
+
+
+/**
+ * O selo diz, em uma linha, o quanto deste resultado dá para acreditar — e mostra a conta
+ * que sustenta a afirmação, para ninguém precisar confiar no rótulo.
+ *
+ * Faixa deliberada: até 60% o resultado não serve para decidir; de 60 a 90 serve com
+ * ressalva; acima de 90 fecha. O lado da despesa passa de 100% quando a conta foi emitida
+ * num mês e paga noutro — é descasamento de data, e o texto diz isso em vez de esconder.
+ */
+function SeloDeConfiabilidade({
+  selo, formatCurrency,
+}: {
+  selo: {
+    receita: number; entrada: number; despesa: number; saida: number;
+    pctReceita: number | null; pctDespesa: number | null; faltaReceita: number;
+  };
+  formatCurrency: (v: number) => string;
+}) {
+  const pct = selo.pctReceita;
+  const nivel = pct == null ? 'sem' : pct >= 90 ? 'bom' : pct >= 60 ? 'parcial' : 'ruim';
+
+  const estilo = {
+    bom: 'border-success/40 bg-success/10 text-success',
+    parcial: 'border-warning/40 bg-warning/10 text-warning',
+    ruim: 'border-destructive/40 bg-destructive/10 text-destructive',
+    sem: 'border-muted-foreground/30 bg-muted/40 text-muted-foreground',
+  }[nivel];
+
+  const titulo = {
+    bom: 'Resultado confiável.',
+    parcial: 'Resultado parcial.',
+    ruim: 'Este resultado não fecha.',
+    sem: 'Sem entrada no banco neste período.',
+  }[nivel];
+
+  return (
+    <div className={`rounded-lg border p-3 text-sm ${estilo}`}>
+      <div className="flex items-start gap-2">
+        {nivel === 'bom'
+          ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+          : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
+        <div className="min-w-0 space-y-1.5">
+          <p>
+            <strong>{titulo}</strong>{' '}
+            {pct != null && (
+              <>
+                O sistema explica <strong>{pct}%</strong> do que entrou na conta
+                {selo.faltaReceita > 0 && (
+                  <> — faltam <strong>{formatCurrency(selo.faltaReceita)}</strong> sem receita lançada</>
+                )}
+                .{' '}
+              </>
+            )}
+            {nivel === 'ruim' && (
+              <>A despesa está quase toda aqui e boa parte da receita não, então o resultado
+              abaixo <strong>parece pior do que é</strong>. Concilie as entradas na aba
+              Conciliação — ou feche no sistema as ordens de serviço que geraram esse dinheiro.</>
+            )}
+            {nivel === 'parcial' && (
+              <>Serve para acompanhar a tendência, ainda não para decidir com precisão.</>
+            )}
+            {nivel === 'bom' && (
+              <>Entradas e lançamentos batem: o resultado abaixo pode ser usado para decidir.</>
+            )}
+          </p>
+
+          {/* A conta, à vista: o rótulo acima é uma leitura, isto é o dado. */}
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs tabular-nums opacity-90">
+            <span>
+              Receita lançada {formatCurrency(selo.receita)} de {formatCurrency(selo.entrada)} que entrou
+            </span>
+            <span>
+              Despesa lançada {formatCurrency(selo.despesa)} de {formatCurrency(selo.saida)} que saiu
+              {selo.pctDespesa != null && ` (${selo.pctDespesa}%)`}
+            </span>
+          </div>
+          {selo.pctDespesa != null && selo.pctDespesa > 105 && (
+            <p className="text-xs opacity-80">
+              A despesa passa de 100% porque a conta é contada pela emissão e a saída do banco
+              pelo pagamento: contas emitidas neste mês saíram da conta noutro.
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

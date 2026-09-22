@@ -12282,6 +12282,16 @@ export type Database = {
       }
       prune_app_error_logs: { Args: { p_days?: number }; Returns: number }
       recalc_po_total: { Args: { p_po_id: string }; Returns: undefined }
+      dre_cobertura: {
+        Args: { p_ano: number }
+        Returns: {
+          mes: number
+          receita_lancada: number
+          entrada_banco: number
+          despesa_lancada: number
+          saida_banco: number
+        }[]
+      }
       calc_so_totals: {
         Args: { so_id: string }
         Returns: {
