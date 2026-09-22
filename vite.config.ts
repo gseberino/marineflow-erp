@@ -14,25 +14,16 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   build: {
-    // MF-AUD-048 (19/09/2026): mesmo com 71 páginas em lazy, o chunk principal tinha 2,26 MB
-    // porque todas as bibliotecas compartilhadas caíam nele. Separar por pacote faz o
-    // navegador guardar em cache o que não muda entre deploys (React, Radix, Supabase,
-    // gráficos, ícones) e baixar de novo só o código do app. Nenhum efeito funcional.
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes("node_modules")) return undefined;
-          if (/[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id)) return "vendor-react";
-          if (id.includes("/node_modules/@radix-ui/") || id.includes("\\node_modules\\@radix-ui\\")) return "vendor-radix";
-          if (/[\\/]node_modules[\\/]@supabase[\\/]/.test(id)) return "vendor-supabase";
-          if (/[\\/]node_modules[\\/]@tanstack[\\/]/.test(id)) return "vendor-query";
-          if (/[\\/]node_modules[\\/](recharts|d3-[a-z-]+|victory-vendor)[\\/]/.test(id)) return "vendor-charts";
-          if (/[\\/]node_modules[\\/]lucide-react[\\/]/.test(id)) return "vendor-icons";
-          if (/[\\/]node_modules[\\/](date-fns|framer-motion|zod)[\\/]/.test(id)) return "vendor-utils";
-          return undefined;
-        },
-      },
-    },
+    // MF-AUD-048: a divisão manual por pacote (19/09/2026) DERRUBOU a aplicação — tela branca
+    // com "Cannot access 'P' before initialization" vindo de vendor-charts. Causa: separar
+    // pacotes em chunks manuais cria ciclo de importação ENTRE chunks (recharts depende de
+    // módulos que ficaram noutro chunk, e aquele chunk depende de volta), e o ciclo vira
+    // violação de TDZ na hora de avaliar — coisa que `tsc`, `vite build` e os testes de
+    // componente não pegam, porque só existe no bundle final avaliado pelo navegador.
+    //
+    // O chunk único de 2,26 MB é o preço de uma aplicação que abre. Se voltarmos a dividir,
+    // a regra é: provar por RENDER (abrir o build no navegador e exigir #root preenchido)
+    // antes de publicar — ver scripts/verifica-build-renderiza.mjs.
   },
   resolve: {
     alias: {
