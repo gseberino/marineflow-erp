@@ -615,6 +615,20 @@ export default function FiscalEmission() {
   const [errorDetail, setErrorDetail] = useState<any | null>(null);
   // Diálogo de "Baixar estoque + recebível" (à vista ou parcelado).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  /**
+   * A nota aberta apenas para CONSULTA.
+   *
+   * Antes dava para clicar na nota e ver a tela cheia; ao trocar as ações pelo menu de
+   * três pontos, sobrou só o PDF -- e o PDF não mostra o CFOP de um item, a base de
+   * cálculo, o CSOSN nem a chave de acesso. Uma nota autorizada não pode ser editada,
+   * mas precisa poder ser LIDA, e a tela que já sabe exibir tudo isso é a de emissão.
+   *
+   * Quando isto não é nulo, o formulário inteiro vai dentro de um `fieldset disabled`:
+   * o navegador desliga todos os campos e botões descendentes de uma vez, sem depender
+   * de alguém lembrar de passar `disabled` em cinquenta lugares -- e sem que o próximo
+   * campo adicionado nasça editável por esquecimento.
+   */
+  const [viewDoc, setViewDoc] = useState<any | null>(null);
   const [settleTarget, setSettleTarget] = useState<any | null>(null);
   const [settleMode, setSettleMode] = useState<'avista' | 'parcelado'>('avista');
   const [settleN, setSettleN] = useState(2);
@@ -1079,6 +1093,40 @@ export default function FiscalEmission() {
     }));
     setCurrentDraftId(null); // veio de reemissão/faturamento/devolução — não é um rascunho salvo
     setShowEmit(true);
+  };
+
+  /**
+   * Abrir a nota para LER: os mesmos campos, todos desligados.
+   *
+   * Reusa o preenchimento da reemissão de propósito — manter dois caminhos que leem o
+   * mesmo payload é garantir que um deles fique para trás.
+   */
+  const handleViewDoc = (doc: any) => {
+    handleReemitFromDoc(doc);
+    setViewDoc(doc);
+  };
+
+  /**
+   * O que ainda dá para fazer com esta nota, e até quando.
+   *
+   * A janela de 24h não é decoração: passada ela, a SEFAZ recusa o cancelamento e o
+   * caminho passa a ser emitir uma NF-e de devolução. Quem descobre isso na hora de
+   * cancelar já perdeu o prazo.
+   */
+  const prazosDaNota = (doc: any) => {
+    if (!doc || doc.status !== 'authorized') return null;
+    const bruta = doc.authorized_at || doc.provider_status?.sefaz?.authorized_at;
+    if (!bruta) return null;
+    const horas = (Date.now() - new Date(bruta).getTime()) / 3_600_000;
+    const restam = 24 - horas;
+    return {
+      horas,
+      dentroDoPrazo: restam > 0,
+      // Em horas enquanto faz sentido contar assim; em dias quando já passou.
+      texto: restam > 0
+        ? 'Faltam ' + Math.floor(restam) + 'h' + Math.round((restam % 1) * 60) + 'min para cancelar sem ônus.'
+        : 'O prazo de 24h para cancelamento venceu há ' + Math.floor(horas / 24) + ' dia(s).',
+    };
   };
 
   // "Gerar devolução" a partir de uma nota AUTORIZADA: cria uma NF-e de devolução
@@ -2352,7 +2400,13 @@ export default function FiscalEmission() {
                   && !!doc.request_payload;
                 const emAndamento = ['draft', 'queued', 'processing'].includes(doc.status);
                 return (
-                  <TableRow key={doc.id} className="hover:bg-muted/30">
+                  // Clicar na linha abre a nota, como era antes do menu de ações; o
+                  // clique nos botões não sobe até aqui porque o menu para a propagação.
+                  <TableRow
+                    key={doc.id}
+                    className="hover:bg-muted/30 cursor-pointer"
+                    onClick={() => handleViewDoc(doc)}
+                  >
                     <TableCell className="font-mono align-top">
                       <div className="whitespace-nowrap">{doc.series}/{doc.number}</div>
                       {/* O tipo estava só implícito: a lista mistura NF-e e NFS-e e não
@@ -2451,6 +2505,9 @@ export default function FiscalEmission() {
                           onClick: () => handleViewArtifact(doc, 'pdf_danfe'),
                         }] : []}
                         menu={[
+                          // Primeira do menu: ver a nota é o que se faz mais depois de
+                          // baixá-la, e era a única coisa que a tela deixou de oferecer.
+                          { texto: 'Ver detalhes da nota', icone: Eye, onClick: () => handleViewDoc(doc) },
                           ...(autorizada ? [
                             { texto: 'Baixar XML autorizado', icone: Download, onClick: () => handleViewArtifact(doc, 'xml_authorized') },
                             ...(doc.client_id ? [{ texto: 'Enviar ao cliente por WhatsApp', icone: Send, onClick: () => handleSendToClient(doc) }] : []),
@@ -2795,21 +2852,75 @@ export default function FiscalEmission() {
       </Dialog>
 
       {/* ── Dialog: emitir NF-e ── */}
-      <Dialog open={showEmit} onOpenChange={setShowEmit}>
+      <Dialog open={showEmit} onOpenChange={(o) => { setShowEmit(o); if (!o) setViewDoc(null); }}>
         {/* Largura generosa e adaptável: usa até 1200px, encolhendo para 97vw em
             telas menores. overflow-x-hidden garante ZERO barra horizontal; com a
             largura maior, nada mais fica cortado (o antigo cap de 768px cortava). */}
         <DialogContent className="max-w-[1200px] w-[97vw] max-h-[92vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
-            <DialogTitle>Emitir NF-e</DialogTitle>
+            <DialogTitle>
+              {viewDoc
+                ? `${tipoDaNota(viewDoc)} ${viewDoc.series}/${viewDoc.number} — consulta`
+                : 'Emitir NF-e'}
+            </DialogTitle>
             <DialogDescription>
-              O ambiente de emissão (homologação ou produção) é definido nos Secrets do servidor e confirmado na mensagem
-              de sucesso. A autorização chega em segundos a minutos — acompanhe pelo histórico.
+              {viewDoc
+                ? 'Nota já emitida: os campos estão travados porque o documento não admite edição. Para corrigir dados que não mudam valores, impostos, destinatário nem datas, use a Carta de Correção; para desfazer a operação, emita uma devolução.'
+                : 'O ambiente de emissão (homologação ou produção) é definido nos Secrets do servidor e confirmado na mensagem de sucesso. A autorização chega em segundos a minutos — acompanhe pelo histórico.'}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-5">
-            {isProducao && (
+          {/* Os dados que só existem depois da autorização e que o formulário não tem
+              onde mostrar: chave, protocolo e o relógio do cancelamento. */}
+          {viewDoc && (() => {
+            const prazo = prazosDaNota(viewDoc);
+            const st = STATUS_MAP[viewDoc.status] ?? STATUS_MAP.draft;
+            return (
+              <div className="rounded-lg border bg-muted/40 p-3 text-xs space-y-1.5">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 font-semibold ${st.className}`}>
+                    {st.label}
+                  </span>
+                  <span className="text-muted-foreground">
+                    Emissão: <strong className="text-foreground">{dataDaNota(viewDoc) ? formatDate(dataDaNota(viewDoc)!) : '—'}</strong>
+                  </span>
+                  <span className="text-muted-foreground">
+                    Total: <strong className="text-foreground tabular-nums">{formatCurrency(totalDaNota(viewDoc))}</strong>
+                  </span>
+                  {naturezaDaNota(viewDoc) && (
+                    <span className="text-muted-foreground">
+                      Natureza: <strong className="text-foreground">{naturezaDaNota(viewDoc)}</strong>
+                    </span>
+                  )}
+                </div>
+                {viewDoc.access_key && (
+                  <p className="text-muted-foreground break-all">
+                    Chave de acesso: <span className="font-mono text-foreground">{viewDoc.access_key}</span>
+                  </p>
+                )}
+                {viewDoc.protocol && (
+                  <p className="text-muted-foreground">
+                    Protocolo: <span className="font-mono text-foreground">{viewDoc.protocol}</span>
+                  </p>
+                )}
+                {prazo && (
+                  <p className={prazo.dentroDoPrazo ? 'text-amber-700' : 'text-muted-foreground'}>
+                    {prazo.texto}{' '}
+                    {prazo.dentroDoPrazo
+                      ? 'Depois disso, desfazer a venda exige uma NF-e de devolução.'
+                      : 'Para desfazer a operação, emita uma NF-e de devolução referenciando esta nota.'}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* fieldset[disabled] desliga TODOS os campos e botões descendentes de uma vez.
+              A alternativa seria espalhar `disabled` por dezenas de controles — e o
+              próximo campo adicionado nasceria editável por esquecimento.
+              `min-w-0` neutraliza o min-width padrão do fieldset, que quebraria o grid. */}
+          <fieldset disabled={!!viewDoc} className="space-y-5 min-w-0 border-0 p-0 m-0">
+            {isProducao && !viewDoc && (
               <div className="rounded-lg border-2 border-red-500 bg-red-50 p-3 text-sm text-red-800">
                 <span className="font-bold text-red-600">⚠ PRODUÇÃO — nota fiscal REAL.</span>{' '}
                 Esta emissão vai para a SEFAZ de verdade e não é um teste. Revise destinatário, itens e impostos.
@@ -3294,36 +3405,64 @@ export default function FiscalEmission() {
                 ))}
               </ul>
             </div>
-          </div>
+          </fieldset>
 
+          {/* O rodapé fica FORA do fieldset: em consulta os botões aqui são os únicos
+              que ainda fazem sentido, e não podem ser desligados junto com o resto. */}
           <DialogFooter className="gap-2 sm:gap-2">
-            <Button variant="outline" onClick={() => setShowEmit(false)}>Cancelar</Button>
-            <Button
-              variant="outline"
-              onClick={() => handleSaveDraft()}
-              disabled={savingDraft || emitting || includedItems.length === 0}
-              title="Salva o que você montou (sem emitir). Retome depois em 'Rascunhos'. Não reserva número fiscal."
-            >
-              {savingDraft ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-              {currentDraftId ? 'Atualizar rascunho' : 'Salvar rascunho'}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleGenerateEspelho}
-              disabled={generatingEspelho || emitting || includedItems.length === 0 || !preflightOk}
-              title="Abre o espelho (pré-DANFE) da nota numa nova aba, SEM VALOR FISCAL e SEM enviar à SEFAZ — para conferir antes de emitir e enviar ao cliente/fornecedor. Salve como PDF (Imprimir → Salvar como PDF)."
-            >
-              {generatingEspelho ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
-              {generatingEspelho ? 'Gerando espelho…' : 'Gerar espelho'}
-            </Button>
-            <Button
-              onClick={handleEmit}
-              disabled={emitting || generatingEspelho || includedItems.length === 0 || !preflightOk}
-              title="Gera o espelho para conferência; a nota só vai à SEFAZ depois que você confirmar"
-            >
-              {emitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
-              {isReturn ? 'Emitir Devolução' : 'Emitir NF-e'}
-            </Button>
+            {viewDoc ? (
+              <>
+                <Button variant="outline" onClick={() => { setShowEmit(false); setViewDoc(null); }}>Fechar</Button>
+                {viewDoc.status === 'authorized' && (
+                  <>
+                    <Button
+                      variant="outline"
+                      disabled={busyDocIds.has(viewDoc.id)}
+                      onClick={() => handleViewArtifact(viewDoc, 'xml_authorized')}
+                    >
+                      <Download className="h-4 w-4 mr-2" />XML
+                    </Button>
+                    <Button
+                      disabled={busyDocIds.has(viewDoc.id)}
+                      onClick={() => handleViewArtifact(viewDoc, 'pdf_danfe')}
+                    >
+                      <FileDown className="h-4 w-4 mr-2" />
+                      {tipoDaNota(viewDoc) === 'NFS-e' ? 'PDF' : 'DANFE'}
+                    </Button>
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setShowEmit(false)}>Cancelar</Button>
+                <Button
+                  variant="outline"
+                  onClick={() => handleSaveDraft()}
+                  disabled={savingDraft || emitting || includedItems.length === 0}
+                  title="Salva o que você montou (sem emitir). Retome depois em 'Rascunhos'. Não reserva número fiscal."
+                >
+                  {savingDraft ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                  {currentDraftId ? 'Atualizar rascunho' : 'Salvar rascunho'}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleGenerateEspelho}
+                  disabled={generatingEspelho || emitting || includedItems.length === 0 || !preflightOk}
+                  title="Abre o espelho (pré-DANFE) da nota numa nova aba, SEM VALOR FISCAL e SEM enviar à SEFAZ — para conferir antes de emitir e enviar ao cliente/fornecedor. Salve como PDF (Imprimir → Salvar como PDF)."
+                >
+                  {generatingEspelho ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
+                  {generatingEspelho ? 'Gerando espelho…' : 'Gerar espelho'}
+                </Button>
+                <Button
+                  onClick={handleEmit}
+                  disabled={emitting || generatingEspelho || includedItems.length === 0 || !preflightOk}
+                  title="Gera o espelho para conferência; a nota só vai à SEFAZ depois que você confirmar"
+                >
+                  {emitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
+                  {isReturn ? 'Emitir Devolução' : 'Emitir NF-e'}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
