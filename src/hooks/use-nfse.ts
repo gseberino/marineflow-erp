@@ -24,7 +24,15 @@ export interface DocumentoNfse {
    * é NACIONAL, gerado pela Sefin na autorização — chega via status/reconcile e fica em
    * provider_status (nfse_number/display_number). Confundir os dois é erro clássico.
    */
-  provider_status?: { nfse_number?: string | null; display_number?: string | null } | null;
+  provider_status?: {
+    nfse_number?: string | null;
+    display_number?: string | null;
+    /** Evento de autorização: a data REAL da nota, com fuso — ver `dataDaNota`. */
+    latest_event?: { status?: string | null; created_at?: string | null } | null;
+  } | null;
+  /** Quem tomou o serviço e quanto deu. Sem isto a lista não tinha o que mostrar. */
+  request_payload?: Record<string, unknown> | null;
+  authorized_at?: string | null;
 }
 
 /** Número nacional da NFS-e (pós-autorização), quando já sincronizado. */
@@ -107,7 +115,9 @@ export function useNfseDocumentos() {
     queryFn: async (): Promise<DocumentoNfse[]> => {
       const { data, error } = await supabase
         .from('issued_fiscal_documents')
-        .select('id, number, series, status, environment, status_message, created_at, origin_id, provider_status')
+        // request_payload traz tomador e valor; authorized_at, a data que vale.
+        // Sem eles a lista mostrava só número e status, e não dava para achar uma nota.
+        .select('id, number, series, status, environment, status_message, created_at, origin_id, provider_status, request_payload, authorized_at, document_type')
         .eq('document_type', 'nfse')
         .order('created_at', { ascending: false })
         .order('id', { ascending: true })

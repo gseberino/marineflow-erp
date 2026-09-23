@@ -30,6 +30,9 @@ import {
   Stethoscope, AlertTriangle, CheckCircle2, FileText, Download, Ban,
   RefreshCw, Loader2,
 } from 'lucide-react';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { tomadorDaNota, totalDaNota, dataDaNota } from '@/lib/nota-fiscal-leitura';
+import { maskCPFCNPJ } from '@/lib/masks';
 
 export function NfseSection({ serviceOrderId }: { serviceOrderId?: string | null }) {
   const { formatCurrency, formatDate } = useI18n();
@@ -235,6 +238,23 @@ function PainelDeProntidao({ health }: { health: ReturnType<typeof useNfseHealth
   );
 }
 
+const ROTULO_STATUS: Record<string, string> = {
+  draft: 'Rascunho',
+  queued: 'Na fila',
+  processing: 'Processando',
+  authorized: 'Autorizada',
+  rejected: 'Rejeitada',
+  failed: 'Falhou',
+  cancelled: 'Cancelada',
+};
+
+/**
+ * Uma NFS-e na lista.
+ *
+ * Mostrava só número, status e a data de criação da linha. Faltava o essencial para
+ * ACHAR a nota — o tomador — e o valor, que nem vinha do banco. E as quatro ações ficavam
+ * lado a lado, com "cancelar" do mesmo tamanho que "baixar XML".
+ */
 function LinhaDaNota({ doc, onCancelar, formatCurrency, formatDate }: {
   doc: DocumentoNfse;
   onCancelar: () => void;
@@ -249,9 +269,16 @@ function LinhaDaNota({ doc, onCancelar, formatCurrency, formatDate }: {
     failed: 'bg-destructive/10 text-destructive',
   };
 
+  const tomador = tomadorDaNota(doc);
+  const total = totalDaNota(doc);
+  const emissao = dataDaNota(doc);
+  const autorizada = doc.status === 'authorized';
+  const baixar = (tipo: 'xml' | 'pdf' | 'rps') =>
+    artefato.mutate({ documentId: doc.id, tipo, numero: doc.number, serie: doc.series });
+
   return (
     <Card className="p-3">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           {/* O número que vale é o NACIONAL (gerado pela Sefin na autorização); o RPS é a
               nossa numeração interna de envio. Antes de autorizar só existe o RPS. */}
@@ -260,44 +287,51 @@ function LinhaDaNota({ doc, onCancelar, formatCurrency, formatDate }: {
               ? <>NFS-e nº {numeroNacionalNfse(doc)} <span className="font-normal text-muted-foreground">· RPS {doc.number ?? '—'}/{doc.series ?? '—'}</span></>
               : <>RPS {doc.number ?? '—'} · série {doc.series ?? '—'}</>}
           </p>
+          {/* O tomador vem antes da data: é por ele que se procura uma nota. */}
+          <p className="truncate text-sm">
+            {tomador.nome || <span className="text-muted-foreground">Tomador não identificado</span>}
+            {tomador.documento && (
+              <span className="ml-1.5 font-mono text-xs text-muted-foreground">
+                {maskCPFCNPJ(tomador.documento)}
+              </span>
+            )}
+          </p>
           <p className="truncate text-xs text-muted-foreground">
-            {doc.created_at ? formatDate(doc.created_at) : ''}
+            {emissao ? formatDate(emissao) : ''}
             {doc.environment === 'homologacao' && ' · homologação (sem valor fiscal)'}
             {doc.status_message ? ` · ${doc.status_message}` : ''}
           </p>
         </div>
 
-        <Badge className={`shrink-0 ${cor[doc.status] ?? 'bg-secondary'}`}>{doc.status}</Badge>
+        <Badge className={`shrink-0 ${cor[doc.status] ?? 'bg-secondary'}`}>
+          {ROTULO_STATUS[doc.status] ?? doc.status}
+        </Badge>
 
-        {doc.status === 'authorized' && (
-          <>
-            <Button
-              size="sm" variant="outline" className="shrink-0"
-              onClick={() => artefato.mutate({ documentId: doc.id, tipo: 'xml', numero: doc.number, serie: doc.series })}
-              disabled={artefato.isPending}
-            >
-              <Download className="mr-1.5 h-4 w-4" />XML
-            </Button>
-            <Button
-              size="sm" variant="outline" className="shrink-0"
-              onClick={() => artefato.mutate({ documentId: doc.id, tipo: 'pdf', numero: doc.number, serie: doc.series })}
-              disabled={artefato.isPending}
-            >
-              <Download className="mr-1.5 h-4 w-4" />DANFSe
-            </Button>
-            <Button
-              size="sm" variant="ghost" className="shrink-0"
-              title="XML do RPS — a via da DPS assinada/transmitida por nós (probatório)"
-              onClick={() => artefato.mutate({ documentId: doc.id, tipo: 'rps', numero: doc.number, serie: doc.series })}
-              disabled={artefato.isPending}
-            >
-              <Download className="mr-1.5 h-4 w-4" />RPS
-            </Button>
-            <Button size="sm" variant="outline" className="shrink-0" onClick={onCancelar}>
-              <Ban className="mr-1.5 h-4 w-4" />Cancelar
-            </Button>
-          </>
-        )}
+        {/* O valor fecha a leitura da linha, à direita — como na lista de NF-e. */}
+        <div className="shrink-0 text-right tabular-nums">
+          <p className="font-semibold">{formatCurrency(total)}</p>
+        </div>
+
+        <AcoesDaLinha
+          rotulo={`NFS-e ${numeroNacionalNfse(doc) ?? `RPS ${doc.number ?? ''}`}`}
+          tituloDoMenu={`NFS-e ${numeroNacionalNfse(doc) ?? `RPS ${doc.number ?? ''}`}`}
+          ocupada={artefato.isPending}
+          className="shrink-0"
+          rapidas={autorizada ? [{
+            texto: 'PDF', icone: Download,
+            titulo: 'Baixar a DANFSe (.pdf)',
+            onClick: () => baixar('pdf'),
+          }] : []}
+          menu={autorizada ? [
+            { texto: 'Baixar XML da NFS-e', icone: Download, onClick: () => baixar('xml') },
+            {
+              texto: 'Baixar XML do RPS', icone: Download,
+              titulo: 'A via da DPS assinada/transmitida por nós (probatório)',
+              onClick: () => baixar('rps'),
+            },
+            { texto: 'Cancelar NFS-e', icone: Ban, perigo: true, onClick: onCancelar },
+          ] : []}
+        />
       </div>
     </Card>
   );

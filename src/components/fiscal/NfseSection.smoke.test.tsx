@@ -109,7 +109,10 @@ describe('seção de NFS-e', () => {
     }];
     renderSecao();
 
-    await user.click(await screen.findByRole('button', { name: /Cancelar/ }));
+    // Cancelar deixou de ser um botão solto na linha: é ação destrutiva e vive no menu,
+    // depois do separador. Ver AcoesDaLinha.
+    await user.click(await screen.findByRole('button', { name: /mais ações para nfs-e/i }));
+    await user.click(await screen.findByText(/Cancelar NFS-e/i));
     const acao = await screen.findByRole('button', { name: /Cancelar a nota/ });
     expect(acao).toBeDisabled(); // vazio
 
