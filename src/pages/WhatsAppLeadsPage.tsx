@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -526,16 +527,50 @@ function LeadsView() {
                   {lead.linked_client && (
                     <p className="mt-2 text-xs text-blue-700">→ {lead.linked_client.name}</p>
                   )}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setSelected(lead)}>Ver mensagens</Button>
-                    {lead.status === 'pending' && (
-                      <>
-                        <Button size="sm" onClick={() => { setSelected(lead); setConvertName(lead.name || ''); setConvertOpen(true); }}><UserPlus className="h-3.5 w-3.5 mr-1" />Converter</Button>
-                        <Button size="sm" variant="secondary" onClick={() => { setSelected(lead); setLinkClientId(null); setLinkOpen(true); }}><Link2 className="h-3.5 w-3.5 mr-1" />Vincular</Button>
-                        <Button size="sm" variant="ghost" onClick={() => discardMut.mutate(lead.id)} className="text-destructive"><Trash2 className="h-3.5 w-3.5 mr-1" />Descartar</Button>
-                        <Button size="sm" variant="ghost" onClick={() => addBlocked.mutate({ phone: lead.phone_normalized, reason: 'Bloqueado da lista de leads' })} className="text-destructive"><Ban className="h-3.5 w-3.5 mr-1" />Bloquear</Button>
-                      </>
-                    )}
+                  {/*
+                    Descartar e bloquear disparavam na hora, sem confirmação, no mesmo
+                    tamanho e à mesma distância de "ver mensagens" — um clique errado
+                    sumia com o lead ou barrava o número. Agora vivem no menu, marcadas,
+                    e à vista ficam só as duas que se usa o tempo todo.
+                  */}
+                  <div className="mt-3">
+                    <AcoesDaLinha
+                      rotulo={`lead ${lead.name || formatPhone(lead.phone_normalized)}`}
+                      className="justify-start"
+                      rapidas={[
+                        { texto: 'Ver mensagens', onClick: () => setSelected(lead) },
+                        ...(lead.status === 'pending'
+                          ? [{
+                              texto: 'Converter',
+                              icone: UserPlus,
+                              titulo: 'Transformar este contato em cliente cadastrado',
+                              onClick: () => { setSelected(lead); setConvertName(lead.name || ''); setConvertOpen(true); },
+                            }]
+                          : []),
+                      ]}
+                      menu={lead.status === 'pending' ? [
+                        {
+                          texto: 'Vincular a cliente existente',
+                          icone: Link2,
+                          onClick: () => { setSelected(lead); setLinkClientId(null); setLinkOpen(true); },
+                        },
+                        {
+                          texto: 'Descartar lead',
+                          icone: Trash2,
+                          perigo: true,
+                          onClick: () => discardMut.mutate(lead.id),
+                        },
+                        {
+                          texto: 'Bloquear este número',
+                          icone: Ban,
+                          perigo: true,
+                          onClick: () => addBlocked.mutate({
+                            phone: lead.phone_normalized,
+                            reason: 'Bloqueado da lista de leads',
+                          }),
+                        },
+                      ] : []}
+                    />
                   </div>
                 </div>
               ))}
