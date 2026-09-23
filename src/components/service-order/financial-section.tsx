@@ -108,7 +108,29 @@ export function FinancialSection(props: FinancialSectionProps) {
   } = props;
   const { t, formatCurrency } = useI18n();
   const [showCommission, setShowCommission] = useState(false);
-  const [presetKey, setPresetKey] = useState(0);
+  /**
+   * O que o seletor de condição de pagamento está mostrando agora.
+   *
+   * Ele era NAO-CONTROLADO (sem `value`) e ainda por cima era remontado a cada escolha
+   * via `key={presetKey}` — o próprio handler incrementava a chave no final. O efeito:
+   * a pessoa escolhia "À vista", o campo era destruído e recriado, e voltava a exibir
+   * "Pré-definidas...". Para quem usa, isso é indistinguível de "não dá para selecionar"
+   * — foi exatamente a queixa do dono em 23/09/2026 —, e um orçamento salvo com condição
+   * gravada reabria com o campo em branco, como se a condição tivesse se perdido.
+   *
+   * Agora o campo reflete o formulário: o preset pelo id (ou pelo rótulo, para os
+   * orçamentos antigos que gravaram só o texto), "Personalizado" quando há parcelas
+   * próprias, e vazio quando a condição foi digitada à mão no campo ao lado.
+   */
+  const CONDICAO_PERSONALIZADA = '__custom__';
+  const presetSelecionado = (paymentPresets || []).find((p: any) =>
+    p.id === form.payment_condition_preset_id
+    || (!form.payment_condition_preset_id && p.label === form.payment_conditions));
+  // Lido do form direto: customInstallments so e declarado mais abaixo no arquivo.
+  const parcelasProprias = form.custom_payment_installments;
+  const temParcelasProprias = Array.isArray(parcelasProprias) && parcelasProprias.length > 0;
+  const valorDoSeletor = presetSelecionado?.label
+    ?? (temParcelasProprias ? CONDICAO_PERSONALIZADA : undefined);
   const customInstallments = (form as any).custom_payment_installments;
 
   return (
@@ -310,8 +332,8 @@ export function FinancialSection(props: FinancialSectionProps) {
                 ) : (
                   <>
                     <div className="flex gap-2 items-center">
-                      <Select key={presetKey} onValueChange={v => {
-                        if (v === '__custom__') {
+                      <Select value={valorDoSeletor} onValueChange={v => {
+                        if (v === CONDICAO_PERSONALIZADA) {
                           set('payment_condition_preset_id', '');
                           set('payment_conditions', 'Personalizado');
                           if (!Array.isArray(customInstallments) || customInstallments.length === 0) {
@@ -319,20 +341,20 @@ export function FinancialSection(props: FinancialSectionProps) {
                               { label: 'Parcela 1', services_pct: 100, parts_pct: 100, expenses_pct: 100, days_after_approval: 0, tipo: 'aprovacao' },
                             ]);
                           }
-                          setPresetKey(k => k + 1);
                           return;
                         }
                         const preset = (paymentPresets || []).find((p: any) => p.label === v);
                         set('payment_conditions', v);
                         set('payment_condition_preset_id', preset?.id || '');
                         set('custom_payment_installments', null);
-                        setPresetKey(k => k + 1);
                       }} disabled={isLocked}>
-                        <SelectTrigger className="w-44 h-8 text-sm">
+                        {/* O campo não tinha nome acessível nenhum: dois seletores na mesma
+                            seção, ambos anunciados só como "combobox". */}
+                        <SelectTrigger className="w-44 h-8 text-sm" aria-label="Condição de pagamento">
                           <SelectValue placeholder="Pré-definidas..." />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__custom__">Personalizado</SelectItem>
+                          <SelectItem value={CONDICAO_PERSONALIZADA}>Personalizado</SelectItem>
                           {(paymentPresets || []).map((p: any) => (
                             <SelectItem key={p.id} value={p.label}>{p.label}</SelectItem>
                           ))}
