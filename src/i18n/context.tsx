@@ -100,25 +100,51 @@ export function I18nProvider({ children }: { children: ReactNode }) {
    */
   const FUSO_DA_EMPRESA = 'America/Sao_Paulo';
 
+  /**
+   * Um VENCIMENTO não é um instante: é um dia.
+   *
+   * O banco guarda `due_date` como DATE e o PostgREST devolve "2026-09-18". O JavaScript
+   * lê essa string como meia-noite UTC, e qualquer fuso a oeste de Greenwich — o Brasil
+   * inteiro — exibe o dia ANTERIOR. Era o "um dia a menos" que aparecia nas parcelas: a
+   * NF-e 2/25 tem a primeira duplicata em 18/09/2026 no DANFE e a tela mostrava 17/09.
+   *
+   * O defeito não vinha do fuso escolhido (sem ele o erro é o mesmo): vinha de tratar um
+   * dia do calendário como um ponto no tempo. Datas sem hora são remontadas no fuso local,
+   * o que as mantém no dia que está escrito. Instantes de verdade (com hora e zona)
+   * continuam convertidos para o fuso da empresa, que é onde os fatos aconteceram.
+   */
+  const SO_DATA = /^\d{4}-\d{2}-\d{2}$/;
+  const comoDiaLocal = (date: string) => {
+    if (!SO_DATA.test(date)) return new Date(date);
+    const [ano, mes, dia] = date.split('-').map(Number);
+    return new Date(ano, mes - 1, dia);
+  };
+  /** Data sem hora já É o dia: convertê-la de fuso é o que a movia. */
+  const fusoDe = (date: string) => (SO_DATA.test(date) ? undefined : FUSO_DA_EMPRESA);
+
   const formatDate = useCallback((date: string) => {
-    const d = new Date(date);
+    const d = comoDiaLocal(date);
     if (locale === 'pt-BR') {
       return d.toLocaleDateString('pt-BR', {
-        day: '2-digit', month: '2-digit', year: 'numeric', timeZone: FUSO_DA_EMPRESA,
+        day: '2-digit', month: '2-digit', year: 'numeric', timeZone: fusoDe(date),
       });
     }
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return d.toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric', timeZone: fusoDe(date),
+    });
   }, [locale]);
 
   const formatDateTime = useCallback((date: string) => {
-    const d = new Date(date);
+    const d = comoDiaLocal(date);
     if (locale === 'pt-BR') {
       return d.toLocaleDateString('pt-BR', {
         day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-        timeZone: FUSO_DA_EMPRESA,
+        timeZone: fusoDe(date),
       });
     }
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: fusoDe(date),
+    });
   }, [locale]);
 
   const formatNumber = useCallback((value: number) => {

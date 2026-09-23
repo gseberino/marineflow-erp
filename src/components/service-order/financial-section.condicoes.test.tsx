@@ -39,7 +39,10 @@ const PRESETS = [
  * Monta a seção com um formulário de verdade por trás — o defeito só aparece quando o
  * estado sobe e volta, que é o que acontece na tela.
  */
-function Palco({ inicial = {} }: { inicial?: Record<string, any> }) {
+function Palco({ inicial = {}, convertida = false }: {
+  inicial?: Record<string, any>;
+  convertida?: boolean;
+}) {
   const [form, setForm] = useState<Record<string, any>>({
     payment_conditions: '', payment_condition_preset_id: '',
     custom_payment_installments: null, ...inicial,
@@ -56,7 +59,14 @@ function Palco({ inicial = {} }: { inicial?: Record<string, any> }) {
         /* A secao inteira vive num Collapsible; aberta e como o dono a ve. */
         showFinancialDialog setShowFinancialDialog={vi.fn()}
         form={form} set={set} setForm={setForm}
-        orderId="os-1" orderData={{ id: 'os-1' }} isNew={false} isLocked={false}
+        orderId="os-1"
+        orderData={{
+          id: 'os-1',
+          converted_to_os_at: convertida ? '2026-09-01T12:00:00Z' : null,
+          // O que esta SALVO no banco — e o que decide se o campo abre ou fica travado.
+          payment_conditions: inicial.payment_conditions ?? null,
+        }}
+        isNew={false} isLocked={false}
         clientView={false}
         laborCost={1000} partsCost={500} operationalCost={0} expensesTotal={0}
         subtotal={1500} base={1500} grandTotal={1500} discountRatio={1}
@@ -135,5 +145,27 @@ describe('seletor de condição de pagamento', () => {
     await user.click(seletor());
     await user.click(await screen.findByRole('option', { name: 'Personalizado' }));
     expect(seletor()).toHaveTextContent('Personalizado');
+  });
+});
+
+describe('OS ja convertida', () => {
+  it('com condicao definida, vira texto travado — o sinal ja virou recebivel', async () => {
+    render(<Palco convertida inicial={{ payment_condition_preset_id: 'p-avista', payment_conditions: 'À vista' }} />);
+    expect(await screen.findByText(/Condição de pagamento:/)).toBeInTheDocument();
+    expect(screen.getByText('À vista')).toBeInTheDocument();
+    expect(screen.queryAllByRole('combobox')).toHaveLength(1); // só o de forma de pagamento
+  });
+
+  it('SEM condicao, o campo continua aberto — travava mostrando so um travessao', async () => {
+    // 14 ordens ficaram assim: convertidas, sem condição, sem nada para ler e sem como
+    // preencher. Quem precisava mandar o PDF com as condições não tinha saída.
+    const user = userEvent.setup();
+    render(<Palco convertida />);
+    expect(screen.queryByText(/Condição de pagamento: —/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/ficou sem condição de pagamento/i)).toBeInTheDocument();
+
+    await user.click(seletor());
+    await user.click(await screen.findByRole('option', { name: 'À vista' }));
+    expect(seletor()).toHaveTextContent('À vista');
   });
 });

@@ -321,16 +321,31 @@ export function FinancialSection(props: FinancialSectionProps) {
                 <CreditCard className="h-3.5 w-3.5" /> Condições de Recebimento
               </p>
               <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
-                {(orderData as any)?.converted_to_os_at ? (
-                  // Já convertida em OS: a condição de pagamento já foi decidida (e o sinal já
-                  // gerou um recebível real) — mostrar só um resumo somente-leitura em vez do
-                  // seletor/tabela de configuração, que não faz mais sentido reabrir aqui.
+                {(orderData as any)?.converted_to_os_at && (orderData as any)?.payment_conditions ? (
+                  // Já convertida em OS E com condição decidida: o sinal já virou recebível
+                  // real, então reabrir o seletor aqui só criaria divergência entre o que a
+                  // tela diz e o título que já existe. Resumo somente-leitura.
+                  //
+                  // A decisão olha o valor SALVO, não o que está sendo editado: se olhasse o
+                  // formulário, o campo sumiria no instante em que a pessoa escolhesse algo,
+                  // no meio da própria edição.
+                  //
+                  // Mas só quando HÁ condição. Antes o campo travava pelo fato de a OS ter
+                  // sido convertida, mostrasse ele algo ou não — e 14 ordens ficaram exibindo
+                  // "Condição de pagamento: —", sem nada para ler e sem como preencher. Quem
+                  // precisava mandar o PDF com as condições não tinha saída.
                   <p className="text-sm">
                     <span className="text-muted-foreground">Condição de pagamento: </span>
-                    <span className="font-medium">{form.payment_conditions || '—'}</span>
+                    <span className="font-medium">{form.payment_conditions}</span>
                   </p>
                 ) : (
                   <>
+                    {(orderData as any)?.converted_to_os_at && !(orderData as any)?.payment_conditions && (
+                      <p className="text-[11px] text-amber-700">
+                        Esta OS já foi convertida e ficou sem condição de pagamento. Defina-a
+                        para o documento sair completo — os recebíveis já lançados não mudam.
+                      </p>
+                    )}
                     <div className="flex gap-2 items-center">
                       <Select value={valorDoSeletor} onValueChange={v => {
                         if (v === CONDICAO_PERSONALIZADA) {
