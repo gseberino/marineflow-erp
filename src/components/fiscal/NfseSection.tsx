@@ -34,7 +34,21 @@ import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { tomadorDaNota, totalDaNota, dataDaNota } from '@/lib/nota-fiscal-leitura';
 import { maskCPFCNPJ } from '@/lib/masks';
 
-export function NfseSection({ serviceOrderId }: { serviceOrderId?: string | null }) {
+/**
+ * @param mostrarLista  Se esta seção traz a própria lista de notas de serviço.
+ *
+ * Falso na tela de Emissão Fiscal: desde 23/09/2026 a lista principal de lá mostra NF-e e
+ * NFS-e juntas, com tomador, valor, natureza e filtro. Repetir as NFS-e logo acima dava
+ * duas listas do mesmo material na mesma página, uma pior que a outra — e obrigava a
+ * pessoa a decidir em qual delas procurar.
+ *
+ * O que continua aqui é o que a lista NÃO diz: o pré-voo, que avisa se a empresa está
+ * apta a emitir NFS-e antes de alguém tentar e queimar numeração fiscal.
+ */
+export function NfseSection({ serviceOrderId, mostrarLista = true }: {
+  serviceOrderId?: string | null;
+  mostrarLista?: boolean;
+}) {
   const { formatCurrency, formatDate } = useI18n();
   const health = useNfseHealth();
   const documentos = useNfseDocumentos();
@@ -115,6 +129,7 @@ export function NfseSection({ serviceOrderId }: { serviceOrderId?: string | null
         </AlertDialogContent>
       </AlertDialog>
 
+      {mostrarLista && (
       <div>
         <div className="mb-2 flex items-center justify-between">
           <h3 className="font-semibold">Notas de serviço</h3>
@@ -154,6 +169,7 @@ export function NfseSection({ serviceOrderId }: { serviceOrderId?: string | null
           </div>
         )}
       </div>
+      )}
 
       <DialogoDeCancelamento
         doc={cancelando}

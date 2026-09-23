@@ -109,4 +109,21 @@ describe('lista de NFS-e', () => {
     montar([{ ...NOTA, id: 'n2', request_payload: { amounts: { service_amount: 100 } } }]);
     expect(await screen.findByText(/Tomador não identificado/i)).toBeInTheDocument();
   });
+
+  it('sem a lista, o pré-voo continua — é o que a lista principal não diz', async () => {
+    // Na tela de Emissão Fiscal a lista principal já mostra NF-e e NFS-e juntas. Repetir
+    // as NFS-e ali em cima dava duas listas do mesmo material na mesma página.
+    docsMock.mockReturnValue({ data: [NOTA], isLoading: false, error: null });
+    healthMock.mockReturnValue({ data: { pronto: true, pendencias: [] }, isLoading: false, error: null });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <I18nProvider><NfseSection mostrarLista={false} /></I18nProvider>
+      </QueryClientProvider>,
+    );
+    // A nota não aparece de novo…
+    expect(screen.queryByText('LUCENIRA MARIA DE MELO')).not.toBeInTheDocument();
+    // …mas o aviso de prontidão, que só existe aqui, continua.
+    expect(await screen.findByText(/NFS-e — Nota Fiscal de Serviço/i)).toBeInTheDocument();
+  });
 });

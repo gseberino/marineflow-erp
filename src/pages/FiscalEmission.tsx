@@ -2085,7 +2085,9 @@ export default function FiscalEmission() {
       {/* ── [F-NFSE-01] NFS-e — documento de SERVIÇO ──
           Seção própria, logo abaixo do cabeçalho: quem abre esta tela para faturar mão de
           obra não precisa rolar por toda a NF-e para descobrir que o documento é outro. */}
-      {company && <NfseSection serviceOrderId={null} />}
+      {/* Só o pré-voo da NFS-e: a lista de notas de serviço vive no histórico abaixo,
+          junto das NF-e, com tomador, valor, natureza e filtro. */}
+      {company && <NfseSection serviceOrderId={null} mostrarLista={false} />}
 
       {/* ── Painel de Saúde Fiscal ── */}
       {company && (
