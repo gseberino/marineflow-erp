@@ -85,10 +85,27 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     return new Intl.NumberFormat(loc, { style: 'currency', currency: code }).format(value);
   }, [locale, currency.displayCurrency]);
 
+  /**
+   * O fuso da EMPRESA, não o do aparelho.
+   *
+   * As datas deste sistema são fatos com hora marcada no Brasil: a autorização de uma
+   * NF-e, o vencimento de uma conta, o horário de um atendimento. Sem fixar o fuso, quem
+   * abrisse o sistema de um celular configurado em outro fuso — ou num servidor em UTC —
+   * veria a data do documento trocada por um dia.
+   *
+   * Não é hipótese: a NFS-e 1/4 foi emitida 27/08/2026 às 22h22 e é gravada como
+   * "2026-08-28T01:22Z". Em UTC ela aparece como 28/08, discordando do próprio XML. Foi
+   * assim que o teste da lista de notas quebrou no CI (que roda em UTC) enquanto passava
+   * em qualquer máquina no Brasil.
+   */
+  const FUSO_DA_EMPRESA = 'America/Sao_Paulo';
+
   const formatDate = useCallback((date: string) => {
     const d = new Date(date);
     if (locale === 'pt-BR') {
-      return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      return d.toLocaleDateString('pt-BR', {
+        day: '2-digit', month: '2-digit', year: 'numeric', timeZone: FUSO_DA_EMPRESA,
+      });
     }
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }, [locale]);
@@ -96,7 +113,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const formatDateTime = useCallback((date: string) => {
     const d = new Date(date);
     if (locale === 'pt-BR') {
-      return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      return d.toLocaleDateString('pt-BR', {
+        day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+        timeZone: FUSO_DA_EMPRESA,
+      });
     }
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   }, [locale]);
