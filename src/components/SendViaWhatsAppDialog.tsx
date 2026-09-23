@@ -23,6 +23,7 @@ import { ScheduleSettings, defaultScheduleConfig, type ScheduleConfig } from '@/
 import { useWhatsAppSend } from '@/hooks/use-whatsapp-send';
 import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
 import { supabase } from '@/integrations/supabase/client';
+import { buildQuoteWhatsAppSummary } from '@/lib/quote-whatsapp-summary';
 
 export type SendViaWhatsAppTarget =
   | {
@@ -146,7 +147,11 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       : target?.kind === 'receivable'
       ? target.serviceOrderId || undefined
       : undefined;
-  const { data: pdfData } = usePDFData(open && mode === 'document' ? pdfSourceId : undefined);
+  // O resumo usa os MESMOS dados do PDF de propósito: se a mensagem escrita e o anexo
+  // discordassem em algum valor, o cliente encontraria a diferença antes de nós.
+  const { data: pdfData } = usePDFData(
+    open && (mode === 'document' || mode === 'resumo') ? pdfSourceId : undefined,
+  );
 
   const documentType: PDFDocumentType = useMemo(() => {
     if (target?.kind === 'service_order') return target.documentType || 'service_order';
@@ -245,6 +250,48 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
 
   const canSendLink = !!publicUrl && target?.kind === 'service_order';
   const canSendDocument = target?.kind === 'service_order' && !!pdfSourceId;
+  // Resumo escrito só faz sentido para orçamento/OS: uma cobrança avulsa não tem sinal,
+  // saldo nem condição de pagamento para descrever.
+  const canSendResumo = target?.kind === 'service_order' && !!pdfSourceId;
+
+  /**
+   * Como a mensagem VIAJA, que não é a mesma coisa que o modo escolhido na tela.
+   *
+   * 'resumo' e 'link' são os dois uma mensagem de texto — o card de preview quem monta é o
+   * próprio WhatsApp, a partir da URL que estiver no corpo. O que muda entre eles é só o
+   * que vai escrito. Só 'document' tem transporte próprio, porque anexa arquivo.
+   */
+  const modoDeEnvio: 'link' | 'document' = mode === 'document' ? 'document' : 'link';
+
+  /**
+   * O texto do resumo, montado a partir do orçamento real.
+   *
+   * Fica num efeito e não no clique porque a pessoa precisa LER antes de enviar — e poder
+   * editar. Orçamento é conversa comercial: a última palavra sobre o que vai escrito é de
+   * quem está negociando, não do sistema.
+   */
+  useEffect(() => {
+    if (!open || mode !== 'resumo' || !pdfData || target?.kind !== 'service_order') return;
+    const so = pdfData.serviceOrder as Record<string, any>;
+    setMessage(buildQuoteWhatsAppSummary({
+      numero: target.serviceOrderNumber,
+      clienteNome: target.clientName,
+      ativoNome: (pdfData as any)?.vessel?.name ?? null,
+      orcamento: so,
+      parcelas: so.payment_condition_installments ?? null,
+      condicaoLabel: so.payment_condition_label ?? so.payment_conditions ?? null,
+      link: publicUrl || null,
+      validadeDias: so.quote_validity_days ?? null,
+      empresa: {
+        nome: appSettings?.['company_name'],
+        pixKey: appSettings?.['pix_key'],
+        bankName: appSettings?.['bank_name'],
+        bankAgency: appSettings?.['bank_agency'],
+        bankAccount: appSettings?.['bank_account'],
+      },
+      opcoes: pdfOptions,
+    }));
+  }, [open, mode, pdfData, target, publicUrl, appSettings, pdfOptions]);
 
   useEffect(() => {
     if (!canSendLink && mode === 'link' && canSendDocument) setMode('document');
@@ -299,7 +346,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
           client_id: target.clientId || null,
           phone,
           message,
-          send_mode: mode,
+          send_mode: modoDeEnvio,
           context: target.kind === 'service_order' ? documentType : 'billing',
           link_title,
           link_description,
@@ -329,7 +376,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       {
         phone,
         message,
-        mode,
+        mode: modoDeEnvio,
         context: target.kind === 'service_order' ? documentType : 'billing',
         service_order_id:
           target.kind === 'service_order'
@@ -366,6 +413,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
             onChange={setMode}
             canSendLink={canSendLink}
             canSendDocument={canSendDocument}
+            canSendResumo={canSendResumo}
           />
 
           <div className="space-y-2">
@@ -401,7 +449,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
             <MessageEditor
               message={message}
               onMessageChange={setMessage}
-              mode={mode}
+              mode={modoDeEnvio}
               templates={templates}
               templateId={templateId}
               onTemplateChange={applyTemplate}
