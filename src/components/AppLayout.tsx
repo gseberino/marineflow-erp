@@ -10,7 +10,7 @@ import {
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, TrendingUp,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
   Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot, Boxes, LayoutGrid, ListChecks,
-  Sparkles, ArrowLeftRight, TrendingDown, Wallet, Wand2, Landmark
+  Sparkles, ArrowLeftRight, TrendingDown, Wallet, Wand2, Landmark, Receipt
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -170,7 +170,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Quadro do Dia', icon: LayoutGrid, path: '/day-board', roles: ['admin', 'financial', 'technician'] },
         { label: 'Roteiros Padrão', icon: ListChecks, path: '/step-templates', roles: ['admin', 'financial', 'technician'] },
         { label: 'Motor de Vendas', icon: Rocket, path: '/v2/prospecting', roles: ['admin'] },
-        { label: 'Cobranças', icon: CreditCard, path: '/v2/collections', roles: ['admin', 'financial'] },
+        // Cobranças mudou para Financeiro (23/09/2026): perseguir quem deve é trabalho de
+        // dinheiro, e ficava longe de Contas a Receber, que é a mesma conversa.
       ],
     },
     {
@@ -196,6 +197,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Produtos', icon: Package, path: '/v2/products' },
         { label: 'Serviços', icon: Wrench, path: '/v2/services' },
         { label: 'Fornecedores', icon: Building2, path: '/v2/suppliers' },
+        // Sócios, diaristas, prestadores e comissionados — com CPF, Pix e conta. É cadastro
+        // de PESSOA, igual a Clientes e Fornecedores; vivia no Financeiro só porque é lá
+        // que o dinheiro sai.
+        { label: 'Favorecidos', icon: Wallet, path: '/v2/payees', roles: ['admin', 'financial'] },
+        // Conectar o banco se faz uma vez e se revisita raramente: é cadastro, não é
+        // trabalho diário, e ocupava uma linha entre as coisas que são.
+        { label: 'Contas Bancárias', icon: Landmark, path: '/v2/financial/banks', roles: ['admin', 'financial'] },
       ],
     },
     {
@@ -220,37 +228,58 @@ export function AppLayout({ children }: { children: ReactNode }) {
       id: 'financeiro',
       label: 'Financeiro',
       icon: DollarSign,
-      // O grupo tinha um item "Financeiro" dentro de si, e nove abas escondidas dentro
-      // DESSE item. Dois problemas: o nível repetido não informava nada, e trabalho
-      // diário (conciliar, decidir o que o banco trouxe) ficava a dois cliques de
-      // distância, invisível de fora.
+      // REORGANIZADO EM 23/09/2026, a pedido do dono ("uma lista enorme de opções").
       //
-      // Sobe para o menu o que é DESTINO — aquilo que alguém abre o sistema para fazer.
-      // Continua como aba o que é RECORTE do mesmo material: DRE e Aging são leituras da
-      // visão geral, e contas bancárias e regras são ajustes que se faz uma vez e revisita
-      // raramente. Promover tudo daria uma lista de doze itens onde nada se destaca —
-      // trocar "escondido demais" por "achatado demais" não é ganho.
+      // O problema não era o tamanho da lista: era que o setor tinha DOIS menus
+      // concorrentes e nenhum dos dois completo. Havia 12 itens aqui e 13 abas dentro de
+      // /v2/financial; cinco apareciam nos dois lugares (Extrato, Conciliação, Contas a
+      // Pagar, Regras, Contas Bancárias) e sete abas não existiam no menu — quem
+      // procurasse "Fechamento" não achava, e quem clicasse em "Contas a Pagar" caía numa
+      // página com treze abas, uma delas chamada "Contas a Pagar".
+      //
+      // A regra agora: o MENU é destino (o que vou fazer agora) e a ABA é recorte do mesmo
+      // material (de que ângulo eu olho). Nada aparece nos dois.
+      //
+      // Saíram daqui: Fiscal e Relatórios viraram grupos próprios (abaixo), Favorecidos e
+      // Contas Bancárias foram para Cadastros, Regras é aba do Extrato — é lá que ela
+      // atua — e Comissões saiu do menu por ser tela de uso raro; virou aba de Contas a
+      // Pagar, que é de onde a comissão é paga.
       items: [
         { label: 'Visão Geral', icon: DollarSign, path: '/v2/financial', roles: ['admin', 'financial'] },
-        // "Extrato", igual à aba. Renomear a aba e esquecer o menu deixou os dois nomes
-        // convivendo para o MESMO destino — que é a confusão que a reorganização veio
-        // desfazer, agora causada por mim.
         { label: 'Extrato', icon: Sparkles, path: '/v2/financial/inbox', roles: ['admin', 'financial'] },
         { label: 'Conciliação', icon: ArrowLeftRight, path: '/v2/financial/reconciliation', roles: ['admin', 'financial'] },
-        // Tela inteira, não aba: tem filtros, régua de cobrança e recibo próprios.
         { label: 'Contas a Receber', icon: TrendingUp, path: '/v2/receivables', roles: ['admin', 'financial'] },
         { label: 'Contas a Pagar', icon: TrendingDown, path: '/v2/financial/payables', roles: ['admin', 'financial'] },
-        // Ficaram de fora na primeira reestruturação por serem "configuração revisitada
-        // raramente". Mas raramente não é nunca — e sem entrada no menu o usuário não
-        // achava as regras que ele mesmo precisa ensinar, nem a tela de conectar banco.
-        { label: 'Regras da IA', icon: Wand2, path: '/v2/financial/rules', roles: ['admin', 'financial'] },
-        { label: 'Contas Bancárias', icon: Landmark, path: '/v2/financial/banks', roles: ['admin', 'financial'] },
-        { label: 'Comissões', icon: Users, path: '/v2/commissions', roles: ['admin', 'financial'] },
-        // Sócios, diaristas, prestadores e comissionados — com CPF, Pix e conta.
-        { label: 'Favorecidos', icon: Wallet, path: '/v2/payees', roles: ['admin', 'financial'] },
-        { label: 'Emissão Fiscal (NF-e)', icon: FileText, path: '/v2/fiscal/emissao', roles: ['admin'] },
-        { label: 'Notas de Serviço (NFS-e)', icon: FileText, path: '/fiscal/nfse', roles: ['admin'] },
-        { label: 'Relatórios', icon: BarChart3, path: '/v2/reports', roles: ['admin', 'financial'] },
+        { label: 'Cobranças', icon: CreditCard, path: '/v2/collections', roles: ['admin', 'financial'] },
+      ],
+    },
+    {
+      // Documento legal não é dinheiro. As duas notas fiscais viviam perdidas no meio de
+      // contas a pagar, e desde 23/09 a lista de emissão mostra NF-e e NFS-e juntas —
+      // então um destino só basta. A página dedicada /fiscal/nfse continua existindo para
+      // quem chega por link, mas não precisa de linha própria no menu.
+      id: 'fiscal',
+      label: 'Fiscal',
+      icon: Receipt,
+      roles: ['admin'],
+      items: [
+        { label: 'Notas Fiscais', icon: Receipt, path: '/v2/fiscal/emissao', roles: ['admin'] },
+      ],
+    },
+    {
+      // Leitura, não ação — e é por isso que o grupo existe.
+      //
+      // DRE e Aging estavam escondidos como aba do Financeiro, no meio de treze. São as
+      // duas leituras que respondem "como foi o mês" e "quem está me devendo há quanto
+      // tempo", e ninguém as procura clicando em "Visão Geral".
+      id: 'relatorios',
+      label: 'Relatórios',
+      icon: BarChart3,
+      roles: ['admin', 'financial'],
+      items: [
+        { label: 'DRE', icon: TrendingUp, path: '/v2/financial/dre', roles: ['admin', 'financial'] },
+        { label: 'Aging (idade das contas)', icon: History, path: '/v2/financial/aging', roles: ['admin', 'financial'] },
+        { label: 'Gerenciais', icon: BarChart3, path: '/v2/reports', roles: ['admin', 'financial'] },
       ],
     },
     {

@@ -13,6 +13,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+// A comissão saiu do menu lateral (uso raro) e passou a viver aqui, ao lado de Contas a
+// Pagar — que é de onde ela é paga. O mesmo painel serve a rota /v2/commissions.
+import { PainelDeComissoes } from '@/v2/pages/CommissionsV2';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
 import { PaymentDialog } from '@/components/PaymentDialog';
@@ -357,6 +360,7 @@ export default function FinancialV2() {
                 dois mundos, porque prometia troca de conteúdo e entregava troca de página.
                 Agora é item do menu, onde uma tela inteira deve estar. */}
             <TabsTrigger value="payables">{t.financial.tabPayables}</TabsTrigger>
+            <TabsTrigger value="comissoes">Comissões</TabsTrigger>
             {/* MF-AUD-050: a programação de caixa (8 semanas, alerta de semana negativa e
                 duplicata de pagáveis) vivia só no Financeiro v1 — desde os redirects de
                 30/07 ficou alcançável apenas com ?legacy=1. O painel sempre funcionou. */}
@@ -389,6 +393,11 @@ export default function FinancialV2() {
             <TabsTrigger value="banks">Contas bancárias</TabsTrigger>
             <TabsTrigger value="aging">Aging</TabsTrigger>
           </TabsList>
+
+          {/* ── COMISSÕES ── */}
+          <TabsContent value="comissoes" className="mt-4">
+            <PainelDeComissoes />
+          </TabsContent>
 
           {/* ── VISÃO GERAL ── */}
           <TabsContent value="overview" className="mt-4 space-y-4">

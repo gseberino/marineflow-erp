@@ -34,7 +34,19 @@ const STATUS_VIEW: Record<string, { label: string; tone: StatusTone }> = {
   paid: { label: 'Pago', tone: 'success' },
 };
 
-export default function CommissionsV2() {
+/**
+ * O painel de comissões, sem invólucro de página.
+ *
+ * Existe separado porque a comissão passou a viver em DOIS lugares (23/09/2026): a rota
+ * /v2/commissions, para quem chega por link, e uma aba do Financeiro, ao lado de Contas a
+ * Pagar — que é de onde a comissão é efetivamente paga. Ela saiu do menu lateral por ser
+ * tela de uso raro, e uma linha permanente no menu para algo que se abre de vez em quando
+ * empurra para baixo o que se usa todo dia.
+ *
+ * Duplicar o componente para servir os dois lugares seria o caminho curto e o errado: uma
+ * das cópias fica para trás.
+ */
+export function PainelDeComissoes() {
   const { formatCurrency, formatDate } = useI18n();
   const qc = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
@@ -180,18 +192,15 @@ export default function CommissionsV2() {
   ];
 
   return (
-    <V2Shell>
-      <PageShell
-        breadcrumb={[{ label: 'Financeiro', to: '/v2/financial' }, { label: 'Comissões' }]}
-        title="Gestão de Comissões"
-        count={stats.totalCount}
-        description="Controle e aprove os pagamentos de técnicos e vendedores com base no lucro real das OS."
-        actions={
+    <div className="space-y-4">
+        {/* Exportar vive dentro do painel para acompanhá-lo aos dois lugares onde ele é
+            montado — no cabeçalho da página ele existiria só num deles. */}
+        <div className="flex justify-end">
           <Button variant="outline" size="sm" className="gap-1.5" onClick={exportCsv}>
             <Download className="h-4 w-4" /> Exportar CSV
           </Button>
-        }
-      >
+        </div>
+
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <KPIStat label="Aguardando aprovação" value={formatCurrency(stats.pending)} tone={stats.pending > 0 ? 'warning' : 'success'} />
           <KPIStat label="Aprovado (no financeiro)" value={formatCurrency(stats.approved)} tone="info" />
@@ -251,6 +260,20 @@ export default function CommissionsV2() {
             );
           })}
         </div>
+    </div>
+  );
+}
+
+/** A comissão na sua própria página, para quem chega por /v2/commissions. */
+export default function CommissionsV2() {
+  return (
+    <V2Shell>
+      <PageShell
+        breadcrumb={[{ label: 'Financeiro', to: '/v2/financial' }, { label: 'Comissões' }]}
+        title="Gestão de Comissões"
+        description="Controle e aprove os pagamentos de técnicos e vendedores com base no lucro real das OS."
+      >
+        <PainelDeComissoes />
       </PageShell>
     </V2Shell>
   );
