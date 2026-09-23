@@ -45,6 +45,7 @@ import { parseNfeReferenceXml } from '@/lib/nfe-xml-parser';
 import {
   tomadorDaNota, totalDaNota, itensDaNota, tipoDaNota,
   dataDaNota, naturezaDaNota, ehDevolucao, textoBuscavelDaNota,
+  contaParaFaturamento,
 } from '@/lib/nota-fiscal-leitura';
 import { MultiFilterBar } from '@/components/MultiFilterBar';
 import { useMultiFilter } from '@/hooks/use-multi-filter';
@@ -356,28 +357,51 @@ export default function FiscalEmission() {
 
   // Métricas do mês corrente para o Painel de Saúde Fiscal (calculadas do
   // histórico já carregado — no volume do HBR as 100 notas recentes cobrem o mês).
+  /**
+   * O faturamento do mes. Medido em 23/09/2026: o painel mostrava R$ 0,00 em setembro.
+   *
+   * Tres defeitos somados, todos herdados de ler a nota pelo campo errado:
+   *
+   *  1. o valor vinha de `payments[0].amount`, a forma de pagamento declarada. A NFS-e nao
+   *     tem esse campo -- e a unica nota de setembro e uma NFS-e de R$ 500, entao o mes
+   *     inteiro aparecia zerado. Em agosto faltavam R$ 2.800,38 pelo mesmo motivo;
+   *  2. o mes vinha de `created_at`, que e quando a LINHA nasceu, em UTC -- nota emitida a
+   *     noite no fim do mes caia no mes seguinte;
+   *  3. nota de HOMOLOGACAO entrava na conta. Julho mostrava R$ 8.100 quando o faturamento
+   *     real foi R$ 4.050: metade era um teste que nao vale nada fiscalmente.
+   *
+   * Devolucao tambem fica de fora, e por um motivo diferente dos outros: ela E uma nota
+   * autorizada de verdade, mas nao e receita -- e mercadoria voltando para o fornecedor.
+   * Soma-la infla o faturamento com dinheiro que ninguem recebeu.
+   */
   const monthStats = useMemo(() => {
     const now = new Date();
     const y = now.getFullYear();
     const m = now.getMonth();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const month = (documents || []).filter((d: any) => {
-      const dt = new Date(d.created_at);
+      const bruta = dataDaNota(d);
+      if (!bruta) return false;
+      const dt = new Date(bruta);
       return dt.getFullYear() === y && dt.getMonth() === m;
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const by = (s: string) => month.filter((d: any) => d.status === s);
     const authorized = by('authorized');
-    const faturamento = authorized.reduce(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (sum: number, d: any) => sum + Number(d.request_payload?.payments?.[0]?.amount ?? 0),
+    const faturaveis = authorized.filter(contaParaFaturamento);
+    const faturamento = faturaveis.reduce(
+      (sum: number, d: unknown) => sum + totalDaNota(d),
       0,
     );
+    const foraDoFaturamento = authorized.length - faturaveis.length;
     const rejected = by('rejected').length;
     const cancelled = by('cancelled').length;
     // Proxy da cota Contora: eventos que chegaram à SEFAZ (autorizada+rejeitada+cancelada).
     const eventos = authorized.length + rejected + cancelled;
-    return { authorized: authorized.length, rejected, cancelled, faturamento, eventos };
+    return {
+      authorized: authorized.length, rejected, cancelled, faturamento, eventos,
+      faturaveis: faturaveis.length, foraDoFaturamento,
+    };
   }, [documents]);
 
   // Validade do certificado A1 → dias a vencer (alerta antecipado de "apagão fiscal").
@@ -1993,8 +2017,11 @@ export default function FiscalEmission() {
           payments?: Array<{ amount?: number }>;
         };
         const rec = payload.recipient || {};
-        const total = Number(payload.payments?.[0]?.amount ?? 0);
-        const dateStr = d.authorized_at ? new Date(d.authorized_at).toLocaleDateString('pt-BR') : '';
+        // Mesmo valor e mesma data da lista e do DANFE -- o CSV vai para a contadora, e
+        // tres numeros diferentes para a mesma nota e pior que nenhum.
+        const total = totalDaNota(d);
+        const dataBruta = dataDaNota(d);
+        const dateStr = dataBruta ? new Date(dataBruta).toLocaleDateString('pt-BR') : '';
         rows.push([
           d.series, d.number, d.access_key || '', dateStr,
           total.toFixed(2).replace('.', ','),
@@ -2133,7 +2160,13 @@ export default function FiscalEmission() {
           <div className="rounded-xl border bg-card p-3">
             <p className="text-xs text-muted-foreground">Faturado no mês</p>
             <p className="text-base font-bold leading-tight">{formatCurrency(monthStats.faturamento)}</p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">{monthStats.authorized} nota(s) autorizada(s)</p>
+            {/* Quantas notas formam este numero -- e, quando alguma ficou de fora, por que.
+                Sem isso, "3 autorizadas" ao lado de um total que so conta 2 parece erro. */}
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {monthStats.faturaveis} nota(s) faturada(s)
+              {monthStats.foraDoFaturamento > 0
+                && ` · ${monthStats.foraDoFaturamento} fora (devolução ou homologação)`}
+            </p>
           </div>
 
           {/* Notas por status */}
@@ -3649,12 +3682,15 @@ export default function FiscalEmission() {
           <DialogHeader>
             <DialogTitle>Baixar estoque + gerar recebível</DialogTitle>
             <DialogDescription>
-              NF-e {settleTarget?.series}/{settleTarget?.number} — total {formatCurrency(Number(settleTarget?.request_payload?.payments?.[0]?.amount ?? 0))}.
+              NF-e {settleTarget?.series}/{settleTarget?.number} — total {formatCurrency(totalDaNota(settleTarget))}.
               Baixa o estoque dos itens ligados a produto e gera o financeiro. Idempotente.
             </DialogDescription>
           </DialogHeader>
           {settleTarget && (() => {
-            const total = Number(settleTarget.request_payload?.payments?.[0]?.amount ?? 0);
+            // O valor que vira CONTA A RECEBER. Ler pelo pagamento declarado dava o numero
+            // certo por coincidencia na venda a vista e errado em tudo mais -- e um titulo
+            // nasce uma vez so.
+            const total = totalDaNota(settleTarget);
             const schedule = settleMode === 'parcelado' && settleN >= 1 && settleFirstDue
               ? buildSchedule(total, settleN, settleFirstDue, settleInterval, settleMethod)
               : [];

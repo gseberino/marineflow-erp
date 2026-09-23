@@ -144,6 +144,25 @@ export function naturezaDaNota(doc: unknown): string {
   return '';
 }
 
+/**
+ * Esta nota entra na conta do faturamento?
+ *
+ * Três exclusões, cada uma por um motivo próprio:
+ *
+ *  · **não autorizada** — rascunho, rejeitada e cancelada não existem para a SEFAZ;
+ *  · **homologação** — é ensaio, não vale nada fiscalmente. Julho de 2026 mostrava
+ *    R$ 8.100 de faturamento quando o real foi R$ 4.050: metade era uma nota de teste;
+ *  · **devolução** — esta é a sutil. É nota autorizada de verdade, mas não é receita: é
+ *    mercadoria voltando para o fornecedor. Somá-la infla o faturamento com dinheiro que
+ *    ninguém recebeu.
+ */
+export function contaParaFaturamento(doc: unknown): boolean {
+  const d = doc as { status?: string; environment?: string };
+  if (d?.status !== 'authorized') return false;
+  if (d?.environment !== 'producao') return false;
+  return !ehDevolucao(doc);
+}
+
 /** Devolução muda o sinal do dinheiro; vale destacar na lista. */
 export function ehDevolucao(doc: unknown): boolean {
   const p = payloadDe(doc);

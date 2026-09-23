@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   tomadorDaNota, totalDaNota, itensDaNota, tipoDaNota, resumirNota,
   dataDaNota, naturezaDaNota, ehDevolucao, textoBuscavelDaNota,
+  contaParaFaturamento,
 } from './nota-fiscal-leitura';
 
 /**
@@ -19,6 +20,7 @@ import {
 const DEVOLUCAO = {
   document_type: 'nfe',
   status: 'authorized',
+  environment: 'producao',
   authorized_at: '2026-07-28T20:06:00Z',
   created_at: '2026-07-28T20:06:30Z',
   request_payload: {
@@ -42,6 +44,7 @@ const DEVOLUCAO = {
 const VENDA_7_ITENS = {
   document_type: 'nfe',
   status: 'authorized',
+  environment: 'producao',
   authorized_at: '2026-08-27T22:56:00Z',
   created_at: '2026-08-27T22:56:10Z',
   request_payload: {
@@ -65,6 +68,7 @@ const VENDA_7_ITENS = {
 const SERVICO = {
   document_type: 'nfse',
   status: 'authorized',
+  environment: 'producao',
   authorized_at: null,
   created_at: '2026-09-16T19:31:47Z',
   request_payload: {
@@ -237,5 +241,62 @@ describe('robustez', () => {
   it('item com campo faltando conta como zero, não como NaN', () => {
     const incompleto = { document_type: 'nfe', request_payload: { items: [{ quantity: 2 }, { unit_price: 10 }] } };
     expect(totalDaNota(incompleto)).toBe(0);
+  });
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// O painel de faturamento da tela fiscal mostrava R$ 0,00 em setembro de 2026.
+// Os números abaixo são os do banco, medidos em 23/09/2026 — cada um é um defeito
+// diferente que somava no mesmo lugar.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('o que conta como faturamento', () => {
+  const autorizadaProducao = {
+    status: 'authorized', environment: 'producao',
+    request_payload: { purpose: 1, payments: [{ amount: 100 }], items: [{ quantity: 1, unit_price: 100 }] },
+  };
+
+  it('setembro aparecia zerado: a única nota do mês é NFS-e, que não tem pagamento', () => {
+    // A NFS-e 1/5, de R$ 500. A fórmula antiga lia payments[0] e somava zero.
+    expect(contaParaFaturamento(SERVICO)).toBe(true);
+    expect(totalDaNota(SERVICO)).toBe(500);
+  });
+
+  it('homologação não é faturamento — julho mostrava R$ 8.100 sendo R$ 4.050', () => {
+    // Metade do "faturamento" de julho era uma nota de teste, que não vale fiscalmente.
+    expect(contaParaFaturamento({ ...autorizadaProducao, environment: 'homologacao' })).toBe(false);
+  });
+
+  it('devolução é nota de verdade, mas não é receita', () => {
+    // Mercadoria voltando para o fornecedor: somá-la infla o faturamento com dinheiro
+    // que ninguém recebeu. É a exclusão mais sutil das três.
+    expect(DEVOLUCAO.status).toBe('authorized');
+    expect(DEVOLUCAO.request_payload.purpose).toBe(4);
+    expect(contaParaFaturamento(DEVOLUCAO)).toBe(false);
+  });
+
+  it('só o que a SEFAZ autorizou entra na conta', () => {
+    for (const status of ['draft', 'queued', 'processing', 'rejected', 'failed', 'cancelled']) {
+      expect(contaParaFaturamento({ ...autorizadaProducao, status })).toBe(false);
+    }
+    expect(contaParaFaturamento(autorizadaProducao)).toBe(true);
+  });
+
+  it('venda autorizada em produção conta, e conta pelo valor da nota', () => {
+    expect(contaParaFaturamento(VENDA_7_ITENS)).toBe(true);
+    expect(totalDaNota(VENDA_7_ITENS)).toBe(17568.17);
+  });
+
+  it('agosto: as duas NFS-e que faltavam somam os R$ 2.800,38 do buraco', () => {
+    // 33.413,62 apareciam; 36.214,00 era o real.
+    const nfse1 = { document_type: 'nfse', status: 'authorized', environment: 'producao',
+      request_payload: { amounts: { net_amount: 368.55 } } };
+    const nfse2 = { document_type: 'nfse', status: 'authorized', environment: 'producao',
+      request_payload: { amounts: { net_amount: 2431.83 } } };
+    const somadas = [nfse1, nfse2]
+      .filter(contaParaFaturamento)
+      .reduce((s, d) => s + totalDaNota(d), 0);
+    expect(Math.round(somadas * 100) / 100).toBe(2800.38);
+    expect(36214.00 - 33413.62).toBeCloseTo(2800.38, 2);
   });
 });
