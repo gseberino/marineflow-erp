@@ -26,8 +26,12 @@ import {
 import {
   FileText, Loader2, Plus, Trash2, RefreshCw, Download, Ban, Pencil, Settings2, Upload,
   Stethoscope, CheckCircle2, XCircle, Undo2, Send, FileDown, Copy, Boxes, Eye, Mail,
-  Save, FolderClock,
+  Save, FolderClock, MoreHorizontal,
 } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -38,6 +42,9 @@ import { useAppSettings } from '@/hooks/use-app-settings';
 import { useI18n } from '@/i18n';
 import { maskCPFCNPJ } from '@/lib/masks';
 import { parseNfeReferenceXml } from '@/lib/nfe-xml-parser';
+import {
+  tomadorDaNota, totalDaNota, itensDaNota, tipoDaNota,
+} from '@/lib/nota-fiscal-leitura';
 import { createZipBlob, type ZipEntry } from '@/lib/zip';
 import { parseLegacyAddress } from '@/lib/address-legacy';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
@@ -2085,7 +2092,7 @@ export default function FiscalEmission() {
       {/* ── Histórico ── */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Histórico de NF-es Emitidas</h2>
+          <h2 className="text-lg font-semibold">Histórico de notas emitidas</h2>
           <Button variant="ghost" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] })}>
             <RefreshCw className="h-4 w-4 mr-1" />Atualizar
           </Button>
@@ -2095,41 +2102,91 @@ export default function FiscalEmission() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Série/Nº</TableHead>
-                <TableHead>Ambiente</TableHead>
-                <TableHead>Emissão</TableHead>
-                <TableHead className="text-right">Total</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+                <TableHead className="w-[120px]">Série/Nº</TableHead>
+                {/* O tomador ocupa a maior largura: é por ele que se procura uma nota. */}
+                <TableHead>Tomador</TableHead>
+                <TableHead className="hidden lg:table-cell text-center w-[68px]">Itens</TableHead>
+                <TableHead className="hidden md:table-cell w-[104px]">Emissão</TableHead>
+                <TableHead className="w-[150px]">Status</TableHead>
+                {/* O valor fecha a leitura da linha, encostado na direita dos dados. */}
+                <TableHead className="text-right w-[126px]">Total</TableHead>
+                <TableHead className="w-[48px]"><span className="sr-only">Ações</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loadingDocs ? (
                 Array.from({ length: 3 }).map((_, i) => (
-                  <TableRow key={i}><TableCell colSpan={6}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
+                  <TableRow key={i}><TableCell colSpan={7}><Skeleton className="h-8 w-full" /></TableCell></TableRow>
                 ))
               ) : !documents?.length ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
-                    Nenhuma NF-e emitida ainda. Use o botão "Emitir NF-e" para começar.
+                  <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
+                    Nenhuma nota emitida ainda. Use o botão "Emitir NF-e" para começar.
                   </TableCell>
                 </TableRow>
               ) : documents.map((doc: any) => {
                 const s = STATUS_MAP[doc.status] ?? STATUS_MAP.draft;
                 const isBusy = busyDocIds.has(doc.id);
-                // Lê o total já calculado/arredondado pelo backend em vez de
-                // recalcular no cliente (as duas contas podem divergir por
-                // arredondamento, e recalcular em toda renderização é trabalho à toa).
-                const docTotal = Number(doc.request_payload?.payments?.[0]?.amount ?? 0);
+                const docTotal = totalDaNota(doc);
+                const tomador = tomadorDaNota(doc);
+                const qtdItens = itensDaNota(doc);
+                const tipo = tipoDaNota(doc);
+                const ehNfe = tipo !== 'NFS-e';
+                const ehDevolucao = doc.request_payload?.purpose === 4;
+                const autorizada = doc.status === 'authorized';
+                const corrigivel = ['failed', 'rejected', 'cancelled', 'draft'].includes(doc.status)
+                  && !!doc.request_payload;
+                const emAndamento = ['draft', 'queued', 'processing'].includes(doc.status);
                 return (
                   <TableRow key={doc.id} className="hover:bg-muted/30">
-                    <TableCell className="font-mono">{doc.series}/{doc.number}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {doc.environment === 'producao' ? 'Produção' : 'Homologação'}
+                    <TableCell className="font-mono align-top">
+                      <div className="whitespace-nowrap">{doc.series}/{doc.number}</div>
+                      {/* O tipo estava só implícito: a lista mistura NF-e e NFS-e e não
+                          dizia qual era qual. Homologação aparece porque é a exceção que
+                          muda o significado da linha — produção é o esperado e não vira
+                          rótulo, que só somaria ruído em toda linha normal. */}
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                        <span className="rounded bg-muted px-1 py-px text-[10px] font-sans font-medium text-muted-foreground">
+                          {tipo}
+                        </span>
+                        {doc.environment !== 'producao' && (
+                          <span className="rounded bg-amber-100 px-1 py-px text-[10px] font-sans font-medium text-amber-800">
+                            Homologação
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-sm">{formatDate(doc.created_at)}</TableCell>
-                    <TableCell className="text-right font-semibold">{formatCurrency(docTotal)}</TableCell>
-                    <TableCell>
+
+                    <TableCell className="align-top">
+                      {tomador.nome ? (
+                        <>
+                          <div className="font-medium leading-snug break-words">{tomador.nome}</div>
+                          {tomador.documento && (
+                            <div className="text-[11px] text-muted-foreground font-mono">
+                              {maskCPFCNPJ(tomador.documento)}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">—</span>
+                      )}
+                      {/* Em tela estreita as colunas de itens e emissão somem; o dado
+                          volta aqui embaixo em vez de empurrar a tabela para o lado. */}
+                      <div className="mt-0.5 text-[11px] text-muted-foreground md:hidden">
+                        {formatDate(doc.created_at)}
+                        {qtdItens != null && ` · ${qtdItens} ${qtdItens === 1 ? 'item' : 'itens'}`}
+                      </div>
+                    </TableCell>
+
+                    <TableCell className="hidden lg:table-cell text-center align-top tabular-nums text-muted-foreground">
+                      {qtdItens ?? '—'}
+                    </TableCell>
+
+                    <TableCell className="hidden md:table-cell text-muted-foreground text-sm align-top whitespace-nowrap">
+                      {formatDate(doc.created_at)}
+                    </TableCell>
+
+                    <TableCell className="align-top">
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${s.className}`}>
                         {s.label}
                       </span>
@@ -2146,105 +2203,119 @@ export default function FiscalEmission() {
                         </button>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-1">
-                        {['failed', 'rejected', 'cancelled', 'draft'].includes(doc.status) && doc.request_payload && (
+
+                    <TableCell className="text-right font-semibold align-top tabular-nums whitespace-nowrap">
+                      {formatCurrency(docTotal)}
+                    </TableCell>
+
+                    {/*
+                      Dez botões lado a lado viravam uma parede: a linha ficava larga, o
+                      olho não achava o que procurava e a ação perigosa (cancelar a nota)
+                      tinha o mesmo peso visual de baixar um PDF. Agora só a ação do dia a
+                      dia fica à vista — baixar o documento — e o resto vive no menu, com
+                      rótulo escrito por extenso em vez de ícone adivinhado.
+                    */}
+                    <TableCell className="align-top">
+                      <div className="flex items-start justify-end gap-1">
+                        {autorizada && (
                           <Button
-                            size="sm" variant="outline" className="text-xs"
-                            onClick={() => handleReemitFromDoc(doc)}
-                            title="Reabrir esta nota já preenchida para corrigir os dados e emitir de novo"
+                            size="sm" variant="outline" className="h-8 px-2 text-xs"
+                            disabled={isBusy}
+                            title={ehNfe ? 'Baixar o DANFE (.pdf)' : 'Baixar o PDF da NFS-e'}
+                            onClick={() => handleViewArtifact(doc, 'pdf_danfe')}
                           >
-                            <Pencil className="h-3.5 w-3.5 mr-1" />Corrigir e reemitir
+                            {isBusy
+                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              : <><FileDown className="h-3.5 w-3.5 sm:mr-1" /><span className="hidden sm:inline">PDF</span></>}
                           </Button>
                         )}
-                        {['draft', 'queued', 'processing'].includes(doc.status) && (
-                          <Button size="sm" variant="outline" disabled={isBusy} onClick={() => handleRefreshStatus(doc.id)}>
-                            {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                          </Button>
-                        )}
-                        {doc.status === 'authorized' && (
-                          <>
+
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
                             <Button
-                              size="sm" variant="ghost" disabled={isBusy}
-                              title="Atualizar status na SEFAZ — use se cancelou a nota e ela ainda aparece como autorizada"
-                              onClick={() => handleRefreshStatus(doc.id)}
-                            >
-                              {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                            </Button>
-                            <Button size="sm" variant="outline" disabled={isBusy} title="Baixar XML autorizado (.xml)" onClick={() => handleViewArtifact(doc, 'xml_authorized')}>
-                              <Download className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button size="sm" variant="outline" disabled={isBusy} title="Baixar o DANFE (.pdf)" onClick={() => handleViewArtifact(doc, 'pdf_danfe')}>
-                              DANFE
-                            </Button>
-                            {doc.client_id && (
-                              <Button
-                                size="sm" variant="outline" className="text-xs"
-                                disabled={isBusy}
-                                title="Enviar o DANFE (PDF) ao cliente por WhatsApp"
-                                onClick={() => handleSendToClient(doc)}
-                              >
-                                <Send className="h-3.5 w-3.5 mr-1" />Enviar ao cliente
-                              </Button>
-                            )}
-                            <Button
-                              size="sm" variant="outline" className="text-xs"
+                              size="sm" variant="ghost" className="h-8 w-8 p-0"
                               disabled={isBusy}
-                              title="Enviar a NF-e (DANFE em PDF + XML) ao cliente por e-mail"
-                              onClick={() => handleSendEmail(doc)}
+                              title="Mais ações para esta nota"
                             >
-                              <Mail className="h-3.5 w-3.5 mr-1" />E-mail
+                              <MoreHorizontal className="h-4 w-4" />
+                              <span className="sr-only">Mais ações para a nota {doc.series}/{doc.number}</span>
                             </Button>
-                            {doc.request_payload?.purpose !== 4 && doc.access_key && (
-                              <Button
-                                size="sm" variant="outline" className="text-xs"
-                                title="Gerar uma NF-e de devolução (total ou parcial) desta venda, já referenciando a nota original"
-                                onClick={() => handleGenerateReturn(doc)}
-                              >
-                                <Undo2 className="h-3.5 w-3.5 mr-1" />Gerar devolução
-                              </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-64">
+                            <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              {tipo} {doc.series}/{doc.number}
+                            </DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+
+                            {autorizada && (
+                              <>
+                                <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => handleViewArtifact(doc, 'xml_authorized')}>
+                                  <Download className="h-3.5 w-3.5" />Baixar XML autorizado
+                                </DropdownMenuItem>
+                                {doc.client_id && (
+                                  <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => handleSendToClient(doc)}>
+                                    <Send className="h-3.5 w-3.5" />Enviar ao cliente por WhatsApp
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => handleSendEmail(doc)}>
+                                  <Mail className="h-3.5 w-3.5" />Enviar por e-mail
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                {doc.request_payload && !ehDevolucao && (
+                                  <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => handleReemitFromDoc(doc)}>
+                                    <Copy className="h-3.5 w-3.5" />Duplicar para nova nota
+                                  </DropdownMenuItem>
+                                )}
+                                {ehNfe && !ehDevolucao && doc.access_key && (
+                                  <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => handleGenerateReturn(doc)}>
+                                    <Undo2 className="h-3.5 w-3.5" />Gerar devolução
+                                  </DropdownMenuItem>
+                                )}
+                                {!ehDevolucao && doc.origin_type === 'manual' && doc.client_id && !doc.stock_settled_at && (
+                                  <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => openSettleDialog(doc)}>
+                                    <Boxes className="h-3.5 w-3.5" />Baixar estoque + gerar recebível
+                                  </DropdownMenuItem>
+                                )}
+                                {ehNfe && (
+                                  <DropdownMenuItem
+                                    className="gap-2 cursor-pointer"
+                                    onClick={() => { setCorrectionTarget({ id: doc.id, number: doc.number, series: doc.series }); setCorrectionText(''); }}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />Carta de correção (CC-e)
+                                  </DropdownMenuItem>
+                                )}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => handleRefreshStatus(doc.id)}>
+                                  <RefreshCw className="h-3.5 w-3.5" />Atualizar status na SEFAZ
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="gap-2 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
+                                  onClick={() => setCancelTarget({ id: doc.id, authorized_at: doc.authorized_at })}
+                                >
+                                  <Ban className="h-3.5 w-3.5" />Cancelar nota
+                                </DropdownMenuItem>
+                              </>
                             )}
-                            {doc.request_payload?.purpose !== 4 && doc.request_payload && (
-                              <Button
-                                size="sm" variant="outline" className="text-xs"
-                                disabled={isBusy}
-                                title="Duplicar: abre uma nova NF-e com os mesmos dados desta (cliente, itens, impostos). Ganha um novo número e você revisa antes de emitir — ideal para vendas recorrentes."
-                                onClick={() => handleReemitFromDoc(doc)}
-                              >
-                                <Copy className="h-3.5 w-3.5 mr-1" />Duplicar
-                              </Button>
+
+                            {emAndamento && (
+                              <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => handleRefreshStatus(doc.id)}>
+                                <RefreshCw className="h-3.5 w-3.5" />Atualizar status
+                              </DropdownMenuItem>
                             )}
-                            {doc.request_payload?.purpose !== 4
-                              && doc.origin_type === 'manual'
-                              && doc.client_id
-                              && !doc.stock_settled_at && (
-                              <Button
-                                size="sm" variant="outline" className="text-xs"
-                                disabled={isBusy}
-                                title="Baixar o estoque dos itens ligados a produtos do catálogo e gerar o(s) recebível(is) — à vista ou parcelado — desta venda avulsa. Notas de OS já fazem isso pelo fluxo da OS."
-                                onClick={() => openSettleDialog(doc)}
-                              >
-                                <Boxes className="h-3.5 w-3.5 mr-1" />Baixar estoque + recebível
-                              </Button>
+
+                            {corrigivel && (
+                              <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => handleReemitFromDoc(doc)}>
+                                <Pencil className="h-3.5 w-3.5" />Corrigir e reemitir
+                              </DropdownMenuItem>
                             )}
-                            <Button
-                              size="sm" variant="outline" className="text-xs"
-                              disabled={isBusy}
-                              title="Carta de Correção Eletrônica (CC-e) — corrige erros que não mudam valores, impostos, destinatário ou datas"
-                              onClick={() => { setCorrectionTarget({ id: doc.id, number: doc.number, series: doc.series }); setCorrectionText(''); }}
-                            >
-                              CC-e
-                            </Button>
-                            <Button
-                              size="sm" variant="ghost" className="text-destructive hover:text-destructive"
-                              disabled={isBusy}
-                              title="Cancelar a NF-e (janela de 24h após a autorização)"
-                              onClick={() => setCancelTarget({ id: doc.id, authorized_at: doc.authorized_at })}
-                            >
-                              <Ban className="h-3.5 w-3.5" />
-                            </Button>
-                          </>
-                        )}
+
+                            {(doc.status_message || ['failed', 'rejected'].includes(doc.status)) && (
+                              <DropdownMenuItem className="gap-2 cursor-pointer" onClick={() => setErrorDetail(doc)}>
+                                <Eye className="h-3.5 w-3.5" />Ver detalhe do erro
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </TableCell>
                   </TableRow>

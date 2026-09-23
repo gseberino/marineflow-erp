@@ -36,6 +36,35 @@ import { supabase } from '@/integrations/supabase/client';
 type ReconcileMode = 'existing' | 'service_order' | 'new' | 'dismiss';
 
 /**
+ * DUPLICIDADE: por que todo lançamento criado aqui carrega `bank_transaction_id`.
+ *
+ * O banco tem a trava certa — `payables_uma_por_transacao` e a gêmea em receivables são
+ * índices únicos que impedem duas contas para a mesma transação. Mas são índices PARCIAIS
+ * (`where bank_transaction_id is not null`): quem grava o campo nulo passa por baixo delas.
+ *
+ * Esta tela gravava nulo. Marcava `bank_transactions.reconciled = true` e ligava o
+ * pagamento, mas deixava a conta sem apontar para a transação. Duas consequências, e a
+ * segunda é a que doeu:
+ *
+ *  1. a trava do banco não protegia nada nestes lançamentos;
+ *  2. a varredura da caixa de entrada decide "esta transação já virou lançamento?" olhando
+ *     exatamente `payables.bank_transaction_id` — então ela não via o que esta tela criou
+ *     e propunha a mesma despesa de novo, que o gestor aprovava de boa-fé.
+ *
+ * Medido em 23/09/2026: 13 despesas lançadas em dobro (R$ 2.315 inflando o resultado) e 29
+ * lançamentos sem vínculo nenhum. Com o campo preenchido, a segunda tentativa agora bate na
+ * trava do banco e vira a mensagem abaixo, em vez de virar uma despesa fantasma.
+ */
+function erroDeConciliacao(e: unknown): string {
+  const msg = String((e as { message?: string })?.message ?? '');
+  // 23505 é violação de unicidade; o nome do índice diz qual das duas travas pegou.
+  if (msg.includes('uma_por_transacao') || msg.includes('23505')) {
+    return 'Esta transação já virou lançamento — não foi criada de novo. Procure-a em Contas a pagar/receber.';
+  }
+  return msg || 'Erro ao conciliar';
+}
+
+/**
  * Até quanto de diferença é tarifa, e não decisão.
  *
  * O menor entre os dois, como manda a prática de conciliação: percentual sozinho dá folga
@@ -513,6 +542,9 @@ export function BankReconciliation() {
           issue_date: bankTx.transaction_date, due_date: bankTx.transaction_date,
           amount: Number(bankTx.amount), paid_amount: Number(bankTx.amount),
           balance_amount: 0, status: 'paid',
+          // O vínculo com o extrato, sem o qual o mesmo dinheiro pode ser lançado de novo
+          // por outro caminho. Ver DUPLICIDADE, no topo do arquivo.
+          bank_transaction_id: bankTx.id,
         }).select().single();
         if (rec) {
           const { data: payment } = await supabase.from('payments').insert({
@@ -531,6 +563,7 @@ export function BankReconciliation() {
           issue_date: bankTx.transaction_date, due_date: bankTx.transaction_date,
           paid_amount: Number(bankTx.amount), balance_amount: 0, status: 'paid',
           origin: 'bank_reconciliation',
+          bank_transaction_id: bankTx.id,
         }).select().single();
         if (pay) {
           const { data: payment } = await supabase.from('payments').insert({
@@ -546,7 +579,7 @@ export function BankReconciliation() {
       toast.success(t.financial.confirmReconciliation);
       setReconcileId(null);
       invalidateAll();
-    } catch { toast.error('Erro ao conciliar'); }
+    } catch (e: any) { toast.error(erroDeConciliacao(e)); }
     setIsProcessing(false);
   };
 
@@ -607,6 +640,7 @@ export function BankReconciliation() {
           // para qualquer leitura de resultado por categoria.
           category: newForm.expense_category || 'Serviços prestados',
           notes: newForm.notes || null,
+          bank_transaction_id: bankTx.id,
         }).select().single();
         if (rec) {
           const { data: payment } = await supabase.from('payments').insert({
@@ -626,6 +660,7 @@ export function BankReconciliation() {
           due_date: bankTx.transaction_date, paid_amount: Number(bankTx.amount),
           balance_amount: 0, status: 'paid', notes: newForm.notes || null,
           origin: 'bank_reconciliation',
+          bank_transaction_id: bankTx.id,
         }).select().single();
         if (pay) {
           const { data: payment } = await supabase.from('payments').insert({
@@ -641,7 +676,7 @@ export function BankReconciliation() {
       setReconcileId(null);
       setNewForm({ description: '', client_id: '', supplier_id: '', expense_category: '', service_order_id: '', notes: '' });
       invalidateAll();
-    } catch { toast.error('Erro ao conciliar'); }
+    } catch (e: any) { toast.error(erroDeConciliacao(e)); }
     setIsProcessing(false);
   };
 

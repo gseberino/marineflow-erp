@@ -521,6 +521,29 @@ export function useReconcile() {
         reconciled: true, reconciled_payment_id: payment.id,
       }).eq('id', input.bankTransactionId);
 
+      /**
+       * O vínculo de volta, da conta para a transação — sem ele a despesa volta a ser
+       * proposta.
+       *
+       * A varredura da caixa de entrada pergunta "esta transação já virou lançamento?"
+       * olhando `payables.bank_transaction_id`. Baixar a conta e marcar a transação como
+       * conciliada não respondia essa pergunta, então a mesma despesa era proposta de novo
+       * e aprovada de boa-fé. Ver o bloco DUPLICIDADE em BankReconciliation.tsx.
+       *
+       * Só grava se ainda estiver vazio: uma conta paga em parcelas recebe várias
+       * transações, e o índice único só admite uma. A primeira fica com o vínculo; as
+       * demais seguem rastreáveis pelos pagamentos, e um conflito aqui não desfaz a baixa
+       * que já aconteceu — por isso o erro é registrado, não propagado.
+       */
+      const alvo = input.receivableId ? 'receivables' : 'payables';
+      const alvoId = (input.receivableId || input.payableId) ?? null;
+      if (alvoId) {
+        const { error: erroVinculo } = await supabase.from(alvo).update({
+          bank_transaction_id: input.bankTransactionId,
+        } as never).eq('id', alvoId).is('bank_transaction_id', null);
+        if (erroVinculo) console.warn('vínculo conta-transação não gravado:', erroVinculo.message);
+      }
+
       return payment;
     },
     onSuccess: () => {
