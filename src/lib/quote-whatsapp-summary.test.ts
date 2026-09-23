@@ -118,12 +118,20 @@ describe('resumo do orçamento para WhatsApp', () => {
     expect(texto(semBanco)).toContain('Chave PIX');
   });
 
-  it('com valores ocultos, manda o link em vez de improvisar números', () => {
-    const t = buildQuoteWhatsAppSummary({
-      ...ROBSON, opcoes: { hideFinancials: true }, link: 'https://exemplo/orc/82',
-    });
-    expect(texto(t)).not.toContain('2.446,45');
-    expect(texto(t)).toContain('https://exemplo/orc/82');
+  it('nunca manda link nem anexo: este modo é só para os valores', () => {
+    // Pedido do dono (24/09/2026). Quem quiser o documento usa os outros dois modos de
+    // envio, que continuam disponíveis ao lado.
+    const t = texto(buildQuoteWhatsAppSummary(ROBSON));
+    expect(t).not.toContain('http');
+    expect(t).not.toContain('📎');
+  });
+
+  it('com valores ocultos não improvisa números nem sobra mensagem vazia', () => {
+    const t = texto(buildQuoteWhatsAppSummary({ ...ROBSON, opcoes: { hideFinancials: true } }));
+    expect(t).not.toContain('2.446,45');
+    expect(t).not.toContain('http');
+    // Sobra uma frase com sentido -- e o diálogo nem oferece este modo nesse caso.
+    expect(t).toContain('envio os valores em seguida');
   });
 
   it('deslocamento não cobrável não entra na conta do cliente', () => {

@@ -252,7 +252,8 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
   const canSendDocument = target?.kind === 'service_order' && !!pdfSourceId;
   // Resumo escrito só faz sentido para orçamento/OS: uma cobrança avulsa não tem sinal,
   // saldo nem condição de pagamento para descrever.
-  const canSendResumo = target?.kind === 'service_order' && !!pdfSourceId;
+  // Com os financeiros ocultos o resumo não teria o que dizer -- é um modo de valores.
+  const canSendResumo = target?.kind === 'service_order' && !!pdfSourceId && !pdfOptions.hideFinancials;
 
   /**
    * Como a mensagem VIAJA, que não é a mesma coisa que o modo escolhido na tela.
@@ -280,7 +281,6 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       orcamento: so,
       parcelas: so.payment_condition_installments ?? null,
       condicaoLabel: so.payment_condition_label ?? so.payment_conditions ?? null,
-      link: publicUrl || null,
       validadeDias: so.quote_validity_days ?? null,
       empresa: {
         nome: appSettings?.['company_name'],

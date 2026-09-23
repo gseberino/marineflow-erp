@@ -7,7 +7,9 @@
  * quanto eu pago agora?") fica sem resposta à vista.
  *
  * Aqui os números vão no texto: total, quanto é o sinal, o que ele cobre, quanto fica para
- * a entrega e como pagar. O link continua no fim, para quem quiser o detalhe item a item.
+ * a entrega e como pagar. SEM link e sem anexo — o dono foi explícito (24/09/2026): este
+ * modo é para mandar os valores, e mais nada. Quem quiser o documento usa os outros dois
+ * modos de envio, que continuam ali ao lado.
  *
  * DUAS REGRAS QUE ESTE ARQUIVO NÃO PODE QUEBRAR:
  *
@@ -62,8 +64,6 @@ export interface ResumoDeOrcamentoInput {
   parcelas?: DepositInstallment[] | null;
   /** Rótulo da condição, como aparece na tela ("50% mão de obra + 100% materiais"). */
   condicaoLabel?: string | null;
-  /** Link público do orçamento, quando existe. */
-  link?: string | null;
   validadeDias?: number | null;
   empresa?: DadosDaEmpresa;
   opcoes?: OpcoesDeExibicao;
@@ -107,7 +107,7 @@ function quandoVence(row: { dueBasis: 'delivery' | 'days'; days: number }): stri
 export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string {
   const {
     numero, clienteNome, ativoNome, orcamento, parcelas, condicaoLabel,
-    link, validadeDias, empresa = {}, opcoes = {},
+    validadeDias, empresa = {}, opcoes = {},
   } = input;
 
   const mostrar = {
@@ -126,11 +126,13 @@ export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string
   linhas.push(`Olá, ${primeiroNome(clienteNome)}!`);
   if (ativoNome) linhas.push(`Referente a: ${ativoNome}`);
 
-  // ── Quando o gestor esconde os valores, a mensagem não os inventa de volta ──
+  // ── Sem valores não há resumo ────────────────────────────────────────────
+  // Com os financeiros ocultos sobra um cumprimento, e mandar isso é pior que não
+  // mandar nada. O diálogo nem oferece este modo nesse caso; a frase abaixo existe só
+  // para a função nunca devolver uma mensagem sem conteúdo.
   if (opcoes.hideFinancials) {
     linhas.push('');
-    linhas.push('Preparamos seu orçamento. Os valores estão no documento:');
-    if (link) linhas.push(link);
+    linhas.push('Preparamos seu orçamento — envio os valores em seguida.');
     return linhas.join('\n');
   }
 
@@ -224,11 +226,8 @@ export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string
     }
   }
 
-  if (link) {
-    linhas.push('');
-    linhas.push(`📎 Orçamento completo, item a item: ${link}`);
-  }
   if (validadeDias && validadeDias > 0) {
+    linhas.push('');
     linhas.push(`⏳ Proposta válida por ${validadeDias} dias.`);
   }
 
