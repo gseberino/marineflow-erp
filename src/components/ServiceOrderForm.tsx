@@ -191,7 +191,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     void writeAuditLog({
       table_name: 'service_orders',
       record_id: orderData.id,
-      action: 'whatsapp_preview' as any,
+      action: 'whatsapp_preview',
       new_value: {
         share_token: orderData.share_token,
         public_url: url,
@@ -972,7 +972,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
             writeAuditLog({
               table_name: 'service_orders',
               record_id: orderId!,
-              action: 'update' as any,
+              action: 'update',
               new_value: { financial_changes: changed },
               reason: 'Campos financeiros alterados manualmente',
             }).catch(() => {});
@@ -2591,7 +2591,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                     void writeAuditLog({
                       table_name: 'service_orders',
                       record_id: orderData.id,
-                      action: 'whatsapp_send' as any,
+                      action: 'whatsapp_send',
                       new_value: {
                         share_token: orderData.share_token,
                         public_url: waPreview?.url,

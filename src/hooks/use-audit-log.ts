@@ -1,10 +1,26 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { logError } from '@/lib/diagnostics';
+
+/**
+ * As ações que a auditoria aceita.
+ *
+ * É a mesma lista do CHECK `audit_log_action_check` no banco, e as duas têm que andar
+ * juntas: o banco recusa o que não está lá, então um valor novo aqui sem a migration
+ * correspondente vira linha perdida. O teste `src/test/audit-log-acoes.test.ts` compara
+ * as duas listas e falha quando uma anda sem a outra.
+ */
+export type AuditAction =
+  | 'update' | 'cancel' | 'reopen' | 'reversal' | 'cascade_update' | 'client_signature'
+  | 'whatsapp_send' | 'whatsapp_send_api' | 'whatsapp_received' | 'whatsapp_preview'
+  | 'whatsapp_send_open' | 'whatsapp_unread_reminder_enqueued'
+  | 'lead_created' | 'lead_matched' | 'lead_converted'
+  | 'import_xml' | 'confirm_import' | 'revert_import';
 
 export async function writeAuditLog(entry: {
   table_name: string;
   record_id: string;
-  action: 'update' | 'cancel' | 'reopen' | 'reversal' | 'cascade_update';
+  action: AuditAction;
   changed_by?: string;
   previous_value?: any;
   new_value?: any;
@@ -13,7 +29,7 @@ export async function writeAuditLog(entry: {
   triggered_by_id?: string;
 }): Promise<void> {
   try {
-    await supabase.from('audit_log').insert({
+    const { error } = await supabase.from('audit_log').insert({
       table_name: entry.table_name,
       record_id: entry.record_id,
       action: entry.action,
@@ -24,8 +40,24 @@ export async function writeAuditLog(entry: {
       triggered_by_table: entry.triggered_by_table || null,
       triggered_by_id: entry.triggered_by_id || null,
     });
-  } catch {
-    // Audit log failure should never break main flow
+    // O `insert` do supabase-js DEVOLVE o erro, não o lança — então o `catch` abaixo
+    // nunca via nada, e seis ações recusadas pelo CHECK sumiram sem deixar rastro
+    // nenhum durante meses. Falhar aqui continua não podendo derrubar a operação do
+    // usuário, mas tem que aparecer em algum lugar.
+    if (error) {
+      void logError({
+        message: `Auditoria recusada (${entry.action} em ${entry.table_name}): ${error.message}`,
+        action: 'audit_log',
+        level: 'warn',
+        details: { acao: entry.action, tabela: entry.table_name, codigo: error.code },
+      });
+    }
+  } catch (e) {
+    // Rede fora do ar, por exemplo. Auditoria nunca derruba o fluxo principal.
+    void logError({
+      message: `Auditoria não gravada (${entry.action} em ${entry.table_name})`,
+      action: 'audit_log', level: 'warn', error: e,
+    });
   }
 }
 

@@ -217,7 +217,7 @@ export default function ServiceOrderList() {
     void writeAuditLog({
       table_name: 'service_orders',
       record_id: so.id,
-      action: 'whatsapp_send' as any,
+      action: 'whatsapp_send',
       new_value: {
         share_token: so.share_token,
         public_url: url,

@@ -1,6 +1,7 @@
 import { supabase } from '@/integrations/supabase/client';
 import { queryClient } from '@/lib/query-client';
 import { toast } from 'sonner';
+import { avisarSeForAppAtualizado } from '@/lib/app-atualizado';
 
 const MAX_ERRORS = 50;
 const MAX_NETWORK = 50;
@@ -217,6 +218,16 @@ export function installDiagnostics() {
     const msg = safeStringify(reason?.message ?? reason);
     if (naoRepetir('rej:' + msg)) return;
     void logError({ message: msg, error: reason, action: 'unhandledrejection' });
+    // Tela carregada sob demanda cujo arquivo sumiu na publicação: vira um aviso com
+    // botão de recarregar, em vez de uma mensagem técnica que não diz o que fazer.
+    avisarSeForAppAtualizado(reason);
+  });
+
+  // O Vite avisa por evento próprio quando não consegue pré-carregar o arquivo de uma
+  // tela. Não cancelamos o evento: a rejeição precisa continuar seu caminho para o
+  // Suspense/ErrorBoundary; aqui só adiantamos ao usuário o que aconteceu.
+  window.addEventListener('vite:preloadError', (ev) => {
+    avisarSeForAppAtualizado((ev as unknown as { payload?: unknown })?.payload ?? ev);
   });
 
   // --- toast.error wrapper ---

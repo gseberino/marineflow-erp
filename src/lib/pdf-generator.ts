@@ -1,3 +1,4 @@
+import { avisarSeForAppAtualizado } from './app-atualizado';
 import { scopeCss } from './css-scope';
 import { itemColumnWidths, valueVisibility } from './pdf-visibility';
 
@@ -330,7 +331,20 @@ async function importHtml2Pdf(): Promise<any> {
   } catch (err) {
     console.warn('[generatePDFBlob] import dinâmico de html2pdf.js falhou, tentando novamente', err);
     await new Promise((resolve) => setTimeout(resolve, 800));
-    return await import('html2pdf.js');
+    try {
+      return await import('html2pdf.js');
+    } catch (err2) {
+      // Falhou duas vezes: não é rede lenta. Em 24/09/2026 16:05 o dono recebeu
+      // exatamente isto ao pedir o PDF — a aba dele era de antes da publicação, e o
+      // arquivo com aquele nome não existe mais. Tentar uma terceira vez busca a mesma
+      // URL morta; o que resolve é recarregar, e é o que o aviso oferece.
+      if (avisarSeForAppAtualizado(err2)) {
+        throw new Error(
+          'O sistema foi atualizado enquanto esta aba estava aberta. Recarregue a página e peça o PDF de novo.',
+        );
+      }
+      throw err2;
+    }
   }
 }
 

@@ -1,8 +1,9 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, RotateCcw, Home } from 'lucide-react';
+import { AlertCircle, RotateCcw, Home, RefreshCw } from 'lucide-react';
 import { logError } from '@/lib/diagnostics';
+import { ehChunkQueSumiu } from '@/lib/app-atualizado';
 
 interface Props {
   children: ReactNode;
@@ -29,6 +30,15 @@ export class GlobalErrorBoundary extends Component<Props, State> {
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error:', error, errorInfo);
     this.setState({ errorInfo });
+    // A tela prometia que "nossos sistemas registraram o problema" e nada era gravado:
+    // `logError` estava importado e nunca chamado. Justamente a tela branca — o erro que
+    // ninguém consegue descrever depois — não deixava rastro nenhum em app_error_logs.
+    void logError({
+      message: error?.message || 'Erro não tratado na árvore de componentes',
+      error,
+      action: 'error_boundary',
+      details: { componentStack: errorInfo?.componentStack?.slice(0, 2000) },
+    });
   }
 
   private handleReset = () => {
@@ -45,6 +55,32 @@ export class GlobalErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       if (this.props.fallback) {
         return this.props.fallback;
+      }
+
+      // Tela publicada com a aba aberta: o arquivo da tela nova não existe mais com
+      // aquele nome. Não é defeito, é versão velha — e dizer "Ops! Algo deu errado"
+      // manda o usuário procurar um problema que não existe. Recarregar resolve.
+      if (ehChunkQueSumiu(this.state.error)) {
+        return (
+          <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4 md:p-8">
+            <div className="w-full max-w-md space-y-6 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+                <RefreshCw className="h-8 w-8 text-primary" />
+              </div>
+              <div className="space-y-2">
+                <h1 className="text-2xl font-bold tracking-tight">O sistema foi atualizado</h1>
+                <p className="text-muted-foreground">
+                  Esta aba ainda está usando a versão anterior. Recarregue para continuar —
+                  nada do que você salvou se perdeu.
+                </p>
+              </div>
+              <Button onClick={this.handleReset} className="gap-2" size="lg">
+                <RefreshCw className="h-4 w-4" />
+                Recarregar agora
+              </Button>
+            </div>
+          </div>
+        );
       }
 
       return (

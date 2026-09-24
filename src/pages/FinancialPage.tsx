@@ -257,7 +257,7 @@ export default function FinancialPage() {
     void writeAuditLog({
       table_name: 'receivables',
       record_id: r.id,
-      action: 'whatsapp_send_open' as any,
+      action: 'whatsapp_send_open',
       new_value: {
         description: r.description,
         amount: Number(r.amount),

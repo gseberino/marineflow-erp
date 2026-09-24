@@ -384,7 +384,7 @@ export default function ImportFiscalXML() {
         (r.payables_removed ? `, ${r.payables_removed} conta(s) a pagar removida(s)` : '') + '.',
       );
       await writeAuditLog({
-        table_name: 'fiscal_notes', record_id: noteId, action: 'revert_import' as any,
+        table_name: 'fiscal_notes', record_id: noteId, action: 'revert_import',
         new_value: r, reason: 'Reversão de importação de NF-e pelo usuário',
       });
       qc.invalidateQueries({ queryKey: ['fiscal_notes'] });
@@ -434,7 +434,7 @@ export default function ImportFiscalXML() {
       await writeAuditLog({
         table_name: 'fiscal_notes',
         record_id:  parsed.noteId,
-        action:     'confirm_import' as any,
+        action:     'confirm_import',
         new_value: {
           nfe_number: parsed.nfeNumber,
           total:      parsed.totalNF,

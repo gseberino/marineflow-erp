@@ -344,7 +344,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     void writeAuditLog({
       table_name: 'service_orders',
       record_id: so.id,
-      action: 'whatsapp_send' as never,
+      action: 'whatsapp_send',
       new_value: {
         share_token: so.share_token, public_url: url, phone_raw: String(phoneRaw),
         phone_normalized: phone, client_name: clientName, opened, source: 'v2_list',

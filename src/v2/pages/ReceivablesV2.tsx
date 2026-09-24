@@ -139,7 +139,7 @@ export default function ReceivablesV2() {
     void writeAuditLog({
       table_name: 'receivables',
       record_id: r.id,
-      action: 'whatsapp_send_open' as never,
+      action: 'whatsapp_send_open',
       new_value: {
         description: r.description,
         amount: Number(r.amount),
