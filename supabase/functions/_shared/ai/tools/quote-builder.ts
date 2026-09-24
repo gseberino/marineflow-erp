@@ -1,6 +1,7 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolCtx, type ToolDef } from "./registry.ts";
 import { applyStockDelta } from "./service-orders.ts";
 import { resolverItens } from "../keyword-resolver.ts";
+import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 
 // MACRO — cria um orçamento INTEIRO numa única chamada (LLM orquestra, código executa).
@@ -195,7 +196,8 @@ export const quoteBuilderTools: ToolDef[] = [
           status: "draft",
           problem_description: String(args.title || "Orçamento"),
           payment_conditions: args.payment_conditions ?? null,
-          quote_validity_days: args.quote_validity_days ?? 30,
+          // A configuracao da empresa, nao um numero fixo aqui. Ver validade-orcamento.ts.
+          quote_validity_days: await validadePadraoDoOrcamento(sb, args.quote_validity_days as number | undefined),
           discount_amount: args.discount_amount != null ? r2(Number(args.discount_amount)) : 0,
           service_order_number: num,
           created_by: userId ?? null,

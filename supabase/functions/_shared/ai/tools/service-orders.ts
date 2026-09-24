@@ -1,6 +1,7 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { dayOverloadNotice } from "./agenda.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
+import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
 
 /**
  * Recalcula os totais da OS após inserir/alterar item — best-effort, não deve derrubar a
@@ -443,7 +444,7 @@ export const serviceOrderTools: ToolDef[] = [
         extra_notes: { type: "string", description: "Observações visíveis ao cliente no PDF (condições, ressalvas, validade)" },
         internal_notes: { type: "string", description: "Notas internas (não aparecem no PDF do cliente)" },
         scheduled_start_at: { type: "string", description: "Data/hora de início agendada (ISO)" },
-        quote_validity_days: { type: "number", description: "Validade do orçamento em dias (padrão 30)" },
+        quote_validity_days: { type: "number", description: "Validade do orçamento em dias. Se omitido, usa o padrão configurado pela empresa." },
         payment_conditions: { type: "string", description: "Condições de pagamento (ex: '50% na aprovação, 50% na entrega')" },
         items: {
           type: "array",
@@ -470,9 +471,17 @@ export const serviceOrderTools: ToolDef[] = [
         num = `${prefix}-${Date.now().toString().slice(-5)}`;
       }
       const { items, ...rest } = args;
+      // Sem este campo no insert, o banco aplicava o DEFAULT 15 da coluna e a configuracao
+      // da empresa nao valia para nada do que o assistente cria.
+      const validade = await validadePadraoDoOrcamento(
+        sb, rest.quote_validity_days as number | undefined,
+      );
       const { data, error } = await sb
         .from("service_orders")
-        .insert({ ...rest, service_order_number: num, status: rest.status || "draft", created_by: userId })
+        .insert({
+          ...rest, quote_validity_days: validade,
+          service_order_number: num, status: rest.status || "draft", created_by: userId,
+        })
         .select()
         .single();
       if (error) throw error;
