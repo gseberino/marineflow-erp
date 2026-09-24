@@ -96,7 +96,7 @@ export default function CRMKanbanPage() {
                         <p className="text-xs text-muted-foreground truncate mb-3">{(order as any).vessels?.name || 'Sem unidade'}</p>
                         
                         <div className="flex items-center gap-2 mb-3">
-                          <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={() => setWhatsAppTarget({
+                          <Button aria-label="Enviar esta OS por WhatsApp" size="icon" variant="ghost" className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50" onClick={() => setWhatsAppTarget({
                             kind: 'service_order',
                             serviceOrderId: order.id,
                             serviceOrderNumber: order.service_order_number,
@@ -108,7 +108,7 @@ export default function CRMKanbanPage() {
                           })}>
                             <MessageCircle className="h-4 w-4" />
                           </Button>
-                          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => navigate(`/service-orders/${order.id}`)}>
+                          <Button aria-label="Abrir a OS" size="icon" variant="ghost" className="h-7 w-7" onClick={() => navigate(`/service-orders/${order.id}`)}>
                             <Edit className="h-4 w-4" />
                           </Button>
                           {order.scheduled_start_at && (

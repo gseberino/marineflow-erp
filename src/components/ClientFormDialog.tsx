@@ -225,7 +225,9 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
                   maxLength={form.type === 'company' ? 18 : 14}
                 />
                 {form.type === 'company' && (
-                  <Button type="button" variant="outline" onClick={handleCnpjSearch} disabled={cnpjLoading || form.cpf_cnpj.length < 14}>
+                  <Button type="button" variant="outline" onClick={handleCnpjSearch}
+                    disabled={cnpjLoading || form.cpf_cnpj.length < 14}
+                    aria-label="Buscar dados da empresa pelo CNPJ">
                     {cnpjLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                   </Button>
                 )}

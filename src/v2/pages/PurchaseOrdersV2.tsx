@@ -406,7 +406,7 @@ export default function PurchaseOrdersV2() {
                 emptyMessage="Nenhuma ordem de compra encontrada."
                 rowActions={(po) => (
                   <>
-                    <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Editar" title="Editar" onClick={() => handleEdit(po)}>
+                    <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Editar esta ordem de compra" title="Editar" onClick={() => handleEdit(po)}>
                       <Pencil className="h-4 w-4" />
                     </Button>
                     {statusMenu(po)}

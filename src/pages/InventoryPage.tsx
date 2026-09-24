@@ -383,7 +383,7 @@ export default function InventoryPage() {
                         <td className="px-4 py-3 text-right">
                           <div className="flex justify-end gap-1">
                             <Button size="sm" variant="outline" onClick={() => setAdjustProduct(p)}>Ajustar</Button>
-                            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setAddEntryProduct(p); setShowAddEntry(true); }}>
+                            <Button aria-label="Lançar entrada deste produto" size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setAddEntryProduct(p); setShowAddEntry(true); }}>
                               <Plus className="h-4 w-4" />
                             </Button>
                           </div>
@@ -401,10 +401,10 @@ export default function InventoryPage() {
                   <span>{t.inventory.filteredValue}: {formatCurrency(filteredValue)}</span>
                   {totalPages > 1 && (
                     <div className="flex gap-1">
-                      <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                      <Button aria-label="Página anterior de produtos" variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
                         <ChevronLeft className="h-3 w-3" />
                       </Button>
-                      <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
+                      <Button aria-label="Próxima página de produtos" variant="outline" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
                         <ChevronRight className="h-3 w-3" />
                       </Button>
                     </div>
@@ -542,10 +542,10 @@ export default function InventoryPage() {
                 </span>
                 {movTotalPages > 1 && (
                   <div className="flex gap-1">
-                    <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setMovPage(p => Math.max(1, p - 1))} disabled={movPage === 1}>
+                    <Button aria-label="Página anterior de movimentações" variant="outline" size="sm" className="h-7 px-2" onClick={() => setMovPage(p => Math.max(1, p - 1))} disabled={movPage === 1}>
                       <ChevronLeft className="h-3 w-3" />
                     </Button>
-                    <Button variant="outline" size="sm" className="h-7 px-2" onClick={() => setMovPage(p => Math.min(movTotalPages, p + 1))} disabled={movPage === movTotalPages}>
+                    <Button aria-label="Próxima página de movimentações" variant="outline" size="sm" className="h-7 px-2" onClick={() => setMovPage(p => Math.min(movTotalPages, p + 1))} disabled={movPage === movTotalPages}>
                       <ChevronRight className="h-3 w-3" />
                     </Button>
                   </div>

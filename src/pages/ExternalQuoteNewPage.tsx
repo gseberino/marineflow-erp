@@ -309,7 +309,7 @@ export default function ExternalQuoteNewPage() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <Button 
+                    <Button aria-label="Remover este item do orçamento" 
                       variant="ghost" 
                       size="icon" 
                       className="text-destructive mt-6" 

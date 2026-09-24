@@ -66,7 +66,7 @@ export function PriceSuggestionAlert() {
               <div className="flex justify-between items-center gap-2">
                 <p className="text-[10px] text-amber-700 font-medium">Margem: {s.margin_percent}%</p>
                 <div className="flex gap-1">
-                  <Button 
+                  <Button aria-label="Ignorar esta sugestão de preço" 
                     size="sm" 
                     variant="ghost" 
                     className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"

@@ -163,7 +163,9 @@ export function SupplierFormDialog({ open, onOpenChange, supplier }: Props) {
               <Label>{t.suppliers.cnpj}</Label>
               <div className="flex gap-2">
                 <Input value={form.cnpj_cpf} onChange={e => set('cnpj_cpf', maskCPFCNPJ(e.target.value))} placeholder="00.000.000/0001-00" maxLength={18} />
-                <Button type="button" variant="outline" onClick={handleCnpjSearch} disabled={cnpjLoading || form.cnpj_cpf.length < 14}>
+                <Button type="button" variant="outline" onClick={handleCnpjSearch}
+                  disabled={cnpjLoading || form.cnpj_cpf.length < 14}
+                  aria-label="Buscar dados do fornecedor pelo CNPJ">
                   {cnpjLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                 </Button>
               </div>

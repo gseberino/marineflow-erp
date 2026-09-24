@@ -459,7 +459,7 @@ export default function PurchaseOrdersPage() {
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">
-                      <Button
+                      <Button aria-label="Editar esta ordem de compra"
                         size="icon"
                         variant="ghost"
                         className="h-7 w-7"
@@ -471,7 +471,8 @@ export default function PurchaseOrdersPage() {
                       {/* Status quick-change */}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button size="icon" variant="ghost" className="h-7 w-7">
+                          <Button size="icon" variant="ghost" className="h-7 w-7"
+                            aria-label={`Mais ações da ordem de compra ${po.po_number}`}>
                             <ChevronDown className="h-3.5 w-3.5" />
                           </Button>
                         </DropdownMenuTrigger>

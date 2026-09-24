@@ -3150,7 +3150,7 @@ export default function FiscalEmission() {
                           <Label className="text-[10px] text-muted-foreground">Valor unit.</Label>
                           <Input type="number" min="0" step="0.01" className="h-8 text-xs" value={it.unit_price} onChange={(e) => updateItem(index, { unit_price: Math.max(0, parseFloat(e.target.value) || 0) })} />
                         </div>
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive shrink-0" onClick={() => removeItem(index)}>
+                        <Button aria-label="Remover este item da nota" size="icon" variant="ghost" className="h-8 w-8 text-destructive shrink-0" onClick={() => removeItem(index)}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -3506,7 +3506,7 @@ export default function FiscalEmission() {
                       </TableCell>
                       <TableCell className="text-right whitespace-nowrap">
                         <Button size="sm" variant="outline" onClick={() => restoreDraft(d)}>Abrir</Button>
-                        <Button
+                        <Button aria-label="Excluir rascunho"
                           size="sm"
                           variant="ghost"
                           className="text-destructive ml-1"

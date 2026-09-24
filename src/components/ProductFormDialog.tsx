@@ -793,11 +793,11 @@ export function ProductFormDialog({ open, onOpenChange, product, onSaved }: Prop
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                          <Button type="button" variant="ghost" size="sm"
+                          <Button aria-label="Marcar este fornecedor como preferido" type="button" variant="ghost" size="sm"
                             onClick={() => handleTogglePreferred(ps.id, ps.is_preferred ?? false)} title={t.suppliers.preferred}>
                             <Star className={`h-4 w-4 ${ps.is_preferred ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'}`} />
                           </Button>
-                          <Button type="button" variant="ghost" size="sm"
+                          <Button aria-label="Remover este fornecedor do produto" type="button" variant="ghost" size="sm"
                             onClick={() => removePS.mutate({ id: ps.id, product_id: product.id })}>
                             <Trash2 className="h-4 w-4 text-destructive" />
                           </Button>

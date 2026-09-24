@@ -177,7 +177,7 @@ export default function MarinaList() {
                         </StatusBadge>
                       </td>
                       <td className="px-4 py-3">
-                        <Button
+                        <Button aria-label="Editar esta marina"
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"

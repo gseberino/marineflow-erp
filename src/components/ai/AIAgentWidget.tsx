@@ -246,7 +246,7 @@ export function AIAgentWidget() {
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <div className="relative">
-              <Button
+              <Button aria-label="Conversas anteriores"
                 variant="ghost" size="icon" className="h-8 w-8"
                 onClick={() => { const n = !showHist; setShowHist(n); if (n) carregarSessoes(); }}
                 title="Conversas anteriores"
@@ -280,7 +280,7 @@ export function AIAgentWidget() {
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={reset} title="Nova conversa" aria-label="Nova conversa">
               <RotateCcw className="h-3.5 w-3.5" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOpen(false)} title="Fechar">
+            <Button aria-label="Fechar o assistente" variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOpen(false)} title="Fechar">
               <X className="h-4 w-4" />
             </Button>
           </div>
@@ -353,6 +353,7 @@ export function AIAgentWidget() {
               disabled={loading}
               className={`h-9 w-9 shrink-0 ${isListening ? 'animate-pulse' : ''}`}
               title={isListening ? 'Parar de ouvir' : 'Falar'}
+              aria-label={isListening ? 'Parar de ouvir' : 'Falar com o assistente'}
             >
               {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </Button>
@@ -371,6 +372,7 @@ export function AIAgentWidget() {
               disabled={loading || !input.trim()}
               size="icon"
               className="h-9 w-9 shrink-0"
+              aria-label="Enviar pergunta ao assistente"
             >
               <Send className="h-4 w-4" />
             </Button>

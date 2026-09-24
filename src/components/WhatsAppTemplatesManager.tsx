@@ -158,10 +158,10 @@ export function WhatsAppTemplatesManager() {
                         <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-wrap">{t.body}</p>
                       </div>
                       <div className="flex gap-1 shrink-0">
-                        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditing(t)}>
+                        <Button aria-label="Editar este modelo" size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditing(t)}>
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                        <Button
+                        <Button aria-label="Excluir este modelo"
                           size="icon" variant="ghost" className="h-8 w-8 text-destructive"
                           onClick={() => { if (confirm(`Remover "${t.name}"?`)) del.mutate(t.id); }}
                         >

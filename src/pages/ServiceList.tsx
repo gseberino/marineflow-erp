@@ -226,7 +226,7 @@ export default function ServiceList() {
                       </StatusBadge>
                     </td>
                     <td className="px-4 py-3">
-                      <Button variant="ghost" size="icon" className="h-7 w-7"
+                      <Button aria-label="Editar este serviço" variant="ghost" size="icon" className="h-7 w-7"
                         onClick={() => { setEditData(s); setDialogOpen(true); }}>
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>

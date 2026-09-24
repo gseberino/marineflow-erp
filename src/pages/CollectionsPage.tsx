@@ -206,7 +206,7 @@ export default function CollectionsPage() {
                 <SelectItem value="created_at">Criação</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline" size="icon"
+            <Button aria-label="Inverter a ordem da lista" variant="outline" size="icon"
               onClick={() => update({ sort_dir: filters.sort_dir === 'desc' ? 'asc' : 'desc' })}
               title={filters.sort_dir === 'desc' ? 'Decrescente' : 'Crescente'}>
               <ArrowUpDown className="h-4 w-4" />
@@ -287,7 +287,8 @@ export default function CollectionsPage() {
                   <TableCell onClick={e => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Button variant="ghost" size="icon" className="h-8 w-8"
+                          aria-label={`Mais ações da cobrança de ${c.client?.name || 'cliente'}`}>
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>

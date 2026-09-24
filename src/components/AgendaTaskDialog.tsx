@@ -484,7 +484,7 @@ export function AgendaTaskDialog({
                   <span className={item.done ? 'text-sm line-through text-muted-foreground flex-1' : 'text-sm flex-1'}>
                     {item.text}
                   </span>
-                  <Button type="button" size="icon" variant="ghost" className="h-6 w-6"
+                  <Button aria-label="Remover este item do checklist" type="button" size="icon" variant="ghost" className="h-6 w-6"
                     onClick={() => setChecklist((c) => c.filter((_, j) => j !== i))}>
                     <X className="h-3.5 w-3.5" />
                   </Button>
@@ -504,7 +504,7 @@ export function AgendaTaskDialog({
                     }
                   }}
                 />
-                <Button type="button" size="icon" variant="outline" className="h-8 w-8" disabled={!newItem.trim()}
+                <Button aria-label="Adicionar item ao checklist" type="button" size="icon" variant="outline" className="h-8 w-8" disabled={!newItem.trim()}
                   onClick={() => { setChecklist((c) => [...c, { text: newItem.trim(), done: false }]); setNewItem(''); }}>
                   <Plus className="h-4 w-4" />
                 </Button>

@@ -176,7 +176,7 @@ export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) 
             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setBulkAction('price')}>{t.imports.bulkSetPrice}</Button>
             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => toggleActive(true)}>{t.common.active}</Button>
             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => toggleActive(false)}>{t.common.inactive}</Button>
-            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelected(new Set())}><X className="h-3 w-3" /></Button>
+            <Button aria-label="Limpar a seleção" size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelected(new Set())}><X className="h-3 w-3" /></Button>
           </div>
         )}
 
@@ -184,7 +184,7 @@ export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) 
           <div className="flex items-center gap-2 p-2 border rounded">
             <Input className="h-7 text-xs flex-1" placeholder={t.imports.bulkSetCategory} value={bulkCategory} onChange={e => setBulkCategory(e.target.value)} />
             <Button size="sm" className="h-7" onClick={applyBulkCategory}>{t.common.save}</Button>
-            <Button size="sm" variant="ghost" className="h-7" onClick={() => setBulkAction(null)}><X className="h-3 w-3" /></Button>
+            <Button aria-label="Cancelar a troca de categoria" size="sm" variant="ghost" className="h-7" onClick={() => setBulkAction(null)}><X className="h-3 w-3" /></Button>
           </div>
         )}
 
@@ -204,7 +204,7 @@ export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) 
               </>
             )}
             <Button size="sm" className="h-7" onClick={applyBulkPrice}>{t.common.save}</Button>
-            <Button size="sm" variant="ghost" className="h-7" onClick={() => setBulkAction(null)}><X className="h-3 w-3" /></Button>
+            <Button aria-label="Cancelar a troca de preço" size="sm" variant="ghost" className="h-7" onClick={() => setBulkAction(null)}><X className="h-3 w-3" /></Button>
           </div>
         )}
 

@@ -252,7 +252,7 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
                 <div className="flex items-center gap-1">
                   <Input placeholder={ft.filterName} className="w-40 h-8" value={saveName} onChange={e => setSaveName(e.target.value)} />
                   <Button size="sm" onClick={handleSave} disabled={createSaved.isPending}>{t.common.save}</Button>
-                  <Button size="sm" variant="ghost" onClick={() => setShowSave(false)}><X className="h-3 w-3" /></Button>
+                  <Button aria-label="Cancelar o salvamento do filtro" size="sm" variant="ghost" onClick={() => setShowSave(false)}><X className="h-3 w-3" /></Button>
                 </div>
               ) : (
                 <Button size="sm" variant="outline" onClick={() => setShowSave(true)}>
@@ -271,7 +271,7 @@ export function FinancialFilterPanel({ type, filters, onChange }: Props) {
                           <button className="text-left flex-1 font-medium" onClick={() => { onChange(sf.filter_config as any); }}>
                             {sf.name}
                           </button>
-                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => deleteSaved.mutate(sf.id)}>
+                          <Button aria-label="Excluir este filtro salvo" size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => deleteSaved.mutate(sf.id)}>
                             <Trash2 className="h-3 w-3 text-destructive" />
                           </Button>
                         </div>

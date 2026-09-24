@@ -448,7 +448,7 @@ export default function WhatsAppScheduledPage() {
                           <div className="flex items-center justify-end gap-1">
                             {job.status === 'pending' && (
                               <>
-                                <Button
+                                <Button aria-label="Enviar esta mensagem agora"
                                   variant="ghost"
                                   size="icon"
                                   className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50"
@@ -458,7 +458,7 @@ export default function WhatsAppScheduledPage() {
                                 >
                                   <Zap className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button
+                                <Button aria-label="Editar / Reagendar"
                                   variant="ghost"
                                   size="icon"
                                   className="h-7 w-7"
@@ -467,7 +467,7 @@ export default function WhatsAppScheduledPage() {
                                 >
                                   <Pencil className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button
+                                <Button aria-label="Cancelar este agendamento"
                                   variant="ghost"
                                   size="icon"
                                   className="h-7 w-7 text-amber-600 hover:text-amber-700"
@@ -479,7 +479,7 @@ export default function WhatsAppScheduledPage() {
                               </>
                             )}
                             {job.status === 'failed' && (
-                              <Button
+                              <Button aria-label="Tentar novamente"
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7 text-blue-600 hover:text-blue-700"
@@ -491,7 +491,7 @@ export default function WhatsAppScheduledPage() {
                               </Button>
                             )}
                             {(job.status === 'sent' || job.status === 'cancelled' || job.status === 'failed') && (
-                              <Button
+                              <Button aria-label="Remover"
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7 text-destructive hover:text-destructive"

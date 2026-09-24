@@ -99,7 +99,7 @@ export function SuggestionCard({ suggestion }: { suggestion: any }) {
           onClick={() => setEditing((v) => !v)}>
           <Pencil className="h-3.5 w-3.5 mr-1" /> {editing ? 'Cancelar' : 'Ajustar'}
         </Button>
-        <Button size="sm" variant="ghost" className="h-7 text-muted-foreground" disabled={busy}
+        <Button aria-label="Descartar esta sugestão" size="sm" variant="ghost" className="h-7 text-muted-foreground" disabled={busy}
           onClick={() => dismiss.mutate({ id: suggestion.id }, {
             onSuccess: () => toast.success('Descartada'),
             onError: (e: any) => toast.error(e?.message || 'Erro'),

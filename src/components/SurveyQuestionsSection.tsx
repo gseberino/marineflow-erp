@@ -204,7 +204,7 @@ export function SurveyQuestionsSection() {
 
                             {pendente && (
                               <div className="flex shrink-0 gap-1">
-                                <Button
+                                <Button aria-label="Descartar esta pergunta"
                                   size="sm" variant="ghost" className="h-7 px-2 text-destructive"
                                   title="Descartar esta pergunta"
                                   onClick={() => reject.mutate(q, {
@@ -213,14 +213,14 @@ export function SurveyQuestionsSection() {
                                 >
                                   <X className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button
+                                <Button aria-label="Editar antes de aprovar"
                                   size="sm" variant="outline" className="h-7 px-2"
                                   title="Editar antes de aprovar"
                                   onClick={() => abrirEdicao(q)}
                                 >
                                   <Pencil className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button
+                                <Button aria-label="Aprovar esta pergunta como está"
                                   size="sm" className="h-7 px-2"
                                   title="Aprovar como está"
                                   onClick={() => approve.mutate({ question: q }, {

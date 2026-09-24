@@ -65,7 +65,7 @@ export default function ExternalQuoteDetailPage() {
   return (
     <div className="space-y-6 animate-fade-in max-w-4xl mx-auto">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+        <Button aria-label="Voltar" variant="ghost" size="icon" onClick={() => navigate(-1)}>
           <ChevronLeft className="h-5 w-5" />
         </Button>
         <PageHeader 

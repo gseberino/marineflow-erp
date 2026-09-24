@@ -333,18 +333,18 @@ export function FinanceRulesPanel() {
         <div className="flex shrink-0 gap-1">
           {r.status === 'proposed' ? (
             <>
-              <Button size="sm" variant="outline" title="Aceitar"
+              <Button aria-label="Aceitar esta regra" size="sm" variant="outline" title="Aceitar"
                 onClick={() => mudarStatus.mutate({ id: r.id, status: 'active' })}>
                 <Check className="h-4 w-4" />
               </Button>
-              <Button size="sm" variant="ghost" title="Recusar"
+              <Button aria-label="Recusar esta regra" size="sm" variant="ghost" title="Recusar"
                 onClick={() => mudarStatus.mutate({ id: r.id, status: 'rejected' })}>
                 <X className="h-4 w-4" />
               </Button>
             </>
           ) : (
             <>
-              <Button size="sm" variant="ghost" title="Editar" onClick={() => setEditando(r)}>
+              <Button aria-label="Editar esta regra" size="sm" variant="ghost" title="Editar" onClick={() => setEditando(r)}>
                 <Pencil className="h-4 w-4" />
               </Button>
               <Button size="sm" variant="ghost"

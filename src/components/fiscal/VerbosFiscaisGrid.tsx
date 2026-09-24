@@ -187,7 +187,7 @@ export function VerbosFiscaisGrid() {
                         />
                       </td>
                       <td className="px-3 py-2">
-                        <Button
+                        <Button aria-label="Salvar este código fiscal"
                           size="icon"
                           variant={mudou ? 'default' : 'ghost'}
                           className="h-7 w-7"

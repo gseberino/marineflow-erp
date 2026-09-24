@@ -111,7 +111,7 @@ export function SurveyMaterialRules({ templateId }: { templateId: string }) {
               >
                 {r.active ? 'Desligar' : 'Ativar'}
               </Button>
-              <Button
+              <Button aria-label="Excluir esta regra de material"
                 size="sm" variant="ghost" className="h-7 w-7 p-0"
                 onClick={() => excluir.mutate(r.id)}
               >

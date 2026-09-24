@@ -111,7 +111,7 @@ export function StepFocusMode({
               <span className="ml-2 tabular-nums">passo {position} de {steps.length}</span>
             )}
           </div>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onOpenChange(false)}>
+          <Button aria-label="Sair do modo foco" variant="ghost" size="icon" className="h-7 w-7" onClick={() => onOpenChange(false)}>
             <X className="h-4 w-4" />
           </Button>
         </div>

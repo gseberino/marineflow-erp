@@ -627,7 +627,7 @@ export default function FinancialV2() {
                             <div className="mt-3 flex gap-2 [&>*]:min-h-11">
                               <Button className="flex-1" onClick={() => setPaymentTarget({ payable: p })}>{t.financial.registerPayment}</Button>
                               {p.status !== 'cancelled' && (
-                                <Button variant="outline" size="icon" className="h-11 w-11" aria-label="Editar" onClick={() => setEditingPayable(p)}>
+                                <Button variant="outline" size="icon" className="h-11 w-11" aria-label="Editar esta conta" onClick={() => setEditingPayable(p)}>
                                   <Pencil className="h-4 w-4" />
                                 </Button>
                               )}

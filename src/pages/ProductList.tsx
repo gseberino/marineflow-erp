@@ -252,7 +252,7 @@ export default function ProductList() {
                       <td className="px-4 py-3 text-right hidden md:table-cell text-muted-foreground">{formatCurrency(p.cost_price ?? 0, p.cost_currency ?? 'BRL')}</td>
                       <td className="px-4 py-3 text-right font-medium">{formatCurrency(p.sale_price ?? 0, p.sale_currency ?? 'BRL')}</td>
                       <td className="px-4 py-3 text-center">
-                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditProduct(p); setFormOpen(true); }}>
+                        <Button aria-label="Editar este produto" variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditProduct(p); setFormOpen(true); }}>
                           <Edit className="h-3.5 w-3.5" />
                         </Button>
                       </td>

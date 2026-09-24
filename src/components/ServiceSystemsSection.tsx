@@ -172,7 +172,7 @@ export function ServiceSystemsSection() {
                           {s.passos_fechamento} de fechamento · {s.perguntas} pergunta(s)
                         </p>
                       </div>
-                      <Button size="sm" variant="outline" className="h-8 px-2"
+                      <Button aria-label="Editar nome da categoria" size="sm" variant="outline" className="h-8 px-2"
                               title="Editar nome da categoria"
                               onClick={() => abrirEdicao(s)}>
                         <Pencil className="h-3.5 w-3.5" />

@@ -251,7 +251,7 @@ export function ServiceRoutePanel({
                   {step.detail && <p className="text-xs text-muted-foreground">{step.detail}</p>}
                 </div>
                 <div className="flex shrink-0 gap-1">
-                  <Button
+                  <Button aria-label="Descartar este passo sugerido"
                     size="sm" variant="ghost" className="h-7 px-2 text-destructive"
                     title="Descartar"
                     onClick={() => review.mutate(
@@ -261,7 +261,7 @@ export function ServiceRoutePanel({
                   >
                     <X className="h-3.5 w-3.5" />
                   </Button>
-                  <Button
+                  <Button aria-label="Aprovar este passo sugerido"
                     size="sm" className="h-7 px-2"
                     title="Aprovar"
                     onClick={() => review.mutate(
@@ -372,7 +372,7 @@ export function ServiceRoutePanel({
                   </div>
                   <div className="flex shrink-0 items-center gap-0.5">
                     {step.status !== 'pending' && (
-                      <Button
+                      <Button aria-label="Voltar este passo para pendente"
                         variant="ghost" size="icon" className="h-7 w-7"
                         title="Voltar para pendente"
                         onClick={() => reopen.mutate(step, {
@@ -382,21 +382,21 @@ export function ServiceRoutePanel({
                         <Undo2 className="h-3.5 w-3.5" />
                       </Button>
                     )}
-                    <Button
+                    <Button aria-label="Subir este passo no roteiro"
                       variant="ghost" size="icon" className="h-7 w-7"
                       title="Subir" disabled={index <= 0}
                       onClick={() => move(index, -1)}
                     >
                       <ArrowUp className="h-3.5 w-3.5" />
                     </Button>
-                    <Button
+                    <Button aria-label="Descer este passo no roteiro"
                       variant="ghost" size="icon" className="h-7 w-7"
                       title="Descer" disabled={index >= steps.length - 1}
                       onClick={() => move(index, 1)}
                     >
                       <ArrowDown className="h-3.5 w-3.5" />
                     </Button>
-                    <Button
+                    <Button aria-label="Remover este passo do roteiro"
                       variant="ghost" size="icon" className="h-7 w-7"
                       title="Remover passo"
                       onClick={() => remove.mutate(
@@ -422,7 +422,8 @@ export function ServiceRoutePanel({
           placeholder="Acrescentar um passo (ex.: conferir aperto dos terminais)"
           className="h-9"
         />
-        <Button size="sm" variant="outline" onClick={handleAdd} disabled={!newTitle.trim() || create.isPending}>
+        <Button size="sm" variant="outline" onClick={handleAdd}
+          disabled={!newTitle.trim() || create.isPending} aria-label="Acrescentar passo ao roteiro">
           <Plus className="h-4 w-4" />
         </Button>
       </div>

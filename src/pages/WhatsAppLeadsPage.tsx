@@ -342,7 +342,7 @@ function InboxView() {
           <>
             <div className="p-3 border-b flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
-                <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setActivePhone(null)}>
+                <Button aria-label="Voltar para a lista de conversas" variant="ghost" size="icon" className="md:hidden" onClick={() => setActivePhone(null)}>
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <div className="min-w-0">
@@ -411,7 +411,8 @@ function InboxView() {
                 rows={2}
                 className="resize-none"
               />
-              <Button onClick={send} disabled={!draft.trim() || sendMut.isPending}>
+              <Button onClick={send} disabled={!draft.trim() || sendMut.isPending}
+                aria-label="Enviar mensagem ao lead">
                 <Send className="h-4 w-4" />
               </Button>
             </div>
@@ -714,7 +715,7 @@ function QuickRepliesView() {
                   <p className="font-medium text-sm">/{q.shortcut}</p>
                   <p className="text-xs text-muted-foreground whitespace-pre-wrap">{q.body}</p>
                 </div>
-                <Button size="sm" variant="ghost" onClick={() => del.mutate(q.id)} className="text-destructive">
+                <Button aria-label="Excluir esta resposta rápida" size="sm" variant="ghost" onClick={() => del.mutate(q.id)} className="text-destructive">
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </div>

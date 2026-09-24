@@ -181,6 +181,7 @@ export function ExpensesTimeDialogs(props: ExpensesTimeDialogsProps) {
                             size="icon"
                             className="h-7 w-7"
                             onClick={handleRemoveReceipt}
+                            aria-label="Remover o comprovante anexado"
                           >
                             <X className="h-3.5 w-3.5" />
                           </Button>
@@ -303,11 +304,11 @@ export function ExpensesTimeDialogs(props: ExpensesTimeDialogsProps) {
                         <td className="px-4 py-3 text-right font-semibold">{formatCurrency(Number(exp.amount))}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-1">
-                            <Button variant="ghost" size="icon" className="h-7 w-7"
+                            <Button aria-label="Editar esta despesa" variant="ghost" size="icon" className="h-7 w-7"
                               onClick={() => handleEditExpense(exp)}>
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                            <Button aria-label="Excluir esta despesa" variant="ghost" size="icon" className="h-7 w-7 text-destructive"
                               onClick={() => removeExpense.mutate({ id: exp.id, service_order_id: orderId! })}>
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
@@ -413,7 +414,7 @@ export function ExpensesTimeDialogs(props: ExpensesTimeDialogsProps) {
                             {te.billable ? t.serviceOrders.billable : t.serviceOrders.nonBillable}
                           </StatusBadge>
                         </div>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                        <Button aria-label="Excluir este apontamento de horas" variant="ghost" size="icon" className="h-7 w-7 text-destructive"
                           onClick={() => removeTime.mutate({ id: te.id, service_order_id: orderId! })}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>

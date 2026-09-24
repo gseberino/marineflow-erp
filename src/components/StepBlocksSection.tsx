@@ -234,7 +234,7 @@ export function StepBlocksSection() {
 
                             {pendente && (
                               <div className="flex shrink-0 gap-1">
-                                <Button
+                                <Button aria-label="Descartar este passo"
                                   size="sm" variant="ghost" className="h-7 px-2 text-destructive"
                                   title="Descartar este passo"
                                   onClick={() => reject.mutate(b, {
@@ -243,14 +243,14 @@ export function StepBlocksSection() {
                                 >
                                   <X className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button
+                                <Button aria-label="Editar antes de aprovar"
                                   size="sm" variant="outline" className="h-7 px-2"
                                   title="Editar antes de aprovar"
                                   onClick={() => abrirEdicao(b)}
                                 >
                                   <Pencil className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button
+                                <Button aria-label="Aprovar este passo como está"
                                   size="sm" className="h-7 px-2"
                                   title="Aprovar como está"
                                   onClick={() => approve.mutate({ block: b }, {

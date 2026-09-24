@@ -345,7 +345,7 @@ export function BankConnectionsPanel() {
                   disabled={sincronizar.isPending} title="Rebusca o último ano inteiro">
                   Histórico
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => handleExcluir(c)} disabled={excluir.isPending}>
+                <Button aria-label="Excluir esta conexão bancária" size="sm" variant="ghost" onClick={() => handleExcluir(c)} disabled={excluir.isPending}>
                   <Trash2 className="h-3 w-3 text-destructive" />
                 </Button>
               </div>

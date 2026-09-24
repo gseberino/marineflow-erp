@@ -391,7 +391,7 @@ export default function WhatsAppStatusPage() {
                               {status.text_content || 'Sem legenda'}
                             </p>
                           </div>
-                          <Button 
+                          <Button aria-label="Excluir este status" 
                             variant="ghost" 
                             size="icon" 
                             className="h-7 w-7 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"

@@ -205,7 +205,7 @@ export default function WhatsAppLogsPage() {
             }}>
               <Download className="h-3.5 w-3.5" /> CSV
             </Button>
-            <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isFetching} title="Atualizar">
+            <Button aria-label="Atualizar a lista de mensagens" variant="outline" size="icon" onClick={() => refetch()} disabled={isFetching} title="Atualizar">
               <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
             </Button>
           </>
@@ -254,7 +254,7 @@ export default function WhatsAppLogsPage() {
                     </TableCell>
                     <TableCell className="max-w-md truncate text-sm">{m.body || <span className="text-muted-foreground italic">vazio</span>}</TableCell>
                     <TableCell>
-                      <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setSelected(m); }}>
+                      <Button aria-label="Ver esta mensagem por inteiro" variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setSelected(m); }}>
                         <Eye className="h-4 w-4" />
                       </Button>
                     </TableCell>

@@ -235,7 +235,7 @@ function QuickDiscountPopover({ quantity, unitPrice, discountPct, discountAmount
   return (
     <Popover open={open} onOpenChange={(v) => { setOpen(v); if (v) reset(discountAmountProp || 0); }}>
       <PopoverTrigger asChild>
-        <Button
+        <Button aria-label="Aplicar desconto neste item"
           type="button"
           variant="ghost"
           size="icon"
@@ -921,7 +921,7 @@ function CustomInstallmentEditor({
                 />
               )}
               <span className="font-semibold text-xs ml-auto">{formatCurrency(amount)}</span>
-              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeRow(i)} disabled={disabled}>
+              <Button aria-label="Remover esta linha" type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeRow(i)} disabled={disabled}>
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>

@@ -63,7 +63,7 @@ function ChecklistTemplatesEditor() {
       {templates.map((t) => (
         <div key={t.name} className="flex items-center justify-between text-xs bg-muted/40 rounded px-2 py-1">
           <span><b>{t.name}</b> — {t.items.join(' · ')}</span>
-          <Button size="icon" variant="ghost" className="h-5 w-5"
+          <Button aria-label="Remover este modelo de checklist" size="icon" variant="ghost" className="h-5 w-5"
             onClick={() => save.mutate(templates.filter((x) => x.name !== t.name))}>
             <X className="h-3 w-3" />
           </Button>

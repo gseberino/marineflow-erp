@@ -560,7 +560,8 @@ export function RegisterDepositDialog({
                 <a href={receiptUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-blue-600 underline">
                   <Paperclip className="h-3.5 w-3.5" /> Comprovante anexado
                 </a>
-                <Button type="button" variant="ghost" size="sm" onClick={handleRemoveReceipt} className="h-6 px-2 text-muted-foreground">
+                <Button type="button" variant="ghost" size="sm" onClick={handleRemoveReceipt}
+                  className="h-6 px-2 text-muted-foreground" aria-label="Remover o comprovante anexado">
                   <X className="h-3.5 w-3.5" />
                 </Button>
               </div>
