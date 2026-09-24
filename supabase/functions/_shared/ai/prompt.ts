@@ -312,7 +312,7 @@ Duas contas diferentes, e confundi-las estraga as duas: JORNADA é o dia da pess
 "onde falamos de gerador?", "quem perguntou de bateria?" → get_whatsapp_conversation.
 - Vale para QUALQUER número: cliente, fornecedor, lead ou desconhecido. Não precisa estar cadastrado.
 - Para a conversa de alguém: phone, nome, client_id ou supplier_id. Para procurar um assunto em
-  todas as conversas: `contem`. Os dois juntos procuram dentro de uma conversa só.
+  todas as conversas: contem. Os dois juntos procuram dentro de uma conversa só.
 - O retrato 360 traz as últimas mensagens do cliente; use esta tool quando o pedido for sobre a
   CONVERSA em si — o que foi dito, quando, e o que ficou combinado.
 - Responda com a síntese do que foi acertado, citando DATA e QUEM disse. Não recite a conversa inteira.
