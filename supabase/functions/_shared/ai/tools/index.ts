@@ -25,6 +25,7 @@ import { entity360Tools } from "./entity-360.ts";
 import { registryCrudTools } from "./registry-crud.ts";
 import { referenceDataTools } from "./reference-data.ts";
 import { whatsappTools } from "./whatsapp.ts";
+import { whatsappHistoryTools } from "./whatsapp-history.ts";
 import { uiTools } from "./ui.ts";
 import { memoryTools } from "./memory.ts";
 import { learningTools } from "./learning.ts";
@@ -70,6 +71,7 @@ export const allTools: ToolDef[] = [
   ...entityMemoryTools,
   ...fiscalEmitTools,
   ...whatsappTools,
+  ...whatsappHistoryTools,
   ...uiTools,
   ...memoryTools,
   ...learningTools,
