@@ -138,7 +138,7 @@ export function ServiceTimer({
           size="icon"
           className="h-7 w-7"
           onClick={handleStart}
-          title="Iniciar"
+          title="Iniciar" aria-label="Iniciar"
         >
           <Play className="h-3.5 w-3.5" />
         </Button>
@@ -150,7 +150,7 @@ export function ServiceTimer({
             size="icon"
             className="h-7 w-7"
             onClick={handlePause}
-            title="Pausar"
+            title="Pausar" aria-label="Pausar"
           >
             <Pause className="h-3.5 w-3.5" />
           </Button>
@@ -160,7 +160,7 @@ export function ServiceTimer({
             size="icon"
             className="h-7 w-7 text-destructive"
             onClick={handleStop}
-            title="Finalizar"
+            title="Finalizar" aria-label="Finalizar"
           >
             <Square className="h-3.5 w-3.5" />
           </Button>

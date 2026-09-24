@@ -274,10 +274,10 @@ export function AIAgentWidget() {
                 </div>
               )}
             </div>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={exportarConversa} title="Exportar conversa" disabled={display.length === 0}>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={exportarConversa} title="Exportar conversa" aria-label="Exportar conversa" disabled={display.length === 0}>
               <Download className="h-3.5 w-3.5" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={reset} title="Nova conversa">
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={reset} title="Nova conversa" aria-label="Nova conversa">
               <RotateCcw className="h-3.5 w-3.5" />
             </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOpen(false)} title="Fechar">

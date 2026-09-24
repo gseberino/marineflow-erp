@@ -674,7 +674,7 @@ function PartCardFormComponent({
                   className="h-7 w-7"
                   onClick={handleRemoveImage}
                   disabled={uploading}
-                  title="Remover foto"
+                  title="Remover foto" aria-label="Remover foto"
                 >
                   <X className="h-3.5 w-3.5" />
                 </Button>

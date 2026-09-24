@@ -166,7 +166,7 @@ export function ServicesSection(props: ServicesSectionProps) {
                 size="icon"
                 className="h-8 w-8"
                 onClick={opts.onExpand}
-                title="Editar"
+                title="Editar" aria-label="Editar"
               >
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
@@ -175,7 +175,7 @@ export function ServicesSection(props: ServicesSectionProps) {
                 size="icon"
                 className="h-8 w-8 text-destructive"
                 onClick={opts.onDelete}
-                title="Excluir"
+                title="Excluir" aria-label="Excluir"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>

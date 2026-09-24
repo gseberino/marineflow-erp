@@ -344,7 +344,7 @@ export default function AgendaPage() {
           </Button>
           <div ref={voiceTriggerRef} className="contents"><VoiceCaptureButton /></div>
           <InstallAgendaButton />
-          <Button size="sm" variant="outline" onClick={handleExportCsv} title="Exportar CSV da visão atual">
+          <Button size="sm" variant="outline" onClick={handleExportCsv} title="Exportar CSV da visão atual" aria-label="Exportar CSV da visão atual">
             <Download className="h-4 w-4" />
           </Button>
           <Button size="sm" variant="outline" onClick={handleExportIcs} title="Exportar para o calendário (.ics)">

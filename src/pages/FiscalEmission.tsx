@@ -3448,7 +3448,7 @@ export default function FiscalEmission() {
                   variant="outline"
                   onClick={handleGenerateEspelho}
                   disabled={generatingEspelho || emitting || includedItems.length === 0 || !preflightOk}
-                  title="Abre o espelho (pré-DANFE) da nota numa nova aba, SEM VALOR FISCAL e SEM enviar à SEFAZ — para conferir antes de emitir e enviar ao cliente/fornecedor. Salve como PDF (Imprimir → Salvar como PDF)."
+                  title="Abre o espelho (pré-DANFE) da nota numa nova aba, SEM VALOR FISCAL e SEM enviar à SEFAZ — para conferir antes de emitir e enviar ao cliente/fornecedor. Salve como PDF (Imprimir → Salvar como PDF)." aria-label="Abre o espelho (pré-DANFE) da nota numa nova aba, SEM VALOR FISCAL e SEM enviar à SEFAZ — para conferir antes de emitir e enviar ao cliente/fornecedor. Salve como PDF (Imprimir → Salvar como PDF)."
                 >
                   {generatingEspelho ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
                   {generatingEspelho ? 'Gerando espelho…' : 'Gerar espelho'}
@@ -3456,7 +3456,7 @@ export default function FiscalEmission() {
                 <Button
                   onClick={handleEmit}
                   disabled={emitting || generatingEspelho || includedItems.length === 0 || !preflightOk}
-                  title="Gera o espelho para conferência; a nota só vai à SEFAZ depois que você confirmar"
+                  title="Gera o espelho para conferência; a nota só vai à SEFAZ depois que você confirmar" aria-label="Gera o espelho para conferência; a nota só vai à SEFAZ depois que você confirmar"
                 >
                   {emitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
                   {isReturn ? 'Emitir Devolução' : 'Emitir NF-e'}
