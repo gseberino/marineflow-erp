@@ -2,6 +2,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { queryClient } from '@/lib/query-client';
 import { toast } from 'sonner';
 import { avisarSeForAppAtualizado } from '@/lib/app-atualizado';
+import { traduzErroDoBanco } from '@/lib/erro-em-portugues';
 
 const MAX_ERRORS = 50;
 const MAX_NETWORK = 50;
@@ -240,15 +241,25 @@ export function installDiagnostics() {
     if (typeof originalToastError === 'function' && !(toast as { __logged?: boolean }).__logged) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (toast as any).error = (message: unknown, opts?: unknown) => {
+        let paraTela = message;
         try {
           const texto = typeof message === 'string' ? message : safeStringify(message);
           if (!naoRepetir('toast:' + texto)) {
+            // O log guarda sempre o ORIGINAL: a tradução é para a tela, e diagnosticar
+            // um erro pela frase amigável seria trocar a evidência pelo resumo.
             void logError({ message: texto, action: 'toast.error' });
+          }
+          // "duplicate key value violates unique constraint products_sku_key" apareceu
+          // cinco vezes na tela do dono em agosto/2026, enquanto ele cadastrava produto.
+          // Está certo e é inútil: não diz o campo nem o que fazer.
+          if (typeof message === 'string') {
+            const emPortugues = traduzErroDoBanco(message);
+            if (emPortugues) paraTela = emPortugues;
           }
         } catch {
           /* nunca impedir o toast */
         }
-        return originalToastError(message as string, opts as never);
+        return originalToastError(paraTela as string, opts as never);
       };
       (toast as { __logged?: boolean }).__logged = true;
     }
