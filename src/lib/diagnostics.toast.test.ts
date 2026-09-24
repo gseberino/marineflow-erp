@@ -7,8 +7,8 @@
 // o "duplicate key value violates unique constraint" que o dono viu cinco vezes).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const rpc = vi.fn(() => Promise.resolve({ data: null, error: null }));
-vi.mock('@/integrations/supabase/client', () => ({ supabase: { rpc: (...a: unknown[]) => rpc(...a) } }));
+const rpc = vi.fn((..._a: unknown[]) => Promise.resolve({ data: null, error: null }));
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: (...a: unknown[]) => rpc(...a) } }));
 vi.mock('@/lib/query-client', () => ({ queryClient: { getQueryCache: () => ({ getAll: () => [] }) } }));
 
 const erroOriginal = vi.fn();
