@@ -11,84 +11,37 @@ Cada item vira **um commit**, com testes cobrindo o caso e as bordas, e os quatr
 
 ---
 
-> ## ⚠️ Itens 1, 2 e 3 JÁ TÊM CORREÇÃO PRONTA, aguardando integração
+> ## ✅ A fila está VAZIA desde 24/09/2026
 >
-> O turno de 11-12/08 rodou em `session/noturno-20260811` (pushado, **fora da `main`**) e entregou os três
-> primeiros da fila, um commit cada, com os quatro gates verdes:
+> Os sete itens que estavam aqui como "em aberto" já estavam corrigidos na `main` — a lista é que não tinha
+> sido atualizada. Conferidos um a um em 24/09/2026, lendo o código de produção (não o histórico de commits,
+> que não prova qual versão está no ar). Detalhes em "Não reproduzem mais", abaixo.
 >
-> | Item | Commit | O quê |
-> |---|---|---|
-> | 1 · NOVO-017 | `e0a7c85` | CSV deixa de corromper dinheiro e de apagar o celular |
-> | 2 · NOVO-024 | `070d988` | deslocamento cobra por 4 técnicos e respeita a tarifa configurada |
-> | 3 · NOVO-009 | `d16da5b` | borda dos 100% deixa de virar zero calado ou preço absurdo |
->
-> **O próximo turno noturno começa no item 4 (NOVO-022).** Refazer 1-3 é trabalho jogado fora — e pior,
-> gera dois diffs concorrentes para o mesmo defeito.
->
-> Duas observações para quem for integrar aquele branch:
-> - ele usa **`NOVO-016`** para o deslocamento (o ID anterior à renumeração de 11/08). Na `main`, `NOVO-016`
->   é o **teste intermitente do F2-UI**, de outra sessão, e o deslocamento é **`NOVO-024`**. Conferir no merge;
-> - o livro do turno (`aec8b45`) declara que **nenhuma das três correções foi vista rodando na tela** — são
->   funções puras com teste, mas a revisão deve importar um CSV, apertar o botão de deslocamento e ver o
->   aviso de preço.
-
----
+> **Antes de escrever um item novo aqui, leia isto:** foi exatamente esta lista desatualizada que quase fez
+> uma sessão refazer sete correções prontas. Um achado que envelhece nesta fila custa mais caro que um achado
+> não registrado, porque parece trabalho pendente. Se você registrar algo, registre **como verificar que ainda
+> reproduz** — não só onde dói.
 
 ## Em aberto, nesta ordem
 
-### 1. NOVO-017 — o importador de CSV corrompe dinheiro
-`1.234,56` entra como `1,23` (o `replace(',', '.')` troca só a primeira ocorrência e não remove o ponto de
-milhar); `1.500` unidades viram `1`. E, no cadastro de clientes, `Telefone` vazio **apaga o celular** já lido,
-porque as duas colunas mapeiam para `phone` e a segunda sobrescreve sempre.
-**Entregar:** correção + testes; **e um script de auditoria somente-leitura** que liste os registros já
-gravados errado, com o critério usado impresso junto. Corrigir os dados passados é decisão do dono — o script
-mostra o estrago, não o conserta.
-`src/lib/import-detector.ts:142-143,170-178`
+_(vazia)_
 
-### 2. NOVO-024 — deslocamento
-4 técnicos custam o mesmo que 1 (`hourly[n] || hourly[1]`, tabela até 3); e `calculateDisplacement` ignora a
-tarifa configurada, devolvendo `cost_per_km: 1.10` fixo em código.
-**Entregar:** correção + testes cobrindo 1, 3 e 4 técnicos e a tarifa vinda da configuração. A regra para
-acima de 3 é **decisão comercial** — se não houver resposta, registrar as opções e corrigir só a parte da
-tarifa ignorada.
-`src/lib/displacement.ts:59,85-93`
+---
 
-### 3. NOVO-009 — preço explode quando margem + imposto + comissão = 100%
-O guard `divisor <= 0` não pega, porque em ponto flutuante `1 - 0.6 - 0.3 - 0.1` dá `+2,78e-17`. O preço sai
-3,6 × 10¹⁸ — e o formulário grava esse número no cadastro do produto.
-**Entregar:** comportamento seguro definido — erro claro ao usuário, nunca número absurdo no campo. Testes de
-borda em 99%, 100% e 101%. O caso hoje está no teste com `it.fails`; ao corrigir, vira `it()`.
-`src/lib/price-calculator.ts:30-39` · `src/components/PriceCalculator.tsx:53-60`
+## Como reabastecer a fila
 
-### 4. NOVO-022 — toggles que mentem na via de execução
-Com "Via de execução" marcada, os outros toggles ficam cinzas **mas continuam valendo** — não dá para tirar os
-termos da folha de campo. E `showPaymentInstructions` e `showSignature` são **mortos** (pré-existentes): a
-tela nova de padrão passou a oferecê-los ao dono.
-**Entregar:** desabilitar só os toggles financeiros. Atenção: o catálogo (`src/lib/pdf-options-catalog.ts`)
-**ainda não distingue** financeiro de não-financeiro — `CatalogEntry` só tem `requiresProductImages`,
-`perDocumentOnly` e `overridesOthers`. Marcar quais são financeiros faz parte da tarefa. Toggle morto que
-exigir decisão de produto — remover da tela ou fazer funcionar — registrar e pular.
-`src/components/PDFOptionsDialog.tsx:139` · `src/lib/pdf-generator.ts:1302,1472`
+Duas fontes valem mais que auditoria nova, porque falam do que o dono usa de verdade:
 
-### 5. NOVO-019 — export de CSV
-Coluna "Marina" repete o nome do barco (as duas entradas usam `key: 'name'`); aspas escapadas sem envelope; e
-**injeção de fórmula** — célula começando com `=`, `+`, `-` ou `@` é executada ao abrir a planilha.
-**Entregar:** correção + testes, incluindo as quatro células perigosas.
-`src/lib/export-utils.ts:16-23,80`
-
-### 7. NOVO-023 — o guarda do hash de assinatura lê a migration pelo nome
-Procura o arquivo `f41d70d9`. Trigger alterado em migration nova passa batido, e a suíte fica verde no
-cenário exato que o teste diz impedir.
-**Entregar:** varrer todas as migrations e usar a definição mais recente de
-`detect_so_change_after_signature`, como o teste de status da OS já faz com o `CHECK`.
-`src/lib/document-hash.test.ts:145`
-
-### 8. NOVO-021 — edição durante o Salvar em voo se perde
-`setDirty(new Set())` limpa o conjunto inteiro no sucesso, inclusive o que entrou depois de a requisição
-partir. A tela diz que salvou, o banco tem o valor antigo, e o botão volta desabilitado.
-**Entregar:** remover de `dirty` só as chaves enviadas, ou desabilitar os checkboxes enquanto `isPending`.
-Teste cobrindo a corrida.
-`src/pages/SettingsPage.tsx:1832,1870-1874`
+1. **`app_error_logs`** — o que a produção registrou, com data e quantas vezes. Foi de lá que saíram os dois
+   defeitos corrigidos em 24/09 (`ac0b8ee`): o PDF que falhava com a aba aberta durante uma publicação, e as
+   seis ações de auditoria que o CHECK recusava em silêncio.
+   ```sql
+   select to_char(last_seen_at,'DD/MM HH24:MI') as visto, occurrences, source, context, action, message
+   from app_error_logs where resolved_at is null and last_seen_at > now() - interval '21 days'
+   order by last_seen_at desc;
+   ```
+2. **`audit/novos-achados.md`** — os achados das varreduras, com o estado de cada um anotado no próprio item.
+   Vários já estão marcados como resolvidos ali; **confira no código antes de trazer para cá.**
 
 ---
 
@@ -104,4 +57,15 @@ comportamento certo — mais 3 bordas novas. 19 testes verdes; os 15 casos legí
 
 ## Não reproduzem mais
 
-_(mover para cá com a data da verificação e como foi verificado)_
+Todos verificados em **24/09/2026**, lendo o código que está na `main`. Cada linha diz **onde** a correção
+está hoje — é o que permite conferir de novo sem repetir a investigação inteira.
+
+| Item | Como foi verificado | Onde está a correção |
+|---|---|---|
+| **1 · NOVO-017** — CSV corrompe dinheiro; "Telefone" vazio apaga o celular | `parseNumeroPlanilha` documenta a regra de separador decimal e tem teste para "1.234,56", "1,234.56" e "1.500"; o caso Celular/Telefone tem teste nos dois sentidos de ordem das colunas | `src/lib/import-detector.ts` · `src/lib/import-detector.test.ts:150-280` |
+| **2 · NOVO-024** — 4 técnicos custam o mesmo que 1 | `hourlyRateFor` deriva o passo das faixas configuradas e o teto vem das chaves da tabela, não de um `3` fixo | `src/lib/displacement.ts:63-85` |
+| **3 · NOVO-009** — preço explode quando margem+imposto+comissão = 100% | teste `[NOVO-009]` cobre 99%, 100% e 101%, e exige erro claro em vez de número absurdo | `src/lib/price-calculator.test.ts:85-128` |
+| **4 · NOVO-022** — toggles que mentem na via de execução | o diálogo desabilita só o que `isFinancialOption(key)` diz ser financeiro | `src/components/PDFOptionsDialog.tsx:142` · `src/lib/pdf-visibility.test.ts:105` |
+| **5 · NOVO-019** — CSV: "Marina" repete o barco, aspas, injeção de fórmula | a coluna Marina lê `marinas.name`; célula iniciada por `=`, `@`, `+`/`-` não numérico recebe apóstrofo; aspas ganham envelope | `src/lib/export-utils.ts:19-31,90` |
+| **7 · NOVO-023** — guarda do hash lê a migration pelo nome | varre todas as migrations que definem o trigger e usa a **mais recente** | `src/lib/document-hash.test.ts:145-160` |
+| **8 · NOVO-021** — edição durante o "Salvar" em voo se perde | o `ref` enxerga o rascunho atual e só as chaves enviadas saem de `dirty` | `src/pages/settings/PdfDefaultsSection.tsx:37,67` |
