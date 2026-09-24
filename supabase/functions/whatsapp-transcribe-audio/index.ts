@@ -39,6 +39,18 @@ servirComCors(async (req) => {
     const key = (msg.raw_payload as any)?.data?.key;
     if (!key?.id) return jr({ ok: false, error: "sem key no payload" });
 
+    // Áudio que a HBR ENVIOU: transcrever é o padrão (sem isso o histórico só tem a metade
+    // do cliente — e o combinado costuma estar na nossa resposta). O interruptor existe para
+    // o dono poder desligar essa metade sem desligar a outra; mora aqui, e não no webhook,
+    // para não acrescentar consulta ao caminho crítico de toda mensagem que chega.
+    if (key?.fromMe === true) {
+      const { data: cfg } = await admin
+        .from("app_settings").select("value").eq("key", "wa_transcrever_audio_enviado").maybeSingle();
+      if (String((cfg as any)?.value ?? "").toLowerCase() === "false") {
+        return jr({ ok: true, skipped: "transcrição de áudio enviado desligada em app_settings" });
+      }
+    }
+
     // 1) Base64 do Evolution (o webhook não traz o binário; o Evolution decifra a mídia).
     const evoUrl = (Deno.env.get("EVOLUTION_API_URL") || "").replace(/\/$/, "");
     const evoKey = Deno.env.get("EVOLUTION_API_KEY") || "";

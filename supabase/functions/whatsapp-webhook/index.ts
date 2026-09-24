@@ -431,9 +431,19 @@ export async function handler(req: Request): Promise<Response> {
         .eq("id", clientId);
     }
 
-    // Áudio inbound → transcreve via Groq Whisper (fire-and-forget; não atrasa o webhook).
+    // Áudio → transcreve via Groq Whisper (fire-and-forget; não atrasa o webhook).
     // Se GROQ_API_KEY não estiver setada, a função sai sem efeito (a mensagem segue "[audio]").
-    if (!event.fromMe && event.messageType === "audio" && msg?.id) {
+    //
+    // Passou a valer TAMBÉM para o que a HBR envia (24/09/2026). Antes era só `!fromMe`, e o
+    // efeito medido foi: dos 1.453 áudios da base, os 825 recebidos estavam quase todos
+    // transcritos (269 em agosto, só 2 sem) e os 629 enviados, NENHUM. Quem lê esse histórico
+    // — pessoa ou assistente — ouvia a pergunta do cliente e não a nossa resposta, e é na
+    // resposta que mora o combinado ("faço por tanto", "passo aí terça"). Os 629 têm a key da
+    // mídia no payload, então tecnicamente sempre deu.
+    // O interruptor `wa_transcrever_audio_enviado=false` (app_settings) desliga só esta
+    // metade; ele é lido DENTRO da função de transcrição para não pôr consulta nenhuma no
+    // caminho crítico do webhook.
+    if (event.messageType === "audio" && msg?.id) {
       const transcribe = async () => {
         try {
           await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-transcribe-audio`, {
