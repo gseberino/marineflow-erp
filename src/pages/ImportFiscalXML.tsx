@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { Button } from '@/components/ui/button';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -13,7 +14,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  Upload, FileText, CheckCircle2, AlertCircle, Loader2, Package, Banknote, RefreshCw, Undo2, ArrowLeft,
+  Upload, FileText, CheckCircle2, AlertCircle, Loader2, Package, Banknote, RefreshCw, Undo2, ArrowLeft, XCircle,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -455,6 +456,41 @@ export default function ImportFiscalXML() {
   };
 
   // ── Cancel pending note ────────────────────────────────────────────────
+  /**
+   * Reabre uma nota pendente na tela de conferência.
+   *
+   * Busca a nota inteira de novo porque a listagem traz só o resumo, e limpa a conferência
+   * anterior antes: sem isso os vínculos manuais feitos numa nota vazam por SKU para a
+   * seguinte.
+   */
+  const abrirConferencia = async (noteId: string) => {
+    const { data } = await supabase.from('fiscal_notes').select('*').eq('id', noteId).single();
+    if (!data) return;
+    const d = data as any;
+    resetConference();
+    setParsed({
+      noteId:      d.id,
+      nfeKey:      d.nfe_key,
+      nfeNumber:   d.nfe_number,
+      issueDate:   d.issued_at ?? d.issue_date,
+      issuerName:  d.issuer_name,
+      issuerCNPJ:  d.issuer_cnpj,
+      totalNF:     d.total_amount ?? d.total_value,
+      totalICMS:   d.tax_icms,
+      totalIPI:    d.tax_ipi,
+      totalPIS:    d.tax_pis,
+      totalCOFINS: d.tax_cofins,
+      items:       d.items || [],
+    });
+    // Fornecedor já vinculado à nota, ou casado pelo CNPJ do emitente — poupa reescolher.
+    const cnpj = String(d.issuer_cnpj || '').replace(/\D/g, '');
+    const forn = d.supplier_id
+      || (cnpj && (suppliers || []).find((s: any) => String(s.cnpj_cpf || '').replace(/\D/g, '') === cnpj)?.id);
+    if (forn) setSupplierId(forn);
+    if (d.purchase_order_id) setPurchaseOrderId(d.purchase_order_id);
+    setShowConfirm(true);
+  };
+
   const handleCancelNote = async (id: string) => {
     const { error } = await supabase
       .from('fiscal_notes')
@@ -1075,100 +1111,56 @@ export default function ImportFiscalXML() {
                       </span>
                     </TableCell>
                     <TableCell className="text-right">
-                      {note.status === 'pending' && (
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={async () => {
-                              // Re-fetch full note to populate confirm dialog
-                              const { data } = await supabase
-                                .from('fiscal_notes')
-                                .select('*')
-                                .eq('id', note.id)
-                                .single();
-                              if (data) {
-                                const d = data as any;
-                                // Limpa o estado da nota anterior antes de abrir
-                                // outra (senão os vínculos manuais vazam por SKU).
-                                resetConference();
-                                setParsed({
-                                  noteId:     d.id,
-                                  nfeKey:     d.nfe_key,
-                                  nfeNumber:  d.nfe_number,
-                                  issueDate:  d.issued_at ?? d.issue_date,
-                                  issuerName: d.issuer_name,
-                                  issuerCNPJ: d.issuer_cnpj,
-                                  totalNF:    d.total_amount ?? d.total_value,
-                                  totalICMS:  d.tax_icms,
-                                  totalIPI:   d.tax_ipi,
-                                  totalPIS:   d.tax_pis,
-                                  totalCOFINS: d.tax_cofins,
-                                  items:      d.items || [],
-                                });
-                                // Fornecedor já vinculado à nota, ou casado pelo
-                                // CNPJ do emitente — poupa reescolher a cada vez.
-                                const cnpj = String(d.issuer_cnpj || '').replace(/\D/g, '');
-                                const forn = d.supplier_id
-                                  || (cnpj && (suppliers || []).find((s: any) => String(s.cnpj_cpf || '').replace(/\D/g, '') === cnpj)?.id);
-                                if (forn) setSupplierId(forn);
-                                if (d.purchase_order_id) setPurchaseOrderId(d.purchase_order_id);
-                                setShowConfirm(true);
-                              }
-                            }}
-                          >
-                            <Banknote className="h-3.5 w-3.5 mr-1" />Confirmar
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-destructive hover:text-destructive"
-                            onClick={() => handleCancelNote(note.id)}
-                          >
-                            Cancelar
-                          </Button>
-                        </div>
-                      )}
-                      {note.status === 'confirmed' && (
-                        <div className="flex items-center justify-end gap-2">
-                          <span className="text-xs text-muted-foreground">
-                            {note.confirmed_at ? formatDate(note.confirmed_at) : 'Confirmada'}
-                          </span>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-xs"
-                            disabled={returningNoteId === note.id}
-                            title="Gerar uma NF-e de devolução (total ou parcial) desta compra ao fornecedor, referenciando a nota original por item"
-                            onClick={() => handleReturnToSupplier(note.id)}
-                          >
-                            {returningNoteId === note.id
-                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              : <Undo2 className="h-3.5 w-3.5 mr-1" />}
-                            Devolver ao fornecedor
-                          </Button>
-                          {/* Desfazer a ENTRADA (erro de conferência). Diferente da
-                              devolução, que é uma operação fiscal com o fornecedor. */}
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-xs text-destructive hover:text-destructive"
-                            disabled={revertingId === note.id}
-                            title="Estorna o estoque e remove a conta a pagar desta importação, devolvendo a nota para 'Pendente'. Não emite nada ao fisco."
-                            onClick={() => {
-                              if (confirm(
-                                'Desfazer a importação desta nota?\n\n' +
-                                'O estoque será estornado e a conta a pagar (se não houver pagamento) será removida. ' +
-                                'A nota volta para "Pendente" e pode ser conferida de novo.',
-                              )) handleRevert(note.id);
-                            }}
-                          >
-                            {revertingId === note.id
-                              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
-                            Desfazer entrada
-                          </Button>
-                        </div>
+                      {/* Uma ação à vista, e o que estraga dado (cancelar, desfazer)
+                          só dentro do menu — nunca a um clique de distância. */}
+                      <AcoesDaLinha
+                        rotulo={`nota ${note.nfe_number || note.nfe_key || ''}`}
+                        tituloDoMenu={`Nota ${note.nfe_number || ''} · ${note.issuer_name || ''}`}
+                        rapidas={
+                          note.status === 'pending'
+                            ? [{
+                                texto: 'Conferir', icone: Banknote,
+                                titulo: 'Abrir a conferência para dar entrada desta nota',
+                                onClick: () => void abrirConferencia(note.id),
+                              }]
+                            : note.status === 'confirmed'
+                              ? [{
+                                  texto: returningNoteId === note.id ? 'Devolvendo…' : 'Devolver ao fornecedor',
+                                  icone: Undo2,
+                                  titulo: 'Gera uma NF-e de devolução (total ou parcial) desta compra, referenciando a nota original por item',
+                                  desabilitada: returningNoteId === note.id,
+                                  onClick: () => void handleReturnToSupplier(note.id),
+                                }]
+                              : []
+                        }
+                        menu={[
+                          ...(note.status === 'pending'
+                            ? [{
+                                texto: 'Cancelar esta nota', icone: XCircle, perigo: true,
+                                onClick: () => void handleCancelNote(note.id),
+                              }]
+                            : []),
+                          ...(note.status === 'confirmed'
+                            ? [{
+                                texto: revertingId === note.id ? 'Desfazendo…' : 'Desfazer a entrada',
+                                icone: RefreshCw, perigo: true,
+                                desabilitada: revertingId === note.id,
+                                titulo: 'Estorna o estoque e remove a conta a pagar desta importação. Não emite nada ao fisco.',
+                                onClick: () => {
+                                  if (confirm(
+                                    'Desfazer a importação desta nota?\n\n' +
+                                    'O estoque será estornado e a conta a pagar (se não houver pagamento) será removida. ' +
+                                    'A nota volta para "Pendente" e pode ser conferida de novo.',
+                                  )) void handleRevert(note.id);
+                                },
+                              }]
+                            : []),
+                        ]}
+                      />
+                      {note.status === 'confirmed' && note.confirmed_at && (
+                        <p className="mt-1 text-right text-[11px] text-muted-foreground">
+                          Conferida em {formatDate(note.confirmed_at)}
+                        </p>
                       )}
                     </TableCell>
                   </TableRow>

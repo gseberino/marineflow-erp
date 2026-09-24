@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { MultiFilterBar } from '@/components/MultiFilterBar';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { useMultiFilter } from '@/hooks/use-multi-filter';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -445,63 +446,38 @@ export default function WhatsAppScheduledPage() {
                           {recurrenceLabel(job.recurrence_type)}
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center justify-end gap-1">
-                            {job.status === 'pending' && (
-                              <>
-                                <Button aria-label="Enviar esta mensagem agora"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 text-green-600 hover:text-green-700 hover:bg-green-50"
-                                  title="Enviar agora"
-                                  onClick={() => sendNow.mutate(job.id)}
-                                  disabled={sendNow.isPending}
-                                >
-                                  <Zap className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button aria-label="Editar / Reagendar"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7"
-                                  title="Editar / Reagendar"
-                                  onClick={() => setEditingJob(job)}
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button aria-label="Cancelar este agendamento"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 text-amber-600 hover:text-amber-700"
-                                  title="Cancelar agendamento"
-                                  onClick={() => setCancellingId(job.id)}
-                                >
-                                  <XCircle className="h-3.5 w-3.5" />
-                                </Button>
-                              </>
-                            )}
-                            {job.status === 'failed' && (
-                              <Button aria-label="Tentar novamente"
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-blue-600 hover:text-blue-700"
-                                title="Tentar novamente"
-                                onClick={() => sendNow.mutate(job.id)}
-                                disabled={sendNow.isPending}
-                              >
-                                <RefreshCw className="h-3.5 w-3.5" />
-                              </Button>
-                            )}
-                            {(job.status === 'sent' || job.status === 'cancelled' || job.status === 'failed') && (
-                              <Button aria-label="Remover"
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-destructive hover:text-destructive"
-                                title="Remover"
-                                onClick={() => setDeletingId(job.id)}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            )}
-                          </div>
+                          {/* Uma ação à vista por estado — a que se usa de verdade naquele
+                              momento — e o resto no menu, com o perigoso isolado. */}
+                          <AcoesDaLinha
+                            rotulo={`mensagem para ${job.phone}`}
+                            tituloDoMenu={`Agendamento · ${job.phone}`}
+                            ocupada={sendNow.isPending}
+                            rapidas={
+                              job.status === 'pending'
+                                ? [{ texto: 'Enviar agora', icone: Zap, onClick: () => sendNow.mutate(job.id) }]
+                                : job.status === 'failed'
+                                  ? [{ texto: 'Tentar de novo', icone: RefreshCw, onClick: () => sendNow.mutate(job.id) }]
+                                  : []
+                            }
+                            menu={[
+                              ...(job.status === 'pending'
+                                ? [
+                                    { texto: 'Editar ou reagendar', icone: Pencil, onClick: () => setEditingJob(job) },
+                                    {
+                                      texto: 'Cancelar o agendamento', icone: XCircle, perigo: true,
+                                      titulo: 'A mensagem não será enviada',
+                                      onClick: () => setCancellingId(job.id),
+                                    },
+                                  ]
+                                : []),
+                              ...(job.status === 'sent' || job.status === 'cancelled' || job.status === 'failed'
+                                ? [{
+                                    texto: 'Remover da lista', icone: Trash2, perigo: true,
+                                    onClick: () => setDeletingId(job.id),
+                                  }]
+                                : []),
+                            ]}
+                          />
                         </TableCell>
                       </TableRow>
                     );

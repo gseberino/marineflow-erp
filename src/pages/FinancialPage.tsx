@@ -35,7 +35,8 @@ import { toast } from 'sonner';
 import { BulkBillingReminderDialog } from '@/components/BulkBillingReminderDialog';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 import { writeAuditLog } from '@/hooks/use-audit-log';
-import { Send } from 'lucide-react';
+import { Send, Pencil } from 'lucide-react';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 
 function getStatusBadgeClass(status: string, dueDate: string) {
   const isOverdue = status !== 'paid' && status !== 'cancelled' && new Date(dueDate) < new Date();
@@ -230,6 +231,45 @@ export default function FinancialPage() {
       </div>
     );
   }
+
+  /**
+   * Abre o envio por WhatsApp de um recebível.
+   *
+   * Vive aqui fora porque o mesmo punhado de linhas era um `onClick` de quarenta linhas
+   * dentro da célula da tabela — e a célula agora declara suas ações como dados.
+   */
+  const abrirEnvioWhatsApp = (r: any) => {
+    const client = (r as any).clients;
+    const so = (r as any).service_orders;
+    const target: SendViaWhatsAppTarget = {
+      kind: 'receivable',
+      receivableId: r.id,
+      description: r.description,
+      serviceOrderId: so?.id || null,
+      shareToken: so?.share_token || null,
+      clientId: client?.id || (r as any).client_id || null,
+      clientName: client?.name || null,
+      clientPhone: client?.whatsapp || client?.phone || null,
+      amount: Number(r.balance_amount ?? r.amount) || null,
+      dueDate: r.due_date || null,
+    };
+    setWhatsAppTarget(target);
+    void writeAuditLog({
+      table_name: 'receivables',
+      record_id: r.id,
+      action: 'whatsapp_send_open' as any,
+      new_value: {
+        description: r.description,
+        amount: Number(r.amount),
+        balance: Number(r.balance_amount ?? r.amount),
+        due_date: r.due_date,
+        client_id: target.clientId,
+        service_order_id: target.serviceOrderId,
+        has_share_token: !!target.shareToken,
+      },
+      reason: 'Abriu envio WhatsApp de recibo/cobrança',
+    });
+  };
 
   const handleGenerateReceipt = async (r: any) => {
     try {
@@ -639,62 +679,35 @@ export default function FinancialPage() {
                         <td className="px-4 py-3 text-right hidden md:table-cell font-semibold">{formatCurrency(Number(r.balance_amount))}</td>
                         <td className="px-4 py-3"><StatusBadge className={getStatusBadgeClass(r.status || 'pending', r.due_date)}>{getDisplayStatus(r.status || 'pending', r.due_date, t)}</StatusBadge></td>
                         <td className="px-4 py-3 text-right">
-                          <div className="flex justify-end gap-1">
-                            {Number(r.paid_amount || 0) > 0 && (
-                              <Button size="sm" variant="ghost" title="Gerar Recibo" onClick={() => handleGenerateReceipt(r)}>
-                                <ReceiptIcon className="h-4 w-4 mr-1" /> Recibo
-                              </Button>
-                            )}
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              title="Enviar via WhatsApp (Recibo/Cobrança)"
-                              onClick={() => {
-                                const client = (r as any).clients;
-                                const so = (r as any).service_orders;
-                                const target: SendViaWhatsAppTarget = {
-                                  kind: 'receivable',
-                                  receivableId: r.id,
-                                  description: r.description,
-                                  serviceOrderId: so?.id || null,
-                                  shareToken: so?.share_token || null,
-                                  clientId: client?.id || (r as any).client_id || null,
-                                  clientName: client?.name || null,
-                                  clientPhone: client?.whatsapp || client?.phone || null,
-                                  amount: Number(r.balance_amount ?? r.amount) || null,
-                                  dueDate: r.due_date || null,
-                                };
-                                setWhatsAppTarget(target);
-                                void writeAuditLog({
-                                  table_name: 'receivables',
-                                  record_id: r.id,
-                                  action: 'whatsapp_send_open' as any,
-                                  new_value: {
-                                    description: r.description,
-                                    amount: Number(r.amount),
-                                    balance: Number(r.balance_amount ?? r.amount),
-                                    due_date: r.due_date,
-                                    client_id: target.clientId,
-                                    service_order_id: target.serviceOrderId,
-                                    has_share_token: !!target.shareToken,
-                                  },
-                                  reason: 'Abriu envio WhatsApp de recibo/cobrança',
-                                });
-                              }}
-                            >
-                              <Send className="h-4 w-4 mr-1" /> WhatsApp
-                            </Button>
-                            {r.status !== 'paid' && (
-                              <Button size="sm" variant="outline" onClick={() => setPaymentTarget({ receivable: r })}>
-                                {t.financial.registerPayment}
-                              </Button>
-                            )}
-                            {r.status !== 'paid' && r.status !== 'cancelled' && (
-                              <Button size="sm" variant="ghost" title="Editar recebível" onClick={() => setEditingReceivable(r)}>
-                                ✏
-                              </Button>
-                            )}
-                          </div>
+                          {/* A ação do dia depende do estado: uma conta em aberto pede
+                              baixa, uma conta paga pede recibo. O resto vai para o menu. */}
+                          <AcoesDaLinha
+                            rotulo={`recebível ${r.description || ''}`}
+                            tituloDoMenu={r.description || 'Recebível'}
+                            rapidas={
+                              r.status !== 'paid'
+                                ? [{
+                                    texto: t.financial.registerPayment,
+                                    onClick: () => setPaymentTarget({ receivable: r }),
+                                  }]
+                                : Number(r.paid_amount || 0) > 0
+                                  ? [{ texto: 'Recibo', icone: ReceiptIcon, onClick: () => void handleGenerateReceipt(r) }]
+                                  : []
+                            }
+                            menu={[
+                              ...(Number(r.paid_amount || 0) > 0 && r.status !== 'paid'
+                                ? [{ texto: 'Gerar recibo', icone: ReceiptIcon, onClick: () => void handleGenerateReceipt(r) }]
+                                : []),
+                              {
+                                texto: 'Enviar por WhatsApp', icone: Send,
+                                titulo: 'Recibo ou cobrança pelo WhatsApp',
+                                onClick: () => abrirEnvioWhatsApp(r),
+                              },
+                              ...(r.status !== 'paid' && r.status !== 'cancelled'
+                                ? [{ texto: 'Editar este recebível', icone: Pencil, onClick: () => setEditingReceivable(r) }]
+                                : []),
+                            ]}
+                          />
                         </td>
                       </tr>
                     );
