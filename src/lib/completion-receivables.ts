@@ -28,12 +28,25 @@ export async function ensureCompletionReceivables(
   if (!so) return { created: 0, skipped: true };
   const o = so as any;
 
-  // Idempotência: se já existe QUALQUER recebível não-depósito (ex.: saldo do sinal), não recria.
+  /**
+   * Idempotência: se a OS já tem QUALQUER recebível vivo, o financeiro dela já existe.
+   *
+   * Até 24/09/2026 esta checagem ignorava o sinal ('is_deposit = true'). A intenção era
+   * boa — o fluxo do sinal cria entrada E saldo, e a idempotência pegava o saldo. Mas
+   * numa condição de 100% na aprovação ("À vista") o sinal cobre o valor inteiro e NÃO
+   * existe saldo: nada era encontrado, e esta função gerava o plano todo de novo, pelo
+   * valor cheio, em cima de um cliente que já tinha pagado.
+   *
+   * Medido no dia da correção: três OS com o título em dobro, R$ 2.956,88 sendo cobrados
+   * de quem não devia — OS-00073 (Rodrigo), OS-00075 (Lucenira) e OS-00084 (Robson), cada
+   * uma com "Sinal — ORÇ-xxx" pago e um gêmeo pendente criado segundos depois.
+   *
+   * O sinal É recebível da OS. Contá-lo aqui é o que fecha a porta.
+   */
   const { data: existing } = await supabase
     .from('receivables')
     .select('id')
     .eq('service_order_id', input.serviceOrderId)
-    .eq('is_deposit', false)
     .neq('status', 'cancelled');
   if (existing && existing.length > 0) return { created: 0, skipped: true };
 
