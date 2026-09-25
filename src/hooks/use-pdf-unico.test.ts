@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -93,5 +93,36 @@ describe('uma montagem só para o PDF', () => {
   // porque quem chama está fora de um componente e trata ausência.
   it('o fetch imperativo continua devolvendo null em vez de lançar', () => {
     expect(src).toMatch(/fetchPDFData[\s\S]*?catch[\s\S]*?return null/);
+  });
+
+  /**
+   * A QUARTA ponta (25/09/2026): o assistente do WhatsApp manda o PDF pela tool
+   * send_document_pdf_to_self. Ele roda numa Edge Function e é o lugar mais fácil de nascer
+   * uma cópia "só para o servidor" — que divergiria da tela no primeiro ajuste.
+   */
+  it('o assistente usa a montagem e o desenho únicos', () => {
+    const tool = readFileSync(
+      join(process.cwd(), 'supabase', 'functions', '_shared', 'ai', 'tools', 'documentos-pdf.ts'), 'utf8',
+    );
+    expect(tool).toMatch(/import \{ carregarPDFData \} from "\.\.\/\.\.\/pdf\/dados\.ts"/);
+    expect(tool).toMatch(/from "\.\.\/\.\.\/pdf\/documento\.ts"/);
+    expect(tool).not.toMatch(/PDFData = \{/);
+    expect(tool).not.toMatch(/\.from\("service_orders"\)\s*\.select\([^)]*clients\(/);
+  });
+
+  it('nenhuma edge monta PDFData por conta própria', () => {
+    const raiz = join(process.cwd(), 'supabase', 'functions');
+    const copias: string[] = [];
+    const varrer = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const caminho = join(dir, e.name);
+        if (e.isDirectory()) { varrer(caminho); continue; }
+        if (!e.name.endsWith('.ts') || e.name.endsWith('_test.ts')) continue;
+        if (caminho.endsWith(join('_shared', 'pdf', 'dados.ts')) || caminho.endsWith(join('_shared', 'pdf', 'amostras.ts'))) continue;
+        if (/const \w+: PDFData = \{/.test(readFileSync(caminho, 'utf8'))) copias.push(caminho.replace(raiz, ''));
+      }
+    };
+    varrer(raiz);
+    expect(copias, `montagem de PDFData fora de _shared/pdf/dados.ts: ${copias.join(', ')}`).toEqual([]);
   });
 });

@@ -17,29 +17,86 @@ function prettyPreview(body?: string | null): string | null {
 }
 
 /**
- * Usa a edge function whatsapp-send (não whatsapp-send-text) para respeitar
- * wa_test_mode/wa_test_number do app_settings. Lê env em tempo de chamada
- * (não no import do módulo) para não quebrar testes que nunca chamam isto.
+ * POST na edge whatsapp-send — o caminho único de envio das tools (texto e documento).
+ * Lê env em tempo de chamada (não no import do módulo) para não quebrar testes que nunca
+ * chamam isto.
+ *
+ * No canal WhatsApp não há JWT de usuário (o toolCtx traz jwt=""), então usamos a
+ * service-role key: o whatsapp-send tem um bypass explícito (isServiceRoleCall) para
+ * chamadas de sistema. No painel, jwt é o token real do usuário.
+ *
+ * NÃO enviar header `apikey`: espelha o chamador que já funciona
+ * (whatsapp-process-scheduled manda só Authorization: Bearer <service_role>).
+ * Enviar `apikey: anon` JUNTO com um bearer service_role faz o gateway rejeitar com
+ * 401 (sem corpo) por conflito de papel — foi o "HTTP 401" que o envio do agente dava.
+ * O whatsapp-send roda com verify_jwt=true (não está no config.toml, vale o padrão): o
+ * gateway exige um JWT válido, e o Bearer já é um — o apikey não acrescenta nada.
  */
-export async function sendWhatsapp(phone: string, message: string, jwt: string, dedupeKey?: string) {
+async function postarWhatsappSend(corpo: Record<string, unknown>, jwt: string, signal?: AbortSignal): Promise<Response> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  // No canal WhatsApp não há JWT de usuário (o toolCtx traz jwt=""), então usamos a
-  // service-role key: o whatsapp-send tem um bypass explícito (isServiceRoleCall) para
-  // chamadas de sistema. No painel, jwt é o token real do usuário.
   const authToken = jwt || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  // NÃO enviar header `apikey`: espelha o chamador que já funciona
-  // (whatsapp-process-scheduled manda só Authorization: Bearer <service_role>).
-  // Enviar `apikey: anon` JUNTO com um bearer service_role faz o gateway rejeitar com
-  // 401 (sem corpo) por conflito de papel — foi o "HTTP 401" que o envio do agente dava.
-  // whatsapp-send tem verify_jwt=false, então o apikey nem é necessário.
-  const r = await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
+  return await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${authToken}`,
     },
-    body: JSON.stringify({ phone, message, kind: "text", ...(dedupeKey ? { dedupe_key: dedupeKey } : {}) }),
+    body: JSON.stringify(corpo),
+    signal,
   });
+}
+
+/**
+ * Manda um PDF (por URL que a Evolution baixa) para um número.
+ *
+ * `context` é obrigatório e nunca 'quote': com context='quote' + service_order_id o
+ * whatsapp-send marca o orçamento como ENVIADO AO CLIENTE (whatsapp-send/index.ts), e daí
+ * vêm a expiração automática, a tarefa de follow-up e o briefing tratando como enviado.
+ * Quem chama daqui não passa service_order_id — o vínculo fica na auditoria do agente.
+ */
+export async function enviarDocumentoWhatsapp(p: {
+  phone: string;
+  url: string;
+  filename: string;
+  caption: string;
+  context: string;
+  jwt: string;
+  dedupeKey?: string;
+  limiteMs?: number;
+}): Promise<{ ok: true; deduplicated?: boolean } | { ok: false; error: string }> {
+  if (p.context === "quote") return { ok: false, error: "context 'quote' marca o orçamento como enviado ao cliente" };
+  const controle = new AbortController();
+  const relogio = setTimeout(() => controle.abort(), p.limiteMs ?? 25_000);
+  try {
+    const r = await postarWhatsappSend({
+      phone: p.phone,
+      kind: "document",
+      document_url: p.url,
+      document_filename: p.filename,
+      document_caption: p.caption,
+      context: p.context,
+      ...(p.dedupeKey ? { dedupe_key: p.dedupeKey } : {}),
+    }, p.jwt, controle.signal);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const erro = (data as any).error;
+      return { ok: false, error: typeof erro === "string" ? erro : erro ? JSON.stringify(erro) : `HTTP ${r.status}` };
+    }
+    return { ok: true, ...((data as any).deduplicated ? { deduplicated: true } : {}) };
+  } catch (e) {
+    const abortado = e instanceof DOMException && e.name === "AbortError";
+    return { ok: false, error: abortado ? "o envio pelo WhatsApp não respondeu em 25 s" : e instanceof Error ? e.message : String(e) };
+  } finally {
+    clearTimeout(relogio);
+  }
+}
+
+/**
+ * Usa a edge function whatsapp-send (não whatsapp-send-text) para respeitar
+ * wa_test_mode/wa_test_number do app_settings.
+ */
+export async function sendWhatsapp(phone: string, message: string, jwt: string, dedupeKey?: string) {
+  const r = await postarWhatsappSend({ phone, message, kind: "text", ...(dedupeKey ? { dedupe_key: dedupeKey } : {}) }, jwt);
   const data = await r.json().catch(() => ({}));
   if (!r.ok) return { error: (data as any).error || `HTTP ${r.status}` };
   if ((data as any).deduplicated) {
