@@ -5,7 +5,7 @@
 // uma que ainda tem parcelas a vencer.
 import { describe, it, expect } from 'vitest';
 import {
-  lerParcela, agruparParcelamentos, descreverParcelamento,
+  lerParcela, agruparParcelamentos, descreverParcelamento, compraJaTratada, nomeSemParcela,
   type PernaDeParcelamento,
 } from '../../supabase/functions/_shared/banking/installments';
 
@@ -160,5 +160,109 @@ describe('agrupamento da compra', () => {
     expect(c.valorDaCompra).toBe(1200);
     expect(c.anterioresForaDoExtrato).toBe(2);
     expect(c.aVencer).toBe(600);
+  });
+});
+
+// ── A mesma compra lançada de novo quando chega a parcela do mês seguinte ──────────────
+//
+// Medido em 25/09/2026: 19 compras parceladas lançadas duas vezes (R$ 12.445). Em todas, a
+// original estava ancorada na parcela 1 e a cópia na parcela 2 da mesma série, porque a
+// varredura só enxerga transação ainda não tratada e a parcela 1 já tinha virado
+// lançamento. Os valores e datas abaixo são desses casos reais.
+describe('compra já lançada a partir de outra parcela da mesma série', () => {
+  const compraDe = (pernas: PernaDeParcelamento[]) => agruparParcelamentos(pernas).compras[0];
+  const tratadas = (...ids: string[]) => (id: string) => ids.includes(id);
+
+  it('Airbnb 6x: a parcela 2 chega e a 1 já foi lançada — é a mesma compra', () => {
+    const p1 = perna({ counterparty_name: 'AIRBNB * HMJFDQK2EH', amount: 185.24, installment_label: '1/6', transaction_date: '2025-12-27' });
+    const p2 = perna({ counterparty_name: 'AIRBNB * HMJFDQK2EH', amount: 185.24, installment_label: '2/6', transaction_date: '2026-01-26' });
+    expect(compraJaTratada(compraDe([p2]), [p1], tratadas(p1.id))).toBe(p1);
+  });
+
+  it('o sentido inverso também: lançada pela 2, e a 1 aparece depois no histórico', () => {
+    // AIRBNB * HMJH38CACR: a original foi ancorada na 2/4 (27/04) e a cópia na 1/4 (01/04).
+    const p2 = perna({ counterparty_name: 'AIRBNB * HMJH38CACR', amount: 52.23, installment_label: '2/4', transaction_date: '2026-04-27' });
+    const p1 = perna({ counterparty_name: 'AIRBNB * HMJH38CACR', amount: 52.23, installment_label: '1/4', transaction_date: '2026-04-01' });
+    expect(compraJaTratada(compraDe([p1]), [p2], tratadas(p2.id))).toBe(p2);
+  });
+
+  it('parcelas com 10 dias de distância ainda são a mesma série', () => {
+    // MP *ALIEXPRESS 3x: 1/3 em 15/09 e 2/3 em 25/09 — o cartão lança no fechamento.
+    const p1 = perna({ counterparty_name: 'MP *ALIEXPRESS', amount: 292.32, installment_label: '1/3', transaction_date: '2025-09-15' });
+    const p2 = perna({ counterparty_name: 'MP *ALIEXPRESS', amount: 292.32, installment_label: '2/3', transaction_date: '2025-09-25' });
+    expect(compraJaTratada(compraDe([p2]), [p1], tratadas(p1.id))).toBe(p1);
+  });
+
+  it('o centavo que o cartão joga numa parcela só não separa a série', () => {
+    const p1 = perna({ counterparty_name: 'PREMEL - ITAJAI', amount: 74.59, installment_label: '1/3', transaction_date: '2026-02-04' });
+    const p2 = perna({ counterparty_name: 'PREMEL - ITAJAI', amount: 74.58, installment_label: '2/3', transaction_date: '2026-02-25' });
+    expect(compraJaTratada(compraDe([p2]), [p1], tratadas(p1.id))).toBe(p1);
+  });
+
+  it('compra NOVA idêntica a uma antiga continua sendo compra nova', () => {
+    // Mesma loja, mesmo plano, mesmo valor — mas a nova começa na parcela 1. As parcelas
+    // 2 e 3 da compra antiga são MAIS ANTIGAS com número maior: não podem ser irmãs.
+    const a1 = perna({ counterparty_name: 'PREMEL - ITAJAI', amount: 74.59, installment_label: '1/3', transaction_date: '2026-01-10' });
+    const a2 = perna({ counterparty_name: 'PREMEL - ITAJAI', amount: 74.59, installment_label: '2/3', transaction_date: '2026-02-10' });
+    const a3 = perna({ counterparty_name: 'PREMEL - ITAJAI', amount: 74.59, installment_label: '3/3', transaction_date: '2026-03-10' });
+    const b1 = perna({ counterparty_name: 'PREMEL - ITAJAI', amount: 74.59, installment_label: '1/3', transaction_date: '2026-04-10' });
+    expect(compraJaTratada(compraDe([b1]), [a1, a2, a3], tratadas(a1.id, a2.id, a3.id))).toBeNull();
+  });
+
+  it('parcela antiga ainda sem lançamento não prova nada', () => {
+    const p1 = perna({ counterparty_name: 'AUTOZONE', amount: 56.79, installment_label: '1/5', transaction_date: '2026-03-03' });
+    const p2 = perna({ counterparty_name: 'AUTOZONE', amount: 56.79, installment_label: '2/5', transaction_date: '2026-03-25' });
+    expect(compraJaTratada(compraDe([p2]), [p1], tratadas())).toBeNull();
+  });
+
+  it('valor de parcela diferente é outra compra', () => {
+    const p1 = perna({ counterparty_name: 'LOJAS TAMOYO LTDA', amount: 93.44, installment_label: '1/4', transaction_date: '2026-06-13' });
+    const p2 = perna({ counterparty_name: 'LOJAS TAMOYO LTDA', amount: 132.79, installment_label: '2/4', transaction_date: '2026-06-25' });
+    expect(compraJaTratada(compraDe([p2]), [p1], tratadas(p1.id))).toBeNull();
+  });
+
+  it('outra loja não conta', () => {
+    const p1 = perna({ counterparty_name: 'MILIUM 64', amount: 58.74, installment_label: '1/3', transaction_date: '2026-04-09' });
+    const p2 = perna({ counterparty_name: 'MILIUM 65', amount: 58.74, installment_label: '2/3', transaction_date: '2026-04-27' });
+    expect(compraJaTratada(compraDe([p2]), [p1], tratadas(p1.id))).toBeNull();
+  });
+
+  it('longe demais no tempo não é a parcela vizinha', () => {
+    const p1 = perna({ counterparty_name: 'FRIGELAR COMERCIO', amount: 178.26, installment_label: '1/6', transaction_date: '2025-06-05' });
+    const p2 = perna({ counterparty_name: 'FRIGELAR COMERCIO', amount: 178.26, installment_label: '2/6', transaction_date: '2026-02-05' });
+    expect(compraJaTratada(compraDe([p2]), [p1], tratadas(p1.id))).toBeNull();
+  });
+});
+
+// ── Parcela escrita dentro do nome da loja ──────────────────────────────────────────────
+//
+// Alguns bancos mandam "COREMMA 2/4" como nome do estabelecimento. Sem tirar o "2/4",
+// cada parcela parecia uma loja diferente e virava uma compra inteira: na fila de
+// 25/09/2026, a Coremma de 4x R$ 112,29 entraria três vezes como compra de R$ 449,16.
+describe('parcela no nome do estabelecimento', () => {
+  it('as três parcelas da Coremma são uma compra só', () => {
+    const p2 = perna({ counterparty_name: 'COREMMA 2/4', amount: 112.29, installment_label: '2/4', transaction_date: '2026-09-13' });
+    const p3 = perna({ counterparty_name: 'COREMMA 3/4', amount: 112.29, installment_label: '3/4', transaction_date: '2026-10-13' });
+    const p4 = perna({ counterparty_name: 'COREMMA 4/4', amount: 112.29, installment_label: '4/4', transaction_date: '2026-11-13' });
+    const { compras } = agruparParcelamentos([p2, p3, p4]);
+    expect(compras).toHaveLength(1);
+    expect(compras[0].pernas).toHaveLength(3);
+    // 4x de 112,29: a 1ª parcela ficou fora do extrato, mas entra no valor da compra.
+    expect(compras[0].valorDaCompra).toBeCloseTo(449.16, 2);
+    // O nome que aparece para você não carrega a parcela.
+    expect(compras[0].rotulo).toBe('COREMMA');
+  });
+
+  it('e uma parcela da série já lançada cobre as novas', () => {
+    const p1 = perna({ counterparty_name: 'MERCADOLIVRE*EUROTERM 1/2', amount: 89.9, installment_label: '1/2', transaction_date: '2026-08-11' });
+    const p2 = perna({ counterparty_name: 'MERCADOLIVRE*EUROTERM 2/2', amount: 89.9, installment_label: '2/2', transaction_date: '2026-09-11' });
+    const compra = agruparParcelamentos([p2]).compras[0];
+    expect(compraJaTratada(compra, [p1], (id) => id === p1.id)).toBe(p1);
+  });
+
+  it('só tira o número do fim: nome com número no meio fica como está', () => {
+    expect(nomeSemParcela({ counterparty_name: 'COREMMA 2/4', description: '' })).toBe('COREMMA');
+    expect(nomeSemParcela({ counterparty_name: 'MILIUM 64', description: '' })).toBe('MILIUM 64');
+    expect(nomeSemParcela({ counterparty_name: 'LOJA 24/7 CONVENIENCIA', description: '' })).toBe('LOJA 24/7 CONVENIENCIA');
   });
 });

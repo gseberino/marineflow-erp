@@ -271,7 +271,8 @@ servirComCors(async (req) => {
       const deMes = `${todayISO.slice(0, 7)}-01`;
       const [cats, pays, recs, entradas] = await Promise.all([
         admin.from("financial_categories").select("name, type, dre_group"),
-        admin.from("payables").select("amount, expense_category").gte("issue_date", deMes).lte("issue_date", todayISO),
+        // Despesa cancelada não entra no resultado (a receita cancelada já era filtrada).
+        admin.from("payables").select("amount, expense_category").neq("status", "cancelled").gte("issue_date", deMes).lte("issue_date", todayISO),
         admin.from("receivables").select("amount, status").gte("issue_date", deMes).lte("issue_date", todayISO),
         admin.from("bank_transactions").select("id", { count: "exact", head: true })
           .eq("transaction_type", "credit").eq("reconciled", false).eq("source_type", "bank")

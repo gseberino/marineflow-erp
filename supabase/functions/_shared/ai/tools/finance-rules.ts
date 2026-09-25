@@ -664,7 +664,8 @@ export const financeRulesTools: ToolDef[] = [
 
       const [cats, pays, recs] = await Promise.all([
         ctx.sb.from("financial_categories").select("name, type, dre_group"),
-        ctx.sb.from("payables").select("amount, expense_category").gte("issue_date", de).lte("issue_date", ate),
+        // Despesa cancelada não entra no resultado — mesma regra do DRE da tela.
+        ctx.sb.from("payables").select("amount, expense_category").neq("status", "cancelled").gte("issue_date", de).lte("issue_date", ate),
         ctx.sb.from("receivables").select("amount, category, status").gte("issue_date", de).lte("issue_date", ate),
       ]);
 

@@ -28,7 +28,10 @@ function useLancamentosDRE(ano: number) {
 
       const [cats, pays, recs] = await Promise.all([
         supabase.from('financial_categories').select('name, type, dre_group'),
+        // Cancelada não é despesa. A consulta de receitas sempre filtrou; a de despesas
+        // não, e cada lançamento cancelado continuava pesando no resultado.
         supabase.from('payables').select('issue_date, amount, expense_category')
+          .neq('status', 'cancelled')
           .gte('issue_date', de).lte('issue_date', ate),
         supabase.from('receivables').select('issue_date, amount, category, status')
           .gte('issue_date', de).lte('issue_date', ate),

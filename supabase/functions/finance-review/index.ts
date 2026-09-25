@@ -30,7 +30,7 @@ import { findInternalTransfers } from "../_shared/banking/matching.ts";
 import { callClaude } from "../_shared/ai/anthropic.ts";
 import { MODEL_LITE } from "../_shared/ai/models.ts";
 import {
-  agruparParcelamentos, descreverParcelamento, lerParcela,
+  agruparParcelamentos, compraJaTratada, descreverParcelamento, lerParcela, nomeSemParcela,
   type CompraParcelada, type PernaDeParcelamento,
 } from "../_shared/banking/installments.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
@@ -512,7 +512,69 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
 
   // Compra parcelada é UMA compra: a proposta nasce na parcela mais antiga, com o valor
   // total, e as outras pernas não viram despesa separada.
-  const { compras, pernaDe } = agruparParcelamentos(transacoes as unknown as PernaDeParcelamento[]);
+  const { compras: todasAsCompras, pernaDe } = agruparParcelamentos(transacoes as unknown as PernaDeParcelamento[]);
+
+  // A MESMA COMPRA NÃO NASCE DUAS VEZES (25/09/2026). Esta varredura só lê transação ainda
+  // não tratada; quando a parcela do mês seguinte chega, as irmãs antigas já viraram
+  // lançamento e ficam invisíveis, e o agrupador montava "a compra" de novo só com ela —
+  // 19 compras lançadas em dobro, R$ 12.445. Agora cada compra montada aqui procura, nas
+  // parcelas antigas da mesma série, uma que já tenha virado lançamento. Achando, a parcela
+  // nova sai da fila como parcela daquela compra, com o motivo escrito.
+  //
+  // Duplicata de importação fica fora da leitura: ela repete o número da parcela e
+  // atrapalharia a série. Prova de "já lançada" é lançamento ou parcela já dada como tal;
+  // proposta pendente não conta, porque ainda pode ser recusada.
+  const historicas = todasAsCompras.length === 0
+    ? []
+    : await lerTudo<PernaDeParcelamento & { dismissed_kind: string | null }>((de, ate) =>
+      admin.from("bank_transactions")
+        .select("id, transaction_date, description, amount, counterparty_name, installment_label, dismissed_kind")
+        .not("installment_label", "is", null)
+        .or("dismissed_kind.is.null,dismissed_kind.eq.parcela")
+        .order("id")
+        .range(de, ate)
+    );
+  const dadaComoParcela = new Set(historicas.filter((h) => h.dismissed_kind === "parcela").map((h) => h.id));
+  const jaLancadaComo = (id: string) => lancadas.has(id) || dadaComoParcela.has(id);
+
+  const comprasJaLancadas: Array<{ compra: CompraParcelada; prova: PernaDeParcelamento }> = [];
+  for (const c of todasAsCompras) {
+    const prova = compraJaTratada(c, historicas, jaLancadaComo);
+    if (prova) comprasJaLancadas.push({ compra: c, prova });
+  }
+  const chavesJaLancadas = new Set(comprasJaLancadas.map((j) => j.compra.chave));
+  const compras = todasAsCompras.filter((c) => !chavesJaLancadas.has(c.chave));
+
+  let parcelasDeCompraJaLancada = 0;
+  for (const { compra, prova } of comprasJaLancadas) {
+    const soltas = compra.pernas.map((perna) => perna.id).filter((id) => !jaLancadaComo(id));
+    if (soltas.length === 0) continue;
+    const valorParcela = compra.valorDaParcela.toFixed(2).replace(".", ",");
+    const motivo = `Parcela da compra já lançada (${compra.totalDeParcelas}x de R$ ${valorParcela}; reconhecida pela parcela ${prova.installment_label} de ${prova.transaction_date})`;
+    const { error: eParc } = await admin.from("bank_transactions").update({
+      reconciled: true,
+      dismissed_reason: motivo,
+      dismissed_kind: "parcela",
+      dismissed_at: new Date().toISOString(),
+      dismissed_by: null,
+    }).in("id", soltas);
+    if (eParc) throw eParc;
+    // Se alguma já estava na fila como proposta, ela deixa de valer pelo mesmo motivo.
+    await admin.from("finance_review_queue").update({
+      status: "superseded",
+      decision_note: "Parcela de compra parcelada que já tem lançamento",
+    }).in("bank_transaction_id", soltas).eq("status", "pending");
+    for (const id of soltas) naFila.delete(id);
+    await anotar(admin, {
+      acao: "ignorou",
+      autor: null,
+      bank_transaction_id: soltas[0],
+      valor: Number((compra.valorDaParcela * soltas.length).toFixed(2)),
+      detalhe: `${compra.rotulo}: ${motivo}`.slice(0, 300),
+    });
+    parcelasDeCompraJaLancada += soltas.length;
+  }
+
   const compraPorChave = new Map(compras.map((c) => [c.chave, c]));
   const ancoras = new Set(compras.map((c) => c.ancora.id));
 
@@ -533,6 +595,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     if (naFila.has(tx.id) || lancadas.has(tx.id)) return false;
     if (jaCoberta.has(tx.id)) return false;
     if (pernaDe.has(tx.id) && !ancoras.has(tx.id)) return false;
+    // Parcela de compra que já tem lançamento acabou de sair da fila acima.
+    if (chavesJaLancadas.has(pernaDe.get(tx.id) ?? "")) return false;
     return tx.transaction_type === "debit" || tx.transaction_type === "credit";
   });
 
@@ -694,6 +758,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     criadas > 0 ? `${criadas - lancadasSozinhas} proposta(s) para revisar` : "Nada novo para propor",
     lancadasSozinhas > 0 ? `${lancadasSozinhas} lançada(s) pelas suas regras` : "",
     pares.length ? `${pares.length} transferência(s) entre contas` : "",
+    parcelasDeCompraJaLancada > 0 ? `${parcelasDeCompraJaLancada} parcela(s) de compra já lançada saíram da fila` : "",
     restantes > 0 ? `faltam ${restantes} do histórico` : "",
   ].filter(Boolean);
 
@@ -702,6 +767,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     criadas,
     lancadas_por_regra: lancadasSozinhas,
     transferencias_internas: pares.length,
+    parcelas_de_compra_ja_lancada: parcelasDeCompraJaLancada,
     elegiveis_lote: linhas.filter((l) => Number(l.suggested_amount) < limiteLote).length,
     limite_lote: limiteLote,
     // Quantas transações antigas sobraram para a próxima chamada. Zero = mutirão terminado.
@@ -1173,15 +1239,21 @@ async function lerCompraParcelada(
 
   // Mesmo favorecido e mesmo valor de parcela: o resto do filtro é do agrupador, que sabe
   // recusar colisão indistinguível.
+  // Pelo nome SEM a parcela e com um centavo de folga: alguns bancos escrevem "COREMMA 2/4"
+  // no nome, e o cartão joga o centavo que não divide numa parcela só. Com nome exato e
+  // valor exato, as irmãs não eram achadas — a aprovação tirava da fila só a parcela
+  // clicada, e as outras voltavam no dia seguinte como compras novas.
+  const base = nomeSemParcela(ancora).replace(/[%_]/g, "");
   let q = admin
     .from("bank_transactions")
     .select("id, transaction_date, description, amount, counterparty_name, installment_label")
-    .eq("amount", ancora.amount)
+    .gte("amount", Number((ancora.amount - 0.02).toFixed(2)))
+    .lte("amount", Number((ancora.amount + 0.02).toFixed(2)))
     .not("installment_label", "is", null)
-    .limit(60);
+    .limit(120);
   q = ancora.counterparty_name
-    ? q.eq("counterparty_name", ancora.counterparty_name)
-    : q.eq("description", ancora.description);
+    ? q.ilike("counterparty_name", `${base}%`)
+    : q.ilike("description", `${base}%`);
 
   const { data: irmas } = await q;
   const { compras, pernaDe } = agruparParcelamentos((irmas ?? []) as PernaDeParcelamento[]);

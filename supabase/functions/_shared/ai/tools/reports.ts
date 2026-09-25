@@ -22,8 +22,9 @@ export const reportTools: ToolDef[] = [
       const start = new Date(year, month - 1, 1).toISOString();
       const end = new Date(year, month, 0, 23, 59, 59).toISOString();
 
-      const { data: rec } = await admin.from("receivables").select("amount, cost_centers(name, type)").gte("due_date", start).lte("due_date", end);
-      const { data: pay } = await admin.from("payables").select("amount, cost_centers(name, type)").gte("due_date", start).lte("due_date", end);
+      // Cancelados não são receita nem despesa.
+      const { data: rec } = await admin.from("receivables").select("amount, cost_centers(name, type)").neq("status", "cancelled").gte("due_date", start).lte("due_date", end);
+      const { data: pay } = await admin.from("payables").select("amount, cost_centers(name, type)").neq("status", "cancelled").gte("due_date", start).lte("due_date", end);
 
       const summary: Record<string, number> = {};
       let totalRevenue = 0;

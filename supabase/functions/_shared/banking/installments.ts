@@ -64,8 +64,23 @@ export interface CompraParcelada {
   anterioresForaDoExtrato: number;
 }
 
+/**
+ * Parcela escrita dentro do nome: "COREMMA 2/4", "MERCADOLIVRE*EUROTERM 1/2".
+ *
+ * Alguns bancos põem o número da parcela no próprio nome do estabelecimento. Sem tirar
+ * isso, cada parcela parecia uma loja diferente, nunca era agrupada com as irmãs, e cada
+ * uma virava "uma compra" do valor inteiro — a Coremma de 4x R$ 112,29 entraria três
+ * vezes como compra de R$ 449,16 (medido na fila de 25/09/2026).
+ */
+const PARCELA_NO_NOME = /\s*\d{1,2}\s*\/\s*\d{1,2}\s*$/;
+
+/** O nome do estabelecimento sem a parcela, como ele aparece para uma pessoa. */
+export function nomeSemParcela(tx: Pick<PernaDeParcelamento, "counterparty_name" | "description">): string {
+  return (tx.counterparty_name || tx.description || "").replace(PARCELA_NO_NOME, "").trim();
+}
+
 function quemRecebeu(tx: PernaDeParcelamento): string {
-  return normalizeText(tx.counterparty_name || tx.description || "");
+  return normalizeText(nomeSemParcela(tx));
 }
 
 /**
@@ -102,7 +117,7 @@ function montarCompra(chave: string, itens: Perna[]): CompraParcelada | null {
 
   return {
     chave,
-    rotulo: (ordenadas[0].tx.counterparty_name || ordenadas[0].tx.description || "").trim(),
+    rotulo: nomeSemParcela(ordenadas[0].tx),
     valorDaParcela: Number(media.toFixed(2)),
     totalDeParcelas: total,
     valorDaCompra: Number((jaPago + aVencer).toFixed(2)),
@@ -189,4 +204,65 @@ export function descreverParcelamento(c: CompraParcelada): string {
 
 function brl(v: number): string {
   return `R$ ${v.toFixed(2).replace(".", ",")}`;
+}
+
+/**
+ * A compra montada com as parcelas NOVAS já foi lançada a partir de uma parcela antiga?
+ *
+ * O DEFEITO QUE ISTO FECHA (medido em 25/09/2026): 19 compras parceladas lançadas duas
+ * vezes, R$ 12.445 de despesa que não existiu. A varredura só lê transação ainda não
+ * tratada. Quando a compra é aprovada, saem da fila as parcelas que já chegaram; a do mês
+ * seguinte chega depois, sozinha, e as irmãs antigas já estão invisíveis. O agrupador
+ * então monta "a compra" só com ela e propõe o valor inteiro de novo. Nos 19 casos, a
+ * original estava ancorada na parcela 1 e a cópia na parcela 2 da mesma série.
+ *
+ * Mesma série quer dizer: mesmo favorecido, mesmo número total de parcelas, mesmo valor de
+ * parcela, número DIFERENTE, e data no sentido certo (parcela de número menor é mais
+ * antiga) a uma distância plausível. A data é folgada de propósito: o cartão lança a
+ * parcela no fechamento da fatura, e observamos de 10 a 35 dias entre a 1ª e a 2ª.
+ *
+ * Duas compras idênticas de verdade continuam separadas: uma compra nova sempre começa na
+ * parcela 1, e para a parcela 1 não existe irmã de número menor. O único caso ambíguo é a
+ * compra cuja 1ª parcela ficou fora do extrato importado — e ali preferimos não lançar em
+ * dobro.
+ *
+ * `tratada` diz se a parcela antiga já virou lançamento, está na fila ou já foi dada como
+ * parcela de uma compra lançada. Devolve a parcela que prova isso, ou null.
+ */
+export function compraJaTratada(
+  compra: CompraParcelada,
+  historicas: PernaDeParcelamento[],
+  tratada: (id: string) => boolean,
+): PernaDeParcelamento | null {
+  const ancora = compra.ancora;
+  const numeroDaAncora = lerParcela(ancora.installment_label)?.numero;
+  if (!numeroDaAncora) return null;
+
+  const quem = quemRecebeu(ancora);
+  const idsDaCompra = new Set(compra.pernas.map((p) => p.id));
+  const numerosDaCompra = new Set(
+    compra.pernas.map((p) => lerParcela(p.installment_label)?.numero).filter((n): n is number => !!n),
+  );
+  // Centavo que o cartão joga numa parcela só: 33,34 × 33,33. Um por cento cobre isso sem
+  // confundir parcelas de valores de fato diferentes.
+  const tolerancia = Math.max(0.02, compra.valorDaParcela * 0.01);
+  const diaDaAncora = Date.parse(ancora.transaction_date);
+
+  for (const h of historicas) {
+    if (idsDaCompra.has(h.id)) continue;
+    const parcela = lerParcela(h.installment_label);
+    if (!parcela || parcela.total !== compra.totalDeParcelas) continue;
+    if (numerosDaCompra.has(parcela.numero)) continue;
+    if (quemRecebeu(h) !== quem) continue;
+    if (Math.abs(h.amount - compra.valorDaParcela) > tolerancia) continue;
+
+    const dias = (Date.parse(h.transaction_date) - diaDaAncora) / 86_400_000;
+    const saltos = parcela.numero - numeroDaAncora;
+    // Parcela de número menor tem de ser mais antiga, e vice-versa.
+    if (Math.sign(dias) !== Math.sign(saltos) && Math.abs(dias) > 3) continue;
+    if (Math.abs(dias) > (Math.abs(saltos) + 1) * 31 + 15) continue;
+
+    if (tratada(h.id)) return h;
+  }
+  return null;
 }
