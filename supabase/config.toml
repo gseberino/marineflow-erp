@@ -114,3 +114,8 @@ verify_jwt = false
 
 [functions.balance-reminders]
 verify_jwt = false
+
+# Repescagem de áudio: segunda tentativa de transcrever o que a primeira não conseguiu.
+# Chamada pelo pg_cron, que manda só x-cron-secret (sem Authorization).
+[functions.whatsapp-repescar-audios]
+verify_jwt = false
