@@ -449,7 +449,9 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     return q.range(de, ate);
   }, 3000);
   if (transacoes.length === 0) {
-    return jr({ ok: true, message: "Nenhuma transação pendente na janela.", criadas: 0 });
+    // Mesmo sem transação nova, o que está na fila sem identificação é completado.
+    const r = await (await reclassificar(admin, true)).json().catch(() => ({}));
+    return jr({ ok: true, message: "Nenhuma transação pendente na janela.", criadas: 0, completadas: Number(r?.atualizadas ?? 0) });
   }
 
   // Transferência entre contas próprias não é despesa nem receita: entra na fila como o
@@ -715,8 +717,19 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     lancadasSozinhas = Number(corpo?.aprovadas ?? 0);
   }
 
+  // Linhas que nasceram antes do identificador (ou antes de um cadastro novo) ganham quem é e
+  // o que pagam na própria varredura diária — sem depender de alguém clicar em "Revisar a fila".
+  let completadas = 0;
+  try {
+    const r = await (await reclassificar(admin, true)).json();
+    completadas = Number(r?.atualizadas ?? 0);
+  } catch (e) {
+    console.error("[finance-review] completar identificação falhou", e);
+  }
+
   const partes = [
     criadas > 0 ? `${criadas - lancadasSozinhas} proposta(s) para revisar` : "Nada novo para propor",
+    completadas > 0 ? `${completadas} já na fila ganharam identificação` : "",
     lancadasSozinhas > 0 ? `${lancadasSozinhas} lançada(s) pelas suas regras` : "",
     pares.length ? `${pares.length} transferência(s) entre contas` : "",
     parcelasDeCompraJaLancada > 0 ? `${parcelasDeCompraJaLancada} parcela(s) de compra já lançada saíram da fila` : "",
@@ -751,7 +764,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
  * ainda não olhou — varrer a fila inteira lançando em silêncio seria decidir por ele
  * centenas de vezes de uma vez, com um clique que ele deu para outra coisa.
  */
-async function reclassificar(admin: DbClient) {
+async function reclassificar(admin: DbClient, soSemEvidencia = false) {
   // Antes de reclassificar, juntar o que é a mesma compra: classificar dez vezes a mesma
   // coisa é trabalho que não deveria existir, e vale a pena eliminá-lo antes de gastar
   // uma decisão com ele.
@@ -773,7 +786,9 @@ async function reclassificar(admin: DbClient) {
   );
 
   // Transferência entre contas não se classifica por regra de despesa: ela já é o que é.
-  const alvo = pendentes.filter((p) => p.kind !== "internal_transfer" && p.bank_transactions);
+  // soSemEvidencia: a varredura diária só completa o que nasceu antes do identificador.
+  const alvo = pendentes.filter((p) => p.kind !== "internal_transfer" && p.bank_transactions
+    && (!soSemEvidencia || (p.evidencia == null && p.vinculo_sugerido == null)));
   if (alvo.length === 0) {
     return jr({
       ok: true, atualizadas: 0, ...parcelamentos,
