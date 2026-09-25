@@ -60,7 +60,9 @@ function consulta(linhas: Linha[]) {
   let limite: number | null = null;
   const q: any = {
     select: () => q,
-    eq: (c: string, v: unknown) => { resultado = resultado.filter((l) => !(c in l) || l[c] === v); return q; },
+    // Estrito: filtro em coluna que a linha não tem NÃO casa. Ignorar deixaria passar um
+    // .eq("user_id", …) errado ou um .limit(1) no lugar do filtro por quem pediu.
+    eq: (c: string, v: unknown) => { resultado = resultado.filter((l) => l[c] === v); return q; },
     neq: (c: string, v: unknown) => { resultado = resultado.filter((l) => l[c] !== v); return q; },
     in: (c: string, vs: unknown[]) => { resultado = resultado.filter((l) => vs.includes(l[c])); return q; },
     not: () => q,
@@ -83,18 +85,26 @@ function montarAmbiente(opcoes: {
   ordens?: Linha[];
   telefone?: string | null;
   respostaPdf?: () => Response | Promise<Response>;
-  respostaEnvio?: () => Response;
+  respostaEnvio?: () => Response | Promise<Response>;
+  settings?: Record<string, string>;
+  userId?: string;
 } = {}) {
-  const chamadas = { pdf: [] as Request[], envio: [] as { headers: Headers; corpo: any }[], upload: [] as string[], removidos: [] as string[] };
+  const chamadas = { pdf: [] as Request[], envio: [] as { headers: Headers; corpo: any }[], upload: [] as string[], removidos: [] as string[], liberadas: [] as unknown[] };
   const tabelas: Record<string, Linha[]> = {
     service_orders: opcoes.ordens ?? [ORDEM, OS],
-    app_users: [{ id: "u1", phone_normalized: opcoes.telefone === undefined ? "5547999159654" : opcoes.telefone }],
+    app_users: [
+      { id: "u0", phone_normalized: "5548988887777" },
+      { id: "u1", phone_normalized: opcoes.telefone === undefined ? "5547999159654" : opcoes.telefone },
+      { id: "u2", phone_normalized: "5547911112222" },
+    ],
     app_settings: [{ key: "company_name", value: "HBR" }],
     receivables: [],
     payments: [],
   };
   const admin = {
-    from: (t: string) => consulta(tabelas[t] ?? []),
+    from: (t: string) => t === "whatsapp_send_idempotencia"
+      ? { delete: () => ({ eq: (_c: string, v: unknown) => { chamadas.liberadas.push(v); return Promise.resolve({ error: null }); } }) }
+      : consulta(tabelas[t] ?? []),
     storage: {
       from: (bucket: string) => ({
         upload: (caminho: string) => { chamadas.upload.push(`${bucket}/${caminho}`); return Promise.resolve({ data: {}, error: null }); },
@@ -112,13 +122,13 @@ function montarAmbiente(opcoes: {
     }
     if (url.endsWith("/functions/v1/whatsapp-send")) {
       chamadas.envio.push({ headers: new Headers(init?.headers), corpo: JSON.parse(String(init?.body)) });
-      return (opcoes.respostaEnvio ?? (() => new Response(JSON.stringify({ success: true, messageId: "m1" }))))();
+      return await (opcoes.respostaEnvio ?? (() => new Response(JSON.stringify({ success: true, messageId: "m1" }))))();
     }
     throw new Error(`fetch inesperado: ${url}`);
   };
-  const ctx = (role = "admin") => ({
-    sb: admin, admin, userId: "u1", userRole: role as any, jwt: "", appOrigin: "",
-    settings: { app_public_url: "https://erp.example", quote_validity_days: "3" },
+  const ctx = (role = "admin", userId = opcoes.userId ?? "u1") => ({
+    sb: admin, admin, userId, userRole: role as any, jwt: "", appOrigin: "",
+    settings: { app_public_url: "https://erp.example", quote_validity_days: "3", ...(opcoes.settings ?? {}) },
   });
   return { chamadas, ctx, fetchFalso };
 }
@@ -227,7 +237,7 @@ Deno.test("sucesso: sobe no bucket privado e apaga depois; o resultado não tem 
   assertEquals(amb.chamadas.upload.length, 1);
   assert(amb.chamadas.upload[0].startsWith(`${BUCKET_DO_PDF}/agente/`));
   assertEquals(amb.chamadas.removidos, amb.chamadas.upload);
-  assert(amb.chamadas.envio[0].corpo.document_url.includes("exp=600"), "URL assinada de 10 minutos");
+  assert(amb.chamadas.envio[0].corpo.document_url.includes("exp=180"), "URL assinada de 3 minutos");
   const texto = JSON.stringify(r);
   assert(!texto.includes("http"), `o resultado lido pelo modelo não pode ter URL: ${texto}`);
   assert(!texto.includes(ORDEM.share_token));
@@ -315,4 +325,61 @@ Deno.test("nome do arquivo cabe no limite do whatsapp-send sem perder o .pdf", (
   assert(cortado.endsWith(".pdf"));
   assert(!/[-_]\.pdf$/.test(cortado));
   assertEquals(limitarNomeDoArquivo("Orcamento_ORC-00086.pdf"), "Orcamento_ORC-00086.pdf");
+});
+
+// ─── Achados da revisão adversarial de 25/09/2026 ────────────────────────────────────────
+Deno.test("dois usuários: cada um recebe no próprio telefone, mesmo não sendo o primeiro da tabela", async () => {
+  for (const [userId, telefone] of [["u1", "5547999159654"], ["u2", "5547911112222"]]) {
+    const amb = montarAmbiente({ userId });
+    await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+    assertEquals(amb.chamadas.envio[0].corpo.phone, telefone);
+  }
+});
+
+Deno.test("a chave anti-duplicado inclui o destinatário: o segundo usuário não ouve 'já mandei'", async () => {
+  const chaves: string[] = [];
+  for (const userId of ["u1", "u2", "u1"]) {
+    const amb = montarAmbiente({ userId });
+    await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+    chaves.push(amb.chamadas.envio[0].corpo.dedupe_key);
+  }
+  assert(chaves[0] !== chaves[1], "admin e financeiro pedindo o mesmo PDF não podem compartilhar a chave");
+  assertEquals(chaves[0], chaves[2], "o mesmo usuário pedindo de novo na janela usa a mesma chave");
+});
+
+Deno.test("envio sem resposta (tempo esgotado): a tool libera a chave para o próximo pedido", async () => {
+  const amb = montarAmbiente({ respostaEnvio: () => { throw new DOMException("cortado", "AbortError"); } });
+  const r: any = await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+  assert(r.error);
+  assertEquals(amb.chamadas.liberadas, [amb.chamadas.envio[0].corpo.dedupe_key]);
+  assertEquals(amb.chamadas.removidos, amb.chamadas.upload);
+});
+
+Deno.test("envio que falhou na Evolution também libera a chave", async () => {
+  const amb = montarAmbiente({ respostaEnvio: () => new Response(JSON.stringify({ error: "Connection Closed" }), { status: 502 }) });
+  await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+  assertEquals(amb.chamadas.liberadas, [amb.chamadas.envio[0].corpo.dedupe_key]);
+});
+
+Deno.test("envio que deu certo NÃO libera a chave", async () => {
+  const amb = montarAmbiente();
+  await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+  assertEquals(amb.chamadas.liberadas, []);
+});
+
+Deno.test("sempre a via do cliente, com valores, mesmo com padrão gravado pedindo a via de execução", async () => {
+  const padrao = JSON.stringify({ hideFinancials: true, showServicePrices: true, showPartsPrices: true });
+  const amb = montarAmbiente({ settings: { pdf_options_service_order: padrao, pdf_options_quote: padrao } });
+  await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "OS-00086" }, amb.ctx()));
+  const corpo = await amb.chamadas.pdf[0].json();
+  assert(!corpo.html.includes("Via de Execução"), "saiu a via do técnico");
+  assertStringIncludes(corpo.html, "VALOR TOTAL");
+  assert(!corpo.filename.includes("Via-Execucao"));
+});
+
+Deno.test("modo de teste do WhatsApp ligado: a tool não diz que chegou para quem pediu", async () => {
+  const amb = montarAmbiente({ settings: { wa_test_mode: "true" } });
+  const r: any = await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+  assertStringIncludes(r.enviado_para, "TESTE");
+  assertStringIncludes(r.observacao, "número de teste");
 });

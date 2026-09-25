@@ -95,6 +95,28 @@ export const ORCAMENTO: PDFData = {
 };
 
 /**
+ * Orçamento com parcelas de vencimento marcado, impresso com validade POR DATA. Os dois são
+ * dia de calendário ('aaaa-mm-dd') — a mesma armadilha do "Pago em": lido como meia-noite
+ * UTC, o navegador em Brasília imprimiria o dia anterior.
+ */
+export const ORCAMENTO_COM_PARCELAS: PDFData = {
+  ...ORCAMENTO,
+  serviceOrder: {
+    ...ORCAMENTO.serviceOrder,
+    service_order_number: 'ORÇ-00087',
+    payment_conditions: undefined,
+    payment_condition_label: 'Duas parcelas',
+    payment_condition_installments: [
+      { due_date: '2026-10-05', amount: 9_000 },
+      { due_date: '2026-11-05', amount: 10_349.5 },
+    ],
+  },
+};
+
+/** Validade escolhida por data no diálogo (em vez de "N dias"). */
+export const VALIDADE_POR_DATA = { mode: 'date' as const, date: '2026-10-10' };
+
+/**
  * OS com pagamento registrado e agendada para 21h30 de Brasília (00h30 UTC do dia
  * seguinte). `payment_date` é coluna `date` no banco: chega como 'aaaa-mm-dd', sem hora.
  */

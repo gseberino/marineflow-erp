@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<title>Orçamento ORÇ-00087</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  
+  .mf-pdf-doc {
+    --pdf-primary: #002B5B;
+    --pdf-primary-light: #1A4D8B;
+    --pdf-secondary: #D4AF37;
+    --pdf-text-main: #1E293B;
+    --pdf-text-muted: #64748B;
+    --pdf-bg-light: #F8FAFC;
+    --pdf-border: #E2E8F0;
+  }
+
+  .mf-pdf-doc * { margin:0; padding:0; box-sizing:border-box; }
+  .mf-pdf-doc { 
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+    font-size: 11px; 
+    color: var(--pdf-text-main); 
+    line-height: 1.5;
+    background: #fff;
+  }
+
+  .mf-pdf-doc .container { padding: 40px; width: 100%; max-width: 800px; margin: 0 auto; }
+  
+  @media print {
+    .mf-pdf-doc .container { padding: 0; }
+    @page { margin: 12mm; size: A4; }
+  }
+
+  .mf-pdf-doc h1, .mf-pdf-doc h2, .mf-pdf-doc h3 { color: var(--pdf-primary); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; }
+  
+  .mf-pdf-doc .card { 
+    border: 1px solid var(--pdf-border); 
+    border-radius: 8px; 
+    padding: 16px; 
+    margin-bottom: 20px;
+    background: var(--pdf-bg-light);
+  }
+
+  .mf-pdf-doc .section-title {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--pdf-primary-light);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--pdf-border);
+    padding-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+    /* Título de seção nunca fica sozinho no pé da página, longe do que ele nomeia. */
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .mf-pdf-doc table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  .mf-pdf-doc th { 
+    background: var(--pdf-primary); 
+    color: #fff; 
+    text-align: left; 
+    padding: 8px 12px; 
+    font-size: 9px; 
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .mf-pdf-doc td { padding: 8px 12px; border-bottom: 1px solid var(--pdf-border); vertical-align: top; }
+  .mf-pdf-doc tr:last-child td { border-bottom: none; }
+
+  .mf-pdf-doc .summary-table td { padding: 4px 12px; border: none; }
+  .mf-pdf-doc .total-row { background: var(--pdf-primary); color: #fff; font-weight: 800; font-size: 14px; }
+  .mf-pdf-doc .total-row td { padding: 12px; }
+
+  .mf-pdf-doc .badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .mf-pdf-doc .badge-primary { background: var(--pdf-primary); color: #fff; }
+
+  .mf-pdf-doc .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+
+  .mf-pdf-doc /* ── Quebra de página ──────────────────────────────────────────────────
+     Sem estas regras o documento parte onde calhar: card de condições de
+     pagamento cortado ao meio, .mf-pdf-doc linha de tabela com o valor numa página e a
+     descrição na outra, .mf-pdf-doc título de seção sozinho no pé. Valem para os DOIS
+     caminhos — a impressão do navegador entende `page-break-*`, .mf-pdf-doc e o
+     html2pdf lê as mesmas regras no modo `css`. */
+  .card, .mf-pdf-doc .badge, .mf-pdf-doc .signature-box { page-break-inside: avoid; break-inside: avoid; }
+  .mf-pdf-doc /* Texto corrido (objetivo, observações, conclusão técnica, termos) PODE partir entre
+     linhas. Travá-lo inteiro empurrava o card para a folha seguinte e deixava meia página
+     em branco — e, .mf-pdf-doc maior que a folha, .mf-pdf-doc ele partia de qualquer jeito. O gerador emite um <p>
+     por linha justamente para a quebra cair ENTRE linhas nos dois caminhos. */
+  .pdf-texto { page-break-inside: auto; break-inside: auto; }
+  .mf-pdf-doc .pdf-texto p { orphans: 3; widows: 3; }
+  .mf-pdf-doc table { page-break-inside: auto; }
+  .mf-pdf-doc tr { page-break-inside: avoid; break-inside: avoid; }
+  .mf-pdf-doc /* Cabeçalho de tabela se repete em cada página: tabela longa sem cabeçalho
+     na segunda página obriga a voltar para saber o que é cada coluna. */
+  thead { display: table-header-group; }
+  .mf-pdf-doc tfoot { display: table-footer-group; }
+  .mf-pdf-doc /* Título nunca fica órfão no pé da página, .mf-pdf-doc longe do que ele nomeia. */
+  h1, .mf-pdf-doc h2, .mf-pdf-doc h3 { page-break-after: avoid; break-after: avoid; }
+  .mf-pdf-doc /* Duas linhas soltas no fim ou no começo da página é o que mais suja a
+     leitura de um texto corrido. */
+  p { orphans: 3; widows: 3; }
+
+  .mf-pdf-doc /* As cores do documento têm que sair na impressão. Por padrão o navegador
+     remove fundos e imagens ao imprimir para poupar tinta — e o cabeçalho
+     azul, .mf-pdf-doc as tarjas e o total em destaque sairiam brancos no papel. */
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+</style>
+</head>
+<body>
+  <div class="mf-pdf-doc"><div class="container">
+
+    <header style="display:flex;justify-content:space-between;margin-bottom:30px;align-items:flex-start;">
+      <div style="flex:1;">
+        <div style="font-size:28px;font-weight:900;color:var(--pdf-primary);letter-spacing:-1px;line-height:1;">
+        HBR MARINE SOLUTIONS
+       </div>
+        <div style="margin-top:12px;font-size:10px;color:var(--pdf-text-muted);max-width:300px;line-height:1.4;">
+          <strong>HBR Marine Solutions</strong><br/>
+          Rua das Marinas, 100, Itajaí - SC<br/>
+          CNPJ: 00.000.000/0001-00 · Tel: (47) 3333-0000<br/>
+          Email: contato@hbr.example
+        </div>
+      </div>
+      <div style="text-align:right;">
+        <h1 style="font-size:24px;margin-bottom:4px;color:var(--pdf-primary);">Orçamento</h1>
+        <div style="font-size:16px;font-weight:700;color:var(--pdf-secondary);">ORÇ-00087</div>
+        <div style="margin-top:8px;font-size:10px;color:var(--pdf-text-muted);">
+          Emissão: 24/09/2026
+        </div>
+      </div>
+    </header>
+  
+
+
+
+<div class="grid">
+  <div class="card">
+    <div class="section-title">Informações do Cliente</div>
+    <div style="font-size:12px;font-weight:700;color:var(--pdf-primary);">Cliente Exemplo Ltda</div>
+    <div style="font-size:10px;">CPF/CNPJ: 11.111.111/0001-11</div>
+    <div style="font-size:10px;">Fone: (47) 99999-0000</div>
+    <div style="font-size:10px;">Email: cliente@example.com</div>
+    <div style="font-size:10px;margin-top:4px;color:var(--pdf-text-muted);">Av. Beira Mar, 50, Balneário Camboriú, SC</div>
+  </div>
+  <div class="card">
+    <div class="section-title">Dados do Ativo / Localização</div>
+    <div style="font-size:12px;font-weight:700;color:var(--pdf-primary);">Lancha Azul</div>
+    <div style="font-size:10px;">
+      Schaefer V33 (2021)<br/>
+      Registro: SC-1234<br/>
+      <strong>Marina:</strong> Marina Exemplo (Itajaí)
+    </div>
+  </div>
+</div>
+
+<div class="card pdf-texto" data-pdf-quebra="dentro">
+  <div class="section-title">Objetivo do Projeto / Diagnóstico</div>
+  <p style="margin:0 0 0.8em;white-space:pre-wrap;font-size:11px;line-height:1.6;">Instalar sistema de energia solar.</p><p style="margin:0 0 0.8em;white-space:pre-wrap;font-size:11px;line-height:1.6;">INVERSOR
+Inversor 3000 W com carregador integrado.</p>
+</div>
+
+
+<div class="card">
+  <div class="section-title">Levantamento Técnico no Local</div>
+  <div style="font-size:10px;color:var(--pdf-text-muted);margin-bottom:6px;">
+    O que foi verificado antes de orçar — 23/09/2026.
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:52%;">Verificado</th>
+        <th style="width:48%;">Constatação</th>
+      </tr>
+    </thead>
+    <tbody>
+      
+        <tr>
+          <td style="font-size:10px;">Distância do banco ao quadro (m)</td>
+          <td style="font-size:10px;">14 <span style="color:var(--pdf-primary);">📷</span></td>
+        </tr>
+        <tr>
+          <td style="font-size:10px;">Tensão do sistema</td>
+          <td style="font-size:10px;">24 V</td>
+        </tr>
+        <tr>
+          <td style="font-size:10px;">Espaço para o inversor</td>
+          <td style="font-size:10px;"><span style="color:var(--pdf-text-muted);font-style:italic;">não foi possível verificar — compartimento trancado</span></td>
+        </tr>
+    </tbody>
+  </table>
+  
+  <div style="margin-top:8px;font-size:10px;line-height:1.5;">
+    <strong>Conclusão de quem levantou:</strong> Distância do banco de baterias ao quadro medida em 14 m.
+  </div>
+</div>
+
+
+<div class="section-title">Cronograma de Serviços / Mão de Obra</div>
+<table>
+  <thead>
+    <tr>
+      <th style="width:55%;">Descrição Técnica</th>
+      <th style="width:15%;text-align:center;">Qtd/Unid</th>
+      
+      <th style="width:15%;text-align:right;">Unitário</th>
+      <th style="width:15%;text-align:right;">Subtotal</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="font-weight:600;">Instalação elétrica<div style="font-weight:400;color:var(--pdf-text-muted);font-size:9px;margin-top:2px;">Passagem de cabos e montagem do quadro</div></td>
+      <td style="text-align:center;">20 hora</td>
+      
+      <td style="text-align:right;">R$ 200,00</td>
+      <td style="text-align:right;font-weight:600;">R$ 4.000,00</td>
+    </tr>
+  
+    <tr>
+      <td style="font-weight:600;">Comissionamento</td>
+      <td style="text-align:center;">1 visita</td>
+      
+      <td style="text-align:right;">R$ 2.000,00</td>
+      <td style="text-align:right;font-weight:600;">R$ 2.000,00</td>
+    </tr>
+  </tbody>
+</table>
+
+
+
+<div class="section-title">Peças, Equipamentos e Materiais</div>
+<table>
+  <thead>
+    <tr>
+      <th style="width:55%;">Item / Especificação</th>
+      <th style="width:15%;text-align:center;">Qtd</th>
+      
+      <th style="width:15%;text-align:right;">Unitário</th>
+      <th style="width:15%;text-align:right;">Subtotal</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><div style="font-weight:600;">Inversor 3000 W</div>
+         <div style="font-size:9px;color:var(--pdf-text-muted);">#INV-3000</div></td>
+      <td style="text-align:center;">1</td>
+      
+      <td style="text-align:right;">R$ 9.000,00</td>
+      <td style="text-align:right;font-weight:600;">R$ 9.000,00</td>
+    </tr>
+  
+    <tr>
+      <td><div style="font-weight:600;">Cabo 35 mm²</div>
+         <div style="font-size:9px;color:var(--pdf-text-muted);">#CAB-35</div></td>
+      <td style="text-align:center;">20</td>
+      
+      <td style="text-align:right;">R$ 200,00</td>
+      <td style="text-align:right;font-weight:600;">R$ 4.000,00</td>
+    </tr>
+  </tbody>
+</table>
+
+
+
+
+
+
+<div style="display:flex;justify-content:flex-end;">
+  <div style="width:300px;">
+    <table class="summary-table">
+      <tbody>
+        <tr><td>Subtotal Serviços</td><td style="text-align:right;">R$ 6.000,00</td></tr><tr><td>Subtotal Peças</td><td style="text-align:right;">R$ 13.000,00</td></tr><tr><td>Deslocamento / Logística</td><td style="text-align:right;">R$ 350,00</td></tr><tr><td style="color:#dc2626;padding-left:16px;">↳ Desc. Serviços (5%)</td><td style="text-align:right;color:#dc2626;">− R$ 300,00</td></tr><tr><td style="color:#dc2626;padding-left:16px;">↳ Desc. Peças (4.6%)</td><td style="text-align:right;color:#dc2626;">− R$ 598,00</td></tr><tr><td style="color:#dc2626;font-weight:600;">Total Desconto</td><td style="text-align:right;color:#dc2626;font-weight:600;">− R$ 899,50</td></tr>
+        <tr class="total-row">
+          <td>VALOR TOTAL</td>
+          <td style="text-align:right;">R$ 18.450,50</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="text-align:right;font-size:10px;font-weight:700;color:var(--pdf-secondary);margin-top:-10px;padding-right:12px;">Válido até 10/10/2026</div>
+  </div>
+</div>
+
+
+    <div class="card" style="margin-top:20px;border-left:4px solid var(--pdf-secondary); background:#fff;">
+      <div class="section-title">
+        <span>Programação de Pagamento</span>
+        <span style="color:var(--pdf-text-muted);font-size:8px;">Duas parcelas</span>
+      </div>
+      
+      <table style="margin-bottom:0; width:100%; border-collapse:collapse;">
+        <thead>
+          <tr style="background:rgba(212, 175, 55, 0.05);color:var(--pdf-primary);">
+            <th style="background:transparent;color:var(--pdf-primary);width:30%;">Vencimento</th>
+            <th style="background:transparent;color:var(--pdf-primary);width:40%;">Data/Evento</th>
+            <th style="background:transparent;color:var(--pdf-primary);text-align:right;">Valor</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td style="font-weight:600;padding:6px 12px;">Parcela 1</td>
+        <td style="padding:6px 12px;">05/10/2026</td>
+        <td style="text-align:right;font-weight:700;padding:6px 12px;">R$ 8.581,63</td>
+      </tr>
+    
+      <tr>
+        <td style="font-weight:600;padding:6px 12px;">Parcela 2</td>
+        <td style="padding:6px 12px;">05/11/2026</td>
+        <td style="text-align:right;font-weight:700;padding:6px 12px;">R$ 9.868,87</td>
+      </tr>
+    </tbody>
+      </table>
+    
+      
+    </div>
+  
+
+
+
+<div class="card pdf-texto" data-pdf-quebra="dentro" style="border-left:4px solid var(--pdf-border);margin-top:8px;">
+  <div class="section-title">Observações Financeiras</div>
+  <p style="margin:0 0 0.8em;white-space:pre-wrap;font-size:10px;line-height:1.6;color:var(--pdf-text-main);">Materiais faturados em nome do cliente.</p>
+</div>
+
+
+
+<div class="card" style="margin-top:20px; background:rgba(212, 175, 55, 0.03); border:1px solid rgba(212, 175, 55, 0.2);">
+  <div class="section-title">Informações para Pagamento — PIX</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:10px;">
+    <div>
+      <strong style="color:var(--pdf-primary);display:block;margin-bottom:4px;">DADOS BANCÁRIOS</strong>
+      Banco: Banco Exemplo<br/>
+      Agência: 0001 · Conta: 12345-6<br/>
+      Favorecido: HBR Marine Solutions<br/>
+      CNPJ: 00.000.000/0001-00
+    </div>
+    <div style="border-left:1px solid rgba(212, 175, 55, 0.2);padding-left:20px;">
+      <strong style="color:var(--pdf-primary);display:block;margin-bottom:4px;">PAGAMENTO VIA PIX</strong>
+      Chave: <span style="font-size:12px;font-weight:800;color:var(--pdf-secondary);">00.000.000/0001-00</span><br/>
+      <span style="font-size:9px;color:var(--pdf-text-muted);display:block;margin-top:6px;">Por favor, envie o comprovante para <strong>contato@hbr.example</strong> para agilizar a baixa.</span>
+    </div>
+  </div>
+</div>
+
+
+
+<div class="grid" style="margin-top:40px;">
+  <div style="text-align:center;">
+    <div style="height:60px;"></div>
+    <div style="border-top:1px solid var(--pdf-primary);padding-top:8px;">
+      <div style="font-weight:700;text-transform:uppercase;color:var(--pdf-primary);">HBR Marine Solutions</div>
+      <div style="font-size:9px;color:var(--pdf-text-muted);">Responsável Técnico</div>
+    </div>
+  </div>
+  <div style="text-align:center;">
+    <div style="height:60px;"></div>
+    <div style="border-top:1px solid var(--pdf-primary);padding-top:8px;">
+      <div style="font-weight:700;text-transform:uppercase;color:var(--pdf-primary);">Cliente Exemplo Ltda</div>
+      <div style="font-size:9px;color:var(--pdf-text-muted);">Aprovação do Orçamento</div>
+    </div>
+  </div>
+</div>
+
+
+
+
+
+<div class="card pdf-texto" data-pdf-quebra="dentro" style="border-left:4px solid var(--pdf-primary);margin-top:8px;">
+  <div class="section-title">Observações</div>
+  <p style="margin:0 0 0.8em;white-space:pre-wrap;font-size:10.5px;line-height:1.6;color:var(--pdf-text-main);">Prazo de execução: 5 dias úteis após a aprovação.</p>
+</div>
+
+
+
+<div class="pdf-texto" data-pdf-quebra="dentro" style="margin-top:30px;padding-top:10px;border-top:1px dashed var(--pdf-border);">
+  <div style="font-size:9px;font-weight:700;color:var(--pdf-primary-light);text-transform:uppercase;margin-bottom:4px;break-after:avoid;page-break-after:avoid;">Condições Gerais e Garantia</div>
+  <p style="margin:0 0 0.8em;white-space:pre-wrap;font-size:8.5px;color:var(--pdf-text-muted);text-align:justify;">CONDIÇÕES GERAIS
+Garantia de 90 dias sobre a mão de obra.</p><p style="margin:0 0 0.8em;white-space:pre-wrap;font-size:8.5px;color:var(--pdf-text-muted);text-align:justify;">GARANTIA
+Equipamentos conforme o fabricante.</p>
+</div>
+
+
+<footer style="margin-top:30px;text-align:center;font-size:9px;color:var(--pdf-text-muted);border-top:1px solid var(--pdf-border);padding-top:10px; display:flex; justify-content:space-between; align-items:center;">
+  <span>MarineFlow ERP · Documento Digital Autenticado</span>
+  <span>Emitido em 25/09/2026, 23:45:00</span>
+</footer>
+</div></div>
+</body>
+</html>

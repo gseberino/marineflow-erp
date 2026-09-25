@@ -2,7 +2,7 @@ import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { dirname, fromFileUrl, join } from "https://deno.land/std@0.224.0/path/mod.ts";
 import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import { buildOrderHTML, DEFAULT_PDF_OPTIONS } from "./documento.ts";
-import { AGORA, ORCAMENTO, OS_COM_PAGAMENTO } from "./amostras.ts";
+import { AGORA, ORCAMENTO, ORCAMENTO_COM_PARCELAS, OS_COM_PAGAMENTO, VALIDADE_POR_DATA } from "./amostras.ts";
 
 // A metade Deno da paridade (a outra é src/lib/pdf-paridade-fuso.test.ts, no vitest).
 //
@@ -35,6 +35,16 @@ Deno.test("OS com pagamento no Deno = referência do navegador", () => {
   const tempo = new FakeTime(new Date(AGORA));
   try {
     assertEquals(buildOrderHTML(OS_COM_PAGAMENTO, { ...DEFAULT_PDF_OPTIONS }), ler("os-com-pagamento.html"));
+  } finally {
+    tempo.restore();
+  }
+});
+
+Deno.test("orçamento com parcelas e validade por data no Deno = referência do navegador", () => {
+  const tempo = new FakeTime(new Date(AGORA));
+  try {
+    const html = buildOrderHTML(ORCAMENTO_COM_PARCELAS, { ...DEFAULT_PDF_OPTIONS, validity: VALIDADE_POR_DATA });
+    assertEquals(html, ler("orcamento-parcelas.html"));
   } finally {
     tempo.restore();
   }

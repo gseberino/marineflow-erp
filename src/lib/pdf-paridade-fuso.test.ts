@@ -2,7 +2,9 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildHTMLDocument, DEFAULT_PDF_OPTIONS, type PDFData, type PDFOptions } from './pdf-generator';
-import { ORCAMENTO, OS_COM_PAGAMENTO, AGORA } from '../../supabase/functions/_shared/pdf/amostras';
+import {
+  ORCAMENTO, ORCAMENTO_COM_PARCELAS, OS_COM_PAGAMENTO, VALIDADE_POR_DATA, AGORA,
+} from '../../supabase/functions/_shared/pdf/amostras';
 
 /**
  * O documento da ordem sai IGUAL na tela e no assistente do WhatsApp.
@@ -29,13 +31,18 @@ const ler = (arquivo: string) => readFileSync(join(REFERENCIA, arquivo), 'utf8')
 const CASOS: Array<{ arquivo: string; dados: PDFData; opcoes: PDFOptions }> = [
   { arquivo: 'orcamento.html', dados: ORCAMENTO, opcoes: { ...DEFAULT_PDF_OPTIONS, validity: { mode: 'days', days: 7 } } },
   { arquivo: 'os-com-pagamento.html', dados: OS_COM_PAGAMENTO, opcoes: { ...DEFAULT_PDF_OPTIONS } },
+  // Gerada já com o código novo (25/09/2026): parcelas com vencimento e validade por data
+  // saíam um dia antes na tela, como o "Pago em". As datas estão conferidas abaixo.
+  { arquivo: 'orcamento-parcelas.html', dados: ORCAMENTO_COM_PARCELAS, opcoes: { ...DEFAULT_PDF_OPTIONS, validity: VALIDADE_POR_DATA } },
 ];
 const FUSOS = ['America/Sao_Paulo', 'UTC', 'Asia/Tokyo', 'America/Los_Angeles'];
 const FUSO_ORIGINAL = process.env.TZ;
 
 afterEach(() => {
   vi.useRealTimers();
-  process.env.TZ = FUSO_ORIGINAL;
+  // `process.env.TZ = undefined` grava a STRING "undefined" (fuso desconhecido = UTC).
+  if (FUSO_ORIGINAL === undefined) delete process.env.TZ;
+  else process.env.TZ = FUSO_ORIGINAL;
 });
 
 describe('o documento não depende do fuso de quem gera', () => {
@@ -59,6 +66,10 @@ describe('o documento não depende do fuso de quem gera', () => {
     const os = ler('os-com-pagamento.html');
     expect(os).toContain('Agendado para: 25/09/2026 21:30');
     expect(os).toContain('Pago em 20/09/2026');                  // coluna date: dia como está
+    const parcelas = ler('orcamento-parcelas.html');
+    expect(parcelas).toContain('<td style="padding:6px 12px;">05/10/2026</td>'); // vencimento
+    expect(parcelas).toContain('<td style="padding:6px 12px;">05/11/2026</td>');
+    expect(parcelas).toContain('Válido até 10/10/2026');                        // validade por data
   });
 });
 
@@ -70,7 +81,10 @@ describe('o desenho do documento continua importável pelo servidor', () => {
   // Toda data passa por ./datas.ts. Um toLocaleDateString novo, sem fuso, reabriria a
   // diferença entre a tela e o WhatsApp sem nenhum outro teste perceber.
   it('nenhuma data é formatada sem fuso', () => {
-    expect(documento).not.toMatch(/\.toLocale(Date|Time)?String\(/);
+    // Todos os jeitos de tirar dia/hora do relógio local: formatadores e getters/setters.
+    expect(documento).not.toMatch(
+      /\.toLocale(Date|Time)?String\(|Intl\.DateTimeFormat\(|\.(get|set)(Date|Day|Hours|Minutes|Month|FullYear)\(|\.to(Date|Time)String\(/,
+    );
   });
 
   it('nada de navegador no desenho', () => {
