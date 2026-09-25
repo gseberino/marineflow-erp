@@ -100,6 +100,8 @@ export const ROTULO_DA_ACAO: Record<string, string> = {
   cancelou_lancamento: 'Cancelou lançamento',
   corrigiu_lancamento: 'Corrigiu lançamento',
   desfez_aprovacao: 'Desfez aprovação',
+  desconciliou: 'Desfez vínculo com o extrato',
+  cadastrou_contraparte: 'Cadastrou a partir do extrato',
 };
 
 /** O que foi feito, por quem e quando — a trilha que nenhuma tela apagava antes. */

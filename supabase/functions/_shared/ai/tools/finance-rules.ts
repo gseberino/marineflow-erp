@@ -435,7 +435,9 @@ export const financeRulesTools: ToolDef[] = [
     name: "listar_propostas_de_lancamento",
     description:
       "Mostra o que está esperando decisão na caixa de entrada financeira: o que o sistema propôs lançar, " +
-      "com valor, categoria sugerida e o motivo.",
+      "com valor, categoria, QUEM é a contraparte (e por qual prova), o que cadastrar quando ninguém foi " +
+      "reconhecido e se a linha PODE JÁ ESTAR LANÇADA (pagamento/sinal/conta existente) — nesse caso, " +
+      "pergunte se é para casar com o já lançado ou lançar novo antes de aprovar.",
     input_schema: {
       type: "object",
       properties: { limite: { type: "number" } },
@@ -445,14 +447,31 @@ export const financeRulesTools: ToolDef[] = [
     async execute(args, ctx) {
       const { data, error } = await ctx.sb
         .from("finance_review_queue")
-        .select("id, title, suggested_amount, suggested_category, suggested_date, confidence, reasoning, kind")
+        .select("id, title, suggested_amount, suggested_category, suggested_date, confidence, kind, evidencia, vinculo_sugerido")
         .eq("status", "pending")
         .order("suggested_amount", { ascending: false })
         .limit(Number(args.limite ?? 30));
       if (error) return { error: error.message };
       const linhas = (data ?? []) as any[];
+      // Resumo curto por linha: o modelo precisa do que decide, não do objeto inteiro.
+      const quem = (e: any) => {
+        const r = e?.fornecedor ?? e?.favorecido ?? e?.cliente;
+        return r ? `${r.nome} (por ${r.por})` : null;
+      };
+      const opcoes = (v: any) => (v ? [v.principal, ...(v.alternativas ?? [])] : []).map((o: any) => ({
+        opcao_id: o.id, o_que: o.rotulo, valor: o.valor, pontos: o.confianca, ja_lancado: !!o.jaLancado,
+        converte_orcamento: !!o.converteOrcamento,
+      }));
       return {
-        propostas: linhas,
+        propostas: linhas.map((p) => ({
+          id: p.id, tipo: p.kind === "create_receivable" ? "entrada" : p.kind === "create_payable" ? "saida" : p.kind,
+          titulo: p.title, valor: Number(p.suggested_amount ?? 0), data: p.suggested_date,
+          categoria: p.suggested_category, confianca: p.confidence,
+          quem: quem(p.evidencia),
+          cadastrar: p.evidencia?.cadastrar ?? null,
+          pode_ja_estar_lancado: opcoes(p.vinculo_sugerido).some((o: any) => o.ja_lancado),
+          vinculos: opcoes(p.vinculo_sugerido),
+        })),
         total: linhas.length,
         valor_total: linhas.reduce((s, p) => s + Number(p.suggested_amount ?? 0), 0),
       };
@@ -462,12 +481,18 @@ export const financeRulesTools: ToolDef[] = [
   {
     name: "aprovar_propostas_de_lancamento",
     description:
-      "Aprova propostas da caixa de entrada, CRIANDO as contas a pagar correspondentes. " +
-      "Só use quando o usuário confirmar explicitamente quais aprovar.",
+      "Aprova propostas da caixa de entrada, CRIANDO os lançamentos correspondentes — ou CASANDO com o que " +
+      "já existe, quando o usuário escolheu um vínculo. Linha que pode já estar lançada é recusada pelo " +
+      "servidor sem a escolha: pergunte e passe em `vinculos`. Só use quando o usuário confirmar quais aprovar.",
     input_schema: {
       type: "object",
       properties: {
         ids: { type: "array", items: { type: "string" }, description: "Ids das propostas a aprovar." },
+        vinculos: {
+          type: "object",
+          description: "Por proposta: o opcao_id escolhido (de listar_propostas_de_lancamento) para casar, ou \"nenhum\" para lançar novo.",
+          additionalProperties: { type: "string" },
+        },
       },
       required: ["ids"],
     },
@@ -478,7 +503,12 @@ export const financeRulesTools: ToolDef[] = [
     async execute(args, ctx) {
       const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
-      return await chamarFinanceReview(ctx, { action: "approve", ids: args.ids });
+      const overrides: Record<string, unknown> = {};
+      for (const [id, escolha] of Object.entries((args.vinculos ?? {}) as Record<string, string>)) {
+        if (!escolha) continue;
+        overrides[id] = { vinculo: escolha === "nenhum" ? "nenhum" : { id: String(escolha) } };
+      }
+      return await chamarFinanceReview(ctx, { action: "approve", ids: args.ids, overrides });
     },
   },
 
@@ -565,6 +595,69 @@ export const financeRulesTools: ToolDef[] = [
       const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
       return await chamarFinanceReview(ctx, { action: "undismiss", ids: args.ids });
+    },
+  },
+
+  // ── CADASTRAR QUEM O EXTRATO TROUXE ─────────────────────────────────────────────
+  // A IA escolhe a LINHA; o sistema preenche o resto: documento e nome do extrato, dados da
+  // Receita quando é CNPJ, categoria pela atividade, e toda linha com o mesmo documento passa
+  // a apontar para o cadastro. Não duplica: documento já cadastrado devolve o existente.
+  {
+    name: "cadastrar_contraparte_do_extrato",
+    description:
+      "Cadastra o fornecedor, favorecido ou cliente de uma linha do Extrato que ninguém reconheceu " +
+      "(listar_propostas_de_lancamento mostra 'cadastrar'). Informe só a proposta; o sistema busca o " +
+      "documento, os dados da Receita (CNPJ) e a categoria. Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        proposta_id: { type: "string", description: "Id da proposta (de listar_propostas_de_lancamento)." },
+        tipo: { type: "string", enum: ["fornecedor", "favorecido", "cliente"], description: "Só se o usuário disser outro tipo que o sugerido." },
+        tipo_de_favorecido: { type: "string", enum: ["socio", "funcionario", "diarista", "prestador", "comissionado"] },
+        nome: { type: "string", description: "Só se o usuário corrigir o nome." },
+      },
+      required: ["proposta_id"],
+    },
+    risk: "medium",
+    roles: CARGOS_FINANCEIRO,
+    async execute(args, ctx) {
+      const bloqueio = bloqueiaSemAcesso(ctx);
+      if (bloqueio) return bloqueio;
+      const { data: p } = await ctx.admin.from("finance_review_queue")
+        .select("id, kind, suggested_category, evidencia, bank_transactions!finance_review_queue_bank_transaction_id_fkey(counterparty_name, counterparty_document, description)")
+        .eq("id", String(args.proposta_id)).maybeSingle();
+      if (!p) return { error: "Proposta não encontrada." };
+      const sugestao = (p as any).evidencia?.cadastrar ?? null;
+      const tx = (p as any).bank_transactions ?? {};
+      const documento = String(sugestao?.documento ?? tx.counterparty_document ?? "").replace(/\D/g, "") || null;
+      const tipo = String(args.tipo ?? sugestao?.tipo ?? ((p as any).kind === "create_receivable" ? "cliente" : documento?.length === 14 ? "fornecedor" : "favorecido"));
+
+      let receita: any = null;
+      if (documento && documento.length === 14) {
+        const r = await chamarFinanceReview(ctx, { action: "consult_document", documento });
+        receita = (r as any)?.dados ?? null;
+      }
+      const nome = String(args.nome ?? receita?.razao_social ?? sugestao?.nome ?? tx.counterparty_name ?? "").trim();
+      if (!nome) return { error: "O extrato não traz o nome. Pergunte ao usuário como cadastrar." };
+      const categoriaDaLinha = (p as any).suggested_category && (p as any).suggested_category !== "Outras despesas"
+        ? (p as any).suggested_category : null;
+
+      const { data, error } = await ctx.sb.rpc("cadastrar_contraparte", {
+        p_tipo: tipo,
+        p_dados: {
+          documento, nome, nome_fantasia: receita?.nome_fantasia ?? null,
+          tipo_de_favorecido: tipo === "favorecido" ? (args.tipo_de_favorecido ?? "prestador") : null,
+          categoria: tipo === "cliente" ? null : (receita?.categoria_sugerida ?? categoriaDaLinha),
+          telefone: receita?.telefone ?? null, email: receita?.email ?? null,
+          cep: receita?.cep ?? null, logradouro: receita?.logradouro ?? null, numero: receita?.numero ?? null,
+          complemento: receita?.complemento ?? null, bairro: receita?.bairro ?? null,
+          cidade: receita?.cidade ?? null, uf: receita?.uf ?? null,
+          observacao: receita?.cnae_descricao ? `Atividade na Receita: ${receita.cnae_descricao}` : "Cadastrado pelo assistente a partir do extrato",
+        },
+        p_autor: ctx.userId || null,
+      });
+      if (error) return { error: error.message.replace(/^(P0001|42501|23514):\s*/, "") };
+      return { ...(data as Record<string, unknown>), situacao_na_receita: receita?.situacao ?? null };
     },
   },
 

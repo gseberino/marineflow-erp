@@ -16,6 +16,7 @@
 // abaixo do limite de lote. As grandes continuam pedindo olho individual, como sempre —
 // elas só chegam lá já classificadas.
 
+import { exigeDecisao } from '../../supabase/functions/_shared/banking/vinculo';
 import type { PropostaFinanceira } from '@/hooks/use-finance-review';
 
 /** Caixa alta, sem acento e sem pontuação — a forma comparável de um nome de extrato. */
@@ -108,7 +109,9 @@ export function agruparPorFavorecido(
 
     // Transferência entre contas nunca entra no lote: confirmar que dois lançamentos são o
     // mesmo dinheiro é decisão de fato, não volume.
-    if (p.kind !== 'internal_transfer' && valor < limiteLote) {
+    // Linha que pode já estar lançada também fica de fora: aprovar o grupo inteiro de uma
+    // vez criaria o lançamento em dobro. Ela pede a escolha "casar ou lançar novo".
+    if (p.kind !== 'internal_transfer' && valor < limiteLote && !exigeDecisao(p.vinculo_sugerido)) {
       grupo.emLote.push(p);
       grupo.totalEmLote += valor;
     } else {

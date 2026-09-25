@@ -10,7 +10,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const RAIZ = join(__dirname, '..', '..');
-const HOOKS_DE_LANCAMENTO = ['src/hooks/use-lancamentos.ts', 'src/hooks/use-conciliacao.ts', 'src/hooks/use-financial.ts'];
+const HOOKS_DE_LANCAMENTO = ['src/hooks/use-lancamentos.ts', 'src/hooks/use-conciliacao.ts', 'src/hooks/use-financial.ts', 'src/hooks/use-contraparte.ts'];
 const PASTA_DAS_TOOLS = 'supabase/functions/_shared/ai/tools';
 
 /** Funções do banco que MUDAM lançamento e que a tela chama. */

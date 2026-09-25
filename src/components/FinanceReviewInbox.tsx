@@ -27,6 +27,8 @@ import { useI18n } from '@/i18n';
 import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { PayeeFormDialog } from '@/components/PayeeFormDialog';
 import { BuscaFinanceira } from '@/components/BuscaFinanceira';
+import { EvidenciaDaLinha, VinculoDaLinha } from '@/components/ExtratoIdentificacao';
+import { precisaDecidir } from '@/lib/extrato-vinculo';
 import { buscaAtiva, casaComBusca, type CriterioDeBusca } from '@/lib/busca-financeira';
 import {
   usePayees, useServiceOrdersVinculaveis, useClientesParaReceita, ROTULO_TIPO,
@@ -277,6 +279,8 @@ function LinhaProposta({
   // "3/10" → 10. O total é o que interessa aqui; qual parcela chegou primeiro é detalhe
   // da fatura, não da compra.
   const parcelas = Number(p.bank_transactions?.installment_label?.split('/')[1]) || null;
+  // Pode já estar lançado e ninguém escolheu: aprovar agora duplicaria o lançamento.
+  const decidir = !transferencia && !anomalia && precisaDecidir(p.vinculo_sugerido, correcao?.vinculo);
 
   return (
     <Card className="p-3">
@@ -375,6 +379,24 @@ function LinhaProposta({
             />
           )}
 
+          {/* Quem é (com a prova) e o que a linha paga (com a escolha de casar). */}
+          {!transferencia && !anomalia && (
+            <>
+              <EvidenciaDaLinha
+                evidencia={p.evidencia}
+                ehReceita={p.kind === 'create_receivable'}
+                categoria={categoria}
+                ocupado={ocupado}
+              />
+              <VinculoDaLinha
+                vinculo={p.vinculo_sugerido}
+                escolha={correcao?.vinculo}
+                onEscolher={(e) => onCorrigir({ ...correcao, vinculo: e })}
+                ocupado={ocupado}
+              />
+            </>
+          )}
+
           <Collapsible open={aberta} onOpenChange={setAberta}>
             <CollapsibleTrigger asChild>
               <button type="button" className="mt-1 inline-flex items-center gap-1 text-xs text-primary hover:underline">
@@ -399,12 +421,17 @@ function LinhaProposta({
             {(mostrarAprovar ?? !modoLote) && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button size="sm" variant="outline" disabled={ocupado} onClick={onAprovar}
-                    aria-label={anomalia ? 'Ciente — tirar da lista' : 'Aprovar e lançar'}>
-                    <Check className="h-4 w-4" />
-                  </Button>
+                  {/* span: botão desabilitado não dispara hover, e o motivo precisa aparecer. */}
+                  <span>
+                    <Button size="sm" variant="outline" disabled={ocupado || decidir} onClick={onAprovar}
+                      aria-label={anomalia ? 'Ciente — tirar da lista' : decidir ? 'Escolha casar ou lançar novo antes de aprovar' : 'Aprovar e lançar'}>
+                      <Check className="h-4 w-4" />
+                    </Button>
+                  </span>
                 </TooltipTrigger>
-                <TooltipContent>{anomalia ? 'Ciente — tirar da lista' : 'Aprovar e lançar'}</TooltipContent>
+                <TooltipContent>
+                  {anomalia ? 'Ciente — tirar da lista' : decidir ? 'Pode já estar lançado: escolha casar ou lançar novo' : 'Aprovar e lançar'}
+                </TooltipContent>
               </Tooltip>
             )}
 
@@ -752,11 +779,13 @@ export function FinanceReviewInbox({
       totalValor += Number(p.suggested_amount ?? 0);
       // Transferência entre contas vai sempre para a revisão individual: confirmar que
       // dois lançamentos são o mesmo dinheiro é decisão de fato, não volume.
-      if (p.kind !== 'internal_transfer' && Number(p.suggested_amount ?? 0) < limiteLote) lote.push(p);
+      // Linha que pode já estar lançada vai para a revisão individual até alguém escolher.
+      if (p.kind !== 'internal_transfer' && Number(p.suggested_amount ?? 0) < limiteLote
+          && !precisaDecidir(p.vinculo_sugerido, correcoes[p.id]?.vinculo)) lote.push(p);
       else individuais.push(p);
     }
     return { lote, individuais, totalValor };
-  }, [porOrigem, limiteLote]);
+  }, [porOrigem, limiteLote, correcoes]);
 
   const marcar = (id: string, marcada: boolean) => {
     setSelecionadas((s) => {

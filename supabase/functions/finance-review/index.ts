@@ -34,6 +34,9 @@ import {
   type CompraParcelada, type PernaDeParcelamento,
 } from "../_shared/banking/installments.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { carregarContexto, identificarLinha, type ContextoDeIdentificacao, type TxDaFila } from "./identificacao.ts";
+import { exigeDecisao, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido } from "../_shared/banking/vinculo.ts";
+import { lerRespostaDaReceita } from "../_shared/banking/cnae.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
 
@@ -80,7 +83,9 @@ const JANELA_DIAS = 90;
 const LOTE_HISTORICO = 200;
 
 interface Body {
-  action?: "generate" | "approve" | "reject" | "suggest_rules" | "reclassify" | "classify_ai" | "undismiss" | "vigiar";
+  action?: "generate" | "approve" | "reject" | "suggest_rules" | "reclassify" | "classify_ai" | "undismiss" | "vigiar" | "consult_document";
+  /** consult_document: CNPJ (ou CPF) a consultar. */
+  documento?: string;
   /** generate: inclui o histórico inteiro, não só a janela. */
   incluir_historico?: boolean;
   ids?: string[];
@@ -109,6 +114,12 @@ interface Correcao {
    * de receita nasceria impossível de aprovar.
    */
   clientId?: string | null;
+  /**
+   * O que esta linha paga, escolhido pela pessoa: o id de uma das opções de
+   * `vinculo_sugerido` (principal ou alternativa), ou "nenhum" para lançar novo mesmo
+   * havendo sugestão. Ausente = a política decide (vinculoAutomatico / exigeDecisao).
+   */
+  vinculo?: { id: string } | "nenhum";
 }
 
 servirComCors(async (req) => {
@@ -150,6 +161,7 @@ servirComCors(async (req) => {
     if (action === "approve") return await aprovar(admin, body.ids ?? [], userId, body.overrides ?? {});
     if (action === "reject") return await recusar(admin, body.ids ?? [], userId, body.note ?? null);
     if (action === "suggest_rules") return await proporRegras(admin);
+    if (action === "consult_document") return await consultarDocumento(admin, String(body.documento ?? ""), userId);
     return jr({ error: "acao_desconhecida" }, 400);
   } catch (e) {
     console.error("[finance-review] erro:", e);
@@ -425,7 +437,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const transacoes = await lerTudo<TransacaoOrfa>((de, ate) => {
     let q = admin
       .from("bank_transactions")
-      .select("id, transaction_date, description, amount, transaction_type, counterparty_name, counterparty_document, source_type, bank_connection_id, installment_label, payee_mcc, tx_status")
+      .select("id, transaction_date, description, amount, transaction_type, counterparty_name, counterparty_document, counterparty_branch, counterparty_account, pix_end_to_end_id, source_type, bank_connection_id, installment_label, payee_mcc, tx_status")
       .eq("reconciled", false)
       // Transação PENDENTE não vira lançamento: o banco ainda pode mudar o valor ou
       // cancelá-la. Criar despesa em cima disso é construir sobre areia — e desfazer
@@ -484,31 +496,9 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     .limit(500);
   const ocs = (ocsAbertas ?? []) as any[];
 
-  // Favorecidos conhecidos, para reconhecer sócio/diarista pelo CPF do extrato.
-  const { data: favorecidosRows } = await admin
-    .from("payees").select("id, name, document, default_category").eq("active", true).limit(500);
-  const favorecidos = (favorecidosRows ?? []) as any[];
-
-  // Clientes, para dizer DE QUEM veio uma entrada.
-  //
-  // `receivables.client_id` é NOT NULL: sem cliente a proposta de receita não pode ser
-  // aprovada. Deixar isso 87 vezes para o gestor era trabalho que a máquina já sabia
-  // evitar — ela faz exatamente isto para favorecido desde sempre, só não fazia para
-  // cliente. Medido em 10/08/2026: 81 das 87 entradas trazem CPF/CNPJ no extrato.
-  const { data: clientesRows } = await admin
-    .from("clients").select("id, name, cpf_cnpj").limit(2000);
-  const clientes = (clientesRows ?? []) as any[];
-
-  const clientePorDocumento = new Map<string, any>();
-  const clientePorNome = new Map<string, any>();
-  for (const c of clientes) {
-    const doc = String(c.cpf_cnpj ?? "").replace(/\D/g, "");
-    if (doc.length >= 11) clientePorDocumento.set(doc, c);
-    const nome = String(c.name ?? "").trim().toUpperCase();
-    // Nome ambíguo não indexa: se dois clientes têm o mesmo nome, escolher um seria
-    // sorteio. Some do índice e a decisão volta para quem sabe.
-    if (nome) clientePorNome.set(nome, clientePorNome.has(nome) ? null : c);
-  }
+  // Quem é quem e o que cada linha paga: cadastros, "quem já pagou por quem" e tudo que
+  // está em aberto ou já lançado. O mesmo contexto serve à "Revisar a fila".
+  const contexto = await carregarContexto(admin);
 
   // Compra parcelada é UMA compra: a proposta nasce na parcela mais antiga, com o valor
   // total, e as outras pernas não viram despesa separada.
@@ -653,44 +643,14 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
 
     const p = montarProposta(tx, fornecedores, memoria.porFornecedor, regras, memoria.porNome);
 
-    // Favorecido pelo documento: CPF é identidade, e reconhecê-lo poupa o gestor de
-    // escolher a mesma pessoa toda vez que ela recebe.
-    const docTx = (tx.counterparty_document || "").replace(/\D/g, "");
-    const favorecido = docTx.length >= 11
-      ? favorecidos.find((f) => String(f.document || "").replace(/\D/g, "") === docTx)
-      : undefined;
-
-    /**
-     * De quem veio a ENTRADA.
-     *
-     * Documento primeiro, porque é identidade. Nome só por igualdade EXATA — nunca por
-     * conter: foi o casamento por substring que fez todo estabelecimento de Itajaí virar
-     * o fornecedor "Coremma" e atribuiu 160 despesas ao errado, em silêncio.
-     *
-     * Sugestão, não decisão: o gestor troca no seletor, e o motivo escrito abaixo diz em
-     * qual das duas evidências a máquina se apoiou — documento merece mais confiança que
-     * nome, e ele precisa saber a diferença para revisar na medida certa.
-     */
-    let cliente: any;
-    let comoAchouOCliente: string | null = null;
-    if (p.kind === "create_receivable") {
-      if (docTx.length >= 11 && clientePorDocumento.has(docTx)) {
-        cliente = clientePorDocumento.get(docTx);
-        comoAchouOCliente = `Cliente reconhecido pelo CPF/CNPJ: ${cliente.name}`;
-      } else {
-        const nomeTx = String(tx.counterparty_name ?? "").trim().toUpperCase();
-        const porNome = nomeTx ? clientePorNome.get(nomeTx) : undefined;
-        if (porNome) {
-          cliente = porNome;
-          comoAchouOCliente = `Nome idêntico ao do cliente ${porNome.name} — confira antes de aprovar`;
-        }
-      }
-    }
+    // Fornecedor, favorecido e cliente com a evidência escrita, e o que a linha provavelmente
+    // paga (conta em aberto, pagamento já lançado, sinal, saldo de OS).
+    const id = identificarLinha(tx as unknown as TxDaFila, p, contexto);
 
     // OC do MESMO fornecedor com valor idêntico — o par é forte o bastante para sugerir,
     // fraco o bastante para exigir confirmação: duas OCs de igual valor existem.
-    const oc = p.suggestedSupplierId
-      ? ocs.find((o) => o.supplier_id === p.suggestedSupplierId
+    const oc = id.supplierId
+      ? ocs.find((o) => o.supplier_id === id.supplierId
           && Math.abs(Number(o.total_amount) - tx.amount) < 0.01)
       : undefined;
 
@@ -706,29 +666,30 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
       confidence: p.confidence,
       suggested_amount: compra ? compra.valorDaCompra : p.suggestedAmount,
       suggested_date: p.suggestedDate,
-      suggested_category: p.suggestedCategory,
+      suggested_category: id.categoria,
       suggested_description: p.suggestedDescription,
-      suggested_supplier_id: p.suggestedSupplierId,
-      suggested_payee_id: favorecido?.id ?? null,
-      suggested_client_id: cliente?.id ?? null,
+      suggested_supplier_id: id.supplierId,
+      suggested_payee_id: id.payeeId,
+      suggested_client_id: id.clientId,
       // A OC costuma saber para qual serviço a compra foi — herdar isso evita perguntar
-      // duas vezes a mesma coisa.
+      // duas vezes a mesma coisa. Sem OC, vale a OS do vínculo forte.
       suggested_purchase_order_id: oc?.id ?? null,
-      suggested_service_order_id: oc?.service_order_id ?? null,
-      dre_group: p.dreGroup,
+      suggested_service_order_id: oc?.service_order_id ?? id.serviceOrderId,
+      dre_group: id.dreGroup,
       applied_rule_id: p.appliedRuleId,
+      evidencia: id.evidencia,
+      vinculo_sugerido: id.vinculo,
       reasoning: [
         compra && descreverParcelamento(compra),
         p.reasoning,
-        favorecido && `Favorecido reconhecido pelo CPF/CNPJ: ${favorecido.name}`,
-        comoAchouOCliente,
+        ...id.frases,
         oc && `Mesmo valor da ordem de compra ${oc.po_number}, do mesmo fornecedor`,
       ].filter(Boolean).join(" · "),
     };
     linhas.push(linha);
     // Regra com autonomia foi conferida pelo gestor no momento em que ele a criou; segurar
     // a proposta para ele confirmar de novo seria pedir a mesma decisão duas vezes.
-    if (p.autoAplicavel && Math.abs(Number(tx.amount)) <= limiteLote) autoAplicar.push(linha);
+    if (p.autoAplicavel && Math.abs(Number(tx.amount)) <= limiteLote && !exigeDecisao(id.vinculo)) autoAplicar.push(linha);
   }
 
   let criadas = 0;
@@ -800,10 +761,12 @@ async function reclassificar(admin: DbClient) {
     admin
       .from("finance_review_queue")
       .select(`id, kind, bank_transaction_id, suggested_category, suggested_amount,
-               suggested_supplier_id, dre_group, applied_rule_id, confidence, reasoning,
+               suggested_supplier_id, suggested_payee_id, suggested_client_id, suggested_service_order_id,
+               dre_group, applied_rule_id, confidence, reasoning, evidencia, vinculo_sugerido,
                bank_transactions!finance_review_queue_bank_transaction_id_fkey (
                  id, transaction_date, description, amount, transaction_type,
-                 counterparty_name, counterparty_document, source_type )`)
+                 counterparty_name, counterparty_document, counterparty_branch, counterparty_account,
+                 pix_end_to_end_id, source_type, installment_label )`)
       .eq("status", "pending")
       .order("id")
       .range(de, ate)
@@ -826,50 +789,58 @@ async function reclassificar(admin: DbClient) {
     .from("finance_rules").select("*").eq("status", "active").limit(500);
   const regras = (regrasRows ?? []) as unknown as RegraFinanceira[];
 
+  const contexto = await carregarContexto(admin);
+
   /**
-   * Uma atualização por CLASSIFICAÇÃO, não por linha.
-   *
-   * Uma regra costuma dizer a mesma coisa sobre dezenas de transações; mandar dezenas de
-   * updates idênticos seria pagar uma ida ao banco por linha e estourar o tempo da função
-   * numa fila de mil. Linhas que terminam com o mesmo resultado viajam juntas.
+   * Cada linha é reidentificada: categoria e regra (como antes) e, agora, fornecedor,
+   * favorecido, cliente, evidência e o que a linha paga. Foi o que faltou para as seis
+   * entradas da MP Motorhomes: o cliente foi cadastrado depois e a fila nunca soube.
+   * Só vão ao banco as linhas que mudaram, todas numa chamada.
    */
-  const porResultado = new Map<string, { payload: Record<string, unknown>; ids: string[] }>();
+  const mudadas: Record<string, unknown>[] = [];
   let porRegra = 0;
+  const igual = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
   for (const p of alvo) {
     const tx = p.bank_transactions as TransacaoOrfa;
     const nova = montarProposta(tx, fornecedores, memoria.porFornecedor, regras, memoria.porNome);
-
-    const mudou = nova.suggestedCategory !== p.suggested_category
-      || nova.dreGroup !== p.dre_group
-      || (nova.suggestedSupplierId ?? null) !== (p.suggested_supplier_id ?? null)
-      || (nova.appliedRuleId ?? null) !== (p.applied_rule_id ?? null);
-    if (!mudou) continue;
-    if (nova.appliedRuleId) porRegra += 1;
-
-    const payload = {
-      suggested_category: nova.suggestedCategory,
-      dre_group: nova.dreGroup,
-      suggested_supplier_id: nova.suggestedSupplierId,
+    const id = identificarLinha(tx as unknown as TxDaFila, nova, contexto);
+    // A descrição da compra parcelada (quando há) continua no começo do motivo.
+    const prefixo = String(p.reasoning ?? "").startsWith("Compra parcelada")
+      ? String(p.reasoning).split(" · ")[0] : null;
+    const linha = {
+      id: p.id,
+      suggested_category: id.categoria,
+      dre_group: id.dreGroup,
+      suggested_supplier_id: id.supplierId,
+      suggested_payee_id: id.payeeId,
+      suggested_client_id: id.clientId,
+      suggested_service_order_id: id.serviceOrderId ?? p.suggested_service_order_id ?? null,
       applied_rule_id: nova.appliedRuleId,
       confidence: nova.confidence,
-      reasoning: nova.reasoning,
+      reasoning: [prefixo, nova.reasoning, ...id.frases].filter(Boolean).join(" · "),
+      evidencia: id.evidencia,
+      vinculo_sugerido: id.vinculo,
     };
-    const chave = JSON.stringify(payload);
-    const entrada = porResultado.get(chave) ?? { payload, ids: [] as string[] };
-    entrada.ids.push(p.id);
-    porResultado.set(chave, entrada);
+    const mudou = linha.suggested_category !== p.suggested_category
+      || linha.dre_group !== p.dre_group
+      || (linha.suggested_supplier_id ?? null) !== (p.suggested_supplier_id ?? null)
+      || (linha.suggested_payee_id ?? null) !== (p.suggested_payee_id ?? null)
+      || (linha.suggested_client_id ?? null) !== (p.suggested_client_id ?? null)
+      || (linha.suggested_service_order_id ?? null) !== (p.suggested_service_order_id ?? null)
+      || (linha.applied_rule_id ?? null) !== (p.applied_rule_id ?? null)
+      || !igual(linha.evidencia, p.evidencia)
+      || !igual(linha.vinculo_sugerido, p.vinculo_sugerido);
+    if (!mudou) continue;
+    if (nova.appliedRuleId) porRegra += 1;
+    mudadas.push(linha);
   }
 
   let atualizadas = 0;
-  for (const { payload, ids } of porResultado.values()) {
-    for (let i = 0; i < ids.length; i += 200) {
-      const lote = ids.slice(i, i + 200);
-      const { error } = await admin
-        .from("finance_review_queue").update(payload).in("id", lote).eq("status", "pending");
-      if (error) throw error;
-      atualizadas += lote.length;
-    }
+  for (let i = 0; i < mudadas.length; i += 300) {
+    const { data, error } = await admin.rpc("aplicar_reavaliacao_da_fila", { p_linhas: mudadas.slice(i, i + 300) });
+    if (error) throw error;
+    atualizadas += Number(data ?? 0);
   }
 
   const partes = [
@@ -1526,6 +1497,55 @@ async function aprovar(
   for (const p of elegiveis) {
     try {
       const ov = overrides[p.id] ?? {};
+
+      /**
+       * O que esta linha PAGA. Escolha da pessoa primeiro; sem escolha, a política:
+       * vínculo forte vale sozinho; "pode já estar lançado" sem vínculo forte barra a linha —
+       * aprovar no escuro criaria o lançamento em dobro.
+       */
+      const sugerido = (p.vinculo_sugerido ?? null) as VinculoSugerido | null;
+      let vinculo: OpcaoDeVinculo | null = null;
+      if (ov.vinculo === "nenhum") vinculo = null;
+      else if (ov.vinculo && typeof ov.vinculo === "object") {
+        vinculo = [sugerido?.principal, ...(sugerido?.alternativas ?? [])].find((o) => o?.id === (ov.vinculo as { id: string }).id) ?? null;
+        if (!vinculo) throw new Error("A opção escolhida não está mais entre as sugestões desta linha — revise a fila e escolha de novo");
+      } else {
+        vinculo = vinculoAutomatico(sugerido);
+        if (!vinculo && exigeDecisao(sugerido)) {
+          const o = sugerido!.principal;
+          throw new Error(`Pode ser ${o.rotulo.replace(/^Pagamento já lançado: /, "")}, que JÁ está lançado. Abra a linha e escolha: casar com ele ou lançar novo`);
+        }
+      }
+
+      // Casar com o que já existe: nenhum lançamento novo nasce.
+      if (vinculo && vinculo.lancamentoId && vinculo.lado
+          && (vinculo.tipo === "receivable" || vinculo.tipo === "payable" || vinculo.tipo === "existing_payment")) {
+        const ladoCerto = p.kind === "create_receivable" ? "receivable" : "payable";
+        if (vinculo.lado !== ladoCerto) throw new Error("O vínculo escolhido é do outro sentido do dinheiro");
+        const { error: eCasar } = await admin.rpc("conciliar_lancamento", {
+          p_tipo: vinculo.lado, p_id: vinculo.lancamentoId, p_transacao: p.bank_transaction_id, p_autor: userId,
+        });
+        if (eCasar) throw new Error(eCasar.message.replace(/^(P0001|42501|23514):\s*/, ""));
+        await admin.from("finance_review_queue").update({
+          status: "approved", decided_by: userId, decided_at: new Date().toISOString(),
+          decision_note: `Casada com ${vinculo.rotulo}`.slice(0, 300),
+        }).eq("id", p.id);
+        feitos.push(p.id);
+        continue;
+      }
+      // Sinal de orçamento: registra o sinal e converte o orçamento em OS, como o botão
+      // "Receber sinal" — só quando a pessoa escolheu (nunca é automático).
+      if (vinculo && vinculo.tipo === "quote_deposit") {
+        if (p.kind !== "create_receivable") throw new Error("Sinal de orçamento só casa com entrada");
+        const { data: sinal, error: eSinal } = await admin.rpc("registrar_sinal_pelo_extrato", {
+          p_orcamento: vinculo.id, p_transacao: p.bank_transaction_id, p_autor: userId,
+        });
+        if (eSinal) throw new Error(eSinal.message.replace(/^(P0001|42501|23514):\s*/, ""));
+        if ((sinal as any)?.receivable_id) recebidoPara.set(p.id, String((sinal as any).receivable_id));
+        feitos.push(p.id);
+        continue;
+      }
+
       const valor = Number(ov.amount ?? p.suggested_amount);
       const data = String(ov.date ?? p.suggested_date);
       const descricao = String(ov.description ?? p.suggested_description ?? p.title);
@@ -1629,7 +1649,11 @@ async function aprovar(
         // Receita exige cliente (receivables.client_id é NOT NULL) e, sem ele, o
         // lançamento não teria a quem pertencer. Falhar aqui com motivo legível é melhor
         // que devolver um erro cru de banco para o gestor.
-        const clienteId = ov.clientId ?? p.suggested_client_id ?? null;
+        const osDaReceita = ov.serviceOrderId !== undefined
+          ? ov.serviceOrderId
+          : (vinculo?.tipo === "service_order_balance" ? vinculo.ordemDeServicoId : p.suggested_service_order_id ?? null);
+        const clienteId = ov.clientId ?? p.suggested_client_id
+          ?? (vinculo?.tipo === "service_order_balance" ? vinculo.clienteId : null) ?? null;
         if (!clienteId) {
           throw new Error("Escolha o cliente antes de aprovar esta receita");
         }
@@ -1643,6 +1667,9 @@ async function aprovar(
           status: "paid",           // entrou no banco: já está recebido
           category: categoria,
           client_id: clienteId,
+          // Ligada à OS, a receita entra na margem do serviço e a OS dá baixa sozinha
+          // (sync_service_order_payment_status). Eram 52 receitas do extrato sem OS.
+          service_order_id: osDaReceita,
           bank_transaction_id: p.bank_transaction_id,
         }).select("id").single();
         if (e2) throw e2;
@@ -1697,6 +1724,42 @@ async function aprovar(
         ? ` · ${acimaDoLimite.length} acima do limite de lote ficaram para aprovação individual` : "")
       + (falhas.length ? ` · ${falhas.length} falharam` : ""),
   });
+}
+
+/**
+ * Dados da Receita para um CNPJ, para cadastrar sem digitar (Fase 2.2).
+ *
+ * BrasilAPI é pública e gratuita; o resultado fica 30 dias em `consulta_cnpj`, porque a
+ * mesma empresa aparece dezenas de vezes no extrato. CPF não tem consulta pública: volta só
+ * o que já se sabe.
+ */
+async function consultarDocumento(admin: DbClient, documento: string, userId: string | null) {
+  if (!userId) return jr({ error: "unauthorized" }, 401);
+  const doc = documento.replace(/\D/g, "");
+  if (doc.length === 11) return jr({ ok: true, tipo: "cpf", documento: doc, dados: null });
+  if (doc.length !== 14) return jr({ ok: false, error: "Documento precisa ter 11 (CPF) ou 14 (CNPJ) dígitos" }, 400);
+
+  const { data: cache } = await admin.from("consulta_cnpj").select("dados, consultado_em").eq("cnpj", doc).maybeSingle();
+  const fresco = cache && Date.now() - new Date((cache as any).consultado_em).getTime() < 30 * 86_400_000;
+  let bruto = fresco ? (cache as any).dados : null;
+
+  if (!bruto) {
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 8000);
+      const res = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${doc}`, { signal: ctl.signal });
+      clearTimeout(t);
+      if (res.status === 404) return jr({ ok: true, tipo: "cnpj", documento: doc, dados: null, aviso: "CNPJ não encontrado na Receita" });
+      if (!res.ok) throw new Error(`Receita respondeu ${res.status}`);
+      bruto = await res.json();
+      await admin.from("consulta_cnpj").upsert({ cnpj: doc, dados: bruto, consultado_em: new Date().toISOString() });
+    } catch (e) {
+      // Sem a Receita o cadastro continua possível: com o nome do extrato, à mão.
+      if (cache) bruto = (cache as any).dados;
+      else return jr({ ok: true, tipo: "cnpj", documento: doc, dados: null, aviso: `Consulta à Receita indisponível agora (${String((e as Error)?.message ?? e).slice(0, 80)}). Preencha à mão.` });
+    }
+  }
+  return jr({ ok: true, tipo: "cnpj", documento: doc, dados: lerRespostaDaReceita(doc, bruto as Record<string, unknown>) });
 }
 
 async function recusar(admin: DbClient, ids: string[], userId: string | null, note: string | null) {

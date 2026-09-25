@@ -71,6 +71,10 @@ export interface Candidate {
   amountSource?: "condicao" | "padrao" | "percentual";
   /** Rótulo da condição de pagamento, ex.: "50% mão de obra + 100% materiais antecipados". */
   conditionLabel?: string | null;
+  /** Em `existing_payment`: a conta a receber do pagamento, para casar o extrato com ela. */
+  receivableId?: string | null;
+  /** Em `existing_payment` de saída: a conta a pagar do pagamento. */
+  payableId?: string | null;
 }
 
 export interface MatchReason {

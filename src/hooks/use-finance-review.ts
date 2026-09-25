@@ -1,6 +1,8 @@
 // Caixa de entrada financeira: propostas do sistema aguardando decisão do gestor.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import type { Identificacao } from '../../supabase/functions/_shared/banking/contraparte';
+import type { VinculoSugerido } from '../../supabase/functions/_shared/banking/vinculo';
 import { toast } from 'sonner';
 import { useAppSetting } from '@/hooks/use-app-settings';
 
@@ -42,6 +44,10 @@ export interface PropostaFinanceira {
   suggested_payee_id: string | null;
   suggested_service_order_id: string | null;
   suggested_purchase_order_id: string | null;
+  /** Quem é a contraparte e por qual prova; o que cadastrar quando nada foi reconhecido. */
+  evidencia?: Partial<Identificacao> | null;
+  /** O que a linha provavelmente paga (conta, pagamento já lançado, sinal, saldo de OS). */
+  vinculo_sugerido?: VinculoSugerido | null;
   created_at: string;
   /** Identificação vinda do extrato, para decidir sem abrir o internet banking. */
   bank_transactions?: {
@@ -85,6 +91,11 @@ export interface Correcao {
    * proposta de receita não tem como ser aprovada.
    */
   clientId?: string | null;
+  /**
+   * O que esta linha paga: uma das opções de `vinculo_sugerido` ou "nenhum" (lançar novo).
+   * Ausente = a política do servidor decide — e recusa a linha que pode já estar lançada.
+   */
+  vinculo?: { id: string } | 'nenhum';
 }
 
 /**

@@ -17,7 +17,7 @@ import {
   suggestMatches, pickAutoApply, suggestCombinations, statementSignature,
   looksLikeInternalTransfer, findInternalTransfers,
 } from "../_shared/banking/matching.ts";
-import { expectedDepositAmount } from "../_shared/banking/quote-deposit.ts";
+import { carregarCandidatos } from "../_shared/banking/candidatos.ts";
 import type { BankTx, Candidate, Suggestion } from "../_shared/banking/types.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
@@ -45,10 +45,6 @@ function jr(body: unknown, status = 200) {
   });
 }
 
-/** Status que significam "ainda não quitado". */
-const ABERTOS = ["pending", "partially_paid", "overdue", "scheduled"];
-/** OS que ainda podem receber dinheiro. */
-const OS_ATIVAS = ["open", "scheduled", "in_progress", "awaiting_parts", "completed", "invoiced", "approved"];
 
 interface ReconcileBody {
   action?: "suggest" | "auto" | "apply" | "apply_group";
@@ -320,231 +316,10 @@ servirComCors(async (req) => {
  * que não entra aqui simplesmente nunca é sugerido.
  */
 async function buildCandidates(admin: DbClient): Promise<Candidate[]> {
-  const candidates: Candidate[] = [];
-
-  // 1. Contas a receber em aberto.
-  const { data: receivables } = await admin
-    .from("receivables")
-    .select("id, description, balance_amount, due_date, client_id, service_order_id, clients(name, cpf_cnpj), service_orders(service_order_number)")
-    .in("status", ABERTOS)
-    .gt("balance_amount", 0)
-    .limit(500);
-
-  for (const r of receivables || []) {
-    const cliente = (r as any).clients;
-    candidates.push({
-      kind: "receivable",
-      id: r.id as string,
-      label: (r.description as string) || "Conta a receber",
-      amount: Number(r.balance_amount),
-      direction: "credit",
-      dueDate: r.due_date as string,
-      clientId: r.client_id as string | null,
-      clientName: cliente?.name ?? null,
-      clientDocument: cliente?.cpf_cnpj ?? null,
-      documentNumber: (r as any).service_orders?.service_order_number ?? null,
-      serviceOrderId: r.service_order_id as string | null,
-    });
-  }
-
-  // 2. Contas a pagar em aberto.
-  const { data: payables } = await admin
-    .from("payables")
-    .select("id, description, balance_amount, due_date, supplier_id, suppliers(name)")
-    .in("status", ABERTOS)
-    .gt("balance_amount", 0)
-    .limit(500);
-
-  for (const p of payables || []) {
-    candidates.push({
-      kind: "payable",
-      id: p.id as string,
-      label: (p.description as string) || "Conta a pagar",
-      amount: Number(p.balance_amount),
-      direction: "debit",
-      dueDate: p.due_date as string,
-      clientName: (p as any).suppliers?.name ?? null,
-    });
-  }
-
-  // 3. Cobranças avulsas (sem conta a receber por trás — as demais já entraram acima).
-  const { data: collections } = await admin
-    .from("collections")
-    .select("id, description, amount, due_date, client_id, receivable_id, clients(name, cpf_cnpj)")
-    .is("receivable_id", null)
-    .not("status", "in", '("paid","cancelled")')
-    .limit(200);
-
-  for (const c of collections || []) {
-    const cliente = (c as any).clients;
-    candidates.push({
-      kind: "collection",
-      id: c.id as string,
-      label: (c.description as string) || "Cobrança",
-      amount: Number(c.amount),
-      direction: "credit",
-      dueDate: c.due_date as string,
-      clientId: c.client_id as string | null,
-      clientName: cliente?.name ?? null,
-      clientDocument: cliente?.cpf_cnpj ?? null,
-    });
-  }
-
-  // 4. Sinal de orçamento — o candidato que faltava.
-  //    Inclui os marcados como "aguardando sinal" e os que foram enviados ao cliente
-  //    (podem ter sido aprovados por WhatsApp sem ninguém mexer no status).
-  const { data: settings } = await admin
-    .from("app_settings")
-    .select("key, value")
-    .eq("key", "quote_deposit_percentage")
-    .maybeSingle();
-  const globalPct = Number((settings as any)?.value ?? 30) || 30;
-
-  const { data: quotes } = await admin
-    .from("service_orders")
-    .select(`id, service_order_number, quote_status, status, grand_total, created_at,
-             labor_cost_total, parts_cost_total, operational_cost_total, travel_cost_total,
-             subcontract_cost_total, is_travel_billable, discount_amount, tax_amount,
-             custom_payment_installments, payment_condition_preset_id, payment_conditions,
-             client_id, clients(name, cpf_cnpj),
-             payment_condition_presets(label, installments)`)
-    .in("quote_status", ["awaiting_deposit", "sent"])
-    .not("status", "in", '("cancelled")')
-    .limit(200);
-
-  // Condições pré-cadastradas: alguns orçamentos guardam só o rótulo em
-  // `payment_conditions`, sem o id do preset — o mesmo fallback que a tela de orçamento faz.
-  const { data: presets } = await admin
-    .from("payment_condition_presets")
-    .select("id, label, installments");
-  const presetPorLabel = new Map<string, any>(
-    (presets || []).map((p: any) => [String(p.label), p]),
-  );
-
-  for (const q of quotes || []) {
-    // Se o sinal já foi pago, o orçamento não está mais esperando dinheiro.
-    const { count } = await admin
-      .from("receivables")
-      .select("id", { count: "exact", head: true })
-      .eq("service_order_id", q.id as string)
-      .eq("is_deposit", true)
-      .eq("status", "paid");
-    if ((count ?? 0) > 0) continue;
-
-    // Precedência idêntica à do orçamento e do botão "Receber sinal": a condição
-    // pré-cadastrada manda; sem ela, a condição avulsa do orçamento; sem nenhuma, o
-    // percentual padrão — que é estimativa, não combinado, e a UI diz isso.
-    const preset = (q as any).payment_condition_presets
-      ?? presetPorLabel.get(String((q as any).payment_conditions ?? ""));
-    const installments = Array.isArray(preset?.installments)
-      ? preset.installments
-      : (Array.isArray((q as any).custom_payment_installments) ? (q as any).custom_payment_installments : null);
-
-    const esperado = expectedDepositAmount(q as never, installments, globalPct);
-    if (!esperado) continue;
-
-    const cliente = (q as any).clients;
-    const rotuloCondicao = esperado.source === "condicao"
-      ? (preset?.label ?? "condição do orçamento")
-      : esperado.source === "padrao"
-        ? "100% materiais + 50% mão de obra"
-        : null;
-    candidates.push({
-      kind: "quote_deposit",
-      id: q.id as string,
-      label: `Sinal do ${q.service_order_number}`,
-      amount: esperado.amount,
-      amountSource: esperado.source,
-      conditionLabel: rotuloCondicao,
-      direction: "credit",
-      dueDate: null,
-      referenceDate: String(q.created_at).slice(0, 10),
-      clientId: q.client_id as string | null,
-      clientName: cliente?.name ?? null,
-      clientDocument: cliente?.cpf_cnpj ?? null,
-      documentNumber: q.service_order_number as string,
-      serviceOrderId: q.id as string,
-      convertsQuote: true,
-    });
-  }
-
-  // 5. Pagamentos já registrados no ERP e ainda não ligados a nenhuma linha do extrato.
-  //    Sem isto, quem lança o recebimento na hora e importa o extrato depois fica sem
-  //    candidato nenhum — a conta já está quitada, então ela não aparece como "em aberto".
-  //    Janela de 120 dias: extrato antigo demais raramente vira conciliação útil.
-  const desde = new Date(Date.now() - 120 * 86_400_000).toISOString().slice(0, 10);
-  const { data: pagamentos } = await admin
-    .from("payments")
-    .select(`id, amount, payment_date, receivable_id, payable_id, notes,
-             receivables(description, client_id, service_order_id, clients(name, cpf_cnpj), service_orders(service_order_number))`)
-    .eq("status", "confirmed")
-    .gte("payment_date", desde)
-    .limit(300);
-
-  const { data: jaVinculados } = await admin
-    .from("bank_transactions")
-    .select("reconciled_payment_id")
-    .not("reconciled_payment_id", "is", null);
-  const vinculados = new Set((jaVinculados || []).map((r: any) => r.reconciled_payment_id));
-
-  for (const p of pagamentos || []) {
-    if (vinculados.has(p.id)) continue;
-    const rec = (p as any).receivables;
-    const cliente = rec?.clients;
-    candidates.push({
-      kind: "existing_payment",
-      id: p.id as string,
-      label: rec?.description
-        ? `Pagamento já lançado: ${rec.description}`
-        : "Pagamento já lançado",
-      amount: Number(p.amount),
-      // Pagamento de conta a receber é dinheiro entrando; de conta a pagar, saindo.
-      direction: p.receivable_id ? "credit" : "debit",
-      dueDate: p.payment_date as string,
-      clientId: rec?.client_id ?? null,
-      clientName: cliente?.name ?? null,
-      clientDocument: cliente?.cpf_cnpj ?? null,
-      documentNumber: rec?.service_orders?.service_order_number ?? null,
-      serviceOrderId: rec?.service_order_id ?? null,
-    });
-  }
-
-  // 6. Saldo de OS ativa ainda não lançado como conta a receber.
-  const { data: orders } = await admin
-    .from("service_orders")
-    .select("id, service_order_number, grand_total, created_at, client_id, clients(name, cpf_cnpj)")
-    .in("status", OS_ATIVAS)
-    .gt("grand_total", 0)
-    .limit(200);
-
-  for (const o of orders || []) {
-    const { data: recs } = await admin
-      .from("receivables")
-      .select("amount")
-      .eq("service_order_id", o.id as string)
-      .neq("status", "cancelled");
-    const lancado = (recs || []).reduce((s, r) => s + Number((r as any).amount || 0), 0);
-    const saldo = Number(o.grand_total) - lancado;
-    if (saldo <= 0.01) continue; // já está todo lançado; os receivables acima cobrem
-
-    const cliente = (o as any).clients;
-    candidates.push({
-      kind: "service_order_balance",
-      id: o.id as string,
-      label: `Saldo da ${o.service_order_number}`,
-      amount: Number(saldo.toFixed(2)),
-      direction: "credit",
-      dueDate: null,
-      referenceDate: String(o.created_at).slice(0, 10),
-      clientId: o.client_id as string | null,
-      clientName: cliente?.name ?? null,
-      clientDocument: cliente?.cpf_cnpj ?? null,
-      documentNumber: o.service_order_number as string,
-      serviceOrderId: o.id as string,
-    });
-  }
-
-  return candidates;
+  // Recebíveis, contas a pagar, cobranças, sinais de orçamento, pagamentos já lançados e
+  // saldo de OS vêm do módulo compartilhado — o mesmo que a fila do Extrato usa para não
+  // criar lançamento em dobro.
+  return await carregarCandidatos(admin);
 }
 
 /**

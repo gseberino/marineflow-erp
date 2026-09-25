@@ -153,6 +153,36 @@ describe('FinanceReviewInbox', () => {
   });
 });
 
+describe('linha que pode já estar lançada', () => {
+  afterEach(() => { estadoDaFila.dados = null; aprovarMock.mockClear(); });
+
+  it('não aprova no escuro: pede casar ou lançar novo, e manda a escolha', async () => {
+    aprovarMock.mockClear();
+    estadoDaFila.dados = [{
+      id: 'p84', kind: 'create_receivable', status: 'pending', bank_transaction_id: 't84', related_transaction_id: null,
+      title: 'Receita: POWER LOG LTDA', reasoning: 'x', confidence: 30, suggested_amount: 591.41, suggested_date: '2026-08-20',
+      suggested_category: 'Outras receitas', suggested_description: 'POWER LOG LTDA', suggested_supplier_id: null,
+      suggested_client_id: null, dre_group: 'receita', created_at: '2026-08-20T10:00:00Z',
+      vinculo_sugerido: { principal: {
+        tipo: 'existing_payment', id: 'pg84', rotulo: 'Pagamento já lançado: Sinal — ORÇ-00084', valor: 591.41, confianca: 60,
+        nivel: 'weak', motivos: ['Valor exato'], diferenca: 0, lancamentoId: 'r84', lado: 'receivable', ordemDeServicoId: 'os84',
+        clienteId: 'c', clienteNome: 'ROBSON', converteOrcamento: false, jaLancado: true,
+      }, alternativas: [] },
+    }];
+    const user = userEvent.setup();
+    renderInbox();
+    // Nem no lote ela entra: vai para a revisão individual.
+    expect(await screen.findByText(/Revisar uma a uma .*(1)/)).toBeInTheDocument();
+    const aprovar = screen.getByRole('button', { name: /Escolha casar ou lançar novo antes de aprovar/ });
+    expect(aprovar).toBeDisabled();
+    await user.click(screen.getByRole('radio', { name: /Casar com Sinal — ORÇ-00084/ }));
+    const liberado = screen.getByRole('button', { name: 'Aprovar e lançar' });
+    expect(liberado).toBeEnabled();
+    await user.click(liberado);
+    expect(aprovarMock.mock.calls[0][0]).toMatchObject({ ids: ['p84'], overrides: { p84: { vinculo: { id: 'pg84' } } } });
+  });
+});
+
 describe('busca na fila do Extrato', () => {
   it('acha pelo valor digitado e as contagens passam a falar só do encontrado', async () => {
     const user = userEvent.setup();

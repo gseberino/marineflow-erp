@@ -133,6 +133,7 @@ const TOOL_LABELS_PT: Record<string, string> = {
   desfazer_aprovacao_de_lancamento: "Desfazer aprovação de lançamento",
   cancelar_lancamento: "Cancelar lançamento",
   casar_lancamento_com_extrato: "Casar lançamento com o extrato",
+  cadastrar_contraparte_do_extrato: "Cadastrar a partir do extrato",
 };
 
 function humanizeToolNamePt(name: string): string {
@@ -174,6 +175,9 @@ const FIELD_LABELS_PT: Record<string, string> = {
   limpar: "Deixar vazio",
   motivo: "Motivo",
   bank_transaction_id: "Linha do extrato",
+  proposta_id: "Linha do Extrato",
+  tipo_de_favorecido: "Tipo de favorecido",
+  vinculos: "Casar com",
 };
 
 const CURRENCY_FIELDS = new Set(["amount", "card_fee_percent"]);
@@ -229,6 +233,9 @@ async function resolveIdLabel(admin: any, key: string, id: string): Promise<stri
     } else if (key === "cost_center_id") {
       const { data } = await admin.from("cost_centers").select("name").eq("id", id).maybeSingle();
       if (data?.name) return data.name;
+    } else if (key === "proposta_id") {
+      const { data } = await admin.from("finance_review_queue").select("title, suggested_amount").eq("id", id).maybeSingle();
+      if (data?.title) return `${data.title} · ${fmtBRL.format(Number(data.suggested_amount) || 0)}`;
     } else if (key === "bank_transaction_id") {
       // A linha do extrato como o dono a reconhece: data, quem e quanto.
       const { data } = await admin.from("bank_transactions")
@@ -410,6 +417,7 @@ export const SEMPRE_NO_PERFIL = new Set([
   "buscar_lancamentos",
   "desfazer_aprovacao_de_lancamento",
   "casar_lancamento_com_extrato",
+  "cadastrar_contraparte_do_extrato",
 ]);
 
 function textoDoUltimoPedido(messages: ClaudeMessage[]): string {
