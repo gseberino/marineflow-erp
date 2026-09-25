@@ -309,7 +309,7 @@ export function BankConnectionsPanel() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium">{c.label}</span>
                   <StatusBadge className={c.account_kind === 'credit_card' ? 'bg-accent/15 text-accent' : 'bg-muted text-muted-foreground'}>
-                    {c.account_kind === 'credit_card' ? 'Cartão' : 'Conta corrente'}
+                    {c.provider === 'caixa' ? 'Dinheiro em espécie' : c.account_kind === 'credit_card' ? 'Cartão' : 'Conta corrente'}
                   </StatusBadge>
                   {c.last_sync_status === 'ok' && !desatualizada && (
                     <StatusBadge className="bg-success/15 text-success">
@@ -332,12 +332,16 @@ export function BankConnectionsPanel() {
                     {c.last_synced_at && c.last_sync_status === 'ok' && ` · ${formatDate(c.last_synced_at)}`}
                   </p>
                 )}
-                {!c.last_synced_at && (
+                {!c.last_synced_at && c.provider !== 'caixa' && (
                   <p className="text-xs text-muted-foreground mt-1">Ainda não sincronizada.</p>
+                )}
+                {c.provider === 'caixa' && (
+                  <p className="text-xs text-muted-foreground mt-1">Lançado à mão ou pelo assistente, em Financeiro › Extrato. Não sincroniza.</p>
                 )}
               </div>
 
-              <div className="flex items-center gap-1 shrink-0">
+              {/* O Caixa não tem banco para buscar, e excluí-lo soltaria todas as linhas dele. */}
+              {c.provider !== 'caixa' && <div className="flex items-center gap-1 shrink-0">
                 <Button size="sm" variant="outline" onClick={() => handleSincronizar(c.id)} disabled={sincronizar.isPending}>
                   <RefreshCw className="h-3 w-3 mr-1" />Buscar
                 </Button>
@@ -348,7 +352,7 @@ export function BankConnectionsPanel() {
                 <Button aria-label="Excluir esta conexão bancária" size="sm" variant="ghost" onClick={() => handleExcluir(c)} disabled={excluir.isPending}>
                   <Trash2 className="h-3 w-3 text-destructive" />
                 </Button>
-              </div>
+              </div>}
             </div>
           );
         })}

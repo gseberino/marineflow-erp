@@ -10,7 +10,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const RAIZ = join(__dirname, '..', '..');
-const HOOKS_DE_LANCAMENTO = ['src/hooks/use-lancamentos.ts', 'src/hooks/use-conciliacao.ts', 'src/hooks/use-financial.ts', 'src/hooks/use-contraparte.ts', 'src/hooks/use-fechamento.ts', 'src/hooks/use-extrato-conta.ts'];
+const HOOKS_DE_LANCAMENTO = ['src/hooks/use-lancamentos.ts', 'src/hooks/use-conciliacao.ts', 'src/hooks/use-financial.ts', 'src/hooks/use-contraparte.ts', 'src/hooks/use-fechamento.ts', 'src/hooks/use-extrato-conta.ts', 'src/hooks/use-caixa.ts'];
 const PASTA_DAS_TOOLS = 'supabase/functions/_shared/ai/tools';
 
 /** Funções do banco que MUDAM lançamento e que a tela chama. */
@@ -19,7 +19,7 @@ function funcoesDaTela(): Set<string> {
   for (const arq of HOOKS_DE_LANCAMENTO) {
     const texto = readFileSync(join(RAIZ, arq), 'utf8');
     // rpc('nome' …) e o helper chamar('nome', …) de use-lancamentos.ts
-    for (const m of texto.matchAll(/(?:\.rpc|chamar)\(\s*'([a-z_]+)'/g)) nomes.add(m[1]);
+    for (const m of texto.matchAll(/(?:\.rpc|chamar|useAcaoDoCaixa(?:<[^>]*>)?)\(\s*'([a-z_]+)'/g)) nomes.add(m[1]);
   }
   return nomes;
 }
@@ -34,7 +34,9 @@ function textoDasTools(): string {
 describe('paridade tela ↔ assistente nos lançamentos', () => {
   it('a tela usa as quatro funções do caminho único', () => {
     const tela = funcoesDaTela();
-    for (const f of ['corrigir_lancamento', 'desfazer_aprovacao', 'cancelar_lancamento', 'conciliar_lancamento']) {
+    for (const f of ['corrigir_lancamento', 'desfazer_aprovacao', 'cancelar_lancamento', 'conciliar_lancamento',
+      'cadastrar_contraparte', 'checklist_do_mes', 'fechar_mes', 'extrato_da_conta',
+      'lancar_no_caixa', 'mover_caixa', 'ajustar_caixa', 'anotar_transacao']) {
       expect(tela.has(f), f).toBe(true);
     }
   });

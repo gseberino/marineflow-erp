@@ -706,10 +706,28 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     criadas += lote.length;
   }
 
+  // Anotações antecipadas ("o Pix de 1.500 é da TSD"): a linha que acabou de chegar ganha o
+  // que o dono disse. Vem ANTES do automático — e o que foi anotado não é lançado sozinho:
+  // a anotação classifica; aprovar continua sendo dele.
+  let anotadas = 0;
+  const anotadasAgora = new Set<string>();
+  try {
+    const { data: n } = await admin.rpc("aplicar_anotacoes_pendentes");
+    anotadas = Number(n ?? 0);
+    if (anotadas > 0) {
+      const { data: aplicadas } = await admin.from("anotacoes_do_extrato").select("bank_transaction_id")
+        .eq("status", "aplicada").gte("aplicada_em", new Date(Date.now() - 10 * 60_000).toISOString());
+      for (const a of (aplicadas ?? []) as any[]) if (a.bank_transaction_id) anotadasAgora.add(String(a.bank_transaction_id));
+    }
+  } catch (e) {
+    console.error("[finance-review] aplicar anotações falhou", e);
+  }
+
   // Aplica de imediato o que as regras autônomas resolveram. Cada lançamento fica ligado à
   // regra que o criou, então desligar a regra e desfazer o que ela fez são a mesma consulta.
   let lancadasSozinhas = 0;
   const idsAuto = autoAplicar
+    .filter((l) => !anotadasAgora.has(String(l.bank_transaction_id)))
     .map((l) => idsPorTransacao.get(String(l.bank_transaction_id)))
     .filter((v): v is string => !!v);
   if (idsAuto.length > 0) {
@@ -732,7 +750,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const autoLigado = String(mapaAuto.finance_auto_approve ?? "off").toLowerCase() === "on";
   const confiancaMinima = Math.max(85, Number(mapaAuto.finance_auto_approve_min_confidence ?? 85) || 85);
   if (autoLigado) {
-    const jaPorRegra = new Set(autoAplicar.map((l) => String(l.bank_transaction_id)));
+    const jaPorRegra = new Set([...autoAplicar.map((l) => String(l.bank_transaction_id)), ...anotadasAgora]);
     // Transação com alerta do vigilante pendente não entra: o alerta existe para alguém olhar.
     const comAlerta = new Set<string>();
     const txs = linhas.filter((l) => l.kind === "create_payable").map((l) => String(l.bank_transaction_id));
@@ -766,6 +784,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const partes = [
     criadas > 0 ? `${criadas - lancadasSozinhas} proposta(s) para revisar` : "Nada novo para propor",
     completadas > 0 ? `${completadas} já na fila ganharam identificação` : "",
+    anotadas > 0 ? `${anotadas} classificada(s) pelas suas anotações` : "",
     lancadasSozinhas > 0 ? `${lancadasSozinhas} lançada(s) sozinha(s) — veja em "Lançados sozinhos"` : "",
     pares.length ? `${pares.length} transferência(s) entre contas` : "",
     parcelasDeCompraJaLancada > 0 ? `${parcelasDeCompraJaLancada} parcela(s) de compra já lançada saíram da fila` : "",

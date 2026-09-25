@@ -39,6 +39,7 @@ import { bankingTools } from "./banking.ts";
 import { financeRulesTools } from "./finance-rules.ts";
 import { lancamentoTools } from "./lancamentos.ts";
 import { fechamentoTools } from "./fechamento.ts";
+import { caixaTools } from "./caixa.ts";
 import { jornadaTools } from "./jornada.ts";
 import { followupTools } from "./followups.ts";
 
@@ -87,6 +88,7 @@ export const allTools: ToolDef[] = [
   ...financeRulesTools,
   ...lancamentoTools,
   ...fechamentoTools,
+  ...caixaTools,
   ...jornadaTools,
   ...followupTools,
 ].sort((a, b) => a.name.localeCompare(b.name));

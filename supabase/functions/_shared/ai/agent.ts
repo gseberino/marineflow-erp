@@ -1,3 +1,4 @@
+import { resumirPedido } from "./tools/caixa.ts";
 import {
   callClaude,
   ClaudeApiError,
@@ -135,6 +136,9 @@ const TOOL_LABELS_PT: Record<string, string> = {
   casar_lancamento_com_extrato: "Casar lançamento com o extrato",
   cadastrar_contraparte_do_extrato: "Cadastrar a partir do extrato",
   fechar_mes: "Fechar o mês",
+  lancar_no_caixa: "Lançar no Caixa (dinheiro)",
+  ajustar_saldo_do_caixa: "Acertar o Caixa pela contagem",
+  anotar_transacao_do_banco: "Anotar transação que o banco vai trazer",
   configurar_lancamento_automatico: "Ligar/desligar o lançar sozinho",
 };
 
@@ -184,6 +188,15 @@ const FIELD_LABELS_PT: Record<string, string> = {
   ano: "Ano",
   ligado: "Ligado",
   conta: "Conta",
+  sentido: "Tipo",
+  valor: "Valor",
+  descricao: "O que foi",
+  quem: "Quem",
+  os: "OS",
+  pago_por: "Pago por",
+  socio: "Sócio",
+  saldo_contado: "Saldo contado",
+  documento: "Documento",
 };
 
 const CURRENCY_FIELDS = new Set(["amount", "card_fee_percent"]);
@@ -264,6 +277,14 @@ async function resolveIdLabel(admin: any, key: string, id: string): Promise<stri
  * para o modelo, não para o usuário) nem UUIDs crus quando dá pra resolver o nome real.
  */
 async function buildPendingSummary(admin: any, toolName: string, args: Record<string, unknown>): Promise<string> {
+  // Dinheiro vivo e anotação: a confirmação mostra o pedido JÁ RESOLVIDO (categoria, quem,
+  // Caixa ou bolso do sócio) — o "sim" tem de ser sobre o que vai acontecer de fato.
+  if (toolName === "lancar_no_caixa" || toolName === "anotar_transacao_do_banco") {
+    try {
+      const r = await resumirPedido({ admin } as unknown as ToolCtx, toolName, args);
+      if (r) return r;
+    } catch { /* cai no resumo genérico */ }
+  }
   // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista
   // do lote, os passos da aprovação) — os args crus não bastam. Resolve o conteúdo real.
   if (toolName === "send_bulk_collection_reminders") {
@@ -428,6 +449,10 @@ export const SEMPRE_NO_PERFIL = new Set([
   "consultar_conta",
   "configurar_lancamento_automatico",
   "listar_lancados_sozinhos",
+  "lancar_no_caixa",
+  "ajustar_saldo_do_caixa",
+  "anotar_transacao_do_banco",
+  "gastos_por_categoria",
 ]);
 
 function textoDoUltimoPedido(messages: ClaudeMessage[]): string {

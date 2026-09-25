@@ -19,7 +19,8 @@ import { FinanceReviewInbox, type SementeDeRegra } from '@/components/FinanceRev
 import { IgnoradasPanel } from '@/components/IgnoradasPanel';
 import { ExtratoComSaldo } from '@/components/ExtratoComSaldo';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Bot, ChevronDown, Undo2 } from 'lucide-react';
+import { Bot, ChevronDown, Undo2, Banknote, Calculator, NotebookPen } from 'lucide-react';
+import { AjustarCaixaDialog, AnotacoesAguardando, AnotarTransacaoDialog, LancarNoCaixaDialog } from '@/components/CaixaDialogs';
 
 export type VisaoDoExtrato = 'revisar' | 'saldo' | 'fora';
 const TODAS = '__todas__';
@@ -109,6 +110,10 @@ export function ExtratoPorConta({
   const [visao, setVisao] = useState<VisaoDoExtrato>(visaoInicial);
   const contaId = conta === TODAS ? null : conta;
   const contaAtual = conexoes.find((c) => c.id === contaId);
+  // O Caixa é uma conta como as do banco, mas quem põe as linhas nele é você (ou o
+  // assistente): não há sincronização, há lançamento e contagem.
+  const ehCaixa = contaAtual?.provider === 'caixa';
+  const [dialogo, setDialogo] = useState<'lancar' | 'contar' | 'anotar' | null>(null);
 
   // A situação da conta hoje: a última conferência de saldo dela.
   const ultima = useMemo(() => {
@@ -132,6 +137,16 @@ export function ExtratoPorConta({
             ? <Badge variant="secondary" className="text-xs">saldo confere{ultima.saldo_do_provedor != null ? ` · ${formatCurrency(Number(ultima.saldo_do_provedor))}` : ''}</Badge>
             : <Badge variant="outline" className="border-amber-500/50 text-xs text-amber-600">saldo difere {formatCurrency(Math.abs(Number(ultima.diferenca)))}</Badge>
         )}
+        {ehCaixa && (
+          <>
+            <Button size="sm" className="h-8 gap-1 text-xs" onClick={() => setDialogo('lancar')}>
+              <Banknote className="h-3.5 w-3.5" /> Lançar no Caixa
+            </Button>
+            <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={() => setDialogo('contar')}>
+              <Calculator className="h-3.5 w-3.5" /> Contei o dinheiro
+            </Button>
+          </>
+        )}
         <div className="flex flex-wrap gap-1 sm:ml-auto" role="tablist" aria-label="Visão do extrato">
           {([
             ['revisar', 'Para revisar'],
@@ -150,12 +165,23 @@ export function ExtratoPorConta({
 
       {visao === 'revisar' && (
         <>
+          <div className="flex justify-end">
+            <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => setDialogo('anotar')}
+              title="Classificar agora um Pix ou boleto que o banco ainda vai trazer">
+              <NotebookPen className="h-3.5 w-3.5" /> Anotar antes do banco
+            </Button>
+          </div>
+          <AnotacoesAguardando />
           <LancadosSozinhos contaId={contaId} />
           <FinanceReviewInbox onCriarRegra={onCriarRegra} contaId={contaId} />
         </>
       )}
       {visao === 'saldo' && contaId && <ExtratoComSaldo conexaoId={contaId} nomeDaConta={contaAtual?.label ?? 'a conta'} />}
       {visao === 'fora' && <IgnoradasPanel contaId={contaId} />}
+
+      {dialogo === 'lancar' && <LancarNoCaixaDialog onFechar={() => setDialogo(null)} />}
+      {dialogo === 'contar' && <AjustarCaixaDialog onFechar={() => setDialogo(null)} />}
+      {dialogo === 'anotar' && <AnotarTransacaoDialog onFechar={() => setDialogo(null)} />}
     </div>
   );
 }
