@@ -153,6 +153,24 @@ describe('FinanceReviewInbox', () => {
   });
 });
 
+describe('busca na fila do Extrato', () => {
+  it('acha pelo valor digitado e as contagens passam a falar só do encontrado', async () => {
+    const user = userEvent.setup();
+    renderInbox();
+    await user.type(await screen.findByLabelText('Buscar'), '18.001,04');
+    expect(screen.getByText('1 de 3')).toBeInTheDocument();
+    expect(screen.getAllByText(/MARINE EXPRESS/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/POSTO AGRICOPEL/)).not.toBeInTheDocument();
+  });
+
+  it('busca sem resultado diz onde a linha pode estar', async () => {
+    const user = userEvent.setup();
+    renderInbox();
+    await user.type(await screen.findByLabelText('Buscar'), 'nao existe nada assim');
+    expect(screen.getByText(/Se a linha já foi aprovada, ela está em Contas a/)).toBeInTheDocument();
+  });
+});
+
 describe('agrupado por favorecido', () => {
   // Metade da fila cai em "Outras despesas", e essas vêm de poucos favorecidos repetidos:
   // 34 compras no mesmo lugar são UMA pergunta. O agrupamento existe para isso — mas não

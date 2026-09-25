@@ -293,6 +293,9 @@ export interface GrupoIgnorado {
   transacoes: Array<{
     id: string; transaction_date: string; description: string; amount: number;
     counterparty_name: string | null; dismissed_at: string | null;
+    /** O motivo DESTA linha — no grupo "à mão" cada cancelamento tem o seu. */
+    dismissed_reason?: string | null;
+    counterparty_document?: string | null;
   }>;
   total: number;
 }
@@ -320,7 +323,7 @@ export function useIgnoradas() {
     queryFn: async (): Promise<GrupoIgnorado[]> => {
       const { data, error } = await supabase
         .from('bank_transactions')
-        .select('id, transaction_date, description, amount, counterparty_name, dismissed_reason, dismissed_kind, dismissed_at')
+        .select('id, transaction_date, description, amount, counterparty_name, counterparty_document, dismissed_reason, dismissed_kind, dismissed_at')
         .not('dismissed_reason', 'is', null)
         .order('transaction_date', { ascending: false })
         .limit(1000);
@@ -339,7 +342,8 @@ export function useIgnoradas() {
         g.transacoes.push({
           id: t.id, transaction_date: t.transaction_date, description: t.description,
           amount: Number(t.amount), counterparty_name: t.counterparty_name,
-          dismissed_at: t.dismissed_at,
+          dismissed_at: t.dismissed_at, dismissed_reason: t.dismissed_reason,
+          counterparty_document: t.counterparty_document,
         });
         g.total += Number(t.amount);
         porTipo.set(kind, g);

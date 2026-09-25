@@ -11,6 +11,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { recarregarFinanceiro, mensagemDoErro, type RespostaDoLancamento } from '@/hooks/use-lancamentos';
 
 export type LadoDoLancamento = 'payable' | 'receivable';
 export type SituacaoDaConciliacao = 'conciliado' | 'sem_extrato';
@@ -32,6 +33,12 @@ export interface LancamentoParaConciliar {
   extrato_descricao: string | null;
   /** lançamento − extrato. Só existe quando há par. */
   diferenca: number | null;
+  /**
+   * Nasceu da aprovação de uma linha do extrato (e não foi só casado com ela). Muda o que
+   * "desfazer" significa: o que nasceu é cancelado e a linha volta para a fila; o que já
+   * existia só perde o vínculo.
+   */
+  nasceu_do_extrato?: boolean;
 }
 
 /** Uma linha do extrato ainda sem lançamento — o outro lado da conciliação. */
@@ -129,75 +136,52 @@ export function useExtratoLivre(paraLado: LadoDoLancamento | null) {
 /**
  * Casa um lançamento com uma linha do extrato.
  *
- * Escreve na tabela base, nunca na view. O `bank_transaction_id` tem índice único parcial
- * nas duas tabelas, então uma linha do extrato não pode ser usada duas vezes — o banco
- * recusa antes de qualquer dano.
+ * Passa pela função do banco `conciliar_lancamento`, a mesma que o assistente usa. Ela
+ * confere o sinal (a pagar só com saída, a receber só com entrada), recusa linha já usada
+ * ou fora da fila, grava na trilha — e, se a conta está em ABERTO, registra o pagamento na
+ * data do extrato. Antes o casamento só gravava o vínculo, e a conta continuava "pendente"
+ * com o dinheiro já fora do banco.
  */
 export function useConciliarLancamento() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (v: { lado: LadoDoLancamento; id: string; bankTransactionId: string }) => {
-      const tabela = v.lado === 'payable' ? 'payables' : 'receivables';
-      const { error } = await supabase
-        .from(tabela)
-        .update({ bank_transaction_id: v.bankTransactionId } as never)
-        .eq('id', v.id);
+      const { data, error } = await supabase.rpc('conciliar_lancamento' as never, {
+        p_tipo: v.lado, p_id: v.id, p_transacao: v.bankTransactionId,
+      } as never);
       if (error) throw error;
-
-      // A linha do extrato sai da fila do Extrato porque agora tem lançamento — isso já é
-      // derivado pela view. Marcar `reconciled` mantém as telas antigas coerentes enquanto
-      // elas existirem.
-      const { error: erroTx } = await supabase
-        .from('bank_transactions')
-        .update({ reconciled: true } as never)
-        .eq('id', v.bankTransactionId);
-      if (erroTx) throw erroTx;
+      return data as unknown as RespostaDoLancamento;
     },
-    onSuccess: () => {
-      for (const k of [
-        ['conciliacao-sem-extrato'], ['conciliacao-conciliados'], ['conciliacao-extrato-livre'],
-        ['extrato-a-tratar'], ['finance-review-count'], ['bank-transactions'],
-      ]) qc.invalidateQueries({ queryKey: k });
-      toast.success('Conciliado');
+    onSuccess: (r) => {
+      recarregarFinanceiro(qc);
+      toast.success(r?.message ?? 'Conciliado');
     },
-    onError: (e: Error) => {
-      // O índice único devolve 23505 quando a linha do extrato já foi usada. Sem esta
-      // tradução o gestor vê "duplicate key value violates unique constraint".
-      const jaUsada = /duplicate key|23505/i.test(e.message);
-      toast.error(jaUsada
-        ? 'Essa linha do extrato já está vinculada a outro lançamento.'
-        : `Não deu para conciliar: ${e.message}`);
-    },
+    onError: (e: Error) => toast.error(`Não deu para conciliar: ${mensagemDoErro(e)}`),
   });
 }
 
-/** Desfaz o vínculo — sem isso um casamento errado é permanente. */
+/**
+ * Desfaz o vínculo — sem isso um casamento errado é permanente.
+ *
+ * Mesma função do "Desfazer aprovação" das contas: se o lançamento NASCEU da linha do
+ * extrato, ele é cancelado e a proposta volta para a fila (soltar só o vínculo deixaria uma
+ * despesa paga sem banco, e a próxima varredura proporia a mesma despesa de novo). Se ele
+ * já existia, perde o vínculo e o pagamento que o casamento registrou é estornado.
+ */
 export function useDesconciliarLancamento() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (v: { lado: LadoDoLancamento; id: string; bankTransactionId: string }) => {
-      const tabela = v.lado === 'payable' ? 'payables' : 'receivables';
-      const { error } = await supabase
-        .from(tabela)
-        .update({ bank_transaction_id: null } as never)
-        .eq('id', v.id);
+      const { data, error } = await supabase.rpc('desfazer_aprovacao' as never, {
+        p_tipo: v.lado, p_id: v.id, p_motivo: 'Desfeito na Conciliação',
+      } as never);
       if (error) throw error;
-
-      // Devolve a linha à fila do Extrato. Só mexe em `reconciled` — `dismissed_reason`
-      // fica como está, porque desfazer conciliação não é o mesmo que tirar do descarte.
-      const { error: erroTx } = await supabase
-        .from('bank_transactions')
-        .update({ reconciled: false, reconciled_payment_id: null } as never)
-        .eq('id', v.bankTransactionId);
-      if (erroTx) throw erroTx;
+      return data as unknown as RespostaDoLancamento;
     },
-    onSuccess: () => {
-      for (const k of [
-        ['conciliacao-sem-extrato'], ['conciliacao-conciliados'], ['conciliacao-extrato-livre'],
-        ['extrato-a-tratar'], ['finance-review-count'], ['bank-transactions'],
-      ]) qc.invalidateQueries({ queryKey: k });
-      toast.success('Vínculo desfeito — a linha voltou para o Extrato');
+    onSuccess: (r) => {
+      recarregarFinanceiro(qc);
+      toast.success(r?.message ?? 'Vínculo desfeito — a linha voltou para o Extrato');
     },
-    onError: (e: Error) => toast.error(`Não deu para desfazer: ${e.message}`),
+    onError: (e: Error) => toast.error(`Não deu para desfazer: ${mensagemDoErro(e)}`),
   });
 }

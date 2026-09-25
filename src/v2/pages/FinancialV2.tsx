@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Download, DollarSign, Paperclip, Pencil, Plus } from 'lucide-react';
+import { Ban, Download, DollarSign, Paperclip, Pencil, Plus, Undo2 } from 'lucide-react';
 import {
   Bar, BarChart, CartesianGrid, ComposedChart, Line, ResponsiveContainer,
   Tooltip as RechartsTooltip, XAxis, YAxis,
@@ -20,6 +20,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
 import { PaymentDialog } from '@/components/PaymentDialog';
 import { PayableFormDialog } from '@/components/PayableFormDialog';
+import { CorrigirLancamentoDialog } from '@/components/CorrigirLancamentoDialog';
+import { DesfazerOuCancelarDialog, type AcaoNoLancamento } from '@/components/DesfazerOuCancelarDialog';
+import { AcoesDaLinha, type AcaoDaLinha } from '@/components/AcoesDaLinha';
 import { DREPanel } from '@/components/DREPanel';
 import { ConciliacaoPanel } from '@/components/ConciliacaoPanel';
 import { BankSourcesPanel } from '@/components/BankSourcesPanel';
@@ -62,6 +65,11 @@ type PayableRow = {
   origin?: string | null;
   receipt_url?: string | null;
   linked_service_order_id?: string | null;
+  issue_date?: string | null;
+  bank_transaction_id?: string | null;
+  supplier_id?: string | null;
+  payee_id?: string | null;
+  cost_center_id?: string | null;
   suppliers?: { name?: string } | null;
   service_orders?: { service_order_number?: string } | null;
   service_order_expenses?: { receipt_url?: string | null }[] | null;
@@ -156,6 +164,31 @@ export default function FinancialV2() {
   const [paymentTarget, setPaymentTarget] = useState<{ receivable?: PayableRow; payable?: PayableRow } | null>(null);
   const [showNewPayable, setShowNewPayable] = useState(false);
   const [editingPayable, setEditingPayable] = useState<PayableRow | null>(null);
+  // Desfazer e cancelar pedem confirmação com motivo — ver DesfazerOuCancelarDialog.
+  const [acaoNaConta, setAcaoNaConta] = useState<{ acao: AcaoNoLancamento; conta: PayableRow } | null>(null);
+
+  /**
+   * As ações de uma conta a pagar, em qualquer situação — inclusive paga.
+   *
+   * Conta paga não tinha ação nenhuma: o que o dono aprovava errado ficava errado. Agora
+   * toda conta se corrige, a que veio do banco se desfaz, e qualquer uma se cancela com
+   * motivo. Pagar fica à vista porque é o uso de todo dia; o resto vai para o menu, e o
+   * cancelamento por último, separado.
+   */
+  const acoesDaConta = (p: PayableRow): { rapidas: AcaoDaLinha[]; menu: AcaoDaLinha[] } => {
+    const viva = p.status !== 'cancelled';
+    const emAberto = viva && p.status !== 'paid';
+    return {
+      rapidas: emAberto ? [{ texto: 'Pagar', icone: DollarSign, titulo: 'Registrar pagamento', onClick: () => setPaymentTarget({ payable: p }) }] : [],
+      menu: [
+        ...(viva ? [{ texto: 'Corrigir', icone: Pencil, titulo: 'Fornecedor, categoria, OS, datas, valor', onClick: () => setEditingPayable(p) }] : []),
+        ...(viva && p.bank_transaction_id
+          ? [{ texto: 'Desfazer aprovação', icone: Undo2, titulo: 'A linha do extrato volta para a fila', onClick: () => setAcaoNaConta({ acao: 'desfazer', conta: p }) }]
+          : []),
+        ...(viva ? [{ texto: 'Cancelar lançamento', icone: Ban, perigo: true, onClick: () => setAcaoNaConta({ acao: 'cancelar', conta: p }) }] : []),
+      ],
+    };
+  };
   // Regra criada a partir de uma linha da caixa de entrada: o editor abre preenchido, sem
   // obrigar a redigitar o fornecedor que está na tela.
   const [sementeRegra, setSementeRegra] = useState<SementeDeRegra | null>(null);
@@ -307,28 +340,10 @@ export default function FinancialV2() {
       onSort={handlePaySort}
       emptyMessage={t.common.noResults}
       rowClassName={(p) => (isOverdue(p) ? 'bg-destructive/5' : undefined)}
-      rowActions={(p) => (
-        <>
-          {p.status !== 'paid' && (
-            <Button
-              variant="ghost" size="icon" className="h-8 w-8"
-              aria-label="Registrar pagamento" title="Registrar pagamento"
-              onClick={() => setPaymentTarget({ payable: p })}
-            >
-              <DollarSign className="h-4 w-4" />
-            </Button>
-          )}
-          {p.status !== 'paid' && p.status !== 'cancelled' && (
-            <Button
-              variant="ghost" size="icon" className="h-8 w-8"
-              aria-label="Editar pagável" title="Editar"
-              onClick={() => setEditingPayable(p)}
-            >
-              <Pencil className="h-4 w-4" />
-            </Button>
-          )}
-        </>
-      )}
+      rowActions={(p) => {
+        const { rapidas, menu } = acoesDaConta(p);
+        return <AcoesDaLinha rotulo={p.description} rapidas={rapidas} menu={menu} tituloDoMenu={p.suppliers?.name || p.name || undefined} />;
+      }}
     />
   );
 
@@ -623,14 +638,12 @@ export default function FinancialV2() {
                           <p className="text-sm text-muted-foreground">
                             {formatDate(p.due_date)}{alert ? ` · ${alert.label}` : ''} · <b className="text-foreground">{formatCurrency(Number(p.balance_amount ?? 0))}</b>
                           </p>
-                          {p.status !== 'paid' && (
-                            <div className="mt-3 flex gap-2 [&>*]:min-h-11">
-                              <Button className="flex-1" onClick={() => setPaymentTarget({ payable: p })}>{t.financial.registerPayment}</Button>
-                              {p.status !== 'cancelled' && (
-                                <Button variant="outline" size="icon" className="h-11 w-11" aria-label="Editar esta conta" onClick={() => setEditingPayable(p)}>
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
+                          {p.status !== 'cancelled' && (
+                            <div className="mt-3 flex items-center gap-2">
+                              {p.status !== 'paid' && (
+                                <Button className="min-h-11 flex-1" onClick={() => setPaymentTarget({ payable: p })}>{t.financial.registerPayment}</Button>
                               )}
+                              <AcoesDaLinha rotulo={p.description} menu={acoesDaConta(p).menu} className={p.status === 'paid' ? 'ml-auto' : undefined} />
                             </div>
                           )}
                         </div>
@@ -689,10 +702,19 @@ export default function FinancialV2() {
         />
       )}
       <PayableFormDialog open={showNewPayable} onOpenChange={setShowNewPayable} />
-      <PayableFormDialog
-        open={!!editingPayable}
-        onOpenChange={(v) => { if (!v) setEditingPayable(null); }}
-        initialData={editingPayable ?? undefined}
+      {/* Corrigir serve para qualquer conta, inclusive paga, e passa pelo caminho único
+          (trilha, mês fechado, valor do banco travado). O formulário de criação continua
+          sendo o PayableFormDialog. */}
+      <CorrigirLancamentoDialog
+        tipo="payable"
+        lancamento={editingPayable as never}
+        onFechar={() => setEditingPayable(null)}
+      />
+      <DesfazerOuCancelarDialog
+        tipo="payable"
+        acao={acaoNaConta?.acao ?? null}
+        lancamento={acaoNaConta?.conta ?? null}
+        onFechar={() => setAcaoNaConta(null)}
       />
     </V2Shell>
   );

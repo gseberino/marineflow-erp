@@ -94,4 +94,18 @@ describe('livro das ignoradas', () => {
     await user.click((await screen.findAllByRole('button', { name: /^Devolver$/ }))[0]);
     expect(desfazerMock).toHaveBeenCalledWith(['d1']);
   });
+
+  it('busca por nome ou valor abre só o grupo que tem a linha', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.type(screen.getByLabelText('Buscar'), 'inohouse');
+    // A linha aparece sem precisar abrir o grupo, e o grupo das duplicatas some.
+    expect(screen.getByText(/INOHOUSE/)).toBeInTheDocument();
+    expect(screen.queryByText('Duplicata da importação')).not.toBeInTheDocument();
+    expect(screen.getByText('1 de 3')).toBeInTheDocument();
+    await user.clear(screen.getByLabelText('Buscar'));
+    await user.type(screen.getByLabelText('Buscar'), '800,00');
+    expect(screen.getByText(/FORNECEDOR B/)).toBeInTheDocument();
+    expect(screen.queryByText(/FORNECEDOR A/)).not.toBeInTheDocument();
+  });
 });

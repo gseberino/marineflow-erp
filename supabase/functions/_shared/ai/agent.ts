@@ -128,6 +128,11 @@ const TOOL_LABELS_PT: Record<string, string> = {
   criar_missao_acompanhamento: "Deixar a IA acompanhar",
   cancelar_missao_acompanhamento: "Encerrar acompanhamento da IA",
   update_service_order_notes: "Editar observações do orçamento/OS",
+  update_payable: "Corrigir conta a pagar",
+  update_receivable: "Corrigir conta a receber",
+  desfazer_aprovacao_de_lancamento: "Desfazer aprovação de lançamento",
+  cancelar_lancamento: "Cancelar lançamento",
+  casar_lancamento_com_extrato: "Casar lançamento com o extrato",
 };
 
 function humanizeToolNamePt(name: string): string {
@@ -156,10 +161,23 @@ const FIELD_LABELS_PT: Record<string, string> = {
   recurrence_type: "Recorrência",
   collection_id: "Cobrança",
   due_days: "Prazo (dias)",
+  // Correção de lançamento (update_payable/update_receivable e lancamentos.ts)
+  supplier_id: "Fornecedor",
+  payee_id: "Favorecido",
+  linked_service_order_id: "OS",
+  expense_category: "Categoria",
+  category: "Categoria",
+  description: "Descrição",
+  issue_date: "Data",
+  due_date: "Vencimento",
+  cost_center_id: "Centro de custo",
+  limpar: "Deixar vazio",
+  motivo: "Motivo",
+  bank_transaction_id: "Linha do extrato",
 };
 
 const CURRENCY_FIELDS = new Set(["amount", "card_fee_percent"]);
-const DATE_FIELDS = new Set(["payment_date", "scheduled_at"]);
+const DATE_FIELDS = new Set(["payment_date", "scheduled_at", "issue_date", "due_date"]);
 const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
 function formatFieldValue(key: string, v: unknown): string {
@@ -199,6 +217,26 @@ async function resolveIdLabel(admin: any, key: string, id: string): Promise<stri
     } else if (key === "collection_id") {
       const { data } = await admin.from("collections").select("description").eq("id", id).maybeSingle();
       if (data?.description) return data.description;
+    } else if (key === "supplier_id") {
+      const { data } = await admin.from("suppliers").select("name").eq("id", id).maybeSingle();
+      if (data?.name) return data.name;
+    } else if (key === "payee_id") {
+      const { data } = await admin.from("payees").select("name").eq("id", id).maybeSingle();
+      if (data?.name) return data.name;
+    } else if (key === "linked_service_order_id") {
+      const { data } = await admin.from("service_orders").select("service_order_number").eq("id", id).maybeSingle();
+      if (data?.service_order_number) return data.service_order_number;
+    } else if (key === "cost_center_id") {
+      const { data } = await admin.from("cost_centers").select("name").eq("id", id).maybeSingle();
+      if (data?.name) return data.name;
+    } else if (key === "bank_transaction_id") {
+      // A linha do extrato como o dono a reconhece: data, quem e quanto.
+      const { data } = await admin.from("bank_transactions")
+        .select("transaction_date, counterparty_name, description, amount").eq("id", id).maybeSingle();
+      if (data) {
+        const quando = String(data.transaction_date ?? "").split("-").reverse().join("/");
+        return `${quando} · ${data.counterparty_name || data.description || "sem descrição"} · ${fmtBRL.format(Number(data.amount) || 0)}`;
+      }
     }
   } catch {
     // best-effort — cai no UUID original
@@ -354,6 +392,26 @@ function withTrailingCacheMark(messages: ClaudeMessage[]): ClaudeMessage[] {
  */
 const PERFIL_DE_TOOLS = { validoAte: 0, ativo: false, nomes: new Set<string>() };
 
+/**
+ * Ferramentas que entram no perfil de operação mesmo fora da lista gravada no banco.
+ *
+ * O perfil (app_settings.ai_tool_profile_operacao) é editado à mão e ferramenta nova nasce
+ * fora dele — invisível para o assistente, por mais que funcione. Foi o que aconteceu com
+ * get_whatsapp_conversation: no ar desde 24/09/2026 e fora do perfil. As daqui são as que o
+ * dono pediu para usar conversando.
+ *
+ * Por que lista FIXA e não "pelo assunto da mensagem": o bloco de tools é o começo do
+ * prompt em cache. Trocar as tools a cada assunto invalidaria o cache (~35 mil tokens pagos
+ * cheios de novo a cada troca); quatro tools a mais, sempre iguais, custam ~10% do seu
+ * tamanho por chamada, porque ficam no cache.
+ */
+export const SEMPRE_NO_PERFIL = new Set([
+  "get_whatsapp_conversation",
+  "buscar_lancamentos",
+  "desfazer_aprovacao_de_lancamento",
+  "casar_lancamento_com_extrato",
+]);
+
 function textoDoUltimoPedido(messages: ClaudeMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role !== "user") continue;
@@ -383,7 +441,8 @@ async function aplicarPerfilDeTools(todas: ToolDef[], params: RunAgentLoopParams
   if (!PERFIL_DE_TOOLS.ativo || PERFIL_DE_TOOLS.nomes.size === 0) return todas;
   const pedido = textoDoUltimoPedido(params.messages).toLowerCase();
   return todas.filter((t) =>
-    t.risk === "high" || PERFIL_DE_TOOLS.nomes.has(t.name) || (pedido.length > 0 && pedido.includes(t.name))
+    t.risk === "high" || PERFIL_DE_TOOLS.nomes.has(t.name) || SEMPRE_NO_PERFIL.has(t.name) ||
+    (pedido.length > 0 && pedido.includes(t.name))
   );
 }
 

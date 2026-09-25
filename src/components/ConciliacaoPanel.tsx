@@ -264,9 +264,17 @@ function LinhaDoLancamento({
                   <span className="tabular-nums">{formatCurrency(Number(l.extrato_valor ?? 0))}</span>
                 </p>
               </div>
-              <Button variant="outline" size="sm" onClick={onDesconciliar} disabled={ocupado}>
+              {/* O mesmo botão faz coisas diferentes conforme a origem, e o rótulo diz qual:
+                  o que NASCEU da linha do extrato é cancelado e volta para a fila; o que já
+                  existia só perde o vínculo. */}
+              <Button
+                variant="outline" size="sm" onClick={onDesconciliar} disabled={ocupado}
+                title={l.nasceu_do_extrato
+                  ? 'Cancela este lançamento e devolve a linha do extrato para a fila, para aprovar de outro jeito'
+                  : 'Solta o vínculo; o lançamento continua valendo e a linha volta para a fila'}
+              >
                 <Link2Off className="h-4 w-4 mr-1.5" />
-                Desfazer vínculo
+                {l.nasceu_do_extrato ? 'Desfazer aprovação' : 'Desfazer vínculo'}
               </Button>
             </div>
           ) : (
@@ -301,6 +309,7 @@ function CandidatosDoExtrato({
   formatDate: (d: string) => string;
 }) {
   const livres = useExtratoLivre(l.lado);
+  const emAberto = l.status === 'pending' || l.status === 'overdue' || l.status === 'partially_paid';
 
   const ordenados = useMemo(() => {
     const linhas: LinhaDoExtratoLivre[] = livres.data ?? [];
@@ -336,7 +345,8 @@ function CandidatosDoExtrato({
   return (
     <div className="space-y-1.5">
       <p className="text-xs text-muted-foreground">
-        Linhas do extrato mais próximas — valor primeiro, depois data:
+        Linhas do extrato mais próximas — valor primeiro, depois data.
+        {emAberto && ' Como esta conta está em aberto, casar registra o pagamento na data do extrato.'}
       </p>
       {ordenados.map(({ t, dv, dd }) => {
         const exato = dv < 0.005;
@@ -376,7 +386,7 @@ function CandidatosDoExtrato({
               className="shrink-0"
             >
               <Link2 className="h-4 w-4 mr-1" />
-              Casar
+              {emAberto ? 'Casar e dar baixa' : 'Casar'}
               <ArrowRight className="h-3 w-3 ml-1" />
             </Button>
           </div>

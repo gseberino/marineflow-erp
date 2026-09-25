@@ -1,4 +1,57 @@
-import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolCtx, type ToolDef } from "./registry.ts";
+import { mensagemDoBanco } from "./lancamentos.ts";
+
+/** Campos que o modelo pode pedir para LIMPAR (deixar vazio) numa correção. */
+const LIMPAVEIS: Record<string, { payable?: string; receivable?: string }> = {
+  observacao: { payable: "notes", receivable: "notes" },
+  categoria: { payable: "expense_category", receivable: "category" },
+  fornecedor: { payable: "supplier_id" },
+  favorecido: { payable: "payee_id" },
+  os: { payable: "linked_service_order_id", receivable: "service_order_id" },
+  centro_de_custo: { payable: "cost_center_id", receivable: "cost_center_id" },
+};
+
+/**
+ * Monta o que vai para corrigir_lancamento a partir dos argumentos da tool.
+ *
+ * Só entra o que veio preenchido; o que a pessoa pediu para tirar ("tira a OS dessa
+ * despesa") vem em `limpar` e vira null. Exportada para o teste: é aqui que "vazio"
+ * poderia virar "apagar sem querer".
+ */
+export function camposDaCorrecao(
+  tipo: "payable" | "receivable",
+  args: Record<string, unknown>,
+  permitidos: string[],
+): { campos: Record<string, unknown> } | { error: string } {
+  const campos: Record<string, unknown> = {};
+  for (const chave of permitidos) {
+    const v = args[chave];
+    if (v === undefined || v === null || v === "") continue;
+    campos[chave] = v;
+  }
+  const limpar = Array.isArray(args.limpar) ? args.limpar.map(String) : [];
+  for (const nome of limpar) {
+    const coluna = LIMPAVEIS[nome]?.[tipo];
+    if (!coluna) return { error: `Não dá para limpar "${nome}" ${tipo === "payable" ? "numa conta a pagar" : "numa conta a receber"}.` };
+    if (coluna in campos) return { error: `"${nome}" veio para mudar e para limpar ao mesmo tempo.` };
+    campos[coluna] = null;
+  }
+  if (Object.keys(campos).length === 0) return { error: "Informe ao menos um campo para alterar." };
+  return { campos };
+}
+
+async function corrigirPeloBanco(
+  ctx: ToolCtx, tipo: "payable" | "receivable", id: string, campos: Record<string, unknown>, motivo: unknown,
+) {
+  const { data, error } = await ctx.sb.rpc("corrigir_lancamento", {
+    p_tipo: tipo, p_id: id, p_campos: campos,
+    p_motivo: typeof motivo === "string" && motivo.trim() ? motivo.trim() : null,
+    p_autor: ctx.userId || null,
+  });
+  if (error) return { error: mensagemDoBanco(error) };
+  return data;
+}
+
 
 export const financialTools: ToolDef[] = [
   {
@@ -340,17 +393,22 @@ export const financialTools: ToolDef[] = [
   {
     name: "update_receivable",
     description:
-      "Corrige um RECEBÍVEL já lançado: vencimento, valor, descrição, categoria, centro de custo ou observação. Use para 'muda o vencimento dessa parcela', 'o valor está errado'. Ação sensível (mexe no que o cliente deve) — pede confirmação. NÃO registra pagamento: para isso use register_payment.",
+      "Corrige uma CONTA A RECEBER já lançada — inclusive já recebida: cliente, OS, categoria, descrição, data, vencimento, valor, centro de custo ou observação. Use para 'muda o vencimento dessa parcela', 'esse recebimento é da OS-60', 'o cliente está errado'. Para tirar a OS ou a categoria, use limpar. Mês fechado recusa (só observação passa); valor que veio do banco não muda. Vai para a trilha. Pede confirmação. NÃO registra pagamento: para isso use register_payment.",
     input_schema: {
       type: "object",
       properties: {
-        receivable_id: { type: "string", description: "UUID do recebível (de list_overdue_receivables/get_os_receivables)." },
+        receivable_id: { type: "string", description: "UUID do recebível (de buscar_lancamentos, list_overdue_receivables ou get_os_receivables)." },
+        client_id: { type: "string" },
+        service_order_id: { type: "string", description: "OS a que o recebimento pertence." },
+        category: { type: "string", description: "Categoria financeira (veja listar_categorias_financeiras)." },
+        description: { type: "string" },
+        issue_date: { type: "string", description: "Data do lançamento (ISO date)." },
         due_date: { type: "string", description: "Novo vencimento (ISO date)." },
         amount: { type: "number", description: "Novo valor total." },
-        description: { type: "string" },
-        category: { type: "string", description: "Categoria financeira (veja list_reference_data)." },
         cost_center_id: { type: "string" },
         notes: { type: "string" },
+        limpar: { type: "array", items: { type: "string", enum: ["observacao", "categoria", "os", "centro_de_custo"] }, description: "Campos a deixar vazios." },
+        motivo: { type: "string", description: "Por que corrigir — vai para a trilha." },
       },
       required: ["receivable_id"],
     },
@@ -359,45 +417,33 @@ export const financialTools: ToolDef[] = [
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
-      const { sb } = ctx;
-      const { receivable_id, ...campos } = args as Record<string, unknown>;
-      const patch = Object.fromEntries(Object.entries(campos).filter(([, v]) => v !== undefined && v !== null && v !== ""));
-      if (Object.keys(patch).length === 0) return { error: "Informe ao menos um campo para alterar." };
-
-      const { data: antes } = await sb.from("receivables").select("description, amount, balance_amount, due_date, status, paid_amount").eq("id", receivable_id).maybeSingle();
-      if (!antes) return { error: "Recebível não encontrado." };
-      if (antes.status === "cancelled") return { error: "Recebível cancelado não pode ser alterado." };
-      // Reduzir o valor abaixo do que já foi pago deixaria o título inconsistente.
-      if (patch.amount != null && Number(patch.amount) < (Number(antes.paid_amount) || 0)) {
-        return { error: `O novo valor (R$ ${Number(patch.amount).toFixed(2)}) é menor que o já pago (R$ ${(Number(antes.paid_amount) || 0).toFixed(2)}).` };
-      }
-      // Mexer no valor exige recalcular o saldo em aberto.
-      if (patch.amount != null) patch.balance_amount = Number(patch.amount) - (Number(antes.paid_amount) || 0);
-
-      const { data, error } = await sb.from("receivables").update(patch).eq("id", receivable_id).select().single();
-      if (error) throw error;
-      return {
-        ok: true,
-        antes: { valor: Number(antes.amount) || 0, vencimento: antes.due_date, saldo: Number(antes.balance_amount) || 0 },
-        depois: { valor: Number(data.amount) || 0, vencimento: data.due_date, saldo: Number(data.balance_amount) || 0 },
-      };
+      const r = camposDaCorrecao("receivable", args, [
+        "client_id", "service_order_id", "category", "description", "issue_date", "due_date", "amount", "cost_center_id", "notes",
+      ]);
+      if ("error" in r) return r;
+      return await corrigirPeloBanco(ctx, "receivable", String(args.receivable_id), r.campos, args.motivo);
     },
   },
   {
     name: "update_payable",
     description:
-      "Corrige uma CONTA A PAGAR já lançada: vencimento, valor, descrição, fornecedor, categoria de despesa, centro de custo ou observação. Use para 'adia o vencimento dessa conta', 'o valor veio diferente na nota'. Ação sensível — pede confirmação.",
+      "Corrige uma CONTA A PAGAR ou DESPESA já lançada — inclusive já paga e as que vieram do extrato: fornecedor, favorecido (pessoa), OS, categoria de despesa, descrição, data, vencimento, valor, centro de custo ou observação. Use para 'essa despesa é da OS-60', 'muda a categoria do almoço para alimentação', 'o fornecedor é a Coremma', 'adia o vencimento'. Para tirar OS/favorecido/fornecedor, use limpar. Mês fechado recusa (só observação passa); valor que veio do banco não muda (para isso, desfazer_aprovacao_de_lancamento). Vai para a trilha. Pede confirmação.",
     input_schema: {
       type: "object",
       properties: {
-        payable_id: { type: "string", description: "UUID da conta a pagar (de list_payables_due)." },
+        payable_id: { type: "string", description: "UUID da conta a pagar (de buscar_lancamentos ou list_payables_due)." },
+        supplier_id: { type: "string" },
+        payee_id: { type: "string", description: "Favorecido pessoa (sócio, funcionário, diarista) — veja listar_favorecidos." },
+        linked_service_order_id: { type: "string", description: "OS a que o custo pertence." },
+        expense_category: { type: "string", description: "Categoria de despesa (veja listar_categorias_financeiras)." },
+        description: { type: "string" },
+        issue_date: { type: "string", description: "Data do lançamento (ISO date)." },
         due_date: { type: "string", description: "Novo vencimento (ISO date)." },
         amount: { type: "number", description: "Novo valor total." },
-        description: { type: "string" },
-        supplier_id: { type: "string" },
-        expense_category: { type: "string" },
         cost_center_id: { type: "string" },
         notes: { type: "string" },
+        limpar: { type: "array", items: { type: "string", enum: ["observacao", "categoria", "fornecedor", "favorecido", "os", "centro_de_custo"] }, description: "Campos a deixar vazios." },
+        motivo: { type: "string", description: "Por que corrigir — vai para a trilha." },
       },
       required: ["payable_id"],
     },
@@ -406,26 +452,12 @@ export const financialTools: ToolDef[] = [
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
-      const { sb } = ctx;
-      const { payable_id, ...campos } = args as Record<string, unknown>;
-      const patch = Object.fromEntries(Object.entries(campos).filter(([, v]) => v !== undefined && v !== null && v !== ""));
-      if (Object.keys(patch).length === 0) return { error: "Informe ao menos um campo para alterar." };
-
-      const { data: antes } = await sb.from("payables").select("description, amount, balance_amount, due_date, status, paid_amount").eq("id", payable_id).maybeSingle();
-      if (!antes) return { error: "Conta a pagar não encontrada." };
-      if (antes.status === "paid") return { error: "Conta já paga não pode ser alterada." };
-      if (patch.amount != null && Number(patch.amount) < (Number(antes.paid_amount) || 0)) {
-        return { error: "O novo valor é menor que o já pago nessa conta." };
-      }
-      if (patch.amount != null) patch.balance_amount = Number(patch.amount) - (Number(antes.paid_amount) || 0);
-
-      const { data, error } = await sb.from("payables").update(patch).eq("id", payable_id).select().single();
-      if (error) throw error;
-      return {
-        ok: true,
-        antes: { valor: Number(antes.amount) || 0, vencimento: antes.due_date },
-        depois: { valor: Number(data.amount) || 0, vencimento: data.due_date },
-      };
+      const r = camposDaCorrecao("payable", args, [
+        "supplier_id", "payee_id", "linked_service_order_id", "expense_category", "description",
+        "issue_date", "due_date", "amount", "cost_center_id", "notes",
+      ]);
+      if ("error" in r) return r;
+      return await corrigirPeloBanco(ctx, "payable", String(args.payable_id), r.campos, args.motivo);
     },
   },
   {

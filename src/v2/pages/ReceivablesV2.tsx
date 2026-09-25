@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Download, DollarSign, MoreHorizontal, Pencil, Plus, Receipt as ReceiptIcon, Send } from 'lucide-react';
+import { Ban, Download, DollarSign, MoreHorizontal, Pencil, Plus, Receipt as ReceiptIcon, Send, Undo2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/i18n';
 import { useReceivables, useFinancialSummary } from '@/hooks/use-financial';
@@ -10,11 +10,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
 import { PaymentDialog } from '@/components/PaymentDialog';
 import { ReceivableFormDialog } from '@/components/ReceivableFormDialog';
+import { CorrigirLancamentoDialog } from '@/components/CorrigirLancamentoDialog';
+import { DesfazerOuCancelarDialog, type AcaoNoLancamento } from '@/components/DesfazerOuCancelarDialog';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 // MF-AUD-050: a cobrança em lote por WhatsApp (546 linhas, com throttle e retry)
 // vivia só no Financeiro v1 — desde 30/07 só era alcançável com ?legacy=1.
@@ -87,6 +89,7 @@ export default function ReceivablesV2() {
   const [page, setPage] = useState(1);
   const [paymentTarget, setPaymentTarget] = useState<ReceivableRow | null>(null);
   const [editing, setEditing] = useState<ReceivableRow | null>(null);
+  const [acaoNoTitulo, setAcaoNoTitulo] = useState<{ acao: AcaoNoLancamento; titulo: ReceivableRow } | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [whatsAppTarget, setWhatsAppTarget] = useState<SendViaWhatsAppTarget | null>(null);
@@ -167,14 +170,32 @@ export default function ReceivablesV2() {
             <ReceiptIcon className="h-4 w-4" /> Gerar recibo
           </DropdownMenuItem>
         )}
-        {r.status !== 'paid' && r.status !== 'cancelled' && (
+        {/* Corrigir vale para o título pago também: cliente errado, OS errada ou categoria
+            errada num recebimento que já entrou eram impossíveis de consertar. */}
+        {r.status !== 'cancelled' && (
           <DropdownMenuItem onClick={() => setEditing(r)} className="gap-2">
-            <Pencil className="h-4 w-4" /> Editar recebível
+            <Pencil className="h-4 w-4" /> Corrigir
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onClick={() => openCharge(r)} className="gap-2">
           <Send className="h-4 w-4" /> Enviar WhatsApp…
         </DropdownMenuItem>
+        {r.status !== 'cancelled' && (r as { bank_transaction_id?: string | null }).bank_transaction_id && (
+          <DropdownMenuItem onClick={() => setAcaoNoTitulo({ acao: 'desfazer', titulo: r })} className="gap-2">
+            <Undo2 className="h-4 w-4" /> Desfazer aprovação
+          </DropdownMenuItem>
+        )}
+        {r.status !== 'cancelled' && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => setAcaoNoTitulo({ acao: 'cancelar', titulo: r })}
+              className="gap-2 text-destructive focus:bg-destructive/10 focus:text-destructive"
+            >
+              <Ban className="h-4 w-4" /> Cancelar lançamento
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -411,10 +432,16 @@ export default function ReceivablesV2() {
         />
       )}
       <ReceivableFormDialog open={showNew} onOpenChange={setShowNew} />
-      <ReceivableFormDialog
-        open={!!editing}
-        onOpenChange={(v) => { if (!v) setEditing(null); }}
-        initialData={editing ?? undefined}
+      <CorrigirLancamentoDialog
+        tipo="receivable"
+        lancamento={editing as never}
+        onFechar={() => setEditing(null)}
+      />
+      <DesfazerOuCancelarDialog
+        tipo="receivable"
+        acao={acaoNoTitulo?.acao ?? null}
+        lancamento={acaoNoTitulo?.titulo ?? null}
+        onFechar={() => setAcaoNoTitulo(null)}
       />
       <SendViaWhatsAppDialog
         open={!!whatsAppTarget}

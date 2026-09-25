@@ -37,6 +37,7 @@ import { bomTools } from "./bom.ts";
 import { statusTools } from "./status-tools.ts";
 import { bankingTools } from "./banking.ts";
 import { financeRulesTools } from "./finance-rules.ts";
+import { lancamentoTools } from "./lancamentos.ts";
 import { jornadaTools } from "./jornada.ts";
 import { followupTools } from "./followups.ts";
 
@@ -83,6 +84,7 @@ export const allTools: ToolDef[] = [
   ...statusTools,
   ...bankingTools,
   ...financeRulesTools,
+  ...lancamentoTools,
   ...jornadaTools,
   ...followupTools,
 ].sort((a, b) => a.name.localeCompare(b.name));

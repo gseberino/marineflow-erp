@@ -11,7 +11,7 @@
 //
 // A regra que esta tela materializa: TODA saída da fila é reversível e diz quem, quando e
 // por quê. É o que separa "o sistema resolveu" de "o sistema escondeu".
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,8 @@ import {
 import { useI18n } from '@/i18n';
 import { useIgnoradas, useDesfazerIgnorada, type GrupoIgnorado } from '@/hooks/use-finance-review';
 import { EyeOff, ChevronDown, Undo2, Info } from 'lucide-react';
+import { BuscaFinanceira } from '@/components/BuscaFinanceira';
+import { buscaAtiva, casaComBusca, type CriterioDeBusca } from '@/lib/busca-financeira';
 
 /**
  * O que desfazer um grupo inteiro provoca.
@@ -47,6 +49,23 @@ export function IgnoradasPanel() {
   const desfazer = useDesfazerIgnorada();
   const [aberto, setAberto] = useState<string | null>(null);
   const [confirmando, setConfirmando] = useState<GrupoIgnorado | null>(null);
+  // Busca por nome, CPF/CNPJ, valor, motivo e período. Com centenas de linhas fora da
+  // fila, "onde foi parar aquele Pix?" era abrir grupo por grupo.
+  const [busca, setBusca] = useState<CriterioDeBusca>({ termo: '' });
+  const procurando = buscaAtiva(busca);
+  const visiveis = useMemo(() => {
+    if (!procurando) return grupos;
+    return grupos
+      .map((g) => {
+        const transacoes = g.transacoes.filter((t) => casaComBusca({
+          textos: [t.description, t.counterparty_name, t.counterparty_document, t.dismissed_reason, g.rotulo],
+          valores: [t.amount],
+          data: t.transaction_date,
+        }, busca));
+        return { ...g, transacoes, total: transacoes.reduce((s, t) => s + t.amount, 0) };
+      })
+      .filter((g) => g.transacoes.length > 0);
+  }, [grupos, busca, procurando]);
 
   // Carregando com TÍTULO: uma aba que abre só com retângulos cinza não diz o que está
   // vindo, e quem clicou fica sem saber se errou de lugar ou se o sistema travou.
@@ -92,9 +111,24 @@ export function IgnoradasPanel() {
           foram tiradas da conciliação. Nenhuma some do sistema: todas estão aqui, com o
           motivo, e qualquer uma pode voltar.
         </p>
+        <div className="mt-3">
+          <BuscaFinanceira
+            criterio={busca}
+            onMudar={setBusca}
+            encontrados={visiveis.reduce((s, g) => s + g.transacoes.length, 0)}
+            total={total}
+            placeholder="Buscar por nome, CPF/CNPJ, valor ou motivo"
+          />
+        </div>
       </Card>
 
-      {grupos.map((g) => (
+      {procurando && visiveis.length === 0 && (
+        <Card className="p-6 text-center text-sm text-muted-foreground">
+          Nenhuma transação fora da fila com essa busca.
+        </Card>
+      )}
+
+      {visiveis.map((g) => (
         <Card key={g.kind} className="p-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
@@ -118,7 +152,7 @@ export function IgnoradasPanel() {
             </Button>
           </div>
 
-          <Collapsible open={aberto === g.kind} onOpenChange={(v) => setAberto(v ? g.kind : null)}>
+          <Collapsible open={procurando || aberto === g.kind} onOpenChange={(v) => setAberto(v ? g.kind : null)}>
             <CollapsibleTrigger asChild>
               <button type="button" className="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline">
                 <Info className="h-3 w-3" />
@@ -133,6 +167,10 @@ export function IgnoradasPanel() {
                     <span className="min-w-0 flex-1 break-words">
                       <span className="text-muted-foreground">{formatDate(t.transaction_date)}</span>{' '}
                       {t.counterparty_name || t.description}
+                      {/* No grupo "à mão" o motivo é de cada linha, não do grupo. */}
+                      {t.dismissed_reason && t.dismissed_reason !== g.motivo && (
+                        <span className="block text-xs text-muted-foreground">{t.dismissed_reason}</span>
+                      )}
                     </span>
                     <span className="shrink-0 whitespace-nowrap font-medium tabular-nums">
                       {formatCurrency(t.amount)}

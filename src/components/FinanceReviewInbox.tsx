@@ -26,6 +26,8 @@ import {
 import { useI18n } from '@/i18n';
 import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { PayeeFormDialog } from '@/components/PayeeFormDialog';
+import { BuscaFinanceira } from '@/components/BuscaFinanceira';
+import { buscaAtiva, casaComBusca, type CriterioDeBusca } from '@/lib/busca-financeira';
 import {
   usePayees, useServiceOrdersVinculaveis, useClientesParaReceita, ROTULO_TIPO,
   CATEGORIAS_COM_FAVORECIDO, CATEGORIAS_COM_OS,
@@ -662,7 +664,28 @@ export function FinanceReviewInbox({
   // Alertas do vigilante não são propostas de lançamento: vivem numa seção própria, fora do
   // lote, dos grupos e das contagens de "o que falta classificar".
   const alertas = useMemo(() => propostas.filter((p) => p.kind === 'anomaly'), [propostas]);
-  const normais = useMemo(() => propostas.filter((p) => p.kind !== 'anomaly'), [propostas]);
+  const todasNormais = useMemo(() => propostas.filter((p) => p.kind !== 'anomaly'), [propostas]);
+
+  /**
+   * Busca por nome, CPF/CNPJ, valor e período.
+   *
+   * Com centenas de linhas na fila, achar "o Pix de 1.250 da Coremma" era rolar a lista
+   * inteira. A busca recorta ANTES de tudo — origem, direção, grupos e contagens passam a
+   * falar só do que foi encontrado, senão os números da tela contradizem a lista.
+   */
+  const [busca, setBusca] = useState<CriterioDeBusca>({ termo: '' });
+  const normais = useMemo(() => {
+    if (!buscaAtiva(busca)) return todasNormais;
+    return todasNormais.filter((p) => {
+      const t = p.bank_transactions;
+      return casaComBusca({
+        textos: [p.title, p.suggested_description, p.suggested_category, t?.description, t?.counterparty_name,
+          t?.counterparty_document, t?.merchant_name, t?.merchant_document, t?.payment_reason],
+        valores: [p.suggested_amount],
+        data: p.suggested_date,
+      }, busca);
+    });
+  }, [todasNormais, busca]);
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
   const [correcoes, setCorrecoes] = useState<Record<string, Correcao>>({});
@@ -1007,6 +1030,18 @@ export function FinanceReviewInbox({
                 {icone}{rotulo}
               </Button>
             ))}
+          </div>
+        )}
+
+        {todasNormais.length > 0 && (
+          <div className="mt-3 space-y-1">
+            <BuscaFinanceira criterio={busca} onMudar={setBusca} encontrados={normais.length} total={todasNormais.length} />
+            {buscaAtiva(busca) && normais.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                Nada na fila com essa busca. Se a linha já foi aprovada, ela está em Contas a
+                pagar ou a receber; se saiu da fila, está em Fora da fila.
+              </p>
+            )}
           </div>
         )}
 

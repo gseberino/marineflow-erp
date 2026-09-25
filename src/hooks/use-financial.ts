@@ -723,18 +723,19 @@ export function useUpdateReceivable() {
       notes?: string;
       cost_center_id?: string;
     }) => {
-      const { data, error } = await supabase
-        .from('receivables')
-        .update(patch)
-        .eq('id', id)
-        .select()
-        .single();
+      // Passa pela função do banco, a mesma da tela nova e do assistente: grava na trilha,
+      // respeita mês fechado e recalcula o saldo quando o valor muda. O update direto que
+      // estava aqui deixava balance_amount com o valor antigo.
+      const { data, error } = await supabase.rpc('corrigir_lancamento' as never, {
+        p_tipo: 'receivable', p_id: id, p_campos: patch,
+      } as never);
       if (error) throw error;
       return data;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['receivables'] });
       qc.invalidateQueries({ queryKey: ['receivables', 'by-so'] });
+      qc.invalidateQueries({ queryKey: ['trilha-conciliacao'] });
     },
   });
 }
@@ -751,15 +752,16 @@ export function useUpdatePayable() {
       cost_center_id?: string;
       notes?: string;
     }) => {
-      const { data, error } = await supabase
-        .from('payables')
-        .update(patch)
-        .eq('id', id)
-        .select()
-        .single();
+      // Mesmo caminho único do recebível acima (trilha, mês fechado, saldo recalculado).
+      const { data, error } = await supabase.rpc('corrigir_lancamento' as never, {
+        p_tipo: 'payable', p_id: id, p_campos: patch,
+      } as never);
       if (error) throw error;
       return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['payables'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['payables'] });
+      qc.invalidateQueries({ queryKey: ['trilha-conciliacao'] });
+    },
   });
 }
