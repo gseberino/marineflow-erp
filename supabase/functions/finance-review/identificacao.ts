@@ -34,6 +34,20 @@ async function lerPaginas<T>(consulta: (de: number, ate: number) => any, teto = 
   return todas;
 }
 
+/**
+ * Carrega o contexto sem nunca derrubar a varredura: se alguma leitura falhar, a proposta
+ * continua nascendo como antes (só sem a identificação extra) e o erro fica no log. Uma
+ * falha aqui não pode custar o dia inteiro de propostas.
+ */
+export async function carregarContextoSeguro(admin: DbClient): Promise<ContextoDeIdentificacao | null> {
+  try {
+    return await carregarContexto(admin);
+  } catch (e) {
+    console.error("[finance-review] contexto de identificação indisponível — seguindo sem ele", e);
+    return null;
+  }
+}
+
 export async function carregarContexto(admin: DbClient): Promise<ContextoDeIdentificacao> {
   const [fornecedores, favorecidos, clientes, categorias] = await Promise.all([
     lerPaginas<any>((de, ate) => admin.from("suppliers").select("id, name, trade_name, cnpj_cpf").order("id").range(de, ate)),
@@ -115,7 +129,14 @@ function semNulos(i: Identificacao): Record<string, unknown> | null {
   return Object.keys(o).length ? o : null;
 }
 
-export function identificarLinha(tx: TxDaFila, p: PropostaBase, ctx: ContextoDeIdentificacao): LinhaIdentificada {
+export function identificarLinha(tx: TxDaFila, p: PropostaBase, ctx: ContextoDeIdentificacao | null): LinhaIdentificada {
+  // Sem contexto (leitura falhou): o que o motor de propostas já sabia, e nada mais.
+  if (!ctx) {
+    return {
+      supplierId: p.suggestedSupplierId, payeeId: null, clientId: null, serviceOrderId: null,
+      categoria: p.suggestedCategory, dreGroup: p.dreGroup, evidencia: null, vinculo: null, frases: [],
+    };
+  }
   const ident = identificarContraparte(tx, ctx.indice);
   const frases: string[] = [];
 

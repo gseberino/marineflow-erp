@@ -34,7 +34,7 @@ import {
   type CompraParcelada, type PernaDeParcelamento,
 } from "../_shared/banking/installments.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
-import { carregarContexto, identificarLinha, type ContextoDeIdentificacao, type TxDaFila } from "./identificacao.ts";
+import { carregarContextoSeguro, identificarLinha, type TxDaFila } from "./identificacao.ts";
 import { exigeDecisao, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido } from "../_shared/banking/vinculo.ts";
 import { lerRespostaDaReceita } from "../_shared/banking/cnae.ts";
 import { selecionarParaLancarSozinho, type LinhaCandidata } from "./lancar-sozinho.ts";
@@ -501,7 +501,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
 
   // Quem é quem e o que cada linha paga: cadastros, "quem já pagou por quem" e tudo que
   // está em aberto ou já lançado. O mesmo contexto serve à "Revisar a fila".
-  const contexto = await carregarContexto(admin);
+  const contexto = await carregarContextoSeguro(admin);
 
   // Compra parcelada é UMA compra: a proposta nasce na parcela mais antiga, com o valor
   // total, e as outras pernas não viram despesa separada.
@@ -859,7 +859,7 @@ async function reclassificar(admin: DbClient, soSemEvidencia = false) {
     .from("finance_rules").select("*").eq("status", "active").limit(500);
   const regras = (regrasRows ?? []) as unknown as RegraFinanceira[];
 
-  const contexto = await carregarContexto(admin);
+  const contexto = await carregarContextoSeguro(admin);
 
   /**
    * Cada linha é reidentificada: categoria e regra (como antes) e, agora, fornecedor,
@@ -892,6 +892,15 @@ async function reclassificar(admin: DbClient, soSemEvidencia = false) {
       evidencia: id.evidencia,
       vinculo_sugerido: id.vinculo,
     };
+    // Sem contexto (leitura falhou), a identificação que a linha JÁ tem fica como está —
+    // reavaliar não pode apagar o que se sabia por causa de uma falha de leitura.
+    if (!contexto) {
+      Object.assign(linha, {
+        suggested_payee_id: p.suggested_payee_id ?? null, suggested_client_id: p.suggested_client_id ?? null,
+        suggested_service_order_id: p.suggested_service_order_id ?? null,
+        evidencia: p.evidencia ?? null, vinculo_sugerido: p.vinculo_sugerido ?? null,
+      });
+    }
     const mudou = linha.suggested_category !== p.suggested_category
       || linha.dre_group !== p.dre_group
       || (linha.suggested_supplier_id ?? null) !== (p.suggested_supplier_id ?? null)
