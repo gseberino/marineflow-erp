@@ -97,6 +97,9 @@ export const ROTULO_DA_ACAO: Record<string, string> = {
   conciliou: 'Conciliou',
   reclassificou: 'Reclassificou',
   fechou_periodo: 'Fechou período',
+  cancelou_lancamento: 'Cancelou lançamento',
+  corrigiu_lancamento: 'Corrigiu lançamento',
+  desfez_aprovacao: 'Desfez aprovação',
 };
 
 /** O que foi feito, por quem e quando — a trilha que nenhuma tela apagava antes. */

@@ -120,13 +120,24 @@ servirComCors(async (req) => {
     try {
       const { data: conexoes } = await admin.from("bank_connections").select("id, label").eq("active", true);
       for (const c of (conexoes ?? []) as { id: string; label: string }[]) {
-        const { data: ult } = await admin
+        // Só avisa quando a diferença PERSISTE, igual, em duas conferências seguidas.
+        //
+        // O saldo do banco é do momento; as transações chegam com atraso de uma sincronização
+        // (em 22/09 às 21:00 o saldo já tinha subido R$ 2.671 e as linhas só entraram na
+        // rodada seguinte). Uma diferença que some na conferência seguinte é atraso, não
+        // falta. Avisar na primeira gerou alerta falso — e, somado à conta com sinal
+        // errado corrigida em 25/09/2026, quatro mensagens "pode faltar lançamento" sem
+        // faltar nada. Verificador que grita sem motivo ensina a ignorar o aviso.
+        const { data: duas } = await admin
           .from("bank_balance_checks").select("fecha, diferenca, saldo_do_provedor, saldo_calculado, conferido_em")
-          .eq("bank_connection_id", c.id).order("conferido_em", { ascending: false }).limit(1).maybeSingle();
-        if (!ult || ult.fecha || Math.abs(Number(ult.diferenca)) < 1) continue;
+          .eq("bank_connection_id", c.id).order("conferido_em", { ascending: false }).limit(2);
+        const [ult, anterior] = (duas ?? []) as Array<{ fecha: boolean; diferenca: number; saldo_do_provedor: number; saldo_calculado: number }>;
+        if (!ult || !anterior) continue;
+        if (ult.fecha || anterior.fecha || Math.abs(Number(ult.diferenca)) < 1) continue;
+        if (Math.abs(Number(ult.diferenca) - Number(anterior.diferenca)) >= 1) continue;
         if (await claim(`saldo_divergente:${c.id}:${todayISO}`, { diferenca: ult.diferenca })) {
           const brl = (v: unknown) => Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-          alerts.push(`🏦 Extrato de ${c.label}: o saldo do banco (${brl(ult.saldo_do_provedor)}) não bate com a soma das transações importadas (${brl(ult.saldo_calculado)}), diferença ${brl(ult.diferenca)}. Pode faltar lançamento; confira em Financeiro › Fechamento.`);
+          alerts.push(`🏦 Extrato de ${c.label}: o saldo do banco (${brl(ult.saldo_do_provedor)}) não bate com a soma das transações importadas (${brl(ult.saldo_calculado)}), diferença ${brl(ult.diferenca)}. A diferença se repetiu nas duas últimas conferências: confira no app do banco se falta alguma transação no sistema (Financeiro › Fechamento).`);
         }
       }
     } catch (_e) {

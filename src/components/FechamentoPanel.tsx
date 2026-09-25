@@ -10,7 +10,7 @@
 // 3. CONFERÊNCIA DE SALDO. Responde a única pergunta que nenhuma outra responde — FALTA
 //    transação? Um lançamento perdido na sincronização não deixa buraco visível: ele
 //    simplesmente não existe para o sistema.
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,7 @@ import {
   usePeriodosFechados, useFecharPeriodo, useReabrirPeriodo,
   useTrilhaDeConciliacao, useConferenciasDeSaldo, ROTULO_DA_ACAO,
 } from '@/hooks/use-fechamento';
+import { useBankConnections } from '@/hooks/use-bank-connections';
 import { Lock, LockOpen, ScrollText, Scale, AlertTriangle } from 'lucide-react';
 
 const MESES = [
@@ -45,7 +46,29 @@ export function FechamentoPanel() {
   const [reabrindo, setReabrindo] = useState<string | null>(null);
   const [motivo, setMotivo] = useState('');
 
-  const naoFechadas = conferencias.filter((c: { fecha: boolean }) => !c.fecha);
+  const { data: conexoes = [] } = useBankConnections();
+
+  /**
+   * A última conferência de cada conta — a situação de HOJE.
+   *
+   * A tela listava as 50 últimas conferências e dizia "N não fecharam". Isso misturava
+   * passado com presente: em 25/09/2026 ela mostraria seis conferências do C6 que falharam
+   * por um erro de conta (débito somando em vez de subtrair), já corrigido. O que importa
+   * para fechar o mês é se cada conta confere agora.
+   */
+  type Conferencia = { id: string; conferido_em: string; diferenca: number; fecha: boolean; observacao: string | null; bank_connection_id: string };
+  const situacaoPorConta = useMemo(() => {
+    const ultima = new Map<string, Conferencia>();
+    for (const c of conferencias as Conferencia[]) {
+      if (!ultima.has(c.bank_connection_id)) ultima.set(c.bank_connection_id, c);
+    }
+    return [...ultima.entries()].map(([id, c]) => ({
+      id,
+      conta: conexoes.find((x) => x.id === id)?.label ?? 'Conta',
+      conferencia: c,
+    }));
+  }, [conferencias, conexoes]);
+  const naoFechadas = situacaoPorConta.filter((s) => !s.conferencia.fecha);
 
   if (isLoading) {
     return (
@@ -149,17 +172,18 @@ export function FechamentoPanel() {
         <Card className="border-amber-500/40 bg-amber-500/5 p-3">
           <p className="flex items-center gap-2 text-sm font-medium text-amber-700">
             <AlertTriangle className="h-4 w-4" />
-            {naoFechadas.length} conferência(s) de saldo não fecharam
+            {naoFechadas.length === 1 ? 'Uma conta não confere' : `${naoFechadas.length} contas não conferem`} com o saldo do banco
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            O saldo que o banco informa não bate com o que as transações explicam. A
-            diferença é, provavelmente, transação que não chegou na sincronização.
+            O saldo que o banco informa não bate com o que as transações explicam. Se a
+            diferença sumir na próxima sincronização, era só atraso do banco; se continuar,
+            confira no app do banco se falta alguma transação no sistema.
           </p>
           <ul className="mt-2 space-y-1 text-sm">
-            {naoFechadas.slice(0, 5).map((c: { id: string; conferido_em: string; diferenca: number }) => (
-              <li key={c.id} className="flex justify-between gap-2">
-                <span>{formatDate(c.conferido_em.slice(0, 10))}</span>
-                <span className="font-semibold tabular-nums">{formatCurrency(Number(c.diferenca))}</span>
+            {naoFechadas.map((s) => (
+              <li key={s.id} className="flex min-w-0 justify-between gap-2">
+                <span className="min-w-0 truncate">{s.conta} · {formatDate(s.conferencia.conferido_em.slice(0, 10))}</span>
+                <span className="shrink-0 font-semibold tabular-nums">{formatCurrency(Number(s.conferencia.diferenca))}</span>
               </li>
             ))}
           </ul>
@@ -201,11 +225,22 @@ export function FechamentoPanel() {
           <Scale className="h-4 w-4 text-muted-foreground" />
           Integridade do extrato
         </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {conferencias.length === 0
-            ? 'Nenhuma conferência ainda — ela roda a cada sincronização bancária.'
-            : `${conferencias.length - naoFechadas.length} de ${conferencias.length} conferências fecharam.`}
-        </p>
+        {situacaoPorConta.length === 0 ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Nenhuma conferência ainda. Ela roda a cada sincronização bancária, às 06:00 e às 18:00.
+          </p>
+        ) : (
+          <ul className="mt-2 space-y-1 text-sm">
+            {situacaoPorConta.map((s) => (
+              <li key={s.id} className="flex min-w-0 items-center justify-between gap-2">
+                <span className="min-w-0 truncate">{s.conta}</span>
+                {s.conferencia.fecha
+                  ? <Badge variant="secondary" className="shrink-0 text-xs">confere</Badge>
+                  : <Badge variant="outline" className="shrink-0 border-amber-500/50 text-xs text-amber-600">difere {formatCurrency(Math.abs(Number(s.conferencia.diferenca)))}</Badge>}
+              </li>
+            ))}
+          </ul>
+        )}
       </Card>
     </div>
   );
