@@ -34,24 +34,52 @@ export function usePeriodosFechados() {
   });
 }
 
+/** Um item de "O mês está pronto?" — calculado no banco (checklist_do_mes). */
+export interface ItemDoChecklist {
+  chave: string;
+  titulo: string;
+  ok: boolean;
+  /** true = impede fechar; false = só avisa. */
+  bloqueia: boolean;
+  quantidade: number;
+  valor?: number;
+  detalhe: string;
+}
+
+export function useChecklistDoMes(ano: number, mes: number) {
+  return useQuery({
+    queryKey: ['checklist-do-mes', ano, mes],
+    enabled: ano > 2000 && mes >= 1 && mes <= 12,
+    queryFn: async (): Promise<{ pronto: boolean; itens: ItemDoChecklist[] }> => {
+      const { data, error } = await supabase.rpc('checklist_do_mes' as never, { p_ano: ano, p_mes: mes } as never);
+      if (error) throw error;
+      return data as unknown as { pronto: boolean; itens: ItemDoChecklist[] };
+    },
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Fechar o mês pela função do banco: ela roda a verificação de novo no clique e só fecha
+ * com tudo verde — ou com o motivo escrito, que vai para a trilha junto com o retrato.
+ */
 export function useFecharPeriodo() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (v: { ano: number; mes: number }) => {
-      const { error } = await supabase.from('periodos_fechados')
-        .insert({ ano: v.ano, mes: v.mes } as never);
+    mutationFn: async (v: { ano: number; mes: number; motivo?: string | null }) => {
+      const { data, error } = await supabase.rpc('fechar_mes' as never, {
+        p_ano: v.ano, p_mes: v.mes, p_motivo: v.motivo ?? null,
+      } as never);
       if (error) throw error;
+      return data as unknown as { ok: boolean; message: string };
     },
-    onSuccess: () => {
-      toast.success('Período fechado. Lançamentos nesta data passam a ser recusados.');
+    onSuccess: (r) => {
+      toast.success(r?.message ?? 'Período fechado. Lançamentos nesta data passam a ser recusados.');
       qc.invalidateQueries({ queryKey: ['periodos-fechados'] });
+      qc.invalidateQueries({ queryKey: ['checklist-do-mes'] });
+      qc.invalidateQueries({ queryKey: ['trilha-conciliacao'] });
     },
-    onError: (e: Error) => {
-      const msg = /duplicate key|periodos_fechados_ano_mes/i.test(e.message)
-        ? 'Este mês já está fechado.'
-        : e.message;
-      toast.error(msg);
-    },
+    onError: (e: Error) => toast.error(e.message.replace(/^(P0001|42501|23514):\s*/, '')),
   });
 }
 
@@ -102,6 +130,8 @@ export const ROTULO_DA_ACAO: Record<string, string> = {
   desfez_aprovacao: 'Desfez aprovação',
   desconciliou: 'Desfez vínculo com o extrato',
   cadastrou_contraparte: 'Cadastrou a partir do extrato',
+  lancou_sozinho: 'Lançou sozinho',
+  configurou_automatico: 'Configurou o lançar sozinho',
 };
 
 /** O que foi feito, por quem e quando — a trilha que nenhuma tela apagava antes. */

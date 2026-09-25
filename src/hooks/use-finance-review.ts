@@ -71,6 +71,8 @@ export interface PropostaFinanceira {
     payee_mcc: string | null;
     provider_category: string | null;
     card_last_digits: string | null;
+    /** De qual conta veio — para o Extrato por conta. */
+    bank_connection_id?: string | null;
   } | null;
 }
 
@@ -156,7 +158,7 @@ export function useFinanceReviewQueue() {
           counterparty_bank, counterparty_branch, counterparty_account, payment_method,
           payment_reason, merchant_name, merchant_document, installment_label,
           pix_end_to_end_id, description, source_type, bank_ref_id,
-          payee_mcc, provider_category, card_last_digits )`)
+          payee_mcc, provider_category, card_last_digits, bank_connection_id )`)
         .eq('status', 'pending')
         .order('confidence', { ascending: false })
         .order('suggested_amount', { ascending: false })
@@ -307,6 +309,7 @@ export interface GrupoIgnorado {
     /** O motivo DESTA linha — no grupo "à mão" cada cancelamento tem o seu. */
     dismissed_reason?: string | null;
     counterparty_document?: string | null;
+    bank_connection_id?: string | null;
   }>;
   total: number;
 }
@@ -334,7 +337,7 @@ export function useIgnoradas() {
     queryFn: async (): Promise<GrupoIgnorado[]> => {
       const { data, error } = await supabase
         .from('bank_transactions')
-        .select('id, transaction_date, description, amount, counterparty_name, counterparty_document, dismissed_reason, dismissed_kind, dismissed_at')
+        .select('id, transaction_date, description, amount, counterparty_name, counterparty_document, dismissed_reason, dismissed_kind, dismissed_at, bank_connection_id')
         .not('dismissed_reason', 'is', null)
         .order('transaction_date', { ascending: false })
         .limit(1000);
@@ -355,6 +358,7 @@ export function useIgnoradas() {
           amount: Number(t.amount), counterparty_name: t.counterparty_name,
           dismissed_at: t.dismissed_at, dismissed_reason: t.dismissed_reason,
           counterparty_document: t.counterparty_document,
+          bank_connection_id: t.bank_connection_id,
         });
         g.total += Number(t.amount);
         porTipo.set(kind, g);

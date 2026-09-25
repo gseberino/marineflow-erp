@@ -43,9 +43,19 @@ const CONSEQUENCIA: Record<string, string> = {
   manual: 'As transações voltam para a fila.',
 };
 
-export function IgnoradasPanel() {
+export function IgnoradasPanel({ contaId = null }: { contaId?: string | null } = {}) {
   const { formatCurrency, formatDate } = useI18n();
-  const { data: grupos = [], isLoading } = useIgnoradas();
+  const { data: gruposTodos = [], isLoading } = useIgnoradas();
+  // Extrato por conta: só o que saiu da fila nesta conta.
+  const grupos = useMemo(() => {
+    if (!contaId) return gruposTodos;
+    return gruposTodos
+      .map((g) => {
+        const transacoes = g.transacoes.filter((t) => t.bank_connection_id === contaId);
+        return { ...g, transacoes, total: transacoes.reduce((s, t) => s + t.amount, 0) };
+      })
+      .filter((g) => g.transacoes.length > 0);
+  }, [gruposTodos, contaId]);
   const desfazer = useDesfazerIgnorada();
   const [aberto, setAberto] = useState<string | null>(null);
   const [confirmando, setConfirmando] = useState<GrupoIgnorado | null>(null);

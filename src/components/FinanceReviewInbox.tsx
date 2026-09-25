@@ -657,10 +657,12 @@ export interface SementeDeRegra {
 }
 
 export function FinanceReviewInbox({
-  onCriarRegra,
+  onCriarRegra, contaId = null,
 }: {
   /** A tela que hospeda abre o editor de regras já preenchido com esta linha. */
   onCriarRegra?: (semente: SementeDeRegra) => void;
+  /** Só as linhas desta conta (Extrato por conta). null = todas. */
+  contaId?: string | null;
 } = {}) {
   const { formatCurrency } = useI18n();
   const limiteLote = useLimiteLote();
@@ -691,7 +693,10 @@ export function FinanceReviewInbox({
   // Alertas do vigilante não são propostas de lançamento: vivem numa seção própria, fora do
   // lote, dos grupos e das contagens de "o que falta classificar".
   const alertas = useMemo(() => propostas.filter((p) => p.kind === 'anomaly'), [propostas]);
-  const todasNormais = useMemo(() => propostas.filter((p) => p.kind !== 'anomaly'), [propostas]);
+  const todasNormais = useMemo(
+    () => propostas.filter((p) => p.kind !== 'anomaly' && (!contaId || p.bank_transactions?.bank_connection_id === contaId)),
+    [propostas, contaId],
+  );
 
   /**
    * Busca por nome, CPF/CNPJ, valor e período.

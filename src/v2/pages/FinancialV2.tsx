@@ -26,9 +26,9 @@ import { AcoesDaLinha, type AcaoDaLinha } from '@/components/AcoesDaLinha';
 import { DREPanel } from '@/components/DREPanel';
 import { ConciliacaoPanel } from '@/components/ConciliacaoPanel';
 import { BankSourcesPanel } from '@/components/BankSourcesPanel';
-import { FinanceReviewInbox, type SementeDeRegra } from '@/components/FinanceReviewInbox';
+import type { SementeDeRegra } from '@/components/FinanceReviewInbox';
 import { FinanceRulesPanel, EditorDeRegra } from '@/components/FinanceRulesPanel';
-import { IgnoradasPanel } from '@/components/IgnoradasPanel';
+import { ExtratoPorConta } from '@/components/ExtratoPorConta';
 import { CartoesPanel } from '@/components/CartoesPanel';
 import { FechamentoPanel } from '@/components/FechamentoPanel';
 import { SaudeDoCadastroPanel } from '@/components/SaudeDoCadastroPanel';
@@ -141,7 +141,10 @@ export default function FinancialV2() {
   // com ?tab= continua valendo: é normalizado para a rota na primeira renderização.
   const { secao } = useParams<{ secao?: string }>();
   const tabDaQuery = searchParams.get('tab');
-  const tab = secao || tabDaQuery || 'overview';
+  // "Fora da fila" deixou de ser aba solta (Fase 3.2): é uma das visões do Extrato por
+  // conta. Link antigo (/v2/financial/ignoradas) abre o Extrato já nessa visão.
+  const secaoPedida = secao || tabDaQuery || 'overview';
+  const tab = secaoPedida === 'ignoradas' ? 'inbox' : secaoPedida;
   useEffect(() => {
     if (!secao && tabDaQuery) {
       navigate(tabDaQuery === 'overview' ? '/v2/financial' : `/v2/financial/${tabDaQuery}`, { replace: true });
@@ -397,7 +400,6 @@ export default function FinancialV2() {
                 e pertencente a um ciclo que fecha. Misturá-lo com Pix e transferência foi o
                 que o gestor pediu para desfazer. */}
             <TabsTrigger value="cartoes">Cartões</TabsTrigger>
-            <TabsTrigger value="ignoradas">Fora da fila</TabsTrigger>
             <TabsTrigger value="rules">Regras</TabsTrigger>
             {/* Fechar o mês, ler a trilha e conferir se o extrato está completo — os três
                 controles que separam "o número está certo" de "o número é auditável". */}
@@ -657,7 +659,11 @@ export default function FinancialV2() {
 
           {/* ── EXTRATO / CONCILIAÇÃO / REGRAS / CONTAS / AGING ── */}
           <TabsContent value="inbox" className="mt-4">
-            <FinanceReviewInbox onCriarRegra={setSementeRegra} />
+            <ExtratoPorConta
+              key={secaoPedida}
+              visaoInicial={secaoPedida === 'ignoradas' ? 'fora' : 'revisar'}
+              onCriarRegra={setSementeRegra}
+            />
           </TabsContent>
           {/* A BankReconciliation (1.727 linhas) foi aposentada aqui por decisão do gestor:
               ela partia do extrato e chamava aquilo de conciliação. O que ela tinha de bom
@@ -667,7 +673,6 @@ export default function FinancialV2() {
           <TabsContent value="forecast" className="mt-4"><CashForecastPanel /></TabsContent>
           <TabsContent value="reconciliation" className="mt-4"><ConciliacaoPanel /></TabsContent>
           <TabsContent value="cartoes" className="mt-4"><CartoesPanel /></TabsContent>
-          <TabsContent value="ignoradas" className="mt-4"><IgnoradasPanel /></TabsContent>
           <TabsContent value="fechamento" className="mt-4"><FechamentoPanel /></TabsContent>
           <TabsContent value="cadastro" className="mt-4"><SaudeDoCadastroPanel /></TabsContent>
           <TabsContent value="rules" className="mt-4"><FinanceRulesPanel /></TabsContent>
@@ -705,11 +710,13 @@ export default function FinancialV2() {
       {/* Corrigir serve para qualquer conta, inclusive paga, e passa pelo caminho único
           (trilha, mês fechado, valor do banco travado). O formulário de criação continua
           sendo o PayableFormDialog. */}
-      <CorrigirLancamentoDialog
-        tipo="payable"
-        lancamento={editingPayable as never}
-        onFechar={() => setEditingPayable(null)}
-      />
+      {editingPayable && (
+        <CorrigirLancamentoDialog
+          tipo="payable"
+          lancamento={editingPayable as never}
+          onFechar={() => setEditingPayable(null)}
+        />
+      )}
       <DesfazerOuCancelarDialog
         tipo="payable"
         acao={acaoNaConta?.acao ?? null}

@@ -10,7 +10,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 import { FechamentoPanel } from './FechamentoPanel';
 
-const { conferencias } = vi.hoisted(() => ({
+const { conferencias, checklist } = vi.hoisted(() => ({
+  checklist: { atual: { pronto: false, itens: [
+    { chave: 'saldo_confere', titulo: 'O saldo de cada conta confere com o banco', ok: true, bloqueia: true, quantidade: 0, detalhe: 'Todas conferem.' },
+    { chave: 'extrato_tratado', titulo: 'Todo movimento do banco no mês tem destino', ok: false, bloqueia: true, quantidade: 36, detalhe: '36 linha(s) esperando no Extrato.' },
+    { chave: 'outras_despesas', titulo: 'Pouco em "Outras despesas"', ok: false, bloqueia: false, quantidade: 2, detalhe: '2 lançamentos.' },
+  ] } as { pronto: boolean; itens: unknown[] } },
   conferencias: [
     // Mais recentes primeiro, como a consulta devolve.
     { id: 'c6-hoje', conferido_em: '2026-09-25T21:00:00Z', diferenca: 0, fecha: true, observacao: null, bank_connection_id: 'c6', saldo_do_provedor: 1386.61, saldo_calculado: 1386.61 },
@@ -28,6 +33,7 @@ vi.mock('@/hooks/use-fechamento', () => ({
     data: [{ id: 't1', ocorrido_em: '2026-09-25T17:00:00Z', acao: 'cancelou_lancamento', valor: 1111.44, detalhe: 'Compra parcelada lançada em dobro', autor: null }],
   }),
   useConferenciasDeSaldo: () => ({ data: conferencias }),
+  useChecklistDoMes: () => ({ isLoading: false, data: checklist.atual }),
   ROTULO_DA_ACAO: { cancelou_lancamento: 'Cancelou lançamento' },
 }));
 
@@ -64,5 +70,14 @@ describe('FechamentoPanel — conferência de saldo', () => {
   it('a trilha nomeia o cancelamento em português', () => {
     renderPainel();
     expect(screen.getByText('Cancelou lançamento')).toBeInTheDocument();
+  });
+
+  it('o mês que não está pronto não fecha no botão principal, e diz por quê', () => {
+    renderPainel();
+    expect(screen.getByText('Ainda não.')).toBeInTheDocument();
+    expect(screen.getByText('36 linha(s) esperando no Extrato.')).toBeInTheDocument();
+    expect(screen.getByText(/\(aviso\)/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Fechar [a-zç]+\/\d{4}$/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Fechar mesmo assim…' })).toBeInTheDocument();
   });
 });

@@ -432,11 +432,13 @@ export default function ReceivablesV2() {
         />
       )}
       <ReceivableFormDialog open={showNew} onOpenChange={setShowNew} />
-      <CorrigirLancamentoDialog
-        tipo="receivable"
-        lancamento={editing as never}
-        onFechar={() => setEditing(null)}
-      />
+      {editing && (
+        <CorrigirLancamentoDialog
+          tipo="receivable"
+          lancamento={editing as never}
+          onFechar={() => setEditing(null)}
+        />
+      )}
       <DesfazerOuCancelarDialog
         tipo="receivable"
         acao={acaoNoTitulo?.acao ?? null}

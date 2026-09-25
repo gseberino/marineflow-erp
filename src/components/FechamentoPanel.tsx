@@ -20,10 +20,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useI18n } from '@/i18n';
 import {
   usePeriodosFechados, useFecharPeriodo, useReabrirPeriodo,
-  useTrilhaDeConciliacao, useConferenciasDeSaldo, ROTULO_DA_ACAO,
+  useTrilhaDeConciliacao, useConferenciasDeSaldo, useChecklistDoMes, ROTULO_DA_ACAO,
 } from '@/hooks/use-fechamento';
 import { useBankConnections } from '@/hooks/use-bank-connections';
-import { Lock, LockOpen, ScrollText, Scale, AlertTriangle } from 'lucide-react';
+import { Lock, LockOpen, ScrollText, Scale, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 
 const MESES = [
   'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
@@ -45,6 +45,10 @@ export function FechamentoPanel() {
   const [mes, setMes] = useState(hoje.getMonth() === 0 ? 12 : hoje.getMonth());
   const [reabrindo, setReabrindo] = useState<string | null>(null);
   const [motivo, setMotivo] = useState('');
+  // "Fechar mesmo assim" — só aparece quando a verificação não passou, e pede o porquê.
+  const [assimMesmo, setAssimMesmo] = useState(false);
+  const [motivoPendencia, setMotivoPendencia] = useState('');
+  const checklist = useChecklistDoMes(ano, mes);
 
   const { data: conexoes = [] } = useBankConnections();
 
@@ -111,12 +115,65 @@ export function FechamentoPanel() {
           />
           <Button
             size="sm"
-            disabled={fechar.isPending}
+            disabled={fechar.isPending || checklist.isLoading || !checklist.data?.pronto}
+            title={checklist.data?.pronto ? undefined : 'O mês ainda não está pronto: veja os itens abaixo'}
             onClick={() => fechar.mutate({ ano, mes })}
           >
             <Lock className="mr-2 h-4 w-4" />
             Fechar {MESES[mes - 1]}/{ano}
           </Button>
+        </div>
+
+        {/* O MÊS ESTÁ PRONTO? — o que separa "fechei" de "fechei com prova". Calculado no
+            banco; o fechamento confere de novo no clique, então a tela velha não fecha nada. */}
+        <div className="mt-3 rounded-md border p-3">
+          <p className="mb-2 text-sm font-medium">
+            O mês está pronto?{' '}
+            {checklist.data && (
+              checklist.data.pronto
+                ? <span className="text-success">Sim — pode fechar.</span>
+                : <span className="text-destructive">Ainda não.</span>
+            )}
+          </p>
+          {checklist.isLoading && <Skeleton className="h-24 w-full" />}
+          {checklist.error && <p className="text-sm text-destructive">Não deu para verificar o mês: {(checklist.error as Error).message}</p>}
+          <ul className="space-y-1.5 text-sm">
+            {(checklist.data?.itens ?? []).map((i) => (
+              <li key={i.chave} className="flex min-w-0 items-start gap-2">
+                {i.ok
+                  ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
+                  : i.bloqueia
+                    ? <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+                    : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />}
+                <span className="min-w-0 flex-1">
+                  <span className="block">{i.titulo}{!i.ok && !i.bloqueia ? ' (aviso)' : ''}</span>
+                  <span className="block text-xs text-muted-foreground">{i.detalhe}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+          {checklist.data && !checklist.data.pronto && (
+            assimMesmo ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Input
+                  className="h-9 min-w-0 flex-1" placeholder="Por que fechar com pendência? (vai para a trilha)"
+                  value={motivoPendencia} onChange={(e) => setMotivoPendencia(e.target.value)}
+                />
+                <Button size="sm" variant="destructive"
+                  disabled={motivoPendencia.trim().length < 10 || fechar.isPending}
+                  onClick={() => fechar.mutate({ ano, mes, motivo: motivoPendencia.trim() }, {
+                    onSuccess: () => { setAssimMesmo(false); setMotivoPendencia(''); },
+                  })}>
+                  Fechar com pendência
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setAssimMesmo(false)}>Cancelar</Button>
+              </div>
+            ) : (
+              <Button size="sm" variant="ghost" className="mt-2 h-8 text-xs" onClick={() => setAssimMesmo(true)}>
+                Fechar mesmo assim…
+              </Button>
+            )
+          )}
         </div>
       </Card>
 

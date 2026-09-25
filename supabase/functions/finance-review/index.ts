@@ -37,6 +37,7 @@ import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { carregarContexto, identificarLinha, type ContextoDeIdentificacao, type TxDaFila } from "./identificacao.ts";
 import { exigeDecisao, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido } from "../_shared/banking/vinculo.ts";
 import { lerRespostaDaReceita } from "../_shared/banking/cnae.ts";
+import { selecionarParaLancarSozinho, type LinhaCandidata } from "./lancar-sozinho.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
 
@@ -604,8 +605,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const desteLote = incluirHistorico ? ordenados.slice(0, LOTE_HISTORICO) : elegiveis;
   const restantes = elegiveis.length - desteLote.length;
 
-  const linhas: Record<string, unknown>[] = [];
-  const autoAplicar: Record<string, unknown>[] = [];
+  const linhas: Array<Record<string, any>> = [];
+  const autoAplicar: Array<Record<string, any>> = [];
   for (const tx of desteLote) {
     const par = parPor.get(tx.id);
     if (par) {
@@ -712,9 +713,44 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     .map((l) => idsPorTransacao.get(String(l.bank_transaction_id)))
     .filter((v): v is string => !!v);
   if (idsAuto.length > 0) {
-    const resposta = await aprovar(admin, idsAuto, null, {});
+    const resposta = await aprovar(admin, idsAuto, null, {}, "regra");
     const corpo = await resposta.json();
     lancadasSozinhas = Number(corpo?.aprovadas ?? 0);
+  }
+
+  /**
+   * Lançar sozinho por CONFIANÇA (decisão do dono, 25/09/2026).
+   *
+   * Só saída, confiança na faixa que acertou 98,6% (85+), abaixo do limite de lote, com
+   * categoria de verdade (não "Outras despesas"), sem alerta do vigilante sobre a transação
+   * e sem "pode já estar lançado". Fica marcada como automática, aparece em "Lançados
+   * sozinhos" e se desfaz como qualquer aprovação.
+   */
+  const cfgAuto = await admin.from("app_settings").select("key, value")
+    .in("key", ["finance_auto_approve", "finance_auto_approve_min_confidence"]);
+  const mapaAuto = Object.fromEntries(((cfgAuto.data ?? []) as { key: string; value: string }[]).map((r) => [r.key, r.value]));
+  const autoLigado = String(mapaAuto.finance_auto_approve ?? "off").toLowerCase() === "on";
+  const confiancaMinima = Math.max(85, Number(mapaAuto.finance_auto_approve_min_confidence ?? 85) || 85);
+  if (autoLigado) {
+    const jaPorRegra = new Set(autoAplicar.map((l) => String(l.bank_transaction_id)));
+    // Transação com alerta do vigilante pendente não entra: o alerta existe para alguém olhar.
+    const comAlerta = new Set<string>();
+    const txs = linhas.filter((l) => l.kind === "create_payable").map((l) => String(l.bank_transaction_id));
+    for (let i = 0; i < txs.length; i += 150) {
+      const { data } = await admin.from("finance_review_queue").select("related_transaction_id")
+        .eq("kind", "anomaly").eq("status", "pending").in("related_transaction_id", txs.slice(i, i + 150));
+      for (const r of (data ?? []) as any[]) comAlerta.add(String(r.related_transaction_id));
+    }
+    const idsConfianca = selecionarParaLancarSozinho(linhas as unknown as LinhaCandidata[], {
+      confiancaMinima, limiteLote, comAlerta, jaPorRegra,
+    })
+      .map((l) => idsPorTransacao.get(String(l.bank_transaction_id)))
+      .filter((v): v is string => !!v);
+    if (idsConfianca.length > 0) {
+      const resposta = await aprovar(admin, idsConfianca, null, {}, "confianca");
+      const corpo = await resposta.json();
+      lancadasSozinhas += Number(corpo?.aprovadas ?? 0);
+    }
   }
 
   // Linhas que nasceram antes do identificador (ou antes de um cadastro novo) ganham quem é e
@@ -730,7 +766,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const partes = [
     criadas > 0 ? `${criadas - lancadasSozinhas} proposta(s) para revisar` : "Nada novo para propor",
     completadas > 0 ? `${completadas} já na fila ganharam identificação` : "",
-    lancadasSozinhas > 0 ? `${lancadasSozinhas} lançada(s) pelas suas regras` : "",
+    lancadasSozinhas > 0 ? `${lancadasSozinhas} lançada(s) sozinha(s) — veja em "Lançados sozinhos"` : "",
     pares.length ? `${pares.length} transferência(s) entre contas` : "",
     parcelasDeCompraJaLancada > 0 ? `${parcelasDeCompraJaLancada} parcela(s) de compra já lançada saíram da fila` : "",
     restantes > 0 ? `faltam ${restantes} do histórico` : "",
@@ -1471,6 +1507,8 @@ async function aprovar(
   ids: string[],
   userId: string | null,
   overrides: Record<string, Correcao>,
+  /** Aprovação sem clique: por regra com autonomia ou por confiança alta. Fica marcada e é desfazível. */
+  automatica: "regra" | "confianca" | null = null,
 ) {
   if (ids.length === 0) return jr({ error: "nenhuma proposta informada" }, 400);
 
@@ -1542,7 +1580,7 @@ async function aprovar(
         });
         if (eCasar) throw new Error(eCasar.message.replace(/^(P0001|42501|23514):\s*/, ""));
         await admin.from("finance_review_queue").update({
-          status: "approved", decided_by: userId, decided_at: new Date().toISOString(),
+          status: "approved", decided_by: userId, decided_at: new Date().toISOString(), automatica,
           decision_note: `Casada com ${vinculo.rotulo}`.slice(0, 300),
         }).eq("id", p.id);
         feitos.push(p.id);
@@ -1698,10 +1736,12 @@ async function aprovar(
         decided_at: new Date().toISOString(),
         created_payable_id: criadoPara.get(p.id) ?? null,
         created_receivable_id: recebidoPara.get(p.id) ?? null,
+        automatica,
+        ...(automatica ? { decision_note: automatica === "regra" ? "Lançada sozinha pela sua regra" : `Lançada sozinha: confiança ${p.confidence}%` } : {}),
       }).eq("id", p.id);
 
       await anotar(admin, {
-        acao: p.kind === "internal_transfer" ? "ignorou" : "aprovou_proposta",
+        acao: p.kind === "internal_transfer" ? "ignorou" : automatica ? "lancou_sozinho" : "aprovou_proposta",
         autor: userId,
         bank_transaction_id: p.bank_transaction_id,
         payable_id: criadoPara.get(p.id) ?? null,

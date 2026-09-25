@@ -134,6 +134,8 @@ const TOOL_LABELS_PT: Record<string, string> = {
   cancelar_lancamento: "Cancelar lançamento",
   casar_lancamento_com_extrato: "Casar lançamento com o extrato",
   cadastrar_contraparte_do_extrato: "Cadastrar a partir do extrato",
+  fechar_mes: "Fechar o mês",
+  configurar_lancamento_automatico: "Ligar/desligar o lançar sozinho",
 };
 
 function humanizeToolNamePt(name: string): string {
@@ -178,6 +180,10 @@ const FIELD_LABELS_PT: Record<string, string> = {
   proposta_id: "Linha do Extrato",
   tipo_de_favorecido: "Tipo de favorecido",
   vinculos: "Casar com",
+  mes: "Mês",
+  ano: "Ano",
+  ligado: "Ligado",
+  conta: "Conta",
 };
 
 const CURRENCY_FIELDS = new Set(["amount", "card_fee_percent"]);
@@ -418,6 +424,10 @@ export const SEMPRE_NO_PERFIL = new Set([
   "desfazer_aprovacao_de_lancamento",
   "casar_lancamento_com_extrato",
   "cadastrar_contraparte_do_extrato",
+  "verificar_mes",
+  "consultar_conta",
+  "configurar_lancamento_automatico",
+  "listar_lancados_sozinhos",
 ]);
 
 function textoDoUltimoPedido(messages: ClaudeMessage[]): string {
