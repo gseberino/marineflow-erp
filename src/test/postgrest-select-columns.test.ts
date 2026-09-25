@@ -37,6 +37,16 @@ function arquivosTs(dir: string, achados: string[] = []): string[] {
 }
 
 /**
+ * O que a varredura lê: todo o front e a montagem do PDF, que mora em _shared/pdf desde
+ * 25/09/2026 para o assistente do WhatsApp gerar o mesmo documento. Foi a consulta DELA
+ * que motivou este teste — sair de src/ não pode tirá-la da vigilância.
+ */
+const PDF_COMPARTILHADO = join(process.cwd(), 'supabase', 'functions', '_shared', 'pdf');
+function arquivosVarridos(): string[] {
+  return [...arquivosTs(RAIZ), ...arquivosTs(PDF_COMPARTILHADO).filter((f) => !/_test\.ts$/.test(f))];
+}
+
+/**
  * Colunas de cada tabela/view, lidas do types.ts gerado.
  *
  * Parse por texto em vez de importar o tipo: os nomes precisam existir em
@@ -165,6 +175,10 @@ describe('colunas usadas em embed do PostgREST existem no banco', () => {
 
   // A regressão exata que derrubou o PDF. Fica explícita para quem vier depois
   // entender de onde saiu o teste genérico abaixo.
+  it('a montagem do PDF está na varredura', () => {
+    expect(arquivosVarridos().some((f) => f.endsWith(join('_shared', 'pdf', 'dados.ts')))).toBe(true);
+  });
+
   it('service_surveys tem answered_at e NÃO tem closed_at', () => {
     const cols = tabelas.get('service_surveys')!;
     expect(cols.has('answered_at')).toBe(true);
@@ -174,7 +188,7 @@ describe('colunas usadas em embed do PostgREST existem no banco', () => {
   it('nenhum .select() cita coluna inexistente', () => {
     const problemas: string[] = [];
 
-    for (const arquivo of arquivosTs(RAIZ)) {
+    for (const arquivo of arquivosVarridos()) {
       const src = readFileSync(arquivo, 'utf8');
       // `.select(\`...\`)` e `.select('...')`
       for (const m of src.replace(/\r\n/g, '\n').matchAll(/\.select\(\s*[`'"]([\s\S]*?)[`'"]\s*[,)]/g)) {
@@ -219,7 +233,7 @@ describe('embeds entre tabelas com mais de uma chave estrangeira', () => {
   it('todo embed de par ambíguo declara qual chave usar', () => {
     const problemas: string[] = [];
 
-    for (const arquivo of arquivosTs(RAIZ)) {
+    for (const arquivo of arquivosVarridos()) {
       const src = readFileSync(arquivo, 'utf8');
       for (const m of src.matchAll(/\.from\(\s*['"](\w+)['"]\s*\)([\s\S]{0,400}?)\.select\(\s*[`'"]([\s\S]*?)[`'"]\s*[,)]/g)) {
         const raiz = m[1];

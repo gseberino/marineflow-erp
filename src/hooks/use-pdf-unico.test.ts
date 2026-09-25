@@ -13,6 +13,11 @@ import { join } from 'node:path';
  * Já aconteceu aqui: a seção de levantamento entrou só no hook.
  */
 const src = readFileSync(join(process.cwd(), 'src', 'hooks', 'use-pdf.ts'), 'utf8');
+// A montagem mora em _shared para o assistente do WhatsApp usar a mesma (25/09/2026);
+// o hook só delega. As verificações de "uma montagem só" valem para os dois juntos.
+const montagem = readFileSync(
+  join(process.cwd(), 'supabase', 'functions', '_shared', 'pdf', 'dados.ts'), 'utf8',
+);
 const portal = readFileSync(
   join(process.cwd(), 'src', 'pages', 'PublicServiceOrderView.tsx'), 'utf8',
 );
@@ -61,20 +66,26 @@ describe('uma montagem só para o PDF', () => {
   });
 
   it('o PDFData é montado UMA vez no arquivo', () => {
-    const montagens = src.match(/const pdfData: PDFData = \{/g) || [];
+    const montagens = (src + montagem).match(/const pdfData: PDFData = \{/g) || [];
     expect(montagens).toHaveLength(1);
   });
 
   it('a query da ordem aparece uma vez só', () => {
-    const queries = src.match(/from\('service_orders'\)/g) || [];
+    const queries = (src + montagem).match(/from\('service_orders'\)/g) || [];
     expect(queries).toHaveLength(1);
+  });
+
+  // O hook delega; se ele voltar a consultar o banco, é uma segunda montagem nascendo.
+  it('o hook não consulta o banco por conta própria', () => {
+    expect(src).not.toMatch(/\.from\(/);
+    expect(src).toMatch(/carregarPDFData as montarPDFData/);
   });
 
   // O hint do embed é o que impede o PGRST201 que derrubou o PDF inteiro.
   // Com uma montagem só, ele existe num lugar e vale para os dois caminhos.
   it('o hint do levantamento está na montagem única', () => {
-    expect(src).toContain('service_surveys!service_surveys_service_order_id_fkey');
-    expect((src.match(/service_surveys!service_surveys_service_order_id_fkey/g) || []))
+    expect(montagem).toContain('service_surveys!service_surveys_service_order_id_fkey');
+    expect(((src + montagem).match(/service_surveys!service_surveys_service_order_id_fkey/g) || []))
       .toHaveLength(1);
   });
 

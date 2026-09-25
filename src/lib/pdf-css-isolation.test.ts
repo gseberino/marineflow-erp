@@ -26,8 +26,15 @@ import { join } from 'node:path';
  * string) nem no tsc. Só na captura, e só quando o app está por perto.
  */
 
-const GERADOR = join(process.cwd(), 'src', 'lib', 'pdf-generator.ts');
+// O desenho do documento mora em _shared/pdf/documento.ts (o assistente do WhatsApp gera o
+// mesmo PDF); fatura e recibo continuam em pdf-generator.ts e usam as variáveis definidas
+// lá. Os dois arquivos são lidos juntos: variável usada num e definida no outro vale.
+const GERADOR = [
+  join(process.cwd(), 'supabase', 'functions', '_shared', 'pdf', 'documento.ts'),
+  join(process.cwd(), 'src', 'lib', 'pdf-generator.ts'),
+];
 const CSS_DO_APP = join(process.cwd(), 'src', 'index.css');
+const lerGerador = () => GERADOR.map((f) => readFileSync(f, 'utf8')).join('\n');
 
 /** Nomes de variável definidos pelo app — o território proibido. */
 function variaveisDoApp(): Set<string> {
@@ -39,7 +46,7 @@ function variaveisDoApp(): Set<string> {
 
 /** Nomes de variável que o gerador de PDF usa. */
 function variaveisDoPdf(): Set<string> {
-  const src = readFileSync(GERADOR, 'utf8');
+  const src = lerGerador();
   const nomes = new Set<string>();
   for (const m of src.matchAll(/var\((--[\w-]+)\)/g)) nomes.add(m[1]);
   for (const m of src.matchAll(/^\s*(--[\w-]+):\s*#/gm)) nomes.add(m[1]);
@@ -80,7 +87,7 @@ describe('isolamento do CSS do documento', () => {
   // Cada var() precisa de uma definição, senão a cor some do mesmo jeito —
   // agora por falta de valor em vez de por conflito.
   it('toda variável usada está definida no :root do documento', () => {
-    const src = readFileSync(GERADOR, 'utf8');
+    const src = lerGerador();
     const definidas = new Set(
       [...src.matchAll(/^\s*(--pdf-[\w-]+):\s*#/gm)].map((m) => m[1]),
     );
