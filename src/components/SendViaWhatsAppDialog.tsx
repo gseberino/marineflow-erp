@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -167,6 +168,23 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
     () => resolvePdfOptions(appSettings, documentType),
     [appSettings, documentType],
   );
+
+  // Os DOIS números do cadastro (whatsapp e telefone), os mesmos que o whatsapp-send confere
+  // para marcar o orçamento como enviado. Quem abre o diálogo passa só um (whatsapp || phone);
+  // comparar só com ele faria a tela avisar "não marca" num envio que o servidor marca.
+  const clienteId = target?.kind === 'service_order' ? target.clientId : null;
+  const { data: numerosDoCliente } = useQuery({
+    queryKey: ['client-phones', clienteId],
+    enabled: open && !!clienteId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('clients').select('whatsapp, phone').eq('id', clienteId!).maybeSingle();
+      if (error) throw error;
+      return [data?.whatsapp, data?.phone];
+    },
+  });
+  const numerosConhecidos = numerosDoCliente ?? [target?.clientPhone];
+  const destinoEhDoCliente = numerosConhecidos.some((n) => mesmoTelefone(phone, n));
+  const clienteTemNumero = numerosConhecidos.some((n) => String(n ?? '').replace(/\D/g, '').length >= 8);
 
   const publicUrl = useMemo(() => {
     if (!target) return '';
@@ -429,9 +447,9 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
                 cliente (regra no whatsapp-send, 26/09/2026). Mandar para si ou para um terceiro
                 continua possível — só não mexe no funil. Vale também para o envio agendado. */}
             {target?.kind === 'service_order' && documentType === 'quote'
-              && phone.replace(/\D/g, '').length >= 8 && !mesmoTelefone(phone, target.clientPhone) && (
+              && phone.replace(/\D/g, '').length >= 8 && !destinoEhDoCliente && (
               <p className="text-xs text-amber-700 dark:text-amber-400">
-                {target.clientPhone ? 'Este número não é o cadastrado para o cliente' : 'O cliente não tem telefone cadastrado'}:
+                {clienteTemNumero ? 'Este número não é o cadastrado para o cliente' : 'O cliente não tem telefone cadastrado'}:
                 {' '}enviar para ele não marca o orçamento como enviado ao cliente.
               </p>
             )}
