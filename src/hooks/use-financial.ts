@@ -4,6 +4,9 @@ import type { BankTransaction } from '@/lib/bank-parser';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { cancelPaymentCascade } from '@/lib/cascade-updates';
 import { lerEmPaginas } from '@/lib/ler-em-paginas';
+import { montarAging, type ContaEmAberto } from '@/lib/aging';
+import { rotuloDoMes, type FluxoDeCaixa } from '@/lib/fluxo-de-caixa';
+import { carregarFluxoDeCaixa, chaveDoFluxo } from '@/hooks/use-fluxo-de-caixa';
 
 export function useReceivables() {
   return useQuery({
@@ -170,24 +173,37 @@ export function useFinancialSummary() {
       const today = new Date().toISOString().split('T')[0];
       const firstOfMonth = `${today.substring(0, 7)}-01`;
 
-      const [recRes, recOverdue, payRes, payOverdue, collectedRes, paidRes] = await Promise.all([
+      const [recRes, recOverdue, payRes, payOverdue, collectedRes, paidRes, fluxoDoMes] = await Promise.all([
         supabase.from('receivables').select('balance_amount').not('status', 'in', '("paid","cancelled")'),
         supabase.from('receivables').select('balance_amount').not('status', 'in', '("paid","cancelled")').lt('due_date', today),
         supabase.from('payables').select('balance_amount').not('status', 'in', '("paid","cancelled")'),
         supabase.from('payables').select('balance_amount').not('status', 'in', '("paid","cancelled")').lt('due_date', today),
         supabase.from('payments').select('amount').not('receivable_id', 'is', null).eq('status', 'confirmed').gte('payment_date', firstOfMonth),
         supabase.from('payments').select('amount').not('payable_id', 'is', null).eq('status', 'confirmed').gte('payment_date', firstOfMonth),
+        // O mês corrente pelo extrato: é o que de fato entrou e saiu das contas.
+        carregarFluxoDeCaixa(1),
       ]);
 
       const sum = (rows: any[] | null) => (rows || []).reduce((s, r) => s + Number(r.balance_amount || r.amount || 0), 0);
+      const mes = fluxoDoMes.meses[0];
 
       return {
         total_receivable: sum(recRes.data),
         overdue_receivable: sum(recOverdue.data),
         total_payable: sum(payRes.data),
         overdue_payable: sum(payOverdue.data),
+        // Baixas de contas a receber/pagar registradas no sistema (tabela payments). Não é o
+        // dinheiro que passou pelo banco — para isso, os campos do extrato abaixo.
         collected_this_month: sum(collectedRes.data),
         paid_this_month: sum(paidRes.data),
+        /** Entrou nas contas no mês, pelo extrato (sem transferência entre contas próprias). */
+        entrou_no_mes: mes?.entrou ?? 0,
+        /** Saiu das contas no mês, pelo extrato (compra no cartão conta quando a fatura é paga). */
+        saiu_no_mes: mes?.saiu ?? 0,
+        /** À parte, sem somar: transferências entre contas próprias no mês. */
+        transferencias_no_mes: mes?.transferencias ?? { entrou: 0, saiu: 0 },
+        /** À parte, sem somar: crédito do cartão posto na conta corrente (Pix no crédito). */
+        credito_do_cartao_no_mes: mes?.creditoDoCartao ?? { entrou: 0, saiu: 0 },
       };
     },
   });
@@ -252,11 +268,10 @@ export interface ForecastWeek {
 /**
  * Projeção de caixa das próximas semanas a partir do que está programado.
  *
- * Deliberadamente NÃO projeta saldo bancário absoluto: o sistema não conhece o saldo real
- * da conta (não há integração bancária ativa), e exibir um "saldo previsto" a partir de um
- * saldo inicial desconhecido seria inventar número — justamente o tipo de erro que quebra
- * a confiança num módulo financeiro. O que ela responde é o que dá para responder com
- * honestidade: quanto entra, quanto sai e qual o resultado líquido de cada semana.
+ * O hook responde quanto entra, quanto sai e o resultado líquido de cada semana (e o
+ * acumulado). O saldo de partida não é dele: desde 26/09/2026 o painel (CashForecastPanel)
+ * soma o acumulado ao saldo de hoje que os bancos informam (fichas de saldo), e só então
+ * mostra "saldo previsto" — sem saldo conhecido, projetar seria inventar número.
  *
  * Contas já vencidas e ainda em aberto entram na primeira semana, porque é quando elas
  * pressionam o caixa de verdade.
@@ -379,44 +394,28 @@ export function useDuplicatePayables() {
   });
 }
 
+/**
+ * Fluxo de caixa mês a mês, PELO EXTRATO (26/09/2026).
+ *
+ * Lia a tabela `payments` — os 52 pagamentos registrados à mão no sistema inteiro —, e o
+ * gráfico mostrava quase nada saindo. Agora é o que entrou e saiu das contas (conta corrente
+ * e Caixa), com as regras de src/lib/fluxo-de-caixa.ts: sem cartão de crédito (conta quando a
+ * fatura é paga), sem duplicata nem transferência entre contas próprias.
+ *
+ * O formato de retorno continua `{ month, inflow, outflow, net }`; a mesma entrada de cache
+ * serve a quem precisa do fluxo completo (useFluxoDeCaixa), com os baldes à parte.
+ */
 export function useCashFlow(months: number = 6) {
   return useQuery({
-    queryKey: ['cash-flow', months],
-    queryFn: async () => {
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
-      const startStr = start.toISOString().split('T')[0];
-
-      const { data } = await supabase
-        .from('payments').select('payment_date, amount, receivable_id, payable_id')
-        .eq('status', 'confirmed')
-        .gte('payment_date', startStr).order('payment_date');
-
-      const monthMap: Record<string, { inflow: number; outflow: number }> = {};
-      for (let i = 0; i < months; i++) {
-        const d = new Date(now.getFullYear(), now.getMonth() - months + 1 + i, 1);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        monthMap[key] = { inflow: 0, outflow: 0 };
-      }
-
-      for (const p of data || []) {
-        const key = p.payment_date.substring(0, 7);
-        if (!monthMap[key]) continue;
-        if (p.receivable_id) monthMap[key].inflow += Number(p.amount);
-        else monthMap[key].outflow += Number(p.amount);
-      }
-
-      const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-      return Object.entries(monthMap).map(([key, v]) => {
-        const [y, m] = key.split('-');
-        return {
-          month: `${monthNames[parseInt(m) - 1]}/${y.slice(2)}`,
-          inflow: v.inflow,
-          outflow: v.outflow,
-          net: v.inflow - v.outflow,
-        };
-      });
-    },
+    queryKey: chaveDoFluxo(months),
+    queryFn: () => carregarFluxoDeCaixa(months),
+    select: (f: FluxoDeCaixa) => f.meses.map((m) => ({
+      month: rotuloDoMes(m.mes),
+      inflow: m.entrou,
+      outflow: m.saiu,
+      net: m.liquido,
+    })),
+    staleTime: 60_000,
   });
 }
 
@@ -594,78 +593,63 @@ export function useDismissBankTransaction() {
 }
 
 // ─── Aging Report ──────────────────────────────────────────────────────────────
+// A régua das faixas mora em src/lib/aging.ts: a mesma para quem me deve e a quem devo.
 
-export interface AgingBucket {
-  client_id: string;
-  client_name: string;
-  future: number;     // A vencer (due_date > hoje)
-  days_1_30: number;  // 1–30 dias em atraso
-  days_31_60: number;
-  days_61_90: number;
-  over_90: number;
-  total: number;
-}
+export type { AgingBucket, AgingReportData } from '@/lib/aging';
 
-export interface AgingReportData {
-  buckets: AgingBucket[];
-  totals: { future: number; days_1_30: number; days_31_60: number; days_61_90: number; over_90: number; total: number };
-  generated_at: string;
-}
-
+/** Quem deve à empresa, por tempo de atraso (contas a receber em aberto). */
 export function useAgingReport() {
   return useQuery({
     queryKey: ['aging-report'],
-    queryFn: async (): Promise<AgingReportData> => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const { data, error } = await supabase
+    queryFn: async () => {
+      // Em páginas: o servidor corta em 1.000 linhas sem avisar.
+      const data = await lerEmPaginas((i, f) => supabase
         .from('receivables')
         .select('id, amount, balance_amount, due_date, status, client_id, clients!receivables_client_id_fkey(id, name)')
         .in('status', ['pending', 'partially_paid', 'overdue'])
-        .gt('balance_amount', 0);
-      if (error) throw error;
+        .gt('balance_amount', 0)
+        .order('id')
+        .range(i, f));
 
-      const map = new Map<string, AgingBucket>();
-      for (const r of data || []) {
-        const client = (r as any).clients;
+      const contas: ContaEmAberto[] = [];
+      for (const r of data) {
+        const client = (r as { clients?: { id: string; name: string } | null }).clients;
         if (!client) continue;
-        const clientId = client.id as string;
-        if (!map.has(clientId)) {
-          map.set(clientId, {
-            client_id: clientId,
-            client_name: client.name as string,
-            future: 0, days_1_30: 0, days_31_60: 0, days_61_90: 0, over_90: 0, total: 0,
-          });
-        }
-        const bucket = map.get(clientId)!;
-        const balance = Number(r.balance_amount || 0);
-        // Normaliza due_date para meia-noite local, evitando drift de timezone
-        const due = new Date(r.due_date + 'T00:00:00');
-        const diffDays = Math.round((today.getTime() - due.getTime()) / 86_400_000);
-
-        bucket.total += balance;
-        if (diffDays < 0)         bucket.future     += balance;  // A vencer
-        else if (diffDays <= 30)  bucket.days_1_30  += balance;  // 1–30d em atraso
-        else if (diffDays <= 60)  bucket.days_31_60 += balance;
-        else if (diffDays <= 90)  bucket.days_61_90 += balance;
-        else                      bucket.over_90    += balance;
+        contas.push({ parteId: client.id, parteNome: client.name, vencimento: r.due_date, saldo: Number(r.balance_amount || 0) });
       }
+      return montarAging(contas);
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
 
-      const buckets = Array.from(map.values()).sort((a, b) => b.over_90 - a.over_90);
-      const totals = buckets.reduce(
-        (acc, b) => ({
-          future:     acc.future     + b.future,
-          days_1_30:  acc.days_1_30  + b.days_1_30,
-          days_31_60: acc.days_31_60 + b.days_31_60,
-          days_61_90: acc.days_61_90 + b.days_61_90,
-          over_90:    acc.over_90    + b.over_90,
-          total:      acc.total      + b.total,
-        }),
-        { future: 0, days_1_30: 0, days_31_60: 0, days_61_90: 0, over_90: 0, total: 0 },
-      );
+/**
+ * A quem a empresa deve, por tempo de atraso (contas a pagar em aberto) — as mesmas faixas
+ * do lado a receber. O nome vem do fornecedor, depois do favorecido (sócio, diarista),
+ * depois do que foi gravado na conta.
+ */
+export function useAgingAPagar() {
+  return useQuery({
+    queryKey: ['aging-a-pagar'],
+    queryFn: async () => {
+      const data = await lerEmPaginas((i, f) => supabase
+        .from('payables')
+        .select('id, balance_amount, due_date, status, supplier_id, payee_id, supplier_name, suppliers!payables_supplier_id_fkey(name), payees!payables_payee_id_fkey(name)')
+        .in('status', ['pending', 'partially_paid', 'overdue'])
+        .gt('balance_amount', 0)
+        .order('id')
+        .range(i, f));
 
-      return { buckets, totals, generated_at: new Date().toISOString() };
+      const contas: ContaEmAberto[] = data.map((p) => {
+        const linha = p as typeof p & {
+          suppliers?: { name?: string } | null; payees?: { name?: string } | null;
+          supplier_name?: string | null; payee_id?: string | null;
+        };
+        const nome = linha.suppliers?.name ?? linha.payees?.name ?? linha.supplier_name ?? 'Sem fornecedor';
+        const id = linha.supplier_id ?? linha.payee_id ?? `nome:${nome.trim().toLowerCase()}`;
+        return { parteId: id, parteNome: nome, vencimento: p.due_date, saldo: Number(p.balance_amount || 0) };
+      });
+      return montarAging(contas);
     },
     staleTime: 5 * 60 * 1000,
   });

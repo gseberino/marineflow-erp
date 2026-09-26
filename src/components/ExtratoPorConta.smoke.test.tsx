@@ -99,6 +99,27 @@ describe('ExtratoPorConta', () => {
     renderizar(<ExtratoPorConta visaoInicial="fora" />);
     expect(screen.getByText('fora da fila todas')).toBeInTheDocument();
   });
+
+  // 26/09/2026: na tela do Extrato as visões viraram abas da página. Com a visão escolhida
+  // por fora, o seletor interno some — dois seletores para a mesma coisa seriam a duplicação
+  // que a reorganização veio desfazer —, e a conta também pode vir de fora.
+  it('com a visão e a conta controladas por fora, não mostra o seletor interno', async () => {
+    const user = userEvent.setup();
+    const escolher = vi.fn();
+    const { rerender } = renderizar(<ExtratoPorConta visao="revisar" contaId={null} onEscolherConta={escolher} />);
+    expect(screen.queryByRole('tablist', { name: 'Visão do extrato' })).not.toBeInTheDocument();
+    expect(screen.getByText('fila da conta todas')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Anotar antes do banco/ })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'ficha C6' }));
+    expect(escolher).toHaveBeenCalledWith('c6');
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rerender(<QueryClientProvider client={qc}><I18nProvider><ExtratoPorConta visao="fora" contaId="c6" onEscolherConta={escolher} /></I18nProvider></QueryClientProvider>);
+    expect(screen.getByText('fora da fila c6')).toBeInTheDocument();
+    // "Anotar antes do banco" é da fila: nas outras visões não aparece.
+    expect(screen.queryByRole('button', { name: /Anotar antes do banco/ })).not.toBeInTheDocument();
+  });
 });
 
 describe('ExtratoComSaldo (dentro do Extrato por conta)', () => {

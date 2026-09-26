@@ -7,12 +7,10 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { PageShell } from '@/v2/components/PageShell';
 import { KPIStat } from '@/v2/components/KPIStat';
 import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
 import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn, type SortState } from '@/v2/components/DataTable';
-import { V2Shell } from '@/v2/components/V2Shell';
 import '@/v2/tokens.css';
 
 /* Onda B · Comissões v2 — paridade com CommissionsPage v1: aprovar gera a
@@ -37,14 +35,10 @@ const STATUS_VIEW: Record<string, { label: string; tone: StatusTone }> = {
 /**
  * O painel de comissões, sem invólucro de página.
  *
- * Existe separado porque a comissão passou a viver em DOIS lugares (23/09/2026): a rota
- * /v2/commissions, para quem chega por link, e uma aba do Financeiro, ao lado de Contas a
- * Pagar — que é de onde a comissão é efetivamente paga. Ela saiu do menu lateral por ser
- * tela de uso raro, e uma linha permanente no menu para algo que se abre de vez em quando
- * empurra para baixo o que se usa todo dia.
- *
- * Duplicar o componente para servir os dois lugares seria o caminho curto e o errado: uma
- * das cópias fica para trás.
+ * A comissão mora em Contas a Pagar › Comissões (/v2/financial/payables/comissoes) — que é de
+ * onde ela é efetivamente paga. Saiu do menu lateral por ser tela de uso raro (23/09/2026), e
+ * desde 26/09/2026 a rota antiga /v2/commissions leva para essa aba: um lugar só, sem uma
+ * segunda cópia da tela que fica para trás.
  */
 export function PainelDeComissoes() {
   const { formatCurrency, formatDate } = useI18n();
@@ -261,20 +255,5 @@ export function PainelDeComissoes() {
           })}
         </div>
     </div>
-  );
-}
-
-/** A comissão na sua própria página, para quem chega por /v2/commissions. */
-export default function CommissionsV2() {
-  return (
-    <V2Shell>
-      <PageShell
-        breadcrumb={[{ label: 'Financeiro', to: '/v2/financial' }, { label: 'Comissões' }]}
-        title="Gestão de Comissões"
-        description="Controle e aprove os pagamentos de técnicos e vendedores com base no lucro real das OS."
-      >
-        <PainelDeComissoes />
-      </PageShell>
-    </V2Shell>
   );
 }

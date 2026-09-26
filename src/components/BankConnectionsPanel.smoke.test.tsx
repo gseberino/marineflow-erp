@@ -7,7 +7,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 import { BankConnectionsPanel } from './BankConnectionsPanel';
 
-const { conexoes } = vi.hoisted(() => ({
+const { conexoes, ativarMock } = vi.hoisted(() => ({
+  ativarMock: vi.fn(async () => {}),
   conexoes: [
     {
       id: 'c1', provider: 'pluggy', external_id: 'item-abc-123', label: 'C6 — conta PJ',
@@ -23,16 +24,24 @@ const { conexoes } = vi.hoisted(() => ({
       last_sync_message: 'A conexão com o banco caiu. Reconecte esta conta no meu.pluggy.ai.',
       last_sync_imported: 0, last_transaction_date: null,
     },
+    {
+      id: 'c3', provider: 'pluggy', external_id: 'item-ghi-789', label: 'Conta antiga',
+      institution: 'Banco X', account_kind: 'bank', active: false,
+      last_synced_at: null, last_sync_status: 'ok', last_sync_message: null,
+      last_sync_imported: 0, last_transaction_date: null,
+    },
   ],
 }));
 
 vi.mock('@/hooks/use-bank-connections', () => ({
   useBankConnections: () => ({ data: conexoes, isLoading: false }),
   useSaveBankConnection: () => ({ mutateAsync: async () => {}, isPending: false }),
-  useDeleteBankConnection: () => ({ mutateAsync: async () => {}, isPending: false }),
+  useSetBankConnectionActive: () => ({ mutateAsync: ativarMock, isPending: false }),
   useSyncBank: () => ({ mutateAsync: async () => ({ ok: true, message: 'ok', resultados: [] }), isPending: false }),
   useListPluggyItems: () => ({ mutateAsync: async () => ({ itens: [], clientIdPrefixo: 'abcd1234' }), isPending: false }),
 }));
+// As fichas de saldo têm teste próprio.
+vi.mock('@/components/SaldosDasContas', () => ({ SaldosDasContas: () => <div>fichas de saldo</div> }));
 
 function renderPainel() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -74,5 +83,44 @@ describe('BankConnectionsPanel', () => {
   it('oferece buscar o extrato quando há conexões', async () => {
     renderPainel();
     expect(await screen.findByRole('button', { name: /Buscar extrato/i })).toBeInTheDocument();
+  });
+
+  // 26/09/2026: "Excluir" virou "Desativar". Excluir a conexão do C6 soltaria as 1.849
+  // transações dela; desativada, a busca para e o que já entrou continua.
+  it('não oferece mais excluir a conexão', async () => {
+    renderPainel();
+    await screen.findByText('C6 — conta PJ');
+    expect(screen.queryByRole('button', { name: /Excluir/i })).not.toBeInTheDocument();
+  });
+
+  it('desativar pede confirmação na própria ficha, e só o "Sim" desativa', async () => {
+    ativarMock.mockClear();
+    const user = userEvent.setup();
+    renderPainel();
+    const [primeira] = await screen.findAllByRole('button', { name: 'Desativar' });
+    await user.click(primeira);
+    expect(ativarMock).not.toHaveBeenCalled();
+    expect(screen.getByText(/As transações já/)).toBeInTheDocument();
+
+    // "Não" desiste sem mexer em nada.
+    await user.click(screen.getByRole('button', { name: 'Não' }));
+    expect(ativarMock).not.toHaveBeenCalled();
+
+    await user.click((await screen.findAllByRole('button', { name: 'Desativar' }))[0]);
+    await user.click(screen.getByRole('button', { name: 'Sim, desativar' }));
+    expect(ativarMock).toHaveBeenCalledWith({ id: 'c1', active: false });
+  });
+
+  it('conexão desativada aparece apagada, sem Buscar, com Reativar', async () => {
+    ativarMock.mockClear();
+    const user = userEvent.setup();
+    renderPainel();
+    expect(await screen.findByText('Conta antiga')).toBeInTheDocument();
+    expect(screen.getByText('desativada')).toBeInTheDocument();
+    expect(screen.getByText(/não é mais buscado/)).toBeInTheDocument();
+    // Duas conexões ativas com "Buscar"; a desativada não tem.
+    expect(screen.getAllByRole('button', { name: /^Buscar$/ })).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: /Reativar/ }));
+    expect(ativarMock).toHaveBeenCalledWith({ id: 'c3', active: true });
   });
 });

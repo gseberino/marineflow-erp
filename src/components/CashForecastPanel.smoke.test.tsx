@@ -35,12 +35,12 @@ vi.mock('@/hooks/use-financial', () => ({
   useDuplicatePayables: () => ({ data: duplicadas }),
 }));
 
-function renderPainel() {
+function renderPainel(saldoInicial?: number | null) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider>
-        <CashForecastPanel />
+        <CashForecastPanel saldoInicial={saldoInicial} />
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -64,6 +64,23 @@ describe('CashForecastPanel', () => {
   it('alerta quando sai mais do que entra em alguma semana', async () => {
     renderPainel();
     expect(await screen.findByText(/sai mais do que entra/)).toBeInTheDocument();
+  });
+
+  // 26/09/2026: a previsão parte do saldo de hoje (as fichas de saldo), não mais de zero.
+  it('com o saldo de hoje, mostra o saldo previsto e avisa a semana que fica no vermelho', async () => {
+    renderPainel(5000);
+    expect(await screen.findByText('Saldo de hoje')).toBeInTheDocument();
+    expect(screen.getAllByText('R$ 5.000,00').length).toBeGreaterThan(0);
+    // 5.000 − 7.000 na primeira semana = −2.000; 5.000 + 0 no fim.
+    expect(screen.getByText('Saldo previsto no fim')).toBeInTheDocument();
+    expect(screen.getByText(/O saldo previsto fica negativo em 1 das próximas 8 semanas — a primeira é/)).toBeInTheDocument();
+    expect(screen.getByText('esta semana')).toBeInTheDocument();
+  });
+
+  it('com saldo que cobre tudo, não acusa semana negativa de saldo', async () => {
+    renderPainel(100000);
+    expect(await screen.findByText('Saldo previsto no fim')).toBeInTheDocument();
+    expect(screen.queryByText(/O saldo previsto fica negativo/)).not.toBeInTheDocument();
   });
 
   it('aponta possível duplicidade sem afirmar que é erro', async () => {

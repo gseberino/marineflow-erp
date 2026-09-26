@@ -7,6 +7,19 @@ function daysAgo(days: number): string {
   return d.toISOString();
 }
 
+/**
+ * O que conta como OS nos relatórios de operação: saiu do rascunho e não foi cancelada.
+ *
+ * Orçamento é `service_orders` com status 'draft' (a tela de Orçamentos e a de OS se separam
+ * por isso). Os relatórios somavam TUDO que foi criado no período: em 30 dias, R$ 223 mil de
+ * orçamentos em rascunho — inclusive os recusados pelo cliente — entraram no "Top 10 clientes"
+ * e na margem (26/09/2026). Rascunho é proposta, cancelada não aconteceu: nenhum dos dois é
+ * receita. A taxa de conversão continua olhando os dois lados, porque é justamente a pergunta.
+ */
+export const STATUS_FORA_DA_OPERACAO = ['draft', 'cancelled'] as const;
+export const osAprovada = (status: string | null | undefined): boolean =>
+  !!status && !(STATUS_FORA_DA_OPERACAO as readonly string[]).includes(status);
+
 // ============ TAB 1: REVENUE ============
 export function useRevenueReport(periodDays: number) {
   return useQuery({
@@ -26,7 +39,7 @@ export function useRevenueReport(periodDays: number) {
           .gte('created_at', since),
         supabase
           .from('service_order_parts')
-          .select('line_total_cost, service_order_id, service_orders!inner(created_at)')
+          .select('line_total_cost, service_order_id, service_orders!inner(created_at, status)')
           .gte('service_orders.created_at', since),
       ]);
 
@@ -35,8 +48,9 @@ export function useRevenueReport(periodDays: number) {
       if (partsRes.error) throw partsRes.error;
 
       const payments = paymentsRes.data ?? [];
-      const orders = ordersRes.data ?? [];
-      const parts = partsRes.data ?? [];
+      // Só OS aprovada: orçamento em rascunho e OS cancelada não são receita (ver osAprovada).
+      const orders = (ordersRes.data ?? []).filter((o) => osAprovada(o.status));
+      const parts = (partsRes.data ?? []).filter((p) => osAprovada((p.service_orders as { status?: string } | null)?.status));
 
       const totalReceived = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
       const completedOrders = orders.filter(o => o.status === 'completed' || o.status === 'invoiced');
@@ -106,7 +120,10 @@ export function useOsPerformanceReport() {
       if (error) throw error;
 
       const all = orders ?? [];
-      const open = all.filter(o => !['completed', 'invoiced', 'cancelled'].includes(o.status));
+      // "OS abertas" são as aprovadas que ainda não terminaram: orçamento em rascunho não é OS
+      // aberta (eram 50 contados aqui). A conversão abaixo continua olhando rascunho × aprovada.
+      const aprovadas = all.filter(o => osAprovada(o.status));
+      const open = aprovadas.filter(o => !['completed', 'invoiced'].includes(o.status));
       const completed = all.filter(o => o.status === 'completed' || o.status === 'invoiced');
 
       // Avg completion time (scheduled_start → check_out_at)
@@ -123,15 +140,13 @@ export function useOsPerformanceReport() {
       const totalQuotes = drafts + approved;
       const conversionRate = totalQuotes > 0 ? (approved / totalQuotes) * 100 : 0;
 
-      // Overdue
+      // Em atraso: OS aprovada, não terminada, com o fim agendado no passado.
       const today = new Date().toISOString();
-      const overdue = all.filter(
-        o => o.scheduled_end_at && o.scheduled_end_at < today && !['completed', 'invoiced', 'cancelled'].includes(o.status),
-      );
+      const overdue = open.filter(o => o.scheduled_end_at && o.scheduled_end_at < today);
 
-      // Status distribution
+      // Distribuição por situação — das OS aprovadas (rascunho e cancelada ficam fora).
       const statusMap = new Map<string, number>();
-      all.forEach(o => statusMap.set(o.status, (statusMap.get(o.status) ?? 0) + 1));
+      aprovadas.forEach(o => statusMap.set(o.status, (statusMap.get(o.status) ?? 0) + 1));
       const statusDistribution = Array.from(statusMap.entries()).map(([name, value]) => ({ name, value }));
 
       // Stale (open > 7 days no update)
@@ -171,12 +186,13 @@ export function usePartsUsageReport(periodDays: number) {
 
       const { data, error } = await supabase
         .from('service_order_parts')
-        .select('product_id, quantity, line_total_sale, unit_sale_snapshot, created_at, products(name)')
+        .select('product_id, quantity, line_total_sale, unit_sale_snapshot, created_at, products(name), service_orders!inner(status)')
         .gte('created_at', since);
       if (error) throw error;
 
       const map = new Map<string, { name: string; qty: number; revenue: number; prices: number[] }>();
-      (data ?? []).forEach(p => {
+      // Peça de orçamento em rascunho ou de OS cancelada não foi usada.
+      (data ?? []).filter(p => osAprovada((p.service_orders as { status?: string } | null)?.status)).forEach(p => {
         const name = (p.products as any)?.name ?? '—';
         const cur = map.get(p.product_id) ?? { name, qty: 0, revenue: 0, prices: [] };
         cur.qty += Number(p.quantity || 0);
@@ -272,8 +288,8 @@ export function useProfitabilityReport(periodDays: number = 30) {
         ? completed.reduce((s: number, o: any) => s + Number(o.net_margin_percent || 0), 0) / completed.length 
         : 0;
 
-      // Map rows for the table
-      const rows = all.map((o: any) => ({
+      // A tabela lista só OS aprovada: orçamento em rascunho e OS cancelada não têm lucro.
+      const rows = all.filter((o: any) => osAprovada(o.status)).map((o: any) => ({
         id: o.os_id,
         number: o.service_order_number,
         client: o.client_name,

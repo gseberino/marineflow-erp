@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Ban, Download, DollarSign, MoreHorizontal, Pencil, Plus, Receipt as ReceiptIcon, Send, Undo2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/i18n';
@@ -28,6 +28,10 @@ import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn, type SortState } from '@/v2/components/DataTable';
 import { generateReceivableReceipt, type ReceivableRow } from '@/v2/lib/receipt';
 import { V2Shell } from '@/v2/components/V2Shell';
+import { AvisoAbasMudaram } from '@/v2/components/AvisoAbasMudaram';
+import { AjudaDoExtrato } from '@/components/FluxoDoExtrato';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { PainelDeCobrancas } from '@/v2/pages/CollectionsV2';
 import '@/v2/tokens.css';
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -35,7 +39,16 @@ import '@/v2/tokens.css';
    (vencimento com alerta, origem automático/manual, saldo, recibo, WhatsApp,
    registrar pagamento, editar, filtros, CSV) em DataTable + EntityCard.
    Cobrar via WhatsApp vira 1 clique na linha. Rota /v2/receivables.
+
+   26/09/2026: a tela se chama Contas a Receber (o nome do menu) e ganhou a aba Cobranças
+   (/v2/receivables/cobrancas) — perseguir quem deve é a mesma conversa. Cobranças saiu do
+   menu; o link antigo /v2/collections leva para a aba.
 ──────────────────────────────────────────────────────────────────────────── */
+
+const ABAS = [
+  { aba: 'contas', rotulo: 'Contas', paraQueServe: 'O que os clientes devem à empresa: cada conta, quando vence e quanto falta. Cobrar pelo WhatsApp é um clique na linha.' },
+  { aba: 'cobrancas', rotulo: 'Cobranças', paraQueServe: 'As cobranças em andamento e a régua automática que manda os lembretes pelo WhatsApp.' },
+] as const;
 
 const PAGE_SIZE = 25;
 
@@ -76,6 +89,9 @@ export default function ReceivablesV2() {
   const { t, formatCurrency, formatDate } = useI18n();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { aba: abaDaRota } = useParams<{ aba?: string }>();
+  const aba = abaDaRota ?? 'contas';
+  const abaValida = ABAS.some((a) => a.aba === aba);
 
   const { data, isLoading, error } = useReceivables();
   const receivables = useMemo(() => (data ?? []) as unknown as ReceivableRow[], [data]);
@@ -271,13 +287,19 @@ export default function ReceivablesV2() {
       { key: 'clients', label: 'Cliente', format: (v: { name?: string } | null) => v?.name || '' },
     ] as never);
 
+  // Aba desconhecida volta para a padrão: tela em branco nunca.
+  if (!abaValida) return <Navigate to="/v2/receivables" replace />;
+
+  const irParaAba = (v: string) => navigate(v === 'contas' ? '/v2/receivables' : `/v2/receivables/${v}`, { replace: true });
+
   return (
     <V2Shell>
       <PageShell
-        breadcrumb={[{ label: 'Financeiro', to: '/financial' }, { label: 'Recebíveis' }]}
-        title="Recebíveis"
-        count={filtered.length}
-        actions={
+        breadcrumb={[{ label: 'Financeiro', to: '/v2/financial' }, { label: 'Contas a Receber' }]}
+        title="Contas a Receber"
+        count={aba === 'contas' ? filtered.length : undefined}
+        description={ABAS.find((a) => a.aba === aba)?.paraQueServe}
+        actions={aba === 'contas' ? (
           <>
             <Button variant="outline" size="sm" onClick={csvExport} className="hidden gap-1.5 sm:inline-flex">
               <Download className="h-4 w-4" /> Exportar CSV
@@ -289,139 +311,159 @@ export default function ReceivablesV2() {
               <Plus className="h-4 w-4" /> Novo recebível
             </Button>
           </>
-        }
+        ) : undefined}
       >
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <KPIStat label="A receber (aberto)" value={formatCurrency(summary?.total_receivable || 0)} />
-          <KPIStat
-            label="Vencidos"
-            value={formatCurrency(summary?.overdue_receivable || 0)}
-            hint={overdueCount > 0 ? `${overdueCount} título${overdueCount > 1 ? 's' : ''}` : 'nenhum'}
-            tone={summary?.overdue_receivable ? 'critical' : 'success'}
-            onClick={() => { setView('overdue'); setPage(1); }}
-          />
-          <KPIStat label="Recebido no mês" value={formatCurrency(summary?.collected_this_month || 0)} tone="success" />
-        </div>
+        <AvisoAbasMudaram />
+        <Tabs value={aba} onValueChange={irParaAba}>
+          <TabsList className="flex h-auto w-full flex-wrap justify-start">
+            {ABAS.map((a) => <TabsTrigger key={a.aba} value={a.aba}>{a.rotulo}</TabsTrigger>)}
+          </TabsList>
+          <TabsContent value="cobrancas" className="mt-4">
+            {aba === 'cobrancas' && <PainelDeCobrancas />}
+          </TabsContent>
+          <TabsContent value="contas" className="mt-4 space-y-4">
+            {aba === 'contas' && (<>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <KPIStat label="A receber (aberto)" value={formatCurrency(summary?.total_receivable || 0)} />
+                <KPIStat
+                  label="Vencidos"
+                  value={formatCurrency(summary?.overdue_receivable || 0)}
+                  hint={overdueCount > 0 ? `${overdueCount} título${overdueCount > 1 ? 's' : ''}` : 'nenhum'}
+                  tone={summary?.overdue_receivable ? 'critical' : 'success'}
+                  onClick={() => { setView('overdue'); setPage(1); }}
+                />
+                {/* Pelo extrato, como na Visão Geral: a tabela de baixas registradas à mão tinha
+                    quase nada, e "recebido" parecia zero. */}
+                <KPIStat
+                  label="Entrou no mês (extrato)"
+                  value={formatCurrency(summary?.entrou_no_mes || 0)}
+                  tone="success"
+                  ajuda={<AjudaDoExtrato rotulo="De onde vem o Entrou no mês" />}
+                />
+              </div>
 
-        <div className="flex flex-wrap items-center gap-1.5">
-          {QUICK_VIEWS.map((v) => (
-            <button
-              key={v.id}
-              type="button"
-              onClick={() => { setView(v.id); setPage(1); }}
-              className={cn(
-                'rounded-full px-3 py-1 text-xs font-semibold transition-colors',
-                view === v.id ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {v.label}{v.id === 'overdue' && overdueCount > 0 ? ` · ${overdueCount}` : ''}
-            </button>
-          ))}
-          <div className="ml-auto w-full sm:w-72">
-            <Input
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              placeholder="Buscar por cliente, descrição ou OS…"
-              className="h-9"
-            />
-          </div>
-        </div>
-
-        <FinancialFilterPanel type="receivable" filters={filters} onChange={(f) => { setFilters(f); setPage(1); }} />
-
-        {isLoading ? (
-          <Skeleton className="h-64 w-full rounded-lg" />
-        ) : error ? (
-          <div className="rounded-lg border bg-card p-8 text-center">
-            <p className="text-destructive">Erro ao carregar recebíveis.</p>
-          </div>
-        ) : (
-          <>
-            <div className="hidden md:block">
-              <DataTable<ReceivableRow>
-                rows={paginated}
-                rowKey={(r) => r.id}
-                columns={columns}
-                sort={sort}
-                onSort={handleSort}
-                emptyMessage={t.common.noResults}
-                rowClassName={(r) => (isOverdue(r) ? 'bg-destructive/5' : undefined)}
-                rowActions={(r) => (
-                  <>
-                    <Button
-                      variant="ghost" size="icon" className="h-8 w-8"
-                      aria-label="Cobrar via WhatsApp" title="Cobrar via WhatsApp"
-                      onClick={() => openCharge(r)}
-                    >
-                      <Send className="h-4 w-4" />
-                    </Button>
-                    {r.status !== 'paid' ? (
-                      <Button
-                        variant="ghost" size="icon" className="h-8 w-8"
-                        aria-label="Registrar pagamento" title="Registrar pagamento"
-                        onClick={() => setPaymentTarget(r)}
-                      >
-                        <DollarSign className="h-4 w-4" />
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="ghost" size="icon" className="h-8 w-8"
-                        aria-label="Gerar recibo" title="Gerar recibo"
-                        onClick={() => generateReceivableReceipt(r)}
-                      >
-                        <ReceiptIcon className="h-4 w-4" />
-                      </Button>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {QUICK_VIEWS.map((v) => (
+                  <button
+                    key={v.id}
+                    type="button"
+                    onClick={() => { setView(v.id); setPage(1); }}
+                    className={cn(
+                      'rounded-full px-3 py-1 text-xs font-semibold transition-colors',
+                      view === v.id ? 'bg-foreground text-background' : 'bg-muted text-muted-foreground hover:text-foreground',
                     )}
-                    {renderMenu(r)}
-                  </>
-                )}
-              />
-            </div>
-
-            <div className="space-y-2.5 md:hidden">
-              {paginated.map((r) => {
-                const s = statusView(r);
-                const alert = dueAlert(r);
-                return (
-                  <EntityCard
-                    key={r.id}
-                    id={r.service_orders?.service_order_number || 'Manual'}
-                    severity={s.tone === 'critical' ? 'critical' : s.tone === 'success' ? 'success' : 'neutral'}
-                    badge={<StatusChip tone={s.tone}>{s.label}</StatusChip>}
-                    title={r.clients?.name || r.description}
-                    lines={[
-                      r.description,
-                      `${formatDate(r.due_date)}${alert ? ` · ${alert.label}` : ''} · ${formatCurrency(Number(r.balance_amount ?? r.amount ?? 0))}`,
-                    ]}
-                    actions={
-                      <>
-                        <Button className="flex-1 gap-1.5" onClick={() => openCharge(r)}>
-                          <Send className="h-4 w-4" /> Cobrar
-                        </Button>
-                        {r.status !== 'paid' && (
-                          <Button variant="outline" size="icon" className="h-11 w-11" aria-label="Registrar pagamento" onClick={() => setPaymentTarget(r)}>
-                            <DollarSign className="h-4 w-4" />
-                          </Button>
-                        )}
-                        {renderMenu(r)}
-                      </>
-                    }
+                  >
+                    {v.label}{v.id === 'overdue' && overdueCount > 0 ? ` · ${overdueCount}` : ''}
+                  </button>
+                ))}
+                <div className="ml-auto w-full sm:w-72">
+                  <Input
+                    value={search}
+                    onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                    placeholder="Buscar por cliente, descrição ou OS…"
+                    className="h-9"
                   />
-                );
-              })}
-            </div>
-
-            {totalPages > 1 && (
-              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span className="text-muted-foreground">{filtered.length} títulos · Página {page} de {totalPages}</span>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>Anterior</Button>
-                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Próxima</Button>
                 </div>
               </div>
-            )}
-          </>
-        )}
+
+              <FinancialFilterPanel type="receivable" filters={filters} onChange={(f) => { setFilters(f); setPage(1); }} />
+
+              {isLoading ? (
+                <Skeleton className="h-64 w-full rounded-lg" />
+              ) : error ? (
+                <div className="rounded-lg border bg-card p-8 text-center">
+                  <p className="text-destructive">Erro ao carregar recebíveis.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="hidden md:block">
+                    <DataTable<ReceivableRow>
+                      rows={paginated}
+                      rowKey={(r) => r.id}
+                      columns={columns}
+                      sort={sort}
+                      onSort={handleSort}
+                      emptyMessage={t.common.noResults}
+                      rowClassName={(r) => (isOverdue(r) ? 'bg-destructive/5' : undefined)}
+                      rowActions={(r) => (
+                        <>
+                          <Button
+                            variant="ghost" size="icon" className="h-8 w-8"
+                            aria-label="Cobrar via WhatsApp" title="Cobrar via WhatsApp"
+                            onClick={() => openCharge(r)}
+                          >
+                            <Send className="h-4 w-4" />
+                          </Button>
+                          {r.status !== 'paid' ? (
+                            <Button
+                              variant="ghost" size="icon" className="h-8 w-8"
+                              aria-label="Registrar pagamento" title="Registrar pagamento"
+                              onClick={() => setPaymentTarget(r)}
+                            >
+                              <DollarSign className="h-4 w-4" />
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost" size="icon" className="h-8 w-8"
+                              aria-label="Gerar recibo" title="Gerar recibo"
+                              onClick={() => generateReceivableReceipt(r)}
+                            >
+                              <ReceiptIcon className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {renderMenu(r)}
+                        </>
+                      )}
+                    />
+                  </div>
+
+                  <div className="space-y-2.5 md:hidden">
+                    {paginated.map((r) => {
+                      const s = statusView(r);
+                      const alert = dueAlert(r);
+                      return (
+                        <EntityCard
+                          key={r.id}
+                          id={r.service_orders?.service_order_number || 'Manual'}
+                          severity={s.tone === 'critical' ? 'critical' : s.tone === 'success' ? 'success' : 'neutral'}
+                          badge={<StatusChip tone={s.tone}>{s.label}</StatusChip>}
+                          title={r.clients?.name || r.description}
+                          lines={[
+                            r.description,
+                            `${formatDate(r.due_date)}${alert ? ` · ${alert.label}` : ''} · ${formatCurrency(Number(r.balance_amount ?? r.amount ?? 0))}`,
+                          ]}
+                          actions={
+                            <>
+                              <Button className="flex-1 gap-1.5" onClick={() => openCharge(r)}>
+                                <Send className="h-4 w-4" /> Cobrar
+                              </Button>
+                              {r.status !== 'paid' && (
+                                <Button variant="outline" size="icon" className="h-11 w-11" aria-label="Registrar pagamento" onClick={() => setPaymentTarget(r)}>
+                                  <DollarSign className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {renderMenu(r)}
+                            </>
+                          }
+                        />
+                      );
+                    })}
+                  </div>
+
+                  {totalPages > 1 && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span className="text-muted-foreground">{filtered.length} títulos · Página {page} de {totalPages}</span>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>Anterior</Button>
+                        <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Próxima</Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </>)}
+          </TabsContent>
+        </Tabs>
       </PageShell>
 
       {paymentTarget && (
