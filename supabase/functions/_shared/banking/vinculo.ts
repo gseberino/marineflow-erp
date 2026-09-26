@@ -139,31 +139,79 @@ export function sugerirVinculo(
 }
 
 /**
- * O vínculo que a aprovação usa SEM a pessoa escolher.
+ * O vínculo que a aprovação usa SEM a pessoa escolher: NENHUM.
  *
- * - Sinal de orçamento: nunca. Converter orçamento em OS é decisão de negócio.
- * - Certeza (Pix idêntico, ou documento + valor exato): sim.
- * - Casar com conta ou pagamento já lançado, com 70 pontos ou mais: sim — a alternativa
- *   seria criar lançamento em dobro.
- * - Saldo de OS: só com certeza. Um saldo de OS de valor parecido não prova nada sozinho.
+ * Decisão do dono (26/09/2026): ligar o dinheiro a uma OS, conta ou pagamento se faz pelo
+ * casamento de informações lançadas (a sugestão) OU à mão, "mas o sistema deve sempre
+ * questionar". Antes, vínculo "certo" ou com 70+ pontos era usado sozinho na aprovação; agora
+ * toda sugestão vira pergunta. A função continua existindo para a tela e o servidor lerem a
+ * mesma política.
  */
-export function vinculoAutomatico(v: VinculoSugerido | null | undefined): OpcaoDeVinculo | null {
-  const p = v?.principal;
-  if (!p || p.converteOrcamento) return null;
-  if (p.nivel === "certain") return p;
-  if ((p.tipo === "receivable" || p.tipo === "payable" || p.tipo === "existing_payment") && p.confianca >= 70) return p;
+export function vinculoAutomatico(_v: VinculoSugerido | null | undefined): OpcaoDeVinculo | null {
   return null;
 }
 
 /**
- * A linha não pode ser aprovada "no escuro": o dinheiro provavelmente já tem lançamento e o
- * vínculo não é forte o bastante para ser usado sozinho. Aprovar em lote (ou pelo
- * assistente sem escolher) criaria o lançamento em dobro — a aprovação recusa essa linha e
- * pede que alguém olhe.
+ * Há vínculo sugerido e ninguém escolheu: a linha não é aprovada no escuro. Em lote, pelo
+ * assistente ou pelo "lançar sozinho", ela fica para alguém responder "é este" ou "é outro".
  */
 export function exigeDecisao(v: VinculoSugerido | null | undefined): boolean {
-  if (!v || vinculoAutomatico(v)) return false;
-  // Valor exato de um pagamento já lançado, dentro da janela, também barra: é o caso do
-  // sinal do ORÇ-00075 (R$ 500 lançado dia 12, R$ 500 no banco dia 16, pago por terceiro).
+  return !!v?.principal;
+}
+
+/** A sugestão é de algo que JÁ está lançado (aprovar como novo contaria duas vezes). */
+export function podeJaEstarLancado(v: VinculoSugerido | null | undefined): boolean {
+  if (!v) return false;
   return [v.principal, ...v.alternativas].some((o) => o.jaLancado && (o.confianca >= 50 || Math.abs(o.diferenca) < 0.01));
+}
+
+/** O que as perguntas da OS e da OC precisam saber de uma linha da fila. */
+export interface LinhaComPerguntas {
+  suggested_service_order_id?: string | null;
+  suggested_purchase_order_id?: string | null;
+  vinculo_sugerido?: VinculoSugerido | null;
+  evidencia?: { anotacao?: { id?: string; os_id?: string | null } | null } | null;
+}
+
+/** A OS sugerida é a de uma das opções do vínculo: a escolha do vínculo já responde. */
+export function osVemDoVinculo(p: LinhaComPerguntas): boolean {
+  const os = p.suggested_service_order_id;
+  const v = p.vinculo_sugerido;
+  return !!os && !!v && [v.principal, ...(v.alternativas ?? [])].some((o) => o?.ordemDeServicoId === os);
+}
+
+/** A OS que o dono DISSE numa anotação ("o Pix de 800 é da OS-60") — já é a resposta. */
+export function osAnotada(p: LinhaComPerguntas): string | null {
+  const os = p.evidencia?.anotacao?.os_id ?? null;
+  return os && os === p.suggested_service_order_id ? os : null;
+}
+
+/** "Paga esta OC?" aparece nesta linha. */
+export function temPerguntaDaOC(p: LinhaComPerguntas): boolean {
+  return !!p.suggested_purchase_order_id;
+}
+
+/**
+ * "É desta OS?" aparece nesta linha: OS sugerida que não é a do vínculo (o vínculo já
+ * pergunta) — ou que o dono anotou, para ele ver e poder desdizer.
+ */
+export function temPerguntaDaOS(p: LinhaComPerguntas): boolean {
+  return !!p.suggested_service_order_id && (!osVemDoVinculo(p) || !!osAnotada(p));
+}
+
+/**
+ * Alguma pergunta de OS ou OC está sem resposta. Decisão do dono (26/09/2026): a ligação
+ * com o serviço "deve sempre questionar" — linha assim não entra no lote, no grupo nem na
+ * aprovação em bloco, para a pergunta não sumir num clique dado para outra coisa.
+ */
+export function perguntaDaOSAberta(
+  p: LinhaComPerguntas,
+  resposta?: { serviceOrderId?: string | null; purchaseOrderId?: string | null },
+): boolean {
+  if (temPerguntaDaOC(p) && resposta?.purchaseOrderId === undefined) return true;
+  if (temPerguntaDaOS(p) && !osVemDoVinculo(p) && resposta?.serviceOrderId === undefined && !osAnotada(p)) {
+    // A OS da OC confirmada ("Sim, é dela") já respondeu a OS.
+    return !(resposta?.purchaseOrderId && resposta?.serviceOrderId !== undefined);
+  }
+  return false;
 }

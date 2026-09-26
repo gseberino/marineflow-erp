@@ -265,9 +265,14 @@ servirComCors(async (req) => {
       return { transaction: tx, suggestions, groups: grupos, internalTransfer: false, internalTransferDetail: null };
     });
 
-    // ── Camada de certeza: aplica sozinha ────────────────────────────────────
+    // ── Camada de certeza: NÃO aplica mais sozinha ──────────────────────────────
+    // Decisão do dono (26/09/2026): ligar dinheiro a conta, OS ou orçamento se faz por
+    // casamento de informações OU à mão, "mas o sistema deve sempre questionar". O "Analisar
+    // tudo" continua achando as certezas — elas ficam no topo da lista, para um clique de
+    // confirmação — mas não concilia nada (nem converte orçamento em OS) sem a pessoa.
     const applied: Array<{ transaction_id: string; candidate: Candidate; message: string }> = [];
-    if (action === "auto") {
+    const aplicarSozinha = false;
+    if (action === "auto" && aplicarSozinha) {
       for (const item of perTransaction) {
         const auto = pickAutoApply(item.suggestions);
         if (!auto) continue;

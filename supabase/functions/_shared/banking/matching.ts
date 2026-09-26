@@ -92,12 +92,15 @@ function daysBetween(a: string, b: string): number {
  * Retorna 0..1. Comparação por tokens (e não distância de edição) porque o nome vem
  * cercado de ruído — "PIX RECEBIDO MARINA DO SOL LTDA 12345" — e o que importa é
  * quantas palavras identificadoras do cliente estão presentes.
+ *
+ * Palavra INTEIRA: "ANA" não aparece em "MARIANA" (achado da revisão de 26/09/2026 — o
+ * pedaço de palavra fazia a entrada de Mariana Souza pontuar como sendo de Ana Souza).
  */
 export function nameOverlap(clientName: string | null | undefined, statementText: string): number {
   const nameTokens = significantTokens(clientName || "", NAME_NOISE);
   if (nameTokens.length === 0) return 0;
   const haystack = ` ${normalizeText(statementText)} `;
-  const hits = nameTokens.filter((t) => haystack.includes(` ${t} `) || haystack.includes(t));
+  const hits = nameTokens.filter((t) => haystack.includes(` ${t} `));
   return hits.length / nameTokens.length;
 }
 
@@ -305,7 +308,10 @@ export function scoreCandidate(
   let score = 0;
 
   const searchText = `${tx.description} ${tx.counterparty_name || ""}`;
-  const overlap = nameOverlap(candidate.clientName, searchText);
+  // Só o nome INTEIRO do cliente conta (decisão do dono, 26/09/2026: "o sistema nunca pode
+  // sugerir ou lançar alguma transação com nomes diferentes"). Parte do nome — o mesmo
+  // sobrenome, o primeiro nome — não identifica, não pontua e não libera tolerância.
+  const overlap = nameOverlap(candidate.clientName, searchText) >= 0.99 ? 1 : 0;
 
   /**
    * O remetente CONTRADIZ o candidato: os dois lados têm documento e eles diferem.
@@ -387,9 +393,7 @@ export function scoreCandidate(
       score += pts;
       reasons.push({
         signal: "nome",
-        detail: overlap >= 0.99
-          ? `Nome de ${candidate.clientName} aparece no histórico`
-          : `Parte do nome de ${candidate.clientName} aparece no histórico`,
+        detail: `Nome de ${candidate.clientName} aparece no histórico`,
         points: pts,
       });
     }

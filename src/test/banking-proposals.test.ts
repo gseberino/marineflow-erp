@@ -4,6 +4,7 @@
 // uma decisão contábil. Os casos abaixo saíram do extrato real da empresa.
 import { describe, it, expect } from "vitest";
 import {
+  regraDeFornecedorAlcanca,
   classificar, acharFornecedor, indexarFornecedores, montarProposta,
   sugerirRegras, historicoSemIdentidade, ehIntermediario, chaveDoRecebedor, categoriaPeloTexto,
   type TransacaoOrfa, type FornecedorConhecido, type HistoricoFornecedor, type RegraFinanceira,
@@ -293,26 +294,52 @@ describe("regras que o gestor ensina", () => {
     expect(p.suggestedCategory).toBe("Certa");
   });
 
-  it("regra de fornecedor alcança o nome que o cartão escreve", () => {
-    // O que o gestor quis dizer: "compras na PREMEL são peças e materiais". O que o
-    // sistema via: um uuid que a resolução automática nunca ligava a "PREMEL - ITAJAI",
-    // porque nem a razão social contém esse texto nem o contrário. A regra existia,
-    // estava ativa, e não valia justamente para as compras que ele tinha na frente.
+  it("regra de fornecedor NÃO alcança o nome que o cartão escreve — a regra de texto alcança", () => {
+    // Decisão do dono (26/09/2026): "o sistema nunca pode sugerir ou lançar alguma transação
+    // com nomes diferentes". "PREMEL - ITAJAI" não é "PREMEL MAT. ELETRICOS": a regra de
+    // fornecedor não vale por palpite de nome. O caminho explícito é a regra de TEXTO, que
+    // diz com todas as letras "o que o cartão escreve como PREMEL é este fornecedor".
     const cadastro: FornecedorConhecido[] = [
       { id: "f-premel", name: "PREMEL MAT. ELETRICOS LTDA", cnpj_cpf: "00.725.876/0008-71" },
     ];
-    const r = regra({
+    const compra = tx({ description: "PREMEL - ITAJAI        ITAJAI        BRA", counterparty_name: "PREMEL - ITAJAI" });
+    const deFornecedor = regra({
       id: "r-premel", match_type: "supplier", match_value: "f-premel",
       set_category: "Peças e materiais", set_dre_group: "custo_direto", set_supplier_id: null,
     });
-    const p = montarProposta(
-      tx({ description: "PREMEL - ITAJAI        ITAJAI        BRA", counterparty_name: "PREMEL - ITAJAI" }),
+    const semTexto = montarProposta(compra, cadastro, undefined, [deFornecedor]);
+    expect(semTexto.appliedRuleId).toBeNull();
+    expect(semTexto.suggestedSupplierId).toBeNull();
+
+    const deTexto = regra({
+      id: "r-premel-texto", match_type: "text", match_value: "PREMEL",
+      set_category: "Peças e materiais", set_dre_group: "custo_direto", set_supplier_id: "f-premel",
+    });
+    const comTexto = montarProposta(compra, cadastro, undefined, [deFornecedor, deTexto]);
+    expect(comTexto.appliedRuleId).toBe("r-premel-texto");
+    expect(comTexto.suggestedCategory).toBe("Peças e materiais");
+    // E diz de QUEM é a despesa, porque a regra disse — não porque o nome pareceu.
+    expect(comTexto.suggestedSupplierId).toBe("f-premel");
+  });
+
+  it("regra de fornecedor alcança o nome cortado pelo banco e o documento", () => {
+    const cadastro: FornecedorConhecido[] = [
+      { id: "f-marine", name: "MARINE EXPRESS COMERCIAL IMPORTADORA LTDA", cnpj_cpf: "11.111.111/0001-11" },
+    ];
+    const r = regra({
+      id: "r-marine", match_type: "supplier", match_value: "f-marine",
+      set_category: "Peças e materiais", set_dre_group: "custo_direto", set_supplier_id: null,
+    });
+    const cortado = montarProposta(
+      tx({ description: "Pix enviado para MARINE EXPRESS COMERCIAL IMPOR", counterparty_name: "MARINE EXPRESS COMERCIAL IMPOR" }),
       cadastro, undefined, [r],
     );
-    expect(p.suggestedCategory).toBe("Peças e materiais");
-    expect(p.appliedRuleId).toBe("r-premel");
-    // E diz de QUEM é a despesa: sem isso o custo por fornecedor seguiria errado.
-    expect(p.suggestedSupplierId).toBe("f-premel");
+    expect(cortado.appliedRuleId).toBe("r-marine");
+    const porDocumento = montarProposta(
+      tx({ description: "Pix enviado", counterparty_name: "MEX", counterparty_document: "11111111000111" }),
+      cadastro, undefined, [r],
+    );
+    expect(porDocumento.appliedRuleId).toBe("r-marine");
   });
 
   it("cabeça curta demais não arrasta meia fatura", () => {
@@ -672,10 +699,22 @@ describe("regra de fornecedor não pega pessoa com nome parecido", () => {
     expect(p.appliedRuleId).toBeNull();
   });
 
-  it("continua pegando a loja pela primeira palavra, mesmo atrás da maquininha", () => {
+  it("a primeira palavra NÃO basta mais, nem atrás da maquininha (decisão do dono, 26/09/2026)", () => {
+    // "PAG*COREMMA ITAJAI" não é "COREMMA COMERCIO": para isso existe a regra de texto.
     const cadastro: FornecedorConhecido[] = [{ id: "f-coremma", name: "COREMMA COMERCIO LTDA", cnpj_cpf: null }];
     const p = montarProposta(tx({ description: "PAG*COREMMA ITAJAI" }), cadastro, undefined, [regraF("r-coremma", "f-coremma")]);
+    expect(p.appliedRuleId).toBeNull();
+    expect(p.suggestedSupplierId).toBeNull();
+  });
+
+  it("o mesmo nome continua valendo (acento, caixa e LTDA não contam)", () => {
+    const cadastro: FornecedorConhecido[] = [{ id: "f-coremma", name: "Coremma Comércio LTDA", cnpj_cpf: null }];
+    const p = montarProposta(
+      tx({ description: "Pix enviado para COREMMA COMERCIO", counterparty_name: "COREMMA COMERCIO" }),
+      cadastro, undefined, [regraF("r-coremma", "f-coremma")],
+    );
     expect(p.appliedRuleId).toBe("r-coremma");
+    expect(p.suggestedSupplierId).toBe("f-coremma");
   });
 });
 
@@ -742,5 +781,260 @@ describe("categoria pelo texto (Caixa na tela e no assistente)", () => {
       const c = categoriaPeloTexto(t)?.categoria;
       expect(["Aplicação financeira", "Impostos e taxas", "Salários e encargos", "Empréstimo e financiamento"], t).not.toContain(c);
     }
+  });
+});
+
+describe("fornecedor pelo MESMO nome (decisão do dono, 26/09/2026)", () => {
+  const cadastro: FornecedorConhecido[] = [
+    { id: "f-marine", name: "MARINE EXPRESS COMERCIAL IMPORTADORA LTDA", cnpj_cpf: "11.111.111/0001-11" },
+    { id: "f-kamell", name: "KAMELL COMERCIO GLOBAL LTDA", cnpj_cpf: null },
+  ];
+
+  it("nome igual reconhece e diz como", () => {
+    const p = montarProposta(tx({ description: "Pix enviado", counterparty_name: "Kamell Comércio Global" }), cadastro);
+    expect(p.suggestedSupplierId).toBe("f-kamell");
+    expect(p.fornecedorPor).toBe("nome_identico");
+  });
+
+  it("nome cortado pelo banco (25+ letras) reconhece, marcado para conferir", () => {
+    const p = montarProposta(tx({ description: "Pix enviado", counterparty_name: "MARINE EXPRESS COMERCIAL IMPOR" }), cadastro);
+    expect(p.suggestedSupplierId).toBe("f-marine");
+    expect(p.fornecedorPor).toBe("nome_cortado");
+    expect(p.reasoning).toMatch(/cortado pelo banco — confira/);
+  });
+
+  it("começo curto ou só a primeira palavra não reconhece", () => {
+    expect(montarProposta(tx({ description: "Pix enviado", counterparty_name: "KAMELL" }), cadastro).suggestedSupplierId).toBeNull();
+    expect(montarProposta(tx({ description: "Pix enviado", counterparty_name: "MARINE EXPRESS" }), cadastro).suggestedSupplierId).toBeNull();
+  });
+
+  it("nome igual com documento de outra pessoa não reconhece", () => {
+    const p = montarProposta(tx({ description: "Pix enviado", counterparty_name: "MARINE EXPRESS COMERCIAL IMPORTADORA", counterparty_document: "123.456.789-09" }), cadastro);
+    expect(p.suggestedSupplierId).toBeNull();
+  });
+
+  it("dois cadastros com o mesmo nome é empate: ninguém", () => {
+    const dois: FornecedorConhecido[] = [...cadastro, { id: "f-kamell2", name: "Kamell Comercio Global", cnpj_cpf: null }];
+    expect(montarProposta(tx({ description: "Pix enviado", counterparty_name: "KAMELL COMERCIO GLOBAL" }), dois).suggestedSupplierId).toBeNull();
+  });
+});
+
+describe("nome cortado pela maquininha (~20 letras, no meio da palavra)", () => {
+  const correa: FornecedorConhecido[] = [
+    { id: "f-correa", name: "CORREA MATERIAIS ELETRICOS LTDA", cnpj_cpf: "02.559.947/0003-24" },
+  ];
+  const compra = tx({ description: "CORREA MATERIAIS ELE   BALNEARIO CAM BRA", counterparty_name: "CORREA MATERIAIS ELE" });
+
+  it("reconhece o fornecedor, marcado para conferir", () => {
+    const p = montarProposta(compra, correa);
+    expect(p.suggestedSupplierId).toBe("f-correa");
+    expect(p.fornecedorPor).toBe("nome_cortado");
+  });
+
+  it("corte na divisa da palavra, ou com uma palavra só, não prova corte", () => {
+    const cad: FornecedorConhecido[] = [{ id: "f-x", name: "MARIA APARECIDA SANTOS COMERCIO", cnpj_cpf: null }];
+    expect(montarProposta(tx({ description: "x", counterparty_name: "MARIA APARECIDA SANTOS" }), cad).suggestedSupplierId).toBeNull();
+    const um: FornecedorConhecido[] = [{ id: "f-y", name: "SUPERMERCADOSBRASILEIROS UNIDOS", cnpj_cpf: null }];
+    expect(montarProposta(tx({ description: "x", counterparty_name: "SUPERMERCADOSBRASIL" }), um).suggestedSupplierId).toBeNull();
+  });
+
+  it("regra de fornecedor \"aplicar sozinha\" alcançada pelo nome cortado só SUGERE", () => {
+    const aplicar: RegraFinanceira = {
+      id: "r-correa", match_type: "supplier", match_value: "f-correa", direction: "debit", autonomy: "apply", status: "active",
+      set_category: "Peças e materiais", set_dre_group: "custo_direto",
+    };
+    const p = montarProposta(compra, correa, undefined, [aplicar]);
+    expect(p.appliedRuleId).toBe("r-correa");
+    expect(p.suggestedCategory).toBe("Peças e materiais");
+    expect(p.autoAplicavel).toBe(false);
+    expect(p.fornecedorPor).toBe("nome_cortado");
+    expect(p.reasoning).toMatch(/não lança sozinha/);
+    // Pelo nome inteiro, a mesma regra continua lançando sozinha.
+    const inteiro = montarProposta(tx({ description: "Pix enviado", counterparty_name: "CORREA MATERIAIS ELETRICOS LTDA" }), correa, undefined, [aplicar]);
+    expect(inteiro.autoAplicavel).toBe(true);
+  });
+});
+
+describe("revisão adversarial de 26/09/2026", () => {
+  const marine: FornecedorConhecido[] = [{ id: "f-marine", name: "MARINE EXPRESS COMERCIAL IMPORTADORA", cnpj_cpf: null }];
+  const regraR = (o: Partial<RegraFinanceira>): RegraFinanceira => ({
+    id: "r", match_type: "text", match_value: "", direction: "debit", autonomy: "suggest", status: "active", ...o,
+  });
+
+  it("nome que não chegou ao limite do banco não é 'cortado' (homônimo mais curto)", () => {
+    const cad: FornecedorConhecido[] = [{ id: "f-m", name: "Maria Aparecida dos Santos Oliveira", cnpj_cpf: null }];
+    const p = montarProposta(tx({ description: "Pix enviado", counterparty_name: "MARIA APARECIDA DOS SANTOS" }), cad);
+    expect(p.suggestedSupplierId).toBeNull();
+  });
+
+  it("corte no meio da palavra só vale no layout de cartão, nunca no Pix", () => {
+    const cad: FornecedorConhecido[] = [{ id: "f-r", name: "MARIA DA SILVA ROSAS", cnpj_cpf: null }];
+    expect(montarProposta(tx({ description: "Pix enviado", counterparty_name: "MARIA DA SILVA ROSA" }), cad).suggestedSupplierId).toBeNull();
+  });
+
+  it("regra de TEXTO com 'lançar sozinha' não lança o fornecedor achado pelo nome cortado", () => {
+    const texto = regraR({ id: "r-t", match_value: "MARINE", autonomy: "apply",
+      set_category: "Peças e materiais", set_dre_group: "custo_direto", set_supplier_id: null });
+    const p = montarProposta(tx({ description: "Pix enviado", counterparty_name: "MARINE EXPRESS COMERCIAL IMPOR" }), marine, undefined, [texto]);
+    expect(p.appliedRuleId).toBe("r-t");
+    expect(p.suggestedSupplierId).toBe("f-marine");
+    expect(p.fornecedorPor).toBe("nome_cortado");
+    expect(p.autoAplicavel).toBe(false);
+    expect(p.confidence).toBe(95);
+    expect(p.fornecedorPelaRegra).toBe(false);
+  });
+
+  it("regra de texto que DIZ o fornecedor lança pela regra", () => {
+    const texto = regraR({ id: "r-t", match_value: "MARINE", autonomy: "apply",
+      set_category: "Peças e materiais", set_dre_group: "custo_direto", set_supplier_id: "f-marine" });
+    const p = montarProposta(tx({ description: "Pix enviado", counterparty_name: "MARINE EXPRESS COMERCIAL IMPOR" }), marine, undefined, [texto]);
+    expect(p.autoAplicavel).toBe(true);
+    expect(p.fornecedorPelaRegra).toBe(true);
+  });
+
+  it("regra de fornecedor de OUTRO cadastro não troca quem o documento provou", () => {
+    const cad: FornecedorConhecido[] = [
+      { id: "f-a", name: "ALFA PECAS", cnpj_cpf: "11.111.111/0001-11" },
+      { id: "f-b", name: "ALFA PECAS NAUTICAS", cnpj_cpf: null },
+    ];
+    const deB = regraR({ id: "r-b", match_type: "supplier", match_value: "f-b", autonomy: "apply",
+      set_category: "Peças e materiais", set_dre_group: "custo_direto", set_supplier_id: null });
+    const p = montarProposta(tx({ description: "Pix", counterparty_name: "ALFA PECAS NAUTICAS", counterparty_document: "11111111000111" }), cad, undefined, [deB]);
+    expect(p.suggestedSupplierId).toBe("f-a");
+    expect(p.appliedRuleId).toBeNull();
+  });
+
+  it("regra de fornecedor com dois cadastros de mesmo nome é empate: não vale", () => {
+    const cad: FornecedorConhecido[] = [
+      { id: "f-1", name: "COREMMA LTDA", cnpj_cpf: null },
+      { id: "f-2", name: "Coremma Ltda", cnpj_cpf: null },
+    ];
+    const r1 = regraR({ id: "r-1", match_type: "supplier", match_value: "f-1", autonomy: "apply",
+      set_category: "Ferramentas e equipamentos", set_dre_group: "custo_direto", set_supplier_id: null });
+    const p = montarProposta(tx({ description: "x", counterparty_name: "COREMMA" }), cad, undefined, [r1]);
+    expect(p.appliedRuleId).toBeNull();
+    expect(p.suggestedSupplierId).toBeNull();
+  });
+
+  it("compra de cartão com nome que começa como o de fornecedor com regra: alerta, não atribui, não lança sozinha", () => {
+    const cad: FornecedorConhecido[] = [{ id: "f-premel", name: "PREMEL MAT. ELETRICOS LTDA", cnpj_cpf: "00.725.876/0008-71" }];
+    const deFornecedor = regraR({ id: "r-premel", match_type: "supplier", match_value: "f-premel", autonomy: "apply",
+      set_category: "Peças e materiais", set_dre_group: "custo_direto", set_supplier_id: null });
+    const p = montarProposta(tx({ description: "PREMEL - ITAJAI        ITAJAI        BRA", counterparty_name: "PREMEL - ITAJAI" }), cad, undefined, [deFornecedor]);
+    expect(p.suggestedSupplierId).toBeNull();
+    expect(p.appliedRuleId).toBeNull();
+    expect(p.lembraRegra).toBe("PREMEL MAT. ELETRICOS LTDA");
+    expect(p.reasoning).toMatch(/não liga nomes diferentes/);
+  });
+});
+
+describe("segunda revisão de 26/09/2026", () => {
+  const regraS = (o: Partial<RegraFinanceira>): RegraFinanceira => ({
+    id: "r", match_type: "supplier", match_value: "", direction: "debit", autonomy: "apply", status: "active",
+    set_category: "Peças e materiais", set_dre_group: "custo_direto", ...o,
+  });
+
+  it("regra de fornecedor COMO ESTÁ EM PRODUÇÃO (set_supplier_id = match_value) não lança o nome cortado", () => {
+    const cad: FornecedorConhecido[] = [{ id: "f-fachini", name: "FERNANDO NUNES FACHINI EPP", cnpj_cpf: "12.345.678/0001-90" }];
+    const r = regraS({ id: "r-f", match_value: "f-fachini", set_supplier_id: "f-fachini" });
+    const p = montarProposta(
+      tx({ description: "FERNANDO NUNES FACHI   ITAJAI        BRA", counterparty_name: "FERNANDO NUNES FACHI" }),
+      cad, undefined, [r],
+    );
+    expect(p.appliedRuleId).toBe("r-f");
+    expect(p.fornecedorPor).toBe("nome_cortado");
+    expect(p.autoAplicavel).toBe(false);
+    expect(p.confidence).toBe(95);
+  });
+
+  it("matriz e filial (mesma raiz de CNPJ) são uma empresa: a regra da matriz vale", () => {
+    const cad: FornecedorConhecido[] = [
+      { id: "f-filial", name: "Coremma Ltda", cnpj_cpf: "83.109.504/0006-86" },
+      { id: "f-matriz", name: "COREMMA LTDA", cnpj_cpf: "83.109.504/0001-71" },
+    ];
+    const r = regraS({ id: "r-c", match_value: "f-matriz", set_supplier_id: "f-matriz", set_category: "Ferramentas e equipamentos" });
+    const p = montarProposta(tx({ description: "COREMMA                ITAJAI        BRA", counterparty_name: "COREMMA" }), cad, undefined, [r]);
+    expect(p.suggestedSupplierId).toBe("f-matriz");
+    expect(p.appliedRuleId).toBe("r-c");
+    expect(p.lembraRegra).toBeNull();
+  });
+
+  it("duas EMPRESAS com o mesmo nome: não escolhe, mas diz quais são (e não chama de 'nome diferente')", () => {
+    const cad: FornecedorConhecido[] = [
+      { id: "k1", name: "KAMELL COMERCIO GLOBAL LTDA", cnpj_cpf: "11.111.111/0001-11" },
+      { id: "k2", name: "Kamell Comercio Global", cnpj_cpf: null },
+    ];
+    const p = montarProposta(tx({ description: "Pix enviado", counterparty_name: "KAMELL COMERCIO GLOBAL" }), cad);
+    expect(p.suggestedSupplierId).toBeNull();
+    expect(p.reasoning).toMatch(/mais de um cadastro com este nome/);
+    expect(p.lembraRegra).toBeNull();
+  });
+
+  it("alerta de regra parecida não dispara com documento no extrato (CPF de outro Fernando)", () => {
+    const cad: FornecedorConhecido[] = [{ id: "f-fachini", name: "FERNANDO NUNES FACHINI EPP", cnpj_cpf: "12.345.678/0001-90" }];
+    const r = regraS({ id: "r-f", match_value: "f-fachini", set_supplier_id: "f-fachini" });
+    const p = montarProposta(
+      tx({ description: "Pix enviado para FERNANDO FERRAZ MORAES", counterparty_name: "FERNANDO FERRAZ MORAES", counterparty_document: "123.456.789-09" }),
+      cad, undefined, [r],
+    );
+    expect(p.lembraRegra).toBeNull();
+  });
+
+  it("nome dentro da descrição (Nubank, sem nome à parte) é reconhecido e a regra vale", () => {
+    const cad: FornecedorConhecido[] = [{ id: "k1", name: "KAMELL COMERCIO GLOBAL LTDA", cnpj_cpf: null }];
+    const r = regraS({ id: "r-k", match_value: "k1", set_supplier_id: "k1", set_category: "Compras de mercadorias" });
+    const p = montarProposta(tx({ description: "Pix enviado para KAMELL COMERCIO GLOBAL", counterparty_name: null }), cad, undefined, [r]);
+    expect(p.suggestedSupplierId).toBe("k1");
+    expect(p.appliedRuleId).toBe("r-k");
+    expect(p.lembraRegra).toBeNull();
+  });
+
+  it("regra de texto que DIZ o fornecedor: sem marca de 'nome cortado'", () => {
+    const cad: FornecedorConhecido[] = [{ id: "f-m", name: "MARINE EXPRESS COMERCIAL IMPORTADORA", cnpj_cpf: null }];
+    const r = regraS({ id: "r-t", match_type: "text", match_value: "MARINE", set_supplier_id: "f-m" });
+    const p = montarProposta(tx({ description: "Pix enviado", counterparty_name: "MARINE EXPRESS COMERCIAL IMPOR" }), cad, undefined, [r]);
+    expect(p.autoAplicavel).toBe(true);
+    expect(p.fornecedorPor).toBeNull();
+    expect(p.fornecedorPelaRegra).toBe(true);
+  });
+
+  it("regraDeFornecedorAlcanca usa as mesmas provas do motor", () => {
+    const cad: FornecedorConhecido[] = [{ id: "c", name: "COREMMA LTDA", cnpj_cpf: "83.109.504/0001-71" }];
+    expect(regraDeFornecedorAlcanca(tx({ description: "x", counterparty_name: "COREMMA" }), "c", cad)).toBe(true);
+    expect(regraDeFornecedorAlcanca(tx({ description: "x", counterparty_name: "COREMMA ITAJAI" }), "c", cad)).toBe(false);
+  });
+});
+
+describe("terceira revisão de 26/09/2026: mesma empresa", () => {
+  const cad: FornecedorConhecido[] = [
+    { id: "matriz", name: "COREMMA LTDA", cnpj_cpf: "83.109.504/0001-71" },
+    { id: "filial", name: "Coremma Ltda", cnpj_cpf: "83.109.504/0006-86" },
+  ];
+  const r = (id: string, fornecedor: string, categoria: string): RegraFinanceira => ({
+    id, match_type: "supplier", match_value: fornecedor, direction: "debit", autonomy: "apply", status: "active",
+    set_category: categoria, set_dre_group: "custo_direto", set_supplier_id: fornecedor,
+  });
+  const compra = tx({ description: "COREMMA                ITAJAI        BRA", counterparty_name: "COREMMA" });
+
+  it("a regra do cadastro reconhecido vence a da filial, qualquer que seja a ordem das regras", () => {
+    const daMatriz = r("r-m", "matriz", "Ferramentas e equipamentos");
+    const daFilial = r("r-f", "filial", "Peças e materiais");
+    expect(montarProposta(compra, cad, undefined, [daMatriz, daFilial]).appliedRuleId).toBe("r-m");
+    expect(montarProposta(compra, cad, undefined, [daFilial, daMatriz]).appliedRuleId).toBe("r-m");
+  });
+
+  it("sem regra no cadastro reconhecido, a regra da filial vale para a empresa", () => {
+    const daFilial = r("r-f", "filial", "Peças e materiais");
+    const p = montarProposta(compra, cad, undefined, [daFilial]);
+    expect(p.appliedRuleId).toBe("r-f");
+    expect(p.suggestedCategory).toBe("Peças e materiais");
+  });
+
+  it("a sugestão de regra não propõe outra regra para uma empresa que já tem", () => {
+    const d = (fornecedor: string) => ({ supplierId: fornecedor, supplierName: "Coremma", categoria: "Combustível e deslocamento", dreGroup: "custo_direto" });
+    const existente = r("r-m", "matriz", "Ferramentas e equipamentos");
+    expect(sugerirRegras([d("filial"), d("filial"), d("filial")], [existente], 3, cad)).toHaveLength(0);
+    // Sem o cadastro, o comportamento antigo (pelo id) continua.
+    expect(sugerirRegras([d("filial"), d("filial"), d("filial")], [existente])).toHaveLength(1);
   });
 });

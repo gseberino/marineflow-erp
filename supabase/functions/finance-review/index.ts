@@ -34,10 +34,12 @@ import {
   type CompraParcelada, type PernaDeParcelamento,
 } from "../_shared/banking/installments.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
-import { carregarContextoSeguro, identificarLinha, type TxDaFila } from "./identificacao.ts";
-import { exigeDecisao, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido } from "../_shared/banking/vinculo.ts";
+import { carregarContextoSeguro, identificarLinha, MOTOR_DA_FILA, type TxDaFila } from "./identificacao.ts";
+import {
+  exigeDecisao, perguntaDaOSAberta, podeJaEstarLancado, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido,
+} from "../_shared/banking/vinculo.ts";
 import { lerRespostaDaReceita } from "../_shared/banking/cnae.ts";
-import { selecionarParaLancarSozinho, type LinhaCandidata } from "./lancar-sozinho.ts";
+import { PISO_DA_CONFIANCA, selecionarParaLancarSozinho, type LinhaCandidata } from "./lancar-sozinho.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
 
@@ -486,7 +488,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const memoria = await montarMemoria(admin);
 
   const { data: regrasRows } = await admin
-    .from("finance_rules").select("*").eq("status", "active").limit(500);
+    .from("finance_rules").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(500);
   const regras = (regrasRows ?? []) as unknown as RegraFinanceira[];
 
   // Ordens de compra ainda sem pagamento: é com elas que uma saída pode casar.
@@ -607,7 +609,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const linhas: Array<Record<string, any>> = [];
   const autoAplicar: Array<Record<string, any>> = [];
   /** O que o "lançar sozinho" precisa saber e a fila não guarda (por transação). */
-  const paraOAutomatico = new Map<string, { semIdentidade: boolean; regraSoSugere: boolean }>();
+  const paraOAutomatico = new Map<string, { semIdentidade: boolean; regraSoSugere: boolean; nomeCortado: boolean; lembraRegra: boolean }>();
   for (const tx of desteLote) {
     const par = parPor.get(tx.id);
     if (par) {
@@ -676,7 +678,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
       suggested_payee_id: id.payeeId,
       suggested_client_id: id.clientId,
       // A OC costuma saber para qual serviço a compra foi — herdar isso evita perguntar
-      // duas vezes a mesma coisa. Sem OC, vale a OS do vínculo forte.
+      // duas vezes a mesma coisa. Sem OC, vale a OS do vínculo. Nos dois casos é PERGUNTA:
+      // só a resposta da pessoa liga a despesa à OS (decisão do dono, 26/09/2026).
       suggested_purchase_order_id: oc?.id ?? null,
       suggested_service_order_id: oc?.service_order_id ?? id.serviceOrderId,
       dre_group: id.dreGroup,
@@ -694,10 +697,16 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     paraOAutomatico.set(String(tx.id), {
       semIdentidade: p.semIdentidade,
       regraSoSugere: !!p.appliedRuleId && !p.autoAplicavel,
+      nomeCortado: p.fornecedorPor === "nome_cortado",
+      lembraRegra: !!p.lembraRegra,
     });
     // Regra com autonomia foi conferida pelo gestor no momento em que ele a criou; segurar
     // a proposta para ele confirmar de novo seria pedir a mesma decisão duas vezes.
-    if (p.autoAplicavel && Math.abs(Number(tx.amount)) <= limiteLote && !exigeDecisao(id.vinculo)) autoAplicar.push(linha);
+    // Com vínculo, OS ou OC sugerida a linha espera a resposta da pessoa, mesmo com regra
+    // autônoma: lançada sozinha, a pergunta "é desta OS?" nunca seria feita.
+    if (p.autoAplicavel && Math.abs(Number(tx.amount)) <= limiteLote && !exigeDecisao(id.vinculo)
+        && !linha.suggested_service_order_id && !linha.suggested_purchase_order_id
+        && p.fornecedorPor !== "nome_cortado") autoAplicar.push(linha);
   }
 
   let criadas = 0;
@@ -744,7 +753,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   /**
    * Lançar sozinho por CONFIANÇA (decisão do dono, 25/09/2026).
    *
-   * Só saída, confiança na faixa que acertou 98,6% (85+), abaixo do limite de lote, com
+   * Só saída, confiança 90+ (decisão de 26/09/2026; a faixa 85+ já acertava 98,6%), abaixo do limite de lote, com
    * categoria de verdade (não "Outras despesas"), sem alerta do vigilante sobre a transação
    * e sem "pode já estar lançado". Fica marcada como automática, aparece em "Lançados
    * sozinhos" e se desfaz como qualquer aprovação.
@@ -753,7 +762,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     .in("key", ["finance_auto_approve", "finance_auto_approve_min_confidence"]);
   const mapaAuto = Object.fromEntries(((cfgAuto.data ?? []) as { key: string; value: string }[]).map((r) => [r.key, r.value]));
   const autoLigado = String(mapaAuto.finance_auto_approve ?? "off").toLowerCase() === "on";
-  const confiancaMinima = Math.max(85, Number(mapaAuto.finance_auto_approve_min_confidence ?? 85) || 85);
+  const confiancaMinima = Math.max(PISO_DA_CONFIANCA, Number(mapaAuto.finance_auto_approve_min_confidence ?? PISO_DA_CONFIANCA) || PISO_DA_CONFIANCA);
   // O mutirão do histórico ("Incluir histórico antigo") só PROPÕE: lançar sozinho um lote de
   // linhas antigas de uma vez, com um clique dado para outra coisa, não é o que o dono ligou.
   if (autoLigado && !incluirHistorico) {
@@ -770,6 +779,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
       ...l,
       sem_identidade: paraOAutomatico.get(String(l.bank_transaction_id))?.semIdentidade ?? false,
       regra_so_sugere: paraOAutomatico.get(String(l.bank_transaction_id))?.regraSoSugere ?? false,
+      nome_cortado: paraOAutomatico.get(String(l.bank_transaction_id))?.nomeCortado ?? false,
+      lembra_regra: paraOAutomatico.get(String(l.bank_transaction_id))?.lembraRegra ?? false,
     }));
     const idsConfianca = selecionarParaLancarSozinho(candidatas as unknown as LinhaCandidata[], {
       confiancaMinima, limiteLote, comAlerta, jaPorRegra,
@@ -911,6 +922,7 @@ async function reclassificar(admin: DbClient, soSemEvidencia = false) {
       .from("finance_review_queue")
       .select(`id, kind, bank_transaction_id, suggested_category, suggested_amount,
                suggested_supplier_id, suggested_payee_id, suggested_client_id, suggested_service_order_id,
+               suggested_purchase_order_id,
                dre_group, applied_rule_id, confidence, reasoning, evidencia, vinculo_sugerido,
                bank_transactions!finance_review_queue_bank_transaction_id_fkey (
                  id, transaction_date, description, amount, transaction_type,
@@ -922,9 +934,15 @@ async function reclassificar(admin: DbClient, soSemEvidencia = false) {
   );
 
   // Transferência entre contas não se classifica por regra de despesa: ela já é o que é.
-  // soSemEvidencia: a varredura diária só completa o que nasceu antes do identificador.
+  // soSemEvidencia (a varredura diária): completa o que nasceu sem identificação e REFAZ o
+  // que foi identificado por uma versão anterior do motor — em 26/09/2026 as linhas antigas
+  // continuavam com o fornecedor do critério "nome parecido", rotulado como "nome idêntico".
+  // Linha que o dono ANOTOU não entra na varredura: o que ele disse vale mais que o motor.
+  const soAMarca = (e: any) => !e || Object.keys(e).every((k) => k === "motor");
   const alvo = pendentes.filter((p) => p.kind !== "internal_transfer" && p.bank_transactions
-    && (!soSemEvidencia || (p.evidencia == null && p.vinculo_sugerido == null)));
+    && (!soSemEvidencia || (!p.evidencia?.anotacao && (
+      (soAMarca(p.evidencia) && p.vinculo_sugerido == null)
+      || p.evidencia?.motor !== MOTOR_DA_FILA))));
   const fraseJaLancadas = jaLancadas > 0 ? `${jaLancadas} já lançada(s) por outro caminho saíram da fila` : "";
   if (alvo.length === 0) {
     return jr({
@@ -938,10 +956,18 @@ async function reclassificar(admin: DbClient, soSemEvidencia = false) {
   const fornecedores = indexarFornecedores((fornecedoresRows ?? []) as FornecedorConhecido[]);
   const memoria = await montarMemoria(admin);
   const { data: regrasRows } = await admin
-    .from("finance_rules").select("*").eq("status", "active").limit(500);
+    .from("finance_rules").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(500);
   const regras = (regrasRows ?? []) as unknown as RegraFinanceira[];
 
   const contexto = await carregarContextoSeguro(admin);
+
+  // A OS de cada OC sugerida, lida da própria OC.
+  const idsDeOc = [...new Set(alvo.map((p) => p.suggested_purchase_order_id).filter(Boolean))] as string[];
+  const osDaOc = new Map<string, string | null>();
+  if (idsDeOc.length > 0) {
+    const { data: ocs } = await admin.from("purchase_orders").select("id, service_order_id").in("id", idsDeOc);
+    for (const o of (ocs ?? []) as any[]) osDaOc.set(String(o.id), o.service_order_id ?? null);
+  }
 
   /**
    * Cada linha é reidentificada: categoria e regra (como antes) e, agora, fornecedor,
@@ -950,6 +976,8 @@ async function reclassificar(admin: DbClient, soSemEvidencia = false) {
    * Só vão ao banco as linhas que mudaram, todas numa chamada.
    */
   const mudadas: Record<string, unknown>[] = [];
+  /** Proposta → anotação do dono, para reaplicar depois da reavaliação. */
+  const anotadas = new Map<string, string>();
   let porRegra = 0;
   const igual = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
@@ -967,7 +995,10 @@ async function reclassificar(admin: DbClient, soSemEvidencia = false) {
       suggested_supplier_id: id.supplierId,
       suggested_payee_id: id.payeeId,
       suggested_client_id: id.clientId,
-      suggested_service_order_id: id.serviceOrderId ?? p.suggested_service_order_id ?? null,
+      // A OS da OC vem primeiro (lida da própria OC, como no gerar); sem OC, a do motor de
+      // agora — inclusive nenhuma. A anotação do dono é reaplicada logo abaixo.
+      suggested_service_order_id: (p.suggested_purchase_order_id ? osDaOc.get(String(p.suggested_purchase_order_id)) : null)
+        ?? id.serviceOrderId ?? null,
       applied_rule_id: nova.appliedRuleId,
       confidence: nova.confidence,
       reasoning: [prefixo, nova.reasoning, ...id.frases].filter(Boolean).join(" · "),
@@ -995,6 +1026,7 @@ async function reclassificar(admin: DbClient, soSemEvidencia = false) {
     if (!mudou) continue;
     if (nova.appliedRuleId) porRegra += 1;
     mudadas.push(linha);
+    if (p.evidencia?.anotacao?.id) anotadas.set(String(p.id), String(p.evidencia.anotacao.id));
   }
 
   let atualizadas = 0;
@@ -1002,6 +1034,13 @@ async function reclassificar(admin: DbClient, soSemEvidencia = false) {
     const { data, error } = await admin.rpc("aplicar_reavaliacao_da_fila", { p_linhas: mudadas.slice(i, i + 300) });
     if (error) throw error;
     atualizadas += Number(data ?? 0);
+  }
+
+  // O que o dono ANOTOU ("o Pix de 1.500 é da TSD, OS-60") volta por cima da reavaliação:
+  // reavaliar não pode apagar uma resposta dele (achado da revisão de 26/09/2026).
+  for (const [proposta, anotacao] of anotadas) {
+    const { error } = await admin.rpc("_aplicar_anotacao", { p_anotacao: anotacao, p_proposta: proposta });
+    if (error) console.error("[finance-review] reaplicar anotação falhou", proposta, error.message);
   }
 
   const partes = [
@@ -1318,7 +1357,7 @@ async function proporRegras(admin: DbClient) {
   const grupoDa = new Map<string, string>();
   for (const c of (cats ?? []) as any[]) if (c.dre_group) grupoDa.set(String(c.name), String(c.dre_group));
 
-  const { data: fornecedores } = await admin.from("suppliers").select("id, name").limit(2000);
+  const { data: fornecedores } = await admin.from("suppliers").select("id, name, cnpj_cpf, trade_name").limit(2000);
   const nomeDo = new Map<string, string>();
   for (const f of (fornecedores ?? []) as any[]) nomeDo.set(f.id, f.name);
 
@@ -1331,7 +1370,8 @@ async function proporRegras(admin: DbClient) {
   }));
 
   const { data: existentes } = await admin.from("finance_rules").select("*").limit(1000);
-  const padroes = sugerirRegras(decisoes, (existentes ?? []) as unknown as RegraFinanceira[]);
+  const padroes = sugerirRegras(decisoes, (existentes ?? []) as unknown as RegraFinanceira[], 3,
+    (fornecedores ?? []) as FornecedorConhecido[]);
 
   if (padroes.length === 0) {
     return jr({ ok: true, propostas: 0, message: "Nenhum padrão novo o bastante para virar regra" });
@@ -1621,6 +1661,25 @@ async function montarMemoria(admin: DbClient) {
 }
 
 /**
+ * A OS que o dono disse numa anotação aplicada a esta linha ("o Pix de 800 é da OS-60").
+ *
+ * Lida da própria anotação, e não da sugestão da fila: a sugestão pode ter sido trocada por
+ * uma reavaliação, a anotação não. undefined = não há anotação com OS.
+ */
+async function osDaAnotacao(admin: DbClient, p: any): Promise<string | undefined> {
+  const id = p?.evidencia?.anotacao?.id;
+  if (!id) return undefined;
+  // A anotação que a linha APONTA (evidencia.anotacao.id) — não "a mais recente com OS da
+  // mesma transação", que podia ser outra anotação, trocada depois.
+  const { data } = await admin.from("anotacoes_do_extrato")
+    .select("os_id")
+    .eq("id", id)
+    .eq("status", "aplicada")
+    .maybeSingle();
+  return (data as any)?.os_id ?? undefined;
+}
+
+/**
  * Aprova propostas, criando os lançamentos.
  *
  * Transferência entre contas NÃO gera lançamento: ela apenas marca as duas pernas como
@@ -1648,6 +1707,8 @@ async function aprovar(
 
   const feitos: string[] = [];
   const falhas: string[] = [];
+  /** O que deu certo pela metade e a pessoa precisa saber (ex.: OC que não pôde ser ligada). */
+  const avisos: string[] = [];
   /** Lançamento criado por proposta, para gravar o vínculo junto com o "aprovado". */
   const criadoPara = new Map<string, string>();
   const recebidoPara = new Map<string, string>();
@@ -1660,6 +1721,8 @@ async function aprovar(
   // entre contas não tem valor a julgar: passa.
   const todas = (propostas ?? []) as any[];
   const acimaDoLimite: string[] = [];
+  /** Em lote, OS/OC sugerida sem resposta não vai (decisão do dono, 26/09/2026). */
+  const semResposta: string[] = [];
   let elegiveis = todas;
   if (ids.length > 1) {
     const limite = await lerLimiteLote(admin);
@@ -1668,6 +1731,14 @@ async function aprovar(
       const valor = Math.abs(Number(overrides[p.id]?.amount ?? p.suggested_amount ?? 0));
       if (valor < limite) return true;
       acimaDoLimite.push(`${String(p.title).slice(0, 60)} (${valor.toFixed(2)})`);
+      return false;
+    });
+    // "É desta OS?" / "Paga esta OC?" sem resposta: aprovar em bloco faria a pergunta sumir
+    // sem ninguém ter respondido. A tela já tira essas da seleção; aqui é a garantia (o
+    // assistente e qualquer outro caminho passam por este mesmo servidor).
+    elegiveis = elegiveis.filter((p) => {
+      if (!perguntaDaOSAberta(p, overrides[p.id])) return true;
+      semResposta.push(String(p.title).slice(0, 60));
       return false;
     });
   }
@@ -1702,9 +1773,12 @@ async function aprovar(
         if (!vinculo) throw new Error("A opção escolhida não está mais entre as sugestões desta linha — revise a fila e escolha de novo");
       } else {
         vinculo = vinculoAutomatico(sugerido);
+        // Decisão do dono (26/09/2026): vínculo sugerido é PERGUNTA, nunca aplicado sozinho.
         if (!vinculo && exigeDecisao(sugerido)) {
           const o = sugerido!.principal;
-          throw new Error(`Pode ser ${o.rotulo.replace(/^Pagamento já lançado: /, "")}, que JÁ está lançado. Abra a linha e escolha: casar com ele ou lançar novo`);
+          throw new Error(podeJaEstarLancado(sugerido)
+            ? `Pode ser ${o.rotulo.replace(/^Pagamento já lançado: /, "")}, que JÁ está lançado. Abra a linha e escolha: casar com ele ou lançar novo`
+            : `Parece ser ${o.rotulo}. Abra a linha e diga se é isso ou se é para lançar novo`);
         }
       }
 
@@ -1737,6 +1811,15 @@ async function aprovar(
         continue;
       }
 
+      /**
+       * A OS que a PESSOA disse: na tela ("Sim, é desta"), pelo assistente, ou na anotação ("o
+       * Pix de 800 de hoje é da OS-60"). Sem nada disso, nenhuma: a OS sugerida pela fila é
+       * pergunta (decisão do dono, 26/09/2026). undefined = ninguém respondeu.
+       */
+      const osRespondida: string | null | undefined = ov.serviceOrderId !== undefined
+        ? ov.serviceOrderId
+        : await osDaAnotacao(admin, p);
+
       const valor = Number(ov.amount ?? p.suggested_amount);
       const data = String(ov.date ?? p.suggested_date);
       const descricao = String(ov.description ?? p.suggested_description ?? p.title);
@@ -1768,6 +1851,20 @@ async function aprovar(
          * contado em dobro no DRE. O financiamento com o banco pertence à fatura (Fase B3),
          * não a cada compra.
          */
+        // A OC respondida é conferida ANTES de qualquer escrita: só a sugerida para ESTA linha,
+        // e só se ainda não tem pagamento ligado. Conferir depois deixava a despesa criada e a
+        // linha pendente, meio lançada (revisão de 26/09/2026).
+        const ocId = ov.purchaseOrderId ?? null;
+        if (ocId) {
+          if (ocId !== p.suggested_purchase_order_id) {
+            throw new Error("A ordem de compra respondida não é a sugerida para esta linha — revise e responda de novo");
+          }
+          const { data: oc } = await admin.from("purchase_orders").select("payable_id").eq("id", ocId).maybeSingle();
+          if ((oc as any)?.payable_id) {
+            throw new Error("Esta ordem de compra já está ligada a outro pagamento — responda \"Não é\" ou corrija a OC");
+          }
+        }
+
         const parcelamento = await lerCompraParcelada(
           admin, (p.bank_transactions ?? null) as PernaDeParcelamento | null,
         );
@@ -1792,7 +1889,9 @@ async function aprovar(
           // Favorecido pessoa e OS a que a compra pertence: é o que transforma "saiu
           // dinheiro" em "este serviço custou isto" e "este sócio retirou aquilo".
           payee_id: ov.payeeId ?? p.suggested_payee_id ?? null,
-          linked_service_order_id: ov.serviceOrderId ?? p.suggested_service_order_id ?? null,
+          // OS só quando a pessoa respondeu (decisão do dono, 26/09/2026): a sugestão da fila é
+          // pergunta, não escolha. Sem resposta, a despesa fica sem OS.
+          linked_service_order_id: osRespondida ?? null,
           origin: "bank_reconciliation",
           bank_transaction_id: p.bank_transaction_id,
         }).select("id").single();
@@ -1828,23 +1927,51 @@ async function aprovar(
           }
         }
 
-        // Quitar a ordem de compra fecha o ciclo do suprimento: sem isto, a OC fica
-        // "enviada" para sempre e ninguém sabe o que já foi pago.
-        const ocId = ov.purchaseOrderId ?? p.suggested_purchase_order_id ?? null;
+        // Ligar o pagamento à ordem de compra diz o que já foi pago. A OC também é vínculo com
+        // serviço: só quando a pessoa respondeu que é ela. PAGAR não é RECEBER: o status da OC
+        // (e a entrada no estoque) é da conferência do material, não do extrato — marcar
+        // "recebida" aqui é o defeito de 29/08 ("OC recebida que não recebeu nada").
         if (ocId) {
-          await admin.from("purchase_orders")
-            .update({ payable_id: criadoPara.get(p.id), status: "received" })
-            .eq("id", ocId);
+          // Já conferida antes de criar a despesa. Só liga se ainda estiver livre; se não der,
+          // a despesa fica lançada e o aviso diz que a OC ficou sem ligação (sem desfazer o resto).
+          const { data: ligada, error: eOc } = await admin.from("purchase_orders")
+            .update({ payable_id: criadoPara.get(p.id) })
+            .eq("id", ocId).is("payable_id", null).select("id");
+          if (eOc || !(ligada as any[] | null)?.length) {
+            avisos.push(`${String(p.title).slice(0, 60)}: despesa lançada, mas a OC não foi ligada${eOc ? ` (${eOc.message})` : " (já tinha pagamento)"}`);
+          }
         }
       } else if (p.kind === "create_receivable") {
         // Receita exige cliente (receivables.client_id é NOT NULL) e, sem ele, o
         // lançamento não teria a quem pertencer. Falhar aqui com motivo legível é melhor
         // que devolver um erro cru de banco para o gestor.
-        const osDaReceita = ov.serviceOrderId !== undefined
-          ? ov.serviceOrderId
-          : (vinculo?.tipo === "service_order_balance" ? vinculo.ordemDeServicoId : p.suggested_service_order_id ?? null);
-        const clienteId = ov.clientId ?? p.suggested_client_id
+        // Saldo de OS escolhido no vínculo JÁ é a resposta "é desta OS". Responder outra OS
+        // (ou "não é") na pergunta ao mesmo tempo é contradição: melhor perguntar de novo do que
+        // escolher por ela.
+        const osDoVinculo = vinculo?.tipo === "service_order_balance" ? vinculo.ordemDeServicoId : null;
+        // Só a resposta de OUTRA OS na tela contradiz o saldo escolhido; "não é desta" (null)
+        // combina com ele. A escolha explícita do vínculo vale mais que uma OS anotada antes.
+        if (osDoVinculo && typeof ov.serviceOrderId === "string" && ov.serviceOrderId !== osDoVinculo) {
+          throw new Error("Você escolheu o saldo de uma OS e respondeu outra OS na pergunta — escolha uma só");
+        }
+        const osDaReceita = osDoVinculo ?? osRespondida ?? null;
+        // Cliente que o motor antigo tirou do VÍNCULO não vale sem a pessoa escolher o vínculo.
+        const clienteSugerido = (p.evidencia as any)?.cliente?.por === "vinculo" ? null : p.suggested_client_id;
+        let clienteId = ov.clientId ?? clienteSugerido
           ?? (vinculo?.tipo === "service_order_balance" ? vinculo.clienteId : null) ?? null;
+        // A receita de uma OS é do CLIENTE DA OS — é a dívida dele que o dinheiro quita, quem
+        // quer que tenha feito o Pix. Um cliente escolhido diferente do da OS é engano: perguntar
+        // de novo é melhor que dar a OS de um como paga com a receita de outro (revisão de 26/09/2026).
+        if (osDaReceita) {
+          const { data: os } = await admin.from("service_orders").select("client_id").eq("id", osDaReceita).maybeSingle();
+          const doCliente = (os as any)?.client_id ?? null;
+          if (doCliente) {
+            if (ov.clientId && ov.clientId !== doCliente) {
+              throw new Error("O cliente escolhido não é o da OS — a receita de uma OS é do cliente dela. Troque o cliente ou a OS");
+            }
+            clienteId = doCliente;
+          }
+        }
         if (!clienteId) {
           throw new Error("Escolha o cliente antes de aprovar esta receita");
         }
@@ -1914,12 +2041,17 @@ async function aprovar(
     aprovadas: feitos.length,
     falhas,
     acima_do_limite: acimaDoLimite,
+    sem_resposta_de_os: semResposta,
+    avisos,
     pernas_de_parcelamento: pernasRetiradas,
     message: `${feitos.length} lançamento(s) criado(s)`
       + (pernasRetiradas > 0
         ? ` · ${pernasRetiradas} parcela(s) da mesma compra saíram da fila junto` : "")
       + (acimaDoLimite.length
         ? ` · ${acimaDoLimite.length} acima do limite de lote ficaram para aprovação individual` : "")
+      + (semResposta.length
+        ? ` · ${semResposta.length} com OS ou OC para responder ficaram para aprovação individual` : "")
+      + (avisos.length ? ` · ${avisos.join(" · ")}` : "")
       + (falhas.length ? ` · ${falhas.length} falharam` : ""),
   });
 }

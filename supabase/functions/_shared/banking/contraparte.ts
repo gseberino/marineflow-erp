@@ -20,7 +20,8 @@ export type TipoDeEvidencia =
   | "conta_bancaria"   // banco, agência e conta iguais aos do favorecido
   | "historico"        // o mesmo documento já foi lançado para este cadastro
   | "nome_identico"    // nome igual, sem acento, caixa e sufixo societário
-  | "nome_parecido"    // mesmas palavras principais — só sugestão
+  | "nome_cortado"     // o nome do extrato é o do cadastro cortado pelo banco (~30 letras)
+  | "nome_parecido"    // NÃO É MAIS PRODUZIDO (decisão do dono, 26/09/2026); fica para ler linhas antigas
   | "regra"            // uma regra sua aponta o cadastro
   | "vinculo";         // é o dono da conta/OS que a linha paga
 
@@ -29,6 +30,7 @@ export const ROTULO_DA_EVIDENCIA: Record<TipoDeEvidencia, string> = {
   conta_bancaria: "conta bancária",
   historico: "lançamentos anteriores",
   nome_identico: "nome idêntico",
+  nome_cortado: "nome cortado pelo banco — confira",
   nome_parecido: "nome parecido — confira",
   regra: "regra sua",
   vinculo: "o que ela paga",
@@ -99,14 +101,43 @@ export interface IndiceDeContrapartes {
 
 const digitos = (s: string | null | undefined) => String(s ?? "").replace(/\D/g, "");
 
+/**
+ * CPF/CNPJ só com dígitos, com o zero à esquerda que a planilha comeu: CNPJ gravado com 13
+ * dígitos ("2559947000324") e CPF com 10 são o mesmo documento com o zero perdido. Sem isto
+ * o MESMO documento "contradizia" a si mesmo e o cadastro certo deixava de ser reconhecido.
+ */
+export function documentoNormalizado(s: string | null | undefined): string {
+  const d = digitos(s);
+  if (d.length === 13) return d.padStart(14, "0");
+  if (d.length === 10) return d.padStart(11, "0");
+  return d;
+}
+
+/**
+ * O extrato e o cadastro têm documento, e eles NÃO são da mesma pessoa ou empresa: o nome
+ * igual não vale. CPF contra CNPJ nunca é o mesmo; CNPJ contra CNPJ compara a raiz (matriz e
+ * filiais são a mesma empresa); CPF contra CPF, o número inteiro. Sem documento de um dos
+ * lados, não há o que contradizer.
+ */
+export function documentoContradiz(doExtrato: string | null | undefined, doCadastro: string | null | undefined): boolean {
+  const a = documentoNormalizado(doExtrato);
+  const b = documentoNormalizado(doCadastro);
+  if (a.length < 11 || b.length < 11) return false;
+  if (a.length !== b.length) return true;
+  return a.length === 14 ? a.slice(0, 8) !== b.slice(0, 8) : a !== b;
+}
+
 /** Palavras que não identificam ninguém. */
 const VAZIAS = new Set(["DE", "DA", "DO", "DAS", "DOS", "E", "LTDA", "ME", "EPP", "EIRELI", "SA", "S", "A", "CIA", "COMERCIO", "SERVICOS"]);
 
 /** Nome sem acento, caixa, pontuação e sufixo societário. */
 export function nomeLimpo(s: string | null | undefined): string {
-  return normalizeText(String(s ?? ""))
+  // "(Lisiane)" em "Thaline Soares Mendonça (Lisiane)" é anotação de quem cadastrou, não nome.
+  return normalizeText(String(s ?? "").replace(/\([^)]*\)/g, " "))
     .replace(/\b(LTDA|ME|EPP|EIRELI|SA|S A|CIA)\b/g, " ")
-    .replace(/^\d[\d.\s]*/, "")   // "65.010.587 CRISLAINE…" — MEI traz o CNPJ no começo do nome
+    // "65.010.587 CRISLAINE…" — MEI traz a raiz do CNPJ no começo do nome. Só esse formato:
+    // apagar qualquer número tornava "idênticos" nomes diferentes ("2 IRMAOS" e "IRMAOS").
+    .replace(/^\d{2} ?\d{3} ?\d{3}(?: ?\d{4} ?\d{2})? +/, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -129,7 +160,7 @@ function palavras(limpo: string): string[] {
 
 function entrada(id: string, nome: string, documento?: string | null): Entrada {
   const limpo = nomeLimpo(nome);
-  const d = digitos(documento);
+  const d = documentoNormalizado(documento);
   return { id, nome, limpo, tokens: palavras(limpo), documento: d.length >= 11 ? d : undefined };
 }
 
@@ -154,7 +185,7 @@ export function indexarContrapartes(c: CadastroParaIdentificar): IndiceDeContrap
     idx.fornecedores.push(e);
     if (f.trade_name) idx.fornecedores.push({ ...entrada(f.id, f.trade_name, f.cnpj_cpf), nome: f.name });
     idx.porId.fornecedor.set(f.id, e);
-    const d = digitos(f.cnpj_cpf);
+    const d = documentoNormalizado(f.cnpj_cpf);
     // Primeiro cadastro vence: dois cadastros com o mesmo documento é erro de cadastro, e
     // trocar qual deles ganha mudaria a identificação sem aviso.
     if (d.length >= 11 && !idx.fornecedorPorDoc.has(d)) idx.fornecedorPorDoc.set(d, e);
@@ -163,7 +194,7 @@ export function indexarContrapartes(c: CadastroParaIdentificar): IndiceDeContrap
     const e = entrada(f.id, f.name, f.document);
     idx.favorecidos.push(e);
     idx.porId.favorecido.set(f.id, e);
-    const d = digitos(f.document);
+    const d = documentoNormalizado(f.document);
     if (d.length >= 11 && !idx.favorecidoPorDoc.has(d)) idx.favorecidoPorDoc.set(d, e);
     const k = chaveDaConta(f.bank_branch, f.bank_account);
     if (k && !idx.favorecidoPorConta.has(k)) idx.favorecidoPorConta.set(k, e);
@@ -172,12 +203,12 @@ export function indexarContrapartes(c: CadastroParaIdentificar): IndiceDeContrap
     const e = entrada(cl.id, cl.name, cl.cpf_cnpj);
     idx.clientes.push(e);
     idx.porId.cliente.set(cl.id, e);
-    const d = digitos(cl.cpf_cnpj);
+    const d = documentoNormalizado(cl.cpf_cnpj);
     if (d.length >= 11 && !idx.clientePorDoc.has(d)) idx.clientePorDoc.set(d, e);
   }
   const soma = (m: Map<string, number>, id: string) => m.set(id, (m.get(id) ?? 0) + 1);
   for (const h of c.historico) {
-    const d = digitos(h.documento);
+    const d = documentoNormalizado(h.documento);
     if (d.length < 11) continue;
     const reg: HistoricoDoDocumento = idx.historico.get(d) ?? {
       saida: { total: 0, fornecedor: new Map(), favorecido: new Map() },
@@ -210,29 +241,23 @@ function unanime(m: Map<string, number>, total: number): { id: string; vezes: nu
   return vezes === total ? { id, vezes } : null;
 }
 
-/** Nome idêntico, e só um cadastro com esse nome — se dois têm, escolher seria sorteio. */
-function porNomeIdentico(lista: Entrada[], limpo: string): Entrada | null {
-  if (!limpo) return null;
-  const achados = new Map<string, Entrada>();
-  for (const e of lista) if (e.limpo === limpo) achados.set(e.id, e);
-  return achados.size === 1 ? [...achados.values()][0] : null;
-}
-
 /**
- * Nome parecido: a PRIMEIRA palavra igual e pelo menos duas palavras em comum (ou todas as
- * do nome mais curto, quando ele tem duas). "RAUL SCHUCHOVSKY NETO" acha "Raul Schuchovsky";
- * "PREMEL ITAJAI" não acha "Coremma Itajaí", porque a cabeça do nome é outra.
+ * Nome idêntico, e só um cadastro com esse nome — se dois têm, escolher seria sorteio. Nome
+ * igual com documento diferente é homônimo, não a mesma pessoa.
  */
-function porNomeParecido(lista: Entrada[], tokens: string[]): Entrada | null {
-  if (tokens.length < 2) return null;
-  const achados = new Map<string, Entrada>();
+function porNomeIdentico(lista: Entrada[], limpo: string, doc: string): Entrada | null {
+  if (!limpo) return null;
+  // Por EMPRESA: matriz e filial (mesma raiz de CNPJ) são uma só; entre elas, sempre a de
+  // menor documento. Duas empresas com o mesmo nome é empate.
+  const empresa = (e: Entrada) => (e.documento?.length === 14 ? `raiz:${e.documento.slice(0, 8)}` : `id:${e.id}`);
+  const porEmpresa = new Map<string, Entrada>();
   for (const e of lista) {
-    if (e.tokens.length < 2 || e.tokens[0] !== tokens[0]) continue;
-    const comuns = e.tokens.filter((t) => tokens.includes(t)).length;
-    const menor = Math.min(e.tokens.length, tokens.length);
-    if (comuns >= 2 && (comuns >= 3 || comuns === menor)) achados.set(e.id, e);
+    if (e.limpo !== limpo || documentoContradiz(doc, e.documento)) continue;
+    const k = empresa(e);
+    const atual = porEmpresa.get(k);
+    if (!atual || (e.documento ?? "").localeCompare(atual.documento ?? "") < 0) porEmpresa.set(k, e);
   }
-  return achados.size === 1 ? [...achados.values()][0] : null;
+  return porEmpresa.size === 1 ? [...porEmpresa.values()][0] : null;
 }
 
 function reconhecer(e: Entrada, por: TipoDeEvidencia, detalhe: string): Reconhecimento {
@@ -240,12 +265,11 @@ function reconhecer(e: Entrada, por: TipoDeEvidencia, detalhe: string): Reconhec
 }
 
 export function identificarContraparte(tx: TxParaIdentificar, idx: IndiceDeContrapartes): Identificacao {
-  const doc = digitos(tx.counterparty_document);
+  const doc = documentoNormalizado(tx.counterparty_document);
   const temDoc = doc.length >= 11;
   const tipoDoc = doc.length === 14 ? "CNPJ" : "CPF";
   const nomeDoExtrato = (tx.counterparty_name ?? "").trim() || nomeDaDescricao(tx.description);
   const limpo = nomeLimpo(nomeDoExtrato);
-  const tokens = palavras(limpo);
   const historico = temDoc ? idx.historico.get(doc) : undefined;
   const saida = tx.transaction_type === "debit";
 
@@ -271,7 +295,8 @@ export function identificarContraparte(tx: TxParaIdentificar, idx: IndiceDeContr
     if (!r.favorecido) {
       const k = chaveDaConta(tx.counterparty_branch, tx.counterparty_account);
       const fav = k ? idx.favorecidoPorConta.get(k) : undefined;
-      if (fav) r.favorecido = reconhecer(fav, "conta_bancaria", `Conta bancária igual à do favorecido ${fav.nome}`);
+      // Mesma agência e conta, mas CPF de outra pessoa: é conta de outro banco com o mesmo número.
+      if (fav && !documentoContradiz(doc, fav.documento)) r.favorecido = reconhecer(fav, "conta_bancaria", `Conta bancária igual à do favorecido ${fav.nome}`);
     }
     // 3. O que já se lançou para este documento — só se sempre foi o mesmo, e só se o
     //    cadastro não tem documento de OUTRO tipo. Um Pix ao CPF do Ricardo foi lançado uma
@@ -280,7 +305,7 @@ export function identificarContraparte(tx: TxParaIdentificar, idx: IndiceDeContr
     if (!r.favorecido && !r.fornecedor && historico) {
       const fav = unanime(historico.saida.favorecido, historico.saida.total);
       const forn = unanime(historico.saida.fornecedor, historico.saida.total);
-      const compativel = (e: Entrada | undefined) => !!e && (!e.documento || e.documento.length === doc.length);
+      const compativel = (e: Entrada | undefined) => !!e && !documentoContradiz(doc, e.documento);
       const e0 = fav ? idx.porId.favorecido.get(fav.id) : undefined;
       const f0 = forn ? idx.porId.fornecedor.get(forn.id) : undefined;
       const e = compativel(e0) ? e0 : undefined;
@@ -290,17 +315,14 @@ export function identificarContraparte(tx: TxParaIdentificar, idx: IndiceDeContr
     }
     // 4. Nome idêntico. Documento de pessoa (CPF) procura favorecido antes de fornecedor.
     if (!r.favorecido && !r.fornecedor && limpo) {
-      const fav = porNomeIdentico(idx.favorecidos, limpo);
-      const forn = fav ? null : porNomeIdentico(idx.fornecedores, limpo);
+      const fav = porNomeIdentico(idx.favorecidos, limpo, doc);
+      const forn = fav ? null : porNomeIdentico(idx.fornecedores, limpo, doc);
       if (fav) r.favorecido = reconhecer(fav, "nome_identico", `Nome idêntico ao do favorecido ${fav.nome}`);
       else if (forn) r.fornecedor = reconhecer(forn, "nome_identico", `Nome idêntico ao do fornecedor ${forn.nome}`);
     }
-    // 5. Nome parecido — só pessoa (favorecido). Fornecedor parecido fica com o motor de
-    //    propostas, que já compara nome com a trava da cabeça do nome.
-    if (!r.favorecido && !r.fornecedor && tokens.length >= 2) {
-      const fav = porNomeParecido(idx.favorecidos, tokens);
-      if (fav) r.favorecido = reconhecer(fav, "nome_parecido", `Nome parecido com o favorecido ${fav.nome} — confira`);
-    }
+    // Nome PARECIDO não identifica ninguém (decisão do dono, 26/09/2026: "o sistema nunca pode
+    // sugerir ou lançar alguma transação com nomes diferentes"). Sem documento, conta, histórico
+    // do mesmo documento ou nome igual, quem decide é a pessoa.
     if (!r.favorecido && !r.fornecedor) {
       const cli = temDoc ? idx.clientePorDoc.get(doc) : undefined;
       if (cli) r.outroCadastro = { tipo: "cliente", id: cli.id, nome: cli.nome };
@@ -331,12 +353,8 @@ export function identificarContraparte(tx: TxParaIdentificar, idx: IndiceDeContr
     }
   }
   if (!r.cliente && limpo) {
-    const cli = porNomeIdentico(idx.clientes, limpo);
+    const cli = porNomeIdentico(idx.clientes, limpo, doc);
     if (cli) r.cliente = reconhecer(cli, "nome_identico", `Nome idêntico ao do cliente ${cli.nome}`);
-  }
-  if (!r.cliente && tokens.length >= 2) {
-    const cli = porNomeParecido(idx.clientes, tokens);
-    if (cli) r.cliente = reconhecer(cli, "nome_parecido", `Nome parecido com o cliente ${cli.nome} — confira`);
   }
   if (!r.cliente) {
     const outro = temDoc ? (idx.favorecidoPorDoc.get(doc) ?? idx.fornecedorPorDoc.get(doc)) : undefined;

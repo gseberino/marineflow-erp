@@ -452,3 +452,30 @@ describe("identidade do remetente manda mais que o valor", () => {
     expect(r!.autoApply).toBe(true);
   });
 });
+
+describe("nome do cliente: palavra inteira e nome inteiro (decisão do dono, 26/09/2026)", () => {
+  it("ANA não aparece em MARIANA", () => {
+    expect(nameOverlap("Ana Souza", "PIX RECEBIDO MARIANA SOUZA")).toBeLessThan(1);
+  });
+});
+
+describe("parte do nome não identifica (decisão do dono, 26/09/2026)", () => {
+  it("mesmo sobrenome não pontua nem libera tolerância de valor", () => {
+    // Valor 15 reais diferente: sem identificação, o motor não aceita aproximação.
+    const s = scoreCandidate(tx({ description: "PIX RECEBIDO MARIANA SOUZA", amount: 1015 }),
+      cand({ amount: 1000, clientName: "Ana Souza" }));
+    expect(s).toBeNull();
+  });
+
+  it("valor exato com parte do nome: sugere, mas o nome não entra nos motivos", () => {
+    const s = scoreCandidate(tx({ description: "PIX RECEBIDO MARIANA SOUZA", amount: 1000 }),
+      cand({ amount: 1000, clientName: "Ana Souza" }));
+    expect(s?.reasons.some((r) => r.signal === "nome")).toBe(false);
+  });
+
+  it("nome inteiro continua valendo", () => {
+    const s = scoreCandidate(tx({ description: "PIX RECEBIDO ANA SOUZA", amount: 1000 }),
+      cand({ amount: 1000, clientName: "Ana Souza" }));
+    expect(s?.reasons.find((r) => r.signal === "nome")?.detail).toMatch(/Nome de Ana Souza/);
+  });
+});

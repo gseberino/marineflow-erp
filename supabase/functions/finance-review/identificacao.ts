@@ -109,7 +109,20 @@ export interface PropostaBase {
   confidence: number;
   appliedRuleId: string | null;
   suggestedSupplierId: string | null;
+  /** Como o motor reconheceu o fornecedor (documento, nome igual ou nome cortado pelo banco). */
+  fornecedorPor?: "documento" | "nome_identico" | "nome_cortado" | null;
+  /** O fornecedor foi dito pela regra (e não só a categoria). Ausente = como antes: a regra. */
+  fornecedorPelaRegra?: boolean;
 }
+
+/**
+ * Versão do motor que identificou a linha, gravada na evidência.
+ *
+ * A varredura diária refaz toda linha pendente de versão anterior: foi o que faltou em
+ * 26/09/2026, quando a regra "nome diferente nunca identifica" entrou e as linhas já na fila
+ * continuavam com o fornecedor do critério antigo, rotulado como "nome idêntico".
+ */
+export const MOTOR_DA_FILA = 2;
 
 export interface LinhaIdentificada {
   supplierId: string | null;
@@ -146,10 +159,20 @@ export function identificarLinha(tx: TxDaFila, p: PropostaBase, ctx: ContextoDeI
   if (supplierId) {
     if (ident.fornecedor?.id !== supplierId) {
       const e = ctx.indice.porId.fornecedor.get(supplierId);
+      const nome = e?.nome ?? "fornecedor";
+      // "Regra sua aponta X" só quando a regra DISSE o fornecedor. Regra de texto que só dá a
+      // categoria não aponta ninguém: aí vale como o motor reconheceu — e o nome cortado
+      // pelo banco continua pedindo "confira", com ou sem regra.
+      const pelaRegra = !!p.appliedRuleId && p.fornecedorPelaRegra !== false && p.fornecedorPor !== "nome_cortado";
+      const por: Reconhecimento["por"] = p.fornecedorPor === "nome_cortado" ? "nome_cortado"
+        : pelaRegra ? "regra"
+        : (p.fornecedorPor ?? "nome_identico");
       ident.fornecedor = {
-        id: supplierId, nome: e?.nome ?? "fornecedor",
-        por: p.appliedRuleId ? "regra" : "nome_identico",
-        detalhe: p.appliedRuleId ? `Regra sua aponta ${e?.nome ?? "o fornecedor"}` : `Reconhecido como ${e?.nome ?? "fornecedor"}`,
+        id: supplierId, nome, por,
+        detalhe: por === "nome_cortado" ? `Mesmo nome de ${nome}, cortado pelo banco — confira`
+          : por === "regra" ? `Regra sua aponta ${nome}`
+          : por === "documento" ? `CNPJ/CPF confere com o fornecedor ${nome}`
+          : `Mesmo nome do fornecedor ${nome}`,
       } as Reconhecimento;
     }
   } else if (ident.fornecedor) {
@@ -159,7 +182,7 @@ export function identificarLinha(tx: TxDaFila, p: PropostaBase, ctx: ContextoDeI
   if (supplierId) ident.cadastrar = null;
 
   const payeeId = ident.favorecido?.id ?? null;
-  let clientId = ident.cliente?.id ?? null;
+  const clientId = ident.cliente?.id ?? null;
   for (const r of [ident.favorecido, ident.cliente]) if (r) frases.push(r.detalhe);
   for (const f of frasesDaIdentificacao({ ...ident, fornecedor: null, favorecido: null, cliente: null })) frases.push(f);
 
@@ -189,23 +212,16 @@ export function identificarLinha(tx: TxDaFila, p: PropostaBase, ctx: ContextoDeI
     const v = vinculo.principal;
     frases.push(
       v.jaLancado
-        ? `Parece ser ${v.rotulo.replace(/^Pagamento já lançado: /, "")}, JÁ LANÇADO — aprovar casa com ele em vez de lançar de novo (${v.confianca} pontos)`
-        : `Parece pagar: ${v.rotulo} (${v.confianca} pontos)`,
+        ? `Parece ser ${v.rotulo.replace(/^Pagamento já lançado: /, "")}, JÁ LANÇADO — diga se é o mesmo dinheiro (casar) ou outro (${v.confianca} pontos)`
+        : `Parece pagar: ${v.rotulo} (${v.confianca} pontos) — diga se é isso`,
     );
+    // A OS fica como SUGESTÃO: a tela pergunta "é desta OS?" e só a resposta liga (decisão do
+    // dono, 26/09/2026). Antes, com 70+ pontos, a OS e o cliente dela já vinham escolhidos.
     if (v.confianca >= 70 && !v.converteOrcamento) serviceOrderId = v.ordemDeServicoId;
-    // Cliente pelo que a entrada paga, quando nada mais o reconheceu: a conta ou OS tem dono.
-    if (!clientId && tx.transaction_type === "credit" && v.clienteId && v.confianca >= 70) {
-      clientId = v.clienteId;
-      ident.cliente = {
-        id: v.clienteId, nome: v.clienteNome ?? "cliente", por: "vinculo",
-        detalhe: `Cliente de ${v.rotulo}`,
-      } as Reconhecimento;
-      ident.cadastrar = null;
-    }
   }
 
   return {
     supplierId, payeeId, clientId, serviceOrderId, categoria, dreGroup,
-    evidencia: semNulos(ident), vinculo, frases,
+    evidencia: { ...(semNulos(ident) ?? {}), motor: MOTOR_DA_FILA }, vinculo, frases,
   };
 }

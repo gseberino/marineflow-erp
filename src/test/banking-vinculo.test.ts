@@ -1,6 +1,8 @@
 // Vínculo de uma linha do extrato com o que ela paga — casos de 25/09/2026.
 import { describe, it, expect } from 'vitest';
-import { sugerirVinculo, vinculoAutomatico, exigeDecisao } from '../../supabase/functions/_shared/banking/vinculo';
+import {
+  sugerirVinculo, vinculoAutomatico, exigeDecisao, perguntaDaOSAberta, temPerguntaDaOS,
+} from '../../supabase/functions/_shared/banking/vinculo';
 import type { BankTx, Candidate } from '../../supabase/functions/_shared/banking/types';
 
 const entrada = (v: number, data: string, extra: Partial<BankTx> = {}): BankTx => ({
@@ -22,15 +24,16 @@ describe('sugerirVinculo', () => {
     expect(exigeDecisao(v)).toBe(true);
   });
 
-  it('documento do cliente + valor exato é certeza e vale sozinho', () => {
+  it('documento do cliente + valor exato é certeza — e mesmo assim pergunta (decisão do dono, 26/09/2026)', () => {
     const cands: Candidate[] = [{
       kind: 'receivable', id: 'r1', label: 'Saldo — OS-00045', amount: 1650, direction: 'credit',
       dueDate: '2026-09-05', clientId: 'c-mp', clientName: 'MP MOTOR HOMES', clientDocument: '44.051.448/0001-00',
     }];
     const v = sugerirVinculo(entrada(1650, '2026-09-05', { counterparty_document: '44051448000100' }), cands);
     expect(v?.principal.nivel).toBe('certain');
-    expect(vinculoAutomatico(v)?.lancamentoId).toBe('r1');
-    expect(exigeDecisao(v)).toBe(false);
+    // "O sistema deve sempre questionar": nenhum vínculo é usado sem a pessoa escolher.
+    expect(vinculoAutomatico(v)).toBeNull();
+    expect(exigeDecisao(v)).toBe(true);
   });
 
   it('sinal de orçamento nunca é automático, nem com certeza', () => {
@@ -89,5 +92,36 @@ describe('sugerirVinculo', () => {
     const v = sugerirVinculo(entrada(500, '2026-08-16', { counterparty_name: 'MP MOTORHOMES', counterparty_document: '44051448000100' }), cands);
     expect(v?.principal.jaLancado).toBe(true);
     expect(exigeDecisao(v)).toBe(true);
+  });
+});
+
+describe("perguntas da OS e da OC (decisão do dono, 26/09/2026)", () => {
+  const vinc = (os: string) => ({ principal: {
+    tipo: "payable", id: "c", rotulo: "Conta", valor: 1, confianca: 80, nivel: "probable", motivos: [], diferenca: 0,
+    lancamentoId: "c", lado: "payable", ordemDeServicoId: os, clienteId: null, clienteNome: null, converteOrcamento: false, jaLancado: false,
+  }, alternativas: [] }) as never;
+
+  it("OS fora do vínculo sem resposta: aberta; respondida: fechada", () => {
+    expect(perguntaDaOSAberta({ suggested_service_order_id: "os1" })).toBe(true);
+    expect(perguntaDaOSAberta({ suggested_service_order_id: "os1" }, { serviceOrderId: null })).toBe(false);
+  });
+
+  it("OS do próprio vínculo: o vínculo pergunta", () => {
+    expect(temPerguntaDaOS({ suggested_service_order_id: "os1", vinculo_sugerido: vinc("os1") })).toBe(false);
+    expect(perguntaDaOSAberta({ suggested_service_order_id: "os1", vinculo_sugerido: vinc("os1") })).toBe(false);
+  });
+
+  it("OS anotada: aparece (para poder desdizer), mas já é resposta", () => {
+    const p = { suggested_service_order_id: "os1", vinculo_sugerido: vinc("os1"), evidencia: { anotacao: { id: "a", os_id: "os1" } } };
+    expect(temPerguntaDaOS(p)).toBe(true);
+    expect(perguntaDaOSAberta(p)).toBe(false);
+  });
+
+  it("OC sem resposta: aberta; 'Sim, é dela' com a OS da OC fecha as duas", () => {
+    expect(perguntaDaOSAberta({ suggested_purchase_order_id: "oc1" })).toBe(true);
+    expect(perguntaDaOSAberta({ suggested_purchase_order_id: "oc1", suggested_service_order_id: "os1" },
+      { purchaseOrderId: "oc1", serviceOrderId: "os1" })).toBe(false);
+    expect(perguntaDaOSAberta({ suggested_purchase_order_id: "oc1", suggested_service_order_id: "os1" },
+      { purchaseOrderId: null })).toBe(true);
   });
 });

@@ -10,7 +10,7 @@
 
 import { normalizeText } from "./matching.ts";
 import { categoriaPorMcc } from "./mcc.ts";
-import { nomeDaDescricao } from "./contraparte.ts";
+import { documentoContradiz, documentoNormalizado, nomeDaDescricao } from "./contraparte.ts";
 
 export interface TransacaoOrfa {
   id: string;
@@ -195,49 +195,31 @@ export function acharRegra(
   };
 
   /**
-   * A regra de fornecedor reconhece o fornecedor pelo NOME dele, não só pelo cadastro
-   * resolvido.
+   * A regra de fornecedor vale para o fornecedor RECONHECIDO: pelo documento no extrato ou
+   * pelo mesmo nome (acharFornecedor). Nome parecido não entra.
    *
-   * Quem escreve "compras na PREMEL são peças" está falando de um lugar, não de um uuid.
-   * Mas o cartão escreve "PREMEL - ITAJAI" e a razão social é "PREMEL MAT. ELETRICOS
-   * LTDA": nenhum dos dois contém o outro, então a resolução automática não liga os dois e
-   * a regra que o gestor criou a dedo simplesmente não valia para as compras que ele tinha
-   * na frente. O elo é a palavra que identifica — a primeira do nome.
-   *
-   * Aqui a permissividade é justificada porque a instrução é EXPLÍCITA: o gestor apontou
-   * este fornecedor. A resolução automática, que ninguém pediu, continua exigente.
+   * Decisão do dono (26/09/2026): "o sistema nunca pode sugerir ou lançar alguma transação
+   * com nomes diferentes". Antes, a regra também reconhecia pela primeira palavra do nome
+   * ("PREMEL - ITAJAI" para PREMEL MAT. ELETRICOS) — foi assim que a regra da Correa pegou
+   * o Pix para Roberto Corrêa e a do Fachini pegou Mickael Fernando. Para o cartão, que
+   * escreve o nome do seu jeito, o caminho é uma regra de TEXTO: a instrução fica explícita.
    */
   const cadastro = fornecedores ? obterIndice(fornecedores) : null;
-  const regraDeFornecedorCasa = (r: RegraFinanceira): boolean => {
-    if (r.match_type !== "supplier") return false;
-    if (fornecedorId && r.match_value === fornecedorId) return true;
-    if (!cadastro) return false;
-
-    const f = cadastro.porNome.find((e) => e.fornecedor.id === r.match_value);
-    if (!f) return false;
-
-    // Documento do fornecedor no extrato: identidade, sem discussão.
-    const docF = (f.fornecedor.cnpj_cpf || "").replace(/\D/g, "");
-    if (doc.length >= 11 && docF === doc) return true;
-    // Pessoa (CPF) nunca é a empresa (CNPJ) da regra, por mais que o nome se pareça: a regra
-    // da CORREA MATERIAIS ELÉTRICOS pegava o Pix para Roberto Daniel Rodrigues Corrêa.
-    if (doc.length === 11 && docF.length === 14) return false;
-
-    for (const candidato of [f.nome, f.fantasia]) {
-      if (!candidato) continue;
-      if (mesmoNomeLimpo(candidato, limparNome(tx.counterparty_name || tx.description))) return true;
-      // Palavra-cabeça do fornecedor = PRIMEIRA palavra do nome de quem recebeu. Exige 4
-      // letras para não deixar um "SUL" ou "MAR" arrastar meia fatura junto. Em qualquer
-      // posição, "FERNANDO" (de FERNANDO NUNES FACHINI EPP) pegava Mickael Fernando Gonzaga.
-      const cabeca = candidato.split(" ")[0];
-      if (cabeca.length >= 4 && cabeca === primeiraPalavraDoNome(tx)) return true;
-    }
-    return false;
+  const como = (r: RegraFinanceira) => comoARegraDeFornecedorCasa(tx, r, fornecedorId ?? null, cadastro);
+  // A regra do PRÓPRIO cadastro reconhecido vence a de outro cadastro da mesma empresa (filial):
+  // duas regras na COREMMA 0001 e 0006 não podem valer conforme a ordem física das linhas.
+  // Entre regras do mesmo degrau, vale a primeira da lista — o servidor lê da mais recente
+  // para a mais antiga, então a instrução mais nova do dono vence (revisão de 26/09/2026).
+  const regraDoProprioFornecedor = (r: RegraFinanceira): boolean => {
+    const c = como(r);
+    return c !== null && c !== "mesma_empresa";
   };
+  const regraDaMesmaEmpresa = (r: RegraFinanceira): boolean => como(r) === "mesma_empresa";
 
   const ordem: Array<(r: RegraFinanceira) => boolean> = [
     (r) => r.match_type === "document" && doc.length >= 11 && r.match_value.replace(/\D/g, "") === doc,
-    regraDeFornecedorCasa,
+    regraDoProprioFornecedor,
+    regraDaMesmaEmpresa,
     (r) => r.match_type === "counterparty" && !!nome && normalizeText(r.match_value) === nome,
     (r) => r.match_type === "text" && texto.includes(normalizeText(r.match_value).trim()),
   ];
@@ -267,42 +249,197 @@ export interface Proposta {
   autoAplicavel: boolean;
   /** O banco não disse para quem foi (débito sem loja, Pix sem nome, só a empresa de pagamento). */
   semIdentidade: boolean;
+  /** Como o fornecedor foi reconhecido — nome cortado pelo banco nunca vai sozinho. */
+  fornecedorPor: "documento" | "nome_identico" | "nome_cortado" | null;
+  /** O fornecedor foi dito pela regra (regra de fornecedor, ou regra com fornecedor definido). */
+  fornecedorPelaRegra: boolean;
+  /** Nome de fornecedor com regra sua cujo nome começa igual ao desta compra — só alerta. */
+  lembraRegra: string | null;
 }
 
 /** Nome sem acento, caixa nem sufixo societário — a forma comparável de um nome. */
 function limparNome(s: string): string {
-  return normalizeText(s)
+  // Parênteses no cadastro são anotação de quem cadastrou, não parte do nome.
+  return normalizeText((s || "").replace(/\([^)]*\)/g, " "))
     .replace(/\b(LTDA|ME|EPP|EIRELI|SA|S A|CIA)\b/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 /**
- * Compara nomes ignorando acento, caixa e sufixo societário.
+ * Onde o banco corta o nome, e se esta transação tem cara de ter sido cortada.
  *
- * A CONTENÇÃO É ANCORADA, e isso não é rigor gratuito: a versão que aceitava qualquer
- * substring atribuiu 160 despesas ao fornecedor errado. O cadastro da Coremma tinha nome
- * fantasia "Itajai" — a CIDADE —, e "ITAJAI" é substring de todo estabelecimento de Itajaí
- * que aparece na fatura. "PREMEL - ITAJAI" virou Coremma; com o fornecedor errado veio o
- * histórico aprendido dele, que sobrepôs a classificação certa. Um dado de cadastro ruim
- * contaminou o resultado inteiro sem uma linha de erro em lugar nenhum.
- *
- * Palavra única só casa quando é a CABEÇA do nome, porque é assim que nome de empresa
- * funciona: o que identifica vem primeiro e o resto qualifica. "KAMELL" casa com "KAMELL
- * COMERCIO GLOBAL"; "ITAJAI" não casa com "PREMEL ITAJAI".
+ * O C6 corta o nome do Pix em ~30 letras ("MARINE EXPRESS COMERCIAL IMPOR"); a maquininha
+ * corta o nome da loja em ~20, no meio da palavra ("CORREA MATERIAIS ELE"). Um nome que NÃO
+ * chegou ao limite não foi cortado: "MARIA APARECIDA DOS SANTOS" (26) é o nome inteiro de
+ * alguém, não o começo de "MARIA APARECIDA DOS SANTOS OLIVEIRA".
  */
-function mesmoNomeLimpo(x: string, y: string): boolean {
-  if (!x || !y) return false;
-  if (x === y) return true;
+const CORTE_DO_PIX = 29;
+const MINIMO_DO_NOME_CORTADO = 25;
+const MINIMO_DO_NOME_CORTADO_NO_CARTAO = 18;
 
-  const [curto, longo] = x.length <= y.length ? [x, y] : [y, x];
-  if (!longo.includes(curto)) return false;
+interface CorteDoBanco {
+  /** Tamanho do nome como o banco mandou, antes de qualquer limpeza. */
+  tamanhoBruto: number;
+  /** Compra de cartão: fatura, ou o layout "NOME   CIDADE   BRA" da maquininha. */
+  cartao: boolean;
+}
 
-  // Nome composto contido no outro é evidência forte — e é o caso do extrato que corta
-  // ("MARINE EXPRESS COMERCIAL IMPOR" dentro da razão social inteira).
-  if (curto.includes(" ")) return true;
+/**
+ * O nome de quem recebeu, como o banco escreveu: o campo próprio, ou o que está DENTRO da
+ * descrição ("Pix enviado para KAMELL COMERCIO GLOBAL" — o Nubank não manda o nome à parte).
+ * Sem nome nenhum, a descrição inteira (que só casa com nome igual, nunca por corte).
+ */
+function nomeNoExtrato(tx: TransacaoOrfa): string {
+  return String(tx.counterparty_name || nomeDaDescricao(tx.description) || tx.description || "");
+}
 
-  return curto.length >= 3 && longo.startsWith(`${curto} `);
+function corteDo(tx: TransacaoOrfa): CorteDoBanco {
+  const bruto = String(tx.counterparty_name || nomeDaDescricao(tx.description) || "").trim();
+  const cartao = tx.source_type === "credit_card"
+    || /\S {2,}\S.* [A-Z]{3}$/.test(String(tx.description || "").trim());
+  return { tamanhoBruto: bruto.length, cartao };
+}
+
+function cortadoNoMeioDaPalavra(cadastro: string, extrato: string): boolean {
+  if (extrato.length < MINIMO_DO_NOME_CORTADO_NO_CARTAO) return false;
+  const proximo = cadastro.charAt(extrato.length);
+  if (!proximo || proximo === " " || extrato.endsWith(" ")) return false;
+  return extrato.split(" ").filter(Boolean).length - 1 >= 2;
+}
+
+/**
+ * O MESMO nome, ignorando acento, caixa, sufixo societário e anotação entre parênteses:
+ * igual, ou o do extrato é o do cadastro cortado pelo banco — e só quando o corte se prova
+ * (Pix no limite de ~30 letras; cartão cortado no meio da palavra). Nada de "parecido".
+ *
+ * Decisão do dono (26/09/2026): "o sistema nunca pode sugerir ou lançar alguma transação com
+ * nomes diferentes; isso tem de ser feito manualmente". A versão anterior aceitava nome
+ * contido no outro e a primeira palavra ("KAMELL" → "KAMELL COMERCIO GLOBAL"): foi o caminho
+ * pelo qual Pix para pessoas acabaram em nome da VIA S.A., da Correa e do Fachini.
+ */
+function mesmoNome(cadastro: string, extrato: string, corte?: CorteDoBanco): "nome_identico" | "nome_cortado" | null {
+  if (!cadastro || !extrato) return null;
+  if (cadastro === extrato) return "nome_identico";
+  if (!corte || !cadastro.startsWith(extrato)) return null;
+  if (corte.tamanhoBruto >= CORTE_DO_PIX && extrato.length >= MINIMO_DO_NOME_CORTADO) return "nome_cortado";
+  if (corte.cartao && cortadoNoMeioDaPalavra(cadastro, extrato)) return "nome_cortado";
+  return null;
+}
+
+/**
+ * A EMPRESA de um cadastro: a raiz do CNPJ (matriz e filiais são a mesma empresa, como em
+ * documentoContradiz); sem CNPJ, o próprio cadastro. "COREMMA LTDA" 0001 e "Coremma Ltda"
+ * 0006 são uma empresa só — tratá-los como empate derrubava a regra da Coremma (revisão de
+ * 26/09/2026).
+ */
+function empresaDo(f: FornecedorConhecido): string {
+  const d = documentoNormalizado(f.cnpj_cpf);
+  return d.length === 14 ? `raiz:${d.slice(0, 8)}` : `id:${f.id}`;
+}
+
+/** Entre cadastros da MESMA empresa, sempre o mesmo: o de menor CNPJ (a matriz). */
+function representante(lista: FornecedorConhecido[]): FornecedorConhecido {
+  return [...lista].sort((a, b) =>
+    documentoNormalizado(a.cnpj_cpf).localeCompare(documentoNormalizado(b.cnpj_cpf)) || a.id.localeCompare(b.id))[0];
+}
+
+/** O melhor casamento de nome entre a razão social e o fantasia de um cadastro. */
+function casamentoDoCadastro(
+  e: { nome: string; fantasia: string },
+  alvo: string,
+  corte: CorteDoBanco,
+): "nome_identico" | "nome_cortado" | null {
+  const a = mesmoNome(e.nome, alvo, corte);
+  const b = mesmoNome(e.fantasia, alvo, corte);
+  if (a === "nome_identico" || b === "nome_identico") return "nome_identico";
+  return a ?? b;
+}
+
+/**
+ * COMO a regra de fornecedor reconhece esta transação — ou null, se não reconhece.
+ *
+ * A regra vale para o fornecedor RECONHECIDO: o que o motor já resolveu, o documento no
+ * extrato ou o mesmo nome. Nome parecido não entra (decisão do dono, 26/09/2026). O "como"
+ * importa: pelo nome cortado pelo banco a regra SUGERE, mas nunca lança sozinha.
+ *
+ * Quem o motor já reconheceu (por documento ou pelo mesmo nome) não é trocado pela regra de
+ * OUTRO cadastro, e dois cadastros com o mesmo nome são empate: nenhuma regra vale.
+ */
+function comoARegraDeFornecedorCasa(
+  tx: TransacaoOrfa,
+  r: RegraFinanceira,
+  fornecedorId: string | null,
+  cadastro: IndiceFornecedores | null,
+): "resolvido" | "mesma_empresa" | "documento" | "nome_identico" | "nome_cortado" | null {
+  if (r.match_type !== "supplier") return null;
+  if (fornecedorId) {
+    if (r.match_value === fornecedorId) return "resolvido";
+    // O motor reconheceu outro cadastro da MESMA empresa (filial): a regra da empresa vale.
+    const daRegra = cadastro?.porNome.find((e) => e.fornecedor.id === r.match_value)?.fornecedor;
+    const achado = cadastro?.porNome.find((e) => e.fornecedor.id === fornecedorId)?.fornecedor;
+    return daRegra && achado && empresaDo(daRegra) === empresaDo(achado) && empresaDo(achado).startsWith("raiz:")
+      ? "mesma_empresa" : null;
+  }
+  if (!cadastro) return null;
+
+  const f = cadastro.porNome.find((e) => e.fornecedor.id === r.match_value);
+  if (!f) return null;
+
+  const doc = documentoNormalizado(tx.counterparty_document);
+  // Documento do fornecedor no extrato: identidade, sem discussão.
+  const docF = documentoNormalizado(f.fornecedor.cnpj_cpf);
+  if (doc.length >= 11 && docF === doc) return "documento";
+  // Documento diferente no extrato: é outra pessoa ou empresa, por mais que o nome bata
+  // (o Pix ao CPF de um Correa não é a CORREA MATERIAIS, CNPJ).
+  if (documentoContradiz(doc, docF)) return null;
+  const alvo = limparNome(nomeNoExtrato(tx));
+  const corte = corteDo(tx);
+  const como = casamentoDoCadastro(f, alvo, corte);
+  if (!como) return null;
+  // Empate é OUTRA empresa com o mesmo nome; filial da mesma empresa não é empate.
+  const empate = cadastro.porNome.some((e) => empresaDo(e.fornecedor) !== empresaDo(f.fornecedor)
+    && casamentoDoCadastro(e, alvo, corte) !== null && !documentoContradiz(doc, e.fornecedor.cnpj_cpf));
+  return empate ? null : como;
+}
+
+/**
+ * A primeira palavra do nome de quem recebeu — sem sufixo societário nem prefixo de
+ * maquininha. NÃO identifica ninguém (decisão de 26/09/2026); serve só de ALERTA: a compra
+ * cujo nome começa como o de um fornecedor com regra sua não é lançada sozinha, para o dono
+ * decidir se é ele (e, se for, criar a regra de texto para aquela grafia).
+ */
+const PREFIXO_DE_ADQUIRENTE = new Set([
+  "PAG", "MP", "EC", "SPG", "PG", "IFD", "IZ", "SUMUP", "PP", "MERCADOPAGO", "PAGSEGURO", "PICPAY", "PAYPAL",
+]);
+
+function primeiraPalavraDoNome(tx: TransacaoOrfa): string {
+  const nome = limparNome(tx.counterparty_name || nomeDaDescricao(tx.description) || tx.description || "");
+  const palavras = nome.split(" ").filter(Boolean);
+  while (palavras.length > 1 && PREFIXO_DE_ADQUIRENTE.has(palavras[0])) palavras.shift();
+  return palavras[0] ?? "";
+}
+
+/** Fornecedor com regra sua cujo nome começa com a mesma palavra (4+ letras) — só alerta. */
+function fornecedorDeRegraQueOComecoLembra(
+  tx: TransacaoOrfa,
+  regras: RegraFinanceira[],
+  cadastro: IndiceFornecedores,
+): string | null {
+  // Com documento no extrato, o fornecedor da regra já teria sido achado por ele — e CPF de
+  // outra pessoa ("FERNANDO FERRAZ", CPF) nunca é o FACHINI (CNPJ). O alerta é para o cartão
+  // e o Pix sem documento, onde só o nome existe.
+  if (documentoNormalizado(tx.counterparty_document).length >= 11) return null;
+  const cabeca = primeiraPalavraDoNome(tx);
+  if (cabeca.length < 4) return null;
+  for (const r of regras) {
+    if (r.match_type !== "supplier" || r.status !== "active") continue;
+    if (r.direction !== "any" && r.direction !== tx.transaction_type) continue;
+    const f = cadastro.porNome.find((e) => e.fornecedor.id === r.match_value);
+    if (!f) continue;
+    if ([f.nome, f.fantasia].some((n) => n && n.split(" ")[0] === cabeca)) return f.fornecedor.name;
+  }
+  return null;
 }
 
 /**
@@ -322,7 +459,7 @@ export function indexarFornecedores(fornecedores: FornecedorConhecido[]): Indice
   const porDocumento = new Map<string, FornecedorConhecido>();
   const porNome: IndiceFornecedores["porNome"] = [];
   for (const f of fornecedores) {
-    const doc = (f.cnpj_cpf || "").replace(/\D/g, "");
+    const doc = documentoNormalizado(f.cnpj_cpf);
     // Primeiro cadastro vence, como fazia o `find` original: dois fornecedores com o mesmo
     // CNPJ é erro de cadastro, e trocar qual deles ganha mudaria a classificação sem aviso.
     if (doc.length >= 11 && !porDocumento.has(doc)) porDocumento.set(doc, f);
@@ -360,23 +497,73 @@ function obterIndice(f: FornecedorConhecido[] | IndiceFornecedores): IndiceForne
 export function acharFornecedor(
   tx: TransacaoOrfa,
   fornecedores: FornecedorConhecido[] | IndiceFornecedores,
-): { fornecedor: FornecedorConhecido; porDocumento: boolean } | null {
+): { fornecedor: FornecedorConhecido; porDocumento: boolean; por: "documento" | "nome_identico" | "nome_cortado" } | null {
   const indice = obterIndice(fornecedores);
 
-  const doc = (tx.counterparty_document || "").replace(/\D/g, "");
+  const doc = documentoNormalizado(tx.counterparty_document);
   if (doc.length >= 11) {
     const porDoc = indice.porDocumento.get(doc);
-    if (porDoc) return { fornecedor: porDoc, porDocumento: true };
+    if (porDoc) return { fornecedor: porDoc, porDocumento: true, por: "documento" };
   }
 
   // O extrato traz ora a razão social, ora o nome fantasia — no C6, o fantasia é o mais
   // comum. Procurar só pela razão social perde a maioria dos casos.
-  const alvo = limparNome(tx.counterparty_name || tx.description);
+  const alvo = limparNome(nomeNoExtrato(tx));
   if (!alvo) return null;
-  const achado = indice.porNome.find(
-    (e) => mesmoNomeLimpo(e.nome, alvo) || mesmoNomeLimpo(e.fantasia, alvo),
-  );
-  return achado ? { fornecedor: achado.fornecedor, porDocumento: false } : null;
+  // Nome igual vence nome cortado. Cadastros da MESMA empresa (raiz do CNPJ) contam como um;
+  // duas empresas com o mesmo nome é empate — ninguém (cadastrosEmpatados diz quais).
+  const corte = corteDo(tx);
+  for (const tipo of ["nome_identico", "nome_cortado"] as const) {
+    const achados = indice.porNome.filter((e) =>
+      casamentoDoCadastro(e, alvo, corte) === tipo && !documentoContradiz(doc, e.fornecedor.cnpj_cpf));
+    const empresas = new Set(achados.map((e) => empresaDo(e.fornecedor)));
+    if (empresas.size === 1) return { fornecedor: representante(achados.map((e) => e.fornecedor)), porDocumento: false, por: tipo };
+    if (empresas.size > 1) return null;
+  }
+  return null;
+}
+
+/**
+ * A regra de fornecedor deste cadastro alcançaria esta transação? Mesmas provas do motor
+ * (documento, mesmo nome, nome cortado provado, mesma empresa) — para o assistente dizer o
+ * alcance de uma regra sem contar por "trecho" o que o motor não reconhece, nem o contrário.
+ */
+export function regraDeFornecedorAlcanca(
+  tx: TransacaoOrfa,
+  supplierId: string,
+  fornecedores: FornecedorConhecido[] | IndiceFornecedores,
+): boolean {
+  const indice = obterIndice(fornecedores);
+  const achado = acharFornecedor(tx, indice);
+  const r: RegraFinanceira = {
+    id: "alcance", match_type: "supplier", match_value: supplierId, direction: "any", autonomy: "suggest", status: "active",
+  };
+  return comoARegraDeFornecedorCasa(tx, r, achado?.fornecedor.id ?? null, indice) !== null;
+}
+
+/**
+ * Os cadastros de EMPRESAS diferentes com o mesmo nome desta transação — o empate que faz o
+ * motor não escolher ninguém. Dizer quais é o que permite ao dono escolher (e juntar os
+ * duplicados), em vez de ver só "nenhum fornecedor".
+ */
+export function cadastrosEmpatados(
+  tx: TransacaoOrfa,
+  fornecedores: FornecedorConhecido[] | IndiceFornecedores,
+): string[] {
+  const indice = obterIndice(fornecedores);
+  const doc = documentoNormalizado(tx.counterparty_document);
+  const alvo = limparNome(nomeNoExtrato(tx));
+  if (!alvo) return [];
+  const corte = corteDo(tx);
+  for (const tipo of ["nome_identico", "nome_cortado"] as const) {
+    const achados = indice.porNome.filter((e) =>
+      casamentoDoCadastro(e, alvo, corte) === tipo && !documentoContradiz(doc, e.fornecedor.cnpj_cpf));
+    const porEmpresa = new Map<string, string>();
+    for (const e of achados) if (!porEmpresa.has(empresaDo(e.fornecedor))) porEmpresa.set(empresaDo(e.fornecedor), e.fornecedor.name);
+    if (porEmpresa.size > 1) return [...porEmpresa.values()];
+    if (porEmpresa.size === 1) return [];
+  }
+  return [];
 }
 
 /** Classifica pelo histórico. Devolve null quando nenhuma regra bate — sem chute. */
@@ -443,19 +630,6 @@ export function ehIntermediario(nome: string | null | undefined): boolean {
   const n = normalizeText(String(nome ?? "")).replace(/^PIX (ENVIADO|ENVIADA) PARA /, "");
   if (!n || /\bNU PAGAMENTOS\b/.test(n)) return false;
   return /\bINSTITUICAO DE PAGAMENTO\b/.test(n) || INTERMEDIARIO.test(n);
-}
-
-/** Prefixos de maquininha que vêm antes do nome da loja na fatura ("PAG*", "MP *", "EC *"). */
-const PREFIXO_DE_ADQUIRENTE = new Set([
-  "PAG", "MP", "EC", "SPG", "PG", "IFD", "IZ", "SUMUP", "PP", "MERCADOPAGO", "PAGSEGURO", "PICPAY", "PAYPAL",
-]);
-
-/** A primeira palavra do nome de quem recebeu — sem sufixo societário nem prefixo de maquininha. */
-function primeiraPalavraDoNome(tx: TransacaoOrfa): string {
-  const nome = limparNome(tx.counterparty_name || nomeDaDescricao(tx.description) || tx.description || "");
-  const palavras = nome.split(" ").filter(Boolean);
-  while (palavras.length > 1 && PREFIXO_DE_ADQUIRENTE.has(palavras[0])) palavras.shift();
-  return palavras[0] ?? "";
 }
 
 /**
@@ -597,9 +771,11 @@ export function montarProposta(
 
   if (achado) {
     razoes.push(
-      achado.porDocumento
+      achado.por === "documento"
         ? `CNPJ/CPF confere com o fornecedor ${achado.fornecedor.name}`
-        : `Nome parecido com o fornecedor ${achado.fornecedor.name}`,
+        : achado.por === "nome_identico"
+          ? `Mesmo nome do fornecedor ${achado.fornecedor.name}`
+          : `Mesmo nome do fornecedor ${achado.fornecedor.name}, cortado pelo banco — confira`,
     );
     confianca = Math.min(98, confianca + (achado.porDocumento ? 10 : 4));
   }
@@ -657,6 +833,9 @@ export function montarProposta(
   // a ser ponderado, é uma instrução. Quem escreveu "PIX para Fulano é pró-labore" não
   // quer que uma regra de texto genérica discorde disso.
   const regra = acharRegra(tx, regras, fornecedorId, fornecedores);
+  const comoCasou = regra ? comoARegraDeFornecedorCasa(tx, regra, fornecedorId, obterIndice(fornecedores)) : null;
+  /** A regra diz DE QUEM é a despesa: regra de fornecedor, ou qualquer regra com fornecedor. */
+  const fornecedorPelaRegra = !!regra && (!!regra.set_supplier_id || regra.match_type === "supplier");
   if (regra) {
     if (regra.set_category) categoria = regra.set_category;
     if (regra.set_dre_group) dreGroup = regra.set_dre_group;
@@ -665,9 +844,39 @@ export function montarProposta(
     // compra continuaria atribuída a quem a resolução automática errou — e o custo por
     // fornecedor seguiria mentindo mesmo com a categoria já corrigida.
     else if (regra.match_type === "supplier") fornecedorId = regra.match_value;
+  }
+  /**
+   * O fornecedor FINAL da linha veio do nome cortado pelo banco: pela regra de fornecedor que
+   * casou assim, ou pelo motor, quando a regra (de texto, de nome, de documento) não disse de
+   * quem é. Vale como sugestão marcada "confira" e nunca lança sozinha — nem por regra com
+   * "lançar sozinha" (achado da revisão de 26/09/2026).
+   */
+  // Regra de FORNECEDOR com set_supplier_id (é assim que todas estão em produção) não torna
+  // o fornecedor "explícito": quem casou a regra foi o próprio nome cortado. Só a regra de
+  // texto/nome/documento que DIZ o fornecedor tira a marca (revisão de 26/09/2026).
+  const fornecedorPeloCorte = (regra?.match_type === "supplier" || !regra?.set_supplier_id) && (
+    comoCasou === "nome_cortado"
+    || (achado?.por === "nome_cortado" && (comoCasou === "resolvido" || comoCasou === "mesma_empresa" || fornecedorId === achado.fornecedor.id))
+  );
+  // Duas empresas com o mesmo nome: o motor não escolhe, mas diz quais são.
+  const empatados = ehSaida && !fornecedorId ? cadastrosEmpatados(tx, fornecedores) : [];
+  // Sem regra aplicada, a compra cujo nome COMEÇA como o de um fornecedor com regra sua não
+  // vai sozinha: o sistema não liga nomes diferentes, mas também não lança pela categoria do
+  // cartão o que o dono talvez tenha dito, com outra grafia, que é outra coisa.
+  const lembraRegra = !regra && ehSaida && !fornecedorId && empatados.length === 0
+    ? fornecedorDeRegraQueOComecoLembra(tx, regras, obterIndice(fornecedores))
+    : null;
+  if (regra) {
     razoes.length = 0;   // o motivo passa a ser a regra; o resto virou ruído
     razoes.push(`Regra sua: ${descreverRegra(regra)}`);
-    confianca = regra.autonomy === "apply" ? 99 : 95;
+    if (fornecedorPeloCorte) razoes.push("fornecedor reconhecido pelo nome cortado pelo banco — confira (não lança sozinha)");
+    confianca = regra.autonomy === "apply" && !fornecedorPeloCorte ? 99 : 95;
+  }
+  if (empatados.length > 0) {
+    razoes.push(`Há mais de um cadastro com este nome (${empatados.slice(0, 3).join("; ")}): escolha o fornecedor — e junte os duplicados em Fornecedores`);
+  }
+  if (lembraRegra) {
+    razoes.push(`Atenção: você tem regra para ${lembraRegra}, cujo nome começa igual. O sistema não liga nomes diferentes — se for ele, escolha o fornecedor (e crie uma regra de texto para esta grafia). Não lança sozinha`);
   }
 
   return {
@@ -683,11 +892,21 @@ export function montarProposta(
     suggestedSupplierId: fornecedorId,
     dreGroup,
     appliedRuleId: regra?.id ?? null,
-    autoAplicavel: regra?.autonomy === "apply",
+    autoAplicavel: regra?.autonomy === "apply" && !fornecedorPeloCorte,
     // Sem regra sua, linha sem identidade nunca vai sozinha: a categoria depende de uma
     // informação (a loja) que só a pessoa tem.
     // Pago por empresa de pagamento também: o nome é dela, não da loja.
     semIdentidade: (semIdentidade || viaIntermediario) && !regra,
+    fornecedorPor: !fornecedorId ? null
+      : fornecedorPeloCorte ? "nome_cortado"
+      : comoCasou === "documento" || comoCasou === "nome_identico" ? comoCasou
+      : comoCasou === "resolvido" || comoCasou === "mesma_empresa" ? (achado?.por ?? null)
+      // Regra de texto/nome/documento que DISSE o fornecedor: é a regra, não o nome.
+      : regra?.set_supplier_id ? null
+      : fornecedorId === achado?.fornecedor.id ? achado.por
+      : null,
+    fornecedorPelaRegra,
+    lembraRegra,
   };
 }
 
@@ -725,7 +944,20 @@ export function sugerirRegras(
   }>,
   regrasExistentes: RegraFinanceira[],
   minimo = 3,
+  /**
+   * Cadastro de fornecedores: com ele, "já tem regra" é pela EMPRESA (raiz do CNPJ) e não
+   * pelo cadastro — a regra da COREMMA 0001 já cobre a filial 0006, e propor outra para a
+   * filial criaria duas regras brigando (revisão de 26/09/2026).
+   */
+  fornecedores?: FornecedorConhecido[] | IndiceFornecedores,
 ): PadraoDetectado[] {
+  const indice = fornecedores ? obterIndice(fornecedores) : null;
+  const cadastroDe = (id: string) => indice?.porNome.find((e) => e.fornecedor.id === id)?.fornecedor ?? null;
+  /** A chave de "já tem regra" de um alvo de fornecedor: a empresa, quando se sabe. */
+  const chaveDoFornecedor = (id: string) => {
+    const f = cadastroDe(id);
+    return f ? `supplier:${empresaDo(f)}` : `supplier:${normalizeText(id)}`;
+  };
   const porAlvo = new Map<string, {
     matchType: RegraFinanceira["match_type"];
     matchValue: string;
@@ -767,7 +999,9 @@ export function sugerirRegras(
   const jaTemRegra = new Set(
     regrasExistentes
       .filter((r) => r.status === "active" || r.status === "proposed" || r.status === "rejected")
-      .map((r) => `${r.match_type}:${normalizeText(r.match_value)}`),
+      .flatMap((r) => r.match_type === "supplier"
+        ? [`${r.match_type}:${normalizeText(r.match_value)}`, chaveDoFornecedor(r.match_value)]
+        : [`${r.match_type}:${normalizeText(r.match_value)}`]),
   );
 
   const padroes: PadraoDetectado[] = [];
@@ -776,6 +1010,7 @@ export function sugerirRegras(
     const [categoria, dados] = [...alvo.categorias.entries()][0];
     if (dados.vezes < minimo) continue;
     if (jaTemRegra.has(`${alvo.matchType}:${normalizeText(alvo.matchValue)}`)) continue;
+    if (alvo.matchType === "supplier" && jaTemRegra.has(chaveDoFornecedor(alvo.matchValue))) continue;
 
     padroes.push({
       matchType: alvo.matchType,

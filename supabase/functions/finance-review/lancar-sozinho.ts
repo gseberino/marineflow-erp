@@ -10,7 +10,13 @@
 //   confiança: o erro mais caro não é a categoria trocada, é a despesa que some do DRE.
 // - Linha em que o banco não disse para quem foi (compra no débito sem loja) nunca vai
 //   sozinha: a categoria depende de uma informação que só a pessoa tem.
-import { exigeDecisao, type VinculoSugerido } from "../_shared/banking/vinculo.ts";
+//
+// Decisões de 26/09/2026: só com confiança 90+ (app_settings); nada com nome cortado pelo banco;
+// nada com OS, OC ou vínculo sugerido — "o sistema deve sempre questionar".
+import { exigeDecisao, podeJaEstarLancado, type VinculoSugerido } from "../_shared/banking/vinculo.ts";
+
+/** Decisão do dono (26/09/2026): "apenas com 90%+ de confiança". Configuração nenhuma desce disto. */
+export const PISO_DA_CONFIANCA = 90;
 
 export interface LinhaCandidata {
   kind: string;
@@ -24,6 +30,13 @@ export interface LinhaCandidata {
   regra_so_sugere?: boolean;
   /** O banco não informou para quem foi (débito sem loja, Pix sem nome, só a empresa de pagamento). */
   sem_identidade?: boolean;
+  /** O fornecedor foi reconhecido pelo nome cortado pelo banco, não pelo nome inteiro. */
+  nome_cortado?: boolean;
+  /** O nome começa como o de um fornecedor com regra sua (outra grafia): o dono decide. */
+  lembra_regra?: boolean;
+  /** OS ou OC sugerida: é pergunta, e só a pessoa responde (decisão de 26/09/2026). */
+  suggested_service_order_id?: string | null;
+  suggested_purchase_order_id?: string | null;
 }
 
 export interface CriterioDoAutomatico {
@@ -41,11 +54,16 @@ export function motivoParaNaoLancarSozinho(l: LinhaCandidata, c: CriterioDoAutom
   if (c.jaPorRegra.has(l.bank_transaction_id)) return "já lançada pela regra";
   if (l.regra_so_sugere) return "a regra está marcada para só sugerir";
   if (l.sem_identidade) return "o banco não informou para quem foi (ou só a empresa de pagamento)";
-  if (Number(l.confidence) < Math.max(85, c.confiancaMinima)) return "confiança abaixo do mínimo";
+  if (l.nome_cortado) return "o fornecedor foi reconhecido pelo nome cortado pelo banco — confira";
+  if (l.lembra_regra) return "o nome começa como o de um fornecedor com regra sua — confira se é ele";
+  if (l.suggested_service_order_id || l.suggested_purchase_order_id) return "há uma OS ou OC sugerida: a ligação com o serviço espera a sua resposta";
+  if (Number(l.confidence) < Math.max(PISO_DA_CONFIANCA, c.confiancaMinima)) return "confiança abaixo do mínimo";
   if (!(Number(l.suggested_amount) < c.limiteLote)) return "acima do limite de lote";
   if (!l.suggested_category || l.suggested_category === "Outras despesas") return "sem categoria de verdade";
   if (l.dre_group === "nao_operacional") return "fica fora do resultado (fatura, empréstimo, aplicação ou retirada)";
-  if (exigeDecisao(l.vinculo_sugerido)) return "pode já estar lançada";
+  if (exigeDecisao(l.vinculo_sugerido)) {
+    return podeJaEstarLancado(l.vinculo_sugerido) ? "pode já estar lançada" : "há um vínculo sugerido: espera a sua resposta";
+  }
   if (c.comAlerta.has(l.bank_transaction_id)) return "tem alerta do vigilante";
   return null;
 }
