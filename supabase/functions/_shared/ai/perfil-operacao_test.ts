@@ -4,7 +4,7 @@
 //   deno test --allow-all supabase/functions/_shared/ai/perfil-operacao_test.ts
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { runAgentLoop } from "./agent.ts";
-import { PERFIL_OPERACAO, SO_PELA_REDE } from "./perfil-operacao.ts";
+import { ehLeituraPeloNome, ESCRITAS_VERIFICADAS_DA_REDE, PERFIL_OPERACAO, SO_PELA_REDE } from "./perfil-operacao.ts";
 import { allTools } from "./tools/index.ts";
 
 Deno.env.set("OPENROUTER_API_KEY", "test-key-not-real");
@@ -63,6 +63,25 @@ Deno.test("todo nome do perfil e da lista SO_PELA_REDE existe em allTools, e as 
   for (const nome of PERFIL_OPERACAO) assertEquals(existentes.has(nome), true, `perfil cita tool inexistente: ${nome}`);
   for (const nome of SO_PELA_REDE) assertEquals(existentes.has(nome), true, `SO_PELA_REDE cita tool inexistente: ${nome}`);
   for (const nome of SO_PELA_REDE) assertEquals(PERFIL_OPERACAO.has(nome), false, `${nome} está no perfil E na rede`);
+});
+
+Deno.test("SO_PELA_REDE: toda escrita de risco low (que pela rede roda direto) é escrita de baixo impacto verificada", () => {
+  // Pela rede, risco low roda sem confirmação (agent.ts). Então escrita low só entra em
+  // SO_PELA_REDE depois de alguém ler o execute e registrar o porquê em ESCRITAS_VERIFICADAS_DA_REDE.
+  // Se este teste acusar um nome novo: leia o execute; se passar no critério, registre lá; se
+  // não passar, dê risk 'medium' à tool ou ponha no perfil — não em SO_PELA_REDE como low.
+  for (const n of ["get_x", "list_x", "read_x", "check_x", "search_x"]) assertEquals(ehLeituraPeloNome(n), true, n);
+  for (const n of ["update_x", "interpret_customer_reply", "remember_about_entity", "xget_x"]) assertEquals(ehLeituraPeloNome(n), false, n);
+
+  const porNome = new Map(allTools.map((t) => [t.name, t]));
+  const escritasLow = [...SO_PELA_REDE]
+    .filter((n) => porNome.get(n)!.risk === "low" && !ehLeituraPeloNome(n))
+    .sort();
+  assertEquals(escritasLow, Object.keys(ESCRITAS_VERIFICADAS_DA_REDE).sort());
+  // A verificação tem de dizer o porquê, não só o nome.
+  for (const [nome, porque] of Object.entries(ESCRITAS_VERIFICADAS_DA_REDE)) {
+    assertEquals(porque.trim().length > 20, true, `${nome} sem o porquê da verificação`);
+  }
 });
 
 Deno.test("comportamento: com o perfil ligado, o modelo recebe exatamente o de antes + as 2", async () => {

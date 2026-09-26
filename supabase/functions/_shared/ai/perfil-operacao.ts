@@ -213,11 +213,26 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
  * Ferramentas que o prompt CITA mas que ficam FORA do perfil de propósito — o modelo só as
  * alcança pela rede de segurança do executor (agent.ts) ou quando o usuário diz o nome.
  *
- * Como a rede trata cada uma: leitura pelo nome (get_, list_, read_, check_, search_) roda
- * direto; qualquer outra vira pendência de confirmação, mesmo sendo de risco baixo, porque o
- * modelo a chamou sem ver o esquema dela. A rede só procura no que o cargo e o canal já
- * liberaram — técnico continua sem as de dinheiro, e as de FORA_DO_WHATSAPP (channel-scope.ts)
- * continuam fora do WhatsApp.
+ * A REDE ALCANÇA SÓ O QUE ESTÁ AQUI. Tool fora do perfil e fora desta lista continua "Tool
+ * desconhecida", mesmo que cargo e canal a liberem: vários `roles` são frouxos
+ * (create_purchase_order não tem roles; get_technician_commissions abre para external_seller;
+ * list_unidentified_contacts não tem roles), e o perfil era a única coisa que as mantinha longe
+ * de técnico e vendedor. E mesmo daqui a rede só pega o que o cargo e o canal já liberaram
+ * (params.tools): técnico continua sem as de dinheiro, e as de FORA_DO_WHATSAPP
+ * (channel-scope.ts) continuam fora do WhatsApp.
+ *
+ * Como a rede trata cada uma, depois de conferir os argumentos contra o input_schema: risco
+ * 'low' — o que a tool DECLARA e o que o computeRisk calcula — roda DIRETO, como o prompt
+ * promete (virar pendência cortava o turno, e no WhatsApp a resposta do modelo sumia); risco
+ * 'medium'/'high' vira pendência de confirmação, sem autonomia.
+ *
+ * POR ISSO SÓ ENTRA AQUI: leitura; escrita de risco medium/high (que pede confirmação pelo
+ * próprio risco); ou ESCRITA DE BAIXO IMPACTO VERIFICADA — alguém leu o execute e conferiu que
+ * não mexe em dinheiro, não manda mensagem para fora, não apaga registro e não faz mais do que
+ * uma tool do perfil da mesma classe já faz sem confirmação. As verificadas estão em
+ * ESCRITAS_VERIFICADAS_DA_REDE, com o porquê, e perfil-operacao_test.ts quebra se aparecer aqui
+ * escrita de risco low que não esteja lá. Escrita de impacto maior não entra: dê risk 'medium'
+ * à tool (vale em todo caminho) ou ponha no perfil, onde o modelo vê a descrição inteira.
  *
  * Critério para estar aqui: nenhum uso na história da auditoria (levantamento de 26/09/2026) e
  * uso raro por natureza. Se uma delas começar a aparecer em eventos 'fora_do_perfil:<tool>' da
@@ -225,7 +240,7 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
  */
 export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   // — Memória por entidade: as notas APROVADAS já chegam prontas no contexto (ai-agent), então
-  //   anotar/revisar/listar é gesto raro, e a anotação que vira pendência é aceitável —
+  //   anotar/revisar/listar é gesto raro —
   "remember_about_entity",
   "review_entity_note",
   "list_entity_notes",
@@ -258,8 +273,8 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   "get_comms_log",
   "get_comms_metrics",
   "check_followup_cadence",
-  // Escrita (registra o desfecho quando recebe entity_id): pela rede vira pendência. Se o
-  // manejo de resposta passar a ser usado no dia a dia, promova ao perfil.
+  // Escrita verificada (ver ESCRITAS_VERIFICADAS_DA_REDE). Se o manejo de resposta passar a ser
+  // usado no dia a dia, promova ao perfil.
   "interpret_customer_reply",
   "read_supplier_media",
 
@@ -267,3 +282,38 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   "create_composed_product",
   "get_autonomy_settings",
 ]);
+
+/**
+ * As ESCRITAS de risco low de SO_PELA_REDE — pela rede elas rodam direto, sem confirmação — e o
+ * porquê de cada uma ser de baixo impacto. Verificação de 26/09/2026, lendo o execute de cada
+ * tool (critério no comentário de SO_PELA_REDE). Nome novo aqui só depois de ler o execute; o
+ * que não passar no critério não entra em SO_PELA_REDE como risco low.
+ *
+ * O executor não consulta esta lista: quem garante que ela bate com SO_PELA_REDE é o teste
+ * (perfil-operacao_test.ts), para a verificação acontecer ANTES do deploy.
+ */
+export const ESCRITAS_VERIFICADAS_DA_REDE: Readonly<Record<string, string>> = {
+  remember_about_entity:
+    "a nota nasce 'candidate' e só entra no contexto do agente depois que o dono aprova",
+  review_entity_note:
+    "só muda o status de uma nota (aprovada/rejeitada), sem apagar; o prompt manda chamar SOMENTE quando o usuário mandar",
+  reorder_service_order_step:
+    "troca a posição (seq) de dois passos do roteiro; outra troca desfaz",
+  interpret_customer_reply:
+    "classifica o texto; com entity_id, só marca responded_at/reply_intent no último toque de ai_comms_log",
+  update_service:
+    "mesma classe de update_product (no perfil, sem confirmação): corrige o catálogo; o prompt manda listar e CONFIRMAR antes de gravar o fiscal",
+  convert_external_quote_to_so:
+    "mesma classe de create_service_order/create_client (no perfil): cria OS, cliente e ativo; a RPC recusa orçamento já convertido",
+  create_composed_product:
+    "mesma classe de create_product (no perfil): cria um produto no catálogo; só no painel (FORA_DO_WHATSAPP)",
+};
+
+/**
+ * Leitura pelo nome (get_, list_, read_, check_, search_). Heurística usada pela guarda de
+ * perfil-operacao_test.ts para separar, em SO_PELA_REDE, o que é leitura do que é escrita —
+ * escrita de risco low tem de estar em ESCRITAS_VERIFICADAS_DA_REDE.
+ */
+export function ehLeituraPeloNome(nome: string): boolean {
+  return /^(get_|list_|read_|check_|search_)/.test(nome);
+}

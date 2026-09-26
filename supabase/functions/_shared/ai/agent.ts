@@ -12,7 +12,7 @@ import {
 import { allTools, type ToolCtx, type ToolDef } from "./tools/index.ts";
 import { isAutonomyGranted } from "./autonomy-policy.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
-import { PERFIL_OPERACAO } from "./perfil-operacao.ts";
+import { PERFIL_OPERACAO, SO_PELA_REDE } from "./perfil-operacao.ts";
 
 export interface Proposal {
   pending_action_id: string;
@@ -467,21 +467,20 @@ async function aplicarPerfilDeTools(todas: ToolDef[], params: RunAgentLoopParams
 /**
  * REDE DE SEGURANÇA DO PERFIL (26/09/2026).
  *
- * O perfil esconde ferramentas que o prompt ensina (perfil-operacao.ts, SO_PELA_REDE). Quando o
- * modelo obedece o prompt e chama uma delas, antes ele recebia "Tool desconhecida" — foi o que
- * aconteceu em 25/09 com send_document_pdf_to_self. A rede procura a ferramenta em params.tools,
- * que é a lista JÁ filtrada por cargo e canal (ai-agent/index.ts) — NUNCA em allTools: procurar
- * lá deixaria o técnico chegar no financeiro e o WhatsApp chegar no que é só de tela.
+ * O perfil esconde ferramentas que o prompt ensina. Quando o modelo obedece o prompt e chama
+ * uma delas, antes ele recebia "Tool desconhecida" — foi o que aconteceu em 25/09 com
+ * send_document_pdf_to_self. A rede alcança SÓ as de SO_PELA_REDE (perfil-operacao.ts: o que o
+ * prompt ensina e fica fora do perfil de propósito), e delas só as que estão em params.tools, a
+ * lista JÁ filtrada por cargo e canal (ai-agent/index.ts). Nunca allTools, e nunca qualquer tool
+ * fora do perfil: vários `roles` são frouxos (create_purchase_order não tem roles,
+ * get_technician_commissions abre para external_seller), e o perfil era a única coisa que as
+ * mantinha longe de técnico e vendedor — a rede não pode devolver o que ele escondia.
  *
- * O modelo chamou sem ver o esquema, então: argumento é conferido contra o input_schema (e,
- * se estiver errado, volta o erro COM o esquema para ele acertar na próxima rodada); leitura
- * pelo nome roda direto; o resto vira pendência de confirmação, mesmo sendo de risco baixo.
+ * O modelo chamou sem ver o esquema, então o argumento é conferido contra o input_schema (e, se
+ * estiver errado, volta o erro COM o esquema para ele acertar na próxima rodada). Passou: risco
+ * low — declarado E calculado — roda direto (SO_PELA_REDE só guarda leitura e escrita de baixo
+ * impacto verificada); o resto vira pendência de confirmação, sem autonomia.
  */
-const PREFIXOS_DE_LEITURA = /^(get_|list_|read_|check_|search_)/;
-
-export function ehLeituraPeloNome(nome: string): boolean {
-  return PREFIXOS_DE_LEITURA.test(nome);
-}
 
 /**
  * Confere os argumentos contra o input_schema: obrigatórios presentes, enum válido e nenhuma
@@ -519,6 +518,11 @@ export function validarArgumentosDaTool(schema: Record<string, unknown>, args: u
   return problemas;
 }
 
+/** O resultado da tool traz `error` preenchido (é o formato de falha das tools e do catch do loop). */
+function temErro(resultado: unknown): boolean {
+  return resultado !== null && typeof resultado === "object" && Boolean((resultado as { error?: unknown }).error);
+}
+
 /**
  * Loop de tool-calling agnóstico de canal. Recebe o histórico em formato nativo
  * Anthropic e devolve o resultado do turno (mensagem final, ou proposal/options
@@ -534,8 +538,11 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
 
   const toolSchemas = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
   const toolsByName: Record<string, ToolDef> = Object.fromEntries(tools.map((t) => [t.name, t]));
-  // Rede de segurança do perfil: SÓ o que cargo e canal já liberaram (params.tools), nunca allTools.
-  const alcancaveisPelaRede: Record<string, ToolDef> = Object.fromEntries((params.tools ?? []).map((t) => [t.name, t]));
+  // Rede de segurança do perfil: SÓ SO_PELA_REDE, e dela só o que cargo e canal já liberaram
+  // (params.tools). Nunca allTools, nunca outra tool fora do perfil (ver o comentário acima).
+  const alcancaveisPelaRede: Record<string, ToolDef> = Object.fromEntries(
+    (params.tools ?? []).filter((t) => SO_PELA_REDE.has(t.name)).map((t) => [t.name, t]),
+  );
 
   // ORÇAMENTO DE TEMPO — o que realmente protege o turno.
   // A Edge Function do Supabase tem teto de parede de ~150s: estourar devolve HTTP 546 e o
@@ -608,17 +615,19 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
     let shortCircuit: { proposal?: Proposal; options?: OptionsData } | null = null;
 
     for (const tc of toolUses) {
-      // Escondida pelo perfil mas liberada por cargo e canal → rede de segurança (ver acima).
+      // Escondida pelo perfil, em SO_PELA_REDE e liberada por cargo e canal → rede (ver acima).
       const foraDoPerfil = toolsByName[tc.name] ? undefined : alcancaveisPelaRede[tc.name];
       const toolDef = toolsByName[tc.name] ?? foraDoPerfil;
       const argumentosInvalidos = foraDoPerfil ? validarArgumentosDaTool(foraDoPerfil.input_schema, tc.input) : [];
       let toolResult: unknown;
       let createdPendingProposal: Proposal | undefined;
+      let executou = false;
 
       const riscoDaTool = toolDef ? (toolDef.computeRisk ? toolDef.computeRisk(tc.input) : toolDef.risk) : "low";
-      // Pela rede, só leitura roda direto: escrita que o modelo chamou sem ver o esquema pede
-      // confirmação. Só sobe o risco — nunca rebaixa o que a própria tool declara.
-      const effectiveRisk = foraDoPerfil && riscoDaTool === "low" && !ehLeituraPeloNome(tc.name) ? "medium" : riscoDaTool;
+      // Pela rede, só roda direto o que a tool DECLARA e o computeRisk CALCULA como low — é o que
+      // SO_PELA_REDE garante ser leitura ou escrita de baixo impacto verificada. Declarada acima
+      // de low e rebaixada pelo computeRisk pede confirmação. Só sobe o risco, nunca rebaixa.
+      const effectiveRisk = foraDoPerfil && riscoDaTool === "low" && foraDoPerfil.risk !== "low" ? "medium" : riscoDaTool;
 
       // Autonomia concedida pelo dono para ESTA ação (Onda 2). Ações de dinheiro/destrutivas
       // nunca entram aqui — ver NEVER_AUTONOMOUS. Pela rede também não: a autonomia foi dada
@@ -661,6 +670,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
         }
         await writeAudit(params.toolCtx, params.sessionId, params.channel, { eventType: `pending_action:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
       } else {
+        executou = true;
         try {
           toolResult = await toolDef.execute(tc.input, params.toolCtx);
         } catch (e: any) {
@@ -677,10 +687,14 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
 
       // Marca própria da rede: 'fora_do_perfil:%' na auditoria mostra quais ferramentas o prompt
       // faz o modelo procurar fora do perfil — a que aparecer com frequência merece entrar nele.
+      // Rodou mas devolveu { error } (ou lançou, e o catch acima virou { error }) é falha, não
+      // execução: senão a auditoria diz que a rede resolveu quando o modelo recebeu erro.
       if (foraDoPerfil) {
         const desfecho = argumentosInvalidos.length > 0
           ? "argumentos_invalidos"
-          : effectiveRisk === "low" ? "executada" : createdPendingProposal ? "pendencia" : "falha_ao_registrar_pendencia";
+          : executou
+          ? (temErro(toolResult) ? "falha_na_execucao" : "executada")
+          : createdPendingProposal ? "pendencia" : "falha_ao_registrar_pendencia";
         await writeAudit(params.toolCtx, params.sessionId, params.channel, {
           eventType: `fora_do_perfil:${tc.name}`,
           risk: effectiveRisk,
