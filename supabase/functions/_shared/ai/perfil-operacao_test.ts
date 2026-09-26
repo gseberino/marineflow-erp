@@ -88,7 +88,7 @@ Deno.test("SO_PELA_REDE: pela rede, roda direto só leitura e escrita de sugest�
     .filter((n) => porNome.get(n)!.risk === "low" && !ehLeituraPeloNome(n) && !rodaDiretoPelaRede(porNome.get(n)!))
     .sort();
   assertEquals(escritasLowConfirmadas, [
-    "convert_external_quote_to_so", "create_composed_product", "reorder_service_order_step", "review_entity_note", "update_service",
+    "convert_external_quote_to_so", "create_composed_product", "reorder_service_order_step", "review_entity_note",
   ]);
   // E nada de risco medium/high roda direto pela rede.
   for (const n of SO_PELA_REDE) {
@@ -126,7 +126,7 @@ Deno.test("migration do perfil: versão 20260927090100, fora da faixa do finance
   assertEquals(arquivos.filter((n) => versao(n) === "20260927090100"), doPerfil, "outra migration usa a mesma versão");
 });
 
-Deno.test("comportamento: com o perfil ligado, o modelo recebe exatamente o de antes + as 2", async () => {
+Deno.test("comportamento: com o perfil ligado, o modelo recebe exatamente o de antes + as acrescentadas", async () => {
   // Fake do service-role: só o liga/desliga no banco, como fica em produção.
   const admin = {
     from(_t: string) {

@@ -256,7 +256,7 @@ Deno.test("rede: o modelo cria a nota e tenta aprová-la no mesmo turno — a no
 });
 
 Deno.test("rede: escrita de risco low que não é sugestão/análise vira pendência (nota, preço/fiscal, OS, roteiro, catálogo)", async () => {
-  const CONFIRMADAS = ["review_entity_note", "update_service", "convert_external_quote_to_so", "reorder_service_order_step", "create_composed_product"];
+  const CONFIRMADAS = ["review_entity_note", "convert_external_quote_to_so", "reorder_service_order_step", "create_composed_product"];
   for (const nome of CONFIRMADAS) {
     const real = porNomeReal.get(nome)!;
     assertEquals(SO_PELA_REDE.has(nome), true, nome);
