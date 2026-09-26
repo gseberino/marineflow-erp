@@ -6,6 +6,8 @@
 --   · Kamell NF 51038 e TSD NF 132181: a importação do XML ignorava as parcelas e o pagamento com
 --     crédito do fornecedor — criava UMA conta com o total, datada do dia da importação.
 --
+--   · Selo de cobertura do DRE com a mesma regra do fluxo de caixa pelo extrato (seção 7).
+--
 -- Nada aqui apaga dado: centro de custo antigo é DESATIVADO; contas já criadas pela importação
 -- não são tocadas (a correção das duas em aberto espera o OK do dono).
 
@@ -560,6 +562,62 @@ revoke all on function public.revert_nfe_import(uuid) from public, anon;
 grant execute on function public.revert_nfe_import(uuid) to authenticated, service_role;
 
 -- ───────────────────────────────────────────────────────────────────────────────────────────
+-- 7. Selo de cobertura do DRE com a MESMA regra do fluxo de caixa pelo extrato
+--    (src/lib/fluxo-de-caixa.ts): só conta corrente e Caixa; fora duplicata, estornada, a
+--    importação manual de 27/07 (sem conta ligada), pendente e data futura; transferência entre
+--    contas e crédito do cartão na conta não são entrada nem saída. E conta cancelada não é
+--    despesa lançada — as três notas da Kamell canceladas em 26/09 ainda contavam em julho.
+-- ───────────────────────────────────────────────────────────────────────────────────────────
+create or replace function public.dre_cobertura(p_ano integer)
+ returns table(mes integer, receita_lancada numeric, entrada_banco numeric, despesa_lancada numeric, saida_banco numeric)
+ language sql
+ stable
+ set search_path to 'public'
+as $function$
+  with meses as (select generate_series(1, 12) m),
+  rec as (
+    select extract(month from issue_date)::int m, sum(amount) total
+      from public.receivables
+     where extract(year from issue_date) = p_ano
+       and coalesce(status, '') <> 'cancelled'
+     group by 1
+  ),
+  pag as (
+    select extract(month from issue_date)::int m, sum(amount) total
+      from public.payables
+     where extract(year from issue_date) = p_ano
+       and coalesce(status, '') <> 'cancelled'
+     group by 1
+  ),
+  banco as (
+    select extract(month from transaction_date)::int m,
+           sum(amount) filter (where transaction_type = 'credit') entradas,
+           sum(amount) filter (where transaction_type = 'debit') saidas
+      from public.bank_transactions
+     where extract(year from transaction_date) = p_ano
+       and coalesce(source_type, 'bank') in ('bank', 'cash')
+       and coalesce(tx_status, '') <> 'PENDING'
+       and coalesce(dismissed_kind, '') not in ('duplicata', 'estornada', 'transferencia', 'mecanica_cartao')
+       and not (coalesce(provider, '') = 'manual' and bank_connection_id is null)
+       and transaction_date <= current_date
+     group by 1
+  )
+  select meses.m,
+         coalesce(rec.total, 0)::numeric,
+         coalesce(banco.entradas, 0)::numeric,
+         coalesce(pag.total, 0)::numeric,
+         coalesce(banco.saidas, 0)::numeric
+    from meses
+    left join rec on rec.m = meses.m
+    left join pag on pag.m = meses.m
+    left join banco on banco.m = meses.m
+   order by meses.m;
+$function$;
+
+revoke all on function public.dre_cobertura(integer) from public, anon;
+grant execute on function public.dre_cobertura(integer) to authenticated, service_role;
+
+-- ───────────────────────────────────────────────────────────────────────────────────────────
 -- Conferências: se algo acima não ficou como deveria, nada é gravado.
 -- ───────────────────────────────────────────────────────────────────────────────────────────
 do $$
@@ -581,8 +639,9 @@ begin
     raise exception 'a categoria de serviço para a empresa não ficou ativa em despesa_operacional';
   end if;
   if has_function_privilege('anon', 'public.confirm_nfe_import(uuid,uuid,jsonb,uuid)', 'EXECUTE')
-     or has_function_privilege('anon', 'public.revert_nfe_import(uuid)', 'EXECUTE') then
-    raise exception 'anon ainda executa a importação ou o desfazer da nota';
+     or has_function_privilege('anon', 'public.revert_nfe_import(uuid)', 'EXECUTE')
+     or has_function_privilege('anon', 'public.dre_cobertura(integer)', 'EXECUTE') then
+    raise exception 'anon ainda executa a importação, o desfazer da nota ou a cobertura do DRE';
   end if;
   if (select reloptions from pg_class where oid = 'public.conciliacao_lancamentos'::regclass) is distinct from array['security_invoker=on'] then
     raise exception 'a visão de conciliação perdeu o security_invoker';

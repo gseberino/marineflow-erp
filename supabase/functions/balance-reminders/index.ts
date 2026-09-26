@@ -92,7 +92,7 @@ servirComCors(async (req) => {
     if (milestoneItems > 0 && users.length > 0 && !dry) {
       const message =
         `💰 *Saldos a cobrar*\n\n` + sections.join("\n\n") +
-        `\n\n_Para lembrar o cliente, use "Enviar WhatsApp" na tela de Cobranças._`;
+        `\n\n_Para lembrar o cliente, use "Enviar WhatsApp" em Contas a Receber › Cobranças._`;
       const rows = users.map((u: any) => ({
         phone_normalized: String(u.phone_normalized), message, source: "balance_escalation", priority: 4,
       }));

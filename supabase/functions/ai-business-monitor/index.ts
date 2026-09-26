@@ -100,8 +100,11 @@ servirComCors(async (req) => {
     // (3b) Consentimento Open Finance vencendo (Pluggy: ~12 meses). Quando vence, o extrato
     // simplesmente para de chegar, sem erro — e o financeiro fica cego sem saber (Open Finance D2).
     try {
+      // Só as conexões ativas: a desativada (27/09/2026, "Desativar" em Contas bancárias) não
+      // busca extrato, e avisar que o consentimento dela vence é ruído.
       const { data: conexoes } = await admin
         .from("bank_connections").select("id, consent_expires_at")
+        .eq("active", true)
         .not("consent_expires_at", "is", null);
       for (const c of (conexoes ?? []) as { id: string; consent_expires_at: string }[]) {
         const dias = Math.floor((new Date(c.consent_expires_at).getTime() - now.getTime()) / 864e5);
@@ -137,7 +140,7 @@ servirComCors(async (req) => {
         if (Math.abs(Number(ult.diferenca) - Number(anterior.diferenca)) >= 1) continue;
         if (await claim(`saldo_divergente:${c.id}:${todayISO}`, { diferenca: ult.diferenca })) {
           const brl = (v: unknown) => Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-          alerts.push(`🏦 Extrato de ${c.label}: o saldo do banco (${brl(ult.saldo_do_provedor)}) não bate com a soma das transações importadas (${brl(ult.saldo_calculado)}), diferença ${brl(ult.diferenca)}. A diferença se repetiu nas duas últimas conferências: confira no app do banco se falta alguma transação no sistema (Financeiro › Fechamento).`);
+          alerts.push(`🏦 Extrato de ${c.label}: o saldo do banco (${brl(ult.saldo_do_provedor)}) não bate com a soma das transações importadas (${brl(ult.saldo_calculado)}), diferença ${brl(ult.diferenca)}. A diferença se repetiu nas duas últimas conferências: confira no app do banco se falta alguma transação no sistema (Financeiro › Conciliação › Fechar o mês).`);
         }
       }
     } catch (_e) {

@@ -95,45 +95,32 @@ function HistoricoDaRegra({ regra }: { regra: RegraFinanceira }) {
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-md border">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b bg-muted/40 text-muted-foreground">
-              <th className="whitespace-nowrap p-2 text-left font-medium">Data</th>
-              <th className="whitespace-nowrap p-2 text-left font-medium">{regra.direction === 'credit' ? 'Cliente' : 'Para quem'}</th>
-              <th className="whitespace-nowrap p-2 text-left font-medium">Descrição</th>
-              <th className="whitespace-nowrap p-2 text-left font-medium">Categoria</th>
-              <th className="whitespace-nowrap p-2 text-right font-medium">Valor</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lancamentos.map((l) => (
-              <tr key={l.id} className="border-b last:border-0">
-                <td className="whitespace-nowrap p-2 tabular-nums">{formatDate(l.issue_date)}</td>
-                <td className="max-w-[13rem] p-2">
-                  {/* Operação do próprio banco (juros, tarifa) não tem favorecido. Dizer
-                      isso é melhor que uma célula vazia, que parece dado faltando. */}
-                  <span className="block truncate">
-                    {l.fornecedor || l.contraparte || l.supplier_name
-                      || <span className="italic text-muted-foreground">sem favorecido — operação do banco</span>}
-                  </span>
-                  {(l.documento || l.banco || l.meio) && (
-                    <span className="block truncate text-[11px] text-muted-foreground">
-                      {[l.documento && formatarDoc(l.documento), l.banco && `banco ${l.banco}`, l.meio]
-                        .filter(Boolean).join(' · ')}
-                    </span>
-                  )}
-                </td>
-                <td className="max-w-[15rem] p-2"><span className="block truncate">{l.description}</span></td>
-                <td className="whitespace-nowrap p-2">{l.expense_category ?? '—'}</td>
-                <td className="whitespace-nowrap p-2 text-right font-medium tabular-nums">
-                  {formatCurrency(l.amount)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {/* Lista, não tabela: dentro de Extrato › Regras a tabela de cinco colunas rolava para o
+          lado no celular — e rolagem lateral o dono não aceita em lugar nenhum. */}
+      <ul className="divide-y rounded-md border text-xs" aria-label={regra.direction === 'credit' ? 'Entradas que embasam a regra' : 'Lançamentos que embasam a regra'}>
+        {lancamentos.map((l) => (
+          <li key={l.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5 p-2">
+            <span className="min-w-0 truncate font-medium">
+              {/* Operação do próprio banco (juros, tarifa) não tem favorecido. Dizer isso é
+                  melhor que um espaço vazio, que parece dado faltando. */}
+              {l.fornecedor || l.contraparte || l.supplier_name
+                || <span className="font-normal italic text-muted-foreground">sem favorecido — operação do banco</span>}
+            </span>
+            <span className="text-right font-medium tabular-nums">{formatCurrency(l.amount)}</span>
+            <span className="col-span-2 min-w-0 truncate text-muted-foreground">
+              <span className="tabular-nums">{formatDate(l.issue_date)}</span>
+              {' · '}<span>{l.description}</span>
+              {' · '}<span>{l.expense_category ?? '—'}</span>
+            </span>
+            {(l.documento || l.banco || l.meio) && (
+              <span className="col-span-2 min-w-0 truncate text-[11px] text-muted-foreground">
+                {[l.documento && formatarDoc(l.documento), l.banco && `banco ${l.banco}`, l.meio]
+                  .filter(Boolean).join(' · ')}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

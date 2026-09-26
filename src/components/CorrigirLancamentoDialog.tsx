@@ -183,7 +183,7 @@ export function CorrigirLancamentoDialog({
             {formatCurrency(Number(lancamento.amount ?? 0))}
             {lancamento.status === 'paid' ? ' · pago' : pago > 0 ? ` · ${formatCurrency(pago)} pago` : ' · em aberto'}
             {lancamento.issue_date ? ` · ${formatDate(lancamento.issue_date)}` : ''}
-            . Toda correção fica registrada na trilha do Fechamento.
+            . Toda correção fica registrada na trilha (Conciliação › Fechar o mês).
           </DialogDescription>
         </DialogHeader>
 
@@ -192,7 +192,7 @@ export function CorrigirLancamentoDialog({
             <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
             <span className="min-w-0">
               O mês deste lançamento está fechado. Só a observação pode mudar; para o resto,
-              reabra o mês em Financeiro › Fechamento.
+              reabra o mês em Conciliação › Fechar o mês.
             </span>
           </div>
         )}

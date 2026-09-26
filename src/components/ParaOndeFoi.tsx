@@ -160,7 +160,7 @@ export function ObservacaoECentro({
         maxLength={500}
         aria-label="Observação"
         placeholder="Observação (opcional)"
-        className="h-8 min-w-[12rem] flex-1 text-xs"
+        className="h-8 min-w-0 flex-1 basis-48 text-xs"
       />
       {opcoes.length > 0 && (
         <Select
