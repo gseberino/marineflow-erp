@@ -22,6 +22,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { verificarCronSecret } from "../_shared/cron-auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -37,6 +38,12 @@ function jr(body: unknown, status = 200) {
 
 servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // verify_jwt=false (o pg_cron chama sem JWT): o segredo do cron é a ÚNICA porta. Até
+  // 26/09/2026 não era conferido, e a versão publicada ainda rejeitava orçamentos — um POST
+  // anônimo à URL rejeitaria em massa, mesmo com o cron pausado. Achado da revisão de 26/09.
+  const recusa = verificarCronSecret(req, corsHeaders, "quote-reminders");
+  if (recusa) return recusa;
 
   try {
     const SUPABASE_URL    = Deno.env.get("SUPABASE_URL")!;
