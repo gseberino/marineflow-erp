@@ -12,6 +12,10 @@
 //   2. toda tool citada está no perfil (PERFIL_OPERACAO), é de risco alto (entra sempre) ou
 //      está em SO_PELA_REDE — a lista, documentada, das que ficam de propósito só pela rede.
 //   3. SO_PELA_REDE não guarda sobra: tool que saiu do prompt sai de lá também.
+// E sobre o que o modelo lê NAS FERRAMENTAS que recebe — description e input_schema das tools
+// VISÍVEIS (perfil ∪ risco alto): a regra 2 vale igual (uma descrição que manda "use antes de
+// create_purchase_order_from_so" ensina tanto quanto o prompt), e a decisão do dono sobre o que
+// não se ensina mais também. A regra 1 não se aplica ali: esquema é feito de nomes de campo.
 // Rodar com:
 //   deno test --allow-all supabase/functions/_shared/ai/prompt-ferramentas_test.ts
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
@@ -63,6 +67,30 @@ const porNome = new Map(allTools.map((t) => [t.name, t]));
 const citados = identificadoresSnakeCase(textoDoPrompt());
 const toolsCitadas = [...citados].filter((n) => porNome.has(n));
 
+/** O que o modelo recebe no bloco de tools com o perfil ligado (sem nome no pedido). */
+const visiveis = allTools.filter((t) => PERFIL_OPERACAO.has(t.name) || t.risk === "high");
+
+/** Texto de uma tool que o modelo lê: a description e o input_schema (com a descrição dos campos). */
+const textoDaTool = (t: { description: string; input_schema: unknown }) => `${t.description}\n${JSON.stringify(t.input_schema)}`;
+
+/** Tools citadas no texto de cada tool visível (a própria não conta). */
+const citadasNasVisiveis: Array<{ em: string; tool: string }> = visiveis.flatMap((t) =>
+  [...identificadoresSnakeCase(textoDaTool(t))]
+    .filter((n) => porNome.has(n) && n !== t.name)
+    .map((n) => ({ em: t.name, tool: n }))
+);
+
+/** Ao alcance do modelo: no perfil, de risco alto (entra sempre) ou pela rede, de propósito. */
+const aoAlcance = (n: string) => PERFIL_OPERACAO.has(n) || porNome.get(n)!.risk === "high" || SO_PELA_REDE.has(n);
+
+// Decisão do dono (26/09): nenhum uso em ~7 semanas (rotina/automação) e o dono não usa OC de
+// verdade. As tools continuam existindo; só não são mais ensinadas — nem no prompt, nem na
+// descrição de outra tool. Voltar a ensinar é decisão do dono.
+const NAO_SE_ENSINA_MAIS = [
+  "record_routine", "list_routines", "propose_automation", "confirm_automation", "get_autonomy_report",
+  "create_purchase_order_from_so", "create_purchase_order_from_quote",
+];
+
 Deno.test("todo nome snake_case do prompt é tool de verdade ou está na lista de campos/valores", () => {
   const desconhecidos = [...citados].filter((n) => !porNome.has(n) && !NAO_SAO_TOOLS.has(n)).sort();
   assertEquals(desconhecidos, [], "o prompt cita nome que não é tool nem campo conhecido (tool renomeada/removida?)");
@@ -71,29 +99,35 @@ Deno.test("todo nome snake_case do prompt é tool de verdade ou está na lista d
 });
 
 Deno.test("toda tool que o prompt ensina está no perfil, é de risco alto ou está em SO_PELA_REDE", () => {
-  const semAlcance = toolsCitadas
-    .filter((n) => !PERFIL_OPERACAO.has(n) && porNome.get(n)!.risk !== "high" && !SO_PELA_REDE.has(n))
-    .sort();
+  const semAlcance = toolsCitadas.filter((n) => !aoAlcance(n)).sort();
   assertEquals(semAlcance, [], "o prompt ensina e o perfil esconde: ponha no perfil ou, de propósito, em SO_PELA_REDE");
 });
 
-Deno.test("SO_PELA_REDE sem sobra: só tool citada no prompt, fora do perfil e que não é de risco alto", () => {
+Deno.test("toda tool citada na description/input_schema de uma tool VISÍVEL está ao alcance, como no prompt", () => {
+  // Sanidade: o scanner acha as citações (se a regex ou o recorte quebrarem, o teste passaria vazio).
+  assertEquals(visiveis.length > 100, true, `só ${visiveis.length} tools visíveis — o recorte quebrou?`);
+  assertEquals(citadasNasVisiveis.length > 20, true, `só ${citadasNasVisiveis.length} citações — o scanner quebrou?`);
+  assertEquals(citadasNasVisiveis.some((c) => c.em === "suggest_suppliers" && c.tool === "search_products"), true);
+
+  const semAlcance = citadasNasVisiveis.filter((c) => !aoAlcance(c.tool)).map((c) => `${c.em} → ${c.tool}`).sort();
+  assertEquals(semAlcance, [], "a descrição de uma tool visível ensina outra que o modelo não alcança: tire a citação ou dê alcance");
+});
+
+Deno.test("SO_PELA_REDE sem sobra: só tool citada (no prompt ou em tool visível), fora do perfil e que não é de risco alto", () => {
+  const citadaEmVisivel = new Set(citadasNasVisiveis.map((c) => c.tool));
   for (const n of SO_PELA_REDE) {
-    assertEquals(citados.has(n), true, `${n} saiu do prompt — tire de SO_PELA_REDE`);
+    assertEquals(citados.has(n) || citadaEmVisivel.has(n), true, `${n} ninguém ensina mais — tire de SO_PELA_REDE`);
     assertEquals(PERFIL_OPERACAO.has(n), false, `${n} está no perfil e em SO_PELA_REDE`);
     assertEquals(porNome.get(n)?.risk === "high", false, `${n} é de risco alto e já entra sempre`);
   }
 });
 
-Deno.test("decisão do dono (26/09): o prompt não ensina rotina/automação nem ordem de compra", () => {
-  // Nenhum uso em ~7 semanas (rotina/automação) e o dono não usa OC de verdade. As tools
-  // continuam existindo; só não são mais ensinadas. Voltar a ensinar é decisão do dono.
+Deno.test("decisão do dono (26/09): nem o prompt nem as tools visíveis ensinam rotina/automação ou ordem de compra", () => {
   const texto = textoDoPrompt();
-  for (const n of [
-    "record_routine", "list_routines", "propose_automation", "confirm_automation", "get_autonomy_report",
-    "create_purchase_order_from_so", "create_purchase_order_from_quote",
-  ]) {
+  for (const n of NAO_SE_ENSINA_MAIS) {
     assertEquals(texto.includes(n), false, `${n} voltou ao prompt`);
+    const emTools = visiveis.filter((t) => textoDaTool(t).includes(n)).map((t) => t.name);
+    assertEquals(emTools, [], `${n} é ensinada na descrição de ${emTools.join(", ")}`);
     assertEquals(porNome.has(n), true, `${n} deixou de existir — só o ensino saiu, a tool fica`);
   }
 });
