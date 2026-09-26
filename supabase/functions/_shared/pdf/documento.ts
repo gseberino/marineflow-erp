@@ -22,6 +22,7 @@
 import { scopeCss } from './css-scope.ts';
 import { itemColumnWidths, valueVisibility } from './pdf-visibility.ts';
 import { dataBR, dataHoraBR, diaBR, horaBR, somarDiasAoDia, somarDiasBR } from './datas.ts';
+import { primeiraValidade } from '../dias-de-validade.ts';
 
 export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
@@ -138,13 +139,17 @@ export function resolvePdfOptions(
  * `quote_validity_days` não está na whitelist, então lá o padrão da empresa não chega e a
  * conta fica em orçamento → 15 — sem efeito prático hoje, porque a coluna tem DEFAULT 15 e
  * nenhum orçamento vivo a tem vazia.
+ *
+ * Cada nível só vale se for um inteiro de pelo menos 1 dia (primeiraValidade, em
+ * ../dias-de-validade.ts, a mesma regra do assistente ao criar o orçamento). Até 26/09/2026
+ * a conta era `Number(x) || próximo`: -1 passava, o PDF dizia "Válido por -1 dias" e a R19
+ * dava o orçamento por vencido já no dia da emissão; 2.5 imprimia "2.5 dias".
  */
 export function validadeDoOrcamento(
   diasDoOrcamento: unknown,
   settings?: Record<string, unknown> | null,
 ): { mode: 'days'; days: number } {
-  const padraoDaEmpresa = Number(settings?.quote_validity_days ?? 15) || 15;
-  return { mode: 'days', days: Number(diasDoOrcamento) || padraoDaEmpresa };
+  return { mode: 'days', days: primeiraValidade(diasDoOrcamento, settings?.quote_validity_days) };
 }
 
 /**
