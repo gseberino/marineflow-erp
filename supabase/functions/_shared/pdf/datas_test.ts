@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { dataBR, dataHoraBR, horaBR, somarDiasBR } from "./datas.ts";
+import { dataBR, dataHoraBR, diaBR, horaBR, somarDiasAoDia, somarDiasBR } from "./datas.ts";
 
 // Os casos-limite do fuso. Todos valem em qualquer TZ do processo — é esse o ponto.
 
@@ -31,4 +31,17 @@ Deno.test("validade soma dias ao dia de Brasília, virando mês e ano", () => {
   assertEquals(somarDiasBR(new Date("2026-12-28T15:00:00.000Z"), 5), "02/01/2027");
   assertEquals(somarDiasBR(new Date("2028-02-27T15:00:00.000Z"), 2), "29/02/2028");
   assertEquals(somarDiasBR(new Date("2026-09-25T15:00:00.000Z"), 0), "25/09/2026");
+});
+
+Deno.test("diaBR: o 'hoje' de Brasília, mesmo com o servidor já no dia seguinte em UTC", () => {
+  // 02h30 UTC de 25/09 = 23h30 de 24/09 em Brasília: toISOString() diria 25.
+  assertEquals(diaBR(new Date("2026-09-25T02:30:00.000Z")), "2026-09-24");
+  assertEquals(diaBR(new Date("2026-09-25T03:00:00.000Z")), "2026-09-25");
+});
+
+Deno.test("somarDiasAoDia: dia de calendário sem fuso, virando mês, ano e bissexto", () => {
+  assertEquals(somarDiasAoDia("2026-09-24", 7), "2026-10-01");
+  assertEquals(somarDiasAoDia("2026-12-28", 5), "2027-01-02");
+  assertEquals(somarDiasAoDia("2028-02-27", 2), "2028-02-29");
+  assertEquals(somarDiasAoDia("2026-09-25", 0), "2026-09-25");
 });

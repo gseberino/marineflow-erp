@@ -1,7 +1,7 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { dirname, fromFileUrl, join } from "https://deno.land/std@0.224.0/path/mod.ts";
 import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
-import { buildOrderHTML, DEFAULT_PDF_OPTIONS } from "./documento.ts";
+import { buildOrderHTML, DEFAULT_PDF_OPTIONS, ultimoDiaDaValidade, validadeDoOrcamento } from "./documento.ts";
 import { AGORA, ORCAMENTO, ORCAMENTO_COM_PARCELAS, OS_COM_PAGAMENTO, VALIDADE_POR_DATA } from "./amostras.ts";
 
 // A metade Deno da paridade (a outra é src/lib/pdf-paridade-fuso.test.ts, no vitest).
@@ -45,6 +45,31 @@ Deno.test("orçamento com parcelas e validade por data no Deno = referência do 
   try {
     const html = buildOrderHTML(ORCAMENTO_COM_PARCELAS, { ...DEFAULT_PDF_OPTIONS, validity: VALIDADE_POR_DATA });
     assertEquals(html, ler("orcamento-parcelas.html"));
+  } finally {
+    tempo.restore();
+  }
+});
+
+// A validade tem uma função só (26/09/2026): o envio pela tela e o portal saíam com "Válido
+// por 15 dias" fixo porque não passavam validade nenhuma, e o gerador caía no literal.
+Deno.test("validadeDoOrcamento: a do orçamento, senão a da empresa, senão 15", () => {
+  assertEquals(validadeDoOrcamento(7, { quote_validity_days: "3" }), { mode: "days", days: 7 });
+  assertEquals(validadeDoOrcamento(null, { quote_validity_days: "3" }), { mode: "days", days: 3 });
+  assertEquals(validadeDoOrcamento(undefined, {}), { mode: "days", days: 15 });
+  // sujeira na configuração não vira "Válido por NaN dias"
+  assertEquals(validadeDoOrcamento(0, { quote_validity_days: "lixo" }), { mode: "days", days: 15 });
+  assertEquals(validadeDoOrcamento(null, null), { mode: "days", days: 15 });
+});
+
+Deno.test("o 'até' do PDF é o último dia do aviso de vencimento (R19)", () => {
+  const tempo = new FakeTime(new Date(AGORA));
+  try {
+    // Com a validade vinda da função, o documento é byte a byte a referência ("até 01/10/2026").
+    const validity = validadeDoOrcamento(ORCAMENTO.serviceOrder.quote_validity_days, { quote_validity_days: "3" });
+    assertEquals(buildOrderHTML(ORCAMENTO, { ...DEFAULT_PDF_OPTIONS, validity }), ler("orcamento.html"));
+    // E o último dia que o motor de tarefas usa é o mesmo 01/10 — criado às 23h30 de 24/09.
+    assertEquals(ultimoDiaDaValidade(ORCAMENTO.serviceOrder, {}), "2026-10-01");
+    assertEquals(ler("orcamento.html").includes("(até 01/10/2026)"), true);
   } finally {
     tempo.restore();
   }

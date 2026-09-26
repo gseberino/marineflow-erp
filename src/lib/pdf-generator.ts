@@ -27,6 +27,7 @@ export {
   PDF_ROOT_CLASS,
   resolvePdfOptions,
   tituloParaImpressao,
+  validadeDoOrcamento,
 } from '../../supabase/functions/_shared/pdf/documento';
 export type { PDFData, PDFDocumentType, PDFOptions } from '../../supabase/functions/_shared/pdf/documento';
 

@@ -21,7 +21,7 @@
  */
 import { scopeCss } from './css-scope.ts';
 import { itemColumnWidths, valueVisibility } from './pdf-visibility.ts';
-import { dataBR, dataHoraBR, horaBR, somarDiasBR } from './datas.ts';
+import { dataBR, dataHoraBR, diaBR, horaBR, somarDiasAoDia, somarDiasBR } from './datas.ts';
 
 export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
@@ -118,6 +118,53 @@ export function resolvePdfOptions(
     if (typeof value === 'boolean') (resolved as Record<string, unknown>)[key] = value;
   }
   return resolved;
+}
+
+/**
+ * A validade que vai impressa no orçamento: a do PRÓPRIO orçamento
+ * (service_orders.quote_validity_days); sem ela, o padrão da empresa
+ * (app_settings.quote_validity_days); sem os dois, 15.
+ *
+ * ═══ POR QUE UMA FUNÇÃO SÓ ═══
+ *
+ * Até 26/09/2026 cada caminho do PDF decidia por conta própria. O Baixar do formulário e o
+ * assistente usavam a do orçamento; o envio pela tela (SendViaWhatsAppDialog) e o Baixar do
+ * portal do cliente não passavam validade nenhuma, porque `resolvePdfOptions` a descarta — e
+ * o gerador caía no literal 15. Um orçamento de 3 dias ia para o cliente dizendo "Válido por
+ * 15 dias", enquanto a rotina de expiração o rejeitava no 7º dia. É o caso das "três fontes
+ * para o mesmo padrão" (config, coluna e literal): aqui a ordem entre elas é decidida uma vez.
+ *
+ * `settings` é o mapa de app_settings de quem chama. No portal (anônimo) a chave
+ * `quote_validity_days` não está na whitelist, então lá o padrão da empresa não chega e a
+ * conta fica em orçamento → 15 — sem efeito prático hoje, porque a coluna tem DEFAULT 15 e
+ * nenhum orçamento vivo a tem vazia.
+ */
+export function validadeDoOrcamento(
+  diasDoOrcamento: unknown,
+  settings?: Record<string, unknown> | null,
+): { mode: 'days'; days: number } {
+  const padraoDaEmpresa = Number(settings?.quote_validity_days ?? 15) || 15;
+  return { mode: 'days', days: Number(diasDoOrcamento) || padraoDaEmpresa };
+}
+
+/**
+ * O ÚLTIMO dia (aaaa-mm-dd, calendário de Brasília) em que o orçamento vale — o mesmo "até"
+ * que o PDF imprime em "Válido por N dias (até dd/mm/aaaa)".
+ *
+ * `quote_validity_date` (data fixa) vence se existir. Senão, dia de Brasília da emissão
+ * (`created_at`, decisão D13: reimprimir não renova) mais a validade de `validadeDoOrcamento`.
+ * Devolve null quando não há data de emissão legível — sem ela não há o que comparar.
+ */
+export function ultimoDiaDaValidade(
+  orcamento: { created_at?: string | null; quote_validity_date?: string | null; quote_validity_days?: unknown },
+  settings?: Record<string, unknown> | null,
+): string | null {
+  const fixa = String(orcamento.quote_validity_date ?? '').slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fixa)) return fixa;
+  if (!orcamento.created_at) return null;
+  const emissao = new Date(orcamento.created_at);
+  if (Number.isNaN(emissao.getTime())) return null;
+  return somarDiasAoDia(diaBR(emissao), validadeDoOrcamento(orcamento.quote_validity_days, settings).days);
 }
 
 export type PDFData = {
