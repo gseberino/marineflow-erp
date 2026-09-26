@@ -8,13 +8,13 @@
 // O teste monta cada lista de verdade, clica no menu da linha e entrega ao gerador REAL
 // (buildHTMLDocument) o que a lista mandou baixar. Os mocks devolvem sempre a mesma
 // referência: objeto novo a cada render faz os useEffect das telas entrarem em laço.
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
-import { buildHTMLDocument, type PDFData, type PDFOptions } from '@/lib/pdf-generator';
+import { buildHTMLDocument, resolvePdfOptions, type PDFData, type PDFOptions } from '@/lib/pdf-generator';
 import { ORCAMENTO } from '../../supabase/functions/_shared/pdf/amostras';
 import QuoteList from './QuoteList';
 import ServiceOrderList from './ServiceOrderList';
@@ -27,7 +27,9 @@ const estado = vi.hoisted(() => ({
   // O padrão da empresa em produção hoje é 3 (app_settings.quote_validity_days).
   ajustes: { quote_validity_days: '3' } as Record<string, string>,
   pdfPorId: {} as Record<string, unknown>,
-  dialogo: null as null | { open: boolean; documentType: string; initialValidityDays?: number },
+  dialogo: null as null | {
+    open: boolean; documentType: string; initialValidityDays?: number; initialValidityDate?: string | null;
+  },
   linhas: [] as unknown[],
   vazio: [] as unknown[],
   mapaVazio: new Map(),
@@ -49,8 +51,15 @@ vi.mock('@/lib/pdf-generator', async (importOriginal) => {
 });
 vi.mock('@/lib/pdf-print', () => ({ printPDF: () => {} }));
 vi.mock('@/components/PDFOptionsDialog', () => ({
-  PDFOptionsDialog: (props: { open: boolean; documentType: string; initialValidityDays?: number }) => {
-    estado.dialogo = { open: props.open, documentType: props.documentType, initialValidityDays: props.initialValidityDays };
+  PDFOptionsDialog: (props: {
+    open: boolean; documentType: string; initialValidityDays?: number; initialValidityDate?: string | null;
+  }) => {
+    estado.dialogo = {
+      open: props.open,
+      documentType: props.documentType,
+      initialValidityDays: props.initialValidityDays,
+      initialValidityDate: props.initialValidityDate,
+    };
     return null;
   },
 }));
@@ -225,5 +234,93 @@ describe('Orçamentos (v2) — Baixar em lote e Imprimir / Baixar', () => {
     await waitFor(() => expect(estado.dialogo?.open).toBe(true));
     expect(estado.dialogo?.documentType).toBe('quote');
     expect(estado.dialogo?.initialValidityDays).toBe(7);
+  });
+});
+
+// ── Padrão da EMPRESA, não o de fábrica (26/09/2026) ─────────────────────────────────────
+// O Baixar direto e o lote partiam de DEFAULT_PDF_OPTIONS: com "termos" desligado em
+// Configurações › Documentos, o Baixar do formulário (diálogo) saía sem termos e o da lista,
+// com eles. Agora os dois partem de opcoesPadraoDoDocumento — padrão da empresa + validade.
+describe('Listas — o Baixar direto parte do padrão da empresa, como o diálogo', () => {
+  const ajustesOriginais = estado.ajustes;
+  const semTermos = {
+    quote_validity_days: '3',
+    pdf_options_quote: JSON.stringify({ showTerms: false }),
+    pdf_options_service_order: JSON.stringify({ showTerms: false }),
+  };
+  beforeEach(() => {
+    estado.ajustes = semTermos;
+    estado.linhas = [linha('q-7', 'ORÇ-00107', 'draft'), linha('q-sem', 'ORÇ-00108', 'draft')];
+  });
+  afterEach(() => {
+    estado.ajustes = ajustesOriginais;
+  });
+
+  const esperado = (tipo: 'quote' | 'service_order', validity?: unknown) => ({
+    ...resolvePdfOptions(semTermos, tipo),
+    hideFinancials: false,
+    ...(validity ? { validity } : {}),
+  });
+
+  it('Orçamentos (v1): sem termos, como o padrão da empresa manda', async () => {
+    montar(<QuoteList />);
+    await clicarNoMenu('ORÇ-00107', /Baixar Orçamento/i);
+    await waitFor(() => expect(estado.baixados).toHaveLength(1));
+    expect(estado.baixados[0].options).toEqual(esperado('quote', { mode: 'days', days: 7 }));
+    expect(documento(estado.baixados[0])).not.toContain('CONDIÇÕES GERAIS');
+  });
+
+  it('Ordens de Serviço (v1): Baixar Orçamento, Baixar OS e o lote de OS', async () => {
+    estado.linhas = [linha('os-7', 'OS-00107', 'in_progress')];
+    montar(<ServiceOrderList />);
+    await clicarNoMenu('OS-00107', /Baixar Orçamento/i);
+    await waitFor(() => expect(estado.baixados).toHaveLength(1));
+    expect(estado.baixados[0].options).toEqual(esperado('quote', { mode: 'days', days: 7 }));
+
+    await clicarNoMenu('OS-00107', /Baixar OS/i);
+    await waitFor(() => expect(estado.baixados).toHaveLength(2));
+    expect(estado.baixados[1].options).toEqual(esperado('service_order'));
+    expect(documento(estado.baixados[1])).not.toContain('CONDIÇÕES GERAIS');
+
+    const user = userEvent.setup();
+    await user.click(screen.getAllByLabelText('Selecionar OS-00107')[0]);
+    await user.click(screen.getByRole('button', { name: /Baixar 1 PDF/i }));
+    await waitFor(() => expect(estado.baixados).toHaveLength(3), { timeout: 4000 });
+    expect(estado.baixados[2].options).toEqual(esperado('service_order'));
+  });
+
+  it('Orçamentos (v2): o lote sai com o padrão da empresa', async () => {
+    const user = userEvent.setup();
+    montar(<OrdersListV2 mode="quotes" />);
+    await user.click(await screen.findByLabelText('Selecionar q-7'));
+    await user.click(screen.getByRole('button', { name: /Baixar 1 PDF/i }));
+    await waitFor(() => expect(estado.baixados).toHaveLength(1), { timeout: 4000 });
+    expect(estado.baixados[0].options).toEqual(esperado('quote', { mode: 'days', days: 7 }));
+  });
+});
+
+// ── Data fixa de validade (quote_validity_date) ───────────────────────────────────────────
+// A R19 avisa do vencimento pela data fixa; o PDF das listas a ignorava e dizia "Válido por
+// N dias" do mesmo orçamento.
+describe('Listas — orçamento com data fixa sai com "Válido até" a data', () => {
+  beforeEach(() => {
+    estado.linhas = [linha('q-fixa', 'ORÇ-00109', 'draft')];
+    const d = dadosDoPdf('ORÇ-00109', 7);
+    estado.pdfPorId['q-fixa'] = { ...d, serviceOrder: { ...d.serviceOrder, quote_validity_date: '2026-10-10' } };
+  });
+
+  it('Baixar direto', async () => {
+    montar(<QuoteList />);
+    await clicarNoMenu('ORÇ-00109', /Baixar Orçamento/i);
+    await waitFor(() => expect(estado.baixados).toHaveLength(1));
+    expect(estado.baixados[0].options.validity).toEqual({ mode: 'date', date: '2026-10-10', days: 7 });
+    expect(documento(estado.baixados[0])).toContain('Válido até 10/10/2026');
+  });
+
+  it('o diálogo recebe a data fixa', async () => {
+    montar(<QuoteList />);
+    await clicarNoMenu('ORÇ-00109', /Imprimir Orçamento/i);
+    await waitFor(() => expect(estado.dialogo?.open).toBe(true));
+    expect(estado.dialogo?.initialValidityDate).toBe('2026-10-10');
   });
 });

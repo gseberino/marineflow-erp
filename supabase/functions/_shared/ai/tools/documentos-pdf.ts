@@ -27,10 +27,9 @@ import {
   buildPDFFilename,
   esc,
   fmtCurrency,
+  opcoesPadraoDoDocumento,
   type PDFOptions,
-  resolvePdfOptions,
   tituloParaImpressao,
-  validadeDoOrcamento,
 } from "../../pdf/documento.ts";
 import { renderizarPdf } from "../../pdf/renderizar.ts";
 
@@ -186,18 +185,12 @@ export const documentoPdfTools: ToolDef[] = [
       }
       const tipoDoc = documentTypeFor(ordem.status);
       dados.documentType = tipoDoc;
-      const opcoes: PDFOptions = {
-        ...resolvePdfOptions(ctx.settings, tipoDoc),
-        // Sempre a via do CLIENTE, com valores (decisão do dono): a via de execução do técnico
-        // é escolha por documento, nunca padrão — mas se um dia um padrão gravado a trouxer,
-        // o dono receberia uma OS sem preço com a legenda dizendo o total.
-        hideFinancials: false,
-        // Validade: a do próprio orçamento; sem ela, o padrão da empresa — pela mesma função
-        // do formulário, do envio pela tela e do portal (validadeDoOrcamento).
-        ...(tipoDoc === "quote"
-          ? { validity: validadeDoOrcamento(dados.serviceOrder.quote_validity_days, ctx.settings) }
-          : {}),
-      };
+      // O padrão da empresa, sempre a via do CLIENTE, com valores (decisão do dono: a via de
+      // execução do técnico é escolha por documento, nunca padrão — se um padrão gravado a
+      // trouxesse, o dono receberia uma OS sem preço com a legenda dizendo o total), e a
+      // validade do próprio orçamento — data fixa, senão dias, senão os da empresa. É a mesma
+      // função das listas e do envio pela tela (opcoesPadraoDoDocumento).
+      const opcoes: PDFOptions = opcoesPadraoDoDocumento(ctx.settings, tipoDoc, dados.serviceOrder);
       const html = buildOrderHTML(dados, opcoes).replace(
         /<title>[^<]*<\/title>/,
         `<title>${esc(tituloParaImpressao(dados, opcoes))}</title>`,

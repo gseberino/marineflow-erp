@@ -148,4 +148,19 @@ describe('PublicServiceOrderView — smoke de render', () => {
       ORDEM.quote_validity_days = original;
     }
   });
+
+  // Com data fixa a tela do portal mostra "Validade: dd/mm/aaaa" e a R19 avisa no dia
+  // seguinte a ela; o PDF baixado dizia "Válido por 7 dias" (até 26/09/2026).
+  it('com data fixa, o PDF sai com "Válido até" a MESMA data da tela', async () => {
+    ORDEM.quote_validity_date = '2026-08-20';
+    try {
+      abrir();
+      fireEvent.click(await screen.findByRole('button', { name: /Baixar PDF/i }));
+      await waitFor(() => expect(baixados).toHaveLength(1));
+      expect(baixados[0].opcoes.validity).toEqual({ mode: 'date', date: '2026-08-20', days: 7 });
+      expect(buildHTMLDocument(baixados[0].dados, baixados[0].opcoes)).toContain('Válido até 20/08/2026');
+    } finally {
+      delete ORDEM.quote_validity_date;
+    }
+  });
 });

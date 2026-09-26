@@ -21,7 +21,7 @@ import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
-import { downloadPDF, DEFAULT_PDF_OPTIONS, validadeDoOrcamento, type PDFOptions } from '@/lib/pdf-generator';
+import { downloadPDF, opcoesPadraoDoDocumento, type PDFOptions } from '@/lib/pdf-generator';
 import { printPDF } from '@/lib/pdf-print';
 import type { PDFAction } from '@/components/PDFOptionsDialog';
 import { normalizePhoneE164 } from '@/lib/masks';
@@ -97,8 +97,8 @@ export default function ServiceOrderList() {
   const [historyTarget, setHistoryTarget] = useState<{ id: string; number: string } | null>(null);
   const [whatsAppTarget, setWhatsAppTarget] = useState<SendViaWhatsAppTarget | null>(null);
   const { data: pdfData } = usePDFData(pdfTarget?.id);
-  // Padrão da empresa para a validade do orçamento (validadeDoOrcamento), usado quando o
-  // orçamento não tem a sua.
+  // Padrão da empresa: as opções do documento (pdf_options_<tipo>) e a validade do orçamento
+  // quando ele não tem a sua — o mesmo ponto de partida do diálogo (opcoesPadraoDoDocumento).
   const { data: appSettings } = useAppSettings();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDownloading, setBulkDownloading] = useState(false);
@@ -134,14 +134,10 @@ export default function ServiceOrderList() {
     try {
       const data = await fetchPDFData(soId);
       if (!data) throw new Error('Dados não encontrados');
-      await downloadPDF({ ...data, documentType: type }, {
-        ...DEFAULT_PDF_OPTIONS,
-        // Sem diálogo, ninguém escolhe a validade: vai a do orçamento (senão a da empresa).
-        // Sem esta linha o gerador caía no literal e o arquivo dizia "Válido por 15 dias".
-        ...(type === 'quote'
-          ? { validity: validadeDoOrcamento(data.serviceOrder?.quote_validity_days, appSettings) }
-          : {}),
-      });
+      // Sem diálogo: o padrão da empresa e a validade do orçamento, o mesmo ponto de partida
+      // do diálogo. Partia de DEFAULT_PDF_OPTIONS (fábrica), e o Baixar da lista saía diferente
+      // do Baixar do formulário sempre que o padrão da empresa desligava alguma opção.
+      await downloadPDF({ ...data, documentType: type }, opcoesPadraoDoDocumento(appSettings, type, data.serviceOrder));
       toast.success('PDF baixado com sucesso');
     } catch (e: any) {
       console.error('PDF download failed:', e);
@@ -160,7 +156,7 @@ export default function ServiceOrderList() {
       try {
         const data = await fetchPDFData(ids[i]);
         if (!data) throw new Error('Dados não encontrados');
-        await downloadPDF({ ...data, documentType: 'service_order' }, DEFAULT_PDF_OPTIONS);
+        await downloadPDF({ ...data, documentType: 'service_order' }, opcoesPadraoDoDocumento(appSettings, 'service_order', data.serviceOrder));
         success++;
         if (i < ids.length - 1) await new Promise(r => setTimeout(r, 800));
       } catch (e: any) {
@@ -736,7 +732,8 @@ export default function ServiceOrderList() {
         onOpenChange={v => { if (!v) setPdfTarget(null); }}
         documentType={pdfTarget?.type || 'quote'}
         hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
-        initialValidityDays={validadeDoOrcamento(pdfData?.serviceOrder?.quote_validity_days, appSettings).days}
+        initialValidityDays={pdfData?.serviceOrder?.quote_validity_days}
+        initialValidityDate={pdfData?.serviceOrder?.quote_validity_date}
         onGenerate={handleGeneratePDF}
       />
 

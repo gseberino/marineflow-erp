@@ -12,7 +12,7 @@ import { useServiceOrders, useDuplicateServiceOrder, useUpdateServiceOrderStatus
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
-import { downloadPDF, DEFAULT_PDF_OPTIONS, validadeDoOrcamento, type PDFOptions } from '@/lib/pdf-generator';
+import { downloadPDF, opcoesPadraoDoDocumento, type PDFOptions } from '@/lib/pdf-generator';
 import { printPDF } from '@/lib/pdf-print';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
@@ -128,8 +128,8 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const pdfGenCountRef = useRef(0);
   const { data: pdfData, error: pdfError } = usePDFData(pdfTarget?.id);
-  // Padrão da empresa para a validade do orçamento (validadeDoOrcamento), usado quando o
-  // orçamento não tem a sua.
+  // Padrão da empresa: as opções do documento (pdf_options_<tipo>) e a validade do orçamento
+  // quando ele não tem a sua — o mesmo ponto de partida do diálogo (opcoesPadraoDoDocumento).
   const { data: appSettings } = useAppSettings();
 
   const { filters, toggle, setField, clearAll, activeCount } = useMultiFilter(
@@ -304,14 +304,10 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
       try {
         const d = await fetchPDFData(ids[i]);
         if (!d) throw new Error('Dados não encontrados');
-        await downloadPDF({ ...d, documentType: isOrders ? 'service_order' : 'quote' }, {
-          ...DEFAULT_PDF_OPTIONS,
-          // Lote não tem diálogo: cada orçamento sai com a validade DELE (senão a da empresa).
-          // Sem esta linha o gerador caía no literal e todos diziam "Válido por 15 dias".
-          ...(isOrders
-            ? {}
-            : { validity: validadeDoOrcamento(d.serviceOrder?.quote_validity_days, appSettings) }),
-        });
+        // Lote não tem diálogo: o padrão da empresa e, em cada orçamento, a validade DELE —
+        // o mesmo ponto de partida do diálogo (antes, DEFAULT_PDF_OPTIONS de fábrica).
+        const tipo = isOrders ? 'service_order' : 'quote';
+        await downloadPDF({ ...d, documentType: tipo }, opcoesPadraoDoDocumento(appSettings, tipo, d.serviceOrder));
         ok++;
         if (i < ids.length - 1) await new Promise((r) => setTimeout(r, 800));
       } catch (e) {
@@ -786,7 +782,8 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
         onOpenChange={(v) => { if (!v) setPdfTarget(null); }}
         documentType={pdfTarget?.type || 'quote'}
         hasProductImages={pdfData?.parts?.some((p: { image_url?: string | null }) => !!p.image_url) ?? false}
-        initialValidityDays={validadeDoOrcamento(pdfData?.serviceOrder?.quote_validity_days, appSettings).days}
+        initialValidityDays={pdfData?.serviceOrder?.quote_validity_days}
+        initialValidityDate={pdfData?.serviceOrder?.quote_validity_date}
         onGenerate={handleGeneratePDF}
       />
       <WhatsAppSendHistoryDialog

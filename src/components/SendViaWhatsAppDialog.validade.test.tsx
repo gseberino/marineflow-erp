@@ -107,4 +107,14 @@ describe('Enviar via WhatsApp — validade no PDF anexado', () => {
     expect(envio.pdfOptions.validity).toBeUndefined();
     expect(documentoGerado(envio)).not.toContain('Válido por');
   });
+
+  // A R19 avisa do vencimento pela data fixa (quote_validity_date); o PDF anexado dizia
+  // "Válido por 7 dias (até 01/10)" do mesmo orçamento (até 26/09/2026).
+  it('orçamento com data fixa sai com "Válido até" a data — a mesma da R19', async () => {
+    estado.pdfData = { ...ORCAMENTO, serviceOrder: { ...ORCAMENTO.serviceOrder, quote_validity_date: '2026-10-10' } };
+    const envio = await enviarPeloDialogo(orcamentoAlvo);
+    expect(envio.pdfOptions.validity).toEqual({ mode: 'date', date: '2026-10-10', days: 7 });
+    expect(documentoGerado(envio)).toContain('Válido até 10/10/2026');
+    expect(documentoGerado(envio)).not.toContain('Válido por');
+  });
 });
