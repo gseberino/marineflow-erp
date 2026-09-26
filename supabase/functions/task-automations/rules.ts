@@ -2,8 +2,8 @@
 // Cada regra sabe (a) achar entidades em condição e (b) dizer se a condição
 // de uma tarefa viva já se resolveu. Dedupe via automation_key (índice único
 // parcial agenda_tasks_automation_key_live). Plano: plans/marineflow-agenda-tarefas.md §6.
-import { ultimoDiaDaValidade } from '../_shared/pdf/documento.ts';
-import { diaBR } from '../_shared/pdf/datas.ts';
+import { ultimoDiaDaValidade, validadeDoOrcamento } from '../_shared/pdf/documento.ts';
+import { diaBR, somarDiasAoDia } from '../_shared/pdf/datas.ts';
 
 export interface RuleCandidate {
   automation_key: string;
@@ -813,6 +813,60 @@ export function vencimentoDoOrcamento(
   return diaBR(agora) > fim ? fim : null;
 }
 
+/** Dias de calendário de `de` até `ate` (aaaa-mm-dd), sem fuso. */
+const diasEntre = (de: string, ate: string) => {
+  const utc = (dia: string) => {
+    const [a, m, d] = dia.slice(0, 10).split('-').map(Number);
+    return Date.UTC(a, m - 1, d);
+  };
+  return Math.round((utc(ate) - utc(de)) / 86_400_000);
+};
+
+/**
+ * A nota da tarefa R19, com a conta da renovação já feita.
+ *
+ * "Aumente a validade" sozinho induz ao erro: a validade conta da EMISSÃO (D13), não do dia
+ * em que se mexe nela. Um orçamento de 3 dias emitido em 24/09 e renovado em 28/09 com
+ * "3 dias" continua vencido (vale até 27/09). A nota diz a data de emissão e dá o número
+ * certo para valer mais o mesmo prazo a partir de hoje: até 01/10, ponha 7 dias.
+ *
+ * Com data fixa (quote_validity_date) os dias não mandam — ultimoDiaDaValidade usa a data —,
+ * então a nota diz para trocar a data em vez de dar uma conta que não teria efeito.
+ */
+export function notaDoVencimento(
+  orcamento: {
+    created_at?: string | null;
+    quote_validity_date?: string | null;
+    quote_validity_days?: unknown;
+    grand_total?: unknown;
+  },
+  settings: Record<string, unknown>,
+  agora: Date = new Date(),
+): string {
+  const fim = ultimoDiaDaValidade(orcamento, settings);
+  const abertura = `Valia até ${fim ? fmtDate(fim) : '—'} (${fmtBRL(Number(orcamento.grand_total))}). ` +
+    'O orçamento NÃO foi rejeitado. ';
+  const fecho = 'Se o cliente desistiu, marque como rejeitado. Nada foi enviado ao cliente.';
+
+  const dataFixa = /^\d{4}-\d{2}-\d{2}$/.test(String(orcamento.quote_validity_date ?? '').slice(0, 10));
+  const emitidoEm = orcamento.created_at ? new Date(orcamento.created_at) : null;
+  if (dataFixa || !emitidoEm || Number.isNaN(emitidoEm.getTime())) {
+    return abertura + 'A validade deste orçamento é uma data fixa: para renovar, troque essa data ' +
+      '(mudar os dias não a altera); esta tarefa fecha sozinha. ' + fecho;
+  }
+
+  const emissao = diaBR(emitidoEm);
+  const hoje = diaBR(agora);
+  const prazo = validadeDoOrcamento(orcamento.quote_validity_days, settings).days;
+  const alvo = somarDiasAoDia(hoje, prazo);
+  const dd = (dia: string) => fmtDate(dia).slice(0, 5);
+  return abertura +
+    'Para renovar, aumente a validade no orçamento (esta tarefa fecha sozinha). ' +
+    `A validade conta da emissão (${dd(emissao)}), não de hoje: para valer até ${dd(alvo)} ` +
+    `(${prazo} ${prazo === 1 ? 'dia' : 'dias'} a partir de hoje, ${dd(hoje)}), ` +
+    `ponha ${diasEntre(emissao, alvo)} dias. ` + fecho;
+}
+
 const r19: Rule = {
   id: 'r19',
   label: 'Orçamento vencido: renovar ou rejeitar?',
@@ -846,9 +900,7 @@ const r19: Rule = {
         related_entity_type: 'service_order',
         related_entity_id: o.id,
         client_id: o.client_id,
-        notes: `Valia até ${fmtDate(fim)} (${fmtBRL(Number(o.grand_total))}). O orçamento NÃO foi rejeitado: ` +
-          'para renovar, aumente a validade no orçamento (esta tarefa fecha sozinha); ' +
-          'se o cliente desistiu, marque como rejeitado. Nada foi enviado ao cliente.',
+        notes: notaDoVencimento(o, settings, agora),
       }];
     });
   },

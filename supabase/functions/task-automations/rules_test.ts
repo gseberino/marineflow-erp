@@ -2,7 +2,7 @@ import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, entityIdFromKey, keyOf, fmtBRL, fmtDate, dueAt,
-  isManualDismissal, dismissCooldownDays, businessDaysBetween, vencimentoDoOrcamento,
+  isManualDismissal, dismissCooldownDays, businessDaysBetween, vencimentoDoOrcamento, notaDoVencimento,
 } from "./rules.ts";
 
 Deno.test("isManualDismissal: conclusão MANUAL recente bloqueia recriação", () => {
@@ -422,9 +422,55 @@ Deno.test("find r19: o aviso sai à meia-noite de Brasília, não às 21h (FakeT
     assertEquals(t.automation_key, "r19:quote:x:2026-09-22");
     // prazo às 08h do dia de Brasília (11h UTC), não do dia UTC
     assertEquals(t.due_at, "2026-09-23T11:00:00Z");
+    // a nota conta da emissão pelo dia de Brasília (19/09), não pelo UTC (20/09): para valer
+    // mais 3 dias a partir de 23/09 (até 26/09), são 7 dias contados de 19/09
+    assertEquals(
+      t.notes!.includes("A validade conta da emissão (19/09), não de hoje: para valer até 26/09 " +
+        "(3 dias a partir de hoje, 23/09), ponha 7 dias."),
+      true,
+      t.notes ?? "",
+    );
   } finally {
     relogio.restore();
   }
+});
+
+// A nota da R19 mandava "aumentar a validade" sem dizer que ela conta da EMISSÃO (D13). Quem
+// renovasse um orçamento de 3 dias emitido em 24/09 pondo "3 dias" em 28/09 o deixaria vencido
+// do mesmo jeito (vale até 27/09), e a tarefa não fecharia. A nota agora traz a conta pronta.
+Deno.test("notaDoVencimento: diz a emissão e dá o número de dias que renova de verdade", () => {
+  const o = { created_at: "2026-09-24T15:00:00Z", quote_validity_days: 3, grand_total: 12500 };
+  const agora = new Date("2026-09-28T15:00:00Z"); // 28/09 em Brasília; venceu em 27/09
+  const nota = notaDoVencimento(o, {}, agora);
+  assertEquals(
+    nota,
+    "Valia até 27/09/2026 (" + fmtBRL(12500) + "). O orçamento NÃO foi rejeitado. " +
+      "Para renovar, aumente a validade no orçamento (esta tarefa fecha sozinha). " +
+      "A validade conta da emissão (24/09), não de hoje: para valer até 01/10 " +
+      "(3 dias a partir de hoje, 28/09), ponha 7 dias. " +
+      "Se o cliente desistiu, marque como rejeitado. Nada foi enviado ao cliente.",
+  );
+  // seguir a nota renova MESMO: com 7 dias o último dia é 01/10 e deixa de estar vencido
+  const renovado = { ...o, quote_validity_days: 7 };
+  assertEquals(vencimentoDoOrcamento(renovado, {}, agora), null);
+  assertEquals(vencimentoDoOrcamento(renovado, {}, new Date("2026-10-02T15:00:00Z")), "2026-10-01");
+});
+
+Deno.test("notaDoVencimento: sem validade própria usa a da empresa; vira mês e ano", () => {
+  // Emitido 30/12/2026 sem validade própria; empresa = 5 → valia até 04/01/2027.
+  const o = { created_at: "2026-12-30T15:00:00Z", quote_validity_days: null, grand_total: 100 };
+  const nota = notaDoVencimento(o, { quote_validity_days: "5" }, new Date("2027-01-06T15:00:00Z"));
+  assertEquals(nota.startsWith("Valia até 04/01/2027 "), true, nota);
+  // 06/01 + 5 = 11/01; de 30/12 até 11/01 são 12 dias
+  assertEquals(nota.includes("emissão (30/12), não de hoje: para valer até 11/01 (5 dias a partir de hoje, 06/01), ponha 12 dias."), true, nota);
+});
+
+Deno.test("notaDoVencimento: com data fixa, manda trocar a data (dias não a alteram)", () => {
+  const o = { created_at: "2026-09-10T15:00:00Z", quote_validity_days: 90, quote_validity_date: "2026-09-20", grand_total: 1 };
+  const nota = notaDoVencimento(o, {}, new Date("2026-09-26T15:00:00Z"));
+  assertEquals(nota.startsWith("Valia até 20/09/2026 "), true, nota);
+  assertEquals(nota.includes("data fixa"), true, nota);
+  assertEquals(nota.includes("ponha"), false, nota);
 });
 
 Deno.test("find r19: renovar e vencer de novo gera chave nova", async () => {
