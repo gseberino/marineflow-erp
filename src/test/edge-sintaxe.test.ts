@@ -72,7 +72,10 @@ describe('edge functions parseiam', () => {
     expect(quebrados, `Edge function que não parseia (o deploy vai falhar):\n${quebrados.join('\n')}\n\n` +
       'Erro comum neste repo: acento grave dentro de prompt.ts, que é um template literal\n' +
       'inteiro — a crase fecha a string no meio e derruba o módulo.').toEqual([]);
-  });
+    // Prazo próprio: a varredura passa pelo compilador centenas de arquivos. Sozinha leva ~4,3 s;
+    // na suíte completa (vários workers disputando CPU) passou dos 5 s padrão do vitest em
+    // 26/09/2026 (5.060 e 5.631 ms) e deixava a suíte vermelha sem erro de sintaxe nenhum.
+  }, 60_000);
 
   // Uma varredura que não sabe acusar nada é um teste que sempre passa.
   it('a varredura sabe reconhecer código quebrado', () => {
