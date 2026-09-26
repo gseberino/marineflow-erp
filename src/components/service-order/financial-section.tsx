@@ -641,6 +641,6 @@ export function FinancialSection(props: FinancialSectionProps) {
             </div>
           </div>
         </CollapsibleContent>
-      </Collapsible>
+      </Collapsible>
   );
 }
