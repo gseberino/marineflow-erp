@@ -99,15 +99,35 @@ describe('uma montagem só para o PDF', () => {
    * A QUARTA ponta (25/09/2026): o assistente do WhatsApp manda o PDF pela tool
    * send_document_pdf_to_self. Ele roda numa Edge Function e é o lugar mais fácil de nascer
    * uma cópia "só para o servidor" — que divergiria da tela no primeiro ajuste.
+   *
+   * Desde 26/09/2026 o caminho do servidor mora em _shared/pdf/gerar-e-guardar.ts, porque o
+   * assistente passou a mandar o PDF também ao CLIENTE (send_service_order_link, em
+   * whatsapp.ts). A guarda segue o código: gerar-e-guardar.ts usa a montagem e o desenho da
+   * tela, e as duas tools usam gerar-e-guardar.ts — nenhuma monta o documento por conta própria.
    */
   it('o assistente usa a montagem e o desenho únicos', () => {
-    const tool = readFileSync(
-      join(process.cwd(), 'supabase', 'functions', '_shared', 'ai', 'tools', 'documentos-pdf.ts'), 'utf8',
-    );
-    expect(tool).toMatch(/import \{ carregarPDFData \} from "\.\.\/\.\.\/pdf\/dados\.ts"/);
-    expect(tool).toMatch(/from "\.\.\/\.\.\/pdf\/documento\.ts"/);
-    expect(tool).not.toMatch(/PDFData = \{/);
-    expect(tool).not.toMatch(/\.from\("service_orders"\)\s*\.select\([^)]*clients\(/);
+    const pastaPdf = join(process.cwd(), 'supabase', 'functions', '_shared', 'pdf');
+    const pastaTools = join(process.cwd(), 'supabase', 'functions', '_shared', 'ai', 'tools');
+    const comum = readFileSync(join(pastaPdf, 'gerar-e-guardar.ts'), 'utf8');
+    expect(comum).toMatch(/import \{[^}]*\bcarregarPDFData\b[^}]*\} from "\.\/dados\.ts"/);
+    expect(comum).toMatch(/import \{[^}]*\bbuildOrderHTML\b[^}]*\} from "\.\/documento\.ts"/);
+    expect(comum).toMatch(/carregarPDFData\(/);
+    expect(comum).toMatch(/buildOrderHTML\(/);
+    expect(comum).not.toMatch(/PDFData = \{/);
+    expect(comum).not.toMatch(/\.from\("service_orders"\)/);
+
+    for (const nome of ['documentos-pdf.ts', 'whatsapp.ts']) {
+      const tool = readFileSync(join(pastaTools, nome), 'utf8');
+      // Usa a função comum...
+      expect(tool, nome).toMatch(/import \{[^}]*\bmontarDocumentoDaOrdem\b[^}]*\} from "\.\.\/\.\.\/pdf\/gerar-e-guardar\.ts"/);
+      expect(tool, nome).toMatch(/montarDocumentoDaOrdem\(admin/);
+      // ...e não monta o documento por conta própria: nem PDFData, nem a montagem ou o desenho
+      // chamados direto (seria um segundo caminho ao lado do comum).
+      expect(tool, nome).not.toMatch(/PDFData = \{/);
+      expect(tool, nome).not.toMatch(/\bcarregarPDFData\b/);
+      expect(tool, nome).not.toMatch(/\bbuildOrderHTML\b/);
+      expect(tool, nome).not.toMatch(/\.from\("service_orders"\)\s*\.select\([^)]*clients\(/);
+    }
   });
 
   it('nenhuma edge monta PDFData por conta própria', () => {

@@ -16,8 +16,14 @@ Deno.test("ação sensível pede confirmação por padrão (sem chave)", () => {
 
 Deno.test("ação sensível liberável com 'auto' executa direto", () => {
   // send_service_order_link NÃO é trava permanente — o dono pode liberar (Confiança Graduada).
+  // Desde 26/09/2026, só no formato 'link': o padrão virou o PDF anexado, que trava por
+  // argumento (NEVER_AUTONOMOUS_WHEN). Os casos do PDF estão em tools/envio-ao-cliente_test.ts.
   const s = { [autonomyKey("send_service_order_link")]: "auto" };
-  assertEquals(isAutonomyGranted("send_service_order_link", "high", s), true);
+  assertEquals(isAutonomyGranted("send_service_order_link", "high", s, { formato: "link" }), true);
+  assertEquals(isAutonomyGranted("send_service_order_link", "high", s), false, "sem formato = PDF = pede confirmação");
+  // Outra ação liberável, sem trava por argumento, continua como sempre.
+  const f = { [autonomyKey("send_supplier_quote_request")]: "auto" };
+  assertEquals(isAutonomyGranted("send_supplier_quote_request", "high", f), true);
 });
 
 Deno.test("valor diferente de 'auto' mantém a confirmação", () => {

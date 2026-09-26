@@ -375,11 +375,25 @@ Deno.test("envio sem resposta (tempo esgotado): a tool libera a chave para o pr�
   assertEquals(amb.chamadas.removidos, amb.chamadas.upload);
 });
 
-Deno.test("envio que falhou na Evolution também libera a chave", async () => {
-  const amb = montarAmbiente({ respostaEnvio: () => new Response(JSON.stringify({ error: "Connection Closed" }), { status: 502 }) });
-  await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+Deno.test("envio sem resposta por erro de rede: também libera a chave", async () => {
+  const amb = montarAmbiente({ respostaEnvio: () => { throw new TypeError("error sending request: connection reset"); } });
+  const r: any = await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+  assertStringIncludes(r.error, "connection reset");
   assertEquals(amb.chamadas.liberadas, [amb.chamadas.envio[0].corpo.dedupe_key]);
 });
+
+// Revisão adversarial de 26/09/2026: liberar em QUALQUER falha apagava a reserva de um envio
+// anterior já concluído. 400/401/500 a edge devolve ANTES de reservar (a chave, se existe, é
+// de outro envio que deu certo) e no 502 ela mesma já liberou. Só o "sem resposta" libera.
+for (const status of [400, 401, 500, 502]) {
+  Deno.test(`resposta definitiva HTTP ${status}: a tool NÃO mexe na chave`, async () => {
+    const amb = montarAmbiente({ respostaEnvio: () => new Response(JSON.stringify({ error: `falhou ${status}` }), { status }) });
+    const r: any = await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+    assertStringIncludes(r.error, `falhou ${status}`);
+    assertEquals(amb.chamadas.liberadas, []);
+    assertEquals(amb.chamadas.removidos, amb.chamadas.upload, "o arquivo é apagado do mesmo jeito");
+  });
+}
 
 Deno.test("envio que deu certo NÃO libera a chave", async () => {
   const amb = montarAmbiente();
@@ -398,8 +412,20 @@ Deno.test("sempre a via do cliente, com valores, mesmo com padrão gravado pedin
 });
 
 Deno.test("modo de teste do WhatsApp ligado: a tool não diz que chegou para quem pediu", async () => {
-  const amb = montarAmbiente({ settings: { wa_test_mode: "true" } });
+  const amb = montarAmbiente({ settings: { wa_test_mode: "true", wa_test_number: "5547988887777" } });
   const r: any = await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
   assertStringIncludes(r.enviado_para, "TESTE");
   assertStringIncludes(r.observacao, "número de teste");
+});
+
+// A edge só desvia com o modo ligado E um número de teste. Ligado sem número, o arquivo chega a
+// quem pediu — a tool dizia "foi para o número de TESTE" e o dono ia procurar no lugar errado.
+Deno.test("modo ligado sem número de teste: a edge não desvia, e a tool diz que chegou a quem pediu", async () => {
+  for (const settings of [{ wa_test_mode: "true" }, { wa_test_mode: "true", wa_test_number: "" }] as Record<string, string>[]) {
+    const amb = montarAmbiente({ settings });
+    const r: any = await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+    assertEquals(r.ok, true, JSON.stringify(r));
+    assertEquals(r.enviado_para, "o WhatsApp de quem pediu", JSON.stringify(settings));
+    assert(!r.observacao.includes("teste"), r.observacao);
+  }
 });

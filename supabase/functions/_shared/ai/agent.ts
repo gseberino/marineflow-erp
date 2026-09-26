@@ -1,4 +1,5 @@
 import { resumirPedido } from "./tools/caixa.ts";
+import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
 import {
   callClaude,
   ClaudeApiError,
@@ -10,6 +11,7 @@ import {
   type ClaudeUsage,
 } from "./anthropic.ts";
 import { allTools, type ToolCtx, type ToolDef } from "./tools/index.ts";
+import { CHAVE_DO_SOLICITANTE, type Solicitante } from "./tools/registry.ts";
 import { isAutonomyGranted } from "./autonomy-policy.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
 import { PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from "./perfil-operacao.ts";
@@ -124,7 +126,8 @@ const TOOL_LABELS_PT: Record<string, string> = {
   reopen_service_order: "Reabrir OS",
   send_whatsapp_message: "Enviar WhatsApp a cliente",
   send_collection_reminder: "Enviar lembrete de cobrança",
-  send_service_order_link: "Enviar link da OS ao cliente",
+  // Desde 26/09/2026 o padrão é o PDF anexado; o formato vai no resumo da confirmação.
+  send_service_order_link: "Enviar orçamento/OS ao cliente (WhatsApp)",
   schedule_whatsapp_message: "Agendar WhatsApp a cliente",
   followup_send_touch: "Enviar toque de acompanhamento (IA acompanha)",
   criar_missao_acompanhamento: "Deixar a IA acompanhar",
@@ -286,6 +289,15 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
   }
+  // Envio ao cliente: o "sim <PIN>" tem de ser sobre QUEM recebe, em que número, qual
+  // documento, quanto e em que formato (o padrão é o PDF com preço e PIX). O resumo mora ao
+  // lado da tool (tools/whatsapp.ts), que lê o destino do mesmo cadastro.
+  if (toolName === "send_service_order_link") {
+    try {
+      const r = await resumirEnvioAoCliente(admin, args);
+      if (r) return r;
+    } catch { /* cai no resumo genérico */ }
+  }
   // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista
   // do lote, os passos da aprovação) — os args crus não bastam. Resolve o conteúdo real.
   if (toolName === "send_bulk_collection_reminders") {
@@ -354,6 +366,28 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
     lines.push(`- ${label}: ${value}`);
   }
   return lines.join("\n");
+}
+
+const ROTULO_DO_CARGO: Record<string, string> = {
+  admin: "Administrador",
+  technician: "Técnico",
+  financial: "Financeiro",
+  seller: "Vendedor",
+  external_seller: "Vendedor Externo",
+};
+
+/**
+ * Quem está pedindo, para gravar na pendência (ToolDef.gravarSolicitante). O cargo é o do ctx
+ * — o autenticado neste turno, nunca um argumento do modelo. O nome é só para o resumo:
+ * best-effort, falhar a leitura não impede a pendência.
+ */
+async function quemPede(ctx: ToolCtx): Promise<Solicitante> {
+  let nome: string | null = null;
+  try {
+    const { data } = await ctx.admin.from("app_users").select("full_name").eq("id", ctx.userId).maybeSingle();
+    if (typeof data?.full_name === "string" && data.full_name.trim()) nome = data.full_name.trim();
+  } catch { /* sem nome: o cargo é o que a execução revalida */ }
+  return { user_id: ctx.userId, nome, cargo: ctx.userRole };
 }
 
 function summarizeForAudit(result: unknown): string {
@@ -634,8 +668,12 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
 
       // Autonomia concedida pelo dono para ESTA ação (Onda 2). Ações de dinheiro/destrutivas
       // nunca entram aqui — ver NEVER_AUTONOMOUS. Pela rede também não: a autonomia foi dada
-      // pensando no modelo que VÊ a ferramenta, não no que a chama de memória do prompt.
-      const autonomo = toolDef && !foraDoPerfil ? isAutonomyGranted(tc.name, effectiveRisk, params.toolCtx.settings) : false;
+      // pensando no modelo que VÊ a ferramenta, não no que a chama de memória do prompt. Os
+      // argumentos vão junto porque há trava por argumento: o envio do PDF ao cliente nunca roda
+      // sozinho (NEVER_AUTONOMOUS_WHEN).
+      const autonomo = toolDef && !foraDoPerfil
+        ? isAutonomyGranted(tc.name, effectiveRisk, params.toolCtx.settings, tc.input as Record<string, unknown>)
+        : false;
 
       if (!toolDef) {
         toolResult = { error: `Tool desconhecida: ${tc.name}` };
@@ -647,31 +685,56 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
           instruction: "Nada foi executado. Corrija os argumentos seguindo o input_schema acima e chame a ferramenta de novo.",
         };
       } else if (effectiveRisk !== "low" && !autonomo) {
-        // Interceptação por risco (Fase 3): não executa — grava a pendência e devolve
-        // um tool_result sintético. A tool real só roda via confirm_action, sem LLM.
-        const { data: pending, error: pendingErr } = await params.toolCtx.admin
-          .from("ai_operator_pending_actions")
-          .insert({
-            session_id: params.sessionId,
-            requested_by_user_id: params.toolCtx.userId,
-            action_name: tc.name,
-            risk_level: effectiveRisk,
-            title: humanizeToolNamePt(tc.name),
-            summary: await buildPendingSummary(params.toolCtx.admin, tc.name, tc.input as Record<string, unknown>),
-            payload: tc.input,
-            status: "pending",
-            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-          })
-          .select("id, title, summary, risk_level")
-          .single();
-
-        if (pendingErr || !pending) {
-          toolResult = { error: `Falha ao registrar pendência: ${pendingErr?.message || "erro desconhecido"}` };
-        } else {
-          toolResult = { pending: true, pending_action_id: pending.id, instruction: "Ação registrada para aprovação. Aguardando decisão do usuário — não repita a chamada." };
-          createdPendingProposal = { pending_action_id: pending.id, title: pending.title, summary_markdown: pending.summary, risk_level: pending.risk_level };
+        // Recusa barata ANTES de a pendência nascer (ToolDef.preValidar): o dono não vê no
+        // sino — nem aprova com PIN — um pedido que a execução vai recusar de qualquer jeito.
+        let recusa: ({ error: string } & Record<string, unknown>) | null = null;
+        try {
+          recusa = toolDef.preValidar?.(tc.input, params.toolCtx) ?? null;
+        } catch (e: any) {
+          recusa = { error: `Falha ao validar o pedido: ${e?.message || "erro desconhecido"}` };
         }
-        await writeAudit(params.toolCtx, params.sessionId, params.channel, { eventType: `pending_action:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
+        if (recusa) {
+          toolResult = recusa;
+          await writeAudit(params.toolCtx, params.sessionId, params.channel, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
+        } else {
+          // Interceptação por risco (Fase 3): não executa — grava a pendência e devolve
+          // um tool_result sintético. A tool real só roda via confirm_action, sem LLM.
+          //
+          // Quem pediu vai junto quando a tool pede (ToolDef.gravarSolicitante): a pendência é
+          // executada com o ctx de quem CONFIRMA, e um admin pode aprovar a de outro — a tool
+          // revalida com o cargo de quem pediu. Grava POR CIMA de qualquer `_solicitante` que
+          // tenha vindo nos argumentos do modelo, e o resumo é montado sem ele.
+          const entrada = { ...((tc.input ?? {}) as Record<string, unknown>) };
+          const solicitante = toolDef.gravarSolicitante ? await quemPede(params.toolCtx) : null;
+          if (solicitante) delete entrada[CHAVE_DO_SOLICITANTE];
+          let resumo = await buildPendingSummary(params.toolCtx.admin, tc.name, solicitante ? entrada : tc.input as Record<string, unknown>);
+          if (solicitante) {
+            resumo += `\nPedido por: *${solicitante.nome || "—"}* (${ROTULO_DO_CARGO[solicitante.cargo] ?? solicitante.cargo})`;
+          }
+          const { data: pending, error: pendingErr } = await params.toolCtx.admin
+            .from("ai_operator_pending_actions")
+            .insert({
+              session_id: params.sessionId,
+              requested_by_user_id: params.toolCtx.userId,
+              action_name: tc.name,
+              risk_level: effectiveRisk,
+              title: humanizeToolNamePt(tc.name),
+              summary: resumo,
+              payload: solicitante ? { ...entrada, [CHAVE_DO_SOLICITANTE]: solicitante } : tc.input,
+              status: "pending",
+              expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            })
+            .select("id, title, summary, risk_level")
+            .single();
+
+          if (pendingErr || !pending) {
+            toolResult = { error: `Falha ao registrar pendência: ${pendingErr?.message || "erro desconhecido"}` };
+          } else {
+            toolResult = { pending: true, pending_action_id: pending.id, instruction: "Ação registrada para aprovação. Aguardando decisão do usuário — não repita a chamada." };
+            createdPendingProposal = { pending_action_id: pending.id, title: pending.title, summary_markdown: pending.summary, risk_level: pending.risk_level };
+          }
+          await writeAudit(params.toolCtx, params.sessionId, params.channel, { eventType: `pending_action:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
+        }
       } else {
         executou = true;
         try {

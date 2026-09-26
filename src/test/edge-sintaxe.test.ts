@@ -56,7 +56,10 @@ export function errosDeSintaxe(codigo: string, nome: string): string[] {
 }
 
 describe('edge functions parseiam', () => {
-  it('nenhum arquivo de supabase/functions tem erro de sintaxe', () => {
+  // Timeout explícito: a varredura transpila todos os arquivos de supabase/functions e passa dos
+  // 5 s padrão com a máquina ocupada (suíte completa em paralelo) — falhava por tempo, não por
+  // sintaxe.
+  it('nenhum arquivo de supabase/functions tem erro de sintaxe', { timeout: 60_000 }, () => {
     expect(fs.existsSync(PASTA), 'a pasta supabase/functions sumiu — a varredura ficaria cega').toBe(true);
     const arquivos = arquivosTs(PASTA);
     expect(arquivos.length, 'não achei arquivo nenhum para checar').toBeGreaterThan(50);
