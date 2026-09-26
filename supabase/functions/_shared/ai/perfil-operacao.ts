@@ -12,7 +12,8 @@
 // estavam escondidas pelo perfil, e o modelo, ao obedecer o prompt, recebia "Tool desconhecida"
 // — aconteceu em 25/09 com send_document_pdf_to_self ("me manda o PDF do orçamento"). Com a lista
 // no código, prompt-ferramentas_test.ts cruza prompt × perfil × SO_PELA_REDE e o descompasso
-// quebra o teste antes do deploy, não a conversa do dono. O banco guarda só o liga/desliga.
+// quebra o teste antes do deploy, não a conversa do dono. O banco guarda só o liga/desliga (a
+// chave velha continua lá, marcada SEM EFEITO, só para uma volta a versão antiga da edge).
 //
 // CUSTO DE ACRESCENTAR: cada tool daqui custa ~256 tokens por chamada, mas fica no prefixo em
 // cache (paga ~10% disso). O que NÃO pode é a lista variar por mensagem: o bloco de tools é o

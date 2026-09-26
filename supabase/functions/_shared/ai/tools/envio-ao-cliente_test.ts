@@ -4,6 +4,7 @@ import {
   CARGOS_DO_PDF_AO_CLIENTE,
   enviarDocumentoWhatsapp,
   formatoDoEnvio,
+  LIMITE_DA_MENSAGEM,
   mascararTelefone,
   resumirEnvioAoCliente,
   whatsappTools,
@@ -569,15 +570,87 @@ Deno.test("resumo mostra cliente, telefone mascarado, número, total e formato",
   assertStringIncludes(link!, "só o link");
   const cancelada = await resumirEnvioAoCliente(amb.admin, { service_order_id: CANCELADA.id });
   assertStringIncludes(cancelada!, "CANCELADA");
-  assert(!pdf.includes("VENCIDO"), "orçamento vivo não leva o aviso de vencido");
   assertEquals(await resumirEnvioAoCliente(amb.admin, { service_order_id: "ORÇ-09999" }), null);
 });
 
-Deno.test("resumo avisa quando o orçamento está recusado/vencido no funil (o PDF sai com a validade velha)", async () => {
-  const vencido = { ...ORC, id: "55555555-5555-4555-8555-555555555555", service_order_number: "ORÇ-00072", quote_status: "rejected" };
-  const amb = montarAmbiente({ ordens: [vencido] });
-  const resumo = await resumirEnvioAoCliente(amb.admin, { service_order_id: vencido.id });
-  assertStringIncludes(resumo!, "RECUSADO/VENCIDO");
+Deno.test("resumo avisa quando o orçamento está marcado como recusado no funil", async () => {
+  const recusado = { ...ORC, id: "55555555-5555-4555-8555-555555555555", service_order_number: "ORÇ-00072", quote_status: "rejected" };
+  const amb = montarAmbiente({ ordens: [recusado] });
+  const resumo = await resumirEnvioAoCliente(amb.admin, { service_order_id: recusado.id }, ONZE_DA_MANHA);
+  assertStringIncludes(resumo!, "RECUSADO no funil");
+  assert(!resumo!.includes("validade acabou"), "recusado mas dentro da validade: a data não é aviso");
+});
+
+// ORC: emitido 24/09 às 23h30 de Brasília (25/09 02h30 UTC), 7 dias → último dia 01/10/2026.
+Deno.test("validade: o resumo avisa quando o PDF sairia vencido, pela mesma conta do documento", async () => {
+  const amb = montarAmbiente();
+  const dentro = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id }, new Date("2026-10-01T22:00:00.000Z"));
+  assert(!dentro!.includes("validade acabou"), "no último dia ainda vale");
+  // 23h30 de 01/10 em Brasília já é 02/10 em UTC: o dia que conta é o de Brasília.
+  const virada = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id }, new Date("2026-10-02T02:30:00.000Z"));
+  assert(!virada!.includes("validade acabou"), "o fuso não antecipa o vencimento");
+  const vencido = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id }, new Date("2026-10-02T12:00:00.000Z"));
+  assertStringIncludes(vencido!, "⚠️ A validade acabou em 01/10/2026");
+});
+
+Deno.test("validade: data fixa manda; OS não tem validade para avisar", async () => {
+  const comData = { ...ORC, quote_validity_date: "2026-09-20" };
+  const amb = montarAmbiente({ ordens: [comData, OS] });
+  const r = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id }, ONZE_DA_MANHA);
+  assertStringIncludes(r!, "A validade acabou em 20/09/2026");
+  const os = await resumirEnvioAoCliente(amb.admin, { service_order_id: OS.id }, new Date("2027-01-01T12:00:00.000Z"));
+  assert(!os!.includes("validade acabou"));
+});
+
+Deno.test("validade: sem dias no orçamento, vale o padrão da empresa (mesma ordem do PDF)", async () => {
+  const semDias = { ...ORC, quote_validity_days: null };
+  const amb = montarAmbiente({ ordens: [semDias] });
+  const ajustes = montarBanco({ app_settings: [{ key: "quote_validity_days", value: "3" }] });
+  const admin = { ...amb.admin, from: (t: string) => t === "app_settings" ? ajustes.consulta(t) : amb.admin.from(t) };
+  // 24/09 + 3 = 27/09: no dia 28 já venceu.
+  const r = await resumirEnvioAoCliente(admin, { service_order_id: ORC.id }, new Date("2026-09-28T15:00:00.000Z"));
+  assertStringIncludes(r!, "A validade acabou em 27/09/2026");
+});
+
+// ─── Mensagem personalizada: inteira na confirmação, recusada acima do limite ───────────
+Deno.test("resumo mostra a mensagem personalizada INTEIRA (antes cortava em 200)", async () => {
+  const amb = montarAmbiente();
+  const longa = "Bom dia! " + "Detalhe combinado na visita. ".repeat(20) + "FIM-DA-MENSAGEM";
+  assert(longa.length > 200 && longa.length <= LIMITE_DA_MENSAGEM.pdf_e_link);
+  const r = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, custom_message: longa }, ONZE_DA_MANHA);
+  assertStringIncludes(r!, longa);
+});
+
+Deno.test("mensagem acima do limite: recusada antes da pendência e no execute; o resumo avisa", async () => {
+  const amb = montarAmbiente();
+  const enorme = "x".repeat(LIMITE_DA_MENSAGEM.pdf_e_link + 1);
+  const pre = tool.preValidar!({ service_order_id: ORC.id, custom_message: enorme }, amb.ctx() as any);
+  assertStringIncludes(String(pre?.error), "cabem até 800");
+  const r = await executar(amb, { service_order_id: ORC.id, custom_message: enorme });
+  assertStringIncludes(r.error, "cabem até 800");
+  assertEquals(amb.chamadas.pdf.length + amb.chamadas.envio.length, 0);
+  const resumo = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, custom_message: enorme }, ONZE_DA_MANHA);
+  assertStringIncludes(resumo!, "o envio será recusado");
+  // No 'link' o texto é a mensagem inteira: o mesmo tamanho passa.
+  assertEquals(tool.preValidar!({ service_order_id: ORC.id, formato: "link", custom_message: enorme }, amb.ctx() as any), null);
+});
+
+Deno.test("formato 'link' com mensagem sem o link: o link vai no fim, e o resumo diz isso", async () => {
+  const amb = montarAmbiente();
+  const args = { service_order_id: ORC.id, formato: "link", custom_message: "Oi! Segue o orçamento que combinamos." };
+  const resumo = await resumirEnvioAoCliente(amb.admin, args, ONZE_DA_MANHA);
+  assertStringIncludes(resumo!, "ele vai no fim");
+  await executar(amb, args);
+  assertEquals(amb.chamadas.envio[0].message, `Oi! Segue o orçamento que combinamos.\n\nhttps://erp.example/view/${ORC.share_token}`);
+});
+
+Deno.test("formato 'link' com mensagem que já traz o link: vai como está", async () => {
+  const amb = montarAmbiente();
+  const msg = `Oi! Veja aqui: https://erp.example/view/${ORC.share_token} — qualquer dúvida me chama.`;
+  const resumo = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "link", custom_message: msg }, ONZE_DA_MANHA);
+  assert(!resumo!.includes("ele vai no fim"));
+  await executar(amb, { service_order_id: ORC.id, formato: "link", custom_message: msg });
+  assertEquals(amb.chamadas.envio[0].message, msg);
 });
 
 Deno.test("máscara do telefone mostra só os 4 últimos dígitos", () => {

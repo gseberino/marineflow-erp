@@ -11,7 +11,8 @@ import { chaveDeEnvio, diaLocal, hashCurto, liberarEnvio } from "../../whatsapp/
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { registrarEnvio } from "../comms/send-log.ts";
 import { documentTypeFor } from "../../pdf/document-type.ts";
-import { fmtCurrency } from "../../pdf/documento.ts";
+import { fmtCurrency, ultimoDiaDaValidade } from "../../pdf/documento.ts";
+import { dataBR, diaBR } from "../../pdf/datas.ts";
 import { guardarEEntregar, impressaoDigitalDoDocumento, montarDocumentoDaOrdem } from "../../pdf/gerar-e-guardar.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 
@@ -211,6 +212,17 @@ export function formatoDoEnvio(args: { formato?: unknown } | null | undefined): 
 export const CARGOS_DO_PDF_AO_CLIENTE: Role[] = ["admin", "financial", "seller"];
 
 /**
+ * Tamanho máximo da mensagem personalizada, por formato. No PDF ela é a abertura da legenda, e
+ * o whatsapp-send recusa legenda acima de 1024 caracteres — o resto da legenda (número, total e
+ * link) ocupa ~160, então 800 deixa folga. No link ela é o texto inteiro (limite 4096).
+ *
+ * Recusa em vez de cortar: a confirmação mostra a mensagem INTEIRA, e o "sim" é sobre ela —
+ * cortar depois mandaria ao cliente um texto que o dono não leu (até 26/09/2026 o resumo cortava
+ * em 200 caracteres e o envio mandava tudo).
+ */
+export const LIMITE_DA_MENSAGEM: Record<FormatoDoEnvio, number> = { pdf_e_link: 800, link: 4000 };
+
+/**
  * Formato e cargo do envio ao cliente — a MESMA checagem no gancho `preValidar` (antes de a
  * pendência nascer, para o dono não aprovar no sino um pedido que vai falhar) e no `execute`
  * (depois do "sim").
@@ -225,6 +237,13 @@ export function validarPedidoDeEnvio(
 ): ({ error: string } & Record<string, unknown>) | null {
   const formato = formatoDoEnvio(args);
   if (!formato) return { error: `Formato "${String(args?.formato)}" não existe. Use 'pdf_e_link' (padrão) ou 'link'.` };
+  const mensagem = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
+  if (mensagem.length > LIMITE_DA_MENSAGEM[formato]) {
+    return {
+      error: `A mensagem personalizada tem ${mensagem.length} caracteres; ${formato === "pdf_e_link" ? "junto do PDF" : "no envio só do link"} cabem até ${LIMITE_DA_MENSAGEM[formato]}. Encurte e peça de novo.`,
+      nada_enviado: true,
+    };
+  }
   if (formato !== "pdf_e_link") return null;
   if (cargosQueContam(args, ctx).every((c) => CARGOS_DO_PDF_AO_CLIENTE.includes(c as Role))) return null;
   const solicitante = lerSolicitante(args);
@@ -244,7 +263,17 @@ export function mascararTelefone(telefone: unknown): string {
   return digitos.length >= 4 ? `••••${digitos.slice(-4)}` : "••••";
 }
 
-const CAMPOS_DA_ORDEM_PARA_ENVIO = "id, service_order_number, share_token, client_id, status, grand_total, quote_status";
+const CAMPOS_DA_ORDEM_PARA_ENVIO =
+  "id, service_order_number, share_token, client_id, status, grand_total, quote_status, created_at, quote_validity_days, quote_validity_date";
+
+/**
+ * No formato 'link' a mensagem personalizada SUBSTITUI o texto padrão. Se ela não traz o link,
+ * o link vai no fim: "só o link" que chega sem link nenhum não é o que o dono pediu. Reconhece
+ * pelo token, que é a parte do link que não muda de domínio para domínio.
+ */
+export function mensagemComLink(mensagem: string, link: string, shareToken: string): string {
+  return mensagem.includes(shareToken) ? mensagem : `${mensagem}\n\n${link}`;
+}
 
 /** Acha a ordem pelo UUID ou pelo número (ORÇ-00086 / OS-00075 / formato antigo). */
 // deno-lint-ignore no-explicit-any
@@ -265,9 +294,15 @@ async function buscarOrdemParaEnvio(admin: any, idOuNumero: unknown) {
  * único destino que a tool aceita.
  *
  * null = não achou a ordem; quem chama cai no resumo genérico.
+ *
+ * `agora` só existe para o teste fixar o dia; em produção é o relógio.
  */
-// deno-lint-ignore no-explicit-any
-export async function resumirEnvioAoCliente(admin: any, args: Record<string, unknown>): Promise<string | null> {
+export async function resumirEnvioAoCliente(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  args: Record<string, unknown>,
+  agora: Date = new Date(),
+): Promise<string | null> {
   const { data: so } = await buscarOrdemParaEnvio(admin, args?.service_order_id);
   if (!so) return null;
   const { data: c } = so.client_id
@@ -286,15 +321,33 @@ export async function resumirEnvioAoCliente(admin: any, args: Record<string, unk
       ? "Formato: *PDF anexado + link* (o arquivo com preço e PIX vai na conversa)"
       : `Formato: ⚠️ "${String(args?.formato)}" não existe — o envio será recusado`,
   ];
-  if (typeof args?.custom_message === "string" && args.custom_message.trim()) {
-    linhas.push(`Mensagem: "${args.custom_message.trim().slice(0, 200)}"`);
+  // A mensagem INTEIRA: o "sim" é sobre o texto que o cliente vai ler. Acima do limite o envio é
+  // recusado (validarPedidoDeEnvio), e o resumo diz isso em vez de mostrar um pedaço.
+  const mensagem = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
+  if (mensagem) {
+    linhas.push(`Mensagem: "${mensagem}"`);
+    if (formato && mensagem.length > LIMITE_DA_MENSAGEM[formato]) {
+      linhas.push(`⚠️ A mensagem tem ${mensagem.length} caracteres (limite ${LIMITE_DA_MENSAGEM[formato]}) — o envio será recusado.`);
+    } else if (formato === "link" && so.share_token && !mensagem.includes(so.share_token)) {
+      linhas.push("(a mensagem não traz o link: ele vai no fim dela)");
+    }
   }
   if (so.status === "cancelled") linhas.push("⚠️ A ordem está CANCELADA — o envio será recusado.");
+  // A validade que o PDF vai imprimir, pela MESMA conta do documento e do aviso de vencimento
+  // (ultimoDiaDaValidade). Não bloqueia: reenviar um orçamento vencido para reabrir a conversa é
+  // legítimo — mas o dono tem de saber, antes do "sim", que o cliente vai ler uma data passada.
+  if (documentTypeFor(so.status) === "quote") {
+    const { data: padrao } = await admin.from("app_settings").select("value").eq("key", "quote_validity_days").maybeSingle();
+    const ultimoDia = ultimoDiaDaValidade(so, { quote_validity_days: padrao?.value });
+    if (ultimoDia && diaBR(agora) > ultimoDia) {
+      linhas.push(`⚠️ A validade acabou em ${dataBR(ultimoDia)}: o PDF sai com essa data, já vencida. Para renovar, mude a validade do orçamento na tela antes de mandar — ou confirme assim mesmo.`);
+    }
+  }
   // Em 26/09/2026, 41 dos 51 orçamentos estavam 'rejected' — a maioria vencida pela rotina
-  // quote-reminders. O PDF sai com a validade ORIGINAL, já passada: o dono tem de ver isso
-  // antes do "sim" (não bloqueia: reenviar um vencido para reabrir a conversa é legítimo).
+  // quote-reminders, que já não rejeita (R19 só avisa). A recusa no funil é um fato à parte da
+  // data: um orçamento recusado pelo cliente ontem ainda está dentro da validade.
   if (so.status === "draft" && so.quote_status === "rejected") {
-    linhas.push("⚠️ Este orçamento está RECUSADO/VENCIDO no funil: o PDF sai com a validade original, já vencida.");
+    linhas.push("⚠️ Este orçamento está marcado como RECUSADO no funil.");
   }
   if (c?.opt_out_whatsapp) linhas.push("⚠️ O cliente pediu para não receber WhatsApp (opt-out) — o envio será recusado.");
   return linhas.join("\n");
@@ -531,7 +584,7 @@ export const whatsappTools: ToolDef[] = [
           enum: ["pdf_e_link", "link"],
           description: "pdf_e_link (padrão) = arquivo PDF com o link na legenda; link = só o link em texto, quando o usuário pedir.",
         },
-        custom_message: { type: "string", description: "Mensagem personalizada. No formato link substitui o texto padrão; no pdf_e_link vira a primeira linha da legenda (número, total e link vêm sempre)." },
+        custom_message: { type: "string", description: "Mensagem personalizada. No formato link substitui o texto padrão (se não trouxer o link, ele vai no fim; até 4000 caracteres); no pdf_e_link vira a primeira linha da legenda (número, total e link vêm sempre; até 800 caracteres)." },
       },
       required: ["service_order_id"],
     },
@@ -587,7 +640,10 @@ export const whatsappTools: ToolDef[] = [
       const marcaDeTeste = modoTeste ? "teste" : null;
 
       if (formato === "link") {
-        const msg = args.custom_message || `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;
+        const personalizada = typeof args.custom_message === "string" ? args.custom_message.trim() : "";
+        const msg = personalizada
+          ? mensagemComLink(personalizada, link, so.share_token)
+          : `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;
         const g = guardaDeEnvio(msg, { tipo: "os_link", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!so.client_id });
         if (g.bloqueado) {
           await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });

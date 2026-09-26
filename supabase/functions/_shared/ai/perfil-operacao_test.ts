@@ -119,11 +119,16 @@ Deno.test("migration do perfil: versão 20260927090100, fora da faixa do finance
   const dir = new URL("../../../migrations/", import.meta.url);
   const arquivos = [...Deno.readDirSync(dir)].filter((e) => e.isFile && e.name.endsWith(".sql")).map((e) => e.name);
   const doPerfil = arquivos.filter((n) =>
-    /delete\s+from\s+public\.app_settings\s+where\s+key\s*=\s*'ai_tool_profile_operacao'/i.test(Deno.readTextFileSync(new URL(n, dir)))
+    /set\s+description\s*=\s*'SEM EFEITO[^']*'\s+where\s+key\s*=\s*'ai_tool_profile_operacao'/i.test(Deno.readTextFileSync(new URL(n, dir)))
   );
   assertEquals(doPerfil, ["20260927090100_perfil_de_tools_no_codigo.sql"]);
   const versao = (n: string) => n.split("_")[0];
   assertEquals(arquivos.filter((n) => versao(n) === "20260927090100"), doPerfil, "outra migration usa a mesma versão");
+  // A chave velha FICA (revisão final, 26/09/2026): é a rede de quem voltar o ai-agent a uma
+  // versão que ainda lê a lista do banco — apagada, o código antigo devolveria TODAS as tools.
+  const sql = Deno.readTextFileSync(new URL(doPerfil[0], dir)).replace(/--[^\n]*/g, "");
+  assertEquals(/delete\s+from\s+public\.app_settings/i.test(sql), false, "a migration voltou a apagar a chave velha");
+  assertEquals(/SEM EFEITO/.test(sql), true, "a descrição da chave velha tem de dizer que ela não muda mais nada");
 });
 
 Deno.test("comportamento: com o perfil ligado, o modelo recebe exatamente o de antes + as acrescentadas", async () => {
