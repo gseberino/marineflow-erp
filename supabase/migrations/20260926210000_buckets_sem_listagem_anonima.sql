@@ -36,9 +36,40 @@
 --                         levantamento (uploadSurveyPhoto) sobe com upsert:true, que sem
 --                         SELECT falha com erro de RLS e o técnico não consegue anexar.
 --
--- As duas regras novas são as equivalentes das que saem, só que TO authenticated: qualquer
--- conta logada, igual à RLS das tabelas que guardam esses caminhos (service_order_photos e
--- service_order_expenses liberam para `auth.uid() is not null`). Nenhum cargo perde nada.
+-- ═══ A LEITURA DO LOGADO SEGUE A TABELA DONA DE CADA CAMINHO ═══
+--
+-- As duas regras novas NÃO são as antigas com `to authenticated`. Cada bucket guarda dois tipos
+-- de arquivo, e cada tipo pertence a uma tabela com RLS própria (pg_policies de 26/09/2026):
+--
+--   expense-receipts      expenses/<os>/   comprovante de despesa da OS — service_order_expenses:
+--                                          qualquer logado.
+--                         deposits/<os>/   comprovante de SINAL (PIX com nome, banco e valor do
+--                                          cliente) — payments: só is_admin_or_financial.
+--   service-order-photos  <os>/            foto da OS — service_order_photos: qualquer logado.
+--                         surveys/<id>/    foto do levantamento — service_surveys e
+--                                          service_survey_answers: NOT is_external_seller.
+--
+-- Uma regra só com `bucket_id = ...` deixaria técnico e vendedor externo listarem os
+-- comprovantes de sinal, e o vendedor externo listar as fotos de levantamento — dado que as
+-- tabelas donas já escondem deles. Por isso:
+--
+--   expense_receipts_logado_le  expenses/ para qualquer logado; o resto (deposits/) só para
+--                               admin/financeiro OU para quem subiu o arquivo (owner_id, que a
+--                               API do Storage grava com o `sub` do JWT). O dono é o que mantém
+--                               o "remover comprovante" do RegisterDepositDialog: ele só apaga o
+--                               arquivo que o próprio usuário acabou de anexar, antes de o sinal
+--                               existir.
+--   so_photos_logado_le         tudo, menos surveys/ para vendedor externo. O upsert da foto do
+--                               levantamento (use-service-survey.ts, upsert:true) exige que a
+--                               linha nova passe no SELECT: passa para técnico, admin, financeiro
+--                               e vendedor interno (is_external_seller = false); o vendedor
+--                               externo nem chega ao levantamento, a tabela já o barra.
+--
+-- O que muda para quem está logado: técnico e vendedor deixam de LISTAR sinal que não subiram, e
+-- o vendedor externo deixa de listar foto de levantamento. Como remove() também passa pelo
+-- SELECT, eles deixam igualmente de APAGAR esses arquivos pela API (as regras de DELETE
+-- continuam só com o bucket) — o que nenhuma tela faz. Nenhuma tela perde função, e o link
+-- público por caminho exato continua abrindo para todos (é CONTENÇÃO, ver acima).
 --
 -- signatures e whatsapp_status NÃO ganham regra para logado, porque nenhum código precisa:
 -- o bucket signatures só é escrito pela edge submit-signature com a chave de serviço (que
@@ -60,11 +91,24 @@ drop policy if exists so_photos_logado_le on storage.objects;
 
 create policy expense_receipts_logado_le on storage.objects
   for select to authenticated
-  using (bucket_id = 'expense-receipts');
+  using (
+    bucket_id = 'expense-receipts'
+    and (
+      name like 'expenses/%'
+      or owner_id = (select auth.uid())::text
+      or public.is_admin_or_financial((select auth.uid()))
+    )
+  );
 
 create policy so_photos_logado_le on storage.objects
   for select to authenticated
-  using (bucket_id = 'service-order-photos');
+  using (
+    bucket_id = 'service-order-photos'
+    and (
+      name not like 'surveys/%'
+      or not public.is_external_seller((select auth.uid()))
+    )
+  );
 
 do $$
 declare
@@ -84,15 +128,17 @@ begin
     raise exception 'ainda há regra de leitura para anon/public nos buckets com dado de cliente: %', v_sobra;
   end if;
 
-  -- 2. Nem regra de leitura para anon/public SEM filtro de bucket — ela abriria todos de uma vez.
+  -- 2. Nem regra de leitura SEM filtro de bucket para anon, public ou authenticated: para anon
+  --    ela abriria todos os buckets de uma vez; para authenticated, reabriria por OR o que as
+  --    duas regras abaixo fecham (sinal para técnico, levantamento para vendedor externo).
   select string_agg(policyname, ', ') into v_sobra
     from pg_policies
    where schemaname = 'storage' and tablename = 'objects'
      and cmd in ('SELECT', 'ALL')
-     and roles && array['anon', 'public']::name[]
+     and roles && array['anon', 'public', 'authenticated']::name[]
      and coalesce(qual, '') not like '%bucket_id%';
   if v_sobra is not null then
-    raise exception 'há regra de leitura para anon/public em storage.objects sem filtro de bucket: %', v_sobra;
+    raise exception 'há regra de leitura em storage.objects sem filtro de bucket: %', v_sobra;
   end if;
 
   -- 3. As duas leituras que o código precisa existem, só SELECT e só para authenticated.
@@ -102,5 +148,38 @@ begin
          and cmd = 'SELECT'
          and roles = array['authenticated']::name[]) <> 2 then
     raise exception 'as regras de leitura para logado de expense-receipts/service-order-photos não ficaram como esperado';
+  end if;
+
+  -- 4. E seguem a tabela dona de cada caminho (o texto é o que o Postgres guarda, já
+  --    normalizado: `name ~~ 'expenses/%'::text`, `NOT is_external_seller(...)`).
+  if not exists (
+       select 1 from pg_policies
+        where schemaname = 'storage' and tablename = 'objects'
+          and policyname = 'expense_receipts_logado_le'
+          and position('''expenses/%''' in qual) > 0
+          and position('owner_id' in qual) > 0
+          and position('is_admin_or_financial' in qual) > 0) then
+    raise exception 'expense_receipts_logado_le não restringe deposits/ a admin/financeiro ou ao dono';
+  end if;
+  if not exists (
+       select 1 from pg_policies
+        where schemaname = 'storage' and tablename = 'objects'
+          and policyname = 'so_photos_logado_le'
+          and position('''surveys/%''' in qual) > 0
+          and position('is_external_seller' in qual) > 0) then
+    raise exception 'so_photos_logado_le não esconde surveys/ do vendedor externo';
+  end if;
+
+  -- 5. Nenhuma OUTRA regra de leitura cita esses dois buckets. Regras PERMISSIVE somam por OR:
+  --    uma `bucket_id = 'expense-receipts'` a mais, criada à mão no painel, desfaria o 4 inteiro.
+  select string_agg(policyname, ', ') into v_sobra
+    from pg_policies
+   where schemaname = 'storage' and tablename = 'objects'
+     and cmd in ('SELECT', 'ALL')
+     and policyname not in ('expense_receipts_logado_le', 'so_photos_logado_le')
+     and (coalesce(qual, '') || coalesce(with_check, ''))
+         ~ '''(expense-receipts|service-order-photos)''';
+  if v_sobra is not null then
+    raise exception 'há outra regra de leitura em expense-receipts/service-order-photos: %', v_sobra;
   end if;
 end $$;
