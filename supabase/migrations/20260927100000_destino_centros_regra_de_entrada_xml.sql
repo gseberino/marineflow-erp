@@ -6,7 +6,11 @@
 --   · Kamell NF 51038 e TSD NF 132181: a importação do XML ignorava as parcelas e o pagamento com
 --     crédito do fornecedor — criava UMA conta com o total, datada do dia da importação.
 --
---   · Selo de cobertura do DRE com a mesma regra do fluxo de caixa pelo extrato (seção 7).
+--   · Selo de cobertura do DRE com a mesma regra do fluxo de caixa pelo extrato (seção 7);
+--   · "Mês pronto?" sem acusar a parcela da nota como duplicata do pagamento da entrada (seção 8).
+--   · Revisão de 27/09/2026: crédito do fornecedor pelos códigos certos (19/21; 05 é crediário),
+--     crédito dentro ou fora das parcelas pela soma, e pagamento que parece já ter saído pelo
+--     banco vira PERGUNTA na importação (nunca é ligado sozinho).
 --
 -- Nada aqui apaga dado: centro de custo antigo é DESATIVADO; contas já criadas pela importação
 -- não são tocadas (a correção das duas em aberto espera o OK do dono).
@@ -126,14 +130,47 @@ UNION ALL
 revoke all on public.conciliacao_lancamentos from anon;
 
 -- ───────────────────────────────────────────────────────────────────────────────────────────
--- 5. Importação do XML: uma conta por PARCELA da nota (<dup>), com o vencimento dela, na data
---    de EMISSÃO (competência da compra, não o dia da importação); a parcela que a própria nota
---    diz ter sido paga com crédito do fornecedor (tPag 05/19, ou 99 "crédito") entra paga e fora
---    do banco; a parcela que JÁ saiu pelo banco (mesmo fornecedor, mesmo valor, até 7 dias do
---    vencimento, lançada pelo Extrato e sem nota) é ligada à nota em vez de virar conta nova —
---    foi o que contou duas vezes os R$ 1.500 da TSD em 22/09.
---    Tudo o mais (produtos, estoque, de-para, sugestões de preço) é o da versão anterior.
+-- 5. Importação do XML — uma conta por PARCELA da nota (<dup>), com o vencimento dela, na data de
+--    EMISSÃO (competência da compra; nota de mês já fechado entra no mês de hoje). Tudo o mais
+--    (produtos, estoque, de-para, sugestões de preço) é o da versão anterior.
+--    · Crédito do fornecedor — tPag 19 (crédito virtual) e 21 (crédito em loja, IT 2024.002), ou
+--      99 com texto de crédito que não seja cartão nem crediário ("CREDITO DE CLIENTE", "CARTA DE
+--      CREDITO"). O 05 é cartão da loja/crediário: é dívida, não crédito. O crédito não é dívida nem
+--      sai do banco. DENTRO das parcelas (a soma delas é o total da nota: uma parcela é a paga com
+--      crédito — Kamell 51038) ou FORA (parcelas + crédito = total): nos dois casos entra paga e
+--      fora do banco. Não bate com nada: as parcelas ficam como estão e a conta leva o aviso.
+--    · Pagamento que parece JÁ ter saído pelo banco (mesmo fornecedor, mesmo valor, até 7 dias do
+--      vencimento, depois da emissão — ou até 3 dias antes, sinal —, lançado pelo Extrato e sem
+--      nota) NÃO é ligado sozinho: vira pergunta na tela da importação ("É este?"), e só o "sim"
+--      liga (ligar_parcela_ao_pagamento). Decisão do dono de 26/09/2026: "o sistema deve sempre
+--      questionar". Foi o que contou duas vezes os R$ 1.500 da TSD em 22/09.
 -- ───────────────────────────────────────────────────────────────────────────────────────────
+
+-- Pagamentos lançados pelo Extrato que podem ser uma parcela (uso interno da importação).
+create or replace function public._pagamentos_que_podem_ser_a_parcela(
+  p_fornecedor uuid, p_valor numeric, p_venc date, p_emissao date)
+ returns jsonb
+ language sql
+ stable
+ set search_path to 'public'
+as $function$
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'payable_id', p.id, 'data', p.issue_date, 'valor', p.amount,
+           'descricao', left(coalesce(p.description, ''), 120))
+           order by abs(p.issue_date - p_venc), p.created_at), '[]'::jsonb)
+    from public.payables p
+   where p.supplier_id = p_fornecedor
+     and p.fiscal_note_id is null
+     and p.status <> 'cancelled'
+     and p.bank_transaction_id is not null
+     and abs(p.amount - p_valor) < 0.01
+     and abs(p.issue_date - p_venc) <= 7
+     and p.issue_date >= p_emissao - 3;
+$function$;
+
+revoke all on function public._pagamentos_que_podem_ser_a_parcela(uuid, numeric, date, date) from public, anon, authenticated;
+grant execute on function public._pagamentos_que_podem_ser_a_parcela(uuid, numeric, date, date) to service_role;
+
 CREATE OR REPLACE FUNCTION public.confirm_nfe_import(p_note_id uuid, p_supplier_id uuid DEFAULT NULL::uuid, p_manual_mappings jsonb DEFAULT '[]'::jsonb, p_purchase_order_id uuid DEFAULT NULL::uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -147,7 +184,8 @@ DECLARE
   v_nfe_number  text;
   v_issuer_name text;
   v_xml         text;
-  v_emissao     date;
+  v_issue_ts    timestamptz;
+  v_issued_ts   timestamptz;
   v_item        RECORD;
   v_match       RECORD;
   v_manual      uuid;
@@ -164,22 +202,30 @@ DECLARE
   v_detail      jsonb := '[]'::jsonb;
   v_prazo       int;
   -- Parcelas
-  v_desc_base   text;
-  v_dup         RECORD;
-  v_n_dups      int := 0;
-  v_parcela     int := 0;
-  v_credito     numeric := 0;
-  v_credito_usado boolean := false;
-  v_ja_pago     uuid;
-  v_ids         uuid[] := '{}';
-  v_parcelas    jsonb := '[]'::jsonb;
+  v_emissao_real   date;
+  v_emissao        date;
+  v_a_vista        boolean := false;
+  v_desc_base      text;
+  v_dup            RECORD;
+  v_n_dups         int := 0;
+  v_soma_dups      numeric := 0;
+  v_parcela        int := 0;
+  v_credito        numeric := 0;
+  v_credito_dentro boolean := false;
+  v_credito_fora   boolean := false;
+  v_credito_usado  boolean := false;
+  v_venc           date;
+  v_cand           jsonb;
+  v_ids            uuid[] := '{}';
+  v_parcelas       jsonb := '[]'::jsonb;
+  c_obs_credito    constant text := 'Paga com crédito do fornecedor (carta de crédito), como a nota informa: não sai do banco.';
 BEGIN
   IF auth.uid() IS NOT NULL AND NOT public.is_admin(auth.uid()) THEN
     RAISE EXCEPTION 'forbidden';
   END IF;
 
-  SELECT status, items, total_amount, nfe_number, issuer_name, xml_content, issue_date
-    INTO v_status, v_items, v_total, v_nfe_number, v_issuer_name, v_xml, v_emissao
+  SELECT status, items, total_amount, nfe_number, issuer_name, xml_content, issue_date, issued_at
+    INTO v_status, v_items, v_total, v_nfe_number, v_issuer_name, v_xml, v_issue_ts, v_issued_ts
     FROM fiscal_notes WHERE id = p_note_id
     FOR UPDATE;
 
@@ -314,30 +360,68 @@ BEGIN
       INTO v_prazo FROM suppliers WHERE id = p_supplier_id;
     IF v_prazo IS NULL OR v_prazo <= 0 OR v_prazo > 365 THEN v_prazo := 28; END IF;
 
-    -- A data da NOTA é a competência da compra no DRE — não o dia em que alguém importou.
-    v_emissao := coalesce(
-      v_emissao,
+    -- A data da NOTA: o dia local que o próprio XML diz; sem ele, o gravado, no fuso de São Paulo.
+    v_emissao_real := coalesce(
       nullif(substring(coalesce(v_xml, '') from '<dhEmi>(\d{4}-\d{2}-\d{2})'), '')::date,
       nullif(substring(coalesce(v_xml, '') from '<dEmi>(\d{4}-\d{2}-\d{2})'), '')::date,
+      (v_issued_ts AT TIME ZONE 'America/Sao_Paulo')::date,
+      (v_issue_ts AT TIME ZONE 'America/Sao_Paulo')::date,
       now()::date);
-    -- Nota de um mês já FECHADO entra no mês de hoje: o fechado não muda sem motivo, e a
-    -- mercadoria não pode ficar fora do estoque por causa disso (a trava recusaria a conta).
+    -- A competência: nota de mês já FECHADO entra no mês de hoje — o fechado não muda sem motivo,
+    -- e a mercadoria não pode ficar fora do estoque porque a trava recusaria a conta. A data real
+    -- continua valendo para os vencimentos e para achar o pagamento no banco.
+    v_emissao := v_emissao_real;
     IF public.periodo_esta_fechado(v_emissao) THEN
       v_emissao := now()::date;
     END IF;
-    v_desc_base :='Compra ref. NF-e ' || coalesce(v_nfe_number, '') || ' - ' || coalesce(v_issuer_name, '');
+    v_desc_base := 'Compra ref. NF-e ' || coalesce(v_nfe_number, '') || ' - ' || coalesce(v_issuer_name, '');
 
-    -- Quanto a nota diz ter sido pago com crédito do fornecedor (carta de crédito, crédito de
-    -- loja, crédito virtual): não sai do banco e não é dívida.
+    -- Quanto a nota diz ter sido pago com crédito do fornecedor.
     SELECT coalesce(sum(nullif(substring(b[1] from '<vPag>([0-9.]+)</vPag>'), '')::numeric), 0)
       INTO v_credito
       FROM regexp_matches(coalesce(v_xml, ''), '<detPag>(.*?)</detPag>', 'g') AS b
-     WHERE substring(b[1] from '<tPag>(\d+)</tPag>') IN ('05', '19')
+     WHERE substring(b[1] from '<tPag>(\d+)</tPag>') IN ('19', '21')
         OR (substring(b[1] from '<tPag>(\d+)</tPag>') = '99'
-            AND upper(coalesce(substring(b[1] from '<xPag>([^<]*)</xPag>'), '')) LIKE '%CRED%');
+            AND translate(upper(coalesce(substring(b[1] from '<xPag>([^<]*)</xPag>'), '')),
+                          'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ', 'AAAAAEEEEIIIIOOOOOUUUUC')
+                ~ '(CARTA DE CREDITO|CREDITO (DE|DO|DA|EM|NA) (CLIENTE|LOJA|FORNECEDOR|DEVOLUCAO)|CREDITO LOJA|VALE CREDITO)'
+            AND translate(upper(coalesce(substring(b[1] from '<xPag>([^<]*)</xPag>'), '')),
+                          'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ', 'AAAAAEEEEIIIIOOOOOUUUUC')
+                !~ '(CARTAO|CREDIARIO)');
 
-    SELECT count(*) INTO v_n_dups
-      FROM regexp_matches(coalesce(v_xml, ''), '<dup>(.*?)</dup>', 'g');
+    -- Pago na hora (à vista, ou por Pix/débito/transferência/cartão): sem parcela, vence na emissão.
+    SELECT exists (
+      SELECT 1 FROM regexp_matches(coalesce(v_xml, ''), '<detPag>(.*?)</detPag>', 'g') AS b
+       WHERE substring(b[1] from '<indPag>(\d)</indPag>') = '0'
+          OR substring(b[1] from '<tPag>(\d+)</tPag>') IN ('01', '03', '04', '17', '18', '20'))
+      INTO v_a_vista;
+
+    SELECT count(*), coalesce(sum(nullif(substring(d[1] from '<vDup>([0-9.]+)</vDup>'), '')::numeric), 0)
+      INTO v_n_dups, v_soma_dups
+      FROM regexp_matches(coalesce(v_xml, ''), '<dup>(.*?)</dup>', 'g') AS d;
+
+    -- Onde está o crédito: DENTRO das parcelas (a soma delas é o total) ou FORA delas.
+    IF v_credito > 0 THEN
+      v_credito_dentro := v_n_dups > 0 AND abs(v_soma_dups - v_total) < 0.05;
+      v_credito_fora := NOT v_credito_dentro AND abs(v_soma_dups + v_credito - v_total) < 0.05;
+    END IF;
+
+    -- Crédito FORA das parcelas (ou a nota inteira paga com crédito): uma conta paga, à parte.
+    IF v_credito_fora THEN
+      INSERT INTO payables (
+        supplier_id, supplier_name, amount, paid_amount, balance_amount, description,
+        issue_date, due_date, status, expense_category, origin, fiscal_note_id, payment_method, notes
+      ) VALUES (
+        p_supplier_id, v_issuer_name, v_credito, v_credito, 0,
+        v_desc_base || CASE WHEN v_n_dups > 0 THEN ' (parte paga com crédito)' ELSE '' END,
+        v_emissao, v_emissao_real, 'paid', 'Compras de mercadorias', 'fiscal_note', p_note_id,
+        'credito_fornecedor', c_obs_credito
+      ) RETURNING id INTO v_payable_id;
+      v_credito_usado := true;
+      v_ids := v_ids || v_payable_id;
+      v_parcelas := v_parcelas || jsonb_build_object('parcela', 0, 'valor', v_credito, 'vencimento', v_emissao_real,
+        'payable_id', v_payable_id, 'como', 'credito_do_fornecedor', 'candidatos', '[]'::jsonb);
+    END IF;
 
     IF v_n_dups > 0 THEN
       FOR v_dup IN
@@ -350,96 +434,67 @@ BEGIN
         v_parcela := v_parcela + 1;
         CONTINUE WHEN v_dup.valor IS NULL OR v_dup.valor <= 0;
 
-        IF NOT v_credito_usado AND v_credito > 0 AND abs(v_dup.valor - v_credito) < 0.01 THEN
+        IF v_credito_dentro AND NOT v_credito_usado AND abs(v_dup.valor - v_credito) < 0.01 THEN
           -- A parcela que a própria nota diz ter sido paga com crédito do fornecedor.
           INSERT INTO payables (
             supplier_id, supplier_name, amount, paid_amount, balance_amount, description,
-            issue_date, due_date, status, expense_category, origin, fiscal_note_id,
-            payment_method, notes
+            issue_date, due_date, status, expense_category, origin, fiscal_note_id, payment_method, notes
           ) VALUES (
             p_supplier_id, v_issuer_name, v_dup.valor, v_dup.valor, 0,
             v_desc_base || ' (parcela ' || v_parcela || '/' || v_n_dups || ')',
-            v_emissao, coalesce(v_dup.venc, v_emissao), 'paid', 'Compras de mercadorias', 'fiscal_note', p_note_id,
-            'credito_fornecedor',
-            'Paga com crédito do fornecedor (carta de crédito), como a nota informa: não sai do banco.'
+            v_emissao, coalesce(v_dup.venc, v_emissao_real), 'paid', 'Compras de mercadorias', 'fiscal_note', p_note_id,
+            'credito_fornecedor', c_obs_credito
           ) RETURNING id INTO v_payable_id;
           v_credito_usado := true;
           v_parcelas := v_parcelas || jsonb_build_object('parcela', v_parcela, 'valor', v_dup.valor,
-            'vencimento', v_dup.venc, 'payable_id', v_payable_id, 'como', 'credito_do_fornecedor');
+            'vencimento', v_dup.venc, 'payable_id', v_payable_id, 'como', 'credito_do_fornecedor',
+            'candidatos', '[]'::jsonb);
         ELSE
-          -- Já saiu pelo banco antes da importação? Mesmo fornecedor, mesmo valor, até 7 dias do
-          -- vencimento, lançado pelo Extrato e ainda sem nota: é esta parcela — liga, não duplica.
-          SELECT p.id INTO v_ja_pago
-            FROM payables p
-           WHERE p.supplier_id = p_supplier_id
-             AND p.fiscal_note_id IS NULL
-             AND p.status <> 'cancelled'
-             AND p.bank_transaction_id IS NOT NULL
-             AND abs(p.amount - v_dup.valor) < 0.01
-             AND abs(p.issue_date - coalesce(v_dup.venc, v_emissao)) <= 7
-             -- Pago antes da própria nota existir não é desta nota (salvo sinal de poucos dias).
-             AND p.issue_date >= v_emissao - 3
-             AND NOT (p.id = ANY (v_ids))
-           ORDER BY abs(p.issue_date - coalesce(v_dup.venc, v_emissao)), p.created_at
-           LIMIT 1;
-
-          IF v_ja_pago IS NOT NULL THEN
-            UPDATE payables
-               SET fiscal_note_id = p_note_id,
-                   notes = btrim(coalesce(notes, '') || ' ' || 'Parcela ' || v_parcela || '/' || v_n_dups
-                           || ' da NF-e ' || coalesce(v_nfe_number, '') || ', paga pelo banco antes da importação.'),
-                   updated_at = now()
-             WHERE id = v_ja_pago;
-            v_payable_id := v_ja_pago;
-            v_parcelas := v_parcelas || jsonb_build_object('parcela', v_parcela, 'valor', v_dup.valor,
-              'vencimento', v_dup.venc, 'payable_id', v_payable_id, 'como', 'ja_paga_pelo_banco');
-          ELSE
-            INSERT INTO payables (
-              supplier_id, supplier_name, amount, balance_amount, description,
-              issue_date, due_date, status, expense_category, origin, fiscal_note_id
-            ) VALUES (
-              p_supplier_id, v_issuer_name, v_dup.valor, v_dup.valor,
-              v_desc_base || ' (parcela ' || v_parcela || '/' || v_n_dups || ')',
-              v_emissao, coalesce(v_dup.venc, v_emissao + v_prazo),
-              'pending', 'Compras de mercadorias', 'fiscal_note', p_note_id
-            ) RETURNING id INTO v_payable_id;
-            v_parcelas := v_parcelas || jsonb_build_object('parcela', v_parcela, 'valor', v_dup.valor,
-              'vencimento', v_dup.venc, 'payable_id', v_payable_id, 'como', 'a_pagar');
-          END IF;
+          v_venc := coalesce(v_dup.venc, v_emissao_real + v_prazo);
+          v_cand := public._pagamentos_que_podem_ser_a_parcela(p_supplier_id, v_dup.valor, v_venc, v_emissao_real);
+          INSERT INTO payables (
+            supplier_id, supplier_name, amount, balance_amount, description,
+            issue_date, due_date, status, expense_category, origin, fiscal_note_id, notes
+          ) VALUES (
+            p_supplier_id, v_issuer_name, v_dup.valor, v_dup.valor,
+            v_desc_base || ' (parcela ' || v_parcela || '/' || v_n_dups || ')',
+            v_emissao, v_venc, 'pending', 'Compras de mercadorias', 'fiscal_note', p_note_id,
+            CASE WHEN jsonb_array_length(v_cand) > 0
+              THEN 'Pode já ter sido paga: há pagamento de mesmo valor a este fornecedor, lançado pelo Extrato. Confirme na importação da nota.'
+            END
+          ) RETURNING id INTO v_payable_id;
+          v_parcelas := v_parcelas || jsonb_build_object('parcela', v_parcela, 'valor', v_dup.valor,
+            'vencimento', v_venc, 'payable_id', v_payable_id, 'como', 'a_pagar', 'candidatos', v_cand);
         END IF;
         v_ids := v_ids || v_payable_id;
       END LOOP;
-
-      -- Crédito declarado que não bate com nenhuma parcela: fica o aviso, para alguém conferir.
-      IF v_credito > 0 AND NOT v_credito_usado AND array_length(v_ids, 1) > 0 THEN
-        UPDATE payables
-           SET notes = btrim(coalesce(notes, '') || ' A nota informa R$ '
-                       || replace(to_char(v_credito, 'FM999999990.00'), '.', ',')
-                       || ' pagos com crédito do fornecedor, e o valor não bate com nenhuma parcela: confira.')
-         WHERE id = v_ids[1];
-      END IF;
-    ELSIF v_credito > 0 AND abs(v_credito - v_total) < 0.01 THEN
-      -- Sem parcelas e toda paga com crédito do fornecedor.
-      INSERT INTO payables (
-        supplier_id, supplier_name, amount, paid_amount, balance_amount, description,
-        issue_date, due_date, status, expense_category, origin, fiscal_note_id, payment_method, notes
-      ) VALUES (
-        p_supplier_id, v_issuer_name, v_total, v_total, 0, v_desc_base,
-        v_emissao, v_emissao, 'paid', 'Compras de mercadorias', 'fiscal_note', p_note_id, 'credito_fornecedor',
-        'Paga com crédito do fornecedor (carta de crédito), como a nota informa: não sai do banco.'
-      ) RETURNING id INTO v_payable_id;
-      v_ids := v_ids || v_payable_id;
-    ELSE
-      -- Sem parcelas na nota: uma conta com o total, no prazo do fornecedor a partir da emissão.
+    ELSIF NOT v_credito_fora THEN
+      -- Sem parcelas na nota: uma conta com o total — à vista vence na emissão; a prazo, no prazo
+      -- do fornecedor a partir da emissão.
+      v_venc := CASE WHEN v_a_vista THEN v_emissao_real ELSE v_emissao_real + v_prazo END;
+      v_cand := public._pagamentos_que_podem_ser_a_parcela(p_supplier_id, v_total, v_emissao_real, v_emissao_real);
       INSERT INTO payables (
         supplier_id, supplier_name, amount, balance_amount, description,
-        issue_date, due_date, status, expense_category, origin, fiscal_note_id
+        issue_date, due_date, status, expense_category, origin, fiscal_note_id, notes
       ) VALUES (
         p_supplier_id, v_issuer_name, v_total, v_total, v_desc_base,
-        v_emissao, v_emissao + v_prazo,
-        'pending', 'Compras de mercadorias', 'fiscal_note', p_note_id
+        v_emissao, v_venc, 'pending', 'Compras de mercadorias', 'fiscal_note', p_note_id,
+        CASE WHEN jsonb_array_length(v_cand) > 0
+          THEN 'Pode já ter sido paga: há pagamento de mesmo valor a este fornecedor, lançado pelo Extrato. Confirme na importação da nota.'
+        END
       ) RETURNING id INTO v_payable_id;
       v_ids := v_ids || v_payable_id;
+      v_parcelas := v_parcelas || jsonb_build_object('parcela', 1, 'valor', v_total, 'vencimento', v_venc,
+        'payable_id', v_payable_id, 'como', 'a_pagar', 'candidatos', v_cand);
+    END IF;
+
+    -- Crédito que não bate com nada: as parcelas ficam como estão, e a primeira conta leva o aviso.
+    IF v_credito > 0 AND NOT v_credito_usado AND array_length(v_ids, 1) > 0 THEN
+      UPDATE payables
+         SET notes = btrim(coalesce(notes, '') || ' A nota informa R$ '
+                     || replace(to_char(v_credito, 'FM999999990.00'), '.', ',')
+                     || ' pagos com crédito do fornecedor, e o valor não bate com as parcelas: confira.')
+       WHERE id = v_ids[1];
     END IF;
 
     v_payable_id := v_ids[1];
@@ -453,7 +508,8 @@ BEGIN
          import_result = jsonb_build_object(
            'items', v_detail, 'products_created', v_created,
            'movements', v_moved, 'payable_id', v_payable_id,
-           'payable_ids', to_jsonb(v_ids), 'parcelas', v_parcelas, 'at', now()
+           'payable_ids', to_jsonb(v_ids), 'parcelas', v_parcelas,
+           'credito_sem_par', v_credito > 0 AND NOT v_credito_usado, 'at', now()
          ),
          updated_at = now()
    WHERE id = p_note_id;
@@ -465,6 +521,7 @@ BEGIN
     'payable_id', v_payable_id,
     'payable_ids', to_jsonb(v_ids),
     'parcelas', v_parcelas,
+    'credito_sem_par', v_credito > 0 AND NOT v_credito_usado,
     'items', v_detail
   );
 END;
@@ -476,10 +533,11 @@ grant execute on function public.confirm_nfe_import(uuid, uuid, jsonb, uuid) to 
 
 -- ───────────────────────────────────────────────────────────────────────────────────────────
 -- 6. "Desfazer importação" acompanha as parcelas. Antes apagava só as contas sem pagamento: a
---    parcela paga com crédito do fornecedor sobraria, e o Pix que a importação só LIGOU à nota
+--    parcela paga com crédito do fornecedor sobraria, e o pagamento que foi LIGADO à nota
 --    continuaria ligado — reimportar a nota duplicaria as duas. Agora: sai o que a importação
---    CRIOU (a pagar e a paga com crédito), volta a ficar sem nota o que ela só ligou, e parcela
---    paga de verdade pela nota (Registrar pagamento) pede para desfazer o pagamento antes.
+--    CRIOU (a pagar e a paga com crédito), volta a ficar sem nota o que foi só ligado (e a marca
+--    "[NF-e …]" sai da observação dele), e parcela paga de verdade pela nota (Registrar
+--    pagamento) pede para desfazer o pagamento antes.
 -- ───────────────────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION public.revert_nfe_import(p_note_id uuid)
  RETURNS jsonb
@@ -539,9 +597,12 @@ BEGIN
      AND (coalesce(paid_amount, 0) = 0 OR payment_method = 'credito_fornecedor');
   GET DIAGNOSTICS v_payable = ROW_COUNT;
 
-  -- O que ela só ligou (o pagamento que já tinha saído pelo banco) e o que foi cancelado voltam
-  -- a ficar sem nota — senão a reimportação não reconheceria o pagamento e criaria a parcela de novo.
-  UPDATE payables SET fiscal_note_id = NULL, updated_at = now()
+  -- O que foi só ligado (o pagamento que já tinha saído pelo banco) e o que foi cancelado voltam a
+  -- ficar sem nota — senão a reimportação não reconheceria o pagamento e criaria a parcela de novo.
+  UPDATE payables
+     SET fiscal_note_id = NULL,
+         notes = nullif(btrim(regexp_replace(coalesce(notes, ''), '\s*\[NF-e [^]]*\]', '', 'g')), ''),
+         updated_at = now()
    WHERE fiscal_note_id = p_note_id AND (origin <> 'fiscal_note' OR status = 'cancelled');
   GET DIAGNOSTICS v_desligadas = ROW_COUNT;
 
@@ -560,6 +621,68 @@ $function$;
 
 revoke all on function public.revert_nfe_import(uuid) from public, anon;
 grant execute on function public.revert_nfe_import(uuid) to authenticated, service_role;
+
+-- ───────────────────────────────────────────────────────────────────────────────────────────
+-- 6b. "É este?" — a pergunta da importação respondida com SIM: o pagamento que já tinha saído pelo
+--     banco passa a ser aquela parcela da nota (ligado a ela, com a marca "[NF-e …]" na
+--     observação), e a parcela a pagar que a importação criou sai. Tudo conferido de novo aqui:
+--     parcela ainda a pagar e criada pela importação; pagamento lançado pelo Extrato, sem nota,
+--     do MESMO fornecedor e do MESMO valor.
+-- ───────────────────────────────────────────────────────────────────────────────────────────
+create or replace function public.ligar_parcela_ao_pagamento(p_parcela uuid, p_pagamento uuid)
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $function$
+declare
+  v_parc   public.payables%rowtype;
+  v_pag    public.payables%rowtype;
+  v_numero text;
+  v_qual   text;
+begin
+  if auth.uid() is not null and not public.is_admin(auth.uid()) then
+    raise exception 'forbidden';
+  end if;
+
+  select * into v_parc from public.payables where id = p_parcela for update;
+  select * into v_pag from public.payables where id = p_pagamento for update;
+  if v_parc.id is null or v_pag.id is null then
+    raise exception 'Parcela ou pagamento não encontrado — nada foi ligado.';
+  end if;
+  if v_parc.origin <> 'fiscal_note' or v_parc.fiscal_note_id is null or v_parc.status <> 'pending'
+     or coalesce(v_parc.paid_amount, 0) > 0 then
+    raise exception 'Esta parcela não está mais a pagar — nada foi ligado.';
+  end if;
+  if v_pag.bank_transaction_id is null or v_pag.fiscal_note_id is not null or v_pag.status = 'cancelled' then
+    raise exception 'Este pagamento não está livre para ser ligado a uma nota — nada foi ligado.';
+  end if;
+  if v_pag.supplier_id is distinct from v_parc.supplier_id or abs(v_pag.amount - v_parc.amount) >= 0.01 then
+    raise exception 'Fornecedor ou valor diferentes — não é a mesma parcela. Nada foi ligado.';
+  end if;
+
+  select nfe_number into v_numero from public.fiscal_notes where id = v_parc.fiscal_note_id;
+  v_qual := coalesce(substring(v_parc.description from '\((parcela [0-9]+/[0-9]+)\)'), 'à vista');
+
+  update public.payables
+     set fiscal_note_id = v_parc.fiscal_note_id,
+         notes = btrim(coalesce(notes, '') || ' [NF-e ' || coalesce(v_numero, '') || ', ' || v_qual
+                 || ': paga por este pagamento]'),
+         updated_at = now()
+   where id = p_pagamento;
+  delete from public.payables where id = p_parcela;
+
+  insert into public.reconciliation_log (acao, autor, payable_id, bank_transaction_id, valor, detalhe)
+  values ('ligou_parcela_da_nota', auth.uid(), p_pagamento, v_pag.bank_transaction_id, v_pag.amount,
+          left('NF-e ' || coalesce(v_numero, '') || ', ' || v_qual || ': o pagamento lançado pelo Extrato é esta parcela '
+               || '(confirmado na importação da nota); a parcela a pagar que a importação criou saiu.', 300));
+
+  return jsonb_build_object('ok', true, 'pagamento', p_pagamento, 'nota', v_parc.fiscal_note_id);
+end;
+$function$;
+
+revoke all on function public.ligar_parcela_ao_pagamento(uuid, uuid) from public, anon;
+grant execute on function public.ligar_parcela_ao_pagamento(uuid, uuid) to authenticated, service_role;
 
 -- ───────────────────────────────────────────────────────────────────────────────────────────
 -- 7. Selo de cobertura do DRE com a MESMA regra do fluxo de caixa pelo extrato
@@ -618,6 +741,105 @@ revoke all on function public.dre_cobertura(integer) from public, anon;
 grant execute on function public.dre_cobertura(integer) to authenticated, service_role;
 
 -- ───────────────────────────────────────────────────────────────────────────────────────────
+-- 8. "Mês pronto?" — o item "Nenhuma despesa lançada em dobro" com as parcelas da nota. A parcela
+--    nasce com a data da NOTA; comparar essa data com a do pagamento da entrada (no mesmo dia, do
+--    mesmo valor) acusava duplicata onde não havia. Conta em aberto se compara pelo VENCIMENTO;
+--    pagamento já ligado à nota não é duplicata das outras parcelas dela; e a parte paga com
+--    crédito do fornecedor não tem par no banco. O resto da função é o de produção, sem mudança.
+-- ───────────────────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.checklist_do_mes(p_ano integer, p_mes integer)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_ini date := make_date(p_ano, p_mes, 1);
+  v_fim date := (make_date(p_ano, p_mes, 1) + interval '1 month - 1 day')::date;
+  v_itens jsonb := '[]'::jsonb;
+  v_n integer;
+  v_valor numeric;
+  v_det text;
+begin
+  -- 1. Saldo de cada conta confere com o banco (a última conferência).
+  select count(*), string_agg(c.label || ' difere ' || public._brl(abs(k.diferenca)), '; ')
+    into v_n, v_det
+    from public.bank_connections c
+    join lateral (select * from public.bank_balance_checks b where b.bank_connection_id = c.id
+                   order by b.conferido_em desc limit 1) k on true
+   where coalesce(c.active, true) and not k.fecha;
+  v_itens := v_itens || jsonb_build_object('chave', 'saldo_confere', 'bloqueia', true, 'ok', v_n = 0,
+    'titulo', 'O saldo de cada conta confere com o banco', 'quantidade', v_n,
+    'detalhe', coalesce(v_det, 'Todas as contas conferem na última sincronização.'));
+
+  -- 2. Nada do extrato do mês sem destino (nem lançado, nem casado, nem fora da fila).
+  select count(*), coalesce(sum(t.amount), 0) into v_n, v_valor
+    from public.bank_transactions_situacao t
+   where t.transaction_date between v_ini and v_fim and t.situacao = 'nova'
+     and coalesce(t.tx_status, '') <> 'PENDING';
+  v_itens := v_itens || jsonb_build_object('chave', 'extrato_tratado', 'bloqueia', true, 'ok', v_n = 0,
+    'titulo', 'Todo movimento do banco no mês tem destino', 'quantidade', v_n, 'valor', v_valor,
+    'detalhe', case when v_n = 0 then 'Nada esperando no Extrato.' else v_n || ' linha(s) esperando no Extrato.' end);
+
+  -- 3. Nenhuma despesa lançada em dobro: uma com banco e outra sem, mesmo valor, mesma
+  --    contraparte, até 5 dias. (Duas COM banco são dois pagamentos reais.) Conta em aberto se
+  --    compara pelo vencimento; pagamento já ligado a uma nota não é duplicata das parcelas dela;
+  --    a parte paga com crédito do fornecedor não passa pelo banco (revisão de 27/09/2026).
+  select count(*) into v_n
+    from public.payables a
+    join public.payables b on b.id <> a.id
+     and a.bank_transaction_id is not null and b.bank_transaction_id is null
+     and b.status <> 'cancelled' and abs(a.amount - b.amount) < 0.01
+     and abs(a.issue_date - case when b.status in ('pending', 'partially_paid', 'overdue') then b.due_date else b.issue_date end) <= 5
+     and not (a.fiscal_note_id is not null and a.fiscal_note_id = b.fiscal_note_id)
+     and b.payment_method is distinct from 'credito_fornecedor'
+     and coalesce(a.supplier_id::text, upper(a.supplier_name), '') = coalesce(b.supplier_id::text, upper(b.supplier_name), '')
+     and coalesce(a.supplier_id::text, upper(a.supplier_name), '') <> ''
+   where a.status <> 'cancelled' and a.issue_date between v_ini and v_fim;
+  v_itens := v_itens || jsonb_build_object('chave', 'sem_duplicata', 'bloqueia', true, 'ok', v_n = 0,
+    'titulo', 'Nenhuma despesa lançada em dobro', 'quantidade', v_n,
+    'detalhe', case when v_n = 0 then 'Nenhum par suspeito.' else v_n || ' par(es) com o mesmo valor e fornecedor, um pelo banco e outro à mão.' end);
+
+  -- 4. Lançamento casado com o extrato pelo mesmo valor.
+  select count(*) into v_n
+    from public.conciliacao_lancamentos l
+   where l.situacao = 'conciliado' and coalesce(l.diferenca, 0) <> 0
+     and coalesce(l.extrato_data, l.issue_date) between v_ini and v_fim;
+  v_itens := v_itens || jsonb_build_object('chave', 'conciliacao_bate', 'bloqueia', true, 'ok', v_n = 0,
+    'titulo', 'Nenhum lançamento com valor diferente do extrato', 'quantidade', v_n,
+    'detalhe', case when v_n = 0 then 'Todos batem.' else v_n || ' lançamento(s) difere(m) do banco — veja a Conciliação.' end);
+
+  -- 5. Tudo tem categoria (sem ela o valor some do resultado).
+  select (select count(*) from public.payables where status <> 'cancelled' and issue_date between v_ini and v_fim and expense_category is null)
+       + (select count(*) from public.receivables where status <> 'cancelled' and issue_date between v_ini and v_fim and category is null)
+    into v_n;
+  v_itens := v_itens || jsonb_build_object('chave', 'tudo_categorizado', 'bloqueia', true, 'ok', v_n = 0,
+    'titulo', 'Todo lançamento tem categoria', 'quantidade', v_n,
+    'detalhe', case when v_n = 0 then 'Nada sem categoria.' else v_n || ' lançamento(s) sem categoria não entram no DRE.' end);
+
+  -- 6. Aviso: pago sem nenhum rastro no banco (ou no caixa).
+  select count(*) into v_n from public.conciliacao_lancamentos l
+   where l.situacao = 'sem_extrato' and l.status = 'paid' and l.issue_date between v_ini and v_fim;
+  v_itens := v_itens || jsonb_build_object('chave', 'pago_sem_banco', 'bloqueia', false, 'ok', v_n = 0,
+    'titulo', 'Pagos com rastro no banco ou no caixa', 'quantidade', v_n,
+    'detalhe', case when v_n = 0 then 'Todo pagamento tem rastro.' else v_n || ' lançamento(s) pago(s) sem linha do banco — confira na Conciliação.' end);
+
+  -- 7. Aviso: "Outras despesas" costuma esconder o que merecia categoria própria.
+  select count(*), coalesce(sum(amount), 0) into v_n, v_valor from public.payables
+   where status <> 'cancelled' and issue_date between v_ini and v_fim and expense_category = 'Outras despesas';
+  v_itens := v_itens || jsonb_build_object('chave', 'outras_despesas', 'bloqueia', false, 'ok', v_n = 0,
+    'titulo', 'Pouco em "Outras despesas"', 'quantidade', v_n, 'valor', v_valor,
+    'detalhe', case when v_n = 0 then 'Nada em "Outras despesas".' else v_n || ' lançamento(s), ' || public._brl(v_valor) || ', em "Outras despesas".' end);
+
+  return jsonb_build_object(
+    'ano', p_ano, 'mes', p_mes,
+    'pronto', not exists (select 1 from jsonb_array_elements(v_itens) i where (i ->> 'bloqueia')::boolean and not (i ->> 'ok')::boolean),
+    'itens', v_itens
+  );
+end;
+$function$;
+
+-- ───────────────────────────────────────────────────────────────────────────────────────────
 -- Conferências: se algo acima não ficou como deveria, nada é gravado.
 -- ───────────────────────────────────────────────────────────────────────────────────────────
 do $$
@@ -640,8 +862,11 @@ begin
   end if;
   if has_function_privilege('anon', 'public.confirm_nfe_import(uuid,uuid,jsonb,uuid)', 'EXECUTE')
      or has_function_privilege('anon', 'public.revert_nfe_import(uuid)', 'EXECUTE')
-     or has_function_privilege('anon', 'public.dre_cobertura(integer)', 'EXECUTE') then
-    raise exception 'anon ainda executa a importação, o desfazer da nota ou a cobertura do DRE';
+     or has_function_privilege('anon', 'public.ligar_parcela_ao_pagamento(uuid,uuid)', 'EXECUTE')
+     or has_function_privilege('anon', 'public.dre_cobertura(integer)', 'EXECUTE')
+     or has_function_privilege('anon', 'public._pagamentos_que_podem_ser_a_parcela(uuid,numeric,date,date)', 'EXECUTE')
+     or has_function_privilege('authenticated', 'public._pagamentos_que_podem_ser_a_parcela(uuid,numeric,date,date)', 'EXECUTE') then
+    raise exception 'anon (ou authenticated, na função interna) ainda executa uma função da importação ou da cobertura';
   end if;
   if (select reloptions from pg_class where oid = 'public.conciliacao_lancamentos'::regclass) is distinct from array['security_invoker=on'] then
     raise exception 'a visão de conciliação perdeu o security_invoker';

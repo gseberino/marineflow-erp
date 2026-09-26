@@ -55,7 +55,12 @@ export function ParaOndeFoi({
           variant={destino === 'cliente' ? 'default' : 'outline'}
           aria-pressed={destino === 'cliente'}
           // "Não é desta OS" (null) dito antes não vira "sem OS": a OS do cliente é pergunta nova.
-          onClick={() => onMudar({ destino: 'cliente', category: SERVICO_DE_CLIENTE, serviceOrderId: typeof os === 'string' ? os : undefined })}
+          // O centro de custo escolhido em "Para a HBR" sai junto: o seletor some, e o valor
+          // escondido iria para o lançamento (revisão de 27/09/2026).
+          onClick={() => onMudar({
+            destino: 'cliente', category: SERVICO_DE_CLIENTE, costCenterId: null,
+            serviceOrderId: typeof os === 'string' ? os : undefined,
+          })}
         >
           Serviço de um cliente
         </Button>

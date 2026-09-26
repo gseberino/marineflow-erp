@@ -823,3 +823,90 @@ describe('serviço de terceiro pergunta para onde foi', () => {
     expect(regraMock).not.toHaveBeenCalled();
   });
 });
+
+describe('revisão de 27/09: centro escondido, contradição e cabeçalho do grupo', () => {
+  afterEach(() => { estadoDaFila.dados = null; aprovarMock.mockClear(); });
+
+  const servico = {
+    id: 'p7', kind: 'create_payable', status: 'pending', bank_transaction_id: 't7', related_transaction_id: null,
+    title: 'Despesa: JOAO PINTOR', reasoning: 'x', confidence: 95, suggested_amount: 650, suggested_date: '2026-09-25',
+    suggested_category: 'Serviços de terceiros', suggested_description: 'JOAO PINTOR', suggested_supplier_id: null,
+    dre_group: 'custo_direto', created_at: '2026-09-25T10:00:00Z',
+  };
+
+  it('voltar de "Para a HBR" para "Serviço de um cliente" tira o centro de custo escondido', async () => {
+    estadoDaFila.dados = [servico];
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderInbox();
+    await user.click(await screen.findByRole('button', { name: 'Para a HBR' }));
+    await user.click(screen.getByLabelText('Centro de custo'));
+    await user.click(await screen.findByText('Obras e reformas da sede'));
+    await user.click(screen.getByRole('button', { name: 'Serviço de um cliente' }));
+    await user.type(screen.getByLabelText('O que foi feito'), 'solda no casco');
+    await user.click(screen.getByLabelText('De qual OS'));
+    await user.click(await screen.findByText('O serviço não tem OS no sistema'));
+    await user.click(screen.getByRole('button', { name: 'Aprovar e lançar' }));
+    expect(aprovarMock.mock.calls[0][0].overrides.p7).toMatchObject({ destino: 'cliente', costCenterId: null });
+  });
+
+  it('para a HBR E ligada à OS do cliente: a tela não libera (o servidor recusaria)', async () => {
+    estadoDaFila.dados = [{ ...servico, suggested_service_order_id: 'os9' }];
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderInbox();
+    await user.click(await screen.findByRole('button', { name: 'Para a HBR' }));
+    await user.click(screen.getByLabelText('Centro de custo'));
+    await user.click(await screen.findByText('Obras e reformas da sede'));
+    await user.type(screen.getByLabelText('O que foi feito'), 'pintura da sede');
+    // "Para a HBR" respondeu "não é desta OS"; desdizer e responder "Sim" contradiz o destino.
+    await user.click(screen.getByRole('button', { name: 'mudar' }));
+    await user.click(await screen.findByRole('button', { name: 'Sim, é desta' }));
+    expect(screen.getByRole('button', { name: /escolha um dos dois/ })).toBeDisabled();
+  });
+
+  // 20 é o piso do modo agrupado.
+  const doPintor = (i: number, extra: Record<string, unknown> = {}) => ({
+    ...servico, id: `g${i}`, bank_transaction_id: `tg${i}`, suggested_amount: 100,
+    bank_transactions: { counterparty_name: 'JOAO PINTOR', source_type: 'bank' }, ...extra,
+  });
+
+  it('o cabeçalho só pergunta "para onde foram" quando TODAS as linhas são serviço', async () => {
+    estadoDaFila.dados = [
+      doPintor(0),
+      ...Array.from({ length: 19 }, (_, i) => doPintor(i + 1, { suggested_category: 'Outras despesas' })),
+    ];
+    renderInbox();
+    expect(await screen.findByText('20 propostas')).toBeInTheDocument();
+    expect(screen.queryByText('Para onde foram estes serviços?')).not.toBeInTheDocument();
+  });
+
+  it('respondido no cabeçalho, vale para as linhas sem resposta — e não apaga a de quem respondeu diferente', async () => {
+    estadoDaFila.dados = [
+      doPintor(0, { title: 'Despesa: JOAO PINTOR (a da lancha)' }),
+      ...Array.from({ length: 19 }, (_, i) => doPintor(i + 1)),
+    ];
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderInbox();
+    // Uma linha responde por conta própria: serviço de um cliente.
+    await user.click(await screen.findByText(/Ver as 20 linhas/));
+    const aDaLancha = (await screen.findByText('Despesa: JOAO PINTOR (a da lancha)')).closest('div.rounded-lg, [class*="p-3"]') as HTMLElement;
+    await user.click(within(aDaLancha).getByRole('button', { name: 'Serviço de um cliente' }));
+
+    // O cabeçalho responde "Para a HBR" para o grupo.
+    const cabecalho = screen.getByText('Para onde foram estes serviços?').closest('div.space-y-2') as HTMLElement;
+    await user.click(within(cabecalho).getByRole('button', { name: 'Para a HBR' }));
+    await user.click(within(cabecalho).getByLabelText('Centro de custo'));
+    await user.click(await screen.findByText('Obras e reformas da sede'));
+    await user.type(within(cabecalho).getByLabelText('O que foi feito'), 'pintura da sede');
+
+    // A linha que respondeu "cliente" continua "cliente".
+    expect(within(aDaLancha).getByRole('button', { name: 'Serviço de um cliente' })).toHaveAttribute('aria-pressed', 'true');
+    // As outras 19 vão no lote do grupo como despesa da empresa.
+    await user.click(screen.getByRole('button', { name: /Aprovar 19/ }));
+    const { ids, overrides } = aprovarMock.mock.calls[0][0];
+    expect(ids).toHaveLength(19);
+    expect(ids).not.toContain('g0');
+    expect(overrides.g1).toMatchObject({
+      destino: 'empresa', category: 'Serviços de terceiros para a empresa', costCenterId: 'cc-obra', notes: 'pintura da sede',
+    });
+  });
+});

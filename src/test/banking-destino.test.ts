@@ -11,17 +11,17 @@ describe('o que a aprovação faz com a resposta (finance-review/aprovar)', () =
 
   it('para a HBR: troca para a categoria da empresa', () => {
     expect(aplicarDestino(k, SERVICO_DE_CLIENTE, { destino: 'empresa', costCenterId: 'cc', notes: 'pintura da sede' }, undefined))
-      .toEqual({ categoria: SERVICO_DA_EMPRESA });
+      .toEqual({ categoria: SERVICO_DA_EMPRESA, destino: 'empresa' });
   });
 
   it('para um cliente com OS: fica no custo do serviço', () => {
     expect(aplicarDestino(k, SERVICO_DE_CLIENTE, { destino: 'cliente', serviceOrderId: 'os60', notes: 'solda' }, 'os60'))
-      .toEqual({ categoria: SERVICO_DE_CLIENTE });
+      .toEqual({ categoria: SERVICO_DE_CLIENTE, destino: 'cliente' });
   });
 
   it('a OS anotada pelo WhatsApp vale como resposta (sem nada na tela)', () => {
     expect(aplicarDestino(k, SERVICO_DE_CLIENTE, { notes: 'mão de obra' }, 'os-anotada'))
-      .toEqual({ categoria: SERVICO_DE_CLIENTE });
+      .toEqual({ categoria: SERVICO_DE_CLIENTE, destino: 'cliente' });
   });
 
   it('HBR e OS de cliente ao mesmo tempo é contradição: recusa', () => {
@@ -31,7 +31,7 @@ describe('o que a aprovação faz com a resposta (finance-review/aprovar)', () =
 
   it('"Para a HBR" com a OS anotada desfeita na tela ("não é") passa', () => {
     expect(aplicarDestino(k, SERVICO_DE_CLIENTE, { destino: 'empresa', costCenterId: 'cc', notes: 'pintura', serviceOrderId: null }, null))
-      .toEqual({ categoria: SERVICO_DA_EMPRESA });
+      .toEqual({ categoria: SERVICO_DA_EMPRESA, destino: 'empresa' });
   });
 
   it('sem resposta: recusa com a frase do que falta', () => {
@@ -40,8 +40,8 @@ describe('o que a aprovação faz com a resposta (finance-review/aprovar)', () =
   });
 
   it('outras categorias passam como estão', () => {
-    expect(aplicarDestino(k, 'Peças e materiais', {}, undefined)).toEqual({ categoria: 'Peças e materiais' });
-    expect(aplicarDestino('create_receivable', 'Serviços prestados', {}, undefined)).toEqual({ categoria: 'Serviços prestados' });
+    expect(aplicarDestino(k, 'Peças e materiais', {}, undefined)).toEqual({ categoria: 'Peças e materiais', destino: null });
+    expect(aplicarDestino('create_receivable', 'Serviços prestados', {}, undefined)).toEqual({ categoria: 'Serviços prestados', destino: null });
   });
 });
 
@@ -110,5 +110,18 @@ describe('o que falta para aprovar', () => {
       'Serviço de terceiro: diga para onde foi (serviço de um cliente ou para a HBR) e o que foi feito',
     );
     expect(fraseDaFalta(['centro'])).toBe('Serviço de terceiro: diga o centro de custo');
+  });
+});
+
+describe('contradição: para a HBR e ligada à OS de um cliente (revisão de 27/09/2026)', () => {
+  const k = 'create_payable';
+  it('a tela não libera o que o servidor recusa', () => {
+    const r = { destino: 'empresa' as const, costCenterId: 'cc', notes: 'pintura da sede', serviceOrderId: 'os60' };
+    expect(faltaNoDestino(k, SERVICO_DE_CLIENTE, r)).toEqual(['contradicao']);
+    expect(fraseDaFalta(['contradicao'])).toMatch(/escolha um dos dois/);
+  });
+  it('a OS anotada pelo WhatsApp também conta, até alguém dizer "não é"', () => {
+    expect(faltaNoDestino(k, SERVICO_DE_CLIENTE, { destino: 'empresa', costCenterId: 'cc', notes: 'pintura' }, 'os-anotada')).toEqual(['contradicao']);
+    expect(faltaNoDestino(k, SERVICO_DE_CLIENTE, { destino: 'empresa', costCenterId: 'cc', notes: 'pintura', serviceOrderId: null }, null)).toEqual([]);
   });
 });

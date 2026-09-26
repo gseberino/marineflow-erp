@@ -33,6 +33,7 @@ import {
 } from '@/hooks/use-note-service-orders';
 import { parseNfeSupplierNote } from '@/lib/nfe-xml-parser';
 import { extractInvokeErrorMessage } from '@/lib/invoke-error';
+import { PerguntasDaNota, parcelasComPergunta, type ParcelaDaImportacao } from '@/components/PerguntasDaNota';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface NFeItem {
@@ -92,7 +93,7 @@ function useFiscalNotes() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('fiscal_notes')
-        .select('id, nfe_key, nfe_number, issuer_name, issued_at, total_amount, tax_icms, status, confirmed_at, created_at')
+        .select('id, nfe_key, nfe_number, issuer_name, issued_at, total_amount, tax_icms, status, confirmed_at, created_at, import_result')
         .order('created_at', { ascending: false })
         .limit(100);
       if (error) throw error;
@@ -128,6 +129,8 @@ export default function ImportFiscalXML() {
   const [itemServiceOrders, setItemServiceOrders] = useState<Record<number, string>>({});
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [revertingId, setRevertingId] = useState<string | null>(null);
+  // "É este?" — parcelas da nota que parecem já ter saído pelo banco (27/09/2026).
+  const [perguntasDaNota, setPerguntasDaNota] = useState<{ nota: string | null; parcelas: ParcelaDaImportacao[] } | null>(null);
   // Numa nota com dezenas de itens, os que casaram com certeza são ruído. Este
   // filtro deixa só o que merece um olhar: item que será criado, casado pela
   // descrição (fuzzy, menos certo) ou com divergência de custo/unidade/NCM.
@@ -417,18 +420,23 @@ export default function ImportFiscalXML() {
       toast.success(
         `Importação confirmada! ${result.movements_created} movimentos · ${result.products_created} produtos criados.`
       );
-      // As parcelas da nota (27/09/2026): o que ficou a pagar, o que a nota diz ter sido pago com
-      // crédito do fornecedor e o que já tinha saído pelo banco — este é LIGADO, não duplicado, e
-      // o dono precisa saber que foi assim.
-      const parcelas = (result.parcelas ?? []) as Array<{ como: string }>;
+      // As parcelas da nota (27/09/2026): o que ficou a pagar e o que a nota diz ter sido pago com
+      // crédito do fornecedor. A parcela que parece já ter saído pelo banco vira PERGUNTA — o
+      // sistema não liga sozinho (decisão do dono, 26/09/2026: "deve sempre questionar").
+      const parcelas = (result.parcelas ?? []) as ParcelaDaImportacao[];
       if (parcelas.length > 1 || parcelas.some((p) => p.como !== 'a_pagar')) {
         const n = (como: string) => parcelas.filter((p) => p.como === como).length;
         toast.info([
-          `A nota tem ${parcelas.length} parcela(s)`,
-          n('a_pagar') && `${n('a_pagar')} ficou(aram) em Contas a Pagar, cada uma com o vencimento da nota`,
+          `A nota foi lançada em ${parcelas.length} conta(s)`,
+          n('a_pagar') && `${n('a_pagar')} em Contas a Pagar, cada uma com o vencimento da nota`,
           n('credito_do_fornecedor') && `${n('credito_do_fornecedor')} paga(s) com crédito do fornecedor (não sai do banco)`,
-          n('ja_paga_pelo_banco') && `${n('ja_paga_pelo_banco')} já tinha(m) saído pelo banco e foi(ram) ligada(s) à nota, sem duplicar`,
         ].filter(Boolean).join(' · ') + '.', { duration: 12000 });
+      }
+      if (result.credito_sem_par) {
+        toast.warning('A nota diz que parte foi paga com crédito do fornecedor, mas o valor não bate com as parcelas. Confira as contas a pagar desta nota.', { duration: 15000 });
+      }
+      if (parcelasComPergunta(parcelas).length > 0) {
+        setPerguntasDaNota({ nota: parsed.nfeNumber, parcelas });
       }
 
       /* Vínculo com a OS só agora: as linhas de fiscal_note_items nascem da
@@ -1155,16 +1163,26 @@ export default function ImportFiscalXML() {
                                 onClick: () => void handleCancelNote(note.id),
                               }]
                             : []),
+                          ...(note.status === 'confirmed' && parcelasComPergunta(note.import_result?.parcelas).length > 0
+                            ? [{
+                                texto: 'Parcelas que parecem já pagas',
+                                icone: Banknote,
+                                titulo: 'Reabre a pergunta: esta parcela é um pagamento que já saiu pelo banco?',
+                                onClick: () => setPerguntasDaNota({ nota: note.nfe_number ?? null, parcelas: note.import_result.parcelas }),
+                              }]
+                            : []),
                           ...(note.status === 'confirmed'
                             ? [{
                                 texto: revertingId === note.id ? 'Desfazendo…' : 'Desfazer a entrada',
                                 icone: RefreshCw, perigo: true,
                                 desabilitada: revertingId === note.id,
-                                titulo: 'Estorna o estoque e remove a conta a pagar desta importação. Não emite nada ao fisco.',
+                                titulo: 'Estorna o estoque e remove as contas a pagar desta importação. Não emite nada ao fisco.',
                                 onClick: () => {
                                   if (confirm(
                                     'Desfazer a importação desta nota?\n\n' +
-                                    'O estoque será estornado e a conta a pagar (se não houver pagamento) será removida. ' +
+                                    'O estoque será estornado e as contas desta nota saem (as a pagar e a paga com crédito do fornecedor). ' +
+                                    'Pagamento do banco ligado a ela continua lançado, só deixa de apontar para a nota. ' +
+                                    'Se alguma parcela já foi paga pela tela, desfaça esse pagamento antes. ' +
                                     'A nota volta para "Pendente" e pode ser conferida de novo.',
                                   )) void handleRevert(note.id);
                                 },
@@ -1185,6 +1203,17 @@ export default function ImportFiscalXML() {
           </Table>
         </div>
       </div>
+      )}
+
+      {perguntasDaNota && (
+        <PerguntasDaNota
+          nota={perguntasDaNota.nota}
+          parcelas={perguntasDaNota.parcelas}
+          onFechar={() => {
+            setPerguntasDaNota(null);
+            void qc.invalidateQueries({ queryKey: ['fiscal_notes'] });
+          }}
+        />
       )}
     </div>
   );

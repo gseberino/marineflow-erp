@@ -31,7 +31,7 @@ export interface RespostaDoDestino {
   notes?: string | null;
 }
 
-export type FaltaNoDestino = "destino" | "os" | "centro" | "o_que_foi_feito";
+export type FaltaNoDestino = "destino" | "os" | "centro" | "o_que_foi_feito" | "contradicao";
 
 /** Menos que isto não diz o que foi feito ("ok", "."). */
 export const MINIMO_DO_QUE_FOI_FEITO = 3;
@@ -76,7 +76,12 @@ export function faltaNoDestino(
   if (!destino) falta.push("destino");
   // "Sem OS no sistema" (null) é resposta; só ninguém ter dito nada é falta.
   else if (destino === "cliente" && r?.serviceOrderId === undefined && !osJaDita) falta.push("os");
-  else if (destino === "empresa" && !r?.costCenterId) falta.push("centro");
+  else if (destino === "empresa") {
+    if (!r?.costCenterId) falta.push("centro");
+    // Para a HBR E ligada à OS de um cliente (respondida na tela ou anotada) é contradição: a tela
+    // não pode liberar o que o servidor vai recusar (revisão de 27/09/2026).
+    if (typeof r?.serviceOrderId === "string" || !!osJaDita) falta.push("contradicao");
+  }
   if (String(r?.notes ?? "").trim().length < MINIMO_DO_QUE_FOI_FEITO) falta.push("o_que_foi_feito");
   return falta;
 }
@@ -91,19 +96,16 @@ export function aplicarDestino(
   categoria: string,
   r: RespostaDoDestino | null | undefined,
   osRespondida: string | null | undefined,
-): { categoria: string } | { erro: string } {
+): { categoria: string; destino: Destino | null } | { erro: string } {
   const osJaDita = r?.serviceOrderId === undefined ? (osRespondida ?? null) : null;
   const falta = faltaNoDestino(kind, categoria, r, osJaDita);
   if (falta.length > 0) return { erro: fraseDaFalta(falta) };
-  if (!precisaDeDestino(kind, categoria)) return { categoria };
+  if (!precisaDeDestino(kind, categoria)) return { categoria, destino: null };
   const destino = destinoEfetivo(categoria, r, osJaDita);
-  if (destino === "empresa" && typeof osRespondida === "string") {
-    return { erro: "Você disse que o serviço foi para a HBR e ligou a despesa à OS de um cliente — escolha um dos dois" };
-  }
-  return { categoria: categoriaDoDestino(categoria, destino) };
+  return { categoria: categoriaDoDestino(categoria, destino), destino };
 }
 
-const ROTULO_DA_FALTA: Record<FaltaNoDestino, string> = {
+const ROTULO_DA_FALTA: Record<Exclude<FaltaNoDestino, "contradicao">, string> = {
   destino: "para onde foi (serviço de um cliente ou para a HBR)",
   os: "a OS do cliente (ou que não tem OS no sistema)",
   centro: "o centro de custo",
@@ -112,7 +114,10 @@ const ROTULO_DA_FALTA: Record<FaltaNoDestino, string> = {
 
 /** "Serviço de terceiro: diga para onde foi e o que foi feito". */
 export function fraseDaFalta(falta: FaltaNoDestino[]): string {
-  const partes = falta.map((f) => ROTULO_DA_FALTA[f]);
+  if (falta.includes("contradicao")) {
+    return "Serviço de terceiro: você disse que foi para a HBR e a despesa está ligada à OS de um cliente — escolha um dos dois";
+  }
+  const partes = falta.map((f) => ROTULO_DA_FALTA[f as Exclude<FaltaNoDestino, "contradicao">]);
   const lista = partes.length <= 1 ? (partes[0] ?? "") : `${partes.slice(0, -1).join(", ")} e ${partes[partes.length - 1]}`;
   return `Serviço de terceiro: diga ${lista}`;
 }

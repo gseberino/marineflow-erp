@@ -32,7 +32,7 @@ import { EvidenciaDaLinha, VinculoDaLinha } from '@/components/ExtratoIdentifica
 import { ParaOndeFoi, ObservacaoECentro } from '@/components/ParaOndeFoi';
 import {
   precisaDecidir, podeJaEstarLancado, osAnotada, temPerguntaDaOS, temPerguntaDaOC,
-  faltaNoDestinoDaLinha, precisaDeDestino, fraseDaFalta, faltaNoDestino,
+  faltaNoDestinoDaLinha, precisaDeDestino, fraseDaFalta, faltaNoDestino, SERVICO_DE_CLIENTE,
 } from '@/lib/extrato-vinculo';
 import { buscaAtiva, casaComBusca, type CriterioDeBusca } from '@/lib/busca-financeira';
 import {
@@ -659,9 +659,19 @@ function LinhaProposta({
  * chega classificada.
  */
 function CartaoDoFavorecido({
-  grupo, categoria, favorecidoId, osId, clienteId, resposta, onMudar, onAprovarLote, onCriarRegra, ocupado,
-  selecionadas, onSelecionarGrupo, children,
+  grupo, categoria, favorecidoId, osId, clienteId, resposta, onMudar, onMudarDestino, onAprovarLote, onCriarRegra, ocupado,
+  selecionadas, onSelecionarGrupo, children, todasSaoServico, categoriaDecidida,
 }: {
+  /** A resposta do "Para onde foi?" do cabeçalho: não apaga o que uma linha já respondeu diferente. */
+  onMudarDestino: (c: Correcao) => void;
+  /** Toda linha do grupo é serviço de terceiro (de cliente ou da empresa): o cabeçalho pergunta. */
+  todasSaoServico: boolean;
+  /**
+   * A categoria está decidida para o grupo inteiro: uma só para todas, ou cada linha escolhida
+   * pelo dono (ex.: 19 "para a HBR" e 1 "de cliente"). Categoria só SUGERIDA e diferente entre as
+   * linhas continua pedindo a escolha — o botão do grupo aplicaria o palpite do sistema.
+   */
+  categoriaDecidida: boolean;
   grupo: GrupoDeFavorecido;
   categoria: string;
   favorecidoId: string | null;
@@ -693,7 +703,7 @@ function CartaoDoFavorecido({
   const soEntradas = grupo.propostas.length > 0
     && grupo.propostas.every((p) => p.kind === 'create_receivable');
 
-  const semCategoriaEscolhida = !categoria || categoria === SEM_CATEGORIA;
+  const semCategoriaEscolhida = !categoriaDecidida;
   /**
    * Acima do limite de lote, a proposta NÃO entra no botão do grupo.
    *
@@ -714,9 +724,12 @@ function CartaoDoFavorecido({
    * contando — o gestor fica olhando para uma tela que não responde e não tem como
    * descobrir o que ela quer.
    */
-  // Serviço de terceiro no grupo: a pergunta vai no cabeçalho e a resposta desce para todas.
-  const perguntaDestino = !soEntradas && precisaDeDestino('create_payable', categoria);
-  const faltaDestino = perguntaDestino ? faltaNoDestino('create_payable', categoria, resposta) : [];
+  // Serviço de terceiro no grupo: a pergunta vai no cabeçalho e a resposta desce para todas. Vale
+  // também quando as linhas se dividem entre "de cliente" e "da empresa" (a pergunta continua ali
+  // para terminar de responder); a categoria que ela usa é a comum, ou a de cliente, neutra.
+  const perguntaDestino = !soEntradas && todasSaoServico;
+  const categoriaDoDestino = precisaDeDestino('create_payable', categoria) ? categoria : SERVICO_DE_CLIENTE;
+  const faltaDestino = perguntaDestino ? faltaNoDestino('create_payable', categoriaDoDestino, resposta) : [];
 
   const motivo = semCategoriaEscolhida
     ? 'Escolha a categoria acima para poder aprovar.'
@@ -803,10 +816,10 @@ function CartaoDoFavorecido({
           {perguntaDestino && (
             <ParaOndeFoi
               emGrupo={grupo.propostas.length > 1}
-              categoria={categoria}
+              categoria={categoriaDoDestino}
               correcao={resposta}
               falta={faltaDestino}
-              onMudar={(c) => onMudar(c)}
+              onMudar={(c) => onMudarDestino(c)}
               ocupado={ocupado}
             />
           )}
@@ -925,6 +938,8 @@ export function FinanceReviewInbox({
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
   const [correcoes, setCorrecoes] = useState<Record<string, Correcao>>({});
+  /** O destino que o cabeçalho de cada grupo escolheu ("Para onde foram estes serviços?"). */
+  const [destinoDoGrupo, setDestinoDoGrupo] = useState<Record<string, 'cliente' | 'empresa' | undefined>>({});
   // Trabalhar cartão e conta separados é mais rápido: a fatura tem muitos gastos pequenos
   // de estabelecimento, a conta tem poucos gastos grandes de fornecedor. Misturar os dois
   // obriga a trocar de raciocínio a cada linha.
@@ -1061,10 +1076,14 @@ export function FinanceReviewInbox({
    * aprovar aplicaria a escolha do sistema como se fosse a sua.
    */
   const estadoDoGrupo = (g: GrupoDeFavorecido): Correcao => {
-    const corrigida = g.propostas.map((p) => correcoes[p.id]).find((c) => c?.category);
-    const unica = g.categorias.length === 1 ? g.categorias[0] : '';
+    // A categoria EFETIVA de cada linha (a corrigida, ou a sugerida): o cabeçalho só mostra uma
+    // quando ela vale para todas. Antes bastava UMA linha corrigida para o cabeçalho exibir a
+    // categoria dela como se fosse do grupo — e a pergunta "para onde foi" do cabeçalho descia
+    // para as 22 (revisão de 27/09/2026).
+    const efetivas = g.propostas.map((p) => correcoes[p.id]?.category ?? p.suggested_category ?? '');
+    const unica = efetivas.length > 0 && efetivas.every((c) => c === efetivas[0]) ? efetivas[0] : '';
     return {
-      category: corrigida?.category ?? (unica === SEM_CATEGORIA ? '' : unica),
+      category: unica === SEM_CATEGORIA ? '' : unica,
       payeeId: g.propostas.map((p) => correcoes[p.id]?.payeeId ?? p.suggested_payee_id).find(Boolean) ?? null,
       // OS só a respondida, e só quando TODAS as linhas do grupo responderam a mesma: a
       // sugestão é pergunta de cada linha, e o cabeçalho não pode mostrar a OS de uma só.
@@ -1079,12 +1098,18 @@ export function FinanceReviewInbox({
    * cabeçalho não afirmar a resposta de uma linha só.
    */
   const respostaDoGrupo = (g: GrupoDeFavorecido): Correcao => {
+    // Depois que o cabeçalho escolheu um destino, ele fala pelas linhas que o SEGUEM (sem destino
+    // próprio, ou com o mesmo): a linha que respondeu diferente não tira a pergunta do cabeçalho.
+    const doCabecalho = destinoDoGrupo[g.chave];
+    const seguem = doCabecalho
+      ? g.propostas.filter((p) => { const d = correcoes[p.id]?.destino; return d === undefined || d === doCabecalho; })
+      : g.propostas;
     const comum = <K extends keyof Correcao>(k: K): Correcao[K] | undefined => {
-      const vs = g.propostas.map((p) => correcoes[p.id]?.[k]);
-      return vs.every((v) => v === vs[0]) ? vs[0] : undefined;
+      const vs = seguem.map((p) => correcoes[p.id]?.[k]);
+      return vs.length > 0 && vs.every((v) => v === vs[0]) ? vs[0] : undefined;
     };
     return {
-      destino: comum('destino'), serviceOrderId: comum('serviceOrderId'),
+      destino: doCabecalho ?? comum('destino'), serviceOrderId: comum('serviceOrderId'),
       costCenterId: comum('costCenterId'), notes: comum('notes'),
     };
   };
@@ -1094,6 +1119,34 @@ export function FinanceReviewInbox({
     setCorrecoes((m) => {
       const n = { ...m };
       for (const p of g.propostas) n[p.id] = { ...n[p.id], ...c };
+      return n;
+    });
+  };
+
+  /**
+   * A resposta do "Para onde foi?" dada no cabeçalho desce para as linhas SEM apagar o que uma
+   * linha já respondeu diferente (um "Sim, é desta OS" dado nela, outra observação): cada campo só
+   * muda onde estava em branco ou igual ao que o cabeçalho mostrava. A categoria acompanha o
+   * destino — muda só onde o destino mudou (revisão de 27/09/2026).
+   */
+  const corrigirDestinoDoGrupo = (g: GrupoDeFavorecido, c: Correcao) => {
+    const comum = respostaDoGrupo(g);
+    // Segue o cabeçalho a linha sem destino próprio ou com o destino que o cabeçalho mostrava.
+    const segue = (atual: Correcao) => atual.destino === undefined || atual.destino === comum.destino;
+    if ('destino' in c) setDestinoDoGrupo((d) => ({ ...d, [g.chave]: c.destino ?? undefined }));
+    setCorrecoes((m) => {
+      const n = { ...m };
+      for (const p of g.propostas) {
+        const atual: Correcao = n[p.id] ?? {};
+        if (!segue(atual)) continue;
+        const novo: Correcao = { ...atual };
+        for (const k of Object.keys(c) as (keyof Correcao)[]) {
+          if (k === 'category' || k === 'destino' || atual[k] === undefined || atual[k] === comum[k]) {
+            (novo as Record<string, unknown>)[k] = c[k];
+          }
+        }
+        n[p.id] = novo;
+      }
       return n;
     });
   };
@@ -1467,6 +1520,10 @@ export function FinanceReviewInbox({
             osId={estado.serviceOrderId ?? null}
             resposta={respostaDoGrupo(g)}
             onMudar={(c) => corrigirGrupo(g, c)}
+            onMudarDestino={(c) => corrigirDestinoDoGrupo(g, c)}
+            todasSaoServico={g.propostas.every((p) => precisaDeDestino(p.kind, correcoes[p.id]?.category ?? p.suggested_category))}
+            categoriaDecidida={!!estado.category
+              || g.propostas.every((p) => !!correcoes[p.id]?.category && correcoes[p.id]?.category !== SEM_CATEGORIA)}
             onAprovarLote={() => aprovarGrupo(g)}
             onCriarRegra={() => criarRegraDoGrupo(g)}
             ocupado={ocupado}

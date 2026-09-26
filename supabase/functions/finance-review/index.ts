@@ -1913,6 +1913,9 @@ async function aprovar(
         const comDestino = aplicarDestino(p.kind, categoria, ov, osRespondida);
         if ("erro" in comDestino) throw new Error(comDestino.erro);
         categoria = comDestino.categoria;
+        // Serviço de um cliente é custo da OS dele: um centro de custo escolhido antes (quando a
+        // linha estava em "Para a HBR") não vai junto (revisão de 27/09/2026).
+        if (comDestino.destino === "cliente") centroDeCusto = null;
 
         const parcelamento = await lerCompraParcelada(
           admin, (p.bank_transactions ?? null) as PernaDeParcelamento | null,
