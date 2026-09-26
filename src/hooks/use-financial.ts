@@ -3,32 +3,41 @@ import { supabase } from '@/integrations/supabase/client';
 import type { BankTransaction } from '@/lib/bank-parser';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { cancelPaymentCascade } from '@/lib/cascade-updates';
+import { lerEmPaginas } from '@/lib/ler-em-paginas';
 
 export function useReceivables() {
   return useQuery({
     queryKey: ['receivables'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('receivables')
-        .select('*, clients!receivables_client_id_fkey(id,name,whatsapp,phone), service_orders!receivables_service_order_id_fkey(id,service_order_number,share_token)')
-        .order('due_date', { ascending: true });
-      if (error) throw error;
-      return data;
-    },
+    // Em páginas: o servidor corta em 1.000 linhas sem avisar (ver lerEmPaginas).
+    queryFn: () => lerEmPaginas((de, ate) => supabase
+      .from('receivables')
+      .select('*, clients!receivables_client_id_fkey(id,name,whatsapp,phone), service_orders!receivables_service_order_id_fkey(id,service_order_number,share_token)')
+      .order('due_date', { ascending: true })
+      .order('id')
+      .range(de, ate)),
   });
 }
 
 export function usePayables() {
   return useQuery({
     queryKey: ['payables'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('payables')
-        .select('*, suppliers!payables_supplier_id_fkey(name), service_orders!payables_linked_service_order_id_fkey(service_order_number), service_order_expenses!service_order_expenses_linked_payable_id_fkey(receipt_url)')
-        .order('due_date', { ascending: true });
-      if (error) throw error;
-      return data;
-    },
+    // Em páginas: com 1.706 contas, a leitura de uma vez parava na 1.000ª (vencimento em
+    // 05/03/2026) e Contas a Pagar aparecia vazia — as 5 em aberto ficavam de fora.
+    queryFn: async () => (await lerEmPaginas((de, ate) => supabase
+      .from('payables')
+      .select('*, suppliers!payables_supplier_id_fkey(name), payees!payables_payee_id_fkey(name), service_orders!payables_linked_service_order_id_fkey(service_order_number), service_order_expenses!service_order_expenses_linked_payable_id_fkey(receipt_url)')
+      .order('due_date', { ascending: true })
+      .order('id')
+      .range(de, ate)))
+      // Quem recebeu, num campo só: fornecedor cadastrado, depois favorecido (sócio,
+      // diarista), depois o nome gravado. A tela lia `name`, que não existe na tabela, e
+      // ~1.200 despesas apareciam com "—", sem agrupar, filtrar nem exportar pelo nome.
+      .map((p) => ({
+        ...p,
+        name: (p as { suppliers?: { name?: string } | null }).suppliers?.name
+          ?? (p as { payees?: { name?: string } | null }).payees?.name
+          ?? (p as { supplier_name?: string | null }).supplier_name ?? null,
+      })),
   });
 }
 
@@ -57,7 +66,7 @@ export function useCreatePayable() {
     mutationFn: async (p: {
       description: string; issue_date: string; due_date: string;
       amount: number; currency?: string; expense_category?: string;
-      supplier_id?: string; name?: string;
+      supplier_id?: string; supplier_name?: string;
       linked_service_order_id?: string; notes?: string;
       origin?: string; bank_transaction_id?: string;
       cost_center_id?: string; sub_category?: string;

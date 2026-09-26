@@ -14,6 +14,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useI18n } from '@/i18n';
 import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/integrations/supabase/client';
+import { lerEmPaginas } from '@/lib/ler-em-paginas';
 import { exportToCSV } from '@/lib/export';
 import { montarDRE, doMes, type LancamentoDRE, type GrupoDRE } from '@/lib/dre';
 import { Download, ChevronDown, AlertTriangle, CheckCircle2, Lock } from 'lucide-react';
@@ -26,19 +27,23 @@ function useLancamentosDRE(ano: number) {
       const de = `${ano}-01-01`;
       const ate = `${ano}-12-31`;
 
-      const [cats, pays, recs] = await Promise.all([
+      // Em páginas: 2026 já passou de 1.000 despesas, e a leitura de uma vez deixava ~35
+      // (≈ R$ 9,9 mil) fora do resultado sem aviso nenhum.
+      const [cats, paysData, recsData] = await Promise.all([
         supabase.from('financial_categories').select('name, type, dre_group'),
         // Cancelada não é despesa. A consulta de receitas sempre filtrou; a de despesas
         // não, e cada lançamento cancelado continuava pesando no resultado.
-        supabase.from('payables').select('issue_date, amount, expense_category')
+        lerEmPaginas((i, f) => supabase.from('payables').select('id, issue_date, amount, expense_category')
           .neq('status', 'cancelled')
-          .gte('issue_date', de).lte('issue_date', ate),
-        supabase.from('receivables').select('issue_date, amount, category, status')
-          .gte('issue_date', de).lte('issue_date', ate),
+          .gte('issue_date', de).lte('issue_date', ate)
+          .order('id').range(i, f)),
+        lerEmPaginas((i, f) => supabase.from('receivables').select('id, issue_date, amount, category, status')
+          .gte('issue_date', de).lte('issue_date', ate)
+          .order('id').range(i, f)),
       ]);
       if (cats.error) throw cats.error;
-      if (pays.error) throw pays.error;
-      if (recs.error) throw recs.error;
+      const pays = { data: paysData };
+      const recs = { data: recsData };
 
       const grupoDe = new Map<string, GrupoDRE>();
       for (const c of (cats.data ?? []) as any[]) {

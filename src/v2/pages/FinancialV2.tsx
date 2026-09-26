@@ -75,6 +75,15 @@ type PayableRow = {
   service_order_expenses?: { receipt_url?: string | null }[] | null;
 };
 
+/** Seções que esta tela sabe mostrar (uma por aba). */
+const SECOES_DO_FINANCEIRO = new Set([
+  'overview', 'dre', 'payables', 'comissoes', 'forecast', 'inbox', 'reconciliation',
+  'cartoes', 'rules', 'fechamento', 'cadastro', 'banks', 'aging',
+]);
+
+/** Situações de uma conta que ainda se deve — o recorte com que Contas a Pagar abre. */
+const STATUS_EM_ABERTO = ['pending', 'partially_paid', 'overdue'];
+
 const isOverdue = (p: PayableRow) => p.status !== 'paid' && p.status !== 'cancelled' && new Date(p.due_date) < new Date();
 
 function statusView(p: PayableRow): { label: string; tone: StatusTone } {
@@ -144,12 +153,16 @@ export default function FinancialV2() {
   // "Fora da fila" deixou de ser aba solta (Fase 3.2): é uma das visões do Extrato por
   // conta. Link antigo (/v2/financial/ignoradas) abre o Extrato já nessa visão.
   const secaoPedida = secao || tabDaQuery || 'overview';
-  const tab = secaoPedida === 'ignoradas' ? 'inbox' : secaoPedida;
+  // Seção desconhecida abre a Visão Geral: antes nenhuma aba acendia e a tela ficava em branco
+  // (era o que acontecia com a notificação "Recebível em atraso").
+  const tab = secaoPedida === 'ignoradas' || secaoPedida === 'extrato' ? 'inbox' : SECOES_DO_FINANCEIRO.has(secaoPedida) ? secaoPedida : 'overview';
   useEffect(() => {
+    // Contas a Receber é tela própria: link antigo para a "aba" vai direto para ela.
+    if (secaoPedida === 'receivables') { navigate('/v2/receivables?view=overdue', { replace: true }); return; }
     if (!secao && tabDaQuery) {
       navigate(tabDaQuery === 'overview' ? '/v2/financial' : `/v2/financial/${tabDaQuery}`, { replace: true });
     }
-  }, [secao, tabDaQuery, navigate]);
+  }, [secao, tabDaQuery, secaoPedida, navigate]);
   // Toda aba se comporta como aba. A de Recebíveis costumava NAVEGAR para outra página, e
   // o efeito para quem usa era a tela inteira trocar ao clicar numa aba — parecia bug
   // porque, do lado de fora, é bug: aba que leva embora não é aba.
@@ -159,7 +172,7 @@ export default function FinancialV2() {
   // D6/F5: contas a pagar abre em "em aberto" (pendente, parcial, vencida). 1.675 das 1.679 contas
   // estão pagas; abrir com tudo obrigava a filtrar antes de qualquer trabalho. "Pago" continua
   // a um clique no painel de filtros.
-  const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters, status: ['pending', 'partially_paid', 'overdue'] });
+  const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters, status: STATUS_EM_ABERTO });
   const [payOsSearch, setPayOsSearch] = useState('');
   const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [paySort, setPaySort] = useState<SortState>({ key: 'due_date', dir: 'asc' });
@@ -543,7 +556,13 @@ export default function FinancialV2() {
                   numa lista de cobrança. Fica a um clique de distância, não escondida. */}
               {paySubTab === 'list' && pagasEscondidas > 0 && (
                 <Button size="sm" variant={mostrarPagas ? 'secondary' : 'ghost'}
-                  onClick={() => setMostrarPagas((v) => !v)}>
+                  // O filtro de situação abre em "em aberto"; sem soltá-lo junto, o botão tirava
+                  // uma trava e a outra continuava escondendo tudo o que foi pago.
+                  onClick={() => {
+                    const novo = !mostrarPagas;
+                    setMostrarPagas(novo);
+                    setPayFilters((f) => ({ ...f, status: novo ? [...STATUS_EM_ABERTO, 'paid'] : STATUS_EM_ABERTO }));
+                  }}>
                   {mostrarPagas ? 'Só o que está em aberto' : `Mostrar as ${pagasEscondidas} já pagas`}
                 </Button>
               )}

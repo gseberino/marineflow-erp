@@ -133,6 +133,22 @@ describe('FinancialV2 — paridade e navegação', () => {
     expect(rotaAtual.caminho).toBe('/v2/financial/inbox');
   });
 
+  it('seção desconhecida abre a Visão Geral, não uma tela em branco', async () => {
+    // A notificação "Recebível em atraso" apontava para ?tab=receivables: nenhuma aba
+    // acendia e a área de baixo ficava vazia (26/09/2026).
+    const { container } = renderFinanceiro('/v2/financial/nao-existe');
+    await screen.findAllByRole('tab');
+    const painel = container.querySelector('[role="tabpanel"][data-state="active"]');
+    expect(painel).toBeTruthy();
+    expect(screen.getByRole('tab', { selected: true })).toHaveTextContent(/Visão|Overview/i);
+  });
+
+  it('link antigo para a "aba" de recebíveis vai para Contas a Receber em Vencidos', async () => {
+    renderFinanceiro('/v2/financial?tab=receivables');
+    expect(await screen.findByText('fora do financeiro')).toBeInTheDocument();
+    expect(rotaAtual.caminho).toBe('/v2/receivables?view=overdue');
+  });
+
   it('cada aba nova alcança o próprio painel', async () => {
     const user = userEvent.setup();
     renderFinanceiro();

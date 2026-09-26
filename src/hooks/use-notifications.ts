@@ -93,7 +93,9 @@ async function generateNotifications(userId: string, role: string): Promise<AppN
         title: 'Recebível em atraso',
         description: `${fmtCurrency(Number(r.balance_amount || 0))} — ${r.clients?.name ?? 'Cliente'}`,
         created_at: r.due_date,
-        navigate_to: '/financial?tab=receivables',
+        // Contas a Receber é tela própria; o endereço antigo (?tab=receivables) abria o
+        // Financeiro sem aba nenhuma, em branco.
+        navigate_to: '/v2/receivables?view=overdue',
       });
     });
   }

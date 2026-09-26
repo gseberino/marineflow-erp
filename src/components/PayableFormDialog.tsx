@@ -15,6 +15,8 @@ import { useCreatePayable, useUpdatePayable } from '@/hooks/use-financial';
 import { useCostCenters } from '@/hooks/use-cost-centers';
 import { toast } from 'sonner';
 import { MoneyInput } from '@/components/MoneyInput';
+import { logError } from '@/lib/diagnostics';
+import { paraOUsuario } from '@/lib/erro-em-portugues';
 
 interface Props {
   open: boolean;
@@ -91,14 +93,20 @@ export function PayableFormDialog({ open, onOpenChange, initialData }: Props) {
           expense_category: category || undefined,
           cost_center_id: costCenterId || undefined,
           supplier_id: supplierId || undefined,
-          name: selectedSupplier?.name || supplierName || undefined,
+          // O nome vai em supplier_name (a coluna que existe). Era `name`, e o banco recusava
+          // a Nova Despesa com fornecedor ("Erro ao criar despesa", sem registro do porquê).
+          supplier_name: selectedSupplier?.name || supplierName || undefined,
           linked_service_order_id: soId || undefined,
           notes: notes || undefined,
         });
         toast.success(t.financial.newPayable);
       }
       onOpenChange(false);
-    } catch { toast.error(isEditing ? 'Erro ao atualizar' : 'Erro ao criar despesa'); }
+    } catch (e) {
+      const bruto = String((e as { message?: string })?.message ?? e);
+      void logError({ message: bruto, context: 'PayableFormDialog', action: isEditing ? 'atualizar despesa' : 'criar despesa', error: e });
+      toast.error(`${isEditing ? 'Erro ao atualizar' : 'Erro ao criar despesa'}: ${paraOUsuario(bruto)}`);
+    }
   };
 
   const isPending = create.isPending || update.isPending;
