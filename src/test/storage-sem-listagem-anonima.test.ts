@@ -1,4 +1,6 @@
-// Guarda estática dos buckets com dado de cliente (migration 20260926210000).
+// Guarda estática dos buckets com dado de cliente (migration 20260927090000).
+// (Ela nasceu 20260926210000 e colidiu com decisoes_do_dono, já aplicada — o Supabase a teria
+// pulado em silêncio. A guarda contra isso é src/test/migrations-versao-unica.test.ts.)
 //
 // Em 26/09/2026 o anônimo LISTAVA o bucket 'signatures' — 3 orçamentos assinados em PDF e 3
 // assinaturas, em pastas com o id da OS — e o 'whatsapp_status'; os de comprovante de despesa
