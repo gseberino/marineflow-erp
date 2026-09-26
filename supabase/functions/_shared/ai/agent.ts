@@ -11,6 +11,7 @@ import {
   type ClaudeUsage,
 } from "./anthropic.ts";
 import { allTools, type ToolCtx, type ToolDef } from "./tools/index.ts";
+import { CHAVE_DO_SOLICITANTE, type Solicitante } from "./tools/registry.ts";
 import { isAutonomyGranted } from "./autonomy-policy.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
 
@@ -366,6 +367,28 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
   return lines.join("\n");
 }
 
+const ROTULO_DO_CARGO: Record<string, string> = {
+  admin: "Administrador",
+  technician: "Técnico",
+  financial: "Financeiro",
+  seller: "Vendedor",
+  external_seller: "Vendedor Externo",
+};
+
+/**
+ * Quem está pedindo, para gravar na pendência (ToolDef.gravarSolicitante). O cargo é o do ctx
+ * — o autenticado neste turno, nunca um argumento do modelo. O nome é só para o resumo:
+ * best-effort, falhar a leitura não impede a pendência.
+ */
+async function quemPede(ctx: ToolCtx): Promise<Solicitante> {
+  let nome: string | null = null;
+  try {
+    const { data } = await ctx.admin.from("app_users").select("full_name").eq("id", ctx.userId).maybeSingle();
+    if (typeof data?.full_name === "string" && data.full_name.trim()) nome = data.full_name.trim();
+  } catch { /* sem nome: o cargo é o que a execução revalida */ }
+  return { user_id: ctx.userId, nome, cargo: ctx.userRole };
+}
+
 function summarizeForAudit(result: unknown): string {
   const text = JSON.stringify(result ?? null);
   return text.length > 500 ? `${text.slice(0, 500)}…` : text;
@@ -603,31 +626,56 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
       if (!toolDef) {
         toolResult = { error: `Tool desconhecida: ${tc.name}` };
       } else if (effectiveRisk !== "low" && !autonomo) {
-        // Interceptação por risco (Fase 3): não executa — grava a pendência e devolve
-        // um tool_result sintético. A tool real só roda via confirm_action, sem LLM.
-        const { data: pending, error: pendingErr } = await params.toolCtx.admin
-          .from("ai_operator_pending_actions")
-          .insert({
-            session_id: params.sessionId,
-            requested_by_user_id: params.toolCtx.userId,
-            action_name: tc.name,
-            risk_level: effectiveRisk,
-            title: humanizeToolNamePt(tc.name),
-            summary: await buildPendingSummary(params.toolCtx.admin, tc.name, tc.input as Record<string, unknown>),
-            payload: tc.input,
-            status: "pending",
-            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-          })
-          .select("id, title, summary, risk_level")
-          .single();
-
-        if (pendingErr || !pending) {
-          toolResult = { error: `Falha ao registrar pendência: ${pendingErr?.message || "erro desconhecido"}` };
-        } else {
-          toolResult = { pending: true, pending_action_id: pending.id, instruction: "Ação registrada para aprovação. Aguardando decisão do usuário — não repita a chamada." };
-          createdPendingProposal = { pending_action_id: pending.id, title: pending.title, summary_markdown: pending.summary, risk_level: pending.risk_level };
+        // Recusa barata ANTES de a pendência nascer (ToolDef.preValidar): o dono não vê no
+        // sino — nem aprova com PIN — um pedido que a execução vai recusar de qualquer jeito.
+        let recusa: ({ error: string } & Record<string, unknown>) | null = null;
+        try {
+          recusa = toolDef.preValidar?.(tc.input, params.toolCtx) ?? null;
+        } catch (e: any) {
+          recusa = { error: `Falha ao validar o pedido: ${e?.message || "erro desconhecido"}` };
         }
-        await writeAudit(params.toolCtx, params.sessionId, params.channel, { eventType: `pending_action:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
+        if (recusa) {
+          toolResult = recusa;
+          await writeAudit(params.toolCtx, params.sessionId, params.channel, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
+        } else {
+          // Interceptação por risco (Fase 3): não executa — grava a pendência e devolve
+          // um tool_result sintético. A tool real só roda via confirm_action, sem LLM.
+          //
+          // Quem pediu vai junto quando a tool pede (ToolDef.gravarSolicitante): a pendência é
+          // executada com o ctx de quem CONFIRMA, e um admin pode aprovar a de outro — a tool
+          // revalida com o cargo de quem pediu. Grava POR CIMA de qualquer `_solicitante` que
+          // tenha vindo nos argumentos do modelo, e o resumo é montado sem ele.
+          const entrada = { ...((tc.input ?? {}) as Record<string, unknown>) };
+          const solicitante = toolDef.gravarSolicitante ? await quemPede(params.toolCtx) : null;
+          if (solicitante) delete entrada[CHAVE_DO_SOLICITANTE];
+          let resumo = await buildPendingSummary(params.toolCtx.admin, tc.name, solicitante ? entrada : tc.input as Record<string, unknown>);
+          if (solicitante) {
+            resumo += `\nPedido por: *${solicitante.nome || "—"}* (${ROTULO_DO_CARGO[solicitante.cargo] ?? solicitante.cargo})`;
+          }
+          const { data: pending, error: pendingErr } = await params.toolCtx.admin
+            .from("ai_operator_pending_actions")
+            .insert({
+              session_id: params.sessionId,
+              requested_by_user_id: params.toolCtx.userId,
+              action_name: tc.name,
+              risk_level: effectiveRisk,
+              title: humanizeToolNamePt(tc.name),
+              summary: resumo,
+              payload: solicitante ? { ...entrada, [CHAVE_DO_SOLICITANTE]: solicitante } : tc.input,
+              status: "pending",
+              expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            })
+            .select("id, title, summary, risk_level")
+            .single();
+
+          if (pendingErr || !pending) {
+            toolResult = { error: `Falha ao registrar pendência: ${pendingErr?.message || "erro desconhecido"}` };
+          } else {
+            toolResult = { pending: true, pending_action_id: pending.id, instruction: "Ação registrada para aprovação. Aguardando decisão do usuário — não repita a chamada." };
+            createdPendingProposal = { pending_action_id: pending.id, title: pending.title, summary_markdown: pending.summary, risk_level: pending.risk_level };
+          }
+          await writeAudit(params.toolCtx, params.sessionId, params.channel, { eventType: `pending_action:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
+        }
       } else {
         try {
           toolResult = await toolDef.execute(tc.input, params.toolCtx);
