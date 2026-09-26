@@ -4,7 +4,7 @@
 // alguma despesa grande consegue escapar da revisão individual escondida num grupo.
 import { describe, it, expect } from 'vitest';
 import {
-  agruparPorFavorecido, ordenarGrupos, resumoDoAgrupamento, normalizarFavorecido, SEM_CATEGORIA,
+  agruparPorFavorecido, ordenarGrupos, resumoDoAgrupamento, normalizarFavorecido, SEM_CATEGORIA, motivoForaDoLote,
 } from '@/lib/finance-inbox-grouping';
 import type { PropostaFinanceira } from '@/hooks/use-finance-review';
 
@@ -226,5 +226,40 @@ describe('normalização do nome', () => {
   });
   it('devolve vazio quando não há nada identificável', () => {
     expect(normalizarFavorecido('   ***   ')).toBe('');
+  });
+});
+
+describe("pergunta sem resposta não entra no lote (decisão do dono, 26/09/2026)", () => {
+  it("OS ou OC sugerida vai para a revisão individual, com o motivo certo", () => {
+    const comOs = proposta({ nome: "LOJA", suggested_service_order_id: "os1" });
+    const comOc = proposta({ nome: "LOJA", suggested_purchase_order_id: "oc1" });
+    const normal = proposta({ nome: "LOJA" });
+    const [g] = agruparPorFavorecido([comOs, comOc, normal], LIMITE);
+    expect(g.emLote.map((p) => p.id)).toEqual([normal.id]);
+    expect(g.motivos[comOs.id]).toBe("responder_os");
+    expect(g.motivos[comOc.id]).toBe("responder_os");
+  });
+
+  it("respondida na tela, volta para o lote", () => {
+    const comOs = proposta({ nome: "LOJA", suggested_service_order_id: "os1" });
+    const [g] = agruparPorFavorecido([comOs], LIMITE, { [comOs.id]: { serviceOrderId: null } });
+    expect(g.emLote.map((p) => p.id)).toEqual([comOs.id]);
+  });
+
+  it("vínculo sugerido pequeno tem o motivo dele, não 'acima do limite'", () => {
+    const v = proposta({ nome: "LOJA", suggested_amount: 50, vinculo_sugerido: { principal: {
+      tipo: "payable", id: "c1", rotulo: "Conta: x", valor: 50, confianca: 80, nivel: "probable", motivos: [],
+      diferenca: 0, lancamentoId: "c1", lado: "payable", ordemDeServicoId: null, clienteId: null, clienteNome: null,
+      converteOrcamento: false, jaLancado: false,
+    }, alternativas: [] } } as never);
+    const [g] = agruparPorFavorecido([v], LIMITE);
+    expect(g.motivos[v.id]).toBe("responder_vinculo");
+    expect(motivoForaDoLote(v, LIMITE)).toBe("responder_vinculo");
+  });
+
+  it("OS que o dono anotou já é resposta", () => {
+    const anotada = proposta({ nome: "LOJA", suggested_service_order_id: "os1",
+      evidencia: { anotacao: { id: "a1", os_id: "os1" } } } as never);
+    expect(motivoForaDoLote(anotada, LIMITE)).toBeNull();
   });
 });

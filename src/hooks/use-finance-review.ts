@@ -13,6 +13,31 @@ import { useAppSetting } from '@/hooks/use-app-settings';
  */
 export const LIMITE_LOTE = 500;
 
+/**
+ * Número da OS e da OC que a pergunta "é desta OS?" / "paga esta OC?" mostra.
+ *
+ * Lidos pelo id, sem filtro de status: a lista de OS "vinculáveis" deixa de fora as
+ * encerradas, e a pergunta ficava dizendo "OS sugerida" sem dizer qual (revisão 26/09/2026).
+ */
+export function useRotulosDaPergunta(osId: string | null | undefined, ocId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['rotulos-da-pergunta', osId ?? null, ocId ?? null],
+    enabled: !!osId || !!ocId,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const [os, oc] = await Promise.all([
+        osId ? supabase.from('service_orders').select('service_order_number').eq('id', osId).maybeSingle() : null,
+        ocId ? supabase.from('purchase_orders').select('po_number, service_order_id').eq('id', ocId).maybeSingle() : null,
+      ]);
+      return {
+        os: (os?.data as { service_order_number?: string } | null)?.service_order_number ?? null,
+        oc: (oc?.data as { po_number?: string } | null)?.po_number ?? null,
+        osDaOc: (oc?.data as { service_order_id?: string | null } | null)?.service_order_id ?? null,
+      };
+    },
+  });
+}
+
 export function useLimiteLote(): number {
   // Lê do mesmo cache ['app-settings'] que Configurações > Financeiro invalida ao salvar.
   // Antes tinha query própria com 5 min de validade: o gestor mudava o limite e a caixa
@@ -44,8 +69,11 @@ export interface PropostaFinanceira {
   suggested_payee_id: string | null;
   suggested_service_order_id: string | null;
   suggested_purchase_order_id: string | null;
-  /** Quem é a contraparte e por qual prova; o que cadastrar quando nada foi reconhecido. */
-  evidencia?: Partial<Identificacao> | null;
+  /**
+   * Quem é a contraparte e por qual prova; o que cadastrar quando nada foi reconhecido; a
+   * anotação do dono aplicada a esta linha (com a OS que ele disse, quando disse).
+   */
+  evidencia?: (Partial<Identificacao> & { anotacao?: { id?: string; os_id?: string | null } | null; motor?: number }) | null;
   /** O que a linha provavelmente paga (conta, pagamento já lançado, sinal, saldo de OS). */
   vinculo_sugerido?: VinculoSugerido | null;
   created_at: string;

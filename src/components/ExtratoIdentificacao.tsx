@@ -31,7 +31,8 @@ function tomDaEvidencia(por: TipoDeEvidencia): string {
   if (por === 'documento' || por === 'conta_bancaria' || por === 'regra' || por === 'historico') {
     return 'border-success/40 text-success';
   }
-  if (por === 'nome_parecido') return 'border-amber-500/50 text-amber-600';
+  // Nome cortado pelo banco pede "confira" como o antigo nome parecido: âmbar, não verde.
+  if (por === 'nome_parecido' || por === 'nome_cortado') return 'border-amber-500/50 text-amber-600';
   return 'text-muted-foreground';
 }
 

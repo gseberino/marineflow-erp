@@ -696,12 +696,11 @@ export function BankReconciliation() {
       if (conciliadas === 0 && sugeridas === 0) {
         toast.info('Nenhuma correspondência encontrada para as transações pendentes');
       } else if (conciliadas === 0) {
-        // Sem identificador Pix nem documento do pagador no extrato, nada atinge o grau
-        // de certeza exigido para conciliar sozinho — e dizer só "0 conciliadas" faz
-        // parecer que o motor não achou nada, quando ele achou e está pedindo conferência.
+        // Decisão do dono (26/09/2026): nada é conciliado sem a pessoa confirmar — nem o que é
+        // certeza. Dizer só "0 conciliadas" faria parecer que o motor não achou nada.
         toast.success(
-          `${sugeridas} transações com correspondência para você conferir na lista · ${sem_candidato} sem candidato. ` +
-          `Nada foi conciliado sozinho porque este extrato não traz identificador do Pix nem CPF/CNPJ do pagador.`,
+          `${sugeridas} transações com correspondência para você confirmar na lista · ${sem_candidato} sem candidato. ` +
+          `Nada é conciliado sem a sua confirmação.`,
         );
       } else {
         toast.success(

@@ -173,13 +173,107 @@ describe('linha que pode já estar lançada', () => {
     renderInbox();
     // Nem no lote ela entra: vai para a revisão individual.
     expect(await screen.findByText(/Revisar uma a uma .*(1)/)).toBeInTheDocument();
-    const aprovar = screen.getByRole('button', { name: /Escolha casar ou lançar novo antes de aprovar/ });
+    const aprovar = screen.getByRole('button', { name: /Responda a sugestão de vínculo antes de aprovar/ });
     expect(aprovar).toBeDisabled();
     await user.click(screen.getByRole('radio', { name: /Casar com Sinal — ORÇ-00084/ }));
     const liberado = screen.getByRole('button', { name: 'Aprovar e lançar' });
     expect(liberado).toBeEnabled();
     await user.click(liberado);
     expect(aprovarMock.mock.calls[0][0]).toMatchObject({ ids: ['p84'], overrides: { p84: { vinculo: { id: 'pg84' } } } });
+  });
+});
+
+/**
+ * "É desta OS?" — decisão do dono (26/09/2026): a ligação com o serviço se faz pelo casamento
+ * de informações ou à mão, "mas o sistema deve sempre questionar". A OS sugerida não pode
+ * chegar ao lançamento sem a pessoa responder.
+ */
+describe('OS sugerida é pergunta', () => {
+  afterEach(() => { estadoDaFila.dados = null; aprovarMock.mockClear(); });
+
+  const comOS = {
+    id: 'p9', kind: 'create_payable', status: 'pending', bank_transaction_id: 't9', related_transaction_id: null,
+    title: 'Despesa: LOJA DE CABOS', reasoning: 'x', confidence: 92, suggested_amount: 1200, suggested_date: '2026-09-20',
+    suggested_category: 'Peças e materiais', suggested_description: 'LOJA DE CABOS', suggested_supplier_id: null,
+    suggested_service_order_id: 'os9', dre_group: 'custo_direto', created_at: '2026-09-20T10:00:00Z',
+  };
+
+  it('sem resposta, aprovar não leva a OS', async () => {
+    estadoDaFila.dados = [comOS];
+    const user = userEvent.setup();
+    renderInbox();
+    expect(await screen.findByText(/É desta OS\?/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Aprovar e lançar' }));
+    expect(aprovarMock.mock.calls[0][0]).toEqual({ ids: ['p9'], overrides: {} });
+  });
+
+  it('"Sim, é desta" manda a OS; "Não é" manda sem OS', async () => {
+    estadoDaFila.dados = [comOS];
+    const user = userEvent.setup();
+    renderInbox();
+    await user.click(await screen.findByRole('button', { name: 'Sim, é desta' }));
+    expect(await screen.findByText(/Ligada à/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Aprovar e lançar' }));
+    expect(aprovarMock.mock.calls[0][0]).toMatchObject({ ids: ['p9'], overrides: { p9: { serviceOrderId: 'os9' } } });
+
+    await user.click(screen.getByRole('button', { name: 'mudar' }));
+    await user.click(await screen.findByRole('button', { name: 'Não é' }));
+    expect(await screen.findByText(/você disse que não é desta/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Aprovar e lançar' }));
+    expect(aprovarMock.mock.calls[1][0]).toMatchObject({ ids: ['p9'], overrides: { p9: { serviceOrderId: null } } });
+  });
+
+  it('linha pequena com OS sugerida não vai para o lote: fica para responder', async () => {
+    estadoDaFila.dados = [{ ...comOS, suggested_amount: 80 }];
+    renderInbox();
+    expect(await screen.findByText(/Revisar uma a uma .*perguntas de vínculo ou OS \(1\)/)).toBeInTheDocument();
+  });
+
+  it('OS que é do próprio vínculo não pergunta duas vezes', async () => {
+    estadoDaFila.dados = [{ ...comOS, vinculo_sugerido: { principal: {
+      tipo: 'payable', id: 'c9', rotulo: 'Conta a pagar da OS 60', valor: 1200, confianca: 80, nivel: 'probable',
+      motivos: [], diferenca: 0, lancamentoId: 'c9', lado: 'payable', ordemDeServicoId: 'os9', clienteId: null,
+      clienteNome: null, converteOrcamento: false, jaLancado: false,
+    }, alternativas: [] } }];
+    renderInbox();
+    expect(await screen.findByText(/Despesa: LOJA DE CABOS/)).toBeInTheDocument();
+    expect(screen.queryByText(/É desta OS\?/)).not.toBeInTheDocument();
+  });
+
+  it('OS que o dono anotou já vem respondida — e "não é" desfaz', async () => {
+    estadoDaFila.dados = [{ ...comOS, evidencia: { anotacao: { id: 'a1', os_id: 'os9' } } }];
+    const user = userEvent.setup();
+    renderInbox();
+    expect(await screen.findByText(/Você anotou que é da/)).toBeInTheDocument();
+    expect(screen.queryByText(/É desta OS\?/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'não é' }));
+    expect(await screen.findByText(/você disse que não é desta/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Aprovar e lançar' }));
+    expect(aprovarMock.mock.calls[0][0]).toMatchObject({ overrides: { p9: { serviceOrderId: null } } });
+  });
+
+  it('ordem de compra e OS são perguntas separadas: "não é" numa não apaga a outra', async () => {
+    estadoDaFila.dados = [{ ...comOS, suggested_purchase_order_id: 'oc9' }];
+    const user = userEvent.setup();
+    renderInbox();
+    expect(await screen.findByText(/Este pagamento é dela\?/)).toBeInTheDocument();
+    expect(screen.getByText(/É desta OS\?/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Sim, é desta' }));
+    await user.click(screen.getByRole('button', { name: 'Não é' }));
+    expect(await screen.findByText(/Não paga a ordem de compra/)).toBeInTheDocument();
+    expect(screen.getByText(/Ligada à/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Aprovar e lançar' }));
+    expect(aprovarMock.mock.calls[0][0]).toMatchObject({ overrides: { p9: { purchaseOrderId: null, serviceOrderId: 'os9' } } });
+  });
+
+  it('ordem de compra: "Sim, é dela" manda a OC', async () => {
+    estadoDaFila.dados = [{ ...comOS, suggested_service_order_id: null, suggested_purchase_order_id: 'oc9' }];
+    const user = userEvent.setup();
+    renderInbox();
+    await user.click(await screen.findByRole('button', { name: 'Sim, é dela' }));
+    expect(await screen.findByText(/Paga a/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Aprovar e lançar' }));
+    expect(aprovarMock.mock.calls[0][0]).toMatchObject({ overrides: { p9: { purchaseOrderId: 'oc9' } } });
   });
 });
 

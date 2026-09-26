@@ -5,7 +5,7 @@
 // exigeDecisao) e é importada daqui — a tela e o servidor não podem discordar sobre o que
 // acontece quando se clica em aprovar.
 import {
-  exigeDecisao, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido,
+  exigeDecisao, podeJaEstarLancado, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido,
 } from '../../supabase/functions/_shared/banking/vinculo';
 
 export type EscolhaDeVinculo = { id: string } | 'nenhum' | undefined;
@@ -25,8 +25,17 @@ export function vinculoEfetivo(v: VinculoSugerido | null | undefined, escolha: E
   return vinculoAutomatico(v);
 }
 
-/** A linha pode já estar lançada e ninguém decidiu: aprovar agora duplicaria. */
+/**
+ * Há vínculo sugerido e ninguém respondeu: não aprova no escuro (decisão do dono, 26/09/2026 —
+ * toda sugestão de vínculo é pergunta).
+ */
 export function precisaDecidir(v: VinculoSugerido | null | undefined, escolha: EscolhaDeVinculo): boolean {
   if (escolha) return false;
   return exigeDecisao(v);
 }
+
+export { podeJaEstarLancado };
+
+export {
+  osVemDoVinculo, osAnotada, temPerguntaDaOS, temPerguntaDaOC, perguntaDaOSAberta, type LinhaComPerguntas,
+} from '../../supabase/functions/_shared/banking/vinculo';

@@ -60,11 +60,12 @@ function LancadosSozinhos({ contaId }: { contaId: string | null }) {
           <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             Saídas de confiança alta até o limite de lote
             <Ajuda rotulo="Como funciona o lançar sozinho">
-              Na análise das 6h, saídas com confiança 85 ou mais, abaixo do limite de lote e com categoria
-              de verdade são lançadas sem clique. Nunca vão sozinhas: compra no débito sem loja, o que fica
-              fora do resultado (fatura, empréstimo, retirada), o que pode já estar lançado e o que veio de
-              regra marcada "só sugerir". Tudo aparece aqui, com Desfazer. As regras marcadas "Lançar
-              sozinha" valem mesmo com este interruptor desligado.
+              Nas análises das 6h e das 15h, saídas com confiança 90 ou mais, abaixo do limite de lote e com
+              categoria de verdade são lançadas sem clique. Nunca vão sozinhas: compra no débito sem loja, o
+              que fica fora do resultado (fatura, empréstimo, retirada), fornecedor reconhecido só pelo nome
+              cortado pelo banco, linha com OS, OC ou vínculo sugerido (é pergunta sua) e o que veio de regra
+              marcada "só sugerir". Tudo aparece aqui, com Desfazer. As regras marcadas "Lançar sozinha" valem
+              mesmo com este interruptor desligado — menos nos casos acima.
             </Ajuda>
             {confirmando ? (
               <>

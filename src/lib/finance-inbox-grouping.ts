@@ -16,8 +16,33 @@
 // abaixo do limite de lote. As grandes continuam pedindo olho individual, como sempre —
 // elas só chegam lá já classificadas.
 
-import { exigeDecisao } from '../../supabase/functions/_shared/banking/vinculo';
-import type { PropostaFinanceira } from '@/hooks/use-finance-review';
+import { perguntaDaOSAberta, precisaDecidir } from '@/lib/extrato-vinculo';
+import type { Correcao, PropostaFinanceira } from '@/hooks/use-finance-review';
+
+/** Por que a linha não entra no lote (nem no botão do grupo). */
+export type MotivoForaDoLote = 'transferencia' | 'acima_do_limite' | 'responder_vinculo' | 'responder_os';
+
+/**
+ * A linha cabe no lote? null = cabe. A mesma regra na lista e no agrupado.
+ *
+ * - Transferência entre contas: confirmar que dois lançamentos são o mesmo dinheiro é
+ *   decisão de fato, não volume.
+ * - Acima do limite de lote (decisão do dono, 14/09/2026): uma a uma.
+ * - Vínculo sugerido sem resposta, ou "é desta OS?" / "paga esta OC?" sem resposta (decisão
+ *   do dono, 26/09/2026: o sistema "deve sempre questionar"): aprovar o lote de uma vez faria
+ *   a pergunta sumir sem ninguém ter respondido.
+ */
+export function motivoForaDoLote(
+  p: PropostaFinanceira,
+  limiteLote: number,
+  correcao?: Correcao,
+): MotivoForaDoLote | null {
+  if (p.kind === 'internal_transfer') return 'transferencia';
+  if (!(Number(p.suggested_amount ?? 0) < limiteLote)) return 'acima_do_limite';
+  if (precisaDecidir(p.vinculo_sugerido, correcao?.vinculo)) return 'responder_vinculo';
+  if (perguntaDaOSAberta(p, correcao)) return 'responder_os';
+  return null;
+}
 
 /** Caixa alta, sem acento e sem pontuação — a forma comparável de um nome de extrato. */
 export function normalizarFavorecido(valor: string): string {
@@ -38,8 +63,10 @@ export interface GrupoDeFavorecido {
   propostas: PropostaFinanceira[];
   /** Abaixo do limite e não transferência: o que o botão do grupo alcança. */
   emLote: PropostaFinanceira[];
-  /** Acima do limite ou transferência: continuam individuais. */
+  /** Acima do limite, transferência ou pergunta sem resposta: continuam individuais. */
   individuais: PropostaFinanceira[];
+  /** Por que cada individual ficou de fora — o selo da linha diz o motivo certo. */
+  motivos: Record<string, MotivoForaDoLote>;
   total: number;
   totalEmLote: number;
   /** Categorias sugeridas distintas — mais de uma significa que o sistema hesitou. */
@@ -82,6 +109,8 @@ function identidade(p: PropostaFinanceira): { chave: string; rotulo: string } {
 export function agruparPorFavorecido(
   propostas: PropostaFinanceira[],
   limiteLote: number,
+  /** Respostas já dadas na tela: a linha respondida volta a caber no lote. */
+  correcoes: Record<string, Correcao> = {},
 ): GrupoDeFavorecido[] {
   const mapa = new Map<string, GrupoDeFavorecido>();
 
@@ -95,6 +124,7 @@ export function agruparPorFavorecido(
       propostas: [],
       emLote: [],
       individuais: [],
+      motivos: {},
       total: 0,
       totalEmLote: 0,
       categorias: [],
@@ -107,15 +137,13 @@ export function agruparPorFavorecido(
     grupo.propostas.push(p);
     grupo.total += valor;
 
-    // Transferência entre contas nunca entra no lote: confirmar que dois lançamentos são o
-    // mesmo dinheiro é decisão de fato, não volume.
-    // Linha que pode já estar lançada também fica de fora: aprovar o grupo inteiro de uma
-    // vez criaria o lançamento em dobro. Ela pede a escolha "casar ou lançar novo".
-    if (p.kind !== 'internal_transfer' && valor < limiteLote && !exigeDecisao(p.vinculo_sugerido)) {
+    const motivo = motivoForaDoLote(p, limiteLote, correcoes[p.id]);
+    if (!motivo) {
       grupo.emLote.push(p);
       grupo.totalEmLote += valor;
     } else {
       grupo.individuais.push(p);
+      grupo.motivos[p.id] = motivo;
     }
 
     const cat = p.suggested_category ?? '';

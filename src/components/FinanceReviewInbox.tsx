@@ -23,12 +23,13 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { toast } from 'sonner';
 import { useI18n } from '@/i18n';
 import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { PayeeFormDialog } from '@/components/PayeeFormDialog';
 import { BuscaFinanceira } from '@/components/BuscaFinanceira';
 import { EvidenciaDaLinha, VinculoDaLinha } from '@/components/ExtratoIdentificacao';
-import { precisaDecidir } from '@/lib/extrato-vinculo';
+import { precisaDecidir, podeJaEstarLancado, osAnotada, temPerguntaDaOS, temPerguntaDaOC } from '@/lib/extrato-vinculo';
 import { buscaAtiva, casaComBusca, type CriterioDeBusca } from '@/lib/busca-financeira';
 import {
   usePayees, useServiceOrdersVinculaveis, useClientesParaReceita, ROTULO_TIPO,
@@ -37,15 +38,15 @@ import {
 import {
   useFinanceReviewQueue, useGerarPropostas, useAprovarPropostas, useRecusarPropostas,
   useMarcarDuplicata, useCriarCategoriaDespesa, useReaplicarRegras, useClassificarComIA,
-  useLimiteLote, type PropostaFinanceira, type Correcao,
+  useLimiteLote, useRotulosDaPergunta, type PropostaFinanceira, type Correcao,
 } from '@/hooks/use-finance-review';
 import {
   Sparkles, Check, X, ChevronDown, ArrowLeftRight, TrendingDown, TrendingUp, Info, RefreshCw,
   CopyX, Wand2, CreditCard, Landmark, AlertTriangle, Users, List, Layers, ArrowDownUp,
 } from 'lucide-react';
 import {
-  agruparPorFavorecido, ordenarGrupos, resumoDoAgrupamento, SEM_CATEGORIA, ROTULO_DA_ORDEM,
-  type GrupoDeFavorecido, type OrdemDaFila,
+  agruparPorFavorecido, ordenarGrupos, resumoDoAgrupamento, SEM_CATEGORIA, ROTULO_DA_ORDEM, motivoForaDoLote,
+  type GrupoDeFavorecido, type OrdemDaFila, type MotivoForaDoLote,
 } from '@/lib/finance-inbox-grouping';
 import { categoriaPorMcc } from '../../supabase/functions/_shared/banking/mcc';
 import { historicoSemIdentidade } from '../../supabase/functions/_shared/banking/proposals';
@@ -235,6 +236,123 @@ const NOVO_FAVORECIDO = '__novo_favorecido__';
 /** Radix não aceita SelectItem com valor vazio; "nenhuma" precisa de um valor próprio. */
 const SEM_OS = '__sem_os__';
 
+/**
+ * "Paga esta OC?" e "É desta OS?" — o que o sistema achou pelo que foi lançado (OC, anotação)
+ * vira PERGUNTA. Decisão do dono (26/09/2026): a ligação com o serviço se faz pelo casamento
+ * de informações ou à mão, "mas o sistema deve sempre questionar". Sem resposta, a despesa
+ * entra sem OS e sem OC. As duas perguntas são independentes: "não é" numa não apaga a outra.
+ */
+function PerguntasDaOSeOC({ p, correcao, onCorrigir, ocupado }: {
+  p: PropostaFinanceira;
+  correcao: Correcao | undefined;
+  onCorrigir: (c: Correcao) => void;
+  ocupado: boolean;
+}) {
+  return (
+    <>
+      {temPerguntaDaOC(p) && <PerguntaDaOC p={p} correcao={correcao} onCorrigir={onCorrigir} ocupado={ocupado} />}
+      {temPerguntaDaOS(p) && <PerguntaDaOS p={p} correcao={correcao} onCorrigir={onCorrigir} ocupado={ocupado} />}
+    </>
+  );
+}
+
+function rotuloDaOS(numero: string | null | undefined, reserva: string): string {
+  return numero ? `OS ${numero.replace(/^OS-?/i, '')}` : reserva;
+}
+
+function PerguntaDaOC({ p, correcao, onCorrigir, ocupado }: {
+  p: PropostaFinanceira;
+  correcao: Correcao | undefined;
+  onCorrigir: (c: Correcao) => void;
+  ocupado: boolean;
+}) {
+  const oc = p.suggested_purchase_order_id!;
+  // A OS DA OC (lida da própria OC), não a sugestão da linha: a OC é de um serviço só.
+  const { data: rotulos } = useRotulosDaPergunta(null, oc);
+  const osDaOc = rotulos?.osDaOc ?? null;
+  const { data: rotulosDaOs } = useRotulosDaPergunta(osDaOc, null);
+  const rotuloOc = rotulos?.oc ? `OC ${rotulos.oc}` : 'a ordem de compra';
+  const rotuloOs = osDaOc ? rotuloDaOS(rotulosDaOs?.os, 'a OS dela') : null;
+  const resposta = correcao?.purchaseOrderId;
+
+  if (resposta !== undefined) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">
+        {resposta ? <>Paga a <b>{rotuloOc}</b>{rotuloOs ? <> (da <b>{rotuloOs}</b>)</> : null}.</> : 'Não paga a ordem de compra (você disse que não é).'}
+        {' '}<button type="button" className="underline" disabled={ocupado}
+          onClick={() => onCorrigir({ ...correcao, purchaseOrderId: undefined })}>mudar</button>
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2 flex max-w-2xl flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-2 text-xs">
+      <span className="min-w-0">
+        Mesmo valor da <b>{rotuloOc}</b>{rotuloOs ? <> (da <b>{rotuloOs}</b>)</> : null}. Este pagamento é dela?
+      </span>
+      <Button size="sm" variant="outline" className="h-7 text-xs" disabled={ocupado}
+        // "Sim" responde a OC e, quando ela é de uma OS e a OS ainda não foi respondida, a OS dela.
+        onClick={() => onCorrigir({
+          ...correcao, purchaseOrderId: oc,
+          ...(osDaOc && correcao?.serviceOrderId === undefined ? { serviceOrderId: osDaOc } : {}),
+        })}>
+        Sim, é dela
+      </Button>
+      <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={ocupado}
+        onClick={() => onCorrigir({ ...correcao, purchaseOrderId: null })}>Não é</Button>
+    </div>
+  );
+}
+
+function PerguntaDaOS({ p, correcao, onCorrigir, ocupado }: {
+  p: PropostaFinanceira;
+  correcao: Correcao | undefined;
+  onCorrigir: (c: Correcao) => void;
+  ocupado: boolean;
+}) {
+  const sugerida = p.suggested_service_order_id!;
+  const anotada = osAnotada(p);
+  const respondida = correcao?.serviceOrderId;
+  // O número mostrado é o da OS que VALE: a respondida (inclusive outra, escolhida no campo
+  // "Comprado para qual OS?"), ou a sugerida enquanto ninguém respondeu.
+  const osMostrada = typeof respondida === 'string' ? respondida : sugerida;
+  const { data: rotulos } = useRotulosDaPergunta(osMostrada, null);
+  const rotulo = rotuloDaOS(rotulos?.os, typeof respondida === 'string' && respondida !== sugerida ? 'a OS escolhida' : 'a OS sugerida');
+
+  if (respondida !== undefined || anotada) {
+    return (
+      <p className="mt-2 text-xs text-muted-foreground">
+        {respondida === undefined
+          ? <>Você anotou que é da <b>{rotulo}</b>.</>
+          : respondida
+            ? <>Ligada à <b>{rotulo}</b>{respondida !== sugerida ? ' (escolhida por você)' : ''}.</>
+            : 'Sem OS (você disse que não é desta).'}
+        {' '}
+        {respondida === undefined
+          ? <button type="button" className="underline" disabled={ocupado}
+              onClick={() => onCorrigir({ ...correcao, serviceOrderId: null })}>não é</button>
+          : <button type="button" className="underline" disabled={ocupado}
+              onClick={() => onCorrigir({ ...correcao, serviceOrderId: undefined })}>mudar</button>}
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2 flex max-w-2xl flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-2 text-xs">
+      <span className="min-w-0">O sistema acha que é da <b>{rotulo}</b>. É desta OS?</span>
+      <Button size="sm" variant="outline" className="h-7 text-xs" disabled={ocupado}
+        onClick={() => onCorrigir({ ...correcao, serviceOrderId: sugerida })}>Sim, é desta</Button>
+      <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={ocupado}
+        onClick={() => onCorrigir({ ...correcao, serviceOrderId: null })}>Não é</Button>
+    </div>
+  );
+}
+
+/** A OS respondida igual em todas as linhas do grupo; senão, nenhuma no cabeçalho. */
+function osComumDoGrupo(g: GrupoDeFavorecido, correcoes: Record<string, Correcao>): string | null {
+  const respostas = g.propostas.map((p) => correcoes[p.id]?.serviceOrderId);
+  const primeira = respostas[0];
+  return primeira && respostas.every((r) => r === primeira) ? primeira : null;
+}
+
 /** CNPJ e CPF em máscara: 14 dígitos crus são ilegíveis para conferir de olho. */
 function formatarDocumento(doc: string | null): string | null {
   if (!doc) return null;
@@ -257,13 +375,13 @@ interface LinhaProps {
   /** Em lote a seleção manda; individualmente cada linha tem seus botões. */
   modoLote: boolean;
   /**
-   * Esta é uma das que o botão do grupo NÃO alcança.
+   * Esta é uma das que o botão do grupo NÃO alcança — e por quê.
    *
    * O cabeçalho do grupo avisava "3 exigem revisão individual", mas ao abrir a lista as
    * três eram idênticas às outras — o aviso dizia que existiam e não dizia QUAIS. Contar
    * um problema sem apontá-lo é dar trabalho de procurar.
    */
-  foraDoLote?: boolean;
+  foraDoLote?: MotivoForaDoLote | null;
   /**
    * Mostrar o botão de aprovar desta linha.
    *
@@ -355,9 +473,13 @@ function LinhaProposta({
             {transferencia && (
               <Badge variant="secondary" className="text-xs">Não entra no resultado</Badge>
             )}
-            {foraDoLote && !transferencia && (
+            {foraDoLote && foraDoLote !== 'transferencia' && (
               <Badge variant="outline" className="border-amber-500/50 text-xs text-amber-600">
-                Acima de {formatCurrency(limiteLote)} — aprove aqui
+                {foraDoLote === 'acima_do_limite'
+                  ? <>Acima de {formatCurrency(limiteLote)} — aprove aqui</>
+                  : foraDoLote === 'responder_vinculo'
+                    ? 'Tem vínculo sugerido — responda aqui'
+                    : 'Responda a OS/OC aqui'}
               </Badge>
             )}
           </div>
@@ -384,12 +506,16 @@ function LinhaProposta({
             <VinculoDaCategoria
               categoria={categoria}
               favorecidoId={correcao?.payeeId ?? p.suggested_payee_id ?? null}
-              osId={correcao?.serviceOrderId ?? p.suggested_service_order_id ?? null}
+              osId={correcao?.serviceOrderId ?? null}
               clienteId={correcao?.clientId ?? p.suggested_client_id ?? null}
               ehReceita={p.kind === 'create_receivable'}
               onMudar={(v) => onCorrigir({ ...correcao, ...v })}
               ocupado={ocupado}
             />
+          )}
+
+          {!transferencia && !anomalia && (
+            <PerguntasDaOSeOC p={p} correcao={correcao} onCorrigir={onCorrigir} ocupado={ocupado} />
           )}
 
           {/* Quem é (com a prova) e o que a linha paga (com a escolha de casar). */}
@@ -437,13 +563,15 @@ function LinhaProposta({
                   {/* span: botão desabilitado não dispara hover, e o motivo precisa aparecer. */}
                   <span>
                     <Button size="sm" variant="outline" disabled={ocupado || decidir} onClick={onAprovar}
-                      aria-label={anomalia ? 'Ciente — tirar da lista' : decidir ? 'Escolha casar ou lançar novo antes de aprovar' : 'Aprovar e lançar'}>
+                      aria-label={anomalia ? 'Ciente — tirar da lista' : decidir ? 'Responda a sugestão de vínculo antes de aprovar' : 'Aprovar e lançar'}>
                       <Check className="h-4 w-4" />
                     </Button>
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {anomalia ? 'Ciente — tirar da lista' : decidir ? 'Pode já estar lançado: escolha casar ou lançar novo' : 'Aprovar e lançar'}
+                  {anomalia ? 'Ciente — tirar da lista' : decidir
+                    ? (podeJaEstarLancado(p.vinculo_sugerido) ? 'Pode já estar lançado: escolha casar ou lançar novo' : 'O sistema sugeriu um vínculo: diga se é isso antes de aprovar')
+                    : 'Aprovar e lançar'}
                 </TooltipContent>
               </Tooltip>
             )}
@@ -554,7 +682,9 @@ function CartaoDoFavorecido({
   const motivo = semCategoriaEscolhida
     ? 'Escolha a categoria acima para poder aprovar.'
     : grupo.emLote.length === 0
-      ? `Todas passam de ${formatCurrency(limiteLote)} — aprove uma a uma.`
+      ? Object.values(grupo.motivos).every((m) => m === 'acima_do_limite')
+        ? `Todas passam de ${formatCurrency(limiteLote)} — aprove uma a uma.`
+        : 'Nenhuma cabe no lote (valor, vínculo ou OS para responder) — aprove uma a uma.'
       : null;
 
   return (
@@ -795,11 +925,9 @@ export function FinanceReviewInbox({
     let totalValor = 0;
     for (const p of porOrigem) {
       totalValor += Number(p.suggested_amount ?? 0);
-      // Transferência entre contas vai sempre para a revisão individual: confirmar que
-      // dois lançamentos são o mesmo dinheiro é decisão de fato, não volume.
-      // Linha que pode já estar lançada vai para a revisão individual até alguém escolher.
-      if (p.kind !== 'internal_transfer' && Number(p.suggested_amount ?? 0) < limiteLote
-          && !precisaDecidir(p.vinculo_sugerido, correcoes[p.id]?.vinculo)) lote.push(p);
+      // A mesma regra do agrupado (motivoForaDoLote): transferência, acima do limite, e
+      // vínculo ou OS/OC sugerida sem resposta vão para a revisão individual.
+      if (!motivoForaDoLote(p, limiteLote, correcoes[p.id])) lote.push(p);
       else individuais.push(p);
     }
     return { lote, individuais, totalValor };
@@ -820,7 +948,20 @@ export function FinanceReviewInbox({
   const corrigir = (id: string, c: Correcao) => setCorrecoes((m) => ({ ...m, [id]: c }));
 
   const aprovarSelecionadas = () => {
-    const ids = [...selecionadas];
+    // Pergunta de vínculo ou de OS/OC sem resposta não vai em bloco (decisão do dono,
+    // 26/09/2026): marcar o grupo inteiro marca também essas, e aprovar faria a pergunta sumir.
+    // A lista INTEIRA, não só a que a busca deixa visível: a linha selecionada e depois
+    // escondida pela busca também passa pela trava (revisão de 26/09/2026).
+    const porId = new Map(propostas.map((p) => [p.id, p]));
+    const semResposta = [...selecionadas].filter((id) => {
+      const p = porId.get(id);
+      const m = p ? motivoForaDoLote(p, limiteLote, correcoes[id]) : null;
+      return m === 'responder_os' || m === 'responder_vinculo';
+    });
+    const ids = [...selecionadas].filter((id) => !semResposta.includes(id));
+    if (semResposta.length > 0) {
+      toast.info(`${semResposta.length} linha(s) ficaram de fora: têm vínculo ou OS/OC para responder na própria linha.`);
+    }
     if (ids.length === 0) return;
     const overrides: Record<string, Correcao> = {};
     for (const id of ids) if (correcoes[id]) overrides[id] = correcoes[id];
@@ -830,7 +971,7 @@ export function FinanceReviewInbox({
   // Calculado nos dois modos: é uma passada só na lista, e o botão precisa saber quantos
   // favorecidos existem ANTES de alguém trocar de modo — senão ele oferece "Por favorecido
   // (0)" justamente quando o agrupamento seria útil.
-  const gruposBrutos = useMemo(() => agruparPorFavorecido(porOrigem, limiteLote), [porOrigem, limiteLote]);
+  const gruposBrutos = useMemo(() => agruparPorFavorecido(porOrigem, limiteLote, correcoes), [porOrigem, limiteLote, correcoes]);
 
   /**
    * A ordem considera a categoria que o gestor ACABOU de escolher, não só a que veio do
@@ -861,7 +1002,9 @@ export function FinanceReviewInbox({
     return {
       category: corrigida?.category ?? (unica === SEM_CATEGORIA ? '' : unica),
       payeeId: g.propostas.map((p) => correcoes[p.id]?.payeeId ?? p.suggested_payee_id).find(Boolean) ?? null,
-      serviceOrderId: g.propostas.map((p) => correcoes[p.id]?.serviceOrderId ?? p.suggested_service_order_id).find(Boolean) ?? null,
+      // OS só a respondida, e só quando TODAS as linhas do grupo responderam a mesma: a
+      // sugestão é pergunta de cada linha, e o cabeçalho não pode mostrar a OS de uma só.
+      serviceOrderId: osComumDoGrupo(g, correcoes),
       clientId: g.propostas.map((p) => correcoes[p.id]?.clientId ?? p.suggested_client_id).find(Boolean) ?? null,
     };
   };
@@ -1226,7 +1369,7 @@ export function FinanceReviewInbox({
                 key={p.id} {...propsComuns(p)} modoLote mostrarAprovar
                 selecionada={selecionadas.has(p.id)}
                 onSelecionar={(m) => marcar(p.id, m)}
-                foraDoLote={g.individuais.some((i) => i.id === p.id)}
+                foraDoLote={g.motivos[p.id] ?? null}
               />
             ))}
           </CartaoDoFavorecido>
@@ -1273,7 +1416,7 @@ export function FinanceReviewInbox({
         <div className="space-y-2">
           <div className="rounded-lg border bg-muted/30 p-2">
             <p className="text-sm font-medium">
-              Revisar uma a uma — acima de {formatCurrency(limiteLote)} e transferências ({individuais.length})
+              Revisar uma a uma — acima de {formatCurrency(limiteLote)}, transferências e perguntas de vínculo ou OS ({individuais.length})
             </p>
           </div>
           {individuais.map((p) => (
