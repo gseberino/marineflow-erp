@@ -1,4 +1,16 @@
-import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolCtx, type ToolDef } from "./registry.ts";
+import { blockTechnician, NON_TECHNICIAN_ROLES, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
+
+/**
+ * Quem edita o catálogo de serviços (preço e campos fiscais da NFS-e) e o cadastro de fornecedor
+ * (o telefone é para onde vai a cotação). Sem o vendedor externo: desde 26/09/2026 as duas tools
+ * estão no perfil fixo do agente, visíveis em todo turno, e NON_TECHNICIAN_ROLES o incluía.
+ */
+export const CARGOS_DO_CADASTRO: Role[] = ["admin", "financial", "seller"];
+
+/** Revalida o cargo no execute (o filtro de `roles` só tira a tool da lista do modelo). */
+function recusaDeCargo(ctx: ToolCtx, oQue: string) {
+  return CARGOS_DO_CADASTRO.includes(ctx.userRole as Role) ? null : { error: `Seu cargo não altera ${oQue}.` };
+}
 
 // ATUALIZAÇÃO de cadastros (produto, ativo, fornecedor, serviço, marina).
 //
@@ -122,6 +134,9 @@ export const registryCrudTools: ToolDef[] = [
         supplier_id: { type: "string", description: "UUID do fornecedor." },
         name: { type: "string" },
         trade_name: { type: "string", description: "Nome fantasia." },
+        // O prompt manda gravar o nome usado com update_supplier, mas o campo não estava aqui:
+        // o modelo não tinha como obedecer (a coluna suppliers.display_name existe).
+        display_name: { type: "string", description: "Nome usado na comunicação (fantasia/primeiro nome) — preferido na saudação." },
         cnpj_cpf: { type: "string" },
         contact_name: { type: "string" },
         phone: { type: "string", description: "Telefone/WhatsApp — sem ele não dá para enviar cotação." },
@@ -139,8 +154,10 @@ export const registryCrudTools: ToolDef[] = [
       required: ["supplier_id"],
     },
     risk: "low",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_DO_CADASTRO,
     async execute(args, ctx) {
+      const recusa = recusaDeCargo(ctx, "o cadastro de fornecedor");
+      if (recusa) return recusa;
       return await atualizar(ctx, "suppliers", "supplier_id", args, "Fornecedor");
     },
   },
@@ -172,8 +189,10 @@ export const registryCrudTools: ToolDef[] = [
       required: ["service_id"],
     },
     risk: "low",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_DO_CADASTRO,
     async execute(args, ctx) {
+      const recusa = recusaDeCargo(ctx, "o catálogo de serviços");
+      if (recusa) return recusa;
       return await atualizar(ctx, "services", "service_id", args, "Serviço");
     },
   },

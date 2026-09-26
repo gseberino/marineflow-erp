@@ -65,6 +65,11 @@ export interface ResumoDeOrcamentoInput {
   /** Rótulo da condição, como aparece na tela ("50% mão de obra + 100% materiais"). */
   condicaoLabel?: string | null;
   validadeDias?: number | null;
+  /**
+   * Data fixa de validade, já em dd/mm/aaaa. Quando vem, vence os dias: é o que o PDF do mesmo
+   * envio imprime ("Válido até …"), e o texto não pode dizer outra coisa (26/09/2026).
+   */
+  validadeAte?: string | null;
   empresa?: DadosDaEmpresa;
   opcoes?: OpcoesDeExibicao;
 }
@@ -107,7 +112,7 @@ function quandoVence(row: { dueBasis: 'delivery' | 'days'; days: number }): stri
 export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string {
   const {
     numero, clienteNome, ativoNome, orcamento, parcelas, condicaoLabel,
-    validadeDias, empresa = {}, opcoes = {},
+    validadeDias, validadeAte, empresa = {}, opcoes = {},
   } = input;
 
   const mostrar = {
@@ -226,9 +231,12 @@ export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string
     }
   }
 
-  if (validadeDias && validadeDias > 0) {
+  if (validadeAte) {
     linhas.push('');
-    linhas.push(`⏳ Proposta válida por ${validadeDias} dias.`);
+    linhas.push(`⏳ Proposta válida até ${validadeAte}.`);
+  } else if (validadeDias && validadeDias > 0) {
+    linhas.push('');
+    linhas.push(`⏳ Proposta válida por ${validadeDias} ${validadeDias === 1 ? 'dia' : 'dias'}.`);
   }
 
   linhas.push('');

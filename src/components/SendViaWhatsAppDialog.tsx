@@ -8,7 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2, Send, CalendarClock, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
-import { type PDFDocumentType, resolvePdfOptions } from '@/lib/pdf-generator';
+import { type PDFDocumentType, type PDFOptions, opcoesPadraoDoDocumento } from '@/lib/pdf-generator';
 import { usePDFData } from '@/hooks/use-pdf';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { useWhatsAppTemplates, applyTemplateVariables } from '@/hooks/use-whatsapp-templates';
@@ -26,6 +26,7 @@ import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
 import { supabase } from '@/integrations/supabase/client';
 import { buildQuoteWhatsAppSummary } from '@/lib/quote-whatsapp-summary';
 import { mesmoTelefone } from '../../supabase/functions/_shared/ai/phone';
+import { dataBR } from '../../supabase/functions/_shared/pdf/datas';
 
 export type SendViaWhatsAppTarget =
   | {
@@ -164,9 +165,14 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
   // Baixar/Imprimir PDF — sem isso, o envio via WhatsApp sempre usava o padrão de fábrica,
   // ignorando o que foi salvo em Configurações/PDFOptionsDialog para este tipo de documento.
   const { data: appSettings } = useAppSettings();
-  const pdfOptions = useMemo(
-    () => resolvePdfOptions(appSettings, documentType),
-    [appSettings, documentType],
+  //
+  // A validade é do DOCUMENTO, e resolvePdfOptions a descarta de propósito (descreve um
+  // padrão): opcoesPadraoDoDocumento a acrescenta — a data fixa do orçamento, senão os dias
+  // dele, senão os da empresa. Sem ela o PDF anexado saía "Válido por 15 dias" (o literal do
+  // gerador) para qualquer orçamento, inclusive os de 3 dias (até 26/09/2026).
+  const pdfOptions = useMemo<PDFOptions>(
+    () => opcoesPadraoDoDocumento(appSettings, documentType, pdfData?.serviceOrder),
+    [appSettings, documentType, pdfData],
   );
 
   // Os DOIS números do cadastro (whatsapp e telefone), os mesmos que o whatsapp-send confere
@@ -300,7 +306,11 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       orcamento: so,
       parcelas: so.payment_condition_installments ?? null,
       condicaoLabel: so.payment_condition_label ?? so.payment_conditions ?? null,
-      validadeDias: so.quote_validity_days ?? null,
+      // A MESMA validade do PDF deste envio (pdfOptions): data fixa, senão os dias do orçamento,
+      // senão os da empresa — já normalizados. Antes o texto lia so.quote_validity_days cru e,
+      // com data fixa, dizia "7 dias" enquanto o PDF dizia "até 10/10".
+      validadeDias: pdfOptions.validity?.days ?? null,
+      validadeAte: pdfOptions.validity?.mode === 'date' && pdfOptions.validity.date ? dataBR(pdfOptions.validity.date) : null,
       empresa: {
         nome: appSettings?.['company_name'],
         pixKey: appSettings?.['pix_key'],

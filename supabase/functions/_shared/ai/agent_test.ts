@@ -280,6 +280,87 @@ Deno.test("runAgentLoop: risco medium/high intercepta — grava pending_action e
   assertExists(content.pending_action_id);
 });
 
+// ---------------- Gancho preValidar e quem pediu (gravarSolicitante) ----------------
+// A pendência é executada com o ctx de quem CONFIRMA; um admin pode aprovar a de outro. O
+// gancho recusa antes de a pendência nascer, e a pendência leva quem pediu para a tool
+// revalidar com o cargo DELE.
+
+function ferramentaAlta(extra: Partial<ToolDef> = {}): { def: ToolDef; executou: () => boolean } {
+  let rodou = false;
+  const def: ToolDef = {
+    name: "ferramenta_alta",
+    description: "Tool de teste de risco alto.",
+    input_schema: { type: "object", properties: { alvo: { type: "string" } } },
+    risk: "high",
+    async execute() {
+      rodou = true;
+      return { ok: true };
+    },
+    ...extra,
+  };
+  return { def, executou: () => rodou };
+}
+
+async function chamarNoLoop(def: ToolDef, input: Record<string, unknown>, papel: "admin" | "external_seller" = "admin") {
+  const { params, pendingRows, auditRows } = makeBaseParams();
+  const { fetchStub, calls } = mockFetchSequence([
+    { status: 200, body: claudeMsg({ content: [{ type: "tool_use", id: "toolu_alta", name: def.name, input }], stop_reason: "tool_use" }) },
+    { status: 200, body: claudeMsg({ content: [{ type: "text", text: "entendi" }], stop_reason: "end_turn" }) },
+  ]);
+  const result = await withFetch(fetchStub, () =>
+    runAgentLoop({
+      ...params,
+      toolCtx: { ...params.toolCtx, userRole: papel },
+      messages: [{ role: "user", content: [{ type: "text", text: "faça" }] }],
+      tools: [def],
+    })
+  );
+  return { result, pendingRows, auditRows, calls };
+}
+
+Deno.test("preValidar recusa: NÃO grava pendência e devolve o erro ao modelo", async () => {
+  const { def, executou } = ferramentaAlta({
+    preValidar: (_args, ctx) => ctx.userRole === "external_seller" ? { error: "cargo não pode", alternativa: "outra" } : null,
+  });
+  const { result, pendingRows, auditRows, calls } = await chamarNoLoop(def, { alvo: "x" }, "external_seller");
+  assertEquals(pendingRows.length, 0, "nada vai para o sino");
+  assertEquals(executou(), false);
+  assertEquals(result.proposal, undefined);
+  assertEquals(result.toolEvents[0].result, { error: "cargo não pode", alternativa: "outra" });
+  assertEquals(auditRows[0].event_type, "pre_validacao_recusada:ferramenta_alta");
+  assertEquals(calls.length, 2, "o modelo recebe a recusa e responde");
+});
+
+Deno.test("preValidar devolve null: a pendência nasce normalmente", async () => {
+  const { def, executou } = ferramentaAlta({ preValidar: () => null });
+  const { result, pendingRows } = await chamarNoLoop(def, { alvo: "x" });
+  assertEquals(pendingRows.length, 1);
+  assertEquals(pendingRows[0].payload, { alvo: "x" }, "sem gravarSolicitante o payload é o input cru");
+  assertEquals(executou(), false);
+  assertExists(result.proposal);
+});
+
+Deno.test("preValidar que lança vira recusa, não pendência", async () => {
+  const { def } = ferramentaAlta({ preValidar: () => { throw new Error("quebrou"); } });
+  const { pendingRows, result } = await chamarNoLoop(def, { alvo: "x" });
+  assertEquals(pendingRows.length, 0);
+  assertStringIncludes(String((result.toolEvents[0].result as any).error), "quebrou");
+});
+
+Deno.test("gravarSolicitante: o payload leva quem pediu, POR CIMA do que o modelo mandou, e o resumo diz quem", async () => {
+  const { def } = ferramentaAlta({ gravarSolicitante: true });
+  const { pendingRows } = await chamarNoLoop(
+    def,
+    { alvo: "x", _solicitante: { user_id: "outro", nome: "Falso", cargo: "admin" } },
+    "external_seller",
+  );
+  assertEquals(pendingRows.length, 1);
+  // O fake de banco não lê app_users: o nome fica null e a pendência nasce mesmo assim.
+  assertEquals(pendingRows[0].payload, { alvo: "x", _solicitante: { user_id: "u1", nome: null, cargo: "external_seller" } });
+  assertStringIncludes(pendingRows[0].summary, "Pedido por: *—* (Vendedor Externo)");
+  assertEquals(String(pendingRows[0].summary).includes("Falso"), false, "o _solicitante do modelo não entra no resumo");
+});
+
 Deno.test("registry: role bloqueia — tool restrita recusa userRole=technician mesmo sendo chamada", async () => {
   const blockedResult = await restrictedTool.execute({}, { sb: {}, admin: {}, userId: "u2", userRole: "technician", jwt: "", appOrigin: "", settings: {} });
   assertEquals(blockedResult, { error: "Cargo não autorizado para esta ação." });

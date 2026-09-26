@@ -76,6 +76,20 @@ Deno.test("orçamento entra por dias parado OU por expiração; recente e válid
   assertEquals(out.orcamentos_parados.valor_total, 3000); // 1000 + 2000
 });
 
+Deno.test("expirado pela validade em DIAS (mesma conta do PDF), não só pela data fixa; aguardando sinal não expira", async () => {
+  // Até 26/09/2026 só a data fixa contava, e ela quase nunca existe: nada aparecia expirado.
+  const emitido40DiasAtras = new Date(Date.now() - 40 * 86400000).toISOString();
+  const quotes = [
+    { service_order_number: "ORÇ-4", grand_total: 4000, updated_at: agora, quote_status: "sent", created_at: emitido40DiasAtras, quote_validity_days: 7, quote_validity_date: null, clients: { name: "D" } },
+    { service_order_number: "ORÇ-5", grand_total: 5000, updated_at: agora, quote_status: "awaiting_deposit", created_at: emitido40DiasAtras, quote_validity_days: 7, quote_validity_date: null, clients: { name: "E" } },
+    { service_order_number: "ORÇ-6", grand_total: 6000, updated_at: agora, quote_status: "sent", created_at: agora, quote_validity_days: 7, quote_validity_date: null, clients: { name: "F" } },
+  ];
+  const admin = fakeAdmin({ receivables: [], service_orders: [quotes, []], payables: [] });
+  const out: any = await tool.execute({ stuck_days: 2 }, ctx(admin));
+  assertEquals(out.orcamentos_parados.topo.map((q: any) => q.numero), ["ORÇ-4"]);
+  assertEquals(out.orcamentos_parados.topo[0].expirado, true);
+});
+
 Deno.test("mensagens: clientes vêm antes de não-clientes no topo", async () => {
   const admin = fakeAdmin(
     { receivables: [], service_orders: [[], []], payables: [] },

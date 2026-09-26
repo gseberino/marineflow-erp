@@ -21,7 +21,8 @@
  */
 import { scopeCss } from './css-scope.ts';
 import { itemColumnWidths, valueVisibility } from './pdf-visibility.ts';
-import { dataBR, dataHoraBR, horaBR, somarDiasBR } from './datas.ts';
+import { dataBR, dataHoraBR, diaBR, diaDeCalendario, horaBR, somarDiasAoDia, somarDiasBR } from './datas.ts';
+import { primeiraValidade } from '../dias-de-validade.ts';
 
 export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
@@ -120,6 +121,126 @@ export function resolvePdfOptions(
   return resolved;
 }
 
+/**
+ * As opções de um documento que sai SEM diálogo — Baixar direto e lote das listas, envio pela
+ * tela (SendViaWhatsAppDialog) e o PDF do assistente: o padrão da empresa, a via do cliente e,
+ * no orçamento, a validade do próprio orçamento. É o mesmo ponto de partida do diálogo de
+ * Baixar/Imprimir, que só acrescenta o que a pessoa mexer ali.
+ *
+ * Até 26/09/2026 o Baixar direto das listas partia de DEFAULT_PDF_OPTIONS (fábrica): com
+ * "termos" desligado no padrão da empresa, o Baixar do formulário saía sem termos e o Baixar
+ * da lista, com eles — o mesmo orçamento, dois arquivos diferentes.
+ *
+ * `hideFinancials` fica sempre desligado: a via de execução é escolha de um documento, nunca
+ * padrão (ver o diálogo), e um documento que sai sem ninguém escolher vai para o cliente.
+ */
+export function opcoesPadraoDoDocumento(
+  settings: Record<string, string> | undefined,
+  tipo: PDFDocumentType,
+  ordem?: { quote_validity_days?: unknown; quote_validity_date?: unknown } | null,
+): PDFOptions {
+  return {
+    ...resolvePdfOptions(settings, tipo),
+    hideFinancials: false,
+    ...(tipo === 'quote'
+      ? { validity: validadeDoOrcamento(ordem?.quote_validity_days, settings, ordem?.quote_validity_date) }
+      : {}),
+  };
+}
+
+/**
+ * A validade de um orçamento: 'date' quando ele tem data fixa, senão 'days'. Nas duas formas
+ * `days` vem preenchido (o diálogo precisa de um número para o campo "Em dias").
+ */
+export type ValidadeDoOrcamento =
+  | { mode: 'days'; days: number }
+  | { mode: 'date'; date: string; days: number };
+
+/**
+ * A validade que vai impressa no orçamento: a DATA FIXA do próprio orçamento
+ * (service_orders.quote_validity_date), se houver; senão os dias do próprio orçamento
+ * (service_orders.quote_validity_days); sem eles, o padrão da empresa
+ * (app_settings.quote_validity_days); sem os dois, 15.
+ *
+ * A data fixa entrou em 26/09/2026: a R19 (ultimoDiaDaValidade) já a respeitava, e o PDF a
+ * ignorava — um orçamento com data fixa dizia ao cliente "Válido por N dias" enquanto o aviso
+ * de vencimento saía no dia seguinte à data. Agora os dois perguntam aqui.
+ *
+ * ═══ POR QUE UMA FUNÇÃO SÓ ═══
+ *
+ * Até 26/09/2026 cada caminho do PDF decidia por conta própria. O Baixar do formulário e o
+ * assistente usavam a do orçamento; o envio pela tela (SendViaWhatsAppDialog) e o Baixar do
+ * portal do cliente não passavam validade nenhuma, porque `resolvePdfOptions` a descarta — e
+ * o gerador caía no literal 15. Um orçamento de 3 dias ia para o cliente dizendo "Válido por
+ * 15 dias", enquanto a rotina de expiração o rejeitava no 7º dia. É o caso das "três fontes
+ * para o mesmo padrão" (config, coluna e literal): aqui a ordem entre elas é decidida uma vez.
+ *
+ * `settings` é o mapa de app_settings de quem chama. No portal (anônimo) a chave
+ * `quote_validity_days` não está na whitelist, então lá o padrão da empresa não chega e a
+ * conta fica em orçamento → 15 — sem efeito prático hoje, porque a coluna tem DEFAULT 15 e
+ * nenhum orçamento vivo a tem vazia.
+ *
+ * Cada nível de dias só vale se for um inteiro de 1 a 3650 (primeiraValidade, em
+ * ../dias-de-validade.ts, a mesma regra do assistente ao criar o orçamento). Até 26/09/2026
+ * a conta era `Number(x) || próximo`: -1 passava, o PDF dizia "Válido por -1 dias" e a R19
+ * dava o orçamento por vencido já no dia da emissão; 2.5 imprimia "2.5 dias"; e 1e9 fazia a
+ * soma de datas lançar RangeError dentro da R19.
+ *
+ * `dataFixa` é o terceiro argumento, e não um campo lido de um objeto, para que quem só quer
+ * o padrão da empresa (`validadeDoOrcamento(null, ajustes).days`) continue chamando igual.
+ * Quem tem a ordem inteira passa por opcoesPadraoDoDocumento, que não esquece a data.
+ */
+export function validadeDoOrcamento(
+  diasDoOrcamento: unknown,
+  settings?: Record<string, unknown> | null,
+  dataFixa?: unknown,
+): ValidadeDoOrcamento {
+  const days = primeiraValidade(diasDoOrcamento, settings?.quote_validity_days);
+  // Só um dia que existe vale como data fixa (diaDeCalendario); lixo cai nos dias.
+  const date = diaDeCalendario(dataFixa);
+  return date ? { mode: 'date', date, days } : { mode: 'days', days };
+}
+
+/**
+ * O ÚLTIMO dia (aaaa-mm-dd, calendário de Brasília) em que o orçamento vale — o mesmo "até"
+ * que o PDF imprime em "Válido por N dias (até dd/mm/aaaa)" ou "Válido até dd/mm/aaaa".
+ *
+ * Sai de `validadeDoOrcamento`, a mesma conta do PDF: a data fixa (quote_validity_date), se
+ * houver, é o próprio último dia; senão, dia de Brasília da emissão (`created_at`, decisão
+ * D13: reimprimir não renova) mais os dias. Devolve null quando, sem data fixa, não há data
+ * de emissão legível — sem ela não há o que comparar.
+ */
+export function ultimoDiaDaValidade(
+  orcamento: { created_at?: string | null; quote_validity_date?: string | null; quote_validity_days?: unknown },
+  settings?: Record<string, unknown> | null,
+): string | null {
+  const validade = validadeDoOrcamento(orcamento.quote_validity_days, settings, orcamento.quote_validity_date);
+  if (validade.mode === 'date') return validade.date;
+  if (!orcamento.created_at) return null;
+  const emissao = new Date(orcamento.created_at);
+  if (Number.isNaN(emissao.getTime())) return null;
+  return somarDiasAoDia(diaBR(emissao), validade.days);
+}
+
+/**
+ * O último dia da validade (aaaa-mm-dd) se o orçamento já venceu em `agora`, pelo
+ * calendário de Brasília; null se ainda vale. Vence no dia SEGUINTE ao "até" do PDF:
+ * "Válido por 3 dias (até 22/09)" ainda vale no dia 22 inteiro.
+ *
+ * Uma pergunta só para a R19 (task-automations), o panorama do assistente, o resumo matinal e a
+ * confirmação de envio ao cliente. Até 26/09/2026 os dois resumos olhavam só a data fixa
+ * (quote_validity_date, quase sempre vazia) e nunca davam orçamento nenhum por expirado.
+ */
+export function vencimentoDoOrcamento(
+  orcamento: { created_at?: string | null; quote_validity_date?: string | null; quote_validity_days?: unknown },
+  settings?: Record<string, unknown> | null,
+  agora: Date = new Date(),
+): string | null {
+  const fim = ultimoDiaDaValidade(orcamento, settings);
+  if (!fim) return null;
+  return diaBR(agora) > fim ? fim : null;
+}
+
 export type PDFData = {
   documentType: PDFDocumentType;
   company: {
@@ -189,6 +310,8 @@ export type PDFData = {
     financial_notes?: string;
     payment_method_preferred?: string;
     quote_validity_days?: number;
+    /** Data fixa de validade ('aaaa-mm-dd'); quando existe, vence os dias (validadeDoOrcamento). */
+    quote_validity_date?: string | null;
     deposit_paid?: number;
     // Registro real de cobranças/pagamentos — distinto da "Programação de
     // Pagamento" (que só mostra o plano acordado, preset ou texto livre).
@@ -786,18 +909,19 @@ export function buildOrderHTML(data: PDFData, options: PDFOptions): string {
 
   const getValidityText = (): string => {
     const v = options.validity;
-    if (!v || v.mode === 'days') {
-      const days = v?.days || 15;
-      // D13 (17/09/2026): a validade conta da EMISSÃO (created_at), não do dia em que
-      // alguém reimprimiu. Reimprimir um orçamento de 20 dias não o renova por mais 15.
-      const base = data.serviceOrder.created_at ? new Date(data.serviceOrder.created_at) : new Date();
-      const emissao = Number.isNaN(base.getTime()) ? new Date() : base;
-      return `Válido por ${days} dias (até ${somarDiasBR(emissao, days)})`;
-    }
-    if (v.date) {
-      return `Válido até ${dataBR(v.date)}`;
-    }
-    return 'Válido por 15 dias.';
+    // A validade chega de quem chama (diálogo, listas, portal, assistente) e é normalizada
+    // AQUI, pela mesma regra de validadeDoOrcamento: nenhum caminho imprime número ou data
+    // inválida. Até 26/09/2026 era `v?.days || 15` — -1 e 2.5 saíam como estavam, e 1e9
+    // derrubava a geração com RangeError —, e "data específica" vazia virava o literal
+    // "Válido por 15 dias." mesmo com outro número no campo de dias.
+    const dataFixa = v?.mode === 'date' ? diaDeCalendario(v.date) : null;
+    if (dataFixa) return `Válido até ${dataBR(dataFixa)}`;
+    const days = primeiraValidade(v?.days);
+    // D13 (17/09/2026): a validade conta da EMISSÃO (created_at), não do dia em que
+    // alguém reimprimiu. Reimprimir um orçamento de 20 dias não o renova por mais 15.
+    const base = data.serviceOrder.created_at ? new Date(data.serviceOrder.created_at) : new Date();
+    const emissao = Number.isNaN(base.getTime()) ? new Date() : base;
+    return `Válido por ${days} ${days === 1 ? 'dia' : 'dias'} (até ${somarDiasBR(emissao, days)})`;
   };
 
   // O que aparece de valor. Desmarcar uma seção no diálogo esconde o preço

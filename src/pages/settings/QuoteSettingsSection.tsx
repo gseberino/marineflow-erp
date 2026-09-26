@@ -8,6 +8,7 @@ import { FileText, Loader2 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import { useAppSettings, useUpdateAppSettings } from '@/hooks/use-app-settings';
+import { VALIDADE_MAXIMA_EM_DIAS, validadeDoOrcamento, validadeGravavel } from '@/lib/pdf-generator';
 
 const PAYMENT_METHOD_OPTIONS = [
   { value: 'pix',           label: 'PIX' },
@@ -31,11 +32,17 @@ export function QuoteSettingsSection() {
     default_payment_method:   'pix',
     default_card_fee_percent: 0,
     iss_rate_pct:             5,
-    quote_validity_days:      15,
-    quote_expiry_days:        30,
+    // Texto, como digitado: o campo pode ficar vazio no meio da digitação, e só um inteiro
+    // de 1 a 3650 é gravado (validadeGravavel, abaixo).
+    quote_validity_days:      '15',
     quote_followup_days:      7,
     survey_valor_limiar:      3000,
   });
+  // `quote_expiry_days` saiu do que esta tela grava (26/09/2026): era o prazo em que a rotina
+  // quote-reminders REJEITAVA o orçamento sozinha, e ela não o lê mais — o vencimento virou a
+  // tarefa da R19. O valor fica no banco como estava (nem apagado, nem reescrito ao salvar) e
+  // aparece aqui só para leitura.
+  const expiracaoGuardada = appSettings?.quote_expiry_days || '';
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
@@ -46,8 +53,8 @@ export function QuoteSettingsSection() {
       default_payment_method:   m.default_payment_method   || 'pix',
       default_card_fee_percent: Number(m.default_card_fee_percent) || 0,
       iss_rate_pct:             m.iss_rate_pct !== undefined && m.iss_rate_pct !== '' ? Number(m.iss_rate_pct) : 5,
-      quote_validity_days:      Number(m.quote_validity_days)      || 15,
-      quote_expiry_days:        Number(m.quote_expiry_days)        || 30,
+      // O que o PDF e o aviso de vencimento usam de fato (inteiro >= 1, senão 15).
+      quote_validity_days:      String(validadeDoOrcamento(null, m).days),
       quote_followup_days:      Number(m.quote_followup_days)      || 7,
       // Mesmo padrão da função should_survey_service (3000) — a tela e o banco concordam.
       survey_valor_limiar:      Number(m.survey_valor_limiar)      || 3000,
@@ -55,8 +62,16 @@ export function QuoteSettingsSection() {
     setInitialized(true);
   }, [appSettings, initialized]);
 
+  // A validade padrão só é gravada se for um inteiro de 1 a 3650 — a faixa que o PDF, a R19 e
+  // o assistente aceitam (../dias-de-validade.ts). Até 26/09/2026 a tela gravava
+  // Number(digitado) sem filtro: -1, 0 e 2.5 iam para app_settings, e cada leitor os tratava
+  // do seu jeito (o PDF descarta e usa 15; a tela mostrava o número gravado).
+  const validadeParaGravar = validadeGravavel(cfg.quote_validity_days);
+
   const handleSave = async () => {
+    if (validadeParaGravar === null) return;
     const entries = Object.fromEntries(Object.entries(cfg).map(([k, v]) => [k, String(v)]));
+    entries.quote_validity_days = String(validadeParaGravar);
     try {
       await updateSettings.mutateAsync(entries);
     } catch {
@@ -86,10 +101,21 @@ export function QuoteSettingsSection() {
 
         {/* Validity days */}
         <div className="space-y-1.5">
-          <Label>Validade padrão do orçamento (dias)</Label>
-          <Input type="number" min="1" value={cfg.quote_validity_days}
-            onChange={e => set('quote_validity_days', Number(e.target.value))} />
-          <p className="text-xs text-muted-foreground">Pré-preenche a validade ao gerar o PDF</p>
+          <Label htmlFor="quote-validity-days">Validade padrão do orçamento (dias)</Label>
+          <Input id="quote-validity-days" type="number" min={1} max={VALIDADE_MAXIMA_EM_DIAS} step={1}
+            value={cfg.quote_validity_days}
+            aria-invalid={validadeParaGravar === null}
+            aria-describedby={validadeParaGravar === null ? 'quote-validity-days-erro' : undefined}
+            onChange={e => set('quote_validity_days', e.target.value)} />
+          {validadeParaGravar === null && (
+            <p id="quote-validity-days-erro" role="alert" className="text-xs text-destructive">
+              Use um número inteiro de 1 a {VALIDADE_MAXIMA_EM_DIAS} dias. Enquanto isso, nada é salvo.
+            </p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Pré-preenche a validade do orçamento e do PDF. Quando o orçamento não tem validade
+            própria, é ela também que define quando aparece o aviso de orçamento vencido.
+          </p>
         </div>
 
         {/* Default payment method */}
@@ -124,12 +150,19 @@ export function QuoteSettingsSection() {
           </p>
         </div>
 
-        {/* Expiry days */}
+        {/* Expiry days — desativado desde 26/09/2026: ninguém lê mais esta chave (ver acima). */}
         <div className="space-y-1.5">
-          <Label>Dias para expiração automática</Label>
-          <Input type="number" min="1" value={cfg.quote_expiry_days}
-            onChange={e => set('quote_expiry_days', Number(e.target.value))} />
-          <p className="text-xs text-muted-foreground">Orçamentos sem resposta são marcados como Reprovados após esse prazo</p>
+          <Label htmlFor="quote-expiry-days" className="text-muted-foreground">
+            Dias para expiração automática (não é mais usado)
+          </Label>
+          <Input id="quote-expiry-days" type="number" value={expiracaoGuardada} placeholder="—"
+            disabled readOnly />
+          <p className="text-xs text-muted-foreground">
+            O vencimento agora gera um AVISO: quando um orçamento enviado ou aguardando aprovação
+            passa da validade, aparece na Agenda a tarefa "Orçamento vencido: renovar ou
+            rejeitar?". Nenhum orçamento é rejeitado sozinho: quem decide é você. O número
+            antigo fica guardado, sem efeito.
+          </p>
         </div>
 
         {/* Follow-up days */}
@@ -151,7 +184,7 @@ export function QuoteSettingsSection() {
       </div>
 
       <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={saving} size="sm">
+        <Button onClick={handleSave} disabled={saving || validadeParaGravar === null} size="sm">
           {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
           Salvar configurações de orçamento
         </Button>

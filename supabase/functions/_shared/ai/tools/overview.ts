@@ -1,5 +1,6 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { STATUS_OS_ATIVAS } from "../../service-order-status.ts";
+import { vencimentoDoOrcamento } from "../../pdf/documento.ts";
 
 // Macro de LEITURA — "como estão as coisas?" numa chamada só.
 //
@@ -62,10 +63,9 @@ export const overviewTools: ToolDef[] = [
       // ── 2. Orçamentos parados (draft + quote_status aberto, sem mexer há ≥ N dias) ──
       let orcamentos: Record<string, unknown> = { erro: "não consultado" };
       try {
-        const todayMid = new Date(`${hojeIso}T00:00:00`).getTime();
         const { data: openQuotes } = await admin
           .from("service_orders")
-          .select("service_order_number, grand_total, updated_at, quote_validity_date, clients(name)")
+          .select("service_order_number, grand_total, updated_at, quote_status, created_at, quote_validity_days, quote_validity_date, clients(name)")
           .eq("status", "draft")
           .in("quote_status", ["sent", "awaiting_approval", "awaiting_deposit"])
           .order("updated_at", { ascending: true })
@@ -73,13 +73,14 @@ export const overviewTools: ToolDef[] = [
         const flagged = ((openQuotes as any[]) || [])
           .map((q) => {
             const dias = Math.floor((now.getTime() - new Date(q.updated_at).getTime()) / 86400000);
-            const vd = q.quote_validity_date ? new Date(`${q.quote_validity_date}T00:00:00`).getTime() : null;
             return {
               numero: q.service_order_number,
               cliente: q.clients?.name || "(sem cliente)",
               valor: r2(Number(q.grand_total) || 0),
               dias_parado: dias,
-              expirado: vd !== null && vd < todayMid,
+              // A mesma conta do PDF e da R19. Aprovado aguardando sinal não expira: o cliente
+              // já disse sim (a R19 também o deixa de fora).
+              expirado: q.quote_status !== "awaiting_deposit" && !!vencimentoDoOrcamento(q, ctx.settings, now),
             };
           })
           .filter((q) => q.dias_parado >= diasParado || q.expirado);

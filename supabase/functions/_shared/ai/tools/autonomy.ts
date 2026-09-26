@@ -1,5 +1,5 @@
 import type { ToolDef } from "./registry.ts";
-import { AUTONOMY_PREFIX, NEVER_AUTONOMOUS, autonomyKey } from "../autonomy-policy.ts";
+import { AUTONOMY_PREFIX, EXPLICACAO_DA_TRAVA_POR_ARGUMENTO, NEVER_AUTONOMOUS, autonomyKey } from "../autonomy-policy.ts";
 
 // Onda 2 — autonomia item-a-item.
 // O dono vai liberando, uma ação por vez, o que o agente pode fazer sem pedir confirmação.
@@ -25,6 +25,9 @@ export const autonomyTools: ToolDef[] = [
         agindo_sozinho: liberadas,
         pedindo_confirmacao: desligadas,
         nunca_liberaveis: [...NEVER_AUTONOMOUS],
+        // Liberável só em parte: o dono pode ter dado 'auto' e ainda ver o pedido de "sim" no
+        // modo travado — sem isto, o agente diria que a ação está liberada por inteiro.
+        liberaveis_so_em_parte: EXPLICACAO_DA_TRAVA_POR_ARGUMENTO,
         explicacao:
           "Ações de baixo risco (buscas, montar orçamento, cadastros) sempre executam direto. As sensíveis pedem confirmação até serem liberadas uma a uma. As da lista 'nunca_liberaveis' envolvem dinheiro ou são destrutivas e exigem confirmação para sempre — por decisão de projeto, não dá para liberar.",
       };
@@ -72,7 +75,7 @@ export const autonomyTools: ToolDef[] = [
         acao: nome,
         modo: modo,
         efeito: modo === "auto"
-          ? `A partir de agora eu executo "${nome}" sozinho, sem pedir confirmação. Fica registrado na auditoria como ação autônoma.`
+          ? `A partir de agora eu executo "${nome}" sozinho, sem pedir confirmação. Fica registrado na auditoria como ação autônoma.${EXPLICACAO_DA_TRAVA_POR_ARGUMENTO[nome] ? ` Exceção: ${EXPLICACAO_DA_TRAVA_POR_ARGUMENTO[nome]}` : ""}`
           : `"${nome}" voltou a pedir sua confirmação antes de executar.`,
       };
     },

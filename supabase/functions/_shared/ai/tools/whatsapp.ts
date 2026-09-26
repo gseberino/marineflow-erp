@@ -1,7 +1,21 @@
-import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
-import { chaveDeEnvio, diaLocal, hashCurto } from "../../whatsapp/idempotencia.ts";
+import {
+  blockTechnician,
+  cargosQueContam,
+  lerRetrato,
+  lerSolicitante,
+  NON_TECHNICIAN_ROLES,
+  type Role,
+  type ToolCtx,
+  type ToolDef,
+} from "./registry.ts";
+import { chaveDeEnvio, diaLocal, hashCurto, liberarEnvio } from "../../whatsapp/idempotencia.ts";
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { registrarEnvio } from "../comms/send-log.ts";
+import { documentTypeFor } from "../../pdf/document-type.ts";
+import { fmtCurrency, vencimentoDoOrcamento } from "../../pdf/documento.ts";
+import { dataBR } from "../../pdf/datas.ts";
+import { guardarEEntregar, impressaoDigitalDoDocumento, montarDocumentoDaOrdem } from "../../pdf/gerar-e-guardar.ts";
+import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -63,7 +77,7 @@ export async function enviarDocumentoWhatsapp(p: {
   jwt: string;
   dedupeKey?: string;
   limiteMs?: number;
-}): Promise<{ ok: true; deduplicated?: boolean } | { ok: false; error: string }> {
+}): Promise<{ ok: true; deduplicated?: boolean } | { ok: false; error: string; semResposta?: boolean }> {
   if (p.context === "quote") return { ok: false, error: "context 'quote' marca o orçamento como enviado ao cliente" };
   const controle = new AbortController();
   const relogio = setTimeout(() => controle.abort(), p.limiteMs ?? 25_000);
@@ -84,11 +98,321 @@ export async function enviarDocumentoWhatsapp(p: {
     }
     return { ok: true, ...((data as any).deduplicated ? { deduplicated: true } : {}) };
   } catch (e) {
+    // Sem resposta HTTP (tempo esgotado ou rede): desfecho desconhecido — ver enviarOrdemAoCliente.
     const abortado = e instanceof DOMException && e.name === "AbortError";
-    return { ok: false, error: abortado ? "o envio pelo WhatsApp não respondeu em 25 s" : e instanceof Error ? e.message : String(e) };
+    return {
+      ok: false,
+      error: abortado ? "o envio pelo WhatsApp não respondeu em 25 s" : e instanceof Error ? e.message : String(e),
+      semResposta: true,
+    };
   } finally {
     clearTimeout(relogio);
   }
+}
+
+/**
+ * Manda uma ORDEM (orçamento/OS) ao CLIENTE — texto com o link, ou o PDF com o link na legenda.
+ *
+ * Caminho PRÓPRIO, separado de `enviarDocumentoWhatsapp`, e é de propósito: aquele recusa
+ * context='quote' para que o PDF que o dono pede PARA SI nunca marque o orçamento como
+ * enviado. Aqui é o contrário — é o envio ao cliente, e ele TEM de levar context +
+ * service_order_id: é o que vincula o registro do audit_log à ordem e deixa o whatsapp-send
+ * marcar 'sent' quando o envio foi de fato ao cliente. Quem decide se marca é a edge
+ * (_shared/whatsapp/marcar-enviado.ts): só marca se o destino for o telefone do cliente da
+ * ordem, fora do modo de teste, em orçamento draft não convertido. Tirar a recusa de lá para
+ * reaproveitar a função abriria o caminho de volta ao bug de 26/09/2026 (ORÇ-00072 e
+ * ORÇ-00078 rejeitados sozinhos depois de envios que só foram ao número de teste).
+ *
+ * `context` é tipado: só 'quote' ou 'service_order'. `phone` vem do cadastro do cliente —
+ * nunca de um argumento da tool.
+ */
+export async function enviarOrdemAoCliente(p: {
+  phone: string;
+  serviceOrderId: string;
+  context: "quote" | "service_order";
+  jwt: string;
+  dedupeKey: string;
+  conteudo: { kind: "text"; message: string } | { kind: "document"; url: string; filename: string; caption: string };
+  /** Documento: 25 s (a Evolution baixa o arquivo dentro da chamada). Texto: sem corte, como sempre foi. */
+  limiteMs?: number;
+}): Promise<
+  | { ok: true; deduplicated?: boolean; messageId?: string | null }
+  | { ok: false; error: string; semResposta?: boolean }
+> {
+  const limite = p.limiteMs ?? (p.conteudo.kind === "document" ? 25_000 : null);
+  const controle = new AbortController();
+  const relogio = limite ? setTimeout(() => controle.abort(), limite) : null;
+  const conteudo = p.conteudo.kind === "text"
+    ? { kind: "text", message: p.conteudo.message }
+    : {
+      kind: "document",
+      document_url: p.conteudo.url,
+      document_filename: p.conteudo.filename,
+      document_caption: p.conteudo.caption,
+    };
+  try {
+    const r = await postarWhatsappSend({
+      phone: p.phone,
+      ...conteudo,
+      context: p.context,
+      service_order_id: p.serviceOrderId,
+      dedupe_key: p.dedupeKey,
+    }, p.jwt, controle.signal);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const erro = (data as any).error;
+      return { ok: false, error: typeof erro === "string" ? erro : erro ? JSON.stringify(erro) : `HTTP ${r.status}` };
+    }
+    if ((data as any).deduplicated) return { ok: true, deduplicated: true, messageId: null };
+    return { ok: true, messageId: (data as any).messageId ?? null };
+  } catch (e) {
+    // Nenhuma resposta HTTP: tempo esgotado ou rede. A edge pode ter reservado a chave e até
+    // enviado — `semResposta` é o que diz a quem chama que o desfecho é desconhecido (e que
+    // só nesse caso a chave pode ser liberada).
+    const abortado = e instanceof DOMException && e.name === "AbortError";
+    return abortado
+      ? { ok: false, error: `o envio pelo WhatsApp não respondeu em ${Math.round((limite ?? 0) / 1000)} s`, semResposta: true }
+      : { ok: false, error: e instanceof Error ? e.message : String(e), semResposta: true };
+  } finally {
+    if (relogio) clearTimeout(relogio);
+  }
+}
+
+// ─── Envio de orçamento/OS ao cliente: formato, cargos e resumo da confirmação ──────────
+
+/** Os dois jeitos de mandar uma ordem ao cliente pelo assistente. */
+export type FormatoDoEnvio = "pdf_e_link" | "link";
+
+/**
+ * Decisão do dono (26/09/2026): o padrão é o ARQUIVO PDF com o link na legenda — o cliente vê
+ * o documento na conversa, sem abrir nada, e o link continua lá para aprovar e assinar.
+ * "Só o link" é quando o dono pede.
+ */
+export const FORMATO_PADRAO: FormatoDoEnvio = "pdf_e_link";
+
+/**
+ * O formato pedido. Ausente/vazio → o padrão. Valor desconhecido → null: a tool recusa em vez
+ * de adivinhar (adivinhar 'link' mandaria menos do que o dono quis; adivinhar 'pdf' mandaria
+ * preço e PIX sem ele ter pedido).
+ *
+ * A trava de autonomia (autonomy-policy.ts, NEVER_AUTONOMOUS_WHEN) normaliza igual — só
+ * "link" é liberável; o teste confere que as duas leituras não se separam.
+ */
+export function formatoDoEnvio(args: { formato?: unknown } | null | undefined): FormatoDoEnvio | null {
+  const bruto = args?.formato;
+  if (bruto === undefined || bruto === null || String(bruto).trim() === "") return FORMATO_PADRAO;
+  const f = String(bruto).trim().toLowerCase();
+  return f === "link" || f === "pdf_e_link" ? f : null;
+}
+
+/**
+ * Quem pode mandar o PDF ao cliente. Lista explícita, e NÃO `NON_TECHNICIAN_ROLES`: aquela
+ * inclui o vendedor externo, e o PDF leva preço, dados bancários e a chave PIX da empresa
+ * num arquivo que não se desfaz. O formato 'link' mantém os cargos de sempre.
+ */
+export const CARGOS_DO_PDF_AO_CLIENTE: Role[] = ["admin", "financial", "seller"];
+
+/**
+ * Tamanho máximo da mensagem personalizada, por formato. No PDF ela é a abertura da legenda, e
+ * o whatsapp-send recusa legenda acima de 1024 caracteres — o resto da legenda (número, total e
+ * link) ocupa ~160, então 800 deixa folga. No link ela é o texto inteiro (limite 4096).
+ *
+ * Recusa em vez de cortar: a confirmação mostra a mensagem INTEIRA, e o "sim" é sobre ela —
+ * cortar depois mandaria ao cliente um texto que o dono não leu (até 26/09/2026 o resumo cortava
+ * em 200 caracteres e o envio mandava tudo).
+ */
+export const LIMITE_DA_MENSAGEM: Record<FormatoDoEnvio, number> = { pdf_e_link: 800, link: 4000 };
+
+/**
+ * Formato e cargo do envio ao cliente — a MESMA checagem no gancho `preValidar` (antes de a
+ * pendência nascer, para o dono não aprovar no sino um pedido que vai falhar) e no `execute`
+ * (depois do "sim").
+ *
+ * Cargo: o de quem PEDIU (gravado na pendência, ver gravarSolicitante) e o de quem executa
+ * têm de poder mandar o PDF (cargosQueContam, em registry.ts). Sem isto, o admin que aprovasse
+ * no painel a pendência de um vendedor externo mandaria o PDF com o cargo dele.
+ */
+export function validarPedidoDeEnvio(
+  args: Record<string, unknown> | null | undefined,
+  ctx: Pick<ToolCtx, "userRole" | "userId">,
+): ({ error: string } & Record<string, unknown>) | null {
+  const formato = formatoDoEnvio(args);
+  if (!formato) return { error: `Formato "${String(args?.formato)}" não existe. Use 'pdf_e_link' (padrão) ou 'link'.` };
+  const mensagem = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
+  if (mensagem.length > LIMITE_DA_MENSAGEM[formato]) {
+    return {
+      error: `A mensagem personalizada tem ${mensagem.length} caracteres; ${formato === "pdf_e_link" ? "junto do PDF" : "no envio só do link"} cabem até ${LIMITE_DA_MENSAGEM[formato]}. Encurte e peça de novo.`,
+      nada_enviado: true,
+    };
+  }
+  if (formato !== "pdf_e_link") return null;
+  if (cargosQueContam(args, ctx).every((c) => CARGOS_DO_PDF_AO_CLIENTE.includes(c as Role))) return null;
+  const solicitante = lerSolicitante(args);
+  const outraPessoaPediu = !!solicitante && solicitante.user_id !== ctx.userId &&
+    !CARGOS_DO_PDF_AO_CLIENTE.includes(solicitante.cargo as Role);
+  const quem = outraPessoaPediu ? `O cargo de quem pediu (${solicitante!.nome ?? "outro usuário"})` : "Seu cargo";
+  return {
+    error: `${quem} não manda o PDF ao cliente (o arquivo leva preço e dados de pagamento). Posso mandar só o link, com formato 'link' — é um envio novo e pede nova confirmação.`,
+    alternativa: "formato 'link'",
+    nada_enviado: true,
+  };
+}
+
+/** "••••1234" — o dono reconhece o número pelo final; o resumo não expõe o telefone inteiro. */
+export function mascararTelefone(telefone: unknown): string {
+  const digitos = String(telefone ?? "").replace(/\D/g, "");
+  return digitos.length >= 4 ? `••••${digitos.slice(-4)}` : "••••";
+}
+
+const CAMPOS_DA_ORDEM_PARA_ENVIO =
+  "id, service_order_number, share_token, client_id, status, grand_total, quote_status, created_at, quote_validity_days, quote_validity_date";
+
+/**
+ * No formato 'link' a mensagem personalizada SUBSTITUI o texto padrão. Se ela não traz o link,
+ * o link vai no fim: "só o link" que chega sem link nenhum não é o que o dono pediu. Reconhece
+ * pelo token, que é a parte do link que não muda de domínio para domínio.
+ */
+export function mensagemComLink(mensagem: string, link: string, shareToken: string): string {
+  return mensagem.includes(shareToken) ? mensagem : `${mensagem}\n\n${link}`;
+}
+
+/**
+ * O retrato do envio que o dono aprova: o telefone do cadastro (em hash — o payload da pendência
+ * não precisa do número) e o total. Tirado quando a pendência nasce (ToolDef.retratoDaPendencia);
+ * o execute compara com o de agora. Sem isto, trocar o WhatsApp do cliente ou o valor do
+ * orçamento entre o pedido e o "sim" mandava o arquivo para outro número, ou com outro preço,
+ * do que o resumo mostrou.
+ */
+// deno-lint-ignore no-explicit-any
+export async function retratoDoEnvio(admin: any, args: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  const { data: so } = await buscarOrdemParaEnvio(admin, args?.service_order_id);
+  if (!so) return null;
+  const { data: c } = so.client_id
+    ? await admin.from("clients").select("whatsapp, phone").eq("id", so.client_id).maybeSingle()
+    : { data: null };
+  const digitos = String(c?.whatsapp || c?.phone || "").replace(/\D/g, "");
+  return { telefone: hashCurto(digitos), total: Number(so.grand_total) || 0 };
+}
+
+/** O que mudou entre o retrato aprovado e o estado de agora, em português; null = nada. */
+export function oQueMudouDesdeOPedido(retrato: Record<string, unknown>, agora: { digitos: string; total: unknown }): string | null {
+  const mudancas: string[] = [];
+  if (typeof retrato.telefone === "string" && retrato.telefone !== hashCurto(agora.digitos)) {
+    mudancas.push("o WhatsApp do cliente no cadastro mudou");
+  }
+  const antes = Number(retrato.total);
+  const depois = Number(agora.total) || 0;
+  if (retrato.total !== undefined && Number.isFinite(antes) && Math.abs(antes - depois) > 0.005) {
+    mudancas.push(`o total mudou (era ${fmtCurrency(antes)}, agora ${fmtCurrency(depois)})`);
+  }
+  return mudancas.length ? mudancas.join(" e ") : null;
+}
+
+/**
+ * Pendência gravada ANTES do formato PDF (26/09/2026): não tem `_solicitante` (toda pendência
+ * nova tem) nem `formato`. O dono a aprovou vendo o resumo antigo — o envio de sempre, que era
+ * só o link. Lida hoje pelo padrão novo, mandaria um PDF com preço e PIX que ninguém viu.
+ */
+export function lerPendenciaDoEnvio(payload: Record<string, unknown>): Record<string, unknown> {
+  const semFormato = payload?.formato === undefined || payload?.formato === null || String(payload.formato).trim() === "";
+  return !lerSolicitante(payload) && semFormato ? { ...payload, formato: "link" } : payload;
+}
+
+/** Acha a ordem pelo UUID ou pelo número (ORÇ-00086 / OS-00075 / formato antigo). */
+// deno-lint-ignore no-explicit-any
+async function buscarOrdemParaEnvio(admin: any, idOuNumero: unknown) {
+  const valor = String(idOuNumero ?? "");
+  let q = admin.from("service_orders").select(CAMPOS_DA_ORDEM_PARA_ENVIO);
+  q = UUID_RE.test(valor) ? q.eq("id", valor) : q.eq("service_order_number", valor);
+  return await q.maybeSingle();
+}
+
+/**
+ * Resumo da confirmação de send_service_order_link (painel e "sim <PIN>" no WhatsApp).
+ *
+ * Até 26/09/2026 o resumo era a lista crua dos argumentos: "OS/Orçamento: ORÇ-00086". O dono
+ * dava o PIN sem ver PARA QUEM ia, em que número e com que valor — e agora o padrão manda um
+ * arquivo com preço e PIX, que não se desfaz. O "sim" tem de ser sobre o que vai sair de fato:
+ * cliente, telefone (mascarado), número, total e formato. O telefone é o do cadastro, que é o
+ * único destino que a tool aceita.
+ *
+ * null = não achou a ordem; quem chama cai no resumo genérico.
+ *
+ * `agora` só existe para o teste fixar o dia; em produção é o relógio.
+ */
+export async function resumirEnvioAoCliente(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  args: Record<string, unknown>,
+  agora: Date = new Date(),
+): Promise<string | null> {
+  const { data: so } = await buscarOrdemParaEnvio(admin, args?.service_order_id);
+  if (!so) return null;
+  const { data: c } = so.client_id
+    ? await admin.from("clients").select("name, display_name, whatsapp, phone, opt_out_whatsapp").eq("id", so.client_id).maybeSingle()
+    : { data: null };
+  const formato = formatoDoEnvio(args as { formato?: unknown });
+  const rotulo = documentTypeFor(so.status) === "quote" ? "Orçamento" : "Ordem de Serviço";
+  const telefone = c?.whatsapp || c?.phone;
+  const linhas = [
+    `Cliente: *${c?.name || "—"}*`,
+    telefone ? `WhatsApp: ${mascararTelefone(telefone)} (do cadastro)` : "WhatsApp: ⚠️ cliente sem WhatsApp/telefone no cadastro — o envio vai falhar",
+    `${rotulo}: *${so.service_order_number}* — Total *${fmtCurrency(Number(so.grand_total) || 0)}*`,
+    formato === "link"
+      ? "Formato: *só o link* (para ver online e aprovar)"
+      : formato === "pdf_e_link"
+      ? "Formato: *PDF anexado + link* (o arquivo com preço e PIX vai na conversa)"
+      : `Formato: ⚠️ "${String(args?.formato)}" não existe — o envio será recusado`,
+  ];
+  // A mensagem INTEIRA: o "sim" é sobre o texto que o cliente vai ler. Acima do limite o envio é
+  // recusado (validarPedidoDeEnvio), e o resumo diz isso em vez de mostrar um pedaço.
+  const mensagem = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
+  if (mensagem) {
+    linhas.push(`Mensagem: "${mensagem}"`);
+    if (formato && mensagem.length > LIMITE_DA_MENSAGEM[formato]) {
+      linhas.push(`⚠️ A mensagem tem ${mensagem.length} caracteres (limite ${LIMITE_DA_MENSAGEM[formato]}) — o envio será recusado.`);
+    } else if (formato === "link" && so.share_token && !mensagem.includes(so.share_token)) {
+      linhas.push("(a mensagem não traz o link: ele vai no fim dela)");
+    }
+  }
+  if (so.status === "cancelled") linhas.push("⚠️ A ordem está CANCELADA — o envio será recusado.");
+  // A validade que o PDF vai imprimir, pela MESMA conta do documento e do aviso de vencimento
+  // (vencimentoDoOrcamento). Não bloqueia: reenviar um orçamento vencido para reabrir a conversa é
+  // legítimo — mas o dono tem de saber, antes do "sim", que o cliente vai ler uma data passada.
+  if (documentTypeFor(so.status) === "quote") {
+    const { data: padrao } = await admin.from("app_settings").select("value").eq("key", "quote_validity_days").maybeSingle();
+    const ultimoDia = vencimentoDoOrcamento(so, { quote_validity_days: padrao?.value }, agora);
+    if (ultimoDia) {
+      linhas.push(`⚠️ A validade acabou em ${dataBR(ultimoDia)}: o PDF sai com essa data, já vencida. Para renovar, mude a validade do orçamento na tela antes de mandar — ou confirme assim mesmo.`);
+    }
+  }
+  // Em 26/09/2026, 41 dos 51 orçamentos estavam 'rejected' — a maioria vencida pela rotina
+  // quote-reminders, que já não rejeita (R19 só avisa). A recusa no funil é um fato à parte da
+  // data: um orçamento recusado pelo cliente ontem ainda está dentro da validade.
+  if (so.status === "draft" && so.quote_status === "rejected") {
+    linhas.push("⚠️ Este orçamento está marcado como RECUSADO no funil.");
+  }
+  if (c?.opt_out_whatsapp) linhas.push("⚠️ O cliente pediu para não receber WhatsApp (opt-out) — o envio será recusado.");
+  return linhas.join("\n");
+}
+
+/**
+ * O PDF não saiu: NADA foi ao cliente. O caminho de volta é mandar só o link — um envio novo,
+ * com nova confirmação. Trocar o formato sozinho mandaria ao cliente algo que o dono não
+ * aprovou.
+ *
+ * A oferta vai DENTRO do `error`, não só em `orientacao`: depois do "sim" (painel ou
+ * "sim <PIN>" no WhatsApp) quem fala com o dono é o ai-agent, sem o modelo, e ele mostra só
+ * "⚠️ <título> — falhou: <error>".
+ */
+function anexoFalhou(motivo: string) {
+  return {
+    error: `O PDF não foi anexado (${motivo}). Nada foi enviado ao cliente. Se quiser, mando só o link — é um envio novo e pede nova confirmação.`,
+    nada_enviado: true,
+    alternativa: "mandar só o link (formato 'link')",
+    orientacao:
+      "Diga ao usuário que o anexo do PDF falhou e que NADA foi enviado ao cliente — não diga que mandou. Ofereça mandar só o link: se ele aceitar, chame send_service_order_link de novo com formato='link' (é um envio novo e pede nova confirmação). Não troque o formato por conta própria.",
+  };
 }
 
 /**
@@ -293,28 +617,52 @@ export const whatsappTools: ToolDef[] = [
   {
     name: "send_service_order_link",
     description:
-      "Envia o link público de uma OS/orçamento por WhatsApp. Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número do documento (ex: 'ORÇ-00001' para orçamentos, 'OS-00042' para OS, ou o formato antigo 'OS-2026-XXXXX'). Prefira sempre o UUID.",
+      "Envia um orçamento/OS AO CLIENTE pelo WhatsApp, sempre para o WhatsApp/telefone do cadastro do cliente (não existe campo de telefone). Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. PADRÃO (formato='pdf_e_link'): o ARQUIVO PDF, igual ao botão Baixar, com o total e o link para ver online e aprovar na legenda. formato='link' manda só o link, em texto — use apenas quando o usuário pedir 'só o link' ou quando o PDF falhar e ele aceitar. Vendedor externo só pode formato='link'. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número do documento (ex: 'ORÇ-00001' para orçamentos, 'OS-00042' para OS, ou o formato antigo 'OS-2026-XXXXX'). Prefira sempre o UUID.",
     input_schema: {
       type: "object",
       properties: {
         service_order_id: { type: "string", description: "UUID (campo id) ou número da OS (campo numero, ex: OS-2026-152542)" },
-        custom_message: { type: "string", description: "Mensagem personalizada. Se omitido, usa mensagem padrão com link." },
+        formato: {
+          type: "string",
+          enum: ["pdf_e_link", "link"],
+          description: "pdf_e_link (padrão) = arquivo PDF com o link na legenda; link = só o link em texto, quando o usuário pedir.",
+        },
+        custom_message: { type: "string", description: "Mensagem personalizada. No formato link substitui o texto padrão (se não trouxer o link, ele vai no fim; até 4000 caracteres); no pdf_e_link vira a primeira linha da legenda (número, total e link vêm sempre; até 800 caracteres)." },
       },
       required: ["service_order_id"],
     },
-    // Sempre envia pro cliente dono da OS — sempre cliente, nunca equipe.
+    // Sempre envia pro cliente dono da OS — sempre cliente, nunca equipe. Sem computeRisk de
+    // propósito: nenhum argumento torna isto "baixo risco", e o PDF nunca roda sem o "sim"
+    // (ver NEVER_AUTONOMOUS_WHEN em autonomy-policy.ts).
     risk: "high",
     roles: NON_TECHNICIAN_ROLES,
+    // Formato inexistente e PDF pedido por vendedor externo são recusados ANTES de a pendência
+    // nascer: o sino não mostra "PDF anexado" para um pedido que o execute vai recusar.
+    preValidar: (args, ctx) => validarPedidoDeEnvio(args, ctx),
+    // A pendência grava quem pediu: o execute revalida o cargo DELE, não o de quem aprova.
+    gravarSolicitante: true,
+    // E o retrato do que foi aprovado (telefone e total): mudou até o "sim", não envia.
+    retratoDaPendencia: (args, ctx) => retratoDoEnvio(ctx.admin, args),
+    lerPendencia: lerPendenciaDoEnvio,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
+      // Antes de ler qualquer coisa: o PDF leva preço e PIX, e o vendedor externo não manda —
+      // nem pela mão de um admin que aprove a pendência dele (validarPedidoDeEnvio).
+      const recusado = validarPedidoDeEnvio(args, ctx);
+      if (recusado) return recusado;
+      const formato = formatoDoEnvio(args)!;
       const { admin, jwt, appOrigin, settings } = ctx;
-      const isUUID = UUID_RE.test(String(args.service_order_id || ""));
-      let soQuery = admin.from("service_orders").select("id, service_order_number, share_token, client_id");
-      soQuery = isUUID ? soQuery.eq("id", args.service_order_id) : soQuery.eq("service_order_number", args.service_order_id);
-      const { data: so, error: soErr } = await soQuery.maybeSingle();
+      const { data: so, error: soErr } = await buscarOrdemParaEnvio(admin, args.service_order_id);
       if (soErr || !so) return { error: `OS não encontrada. Verifique se o número ou ID está correto. Valor recebido: "${args.service_order_id}"` };
+      if (so.status === "cancelled") {
+        // Sem sugerir a tool de reabrir OS: ela reabre OS CONCLUÍDA/FATURADA e, no caminho,
+        // cancela pagamentos e zera recebíveis — não é o caminho de uma ordem cancelada.
+        return { error: `A ordem ${so.service_order_number} está CANCELADA: não se manda ao cliente. Se ela voltou a valer, mude o status dela na tela antes de mandar.` };
+      }
       if (!so.share_token) return { error: `A OS ${so.service_order_number} não possui link público ainda. Abra a OS no app, clique em "Compartilhar" para gerar o link, e tente novamente.` };
+      // Destino: SÓ o cadastro do cliente da ordem. Nenhum telefone dos argumentos é lido —
+      // é o que garante que o arquivo com preço e PIX vai para quem é dono do orçamento.
       const { data: c } = await admin.from("clients").select("whatsapp, phone, name, display_name, opt_out_whatsapp").eq("id", so.client_id).maybeSingle();
       if (c?.opt_out_whatsapp) return { error: "Este cliente pediu para não receber mensagens no WhatsApp (opt-out)." };
       const phone = c?.whatsapp || c?.phone;
@@ -322,15 +670,147 @@ export const whatsappTools: ToolDef[] = [
       const origin = appOrigin || settings.app_public_url || "https://marineflow-erp.vercel.app";
       const link = `${origin}/view/${so.share_token}`;
       const nomeUsado = c?.display_name || (c?.name ? String(c.name).trim().split(/\s+/)[0] : "");
-      const msg = args.custom_message || `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;
-      const g = guardaDeEnvio(msg, { tipo: "os_link", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!so.client_id });
+      // 'quote' só para orçamento: é o que deixa o whatsapp-send marcar 'sent' (e ele ainda
+      // confere destino, modo de teste e status). OS vai como 'service_order' — só o vínculo.
+      const contexto = documentTypeFor(so.status) === "quote" ? "quote" as const : "service_order" as const;
+      const digitos = String(phone).replace(/\D/g, "");
+      // O "sim" foi sobre o telefone e o total do resumo: se mudaram desde o pedido, não envia.
+      const retrato = lerRetrato(args);
+      const mudou = retrato ? oQueMudouDesdeOPedido(retrato, { digitos, total: so.grand_total }) : null;
+      if (mudou) {
+        return {
+          error: `Desde o pedido, ${mudou}. Nada foi enviado ao cliente — peça de novo para confirmar com os dados de agora.`,
+          nada_enviado: true,
+        };
+      }
+      // Modo de teste: o whatsapp-send desvia o envio para o número de teste (e aí não marca o
+      // orçamento como enviado). Entra nas chaves anti-duplicado: sem isso, o envio de teste
+      // reservava a chave do CLIENTE e, desligado o modo no mesmo dia, o envio de verdade ouvia
+      // "já foi enviado hoje" — sem o cliente ter recebido nada. Fora do desvio a parte some
+      // (chaveDeEnvio descarta null) e a chave é a mesma de sempre.
+      // A pergunta é "a edge VAI desviar?", não "o interruptor está ligado?": ligado sem número
+      // de teste a edge manda ao cliente — a chave tem de ser a do cliente e o resultado não
+      // pode dizer "foi para o teste". Por isso a mesma função da edge (marcar-enviado.ts).
+      const modoTeste = desviadoPorTeste(settings);
+      const marcaDeTeste = modoTeste ? "teste" : null;
+
+      if (formato === "link") {
+        const personalizada = typeof args.custom_message === "string" ? args.custom_message.trim() : "";
+        const msg = personalizada
+          ? mensagemComLink(personalizada, link, so.share_token)
+          : `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;
+        const g = guardaDeEnvio(msg, { tipo: "os_link", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!so.client_id });
+        if (g.bloqueado) {
+          await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });
+          return { error: g.motivo };
+        }
+        const envio = await enviarOrdemAoCliente({
+          phone,
+          serviceOrderId: so.id,
+          context: contexto,
+          jwt,
+          dedupeKey: chaveDeEnvio("os-link", so.id, digitos, diaLocal(), marcaDeTeste),
+          conteudo: { kind: "text", message: msg },
+        });
+        // Mesmo formato de resposta de antes (sendWhatsapp), para o modelo ler igual.
+        const r = !envio.ok
+          ? { error: envio.error }
+          : envio.deduplicated
+          ? { ok: true, messageId: null, deduplicated: true, aviso: "Esta mesma mensagem já tinha sido enviada hoje para este número; não reenviei." }
+          : { ok: true, messageId: envio.messageId ?? null };
+        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: msg, status: envio.ok ? "sent" : "failed" });
+        return { ...r, ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}) };
+      }
+
+      // ── formato 'pdf_e_link': o arquivo do Baixar, com o link na legenda ──────────────
+      const montado = await montarDocumentoDaOrdem(admin, so, settings);
+      if (!montado.ok) {
+        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[pdf+link] não gerado: ${montado.motivo}`, status: "failed" });
+        return anexoFalhou(montado.motivo);
+      }
+      const doc = montado.doc;
+      const abertura = typeof args.custom_message === "string" && args.custom_message.trim()
+        ? args.custom_message.trim()
+        : `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, segue ${doc.tipoDoc === "quote" ? "o orçamento" : "a ordem de serviço"} em PDF.`;
+      // Número, total e link vêm SEMPRE, mesmo com mensagem personalizada: o dono aprovou o
+      // envio vendo esses três no resumo da confirmação.
+      const legenda = `${abertura}\n\n${doc.rotulo} ${doc.numero} — Total ${doc.total}\nPara ver online e aprovar: ${link}`;
+      // O whatsapp-send recusa legenda acima de 1024 caracteres (zod). Melhor dizer agora do
+      // que gerar o PDF e ouvir um 400.
+      if (legenda.length > 1024) return { error: "A mensagem personalizada ficou longa demais para a legenda do PDF (limite do WhatsApp). Encurte e tente de novo." };
+      // Portão de comunicação ANTES de gerar o arquivo: fora da janela 8h–20h não adianta renderizar.
+      const g = guardaDeEnvio(legenda, { tipo: "os_link", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!so.client_id });
       if (g.bloqueado) {
-        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });
+        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[pdf+link] ${legenda}`, status: "blocked", blockCode: g.codigoBloqueio });
         return { error: g.motivo };
       }
-      const r = await sendWhatsapp(phone, msg, jwt, chaveDeEnvio("os-link", so.id, String(phone).replace(/\D/g, ""), diaLocal()));
-      await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: msg, status: r.ok ? "sent" : "failed" });
-      return { ...r, ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}) };
+
+      // Anti-duplicado pelo CONTEÚDO do documento, não por updated_at: o mesmo PDF para o mesmo
+      // número no mesmo dia sai uma vez só (o laço do agente repetindo a tool depois de um
+      // tempo esgotado não manda dois arquivos ao cliente). Mudou item, valor ou validade, o
+      // conteúdo muda e o envio passa. O carimbo "Emitido em" fica fora da conta.
+      const chave = chaveDeEnvio("os-pdf", so.id, digitos, diaLocal(), impressaoDigitalDoDocumento(doc.html), marcaDeTeste);
+      const entrega = await guardarEEntregar({
+        admin,
+        doc,
+        shareToken: so.share_token,
+        baseUrl: settings.app_public_url || "",
+        rotuloDoLog: "send_service_order_link",
+        entregar: (url) =>
+          enviarOrdemAoCliente({
+            phone,
+            serviceOrderId: so.id,
+            context: contexto,
+            jwt,
+            dedupeKey: chave,
+            conteudo: { kind: "document", url, filename: doc.nomeDoArquivo, caption: legenda },
+          }),
+      });
+      if (!entrega.ok) {
+        // Renderizar, guardar ou assinar falhou: `entregar` nem foi chamado — nada saiu.
+        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[pdf+link] não gerado: ${entrega.motivo}`, status: "failed" });
+        return anexoFalhou(entrega.motivo);
+      }
+      const envio = entrega.valor;
+      if (!envio.ok) {
+        // Libera a chave SÓ quando não houve resposta definitiva (25 s esgotados, rede): a edge
+        // reservou a chave antes de chamar a Evolution e, com a tool tendo desistido no meio, a
+        // reserva ficaria de pé — o próximo pedido ouviria "já enviado" sem nada entregue. Um
+        // PDF repetido ao cliente é o erro menor.
+        // Com resposta definitiva, NÃO mexe: 400/401/500 a edge devolve ANTES de reservar — a
+        // chave, se existe, é de um envio anterior JÁ CONCLUÍDO, e apagá-la abriria a porta
+        // para mandar o mesmo PDF de novo; no 502 a própria edge já liberou.
+        if (envio.semResposta) await liberarEnvio(admin, chave).catch(() => {});
+        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[pdf+link] ${legenda}`, status: "failed" });
+        if (envio.semResposta) {
+          return {
+            error: `O WhatsApp não confirmou o envio do PDF (${envio.error}): pode ter chegado ou não. Confira a conversa do cliente antes de reenviar.`,
+            orientacao:
+              "Diga que o envio não foi confirmado. Antes de oferecer reenviar, confira a conversa do cliente (get_whatsapp_conversation) para ver se o PDF chegou; se não chegou, ofereça reenviar ou mandar só o link (formato='link') — os dois pedem nova confirmação.",
+          };
+        }
+        return anexoFalhou(`o WhatsApp recusou o envio: ${envio.error}`);
+      }
+      const rotuloDoc = `${doc.rotulo} ${doc.numero}`;
+      if (envio.deduplicated) {
+        return { ok: true, deduplicated: true, aviso: `Este mesmo PDF (${rotuloDoc}) já foi enviado hoje para este cliente; não reenviei.` };
+      }
+      await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[pdf+link] ${legenda}`, status: "sent" });
+      // Modo de teste (calculado lá em cima): dizer "chegou ao cliente" seria fingir.
+      // Sem URL e sem token no resultado: ele fica gravado no histórico do agente.
+      return {
+        ok: true,
+        formato: "pdf_e_link",
+        enviado_para: modoTeste ? "o número de TESTE do WhatsApp (modo de teste ligado), não o cliente" : `o WhatsApp do cliente (${mascararTelefone(phone)})`,
+        documento: rotuloDoc,
+        cliente: doc.cliente,
+        total: doc.total,
+        arquivo: doc.nomeDoArquivo,
+        observacao: modoTeste
+          ? "O modo de teste do WhatsApp está ligado: o PDF foi para o número de teste, NÃO para o cliente. Diga isso."
+          : "O cliente recebeu o PDF com o link para ver online e aprovar.",
+        ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}),
+      };
     },
   },
   {

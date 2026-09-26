@@ -87,6 +87,7 @@ const RULE_DEFS: { id: string; label: string; description: string; defaultEnable
   { id: 'r4', label: 'Recebível vencido', description: 'Tarefa urgente de cobrança para recebíveis em atraso.', defaultEnabled: true },
   { id: 'r5', label: 'Pagável vencendo (D-1)', description: 'Tarefa "Pagar fornecedor" na véspera do vencimento.', defaultEnabled: true },
   { id: 'r6', label: 'Orçamento sem resposta', description: 'Follow-up interno quando um orçamento enviado fica 3 dias sem resposta.', defaultEnabled: true },
+  { id: 'r19', label: 'Orçamento vencido: renovar ou rejeitar?', description: 'Tarefa quando um orçamento enviado ou aguardando aprovação passa da validade — a mesma data "até" impressa no PDF, no calendário de Brasília. Nada é rejeitado sozinho: você renova a validade no orçamento (a tarefa fecha sozinha) ou marca como rejeitado. Orçamento aprovado aguardando sinal nunca entra. Substitui a rejeição automática, que em setembro/2026 rejeitou R$ 133 mil em orçamentos sem avisar.', defaultEnabled: true },
   { id: 'r7', label: 'OC não recebida', description: 'Tarefa "Cobrar entrega" quando a ordem de compra passa do prazo.', defaultEnabled: true },
   { id: 'r8', label: 'Estoque abaixo do mínimo', description: 'Tarefa "Repor produto" enquanto o estoque estiver abaixo do mínimo.', defaultEnabled: true },
   { id: 'r11', label: 'Nota fiscal com pendência', description: 'Tarefa para o financeiro quando uma NF fica com erro/rejeitada.', defaultEnabled: true },

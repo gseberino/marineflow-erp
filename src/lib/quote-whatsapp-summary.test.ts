@@ -152,3 +152,17 @@ describe('resumo do orçamento para WhatsApp', () => {
     expect(texto(t)).not.toContain('Sinal para iniciar');
   });
 });
+
+// A validade do texto é a MESMA do PDF do envio (26/09/2026): com data fixa, o PDF diz
+// "Válido até …" — e o texto dizia "válida por 7 dias", contradizendo o anexo.
+describe('validade no texto', () => {
+  it('data fixa vence os dias, igual ao PDF', () => {
+    const txt = buildQuoteWhatsAppSummary({ ...ROBSON, validadeDias: 7, validadeAte: '10/10/2026' });
+    expect(txt).toContain('Proposta válida até 10/10/2026.');
+    expect(txt).not.toContain('válida por 7');
+  });
+  it('sem data fixa, os dias — no singular quando é um', () => {
+    expect(buildQuoteWhatsAppSummary({ ...ROBSON, validadeDias: 7, validadeAte: null })).toContain('Proposta válida por 7 dias.');
+    expect(buildQuoteWhatsAppSummary({ ...ROBSON, validadeDias: 1 })).toContain('Proposta válida por 1 dia.');
+  });
+});

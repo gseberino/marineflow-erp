@@ -1,5 +1,11 @@
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { decidirMarcarEnviado, urlDeDocumentoPermitida } from "./marcar-enviado.ts";
+import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import {
+  campoObrigatorioFaltando,
+  decidirMarcarEnviado,
+  desviadoPorTeste,
+  numeroDeTesteAtivo,
+  urlDeDocumentoPermitida,
+} from "./marcar-enviado.ts";
 
 // Os casos reais que motivaram a regra (26/09/2026): o dono mandando o PDF para si, o modo de
 // teste desviando tudo, OS cancelada e OS concluída recebendo "enviado".
@@ -66,4 +72,76 @@ Deno.test("documento: só URL do Storage deste projeto", () => {
   assertEquals(urlDeDocumentoPermitida(`${SB}/rest/v1/clients?select=*`, SB), false);
   assertEquals(urlDeDocumentoPermitida(`${SB}.evil.com/storage/v1/object/public/documents/x.pdf`, SB), false);
   assertEquals(urlDeDocumentoPermitida("não é url", SB), false);
+});
+
+// ─── Modo de teste: a MESMA regra na edge e nas tools (conferência de 26/09/2026) ──────────
+// A edge desvia só com o modo ligado E um número de teste. As tools olhavam só o interruptor:
+// com o número vazio o PDF ia ao cliente, a tool dizia "foi para o TESTE" e a chave levava
+// ":teste" — desligado o modo no mesmo dia, o cliente recebia o mesmo documento de novo.
+
+Deno.test("modo de teste: desvia só com o modo ligado E um número", () => {
+  assertEquals(numeroDeTesteAtivo({ wa_test_mode: "true", wa_test_number: "5547988887777" }), "5547988887777");
+  assertEquals(desviadoPorTeste({ wa_test_mode: "true", wa_test_number: "5547988887777" }), true);
+  // Desligado, com ou sem número: não desvia.
+  assertEquals(desviadoPorTeste({ wa_test_mode: "false", wa_test_number: "5547988887777" }), false);
+  assertEquals(desviadoPorTeste({ wa_test_number: "5547988887777" }), false);
+  assertEquals(desviadoPorTeste({}), false);
+});
+
+Deno.test("modo ligado sem número: NÃO desvia (a mensagem vai ao destino de verdade)", () => {
+  // Chave ausente (a edge), texto vazio (o ai-agent grava null como "") e null cru.
+  for (const numero of [undefined, "", null]) {
+    const settings = { wa_test_mode: "true", wa_test_number: numero };
+    assertEquals(numeroDeTesteAtivo(settings), null, String(numero));
+    assertEquals(desviadoPorTeste(settings), false, String(numero));
+  }
+  assertEquals(desviadoPorTeste({ zapi_test_mode: "true" }), false);
+});
+
+Deno.test("modo de teste: os nomes antigos zapi_* valem como reserva, e o número zapi só com dígitos", () => {
+  assertEquals(numeroDeTesteAtivo({ zapi_test_mode: "true", zapi_test_number: "+55 (47) 98888-7777" }), "5547988887777");
+  // O wa_* vence o zapi_* (é o que a tela grava hoje).
+  assertEquals(numeroDeTesteAtivo({ wa_test_mode: "true", wa_test_number: "5511900000000", zapi_test_number: "5547988887777" }), "5511900000000");
+  assertEquals(desviadoPorTeste({ wa_test_mode: "false", zapi_test_mode: "true", zapi_test_number: "5547988887777" }), false);
+});
+
+// ─── Campo obrigatório por tipo, conferido ANTES da reserva ───────────────────────────────
+Deno.test("campo obrigatório: message no text, link_url+message no link, document_url no document", () => {
+  assertEquals(campoObrigatorioFaltando({ kind: "text", message: "oi" }), null);
+  assertEquals(campoObrigatorioFaltando({ kind: "text" }), "message é obrigatório para kind=text");
+  assertEquals(campoObrigatorioFaltando({ kind: "text", message: "" }), "message é obrigatório para kind=text");
+
+  assertEquals(campoObrigatorioFaltando({ kind: "link", message: "veja", link_url: "https://x.example/v/1" }), null);
+  assertEquals(campoObrigatorioFaltando({ kind: "link", message: "veja" }), "link_url e message são obrigatórios para kind=link");
+  assertEquals(campoObrigatorioFaltando({ kind: "link", link_url: "https://x.example/v/1" }), "link_url e message são obrigatórios para kind=link");
+
+  assertEquals(campoObrigatorioFaltando({ kind: "document", document_url: "https://sb.example/a.pdf" }), null);
+  // A legenda é opcional no documento; o arquivo não.
+  assertEquals(campoObrigatorioFaltando({ kind: "document", message: "segue" }), "document_url é obrigatório para kind=document");
+});
+
+// ─── A edge e as tools usam estas funções, e na ordem certa ───────────────────────────────
+const lerFonte = (relativo: string) => Deno.readTextFile(new URL(relativo, import.meta.url));
+
+Deno.test("whatsapp-send: nenhum 400 depois de reservar a chave; campo obrigatório vem antes", async () => {
+  const edge = await lerFonte("../../whatsapp-send/index.ts");
+  const reserva = edge.indexOf("reservarEnvio(");
+  const validacao = edge.indexOf("campoObrigatorioFaltando(body)");
+  assert(reserva > 0, "a edge não reserva mais a chave? a guarda ficou cega");
+  assert(validacao > 0, "a edge não chama campoObrigatorioFaltando");
+  assert(validacao < reserva, "a checagem de campo obrigatório tem de vir ANTES da reserva da chave");
+  // Um 400 depois da reserva prende a chave: o pedido corrigido ouviria "já enviado".
+  const depoisDaReserva = edge.slice(reserva);
+  assert(!/,\s*400\s*\)/.test(depoisDaReserva), "há um 400 depois de reservarEnvio: a chave ficaria presa");
+});
+
+Deno.test("modo de teste: a edge e as tools usam a mesma função, nenhuma lê o interruptor à mão", async () => {
+  const edge = await lerFonte("../../whatsapp-send/index.ts");
+  assertStringIncludes(edge, "numeroDeTesteAtivo(settingsMap)");
+  assert(!/(wa|zapi)_test_(mode|number)/.test(edge), "a edge voltou a calcular o modo de teste à mão");
+  for (const tool of ["../ai/tools/whatsapp.ts", "../ai/tools/documentos-pdf.ts"]) {
+    const fonte = await lerFonte(tool);
+    assertStringIncludes(fonte, "desviadoPorTeste(", tool);
+    assert(!/settings(\.|\[["'])(wa|zapi)_test_mode/.test(fonte), `${tool} lê o interruptor do modo de teste à mão`);
+  }
 });

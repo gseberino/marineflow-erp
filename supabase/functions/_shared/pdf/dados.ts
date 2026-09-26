@@ -220,6 +220,9 @@ export async function carregarPDFData(
       financial_notes: (so as any).financial_notes ?? undefined,
       payment_method_preferred: (so as any).payment_method_preferred ?? undefined,
       quote_validity_days: (so as any).quote_validity_days ?? undefined,
+      // A data fixa de validade: sem ela aqui, o PDF dizia "Válido por N dias" de um orçamento
+      // que a R19 dava por vencido no dia seguinte à data (validadeDoOrcamento).
+      quote_validity_date: (so as any).quote_validity_date ?? null,
       deposit_paid: depositPaid > 0 ? depositPaid : undefined,
       receivables: receivables.map((r) => ({
         id: r.id,

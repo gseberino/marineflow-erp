@@ -22,6 +22,7 @@ import { MoneyInput } from '@/components/MoneyInput';
 import { useI18n } from '@/i18n';
 import { USER_ROLES } from '@/hooks/use-app-users';
 import type { InstallmentRow } from '@/lib/os-financials';
+import { primeiraValidade, VALIDADE_MAXIMA_EM_DIAS } from '@/lib/pdf-generator';
 import { CustomInstallmentEditor } from './form-parts';
 
 interface FinancialSectionProps {
@@ -538,10 +539,14 @@ export function FinancialSection(props: FinancialSectionProps) {
                     </Select>
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Validade do orçamento (dias)</Label>
-                    <Input type="number" min="1" className="h-8 text-sm"
+                    <Label htmlFor="so-quote-validity-days" className="text-xs">Validade do orçamento (dias)</Label>
+                    {/* A mesma regra do PDF e da R19 (primeiraValidade): inteiro de 1 a 3650. Era
+                        `parseInt(x) || padrão`, que gravava -1 e 99999 no orçamento — e o PDF e o
+                        aviso de vencimento, que descartam esses números, usavam outro. */}
+                    <Input id="so-quote-validity-days" type="number" min={1} max={VALIDADE_MAXIMA_EM_DIAS} step={1}
+                      className="h-8 text-sm"
                       value={form.quote_validity_days || defaultQuoteValidityDays}
-                      onChange={e => set('quote_validity_days', parseInt(e.target.value) || defaultQuoteValidityDays)}
+                      onChange={e => set('quote_validity_days', primeiraValidade(e.target.value, defaultQuoteValidityDays))}
                       disabled={isLocked} />
                   </div>
                 </div>

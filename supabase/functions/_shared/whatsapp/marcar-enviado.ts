@@ -1,6 +1,64 @@
-// Duas decisões do whatsapp-send, isoladas para teste: quando um envio marca o orçamento como
-// ENVIADO AO CLIENTE, e de onde a Evolution pode baixar um documento.
+// As decisões do whatsapp-send, isoladas para teste: se o modo de teste desvia o envio, que
+// campo falta para cada tipo de envio, quando um envio marca o orçamento como ENVIADO AO
+// CLIENTE, e de onde a Evolution pode baixar um documento.
 import { mesmoTelefone } from "../ai/phone.ts";
+
+/** app_settings em mapa. A edge guarda o valor cru (null fica null); o ai-agent, em texto. */
+type Configuracoes = Record<string, string | null | undefined>;
+
+/**
+ * Para onde o modo de teste desvia o envio — ou null quando NÃO desvia.
+ *
+ * ═══ POR QUE EXISTE ═══
+ *
+ * A regra é da edge whatsapp-send: desvia só com o modo LIGADO **e** um número de teste
+ * preenchido. Modo ligado sem número não desvia — a mensagem vai ao destino de verdade.
+ *
+ * As tools do assistente precisam da MESMA resposta: a chave anti-duplicado do envio ao cliente
+ * leva a marca "teste" quando o envio é desviado, e o resultado diz ao dono "foi para o número
+ * de teste". Até 26/09/2026 elas olhavam só o interruptor. Com o modo ligado e o número vazio,
+ * o PDF ia ao cliente, a tool dizia "foi para o número de TESTE" e a chave levava ":teste" —
+ * desligado o modo no mesmo dia, a chave mudava e o cliente recebia o mesmo PDF de novo. Uma
+ * função só, usada pela edge e pelas tools, é o que impede as duas de divergirem.
+ *
+ * O cálculo é o que a edge sempre fez: nomes antigos zapi_* como reserva; o número wa_* vai
+ * como está, o zapi_* só com os dígitos.
+ */
+export function numeroDeTesteAtivo(settings: Configuracoes): string | null {
+  const modoLigado = (settings.wa_test_mode ?? settings.zapi_test_mode) === "true";
+  if (!modoLigado) return null;
+  const numero = settings.wa_test_number ?? settings.zapi_test_number?.replace(/\D/g, "");
+  return numero ? numero : null;
+}
+
+/** O envio vai para o número de teste em vez do destino de verdade? (ver numeroDeTesteAtivo) */
+export function desviadoPorTeste(settings: Configuracoes): boolean {
+  return numeroDeTesteAtivo(settings) !== null;
+}
+
+/** O corpo do whatsapp-send no que importa para a validação por tipo. */
+export type CorpoDoEnvio = {
+  kind: "text" | "link" | "document";
+  message?: string;
+  link_url?: string;
+  document_url?: string;
+};
+
+/**
+ * O campo obrigatório que falta para o tipo de envio (a mensagem do 400), ou null.
+ *
+ * A edge chama ANTES de reservar a chave anti-duplicado. Até 26/09/2026 estas checagens
+ * ficavam depois da reserva e devolviam 400 sem liberá-la: o pedido corrigido, com a mesma
+ * chave, ouvia "já enviado" sem nada ter saído. As tools contam com a ordem certa — com
+ * resposta 400 elas NÃO liberam a chave, porque "a edge recusa antes de reservar".
+ */
+export function campoObrigatorioFaltando(body: CorpoDoEnvio): string | null {
+  if (body.kind === "text") return body.message ? null : "message é obrigatório para kind=text";
+  if (body.kind === "link") {
+    return body.link_url && body.message ? null : "link_url e message são obrigatórios para kind=link";
+  }
+  return body.document_url ? null : "document_url é obrigatório para kind=document";
+}
 
 export type OrdemParaMarcar = {
   status: string | null;

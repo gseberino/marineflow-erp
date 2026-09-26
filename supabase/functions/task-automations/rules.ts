@@ -2,6 +2,8 @@
 // Cada regra sabe (a) achar entidades em condição e (b) dizer se a condição
 // de uma tarefa viva já se resolveu. Dedupe via automation_key (índice único
 // parcial agenda_tasks_automation_key_live). Plano: plans/marineflow-agenda-tarefas.md §6.
+import { ultimoDiaDaValidade, validadeDoOrcamento, vencimentoDoOrcamento } from '../_shared/pdf/documento.ts';
+import { diaBR, somarDiasAoDia } from '../_shared/pdf/datas.ts';
 
 export interface RuleCandidate {
   automation_key: string;
@@ -765,7 +767,185 @@ const r17: Rule = {
   },
 };
 
-export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15, r16, r17, r18];
+// R19: o orçamento passou da validade — AVISO, nunca rejeição.
+//
+// Decisão do dono (26/09/2026). Até ali a rotina quote-reminders rejeitava em silêncio, sem
+// audit_log, todo orçamento com 7 dias de CRIAÇÃO (app_settings.quote_expiry_days, que não é
+// a validade escrita no PDF), inclusive os já aprovados aguardando sinal: foram R$ 133 mil
+// em 23-24/09, e o cron foi pausado. Agora o vencimento vira uma tarefa e quem decide é o
+// dono: renovar a validade (a tarefa fecha sozinha) ou rejeitar. Esta regra não mexe no
+// orçamento e não manda nada ao cliente.
+//
+// O vencimento é o MESMO "até" que o cliente lê no PDF (ultimoDiaDaValidade, em
+// _shared/pdf/documento.ts): validade do próprio orçamento, senão o padrão da empresa,
+// contada do dia de Brasília da emissão. Avisar num dia e o documento dizer outro seria o
+// erro de antes pelo avesso.
+//
+// 'awaiting_deposit' (aprovado, aguardando sinal) fica de fora de propósito: o cliente já
+// disse sim, e a validade já cumpriu o papel dela. Era exatamente o caso do ORÇ-00095.
+//
+// A chave leva o último dia da validade: renovar e vencer de novo é uma decisão NOVA e
+// precisa de tarefa nova. Com a chave só do orçamento, a dispensa manual da primeira
+// silenciaria a segunda por uma semana (isManualDismissal).
+
+/** Status comerciais em que o orçamento ainda espera resposta do cliente. */
+const AGUARDANDO_CLIENTE = ['sent', 'awaiting_approval'];
+
+/** Padrão da empresa para a validade. `find` só recebe o db, então a regra lê aqui. */
+async function ajustesDeValidade(db: any): Promise<Record<string, unknown>> {
+  const { data } = await db.from('app_settings')
+    .select('value').eq('key', 'quote_validity_days').maybeSingle();
+  return { quote_validity_days: data?.value };
+}
+
+// vencimentoDoOrcamento mora em _shared/pdf/documento.ts desde a revisão final (26/09/2026):
+// o panorama do assistente, o resumo matinal e a confirmação de envio ao cliente fazem a mesma
+// pergunta. Reexportada aqui para quem já a importava desta regra.
+export { vencimentoDoOrcamento };
+
+/** Dias de calendário de `de` até `ate` (aaaa-mm-dd), sem fuso. */
+const diasEntre = (de: string, ate: string) => {
+  const utc = (dia: string) => {
+    const [a, m, d] = dia.slice(0, 10).split('-').map(Number);
+    return Date.UTC(a, m - 1, d);
+  };
+  return Math.round((utc(ate) - utc(de)) / 86_400_000);
+};
+
+/**
+ * A nota da tarefa R19, com a conta da renovação já feita.
+ *
+ * "Aumente a validade" sozinho induz ao erro: a validade conta da EMISSÃO (D13), não do dia
+ * em que se mexe nela. Um orçamento de 3 dias emitido em 24/09 e renovado em 28/09 com
+ * "3 dias" continua vencido (vale até 27/09). A nota diz a data de emissão e dá o número
+ * certo para valer mais o mesmo prazo a partir de hoje: até 01/10, ponha 7 dias.
+ *
+ * Três casos, que até 26/09/2026 eram dois (e o terceiro saía com o texto do segundo):
+ *
+ *   · validade em dias, com emissão legível → a conta pronta, acima;
+ *   · DATA FIXA (quote_validity_date) → os dias não mandam (validadeDoOrcamento usa a data), e
+ *     NENHUMA tela edita essa coluna (MF-AUD-016: só a conversão de orçamento externo a grava).
+ *     A nota antiga mandava "trocar a data" sem dizer onde; agora diz que ela foi gravada fora
+ *     da tela e que renovar pede ajuste técnico;
+ *   · sem data fixa e sem emissão legível → era chamado de "data fixa", o que não era. Não há
+ *     de onde contar os dias, e a nota diz isso.
+ */
+export function notaDoVencimento(
+  orcamento: {
+    created_at?: string | null;
+    quote_validity_date?: string | null;
+    quote_validity_days?: unknown;
+    grand_total?: unknown;
+  },
+  settings: Record<string, unknown>,
+  agora: Date = new Date(),
+): string {
+  const fim = ultimoDiaDaValidade(orcamento, settings);
+  const abertura = `Valia até ${fim ? fmtDate(fim) : '—'} (${fmtBRL(Number(orcamento.grand_total))}). ` +
+    'O orçamento NÃO foi rejeitado. ';
+  const fecho = 'Se o cliente desistiu, marque como rejeitado. Nada foi enviado ao cliente.';
+
+  // A mesma pergunta que ultimoDiaDaValidade faz: data fixa é só a que validadeDoOrcamento
+  // aceita como dia de calendário.
+  const validade = validadeDoOrcamento(orcamento.quote_validity_days, settings, orcamento.quote_validity_date);
+  if (validade.mode === 'date') {
+    return abertura + 'A validade deste orçamento é uma DATA FIXA, gravada fora da tela do ' +
+      'orçamento: não há campo na tela para trocá-la, e mudar os dias não a altera enquanto ela ' +
+      'existir. Para renovar, a data fixa precisa ser trocada ou apagada no banco (ajuste ' +
+      'técnico, peça ao suporte do sistema); feito isso, esta tarefa fecha sozinha. ' + fecho;
+  }
+
+  const emitidoEm = orcamento.created_at ? new Date(orcamento.created_at) : null;
+  if (!emitidoEm || Number.isNaN(emitidoEm.getTime())) {
+    return abertura + 'Este orçamento não tem data de emissão legível, e a validade em dias conta ' +
+      'da emissão: não dá para calcular até quando ele vale nem quantos dias pôr para renová-lo. ' +
+      'Confira o orçamento antes de decidir. ' + fecho;
+  }
+
+  const emissao = diaBR(emitidoEm);
+  const hoje = diaBR(agora);
+  const prazo = validade.days;
+  const alvo = somarDiasAoDia(hoje, prazo);
+  const dd = (dia: string) => fmtDate(dia).slice(0, 5);
+  return abertura +
+    'Para renovar, aumente a validade no orçamento (esta tarefa fecha sozinha). ' +
+    `A validade conta da emissão (${dd(emissao)}), não de hoje: para valer até ${dd(alvo)} ` +
+    `(${prazo} ${prazo === 1 ? 'dia' : 'dias'} a partir de hoje, ${dd(hoje)}), ` +
+    `ponha ${diasEntre(emissao, alvo)} dias. ` + fecho;
+}
+
+const r19: Rule = {
+  id: 'r19',
+  label: 'Orçamento vencido: renovar ou rejeitar?',
+  defaultEnabled: true,
+  async find(db) {
+    const [{ data, error }, settings] = await Promise.all([
+      db.from('service_orders')
+        .select('id, service_order_number, client_id, grand_total, created_at, quote_validity_days, quote_validity_date, clients(name)')
+        .eq('status', 'draft')
+        .is('converted_to_os_at', null)
+        .in('quote_status', AGUARDANDO_CLIENTE)
+        .limit(500),
+      ajustesDeValidade(db),
+    ]);
+    // Erro de consulta não pode virar "nenhum orçamento vencido" (ver R17): levantar faz o
+    // motor registrar a falha com o id da regra.
+    if (error) throw error;
+    const agora = new Date();
+    return (data || []).flatMap((o: any) => {
+      // Um orçamento por vez: um dado que a conta de datas não aceita cala só o aviso DELE.
+      // Até 26/09/2026 uma validade de 1e9 dias fazia `toISOString` lançar RangeError, o erro
+      // saía do find e o motor perdia a R19 inteira — nenhum orçamento vencido era avisado por
+      // causa de um. O teto de 3650 dias (dias-de-validade.ts) fecha esse caso; este catch é a
+      // defesa para o próximo. Fica registrado no log com o id, para consertar o dado.
+      try {
+        const fim = vencimentoDoOrcamento(o, settings, agora);
+        if (!fim) return [];
+        const cliente = o.clients?.name;
+        return [{
+          automation_key: keyOf('r19', 'quote', o.id, fim),
+          title: `Orçamento ${o.service_order_number} venceu em ${fmtDate(fim).slice(0, 5)} — renovar ou rejeitar?` +
+            (cliente ? ` (${cliente})` : ''),
+          priority: 'high' as const,
+          // A decisão é comercial e é do dono, não de quem digitou o orçamento.
+          assignee: 'admin' as const,
+          due_at: dueAt(diaBR(agora)),
+          related_entity_type: 'service_order',
+          related_entity_id: o.id,
+          client_id: o.client_id,
+          notes: notaDoVencimento(o, settings, agora),
+        }];
+      } catch (e) {
+        console.error(`r19: orçamento ${o?.id ?? '?'} (${o?.service_order_number ?? '?'}) ficou sem aviso:`, e);
+        return [];
+      }
+    });
+  },
+  async isResolved(db, task) {
+    const id = entityIdFromKey(task.automation_key);
+    const venceuEm = task.automation_key.split(':')[3];
+    const [{ data }, settings] = await Promise.all([
+      db.from('service_orders')
+        .select('status, quote_status, converted_to_os_at, created_at, quote_validity_days, quote_validity_date')
+        .eq('id', id).maybeSingle(),
+      ajustesDeValidade(db),
+    ]);
+    if (!data) return 'Orçamento não existe mais';
+    // O mesmo filtro do find, na mesma ordem da R6.
+    if (!AGUARDANDO_CLIENTE.includes(data.quote_status)) return `Orçamento mudou para ${data.quote_status}`;
+    if (data.converted_to_os_at) return 'Orçamento convertido em OS';
+    if (data.status !== 'draft') return `Deixou de ser orçamento (${data.status})`;
+    const fim = ultimoDiaDaValidade(data, settings);
+    if (!fim) return null;
+    if (!vencimentoDoOrcamento(data, settings)) return `Validade renovada até ${fmtDate(fim)}`;
+    // Mexeram na validade e ela continua vencida: fecha esta, e o find abre a nova com a
+    // data certa no título (senão ficariam duas tarefas vivas para o mesmo orçamento).
+    if (fim !== venceuEm) return `Validade alterada (agora até ${fmtDate(fim)})`;
+    return null;
+  },
+};
+
+export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15, r16, r17, r18, r19];
 
 export function ruleById(id: string): Rule | undefined {
   return RULES.find((r) => r.id === id);

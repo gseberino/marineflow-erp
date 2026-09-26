@@ -9,7 +9,12 @@ import { z } from "https://esm.sh/zod@3.23.8";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { normalizePhoneNumber } from "../_shared/whatsapp/normalize.ts";
 import { concluirEnvio, liberarEnvio, reservarEnvio } from "../_shared/whatsapp/idempotencia.ts";
-import { decidirMarcarEnviado, urlDeDocumentoPermitida } from "../_shared/whatsapp/marcar-enviado.ts";
+import {
+  campoObrigatorioFaltando,
+  decidirMarcarEnviado,
+  numeroDeTesteAtivo,
+  urlDeDocumentoPermitida,
+} from "../_shared/whatsapp/marcar-enviado.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
@@ -51,6 +56,11 @@ function jr(body: unknown, status = 200) {
 servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  // Reserva de idempotência feita e ainda sem desfecho do provedor. Se algo lançar entre a
+  // reserva e a resposta do provedor, o catch libera — senão a chave ficava presa e o próximo
+  // pedido ouvia "já enviado" sem nada ter saído (conferência de 26/09/2026).
+  let liberarReservaPendente: (() => Promise<void>) | null = null;
+
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -90,13 +100,19 @@ servirComCors(async (req) => {
       return jr({ error: "document_url precisa ser um arquivo do Storage deste projeto." }, 400);
     }
 
-    const testMode = (settingsMap["wa_test_mode"] ?? settingsMap["zapi_test_mode"]) === "true";
-    const testNumber = settingsMap["wa_test_number"] ?? settingsMap["zapi_test_number"]?.replace(/\D/g, "");
-    const desviadoPorTeste = !!(testMode && testNumber);
+    // Campo obrigatório de cada tipo ANTES de reservar a chave: o 400 depois da reserva deixava
+    // a chave presa, e o pedido corrigido ouvia "já enviado" sem nada ter saído.
+    const faltando = campoObrigatorioFaltando(body);
+    if (faltando) return jr({ error: faltando }, 400);
+
+    // Desvio do modo de teste: a MESMA regra das tools do assistente (marcar-enviado.ts), que
+    // decidem por ela a chave anti-duplicado e o "foi para o número de teste".
+    const testNumber = numeroDeTesteAtivo(settingsMap);
+    const foiDesviado = testNumber !== null;
 
     let phoneClean = normalizePhoneNumber(body.phone);
 
-    if (desviadoPorTeste) {
+    if (testNumber !== null) {
       console.log(`WhatsApp: Test Mode Active. Redirecting from ${phoneClean} to ${testNumber}`);
       phoneClean = testNumber;
     }
@@ -114,6 +130,7 @@ servirComCors(async (req) => {
         console.info(`[whatsapp-send] chave repetida, não reenviado: ${chave}`);
         return jr({ success: true, deduplicated: true, kind: body.kind, messageId: null });
       }
+      if (reserva === "nova") liberarReservaPendente = () => liberarEnvio(supabaseAdmin, chave);
     }
 
     const provider = createWhatsAppProvider();
@@ -121,35 +138,35 @@ servirComCors(async (req) => {
     let sendResult;
     let messagePreview = "";
 
+    // message, link_url e document_url já foram conferidos antes da reserva
+    // (campoObrigatorioFaltando): daí o "!" abaixo.
     if (body.kind === "text") {
-      if (!body.message) return jr({ error: "message é obrigatório para kind=text" }, 400);
-      sendResult = await provider.sendText(phoneClean, body.message);
-      messagePreview = body.message.slice(0, 200);
+      sendResult = await provider.sendText(phoneClean, body.message!);
+      messagePreview = body.message!.slice(0, 200);
     } else if (body.kind === "link") {
-      if (!body.link_url || !body.message) {
-        return jr({ error: "link_url e message são obrigatórios para kind=link" }, 400);
-      }
       sendResult = await provider.sendLink(
         phoneClean,
-        body.message,
-        body.link_url,
+        body.message!,
+        body.link_url!,
         body.link_title,
         body.link_description,
         body.link_image && body.link_image.trim() !== "" ? body.link_image : undefined,
       );
-      messagePreview = `[link] ${body.link_url} — ${body.message.slice(0, 160)}`;
+      messagePreview = `[link] ${body.link_url} — ${body.message!.slice(0, 160)}`;
     } else {
       // kind === "document"
-      if (!body.document_url) return jr({ error: "document_url é obrigatório para kind=document" }, 400);
       sendResult = await provider.sendDocument(
         phoneClean,
-        body.document_url,
+        body.document_url!,
         body.document_filename || "documento.pdf",
         body.document_caption || body.message,
       );
       messagePreview = `[pdf] ${body.document_filename || "documento.pdf"}`;
     }
 
+    // O provedor respondeu: daqui em diante a reserva tem desfecho (concluída ou liberada logo
+    // abaixo). Uma exceção depois disto NÃO pode liberar — a mensagem pode já ter saído.
+    liberarReservaPendente = null;
     const success = sendResult.ok;
     if (chave) {
       if (success) await concluirEnvio(supabaseAdmin, chave, sendResult.providerMessageId || null);
@@ -177,7 +194,7 @@ servirComCors(async (req) => {
         provider_result: sendResult,
       },
       reason: success
-        ? `Envio WhatsApp (${body.kind}) realizado com sucesso${testMode ? " [TEST MODE ACTIVE]" : ""}`
+        ? `Envio WhatsApp (${body.kind}) realizado com sucesso${foiDesviado ? " [TEST MODE ACTIVE]" : ""}`
         : `Falha no envio WhatsApp (${body.kind}): ${!sendResult.ok ? sendResult.error : ""}`,
     });
 
@@ -203,7 +220,7 @@ servirComCors(async (req) => {
         const decisao = decidirMarcarEnviado({
           context: body.context,
           serviceOrderId: body.service_order_id,
-          desviadoPorTeste,
+          desviadoPorTeste: foiDesviado,
           telefoneDestino: phoneClean,
           telefonesDoCliente: [cliente?.whatsapp, cliente?.phone],
           ordem: ordem as any,
@@ -246,6 +263,7 @@ servirComCors(async (req) => {
     });
   } catch (err) {
     console.error("whatsapp-send error", err);
+    if (liberarReservaPendente) await liberarReservaPendente().catch(() => {});
     return jr({ error: err instanceof Error ? err.message : "Unknown error" }, 500);
   }
 });

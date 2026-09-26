@@ -6,7 +6,7 @@
 // widget — que não muda nesta fase.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { runAgentLoop, type Proposal } from "../_shared/ai/agent.ts";
+import { ressalvaDoResultado, runAgentLoop, type Proposal } from "../_shared/ai/agent.ts";
 import { filtrarTools } from "../_shared/ai/intent-router.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
@@ -302,11 +302,15 @@ async function approveAndExecutePendingAction(
     .maybeSingle();
   if (!locked) return { locked: false, execResult: null };
 
-  // Passo 2: executa a tool com o payload gravado.
+  // Passo 2: executa a tool com o payload gravado — lido como a tool manda ler pendência de
+  // versão anterior (ToolDef.lerPendencia), quando ela diz como.
   const toolDef = toolsByName[pending.action_name];
   let execResult: unknown;
   try {
-    execResult = toolDef ? await toolDef.execute(pending.payload, toolCtx) : { error: `Tool desconhecida: ${pending.action_name}` };
+    const payload = toolDef?.lerPendencia && pending.payload && typeof pending.payload === "object"
+      ? toolDef.lerPendencia(pending.payload as Record<string, unknown>)
+      : pending.payload;
+    execResult = toolDef ? await toolDef.execute(payload, toolCtx) : { error: `Tool desconhecida: ${pending.action_name}` };
   } catch (e: any) {
     execResult = { error: e?.message || "Falha na execução da tool" };
   }
@@ -402,7 +406,7 @@ async function resolveWhatsAppConfirmation(
     event_category: "data",
     payload: { channel: "whatsapp", args: pending.payload, risk: pending.risk_level, result_summary: JSON.stringify(execResult ?? null).slice(0, 500) },
   });
-  const message = execError ? `⚠️ ${pending.title} — falhou: ${execError}` : `✅ ${pending.title} — executado.`;
+  const message = execError ? `⚠️ ${pending.title} — falhou: ${execError}` : `✅ ${pending.title} — executado.${ressalvaDoResultado(execResult)}`;
   return { message, metadata: clearedMetadata };
 }
 
@@ -717,7 +721,7 @@ servirComCors(async (req) => {
         : "";
       const execMsg = execError
         ? `⚠️ ${pending.title} — falhou: ${execError}${sufixoFila}`
-        : `✅ ${pending.title} — executado.${sufixoFila}`;
+        : `✅ ${pending.title} — executado.${ressalvaDoResultado(execResult)}${sufixoFila}`;
       // Continuidade: injeta uma mensagem assistant simples no histórico (não um tool_result
       // sintético — o tool_result do momento da interceptação já foi persistido no turno
       // original; inventar outro sem um tool_use pareado quebraria a reconstrução do
