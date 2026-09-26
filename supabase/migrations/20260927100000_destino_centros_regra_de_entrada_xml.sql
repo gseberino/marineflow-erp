@@ -375,6 +375,8 @@ BEGIN
              AND p.bank_transaction_id IS NOT NULL
              AND abs(p.amount - v_dup.valor) < 0.01
              AND abs(p.issue_date - coalesce(v_dup.venc, v_emissao)) <= 7
+             -- Pago antes da própria nota existir não é desta nota (salvo sinal de poucos dias).
+             AND p.issue_date >= v_emissao - 3
              AND NOT (p.id = ANY (v_ids))
            ORDER BY abs(p.issue_date - coalesce(v_dup.venc, v_emissao)), p.created_at
            LIMIT 1;
@@ -471,6 +473,93 @@ revoke all on function public.confirm_nfe_import(uuid, uuid, jsonb, uuid) from p
 grant execute on function public.confirm_nfe_import(uuid, uuid, jsonb, uuid) to authenticated, service_role;
 
 -- ───────────────────────────────────────────────────────────────────────────────────────────
+-- 6. "Desfazer importação" acompanha as parcelas. Antes apagava só as contas sem pagamento: a
+--    parcela paga com crédito do fornecedor sobraria, e o Pix que a importação só LIGOU à nota
+--    continuaria ligado — reimportar a nota duplicaria as duas. Agora: sai o que a importação
+--    CRIOU (a pagar e a paga com crédito), volta a ficar sem nota o que ela só ligou, e parcela
+--    paga de verdade pela nota (Registrar pagamento) pede para desfazer o pagamento antes.
+-- ───────────────────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.revert_nfe_import(p_note_id uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'extensions'
+AS $function$
+DECLARE
+  v_status     text;
+  v_mov        RECORD;
+  v_undone     int := 0;
+  v_payable    int := 0;
+  v_desligadas int := 0;
+  v_pago       numeric;
+BEGIN
+  IF auth.uid() IS NOT NULL AND NOT public.is_admin(auth.uid()) THEN
+    RAISE EXCEPTION 'forbidden';
+  END IF;
+
+  SELECT status INTO v_status FROM fiscal_notes WHERE id = p_note_id FOR UPDATE;
+  IF v_status IS NULL THEN
+    RAISE EXCEPTION 'Nota fiscal não encontrada.';
+  END IF;
+  IF v_status <> 'confirmed' THEN
+    RAISE EXCEPTION 'Só é possível desfazer uma importação confirmada (status: %).', v_status;
+  END IF;
+
+  -- Parcela criada pela importação e já paga de verdade: desfazer apagaria o registro do
+  -- pagamento, e reimportar criaria a parcela de novo.
+  SELECT coalesce(sum(paid_amount), 0) INTO v_pago
+    FROM payables
+   WHERE fiscal_note_id = p_note_id AND origin = 'fiscal_note' AND status <> 'cancelled'
+     AND coalesce(paid_amount, 0) > 0
+     AND payment_method IS DISTINCT FROM 'credito_fornecedor';
+  IF v_pago > 0 THEN
+    RAISE EXCEPTION 'Esta nota tem parcela já paga (R$ %). Desfaça o pagamento antes de desfazer a importação.',
+      replace(to_char(v_pago, 'FM999999990.00'), '.', ',');
+  END IF;
+
+  FOR v_mov IN
+    SELECT product_id, quantity_delta FROM inventory_movements
+     WHERE reference_type = 'import' AND reference_id = p_note_id
+  LOOP
+    UPDATE products
+       SET stock_quantity = coalesce(stock_quantity, 0) - v_mov.quantity_delta,
+           updated_at = now()
+     WHERE id = v_mov.product_id;
+    v_undone := v_undone + 1;
+  END LOOP;
+
+  DELETE FROM inventory_movements WHERE reference_type = 'import' AND reference_id = p_note_id;
+
+  -- O que a importação criou: a pagar (sem pagamento) e a parcela paga com crédito do fornecedor.
+  -- Conta cancelada fica (é trilha de uma decisão), só deixa de apontar para a nota.
+  DELETE FROM payables
+   WHERE fiscal_note_id = p_note_id AND origin = 'fiscal_note' AND status <> 'cancelled'
+     AND (coalesce(paid_amount, 0) = 0 OR payment_method = 'credito_fornecedor');
+  GET DIAGNOSTICS v_payable = ROW_COUNT;
+
+  -- O que ela só ligou (o pagamento que já tinha saído pelo banco) e o que foi cancelado voltam
+  -- a ficar sem nota — senão a reimportação não reconheceria o pagamento e criaria a parcela de novo.
+  UPDATE payables SET fiscal_note_id = NULL, updated_at = now()
+   WHERE fiscal_note_id = p_note_id AND (origin <> 'fiscal_note' OR status = 'cancelled');
+  GET DIAGNOSTICS v_desligadas = ROW_COUNT;
+
+  DELETE FROM price_update_suggestions WHERE fiscal_note_id = p_note_id;
+
+  UPDATE fiscal_notes
+     SET status = 'pending', confirmed_at = NULL, import_result = NULL, updated_at = now()
+   WHERE id = p_note_id;
+
+  RETURN jsonb_build_object(
+    'success', true, 'movements_reverted', v_undone, 'payables_removed', v_payable,
+    'payables_desligadas', v_desligadas
+  );
+END;
+$function$;
+
+revoke all on function public.revert_nfe_import(uuid) from public, anon;
+grant execute on function public.revert_nfe_import(uuid) to authenticated, service_role;
+
+-- ───────────────────────────────────────────────────────────────────────────────────────────
 -- Conferências: se algo acima não ficou como deveria, nada é gravado.
 -- ───────────────────────────────────────────────────────────────────────────────────────────
 do $$
@@ -491,8 +580,9 @@ begin
                     and active and dre_group = 'despesa_operacional') then
     raise exception 'a categoria de serviço para a empresa não ficou ativa em despesa_operacional';
   end if;
-  if has_function_privilege('anon', 'public.confirm_nfe_import(uuid,uuid,jsonb,uuid)', 'EXECUTE') then
-    raise exception 'anon ainda executa confirm_nfe_import';
+  if has_function_privilege('anon', 'public.confirm_nfe_import(uuid,uuid,jsonb,uuid)', 'EXECUTE')
+     or has_function_privilege('anon', 'public.revert_nfe_import(uuid)', 'EXECUTE') then
+    raise exception 'anon ainda executa a importação ou o desfazer da nota';
   end if;
   if (select reloptions from pg_class where oid = 'public.conciliacao_lancamentos'::regclass) is distinct from array['security_invoker=on'] then
     raise exception 'a visão de conciliação perdeu o security_invoker';

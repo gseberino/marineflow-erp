@@ -381,7 +381,9 @@ export default function ImportFiscalXML() {
       const r = data as any;
       toast.success(
         `Importação desfeita: ${r.movements_reverted} movimento(s) estornado(s)` +
-        (r.payables_removed ? `, ${r.payables_removed} conta(s) a pagar removida(s)` : '') + '.',
+        (r.payables_removed ? `, ${r.payables_removed} conta(s) a pagar removida(s)` : '') +
+        // Pagamento que já tinha saído pelo banco e só foi LIGADO à nota continua lançado.
+        (r.payables_desligadas ? `, ${r.payables_desligadas} pagamento(s) desligado(s) da nota (continuam lançados)` : '') + '.',
       );
       await writeAuditLog({
         table_name: 'fiscal_notes', record_id: noteId, action: 'revert_import',
@@ -415,6 +417,19 @@ export default function ImportFiscalXML() {
       toast.success(
         `Importação confirmada! ${result.movements_created} movimentos · ${result.products_created} produtos criados.`
       );
+      // As parcelas da nota (27/09/2026): o que ficou a pagar, o que a nota diz ter sido pago com
+      // crédito do fornecedor e o que já tinha saído pelo banco — este é LIGADO, não duplicado, e
+      // o dono precisa saber que foi assim.
+      const parcelas = (result.parcelas ?? []) as Array<{ como: string }>;
+      if (parcelas.length > 1 || parcelas.some((p) => p.como !== 'a_pagar')) {
+        const n = (como: string) => parcelas.filter((p) => p.como === como).length;
+        toast.info([
+          `A nota tem ${parcelas.length} parcela(s)`,
+          n('a_pagar') && `${n('a_pagar')} ficou(aram) em Contas a Pagar, cada uma com o vencimento da nota`,
+          n('credito_do_fornecedor') && `${n('credito_do_fornecedor')} paga(s) com crédito do fornecedor (não sai do banco)`,
+          n('ja_paga_pelo_banco') && `${n('ja_paga_pelo_banco')} já tinha(m) saído pelo banco e foi(ram) ligada(s) à nota, sem duplicar`,
+        ].filter(Boolean).join(' · ') + '.', { duration: 12000 });
+      }
 
       /* Vínculo com a OS só agora: as linhas de fiscal_note_items nascem da
          confirmação (o gatilho as cria), então este é o primeiro momento em que
