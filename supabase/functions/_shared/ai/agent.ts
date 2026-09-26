@@ -1,4 +1,5 @@
 import { resumirPedido } from "./tools/caixa.ts";
+import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
 import {
   callClaude,
   ClaudeApiError,
@@ -123,7 +124,8 @@ const TOOL_LABELS_PT: Record<string, string> = {
   reopen_service_order: "Reabrir OS",
   send_whatsapp_message: "Enviar WhatsApp a cliente",
   send_collection_reminder: "Enviar lembrete de cobrança",
-  send_service_order_link: "Enviar link da OS ao cliente",
+  // Desde 26/09/2026 o padrão é o PDF anexado; o formato vai no resumo da confirmação.
+  send_service_order_link: "Enviar orçamento/OS ao cliente (WhatsApp)",
   schedule_whatsapp_message: "Agendar WhatsApp a cliente",
   followup_send_touch: "Enviar toque de acompanhamento (IA acompanha)",
   criar_missao_acompanhamento: "Deixar a IA acompanhar",
@@ -282,6 +284,15 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
   if (toolName === "lancar_no_caixa" || toolName === "anotar_transacao_do_banco") {
     try {
       const r = await resumirPedido({ admin } as unknown as ToolCtx, toolName, args);
+      if (r) return r;
+    } catch { /* cai no resumo genérico */ }
+  }
+  // Envio ao cliente: o "sim <PIN>" tem de ser sobre QUEM recebe, em que número, qual
+  // documento, quanto e em que formato (o padrão é o PDF com preço e PIX). O resumo mora ao
+  // lado da tool (tools/whatsapp.ts), que lê o destino do mesmo cadastro.
+  if (toolName === "send_service_order_link") {
+    try {
+      const r = await resumirEnvioAoCliente(admin, args);
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
   }
@@ -583,8 +594,11 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
       const effectiveRisk = toolDef ? (toolDef.computeRisk ? toolDef.computeRisk(tc.input) : toolDef.risk) : "low";
 
       // Autonomia concedida pelo dono para ESTA ação (Onda 2). Ações de dinheiro/destrutivas
-      // nunca entram aqui — ver NEVER_AUTONOMOUS.
-      const autonomo = toolDef ? isAutonomyGranted(tc.name, effectiveRisk, params.toolCtx.settings) : false;
+      // nunca entram aqui — ver NEVER_AUTONOMOUS. Os argumentos vão junto porque há trava por
+      // argumento: o envio do PDF ao cliente nunca roda sozinho (NEVER_AUTONOMOUS_WHEN).
+      const autonomo = toolDef
+        ? isAutonomyGranted(tc.name, effectiveRisk, params.toolCtx.settings, tc.input as Record<string, unknown>)
+        : false;
 
       if (!toolDef) {
         toolResult = { error: `Tool desconhecida: ${tc.name}` };
