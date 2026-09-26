@@ -148,10 +148,11 @@ describe('FinancialV2 — paridade e navegação', () => {
     expect(screen.getByRole('tab', { selected: true })).toHaveTextContent(/Visão|Overview/i);
   });
 
-  it('link antigo para a "aba" de recebíveis vai para Contas a Receber em Vencidos', async () => {
+  it('link antigo para a "aba" de recebíveis vai para Contas a Receber', async () => {
+    // A notificação de atraso aponta direto para os vencidos; o link genérico abre o padrão.
     renderFinanceiro('/v2/financial?tab=receivables');
     expect(await screen.findByText('fora do financeiro')).toBeInTheDocument();
-    expect(rotaAtual.caminho).toBe('/v2/receivables?view=overdue');
+    expect(rotaAtual.caminho).toBe('/v2/receivables');
   });
 
   it('"+ Lançar" está no topo de qualquer aba e ?lancar= abre direto', async () => {

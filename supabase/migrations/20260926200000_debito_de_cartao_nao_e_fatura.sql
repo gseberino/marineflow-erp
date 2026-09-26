@@ -128,7 +128,48 @@ with c6 as (
      and saldo_base = 7810.51
   returning id
 )
-insert into public.bank_balance_checks (bank_connection_id, saldo_do_provedor, saldo_calculado, diferenca, transacoes_no_periodo, fecha, observacao)
-select id, 3246.61, 3246.61, 0, 0, true,
+-- A conferência registrada leva a hora em que o banco informou os 3.246,61 (25/09, logo
+-- depois da base de 18:00:14), não a hora da migration: aplicada depois de uma busca nova,
+-- ela não pode passar na frente da conferência real e mostrar um saldo velho como "confere".
+insert into public.bank_balance_checks (bank_connection_id, conferido_em, saldo_do_provedor, saldo_calculado, diferenca, transacoes_no_periodo, fecha, observacao)
+select id, '2026-09-25 21:00:14.3+00', 3246.61, 3246.61, 0, 906, true,
        'Linha de base corrigida em 26/09/2026: 7.810,51 → 5.950,51. A de 25/09 foi fixada antes de gravar 3 Pix da mesma busca (+1.860).'
   from c6;
+
+-- ── 6. A contagem do Caixa que bate também fica registrada ──
+-- "Contei o dinheiro" com o mesmo valor do sistema voltava sem gravar nada, e a tela não tinha
+-- como saber que alguém contou (o aviso "conte o dinheiro" ficaria para sempre). Mesma
+-- função, mesmas regras; a diferença é o registro 'contou_caixa' quando não há ajuste.
+create or replace function public.ajustar_caixa(p_saldo_contado numeric, p_motivo text, p_autor uuid default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_autor uuid := public._autor_do_financeiro(p_autor);
+  v_atual numeric := public.saldo_do_caixa();
+  v_dif numeric;
+  v_motivo text := nullif(btrim(coalesce(p_motivo, '')), '');
+begin
+  if p_saldo_contado is null or p_saldo_contado < 0 then raise exception 'Informe quanto dinheiro há no caixa agora.'; end if;
+  if v_motivo is null then raise exception 'Diga o motivo do ajuste (ex.: contagem de sexta).'; end if;
+  v_dif := round(p_saldo_contado - v_atual, 2);
+  if v_dif = 0 then
+    insert into public.reconciliation_log (acao, autor, valor, detalhe, antes, depois)
+    values ('contou_caixa', v_autor, 0, left('Contagem bateu: ' || v_motivo, 300),
+            jsonb_build_object('saldo', v_atual), jsonb_build_object('saldo', p_saldo_contado));
+    return jsonb_build_object('ok', true, 'diferenca', 0, 'saldo_do_caixa', v_atual, 'message', 'O Caixa já bate com a contagem.');
+  end if;
+  perform public._linha_do_caixa(case when v_dif > 0 then 'credit' else 'debit' end, abs(v_dif), public._hoje_brt(),
+                                 'Ajuste pela contagem: ' || v_motivo, null, 'ajuste_caixa', 'Ajuste pela contagem: ' || v_motivo, v_autor);
+  insert into public.reconciliation_log (acao, autor, valor, detalhe, antes, depois)
+  values ('ajustou_caixa', v_autor, v_dif, left('Contagem: ' || v_motivo, 300),
+          jsonb_build_object('saldo', v_atual), jsonb_build_object('saldo', p_saldo_contado));
+  return jsonb_build_object('ok', true, 'diferenca', v_dif, 'saldo_do_caixa', public.saldo_do_caixa(),
+    'message', case when v_dif > 0 then 'Sobrou ' else 'Faltou ' end || public._brl(abs(v_dif))
+               || ' em relação ao sistema. Caixa ajustado para ' || public._brl(p_saldo_contado) || '.');
+end;
+$$;
+revoke all on function public.ajustar_caixa(numeric, text, uuid) from public, anon;
+grant execute on function public.ajustar_caixa(numeric, text, uuid) to authenticated, service_role;

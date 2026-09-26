@@ -16,6 +16,7 @@ import {
   useDespesas, totaisPorCategoria, ROTULO_DO_GRUPO, ROTULO_QUEM_CLASSIFICOU, type Despesa,
 } from '@/hooks/use-despesas';
 import { CorrigirLancamentoDialog } from '@/components/CorrigirLancamentoDialog';
+import { useFinanceReviewCount } from '@/hooks/use-finance-review';
 import { Ajuda } from '@/components/Ajuda';
 import { Pencil, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -93,6 +94,9 @@ export function DespesasPanel() {
   const [categoria, setCategoria] = useState<string | null>(null);
   const [busca, setBusca] = useState('');
   const [corrigindo, setCorrigindo] = useState<Despesa | null>(null);
+  // O que ainda está no Extrato esperando decisão não virou despesa: sem este aviso, o mês
+  // parece ter gastado pouco (em 25/09, setembro tinha 11 despesas lançadas e 72 linhas na fila).
+  const { data: naFila = 0 } = useFinanceReviewCount();
 
   // Por padrão fica de fora o que não é despesa do resultado (fatura do cartão — a compra já
   // foi contada —, empréstimo, aplicação, transferência entre contas): assim o total bate com o DRE.
@@ -138,9 +142,15 @@ export function DespesasPanel() {
             Saiu no período: <b className="tabular-nums">{formatCurrency(total)}</b> em {doResultado.length} despesa(s)
             <Ajuda rotulo="Como é contado">
               Pela data do lançamento (como o DRE), de todas as origens: banco, cartão de crédito, Caixa e
-              bolso de sócio. O que você ainda vai pagar aparece como "em aberto".
+              bolso de sócio. O que você ainda vai pagar aparece como "em aberto". Só entra o que já foi
+              lançado: o que está no Extrato esperando decisão ainda não conta.
             </Ajuda>
           </p>
+          {naFila > 0 && (
+            <p className="text-xs text-amber-600">
+              {naFila} movimento(s) do banco ainda esperam decisão no Extrato e não estão somados aqui.
+            </p>
+          )}
 
           <div className="flex flex-wrap gap-1" role="tablist" aria-label="Visão das despesas">
             {([['categoria', 'Por categoria'], ['todas', 'Todas as saídas'], ['conferir', 'Para conferir']] as const).map(([v, r]) => (

@@ -72,7 +72,9 @@ export function paraDespesa(l: Linha, grupoDe: Map<string, string>): Despesa {
     grupo: grupoDe.get(categoria) ?? null, quem: String(quem ?? '—'), deOnde, quemClassificou,
     os: l.service_orders?.service_order_number ?? null, status: l.status,
     // A mesma lista do motor do Extrato (historicoSemIdentidade): uma fonte só.
-    semNome: !l.suppliers?.name && !l.payees?.name && !bt?.counterparty_name && historicoSemIdentidade(String(bt?.description ?? l.supplier_name ?? '')),
+    // Só quando há linha do banco: sem ela não há "o banco não informou" (lançamento à mão sem
+    // nome é outra coisa, e mostraria o nome na coluna e "sem quem recebeu" ao mesmo tempo).
+    semNome: !!bt && !l.suppliers?.name && !l.payees?.name && !bt.counterparty_name && historicoSemIdentidade(String(bt.description ?? '')),
     bruto: l as unknown as Record<string, unknown>,
   };
 }

@@ -4,7 +4,7 @@ import { destinoDoGasto } from './destino-do-gasto';
 
 describe('destinoDoGasto', () => {
   it('categoria escolhida vence tudo', () => {
-    expect(destinoDoGasto('Peças e materiais', null, 'almoço', 50, [])).toEqual({ categoria: 'Peças e materiais', porque: null });
+    expect(destinoDoGasto('Peças e materiais', null, 'almoço', 50, [])).toEqual({ categoria: 'Peças e materiais', porque: null, reserva: false });
   });
   it('sem escolha, a padrão de quem recebeu', () => {
     expect(destinoDoGasto('', { nome: 'Roberto', categoria: 'Serviços de terceiros' }, 'almoço', 50, []).categoria).toBe('Serviços de terceiros');
@@ -18,5 +18,8 @@ describe('destinoDoGasto', () => {
     const d = destinoDoGasto('', null, 'coisa diversa', 10, []);
     expect(d.categoria).toBe('Outras despesas');
     expect(d.porque).toMatch(/não reconheci/);
+    // Marcada como reserva: quem chama sabe que ninguém decidiu.
+    expect(d.reserva).toBe(true);
+    expect(destinoDoGasto('', null, 'almoço', 10, []).reserva).toBe(false);
   });
 });

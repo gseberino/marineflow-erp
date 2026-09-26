@@ -24,6 +24,7 @@ vi.mock('@/hooks/use-despesas', async (orig) => {
   };
 });
 vi.mock('@/components/CorrigirLancamentoDialog', () => ({ CorrigirLancamentoDialog: () => <div>janela corrigir</div> }));
+vi.mock('@/hooks/use-finance-review', () => ({ useFinanceReviewCount: () => ({ data: 72 }) }));
 
 function renderizar() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -50,6 +51,11 @@ describe('DespesasPanel', () => {
     expect(screen.queryByText('POSTO')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Corrigir Almoço equipe' }));
     expect(screen.getByText('janela corrigir')).toBeInTheDocument();
+  });
+
+  it('avisa o que ainda está no Extrato e não entrou na soma', () => {
+    renderizar();
+    expect(screen.getByText(/^72 movimento.+ainda esperam decisão no Extrato/)).toBeInTheDocument();
   });
 
   it('para conferir: Outras despesas, sem quem recebeu e lançados sozinhos', async () => {

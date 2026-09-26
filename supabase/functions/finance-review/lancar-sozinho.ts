@@ -22,7 +22,7 @@ export interface LinhaCandidata {
   vinculo_sugerido?: VinculoSugerido | null;
   /** A proposta veio de uma regra marcada "Preencher e esperar meu OK". */
   regra_so_sugere?: boolean;
-  /** O banco não informou para quem foi (débito sem loja, Pix sem nome). */
+  /** O banco não informou para quem foi (débito sem loja, Pix sem nome, só a empresa de pagamento). */
   sem_identidade?: boolean;
 }
 
@@ -40,7 +40,7 @@ export function motivoParaNaoLancarSozinho(l: LinhaCandidata, c: CriterioDoAutom
   if (l.kind !== "create_payable") return "só saída é lançada sozinha";
   if (c.jaPorRegra.has(l.bank_transaction_id)) return "já lançada pela regra";
   if (l.regra_so_sugere) return "a regra está marcada para só sugerir";
-  if (l.sem_identidade) return "o banco não informou para quem foi";
+  if (l.sem_identidade) return "o banco não informou para quem foi (ou só a empresa de pagamento)";
   if (Number(l.confidence) < Math.max(85, c.confiancaMinima)) return "confiança abaixo do mínimo";
   if (!(Number(l.suggested_amount) < c.limiteLote)) return "acima do limite de lote";
   if (!l.suggested_category || l.suggested_category === "Outras despesas") return "sem categoria de verdade";

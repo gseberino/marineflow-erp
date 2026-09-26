@@ -182,7 +182,8 @@ export default function FinancialV2() {
   const tab = secaoPedida === 'ignoradas' || secaoPedida === 'extrato' ? 'inbox' : SECOES_DO_FINANCEIRO.has(secaoPedida) ? secaoPedida : 'overview';
   useEffect(() => {
     // Contas a Receber é tela própria: link antigo para a "aba" vai direto para ela.
-    if (secaoPedida === 'receivables') { navigate('/v2/receivables?view=overdue', { replace: true }); return; }
+    // A notificação de atraso já aponta direto para os vencidos; o link genérico abre o padrão.
+    if (secaoPedida === 'receivables') { navigate('/v2/receivables', { replace: true }); return; }
     if (!secao && tabDaQuery) {
       navigate(tabDaQuery === 'overview' ? '/v2/financial' : `/v2/financial/${tabDaQuery}`, { replace: true });
     }
@@ -269,7 +270,8 @@ export default function FinancialV2() {
   }, [payables, payFilters, payOsSearch, paySort, mostrarPagas]);
 
   const pagasEscondidas = useMemo(
-    () => payables.filter((p) => p.status === 'paid' || p.status === 'cancelled').length,
+    // Só as pagas: é o que o botão passa a mostrar (cancelada não é despesa).
+    () => payables.filter((p) => p.status === 'paid').length,
     [payables],
   );
 

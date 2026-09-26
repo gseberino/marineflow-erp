@@ -108,6 +108,9 @@ export function LancarDialog({ onFechar, tipoInicial = 'despesa', porOndeInicial
     if (!escolhida) return 'por onde';
     if (porOnde === 'socio' && !socio) return 'o sócio';
     if (porOnde === 'depois' && !vencimento) return 'o vencimento';
+    // Anotação do banco sem categoria decidida, sem quem e sem OS: a função recusa (não há o que
+    // classificar) e mandar a reserva "Outras despesas" apagaria o que o motor acharia sozinho.
+    if (tipo === 'despesa' && (porOnde === 'banco' || porOnde === 'cartao') && destino?.reserva && !quem && !os) return 'a categoria ou para quem';
     return null;
   })();
 
@@ -132,7 +135,7 @@ export function LancarDialog({ onFechar, tipoInicial = 'despesa', porOndeInicial
         }, fim);
       } else if (porOnde === 'banco' || porOnde === 'cartao') {
         anotar.mutate({
-          sentido: 'saida', valor, data: data || null, categoria: cat, favorecidoId, fornecedorId,
+          sentido: 'saida', valor, data: data || null, categoria: destino?.reserva ? null : cat, favorecidoId, fornecedorId,
           osId: os || null, descricao: desc,
         }, fim);
       } else if (porOnde === 'depois') {

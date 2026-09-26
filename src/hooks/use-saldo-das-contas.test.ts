@@ -41,4 +41,9 @@ describe('montarSaldos', () => {
     expect(cx.saldo).toBe(640);
     expect(cx.contado).toBe(true);
   });
+
+  it('contagem que bateu (sem linha de ajuste) também conta como contado', () => {
+    const r = montarSaldos(conexoes, [], [], true);
+    expect(r.contas.find((c) => c.id === 'cx')!.contado).toBe(true);
+  });
 });

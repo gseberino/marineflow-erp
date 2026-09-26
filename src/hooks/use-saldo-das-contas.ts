@@ -42,6 +42,8 @@ export function montarSaldos(
   conexoes: Array<{ id: string; label: string; provider: string; active: boolean; saldo_base: number | null }>,
   conferencias: Conferencia[],
   linhasDoCaixa: Array<{ amount: number; transaction_type: string; tx_status: string | null; dismissed_kind: string | null }>,
+  /** Há registro de contagem na trilha (inclusive a que bateu e não gerou ajuste). */
+  contagemRegistrada = false,
 ): SaldosDasContas {
   const ultima = new Map<string, Conferencia>();
   for (const c of [...conferencias].sort((a, b) => b.conferido_em.localeCompare(a.conferido_em))) {
@@ -55,7 +57,7 @@ export function montarSaldos(
         id: c.id, nome: c.label, ehCaixa: true,
         saldo: Math.round((Number(c.saldo_base ?? 0) + soma) * 100) / 100,
         conferidoEm: null, confere: null, diferenca: null,
-        contado: linhasDoCaixa.some((l) => l.dismissed_kind === 'ajuste_caixa'),
+        contado: contagemRegistrada || linhasDoCaixa.some((l) => l.dismissed_kind === 'ajuste_caixa'),
       };
     }
     const u = ultima.get(c.id);
@@ -78,22 +80,33 @@ export function useSaldoDasContas() {
   return useQuery({
     queryKey: ['saldo-das-contas'],
     queryFn: async (): Promise<SaldosDasContas> => {
-      const [con, conf] = await Promise.all([
-        supabase.from('bank_connections').select('id, label, provider, active, saldo_base'),
-        supabase.from('bank_balance_checks')
-          .select('bank_connection_id, conferido_em, saldo_do_provedor, diferenca, fecha')
-          .order('conferido_em', { ascending: false }).limit(60),
-      ]);
+      const con = await supabase.from('bank_connections').select('id, label, provider, active, saldo_base');
       if (con.error) throw con.error;
-      if (conf.error) throw conf.error;
       const conexoes = (con.data ?? []) as unknown as Parameters<typeof montarSaldos>[0];
       const caixa = conexoes.find((c) => c.provider === 'caixa' && c.active);
-      const linhas = caixa
-        ? await lerEmPaginas((de, ate) => supabase.from('bank_transactions')
-            .select('id, amount, transaction_type, tx_status, dismissed_kind')
-            .eq('bank_connection_id', caixa.id).order('id').range(de, ate))
-        : [];
-      return montarSaldos(conexoes, (conf.data ?? []) as unknown as Conferencia[], linhas as never);
+      // A ÚLTIMA conferência de CADA conta, uma consulta por conta: numa janela comum às contas,
+      // a que parasse de sincronizar sumiria das fichas e do dinheiro disponível.
+      const bancos = conexoes.filter((c) => c.active && c.provider !== 'caixa');
+      const [ultimas, linhas, contagem] = await Promise.all([
+        Promise.all(bancos.map(async (c) => {
+          const { data, error } = await supabase.from('bank_balance_checks')
+            .select('bank_connection_id, conferido_em, saldo_do_provedor, diferenca, fecha')
+            .eq('bank_connection_id', c.id).order('conferido_em', { ascending: false }).limit(1);
+          if (error) throw error;
+          return (data ?? []) as unknown as Conferencia[];
+        })),
+        caixa
+          ? lerEmPaginas((de, ate) => supabase.from('bank_transactions')
+              .select('id, amount, transaction_type, tx_status, dismissed_kind')
+              .eq('bank_connection_id', caixa.id).order('id').range(de, ate))
+          : Promise.resolve([]),
+        // Contagem que bateu não gera linha de ajuste: vale o registro na trilha.
+        caixa
+          ? supabase.from('reconciliation_log').select('id').in('acao', ['ajustou_caixa', 'contou_caixa']).limit(1)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+      if (contagem.error) throw contagem.error;
+      return montarSaldos(conexoes, ultimas.flat(), linhas as never, (contagem.data ?? []).length > 0);
     },
     staleTime: 60_000,
   });

@@ -34,6 +34,13 @@ describe('paraDespesa', () => {
   });
 });
 
+describe('sem quem recebeu', () => {
+  it('só vale quando há linha do banco: lançamento à mão sem nome não é "o banco não informou"', () => {
+    const d = paraDespesa({ ...base, supplier_name: null, description: 'INSTALADORA BERLIM' }, grupos);
+    expect(d.semNome).toBe(false);
+  });
+});
+
 describe('totaisPorCategoria', () => {
   it('soma e ordena do maior para o menor', () => {
     const ds = [

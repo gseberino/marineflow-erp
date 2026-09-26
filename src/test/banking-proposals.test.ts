@@ -589,6 +589,23 @@ describe("empresa de pagamento no lugar da loja", () => {
     expect(ehIntermediario("NU PAGAMENTOS S.A. - INSTITUICAO DE PAGAMENTO")).toBe(false);
   });
 
+  it("Mercado Pago cadastrado como fornecedor não ensina categoria nem vai sozinho", () => {
+    // Em produção ele tem CNPJ no cadastro e 6 de 7 decisões em Peças: pelo documento, a memória
+    // do FORNECEDOR decidia — o QR de um restaurante e o de uma loja caem no mesmo CNPJ.
+    const cadastro: FornecedorConhecido[] = [{ id: "f-mp", name: "MERCADO PAGO INSTITUICAO DE PAGAMENTO LTDA", cnpj_cpf: "10.573.521/0001-91" }];
+    const historico = new Map([["f-mp", { categoria: "Peças e materiais", dreGroup: "custo_direto", vezes: 9, total: 10 }]]);
+    const p = montarProposta(
+      tx({ description: "Pix enviado para MERCADO PAGO", counterparty_name: "MERCADO PAGO INSTITUICAO DE PAGAMENTO LTDA", counterparty_document: "10573521000191" }),
+      cadastro, historico,
+    );
+    expect(p.suggestedCategory).toBe("Outras despesas");
+    expect(p.semIdentidade).toBe(true);
+    expect(p.confidence).toBeLessThan(85);
+    // E não vira regra sugerida.
+    const d = { supplierId: "f-mp", supplierName: "MERCADO PAGO INSTITUICAO DE PAGAMENTO LTDA", categoria: "Peças e materiais", dreGroup: "custo_direto" };
+    expect(sugerirRegras([d, d, d, d], [])).toHaveLength(0);
+  });
+
   it("não herda 'supermercado' do nome MERCADO PAGO nem a memória de uma loja só", () => {
     const porNome = new Map([
       ["MERCADO PAGO INSTITUICAO DE PAGAMENTO", { categoria: "Peças e materiais", dreGroup: "custo_direto", vezes: 6, total: 7 }],
@@ -695,12 +712,35 @@ describe("categoria pelo texto (Caixa na tela e no assistente)", () => {
     expect(categoriaPeloTexto("coisa diversa")).toBeNull();
   });
 
-  it("regra de texto sua vem antes da lista do sistema e respeita a faixa de valor", () => {
+  it("regra de texto sua vale como palavra inteira e respeita a faixa de valor", () => {
     const r: RegraFinanceira = {
-      id: "r-rest", match_type: "text", match_value: "rest", direction: "debit", autonomy: "suggest",
+      id: "r-porto", match_type: "text", match_value: "porto", direction: "debit", autonomy: "suggest",
       status: "active", set_category: "Alimentação de campo", set_dre_group: "custo_direto", max_amount: 200,
     };
     expect(categoriaPeloTexto("restaurante do porto", [r], 80)?.motivo).toMatch(/regra sua/);
     expect(categoriaPeloTexto("restaurante do porto", [r], 900)?.motivo).not.toMatch(/regra sua/);
+  });
+
+  it("regras curtas do extrato não pegam palavra de oficina (revisão de 26/09)", () => {
+    // "lanch" pegava "lancha" e "rest" pegava "restante"/"prestação": tudo virava Alimentação.
+    const regras: RegraFinanceira[] = ["lanch", "rest"].map((v) => ({
+      id: v, match_type: "text", match_value: v, direction: "debit", autonomy: "suggest", status: "active",
+      set_category: "Alimentação de campo", set_dre_group: "custo_direto",
+    }));
+    expect(categoriaPeloTexto("gasolina da lancha", regras)?.categoria).toBe("Combustível e deslocamento");
+    expect(categoriaPeloTexto("peça para a lancha do cliente", regras)?.categoria).toBe("Peças e materiais");
+    expect(categoriaPeloTexto("restante do cabo", regras)?.categoria).toBe("Peças e materiais");
+    expect(categoriaPeloTexto("prestação da van", regras)).toBeNull();
+  });
+
+  it("texto livre nunca cai em imposto, aplicação ou salário por palavra comum", () => {
+    // A lista do extrato lia "DAS" (imposto) em "almoço das meninas" e "aplicação" como investimento.
+    expect(categoriaPeloTexto("almoço das meninas")?.categoria).toBe("Alimentação de campo");
+    expect(categoriaPeloTexto("frete das peças")?.categoria).toBe("Frete e importação");
+    expect(categoriaPeloTexto("folha de lixa")?.categoria).toBe("Ferramentas e equipamentos");
+    for (const t of ["aplicação de verniz no casco", "resgate do barco com reboque", "gps garmin", "investimento em ferramenta"]) {
+      const c = categoriaPeloTexto(t)?.categoria;
+      expect(["Aplicação financeira", "Impostos e taxas", "Salários e encargos", "Empréstimo e financiamento"], t).not.toContain(c);
+    }
   });
 });

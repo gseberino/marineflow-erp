@@ -91,6 +91,18 @@ describe('LancarDialog ("+ Lançar")', () => {
     expect(lancar).not.toHaveBeenCalled();
   });
 
+  it('anotação do banco não manda a categoria reserva: sem pista, pede a categoria ou para quem', async () => {
+    // Mandar "Outras despesas" por falta de palpite apagaria a categoria que o motor acharia
+    // sozinho quando a linha chegasse (revisão de 26/09).
+    const user = userEvent.setup();
+    renderizar(<LancarDialog onFechar={() => {}} />);
+    await user.type(screen.getByLabelText('Valor'), '3000');
+    await user.type(screen.getByLabelText('O que foi *'), 'coisa diversa');
+    await user.click(screen.getByRole('button', { name: 'Pix, débito ou boleto' }));
+    expect(screen.getByRole('button', { name: 'Falta a categoria ou para quem' })).toBeDisabled();
+    expect(anotar).not.toHaveBeenCalled();
+  });
+
   it('"Ainda vou pagar" pede o vencimento e cria a conta a pagar', async () => {
     const user = userEvent.setup();
     renderizar(<LancarDialog onFechar={() => {}} />);

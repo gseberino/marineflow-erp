@@ -265,7 +265,7 @@ export interface Proposta {
   appliedRuleId: string | null;
   /** A regra tem autonomia para lançar sozinha (o gestor conferiu ao criá-la). */
   autoAplicavel: boolean;
-  /** O banco não disse para quem foi (débito sem loja, Pix sem nome). */
+  /** O banco não disse para quem foi (débito sem loja, Pix sem nome, só a empresa de pagamento). */
   semIdentidade: boolean;
 }
 
@@ -472,28 +472,61 @@ export function chaveDoRecebedor(tx: TransacaoOrfa): string {
 }
 
 /**
- * Categoria pelo que a pessoa escreveu ("almoço da equipe", "gasolina da van"): regra de
- * texto sua primeiro, depois a lista do sistema. É a mesma leitura do Extrato, usada pelo
- * Caixa na tela e pelo assistente — as duas portas sugerem a mesma coisa.
+ * Palavras do dia a dia → categoria, para o texto que a PESSOA escreve ("almoço da equipe",
+ * "gasolina da lancha", "peça para o cliente").
+ *
+ * Não é a lista do extrato (REGRAS_CATEGORIA): aquela foi feita para históricos de banco e,
+ * aplicada a português corrido, errava feio — "almoço DAS meninas" virava imposto (DAS),
+ * "aplicação de verniz" virava Aplicação financeira (fora do DRE), "folha de lixa" virava
+ * Salários (revisão de 26/09/2026). Aqui só entram gastos de rua de uma oficina náutica, e
+ * nenhum leva para fora do resultado ou para juros/impostos: na dúvida, "não reconheci".
+ */
+const PALAVRAS_DO_DIA_A_DIA: Array<{ categoria: string; dreGroup: string; palavras: string[] }> = [
+  { categoria: "Alimentação de campo", dreGroup: "custo_direto", palavras: ["ALMOCO", "JANTA", "JANTAR", "LANCHE", "REFEICAO", "REFEICOES", "MARMITA", "MARMITEX", "CAFE", "RESTAURANTE", "LANCHONETE", "PADARIA", "PIZZA", "SALGADO", "COMIDA", "SUPERMERCADO"] },
+  { categoria: "Combustível e deslocamento", dreGroup: "custo_direto", palavras: ["GASOLINA", "ETANOL", "DIESEL", "COMBUSTIVEL", "ABASTECIMENTO", "ABASTECI", "POSTO", "UBER", "TAXI"] },
+  { categoria: "Pedágio e estacionamento", dreGroup: "custo_direto", palavras: ["PEDAGIO", "ESTACIONAMENTO", "BALSA", "FERRY"] },
+  { categoria: "Frete e importação", dreGroup: "custo_direto", palavras: ["FRETE", "CORREIOS", "SEDEX", "TRANSPORTADORA"] },
+  { categoria: "Peças e materiais", dreGroup: "custo_direto", palavras: ["PECA", "MATERIAL", "MATERIAIS", "CABO", "FIO", "DISJUNTOR", "TERMINAL", "TERMINAIS", "CONECTOR", "BATERIA", "FUSIVEL", "FUSIVEIS"] },
+  { categoria: "Ferramentas e equipamentos", dreGroup: "despesa_operacional", palavras: ["FERRAMENTA", "BROCA", "LIXA"] },
+  { categoria: "Hospedagem e Hotelaria", dreGroup: "despesa_operacional", palavras: ["HOTEL", "POUSADA", "HOSPEDAGEM", "AIRBNB"] },
+  { categoria: "Aluguel e condomínio", dreGroup: "despesa_operacional", palavras: ["ALUGUEL", "CONDOMINIO"] },
+  { categoria: "Contabilidade e assessoria", dreGroup: "despesa_operacional", palavras: ["CONTADOR", "CONTADORA", "CONTABILIDADE"] },
+];
+
+/** A palavra do texto é o termo, ou o termo no plural (PECA → PECAS, CONECTOR → CONECTORES). */
+function palavraCasa(palavra: string, termo: string): boolean {
+  return palavra === termo || palavra === `${termo}S` || palavra === `${termo}ES`;
+}
+
+/**
+ * Categoria pelo que a pessoa escreveu. Regra de texto sua só vale como PALAVRA INTEIRA
+ * ("rest" pegava "restante" e "prestação"; "lanch" pegava "lancha"); depois a lista do dia a
+ * dia, na ordem em que as palavras aparecem no texto ("frete das peças" é frete). É a mesma
+ * leitura na tela ("+ Lançar", Caixa) e no assistente do WhatsApp.
  */
 export function categoriaPeloTexto(
   texto: string,
   regras: RegraFinanceira[] = [],
   valor?: number,
 ): { categoria: string; dreGroup: string; motivo: string } | null {
-  const t = String(texto ?? "").trim();
+  const t = normalizeText(String(texto ?? ""));
   if (!t) return null;
-  const tx: TransacaoOrfa = { id: "", transaction_date: "", description: t, amount: valor ?? 0, transaction_type: "debit" };
+  const cercado = ` ${t} `;
   const noValor = (r: RegraFinanceira) => valor == null
     || ((r.min_amount == null || valor >= Number(r.min_amount)) && (r.max_amount == null || valor <= Number(r.max_amount)));
   const sua = regras.find((r) => r.match_type === "text" && r.set_category && r.status === "active"
-    && r.direction !== "credit" && noValor(r) && normalizeText(t).includes(normalizeText(r.match_value).trim()));
+    && r.direction !== "credit" && noValor(r) && normalizeText(r.match_value).length > 0
+    && cercado.includes(` ${normalizeText(r.match_value)} `));
   if (sua?.set_category) {
     return { categoria: sua.set_category, dreGroup: sua.set_dre_group ?? "despesa_operacional", motivo: `regra sua: "${sua.match_value}"` };
   }
-  const c = classificar(tx);
-  if (!c || c.categoria === "Outras despesas") return null;
-  return { categoria: c.categoria, dreGroup: c.dreGroup, motivo: `"${c.termo.toLowerCase()}" no texto` };
+  for (const palavra of t.split(" ")) {
+    for (const grupo of PALAVRAS_DO_DIA_A_DIA) {
+      const termo = grupo.palavras.find((p) => palavraCasa(palavra, p));
+      if (termo) return { categoria: grupo.categoria, dreGroup: grupo.dreGroup, motivo: `"${palavra.toLowerCase()}" no texto` };
+    }
+  }
+  return null;
 }
 
 export function montarProposta(
@@ -574,7 +607,9 @@ export function montarProposta(
   // O que o gestor já decidiu para este fornecedor vale mais que uma regra de texto:
   // a regra é um palpite genérico, isto é a prática da própria empresa. Por isso o
   // histórico SOBRESCREVE a classificação por termo quando há repetição.
-  const porFornecedor = achado ? historico?.get(achado.fornecedor.id) : undefined;
+  // Empresa de pagamento cadastrada como fornecedor (o Mercado Pago tem CNPJ no cadastro) não
+  // ensina categoria: o QR de um restaurante e o de uma loja de peças caem no mesmo CNPJ.
+  const porFornecedor = achado && !viaIntermediario ? historico?.get(achado.fornecedor.id) : undefined;
   // Fornecedor cadastrado vale mais que nome de extrato: é identidade contra aproximação.
   const porNome = historicoPorNome?.get(chaveDoRecebedor(tx));
   // MAS SÓ PARA SAÍDA. Esta memória é construída lendo `payables` — é histórico de DESPESA,
@@ -651,7 +686,8 @@ export function montarProposta(
     autoAplicavel: regra?.autonomy === "apply",
     // Sem regra sua, linha sem identidade nunca vai sozinha: a categoria depende de uma
     // informação (a loja) que só a pessoa tem.
-    semIdentidade: semIdentidade && !regra,
+    // Pago por empresa de pagamento também: o nome é dela, não da loja.
+    semIdentidade: (semIdentidade || viaIntermediario) && !regra,
   };
 }
 
@@ -705,6 +741,9 @@ export function sugerirRegras(
     // social e a variações de escrita no extrato. Nome que não identifica ninguém
     // ("DEBITO DE CARTAO") não vira regra: seria "toda compra no débito é X".
     const nomeServe = !!d.counterpartyName && !historicoSemIdentidade(d.counterpartyName) && !ehIntermediario(d.counterpartyName);
+    // Empresa de pagamento cadastrada como fornecedor também não vira regra: seria "todo QR do
+    // Mercado Pago é X".
+    if (d.supplierId && ehIntermediario(d.supplierName)) continue;
     const chave = d.supplierId
       ? `supplier:${d.supplierId}`
       : nomeServe

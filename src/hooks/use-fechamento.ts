@@ -134,6 +134,8 @@ export const ROTULO_DA_ACAO: Record<string, string> = {
   configurou_automatico: 'Configurou o lançar sozinho',
   tirou_da_fila_ja_lancada: 'Tirou da fila (já estava lançada)',
   lancou_no_caixa: 'Lançou no Caixa',
+  ajustou_caixa: 'Acertou o Caixa pela contagem',
+  contou_caixa: 'Contou o Caixa (bateu)',
   devolvida_a_fila: 'Devolveu à fila',
 };
 
