@@ -12,10 +12,11 @@ import { useServiceOrders, useDuplicateServiceOrder, useUpdateServiceOrderStatus
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
-import { downloadPDF, DEFAULT_PDF_OPTIONS, type PDFOptions } from '@/lib/pdf-generator';
+import { downloadPDF, DEFAULT_PDF_OPTIONS, validadeDoOrcamento, type PDFOptions } from '@/lib/pdf-generator';
 import { printPDF } from '@/lib/pdf-print';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
+import { useAppSettings } from '@/hooks/use-app-settings';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
 import { statusConfig } from '@/lib/constants';
 import type { ServiceOrderStatus } from '@/types/domain';
@@ -127,6 +128,9 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
   const [bulkDownloading, setBulkDownloading] = useState(false);
   const pdfGenCountRef = useRef(0);
   const { data: pdfData, error: pdfError } = usePDFData(pdfTarget?.id);
+  // Padrão da empresa para a validade do orçamento (validadeDoOrcamento), usado quando o
+  // orçamento não tem a sua.
+  const { data: appSettings } = useAppSettings();
 
   const { filters, toggle, setField, clearAll, activeCount } = useMultiFilter(
     isOrders
@@ -300,7 +304,14 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
       try {
         const d = await fetchPDFData(ids[i]);
         if (!d) throw new Error('Dados não encontrados');
-        await downloadPDF({ ...d, documentType: isOrders ? 'service_order' : 'quote' }, DEFAULT_PDF_OPTIONS);
+        await downloadPDF({ ...d, documentType: isOrders ? 'service_order' : 'quote' }, {
+          ...DEFAULT_PDF_OPTIONS,
+          // Lote não tem diálogo: cada orçamento sai com a validade DELE (senão a da empresa).
+          // Sem esta linha o gerador caía no literal e todos diziam "Válido por 15 dias".
+          ...(isOrders
+            ? {}
+            : { validity: validadeDoOrcamento(d.serviceOrder?.quote_validity_days, appSettings) }),
+        });
         ok++;
         if (i < ids.length - 1) await new Promise((r) => setTimeout(r, 800));
       } catch (e) {
@@ -775,6 +786,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
         onOpenChange={(v) => { if (!v) setPdfTarget(null); }}
         documentType={pdfTarget?.type || 'quote'}
         hasProductImages={pdfData?.parts?.some((p: { image_url?: string | null }) => !!p.image_url) ?? false}
+        initialValidityDays={validadeDoOrcamento(pdfData?.serviceOrder?.quote_validity_days, appSettings).days}
         onGenerate={handleGeneratePDF}
       />
       <WhatsAppSendHistoryDialog

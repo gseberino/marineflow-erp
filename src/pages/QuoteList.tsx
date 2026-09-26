@@ -23,10 +23,11 @@ import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialo
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
-import { downloadPDF, DEFAULT_PDF_OPTIONS, type PDFOptions } from '@/lib/pdf-generator';
+import { downloadPDF, DEFAULT_PDF_OPTIONS, validadeDoOrcamento, type PDFOptions } from '@/lib/pdf-generator';
 import { printPDF } from '@/lib/pdf-print';
 import type { PDFAction } from '@/components/PDFOptionsDialog';
 import { normalizePhoneE164 } from '@/lib/masks';
+import { useAppSettings } from '@/hooks/use-app-settings';
 import { toast } from 'sonner';
 
 type SortDir = 'asc' | 'desc';
@@ -57,6 +58,9 @@ export default function QuoteList() {
   });
 
   const { data: pdfData } = usePDFData(pdfTarget?.id);
+  // Padrão da empresa para a validade do orçamento (validadeDoOrcamento), usado quando o
+  // orçamento não tem a sua.
+  const { data: appSettings } = useAppSettings();
 
   // ── Sorting ────────────────────────────────────────────────────────────────
   const handleSort = (key: string) => {
@@ -160,7 +164,14 @@ export default function QuoteList() {
     try {
       const data = await fetchPDFData(soId);
       if (!data) throw new Error('Dados não encontrados');
-      await downloadPDF({ ...data, documentType: type }, DEFAULT_PDF_OPTIONS);
+      await downloadPDF({ ...data, documentType: type }, {
+        ...DEFAULT_PDF_OPTIONS,
+        // Sem diálogo, ninguém escolhe a validade: vai a do orçamento (senão a da empresa).
+        // Sem esta linha o gerador caía no literal e o arquivo dizia "Válido por 15 dias".
+        ...(type === 'quote'
+          ? { validity: validadeDoOrcamento(data.serviceOrder?.quote_validity_days, appSettings) }
+          : {}),
+      });
       toast.success('PDF baixado');
     } catch {
       toast.error('Erro ao gerar o PDF');
@@ -494,6 +505,7 @@ export default function QuoteList() {
         onOpenChange={v => { if (!v) setPdfTarget(null); }}
         documentType={pdfTarget?.type || 'quote'}
         hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
+        initialValidityDays={validadeDoOrcamento(pdfData?.serviceOrder?.quote_validity_days, appSettings).days}
         onGenerate={handleGeneratePDF}
       />
       <WhatsAppSendHistoryDialog

@@ -7,10 +7,10 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { AlertTriangle, Download, Printer, Loader2 } from 'lucide-react';
 import type { PDFOptions, PDFDocumentType } from '@/lib/pdf-generator';
-import { DEFAULT_PDF_OPTIONS, resolvePdfOptions } from '@/lib/pdf-generator';
+import { DEFAULT_PDF_OPTIONS, resolvePdfOptions, validadeDoOrcamento } from '@/lib/pdf-generator';
 import { pdfOptionItems } from '@/lib/pdf-options-catalog';
 import { isFinancialOption } from '@/lib/pdf-visibility';
-import { useAppSetting, useAppSettings } from '@/hooks/use-app-settings';
+import { useAppSettings } from '@/hooks/use-app-settings';
 
 export type ValidityConfig = {
   mode: 'days' | 'date';
@@ -40,13 +40,20 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
   // uma vez desligava os termos de todos os documentos futuros daquele tipo, inclusive os
   // enviados por WhatsApp — sem pedir nada e sem avisar ninguém.
   const { data: appSettings } = useAppSettings();
-  const defaultQuoteValidityDays = Number(useAppSetting('quote_validity_days', '15')) || 15;
+  // Padrão da empresa para a validade (app_settings, senão 15) pela função única do PDF — a
+  // mesma do formulário, do envio pela tela, do portal e do assistente. A cópia própria que
+  // havia aqui (`Number(...) || 15`) aceitava -1 e 2.5.
+  const defaultQuoteValidityDays = validadeDoOrcamento(null, appSettings).days;
 
   const [options, setOptions] = useState<PDFOptions>({ ...DEFAULT_PDF_OPTIONS });
   // Enquanto ninguém mexeu nos checkboxes, o padrão da empresa que chegar depois (a query de
   // app_settings pode resolver com o diálogo já aberto) ainda é aplicado. Depois do primeiro
   // clique, não — seria trocar a escolha do usuário debaixo dele.
   const optionsTouched = useRef(false);
+  // O mesmo para a validade. As listas abrem o diálogo no clique, antes de os dados da ordem
+  // chegarem: `initialValidityDays` nasce com o padrão da empresa e só depois vira a validade
+  // do orçamento. Sem acompanhar essa troca, o campo ficava no padrão e o PDF saía com ele.
+  const validityTouched = useRef(false);
   const [downloading, setDownloading] = useState(false);
   const [validityMode, setValidityMode] = useState<'days' | 'date'>('days');
   const [validityDays, setValidityDays] = useState(initialValidityDays ?? defaultQuoteValidityDays);
@@ -65,6 +72,7 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
   useEffect(() => {
     if (open) {
       optionsTouched.current = false;
+      validityTouched.current = false;
       setOptions(padraoDaEmpresa(appSettings));
       setDownloading(false);
       setValidityMode('days');
@@ -85,6 +93,13 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
     setOptions(padraoDaEmpresa(appSettings));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, appSettings, documentType]);
+
+  // A validade do orçamento (ou o padrão da empresa) que chega tarde alcança o campo enquanto
+  // ninguém o editou; depois de editado, o número digitado fica.
+  useEffect(() => {
+    if (!open || validityTouched.current) return;
+    setValidityDays(initialValidityDays ?? defaultQuoteValidityDays);
+  }, [open, initialValidityDays, defaultQuoteValidityDays]);
 
   const titleMap: Record<PDFDocumentType, string> = {
     quote: `${t.pdf.generate} — ${t.pdf.quote}`,
@@ -190,7 +205,10 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
                   type="number"
                   min={1}
                   value={validityDays}
-                  onChange={(e) => setValidityDays(Number(e.target.value) || defaultQuoteValidityDays)}
+                  onChange={(e) => {
+                    validityTouched.current = true;
+                    setValidityDays(Number(e.target.value) || defaultQuoteValidityDays);
+                  }}
                   className="w-24"
                 />
                 <span className="text-sm text-muted-foreground">dias a partir da emissão</span>
