@@ -12,6 +12,7 @@ import {
 import { allTools, type ToolCtx, type ToolDef } from "./tools/index.ts";
 import { isAutonomyGranted } from "./autonomy-policy.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
+import { PERFIL_OPERACAO } from "./perfil-operacao.ts";
 
 export interface Proposal {
   pending_action_id: string;
@@ -365,7 +366,7 @@ async function writeAudit(
   toolCtx: ToolCtx,
   sessionId: string,
   channel: string | undefined,
-  entry: { eventType: string; risk: string; args: unknown; result: unknown; autonomous?: boolean }
+  entry: { eventType: string; risk: string; args: unknown; result: unknown; autonomous?: boolean; detalhe?: Record<string, unknown> }
 ): Promise<void> {
   try {
     await toolCtx.admin.from("ai_operator_audit").insert({
@@ -382,6 +383,7 @@ async function writeAudit(
         args: entry.args,
         result_summary: summarizeForAudit(entry.result),
         ...(entry.autonomous ? { autonomous: true } : {}),
+        ...(entry.detalhe ?? {}),
       },
     });
   } catch (e) {
@@ -417,43 +419,19 @@ function withTrailingCacheMark(messages: ClaudeMessage[]): ClaudeMessage[] {
  * D18 (decisão do dono, 17/09/2026) — perfil enxuto de tools.
  *
  * As 194 tools custavam ~35 mil tokens por chamada e 138 delas nunca tinham sido usadas.
- * Com `app_settings.ai_tool_profile = 'operacao'`, só entram no turno as tools listadas em
- * `ai_tool_profile_operacao` (as usadas nos últimos 60 dias mais as essenciais), as de risco
- * alto (ações que o dono aprova no sino — e que o `confirm_action` precisa encontrar) e
- * qualquer tool cujo nome apareça no pedido do usuário ("use a list_low_stock"). Qualquer
- * outro valor no setting, ou erro de leitura, devolve a lista completa: o corte de custo
- * nunca pode virar um agente sem mãos.
+ * Com `app_settings.ai_tool_profile = 'operacao'`, só entram no turno as tools de
+ * PERFIL_OPERACAO (perfil-operacao.ts — a lista mora no código desde 26/09/2026; o banco
+ * guarda só o liga/desliga), as de risco alto (ações que o dono aprova no sino — e que o
+ * `confirm_action` precisa encontrar) e qualquer tool cujo nome apareça no pedido do usuário
+ * ("use a list_low_stock"). Qualquer outro valor no setting, ou erro de leitura, devolve a
+ * lista completa: o corte de custo nunca pode virar um agente sem mãos.
  */
-const PERFIL_DE_TOOLS = { validoAte: 0, ativo: false, nomes: new Set<string>() };
+const PERFIL_DE_TOOLS = { validoAte: 0, ativo: false };
 
-/**
- * Ferramentas que entram no perfil de operação mesmo fora da lista gravada no banco.
- *
- * O perfil (app_settings.ai_tool_profile_operacao) é editado à mão e ferramenta nova nasce
- * fora dele — invisível para o assistente, por mais que funcione. Foi o que aconteceu com
- * get_whatsapp_conversation: no ar desde 24/09/2026 e fora do perfil. As daqui são as que o
- * dono pediu para usar conversando.
- *
- * Por que lista FIXA e não "pelo assunto da mensagem": o bloco de tools é o começo do
- * prompt em cache. Trocar as tools a cada assunto invalidaria o cache (~35 mil tokens pagos
- * cheios de novo a cada troca); quatro tools a mais, sempre iguais, custam ~10% do seu
- * tamanho por chamada, porque ficam no cache.
- */
-export const SEMPRE_NO_PERFIL = new Set([
-  "get_whatsapp_conversation",
-  "buscar_lancamentos",
-  "desfazer_aprovacao_de_lancamento",
-  "casar_lancamento_com_extrato",
-  "cadastrar_contraparte_do_extrato",
-  "verificar_mes",
-  "consultar_conta",
-  "configurar_lancamento_automatico",
-  "listar_lancados_sozinhos",
-  "lancar_no_caixa",
-  "ajustar_saldo_do_caixa",
-  "anotar_transacao_do_banco",
-  "gastos_por_categoria",
-]);
+// Nome antigo mantido: o SEMPRE_NO_PERFIL daqui foi unificado com a lista que morava no banco
+// em PERFIL_OPERACAO (26/09/2026). Testes e outras frentes ainda importam por este nome.
+// Ferramenta nova que o dono quer usar conversando entra em perfil-operacao.ts, não aqui.
+export { PERFIL_OPERACAO as SEMPRE_NO_PERFIL };
 
 function textoDoUltimoPedido(messages: ClaudeMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -470,23 +448,75 @@ async function aplicarPerfilDeTools(todas: ToolDef[], params: RunAgentLoopParams
     if (Date.now() > PERFIL_DE_TOOLS.validoAte) {
       const { data } = await params.toolCtx.admin
         .from("app_settings").select("key, value")
-        .in("key", ["ai_tool_profile", "ai_tool_profile_operacao"]);
+        .in("key", ["ai_tool_profile"]);
       const mapa = Object.fromEntries(((data ?? []) as { key: string; value: string }[]).map((r) => [r.key, r.value]));
-      let nomes: unknown = [];
-      try { nomes = JSON.parse(mapa.ai_tool_profile_operacao || "[]"); } catch { nomes = []; }
       PERFIL_DE_TOOLS.ativo = mapa.ai_tool_profile === "operacao";
-      PERFIL_DE_TOOLS.nomes = new Set(Array.isArray(nomes) ? nomes.map(String) : []);
       PERFIL_DE_TOOLS.validoAte = Date.now() + 5 * 60_000;
     }
   } catch {
     return todas;
   }
-  if (!PERFIL_DE_TOOLS.ativo || PERFIL_DE_TOOLS.nomes.size === 0) return todas;
+  if (!PERFIL_DE_TOOLS.ativo) return todas;
   const pedido = textoDoUltimoPedido(params.messages).toLowerCase();
   return todas.filter((t) =>
-    t.risk === "high" || PERFIL_DE_TOOLS.nomes.has(t.name) || SEMPRE_NO_PERFIL.has(t.name) ||
+    t.risk === "high" || PERFIL_OPERACAO.has(t.name) ||
     (pedido.length > 0 && pedido.includes(t.name))
   );
+}
+
+/**
+ * REDE DE SEGURANÇA DO PERFIL (26/09/2026).
+ *
+ * O perfil esconde ferramentas que o prompt ensina (perfil-operacao.ts, SO_PELA_REDE). Quando o
+ * modelo obedece o prompt e chama uma delas, antes ele recebia "Tool desconhecida" — foi o que
+ * aconteceu em 25/09 com send_document_pdf_to_self. A rede procura a ferramenta em params.tools,
+ * que é a lista JÁ filtrada por cargo e canal (ai-agent/index.ts) — NUNCA em allTools: procurar
+ * lá deixaria o técnico chegar no financeiro e o WhatsApp chegar no que é só de tela.
+ *
+ * O modelo chamou sem ver o esquema, então: argumento é conferido contra o input_schema (e,
+ * se estiver errado, volta o erro COM o esquema para ele acertar na próxima rodada); leitura
+ * pelo nome roda direto; o resto vira pendência de confirmação, mesmo sendo de risco baixo.
+ */
+const PREFIXOS_DE_LEITURA = /^(get_|list_|read_|check_|search_)/;
+
+export function ehLeituraPeloNome(nome: string): boolean {
+  return PREFIXOS_DE_LEITURA.test(nome);
+}
+
+/**
+ * Confere os argumentos contra o input_schema: obrigatórios presentes, enum válido e nenhuma
+ * chave fora de properties. Não confere tipo de propósito — rejeitar demais custa tanto quanto
+ * aceitar errado, e a própria tool já recusa valor que não serve. Devolve a lista de problemas
+ * em português (vazia = pode seguir).
+ */
+export function validarArgumentosDaTool(schema: Record<string, unknown>, args: unknown): string[] {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) {
+    return ["os argumentos precisam ser um objeto JSON com os campos do input_schema"];
+  }
+  const entrada = args as Record<string, unknown>;
+  const props = ((schema?.properties ?? {}) as Record<string, { enum?: unknown[]; items?: { enum?: unknown[] } }>);
+  const obrigatorios = Array.isArray(schema?.required) ? (schema.required as string[]) : [];
+  const problemas: string[] = [];
+  for (const campo of obrigatorios) {
+    const v = entrada[campo];
+    if (v === undefined || v === null || v === "") problemas.push(`falta o campo obrigatório '${campo}'`);
+  }
+  for (const [campo, valor] of Object.entries(entrada)) {
+    const def = props[campo];
+    if (!def) {
+      problemas.push(`o campo '${campo}' não existe nesta ferramenta`);
+      continue;
+    }
+    if (valor === undefined || valor === null) continue;
+    if (Array.isArray(def.enum) && !def.enum.includes(valor)) {
+      problemas.push(`'${campo}' aceita só: ${def.enum.map(String).join(", ")}`);
+    }
+    if (Array.isArray(def.items?.enum) && Array.isArray(valor)) {
+      const fora = valor.filter((x) => !def.items!.enum!.includes(x));
+      if (fora.length) problemas.push(`'${campo}' aceita só: ${def.items.enum.map(String).join(", ")}`);
+    }
+  }
+  return problemas;
 }
 
 /**
@@ -504,6 +534,8 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
 
   const toolSchemas = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
   const toolsByName: Record<string, ToolDef> = Object.fromEntries(tools.map((t) => [t.name, t]));
+  // Rede de segurança do perfil: SÓ o que cargo e canal já liberaram (params.tools), nunca allTools.
+  const alcancaveisPelaRede: Record<string, ToolDef> = Object.fromEntries((params.tools ?? []).map((t) => [t.name, t]));
 
   // ORÇAMENTO DE TEMPO — o que realmente protege o turno.
   // A Edge Function do Supabase tem teto de parede de ~150s: estourar devolve HTTP 546 e o
@@ -576,18 +608,32 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
     let shortCircuit: { proposal?: Proposal; options?: OptionsData } | null = null;
 
     for (const tc of toolUses) {
-      const toolDef = toolsByName[tc.name];
+      // Escondida pelo perfil mas liberada por cargo e canal → rede de segurança (ver acima).
+      const foraDoPerfil = toolsByName[tc.name] ? undefined : alcancaveisPelaRede[tc.name];
+      const toolDef = toolsByName[tc.name] ?? foraDoPerfil;
+      const argumentosInvalidos = foraDoPerfil ? validarArgumentosDaTool(foraDoPerfil.input_schema, tc.input) : [];
       let toolResult: unknown;
       let createdPendingProposal: Proposal | undefined;
 
-      const effectiveRisk = toolDef ? (toolDef.computeRisk ? toolDef.computeRisk(tc.input) : toolDef.risk) : "low";
+      const riscoDaTool = toolDef ? (toolDef.computeRisk ? toolDef.computeRisk(tc.input) : toolDef.risk) : "low";
+      // Pela rede, só leitura roda direto: escrita que o modelo chamou sem ver o esquema pede
+      // confirmação. Só sobe o risco — nunca rebaixa o que a própria tool declara.
+      const effectiveRisk = foraDoPerfil && riscoDaTool === "low" && !ehLeituraPeloNome(tc.name) ? "medium" : riscoDaTool;
 
       // Autonomia concedida pelo dono para ESTA ação (Onda 2). Ações de dinheiro/destrutivas
-      // nunca entram aqui — ver NEVER_AUTONOMOUS.
-      const autonomo = toolDef ? isAutonomyGranted(tc.name, effectiveRisk, params.toolCtx.settings) : false;
+      // nunca entram aqui — ver NEVER_AUTONOMOUS. Pela rede também não: a autonomia foi dada
+      // pensando no modelo que VÊ a ferramenta, não no que a chama de memória do prompt.
+      const autonomo = toolDef && !foraDoPerfil ? isAutonomyGranted(tc.name, effectiveRisk, params.toolCtx.settings) : false;
 
       if (!toolDef) {
         toolResult = { error: `Tool desconhecida: ${tc.name}` };
+      } else if (argumentosInvalidos.length > 0) {
+        // Nada roda: devolve o que está errado JUNTO com o esquema, que o modelo não tinha visto.
+        toolResult = {
+          error: `Argumentos inválidos para ${tc.name}: ${argumentosInvalidos.join("; ")}.`,
+          input_schema: toolDef.input_schema,
+          instruction: "Nada foi executado. Corrija os argumentos seguindo o input_schema acima e chame a ferramenta de novo.",
+        };
       } else if (effectiveRisk !== "low" && !autonomo) {
         // Interceptação por risco (Fase 3): não executa — grava a pendência e devolve
         // um tool_result sintético. A tool real só roda via confirm_action, sem LLM.
@@ -626,6 +672,21 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
           args: tc.input,
           result: toolResult,
           autonomous: effectiveRisk !== "low", // sensível que rodou direto = autonomia concedida
+        });
+      }
+
+      // Marca própria da rede: 'fora_do_perfil:%' na auditoria mostra quais ferramentas o prompt
+      // faz o modelo procurar fora do perfil — a que aparecer com frequência merece entrar nele.
+      if (foraDoPerfil) {
+        const desfecho = argumentosInvalidos.length > 0
+          ? "argumentos_invalidos"
+          : effectiveRisk === "low" ? "executada" : createdPendingProposal ? "pendencia" : "falha_ao_registrar_pendencia";
+        await writeAudit(params.toolCtx, params.sessionId, params.channel, {
+          eventType: `fora_do_perfil:${tc.name}`,
+          risk: effectiveRisk,
+          args: tc.input,
+          result: toolResult,
+          detalhe: { desfecho },
         });
       }
 
