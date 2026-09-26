@@ -1,7 +1,14 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { dirname, fromFileUrl, join } from "https://deno.land/std@0.224.0/path/mod.ts";
 import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
-import { buildOrderHTML, DEFAULT_PDF_OPTIONS, ultimoDiaDaValidade, validadeDoOrcamento } from "./documento.ts";
+import {
+  buildOrderHTML,
+  DEFAULT_PDF_OPTIONS,
+  opcoesPadraoDoDocumento,
+  type PDFOptions,
+  ultimoDiaDaValidade,
+  validadeDoOrcamento,
+} from "./documento.ts";
 import { AGORA, ORCAMENTO, ORCAMENTO_COM_PARCELAS, OS_COM_PAGAMENTO, VALIDADE_POR_DATA } from "./amostras.ts";
 
 // A metade Deno da paridade (a outra é src/lib/pdf-paridade-fuso.test.ts, no vitest).
@@ -73,4 +80,61 @@ Deno.test("o 'até' do PDF é o último dia do aviso de vencimento (R19)", () =>
   } finally {
     tempo.restore();
   }
+});
+
+/** A linha de validade que o orçamento imprime com esta `validity`. */
+const linhaDeValidade = (validity: PDFOptions["validity"], dados = ORCAMENTO) =>
+  /Válido[^<]*/.exec(buildOrderHTML(dados, { ...DEFAULT_PDF_OPTIONS, validity }))?.[0];
+
+// A normalização mora DENTRO do gerador (26/09/2026): o diálogo mandava `Number(x) || padrão`
+// (-1 e 2.5 passavam), e qualquer caminho novo que esquecesse de normalizar imprimiria lixo.
+// ORCAMENTO foi emitido às 23h30 de 24/09 (Brasília).
+Deno.test("getValidityText: número inválido nunca vai impresso", () => {
+  assertEquals(linhaDeValidade({ mode: "days", days: -1 }), "Válido por 15 dias (até 09/10/2026)");
+  assertEquals(linhaDeValidade({ mode: "days", days: 0 }), "Válido por 15 dias (até 09/10/2026)");
+  assertEquals(linhaDeValidade({ mode: "days", days: 2.5 }), "Válido por 2 dias (até 26/09/2026)");
+  // 1e9 lançava RangeError na soma de datas e derrubava a geração do PDF
+  assertEquals(linhaDeValidade({ mode: "days", days: 1e9 }), "Válido por 15 dias (até 09/10/2026)");
+  assertEquals(linhaDeValidade({ mode: "days", days: 1 }), "Válido por 1 dia (até 25/09/2026)");
+  assertEquals(linhaDeValidade(undefined), "Válido por 15 dias (até 09/10/2026)");
+});
+
+Deno.test("getValidityText: data específica vazia ou inexistente usa os dias, não o literal", () => {
+  // o diálogo manda {mode:'date', days, date:''} quando se marca "Data específica" e não se
+  // escolhe a data: antes saía "Válido por 15 dias." com 7 no campo de dias
+  assertEquals(linhaDeValidade({ mode: "date", days: 7, date: "" }), "Válido por 7 dias (até 01/10/2026)");
+  assertEquals(linhaDeValidade({ mode: "date", days: 7, date: "2026-02-31" }), "Válido por 7 dias (até 01/10/2026)");
+  assertEquals(linhaDeValidade({ mode: "date", date: "2026-10-10" }), "Válido até 10/10/2026");
+});
+
+// O PDF ignorava quote_validity_date e a R19 a respeitava: o cliente lia "Válido por 7 dias
+// (até 01/10)" e o aviso de vencido saía depois de 10/10. Agora os dois saem de
+// validadeDoOrcamento.
+Deno.test("data fixa: o PDF imprime a MESMA data que a R19 usa", () => {
+  const comDataFixa = {
+    ...ORCAMENTO,
+    serviceOrder: { ...ORCAMENTO.serviceOrder, quote_validity_days: 7, quote_validity_date: "2026-10-10" },
+  };
+  const opcoes = opcoesPadraoDoDocumento({ quote_validity_days: "3" }, "quote", comDataFixa.serviceOrder);
+  assertEquals(opcoes.validity, { mode: "date", date: "2026-10-10", days: 7 });
+  assertEquals(ultimoDiaDaValidade(comDataFixa.serviceOrder, { quote_validity_days: "3" }), "2026-10-10");
+  assertEquals(linhaDeValidade(opcoes.validity, comDataFixa), "Válido até 10/10/2026");
+});
+
+Deno.test("opcoesPadraoDoDocumento: padrão da EMPRESA (não o de fábrica), via do cliente, validade só no orçamento", () => {
+  const ajustes = {
+    quote_validity_days: "3",
+    pdf_options_quote: JSON.stringify({ showTerms: false, hideFinancials: true }),
+    pdf_options_service_order: JSON.stringify({ showTerms: false, hideFinancials: true }),
+  };
+  const orcamento = opcoesPadraoDoDocumento(ajustes, "quote", { quote_validity_days: 7 });
+  assertEquals(orcamento.showTerms, false); // DEFAULT_PDF_OPTIONS diria true
+  assertEquals(orcamento.hideFinancials, false); // documento sem diálogo vai para o cliente
+  assertEquals(orcamento.validity, { mode: "days", days: 7 });
+  // sem a ordem (ou sem validade nela): a da empresa
+  assertEquals(opcoesPadraoDoDocumento(ajustes, "quote").validity, { mode: "days", days: 3 });
+  const os = opcoesPadraoDoDocumento(ajustes, "service_order", { quote_validity_days: 7 });
+  assertEquals(os.showTerms, false);
+  assertEquals(os.hideFinancials, false);
+  assertEquals(os.validity, undefined);
 });

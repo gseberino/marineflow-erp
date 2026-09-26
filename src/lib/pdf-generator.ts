@@ -24,12 +24,20 @@ import {
 export {
   buildPDFFilename,
   DEFAULT_PDF_OPTIONS,
+  opcoesPadraoDoDocumento,
   PDF_ROOT_CLASS,
   resolvePdfOptions,
   tituloParaImpressao,
   validadeDoOrcamento,
 } from '../../supabase/functions/_shared/pdf/documento';
-export type { PDFData, PDFDocumentType, PDFOptions } from '../../supabase/functions/_shared/pdf/documento';
+export type { PDFData, PDFDocumentType, PDFOptions, ValidadeDoOrcamento } from '../../supabase/functions/_shared/pdf/documento';
+// A regra do número de dias (a mesma do PDF, da R19 e do assistente), para os campos que o
+// digitam: o diálogo de Baixar/Imprimir, o formulário e Configurações › Orçamentos.
+export {
+  primeiraValidade,
+  VALIDADE_MAXIMA_EM_DIAS,
+  validadeGravavel,
+} from '../../supabase/functions/_shared/dias-de-validade';
 
 export function generatePDF(data: PDFData, options: PDFOptions): void {
   // O título da janela é o nome que "Salvar como PDF" sugere. Com "ORÇAMENTO ORÇ-00100"
