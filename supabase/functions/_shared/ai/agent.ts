@@ -11,7 +11,7 @@ import {
   type ClaudeUsage,
 } from "./anthropic.ts";
 import { allTools, type ToolCtx, type ToolDef } from "./tools/index.ts";
-import { CHAVE_DO_SOLICITANTE, type Solicitante } from "./tools/registry.ts";
+import { CHAVE_DO_RETRATO, CHAVE_DO_SOLICITANTE, type Solicitante } from "./tools/registry.ts";
 import { isAutonomyGranted } from "./autonomy-policy.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
 import { PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from "./perfil-operacao.ts";
@@ -406,6 +406,24 @@ function summarizeForAudit(result: unknown): string {
   return text.length > 500 ? `${text.slice(0, 500)}…` : text;
 }
 
+/**
+ * A ressalva que a tool devolveu junto do "deu certo", para ir depois de "✅ … executado." na
+ * aprovação (painel e "sim <PIN>"). Ali quem fala com o dono é o ai-agent, sem o modelo: até
+ * 26/09/2026 ele dizia só "executado" quando o envio tinha ido ao número de TESTE ou nem saíra
+ * (a mesma mensagem já tinha ido hoje), e o dono supunha que o cliente recebeu.
+ *
+ * `aviso` é texto escrito para o usuário em todas as tools que o devolvem. `enviado_para` entra
+ * só no desvio para o teste — no envio normal ele repetiria o óbvio.
+ */
+export function ressalvaDoResultado(resultado: unknown): string {
+  if (!resultado || typeof resultado !== "object") return "";
+  const r = resultado as Record<string, unknown>;
+  const partes: string[] = [];
+  if (typeof r.enviado_para === "string" && /TESTE/.test(r.enviado_para)) partes.push(`Foi para ${r.enviado_para}.`);
+  if (typeof r.aviso === "string" && r.aviso.trim()) partes.push(r.aviso.trim());
+  return partes.length ? ` ${partes.join(" ")}` : "";
+}
+
 /** Auditoria best-effort — nunca derruba o turno se falhar. */
 async function writeAudit(
   toolCtx: ToolCtx,
@@ -718,10 +736,27 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
           const entrada = { ...((tc.input ?? {}) as Record<string, unknown>) };
           const solicitante = toolDef.gravarSolicitante ? await quemPede(params.toolCtx) : null;
           if (solicitante) delete entrada[CHAVE_DO_SOLICITANTE];
-          let resumo = await buildPendingSummary(params.toolCtx.admin, tc.name, solicitante ? entrada : tc.input as Record<string, unknown>);
+          // O retrato do que o dono vai aprovar (ToolDef.retratoDaPendencia): mesma proteção do
+          // solicitante — o que veio do modelo sai, o gravado é o lido agora do banco.
+          if (toolDef.retratoDaPendencia) delete entrada[CHAVE_DO_RETRATO];
+          let retrato: Record<string, unknown> | null = null;
+          if (toolDef.retratoDaPendencia) {
+            try {
+              retrato = await toolDef.retratoDaPendencia(entrada, params.toolCtx);
+            } catch { /* sem retrato: a execução segue sem comparar */ }
+          }
+          const limpa = !!solicitante || !!toolDef.retratoDaPendencia;
+          let resumo = await buildPendingSummary(params.toolCtx.admin, tc.name, limpa ? entrada : tc.input as Record<string, unknown>);
           if (solicitante) {
             resumo += `\nPedido por: *${solicitante.nome || "—"}* (${ROTULO_DO_CARGO[solicitante.cargo] ?? solicitante.cargo})`;
           }
+          const payloadDaPendencia = limpa
+            ? {
+              ...entrada,
+              ...(solicitante ? { [CHAVE_DO_SOLICITANTE]: solicitante } : {}),
+              ...(retrato ? { [CHAVE_DO_RETRATO]: retrato } : {}),
+            }
+            : tc.input;
           const { data: pending, error: pendingErr } = await params.toolCtx.admin
             .from("ai_operator_pending_actions")
             .insert({
@@ -731,7 +766,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
               risk_level: effectiveRisk,
               title: humanizeToolNamePt(tc.name),
               summary: resumo,
-              payload: solicitante ? { ...entrada, [CHAVE_DO_SOLICITANTE]: solicitante } : tc.input,
+              payload: payloadDaPendencia,
               status: "pending",
               expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
             })

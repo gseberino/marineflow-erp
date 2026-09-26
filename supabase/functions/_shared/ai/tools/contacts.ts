@@ -1,4 +1,4 @@
-import type { ToolDef } from "./registry.ts";
+import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { chaveTelefone, padraoLikeTelefone } from "../phone.ts";
 
 // Resolução de contato: de quem é este número? (Fase 3 · Etapa 2)
@@ -113,7 +113,13 @@ export const contactTools: ToolDef[] = [
       },
     },
     risk: "low",
-    async execute(args, { sb }) {
+    // Grava o vínculo e reatribui as mensagens antigas do número: não é tarefa do técnico. Sem
+    // `roles` a tool ia a todo cargo, e desde 26/09/2026 ela está no perfil fixo do agente.
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      const { sb } = ctx;
       let telefone: string | null = args.phone || null;
       if (!telefone && args.message_id) telefone = await telefoneDaMensagem(sb, args.message_id);
       if (!telefone) return { error: "Informe phone ou message_id." };

@@ -1,6 +1,7 @@
 import {
   blockTechnician,
   cargosQueContam,
+  lerRetrato,
   lerSolicitante,
   NON_TECHNICIAN_ROLES,
   type Role,
@@ -273,6 +274,48 @@ const CAMPOS_DA_ORDEM_PARA_ENVIO =
  */
 export function mensagemComLink(mensagem: string, link: string, shareToken: string): string {
   return mensagem.includes(shareToken) ? mensagem : `${mensagem}\n\n${link}`;
+}
+
+/**
+ * O retrato do envio que o dono aprova: o telefone do cadastro (em hash — o payload da pendência
+ * não precisa do número) e o total. Tirado quando a pendência nasce (ToolDef.retratoDaPendencia);
+ * o execute compara com o de agora. Sem isto, trocar o WhatsApp do cliente ou o valor do
+ * orçamento entre o pedido e o "sim" mandava o arquivo para outro número, ou com outro preço,
+ * do que o resumo mostrou.
+ */
+// deno-lint-ignore no-explicit-any
+export async function retratoDoEnvio(admin: any, args: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  const { data: so } = await buscarOrdemParaEnvio(admin, args?.service_order_id);
+  if (!so) return null;
+  const { data: c } = so.client_id
+    ? await admin.from("clients").select("whatsapp, phone").eq("id", so.client_id).maybeSingle()
+    : { data: null };
+  const digitos = String(c?.whatsapp || c?.phone || "").replace(/\D/g, "");
+  return { telefone: hashCurto(digitos), total: Number(so.grand_total) || 0 };
+}
+
+/** O que mudou entre o retrato aprovado e o estado de agora, em português; null = nada. */
+export function oQueMudouDesdeOPedido(retrato: Record<string, unknown>, agora: { digitos: string; total: unknown }): string | null {
+  const mudancas: string[] = [];
+  if (typeof retrato.telefone === "string" && retrato.telefone !== hashCurto(agora.digitos)) {
+    mudancas.push("o WhatsApp do cliente no cadastro mudou");
+  }
+  const antes = Number(retrato.total);
+  const depois = Number(agora.total) || 0;
+  if (retrato.total !== undefined && Number.isFinite(antes) && Math.abs(antes - depois) > 0.005) {
+    mudancas.push(`o total mudou (era ${fmtCurrency(antes)}, agora ${fmtCurrency(depois)})`);
+  }
+  return mudancas.length ? mudancas.join(" e ") : null;
+}
+
+/**
+ * Pendência gravada ANTES do formato PDF (26/09/2026): não tem `_solicitante` (toda pendência
+ * nova tem) nem `formato`. O dono a aprovou vendo o resumo antigo — o envio de sempre, que era
+ * só o link. Lida hoje pelo padrão novo, mandaria um PDF com preço e PIX que ninguém viu.
+ */
+export function lerPendenciaDoEnvio(payload: Record<string, unknown>): Record<string, unknown> {
+  const semFormato = payload?.formato === undefined || payload?.formato === null || String(payload.formato).trim() === "";
+  return !lerSolicitante(payload) && semFormato ? { ...payload, formato: "link" } : payload;
 }
 
 /** Acha a ordem pelo UUID ou pelo número (ORÇ-00086 / OS-00075 / formato antigo). */
@@ -598,6 +641,9 @@ export const whatsappTools: ToolDef[] = [
     preValidar: (args, ctx) => validarPedidoDeEnvio(args, ctx),
     // A pendência grava quem pediu: o execute revalida o cargo DELE, não o de quem aprova.
     gravarSolicitante: true,
+    // E o retrato do que foi aprovado (telefone e total): mudou até o "sim", não envia.
+    retratoDaPendencia: (args, ctx) => retratoDoEnvio(ctx.admin, args),
+    lerPendencia: lerPendenciaDoEnvio,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
@@ -628,6 +674,15 @@ export const whatsappTools: ToolDef[] = [
       // confere destino, modo de teste e status). OS vai como 'service_order' — só o vínculo.
       const contexto = documentTypeFor(so.status) === "quote" ? "quote" as const : "service_order" as const;
       const digitos = String(phone).replace(/\D/g, "");
+      // O "sim" foi sobre o telefone e o total do resumo: se mudaram desde o pedido, não envia.
+      const retrato = lerRetrato(args);
+      const mudou = retrato ? oQueMudouDesdeOPedido(retrato, { digitos, total: so.grand_total }) : null;
+      if (mudou) {
+        return {
+          error: `Desde o pedido, ${mudou}. Nada foi enviado ao cliente — peça de novo para confirmar com os dados de agora.`,
+          nada_enviado: true,
+        };
+      }
       // Modo de teste: o whatsapp-send desvia o envio para o número de teste (e aí não marca o
       // orçamento como enviado). Entra nas chaves anti-duplicado: sem isso, o envio de teste
       // reservava a chave do CLIENTE e, desligado o modo no mesmo dia, o envio de verdade ouvia

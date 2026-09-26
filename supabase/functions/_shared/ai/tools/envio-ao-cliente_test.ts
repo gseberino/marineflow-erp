@@ -5,13 +5,16 @@ import {
   enviarDocumentoWhatsapp,
   formatoDoEnvio,
   LIMITE_DA_MENSAGEM,
+  lerPendenciaDoEnvio,
   mascararTelefone,
+  oQueMudouDesdeOPedido,
   resumirEnvioAoCliente,
   whatsappTools,
 } from "./whatsapp.ts";
 import { impressaoDigitalDoDocumento } from "../../pdf/gerar-e-guardar.ts";
+import { hashCurto } from "../../whatsapp/idempotencia.ts";
 import { autonomyKey, isAutonomyGranted, NEVER_AUTONOMOUS, NEVER_AUTONOMOUS_WHEN } from "../autonomy-policy.ts";
-import { runAgentLoop } from "../agent.ts";
+import { ressalvaDoResultado, runAgentLoop } from "../agent.ts";
 
 // Frente D (26/09/2026): o assistente passa a mandar ao CLIENTE o ARQUIVO PDF, com o link na
 // legenda, em vez de só o link. O que estes testes protegem, em ordem de gravidade:
@@ -710,8 +713,82 @@ Deno.test("no agente, com autonomia 'auto' gravada: o PDF vira pendência com re
   // Quem pediu vai no resumo (o admin que aprova no painel vê de quem é o pedido) e no
   // payload (a execução revalida com o cargo dele).
   assertStringIncludes(resumo, "Pedido por: *Gustavo Dono* (Administrador)");
-  assertEquals(pendencia.payload, { service_order_id: ORC.id, _solicitante: { user_id: "u1", nome: "Gustavo Dono", cargo: "admin" } });
+  // E o retrato do que foi aprovado: telefone (em hash) e total.
+  assertEquals(pendencia.payload, {
+    service_order_id: ORC.id,
+    _solicitante: { user_id: "u1", nome: "Gustavo Dono", cargo: "admin" },
+    _retrato: { telefone: hashCurto(CLIENTE.whatsapp), total: 18450.5 },
+  });
+  assert(!JSON.stringify(pendencia.payload).includes(CLIENTE.whatsapp), "o número não fica no payload");
   assert(resultado.proposal, "o turno devolve a proposta para o usuário confirmar");
+});
+
+Deno.test("no agente: _retrato vindo do modelo é trocado pelo lido do banco", async () => {
+  const { amb } = await rodarNoAgente({ service_order_id: ORC.id, _retrato: { telefone: "forjado", total: 1 } });
+  const pendencia = amb.banco.inseridos.ai_operator_pending_actions?.[0];
+  assertEquals((pendencia!.payload as any)._retrato, { telefone: hashCurto(CLIENTE.whatsapp), total: 18450.5 });
+  assert(!String(pendencia!.summary).includes("forjado"), "o resumo é montado sem o retrato");
+});
+
+// ─── 8. O "sim" é sobre o retrato: telefone ou total mudou até a aprovação, não envia ─────
+Deno.test("execução: retrato igual ao de agora, envia", async () => {
+  const amb = montarAmbiente();
+  const r = await executar(amb, { service_order_id: ORC.id, _retrato: { telefone: hashCurto(CLIENTE.whatsapp), total: 18450.5 } });
+  assertEquals(r.ok, true, JSON.stringify(r));
+});
+
+Deno.test("execução: o total mudou desde o pedido — nada sai, e diz de quanto para quanto", async () => {
+  const amb = montarAmbiente();
+  const r = await executar(amb, { service_order_id: ORC.id, _retrato: { telefone: hashCurto(CLIENTE.whatsapp), total: 15000 } });
+  assertStringIncludes(r.error, "o total mudou");
+  assertStringIncludes(r.error, "15.000,00");
+  assertStringIncludes(r.error, "18.450,50");
+  assertEquals(r.nada_enviado, true);
+  assertEquals(amb.chamadas.pdf.length + amb.chamadas.envio.length, 0);
+});
+
+Deno.test("execução: o WhatsApp do cadastro mudou desde o pedido — nada sai, nos dois formatos", async () => {
+  for (const formato of [undefined, "link"]) {
+    const amb = montarAmbiente({ cliente: { whatsapp: "5547988887777" } });
+    const r = await executar(amb, {
+      service_order_id: ORC.id,
+      ...(formato ? { formato } : {}),
+      _retrato: { telefone: hashCurto(CLIENTE.whatsapp), total: 18450.5 },
+    });
+    assertStringIncludes(r.error, "WhatsApp do cliente no cadastro mudou");
+    assertEquals(amb.chamadas.pdf.length + amb.chamadas.envio.length, 0);
+  }
+});
+
+Deno.test("retrato torto não recusa à toa: total que não é número é ignorado", () => {
+  assertEquals(oQueMudouDesdeOPedido({ total: "abc" }, { digitos: "1", total: 10 }), null);
+  assertEquals(oQueMudouDesdeOPedido({}, { digitos: "1", total: 10 }), null);
+});
+
+// ─── 6. Pendência gravada antes do PDF: vale o que o dono aprovou (só o link) ────────────
+Deno.test("pendência antiga (sem _solicitante e sem formato) é lida como 'só o link'", () => {
+  assertEquals(tool.lerPendencia, lerPendenciaDoEnvio);
+  assertEquals(lerPendenciaDoEnvio({ service_order_id: ORC.id }), { service_order_id: ORC.id, formato: "link" });
+  assertEquals(lerPendenciaDoEnvio({ service_order_id: ORC.id, formato: "" }).formato, "link");
+  // Pendência nova (tem _solicitante): o padrão novo vale, sem formato é o PDF.
+  const nova = { service_order_id: ORC.id, _solicitante: { user_id: "u1", nome: null, cargo: "admin" } };
+  assertEquals(lerPendenciaDoEnvio(nova), nova);
+  // Formato explícito é respeitado sempre.
+  assertEquals(lerPendenciaDoEnvio({ service_order_id: ORC.id, formato: "pdf_e_link" }).formato, "pdf_e_link");
+});
+
+// ─── 5. Depois do "sim": o "executado" leva a ressalva da tool ───────────────────────────
+Deno.test("ressalva da aprovação: modo de teste e 'já enviado hoje' aparecem; envio normal não acrescenta nada", async () => {
+  const teste = montarAmbiente({ settings: { wa_test_mode: "true", wa_test_number: "5547900000000" } });
+  const rTeste = await executar(teste, { service_order_id: ORC.id });
+  assertStringIncludes(ressalvaDoResultado(rTeste), "número de TESTE");
+  const repetido = montarAmbiente({ respostaEnvio: () => new Response(JSON.stringify({ success: true, deduplicated: true })) });
+  const rRepetido = await executar(repetido, { service_order_id: ORC.id });
+  assertStringIncludes(ressalvaDoResultado(rRepetido), "já foi enviado hoje");
+  const normal = montarAmbiente();
+  assertEquals(ressalvaDoResultado(await executar(normal, { service_order_id: ORC.id })), "");
+  assertEquals(ressalvaDoResultado(null), "");
+  assertEquals(ressalvaDoResultado({ aviso: ["não", "é", "texto"] }), "");
 });
 
 // ─── 3b. Cargo de QUEM PEDIU (revisão adversarial de 26/09/2026) ─────────────────────────

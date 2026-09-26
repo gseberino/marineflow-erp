@@ -76,11 +76,34 @@ export interface ToolDef {
    * mais no payload delas não é inofensiva.
    */
   gravarSolicitante?: boolean;
+  /**
+   * O retrato do que o dono está aprovando (ex.: telefone e total do envio ao cliente), tirado
+   * quando a pendência nasce e gravado no payload na chave CHAVE_DO_RETRATO — protegido como o
+   * `_solicitante`: o runAgentLoop apaga o que vier nos argumentos do modelo e grava o dele. O
+   * `execute` compara com o estado de agora e recusa se mudou: o "sim" foi sobre o retrato.
+   * null = não deu para tirar (a execução segue sem comparar, como as pendências antigas).
+   */
+  retratoDaPendencia?: (args: Record<string, unknown>, ctx: ToolCtx) => Promise<Record<string, unknown> | null>;
+  /**
+   * Como ler o payload de uma pendência na hora de executá-la depois do "sim". Existe para
+   * pendência gravada por uma versão anterior da tool, cujo significado mudou desde então (ver
+   * send_service_order_link: sem formato, a antiga era só o link; a nova é o PDF).
+   */
+  lerPendencia?: (payload: Record<string, unknown>) => Record<string, unknown>;
   execute: (args: any, ctx: ToolCtx) => Promise<unknown>;
 }
 
 /** Chave do payload da pendência onde o runAgentLoop grava quem pediu (ToolDef.gravarSolicitante). */
 export const CHAVE_DO_SOLICITANTE = "_solicitante";
+
+/** Chave do payload da pendência onde o runAgentLoop grava o retrato do que foi aprovado. */
+export const CHAVE_DO_RETRATO = "_retrato";
+
+/** O retrato gravado na pendência, ou null (execução direta, pendência antiga, retrato torto). */
+export function lerRetrato(args: unknown): Record<string, unknown> | null {
+  const r = (args as Record<string, unknown> | null | undefined)?.[CHAVE_DO_RETRATO];
+  return r && typeof r === "object" && !Array.isArray(r) ? r as Record<string, unknown> : null;
+}
 
 /** Quem pediu a ação que ficou pendente. */
 export interface Solicitante {

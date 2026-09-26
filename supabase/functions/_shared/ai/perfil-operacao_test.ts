@@ -113,6 +113,22 @@ Deno.test("SO_PELA_REDE: a 'leitura pelo nome' que roda direto não escreve (o n
   }
 });
 
+Deno.test("acrescentadas que editam cadastro: serviço e fornecedor sem vendedor externo; vínculo de contato sem técnico", async () => {
+  // Estão no perfil fixo, visíveis em todo turno (revisão final, 26/09/2026). O cargo é conferido
+  // na lista (roles) E no execute — a lista só tira a tool da vista do modelo.
+  const porNome = new Map(allTools.map((t) => [t.name, t]));
+  for (const [nome, campo] of [["update_service", "service_id"], ["update_supplier", "supplier_id"]]) {
+    const t = porNome.get(nome)!;
+    assertEquals(t.roles, ["admin", "financial", "seller"], nome);
+    const r = await t.execute({ [campo]: "x", name: "y" }, { userRole: "external_seller" } as any) as any;
+    assertEquals(typeof r?.error, "string", `${nome} executou para o vendedor externo`);
+  }
+  const vinculo = porNome.get("link_contact_to_entity")!;
+  assertEquals(vinculo.roles?.includes("technician"), false);
+  const r = await vinculo.execute({ phone: "5547999990000", client_id: "c1" }, { userRole: "technician" } as any) as any;
+  assertEquals(typeof r?.error, "string", "o técnico gravou vínculo de contato");
+});
+
 Deno.test("migration do perfil: versão 20260927090100, fora da faixa do financeiro (26/09 à noite), e única", () => {
   // Nasceu 20260926213000, vizinha de 20260926210000 (decisoes_do_dono, da sessão do financeiro,
   // já aplicada). Versão repetida ou fora de ordem quebra o db push de quem vier depois.
