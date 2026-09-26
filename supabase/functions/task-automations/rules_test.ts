@@ -465,12 +465,66 @@ Deno.test("notaDoVencimento: sem validade própria usa a da empresa; vira mês e
   assertEquals(nota.includes("emissão (30/12), não de hoje: para valer até 11/01 (5 dias a partir de hoje, 06/01), ponha 12 dias."), true, nota);
 });
 
-Deno.test("notaDoVencimento: com data fixa, manda trocar a data (dias não a alteram)", () => {
+// Nenhuma tela edita quote_validity_date (MF-AUD-016: só a conversão de orçamento externo a
+// grava). A nota mandava "troque essa data" sem dizer onde — o dono procuraria um campo que
+// não existe. Agora diz que a data foi gravada fora da tela e que renovar é ajuste técnico.
+Deno.test("notaDoVencimento: com data fixa, diz que ela não se troca pela tela (e não dá conta de dias)", () => {
   const o = { created_at: "2026-09-10T15:00:00Z", quote_validity_days: 90, quote_validity_date: "2026-09-20", grand_total: 1 };
   const nota = notaDoVencimento(o, {}, new Date("2026-09-26T15:00:00Z"));
   assertEquals(nota.startsWith("Valia até 20/09/2026 "), true, nota);
-  assertEquals(nota.includes("data fixa"), true, nota);
+  assertEquals(nota.includes("DATA FIXA, gravada fora da tela do orçamento"), true, nota);
+  assertEquals(nota.includes("não há campo na tela para trocá-la"), true, nota);
+  assertEquals(nota.includes("ajuste técnico"), true, nota);
   assertEquals(nota.includes("ponha"), false, nota);
+  assertEquals(nota.includes("troque essa data"), false, nota);
+});
+
+// Sem data fixa e sem emissão legível, a nota dizia "é uma data fixa" — não era.
+Deno.test("notaDoVencimento: sem emissão legível NÃO é chamado de data fixa", () => {
+  for (const created_at of [null, "", "lixo"]) {
+    const nota = notaDoVencimento({ created_at, quote_validity_days: 3, grand_total: 1 }, {}, new Date("2026-09-26T15:00:00Z"));
+    assertEquals(nota.toLowerCase().includes("data fixa"), false, nota);
+    assertEquals(nota.includes("não tem data de emissão legível"), true, nota);
+    assertEquals(nota.includes("ponha"), false, nota);
+  }
+  // data fixa que não existe (31/02) também não é data fixa: sem emissão, cai no mesmo caso
+  const nota = notaDoVencimento({ created_at: null, quote_validity_date: "2026-02-31", grand_total: 1 }, {});
+  assertEquals(nota.includes("não tem data de emissão legível"), true, nota);
+});
+
+// Sem teto, validade 1e9 fazia a soma de datas lançar RangeError DENTRO do find: o motor
+// registrava a falha da regra e nenhum orçamento vencido era avisado (26/09/2026).
+Deno.test("find r19: validade 1e9 num orçamento não cala os outros; ele usa a da empresa", async () => {
+  const r19 = ruleById("r19")!;
+  const tarefas = await r19.find(bancoDeOrcamentos([
+    orcamento({ id: "gigante", quote_validity_days: 1e9 }),
+    orcamento({ id: "maximo", quote_validity_days: 2147483647 }),
+    orcamento({ id: "normal" }),
+  ], "3"));
+  assertEquals(tarefas.map((t) => t.related_entity_id).sort(), ["gigante", "maximo", "normal"]);
+  // 1e9 passa a vez ao padrão da empresa (3): 10/01 + 3 = 13/01
+  assertEquals(tarefas.find((t) => t.related_entity_id === "gigante")!.automation_key, "r19:quote:gigante:2026-01-13");
+});
+
+Deno.test("find r19: um orçamento que faz a conta lançar fica sem aviso, os outros não", async () => {
+  const r19 = ruleById("r19")!;
+  // Qualquer dado que a conta não aceite: aqui, uma coluna cuja leitura lança.
+  const corrompido = orcamento({ id: "corrompido" });
+  Object.defineProperty(corrompido, "quote_validity_days", {
+    get() { throw new RangeError("Invalid time value"); },
+  });
+  const erroOriginal = console.error;
+  const registrados: unknown[][] = [];
+  console.error = (...args: unknown[]) => { registrados.push(args); };
+  try {
+    const tarefas = await r19.find(bancoDeOrcamentos([orcamento({ id: "antes" }), corrompido, orcamento({ id: "depois" })], "3"));
+    assertEquals(tarefas.map((t) => t.related_entity_id).sort(), ["antes", "depois"]);
+  } finally {
+    console.error = erroOriginal;
+  }
+  // registrado com o id, para alguém consertar o dado
+  assertEquals(registrados.length, 1);
+  assertEquals(String(registrados[0][0]).includes("corrompido"), true, String(registrados[0][0]));
 });
 
 Deno.test("find r19: renovar e vencer de novo gera chave nova", async () => {
@@ -490,7 +544,9 @@ Deno.test("isResolved r19: renovado resolve; decisão tomada resolve; vencido se
   assertEquals(await res({}), null);
   assertEquals(await res({ quote_status: "awaiting_approval" }), null);
   // renovou a validade (a tarefa fecha sozinha)
-  assertEquals((await res({ quote_validity_days: 36500 }))?.startsWith("Validade renovada até "), true);
+  assertEquals((await res({ quote_validity_days: 3650 }))?.startsWith("Validade renovada até "), true);
+  // acima do teto (3650) não é renovação: o número não serve e vale o padrão (15, sem empresa)
+  assertEquals(await res({ quote_validity_days: 36500 }), "Validade alterada (agora até 25/01/2026)");
   assertEquals(await res({ quote_validity_date: "2999-12-31" }), "Validade renovada até 31/12/2999");
   // mexeu na validade mas continua vencido: fecha esta, a nova sai com a data certa
   assertEquals(await res({ quote_validity_days: 5 }), "Validade alterada (agora até 15/01/2026)");

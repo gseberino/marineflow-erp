@@ -830,8 +830,15 @@ const diasEntre = (de: string, ate: string) => {
  * "3 dias" continua vencido (vale até 27/09). A nota diz a data de emissão e dá o número
  * certo para valer mais o mesmo prazo a partir de hoje: até 01/10, ponha 7 dias.
  *
- * Com data fixa (quote_validity_date) os dias não mandam — ultimoDiaDaValidade usa a data —,
- * então a nota diz para trocar a data em vez de dar uma conta que não teria efeito.
+ * Três casos, que até 26/09/2026 eram dois (e o terceiro saía com o texto do segundo):
+ *
+ *   · validade em dias, com emissão legível → a conta pronta, acima;
+ *   · DATA FIXA (quote_validity_date) → os dias não mandam (validadeDoOrcamento usa a data), e
+ *     NENHUMA tela edita essa coluna (MF-AUD-016: só a conversão de orçamento externo a grava).
+ *     A nota antiga mandava "trocar a data" sem dizer onde; agora diz que ela foi gravada fora
+ *     da tela e que renovar pede ajuste técnico;
+ *   · sem data fixa e sem emissão legível → era chamado de "data fixa", o que não era. Não há
+ *     de onde contar os dias, e a nota diz isso.
  */
 export function notaDoVencimento(
   orcamento: {
@@ -848,16 +855,26 @@ export function notaDoVencimento(
     'O orçamento NÃO foi rejeitado. ';
   const fecho = 'Se o cliente desistiu, marque como rejeitado. Nada foi enviado ao cliente.';
 
-  const dataFixa = /^\d{4}-\d{2}-\d{2}$/.test(String(orcamento.quote_validity_date ?? '').slice(0, 10));
+  // A mesma pergunta que ultimoDiaDaValidade faz: data fixa é só a que validadeDoOrcamento
+  // aceita como dia de calendário.
+  const validade = validadeDoOrcamento(orcamento.quote_validity_days, settings, orcamento.quote_validity_date);
+  if (validade.mode === 'date') {
+    return abertura + 'A validade deste orçamento é uma DATA FIXA, gravada fora da tela do ' +
+      'orçamento: não há campo na tela para trocá-la, e mudar os dias não a altera enquanto ela ' +
+      'existir. Para renovar, a data fixa precisa ser trocada ou apagada no banco (ajuste ' +
+      'técnico, peça ao suporte do sistema); feito isso, esta tarefa fecha sozinha. ' + fecho;
+  }
+
   const emitidoEm = orcamento.created_at ? new Date(orcamento.created_at) : null;
-  if (dataFixa || !emitidoEm || Number.isNaN(emitidoEm.getTime())) {
-    return abertura + 'A validade deste orçamento é uma data fixa: para renovar, troque essa data ' +
-      '(mudar os dias não a altera); esta tarefa fecha sozinha. ' + fecho;
+  if (!emitidoEm || Number.isNaN(emitidoEm.getTime())) {
+    return abertura + 'Este orçamento não tem data de emissão legível, e a validade em dias conta ' +
+      'da emissão: não dá para calcular até quando ele vale nem quantos dias pôr para renová-lo. ' +
+      'Confira o orçamento antes de decidir. ' + fecho;
   }
 
   const emissao = diaBR(emitidoEm);
   const hoje = diaBR(agora);
-  const prazo = validadeDoOrcamento(orcamento.quote_validity_days, settings).days;
+  const prazo = validade.days;
   const alvo = somarDiasAoDia(hoje, prazo);
   const dd = (dia: string) => fmtDate(dia).slice(0, 5);
   return abertura +
@@ -886,22 +903,32 @@ const r19: Rule = {
     if (error) throw error;
     const agora = new Date();
     return (data || []).flatMap((o: any) => {
-      const fim = vencimentoDoOrcamento(o, settings, agora);
-      if (!fim) return [];
-      const cliente = o.clients?.name;
-      return [{
-        automation_key: keyOf('r19', 'quote', o.id, fim),
-        title: `Orçamento ${o.service_order_number} venceu em ${fmtDate(fim).slice(0, 5)} — renovar ou rejeitar?` +
-          (cliente ? ` (${cliente})` : ''),
-        priority: 'high' as const,
-        // A decisão é comercial e é do dono, não de quem digitou o orçamento.
-        assignee: 'admin' as const,
-        due_at: dueAt(diaBR(agora)),
-        related_entity_type: 'service_order',
-        related_entity_id: o.id,
-        client_id: o.client_id,
-        notes: notaDoVencimento(o, settings, agora),
-      }];
+      // Um orçamento por vez: um dado que a conta de datas não aceita cala só o aviso DELE.
+      // Até 26/09/2026 uma validade de 1e9 dias fazia `toISOString` lançar RangeError, o erro
+      // saía do find e o motor perdia a R19 inteira — nenhum orçamento vencido era avisado por
+      // causa de um. O teto de 3650 dias (dias-de-validade.ts) fecha esse caso; este catch é a
+      // defesa para o próximo. Fica registrado no log com o id, para consertar o dado.
+      try {
+        const fim = vencimentoDoOrcamento(o, settings, agora);
+        if (!fim) return [];
+        const cliente = o.clients?.name;
+        return [{
+          automation_key: keyOf('r19', 'quote', o.id, fim),
+          title: `Orçamento ${o.service_order_number} venceu em ${fmtDate(fim).slice(0, 5)} — renovar ou rejeitar?` +
+            (cliente ? ` (${cliente})` : ''),
+          priority: 'high' as const,
+          // A decisão é comercial e é do dono, não de quem digitou o orçamento.
+          assignee: 'admin' as const,
+          due_at: dueAt(diaBR(agora)),
+          related_entity_type: 'service_order',
+          related_entity_id: o.id,
+          client_id: o.client_id,
+          notes: notaDoVencimento(o, settings, agora),
+        }];
+      } catch (e) {
+        console.error(`r19: orçamento ${o?.id ?? '?'} (${o?.service_order_number ?? '?'}) ficou sem aviso:`, e);
+        return [];
+      }
     });
   },
   async isResolved(db, task) {
