@@ -13,6 +13,11 @@
 -- ORDEM SEGURA: aplicar DEPOIS do deploy da edge ai-agent com perfil-operacao.ts. Se for aplicada
 -- antes, o código antigo lê a lista vazia e devolve TODAS as tools: não quebra nada, só volta a
 -- custar ~35 mil tokens por chamada até o deploy.
+--
+-- VERSÃO: nasceu 20260926213000, dentro da faixa que a sessão do financeiro usava na mesma noite
+-- (20260926210000 já estava aplicada por ela) — duas sessões na mesma vizinhança dão versão
+-- repetida ou fora de ordem no db push. Foi para 20260927090100, fora dessa faixa.
+-- perfil-operacao_test.ts confere o nome e que a versão é única.
 
 update public.app_settings
    set description = 'Perfil de tools do agente: operacao (lista enxuta em _shared/ai/perfil-operacao.ts, mais as de risco alto) ou qualquer outro valor = todas as tools.'

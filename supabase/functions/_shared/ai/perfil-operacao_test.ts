@@ -84,6 +84,19 @@ Deno.test("SO_PELA_REDE: toda escrita de risco low (que pela rede roda direto) �
   }
 });
 
+Deno.test("migration do perfil: versão 20260927090100, fora da faixa do financeiro (26/09 à noite), e única", () => {
+  // Nasceu 20260926213000, vizinha de 20260926210000 (decisoes_do_dono, da sessão do financeiro,
+  // já aplicada). Versão repetida ou fora de ordem quebra o db push de quem vier depois.
+  const dir = new URL("../../../migrations/", import.meta.url);
+  const arquivos = [...Deno.readDirSync(dir)].filter((e) => e.isFile && e.name.endsWith(".sql")).map((e) => e.name);
+  const doPerfil = arquivos.filter((n) =>
+    /delete\s+from\s+public\.app_settings\s+where\s+key\s*=\s*'ai_tool_profile_operacao'/i.test(Deno.readTextFileSync(new URL(n, dir)))
+  );
+  assertEquals(doPerfil, ["20260927090100_perfil_de_tools_no_codigo.sql"]);
+  const versao = (n: string) => n.split("_")[0];
+  assertEquals(arquivos.filter((n) => versao(n) === "20260927090100"), doPerfil, "outra migration usa a mesma versão");
+});
+
 Deno.test("comportamento: com o perfil ligado, o modelo recebe exatamente o de antes + as 2", async () => {
   // Fake do service-role: só o liga/desliga no banco, como fica em produção.
   const admin = {
