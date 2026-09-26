@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { generatePDFBlob, downloadPDF, DEFAULT_PDF_OPTIONS, type PDFData, type PDFOptions } from '@/lib/pdf-generator';
+import { generatePDFBlob, downloadPDF, DEFAULT_PDF_OPTIONS, validadeDoOrcamento, type PDFData, type PDFOptions } from '@/lib/pdf-generator';
 import { carregarPDFData } from '@/hooks/use-pdf';
 import { documentTypeFor } from '@/lib/document-type';
 import { SignaturePad } from '@/components/SignaturePad';
@@ -250,6 +250,12 @@ export default function PublicServiceOrderView() {
     showBankDetails: show.bankDetails,
     showPaymentInstructions: show.paymentInstructions,
     showSignature: show.allowSignature,
+    // A validade do PRÓPRIO orçamento: a data fixa, se houver (a mesma que esta tela mostra
+    // em "Validade" e que a R19 usa), senão os dias. Sem ela o cliente baixava "Válido por 15
+    // dias" (o literal do gerador) de um orçamento de 3. `company` aqui é o que o anônimo
+    // enxerga de app_settings, e quote_validity_days não está na whitelist: sem a do
+    // orçamento, 15.
+    validity: validadeDoOrcamento(order.quote_validity_days, company, order.quote_validity_date),
   });
 
   /**

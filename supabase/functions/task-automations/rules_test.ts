@@ -1,7 +1,8 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, entityIdFromKey, keyOf, fmtBRL, fmtDate, dueAt,
-  isManualDismissal, dismissCooldownDays, businessDaysBetween,
+  isManualDismissal, dismissCooldownDays, businessDaysBetween, vencimentoDoOrcamento, notaDoVencimento,
 } from "./rules.ts";
 
 Deno.test("isManualDismissal: conclusão MANUAL recente bloqueia recriação", () => {
@@ -299,4 +300,272 @@ Deno.test("find r6: filtra rascunho não convertido no próprio banco", async ()
   await r6.find({ from: () => q } as any);
   assertEquals(filtros.includes("eq:status:draft"), true, filtros.join(" "));
   assertEquals(filtros.includes("is:converted_to_os_at:null"), true, filtros.join(" "));
+});
+
+// ── R19: orçamento vencido vira AVISO (decisão do dono, 26/09/2026) ──────────────────────
+// A rotina quote-reminders rejeitava sozinha orçamentos com 7 dias de criação, inclusive os
+// aprovados aguardando sinal (R$ 133 mil em 23-24/09). Estes testes seguram as três coisas que
+// importam: o dia do vencimento é o mesmo "até" do PDF (calendário de Brasília), aguardando
+// sinal nunca entra, e renovar a validade fecha a tarefa.
+
+/**
+ * Banco de mentira que APLICA os filtros sobre as linhas, em vez de ignorá-los: assim o teste
+ * prova o que o find pede ao banco (um .in() sem 'awaiting_deposit', um .eq('status','draft')),
+ * e não só o que ele faz com a resposta.
+ */
+// deno-lint-ignore no-explicit-any
+function bancoDeOrcamentos(linhas: any[], validadePadrao?: string) {
+  return {
+    from(tabela: string) {
+      if (tabela === "app_settings") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: validadePadrao === undefined ? null : { value: validadePadrao } }),
+            }),
+          }),
+        };
+      }
+      let rows = [...linhas];
+      // deno-lint-ignore no-explicit-any
+      const q: any = {
+        select: () => q,
+        eq: (c: string, v: unknown) => { rows = rows.filter((r) => r[c] === v); return q; },
+        is: (c: string, v: unknown) => { rows = rows.filter((r) => (r[c] ?? null) === v); return q; },
+        in: (c: string, v: unknown[]) => { rows = rows.filter((r) => v.includes(r[c])); return q; },
+        limit: async () => ({ data: rows, error: null }),
+        maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
+      };
+      return q;
+    },
+  };
+}
+
+const orcamento = (over: Record<string, unknown>) => ({
+  id: "o-1",
+  service_order_number: "ORÇ-00100",
+  client_id: "c-1",
+  grand_total: 12500,
+  status: "draft",
+  quote_status: "sent",
+  converted_to_os_at: null,
+  created_at: "2026-01-10T15:00:00Z",
+  quote_validity_days: 3,
+  quote_validity_date: null,
+  clients: { name: "Marina Azul" },
+  ...over,
+});
+
+Deno.test("vencimentoDoOrcamento: vira o dia pelo calendário de Brasília, não pelo UTC", () => {
+  // Criado às 23h30 de 19/09 em Brasília = 02h30 UTC de 20/09. Com 3 dias, o PDF imprime
+  // "até 22/09" — contar pelo dia UTC daria 23/09 e o aviso sairia um dia atrasado.
+  const o = { created_at: "2026-09-20T02:30:00Z", quote_validity_days: 3 };
+  // 23h de 22/09 em Brasília (02h UTC de 23/09): ainda é o último dia, não venceu.
+  assertEquals(vencimentoDoOrcamento(o, {}, new Date("2026-09-23T02:00:00Z")), null);
+  // 00h30 de 23/09 em Brasília (03h30 UTC): venceu, e venceu no dia 22.
+  assertEquals(vencimentoDoOrcamento(o, {}, new Date("2026-09-23T03:30:00Z")), "2026-09-22");
+  // Meio-dia do último dia: vale.
+  assertEquals(vencimentoDoOrcamento(o, {}, new Date("2026-09-22T15:00:00Z")), null);
+});
+
+Deno.test("vencimentoDoOrcamento: orçamento → padrão da empresa → 15; data fixa vence tudo", () => {
+  const agora = new Date("2026-09-26T15:00:00Z");
+  const base = { created_at: "2026-09-10T15:00:00Z" };
+  // do próprio orçamento: 10/09 + 3 = 13/09
+  assertEquals(vencimentoDoOrcamento({ ...base, quote_validity_days: 3 }, { quote_validity_days: "30" }, agora), "2026-09-13");
+  // sem a do orçamento, a da empresa: 10/09 + 5 = 15/09
+  assertEquals(vencimentoDoOrcamento({ ...base, quote_validity_days: null }, { quote_validity_days: "5" }, agora), "2026-09-15");
+  // sem nenhuma, 15 dias: 25/09, vencido no dia 26
+  assertEquals(vencimentoDoOrcamento({ ...base, quote_validity_days: null }, {}, agora), "2026-09-25");
+  // data fixa (coluna date) é o próprio último dia
+  assertEquals(vencimentoDoOrcamento({ ...base, quote_validity_days: 3, quote_validity_date: "2026-09-30" }, {}, agora), null);
+  assertEquals(vencimentoDoOrcamento({ ...base, quote_validity_days: 90, quote_validity_date: "2026-09-20" }, {}, agora), "2026-09-20");
+});
+
+Deno.test("find r19: só enviado/aguardando aprovação vencido; aguardando sinal NUNCA", async () => {
+  const r19 = ruleById("r19")!;
+  const agoraISO = new Date().toISOString();
+  const db = bancoDeOrcamentos([
+    orcamento({ id: "vencido-enviado" }),
+    orcamento({ id: "vencido-aguardando", quote_status: "awaiting_approval", clients: null }),
+    // aprovado, aguardando sinal: o cliente já disse sim (o caso do ORÇ-00095)
+    orcamento({ id: "aguardando-sinal", quote_status: "awaiting_deposit" }),
+    orcamento({ id: "no-prazo", created_at: agoraISO, quote_validity_days: 15 }),
+    orcamento({ id: "virou-os", status: "approved" }),
+    orcamento({ id: "convertido", converted_to_os_at: "2026-01-12T10:00:00Z" }),
+    orcamento({ id: "rejeitado", quote_status: "rejected" }),
+    orcamento({ id: "rascunho", quote_status: "draft" }),
+  ], "3");
+  const tarefas = await r19.find(db);
+  assertEquals(tarefas.map((t) => t.related_entity_id).sort(), ["vencido-aguardando", "vencido-enviado"]);
+
+  const t = tarefas.find((x) => x.related_entity_id === "vencido-enviado")!;
+  // 10/01 + 3 dias = último dia 13/01: é essa data que vai na chave e no título
+  assertEquals(t.automation_key, "r19:quote:vencido-enviado:2026-01-13");
+  assertEquals(t.title, "Orçamento ORÇ-00100 venceu em 13/01 — renovar ou rejeitar? (Marina Azul)");
+  assertEquals(t.related_entity_type, "service_order");
+  assertEquals(t.assignee, "admin");
+  assertEquals(entityIdFromKey(t.automation_key), "vencido-enviado");
+  // sem cliente, o título não termina com "()"
+  assertEquals(tarefas.find((x) => x.related_entity_id === "vencido-aguardando")!.title.endsWith("rejeitar?"), true);
+});
+
+Deno.test("find r19: o aviso sai à meia-noite de Brasília, não às 21h (FakeTime)", async () => {
+  const r19 = ruleById("r19")!;
+  // Criado às 23h30 de 19/09 em Brasília, válido por 3 dias: vale até 22/09.
+  const db = () => bancoDeOrcamentos([orcamento({ id: "x", created_at: "2026-09-20T02:30:00Z" })], "15");
+  const relogio = new FakeTime(new Date("2026-09-23T02:00:00Z")); // 23h de 22/09 em Brasília
+  try {
+    assertEquals((await r19.find(db())).length, 0);
+    relogio.tick(90 * 60 * 1000); // 00h30 de 23/09 em Brasília
+    const [t] = await r19.find(db());
+    assertEquals(t.automation_key, "r19:quote:x:2026-09-22");
+    // prazo às 08h do dia de Brasília (11h UTC), não do dia UTC
+    assertEquals(t.due_at, "2026-09-23T11:00:00Z");
+    // a nota conta da emissão pelo dia de Brasília (19/09), não pelo UTC (20/09): para valer
+    // mais 3 dias a partir de 23/09 (até 26/09), são 7 dias contados de 19/09
+    assertEquals(
+      t.notes!.includes("A validade conta da emissão (19/09), não de hoje: para valer até 26/09 " +
+        "(3 dias a partir de hoje, 23/09), ponha 7 dias."),
+      true,
+      t.notes ?? "",
+    );
+  } finally {
+    relogio.restore();
+  }
+});
+
+// A nota da R19 mandava "aumentar a validade" sem dizer que ela conta da EMISSÃO (D13). Quem
+// renovasse um orçamento de 3 dias emitido em 24/09 pondo "3 dias" em 28/09 o deixaria vencido
+// do mesmo jeito (vale até 27/09), e a tarefa não fecharia. A nota agora traz a conta pronta.
+Deno.test("notaDoVencimento: diz a emissão e dá o número de dias que renova de verdade", () => {
+  const o = { created_at: "2026-09-24T15:00:00Z", quote_validity_days: 3, grand_total: 12500 };
+  const agora = new Date("2026-09-28T15:00:00Z"); // 28/09 em Brasília; venceu em 27/09
+  const nota = notaDoVencimento(o, {}, agora);
+  assertEquals(
+    nota,
+    "Valia até 27/09/2026 (" + fmtBRL(12500) + "). O orçamento NÃO foi rejeitado. " +
+      "Para renovar, aumente a validade no orçamento (esta tarefa fecha sozinha). " +
+      "A validade conta da emissão (24/09), não de hoje: para valer até 01/10 " +
+      "(3 dias a partir de hoje, 28/09), ponha 7 dias. " +
+      "Se o cliente desistiu, marque como rejeitado. Nada foi enviado ao cliente.",
+  );
+  // seguir a nota renova MESMO: com 7 dias o último dia é 01/10 e deixa de estar vencido
+  const renovado = { ...o, quote_validity_days: 7 };
+  assertEquals(vencimentoDoOrcamento(renovado, {}, agora), null);
+  assertEquals(vencimentoDoOrcamento(renovado, {}, new Date("2026-10-02T15:00:00Z")), "2026-10-01");
+});
+
+Deno.test("notaDoVencimento: sem validade própria usa a da empresa; vira mês e ano", () => {
+  // Emitido 30/12/2026 sem validade própria; empresa = 5 → valia até 04/01/2027.
+  const o = { created_at: "2026-12-30T15:00:00Z", quote_validity_days: null, grand_total: 100 };
+  const nota = notaDoVencimento(o, { quote_validity_days: "5" }, new Date("2027-01-06T15:00:00Z"));
+  assertEquals(nota.startsWith("Valia até 04/01/2027 "), true, nota);
+  // 06/01 + 5 = 11/01; de 30/12 até 11/01 são 12 dias
+  assertEquals(nota.includes("emissão (30/12), não de hoje: para valer até 11/01 (5 dias a partir de hoje, 06/01), ponha 12 dias."), true, nota);
+});
+
+// Nenhuma tela edita quote_validity_date (MF-AUD-016: só a conversão de orçamento externo a
+// grava). A nota mandava "troque essa data" sem dizer onde — o dono procuraria um campo que
+// não existe. Agora diz que a data foi gravada fora da tela e que renovar é ajuste técnico.
+Deno.test("notaDoVencimento: com data fixa, diz que ela não se troca pela tela (e não dá conta de dias)", () => {
+  const o = { created_at: "2026-09-10T15:00:00Z", quote_validity_days: 90, quote_validity_date: "2026-09-20", grand_total: 1 };
+  const nota = notaDoVencimento(o, {}, new Date("2026-09-26T15:00:00Z"));
+  assertEquals(nota.startsWith("Valia até 20/09/2026 "), true, nota);
+  assertEquals(nota.includes("DATA FIXA, gravada fora da tela do orçamento"), true, nota);
+  assertEquals(nota.includes("não há campo na tela para trocá-la"), true, nota);
+  assertEquals(nota.includes("ajuste técnico"), true, nota);
+  assertEquals(nota.includes("ponha"), false, nota);
+  assertEquals(nota.includes("troque essa data"), false, nota);
+});
+
+// Sem data fixa e sem emissão legível, a nota dizia "é uma data fixa" — não era.
+Deno.test("notaDoVencimento: sem emissão legível NÃO é chamado de data fixa", () => {
+  for (const created_at of [null, "", "lixo"]) {
+    const nota = notaDoVencimento({ created_at, quote_validity_days: 3, grand_total: 1 }, {}, new Date("2026-09-26T15:00:00Z"));
+    assertEquals(nota.toLowerCase().includes("data fixa"), false, nota);
+    assertEquals(nota.includes("não tem data de emissão legível"), true, nota);
+    assertEquals(nota.includes("ponha"), false, nota);
+  }
+  // data fixa que não existe (31/02) também não é data fixa: sem emissão, cai no mesmo caso
+  const nota = notaDoVencimento({ created_at: null, quote_validity_date: "2026-02-31", grand_total: 1 }, {});
+  assertEquals(nota.includes("não tem data de emissão legível"), true, nota);
+});
+
+// Sem teto, validade 1e9 fazia a soma de datas lançar RangeError DENTRO do find: o motor
+// registrava a falha da regra e nenhum orçamento vencido era avisado (26/09/2026).
+Deno.test("find r19: validade 1e9 num orçamento não cala os outros; ele usa a da empresa", async () => {
+  const r19 = ruleById("r19")!;
+  const tarefas = await r19.find(bancoDeOrcamentos([
+    orcamento({ id: "gigante", quote_validity_days: 1e9 }),
+    orcamento({ id: "maximo", quote_validity_days: 2147483647 }),
+    orcamento({ id: "normal" }),
+  ], "3"));
+  assertEquals(tarefas.map((t) => t.related_entity_id).sort(), ["gigante", "maximo", "normal"]);
+  // 1e9 passa a vez ao padrão da empresa (3): 10/01 + 3 = 13/01
+  assertEquals(tarefas.find((t) => t.related_entity_id === "gigante")!.automation_key, "r19:quote:gigante:2026-01-13");
+});
+
+Deno.test("find r19: um orçamento que faz a conta lançar fica sem aviso, os outros não", async () => {
+  const r19 = ruleById("r19")!;
+  // Qualquer dado que a conta não aceite: aqui, uma coluna cuja leitura lança.
+  const corrompido = orcamento({ id: "corrompido" });
+  Object.defineProperty(corrompido, "quote_validity_days", {
+    get() { throw new RangeError("Invalid time value"); },
+  });
+  const erroOriginal = console.error;
+  const registrados: unknown[][] = [];
+  console.error = (...args: unknown[]) => { registrados.push(args); };
+  try {
+    const tarefas = await r19.find(bancoDeOrcamentos([orcamento({ id: "antes" }), corrompido, orcamento({ id: "depois" })], "3"));
+    assertEquals(tarefas.map((t) => t.related_entity_id).sort(), ["antes", "depois"]);
+  } finally {
+    console.error = erroOriginal;
+  }
+  // registrado com o id, para alguém consertar o dado
+  assertEquals(registrados.length, 1);
+  assertEquals(String(registrados[0][0]).includes("corrompido"), true, String(registrados[0][0]));
+});
+
+Deno.test("find r19: renovar e vencer de novo gera chave nova", async () => {
+  const r19 = ruleById("r19")!;
+  const [antes] = await r19.find(bancoDeOrcamentos([orcamento({ quote_validity_days: 3 })]));
+  const [depois] = await r19.find(bancoDeOrcamentos([orcamento({ quote_validity_days: 10 })]));
+  assertEquals(antes.automation_key, "r19:quote:o-1:2026-01-13");
+  assertEquals(depois.automation_key, "r19:quote:o-1:2026-01-20");
+});
+
+Deno.test("isResolved r19: renovado resolve; decisão tomada resolve; vencido segue", async () => {
+  const r19 = ruleById("r19")!;
+  const k = { automation_key: "r19:quote:o-1:2026-01-13" };
+  const res = (over: Record<string, unknown>) => r19.isResolved(bancoDeOrcamentos([orcamento(over)]), k);
+
+  // nada mudou: segue vencido no mesmo dia → a tarefa continua
+  assertEquals(await res({}), null);
+  assertEquals(await res({ quote_status: "awaiting_approval" }), null);
+  // renovou a validade (a tarefa fecha sozinha)
+  assertEquals((await res({ quote_validity_days: 3650 }))?.startsWith("Validade renovada até "), true);
+  // acima do teto (3650) não é renovação: o número não serve e vale o padrão (15, sem empresa)
+  assertEquals(await res({ quote_validity_days: 36500 }), "Validade alterada (agora até 25/01/2026)");
+  assertEquals(await res({ quote_validity_date: "2999-12-31" }), "Validade renovada até 31/12/2999");
+  // mexeu na validade mas continua vencido: fecha esta, a nova sai com a data certa
+  assertEquals(await res({ quote_validity_days: 5 }), "Validade alterada (agora até 15/01/2026)");
+  // o dono decidiu, ou o cliente aprovou
+  assertEquals(await res({ quote_status: "rejected" }), "Orçamento mudou para rejected");
+  assertEquals(await res({ quote_status: "awaiting_deposit" }), "Orçamento mudou para awaiting_deposit");
+  assertEquals(await res({ converted_to_os_at: "2026-01-12T10:00:00Z" }), "Orçamento convertido em OS");
+  assertEquals(await res({ status: "approved" }), "Deixou de ser orçamento (approved)");
+  assertEquals(await r19.isResolved(bancoDeOrcamentos([]), k), "Orçamento não existe mais");
+});
+
+Deno.test("isResolved r19: sem validade no orçamento, usa o padrão da empresa", async () => {
+  const r19 = ruleById("r19")!;
+  // 10/01 + 3 (empresa) = 13/01, igual à chave → segue vencido
+  const k = { automation_key: "r19:quote:o-1:2026-01-13" };
+  assertEquals(await r19.isResolved(bancoDeOrcamentos([orcamento({ quote_validity_days: null })], "3"), k), null);
+  // a empresa passou a 15 dias: último dia agora é 25/01, ainda vencido, mas outra data
+  assertEquals(
+    await r19.isResolved(bancoDeOrcamentos([orcamento({ quote_validity_days: null })], "15"), k),
+    "Validade alterada (agora até 25/01/2026)",
+  );
 });

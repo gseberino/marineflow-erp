@@ -7,10 +7,16 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { AlertTriangle, Download, Printer, Loader2 } from 'lucide-react';
 import type { PDFOptions, PDFDocumentType } from '@/lib/pdf-generator';
-import { DEFAULT_PDF_OPTIONS, resolvePdfOptions } from '@/lib/pdf-generator';
+import {
+  DEFAULT_PDF_OPTIONS,
+  primeiraValidade,
+  resolvePdfOptions,
+  VALIDADE_MAXIMA_EM_DIAS,
+  validadeDoOrcamento,
+} from '@/lib/pdf-generator';
 import { pdfOptionItems } from '@/lib/pdf-options-catalog';
 import { isFinancialOption } from '@/lib/pdf-visibility';
-import { useAppSetting, useAppSettings } from '@/hooks/use-app-settings';
+import { useAppSettings } from '@/hooks/use-app-settings';
 
 export type ValidityConfig = {
   mode: 'days' | 'date';
@@ -27,9 +33,17 @@ interface Props {
   onGenerate: (action: PDFAction, options: PDFOptions, validity?: ValidityConfig, dueDate?: string) => void | Promise<void>;
   hasProductImages?: boolean;
   initialValidityDays?: number;
+  /**
+   * A data fixa de validade do orçamento (service_orders.quote_validity_date), se houver. Com
+   * ela o diálogo abre em "Data específica" com essa data — a mesma que a R19 usa para avisar
+   * do vencimento. Sem ela o PDF dizia "Válido por N dias" de um orçamento com data fixa.
+   */
+  initialValidityDate?: string | null;
 }
 
-export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate, hasProductImages, initialValidityDays }: Props) {
+export function PDFOptionsDialog({
+  open, onOpenChange, documentType, onGenerate, hasProductImages, initialValidityDays, initialValidityDate,
+}: Props) {
   const { t } = useI18n();
   // Este diálogo NÃO guarda preferência (MF-AUD-014). Ele parte do padrão da empresa —
   // configurado em Configurações › Documentos, chave app_settings.pdf_options_<tipo> — e o
@@ -40,17 +54,29 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
   // uma vez desligava os termos de todos os documentos futuros daquele tipo, inclusive os
   // enviados por WhatsApp — sem pedir nada e sem avisar ninguém.
   const { data: appSettings } = useAppSettings();
-  const defaultQuoteValidityDays = Number(useAppSetting('quote_validity_days', '15')) || 15;
+  // O ponto de partida da validade, pela função única do PDF — a mesma do formulário, do
+  // envio pela tela, do portal, do assistente e da R19: a data fixa do orçamento, senão os
+  // dias dele, senão o padrão da empresa (app_settings), senão 15. A cópia própria que havia
+  // aqui (`Number(...) || 15`) aceitava -1 e 2.5; um initialValidityDays inválido (-1, 2.5,
+  // 1e9) também não chega ao campo — passa a vez ao padrão.
+  const inicial = validadeDoOrcamento(initialValidityDays, appSettings, initialValidityDate);
+  const inicialModo = inicial.mode;
+  const inicialDias = inicial.days;
+  const inicialData = inicial.mode === 'date' ? inicial.date : '';
 
   const [options, setOptions] = useState<PDFOptions>({ ...DEFAULT_PDF_OPTIONS });
   // Enquanto ninguém mexeu nos checkboxes, o padrão da empresa que chegar depois (a query de
   // app_settings pode resolver com o diálogo já aberto) ainda é aplicado. Depois do primeiro
   // clique, não — seria trocar a escolha do usuário debaixo dele.
   const optionsTouched = useRef(false);
+  // O mesmo para a validade. As listas abrem o diálogo no clique, antes de os dados da ordem
+  // chegarem: `initialValidityDays` nasce com o padrão da empresa e só depois vira a validade
+  // do orçamento. Sem acompanhar essa troca, o campo ficava no padrão e o PDF saía com ele.
+  const validityTouched = useRef(false);
   const [downloading, setDownloading] = useState(false);
-  const [validityMode, setValidityMode] = useState<'days' | 'date'>('days');
-  const [validityDays, setValidityDays] = useState(initialValidityDays ?? defaultQuoteValidityDays);
-  const [validityDate, setValidityDate] = useState('');
+  const [validityMode, setValidityMode] = useState<'days' | 'date'>(inicialModo);
+  const [validityDays, setValidityDays] = useState(inicialDias);
+  const [validityDate, setValidityDate] = useState(inicialData);
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 15);
@@ -65,11 +91,12 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
   useEffect(() => {
     if (open) {
       optionsTouched.current = false;
+      validityTouched.current = false;
       setOptions(padraoDaEmpresa(appSettings));
       setDownloading(false);
-      setValidityMode('days');
-      setValidityDays(initialValidityDays ?? defaultQuoteValidityDays);
-      setValidityDate('');
+      setValidityMode(inicialModo);
+      setValidityDays(inicialDias);
+      setValidityDate(inicialData);
       const d = new Date();
       d.setDate(d.getDate() + 15);
       setDueDate(d.toISOString().split('T')[0]);
@@ -85,6 +112,15 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
     setOptions(padraoDaEmpresa(appSettings));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, appSettings, documentType]);
+
+  // A validade do orçamento (ou o padrão da empresa) que chega tarde alcança o campo enquanto
+  // ninguém o editou; depois de editado, o que a pessoa escolheu fica.
+  useEffect(() => {
+    if (!open || validityTouched.current) return;
+    setValidityMode(inicialModo);
+    setValidityDays(inicialDias);
+    setValidityDate(inicialData);
+  }, [open, inicialModo, inicialDias, inicialData]);
 
   const titleMap: Record<PDFDocumentType, string> = {
     quote: `${t.pdf.generate} — ${t.pdf.quote}`,
@@ -170,7 +206,7 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
                   type="radio"
                   name="validityMode"
                   checked={validityMode === 'days'}
-                  onChange={() => setValidityMode('days')}
+                  onChange={() => { validityTouched.current = true; setValidityMode('days'); }}
                 />
                 Em dias
               </label>
@@ -179,7 +215,7 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
                   type="radio"
                   name="validityMode"
                   checked={validityMode === 'date'}
-                  onChange={() => setValidityMode('date')}
+                  onChange={() => { validityTouched.current = true; setValidityMode('date'); }}
                 />
                 Data específica
               </label>
@@ -189,8 +225,16 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
                 <Input
                   type="number"
                   min={1}
+                  max={VALIDADE_MAXIMA_EM_DIAS}
+                  step={1}
                   value={validityDays}
-                  onChange={(e) => setValidityDays(Number(e.target.value) || defaultQuoteValidityDays)}
+                  onChange={(e) => {
+                    validityTouched.current = true;
+                    // A mesma regra do PDF (primeiraValidade): -1, 0, 2.5 e 1e9 não entram. O
+                    // que não serve volta ao número com que o diálogo abriu (o do orçamento,
+                    // senão o da empresa). Era `Number(x) || padrão`, que deixava -1 e 2.5.
+                    setValidityDays(primeiraValidade(e.target.value, inicialDias));
+                  }}
                   className="w-24"
                 />
                 <span className="text-sm text-muted-foreground">dias a partir da emissão</span>
@@ -199,7 +243,7 @@ export function PDFOptionsDialog({ open, onOpenChange, documentType, onGenerate,
               <Input
                 type="date"
                 value={validityDate}
-                onChange={(e) => setValidityDate(e.target.value)}
+                onChange={(e) => { validityTouched.current = true; setValidityDate(e.target.value); }}
                 min={new Date().toISOString().split('T')[0]}
               />
             )}

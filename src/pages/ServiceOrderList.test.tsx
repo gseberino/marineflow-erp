@@ -65,6 +65,13 @@ vi.mock('@/hooks/use-pdf', () => ({
   fetchPDFData: vi.fn(),
 }));
 
+// A lista lê o padrão de validade do orçamento (app_settings) desde 26/09/2026; sem este
+// mock o teste consultaria o banco de verdade.
+const { ajustesVazios } = vi.hoisted(() => ({ ajustesVazios: {} }));
+vi.mock('@/hooks/use-app-settings', () => ({
+  useAppSettings: () => ({ data: ajustesVazios }),
+}));
+
 vi.mock('@/hooks/use-whatsapp-send-log', () => ({
   useWhatsAppSendStatusMap: () => ({ data: new Map() }),
   useWhatsAppSendHistory: () => ({ data: [], isLoading: false }),

@@ -23,10 +23,11 @@ import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialo
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
-import { downloadPDF, DEFAULT_PDF_OPTIONS, type PDFOptions } from '@/lib/pdf-generator';
+import { downloadPDF, opcoesPadraoDoDocumento, type PDFOptions } from '@/lib/pdf-generator';
 import { printPDF } from '@/lib/pdf-print';
 import type { PDFAction } from '@/components/PDFOptionsDialog';
 import { normalizePhoneE164 } from '@/lib/masks';
+import { useAppSettings } from '@/hooks/use-app-settings';
 import { toast } from 'sonner';
 
 type SortDir = 'asc' | 'desc';
@@ -57,6 +58,9 @@ export default function QuoteList() {
   });
 
   const { data: pdfData } = usePDFData(pdfTarget?.id);
+  // Padrão da empresa: as opções do documento (pdf_options_<tipo>) e a validade do orçamento
+  // quando ele não tem a sua — o mesmo ponto de partida do diálogo (opcoesPadraoDoDocumento).
+  const { data: appSettings } = useAppSettings();
 
   // ── Sorting ────────────────────────────────────────────────────────────────
   const handleSort = (key: string) => {
@@ -160,7 +164,10 @@ export default function QuoteList() {
     try {
       const data = await fetchPDFData(soId);
       if (!data) throw new Error('Dados não encontrados');
-      await downloadPDF({ ...data, documentType: type }, DEFAULT_PDF_OPTIONS);
+      // Sem diálogo: o padrão da empresa e a validade do orçamento, o mesmo ponto de partida
+      // do diálogo. Partia de DEFAULT_PDF_OPTIONS (fábrica), e o Baixar da lista saía diferente
+      // do Baixar do formulário sempre que o padrão da empresa desligava alguma opção.
+      await downloadPDF({ ...data, documentType: type }, opcoesPadraoDoDocumento(appSettings, type, data.serviceOrder));
       toast.success('PDF baixado');
     } catch {
       toast.error('Erro ao gerar o PDF');
@@ -494,6 +501,8 @@ export default function QuoteList() {
         onOpenChange={v => { if (!v) setPdfTarget(null); }}
         documentType={pdfTarget?.type || 'quote'}
         hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
+        initialValidityDays={pdfData?.serviceOrder?.quote_validity_days}
+        initialValidityDate={pdfData?.serviceOrder?.quote_validity_date}
         onGenerate={handleGeneratePDF}
       />
       <WhatsAppSendHistoryDialog

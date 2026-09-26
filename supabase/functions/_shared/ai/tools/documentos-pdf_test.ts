@@ -213,6 +213,26 @@ Deno.test("o documento enviado ao /api/pdf é o orçamento do formulário: títu
   assertEquals(amb.chamadas.envio[0].corpo.document_filename, corpo.filename);
 });
 
+// A R19 avisa do vencimento pela data fixa (quote_validity_date) quando ela existe; o PDF do
+// assistente dizia "Válido por 7 dias" do mesmo orçamento até 26/09/2026.
+Deno.test("orçamento com data fixa sai com 'Válido até' a data — a mesma da R19", async () => {
+  const amb = montarAmbiente({ ordens: [{ ...ORDEM, quote_validity_date: "2026-10-10" }, OS] });
+  await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+  const corpo = await amb.chamadas.pdf[0].json();
+  assertStringIncludes(corpo.html, "Válido até 10/10/2026");
+  assert(!corpo.html.includes("Válido por"), "a data fixa vence os dias");
+});
+
+// A via de execução nunca é padrão: um pdf_options_service_order gravado com ela não pode
+// fazer o dono receber uma OS sem preço (opcoesPadraoDoDocumento força hideFinancials: false).
+Deno.test("OS do assistente sai com valores mesmo com via de execução no padrão gravado", async () => {
+  const amb = montarAmbiente({ settings: { pdf_options_service_order: JSON.stringify({ hideFinancials: true }) } });
+  await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "OS-00086" }, amb.ctx()));
+  const corpo = await amb.chamadas.pdf[0].json();
+  assertStringIncludes(corpo.html, ">Ordem de Serviço</h1>");
+  assert(!corpo.html.includes("Via de Execução"), "saiu como via de execução");
+});
+
 Deno.test("OS sai como Ordem de Serviço (o tipo vem do status, como na tela)", async () => {
   const amb = montarAmbiente();
   await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "OS-00086" }, amb.ctx()));
