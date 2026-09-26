@@ -46,6 +46,8 @@ const NAO_SAO_TOOLS = new Set<string>([
   "product_type", "proposed_start", "quote_request_id", "recurrence_type", "related_entity_id", "related_entity_type",
   "reminder_offsets_minutes", "response_id", "scheduled_at", "service_name", "service_order_id", "skipped_reason",
   "source_excerpt", "step_id", "supplier_id", "supplier_ids", "unit_price", "vessel_id",
+  // envio do orçamento ao cliente (formato da send_service_order_link e campos do resultado)
+  "pdf_e_link", "nada_enviado", "enviado_para",
   // tabelas citadas para explicar as duas listas da OS
   "service_order_parts", "service_order_services",
   // campos e marcas que as tools DEVOLVEM

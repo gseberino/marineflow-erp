@@ -56,6 +56,11 @@ function jr(body: unknown, status = 200) {
 servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
+  // Reserva de idempotência feita e ainda sem desfecho do provedor. Se algo lançar entre a
+  // reserva e a resposta do provedor, o catch libera — senão a chave ficava presa e o próximo
+  // pedido ouvia "já enviado" sem nada ter saído (conferência de 26/09/2026).
+  let liberarReservaPendente: (() => Promise<void>) | null = null;
+
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -125,6 +130,7 @@ servirComCors(async (req) => {
         console.info(`[whatsapp-send] chave repetida, não reenviado: ${chave}`);
         return jr({ success: true, deduplicated: true, kind: body.kind, messageId: null });
       }
+      if (reserva === "nova") liberarReservaPendente = () => liberarEnvio(supabaseAdmin, chave);
     }
 
     const provider = createWhatsAppProvider();
@@ -158,6 +164,9 @@ servirComCors(async (req) => {
       messagePreview = `[pdf] ${body.document_filename || "documento.pdf"}`;
     }
 
+    // O provedor respondeu: daqui em diante a reserva tem desfecho (concluída ou liberada logo
+    // abaixo). Uma exceção depois disto NÃO pode liberar — a mensagem pode já ter saído.
+    liberarReservaPendente = null;
     const success = sendResult.ok;
     if (chave) {
       if (success) await concluirEnvio(supabaseAdmin, chave, sendResult.providerMessageId || null);
@@ -254,6 +263,7 @@ servirComCors(async (req) => {
     });
   } catch (err) {
     console.error("whatsapp-send error", err);
+    if (liberarReservaPendente) await liberarReservaPendente().catch(() => {});
     return jr({ error: err instanceof Error ? err.message : "Unknown error" }, 500);
   }
 });

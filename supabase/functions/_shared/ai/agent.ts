@@ -144,6 +144,17 @@ const TOOL_LABELS_PT: Record<string, string> = {
   ajustar_saldo_do_caixa: "Acertar o Caixa pela contagem",
   anotar_transacao_do_banco: "Anotar transação que o banco vai trazer",
   configurar_lancamento_automatico: "Ligar/desligar o lançar sozinho",
+  // As que pedem confirmação quando chegam pela rede de segurança (perfil-operacao.ts,
+  // SO_PELA_REDE): sem rótulo, o dono aprovava um nome técnico em inglês às cegas.
+  review_entity_note: "Aprovar ou rejeitar anotação da memória",
+  convert_external_quote_to_so: "Converter orçamento externo em OS",
+  remove_service_order_step: "Remover passo do roteiro",
+  reopen_service_order_step: "Reabrir passo do roteiro",
+  reorder_service_order_step: "Reordenar passos do roteiro",
+  review_ai_step: "Revisar passo sugerido pela IA",
+  remove_service_order_expense: "Remover gasto da OS",
+  create_composed_product: "Criar produto composto/kit",
+  criar_categoria_de_despesa: "Criar categoria de despesa",
 };
 
 function humanizeToolNamePt(name: string): string {

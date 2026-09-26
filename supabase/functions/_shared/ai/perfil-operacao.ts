@@ -207,6 +207,10 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   // "CORRIGIR CADASTRO é rotina": o prompt manda update_supplier para telefone novo, nome usado
   // (display_name) e opt-out — e update_client/update_product/update_vessel já estavam aqui.
   "update_supplier",
+  // CADASTRO FISCAL PENDENTE: o prompt mostra a tabela, pede UM "sim" e grava serviço a serviço.
+  // Só pela rede, cada update_service virava uma pendência — 10 serviços, 10 "sim" a mais
+  // (conferência de 26/09/2026). À vista, segue o risco low que declara e o "sim" do prompt basta.
+  "update_service",
 ]);
 
 /**
@@ -264,7 +268,6 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   //   completa na hora de emitir (list_fiscal_documents e os espelhos estão no perfil) —
   "get_fiscal_document",
   "list_pending_fiscal_products",
-  "update_service",
 
   // — Roteiro: manutenção da lista de passos (a execução do passo a passo está no perfil) —
   "remove_service_order_step",

@@ -557,7 +557,9 @@ export const whatsappTools: ToolDef[] = [
       const { data: so, error: soErr } = await buscarOrdemParaEnvio(admin, args.service_order_id);
       if (soErr || !so) return { error: `OS não encontrada. Verifique se o número ou ID está correto. Valor recebido: "${args.service_order_id}"` };
       if (so.status === "cancelled") {
-        return { error: `A ordem ${so.service_order_number} está CANCELADA: não se manda ao cliente. Se ela voltou a valer, reabra antes (reopen_service_order).` };
+        // Sem sugerir a tool de reabrir OS: ela reabre OS CONCLUÍDA/FATURADA e, no caminho,
+        // cancela pagamentos e zera recebíveis — não é o caminho de uma ordem cancelada.
+        return { error: `A ordem ${so.service_order_number} está CANCELADA: não se manda ao cliente. Se ela voltou a valer, mude o status dela na tela antes de mandar.` };
       }
       if (!so.share_token) return { error: `A OS ${so.service_order_number} não possui link público ainda. Abra a OS no app, clique em "Compartilhar" para gerar o link, e tente novamente.` };
       // Destino: SÓ o cadastro do cliente da ordem. Nenhum telefone dos argumentos é lido —

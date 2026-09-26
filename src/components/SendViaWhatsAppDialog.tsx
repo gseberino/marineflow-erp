@@ -26,6 +26,7 @@ import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
 import { supabase } from '@/integrations/supabase/client';
 import { buildQuoteWhatsAppSummary } from '@/lib/quote-whatsapp-summary';
 import { mesmoTelefone } from '../../supabase/functions/_shared/ai/phone';
+import { dataBR } from '../../supabase/functions/_shared/pdf/datas';
 
 export type SendViaWhatsAppTarget =
   | {
@@ -305,7 +306,11 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       orcamento: so,
       parcelas: so.payment_condition_installments ?? null,
       condicaoLabel: so.payment_condition_label ?? so.payment_conditions ?? null,
-      validadeDias: so.quote_validity_days ?? null,
+      // A MESMA validade do PDF deste envio (pdfOptions): data fixa, senão os dias do orçamento,
+      // senão os da empresa — já normalizados. Antes o texto lia so.quote_validity_days cru e,
+      // com data fixa, dizia "7 dias" enquanto o PDF dizia "até 10/10".
+      validadeDias: pdfOptions.validity?.days ?? null,
+      validadeAte: pdfOptions.validity?.mode === 'date' && pdfOptions.validity.date ? dataBR(pdfOptions.validity.date) : null,
       empresa: {
         nome: appSettings?.['company_name'],
         pixKey: appSettings?.['pix_key'],

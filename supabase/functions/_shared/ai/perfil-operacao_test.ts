@@ -48,12 +48,14 @@ const SEMPRE_NO_PERFIL_ANTIGO = [
   "listar_lancados_sozinhos", "lancar_no_caixa", "ajustar_saldo_do_caixa", "anotar_transacao_do_banco", "gastos_por_categoria",
 ];
 
-// Decisão do dono (Frente C): as duas que o prompt ensina e o perfil escondia sem motivo.
-const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier"];
+// Decisão do dono (Frente C): as que o prompt ensina e o perfil escondia sem motivo. A terceira
+// (update_service) entrou na integração de 26/09/2026: pela rede, o cadastro fiscal em lote
+// virava uma confirmação por serviço.
+const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service"];
 
 const ordenado = (xs: Iterable<string>) => [...new Set(xs)].sort();
 
-Deno.test("perfil no código = banco de 26/09 ∪ SEMPRE_NO_PERFIL antigo ∪ as 2 acrescentadas — nem mais, nem menos", () => {
+Deno.test("perfil no código = banco de 26/09 ∪ SEMPRE_NO_PERFIL antigo ∪ as acrescentadas — nem mais, nem menos", () => {
   assertEquals(BANCO_EM_26_09.length, 127);
   assertEquals(ordenado(PERFIL_OPERACAO), ordenado([...BANCO_EM_26_09, ...SEMPRE_NO_PERFIL_ANTIGO, ...ACRESCENTADAS]));
 });
