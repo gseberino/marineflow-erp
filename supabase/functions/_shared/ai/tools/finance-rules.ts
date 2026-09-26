@@ -13,6 +13,25 @@
 
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
 import { regraDeFornecedorAlcanca, type FornecedorConhecido, type TransacaoOrfa } from "../../banking/proposals.ts";
+import { faltaNoDestino, precisaDeDestino } from "../../banking/destino.ts";
+
+/** Nome comparável: sem acento, caixa e espaços sobrando. */
+function comparavel(s: string): string {
+  return String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * O centro de custo que o usuário disse — pelo nome igual (sem acento e caixa) ou pelo id, só
+ * entre os ATIVOS. Nome que não bate vira pergunta com as opções, nunca escolha.
+ */
+async function resolverCentroDeCusto(ctx: ToolCtx, dito: string): Promise<{ id: string; nome: string } | { error: string; opcoes: string[] }> {
+  const { data } = await ctx.sb.from("cost_centers").select("id, name, active").eq("active", true).order("name");
+  const ativos = (data ?? []) as Array<{ id: string; name: string }>;
+  const alvo = comparavel(dito);
+  const achado = ativos.find((c) => c.id === dito || comparavel(c.name) === alvo);
+  if (achado) return { id: achado.id, nome: achado.name };
+  return { error: `Não há centro de custo ativo chamado "${dito}". Pergunte ao usuário qual destes é.`, opcoes: ativos.map((c) => c.name) };
+}
 
 /**
  * Quem pode operar o financeiro pelo agente.
@@ -231,6 +250,116 @@ export async function resolverFornecedorDito(
   };
 }
 
+/**
+ * O cliente que o usuário disse: pelo nome IGUAL ao do cadastro (sem acento, caixa, sufixo e
+ * parênteses) ou pelo id. Parecido não é aceito calado — vira pergunta com as opções, como no
+ * fornecedor (decisão do dono de 26/09/2026: nome diferente só por escolha dele).
+ */
+export async function resolverClienteDito(
+  ctx: ToolCtx,
+  dito: string,
+): Promise<{ id: string; nome: string } | { error: string; opcoes?: Array<{ id: string; nome: string; cpf_cnpj: string | null }> }> {
+  const d = String(dito ?? "").trim();
+  if (!d) return { error: "De qual cliente é o dinheiro? Pergunte ao usuário." };
+  if (/^[0-9a-f-]{36}$/i.test(d)) {
+    const { data } = await ctx.sb.from("clients").select("id, name").eq("id", d).maybeSingle();
+    return data ? { id: (data as any).id, nome: (data as any).name } : { error: "Cliente não encontrado." };
+  }
+  const todos: Array<{ id: string; name: string; cpf_cnpj: string | null }> = [];
+  for (let de = 0; de < 50000; de += 1000) {
+    const { data, error } = await ctx.sb.from("clients").select("id, name, cpf_cnpj").order("id").range(de, de + 999);
+    if (error) break;
+    const pagina = (data ?? []) as typeof todos;
+    todos.push(...pagina);
+    if (pagina.length < 1000) break;
+  }
+  const alvo = limpaNome(d);
+  const opcao = (c: (typeof todos)[number]) => ({ id: c.id, nome: c.name, cpf_cnpj: c.cpf_cnpj ?? null });
+  const iguais = todos.filter((c) => limpaNome(c.name) === alvo);
+  if (iguais.length === 1) return { id: iguais[0].id, nome: iguais[0].name };
+  if (iguais.length > 1) {
+    return { error: `Há ${iguais.length} clientes com o nome "${d}". Pergunte ao usuário qual é (pelo CPF/CNPJ) e repita com o id.`, opcoes: iguais.map(opcao) };
+  }
+  const parecidos = alvo ? todos.filter((c) => limpaNome(c.name).includes(alvo)) : [];
+  if (parecidos.length > 0) {
+    return {
+      error: parecidos.length === 1
+        ? `O cadastro parecido é "${parecidos[0].name}". Pergunte ao usuário se é este; se for, repita com o id dele.`
+        : `"${d}" não é o nome exato de um cliente. Pergunte ao usuário qual é e repita com o id da opção escolhida.`,
+      opcoes: parecidos.slice(0, 8).map(opcao),
+    };
+  }
+  return { error: `Nenhum cliente cadastrado com "${d}". Confira o nome ou cadastre o cliente antes.` };
+}
+
+/**
+ * Regra de ENTRADA: "o Pix do CPF/CNPJ X é do cliente Y" (resposta 18 do dono, 26/09/2026).
+ * Só pelo documento (nome não identifica ninguém), só sugere (a receita espera o OK dele) e,
+ * se já houver uma para o mesmo documento, só troca com o usuário dizendo que é para trocar.
+ */
+async function criarRegraDeEntrada(args: Record<string, unknown>, ctx: ToolCtx) {
+  if (String(args.reconhecer_por ?? "") !== "documento") {
+    return { error: "Regra de entrada reconhece só pelo CPF/CNPJ de quem paga: use reconhecer_por='documento'. Nome não identifica ninguém." };
+  }
+  const doc = String(args.valor_de_busca ?? "").replace(/\D/g, "");
+  if (doc.length !== 11 && doc.length !== 14) {
+    return { error: "CPF tem 11 dígitos e CNPJ, 14. Confira o documento com o usuário." };
+  }
+  if (args.lancar_sozinha) {
+    return { error: "Regra de entrada só sugere: a receita sempre espera o OK do usuário. Repita sem lancar_sozinha." };
+  }
+  const cats = await categoriasValidas(ctx, "receivable");
+  const cat = cats.find((c) => c.name.toLowerCase() === String(args.categoria ?? "").toLowerCase());
+  if (!cat) {
+    return { error: `A categoria de receita "${args.categoria}" não existe.`, categorias_disponiveis: cats.map((c) => c.name) };
+  }
+  const cliente = await resolverClienteDito(ctx, String(args.cliente ?? ""));
+  if ("error" in cliente) return cliente;
+
+  const campos = {
+    set_category: cat.name, set_dre_group: cat.dre_group, set_client_id: cliente.id, set_supplier_id: null,
+    autonomy: "suggest", min_amount: (args.valor_minimo as number | undefined) ?? null,
+    max_amount: (args.valor_maximo as number | undefined) ?? null, status: "active",
+  };
+  const { data: existentes } = await ctx.sb.from("finance_rules")
+    .select("id, set_client_id, set_category, status")
+    .eq("match_type", "document").eq("direction", "credit").eq("match_value", doc).in("status", ["active", "proposed"]);
+  const ja = ((existentes ?? []) as any[])[0];
+  let regraId: string;
+  if (ja) {
+    if (ja.set_client_id === cliente.id && ja.set_category === cat.name) {
+      return { ok: true, ja_existia: true, cliente: cliente.nome, categoria: cat.name, documento: doc };
+    }
+    if (!args.substituir_regra_existente) {
+      return {
+        error: "Já existe regra de entrada para este CPF/CNPJ, com outro cliente ou categoria. Pergunte ao usuário se é para TROCAR; "
+          + "se for, repita com substituir_regra_existente=true.",
+      };
+    }
+    const { error } = await ctx.sb.from("finance_rules").update(campos).eq("id", ja.id);
+    if (error) return { error: `Não consegui trocar a regra: ${error.message}` };
+    regraId = ja.id;
+  } else {
+    const { data, error } = await ctx.sb.from("finance_rules").insert({
+      match_type: "document", match_value: doc, direction: "credit", origin: "user",
+      reasoning: "Criada pelo assistente a pedido do usuário.", ...campos,
+    }).select("id").single();
+    if (error) return { error: `Não consegui criar a regra: ${error.message}` };
+    regraId = (data as any).id;
+  }
+
+  // Quantas entradas do extrato vieram deste documento: regra que não alcança nada é dita na hora.
+  const { count } = await ctx.sb.from("bank_transactions").select("id", { count: "exact", head: true })
+    .eq("transaction_type", "credit").eq("counterparty_document", doc);
+  const efeito = await chamarFinanceReview(ctx, { action: "reclassify" });
+  return {
+    ok: true, regra_id: regraId, cliente: cliente.nome, categoria: cat.name, documento: doc,
+    entradas_deste_documento_no_extrato: count ?? 0,
+    propostas_reclassificadas: Number((efeito as any)?.atualizadas ?? 0),
+    lembrete: "A regra só preenche o cliente: cada entrada continua esperando o OK do usuário na fila.",
+  };
+}
+
 export const financeRulesTools: ToolDef[] = [
   // ── ENSINAR: muda o que o sistema propõe, não o que ele já lançou ──────────────
   {
@@ -238,7 +367,8 @@ export const financeRulesTools: ToolDef[] = [
     description:
       "Ensina o sistema a classificar despesas automaticamente. Use quando o usuário disser algo como " +
       "'toda transação com Mercado Livre é peças e materiais', 'pagamentos para Fulano são sempre pró-labore' " +
-      "ou 'despesas do fornecedor X vão para categoria Y'. Ao criar, a regra também " +
+      "ou 'despesas do fornecedor X vão para categoria Y'. Também ensina ENTRADAS: 'o Pix do CPF X é do " +
+      "cliente Y' (sentido='entrada', reconhecer_por='documento', cliente). Ao criar, a regra também " +
       "reclassifica as propostas que já estão na fila aguardando decisão. Não altera " +
       "lançamentos já feitos.",
     input_schema: {
@@ -264,7 +394,22 @@ export const financeRulesTools: ToolDef[] = [
             "letras: 'CONFEIT' pega 'LMGCONFEITARIA'. Prefira o radical curto e sem " +
             "acento, que cobre as variações de uma vez.",
         },
-        categoria: { type: "string", description: "Categoria do plano de contas a aplicar." },
+        categoria: {
+          type: "string",
+          description: "Categoria do plano de contas a aplicar. Com sentido='entrada', uma categoria de RECEITA "
+            + "(ex.: Serviços prestados, Venda de peças e produtos, Sinal e adiantamento).",
+        },
+        sentido: {
+          type: "string",
+          enum: ["saida", "entrada"],
+          description: "saida (padrão) = despesa. entrada = dinheiro que ENTRA: \"o Pix do CPF/CNPJ X é do cliente Y\" — "
+            + "use quando alguém paga com o documento de outra pessoa. Exige reconhecer_por='documento', o CPF/CNPJ em "
+            + "valor_de_busca e `cliente`. Regra de entrada só sugere: a receita espera o OK do usuário.",
+        },
+        cliente: {
+          type: "string",
+          description: "Só com sentido='entrada': o cliente cadastrado (nome igual ao do cadastro, ou o id) dono do dinheiro.",
+        },
         substituir_regra_existente: {
           type: "boolean",
           description: "Só com reconhecer_por='fornecedor', quando a ferramenta disser que já há regra para a empresa e o usuário confirmar a troca: pausa a antiga e cria a nova.",
@@ -291,6 +436,9 @@ export const financeRulesTools: ToolDef[] = [
     async execute(args, ctx) {
       const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
+
+      // Regra de ENTRADA ("o Pix deste CPF é do cliente Y") é outro caminho, com outras travas.
+      if (args.sentido === "entrada") return await criarRegraDeEntrada(args as Record<string, unknown>, ctx);
 
       const cats = await categoriasValidas(ctx);
       const cat = cats.find((c) => c.name.toLowerCase() === String(args.categoria).toLowerCase());
@@ -472,14 +620,20 @@ export const financeRulesTools: ToolDef[] = [
         ativas: "active", sugeridas: "proposed", pausadas: "paused",
       };
       let q = ctx.sb.from("finance_rules")
-        .select("id, match_type, match_value, set_category, autonomy, status, times_applied, reasoning")
+        .select("id, match_type, match_value, direction, set_category, set_client_id, autonomy, status, times_applied, reasoning, clients(name)")
         .order("times_applied", { ascending: false }).limit(100);
       const alvo = mapa[String(args.situacao ?? "ativas")];
       if (alvo) q = q.eq("status", alvo);
 
       const { data, error } = await q;
       if (error) return { error: error.message };
-      return { regras: data ?? [], total: (data ?? []).length };
+      // Regra de entrada diz o cliente pelo nome: o id sozinho não significa nada para quem lê.
+      const regras = ((data ?? []) as any[]).map(({ clients, set_client_id, direction, ...r }) => ({
+        ...r,
+        sentido: direction === "credit" ? "entrada" : "saida",
+        ...(set_client_id ? { cliente: clients?.name ?? "(cadastro removido)" } : {}),
+      }));
+      return { regras, total: regras.length };
     },
   },
 
@@ -656,6 +810,15 @@ export const financeRulesTools: ToolDef[] = [
           oc_sugerida: p.suggested_purchase_order_id
             ? { oc_id: p.suggested_purchase_order_id, numero: numeroDaOc.get(p.suggested_purchase_order_id) ?? null }
             : null,
+          // Serviço de terceiro: pergunte para onde foi (serviço de um cliente → OS; para a HBR →
+          // centro de custo) e o que foi feito, e passe em aprovar (destino, os, centro_de_custo,
+          // observacao). Decisão do dono, 26/09/2026.
+          servico_de_terceiro: precisaDeDestino(p.kind, p.suggested_category)
+            ? {
+              falta: faltaNoDestino(p.kind, p.suggested_category, {},
+                p.evidencia?.anotacao?.os_id === p.suggested_service_order_id ? p.suggested_service_order_id : null),
+            }
+            : undefined,
         })),
         total: linhas.length,
         valor_total: linhas.reduce((s, p) => s + Number(p.suggested_amount ?? 0), 0),
@@ -668,11 +831,28 @@ export const financeRulesTools: ToolDef[] = [
     description:
       "Aprova propostas da caixa de entrada, CRIANDO os lançamentos correspondentes — ou CASANDO com o que " +
       "já existe, quando o usuário escolheu um vínculo. Linha com vínculo sugerido é recusada pelo " +
-      "servidor sem a escolha: pergunte e passe em `vinculos`. Só use quando o usuário confirmar quais aprovar.",
+      "servidor sem a escolha: pergunte e passe em `vinculos`. Serviço de terceiro (servico_de_terceiro na " +
+      "lista) exige para onde foi e o que foi feito: pergunte e passe `destino` (cliente + os, ou empresa + " +
+      "centro_de_custo) e `observacao`. Só use quando o usuário confirmar quais aprovar.",
     input_schema: {
       type: "object",
       properties: {
         ids: { type: "array", items: { type: "string" }, description: "Ids das propostas a aprovar." },
+        destino: {
+          type: "object",
+          description: "Por proposta de serviço de terceiro: \"cliente\" (foi para o serviço de um cliente — passe a OS em `os`, ou \"nenhuma\" se não tem OS) ou \"empresa\" (para a própria HBR: sede, obra, veículo, equipamento — passe `centro_de_custo`).",
+          additionalProperties: { type: "string", enum: ["cliente", "empresa"] },
+        },
+        centro_de_custo: {
+          type: "object",
+          description: "Por proposta: o NOME do centro de custo dito pelo usuário (ex.: \"Obras e reformas da sede\", \"Veículos da empresa\").",
+          additionalProperties: { type: "string" },
+        },
+        observacao: {
+          type: "object",
+          description: "Por proposta: a observação do usuário. No serviço de terceiro é o que foi feito (ex.: \"pintura da fachada da sede\").",
+          additionalProperties: { type: "string" },
+        },
         vinculos: {
           type: "object",
           description: "Por proposta: o opcao_id escolhido (de listar_propostas_de_lancamento) para casar, ou \"nenhum\" para lançar novo.",
@@ -715,6 +895,21 @@ export const financeRulesTools: ToolDef[] = [
           const valor = /^nenhum/i.test(v) ? null : String(v);
           if (campo === "os") de(id).serviceOrderId = valor; else de(id).purchaseOrderId = valor;
         }
+      }
+      // Para onde foi, centro de custo e o que foi feito (decisão do dono, 26/09/2026). O servidor
+      // confere de novo o que falta; o centro é resolvido aqui pelo nome, só entre os ativos.
+      for (const [id, v] of Object.entries((args.destino ?? {}) as Record<string, string>)) {
+        if (v !== "cliente" && v !== "empresa") return { error: `Em destino, use "cliente" ou "empresa" (veio "${v}").` };
+        de(id).destino = v;
+      }
+      for (const [id, v] of Object.entries((args.centro_de_custo ?? {}) as Record<string, string>)) {
+        if (!v) continue;
+        const r = await resolverCentroDeCusto(ctx, String(v));
+        if ("error" in r) return r;
+        de(id).costCenterId = r.id;
+      }
+      for (const [id, v] of Object.entries((args.observacao ?? {}) as Record<string, string>)) {
+        if (String(v ?? "").trim()) de(id).notes = String(v).trim().slice(0, 1000);
       }
       return await chamarFinanceReview(ctx, { action: "approve", ids: args.ids, overrides });
     },

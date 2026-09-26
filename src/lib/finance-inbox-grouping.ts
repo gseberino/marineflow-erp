@@ -16,11 +16,12 @@
 // abaixo do limite de lote. As grandes continuam pedindo olho individual, como sempre —
 // elas só chegam lá já classificadas.
 
-import { perguntaDaOSAberta, precisaDecidir } from '@/lib/extrato-vinculo';
+import { faltaNoDestinoDaLinha, perguntaDaOSAberta, precisaDecidir } from '@/lib/extrato-vinculo';
 import type { Correcao, PropostaFinanceira } from '@/hooks/use-finance-review';
 
 /** Por que a linha não entra no lote (nem no botão do grupo). */
-export type MotivoForaDoLote = 'transferencia' | 'acima_do_limite' | 'responder_vinculo' | 'responder_os';
+export type MotivoForaDoLote =
+  'transferencia' | 'acima_do_limite' | 'responder_vinculo' | 'responder_os' | 'responder_destino';
 
 /**
  * A linha cabe no lote? null = cabe. A mesma regra na lista e no agrupado.
@@ -31,6 +32,8 @@ export type MotivoForaDoLote = 'transferencia' | 'acima_do_limite' | 'responder_
  * - Vínculo sugerido sem resposta, ou "é desta OS?" / "paga esta OC?" sem resposta (decisão
  *   do dono, 26/09/2026: o sistema "deve sempre questionar"): aprovar o lote de uma vez faria
  *   a pergunta sumir sem ninguém ter respondido.
+ * - Serviço de terceiro sem "para onde foi" e "o que foi feito" (decisão do dono, 26/09/2026):
+ *   a resposta é de cada linha — até ser dada, a linha não vai no bloco.
  */
 export function motivoForaDoLote(
   p: PropostaFinanceira,
@@ -41,6 +44,7 @@ export function motivoForaDoLote(
   if (!(Number(p.suggested_amount ?? 0) < limiteLote)) return 'acima_do_limite';
   if (precisaDecidir(p.vinculo_sugerido, correcao?.vinculo)) return 'responder_vinculo';
   if (perguntaDaOSAberta(p, correcao)) return 'responder_os';
+  if (faltaNoDestinoDaLinha(p, correcao).length > 0) return 'responder_destino';
   return null;
 }
 

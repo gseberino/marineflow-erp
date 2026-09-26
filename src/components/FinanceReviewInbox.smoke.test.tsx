@@ -87,6 +87,20 @@ vi.mock('@/hooks/use-financial-categories', () => ({
   }),
 }));
 
+// Centros de custo: um ativo e um dos sete antigos, desativado — que não pode ser oferecido.
+vi.mock('@/hooks/use-cost-centers', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/hooks/use-cost-centers')>();
+  return {
+    ...real,
+    useCostCenters: () => ({
+      data: [
+        { id: 'cc-obra', name: 'Obras e reformas da sede', type: 'expense', parent_id: null, active: true },
+        { id: 'cc-velho', name: 'Despesas Administrativas', type: 'expense', parent_id: null, active: false },
+      ],
+    }),
+  };
+});
+
 /**
  * O seletor de categoria do primeiro grupo.
  *
@@ -226,7 +240,7 @@ describe('OS sugerida é pergunta', () => {
   it('linha pequena com OS sugerida não vai para o lote: fica para responder', async () => {
     estadoDaFila.dados = [{ ...comOS, suggested_amount: 80 }];
     renderInbox();
-    expect(await screen.findByText(/Revisar uma a uma .*perguntas de vínculo ou OS \(1\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Revisar uma a uma .*perguntas de vínculo, OS ou "para onde foi" \(1\)/)).toBeInTheDocument();
   });
 
   it('OS que é do próprio vínculo não pergunta duas vezes', async () => {
@@ -685,5 +699,127 @@ describe('entrada e saída convivendo na fila', () => {
     await user.click(await seletorDeCategoria());
     expect(await screen.findByText('Peças e materiais')).toBeInTheDocument();
     expect(screen.queryByText('Serviços prestados')).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * "Para onde foi?" e a observação — pedido do dono (26/09/2026): "só tem o campo de selecionar
+ * a despesa e os botões de ações, isso não basta". Serviço de terceiro diz para onde foi (o
+ * serviço de um cliente ou a própria HBR) e o que foi feito; qualquer linha ganha observação e
+ * centro de custo.
+ */
+describe('serviço de terceiro pergunta para onde foi', () => {
+  afterEach(() => { estadoDaFila.dados = null; aprovarMock.mockClear(); regraMock.mockClear(); });
+
+  const servico = {
+    id: 'p7', kind: 'create_payable', status: 'pending', bank_transaction_id: 't7', related_transaction_id: null,
+    title: 'Despesa: JOAO PINTOR', reasoning: 'x', confidence: 95, suggested_amount: 350, suggested_date: '2026-09-25',
+    suggested_category: 'Serviços de terceiros', suggested_description: 'JOAO PINTOR', suggested_supplier_id: null,
+    dre_group: 'custo_direto', created_at: '2026-09-25T10:00:00Z',
+  };
+
+  it('não entra no lote e não aprova sem dizer para onde foi e o que foi feito', async () => {
+    estadoDaFila.dados = [servico];
+    renderInbox();
+    expect(await screen.findByText(/Revisar uma a uma .*\(1\)/)).toBeInTheDocument();
+    expect(screen.getByText('Para onde foi este serviço?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Serviço de terceiro: diga para onde foi .* e o que foi feito/ })).toBeDisabled();
+    expect(screen.queryByText(/Aprovação em lote/)).not.toBeInTheDocument();
+  });
+
+  it('"Para a HBR": pede o centro de custo (só os ativos) e manda a categoria da empresa com o que foi feito', async () => {
+    estadoDaFila.dados = [servico];
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderInbox();
+    await user.click(await screen.findByRole('button', { name: 'Para a HBR' }));
+    await user.type(screen.getByLabelText('O que foi feito'), 'pintura da fachada da sede');
+    expect(screen.getByRole('button', { name: /diga o centro de custo/ })).toBeDisabled();
+
+    await user.click(screen.getByLabelText('Centro de custo'));
+    expect(screen.queryByText('Despesas Administrativas')).not.toBeInTheDocument();
+    await user.click(await screen.findByText('Obras e reformas da sede'));
+
+    const aprovar = await screen.findByRole('button', { name: 'Aprovar e lançar' });
+    expect(aprovar).toBeEnabled();
+    await user.click(aprovar);
+    expect(aprovarMock.mock.calls[0][0]).toMatchObject({
+      ids: ['p7'],
+      overrides: { p7: {
+        destino: 'empresa', category: 'Serviços de terceiros para a empresa', serviceOrderId: null,
+        costCenterId: 'cc-obra', notes: 'pintura da fachada da sede',
+      } },
+    });
+  });
+
+  it('"Serviço de um cliente": pede a OS — ou que o serviço não tem OS no sistema', async () => {
+    estadoDaFila.dados = [servico];
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderInbox();
+    await user.click(await screen.findByRole('button', { name: 'Serviço de um cliente' }));
+    await user.type(screen.getByLabelText('O que foi feito'), 'solda no casco');
+    expect(screen.getByRole('button', { name: /diga a OS do cliente/ })).toBeDisabled();
+
+    await user.click(screen.getByLabelText('De qual OS'));
+    await user.click(await screen.findByText('O serviço não tem OS no sistema'));
+    await user.click(await screen.findByRole('button', { name: 'Aprovar e lançar' }));
+    expect(aprovarMock.mock.calls[0][0]).toMatchObject({
+      overrides: { p7: { destino: 'cliente', category: 'Serviços de terceiros', serviceOrderId: null, notes: 'solda no casco' } },
+    });
+  });
+
+  it('linha comum ganha observação quando o dono quer, e ela vai na aprovação', async () => {
+    // A de R$ 18 mil: fica na revisão individual, com o botão de aprovar próprio.
+    estadoDaFila.dados = [propostas[1]];
+    const user = userEvent.setup();
+    renderInbox();
+    // Fechada por padrão: centenas de linhas não precisam dela.
+    await user.click(await screen.findByRole('button', { name: /\+ Observação e centro de custo/ }));
+    await user.type(screen.getByLabelText('Observação'), 'cabos para o estoque');
+    await user.click(screen.getByRole('button', { name: 'Aprovar e lançar' }));
+    expect(aprovarMock.mock.calls[0][0]).toMatchObject({ overrides: { p2: { notes: 'cabos para o estoque' } } });
+  });
+
+  it('respondida, a linha pequena não pula de seção: continua onde estava, pronta para aprovar', async () => {
+    estadoDaFila.dados = [servico];
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderInbox();
+    await user.click(await screen.findByRole('button', { name: 'Serviço de um cliente' }));
+    await user.type(screen.getByLabelText('O que foi feito'), 'solda no casco');
+    await user.click(screen.getByLabelText('De qual OS'));
+    await user.click(await screen.findByText('O serviço não tem OS no sistema'));
+    expect(screen.getByText(/Revisar uma a uma .*\(1\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/Aprovação em lote/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Aprovar e lançar' })).toBeEnabled();
+  });
+
+  it('regra a partir de uma ENTRADA é pelo CPF/CNPJ e já leva o cliente', async () => {
+    estadoDaFila.dados = [{
+      id: 'e9', kind: 'create_receivable', status: 'pending', bank_transaction_id: 'te9', related_transaction_id: null,
+      title: 'Receita: MARIA SILVA', reasoning: 'x', confidence: 30, suggested_amount: 800, suggested_date: '2026-09-24',
+      suggested_category: 'Serviços prestados', suggested_description: 'MARIA SILVA', suggested_supplier_id: null,
+      suggested_client_id: 'c-joao', dre_group: 'receita', created_at: '2026-09-24T10:00:00Z',
+      bank_transactions: { counterparty_name: 'MARIA SILVA', counterparty_document: '123.456.789-01', source_type: 'bank' },
+    }];
+    const user = userEvent.setup();
+    renderInbox();
+    await user.click(await screen.findByRole('button', { name: /regra a partir desta linha/i }));
+    expect(regraMock).toHaveBeenCalledWith({
+      match_type: 'document', match_value: '12345678901', direction: 'credit',
+      set_client_id: 'c-joao', set_category: 'Serviços prestados',
+    });
+  });
+
+  it('entrada sem CPF/CNPJ não vira regra (nome não identifica ninguém)', async () => {
+    estadoDaFila.dados = [{
+      id: 'e10', kind: 'create_receivable', status: 'pending', bank_transaction_id: 'te10', related_transaction_id: null,
+      title: 'Receita: PIX RECEBIDO', reasoning: 'x', confidence: 30, suggested_amount: 800, suggested_date: '2026-09-24',
+      suggested_category: 'Outras receitas', suggested_description: 'PIX RECEBIDO', suggested_supplier_id: null,
+      suggested_client_id: null, dre_group: 'receita', created_at: '2026-09-24T10:00:00Z',
+      bank_transactions: { counterparty_name: null, counterparty_document: null, source_type: 'bank' },
+    }];
+    const user = userEvent.setup();
+    renderInbox();
+    await user.click(await screen.findByRole('button', { name: /regra a partir desta linha/i }));
+    expect(regraMock).not.toHaveBeenCalled();
   });
 });

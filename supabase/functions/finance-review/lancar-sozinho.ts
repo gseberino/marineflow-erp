@@ -14,6 +14,7 @@
 // Decisões de 26/09/2026: só com confiança 90+ (app_settings); nada com nome cortado pelo banco;
 // nada com OS, OC ou vínculo sugerido — "o sistema deve sempre questionar".
 import { exigeDecisao, podeJaEstarLancado, type VinculoSugerido } from "../_shared/banking/vinculo.ts";
+import { precisaDeDestino } from "../_shared/banking/destino.ts";
 
 /** Decisão do dono (26/09/2026): "apenas com 90%+ de confiança". Configuração nenhuma desce disto. */
 export const PISO_DA_CONFIANCA = 90;
@@ -52,6 +53,9 @@ export interface CriterioDoAutomatico {
 export function motivoParaNaoLancarSozinho(l: LinhaCandidata, c: CriterioDoAutomatico): string | null {
   if (l.kind !== "create_payable") return "só saída é lançada sozinha";
   if (c.jaPorRegra.has(l.bank_transaction_id)) return "já lançada pela regra";
+  // Serviço de terceiro: para onde foi (cliente ou HBR) e o que foi feito só a pessoa sabe
+  // (decisão do dono, 26/09/2026).
+  if (precisaDeDestino(l.kind, l.suggested_category)) return "serviço de terceiro: falta dizer para onde foi e o que foi feito";
   if (l.regra_so_sugere) return "a regra está marcada para só sugerir";
   if (l.sem_identidade) return "o banco não informou para quem foi (ou só a empresa de pagamento)";
   if (l.nome_cortado) return "o fornecedor foi reconhecido pelo nome cortado pelo banco — confira";

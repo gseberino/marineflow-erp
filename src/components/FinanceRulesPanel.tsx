@@ -23,6 +23,7 @@ import {
   type RegraFinanceira,
 } from '@/hooks/use-finance-review';
 import { useFinancialCategories } from '@/hooks/use-financial-categories';
+import { useClientesParaReceita } from '@/hooks/use-payees';
 import { Sparkles, Plus, Pause, Play, Check, X, Pencil, Wand2, Receipt, ChevronDown } from 'lucide-react';
 
 const ROTULO_ALVO: Record<RegraFinanceira['match_type'], string> = {
@@ -33,7 +34,12 @@ const ROTULO_ALVO: Record<RegraFinanceira['match_type'], string> = {
 };
 
 /** Frase legível da regra. O gestor precisa reconhecer o que ensinou sem decifrar campos. */
-export function frasearRegra(r: RegraFinanceira, nomeFornecedor?: string): string {
+export function frasearRegra(r: RegraFinanceira, nomeFornecedor?: string, nomeCliente?: string): string {
+  // Regra de entrada: "o Pix deste CPF/CNPJ é do cliente Y" (resposta 18 do dono, 26/09/2026).
+  if (r.direction === 'credit' && r.set_client_id) {
+    return `dinheiro que entra de quem tem o CPF/CNPJ ${formatarDoc(r.match_value.replace(/\D/g, ''))} → cliente ${nomeCliente ?? '(cadastro removido)'}`
+      + (r.set_category ? ` · ${r.set_category}` : '');
+  }
   const alvo = r.match_type === 'supplier'
     ? (nomeFornecedor || 'este fornecedor')
     : r.match_type === 'document'
@@ -94,7 +100,7 @@ function HistoricoDaRegra({ regra }: { regra: RegraFinanceira }) {
           <thead>
             <tr className="border-b bg-muted/40 text-muted-foreground">
               <th className="whitespace-nowrap p-2 text-left font-medium">Data</th>
-              <th className="whitespace-nowrap p-2 text-left font-medium">Para quem</th>
+              <th className="whitespace-nowrap p-2 text-left font-medium">{regra.direction === 'credit' ? 'Cliente' : 'Para quem'}</th>
               <th className="whitespace-nowrap p-2 text-left font-medium">Descrição</th>
               <th className="whitespace-nowrap p-2 text-left font-medium">Categoria</th>
               <th className="whitespace-nowrap p-2 text-right font-medium">Valor</th>
@@ -148,31 +154,73 @@ interface EditorProps {
 export function EditorDeRegra({ aberto, onFechar, regra }: EditorProps) {
   const salvar = useSalvarRegra();
   const { data: fornecedores = [] } = useSuppliers();
-  const { data: categorias = [] } = useFinancialCategories('payable');
+
+  /**
+   * Regra de ENTRADA ("o Pix deste CPF/CNPJ é do cliente Y" — resposta 18 do dono, 26/09/2026):
+   * outro formulário — documento, cliente e categoria de receita — e só sugere: a receita espera
+   * o OK dele na fila. Uma regra que já existe não troca de sentido.
+   */
+  const [sentido, setSentido] = useState<'saida' | 'entrada'>(regra?.direction === 'credit' ? 'entrada' : 'saida');
+  const entrada = sentido === 'entrada';
+  const { data: categorias = [] } = useFinancialCategories(entrada ? 'receivable' : 'payable');
+  const { data: clientes = [] } = useClientesParaReceita(entrada);
 
   const [tipo, setTipo] = useState<RegraFinanceira['match_type']>(regra?.match_type ?? 'counterparty');
   const [valor, setValor] = useState(regra?.match_value ?? '');
   const [categoria, setCategoria] = useState(regra?.set_category ?? '');
+  const [cliente, setCliente] = useState(regra?.set_client_id ?? '');
   const [autonomia, setAutonomia] = useState<RegraFinanceira['autonomy']>(regra?.autonomy ?? 'suggest');
   const [minimo, setMinimo] = useState(regra?.min_amount != null ? String(regra.min_amount) : '');
   const [maximo, setMaximo] = useState(regra?.max_amount != null ? String(regra.max_amount) : '');
 
   const grupoDa = (nome: string) => categorias.find((c) => c.name === nome)?.dre_group ?? null;
 
-  const podeSalvar = valor.trim().length > 0 && categoria.length > 0;
+  const documento = valor.replace(/\D/g, '');
+  const documentoValido = documento.length === 11 || documento.length === 14;
+  const podeSalvar = entrada
+    ? documentoValido && !!cliente && categoria.length > 0
+    : valor.trim().length > 0 && categoria.length > 0;
+
+  const trocarSentido = (novo: 'saida' | 'entrada') => {
+    if (novo === sentido) return;
+    setSentido(novo);
+    // As categorias de entrada e de saída são planos diferentes: a escolhida não vale no outro.
+    setCategoria('');
+    if (novo === 'entrada') { setTipo('document'); setValor(documento); }
+  };
 
   const confirmar = () => {
+    const faixa = { min_amount: minimo ? Number(minimo) : null, max_amount: maximo ? Number(maximo) : null };
+    if (entrada) {
+      salvar.mutate({
+        id: regra?.id,
+        match_type: 'document',
+        match_value: documento,
+        direction: 'credit',
+        set_category: categoria,
+        set_dre_group: grupoDa(categoria),
+        set_supplier_id: null,
+        set_client_id: cliente,
+        // O banco também garante (CHECK): regra que diz o cliente só sugere.
+        autonomy: 'suggest',
+        ...faixa,
+        status: 'active',
+        origin: regra?.origin ?? 'user',
+      }, { onSuccess: onFechar });
+      return;
+    }
     salvar.mutate({
       id: regra?.id,
       match_type: tipo,
       match_value: valor.trim(),
-      direction: 'debit',
+      // Editar não muda o sentido de uma regra antiga ('any' continua 'any').
+      direction: regra?.id && regra.direction && regra.direction !== 'credit' ? regra.direction : 'debit',
       set_category: categoria,
       set_dre_group: grupoDa(categoria),
       set_supplier_id: tipo === 'supplier' ? valor.trim() : null,
+      set_client_id: null,
       autonomy: autonomia,
-      min_amount: minimo ? Number(minimo) : null,
-      max_amount: maximo ? Number(maximo) : null,
+      ...faixa,
       status: 'active',
       origin: regra?.origin ?? 'user',
     }, { onSuccess: onFechar });
@@ -186,6 +234,47 @@ export function EditorDeRegra({ aberto, onFechar, regra }: EditorProps) {
         </DialogHeader>
 
         <div className="space-y-4">
+          {!regra?.id && (
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Sentido do dinheiro">
+              <Button type="button" size="sm" variant={!entrada ? 'default' : 'outline'} aria-pressed={!entrada}
+                onClick={() => trocarSentido('saida')}>
+                Dinheiro que sai
+              </Button>
+              <Button type="button" size="sm" variant={entrada ? 'default' : 'outline'} aria-pressed={entrada}
+                onClick={() => trocarSentido('entrada')}>
+                Dinheiro que entra
+              </Button>
+            </div>
+          )}
+
+          {entrada ? (
+            <>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <Label className="text-xs" htmlFor="regra-doc">CPF ou CNPJ de quem paga</Label>
+                  <Input id="regra-doc" inputMode="numeric" value={valor} onChange={(e) => setValor(e.target.value)}
+                    placeholder="ex.: 123.456.789-01" />
+                  {valor.trim() && !documentoValido && (
+                    <p className="mt-1 text-xs text-amber-600">CPF tem 11 dígitos e CNPJ, 14.</p>
+                  )}
+                </div>
+                <div>
+                  <Label className="text-xs">É do cliente</Label>
+                  <Select value={cliente} onValueChange={setCliente}>
+                    <SelectTrigger><SelectValue placeholder="Escolher o cliente" /></SelectTrigger>
+                    <SelectContent>
+                      {clientes.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
+                Serve para quem paga com o CPF de outra pessoa (o marido pelo barco da esposa, a
+                empresa pelo sócio). A entrada chega na fila já com este cliente, e só vira receita
+                com o seu OK — regra de entrada nunca lança sozinha.
+              </p>
+            </>
+          ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label className="text-xs">Reconhecer por</Label>
@@ -221,9 +310,10 @@ export function EditorDeRegra({ aberto, onFechar, regra }: EditorProps) {
               )}
             </div>
           </div>
+          )}
 
           <div>
-            <Label className="text-xs">Classificar sempre como</Label>
+            <Label className="text-xs">{entrada ? 'Entra como (categoria de receita)' : 'Classificar sempre como'}</Label>
             <Select value={categoria} onValueChange={setCategoria}>
               <SelectTrigger><SelectValue placeholder="Escolher categoria" /></SelectTrigger>
               <SelectContent>
@@ -245,21 +335,23 @@ export function EditorDeRegra({ aberto, onFechar, regra }: EditorProps) {
             </div>
           </div>
 
-          <div>
-            <Label className="text-xs">O quanto ela pode agir sozinha</Label>
-            <Select value={autonomia} onValueChange={(v) => setAutonomia(v as never)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="suggest">Preencher e esperar meu OK</SelectItem>
-                <SelectItem value="apply">Lançar sozinha (fica marcado, dá para desfazer)</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {autonomia === 'apply'
-                ? 'A despesa nasce pronta e aparece separada, como lançada por regra.'
-                : 'A despesa fica na fila já classificada, aguardando sua confirmação.'}
-            </p>
-          </div>
+          {!entrada && (
+            <div>
+              <Label className="text-xs">O quanto ela pode agir sozinha</Label>
+              <Select value={autonomia} onValueChange={(v) => setAutonomia(v as never)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="suggest">Preencher e esperar meu OK</SelectItem>
+                  <SelectItem value="apply">Lançar sozinha (fica marcado, dá para desfazer)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {autonomia === 'apply'
+                  ? 'A despesa nasce pronta e aparece separada, como lançada por regra.'
+                  : 'A despesa fica na fila já classificada, aguardando sua confirmação.'}
+              </p>
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -280,9 +372,12 @@ export function FinanceRulesPanel() {
 
   const [editando, setEditando] = useState<Partial<RegraFinanceira> | null>(null);
   const [abertoNovo, setAbertoNovo] = useState(false);
+  // Nome do cliente das regras de entrada — só carrega se houver alguma.
+  const { data: clientes = [] } = useClientesParaReceita(regras.some((r) => !!r.set_client_id));
 
   const nomeDo = (id: string | null) =>
     (fornecedores as any[]).find((f) => f.id === id)?.name as string | undefined;
+  const clienteDo = (id: string | null | undefined) => clientes.find((c) => c.id === id)?.name;
 
   const propostas = regras.filter((r) => r.status === 'proposed');
   const ativas = regras.filter((r) => r.status === 'active');
@@ -298,8 +393,9 @@ export function FinanceRulesPanel() {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate font-medium">
-              {frasearRegra(r, r.match_type === 'supplier' ? nomeDo(r.match_value) : undefined)}
+              {frasearRegra(r, r.match_type === 'supplier' ? nomeDo(r.match_value) : undefined, clienteDo(r.set_client_id))}
             </span>
+            {r.direction === 'credit' && <Badge variant="outline" className="shrink-0 text-xs">Entrada</Badge>}
             {r.origin === 'ai' && <Badge variant="outline" className="shrink-0 text-xs">Sugerida</Badge>}
             {r.autonomy === 'apply' && (
               <Badge variant="secondary" className="shrink-0 text-xs">Lança sozinha</Badge>

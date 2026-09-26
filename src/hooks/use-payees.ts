@@ -44,12 +44,16 @@ export const CATEGORIAS_COM_FAVORECIDO = [
   'Retirada de sócio',
   'Salários e encargos',
   'Serviços de terceiros',
+  // Serviço contratado para a própria HBR (27/09/2026): muitas vezes pago a uma pessoa, por CPF.
+  'Serviços de terceiros para a empresa',
 ];
 
 /** Categorias em que a compra costuma pertencer a um serviço específico. */
 export const CATEGORIAS_COM_OS = [
   'Peças e materiais',
-  'Compras de Mercadorias',
+  // Era "Compras de Mercadorias", com M maiúsculo — o plano de contas escreve com m minúsculo,
+  // então a pergunta da OS nunca aparecia para compra de mercadoria.
+  'Compras de mercadorias',
   'Ferramentas e equipamentos',
   'Frete e importação',
 ];
@@ -103,14 +107,18 @@ export function useSalvarPayee() {
  * Só as que ainda estão vivas: vincular custo a uma OS já faturada mudaria uma margem que
  * o cliente e a contabilidade já enxergaram.
  */
-export function useServiceOrdersVinculaveis() {
+export function useServiceOrdersVinculaveis(opcoes: { incluirFaturadas?: boolean } = {}) {
+  // Exceção (27/09/2026): o serviço de terceiro de um cliente costuma ser pago DEPOIS de a OS
+  // ser faturada, e "para qual serviço foi" é justamente a OS dele. Nesse caso a lista inclui
+  // as faturadas — a tela marca quais são.
+  const incluirFaturadas = !!opcoes.incluirFaturadas;
   return useQuery({
-    queryKey: ['service-orders-vinculaveis'],
+    queryKey: ['service-orders-vinculaveis', incluirFaturadas],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('service_orders')
         .select('id, service_order_number, status, clients(name)')
-        .not('status', 'in', '("cancelled","invoiced")')
+        .not('status', 'in', incluirFaturadas ? '("cancelled")' : '("cancelled","invoiced")')
         .order('created_at', { ascending: false })
         .limit(200);
       if (error) throw error;
@@ -138,13 +146,22 @@ export function useClientesParaReceita(ativo = true) {
     enabled: ativo,
     queryKey: ['clientes-para-receita'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('clients')
-        .select('id, name')
-        .order('name', { ascending: true })
-        .limit(500);
-      if (error) throw error;
-      return (data ?? []) as Array<{ id: string; name: string }>;
+      // Em páginas: eram .limit(500) com 533 clientes — os 33 últimos em ordem alfabética nunca
+      // apareciam para escolher (e o PostgREST corta em 1.000 de qualquer jeito).
+      const todos: Array<{ id: string; name: string }> = [];
+      for (let de = 0; de < 20000; de += 1000) {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('id, name')
+          .order('name', { ascending: true })
+          .order('id', { ascending: true })
+          .range(de, de + 999);
+        if (error) throw error;
+        const pagina = (data ?? []) as Array<{ id: string; name: string }>;
+        todos.push(...pagina);
+        if (pagina.length < 1000) break;
+      }
+      return todos;
     },
     staleTime: 5 * 60_000,
   });

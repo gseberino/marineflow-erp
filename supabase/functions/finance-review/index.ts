@@ -36,8 +36,9 @@ import {
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { carregarContextoSeguro, identificarLinha, MOTOR_DA_FILA, type TxDaFila } from "./identificacao.ts";
 import {
-  exigeDecisao, perguntaDaOSAberta, podeJaEstarLancado, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido,
+  exigeDecisao, osAnotada, perguntaDaOSAberta, podeJaEstarLancado, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido,
 } from "../_shared/banking/vinculo.ts";
+import { aplicarDestino, faltaNoDestino, precisaDeDestino, type Destino } from "../_shared/banking/destino.ts";
 import { lerRespostaDaReceita } from "../_shared/banking/cnae.ts";
 import { PISO_DA_CONFIANCA, selecionarParaLancarSozinho, type LinhaCandidata } from "./lancar-sozinho.ts";
 
@@ -123,6 +124,21 @@ interface Correcao {
    * havendo sugestão. Ausente = a política decide (vinculoAutomatico / exigeDecisao).
    */
   vinculo?: { id: string } | "nenhum";
+  /**
+   * Observação escrita na linha (pedido do dono, 26/09/2026): vai para `notes` do lançamento.
+   * No serviço de terceiro é o "o que foi feito", obrigatório.
+   */
+  notes?: string | null;
+  /** Centro de custo (Oficina/sede, Obras e reformas da sede, Veículos…): `cost_center_id`. */
+  costCenterId?: string | null;
+  /** Serviço de terceiro: para o serviço de um cliente (OS) ou para a própria HBR. */
+  destino?: Destino | null;
+}
+
+/** Observação limpa: texto sem espaços sobrando, no máximo 1.000 caracteres; vazio = nada. */
+function observacaoDa(ov: Correcao): string | null {
+  const t = String(ov.notes ?? "").replace(/\s+/g, " ").trim();
+  return t ? t.slice(0, 1000) : null;
 }
 
 servirComCors(async (req) => {
@@ -704,9 +720,11 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     // a proposta para ele confirmar de novo seria pedir a mesma decisão duas vezes.
     // Com vínculo, OS ou OC sugerida a linha espera a resposta da pessoa, mesmo com regra
     // autônoma: lançada sozinha, a pergunta "é desta OS?" nunca seria feita.
+    // Serviço de terceiro também espera: para onde foi e o que foi feito só a pessoa sabe.
     if (p.autoAplicavel && Math.abs(Number(tx.amount)) <= limiteLote && !exigeDecisao(id.vinculo)
         && !linha.suggested_service_order_id && !linha.suggested_purchase_order_id
-        && p.fornecedorPor !== "nome_cortado") autoAplicar.push(linha);
+        && p.fornecedorPor !== "nome_cortado"
+        && !precisaDeDestino(linha.kind, linha.suggested_category)) autoAplicar.push(linha);
   }
 
   let criadas = 0;
@@ -1723,6 +1741,8 @@ async function aprovar(
   const acimaDoLimite: string[] = [];
   /** Em lote, OS/OC sugerida sem resposta não vai (decisão do dono, 26/09/2026). */
   const semResposta: string[] = [];
+  /** Em lote, serviço de terceiro sem "para onde foi" e "o que foi feito" não vai. */
+  const semDestino: string[] = [];
   let elegiveis = todas;
   if (ids.length > 1) {
     const limite = await lerLimiteLote(admin);
@@ -1739,6 +1759,16 @@ async function aprovar(
     elegiveis = elegiveis.filter((p) => {
       if (!perguntaDaOSAberta(p, overrides[p.id])) return true;
       semResposta.push(String(p.title).slice(0, 60));
+      return false;
+    });
+    // Serviço de terceiro: "para onde foi" e "o que foi feito" são de cada linha. Casar com o
+    // que já está lançado não pergunta (o lançamento que existe já tem a categoria dele).
+    elegiveis = elegiveis.filter((p) => {
+      const ov = overrides[p.id] ?? {};
+      if (ov.vinculo && typeof ov.vinculo === "object") return true;
+      const categoria = String(ov.category ?? p.suggested_category ?? "");
+      if (faltaNoDestino(p.kind, categoria, ov, ov.serviceOrderId === undefined ? osAnotada(p) : null).length === 0) return true;
+      semDestino.push(String(p.title).slice(0, 60));
       return false;
     });
   }
@@ -1823,7 +1853,17 @@ async function aprovar(
       const valor = Number(ov.amount ?? p.suggested_amount);
       const data = String(ov.date ?? p.suggested_date);
       const descricao = String(ov.description ?? p.suggested_description ?? p.title);
-      const categoria = String(ov.category ?? p.suggested_category ?? "Outras despesas");
+      let categoria = String(ov.category ?? p.suggested_category ?? "Outras despesas");
+
+      // Centro de custo escolhido na linha: só um que existe e está ativo (os sete antigos, que
+      // eram grupos do DRE, foram desativados em 27/09/2026).
+      let centroDeCusto: string | null = null;
+      if (ov.costCenterId && (p.kind === "create_payable" || p.kind === "create_receivable")) {
+        const { data: cc } = await admin.from("cost_centers").select("id, active").eq("id", ov.costCenterId).maybeSingle();
+        if (!cc) throw new Error("O centro de custo escolhido não existe mais — escolha de novo");
+        if (!(cc as any).active) throw new Error("O centro de custo escolhido foi desativado — escolha outro");
+        centroDeCusto = String((cc as any).id);
+      }
 
       if (p.kind === "internal_transfer") {
         // Só marca as duas pernas: nenhum lançamento é criado.
@@ -1865,6 +1905,15 @@ async function aprovar(
           }
         }
 
+        /**
+         * Serviço de terceiro: para onde foi e o que foi feito (decisão do dono, 26/09/2026).
+         * Para a HBR vira despesa da empresa (outra categoria, fora do custo do serviço), com
+         * centro de custo; para um cliente fica no custo do serviço, ligado à OS dele.
+         */
+        const comDestino = aplicarDestino(p.kind, categoria, ov, osRespondida);
+        if ("erro" in comDestino) throw new Error(comDestino.erro);
+        categoria = comDestino.categoria;
+
         const parcelamento = await lerCompraParcelada(
           admin, (p.bank_transactions ?? null) as PernaDeParcelamento | null,
         );
@@ -1892,6 +1941,9 @@ async function aprovar(
           // OS só quando a pessoa respondeu (decisão do dono, 26/09/2026): a sugestão da fila é
           // pergunta, não escolha. Sem resposta, a despesa fica sem OS.
           linked_service_order_id: osRespondida ?? null,
+          // O que o dono escreveu na linha e onde o gasto pesa (pedido de 26/09/2026).
+          notes: observacaoDa(ov),
+          cost_center_id: centroDeCusto,
           origin: "bank_reconciliation",
           bank_transaction_id: p.bank_transaction_id,
         }).select("id").single();
@@ -1988,6 +2040,8 @@ async function aprovar(
           // Ligada à OS, a receita entra na margem do serviço e a OS dá baixa sozinha
           // (sync_service_order_payment_status). Eram 52 receitas do extrato sem OS.
           service_order_id: osDaReceita,
+          notes: observacaoDa(ov),
+          cost_center_id: centroDeCusto,
           bank_transaction_id: p.bank_transaction_id,
         }).select("id").single();
         if (e2) throw e2;
@@ -2042,6 +2096,7 @@ async function aprovar(
     falhas,
     acima_do_limite: acimaDoLimite,
     sem_resposta_de_os: semResposta,
+    sem_destino: semDestino,
     avisos,
     pernas_de_parcelamento: pernasRetiradas,
     message: `${feitos.length} lançamento(s) criado(s)`
@@ -2051,6 +2106,8 @@ async function aprovar(
         ? ` · ${acimaDoLimite.length} acima do limite de lote ficaram para aprovação individual` : "")
       + (semResposta.length
         ? ` · ${semResposta.length} com OS ou OC para responder ficaram para aprovação individual` : "")
+      + (semDestino.length
+        ? ` · ${semDestino.length} serviço(s) de terceiro sem "para onde foi" e "o que foi feito" ficaram para aprovação individual` : "")
       + (avisos.length ? ` · ${avisos.join(" · ")}` : "")
       + (falhas.length ? ` · ${falhas.length} falharam` : ""),
   });

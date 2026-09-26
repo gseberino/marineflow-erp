@@ -10,7 +10,10 @@ import { useI18n } from '@/i18n';
 import { useClients } from '@/hooks/use-clients';
 import { useServiceOrders } from '@/hooks/use-service-orders';
 import { useCreateReceivable, useUpdateReceivable } from '@/hooks/use-financial';
-import { useCostCenters } from '@/hooks/use-cost-centers';
+import { useCostCenters, centrosParaEscolher } from '@/hooks/use-cost-centers';
+
+/** Radix não aceita SelectItem com valor vazio: "nenhum" precisa de um valor próprio. */
+const SEM_CENTRO = '__sem_centro__';
 import { toast } from 'sonner';
 import { MoneyInput } from '@/components/MoneyInput';
 
@@ -126,17 +129,21 @@ export function ReceivableFormDialog({ open, onOpenChange, initialData }: Props)
               />
             </div>
           )}
-          <div><Label>Centro de Custo (Opcional)</Label>
-            <Select value={costCenterId} onValueChange={setCostCenterId}>
-              <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">—</SelectItem>
-                {(costCenters || []).filter(c => c.type !== 'expense').map(c => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Os centros de custo são de despesa (27/09/2026): sem nenhum de receita ativo, o
+              campo nem aparece — um seletor só com "—" é ruído. */}
+          {centrosParaEscolher(costCenters, 'receivable', costCenterId || null).length > 0 && (
+            <div><Label>Centro de Custo (Opcional)</Label>
+              <Select value={costCenterId || SEM_CENTRO} onValueChange={(v) => setCostCenterId(v === SEM_CENTRO ? '' : v)}>
+                <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={SEM_CENTRO}>—</SelectItem>
+                  {centrosParaEscolher(costCenters, 'receivable', costCenterId || null).map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.rotulo}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div><Label>{t.common.description} *</Label>
             <Input value={description} onChange={e => setDescription(e.target.value)} />
           </div>

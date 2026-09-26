@@ -113,6 +113,8 @@ export interface PropostaBase {
   fornecedorPor?: "documento" | "nome_identico" | "nome_cortado" | null;
   /** O fornecedor foi dito pela regra (e não só a categoria). Ausente = como antes: a regra. */
   fornecedorPelaRegra?: boolean;
+  /** Entrada: o cliente que uma regra sua diz ser o dono do CPF/CNPJ ("o Pix de X é do Y"). */
+  suggestedClientId?: string | null;
 }
 
 /**
@@ -146,7 +148,8 @@ export function identificarLinha(tx: TxDaFila, p: PropostaBase, ctx: ContextoDeI
   // Sem contexto (leitura falhou): o que o motor de propostas já sabia, e nada mais.
   if (!ctx) {
     return {
-      supplierId: p.suggestedSupplierId, payeeId: null, clientId: null, serviceOrderId: null,
+      supplierId: p.suggestedSupplierId, payeeId: null,
+      clientId: p.kind === "create_receivable" ? (p.suggestedClientId ?? null) : null, serviceOrderId: null,
       categoria: p.suggestedCategory, dreGroup: p.dreGroup, evidencia: null, vinculo: null, frases: [],
     };
   }
@@ -180,6 +183,21 @@ export function identificarLinha(tx: TxDaFila, p: PropostaBase, ctx: ContextoDeI
     frases.push(ident.fornecedor.detalhe);
   }
   if (supplierId) ident.cadastrar = null;
+
+  // Cliente dito por regra sua ("o Pix do CPF X é do cliente Y" — resposta 18 do dono,
+  // 26/09/2026): é instrução, vence o reconhecimento automático, e continua só sugestão (a
+  // receita espera o OK dele). Cliente que não existe mais não entra.
+  if (p.kind === "create_receivable" && p.suggestedClientId) {
+    const e = ctx.indice.porId.cliente.get(p.suggestedClientId);
+    if (e) {
+      ident.cliente = {
+        id: e.id, nome: e.nome, por: "regra",
+        detalhe: `Regra sua: este CPF/CNPJ é do cliente ${e.nome}`,
+      };
+      ident.cadastrar = null;
+      ident.outroCadastro = null;
+    }
+  }
 
   const payeeId = ident.favorecido?.id ?? null;
   const clientId = ident.cliente?.id ?? null;

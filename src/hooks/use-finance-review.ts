@@ -126,6 +126,15 @@ export interface Correcao {
    * Ausente = a política do servidor decide — e recusa a linha que pode já estar lançada.
    */
   vinculo?: { id: string } | 'nenhum';
+  /**
+   * Observação escrita na linha (pedido do dono, 26/09/2026) — vai para as observações do
+   * lançamento. No serviço de terceiro é o "o que foi feito", obrigatório.
+   */
+  notes?: string | null;
+  /** Centro de custo: onde o gasto pesa (Oficina/sede, Obras e reformas da sede, Veículos…). */
+  costCenterId?: string | null;
+  /** Serviço de terceiro: para o serviço de um cliente (OS) ou para a própria HBR. */
+  destino?: 'cliente' | 'empresa' | null;
 }
 
 /**
@@ -526,6 +535,8 @@ export interface RegraFinanceira {
   set_category: string | null;
   set_dre_group: string | null;
   set_supplier_id: string | null;
+  /** Regra de entrada: o cliente dono do CPF/CNPJ (só por documento, só em entrada, só sugere). */
+  set_client_id?: string | null;
   autonomy: 'suggest' | 'apply';
   origin: 'user' | 'ai';
   status: 'active' | 'paused' | 'proposed' | 'rejected';
@@ -580,10 +591,46 @@ export interface LancamentoDaRegra {
  */
 export function useLancamentosDaRegra(regra: RegraFinanceira | null) {
   return useQuery({
-    queryKey: ['lancamentos-da-regra', regra?.id, regra?.match_type, regra?.match_value],
+    queryKey: ['lancamentos-da-regra', regra?.id, regra?.match_type, regra?.match_value, regra?.direction],
     enabled: !!regra,
     queryFn: async (): Promise<LancamentoDaRegra[]> => {
       if (!regra) return [];
+
+      // Regra de ENTRADA ("o Pix deste CPF é do cliente Y"): o que embasa são as RECEITAS que já
+      // vieram desse documento — e de quais clientes. Ler despesas aqui mostraria nada.
+      if (regra.direction === 'credit' && regra.match_type === 'document') {
+        const { data: txs } = await supabase
+          .from('bank_transactions')
+          .select('id')
+          .eq('transaction_type', 'credit')
+          .eq('counterparty_document', regra.match_value.replace(/\D/g, ''))
+          .limit(50);
+        const ids = (txs ?? []).map((t: any) => t.id);
+        if (ids.length === 0) return [];
+        const { data, error } = await supabase
+          .from('receivables')
+          // FK explícita: o embed sem nome é ambíguo entre receivables e bank_transactions (PGRST201).
+          .select(`id, description, amount, issue_date, category, clients ( name ),
+                   bank_transactions!receivables_bank_transaction_id_fkey ( counterparty_name, counterparty_document, counterparty_bank, payment_method )`)
+          .in('bank_transaction_id', ids)
+          .neq('status', 'cancelled')
+          .order('issue_date', { ascending: false })
+          .limit(25);
+        if (error) throw error;
+        return ((data ?? []) as any[]).map((r) => ({
+          id: r.id,
+          description: r.description,
+          amount: Number(r.amount),
+          issue_date: r.issue_date,
+          expense_category: r.category ?? null,
+          supplier_name: null,
+          fornecedor: r.clients?.name ?? null,
+          contraparte: r.bank_transactions?.counterparty_name ?? null,
+          documento: r.bank_transactions?.counterparty_document ?? null,
+          banco: r.bank_transactions?.counterparty_bank ?? null,
+          meio: r.bank_transactions?.payment_method ?? null,
+        }));
+      }
 
       let q = supabase
         .from('payables')

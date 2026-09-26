@@ -263,3 +263,34 @@ describe("pergunta sem resposta não entra no lote (decisão do dono, 26/09/2026
     expect(motivoForaDoLote(anotada, LIMITE)).toBeNull();
   });
 });
+
+describe("serviço de terceiro sem 'para onde foi' não entra no lote (decisão do dono, 26/09/2026)", () => {
+  it("sem resposta fica de fora, com o motivo dele", () => {
+    const servico = proposta({ nome: "JOAO PINTOR", suggested_category: "Serviços de terceiros" });
+    const normal = proposta({ nome: "JOAO PINTOR", suggested_category: "Peças e materiais" });
+    const [g] = agruparPorFavorecido([servico, normal], LIMITE);
+    expect(g.emLote.map((p) => p.id)).toEqual([normal.id]);
+    expect(g.motivos[servico.id]).toBe("responder_destino");
+  });
+
+  it("respondido (para a HBR, com centro e o que foi feito), volta para o lote", () => {
+    const servico = proposta({ nome: "JOAO PINTOR", suggested_category: "Serviços de terceiros" });
+    expect(motivoForaDoLote(servico, LIMITE, {
+      destino: "empresa", category: "Serviços de terceiros para a empresa", costCenterId: "cc", notes: "pintura da sede",
+    })).toBeNull();
+    // Metade da resposta não basta: sem "o que foi feito" continua de fora.
+    expect(motivoForaDoLote(servico, LIMITE, { destino: "empresa", costCenterId: "cc" })).toBe("responder_destino");
+  });
+
+  it("casar com o que já está lançado não pergunta para onde foi", () => {
+    const servico = proposta({ nome: "JOAO PINTOR", suggested_category: "Serviços de terceiros" });
+    expect(motivoForaDoLote(servico, LIMITE, { vinculo: { id: "c1" } })).toBeNull();
+  });
+
+  it("a OS anotada pelo WhatsApp responde o destino; falta só o que foi feito", () => {
+    const anotada = proposta({ nome: "JOAO PINTOR", suggested_category: "Serviços de terceiros", suggested_service_order_id: "os1",
+      evidencia: { anotacao: { id: "a1", os_id: "os1" } } } as never);
+    expect(motivoForaDoLote(anotada, LIMITE)).toBe("responder_destino");
+    expect(motivoForaDoLote(anotada, LIMITE, { notes: "mão de obra da solda" })).toBeNull();
+  });
+});

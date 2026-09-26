@@ -29,7 +29,11 @@ import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { PayeeFormDialog } from '@/components/PayeeFormDialog';
 import { BuscaFinanceira } from '@/components/BuscaFinanceira';
 import { EvidenciaDaLinha, VinculoDaLinha } from '@/components/ExtratoIdentificacao';
-import { precisaDecidir, podeJaEstarLancado, osAnotada, temPerguntaDaOS, temPerguntaDaOC } from '@/lib/extrato-vinculo';
+import { ParaOndeFoi, ObservacaoECentro } from '@/components/ParaOndeFoi';
+import {
+  precisaDecidir, podeJaEstarLancado, osAnotada, temPerguntaDaOS, temPerguntaDaOC,
+  faltaNoDestinoDaLinha, precisaDeDestino, fraseDaFalta, faltaNoDestino,
+} from '@/lib/extrato-vinculo';
 import { buscaAtiva, casaComBusca, type CriterioDeBusca } from '@/lib/busca-financeira';
 import {
   usePayees, useServiceOrdersVinculaveis, useClientesParaReceita, ROTULO_TIPO,
@@ -412,6 +416,14 @@ function LinhaProposta({
   const parcelas = Number(p.bank_transactions?.installment_label?.split('/')[1]) || null;
   // Pode já estar lançado e ninguém escolheu: aprovar agora duplicaria o lançamento.
   const decidir = !transferencia && !anomalia && precisaDecidir(p.vinculo_sugerido, correcao?.vinculo);
+  // Casar com o que já existe não cria lançamento: observação e "para onde foi" não se aplicam.
+  const casando = !!correcao?.vinculo && typeof correcao.vinculo === 'object';
+  // Serviço de terceiro: para onde foi e o que foi feito (decisão do dono, 26/09/2026).
+  const perguntaDestino = !transferencia && !anomalia && !casando && precisaDeDestino(p.kind, categoria);
+  const faltaDestino = perguntaDestino ? faltaNoDestinoDaLinha(p, correcao) : [];
+  const bloqueio = decidir
+    ? (podeJaEstarLancado(p.vinculo_sugerido) ? 'Pode já estar lançado: escolha casar ou lançar novo' : 'O sistema sugeriu um vínculo: diga se é isso antes de aprovar')
+    : faltaDestino.length > 0 ? fraseDaFalta(faltaDestino) : null;
 
   return (
     <Card className="p-3">
@@ -479,7 +491,9 @@ function LinhaProposta({
                   ? <>Acima de {formatCurrency(limiteLote)} — aprove aqui</>
                   : foraDoLote === 'responder_vinculo'
                     ? 'Tem vínculo sugerido — responda aqui'
-                    : 'Responda a OS/OC aqui'}
+                    : foraDoLote === 'responder_destino'
+                      ? 'Diga para onde foi — aqui'
+                      : 'Responda a OS/OC aqui'}
               </Badge>
             )}
           </div>
@@ -516,6 +530,27 @@ function LinhaProposta({
 
           {!transferencia && !anomalia && (
             <PerguntasDaOSeOC p={p} correcao={correcao} onCorrigir={onCorrigir} ocupado={ocupado} />
+          )}
+
+          {/* Serviço de terceiro pergunta para onde foi e o que foi feito; as outras linhas
+              ganham observação e centro de custo quando o dono quiser (pedido de 26/09/2026). */}
+          {perguntaDestino && (
+            <ParaOndeFoi
+              categoria={categoria}
+              correcao={correcao}
+              osJaDita={correcao?.serviceOrderId === undefined ? osAnotada(p) : null}
+              falta={faltaDestino}
+              onMudar={(c) => onCorrigir({ ...correcao, ...c })}
+              ocupado={ocupado}
+            />
+          )}
+          {!transferencia && !anomalia && !casando && !perguntaDestino && (
+            <ObservacaoECentro
+              correcao={correcao}
+              ehReceita={p.kind === 'create_receivable'}
+              onMudar={(c) => onCorrigir({ ...correcao, ...c })}
+              ocupado={ocupado}
+            />
           )}
 
           {/* Quem é (com a prova) e o que a linha paga (com a escolha de casar). */}
@@ -562,16 +597,14 @@ function LinhaProposta({
                 <TooltipTrigger asChild>
                   {/* span: botão desabilitado não dispara hover, e o motivo precisa aparecer. */}
                   <span>
-                    <Button size="sm" variant="outline" disabled={ocupado || decidir} onClick={onAprovar}
-                      aria-label={anomalia ? 'Ciente — tirar da lista' : decidir ? 'Responda a sugestão de vínculo antes de aprovar' : 'Aprovar e lançar'}>
+                    <Button size="sm" variant="outline" disabled={ocupado || !!bloqueio} onClick={onAprovar}
+                      aria-label={anomalia ? 'Ciente — tirar da lista' : decidir ? 'Responda a sugestão de vínculo antes de aprovar' : bloqueio ?? 'Aprovar e lançar'}>
                       <Check className="h-4 w-4" />
                     </Button>
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {anomalia ? 'Ciente — tirar da lista' : decidir
-                    ? (podeJaEstarLancado(p.vinculo_sugerido) ? 'Pode já estar lançado: escolha casar ou lançar novo' : 'O sistema sugeriu um vínculo: diga se é isso antes de aprovar')
-                    : 'Aprovar e lançar'}
+                  {anomalia ? 'Ciente — tirar da lista' : bloqueio ?? 'Aprovar e lançar'}
                 </TooltipContent>
               </Tooltip>
             )}
@@ -626,7 +659,7 @@ function LinhaProposta({
  * chega classificada.
  */
 function CartaoDoFavorecido({
-  grupo, categoria, favorecidoId, osId, clienteId, onMudar, onAprovarLote, onCriarRegra, ocupado,
+  grupo, categoria, favorecidoId, osId, clienteId, resposta, onMudar, onAprovarLote, onCriarRegra, ocupado,
   selecionadas, onSelecionarGrupo, children,
 }: {
   grupo: GrupoDeFavorecido;
@@ -634,6 +667,8 @@ function CartaoDoFavorecido({
   favorecidoId: string | null;
   osId: string | null;
   clienteId: string | null;
+  /** O que TODAS as linhas responderam igual (para onde foi, centro, o que foi feito). */
+  resposta: Correcao;
   onMudar: (c: Correcao) => void;
   onAprovarLote: () => void;
   onCriarRegra: () => void;
@@ -679,12 +714,18 @@ function CartaoDoFavorecido({
    * contando — o gestor fica olhando para uma tela que não responde e não tem como
    * descobrir o que ela quer.
    */
+  // Serviço de terceiro no grupo: a pergunta vai no cabeçalho e a resposta desce para todas.
+  const perguntaDestino = !soEntradas && precisaDeDestino('create_payable', categoria);
+  const faltaDestino = perguntaDestino ? faltaNoDestino('create_payable', categoria, resposta) : [];
+
   const motivo = semCategoriaEscolhida
     ? 'Escolha a categoria acima para poder aprovar.'
     : grupo.emLote.length === 0
       ? Object.values(grupo.motivos).every((m) => m === 'acima_do_limite')
         ? `Todas passam de ${formatCurrency(limiteLote)} — aprove uma a uma.`
-        : 'Nenhuma cabe no lote (valor, vínculo ou OS para responder) — aprove uma a uma.'
+        : perguntaDestino && faltaDestino.length > 0
+          ? 'Diga acima para onde foi e o que foi feito para poder aprovar.'
+          : 'Nenhuma cabe no lote (valor, vínculo, OS ou "para onde foi" para responder) — aprove uma a uma.'
       : null;
 
   return (
@@ -758,6 +799,17 @@ function CartaoDoFavorecido({
             onMudar={(v) => onMudar(v)}
             ocupado={ocupado}
           />
+
+          {perguntaDestino && (
+            <ParaOndeFoi
+              emGrupo={grupo.propostas.length > 1}
+              categoria={categoria}
+              correcao={resposta}
+              falta={faltaDestino}
+              onMudar={(c) => onMudar(c)}
+              ocupado={ocupado}
+            />
+          )}
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1">
@@ -794,9 +846,18 @@ function CartaoDoFavorecido({
 }
 
 export interface SementeDeRegra {
-  match_type: 'counterparty' | 'supplier';
+  match_type: 'counterparty' | 'supplier' | 'document';
   match_value: string;
   set_category: string | null;
+  /** Entrada: a regra é "o Pix deste CPF/CNPJ é do cliente…" (resposta 18 do dono). */
+  direction?: 'debit' | 'credit';
+  set_client_id?: string | null;
+}
+
+/** CPF/CNPJ do extrato só com dígitos, quando é um documento de verdade (11 ou 14). */
+function documentoDaEntrada(doc: string | null | undefined): string | null {
+  const d = String(doc ?? '').replace(/\D/g, '');
+  return d.length === 11 || d.length === 14 ? d : null;
 }
 
 export function FinanceReviewInbox({
@@ -926,12 +987,15 @@ export function FinanceReviewInbox({
     for (const p of porOrigem) {
       totalValor += Number(p.suggested_amount ?? 0);
       // A mesma regra do agrupado (motivoForaDoLote): transferência, acima do limite, e
-      // vínculo ou OS/OC sugerida sem resposta vão para a revisão individual.
-      if (!motivoForaDoLote(p, limiteLote, correcoes[p.id])) lote.push(p);
+      // vínculo, OS/OC ou "para onde foi" sem resposta vão para a revisão individual.
+      // O LUGAR é o que a linha pede ao chegar, não o que já foi respondido: responder não pode
+      // fazer a linha pular para outra seção (ela sumia de onde o dono estava olhando, e no lote
+      // não tem botão de aprovar próprio). Na hora de aprovar em bloco, vale a resposta atual.
+      if (!motivoForaDoLote(p, limiteLote)) lote.push(p);
       else individuais.push(p);
     }
     return { lote, individuais, totalValor };
-  }, [porOrigem, limiteLote, correcoes]);
+  }, [porOrigem, limiteLote]);
 
   const marcar = (id: string, marcada: boolean) => {
     setSelecionadas((s) => {
@@ -956,11 +1020,11 @@ export function FinanceReviewInbox({
     const semResposta = [...selecionadas].filter((id) => {
       const p = porId.get(id);
       const m = p ? motivoForaDoLote(p, limiteLote, correcoes[id]) : null;
-      return m === 'responder_os' || m === 'responder_vinculo';
+      return m === 'responder_os' || m === 'responder_vinculo' || m === 'responder_destino';
     });
     const ids = [...selecionadas].filter((id) => !semResposta.includes(id));
     if (semResposta.length > 0) {
-      toast.info(`${semResposta.length} linha(s) ficaram de fora: têm vínculo ou OS/OC para responder na própria linha.`);
+      toast.info(`${semResposta.length} linha(s) ficaram de fora: têm vínculo, OS/OC ou "para onde foi" para responder na própria linha.`);
     }
     if (ids.length === 0) return;
     const overrides: Record<string, Correcao> = {};
@@ -1009,6 +1073,22 @@ export function FinanceReviewInbox({
     };
   };
 
+  /**
+   * O que TODAS as linhas do grupo responderam igual: para onde foi, OS, centro de custo e o que
+   * foi feito. O que diverge — ou ninguém disse — fica em branco no cabeçalho (undefined), para o
+   * cabeçalho não afirmar a resposta de uma linha só.
+   */
+  const respostaDoGrupo = (g: GrupoDeFavorecido): Correcao => {
+    const comum = <K extends keyof Correcao>(k: K): Correcao[K] | undefined => {
+      const vs = g.propostas.map((p) => correcoes[p.id]?.[k]);
+      return vs.every((v) => v === vs[0]) ? vs[0] : undefined;
+    };
+    return {
+      destino: comum('destino'), serviceOrderId: comum('serviceOrderId'),
+      costCenterId: comum('costCenterId'), notes: comum('notes'),
+    };
+  };
+
   /** Uma escolha no cabeçalho vira correção em cada linha — inclusive nas grandes. */
   const corrigirGrupo = (g: GrupoDeFavorecido, c: Correcao) => {
     setCorrecoes((m) => {
@@ -1031,15 +1111,43 @@ export function FinanceReviewInbox({
     aprovar.mutate({ ids, overrides });
   };
 
+  /**
+   * Regra a partir de uma ENTRADA: "o Pix deste CPF/CNPJ é do cliente…" (resposta 18 do dono,
+   * 26/09/2026). Só pelo documento — nome não identifica ninguém (decisão de 26/09/2026) —,
+   * então entrada que veio sem CPF/CNPJ não vira regra.
+   */
+  const sementeDeEntrada = (documento: string | null | undefined, clienteId: string | null, categoria: string | null): SementeDeRegra | null => {
+    const doc = documentoDaEntrada(documento);
+    if (!doc) {
+      toast.info('Esta entrada veio sem CPF/CNPJ. A regra de entrada reconhece só pelo documento — escolha o cliente na própria linha.');
+      return null;
+    }
+    return { match_type: 'document', match_value: doc, direction: 'credit', set_client_id: clienteId, set_category: categoria };
+  };
+
   const criarRegraDoGrupo = (g: GrupoDeFavorecido) => {
+    const estado = estadoDoGrupo(g);
+    if (g.propostas.length > 0 && g.propostas.every((p) => p.kind === 'create_receivable')) {
+      const semente = sementeDeEntrada(g.documento ?? g.propostas[0]?.bank_transactions?.counterparty_document,
+        estado.clientId ?? null, estado.category || null);
+      if (semente) onCriarRegra?.(semente);
+      return;
+    }
     onCriarRegra?.({
       match_type: g.supplierId ? 'supplier' : 'counterparty',
       match_value: g.supplierId ?? g.rotulo,
-      set_category: estadoDoGrupo(g).category || null,
+      set_category: estado.category || null,
     });
   };
 
   const criarRegraDaLinha = (p: PropostaFinanceira) => {
+    if (p.kind === 'create_receivable') {
+      const semente = sementeDeEntrada(p.bank_transactions?.counterparty_document,
+        correcoes[p.id]?.clientId ?? p.suggested_client_id ?? null,
+        correcoes[p.id]?.category ?? p.suggested_category ?? null);
+      if (semente) onCriarRegra?.(semente);
+      return;
+    }
     onCriarRegra?.({
       match_type: p.suggested_supplier_id ? 'supplier' : 'counterparty',
       match_value: p.suggested_supplier_id ?? (p.suggested_description ?? p.title),
@@ -1357,6 +1465,7 @@ export function FinanceReviewInbox({
             clienteId={estado.clientId ?? null}
             favorecidoId={estado.payeeId ?? null}
             osId={estado.serviceOrderId ?? null}
+            resposta={respostaDoGrupo(g)}
             onMudar={(c) => corrigirGrupo(g, c)}
             onAprovarLote={() => aprovarGrupo(g)}
             onCriarRegra={() => criarRegraDoGrupo(g)}
@@ -1416,7 +1525,7 @@ export function FinanceReviewInbox({
         <div className="space-y-2">
           <div className="rounded-lg border bg-muted/30 p-2">
             <p className="text-sm font-medium">
-              Revisar uma a uma — acima de {formatCurrency(limiteLote)}, transferências e perguntas de vínculo ou OS ({individuais.length})
+              Revisar uma a uma — acima de {formatCurrency(limiteLote)}, transferências e perguntas de vínculo, OS ou "para onde foi" ({individuais.length})
             </p>
           </div>
           {individuais.map((p) => (

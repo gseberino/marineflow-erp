@@ -21,7 +21,7 @@ import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { QuickSupplierDialog } from '@/components/QuickSupplierDialog';
 import { MoneyInput } from '@/components/MoneyInput';
 import { useSuppliers } from '@/hooks/use-suppliers';
-import { useCostCenters } from '@/hooks/use-cost-centers';
+import { useCostCenters, centrosParaEscolher } from '@/hooks/use-cost-centers';
 import { usePayees, useServiceOrdersVinculaveis, useClientesParaReceita, ROTULO_TIPO } from '@/hooks/use-payees';
 import { usePeriodosFechados } from '@/hooks/use-fechamento';
 import { useCorrigirLancamento, type TipoDeLancamento } from '@/hooks/use-lancamentos';
@@ -310,9 +310,9 @@ export function CorrigirLancamentoDialog({
               <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={NENHUM}>—</SelectItem>
-                {(centros ?? [])
-                  .filter((c) => (ehPagar ? c.type !== 'revenue' : c.type !== 'expense'))
-                  .map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                {/* Só os ativos do lado certo — e o desativado que o lançamento já tem. */}
+                {centrosParaEscolher(centros, ehPagar ? 'payable' : 'receivable', f.cost_center_id || null)
+                  .map((c) => <SelectItem key={c.id} value={c.id}>{c.rotulo}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

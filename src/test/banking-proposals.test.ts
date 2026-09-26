@@ -282,6 +282,31 @@ describe("regras que o gestor ensina", () => {
     expect(p.appliedRuleId).toBe("r1");
   });
 
+  it("regra de ENTRADA por documento diz o cliente — e só na entrada (resposta 18 do dono)", () => {
+    const deEntrada = regra({
+      id: "r-in", match_type: "document", match_value: "123.456.789-01", direction: "credit",
+      set_category: "Serviços prestados", set_dre_group: "receita", set_client_id: "c-joao",
+    });
+    const p = montarProposta(
+      tx({ transaction_type: "credit", description: "PIX RECEBIDO", counterparty_name: "MARIA SILVA", counterparty_document: "12345678901" }),
+      fornecedores, undefined, [deEntrada],
+    );
+    expect(p.kind).toBe("create_receivable");
+    expect(p.suggestedClientId).toBe("c-joao");
+    expect(p.suggestedCategory).toBe("Serviços prestados");
+    expect(p.appliedRuleId).toBe("r-in");
+    // Só sugere: a receita espera o OK do dono.
+    expect(p.autoAplicavel).toBe(false);
+
+    // A saída do MESMO documento não ganha cliente (nem é alcançada pela regra de entrada).
+    const saida = montarProposta(
+      tx({ transaction_type: "debit", description: "PIX ENVIADO", counterparty_name: "MARIA SILVA", counterparty_document: "12345678901" }),
+      fornecedores, undefined, [deEntrada],
+    );
+    expect(saida.suggestedClientId).toBeNull();
+    expect(saida.appliedRuleId).toBeNull();
+  });
+
   it("regra por documento ganha de regra por texto", () => {
     // CNPJ é identidade; texto casa demais. Se a ordem fosse a de cadastro, um "PIX"
     // genérico sequestraria a classificação de um fornecedor configurado a dedo.

@@ -2,11 +2,12 @@
 // a linha não pode ser aprovada sem alguém escolher.
 //
 // A política mora em supabase/functions/_shared/banking/vinculo.ts (vinculoAutomatico,
-// exigeDecisao) e é importada daqui — a tela e o servidor não podem discordar sobre o que
-// acontece quando se clica em aprovar.
+// exigeDecisao) e destino.ts ("para onde foi" do serviço de terceiro) e é importada daqui — a
+// tela e o servidor não podem discordar sobre o que acontece quando se clica em aprovar.
 import {
-  exigeDecisao, podeJaEstarLancado, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido,
+  exigeDecisao, osAnotada, podeJaEstarLancado, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido,
 } from '../../supabase/functions/_shared/banking/vinculo';
+import { faltaNoDestino, type FaltaNoDestino } from '../../supabase/functions/_shared/banking/destino';
 
 export type EscolhaDeVinculo = { id: string } | 'nenhum' | undefined;
 
@@ -39,3 +40,40 @@ export { podeJaEstarLancado };
 export {
   osVemDoVinculo, osAnotada, temPerguntaDaOS, temPerguntaDaOC, perguntaDaOSAberta, type LinhaComPerguntas,
 } from '../../supabase/functions/_shared/banking/vinculo';
+
+export {
+  SERVICO_DE_CLIENTE, SERVICO_DA_EMPRESA, CATEGORIAS_COM_DESTINO, precisaDeDestino, destinoEfetivo,
+  categoriaDoDestino, fraseDaFalta, type FaltaNoDestino, type Destino,
+} from '../../supabase/functions/_shared/banking/destino';
+export { faltaNoDestino };
+
+/** O que uma linha da fila precisa para a pergunta "Para onde foi?". */
+interface LinhaParaODestino {
+  kind: string;
+  suggested_category: string | null;
+  suggested_service_order_id?: string | null;
+  evidencia?: { anotacao?: { id?: string; os_id?: string | null } | null } | null;
+}
+
+/** O que a tela respondeu na linha (os campos da correção que importam aqui). */
+interface RespostaDaLinha {
+  category?: string;
+  serviceOrderId?: string | null;
+  costCenterId?: string | null;
+  notes?: string | null;
+  destino?: 'cliente' | 'empresa' | null;
+  vinculo?: { id: string } | 'nenhum';
+}
+
+/**
+ * O que falta para aprovar uma linha de serviço de terceiro — a MESMA conta que o servidor faz
+ * em finance-review/aprovar: a categoria escolhida na tela, a OS anotada pelo WhatsApp quando
+ * ninguém respondeu outra, e nada quando a linha vai CASAR com um lançamento que já existe
+ * (ele já tem a categoria dele).
+ */
+export function faltaNoDestinoDaLinha(p: LinhaParaODestino, r: RespostaDaLinha | undefined): FaltaNoDestino[] {
+  if (r?.vinculo && typeof r.vinculo === 'object') return [];
+  const categoria = r?.category ?? p.suggested_category ?? '';
+  const osJaDita = r?.serviceOrderId === undefined ? osAnotada(p) : null;
+  return faltaNoDestino(p.kind, categoria, r, osJaDita);
+}

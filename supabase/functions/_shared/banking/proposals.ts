@@ -163,6 +163,11 @@ export interface RegraFinanceira {
   set_category?: string | null;
   set_dre_group?: string | null;
   set_supplier_id?: string | null;
+  /**
+   * Regra de ENTRADA: "o Pix do CPF/CNPJ X é do cliente Y" (resposta 18 do dono, 26/09/2026).
+   * Só por documento, só em entrada e só sugere — o banco garante (CHECK em finance_rules).
+   */
+  set_client_id?: string | null;
   autonomy: "suggest" | "apply";
   status: string;
 }
@@ -255,6 +260,8 @@ export interface Proposta {
   fornecedorPelaRegra: boolean;
   /** Nome de fornecedor com regra sua cujo nome começa igual ao desta compra — só alerta. */
   lembraRegra: string | null;
+  /** Entrada: o cliente que uma regra sua diz ser o dono deste CPF/CNPJ. Só sugestão. */
+  suggestedClientId: string | null;
 }
 
 /** Nome sem acento, caixa nem sufixo societário — a forma comparável de um nome. */
@@ -907,6 +914,8 @@ export function montarProposta(
       : null,
     fornecedorPelaRegra,
     lembraRegra,
+    // Regra de entrada ("o Pix deste CPF é do cliente Y"): o cliente vem da instrução do dono.
+    suggestedClientId: !ehSaida && regra?.set_client_id ? regra.set_client_id : null,
   };
 }
 

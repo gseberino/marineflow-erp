@@ -29,7 +29,10 @@ vi.mock('@/hooks/use-suppliers', () => ({
   useSuppliers: () => ({ data: [{ id: 's1', name: 'Coremma', cnpj_cpf: '11.111.111/0001-11', email: null }] }),
   useCreateSupplier: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
-vi.mock('@/hooks/use-cost-centers', () => ({ useCostCenters: () => ({ data: [] }) }));
+vi.mock('@/hooks/use-cost-centers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-cost-centers')>()),
+  useCostCenters: () => ({ data: [] }),
+}));
 vi.mock('@/hooks/use-payees', () => ({
   usePayees: () => ({ data: [] }),
   useServiceOrdersVinculaveis: () => ({ data: [{ id: 'os1', service_order_number: 'OS-60', status: 'in_progress', clients: { name: 'Cliente' } }] }),

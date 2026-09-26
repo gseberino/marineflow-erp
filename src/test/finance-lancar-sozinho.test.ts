@@ -94,3 +94,13 @@ describe("revisão de 26/09/2026", () => {
       .toMatch(/regra sua/);
   });
 });
+
+describe("serviço de terceiro pergunta para onde foi (decisão do dono, 26/09/2026)", () => {
+  it("nunca vai sozinho, nem com confiança 99 — de cliente ou da empresa", () => {
+    const servico = { ...base, confidence: 99, suggested_category: "Serviços de terceiros" };
+    expect(motivoParaNaoLancarSozinho(servico, { ...criterio, confiancaMinima: 90 })).toMatch(/para onde foi/);
+    expect(motivoParaNaoLancarSozinho({ ...servico, suggested_category: "Serviços de terceiros para a empresa" }, criterio))
+      .toMatch(/para onde foi/);
+    expect(selecionarParaLancarSozinho([servico], criterio)).toEqual([]);
+  });
+});

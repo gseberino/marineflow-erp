@@ -12,7 +12,7 @@ import { useI18n } from '@/i18n';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { useServiceOrders } from '@/hooks/use-service-orders';
 import { useCreatePayable, useUpdatePayable } from '@/hooks/use-financial';
-import { useCostCenters } from '@/hooks/use-cost-centers';
+import { useCostCenters, centrosParaEscolher } from '@/hooks/use-cost-centers';
 import { toast } from 'sonner';
 import { MoneyInput } from '@/components/MoneyInput';
 import { logError } from '@/lib/diagnostics';
@@ -148,12 +148,13 @@ export function PayableFormDialog({ open, onOpenChange, initialData }: Props) {
               <CategorySelect type="payable" value={category} onChange={setCategory} placeholder="—" />
             </div>
             <div><Label>Centro de Custo</Label>
-              <Select value={costCenterId} onValueChange={setCostCenterId}>
+              {/* Radix não aceita SelectItem de valor vazio: "nenhum" tem valor próprio. */}
+              <Select value={costCenterId || '__sem_centro__'} onValueChange={(v) => setCostCenterId(v === '__sem_centro__' ? '' : v)}>
                 <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">—</SelectItem>
-                  {(costCenters || []).filter(c => c.type !== 'revenue').map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  <SelectItem value="__sem_centro__">—</SelectItem>
+                  {centrosParaEscolher(costCenters, 'payable', costCenterId || null).map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.rotulo}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
