@@ -122,6 +122,9 @@ export const registryCrudTools: ToolDef[] = [
         supplier_id: { type: "string", description: "UUID do fornecedor." },
         name: { type: "string" },
         trade_name: { type: "string", description: "Nome fantasia." },
+        // O prompt manda gravar o nome usado com update_supplier, mas o campo não estava aqui:
+        // o modelo não tinha como obedecer (a coluna suppliers.display_name existe).
+        display_name: { type: "string", description: "Nome usado na comunicação (fantasia/primeiro nome) — preferido na saudação." },
         cnpj_cpf: { type: "string" },
         contact_name: { type: "string" },
         phone: { type: "string", description: "Telefone/WhatsApp — sem ele não dá para enviar cotação." },
