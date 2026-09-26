@@ -14,68 +14,12 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useI18n } from '@/i18n';
 import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/integrations/supabase/client';
-import { lerEmPaginas } from '@/lib/ler-em-paginas';
 import { exportToCSV } from '@/lib/export';
-import { montarDRE, doMes, type LancamentoDRE, type GrupoDRE } from '@/lib/dre';
+import { montarDRE, doMes } from '@/lib/dre';
+// Os lançamentos do ano, com o grupo do plano de contas: a mesma leitura serve o Resumo do
+// mês da Central de relatórios, para "vendido" e "resultado" não terem dois números.
+import { useLancamentosDRE } from '@/hooks/use-dre';
 import { Download, ChevronDown, AlertTriangle, CheckCircle2, Lock } from 'lucide-react';
-
-/** Lançamentos do ano com o grupo já resolvido pelo plano de contas. */
-function useLancamentosDRE(ano: number) {
-  return useQuery({
-    queryKey: ['dre-lancamentos', ano],
-    queryFn: async (): Promise<LancamentoDRE[]> => {
-      const de = `${ano}-01-01`;
-      const ate = `${ano}-12-31`;
-
-      // Em páginas: 2026 já passou de 1.000 despesas, e a leitura de uma vez deixava ~35
-      // (≈ R$ 9,9 mil) fora do resultado sem aviso nenhum.
-      const [cats, paysData, recsData] = await Promise.all([
-        supabase.from('financial_categories').select('name, type, dre_group'),
-        // Cancelada não é despesa. A consulta de receitas sempre filtrou; a de despesas
-        // não, e cada lançamento cancelado continuava pesando no resultado.
-        lerEmPaginas((i, f) => supabase.from('payables').select('id, issue_date, amount, expense_category')
-          .neq('status', 'cancelled')
-          .gte('issue_date', de).lte('issue_date', ate)
-          .order('id').range(i, f)),
-        lerEmPaginas((i, f) => supabase.from('receivables').select('id, issue_date, amount, category, status')
-          .gte('issue_date', de).lte('issue_date', ate)
-          .order('id').range(i, f)),
-      ]);
-      if (cats.error) throw cats.error;
-      const pays = { data: paysData };
-      const recs = { data: recsData };
-
-      const grupoDe = new Map<string, GrupoDRE>();
-      for (const c of (cats.data ?? []) as any[]) {
-        if (c.dre_group) grupoDe.set(`${c.type}:${c.name}`, c.dre_group);
-      }
-
-      const despesas: LancamentoDRE[] = ((pays.data ?? []) as any[]).map((p) => ({
-        data: p.issue_date,
-        valor: Number(p.amount),
-        categoria: p.expense_category,
-        grupo: p.expense_category ? grupoDe.get(`payable:${p.expense_category}`) ?? null : null,
-        tipo: 'despesa',
-      }));
-
-      const receitas: LancamentoDRE[] = ((recs.data ?? []) as any[])
-        // Receita cancelada não é receita — entraria inflando o faturamento.
-        .filter((r) => r.status !== 'cancelled')
-        .map((r) => ({
-          data: r.issue_date,
-          valor: Number(r.amount),
-          categoria: r.category,
-          // Receita sem categoria ainda é receita: a natureza do lançamento já diz onde
-          // entra, diferente da despesa, onde é a categoria que define o grupo.
-          grupo: (r.category ? grupoDe.get(`receivable:${r.category}`) : null) ?? 'receita',
-          tipo: 'receita',
-        }));
-
-      return [...despesas, ...receitas];
-    },
-    staleTime: 60_000,
-  });
-}
 
 /**
  * Cobertura: quanto do dinheiro que passou pelo banco este resultado explica.
@@ -359,7 +303,7 @@ function SeloDeConfiabilidade({
             )}
             {nivel === 'ruim' && (
               <>A despesa está quase toda aqui e boa parte da receita não, então o resultado
-              abaixo <strong>parece pior do que é</strong>. Concilie as entradas na aba
+              abaixo <strong>parece pior do que é</strong>. Concilie as entradas em Financeiro ›
               Conciliação — ou feche no sistema as ordens de serviço que geraram esse dinheiro.</>
             )}
             {nivel === 'parcial' && (

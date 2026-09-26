@@ -53,8 +53,6 @@ const OrdersListV2 = lazy(() => import("./v2/pages/OrdersListV2"));
 const DashboardV2 = lazy(() => import("./v2/pages/DashboardV2"));
 const ReceivablesV2 = lazy(() => import("./v2/pages/ReceivablesV2"));
 const FinancialV2 = lazy(() => import("./v2/pages/FinancialV2"));
-const CollectionsV2 = lazy(() => import("./v2/pages/CollectionsV2"));
-const CommissionsV2 = lazy(() => import("./v2/pages/CommissionsV2"));
 const PayeesPage = lazy(() => import("./pages/PayeesPage"));
 const AuditLogV2 = lazy(() => import("./v2/pages/AuditLogV2"));
 const ReportsV2 = lazy(() => import("./v2/pages/ReportsV2"));
@@ -183,16 +181,20 @@ const App = () => (
                         <Route path="/v2/service-orders" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><OrdersListV2 mode="orders" /></ProtectedRoute>} />
                         <Route path="/v2/quotes" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="operacional"><OrdersListV2 mode="quotes" /></ProtectedRoute>} />
                         <Route path="/v2/dashboard" element={<ProtectedRoute roles={['admin','financial','technician','seller']}><DashboardV2 /></ProtectedRoute>} />
-                        <Route path="/v2/receivables" element={<ProtectedRoute roles={['admin','financial']}><ReceivablesV2 /></ProtectedRoute>} />
-                        <Route path="/v2/financial" element={<ProtectedRoute roles={['admin','financial']}><FinancialV2 /></ProtectedRoute>} />
-                        {/* D6/F4: cada item do menu financeiro e uma rota de verdade (/v2/financial/extrato, ...); ?tab= antigo redireciona dentro da tela. */}
-                        <Route path="/v2/financial/:secao" element={<ProtectedRoute roles={['admin','financial']}><FinancialV2 /></ProtectedRoute>} />
-                        <Route path="/v2/collections" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><CollectionsV2 /></ProtectedRoute>} />
-                        <Route path="/v2/commissions" element={<ProtectedRoute roles={['admin','financial']}><CommissionsV2 /></ProtectedRoute>} />
+                        {/* Contas a Receber: abas Contas · Cobranças (/v2/receivables/cobrancas). */}
+                        <Route path="/v2/receivables/:aba?" element={<ProtectedRoute roles={['admin','financial']}><ReceivablesV2 /></ProtectedRoute>} />
+                        {/* Financeiro (26/09/2026): um cômodo por assunto, /v2/financial/<cômodo>/<aba>. Uma rota
+                            só com segmentos opcionais: trocar de aba não remonta a tela. Links antigos
+                            (?tab=, /cartoes, /dre…) levam ao lugar novo dentro da tela (financeiro/rotas.ts). */}
+                        <Route path="/v2/financial/:secao?/:aba?" element={<ProtectedRoute roles={['admin','financial']}><FinancialV2 /></ProtectedRoute>} />
+                        {/* Cobranças virou aba de Contas a Receber; Comissões, aba de Contas a Pagar. */}
+                        <Route path="/v2/collections" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><Navigate to="/v2/receivables/cobrancas" replace /></ProtectedRoute>} />
+                        <Route path="/v2/commissions" element={<ProtectedRoute roles={['admin','financial']}><Navigate to="/v2/financial/payables/comissoes" replace /></ProtectedRoute>} />
                         {/* Dado sensível (CPF, conta, Pix): mesma restrição do financeiro. */}
                         <Route path="/v2/payees" element={<ProtectedRoute roles={['admin','financial']}><PayeesPage /></ProtectedRoute>} />
                         <Route path="/v2/audit-log" element={<ProtectedRoute roles={['admin']}><AuditLogV2 /></ProtectedRoute>} />
-                        <Route path="/v2/reports" element={<ProtectedRoute roles={['admin','financial']}><ReportsV2 /></ProtectedRoute>} />
+                        {/* Central de relatórios: /v2/reports/<seção> (resumo, fluxo, dre, categorias, aging, operacao). */}
+                        <Route path="/v2/reports/:secao?" element={<ProtectedRoute roles={['admin','financial']}><ReportsV2 /></ProtectedRoute>} />
                         <Route path="/v2/inventory/smart-purchase" element={<ProtectedRoute roles={['admin','financial']}><SmartPurchaseV2 /></ProtectedRoute>} />
                         <Route path="/v2/inventory" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><InventoryV2 /></ProtectedRoute>} />
                         <Route path="/v2/purchase-orders" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><PurchaseOrdersV2 /></ProtectedRoute>} />
@@ -225,7 +227,8 @@ const App = () => (
                         <Route path="/v2/marinas" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><MarinasListV2 /></ProtectedRoute>} />
                         <Route path="/v2/products" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ProductsListV2 /></ProtectedRoute>} />
                         <Route path="/v2/services" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><ServicesListV2 /></ProtectedRoute>} />
-                        <Route path="/v2/suppliers" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><SuppliersListV2 /></ProtectedRoute>} />
+                        {/* Fornecedores: abas Fornecedores · Saúde do cadastro (/v2/suppliers/saude, só admin e financeiro). */}
+                        <Route path="/v2/suppliers/:aba?" element={<ProtectedRoute roles={['admin','financial','technician','seller']} groupId="cadastros"><SuppliersListV2 /></ProtectedRoute>} />
 
                         <Route path="/purchase-orders" element={<ProtectedRoute roles={['admin','financial']} groupId="operacional"><LegadoOuV2 to="/v2/purchase-orders" legacy={<PurchaseOrdersPage />} /></ProtectedRoute>} />
                         {/* Detalhe de OC nasceu direto na v2 — o legado nunca teve um, então

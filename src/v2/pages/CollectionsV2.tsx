@@ -29,21 +29,23 @@ import { AddContactDialog } from '@/components/collections/AddContactDialog';
 import { EditContactDialog } from '@/components/collections/EditContactDialog';
 import { AutoRuleDialog } from '@/components/collections/AutoRuleDialog';
 import { CollectionDetailSheet } from '@/components/collections/CollectionDetailSheet';
-import { PageShell } from '@/v2/components/PageShell';
 import { KPIStat } from '@/v2/components/KPIStat';
 import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn } from '@/v2/components/DataTable';
-import { V2Shell } from '@/v2/components/V2Shell';
 import '@/v2/tokens.css';
 
 /* Onda B · Cobranças v2 — paridade com CollectionsPage v1 (KPIs clicáveis,
    filtros completos, régua automática, dialogs e sheet reutilizados) com
-   ações em 2 níveis: WhatsApp na linha, resto no menu. */
+   ações em 2 níveis: WhatsApp na linha, resto no menu.
+
+   26/09/2026: deixou de ser tela solta. Perseguir quem deve é a mesma conversa de Contas a
+   Receber, então Cobranças virou aba de lá (/v2/receivables/cobrancas) e saiu do menu. O link
+   antigo /v2/collections leva para a aba. Aqui fica só o painel, sem invólucro de página. */
 
 const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
-export default function CollectionsV2() {
+export function PainelDeCobrancas() {
   const [filters, setFilters] = useState<CollectionFilters>({ sort_by: 'due_date', sort_dir: 'asc' });
   const [createOpen, setCreateOpen] = useState(false);
   const [ruleOpen, setRuleOpen] = useState(false);
@@ -186,145 +188,142 @@ export default function CollectionsV2() {
   ];
 
   return (
-    <V2Shell>
-      <PageShell
-        breadcrumb={[{ label: 'Operacional' }, { label: 'Cobranças' }]}
-        title="Cobranças"
-        count={collections.length}
-        description="Gerencie cobranças e a régua automática"
-        actions={
-          <>
-            <Button variant="outline" size="sm" className="hidden gap-1.5 sm:inline-flex" onClick={exportCsv}>
-              <Download className="h-4 w-4" /> Exportar CSV
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setRuleOpen(true)}>
-              <SlidersHorizontal className="h-4 w-4" /> Régua
-            </Button>
-            <Button className="gap-1.5" onClick={() => setCreateOpen(true)}>
-              <Plus className="h-4 w-4" /> Nova Cobrança
-            </Button>
-          </>
-        }
-      >
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <KPIStat label="Total em aberto" value={fmtBRL(kpis.totalOpen)} hint="pendentes/enviadas/vistas" tone="warning" onClick={() => update({ status: 'pending' })} />
-          <KPIStat label="Total vencido" value={fmtBRL(kpis.totalOverdue)} hint="em atraso" tone={kpis.totalOverdue > 0 ? 'critical' : 'success'} onClick={() => update({ status: 'overdue' })} />
-          <KPIStat label="Taxa de recuperação" value={`${kpis.recovery.toFixed(0)}%`} hint="últimos 30 dias" tone="success" />
-          <KPIStat label="Média em atraso" value={`${kpis.avgDays} dias`} hint="cobranças vencidas" />
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-muted-foreground">
+          {collections.length} cobrança(s) · a régua automática manda os lembretes pelo WhatsApp.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" className="hidden gap-1.5 sm:inline-flex" onClick={exportCsv}>
+            <Download className="h-4 w-4" /> Exportar CSV
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setRuleOpen(true)}>
+            <SlidersHorizontal className="h-4 w-4" /> Régua
+          </Button>
+          <Button size="sm" className="gap-1.5" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" /> Nova cobrança
+          </Button>
         </div>
+      </div>
 
-        <div className="grid grid-cols-1 gap-3 rounded-lg border bg-card p-4 md:grid-cols-2 lg:grid-cols-4">
-          <div className="space-y-1">
-            <Label className="text-xs">Buscar</Label>
-            <Input placeholder="Cliente ou OS…" className="h-9" value={filters.search || ''} onChange={(e) => update({ search: e.target.value || undefined })} />
-          </div>
-          <div className="space-y-1 md:col-span-2 lg:col-span-3">
-            <Label className="text-xs">Status</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {[{ value: 'all', label: 'Todos' }, ...COLLECTION_STATUS_OPTIONS].map((opt) => {
-                const isActive = opt.value === 'all' ? !filters.status || filters.status === 'all' : filters.status === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => update({ status: opt.value === 'all' || isActive ? undefined : (opt.value as CollectionStatus) })}
-                    className={cn(
-                      'rounded-full border px-2.5 py-0.5 text-xs transition-colors',
-                      isActive
-                        ? 'border-primary/50 bg-primary/10 font-medium text-primary'
-                        : 'border-border bg-background text-muted-foreground hover:border-primary/50',
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Cliente</Label>
-            <Select value={filters.client_id || 'all'} onValueChange={(v) => update({ client_id: v === 'all' ? undefined : v })}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                {(clients || []).map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Vence de</Label>
-            <Input type="date" className="h-9" value={filters.date_from || ''} onChange={(e) => update({ date_from: e.target.value || undefined })} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Vence até</Label>
-            <Input type="date" className="h-9" value={filters.date_to || ''} onChange={(e) => update({ date_to: e.target.value || undefined })} />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Valor mín / máx</Label>
-            <div className="flex gap-2">
-              <Input type="number" className="h-9" value={filters.amount_min ?? ''} onChange={(e) => update({ amount_min: e.target.value ? Number(e.target.value) : undefined })} />
-              <Input type="number" className="h-9" value={filters.amount_max ?? ''} onChange={(e) => update({ amount_max: e.target.value ? Number(e.target.value) : undefined })} />
-              <Button variant="outline" size="sm" className="h-9 shrink-0" onClick={clearFilters}>Limpar</Button>
-            </div>
-          </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <KPIStat label="Total em aberto" value={fmtBRL(kpis.totalOpen)} hint="pendentes/enviadas/vistas" tone="warning" onClick={() => update({ status: 'pending' })} />
+        <KPIStat label="Total vencido" value={fmtBRL(kpis.totalOverdue)} hint="em atraso" tone={kpis.totalOverdue > 0 ? 'critical' : 'success'} onClick={() => update({ status: 'overdue' })} />
+        <KPIStat label="Taxa de recuperação" value={`${kpis.recovery.toFixed(0)}%`} hint="últimos 30 dias" tone="success" />
+        <KPIStat label="Média em atraso" value={`${kpis.avgDays} dias`} hint="cobranças vencidas" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 rounded-lg border bg-card p-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="space-y-1">
+          <Label className="text-xs">Buscar</Label>
+          <Input placeholder="Cliente ou OS…" className="h-9" value={filters.search || ''} onChange={(e) => update({ search: e.target.value || undefined })} />
         </div>
-
-        <div className="hidden md:block">
-          <DataTable<Collection>
-            rows={collections}
-            rowKey={(c) => c.id}
-            columns={columns}
-            isLoading={isLoading}
-            onRowClick={(c) => setDetailId(c.id)}
-            emptyMessage="Nenhuma cobrança encontrada."
-            rowClassName={(c) => (c.status === 'overdue' ? 'bg-destructive/5' : undefined)}
-            rowActions={(c) => (
-              <>
-                <Button
-                  variant="ghost" size="icon" className="h-8 w-8"
-                  aria-label="Enviar WhatsApp" title="Enviar WhatsApp"
-                  onClick={() => send.mutate({ collection: c })}
+        <div className="space-y-1 md:col-span-2 lg:col-span-3">
+          <Label className="text-xs">Status</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {[{ value: 'all', label: 'Todos' }, ...COLLECTION_STATUS_OPTIONS].map((opt) => {
+              const isActive = opt.value === 'all' ? !filters.status || filters.status === 'all' : filters.status === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => update({ status: opt.value === 'all' || isActive ? undefined : (opt.value as CollectionStatus) })}
+                  className={cn(
+                    'rounded-full border px-2.5 py-0.5 text-xs transition-colors',
+                    isActive
+                      ? 'border-primary/50 bg-primary/10 font-medium text-primary'
+                      : 'border-border bg-background text-muted-foreground hover:border-primary/50',
+                  )}
                 >
-                  <MessageCircle className="h-4 w-4" />
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Cliente</Label>
+          <Select value={filters.client_id || 'all'} onValueChange={(v) => update({ client_id: v === 'all' ? undefined : v })}>
+            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos</SelectItem>
+              {(clients || []).map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Vence de</Label>
+          <Input type="date" className="h-9" value={filters.date_from || ''} onChange={(e) => update({ date_from: e.target.value || undefined })} />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Vence até</Label>
+          <Input type="date" className="h-9" value={filters.date_to || ''} onChange={(e) => update({ date_to: e.target.value || undefined })} />
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs">Valor mín / máx</Label>
+          <div className="flex gap-2">
+            <Input type="number" className="h-9" value={filters.amount_min ?? ''} onChange={(e) => update({ amount_min: e.target.value ? Number(e.target.value) : undefined })} />
+            <Input type="number" className="h-9" value={filters.amount_max ?? ''} onChange={(e) => update({ amount_max: e.target.value ? Number(e.target.value) : undefined })} />
+            <Button variant="outline" size="sm" className="h-9 shrink-0" onClick={clearFilters}>Limpar</Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="hidden md:block">
+        <DataTable<Collection>
+          rows={collections}
+          rowKey={(c) => c.id}
+          columns={columns}
+          isLoading={isLoading}
+          onRowClick={(c) => setDetailId(c.id)}
+          emptyMessage="Nenhuma cobrança encontrada."
+          rowClassName={(c) => (c.status === 'overdue' ? 'bg-destructive/5' : undefined)}
+          rowActions={(c) => (
+            <>
+              <Button
+                variant="ghost" size="icon" className="h-8 w-8"
+                aria-label="Enviar WhatsApp" title="Enviar WhatsApp"
+                onClick={() => send.mutate({ collection: c })}
+              >
+                <MessageCircle className="h-4 w-4" />
+              </Button>
+              {renderMenu(c)}
+            </>
+          )}
+        />
+      </div>
+
+      <div className="space-y-2.5 md:hidden">
+        {collections.map((c) => (
+          <EntityCard
+            key={c.id}
+            severity={c.status === 'overdue' ? 'critical' : c.status === 'paid' ? 'success' : 'neutral'}
+            badge={<CollectionStatusBadge status={c.status} />}
+            title={c.client?.name || '—'}
+            lines={[
+              c.service_order?.service_order_number || 'Avulso',
+              `${new Date(c.due_date).toLocaleDateString('pt-BR')} · ${fmtBRL(Number(c.amount))}`,
+            ]}
+            onClick={() => setDetailId(c.id)}
+            actions={
+              <>
+                <Button className="flex-1 gap-1.5" onClick={() => send.mutate({ collection: c })}>
+                  <MessageCircle className="h-4 w-4" /> Cobrar
                 </Button>
                 {renderMenu(c)}
               </>
-            )}
+            }
           />
-        </div>
-
-        <div className="space-y-2.5 md:hidden">
-          {collections.map((c) => (
-            <EntityCard
-              key={c.id}
-              severity={c.status === 'overdue' ? 'critical' : c.status === 'paid' ? 'success' : 'neutral'}
-              badge={<CollectionStatusBadge status={c.status} />}
-              title={c.client?.name || '—'}
-              lines={[
-                c.service_order?.service_order_number || 'Avulso',
-                `${new Date(c.due_date).toLocaleDateString('pt-BR')} · ${fmtBRL(Number(c.amount))}`,
-              ]}
-              onClick={() => setDetailId(c.id)}
-              actions={
-                <>
-                  <Button className="flex-1 gap-1.5" onClick={() => send.mutate({ collection: c })}>
-                    <MessageCircle className="h-4 w-4" /> Cobrar
-                  </Button>
-                  {renderMenu(c)}
-                </>
-              }
-            />
-          ))}
-          <button
-            type="button"
-            aria-label="Nova Cobrança"
-            onClick={() => setCreateOpen(true)}
-            className="fixed bottom-24 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform active:scale-95"
-          >
-            <Plus className="h-6 w-6" />
-          </button>
-        </div>
-      </PageShell>
+        ))}
+        <button
+          type="button"
+          aria-label="Nova Cobrança"
+          onClick={() => setCreateOpen(true)}
+          className="fixed bottom-24 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform active:scale-95"
+        >
+          <Plus className="h-6 w-6" />
+        </button>
+      </div>
 
       <CreateCollectionDialog open={createOpen} onOpenChange={setCreateOpen} />
       <AutoRuleDialog open={ruleOpen} onOpenChange={setRuleOpen} />
@@ -357,6 +356,6 @@ export default function CollectionsV2() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </V2Shell>
+    </div>
   );
 }

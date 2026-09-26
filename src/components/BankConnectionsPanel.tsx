@@ -5,13 +5,14 @@ import { Label } from '@/components/ui/label';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useI18n } from '@/i18n';
 import {
-  useBankConnections, useSaveBankConnection, useDeleteBankConnection, useSyncBank,
+  useBankConnections, useSaveBankConnection, useSetBankConnectionActive, useSyncBank,
   useListPluggyItems,
   type BankConnection, type PluggyItemDisponivel,
 } from '@/hooks/use-bank-connections';
 import { toast } from 'sonner';
-import { RefreshCw, Plus, Trash2, AlertTriangle, CheckCircle2, Link2 } from 'lucide-react';
+import { RefreshCw, Plus, Power, AlertTriangle, CheckCircle2, Link2 } from 'lucide-react';
 import { SaldosDasContas } from '@/components/SaldosDasContas';
+import { cn } from '@/lib/utils';
 
 /**
  * Conexões de leitura do extrato (Open Finance).
@@ -25,8 +26,10 @@ export function BankConnectionsPanel() {
   const { formatDate } = useI18n();
   const { data: conexoes, isLoading } = useBankConnections();
   const salvar = useSaveBankConnection();
-  const excluir = useDeleteBankConnection();
+  const ativar = useSetBankConnectionActive();
   const sincronizar = useSyncBank();
+  // Qual conexão está pedindo confirmação para desativar (na própria ficha, sem janela do navegador).
+  const [desativando, setDesativando] = useState<string | null>(null);
 
   const listarItens = useListPluggyItems();
   const [novoAberto, setNovoAberto] = useState(false);
@@ -132,12 +135,19 @@ export function BankConnectionsPanel() {
     }
   };
 
-  const handleExcluir = async (c: BankConnection) => {
+  /**
+   * Desativar, não excluir (26/09/2026). Excluir a conexão do C6 soltaria as 1.849 transações
+   * dela; desativada, a busca para e tudo o que já entrou continua no lugar.
+   */
+  const handleAtivar = async (c: BankConnection, active: boolean) => {
     try {
-      await excluir.mutateAsync(c.id);
-      toast.success(`Conexão "${c.label}" removida. As transações já importadas continuam no sistema.`);
-    } catch (e: any) {
-      toast.error(e?.message || 'Erro ao remover');
+      await ativar.mutateAsync({ id: c.id, active });
+      setDesativando(null);
+      toast.success(active
+        ? `Conexão "${c.label}" reativada. O extrato volta a ser buscado.`
+        : `Conexão "${c.label}" desativada. O extrato para de ser buscado; o que já foi importado continua no sistema.`);
+    } catch (e) {
+      toast.error((e as Error)?.message || (active ? 'Erro ao reativar' : 'Erro ao desativar'));
     }
   };
 
@@ -302,7 +312,7 @@ export function BankConnectionsPanel() {
         <div className="rounded-lg border border-dashed p-6 text-center">
           <p className="text-sm text-muted-foreground">
             Nenhuma conta conectada. Enquanto isso, o extrato pode ser importado por arquivo
-            OFX na aba de conciliação.
+            OFX logo abaixo, em "Importar extrato por arquivo".
           </p>
         </div>
       )}
@@ -311,28 +321,43 @@ export function BankConnectionsPanel() {
         {(conexoes || []).map(c => {
           const dias = diasDesde(c.last_synced_at);
           const desatualizada = dias !== null && dias > 2;
+          const inativa = c.active === false;
           return (
-            <div key={c.id} className="rounded-lg border bg-card p-3 flex items-start justify-between gap-3 flex-wrap">
+            <div
+              key={c.id}
+              className={cn(
+                'rounded-lg border p-3 flex items-start justify-between gap-3 flex-wrap',
+                inativa ? 'bg-muted/40 text-muted-foreground' : 'bg-card',
+              )}
+            >
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-medium">{c.label}</span>
                   <StatusBadge className={c.account_kind === 'credit_card' ? 'bg-accent/15 text-accent' : 'bg-muted text-muted-foreground'}>
                     {c.provider === 'caixa' ? 'Dinheiro em espécie' : c.account_kind === 'credit_card' ? 'Cartão' : 'Conta corrente'}
                   </StatusBadge>
-                  {c.last_sync_status === 'ok' && !desatualizada && (
+                  {inativa && (
+                    <StatusBadge className="bg-muted text-muted-foreground">desativada</StatusBadge>
+                  )}
+                  {!inativa && c.last_sync_status === 'ok' && !desatualizada && (
                     <StatusBadge className="bg-success/15 text-success">
                       <CheckCircle2 className="h-3 w-3 mr-1 inline" />em dia
                     </StatusBadge>
                   )}
-                  {c.last_sync_status === 'error' && (
+                  {!inativa && c.last_sync_status === 'error' && (
                     <StatusBadge className="bg-destructive/10 text-destructive">
                       <AlertTriangle className="h-3 w-3 mr-1 inline" />com problema
                     </StatusBadge>
                   )}
-                  {c.last_sync_status === 'ok' && desatualizada && (
+                  {!inativa && c.last_sync_status === 'ok' && desatualizada && (
                     <StatusBadge className="bg-warning/15 text-warning">sem atualizar há {dias} dias</StatusBadge>
                   )}
                 </div>
+                {inativa && (
+                  <p className="text-xs mt-1">
+                    O extrato desta conta não é mais buscado e ela não entra no saldo. O que já foi importado continua no sistema.
+                  </p>
+                )}
                 <p className="text-xs text-muted-foreground font-mono mt-0.5">{c.external_id}</p>
                 {c.last_sync_message && (
                   <p className={`text-xs mt-1 ${c.last_sync_status === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}>
@@ -348,19 +373,44 @@ export function BankConnectionsPanel() {
                 )}
               </div>
 
-              {/* O Caixa não tem banco para buscar, e excluí-lo soltaria todas as linhas dele. */}
-              {c.provider !== 'caixa' && <div className="flex items-center gap-1 shrink-0">
-                <Button size="sm" variant="outline" onClick={() => handleSincronizar(c.id)} disabled={sincronizar.isPending}>
-                  <RefreshCw className="h-3 w-3 mr-1" />Buscar
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => handleSincronizar(c.id, true)}
-                  disabled={sincronizar.isPending} title="Rebusca o último ano inteiro">
-                  Histórico
-                </Button>
-                <Button aria-label="Excluir esta conexão bancária" size="sm" variant="ghost" onClick={() => handleExcluir(c)} disabled={excluir.isPending}>
-                  <Trash2 className="h-3 w-3 text-destructive" />
-                </Button>
-              </div>}
+              {/* O Caixa não tem banco para buscar, e desativá-lo esconderia o dinheiro da gaveta. */}
+              {c.provider !== 'caixa' && inativa && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button size="sm" variant="outline" onClick={() => handleAtivar(c, true)} disabled={ativar.isPending}>
+                    <Power className="h-3 w-3 mr-1" />Reativar
+                  </Button>
+                </div>
+              )}
+              {c.provider !== 'caixa' && !inativa && desativando !== c.id && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button size="sm" variant="outline" onClick={() => handleSincronizar(c.id)} disabled={sincronizar.isPending}>
+                    <RefreshCw className="h-3 w-3 mr-1" />Buscar
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => handleSincronizar(c.id, true)}
+                    disabled={sincronizar.isPending} title="Rebusca o último ano inteiro">
+                    Histórico
+                  </Button>
+                  <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setDesativando(c.id)}
+                    title="Para de buscar o extrato desta conta; nada do que já entrou é apagado">
+                    Desativar
+                  </Button>
+                </div>
+              )}
+              {/* Confirmação na própria ficha: um clique distraído não pode parar o extrato. */}
+              {c.provider !== 'caixa' && !inativa && desativando === c.id && (
+                <div className="w-full rounded-md border border-warning/40 bg-warning/5 p-2 text-sm">
+                  <p>
+                    Desativar <b>{c.label}</b>? O extrato para de ser buscado e a conta sai do saldo. As transações já
+                    importadas continuam no sistema, e dá para reativar depois.
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button size="sm" variant="destructive" onClick={() => handleAtivar(c, false)} disabled={ativar.isPending}>
+                      Sim, desativar
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setDesativando(null)}>Não</Button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

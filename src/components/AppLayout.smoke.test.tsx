@@ -107,3 +107,37 @@ describe('menu lateral — Financeiro reestruturado', () => {
     expect(within(link!).getByText('7')).toBeInTheDocument();
   });
 });
+
+describe('menu lateral — abas das telas novas acendem o item da tela (26/09/2026)', () => {
+  it.each([
+    ['/v2/financial/inbox/cartao', 'Extrato'],
+    ['/v2/financial/inbox/regras', 'Extrato'],
+    ['/v2/financial/reconciliation/fechar', 'Conciliação'],
+    ['/v2/financial/payables/comissoes', 'Contas a Pagar'],
+    ['/v2/receivables/cobrancas', 'Contas a Receber'],
+    ['/v2/reports/dre', 'Central de relatórios'],
+    ['/v2/reports', 'Central de relatórios'],
+    ['/v2/suppliers/saude', 'Fornecedores'],
+    // A rota antiga continua abrindo a Saúde do cadastro; quem acende é a casa dela.
+    ['/v2/financial/cadastro', 'Fornecedores'],
+  ])('%s acende só "%s"', (rota, item) => {
+    renderMenu(rota);
+    const acesos = ativos();
+    expect(acesos.filter((r) => r?.includes(item))).toHaveLength(1);
+    expect(acesos).toHaveLength(1);
+  });
+
+  it('Relatórios é um link direto para a Central, sem grupo para abrir', async () => {
+    renderMenu('/v2/dashboard');
+    const link = (await screen.findAllByRole('link')).find((l) => l.textContent?.trim() === 'Central de relatórios');
+    expect(link).toHaveAttribute('href', '/v2/reports');
+  });
+
+  it('Cobranças, DRE, Aging e Gerenciais não estão mais no menu', async () => {
+    renderMenu('/v2/financial');
+    const rotulos = (await screen.findAllByRole('link')).map((l) => l.textContent?.trim() ?? '');
+    for (const velho of ['Cobranças', 'DRE', 'Aging (idade das contas)', 'Gerenciais']) {
+      expect(rotulos.some((r) => r === velho), `"${velho}" voltou ao menu`).toBe(false);
+    }
+  });
+});

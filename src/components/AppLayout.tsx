@@ -8,7 +8,7 @@ import { supabase } from '@/integrations/supabase/client';
 import {
   LayoutDashboard, Users, Ship, Anchor, Package, ClipboardList,
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, TrendingUp,
-  Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle, CreditCard,
+  Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle,
   Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot, Boxes, LayoutGrid, ListChecks,
   Sparkles, ArrowLeftRight, TrendingDown, Wallet, Wand2, Landmark, Receipt
 } from 'lucide-react';
@@ -83,7 +83,21 @@ type NavGroup = {
   icon: typeof LayoutDashboard;
   roles?: string[];
   items: NavItem[];
+  /**
+   * Grupo de uma porta só: aparece como link direto, sem abrir e fechar. "Relatórios ▸
+   * Central de relatórios" era um clique a mais para chegar ao único lugar do grupo.
+   */
+  direto?: boolean;
 };
+
+/**
+ * Rotas que não têm item próprio no menu e moram em outro destino. Sem isto, o prefixo
+ * acenderia o item errado: /v2/financial/cadastro acenderia a Visão Geral, mas a casa da Saúde
+ * do cadastro é Fornecedores (26/09/2026).
+ */
+const MORA_EM: Array<[string, string]> = [
+  ['/v2/financial/cadastro', '/v2/suppliers'],
+];
 
 const roleLabels: Record<string, string> = {
   admin: 'Administrador',
@@ -244,6 +258,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
       // Contas Bancárias foram para Cadastros, Regras é aba do Extrato — é lá que ela
       // atua — e Comissões saiu do menu por ser tela de uso raro; virou aba de Contas a
       // Pagar, que é de onde a comissão é paga.
+      //
+      // 26/09/2026: as 14 abas de /v2/financial acabaram — cada item daqui abre SÓ o seu
+      // assunto. Cobranças virou aba de Contas a Receber (é a mesma conversa: quem me deve).
       items: [
         { label: 'Visão Geral', icon: DollarSign, path: '/v2/financial', roles: ['admin', 'financial'] },
         { label: 'Extrato', icon: Sparkles, path: '/v2/financial/inbox', roles: ['admin', 'financial'] },
@@ -253,7 +270,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
         // Despesas (26/09/2026): o que JÁ saiu e em que categoria entrou. Contas a Pagar é o que
         // ainda se deve; faltava um lugar para o dono ver para onde foi o dinheiro.
         { label: 'Despesas', icon: Receipt, path: '/v2/financial/despesas', roles: ['admin', 'financial'] },
-        { label: 'Cobranças', icon: CreditCard, path: '/v2/collections', roles: ['admin', 'financial'] },
       ],
     },
     {
@@ -272,17 +288,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
     {
       // Leitura, não ação — e é por isso que o grupo existe.
       //
-      // DRE e Aging estavam escondidos como aba do Financeiro, no meio de treze. São as
-      // duas leituras que respondem "como foi o mês" e "quem está me devendo há quanto
-      // tempo", e ninguém as procura clicando em "Visão Geral".
+      // 26/09/2026, pedido do dono: "tudo que é demonstrativo ou relatório deveria estar em
+      // uma só aba". DRE, Aging e Gerenciais eram três entradas; agora é uma porta só, a
+      // Central de relatórios, com Resumo do mês, Fluxo de caixa, DRE, Para onde foi o
+      // dinheiro, Quem deve e a quem devo, e Operação lá dentro, como abas.
       id: 'relatorios',
       label: 'Relatórios',
       icon: BarChart3,
       roles: ['admin', 'financial'],
+      direto: true,
       items: [
-        { label: 'DRE', icon: TrendingUp, path: '/v2/financial/dre', roles: ['admin', 'financial'] },
-        { label: 'Aging (idade das contas)', icon: History, path: '/v2/financial/aging', roles: ['admin', 'financial'] },
-        { label: 'Gerenciais', icon: BarChart3, path: '/v2/reports', roles: ['admin', 'financial'] },
+        { label: 'Central de relatórios', icon: BarChart3, path: '/v2/reports', roles: ['admin', 'financial'] },
       ],
     },
     {
@@ -314,14 +330,17 @@ export function AppLayout({ children }: { children: ReactNode }) {
     if (path === '/') return location.pathname === '/';
 
     // D6/F4 (19/09/2026): os itens do Financeiro viraram rotas de verdade (/v2/financial/inbox),
-    // então o menu compara só o pathname. Um item por caminho; nada de ?tab= aqui.
+    // então o menu compara só o pathname. Um item por caminho; nada de ?tab= aqui. As abas de
+    // cada tela são um segmento a mais (/v2/financial/inbox/cartao) e acendem o item da tela.
     const rota = path;
-    if (location.pathname === rota) return true;
+    const moradia = MORA_EM.find(([prefixo]) => location.pathname === prefixo || location.pathname.startsWith(prefixo + '/'));
+    const pathname = moradia ? moradia[1] : location.pathname;
+    if (pathname === rota) return true;
 
     // Item mais específico ganha, para /v2/clients não acender junto de /v2/clients/:id
     // (e /v2/financial não acender junto de /v2/financial/inbox).
     const allPaths = groups.flatMap(g => g.items.map(i => i.path));
-    const matchingPaths = allPaths.filter(p => location.pathname.startsWith(p) && (location.pathname.length === p.length || location.pathname.charAt(p.length) === '/'));
+    const matchingPaths = allPaths.filter(p => pathname.startsWith(p) && (pathname.length === p.length || pathname.charAt(p.length) === '/'));
     const longestMatch = matchingPaths.reduce((a, b) => a.length > b.length ? a : b, '');
 
     if (longestMatch) {
@@ -329,7 +348,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     }
 
     // Fallback para caminhos sem item exato no menu (como /clients/new).
-    return location.pathname.startsWith(rota + '/');
+    return pathname.startsWith(rota + '/');
   };
 
   // Filter items based on roles and dynamic permissions (metadata.visible_areas)
@@ -474,6 +493,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 {group.items.map((item) => renderNavItem(item, false))}
               </div>
             );
+          }
+
+          // Grupo de uma porta só vira link direto: abrir um grupo para ver um item só era um
+          // clique a mais (Relatórios → Central de relatórios).
+          if (group.direto && group.items.length === 1) {
+            return <div key={group.id}>{renderNavItem(group.items[0], false)}</div>;
           }
 
           return (

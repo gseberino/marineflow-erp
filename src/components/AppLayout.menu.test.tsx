@@ -7,6 +7,9 @@
 // A regra que ficou: MENU é destino (o que vou fazer agora), ABA é recorte do mesmo
 // material (de que ângulo eu olho). Nada nos dois. Estes testes guardam essa regra, que
 // se desfaz sozinha assim que alguém "só adicionar um item".
+//
+// 26/09/2026: a barra de 14 abas do Financeiro acabou — cada item do menu abre só o seu
+// assunto, e os relatórios viraram uma porta só (Central de relatórios).
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -48,7 +51,8 @@ describe('menu lateral', () => {
     expect(fin.itens).toEqual([
       'Visão Geral', 'Extrato', 'Conciliação',
       // Despesas (26/09/2026): o que JÁ saiu e em que categoria entrou; Contas a Pagar é o que se deve.
-      'Contas a Receber', 'Contas a Pagar', 'Despesas', 'Cobranças',
+      // Cobranças saiu em 26/09/2026: virou aba de Contas a Receber (é a mesma conversa).
+      'Contas a Receber', 'Contas a Pagar', 'Despesas',
     ]);
   });
 
@@ -58,10 +62,10 @@ describe('menu lateral', () => {
     expect(grupo('Fiscal')!.itens).toHaveLength(1);
   });
 
-  it('DRE e Aging saíram de aba escondida para Relatórios', () => {
-    const rel = grupo('Relatórios')!;
-    expect(rel.itens).toContain('DRE');
-    expect(rel.itens.some((i) => i.startsWith('Aging'))).toBe(true);
+  it('Relatórios é uma porta só: a Central de relatórios', () => {
+    // Pedido do dono (26/09/2026): "tudo que é demonstrativo ou relatório deveria estar em uma
+    // só aba". DRE, Aging, Gerenciais e Programação vivem DENTRO da Central, como abas.
+    expect(grupo('Relatórios')!.itens).toEqual(['Central de relatórios']);
   });
 
   it('cadastro de pessoa e de banco vive em Cadastros, junto dos outros', () => {
@@ -72,9 +76,23 @@ describe('menu lateral', () => {
 
   it('o que virou aba não fica também no menu — era a duplicação da queixa', () => {
     const todos = grupos.flatMap((g) => g.itens);
-    for (const repetido of ['Regras da IA', 'Comissões', 'Notas de Serviço (NFS-e)']) {
+    for (const repetido of [
+      'Regras da IA', 'Regras', 'Comissões', 'Reembolsos', 'Notas de Serviço (NFS-e)',
+      // 26/09/2026: abas das telas novas — Cobranças (Contas a Receber), Cartões e Regras
+      // (Extrato), Fechamento (Conciliação), Saúde do cadastro (Fornecedores) e os relatórios
+      // (Central de relatórios).
+      'Cobranças', 'Cartões', 'Fechamento', 'Saúde do cadastro',
+      'DRE', 'Aging', 'Aging (idade das contas)', 'Gerenciais', 'Programação', 'Fluxo de caixa',
+    ]) {
       expect(todos, `"${repetido}" voltou ao menu`).not.toContain(repetido);
     }
+  });
+
+  it('cada item do Financeiro é uma tela de assunto único, sem ?tab=', () => {
+    const trecho = fonte.slice(fonte.indexOf("id: 'financeiro'"), fonte.indexOf("id: 'fiscal'"));
+    const caminhos = [...trecho.matchAll(/path: '([^']+)'/g)].map((m) => m[1]);
+    expect(caminhos.length).toBeGreaterThan(0);
+    for (const c of caminhos) expect(c, c).not.toContain('?');
   });
 
   it('nenhum rótulo aparece em dois grupos diferentes', () => {

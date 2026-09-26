@@ -37,10 +37,17 @@ const PAGES = [
   { path: '/v2/services', modes: ['light', 'dark'], slug: 'services', themeVia: 'storage' },
   { path: '/v2/suppliers', modes: ['light', 'dark'], slug: 'suppliers', themeVia: 'storage' },
   { path: '/v2/financial', modes: ['light', 'dark'], slug: 'financial', themeVia: 'storage' },
-  { path: '/v2/financial?tab=payables', modes: ['light', 'dark'], slug: 'payables', themeVia: 'storage' },
-  { path: '/v2/collections', modes: ['light', 'dark'], slug: 'collections', themeVia: 'storage' },
-  { path: '/v2/commissions', modes: ['light', 'dark'], slug: 'commissions', themeVia: 'storage' },
+  /* 26/09/2026: um cômodo por assunto no Financeiro e a Central de relatórios — as rotas
+     canônicas (as antigas, com ?tab=, só redirecionam para cá). */
+  { path: '/v2/financial/payables', modes: ['light', 'dark'], slug: 'payables', themeVia: 'storage' },
+  { path: '/v2/financial/payables/reembolsos', modes: ['light', 'dark'], slug: 'reimbursements', themeVia: 'storage' },
+  { path: '/v2/receivables/cobrancas', modes: ['light', 'dark'], slug: 'collections', themeVia: 'storage' },
+  { path: '/v2/financial/payables/comissoes', modes: ['light', 'dark'], slug: 'commissions', themeVia: 'storage' },
   { path: '/v2/reports', modes: ['light', 'dark'], slug: 'reports', themeVia: 'storage' },
+  { path: '/v2/reports/fluxo', modes: ['light', 'dark'], slug: 'reports-fluxo', themeVia: 'storage' },
+  { path: '/v2/reports/categorias', modes: ['light', 'dark'], slug: 'reports-categorias', themeVia: 'storage' },
+  { path: '/v2/reports/aging', modes: ['light', 'dark'], slug: 'reports-aging', themeVia: 'storage' },
+  { path: '/v2/reports/operacao', modes: ['light', 'dark'], slug: 'reports-operacao', themeVia: 'storage' },
   { path: '/v2/inventory/smart-purchase', modes: ['light', 'dark'], slug: 'smartbuy', themeVia: 'storage' },
   { path: '/v2/inventory', modes: ['light', 'dark'], slug: 'inventory', themeVia: 'storage' },
   { path: '/v2/inventory?tab=movements', modes: ['light', 'dark'], slug: 'movements', themeVia: 'storage' },
@@ -56,9 +63,14 @@ const PAGES = [
   /* Telas nascidas depois do inventário original do redesign (auditoria
      30/07/2026): tudo que entra no sistema entra também neste crivo. */
   { path: '/day-board', modes: ['light', 'dark'], slug: 'dayboard', themeVia: 'storage' },
-  { path: '/v2/financial?tab=banks', modes: ['light', 'dark'], slug: 'fin-banks', themeVia: 'storage' },
-  { path: '/v2/financial?tab=inbox', modes: ['light', 'dark'], slug: 'fin-inbox', themeVia: 'storage' },
-  { path: '/v2/financial?tab=rules', modes: ['light', 'dark'], slug: 'fin-rules', themeVia: 'storage' },
+  { path: '/v2/financial/banks', modes: ['light', 'dark'], slug: 'fin-banks', themeVia: 'storage' },
+  { path: '/v2/financial/inbox', modes: ['light', 'dark'], slug: 'fin-inbox', themeVia: 'storage' },
+  { path: '/v2/financial/inbox/regras', modes: ['light', 'dark'], slug: 'fin-rules', themeVia: 'storage' },
+  { path: '/v2/financial/inbox/cartao', modes: ['light', 'dark'], slug: 'fin-cartao', themeVia: 'storage' },
+  { path: '/v2/financial/reconciliation', modes: ['light', 'dark'], slug: 'fin-conciliacao', themeVia: 'storage' },
+  { path: '/v2/financial/reconciliation/fechar', modes: ['light', 'dark'], slug: 'fin-fechar', themeVia: 'storage' },
+  { path: '/v2/financial/despesas', modes: ['light', 'dark'], slug: 'fin-despesas', themeVia: 'storage' },
+  { path: '/v2/suppliers/saude', modes: ['light', 'dark'], slug: 'suppliers-saude', themeVia: 'storage' },
 ];
 
 if (!EMAIL || !PASSWORD) {

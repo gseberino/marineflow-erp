@@ -71,6 +71,33 @@ export function useSaveBankConnection() {
   });
 }
 
+/**
+ * Desativa (ou reativa) uma conexão — em vez de apagá-la.
+ *
+ * Apagar a conexão do C6 deixaria as 1.849 transações dela sem conta: o extrato por conta, o
+ * saldo e a conferência deixariam de achá-las. Desativada, a busca do extrato (banking-sync,
+ * que só lê conexões ativas) para, as fichas de saldo a escondem, e tudo o que já foi
+ * importado continua no lugar. Reativar volta como estava.
+ */
+export function useSetBankConnectionActive() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, active }: { id: string; active: boolean }) => {
+      const { error } = await supabase.from('bank_connections').update({ active }).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bank-connections'] });
+      qc.invalidateQueries({ queryKey: ['saldo-das-contas'] });
+    },
+  });
+}
+
+/**
+ * Apaga a conexão. A tela não usa mais (26/09/2026): ver useSetBankConnectionActive — apagar
+ * soltaria as transações da conta. Fica para quem precisar remover uma conexão cadastrada por
+ * engano, sem transação nenhuma.
+ */
 export function useDeleteBankConnection() {
   const qc = useQueryClient();
   return useMutation({

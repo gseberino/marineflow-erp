@@ -1,8 +1,12 @@
 import { useMemo, useState } from 'react';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Building2, Download, Pencil, Plus, Upload } from 'lucide-react';
 import { useI18n } from '@/i18n';
+import { useAuth } from '@/hooks/use-auth';
 import { useSuppliers, type Supplier } from '@/hooks/use-suppliers';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SaudeDoCadastroPanel } from '@/components/SaudeDoCadastroPanel';
 import { supabase } from '@/integrations/supabase/client';
 import { exportToCSV, SUPPLIERS_COLUMNS } from '@/lib/export-utils';
 import { Button } from '@/components/ui/button';
@@ -19,12 +23,24 @@ import { V2Shell } from '@/v2/components/V2Shell';
 import '@/v2/tokens.css';
 
 /* Onda A · Fornecedores v2 — paridade com SupplierList v1 (busca, presets,
-   import, CSV, produtos vinculados, edição via dialog). */
+   import, CSV, produtos vinculados, edição via dialog).
+
+   26/09/2026: ganhou a aba "Saúde do cadastro" (/v2/suppliers/saude) — cadastro de fornecedor
+   que atrapalha o reconhecimento automático, com a correção sugerida. Vivia como uma das 14
+   abas do Financeiro; a casa dela é aqui, junto do cadastro que ela conserta. Só admin e
+   financeiro veem (as correções mexem no cadastro e a evidência vem do extrato). */
 
 const PAGE_SIZE = 20;
 
+const PARA_QUE_SERVE_DA_SAUDE = 'Cadastros que atrapalham o reconhecimento automático do extrato (apelido ruim, CNPJ faltando ou duplicado), com a correção sugerida.';
+
 export default function SuppliersListV2() {
   const { t } = useI18n();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { aba: abaDaRota } = useParams<{ aba?: string }>();
+  const veSaude = user?.role === 'admin' || user?.role === 'financial';
+  const aba = abaDaRota === 'saude' && veSaude ? 'saude' : 'lista';
   const { data, isLoading, error } = useSuppliers();
   const suppliers = useMemo(() => (data ?? []) as Supplier[], [data]);
 
@@ -111,13 +127,103 @@ export default function SuppliersListV2() {
     },
   ];
 
+  // Aba desconhecida (ou sem permissão para a Saúde do cadastro) volta para a lista.
+  if (abaDaRota && abaDaRota !== aba) return <Navigate to="/v2/suppliers" replace />;
+
+  const lista = (
+    <>
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <Input
+          placeholder={t.suppliers.searchPlaceholder}
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          className="h-9 flex-1"
+        />
+        <FilterPresets
+          filterType="suppliers"
+          currentConfig={{ search }}
+          hasActiveFilters={!!search}
+          onApply={(c: { search?: string }) => { setSearch(c.search ?? ''); setPage(1); }}
+        />
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+      ) : error ? (
+        <div className="rounded-lg border bg-card p-8 text-center"><p className="text-destructive">{(error as Error).message}</p></div>
+      ) : filtered.length === 0 ? (
+        <div className="space-y-3 rounded-lg border bg-card p-12 text-center">
+          <Building2 className="mx-auto h-12 w-12 text-muted-foreground" />
+          <p className="text-muted-foreground">{suppliers.length === 0 ? t.suppliers.noSuppliers : t.common.noResults}</p>
+          {suppliers.length === 0 && (
+            <Button className="gap-1.5" onClick={() => { setEditing(null); setFormOpen(true); }}>
+              <Plus className="h-4 w-4" /> {t.suppliers.createFirst}
+            </Button>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="hidden md:block">
+            <DataTable<Supplier>
+              rows={paginated}
+              rowKey={(s) => s.id}
+              columns={columns}
+              sort={sort}
+              onSort={handleSort}
+              onRowClick={openEdit}
+              emptyMessage={t.common.noResults}
+              rowActions={(s) => (
+                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Editar fornecedor" title="Editar" onClick={() => openEdit(s)}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
+              )}
+            />
+          </div>
+          <div className="space-y-2.5 md:hidden">
+            {paginated.map((s) => (
+              <EntityCard
+                key={s.id}
+                badge={<StatusChip tone={s.active ? 'success' : 'neutral'}>{s.active ? t.common.active : t.common.inactive}</StatusChip>}
+                title={s.name}
+                lines={[
+                  [s.trade_name, s.cnpj_cpf].filter(Boolean).join(' · ') || '—',
+                  [s.contact_name, [s.city, s.state].filter(Boolean).join('/'), `${productCounts?.[s.id] ?? 0} produto(s)`].filter(Boolean).join(' · '),
+                ]}
+                onClick={() => openEdit(s)}
+              />
+            ))}
+            <button
+              type="button"
+              aria-label={t.suppliers.newSupplier}
+              onClick={() => { setEditing(null); setFormOpen(true); }}
+              className="fixed bottom-24 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform active:scale-95"
+            >
+              <Plus className="h-6 w-6" />
+            </button>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-16 text-sm md:pb-0">
+              <span className="text-muted-foreground">{filtered.length} fornecedores · Página {page} de {totalPages}</span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>Anterior</Button>
+                <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Próxima</Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+
   return (
     <V2Shell>
       <PageShell
         breadcrumb={[{ label: 'Cadastros' }, { label: t.suppliers.title }]}
         title={t.suppliers.title}
-        count={suppliers.length}
-        actions={
+        count={aba === 'lista' ? suppliers.length : undefined}
+        description={aba === 'saude' ? PARA_QUE_SERVE_DA_SAUDE : undefined}
+        actions={aba === 'lista' ? (
           <>
             <Button variant="outline" size="sm" className="hidden gap-1.5 sm:inline-flex" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4" /> {t.imports.importData}
@@ -132,89 +238,18 @@ export default function SuppliersListV2() {
               <Plus className="h-4 w-4" /> {t.suppliers.newSupplier}
             </Button>
           </>
-        }
+        ) : undefined}
       >
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <Input
-            placeholder={t.suppliers.searchPlaceholder}
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="h-9 flex-1"
-          />
-          <FilterPresets
-            filterType="suppliers"
-            currentConfig={{ search }}
-            hasActiveFilters={!!search}
-            onApply={(c: { search?: string }) => { setSearch(c.search ?? ''); setPage(1); }}
-          />
-        </div>
-
-        {isLoading ? (
-          <div className="space-y-2">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
-        ) : error ? (
-          <div className="rounded-lg border bg-card p-8 text-center"><p className="text-destructive">{(error as Error).message}</p></div>
-        ) : filtered.length === 0 ? (
-          <div className="space-y-3 rounded-lg border bg-card p-12 text-center">
-            <Building2 className="mx-auto h-12 w-12 text-muted-foreground" />
-            <p className="text-muted-foreground">{suppliers.length === 0 ? t.suppliers.noSuppliers : t.common.noResults}</p>
-            {suppliers.length === 0 && (
-              <Button className="gap-1.5" onClick={() => { setEditing(null); setFormOpen(true); }}>
-                <Plus className="h-4 w-4" /> {t.suppliers.createFirst}
-              </Button>
-            )}
-          </div>
-        ) : (
-          <>
-            <div className="hidden md:block">
-              <DataTable<Supplier>
-                rows={paginated}
-                rowKey={(s) => s.id}
-                columns={columns}
-                sort={sort}
-                onSort={handleSort}
-                onRowClick={openEdit}
-                emptyMessage={t.common.noResults}
-                rowActions={(s) => (
-                  <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Editar fornecedor" title="Editar" onClick={() => openEdit(s)}>
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                )}
-              />
-            </div>
-            <div className="space-y-2.5 md:hidden">
-              {paginated.map((s) => (
-                <EntityCard
-                  key={s.id}
-                  badge={<StatusChip tone={s.active ? 'success' : 'neutral'}>{s.active ? t.common.active : t.common.inactive}</StatusChip>}
-                  title={s.name}
-                  lines={[
-                    [s.trade_name, s.cnpj_cpf].filter(Boolean).join(' · ') || '—',
-                    [s.contact_name, [s.city, s.state].filter(Boolean).join('/'), `${productCounts?.[s.id] ?? 0} produto(s)`].filter(Boolean).join(' · '),
-                  ]}
-                  onClick={() => openEdit(s)}
-                />
-              ))}
-              <button
-                type="button"
-                aria-label={t.suppliers.newSupplier}
-                onClick={() => { setEditing(null); setFormOpen(true); }}
-                className="fixed bottom-24 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform active:scale-95"
-              >
-                <Plus className="h-6 w-6" />
-              </button>
-            </div>
-
-            {totalPages > 1 && (
-              <div className="flex flex-wrap items-center justify-between gap-2 pb-16 text-sm md:pb-0">
-                <span className="text-muted-foreground">{filtered.length} fornecedores · Página {page} de {totalPages}</span>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>Anterior</Button>
-                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Próxima</Button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
+        {veSaude ? (
+          <Tabs value={aba} onValueChange={(v) => navigate(v === 'saude' ? '/v2/suppliers/saude' : '/v2/suppliers', { replace: true })}>
+            <TabsList className="flex h-auto w-full flex-wrap justify-start">
+              <TabsTrigger value="lista">{t.suppliers.title}</TabsTrigger>
+              <TabsTrigger value="saude">Saúde do cadastro</TabsTrigger>
+            </TabsList>
+            <TabsContent value="lista" className="mt-4 space-y-4">{aba === 'lista' && lista}</TabsContent>
+            <TabsContent value="saude" className="mt-4">{aba === 'saude' && <SaudeDoCadastroPanel />}</TabsContent>
+          </Tabs>
+        ) : lista}
       </PageShell>
 
       <SupplierFormDialog open={formOpen} onOpenChange={setFormOpen} supplier={editing} />

@@ -27,7 +27,8 @@ const ENTITY_CONFIG: Record<RelatedEntityType, { label: string; Icon: typeof Bri
   receivable:     { label: 'Recebível',  Icon: DollarSign,   route: () => '/v2/receivables' },
   payable:        { label: 'Pagável',    Icon: DollarSign,   route: () => '/v2/financial/payables' },
   purchase_order: { label: 'OC',         Icon: ShoppingCart, route: (id) => `/v2/purchase-orders/${id}` },
-  collection:     { label: 'Cobrança',   Icon: DollarSign,   route: () => '/v2/collections' },
+  // Cobranças é aba de Contas a Receber desde 26/09/2026 (/v2/collections ainda redireciona).
+  collection:     { label: 'Cobrança',   Icon: DollarSign,   route: () => '/v2/receivables/cobrancas' },
   stock_item:     { label: 'Estoque',    Icon: Package,      route: () => '/v2/inventory' },
   quote_request:  { label: 'Cotação',    Icon: ClipboardList, route: (id) => `/purchasing/quotes/${id}` },
 };

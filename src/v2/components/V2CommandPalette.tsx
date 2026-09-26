@@ -1,71 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import {
-  Anchor, BarChart3, Boxes, Building2, CalendarDays, ClipboardList, CreditCard,
-  DollarSign, FileText, LayoutDashboard, MessageCircle, Moon, Package, Receipt,
-  Search, Settings, Ship, Sun, Target, Truck, Users, Wrench,
-} from 'lucide-react';
+import { ClipboardList, Moon, Sun, Users } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem,
   CommandList, CommandSeparator,
 } from '@/components/ui/command';
+import { NAV } from './destinos-da-paleta';
 
 /* Fase 4 · Command Palette (⌘K / Ctrl+K) — presente em todas as rotas v2.
    Navegação por qualquer tela + busca ao vivo de OS e clientes. */
-
-const NAV: { group: string; items: { label: string; to: string; icon: typeof Search }[] }[] = [
-  {
-    group: 'Operacional',
-    items: [
-      { label: 'Dashboard', to: '/v2/dashboard', icon: LayoutDashboard },
-      { label: 'CRM & Funil', to: '/v2/crm', icon: Target },
-      { label: 'Ordens de Serviço', to: '/v2/service-orders', icon: ClipboardList },
-      { label: 'Orçamentos', to: '/v2/quotes', icon: FileText },
-      { label: 'Cobranças', to: '/v2/collections', icon: CreditCard },
-      { label: 'Agenda', to: '/v2/agenda', icon: CalendarDays },
-    ],
-  },
-  {
-    group: 'Cadastros',
-    items: [
-      { label: 'Clientes', to: '/v2/clients', icon: Users },
-      { label: 'Embarcações', to: '/v2/vessels', icon: Ship },
-      { label: 'Marinas', to: '/v2/marinas', icon: Anchor },
-      { label: 'Produtos', to: '/v2/products', icon: Package },
-      { label: 'Serviços', to: '/v2/services', icon: Wrench },
-      { label: 'Fornecedores', to: '/v2/suppliers', icon: Building2 },
-    ],
-  },
-  {
-    group: 'Financeiro',
-    items: [
-      { label: 'Financeiro', to: '/v2/financial', icon: DollarSign },
-      { label: 'Recebíveis', to: '/v2/receivables', icon: DollarSign },
-      { label: 'Comissões', to: '/v2/commissions', icon: Users },
-      { label: 'Emissão Fiscal (NF-e)', to: '/v2/fiscal/emissao', icon: Receipt },
-      { label: 'Notas de Serviço (NFS-e)', to: '/fiscal/nfse', icon: Receipt },
-      { label: 'Relatórios', to: '/v2/reports', icon: BarChart3 },
-    ],
-  },
-  {
-    group: 'Estoque & Compras',
-    items: [
-      { label: 'Estoque', to: '/v2/inventory', icon: Boxes },
-      { label: 'Ordens de Compra', to: '/v2/purchase-orders', icon: Truck },
-      { label: 'Assistente de Compras', to: '/v2/inventory/smart-purchase', icon: Package },
-      { label: 'Entrada de Mercadoria (XML)', to: '/v2/inventory/import-xml', icon: FileText },
-    ],
-  },
-  {
-    group: 'Sistema',
-    items: [
-      { label: 'WhatsApp — Inbox', to: '/v2/whatsapp/leads', icon: MessageCircle },
-      { label: 'Configurações', to: '/v2/settings', icon: Settings },
-    ],
-  },
-];
 
 export function V2CommandPalette({ onToggleTheme, mode }: { onToggleTheme: () => void; mode: 'light' | 'dark' }) {
   const [open, setOpen] = useState(false);
@@ -150,9 +95,15 @@ export function V2CommandPalette({ onToggleTheme, mode }: { onToggleTheme: () =>
         {NAV.map((g) => (
           <CommandGroup key={g.group} heading={g.group}>
             {g.items.map((item) => (
-              <CommandItem key={item.to} value={`${g.group} ${item.label}`} onSelect={() => go(item.to)}>
-                <item.icon className="mr-2 h-4 w-4" />
-                {item.label}
+              <CommandItem
+                key={`${g.group}-${item.label}`}
+                value={`${g.group} ${item.label}`}
+                keywords={[...(item.keywords ?? []), ...(item.onde ? [item.onde] : [])]}
+                onSelect={() => go(item.to)}
+              >
+                <item.icon className="mr-2 h-4 w-4 shrink-0" />
+                <span className="truncate">{item.label}</span>
+                {item.onde && <span className="ml-2 truncate text-xs text-muted-foreground">→ {item.onde}</span>}
               </CommandItem>
             ))}
           </CommandGroup>

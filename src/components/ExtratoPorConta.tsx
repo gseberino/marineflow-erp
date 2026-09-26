@@ -121,14 +121,30 @@ function LancadosSozinhos({ contaId }: { contaId: string | null }) {
 }
 
 export function ExtratoPorConta({
-  visaoInicial = 'revisar', onCriarRegra,
+  visaoInicial = 'revisar', visao: visaoControlada, contaId: contaControlada, onEscolherConta, onCriarRegra,
 }: {
   visaoInicial?: VisaoDoExtrato;
+  /**
+   * Visão escolhida por fora (as abas da tela do Extrato, 26/09/2026). Com ela, o seletor
+   * interno some: a tela já mostra as visões como abas, e dois seletores para a mesma coisa
+   * seriam a duplicação que a reorganização veio desfazer.
+   */
+  visao?: VisaoDoExtrato;
+  /** Conta escolhida por fora: trocar de aba não perde a conta das fichas. */
+  contaId?: string | null;
+  onEscolherConta?: (id: string | null) => void;
   onCriarRegra?: (s: SementeDeRegra) => void;
 }) {
   const { data: conexoes = [] } = useBankConnections();
-  const [contaId, setContaId] = useState<string | null>(null);
-  const [visao, setVisao] = useState<VisaoDoExtrato>(visaoInicial);
+  const [contaInterna, setContaInterna] = useState<string | null>(null);
+  const [visaoInterna, setVisaoInterna] = useState<VisaoDoExtrato>(visaoInicial);
+  const controlada = visaoControlada !== undefined;
+  const visao = visaoControlada ?? visaoInterna;
+  const contaId = contaControlada !== undefined ? contaControlada : contaInterna;
+  const setContaId = (id: string | null) => {
+    if (onEscolherConta) onEscolherConta(id);
+    if (contaControlada === undefined) setContaInterna(id);
+  };
   const contaAtual = conexoes.find((c) => c.id === contaId);
   const [anotando, setAnotando] = useState(false);
 
@@ -138,32 +154,40 @@ export function ExtratoPorConta({
           Caixa tem "Lançar" e "Contei o dinheiro". */}
       <SaldosDasContas contaAtiva={contaId} onEscolher={setContaId} />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex flex-wrap gap-1" role="tablist" aria-label="Visão do extrato">
-          {([
-            ['revisar', 'Para revisar'],
-            ['saldo', 'Extrato com saldo'],
-            ['fora', 'Fora da fila'],
-          ] as const).map(([v, r]) => (
-            <Button key={v} role="tab" aria-selected={visao === v} size="sm" variant={visao === v ? 'default' : 'outline'} className="h-8 text-xs"
-              onClick={() => setVisao(v)}>
-              {r}
+      {/* Com a visão escolhida por fora, as abas da tela já dizem para que serve cada uma:
+          fica só o "Anotar antes do banco", que é da fila. */}
+      {(!controlada || visao === 'revisar') && (
+        <div className="flex flex-wrap items-center gap-2">
+          {!controlada && (
+            <>
+              <div className="flex flex-wrap gap-1" role="tablist" aria-label="Visão do extrato">
+                {([
+                  ['revisar', 'Para revisar'],
+                  ['saldo', 'Extrato com saldo'],
+                  ['fora', 'Fora da fila'],
+                ] as const).map(([v, r]) => (
+                  <Button key={v} role="tab" aria-selected={visao === v} size="sm" variant={visao === v ? 'default' : 'outline'} className="h-8 text-xs"
+                    onClick={() => setVisaoInterna(v)}>
+                    {r}
+                  </Button>
+                ))}
+              </div>
+              <Ajuda rotulo="O que cada visão mostra">
+                <b>Para revisar</b>: o que o banco trouxe e ainda precisa de uma decisão sua — aprovar só
+                registra, nenhum pagamento é feito. <b>Extrato com saldo</b>: o mês de uma conta como no app do
+                banco, com o saldo linha a linha e o que cada movimento virou. <b>Fora da fila</b>: o que saiu
+                da fila sem virar lançamento (duplicata, fatura, transferência entre contas suas), com o
+                motivo e o botão Devolver.
+              </Ajuda>
+            </>
+          )}
+          {visao === 'revisar' && (
+            <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs sm:ml-auto" onClick={() => setAnotando(true)}>
+              <NotebookPen className="h-3.5 w-3.5" /> Anotar antes do banco
             </Button>
-          ))}
+          )}
         </div>
-        <Ajuda rotulo="O que cada visão mostra">
-          <b>Para revisar</b>: o que o banco trouxe e ainda precisa de uma decisão sua — aprovar só
-          registra, nenhum pagamento é feito. <b>Extrato com saldo</b>: o mês de uma conta como no app do
-          banco, com o saldo linha a linha e o que cada movimento virou. <b>Fora da fila</b>: o que saiu
-          da fila sem virar lançamento (duplicata, fatura, transferência entre contas suas), com o
-          motivo e o botão Devolver.
-        </Ajuda>
-        {visao === 'revisar' && (
-          <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs sm:ml-auto" onClick={() => setAnotando(true)}>
-            <NotebookPen className="h-3.5 w-3.5" /> Anotar antes do banco
-          </Button>
-        )}
-      </div>
+      )}
 
       {visao === 'revisar' && (
         <>

@@ -1,751 +1,167 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Ban, Download, DollarSign, Paperclip, Pencil, Plus, Undo2 } from 'lucide-react';
-import {
-  Bar, BarChart, CartesianGrid, ComposedChart, Line, ResponsiveContainer,
-  Tooltip as RechartsTooltip, XAxis, YAxis,
-} from 'recharts';
-import { useI18n } from '@/i18n';
-import { useReceivables, usePayables, useFinancialSummary, useCashFlow } from '@/hooks/use-financial';
+import { useState } from 'react';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Plus } from 'lucide-react';
 import { usePendingReimbursements } from '@/hooks/use-service-order-expenses';
-import { exportToCSV } from '@/lib/export';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-// A comissão saiu do menu lateral (uso raro) e passou a viver aqui, ao lado de Contas a
-// Pagar — que é de onde ela é paga. O mesmo painel serve a rota /v2/commissions.
+// A comissão saiu do menu lateral (uso raro) e mora em Contas a Pagar — que é de onde ela é
+// paga. O link antigo /v2/commissions leva para cá.
 import { PainelDeComissoes } from '@/v2/pages/CommissionsV2';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
-import { PaymentDialog } from '@/components/PaymentDialog';
 import { LancarDialog, type TipoDeLancamento, type PorOnde } from '@/components/LancarDialog';
-import { CorrigirLancamentoDialog } from '@/components/CorrigirLancamentoDialog';
 import { DespesasPanel } from '@/components/DespesasPanel';
-import { DesfazerOuCancelarDialog, type AcaoNoLancamento } from '@/components/DesfazerOuCancelarDialog';
-import { AcoesDaLinha, type AcaoDaLinha } from '@/components/AcoesDaLinha';
-import { DREPanel } from '@/components/DREPanel';
 import { ConciliacaoPanel } from '@/components/ConciliacaoPanel';
 import { BankSourcesPanel } from '@/components/BankSourcesPanel';
 import type { SementeDeRegra } from '@/components/FinanceReviewInbox';
 import { FinanceRulesPanel, EditorDeRegra } from '@/components/FinanceRulesPanel';
-import { ExtratoPorConta } from '@/components/ExtratoPorConta';
+import { ExtratoPorConta, type VisaoDoExtrato } from '@/components/ExtratoPorConta';
 import { CartoesPanel } from '@/components/CartoesPanel';
 import { FechamentoPanel } from '@/components/FechamentoPanel';
 import { SaudeDoCadastroPanel } from '@/components/SaudeDoCadastroPanel';
-import { AgingReportPanel } from '@/components/AgingReportPanel';
-import { CashForecastPanel } from '@/components/CashForecastPanel';
 import { ReimbursementsPanel } from '@/components/ReimbursementsPanel';
 import { PageShell } from '@/v2/components/PageShell';
-import { KPIStat } from '@/v2/components/KPIStat';
-import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
-import { DataTable, type DataColumn, type SortState } from '@/v2/components/DataTable';
 import { V2Shell } from '@/v2/components/V2Shell';
-import { SaldosDasContas } from '@/components/SaldosDasContas';
+import { AvisoAbasMudaram } from '@/v2/components/AvisoAbasMudaram';
+import { VisaoGeral } from '@/v2/pages/financeiro/VisaoGeral';
+import { ContasAPagarLista } from '@/v2/pages/financeiro/ContasAPagarLista';
+import {
+  COMODOS, resolverFinanceiro, rotaDoComodo, paraQueServeDe, type Comodo,
+} from '@/v2/pages/financeiro/rotas';
 import '@/v2/tokens.css';
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   Onda B · Financeiro v2 — paridade com FinancialPage v1:
-   visão geral (KPIs + fluxo de caixa 3/6/12m + próximos 30d), DRE,
-   Pagáveis (filtros, busca por OS, agrupamento categoria/fornecedor/mês,
-   comprovante, reembolsos, registrar pagamento, editar, CSV, totais),
-   Conciliação e Aging (painéis reutilizados). Recebíveis vive em
-   /v2/receivables — a aba redireciona. Estado da aba na URL (?tab=).
+   Financeiro v2 — um cômodo por assunto (26/09/2026).
+
+   Até aqui toda rota /v2/financial/<secao> mostrava a MESMA barra com 14 abas (Visão Geral,
+   DRE, Contas a Pagar, Despesas, Comissões, Programação, Extrato, Conciliação, Cartões,
+   Regras, Fechamento, Saúde do cadastro, Contas bancárias, Aging). O dono: "ainda achei
+   abas demais". Agora cada rota abre SÓ o seu assunto, com título próprio, e as abas que
+   sobram são recortes do mesmo material, num nível só:
+
+     /v2/financial                 Visão Geral
+     /v2/financial/inbox[/aba]     Extrato: Para revisar · Extrato com saldo · Fora da fila ·
+                                   Cartão de crédito · Regras
+     /v2/financial/reconciliation  Conciliação: Conciliação · Fechar o mês
+     /v2/financial/payables        Contas a Pagar: Em aberto · Reembolsos · Comissões
+     /v2/financial/despesas        Despesas
+     /v2/financial/banks           Contas bancárias
+     /v2/financial/cadastro        Saúde do cadastro (a casa é Fornecedores; o link antigo
+                                   continua abrindo o painel)
+
+   DRE, Aging e Programação foram para a Central de relatórios (/v2/reports). Os links antigos
+   (?tab=, /cartoes, /rules, /fechamento, /comissoes, /dre…) levam ao lugar novo — o mapa está
+   em financeiro/rotas.ts, testado.
 ──────────────────────────────────────────────────────────────────────────── */
 
-type PayableRow = {
-  id: string;
-  description: string;
-  name?: string | null;
-  amount: number | null;
-  paid_amount?: number | null;
-  balance_amount?: number | null;
-  status?: string | null;
-  due_date: string;
-  notes?: string | null;
-  expense_category?: string | null;
-  origin?: string | null;
-  receipt_url?: string | null;
-  linked_service_order_id?: string | null;
-  issue_date?: string | null;
-  bank_transaction_id?: string | null;
-  supplier_id?: string | null;
-  payee_id?: string | null;
-  cost_center_id?: string | null;
-  suppliers?: { name?: string } | null;
-  service_orders?: { service_order_number?: string } | null;
-  service_order_expenses?: { receipt_url?: string | null }[] | null;
-};
-
-/**
- * Para que serve cada aba, numa frase — embaixo do título, sempre visível (pedido do dono,
- * 26/09/2026: "um breve resumo de para que serve cada aba"). Antes as 13 abas mostravam a
- * mesma frase.
- */
-const PARA_QUE_SERVE: Record<string, string> = {
-  overview: 'Como está o dinheiro hoje: quanto há em cada conta e no Caixa, o que você tem a receber e a pagar. Lucro ou prejuízo do período fica no DRE.',
-  dre: 'Diz se a empresa deu lucro ou prejuízo no período: o que foi vendido menos custos e despesas, pela data do lançamento. Não é o saldo do banco.',
-  payables: 'O que a empresa ainda deve pagar. O que já saiu, com a categoria de cada gasto, fica em Despesas.',
-  despesas: 'Tudo o que saiu (bancos, cartão, Caixa e bolso de sócio) e em que categoria entrou. Aqui você confere e corrige.',
-  comissoes: 'Comissões de técnicos e vendedores. Aprovar cria a conta a pagar.',
-  forecast: 'Previsão semana a semana, pelo que vence a receber e a pagar nas próximas 8 semanas: vai faltar dinheiro em alguma semana?',
-  inbox: 'O que o banco trouxe e ainda precisa de uma decisão sua, conta por conta. Aprovar só registra: nenhum pagamento é feito.',
-  reconciliation: 'Confere se o que foi lançado tem a linha correspondente no banco. No Extrato você parte do banco; aqui, do que você lançou.',
-  cartoes: 'As faturas do cartão de crédito: compras de cada ciclo, pagamento e juros. Compra no débito não fica aqui.',
-  rules: 'O que você ensinou o sistema a classificar. "Preencher e esperar meu OK" só sugere; "Lançar sozinha" lança sem clique.',
-  fechamento: 'Confere se o mês está completo e trava os números. Mês fechado não muda sem um motivo.',
-  cadastro: 'Cadastros que atrapalham o reconhecimento automático (apelido ruim, CNPJ faltando ou duplicado), com a correção sugerida.',
-  banks: 'Os bancos ligados ao sistema e o saldo de cada conta. O dia a dia do que entrou e saiu fica no Extrato.',
-  aging: 'Quem deve à empresa, por tempo de atraso: a vencer, 1–30, 31–60, 61–90 e mais de 90 dias.',
-};
-
-/** Seções que esta tela sabe mostrar (uma por aba). */
-const SECOES_DO_FINANCEIRO = new Set([
-  'overview', 'dre', 'payables', 'despesas', 'comissoes', 'forecast', 'inbox', 'reconciliation',
-  'cartoes', 'rules', 'fechamento', 'cadastro', 'banks', 'aging',
-]);
-
-/** Situações de uma conta que ainda se deve — o recorte com que Contas a Pagar abre. */
-const STATUS_EM_ABERTO = ['pending', 'partially_paid', 'overdue'];
-
-const isOverdue = (p: PayableRow) => p.status !== 'paid' && p.status !== 'cancelled' && new Date(p.due_date) < new Date();
-
-function statusView(p: PayableRow): { label: string; tone: StatusTone } {
-  if (isOverdue(p)) return { label: 'Em atraso', tone: 'critical' };
-  if (p.status === 'paid') return { label: 'Pago', tone: 'success' };
-  if (p.status === 'partially_paid') return { label: 'Parcial', tone: 'warning' };
-  if (p.status === 'cancelled') return { label: 'Cancelado', tone: 'neutral' };
-  return { label: 'Em aberto', tone: 'neutral' };
-}
-
-function dueAlert(p: PayableRow): { label: string; tone: StatusTone } | null {
-  if (p.status === 'paid' || p.status === 'cancelled') return null;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const due = new Date(p.due_date); due.setHours(0, 0, 0, 0);
-  const diff = Math.round((due.getTime() - today.getTime()) / 86400000);
-  if (diff < 0) return { label: `${Math.abs(diff)}d em atraso`, tone: 'critical' };
-  if (diff === 0) return { label: 'Vence hoje', tone: 'critical' };
-  if (diff <= 7) return { label: `Vence em ${diff}d`, tone: 'warning' };
-  return null;
-}
-
-const originView = (origin: string | null | undefined): { label: string; tone: StatusTone } => {
-  switch (origin) {
-    case 'service_order_expense': return { label: 'Despesa de OS', tone: 'info' };
-    case 'bank_reconciliation': return { label: 'Conciliação', tone: 'info' };
-    default: return { label: 'Manual', tone: 'neutral' };
-  }
-};
-
-type GroupBy = 'none' | 'category' | 'supplier' | 'month';
-
-function groupPayables(payables: PayableRow[], groupBy: GroupBy): Record<string, PayableRow[]> {
-  if (groupBy === 'none') return { Todos: payables };
-  const groups: Record<string, PayableRow[]> = {};
-  const keyOf = (p: PayableRow) => {
-    if (groupBy === 'category') return p.expense_category || 'Sem categoria';
-    if (groupBy === 'supplier') return p.suppliers?.name || p.name || 'Sem fornecedor';
-    return new Date(p.due_date).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-  };
-  for (const p of payables) {
-    const k = keyOf(p);
-    (groups[k] ??= []).push(p);
-  }
-  return groups;
-}
+const TIPOS_DE_LANCAMENTO = ['despesa', 'recebimento', 'transferencia', 'contagem'];
 
 export default function FinancialV2() {
-  const { t, formatCurrency, formatDate } = useI18n();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
+  const { secao, aba } = useParams<{ secao?: string; aba?: string }>();
+  const rota = resolverFinanceiro(secao, aba, searchParams.get('tab'));
 
-  const { data: recData, error: recError } = useReceivables();
-  const { data: payData, isLoading: loadingPay, error: payError } = usePayables();
-  const { data: summary, isLoading: loadingSummary, error: summaryError } = useFinancialSummary();
-  const [cfMonths, setCfMonths] = useState(6);
-  const { data: cashFlow } = useCashFlow(cfMonths);
-  const { data: pendingReimb } = usePendingReimbursements();
-
-  const receivables = useMemo(() => (recData ?? []) as unknown as PayableRow[], [recData]);
-  const payables = useMemo(() => (payData ?? []) as unknown as PayableRow[], [payData]);
-
-  // D6/F4 (19/09/2026): a seção vive na ROTA (/v2/financial/inbox), não em ?tab=. Assim cada
-  // item do menu lateral é um destino de verdade e o item ativo acende sozinho. Link antigo
-  // com ?tab= continua valendo: é normalizado para a rota na primeira renderização.
-  const { secao } = useParams<{ secao?: string }>();
-  const tabDaQuery = searchParams.get('tab');
-  // "Fora da fila" deixou de ser aba solta (Fase 3.2): é uma das visões do Extrato por
-  // conta. Link antigo (/v2/financial/ignoradas) abre o Extrato já nessa visão.
-  const secaoPedida = secao || tabDaQuery || 'overview';
-  // Seção desconhecida abre a Visão Geral: antes nenhuma aba acendia e a tela ficava em branco
-  // (era o que acontecia com a notificação "Recebível em atraso").
-  const tab = secaoPedida === 'ignoradas' || secaoPedida === 'extrato' ? 'inbox' : SECOES_DO_FINANCEIRO.has(secaoPedida) ? secaoPedida : 'overview';
-  useEffect(() => {
-    // Contas a Receber é tela própria: link antigo para a "aba" vai direto para ela.
-    // A notificação de atraso já aponta direto para os vencidos; o link genérico abre o padrão.
-    if (secaoPedida === 'receivables') { navigate('/v2/receivables', { replace: true }); return; }
-    if (!secao && tabDaQuery) {
-      navigate(tabDaQuery === 'overview' ? '/v2/financial' : `/v2/financial/${tabDaQuery}`, { replace: true });
-    }
-  }, [secao, tabDaQuery, secaoPedida, navigate]);
-  // Toda aba se comporta como aba. A de Recebíveis costumava NAVEGAR para outra página, e
-  // o efeito para quem usa era a tela inteira trocar ao clicar numa aba — parecia bug
-  // porque, do lado de fora, é bug: aba que leva embora não é aba.
-  const setTab = (v: string) =>
-    navigate(v === 'overview' ? '/v2/financial' : `/v2/financial/${v}`, { replace: true });
-
-  // D6/F5: contas a pagar abre em "em aberto" (pendente, parcial, vencida). 1.675 das 1.679 contas
-  // estão pagas; abrir com tudo obrigava a filtrar antes de qualquer trabalho. "Pago" continua
-  // a um clique no painel de filtros.
-  const [payFilters, setPayFilters] = useState<FinancialFilters>({ ...defaultFilters, status: STATUS_EM_ABERTO });
-  const [payOsSearch, setPayOsSearch] = useState('');
-  const [groupBy, setGroupBy] = useState<GroupBy>('none');
-  const [paySort, setPaySort] = useState<SortState>({ key: 'due_date', dir: 'asc' });
-  const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements'>('list');
-  const [paymentTarget, setPaymentTarget] = useState<{ receivable?: PayableRow; payable?: PayableRow } | null>(null);
-  // "+ Lançar": a porta única para registrar à mão. ?lancar=despesa abre direto (atalho que o
-  // assistente pode mandar pelo WhatsApp).
+  // "+ Lançar": a porta única para registrar à mão, em toda tela do Financeiro. ?lancar=despesa
+  // abre direto (atalho que o assistente pode mandar pelo WhatsApp).
   const [lancar, setLancar] = useState<{ tipo?: TipoDeLancamento; porOnde?: PorOnde } | null>(() => {
     const pedido = searchParams.get('lancar');
-    return pedido && ['despesa', 'recebimento', 'transferencia', 'contagem'].includes(pedido) ? { tipo: pedido as TipoDeLancamento } : null;
+    return pedido && TIPOS_DE_LANCAMENTO.includes(pedido) ? { tipo: pedido as TipoDeLancamento } : null;
   });
-  const [editingPayable, setEditingPayable] = useState<PayableRow | null>(null);
-  // Desfazer e cancelar pedem confirmação com motivo — ver DesfazerOuCancelarDialog.
-  const [acaoNaConta, setAcaoNaConta] = useState<{ acao: AcaoNoLancamento; conta: PayableRow } | null>(null);
-
-  /**
-   * As ações de uma conta a pagar, em qualquer situação — inclusive paga.
-   *
-   * Conta paga não tinha ação nenhuma: o que o dono aprovava errado ficava errado. Agora
-   * toda conta se corrige, a que veio do banco se desfaz, e qualquer uma se cancela com
-   * motivo. Pagar fica à vista porque é o uso de todo dia; o resto vai para o menu, e o
-   * cancelamento por último, separado.
-   */
-  const acoesDaConta = (p: PayableRow): { rapidas: AcaoDaLinha[]; menu: AcaoDaLinha[] } => {
-    const viva = p.status !== 'cancelled';
-    const emAberto = viva && p.status !== 'paid';
-    return {
-      rapidas: emAberto ? [{ texto: 'Pagar', icone: DollarSign, titulo: 'Registrar pagamento', onClick: () => setPaymentTarget({ payable: p }) }] : [],
-      menu: [
-        ...(viva ? [{ texto: 'Corrigir', icone: Pencil, titulo: 'Fornecedor, categoria, OS, datas, valor', onClick: () => setEditingPayable(p) }] : []),
-        ...(viva && p.bank_transaction_id
-          ? [{ texto: 'Desfazer aprovação', icone: Undo2, titulo: 'A linha do extrato volta para a fila', onClick: () => setAcaoNaConta({ acao: 'desfazer', conta: p }) }]
-          : []),
-        ...(viva ? [{ texto: 'Cancelar lançamento', icone: Ban, perigo: true, onClick: () => setAcaoNaConta({ acao: 'cancelar', conta: p }) }] : []),
-      ],
-    };
-  };
-  // Regra criada a partir de uma linha da caixa de entrada: o editor abre preenchido, sem
-  // obrigar a redigitar o fornecedor que está na tela.
+  // Regra criada a partir de uma linha do Extrato: o editor abre preenchido, sem obrigar a
+  // redigitar o fornecedor que está na tela.
   const [sementeRegra, setSementeRegra] = useState<SementeDeRegra | null>(null);
+  // A conta escolhida nas fichas do Extrato sobrevive à troca de aba.
+  const [contaDoExtrato, setContaDoExtrato] = useState<string | null>(null);
+  const { data: pendingReimb } = usePendingReimbursements();
 
-  /**
-   * "Contas a pagar" mostra o que se DEVE, não o histórico de despesa.
-   *
-   * A lista trazia as 1.663 despesas já quitadas junto com as 4 obrigações em aberto —
-   * quase quatrocentas vindas de compra no cartão, cada uma parecendo uma conta a pagar.
-   * Não são: a compra está paga do ponto de vista do gestor, e quem ele deve é o banco,
-   * pela FATURA. Conta a pagar é obrigação viva; despesa liquidada é história, e história
-   * se lê no resultado, não numa lista de cobrança.
-   *
-   * O histórico continua alcançável — é o botão "Mostrar já pagas".
-   */
-  const [mostrarPagas, setMostrarPagas] = useState(false);
+  if (rota.tipo === 'redirecionar') {
+    // Leva o resto da query junto (?lancar=, ?view=); só o ?tab= antigo fica para trás.
+    const resto = new URLSearchParams(location.search);
+    resto.delete('tab');
+    const busca = resto.toString();
+    return <Navigate to={`${rota.para}${busca ? `${rota.para.includes('?') ? '&' : '?'}${busca}` : ''}`} replace />;
+  }
 
-  const filteredPayables = useMemo(() => {
-    const base = (applyFilters(payables as never[], payFilters, 'payable') as unknown as PayableRow[])
-      .filter((p) => mostrarPagas || (p.status !== 'paid' && p.status !== 'cancelled'))
-      .filter((p) => !payOsSearch || p.service_orders?.service_order_number?.toLowerCase().includes(payOsSearch.toLowerCase()));
-    return [...base].sort((a, b) => {
-      const val = (p: PayableRow) =>
-        ['amount', 'balance_amount', 'paid_amount'].includes(paySort.key)
-          ? Number((p as Record<string, unknown>)[paySort.key] ?? 0)
-          : String((p as Record<string, unknown>)[paySort.key] ?? '');
-      const av = val(a);
-      const bv = val(b);
-      if (av < bv) return paySort.dir === 'asc' ? -1 : 1;
-      if (av > bv) return paySort.dir === 'asc' ? 1 : -1;
-      return 0;
-    });
-  }, [payables, payFilters, payOsSearch, paySort, mostrarPagas]);
+  const { comodo, aba: abaAtiva } = rota;
+  const def = COMODOS[comodo];
+  // Aba é recorte: troca a rota, sempre dentro do mesmo cômodo (sair daqui ao clicar numa aba
+  // foi a regressão de 30/07). A query fica para trás: ?lancar= é de uma vez só.
+  const irPara = (c: Comodo, a?: string | null) => navigate(rotaDoComodo(c, a), { replace: true });
 
-  const pagasEscondidas = useMemo(
-    // Só as pagas: é o que o botão passa a mostrar (cancelada não é despesa).
-    () => payables.filter((p) => p.status === 'paid').length,
-    [payables],
-  );
-
-  const payTotalBalance = filteredPayables.filter((p) => p.status !== 'paid' && p.status !== 'cancelled').reduce((s, p) => s + Number(p.balance_amount ?? 0), 0);
-  const payTotalPaid = filteredPayables.reduce((s, p) => s + Number(p.paid_amount ?? 0), 0);
-  const payTotalAmount = filteredPayables.reduce((s, p) => s + Number(p.amount ?? 0), 0);
-  const grouped = useMemo(() => groupPayables(filteredPayables, groupBy), [filteredPayables, groupBy]);
-
-  const today = new Date();
-  const in30 = new Date(today.getTime() + 30 * 86400000);
-  const upcomingRec = receivables.filter((r) => r.status !== 'paid' && r.status !== 'cancelled' && new Date(r.due_date) <= in30).slice(0, 5);
-  const upcomingPay = payables.filter((p) => p.status !== 'paid' && p.status !== 'cancelled' && new Date(p.due_date) <= in30).slice(0, 5);
-  const periodBalance = (cashFlow ?? []).reduce((s: number, m: { net: number }) => s + m.net, 0);
-
-  const handlePaySort = (key: string) => {
-    setPaySort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'due_date' ? 'asc' : 'desc' }));
+  const conteudo = (c: Comodo, a: string | null) => {
+    switch (c) {
+      case 'visao':
+        return <VisaoGeral />;
+      case 'extrato':
+        if (a === 'cartao') return <CartoesPanel />;
+        if (a === 'regras') return <FinanceRulesPanel />;
+        return (
+          <ExtratoPorConta
+            visao={(a ?? 'revisar') as VisaoDoExtrato}
+            contaId={contaDoExtrato}
+            onEscolherConta={setContaDoExtrato}
+            onCriarRegra={setSementeRegra}
+          />
+        );
+      case 'conciliacao':
+        return a === 'fechar' ? <FechamentoPanel /> : <ConciliacaoPanel />;
+      case 'pagar':
+        if (a === 'reembolsos') return <ReimbursementsPanel />;
+        if (a === 'comissoes') return <PainelDeComissoes />;
+        return <ContasAPagarLista onNovaConta={() => setLancar({ tipo: 'despesa', porOnde: 'depois' })} />;
+      case 'despesas':
+        return <DespesasPanel />;
+      case 'bancos':
+        return <BankSourcesPanel />;
+      case 'cadastro':
+        return (
+          <div className="space-y-3">
+            <p className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+              A casa desta tela agora é{' '}
+              <Link to="/v2/suppliers/saude" className="font-medium text-accent underline-offset-2 hover:underline">
+                Fornecedores › Saúde do cadastro
+              </Link>
+              : é cadastro de fornecedor.
+            </p>
+            <SaudeDoCadastroPanel />
+          </div>
+        );
+    }
   };
 
-  const payColumns: DataColumn<PayableRow>[] = [
-    {
-      key: 'due_date', header: t.financial.dueDate, minWidth: 126, priority: 0, sortable: true,
-      render: (p) => {
-        const alert = dueAlert(p);
-        return (
-          <span className="block leading-tight">
-            <span className="block">{formatDate(p.due_date)}</span>
-            {alert && <StatusChip tone={alert.tone} className="mt-0.5">{alert.label}</StatusChip>}
-          </span>
-        );
-      },
-    },
-    {
-      key: 'who', header: 'Fornecedor · Descrição', minWidth: 225, priority: 1, detailLabel: 'Fornecedor',
-      render: (p) => (
-        <span className="block leading-tight">
-          <span className="block truncate font-semibold">{p.suppliers?.name || p.name || '—'}</span>
-          <span className="block truncate text-xs text-muted-foreground" title={p.notes ?? undefined}>{p.description}</span>
-        </span>
-      ),
-    },
-    {
-      key: 'status', header: t.common.status, minWidth: 110, priority: 2, detailLabel: 'Status',
-      render: (p) => {
-        const s = statusView(p);
-        return <StatusChip dot tone={s.tone}>{s.label}</StatusChip>;
-      },
-    },
-    {
-      key: 'balance_amount', header: t.common.balance, minWidth: 116, priority: 2, align: 'right', sortable: true, detailLabel: 'Saldo',
-      render: (p) => <span className="font-semibold">{formatCurrency(Number(p.balance_amount ?? 0))}</span>,
-    },
-    {
-      key: 'category', header: 'Categoria', minWidth: 128, priority: 3, detailLabel: 'Categoria',
-      render: (p) => (p.expense_category ? <StatusChip tone="neutral">{p.expense_category}</StatusChip> : <span className="text-muted-foreground">—</span>),
-    },
-    {
-      key: 'os', header: 'OS', minWidth: 100, priority: 4, detailLabel: 'OS',
-      render: (p) =>
-        p.service_orders?.service_order_number ? (
-          <button
-            type="button"
-            className="font-semibold text-accent underline-offset-2 hover:underline"
-            onClick={(e) => { e.stopPropagation(); if (p.linked_service_order_id) navigate(`/v2/service-orders/${p.linked_service_order_id}`); }}
-          >
-            {p.service_orders.service_order_number}
-          </button>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        ),
-    },
-    {
-      key: 'amount', header: t.common.total, minWidth: 112, priority: 4, align: 'right', sortable: true, detailLabel: 'Valor',
-      render: (p) => formatCurrency(Number(p.amount ?? 0)),
-    },
-    {
-      key: 'paid_amount', header: 'Pago', minWidth: 108, priority: 5, align: 'right', sortable: true, detailLabel: 'Pago',
-      render: (p) => (
-        <span className={Number(p.paid_amount) > 0 ? 'text-success' : 'text-muted-foreground'}>{formatCurrency(Number(p.paid_amount ?? 0))}</span>
-      ),
-    },
-    {
-      key: 'origin', header: 'Origem', minWidth: 118, priority: 5, detailLabel: 'Origem',
-      render: (p) => {
-        const o = originView(p.origin);
-        return <StatusChip tone={o.tone}>{o.label}</StatusChip>;
-      },
-    },
-    {
-      key: 'receipt', header: 'Comprovante', minWidth: 104, priority: 6, detailLabel: 'Comprovante',
-      render: (p) => {
-        const soeReceipt = p.service_order_expenses?.find?.((e) => e?.receipt_url)?.receipt_url;
-        const url = soeReceipt || p.receipt_url;
-        if (!url) return <span className="text-muted-foreground">—</span>;
-        return (
-          <a
-            href={url} target="_blank" rel="noopener noreferrer" title="Ver comprovante"
-            className="inline-flex items-center gap-1 text-accent underline-offset-2 hover:underline"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Paperclip className="h-4 w-4" /> Ver
-          </a>
-        );
-      },
-    },
-  ];
-
-  const payTable = (rows: PayableRow[]) => (
-    <DataTable<PayableRow>
-      rows={rows}
-      rowKey={(p) => p.id}
-      columns={payColumns}
-      sort={paySort}
-      onSort={handlePaySort}
-      emptyMessage={t.common.noResults}
-      rowClassName={(p) => (isOverdue(p) ? 'bg-destructive/5' : undefined)}
-      rowActions={(p) => {
-        const { rapidas, menu } = acoesDaConta(p);
-        return <AcoesDaLinha rotulo={p.description} rapidas={rapidas} menu={menu} tituloDoMenu={p.suppliers?.name || p.name || undefined} />;
-      }}
-    />
-  );
-
-  if (recError || payError || summaryError) {
-    return (
-      <V2Shell>
-        <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
-          <p className="font-medium text-destructive">Erro ao carregar dados financeiros.</p>
-          <p className="text-sm text-muted-foreground">{(recError || payError || summaryError)?.message || 'Verifique sua conexão e tente novamente.'}</p>
-          <Button variant="outline" onClick={() => window.location.reload()}>Recarregar página</Button>
-        </div>
-      </V2Shell>
-    );
-  }
+  const rotuloDaAba = (a: string, rotulo: string) =>
+    a === 'reembolsos' && (pendingReimb?.length ?? 0) > 0 ? `${rotulo} (${pendingReimb!.length})` : rotulo;
 
   return (
     <V2Shell>
       <PageShell
-        breadcrumb={[{ label: 'Financeiro' }]}
-        title={t.financial.title}
-        description={PARA_QUE_SERVE[tab] ?? t.financial.description}
+        breadcrumb={comodo === 'visao' ? [{ label: 'Financeiro' }, { label: def.nome }] : [{ label: 'Financeiro', to: '/v2/financial' }, { label: def.nome }]}
+        title={def.nome}
+        description={paraQueServeDe(comodo, abaAtiva)}
         actions={
           <Button className="gap-1.5" onClick={() => setLancar({})}>
             <Plus className="h-4 w-4" /> Lançar
           </Button>
         }
       >
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList className="flex h-auto w-full flex-wrap justify-start">
-            <TabsTrigger value="overview">{t.financial.tabOverview}</TabsTrigger>
-            <TabsTrigger value="dre">DRE / Avançado</TabsTrigger>
-            {/* Contas a Receber NÃO é aba: é tela própria (/v2/receivables), com filtros,
-                régua de cobrança e recibo. Era uma aba que navegava para fora — o pior dos
-                dois mundos, porque prometia troca de conteúdo e entregava troca de página.
-                Agora é item do menu, onde uma tela inteira deve estar. */}
-            <TabsTrigger value="payables">{t.financial.tabPayables}</TabsTrigger>
-            <TabsTrigger value="despesas">Despesas</TabsTrigger>
-            <TabsTrigger value="comissoes">Comissões</TabsTrigger>
-            {/* MF-AUD-050: a programação de caixa (8 semanas, alerta de semana negativa e
-                duplicata de pagáveis) vivia só no Financeiro v1 — desde os redirects de
-                30/07 ficou alcançável apenas com ?legacy=1. O painel sempre funcionou. */}
-            <TabsTrigger value="forecast">Programação</TabsTrigger>
-            {/* A ORDEM AQUI É O FLUXO DO TRABALHO, e ela mudou.
-                Extrato vem primeiro: é a triagem do que o banco trouxe e ainda não virou
-                lançamento. Conciliação vem depois: confere o que JÁ foi lançado contra o
-                extrato. Antes as duas estavam invertidas e sobrepostas — a aba
-                "Conciliação" listava o extrato inteiro, e a "Caixa de entrada" mostrava
-                2 linhas de 101 porque lia a fila de PROPOSTAS, que só existe para débito.
-                É a separação que QuickBooks (For Review × Reconcile) e NetSuite (Match
-                Bank Data × Reconcile Account Statement) fazem. */}
-            <TabsTrigger value="inbox">Extrato</TabsTrigger>
-            <TabsTrigger value="reconciliation">{t.financial.tabReconciliation}</TabsTrigger>
-            {/* O que saiu da fila não pode sair do sistema. Sem esta aba, 380 transações
-                tinham virado sumiço — e a suspeita, justa, foi de que a IA as tinha
-                escondido. Toda saída da fila é reversível e diz quem, quando e por quê. */}
-            {/* Cartão é OUTRO objeto: sem contraparte, sem saída de caixa na data da compra,
-                e pertencente a um ciclo que fecha. Misturá-lo com Pix e transferência foi o
-                que o gestor pediu para desfazer. */}
-            <TabsTrigger value="cartoes">Cartões</TabsTrigger>
-            <TabsTrigger value="rules">Regras</TabsTrigger>
-            {/* Fechar o mês, ler a trilha e conferir se o extrato está completo — os três
-                controles que separam "o número está certo" de "o número é auditável". */}
-            <TabsTrigger value="fechamento">Fechamento</TabsTrigger>
-            {/* Cadastro sujo é o que faz o motor errar em silêncio — foi um nome fantasia
-                com o nome de uma cidade que atribuiu 160 despesas ao fornecedor errado. */}
-            <TabsTrigger value="cadastro">Saúde do cadastro</TabsTrigger>
-            <TabsTrigger value="banks">Contas bancárias</TabsTrigger>
-            <TabsTrigger value="aging">Aging</TabsTrigger>
-          </TabsList>
+        <AvisoAbasMudaram />
 
-          {/* ── COMISSÕES ── */}
-          <TabsContent value="comissoes" className="mt-4">
-            <PainelDeComissoes />
-          </TabsContent>
-
-          {/* ── VISÃO GERAL ── */}
-          <TabsContent value="overview" className="mt-4 space-y-4">
-            {/* Primeiro, quanto dinheiro há hoje — o que todo dono procura primeiro. */}
-            <SaldosDasContas />
-            {loadingSummary ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24 rounded-lg" />)}
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <KPIStat
-                    label={t.financial.totalReceivables}
-                    value={formatCurrency(summary?.total_receivable || 0)}
-                    hint={summary?.overdue_receivable ? `${formatCurrency(summary.overdue_receivable)} vencidos` : 'sem atrasos'}
-                    tone={summary?.overdue_receivable ? 'critical' : 'success'}
-                    onClick={() => navigate('/v2/receivables')}
-                  />
-                  <KPIStat
-                    label={t.financial.pendingPayables}
-                    value={formatCurrency(summary?.total_payable || 0)}
-                    hint={summary?.overdue_payable ? `${formatCurrency(summary.overdue_payable)} vencidos` : 'sem atrasos'}
-                    tone={summary?.overdue_payable ? 'critical' : 'success'}
-                    onClick={() => setTab('payables')}
-                  />
-                  <KPIStat label={t.financial.collectedThisMonth} value={formatCurrency(summary?.collected_this_month || 0)} tone="success" />
-                  <KPIStat label={t.financial.paidThisMonth} value={formatCurrency(summary?.paid_this_month || 0)} />
-                </div>
-
-                <div className="overflow-hidden rounded-lg border bg-card p-4">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-sm font-bold">{t.financial.cashFlowChart}</h3>
-                    <div className="flex gap-1">
-                      {[3, 6, 12].map((m) => (
-                        <Button key={m} size="sm" variant={cfMonths === m ? 'secondary' : 'ghost'} onClick={() => setCfMonths(m)}>
-                          {m}m
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                  {cashFlow && cashFlow.length > 0 ? (
-                    <>
-                      <ResponsiveContainer width="100%" height={280}>
-                        <ComposedChart data={cashFlow}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                          <XAxis dataKey="month" tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} axisLine={false} tickLine={false} />
-                          <YAxis tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} tickFormatter={(v: number) => `${(v / 1000).toFixed(0)}k`} width={44} axisLine={false} tickLine={false} />
-                          <RechartsTooltip formatter={(v: number) => formatCurrency(v)} cursor={{ fill: 'hsl(var(--muted))' }} />
-                          <Bar dataKey="inflow" name={t.financial.inflow} fill="hsl(var(--success))" radius={[3, 3, 0, 0]} />
-                          <Bar dataKey="outflow" name={t.financial.outflow} fill="hsl(var(--destructive))" radius={[3, 3, 0, 0]} />
-                          <Line dataKey="net" name={t.financial.netBalance} stroke="hsl(var(--primary))" strokeWidth={2} dot />
-                        </ComposedChart>
-                      </ResponsiveContainer>
-                      <p className="mt-1 text-sm">
-                        {t.financial.periodBalance}:{' '}
-                        <span className={`font-bold tabular-nums ${periodBalance >= 0 ? 'text-success' : 'text-destructive'}`}>{formatCurrency(periodBalance)}</span>
-                      </p>
-                    </>
-                  ) : (
-                    <p className="py-8 text-center text-sm text-muted-foreground">{t.common.noResults}</p>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="rounded-lg border bg-card p-4">
-                    <h3 className="mb-3 text-sm font-bold">{t.financial.upcomingReceivables}</h3>
-                    {upcomingRec.length === 0 ? <p className="text-sm text-muted-foreground">{t.common.noResults}</p> : (
-                      <div className="space-y-2">
-                        {upcomingRec.map((r) => (
-                          <div key={r.id} className="flex items-center justify-between gap-2 border-b pb-2 text-sm last:border-0">
-                            <span className="min-w-0 overflow-hidden">
-                              <span className="block truncate font-medium">{(r as PayableRow & { clients?: { name?: string } }).clients?.name || r.description}</span>
-                              <span className="block truncate text-xs text-muted-foreground">{formatDate(r.due_date)}</span>
-                            </span>
-                            <span className="flex shrink-0 items-center gap-2">
-                              <span className="font-semibold tabular-nums">{formatCurrency(Number(r.balance_amount ?? 0))}</span>
-                              <Button size="sm" variant="outline" onClick={() => setPaymentTarget({ receivable: r })}>{t.financial.registerPayment}</Button>
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="rounded-lg border bg-card p-4">
-                    <h3 className="mb-3 text-sm font-bold">{t.financial.upcomingPayables}</h3>
-                    {upcomingPay.length === 0 ? <p className="text-sm text-muted-foreground">{t.common.noResults}</p> : (
-                      <div className="space-y-2">
-                        {upcomingPay.map((p) => (
-                          <div key={p.id} className="flex items-center justify-between gap-2 border-b pb-2 text-sm last:border-0">
-                            <span className="min-w-0 overflow-hidden">
-                              <span className="block truncate font-medium">{p.description}</span>
-                              <span className="block truncate text-xs text-muted-foreground">{formatDate(p.due_date)}</span>
-                            </span>
-                            <span className="flex shrink-0 items-center gap-2">
-                              <span className="font-semibold tabular-nums">{formatCurrency(Number(p.balance_amount ?? 0))}</span>
-                              <Button size="sm" variant="outline" onClick={() => setPaymentTarget({ payable: p })}>{t.financial.registerPayment}</Button>
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-          </TabsContent>
-
-          {/* ── DRE ── */}
-          <TabsContent value="dre" className="mt-4"><DREPanel /></TabsContent>
-
-          {/* ── PAGÁVEIS ── */}
-          {/* ── DESPESAS: o que saiu e como foi categorizado (pedido do dono, 26/09/2026) ── */}
-          <TabsContent value="despesas" className="mt-4">
-            <DespesasPanel />
-          </TabsContent>
-
-          <TabsContent value="payables" className="mt-4 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-lg font-semibold">{t.financial.payables}</h3>
-                <div className="flex flex-wrap gap-1 sm:ml-2">
-                  <Button size="sm" variant={paySubTab === 'list' ? 'secondary' : 'ghost'} onClick={() => setPaySubTab('list')}>
-                    {t.financial.payables}
-                  </Button>
-                  <Button size="sm" variant={paySubTab === 'reimbursements' ? 'secondary' : 'ghost'} onClick={() => setPaySubTab('reimbursements')}>
-                    {t.financial.pendingReimbursements} ({pendingReimb?.length || 0})
-                  </Button>
-                </div>
-              </div>
-              {/* A lista é de obrigação VIVA. Despesa já quitada — inclusive as centenas
-                  de compras no cartão — é história, e história se lê no resultado, não
-                  numa lista de cobrança. Fica a um clique de distância, não escondida. */}
-              {paySubTab === 'list' && pagasEscondidas > 0 && (
-                <Button size="sm" variant={mostrarPagas ? 'secondary' : 'ghost'}
-                  // O filtro de situação abre em "em aberto"; sem soltá-lo junto, o botão tirava
-                  // uma trava e a outra continuava escondendo tudo o que foi pago.
-                  onClick={() => {
-                    const novo = !mostrarPagas;
-                    setMostrarPagas(novo);
-                    setPayFilters((f) => ({ ...f, status: novo ? [...STATUS_EM_ABERTO, 'paid'] : STATUS_EM_ABERTO }));
-                  }}>
-                  {mostrarPagas ? 'Só o que está em aberto' : `Mostrar as ${pagasEscondidas} já pagas`}
-                </Button>
-              )}
-              {/* O que já saiu, com a categoria de cada gasto, mora em Despesas. */}
-              <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => setTab('despesas')}>
-                Ver o que já saiu (Despesas)
-              </Button>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline" size="sm" className="gap-1.5"
-                  onClick={() =>
-                    exportToCSV(filteredPayables as never[], 'pagaveis', [
-                      { key: 'description', label: 'Descrição' },
-                      { key: 'amount', label: 'Valor', format: (v: number | null) => Number(v || 0).toFixed(2).replace('.', ',') },
-                      { key: 'due_date', label: 'Vencimento', format: (v: string | null) => (v ? new Date(v).toLocaleDateString('pt-BR') : '') },
-                      { key: 'status', label: 'Status' },
-                      { key: 'name', label: 'Fornecedor' },
-                    ] as never)
-                  }
-                >
-                  <Download className="h-4 w-4" /> Exportar CSV
-                </Button>
-                <Button className="gap-1.5" onClick={() => setLancar({ tipo: 'despesa', porOnde: 'depois' })}>
-                  <Plus className="h-4 w-4" /> Nova conta a pagar
-                </Button>
-              </div>
-            </div>
-
-            {paySubTab === 'reimbursements' ? (
-              <ReimbursementsPanel />
-            ) : (
-              <>
-                <FinancialFilterPanel type="payable" filters={payFilters} onChange={setPayFilters} />
-                <div className="flex flex-wrap items-center gap-3">
-                  <Input
-                    placeholder="Filtrar por número da OS"
-                    value={payOsSearch}
-                    onChange={(e) => setPayOsSearch(e.target.value)}
-                    className="h-9 w-full sm:w-64"
-                  />
-                  <div className="flex flex-wrap items-center gap-1">
-                    <span className="text-sm text-muted-foreground">{t.financial.groupBy}:</span>
-                    {([
-                      { v: 'none', l: t.financial.groupByNone },
-                      { v: 'category', l: t.financial.groupByCategory },
-                      { v: 'supplier', l: t.financial.groupBySupplier },
-                      { v: 'month', l: t.financial.groupByMonth },
-                    ] as { v: GroupBy; l: string }[]).map(({ v, l }) => (
-                      <Button key={v} size="sm" variant={groupBy === v ? 'secondary' : 'ghost'} onClick={() => setGroupBy(v)}>{l}</Button>
-                    ))}
-                  </div>
-                </div>
-
-                {loadingPay ? (
-                  <Skeleton className="h-64 w-full rounded-lg" />
-                ) : groupBy === 'none' ? (
-                  <div className="hidden md:block">
-                    {payTable(filteredPayables)}
-                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 px-4 py-2 text-sm">
-                      <span className="font-medium">{t.common.total}: {filteredPayables.length} itens</span>
-                      <span className="flex flex-wrap gap-4 tabular-nums">
-                        <span>Valor: <b>{formatCurrency(payTotalAmount)}</b></span>
-                        <span className="text-success">Pago: <b>{formatCurrency(payTotalPaid)}</b></span>
-                        <span>Saldo: <b>{formatCurrency(payTotalBalance)}</b></span>
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="hidden space-y-3 md:block">
-                    {Object.entries(grouped).map(([groupName, items]) => {
-                      const groupBalance = items.filter((p) => p.status !== 'paid' && p.status !== 'cancelled').reduce((s, p) => s + Number(p.balance_amount ?? 0), 0);
-                      return (
-                        <Collapsible key={groupName} defaultOpen>
-                          <CollapsibleTrigger className="flex w-full items-center justify-between rounded-lg border bg-card p-3 hover:bg-muted/50">
-                            <span className="font-semibold">{groupName} <span className="font-normal text-muted-foreground">({items.length})</span></span>
-                            <span className="font-semibold tabular-nums">{t.financial.subtotal}: {formatCurrency(groupBalance)}</span>
-                          </CollapsibleTrigger>
-                          <CollapsibleContent className="pt-2">{payTable(items)}</CollapsibleContent>
-                        </Collapsible>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Mobile: lista compacta de pagáveis */}
-                {!loadingPay && (
-                  <div className="space-y-2.5 md:hidden">
-                    {filteredPayables.map((p) => {
-                      const s = statusView(p);
-                      const alert = dueAlert(p);
-                      return (
-                        <div key={p.id} className={`rounded-lg border border-l-[3px] bg-card p-3.5 shadow-sm ${s.tone === 'critical' ? 'border-l-destructive' : s.tone === 'success' ? 'border-l-success' : 'border-l-transparent'}`}>
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="min-w-0 truncate text-sm font-bold">{p.suppliers?.name || p.name || p.description}</span>
-                            <StatusChip tone={s.tone}>{s.label}</StatusChip>
-                          </div>
-                          <p className="truncate text-sm text-muted-foreground">{p.description}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {formatDate(p.due_date)}{alert ? ` · ${alert.label}` : ''} · <b className="text-foreground">{formatCurrency(Number(p.balance_amount ?? 0))}</b>
-                          </p>
-                          {p.status !== 'cancelled' && (
-                            <div className="mt-3 flex items-center gap-2">
-                              {p.status !== 'paid' && (
-                                <Button className="min-h-11 flex-1" onClick={() => setPaymentTarget({ payable: p })}>{t.financial.registerPayment}</Button>
-                              )}
-                              <AcoesDaLinha rotulo={p.description} menu={acoesDaConta(p).menu} className={p.status === 'paid' ? 'ml-auto' : undefined} />
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-          </TabsContent>
-
-          {/* ── EXTRATO / CONCILIAÇÃO / REGRAS / CONTAS / AGING ── */}
-          <TabsContent value="inbox" className="mt-4">
-            <ExtratoPorConta
-              key={secaoPedida}
-              visaoInicial={secaoPedida === 'ignoradas' ? 'fora' : 'revisar'}
-              onCriarRegra={setSementeRegra}
-            />
-          </TabsContent>
-          {/* A BankReconciliation (1.727 linhas) foi aposentada aqui por decisão do gestor:
-              ela partia do extrato e chamava aquilo de conciliação. O que ela tinha de bom
-              — tolerância de diferença, conciliação em grupo, criação de cliente na hora —
-              volta em fases seguintes, sobre o modelo certo. O arquivo continua no repo
-              até a F3 terminar, para nada se perder no caminho. */}
-          <TabsContent value="forecast" className="mt-4"><CashForecastPanel /></TabsContent>
-          <TabsContent value="reconciliation" className="mt-4"><ConciliacaoPanel /></TabsContent>
-          <TabsContent value="cartoes" className="mt-4"><CartoesPanel /></TabsContent>
-          <TabsContent value="fechamento" className="mt-4"><FechamentoPanel /></TabsContent>
-          <TabsContent value="cadastro" className="mt-4"><SaudeDoCadastroPanel /></TabsContent>
-          <TabsContent value="rules" className="mt-4"><FinanceRulesPanel /></TabsContent>
-          <TabsContent value="banks" className="mt-4"><BankSourcesPanel /></TabsContent>
-          <TabsContent value="aging" className="mt-4"><AgingReportPanel /></TabsContent>
-        </Tabs>
+        {def.abas.length > 0 ? (
+          <Tabs value={abaAtiva ?? def.abas[0].aba} onValueChange={(v) => irPara(comodo, v)}>
+            <TabsList className="flex h-auto w-full flex-wrap justify-start">
+              {def.abas.map((a) => (
+                <TabsTrigger key={a.aba} value={a.aba}>{rotuloDaAba(a.aba, a.rotulo)}</TabsTrigger>
+              ))}
+            </TabsList>
+            {def.abas.map((a) => (
+              <TabsContent key={a.aba} value={a.aba} className="mt-4">
+                {a.aba === abaAtiva && conteudo(comodo, a.aba)}
+              </TabsContent>
+            ))}
+          </Tabs>
+        ) : (
+          conteudo(comodo, null)
+        )}
 
         {/* Saída para a versão anterior enquanto a confiança na nova não se firma. Some
             quando a transição terminar — até lá, ficar preso é pior que ver um link. */}
@@ -757,14 +173,6 @@ export default function FinancialV2() {
         </p>
       </PageShell>
 
-      {paymentTarget && (
-        <PaymentDialog
-          open={!!paymentTarget}
-          onOpenChange={() => setPaymentTarget(null)}
-          receivable={paymentTarget.receivable as never}
-          payable={paymentTarget.payable as never}
-        />
-      )}
       {sementeRegra && (
         <EditorDeRegra
           key={sementeRegra.match_value}
@@ -774,21 +182,6 @@ export default function FinancialV2() {
         />
       )}
       {lancar && <LancarDialog tipoInicial={lancar.tipo} porOndeInicial={lancar.porOnde} onFechar={() => setLancar(null)} />}
-      {/* Corrigir serve para qualquer conta, inclusive paga, e passa pelo caminho único
-          (trilha, mês fechado, valor do banco travado). Criar é pelo "+ Lançar". */}
-      {editingPayable && (
-        <CorrigirLancamentoDialog
-          tipo="payable"
-          lancamento={editingPayable as never}
-          onFechar={() => setEditingPayable(null)}
-        />
-      )}
-      <DesfazerOuCancelarDialog
-        tipo="payable"
-        acao={acaoNaConta?.acao ?? null}
-        lancamento={acaoNaConta?.conta ?? null}
-        onFechar={() => setAcaoNaConta(null)}
-      />
     </V2Shell>
   );
 }
