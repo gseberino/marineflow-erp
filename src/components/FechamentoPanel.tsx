@@ -284,7 +284,7 @@ export function FechamentoPanel() {
         </p>
         {situacaoPorConta.length === 0 ? (
           <p className="mt-1 text-xs text-muted-foreground">
-            Nenhuma conferência ainda. Ela roda a cada sincronização bancária, às 06:00 e às 18:00.
+            Nenhuma conferência ainda. Ela roda a cada sincronização bancária, às 06:00 e às 15:00.
           </p>
         ) : (
           <ul className="mt-2 space-y-1 text-sm">

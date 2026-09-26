@@ -39,7 +39,9 @@ export const ROTULO_TIPO: Record<TipoFavorecido, string> = {
  * 90% das linhas, e nunca perguntar deixa R$ 36 mil de pró-labore sem dono.
  */
 export const CATEGORIAS_COM_FAVORECIDO = [
-  'Pró-labore e retirada',
+  // Separados em 26/09/2026: pró-labore é despesa; retirada de lucro fica fora do resultado.
+  'Pró-labore',
+  'Retirada de sócio',
   'Salários e encargos',
   'Serviços de terceiros',
 ];

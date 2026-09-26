@@ -81,7 +81,7 @@ vi.mock('@/hooks/use-financial-categories', () => ({
       : [
           { name: 'Combustível e deslocamento', dre_group: 'custo_direto' },
           { name: 'Peças e materiais', dre_group: 'custo_direto' },
-          { name: 'Pró-labore e retirada', dre_group: 'nao_operacional' },
+          { name: 'Pró-labore', dre_group: 'nao_operacional' },
         ],
     isLoading: false,
   }),
@@ -346,7 +346,7 @@ describe('agrupado por favorecido', () => {
     renderInbox();
 
     await user.click(await seletorDeCategoria());
-    await user.click(await screen.findByText('Pró-labore e retirada'));
+    await user.click(await screen.findByText('Pró-labore'));
 
     expect(await screen.findByRole('button', { name: /Aprovar 0/ })).toBeDisabled();
     expect(screen.getByText(/Todas passam de .* — aprove uma a uma/)).toBeInTheDocument();
@@ -507,7 +507,7 @@ describe('vínculo que a categoria pede', () => {
     renderInbox();
     // Troca a categoria de p1 para pró-labore e o campo deve aparecer.
     await user.click(await seletorDeCategoria());
-    await user.click(await screen.findByText('Pró-labore e retirada'));
+    await user.click(await screen.findByText('Pró-labore'));
     expect(await screen.findByText(/Quem recebeu/)).toBeInTheDocument();
   });
 
@@ -518,7 +518,7 @@ describe('vínculo que a categoria pede', () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderInbox();
     await user.click(await seletorDeCategoria());
-    await user.click(await screen.findByText('Pró-labore e retirada'));
+    await user.click(await screen.findByText('Pró-labore'));
 
     const gatilhoFavorecido = (await screen.findByText(/Quem recebeu/)).closest('button');
     await user.click(gatilhoFavorecido!);
@@ -581,7 +581,7 @@ describe('entrada e saída convivendo na fila', () => {
     expect(await screen.findByText('Serviços prestados')).toBeInTheDocument();
     expect(screen.getByText('Venda de peças e produtos')).toBeInTheDocument();
     expect(screen.queryByText('Peças e materiais')).not.toBeInTheDocument();
-    expect(screen.queryByText('Pró-labore e retirada')).not.toBeInTheDocument();
+    expect(screen.queryByText('Pró-labore')).not.toBeInTheDocument();
   });
 
   it('SAÍDA continua com plano de despesa', async () => {

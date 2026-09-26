@@ -136,6 +136,7 @@ export const ROTULO_DA_ACAO: Record<string, string> = {
   lancou_no_caixa: 'Lançou no Caixa',
   ajustou_caixa: 'Acertou o Caixa pela contagem',
   contou_caixa: 'Contou o Caixa (bateu)',
+  decisao_do_dono: 'Decisão do dono aplicada',
   devolvida_a_fila: 'Devolveu à fila',
 };
 

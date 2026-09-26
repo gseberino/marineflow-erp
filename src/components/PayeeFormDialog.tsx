@@ -13,7 +13,7 @@ import { useSalvarPayee, ROTULO_TIPO, type Favorecido, type TipoFavorecido } fro
 
 /** A categoria que motivou o cadastro já diz o que a pessoa é para a empresa. */
 function tipoPelaCategoria(categoria?: string): TipoFavorecido {
-  if (categoria === 'Pró-labore e retirada') return 'socio';
+  if (categoria === 'Pró-labore' || categoria === 'Retirada de sócio') return 'socio';
   if (categoria === 'Salários e encargos') return 'funcionario';
   if (categoria === 'Serviços de terceiros') return 'prestador';
   return 'prestador';

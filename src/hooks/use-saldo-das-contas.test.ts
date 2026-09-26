@@ -42,6 +42,13 @@ describe('montarSaldos', () => {
     expect(cx.contado).toBe(true);
   });
 
+  it('lançamento do Caixa cancelado (estornada) não conta no saldo', () => {
+    const r = montarSaldos(conexoes, [], [
+      { amount: 100, transaction_type: 'debit', tx_status: null, dismissed_kind: 'estornada' },
+    ], true);
+    expect(r.contas.find((c) => c.id === 'cx')!.saldo).toBe(0);
+  });
+
   it('contagem que bateu (sem linha de ajuste) também conta como contado', () => {
     const r = montarSaldos(conexoes, [], [], true);
     expect(r.contas.find((c) => c.id === 'cx')!.contado).toBe(true);

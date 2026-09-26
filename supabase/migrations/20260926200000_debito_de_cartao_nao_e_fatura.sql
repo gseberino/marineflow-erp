@@ -173,3 +173,7 @@ end;
 $$;
 revoke all on function public.ajustar_caixa(numeric, text, uuid) from public, anon;
 grant execute on function public.ajustar_caixa(numeric, text, uuid) to authenticated, service_role;
+
+insert into supabase_migrations.schema_migrations (version, name)
+values ('20260926200000', 'debito_de_cartao_nao_e_fatura')
+on conflict do nothing;

@@ -1,7 +1,7 @@
 // Quanto há em cada conta e no Caixa — o número que todo dono procura primeiro.
 //
 // Pedido do dono (26/09/2026): "na aba contas bancárias poderia ter o saldo em cada conta".
-// O dado já existia: a cada busca (6h e 18h) o banco informa o saldo da conta, e ele fica em
+// O dado já existia: a cada busca (6h e 15h) o banco informa o saldo da conta, e ele fica em
 // bank_balance_checks junto com a conferência "base + lançado = banco". O Caixa não tem banco
 // que informe: o saldo dele é a base mais as linhas lançadas (mesma conta de saldo_do_caixa).
 import { useQuery } from '@tanstack/react-query';
@@ -51,7 +51,8 @@ export function montarSaldos(
   }
   const contas: SaldoDaConta[] = conexoes.filter((c) => c.active).map((c) => {
     if (c.provider === 'caixa') {
-      const validas = linhasDoCaixa.filter((l) => (l.tx_status ?? '') !== 'PENDING' && (l.dismissed_kind ?? '') !== 'duplicata');
+      // Mesma conta de saldo_do_caixa(): duplicata e lançamento cancelado (estornada) não contam.
+      const validas = linhasDoCaixa.filter((l) => (l.tx_status ?? '') !== 'PENDING' && !['duplicata', 'estornada'].includes(l.dismissed_kind ?? ''));
       const soma = validas.reduce((s, l) => s + (l.transaction_type === 'credit' ? 1 : -1) * Number(l.amount), 0);
       return {
         id: c.id, nome: c.label, ehCaixa: true,

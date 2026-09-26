@@ -20,7 +20,7 @@ const { favorecidos, salvarMock } = vi.hoisted(() => ({
       document: '12345678901', phone: null, email: null,
       pix_key: 'gustavo@hbr.com.br', pix_key_type: 'email',
       bank_name: 'C6', bank_branch: '0001', bank_account: '12345-6', account_type: 'corrente',
-      default_category: 'Pró-labore e retirada', commission_percentage: null,
+      default_category: 'Pró-labore', commission_percentage: null,
       notes: null, active: true,
     },
     {

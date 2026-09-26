@@ -59,7 +59,7 @@ export function SaldosDasContas({ contaAtiva, onEscolher, mostrarTotal = true, c
           <span className="text-muted-foreground">Dinheiro disponível:</span>
           <b className="tabular-nums">{formatCurrency(data.disponivel)}</b>
           <Ajuda rotulo="Como é calculado o dinheiro disponível">
-            Soma do saldo que cada banco informou na última busca (6h e 18h) com o saldo do Caixa em
+            Soma do saldo que cada banco informou na última busca (6h e 15h) com o saldo do Caixa em
             dinheiro. O saldo do banco vem do próprio banco; o do Caixa, do que foi lançado e contado.
           </Ajuda>
         </p>
