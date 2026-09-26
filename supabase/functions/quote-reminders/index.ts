@@ -1,7 +1,24 @@
 // Edge Function: quote-reminders
-// Runs daily via cron at 09:00 BRT.
+// Runs daily via cron at 09:00 BRT (cron PAUSADO desde 26/09/2026 01h, a pedido do dono).
 // 1. FOLLOW-UP: quotes stuck in sent/awaiting_approval for > quote_followup_days → queue WhatsApp follow-up
-// 2. EXPIRY:    quotes stuck in sent/awaiting_approval/awaiting_deposit for > quote_expiry_days → mark rejected
+//
+// ═══ A EXPIRAÇÃO SAIU DAQUI (26/09/2026) ═══
+//
+// Esta rotina também REJEITAVA sozinha todo orçamento em sent/awaiting_approval/
+// awaiting_deposit com mais de `quote_expiry_days` (7) dias de CRIAÇÃO — sem audit_log, sem
+// aviso, contando de uma data que não é a validade impressa no PDF e pegando inclusive
+// orçamentos já aprovados aguardando sinal. Em 23-24/09 foram R$ 133 mil rejeitados assim.
+//
+// Decisão do dono (26/09/2026): vencer a validade gera um AVISO, e quem decide é ele. Isso é
+// a regra R19 do motor de tarefas (task-automations/rules.ts, "Orçamento vencido: renovar ou
+// rejeitar?"), que conta a validade como o PDF (do próprio orçamento, dia de Brasília) e
+// nunca olha 'aguardando sinal'. Nada aqui muda o quote_status para 'rejected' — não volte
+// a pôr: é a única rotina que fazia isso, e fazia em silêncio.
+//
+// O FOLLOW-UP abaixo NÃO foi consertado de propósito: ele nunca funcionou (grava colunas que
+// a whatsapp_send_queue não tem e monta o link com a URL do Supabase), e consertá-lo passaria
+// a mandar mensagem automática a clientes — decisão pendente do dono. Com o cron pausado,
+// ele não roda.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
@@ -26,45 +43,30 @@ servirComCors(async (req) => {
     const SERVICE_ROLE    = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const admin           = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    // Load configurable thresholds from app_settings
+    // Load configurable thresholds from app_settings.
+    // `quote_expiry_days` não é mais lido: a expiração virou aviso (R19, ver cabeçalho).
     const { data: settings } = await admin
       .from("app_settings")
       .select("key, value")
-      .in("key", ["quote_followup_days", "quote_expiry_days"]);
+      .in("key", ["quote_followup_days"]);
 
     const sMap = Object.fromEntries((settings || []).map((s: any) => [s.key, Number(s.value)]));
     const followupDays = sMap["quote_followup_days"] ?? 7;
-    const expiryDays   = sMap["quote_expiry_days"]   ?? 30;
 
     const now = new Date();
 
     // Helper: date N days ago as ISO string
     const daysAgo = (n: number) => new Date(now.getTime() - n * 86400000).toISOString();
 
-    const results = { followups: 0, expired: 0, errors: 0 };
+    const results = { followups: 0, errors: 0 };
 
-    // ── 1. EXPIRY ──────────────────────────────────────────────────────────────
-    // Quotes older than expiry_days with no conversion → mark rejected
-    const { data: expiredQuotes, error: expErr } = await admin
-      .from("service_orders")
-      .select("id, service_order_number")
-      .eq("status", "draft")
-      .is("converted_to_os_at", null)
-      .in("quote_status", ["sent", "awaiting_approval", "awaiting_deposit"])
-      .lt("created_at", daysAgo(expiryDays));
+    // ── EXPIRY: REMOVIDA em 26/09/2026 ─────────────────────────────────────────
+    // Aqui ficava o laço que marcava quote_status = 'rejected' em todo orçamento com mais de
+    // quote_expiry_days de criação (inclusive 'awaiting_deposit'). O vencimento agora é
+    // AVISO: a R19 do task-automations cria a tarefa "Orçamento vencido: renovar ou
+    // rejeitar?" e o dono decide. Decisão do dono de 26/09/2026.
 
-    if (expErr) throw expErr;
-
-    for (const q of expiredQuotes || []) {
-      const { error } = await admin
-        .from("service_orders")
-        .update({ quote_status: "rejected" } as any)
-        .eq("id", q.id);
-      if (error) { results.errors++; console.error("expiry update failed", q.id, error); }
-      else results.expired++;
-    }
-
-    // ── 2. FOLLOW-UP ───────────────────────────────────────────────────────────
+    // ── FOLLOW-UP ──────────────────────────────────────────────────────────────
     // Quotes stuck in sent/awaiting_approval for > followup_days → queue reminder
     const { data: stuckQuotes, error: stuckErr } = await admin
       .from("service_orders")
