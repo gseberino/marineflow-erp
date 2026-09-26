@@ -6,7 +6,7 @@
 // configurando um número que não faz nada. O teste segura três coisas: o texto não promete
 // mais rejeição, o campo está desabilitado, e salvar não reescreve a chave (fica como estava).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QuoteSettingsSection } from './QuoteSettingsSection';
 
@@ -66,5 +66,45 @@ describe('Configurações › Orçamentos — vencimento é aviso', () => {
     expect((screen.getByLabelText(/Dias para expiração automática/) as HTMLInputElement).value).toBe('');
     await userEvent.click(screen.getByRole('button', { name: /Salvar configurações de orçamento/ }));
     expect(estado.gravados[0]).not.toHaveProperty('quote_expiry_days');
+  });
+});
+
+// A validade padrão era gravada como Number(digitado), sem filtro: -1, 0 e 2.5 iam para
+// app_settings. Agora só um inteiro de 1 a 3650 é gravado — a faixa que o PDF, a R19 e o
+// assistente aceitam (validadeGravavel).
+describe('Configurações › Orçamentos — validade padrão só grava inteiro de 1 a 3650', () => {
+  const campo = () => screen.getByLabelText(/Validade padrão do orçamento/) as HTMLInputElement;
+  const salvar = () => screen.getByRole('button', { name: /Salvar configurações de orçamento/ });
+
+  it('o campo pede inteiro de 1 a 3650 (min, max, step)', () => {
+    render(<QuoteSettingsSection />);
+    expect(campo().min).toBe('1');
+    expect(campo().max).toBe('3650');
+    expect(campo().step).toBe('1');
+  });
+
+  it.each(['-1', '0', '2.5', '3651', '1e9', ''])('com %j no campo, nada é gravado e a tela diz por quê', async (digitado) => {
+    render(<QuoteSettingsSection />);
+    fireEvent.change(campo(), { target: { value: digitado } });
+    expect(screen.getByRole('alert').textContent).toMatch(/inteiro de 1 a 3650 dias/);
+    expect(campo().getAttribute('aria-invalid')).toBe('true');
+    expect((salvar() as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(salvar());
+    expect(estado.gravados).toHaveLength(0);
+  });
+
+  it('um inteiro válido é gravado como texto do inteiro', async () => {
+    render(<QuoteSettingsSection />);
+    fireEvent.change(campo(), { target: { value: '30' } });
+    expect(screen.queryByRole('alert')).toBeNull();
+    await userEvent.click(salvar());
+    expect(estado.gravados).toHaveLength(1);
+    expect(estado.gravados[0].quote_validity_days).toBe('30');
+  });
+
+  it('um valor gravado inválido (-1) abre como o que o PDF usa (15), não como -1', () => {
+    estado.ajustes = { quote_validity_days: '-1' };
+    render(<QuoteSettingsSection />);
+    expect(campo().value).toBe('15');
   });
 });
