@@ -2503,7 +2503,10 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         open={!!pdfDialogType && !!pdfData}
         onOpenChange={v => { if (!v) setPdfDialogType(null); }}
         documentType={pdfDialogType || 'quote'}
-        initialValidityDays={validadeDoOrcamento(form.quote_validity_days, appSettings).days}
+        // Os dias do formulário (ainda não salvos) e a data fixa gravada: o diálogo decide entre
+        // eles e o padrão da empresa pela função única (validadeDoOrcamento), como a R19.
+        initialValidityDays={form.quote_validity_days}
+        initialValidityDate={orderData?.quote_validity_date}
         hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
         onGenerate={async (action, options, validity, dueDate) => {
           if (!pdfData || !pdfDialogType) return;
