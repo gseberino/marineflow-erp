@@ -20,12 +20,22 @@
 export const VALIDADE_PADRAO_DE_RESERVA = 15;
 
 /**
+ * O teto: dez anos. Acima disso o número não é validade, é erro de digitação.
+ *
+ * POR QUE EXISTE: sem teto, `1e9` ou `2147483647` passavam, e somar isso ao dia da emissão
+ * dá uma data que o JavaScript não representa — `toISOString` lança RangeError. Na R19 o erro
+ * saía de dentro do find e derrubava o aviso de TODOS os orçamentos por causa de um só
+ * (26/09/2026). Acima do teto o nível não serve e passa a vez ao seguinte, como o 0 e o -1.
+ */
+export const VALIDADE_MAXIMA_EM_DIAS = 3650;
+
+/**
  * Um número de dias de validade utilizável, ou null se o valor não serve.
  *
- * Serve: número (ou texto numérico) finito cujo inteiro, arredondado para baixo, seja pelo
- * menos 1. `2.5` vira 2 (a mesma conta que o assistente já fazia). Não servem: vazio, null,
- * texto que não é número, 0, negativo e o que arredonda para 0 (`0.5`) — antes o assistente
- * devolvia 0 para `0.5`.
+ * Serve: número (ou texto numérico) finito cujo inteiro, arredondado para baixo, fique entre
+ * 1 e 3650 (VALIDADE_MAXIMA_EM_DIAS). `2.5` vira 2 (a mesma conta que o assistente já fazia).
+ * Não servem: vazio, null, texto que não é número, 0, negativo, o que arredonda para 0 (`0.5`)
+ * — antes o assistente devolvia 0 para `0.5` — e o que passa do teto.
  */
 export function diasDeValidade(valor: unknown): number | null {
   if (valor === null || valor === undefined || typeof valor === 'boolean') return null;
@@ -33,7 +43,19 @@ export function diasDeValidade(valor: unknown): number | null {
   const n = Number(valor);
   if (!Number.isFinite(n)) return null;
   const dias = Math.floor(n);
-  return dias >= 1 ? dias : null;
+  return dias >= 1 && dias <= VALIDADE_MAXIMA_EM_DIAS ? dias : null;
+}
+
+/**
+ * Um número DIGITADO para ser gravado como validade: inteiro de 1 a 3650, ou null.
+ *
+ * Mais estrito que diasDeValidade de propósito: lá o valor já está no banco e o melhor a fazer
+ * é aproveitá-lo (2.5 vira 2); aqui a pessoa ainda está digitando, e gravar 2 quando ela
+ * escreveu 2.5 seria decidir por ela. Quem grava pergunta aqui e, com null, não grava.
+ */
+export function validadeGravavel(valor: unknown): number | null {
+  const dias = diasDeValidade(valor);
+  return dias !== null && dias === Number(valor) ? dias : null;
 }
 
 /**

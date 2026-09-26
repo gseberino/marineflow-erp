@@ -31,6 +31,24 @@ export function dataBR(valor: string | Date): string {
   return d.toLocaleDateString('pt-BR', { timeZone: FUSO });
 }
 
+/**
+ * O dia de calendário 'aaaa-mm-dd' contido em `valor`, se for um dia que existe; senão null.
+ *
+ * É o filtro da data fixa de validade (service_orders.quote_validity_date): o PDF imprime
+ * "Válido até" com ela e a R19 avisa no dia seguinte a ela, então os dois precisam concordar
+ * sobre o que é uma data. Aceita o começo de um timestamp ('2026-09-30T00:00:00'); recusa
+ * vazio, texto solto e dia que não existe ('2026-02-31'), que `dataBR` imprimiria como está.
+ */
+export function diaDeCalendario(valor: unknown): string | null {
+  if (typeof valor !== 'string') return null;
+  const dia = valor.trim().slice(0, 10);
+  const m = DIA_DE_CALENDARIO.exec(dia);
+  if (!m) return null;
+  const [ano, mes, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const t = new Date(Date.UTC(ano, mes - 1, d));
+  return t.getUTCFullYear() === ano && t.getUTCMonth() === mes - 1 && t.getUTCDate() === d ? dia : null;
+}
+
 /** hh:mm no horário de Brasília. */
 export function horaBR(d: Date): string {
   return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: FUSO });

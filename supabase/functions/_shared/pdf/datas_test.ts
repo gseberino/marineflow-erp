@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { dataBR, dataHoraBR, diaBR, horaBR, somarDiasAoDia, somarDiasBR } from "./datas.ts";
+import { dataBR, dataHoraBR, diaBR, diaDeCalendario, horaBR, somarDiasAoDia, somarDiasBR } from "./datas.ts";
 
 // Os casos-limite do fuso. Todos valem em qualquer TZ do processo — é esse o ponto.
 
@@ -44,4 +44,16 @@ Deno.test("somarDiasAoDia: dia de calendário sem fuso, virando mês, ano e biss
   assertEquals(somarDiasAoDia("2026-12-28", 5), "2027-01-02");
   assertEquals(somarDiasAoDia("2028-02-27", 2), "2028-02-29");
   assertEquals(somarDiasAoDia("2026-09-25", 0), "2026-09-25");
+});
+
+// A data fixa de validade: o PDF imprime "Válido até" com ela e a R19 avisa no dia seguinte;
+// os dois só aceitam um dia que existe.
+Deno.test("diaDeCalendario: só dia que existe, em aaaa-mm-dd", () => {
+  assertEquals(diaDeCalendario("2026-10-10"), "2026-10-10");
+  assertEquals(diaDeCalendario(" 2026-10-10 "), "2026-10-10");
+  assertEquals(diaDeCalendario("2026-10-10T00:00:00"), "2026-10-10");
+  assertEquals(diaDeCalendario("2028-02-29"), "2028-02-29");
+  for (const ruim of ["2026-02-29", "2026-02-31", "2026-13-01", "2026-00-10", "10/10/2026", "", "lixo", null, undefined, 20261010, new Date()]) {
+    assertEquals(diaDeCalendario(ruim), null, `aceitou ${String(ruim)}`);
+  }
 });

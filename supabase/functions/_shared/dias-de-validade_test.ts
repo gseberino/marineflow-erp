@@ -4,9 +4,66 @@
 // assistente (validadePadraoDoOrcamento) já exigia número positivo. Estes testes seguram a
 // regra e provam que as duas portas respondem igual para a mesma sujeira.
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { diasDeValidade, primeiraValidade, VALIDADE_PADRAO_DE_RESERVA } from "./dias-de-validade.ts";
+import {
+  diasDeValidade,
+  primeiraValidade,
+  VALIDADE_MAXIMA_EM_DIAS,
+  VALIDADE_PADRAO_DE_RESERVA,
+  validadeGravavel,
+} from "./dias-de-validade.ts";
 import { ultimoDiaDaValidade, validadeDoOrcamento } from "./pdf/documento.ts";
 import { validadePadraoDoOrcamento } from "./ai/validade-orcamento.ts";
+
+// Sem teto, 1e9 dias passavam e somar isso à emissão dava uma data que o JavaScript não
+// representa: `toISOString` lançava RangeError e a R19 caía inteira (26/09/2026).
+Deno.test("diasDeValidade: teto de 3650 dias; acima disso não serve", () => {
+  assertEquals(VALIDADE_MAXIMA_EM_DIAS, 3650);
+  assertEquals(diasDeValidade(3650), 3650);
+  assertEquals(diasDeValidade("3650.9"), 3650);
+  for (const gigante of [3651, "3651", 1e9, 2147483647, "1e9", Number.MAX_SAFE_INTEGER]) {
+    assertEquals(diasDeValidade(gigante), null, `aceitou ${String(gigante)}`);
+  }
+  // o nível gigante passa a vez, como o 0 e o -1
+  assertEquals(primeiraValidade(1e9, "3"), 3);
+});
+
+Deno.test("ultimoDiaDaValidade: 1e9 e 2147483647 não lançam; valem os dias da empresa", () => {
+  const o = (dias: unknown) => ({ created_at: "2026-09-24T15:00:00Z", quote_validity_days: dias });
+  // 24/09 + 3 (empresa) = 27/09 — antes: RangeError: Invalid time value
+  assertEquals(ultimoDiaDaValidade(o(1e9), { quote_validity_days: "3" }), "2026-09-27");
+  assertEquals(ultimoDiaDaValidade(o(2147483647), { quote_validity_days: "3" }), "2026-09-27");
+  // empresa gigante também passa a vez: sobra o 15
+  assertEquals(ultimoDiaDaValidade(o(null), { quote_validity_days: "1000000000" }), "2026-10-09");
+});
+
+Deno.test("validadeGravavel: só grava inteiro de 1 a 3650, exatamente como digitado", () => {
+  assertEquals(validadeGravavel("3"), 3);
+  assertEquals(validadeGravavel(30), 30);
+  assertEquals(validadeGravavel(" 7 "), 7);
+  assertEquals(validadeGravavel("3650"), 3650);
+  // 2.5 não vira 2 na hora de gravar: quem digitou decide
+  for (const ruim of ["2.5", 2.5, "-1", -1, "0", 0, "", "  ", "lixo", "3651", 1e9, null, undefined, true]) {
+    assertEquals(validadeGravavel(ruim), null, `gravaria ${String(ruim)}`);
+  }
+});
+
+Deno.test("validadeDoOrcamento: data fixa válida vira mode 'date' (com os dias junto); lixo cai nos dias", () => {
+  const empresa = { quote_validity_days: "3" };
+  assertEquals(validadeDoOrcamento(7, empresa, "2026-10-10"), { mode: "date", date: "2026-10-10", days: 7 });
+  // começo de timestamp também serve
+  assertEquals(validadeDoOrcamento(null, empresa, "2026-10-10T00:00:00"), { mode: "date", date: "2026-10-10", days: 3 });
+  // dia que não existe, texto, vazio e não-string não são data fixa
+  for (const ruim of ["2026-02-31", "2026-13-01", "10/10/2026", "", "lixo", null, undefined, 20261010]) {
+    assertEquals(validadeDoOrcamento(7, empresa, ruim), { mode: "days", days: 7 }, `aceitou ${String(ruim)}`);
+  }
+});
+
+Deno.test("ultimoDiaDaValidade: data fixa inválida não vira o último dia", () => {
+  const o = { created_at: "2026-09-24T15:00:00Z", quote_validity_days: 3 };
+  assertEquals(ultimoDiaDaValidade({ ...o, quote_validity_date: "2026-10-10" }, {}), "2026-10-10");
+  // antes o filtro era só a forma aaaa-mm-dd: 31/02 passava e a R19 o tomava por último dia
+  assertEquals(ultimoDiaDaValidade({ ...o, quote_validity_date: "2026-02-31" }, {}), "2026-09-27");
+});
 
 Deno.test("diasDeValidade: só inteiro de pelo menos 1 dia serve", () => {
   assertEquals(diasDeValidade(7), 7);
