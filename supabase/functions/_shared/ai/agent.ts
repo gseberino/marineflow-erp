@@ -12,7 +12,7 @@ import {
 import { allTools, type ToolCtx, type ToolDef } from "./tools/index.ts";
 import { isAutonomyGranted } from "./autonomy-policy.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
-import { PERFIL_OPERACAO, SO_PELA_REDE } from "./perfil-operacao.ts";
+import { PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from "./perfil-operacao.ts";
 
 export interface Proposal {
   pending_action_id: string;
@@ -477,9 +477,11 @@ async function aplicarPerfilDeTools(todas: ToolDef[], params: RunAgentLoopParams
  * mantinha longe de técnico e vendedor — a rede não pode devolver o que ele escondia.
  *
  * O modelo chamou sem ver o esquema, então o argumento é conferido contra o input_schema (e, se
- * estiver errado, volta o erro COM o esquema para ele acertar na próxima rodada). Passou: risco
- * low — declarado E calculado — roda direto (SO_PELA_REDE só guarda leitura e escrita de baixo
- * impacto verificada); o resto vira pendência de confirmação, sem autonomia.
+ * estiver errado, volta o erro COM o esquema para ele acertar na próxima rodada). Passou: roda
+ * direto só o que rodaDiretoPelaRede aceita (risco low declarado, e leitura ou escrita de
+ * sugestão/análise de ESCRITAS_VERIFICADAS_DA_REDE) e o computeRisk calcula low; todo o resto
+ * vira pendência de confirmação, sem autonomia — escrita de risco low inclusive, porque o modelo
+ * a chamou sem ter lido a descrição e os limites dela.
  */
 
 /**
@@ -624,10 +626,11 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
       let executou = false;
 
       const riscoDaTool = toolDef ? (toolDef.computeRisk ? toolDef.computeRisk(tc.input) : toolDef.risk) : "low";
-      // Pela rede, só roda direto o que a tool DECLARA e o computeRisk CALCULA como low — é o que
-      // SO_PELA_REDE garante ser leitura ou escrita de baixo impacto verificada. Declarada acima
-      // de low e rebaixada pelo computeRisk pede confirmação. Só sobe o risco, nunca rebaixa.
-      const effectiveRisk = foraDoPerfil && riscoDaTool === "low" && foraDoPerfil.risk !== "low" ? "medium" : riscoDaTool;
+      // Pela rede, só roda direto o que o computeRisk CALCULA como low e rodaDiretoPelaRede aceita:
+      // declarada low E leitura ou escrita de sugestão/análise (ESCRITAS_VERIFICADAS_DA_REDE).
+      // Escrita low fora dessa lista, ou declarada acima de low e rebaixada pelo computeRisk, pede
+      // confirmação. Só sobe o risco, nunca rebaixa.
+      const effectiveRisk = foraDoPerfil && riscoDaTool === "low" && !rodaDiretoPelaRede(foraDoPerfil) ? "medium" : riscoDaTool;
 
       // Autonomia concedida pelo dono para ESTA ação (Onda 2). Ações de dinheiro/destrutivas
       // nunca entram aqui — ver NEVER_AUTONOMOUS. Pela rede também não: a autonomia foi dada

@@ -140,7 +140,7 @@ function comExecuteFalso(nome: string, resposta: (args: Record<string, unknown>)
 }
 
 const LEITURA = "get_comms_log"; // leitura, risco low
-const ESCRITA_VERIFICADA = "interpret_customer_reply"; // escrita de baixo impacto verificada, risco low
+const ESCRITA_VERIFICADA = "interpret_customer_reply"; // escrita de análise (ESCRITAS_VERIFICADAS_DA_REDE), risco low
 const ESCRITA_MEDIA = "remove_service_order_expense"; // escrita de risco medium
 const ESCRITA_MEDIA_AUTONOMIZAVEL = "remove_service_order_step"; // medium e fora de NEVER_AUTONOMOUS
 const COM_ESQUEMA = "list_entity_notes"; // obrigatórios e enum, para a validação de argumentos
@@ -188,7 +188,7 @@ Deno.test("rede: leitura de SO_PELA_REDE roda direto e deixa a marca fora_do_per
   assertEquals(r.message.content, "feito");
 });
 
-Deno.test("rede: escrita de baixo impacto verificada roda direto — o turno segue e a resposta chega no WhatsApp", async () => {
+Deno.test("rede: escrita de sugestão/análise (verificada) roda direto — o turno segue e a resposta chega no WhatsApp", async () => {
   // Antes virava pendência: o turno parava na proposta e, no WhatsApp, a resposta do modelo sumia.
   execucoes = [];
   const { params, auditRows, pendingRows } = montar({
@@ -206,6 +206,75 @@ Deno.test("rede: escrita de baixo impacto verificada roda direto — o turno seg
   assertEquals(r.message.content, "Ele diz que já pagou — não reenvio a cobrança e te passo o caso.");
   assertEquals(auditRows.map((a) => a.event_type), [`tool:${ESCRITA_VERIFICADA}`, `fora_do_perfil:${ESCRITA_VERIFICADA}`]);
   assertEquals(marcasDaRede(auditRows), [{ tool: ESCRITA_VERIFICADA, desfecho: "executada" }]);
+});
+
+Deno.test("rede: review_entity_note (portão humano da memória) vira pendência e NÃO aprova a nota", async () => {
+  // Conferência de 26/09: rodando direto pela rede, o modelo aprovava nota sem o dono.
+  execucoes = [];
+  const REVISAR = "review_entity_note";
+  assertEquals(SO_PELA_REDE.has(REVISAR) && porNomeReal.get(REVISAR)!.risk === "low", true);
+  assertEquals(REVISAR in ESCRITAS_VERIFICADAS_DA_REDE, false);
+  const { params, auditRows, pendingRows } = montar({ tools: [comExecuteFalso(REVISAR)], channel: "whatsapp" });
+  const { fetchStub, calls } = mockFetchSequence([chamaTool(REVISAR, { note_id: "n1", decision: "approve" })]);
+  const r = await withFetch(fetchStub, () => runAgentLoop(params));
+  assertEquals(toolsEnviadas(calls).includes(REVISAR), false);
+  assertEquals(execucoes, []);
+  assertExists(r.proposal);
+  assertEquals(r.proposal?.risk_level, "medium");
+  assertEquals(pendingRows.length, 1);
+  assertEquals(pendingRows[0].action_name, REVISAR);
+  assertEquals(pendingRows[0].payload, { note_id: "n1", decision: "approve" });
+  assertEquals(marcasDaRede(auditRows), [{ tool: REVISAR, desfecho: "pendencia" }]);
+
+  // Controle: À VISTA (nome no pedido do dono), a tool segue o risco que declara (low) e roda —
+  // a confirmação é da rede, não uma mudança na tool.
+  execucoes = [];
+  const aVista = montar({ tools: [comExecuteFalso(REVISAR)], pedido: `aprova a nota n1 (${REVISAR})` });
+  const s = mockFetchSequence([chamaTool(REVISAR, { note_id: "n1", decision: "approve" }), respondeTexto("aprovada")]);
+  await withFetch(s.fetchStub, () => runAgentLoop(aVista.params));
+  assertEquals(execucoes, [REVISAR]);
+  assertEquals(aVista.pendingRows.length, 0);
+});
+
+Deno.test("rede: o modelo cria a nota e tenta aprová-la no mesmo turno — a nota nasce candidata, a aprovação para no dono", async () => {
+  execucoes = [];
+  const { params, pendingRows, auditRows } = montar({
+    tools: [comExecuteFalso("remember_about_entity", () => ({ ok: true, note_id: "n9", status: "sugerida" })), comExecuteFalso("review_entity_note")],
+  });
+  const { fetchStub } = mockFetchSequence([
+    chamaTool("remember_about_entity", { scope: "client", entity_id: "c1", title: "Pede desconto", body: "Sempre pede 10%" }, "toolu_a"),
+    chamaTool("review_entity_note", { note_id: "n9", decision: "approve" }, "toolu_b"),
+  ]);
+  const r = await withFetch(fetchStub, () => runAgentLoop(params));
+  assertEquals(execucoes, ["remember_about_entity"]);
+  assertEquals(pendingRows.map((p) => p.action_name), ["review_entity_note"]);
+  assertExists(r.proposal);
+  assertEquals(marcasDaRede(auditRows), [
+    { tool: "remember_about_entity", desfecho: "executada" },
+    { tool: "review_entity_note", desfecho: "pendencia" },
+  ]);
+});
+
+Deno.test("rede: escrita de risco low que não é sugestão/análise vira pendência (nota, preço/fiscal, OS, roteiro, catálogo)", async () => {
+  const CONFIRMADAS = ["review_entity_note", "update_service", "convert_external_quote_to_so", "reorder_service_order_step", "create_composed_product"];
+  for (const nome of CONFIRMADAS) {
+    const real = porNomeReal.get(nome)!;
+    assertEquals(SO_PELA_REDE.has(nome), true, nome);
+    assertEquals(real.risk, "low", `${nome}: premissa — declarada low (à vista roda direto)`);
+    // Chamada mínima válida: os obrigatórios, com o primeiro valor do enum quando houver.
+    const s = real.input_schema as { properties?: Record<string, { enum?: unknown[] }>; required?: string[] };
+    const args: Record<string, unknown> = {};
+    for (const campo of s.required ?? []) args[campo] = s.properties?.[campo]?.enum?.[0] ?? "valor";
+
+    execucoes = [];
+    const { params, auditRows, pendingRows } = montar({ tools: [comExecuteFalso(nome)] });
+    const { fetchStub } = mockFetchSequence([chamaTool(nome, args)]);
+    const r = await withFetch(fetchStub, () => runAgentLoop(params));
+    assertEquals(execucoes, [], nome);
+    assertEquals(r.proposal?.risk_level, "medium", nome);
+    assertEquals(pendingRows.map((p) => p.action_name), [nome], nome);
+    assertEquals(marcasDaRede(auditRows), [{ tool: nome, desfecho: "pendencia" }], nome);
+  }
 });
 
 Deno.test("rede: escrita de risco medium de SO_PELA_REDE vira pendência e NÃO executa", async () => {
@@ -362,12 +431,15 @@ Deno.test("rede: de SO_PELA_REDE, alcança só o que o cargo libera (técnico: p
   const tools = porCargo("technician").map((t) => (t.name === REORDENAR ? comExecuteFalso(REORDENAR) : t));
   assertEquals(tools.some((t) => t.name === MEMORIA), false);
 
+  // Alcançada: vira pendência (é escrita fora de ESCRITAS_VERIFICADAS_DA_REDE), não "Tool desconhecida".
   execucoes = [];
   const a = montar({ tools, role: "technician" });
   const sa = mockFetchSequence([chamaTool(REORDENAR, { step_id: "p1", direction: "up" }), respondeTexto("feito")]);
-  await withFetch(sa.fetchStub, () => runAgentLoop(a.params));
-  assertEquals(execucoes, [REORDENAR]);
-  assertEquals(marcasDaRede(a.auditRows), [{ tool: REORDENAR, desfecho: "executada" }]);
+  const ra = await withFetch(sa.fetchStub, () => runAgentLoop(a.params));
+  assertEquals(execucoes, []);
+  assertEquals(ra.proposal?.risk_level, "medium");
+  assertEquals(a.pendingRows.map((p) => p.action_name), [REORDENAR]);
+  assertEquals(marcasDaRede(a.auditRows), [{ tool: REORDENAR, desfecho: "pendencia" }]);
 
   const b = montar({ tools, role: "technician" });
   const sb = mockFetchSequence([chamaTool(MEMORIA, { scope: "client", entity_id: "c1", title: "t", body: "b" }), respondeTexto("ok")]);

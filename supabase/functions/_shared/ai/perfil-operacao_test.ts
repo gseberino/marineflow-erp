@@ -4,7 +4,7 @@
 //   deno test --allow-all supabase/functions/_shared/ai/perfil-operacao_test.ts
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { runAgentLoop } from "./agent.ts";
-import { ehLeituraPeloNome, ESCRITAS_VERIFICADAS_DA_REDE, PERFIL_OPERACAO, SO_PELA_REDE } from "./perfil-operacao.ts";
+import { ehLeituraPeloNome, ESCRITAS_VERIFICADAS_DA_REDE, PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from "./perfil-operacao.ts";
 import { allTools } from "./tools/index.ts";
 
 Deno.env.set("OPENROUTER_API_KEY", "test-key-not-real");
@@ -65,22 +65,49 @@ Deno.test("todo nome do perfil e da lista SO_PELA_REDE existe em allTools, e as 
   for (const nome of SO_PELA_REDE) assertEquals(PERFIL_OPERACAO.has(nome), false, `${nome} está no perfil E na rede`);
 });
 
-Deno.test("SO_PELA_REDE: toda escrita de risco low (que pela rede roda direto) é escrita de baixo impacto verificada", () => {
-  // Pela rede, risco low roda sem confirmação (agent.ts). Então escrita low só entra em
-  // SO_PELA_REDE depois de alguém ler o execute e registrar o porquê em ESCRITAS_VERIFICADAS_DA_REDE.
-  // Se este teste acusar um nome novo: leia o execute; se passar no critério, registre lá; se
-  // não passar, dê risk 'medium' à tool ou ponha no perfil — não em SO_PELA_REDE como low.
+Deno.test("SO_PELA_REDE: pela rede, roda direto só leitura e escrita de sugestão/análise; o resto pede confirmação", () => {
+  // Pela rede, o executor (agent.ts) consulta rodaDiretoPelaRede: escrita que não está em
+  // ESCRITAS_VERIFICADAS_DA_REDE vira pendência, mesmo de risco low. Se este teste acusar
+  // diferença: nome novo em SO_PELA_REDE cai do lado "pede confirmação" sozinho — confira se é
+  // isso mesmo; acrescentar a ESCRITAS_VERIFICADAS_DA_REDE só depois de ler o execute.
   for (const n of ["get_x", "list_x", "read_x", "check_x", "search_x"]) assertEquals(ehLeituraPeloNome(n), true, n);
   for (const n of ["update_x", "interpret_customer_reply", "remember_about_entity", "xget_x"]) assertEquals(ehLeituraPeloNome(n), false, n);
+  // Nome herdado do protótipo de objeto não é "verificado".
+  for (const n of ["constructor", "toString", "hasOwnProperty"]) assertEquals(rodaDiretoPelaRede({ name: n, risk: "low" }), false, n);
 
   const porNome = new Map(allTools.map((t) => [t.name, t]));
-  const escritasLow = [...SO_PELA_REDE]
-    .filter((n) => porNome.get(n)!.risk === "low" && !ehLeituraPeloNome(n))
+  const diretas = [...SO_PELA_REDE].filter((n) => rodaDiretoPelaRede(porNome.get(n)!));
+  const escritasDiretas = diretas.filter((n) => !ehLeituraPeloNome(n)).sort();
+  assertEquals(escritasDiretas, ["interpret_customer_reply", "remember_about_entity"]);
+  assertEquals(escritasDiretas, Object.keys(ESCRITAS_VERIFICADAS_DA_REDE).sort(), "lista verificada com nome que não é escrita low de SO_PELA_REDE");
+
+  // As escritas de risco low que, pela rede, pedem confirmação (conferência de 26/09/2026).
+  const escritasLowConfirmadas = [...SO_PELA_REDE]
+    .filter((n) => porNome.get(n)!.risk === "low" && !ehLeituraPeloNome(n) && !rodaDiretoPelaRede(porNome.get(n)!))
     .sort();
-  assertEquals(escritasLow, Object.keys(ESCRITAS_VERIFICADAS_DA_REDE).sort());
+  assertEquals(escritasLowConfirmadas, [
+    "convert_external_quote_to_so", "create_composed_product", "reorder_service_order_step", "review_entity_note", "update_service",
+  ]);
+  // E nada de risco medium/high roda direto pela rede.
+  for (const n of SO_PELA_REDE) {
+    if (porNome.get(n)!.risk !== "low") assertEquals(rodaDiretoPelaRede(porNome.get(n)!), false, n);
+  }
   // A verificação tem de dizer o porquê, não só o nome.
   for (const [nome, porque] of Object.entries(ESCRITAS_VERIFICADAS_DA_REDE)) {
     assertEquals(porque.trim().length > 20, true, `${nome} sem o porquê da verificação`);
+  }
+});
+
+Deno.test("SO_PELA_REDE: a 'leitura pelo nome' que roda direto não escreve (o nome não mente)", () => {
+  // O executor confia no nome (get_/list_/read_/check_/search_) para deixar rodar direto. Aqui se
+  // confere, no corpo do execute, que nenhuma delas grava. Só o corpo do execute é lido: helper
+  // em outra função não aparece — quem acrescentar leitura que delega tem de ler o helper.
+  const porNome = new Map(allTools.map((t) => [t.name, t]));
+  const leituras = [...SO_PELA_REDE].filter((n) => ehLeituraPeloNome(n));
+  assertEquals(leituras.length >= 10, true, `só ${leituras.length} leituras — o recorte quebrou?`);
+  for (const n of leituras) {
+    const corpo = String(porNome.get(n)!.execute);
+    assertEquals(/\.(insert|update|upsert|delete|rpc)\(/.test(corpo), false, `${n} tem escrita no execute e passaria direto pela rede`);
   }
 });
 
