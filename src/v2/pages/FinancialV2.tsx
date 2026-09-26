@@ -19,8 +19,9 @@ import { PainelDeComissoes } from '@/v2/pages/CommissionsV2';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { FinancialFilterPanel, applyFilters, defaultFilters, type FinancialFilters } from '@/components/FinancialFilterPanel';
 import { PaymentDialog } from '@/components/PaymentDialog';
-import { PayableFormDialog } from '@/components/PayableFormDialog';
+import { LancarDialog, type TipoDeLancamento, type PorOnde } from '@/components/LancarDialog';
 import { CorrigirLancamentoDialog } from '@/components/CorrigirLancamentoDialog';
+import { DespesasPanel } from '@/components/DespesasPanel';
 import { DesfazerOuCancelarDialog, type AcaoNoLancamento } from '@/components/DesfazerOuCancelarDialog';
 import { AcoesDaLinha, type AcaoDaLinha } from '@/components/AcoesDaLinha';
 import { DREPanel } from '@/components/DREPanel';
@@ -40,6 +41,7 @@ import { KPIStat } from '@/v2/components/KPIStat';
 import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
 import { DataTable, type DataColumn, type SortState } from '@/v2/components/DataTable';
 import { V2Shell } from '@/v2/components/V2Shell';
+import { SaldosDasContas } from '@/components/SaldosDasContas';
 import '@/v2/tokens.css';
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -75,9 +77,31 @@ type PayableRow = {
   service_order_expenses?: { receipt_url?: string | null }[] | null;
 };
 
+/**
+ * Para que serve cada aba, numa frase — embaixo do título, sempre visível (pedido do dono,
+ * 26/09/2026: "um breve resumo de para que serve cada aba"). Antes as 13 abas mostravam a
+ * mesma frase.
+ */
+const PARA_QUE_SERVE: Record<string, string> = {
+  overview: 'Como está o dinheiro hoje: quanto há em cada conta e no Caixa, o que você tem a receber e a pagar. Lucro ou prejuízo do período fica no DRE.',
+  dre: 'Diz se a empresa deu lucro ou prejuízo no período: o que foi vendido menos custos e despesas, pela data do lançamento. Não é o saldo do banco.',
+  payables: 'O que a empresa ainda deve pagar. O que já saiu, com a categoria de cada gasto, fica em Despesas.',
+  despesas: 'Tudo o que saiu (bancos, cartão, Caixa e bolso de sócio) e em que categoria entrou. Aqui você confere e corrige.',
+  comissoes: 'Comissões de técnicos e vendedores. Aprovar cria a conta a pagar.',
+  forecast: 'Previsão semana a semana, pelo que vence a receber e a pagar nas próximas 8 semanas: vai faltar dinheiro em alguma semana?',
+  inbox: 'O que o banco trouxe e ainda precisa de uma decisão sua, conta por conta. Aprovar só registra: nenhum pagamento é feito.',
+  reconciliation: 'Confere se o que foi lançado tem a linha correspondente no banco. No Extrato você parte do banco; aqui, do que você lançou.',
+  cartoes: 'As faturas do cartão de crédito: compras de cada ciclo, pagamento e juros. Compra no débito não fica aqui.',
+  rules: 'O que você ensinou o sistema a classificar. "Preencher e esperar meu OK" só sugere; "Lançar sozinha" lança sem clique.',
+  fechamento: 'Confere se o mês está completo e trava os números. Mês fechado não muda sem um motivo.',
+  cadastro: 'Cadastros que atrapalham o reconhecimento automático (apelido ruim, CNPJ faltando ou duplicado), com a correção sugerida.',
+  banks: 'Os bancos ligados ao sistema e o saldo de cada conta. O dia a dia do que entrou e saiu fica no Extrato.',
+  aging: 'Quem deve à empresa, por tempo de atraso: a vencer, 1–30, 31–60, 61–90 e mais de 90 dias.',
+};
+
 /** Seções que esta tela sabe mostrar (uma por aba). */
 const SECOES_DO_FINANCEIRO = new Set([
-  'overview', 'dre', 'payables', 'comissoes', 'forecast', 'inbox', 'reconciliation',
+  'overview', 'dre', 'payables', 'despesas', 'comissoes', 'forecast', 'inbox', 'reconciliation',
   'cartoes', 'rules', 'fechamento', 'cadastro', 'banks', 'aging',
 ]);
 
@@ -178,7 +202,12 @@ export default function FinancialV2() {
   const [paySort, setPaySort] = useState<SortState>({ key: 'due_date', dir: 'asc' });
   const [paySubTab, setPaySubTab] = useState<'list' | 'reimbursements'>('list');
   const [paymentTarget, setPaymentTarget] = useState<{ receivable?: PayableRow; payable?: PayableRow } | null>(null);
-  const [showNewPayable, setShowNewPayable] = useState(false);
+  // "+ Lançar": a porta única para registrar à mão. ?lancar=despesa abre direto (atalho que o
+  // assistente pode mandar pelo WhatsApp).
+  const [lancar, setLancar] = useState<{ tipo?: TipoDeLancamento; porOnde?: PorOnde } | null>(() => {
+    const pedido = searchParams.get('lancar');
+    return pedido && ['despesa', 'recebimento', 'transferencia', 'contagem'].includes(pedido) ? { tipo: pedido as TipoDeLancamento } : null;
+  });
   const [editingPayable, setEditingPayable] = useState<PayableRow | null>(null);
   // Desfazer e cancelar pedem confirmação com motivo — ver DesfazerOuCancelarDialog.
   const [acaoNaConta, setAcaoNaConta] = useState<{ acao: AcaoNoLancamento; conta: PayableRow } | null>(null);
@@ -380,7 +409,12 @@ export default function FinancialV2() {
       <PageShell
         breadcrumb={[{ label: 'Financeiro' }]}
         title={t.financial.title}
-        description={t.financial.description}
+        description={PARA_QUE_SERVE[tab] ?? t.financial.description}
+        actions={
+          <Button className="gap-1.5" onClick={() => setLancar({})}>
+            <Plus className="h-4 w-4" /> Lançar
+          </Button>
+        }
       >
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList className="flex h-auto w-full flex-wrap justify-start">
@@ -391,6 +425,7 @@ export default function FinancialV2() {
                 dois mundos, porque prometia troca de conteúdo e entregava troca de página.
                 Agora é item do menu, onde uma tela inteira deve estar. */}
             <TabsTrigger value="payables">{t.financial.tabPayables}</TabsTrigger>
+            <TabsTrigger value="despesas">Despesas</TabsTrigger>
             <TabsTrigger value="comissoes">Comissões</TabsTrigger>
             {/* MF-AUD-050: a programação de caixa (8 semanas, alerta de semana negativa e
                 duplicata de pagáveis) vivia só no Financeiro v1 — desde os redirects de
@@ -431,6 +466,8 @@ export default function FinancialV2() {
 
           {/* ── VISÃO GERAL ── */}
           <TabsContent value="overview" className="mt-4 space-y-4">
+            {/* Primeiro, quanto dinheiro há hoje — o que todo dono procura primeiro. */}
+            <SaldosDasContas />
             {loadingSummary ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24 rounded-lg" />)}
@@ -538,6 +575,11 @@ export default function FinancialV2() {
           <TabsContent value="dre" className="mt-4"><DREPanel /></TabsContent>
 
           {/* ── PAGÁVEIS ── */}
+          {/* ── DESPESAS: o que saiu e como foi categorizado (pedido do dono, 26/09/2026) ── */}
+          <TabsContent value="despesas" className="mt-4">
+            <DespesasPanel />
+          </TabsContent>
+
           <TabsContent value="payables" className="mt-4 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
@@ -566,6 +608,10 @@ export default function FinancialV2() {
                   {mostrarPagas ? 'Só o que está em aberto' : `Mostrar as ${pagasEscondidas} já pagas`}
                 </Button>
               )}
+              {/* O que já saiu, com a categoria de cada gasto, mora em Despesas. */}
+              <Button size="sm" variant="link" className="h-8 px-1 text-xs" onClick={() => setTab('despesas')}>
+                Ver o que já saiu (Despesas)
+              </Button>
               <div className="flex gap-2">
                 <Button
                   variant="outline" size="sm" className="gap-1.5"
@@ -581,8 +627,8 @@ export default function FinancialV2() {
                 >
                   <Download className="h-4 w-4" /> Exportar CSV
                 </Button>
-                <Button className="gap-1.5" onClick={() => setShowNewPayable(true)}>
-                  <Plus className="h-4 w-4" /> {t.financial.newPayable}
+                <Button className="gap-1.5" onClick={() => setLancar({ tipo: 'despesa', porOnde: 'depois' })}>
+                  <Plus className="h-4 w-4" /> Nova conta a pagar
                 </Button>
               </div>
             </div>
@@ -725,10 +771,9 @@ export default function FinancialV2() {
           regra={sementeRegra}
         />
       )}
-      <PayableFormDialog open={showNewPayable} onOpenChange={setShowNewPayable} />
+      {lancar && <LancarDialog tipoInicial={lancar.tipo} porOndeInicial={lancar.porOnde} onFechar={() => setLancar(null)} />}
       {/* Corrigir serve para qualquer conta, inclusive paga, e passa pelo caminho único
-          (trilha, mês fechado, valor do banco travado). O formulário de criação continua
-          sendo o PayableFormDialog. */}
+          (trilha, mês fechado, valor do banco travado). Criar é pelo "+ Lançar". */}
       {editingPayable && (
         <CorrigirLancamentoDialog
           tipo="payable"

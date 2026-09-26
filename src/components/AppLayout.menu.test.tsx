@@ -47,7 +47,8 @@ describe('menu lateral', () => {
     const fin = grupo('Financeiro')!;
     expect(fin.itens).toEqual([
       'Visão Geral', 'Extrato', 'Conciliação',
-      'Contas a Receber', 'Contas a Pagar', 'Cobranças',
+      // Despesas (26/09/2026): o que JÁ saiu e em que categoria entrou; Contas a Pagar é o que se deve.
+      'Contas a Receber', 'Contas a Pagar', 'Despesas', 'Cobranças',
     ]);
   });
 

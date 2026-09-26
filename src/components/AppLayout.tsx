@@ -250,6 +250,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Conciliação', icon: ArrowLeftRight, path: '/v2/financial/reconciliation', roles: ['admin', 'financial'] },
         { label: 'Contas a Receber', icon: TrendingUp, path: '/v2/receivables', roles: ['admin', 'financial'] },
         { label: 'Contas a Pagar', icon: TrendingDown, path: '/v2/financial/payables', roles: ['admin', 'financial'] },
+        // Despesas (26/09/2026): o que JÁ saiu e em que categoria entrou. Contas a Pagar é o que
+        // ainda se deve; faltava um lugar para o dono ver para onde foi o dinheiro.
+        { label: 'Despesas', icon: Receipt, path: '/v2/financial/despesas', roles: ['admin', 'financial'] },
         { label: 'Cobranças', icon: CreditCard, path: '/v2/collections', roles: ['admin', 'financial'] },
       ],
     },

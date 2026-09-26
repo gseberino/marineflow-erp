@@ -1,32 +1,23 @@
-// Caixa em dinheiro e anotação antecipada, pela tela (Fase 4 do Financeiro Confiável).
+// Anotação antecipada pela tela (Fase 4 do Financeiro Confiável).
 //
 // As mesmas funções que o assistente do WhatsApp chama. Na tela, os cadastros são
 // escolhidos em lista; no WhatsApp, pelo nome dito — o banco recebe a mesma coisa.
+// Lançar no Caixa e "Contei o dinheiro" moraram aqui até 26/09/2026; hoje são abas da
+// janela única "+ Lançar" (LancarDialog), que a ficha do Caixa abre já no lugar certo.
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
 import { EntityCombobox } from '@/components/EntityCombobox';
 import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { MoneyInput } from '@/components/MoneyInput';
 import { useI18n } from '@/i18n';
 import { usePayees, useServiceOrdersVinculaveis, useClientesParaReceita, ROTULO_TIPO } from '@/hooks/use-payees';
 import { useSuppliers } from '@/hooks/use-suppliers';
-import {
-  useLancarNoCaixa, useMoverCaixa, useAjustarCaixa, useAnotarTransacao,
-  useAnotacoesAguardando, useCancelarAnotacao,
-} from '@/hooks/use-caixa';
-import { useFinanceRules } from '@/hooks/use-finance-review';
-import type { RegraFinanceira } from '../../supabase/functions/_shared/banking/proposals';
-import { destinoDoGasto } from '@/lib/destino-do-gasto';
+import { useAnotarTransacao, useAnotacoesAguardando, useCancelarAnotacao } from '@/hooks/use-caixa';
 import { Clock, X } from 'lucide-react';
-
-
-type Sentido = 'gasto' | 'recebimento' | 'saque' | 'deposito';
-const ROTULO: Record<Sentido, string> = { gasto: 'Gasto', recebimento: 'Recebimento', saque: 'Saque do banco', deposito: 'Depósito no banco' };
 
 /** "Quem": favorecido (pessoa) ou fornecedor, numa lista só — como a pessoa pensa. */
 function useQuemRecebe() {
@@ -36,161 +27,6 @@ function useQuemRecebe() {
     ...favorecidos.map((f) => ({ value: `p:${f.id}`, label: f.name, description: ROTULO_TIPO[f.kind] })),
     ...fornecedores.map((s) => ({ value: `f:${s.id}`, label: s.name, description: 'Fornecedor', searchTerms: [s.cnpj_cpf || ''] })),
   ];
-}
-
-export function LancarNoCaixaDialog({ onFechar }: { onFechar: () => void }) {
-  const [sentido, setSentido] = useState<Sentido>('gasto');
-  const [valor, setValor] = useState(0);
-  const [data, setData] = useState('');
-  const [descricao, setDescricao] = useState('');
-  const [categoria, setCategoria] = useState('');
-  const [quem, setQuem] = useState('');
-  const [cliente, setCliente] = useState('');
-  const [os, setOs] = useState('');
-  const [doBolso, setDoBolso] = useState(false);
-  const [socio, setSocio] = useState('');
-  const quemRecebe = useQuemRecebe();
-  const { data: clientes = [] } = useClientesParaReceita(sentido === 'recebimento');
-  const { data: ordens = [] } = useServiceOrdersVinculaveis();
-  const { data: favorecidos = [] } = usePayees();
-  const socios = favorecidos.filter((f) => f.kind === 'socio');
-  const { data: regras = [] } = useFinanceRules();
-  const favorecido = quem.startsWith('p:') ? favorecidos.find((f) => f.id === quem.slice(2)) : undefined;
-  const destino = sentido === 'gasto'
-    ? destinoDoGasto(categoria, favorecido ? { nome: favorecido.name, categoria: favorecido.default_category } : null,
-        descricao, valor, regras as unknown as RegraFinanceira[])
-    : null;
-  const lancar = useLancarNoCaixa();
-  const mover = useMoverCaixa();
-  const ocupado = lancar.isPending || mover.isPending;
-
-  const falta = !(valor > 0) ? 'o valor'
-    : (sentido === 'gasto' || sentido === 'recebimento') && !descricao.trim() ? 'o que foi'
-    : sentido === 'recebimento' && !cliente ? 'o cliente'
-    : sentido === 'gasto' && doBolso && !socio ? 'o sócio que pagou'
-    : null;
-
-  const salvar = () => {
-    if (falta) return;
-    const fim = { onSuccess: () => onFechar() };
-    if (sentido === 'saque' || sentido === 'deposito') { mover.mutate({ sentido, valor, data: data || null }, fim); return; }
-    lancar.mutate({
-      sentido: sentido === 'gasto' ? 'saida' : 'entrada', valor, descricao: descricao.trim(), data: data || null,
-      categoria: destino?.categoria ?? (categoria || null),
-      favorecidoId: quem.startsWith('p:') ? quem.slice(2) : null,
-      fornecedorId: quem.startsWith('f:') ? quem.slice(2) : null,
-      clienteId: sentido === 'recebimento' ? cliente : null,
-      osId: os || null, pagoPor: sentido === 'gasto' && doBolso ? 'socio' : 'caixa', socioId: doBolso ? socio : null,
-    }, fim);
-  };
-
-  return (
-    <Dialog open onOpenChange={(v) => { if (!v) onFechar(); }}>
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Lançar no Caixa (dinheiro)</DialogTitle>
-          <DialogDescription>Dinheiro vivo e o que saiu do bolso de um sócio. Pix e cartão chegam pelo banco.</DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-wrap gap-1" role="tablist" aria-label="Tipo">
-          {(Object.keys(ROTULO) as Sentido[]).map((s) => (
-            <Button key={s} role="tab" aria-selected={sentido === s} size="sm" variant={sentido === s ? 'default' : 'outline'}
-              className="h-8 text-xs" onClick={() => setSentido(s)}>{ROTULO[s]}</Button>
-          ))}
-        </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <Label>Valor *</Label>
-            <MoneyInput value={valor} onValueChange={setValor} aria-label="Valor" />
-          </div>
-          <div>
-            <Label htmlFor="caixa-data">Data</Label>
-            <Input id="caixa-data" type="date" value={data} onChange={(e) => setData(e.target.value)} placeholder="hoje" />
-          </div>
-          {(sentido === 'gasto' || sentido === 'recebimento') && (
-            <div className="sm:col-span-2">
-              <Label htmlFor="caixa-desc">O que foi *</Label>
-              <Input id="caixa-desc" value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder={sentido === 'gasto' ? 'Ex.: almoço da equipe' : 'Ex.: serviço pago em dinheiro'} />
-            </div>
-          )}
-          {sentido === 'gasto' && (
-            <>
-              <div className="sm:col-span-2">
-                <Label>Para quem (opcional)</Label>
-                <EntityCombobox value={quem} onChange={setQuem} options={[{ value: '', label: '— ninguém em especial' }, ...quemRecebe]} placeholder="— ninguém em especial" fullWidth />
-              </div>
-              <div>
-                <Label>Categoria</Label>
-                <CategoriaDespesaSelect valor={categoria} onMudar={setCategoria} className="h-10 text-sm" placeholder="Deduzir pelo texto" />
-              </div>
-              {destino && (descricao.trim() || categoria) && (
-                <p className="self-end pb-2 text-xs text-muted-foreground sm:col-span-1" aria-live="polite">
-                  Vai entrar em: <b className="text-foreground">{destino.categoria}</b>{destino.porque ? ` (${destino.porque})` : ''}
-                </p>
-              )}
-            </>
-          )}
-          {sentido === 'recebimento' && (
-            <div className="sm:col-span-2">
-              <Label>Cliente *</Label>
-              <EntityCombobox value={cliente} onChange={setCliente} options={clientes.map((c) => ({ value: c.id, label: c.name }))} placeholder="De quem veio?" fullWidth />
-            </div>
-          )}
-          {(sentido === 'gasto' || sentido === 'recebimento') && (
-            <div>
-              <Label>OS (opcional)</Label>
-              <EntityCombobox value={os} onChange={setOs} options={[{ value: '', label: '— nenhuma' }, ...ordens.map((o) => ({ value: o.id, label: o.service_order_number, description: o.clients?.name ?? undefined }))]} placeholder="— nenhuma" fullWidth />
-            </div>
-          )}
-          {sentido === 'gasto' && (
-            <div className="sm:col-span-2 space-y-2 rounded-md border p-2">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={doBolso} onCheckedChange={(v) => setDoBolso(v === true)} />
-                Saiu do bolso de um sócio (não do Caixa)
-              </label>
-              {doBolso && (
-                <>
-                  <EntityCombobox value={socio} onChange={setSocio} options={socios.map((s) => ({ value: s.id, label: s.name }))} placeholder="Qual sócio?" fullWidth />
-                  <p className="text-xs text-muted-foreground">Vira despesa e fica como reembolso a pagar a ele. O Caixa não mexe.</p>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={onFechar}>Cancelar</Button>
-          <Button onClick={salvar} disabled={!!falta || ocupado} title={falta ? `Falta ${falta}` : undefined}>
-            {ocupado ? 'Lançando…' : falta ? `Falta ${falta}` : 'Lançar'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-export function AjustarCaixaDialog({ onFechar }: { onFechar: () => void }) {
-  const [contado, setContado] = useState(0);
-  const [motivo, setMotivo] = useState('');
-  const ajustar = useAjustarCaixa();
-  return (
-    <Dialog open onOpenChange={(v) => { if (!v) onFechar(); }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Contei o dinheiro</DialogTitle>
-          <DialogDescription>O Caixa passa a bater com a contagem; a sobra ou a falta fica registrada com o motivo. Serve também para o saldo inicial.</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div><Label>Quanto há no caixa agora</Label><MoneyInput value={contado} onValueChange={setContado} aria-label="Saldo contado" /></div>
-          <div><Label htmlFor="ajuste-motivo">Motivo</Label><Input id="ajuste-motivo" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ex.: contagem de sexta; saldo inicial" /></div>
-        </div>
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={onFechar}>Cancelar</Button>
-          <Button disabled={!motivo.trim() || ajustar.isPending} onClick={() => ajustar.mutate({ saldoContado: contado, motivo: motivo.trim() }, { onSuccess: () => onFechar() })}>
-            Acertar o Caixa
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 export function AnotarTransacaoDialog({ onFechar }: { onFechar: () => void }) {

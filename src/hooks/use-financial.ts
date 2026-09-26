@@ -66,7 +66,7 @@ export function useCreatePayable() {
     mutationFn: async (p: {
       description: string; issue_date: string; due_date: string;
       amount: number; currency?: string; expense_category?: string;
-      supplier_id?: string; supplier_name?: string;
+      supplier_id?: string; supplier_name?: string; payee_id?: string;
       linked_service_order_id?: string; notes?: string;
       origin?: string; bank_transaction_id?: string;
       cost_center_id?: string; sub_category?: string;

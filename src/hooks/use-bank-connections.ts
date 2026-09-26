@@ -161,6 +161,9 @@ export function useSyncBank() {
       qc.invalidateQueries({ queryKey: ['bank-transactions'] });
       qc.invalidateQueries({ queryKey: ['reconcile-suggestions'] });
       qc.invalidateQueries({ queryKey: ['reconciliation-health'] });
+      // A busca grava a conferência nova: o saldo mostrado nas fichas muda junto.
+      qc.invalidateQueries({ queryKey: ['saldo-das-contas'] });
+      qc.invalidateQueries({ queryKey: ['conferencias-saldo'] });
     },
   });
 }

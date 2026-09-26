@@ -50,6 +50,12 @@ vi.mock('@/hooks/use-extrato-conta', () => ({
 }));
 vi.mock('@/components/FinanceReviewInbox', () => ({ FinanceReviewInbox: ({ contaId }: { contaId: string | null }) => <div>fila da conta {contaId ?? 'todas'}</div> }));
 vi.mock('@/components/IgnoradasPanel', () => ({ IgnoradasPanel: ({ contaId }: { contaId: string | null }) => <div>fora da fila {contaId ?? 'todas'}</div> }));
+// As fichas de saldo têm teste próprio; aqui só importa que escolher uma ficha escolhe a conta.
+vi.mock('@/components/SaldosDasContas', () => ({
+  SaldosDasContas: ({ onEscolher }: { onEscolher?: (id: string | null) => void }) => (
+    <div><button type="button" onClick={() => onEscolher?.('c6')}>ficha C6</button><button type="button" onClick={() => onEscolher?.(null)}>ficha todas</button></div>
+  ),
+}));
 
 function renderizar(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -59,10 +65,20 @@ function renderizar(ui: React.ReactElement) {
 beforeEach(() => { desfazerMock.mockReset(); salvarMock.mockReset(); estado.auto = 'on'; });
 
 describe('ExtratoPorConta', () => {
-  it('abre na fila de todas as contas; extrato com saldo pede uma conta', () => {
+  it('abre na fila de todas as contas; extrato com saldo pede uma conta, por escrito', async () => {
+    const user = userEvent.setup();
     renderizar(<ExtratoPorConta />);
     expect(screen.getByText('fila da conta todas')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Extrato com saldo' })).toBeDisabled();
+    // Botão apagado não mostra dica: o motivo tem de estar escrito.
+    await user.click(screen.getByRole('tab', { name: 'Extrato com saldo' }));
+    expect(screen.getByText(/Escolha uma conta nas fichas acima/)).toBeInTheDocument();
+  });
+
+  it('a ficha escolhe a conta da fila', async () => {
+    const user = userEvent.setup();
+    renderizar(<ExtratoPorConta />);
+    await user.click(screen.getByRole('button', { name: 'ficha C6' }));
+    expect(screen.getByText('fila da conta c6')).toBeInTheDocument();
   });
 
   it('lançados sozinhos: interruptor e desfazer', async () => {
@@ -72,7 +88,10 @@ describe('ExtratoPorConta', () => {
     expect(screen.getByText('Despesa: POSTO AGRICOPEL')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Desfazer/ }));
     expect(desfazerMock.mock.calls[0][0]).toMatchObject({ tipo: 'payable', id: 'p1' });
+    // Desligar pede confirmação: o primeiro clique não muda nada.
     await user.click(screen.getByRole('button', { name: 'Ligado — desligar' }));
+    expect(salvarMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Sim, desligar' }));
     expect(salvarMock).toHaveBeenCalledWith({ key: 'finance_auto_approve', value: 'off' });
   });
 

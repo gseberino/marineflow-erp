@@ -65,6 +65,7 @@ export function recarregarFinanceiro(qc: QueryClient) {
     ['conciliacao-sem-extrato'], ['conciliacao-conciliados'], ['conciliacao-extrato-livre'],
     ['trilha-conciliacao'], ['dre'], ['dashboard'], ['aging-report'], ['service-orders'],
     ['extrato-da-conta'], ['lancados-sozinhos'], ['checklist-do-mes'],
+    ['dre-lancamentos'], ['saldo-das-contas'], ['despesas'],
   ]) qc.invalidateQueries({ queryKey: k });
 }
 

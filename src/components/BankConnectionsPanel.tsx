@@ -11,6 +11,7 @@ import {
 } from '@/hooks/use-bank-connections';
 import { toast } from 'sonner';
 import { RefreshCw, Plus, Trash2, AlertTriangle, CheckCircle2, Link2 } from 'lucide-react';
+import { SaldosDasContas } from '@/components/SaldosDasContas';
 
 /**
  * Conexões de leitura do extrato (Open Finance).
@@ -145,6 +146,13 @@ export function BankConnectionsPanel() {
 
   return (
     <div className="space-y-4">
+      {/* O saldo de cada conta (pedido do dono, 26/09/2026): o do banco é o que o próprio banco
+          informou na última busca; o do Caixa é o lançado e contado, com os dois botões à vista. */}
+      <div className="space-y-2">
+        <h3 className="font-semibold">Saldo de hoje</h3>
+        <SaldosDasContas />
+      </div>
+
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <h3 className="font-semibold">Contas conectadas</h3>
@@ -336,7 +344,7 @@ export function BankConnectionsPanel() {
                   <p className="text-xs text-muted-foreground mt-1">Ainda não sincronizada.</p>
                 )}
                 {c.provider === 'caixa' && (
-                  <p className="text-xs text-muted-foreground mt-1">Lançado à mão ou pelo assistente, em Financeiro › Extrato. Não sincroniza.</p>
+                  <p className="text-xs text-muted-foreground mt-1">Lançado à mão (botões "Lançar" e "Contei o dinheiro" na ficha do Caixa, acima e no Extrato) ou pelo assistente do WhatsApp. Não sincroniza.</p>
                 )}
               </div>
 

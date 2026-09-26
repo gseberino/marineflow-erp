@@ -55,6 +55,11 @@ vi.mock('@/components/CashForecastPanel', () => ({ CashForecastPanel: () => <div
 vi.mock('@/components/PayableFormDialog', () => ({ PayableFormDialog: () => null }));
 vi.mock('@/components/PaymentDialog', () => ({ PaymentDialog: () => null }));
 vi.mock('@/components/ReimbursementsPanel', () => ({ ReimbursementsPanel: () => <div>painel reembolsos</div> }));
+vi.mock('@/components/LancarDialog', () => ({
+  LancarDialog: ({ tipoInicial, porOndeInicial }: { tipoInicial?: string; porOndeInicial?: string }) =>
+    <div>janela lançar {tipoInicial ?? 'despesa'} {porOndeInicial ?? ''}</div>,
+}));
+vi.mock('@/components/SaldosDasContas', () => ({ SaldosDasContas: () => <div>fichas de saldo</div> }));
 
 function renderFinanceiro(inicio = '/v2/financial') {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -147,6 +152,23 @@ describe('FinancialV2 — paridade e navegação', () => {
     renderFinanceiro('/v2/financial?tab=receivables');
     expect(await screen.findByText('fora do financeiro')).toBeInTheDocument();
     expect(rotaAtual.caminho).toBe('/v2/receivables?view=overdue');
+  });
+
+  it('"+ Lançar" está no topo de qualquer aba e ?lancar= abre direto', async () => {
+    const user = userEvent.setup();
+    renderFinanceiro('/v2/financial/reconciliation');
+    await user.click(await screen.findByRole('button', { name: /^Lançar$/ }));
+    expect(screen.getByText(/janela lançar despesa/)).toBeInTheDocument();
+  });
+
+  it('link com ?lancar=recebimento abre a janela já em Recebimento', async () => {
+    renderFinanceiro('/v2/financial?lancar=recebimento');
+    expect(await screen.findByText(/janela lançar recebimento/)).toBeInTheDocument();
+  });
+
+  it('cada aba diz para que serve, embaixo do título', async () => {
+    renderFinanceiro('/v2/financial/dre');
+    expect(await screen.findByText(/lucro ou prejuízo no período/)).toBeInTheDocument();
   });
 
   it('cada aba nova alcança o próprio painel', async () => {
