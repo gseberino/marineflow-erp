@@ -12,6 +12,7 @@
 // mesmo que a literatura de agentes em finanças usa: reversibilidade e alcance da escrita.
 
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
+import { regraDeFornecedorAlcanca, type FornecedorConhecido, type TransacaoOrfa } from "../../banking/proposals.ts";
 
 /**
  * Quem pode operar o financeiro pelo agente.
@@ -86,6 +87,22 @@ async function chamarFinanceReview(ctx: ToolCtx, body: Record<string, unknown>) 
  * casa como está mas apareceria como pedaço de texto, o problema é o TIPO da regra, não a
  * grafia — e a resposta pode dizer isso em vez de deixar o usuário adivinhando.
  */
+/**
+ * Todos os fornecedores, em páginas: o PostgREST corta em 1.000 linhas sem avisar, e um
+ * .limit(5000) passaria a "não achar" fornecedor quando o cadastro crescer.
+ */
+async function lerFornecedores(ctx: ToolCtx): Promise<Array<{ id: string; name: string; trade_name: string | null; cnpj_cpf: string | null }>> {
+  const todos: Array<{ id: string; name: string; trade_name: string | null; cnpj_cpf: string | null }> = [];
+  for (let de = 0; de < 50000; de += 1000) {
+    const { data, error } = await ctx.sb.from("suppliers").select("id, name, trade_name, cnpj_cpf").order("id").range(de, de + 999);
+    if (error) break;
+    const pagina = (data ?? []) as typeof todos;
+    todos.push(...pagina);
+    if (pagina.length < 1000) break;
+  }
+  return todos;
+}
+
 async function alcanceDaRegra(
   ctx: ToolCtx,
   tipo: string,
@@ -114,14 +131,104 @@ async function alcanceDaRegra(
     return { alcanca: r.count ?? 0 };
   }
 
-  // Fornecedor: o motor reconhece pelo documento OU pelo nome dele no histórico, então a
-  // contagem aqui usa o nome cadastrado como trecho — a mesma evidência que a regra usa.
-  const { data: f } = await ctx.sb
-    .from("suppliers").select("name, cnpj_cpf").eq("id", valor).maybeSingle();
-  const nome = String((f as any)?.name ?? "").split(/\s+/)[0] ?? "";
-  if (!nome) return { alcanca: 0 };
-  const r = await base().or(`description.ilike.%${nome}%,counterparty_name.ilike.%${nome}%`);
-  return { alcanca: r.count ?? 0 };
+  // Fornecedor: conta com as MESMAS provas do motor (documento, mesmo nome, nome cortado
+  // provado, mesma empresa) — decisão do dono de 26/09/2026. As candidatas vêm do banco por
+  // documento ou pela primeira palavra do nome; quem decide se a regra alcança é o motor.
+  // Todas as saídas passam pelo motor (são ~2 mil): um pré-filtro por palavra deixava de fora
+  // o que o motor reconhece (nome com a 1ª palavra curta, fantasia diferente da razão social).
+  const fornecedores = (await lerFornecedores(ctx)) as FornecedorConhecido[];
+  if (!fornecedores.some((x) => x.id === valor)) return { alcanca: 0 };
+  let alcanca = 0;
+  for (let de = 0; de < 20000; de += 1000) {
+    const { data: pagina, error } = await ctx.sb.from("bank_transactions")
+      .select("id, transaction_date, description, amount, transaction_type, counterparty_name, counterparty_document, source_type")
+      .eq("transaction_type", "debit").order("id").range(de, de + 999);
+    if (error) break;
+    const linhas = (pagina ?? []) as TransacaoOrfa[];
+    alcanca += linhas.filter((tx) => regraDeFornecedorAlcanca({ ...tx, amount: Number(tx.amount) }, valor, fornecedores)).length;
+    if (linhas.length < 1000) break;
+  }
+  return { alcanca };
+}
+
+/**
+ * O fornecedor que o usuário disse, pelo nome IGUAL ao do cadastro (razão social ou fantasia,
+ * sem acento, caixa e sufixo societário) ou pelo id. Um só parecido NÃO é aceito calado:
+ * vira pergunta com o nome por extenso ("é FERNANDO NUNES FACHINI EPP?") — decisão do dono de
+ * 26/09/2026: nome diferente só por escolha dele.
+ */
+type FornecedorDaLista = { id: string; name: string; trade_name: string | null; cnpj_cpf: string | null };
+
+/** A mesma forma comparável do motor: sem parênteses, acento, caixa, pontuação e sufixo. */
+function limpaNome(s: string): string {
+  return String(s ?? "").replace(/\([^)]*\)/g, " ").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, " ").replace(/\b(LTDA|ME|EPP|EIRELI|SA|S A|CIA)\b/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** A empresa do cadastro: raiz do CNPJ (matriz e filiais), ou o próprio cadastro sem CNPJ. */
+function empresaDoCadastro(f: FornecedorDaLista): string {
+  let d = String(f.cnpj_cpf ?? "").replace(/\D/g, "");
+  if (d.length === 13) d = d.padStart(14, "0");
+  return d.length === 14 ? `raiz:${d.slice(0, 8)}` : `id:${f.id}`;
+}
+
+/** Entre cadastros da mesma empresa, sempre o mesmo: o de menor CNPJ (a matriz), como no motor. */
+function representanteDa(lista: FornecedorDaLista[]): FornecedorDaLista {
+  return [...lista].sort((a, b) => String(a.cnpj_cpf ?? "").replace(/\D/g, "").padStart(14, "0")
+    .localeCompare(String(b.cnpj_cpf ?? "").replace(/\D/g, "").padStart(14, "0")) || a.id.localeCompare(b.id))[0];
+}
+
+/**
+ * O fornecedor que o usuário disse, pelo nome IGUAL ao do cadastro (razão social ou fantasia,
+ * sem acento, caixa, sufixo societário e parênteses) ou pelo id. Um só parecido NÃO é aceito
+ * calado: vira pergunta com o nome por extenso — decisão do dono de 26/09/2026: nome
+ * diferente só por escolha dele.
+ *
+ * Compara em memória (são ~530 cadastros): o ilike do banco diferencia acento, e a
+ * transcrição do áudio sempre acentua — "Kamell Comércio Global" não achava nada. Cadastros
+ * da mesma empresa (matriz e filial) contam como um só, o mesmo que o motor escolhe.
+ */
+export async function resolverFornecedorDito(
+  ctx: ToolCtx,
+  dito: string,
+): Promise<{ id: string; nome: string } | { error: string; opcoes?: Array<{ id: string; nome: string; cnpj_cpf: string | null }>; dica?: string }> {
+  const d = String(dito ?? "").trim();
+  if (/^[0-9a-f-]{36}$/i.test(d)) {
+    const { data } = await ctx.sb.from("suppliers").select("id, name").eq("id", d).maybeSingle();
+    return data ? { id: (data as any).id, nome: (data as any).name } : { error: "Fornecedor não encontrado." };
+  }
+  const alvo = limpaNome(d);
+  if (!alvo) return { error: "Qual fornecedor?" };
+  const todos = (await lerFornecedores(ctx)) as FornecedorDaLista[];
+  const opcao = (f: FornecedorDaLista) => ({ id: f.id, nome: f.name, cnpj_cpf: f.cnpj_cpf ?? null });
+
+  const iguais = todos.filter((f) => limpaNome(f.name) === alvo || (!!f.trade_name && limpaNome(f.trade_name) === alvo));
+  const empresas = new Map<string, FornecedorDaLista[]>();
+  for (const f of iguais) empresas.set(empresaDoCadastro(f), [...(empresas.get(empresaDoCadastro(f)) ?? []), f]);
+  if (empresas.size === 1) {
+    const r = representanteDa([...empresas.values()][0]);
+    return { id: r.id, nome: r.name };
+  }
+  if (empresas.size > 1) {
+    return {
+      error: `"${d}" é o nome de mais de uma empresa cadastrada. Pergunte ao usuário qual é e repita com o id da opção escolhida.`,
+      opcoes: [...empresas.values()].map((l) => opcao(representanteDa(l))),
+    };
+  }
+  // Nenhum igual: os que CONTÊM o nome dito viram pergunta, nunca escolha.
+  const parecidos = todos.filter((f) => limpaNome(f.name).includes(alvo) || (!!f.trade_name && limpaNome(f.trade_name).includes(alvo)));
+  if (parecidos.length > 0) {
+    return {
+      error: parecidos.length === 1
+        ? `O cadastro parecido é "${parecidos[0].name}". Pergunte ao usuário se é este; se for, repita com o id dele.`
+        : `"${d}" não é o nome exato de um fornecedor. Pergunte ao usuário qual é e repita com o id da opção escolhida.`,
+      opcoes: parecidos.slice(0, 8).map(opcao),
+    };
+  }
+  return {
+    error: `Nenhum fornecedor cadastrado com "${d}".`,
+    dica: "Confira o nome, ou crie a regra por 'texto' usando um trecho do histórico do extrato.",
+  };
 }
 
 export const financeRulesTools: ToolDef[] = [
@@ -142,7 +249,8 @@ export const financeRulesTools: ToolDef[] = [
           enum: ["texto", "fornecedor", "documento", "nome_de_quem_recebe"],
           description:
             "texto = trecho que aparece no histórico do extrato (ex: MERCADOLIVRE) — é o mais comum. " +
-            "fornecedor = NOME de fornecedor cadastrado (a ferramenta resolve o cadastro). " +
+            "fornecedor = NOME de fornecedor cadastrado, igual ao do cadastro (vale só para o que o banco escreve com o " +
+            "MESMO nome ou o mesmo CNPJ). Para a grafia do cartão ('PREMEL - ITAJAI'), use texto + fornecedor_da_regra. " +
             "documento = CNPJ/CPF. nome_de_quem_recebe = nome exato da contraparte no extrato.",
         },
         valor_de_busca: {
@@ -157,6 +265,14 @@ export const financeRulesTools: ToolDef[] = [
             "acento, que cobre as variações de uma vez.",
         },
         categoria: { type: "string", description: "Categoria do plano de contas a aplicar." },
+        substituir_regra_existente: {
+          type: "boolean",
+          description: "Só com reconhecer_por='fornecedor', quando a ferramenta disser que já há regra para a empresa e o usuário confirmar a troca: pausa a antiga e cria a nova.",
+        },
+        fornecedor_da_regra: {
+          type: "string",
+          description: "Só com reconhecer_por='texto': o fornecedor cadastrado (nome igual ao do cadastro) a quem a despesa pertence.",
+        },
         valor_minimo: { type: "number", description: "Opcional: só vale acima deste valor." },
         valor_maximo: { type: "number", description: "Opcional: só vale até este valor." },
         lancar_sozinha: {
@@ -198,23 +314,61 @@ export const financeRulesTools: ToolDef[] = [
       // Regra por fornecedor guarda o ID, mas quem fala diz o NOME — e o agente não tem
       // como adivinhar um uuid. Resolver aqui evita a regra nascer apontando para um
       // fornecedor que não existe, que só apareceria como "regra que nunca aplica".
-      if (tipo === "supplier" && !/^[0-9a-f-]{36}$/i.test(alvo)) {
-        const { data: achados } = await ctx.sb
-          .from("suppliers").select("id, name").ilike("name", `%${alvo}%`).limit(5);
-        const lista = (achados ?? []) as { id: string; name: string }[];
-        if (lista.length === 0) {
+      let fornecedorNome: string | null = null;
+      /** Regras da mesma empresa que a nova substitui — pausadas só DEPOIS de a nova existir. */
+      let aSubstituir: string[] = [];
+      if (tipo === "supplier") {
+        const r = await resolverFornecedorDito(ctx, alvo);
+        if ("error" in r) return r;
+        alvo = r.id;
+        fornecedorNome = r.nome;
+        // Já existe regra ativa para esta EMPRESA (o mesmo cadastro, a matriz ou uma filial)?
+        // Duas regras na mesma empresa brigariam; a nova só entra trocando a antiga, e só se
+        // o usuário disser (revisão de 26/09/2026).
+        const cadastros = (await lerFornecedores(ctx)) as FornecedorDaLista[];
+        const eu = cadastros.find((f) => f.id === alvo);
+        const daEmpresa = eu ? cadastros.filter((f) => empresaDoCadastro(f) === empresaDoCadastro(eu)).map((f) => f.id) : [alvo];
+        // Ativas e propostas: uma proposta na filial bateria no índice único na hora de criar.
+        const { data: existentes } = await ctx.sb.from("finance_rules")
+          .select("id, match_value, set_category, autonomy, direction, status")
+          .eq("match_type", "supplier").in("status", ["active", "proposed"]).in("match_value", daEmpresa);
+        const conflito = ((existentes ?? []) as any[]).filter((x) => x.direction === "debit" || x.direction === "any");
+        if (conflito.length > 0 && !args.substituir_regra_existente) {
           return {
-            error: `Nenhum fornecedor cadastrado com "${alvo}".`,
-            dica: "Confira o nome, ou crie a regra por 'texto' usando um trecho do histórico do extrato.",
+            error: `Já existe regra ${conflito[0].status === "proposed" ? "sugerida" : "ativa"} para esta empresa (${eu?.name ?? fornecedorNome}): `
+              + `categoria "${conflito[0].set_category}"${conflito[0].autonomy === "apply" ? ", lançando sozinha" : ""}. `
+              + "Pergunte ao usuário se é para TROCAR; se for, repita com substituir_regra_existente=true (a antiga é pausada, não apagada).",
           };
         }
-        if (lista.length > 1) {
+        // Trocar a regra do MESMO cadastro é editar a que existe (o índice não deixa duas no
+        // mesmo alvo); trocar a de outro cadastro da empresa é criar a nova e só então pausar.
+        const mesma = conflito.find((x) => x.match_value === alvo);
+        if (mesma) {
+          const { error: eEdita } = await ctx.sb.from("finance_rules").update({
+            set_category: cat.name, set_dre_group: cat.dre_group, set_supplier_id: alvo,
+            autonomy: args.lancar_sozinha ? "apply" : "suggest",
+            min_amount: args.valor_minimo ?? null, max_amount: args.valor_maximo ?? null, status: "active",
+          }).eq("id", mesma.id);
+          if (eEdita) return { error: `Não consegui trocar a regra: ${eEdita.message}` };
+          const outras = conflito.filter((x) => x.id !== mesma.id).map((x) => x.id);
+          if (outras.length > 0) await ctx.sb.from("finance_rules").update({ status: "paused" }).in("id", outras);
+          const efeito = await chamarFinanceReview(ctx, { action: "reclassify" });
           return {
-            error: `"${alvo}" corresponde a mais de um fornecedor. Pergunte ao usuário qual é.`,
-            opcoes: lista.map((f) => f.name),
+            ok: true, categoria: cat.name, fornecedor: fornecedorNome ?? undefined, regra_trocada: mesma.id,
+            lanca_sozinha: !!args.lancar_sozinha,
+            propostas_reclassificadas: Number((efeito as any)?.atualizadas ?? 0),
           };
         }
-        alvo = lista[0].id;
+        aSubstituir = conflito.map((x) => x.id);
+      }
+      // Regra de TEXTO que também diz de quem é a despesa: o caminho para a grafia do cartão
+      // ("PREMEL - ITAJAI" é a PREMEL MAT. ELETRICOS), que a regra de fornecedor não alcança
+      // mais por nome parecido (decisão do dono, 26/09/2026).
+      let fornecedorDaRegra: { id: string; nome: string } | null = null;
+      if (tipo === "text" && args.fornecedor_da_regra) {
+        const r = await resolverFornecedorDito(ctx, String(args.fornecedor_da_regra));
+        if ("error" in r) return r;
+        fornecedorDaRegra = r;
       }
 
       /**
@@ -243,6 +397,7 @@ export const financeRulesTools: ToolDef[] = [
             direction: "debit",
             set_category: cat.name,
             set_dre_group: cat.dre_group,
+            set_supplier_id: fornecedorDaRegra?.id ?? null,
             min_amount: args.valor_minimo ?? null,
             max_amount: args.valor_maximo ?? null,
             autonomy: args.lancar_sozinha ? "apply" : "suggest",
@@ -265,6 +420,11 @@ export const financeRulesTools: ToolDef[] = [
       if (criadas.length === 0) {
         return { error: "Nenhuma regra criada.", detalhes: recusadas };
       }
+      // Só agora, com a nova de pé, a antiga da mesma empresa sai (pausada, não apagada).
+      if (aSubstituir.length > 0) {
+        const { error: ePausa } = await ctx.sb.from("finance_rules").update({ status: "paused" }).in("id", aSubstituir);
+        if (ePausa) recusadas.push(`A regra antiga não foi pausada (${ePausa.message}) — pause-a pela tela para as duas não brigarem`);
+      }
 
       // A regra nova alcança de imediato o que JÁ está esperando decisão. Sem isto, quem
       // ensina "compra na Corema é ferramenta" continua corrigindo à mão as 40 compras da
@@ -279,6 +439,8 @@ export const financeRulesTools: ToolDef[] = [
       return {
         ok: true,
         categoria: cat.name,
+        // O cadastro que a regra usa, por extenso: o "sim" foi sobre ele.
+        fornecedor: fornecedorNome ?? fornecedorDaRegra?.nome ?? undefined,
         regras_criadas: criadas,
         nao_criadas: recusadas.length > 0 ? recusadas : undefined,
         lanca_sozinha: !!args.lancar_sozinha,
@@ -436,8 +598,9 @@ export const financeRulesTools: ToolDef[] = [
     description:
       "Mostra o que está esperando decisão na caixa de entrada financeira: o que o sistema propôs lançar, " +
       "com valor, categoria, QUEM é a contraparte (e por qual prova), o que cadastrar quando ninguém foi " +
-      "reconhecido e se a linha PODE JÁ ESTAR LANÇADA (pagamento/sinal/conta existente) — nesse caso, " +
-      "pergunte se é para casar com o já lançado ou lançar novo antes de aprovar.",
+      "reconhecido e o VÍNCULO sugerido (conta, OS, pagamento/sinal que PODE JÁ ESTAR LANÇADO). Todo vínculo " +
+      "é pergunta: antes de aprovar, pergunte se é aquele (casar) ou se é para lançar novo. Idem os_sugerida e " +
+      "oc_sugerida: pergunte 'é da OS X?' / 'paga a OC Y?' e passe a resposta em aprovar (os / oc).",
     input_schema: {
       type: "object",
       properties: { limite: { type: "number" } },
@@ -447,12 +610,21 @@ export const financeRulesTools: ToolDef[] = [
     async execute(args, ctx) {
       const { data, error } = await ctx.sb
         .from("finance_review_queue")
-        .select("id, title, suggested_amount, suggested_category, suggested_date, confidence, kind, evidencia, vinculo_sugerido")
+        .select("id, title, suggested_amount, suggested_category, suggested_date, confidence, kind, evidencia, vinculo_sugerido, suggested_service_order_id, suggested_purchase_order_id")
         .eq("status", "pending")
         .order("suggested_amount", { ascending: false })
         .limit(Number(args.limite ?? 30));
       if (error) return { error: error.message };
       const linhas = (data ?? []) as any[];
+      // Número da OS e da OC sugeridas: a pergunta "é da OS 60?" precisa do número, não do id.
+      const idsOs = [...new Set(linhas.map((l) => l.suggested_service_order_id).filter(Boolean))];
+      const idsOc = [...new Set(linhas.map((l) => l.suggested_purchase_order_id).filter(Boolean))];
+      const [{ data: oss }, { data: ocs }] = await Promise.all([
+        idsOs.length ? ctx.sb.from("service_orders").select("id, service_order_number").in("id", idsOs) : Promise.resolve({ data: [] }),
+        idsOc.length ? ctx.sb.from("purchase_orders").select("id, po_number").in("id", idsOc) : Promise.resolve({ data: [] }),
+      ]);
+      const numeroDaOs = new Map(((oss ?? []) as any[]).map((o) => [o.id, o.service_order_number]));
+      const numeroDaOc = new Map(((ocs ?? []) as any[]).map((o) => [o.id, o.po_number]));
       // Resumo curto por linha: o modelo precisa do que decide, não do objeto inteiro.
       const quem = (e: any) => {
         const r = e?.fornecedor ?? e?.favorecido ?? e?.cliente;
@@ -471,6 +643,19 @@ export const financeRulesTools: ToolDef[] = [
           cadastrar: p.evidencia?.cadastrar ?? null,
           pode_ja_estar_lancado: opcoes(p.vinculo_sugerido).some((o: any) => o.ja_lancado),
           vinculos: opcoes(p.vinculo_sugerido),
+          // OS que é do próprio vínculo já é perguntada pelo vínculo; a anotada já foi dita.
+          os_sugerida: p.suggested_service_order_id
+            && ![p.vinculo_sugerido?.principal, ...(p.vinculo_sugerido?.alternativas ?? [])]
+              .some((o: any) => o?.ordemDeServicoId === p.suggested_service_order_id)
+            ? {
+              os_id: p.suggested_service_order_id,
+              numero: numeroDaOs.get(p.suggested_service_order_id) ?? null,
+              ja_dita_na_anotacao: p.evidencia?.anotacao?.os_id === p.suggested_service_order_id,
+            }
+            : null,
+          oc_sugerida: p.suggested_purchase_order_id
+            ? { oc_id: p.suggested_purchase_order_id, numero: numeroDaOc.get(p.suggested_purchase_order_id) ?? null }
+            : null,
         })),
         total: linhas.length,
         valor_total: linhas.reduce((s, p) => s + Number(p.suggested_amount ?? 0), 0),
@@ -482,7 +667,7 @@ export const financeRulesTools: ToolDef[] = [
     name: "aprovar_propostas_de_lancamento",
     description:
       "Aprova propostas da caixa de entrada, CRIANDO os lançamentos correspondentes — ou CASANDO com o que " +
-      "já existe, quando o usuário escolheu um vínculo. Linha que pode já estar lançada é recusada pelo " +
+      "já existe, quando o usuário escolheu um vínculo. Linha com vínculo sugerido é recusada pelo " +
       "servidor sem a escolha: pergunte e passe em `vinculos`. Só use quando o usuário confirmar quais aprovar.",
     input_schema: {
       type: "object",
@@ -491,6 +676,16 @@ export const financeRulesTools: ToolDef[] = [
         vinculos: {
           type: "object",
           description: "Por proposta: o opcao_id escolhido (de listar_propostas_de_lancamento) para casar, ou \"nenhum\" para lançar novo.",
+          additionalProperties: { type: "string" },
+        },
+        os: {
+          type: "object",
+          description: "Por proposta: o os_id que o usuário CONFIRMOU (\"é desta OS\"), ou \"nenhuma\". Sem resposta, a despesa entra sem OS.",
+          additionalProperties: { type: "string" },
+        },
+        oc: {
+          type: "object",
+          description: "Por proposta: o oc_id que o usuário confirmou que este pagamento quita, ou \"nenhuma\".",
           additionalProperties: { type: "string" },
         },
       },
@@ -503,10 +698,23 @@ export const financeRulesTools: ToolDef[] = [
     async execute(args, ctx) {
       const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
-      const overrides: Record<string, unknown> = {};
+      const overrides: Record<string, Record<string, unknown>> = {};
+      const de = (id: string) => (overrides[id] ??= {});
       for (const [id, escolha] of Object.entries((args.vinculos ?? {}) as Record<string, string>)) {
         if (!escolha) continue;
-        overrides[id] = { vinculo: escolha === "nenhum" ? "nenhum" : { id: String(escolha) } };
+        de(id).vinculo = escolha === "nenhum" ? "nenhum" : { id: String(escolha) };
+      }
+      // "É desta OS?" / "Paga esta OC?" respondidos pelo usuário (decisão do dono, 26/09/2026).
+      const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      for (const [campo, mapa] of [["os", args.os], ["oc", args.oc]] as const) {
+        for (const [id, v] of Object.entries((mapa ?? {}) as Record<string, string>)) {
+          if (!v) continue;
+          if (!/^nenhum/i.test(v) && !UUID.test(String(v))) {
+            return { error: `Em ${campo}, use o ${campo}_id de listar_propostas_de_lancamento (não o número) ou "nenhuma".` };
+          }
+          const valor = /^nenhum/i.test(v) ? null : String(v);
+          if (campo === "os") de(id).serviceOrderId = valor; else de(id).purchaseOrderId = valor;
+        }
       }
       return await chamarFinanceReview(ctx, { action: "approve", ids: args.ids, overrides });
     },

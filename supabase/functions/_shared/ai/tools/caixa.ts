@@ -231,13 +231,36 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
     const pelo = !args.categoria && !args.quem && args.sentido !== "entrada" && args.descricao
       ? await categoriaDoTexto(ctx, String(args.descricao), Number(args.valor) || 0)
       : null;
+    // O "sim" é sobre o CADASTRO que vai ser usado, não sobre o nome dito: "fernando" pode
+    // ser o Fernando Nunes Fachini EPP. Mostrar o resolvido é o que torna a escolha manual.
+    let quem: string | null = null;
+    let pessoa: Pessoa | null = null;
+    if (args.quem) {
+      const todas = await listaDePessoas(ctx);
+      const alvo = args.sentido === "entrada" ? todas.filter((x) => x.tipo === "cliente") : todas.filter((x) => x.tipo !== "cliente");
+      const r = escolherPorNome(String(args.quem), alvo);
+      if ("ambiguo" in r) return `⚠️ Qual "${args.quem}"? ${r.ambiguo.map((x) => `${x.nome} (${x.tipo})`).join("; ")}`;
+      if ("nenhum" in r) return `⚠️ Não achei "${args.quem}". Cadastre antes ou diga como está no cadastro.`;
+      pessoa = r.achado;
+      quem = `${r.achado.nome} (${r.achado.tipo})`;
+    }
+    const os = await osPeloNumero(ctx, args.os);
+    if (os && "error" in os) return `⚠️ ${os.error}`;
+    // A categoria que o execute VAI gravar: a dita (resolvida no plano de contas), senão a
+    // padrão do favorecido, senão a do texto — o "sim" é sobre ela.
+    const cat = await categoriaValida(ctx, args.categoria, args.sentido === "entrada" ? "receivable" : "payable");
+    if (cat && "error" in cat) return `⚠️ ${cat.error}`;
+    const padrao = !cat && pessoa?.tipo === "favorecido" && pessoa.categoria ? pessoa.categoria : null;
     return [
       `- Quando chegar do banco: ${args.sentido === "entrada" ? "entrada" : "saída"} de *${brl.format(Number(args.valor) || 0)}* (${quando})`,
       args.documento ? `- Para o documento ${String(args.documento)}` : null,
-      args.quem ? `- Classificar como: *${String(args.quem)}*` : null,
-      args.categoria ? `- Categoria: *${String(args.categoria)}*` : null,
-      pelo ? `- Categoria: *${pelo.nome}* (pelo texto: ${pelo.motivo})` : null,
-      args.os ? `- OS: ${String(args.os)}` : null,
+      quem ? `- Classificar como: *${quem}*` : null,
+      cat ? `- Categoria: *${cat.nome}*` : null,
+      padrao ? `- Categoria: *${padrao}* (padrão de ${pessoa!.nome})` : null,
+      !cat && !padrao && pelo ? `- Categoria: *${pelo.nome}* (pelo texto: ${pelo.motivo})` : null,
+      os ? `- OS: ${os.numero}` : null,
+      !quem ? "- Sem dizer para quem foi: só vale para compra no débito ou transferência SEM nome no extrato." : null,
+      "- Se houver mais de uma transação desse valor nesses dias, ou se a que chegou for de outro nome, nada é aplicado: eu pergunto.",
     ].filter(Boolean).join("\n");
   }
   return null;
@@ -318,8 +341,10 @@ export const caixaTools: ToolDef[] = [
     name: "anotar_transacao_do_banco",
     description:
       "Classifica AGORA uma transação que o banco ainda vai trazer (Pix/transferência/boleto): 'fiz um Pix de 1.500 pro CNPJ X, " +
-      "classifica como fornecedor TSD', 'o Pix de 800 de hoje é da OS-60'. Quando a linha chegar, ela entra na fila já " +
-      "classificada; se já chegou, classifica na hora. Pede confirmação.",
+      "classifica como fornecedor TSD', 'o Pix de 800 do Fulano de hoje é da OS-60'. Quando a linha chegar, ela entra na fila já " +
+      "classificada; se já chegou, classifica na hora. Passe SEMPRE 'quem' quando a pessoa disser (e o documento, se disser): " +
+      "sem dizer para quem foi, só vale para transação sem nome no extrato (débito no cartão, transferência sem nome) — " +
+      "Pix com nome exige o nome (decisão do dono). Pede confirmação.",
     input_schema: {
       type: "object",
       properties: {
