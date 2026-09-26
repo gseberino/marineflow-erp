@@ -293,7 +293,7 @@ export const purchasingTools: ToolDef[] = [
   {
     name: "suggest_suppliers",
     description:
-      "Sugere fornecedores para um produto do catálogo, rankeados por preferência e histórico (tabela product_suppliers). SÓ LEITURA — não abre OC nem envia nada. Use antes de create_purchase_order_from_so ('quem vende o inversor Victron?', 'de quem eu compro essa bateria?').",
+      "Sugere fornecedores para um produto do catálogo, rankeados por preferência e histórico (tabela product_suppliers). SÓ LEITURA — não abre OC nem envia nada. Use para 'quem vende o inversor Victron?', 'de quem eu compro essa bateria?'.",
     input_schema: {
       type: "object",
       properties: {
