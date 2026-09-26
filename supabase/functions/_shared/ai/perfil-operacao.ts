@@ -287,6 +287,12 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   // — Cadastro estrutural e configuração do próprio agente (FORA_DO_WHATSAPP também) —
   "create_composed_product",
   "get_autonomy_settings",
+
+  // — Plano de contas: quem ensina é o criar_regra_financeira (no perfil). Quando a categoria
+  //   pedida não existe, ele devolve a dica "Use criar_categoria_de_despesa antes"; fora do
+  //   alcance, o modelo obedecia e recebia "Tool desconhecida". É risco medium: pela rede vira
+  //   pendência, como já era à vista. Cargos: admin e financeiro (CARGOS_FINANCEIRO) —
+  "criar_categoria_de_despesa",
 ]);
 
 /**

@@ -489,6 +489,41 @@ Deno.test("rede: tool FORA_DO_WHATSAPP de SO_PELA_REDE não é alcançada no Wha
   assertEquals(marcasDaRede(p.auditRows), [{ tool: CONFIG, desfecho: "executada" }]);
 });
 
+Deno.test("rede: a dica do criar_regra_financeira ('Use criar_categoria_de_despesa antes') leva a uma pendência, não a 'Tool desconhecida'", async () => {
+  const CATEGORIA = "criar_categoria_de_despesa"; // medium, só admin e financeiro
+  assertEquals(PERFIL_OPERACAO.has("criar_regra_financeira"), true);
+  assertStringIncludes(String(porNomeReal.get("criar_regra_financeira")!.execute), `Use ${CATEGORIA} antes`);
+  assertEquals(SO_PELA_REDE.has(CATEGORIA), true);
+  assertEquals(porNomeReal.get(CATEGORIA)!.risk, "medium");
+
+  // Admin, no WhatsApp (mesma ordem do ai-agent: cargo, depois canal): alcança, vira pendência.
+  for (const role of ["admin", "financial"] as const) {
+    execucoes = [];
+    const tools = filtrarPorCanal(porCargo(role), "whatsapp").map((t) => (t.name === CATEGORIA ? comExecuteFalso(CATEGORIA) : t));
+    assertEquals(tools.some((t) => t.name === CATEGORIA), true, `${role}: premissa — cargo e canal liberam`);
+    const { params, auditRows, pendingRows } = montar({ tools, role, channel: "whatsapp" });
+    const { fetchStub, calls } = mockFetchSequence([chamaTool(CATEGORIA, { nome: "Alimentação de campo", grupo: "custo_direto" })]);
+    const r = await withFetch(fetchStub, () => runAgentLoop(params));
+    assertEquals(toolsEnviadas(calls).includes(CATEGORIA), false, role);
+    assertEquals(execucoes, [], role);
+    assertEquals(r.proposal?.risk_level, "medium", role);
+    assertEquals(pendingRows.map((p) => p.action_name), [CATEGORIA], role);
+    assertEquals(marcasDaRede(auditRows), [{ tool: CATEGORIA, desfecho: "pendencia" }], role);
+  }
+
+  // Técnico e vendedor: o cargo não libera — a rede não passa por cima.
+  for (const role of ["technician", "seller"] as const) {
+    const tools = porCargo(role);
+    assertEquals(tools.some((t) => t.name === CATEGORIA), false, `${role}: premissa — cargo não libera`);
+    const { params, auditRows, pendingRows } = montar({ tools, role });
+    const { fetchStub } = mockFetchSequence([chamaTool(CATEGORIA, { nome: "X", grupo: "custo_direto" }), respondeTexto("ok")]);
+    const r = await withFetch(fetchStub, () => runAgentLoop(params));
+    assertEquals(r.toolEvents[0].result, { error: `Tool desconhecida: ${CATEGORIA}` }, role);
+    assertEquals(pendingRows.length, 0, role);
+    assertEquals(auditRows.length, 0, role);
+  }
+});
+
 Deno.test("dado real (26/09 00:00 UTC, WhatsApp, admin): a chamada que deu 'Tool desconhecida' agora é aceita", () => {
   // Único 'Tool desconhecida' da história (SELECT em ai_operator_messages): "Me envia o
   // orçamento 108 em PDF." → send_document_pdf_to_self com estes argumentos, exatamente.

@@ -16,6 +16,11 @@
 // VISÍVEIS (perfil ∪ risco alto): a regra 2 vale igual (uma descrição que manda "use antes de
 // create_purchase_order_from_so" ensina tanto quanto o prompt), e a decisão do dono sobre o que
 // não se ensina mais também. A regra 1 não se aplica ali: esquema é feito de nomes de campo.
+// E sobre o que as tools visíveis DEVOLVEM — String(t.execute), onde moram as dicas, notas e
+// instructions do resultado: a mesma regra 2 e a mesma decisão do dono. Caso real (26/09):
+// criar_regra_financeira devolvia "Use criar_categoria_de_despesa antes", e essa estava fora do
+// alcance. A regra 1 também não se aplica: código é cheio de nome de coluna. Limite: só o corpo
+// do execute é lido — texto montado num helper de outra função não aparece aqui.
 // Rodar com:
 //   deno test --allow-all supabase/functions/_shared/ai/prompt-ferramentas_test.ts
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
@@ -80,6 +85,16 @@ const citadasNasVisiveis: Array<{ em: string; tool: string }> = visiveis.flatMap
     .map((n) => ({ em: t.name, tool: n }))
 );
 
+/** O que a tool devolve ao modelo sai do execute: dica, nota, aviso, instruction. */
+const textoDoExecute = (t: { execute: unknown }) => String(t.execute);
+
+/** Tools citadas no execute de cada tool visível (a própria não conta — ex.: RPC de mesmo nome). */
+const citadasNosExecutes: Array<{ em: string; tool: string }> = visiveis.flatMap((t) =>
+  [...identificadoresSnakeCase(textoDoExecute(t))]
+    .filter((n) => porNome.has(n) && n !== t.name)
+    .map((n) => ({ em: t.name, tool: n }))
+);
+
 /** Ao alcance do modelo: no perfil, de risco alto (entra sempre) ou pela rede, de propósito. */
 const aoAlcance = (n: string) => PERFIL_OPERACAO.has(n) || porNome.get(n)!.risk === "high" || SO_PELA_REDE.has(n);
 
@@ -113,8 +128,18 @@ Deno.test("toda tool citada na description/input_schema de uma tool VISÍVEL est
   assertEquals(semAlcance, [], "a descrição de uma tool visível ensina outra que o modelo não alcança: tire a citação ou dê alcance");
 });
 
+Deno.test("toda tool citada no execute (dica, nota, instruction) de uma tool VISÍVEL está ao alcance, como no prompt", () => {
+  // Sanidade: o scanner lê o corpo do execute (se o recorte quebrar, o teste passaria vazio).
+  assertEquals(citadasNosExecutes.length > 20, true, `só ${citadasNosExecutes.length} citações — o scanner quebrou?`);
+  // O caso que motivou a guarda: a dica de categoria inexistente em criar_regra_financeira.
+  assertEquals(citadasNosExecutes.some((c) => c.em === "criar_regra_financeira" && c.tool === "criar_categoria_de_despesa"), true);
+
+  const semAlcance = citadasNosExecutes.filter((c) => !aoAlcance(c.tool)).map((c) => `${c.em} → ${c.tool}`).sort();
+  assertEquals(semAlcance, [], "o resultado de uma tool visível manda usar outra que o modelo não alcança: tire a citação ou dê alcance");
+});
+
 Deno.test("SO_PELA_REDE sem sobra: só tool citada (no prompt ou em tool visível), fora do perfil e que não é de risco alto", () => {
-  const citadaEmVisivel = new Set(citadasNasVisiveis.map((c) => c.tool));
+  const citadaEmVisivel = new Set([...citadasNasVisiveis, ...citadasNosExecutes].map((c) => c.tool));
   for (const n of SO_PELA_REDE) {
     assertEquals(citados.has(n) || citadaEmVisivel.has(n), true, `${n} ninguém ensina mais — tire de SO_PELA_REDE`);
     assertEquals(PERFIL_OPERACAO.has(n), false, `${n} está no perfil e em SO_PELA_REDE`);
@@ -128,6 +153,8 @@ Deno.test("decisão do dono (26/09): nem o prompt nem as tools visíveis ensinam
     assertEquals(texto.includes(n), false, `${n} voltou ao prompt`);
     const emTools = visiveis.filter((t) => textoDaTool(t).includes(n)).map((t) => t.name);
     assertEquals(emTools, [], `${n} é ensinada na descrição de ${emTools.join(", ")}`);
+    const emResultados = visiveis.filter((t) => textoDoExecute(t).includes(n)).map((t) => t.name);
+    assertEquals(emResultados, [], `${n} é ensinada no resultado (execute) de ${emResultados.join(", ")}`);
     assertEquals(porNome.has(n), true, `${n} deixou de existir — só o ensino saiu, a tool fica`);
   }
 });
