@@ -266,3 +266,37 @@ Deno.test("isResolved r18: só o envio registrado resolve a tarefa", async () =>
     "Cotação não existe mais",
   );
 });
+
+// r6 cobrava "resposta" de OS concluída e paga: o quote_status 'sent' ficava parado (a assinatura
+// pelo link muda o status, não o quote_status) e a tarefa não fechava nunca (ORÇ-00070, 03/08).
+Deno.test("isResolved r6: só orçamento em rascunho não convertido mantém a tarefa", async () => {
+  const r6 = ruleById("r6")!;
+  const mkDb = (row: unknown) => ({
+    from: () => ({
+      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: row }) }) }),
+    }),
+  });
+  const k = { automation_key: "r6:quote:x" };
+  assertEquals(await r6.isResolved(mkDb({ quote_status: "sent", status: "draft", converted_to_os_at: null }), k), null);
+  assertEquals(await r6.isResolved(mkDb({ quote_status: "awaiting_approval", status: "draft", converted_to_os_at: null }), k), null);
+  assertEquals(await r6.isResolved(mkDb({ quote_status: "sent", status: "completed", converted_to_os_at: null }), k), "Deixou de ser orçamento (completed)");
+  assertEquals(await r6.isResolved(mkDb({ quote_status: "sent", status: "cancelled", converted_to_os_at: null }), k), "Deixou de ser orçamento (cancelled)");
+  assertEquals(await r6.isResolved(mkDb({ quote_status: "sent", status: "draft", converted_to_os_at: "2026-09-01T00:00:00Z" }), k), "Orçamento convertido em OS");
+  assertEquals(await r6.isResolved(mkDb({ quote_status: "rejected", status: "draft", converted_to_os_at: null }), k), "Orçamento mudou para rejected");
+});
+
+Deno.test("find r6: filtra rascunho não convertido no próprio banco", async () => {
+  const r6 = ruleById("r6")!;
+  const filtros: string[] = [];
+  const q: any = {
+    select: () => q,
+    in: (c: string, v: unknown) => { filtros.push(`in:${c}:${JSON.stringify(v)}`); return q; },
+    eq: (c: string, v: unknown) => { filtros.push(`eq:${c}:${v}`); return q; },
+    is: (c: string, v: unknown) => { filtros.push(`is:${c}:${v}`); return q; },
+    lt: (c: string) => { filtros.push(`lt:${c}`); return q; },
+    limit: async () => ({ data: [] }),
+  };
+  await r6.find({ from: () => q } as any);
+  assertEquals(filtros.includes("eq:status:draft"), true, filtros.join(" "));
+  assertEquals(filtros.includes("is:converted_to_os_at:null"), true, filtros.join(" "));
+});

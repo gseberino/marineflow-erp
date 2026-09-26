@@ -241,10 +241,15 @@ const r6: Rule = {
   label: 'Orçamento sem resposta (3 dias)',
   defaultEnabled: true,
   async find(db) {
+    // Só orçamento de verdade: rascunho não convertido. Sem este filtro, OS concluída e paga
+    // com quote_status 'sent' parado (assinada pelo link, que não mexe no quote_status) virava
+    // "orçamento sem resposta" — ORÇ-00070 ficou com tarefa aberta de 03/08 a 26/09/2026.
     const { data } = await db
       .from('service_orders')
       .select('id, service_order_number, client_id, created_by, clients(name)')
       .in('quote_status', ['sent', 'awaiting_approval'])
+      .eq('status', 'draft')
+      .is('converted_to_os_at', null)
       .lt('updated_at', daysAgoISO(3))
       .limit(50);
     return (data || []).map((o: any) => ({
@@ -261,11 +266,15 @@ const r6: Rule = {
   async isResolved(db, task) {
     const id = entityIdFromKey(task.automation_key);
     const { data } = await db.from('service_orders')
-      .select('quote_status').eq('id', id).maybeSingle();
+      .select('quote_status, status, converted_to_os_at').eq('id', id).maybeSingle();
     if (!data) return 'OS não existe mais';
     if (!['sent', 'awaiting_approval'].includes(data.quote_status)) {
       return `Orçamento mudou para ${data.quote_status}`;
     }
+    // O mesmo filtro do find: deixou de ser orçamento (aprovado, em execução, concluído,
+    // cancelado ou convertido), não há mais resposta a cobrar.
+    if (data.converted_to_os_at) return 'Orçamento convertido em OS';
+    if (data.status !== 'draft') return `Deixou de ser orçamento (${data.status})`;
     return null;
   },
 };

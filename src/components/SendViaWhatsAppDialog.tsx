@@ -24,6 +24,7 @@ import { useWhatsAppSend } from '@/hooks/use-whatsapp-send';
 import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
 import { supabase } from '@/integrations/supabase/client';
 import { buildQuoteWhatsAppSummary } from '@/lib/quote-whatsapp-summary';
+import { mesmoTelefone } from '../../supabase/functions/_shared/ai/phone';
 
 export type SendViaWhatsAppTarget =
   | {
@@ -424,6 +425,16 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
               onChange={(e) => setPhone(e.target.value)}
               placeholder="5521999998888"
             />
+            {/* O envio só marca o orçamento como "enviado ao cliente" quando vai ao número do
+                cliente (regra no whatsapp-send, 26/09/2026). Mandar para si ou para um terceiro
+                continua possível — só não mexe no funil. Vale também para o envio agendado. */}
+            {target?.kind === 'service_order' && documentType === 'quote'
+              && phone.replace(/\D/g, '').length >= 8 && !mesmoTelefone(phone, target.clientPhone) && (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                {target.clientPhone ? 'Este número não é o cadastrado para o cliente' : 'O cliente não tem telefone cadastrado'}:
+                {' '}enviar para ele não marca o orçamento como enviado ao cliente.
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">

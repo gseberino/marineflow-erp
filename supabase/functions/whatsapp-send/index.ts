@@ -9,6 +9,7 @@ import { z } from "https://esm.sh/zod@3.23.8";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { normalizePhoneNumber } from "../_shared/whatsapp/normalize.ts";
 import { concluirEnvio, liberarEnvio, reservarEnvio } from "../_shared/whatsapp/idempotencia.ts";
+import { decidirMarcarEnviado, urlDeDocumentoPermitida } from "../_shared/whatsapp/marcar-enviado.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
@@ -84,12 +85,18 @@ servirComCors(async (req) => {
     if (!parsed.success) return jr({ error: parsed.error.flatten().fieldErrors }, 400);
     const body = parsed.data;
 
+    // A Evolution baixa esta URL de dentro da rede da empresa: só do nosso Storage.
+    if (body.kind === "document" && body.document_url && !urlDeDocumentoPermitida(body.document_url, SUPABASE_URL)) {
+      return jr({ error: "document_url precisa ser um arquivo do Storage deste projeto." }, 400);
+    }
+
     const testMode = (settingsMap["wa_test_mode"] ?? settingsMap["zapi_test_mode"]) === "true";
     const testNumber = settingsMap["wa_test_number"] ?? settingsMap["zapi_test_number"]?.replace(/\D/g, "");
+    const desviadoPorTeste = !!(testMode && testNumber);
 
     let phoneClean = normalizePhoneNumber(body.phone);
 
-    if (testMode && testNumber) {
+    if (desviadoPorTeste) {
       console.log(`WhatsApp: Test Mode Active. Redirecting from ${phoneClean} to ${testNumber}`);
       phoneClean = testNumber;
     }
@@ -181,17 +188,53 @@ servirComCors(async (req) => {
       );
     }
 
-    // Auto-advance quote_status to 'sent' when a quote document is sent via WhatsApp
+    // Marca o orçamento como ENVIADO AO CLIENTE só quando ele foi mesmo ao cliente
+    // (regra e motivo em _shared/whatsapp/marcar-enviado.ts). Antes marcava qualquer envio com
+    // context='quote' — inclusive o dono mandando para si e o modo de teste —, e o "enviado"
+    // falso levou a rotina quote-reminders a rejeitar orçamentos vivos.
     if (body.context === "quote" && body.service_order_id) {
       try {
-        await supabaseAdmin
+        const { data: ordem } = await supabaseAdmin
           .from("service_orders")
-          .update({ quote_status: "sent" } as any)
+          .select("status, quote_status, converted_to_os_at, clients(whatsapp, phone)")
           .eq("id", body.service_order_id)
-          .in("quote_status" as any, ["draft", "awaiting_approval"])
-          .is("converted_to_os_at" as any, null);
+          .maybeSingle();
+        const cliente = (ordem as any)?.clients ?? null;
+        const decisao = decidirMarcarEnviado({
+          context: body.context,
+          serviceOrderId: body.service_order_id,
+          desviadoPorTeste,
+          telefoneDestino: phoneClean,
+          telefonesDoCliente: [cliente?.whatsapp, cliente?.phone],
+          ordem: ordem as any,
+        });
+        if (decisao.marcar) {
+          // Os mesmos filtros no próprio UPDATE: se outra pessoa mexeu no funil entre a leitura
+          // e aqui, não sobrescreve.
+          const { data: mudou } = await supabaseAdmin
+            .from("service_orders")
+            .update({ quote_status: "sent" } as any)
+            .eq("id", body.service_order_id)
+            .eq("status", "draft")
+            .in("quote_status" as any, ["draft", "awaiting_approval"])
+            .is("converted_to_os_at" as any, null)
+            .select("id");
+          if ((mudou ?? []).length > 0) {
+            await supabaseAdmin.from("audit_log").insert({
+              table_name: "service_orders",
+              record_id: body.service_order_id,
+              action: "update",
+              changed_by: callerIdentity,
+              previous_value: { quote_status: (ordem as any).quote_status },
+              new_value: { quote_status: "sent" },
+              reason: `Marcado como enviado: ${decisao.motivo} (${body.kind}).`,
+            });
+          }
+        } else {
+          console.info(`[whatsapp-send] orçamento não marcado como enviado: ${decisao.motivo}`);
+        }
       } catch (_e) {
-        // Non-blocking — send already succeeded
+        // Não bloqueia — o envio já aconteceu.
         console.warn("quote_status update skipped:", _e);
       }
     }

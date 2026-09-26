@@ -49,15 +49,36 @@ function sanitizeStorageKey(filename: string): string {
 }
 
 
-async function uploadPdfBlob(blob: Blob, filename: string): Promise<string> {
+/**
+ * O PDF passa pelo bucket só pelo tempo de a Evolution baixá-lo.
+ *
+ * Até 26/09/2026 ele ficava para sempre no bucket 'documents', PÚBLICO: 41 orçamentos e OS
+ * com CPF/CNPJ, telefone e endereço de clientes e o PIX da HBR, que um visitante anônimo
+ * conseguia listar e baixar. Agora o link é ASSINADO e curto (a Evolution baixa na hora, de
+ * dentro do envio) e o arquivo é apagado assim que a função de envio responde — o mesmo
+ * desenho do PDF que o assistente manda (bucket pdf-agente).
+ */
+const VALIDADE_DO_LINK_S = 300;
+
+async function uploadPdfBlob(blob: Blob, filename: string): Promise<{ path: string; url: string }> {
   const safeFilename = sanitizeStorageKey(filename);
   const path = `${new Date().getFullYear()}/${crypto.randomUUID()}-${safeFilename}`;
   const { error } = await supabase.storage
     .from('documents')
     .upload(path, blob, { contentType: 'application/pdf', upsert: false });
   if (error) throw new Error(`Upload falhou: ${error.message}`);
-  const { data } = supabase.storage.from('documents').getPublicUrl(path);
-  return data.publicUrl;
+  const { data, error: signErr } = await supabase.storage.from('documents').createSignedUrl(path, VALIDADE_DO_LINK_S);
+  if (signErr || !data?.signedUrl) {
+    await apagarPdf(path);
+    throw new Error(`Não consegui gerar o link do arquivo: ${signErr?.message ?? 'sem URL'}`);
+  }
+  return { path, url: data.signedUrl };
+}
+
+async function apagarPdf(path: string): Promise<void> {
+  // O storage-js devolve { error } em vez de lançar; o que sobrar fica privado.
+  const { error } = await supabase.storage.from('documents').remove([path]);
+  if (error) console.warn(`[whatsapp] não apaguei documents/${path}:`, error.message);
 }
 
 export function useWhatsAppSend() {
@@ -76,6 +97,7 @@ export function useWhatsAppSend() {
     if (payload.service_order_id) invokeBody.service_order_id = payload.service_order_id;
     if (payload.receivable_id) invokeBody.receivable_id = payload.receivable_id;
 
+    let arquivo: string | null = null;
     if (payload.mode === 'link') {
       if (!payload.publicUrl) throw new Error('Sem link público disponível.');
       invokeBody.kind = 'link';
@@ -89,7 +111,8 @@ export function useWhatsAppSend() {
         payload.pdfOptions ?? DEFAULT_PDF_OPTIONS,
       );
       const filename = payload.filename || 'documento.pdf';
-      const url = await uploadPdfBlob(blob, filename);
+      const { path, url } = await uploadPdfBlob(blob, filename);
+      arquivo = path;
       invokeBody.kind = 'document';
       invokeBody.document_url = url;
       invokeBody.document_filename = filename;
@@ -102,9 +125,18 @@ export function useWhatsAppSend() {
       phoneClean,
       [invokeBody.kind, invokeBody.message, invokeBody.link_url, invokeBody.document_filename, invokeBody.document_caption].join('|'),
     );
-    const { data, error } = await supabase.functions.invoke('whatsapp-send', { body: invokeBody });
-    if (error) throw error;
-    if ((data as any)?.error) throw new Error((data as any).error);
+    let respostaDefinitiva = false;
+    try {
+      const { data, error } = await supabase.functions.invoke('whatsapp-send', { body: invokeBody });
+      // A função respondeu (sucesso, erro com corpo ou "já enviado"): a Evolution já baixou ou
+      // já desistiu, e o arquivo pode sair. Erro de rede ou de relay NÃO é resposta — a função
+      // pode ainda estar enviando, e apagar agora tiraria o arquivo debaixo dela.
+      respostaDefinitiva = !error || (error as { name?: string }).name === 'FunctionsHttpError';
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+    } finally {
+      if (arquivo && respostaDefinitiva) await apagarPdf(arquivo);
+    }
   }
 
   async function send(payload: WhatsAppSendPayload, retry: RetryConfig): Promise<boolean> {
