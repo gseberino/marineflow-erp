@@ -20,18 +20,17 @@
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
 import { enviarDocumentoWhatsapp } from "./whatsapp.ts";
 import { chaveDeEnvio, liberarEnvio } from "../../whatsapp/idempotencia.ts";
-import { carregarPDFData } from "../../pdf/dados.ts";
-import { documentTypeFor } from "../../pdf/document-type.ts";
+// O caminho do PDF (montar → renderizar → guardar → entregar → apagar) mora em
+// _shared/pdf/gerar-e-guardar.ts desde 26/09/2026, quando o envio ao CLIENTE passou a usar o
+// mesmo arquivo. Os dois nomes reexportados abaixo continuam saindo daqui: os testes e quem
+// já os importava não precisam saber da mudança.
 import {
-  buildOrderHTML,
-  buildPDFFilename,
-  esc,
-  fmtCurrency,
-  type PDFOptions,
-  resolvePdfOptions,
-  tituloParaImpressao,
-} from "../../pdf/documento.ts";
-import { renderizarPdf } from "../../pdf/renderizar.ts";
+  BUCKET_DO_PDF,
+  guardarEEntregar,
+  limitarNomeDoArquivo,
+  montarDocumentoDaOrdem,
+} from "../../pdf/gerar-e-guardar.ts";
+export { BUCKET_DO_PDF, limitarNomeDoArquivo };
 
 /**
  * Quem pode pedir. Lista explícita, e NÃO `NON_TECHNICIAN_ROLES`: aquela inclui o vendedor
@@ -39,16 +38,6 @@ import { renderizarPdf } from "../../pdf/renderizar.ts";
  */
 export const CARGOS_DO_PDF: Role[] = ["admin", "financial"];
 
-/** Bucket privado, sem policy nenhuma: só a chave de serviço lê e escreve. */
-export const BUCKET_DO_PDF = "pdf-agente";
-/**
- * A Evolution baixa o arquivo DENTRO da chamada de envio (que a tool corta aos 25 s), e o
- * objeto é apagado logo depois. A URL só precisa sobreviver a isso. Curta de propósito: o
- * whatsapp-send grava a URL no audit_log, que qualquer usuário logado lê.
- */
-const VALIDADE_DA_URL_S = 180;
-/** O whatsapp-send recusa nome de arquivo acima de 120 caracteres (zod). */
-const NOME_MAXIMO = 120;
 /** O que diz ao whatsapp-send que isto NÃO é envio ao cliente. Nunca 'quote'. */
 export const CONTEXTO_DO_ENVIO = "agente_pdf_proprio";
 
@@ -120,12 +109,6 @@ export async function localizarOrdem(admin: any, documento: string, tipo?: strin
   return { erro: `Não achei ${candidatos.join(" nem ")}.${dica}` };
 }
 
-/** Corta o nome para caber no limite do whatsapp-send, sem perder o ".pdf". */
-export function limitarNomeDoArquivo(nome: string): string {
-  if (nome.length <= NOME_MAXIMO) return nome;
-  return `${nome.slice(0, NOME_MAXIMO - 4).replace(/[-_]+$/, "")}.pdf`;
-}
-
 /** Janela de 2 minutos: pedir duas vezes seguidas não manda dois arquivos iguais. */
 const janelaDeDoisMinutos = () => Math.floor(Date.now() / 120_000);
 
@@ -177,104 +160,64 @@ export const documentoPdfTools: ToolDef[] = [
       if (!telefone) return { error: "Você não tem um WhatsApp cadastrado para receber o PDF. Cadastre em Configurações → Usuários (aba IA/Zap)." };
 
       // ── O documento, exatamente como o Baixar do formulário monta ──────────────────
-      let dados;
-      try {
-        dados = await carregarPDFData(ordem.id, admin);
-      } catch (e) {
-        return await falha(ctx, ordem, `não consegui ler os dados do documento (${e instanceof Error ? e.message : String(e)})`);
-      }
-      const tipoDoc = documentTypeFor(ordem.status);
-      dados.documentType = tipoDoc;
-      // Validade: a do próprio orçamento; sem ela, o padrão da empresa — a mesma conta do
-      // formulário (ServiceOrderForm: form.quote_validity_days || defaultQuoteValidityDays).
-      const padraoDaEmpresa = Number(ctx.settings.quote_validity_days ?? 15) || 15;
-      const opcoes: PDFOptions = {
-        ...resolvePdfOptions(ctx.settings, tipoDoc),
-        // Sempre a via do CLIENTE, com valores (decisão do dono): a via de execução do técnico
-        // é escolha por documento, nunca padrão — mas se um dia um padrão gravado a trouxer,
-        // o dono receberia uma OS sem preço com a legenda dizendo o total.
-        hideFinancials: false,
-        ...(tipoDoc === "quote"
-          ? { validity: { mode: "days" as const, days: Number(dados.serviceOrder.quote_validity_days) || padraoDaEmpresa } }
-          : {}),
-      };
-      const html = buildOrderHTML(dados, opcoes).replace(
-        /<title>[^<]*<\/title>/,
-        `<title>${esc(tituloParaImpressao(dados, opcoes))}</title>`,
-      );
-      const nomeDoArquivo = limitarNomeDoArquivo(buildPDFFilename(dados, opcoes));
+      const montado = await montarDocumentoDaOrdem(admin, ordem, ctx.settings);
+      if (!montado.ok) return await falha(ctx, ordem, montado.motivo);
+      const doc = montado.doc;
+      const { rotulo, numero, cliente, total } = doc;
+      const barco = doc.embarcacao ? ` · ${doc.embarcacao}` : "";
+      const legenda = `📄 ${rotulo} ${numero} — ${cliente}${barco}\nTotal: ${total}`;
 
-      const render = await renderizarPdf({
-        baseUrl: ctx.settings.app_public_url || "",
-        html,
-        filename: nomeDoArquivo,
-        shareToken: ordem.share_token,
-      });
-      if (!render.ok) return await falha(ctx, ordem, render.motivo);
+      // Mesmo documento, mesma versão, MESMO DESTINATÁRIO, mesma janela de 2 min: não manda
+      // duas vezes. Sem o telefone na chave, o financeiro que pedisse o mesmo PDF logo depois
+      // do admin ouviria "já mandei" — e o arquivo tinha ido para o admin.
+      const chave = chaveDeEnvio("agente-pdf", ordem.id, telefone, ordem.updated_at, janelaDeDoisMinutos());
 
       // ── Guarda por minutos num bucket privado; a Evolution baixa pela URL assinada ──
-      const caminho = `agente/${new Date().getUTCFullYear()}/${crypto.randomUUID()}.pdf`;
-      const armazem = admin.storage.from(BUCKET_DO_PDF);
-      const { error: upErr } = await armazem.upload(caminho, render.pdf, { contentType: "application/pdf", upsert: false });
-      if (upErr) return await falha(ctx, ordem, `não consegui guardar o arquivo (${upErr.message})`);
-
-      try {
-        const { data: assinada, error: urlErr } = await armazem.createSignedUrl(caminho, VALIDADE_DA_URL_S);
-        if (urlErr || !assinada?.signedUrl) return await falha(ctx, ordem, `não consegui gerar o endereço do arquivo (${urlErr?.message ?? "sem URL"})`);
-
-        const rotulo = tipoDoc === "quote" ? "Orçamento" : "Ordem de Serviço";
-        const numero = dados.serviceOrder.service_order_number;
-        const cliente = dados.client?.name || "—";
-        const barco = dados.vessel?.name ? ` · ${dados.vessel.name}` : "";
-        const total = fmtCurrency(Number(dados.serviceOrder.grand_total) || 0);
-        const legenda = `📄 ${rotulo} ${numero} — ${cliente}${barco}\nTotal: ${total}`;
-
-        // Mesmo documento, mesma versão, MESMO DESTINATÁRIO, mesma janela de 2 min: não manda
-        // duas vezes. Sem o telefone na chave, o financeiro que pedisse o mesmo PDF logo depois
-        // do admin ouviria "já mandei" — e o arquivo tinha ido para o admin.
-        const chave = chaveDeEnvio("agente-pdf", ordem.id, telefone, ordem.updated_at, janelaDeDoisMinutos());
-        const envio = await enviarDocumentoWhatsapp({
-          phone: telefone,
-          url: assinada.signedUrl,
-          filename: nomeDoArquivo,
-          caption: legenda,
-          context: CONTEXTO_DO_ENVIO,
-          jwt: ctx.jwt,
-          dedupeKey: chave,
-        });
-        if (!envio.ok) {
-          // O whatsapp-send reserva a chave ANTES de chamar a Evolution e só a libera quando ela
-          // responde. Se a tool desistiu no meio (25 s, rede), a reserva ficaria de pé e o
-          // próximo pedido ouviria "já mandei" sem nada entregue. Entre um PDF repetido para si
-          // mesmo e um "já mandei" falso, o repetido é o erro menor.
-          await liberarEnvio(admin, chave).catch(() => {});
-          return await falha(ctx, ordem, envio.error);
-        }
-        if (envio.deduplicated) {
-          return { ok: true, deduplicated: true, aviso: `Esse mesmo PDF (${rotulo} ${numero}) já foi mandado para você há instantes; não reenviei.` };
-        }
-        // Modo de teste do WhatsApp: o whatsapp-send desvia TODO envio para o número de teste.
-        // Dizer "chegou para você" seria fingir.
-        const modoTeste = (ctx.settings.wa_test_mode ?? ctx.settings.zapi_test_mode) === "true";
-        // Sem URL e sem token: o resultado fica gravado no histórico do agente.
-        return {
-          ok: true,
-          enviado_para: modoTeste ? "o número de TESTE do WhatsApp (modo de teste ligado)" : "o WhatsApp de quem pediu",
-          documento: `${rotulo} ${numero}`,
-          cliente,
-          total,
-          arquivo: nomeDoArquivo,
-          observacao: modoTeste
-            ? "O modo de teste do WhatsApp está ligado: o arquivo foi para o número de teste, não para quem pediu. Diga isso."
-            : "O arquivo já chegou no WhatsApp de quem pediu (no canal WhatsApp, antes desta resposta).",
-        };
-      } finally {
-        // Sucesso ou falha, o arquivo não fica: o PDF leva preço e dados do cliente, e a
-        // cópia que importa já está no WhatsApp. Falha ao apagar não derruba o envio, mas
-        // fica no log (o storage-js devolve { error }, não lança).
-        const { error: rmErr } = await armazem.remove([caminho]).catch((e: unknown) => ({ error: e }));
-        if (rmErr) console.warn(`[send_document_pdf_to_self] não apaguei ${BUCKET_DO_PDF}/${caminho}:`, rmErr);
+      const entrega = await guardarEEntregar({
+        admin,
+        doc,
+        shareToken: ordem.share_token,
+        baseUrl: ctx.settings.app_public_url || "",
+        rotuloDoLog: "send_document_pdf_to_self",
+        entregar: (url) =>
+          enviarDocumentoWhatsapp({
+            phone: telefone,
+            url,
+            filename: doc.nomeDoArquivo,
+            caption: legenda,
+            context: CONTEXTO_DO_ENVIO,
+            jwt: ctx.jwt,
+            dedupeKey: chave,
+          }),
+      });
+      if (!entrega.ok) return await falha(ctx, ordem, entrega.motivo);
+      const envio = entrega.valor;
+      if (!envio.ok) {
+        // O whatsapp-send reserva a chave ANTES de chamar a Evolution e só a libera quando ela
+        // responde. Se a tool desistiu no meio (25 s, rede), a reserva ficaria de pé e o
+        // próximo pedido ouviria "já mandei" sem nada entregue. Entre um PDF repetido para si
+        // mesmo e um "já mandei" falso, o repetido é o erro menor.
+        await liberarEnvio(admin, chave).catch(() => {});
+        return await falha(ctx, ordem, envio.error);
       }
+      if (envio.deduplicated) {
+        return { ok: true, deduplicated: true, aviso: `Esse mesmo PDF (${rotulo} ${numero}) já foi mandado para você há instantes; não reenviei.` };
+      }
+      // Modo de teste do WhatsApp: o whatsapp-send desvia TODO envio para o número de teste.
+      // Dizer "chegou para você" seria fingir.
+      const modoTeste = (ctx.settings.wa_test_mode ?? ctx.settings.zapi_test_mode) === "true";
+      // Sem URL e sem token: o resultado fica gravado no histórico do agente.
+      return {
+        ok: true,
+        enviado_para: modoTeste ? "o número de TESTE do WhatsApp (modo de teste ligado)" : "o WhatsApp de quem pediu",
+        documento: `${rotulo} ${numero}`,
+        cliente,
+        total,
+        arquivo: doc.nomeDoArquivo,
+        observacao: modoTeste
+          ? "O modo de teste do WhatsApp está ligado: o arquivo foi para o número de teste, não para quem pediu. Diga isso."
+          : "O arquivo já chegou no WhatsApp de quem pediu (no canal WhatsApp, antes desta resposta).",
+      };
     },
   },
 ];
