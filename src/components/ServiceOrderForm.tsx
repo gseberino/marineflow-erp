@@ -57,7 +57,7 @@ import { levantamentosPendentesParaConcluir } from '@/lib/levantamento-gate';
 import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { usePDFData } from '@/hooks/use-pdf';
-import { downloadPDF, DEFAULT_PDF_OPTIONS } from '@/lib/pdf-generator';
+import { downloadPDF, DEFAULT_PDF_OPTIONS, validadeDoOrcamento } from '@/lib/pdf-generator';
 import { printPDF } from '@/lib/pdf-print';
 import type { PDFOptions } from '@/lib/pdf-generator';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
@@ -142,7 +142,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     shareUrl: orderData?.share_token ? `${window.location.origin}/view/${orderData.share_token}` : null,
   });
   const issRatePct = Number(appSettings?.iss_rate_pct ?? 5) || 0;
-  const defaultQuoteValidityDays = Number(appSettings?.quote_validity_days ?? 15) || 15;
+  // Padrão da empresa para a validade (app_settings, senão 15) — pela função única do PDF,
+  // a mesma do envio pela tela, do portal e do assistente.
+  const defaultQuoteValidityDays = validadeDoOrcamento(null, appSettings).days;
   const travelRates = travelRatesFromSettings(appSettings);
   // Wrapper que injeta as tarifas configuráveis em todas as chamadas de cálculo de deslocamento
   const calcTravelCost = (p: Parameters<typeof calculateTravelCost>[0]) => calculateTravelCost(p, travelRates);
@@ -2501,7 +2503,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         open={!!pdfDialogType && !!pdfData}
         onOpenChange={v => { if (!v) setPdfDialogType(null); }}
         documentType={pdfDialogType || 'quote'}
-        initialValidityDays={form.quote_validity_days || defaultQuoteValidityDays}
+        initialValidityDays={validadeDoOrcamento(form.quote_validity_days, appSettings).days}
         hasProductImages={pdfData?.parts?.some((p: any) => !!p.image_url) ?? false}
         onGenerate={async (action, options, validity, dueDate) => {
           if (!pdfData || !pdfDialogType) return;

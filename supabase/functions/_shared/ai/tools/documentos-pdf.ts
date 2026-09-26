@@ -30,6 +30,7 @@ import {
   type PDFOptions,
   resolvePdfOptions,
   tituloParaImpressao,
+  validadeDoOrcamento,
 } from "../../pdf/documento.ts";
 import { renderizarPdf } from "../../pdf/renderizar.ts";
 
@@ -185,17 +186,16 @@ export const documentoPdfTools: ToolDef[] = [
       }
       const tipoDoc = documentTypeFor(ordem.status);
       dados.documentType = tipoDoc;
-      // Validade: a do próprio orçamento; sem ela, o padrão da empresa — a mesma conta do
-      // formulário (ServiceOrderForm: form.quote_validity_days || defaultQuoteValidityDays).
-      const padraoDaEmpresa = Number(ctx.settings.quote_validity_days ?? 15) || 15;
       const opcoes: PDFOptions = {
         ...resolvePdfOptions(ctx.settings, tipoDoc),
         // Sempre a via do CLIENTE, com valores (decisão do dono): a via de execução do técnico
         // é escolha por documento, nunca padrão — mas se um dia um padrão gravado a trouxer,
         // o dono receberia uma OS sem preço com a legenda dizendo o total.
         hideFinancials: false,
+        // Validade: a do próprio orçamento; sem ela, o padrão da empresa — pela mesma função
+        // do formulário, do envio pela tela e do portal (validadeDoOrcamento).
         ...(tipoDoc === "quote"
-          ? { validity: { mode: "days" as const, days: Number(dados.serviceOrder.quote_validity_days) || padraoDaEmpresa } }
+          ? { validity: validadeDoOrcamento(dados.serviceOrder.quote_validity_days, ctx.settings) }
           : {}),
       };
       const html = buildOrderHTML(dados, opcoes).replace(

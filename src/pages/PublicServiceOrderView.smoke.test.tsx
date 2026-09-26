@@ -8,11 +8,23 @@
 // Os mocks devolvem SEMPRE a mesma referência: objeto novo a cada chamada faz os
 // `useEffect` da página entrarem em laço, e o teste trava em vez de falhar.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PublicServiceOrderView from './PublicServiceOrderView';
+import { buildHTMLDocument, type PDFData, type PDFOptions } from '@/lib/pdf-generator';
 
-const ORDEM = {
+// O que o botão Baixar entrega ao gerador. O download de verdade (servidor/html2pdf) não
+// roda aqui; o desenho roda, com as MESMAS opções, em buildHTMLDocument.
+const baixados = vi.hoisted(() => [] as Array<{ dados: PDFData; opcoes: PDFOptions }>);
+vi.mock('@/lib/pdf-generator', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/lib/pdf-generator')>();
+  return {
+    ...real,
+    downloadPDF: async (dados: PDFData, opcoes: PDFOptions) => { baixados.push({ dados, opcoes }); },
+  };
+});
+
+const ORDEM: Record<string, unknown> = {
   id: 'os-1',
   service_order_number: 'ORÇ-00074',
   status: 'draft',
@@ -27,7 +39,9 @@ const ORDEM = {
   discount_amount: 0,
   tax_amount: 0,
   operational_cost_total: 0,
-  quote_validity_days: 15,
+  // 7, e não 15: o literal do gerador é 15, então só um número diferente prova que a
+  // validade do orçamento chegou ao PDF.
+  quote_validity_days: 7,
   share_token: 'tok-1',
   signed_at: null,
   requires_resignature: false,
@@ -88,7 +102,10 @@ const abrir = () =>
   );
 
 describe('PublicServiceOrderView — smoke de render', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    baixados.length = 0;
+  });
 
   it('carrega o documento do link sem crashar', async () => {
     abrir();
@@ -101,5 +118,34 @@ describe('PublicServiceOrderView — smoke de render', () => {
   it('oferece baixar o PDF', async () => {
     abrir();
     await waitFor(() => expect(screen.getByText(/Baixar PDF/i)).toBeTruthy());
+  });
+
+  // Até 26/09/2026 o PDF do portal saía "Válido por 15 dias" para qualquer orçamento: as
+  // opções não levavam validade e o gerador caía no literal.
+  it('o PDF baixado leva a validade do PRÓPRIO orçamento', async () => {
+    abrir();
+    fireEvent.click(await screen.findByRole('button', { name: /Baixar PDF/i }));
+    await waitFor(() => expect(baixados).toHaveLength(1));
+    const { dados, opcoes } = baixados[0];
+    expect(opcoes.validity).toEqual({ mode: 'days', days: 7 });
+    expect(dados.documentType).toBe('quote');
+    // criado em 01/08/2026 (09h de Brasília) + 7 dias
+    expect(buildHTMLDocument(dados, opcoes)).toContain('Válido por 7 dias (até 08/08/2026)');
+  });
+
+  // O anônimo não enxerga app_settings.quote_validity_days (whitelist), então sem a do
+  // orçamento o padrão é 15 — e nunca "NaN dias".
+  it('sem validade no orçamento, o PDF cai em 15 dias', async () => {
+    const original = ORDEM.quote_validity_days;
+    ORDEM.quote_validity_days = null;
+    try {
+      abrir();
+      fireEvent.click(await screen.findByRole('button', { name: /Baixar PDF/i }));
+      await waitFor(() => expect(baixados).toHaveLength(1));
+      expect(baixados[0].opcoes.validity).toEqual({ mode: 'days', days: 15 });
+      expect(buildHTMLDocument(baixados[0].dados, baixados[0].opcoes)).toContain('Válido por 15 dias');
+    } finally {
+      ORDEM.quote_validity_days = original;
+    }
   });
 });
