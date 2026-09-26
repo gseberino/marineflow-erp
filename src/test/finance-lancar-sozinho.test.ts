@@ -37,3 +37,22 @@ describe('lançar sozinho', () => {
     expect(selecionarParaLancarSozinho([base, linha], criterio)).toEqual([base]);
   });
 });
+
+describe("travas de 26/09/2026 (achadas antes da primeira rodada)", () => {
+  it("regra marcada 'só sugerir' não lança sozinha, mesmo com confiança 95", () => {
+    expect(motivoParaNaoLancarSozinho({ ...base, confidence: 95, regra_so_sugere: true }, criterio)).toMatch(/só sugerir/);
+  });
+
+  it("o que fica fora do resultado não vai sozinho por confiança", () => {
+    const fatura = { ...base, suggested_category: "Pagamento de fatura de cartão", dre_group: "nao_operacional", confidence: 95 };
+    expect(motivoParaNaoLancarSozinho(fatura, criterio)).toMatch(/fora do resultado/);
+  });
+
+  it("compra no débito sem loja nunca vai sozinha", () => {
+    expect(motivoParaNaoLancarSozinho({ ...base, sem_identidade: true }, criterio)).toMatch(/não informou/);
+  });
+
+  it("sem as marcas novas, a linha boa continua indo", () => {
+    expect(motivoParaNaoLancarSozinho({ ...base, dre_group: "custo_direto", regra_so_sugere: false, sem_identidade: false }, criterio)).toBeNull();
+  });
+});

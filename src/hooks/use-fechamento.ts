@@ -132,6 +132,9 @@ export const ROTULO_DA_ACAO: Record<string, string> = {
   cadastrou_contraparte: 'Cadastrou a partir do extrato',
   lancou_sozinho: 'Lançou sozinho',
   configurou_automatico: 'Configurou o lançar sozinho',
+  tirou_da_fila_ja_lancada: 'Tirou da fila (já estava lançada)',
+  lancou_no_caixa: 'Lançou no Caixa',
+  devolvida_a_fila: 'Devolveu à fila',
 };
 
 /** O que foi feito, por quem e quando — a trilha que nenhuma tela apagava antes. */

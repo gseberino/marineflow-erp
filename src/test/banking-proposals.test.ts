@@ -5,7 +5,7 @@
 import { describe, it, expect } from "vitest";
 import {
   classificar, acharFornecedor, indexarFornecedores, montarProposta,
-  sugerirRegras,
+  sugerirRegras, historicoSemIdentidade, ehIntermediario, chaveDoRecebedor, categoriaPeloTexto,
   type TransacaoOrfa, type FornecedorConhecido, type HistoricoFornecedor, type RegraFinanceira,
 } from "../../supabase/functions/_shared/banking/proposals";
 
@@ -518,5 +518,189 @@ describe("regras que a IA propõe", () => {
     ], []);
     expect(p[0].matchType).toBe("counterparty");
     expect(p[0].matchValue).toBe("GUSTAVO SEBERINO");
+  });
+});
+
+describe("histórico que não diz para quem foi (débito de cartão, 26/09/2026)", () => {
+  // O C6 manda a compra no cartão de débito só como "DEBITO DE CARTAO": sem loja, sem CNPJ,
+  // sem ramo. Uma correção de 10/08 tratou isso como fatura, a memória aprendeu "fatura" com
+  // 4 lançamentos e toda compra no débito passou a nascer como fatura — fora do DRE.
+  it("reconhece os textos que só dizem o meio de pagamento, e só eles", () => {
+    for (const t of ["DEBITO DE CARTAO", "Débito de cartão", "TRANSF ENVIADA PIX", "PIX ENVIADO", "PAGAMENTO DE PIX", "COMPRA NO DEBITO", "Sem descrição"]) {
+      expect(historicoSemIdentidade(t), t).toBe(true);
+    }
+    for (const t of ["Pix enviado para JOSE CARLOS ABEL", "POSTO PAULINHO NAVEGANTES", "PGTO FATURA CARTAO C6"]) {
+      expect(historicoSemIdentidade(t), t).toBe(false);
+    }
+  });
+
+  it("a memória por nome não aprende com o débito sem loja", () => {
+    expect(chaveDoRecebedor(tx({ description: "DEBITO DE CARTAO" }))).toBe("");
+    expect(chaveDoRecebedor(tx({ description: "TRANSF ENVIADA PIX" }))).toBe("");
+    expect(chaveDoRecebedor(tx({ description: "POSTO PAULINHO", counterparty_name: "POSTO PAULINHO" }))).toBe("POSTO PAULINHO");
+  });
+
+  it("débito sem loja nunca vira fatura — fica sem categoria, pedindo a loja", () => {
+    // A memória envenenada de antes da correção: se a chave ainda fosse "DEBITO DE CARTAO",
+    // esta linha nasceria como fatura com confiança 80.
+    const porNome = new Map([
+      ["DEBITO DE CARTAO", { categoria: "Pagamento de fatura de cartão", dreGroup: "nao_operacional", vezes: 4, total: 5 }],
+    ]);
+    const p = montarProposta(tx({ description: "DEBITO DE CARTAO", amount: 64.8 }), fornecedores, undefined, [], porNome);
+    expect(p.suggestedCategory).toBe("Outras despesas");
+    expect(p.dreGroup).not.toBe("nao_operacional");
+    expect(p.confidence).toBe(30);
+    expect(p.semIdentidade).toBe(true);
+    expect(p.reasoning).toMatch(/banco não informa onde foi/);
+  });
+
+  it("com CNPJ do outro lado a linha tem identidade, mesmo com o texto genérico", () => {
+    const p = montarProposta(
+      tx({ description: "TRANSF ENVIADA PIX", counterparty_document: "68.904.101/0001-20" }),
+      fornecedores,
+    );
+    expect(p.semIdentidade).toBe(false);
+    expect(p.suggestedSupplierId).toBe("f-marine");
+  });
+
+  it("regra sua ainda classifica a linha sem identidade — e aí ela deixa de ser 'sem identidade'", () => {
+    const r: RegraFinanceira = {
+      id: "r-deb", match_type: "text", match_value: "DEBITO DE CARTAO", direction: "debit",
+      autonomy: "suggest", status: "active", set_category: "Pedágio e estacionamento", set_dre_group: "custo_direto",
+    };
+    const p = montarProposta(tx({ description: "DEBITO DE CARTAO", amount: 8.9 }), fornecedores, undefined, [r]);
+    expect(p.suggestedCategory).toBe("Pedágio e estacionamento");
+    expect(p.semIdentidade).toBe(false);
+  });
+
+  it("não vira regra sugerida: seria 'toda compra no débito é X'", () => {
+    const d = { supplierId: null, categoria: "Pagamento de fatura de cartão", dreGroup: "nao_operacional", counterpartyName: "DEBITO DE CARTAO" };
+    expect(sugerirRegras([d, d, d, d], [])).toHaveLength(0);
+  });
+});
+
+describe("empresa de pagamento no lugar da loja", () => {
+  it("reconhece o intermediário, mas não a fatura da Nu Pagamentos", () => {
+    expect(ehIntermediario("MERCADO PAGO INSTITUICAO DE PAGAMENTO LTDA")).toBe(true);
+    expect(ehIntermediario("Pix enviado para PICPAY INSTITUICAO DE PAGAMENTO S A")).toBe(true);
+    expect(ehIntermediario("YAPAY")).toBe(true);
+    // Loja atrás da maquininha tem nome próprio: não é o intermediário.
+    expect(ehIntermediario("PAGSEGURO POSTO ABC")).toBe(false);
+    expect(ehIntermediario("NU PAGAMENTOS S.A. - INSTITUICAO DE PAGAMENTO")).toBe(false);
+  });
+
+  it("não herda 'supermercado' do nome MERCADO PAGO nem a memória de uma loja só", () => {
+    const porNome = new Map([
+      ["MERCADO PAGO INSTITUICAO DE PAGAMENTO", { categoria: "Peças e materiais", dreGroup: "custo_direto", vezes: 6, total: 7 }],
+    ]);
+    const p = montarProposta(
+      tx({ description: "Pix enviado para MERCADO PAGO", counterparty_name: "MERCADO PAGO INSTITUICAO DE PAGAMENTO" }),
+      fornecedores, undefined, [], porNome,
+    );
+    expect(p.suggestedCategory).toBe("Outras despesas");
+    expect(p.confidence).toBeLessThan(85);
+  });
+});
+
+describe("memória dividida é sugestão, não certeza", () => {
+  it("maioria fraca não passa de 75 (VIA S.A.: 9 de 19)", () => {
+    const porNome = new Map([
+      ["LOJA DIVIDIDA", { categoria: "Alimentação de campo", dreGroup: "custo_direto", vezes: 9, total: 19 }],
+    ]);
+    const p = montarProposta(tx({ description: "LOJA DIVIDIDA" }), fornecedores, undefined, [], porNome);
+    expect(p.suggestedCategory).toBe("Alimentação de campo");
+    expect(p.confidence).toBeLessThanOrEqual(75);
+    expect(p.reasoning).toMatch(/9 de 19 vezes/);
+  });
+
+  it("maioria clara continua podendo chegar a 85", () => {
+    const porNome = new Map([
+      ["LOJA CERTA", { categoria: "Alimentação de campo", dreGroup: "custo_direto", vezes: 10, total: 10 }],
+    ]);
+    expect(montarProposta(tx({ description: "LOJA CERTA" }), fornecedores, undefined, [], porNome).confidence).toBe(85);
+  });
+
+  it("quando a memória troca a categoria que o texto sugeria, a confiança é a da memória", () => {
+    // Antes ficava a do texto (88, "posto" = combustível) para uma categoria que o texto não disse.
+    const porNome = new Map([
+      ["POSTO E LOJA X", { categoria: "Peças e materiais", dreGroup: "custo_direto", vezes: 3, total: 3 }],
+    ]);
+    const p = montarProposta(tx({ description: "POSTO E LOJA X" }), fornecedores, undefined, [], porNome);
+    expect(p.suggestedCategory).toBe("Peças e materiais");
+    expect(p.confidence).toBe(75);
+  });
+});
+
+describe("regra de fornecedor não pega pessoa com nome parecido", () => {
+  const regraF = (id: string, fornecedor: string): RegraFinanceira => ({
+    id, match_type: "supplier", match_value: fornecedor, direction: "debit", autonomy: "apply", status: "active",
+    set_category: "Peças e materiais", set_dre_group: "custo_direto",
+  });
+
+  it("FERNANDO NUNES FACHINI EPP não pega Mickael Fernando Gonzaga", () => {
+    const cadastro: FornecedorConhecido[] = [{ id: "f-fachini", name: "FERNANDO NUNES FACHINI EPP", cnpj_cpf: "12.345.678/0001-90" }];
+    const p = montarProposta(
+      tx({ description: "Pix enviado para MICKAEL FERNANDO GONZAGA" }),
+      cadastro, undefined, [regraF("r-fachini", "f-fachini")],
+    );
+    expect(p.appliedRuleId).toBeNull();
+  });
+
+  it("CPF nunca casa com a regra de uma empresa (CNPJ), nem com o nome começando igual", () => {
+    const cadastro: FornecedorConhecido[] = [{ id: "f-correa", name: "CORREA MATERIAIS ELETRICOS LTDA", cnpj_cpf: "11.222.333/0001-44" }];
+    const p = montarProposta(
+      tx({ description: "Pix enviado para Correa Roberto", counterparty_name: "CORREA ROBERTO", counterparty_document: "123.456.789-09" }),
+      cadastro, undefined, [regraF("r-correa", "f-correa")],
+    );
+    expect(p.appliedRuleId).toBeNull();
+  });
+
+  it("continua pegando a loja pela primeira palavra, mesmo atrás da maquininha", () => {
+    const cadastro: FornecedorConhecido[] = [{ id: "f-coremma", name: "COREMMA COMERCIO LTDA", cnpj_cpf: null }];
+    const p = montarProposta(tx({ description: "PAG*COREMMA ITAJAI" }), cadastro, undefined, [regraF("r-coremma", "f-coremma")]);
+    expect(p.appliedRuleId).toBe("r-coremma");
+  });
+});
+
+describe("palavras que casavam dentro de outras", () => {
+  it("ÁGUA não casa em PARANAGUÁ, MORA não casa em MORAES", () => {
+    expect(classificar(tx({ description: "BATERIAS PARANAGUA" }))?.categoria).not.toBe("Outras despesas");
+    expect(classificar(tx({ description: "PIX PARA FERNANDO FERRAZ MORAES" }))).toBeNull();
+    expect(classificar(tx({ description: "JUROS DE MORA" }))?.categoria).toBe("Juros e encargos");
+  });
+
+  it("ENCARGOS DE REFINANCIAMENTO são juros, não empréstimo", () => {
+    expect(classificar(tx({ description: "ENCARGOS DE REFINANCIAMENTO" }))?.categoria).toBe("Juros e encargos");
+    expect(classificar(tx({ description: "PARCELA FINANCIAMENTO VEICULO" }))?.categoria).toBe("Empréstimo e financiamento");
+  });
+
+  it("COMISSÃO não é ISS, GTEK ENERGIA SOLAR não é conta de luz, GOOGLE ADS é marketing", () => {
+    expect(classificar(tx({ description: "COMISSAO DE VENDA" }))).toBeNull();
+    expect(classificar(tx({ description: "GTEK ENERGIA SOLAR" }))).toBeNull();
+    expect(classificar(tx({ description: "CELESC DISTRIBUICAO" }))?.dreGroup).toBe("despesa_operacional");
+    expect(classificar(tx({ description: "GOOGLE ADS 123" }))?.categoria).toBe("Marketing e publicidade");
+    expect(classificar(tx({ description: "GOOGLE WORKSPACE" }))?.categoria).toBe("Software e assinaturas");
+  });
+});
+
+describe("categoria pelo texto (Caixa na tela e no assistente)", () => {
+  it("almoço, jantar, lanche e marmita são Alimentação de campo", () => {
+    for (const t of ["Almoço meu e do Roberto", "jantar da equipe", "lanche", "marmitas", "refeição no barco", "café da manhã"]) {
+      expect(categoriaPeloTexto(t)?.categoria, t).toBe("Alimentação de campo");
+    }
+  });
+
+  it("gasolina é combustível; texto sem pista não chuta", () => {
+    expect(categoriaPeloTexto("gasolina da van")?.categoria).toBe("Combustível e deslocamento");
+    expect(categoriaPeloTexto("coisa diversa")).toBeNull();
+  });
+
+  it("regra de texto sua vem antes da lista do sistema e respeita a faixa de valor", () => {
+    const r: RegraFinanceira = {
+      id: "r-rest", match_type: "text", match_value: "rest", direction: "debit", autonomy: "suggest",
+      status: "active", set_category: "Alimentação de campo", set_dre_group: "custo_direto", max_amount: 200,
+    };
+    expect(categoriaPeloTexto("restaurante do porto", [r], 80)?.motivo).toMatch(/regra sua/);
+    expect(categoriaPeloTexto("restaurante do porto", [r], 900)?.motivo).not.toMatch(/regra sua/);
   });
 });

@@ -48,6 +48,7 @@ import {
   type GrupoDeFavorecido, type OrdemDaFila,
 } from '@/lib/finance-inbox-grouping';
 import { categoriaPorMcc } from '../../supabase/functions/_shared/banking/mcc';
+import { historicoSemIdentidade } from '../../supabase/functions/_shared/banking/proposals';
 
 function corDaConfianca(c: number): string {
   if (c >= 85) return 'bg-success/10 text-success border-success/30';
@@ -59,6 +60,12 @@ function rotuloDaConfianca(c: number): string {
   if (c >= 85) return 'Alta';
   if (c >= 60) return 'Média';
   return 'Baixa';
+}
+
+/** Compra no cartão de débito sem loja: histórico genérico, sem nome nem documento. */
+function ehCompraNoDebito(tx: NonNullable<PropostaFinanceira['bank_transactions']>): boolean {
+  return !tx.counterparty_name && !tx.counterparty_document
+    && historicoSemIdentidade(tx.description) && /DEBITO/i.test(tx.description ?? '');
 }
 
 /**
@@ -79,7 +86,11 @@ function IdentificacaoDaTransacao({ tx }: { tx: PropostaFinanceira['bank_transac
     ['Favorecido', tx.counterparty_name],
     ['CNPJ/CPF', formatarDocumento(tx.counterparty_document)],
     ['Conta', conta || null],
-    ['Meio', [tx.payment_method, tx.installment_label && `parcela ${tx.installment_label}`].filter(Boolean).join(' · ') || null],
+    // Compra no cartão de DÉBITO: o C6 manda só "DEBITO DE CARTAO", sem loja. Dizer isso é o
+    // que evita ler a linha como pagamento de fatura (o erro de 10/08).
+    ['Meio', ehCompraNoDebito(tx)
+      ? 'Cartão de débito — o banco não informa a loja'
+      : [tx.payment_method, tx.installment_label && `parcela ${tx.installment_label}`].filter(Boolean).join(' · ') || null],
     ['Mensagem', tx.payment_reason],
     ['Estabelecimento', tx.merchant_name],
     // O que identifica uma compra de CARTÃO. A bandeira não repassa o CNPJ do
@@ -87,7 +98,9 @@ function IdentificacaoDaTransacao({ tx }: { tx: PropostaFinanceira['bank_transac
     // mas 91% têm MCC: é a identificação que de fato existe nesse meio de pagamento.
     ['Ramo (MCC)', tx.payee_mcc
       ? `${categoriaPorMcc(tx.payee_mcc)?.rotulo ?? 'não mapeado'} · ${tx.payee_mcc}` : null],
-    ['Categoria do provedor', tx.provider_category],
+    // Palpite em inglês que o banco manda ("Credit card payment" até em compra no débito). O
+    // motor não usa; mostrado como dado, reforçava a leitura errada.
+    ['Palpite do banco (não usado)', tx.provider_category],
     ['Cartão', tx.card_last_digits ? `····${tx.card_last_digits}` : null],
     ['Identificador Pix', tx.pix_end_to_end_id],
     ['Histórico do banco', tx.description],

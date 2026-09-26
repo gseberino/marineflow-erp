@@ -23,7 +23,7 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
-  chaveDoRecebedor, indexarFornecedores, montarProposta, sugerirRegras,
+  chaveDoRecebedor, historicoSemIdentidade, indexarFornecedores, montarProposta, sugerirRegras,
   type FornecedorConhecido, type HistoricoFornecedor, type RegraFinanceira, type TransacaoOrfa,
 } from "../_shared/banking/proposals.ts";
 import { findInternalTransfers } from "../_shared/banking/matching.ts";
@@ -210,8 +210,6 @@ async function vigiar(admin: DbClient) {
 
   const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
     .replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
-  const generico = (n: string) =>
-    /^(transf enviada( pix)?( c)?|transferencia enviada|debito de cartao|pagamento de pix|pix enviado|compra no (debito|credito))$/.test(n);
   type Tx = { id: string; transaction_date: string; amount: number; rotulo: string };
   const grupos = new Map<string, Tx[]>();
   // O mesmo favorecido aparece ora com CNPJ, ora só pelo nome (extrato do cartão não
@@ -230,8 +228,9 @@ async function vigiar(admin: DbClient) {
     const chave = doc.length >= 11 ? `doc:${doc}` : (docPorNome.get(norm(nome).slice(0, 40)) ?? `nome:${norm(nome).slice(0, 40)}`);
     if (chave === "nome:") continue;
     // Sem favorecido e com descrição genérica ("TRANSF ENVIADA PIX", "DEBITO DE CARTAO")
-    // o grupo mistura dezenas de destinos: mediana, "novo" e "parou" não dizem nada.
-    if (doc.length < 11 && generico(norm(nome))) continue;
+    // o grupo mistura dezenas de destinos: mediana, "novo" e "parou" não dizem nada. A lista
+    // é a mesma da memória do motor (historicoSemIdentidade).
+    if (doc.length < 11 && historicoSemIdentidade(nome)) continue;
     const tx: Tx = {
       id: t.id, transaction_date: String(t.transaction_date).slice(0, 10),
       amount: Math.abs(Number(t.amount || 0)), rotulo: nome.slice(0, 60) || chave,
@@ -607,6 +606,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
 
   const linhas: Array<Record<string, any>> = [];
   const autoAplicar: Array<Record<string, any>> = [];
+  /** O que o "lançar sozinho" precisa saber e a fila não guarda (por transação). */
+  const paraOAutomatico = new Map<string, { semIdentidade: boolean; regraSoSugere: boolean }>();
   for (const tx of desteLote) {
     const par = parPor.get(tx.id);
     if (par) {
@@ -690,6 +691,10 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
       ].filter(Boolean).join(" · "),
     };
     linhas.push(linha);
+    paraOAutomatico.set(String(tx.id), {
+      semIdentidade: p.semIdentidade,
+      regraSoSugere: !!p.appliedRuleId && !p.autoAplicavel,
+    });
     // Regra com autonomia foi conferida pelo gestor no momento em que ele a criou; segurar
     // a proposta para ele confirmar de novo seria pedir a mesma decisão duas vezes.
     if (p.autoAplicavel && Math.abs(Number(tx.amount)) <= limiteLote && !exigeDecisao(id.vinculo)) autoAplicar.push(linha);
@@ -749,7 +754,9 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const mapaAuto = Object.fromEntries(((cfgAuto.data ?? []) as { key: string; value: string }[]).map((r) => [r.key, r.value]));
   const autoLigado = String(mapaAuto.finance_auto_approve ?? "off").toLowerCase() === "on";
   const confiancaMinima = Math.max(85, Number(mapaAuto.finance_auto_approve_min_confidence ?? 85) || 85);
-  if (autoLigado) {
+  // O mutirão do histórico ("Incluir histórico antigo") só PROPÕE: lançar sozinho um lote de
+  // linhas antigas de uma vez, com um clique dado para outra coisa, não é o que o dono ligou.
+  if (autoLigado && !incluirHistorico) {
     const jaPorRegra = new Set([...autoAplicar.map((l) => String(l.bank_transaction_id)), ...anotadasAgora]);
     // Transação com alerta do vigilante pendente não entra: o alerta existe para alguém olhar.
     const comAlerta = new Set<string>();
@@ -759,7 +766,12 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
         .eq("kind", "anomaly").eq("status", "pending").in("related_transaction_id", txs.slice(i, i + 150));
       for (const r of (data ?? []) as any[]) comAlerta.add(String(r.related_transaction_id));
     }
-    const idsConfianca = selecionarParaLancarSozinho(linhas as unknown as LinhaCandidata[], {
+    const candidatas = linhas.map((l) => ({
+      ...l,
+      sem_identidade: paraOAutomatico.get(String(l.bank_transaction_id))?.semIdentidade ?? false,
+      regra_so_sugere: paraOAutomatico.get(String(l.bank_transaction_id))?.regraSoSugere ?? false,
+    }));
+    const idsConfianca = selecionarParaLancarSozinho(candidatas as unknown as LinhaCandidata[], {
       confiancaMinima, limiteLote, comAlerta, jaPorRegra,
     })
       .map((l) => idsPorTransacao.get(String(l.bank_transaction_id)))
@@ -806,6 +818,72 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
 }
 
 /**
+ * Tira da fila a sugestão cuja linha do banco JÁ virou lançamento por outro caminho — à mão,
+ * pelo WhatsApp, pela conciliação.
+ *
+ * Nada fechava essa sugestão: ela ficava pendente, inflava o contador e, aprovada, estourava
+ * o índice de "um lançamento por transação" com um erro em inglês. Em 25/09 eram 6 — entre
+ * elas o débito de R$ 1.055 já lançado como Peças, que a fila ainda sugeria como fatura.
+ * Lançamento cancelado não conta: desfazer solta a transação (bank_transaction_id = null).
+ */
+async function tirarDaFilaOQueJaFoiLancado(admin: DbClient): Promise<number> {
+  const pendentes = await lerTudo<{ id: string; bank_transaction_id: string; suggested_amount: number }>((de, ate) =>
+    admin.from("finance_review_queue").select("id, bank_transaction_id, suggested_amount")
+      .eq("status", "pending").in("kind", ["create_payable", "create_receivable"])
+      .not("bank_transaction_id", "is", null).order("id").range(de, ate));
+  if (pendentes.length === 0) return 0;
+
+  const lancadaComo = new Map<string, { texto: string; payable_id?: string; receivable_id?: string }>();
+  const txs = [...new Set(pendentes.map((p) => String(p.bank_transaction_id)))];
+  for (let i = 0; i < txs.length; i += 150) {
+    const lote = txs.slice(i, i + 150);
+    const [pg, rc] = await Promise.all([
+      admin.from("payables").select("id, bank_transaction_id, description, expense_category").in("bank_transaction_id", lote),
+      admin.from("receivables").select("id, bank_transaction_id, description").in("bank_transaction_id", lote),
+    ]);
+    for (const r of (pg.data ?? []) as any[]) {
+      lancadaComo.set(String(r.bank_transaction_id), { texto: `despesa "${String(r.description ?? "").slice(0, 60)}" (${r.expense_category ?? "sem categoria"})`, payable_id: r.id });
+    }
+    for (const r of (rc.data ?? []) as any[]) {
+      lancadaComo.set(String(r.bank_transaction_id), { texto: `receita "${String(r.description ?? "").slice(0, 60)}"`, receivable_id: r.id });
+    }
+  }
+
+  let retiradas = 0;
+  for (const p of pendentes) {
+    const l = lancadaComo.get(String(p.bank_transaction_id));
+    if (!l) continue;
+    const { data, error } = await admin.from("finance_review_queue").update({
+      status: "superseded",
+      decision_note: `Já lançada por outro caminho como ${l.texto}`.slice(0, 300),
+    }).eq("id", p.id).eq("status", "pending").select("id");
+    if (error) throw error;
+    if (!data?.length) continue;
+    retiradas += 1;
+    await anotar(admin, {
+      acao: "tirou_da_fila_ja_lancada",
+      bank_transaction_id: p.bank_transaction_id,
+      payable_id: l.payable_id ?? null,
+      receivable_id: l.receivable_id ?? null,
+      valor: Number(p.suggested_amount ?? 0),
+      detalhe: `Sugestão saiu da fila: a linha já estava lançada como ${l.texto}`.slice(0, 300),
+    });
+  }
+  return retiradas;
+}
+
+/** O lançamento ativo que já usa esta linha do banco, descrito para a pessoa; null = nenhum. */
+async function lancamentoDaTransacao(admin: DbClient, txId: string): Promise<string | null> {
+  const [pg, rc] = await Promise.all([
+    admin.from("payables").select("description, expense_category").eq("bank_transaction_id", txId).maybeSingle(),
+    admin.from("receivables").select("description").eq("bank_transaction_id", txId).maybeSingle(),
+  ]);
+  if (pg.data) return `despesa "${String((pg.data as any).description ?? "").slice(0, 60)}" (${(pg.data as any).expense_category ?? "sem categoria"})`;
+  if (rc.data) return `receita "${String((rc.data as any).description ?? "").slice(0, 60)}"`;
+  return null;
+}
+
+/**
  * Reavalia as propostas que já estão na fila com as regras de HOJE.
  *
  * A regra era consultada só no nascimento da proposta, e a varredura pula o que já está na
@@ -820,6 +898,9 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
  * centenas de vezes de uma vez, com um clique que ele deu para outra coisa.
  */
 async function reclassificar(admin: DbClient, soSemEvidencia = false) {
+  // Sugestão de linha já lançada sai antes de tudo: reclassificá-la seria trabalho jogado fora.
+  const jaLancadas = await tirarDaFilaOQueJaFoiLancado(admin);
+
   // Antes de reclassificar, juntar o que é a mesma compra: classificar dez vezes a mesma
   // coisa é trabalho que não deveria existir, e vale a pena eliminá-lo antes de gastar
   // uma decisão com ele.
@@ -844,10 +925,11 @@ async function reclassificar(admin: DbClient, soSemEvidencia = false) {
   // soSemEvidencia: a varredura diária só completa o que nasceu antes do identificador.
   const alvo = pendentes.filter((p) => p.kind !== "internal_transfer" && p.bank_transactions
     && (!soSemEvidencia || (p.evidencia == null && p.vinculo_sugerido == null)));
+  const fraseJaLancadas = jaLancadas > 0 ? `${jaLancadas} já lançada(s) por outro caminho saíram da fila` : "";
   if (alvo.length === 0) {
     return jr({
-      ok: true, atualizadas: 0, ...parcelamentos,
-      message: "Nenhuma proposta na fila para reavaliar.",
+      ok: true, atualizadas: 0, ja_lancadas: jaLancadas, ...parcelamentos,
+      message: fraseJaLancadas || "Nenhuma proposta na fila para reavaliar.",
     });
   }
 
@@ -929,11 +1011,13 @@ async function reclassificar(admin: DbClient, soSemEvidencia = false) {
     parcelamentos.compras > 0
       ? `${parcelamentos.compras} compra(s) parcelada(s) juntada(s), ${parcelamentos.retiradas} linha(s) a menos`
       : "",
+    fraseJaLancadas,
   ].filter(Boolean);
 
   return jr({
     ok: true,
     atualizadas,
+    ja_lancadas: jaLancadas,
     avaliadas: alvo.length,
     por_regra: porRegra,
     compras_parceladas: parcelamentos.compras,
@@ -1105,6 +1189,10 @@ async function classificarComIA(admin: DbClient) {
     const nome = String(tx.counterparty_name || tx.description || "").trim();
     if (!nome) continue;
     const chave = chaveDoRecebedor({ description: String(tx.description ?? ""), counterparty_name: tx.counterparty_name ?? null } as TransacaoOrfa);
+    // Chave vazia = o texto não identifica ninguém ("DEBITO DE CARTAO"). Agrupar essas linhas
+    // mandaria dezenas de compras diferentes para a IA como UMA loja, e todas sairiam com a
+    // mesma categoria.
+    if (!chave) continue;
     const atual = porNome.get(chave) ?? { ids: [], exemplo: nome };
     atual.ids.push(p.id);
     porNome.set(chave, atual);
@@ -1432,18 +1520,21 @@ async function montarHistoricoPorNome(
 
   const historico = new Map<string, HistoricoFornecedor>();
   for (const [chave, porCat] of contagem) {
-    let melhor = ""; let vezes = 0; let segundo = 0;
+    let melhor = ""; let vezes = 0; let segundo = 0; let total = 0;
     for (const [cat, n] of porCat) {
+      total += n;
       if (n > vezes) { segundo = vezes; melhor = cat; vezes = n; }
       else if (n > segundo) segundo = n;
     }
     // Duas decisões iguais no mínimo, e a preferida tem de ser a preferida de verdade:
     // empate significa que o próprio histórico está dividido, e aí ele não ensina nada.
+    // O total vai junto: sem maioria clara, a proposta fica abaixo do "lançar sozinho".
     if (melhor && vezes >= 2 && vezes > segundo) {
       historico.set(chave, {
         categoria: melhor,
         dreGroup: grupoDaCategoria.get(melhor) ?? "despesa_operacional",
         vezes,
+        total,
       });
     }
   }
@@ -1477,13 +1568,19 @@ async function montarHistoricoPorFornecedor(admin: DbClient): Promise<Map<string
 
   const historico = new Map<string, HistoricoFornecedor>();
   for (const [supplierId, porCat] of contagem) {
-    let melhor = ""; let vezes = 0;
-    for (const [cat, n] of porCat) if (n > vezes) { melhor = cat; vezes = n; }
-    if (melhor) {
+    let melhor = ""; let vezes = 0; let segundo = 0; let total = 0;
+    for (const [cat, n] of porCat) {
+      total += n;
+      if (n > vezes) { segundo = vezes; melhor = cat; vezes = n; }
+      else if (n > segundo) segundo = n;
+    }
+    // Empate não ensina: a categoria vencedora seria a que o Map viu primeiro.
+    if (melhor && vezes > segundo) {
       historico.set(supplierId, {
         categoria: melhor,
         dreGroup: grupoDaCategoria.get(melhor) ?? "despesa_operacional",
         vezes,
+        total,
       });
     }
   }
@@ -1578,6 +1675,19 @@ async function aprovar(
   for (const p of elegiveis) {
     try {
       const ov = overrides[p.id] ?? {};
+
+      // Lançada por outro caminho enquanto esperava na fila: sai daqui com o motivo, em vez de
+      // estourar o índice "um lançamento por transação" com um erro em inglês (ou de o
+      // "Casar" recusar sem dizer por quê).
+      if ((p.kind === "create_payable" || p.kind === "create_receivable") && p.bank_transaction_id) {
+        const ja = await lancamentoDaTransacao(admin, String(p.bank_transaction_id));
+        if (ja) {
+          await admin.from("finance_review_queue").update({
+            status: "superseded", decision_note: `Já lançada por outro caminho como ${ja}`.slice(0, 300),
+          }).eq("id", p.id).eq("status", "pending");
+          throw new Error(`Esta linha já foi lançada como ${ja} — tirei da fila`);
+        }
+      }
 
       /**
        * O que esta linha PAGA. Escolha da pessoa primeiro; sem escolha, a política:
@@ -1790,7 +1900,12 @@ async function aprovar(
       feitos.push(p.id);
     } catch (e) {
       console.error("[finance-review] falha ao aprovar", p.id, e);
-      falhas.push(`${p.title}: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
+      // Corrida (lançada entre a leitura e a gravação): a mesma frase, sem o texto do banco.
+      const bruto = String((e as { message?: string })?.message ?? e);
+      const msg = /uma_por_transacao|duplicate key/i.test(bruto)
+        ? "Esta linha acabou de ser lançada por outro caminho — revise a fila"
+        : bruto;
+      falhas.push(`${p.title}: ${msg.slice(0, 160)}`);
     }
   }
 

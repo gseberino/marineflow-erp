@@ -30,7 +30,7 @@ vi.mock('@/hooks/use-payees', () => ({
 }));
 vi.mock('@/hooks/use-suppliers', () => ({ useSuppliers: () => ({ data: [] }) }));
 vi.mock('@/hooks/use-financial-categories', () => ({ useFinancialCategories: () => ({ data: [{ id: '1', name: 'Alimentação de campo' }] }) }));
-vi.mock('@/hooks/use-finance-review', () => ({ useCriarCategoriaDespesa: () => ({ mutate: vi.fn(), isPending: false }) }));
+vi.mock('@/hooks/use-finance-review', () => ({ useCriarCategoriaDespesa: () => ({ mutate: vi.fn(), isPending: false }), useFinanceRules: () => ({ data: [] }) }));
 
 function renderizar(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });

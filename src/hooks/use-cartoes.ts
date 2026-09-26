@@ -42,12 +42,15 @@ export interface PagamentoDeFatura {
   amount: number;
 }
 
-/** Como o banco escreve o pagamento da fatura. Uma lista, porque ele usa quatro variações. */
+/**
+ * Como o banco escreve o pagamento da fatura. "DEBITO DE CARTAO" NÃO entra: é compra feita
+ * com o cartão na função débito (o C6 não informa a loja), não pagamento de fatura — estava
+ * aqui por uma premissa errada de 10/08 e contava 29 compras como fatura (26/09/2026).
+ */
 const HISTORICOS_DE_FATURA = [
   'description.ilike.%FAT%CARTAO%',
   'description.ilike.%FATURA%CART%',
   'description.ilike.%PGTO%CARTAO%',
-  'description.eq.DEBITO DE CARTAO',
 ].join(',');
 
 export function useFaturasDoCartao() {

@@ -10,6 +10,7 @@
 
 import { normalizeText } from "./matching.ts";
 import { categoriaPorMcc } from "./mcc.ts";
+import { nomeDaDescricao } from "./contraparte.ts";
 
 export interface TransacaoOrfa {
   id: string;
@@ -57,33 +58,44 @@ export const REGRAS_CATEGORIA: RegraCategoria[] = [
   // coisa de um jeito. "PAGAMENTO RECEBIDO" é como a fatura aparece pelo lado do cartão.
   { termos: ["PGTO FATURA CARTAO", "PGTO FAT CARTAO", "PAGAMENTO FATURA", "FATURA DE CARTAO", "FATURA CARTAO", "PAGAMENTO RECEBIDO", "SALDO EM ATRASO"], categoria: "Pagamento de fatura de cartão", dreGroup: "nao_operacional", confianca: 95 },
   { termos: ["CDB", "APLICACAO", "RESGATE", "POUPANCA", "INVESTIMENTO"], categoria: "Aplicação financeira", dreGroup: "nao_operacional", confianca: 90 },
-  { termos: ["EMPRESTIMO", "FINANCIAMENTO", "AYMORE", "SOC CRED FINANC", "CRED FINANCIAMENTO"], categoria: "Empréstimo e financiamento", dreGroup: "nao_operacional", confianca: 85 },
+  // "FINANCIAMENTO " exige a palavra inteira: solto, casava dentro de "ENCARGOS DE
+  // REFINANCIAMENTO" e mandava juros para Empréstimo — fora do DRE, com confiança 85.
+  { termos: ["EMPRESTIMO", "FINANCIAMENTO ", "AYMORE", "SOC CRED FINANC", "CRED FINANCIAMENTO"], categoria: "Empréstimo e financiamento", dreGroup: "nao_operacional", confianca: 85 },
 
   // ── Tributos e banco ──
-  { termos: ["DARF", "TRIBUTOS FEDERAIS", "DAS ", "SIMPLES NACIONAL", "GPS", "FGTS", "ISS", "IPTU", "IPVA", "MUNICIPIO DE", "PREFEITURA", "RECEITA FEDERAL"], categoria: "Impostos e taxas", dreGroup: "financeiro", confianca: 92 },
+  // "GPS " e "ISS " com palavra inteira: soltos, "ISS" casava em "COMISSAO" e "GPS" é também
+  // produto náutico.
+  { termos: ["DARF", "TRIBUTOS FEDERAIS", "DAS ", "SIMPLES NACIONAL", "GPS ", "FGTS", "ISS ", "IPTU", "IPVA", "MUNICIPIO DE", "PREFEITURA", "RECEITA FEDERAL"], categoria: "Impostos e taxas", dreGroup: "financeiro", confianca: 92 },
   { termos: ["TARIFA", "IOF", "ANUIDADE", "CESTA DE SERVICO", "MANUTENCAO DE CONTA"], categoria: "Tarifas bancárias", dreGroup: "financeiro", confianca: 90 },
-  { termos: ["JUROS", "MULTA", "MORA", "ENCARGOS"], categoria: "Juros e encargos", dreGroup: "financeiro", confianca: 80 },
+  // "MORA " com palavra inteira: solta, casava em MORAES e MORADA.
+  { termos: ["JUROS", "MULTA", "MORA ", "ENCARGOS"], categoria: "Juros e encargos", dreGroup: "financeiro", confianca: 80 },
 
   // ── Custo direto ──
-  { termos: ["POSTO", "ABASTECIMENTO", "COMBUSTIVEL", "IPIRANGA", "SHELL", "PETROBRAS", "AGRICOPEL"], categoria: "Combustível e deslocamento", dreGroup: "custo_direto", confianca: 88 },
+  { termos: ["POSTO", "ABASTECIMENTO", "COMBUSTIVEL", "GASOLINA", "ETANOL", "IPIRANGA", "SHELL", "PETROBRAS", "AGRICOPEL"], categoria: "Combustível e deslocamento", dreGroup: "custo_direto", confianca: 88 },
   { termos: ["MARINE", "NAUTIC", "NAUTICA", "ESTALEIRO", "MOTORES", "PECAS"], categoria: "Peças e materiais", dreGroup: "custo_direto", confianca: 80 },
   { termos: ["CORREIOS", "TRANSPORTADORA", "JADLOG", "FRETE", "SEDEX", "DESPACHANTE"], categoria: "Frete e importação", dreGroup: "custo_direto", confianca: 85 },
   { termos: ["PEDAGIO", "ESTACIONAMENTO", "AUTOPASS", "CONECTCAR", "SEM PARAR", "FERRY", "BALSA", "C6TAG", "ARTERIS", "AUTOPISTA"], categoria: "Pedágio e estacionamento", dreGroup: "custo_direto", confianca: 88 },
   // E-commerce vem ANTES de alimentação de propósito: "MERCADO LIVRE" contém "MERCADO" e
   // seria classificado como supermercado se a ordem fosse a inversa.
   { termos: ["ALIEXPRESS", "SHOPEE", "MERCADO LIVRE", "MERCADOLIVRE", "AMAZON", "MERCADOPAGO"], categoria: "Peças e materiais", dreGroup: "custo_direto", confianca: 70 },
-  { termos: ["RESTAURANTE", "LANCHONETE", "PADARIA", "IFOOD", "SUPERMERCADO", "MERCADO", "TICKETEXPRESS"], categoria: "Alimentação de campo", dreGroup: "custo_direto", confianca: 75 },
+  // As palavras de refeição vêm do que a pessoa escreve no Caixa e no WhatsApp ("almoço da
+  // equipe"): sem elas, o almoço caía em "Outras despesas" (teste do dono, 25/09/2026).
+  { termos: ["RESTAURANTE", "LANCHONETE", "PADARIA", "IFOOD", "SUPERMERCADO", "MERCADO", "TICKETEXPRESS", "ALMOCO", "JANTA", "LANCHE", "REFEIC", "MARMITA", "CAFE "], categoria: "Alimentação de campo", dreGroup: "custo_direto", confianca: 75 },
 
   // ── Despesa operacional ──
   { termos: ["IMOBILIARIA", "ALUGUEL", "CONDOMINIO", "LOCACAO"], categoria: "Aluguel e condomínio", dreGroup: "despesa_operacional", confianca: 88 },
   { termos: ["CONTABILIDADE", "CONTABIL", "ADVOCACIA", "ADVOGADO", "ASSESSORIA"], categoria: "Contabilidade e assessoria", dreGroup: "despesa_operacional", confianca: 90 },
   { termos: ["TELECOM", "UNIFIQUE", "VIVO", "CLARO", "TIM ", "OI ", "INTERNET", "TELEFONIA"], categoria: "Telefonia e internet", dreGroup: "despesa_operacional", confianca: 88 },
+  // Marketing ANTES de Software: "GOOGLE ADS" contém "GOOGLE", e na ordem inversa todo
+  // anúncio virava assinatura de software.
+  { termos: ["MARKETING", "PUBLICIDADE", "META PLATFORMS", "FACEBOOK", "GOOGLE ADS", "INSTAGRAM"], categoria: "Marketing e publicidade", dreGroup: "despesa_operacional", confianca: 85 },
   { termos: ["GOOGLE", "MICROSOFT", "ADOBE", "SOFTWARE", "ASSINATURA", "SUPABASE", "VERCEL", "OPENAI", "ANTHROPIC", "APPLE.COM", "APPLE COM", "CANVA", "DROPBOX"], categoria: "Software e assinaturas", dreGroup: "despesa_operacional", confianca: 85 },
   { termos: ["MECANICA", "OFICINA", "AUTO CENTER", "PNEU", "FUNILARIA"], categoria: "Manutenção de veículo", dreGroup: "despesa_operacional", confianca: 80 },
-  { termos: ["ENERGIA", "CELESC", "CEMIG", "COPEL", "LIGHT", "SANEAMENTO", "CASAN", "SABESP", "AGUA"], categoria: "Outras despesas", dreGroup: "despesa_operacional", confianca: 78 },
+  // "ENERGIA ELETRICA", "LIGHT " e "AGUA " exigem a expressão inteira: soltos, "ENERGIA"
+  // pegava a GTEK Energia Solar (fornecedor) e "AGUA" casava dentro de PARANAGUA.
+  { termos: ["ENERGIA ELETRICA", "CELESC", "CEMIG", "COPEL", "LIGHT ", "SANEAMENTO", "CASAN", "SABESP", "AGUA ", "AGUAS "], categoria: "Outras despesas", dreGroup: "despesa_operacional", confianca: 78 },
   { termos: ["SEGURO", "PORTO SEGURO", "SULAMERICA", "BRADESCO SEGUROS"], categoria: "Seguro", dreGroup: "despesa_operacional", confianca: 85 },
   { termos: ["FERRAMENT", "PREMEL", "PARAFUSO", "LEROY", "HOME CENTER", "MATERIAL DE CONSTRUCAO"], categoria: "Ferramentas e equipamentos", dreGroup: "despesa_operacional", confianca: 75 },
-  { termos: ["MARKETING", "PUBLICIDADE", "META PLATFORMS", "FACEBOOK", "GOOGLE ADS", "INSTAGRAM"], categoria: "Marketing e publicidade", dreGroup: "despesa_operacional", confianca: 85 },
   { termos: ["SALARIO", "FOLHA", "PRO LABORE", "PROLABORE", "RESCISAO", "FERIAS", "13 SALARIO"], categoria: "Salários e encargos", dreGroup: "despesa_operacional", confianca: 85 },
 ];
 
@@ -124,6 +136,20 @@ export interface HistoricoFornecedor {
   dreGroup: string;
   /** Quantas vezes esse fornecedor já foi classificado assim. Repetição é evidência. */
   vezes: number;
+  /**
+   * Quantas decisões existem no total (todas as categorias). Sem maioria clara (90%), a
+   * memória não passa de 75 de confiança: a VIA S.A. "ensinava" Alimentação com 9 de 19
+   * decisões e saía com 85 — o bastante para lançar sozinha.
+   */
+  total?: number;
+}
+
+/** Acima disto a memória só vai com maioria clara; abaixo, é sugestão para conferir. */
+export const TETO_DA_MEMORIA_DIVIDIDA = 75;
+
+/** A memória decide com a maioria clara (≥ 90% das decisões) ou sem saber o total. */
+export function maioriaClara(h: HistoricoFornecedor): boolean {
+  return !h.total || h.vezes / h.total >= 0.9;
 }
 
 /** Uma regra que o gestor ensinou (ou que a IA propôs e ele aceitou). */
@@ -159,7 +185,6 @@ export function acharRegra(
   const doc = (tx.counterparty_document || "").replace(/\D/g, "");
   const texto = normalizeText(`${tx.description} ${tx.counterparty_name || ""}`);
   const nome = normalizeText(tx.counterparty_name || "");
-  const tokensDoTexto = new Set(texto.split(" ").filter(Boolean));
 
   const serve = (r: RegraFinanceira): boolean => {
     if (r.status !== "active") return false;
@@ -194,14 +219,18 @@ export function acharRegra(
     // Documento do fornecedor no extrato: identidade, sem discussão.
     const docF = (f.fornecedor.cnpj_cpf || "").replace(/\D/g, "");
     if (doc.length >= 11 && docF === doc) return true;
+    // Pessoa (CPF) nunca é a empresa (CNPJ) da regra, por mais que o nome se pareça: a regra
+    // da CORREA MATERIAIS ELÉTRICOS pegava o Pix para Roberto Daniel Rodrigues Corrêa.
+    if (doc.length === 11 && docF.length === 14) return false;
 
     for (const candidato of [f.nome, f.fantasia]) {
       if (!candidato) continue;
       if (mesmoNomeLimpo(candidato, limparNome(tx.counterparty_name || tx.description))) return true;
-      // Palavra-cabeça do nome do fornecedor presente no histórico. Exige 4 letras para
-      // não deixar um "SUL" ou "MAR" arrastar meia fatura junto.
+      // Palavra-cabeça do fornecedor = PRIMEIRA palavra do nome de quem recebeu. Exige 4
+      // letras para não deixar um "SUL" ou "MAR" arrastar meia fatura junto. Em qualquer
+      // posição, "FERNANDO" (de FERNANDO NUNES FACHINI EPP) pegava Mickael Fernando Gonzaga.
       const cabeca = candidato.split(" ")[0];
-      if (cabeca.length >= 4 && tokensDoTexto.has(cabeca)) return true;
+      if (cabeca.length >= 4 && cabeca === primeiraPalavraDoNome(tx)) return true;
     }
     return false;
   };
@@ -236,6 +265,8 @@ export interface Proposta {
   appliedRuleId: string | null;
   /** A regra tem autonomia para lançar sozinha (o gestor conferiu ao criá-la). */
   autoAplicavel: boolean;
+  /** O banco não disse para quem foi (débito sem loja, Pix sem nome). */
+  semIdentidade: boolean;
 }
 
 /** Nome sem acento, caixa nem sufixo societário — a forma comparável de um nome. */
@@ -376,9 +407,93 @@ export function classificar(tx: TransacaoOrfa): { categoria: string; dreGroup: s
  * Sem categoria reconhecida, a proposta ainda é feita (o lançamento precisa existir), mas
  * com confiança baixa e categoria genérica, para cair na revisão atenta.
  */
-/** Caixa alta, sem acento e sem pontuação: a chave de quem recebeu, no extrato. */
+/**
+ * Histórico que diz só COMO o dinheiro saiu, não PARA QUEM.
+ *
+ * O C6 manda a compra no cartão de débito como "DEBITO DE CARTAO", sem loja, sem CNPJ e sem
+ * ramo — a regra do Open Finance dispensa o banco de informar a contraparte no débito. Em
+ * 10/08 uma correção tratou esse texto como pagamento de fatura; a memória por nome o tomou
+ * por uma loja, aprendeu "fatura" com 4 lançamentos e passou a sugerir fatura para TODA
+ * compra no débito (fora do DRE, confiança 80). O mesmo vale para "TRANSF ENVIADA PIX" sem
+ * nome: 85 saídas diferentes viravam um "estabelecimento" só.
+ *
+ * É a lista ÚNICA: memória, IA, sugestão de regra e vigilante leem daqui. Compara o texto
+ * INTEIRO — "PIX ENVIADO PARA JOSE" tem nome e não entra.
+ */
+const SO_O_MEIO_DE_PAGAMENTO =
+  /^(DEBITO DE CARTAO|COMPRA (NO )?(DEBITO|CREDITO)|COMPRA CARTAO( DE)?( DEBITO| CREDITO)?|TRANSF(ERENCIA)? ENVIADA( PIX)?( C6?)?|TRANSF(ERENCIA)? PIX( ENVIADA)?|PIX ENVIADO|PAGAMENTO (DE )?PIX|PAGAMENTO (DE )?BOLETO|PAGTO BOLETO|PAGAMENTO EFETUADO|SEM DESCRICAO)$/;
+
+export function historicoSemIdentidade(texto: string | null | undefined): boolean {
+  const n = normalizeText(String(texto ?? ""));
+  return !n || SO_O_MEIO_DE_PAGAMENTO.test(n);
+}
+
+/**
+ * Empresa de pagamento no lugar da loja: o Pix para o QR de um restaurante e o de uma loja
+ * de peças chegam os dois como "MERCADO PAGO INSTITUIÇÃO DE PAGAMENTO". Tomar isso por loja
+ * fazia qualquer QR do Mercado Pago virar "Peças" (6 de 7 decisões, confiança 85).
+ *
+ * A NU PAGAMENTOS fica de fora de propósito: ali o Pix mensal é a fatura do Nubank, sempre
+ * — conferido nas 11 decisões.
+ */
+const INTERMEDIARIO =
+  /^(MERCADO ?PAGO|PAGSEGURO|PAG SEGURO|YAPAY|PICPAY|CLOUDWALK|MAGALU ?PAY|PAGALI|PAGUEVELOZ|AIBR)( (COM|BR|BRASIL|PAGAMENTOS?|SERVICOS?|IP|LTDA|S ?A|ME|EPP|TECNOLOGIA|DE|E))*$/;
+
+export function ehIntermediario(nome: string | null | undefined): boolean {
+  const n = normalizeText(String(nome ?? "")).replace(/^PIX (ENVIADO|ENVIADA) PARA /, "");
+  if (!n || /\bNU PAGAMENTOS\b/.test(n)) return false;
+  return /\bINSTITUICAO DE PAGAMENTO\b/.test(n) || INTERMEDIARIO.test(n);
+}
+
+/** Prefixos de maquininha que vêm antes do nome da loja na fatura ("PAG*", "MP *", "EC *"). */
+const PREFIXO_DE_ADQUIRENTE = new Set([
+  "PAG", "MP", "EC", "SPG", "PG", "IFD", "IZ", "SUMUP", "PP", "MERCADOPAGO", "PAGSEGURO", "PICPAY", "PAYPAL",
+]);
+
+/** A primeira palavra do nome de quem recebeu — sem sufixo societário nem prefixo de maquininha. */
+function primeiraPalavraDoNome(tx: TransacaoOrfa): string {
+  const nome = limparNome(tx.counterparty_name || nomeDaDescricao(tx.description) || tx.description || "");
+  const palavras = nome.split(" ").filter(Boolean);
+  while (palavras.length > 1 && PREFIXO_DE_ADQUIRENTE.has(palavras[0])) palavras.shift();
+  return palavras[0] ?? "";
+}
+
+/**
+ * Caixa alta, sem acento e sem pontuação: a chave de quem recebeu, no extrato.
+ *
+ * Vazia quando o texto não identifica ninguém (meio de pagamento ou empresa de pagamento):
+ * a memória por nome, a IA e a sugestão de regras pulam chave vazia — é o que as impede de
+ * tratar dezenas de destinos diferentes como uma loja só.
+ */
 export function chaveDoRecebedor(tx: TransacaoOrfa): string {
-  return normalizeText(tx.counterparty_name || tx.description || "");
+  const chave = normalizeText(tx.counterparty_name || tx.description || "");
+  if (historicoSemIdentidade(chave) || ehIntermediario(chave)) return "";
+  return chave;
+}
+
+/**
+ * Categoria pelo que a pessoa escreveu ("almoço da equipe", "gasolina da van"): regra de
+ * texto sua primeiro, depois a lista do sistema. É a mesma leitura do Extrato, usada pelo
+ * Caixa na tela e pelo assistente — as duas portas sugerem a mesma coisa.
+ */
+export function categoriaPeloTexto(
+  texto: string,
+  regras: RegraFinanceira[] = [],
+  valor?: number,
+): { categoria: string; dreGroup: string; motivo: string } | null {
+  const t = String(texto ?? "").trim();
+  if (!t) return null;
+  const tx: TransacaoOrfa = { id: "", transaction_date: "", description: t, amount: valor ?? 0, transaction_type: "debit" };
+  const noValor = (r: RegraFinanceira) => valor == null
+    || ((r.min_amount == null || valor >= Number(r.min_amount)) && (r.max_amount == null || valor <= Number(r.max_amount)));
+  const sua = regras.find((r) => r.match_type === "text" && r.set_category && r.status === "active"
+    && r.direction !== "credit" && noValor(r) && normalizeText(t).includes(normalizeText(r.match_value).trim()));
+  if (sua?.set_category) {
+    return { categoria: sua.set_category, dreGroup: sua.set_dre_group ?? "despesa_operacional", motivo: `regra sua: "${sua.match_value}"` };
+  }
+  const c = classificar(tx);
+  if (!c || c.categoria === "Outras despesas") return null;
+  return { categoria: c.categoria, dreGroup: c.dreGroup, motivo: `"${c.termo.toLowerCase()}" no texto` };
 }
 
 export function montarProposta(
@@ -403,8 +518,14 @@ export function montarProposta(
   // custo_direto" para um recebimento, e isso entra direto no DRE com cara de certeza.
   // Entrada fica com "Outras receitas" até uma REGRA sua dizer outra coisa: regra tem
   // direção e é instrução, não palpite.
-  const classificacao = ehSaida ? classificar(tx) : null;
-  const achado = ehSaida ? acharFornecedor(tx, fornecedores) : null;
+  const temDocumento = (tx.counterparty_document || "").replace(/\D/g, "").length >= 11;
+  // O banco não disse para quem foi: "DEBITO DE CARTAO", "TRANSF ENVIADA PIX" sem nome.
+  const semIdentidade = ehSaida && !temDocumento && historicoSemIdentidade(tx.counterparty_name || tx.description);
+  // O nome é o da empresa de pagamento, não o da loja: o texto dela não diz o que foi comprado
+  // ("MERCADO PAGO" contém "MERCADO" e viraria supermercado).
+  const viaIntermediario = ehSaida && ehIntermediario(tx.counterparty_name || tx.description);
+  const classificacao = ehSaida && !viaIntermediario ? classificar(tx) : null;
+  const achado = ehSaida && !semIdentidade ? acharFornecedor(tx, fornecedores) : null;
 
   /**
    * MCC: o que a bandeira diz que o estabelecimento é.
@@ -428,6 +549,15 @@ export function montarProposta(
     confianca = 90;
   } else if (classificacao) {
     razoes.push(`Histórico contém "${classificacao.termo}", que indica ${classificacao.categoria}`);
+  } else if (semIdentidade) {
+    const h = normalizeText(tx.description);
+    razoes.push(/DEBITO/.test(h)
+      ? "Compra no débito: o banco não informa onde foi. Diga a loja ao aprovar — ou, na próxima, avise pelo WhatsApp na hora"
+      : /COMPRA/.test(h)
+        ? "Compra no cartão sem o nome da loja: diga onde foi ao aprovar"
+        : "O banco não informou para quem foi este dinheiro. Diga quem recebeu ao aprovar");
+  } else if (viaIntermediario) {
+    razoes.push("Pago por uma empresa de pagamento (o nome é dela, não da loja): diga o que foi ao aprovar");
   } else {
     razoes.push("Nenhuma regra de categoria reconheceu este histórico");
   }
@@ -456,12 +586,26 @@ export function montarProposta(
   const aprendido = ehSaida ? (porFornecedor ?? porNome) : undefined;
   if (aprendido) {
     const quem = porFornecedor ? "Este fornecedor" : "Este estabelecimento";
+    const clara = maioriaClara(aprendido);
     razoes.push(
       aprendido.vezes === 1
         ? `Da última vez, uma despesa de ${porFornecedor ? "deste fornecedor" : "aqui"} foi lançada como ${aprendido.categoria}`
-        : `${quem} já foi lançado como ${aprendido.categoria} ${aprendido.vezes} vezes`,
+        : clara
+          ? `${quem} já foi lançado como ${aprendido.categoria} ${aprendido.vezes} vezes`
+          : `${quem} foi lançado como ${aprendido.categoria} em ${aprendido.vezes} de ${aprendido.total} vezes — confira`,
     );
-    confianca = Math.min(98, Math.max(confianca, 60 + Math.min(25, aprendido.vezes * 5)));
+    // Memória dividida é sugestão, não certeza: fica abaixo do corte do "lançar sozinho".
+    const daMemoria = Math.min(clara ? 85 : TETO_DA_MEMORIA_DIVIDIDA, 60 + Math.min(25, aprendido.vezes * 5));
+    // A confiança acompanha a categoria que vai para a linha. Se a bandeira decide, a memória
+    // só reforça quando concorda; se a memória troca a categoria que o texto sugeria, a
+    // confiança é a dela — antes ficava a do texto, para uma categoria que o texto não disse.
+    const decide = porMcc?.categoria ?? aprendido.categoria;
+    const referencia = porMcc?.categoria ?? classificacao?.categoria;
+    if (decide === aprendido.categoria) {
+      confianca = !referencia || referencia === aprendido.categoria
+        ? Math.min(98, Math.max(confianca, daMemoria))
+        : daMemoria;
+    }
   }
 
   const nome = tx.counterparty_name || tx.description;
@@ -505,6 +649,9 @@ export function montarProposta(
     dreGroup,
     appliedRuleId: regra?.id ?? null,
     autoAplicavel: regra?.autonomy === "apply",
+    // Sem regra sua, linha sem identidade nunca vai sozinha: a categoria depende de uma
+    // informação (a loja) que só a pessoa tem.
+    semIdentidade: semIdentidade && !regra,
   };
 }
 
@@ -555,11 +702,13 @@ export function sugerirRegras(
     if (!d.categoria || d.categoria === "Outras despesas") continue;
 
     // Fornecedor cadastrado é alvo melhor que nome solto: sobrevive a mudança de razão
-    // social e a variações de escrita no extrato.
+    // social e a variações de escrita no extrato. Nome que não identifica ninguém
+    // ("DEBITO DE CARTAO") não vira regra: seria "toda compra no débito é X".
+    const nomeServe = !!d.counterpartyName && !historicoSemIdentidade(d.counterpartyName) && !ehIntermediario(d.counterpartyName);
     const chave = d.supplierId
       ? `supplier:${d.supplierId}`
-      : d.counterpartyName
-        ? `counterparty:${normalizeText(d.counterpartyName)}`
+      : nomeServe
+        ? `counterparty:${normalizeText(String(d.counterpartyName))}`
         : null;
     if (!chave) continue;
 

@@ -56,3 +56,14 @@ describe('paridade tela ↔ assistente nos lançamentos', () => {
     }
   });
 });
+
+describe('paridade na categoria deduzida', () => {
+  // Teste do dono (25/09/2026): "almoço" pelo WhatsApp caiu em Outras despesas. A tela do Caixa
+  // e o assistente deduzem pela MESMA função — se um lado trocar de lógica, este teste cai.
+  it('tela e assistente usam categoriaPeloTexto', () => {
+    const tela = readFileSync(join(RAIZ, 'src/lib/destino-do-gasto.ts'), 'utf8');
+    const assistente = readFileSync(join(RAIZ, PASTA_DAS_TOOLS, 'caixa.ts'), 'utf8');
+    expect(tela).toContain('categoriaPeloTexto(');
+    expect(assistente).toContain('categoriaPeloTexto(');
+  });
+});

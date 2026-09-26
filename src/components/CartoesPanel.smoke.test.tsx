@@ -113,7 +113,7 @@ describe('painel de cartões', () => {
     // Ramo (MCC) · categoria do provedor · cartão, tudo numa linha só — é a identificação
     // que existe em compra de cartão. O CNPJ não vem, e isso não é defeito: a bandeira não
     // repassa o documento do estabelecimento.
-    expect(screen.getByText('Posto de combustível · Gas stations · cartão ····9395'))
+    expect(screen.getByText('Posto de combustível · palpite do banco: Gas stations · cartão ····9395'))
       .toBeInTheDocument();
   });
 

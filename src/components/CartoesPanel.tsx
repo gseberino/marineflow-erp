@@ -229,7 +229,7 @@ function ComprasDaFatura({ billId, formatCurrency, formatDate }: {
                   provedor e final do cartão. CNPJ não vem — só 4% têm, e não é defeito. */}
               {(ramo || c.provider_category || c.card_last_digits) && (
                 <p className="truncate text-xs text-muted-foreground">
-                  {[ramo, c.provider_category, c.card_last_digits && `cartão ····${c.card_last_digits}`,
+                  {[ramo, c.provider_category && `palpite do banco: ${c.provider_category}`, c.card_last_digits && `cartão ····${c.card_last_digits}`,
                     c.installment_label && `parcela ${c.installment_label}`]
                     .filter(Boolean).join(' · ')}
                 </p>

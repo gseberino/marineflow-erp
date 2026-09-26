@@ -19,7 +19,11 @@ import {
   useLancarNoCaixa, useMoverCaixa, useAjustarCaixa, useAnotarTransacao,
   useAnotacoesAguardando, useCancelarAnotacao,
 } from '@/hooks/use-caixa';
+import { useFinanceRules } from '@/hooks/use-finance-review';
+import type { RegraFinanceira } from '../../supabase/functions/_shared/banking/proposals';
+import { destinoDoGasto } from '@/lib/destino-do-gasto';
 import { Clock, X } from 'lucide-react';
+
 
 type Sentido = 'gasto' | 'recebimento' | 'saque' | 'deposito';
 const ROTULO: Record<Sentido, string> = { gasto: 'Gasto', recebimento: 'Recebimento', saque: 'Saque do banco', deposito: 'Depósito no banco' };
@@ -50,6 +54,12 @@ export function LancarNoCaixaDialog({ onFechar }: { onFechar: () => void }) {
   const { data: ordens = [] } = useServiceOrdersVinculaveis();
   const { data: favorecidos = [] } = usePayees();
   const socios = favorecidos.filter((f) => f.kind === 'socio');
+  const { data: regras = [] } = useFinanceRules();
+  const favorecido = quem.startsWith('p:') ? favorecidos.find((f) => f.id === quem.slice(2)) : undefined;
+  const destino = sentido === 'gasto'
+    ? destinoDoGasto(categoria, favorecido ? { nome: favorecido.name, categoria: favorecido.default_category } : null,
+        descricao, valor, regras as unknown as RegraFinanceira[])
+    : null;
   const lancar = useLancarNoCaixa();
   const mover = useMoverCaixa();
   const ocupado = lancar.isPending || mover.isPending;
@@ -66,7 +76,7 @@ export function LancarNoCaixaDialog({ onFechar }: { onFechar: () => void }) {
     if (sentido === 'saque' || sentido === 'deposito') { mover.mutate({ sentido, valor, data: data || null }, fim); return; }
     lancar.mutate({
       sentido: sentido === 'gasto' ? 'saida' : 'entrada', valor, descricao: descricao.trim(), data: data || null,
-      categoria: categoria || null,
+      categoria: destino?.categoria ?? (categoria || null),
       favorecidoId: quem.startsWith('p:') ? quem.slice(2) : null,
       fornecedorId: quem.startsWith('f:') ? quem.slice(2) : null,
       clienteId: sentido === 'recebimento' ? cliente : null,
@@ -110,8 +120,13 @@ export function LancarNoCaixaDialog({ onFechar }: { onFechar: () => void }) {
               </div>
               <div>
                 <Label>Categoria</Label>
-                <CategoriaDespesaSelect valor={categoria} onMudar={setCategoria} className="h-10 text-sm" placeholder="Padrão de quem recebeu" />
+                <CategoriaDespesaSelect valor={categoria} onMudar={setCategoria} className="h-10 text-sm" placeholder="Deduzir pelo texto" />
               </div>
+              {destino && (descricao.trim() || categoria) && (
+                <p className="self-end pb-2 text-xs text-muted-foreground sm:col-span-1" aria-live="polite">
+                  Vai entrar em: <b className="text-foreground">{destino.categoria}</b>{destino.porque ? ` (${destino.porque})` : ''}
+                </p>
+              )}
             </>
           )}
           {sentido === 'recebimento' && (

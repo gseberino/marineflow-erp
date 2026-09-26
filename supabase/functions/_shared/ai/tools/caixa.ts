@@ -12,6 +12,7 @@
 // o pedido JÁ RESOLVIDO — categoria, quem, conta — para o "sim" ser sobre o que vai
 // acontecer de fato (resumirPedido, usado pelo agente).
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
+import { categoriaPeloTexto, type RegraFinanceira } from "../../banking/proposals.ts";
 
 const CARGOS_FINANCEIRO: Role[] = ["admin", "financial"];
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -81,6 +82,21 @@ async function categoriaValida(ctx: ToolCtx, dita: unknown, tipo: "payable" | "r
   return { error: `Categoria "${dita}" não existe${parciais.length ? `; parecidas: ${parciais.join(", ")}` : ""}. Veja listar_categorias_financeiras.` };
 }
 
+/**
+ * Categoria que o texto indica ("almoço" → Alimentação de campo): as regras de texto do dono e
+ * a lista do Extrato — a mesma leitura que a tela do Caixa faz. Só devolve categoria que
+ * existe no plano de contas.
+ */
+async function categoriaDoTexto(ctx: ToolCtx, texto: string, valor: number): Promise<{ nome: string; motivo: string } | null> {
+  const { data } = await ctx.admin.from("finance_rules")
+    .select("id, match_type, match_value, direction, set_category, set_dre_group, autonomy, status, min_amount, max_amount")
+    .eq("status", "active").eq("match_type", "text").limit(500);
+  const d = categoriaPeloTexto(texto, (data ?? []) as unknown as RegraFinanceira[], valor);
+  if (!d) return null;
+  const valida = await categoriaValida(ctx, d.categoria, "payable");
+  return valida && "nome" in valida ? { nome: valida.nome, motivo: d.motivo } : null;
+}
+
 async function osPeloNumero(ctx: ToolCtx, numero: unknown): Promise<{ id: string; numero: string } | { error: string } | null> {
   if (!numero) return null;
   const n = String(numero).replace(/\D/g, "");
@@ -116,6 +132,8 @@ export interface PedidoResolvido {
   descricao: string;
   data: string | null;
   categoria: string | null;
+  /** De onde veio a categoria, quando ninguém a disse ("padrão de Fulano", "“almoço” no texto"). */
+  origemDaCategoria: string | null;
   pessoa: Pessoa | null;
   os: { id: string; numero: string } | null;
   pagoPor: "caixa" | "socio";
@@ -133,7 +151,7 @@ export async function resolverPedidoDeCaixa(ctx: ToolCtx, args: Record<string, u
 
   if (sentido === "saque" || sentido === "deposito") {
     return { sentido, valor, descricao: sentido === "saque" ? "Saque do banco para o Caixa" : "Depósito do Caixa no banco",
-      data, categoria: null, pessoa: null, os: null, pagoPor: "caixa", socio: null };
+      data, categoria: null, origemDaCategoria: null, pessoa: null, os: null, pagoPor: "caixa", socio: null };
   }
 
   const descricao = String(args.descricao ?? "").trim();
@@ -172,11 +190,21 @@ export async function resolverPedidoDeCaixa(ctx: ToolCtx, args: Record<string, u
   const os = await osPeloNumero(ctx, args.os);
   if (os && "error" in os) return os;
 
-  return {
-    sentido, valor, descricao, data,
-    categoria: cat?.nome ?? (pessoa?.tipo === "favorecido" ? pessoa.categoria ?? null : null),
-    pessoa, os, pagoPor, socio,
-  };
+  // Ninguém disse a categoria: a padrão de quem recebeu; sem ela, o que o texto indica
+  // ("almoço" → Alimentação de campo). Antes caía direto em "Outras despesas" (teste do
+  // dono, 25/09/2026).
+  let categoria = cat?.nome ?? null;
+  let origemDaCategoria: string | null = null;
+  if (!categoria && pessoa?.tipo === "favorecido" && pessoa.categoria) {
+    categoria = pessoa.categoria;
+    origemDaCategoria = `padrão de ${pessoa.nome}`;
+  }
+  if (!categoria && sentido === "gasto") {
+    const pelo = await categoriaDoTexto(ctx, descricao, valor);
+    if (pelo) { categoria = pelo.nome; origemDaCategoria = `pelo texto: ${pelo.motivo}`; }
+  }
+
+  return { sentido, valor, descricao, data, categoria, origemDaCategoria, pessoa, os, pagoPor, socio };
 }
 
 /** O texto da confirmação: o que vai acontecer, com tudo resolvido. */
@@ -188,7 +216,9 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
     if (p.sentido === "saque" || p.sentido === "deposito") return `- ${p.descricao}: *${brl.format(p.valor)}* · ${quando}`;
     return [
       `- ${p.sentido === "gasto" ? "Gasto" : "Recebimento"} de *${brl.format(p.valor)}* · ${p.descricao} · ${quando}`,
-      `- Categoria: *${p.categoria ?? (p.sentido === "gasto" ? "Outras despesas" : "Serviços prestados")}*`,
+      p.categoria
+        ? `- Categoria: *${p.categoria}*${p.origemDaCategoria ? ` (${p.origemDaCategoria})` : ""}`
+        : `- Categoria: *${p.sentido === "gasto" ? "Outras despesas" : "Serviços prestados"}* (não reconheci pelo texto — diga a categoria se quiser outra)`,
       p.pessoa ? `- ${p.pessoa.tipo === "cliente" ? "Cliente" : p.pessoa.tipo === "favorecido" ? "Para (favorecido)" : "Fornecedor"}: ${p.pessoa.nome}` : null,
       p.os ? `- OS: ${p.os.numero}` : null,
       p.pagoPor === "socio"
@@ -198,11 +228,15 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
   }
   if (nome === "anotar_transacao_do_banco") {
     const quando = dataDita(args.data) ?? "hoje";
+    const pelo = !args.categoria && !args.quem && args.sentido !== "entrada" && args.descricao
+      ? await categoriaDoTexto(ctx, String(args.descricao), Number(args.valor) || 0)
+      : null;
     return [
       `- Quando chegar do banco: ${args.sentido === "entrada" ? "entrada" : "saída"} de *${brl.format(Number(args.valor) || 0)}* (${quando})`,
       args.documento ? `- Para o documento ${String(args.documento)}` : null,
       args.quem ? `- Classificar como: *${String(args.quem)}*` : null,
       args.categoria ? `- Categoria: *${String(args.categoria)}*` : null,
+      pelo ? `- Categoria: *${pelo.nome}* (pelo texto: ${pelo.motivo})` : null,
       args.os ? `- OS: ${String(args.os)}` : null,
     ].filter(Boolean).join("\n");
   }
@@ -230,7 +264,7 @@ export const caixaTools: ToolDef[] = [
         valor: { type: "number" },
         descricao: { type: "string", description: "O que foi, com as palavras da pessoa." },
         data: { type: "string", description: "'hoje' (padrão), 'ontem', dd/mm." },
-        categoria: { type: "string", description: "Só se a pessoa disser; senão o sistema usa a padrão de quem recebeu." },
+        categoria: { type: "string", description: "Se a pessoa disser. Sem ela, o sistema usa a padrão de quem recebeu ou deduz pelo texto (almoço → Alimentação de campo); a confirmação mostra qual." },
         quem: { type: "string", description: "Favorecido/fornecedor (gasto) ou cliente (recebimento), pelo nome." },
         os: { type: "string", description: "Número da OS, se o gasto foi para um serviço." },
         pago_por: { type: "string", enum: ["caixa", "bolso_do_socio"], description: "bolso_do_socio = saiu do dinheiro pessoal: vira reembolso." },
@@ -322,13 +356,18 @@ export const caixaTools: ToolDef[] = [
       if (cat && "error" in cat) return cat;
       const os = await osPeloNumero(ctx, args.os);
       if (os && "error" in os) return os;
+      let categoria = cat?.nome ?? (pessoa?.tipo === "favorecido" ? pessoa.categoria ?? null : null);
+      // Sem categoria e sem ninguém dito: o texto decide (a confirmação mostrou a mesma coisa).
+      if (!categoria && !args.quem && sentido === "saida" && args.descricao) {
+        categoria = (await categoriaDoTexto(ctx, String(args.descricao), valor))?.nome ?? null;
+      }
       return await chamar(ctx, "anotar_transacao", {
         p_sentido: sentido, p_valor: valor, p_data: data,
         p_documento: args.documento ? String(args.documento) : null, p_nome: pessoa?.nome ?? (args.quem ? String(args.quem) : null),
         p_fornecedor_id: pessoa?.tipo === "fornecedor" ? pessoa.id : null,
         p_favorecido_id: pessoa?.tipo === "favorecido" ? pessoa.id : null,
         p_cliente_id: pessoa?.tipo === "cliente" ? pessoa.id : null,
-        p_categoria: cat?.nome ?? (pessoa?.tipo === "favorecido" ? pessoa.categoria ?? null : null),
+        p_categoria: categoria,
         p_os_id: os?.id ?? null,
         p_descricao: args.descricao ? String(args.descricao) : null,
       });
@@ -370,9 +409,21 @@ export const caixaTools: ToolDef[] = [
           .neq("status", "cancelled").gte("issue_date", de).lte("issue_date", ate).limit(5000);
         return (data ?? []) as any[];
       };
-      const [atual, anterior] = await Promise.all([ler(ano, mes), ler(aAnt, mAnt)]);
+      const [atual, anterior, cats] = await Promise.all([
+        ler(ano, mes), ler(aAnt, mAnt),
+        ctx.sb.from("financial_categories").select("name, dre_group"),
+      ]);
+      // Fatura do cartão, empréstimo, aplicação e transferência ficam FORA do resultado: a
+      // compra no cartão já foi contada quando aconteceu, e somar a fatura contava duas vezes
+      // (R$ 70,9 mil de fatura em 2026). Só entram se a pessoa perguntar por uma delas.
+      const foraDoResultado = new Set(((cats.data ?? []) as { name: string; dre_group: string | null }[])
+        .filter((c) => c.dre_group === "nao_operacional").map((c) => c.name));
       const filtro = args.categoria ? normal(args.categoria) : null;
-      const passa = (r: any) => !filtro || normal(r[colCat]).includes(filtro);
+      const passa = (r: any) => filtro ? normal(r[colCat]).includes(filtro) : !foraDoResultado.has(r[colCat]);
+      const fora = new Map<string, number>();
+      if (!filtro) {
+        for (const r of atual) if (foraDoResultado.has(r[colCat])) fora.set(r[colCat], (fora.get(r[colCat]) ?? 0) + Number(r.amount));
+      }
       const somaPorCat = (rs: any[]) => {
         const m = new Map<string, number>();
         for (const r of rs.filter(passa)) m.set(r[colCat] ?? "(sem categoria)", (m.get(r[colCat] ?? "(sem categoria)") ?? 0) + Number(r.amount));
@@ -394,6 +445,10 @@ export const caixaTools: ToolDef[] = [
         por_categoria: [...agora.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)
           .map(([categoria, valor]) => ({ categoria, valor, mes_anterior: antes.get(categoria) ?? 0 })),
         quem_mais_recebeu: [...quem.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([nome, valor]) => ({ nome, valor })),
+        fora_do_resultado: [...fora.entries()].map(([categoria, valor]) => ({ categoria, valor })),
+        observacao: fora.size
+          ? "O total não inclui o que fica fora do resultado (pagamento de fatura, empréstimo, aplicação, transferência entre contas): a compra no cartão já foi contada quando aconteceu."
+          : undefined,
       };
     },
   },

@@ -109,3 +109,51 @@ Deno.test("tudo que grava pede confirmação; consulta não", () => {
   }
   assertEquals(caixaTools.find((t) => t.name === "gastos_por_categoria")!.risk, "low");
 });
+
+Deno.test("gastei 50 em dinheiro com almoço: a categoria vem do texto, e a confirmação diz de onde", async () => {
+  // Teste do dono em 25/09/2026: o almoço caía em "Outras despesas" e ele teve de corrigir.
+  const p = await resolverPedidoDeCaixa(ctx() as never, { valor: 50, descricao: "almoço da equipe" });
+  if ("error" in p) throw new Error(p.error);
+  assertEquals(p.categoria, "Alimentação de campo");
+  assertStringIncludes(String(p.origemDaCategoria), "pelo texto");
+  const txt = String(await resumirPedido(ctx() as never, "lancar_no_caixa", { valor: 50, descricao: "almoço da equipe" }));
+  assertStringIncludes(txt, "Alimentação de campo");
+  assertStringIncludes(txt, "pelo texto");
+});
+
+Deno.test("a padrão de quem recebeu ainda vem antes do texto", async () => {
+  const p = await resolverPedidoDeCaixa(ctx() as never, { valor: 100, descricao: "almoço", quem: "roberto" });
+  if ("error" in p) throw new Error(p.error);
+  assertEquals(p.categoria, "Serviços de terceiros");
+});
+
+Deno.test("sem pista no texto, a confirmação avisa que vai em Outras despesas", async () => {
+  const txt = String(await resumirPedido(ctx() as never, "lancar_no_caixa", { valor: 30, descricao: "coisa diversa" }));
+  assertStringIncludes(txt, "Outras despesas");
+  assertStringIncludes(txt, "não reconheci");
+});
+
+Deno.test("gastos_por_categoria: fatura, empréstimo e transferência ficam fora do total", async () => {
+  // A compra no cartão já foi contada quando aconteceu; somar a fatura contava duas vezes.
+  const linhas: Record<string, any[]> = {
+    payables: [
+      { amount: 100, expense_category: "Alimentação de campo", supplier_name: "Padaria" },
+      { amount: 900, expense_category: "Pagamento de fatura de cartão", supplier_name: "C6" },
+    ],
+    financial_categories: [
+      { name: "Alimentação de campo", dre_group: "custo_direto" },
+      { name: "Pagamento de fatura de cartão", dre_group: "nao_operacional" },
+    ],
+  };
+  const from = (t: string) => {
+    const q: any = { select: () => q, neq: () => q, gte: () => q, lte: () => q, limit: () => q, eq: () => q,
+      then: (res: any) => Promise.resolve({ data: linhas[t] ?? [], error: null }).then(res) };
+    return q;
+  };
+  const c = { ...ctx(), sb: { from, rpc: () => Promise.resolve({ data: null, error: null }) } };
+  const r = await caixaTools.find((t) => t.name === "gastos_por_categoria")!.execute({ mes: 9, ano: 2026 }, c as never) as any;
+  assertEquals(r.total, 100);
+  assertEquals(r.fora_do_resultado, [{ categoria: "Pagamento de fatura de cartão", valor: 900 }]);
+  const soFatura = await caixaTools.find((t) => t.name === "gastos_por_categoria")!.execute({ mes: 9, ano: 2026, categoria: "fatura" }, c as never) as any;
+  assertEquals(soFatura.total, 900);
+});

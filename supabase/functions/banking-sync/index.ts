@@ -502,56 +502,64 @@ async function sincronizarConexao(
       const origem = accountSourceType(conta);
       const transacoes = await fetchTransactions(apiKey, conta.id, desde);
       await conferirSaldo(admin, conexao.id, conta, transacoes);
-      if (origem === "bank") await conferirSaldoAcumulado(admin, conexao, conta);
-      if (transacoes.length === 0) continue;
 
-      const linhas = transacoes.map((t) => {
-        const linha = mapTransaction(t, origem);
-        // Crédito em fatura de cartão já entra resolvido: nunca é receita e só polui a
-        // fila. Ver `motivoDeCreditoEmCartao` para o porquê de ser uma regra estrutural,
-        // e não uma lista de exceções.
-        const ignorar = motivoDeCreditoEmCartao(linha.source_type, linha.transaction_type, linha.description);
-        return {
-          ...linha,
-          bank_connection_id: conexao.id,
-          reconciled: !!ignorar,
-          dismissed_reason: ignorar,
-          // Sair da fila na importação também deixa rastro: sem tipo, essas linhas não
-          // apareceriam no livro das ignoradas nem teriam como voltar.
-          dismissed_kind: ignorar ? "mecanica_cartao" : null,
-          dismissed_at: ignorar ? new Date().toISOString() : null,
-        };
-      });
+      // A conferência acumulada (base + soma das transações = saldo do banco) roda DEPOIS de
+      // gravar o que chegou agora. Antes ela rodava antes: em 25/09 às 18h a base do C6 foi
+      // fixada e, um instante depois, entraram 3 Pix (+2.070, −110, −100) — a base ficou
+      // R$ 1.860 acima do certo e a diferença não sumiria sozinha.
+      gravar: {
+        if (transacoes.length === 0) break gravar;
 
-      for (const linha of linhas) {
-        if (!dataMaisRecente || linha.transaction_date > dataMaisRecente) {
-          dataMaisRecente = linha.transaction_date;
+        const linhas = transacoes.map((t) => {
+          const linha = mapTransaction(t, origem);
+          // Crédito em fatura de cartão já entra resolvido: nunca é receita e só polui a
+          // fila. Ver `motivoDeCreditoEmCartao` para o porquê de ser uma regra estrutural,
+          // e não uma lista de exceções.
+          const ignorar = motivoDeCreditoEmCartao(linha.source_type, linha.transaction_type, linha.description);
+          return {
+            ...linha,
+            bank_connection_id: conexao.id,
+            reconciled: !!ignorar,
+            dismissed_reason: ignorar,
+            // Sair da fila na importação também deixa rastro: sem tipo, essas linhas não
+            // apareceriam no livro das ignoradas nem teriam como voltar.
+            dismissed_kind: ignorar ? "mecanica_cartao" : null,
+            dismissed_at: ignorar ? new Date().toISOString() : null,
+          };
+        });
+
+        for (const linha of linhas) {
+          if (!dataMaisRecente || linha.transaction_date > dataMaisRecente) {
+            dataMaisRecente = linha.transaction_date;
+          }
+        }
+
+        // Descarta o que já está no banco antes de inserir. O índice único por
+        // (bank_ref_id, source_type) é a rede de segurança; esta consulta evita depender
+        // dela e permite contar quantas eram realmente novas.
+        const refs = linhas.map((l) => l.bank_ref_id);
+        const existentes = new Set<string>();
+        for (let i = 0; i < refs.length; i += 200) {
+          const { data } = await admin
+            .from("bank_transactions")
+            .select("bank_ref_id")
+            .in("bank_ref_id", refs.slice(i, i + 200));
+          for (const r of data || []) if (r.bank_ref_id) existentes.add(r.bank_ref_id);
+        }
+
+        const novas = linhas.filter((l) => !existentes.has(l.bank_ref_id));
+        jaExistiam += linhas.length - novas.length;
+        if (novas.length === 0) break gravar;
+
+        for (let i = 0; i < novas.length; i += 200) {
+          const lote = novas.slice(i, i + 200);
+          const { error } = await admin.from("bank_transactions").insert(lote);
+          if (error) throw error;
+          importadas += lote.length;
         }
       }
 
-      // Descarta o que já está no banco antes de inserir. O índice único por
-      // (bank_ref_id, source_type) é a rede de segurança; esta consulta evita depender
-      // dela e permite contar quantas eram realmente novas.
-      const refs = linhas.map((l) => l.bank_ref_id);
-      const existentes = new Set<string>();
-      for (let i = 0; i < refs.length; i += 200) {
-        const { data } = await admin
-          .from("bank_transactions")
-          .select("bank_ref_id")
-          .in("bank_ref_id", refs.slice(i, i + 200));
-        for (const r of data || []) if (r.bank_ref_id) existentes.add(r.bank_ref_id);
-      }
-
-      const novas = linhas.filter((l) => !existentes.has(l.bank_ref_id));
-      jaExistiam += linhas.length - novas.length;
-      if (novas.length === 0) continue;
-
-      for (let i = 0; i < novas.length; i += 200) {
-        const lote = novas.slice(i, i + 200);
-        const { error } = await admin.from("bank_transactions").insert(lote);
-        if (error) throw error;
-        importadas += lote.length;
-      }
+      if (origem === "bank") await conferirSaldoAcumulado(admin, conexao, conta);
     }
 
     const mensagem = importadas > 0
