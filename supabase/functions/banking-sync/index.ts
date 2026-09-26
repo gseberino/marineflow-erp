@@ -331,6 +331,37 @@ function ehCandidataAAmostra(tx: any): boolean {
   return /PIX/i.test(JSON.stringify(tx.paymentData) + String(tx.description ?? ""));
 }
 
+/**
+ * Amostras do "DEBITO DE CARTAO" — decisão do dono de 26/09/2026 (resposta 19).
+ *
+ * O C6 escreve só "DEBITO DE CARTAO" na compra no débito: o extrato não diz a loja, e o
+ * sistema não tem como classificar sem perguntar. A pergunta é se o provedor manda a loja em
+ * ALGUM campo (merchant, paymentData, descriptionRaw…) que o mapeamento ainda não lê. Três
+ * payloads crus respondem isso. Cota própria: a das amostras de Pix (40) já está cheia.
+ */
+const TETO_DE_AMOSTRAS_DE_DEBITO = 3;
+
+function ehDebitoSemLoja(tx: any): boolean {
+  return /DEBITO DE CART/i.test(String(tx?.description ?? "").normalize("NFD").replace(/[̀-ͯ]/g, ""));
+}
+
+async function gravarAmostrasDeDebito(
+  admin: DbClient,
+  candidatas: Array<{ bank_ref_id: string; source_type: string; payload: unknown }>,
+): Promise<void> {
+  if (candidatas.length === 0) return;
+  try {
+    const { count } = await admin
+      .from("pluggy_amostra_payload")
+      .select("id", { count: "exact", head: true })
+      .ilike("payload->>description", "DEBITO DE CART%");
+    const espaco = TETO_DE_AMOSTRAS_DE_DEBITO - (count ?? 0);
+    if (espaco <= 0) return;
+    await admin.from("pluggy_amostra_payload")
+      .upsert(candidatas.slice(0, espaco), { onConflict: "bank_ref_id" });
+  } catch { /* diagnóstico nunca derruba a sincronização */ }
+}
+
 async function gravarAmostras(
   admin: DbClient,
   candidatas: Array<{ bank_ref_id: string; source_type: string; payload: unknown }>,
@@ -386,6 +417,7 @@ async function preencherIdentificacao(
     }
 
     const amostras: Array<{ bank_ref_id: string; source_type: string; payload: unknown }> = [];
+    const amostrasDeDebito: Array<{ bank_ref_id: string; source_type: string; payload: unknown }> = [];
     const aGravar: Array<{ id: string; campos: Record<string, unknown> }> = [];
     let semNovidade = 0;
 
@@ -396,6 +428,9 @@ async function preencherIdentificacao(
       for (const t of transacoes) {
         if (amostras.length < TETO_DE_AMOSTRAS && ehCandidataAAmostra(t)) {
           amostras.push({ bank_ref_id: t.id, source_type: origem, payload: t });
+        }
+        if (amostrasDeDebito.length < TETO_DE_AMOSTRAS_DE_DEBITO && ehDebitoSemLoja(t)) {
+          amostrasDeDebito.push({ bank_ref_id: t.id, source_type: origem, payload: t });
         }
 
         const atual = existentes.get(String(t.id));
@@ -418,6 +453,7 @@ async function preencherIdentificacao(
     }
 
     await gravarAmostras(admin, amostras);
+    await gravarAmostrasDeDebito(admin, amostrasDeDebito);
 
     // Teto por chamada: mesmo com a leitura resolvida, mil escritas seguidas voltariam a
     // encostar no limite. O que sobra volta na próxima — a tela repete até zerar.
@@ -436,6 +472,7 @@ async function preencherIdentificacao(
       restantes,
       ja_completas: semNovidade,
       amostras_colhidas: amostras.length,
+      amostras_de_debito: amostrasDeDebito.length,
       mensagem: atualizadas > 0
         ? `${atualizadas} lançamento(s) ganharam identificação`
           + (restantes > 0 ? ` · faltam ${restantes}` : "")
@@ -502,6 +539,8 @@ async function sincronizarConexao(
       const origem = accountSourceType(conta);
       const transacoes = await fetchTransactions(apiKey, conta.id, desde);
       await conferirSaldo(admin, conexao.id, conta, transacoes);
+      await gravarAmostrasDeDebito(admin, transacoes.filter(ehDebitoSemLoja).slice(0, TETO_DE_AMOSTRAS_DE_DEBITO)
+        .map((t: any) => ({ bank_ref_id: t.id, source_type: accountSourceType(conta), payload: t })));
 
       // A conferência acumulada (base + soma das transações = saldo do banco) roda DEPOIS de
       // gravar o que chegou agora. Antes ela rodava antes: em 25/09 às 18h a base do C6 foi

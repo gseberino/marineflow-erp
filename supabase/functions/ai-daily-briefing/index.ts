@@ -12,6 +12,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { historicoSemIdentidade } from "../_shared/banking/proposals.ts";
+import { normalizeText } from "../_shared/banking/matching.ts";
+import { linhasDoExtratoNoResumo } from "./extrato.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -260,6 +263,54 @@ servirComCors(async (req) => {
       console.warn("[ai-daily-briefing] bloco da fila financeira falhou:", (e as Error).message);
     }
 
+    // ── Extrato: o que foi lançado sozinho e a pergunta do débito sem loja ──
+    // Decisões do dono de 26/09/2026 (respostas 15 e 17): o lançar sozinho só vale porque é
+    // visível e desfazível — o resumo diz o que foi lançado nas últimas 24h e como desfazer;
+    // e a compra no débito que o banco não diz onde foi vira pergunta, uma vez por dia.
+    let extratoNoResumo: { linhas: string[]; acoes: string[] } = { linhas: [], acoes: [] };
+    try {
+      const desde24h = new Date(Date.now() - 24 * 3600_000).toISOString();
+      const [{ data: sozinhos }, { data: pendentes }, { data: canceladas }] = await Promise.all([
+        admin.from("finance_review_queue")
+          .select("title, suggested_amount, suggested_category, automatica")
+          .not("automatica", "is", null).eq("status", "approved").gte("decided_at", desde24h)
+          .order("decided_at", { ascending: false }).limit(200),
+        admin.from("finance_review_queue")
+          .select(`suggested_amount, suggested_date, evidencia,
+                   bank_transactions!finance_review_queue_bank_transaction_id_fkey ( description, counterparty_name, counterparty_document )`)
+          .eq("status", "pending").eq("kind", "create_payable")
+          .order("suggested_date", { ascending: false }).limit(1000),
+        // Anotações que a VARREDURA cancelou nas últimas 24h (as canceladas na hora já foram
+        // respondidas na conversa): valor, quem e o motivo.
+        admin.from("anotacoes_do_extrato")
+          .select("valor, criada_em, cancelada_em, motivo_cancelamento, nome, suppliers(name), payees(name), clients(name)")
+          .eq("status", "cancelada").not("motivo_cancelamento", "is", null).gte("cancelada_em", desde24h)
+          .order("cancelada_em", { ascending: false }).limit(50),
+      ]);
+      // Compra no débito (ou no cartão) sem loja: o banco só escreveu o meio de pagamento.
+      const semLoja = ((pendentes as any[]) || []).filter((l) => {
+        const t = l.bank_transactions;
+        if (!t || String(t.counterparty_document ?? "").replace(/\D/g, "").length >= 11) return false;
+        return historicoSemIdentidade(t.counterparty_name || t.description)
+          && /^(DEBITO|COMPRA)/.test(normalizeText(String(t.description ?? "")));
+      });
+      // O que o dono já respondeu (anotação) não é perguntado de novo: só falta aprovar.
+      const debitos = semLoja.filter((l) => !l.evidencia?.anotacao);
+      const anotadosEsperando = semLoja.length - debitos.length;
+      const fmtExtrato = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+      const naoAplicadas = ((canceladas as any[]) || [])
+        .filter((a) => new Date(a.cancelada_em).getTime() - new Date(a.criada_em).getTime() > 60_000)
+        .map((a) => ({
+          valor: a.valor,
+          quem: a.suppliers?.name ?? a.payees?.name ?? a.clients?.name ?? a.nome ?? null,
+          motivo: String(a.motivo_cancelamento),
+        }));
+      extratoNoResumo = linhasDoExtratoNoResumo((sozinhos as any[]) || [], debitos, (v) => fmtExtrato.format(v),
+        { anoAtual: new Date(Date.now() - 3 * 3600_000).getUTCFullYear(), anotadosEsperando, naoAplicadas });
+    } catch (e) {
+      console.warn("[ai-daily-briefing] bloco do extrato falhou:", (e as Error).message);
+    }
+
     // ── Conselheiro (Executivo Financeiro, módulo V — decisão do dono de 14/09/2026) ──
     // No máximo três CONSTATAÇÕES: resultado do mês até aqui, concentração do faturamento e
     // a próxima semana no vermelho. A SUGESTÃO fica separada, no bloco "Sugestão de hoje".
@@ -504,6 +555,7 @@ servirComCors(async (req) => {
     if (waiting.length > 0) quickActions.push(`   • *Quem está esperando resposta?*`);
     if (missaoLines.length > 0) quickActions.push(`   • *Como estão os acompanhamentos da IA?*`);
     if (filaFinanceiraCount > 0) quickActions.push(`   • *O que está esperando na caixa de entrada financeira?*`);
+    quickActions.push(...extratoNoResumo.acoes);
     const quickActionLines = quickActions.length > 0
       ? ["", "⚡ *Ações rápidas* (responda com uma):", ...quickActions]
       : [];
@@ -519,6 +571,7 @@ servirComCors(async (req) => {
       ...(upcomingCount > 0 ? [`🔜 A vencer (próx. 3 dias): *${upcomingCount}* (${fmt.format(upcomingSum)})`] : []),
       `✅ Aprovações da IA pendentes: *${pendingCount ?? 0}*`,
       ...filaFinanceiraLines,
+      ...extratoNoResumo.linhas,
       ...conselheiroLines,
       ...conciliaLines,
       ...stuckLines,
