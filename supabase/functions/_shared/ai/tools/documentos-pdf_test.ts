@@ -355,11 +355,25 @@ Deno.test("envio sem resposta (tempo esgotado): a tool libera a chave para o pr�
   assertEquals(amb.chamadas.removidos, amb.chamadas.upload);
 });
 
-Deno.test("envio que falhou na Evolution também libera a chave", async () => {
-  const amb = montarAmbiente({ respostaEnvio: () => new Response(JSON.stringify({ error: "Connection Closed" }), { status: 502 }) });
-  await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+Deno.test("envio sem resposta por erro de rede: também libera a chave", async () => {
+  const amb = montarAmbiente({ respostaEnvio: () => { throw new TypeError("error sending request: connection reset"); } });
+  const r: any = await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+  assertStringIncludes(r.error, "connection reset");
   assertEquals(amb.chamadas.liberadas, [amb.chamadas.envio[0].corpo.dedupe_key]);
 });
+
+// Revisão adversarial de 26/09/2026: liberar em QUALQUER falha apagava a reserva de um envio
+// anterior já concluído. 400/401/500 a edge devolve ANTES de reservar (a chave, se existe, é
+// de outro envio que deu certo) e no 502 ela mesma já liberou. Só o "sem resposta" libera.
+for (const status of [400, 401, 500, 502]) {
+  Deno.test(`resposta definitiva HTTP ${status}: a tool NÃO mexe na chave`, async () => {
+    const amb = montarAmbiente({ respostaEnvio: () => new Response(JSON.stringify({ error: `falhou ${status}` }), { status }) });
+    const r: any = await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+    assertStringIncludes(r.error, `falhou ${status}`);
+    assertEquals(amb.chamadas.liberadas, []);
+    assertEquals(amb.chamadas.removidos, amb.chamadas.upload, "o arquivo é apagado do mesmo jeito");
+  });
+}
 
 Deno.test("envio que deu certo NÃO libera a chave", async () => {
   const amb = montarAmbiente();

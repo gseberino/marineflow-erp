@@ -128,6 +128,10 @@ function montarAmbiente(opcoes: {
     service_orders: opcoes.ordens ?? [ORC, OS, CANCELADA],
     clients: [{ ...CLIENTE, ...(opcoes.cliente ?? {}) }],
     app_settings: [{ key: "company_name", value: "HBR" }],
+    app_users: [
+      { id: "u1", full_name: "Gustavo Dono", role: "admin" },
+      { id: "u9", full_name: "Paulo Externo", role: "external_seller" },
+    ],
     receivables: [],
     payments: [],
   }, opcoes.erros);
@@ -158,8 +162,8 @@ function montarAmbiente(opcoes: {
     }
     throw new Error(`fetch inesperado: ${url}`);
   };
-  const ctx = (role = "admin") => ({
-    sb: admin, admin, userId: "u1", userRole: role as any, jwt: "", appOrigin: "",
+  const ctx = (role = "admin", userId = role === "external_seller" ? "u9" : "u1") => ({
+    sb: admin, admin, userId, userRole: role as any, jwt: "", appOrigin: "",
     settings: { app_public_url: "https://erp.example", quote_validity_days: "3", ...(opcoes.settings ?? {}) },
   });
   return { chamadas, ctx, fetchFalso, admin, banco };
@@ -343,13 +347,34 @@ for (const [nome, opcoes] of [
   });
 }
 
-Deno.test("WhatsApp recusou o envio: libera a chave, apaga o arquivo e diz que nada foi", async () => {
+Deno.test("WhatsApp recusou o envio (502): NÃO mexe na chave (a edge já liberou), apaga o arquivo e diz que nada foi", async () => {
   const amb = montarAmbiente({ respostaEnvio: () => new Response(JSON.stringify({ error: "Connection Closed" }), { status: 502 }) });
   const r = await executar(amb, { service_order_id: ORC.id });
   assertStringIncludes(r.error, "Connection Closed");
   assertEquals(r.nada_enviado, true);
-  assertEquals(amb.banco.liberadas, [amb.chamadas.envio[0].dedupe_key]);
+  assertEquals(amb.banco.liberadas, []);
   assertEquals(amb.chamadas.removidos, amb.chamadas.upload);
+});
+
+// Revisão adversarial de 26/09/2026: 400/401/500 a edge devolve ANTES de reservar. Se a chave
+// existe, é de um envio anterior JÁ CONCLUÍDO — liberar aqui deixaria o mesmo PDF sair de
+// novo ao cliente no pedido seguinte.
+for (const status of [400, 401, 500]) {
+  Deno.test(`resposta definitiva HTTP ${status}: a reserva de um envio anterior fica de pé`, async () => {
+    const amb = montarAmbiente({ respostaEnvio: () => new Response(JSON.stringify({ error: `recusado ${status}` }), { status }) });
+    const r = await executar(amb, { service_order_id: ORC.id });
+    assertStringIncludes(r.error, `recusado ${status}`);
+    assertEquals(r.nada_enviado, true);
+    assertEquals(amb.banco.liberadas, []);
+  });
+}
+
+Deno.test("erro de rede (sem resposta HTTP): libera a chave e NÃO afirma que nada chegou", async () => {
+  const amb = montarAmbiente({ respostaEnvio: () => { throw new TypeError("error sending request: connection reset"); } });
+  const r = await executar(amb, { service_order_id: ORC.id });
+  assertStringIncludes(r.error, "pode ter chegado ou não");
+  assertEquals(r.nada_enviado, undefined);
+  assertEquals(amb.banco.liberadas, [amb.chamadas.envio[0].dedupe_key]);
 });
 
 Deno.test("envio sem resposta (25 s): libera a chave e NÃO afirma que nada chegou", async () => {
@@ -411,6 +436,32 @@ Deno.test("mudou o conteúdo (total) ou o dia: chave nova, o envio passa", async
   const outroDia = await chaveDoEnvio(ORC, new Date("2026-09-27T14:00:00.000Z"));
   assertNotEquals(base.chave, outroTotal.chave);
   assertNotEquals(base.chave, outroDia.chave);
+});
+
+// Revisão adversarial de 26/09/2026: o envio no modo de teste (que vai ao número de TESTE)
+// reservava a mesma chave do envio ao cliente. Desligado o modo no mesmo dia, o envio de
+// verdade ouvia "já foi enviado hoje" e o cliente ficava sem nada.
+async function chaveComSettings(formato: "pdf_e_link" | "link", settings: Record<string, string>) {
+  const amb = montarAmbiente({ settings });
+  await executar(amb, { service_order_id: ORC.id, formato });
+  return amb.chamadas.envio[0].dedupe_key as string;
+}
+
+Deno.test("modo de teste entra na chave do PDF: o envio de teste não bloqueia o de verdade", async () => {
+  const real = await chaveComSettings("pdf_e_link", {});
+  const teste = await chaveComSettings("pdf_e_link", { wa_test_mode: "true" });
+  const testeLegado = await chaveComSettings("pdf_e_link", { zapi_test_mode: "true" });
+  assertNotEquals(real, teste);
+  assert(teste.endsWith(":teste"), teste);
+  assertEquals(teste, `${real}:teste`, "só a marca muda: mesmo documento, número e dia");
+  assertEquals(testeLegado, teste, "a chave antiga (zapi_test_mode) vale igual");
+  assert(!real.includes("teste"), real);
+  assertEquals(await chaveComSettings("pdf_e_link", { wa_test_mode: "false" }), real);
+});
+
+Deno.test("modo de teste entra na chave do link; fora dele a chave é a de sempre", async () => {
+  assertEquals(await chaveComSettings("link", {}), `os-link:${ORC.id}:5547999990000:2026-09-26`);
+  assertEquals(await chaveComSettings("link", { wa_test_mode: "true" }), `os-link:${ORC.id}:5547999990000:2026-09-26:teste`);
 });
 
 Deno.test("impressão digital ignora só o carimbo 'Emitido em'", () => {
@@ -525,8 +576,8 @@ function respostaDoModelo(conteudo: { texto?: string; ferramenta?: { nome: strin
   };
 }
 
-async function rodarNoAgente(args: Record<string, unknown>) {
-  const amb = montarAmbiente({ settings: AUTO });
+async function rodarNoAgente(args: Record<string, unknown>, opcoes: { role?: string; settings?: Record<string, string> } = {}) {
+  const amb = montarAmbiente({ settings: opcoes.settings ?? AUTO });
   const respostas = [respostaDoModelo({ ferramenta: { nome: "send_service_order_link", args } }), respostaDoModelo({ texto: "feito" })];
   const fetchComModelo = async (entrada: string | URL | Request, init?: RequestInit) => {
     const url = String(entrada instanceof Request ? entrada.url : entrada);
@@ -539,7 +590,7 @@ async function rodarNoAgente(args: Record<string, unknown>) {
       system: [{ type: "text", text: "teste" }],
       messages: [{ role: "user", content: [{ type: "text", text: "manda o orçamento 86 pro cliente" }] }],
       tools: [tool],
-      toolCtx: amb.ctx("admin"),
+      toolCtx: amb.ctx(opcoes.role ?? "admin"),
       sessionId: "sessao-teste",
     }));
   return { amb, resultado };
@@ -556,7 +607,94 @@ Deno.test("no agente, com autonomia 'auto' gravada: o PDF vira pendência com re
   for (const trecho of ["Cliente Exemplo Silva", "••••0000", "ORÇ-00086", "18.450,50", "PDF anexado"]) {
     assertStringIncludes(resumo, trecho);
   }
+  // Quem pediu vai no resumo (o admin que aprova no painel vê de quem é o pedido) e no
+  // payload (a execução revalida com o cargo dele).
+  assertStringIncludes(resumo, "Pedido por: *Gustavo Dono* (Administrador)");
+  assertEquals(pendencia.payload, { service_order_id: ORC.id, _solicitante: { user_id: "u1", nome: "Gustavo Dono", cargo: "admin" } });
   assert(resultado.proposal, "o turno devolve a proposta para o usuário confirmar");
+});
+
+// ─── 3b. Cargo de QUEM PEDIU (revisão adversarial de 26/09/2026) ─────────────────────────
+// Antes: a pendência do vendedor externo dizia "PDF anexado" e só falhava depois do "sim"; e
+// um admin que a aprovasse no painel mandava o PDF com o cargo DELE.
+Deno.test("no agente: vendedor externo pedindo o PDF é recusado ANTES da pendência — nada no sino, nada enviado", async () => {
+  for (const args of [{ service_order_id: ORC.id }, { service_order_id: ORC.id, formato: "pdf_e_link" }]) {
+    const { amb, resultado } = await rodarNoAgente(args, { role: "external_seller", settings: {} });
+    assertEquals(amb.banco.inseridos.ai_operator_pending_actions, undefined, JSON.stringify(args));
+    assertEquals(amb.chamadas.pdf.length + amb.chamadas.envio.length, 0);
+    assertEquals(resultado.proposal, undefined);
+    const r = resultado.toolEvents[0].result as any;
+    assertStringIncludes(r.error, "formato 'link'");
+    assertEquals(r.nada_enviado, true);
+  }
+});
+
+Deno.test("no agente: vendedor externo pedindo SÓ o link vira pendência com quem pediu", async () => {
+  const { amb } = await rodarNoAgente({ service_order_id: ORC.id, formato: "link" }, { role: "external_seller", settings: {} });
+  const pendencia = amb.banco.inseridos.ai_operator_pending_actions?.[0];
+  assert(pendencia, "o link continua podendo ser pedido");
+  assertEquals((pendencia.payload as any)._solicitante, { user_id: "u9", nome: "Paulo Externo", cargo: "external_seller" });
+  assertStringIncludes(String(pendencia.summary), "só o link");
+  assertStringIncludes(String(pendencia.summary), "Pedido por: *Paulo Externo* (Vendedor Externo)");
+  assertEquals(amb.chamadas.envio.length, 0);
+});
+
+Deno.test("formato inexistente também é recusado antes da pendência", async () => {
+  const { amb, resultado } = await rodarNoAgente({ service_order_id: ORC.id, formato: "pdf" }, { settings: {} });
+  assertEquals(amb.banco.inseridos.ai_operator_pending_actions, undefined);
+  assertStringIncludes((resultado.toolEvents[0].result as any).error, "não existe");
+});
+
+Deno.test("execução: pendência do vendedor externo aprovada por um admin NÃO manda o PDF", async () => {
+  const amb = montarAmbiente();
+  const payload = { service_order_id: ORC.id, _solicitante: { user_id: "u9", nome: "Paulo Externo", cargo: "external_seller" } };
+  const r = await executar(amb, payload, "admin"); // ctx = quem confirma (admin, u1)
+  assertStringIncludes(r.error, "O cargo de quem pediu (Paulo Externo)");
+  assertStringIncludes(r.error, "formato 'link'");
+  assertEquals(amb.chamadas.pdf.length + amb.chamadas.envio.length, 0);
+  // O link do mesmo vendedor externo, aprovado pelo admin, sai normalmente.
+  const link = await executar(amb, { ...payload, formato: "link" }, "admin");
+  assertEquals(link.ok, true, JSON.stringify(link));
+  assertEquals(amb.chamadas.envio[0].kind, "text");
+});
+
+Deno.test("execução: pendência do vendedor, aprovada por um admin, manda o PDF", async () => {
+  const amb = montarAmbiente();
+  const r = await executar(amb, { service_order_id: ORC.id, _solicitante: { user_id: "u5", nome: "Vendedor", cargo: "seller" } }, "admin");
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(amb.chamadas.envio[0].kind, "document");
+});
+
+Deno.test("execução: _solicitante forjado nos argumentos não amplia o cargo de quem executa", async () => {
+  const amb = montarAmbiente();
+  const forjado = { service_order_id: ORC.id, _solicitante: { user_id: "u1", nome: "Admin", cargo: "admin" } };
+  const r = await executar(amb, forjado, "external_seller");
+  assertStringIncludes(r.error, "formato 'link'");
+  // Cargo torto (ou ausente) no payload nega em vez de liberar.
+  const torto = await executar(amb, { service_order_id: ORC.id, _solicitante: { user_id: "u5", cargo: "dono" } }, "admin");
+  assertStringIncludes(torto.error, "formato 'link'");
+  const semCargo = await executar(amb, { service_order_id: ORC.id, _solicitante: { user_id: "u5" } }, "admin");
+  assertStringIncludes(semCargo.error, "formato 'link'");
+  assertEquals(amb.chamadas.pdf.length + amb.chamadas.envio.length, 0);
+});
+
+Deno.test("execução: pendência ANTIGA, sem _solicitante, vale o cargo de quem executa (por isso a conferência de deploy)", async () => {
+  // Pendências gravadas antes desta versão não sabem quem pediu. Não há como revalidar o cargo
+  // de quem pediu — o passo de produção exige 0 pendências de send_service_order_link abertas.
+  const amb = montarAmbiente();
+  const r = await executar(amb, { service_order_id: ORC.id }, "admin");
+  assertEquals(r.ok, true, JSON.stringify(r));
+});
+
+Deno.test("preValidar da tool e execute usam a mesma checagem", () => {
+  const pv = tool.preValidar!;
+  const ctx = (userRole: string, userId = "u1") => ({ userRole, userId }) as any;
+  assert(pv({ service_order_id: ORC.id }, ctx("external_seller", "u9")));
+  assert(pv({ service_order_id: ORC.id, formato: "pdf_e_link" }, ctx("external_seller", "u9")));
+  assertEquals(pv({ service_order_id: ORC.id, formato: "link" }, ctx("external_seller", "u9")), null);
+  assertEquals(pv({ service_order_id: ORC.id }, ctx("seller")), null);
+  assertStringIncludes(pv({ service_order_id: ORC.id, formato: "pdf" }, ctx("admin"))!.error, "não existe");
+  assertEquals(tool.gravarSolicitante, true);
 });
 
 Deno.test("no agente, com autonomia 'auto' gravada: o link roda direto (Confiança Graduada mantida)", async () => {

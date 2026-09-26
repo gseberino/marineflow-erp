@@ -194,10 +194,13 @@ export const documentoPdfTools: ToolDef[] = [
       const envio = entrega.valor;
       if (!envio.ok) {
         // O whatsapp-send reserva a chave ANTES de chamar a Evolution e só a libera quando ela
-        // responde. Se a tool desistiu no meio (25 s, rede), a reserva ficaria de pé e o
-        // próximo pedido ouviria "já mandei" sem nada entregue. Entre um PDF repetido para si
-        // mesmo e um "já mandei" falso, o repetido é o erro menor.
-        await liberarEnvio(admin, chave).catch(() => {});
+        // responde. Se a tool desistiu no meio (25 s, rede — o `semResposta`), a reserva ficaria
+        // de pé e o próximo pedido ouviria "já mandei" sem nada entregue. Entre um PDF repetido
+        // para si mesmo e um "já mandei" falso, o repetido é o erro menor.
+        // Com resposta definitiva, a chave fica como está: 400/401/500 a edge devolve antes de
+        // reservar (a chave, se existe, é de um envio anterior já concluído — apagá-la faria o
+        // mesmo PDF sair de novo) e no 502 a própria edge já liberou.
+        if (envio.semResposta) await liberarEnvio(admin, chave).catch(() => {});
         return await falha(ctx, ordem, envio.error);
       }
       if (envio.deduplicated) {
