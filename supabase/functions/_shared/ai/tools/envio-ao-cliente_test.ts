@@ -399,11 +399,27 @@ Deno.test("sucesso: sobe no bucket privado, apaga depois e o resultado não tem 
   assertEquals(amb.banco.inseridos.ai_comms_log?.[0]?.status, "sent");
 });
 
+/** Modo de teste como a edge desvia de fato: interruptor ligado E número de teste preenchido. */
+const MODO_TESTE = { wa_test_mode: "true", wa_test_number: "5547988887777" };
+
 Deno.test("modo de teste ligado: não diz que chegou ao cliente", async () => {
-  const amb = montarAmbiente({ settings: { wa_test_mode: "true" } });
+  const amb = montarAmbiente({ settings: MODO_TESTE });
   const r = await executar(amb, { service_order_id: ORC.id });
   assertStringIncludes(r.enviado_para, "TESTE");
   assertStringIncludes(r.observacao, "NÃO para o cliente");
+});
+
+// Conferência de 26/09/2026: a edge só desvia com o modo ligado E um número de teste. Ligado
+// sem número, o PDF vai ao CLIENTE — e a tool dizia "foi para o número de TESTE".
+Deno.test("modo ligado sem número: a edge não desvia, e a tool diz que foi ao cliente", async () => {
+  for (const settings of [{ wa_test_mode: "true" }, { wa_test_mode: "true", wa_test_number: "" }] as Record<string, string>[]) {
+    const amb = montarAmbiente({ settings });
+    const r = await executar(amb, { service_order_id: ORC.id });
+    assertEquals(r.ok, true, JSON.stringify(r));
+    assertStringIncludes(r.enviado_para, "••••0000", JSON.stringify(settings));
+    assert(!r.enviado_para.includes("TESTE"), r.enviado_para);
+    assertEquals(r.observacao, "O cliente recebeu o PDF com o link para ver online e aprovar.");
+  }
 });
 
 // ─── 6. Anti-duplicado pelo conteúdo ─────────────────────────────────────────────────────
@@ -449,19 +465,30 @@ async function chaveComSettings(formato: "pdf_e_link" | "link", settings: Record
 
 Deno.test("modo de teste entra na chave do PDF: o envio de teste não bloqueia o de verdade", async () => {
   const real = await chaveComSettings("pdf_e_link", {});
-  const teste = await chaveComSettings("pdf_e_link", { wa_test_mode: "true" });
-  const testeLegado = await chaveComSettings("pdf_e_link", { zapi_test_mode: "true" });
+  const teste = await chaveComSettings("pdf_e_link", MODO_TESTE);
+  const testeLegado = await chaveComSettings("pdf_e_link", { zapi_test_mode: "true", zapi_test_number: "+55 47 98888-7777" });
   assertNotEquals(real, teste);
   assert(teste.endsWith(":teste"), teste);
   assertEquals(teste, `${real}:teste`, "só a marca muda: mesmo documento, número e dia");
   assertEquals(testeLegado, teste, "a chave antiga (zapi_test_mode) vale igual");
   assert(!real.includes("teste"), real);
-  assertEquals(await chaveComSettings("pdf_e_link", { wa_test_mode: "false" }), real);
+  assertEquals(await chaveComSettings("pdf_e_link", { ...MODO_TESTE, wa_test_mode: "false" }), real);
 });
 
 Deno.test("modo de teste entra na chave do link; fora dele a chave é a de sempre", async () => {
   assertEquals(await chaveComSettings("link", {}), `os-link:${ORC.id}:5547999990000:2026-09-26`);
-  assertEquals(await chaveComSettings("link", { wa_test_mode: "true" }), `os-link:${ORC.id}:5547999990000:2026-09-26:teste`);
+  assertEquals(await chaveComSettings("link", MODO_TESTE), `os-link:${ORC.id}:5547999990000:2026-09-26:teste`);
+});
+
+// Modo ligado sem número: a edge manda ao CLIENTE (não desvia). A chave com ":teste" deixava o
+// cliente receber o mesmo documento de novo quando o modo fosse desligado no mesmo dia (a chave
+// mudava). A chave tem de ser a do cliente — a mesma de sempre.
+Deno.test("modo ligado sem número: a chave é a do cliente, sem a marca de teste", async () => {
+  const real = await chaveComSettings("pdf_e_link", {});
+  assertEquals(await chaveComSettings("pdf_e_link", { wa_test_mode: "true" }), real);
+  assertEquals(await chaveComSettings("pdf_e_link", { wa_test_mode: "true", wa_test_number: "" }), real);
+  assertEquals(await chaveComSettings("pdf_e_link", { zapi_test_mode: "true" }), real);
+  assertEquals(await chaveComSettings("link", { wa_test_mode: "true" }), `os-link:${ORC.id}:5547999990000:2026-09-26`);
 });
 
 Deno.test("impressão digital ignora só o carimbo 'Emitido em'", () => {

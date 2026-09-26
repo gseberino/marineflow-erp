@@ -20,6 +20,7 @@
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
 import { enviarDocumentoWhatsapp } from "./whatsapp.ts";
 import { chaveDeEnvio, liberarEnvio } from "../../whatsapp/idempotencia.ts";
+import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 // O caminho do PDF (montar → renderizar → guardar → entregar → apagar) mora em
 // _shared/pdf/gerar-e-guardar.ts desde 26/09/2026, quando o envio ao CLIENTE passou a usar o
 // mesmo arquivo. Os dois nomes reexportados abaixo continuam saindo daqui: os testes e quem
@@ -206,9 +207,10 @@ export const documentoPdfTools: ToolDef[] = [
       if (envio.deduplicated) {
         return { ok: true, deduplicated: true, aviso: `Esse mesmo PDF (${rotulo} ${numero}) já foi mandado para você há instantes; não reenviei.` };
       }
-      // Modo de teste do WhatsApp: o whatsapp-send desvia TODO envio para o número de teste.
-      // Dizer "chegou para você" seria fingir.
-      const modoTeste = (ctx.settings.wa_test_mode ?? ctx.settings.zapi_test_mode) === "true";
+      // Modo de teste do WhatsApp: o whatsapp-send desvia o envio para o número de teste — dizer
+      // "chegou para você" seria fingir. Ligado SEM número de teste a edge não desvia e o arquivo
+      // chega a quem pediu: por isso a mesma regra da edge, não só o interruptor.
+      const modoTeste = desviadoPorTeste(ctx.settings);
       // Sem URL e sem token: o resultado fica gravado no histórico do agente.
       return {
         ok: true,

@@ -392,8 +392,20 @@ Deno.test("sempre a via do cliente, com valores, mesmo com padrão gravado pedin
 });
 
 Deno.test("modo de teste do WhatsApp ligado: a tool não diz que chegou para quem pediu", async () => {
-  const amb = montarAmbiente({ settings: { wa_test_mode: "true" } });
+  const amb = montarAmbiente({ settings: { wa_test_mode: "true", wa_test_number: "5547988887777" } });
   const r: any = await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
   assertStringIncludes(r.enviado_para, "TESTE");
   assertStringIncludes(r.observacao, "número de teste");
+});
+
+// A edge só desvia com o modo ligado E um número de teste. Ligado sem número, o arquivo chega a
+// quem pediu — a tool dizia "foi para o número de TESTE" e o dono ia procurar no lugar errado.
+Deno.test("modo ligado sem número de teste: a edge não desvia, e a tool diz que chegou a quem pediu", async () => {
+  for (const settings of [{ wa_test_mode: "true" }, { wa_test_mode: "true", wa_test_number: "" }] as Record<string, string>[]) {
+    const amb = montarAmbiente({ settings });
+    const r: any = await comFetch(amb.fetchFalso as any, () => tool.execute({ documento: "ORÇ-00086" }, amb.ctx()));
+    assertEquals(r.ok, true, JSON.stringify(r));
+    assertEquals(r.enviado_para, "o WhatsApp de quem pediu", JSON.stringify(settings));
+    assert(!r.observacao.includes("teste"), r.observacao);
+  }
 });

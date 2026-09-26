@@ -13,6 +13,7 @@ import { registrarEnvio } from "../comms/send-log.ts";
 import { documentTypeFor } from "../../pdf/document-type.ts";
 import { fmtCurrency } from "../../pdf/documento.ts";
 import { guardarEEntregar, impressaoDigitalDoDocumento, montarDocumentoDaOrdem } from "../../pdf/gerar-e-guardar.ts";
+import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -572,12 +573,15 @@ export const whatsappTools: ToolDef[] = [
       // confere destino, modo de teste e status). OS vai como 'service_order' — só o vínculo.
       const contexto = documentTypeFor(so.status) === "quote" ? "quote" as const : "service_order" as const;
       const digitos = String(phone).replace(/\D/g, "");
-      // Modo de teste: o whatsapp-send desvia TODO envio para o número de teste (e aí não marca
-      // o orçamento como enviado). Entra nas chaves anti-duplicado: sem isso, o envio de teste
+      // Modo de teste: o whatsapp-send desvia o envio para o número de teste (e aí não marca o
+      // orçamento como enviado). Entra nas chaves anti-duplicado: sem isso, o envio de teste
       // reservava a chave do CLIENTE e, desligado o modo no mesmo dia, o envio de verdade ouvia
-      // "já foi enviado hoje" — sem o cliente ter recebido nada. Fora do modo de teste a parte
-      // some (chaveDeEnvio descarta null) e a chave é a mesma de sempre.
-      const modoTeste = (settings.wa_test_mode ?? settings.zapi_test_mode) === "true";
+      // "já foi enviado hoje" — sem o cliente ter recebido nada. Fora do desvio a parte some
+      // (chaveDeEnvio descarta null) e a chave é a mesma de sempre.
+      // A pergunta é "a edge VAI desviar?", não "o interruptor está ligado?": ligado sem número
+      // de teste a edge manda ao cliente — a chave tem de ser a do cliente e o resultado não
+      // pode dizer "foi para o teste". Por isso a mesma função da edge (marcar-enviado.ts).
+      const modoTeste = desviadoPorTeste(settings);
       const marcaDeTeste = modoTeste ? "teste" : null;
 
       if (formato === "link") {
