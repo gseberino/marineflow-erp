@@ -2,7 +2,7 @@
 // Cada regra sabe (a) achar entidades em condição e (b) dizer se a condição
 // de uma tarefa viva já se resolveu. Dedupe via automation_key (índice único
 // parcial agenda_tasks_automation_key_live). Plano: plans/marineflow-agenda-tarefas.md §6.
-import { ultimoDiaDaValidade, validadeDoOrcamento } from '../_shared/pdf/documento.ts';
+import { ultimoDiaDaValidade, validadeDoOrcamento, vencimentoDoOrcamento } from '../_shared/pdf/documento.ts';
 import { diaBR, somarDiasAoDia } from '../_shared/pdf/datas.ts';
 
 export interface RuleCandidate {
@@ -798,20 +798,10 @@ async function ajustesDeValidade(db: any): Promise<Record<string, unknown>> {
   return { quote_validity_days: data?.value };
 }
 
-/**
- * O último dia da validade (aaaa-mm-dd) se o orçamento já venceu em `agora`, pelo
- * calendário de Brasília; null se ainda vale. Vence no dia SEGUINTE ao "até" do PDF:
- * "Válido por 3 dias (até 22/09)" ainda vale no dia 22 inteiro.
- */
-export function vencimentoDoOrcamento(
-  orcamento: { created_at?: string | null; quote_validity_date?: string | null; quote_validity_days?: unknown },
-  settings: Record<string, unknown>,
-  agora: Date = new Date(),
-): string | null {
-  const fim = ultimoDiaDaValidade(orcamento, settings);
-  if (!fim) return null;
-  return diaBR(agora) > fim ? fim : null;
-}
+// vencimentoDoOrcamento mora em _shared/pdf/documento.ts desde a revisão final (26/09/2026):
+// o panorama do assistente, o resumo matinal e a confirmação de envio ao cliente fazem a mesma
+// pergunta. Reexportada aqui para quem já a importava desta regra.
+export { vencimentoDoOrcamento };
 
 /** Dias de calendário de `de` até `ate` (aaaa-mm-dd), sem fuso. */
 const diasEntre = (de: string, ate: string) => {

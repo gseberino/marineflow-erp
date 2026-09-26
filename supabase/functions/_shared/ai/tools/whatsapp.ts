@@ -11,8 +11,8 @@ import { chaveDeEnvio, diaLocal, hashCurto, liberarEnvio } from "../../whatsapp/
 import { guardaDeEnvio } from "../comms/send-guard.ts";
 import { registrarEnvio } from "../comms/send-log.ts";
 import { documentTypeFor } from "../../pdf/document-type.ts";
-import { fmtCurrency, ultimoDiaDaValidade } from "../../pdf/documento.ts";
-import { dataBR, diaBR } from "../../pdf/datas.ts";
+import { fmtCurrency, vencimentoDoOrcamento } from "../../pdf/documento.ts";
+import { dataBR } from "../../pdf/datas.ts";
 import { guardarEEntregar, impressaoDigitalDoDocumento, montarDocumentoDaOrdem } from "../../pdf/gerar-e-guardar.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 
@@ -334,12 +334,12 @@ export async function resumirEnvioAoCliente(
   }
   if (so.status === "cancelled") linhas.push("⚠️ A ordem está CANCELADA — o envio será recusado.");
   // A validade que o PDF vai imprimir, pela MESMA conta do documento e do aviso de vencimento
-  // (ultimoDiaDaValidade). Não bloqueia: reenviar um orçamento vencido para reabrir a conversa é
+  // (vencimentoDoOrcamento). Não bloqueia: reenviar um orçamento vencido para reabrir a conversa é
   // legítimo — mas o dono tem de saber, antes do "sim", que o cliente vai ler uma data passada.
   if (documentTypeFor(so.status) === "quote") {
     const { data: padrao } = await admin.from("app_settings").select("value").eq("key", "quote_validity_days").maybeSingle();
-    const ultimoDia = ultimoDiaDaValidade(so, { quote_validity_days: padrao?.value });
-    if (ultimoDia && diaBR(agora) > ultimoDia) {
+    const ultimoDia = vencimentoDoOrcamento(so, { quote_validity_days: padrao?.value }, agora);
+    if (ultimoDia) {
       linhas.push(`⚠️ A validade acabou em ${dataBR(ultimoDia)}: o PDF sai com essa data, já vencida. Para renovar, mude a validade do orçamento na tela antes de mandar — ou confirme assim mesmo.`);
     }
   }

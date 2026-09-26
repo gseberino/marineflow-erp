@@ -222,6 +222,25 @@ export function ultimoDiaDaValidade(
   return somarDiasAoDia(diaBR(emissao), validade.days);
 }
 
+/**
+ * O último dia da validade (aaaa-mm-dd) se o orçamento já venceu em `agora`, pelo
+ * calendário de Brasília; null se ainda vale. Vence no dia SEGUINTE ao "até" do PDF:
+ * "Válido por 3 dias (até 22/09)" ainda vale no dia 22 inteiro.
+ *
+ * Uma pergunta só para a R19 (task-automations), o panorama do assistente, o resumo matinal e a
+ * confirmação de envio ao cliente. Até 26/09/2026 os dois resumos olhavam só a data fixa
+ * (quote_validity_date, quase sempre vazia) e nunca davam orçamento nenhum por expirado.
+ */
+export function vencimentoDoOrcamento(
+  orcamento: { created_at?: string | null; quote_validity_date?: string | null; quote_validity_days?: unknown },
+  settings?: Record<string, unknown> | null,
+  agora: Date = new Date(),
+): string | null {
+  const fim = ultimoDiaDaValidade(orcamento, settings);
+  if (!fim) return null;
+  return diaBR(agora) > fim ? fim : null;
+}
+
 export type PDFData = {
   documentType: PDFDocumentType;
   company: {

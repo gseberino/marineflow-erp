@@ -12,6 +12,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { ultimoDiaDaValidade } from "../_shared/pdf/documento.ts";
+import { diaBR, somarDiasAoDia } from "../_shared/pdf/datas.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -57,7 +59,7 @@ servirComCors(async (req) => {
     const { data: cfgRows } = await admin
       .from("app_settings")
       .select("key, value")
-      .in("key", ["company_name", "digest_show_low_stock"]);
+      .in("key", ["company_name", "digest_show_low_stock", "quote_validity_days"]);
     const cfg: Record<string, string> = {};
     for (const r of (cfgRows as any[]) || []) if (r?.key) cfg[String(r.key)] = String(r.value ?? "");
     const companyName = cfg["company_name"] || "MarineFlow";
@@ -360,19 +362,25 @@ servirComCors(async (req) => {
     // Orçamento recém-mexido não polui o digest. Ordena pelos mais parados primeiro.
     const { data: openQuotes } = await admin
       .from("service_orders")
-      .select("service_order_number, grand_total, updated_at, quote_validity_date, clients(name)")
+      .select("service_order_number, grand_total, updated_at, quote_status, created_at, quote_validity_days, quote_validity_date, clients(name)")
       .eq("status", "draft")
       .in("quote_status", ["sent", "awaiting_approval", "awaiting_deposit"])
       .order("updated_at", { ascending: true })
       .limit(20);
     const todayMid = new Date(`${todayISO}T00:00:00`).getTime();
+    // O dia de Brasília: a edge roda em UTC, e depois das 21h o dia UTC já é o seguinte.
+    const hojeBR = diaBR(now);
+    const daqui3Dias = somarDiasAoDia(hojeBR, 3);
     const quoteLines: string[] = [];
     const flaggedQuotes = ((openQuotes as any[]) || [])
       .map((q: any) => {
         const dias = Math.floor((now.getTime() - new Date(q.updated_at).getTime()) / 86400000);
-        const vd = q.quote_validity_date ? new Date(`${q.quote_validity_date}T00:00:00`).getTime() : null;
-        const expired = vd !== null && vd < todayMid;
-        const expiringSoon = vd !== null && !expired && vd <= todayMid + 3 * 86400000;
+        // O mesmo "até" do PDF e da R19 (ultimoDiaDaValidade). Até 26/09/2026 só a data fixa
+        // contava, e ela quase nunca existe: nenhum orçamento aparecia expirado. Aprovado
+        // aguardando sinal não expira — o cliente já disse sim (a R19 também o deixa de fora).
+        const fim = q.quote_status === "awaiting_deposit" ? null : ultimoDiaDaValidade(q, cfg);
+        const expired = !!fim && hojeBR > fim;
+        const expiringSoon = !!fim && !expired && fim <= daqui3Dias;
         const nome = Array.isArray(q.clients) ? q.clients[0]?.name : q.clients?.name;
         return { nome: nome || "(sem cliente)", valor: Number(q.grand_total || 0), dias, expired, expiringSoon };
       })
