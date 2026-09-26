@@ -2,6 +2,8 @@
 // Cada regra sabe (a) achar entidades em condição e (b) dizer se a condição
 // de uma tarefa viva já se resolveu. Dedupe via automation_key (índice único
 // parcial agenda_tasks_automation_key_live). Plano: plans/marineflow-agenda-tarefas.md §6.
+import { ultimoDiaDaValidade } from '../_shared/pdf/documento.ts';
+import { diaBR } from '../_shared/pdf/datas.ts';
 
 export interface RuleCandidate {
   automation_key: string;
@@ -765,7 +767,116 @@ const r17: Rule = {
   },
 };
 
-export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15, r16, r17, r18];
+// R19: o orçamento passou da validade — AVISO, nunca rejeição.
+//
+// Decisão do dono (26/09/2026). Até ali a rotina quote-reminders rejeitava em silêncio, sem
+// audit_log, todo orçamento com 7 dias de CRIAÇÃO (app_settings.quote_expiry_days, que não é
+// a validade escrita no PDF), inclusive os já aprovados aguardando sinal: foram R$ 133 mil
+// em 23-24/09, e o cron foi pausado. Agora o vencimento vira uma tarefa e quem decide é o
+// dono: renovar a validade (a tarefa fecha sozinha) ou rejeitar. Esta regra não mexe no
+// orçamento e não manda nada ao cliente.
+//
+// O vencimento é o MESMO "até" que o cliente lê no PDF (ultimoDiaDaValidade, em
+// _shared/pdf/documento.ts): validade do próprio orçamento, senão o padrão da empresa,
+// contada do dia de Brasília da emissão. Avisar num dia e o documento dizer outro seria o
+// erro de antes pelo avesso.
+//
+// 'awaiting_deposit' (aprovado, aguardando sinal) fica de fora de propósito: o cliente já
+// disse sim, e a validade já cumpriu o papel dela. Era exatamente o caso do ORÇ-00095.
+//
+// A chave leva o último dia da validade: renovar e vencer de novo é uma decisão NOVA e
+// precisa de tarefa nova. Com a chave só do orçamento, a dispensa manual da primeira
+// silenciaria a segunda por uma semana (isManualDismissal).
+
+/** Status comerciais em que o orçamento ainda espera resposta do cliente. */
+const AGUARDANDO_CLIENTE = ['sent', 'awaiting_approval'];
+
+/** Padrão da empresa para a validade. `find` só recebe o db, então a regra lê aqui. */
+async function ajustesDeValidade(db: any): Promise<Record<string, unknown>> {
+  const { data } = await db.from('app_settings')
+    .select('value').eq('key', 'quote_validity_days').maybeSingle();
+  return { quote_validity_days: data?.value };
+}
+
+/**
+ * O último dia da validade (aaaa-mm-dd) se o orçamento já venceu em `agora`, pelo
+ * calendário de Brasília; null se ainda vale. Vence no dia SEGUINTE ao "até" do PDF:
+ * "Válido por 3 dias (até 22/09)" ainda vale no dia 22 inteiro.
+ */
+export function vencimentoDoOrcamento(
+  orcamento: { created_at?: string | null; quote_validity_date?: string | null; quote_validity_days?: unknown },
+  settings: Record<string, unknown>,
+  agora: Date = new Date(),
+): string | null {
+  const fim = ultimoDiaDaValidade(orcamento, settings);
+  if (!fim) return null;
+  return diaBR(agora) > fim ? fim : null;
+}
+
+const r19: Rule = {
+  id: 'r19',
+  label: 'Orçamento vencido: renovar ou rejeitar?',
+  defaultEnabled: true,
+  async find(db) {
+    const [{ data, error }, settings] = await Promise.all([
+      db.from('service_orders')
+        .select('id, service_order_number, client_id, grand_total, created_at, quote_validity_days, quote_validity_date, clients(name)')
+        .eq('status', 'draft')
+        .is('converted_to_os_at', null)
+        .in('quote_status', AGUARDANDO_CLIENTE)
+        .limit(500),
+      ajustesDeValidade(db),
+    ]);
+    // Erro de consulta não pode virar "nenhum orçamento vencido" (ver R17): levantar faz o
+    // motor registrar a falha com o id da regra.
+    if (error) throw error;
+    const agora = new Date();
+    return (data || []).flatMap((o: any) => {
+      const fim = vencimentoDoOrcamento(o, settings, agora);
+      if (!fim) return [];
+      const cliente = o.clients?.name;
+      return [{
+        automation_key: keyOf('r19', 'quote', o.id, fim),
+        title: `Orçamento ${o.service_order_number} venceu em ${fmtDate(fim).slice(0, 5)} — renovar ou rejeitar?` +
+          (cliente ? ` (${cliente})` : ''),
+        priority: 'high' as const,
+        // A decisão é comercial e é do dono, não de quem digitou o orçamento.
+        assignee: 'admin' as const,
+        due_at: dueAt(diaBR(agora)),
+        related_entity_type: 'service_order',
+        related_entity_id: o.id,
+        client_id: o.client_id,
+        notes: `Valia até ${fmtDate(fim)} (${fmtBRL(Number(o.grand_total))}). O orçamento NÃO foi rejeitado: ` +
+          'para renovar, aumente a validade no orçamento (esta tarefa fecha sozinha); ' +
+          'se o cliente desistiu, marque como rejeitado. Nada foi enviado ao cliente.',
+      }];
+    });
+  },
+  async isResolved(db, task) {
+    const id = entityIdFromKey(task.automation_key);
+    const venceuEm = task.automation_key.split(':')[3];
+    const [{ data }, settings] = await Promise.all([
+      db.from('service_orders')
+        .select('status, quote_status, converted_to_os_at, created_at, quote_validity_days, quote_validity_date')
+        .eq('id', id).maybeSingle(),
+      ajustesDeValidade(db),
+    ]);
+    if (!data) return 'Orçamento não existe mais';
+    // O mesmo filtro do find, na mesma ordem da R6.
+    if (!AGUARDANDO_CLIENTE.includes(data.quote_status)) return `Orçamento mudou para ${data.quote_status}`;
+    if (data.converted_to_os_at) return 'Orçamento convertido em OS';
+    if (data.status !== 'draft') return `Deixou de ser orçamento (${data.status})`;
+    const fim = ultimoDiaDaValidade(data, settings);
+    if (!fim) return null;
+    if (!vencimentoDoOrcamento(data, settings)) return `Validade renovada até ${fmtDate(fim)}`;
+    // Mexeram na validade e ela continua vencida: fecha esta, e o find abre a nova com a
+    // data certa no título (senão ficariam duas tarefas vivas para o mesmo orçamento).
+    if (fim !== venceuEm) return `Validade alterada (agora até ${fmtDate(fim)})`;
+    return null;
+  },
+};
+
+export const RULES: Rule[] = [r1, r2, r3, r4, r5, r6, r7, r8, r11, r12, r14, r15, r16, r17, r18, r19];
 
 export function ruleById(id: string): Rule | undefined {
   return RULES.find((r) => r.id === id);
