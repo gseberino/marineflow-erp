@@ -2,6 +2,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { lerEmPaginas } from '@/lib/ler-em-paginas';
+import { totaisPorFavorecido, type LancamentoDoFavorecido } from '@/lib/favorecidos-no-ano';
 
 export type TipoFavorecido = 'socio' | 'funcionario' | 'diarista' | 'prestador' | 'comissionado';
 
@@ -68,6 +70,25 @@ export function usePayees(apenasAtivos = true) {
       if (error) throw error;
       return (data ?? []) as unknown as Favorecido[];
     },
+    staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * O que cada favorecido recebeu num ano, e o que ainda falta pagar (ver favorecidos-no-ano).
+ * Em páginas: o servidor corta em 1.000 linhas sem avisar.
+ */
+export function useTotaisDosFavorecidos(ano: number) {
+  return useQuery({
+    queryKey: ['payees-totais-do-ano', ano],
+    queryFn: async () => totaisPorFavorecido(await lerEmPaginas<LancamentoDoFavorecido>((de, ate) => supabase
+      .from('payables')
+      .select('id, payee_id, amount, paid_amount, status, expense_category')
+      .not('payee_id', 'is', null)
+      .gte('issue_date', `${ano}-01-01`)
+      .lte('issue_date', `${ano}-12-31`)
+      .order('id')
+      .range(de, ate))),
     staleTime: 5 * 60_000,
   });
 }

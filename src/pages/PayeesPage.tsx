@@ -17,8 +17,11 @@ import {
 } from '@/components/ui/tooltip';
 import { PayeeFormDialog } from '@/components/PayeeFormDialog';
 import {
-  usePayees, useSalvarPayee, ROTULO_TIPO, type Favorecido, type TipoFavorecido,
+  usePayees, useSalvarPayee, useTotaisDosFavorecidos, ROTULO_TIPO, type Favorecido, type TipoFavorecido,
 } from '@/hooks/use-payees';
+import { somaDosFavorecidos, type TotalDoFavorecido } from '@/lib/favorecidos-no-ano';
+import { hojeLocal } from '@/lib/dia';
+import { useI18n } from '@/i18n';
 import { Plus, Pencil, Search, UserX, UserCheck, KeyRound, Landmark } from 'lucide-react';
 
 const TONS: Record<TipoFavorecido, string> = {
@@ -37,9 +40,50 @@ function mascara(doc: string | null): string | null {
   return doc;
 }
 
+const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
+
+/** O que a pessoa recebeu no ano, por categoria — pró-labore, retirada e reembolso separados. */
+function RecebidoNoAno({ total, ano }: { total: TotalDoFavorecido | undefined; ano: number }) {
+  const { formatCurrency } = useI18n();
+  if (!total || (total.pago === 0 && total.aPagar === 0)) {
+    return <p className="mt-1.5 text-xs text-muted-foreground">Nada pago em {ano}.</p>;
+  }
+  if (total.pago === 0) {
+    return (
+      <p className="mt-1.5 text-xs text-muted-foreground">
+        Nada pago em {ano} · <span className="text-warning">a pagar {formatCurrency(total.aPagar)}</span>
+      </p>
+    );
+  }
+  return (
+    <div className="mt-1.5 space-y-0.5 text-xs">
+      <p>
+        Recebeu em {ano}: <span className="font-semibold tabular-nums">{formatCurrency(total.pago)}</span>
+        <span className="text-muted-foreground"> · {plural(total.pagamentos, 'pagamento', 'pagamentos')}</span>
+        {total.aPagar > 0 && (
+          <span className="text-warning"> · a pagar {formatCurrency(total.aPagar)}</span>
+        )}
+      </p>
+      {total.porCategoria.length > 1 && (
+        <p className="text-muted-foreground">
+          {total.porCategoria.map((c) => `${c.categoria} ${formatCurrency(c.valor)}`).join(' · ')}
+        </p>
+      )}
+      {total.porCategoria.length === 1 && (
+        <p className="text-muted-foreground">Tudo em {total.porCategoria[0].categoria}</p>
+      )}
+    </div>
+  );
+}
+
 export default function PayeesPage() {
   const { data: favorecidos = [], isLoading } = usePayees(false);   // inclui inativos
   const salvar = useSalvarPayee();
+  const { formatCurrency } = useI18n();
+
+  const anoAtual = Number(hojeLocal().slice(0, 4));
+  const [ano, setAno] = useState(anoAtual);
+  const totais = useTotaisDosFavorecidos(ano);
 
   const [busca, setBusca] = useState('');
   const [filtroTipo, setFiltroTipo] = useState<TipoFavorecido | 'todos'>('todos');
@@ -61,6 +105,12 @@ export default function PayeesPage() {
     for (const f of favorecidos) c[f.kind] = (c[f.kind] ?? 0) + 1;
     return c;
   }, [favorecidos]);
+
+  // O total da lista em tela: com a aba "Sócios", é o que os sócios receberam no ano.
+  const somaDaLista = useMemo(
+    () => (totais.data ? somaDosFavorecidos(visiveis.map((f) => f.id), totais.data) : null),
+    [totais.data, visiveis],
+  );
 
   const alternarAtivo = (f: Favorecido) =>
     salvar.mutate({ id: f.id, active: !f.active });
@@ -89,6 +139,15 @@ export default function PayeesPage() {
                 className="pl-8"
               />
             </div>
+            {/* O ano dos totais: o atual e o anterior (o do informe de rendimentos). */}
+            <div className="flex items-center gap-1" role="group" aria-label="Ano dos totais">
+              {[anoAtual, anoAtual - 1].map((a) => (
+                <Button key={a} size="sm" variant={a === ano ? 'secondary' : 'ghost'} aria-pressed={a === ano}
+                  onClick={() => setAno(a)}>
+                  {a}
+                </Button>
+              ))}
+            </div>
           </div>
 
           <Tabs value={filtroTipo} onValueChange={(v) => setFiltroTipo(v as never)}>
@@ -101,6 +160,19 @@ export default function PayeesPage() {
               ))}
             </TabsList>
           </Tabs>
+
+          {totais.isError ? (
+            <p className="text-sm text-destructive">
+              Não consegui somar o que foi pago em {ano}. Os cadastros abaixo estão certos; os valores, não aparecem.
+            </p>
+          ) : somaDaLista && visiveis.length > 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Pago em {ano} a quem está nesta lista:{' '}
+              <span className="font-semibold tabular-nums text-foreground">{formatCurrency(somaDaLista.pago)}</span>
+              {' '}({plural(somaDaLista.pagamentos, 'pagamento', 'pagamentos')})
+              {somaDaLista.aPagar > 0 && <> · a pagar {formatCurrency(somaDaLista.aPagar)}</>}
+            </p>
+          ) : null}
 
           {isLoading ? (
             <div className="space-y-2">
@@ -150,6 +222,8 @@ export default function PayeesPage() {
                           )}
                           {f.default_category && <span>Padrão: {f.default_category}</span>}
                         </div>
+
+                        {totais.data && <RecebidoNoAno total={totais.data.get(f.id)} ano={ano} />}
                       </div>
 
                       <div className="flex shrink-0 gap-1">
