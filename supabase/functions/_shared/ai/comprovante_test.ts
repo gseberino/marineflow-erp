@@ -57,6 +57,12 @@ Deno.test("comprovante: nota a prazo não é pagamento, e a linha dela não se p
   assertEquals(c.itens[0], "- compra a prazo | vencimentos: 20/10/2026, 20/11/2026");
 });
 
+Deno.test("comprovante: Pix no crédito é lido à parte (chega na fatura sem nome, como o débito)", () => {
+  const c = lerComprovante("COMPROVANTE | loja: FULANO DE TAL | cnpj: 123.456.789-01 | data: 06/04/2026 | total: 395,00 | pagamento: pix no crédito")!;
+  assertEquals(c.pagamento, "pix_credito");
+  assertEquals(mensagemDoComprovante(c, null).includes("pago por Pix no crédito"), true);
+});
+
 Deno.test("comprovante: imagem que não é comprovante não vira nada", () => {
   assertEquals(lerComprovante("- Bateria 105Ah | unitário: R$ 890,00 | prazo: 5 dias"), null);
   assertEquals(lerComprovante(""), null);

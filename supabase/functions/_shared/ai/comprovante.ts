@@ -16,7 +16,8 @@ export interface Comprovante {
   /** 'AAAA-MM-DD' */
   data: string | null;
   total: number | null;
-  pagamento: 'debito' | 'credito' | 'pix' | 'dinheiro' | 'boleto' | null;
+  /** pix_credito: Pix pago com o cartão de crédito — chega na fatura como "Pagamento de pix", sem nome. */
+  pagamento: 'debito' | 'credito' | 'pix' | 'pix_credito' | 'dinheiro' | 'boleto' | null;
   /** As linhas de itens que vieram depois da linha do comprovante. */
   itens: string[];
 }
@@ -33,9 +34,9 @@ export function fotoDeQuemUsaOFinanceiro(cargo?: string | null): boolean {
 export const PEDIDO_DE_LEITURA_AUTO = `Você recebeu uma imagem ou PDF enviado pelo WhatsApp por alguém da empresa.
 
 1) Se for CUPOM FISCAL, NOTA FISCAL, RECIBO ou COMPROVANTE DE PAGAMENTO (cartão, Pix, boleto ou dinheiro), responda na PRIMEIRA linha exatamente neste formato, sem nada antes:
-COMPROVANTE | loja: <nome do estabelecimento ou de quem recebeu> | cnpj: <os dígitos do CNPJ ou CPF de quem RECEBEU, ou não informado> | data: <dd/mm/aaaa, ou não informada> | total: <valor total pago, com vírgula nos centavos, ex. 64,80> | pagamento: <débito, crédito, pix, dinheiro, boleto ou não informado>
+COMPROVANTE | loja: <nome do estabelecimento ou de quem recebeu> | cnpj: <os dígitos do CNPJ ou CPF de quem RECEBEU, ou não informado> | data: <dd/mm/aaaa, ou não informada> | total: <valor total pago, com vírgula nos centavos, ex. 64,80> | pagamento: <débito, crédito, pix, pix no crédito, dinheiro, boleto ou não informado>
 Depois, em até 5 linhas, os itens principais no formato "- <item> | R$ <valor>".
-Regras: NÃO invente. O que não estiver legível no documento é "não informado". O total é o valor PAGO (com desconto), não a soma dos itens se houver diferença. "Cartão de débito"/"débito" é débito; "cartão de crédito"/"crédito" é crédito; Pix pago com cartão de crédito ("Pix no crédito") é crédito.
+Regras: NÃO invente. O que não estiver legível no documento é "não informado". O total é o valor PAGO (com desconto), não a soma dos itens se houver diferença. "Cartão de débito"/"débito" é débito; "cartão de crédito"/"crédito" é crédito; Pix pago com cartão de crédito ("Pix no crédito", "Pix com cartão") é "pix no crédito".
 O CNPJ/CPF é o de quem RECEBEU o dinheiro (a loja, o recebedor do Pix, o beneficiário do boleto) — nunca o de quem pagou.
 Nota fiscal (NF-e/DANFE) só prova pagamento se disser que foi paga à vista: com duplicatas ou vencimentos (compra a prazo), escreva "pagamento: não informado" e, na linha dos itens, "- compra a prazo | vencimentos: <datas>".
 
@@ -47,6 +48,7 @@ const PAGAMENTOS: Record<string, Comprovante['pagamento']> = {
   'debito': 'debito', 'débito': 'debito',
   'credito': 'credito', 'crédito': 'credito',
   'pix': 'pix', 'dinheiro': 'dinheiro', 'boleto': 'boleto',
+  'pix no crédito': 'pix_credito', 'pix no credito': 'pix_credito', 'pix crédito': 'pix_credito', 'pix credito': 'pix_credito',
 };
 
 const naoInformado = (v: string) => /^n[ãa]o\s+informad[oa]$/i.test(v.trim()) || v.trim() === '';
@@ -128,7 +130,7 @@ const cnpjFormatado = (c: string) => c.length === 11
   : `CNPJ ${c.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')}`;
 const dataFormatada = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
 const COMO_FOI_PAGO: Record<NonNullable<Comprovante['pagamento']>, string> = {
-  debito: 'no débito', credito: 'no crédito', pix: 'por Pix', dinheiro: 'em dinheiro', boleto: 'por boleto',
+  debito: 'no débito', credito: 'no crédito', pix: 'por Pix', pix_credito: 'por Pix no crédito', dinheiro: 'em dinheiro', boleto: 'por boleto',
 };
 
 /**

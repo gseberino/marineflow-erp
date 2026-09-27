@@ -194,7 +194,7 @@ export function ConciliacaoPanel() {
 
         {verProblemas && (
           <span className="flex items-center gap-1 rounded-lg border px-2 py-1 text-sm">
-            Só os com diferença
+            Só os que pedem conferência
             <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setSoProblemas(false)}>
               Ver todos
             </Button>
