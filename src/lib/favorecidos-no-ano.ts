@@ -75,8 +75,10 @@ export function totaisPorFavorecido(
     let id = l.payee_id;
     let lancadoEm: string | null = null;
     if (!id) {
-      const pelaLinha = doDocumento(l.documento_da_linha);
-      id = pelaLinha ?? doDocumento(l.documento_do_fornecedor);
+      // A linha do banco diz para onde o dinheiro foi: se ela tem documento, só ela decide (o
+      // documento de outra pessoa na linha não vira pagamento ao favorecido do fornecedor ligado).
+      const daLinha = documentoNormalizado(l.documento_da_linha);
+      id = daLinha.length === 11 || daLinha.length === 14 ? doDocumento(daLinha) : doDocumento(l.documento_do_fornecedor);
       if (!id) continue;
       lancadoEm = l.nome_do_fornecedor?.trim() || 'sem cadastro ligado';
     }
@@ -93,10 +95,11 @@ export function totaisPorFavorecido(
       const categoria = l.expense_category?.trim() || 'Sem categoria';
       t.categorias.set(categoria, (t.categorias.get(categoria) ?? 0) + pago);
     }
-    if (lancadoEm) {
+    // O que entrou pelo documento conta como o "Recebeu": só o que foi pago.
+    if (lancadoEm && pago > 0) {
       const d = t.documento.get(lancadoEm) ?? { lancamentos: 0, valor: 0 };
       d.lancamentos += 1;
-      d.valor += valor;
+      d.valor += pago;
       t.documento.set(lancadoEm, d);
     }
     soma.set(id, t);

@@ -97,6 +97,21 @@ describe('pelo mesmo CPF/CNPJ, sem o favorecido ligado (documento igual identifi
     expect(t.size).toBe(0);
   });
 
+  it('linha do banco com o documento de OUTRA pessoa: o dinheiro foi para ela, não para o favorecido do fornecedor', () => {
+    const t = totaisPorFavorecido([
+      semLigar(400, { documento_da_linha: '55566677788', documento_do_fornecedor: '123.456.789-01', nome_do_fornecedor: 'GUSTAVO SEBERINO' }),
+    ], favorecidos);
+    expect(t.has('gus')).toBe(false);
+  });
+
+  it('"Inclui N lançamentos" soma só o pago, como o "Recebeu"', () => {
+    const t = totaisPorFavorecido([
+      semLigar(500, { documento_da_linha: '12345678901' }),
+      { ...semLigar(300, { documento_da_linha: '12345678901' }), status: 'pending', paid_amount: 0 },
+    ], favorecidos);
+    expect(t.get('gus')).toMatchObject({ pago: 500, aPagar: 300, peloDocumento: [{ lancadoEm: 'sem cadastro ligado', lancamentos: 1, valor: 500 }] });
+  });
+
   it('CPF que perdeu o zero à esquerda (planilha) ainda é o mesmo', () => {
     const t = totaisPorFavorecido([semLigar(70, { documento_da_linha: '1234567890' })], [{ id: 'z', document: '01234567890' }]);
     expect(t.get('z')?.pago).toBe(70);
