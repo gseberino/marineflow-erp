@@ -31,6 +31,7 @@ import { V2Shell } from '@/v2/components/V2Shell';
 import { AvisoAbasMudaram } from '@/v2/components/AvisoAbasMudaram';
 import { AjudaDoExtrato } from '@/components/FluxoDoExtrato';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { comoDiaLocal, diasAte } from '@/lib/dia';
 import { PainelDeCobrancas } from '@/v2/pages/CollectionsV2';
 import '@/v2/tokens.css';
 
@@ -53,7 +54,8 @@ const ABAS = [
 const PAGE_SIZE = 25;
 
 function isOverdue(r: ReceivableRow): boolean {
-  return r.status !== 'paid' && r.status !== 'cancelled' && new Date(r.due_date) < new Date();
+  // Vencimento é um dia do calendário (src/lib/dia.ts): a conta que vence hoje não está em atraso.
+  return r.status !== 'paid' && r.status !== 'cancelled' && !!r.due_date && diasAte(r.due_date) < 0;
 }
 
 function statusView(r: ReceivableRow): { label: string; tone: StatusTone } {
@@ -67,9 +69,8 @@ function statusView(r: ReceivableRow): { label: string; tone: StatusTone } {
 /** Alerta de vencimento (porte do getDueDateAlert v1, tonalizado por token). */
 function dueAlert(r: ReceivableRow): { label: string; tone: StatusTone } | null {
   if (r.status === 'paid' || r.status === 'cancelled') return null;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const due = new Date(r.due_date); due.setHours(0, 0, 0, 0);
-  const diff = Math.round((due.getTime() - today.getTime()) / 86400000);
+  if (!r.due_date) return null;
+  const diff = diasAte(r.due_date);
   if (diff < 0) return { label: `${Math.abs(diff)}d em atraso`, tone: 'critical' };
   if (diff === 0) return { label: 'Vence hoje', tone: 'critical' };
   if (diff <= 7) return { label: `Vence em ${diff}d`, tone: 'warning' };
@@ -282,7 +283,7 @@ export default function ReceivablesV2() {
     exportToCSV(filtered as never[], 'recebiveis', [
       { key: 'description', label: 'Descrição' },
       { key: 'amount', label: 'Valor', format: (v: number | null) => Number(v || 0).toFixed(2).replace('.', ',') },
-      { key: 'due_date', label: 'Vencimento', format: (v: string | null) => (v ? new Date(v).toLocaleDateString('pt-BR') : '') },
+      { key: 'due_date', label: 'Vencimento', format: (v: string | null) => (v ? comoDiaLocal(v).toLocaleDateString('pt-BR') : '') },
       { key: 'status', label: 'Status' },
       { key: 'clients', label: 'Cliente', format: (v: { name?: string } | null) => v?.name || '' },
     ] as never);

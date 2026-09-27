@@ -27,7 +27,8 @@ const mesDoFluxo = {
   transferencias: { entrou: 0, saiu: 153 }, creditoDoCartao: { entrou: 0, saiu: 0 },
 };
 
-vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: { id: 'u1', role: 'admin' } }) }));
+const { papel } = vi.hoisted(() => ({ papel: { atual: 'admin' } }));
+vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: { id: 'u1', role: papel.atual } }) }));
 vi.mock('@/hooks/use-fluxo-de-caixa', () => ({
   useFluxoDeCaixa: () => ({
     isLoading: false, error: null,
@@ -190,6 +191,18 @@ describe('Central de relatórios', () => {
     expect(screen.queryByText('Pagamento de fatura de cartão')).not.toBeInTheDocument();
     await user.click(screen.getByRole('switch'));
     expect(screen.getByText('Pagamento de fatura de cartão')).toBeInTheDocument();
+    // Admin vê tudo: nada de aviso de total incompleto.
+    expect(screen.queryByText(/os totais abaixo estão/)).not.toBeInTheDocument();
+  });
+
+  it('Para onde foi o dinheiro: quem não é admin é avisado de que pró-labore e folha não entram', async () => {
+    papel.atual = 'financial';
+    try {
+      renderCentral('/v2/reports/categorias');
+      expect(await screen.findByText(/Pró-labore e folha não aparecem no seu perfil, então os totais abaixo estão/)).toBeInTheDocument();
+    } finally {
+      papel.atual = 'admin';
+    }
   });
 
   it('Quem deve e a quem devo: alterna entre A receber e A pagar, com as mesmas faixas', async () => {

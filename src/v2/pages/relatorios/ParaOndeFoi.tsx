@@ -4,7 +4,9 @@
 // cartão com o total e uma barrinha por mês, que cabe no celular.
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Lock } from 'lucide-react';
 import { useI18n } from '@/i18n';
+import { useAuth } from '@/hooks/use-auth';
 import { useDespesasDosMeses } from '@/hooks/use-despesas-por-categoria';
 import { ROTULO_DO_GRUPO } from '@/hooks/use-despesas';
 import { montarDespesasPorCategoria } from '@/lib/despesas-por-categoria';
@@ -39,6 +41,10 @@ function BarrasDosMeses({ meses, valores, escala, className }: {
 
 export function ParaOndeFoi() {
   const { formatCurrency } = useI18n();
+  const { user } = useAuth();
+  // Quem não é admin não enxerga pró-labore nem folha (a RLS os oculta): sem dizer, os totais
+  // parecem completos e ninguém tem como desconfiar — o mesmo aviso do DRE.
+  const veTudo = user?.role === 'admin';
   const { data, isLoading, error } = useDespesasDosMeses(6);
   const [incluirFora, setIncluirFora] = useState(false);
   const r = useMemo(
@@ -74,6 +80,16 @@ export function ParaOndeFoi() {
           </Ajuda>
         </div>
       </div>
+
+      {!veTudo && (
+        <p className="flex items-start gap-2 rounded-lg border border-info/40 bg-info/10 p-3 text-sm text-info">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Pró-labore e folha não aparecem no seu perfil, então os totais abaixo estão
+            <strong> incompletos</strong>. Peça a versão completa a um administrador.
+          </span>
+        </p>
+      )}
 
       <div className="rounded-lg border bg-card p-3">
         <p className="mb-2 text-xs font-medium text-muted-foreground">Total de cada mês</p>

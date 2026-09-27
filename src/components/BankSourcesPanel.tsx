@@ -16,7 +16,7 @@ import { Upload } from 'lucide-react';
  * enterrada atrás de uma sub-aba e o usuário não a encontrava.
  */
 export function BankSourcesPanel() {
-  const { t, formatCurrency } = useI18n();
+  const { t, formatCurrency, formatDate } = useI18n();
   const importMutation = useImportBankTransactions();
   const [preview, setPreview] = useState<BankTransaction[] | null>(null);
   const [previewSource, setPreviewSource] = useState<'bank' | 'credit_card'>('bank');
@@ -103,31 +103,24 @@ export function BankSourcesPanel() {
             </div>
           )}
           <p className="font-medium">{preview.length} transações encontradas</p>
-          <div className="max-h-64 overflow-x-auto scrollbar-thin">
-            <table className="w-full text-sm min-w-[520px]">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-1 px-2">{t.common.date}</th>
-                  <th className="text-left py-1 px-2">{t.common.description}</th>
-                  <th className="text-left py-1 px-2">{t.common.type}</th>
-                  <th className="text-right py-1 px-2">{t.common.amount}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {preview.slice(0, 10).map((tx, i) => (
-                  <tr key={i} className="border-b last:border-0">
-                    <td className="py-1 px-2">{tx.transaction_date}</td>
-                    <td className="py-1 px-2 truncate max-w-[220px]">{tx.description}</td>
-                    <td className="py-1 px-2">
-                      <StatusBadge className={tx.transaction_type === 'credit' ? 'bg-success/15 text-success' : 'bg-destructive/10 text-destructive'}>
-                        {tx.transaction_type === 'credit' ? 'Entrada' : 'Saída'}
-                      </StatusBadge>
-                    </td>
-                    <td className="py-1 px-2 text-right font-medium tabular-nums">{formatCurrency(tx.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Lista, não tabela: a tabela de 520px rolava de lado no celular (princípio nº 0 do dono). */}
+          <div className="max-h-64 overflow-y-auto scrollbar-thin">
+            <ul className="divide-y text-sm">
+              {preview.slice(0, 10).map((tx, i) => (
+                <li key={i} className="flex min-w-0 items-center justify-between gap-3 py-1.5">
+                  <div className="min-w-0">
+                    <p className="truncate">{tx.description}</p>
+                    <p className="text-xs text-muted-foreground tabular-nums">{formatDate(tx.transaction_date)}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <StatusBadge className={tx.transaction_type === 'credit' ? 'bg-success/15 text-success' : 'bg-destructive/10 text-destructive'}>
+                      {tx.transaction_type === 'credit' ? 'Entrada' : 'Saída'}
+                    </StatusBadge>
+                    <span className="font-medium tabular-nums">{formatCurrency(tx.amount)}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
             {preview.length > 10 && (
               <p className="text-sm text-muted-foreground mt-1">e mais {preview.length - 10}...</p>
             )}

@@ -9,6 +9,7 @@ import { Ban, Download, DollarSign, Paperclip, Pencil, Plus, Undo2 } from 'lucid
 import { useI18n } from '@/i18n';
 import { usePayables } from '@/hooks/use-financial';
 import { exportToCSV } from '@/lib/export';
+import { comoDiaLocal, diasAte } from '@/lib/dia';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -48,7 +49,8 @@ type PayableRow = {
 /** Situações de uma conta que ainda se deve — o recorte com que Contas a Pagar abre. */
 const STATUS_EM_ABERTO = ['pending', 'partially_paid', 'overdue'];
 
-const isOverdue = (p: PayableRow) => p.status !== 'paid' && p.status !== 'cancelled' && new Date(p.due_date) < new Date();
+// Vencimento é um dia do calendário (src/lib/dia.ts): a conta que vence hoje não está em atraso.
+const isOverdue = (p: PayableRow) => p.status !== 'paid' && p.status !== 'cancelled' && !!p.due_date && diasAte(p.due_date) < 0;
 
 function statusView(p: PayableRow): { label: string; tone: StatusTone } {
   if (isOverdue(p)) return { label: 'Em atraso', tone: 'critical' };
@@ -60,9 +62,8 @@ function statusView(p: PayableRow): { label: string; tone: StatusTone } {
 
 function dueAlert(p: PayableRow): { label: string; tone: StatusTone } | null {
   if (p.status === 'paid' || p.status === 'cancelled') return null;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const due = new Date(p.due_date); due.setHours(0, 0, 0, 0);
-  const diff = Math.round((due.getTime() - today.getTime()) / 86400000);
+  if (!p.due_date) return null;
+  const diff = diasAte(p.due_date);
   if (diff < 0) return { label: `${Math.abs(diff)}d em atraso`, tone: 'critical' };
   if (diff === 0) return { label: 'Vence hoje', tone: 'critical' };
   if (diff <= 7) return { label: `Vence em ${diff}d`, tone: 'warning' };
@@ -85,7 +86,7 @@ function groupPayables(payables: PayableRow[], groupBy: GroupBy): Record<string,
   const keyOf = (p: PayableRow) => {
     if (groupBy === 'category') return p.expense_category || 'Sem categoria';
     if (groupBy === 'supplier') return p.suppliers?.name || p.name || 'Sem fornecedor';
-    return new Date(p.due_date).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    return p.due_date ? comoDiaLocal(p.due_date).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }) : 'Sem vencimento';
   };
   for (const p of payables) {
     const k = keyOf(p);
@@ -310,7 +311,7 @@ export function ContasAPagarLista({ onNovaConta }: {
               exportToCSV(filteredPayables as never[], 'pagaveis', [
                 { key: 'description', label: 'Descrição' },
                 { key: 'amount', label: 'Valor', format: (v: number | null) => Number(v || 0).toFixed(2).replace('.', ',') },
-                { key: 'due_date', label: 'Vencimento', format: (v: string | null) => (v ? new Date(v).toLocaleDateString('pt-BR') : '') },
+                { key: 'due_date', label: 'Vencimento', format: (v: string | null) => (v ? comoDiaLocal(v).toLocaleDateString('pt-BR') : '') },
                 { key: 'status', label: 'Status' },
                 { key: 'name', label: 'Fornecedor' },
               ] as never)

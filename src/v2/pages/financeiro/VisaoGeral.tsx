@@ -15,6 +15,8 @@ import { PaymentDialog } from '@/components/PaymentDialog';
 import { SaldosDasContas } from '@/components/SaldosDasContas';
 import { AjudaDoExtrato, FicouDeFora } from '@/components/FluxoDoExtrato';
 import { KPIStat } from '@/v2/components/KPIStat';
+import { hojeLocal } from '@/lib/dia';
+import { somarDias } from '@/lib/fluxo-de-caixa';
 
 type ContaCurta = {
   id: string;
@@ -41,10 +43,11 @@ export function VisaoGeral() {
   const receivables = useMemo(() => (recData ?? []) as unknown as ContaCurta[], [recData]);
   const payables = useMemo(() => (payData ?? []) as unknown as ContaCurta[], [payData]);
 
-  const today = new Date();
-  const in30 = new Date(today.getTime() + 30 * 86400000);
-  const upcomingRec = receivables.filter((r) => r.status !== 'paid' && r.status !== 'cancelled' && new Date(r.due_date) <= in30).slice(0, 5);
-  const upcomingPay = payables.filter((p) => p.status !== 'paid' && p.status !== 'cancelled' && new Date(p.due_date) <= in30).slice(0, 5);
+  // Vencimento é um dia do calendário: compara o texto 'AAAA-MM-DD', sem fuso no caminho.
+  const em30 = somarDias(hojeLocal(), 30);
+  const vencePorAte30 = (c: ContaCurta) => c.status !== 'paid' && c.status !== 'cancelled' && !!c.due_date && String(c.due_date).slice(0, 10) <= em30;
+  const upcomingRec = receivables.filter(vencePorAte30).slice(0, 5);
+  const upcomingPay = payables.filter(vencePorAte30).slice(0, 5);
   const periodBalance = (cashFlow ?? []).reduce((s: number, m: { net: number }) => s + m.net, 0);
   const erro = (summaryError || recError || payError) as Error | null;
 
