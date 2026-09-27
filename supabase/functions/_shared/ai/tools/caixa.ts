@@ -52,22 +52,70 @@ export function escolherPorNome<T extends { id: string; nome: string }>(
   return { nenhum: true };
 }
 
-type Pessoa = { id: string; nome: string; tipo: "favorecido" | "fornecedor" | "cliente"; categoria?: string | null; kind?: string };
+type Pessoa = {
+  id: string; nome: string; tipo: "favorecido" | "fornecedor" | "cliente"; categoria?: string | null; kind?: string;
+  /** CPF/CNPJ do cadastro, se houver. */
+  documento?: string | null;
+};
 
 async function listaDePessoas(ctx: ToolCtx): Promise<Pessoa[]> {
   const [fav, forn, cli] = await Promise.all([
-    ctx.admin.from("payees").select("id, name, default_category, kind").eq("active", true).limit(1000),
-    ctx.admin.from("suppliers").select("id, name, trade_name").limit(3000),
-    ctx.admin.from("clients").select("id, name").limit(3000),
+    ctx.admin.from("payees").select("id, name, default_category, kind, document").eq("active", true).limit(1000),
+    ctx.admin.from("suppliers").select("id, name, trade_name, cnpj_cpf").limit(3000),
+    ctx.admin.from("clients").select("id, name, cpf_cnpj").limit(3000),
   ]);
   return [
-    ...((fav.data ?? []) as any[]).map((p) => ({ id: p.id, nome: p.name, tipo: "favorecido" as const, categoria: p.default_category, kind: p.kind })),
+    ...((fav.data ?? []) as any[]).map((p) => ({
+      id: p.id, nome: p.name, tipo: "favorecido" as const, categoria: p.default_category, kind: p.kind, documento: p.document ?? null,
+    })),
     ...((forn.data ?? []) as any[]).flatMap((s) => [
-      { id: s.id, nome: s.name, tipo: "fornecedor" as const },
-      ...(s.trade_name ? [{ id: s.id, nome: s.trade_name, tipo: "fornecedor" as const }] : []),
+      { id: s.id, nome: s.name, tipo: "fornecedor" as const, documento: s.cnpj_cpf ?? null },
+      ...(s.trade_name ? [{ id: s.id, nome: s.trade_name, tipo: "fornecedor" as const, documento: s.cnpj_cpf ?? null }] : []),
     ]),
-    ...((cli.data ?? []) as any[]).map((c) => ({ id: c.id, nome: c.name, tipo: "cliente" as const })),
+    ...((cli.data ?? []) as any[]).map((c) => ({ id: c.id, nome: c.name, tipo: "cliente" as const, documento: c.cpf_cnpj ?? null })),
   ];
+}
+
+/** Só os dígitos, com o zero à esquerda que planilha costuma comer (como _doc_normalizado). */
+function docNormalizado(p: unknown): string {
+  const d = String(p ?? "").replace(/\D/g, "");
+  return d.length === 13 ? d.padStart(14, "0") : d.length === 10 ? d.padStart(11, "0") : d;
+}
+
+/**
+ * Os dois documentos existem e NÃO são da mesma pessoa/empresa: CPF diferente, ou CNPJ de outra
+ * raiz (filial é a mesma empresa). O mesmo que _documento_contradiz no banco.
+ */
+export function documentoContradiz(a: unknown, b: unknown): boolean {
+  const x = docNormalizado(a);
+  const y = docNormalizado(b);
+  if (x.length < 11 || y.length < 11) return false;
+  if (x.length !== y.length) return true;
+  if (x.length === 14) return x.slice(0, 8) !== y.slice(0, 8);
+  return x !== y;
+}
+
+const docFormatado = (d: unknown) => {
+  const x = docNormalizado(d);
+  return x.length === 14 ? x.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5")
+    : x.length === 11 ? x.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4") : String(d ?? "");
+};
+
+/**
+ * Nome e CPF/CNPJ ditos juntos têm de ser da mesma pessoa. O documento dito vale no lugar do
+ * cadastro na identidade da anotação — com o nome de um e o documento de outro, o Pix da loja
+ * entraria como do Roberto: nome e documento diferentes (regra P1 do dono; revisão de 27/09/2026).
+ * Contradiz → pergunta. Cadastro sem documento → não dá para conferir: a confirmação diz.
+ */
+function conferirDocumentoDoCadastro(pessoa: Pessoa, documento: unknown): { error: string } | { semDocumentoNoCadastro: boolean } {
+  if (!documento) return { semDocumentoNoCadastro: false };
+  if (documentoContradiz(documento, pessoa.documento)) {
+    return {
+      error: `O documento ${docFormatado(documento)} não é o de ${pessoa.nome} (no cadastro: ${docFormatado(pessoa.documento)}). ` +
+        `Qual dos dois vale? Para ${pessoa.nome}, anote sem o documento; para o documento, sem o nome.`,
+    };
+  }
+  return { semDocumentoNoCadastro: docNormalizado(pessoa.documento).length < 11 };
 }
 
 /** CPF/CNPJ dito → as duas formas que os cadastros guardam: só os dígitos e a máscara padrão. */
@@ -275,12 +323,16 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
     let quem: string | null = null;
     let pessoa: Pessoa | null = null;
     let documentoSemCadastro = false;
+    let cadastroSemDocumento = false;
     if (args.quem) {
       const todas = await listaDePessoas(ctx);
       const alvo = args.sentido === "entrada" ? todas.filter((x) => x.tipo === "cliente") : todas.filter((x) => x.tipo !== "cliente");
       const r = escolherPorNome(String(args.quem), alvo);
       if ("ambiguo" in r) return `⚠️ Qual "${args.quem}"? ${r.ambiguo.map((x) => `${x.nome} (${x.tipo})`).join("; ")}`;
       if ("nenhum" in r) return `⚠️ Não achei "${args.quem}". Cadastre antes ou diga como está no cadastro.`;
+      const conferido = conferirDocumentoDoCadastro(r.achado, args.documento);
+      if ("error" in conferido) return `⚠️ ${conferido.error}`;
+      cadastroSemDocumento = conferido.semDocumentoNoCadastro;
       pessoa = r.achado;
       quem = `${r.achado.nome} (${r.achado.tipo})`;
     } else if (args.documento) {
@@ -304,6 +356,9 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
       `- Quando chegar do banco: ${args.sentido === "entrada" ? "entrada" : "saída"} de *${brl.format(Number(args.valor) || 0)}* (${quando})`,
       args.documento ? `- Para o documento ${String(args.documento)}` : null,
       quem ? `- Classificar como: *${quem}*` : null,
+      cadastroSemDocumento
+        ? `- ⚠️ ${pessoa!.nome} não tem CPF/CNPJ no cadastro: não dá para conferir que ${docFormatado(args.documento)} é dele. Confira antes do "sim".`
+        : null,
       cat ? `- Categoria: *${cat.nome}*` : null,
       padrao ? `- Categoria: *${padrao}* (padrão de ${pessoa!.nome})` : null,
       !cat && !padrao && pelo ? `- Categoria: *${pelo.nome}* (pelo texto: ${pelo.motivo})` : null,
@@ -427,6 +482,8 @@ export const caixaTools: ToolDef[] = [
         const r = escolherPorNome(String(args.quem), alvo);
         if ("ambiguo" in r) return { error: `Qual "${args.quem}"? ${r.ambiguo.map((p) => `${p.nome} (${p.tipo})`).join("; ")}` };
         if ("nenhum" in r) return { error: `Não achei "${args.quem}". Cadastre antes ou diga como está no cadastro.` };
+        const conferido = conferirDocumentoDoCadastro(r.achado, args.documento);
+        if ("error" in conferido) return conferido;
         pessoa = r.achado;
       } else if (args.documento) {
         // Sem nome dito, o CPF/CNPJ acha o cadastro (a confirmação mostrou qual).

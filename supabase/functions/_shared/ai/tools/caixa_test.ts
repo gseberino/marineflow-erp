@@ -187,14 +187,45 @@ Deno.test("dois cadastros com o mesmo documento: pergunta qual, sem gravar", asy
   assertEquals(gravou, false);
 });
 
-Deno.test("entrada com CNPJ procura só cliente; nome dito vence o documento", async () => {
+Deno.test("entrada com CNPJ procura só cliente", async () => {
+  let chamada: any = null;
+  const c = ctx((n, a) => { chamada = { n, a }; return Promise.resolve({ data: { ok: true }, error: null }); });
+  await caixaTools.find((x) => x.name === "anotar_transacao_do_banco")!.execute({ sentido: "entrada", valor: 300, documento: "98765432000110", os: "60" }, c as never);
+  assertEquals(chamada.a.p_cliente_id, "c-mp");
+});
+
+Deno.test("nome de um e documento de outro: pergunta qual vale, sem gravar (regra P1; revisão de 27/09)", async () => {
+  // Antes passava: o documento dito toma o lugar do cadastro na identidade da anotação, e o Pix
+  // da loja (CNPJ 12.345.678/0001-90) entraria como do Roberto (CPF 123.456.789-01).
+  let gravou = false;
+  const c = ctx(() => { gravou = true; return Promise.resolve({ data: {}, error: null }); });
+  const args = { valor: 100, quem: "roberto", documento: "12345678000190", categoria: "peças" };
+  const txt = String(await resumirPedido(c as never, "anotar_transacao_do_banco", args));
+  assertStringIncludes(txt, "O documento 12.345.678/0001-90 não é o de Roberto Carlos da Silva (no cadastro: 123.456.789-01)");
+  const r = await caixaTools.find((x) => x.name === "anotar_transacao_do_banco")!.execute(args, c as never) as { error?: string };
+  assertStringIncludes(String(r.error), "Qual dos dois vale?");
+  assertEquals(gravou, false);
+});
+
+Deno.test("nome e documento da mesma pessoa passam; cadastro sem documento avisa na confirmação", async () => {
   let chamada: any = null;
   const c = ctx((n, a) => { chamada = { n, a }; return Promise.resolve({ data: { ok: true }, error: null }); });
   const t = caixaTools.find((x) => x.name === "anotar_transacao_do_banco")!;
-  await t.execute({ sentido: "entrada", valor: 300, documento: "98765432000110", os: "60" }, c as never);
-  assertEquals(chamada.a.p_cliente_id, "c-mp");
-  await t.execute({ valor: 100, quem: "roberto", documento: "12345678000190", categoria: "peças" }, c as never);
-  assertEquals([chamada.a.p_favorecido_id, chamada.a.p_fornecedor_id], ["p-rob", null]);
+  await t.execute({ valor: 100, quem: "roberto", documento: "123.456.789-01" }, c as never);
+  assertEquals([chamada.a.p_favorecido_id, chamada.a.p_documento], ["p-rob", "123.456.789-01"]);
+  // O sócio não tem CPF no cadastro: não dá para conferir — a confirmação diz, e o "sim" decide.
+  const txt = String(await resumirPedido(c as never, "anotar_transacao_do_banco", { valor: 100, quem: "gustavo", documento: "11122233344", categoria: "peças" }));
+  assertStringIncludes(txt, "Gustavo Seberino da Silva não tem CPF/CNPJ no cadastro: não dá para conferir que 111.222.333-44 é dele");
+});
+
+Deno.test("documentoContradiz: CPF diferente ou CNPJ de outra raiz; filial é a mesma empresa; faltando um, não contradiz", async () => {
+  const { documentoContradiz } = await import("./caixa.ts");
+  assertEquals(documentoContradiz("12.345.678/0001-90", "12345678000271"), false); // filial
+  assertEquals(documentoContradiz("12.345.678/0001-90", "98765432000110"), true);
+  assertEquals(documentoContradiz("12345678901", "12345678000190"), true);         // CPF × CNPJ
+  assertEquals(documentoContradiz("123.456.789-01", "12345678901"), false);
+  assertEquals(documentoContradiz("1234567890", "01234567890"), false);           // zero comido
+  assertEquals(documentoContradiz("12345678901", null), false);
 });
 
 Deno.test("gastos_por_categoria: fatura, empréstimo e transferência ficam fora do total", async () => {
