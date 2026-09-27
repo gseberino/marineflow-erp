@@ -11,14 +11,24 @@
 //   · a fatura FECHADA ainda não quitada vence no dia de pagamento; a do ciclo ABERTO leva as
 //     compras feitas até hoje (e as parcelas já lançadas até o fechamento) para o vencimento
 //     seguinte;
-//   · o dono paga o C6 em pedaços ao longo do mês: pagamento feito depois do vencimento anterior
-//     e até o vencimento da fechada (os dois com 5 dias de tolerância para atraso) é da fechada;
-//     depois disso, é adiantamento da aberta;
+//   · o dono paga em pedaços e às vezes atrasado. Cada fatura tem a sua janela de pagamento:
+//     depois do vencimento da anterior e até o dela (os dois com 5 dias de tolerância). O que
+//     cai na janela paga primeiro o que ainda falta da fatura ANTERIOR (pagamento atrasado) e
+//     depois a dela; o que vem depois da janela da fechada paga primeiro o que falta dela e só
+//     então é adiantamento da aberta. Três faturas entram na conta: a anterior, a fechada e a
+//     aberta (revisão de 27/09/2026: o Nubank pagou a de maio 10 e 22 dias depois do vencimento,
+//     e a regra só com a fechada via a de junho como paga e a de maio como vencida);
 //   · pago na fechada MAIS do que as compras que o extrato do cartão mostra nela não abate a
 //     aberta: no dado real (C6, setembro/2026) a fatura foi paga em R$ 1.860,81 e o extrato só
 //     trouxe R$ 362,55 de compras — faltam compras no extrato, não houve adiantamento. Levar a
 //     "sobra" para a aberta zerava a fatura seguinte e a previsão voltava a dizer que sobrava
-//     dinheiro (revisão de 27/09/2026). Vira aviso de extrato incompleto;
+//     dinheiro. Vira aviso de extrato incompleto (a partir de R$ 50 — abaixo disso é centavo,
+//     IOF ou juro);
+//   · "Saldo em atraso" e "Saldo em rotativo" não são compra: é o cartão mudando de lugar uma
+//     dívida de fatura anterior, que já é contada pela falta daquela fatura (o par vem com
+//     "Crédito de atraso" no mesmo dia). Contá-los dobrava a dívida: em 15/08/2026 o Nubank
+//     aparecia devendo R$ 1.622,44 da fatura de agosto, e eram R$ 122,05 — os R$ 1.500,39
+//     rolados de junho tinham sido pagos em 20/07;
 //   · o cartão às vezes registra o mesmo pagamento duas vezes ("Inclusão de Pagamento" e
 //     "Pagamento recebido", mesmo dia e valor, contra um só débito na conta): conta uma vez.
 // Gastos que se repetem — categoria que apareceu em pelo menos 3 dos 4 últimos meses completos,
@@ -106,6 +116,11 @@ function noDia(ano: number, mes: number, d: number): string {
   return `${a}-${String(m).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
 }
 
+/** A dívida de uma fatura anterior mudada de lugar pelo cartão — não é compra (ver o cabeçalho). */
+const ROLAGEM_DE_DIVIDA = /saldo em atraso|saldo em rotativo/i;
+/** Abaixo disto, pago a mais é centavo, IOF ou juro — não é sinal de extrato incompleto. */
+const AVISO_MINIMO = 50;
+
 const compraValida = (l: LinhaDoCartao) => l.transaction_type === 'debit'
   && !['duplicata', 'estornada'].includes(l.dismissed_kind ?? '')
   && l.import_batch_id !== LOTE_DE_JULHO;
@@ -176,13 +191,16 @@ export function fechamentosEmVolta(hoje: string, c: CicloDoCartao): { anterior: 
 }
 
 /**
- * As faturas de UM cartão que ainda vão sair do caixa: a fechada que o pagamento não cobriu e
- * a aberta, com as compras feitas até hoje.
+ * As faturas de UM cartão que ainda vão sair do caixa: o que falta da anterior e da fechada (o
+ * pagamento não cobriu) e a aberta, com as compras feitas até hoje.
  */
 export function faturasDoCartao(conta: string, linhas: LinhaDoCartao[], hoje: string): FaturasDoCartao {
   const ciclo = inferirCiclo(linhas);
   if (!ciclo) return { faturas: [], pagoAlemDoExtrato: 0, fechada: { fechamento: '', compras: 0, pago: 0 } };
   const { anterior, ultimo, proximo } = fechamentosEmVolta(hoje, ciclo);
+  const [anoDaAnterior, mesDaAnterior] = anterior.split('-').map(Number);
+  const anteAnterior = fechamentoDoMes(anoDaAnterior, mesDaAnterior - 1, ciclo);
+  const vencimentoDaAnteAnterior = vencimentoDaFatura(anteAnterior, ciclo);
   const vencimentoDaAnterior = vencimentoDaFatura(anterior, ciclo);
   const vencimentoDaFechada = vencimentoDaFatura(ultimo, ciclo);
   const vencimentoDaAberta = vencimentoDaFatura(proximo, ciclo);
@@ -203,43 +221,67 @@ export function faturasDoCartao(conta: string, linhas: LinhaDoCartao[], hoje: st
     });
   };
 
-  const comprasDaFechada = linhas.filter((l) => compraValida(l) && entre(l, anterior, ultimo));
+  const centavos = (v: number) => Math.round(v * 100) / 100;
+  /** Compras de um ciclo — sem a dívida antiga que o cartão só mudou de lugar. */
+  const comprasEntre = (de: string, ate: string) => linhas.filter((l) =>
+    compraValida(l) && !ROLAGEM_DE_DIVIDA.test(String(l.description ?? '')) && entre(l, de, ate));
+  const comprasDaAnterior = comprasEntre(anteAnterior, anterior);
+  const comprasDaFechada = comprasEntre(anterior, ultimo);
   // Até o fechamento, não só até hoje: a parcela de uma compra antiga já vem com a data futura
   // em que cai (Coremma 3/4 em outubro) e é cobrança certa desta fatura.
-  const comprasDaAberta = linhas.filter((l) => compraValida(l) && entre(l, ultimo, proximo));
-  // O dono paga o C6 em pedaços ao longo do mês. Até 5 dias depois de um vencimento, o pagamento
-  // ainda é daquela fatura (pago com atraso): depois do vencimento anterior e até o da fechada, é
-  // da fechada; depois disso, adiantamento da aberta.
-  const inicioDaFechada = somarDias(vencimentoDaAnterior, DIAS_DE_ATRASO_DA_ANTERIOR);
-  const fimDaFechada = somarDias(vencimentoDaFechada, DIAS_DE_ATRASO_DA_ANTERIOR);
-  const pagamentos = semRepetir(linhas.filter((l) => pagamentoValido(l) && entre(l, inicioDaFechada, hoje)));
-  const pagosDaFechada = somaEm(pagamentos.filter((l) => entre(l, inicioDaFechada, fimDaFechada)));
-  const pagosDaAberta = somaEm(pagamentos.filter((l) => entre(l, fimDaFechada, hoje)));
+  const comprasDaAberta = comprasEntre(ultimo, proximo);
 
+  // A janela de pagamento de cada fatura: do vencimento da fatura de antes (+5 dias) ao dela (+5).
+  const fimDaJanela = (vencimento: string) => somarDias(vencimento, DIAS_DE_ATRASO_DA_ANTERIOR);
+  const pagamentos = semRepetir(linhas.filter((l) => pagamentoValido(l) && entre(l, fimDaJanela(vencimentoDaAnteAnterior), hoje)));
+  const pagoEntre = (de: string, ate: string) => somaEm(pagamentos.filter((l) => entre(l, de, ate)));
+  const naJanelaDaAnterior = pagoEntre(fimDaJanela(vencimentoDaAnteAnterior), fimDaJanela(vencimentoDaAnterior));
+  const naJanelaDaFechada = pagoEntre(fimDaJanela(vencimentoDaAnterior), fimDaJanela(vencimentoDaFechada));
+  const depoisDaFechada = pagoEntre(fimDaJanela(vencimentoDaFechada), hoje);
+
+  // O que cai na janela da fechada paga primeiro o que ainda faltava da anterior (atraso).
+  const faltavaDaAnterior = Math.max(0, centavos(somaEm(comprasDaAnterior) - naJanelaDaAnterior));
+  const atrasoDaAnterior = Math.min(naJanelaDaFechada, faltavaDaAnterior);
+  const paraAFechada = centavos(naJanelaDaFechada - atrasoDaAnterior);
   const totalFechada = somaEm(comprasDaFechada);
-  const faltaDaFechada = Math.max(0, Math.round((totalFechada - pagosDaFechada) * 100) / 100);
+  const faltavaDaFechada = Math.max(0, centavos(totalFechada - paraAFechada));
   // O que foi pago a mais na fechada NÃO abate a aberta (ver o cabeçalho): vira aviso.
-  const pagoAlemDoExtrato = Math.max(0, Math.round((pagosDaFechada - totalFechada) * 100) / 100);
-  const faltaDaAberta = Math.max(0, Math.round((somaEm(comprasDaAberta) - pagosDaAberta) * 100) / 100);
+  const pagoAlemDoExtrato = Math.max(0, centavos(paraAFechada - totalFechada));
+  // O que vem depois da janela da fechada paga primeiro o que ainda falta (anterior, depois a
+  // fechada); só o resto é adiantamento da aberta.
+  const cobreAnterior = Math.min(depoisDaFechada, centavos(faltavaDaAnterior - atrasoDaAnterior));
+  const cobreFechada = Math.min(centavos(depoisDaFechada - cobreAnterior), faltavaDaFechada);
+  const adiantado = centavos(depoisDaFechada - cobreAnterior - cobreFechada);
+  const faltaDaAnterior = centavos(faltavaDaAnterior - atrasoDaAnterior - cobreAnterior);
+  const faltaDaFechada = centavos(faltavaDaFechada - cobreFechada);
+  const faltaDaAberta = Math.max(0, centavos(somaEm(comprasDaAberta) - adiantado));
+  const pagoDaFechada = centavos(paraAFechada + cobreFechada);
 
   const faturas: FaturaPrevista[] = [];
   // Menos de R$ 1 é arredondamento do cartão, não conta a pagar.
+  if (faltaDaAnterior >= 1) {
+    faturas.push({
+      conta, valor: faltaDaAnterior, vencimento: vencimentoDaAnterior, fechamento: anterior,
+      situacao: 'fechada', vencida: vencimentoDaAnterior < hoje, compras: comprasDaAnterior.length,
+      pago: centavos(naJanelaDaAnterior + atrasoDaAnterior + cobreAnterior),
+    });
+  }
   if (faltaDaFechada >= 1) {
     faturas.push({
       conta, valor: faltaDaFechada, vencimento: vencimentoDaFechada, fechamento: ultimo,
-      situacao: 'fechada', vencida: vencimentoDaFechada < hoje, compras: comprasDaFechada.length, pago: pagosDaFechada,
+      situacao: 'fechada', vencida: vencimentoDaFechada < hoje, compras: comprasDaFechada.length, pago: pagoDaFechada,
     });
   }
   if (faltaDaAberta >= 1) {
     faturas.push({
       conta, valor: faltaDaAberta, vencimento: vencimentoDaAberta, fechamento: proximo,
-      situacao: 'aberta', vencida: false, compras: comprasDaAberta.length, pago: pagosDaAberta,
+      situacao: 'aberta', vencida: false, compras: comprasDaAberta.length, pago: adiantado,
     });
   }
   return {
     faturas,
-    pagoAlemDoExtrato: pagoAlemDoExtrato >= 1 ? pagoAlemDoExtrato : 0,
-    fechada: { fechamento: ultimo, compras: totalFechada, pago: pagosDaFechada },
+    pagoAlemDoExtrato: pagoAlemDoExtrato >= AVISO_MINIMO ? pagoAlemDoExtrato : 0,
+    fechada: { fechamento: ultimo, compras: totalFechada, pago: pagoDaFechada },
   };
 }
 

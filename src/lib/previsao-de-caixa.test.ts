@@ -110,6 +110,55 @@ describe('fatura de um cartão', () => {
     expect(faturasDoCartao('C6', linhas, '2026-09-27').faturas).toEqual([expect.objectContaining({ situacao: 'aberta', valor: 80 })]);
   });
 
+  it('pagamento atrasado da fechada (depois da janela) paga a fechada, não adianta a aberta', () => {
+    // Revisão de 27/09: o Nubank pagou a fatura de maio 10 e 22 dias depois do vencimento; a regra
+    // levava esse pagamento para a aberta e mostrava a fechada como vencida.
+    // Vence em 25/09 (tolerância até 30/09); R$ 100 no dia e R$ 500 só em 03/10.
+    const linhas = [
+      ...historicoC6(), compra('2026-08-20', 400), compra('2026-09-10', 200), pagamento('2026-09-25', 100),
+      compra('2026-09-20', 150), pagamento('2026-10-03', 500),
+    ];
+    const r = faturasDoCartao('C6', linhas, '2026-10-05');
+    expect(inferirCiclo(linhas)).toEqual({ diaDeFechamento: 17, diaDePagamento: 25 });
+    expect(r.faturas).toEqual([expect.objectContaining({ situacao: 'aberta', valor: 150, pago: 0 })]);
+  });
+
+  it('pagamento atrasado da ANTERIOR, na janela da fechada, paga primeiro a anterior', () => {
+    // Anterior (18/07 a 17/08) com R$ 500 e só R$ 300 pagos na janela dela; em 02/09 chegam R$ 600:
+    // R$ 200 terminam a anterior e R$ 400 pagam a fechada inteira — nada de "pago a mais".
+    const base = [...historicoC6(), compra('2026-08-10', 200), compra('2026-08-20', 400)];
+    const quitou = faturasDoCartao('C6', [...base, pagamento('2026-09-02', 600)], '2026-09-27');
+    expect(quitou.faturas).toEqual([]);
+    expect(quitou.pagoAlemDoExtrato).toBe(0);
+    // Só R$ 300: a anterior fecha e a fechada fica devendo R$ 300.
+    const emParte = faturasDoCartao('C6', [...base, pagamento('2026-09-02', 300)], '2026-09-27');
+    expect(emParte.faturas).toEqual([expect.objectContaining({ situacao: 'fechada', fechamento: '2026-09-17', valor: 300, vencida: true, pago: 100 })]);
+    // Nada: o resto da anterior também aparece, vencido.
+    const nada = faturasDoCartao('C6', base, '2026-09-27');
+    expect(nada.faturas).toEqual([
+      expect.objectContaining({ situacao: 'fechada', fechamento: '2026-08-17', valor: 200, vencida: true, pago: 300 }),
+      expect.objectContaining({ situacao: 'fechada', fechamento: '2026-09-17', valor: 400, vencida: true, pago: 0 }),
+    ]);
+  });
+
+  it('"Saldo em atraso" é dívida antiga mudada de lugar, não compra: não dobra a conta', () => {
+    // O par do Nubank: débito "Saldo em atraso" e crédito "Crédito de atraso", mesmo dia e valor.
+    const linhas = [
+      ...historicoC6(), compra('2026-09-20', 150),
+      compra('2026-09-22', 916.75, null, { description: 'Saldo em atraso' }),
+      { transaction_date: '2026-09-22', amount: 916.75, transaction_type: 'credit', description: 'Crédito de atraso' },
+      compra('2026-09-23', 34.13, null, { description: 'Saldo em rotativo' }),
+    ];
+    expect(faturasDoCartao('C6', linhas, '2026-09-27').faturas).toEqual([expect.objectContaining({ situacao: 'aberta', valor: 150 })]);
+  });
+
+  it('pago a mais de até R$ 50 é centavo, IOF ou juro: não vira aviso', () => {
+    const pouco = faturasDoCartao('C6', [...historicoC6(), compra('2026-08-20', 400), pagamento('2026-09-24', 430)], '2026-09-27');
+    expect(pouco.pagoAlemDoExtrato).toBe(0);
+    const muito = faturasDoCartao('C6', [...historicoC6(), compra('2026-08-20', 400), pagamento('2026-09-24', 460)], '2026-09-27');
+    expect(muito.pagoAlemDoExtrato).toBe(60);
+  });
+
   it('sem ciclo conhecido, nada — e nenhum aviso inventado', () => {
     expect(faturasDoCartao('X', [compra('2026-09-01', 50)], '2026-09-27')).toEqual({ faturas: [], pagoAlemDoExtrato: 0, fechada: { fechamento: '', compras: 0, pago: 0 } });
   });
