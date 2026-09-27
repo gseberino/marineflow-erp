@@ -34,6 +34,13 @@ export interface LancamentoParaConciliar {
   /** lançamento − extrato. Só existe quando há par. */
   diferenca: number | null;
   /**
+   * Compra parcelada casada com UMA parcela: o lançamento é a compra inteira e o extrato mostra
+   * a parcela, então a diferença é esperada e não é erro (20260927120000).
+   */
+  compra_parcelada?: boolean;
+  /** Em quantas vezes, quando a linha do extrato é uma parcela ("3/6" → 6). */
+  parcelas?: number | null;
+  /**
    * Nasceu da aprovação de uma linha do extrato (e não foi só casado com ela). Muda o que
    * "desfazer" significa: o que nasceu é cancelado e a linha volta para a fila; o que já
    * existia só perde o vínculo.
@@ -93,8 +100,9 @@ export function useLancamentosConciliados(apenasComDiferenca = false) {
         .select('*')
         .eq('situacao', 'conciliado');
       // `neq(0)` sozinho descartaria os nulos junto; aqui diferença nula não existe entre
-      // conciliados, mas deixar explícito evita surpresa se a view mudar.
-      if (apenasComDiferenca) q = q.neq('diferenca', 0);
+      // conciliados, mas deixar explícito evita surpresa se a view mudar. Compra parcelada casada
+      // com uma parcela tem a diferença esperada e não entra na lista de diferenças.
+      if (apenasComDiferenca) q = q.neq('diferenca', 0).eq('compra_parcelada', false);
 
       const { data, error } = await q
         .order('extrato_data', { ascending: false, nullsFirst: false })

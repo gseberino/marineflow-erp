@@ -44,6 +44,15 @@ const { estado, conciliarMock } = vi.hoisted(() => ({
         extrato_data: '2026-06-10', extrato_valor: 530.5, extrato_descricao: 'DEB CELESC',
         diferenca: 10,
       },
+      {
+        // Compra parcelada casada com a parcela 1/4: a diferença é o resto da compra, não erro.
+        lado: 'payable', id: 'p3', description: 'INSTALADORA BERLIM (compra em 4x)',
+        amount: 457.36, status: 'paid', due_date: '2026-08-15', issue_date: '2026-08-15',
+        contraparte: 'Instaladora Berlim', categoria: 'Peças e materiais',
+        bank_transaction_id: 'bt10', situacao: 'conciliado',
+        extrato_data: '2026-08-15', extrato_valor: 114.34, extrato_descricao: 'INSTALADORA BERLIM 1/4',
+        diferenca: 343.02, compra_parcelada: true, parcelas: 4,
+      },
     ],
     // Uma entrada e uma saída: a tela só pode oferecer a do sinal certo.
     livres: [
@@ -107,6 +116,18 @@ describe('conciliação (parte do lançamento)', () => {
   it('avisa quando um conciliado tem valor diferente do extrato', async () => {
     renderPanel();
     expect(await screen.findByText(/valor diferente do extrato/)).toBeInTheDocument();
+  });
+
+  it('compra parcelada casada com uma parcela não é "valor diferente": aparece como compra em Nx', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderPanel();
+    // Só a Celesc conta no aviso; a Instaladora Berlim (compra em 4x) não.
+    expect(await screen.findByText(/lançamento conciliado tem/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Conciliados/ }));
+    expect(await screen.findByText('Instaladora Berlim')).toBeInTheDocument();
+    expect(screen.getByText(/compra em 4x · no extrato, a parcela/)).toBeInTheDocument();
+    // Só a Celesc mostra "difere"; a compra parcelada não.
+    expect(screen.getAllByText(/^difere /)).toHaveLength(1);
   });
 
   it('só oferece candidato do SINAL certo — e marca o valor exato', async () => {

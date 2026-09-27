@@ -70,8 +70,10 @@ export function ConciliacaoPanel() {
       String(l.amount).includes(termo));
   }, [lista.data, busca, aba, ladoFiltro]);
 
+  // Compra parcelada casada com UMA parcela tem a diferença esperada (a compra inteira contra a
+  // parcela): não é aviso. Eram 58 dos 62 "valores diferentes" (27/09/2026).
   const comDiferenca = useMemo(
-    () => (conciliados.data ?? []).filter(l => l.diferenca != null && Number(l.diferenca) !== 0),
+    () => (conciliados.data ?? []).filter(l => l.diferenca != null && Number(l.diferenca) !== 0 && !l.compra_parcelada),
     [conciliados.data]);
 
   // Erro precisa aparecer. Uma lista vazia por falha de consulta parece "nada a fazer", e
@@ -211,7 +213,9 @@ function LinhaDoLancamento({
   formatDate: (d: string) => string;
 }) {
   const ehPagar = l.lado === 'payable';
-  const temDiferenca = l.diferenca != null && Number(l.diferenca) !== 0;
+  // Compra parcelada casada com uma parcela: a diferença é o resto da compra, não um erro.
+  const parcelada = !!l.compra_parcelada;
+  const temDiferenca = l.diferenca != null && Number(l.diferenca) !== 0 && !parcelada;
 
   return (
     <Card className="overflow-hidden">
@@ -242,6 +246,11 @@ function LinhaDoLancamento({
             {temDiferenca && (
               <p className="text-xs text-amber-600 tabular-nums">
                 difere {formatCurrency(Math.abs(Number(l.diferenca)))}
+              </p>
+            )}
+            {parcelada && (
+              <p className="text-xs text-muted-foreground tabular-nums">
+                compra em {l.parcelas}x · no extrato, a parcela
               </p>
             )}
           </div>
