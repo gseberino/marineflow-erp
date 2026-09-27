@@ -44,6 +44,19 @@ Deno.test("comprovante: CPF de quem recebeu o Pix vale (acha o favorecido); o CN
   assertEquals(semODocumentoDaEmpresa(errado, null).cnpj, "50057049000110");
 });
 
+Deno.test("comprovante: nota a prazo não é pagamento, e a linha dela não se perde no corte de 5 itens", () => {
+  const c = lerComprovante(`COMPROVANTE | loja: DISTRIBUIDORA X | cnpj: 12.345.678/0001-90 | data: 20/09/2026 | total: 3.400,00 | pagamento: boleto
+- Cabo 16mm | R$ 900,00
+- Disjuntor | R$ 500,00
+- Barramento | R$ 800,00
+- Terminal | R$ 200,00
+- Fita | R$ 50,00
+- compra a prazo | vencimentos: 20/10/2026, 20/11/2026`)!;
+  assertEquals(c.pagamento, null);
+  assertEquals(c.itens.length, 5);
+  assertEquals(c.itens[0], "- compra a prazo | vencimentos: 20/10/2026, 20/11/2026");
+});
+
 Deno.test("comprovante: imagem que não é comprovante não vira nada", () => {
   assertEquals(lerComprovante("- Bateria 105Ah | unitário: R$ 890,00 | prazo: 5 dias"), null);
   assertEquals(lerComprovante(""), null);

@@ -35,7 +35,7 @@ export const PEDIDO_DE_LEITURA_AUTO = `Você recebeu uma imagem ou PDF enviado p
 1) Se for CUPOM FISCAL, NOTA FISCAL, RECIBO ou COMPROVANTE DE PAGAMENTO (cartão, Pix, boleto ou dinheiro), responda na PRIMEIRA linha exatamente neste formato, sem nada antes:
 COMPROVANTE | loja: <nome do estabelecimento ou de quem recebeu> | cnpj: <os dígitos do CNPJ ou CPF de quem RECEBEU, ou não informado> | data: <dd/mm/aaaa, ou não informada> | total: <valor total pago, com vírgula nos centavos, ex. 64,80> | pagamento: <débito, crédito, pix, dinheiro, boleto ou não informado>
 Depois, em até 5 linhas, os itens principais no formato "- <item> | R$ <valor>".
-Regras: NÃO invente. O que não estiver legível no documento é "não informado". O total é o valor PAGO (com desconto), não a soma dos itens se houver diferença. "Cartão de débito"/"débito" é débito; "cartão de crédito"/"crédito" é crédito.
+Regras: NÃO invente. O que não estiver legível no documento é "não informado". O total é o valor PAGO (com desconto), não a soma dos itens se houver diferença. "Cartão de débito"/"débito" é débito; "cartão de crédito"/"crédito" é crédito; Pix pago com cartão de crédito ("Pix no crédito") é crédito.
 O CNPJ/CPF é o de quem RECEBEU o dinheiro (a loja, o recebedor do Pix, o beneficiário do boleto) — nunca o de quem pagou.
 Nota fiscal (NF-e/DANFE) só prova pagamento se disser que foi paga à vista: com duplicatas ou vencimentos (compra a prazo), escreva "pagamento: não informado" e, na linha dos itens, "- compra a prazo | vencimentos: <datas>".
 
@@ -87,13 +87,18 @@ export function lerComprovante(texto: string): Comprovante | null {
   const loja = campos.get('loja') ?? '';
   const cnpj = (campos.get('cnpj') ?? '').replace(/\D/g, '');
   const pagamento = (campos.get('pagamento') ?? '').toLowerCase();
+  // Nota de compra a prazo não prova pagamento: a linha vem primeiro (não se perde no corte de 5
+  // itens) e a forma de pagamento fica em branco, mesmo que o modelo tenha escrito "boleto".
+  const todos = linhas.slice(1).filter((l) => l.startsWith('-'));
+  const aPrazo = todos.find((l) => /compra a prazo/i.test(l));
+  const itens = (aPrazo ? [aPrazo, ...todos.filter((l) => l !== aPrazo)] : todos).slice(0, 5);
   return {
     loja: naoInformado(loja) ? null : loja,
     cnpj: cnpj.length === 14 || cnpj.length === 11 ? cnpj : null,
     data: dataDoCupom(campos.get('data') ?? ''),
     total: valorDoCupom(campos.get('total') ?? ''),
-    pagamento: PAGAMENTOS[pagamento] ?? null,
-    itens: linhas.slice(1).filter((l) => l.startsWith('-')).slice(0, 5),
+    pagamento: aPrazo ? null : PAGAMENTOS[pagamento] ?? null,
+    itens,
   };
 }
 
