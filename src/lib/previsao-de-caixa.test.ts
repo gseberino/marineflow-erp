@@ -52,16 +52,17 @@ describe('fatura de um cartão', () => {
       pagamento('2026-09-24', 600),                          // pagou a fechada inteira
       compra('2026-09-20', 150), compra('2026-09-26', 50),   // ciclo aberto
     ];
-    const f = faturasDoCartao('C6', linhas, '2026-09-27');
-    expect(f).toEqual([
-      { conta: 'C6', valor: 200, vencimento: '2026-10-25', fechamento: '2026-10-17', situacao: 'aberta', vencida: false, compras: 2 },
+    const r = faturasDoCartao('C6', linhas, '2026-09-27');
+    expect(r.faturas).toEqual([
+      { conta: 'C6', valor: 200, vencimento: '2026-10-25', fechamento: '2026-10-17', situacao: 'aberta', vencida: false, compras: 2, pago: 0 },
     ]);
+    expect(r.pagoAlemDoExtrato).toBe(0);
   });
 
-  it('fechada sem pagamento suficiente: o que falta, e marcada como vencida se o dia passou', () => {
+  it('fechada sem pagamento suficiente: o que falta, o que foi pago, e vencida se o dia passou', () => {
     const linhas = [...historicoC6(), compra('2026-08-20', 400), compra('2026-09-10', 200), pagamento('2026-09-05', 100)];
-    const [fechada] = faturasDoCartao('C6', linhas, '2026-09-27');
-    expect(fechada).toMatchObject({ situacao: 'fechada', valor: 500, vencimento: '2026-09-25', vencida: true, compras: 2 });
+    const [fechada] = faturasDoCartao('C6', linhas, '2026-09-27').faturas;
+    expect(fechada).toMatchObject({ situacao: 'fechada', valor: 500, vencimento: '2026-09-25', vencida: true, compras: 2, pago: 100 });
   });
 
   it('o mesmo pagamento registrado duas vezes pelo cartão conta uma vez', () => {
@@ -69,25 +70,48 @@ describe('fatura de um cartão', () => {
       ...historicoC6(), compra('2026-08-20', 600),
       pagamento('2026-09-05', 300, 'Inclusao de Pagamento Ciclo Corrente'), pagamento('2026-09-05', 300, 'Pagamento recebido'),
     ];
-    const [fechada] = faturasDoCartao('C6', linhas, '2026-09-27');
+    const [fechada] = faturasDoCartao('C6', linhas, '2026-09-27').faturas;
     expect(fechada).toMatchObject({ situacao: 'fechada', valor: 300 });
   });
 
-  it('pagamento a mais que a fechada abate a aberta (pagamento adiantado)', () => {
-    const linhas = [...historicoC6(), compra('2026-08-20', 100), pagamento('2026-09-26', 250), compra('2026-09-20', 300)];
-    const f = faturasDoCartao('C6', linhas, '2026-09-27');
-    expect(f).toEqual([expect.objectContaining({ situacao: 'aberta', valor: 150 })]);
+  it('pago na fechada além das compras do extrato NÃO abate a aberta: vira aviso (o caso real do C6, 09/2026)', () => {
+    // Extrato do cartão com R$ 362,55 de compras na fatura; pagos R$ 1.860,81. Faltam compras no
+    // extrato — levar a "sobra" para a aberta zerava a fatura de outubro.
+    const linhas = [
+      ...historicoC6(), compra('2026-08-20', 362.55),
+      pagamento('2026-09-05', 300), pagamento('2026-09-25', 1560.81),
+      compra('2026-09-20', 1031.46),
+    ];
+    const r = faturasDoCartao('C6', linhas, '2026-09-27');
+    expect(r.faturas).toEqual([expect.objectContaining({ situacao: 'aberta', valor: 1031.46, pago: 0 })]);
+    expect(r.pagoAlemDoExtrato).toBe(1498.26);
+    expect(r.fechada).toEqual({ fechamento: '2026-09-17', compras: 362.55, pago: 1860.81 });
+  });
+
+  it('pagamento depois do vencimento da fechada (mais 5 dias) é adiantamento da aberta', () => {
+    const linhas = [
+      ...historicoC6(), compra('2026-08-20', 600), pagamento('2026-09-24', 600),
+      compra('2026-09-20', 150), compra('2026-09-26', 50), compra('2026-10-01', 100),
+      pagamento('2026-10-03', 100),
+    ];
+    const r = faturasDoCartao('C6', linhas, '2026-10-05');
+    expect(r.faturas).toEqual([expect.objectContaining({ situacao: 'aberta', valor: 200, pago: 100, compras: 3 })]);
+    expect(r.pagoAlemDoExtrato).toBe(0);
   });
 
   it('parcela já lançada com data futura dentro do ciclo aberto entra na fatura aberta', () => {
     const linhas = [...historicoC6(), compra('2026-09-20', 100), compra('2026-10-10', 112.29, null, { description: 'COREMMA 3/4' }), compra('2026-10-20', 112.29)];
     // 10/10 é antes do fechamento (17/10): entra; 20/10 é do ciclo seguinte: não.
-    expect(faturasDoCartao('C6', linhas, '2026-09-27')).toEqual([expect.objectContaining({ situacao: 'aberta', valor: 212.29, compras: 2 })]);
+    expect(faturasDoCartao('C6', linhas, '2026-09-27').faturas).toEqual([expect.objectContaining({ situacao: 'aberta', valor: 212.29, compras: 2 })]);
   });
 
   it('duplicata e estorno de importação não são compra', () => {
     const linhas = [...historicoC6(), compra('2026-09-20', 300, null, { dismissed_kind: 'duplicata' }), compra('2026-09-21', 80)];
-    expect(faturasDoCartao('C6', linhas, '2026-09-27')).toEqual([expect.objectContaining({ situacao: 'aberta', valor: 80 })]);
+    expect(faturasDoCartao('C6', linhas, '2026-09-27').faturas).toEqual([expect.objectContaining({ situacao: 'aberta', valor: 80 })]);
+  });
+
+  it('sem ciclo conhecido, nada — e nenhum aviso inventado', () => {
+    expect(faturasDoCartao('X', [compra('2026-09-01', 50)], '2026-09-27')).toEqual({ faturas: [], pagoAlemDoExtrato: 0, fechada: { fechamento: '', compras: 0, pago: 0 } });
   });
 });
 
@@ -128,5 +152,20 @@ describe('gastos que se repetem', () => {
     const porDia = gastosQueSeRepetemPorDia([{ categoria: 'Telefone', mediaMensal: 300, meses: 3 }], [], '2026-09-21', '2026-09-30');
     expect([...porDia.values()].reduce((s, v) => s + v, 0)).toBeCloseTo(100, 5);
     expect(porDia.size).toBe(10);
+  });
+
+  it('no mês de hoje, o que já foi pago não entra de novo (contabilidade paga no dia 2)', () => {
+    const gasto = [{ categoria: 'Contabilidade', mediaMensal: 915.35, meses: 3 }];
+    const soma = (m: Map<string, number>, mes: string) => [...m].filter(([d]) => d.startsWith(mes)).reduce((s, [, v]) => s + v, 0);
+    // Paga inteira em 02/09: setembro não soma nada; outubro, a média inteira.
+    const paga = gastosQueSeRepetemPorDia(gasto, [], '2026-09-03', '2026-10-31', new Map([['Contabilidade', 915.35]]));
+    expect(soma(paga, '2026-09')).toBe(0);
+    expect(soma(paga, '2026-10')).toBeCloseTo(915.35, 5);
+    // Paga em parte: no máximo o que falta do mês.
+    const emParte = gastosQueSeRepetemPorDia(gasto, [], '2026-09-03', '2026-09-30', new Map([['Contabilidade', 500]]));
+    expect(soma(emParte, '2026-09')).toBeCloseTo(415.35, 5);
+    // Nada pago: a parte dos dias que faltam, como antes (28 de 30 dias).
+    const nada = gastosQueSeRepetemPorDia(gasto, [], '2026-09-03', '2026-09-30');
+    expect(soma(nada, '2026-09')).toBeCloseTo(915.35 * 28 / 30, 5);
   });
 });

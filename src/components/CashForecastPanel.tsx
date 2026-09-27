@@ -163,8 +163,8 @@ export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: numb
           <p className="font-medium">Além das contas lançadas, a previsão soma:</p>
           {faturasNaPrevisao.length > 0 && (
             <ul className="space-y-1">
-              {faturasNaPrevisao.map((f) => (
-                <li key={`${f.conta}-${f.situacao}`} className="min-w-0">
+              {faturasNaPrevisao.map((f, i) => (
+                <li key={`${i}-${f.conta}-${f.situacao}`} className="min-w-0">
                   <span className="font-medium">Fatura {f.conta}</span>{' '}
                   <span className="tabular-nums">{formatCurrency(f.valor)}</span>
                   <span className="text-muted-foreground">
@@ -173,7 +173,9 @@ export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: numb
                       ? `fatura fechada em ${dataCurta(f.fechamento)}, ${f.compras} compra(s), menos o que já foi pago`
                       : `${f.compras} compra(s) do ciclo aberto até hoje (fecha em ${dataCurta(f.fechamento)})`}
                     {f.vencida
-                      ? `; venceu por volta de ${dataCurta(f.vencimento)} e não aparece pagamento — confira`
+                      ? (f.pago > 0
+                        ? `; venceu por volta de ${dataCurta(f.vencimento)} e o pago (${formatCurrency(f.pago)}) não cobre as compras — confira`
+                        : `; venceu por volta de ${dataCurta(f.vencimento)} e não aparece pagamento — confira`)
                       : `; vence por volta de ${dataCurta(f.vencimento)}`}
                   </span>
                 </li>
@@ -184,7 +186,7 @@ export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: numb
             <p className="min-w-0">
               <span className="font-medium">Gastos que se repetem todo mês</span>
               <span className="text-muted-foreground">
-                {' (média dos meses em que apareceram, espalhada pelos dias, menos o que já está lançado): '}
+                {' (média dos meses em que apareceram, espalhada pelos dias, menos o que já está lançado — e, neste mês, menos o que já foi pago): '}
                 {extras.recorrentes.map((g) => `${g.categoria} ${formatCurrency(g.mediaMensal)}/mês`).join('; ')}.
               </span>
             </p>

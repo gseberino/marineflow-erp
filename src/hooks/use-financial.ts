@@ -294,11 +294,18 @@ export interface ExtrasDaPrevisao {
  * A fatura de cada cartão e os gastos que se repetem (regras em src/lib/previsao-de-caixa.ts).
  * Erro de leitura aqui não derruba a previsão: ela segue só com as contas e diz o que ficou fora.
  */
-async function lerExtrasDaPrevisao(hoje: string): Promise<{ extras: ExtrasDaPrevisao; linhasDoCartao: Set<string> }> {
+const reais = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const diaEMes = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+
+async function lerExtrasDaPrevisao(hoje: string): Promise<{
+  extras: ExtrasDaPrevisao; linhasDoCartao: Set<string>; pagoNoMes: Map<string, number>;
+}> {
   const avisos: string[] = [];
   let faturas: FaturaPrevista[] = [];
   let recorrentes: GastoQueSeRepete[] = [];
   const linhasDoCartao = new Set<string>();
+  /** O que já foi pago no mês de hoje, por categoria (fora do cartão): não entra de novo. */
+  const pagoNoMes = new Map<string, number>();
   try {
     const [linhas, conexoes] = await Promise.all([
       lerEmPaginas((i, f) => supabase.from('bank_transactions')
@@ -317,7 +324,14 @@ async function lerExtrasDaPrevisao(hoje: string): Promise<{ extras: ExtrasDaPrev
       porConta.set(conta, [...(porConta.get(conta) ?? []), l]);
     }
     for (const [conta, doCartao] of porConta) {
-      faturas.push(...faturasDoCartao(rotulo.get(conta) ?? 'Cartão', doCartao, hoje));
+      const nome = rotulo.get(conta) ?? 'Cartão';
+      const r = faturasDoCartao(nome, doCartao, hoje);
+      faturas.push(...r.faturas);
+      if (r.pagoAlemDoExtrato > 0) {
+        avisos.push(`${nome}: a fatura que fechou em ${diaEMes(r.fechada.fechamento)} foi paga em ${reais(r.fechada.pago)}, `
+          + `mas o extrato do cartão mostra só ${reais(r.fechada.compras)} de compras nela. Faltam compras no extrato do `
+          + 'cartão — a próxima fatura pode ser maior do que a prevista.');
+      }
     }
   } catch (e) {
     avisos.push(`Não consegui ler os cartões (${(e as Error)?.message ?? 'erro'}): a fatura ficou fora da previsão.`);
@@ -325,31 +339,41 @@ async function lerExtrasDaPrevisao(hoje: string): Promise<{ extras: ExtrasDaPrev
   }
   try {
     const meses = mesesDeReferencia(hoje);
+    const inicioDoMes = `${hoje.slice(0, 7)}-01`;
+    // Os 4 meses de referência e o mês de hoje (o que já foi pago nele não entra de novo).
     const [despesas, categorias] = await Promise.all([
       lerEmPaginas((i, f) => supabase.from('payables')
-        .select('id, amount, issue_date, expense_category, bank_transaction_id')
+        .select('id, amount, issue_date, expense_category, bank_transaction_id, status')
         .neq('status', 'cancelled')
         .gte('issue_date', `${meses[0]}-01`)
-        .lt('issue_date', `${hoje.slice(0, 7)}-01`)
+        .lte('issue_date', hoje)
         .order('id').range(i, f)),
       supabase.from('financial_categories').select('name, type, dre_group').eq('type', 'payable'),
     ]);
     if (categorias.error) throw categorias.error;
     const grupo = new Map((categorias.data ?? []).map((c: { name: string; dre_group: string | null }) => [c.name, c.dre_group]));
-    const lancadas: DespesaLancada[] = (despesas as Array<{ amount: number; issue_date: string; expense_category: string | null; bank_transaction_id: string | null }>)
+    const lancadas: Array<DespesaLancada & { pago: boolean }> = (despesas as Array<{
+      amount: number; issue_date: string; expense_category: string | null; bank_transaction_id: string | null; status: string | null;
+    }>)
       .map((d) => ({
         categoria: d.expense_category,
         valor: Number(d.amount) || 0,
         data: d.issue_date,
         grupo: d.expense_category ? grupo.get(d.expense_category) ?? null : null,
         noCartao: !!d.bank_transaction_id && linhasDoCartao.has(d.bank_transaction_id),
+        pago: d.status === 'paid',
       }));
-    recorrentes = gastosQueSeRepetem(lancadas, hoje);
+    recorrentes = gastosQueSeRepetem(lancadas.filter((d) => d.data < inicioDoMes), hoje);
+    for (const d of lancadas) {
+      if (d.data < inicioDoMes || !d.pago || d.noCartao || !d.categoria) continue;
+      pagoNoMes.set(d.categoria, (pagoNoMes.get(d.categoria) ?? 0) + d.valor);
+    }
   } catch (e) {
     avisos.push(`Não consegui ler as despesas dos últimos meses (${(e as Error)?.message ?? 'erro'}): os gastos que se repetem ficaram fora da previsão.`);
     recorrentes = [];
+    pagoNoMes.clear();
   }
-  return { extras: { faturas: faturas.map((f) => ({ ...f, naPrevisao: true })), recorrentes, avisos }, linhasDoCartao };
+  return { extras: { faturas: faturas.map((f) => ({ ...f, naPrevisao: true })), recorrentes, avisos }, linhasDoCartao, pagoNoMes };
 }
 
 /**
@@ -389,7 +413,7 @@ export function useCashForecast(semanas: number = 8) {
           .lte('due_date', limiteISO),
       ]);
       const hojeLocal = hojeEmBrasilia();
-      const { extras } = await lerExtrasDaPrevisao(hojeLocal);
+      const { extras, pagoNoMes } = await lerExtrasDaPrevisao(hojeLocal);
 
       // Segunda-feira da semana corrente é a âncora das faixas.
       const inicioSemana = (d: Date) => {
@@ -453,11 +477,13 @@ export function useCashForecast(semanas: number = 8) {
         if (i < 0) { f.naPrevisao = false; continue; }
         buckets[i].saidas += f.valor;
         buckets[i].saidasDaFatura! += f.valor;
+        // Fatura vencida vai para esta semana como as contas vencidas: com o mesmo selo.
+        if (f.vencida) buckets[0].contemAtrasados = true;
       }
 
       // Gastos que se repetem, espalhados pelos dias de hoje até o fim da janela.
       const fimDaJanela = somarDias(buckets[buckets.length - 1].inicio, 6);
-      for (const [data, valor] of gastosQueSeRepetemPorDia(extras.recorrentes, contasAbertas, hojeLocal, fimDaJanela)) {
+      for (const [data, valor] of gastosQueSeRepetemPorDia(extras.recorrentes, contasAbertas, hojeLocal, fimDaJanela, pagoNoMes)) {
         const i = indiceDe(data);
         if (i < 0) continue;
         buckets[i].saidas += valor;

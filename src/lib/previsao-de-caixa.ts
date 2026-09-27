@@ -12,14 +12,20 @@
 //     compras feitas até hoje (e as parcelas já lançadas até o fechamento) para o vencimento
 //     seguinte;
 //   · o dono paga o C6 em pedaços ao longo do mês: pagamento feito depois do vencimento anterior
-//     (com 5 dias de tolerância para o pagamento atrasado daquela) abate primeiro a fatura fechada
-//     e o que sobrar, a aberta;
+//     e até o vencimento da fechada (os dois com 5 dias de tolerância para atraso) é da fechada;
+//     depois disso, é adiantamento da aberta;
+//   · pago na fechada MAIS do que as compras que o extrato do cartão mostra nela não abate a
+//     aberta: no dado real (C6, setembro/2026) a fatura foi paga em R$ 1.860,81 e o extrato só
+//     trouxe R$ 362,55 de compras — faltam compras no extrato, não houve adiantamento. Levar a
+//     "sobra" para a aberta zerava a fatura seguinte e a previsão voltava a dizer que sobrava
+//     dinheiro (revisão de 27/09/2026). Vira aviso de extrato incompleto;
 //   · o cartão às vezes registra o mesmo pagamento duas vezes ("Inclusão de Pagamento" e
 //     "Pagamento recebido", mesmo dia e valor, contra um só débito na conta): conta uma vez.
 // Gastos que se repetem — categoria que apareceu em pelo menos 3 dos 4 últimos meses completos,
 // com valor estável (variação até 35%), fora do cartão (esse já vai na fatura) e fora do que não
 // é despesa (fatura, transferência). Entram pela média, espalhados pelos dias, descontado o que
-// já está lançado como conta a pagar daquela categoria no mês.
+// já está lançado como conta a pagar daquela categoria no mês — e, no mês corrente, o que já foi
+// pago: o saldo de partida já não tem esse dinheiro.
 
 /** 'AAAA-MM-DD' mais (ou menos) n dias, sem fuso no caminho. */
 function somarDias(data: string, n: number): string {
@@ -58,6 +64,20 @@ export interface FaturaPrevista {
   /** Venceu e o pagamento não cobriu: pode estar em aberto. */
   vencida: boolean;
   compras: number;
+  /** O que já foi pago desta fatura (a tela diz "pago em parte" em vez de "não aparece pagamento"). */
+  pago: number;
+}
+
+/** As faturas de um cartão e o que o extrato dele não explica. */
+export interface FaturasDoCartao {
+  faturas: FaturaPrevista[];
+  /**
+   * Pago na fatura fechada além das compras que o extrato do cartão mostra nela. Quase sempre é
+   * compra que o extrato não trouxe (não adiantamento): a aberta não é abatida e pode estar baixa.
+   */
+  pagoAlemDoExtrato: number;
+  /** A fechada: quando fechou, as compras que o extrato mostra e o que foi pago. */
+  fechada: { fechamento: string; compras: number; pago: number };
 }
 
 /** O lote da importação manual de julho (repetido pela sincronização) — fora de tudo. */
@@ -159,9 +179,9 @@ export function fechamentosEmVolta(hoje: string, c: CicloDoCartao): { anterior: 
  * As faturas de UM cartão que ainda vão sair do caixa: a fechada que o pagamento não cobriu e
  * a aberta, com as compras feitas até hoje.
  */
-export function faturasDoCartao(conta: string, linhas: LinhaDoCartao[], hoje: string): FaturaPrevista[] {
+export function faturasDoCartao(conta: string, linhas: LinhaDoCartao[], hoje: string): FaturasDoCartao {
   const ciclo = inferirCiclo(linhas);
-  if (!ciclo) return [];
+  if (!ciclo) return { faturas: [], pagoAlemDoExtrato: 0, fechada: { fechamento: '', compras: 0, pago: 0 } };
   const { anterior, ultimo, proximo } = fechamentosEmVolta(hoje, ciclo);
   const vencimentoDaAnterior = vencimentoDaFatura(anterior, ciclo);
   const vencimentoDaFechada = vencimentoDaFatura(ultimo, ciclo);
@@ -187,31 +207,40 @@ export function faturasDoCartao(conta: string, linhas: LinhaDoCartao[], hoje: st
   // Até o fechamento, não só até hoje: a parcela de uma compra antiga já vem com a data futura
   // em que cai (Coremma 3/4 em outubro) e é cobrança certa desta fatura.
   const comprasDaAberta = linhas.filter((l) => compraValida(l) && entre(l, ultimo, proximo));
-  // Pagamento feito depois do vencimento da fatura anterior é para a fechada (ou adiantado da
-  // aberta): o dono paga o C6 em pedaços ao longo do mês.
-  // Até 5 dias depois do vencimento anterior, o pagamento ainda é daquela fatura (pago com atraso).
-  const pagos = somaEm(semRepetir(linhas.filter((l) => pagamentoValido(l) && entre(l, somarDias(vencimentoDaAnterior, DIAS_DE_ATRASO_DA_ANTERIOR), hoje))));
+  // O dono paga o C6 em pedaços ao longo do mês. Até 5 dias depois de um vencimento, o pagamento
+  // ainda é daquela fatura (pago com atraso): depois do vencimento anterior e até o da fechada, é
+  // da fechada; depois disso, adiantamento da aberta.
+  const inicioDaFechada = somarDias(vencimentoDaAnterior, DIAS_DE_ATRASO_DA_ANTERIOR);
+  const fimDaFechada = somarDias(vencimentoDaFechada, DIAS_DE_ATRASO_DA_ANTERIOR);
+  const pagamentos = semRepetir(linhas.filter((l) => pagamentoValido(l) && entre(l, inicioDaFechada, hoje)));
+  const pagosDaFechada = somaEm(pagamentos.filter((l) => entre(l, inicioDaFechada, fimDaFechada)));
+  const pagosDaAberta = somaEm(pagamentos.filter((l) => entre(l, fimDaFechada, hoje)));
 
   const totalFechada = somaEm(comprasDaFechada);
-  const faltaDaFechada = Math.max(0, Math.round((totalFechada - pagos) * 100) / 100);
-  const sobraParaAberta = Math.max(0, pagos - totalFechada);
-  const faltaDaAberta = Math.max(0, Math.round((somaEm(comprasDaAberta) - sobraParaAberta) * 100) / 100);
+  const faltaDaFechada = Math.max(0, Math.round((totalFechada - pagosDaFechada) * 100) / 100);
+  // O que foi pago a mais na fechada NÃO abate a aberta (ver o cabeçalho): vira aviso.
+  const pagoAlemDoExtrato = Math.max(0, Math.round((pagosDaFechada - totalFechada) * 100) / 100);
+  const faltaDaAberta = Math.max(0, Math.round((somaEm(comprasDaAberta) - pagosDaAberta) * 100) / 100);
 
   const faturas: FaturaPrevista[] = [];
   // Menos de R$ 1 é arredondamento do cartão, não conta a pagar.
   if (faltaDaFechada >= 1) {
     faturas.push({
       conta, valor: faltaDaFechada, vencimento: vencimentoDaFechada, fechamento: ultimo,
-      situacao: 'fechada', vencida: vencimentoDaFechada < hoje, compras: comprasDaFechada.length,
+      situacao: 'fechada', vencida: vencimentoDaFechada < hoje, compras: comprasDaFechada.length, pago: pagosDaFechada,
     });
   }
   if (faltaDaAberta >= 1) {
     faturas.push({
       conta, valor: faltaDaAberta, vencimento: vencimentoDaAberta, fechamento: proximo,
-      situacao: 'aberta', vencida: false, compras: comprasDaAberta.length,
+      situacao: 'aberta', vencida: false, compras: comprasDaAberta.length, pago: pagosDaAberta,
     });
   }
-  return faturas;
+  return {
+    faturas,
+    pagoAlemDoExtrato: pagoAlemDoExtrato >= 1 ? pagoAlemDoExtrato : 0,
+    fechada: { fechamento: ultimo, compras: totalFechada, pago: pagosDaFechada },
+  };
 }
 
 // ── Gastos que se repetem ────────────────────────────────────────────────────────────────
@@ -282,10 +311,14 @@ export interface ContaEmAberto {
 
 /**
  * Quanto dos gastos que se repetem cai em cada dia de hoje até `ate`, já descontado o que está
- * lançado como conta a pagar da mesma categoria no mês. Devolve o valor por dia ('AAAA-MM-DD').
+ * lançado como conta a pagar da mesma categoria no mês. No mês de hoje, nunca mais do que falta
+ * do mês: a média menos o que já foi pago nele (`pagoNoMes`, por categoria) — a contabilidade
+ * paga no dia 2 já saiu do saldo de partida e não entra de novo. Sem nada pago, fica a parte dos
+ * dias que faltam, como antes. Devolve o valor por dia ('AAAA-MM-DD').
  */
 export function gastosQueSeRepetemPorDia(
   gastos: GastoQueSeRepete[], contas: ContaEmAberto[], hoje: string, ate: string,
+  pagoNoMes: Map<string, number> = new Map(),
 ): Map<string, number> {
   const porDia = new Map<string, number>();
   if (ate < hoje) return porDia;
@@ -297,7 +330,10 @@ export function gastosQueSeRepetemPorDia(
       const fimDoMes = noDia(a, m, 31);
       const fim = fimDoMes < ate ? fimDoMes : ate;
       const diasNaJanela = Number(((Date.parse(fim) - Date.parse(cursor)) / 86_400_000).toFixed(0)) + 1;
-      const esperado = g.mediaMensal * (diasNaJanela / diasNoMes(a, m));
+      const pelosDias = g.mediaMensal * (diasNaJanela / diasNoMes(a, m));
+      const esperado = mesDe(cursor) === mesDe(hoje)
+        ? Math.min(pelosDias, Math.max(0, g.mediaMensal - (pagoNoMes.get(g.categoria) ?? 0)))
+        : pelosDias;
       const lancado = contas
         .filter((c) => c.categoria === g.categoria && mesDe(c.vencimento) === mesDe(cursor))
         .reduce((s, c) => s + c.valor, 0);
