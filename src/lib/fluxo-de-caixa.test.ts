@@ -17,6 +17,9 @@ const LOTE = LOTE_DA_IMPORTACAO_MANUAL_DE_JULHO;
 /** A raiz do CNPJ da HBR e uma linha de Pix com ela do outro lado. */
 const OPCOES = { raizDaEmpresa: '50057049' };
 const daHBR = { counterparty_document: '50.057.049/0001-00', payment_method: 'PIX' } as const;
+/** O motivo que o "+ Lançar" grava nas duas pontas do saque e do depósito ligados. */
+const SAQUE = { dismissed_reason: 'Saque do banco para o Caixa' } as const;
+const DEPOSITO = { dismissed_reason: 'Depósito do Caixa no banco' } as const;
 
 function linha(p: Partial<LinhaDoFluxo>): LinhaDoFluxo {
   return {
@@ -415,14 +418,27 @@ describe('transferência entre contas suas: a linha diz, não a marca (extrato r
   });
 });
 
+describe('crédito do cartão na conta pela descrição (conferência final)', () => {
+  it('"Valor adicionado... PIX no Crédito" é crédito do cartão mesmo marcado como transferência, e não rouba par', () => {
+    const f = montarFluxoDeCaixa([
+      linha({ id: 'cartao', transaction_date: '2026-07-26', transaction_type: 'credit', amount: 80, bank_connection_id: NUBANK, dismissed_kind: 'transferencia',
+        description: 'Valor adicionado na conta por cartão de crédito | Valor adicionado para PIX no Crédito', payment_method: 'TEF' }),
+      linha({ id: 'compra', transaction_date: '2026-07-26', amount: 80, dismissed_kind: 'transferencia', description: 'TICKETEXPRESS          ITAJAI        BRA', payment_method: 'OTHER' }),
+    ], ['2026-07'], '2026-07-31', OPCOES);
+    expect(f.meses[0]).toMatchObject({ entrou: 0, saiu: 80 });
+    expect(f.meses[0].creditoDoCartao).toEqual({ entrou: 80, saiu: 0 });
+    expect(f.meses[0].transferencias).toEqual({ entrou: 0, saiu: 0 });
+  });
+});
+
 describe('fases do pareamento (reconferência de 27/09/2026)', () => {
   it('o saque ligado ao banco casa antes; a marcada de outra conta e o Pix comum continuam dinheiro', () => {
     // Saque ligado: débito no C6 e crédito no Caixa, os dois marcados. No mesmo dia, um crédito
     // marcado sem prova em outra conta e um Pix comum a fornecedor, do mesmo valor.
     for (const ids of permutacoes(['a', 'b', 'c', 'd'])) {
       const f = montarFluxoDeCaixa([
-        linha({ id: ids[0], amount: 500, dismissed_kind: 'transferencia' }),
-        linha({ id: ids[1], source_type: 'cash', bank_connection_id: CAIXA, transaction_type: 'credit', amount: 500, dismissed_kind: 'transferencia' }),
+        linha({ id: ids[0], amount: 500, dismissed_kind: 'transferencia', ...SAQUE }),
+        linha({ id: ids[1], source_type: 'cash', bank_connection_id: CAIXA, transaction_type: 'credit', amount: 500, dismissed_kind: 'transferencia', ...SAQUE }),
         linha({ id: ids[2], transaction_type: 'credit', amount: 500, dismissed_kind: 'transferencia', bank_connection_id: 'infinitepay' }),
         linha({ id: ids[3], amount: 500, bank_connection_id: NUBANK }),
       ], ['2026-09'], HOJE);
@@ -434,14 +450,40 @@ describe('fases do pareamento (reconferência de 27/09/2026)', () => {
   it('depósito ligado ao banco casa antes; a fatura marcada e o Pix do cliente continuam dinheiro', () => {
     for (const ids of permutacoes(['a', 'b', 'c', 'd'])) {
       const f = montarFluxoDeCaixa([
-        linha({ id: ids[0], source_type: 'cash', bank_connection_id: CAIXA, amount: 500, dismissed_kind: 'transferencia' }),
-        linha({ id: ids[1], transaction_type: 'credit', amount: 500, dismissed_kind: 'transferencia', bank_connection_id: NUBANK }),
+        linha({ id: ids[0], source_type: 'cash', bank_connection_id: CAIXA, amount: 500, dismissed_kind: 'transferencia', ...DEPOSITO }),
+        linha({ id: ids[1], transaction_type: 'credit', amount: 500, dismissed_kind: 'transferencia', bank_connection_id: NUBANK, ...DEPOSITO }),
         linha({ id: ids[2], amount: 500, dismissed_kind: 'transferencia' }),
         linha({ id: ids[3], transaction_type: 'credit', amount: 500 }),
       ], ['2026-09'], HOJE);
       expect(f.meses[0]).toMatchObject({ entrou: 500, saiu: 500 });
       expect(f.meses[0].transferencias).toEqual({ entrou: 500, saiu: 500 });
     }
+  });
+
+  it('o depósito ligado não é desmanchado por uma fatura e um Pix do sócio marcados (conferência final)', () => {
+    // Depósito do Caixa ligado no dia 10; fatura do Nubank paga pelo C6 no dia 8 e Pix do sócio no
+    // C6 no dia 12, os dois marcados como transferência e sem par de verdade. Tudo R$ 500.
+    for (const ids of permutacoes(['a', 'b', 'c', 'd'])) {
+      const f = montarFluxoDeCaixa([
+        linha({ id: ids[0], source_type: 'cash', bank_connection_id: CAIXA, amount: 500, dismissed_kind: 'transferencia', ...DEPOSITO }),
+        linha({ id: ids[1], transaction_type: 'credit', amount: 500, dismissed_kind: 'transferencia', bank_connection_id: NUBANK, ...DEPOSITO }),
+        linha({ id: ids[2], transaction_date: '2026-09-08', amount: 500, dismissed_kind: 'transferencia' }),
+        linha({ id: ids[3], transaction_date: '2026-09-12', transaction_type: 'credit', amount: 500, dismissed_kind: 'transferencia' }),
+      ], ['2026-09'], HOJE);
+      expect(f.meses[0]).toMatchObject({ entrou: 500, saiu: 500 });
+      expect(f.meses[0].transferencias).toEqual({ entrou: 500, saiu: 500 });
+    }
+  });
+
+  it('as pontas ligadas pelo "+ Lançar" casam entre si mesmo com outra linha igual no dia', () => {
+    // Dois saques de R$ 200 no mesmo dia: um ligado ao banco, outro lançado sem ligar.
+    const f = montarFluxoDeCaixa([
+      linha({ id: 'b1', amount: 200, dismissed_kind: 'transferencia', ...SAQUE }),
+      linha({ id: 'c1', source_type: 'cash', bank_connection_id: CAIXA, transaction_type: 'credit', amount: 200, dismissed_kind: 'transferencia', ...SAQUE }),
+      linha({ id: 'b2', amount: 200, description: 'SAQUE 24H' }),
+      linha({ id: 'c2', source_type: 'cash', bank_connection_id: CAIXA, transaction_type: 'credit', amount: 200, dismissed_kind: 'transferencia', ...SAQUE }),
+    ], ['2026-09'], HOJE);
+    expect(f.meses[0]).toMatchObject({ entrou: 0, saiu: 0, transferencias: { entrou: 400, saiu: 400 } });
   });
 
   it('meses inteiros de um período: é o que a leitura do assistente traz', () => {

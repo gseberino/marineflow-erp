@@ -74,6 +74,17 @@ Deno.test("fechamento do mês: entrou e saiu pelo extrato — transferência par
   assertEquals(sb.pedidos.some((p) => p.tabela === "payments"), false);
 });
 
+Deno.test("fechamento: sem conseguir ler a raiz do CNPJ, falha em vez de mudar o número em silêncio", async () => {
+  const sb = {
+    ...sbFalso({ bank_transactions: [] }),
+    rpc: () => Promise.resolve({ data: null, error: { message: "function raiz_do_cnpj_da_empresa() does not exist" } }),
+  };
+  const t = financialTools.find((x) => x.name === "get_period_summary")!;
+  const ctx = { sb, admin: {}, userId: "u", userRole: "admin" as const, jwt: "", appOrigin: "", settings: {} };
+  const r = await t.execute({ period: "mes" }, ctx as never) as { error?: string };
+  assertEquals(r.error, "Não consegui ler o extrato: function raiz_do_cnpj_da_empresa() does not exist");
+});
+
 Deno.test("fechamento: erro ao ler o extrato vira mensagem, não um zero", async () => {
   const sb = {
     rpc: () => Promise.resolve({ data: null, error: null }),

@@ -51,6 +51,8 @@ export interface LinhaDoFluxo {
   provider?: string | null;
   bank_connection_id?: string | null;
   dismissed_kind?: string | null;
+  /** O "+ Lançar" grava o mesmo motivo nas duas pontas do saque ou depósito do Caixa. */
+  dismissed_reason?: string | null;
   tx_status?: string | null;
   import_batch_id?: string | null;
   description?: string | null;
@@ -115,6 +117,16 @@ const MEIOS_DE_TRANSFERENCIA = new Set(['PIX', 'TED', 'TEF', 'DOC']);
 /** Aplicação e resgate de investimento, pelo texto do banco ("CDB C6 LIM. GARANT.", "Resgate RDB"). */
 const INVESTIMENTO = /\b(CDB|RDB|LCI|LCA)\b/i;
 
+/**
+ * "Valor adicionado na conta por cartão de crédito | Valor adicionado para PIX no Crédito" (Nubank):
+ * dívida do cartão entrando na conta. No extrato real, 8 linhas assim estavam marcadas como crédito
+ * do cartão e 1 como transferência — e essa casava por acaso com uma compra de R$ 80 no mesmo dia.
+ */
+const CREDITO_DO_CARTAO_NA_CONTA = /valor adicionado.*cr[eé]dito/i;
+
+/** O motivo que o "+ Lançar" (mover_caixa) grava nas duas pontas quando liga a linha do banco. */
+const MOTIVOS_DO_CAIXA_LIGADO = new Set(['saque do banco para o caixa', 'depósito do caixa no banco', 'deposito do caixa no banco']);
+
 const dataDa = (l: LinhaDoFluxo) => String(l.transaction_date).slice(0, 10);
 const origemDa = (l: LinhaDoFluxo) => l.source_type ?? 'bank';
 
@@ -156,6 +168,9 @@ export function destinoDaLinha(l: LinhaDoFluxo, hoje: string, opcoes: OpcoesDoFl
   if (l.transaction_type !== 'credit' && l.transaction_type !== 'debit') return 'fora_ilegivel';
   if (!Number.isFinite(Number(l.amount))) return 'fora_ilegivel';
   if (tipo === 'mecanica_cartao') return 'credito_do_cartao';
+  if (l.transaction_type === 'credit' && origemDa(l) === 'bank' && CREDITO_DO_CARTAO_NA_CONTA.test(String(l.description ?? ''))) {
+    return 'credito_do_cartao';
+  }
   if (ehVendaDaMaquininha(l)) return 'movimento';
   if (transferenciaProvada(l, opcoes) || tipo === 'transferencia') return 'transferencia';
   return 'movimento';
@@ -176,6 +191,9 @@ interface Perna {
   conta: string;
   marcada: boolean;
   caixa: boolean;
+  debito: boolean;
+  /** dismissed_reason normalizado — para achar as duas pontas ligadas pelo "+ Lançar". */
+  motivo: string;
 }
 
 const antes = (a: Perna, b: Perna) => (a.data < b.data ? -1 : a.data > b.data ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -243,17 +261,15 @@ function emparelhamento(debitos: Perna[], creditos: Perna[]) {
  * banco que casa com a perna do Caixa). Chame com as linhas de UM mês: o par não atravessa a
  * virada do mês (use paresPorMes).
  *
- *   1ª fase: a perna do Caixa marcada com a linha do banco marcada — o saque ou o depósito
- *   registrado pelo "+ Lançar" com a linha do banco ligada. É a prova mais forte e vem antes:
- *   senão a linha do banco podia casar com uma marcada qualquer de outra conta e deixar o Caixa
- *   sem par (reconferência de 27/09/2026).
- *   2ª fase: o MESMO emparelhamento continua com todas as marcadas (entre bancos também). Pode
- *   trocar o par de quem já casou, mas ninguém casado fica sem par — numa transferência do Nubank
- *   para o C6 seguida de saque do mesmo valor, as quatro pernas fecham dois pares.
- *   3ª fase: a perna do CAIXA marcada que sobrou (lançada sem ligar a linha do banco) com uma
- *   linha do banco que também sobrou, marcada ou não — senão o saque contava duas vezes (a saída
- *   no banco e o gasto em dinheiro). Aqui os pares das marcadas ficam como estão: uma linha comum
- *   nunca desmancha um par de marcadas.
+ *   1ª fase: as duas pontas que o "+ Lançar" ligou (o mover_caixa grava o mesmo motivo — "Saque
+ *   do banco para o Caixa" ou "Depósito do Caixa no banco" — e a mesma data nas duas). É prova:
+ *   nenhuma fase seguinte mexe nelas (conferência final de 27/09/2026 — antes, uma fatura marcada
+ *   podia roubar a linha do depósito e deixar o Caixa casando com um Pix do sócio).
+ *   2ª fase: marcada com marcada entre contas do banco, o maior número de pares.
+ *   3ª fase: a perna do CAIXA que sobrou com a linha MARCADA do banco que sobrou.
+ *   4ª fase: a perna do CAIXA que ainda sobrou (lançada sem ligar a linha do banco) com uma linha
+ *   comum do banco — senão o saque contava duas vezes (a saída no banco e o gasto em dinheiro).
+ * Cada fase só casa o que as anteriores deixaram livre.
  *
  * Linha com prova (transferenciaProvada), "Vendas", crédito do cartão e o que fica fora não entram
  * aqui: não precisam de par, e não podem roubar o par de outra.
@@ -273,15 +289,40 @@ export function paresDeTransferencia(linhas: LinhaDoFluxo[], hoje: string, opcoe
       conta: l.bank_connection_id ?? `origem:${origemDa(l)}`,
       marcada: destino === 'transferencia',
       caixa: origemDa(l) === 'cash',
+      debito: l.transaction_type === 'debit',
+      motivo: String(l.dismissed_reason ?? '').trim().toLowerCase(),
     };
     (l.transaction_type === 'debit' ? debitos : creditos).push(perna);
   }
 
-  const pares = emparelhamento(debitos, creditos);
-  pares.aumentar((d, c) => d.marcada && c.marcada && d.caixa !== c.caixa);
-  pares.aumentar((d, c) => d.marcada && c.marcada);
-  pares.aumentar((d, c) => (d.marcada && d.caixa && !c.caixa) || (c.marcada && c.caixa && !d.caixa), pares.casadas());
-  return pares.casadas();
+  // 1ª fase: as duas pontas que o "+ Lançar" ligou — mesmo motivo, mesmo dia, mesmo valor (o
+  // mover_caixa aceita até R$ 0,01 de diferença). É prova, não palpite: ficam como estão.
+  const ligadas = new Set<string>();
+  const doBancoLigadas = [...debitos, ...creditos]
+    .filter((p) => !p.caixa && p.marcada && MOTIVOS_DO_CAIXA_LIGADO.has(p.motivo)).sort(antes);
+  const doCaixaLigadas = [...debitos, ...creditos]
+    .filter((p) => p.caixa && p.marcada && MOTIVOS_DO_CAIXA_LIGADO.has(p.motivo)).sort(antes);
+  for (const cx of doCaixaLigadas) {
+    const banco = doBancoLigadas.find((b) => !ligadas.has(b.id) && b.debito !== cx.debito && b.motivo === cx.motivo
+      && b.data === cx.data && Math.abs(b.centavos - cx.centavos) <= 1);
+    if (banco) { ligadas.add(cx.id); ligadas.add(banco.id); }
+  }
+
+  const pares = emparelhamento(debitos.filter((d) => !ligadas.has(d.id)), creditos.filter((c) => !ligadas.has(c.id)));
+  // 2ª fase: marcada com marcada entre contas do banco — o maior número de pares.
+  pares.aumentar((d, c) => d.marcada && c.marcada && !d.caixa && !c.caixa);
+  // 3ª fase: a perna do Caixa que sobrou com a linha MARCADA do banco que sobrou.
+  const caixaCom = (marcadaNoBanco: boolean) => (d: Perna, c: Perna) =>
+    (d.marcada && d.caixa && !c.caixa && c.marcada === marcadaNoBanco)
+    || (c.marcada && c.caixa && !d.caixa && d.marcada === marcadaNoBanco);
+  pares.aumentar(caixaCom(true), pares.casadas());
+  // 4ª fase: a perna do Caixa que ainda sobrou com uma linha comum do banco (o saque lançado sem
+  // ligar a linha do banco). Uma linha comum nunca desmancha um par de marcadas.
+  pares.aumentar(caixaCom(false), pares.casadas());
+
+  const todas = pares.casadas();
+  for (const id of ligadas) todas.add(id);
+  return todas;
 }
 
 /** Os pares de cada mês, juntos: o par nunca atravessa a virada do mês. */
@@ -481,7 +522,7 @@ export function nomeDoMes(mes: string): string {
 
 /** As colunas que a regra lê — a mesma lista para a tela e para o assistente. */
 export const COLUNAS_DO_FLUXO =
-  'id, transaction_date, amount, transaction_type, source_type, provider, bank_connection_id, dismissed_kind, tx_status, import_batch_id, description, counterparty_document, payment_method';
+  'id, transaction_date, amount, transaction_type, source_type, provider, bank_connection_id, dismissed_kind, dismissed_reason, tx_status, import_batch_id, description, counterparty_document, payment_method';
 
 /** A função do banco que devolve a raiz do CNPJ da empresa (a tabela fiscal é só do admin). */
 export const FUNCAO_DA_RAIZ_DA_EMPRESA = 'raiz_do_cnpj_da_empresa';

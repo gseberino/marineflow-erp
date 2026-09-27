@@ -867,7 +867,10 @@ begin
      or not has_function_privilege('authenticated', 'public.raiz_do_cnpj_da_empresa()', 'EXECUTE') then
     raise exception 'a raiz do CNPJ da empresa ficou aberta para anon, ou fechada para quem usa o sistema';
   end if;
-  if public.raiz_do_cnpj_da_empresa() is null or length(public.raiz_do_cnpj_da_empresa()) <> 8 then
+  -- Só confere o valor quando há CNPJ cadastrado: num banco vazio (reset local, branch) a
+  -- migration não pode abortar por falta de dado.
+  if exists (select 1 from public.company_fiscal_settings where coalesce(btrim(cnpj), '') <> '')
+     and coalesce(length(public.raiz_do_cnpj_da_empresa()), 0) <> 8 then
     raise exception 'a raiz do CNPJ da empresa não saiu com 8 dígitos';
   end if;
 end $$;

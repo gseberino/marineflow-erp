@@ -38,8 +38,10 @@ async function lerExtratoDoFluxo(sb: ToolCtx["sb"], de: string, ate: string): Pr
     tudo.push(...lote);
     if (lote.length < 1000) break;
   }
-  // Sem a raiz, a regra segue só com a marca e o par — o mesmo que a tela faz se a leitura falhar.
-  const { data: raiz } = await sb.rpc(FUNCAO_DA_RAIZ_DA_EMPRESA);
+  // Sem conseguir ler a raiz, o fechamento falha como a tela: seguir sem ela mudaria os números
+  // em silêncio. Raiz vazia (empresa sem CNPJ cadastrado) é outra coisa: a regra segue sem ela.
+  const { data: raiz, error: erroDaRaiz } = await sb.rpc(FUNCAO_DA_RAIZ_DA_EMPRESA);
+  if (erroDaRaiz) throw erroDaRaiz;
   return { linhas: tudo, opcoes: { raizDaEmpresa: typeof raiz === "string" && raiz.length === 8 ? raiz : null } };
 }
 

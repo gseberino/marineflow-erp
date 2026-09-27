@@ -32,8 +32,9 @@ let raizEmCache: Promise<string | null> | null = null;
 
 /**
  * A raiz do CNPJ da empresa (8 dígitos): o Pix ou TED com ela do outro lado é transferência entre
- * contas suas. Não muda — uma leitura por sessão. Se falhar, a regra segue sem ela (só a marca e
- * o par) e a próxima leitura tenta de novo.
+ * contas suas. Não muda — uma leitura por sessão. Se a leitura FALHAR, o fluxo falha junto e a tela
+ * diz que não conseguiu ler: seguir sem ela mudaria os números em silêncio (até R$ 22 mil de
+ * Entrou num mês, medido no extrato real). A próxima leitura tenta de novo.
  */
 export function lerRaizDaEmpresa(): Promise<string | null> {
   if (!raizEmCache) {
@@ -43,9 +44,9 @@ export function lerRaizDaEmpresa(): Promise<string | null> {
         const raiz: unknown = data;
         return typeof raiz === 'string' && raiz.length === 8 ? raiz : null;
       })
-      .catch(() => {
+      .catch((e: unknown) => {
         raizEmCache = null;
-        return null;
+        throw e;
       });
   }
   return raizEmCache;
