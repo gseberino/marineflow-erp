@@ -20,6 +20,7 @@ describe('totaisPorFavorecido', () => {
         { categoria: 'Retirada de sócio', valor: 1500.5 },
         { categoria: 'Reembolso', valor: 80.1 },
       ],
+      peloDocumento: [],
     });
     expect(t.get('rob')?.pago).toBe(150);
   });
@@ -48,6 +49,57 @@ describe('totaisPorFavorecido', () => {
   it('valor em texto (numeric do banco) soma em centavos, sem erro de arredondamento', () => {
     const linhas = Array.from({ length: 10 }, () => ({ payee_id: 'gus', amount: '0.10', paid_amount: '0.10', status: 'paid', expense_category: 'Pró-labore' }));
     expect(totaisPorFavorecido(linhas).get('gus')?.pago).toBe(1);
+  });
+});
+
+describe('pelo mesmo CPF/CNPJ, sem o favorecido ligado (documento igual identifica)', () => {
+  const favorecidos = [
+    { id: 'gus', document: '12345678901' },
+    { id: 'mic', document: '98765432100' },
+    { id: 'ana', document: null },
+  ];
+  const semLigar = (amount: number, extra: Partial<LancamentoDoFavorecido>): LancamentoDoFavorecido =>
+    ({ payee_id: null, amount, paid_amount: amount, status: 'paid', expense_category: 'Pró-labore', ...extra });
+
+  it('o pró-labore lançado no cadastro de FORNECEDOR com o CPF do sócio é do sócio (o caso real de 2026)', () => {
+    const t = totaisPorFavorecido([
+      l('gus', 1000, 'paid', 'Pró-labore'),
+      semLigar(500, { documento_do_fornecedor: '123.456.789-01', nome_do_fornecedor: 'GUSTAVO SEBERINO' }),
+      semLigar(500, { documento_do_fornecedor: '123.456.789-01', nome_do_fornecedor: 'GUSTAVO SEBERINO' }),
+      semLigar(200, { documento_da_linha: '12345678901' }),
+    ], favorecidos);
+    expect(t.get('gus')).toMatchObject({
+      pago: 2200, pagamentos: 4,
+      peloDocumento: [
+        { lancadoEm: 'GUSTAVO SEBERINO', lancamentos: 2, valor: 1000 },
+        { lancadoEm: 'sem cadastro ligado', lancamentos: 1, valor: 200 },
+      ],
+    });
+  });
+
+  it('a linha do banco (para onde o dinheiro foi) vence o fornecedor ligado: acha lançamento no cadastro errado', () => {
+    // 2 pagamentos ao CPF do Mickael lançados no fornecedor "VIA S.A." (CNPJ de outra empresa).
+    const t = totaisPorFavorecido([
+      semLigar(500, { documento_da_linha: '98765432100', documento_do_fornecedor: '33.041.260/0652-90', nome_do_fornecedor: 'VIA S.A.', expense_category: 'Salários e encargos' }),
+    ], favorecidos);
+    expect(t.get('mic')?.peloDocumento).toEqual([{ lancadoEm: 'VIA S.A.', lancamentos: 1, valor: 500 }]);
+  });
+
+  it('ligado a um favorecido conta só para ele, sem contar de novo pelo documento', () => {
+    const t = totaisPorFavorecido([l('ana', 300, 'paid', 'Serviços de terceiros')].map((x) => ({ ...x, documento_da_linha: '12345678901' })), favorecidos);
+    expect(t.get('ana')?.pago).toBe(300);
+    expect(t.has('gus')).toBe(false);
+  });
+
+  it('documento de dois favorecidos é dúvida e não soma; documento sem dono não soma', () => {
+    const repetido = [...favorecidos, { id: 'gus2', document: '123.456.789-01' }];
+    const t = totaisPorFavorecido([semLigar(500, { documento_da_linha: '12345678901' }), semLigar(90, { documento_da_linha: '11122233344' })], repetido);
+    expect(t.size).toBe(0);
+  });
+
+  it('CPF que perdeu o zero à esquerda (planilha) ainda é o mesmo', () => {
+    const t = totaisPorFavorecido([semLigar(70, { documento_da_linha: '1234567890' })], [{ id: 'z', document: '01234567890' }]);
+    expect(t.get('z')?.pago).toBe(70);
   });
 });
 

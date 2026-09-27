@@ -72,6 +72,16 @@ function RecebidoNoAno({ total, ano }: { total: TotalDoFavorecido | undefined; a
       {total.porCategoria.length === 1 && (
         <p className="text-muted-foreground">Tudo em {total.porCategoria[0].categoria}</p>
       )}
+      {total.peloDocumento.length > 0 && (() => {
+        const n = total.peloDocumento.reduce((s, d) => s + d.lancamentos, 0);
+        const v = total.peloDocumento.reduce((s, d) => s + d.valor, 0);
+        return (
+          <p className="text-warning">
+            Inclui {plural(n, 'lançamento', 'lançamentos')} ({formatCurrency(v)}) pelo mesmo CPF/CNPJ, sem o favorecido ligado:{' '}
+            {total.peloDocumento.map((d) => `${d.lancadoEm === 'sem cadastro ligado' ? d.lancadoEm : `no fornecedor ${d.lancadoEm}`} (${d.lancamentos})`).join(' · ')}
+          </p>
+        );
+      })()}
     </div>
   );
 }

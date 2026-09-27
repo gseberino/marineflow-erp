@@ -155,6 +155,21 @@ describe('PayeesPage', () => {
       .toBe(`Pago em ${ANO} a quem está nesta lista: R$ 0,00 (0 pagamentos)`);
   });
 
+  it('o que entrou pelo mesmo CPF, sem o favorecido ligado, aparece separado e diz onde foi lançado', async () => {
+    totaisMock.mockImplementation(() => ({
+      isError: false,
+      data: totaisPorFavorecido(
+        [{ payee_id: null, amount: 250, paid_amount: 250, status: 'paid', expense_category: 'Comissões',
+           documento_do_fornecedor: '987.654.321-00', nome_do_fornecedor: 'FELIPE V ME' }],
+        [{ id: 'p2', document: '98765432100' }],
+      ),
+    }));
+    renderPagina();
+    expect(texto(await screen.findByText(new RegExp(`Recebeu em ${ANO}:`)))).toBe(`Recebeu em ${ANO}: R$ 250,00 · 1 pagamento`);
+    expect(texto(screen.getByText(/^Inclui 1 lançamento/)))
+      .toBe('Inclui 1 lançamento (R$ 250,00) pelo mesmo CPF/CNPJ, sem o favorecido ligado: no fornecedor FELIPE V ME (1)');
+  });
+
   it('se a soma falhar, a tela continua e diz que os valores não aparecem', async () => {
     totaisMock.mockImplementation(() => ({ isError: true, data: undefined }));
     renderPagina();

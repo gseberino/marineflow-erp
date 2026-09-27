@@ -76,19 +76,39 @@ export function usePayees(apenasAtivos = true) {
 
 /**
  * O que cada favorecido recebeu num ano, e o que ainda falta pagar (ver favorecidos-no-ano).
- * Em páginas: o servidor corta em 1.000 linhas sem avisar.
+ * Lê TODOS os lançamentos do ano, não só os ligados a um favorecido: o que foi pago ao mesmo
+ * CPF/CNPJ sem o favorecido ligado também é dele. Em páginas: o servidor corta em 1.000 linhas.
  */
 export function useTotaisDosFavorecidos(ano: number) {
   return useQuery({
     queryKey: ['payees-totais-do-ano', ano],
-    queryFn: async () => totaisPorFavorecido(await lerEmPaginas<LancamentoDoFavorecido>((de, ate) => supabase
-      .from('payables')
-      .select('id, payee_id, amount, paid_amount, status, expense_category')
-      .not('payee_id', 'is', null)
-      .gte('issue_date', `${ano}-01-01`)
-      .lte('issue_date', `${ano}-12-31`)
-      .order('id')
-      .range(de, ate))),
+    queryFn: async () => {
+      const [favorecidos, lancamentos] = await Promise.all([
+        supabase.from('payees').select('id, document'),
+        lerEmPaginas((de, ate) => supabase
+          .from('payables')
+          .select(`id, payee_id, amount, paid_amount, status, expense_category,
+                   suppliers!payables_supplier_id_fkey(name, cnpj_cpf),
+                   bank_transactions!payables_bank_transaction_id_fkey(counterparty_document)`)
+          .gte('issue_date', `${ano}-01-01`)
+          .lte('issue_date', `${ano}-12-31`)
+          .order('id')
+          .range(de, ate)),
+      ]);
+      if (favorecidos.error) throw favorecidos.error;
+      type Linha = {
+        payee_id: string | null; amount: number; paid_amount: number | null; status: string | null; expense_category: string | null;
+        suppliers: { name: string | null; cnpj_cpf: string | null } | null;
+        bank_transactions: { counterparty_document: string | null } | null;
+      };
+      const linhas: LancamentoDoFavorecido[] = (lancamentos as unknown as Linha[]).map((l) => ({
+        payee_id: l.payee_id, amount: l.amount, paid_amount: l.paid_amount, status: l.status, expense_category: l.expense_category,
+        documento_da_linha: l.bank_transactions?.counterparty_document ?? null,
+        documento_do_fornecedor: l.suppliers?.cnpj_cpf ?? null,
+        nome_do_fornecedor: l.suppliers?.name ?? null,
+      }));
+      return totaisPorFavorecido(linhas, (favorecidos.data ?? []) as Array<{ id: string; document: string | null }>);
+    },
     staleTime: 5 * 60_000,
   });
 }
