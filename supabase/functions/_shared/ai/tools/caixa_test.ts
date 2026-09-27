@@ -203,7 +203,8 @@ Deno.test("nome de um e documento de outro: pergunta qual vale, sem gravar (regr
   const txt = String(await resumirPedido(c as never, "anotar_transacao_do_banco", args));
   assertStringIncludes(txt, "O documento 12.345.678/0001-90 não é o de Roberto Carlos da Silva (no cadastro: 123.456.789-01)");
   const r = await caixaTools.find((x) => x.name === "anotar_transacao_do_banco")!.execute(args, c as never) as { error?: string };
-  assertStringIncludes(String(r.error), "Qual dos dois vale?");
+  // O caminho sugerido tem de levar a algum lugar: outra pessoa pagando em nome dele é caso de tela.
+  assertStringIncludes(String(r.error), "classifique pela tela do Extrato quando a transação chegar");
   assertEquals(gravou, false);
 });
 

@@ -110,9 +110,12 @@ const docFormatado = (d: unknown) => {
 function conferirDocumentoDoCadastro(pessoa: Pessoa, documento: unknown): { error: string } | { semDocumentoNoCadastro: boolean } {
   if (!documento) return { semDocumentoNoCadastro: false };
   if (documentoContradiz(documento, pessoa.documento)) {
+    // Outra pessoa pagando (ou recebendo) em nome de alguém — cônjuge, empresa — é caso de tela:
+    // anotar só com o nome nunca casaria com a linha, que chega com o nome de quem pagou.
     return {
-      error: `O documento ${docFormatado(documento)} não é o de ${pessoa.nome} (no cadastro: ${docFormatado(pessoa.documento)}). ` +
-        `Qual dos dois vale? Para ${pessoa.nome}, anote sem o documento; para o documento, sem o nome.`,
+      error: `O documento ${docFormatado(documento)} não é o de ${pessoa.nome} (no cadastro: ${docFormatado(pessoa.documento)}): ` +
+        `o sistema não junta nome e documento diferentes. Se é outra pessoa pagando ou recebendo em nome de ${pessoa.nome}, ` +
+        `classifique pela tela do Extrato quando a transação chegar; se o nome estava errado, anote só com o documento.`,
     };
   }
   return { semDocumentoNoCadastro: docNormalizado(pessoa.documento).length < 11 };

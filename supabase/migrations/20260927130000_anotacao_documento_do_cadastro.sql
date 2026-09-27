@@ -34,8 +34,10 @@ begin
     ) x
    where public._documento_contradiz(new.documento, x.doc)
    limit 1;
+  -- Outra pessoa pagando (ou recebendo) em nome de alguém é caso de tela: a anotação só com o
+  -- nome nunca casaria com a linha, que chega com o nome de quem pagou.
   if v_nome is not null then
-    raise exception 'O documento % não é o de % (no cadastro: %). Qual dos dois vale? Para %, anote sem o documento; para o documento, sem o nome.',
+    raise exception 'O documento % não é o de % (no cadastro: %): o sistema não junta nome e documento diferentes. Se é outra pessoa pagando ou recebendo em nome de %, classifique pela tela do Extrato quando a transação chegar; se o nome estava errado, anote só com o documento.',
       new.documento, v_nome, v_doc, v_nome;
   end if;
   return new;
