@@ -6,8 +6,11 @@
 --   · Kamell NF 51038 e TSD NF 132181: a importação do XML ignorava as parcelas e o pagamento com
 --     crédito do fornecedor — criava UMA conta com o total, datada do dia da importação.
 --
---   · Selo de cobertura do DRE com a mesma regra do fluxo de caixa pelo extrato (seção 7);
+--   · (Seção 7 retirada na revisão de 27/09/2026: o selo de cobertura do DRE passou a ser calculado
+--     na tela com o fluxo pelo extrato, a mesma conta do Resumo do mês. A função dre_cobertura fica
+--     como está e ninguém a chama mais.)
 --   · "Mês pronto?" sem acusar a parcela da nota como duplicata do pagamento da entrada (seção 8).
+--   · A recusa de mês fechado aponta para o lugar novo, Conciliação › Fechar o mês (seção 9).
 --   · Revisão de 27/09/2026: crédito do fornecedor pelos códigos certos (19/21; 05 é crediário),
 --     crédito dentro ou fora das parcelas pela soma, e pagamento que parece já ter saído pelo
 --     banco vira PERGUNTA na importação (nunca é ligado sozinho).
@@ -685,62 +688,6 @@ revoke all on function public.ligar_parcela_ao_pagamento(uuid, uuid) from public
 grant execute on function public.ligar_parcela_ao_pagamento(uuid, uuid) to authenticated, service_role;
 
 -- ───────────────────────────────────────────────────────────────────────────────────────────
--- 7. Selo de cobertura do DRE com a MESMA regra do fluxo de caixa pelo extrato
---    (src/lib/fluxo-de-caixa.ts): só conta corrente e Caixa; fora duplicata, estornada, a
---    importação manual de 27/07 (sem conta ligada), pendente e data futura; transferência entre
---    contas e crédito do cartão na conta não são entrada nem saída. E conta cancelada não é
---    despesa lançada — as três notas da Kamell canceladas em 26/09 ainda contavam em julho.
--- ───────────────────────────────────────────────────────────────────────────────────────────
-create or replace function public.dre_cobertura(p_ano integer)
- returns table(mes integer, receita_lancada numeric, entrada_banco numeric, despesa_lancada numeric, saida_banco numeric)
- language sql
- stable
- set search_path to 'public'
-as $function$
-  with meses as (select generate_series(1, 12) m),
-  rec as (
-    select extract(month from issue_date)::int m, sum(amount) total
-      from public.receivables
-     where extract(year from issue_date) = p_ano
-       and coalesce(status, '') <> 'cancelled'
-     group by 1
-  ),
-  pag as (
-    select extract(month from issue_date)::int m, sum(amount) total
-      from public.payables
-     where extract(year from issue_date) = p_ano
-       and coalesce(status, '') <> 'cancelled'
-     group by 1
-  ),
-  banco as (
-    select extract(month from transaction_date)::int m,
-           sum(amount) filter (where transaction_type = 'credit') entradas,
-           sum(amount) filter (where transaction_type = 'debit') saidas
-      from public.bank_transactions
-     where extract(year from transaction_date) = p_ano
-       and coalesce(source_type, 'bank') in ('bank', 'cash')
-       and coalesce(tx_status, '') <> 'PENDING'
-       and coalesce(dismissed_kind, '') not in ('duplicata', 'estornada', 'transferencia', 'mecanica_cartao')
-       and not (coalesce(provider, '') = 'manual' and bank_connection_id is null)
-       and transaction_date <= current_date
-     group by 1
-  )
-  select meses.m,
-         coalesce(rec.total, 0)::numeric,
-         coalesce(banco.entradas, 0)::numeric,
-         coalesce(pag.total, 0)::numeric,
-         coalesce(banco.saidas, 0)::numeric
-    from meses
-    left join rec on rec.m = meses.m
-    left join pag on pag.m = meses.m
-    left join banco on banco.m = meses.m
-   order by meses.m;
-$function$;
-
-revoke all on function public.dre_cobertura(integer) from public, anon;
-grant execute on function public.dre_cobertura(integer) to authenticated, service_role;
-
--- ───────────────────────────────────────────────────────────────────────────────────────────
 -- 8. "Mês pronto?" — o item "Nenhuma despesa lançada em dobro" com as parcelas da nota. A parcela
 --    nasce com a data da NOTA; comparar essa data com a do pagamento da entrada (no mesmo dia, do
 --    mesmo valor) acusava duplicata onde não havia. Conta em aberto se compara pelo VENCIMENTO;
@@ -840,6 +787,27 @@ end;
 $function$;
 
 -- ───────────────────────────────────────────────────────────────────────────────────────────
+-- 9. A recusa de mês fechado apontava para "Financeiro › Fechamento", aba que deixou de existir
+--    na reorganização de 26/09/2026: fechar e reabrir o mês mora em Conciliação › Fechar o mês.
+--    Só o texto muda; assinatura, dono e permissões (postgres e service_role) ficam.
+-- ───────────────────────────────────────────────────────────────────────────────────────────
+create or replace function public._recusa_se_mes_fechado(p_data date, p_o_que text)
+returns void
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if p_data is not null and public.periodo_esta_fechado(p_data) then
+    raise exception 'O mês % está fechado. Reabra-o em Financeiro › Conciliação › Fechar o mês para %.',
+      to_char(p_data, 'MM/YYYY'), p_o_que
+      using errcode = 'check_violation';
+  end if;
+end;
+$$;
+
+-- ───────────────────────────────────────────────────────────────────────────────────────────
 -- Conferências: se algo acima não ficou como deveria, nada é gravado.
 -- ───────────────────────────────────────────────────────────────────────────────────────────
 do $$
@@ -863,12 +831,15 @@ begin
   if has_function_privilege('anon', 'public.confirm_nfe_import(uuid,uuid,jsonb,uuid)', 'EXECUTE')
      or has_function_privilege('anon', 'public.revert_nfe_import(uuid)', 'EXECUTE')
      or has_function_privilege('anon', 'public.ligar_parcela_ao_pagamento(uuid,uuid)', 'EXECUTE')
-     or has_function_privilege('anon', 'public.dre_cobertura(integer)', 'EXECUTE')
      or has_function_privilege('anon', 'public._pagamentos_que_podem_ser_a_parcela(uuid,numeric,date,date)', 'EXECUTE')
      or has_function_privilege('authenticated', 'public._pagamentos_que_podem_ser_a_parcela(uuid,numeric,date,date)', 'EXECUTE') then
-    raise exception 'anon (ou authenticated, na função interna) ainda executa uma função da importação ou da cobertura';
+    raise exception 'anon (ou authenticated, na função interna) ainda executa uma função da importação';
   end if;
   if (select reloptions from pg_class where oid = 'public.conciliacao_lancamentos'::regclass) is distinct from array['security_invoker=on'] then
     raise exception 'a visão de conciliação perdeu o security_invoker';
+  end if;
+  if has_function_privilege('anon', 'public._recusa_se_mes_fechado(date,text)', 'EXECUTE')
+     or has_function_privilege('authenticated', 'public._recusa_se_mes_fechado(date,text)', 'EXECUTE') then
+    raise exception 'a recusa de mês fechado ficou executável por anon ou authenticated';
   end if;
 end $$;

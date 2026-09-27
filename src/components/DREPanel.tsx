@@ -5,7 +5,6 @@
 // o campo `cost_center_id` está vazio nos 367 lançamentos: o relatório existia e mostrava
 // zero em tudo. Este lê `dre_group`, que é onde a classificação de fato mora.
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -13,47 +12,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useI18n } from '@/i18n';
 import { useAuth } from '@/hooks/use-auth';
-import { supabase } from '@/integrations/supabase/client';
 import { exportToCSV } from '@/lib/export';
-import { montarDRE, doMes } from '@/lib/dre';
+import { montarDRE, doMes, coberturaDoDRE } from '@/lib/dre';
 // Os lançamentos do ano, com o grupo do plano de contas: a mesma leitura serve o Resumo do
 // mês da Central de relatórios, para "vendido" e "resultado" não terem dois números.
 import { useLancamentosDRE } from '@/hooks/use-dre';
+import { useFluxoDeCaixa } from '@/hooks/use-fluxo-de-caixa';
 import { Download, ChevronDown, AlertTriangle, CheckCircle2, Lock } from 'lucide-react';
-
-/**
- * Cobertura: quanto do dinheiro que passou pelo banco este resultado explica.
- *
- * Este DRE nasce torto por construção: a caixa de entrada lança DESPESA automaticamente, mas
- * nunca receita — entrada quase sempre corresponde a um orçamento ou OS que já existe, e criar
- * receita avulsa duplicaria o faturamento na hora de faturar. A consequência medida em
- * 22/09/2026: 38% das entradas do ano viraram receita, contra 96% das saídas. O resultado
- * mostra prejuízo onde não há.
- *
- * A conta vem da função `dre_cobertura` no banco (mesma base do DRE: lançamento por
- * issue_date, banco por transaction_date), para painel, agente e briefing dizerem o mesmo
- * número.
- */
-function useCoberturaDRE(ano: number) {
-  return useQuery({
-    queryKey: ['dre-cobertura', ano],
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc('dre_cobertura', { p_ano: ano });
-      if (error) throw error;
-      return (data ?? []) as Array<{
-        mes: number; receita_lancada: number; entrada_banco: number;
-        despesa_lancada: number; saida_banco: number;
-      }>;
-    },
-    staleTime: 60_000,
-  });
-}
-
-/** Percentual coberto, ou null quando não houve movimento no banco (nada a comparar). */
-function cobertura(lancado: number, banco: number): number | null {
-  if (!banco) return null;
-  return Math.round((100 * lancado) / banco);
-}
 
 const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
 
@@ -65,31 +30,34 @@ export function DREPanel() {
   const [mes, setMes] = useState<number | 'ano'>('ano');
 
   const { data: lancamentos = [], isLoading } = useLancamentosDRE(ano);
-  const { data: linhasCobertura = [] } = useCoberturaDRE(ano);
-
-  // O selo acompanha o recorte escolhido: olhar o ano inteiro quando a tela mostra março
-  // diria que o número está bom enquanto março está vazio.
-  const selo = useMemo(() => {
-    const linhas = mes === 'ano' ? linhasCobertura : linhasCobertura.filter((l) => l.mes === mes);
-    const soma = (f: (l: typeof linhas[number]) => number) => linhas.reduce((s, l) => s + Number(f(l) || 0), 0);
-    const receita = soma((l) => l.receita_lancada);
-    const entrada = soma((l) => l.entrada_banco);
-    const despesa = soma((l) => l.despesa_lancada);
-    const saida = soma((l) => l.saida_banco);
-    return {
-      receita, entrada, despesa, saida,
-      pctReceita: cobertura(receita, entrada),
-      pctDespesa: cobertura(despesa, saida),
-      faltaReceita: Math.max(0, entrada - receita),
-      semMovimento: entrada === 0 && saida === 0,
-    };
-  }, [linhasCobertura, mes]);
+  // O ano inteiro do extrato, com a regra da Central de relatórios (transferência pareada fora,
+  // importação repetida fora…): o selo e o Resumo do mês dizem a mesma cobertura.
+  const { data: fluxoDoAno } = useFluxoDeCaixa(12, `${ano}-12`);
 
   const recorte = useMemo(
     () => (mes === 'ano' ? lancamentos : doMes(lancamentos, ano, mes)),
     [lancamentos, ano, mes],
   );
   const dre = useMemo(() => montarDRE(recorte), [recorte]);
+
+  /*
+   * Cobertura: quanto do dinheiro que passou pelo banco este resultado explica.
+   *
+   * Este DRE nasce torto por construção: a caixa de entrada lança DESPESA automaticamente, mas
+   * nunca receita — entrada quase sempre corresponde a um orçamento ou OS que já existe, e criar
+   * receita avulsa duplicaria o faturamento na hora de faturar. Medido em 22/09/2026: 38% das
+   * entradas do ano viraram receita, contra 96% das saídas. O resultado mostra prejuízo onde
+   * não há.
+   *
+   * O selo acompanha o recorte escolhido: olhar o ano inteiro quando a tela mostra março diria
+   * que o número está bom enquanto março está vazio.
+   */
+  const selo = useMemo(() => {
+    const meses = (fluxoDoAno?.meses ?? []).filter((m) => mes === 'ano' || Number(m.mes.slice(5, 7)) === mes);
+    const somaEm = (f: (m: typeof meses[number]) => number) =>
+      Math.round(meses.reduce((s, m) => s + Math.round(f(m) * 100), 0)) / 100;
+    return coberturaDoDRE(recorte, { entrou: somaEm((m) => m.entrou), saiu: somaEm((m) => m.saiu) });
+  }, [fluxoDoAno, recorte, mes]);
 
   // Quem não é admin não enxerga pró-labore nem folha (a RLS os oculta). Sem dizer isso, o
   // resultado parece melhor do que é e ninguém tem como desconfiar.

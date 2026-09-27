@@ -10,7 +10,7 @@ import { useI18n } from '@/i18n';
 import { useAuth } from '@/hooks/use-auth';
 import { useFluxoDeCaixa } from '@/hooks/use-fluxo-de-caixa';
 import { useLancamentosDRE } from '@/hooks/use-dre';
-import { montarDRE, doMes } from '@/lib/dre';
+import { montarDRE, doMes, coberturaDoDRE } from '@/lib/dre';
 import { hojeEmBrasilia, nomeDoMes, ultimosMeses } from '@/lib/fluxo-de-caixa';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -27,18 +27,20 @@ export function ResumoDoMes() {
 
   const fluxo = useFluxoDeCaixa(1, mes);
   const dre = useLancamentosDRE(ano);
-  const doResultado = useMemo(
-    () => (dre.data ? montarDRE(doMes(dre.data, ano, numeroDoMes)) : null),
+  const doMesNoDRE = useMemo(
+    () => (dre.data ? doMes(dre.data, ano, numeroDoMes) : null),
     [dre.data, ano, numeroDoMes],
   );
+  const doResultado = useMemo(() => (doMesNoDRE ? montarDRE(doMesNoDRE) : null), [doMesNoDRE]);
 
   const doMesNoExtrato = fluxo.data?.meses[0];
   const mesCorrente = mes === hoje.slice(0, 7);
   // Quem não é admin não enxerga pró-labore nem folha (a RLS os oculta): o resultado dele sai
   // incompleto, e a tela precisa dizer.
   const veTudo = user?.role === 'admin';
-  const cobertura = doMesNoExtrato && doResultado && doMesNoExtrato.entrou > 0
-    ? Math.round((100 * doResultado.receitaTotal) / doMesNoExtrato.entrou)
+  // A mesma conta do selo do DRE (coberturaDoDRE): os dois lugares dizem o mesmo percentual.
+  const cobertura = doMesNoExtrato && doMesNoDRE
+    ? coberturaDoDRE(doMesNoDRE, doMesNoExtrato).pctReceita
     : null;
 
   return (

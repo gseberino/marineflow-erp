@@ -140,3 +140,45 @@ export function doMes(lancamentos: LancamentoDRE[], ano: number, mes: number): L
 }
 
 export const ROTULOS_GRUPO = ROTULO_GRUPO;
+
+/** O que o selo de confiabilidade mostra: a conta, não só o veredicto. */
+export interface CoberturaDoDRE {
+  receita: number;
+  entrada: number;
+  despesa: number;
+  saida: number;
+  /** Receita lançada ÷ o que entrou no banco, em %; null quando nada entrou. */
+  pctReceita: number | null;
+  pctDespesa: number | null;
+  faltaReceita: number;
+  semMovimento: boolean;
+}
+
+/**
+ * Cobertura: quanto do dinheiro que passou pelo banco este resultado explica.
+ *
+ * A receita é a MESMA da primeira linha do DRE e do "Vendido" do Resumo do mês (grupo
+ * "receita"); o banco é o Entrou/Saiu do fluxo de caixa pelo extrato, a mesma regra da Central
+ * de relatórios. Até 27/09/2026 o selo lia uma conta própria no banco de dados e o Resumo do mês
+ * outra: o mesmo mês tinha duas coberturas.
+ *
+ * A despesa é toda conta lançada no período pela emissão (menos cancelada), inclusive a que
+ * fica fora do resultado — é a comparação com o que saiu, não uma linha do DRE.
+ */
+export function coberturaDoDRE(lancamentos: LancamentoDRE[], banco: { entrou: number; saiu: number }): CoberturaDoDRE {
+  // Em centavos: somar reais em ponto flutuante deixa "faltam R$ 0,00" no selo.
+  const centavos = (ls: LancamentoDRE[]) => ls.reduce((s, l) => s + Math.round(l.valor * 100), 0);
+  const receita = centavos(lancamentos.filter((l) => l.grupo === 'receita')) / 100;
+  const despesa = centavos(lancamentos.filter((l) => l.tipo === 'despesa')) / 100;
+  const pct = (lancado: number, noBanco: number) => (noBanco ? Math.round((100 * lancado) / noBanco) : null);
+  return {
+    receita,
+    despesa,
+    entrada: banco.entrou,
+    saida: banco.saiu,
+    pctReceita: pct(receita, banco.entrou),
+    pctDespesa: pct(despesa, banco.saiu),
+    faltaReceita: Math.max(0, Math.round((banco.entrou - receita) * 100) / 100),
+    semMovimento: banco.entrou === 0 && banco.saiu === 0,
+  };
+}
