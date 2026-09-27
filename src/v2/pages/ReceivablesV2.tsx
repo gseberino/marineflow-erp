@@ -337,7 +337,8 @@ export default function ReceivablesV2() {
                     quase nada, e "recebido" parecia zero. */}
                 <KPIStat
                   label="Entrou no mês (extrato)"
-                  value={formatCurrency(summary?.entrou_no_mes || 0)}
+                  value={summary?.entrou_no_mes == null ? '—' : formatCurrency(summary.entrou_no_mes)}
+                  hint={summary?.erro_do_extrato ? 'Não consegui ler o extrato agora.' : undefined}
                   tone="success"
                   ajuda={<AjudaDoExtrato rotulo="De onde vem o Entrou no mês" />}
                 />

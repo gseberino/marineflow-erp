@@ -86,15 +86,15 @@ export function VisaoGeral() {
                 inteiro), e o mês parecia não ter gastado nada. */}
             <KPIStat
               label="Entrou no mês (extrato)"
-              value={formatCurrency(summary?.entrou_no_mes || 0)}
+              value={summary?.entrou_no_mes == null ? '—' : formatCurrency(summary.entrou_no_mes)}
               tone="success"
-              hint="nas contas e no Caixa"
+              hint={summary?.erro_do_extrato ? 'Não consegui ler o extrato agora.' : 'nas contas e no Caixa'}
               ajuda={<AjudaDoExtrato rotulo="De onde vem o Entrou no mês" />}
             />
             <KPIStat
               label="Saiu no mês (extrato)"
-              value={formatCurrency(summary?.saiu_no_mes || 0)}
-              hint="cartão conta quando a fatura é paga"
+              value={summary?.saiu_no_mes == null ? '—' : formatCurrency(summary.saiu_no_mes)}
+              hint={summary?.erro_do_extrato ? 'Não consegui ler o extrato agora.' : 'cartão conta quando a fatura é paga'}
               ajuda={<AjudaDoExtrato rotulo="De onde vem o Saiu no mês" />}
             />
           </div>

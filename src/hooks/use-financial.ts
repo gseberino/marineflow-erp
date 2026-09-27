@@ -180,12 +180,17 @@ export function useFinancialSummary() {
         supabase.from('payables').select('balance_amount').not('status', 'in', '("paid","cancelled")').lt('due_date', today),
         supabase.from('payments').select('amount').not('receivable_id', 'is', null).eq('status', 'confirmed').gte('payment_date', firstOfMonth),
         supabase.from('payments').select('amount').not('payable_id', 'is', null).eq('status', 'confirmed').gte('payment_date', firstOfMonth),
-        // O mês corrente pelo extrato: é o que de fato entrou e saiu das contas.
-        carregarFluxoDeCaixa(1),
+        // O mês corrente pelo extrato: é o que de fato entrou e saiu das contas. Um erro aqui apaga
+        // só os números do extrato — A receber e A pagar não dependem dele (conferência de
+        // 27/09/2026: a falha derrubava o resumo inteiro e Contas a Receber mostrava R$ 0,00).
+        carregarFluxoDeCaixa(1).then(
+          (fluxo) => ({ fluxo, erro: null as string | null }),
+          (e: unknown) => ({ fluxo: null as FluxoDeCaixa | null, erro: (e as Error)?.message ?? String(e) }),
+        ),
       ]);
 
       const sum = (rows: any[] | null) => (rows || []).reduce((s, r) => s + Number(r.balance_amount || r.amount || 0), 0);
-      const mes = fluxoDoMes.meses[0];
+      const mes = fluxoDoMes.fluxo?.meses[0];
 
       return {
         total_receivable: sum(recRes.data),
@@ -196,10 +201,12 @@ export function useFinancialSummary() {
         // dinheiro que passou pelo banco — para isso, os campos do extrato abaixo.
         collected_this_month: sum(collectedRes.data),
         paid_this_month: sum(paidRes.data),
-        /** Entrou nas contas no mês, pelo extrato (sem transferência entre contas próprias). */
-        entrou_no_mes: mes?.entrou ?? 0,
-        /** Saiu das contas no mês, pelo extrato (compra no cartão conta quando a fatura é paga). */
-        saiu_no_mes: mes?.saiu ?? 0,
+        /** Entrou nas contas no mês, pelo extrato (sem transferência entre contas próprias). null = não deu para ler. */
+        entrou_no_mes: mes ? mes.entrou : null,
+        /** Saiu das contas no mês, pelo extrato (compra no cartão conta quando a fatura é paga). null = não deu para ler. */
+        saiu_no_mes: mes ? mes.saiu : null,
+        /** Por que o extrato não pôde ser lido — a tela diz isso em vez de mostrar R$ 0,00. */
+        erro_do_extrato: fluxoDoMes.erro,
         /** À parte, sem somar: transferências entre contas próprias no mês. */
         transferencias_no_mes: mes?.transferencias ?? { entrou: 0, saiu: 0 },
         /** À parte, sem somar: crédito do cartão posto na conta corrente (Pix no crédito). */

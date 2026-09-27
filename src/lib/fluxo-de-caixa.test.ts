@@ -431,6 +431,15 @@ describe('crédito do cartão na conta pela descrição (conferência final)', (
   });
 });
 
+describe('crédito do cartão pela descrição: só o do cartão', () => {
+  it('"Valor adicionado" que não fala de cartão de crédito nem de Pix no crédito continua dinheiro', () => {
+    const l = linha({ transaction_type: 'credit', amount: 50, description: 'Valor adicionado via Pix - devolução de crédito' });
+    expect(destinoDaLinha(l, HOJE)).toBe('movimento');
+    const noBoleto = linha({ transaction_type: 'credit', amount: 50, description: 'Valor adicionado na conta por boleto' });
+    expect(destinoDaLinha(noBoleto, HOJE)).toBe('movimento');
+  });
+});
+
 describe('fases do pareamento (reconferência de 27/09/2026)', () => {
   it('o saque ligado ao banco casa antes; a marcada de outra conta e o Pix comum continuam dinheiro', () => {
     // Saque ligado: débito no C6 e crédito no Caixa, os dois marcados. No mesmo dia, um crédito
@@ -484,6 +493,19 @@ describe('fases do pareamento (reconferência de 27/09/2026)', () => {
       linha({ id: 'c2', source_type: 'cash', bank_connection_id: CAIXA, transaction_type: 'credit', amount: 200, dismissed_kind: 'transferencia', ...SAQUE }),
     ], ['2026-09'], HOJE);
     expect(f.meses[0]).toMatchObject({ entrou: 0, saiu: 0, transferencias: { entrou: 400, saiu: 400 } });
+  });
+
+  it('dois saques ligados no mesmo dia com centavos cruzados: os dois pares fecham, em qualquer ordem', () => {
+    for (const ids of permutacoes(['a', 'b', 'c', 'd'])) {
+      const f = montarFluxoDeCaixa([
+        linha({ id: ids[0], amount: 500.01, dismissed_kind: 'transferencia', ...SAQUE }),
+        linha({ id: ids[1], amount: 500.02, dismissed_kind: 'transferencia', ...SAQUE }),
+        linha({ id: ids[2], source_type: 'cash', bank_connection_id: CAIXA, transaction_type: 'credit', amount: 500.00, dismissed_kind: 'transferencia', ...SAQUE }),
+        linha({ id: ids[3], source_type: 'cash', bank_connection_id: CAIXA, transaction_type: 'credit', amount: 500.01, dismissed_kind: 'transferencia', ...SAQUE }),
+      ], ['2026-09'], HOJE);
+      expect(f.meses[0]).toMatchObject({ entrou: 0, saiu: 0 });
+      expect(f.meses[0].transferencias).toEqual({ entrou: 1000.01, saiu: 1000.03 });
+    }
   });
 
   it('meses inteiros de um período: é o que a leitura do assistente traz', () => {

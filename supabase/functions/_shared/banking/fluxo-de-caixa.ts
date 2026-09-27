@@ -122,7 +122,7 @@ const INVESTIMENTO = /\b(CDB|RDB|LCI|LCA)\b/i;
  * dívida do cartão entrando na conta. No extrato real, 8 linhas assim estavam marcadas como crédito
  * do cartão e 1 como transferência — e essa casava por acaso com uma compra de R$ 80 no mesmo dia.
  */
-const CREDITO_DO_CARTAO_NA_CONTA = /valor adicionado.*cr[eé]dito/i;
+const CREDITO_DO_CARTAO_NA_CONTA = /valor adicionado.*(cart[aã]o de cr[eé]dito|pix no cr[eé]dito)/i;
 
 /** O motivo que o "+ Lançar" (mover_caixa) grava nas duas pontas quando liga a linha do banco. */
 const MOTIVOS_DO_CAIXA_LIGADO = new Set(['saque do banco para o caixa', 'depósito do caixa no banco', 'deposito do caixa no banco']);
@@ -298,14 +298,33 @@ export function paresDeTransferencia(linhas: LinhaDoFluxo[], hoje: string, opcoe
   // 1ª fase: as duas pontas que o "+ Lançar" ligou — mesmo motivo, mesmo dia, mesmo valor (o
   // mover_caixa aceita até R$ 0,01 de diferença). É prova, não palpite: ficam como estão.
   const ligadas = new Set<string>();
-  const doBancoLigadas = [...debitos, ...creditos]
-    .filter((p) => !p.caixa && p.marcada && MOTIVOS_DO_CAIXA_LIGADO.has(p.motivo)).sort(antes);
-  const doCaixaLigadas = [...debitos, ...creditos]
-    .filter((p) => p.caixa && p.marcada && MOTIVOS_DO_CAIXA_LIGADO.has(p.motivo)).sort(antes);
-  for (const cx of doCaixaLigadas) {
-    const banco = doBancoLigadas.find((b) => !ligadas.has(b.id) && b.debito !== cx.debito && b.motivo === cx.motivo
-      && b.data === cx.data && Math.abs(b.centavos - cx.centavos) <= 1);
-    if (banco) { ligadas.add(cx.id); ligadas.add(banco.id); }
+  {
+    const doBanco = [...debitos, ...creditos]
+      .filter((p) => !p.caixa && p.marcada && MOTIVOS_DO_CAIXA_LIGADO.has(p.motivo)).sort(antes);
+    const doCaixa = [...debitos, ...creditos]
+      .filter((p) => p.caixa && p.marcada && MOTIVOS_DO_CAIXA_LIGADO.has(p.motivo)).sort(antes);
+    // Candidatas de cada ponta do Caixa, a menor diferença de valor primeiro. Também aqui o maior
+    // número de pares (caminhos aumentantes): dois saques ligados no mesmo dia com centavos
+    // cruzados (500,01 e 500,02 no banco, 500,00 e 500,01 no Caixa) não podem deixar um solto.
+    const candidatas = new Map(doCaixa.map((cx) => [cx.id, doBanco
+      .filter((b) => b.debito !== cx.debito && b.motivo === cx.motivo && b.data === cx.data
+        && Math.abs(b.centavos - cx.centavos) <= 1)
+      .sort((a, b) => Math.abs(a.centavos - cx.centavos) - Math.abs(b.centavos - cx.centavos) || antes(a, b))]));
+    const caixaDoBanco = new Map<string, Perna>();
+    const tentar = (cx: Perna, vistos: Set<string>): boolean => {
+      for (const b of candidatas.get(cx.id) ?? []) {
+        if (vistos.has(b.id)) continue;
+        vistos.add(b.id);
+        const atual = caixaDoBanco.get(b.id);
+        if (!atual || tentar(atual, vistos)) {
+          caixaDoBanco.set(b.id, cx);
+          return true;
+        }
+      }
+      return false;
+    };
+    for (const cx of doCaixa) tentar(cx, new Set());
+    for (const [banco, cx] of caixaDoBanco) { ligadas.add(banco); ligadas.add(cx.id); }
   }
 
   const pares = emparelhamento(debitos.filter((d) => !ligadas.has(d.id)), creditos.filter((c) => !ligadas.has(c.id)));
