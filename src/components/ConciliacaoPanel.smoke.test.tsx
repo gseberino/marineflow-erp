@@ -53,6 +53,15 @@ const { estado, conciliarMock } = vi.hoisted(() => ({
         extrato_data: '2026-08-15', extrato_valor: 114.34, extrato_descricao: 'INSTALADORA BERLIM 1/4',
         diferenca: 343.02, compra_parcelada: true, parcelas: 4,
       },
+      {
+        // A mesma compra lançada de novo, inteira, na parcela 3/4 (lote de 29/07): é despesa em dobro.
+        lado: 'payable', id: 'p4', description: 'AMAZON MARKETPLACE 3/4',
+        amount: 602, status: 'paid', due_date: '2025-10-03', issue_date: '2025-10-03',
+        contraparte: 'Amazon Marketplace', categoria: 'Peças e materiais',
+        bank_transaction_id: 'bt11', situacao: 'conciliado',
+        extrato_data: '2025-10-03', extrato_valor: 150.5, extrato_descricao: 'AMAZON MARKETPLACE 3/4',
+        diferenca: 451.5, compra_parcelada: true, parcelas: 4, lancada_em_dobro: true,
+      },
     ],
     // Uma entrada e uma saída: a tela só pode oferecer a do sinal certo.
     livres: [
@@ -121,13 +130,27 @@ describe('conciliação (parte do lançamento)', () => {
   it('compra parcelada casada com uma parcela não é "valor diferente": aparece como compra em Nx', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderPanel();
-    // Só a Celesc conta no aviso; a Instaladora Berlim (compra em 4x) não.
-    expect(await screen.findByText(/lançamento conciliado tem/)).toBeInTheDocument();
+    // A Celesc e a Amazon em dobro contam no aviso; a Instaladora Berlim (compra em 4x) não.
+    const aviso = await screen.findByText(/lançamentos conciliados têm/);
+    expect(aviso.textContent).toMatch(/^2 lançamentos conciliados têm valor diferente do extrato/);
     await user.click(screen.getByRole('button', { name: /Conciliados/ }));
     expect(await screen.findByText('Instaladora Berlim')).toBeInTheDocument();
     expect(screen.getByText(/compra em 4x · no extrato, a parcela/)).toBeInTheDocument();
     // Só a Celesc mostra "difere"; a compra parcelada não.
     expect(screen.getAllByText(/^difere /)).toHaveLength(1);
+  });
+
+  it('compra parcelada lançada em dobro: conta no aviso, sai marcada, e o "Ver" mostra só os com problema', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderPanel();
+    expect(await screen.findByText(/1 repete uma compra parcelada já lançada/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Ver' }));
+    expect(await screen.findByText('Amazon Marketplace')).toBeInTheDocument();
+    expect(screen.getByText('Lançada em dobro: repete uma compra em 4x que já está lançada inteira')).toBeInTheDocument();
+    expect(screen.getByText('Celesc')).toBeInTheDocument();
+    expect(screen.queryByText('Instaladora Berlim')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Ver todos' }));
+    expect(await screen.findByText('Instaladora Berlim')).toBeInTheDocument();
   });
 
   it('só oferece candidato do SINAL certo — e marca o valor exato', async () => {

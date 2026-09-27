@@ -41,6 +41,11 @@ export interface LancamentoParaConciliar {
   /** Em quantas vezes, quando a linha do extrato é uma parcela ("3/6" → 6). */
   parcelas?: number | null;
   /**
+   * Repete uma compra parcelada que já está lançada pelo valor inteiro (compras_parceladas_em_dobro):
+   * a mesma despesa contada de novo. É problema, mesmo tendo a cara de "compra em Nx".
+   */
+  lancada_em_dobro?: boolean;
+  /**
    * Nasceu da aprovação de uma linha do extrato (e não foi só casado com ela). Muda o que
    * "desfazer" significa: o que nasceu é cancelado e a linha volta para a fila; o que já
    * existia só perde o vínculo.
@@ -101,8 +106,9 @@ export function useLancamentosConciliados(apenasComDiferenca = false) {
         .eq('situacao', 'conciliado');
       // `neq(0)` sozinho descartaria os nulos junto; aqui diferença nula não existe entre
       // conciliados, mas deixar explícito evita surpresa se a view mudar. Compra parcelada casada
-      // com uma parcela tem a diferença esperada e não entra na lista de diferenças.
-      if (apenasComDiferenca) q = q.neq('diferenca', 0).eq('compra_parcelada', false);
+      // com uma parcela tem a diferença esperada e não entra na lista de diferenças — a não ser
+      // que repita uma compra já lançada (lançada em dobro).
+      if (apenasComDiferenca) q = q.neq('diferenca', 0).or('compra_parcelada.eq.false,lancada_em_dobro.eq.true');
 
       const { data, error } = await q
         .order('extrato_data', { ascending: false, nullsFirst: false })

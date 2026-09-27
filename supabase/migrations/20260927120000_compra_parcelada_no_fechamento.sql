@@ -38,24 +38,30 @@ grant execute on function public._loja_da_parcela(text, text) to authenticated, 
 -- ───────────────────────────────────────────────────────────────────────────────────────────
 -- 2. Compras parceladas lançadas mais de uma vez.
 --
---    A compra é: mesma conta (cartão), mesma loja, mesmo número de parcelas e o valor da parcela
---    igual com até 1 centavo por parcela de diferença (o cartão joga na primeira os centavos que
---    não dividem: Vila Verde, 275,35 na 1/6 e 275,32 nas outras). Só entra compra que tem ao menos UM lançamento com o valor inteiro (parcela × vezes):
---    lançar parcela por parcela, cada uma com o valor dela, soma certo e não é duplicata. Fica
---    o lançamento inteiro da parcela mais antiga; os outros da mesma compra repetem despesa.
---    Número de parcela repetido dentro da compra é ambíguo (podem ser duas compras iguais) e
---    fica de fora — como no motor, errar juntando compras diferentes é pior.
+--    A compra é: mesma conta (cartão), mesma loja, mesmo número de parcelas (2 ou mais) e o valor
+--    da parcela igual com até 1 centavo por parcela de diferença (o cartão joga na primeira os
+--    centavos que não dividem: Vila Verde, 275,35 na 1/6 e 275,32 nas outras). Só entra compra
+--    que tem ao menos UM lançamento com o valor inteiro (parcela × vezes, com a mesma folga de
+--    centavos da conciliação): lançar parcela por parcela, cada uma com o valor dela, soma certo
+--    e não é duplicata. Fica o lançamento inteiro da parcela mais antiga; os outros da mesma
+--    compra repetem despesa. Número de parcela repetido dentro da compra é ambíguo (podem ser
+--    duas compras iguais) e fica de fora — como no motor, errar juntando compras diferentes é
+--    pior. Pelo mesmo motivo, as linhas de uma compra têm de apontar para a mesma data de compra
+--    (a data da linha menos um mês por parcela, com até 35 dias de folga): duas compras iguais
+--    feitas em épocas diferentes, cada uma ancorada numa parcela, não viram duplicata (revisão
+--    de 27/09/2026; nos 9 grupos reais a folga medida vai de 3 a 22 dias).
 -- ───────────────────────────────────────────────────────────────────────────────────────────
 create or replace view public.compras_parceladas_em_dobro with (security_invoker = on) as
 with parcelas as (
   select p.id as payable_id, p.amount as lancado, p.issue_date, p.description,
          bt.bank_connection_id, bt.amount as parcela, bt.transaction_date,
-         case when bt.installment_label ~ '^\d{1,2}/\d{1,2}$' then split_part(bt.installment_label, '/', 1)::int end as k,
-         case when bt.installment_label ~ '^\d{1,2}/\d{1,2}$' then split_part(bt.installment_label, '/', 2)::int end as n,
+         split_part(bt.installment_label, '/', 1)::int as k,
+         split_part(bt.installment_label, '/', 2)::int as n,
          public._loja_da_parcela(bt.counterparty_name, bt.description) as loja
     from public.payables p
     join public.bank_transactions bt on bt.id = p.bank_transaction_id
    where p.status <> 'cancelled' and bt.installment_label ~ '^\d{1,2}/\d{1,2}$'
+     and split_part(bt.installment_label, '/', 2)::int >= 2
 ),
 saltos as (
   select *, parcela - lag(parcela) over (partition by bank_connection_id, loja, n order by parcela, k, payable_id) as salto
@@ -70,14 +76,16 @@ grupos as (
   select bank_connection_id, loja, n, compra,
          count(*) as lancamentos,
          count(distinct k) as parcelas_distintas,
-         count(*) filter (where abs(lancado - n * parcela) <= n * 0.01) as inteiras
+         -- Folga de centavos: n−1 por parcela (a 1ª parcela leva o resto que não divide).
+         count(*) filter (where abs(lancado - n * parcela) <= n * (n - 1) * 0.01) as inteiras,
+         max(transaction_date - (k - 1) * 30) - min(transaction_date - (k - 1) * 30) as folga_da_compra
     from compras
    group by bank_connection_id, loja, n, compra
 ),
 marcadas as (
-  select c.*, g.lancamentos, g.parcelas_distintas, g.inteiras,
+  select c.*, g.lancamentos, g.parcelas_distintas, g.inteiras, g.folga_da_compra,
          first_value(c.payable_id) over (partition by c.bank_connection_id, c.loja, c.n, c.compra
-                                         order by (abs(c.lancado - c.n * c.parcela) <= c.n * 0.01) desc, c.k, c.payable_id) as fica
+                                         order by (abs(c.lancado - c.n * c.parcela) <= c.n * (c.n - 1) * 0.01) desc, c.k, c.payable_id) as fica
     from compras c
     join grupos g
       on g.bank_connection_id is not distinct from c.bank_connection_id
@@ -94,7 +102,8 @@ select payable_id,
        transaction_date,
        description
   from marcadas
- where inteiras >= 1 and lancamentos > 1 and parcelas_distintas = lancamentos and payable_id <> fica;
+ where inteiras >= 1 and lancamentos > 1 and parcelas_distintas = lancamentos and folga_da_compra <= 35
+   and payable_id <> fica;
 
 comment on view public.compras_parceladas_em_dobro is
   'Lançamentos que repetem uma compra parcelada já lançada pelo valor inteiro (fica o da parcela mais antiga). Ver 20260927120000.';
@@ -103,7 +112,10 @@ grant select on public.compras_parceladas_em_dobro to authenticated;
 
 -- ───────────────────────────────────────────────────────────────────────────────────────────
 -- 3. Conciliação: a compra parcelada casada com UMA parcela não é "valor diferente". Mesma
---    visão, mesmas colunas na mesma ordem; duas colunas novas no fim.
+--    visão, mesmas colunas na mesma ordem; três colunas novas no fim. "1/1" não é parcelada (a
+--    diferença de centavo continua aparecendo). E o lançamento que REPETE uma compra parcelada
+--    (compras_parceladas_em_dobro) sai marcado: sem isso ele sumia da lista de diferenças e
+--    parecia certo, enquanto o "Mês pronto?" travava sem dizer qual era (revisão de 27/09/2026).
 -- ───────────────────────────────────────────────────────────────────────────────────────────
 create or replace view public.conciliacao_lancamentos with (security_invoker = on) as
  SELECT 'payable'::text AS lado,
@@ -132,18 +144,20 @@ create or replace view public.conciliacao_lancamentos with (security_invoker = o
            FROM finance_review_queue q
           WHERE q.created_payable_id = p.id)) AS nasceu_do_extrato,
         CASE
-            WHEN bt.installment_label ~ '^\d{1,2}/\d{1,2}$'
+            WHEN bt.installment_label ~ '^\d{1,2}/\d{1,2}$' AND split_part(bt.installment_label, '/', 2)::integer >= 2
             THEN abs(p.amount - split_part(bt.installment_label, '/', 2)::integer * bt.amount)
-                 <= split_part(bt.installment_label, '/', 2)::integer * 0.01
+                 <= split_part(bt.installment_label, '/', 2)::integer * (split_part(bt.installment_label, '/', 2)::integer - 1) * 0.01
             ELSE false
         END AS compra_parcelada,
         CASE
             WHEN bt.installment_label ~ '^\d{1,2}/\d{1,2}$' THEN split_part(bt.installment_label, '/', 2)::integer
             ELSE NULL::integer
-        END AS parcelas
+        END AS parcelas,
+    d.payable_id IS NOT NULL AS lancada_em_dobro
    FROM payables p
      LEFT JOIN bank_transactions bt ON bt.id = p.bank_transaction_id
      LEFT JOIN suppliers s ON s.id = p.supplier_id
+     LEFT JOIN compras_parceladas_em_dobro d ON d.payable_id = p.id
   WHERE p.status <> 'cancelled'::text
 UNION ALL
  SELECT 'receivable'::text AS lado,
@@ -171,7 +185,8 @@ UNION ALL
            FROM finance_review_queue q
           WHERE q.created_receivable_id = r.id)) AS nasceu_do_extrato,
     false AS compra_parcelada,
-    NULL::integer AS parcelas
+    NULL::integer AS parcelas,
+    false AS lancada_em_dobro
    FROM receivables r
      LEFT JOIN bank_transactions bt ON bt.id = r.bank_transaction_id
      LEFT JOIN clients c ON c.id = r.client_id
@@ -237,7 +252,7 @@ begin
      and coalesce(a.supplier_id::text, upper(a.supplier_name), '') = coalesce(b.supplier_id::text, upper(b.supplier_name), '')
      and coalesce(a.supplier_id::text, upper(a.supplier_name), '') <> ''
    where a.status <> 'cancelled' and a.issue_date between v_ini and v_fim;
-  select count(*), coalesce(sum(d.lancado), 0) into v_n_parc, v_valor
+  select count(*), coalesce(sum(d.lancado), 0), string_agg(distinct d.loja, ', ') into v_n_parc, v_valor, v_det
     from public.compras_parceladas_em_dobro d
    where d.issue_date between v_ini and v_fim;
   v_itens := v_itens || jsonb_build_object('chave', 'sem_duplicata', 'bloqueia', true, 'ok', v_n + v_n_parc = 0,
@@ -247,7 +262,8 @@ begin
       else concat_ws(' ',
         case when v_n > 0 then v_n || ' par(es) com o mesmo valor e fornecedor, um pelo banco e outro à mão.' end,
         case when v_n_parc > 0 then v_n_parc || ' lançamento(s) repetem uma compra parcelada já lançada ('
-                                     || public._brl(v_valor) || ' a mais).' end)
+                                     || public._brl(v_valor) || ' a mais: ' || left(v_det, 200)
+                                     || ') — marcados como "lançada em dobro" na Conciliação.' end)
     end);
 
   -- 4. Lançamento casado com o extrato pelo mesmo valor. A compra parcelada casada com UMA

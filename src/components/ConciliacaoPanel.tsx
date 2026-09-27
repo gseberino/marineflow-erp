@@ -38,6 +38,11 @@ function distancia(lancamento: number, extrato: number): number {
   return Math.abs(Math.abs(lancamento) - Math.abs(extrato));
 }
 
+/** Conciliado que pede atenção: valor diferente do extrato, ou compra parcelada lançada em dobro. */
+function temProblema(l: LancamentoParaConciliar): boolean {
+  return l.diferenca != null && Number(l.diferenca) !== 0 && (!l.compra_parcelada || !!l.lancada_em_dobro);
+}
+
 /** Dias entre o vencimento e a data do extrato. Sem data, não pontua. */
 function diasDeDistancia(due: string | null, extrato: string): number {
   if (!due) return 999;
@@ -54,27 +59,34 @@ export function ConciliacaoPanel() {
 
   const semExtrato = useLancamentosSemExtrato(ladoFiltro === 'todos' ? undefined : ladoFiltro);
   const conciliados = useLancamentosConciliados();
+  // Os com problema vêm à parte e inteiros: a lista de conciliados traz só os 500 mais recentes
+  // (1.791 em 27/09/2026, corte em 28/04) e as compras lançadas em dobro são de 2025 e do começo
+  // de 2026 — ficavam fora da tela mesmo marcadas.
+  const problemas = useLancamentosConciliados(true);
+  const [soProblemas, setSoProblemas] = useState(false);
   const conciliar = useConciliarLancamento();
   const desconciliar = useDesconciliarLancamento();
 
-  const lista = aba === 'sem_extrato' ? semExtrato : conciliados;
+  const verProblemas = aba === 'conciliados' && soProblemas;
+  const lista = aba === 'sem_extrato' ? semExtrato : verProblemas ? problemas : conciliados;
 
   const filtrada = useMemo(() => {
     const termo = busca.trim().toLowerCase();
     let base = lista.data ?? [];
+    if (verProblemas) base = base.filter(temProblema);
     if (aba === 'conciliados' && ladoFiltro !== 'todos') base = base.filter(l => l.lado === ladoFiltro);
     if (!termo) return base;
     return base.filter(l =>
       (l.description ?? '').toLowerCase().includes(termo) ||
       (l.contraparte ?? '').toLowerCase().includes(termo) ||
       String(l.amount).includes(termo));
-  }, [lista.data, busca, aba, ladoFiltro]);
+  }, [lista.data, busca, aba, ladoFiltro, verProblemas]);
 
   // Compra parcelada casada com UMA parcela tem a diferença esperada (a compra inteira contra a
-  // parcela): não é aviso. Eram 58 dos 62 "valores diferentes" (27/09/2026).
-  const comDiferenca = useMemo(
-    () => (conciliados.data ?? []).filter(l => l.diferenca != null && Number(l.diferenca) !== 0 && !l.compra_parcelada),
-    [conciliados.data]);
+  // parcela): não é aviso. Eram 58 dos 62 "valores diferentes" (27/09/2026). A que repete uma
+  // compra já lançada (lançada em dobro) é.
+  const comDiferenca = useMemo(() => (problemas.data ?? []).filter(temProblema), [problemas.data]);
+  const emDobro = comDiferenca.filter(l => l.lancada_em_dobro).length;
 
   // Erro precisa aparecer. Uma lista vazia por falha de consulta parece "nada a fazer", e
   // essa confusão já custou caro aqui antes (PGRST201 com a fila inteira invisível).
@@ -104,15 +116,29 @@ export function ConciliacaoPanel() {
 
       {comDiferenca.length > 0 && (
         <Card className="p-3 border-amber-500/40 bg-amber-500/5">
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-            <span className="min-w-0">
+            <span className="min-w-0 flex-1">
               <strong>{comDiferenca.length}</strong>{' '}
               {comDiferenca.length === 1 ? 'lançamento conciliado tem' : 'lançamentos conciliados têm'}{' '}
-              valor diferente do extrato.
+              valor diferente do extrato
+              {emDobro > 0 && (
+                <>{' '}— {emDobro} {emDobro === 1 ? 'repete' : 'repetem'} uma compra parcelada já lançada</>
+              )}.
             </span>
+            {!verProblemas && (
+              <Button size="sm" variant="outline" className="shrink-0"
+                onClick={() => { setAba('conciliados'); setSoProblemas(true); setAbertoId(null); }}>
+                Ver
+              </Button>
+            )}
           </div>
         </Card>
+      )}
+      {problemas.error && (
+        <p className="text-sm text-destructive break-words">
+          Não consegui conferir as diferenças: {problemas.error.message}
+        </p>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -123,7 +149,7 @@ export function ConciliacaoPanel() {
           ]).map(t => (
             <button
               key={t.k}
-              onClick={() => { setAba(t.k); setAbertoId(null); }}
+              onClick={() => { setAba(t.k); setSoProblemas(false); setAbertoId(null); }}
               className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
                 aba === t.k ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
             >
@@ -148,6 +174,15 @@ export function ConciliacaoPanel() {
             </button>
           ))}
         </div>
+
+        {verProblemas && (
+          <span className="flex items-center gap-1 rounded-lg border px-2 py-1 text-sm">
+            Só os com diferença
+            <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setSoProblemas(false)}>
+              Ver todos
+            </Button>
+          </span>
+        )}
 
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -213,9 +248,11 @@ function LinhaDoLancamento({
   formatDate: (d: string) => string;
 }) {
   const ehPagar = l.lado === 'payable';
-  // Compra parcelada casada com uma parcela: a diferença é o resto da compra, não um erro.
-  const parcelada = !!l.compra_parcelada;
-  const temDiferenca = l.diferenca != null && Number(l.diferenca) !== 0 && !parcelada;
+  // Compra parcelada casada com uma parcela: a diferença é o resto da compra, não um erro — a não
+  // ser que o lançamento repita uma compra que já está lançada (em dobro).
+  const emDobro = !!l.lancada_em_dobro;
+  const parcelada = !!l.compra_parcelada && !emDobro;
+  const temDiferenca = l.diferenca != null && Number(l.diferenca) !== 0 && !l.compra_parcelada;
 
   return (
     <Card className="overflow-hidden">
@@ -236,6 +273,12 @@ function LinhaDoLancamento({
             {l.due_date ? `vence ${formatDate(l.due_date)}` : 'sem vencimento'}
             {l.categoria ? ` · ${l.categoria}` : ''}
           </p>
+          {/* Visível em qualquer largura: é o motivo de o mês não fechar. */}
+          {emDobro && (
+            <p className="text-xs text-destructive">
+              Lançada em dobro: repete uma compra em {l.parcelas}x que já está lançada inteira
+            </p>
+          )}
         </div>
 
         {l.situacao === 'conciliado' && (
