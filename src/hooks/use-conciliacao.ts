@@ -104,11 +104,11 @@ export function useLancamentosConciliados(apenasComDiferenca = false) {
         .from('conciliacao_lancamentos' as never)
         .select('*')
         .eq('situacao', 'conciliado');
-      // `neq(0)` sozinho descartaria os nulos junto; aqui diferença nula não existe entre
-      // conciliados, mas deixar explícito evita surpresa se a view mudar. Compra parcelada casada
-      // com uma parcela tem a diferença esperada e não entra na lista de diferenças — a não ser
-      // que repita uma compra já lançada (lançada em dobro).
-      if (apenasComDiferenca) q = q.neq('diferenca', 0).or('compra_parcelada.eq.false,lancada_em_dobro.eq.true');
+      // Compra parcelada casada com uma parcela tem a diferença esperada e não entra na lista de
+      // diferenças. A lançada em dobro entra SEMPRE — inclusive a parcela lançada pelo valor dela
+      // (diferença zero) quando a compra inteira já estava lançada: 4 das 17 são assim (revisão
+      // de 27/09/2026).
+      if (apenasComDiferenca) q = q.or('and(diferenca.neq.0,compra_parcelada.eq.false),lancada_em_dobro.eq.true');
 
       const { data, error } = await q
         .order('extrato_data', { ascending: false, nullsFirst: false })

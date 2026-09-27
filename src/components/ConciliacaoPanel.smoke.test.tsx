@@ -62,6 +62,16 @@ const { estado, conciliarMock } = vi.hoisted(() => ({
         extrato_data: '2025-10-03', extrato_valor: 150.5, extrato_descricao: 'AMAZON MARKETPLACE 3/4',
         diferenca: 451.5, compra_parcelada: true, parcelas: 4, lancada_em_dobro: true,
       },
+      {
+        // A parcela lançada pelo valor dela quando a compra inteira já estava lançada: diferença
+        // zero, e mesmo assim é despesa em dobro (4 das 17 reais são assim).
+        lado: 'payable', id: 'p5', description: 'VILA VERDE CENTRO AUTO 6/6',
+        amount: 275.32, status: 'paid', due_date: '2026-06-17', issue_date: '2026-06-17',
+        contraparte: 'Vila Verde Centro Auto', categoria: 'Peças e materiais',
+        bank_transaction_id: 'bt12', situacao: 'conciliado',
+        extrato_data: '2026-06-17', extrato_valor: 275.32, extrato_descricao: 'VILA VERDE CENTRO AUTO 6/6',
+        diferenca: 0, compra_parcelada: false, parcelas: 6, lancada_em_dobro: true,
+      },
     ],
     // Uma entrada e uma saída: a tela só pode oferecer a do sinal certo.
     livres: [
@@ -130,9 +140,10 @@ describe('conciliação (parte do lançamento)', () => {
   it('compra parcelada casada com uma parcela não é "valor diferente": aparece como compra em Nx', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderPanel();
-    // A Celesc e a Amazon em dobro contam no aviso; a Instaladora Berlim (compra em 4x) não.
-    const aviso = await screen.findByText(/lançamentos conciliados têm/);
-    expect(aviso.textContent).toMatch(/^2 lançamentos conciliados têm valor diferente do extrato/);
+    // A Celesc e as duas em dobro contam no aviso; a Instaladora Berlim (compra em 4x) não.
+    const aviso = await screen.findByText(/lançamentos conciliados pedem conferência/);
+    expect(aviso.textContent).toBe(
+      '3 lançamentos conciliados pedem conferência: 1 com valor diferente do extrato e 2 que repetem uma compra parcelada já lançada.');
     await user.click(screen.getByRole('button', { name: /Conciliados/ }));
     expect(await screen.findByText('Instaladora Berlim')).toBeInTheDocument();
     expect(screen.getByText(/compra em 4x · no extrato, a parcela/)).toBeInTheDocument();
@@ -143,10 +154,13 @@ describe('conciliação (parte do lançamento)', () => {
   it('compra parcelada lançada em dobro: conta no aviso, sai marcada, e o "Ver" mostra só os com problema', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     renderPanel();
-    expect(await screen.findByText(/1 repete uma compra parcelada já lançada/)).toBeInTheDocument();
+    expect(await screen.findByText(/2 que repetem uma compra parcelada já lançada/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Ver' }));
     expect(await screen.findByText('Amazon Marketplace')).toBeInTheDocument();
     expect(screen.getByText('Lançada em dobro: repete uma compra em 4x que já está lançada inteira')).toBeInTheDocument();
+    // A de diferença zero também aparece — era o furo da primeira correção.
+    expect(screen.getByText('Vila Verde Centro Auto')).toBeInTheDocument();
+    expect(screen.getByText('Lançada em dobro: repete uma compra em 6x que já está lançada inteira')).toBeInTheDocument();
     expect(screen.getByText('Celesc')).toBeInTheDocument();
     expect(screen.queryByText('Instaladora Berlim')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Ver todos' }));

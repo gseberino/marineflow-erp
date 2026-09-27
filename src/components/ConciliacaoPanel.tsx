@@ -38,9 +38,14 @@ function distancia(lancamento: number, extrato: number): number {
   return Math.abs(Math.abs(lancamento) - Math.abs(extrato));
 }
 
-/** Conciliado que pede atenção: valor diferente do extrato, ou compra parcelada lançada em dobro. */
+/**
+ * Conciliado que pede atenção: compra parcelada lançada em dobro (mesmo com diferença zero — a
+ * parcela lançada pelo valor dela quando a compra inteira já estava lançada), ou valor diferente
+ * do extrato que não é a compra parcelada casada com uma parcela.
+ */
 function temProblema(l: LancamentoParaConciliar): boolean {
-  return l.diferenca != null && Number(l.diferenca) !== 0 && (!l.compra_parcelada || !!l.lancada_em_dobro);
+  if (l.lancada_em_dobro) return true;
+  return l.diferenca != null && Number(l.diferenca) !== 0 && !l.compra_parcelada;
 }
 
 /** Dias entre o vencimento e a data do extrato. Sem data, não pontua. */
@@ -119,12 +124,24 @@ export function ConciliacaoPanel() {
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
             <span className="min-w-0 flex-1">
-              <strong>{comDiferenca.length}</strong>{' '}
-              {comDiferenca.length === 1 ? 'lançamento conciliado tem' : 'lançamentos conciliados têm'}{' '}
-              valor diferente do extrato
-              {emDobro > 0 && (
-                <>{' '}— {emDobro} {emDobro === 1 ? 'repete' : 'repetem'} uma compra parcelada já lançada</>
-              )}.
+              {emDobro === 0 ? (
+                <>
+                  <strong>{comDiferenca.length}</strong>{' '}
+                  {comDiferenca.length === 1 ? 'lançamento conciliado tem' : 'lançamentos conciliados têm'}{' '}
+                  valor diferente do extrato.
+                </>
+              ) : emDobro === comDiferenca.length ? (
+                <>
+                  <strong>{emDobro}</strong>{' '}
+                  {emDobro === 1 ? 'lançamento repete' : 'lançamentos repetem'} uma compra parcelada já lançada.
+                </>
+              ) : (
+                <>
+                  <strong>{comDiferenca.length}</strong> lançamentos conciliados pedem conferência:{' '}
+                  {comDiferenca.length - emDobro} com valor diferente do extrato e {emDobro} que{' '}
+                  {emDobro === 1 ? 'repete' : 'repetem'} uma compra parcelada já lançada.
+                </>
+              )}
             </span>
             {!verProblemas && (
               <Button size="sm" variant="outline" className="shrink-0"
