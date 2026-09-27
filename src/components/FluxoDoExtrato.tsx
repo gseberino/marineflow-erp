@@ -15,11 +15,14 @@ export function AjudaDoExtrato({ rotulo = 'Como o extrato é somado' }: { rotulo
     <Ajuda rotulo={rotulo}>
       Soma do que entrou e saiu das contas do banco e do Caixa em dinheiro, pela data do extrato.
       <br />
-      <b>Não entram:</b> transferência entre contas suas (quando as duas pontas aparecem no extrato);
-      dinheiro que o cartão de crédito pôs na conta (Pix no crédito — é dívida, não receita); compra no
-      cartão de crédito, que conta quando a fatura é paga; linha repetida da importação manual de julho;
-      lançamento estornado; o ajuste do &quot;Contei o dinheiro&quot;, que acerta o saldo do Caixa; linha
-      ainda pendente no banco e linha com data no futuro.
+      <b>Não entram:</b> transferência entre contas suas (Pix ou TED para outra conta da HBR, mesmo de
+      banco que não está ligado ao sistema, e o saque ou depósito do Caixa); aplicação e resgate de
+      investimento (CDB, RDB); dinheiro que o cartão de crédito pôs na conta (Pix no crédito — é dívida,
+      não receita); compra no cartão de crédito, que conta quando a fatura é paga; linha repetida da
+      importação manual de julho; lançamento estornado; o ajuste do &quot;Contei o dinheiro&quot;, que acerta o
+      saldo do Caixa; linha ainda pendente no banco e linha com data no futuro.
+      <br />
+      <b>Entram</b> as &quot;Vendas&quot; da maquininha, que são o dinheiro das vendas no cartão chegando.
     </Ajuda>
   );
 }
@@ -35,7 +38,7 @@ export function FicouDeFora({ transferencias, creditoDoCartao, className }: {
   const { formatCurrency } = useI18n();
   const partes: string[] = [];
   if (temValor(transferencias)) {
-    partes.push(`transferências entre contas suas (entrou ${formatCurrency(transferencias.entrou)}, saiu ${formatCurrency(transferencias.saiu)})`);
+    partes.push(`transferências entre contas suas, com aplicação e resgate (entrou ${formatCurrency(transferencias.entrou)}, saiu ${formatCurrency(transferencias.saiu)})`);
   }
   if (temValor(creditoDoCartao)) {
     partes.push(`crédito do cartão posto na conta, que é dívida (${formatCurrency(creditoDoCartao.entrou - creditoDoCartao.saiu)})`);

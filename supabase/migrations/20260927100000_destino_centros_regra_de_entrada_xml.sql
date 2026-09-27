@@ -11,6 +11,7 @@
 --     como está e ninguém a chama mais.)
 --   · "Mês pronto?" sem acusar a parcela da nota como duplicata do pagamento da entrada (seção 8).
 --   · A recusa de mês fechado aponta para o lugar novo, Conciliação › Fechar o mês (seção 9).
+--   · A raiz do CNPJ da empresa para o fluxo de caixa reconhecer transferência entre contas suas (seção 10).
 --   · Revisão de 27/09/2026: crédito do fornecedor pelos códigos certos (19/21; 05 é crediário),
 --     crédito dentro ou fora das parcelas pela soma, e pagamento que parece já ter saído pelo
 --     banco vira PERGUNTA na importação (nunca é ligado sozinho).
@@ -808,6 +809,26 @@ end;
 $$;
 
 -- ───────────────────────────────────────────────────────────────────────────────────────────
+-- 10. A raiz do CNPJ da empresa para o fluxo de caixa pelo extrato. "Transferência entre contas
+--     suas" é o Pix/TED cuja outra ponta tem o CNPJ da própria empresa — inclusive de uma conta da
+--     HBR que não está ligada ao sistema. company_fiscal_settings só o admin lê; o financeiro
+--     precisa do mesmo número, senão as telas dele contariam diferente. Devolve só os 8 primeiros
+--     dígitos (a raiz, que está em toda nota fiscal), nada mais da tabela.
+-- ───────────────────────────────────────────────────────────────────────────────────────────
+create or replace function public.raiz_do_cnpj_da_empresa()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select nullif(left(regexp_replace(coalesce((select cnpj from public.company_fiscal_settings limit 1), ''), '\D', '', 'g'), 8), '');
+$$;
+
+revoke all on function public.raiz_do_cnpj_da_empresa() from public, anon;
+grant execute on function public.raiz_do_cnpj_da_empresa() to authenticated, service_role;
+
+-- ───────────────────────────────────────────────────────────────────────────────────────────
 -- Conferências: se algo acima não ficou como deveria, nada é gravado.
 -- ───────────────────────────────────────────────────────────────────────────────────────────
 do $$
@@ -841,5 +862,12 @@ begin
   if has_function_privilege('anon', 'public._recusa_se_mes_fechado(date,text)', 'EXECUTE')
      or has_function_privilege('authenticated', 'public._recusa_se_mes_fechado(date,text)', 'EXECUTE') then
     raise exception 'a recusa de mês fechado ficou executável por anon ou authenticated';
+  end if;
+  if has_function_privilege('anon', 'public.raiz_do_cnpj_da_empresa()', 'EXECUTE')
+     or not has_function_privilege('authenticated', 'public.raiz_do_cnpj_da_empresa()', 'EXECUTE') then
+    raise exception 'a raiz do CNPJ da empresa ficou aberta para anon, ou fechada para quem usa o sistema';
+  end if;
+  if public.raiz_do_cnpj_da_empresa() is null or length(public.raiz_do_cnpj_da_empresa()) <> 8 then
+    raise exception 'a raiz do CNPJ da empresa não saiu com 8 dígitos';
   end if;
 end $$;

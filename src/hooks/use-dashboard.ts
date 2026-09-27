@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { lerLinhasDoFluxo } from '@/hooks/use-fluxo-de-caixa';
+import { lerExtratoDoFluxo } from '@/hooks/use-fluxo-de-caixa';
 import {
   hojeEmBrasilia, montarFluxoDeCaixa, rotuloDoMes, somarDias, somarFluxoDoPeriodo, ultimosMeses,
-  MARGEM_PARA_PAREAR, type LinhaDoFluxo,
+  type LinhaDoFluxo, type OpcoesDoFluxo,
 } from '@/lib/fluxo-de-caixa';
 
 /**
@@ -15,15 +15,15 @@ import {
  * A comparação é com o MESMO trecho do mês anterior (do dia 1º até o mesmo dia): comparar dez
  * dias deste mês com o mês anterior inteiro dava sempre "caiu".
  */
-export function entrouNoMesPeloExtrato(linhas: Parameters<typeof somarFluxoDoPeriodo>[0], hoje: string) {
+export function entrouNoMesPeloExtrato(linhas: LinhaDoFluxo[], hoje: string, opcoes: OpcoesDoFluxo = {}) {
   const inicio = `${hoje.slice(0, 7)}-01`;
   const inicioAnterior = `${ultimosMeses(2, hoje)[0]}-01`;
   const ultimoDiaAnterior = somarDias(inicio, -1);
   const mesmoDia = `${inicioAnterior.slice(0, 8)}${hoje.slice(8, 10)}`;
   const ateNoAnterior = mesmoDia < ultimoDiaAnterior ? mesmoDia : ultimoDiaAnterior;
   return {
-    esteMes: somarFluxoDoPeriodo(linhas, inicio, hoje, hoje).entrou,
-    mesmoTrechoDoAnterior: somarFluxoDoPeriodo(linhas, inicioAnterior, ateNoAnterior, hoje).entrou,
+    esteMes: somarFluxoDoPeriodo(linhas, inicio, hoje, hoje, opcoes).entrou,
+    mesmoTrechoDoAnterior: somarFluxoDoPeriodo(linhas, inicioAnterior, ateNoAnterior, hoje, opcoes).entrou,
   };
 }
 
@@ -56,15 +56,12 @@ export function useDashboardData() {
           .select('balance_amount')
           .not('status', 'in', '("paid","cancelled")'),
 
-        // Os 6 meses do gráfico até hoje, com a margem para parear transferência. Um erro aqui
-        // apaga só os números do extrato, não o painel inteiro (as outras leituras devolvem o
-        // erro em vez de lançar; esta lança).
-        lerLinhasDoFluxo(
-          somarDias(`${seisMeses[0]}-01`, -MARGEM_PARA_PAREAR),
-          somarDias(hojeLocal, MARGEM_PARA_PAREAR),
-        ).then(
-          (linhas) => ({ linhas, erro: null as string | null }),
-          (e: unknown) => ({ linhas: [] as LinhaDoFluxo[], erro: (e as Error)?.message ?? String(e) }),
+        // Os 6 meses do gráfico, inteiros, até hoje (o pareamento de cada mês usa o mês todo).
+        // Um erro aqui apaga só os números do extrato, não o painel inteiro (as outras leituras
+        // devolvem o erro em vez de lançar; esta lança).
+        lerExtratoDoFluxo(`${seisMeses[0]}-01`, hojeLocal).then(
+          (r) => ({ ...r, erro: null as string | null }),
+          (e: unknown) => ({ linhas: [] as LinhaDoFluxo[], opcoes: {} as OpcoesDoFluxo, erro: (e as Error)?.message ?? String(e) }),
         ),
 
         supabase.from('receivables')
@@ -115,7 +112,7 @@ export function useDashboardData() {
       const erroDoExtrato = linhasDoFluxo.erro;
       const revenueChart = erroDoExtrato
         ? []
-        : montarFluxoDeCaixa(linhasDoFluxo.linhas, seisMeses, hojeLocal).meses
+        : montarFluxoDeCaixa(linhasDoFluxo.linhas, seisMeses, hojeLocal, linhasDoFluxo.opcoes).meses
           .map((m) => ({ month: rotuloDoMes(m.mes), revenue: m.entrou }));
 
       // Process status counts
@@ -129,7 +126,7 @@ export function useDashboardData() {
         (rows || []).reduce((s: number, r: any) => s + Number(r[field] || 0), 0);
 
       // null = não deu para ler o extrato: a tela diz isso em vez de mostrar R$ 0,00.
-      const entrou = erroDoExtrato ? null : entrouNoMesPeloExtrato(linhasDoFluxo.linhas, hojeLocal);
+      const entrou = erroDoExtrato ? null : entrouNoMesPeloExtrato(linhasDoFluxo.linhas, hojeLocal, linhasDoFluxo.opcoes);
       const collectedThisMonth = entrou?.esteMes ?? null;
       /** Até o mesmo dia do mês anterior — não o mês anterior inteiro. */
       const collectedLastMonth = entrou?.mesmoTrechoDoAnterior ?? null;

@@ -1,8 +1,8 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolCtx, type ToolDef } from "./registry.ts";
 import { mensagemDoBanco } from "./lancamentos.ts";
 import {
-  COLUNAS_DO_FLUXO, MARGEM_PARA_PAREAR, ROTULO_DO_DESTINO, hojeEmBrasilia, somarDias, somarFluxoDoPeriodo,
-  type DestinoDeFora, type LinhaDoFluxo,
+  COLUNAS_DO_FLUXO, FUNCAO_DA_RAIZ_DA_EMPRESA, ROTULO_DO_DESTINO, hojeEmBrasilia, mesesInteirosDoPeriodo, somarDias,
+  somarFluxoDoPeriodo, type DestinoDeFora, type LinhaDoFluxo, type OpcoesDoFluxo,
 } from "../../banking/fluxo-de-caixa.ts";
 
 /** O recorte de dias do fechamento, em datas de Brasília ('AAAA-MM-DD'). */
@@ -17,18 +17,19 @@ export function periodoDoFechamento(periodo: string, hoje: string): { de: string
 }
 
 /**
- * As linhas do extrato (conta corrente e Caixa) do recorte, com a margem de dias que a regra usa
- * para parear as duas pernas de uma transferência. Em páginas: o servidor corta em 1.000 linhas
- * sem avisar.
+ * As linhas do extrato (conta corrente e Caixa) dos meses INTEIROS que o recorte toca — o
+ * pareamento de cada mês usa o mês todo, como nas telas — e a raiz do CNPJ da empresa. Em
+ * páginas: o servidor corta em 1.000 linhas sem avisar.
  */
-async function lerLinhasDoFluxo(sb: ToolCtx["sb"], de: string, ate: string): Promise<LinhaDoFluxo[]> {
+async function lerExtratoDoFluxo(sb: ToolCtx["sb"], de: string, ate: string): Promise<{ linhas: LinhaDoFluxo[]; opcoes: OpcoesDoFluxo }> {
+  const meses = mesesInteirosDoPeriodo(de, ate);
   const tudo: LinhaDoFluxo[] = [];
   for (let i = 0; i < 50_000; i += 1000) {
     const { data, error } = await sb.from("bank_transactions")
       .select(COLUNAS_DO_FLUXO)
       .in("source_type", ["bank", "cash"])
-      .gte("transaction_date", somarDias(de, -MARGEM_PARA_PAREAR))
-      .lte("transaction_date", somarDias(ate, MARGEM_PARA_PAREAR))
+      .gte("transaction_date", meses.de)
+      .lte("transaction_date", meses.ate)
       .order("transaction_date")
       .order("id")
       .range(i, i + 999);
@@ -37,7 +38,9 @@ async function lerLinhasDoFluxo(sb: ToolCtx["sb"], de: string, ate: string): Pro
     tudo.push(...lote);
     if (lote.length < 1000) break;
   }
-  return tudo;
+  // Sem a raiz, a regra segue só com a marca e o par — o mesmo que a tela faz se a leitura falhar.
+  const { data: raiz } = await sb.rpc(FUNCAO_DA_RAIZ_DA_EMPRESA);
+  return { linhas: tudo, opcoes: { raizDaEmpresa: typeof raiz === "string" && raiz.length === 8 ? raiz : null } };
 }
 
 /** Campos que o modelo pode pedir para LIMPAR (deixar vazio) numa correção. */
@@ -525,13 +528,13 @@ export const financialTools: ToolDef[] = [
       // (_shared/banking/fluxo-de-caixa.ts). Até 27/09/2026 a entrada vinha das baixas em
       // `payments` e a saída das contas marcadas pagas por updated_at: o assistente dava um
       // terceiro número para "quanto entrou no mês", diferente da tela e do painel.
-      let linhas: LinhaDoFluxo[];
+      let extrato: { linhas: LinhaDoFluxo[]; opcoes: OpcoesDoFluxo };
       try {
-        linhas = await lerLinhasDoFluxo(sb, de, ate);
+        extrato = await lerExtratoDoFluxo(sb, de, ate);
       } catch (e) {
         return { error: `Não consegui ler o extrato: ${mensagemDoBanco(e)}` };
       }
-      const fluxo = somarFluxoDoPeriodo(linhas, de, ate, hoje);
+      const fluxo = somarFluxoDoPeriodo(extrato.linhas, de, ate, hoje, extrato.opcoes);
 
       // Pendências que pedem ação.
       const { data: venc } = await sb

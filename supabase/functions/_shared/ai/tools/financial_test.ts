@@ -2,7 +2,7 @@
 // da Central de relatórios e do painel inicial (revisão de 27/09/2026).
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { financialTools, periodoDoFechamento } from "./financial.ts";
-import { hojeEmBrasilia, somarDias } from "../../banking/fluxo-de-caixa.ts";
+import { hojeEmBrasilia, mesesInteirosDoPeriodo } from "../../banking/fluxo-de-caixa.ts";
 
 Deno.test("fechamento: os recortes são datas de Brasília, sem fuso no caminho", () => {
   assertEquals(periodoDoFechamento("hoje", "2026-09-26"), { de: "2026-09-26", ate: "2026-09-26" });
@@ -17,6 +17,7 @@ function sbFalso(tabelas: Record<string, unknown[]>) {
   const pedidos: Array<{ tabela: string; filtros: unknown[][] }> = [];
   return {
     pedidos,
+    rpc: (nome: string) => Promise.resolve({ data: nome === "raiz_do_cnpj_da_empresa" ? "50057049" : null, error: null }),
     from(tabela: string) {
       const pedido = { tabela, filtros: [] as unknown[][] };
       pedidos.push(pedido);
@@ -48,6 +49,8 @@ Deno.test("fechamento do mês: entrou e saiu pelo extrato — transferência par
       linha("t2", 2900, "credit", { dismissed_kind: "transferencia", bank_connection_id: "nubank" }),
       // A marca "transferência" sem a outra perna é dinheiro de verdade (a fatura do cartão).
       linha("f", 400, "debit", { dismissed_kind: "transferencia" }),
+      // Pix para outra conta da HBR fora do sistema: a outra ponta tem o CNPJ da empresa.
+      linha("h", 153, "debit", { counterparty_document: "50057049000100", payment_method: "PIX" }),
     ],
   });
   const t = financialTools.find((x) => x.name === "get_period_summary")!;
@@ -56,16 +59,16 @@ Deno.test("fechamento do mês: entrou e saiu pelo extrato — transferência par
   const r = await t.execute({ period: "mes" }, ctx as never) as any;
 
   assertEquals([r.entrou, r.saiu, r.saldo], [1000, 700, 300]);
-  assertEquals(r.a_parte_sem_somar.transferencias_entre_contas_proprias, { entrou: 2900, saiu: 2900 });
+  assertEquals(r.a_parte_sem_somar.transferencias_entre_contas_proprias, { entrou: 2900, saiu: 3053 });
   assertEquals(r.fora_da_conta["linha repetida da importação"], { quantidade: 1, valor: 50 });
   assertEquals([r.de, r.ate], [dia1, hoje]);
 
-  // A leitura é do extrato de conta e Caixa, com a margem de dias para parear, e em páginas.
+  // A leitura é do extrato de conta e Caixa, dos meses INTEIROS do recorte, e em páginas.
   const leitura = sb.pedidos.find((p) => p.tabela === "bank_transactions")!;
   const filtro = (m: string) => leitura.filtros.find((f) => f[0] === m);
   assertEquals(filtro("in"), ["in", "source_type", ["bank", "cash"]]);
-  assertEquals(filtro("gte"), ["gte", "transaction_date", somarDias(dia1, -3)]);
-  assertEquals(filtro("lte"), ["lte", "transaction_date", somarDias(hoje, 3)]);
+  assertEquals(filtro("gte"), ["gte", "transaction_date", dia1]);
+  assertEquals(filtro("lte"), ["lte", "transaction_date", mesesInteirosDoPeriodo(dia1, hoje).ate]);
   assertEquals(filtro("range"), ["range", 0, 999]);
   // O painel de pagamentos não é mais a fonte do "entrou".
   assertEquals(sb.pedidos.some((p) => p.tabela === "payments"), false);
@@ -73,6 +76,7 @@ Deno.test("fechamento do mês: entrou e saiu pelo extrato — transferência par
 
 Deno.test("fechamento: erro ao ler o extrato vira mensagem, não um zero", async () => {
   const sb = {
+    rpc: () => Promise.resolve({ data: null, error: null }),
     from() {
       // deno-lint-ignore no-explicit-any
       const q: any = {};

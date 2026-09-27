@@ -5,7 +5,7 @@ import { createElement, type ReactNode } from 'react';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const { lerLinhas } = vi.hoisted(() => ({ lerLinhas: vi.fn() }));
+const { lerExtrato } = vi.hoisted(() => ({ lerExtrato: vi.fn() }));
 
 vi.mock('@/integrations/supabase/client', () => {
   const builder = (): any => {
@@ -17,7 +17,7 @@ vi.mock('@/integrations/supabase/client', () => {
   return { supabase: { from: () => builder() } };
 });
 
-vi.mock('@/hooks/use-fluxo-de-caixa', () => ({ lerLinhasDoFluxo: lerLinhas }));
+vi.mock('@/hooks/use-fluxo-de-caixa', () => ({ lerExtratoDoFluxo: lerExtrato }));
 
 import { entrouNoMesPeloExtrato, useDashboardData } from './use-dashboard';
 import type { LinhaDoFluxo } from '@/lib/fluxo-de-caixa';
@@ -69,8 +69,8 @@ function renderPainel() {
 
 describe('painel inicial e o extrato', () => {
   it('falha ao ler o extrato apaga só os números do extrato, não o painel', async () => {
-    lerLinhas.mockReset();
-    lerLinhas.mockRejectedValue(new Error('tempo esgotado'));
+    lerExtrato.mockReset();
+    lerExtrato.mockRejectedValue(new Error('tempo esgotado'));
     const { result } = renderPainel();
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toMatchObject({
@@ -86,12 +86,16 @@ describe('painel inicial e o extrato', () => {
 
   it('o gráfico dos 6 meses e o Entrou no mês saem da mesma leitura e batem', async () => {
     const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
-    lerLinhas.mockReset();
-    lerLinhas.mockResolvedValue([entrada('a', `${hoje.slice(0, 7)}-01`, 1234.5)]);
+    lerExtrato.mockReset();
+    lerExtrato.mockResolvedValue({ linhas: [entrada('a', `${hoje.slice(0, 7)}-01`, 1234.5)], opcoes: { raizDaEmpresa: '50057049' } });
     const { result } = renderPainel();
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     const d = result.current.data!;
-    expect(lerLinhas).toHaveBeenCalledTimes(1);
+    expect(lerExtrato).toHaveBeenCalledTimes(1);
+    // Meses inteiros: do dia 1º do mais antigo dos 6 até hoje.
+    const [de, ate] = lerExtrato.mock.calls[0];
+    expect(de.slice(8)).toBe('01');
+    expect(ate).toBe(hoje);
     expect(d.revenueChart).toHaveLength(6);
     expect(d.revenueChart[5].revenue).toBe(1234.5);
     expect(d.collectedThisMonth).toBe(1234.5);
