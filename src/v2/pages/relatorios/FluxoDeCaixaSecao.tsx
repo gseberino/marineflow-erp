@@ -121,10 +121,11 @@ function ProximasSemanas() {
       <div className="rounded-lg border bg-muted/40 p-3 text-xs text-muted-foreground">
         <p className="font-medium text-foreground">O que a previsão não inclui</p>
         <p className="mt-1">
-          Ela soma só as contas a receber e a pagar em aberto, pelo vencimento. Não entram: a fatura do cartão
-          que ainda não virou conta a pagar; gastos do dia a dia que ainda não foram lançados (combustível, Pix
-          avulso); vendas que ainda não viraram conta a receber; e o que está no Extrato esperando decisão.
-          Contas vencidas e não pagas entram na primeira semana.
+          Ela soma as contas a receber e a pagar em aberto, pelo vencimento; a fatura de cada cartão com as
+          compras já feitas, no dia provável de pagamento; e os gastos que se repetem todo mês, pela média. Não
+          entram: compras no cartão que ainda vão ser feitas; gastos do dia a dia que variam de um mês para outro
+          (combustível, Pix avulso, peças); vendas que ainda não viraram conta a receber; e o que está no Extrato
+          esperando decisão. Contas vencidas e não pagas entram na primeira semana.
         </p>
       </div>
     </div>

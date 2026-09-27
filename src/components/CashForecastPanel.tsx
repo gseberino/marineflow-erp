@@ -10,7 +10,8 @@ type Semana = ForecastWeek & { saldoPrevisto: number | null };
  * Programação de caixa: o que está comprometido nas próximas 8 semanas.
  *
  * Nada aqui movimenta dinheiro: é leitura do que já está programado (contas a receber e a
- * pagar em aberto, pelo vencimento).
+ * pagar em aberto, pelo vencimento) e, desde 27/09/2026, da fatura de cada cartão e dos gastos
+ * que se repetem todo mês — a tela diz de onde vem cada um.
  *
  * Com `saldoInicial` (26/09/2026), a previsão parte do dinheiro que há HOJE — a soma dos saldos
  * que os bancos informam e do Caixa, a mesma das fichas de saldo — e diz o saldo previsto no
@@ -31,6 +32,9 @@ export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: numb
   }
 
   const { weeks, totalEntradas, totalSaidas, semanasNegativas } = forecast;
+  const extras = forecast.extras ?? { faturas: [], recorrentes: [], avisos: [] };
+  const faturasNaPrevisao = extras.faturas.filter((f) => f.naPrevisao);
+  const dataCurta = (d: string) => d.slice(8, 10) + '/' + d.slice(5, 7);
   const saldoPeriodo = totalEntradas - totalSaidas;
   const comSaldo = saldoInicial != null;
   const semanas: Semana[] = weeks.map((w) => ({
@@ -46,12 +50,12 @@ export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: numb
     ? [
       { l: 'Saldo de hoje', v: formatCurrency(saldoInicial), c: saldoInicial < 0 ? 'text-destructive' : '' },
       { l: 'A receber (8 semanas)', v: formatCurrency(totalEntradas), c: 'text-success' },
-      { l: 'A pagar (8 semanas)', v: formatCurrency(totalSaidas), c: 'text-destructive' },
+      { l: 'Sai (8 semanas)', v: formatCurrency(totalSaidas), c: 'text-destructive' },
       { l: 'Saldo previsto no fim', v: formatCurrency(saldoNoFim ?? 0), c: (saldoNoFim ?? 0) < 0 ? 'text-destructive' : 'text-success' },
     ]
     : [
       { l: 'A receber (8 semanas)', v: formatCurrency(totalEntradas), c: 'text-success' },
-      { l: 'A pagar (8 semanas)', v: formatCurrency(totalSaidas), c: 'text-destructive' },
+      { l: 'Sai (8 semanas)', v: formatCurrency(totalSaidas), c: 'text-destructive' },
       { l: 'Resultado do período', v: formatCurrency(saldoPeriodo), c: saldoPeriodo >= 0 ? 'text-success' : 'text-destructive' },
       { l: 'Semanas no vermelho', v: String(semanasNegativas), c: semanasNegativas > 0 ? 'text-warning' : '' },
     ];
@@ -87,7 +91,20 @@ export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: numb
     },
     {
       key: 'sai', header: 'Sai', minWidth: 112, priority: 2, align: 'right', detailLabel: 'Sai',
-      render: (w) => <span className="text-destructive">{w.saidas > 0 ? formatCurrency(w.saidas) : '—'}</span>,
+      render: (w) => (
+        <span className="block text-destructive">
+          {w.saidas > 0 ? formatCurrency(w.saidas) : '—'}
+          {/* De onde vem a saída, quando não é só conta lançada. */}
+          {((w.saidasDaFatura ?? 0) > 0 || (w.saidasRecorrentes ?? 0) > 0) && (
+            <span className="block text-[11px] font-normal text-muted-foreground">
+              {[
+                (w.saidasDaFatura ?? 0) > 0 ? `fatura ${formatCurrency(w.saidasDaFatura ?? 0)}` : null,
+                (w.saidasRecorrentes ?? 0) > 0 ? `fixos ${formatCurrency(w.saidasRecorrentes ?? 0)}` : null,
+              ].filter(Boolean).join(' · ')}
+            </span>
+          )}
+        </span>
+      ),
     },
     {
       key: 'resultado', header: 'Resultado', minWidth: 120, priority: comSaldo ? 3 : 1, align: 'right', detailLabel: 'Resultado da semana',
@@ -140,6 +157,46 @@ export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: numb
         density="compact"
         emptyMessage="Nada programado."
       />
+
+      {(faturasNaPrevisao.length > 0 || extras.recorrentes.length > 0 || extras.avisos.length > 0) && (
+        <div className="space-y-2 rounded-lg border bg-card p-3 text-sm">
+          <p className="font-medium">Além das contas lançadas, a previsão soma:</p>
+          {faturasNaPrevisao.length > 0 && (
+            <ul className="space-y-1">
+              {faturasNaPrevisao.map((f) => (
+                <li key={`${f.conta}-${f.situacao}`} className="min-w-0">
+                  <span className="font-medium">Fatura {f.conta}</span>{' '}
+                  <span className="tabular-nums">{formatCurrency(f.valor)}</span>
+                  <span className="text-muted-foreground">
+                    {' — '}
+                    {f.situacao === 'fechada'
+                      ? `fatura fechada em ${dataCurta(f.fechamento)}, ${f.compras} compra(s), menos o que já foi pago`
+                      : `${f.compras} compra(s) do ciclo aberto até hoje (fecha em ${dataCurta(f.fechamento)})`}
+                    {f.vencida
+                      ? `; venceu por volta de ${dataCurta(f.vencimento)} e não aparece pagamento — confira`
+                      : `; vence por volta de ${dataCurta(f.vencimento)}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {extras.recorrentes.length > 0 && (
+            <p className="min-w-0">
+              <span className="font-medium">Gastos que se repetem todo mês</span>
+              <span className="text-muted-foreground">
+                {' (média dos meses em que apareceram, espalhada pelos dias, menos o que já está lançado): '}
+                {extras.recorrentes.map((g) => `${g.categoria} ${formatCurrency(g.mediaMensal)}/mês`).join('; ')}.
+              </span>
+            </p>
+          )}
+          {extras.avisos.map((a) => (
+            <p key={a} className="flex items-start gap-2 text-warning">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{a}</span>
+            </p>
+          ))}
+        </div>
+      )}
 
       {(duplicadas?.length ?? 0) > 0 && (
         <div className="space-y-2 rounded-lg border border-warning/40 bg-warning/5 p-3">

@@ -5,8 +5,12 @@ import { writeAuditLog } from '@/hooks/use-audit-log';
 import { cancelPaymentCascade } from '@/lib/cascade-updates';
 import { lerEmPaginas } from '@/lib/ler-em-paginas';
 import { montarAging, type ContaEmAberto } from '@/lib/aging';
-import { rotuloDoMes, type FluxoDeCaixa } from '@/lib/fluxo-de-caixa';
+import { rotuloDoMes, hojeEmBrasilia, somarDias, type FluxoDeCaixa } from '@/lib/fluxo-de-caixa';
 import { carregarFluxoDeCaixa, chaveDoFluxo } from '@/hooks/use-fluxo-de-caixa';
+import {
+  faturasDoCartao, gastosQueSeRepetem, gastosQueSeRepetemPorDia, mesesDeReferencia,
+  type ContaEmAberto as ContaDaPrevisao, type DespesaLancada, type FaturaPrevista, type GastoQueSeRepete, type LinhaDoCartao,
+} from '@/lib/previsao-de-caixa';
 
 export function useReceivables() {
   return useQuery({
@@ -270,6 +274,82 @@ export interface ForecastWeek {
   acumulado: number;
   /** Contas vencidas arrastadas para a primeira semana. */
   contemAtrasados: boolean;
+  /** Das saídas: contas a pagar lançadas. */
+  saidasDasContas?: number;
+  /** Das saídas: fatura do cartão (o que já está no cartão). */
+  saidasDaFatura?: number;
+  /** Das saídas: gastos que se repetem todo mês, pela média. */
+  saidasRecorrentes?: number;
+}
+
+/** O que a previsão soma além das contas lançadas, para a tela dizer de onde vem cada número. */
+export interface ExtrasDaPrevisao {
+  faturas: Array<FaturaPrevista & { naPrevisao: boolean }>;
+  recorrentes: GastoQueSeRepete[];
+  /** O que não deu para ler — a previsão segue sem aquela parte e diz qual. */
+  avisos: string[];
+}
+
+/**
+ * A fatura de cada cartão e os gastos que se repetem (regras em src/lib/previsao-de-caixa.ts).
+ * Erro de leitura aqui não derruba a previsão: ela segue só com as contas e diz o que ficou fora.
+ */
+async function lerExtrasDaPrevisao(hoje: string): Promise<{ extras: ExtrasDaPrevisao; linhasDoCartao: Set<string> }> {
+  const avisos: string[] = [];
+  let faturas: FaturaPrevista[] = [];
+  let recorrentes: GastoQueSeRepete[] = [];
+  const linhasDoCartao = new Set<string>();
+  try {
+    const [linhas, conexoes] = await Promise.all([
+      lerEmPaginas((i, f) => supabase.from('bank_transactions')
+        .select('id, bank_connection_id, transaction_date, amount, transaction_type, description, bill_id, dismissed_kind, import_batch_id')
+        .eq('source_type', 'credit_card')
+        .gte('transaction_date', somarDias(hoje, -200))
+        .order('transaction_date').order('id').range(i, f)),
+      supabase.from('bank_connections').select('id, label'),
+    ]);
+    if (conexoes.error) throw conexoes.error;
+    const rotulo = new Map((conexoes.data ?? []).map((c: { id: string; label: string | null }) => [c.id, c.label ?? 'Cartão']));
+    const porConta = new Map<string, LinhaDoCartao[]>();
+    for (const l of linhas as Array<LinhaDoCartao & { id: string; bank_connection_id: string | null }>) {
+      linhasDoCartao.add(l.id);
+      const conta = l.bank_connection_id ?? 'sem conta';
+      porConta.set(conta, [...(porConta.get(conta) ?? []), l]);
+    }
+    for (const [conta, doCartao] of porConta) {
+      faturas.push(...faturasDoCartao(rotulo.get(conta) ?? 'Cartão', doCartao, hoje));
+    }
+  } catch (e) {
+    avisos.push(`Não consegui ler os cartões (${(e as Error)?.message ?? 'erro'}): a fatura ficou fora da previsão.`);
+    faturas = [];
+  }
+  try {
+    const meses = mesesDeReferencia(hoje);
+    const [despesas, categorias] = await Promise.all([
+      lerEmPaginas((i, f) => supabase.from('payables')
+        .select('id, amount, issue_date, expense_category, bank_transaction_id')
+        .neq('status', 'cancelled')
+        .gte('issue_date', `${meses[0]}-01`)
+        .lt('issue_date', `${hoje.slice(0, 7)}-01`)
+        .order('id').range(i, f)),
+      supabase.from('financial_categories').select('name, type, dre_group').eq('type', 'payable'),
+    ]);
+    if (categorias.error) throw categorias.error;
+    const grupo = new Map((categorias.data ?? []).map((c: { name: string; dre_group: string | null }) => [c.name, c.dre_group]));
+    const lancadas: DespesaLancada[] = (despesas as Array<{ amount: number; issue_date: string; expense_category: string | null; bank_transaction_id: string | null }>)
+      .map((d) => ({
+        categoria: d.expense_category,
+        valor: Number(d.amount) || 0,
+        data: d.issue_date,
+        grupo: d.expense_category ? grupo.get(d.expense_category) ?? null : null,
+        noCartao: !!d.bank_transaction_id && linhasDoCartao.has(d.bank_transaction_id),
+      }));
+    recorrentes = gastosQueSeRepetem(lancadas, hoje);
+  } catch (e) {
+    avisos.push(`Não consegui ler as despesas dos últimos meses (${(e as Error)?.message ?? 'erro'}): os gastos que se repetem ficaram fora da previsão.`);
+    recorrentes = [];
+  }
+  return { extras: { faturas: faturas.map((f) => ({ ...f, naPrevisao: true })), recorrentes, avisos }, linhasDoCartao };
 }
 
 /**
@@ -282,11 +362,16 @@ export interface ForecastWeek {
  *
  * Contas já vencidas e ainda em aberto entram na primeira semana, porque é quando elas
  * pressionam o caixa de verdade.
+ *
+ * Desde 27/09/2026 as saídas somam também a fatura de cada cartão (o que já está no cartão, no
+ * dia provável de pagamento) e os gastos que se repetem todo mês, pela média — quase todo gasto
+ * da HBR é lançado depois que sai, e só com as contas lançadas a previsão dizia que sobrava
+ * dinheiro. As regras estão em src/lib/previsao-de-caixa.ts; o que entrou vem em `extras`.
  */
 export function useCashForecast(semanas: number = 8) {
   return useQuery({
     queryKey: ['cash-forecast', semanas],
-    queryFn: async (): Promise<{ weeks: ForecastWeek[]; totalEntradas: number; totalSaidas: number; semanasNegativas: number }> => {
+    queryFn: async (): Promise<{ weeks: ForecastWeek[]; totalEntradas: number; totalSaidas: number; semanasNegativas: number; extras: ExtrasDaPrevisao }> => {
       const hoje = new Date();
       hoje.setHours(0, 0, 0, 0);
       const limite = new Date(hoje);
@@ -299,10 +384,12 @@ export function useCashForecast(semanas: number = 8) {
           .not('status', 'in', '("paid","cancelled")')
           .lte('due_date', limiteISO),
         supabase.from('payables')
-          .select('balance_amount, due_date')
+          .select('balance_amount, due_date, expense_category')
           .not('status', 'in', '("paid","cancelled")')
           .lte('due_date', limiteISO),
       ]);
+      const hojeLocal = hojeEmBrasilia();
+      const { extras } = await lerExtrasDaPrevisao(hojeLocal);
 
       // Segunda-feira da semana corrente é a âncora das faixas.
       const inicioSemana = (d: Date) => {
@@ -325,6 +412,7 @@ export function useCashForecast(semanas: number = 8) {
           rotulo: i === 0 ? 'Esta semana' : i === 1 ? 'Próxima semana'
             : `${String(inicio.getDate()).padStart(2, '0')}/${String(inicio.getMonth() + 1).padStart(2, '0')} a ${String(fim.getDate()).padStart(2, '0')}/${String(fim.getMonth() + 1).padStart(2, '0')}`,
           entradas: 0, saidas: 0, liquido: 0, acumulado: 0, contemAtrasados: false,
+          saidasDasContas: 0, saidasDaFatura: 0, saidasRecorrentes: 0,
         });
       }
 
@@ -345,7 +433,41 @@ export function useCashForecast(semanas: number = 8) {
         const i = indiceDe(p.due_date as string);
         if (i < 0) continue;
         buckets[i].saidas += Number(p.balance_amount || 0);
+        buckets[i].saidasDasContas! += Number(p.balance_amount || 0);
         if (i === 0 && new Date(`${p.due_date}T12:00:00`) < hoje) buckets[0].contemAtrasados = true;
+      }
+
+      // A fatura de cada cartão, no vencimento — a não ser que já esteja lançada como conta a
+      // pagar perto dele (aí ela já está nas saídas acima e não conta duas vezes).
+      const contasAbertas: ContaDaPrevisao[] = (payRes.data || []).map((p) => ({
+        categoria: (p as { expense_category?: string | null }).expense_category ?? null,
+        valor: Number(p.balance_amount || 0),
+        vencimento: String(p.due_date),
+      }));
+      const faturaLancadaPerto = (vencimento: string) => contasAbertas.some((c) =>
+        c.categoria === 'Pagamento de fatura de cartão'
+        && Math.abs(Date.parse(c.vencimento) - Date.parse(vencimento)) <= 5 * 86_400_000);
+      for (const f of extras.faturas) {
+        if (faturaLancadaPerto(f.vencimento)) { f.naPrevisao = false; continue; }
+        const i = f.vencida ? 0 : indiceDe(f.vencimento);
+        if (i < 0) { f.naPrevisao = false; continue; }
+        buckets[i].saidas += f.valor;
+        buckets[i].saidasDaFatura! += f.valor;
+      }
+
+      // Gastos que se repetem, espalhados pelos dias de hoje até o fim da janela.
+      const fimDaJanela = somarDias(buckets[buckets.length - 1].inicio, 6);
+      for (const [data, valor] of gastosQueSeRepetemPorDia(extras.recorrentes, contasAbertas, hojeLocal, fimDaJanela)) {
+        const i = indiceDe(data);
+        if (i < 0) continue;
+        buckets[i].saidas += valor;
+        buckets[i].saidasRecorrentes! += valor;
+      }
+      for (const b of buckets) {
+        b.saidas = Number(b.saidas.toFixed(2));
+        b.saidasDasContas = Number((b.saidasDasContas ?? 0).toFixed(2));
+        b.saidasDaFatura = Number((b.saidasDaFatura ?? 0).toFixed(2));
+        b.saidasRecorrentes = Number((b.saidasRecorrentes ?? 0).toFixed(2));
       }
 
       let acumulado = 0;
@@ -360,6 +482,7 @@ export function useCashForecast(semanas: number = 8) {
         totalEntradas: buckets.reduce((s, b) => s + b.entradas, 0),
         totalSaidas: buckets.reduce((s, b) => s + b.saidas, 0),
         semanasNegativas: buckets.filter(b => b.liquido < 0).length,
+        extras,
       };
     },
   });
