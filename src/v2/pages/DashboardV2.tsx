@@ -259,9 +259,9 @@ function AdminHome({
       {/* KPIs clicáveis */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KPIStat
-          label="Recebido no mês"
+          label="Entrou no mês (extrato)"
           value={formatCurrency(collectedThisMonth)}
-          hint={revenueGrowth !== null ? `${revenueGrowth >= 0 ? '▲' : '▼'} ${Math.abs(revenueGrowth)}% vs mês anterior` : undefined}
+          hint={revenueGrowth !== null ? `${revenueGrowth >= 0 ? '▲' : '▼'} ${Math.abs(revenueGrowth)}% vs o mesmo trecho do mês anterior` : undefined}
           tone={revenueGrowth !== null && revenueGrowth < 0 ? 'critical' : 'success'}
         />
         <KPIStat

@@ -1,10 +1,12 @@
 // O fluxo de caixa pelo extrato — leitura do banco. A regra de quais linhas contam mora em
-// src/lib/fluxo-de-caixa.ts (pura, testada); aqui só se busca o que ela precisa.
+// supabase/functions/_shared/banking/fluxo-de-caixa.ts (pura, testada, a mesma do assistente);
+// aqui só se busca o que ela precisa.
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { lerEmPaginas } from '@/lib/ler-em-paginas';
 import {
-  montarFluxoDeCaixa, hojeEmBrasilia, ultimosMeses, limitesDosMeses,
+  montarFluxoDeCaixa, hojeEmBrasilia, ultimosMeses, limitesDosMeses, somarDias,
+  MARGEM_PARA_PAREAR, COLUNAS_DO_FLUXO,
   type FluxoDeCaixa, type LinhaDoFluxo,
 } from '@/lib/fluxo-de-caixa';
 
@@ -16,7 +18,7 @@ import {
 export async function lerLinhasDoFluxo(de: string, ate: string): Promise<LinhaDoFluxo[]> {
   return lerEmPaginas((i, f) => supabase
     .from('bank_transactions')
-    .select('id, transaction_date, amount, transaction_type, source_type, provider, bank_connection_id, dismissed_kind, tx_status')
+    .select(COLUNAS_DO_FLUXO)
     .in('source_type', ['bank', 'cash'])
     .gte('transaction_date', de)
     .lte('transaction_date', ate)
@@ -30,7 +32,9 @@ export async function carregarFluxoDeCaixa(quantosMeses: number, ateMes?: string
   const hoje = hojeEmBrasilia();
   const meses = ultimosMeses(quantosMeses, ateMes ?? hoje);
   const { de, ate } = limitesDosMeses(meses);
-  const linhas = await lerLinhasDoFluxo(de, ate);
+  // Alguns dias a mais de cada lado: a outra perna de uma transferência feita na virada do mês
+  // mora do outro lado do recorte. Essas linhas só servem para parear — não somam.
+  const linhas = await lerLinhasDoFluxo(somarDias(de, -MARGEM_PARA_PAREAR), somarDias(ate, MARGEM_PARA_PAREAR));
   return montarFluxoDeCaixa(linhas, meses, hoje);
 }
 

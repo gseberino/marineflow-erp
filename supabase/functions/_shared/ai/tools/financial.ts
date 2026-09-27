@@ -1,5 +1,44 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolCtx, type ToolDef } from "./registry.ts";
 import { mensagemDoBanco } from "./lancamentos.ts";
+import {
+  COLUNAS_DO_FLUXO, MARGEM_PARA_PAREAR, ROTULO_DO_DESTINO, hojeEmBrasilia, somarDias, somarFluxoDoPeriodo,
+  type DestinoDeFora, type LinhaDoFluxo,
+} from "../../banking/fluxo-de-caixa.ts";
+
+/** O recorte de dias do fechamento, em datas de Brasília ('AAAA-MM-DD'). */
+export function periodoDoFechamento(periodo: string, hoje: string): { de: string; ate: string } {
+  if (periodo === "ontem") {
+    const ontem = somarDias(hoje, -1);
+    return { de: ontem, ate: ontem };
+  }
+  if (periodo === "semana") return { de: somarDias(hoje, -6), ate: hoje };
+  if (periodo === "mes") return { de: `${hoje.slice(0, 7)}-01`, ate: hoje };
+  return { de: hoje, ate: hoje };
+}
+
+/**
+ * As linhas do extrato (conta corrente e Caixa) do recorte, com a margem de dias que a regra usa
+ * para parear as duas pernas de uma transferência. Em páginas: o servidor corta em 1.000 linhas
+ * sem avisar.
+ */
+async function lerLinhasDoFluxo(sb: ToolCtx["sb"], de: string, ate: string): Promise<LinhaDoFluxo[]> {
+  const tudo: LinhaDoFluxo[] = [];
+  for (let i = 0; i < 50_000; i += 1000) {
+    const { data, error } = await sb.from("bank_transactions")
+      .select(COLUNAS_DO_FLUXO)
+      .in("source_type", ["bank", "cash"])
+      .gte("transaction_date", somarDias(de, -MARGEM_PARA_PAREAR))
+      .lte("transaction_date", somarDias(ate, MARGEM_PARA_PAREAR))
+      .order("transaction_date")
+      .order("id")
+      .range(i, i + 999);
+    if (error) throw error;
+    const lote = (data ?? []) as LinhaDoFluxo[];
+    tudo.push(...lote);
+    if (lote.length < 1000) break;
+  }
+  return tudo;
+}
 
 /** Campos que o modelo pode pedir para LIMPAR (deixar vazio) numa correção. */
 const LIMPAVEIS: Record<string, { payable?: string; receivable?: string }> = {
@@ -463,7 +502,7 @@ export const financialTools: ToolDef[] = [
   {
     name: "get_period_summary",
     description:
-      "FECHAMENTO do período: quanto ENTROU, quanto SAIU, o saldo, e as pendências que pedem ação (a receber vencido, contas a pagar vencendo, OS concluídas). Use para 'como foi hoje?', 'fechamento da semana', 'resumo do mês'. Só leitura — não registra nada.",
+      "FECHAMENTO do período pelo EXTRATO: quanto ENTROU e quanto SAIU das contas e do Caixa (a mesma conta da Central de relatórios e do painel inicial), o saldo do período (entrou − saiu; NÃO é o saldo das contas) e as pendências que pedem ação (a receber vencido, contas a pagar vencendo, OS concluídas). Transferência entre contas próprias e crédito do cartão na conta vêm à parte, sem somar. Use para 'como foi hoje?', 'fechamento da semana', 'resumo do mês', 'quanto entrou esse mês'. Só leitura — não registra nada.",
     input_schema: {
       type: "object",
       properties: {
@@ -477,52 +516,22 @@ export const financialTools: ToolDef[] = [
       if (blocked) return blocked;
       const { sb } = ctx;
 
-      const hoje = new Date();
-      const iso = (d: Date) => d.toISOString().slice(0, 10);
+      // Datas de Brasília: o servidor roda em UTC, e depois das 21h "hoje" já era amanhã.
+      const hoje = hojeEmBrasilia();
       const periodo = String(args.period || "hoje");
-      let de = iso(hoje);
-      let ate = iso(hoje);
-      if (periodo === "ontem") {
-        const o = new Date(hoje.getTime() - 86400000);
-        de = iso(o); ate = iso(o);
-      } else if (periodo === "semana") {
-        de = iso(new Date(hoje.getTime() - 6 * 86400000));
-      } else if (periodo === "mes") {
-        de = iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
-      }
+      const { de, ate } = periodoDoFechamento(periodo, hoje);
 
-      // ENTRADAS: vêm da tabela payments (payment_date é a data do recebimento).
-      const { data: pays } = await sb
-        .from("payments")
-        .select("amount, net_amount, receivable_id, payment_method, payment_date, status")
-        .gte("payment_date", de)
-        .lte("payment_date", ate)
-        .eq("status", "confirmed");
-
-      let entrou = 0, nEntradas = 0;
-      const porMetodo: Record<string, number> = {};
-      for (const p of (pays as any[]) || []) {
-        if (!p.receivable_id) continue;
-        const v = Number(p.net_amount ?? p.amount) || 0;
-        entrou += v; nEntradas++;
-        const m = p.payment_method || "não informado";
-        porMetodo[m] = (porMetodo[m] || 0) + v;
+      // ENTROU e SAIU: pelo extrato, com a regra da Central de relatórios e do painel inicial
+      // (_shared/banking/fluxo-de-caixa.ts). Até 27/09/2026 a entrada vinha das baixas em
+      // `payments` e a saída das contas marcadas pagas por updated_at: o assistente dava um
+      // terceiro número para "quanto entrou no mês", diferente da tela e do painel.
+      let linhas: LinhaDoFluxo[];
+      try {
+        linhas = await lerLinhasDoFluxo(sb, de, ate);
+      } catch (e) {
+        return { error: `Não consegui ler o extrato: ${mensagemDoBanco(e)}` };
       }
-
-      // SAÍDAS: conferido no banco — pagamento de conta a pagar NÃO passa por `payments`
-      // (é marcado direto em payables). Então a fonte da verdade aqui é payables.
-      // Não existe paid_at no schema: usamos updated_at (quando a conta foi marcada paga).
-      const { data: pagos } = await sb
-        .from("payables")
-        .select("paid_amount, amount, status, updated_at")
-        .eq("status", "paid")
-        .gte("updated_at", `${de}T00:00:00`)
-        .lte("updated_at", `${ate}T23:59:59`);
-      let saiu = 0, nSaidas = 0;
-      for (const p of (pagos as any[]) || []) {
-        saiu += Number(p.paid_amount ?? p.amount) || 0;
-        nSaidas++;
-      }
+      const fluxo = somarFluxoDoPeriodo(linhas, de, ate, hoje);
 
       // Pendências que pedem ação.
       const { data: venc } = await sb
@@ -530,10 +539,10 @@ export const financialTools: ToolDef[] = [
         .select("balance_amount, amount")
         .in("status", ["pending", "partially_paid"])
         .eq("is_deposit", false)
-        .lt("due_date", iso(hoje));
+        .lt("due_date", hoje);
       const vencidoTotal = ((venc as any[]) || []).reduce((a, r) => a + (Number(r.balance_amount ?? r.amount) || 0), 0);
 
-      const em7 = iso(new Date(hoje.getTime() + 7 * 86400000));
+      const em7 = somarDias(hoje, 7);
       const { data: pag } = await sb
         .from("payables")
         .select("amount, balance_amount, due_date")
@@ -545,19 +554,26 @@ export const financialTools: ToolDef[] = [
         .from("service_orders")
         .select("id", { count: "exact", head: true })
         .in("status", ["completed", "invoiced"])
-        .gte("updated_at", `${de}T00:00:00`);
+        .gte("updated_at", `${de}T00:00:00-03:00`);
 
       const r2 = (n: number) => Math.round(n * 100) / 100;
       return {
         periodo,
         de,
         ate,
-        entrou: r2(entrou),
-        saiu: r2(saiu),
-        saldo: r2(entrou - saiu),
-        qtd_entradas: nEntradas,
-        qtd_saidas: nSaidas,
-        entradas_por_metodo: Object.fromEntries(Object.entries(porMetodo).map(([k, v]) => [k, r2(v)])),
+        fonte: "extrato das contas e do Caixa — o mesmo número da Central de relatórios e do painel inicial",
+        entrou: fluxo.entrou,
+        saiu: fluxo.saiu,
+        saldo: fluxo.liquido,
+        qtd_movimentos: fluxo.quantidade,
+        a_parte_sem_somar: {
+          transferencias_entre_contas_proprias: fluxo.transferencias,
+          credito_do_cartao_na_conta: fluxo.creditoDoCartao,
+        },
+        fora_da_conta: Object.fromEntries(
+          (Object.entries(fluxo.deFora) as Array<[DestinoDeFora, { quantidade: number; valor: number }]>)
+            .map(([motivo, v]) => [ROTULO_DO_DESTINO[motivo], v]),
+        ),
         pendencias: {
           a_receber_vencido: r2(vencidoTotal),
           a_pagar_proximos_7_dias: r2(aPagar),

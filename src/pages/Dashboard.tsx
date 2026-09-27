@@ -156,16 +156,16 @@ export default function Dashboard() {
       {/* ROW 1 — Financial KPIs */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPIBox
-          title="Recebido este mês"
+          title="Entrou no mês (extrato)"
           value={formatCurrency(collectedThisMonth)}
           icon={<TrendingUp className="h-5 w-5 text-emerald-600" />}
           iconBg="bg-emerald-100 dark:bg-emerald-900/30"
           badge={revenueGrowth !== null ? (
             <span className={`text-xs font-medium ${revenueGrowth >= 0 ? 'text-emerald-600' : 'text-destructive'}`}>
-              {revenueGrowth >= 0 ? '↑' : '↓'} {Math.abs(revenueGrowth)}% vs mês anterior
+              {revenueGrowth >= 0 ? '↑' : '↓'} {Math.abs(revenueGrowth)}% vs o mesmo trecho do mês anterior
             </span>
           ) : undefined}
-          subtext={`vs ${formatCurrency(collectedLastMonth)} no mês anterior`}
+          subtext={`vs ${formatCurrency(collectedLastMonth)} até o mesmo dia do mês anterior`}
         />
         <KPIBox
           title="A Receber"

@@ -5,11 +5,15 @@
 import { describe, it, expect } from 'vitest';
 import {
   destinoDaLinha, montarFluxoDeCaixa, hojeEmBrasilia, ultimosMeses, limitesDosMeses,
-  rotuloDoMes, nomeDoMes, type LinhaDoFluxo,
+  rotuloDoMes, nomeDoMes, somarFluxoDoPeriodo, somarDias, paresDeTransferencia,
+  LOTE_DA_IMPORTACAO_MANUAL_DE_JULHO, type LinhaDoFluxo,
 } from './fluxo-de-caixa';
 
 const HOJE = '2026-09-26';
 const C6 = 'd288bc10-eff3-42c8-ae31-4c9a9b35e5c6';
+const NUBANK = 'nubank-conta';
+const CAIXA = 'caixa-dinheiro';
+const LOTE = LOTE_DA_IMPORTACAO_MANUAL_DE_JULHO;
 
 function linha(p: Partial<LinhaDoFluxo>): LinhaDoFluxo {
   return {
@@ -43,9 +47,10 @@ describe('destino de cada linha do extrato', () => {
   it('duplicata, estornada e a importação manual de julho ficam fora', () => {
     expect(destinoDaLinha(linha({ dismissed_kind: 'duplicata' }), HOJE)).toBe('fora_duplicata');
     expect(destinoDaLinha(linha({ dismissed_kind: 'estornada', source_type: 'cash' }), HOJE)).toBe('fora_estornada');
-    // As 13 linhas da importação de 27/07 ainda sem a marca de duplicata.
-    expect(destinoDaLinha(linha({ provider: 'manual', bank_connection_id: null }), HOJE)).toBe('fora_importacao_manual');
-    // Manual COM conta ligada (lançado à mão no Caixa, por exemplo) é movimento.
+    // As 13 linhas da importação de 27/07 ainda sem a marca de duplicata: pelo LOTE.
+    expect(destinoDaLinha(linha({ provider: 'manual', bank_connection_id: null, import_batch_id: LOTE }), HOJE)).toBe('fora_importacao_manual');
+    // Extrato importado por arquivo depois daquele lote é dinheiro de verdade (revisão de 27/09/2026).
+    expect(destinoDaLinha(linha({ provider: 'manual', bank_connection_id: null, import_batch_id: 'outro-lote' }), HOJE)).toBe('movimento');
     expect(destinoDaLinha(linha({ provider: 'manual', bank_connection_id: 'caixa' }), HOJE)).toBe('movimento');
   });
 
@@ -103,24 +108,65 @@ describe('montarFluxoDeCaixa', () => {
     expect(montarFluxoDeCaixa(muitas, meses, HOJE).meses[1].saiu).toBe(100);
   });
 
-  it('transferência e crédito do cartão vêm à parte, sem mexer em Entrou/Saiu', () => {
+  it('transferência COM as duas pernas e crédito do cartão vêm à parte, sem mexer em Entrou/Saiu', () => {
     const f = montarFluxoDeCaixa([
-      linha({ amount: 1000 }),
-      linha({ dismissed_kind: 'transferencia', amount: 2900 }),
-      linha({ dismissed_kind: 'transferencia', transaction_type: 'credit', amount: 1200 }),
-      linha({ dismissed_kind: 'mecanica_cartao', transaction_type: 'credit', amount: 551.32 }),
+      linha({ id: 'a', amount: 1000 }),
+      linha({ id: 't1', dismissed_kind: 'transferencia', amount: 2900, bank_connection_id: C6 }),
+      linha({ id: 't2', dismissed_kind: 'transferencia', transaction_type: 'credit', amount: 2900, bank_connection_id: NUBANK, transaction_date: '2026-09-11' }),
+      linha({ id: 'm', dismissed_kind: 'mecanica_cartao', transaction_type: 'credit', amount: 551.32 }),
     ], meses, HOJE);
     const set = f.meses[1];
     expect(set).toMatchObject({ entrou: 0, saiu: 1000, liquido: -1000, quantidade: 1 });
-    expect(set.transferencias).toEqual({ entrou: 1200, saiu: 2900 });
+    expect(set.transferencias).toEqual({ entrou: 2900, saiu: 2900 });
     expect(set.creditoDoCartao).toEqual({ entrou: 551.32, saiu: 0 });
+  });
+
+  it('a marca transferência SEM a outra perna é dinheiro que entrou ou saiu de verdade', () => {
+    // Pagamento da fatura do Nubank pela conta do C6 (a outra perna está no cartão) e as Vendas
+    // que a maquininha liquida na InfinitePay: estavam marcados como transferência.
+    const f = montarFluxoDeCaixa([
+      linha({ id: 'fatura', dismissed_kind: 'transferencia', amount: 1593.09 }),
+      linha({ id: 'lado-do-cartao', source_type: 'credit_card', transaction_type: 'credit', amount: 1593.09, bank_connection_id: NUBANK }),
+      linha({ id: 'vendas', dismissed_kind: 'transferencia', transaction_type: 'credit', amount: 4105.2, bank_connection_id: 'infinitepay' }),
+    ], meses, HOJE);
+    expect(f.meses[1]).toMatchObject({ entrou: 4105.2, saiu: 1593.09 });
+    expect(f.meses[1].transferencias).toEqual({ entrou: 0, saiu: 0 });
+  });
+
+  it('saque para o Caixa não conta duas vezes: o banco e o Caixa pareados, só o gasto conta', () => {
+    const f = montarFluxoDeCaixa([
+      linha({ id: 'saque-banco', amount: 500, dismissed_kind: 'manual' }),
+      linha({ id: 'saque-caixa', source_type: 'cash', bank_connection_id: CAIXA, transaction_type: 'credit', amount: 500, dismissed_kind: 'transferencia' }),
+      linha({ id: 'almoco', source_type: 'cash', bank_connection_id: CAIXA, amount: 500, transaction_date: '2026-09-12' }),
+    ], meses, HOJE);
+    expect(f.meses[1]).toMatchObject({ entrou: 0, saiu: 500 });
+    expect(f.meses[1].transferencias).toEqual({ entrou: 500, saiu: 500 });
+  });
+
+  it('par na virada do mês: cada perna fica à parte no seu mês', () => {
+    const f = montarFluxoDeCaixa([
+      linha({ id: 'sai', dismissed_kind: 'transferencia', amount: 800, transaction_date: '2026-08-31' }),
+      linha({ id: 'entra', dismissed_kind: 'transferencia', transaction_type: 'credit', amount: 800, bank_connection_id: NUBANK, transaction_date: '2026-09-01' }),
+    ], meses, HOJE);
+    expect(f.meses[0].transferencias.saiu).toBe(800);
+    expect(f.meses[1].transferencias.entrou).toBe(800);
+    expect(f.total.entrou + f.total.saiu).toBe(0);
+  });
+
+  it('um par por linha: duas saídas iguais e uma entrada só formam um par', () => {
+    const pares = paresDeTransferencia([
+      linha({ id: 's1', dismissed_kind: 'transferencia', amount: 300 }),
+      linha({ id: 's2', dismissed_kind: 'transferencia', amount: 300, transaction_date: '2026-09-12' }),
+      linha({ id: 'e1', dismissed_kind: 'transferencia', transaction_type: 'credit', amount: 300, bank_connection_id: NUBANK }),
+    ], HOJE);
+    expect([...pares].sort()).toEqual(['e1', 's1']);
   });
 
   it('diz o que ficou fora e quanto', () => {
     const f = montarFluxoDeCaixa([
       linha({ dismissed_kind: 'duplicata', amount: 10 }),
       linha({ dismissed_kind: 'duplicata', amount: 5.5 }),
-      linha({ provider: 'manual', bank_connection_id: null, amount: 66244.92 }),
+      linha({ provider: 'manual', bank_connection_id: null, import_batch_id: LOTE, amount: 66244.92 }),
       linha({ source_type: 'credit_card', amount: 20 }),
     ], meses, HOJE);
     expect(f.deFora.fora_duplicata).toEqual({ quantidade: 2, valor: 15.5 });
@@ -181,5 +227,23 @@ describe('datas do fluxo', () => {
   it('rótulos do mês', () => {
     expect(rotuloDoMes('2026-09')).toBe('Set/26');
     expect(nomeDoMes('2026-03')).toBe('março de 2026');
+  });
+});
+
+describe('fluxo de um período de dias (o fechamento do assistente)', () => {
+  it('soma só os dias pedidos, com a mesma regra', () => {
+    const r = somarFluxoDoPeriodo([
+      linha({ id: '1', transaction_date: '2026-09-20', transaction_type: 'credit', amount: 700 }),
+      linha({ id: '2', transaction_date: '2026-09-21', amount: 120 }),
+      linha({ id: '3', transaction_date: '2026-09-25', amount: 999 }),
+      linha({ id: '4', transaction_date: '2026-09-21', dismissed_kind: 'duplicata', amount: 50 }),
+    ], '2026-09-20', '2026-09-21', HOJE);
+    expect(r).toMatchObject({ entrou: 700, saiu: 120, liquido: 580 });
+    expect(r.deFora.fora_duplicata).toEqual({ quantidade: 1, valor: 50 });
+  });
+
+  it('somarDias não escorrega de dia por fuso', () => {
+    expect(somarDias('2026-09-01', -3)).toBe('2026-08-29');
+    expect(somarDias('2026-12-30', 3)).toBe('2027-01-02');
   });
 });

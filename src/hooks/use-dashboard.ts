@@ -1,20 +1,36 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { lerLinhasDoFluxo } from '@/hooks/use-fluxo-de-caixa';
+import {
+  hojeEmBrasilia, somarDias, somarFluxoDoPeriodo, ultimosMeses, MARGEM_PARA_PAREAR,
+} from '@/lib/fluxo-de-caixa';
+
+/**
+ * O "Entrou no mês" do painel: o dinheiro que entrou nas contas e no Caixa pelo EXTRATO, com a
+ * regra da Central de relatórios — o mesmo número do Resumo do mês e do assistente. Até
+ * 27/09/2026 era a soma da tabela `payments` (as baixas registradas à mão), que quase ninguém
+ * usa: o painel dizia um valor, a Central outro e o assistente um terceiro.
+ *
+ * A comparação é com o MESMO trecho do mês anterior (do dia 1º até o mesmo dia): comparar dez
+ * dias deste mês com o mês anterior inteiro dava sempre "caiu".
+ */
+export function entrouNoMesPeloExtrato(linhas: Parameters<typeof somarFluxoDoPeriodo>[0], hoje: string) {
+  const inicio = `${hoje.slice(0, 7)}-01`;
+  const inicioAnterior = `${ultimosMeses(2, hoje)[0]}-01`;
+  const ultimoDiaAnterior = somarDias(inicio, -1);
+  const mesmoDia = `${inicioAnterior.slice(0, 8)}${hoje.slice(8, 10)}`;
+  const ateNoAnterior = mesmoDia < ultimoDiaAnterior ? mesmoDia : ultimoDiaAnterior;
+  return {
+    esteMes: somarFluxoDoPeriodo(linhas, inicio, hoje, hoje).entrou,
+    mesmoTrechoDoAnterior: somarFluxoDoPeriodo(linhas, inicioAnterior, ateNoAnterior, hoje).entrou,
+  };
+}
 
 export function useDashboardData() {
   const today = new Date().toISOString().split('T')[0];
   const firstOfMonth = `${today.substring(0, 7)}-01`;
-  const firstOfLastMonth = (() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() - 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
-  })();
-  const lastOfLastMonth = (() => {
-    const d = new Date();
-    d.setDate(0);
-    return d.toISOString().split('T')[0];
-  })();
   const in7days = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+  const hojeLocal = hojeEmBrasilia();
 
   return useQuery({
     queryKey: ['dashboard'],
@@ -22,8 +38,7 @@ export function useDashboardData() {
       const [
         receivablesRes,
         payablesRes,
-        collectedThisMonthRes,
-        collectedLastMonthRes,
+        linhasDoFluxo,
         overdueReceivablesRes,
         openOrdersRes,
         ordersByStatusRes,
@@ -39,18 +54,11 @@ export function useDashboardData() {
           .select('balance_amount')
           .not('status', 'in', '("paid","cancelled")'),
 
-        supabase.from('payments')
-          .select('amount')
-          .not('receivable_id', 'is', null)
-          .eq('status', 'confirmed')
-          .gte('payment_date', firstOfMonth),
-
-        supabase.from('payments')
-          .select('amount')
-          .not('receivable_id', 'is', null)
-          .eq('status', 'confirmed')
-          .gte('payment_date', firstOfLastMonth)
-          .lte('payment_date', lastOfLastMonth),
+        // Do 1º dia do mês anterior até hoje, com a margem para parear transferência.
+        lerLinhasDoFluxo(
+          somarDias(`${ultimosMeses(2, hojeLocal)[0]}-01`, -MARGEM_PARA_PAREAR),
+          somarDias(hojeLocal, MARGEM_PARA_PAREAR),
+        ),
 
         supabase.from('receivables')
           .select('balance_amount')
@@ -138,8 +146,10 @@ export function useDashboardData() {
       const sum = (rows: any[] | null, field = 'balance_amount') =>
         (rows || []).reduce((s: number, r: any) => s + Number(r[field] || 0), 0);
 
-      const collectedThisMonth = sum(collectedThisMonthRes.data, 'amount');
-      const collectedLastMonth = sum(collectedLastMonthRes.data, 'amount');
+      const entrou = entrouNoMesPeloExtrato(linhasDoFluxo, hojeLocal);
+      const collectedThisMonth = entrou.esteMes;
+      /** Até o mesmo dia do mês anterior — não o mês anterior inteiro. */
+      const collectedLastMonth = entrou.mesmoTrechoDoAnterior;
       const revenueGrowth = collectedLastMonth > 0
         ? Math.round(((collectedThisMonth - collectedLastMonth) / collectedLastMonth) * 100)
         : null;
