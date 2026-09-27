@@ -146,7 +146,7 @@ Deno.test("formasDoDocumento: só dígitos e a máscara padrão; tamanho errado 
   assertEquals(formasDoDocumento(undefined), null);
 });
 
-Deno.test("comprovante de Pix por foto: só o CNPJ acha o fornecedor (documento igual identifica)", async () => {
+Deno.test("Pix pro CNPJ, sem dizer o nome: o CNPJ acha o fornecedor (documento igual identifica)", async () => {
   let chamada: any = null;
   const c = ctx((n, a) => { chamada = { n, a }; return Promise.resolve({ data: { ok: true }, error: null }); });
   const args = { valor: 1500, data: "26/09", documento: "12345678000190", categoria: "peças", descricao: "Pix — cabos" };

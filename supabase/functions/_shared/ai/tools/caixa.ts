@@ -131,9 +131,9 @@ export function formasDoDocumento(documento: unknown): string[] | null {
 
 /**
  * O cadastro deste CPF/CNPJ, quando ninguém disse o nome: documento igual identifica (regra do
- * dono). É o que faz o comprovante de Pix ou boleto mandado por foto achar o fornecedor sem
- * depender de o nome do comprovante bater com o do cadastro. Saída procura fornecedor e
- * favorecido; entrada, cliente. Mais de um é pergunta.
+ * dono). "O Pix de 800 pro CNPJ X é da OS-60" acha o fornecedor sem depender de o nome dito
+ * bater com o do cadastro. Saída procura fornecedor e favorecido; entrada, cliente. Mais de um
+ * é pergunta.
  */
 async function pessoaPeloDocumento(ctx: ToolCtx, documento: unknown, sentido: "saida" | "entrada"):
   Promise<{ achado: Pessoa } | { ambiguo: Pessoa[] } | { nenhum: true } | { error: string } | null> {
@@ -461,7 +461,7 @@ export const caixaTools: ToolDef[] = [
         sentido: { type: "string", enum: ["saida", "entrada"], description: "Padrão: saida." },
         valor: { type: "number" },
         data: { type: "string", description: "'hoje' (padrão), 'ontem', dd/mm." },
-        documento: { type: "string", description: "CPF/CNPJ de quem recebeu/pagou (dito ou do comprovante de Pix/boleto). Sem 'quem', acha o cadastro por ele. Nunca em débito no cartão." },
+        documento: { type: "string", description: "CPF/CNPJ de quem recebeu/pagou, se a pessoa disse. Sem 'quem', acha o cadastro por ele. Nunca em débito no cartão." },
         quem: { type: "string", description: "Fornecedor/favorecido (saída) ou cliente (entrada), pelo nome." },
         categoria: { type: "string" },
         os: { type: "string" },
