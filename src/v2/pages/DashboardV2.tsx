@@ -130,7 +130,7 @@ function AdminHome({
   statusLabels: Record<string, string>;
 }) {
   const {
-    totalReceivable, totalPayable, collectedThisMonth, revenueGrowth,
+    totalReceivable, totalPayable, collectedThisMonth, revenueGrowth, erroDoExtrato,
     overdueReceivables, openOrders, completedThisMonth,
     completedThisMonthValue, upcomingOrders, revenueChart, lowStock,
   } = data;
@@ -260,8 +260,10 @@ function AdminHome({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KPIStat
           label="Entrou no mês (extrato)"
-          value={formatCurrency(collectedThisMonth)}
-          hint={revenueGrowth !== null ? `${revenueGrowth >= 0 ? '▲' : '▼'} ${Math.abs(revenueGrowth)}% vs o mesmo trecho do mês anterior` : undefined}
+          value={collectedThisMonth == null ? '—' : formatCurrency(collectedThisMonth)}
+          hint={erroDoExtrato
+            ? 'Não consegui ler o extrato agora.'
+            : revenueGrowth !== null ? `${revenueGrowth >= 0 ? '▲' : '▼'} ${Math.abs(revenueGrowth)}% vs o mesmo trecho do mês anterior` : undefined}
           tone={revenueGrowth !== null && revenueGrowth < 0 ? 'critical' : 'success'}
         />
         <KPIStat
@@ -286,7 +288,7 @@ function AdminHome({
       {/* Gráfico + próximos 7 dias */}
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
         <div className="rounded-lg border bg-card p-4 lg:col-span-3">
-          <h3 className="mb-3 text-sm font-bold">Receita — últimos 6 meses</h3>
+          <h3 className="mb-3 text-sm font-bold">Entrou — últimos 6 meses (extrato)</h3>
           {revenueChart.some((r: { revenue: number }) => r.revenue > 0) ? (
             <>
               <ResponsiveContainer width="100%" height={200}>
@@ -307,7 +309,9 @@ function AdminHome({
               </p>
             </>
           ) : (
-            <p className="py-16 text-center text-sm text-muted-foreground">Nenhuma receita registrada no período.</p>
+            <p className="py-16 text-center text-sm text-muted-foreground">
+              {erroDoExtrato ? `Não consegui ler o extrato: ${erroDoExtrato}` : 'Nada entrou nas contas no período.'}
+            </p>
           )}
         </div>
 

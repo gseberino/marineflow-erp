@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { lerLinhasDoFluxo } from '@/hooks/use-fluxo-de-caixa';
 import {
-  hojeEmBrasilia, somarDias, somarFluxoDoPeriodo, ultimosMeses, MARGEM_PARA_PAREAR,
+  hojeEmBrasilia, montarFluxoDeCaixa, rotuloDoMes, somarDias, somarFluxoDoPeriodo, ultimosMeses,
+  MARGEM_PARA_PAREAR, type LinhaDoFluxo,
 } from '@/lib/fluxo-de-caixa';
 
 /**
@@ -31,6 +32,8 @@ export function useDashboardData() {
   const firstOfMonth = `${today.substring(0, 7)}-01`;
   const in7days = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
   const hojeLocal = hojeEmBrasilia();
+  // O gráfico dos 6 meses e o "Entrou no mês" saem da MESMA leitura do extrato.
+  const seisMeses = ultimosMeses(6, hojeLocal);
 
   return useQuery({
     queryKey: ['dashboard'],
@@ -44,7 +47,6 @@ export function useDashboardData() {
         ordersByStatusRes,
         completedThisMonthRes,
         upcomingOrdersRes,
-        revenueChartRes,
       ] = await Promise.all([
         supabase.from('receivables')
           .select('balance_amount')
@@ -54,10 +56,15 @@ export function useDashboardData() {
           .select('balance_amount')
           .not('status', 'in', '("paid","cancelled")'),
 
-        // Do 1º dia do mês anterior até hoje, com a margem para parear transferência.
+        // Os 6 meses do gráfico até hoje, com a margem para parear transferência. Um erro aqui
+        // apaga só os números do extrato, não o painel inteiro (as outras leituras devolvem o
+        // erro em vez de lançar; esta lança).
         lerLinhasDoFluxo(
-          somarDias(`${ultimosMeses(2, hojeLocal)[0]}-01`, -MARGEM_PARA_PAREAR),
+          somarDias(`${seisMeses[0]}-01`, -MARGEM_PARA_PAREAR),
           somarDias(hojeLocal, MARGEM_PARA_PAREAR),
+        ).then(
+          (linhas) => ({ linhas, erro: null as string | null }),
+          (e: unknown) => ({ linhas: [] as LinhaDoFluxo[], erro: (e as Error)?.message ?? String(e) }),
         ),
 
         supabase.from('receivables')
@@ -87,17 +94,6 @@ export function useDashboardData() {
           .lte('scheduled_start_at', in7days)
           .order('scheduled_start_at', { ascending: true })
           .limit(5),
-
-        supabase.from('payments')
-          .select('payment_date, amount')
-          .not('receivable_id', 'is', null)
-          .eq('status', 'confirmed')
-          .gte('payment_date', (() => {
-            const d = new Date();
-            d.setMonth(d.getMonth() - 5);
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
-          })())
-          .order('payment_date', { ascending: true }),
       ]);
 
       // Low stock (separate query since we need JS filter for column comparison)
@@ -113,28 +109,14 @@ export function useDashboardData() {
         .filter(p => (p.stock_quantity ?? 0) < (p.minimum_stock ?? 0))
         .slice(0, 5);
 
-      // Process revenue chart data
-      const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-      const now = new Date();
-      const revenueByMonth: Record<string, number> = {};
-      for (let i = 5; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        revenueByMonth[key] = 0;
-      }
-      for (const p of revenueChartRes.data || []) {
-        const key = p.payment_date.substring(0, 7);
-        if (revenueByMonth[key] !== undefined) {
-          revenueByMonth[key] += Number(p.amount);
-        }
-      }
-      const revenueChart = Object.entries(revenueByMonth).map(([key, value]) => {
-        const [, m] = key.split('-');
-        return {
-          month: `${monthNames[parseInt(m) - 1]}/${key.slice(2, 4)}`,
-          revenue: Math.round(value * 100) / 100,
-        };
-      });
+      // O gráfico: o que ENTROU nas contas mês a mês pelo extrato, com a regra da Central de
+      // relatórios. Até 27/09/2026 somava a tabela `payments` (as baixas registradas à mão) e
+      // mostrava quase nada ao lado do "Entrou no mês".
+      const erroDoExtrato = linhasDoFluxo.erro;
+      const revenueChart = erroDoExtrato
+        ? []
+        : montarFluxoDeCaixa(linhasDoFluxo.linhas, seisMeses, hojeLocal).meses
+          .map((m) => ({ month: rotuloDoMes(m.mes), revenue: m.entrou }));
 
       // Process status counts
       const statusCounts: Record<string, number> = {};
@@ -146,12 +128,13 @@ export function useDashboardData() {
       const sum = (rows: any[] | null, field = 'balance_amount') =>
         (rows || []).reduce((s: number, r: any) => s + Number(r[field] || 0), 0);
 
-      const entrou = entrouNoMesPeloExtrato(linhasDoFluxo, hojeLocal);
-      const collectedThisMonth = entrou.esteMes;
+      // null = não deu para ler o extrato: a tela diz isso em vez de mostrar R$ 0,00.
+      const entrou = erroDoExtrato ? null : entrouNoMesPeloExtrato(linhasDoFluxo.linhas, hojeLocal);
+      const collectedThisMonth = entrou?.esteMes ?? null;
       /** Até o mesmo dia do mês anterior — não o mês anterior inteiro. */
-      const collectedLastMonth = entrou.mesmoTrechoDoAnterior;
-      const revenueGrowth = collectedLastMonth > 0
-        ? Math.round(((collectedThisMonth - collectedLastMonth) / collectedLastMonth) * 100)
+      const collectedLastMonth = entrou?.mesmoTrechoDoAnterior ?? null;
+      const revenueGrowth = entrou && entrou.mesmoTrechoDoAnterior > 0
+        ? Math.round(((entrou.esteMes - entrou.mesmoTrechoDoAnterior) / entrou.mesmoTrechoDoAnterior) * 100)
         : null;
 
       return {
@@ -160,6 +143,7 @@ export function useDashboardData() {
         collectedThisMonth,
         collectedLastMonth,
         revenueGrowth,
+        erroDoExtrato,
         overdueReceivables: sum(overdueReceivablesRes.data),
 
         openOrders: openOrdersRes.data || [],

@@ -15,10 +15,11 @@ export function AjudaDoExtrato({ rotulo = 'Como o extrato é somado' }: { rotulo
     <Ajuda rotulo={rotulo}>
       Soma do que entrou e saiu das contas do banco e do Caixa em dinheiro, pela data do extrato.
       <br />
-      <b>Não entram:</b> transferência entre contas suas; dinheiro que o cartão de crédito pôs na
-      conta (Pix no crédito — é dívida, não receita); compra no cartão de crédito, que conta quando a
-      fatura é paga; linha repetida da importação manual de julho; lançamento estornado; linha ainda
-      pendente no banco e linha com data no futuro.
+      <b>Não entram:</b> transferência entre contas suas (quando as duas pontas aparecem no extrato);
+      dinheiro que o cartão de crédito pôs na conta (Pix no crédito — é dívida, não receita); compra no
+      cartão de crédito, que conta quando a fatura é paga; linha repetida da importação manual de julho;
+      lançamento estornado; o ajuste do &quot;Contei o dinheiro&quot;, que acerta o saldo do Caixa; linha
+      ainda pendente no banco e linha com data no futuro.
     </Ajuda>
   );
 }

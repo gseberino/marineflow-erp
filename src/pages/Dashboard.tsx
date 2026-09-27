@@ -110,7 +110,7 @@ export default function Dashboard() {
     );
   }
 
-  const { totalReceivable, totalPayable, collectedThisMonth, collectedLastMonth, revenueGrowth,
+  const { totalReceivable, totalPayable, collectedThisMonth, collectedLastMonth, revenueGrowth, erroDoExtrato,
     overdueReceivables, openOrders, openOrdersCount, statusCounts, completedThisMonth,
     completedThisMonthValue, upcomingOrders, revenueChart, lowStock } = data;
 
@@ -157,7 +157,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPIBox
           title="Entrou no mês (extrato)"
-          value={formatCurrency(collectedThisMonth)}
+          value={collectedThisMonth == null ? '—' : formatCurrency(collectedThisMonth)}
           icon={<TrendingUp className="h-5 w-5 text-emerald-600" />}
           iconBg="bg-emerald-100 dark:bg-emerald-900/30"
           badge={revenueGrowth !== null ? (
@@ -165,7 +165,9 @@ export default function Dashboard() {
               {revenueGrowth >= 0 ? '↑' : '↓'} {Math.abs(revenueGrowth)}% vs o mesmo trecho do mês anterior
             </span>
           ) : undefined}
-          subtext={`vs ${formatCurrency(collectedLastMonth)} até o mesmo dia do mês anterior`}
+          subtext={erroDoExtrato
+            ? 'Não consegui ler o extrato agora.'
+            : `vs ${formatCurrency(collectedLastMonth ?? 0)} até o mesmo dia do mês anterior`}
         />
         <KPIBox
           title="A Receber"
@@ -221,7 +223,7 @@ export default function Dashboard() {
       {/* ROW 3 — Chart + Upcoming */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <div className="lg:col-span-3 rounded-xl border bg-card p-5 shadow-sm">
-          <h3 className="text-sm font-semibold mb-4">Receita — últimos 6 meses</h3>
+          <h3 className="text-sm font-semibold mb-4">Entrou — últimos 6 meses (extrato)</h3>
           {revenueChart.some(r => r.revenue > 0) ? (
             <>
               <ResponsiveContainer width="100%" height={220}>
@@ -238,7 +240,9 @@ export default function Dashboard() {
               </p>
             </>
           ) : (
-            <p className="text-sm text-muted-foreground py-16 text-center">Nenhuma receita registrada no período.</p>
+            <p className="text-sm text-muted-foreground py-16 text-center">
+              {erroDoExtrato ? `Não consegui ler o extrato: ${erroDoExtrato}` : 'Nada entrou nas contas no período.'}
+            </p>
           )}
         </div>
 

@@ -73,8 +73,10 @@ describe('destino de cada linha do extrato', () => {
   it('linha que tirou da fila por outro motivo (fatura, manual) continua sendo dinheiro', () => {
     expect(destinoDaLinha(linha({ dismissed_kind: 'manual' }), HOJE)).toBe('movimento');
     expect(destinoDaLinha(linha({ dismissed_kind: 'fatura_cartao' }), HOJE)).toBe('movimento');
-    // Acerto da contagem do Caixa é dinheiro que entrou ou sumiu da gaveta.
-    expect(destinoDaLinha(linha({ dismissed_kind: 'ajuste_caixa', source_type: 'cash' }), HOJE)).toBe('movimento');
+    // O acerto da contagem do Caixa fica FORA, com o nome dele na lista do que ficou de fora: a
+    // primeira contagem põe o saldo inteiro do Caixa numa linha só, e contá-la como "Entrou"
+    // inventaria uma receita no mês (2ª revisão de 27/09/2026).
+    expect(destinoDaLinha(linha({ dismissed_kind: 'ajuste_caixa', source_type: 'cash' }), HOJE)).toBe('fora_ajuste_caixa');
   });
 
   it('sentido ou valor ilegível não entra em conta nenhuma', () => {
@@ -245,5 +247,87 @@ describe('fluxo de um período de dias (o fechamento do assistente)', () => {
   it('somarDias não escorrega de dia por fuso', () => {
     expect(somarDias('2026-09-01', -3)).toBe('2026-08-29');
     expect(somarDias('2026-12-30', 3)).toBe('2027-01-02');
+  });
+});
+
+/** Todas as ordens possíveis de uma lista. */
+function permutacoes<T>(xs: T[]): T[][] {
+  if (xs.length <= 1) return [xs];
+  return xs.flatMap((x, i) => permutacoes([...xs.slice(0, i), ...xs.slice(i + 1)]).map((resto) => [x, ...resto]));
+}
+
+describe('pareamento: o maior número de pares, e o mesmo número em qualquer tela (2ª revisão de 27/09/2026)', () => {
+  it('transferência seguida de saque do mesmo valor: as quatro pernas ficam à parte, em qualquer ordem de id', () => {
+    // Nubank → C6 R$ 1.000 e, no mesmo dia, saque de R$ 1.000 do C6 para o Caixa. Pegar "o
+    // primeiro par" casava o Nubank com o Caixa e deixava as duas pernas do C6 órfãs.
+    const pernas: Array<Partial<LinhaDoFluxo>> = [
+      { transaction_type: 'debit', bank_connection_id: NUBANK },
+      { transaction_type: 'credit', bank_connection_id: C6 },
+      { transaction_type: 'debit', bank_connection_id: C6 },
+      { transaction_type: 'credit', bank_connection_id: CAIXA, source_type: 'cash' },
+    ];
+    for (const ids of permutacoes(['a', 'b', 'c', 'd'])) {
+      const linhas = pernas.map((p, i) => linha({ id: ids[i], amount: 1000, dismissed_kind: 'transferencia', ...p }));
+      const f = montarFluxoDeCaixa(linhas, ['2026-09'], HOJE);
+      expect(f.meses[0]).toMatchObject({ entrou: 0, saiu: 0 });
+      expect(f.meses[0].transferencias).toEqual({ entrou: 2000, saiu: 2000 });
+    }
+  });
+
+  it('o mesmo mês dá o mesmo número lendo o mês, o ano, o período ou só a margem do Resumo', () => {
+    // Crédito marcado sem par em 28/08; débito em 30/08 cujo par é o crédito de 01/09.
+    const linhas = [
+      linha({ id: 'x', transaction_date: '2026-08-28', transaction_type: 'credit', amount: 1000, dismissed_kind: 'transferencia' }),
+      linha({ id: 'd', transaction_date: '2026-08-30', amount: 1000, dismissed_kind: 'transferencia', bank_connection_id: NUBANK }),
+      linha({ id: 'c', transaction_date: '2026-09-01', transaction_type: 'credit', amount: 1000, dismissed_kind: 'transferencia' }),
+    ];
+    const doAno = montarFluxoDeCaixa(linhas, ultimosMeses(12, '2026-12'), HOJE).meses.find((m) => m.mes === '2026-09')!;
+    const doMes = montarFluxoDeCaixa(linhas, ['2026-09'], HOJE).meses[0];
+    const doPeriodo = somarFluxoDoPeriodo(linhas, '2026-09-01', HOJE, HOJE);
+    const lidasPeloResumo = linhas.filter((l) => l.transaction_date >= somarDias('2026-09-01', -3));
+    const doResumo = montarFluxoDeCaixa(lidasPeloResumo, ['2026-09'], HOJE).meses[0];
+    expect(doAno).toMatchObject({ entrou: 0, saiu: 0, transferencias: { entrou: 1000, saiu: 0 } });
+    for (const r of [doMes, doPeriodo, doResumo]) {
+      expect([r.entrou, r.saiu, r.transferencias]).toEqual([doAno.entrou, doAno.saiu, doAno.transferencias]);
+    }
+  });
+
+  it('a perna do Caixa não casa com o crédito do cartão na conta, qualquer que seja a ordem', () => {
+    // Depósito do Caixa de R$ 500 lançado sem ligar a linha do banco; no mesmo dia, o crédito
+    // do depósito no C6 e um "Pix no crédito" de R$ 500.
+    for (const [idDoCartao, idDoDeposito] of [['a', 'b'], ['b', 'a']]) {
+      const f = montarFluxoDeCaixa([
+        linha({ id: 'cx', source_type: 'cash', bank_connection_id: CAIXA, amount: 500, dismissed_kind: 'transferencia' }),
+        linha({ id: idDoDeposito, transaction_type: 'credit', amount: 500 }),
+        linha({ id: idDoCartao, transaction_type: 'credit', amount: 500, dismissed_kind: 'mecanica_cartao' }),
+      ], ['2026-09'], HOJE);
+      expect(f.meses[0]).toMatchObject({ entrou: 0, saiu: 0 });
+      expect(f.meses[0].transferencias).toEqual({ entrou: 500, saiu: 500 });
+      expect(f.meses[0].creditoDoCartao).toEqual({ entrou: 500, saiu: 0 });
+    }
+  });
+
+  it('a perna marcada casa antes com outra marcada do que com uma linha comum do banco', () => {
+    // Saque de R$ 300 ligado à linha do banco (as duas marcadas) e, no mesmo dia, um Pix comum
+    // de R$ 300 a um fornecedor: o Pix continua sendo saída.
+    const f = montarFluxoDeCaixa([
+      linha({ id: 'z-saque', amount: 300, dismissed_kind: 'transferencia' }),
+      linha({ id: 'a-pix', amount: 300 }),
+      linha({ id: 'cx', source_type: 'cash', bank_connection_id: CAIXA, transaction_type: 'credit', amount: 300, dismissed_kind: 'transferencia' }),
+    ], ['2026-09'], HOJE);
+    expect(f.meses[0]).toMatchObject({ entrou: 0, saiu: 300, quantidade: 1 });
+    expect(f.meses[0].transferencias).toEqual({ entrou: 300, saiu: 300 });
+  });
+});
+
+describe('ajuste pela contagem do Caixa', () => {
+  it('acerta o saldo, mas não é dinheiro que entrou nem saiu', () => {
+    // A primeira contagem põe o saldo inteiro do Caixa numa linha só.
+    const f = montarFluxoDeCaixa([
+      linha({ id: 'aj', source_type: 'cash', bank_connection_id: CAIXA, transaction_type: 'credit', amount: 3000, dismissed_kind: 'ajuste_caixa' }),
+      linha({ id: 'g', source_type: 'cash', bank_connection_id: CAIXA, amount: 45 }),
+    ], ['2026-09'], HOJE);
+    expect(f.meses[0]).toMatchObject({ entrou: 0, saiu: 45 });
+    expect(f.deFora.fora_ajuste_caixa).toEqual({ quantidade: 1, valor: 3000 });
   });
 });

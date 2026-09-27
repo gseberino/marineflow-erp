@@ -16,7 +16,9 @@
 //     dinheiro). Compra no cartão de crédito NÃO é saída de caixa: o dinheiro sai quando a
 //     fatura é paga, e esse pagamento é uma linha de débito da conta corrente, que conta.
 //   · Fica fora: duplicata, estornada, as linhas da importação manual de 27/07 (o lote inteiro
-//     foi repetido pela sincronização automática), linha pendente e linha com data no futuro.
+//     foi repetido pela sincronização automática), linha pendente, linha com data no futuro e
+//     o ajuste pela contagem do Caixa ("Contei o dinheiro": a primeira contagem põe o saldo
+//     inteiro do Caixa numa linha só — contá-la como "Entrou" inventaria uma receita).
 //     Extrato importado por arquivo DEPOIS daquele lote conta normalmente.
 //   · Fica À PARTE, sem somar em Entrou/Saiu: transferência entre contas próprias — só a de
 //     FATO, com as duas pernas (mesmo valor, sentido oposto, outra conta que guarda dinheiro,
@@ -25,6 +27,9 @@
 //     A marca "transferência" SEM a outra perna não basta: o pagamento da fatura do Nubank pela
 //     conta do C6 e as "Vendas" que a maquininha liquida na InfinitePay estavam marcados assim,
 //     e são dinheiro que saiu e que entrou de verdade (revisão de 27/09/2026).
+//   · Cada recorte (um mês, um período) é pareado com as SUAS linhas mais 2 dias de cada lado,
+//     e só com elas. Assim o mesmo mês dá o mesmo número em qualquer tela, leia ela um mês ou o
+//     ano inteiro (2ª revisão de 27/09/2026: o painel e o Resumo do mês chegaram a divergir).
 
 export interface LinhaDoFluxo {
   /** Necessário para parear as duas pernas de uma transferência. */
@@ -43,6 +48,9 @@ export interface LinhaDoFluxo {
 /** O lote da importação manual de 27/07/2026 (28/04 a 26/07): todo ele repetido pela sincronização. */
 export const LOTE_DA_IMPORTACAO_MANUAL_DE_JULHO = '14a6a33c-3a21-412c-97c0-0843cf373d08';
 
+/** Distância máxima, em dias, entre as duas pernas de uma transferência. */
+export const DIAS_ENTRE_AS_PERNAS = 2;
+
 /** Para onde vai cada linha do extrato. */
 export type DestinoDaLinha =
   /** Entra em Entrou/Saiu. */
@@ -56,6 +64,7 @@ export type DestinoDaLinha =
   | 'fora_duplicata'
   | 'fora_estornada'
   | 'fora_importacao_manual'
+  | 'fora_ajuste_caixa'
   | 'fora_pendente'
   | 'fora_futuro'
   /** Fora: sentido ou valor que não dá para ler. */
@@ -72,6 +81,7 @@ export const ROTULO_DO_DESTINO: Record<DestinoDaLinha, string> = {
   fora_duplicata: 'linha repetida da importação',
   fora_estornada: 'lançamento estornado',
   fora_importacao_manual: 'importação manual de julho (repetida pela sincronização)',
+  fora_ajuste_caixa: 'ajuste pela contagem do Caixa (acerta o saldo, não é dinheiro que entrou ou saiu)',
   fora_pendente: 'ainda pendente no banco',
   fora_futuro: 'data no futuro',
   fora_ilegivel: 'linha sem sentido ou valor legível',
@@ -92,10 +102,11 @@ export function destinoDaLinha(l: LinhaDoFluxo, hoje: string): DestinoDaLinha {
   const tipo = l.dismissed_kind ?? '';
   if (tipo === 'duplicata') return 'fora_duplicata';
   if (tipo === 'estornada') return 'fora_estornada';
+  if (tipo === 'ajuste_caixa') return 'fora_ajuste_caixa';
   if (l.import_batch_id === LOTE_DA_IMPORTACAO_MANUAL_DE_JULHO) return 'fora_importacao_manual';
   if ((l.tx_status ?? '') === 'PENDING') return 'fora_pendente';
   // Comparação de texto 'AAAA-MM-DD': sem Date, sem fuso deslocando o dia.
-  if (String(l.transaction_date).slice(0, 10) > hoje) return 'fora_futuro';
+  if (dataDa(l) > hoje) return 'fora_futuro';
   if (l.transaction_type !== 'credit' && l.transaction_type !== 'debit') return 'fora_ilegivel';
   if (!Number.isFinite(Number(l.amount))) return 'fora_ilegivel';
   if (tipo === 'transferencia') return 'transferencia';
@@ -103,49 +114,114 @@ export function destinoDaLinha(l: LinhaDoFluxo, hoje: string): DestinoDaLinha {
   return 'movimento';
 }
 
+const dataDa = (l: LinhaDoFluxo) => String(l.transaction_date).slice(0, 10);
+
 /** Soma em centavos: somar reais em ponto flutuante deixa R$ 0,01 de sobra no fim. */
 function emCentavos(v: number | string): number {
   return Math.round(Math.abs(Number(v)) * 100);
 }
 
-const diasEntre = (a: string, b: string) =>
-  Math.abs(Date.parse(String(a).slice(0, 10)) - Date.parse(String(b).slice(0, 10))) / 86_400_000;
+const diasEntre = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b)) / 86_400_000;
+
+/** Uma perna candidata a transferência. */
+interface Perna {
+  id: string;
+  data: string;
+  centavos: number;
+  conta: string;
+  marcada: boolean;
+  caixa: boolean;
+}
+
+const antes = (a: Perna, b: Perna) => (a.data < b.data ? -1 : a.data > b.data ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
- * As transferências de FATO: pares de linhas (ids) com o mesmo valor, sentido oposto, em contas
- * diferentes que guardam dinheiro, até 2 dias de diferença — um par por linha, o mais próximo.
- *   1ª passada: as duas pernas marcadas "transferência".
- *   2ª passada: a perna do CAIXA marcada (saque ou depósito lançado pelo "+ Lançar") com a
- *   linha do banco, marcada ou não — senão o saque contava duas vezes (a saída no banco e o
- *   gasto em dinheiro).
+ * As transferências de FATO: o MAIOR número de pares débito × crédito com o mesmo valor, em
+ * contas diferentes que guardam dinheiro, até 2 dias de diferença — cada linha em um par só.
+ *
+ *   1ª fase: só as pernas marcadas "transferência".
+ *   2ª fase: a perna do CAIXA marcada (saque ou depósito lançado pelo "+ Lançar") pode casar com
+ *   a linha do banco, marcada ou não — senão o saque contava duas vezes (a saída no banco e o
+ *   gasto em dinheiro). O crédito do cartão na conta ("Pix no crédito") não é candidato: não é
+ *   dinheiro do Caixa indo ou vindo.
+ *
+ * O maior número de pares, e não "o primeiro que aparecer": numa transferência do Nubank para o
+ * C6 seguida de um saque do mesmo valor no C6, pegar o primeiro par deixava as duas pernas do C6
+ * órfãs — e elas viravam Entrou e Saiu (2ª revisão de 27/09/2026). Entre escolhas igualmente
+ * boas, vale a mais próxima em dias, depois a mais antiga e o id — o resultado não depende da
+ * ordem em que as linhas chegaram.
  */
 export function paresDeTransferencia(linhas: LinhaDoFluxo[], hoje: string): Set<string> {
-  const validas = linhas.filter((l) => !!l.id && !destinoDaLinha(l, hoje).startsWith('fora_'));
-  const marcadas = validas.filter((l) => (l.dismissed_kind ?? '') === 'transferencia');
-  const conta = (l: LinhaDoFluxo) => l.bank_connection_id ?? `origem:${l.source_type ?? 'bank'}`;
-  const usadas = new Set<string>();
+  const debitos: Perna[] = [];
+  const creditos: Perna[] = [];
+  for (const l of linhas) {
+    if (!l.id) continue;
+    const destino = destinoDaLinha(l, hoje);
+    if (destino !== 'movimento' && destino !== 'transferencia') continue;
+    const perna: Perna = {
+      id: l.id,
+      data: dataDa(l),
+      centavos: emCentavos(l.amount),
+      conta: l.bank_connection_id ?? `origem:${l.source_type ?? 'bank'}`,
+      marcada: destino === 'transferencia',
+      caixa: (l.source_type ?? 'bank') === 'cash',
+    };
+    (l.transaction_type === 'debit' ? debitos : creditos).push(perna);
+  }
+  debitos.sort(antes);
 
-  const parDe = (l: LinhaDoFluxo, candidatas: LinhaDoFluxo[]): LinhaDoFluxo | undefined => {
-    let melhor: LinhaDoFluxo | undefined;
-    let menor = Infinity;
-    for (const m of candidatas) {
-      if (m.id === l.id || usadas.has(m.id!) || m.transaction_type === l.transaction_type) continue;
-      if (emCentavos(m.amount) !== emCentavos(l.amount) || conta(m) === conta(l)) continue;
-      const d = diasEntre(m.transaction_date, l.transaction_date);
-      if (d <= 2 && d < menor) { menor = d; melhor = m; }
+  const creditosPorValor = new Map<number, Perna[]>();
+  for (const c of creditos) {
+    const lista = creditosPorValor.get(c.centavos) ?? [];
+    lista.push(c);
+    creditosPorValor.set(c.centavos, lista);
+  }
+
+  const casam = (d: Perna, c: Perna, fase: 1 | 2): boolean => {
+    if (d.conta === c.conta || diasEntre(d.data, c.data) > DIAS_ENTRE_AS_PERNAS) return false;
+    if (d.marcada && c.marcada) return true;
+    if (fase === 1) return false;
+    return (d.marcada && d.caixa && !c.caixa) || (c.marcada && c.caixa && !d.caixa);
+  };
+
+  // Candidatos de cada débito em cada fase, do melhor para o pior.
+  const candidatos = new Map<string, Perna[]>();
+  const candidatosDe = (d: Perna, fase: 1 | 2): Perna[] => {
+    const chave = `${fase}:${d.id}`;
+    let lista = candidatos.get(chave);
+    if (!lista) {
+      lista = (creditosPorValor.get(d.centavos) ?? [])
+        .filter((c) => casam(d, c, fase))
+        .sort((a, b) => diasEntre(d.data, a.data) - diasEntre(d.data, b.data) || antes(a, b));
+      candidatos.set(chave, lista);
     }
-    return melhor;
-  };
-  const casar = (l: LinhaDoFluxo, candidatas: LinhaDoFluxo[]) => {
-    if (usadas.has(l.id!)) return;
-    const m = parDe(l, candidatas);
-    if (m) { usadas.add(l.id!); usadas.add(m.id!); }
+    return lista;
   };
 
-  for (const l of marcadas) casar(l, marcadas);
-  const doBanco = validas.filter((v) => (v.source_type ?? 'bank') !== 'cash');
-  for (const l of marcadas) if ((l.source_type ?? 'bank') === 'cash') casar(l, doBanco);
-  return usadas;
+  // Emparelhamento máximo por caminhos aumentantes: um débito já casado só troca de par se o
+  // antigo par dele puder casar com outro — ninguém que já estava casado fica sem par.
+  const debitoDoCredito = new Map<string, Perna>();
+  const creditoDoDebito = new Map<string, Perna>();
+  const casar = (d: Perna, fase: 1 | 2, vistos: Set<string>): boolean => {
+    for (const c of candidatosDe(d, fase)) {
+      if (vistos.has(c.id)) continue;
+      vistos.add(c.id);
+      const atual = debitoDoCredito.get(c.id);
+      if (!atual || casar(atual, fase, vistos)) {
+        debitoDoCredito.set(c.id, d);
+        creditoDoDebito.set(d.id, c);
+        return true;
+      }
+    }
+    return false;
+  };
+  for (const fase of [1, 2] as const) {
+    for (const d of debitos) if (!creditoDoDebito.has(d.id)) casar(d, fase, new Set());
+  }
+
+  const pareadas = new Set<string>();
+  for (const [d, c] of creditoDoDebito) { pareadas.add(d); pareadas.add(c.id); }
+  return pareadas;
 }
 
 export interface EntrouSaiu {
@@ -169,11 +245,13 @@ export interface MesDoFluxo extends SomaDoFluxo {
   mes: string;
 }
 
+export type ForaDoFluxo = Partial<Record<DestinoDeFora, { quantidade: number; valor: number }>>;
+
 export interface FluxoDeCaixa {
   meses: MesDoFluxo[];
   total: SomaDoFluxo;
   /** O que não entrou em conta nenhuma, por motivo — para a tela poder dizer. */
-  deFora: Partial<Record<DestinoDeFora, { quantidade: number; valor: number }>>;
+  deFora: ForaDoFluxo;
 }
 
 type Acumulador = {
@@ -194,30 +272,40 @@ function paraReais(a: Acumulador): SomaDoFluxo {
   };
 }
 
-/**
- * Soma as linhas nos baldes que `baldeDe` escolher ('AAAA-MM', 'periodo'…; null = fora do
- * recorte, mas ainda serve para parear transferência na virada do mês).
- */
-function acumular(
-  linhas: LinhaDoFluxo[],
-  hoje: string,
-  baldeDe: (data: string) => string | null,
-  baldes: Map<string, Acumulador>,
-): { total: Acumulador; deFora: FluxoDeCaixa['deFora'] } {
-  const total = vazio();
-  const deFora: FluxoDeCaixa['deFora'] = {};
-  const pareadas = paresDeTransferencia(linhas, hoje);
+/** Soma o que ficou fora, por motivo, em centavos (ponto flutuante deixaria R$ 0,01 de sobra). */
+type ForaEmCentavos = Partial<Record<DestinoDeFora, { quantidade: number; centavos: number }>>;
 
-  for (const l of linhas) {
-    const chave = baldeDe(String(l.transaction_date).slice(0, 10));
-    const acc = chave ? baldes.get(chave) : undefined;
-    if (!acc) continue;
+function anotarFora(fora: ForaEmCentavos, motivo: DestinoDeFora, quantidade: number, centavos: number) {
+  const atual = fora[motivo] ?? { quantidade: 0, centavos: 0 };
+  fora[motivo] = { quantidade: atual.quantidade + quantidade, centavos: atual.centavos + centavos };
+}
+
+const foraEmReais = (fora: ForaEmCentavos): ForaDoFluxo => Object.fromEntries(
+  Object.entries(fora).map(([motivo, v]) => [motivo, { quantidade: v!.quantidade, valor: v!.centavos / 100 }]),
+) as ForaDoFluxo;
+
+/**
+ * Soma UM recorte de dias ('AAAA-MM-DD' a 'AAAA-MM-DD', inclusive). O pareamento usa só as
+ * linhas do recorte e as de até 2 dias antes e depois — nunca o resto do que foi lido —, para o
+ * resultado não depender de quanto a tela leu.
+ */
+function somarRecorte(linhas: LinhaDoFluxo[], de: string, ate: string, hoje: string): { soma: Acumulador; fora: ForaEmCentavos } {
+  const inicioDaJanela = somarDias(de, -DIAS_ENTRE_AS_PERNAS);
+  const fimDaJanela = somarDias(ate, DIAS_ENTRE_AS_PERNAS);
+  const janela = linhas.filter((l) => {
+    const d = dataDa(l);
+    return d >= inicioDaJanela && d <= fimDaJanela;
+  });
+  const pareadas = paresDeTransferencia(janela, hoje);
+
+  const soma = vazio();
+  const fora: ForaEmCentavos = {};
+  for (const l of janela) {
+    const d = dataDa(l);
+    if (d < de || d > ate) continue;
     let destino = destinoDaLinha(l, hoje);
     if (destino.startsWith('fora_')) {
-      const d = destino as DestinoDeFora;
-      const atual = deFora[d] ?? { quantidade: 0, valor: 0 };
-      const valor = Number.isFinite(Number(l.amount)) ? emCentavos(l.amount) : 0;
-      deFora[d] = { quantidade: atual.quantidade + 1, valor: Math.round(atual.valor * 100 + valor) / 100 };
+      anotarFora(fora, destino as DestinoDeFora, 1, Number.isFinite(Number(l.amount)) ? emCentavos(l.amount) : 0);
       continue;
     }
     // A marca "transferência" só vale com o par; a linha do banco pareada com o Caixa também é.
@@ -227,40 +315,41 @@ function acumular(
 
     const c = emCentavos(l.amount);
     const entrada = l.transaction_type === 'credit';
-    for (const a of [acc, total]) {
-      if (destino === 'transferencia') {
-        if (entrada) a.tEntrou += c; else a.tSaiu += c;
-      } else if (destino === 'credito_do_cartao') {
-        if (entrada) a.cEntrou += c; else a.cSaiu += c;
-      } else {
-        if (entrada) a.entrou += c; else a.saiu += c;
-        a.quantidade += 1;
-      }
+    if (destino === 'transferencia') {
+      if (entrada) soma.tEntrou += c; else soma.tSaiu += c;
+    } else if (destino === 'credito_do_cartao') {
+      if (entrada) soma.cEntrou += c; else soma.cSaiu += c;
+    } else {
+      if (entrada) soma.entrou += c; else soma.saiu += c;
+      soma.quantidade += 1;
     }
   }
-  return { total, deFora };
+  return { soma, fora };
 }
 
 /**
- * Monta o fluxo dos meses pedidos (em ordem), a partir das linhas cruas do extrato.
- * Linha de mês fora da lista não soma (mas ajuda a parear). Mês sem movimento aparece zerado —
- * um buraco no gráfico diz "não houve nada", uma ausência diria "não sei".
+ * Monta o fluxo dos meses pedidos (em ordem), a partir das linhas cruas do extrato — cada mês
+ * pareado com as suas linhas e 2 dias de cada lado, exatamente como o Resumo do mês faz.
+ * Mês sem movimento aparece zerado — um buraco no gráfico diz "não houve nada", uma ausência
+ * diria "não sei".
  */
 export function montarFluxoDeCaixa(linhas: LinhaDoFluxo[], meses: string[], hoje: string): FluxoDeCaixa {
-  const porMes = new Map<string, Acumulador>(meses.map((m) => [m, vazio()]));
-  const { total, deFora } = acumular(linhas, hoje, (d) => d.slice(0, 7), porMes);
-  return {
-    meses: meses.map((mes) => ({ mes, ...paraReais(porMes.get(mes)!) })),
-    total: paraReais(total),
-    deFora,
-  };
+  const total = vazio();
+  const fora: ForaEmCentavos = {};
+  const porMes = meses.map((mes) => {
+    const { de, ate } = limitesDosMeses([mes]);
+    const r = somarRecorte(linhas, de, ate, hoje);
+    for (const k of Object.keys(total) as Array<keyof Acumulador>) total[k] += r.soma[k];
+    for (const [motivo, v] of Object.entries(r.fora)) anotarFora(fora, motivo as DestinoDeFora, v!.quantidade, v!.centavos);
+    return { mes, ...paraReais(r.soma) };
+  });
+  return { meses: porMes, total: paraReais(total), deFora: foraEmReais(fora) };
 }
 
 /** Entrou e saiu num período de dias ('AAAA-MM-DD' a 'AAAA-MM-DD', inclusive). */
-export function somarFluxoDoPeriodo(linhas: LinhaDoFluxo[], de: string, ate: string, hoje: string): SomaDoFluxo & { deFora: FluxoDeCaixa['deFora'] } {
-  const baldes = new Map<string, Acumulador>([['periodo', vazio()]]);
-  const { deFora } = acumular(linhas, hoje, (d) => (d >= de && d <= ate ? 'periodo' : null), baldes);
-  return { ...paraReais(baldes.get('periodo')!), deFora };
+export function somarFluxoDoPeriodo(linhas: LinhaDoFluxo[], de: string, ate: string, hoje: string): SomaDoFluxo & { deFora: ForaDoFluxo } {
+  const r = somarRecorte(linhas, de, ate, hoje);
+  return { ...paraReais(r.soma), deFora: foraEmReais(r.fora) };
 }
 
 // ── Datas ────────────────────────────────────────────────────────────────────────────
@@ -279,8 +368,9 @@ export function somarDias(data: string, n: number): string {
 }
 
 /**
- * Margem de dias que a leitura pega antes e depois do recorte: a outra perna de uma
- * transferência feita na virada do mês fica do outro lado dela.
+ * Margem de dias que a LEITURA pega antes e depois do recorte: a outra perna de uma
+ * transferência feita na virada do mês fica do outro lado dela. Maior ou igual a
+ * DIAS_ENTRE_AS_PERNAS — o que passa disso é lido e ignorado.
  */
 export const MARGEM_PARA_PAREAR = 3;
 
