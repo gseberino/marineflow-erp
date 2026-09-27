@@ -1,5 +1,5 @@
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { caixaTools, dataDita, escolherPorNome, resolverPedidoDeCaixa, resumirPedido } from "./caixa.ts";
+import { caixaTools, dataDita, escolherPorNome, formasDoDocumento, resolverPedidoDeCaixa, resumirPedido } from "./caixa.ts";
 
 /* O assessor pelo WhatsApp: "gastei 50 em dinheiro com almoço", "paguei 100 pro Roberto".
    O que se fixa aqui é a parte que interpreta a fala — nome, data, sócio, categoria — e o
@@ -29,23 +29,29 @@ Deno.test("dataDita: hoje, ontem, dd/mm e ISO; o resto não passa", () => {
 });
 
 /** Banco falso: só o que o resolvedor lê. */
-function admin() {
+function admin(mudar?: (t: Record<string, any[]>) => void) {
   const tabelas: Record<string, any[]> = {
     payees: [
-      { id: "p-rob", name: "Roberto Carlos da Silva", default_category: "Serviços de terceiros", kind: "diarista" },
+      { id: "p-rob", name: "Roberto Carlos da Silva", default_category: "Serviços de terceiros", kind: "diarista", document: "12345678901" },
       { id: "p-gus", name: "Gustavo Seberino da Silva", default_category: null, kind: "socio" },
     ],
-    suppliers: [{ id: "f-premel", name: "PREMEL MATERIAIS ELETRICOS", trade_name: "Premel" }],
-    clients: [{ id: "c-mp", name: "MP MOTOR HOMES" }],
+    // Como no banco: fornecedor com o CNPJ na máscara, favorecido só com os dígitos.
+    suppliers: [{ id: "f-premel", name: "PREMEL MATERIAIS ELETRICOS", trade_name: "Premel", cnpj_cpf: "12.345.678/0001-90" }],
+    clients: [{ id: "c-mp", name: "MP MOTOR HOMES", cpf_cnpj: "98.765.432/0001-10" }],
     financial_categories: [
       { name: "Alimentação de campo" }, { name: "Peças e materiais" }, { name: "Serviços de terceiros" }, { name: "Outras despesas" },
     ],
     service_orders: [{ id: "os60", service_order_number: "OS-00060" }],
   };
+  mudar?.(tabelas);
   const consulta = (nome: string) => {
     const q: any = {
       _rows: tabelas[nome] ?? [],
       select() { return q; }, eq() { return q; }, limit() { return q; },
+      in(coluna: string, valores: string[]) {
+        q._rows = q._rows.filter((r: any) => valores.includes(r[coluna]));
+        return q;
+      },
       ilike(_c: string, padrao: string) {
         const alvo = padrao.replaceAll("%", "");
         q._rows = q._rows.filter((r: any) => String(r.service_order_number ?? "").includes(alvo));
@@ -57,9 +63,9 @@ function admin() {
   };
   return { from: consulta };
 }
-const ctx = (rpc?: (n: string, a: any) => any) => ({
+const ctx = (rpc?: (n: string, a: any) => any, mudar?: (t: Record<string, any[]>) => void) => ({
   sb: { rpc: rpc ?? (() => Promise.resolve({ data: { ok: true }, error: null })) },
-  admin: admin(), userId: "u-dono", userRole: "admin" as const, jwt: "", appOrigin: "", settings: {},
+  admin: admin(mudar), userId: "u-dono", userRole: "admin" as const, jwt: "", appOrigin: "", settings: {},
 });
 
 Deno.test("paguei 100 em dinheiro pro Roberto: favorecido e a categoria padrão dele", async () => {
@@ -131,6 +137,64 @@ Deno.test("sem pista no texto, a confirmação avisa que vai em Outras despesas"
   const txt = String(await resumirPedido(ctx() as never, "lancar_no_caixa", { valor: 30, descricao: "coisa diversa" }));
   assertStringIncludes(txt, "Outras despesas");
   assertStringIncludes(txt, "não reconheci");
+});
+
+Deno.test("formasDoDocumento: só dígitos e a máscara padrão; tamanho errado não passa", () => {
+  assertEquals(formasDoDocumento("12.345.678/0001-90"), ["12345678000190", "12.345.678/0001-90"]);
+  assertEquals(formasDoDocumento("123.456.789-01"), ["12345678901", "123.456.789-01"]);
+  assertEquals(formasDoDocumento("1234"), null);
+  assertEquals(formasDoDocumento(undefined), null);
+});
+
+Deno.test("comprovante de Pix por foto: só o CNPJ acha o fornecedor (documento igual identifica)", async () => {
+  let chamada: any = null;
+  const c = ctx((n, a) => { chamada = { n, a }; return Promise.resolve({ data: { ok: true }, error: null }); });
+  const args = { valor: 1500, data: "26/09", documento: "12345678000190", categoria: "peças", descricao: "Pix — cabos" };
+  const txt = String(await resumirPedido(c as never, "anotar_transacao_do_banco", args));
+  assertStringIncludes(txt, "PREMEL MATERIAIS ELETRICOS (fornecedor), pelo CPF/CNPJ");
+  assertEquals(txt.includes("Sem dizer para quem foi"), false);
+  await caixaTools.find((t) => t.name === "anotar_transacao_do_banco")!.execute(args, c as never);
+  assertEquals(chamada.n, "anotar_transacao");
+  assertEquals([chamada.a.p_fornecedor_id, chamada.a.p_nome, chamada.a.p_documento], ["f-premel", "PREMEL MATERIAIS ELETRICOS", "12345678000190"]);
+  assertEquals(chamada.a.p_categoria, "Peças e materiais");
+});
+
+Deno.test("CPF de favorecido gravado só com dígitos também é achado, com a categoria padrão dele", async () => {
+  let chamada: any = null;
+  const c = ctx((n, a) => { chamada = { n, a }; return Promise.resolve({ data: { ok: true }, error: null }); });
+  await caixaTools.find((t) => t.name === "anotar_transacao_do_banco")!.execute({ valor: 200, documento: "123.456.789-01" }, c as never);
+  assertEquals([chamada.a.p_favorecido_id, chamada.a.p_categoria], ["p-rob", "Serviços de terceiros"]);
+});
+
+Deno.test("documento sem cadastro: a confirmação avisa que a transação com nome não entra classificada", async () => {
+  const txt = String(await resumirPedido(ctx() as never, "anotar_transacao_do_banco",
+    { valor: 90, documento: "11.111.111/0001-11", categoria: "peças" }));
+  assertStringIncludes(txt, "Nenhum cadastro com esse CPF/CNPJ");
+  let chamada: any = null;
+  const c = ctx((n, a) => { chamada = { n, a }; return Promise.resolve({ data: { ok: true }, error: null }); });
+  await caixaTools.find((t) => t.name === "anotar_transacao_do_banco")!.execute({ valor: 90, documento: "11111111000111", categoria: "peças" }, c as never);
+  assertEquals([chamada.a.p_fornecedor_id, chamada.a.p_favorecido_id, chamada.a.p_documento], [null, null, "11111111000111"]);
+});
+
+Deno.test("dois cadastros com o mesmo documento: pergunta qual, sem gravar", async () => {
+  let gravou = false;
+  const doisIguais = (t: Record<string, any[]>) => { t.payees.push({ id: "p-premel", name: "Premel (favorecido)", document: "12345678000190" }); };
+  const c = ctx(() => { gravou = true; return Promise.resolve({ data: {}, error: null }); }, doisIguais);
+  const args = { valor: 1500, documento: "12345678000190", categoria: "peças" };
+  assertStringIncludes(String(await resumirPedido(c as never, "anotar_transacao_do_banco", args)), "Mais de um cadastro");
+  const r = await caixaTools.find((t) => t.name === "anotar_transacao_do_banco")!.execute(args, c as never) as { error?: string };
+  assertStringIncludes(String(r.error), "Mais de um cadastro");
+  assertEquals(gravou, false);
+});
+
+Deno.test("entrada com CNPJ procura só cliente; nome dito vence o documento", async () => {
+  let chamada: any = null;
+  const c = ctx((n, a) => { chamada = { n, a }; return Promise.resolve({ data: { ok: true }, error: null }); });
+  const t = caixaTools.find((x) => x.name === "anotar_transacao_do_banco")!;
+  await t.execute({ sentido: "entrada", valor: 300, documento: "98765432000110", os: "60" }, c as never);
+  assertEquals(chamada.a.p_cliente_id, "c-mp");
+  await t.execute({ valor: 100, quem: "roberto", documento: "12345678000190", categoria: "peças" }, c as never);
+  assertEquals([chamada.a.p_favorecido_id, chamada.a.p_fornecedor_id], ["p-rob", null]);
 });
 
 Deno.test("gastos_por_categoria: fatura, empréstimo e transferência ficam fora do total", async () => {

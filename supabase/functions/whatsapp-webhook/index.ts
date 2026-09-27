@@ -4,6 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { EVOLUTION_STATUS_MAP } from "../_shared/whatsapp/evolution-provider.ts";
 import { classificarResposta } from "../_shared/ai/comms/reply-router.ts";
+import { fotoDeQuemUsaOFinanceiro, lerComprovante, mensagemDoComprovante } from "../_shared/ai/comprovante.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 // Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
@@ -270,7 +271,7 @@ export async function handler(req: Request): Promise<Response> {
     if (!event.fromMe) {
       const { data: aiUser } = await admin
         .from("app_users")
-        .select("id")
+        .select("id, role")
         .eq("phone_normalized", phone)
         .eq("ai_whatsapp_enabled", true)
         .eq("active", true)
@@ -312,6 +313,27 @@ export async function handler(req: Request): Promise<Response> {
                 const trBody = await tr.json().catch(() => ({}));
                 if (trBody?.ok && trBody?.text) dispatchText = String(trBody.text);
               } catch (_e) { /* mantém "[audio]" */ }
+            }
+            // Foto (ou PDF) de quem usa o financeiro: se for cupom ou comprovante, o agente recebe
+            // o que ela diz — loja, CNPJ, data, total e forma de pagamento — no lugar de "[image]"
+            // (item 4.5 do plano Financeiro Confiável, 27/09/2026). Foto de técnico continua como
+            // estava: é do serviço (attach_photo_to_service_order). Se a leitura falhar ou não for
+            // comprovante, segue a legenda ou "[image]", como antes.
+            if ((event.messageType === "image" || event.messageType === "document") && msg?.id
+              && fotoDeQuemUsaOFinanceiro((aiUser as { role?: string | null }).role)) {
+              try {
+                const lr = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-read-media`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+                  },
+                  body: JSON.stringify({ message_id: msg.id, finalidade: "auto" }),
+                });
+                const lrBody = await lr.json().catch(() => ({}));
+                const comprovante = lrBody?.ok && lrBody?.text ? lerComprovante(String(lrBody.text)) : null;
+                if (comprovante) dispatchText = mensagemDoComprovante(comprovante, event.text);
+              } catch (_e) { /* mantém a legenda ou "[image]" */ }
             }
             const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-agent`, {
               method: "POST",

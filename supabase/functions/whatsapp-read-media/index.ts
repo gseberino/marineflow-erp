@@ -12,6 +12,9 @@
 // "[image]" e o agente pede o valor por texto. NUNCA lança erro fatal para quem chamou.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+// Finalidade "auto" (27/09/2026): foto mandada ao assistente por quem usa o financeiro — se for
+// cupom ou comprovante, a primeira linha sai no formato que o webhook lê (_shared/ai/comprovante.ts).
+import { legendaDaMidia, PEDIDO_DE_LEITURA_AUTO } from "../_shared/ai/comprovante.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -44,7 +47,9 @@ servirComCors(async (req) => {
     if (!apiKey) return jr({ ok: false, disabled: "OPENROUTER_API_KEY não configurada" });
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { message_id, force } = await req.json().catch(() => ({}));
+    const { message_id, force, finalidade } = await req.json().catch(() => ({}));
+    // "cotacao" (padrão, o uso de sempre: resposta de fornecedor) ou "auto" (foto ao assistente).
+    const pedido = finalidade === "auto" ? PEDIDO_DE_LEITURA_AUTO : PROMPT;
     if (!message_id) return jr({ error: "message_id obrigatório" }, 400);
 
     const { data: msg } = await admin
@@ -96,7 +101,7 @@ servirComCors(async (req) => {
       body: JSON.stringify({
         model: EXTRACTION_MODEL,
         max_tokens: 1500,
-        messages: [{ role: "user", content: [{ type: "text", text: PROMPT }, contentBlock] }],
+        messages: [{ role: "user", content: [{ type: "text", text: pedido }, contentBlock] }],
       }),
     });
     const aiBody = await aiRes.json().catch(() => ({}));
@@ -105,9 +110,15 @@ servirComCors(async (req) => {
       return jr({ ok: false, error: "falha na extração", detail: JSON.stringify(aiBody).slice(0, 300) });
     }
 
-    // 3) Grava no corpo da mensagem (marcador mantém a origem: veio de PDF/imagem).
+    // 3) Grava no corpo da mensagem (marcador mantém a origem: veio de PDF/imagem). Na foto
+    //    mandada ao assistente, a legenda que a pessoa escreveu ("almoço da equipe, OS-60")
+    //    continua no histórico, depois do texto lido — antes ela sumia, trocada pela leitura.
     const marker = kind === "image" ? "📷" : "📄";
-    await admin.from("whatsapp_messages").update({ body: `${marker} ${text}`.slice(0, 4000) }).eq("id", message_id);
+    const legenda = finalidade !== "auto" ? null
+      : already ? (String(msg.body).match(/\nLegenda: ([^\n]*)$/)?.[1] ?? null)
+      : legendaDaMidia(msg.body);
+    const final = legenda ? `\nLegenda: ${legenda.slice(0, 500)}` : "";
+    await admin.from("whatsapp_messages").update({ body: `${marker} ${text}`.slice(0, 4000 - final.length) + final }).eq("id", message_id);
 
     return jr({ ok: true, kind, text });
   } catch (err) {

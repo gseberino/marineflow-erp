@@ -70,6 +70,45 @@ async function listaDePessoas(ctx: ToolCtx): Promise<Pessoa[]> {
   ];
 }
 
+/** CPF/CNPJ dito → as duas formas que os cadastros guardam: só os dígitos e a máscara padrão. */
+export function formasDoDocumento(documento: unknown): string[] | null {
+  const d = String(documento ?? "").replace(/\D/g, "");
+  if (d.length === 14) return [d, d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5")];
+  if (d.length === 11) return [d, d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4")];
+  return null;
+}
+
+/**
+ * O cadastro deste CPF/CNPJ, quando ninguém disse o nome: documento igual identifica (regra do
+ * dono). É o que faz o comprovante de Pix ou boleto mandado por foto achar o fornecedor sem
+ * depender de o nome do comprovante bater com o do cadastro. Saída procura fornecedor e
+ * favorecido; entrada, cliente. Mais de um é pergunta.
+ */
+async function pessoaPeloDocumento(ctx: ToolCtx, documento: unknown, sentido: "saida" | "entrada"):
+  Promise<{ achado: Pessoa } | { ambiguo: Pessoa[] } | { nenhum: true } | { error: string } | null> {
+  const formas = formasDoDocumento(documento);
+  if (!formas) return null;
+  const falhou = { error: "Não consegui consultar os cadastros agora. Tente de novo em instantes." };
+  if (sentido === "entrada") {
+    const { data, error } = await ctx.admin.from("clients").select("id, name").in("cpf_cnpj", formas).limit(5);
+    if (error) return falhou;
+    const achados = ((data ?? []) as any[]).map((c) => ({ id: c.id, nome: c.name, tipo: "cliente" as const }));
+    return achados.length === 1 ? { achado: achados[0] } : achados.length ? { ambiguo: achados } : { nenhum: true };
+  }
+  const [forn, fav] = await Promise.all([
+    ctx.admin.from("suppliers").select("id, name").in("cnpj_cpf", formas).limit(5),
+    ctx.admin.from("payees").select("id, name, default_category, kind").eq("active", true).in("document", formas).limit(5),
+  ]);
+  if (forn.error || fav.error) return falhou;
+  const achados: Pessoa[] = [
+    ...((forn.data ?? []) as any[]).map((s) => ({ id: s.id, nome: s.name, tipo: "fornecedor" as const })),
+    ...((fav.data ?? []) as any[]).map((p) => ({ id: p.id, nome: p.name, tipo: "favorecido" as const, categoria: p.default_category, kind: p.kind })),
+  ];
+  return achados.length === 1 ? { achado: achados[0] } : achados.length ? { ambiguo: achados } : { nenhum: true };
+}
+
+const listaDeCadastros = (ps: Pessoa[]) => ps.map((x) => `${x.nome} (${x.tipo})`).join("; ");
+
 async function categoriaValida(ctx: ToolCtx, dita: unknown, tipo: "payable" | "receivable"): Promise<{ nome: string } | { error: string } | null> {
   if (dita == null || dita === "") return null;
   const { data } = await ctx.admin.from("financial_categories").select("name").eq("type", tipo).eq("active", true);
@@ -235,6 +274,7 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
     // ser o Fernando Nunes Fachini EPP. Mostrar o resolvido é o que torna a escolha manual.
     let quem: string | null = null;
     let pessoa: Pessoa | null = null;
+    let documentoSemCadastro = false;
     if (args.quem) {
       const todas = await listaDePessoas(ctx);
       const alvo = args.sentido === "entrada" ? todas.filter((x) => x.tipo === "cliente") : todas.filter((x) => x.tipo !== "cliente");
@@ -243,6 +283,15 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
       if ("nenhum" in r) return `⚠️ Não achei "${args.quem}". Cadastre antes ou diga como está no cadastro.`;
       pessoa = r.achado;
       quem = `${r.achado.nome} (${r.achado.tipo})`;
+    } else if (args.documento) {
+      const r = await pessoaPeloDocumento(ctx, args.documento, args.sentido === "entrada" ? "entrada" : "saida");
+      if (r && "error" in r) return `⚠️ ${r.error}`;
+      if (r && "ambiguo" in r) return `⚠️ Mais de um cadastro com o documento ${String(args.documento)}: ${listaDeCadastros(r.ambiguo)}. Diga qual.`;
+      if (r && "achado" in r) {
+        pessoa = r.achado;
+        quem = `${r.achado.nome} (${r.achado.tipo}), pelo CPF/CNPJ`;
+      }
+      documentoSemCadastro = !!r && "nenhum" in r;
     }
     const os = await osPeloNumero(ctx, args.os);
     if (os && "error" in os) return `⚠️ ${os.error}`;
@@ -259,7 +308,9 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
       padrao ? `- Categoria: *${padrao}* (padrão de ${pessoa!.nome})` : null,
       !cat && !padrao && pelo ? `- Categoria: *${pelo.nome}* (pelo texto: ${pelo.motivo})` : null,
       os ? `- OS: ${os.numero}` : null,
-      !quem ? "- Sem dizer para quem foi: só vale para compra no débito ou transferência SEM nome no extrato." : null,
+      documentoSemCadastro
+        ? "- Nenhum cadastro com esse CPF/CNPJ: se a transação chegar com o nome de quem recebeu, ela não entra classificada (cadastre antes para entrar)."
+        : !quem ? "- Sem dizer para quem foi: só vale para compra no débito ou transferência SEM nome no extrato." : null,
       "- Se houver mais de uma transação desse valor nesses dias, ou se a que chegou for de outro nome, nada é aplicado: eu pergunto.",
     ].filter(Boolean).join("\n");
   }
@@ -344,14 +395,15 @@ export const caixaTools: ToolDef[] = [
       "classifica como fornecedor TSD', 'o Pix de 800 do Fulano de hoje é da OS-60'. Quando a linha chegar, ela entra na fila já " +
       "classificada; se já chegou, classifica na hora. Passe SEMPRE 'quem' quando a pessoa disser (e o documento, se disser): " +
       "sem dizer para quem foi, só vale para transação sem nome no extrato (débito no cartão, transferência sem nome) — " +
-      "Pix com nome exige o nome (decisão do dono). Pede confirmação.",
+      "Pix com nome exige o nome (decisão do dono). Só o CPF/CNPJ, sem o nome, também serve: o sistema acha o cadastro " +
+      "por ele. Débito no cartão NÃO leva documento (a linha chega sem CNPJ e não casaria). Pede confirmação.",
     input_schema: {
       type: "object",
       properties: {
         sentido: { type: "string", enum: ["saida", "entrada"], description: "Padrão: saida." },
         valor: { type: "number" },
         data: { type: "string", description: "'hoje' (padrão), 'ontem', dd/mm." },
-        documento: { type: "string", description: "CPF/CNPJ de quem recebeu/pagou, se a pessoa disse." },
+        documento: { type: "string", description: "CPF/CNPJ de quem recebeu/pagou (dito ou do comprovante de Pix/boleto). Sem 'quem', acha o cadastro por ele. Nunca em débito no cartão." },
         quem: { type: "string", description: "Fornecedor/favorecido (saída) ou cliente (entrada), pelo nome." },
         categoria: { type: "string" },
         os: { type: "string" },
@@ -376,6 +428,12 @@ export const caixaTools: ToolDef[] = [
         if ("ambiguo" in r) return { error: `Qual "${args.quem}"? ${r.ambiguo.map((p) => `${p.nome} (${p.tipo})`).join("; ")}` };
         if ("nenhum" in r) return { error: `Não achei "${args.quem}". Cadastre antes ou diga como está no cadastro.` };
         pessoa = r.achado;
+      } else if (args.documento) {
+        // Sem nome dito, o CPF/CNPJ acha o cadastro (a confirmação mostrou qual).
+        const r = await pessoaPeloDocumento(ctx, args.documento, sentido);
+        if (r && "error" in r) return r;
+        if (r && "ambiguo" in r) return { error: `Mais de um cadastro com o documento ${String(args.documento)}: ${listaDeCadastros(r.ambiguo)}. Diga qual.` };
+        if (r && "achado" in r) pessoa = r.achado;
       }
       const cat = await categoriaValida(ctx, args.categoria, sentido === "entrada" ? "receivable" : "payable");
       if (cat && "error" in cat) return cat;
