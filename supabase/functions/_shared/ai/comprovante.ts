@@ -11,7 +11,7 @@
 /** O que o modelo de leitura extrai do cupom ou comprovante. */
 export interface Comprovante {
   loja: string | null;
-  /** Só os 14 dígitos. */
+  /** CNPJ (14 dígitos) ou CPF (11) de quem RECEBEU — só os dígitos. */
   cnpj: string | null;
   /** 'AAAA-MM-DD' */
   data: string | null;
@@ -33,9 +33,11 @@ export function fotoDeQuemUsaOFinanceiro(cargo?: string | null): boolean {
 export const PEDIDO_DE_LEITURA_AUTO = `Você recebeu uma imagem ou PDF enviado pelo WhatsApp por alguém da empresa.
 
 1) Se for CUPOM FISCAL, NOTA FISCAL, RECIBO ou COMPROVANTE DE PAGAMENTO (cartão, Pix, boleto ou dinheiro), responda na PRIMEIRA linha exatamente neste formato, sem nada antes:
-COMPROVANTE | loja: <nome do estabelecimento ou de quem recebeu> | cnpj: <os 14 dígitos, ou não informado> | data: <dd/mm/aaaa, ou não informada> | total: <valor total pago, com vírgula nos centavos, ex. 64,80> | pagamento: <débito, crédito, pix, dinheiro, boleto ou não informado>
+COMPROVANTE | loja: <nome do estabelecimento ou de quem recebeu> | cnpj: <os dígitos do CNPJ ou CPF de quem RECEBEU, ou não informado> | data: <dd/mm/aaaa, ou não informada> | total: <valor total pago, com vírgula nos centavos, ex. 64,80> | pagamento: <débito, crédito, pix, dinheiro, boleto ou não informado>
 Depois, em até 5 linhas, os itens principais no formato "- <item> | R$ <valor>".
 Regras: NÃO invente. O que não estiver legível no documento é "não informado". O total é o valor PAGO (com desconto), não a soma dos itens se houver diferença. "Cartão de débito"/"débito" é débito; "cartão de crédito"/"crédito" é crédito.
+O CNPJ/CPF é o de quem RECEBEU o dinheiro (a loja, o recebedor do Pix, o beneficiário do boleto) — nunca o de quem pagou.
+Nota fiscal (NF-e/DANFE) só prova pagamento se disser que foi paga à vista: com duplicatas ou vencimentos (compra a prazo), escreva "pagamento: não informado" e, na linha dos itens, "- compra a prazo | vencimentos: <datas>".
 
 2) Se NÃO for comprovante (por exemplo, cotação de fornecedor ou foto de equipamento), extraia o conteúdo em português, de forma compacta e fiel. Se houver itens com preços, liste um por linha: "- <descrição> | unitário: R$ <valor> | prazo: <prazo se houver>". Se não for cotação, resuma em até 5 linhas.
 
@@ -87,7 +89,7 @@ export function lerComprovante(texto: string): Comprovante | null {
   const pagamento = (campos.get('pagamento') ?? '').toLowerCase();
   return {
     loja: naoInformado(loja) ? null : loja,
-    cnpj: cnpj.length === 14 ? cnpj : null,
+    cnpj: cnpj.length === 14 || cnpj.length === 11 ? cnpj : null,
     data: dataDoCupom(campos.get('data') ?? ''),
     total: valorDoCupom(campos.get('total') ?? ''),
     pagamento: PAGAMENTOS[pagamento] ?? null,
@@ -107,8 +109,18 @@ export function legendaDaMidia(texto?: string | null): string | null {
   return t;
 }
 
+/**
+ * O documento lido é o da própria empresa (quem PAGOU, num comprovante de Pix): não é de quem
+ * recebeu e não identificaria ninguém — sai. `raiz` são os 8 primeiros dígitos do CNPJ da empresa.
+ */
+export function semODocumentoDaEmpresa(c: Comprovante, raiz: string | null | undefined): Comprovante {
+  return c.cnpj && raiz && raiz.length === 8 && c.cnpj.length === 14 && c.cnpj.startsWith(raiz) ? { ...c, cnpj: null } : c;
+}
+
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const cnpjFormatado = (c: string) => c.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+const cnpjFormatado = (c: string) => c.length === 11
+  ? `CPF ${c.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')}`
+  : `CNPJ ${c.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5')}`;
 const dataFormatada = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
 const COMO_FOI_PAGO: Record<NonNullable<Comprovante['pagamento']>, string> = {
   debito: 'no débito', credito: 'no crédito', pix: 'por Pix', dinheiro: 'em dinheiro', boleto: 'por boleto',
@@ -120,7 +132,7 @@ const COMO_FOI_PAGO: Record<NonNullable<Comprovante['pagamento']>, string> = {
  */
 export function mensagemDoComprovante(c: Comprovante, legenda?: string | null): string {
   const valor = c.total != null ? brl(c.total) : 'valor não informado';
-  const loja = c.loja ? `em ${c.loja}${c.cnpj ? ` (CNPJ ${cnpjFormatado(c.cnpj)})` : ''}` : 'loja não informada';
+  const loja = c.loja ? `em ${c.loja}${c.cnpj ? ` (${cnpjFormatado(c.cnpj)})` : ''}` : 'loja não informada';
   const partes: string[] = [`${valor} ${loja}`];
   partes.push(c.data ? `em ${dataFormatada(c.data)}` : 'data não informada');
   partes.push(c.pagamento ? `pago ${COMO_FOI_PAGO[c.pagamento]}` : 'forma de pagamento não informada');

@@ -28,6 +28,8 @@ function jr(body: unknown, status = 200) {
 // Modelo leve: a extração é tarefa fechada e TODO número extraído ainda passa por confirmação
 // humana antes de virar custo/ordem de compra — não vale pagar o modelo grande aqui.
 const EXTRACTION_MODEL = "anthropic/claude-haiku-4.5";
+/** ~3 MB de arquivo (em base64): acima disso a foto ao assistente não é lida. */
+const TETO_DO_ARQUIVO_AUTO = 4_000_000;
 
 const PROMPT = `Você recebeu um arquivo enviado por um FORNECEDOR pelo WhatsApp (normalmente uma cotação/orçamento).
 
@@ -84,6 +86,11 @@ servirComCors(async (req) => {
       return jr({ ok: false, error: "falha ao obter a mídia no Evolution (pode ter expirado)", detail: JSON.stringify(mediaBody).slice(0, 200) });
     }
     const mimetype = String((mediaBody as any)?.mimetype || (kind === "image" ? "image/jpeg" : "application/pdf")).split(";")[0];
+    // Foto mandada ao assistente: comprovante é pequeno. PDF grande custaria por página e
+    // atrasaria a resposta — fica sem ler, e o assistente pede o que precisa por texto.
+    if (finalidade === "auto" && String(base64).length > TETO_DO_ARQUIVO_AUTO) {
+      return jr({ ok: false, error: "arquivo grande demais para ler sozinho" });
+    }
     const dataUri = `data:${mimetype};base64,${base64}`;
 
     // 2) Extração pelo modelo (formato OpenAI-compatível do OpenRouter).
@@ -103,6 +110,8 @@ servirComCors(async (req) => {
         max_tokens: 1500,
         messages: [{ role: "user", content: [{ type: "text", text: pedido }, contentBlock] }],
       }),
+      // Na foto ao assistente, a resposta ao dono espera por isto (o webhook desiste em 30 s).
+      ...(finalidade === "auto" ? { signal: AbortSignal.timeout(25_000) } : {}),
     });
     const aiBody = await aiRes.json().catch(() => ({}));
     const text = String((aiBody as any)?.choices?.[0]?.message?.content || "").trim();

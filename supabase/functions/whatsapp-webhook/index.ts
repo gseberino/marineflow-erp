@@ -4,7 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { EVOLUTION_STATUS_MAP } from "../_shared/whatsapp/evolution-provider.ts";
 import { classificarResposta } from "../_shared/ai/comms/reply-router.ts";
-import { fotoDeQuemUsaOFinanceiro, lerComprovante, mensagemDoComprovante } from "../_shared/ai/comprovante.ts";
+import { fotoDeQuemUsaOFinanceiro, lerComprovante, mensagemDoComprovante, semODocumentoDaEmpresa } from "../_shared/ai/comprovante.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 // Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
@@ -329,10 +329,17 @@ export async function handler(req: Request): Promise<Response> {
                     Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
                   },
                   body: JSON.stringify({ message_id: msg.id, finalidade: "auto" }),
+                  // A resposta ao dono espera a leitura: sem teto, um modelo travado a atrasava até
+                  // o limite do worker. Passou disso, segue com a legenda.
+                  signal: AbortSignal.timeout(30_000),
                 });
                 const lrBody = await lr.json().catch(() => ({}));
                 const comprovante = lrBody?.ok && lrBody?.text ? lerComprovante(String(lrBody.text)) : null;
-                if (comprovante) dispatchText = mensagemDoComprovante(comprovante, event.text);
+                if (comprovante) {
+                  // O CNPJ da própria empresa (quem pagou, num comprovante de Pix) não identifica ninguém.
+                  const { data: raiz } = await admin.rpc("raiz_do_cnpj_da_empresa");
+                  dispatchText = mensagemDoComprovante(semODocumentoDaEmpresa(comprovante, typeof raiz === "string" ? raiz : null), event.text);
+                }
               } catch (_e) { /* mantém a legenda ou "[image]" */ }
             }
             const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-agent`, {

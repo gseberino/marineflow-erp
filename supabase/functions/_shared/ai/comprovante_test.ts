@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { fotoDeQuemUsaOFinanceiro, legendaDaMidia, lerComprovante, mensagemDoComprovante } from "./comprovante.ts";
+import { fotoDeQuemUsaOFinanceiro, legendaDaMidia, lerComprovante, mensagemDoComprovante, semODocumentoDaEmpresa } from "./comprovante.ts";
 
 Deno.test("legenda: o marcador e o nome do arquivo não são legenda", () => {
   assertEquals(["[image]", "[document]", "[documento] nota.pdf", "comprovante.pdf", "IMG_2031.JPG", "", null, undefined].map(legendaDaMidia),
@@ -30,6 +30,18 @@ Deno.test("comprovante: 'não informado' vira null, sem inventar", () => {
 Deno.test("comprovante: data impossível e valor ilegível não passam", () => {
   const c = lerComprovante("COMPROVANTE | loja: X | cnpj: 123 | data: 31/02/2026 | total: sessenta | pagamento: pix");
   assertEquals([c?.data, c?.total, c?.cnpj, c?.pagamento], [null, null, null, "pix"]);
+});
+
+Deno.test("comprovante: CPF de quem recebeu o Pix vale (acha o favorecido); o CNPJ da própria empresa sai", () => {
+  const pix = lerComprovante("COMPROVANTE | loja: ROBERTO D R CORREA | cnpj: 123.456.789-01 | data: 25/09/2026 | total: 150,00 | pagamento: pix")!;
+  assertEquals(pix.cnpj, "12345678901");
+  assertEquals(mensagemDoComprovante(pix, null).split("\n")[0].replace(/ /g, " "),
+    "📷 Comprovante enviado por foto: R$ 150,00 em ROBERTO D R CORREA (CPF 123.456.789-01), em 25/09/2026, pago por Pix.");
+  // O modelo pegou o CNPJ de quem PAGOU (a HBR, raiz 50057049): não identifica ninguém.
+  const errado = lerComprovante("COMPROVANTE | loja: LOJA X | cnpj: 50.057.049/0001-10 | data: 25/09/2026 | total: 90,00 | pagamento: pix")!;
+  assertEquals(semODocumentoDaEmpresa(errado, "50057049").cnpj, null);
+  assertEquals(semODocumentoDaEmpresa(pix, "50057049").cnpj, "12345678901");
+  assertEquals(semODocumentoDaEmpresa(errado, null).cnpj, "50057049000110");
 });
 
 Deno.test("comprovante: imagem que não é comprovante não vira nada", () => {
