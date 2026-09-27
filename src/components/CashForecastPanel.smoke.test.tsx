@@ -105,7 +105,8 @@ describe('CashForecastPanel', () => {
     expect(await screen.findByText(/Além das contas lançadas, a previsão soma/)).toBeInTheDocument();
     expect(screen.getByText('Fatura Nubank PJ HBR')).toBeInTheDocument();
     expect(screen.getByText(/venceu por volta de 16\/07 e não aparece pagamento — confira/)).toBeInTheDocument();
-    expect(screen.getByText(/3 compra\(s\) do ciclo aberto até hoje \(fecha em 17\/08\)/)).toBeInTheDocument();
+    // "lançamento(s)": no ciclo entram compras, parcelas, tarifas e juros.
+    expect(screen.getByText(/3 lançamento\(s\) do ciclo aberto até hoje \(fecha em 17\/08\)/)).toBeInTheDocument();
     expect(screen.getByText(/Contabilidade e assessoria R\$ 915,35\/mês/)).toBeInTheDocument();
   });
 });

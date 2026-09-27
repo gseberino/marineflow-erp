@@ -327,6 +327,12 @@ async function lerExtrasDaPrevisao(hoje: string): Promise<{
       const nome = rotulo.get(conta) ?? 'Cartão';
       const r = faturasDoCartao(nome, doCartao, hoje);
       faturas.push(...r.faturas);
+      // Cartão em uso cujo ciclo não dá para saber: o banco parou de identificar a fatura das
+      // compras (C6 desde julho, Nubank desde agosto/2026). Sem este aviso, ele sumia da previsão.
+      if (!r.ciclo && doCartao.some((l) => l.transaction_date >= somarDias(hoje, -60))) {
+        avisos.push(`${nome}: não consegui saber em que dia a fatura fecha (o banco não identifica a fatura das compras `
+          + 'recentes) — a fatura deste cartão ficou fora da previsão.');
+      }
       if (r.pagoAlemDoExtrato > 0) {
         avisos.push(`${nome}: a fatura que fechou em ${diaEMes(r.fechada.fechamento)} foi paga em ${reais(r.fechada.pago)}, `
           + `mas o extrato do cartão mostra só ${reais(r.fechada.compras)} de compras nela. Faltam compras no extrato do `

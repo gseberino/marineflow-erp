@@ -141,15 +141,34 @@ describe('fatura de um cartão', () => {
     ]);
   });
 
-  it('"Saldo em atraso" é dívida antiga mudada de lugar, não compra: não dobra a conta', () => {
-    // O par do Nubank: débito "Saldo em atraso" e crédito "Crédito de atraso", mesmo dia e valor.
+  const credito = (data: string, valor: number, descricao: string): LinhaDoCartao =>
+    ({ transaction_date: data, amount: valor, transaction_type: 'credit', description: descricao, dismissed_kind: 'mecanica_cartao' });
+
+  it('rolagem de dívida ("Saldo em atraso" contra "Crédito de atraso") se anula: não dobra a conta', () => {
+    // Os pares do Nubank vêm no mesmo dia e valor, como no dado real.
     const linhas = [
       ...historicoC6(), compra('2026-09-20', 150),
-      compra('2026-09-22', 916.75, null, { description: 'Saldo em atraso' }),
-      { transaction_date: '2026-09-22', amount: 916.75, transaction_type: 'credit', description: 'Crédito de atraso' },
-      compra('2026-09-23', 34.13, null, { description: 'Saldo em rotativo' }),
+      compra('2026-09-22', 916.75, null, { description: 'Saldo em atraso' }), credito('2026-09-22', 916.75, 'Crédito de atraso'),
+      compra('2026-09-23', 34.13, null, { description: 'Saldo em rotativo' }), credito('2026-09-23', 34.13, 'Crédito de rotativo'),
     ];
     expect(faturasDoCartao('C6', linhas, '2026-09-27').faturas).toEqual([expect.objectContaining({ situacao: 'aberta', valor: 150 })]);
+  });
+
+  it('juro anulado ("Encerramento de dívida") não vira dívida: a fatura paga no centavo fica quitada', () => {
+    // O caso real do Nubank, agosto/2026: R$ 2.030,05 de débitos, R$ 122,05 de juro anulado,
+    // R$ 1.908,00 pagos. Contar só os débitos deixava R$ 122,05 "vencidos" que não existiam.
+    const linhas = [
+      ...historicoC6(), compra('2026-08-20', 1908), compra('2026-09-01', 122.05, null, { description: 'Juros de dívida encerrada' }),
+      credito('2026-09-01', 122.05, 'Encerramento de dívida'), pagamento('2026-09-24', 1908),
+    ];
+    const r = faturasDoCartao('C6', linhas, '2026-09-27');
+    expect(r.faturas).toEqual([]);
+    expect(r.pagoAlemDoExtrato).toBe(0);
+  });
+
+  it('estorno de loja abate a fatura em que cai', () => {
+    const linhas = [...historicoC6(), compra('2026-09-20', 457.36), credito('2026-09-23', 316.74, 'Crédito de "MERCADOLIVRE*7PRODUTOS"')];
+    expect(faturasDoCartao('C6', linhas, '2026-09-27').faturas).toEqual([expect.objectContaining({ situacao: 'aberta', valor: 140.62 })]);
   });
 
   it('pago a mais de até R$ 50 é centavo, IOF ou juro: não vira aviso', () => {
@@ -160,7 +179,7 @@ describe('fatura de um cartão', () => {
   });
 
   it('sem ciclo conhecido, nada — e nenhum aviso inventado', () => {
-    expect(faturasDoCartao('X', [compra('2026-09-01', 50)], '2026-09-27')).toEqual({ faturas: [], pagoAlemDoExtrato: 0, fechada: { fechamento: '', compras: 0, pago: 0 } });
+    expect(faturasDoCartao('X', [compra('2026-09-01', 50)], '2026-09-27')).toEqual({ faturas: [], pagoAlemDoExtrato: 0, fechada: { fechamento: '', compras: 0, pago: 0 }, ciclo: null });
   });
 });
 

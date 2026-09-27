@@ -170,8 +170,8 @@ export function CashForecastPanel({ saldoInicial = null }: { saldoInicial?: numb
                   <span className="text-muted-foreground">
                     {' — '}
                     {f.situacao === 'fechada'
-                      ? `fatura fechada em ${dataCurta(f.fechamento)}, ${f.compras} compra(s), menos o que já foi pago`
-                      : `${f.compras} compra(s) do ciclo aberto até hoje (fecha em ${dataCurta(f.fechamento)})`}
+                      ? `fatura fechada em ${dataCurta(f.fechamento)}, ${f.compras} lançamento(s), menos o que já foi pago`
+                      : `${f.compras} lançamento(s) do ciclo aberto até hoje (fecha em ${dataCurta(f.fechamento)})`}
                     {f.vencida
                       ? (f.pago > 0
                         ? `; venceu por volta de ${dataCurta(f.vencimento)} e o pago (${formatCurrency(f.pago)}) não cobre as compras — confira`
