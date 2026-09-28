@@ -47,12 +47,82 @@ export function resolveOptionAsUserText(option: { label: string; value: string }
   return option.label;
 }
 
-/** Sessão de WhatsApp: reusa se ativa há menos de 4h, senão cria uma nova. */
+/** O rodapé que diz como responder a uma pendência — na proposta e na reapresentação. */
+export function notaDeConfirmacao(risco: string | null | undefined): string {
+  return risco === "high"
+    ? "\n\nPara aprovar, responda: *sim <SEU PIN>*. Para rejeitar: *não*."
+    : "\n\nResponda *sim* para aprovar ou *não* para rejeitar.";
+}
+
+/**
+ * A pendência da conversa anterior que ainda espera resposta, para ir junto na conversa nova.
+ *
+ * POR QUE (27/09/2026): a conversa acaba com 4h sem mensagem, e a pendência vale 24h. O dono
+ * respondeu "Nao" 18h depois de um pedido de envio ao cliente; a conversa nova nasceu sem a
+ * pendência, o "Nao" foi para o modelo como frase solta e voltou "Tudo bem! Fico por aqui" —
+ * com a pendência ainda aberta. Um "sim <PIN>" atrasado teria mandado o PIN ao modelo.
+ *
+ * Só a pendência VIVA (status pending e dentro do prazo) passa, com as tentativas de PIN já
+ * gastas (esperar 4h não zera o limite de 3). `pendencia_herdada` avisa o turno de que ela não
+ * foi apresentada nesta conversa: aprovação sem PIN a reapresenta em vez de executar
+ * (decidirPendenciaHerdada).
+ */
+export async function pendenciaParaHerdar(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  metadataAnterior: Record<string, unknown> | null | undefined,
+  agora: Date = new Date(),
+): Promise<Record<string, unknown> | null> {
+  const id = metadataAnterior?.pending_confirm_action_id;
+  if (typeof id !== "string" || !id) return null;
+  const { data: pendencia } = await admin
+    .from("ai_operator_pending_actions")
+    .select("id, status, expires_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (!pendencia || pendencia.status !== "pending") return null;
+  if (pendencia.expires_at && new Date(pendencia.expires_at).getTime() <= agora.getTime()) return null;
+  return {
+    pending_confirm_action_id: id,
+    pin_attempts: Number(metadataAnterior?.pin_attempts) || 0,
+    pendencia_herdada: true,
+  };
+}
+
+/**
+ * O que fazer com a resposta a uma pendência que veio da conversa anterior.
+ *
+ * Recusar é sempre seguro. Aprovar com PIN é intenção explícita. Aprovar SEM PIN ("sim", "ok",
+ * "1") pode ser resposta a outra coisa — o resumo das 07:30 chega pelo mesmo número, e um "ok"
+ * a ele não pode executar o pedido da noite anterior. Nesse caso a pendência é mostrada de
+ * novo, com a hora do pedido, e a PRÓXIMA resposta decide.
+ */
+export function decidirPendenciaHerdada(resposta: ConfirmationReply): "resolver" | "reapresentar" {
+  return resposta.decision === "approve" && !resposta.pin ? "reapresentar" : "resolver";
+}
+
+/** O texto da pendência mostrada de novo na conversa nova. */
+export function textoDaPendenciaReapresentada(pendencia: {
+  title: string;
+  summary?: string | null;
+  risk_level?: string | null;
+  created_at?: string | null;
+}): string {
+  const quando = pendencia.created_at
+    ? new Date(pendencia.created_at).toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+    })
+    : null;
+  const cabecalho = quando ? `Este pedido de ${quando} ainda espera a sua resposta:` : "Este pedido ainda espera a sua resposta:";
+  return `${cabecalho}\n⚠️ ${pendencia.title}\n${pendencia.summary ?? ""}${notaDeConfirmacao(pendencia.risk_level)}`;
+}
+
+/** Sessão de WhatsApp: reusa se ativa há menos de 4h, senão cria uma nova (levando a pendência viva). */
 export async function resolveOrCreateWhatsAppSession(admin: any, phoneNormalized: string, appUserId: string): Promise<string> {
   const fourHoursAgoIso = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
   const { data: existing } = await admin
     .from("ai_operator_sessions")
-    .select("id, last_activity_at")
+    .select("id, last_activity_at, metadata")
     .eq("channel", "whatsapp")
     .eq("external_thread_key", phoneNormalized)
     .eq("status", "open")
@@ -62,9 +132,22 @@ export async function resolveOrCreateWhatsAppSession(admin: any, phoneNormalized
 
   if (existing && existing.last_activity_at >= fourHoursAgoIso) return existing.id;
 
+  // Best-effort: sem a herança a conversa nova nasce como sempre nasceu.
+  let heranca: Record<string, unknown> | null = null;
+  try {
+    heranca = existing ? await pendenciaParaHerdar(admin, existing.metadata) : null;
+  } catch { /* segue sem herdar */ }
+
   const { data: created, error } = await admin
     .from("ai_operator_sessions")
-    .insert({ channel: "whatsapp", channel_provider: "evolution", owner_user_id: appUserId, external_thread_key: phoneNormalized, status: "open" })
+    .insert({
+      channel: "whatsapp",
+      channel_provider: "evolution",
+      owner_user_id: appUserId,
+      external_thread_key: phoneNormalized,
+      status: "open",
+      ...(heranca ? { metadata: heranca } : {}),
+    })
     .select("id")
     .single();
   if (error || !created) throw new Error(`Falha ao criar sessão WhatsApp: ${error?.message || "erro desconhecido"}`);

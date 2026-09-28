@@ -27,8 +27,11 @@ import { MAX_ITERATIONS_WHATSAPP, MODEL_AGENT, MODEL_LITE } from "../_shared/ai/
 import { allTools, toolsByName, type Role } from "../_shared/ai/tools/index.ts";
 import {
   checkWhatsAppRateLimit,
+  decidirPendenciaHerdada,
   formatOptionsAsNumberedText,
+  notaDeConfirmacao,
   parseConfirmationReply,
+  textoDaPendenciaReapresentada,
   parseOptionReply,
   queueWhatsAppReply,
   resolveOptionAsUserText,
@@ -341,7 +344,7 @@ async function resolveWhatsAppConfirmation(
 ): Promise<{ message: string; metadata: Record<string, any> }> {
   const pendingActionId = metadata.pending_confirm_action_id as string;
   const { data: pending } = await admin.from("ai_operator_pending_actions").select("*").eq("id", pendingActionId).maybeSingle();
-  const clearedMetadata = { ...metadata, pending_confirm_action_id: null, pin_attempts: 0 };
+  const clearedMetadata = { ...metadata, pending_confirm_action_id: null, pin_attempts: 0, pendencia_herdada: false };
 
   if (!pending || pending.status !== "pending") {
     return { message: "Essa pendência não existe mais ou já foi decidida.", metadata: clearedMetadata };
@@ -471,15 +474,42 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   const toolCtx = { sb: admin, admin, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings };
 
   // ---- Camada determinística (custo $0): confirmação de pendência ----
+  const confirmation = parseConfirmationReply(text);
   if (metadata.pending_confirm_action_id) {
-    const confirmation = parseConfirmationReply(text);
     if (confirmation) {
+      // Pendência que veio da conversa anterior (resolveOrCreateWhatsAppSession): aprovar sem
+      // PIN a mostra de novo em vez de executar — o "ok" pode ser resposta a outra coisa.
+      if (metadata.pendencia_herdada && decidirPendenciaHerdada(confirmation) === "reapresentar") {
+        const { data: herdada } = await admin
+          .from("ai_operator_pending_actions")
+          .select("title, summary, risk_level, created_at, status")
+          .eq("id", metadata.pending_confirm_action_id)
+          .maybeSingle();
+        if (herdada?.status === "pending") {
+          await admin.from("ai_operator_sessions")
+            .update({ metadata: { ...metadata, pendencia_herdada: false }, last_activity_at: new Date().toISOString() })
+            .eq("id", sessionId);
+          await queueWhatsAppReply(admin, phoneNormalized, textoDaPendenciaReapresentada(herdada));
+          return jr({ ok: true });
+        }
+      }
       const resolved = await resolveWhatsAppConfirmation(admin, metadata, appUser, toolCtx, confirmation);
       await admin.from("ai_operator_sessions").update({ metadata: resolved.metadata, last_activity_at: new Date().toISOString() }).eq("id", sessionId);
       await queueWhatsAppReply(admin, phoneNormalized, resolved.message);
       return jr({ ok: true });
     }
     // Não pareceu confirmação — segue pro LLM (usuário pode ter mudado de assunto).
+  } else if (confirmation?.decision === "approve" && confirmation.pin && await verifyPin(confirmation.pin, appUser.ai_whatsapp_pin_hash)) {
+    // "sim <PIN>" sem nada esperando: responde aqui, sem o modelo. Passando adiante, o PIN iria
+    // para o modelo e para o histórico da conversa. Só age quando o número É o PIN (conferido no
+    // hash): "sim 500" como resposta de conversa segue para o modelo normalmente.
+    await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", sessionId);
+    await queueWhatsAppReply(
+      admin,
+      phoneNormalized,
+      "Não há nenhuma ação esperando a sua confirmação agora — nada foi executado. Por segurança, o seu PIN não foi repassado ao assistente.",
+    );
+    return jr({ ok: true });
   }
 
   // ---- Camada determinística (custo $0): número de uma lista de opções pendente ----
@@ -552,7 +582,9 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   }
 
   let replyText: string;
-  const newMetadata: Record<string, any> = { ...metadata };
+  // O turno passou pelo modelo: a pendência herdada (se havia) deixou de valer aqui — os ramos
+  // abaixo zeram ou trocam pending_confirm_action_id, e a marca de herança vai junto.
+  const newMetadata: Record<string, any> = { ...metadata, pendencia_herdada: false };
 
   if (result.error) {
     replyText = `⚠️ ${result.error}`;
@@ -563,11 +595,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     newMetadata.pending_confirm_action_id = null;
   } else if (result.proposal) {
     const proposal = result.proposal as Proposal;
-    const pinNote =
-      proposal.risk_level === "high"
-        ? "\n\nPara aprovar, responda: *sim <SEU PIN>*. Para rejeitar: *não*."
-        : "\n\nResponda *sim* para aprovar ou *não* para rejeitar.";
-    replyText = `⚠️ ${proposal.title}\n${proposal.summary_markdown}${pinNote}`;
+    replyText = `⚠️ ${proposal.title}\n${proposal.summary_markdown}${notaDeConfirmacao(proposal.risk_level)}`;
     newMetadata.pending_confirm_action_id = proposal.pending_action_id;
     newMetadata.pin_attempts = 0;
     newMetadata.pending_options = null;
