@@ -60,11 +60,50 @@ async function idsPorNome(ctx: ToolCtx, tabela: string, termo: string): Promise<
   return ((data ?? []) as { id: string }[]).map((r) => r.id);
 }
 
+export interface MembroDoPix { id: string; divisao_id: string | null; amount: number | string; expense_category: string | null }
+export interface PixDividido { total: number; partes: Array<{ payable_id: string; categoria: string | null; valor: number }> }
+
+/**
+ * Pix dividido (pró-labore + retirada de sócio, 28/09/2026): as partes de cada lançamento
+ * principal, pelo id do principal (o principal primeiro). Grupo de um membro só não é divisão.
+ */
+export function gruposDoPixDividido(membros: MembroDoPix[]): Map<string, PixDividido> {
+  const grupos = new Map<string, PixDividido>();
+  for (const m of membros) {
+    const raiz = m.divisao_id ?? m.id;
+    const g = grupos.get(raiz) ?? { total: 0, partes: [] };
+    if (g.partes.some((p) => p.payable_id === m.id)) continue;
+    g.total = Math.round((g.total + Number(m.amount || 0)) * 100) / 100;
+    g.partes.push({ payable_id: m.id, categoria: m.expense_category, valor: Number(m.amount || 0) });
+    grupos.set(raiz, g);
+  }
+  for (const [raiz, g] of grupos) {
+    if (g.partes.length < 2) grupos.delete(raiz);
+    else g.partes.sort((a, b) => Number(a.payable_id !== raiz) - Number(b.payable_id !== raiz));
+  }
+  return grupos;
+}
+
+/** Todos os Pix divididos vivos (são poucos: um por mês por sócio da regra). */
+async function lerPixDivididos(ctx: ToolCtx): Promise<Map<string, PixDividido>> {
+  const campos = "id, divisao_id, amount, expense_category";
+  const { data: partes, error } = await ctx.sb.from("payables").select(campos)
+    .not("divisao_id", "is", null).neq("status", "cancelled").limit(1000);
+  if (error || !partes?.length) return new Map();
+  const raizes = [...new Set((partes as MembroDoPix[]).map((p) => String(p.divisao_id)))];
+  const principais: MembroDoPix[] = [];
+  for (let i = 0; i < raizes.length; i += 100) {
+    const { data } = await ctx.sb.from("payables").select(campos).in("id", raizes.slice(i, i + 100)).neq("status", "cancelled");
+    principais.push(...((data ?? []) as MembroDoPix[]));
+  }
+  return gruposDoPixDividido([...principais, ...(partes as MembroDoPix[])]);
+}
+
 export const lancamentoTools: ToolDef[] = [
   {
     name: "buscar_lancamentos",
     description:
-      "Acha contas a pagar e a receber JÁ LANÇADAS por texto (descrição, fornecedor, favorecido ou cliente), valor, período, situação ou número da OS. Use antes de corrigir, desfazer ou cancelar — 'o almoço de 50 reais de ontem', 'a despesa da Coremma de agosto'. Devolve o id que as outras ferramentas pedem. Só leitura.",
+      "Acha contas a pagar e a receber JÁ LANÇADAS por texto (descrição, fornecedor, favorecido ou cliente), valor, período, situação ou número da OS. Use antes de corrigir, desfazer ou cancelar — 'o almoço de 50 reais de ontem', 'a despesa da Coremma de agosto'. Devolve o id que as outras ferramentas pedem. Pix dividido em pró-labore + retirada de sócio vem com dividido: true, o valor inteiro (pix_inteiro) e as partes; ele é achado também pelo valor inteiro. Só leitura.",
     input_schema: {
       type: "object",
       properties: {
@@ -117,25 +156,45 @@ export const lancamentoTools: ToolDef[] = [
       const resultado: Array<Record<string, unknown>> = [];
 
       if (tipo !== "receber") {
-        let q = ctx.sb.from("payables")
-          .select("id, description, amount, paid_amount, status, issue_date, due_date, expense_category, supplier_name, bank_transaction_id, origin, suppliers!payables_supplier_id_fkey(name), payees(name), service_orders!payables_linked_service_order_id_fkey(service_order_number)")
-          .order("issue_date", { ascending: false }).limit(15);
-        q = aplicarSituacao(q);
+        const campos = "id, description, amount, paid_amount, status, issue_date, due_date, expense_category, supplier_name, bank_transaction_id, origin, divisao_id, suppliers!payables_supplier_id_fkey(name), payees(name), service_orders!payables_linked_service_order_id_fkey(service_order_number)";
+        const [fornecedores, favorecidos] = termo
+          ? await Promise.all([idsPorNome(ctx, "suppliers", termo), idsPorNome(ctx, "payees", termo)])
+          : [[], []];
+        // Todos os filtros menos o de valor: servem à busca por linha e à do Pix dividido.
+        const filtrar = (q: any) => {
+          q = aplicarSituacao(q);
+          if (args.de) q = q.gte("issue_date", String(args.de).slice(0, 10));
+          if (args.ate) q = q.lte("issue_date", String(args.ate).slice(0, 10));
+          if (osId) q = q.eq("linked_service_order_id", osId);
+          if (termo) {
+            const partes = [`description.ilike.%${termo}%`, `supplier_name.ilike.%${termo}%`];
+            if (fornecedores.length) partes.push(`supplier_id.in.(${fornecedores.join(",")})`);
+            if (favorecidos.length) partes.push(`payee_id.in.(${favorecidos.join(",")})`);
+            q = q.or(partes.join(","));
+          }
+          return q;
+        };
+        let q = filtrar(ctx.sb.from("payables").select(campos).order("issue_date", { ascending: false }).limit(15));
         if (valor) q = q.gte("amount", valor[0]).lte("amount", valor[1]);
-        if (args.de) q = q.gte("issue_date", String(args.de).slice(0, 10));
-        if (args.ate) q = q.lte("issue_date", String(args.ate).slice(0, 10));
-        if (osId) q = q.eq("linked_service_order_id", osId);
-        if (termo) {
-          const [fornecedores, favorecidos] = await Promise.all([idsPorNome(ctx, "suppliers", termo), idsPorNome(ctx, "payees", termo)]);
-          const partes = [`description.ilike.%${termo}%`, `supplier_name.ilike.%${termo}%`];
-          if (fornecedores.length) partes.push(`supplier_id.in.(${fornecedores.join(",")})`);
-          if (favorecidos.length) partes.push(`payee_id.in.(${favorecidos.join(",")})`);
-          q = q.or(partes.join(","));
-        }
         const { data, error } = await q;
         if (error) return { error: error.message };
-        for (const p of (data ?? []) as any[]) {
+        const achados = [...((data ?? []) as any[])];
+        // Pix dividido (pró-labore + retirada de sócio): "o Pix de 4 mil" é a SOMA das partes, e
+        // nenhuma linha tem 4 mil. Acha pelo valor inteiro e marca o que é parte de um Pix só.
+        const divididos = await lerPixDivididos(ctx);
+        if (valor && divididos.size) {
+          const raizes = [...divididos].filter(([, g]) => g.total >= valor[0] && g.total <= valor[1])
+            .map(([id]) => id).filter((id) => !achados.some((p) => p.id === id));
+          if (raizes.length) {
+            const { data: principais, error: erro } = await filtrar(ctx.sb.from("payables").select(campos).in("id", raizes.slice(0, 15)));
+            if (erro) return { error: erro.message };
+            achados.push(...((principais ?? []) as any[]));
+          }
+        }
+        for (const p of achados) {
           if (p.expense_category && sensiveis.includes(p.expense_category)) continue;
+          const principal = p.divisao_id ?? p.id;
+          const pix = divididos.get(principal);
           resultado.push({
             tipo: "pagar", payable_id: p.id, data: p.issue_date, vencimento: p.due_date,
             valor: Number(p.amount), pago: Number(p.paid_amount ?? 0), situacao: p.status,
@@ -144,6 +203,10 @@ export const lancamentoTools: ToolDef[] = [
             favorecido: p.payees?.name ?? null,
             categoria: p.expense_category, os: p.service_orders?.service_order_number ?? null,
             veio_do_banco: !!p.bank_transaction_id,
+            ...(pix ? {
+              dividido: true, pix_inteiro: pix.total, payable_principal_id: principal, partes: pix.partes,
+              aviso: "Parte de um Pix dividido (pró-labore + retirada de sócio): desfazer ou cancelar vale para o Pix inteiro.",
+            } : {}),
           });
         }
       }
@@ -190,7 +253,7 @@ export const lancamentoTools: ToolDef[] = [
   {
     name: "desfazer_aprovacao_de_lancamento",
     description:
-      "Desfaz a aprovação de um lançamento que veio do extrato do banco: o lançamento é cancelado e a linha volta para a fila do Extrato, para ser aprovada de outro jeito. Se o lançamento já existia e só tinha sido casado com o extrato, apenas o vínculo é desfeito. Use para 'aprovei errado', 'desfaz isso'. Para só trocar categoria/fornecedor/OS, prefira update_payable/update_receivable. Pede confirmação.",
+      "Desfaz a aprovação de um lançamento que veio do extrato do banco: o lançamento é cancelado e a linha volta para a fila do Extrato, para ser aprovada de outro jeito. Se o lançamento já existia e só tinha sido casado com o extrato, apenas o vínculo é desfeito. Use para 'aprovei errado', 'desfaz isso'. Para só trocar categoria/fornecedor/OS, prefira update_payable/update_receivable. Se o lançamento é parte de um Pix dividido (pró-labore + retirada de sócio; buscar_lancamentos marca dividido), desfazer vale para o Pix inteiro: diga isso antes de pedir o sim. Pede confirmação.",
     input_schema: {
       type: "object",
       properties: {
@@ -215,7 +278,7 @@ export const lancamentoTools: ToolDef[] = [
   {
     name: "cancelar_lancamento",
     description:
-      "Cancela um lançamento (o 'excluir' que não apaga): sai do resultado e das listas, mas fica registrado com o motivo. Se veio do extrato, a linha do banco vai para 'Fora da fila' com o mesmo motivo. Use para 'foi despesa pessoal', 'lançado em dobro', 'não aconteceu'. Motivo obrigatório. Pede confirmação.",
+      "Cancela um lançamento (o 'excluir' que não apaga): sai do resultado e das listas, mas fica registrado com o motivo. Se veio do extrato, a linha do banco vai para 'Fora da fila' com o mesmo motivo. Use para 'foi despesa pessoal', 'lançado em dobro', 'não aconteceu'. Se o lançamento é parte de um Pix dividido (pró-labore + retirada de sócio; buscar_lancamentos marca dividido), cancelar vale para o Pix inteiro: diga isso antes de pedir o sim; para mudar só uma parte, use update_payable. Motivo obrigatório. Pede confirmação.",
     input_schema: {
       type: "object",
       properties: {

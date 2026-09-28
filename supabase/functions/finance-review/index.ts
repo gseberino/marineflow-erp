@@ -903,11 +903,19 @@ async function tirarDaFilaOQueJaFoiLancado(admin: DbClient): Promise<number> {
 
 /** O lançamento ativo que já usa esta linha do banco, descrito para a pessoa; null = nenhum. */
 async function lancamentoDaTransacao(admin: DbClient, txId: string): Promise<string | null> {
+  // Pix dividido (pró-labore + retirada de sócio, 28/09/2026) tem DUAS despesas na mesma linha:
+  // com .maybeSingle() a busca dava erro e a linha parecia livre. Lê as despesas da linha e
+  // descreve o pagamento inteiro (o principal, com as categorias das partes).
   const [pg, rc] = await Promise.all([
-    admin.from("payables").select("description, expense_category").eq("bank_transaction_id", txId).maybeSingle(),
+    admin.from("payables").select("description, expense_category, divisao_id").eq("bank_transaction_id", txId).limit(5),
     admin.from("receivables").select("description").eq("bank_transaction_id", txId).maybeSingle(),
   ]);
-  if (pg.data) return `despesa "${String((pg.data as any).description ?? "").slice(0, 60)}" (${(pg.data as any).expense_category ?? "sem categoria"})`;
+  const despesas = (pg.data ?? []) as Array<{ description: string | null; expense_category: string | null; divisao_id: string | null }>;
+  if (despesas.length) {
+    const principal = despesas.find((d) => !d.divisao_id) ?? despesas[0];
+    const categorias = [...new Set(despesas.map((d) => d.expense_category ?? "sem categoria"))].join(" + ");
+    return `despesa "${String(principal.description ?? "").slice(0, 60)}" (${categorias})`;
+  }
   if (rc.data) return `receita "${String((rc.data as any).description ?? "").slice(0, 60)}"`;
   return null;
 }
@@ -1549,6 +1557,8 @@ async function montarHistoricoPorNome(
   categoriasValidas: Set<string>,
   grupoDaCategoria: Map<string, string>,
 ): Promise<Map<string, HistoricoFornecedor>> {
+  // A parte de um Pix dividido (pró-labore + retirada de sócio) não é outra decisão: conta só o
+  // lançamento principal, senão o sócio parece ter o dobro de pagamentos em duas categorias.
   const linhas = await lerTudo<any>((de, ate) =>
     admin
       .from("payables")
@@ -1556,6 +1566,7 @@ async function montarHistoricoPorNome(
                bank_transactions ( counterparty_name, description )`)
       .not("expense_category", "is", null)
       .not("bank_transaction_id", "is", null)
+      .is("divisao_id", null)
       .order("id")
       .range(de, ate)
   );

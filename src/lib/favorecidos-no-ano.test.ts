@@ -50,6 +50,18 @@ describe('totaisPorFavorecido', () => {
     const linhas = Array.from({ length: 10 }, () => ({ payee_id: 'gus', amount: '0.10', paid_amount: '0.10', status: 'paid', expense_category: 'Pró-labore' }));
     expect(totaisPorFavorecido(linhas).get('gus')?.pago).toBe(1);
   });
+
+  it('Pix dividido em pró-labore + retirada (28/09/2026) é UM pagamento: as partes somam por categoria', () => {
+    const t = totaisPorFavorecido([
+      l('gus', 1621, 'paid', 'Pró-labore'),
+      { ...l('gus', 2379, 'paid', 'Retirada de sócio'), parte_de_divisao: true },
+      l('gus', 500, 'paid', 'Retirada de sócio'),
+    ]);
+    expect(t.get('gus')).toMatchObject({
+      pago: 4500, pagamentos: 2,
+      porCategoria: [{ categoria: 'Retirada de sócio', valor: 2879 }, { categoria: 'Pró-labore', valor: 1621 }],
+    });
+  });
 });
 
 describe('pelo mesmo CPF/CNPJ, sem o favorecido ligado (documento igual identifica)', () => {

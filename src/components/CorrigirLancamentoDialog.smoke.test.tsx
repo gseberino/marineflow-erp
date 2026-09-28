@@ -12,17 +12,20 @@ import { I18nProvider } from '@/i18n';
 import { CorrigirLancamentoDialog, camposQueMudaram, type Formulario } from './CorrigirLancamentoDialog';
 import { DesfazerOuCancelarDialog } from './DesfazerOuCancelarDialog';
 
-const { corrigirMock, desfazerMock, cancelarMock, periodos } = vi.hoisted(() => ({
+const { corrigirMock, desfazerMock, cancelarMock, periodos, pix } = vi.hoisted(() => ({
   corrigirMock: vi.fn(),
   desfazerMock: vi.fn(),
   cancelarMock: vi.fn(),
   periodos: { lista: [] as Array<{ ano: number; mes: number; reaberto_em: string | null }> },
+  pix: { partes: null as null | Array<{ id: string; amount: number; expense_category: string | null; divisao_id: string | null }> },
 }));
 
-vi.mock('@/hooks/use-lancamentos', () => ({
+vi.mock('@/hooks/use-lancamentos', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-lancamentos')>()),
   useCorrigirLancamento: () => ({ mutate: corrigirMock, isPending: false }),
   useDesfazerAprovacao: () => ({ mutate: desfazerMock, isPending: false }),
   useCancelarLancamento: () => ({ mutate: cancelarMock, isPending: false }),
+  usePixDividido: () => ({ data: pix.partes }),
 }));
 vi.mock('@/hooks/use-fechamento', () => ({ usePeriodosFechados: () => ({ data: periodos.lista }) }));
 vi.mock('@/hooks/use-suppliers', () => ({
@@ -57,6 +60,7 @@ function renderizar(ui: React.ReactElement) {
 }
 
 beforeEach(() => {
+  pix.partes = null;
   corrigirMock.mockReset(); desfazerMock.mockReset(); cancelarMock.mockReset();
   periodos.lista = [];
 });
@@ -134,7 +138,21 @@ describe('DesfazerOuCancelarDialog', () => {
     const user = userEvent.setup();
     renderizar(<DesfazerOuCancelarDialog tipo="payable" acao="desfazer" lancamento={alvo} onFechar={() => {}} />);
     expect(screen.getByText(/volta para a fila do Extrato/)).toBeInTheDocument();
+    expect(screen.queryByText(/Este Pix está dividido/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Desfazer aprovação' }));
     expect(desfazerMock.mock.calls[0][0]).toEqual({ tipo: 'payable', id: 'p1', motivo: null });
+  });
+
+  it('Pix dividido (pró-labore + retirada): avisa antes que a ação vale para o pagamento inteiro', () => {
+    pix.partes = [
+      { id: 'p2', amount: 2379, expense_category: 'Retirada de sócio', divisao_id: 'p1' },
+      { id: 'p1', amount: 1621, expense_category: 'Pró-labore', divisao_id: null },
+    ];
+    renderizar(<DesfazerOuCancelarDialog tipo="payable" acao="cancelar" lancamento={alvo} onFechar={() => {}} />);
+    const aviso = screen.getByText(/Este Pix está dividido/);
+    expect(aviso.textContent?.replace(/ /g, ' ')).toBe(
+      'Este Pix está dividido em Pró-labore R$ 1.621,00 + Retirada de sócio R$ 2.379,00. '
+      + 'Cancelar vale para o pagamento inteiro de R$ 4.000,00. Para mudar só uma parte (um gasto pessoal, por exemplo), use Corrigir.',
+    );
   });
 });

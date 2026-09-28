@@ -5051,6 +5051,7 @@ export type Database = {
           created_at: string
           currency: string | null
           description: string
+          divisao_id: string | null
           due_date: string
           expense_category: string | null
           fiscal_note_id: string | null
@@ -5076,6 +5077,7 @@ export type Database = {
           created_at?: string
           currency?: string | null
           description: string
+          divisao_id?: string | null
           due_date: string
           expense_category?: string | null
           fiscal_note_id?: string | null
@@ -5101,6 +5103,7 @@ export type Database = {
           created_at?: string
           currency?: string | null
           description?: string
+          divisao_id?: string | null
           due_date?: string
           expense_category?: string | null
           fiscal_note_id?: string | null
@@ -5152,6 +5155,20 @@ export type Database = {
             columns: ["cost_center_id"]
             isOneToOne: false
             referencedRelation: "cost_centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payables_divisao_id_fkey"
+            columns: ["divisao_id"]
+            isOneToOne: false
+            referencedRelation: "compras_parceladas_em_dobro"
+            referencedColumns: ["payable_id"]
+          },
+          {
+            foreignKeyName: "payables_divisao_id_fkey"
+            columns: ["divisao_id"]
+            isOneToOne: false
+            referencedRelation: "payables"
             referencedColumns: ["id"]
           },
           {

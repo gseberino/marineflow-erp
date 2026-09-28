@@ -8,7 +8,7 @@ import { montarAging, type ContaEmAberto } from '@/lib/aging';
 import { rotuloDoMes, hojeEmBrasilia, somarDias, type FluxoDeCaixa } from '@/lib/fluxo-de-caixa';
 import { carregarFluxoDeCaixa, chaveDoFluxo } from '@/hooks/use-fluxo-de-caixa';
 import {
-  faturasDoCartao, gastosQueSeRepetem, gastosQueSeRepetemPorDia, mesesDeReferencia,
+  categoriaNaPrevisao, faturasDoCartao, gastosQueSeRepetem, gastosQueSeRepetemPorDia, mesesDeReferencia,
   type ContaEmAberto as ContaDaPrevisao, type DespesaLancada, type FaturaPrevista, type GastoQueSeRepete, type LinhaDoCartao,
 } from '@/lib/previsao-de-caixa';
 
@@ -371,8 +371,10 @@ async function lerExtrasDaPrevisao(hoje: string): Promise<{
       }));
     recorrentes = gastosQueSeRepetem(lancadas.filter((d) => d.data < inicioDoMes), hoje);
     for (const d of lancadas) {
-      if (d.data < inicioDoMes || !d.pago || d.noCartao || !d.categoria) continue;
-      pagoNoMes.set(d.categoria, (pagoNoMes.get(d.categoria) ?? 0) + d.valor);
+      // Pela mesma chave dos gastos que se repetem (pró-labore e retirada de sócio juntos).
+      const categoria = categoriaNaPrevisao(d.categoria);
+      if (d.data < inicioDoMes || !d.pago || d.noCartao || !categoria) continue;
+      pagoNoMes.set(categoria, (pagoNoMes.get(categoria) ?? 0) + d.valor);
     }
   } catch (e) {
     avisos.push(`Não consegui ler as despesas dos últimos meses (${(e as Error)?.message ?? 'erro'}): os gastos que se repetem ficaram fora da previsão.`);

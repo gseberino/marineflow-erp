@@ -15,7 +15,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useI18n } from '@/i18n';
-import { useCancelarLancamento, useDesfazerAprovacao, type TipoDeLancamento } from '@/hooks/use-lancamentos';
+import {
+  avisoDoPixDividido, useCancelarLancamento, useDesfazerAprovacao, usePixDividido, type TipoDeLancamento,
+} from '@/hooks/use-lancamentos';
 
 export type AcaoNoLancamento = 'desfazer' | 'cancelar';
 
@@ -40,6 +42,8 @@ export function DesfazerOuCancelarDialog({
   const desfazer = useDesfazerAprovacao();
   const cancelar = useCancelarLancamento();
   const [motivo, setMotivo] = useState('');
+  // Pix dividido (pró-labore + retirada de sócio): a ação vale para o pagamento inteiro.
+  const { data: pixDividido } = usePixDividido(tipo, acao ? lancamento?.id : null);
 
   useEffect(() => { setMotivo(''); }, [lancamento?.id, acao]);
 
@@ -78,6 +82,11 @@ export function DesfazerOuCancelarDialog({
           <AlertDialogTitle>{acao === 'desfazer' ? 'Desfazer a aprovação?' : 'Cancelar este lançamento?'}</AlertDialogTitle>
           <AlertDialogDescription className="space-y-2">
             <span className="block break-words font-medium text-foreground">{nome}</span>
+            {pixDividido && (
+              <span className="block rounded-md border border-amber-200 bg-amber-50/60 px-2 py-1.5 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                {avisoDoPixDividido(pixDividido, (v) => formatCurrency(v), acao)}
+              </span>
+            )}
             <span className="block">{consequencia}</span>
           </AlertDialogDescription>
         </AlertDialogHeader>

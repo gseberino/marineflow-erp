@@ -336,16 +336,29 @@ export function mesesDeReferencia(hoje: string): string[] {
 const VARIACAO_MAXIMA = 0.35;
 const MEDIA_MINIMA = 50;
 
+/**
+ * O que sai para o sócio é UM gasto na previsão. Desde 28/09/2026 o Pix ao sócio se divide entre
+ * "Pró-labore" (o salário mínimo do mês) e "Retirada de sócio" (o resto, não operacional). Sem
+ * juntar, a retirada sairia da previsão por ser não operacional e o caixa pareceria mais folgado;
+ * juntos, o mês soma o mesmo que o pró-labore somava antes da divisão.
+ */
+export const GASTO_DO_SOCIO = 'Pró-labore e retirada de sócio';
+
+export function categoriaNaPrevisao(categoria: string | null): string | null {
+  return categoria === 'Pró-labore' || categoria === 'Retirada de sócio' ? GASTO_DO_SOCIO : categoria;
+}
+
 export function gastosQueSeRepetem(despesas: DespesaLancada[], hoje: string): GastoQueSeRepete[] {
   const meses = mesesDeReferencia(hoje);
   const porCategoria = new Map<string, Map<string, number>>();
   for (const d of despesas) {
-    if (!d.categoria || d.noCartao || d.grupo === 'nao_operacional') continue;
+    const categoria = categoriaNaPrevisao(d.categoria);
+    if (!categoria || d.noCartao || (d.grupo === 'nao_operacional' && categoria !== GASTO_DO_SOCIO)) continue;
     const mes = mesDe(d.data);
     if (!meses.includes(mes)) continue;
-    const doMes = porCategoria.get(d.categoria) ?? new Map<string, number>();
+    const doMes = porCategoria.get(categoria) ?? new Map<string, number>();
     doMes.set(mes, (doMes.get(mes) ?? 0) + Math.round(d.valor * 100));
-    porCategoria.set(d.categoria, doMes);
+    porCategoria.set(categoria, doMes);
   }
   const saida: GastoQueSeRepete[] = [];
   for (const [categoria, doMes] of porCategoria) {
@@ -393,7 +406,7 @@ export function gastosQueSeRepetemPorDia(
         ? Math.min(pelosDias, Math.max(0, g.mediaMensal - (pagoNoMes.get(g.categoria) ?? 0)))
         : pelosDias;
       const lancado = contas
-        .filter((c) => c.categoria === g.categoria && mesDe(c.vencimento) === mesDe(cursor))
+        .filter((c) => categoriaNaPrevisao(c.categoria) === g.categoria && mesDe(c.vencimento) === mesDe(cursor))
         .reduce((s, c) => s + c.valor, 0);
       const falta = Math.max(0, esperado - lancado);
       if (falta > 0) {

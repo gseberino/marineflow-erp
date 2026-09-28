@@ -8,7 +8,7 @@
 // Antes, cada tela gravava direto na tabela. Mudar o valor de uma conta em aberto não
 // recalculava o saldo, conta paga não abria para edição e desfazer não existia — foi o que
 // levou o dono a não confiar no que tinha aprovado.
-import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -65,8 +65,54 @@ export function recarregarFinanceiro(qc: QueryClient) {
     ['conciliacao-sem-extrato'], ['conciliacao-conciliados'], ['conciliacao-extrato-livre'],
     ['trilha-conciliacao'], ['dre'], ['dashboard'], ['aging-report'], ['service-orders'],
     ['extrato-da-conta'], ['lancados-sozinhos'], ['checklist-do-mes'],
-    ['dre-lancamentos'], ['saldo-das-contas'], ['despesas'],
+    ['dre-lancamentos'], ['saldo-das-contas'], ['despesas'], ['pix-dividido'],
   ]) qc.invalidateQueries({ queryKey: k });
+}
+
+/** Uma parte de um Pix dividido (pró-labore + retirada de sócio, 28/09/2026). */
+export interface ParteDoPix {
+  id: string;
+  amount: number | string;
+  expense_category: string | null;
+  /** Nulo no lançamento principal; nas partes, o id do principal. */
+  divisao_id: string | null;
+}
+
+/**
+ * As partes do Pix dividido a que a conta pertence, ou null se ela não é de um Pix dividido.
+ * Desfazer e cancelar valem para o Pix inteiro (o banco junta as partes antes), então a tela
+ * precisa dizer isso antes do clique.
+ */
+export function usePixDividido(tipo: TipoDeLancamento, id: string | null | undefined) {
+  return useQuery({
+    queryKey: ['pix-dividido', tipo, id],
+    enabled: tipo === 'payable' && !!id,
+    staleTime: 30_000,
+    queryFn: async (): Promise<ParteDoPix[] | null> => {
+      const { data: eu, error } = await supabase.from('payables').select('id, divisao_id').eq('id', id!).maybeSingle();
+      if (error) throw error;
+      if (!eu) return null;
+      const raiz = (eu as { divisao_id: string | null }).divisao_id ?? (eu as { id: string }).id;
+      const { data, error: erro } = await supabase.from('payables')
+        .select('id, amount, expense_category, divisao_id')
+        .or(`id.eq.${raiz},divisao_id.eq.${raiz}`)
+        .neq('status', 'cancelled');
+      if (erro) throw erro;
+      const partes = (data ?? []) as ParteDoPix[];
+      return partes.length > 1 ? partes : null;
+    },
+  });
+}
+
+/** "Este Pix está dividido em Pró-labore R$ 1.621,00 + Retirada de sócio R$ 2.379,00. …" */
+export function avisoDoPixDividido(
+  partes: ParteDoPix[], formatar: (v: number) => string, acao: 'desfazer' | 'cancelar',
+): string {
+  const ordem = [...partes].sort((a, b) => Number(!!a.divisao_id) - Number(!!b.divisao_id));
+  const total = Math.round(ordem.reduce((s, p) => s + Number(p.amount || 0), 0) * 100) / 100;
+  return `Este Pix está dividido em ${ordem.map((p) => `${p.expense_category ?? 'sem categoria'} ${formatar(Number(p.amount || 0))}`).join(' + ')}. `
+    + `${acao === 'desfazer' ? 'Desfazer' : 'Cancelar'} vale para o pagamento inteiro de ${formatar(total)}. `
+    + 'Para mudar só uma parte (um gasto pessoal, por exemplo), use Corrigir.';
 }
 
 /** A mensagem do banco já vem em português e diz o que fazer; só tira o prefixo técnico. */

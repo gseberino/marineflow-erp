@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { alvoDoLancamento, faixaDeValor, lancamentoTools, mensagemDoBanco, termoDeBusca } from "./lancamentos.ts";
+import { alvoDoLancamento, faixaDeValor, gruposDoPixDividido, lancamentoTools, mensagemDoBanco, termoDeBusca } from "./lancamentos.ts";
 import { camposDaCorrecao, financialTools } from "./financial.ts";
 import { SEMPRE_NO_PERFIL } from "../agent.ts";
 
@@ -38,6 +38,27 @@ Deno.test("busca: faixa de valor e termo seguro para o filtro", () => {
   assertEquals(termoDeBusca("Coremma (Itajaí), filial"), "Coremma Itajaí filial");
   assertEquals(termoDeBusca("a"), null);
   assertEquals(termoDeBusca(undefined), null);
+});
+
+Deno.test("Pix dividido (pró-labore + retirada): o grupo soma as partes e o principal vem primeiro", () => {
+  const g = gruposDoPixDividido([
+    { id: "parte", divisao_id: "raiz", amount: "2379.00", expense_category: "Retirada de sócio" },
+    { id: "raiz", divisao_id: null, amount: 1621, expense_category: "Pró-labore" },
+    { id: "sozinho", divisao_id: null, amount: 50, expense_category: "Alimentação de campo" },
+    // o mesmo lançamento lido duas vezes não conta em dobro
+    { id: "parte", divisao_id: "raiz", amount: "2379.00", expense_category: "Retirada de sócio" },
+  ]);
+  assertEquals([...g.keys()], ["raiz"]);
+  assertEquals(g.get("raiz"), {
+    total: 4000,
+    partes: [
+      { payable_id: "raiz", categoria: "Pró-labore", valor: 1621 },
+      { payable_id: "parte", categoria: "Retirada de sócio", valor: 2379 },
+    ],
+  });
+  // o valor inteiro cai na faixa da busca de "4 mil"; nenhuma linha sozinha cai
+  const [min, max] = faixaDeValor(4000);
+  assertEquals(g.get("raiz")!.total >= min && g.get("raiz")!.total <= max, true);
 });
 
 Deno.test("mensagemDoBanco: tira o código e deixa a frase para a pessoa", () => {

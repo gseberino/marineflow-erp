@@ -43,6 +43,8 @@ export interface Despesa {
 type Linha = {
   id: string; description: string; issue_date: string; amount: number; status: string;
   expense_category: string | null; supplier_name: string | null; origin: string | null;
+  /** Parte de um Pix dividido (pró-labore + retirada): aponta para o lançamento principal. */
+  divisao_id?: string | null;
   suppliers?: { name?: string } | null; payees?: { name?: string } | null;
   service_orders?: { service_order_number?: string } | null;
   bank_transactions?: {
@@ -86,7 +88,7 @@ export function useDespesas(de: string, ate: string) {
       const [cats, linhas] = await Promise.all([
         supabase.from('financial_categories').select('name, dre_group').eq('type', 'payable'),
         lerEmPaginas((i, f) => supabase.from('payables')
-          .select(`id, description, issue_date, amount, status, expense_category, supplier_name, origin, payee_id, supplier_id,
+          .select(`id, description, issue_date, amount, status, expense_category, supplier_name, origin, payee_id, supplier_id, divisao_id,
                    bank_transaction_id, linked_service_order_id, paid_amount, balance_amount, due_date, notes, cost_center_id,
                    suppliers!payables_supplier_id_fkey(name), payees!payables_payee_id_fkey(name),
                    service_orders!payables_linked_service_order_id_fkey(service_order_number),
@@ -112,7 +114,10 @@ export function useDespesas(de: string, ate: string) {
           filaPor.set(q.created_payable_id, [...(filaPor.get(q.created_payable_id) ?? []), q]);
         }
       }
-      return (linhas as unknown as Linha[]).map((l) => paraDespesa({ ...l, finance_review_queue: filaPor.get(l.id) ?? [] }, grupoDe));
+      // A parte de um Pix dividido não tem proposta própria: quem classificou é quem aprovou o principal.
+      return (linhas as unknown as Linha[]).map((l) => paraDespesa({
+        ...l, finance_review_queue: filaPor.get(l.id) ?? (l.divisao_id ? filaPor.get(l.divisao_id) : undefined) ?? [],
+      }, grupoDe));
     },
     staleTime: 30_000,
   });

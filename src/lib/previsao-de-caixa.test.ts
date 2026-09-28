@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   inferirCiclo, faturasDoCartao, fechamentosEmVolta, vencimentoDaFatura, gastosQueSeRepetem,
-  gastosQueSeRepetemPorDia, mesesDeReferencia, type LinhaDoCartao, type DespesaLancada,
+  gastosQueSeRepetemPorDia, mesesDeReferencia, categoriaNaPrevisao, GASTO_DO_SOCIO, type LinhaDoCartao, type DespesaLancada,
 } from './previsao-de-caixa';
 
 const compra = (data: string, valor: number, bill: string | null = null, extra: Partial<LinhaDoCartao> = {}): LinhaDoCartao =>
@@ -235,5 +235,35 @@ describe('gastos que se repetem', () => {
     // Nada pago: a parte dos dias que faltam, como antes (28 de 30 dias).
     const nada = gastosQueSeRepetemPorDia(gasto, [], '2026-09-03', '2026-09-30');
     expect(soma(nada, '2026-09')).toBeCloseTo(915.35 * 28 / 30, 5);
+  });
+
+  it('pró-labore dividido com a retirada de sócio (28/09/2026): a previsão soma os dois como antes da divisão', () => {
+    const meses = ['2026-05', '2026-06', '2026-07', '2026-08'];
+    const pagos = [3000, 3100, 2900, 3050];
+    // Antes: o Pix inteiro como pró-labore.
+    const antes = gastosQueSeRepetem(meses.map((m, i) => despesa('Pró-labore', `${m}-10`, pagos[i])), '2026-09-27');
+    // Depois: 1.621 de pró-labore e o resto como retirada (não operacional), no mesmo Pix.
+    const depois = gastosQueSeRepetem(meses.flatMap((m, i) => [
+      despesa('Pró-labore', `${m}-10`, 1621),
+      despesa('Retirada de sócio', `${m}-10`, pagos[i] - 1621, { grupo: 'nao_operacional' }),
+    ]), '2026-09-27');
+    expect(depois).toEqual([{ categoria: GASTO_DO_SOCIO, mediaMensal: 3012.5, meses: 4 }]);
+    expect(depois.map((g) => g.mediaMensal)).toEqual(antes.map((g) => g.mediaMensal));
+    // As outras não operacionais continuam fora.
+    expect(gastosQueSeRepetem(meses.map((m) => despesa('Transferência entre contas', `${m}-05`, 1000, { grupo: 'nao_operacional' })), '2026-09-27')).toEqual([]);
+  });
+
+  it('pró-labore e retirada: o pago no mês e a conta em aberto contam pela mesma chave', () => {
+    expect(categoriaNaPrevisao('Pró-labore')).toBe(GASTO_DO_SOCIO);
+    expect(categoriaNaPrevisao('Retirada de sócio')).toBe(GASTO_DO_SOCIO);
+    expect(categoriaNaPrevisao('Contabilidade')).toBe('Contabilidade');
+    const soma = (m: Map<string, number>) => [...m.values()].reduce((s, v) => s + v, 0);
+    const gasto = [{ categoria: GASTO_DO_SOCIO, mediaMensal: 3000, meses: 4 }];
+    // Outubro já tem uma retirada lançada de 3.000: nada a prever nele.
+    const lancada = gastosQueSeRepetemPorDia(gasto, [{ categoria: 'Retirada de sócio', valor: 3000, vencimento: '2026-10-10' }], '2026-10-01', '2026-10-31');
+    expect(soma(lancada)).toBe(0);
+    // Setembro com 1.000 já pago (pela chave do sócio): prevê só o que falta.
+    const paga = gastosQueSeRepetemPorDia(gasto, [], '2026-09-01', '2026-09-30', new Map([[GASTO_DO_SOCIO, 1000]]));
+    expect(soma(paga)).toBeCloseTo(2000, 5);
   });
 });

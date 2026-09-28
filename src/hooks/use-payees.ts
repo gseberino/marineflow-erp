@@ -87,7 +87,7 @@ export function useTotaisDosFavorecidos(ano: number) {
         supabase.from('payees').select('id, document'),
         lerEmPaginas((de, ate) => supabase
           .from('payables')
-          .select(`id, payee_id, amount, paid_amount, status, expense_category,
+          .select(`id, payee_id, amount, paid_amount, status, expense_category, divisao_id,
                    suppliers!payables_supplier_id_fkey(name, cnpj_cpf),
                    bank_transactions!payables_bank_transaction_id_fkey(counterparty_document)`)
           .gte('issue_date', `${ano}-01-01`)
@@ -98,6 +98,7 @@ export function useTotaisDosFavorecidos(ano: number) {
       if (favorecidos.error) throw favorecidos.error;
       type Linha = {
         payee_id: string | null; amount: number; paid_amount: number | null; status: string | null; expense_category: string | null;
+        divisao_id: string | null;
         suppliers: { name: string | null; cnpj_cpf: string | null } | null;
         bank_transactions: { counterparty_document: string | null } | null;
       };
@@ -106,6 +107,7 @@ export function useTotaisDosFavorecidos(ano: number) {
         documento_da_linha: l.bank_transactions?.counterparty_document ?? null,
         documento_do_fornecedor: l.suppliers?.cnpj_cpf ?? null,
         nome_do_fornecedor: l.suppliers?.name ?? null,
+        parte_de_divisao: !!l.divisao_id,
       }));
       return totaisPorFavorecido(linhas, (favorecidos.data ?? []) as Array<{ id: string; document: string | null }>);
     },

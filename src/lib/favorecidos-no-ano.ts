@@ -24,6 +24,8 @@ export interface LancamentoDoFavorecido {
   /** CPF/CNPJ e nome do fornecedor ligado ao lançamento. */
   documento_do_fornecedor?: string | null;
   nome_do_fornecedor?: string | null;
+  /** Parte de um Pix dividido (pró-labore + retirada, 28/09/2026): soma o valor, não conta pagamento. */
+  parte_de_divisao?: boolean;
 }
 
 export interface FavorecidoComDocumento {
@@ -91,7 +93,8 @@ export function totaisPorFavorecido(
     t.pago += pago;
     t.aPagar += valor - pago;
     if (pago > 0) {
-      t.pagamentos += 1;
+      // O Pix dividido é UM pagamento: conta o principal, a parte só soma.
+      if (!l.parte_de_divisao) t.pagamentos += 1;
       const categoria = l.expense_category?.trim() || 'Sem categoria';
       t.categorias.set(categoria, (t.categorias.get(categoria) ?? 0) + pago);
     }
