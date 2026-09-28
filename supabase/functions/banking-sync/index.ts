@@ -16,6 +16,9 @@ import {
   pluggyAuth, fetchItem, fetchAccounts, fetchTransactions, listItems,
   mapTransaction, accountSourceType, motivoDeCreditoEmCartao,
 } from "../_shared/banking/pluggy.ts";
+import {
+  JANELA_INICIAL_DIAS, inicioDaBusca, mudancasDoProvedor, transacaoMaisRecente, type EstadoDaLinha,
+} from "../_shared/banking/janela-de-busca.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
@@ -33,10 +36,11 @@ function jr(body: unknown, status = 200) {
   });
 }
 
-/** Quantos dias para trás buscar quando a conexão nunca sincronizou. */
-const JANELA_INICIAL_DIAS = 365;
-/** Sobreposição em cima da última transação conhecida, para pegar lançamento atrasado. */
-const SOBREPOSICAO_DIAS = 7;
+// A janela (quantos dias para trás, a sobreposição, o cartão) mora em
+// _shared/banking/janela-de-busca.ts — com o porquê do defeito de 27/09/2026.
+
+/** Quantas transações já importadas a sincronização atualiza por vez (pendente → lançada). */
+const LOTE_DE_ATUALIZACAO = 400;
 
 function diasAtras(dias: number): string {
   return new Date(Date.now() - dias * 86_400_000).toISOString().slice(0, 10);
@@ -508,13 +512,6 @@ async function sincronizarConexao(
       return { conexao: rotulo, status: "error", mensagem: msg, importadas: 0 };
     }
 
-    const desde = full
-      ? diasAtras(JANELA_INICIAL_DIAS)
-      : conexao.last_transaction_date
-        ? new Date(new Date(`${conexao.last_transaction_date}T12:00:00Z`).getTime() - SOBREPOSICAO_DIAS * 86_400_000)
-            .toISOString().slice(0, 10)
-        : diasAtras(JANELA_INICIAL_DIAS);
-
     const contas = await fetchAccounts(apiKey, conexao.external_id);
     if (contas.length === 0) {
       const msg = "Nenhuma conta encontrada nesta conexão.";
@@ -522,9 +519,19 @@ async function sincronizarConexao(
       return { conexao: rotulo, status: "error", mensagem: msg, importadas: 0 };
     }
 
+    // A data guardada nunca empurra a busca para o futuro (parcela futura do cartão), e a
+    // conexão com cartão volta mais: compra de cartão entra no provedor semanas depois.
+    const hoje = new Date().toISOString().slice(0, 10);
+    const desde = inicioDaBusca(conexao.last_transaction_date, hoje, {
+      completa: full,
+      temCartao: contas.some((c: any) => accountSourceType(c) === "credit_card"),
+    });
+
     let importadas = 0;
     let jaExistiam = 0;
-    let dataMaisRecente: string | null = conexao.last_transaction_date ?? null;
+    let atualizadas = 0;
+    let valorMudou = 0;
+    const datasQueChegaram: string[] = [];
 
     // Saúde da conexão, gravada a cada sincronização: consentimento de Open Finance vence
     // em 12 meses e o item cai por MFA ou troca de senha. Sem isso a conexão morre calada
@@ -567,23 +574,35 @@ async function sincronizarConexao(
           };
         });
 
-        for (const linha of linhas) {
-          if (!dataMaisRecente || linha.transaction_date > dataMaisRecente) {
-            dataMaisRecente = linha.transaction_date;
-          }
-        }
+        for (const linha of linhas) datasQueChegaram.push(linha.transaction_date);
 
         // Descarta o que já está no banco antes de inserir. O índice único por
         // (bank_ref_id, source_type) é a rede de segurança; esta consulta evita depender
         // dela e permite contar quantas eram realmente novas.
         const refs = linhas.map((l) => l.bank_ref_id);
-        const existentes = new Set<string>();
+        const existentes = new Map<string, EstadoDaLinha & { id: string; amount: number }>();
         for (let i = 0; i < refs.length; i += 200) {
-          const { data } = await admin
+          const { data, error } = await admin
             .from("bank_transactions")
-            .select("bank_ref_id")
+            .select("id, bank_ref_id, tx_status, bill_id, installment_label, amount")
             .in("bank_ref_id", refs.slice(i, i + 200));
-          for (const r of data || []) if (r.bank_ref_id) existentes.add(r.bank_ref_id);
+          if (error) throw error;
+          for (const r of (data || []) as any[]) if (r.bank_ref_id) existentes.set(String(r.bank_ref_id), r);
+        }
+
+        // Do que já estava, atualiza o que o banco mudou: a compra "pendente" que ele lançou,
+        // com a fatura e a parcela. Antes a sincronização só inseria, e a pendente ficava
+        // pendente para sempre — fora da fila e do fluxo. Valor não muda sozinho: só conta.
+        for (const l of linhas) {
+          const atual = existentes.get(l.bank_ref_id);
+          if (!atual) continue;
+          if (Math.abs(Number(atual.amount) - Number(l.amount)) >= 0.01) valorMudou++;
+          if (atualizadas >= LOTE_DE_ATUALIZACAO) continue;
+          const patch = mudancasDoProvedor(atual, l);
+          if (Object.keys(patch).length === 0) continue;
+          const { error } = await admin.from("bank_transactions").update(patch).eq("id", atual.id);
+          if (error) throw error;
+          atualizadas++;
         }
 
         const novas = linhas.filter((l) => !existentes.has(l.bank_ref_id));
@@ -601,12 +620,18 @@ async function sincronizarConexao(
       if (origem === "bank") await conferirSaldoAcumulado(admin, conexao, conta);
     }
 
-    const mensagem = importadas > 0
+    const base = importadas > 0
       ? `${importadas} transação(ões) nova(s)`
       : jaExistiam > 0 ? "Nada novo — tudo já estava importado" : "Sem movimentação no período";
+    const mensagem = [
+      base,
+      atualizadas > 0 ? `${atualizadas} atualizada(s) pelo banco (pendente → lançada, fatura, parcela)` : null,
+      valorMudou > 0 ? `${valorMudou} com valor diferente no banco (não alterado — confira)` : null,
+    ].filter(Boolean).join(" · ");
+    const dataMaisRecente = transacaoMaisRecente(conexao.last_transaction_date, datasQueChegaram, hoje);
 
     await registrarResultado(admin, conexao.id, "ok", mensagem, importadas, dataMaisRecente);
-    return { conexao: rotulo, status: "ok", mensagem, importadas, ja_existiam: jaExistiam };
+    return { conexao: rotulo, status: "ok", mensagem, importadas, ja_existiam: jaExistiam, atualizadas, valor_mudou: valorMudou };
   } catch (e) {
     let msg = String((e as Error)?.message ?? e).slice(0, 300);
 
