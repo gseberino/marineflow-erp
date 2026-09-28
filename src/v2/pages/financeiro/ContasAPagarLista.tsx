@@ -10,6 +10,7 @@ import { useI18n } from '@/i18n';
 import { usePayables } from '@/hooks/use-financial';
 import { exportToCSV } from '@/lib/export';
 import { comoDiaLocal, diasAte } from '@/lib/dia';
+import { origemDoDinheiro, type ContaDaHBR, type LinhaDeOrigem } from '@/lib/origem-do-dinheiro';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -44,7 +45,12 @@ type PayableRow = {
   suppliers?: { name?: string } | null;
   service_orders?: { service_order_number?: string } | null;
   service_order_expenses?: { receipt_url?: string | null }[] | null;
+  /** A linha do banco que pagou: de qual conta ou cartão saiu. */
+  bank_transactions?: (LinhaDeOrigem & { bank_connections?: ContaDaHBR | null }) | null;
 };
+
+/** "Conta C6", "Cartão Nubank final 4922"… — null enquanto nada saiu do banco. */
+const deOndeSaiu = (p: PayableRow) => origemDoDinheiro(p.bank_transactions, p.bank_transactions?.bank_connections);
 
 /** Situações de uma conta que ainda se deve — o recorte com que Contas a Pagar abre. */
 const STATUS_EM_ABERTO = ['pending', 'partially_paid', 'overdue'];
@@ -241,9 +247,16 @@ export function ContasAPagarLista({ onNovaConta }: {
     },
     {
       key: 'origin', header: 'Origem', minWidth: 118, priority: 5, detailLabel: 'Origem',
+      // Como a conta nasceu e, quando já saiu do banco, de qual conta ou cartão (28/09/2026).
       render: (p) => {
         const o = originView(p.origin);
-        return <StatusChip tone={o.tone}>{o.label}</StatusChip>;
+        const deOnde = deOndeSaiu(p);
+        return (
+          <span className="block leading-tight">
+            <StatusChip tone={o.tone}>{o.label}</StatusChip>
+            {deOnde && <span className="mt-0.5 block text-xs text-muted-foreground">{deOnde}</span>}
+          </span>
+        );
       },
     },
     {
@@ -314,6 +327,10 @@ export function ContasAPagarLista({ onNovaConta }: {
                 { key: 'due_date', label: 'Vencimento', format: (v: string | null) => (v ? comoDiaLocal(v).toLocaleDateString('pt-BR') : '') },
                 { key: 'status', label: 'Status' },
                 { key: 'name', label: 'Fornecedor' },
+                {
+                  key: 'bank_transactions', label: 'De onde saiu',
+                  format: (bt: PayableRow['bank_transactions']) => origemDoDinheiro(bt, bt?.bank_connections) ?? '',
+                },
               ] as never)
             }
           >
@@ -399,6 +416,7 @@ export function ContasAPagarLista({ onNovaConta }: {
                 <p className="text-sm text-muted-foreground">
                   {formatDate(p.due_date)}{alert ? ` · ${alert.label}` : ''} · <b className="text-foreground">{formatCurrency(Number(p.balance_amount ?? 0))}</b>
                 </p>
+                {deOndeSaiu(p) && <p className="text-xs text-muted-foreground">Saiu de: {deOndeSaiu(p)}</p>}
                 {p.status !== 'cancelled' && (
                   <div className="mt-3 flex items-center gap-2">
                     {p.status !== 'paid' && (

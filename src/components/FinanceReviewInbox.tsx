@@ -30,9 +30,12 @@ import { PayeeFormDialog } from '@/components/PayeeFormDialog';
 import { BuscaFinanceira } from '@/components/BuscaFinanceira';
 import { EvidenciaDaLinha, VinculoDaLinha } from '@/components/ExtratoIdentificacao';
 import { ParaOndeFoi, ObservacaoECentro } from '@/components/ParaOndeFoi';
+import { BotaoVerOS } from '@/components/VerOSRapido';
+import { useContasDaHBR } from '@/hooks/use-bank-connections';
+import { origemDoDinheiro } from '@/lib/origem-do-dinheiro';
 import {
   precisaDecidir, podeJaEstarLancado, osAnotada, temPerguntaDaOS, temPerguntaDaOC,
-  faltaNoDestinoDaLinha, precisaDeDestino, fraseDaFalta, faltaNoDestino, SERVICO_DE_CLIENTE,
+  faltaNoDestinoDaLinha, precisaDeDestino, fraseDaFalta, faltaNoDestino, SERVICO_DE_CLIENTE, vinculoEfetivo,
 } from '@/lib/extrato-vinculo';
 import { buscaAtiva, casaComBusca, type CriterioDeBusca } from '@/lib/busca-financeira';
 import {
@@ -54,6 +57,9 @@ import {
 } from '@/lib/finance-inbox-grouping';
 import { categoriaPorMcc } from '../../supabase/functions/_shared/banking/mcc';
 import { historicoSemIdentidade } from '../../supabase/functions/_shared/banking/proposals';
+import {
+  contradicaoSemReceita, entradaSemCliente, saiSemReceita,
+} from '../../supabase/functions/_shared/banking/entrada-sem-cliente';
 
 function corDaConfianca(c: number): string {
   if (c >= 85) return 'bg-success/10 text-success border-success/30';
@@ -152,21 +158,26 @@ function VinculoDaCategoria({
 }) {
   const pedeFavorecido = !ehReceita && CATEGORIAS_COM_FAVORECIDO.includes(categoria);
   const pedeOS = CATEGORIAS_COM_OS.includes(categoria);
+  // Dinheiro de outra conta da HBR ou aporte do sócio não tem cliente (observação do dono,
+  // 28/09/2026): a linha sai da fila marcada, sem conta a receber.
+  const semCliente = ehReceita ? entradaSemCliente(categoria) : null;
+  const pedeCliente = ehReceita && !semCliente;
 
   const { data: favorecidos = [] } = usePayees();
   const { data: ordens = [] } = useServiceOrdersVinculaveis();
-  const { data: clientes = [] } = useClientesParaReceita(ehReceita);
+  const { data: clientes = [] } = useClientesParaReceita(pedeCliente);
   const [cadastrando, setCadastrando] = useState(false);
 
   if (!pedeFavorecido && !pedeOS && !ehReceita) return null;
 
   return (
     <div className="mt-2 flex max-w-lg flex-wrap items-center gap-2">
-      {/* Entrada SEMPRE pede cliente, independente da categoria: receivables.client_id é
-          NOT NULL, então sem esta escolha a aprovação falha com "Escolha o cliente antes de
-          aprovar esta receita". O motor não adivinha — quem paga por Pix aparece no extrato
-          com o nome da pessoa física, que raramente é o nome do cliente cadastrado. */}
-      {ehReceita && (
+      {semCliente && <p className="text-xs text-muted-foreground">{semCliente.aviso}</p>}
+      {/* Entrada pede cliente em toda categoria de receita: receivables.client_id é NOT NULL,
+          então sem esta escolha a aprovação falha com "Escolha o cliente antes de aprovar esta
+          receita". O motor não adivinha — quem paga por Pix aparece no extrato com o nome da
+          pessoa física, que raramente é o nome do cliente cadastrado. */}
+      {pedeCliente && (
         <Select
           value={clienteId ?? ''}
           onValueChange={(v) => onMudar({ clientId: v })}
@@ -232,6 +243,8 @@ function VinculoDaCategoria({
           </SelectContent>
         </Select>
       )}
+      {/* Mais de uma OS do mesmo cliente: conferir qual é antes de aprovar (pedido de 28/09/2026). */}
+      {pedeOS && <BotaoVerOS osId={osId} />}
     </div>
   );
 }
@@ -336,12 +349,14 @@ function PerguntaDaOS({ p, correcao, onCorrigir, ocupado }: {
               onClick={() => onCorrigir({ ...correcao, serviceOrderId: null })}>não é</button>
           : <button type="button" className="underline" disabled={ocupado}
               onClick={() => onCorrigir({ ...correcao, serviceOrderId: undefined })}>mudar</button>}
+        {respondida !== null && <> <BotaoVerOS osId={osMostrada} /></>}
       </p>
     );
   }
   return (
     <div className="mt-2 flex max-w-2xl flex-wrap items-center gap-2 rounded-md border border-primary/30 bg-primary/5 p-2 text-xs">
       <span className="min-w-0">O sistema acha que é da <b>{rotulo}</b>. É desta OS?</span>
+      <BotaoVerOS osId={sugerida} />
       <Button size="sm" variant="outline" className="h-7 text-xs" disabled={ocupado}
         onClick={() => onCorrigir({ ...correcao, serviceOrderId: sugerida })}>Sim, é desta</Button>
       <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={ocupado}
@@ -410,6 +425,29 @@ function LinhaProposta({
   // regra, não lança — "Ciente" e "Descartar" apenas tiram da lista.
   const anomalia = p.kind === 'anomaly';
   const categoria = correcao?.category ?? p.suggested_category ?? '';
+  // De qual conta ou cartão da HBR (pedido do dono, 28/09/2026): quem confere vai direto ao
+  // aplicativo certo. Na transferência, as duas pontas na ordem do dinheiro.
+  const contas = useContasDaHBR();
+  const tx = p.bank_transactions;
+  const origem = origemDoDinheiro(tx, tx?.bank_connection_id ? contas.get(tx.bank_connection_id) : null);
+  const outraPonta = transferencia && p.outra_perna
+    ? origemDoDinheiro(p.outra_perna, p.outra_perna.bank_connection_id ? contas.get(p.outra_perna.bank_connection_id) : null)
+    : null;
+  const rotuloDaOrigem = outraPonta
+    ? tx?.transaction_type === 'credit' ? `${outraPonta} → ${origem}`
+      : tx?.transaction_type === 'debit' ? `${origem} → ${outraPonta}` : `${origem} ⇄ ${outraPonta}`
+    : origem;
+  // Entrada de transferência ou aporte do sócio sai da fila sem lançamento: sem centro de custo.
+  const entradaSemLancamento = !!saiSemReceita(p.kind, categoria);
+  // Casar, sinal, saldo de OS ou "é desta OS" dizem "é recebimento de cliente"; transferência e
+  // aporte, o contrário — com as duas respostas, a linha não sai (revisão de 28/09/2026). A mesma
+  // leitura do servidor: o vínculo escolhido, a OS respondida ou, sem resposta, a da anotação.
+  const contradicao = entradaSemLancamento
+    ? contradicaoSemReceita(
+      vinculoEfetivo(p.vinculo_sugerido, correcao?.vinculo),
+      correcao?.serviceOrderId !== undefined ? correcao.serviceOrderId : p.evidencia?.anotacao?.os_id ?? null,
+    )
+    : null;
   const porRegra = !!p.applied_rule_id;
   // "3/10" → 10. O total é o que interessa aqui; qual parcela chegou primeiro é detalhe
   // da fatura, não da compra.
@@ -423,7 +461,8 @@ function LinhaProposta({
   const faltaDestino = perguntaDestino ? faltaNoDestinoDaLinha(p, correcao) : [];
   const bloqueio = decidir
     ? (podeJaEstarLancado(p.vinculo_sugerido) ? 'Pode já estar lançado: escolha casar ou lançar novo' : 'O sistema sugeriu um vínculo: diga se é isso antes de aprovar')
-    : faltaDestino.length > 0 ? fraseDaFalta(faltaDestino) : null;
+    : faltaDestino.length > 0 ? fraseDaFalta(faltaDestino)
+    : contradicao;
 
   return (
     <Card className="p-3">
@@ -465,13 +504,15 @@ function LinhaProposta({
             <span className="font-semibold text-foreground">
               {formatCurrency(Number(p.suggested_amount ?? 0))}
             </span>
-            {/* De onde veio muda onde se confere: gasto de cartão se acha na fatura, gasto
-                de conta no extrato bancário. Sem isso o gestor procura no lugar errado. */}
-            {p.bank_transactions?.source_type && (
-              <Badge variant="outline" className="gap-1 text-xs">
-                {p.bank_transactions.source_type === 'credit_card'
-                  ? <><CreditCard className="h-3 w-3" />Fatura de cartão</>
-                  : <><Landmark className="h-3 w-3" />Conta corrente</>}
+            {/* De onde veio muda onde se confere: gasto de cartão se acha na fatura daquele
+                cartão, gasto de conta no extrato daquela conta. Sem isso o gestor procura no
+                lugar errado — "Fatura de cartão" não dizia se era o C6 ou o Nubank. */}
+            {tx?.source_type && rotuloDaOrigem && (
+              <Badge variant="outline" className="gap-1 text-xs" title="De qual conta ou cartão da HBR — onde conferir no aplicativo do banco">
+                {tx.source_type === 'credit_card'
+                  ? <CreditCard className="h-3 w-3 shrink-0" />
+                  : <Landmark className="h-3 w-3 shrink-0" />}
+                {rotuloDaOrigem}
               </Badge>
             )}
             {/* Uma compra, não N despesas: o valor mostrado é o da COMPRA, e o rótulo
@@ -489,6 +530,8 @@ function LinhaProposta({
               <Badge variant="outline" className="border-amber-500/50 text-xs text-amber-600">
                 {foraDoLote === 'acima_do_limite'
                   ? <>Acima de {formatCurrency(limiteLote)} — aprove aqui</>
+                  : foraDoLote === 'sem_receita'
+                    ? 'Sai sem receita — aprove aqui'
                   : foraDoLote === 'responder_vinculo'
                     ? 'Tem vínculo sugerido — responda aqui'
                     : foraDoLote === 'responder_destino'
@@ -527,6 +570,7 @@ function LinhaProposta({
               ocupado={ocupado}
             />
           )}
+          {contradicao && <p className="mt-1 max-w-2xl text-xs text-amber-600">{contradicao}.</p>}
 
           {!transferencia && !anomalia && (
             <PerguntasDaOSeOC p={p} correcao={correcao} onCorrigir={onCorrigir} ocupado={ocupado} />
@@ -548,6 +592,7 @@ function LinhaProposta({
             <ObservacaoECentro
               correcao={correcao}
               ehReceita={p.kind === 'create_receivable'}
+              semCentro={entradaSemLancamento}
               onMudar={(c) => onCorrigir({ ...correcao, ...c })}
               ocupado={ocupado}
             />
@@ -567,6 +612,7 @@ function LinhaProposta({
                 escolha={correcao?.vinculo}
                 onEscolher={(e) => onCorrigir({ ...correcao, vinculo: e })}
                 ocupado={ocupado}
+                semReceita={entradaSemLancamento}
               />
             </>
           )}
@@ -738,7 +784,7 @@ function CartaoDoFavorecido({
         ? `Todas passam de ${formatCurrency(limiteLote)} — aprove uma a uma.`
         : perguntaDestino && faltaDestino.length > 0
           ? 'Diga acima para onde foi e o que foi feito para poder aprovar.'
-          : 'Nenhuma cabe no lote (valor, vínculo, OS ou "para onde foi" para responder) — aprove uma a uma.'
+          : 'Nenhuma cabe no lote (valor, vínculo, OS ou "para onde foi" para responder, transferência ou aporte) — aprove uma a uma.'
       : null;
 
   return (
@@ -1035,11 +1081,13 @@ export function FinanceReviewInbox({
     const semResposta = [...selecionadas].filter((id) => {
       const p = porId.get(id);
       const m = p ? motivoForaDoLote(p, limiteLote, correcoes[id]) : null;
-      return m === 'responder_os' || m === 'responder_vinculo' || m === 'responder_destino';
+      return m === 'responder_os' || m === 'responder_vinculo' || m === 'responder_destino' || m === 'sem_receita';
     });
     const ids = [...selecionadas].filter((id) => !semResposta.includes(id));
     if (semResposta.length > 0) {
-      toast.info(`${semResposta.length} linha(s) ficaram de fora: têm vínculo, OS/OC ou "para onde foi" para responder na própria linha.`);
+      // Entrada que virou transferência ou aporte depois de marcada também fica: sai sem receita,
+      // é decisão de cada linha (revisão de 28/09/2026).
+      toast.info(`${semResposta.length} linha(s) ficaram de fora: têm vínculo, OS/OC ou "para onde foi" para responder, ou saem sem receita (transferência, aporte) — aprove na própria linha.`);
     }
     if (ids.length === 0) return;
     const overrides: Record<string, Correcao> = {};
@@ -1243,7 +1291,15 @@ export function FinanceReviewInbox({
     p,
     correcao: correcoes[p.id],
     onCorrigir: (c: Correcao) => corrigir(p.id, c),
-    onAprovar: () => aprovar.mutate({ ids: [p.id], overrides: correcoes[p.id] ? { [p.id]: correcoes[p.id] } : {} }),
+    onAprovar: () => {
+      // Entrada: vai a categoria que a linha MOSTROU. Reclassificada no servidor com a tela aberta
+      // (uma regra nova de aporte, por exemplo), ela sairia sem receita sem ninguém ter visto
+      // "Aporte" na linha (revisão de 28/09/2026).
+      const c = p.kind === 'create_receivable' && p.suggested_category && correcoes[p.id]?.category === undefined
+        ? { ...correcoes[p.id], category: p.suggested_category }
+        : correcoes[p.id];
+      aprovar.mutate({ ids: [p.id], overrides: c ? { [p.id]: c } : {} });
+    },
     onRecusar: () => recusar.mutate({ ids: [p.id] }),
     onDuplicata: () => duplicata.mutate({ propostaId: p.id, bankTransactionId: p.bank_transaction_id }),
     onCriarRegra: () => criarRegraDaLinha(p),
@@ -1568,13 +1624,20 @@ export function FinanceReviewInbox({
             </div>
           </div>
 
-          {lote.map((p) => (
-            <LinhaProposta
-              key={p.id} {...propsComuns(p)} modoLote
-              selecionada={selecionadas.has(p.id)}
-              onSelecionar={(m) => marcar(p.id, m)}
-            />
-          ))}
+          {lote.map((p) => {
+            // Trocada na linha para transferência ou aporte, a entrada sai sem receita — só pela
+            // própria linha ("Aprovar selecionadas" a tira): ganha o botão dela (revisão de 28/09/2026).
+            const semReceita = motivoForaDoLote(p, limiteLote, correcoes[p.id]) === 'sem_receita';
+            return (
+              <LinhaProposta
+                key={p.id} {...propsComuns(p)} modoLote
+                mostrarAprovar={semReceita}
+                foraDoLote={semReceita ? 'sem_receita' : null}
+                selecionada={selecionadas.has(p.id)}
+                onSelecionar={(m) => marcar(p.id, m)}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -1582,7 +1645,7 @@ export function FinanceReviewInbox({
         <div className="space-y-2">
           <div className="rounded-lg border bg-muted/30 p-2">
             <p className="text-sm font-medium">
-              Revisar uma a uma — acima de {formatCurrency(limiteLote)}, transferências e perguntas de vínculo, OS ou "para onde foi" ({individuais.length})
+              Revisar uma a uma — acima de {formatCurrency(limiteLote)}, transferências e aportes, perguntas de vínculo, OS ou "para onde foi" ({individuais.length})
             </p>
           </div>
           {individuais.map((p) => (

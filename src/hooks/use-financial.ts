@@ -32,7 +32,8 @@ export function usePayables() {
     // 05/03/2026) e Contas a Pagar aparecia vazia — as 5 em aberto ficavam de fora.
     queryFn: async () => (await lerEmPaginas((de, ate) => supabase
       .from('payables')
-      .select('*, suppliers!payables_supplier_id_fkey(name), payees!payables_payee_id_fkey(name), service_orders!payables_linked_service_order_id_fkey(service_order_number), service_order_expenses!service_order_expenses_linked_payable_id_fkey(receipt_url)')
+      // A linha do banco que pagou diz de qual conta ou cartão saiu (src/lib/origem-do-dinheiro).
+      .select('*, suppliers!payables_supplier_id_fkey(name), payees!payables_payee_id_fkey(name), service_orders!payables_linked_service_order_id_fkey(service_order_number), service_order_expenses!service_order_expenses_linked_payable_id_fkey(receipt_url), bank_transactions!payables_bank_transaction_id_fkey(source_type, card_last_digits, bank_connections(label, institution, provider))')
       .order('due_date', { ascending: true })
       .order('id')
       .range(de, ate)))

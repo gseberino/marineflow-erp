@@ -18,16 +18,19 @@
 
 import { faltaNoDestinoDaLinha, perguntaDaOSAberta, precisaDecidir } from '@/lib/extrato-vinculo';
 import type { Correcao, PropostaFinanceira } from '@/hooks/use-finance-review';
+import { saiSemReceita } from '../../supabase/functions/_shared/banking/entrada-sem-cliente';
 
 /** Por que a linha não entra no lote (nem no botão do grupo). */
 export type MotivoForaDoLote =
-  'transferencia' | 'acima_do_limite' | 'responder_vinculo' | 'responder_os' | 'responder_destino';
+  'transferencia' | 'sem_receita' | 'acima_do_limite' | 'responder_vinculo' | 'responder_os' | 'responder_destino';
 
 /**
  * A linha cabe no lote? null = cabe. A mesma regra na lista e no agrupado.
  *
  * - Transferência entre contas: confirmar que dois lançamentos são o mesmo dinheiro é
  *   decisão de fato, não volume.
+ * - Entrada de transferência ou aporte do sócio (revisão de 28/09/2026): sai da fila SEM
+ *   receita. Em lote, uma categoria só sugerida tiraria um Pix de cliente do resultado.
  * - Acima do limite de lote (decisão do dono, 14/09/2026): uma a uma.
  * - Vínculo sugerido sem resposta, ou "é desta OS?" / "paga esta OC?" sem resposta (decisão
  *   do dono, 26/09/2026: o sistema "deve sempre questionar"): aprovar o lote de uma vez faria
@@ -41,6 +44,7 @@ export function motivoForaDoLote(
   correcao?: Correcao,
 ): MotivoForaDoLote | null {
   if (p.kind === 'internal_transfer') return 'transferencia';
+  if (saiSemReceita(p.kind, correcao?.category ?? p.suggested_category)) return 'sem_receita';
   if (!(Number(p.suggested_amount ?? 0) < limiteLote)) return 'acima_do_limite';
   if (precisaDecidir(p.vinculo_sugerido, correcao?.vinculo)) return 'responder_vinculo';
   if (perguntaDaOSAberta(p, correcao)) return 'responder_os';

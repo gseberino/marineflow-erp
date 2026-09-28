@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -40,6 +41,15 @@ export function useBankConnections() {
       return (data || []) as unknown as BankConnection[];
     },
   });
+}
+
+/**
+ * As contas da HBR pelo id da conexão — para dizer de onde o dinheiro saiu ("Conta C6",
+ * "Cartão Nubank final 4922") sem cada lista carregar a conexão junto (src/lib/origem-do-dinheiro).
+ */
+export function useContasDaHBR(): Map<string, BankConnection> {
+  const { data } = useBankConnections();
+  return useMemo(() => new Map((data ?? []).map((c) => [c.id, c])), [data]);
 }
 
 export function useSaveBankConnection() {

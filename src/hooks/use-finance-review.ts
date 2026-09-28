@@ -101,6 +101,15 @@ export interface PropostaFinanceira {
     card_last_digits: string | null;
     /** De qual conta veio — para o Extrato por conta. */
     bank_connection_id?: string | null;
+    /** 'debit' saiu, 'credit' entrou — numa transferência diz qual ponta é esta. */
+    transaction_type?: string | null;
+  } | null;
+  /** Transferência entre contas: a OUTRA perna, para a linha dizer de qual conta saiu e em qual entrou. */
+  outra_perna?: {
+    source_type: string | null;
+    card_last_digits: string | null;
+    bank_connection_id: string | null;
+    transaction_type: string | null;
   } | null;
 }
 
@@ -195,16 +204,48 @@ export function useFinanceReviewQueue() {
           counterparty_bank, counterparty_branch, counterparty_account, payment_method,
           payment_reason, merchant_name, merchant_document, installment_label,
           pix_end_to_end_id, description, source_type, bank_ref_id,
-          payee_mcc, provider_category, card_last_digits, bank_connection_id )`)
+          payee_mcc, provider_category, card_last_digits, bank_connection_id, transaction_type )`)
         .eq('status', 'pending')
         .order('confidence', { ascending: false })
         .order('suggested_amount', { ascending: false })
         .limit(500);
       if (error) throw error;
-      return (data ?? []) as unknown as PropostaFinanceira[];
+      const propostas = (data ?? []) as unknown as PropostaFinanceira[];
+      // Transferência entre contas: a conta da OUTRA perna, para a linha dizer "saiu da X,
+      // entrou na Y" (pedido do dono, 28/09/2026). Consulta à parte — são poucas, e o join pelo
+      // segundo caminho é o que derrubava a fila (PGRST201). Se ela falhar, a linha só perde o
+      // destino: a fila não cai por causa de um rótulo.
+      const outras = idsDasOutrasPernas(propostas);
+      if (outras.length > 0) {
+        const { data: pernas } = await supabase.from('bank_transactions')
+          .select('id, source_type, card_last_digits, bank_connection_id, transaction_type')
+          .in('id', outras.slice(0, 300));
+        juntarOutraPerna(propostas, (pernas ?? []) as OutraPernaLida[]);
+      }
+      return propostas;
     },
     staleTime: 30_000,
   });
+}
+
+type OutraPernaLida = { id: string } & NonNullable<PropostaFinanceira['outra_perna']>;
+
+/** Os ids da outra perna das transferências da fila, sem repetir. */
+export function idsDasOutrasPernas(propostas: PropostaFinanceira[]): string[] {
+  return [...new Set(propostas
+    .filter((p) => p.kind === 'internal_transfer' && p.related_transaction_id)
+    .map((p) => p.related_transaction_id as string))];
+}
+
+/** Pendura em cada transferência a outra perna lida; a que não veio fica null (sem destino). */
+export function juntarOutraPerna(propostas: PropostaFinanceira[], pernas: OutraPernaLida[]): PropostaFinanceira[] {
+  const porId = new Map(pernas.map((x) => [x.id, x]));
+  for (const p of propostas) {
+    if (p.kind === 'internal_transfer' && p.related_transaction_id) {
+      p.outra_perna = porId.get(p.related_transaction_id) ?? null;
+    }
+  }
+  return propostas;
 }
 
 /**
@@ -355,6 +396,7 @@ export const ROTULO_DA_IGNORADA: Record<string, string> = {
   duplicata: 'Duplicata da importação',
   fatura_cartao: 'Pagamento de fatura de cartão',
   transferencia: 'Transferência entre contas próprias',
+  aporte_socio: 'Aporte de sócio (dinheiro do sócio entrando na empresa)',
   mecanica_cartao: 'Mecânica do cartão (Pix no Crédito, estorno, ajuste)',
   parcela: 'Parcela de compra parcelada',
   manual: 'Ignorada à mão',

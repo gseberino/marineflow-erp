@@ -140,12 +140,15 @@ Deno.test("aprovar leva destino, centro de custo (pelo nome) e o que foi feito",
 
 /* Regra de ENTRADA (resposta 18 do dono): só por documento, com o cliente, e só sugere. Banco
    falso: clientes em páginas, categorias de receita, regras existentes e a contagem do extrato. */
-function sbParaRegraDeEntrada(clientes: Array<{ id: string; name: string; cpf_cnpj?: string | null }>, existentes: any[] = []) {
+function sbParaRegraDeEntrada(
+  clientes: Array<{ id: string; name: string; cpf_cnpj?: string | null }>, existentes: any[] = [],
+  categorias: Array<{ name: string; dre_group: string }> = [{ name: "Serviços prestados", dre_group: "receita" }],
+) {
   const inseridas: any[] = [];
   const atualizadas: any[] = [];
   const tabela = (nome: string) => {
     const resposta = () => nome === "financial_categories"
-      ? { data: [{ name: "Serviços prestados", dre_group: "receita" }], error: null }
+      ? { data: categorias, error: null }
       : nome === "finance_rules" ? { data: existentes, error: null }
       : nome === "bank_transactions" ? { count: 3, data: null, error: null }
       : { data: [], error: null };
@@ -229,4 +232,32 @@ Deno.test("cliente dito parecido vira pergunta, nunca escolha", async () => {
   const r = await resolverClienteDito({ sb: banco.sb } as never, "João da Silva") as any;
   assertEquals(typeof r.error, "string");
   assertEquals(r.opcoes.map((o: any) => o.id), ["c1"]);
+});
+
+Deno.test("regra de entrada de aporte do sócio: sem cliente, sem perguntar cliente, e só sugere", async () => {
+  Deno.env.set("SUPABASE_URL", "https://exemplo.supabase.co");
+  const original = globalThis.fetch;
+  globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({ ok: true, atualizadas: 2 }), { status: 200 }))) as typeof fetch;
+  // Nenhum cliente cadastrado: se a ferramenta procurasse o cliente, daria erro.
+  const banco = sbParaRegraDeEntrada([], [], [
+    { name: "Serviços prestados", dre_group: "receita" }, { name: "Aporte de sócio", dre_group: "nao_operacional" },
+  ]);
+  try {
+    const ok = await tool("criar_regra_financeira").execute({
+      sentido: "entrada", reconhecer_por: "documento", valor_de_busca: "123.456.789-01", categoria: "aporte de sócio",
+    }, ctxDe(banco.sb) as never) as any;
+    assertEquals(ok.ok, true);
+    assertEquals(ok.cliente, null);
+    assertEquals(banco.inseridas[0].set_client_id, null);
+    assertEquals(banco.inseridas[0].set_category, "Aporte de sócio");
+    assertEquals(banco.inseridas[0].autonomy, "suggest");
+    // Receita comum continua exigindo o cliente.
+    const semCliente = await tool("criar_regra_financeira").execute({
+      sentido: "entrada", reconhecer_por: "documento", valor_de_busca: "98765432100", categoria: "Serviços prestados",
+    }, ctxDe(banco.sb) as never) as any;
+    assertEquals(typeof semCliente.error, "string");
+    assertEquals(banco.inseridas.length, 1);
+  } finally {
+    globalThis.fetch = original;
+  }
 });

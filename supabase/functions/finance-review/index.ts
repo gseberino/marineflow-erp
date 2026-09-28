@@ -39,6 +39,9 @@ import {
   exigeDecisao, osAnotada, perguntaDaOSAberta, podeJaEstarLancado, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido,
 } from "../_shared/banking/vinculo.ts";
 import { aplicarDestino, faltaNoDestino, precisaDeDestino, type Destino } from "../_shared/banking/destino.ts";
+import {
+  contradicaoSemReceita, FRASE_SEM_RECEITA_COM_VINCULO, FRASE_SEM_RECEITA_SOZINHA, motivoDaEntradaSemCliente, saiSemReceita,
+} from "../_shared/banking/entrada-sem-cliente.ts";
 import { lerRespostaDaReceita } from "../_shared/banking/cnae.ts";
 import { PISO_DA_CONFIANCA, selecionarParaLancarSozinho, type LinhaCandidata } from "./lancar-sozinho.ts";
 
@@ -1743,6 +1746,9 @@ async function aprovar(
   const recebidoPara = new Map<string, string>();
   /** Pernas de compra parcelada que saíram de vista junto com a aprovação. */
   let pernasRetiradas = 0;
+  // Transferência e aporte do sócio saem da fila marcados, sem lançamento: a mensagem não os
+  // conta como "lançamento criado".
+  let marcadasSemLancamento = 0;
 
   // Decisão do dono (14/09/2026): acima do limite de lote a proposta é aprovada UMA A UMA.
   // Em lote (mais de um id), o servidor tira do caminho o que passa do limite e devolve a
@@ -1754,6 +1760,8 @@ async function aprovar(
   const semResposta: string[] = [];
   /** Em lote, serviço de terceiro sem "para onde foi" e "o que foi feito" não vai. */
   const semDestino: string[] = [];
+  /** Em lote, entrada que sai sem receita (transferência, aporte do sócio) não vai. */
+  const semReceita: string[] = [];
   let elegiveis = todas;
   if (ids.length > 1) {
     const limite = await lerLimiteLote(admin);
@@ -1780,6 +1788,14 @@ async function aprovar(
       const categoria = String(ov.category ?? p.suggested_category ?? "");
       if (faltaNoDestino(p.kind, categoria, ov, ov.serviceOrderId === undefined ? osAnotada(p) : null).length === 0) return true;
       semDestino.push(String(p.title).slice(0, 60));
+      return false;
+    });
+    // Transferência entre contas ou aporte do sócio numa ENTRADA: a linha sai da fila sem receita,
+    // decisão de cada linha (revisão de 28/09/2026). Em lote, a categoria só sugerida — pela IA,
+    // pelo favorecido — tiraria um Pix de cliente do resultado sem ninguém ter olhado.
+    elegiveis = elegiveis.filter((p) => {
+      if (!saiSemReceita(p.kind, overrides[p.id]?.category ?? p.suggested_category)) return true;
+      semReceita.push(String(p.title).slice(0, 60));
       return false;
     });
   }
@@ -1821,6 +1837,13 @@ async function aprovar(
             ? `Pode ser ${o.rotulo.replace(/^Pagamento já lançado: /, "")}, que JÁ está lançado. Abra a linha e escolha: casar com ele ou lançar novo`
             : `Parece ser ${o.rotulo}. Abra a linha e diga se é isso ou se é para lançar novo`);
         }
+      }
+
+      // Casar, registrar sinal ou ligar ao saldo de uma OS diz "é recebimento de cliente";
+      // transferência e aporte do sócio (a entrada sai sem receita) dizem o contrário. As duas
+      // respostas juntas: perguntar de novo, antes de qualquer escrita (revisão de 28/09/2026).
+      if (vinculo && saiSemReceita(p.kind, ov.category ?? p.suggested_category)) {
+        throw new Error(contradicaoSemReceita(vinculo, undefined) ?? FRASE_SEM_RECEITA_COM_VINCULO);
       }
 
       // Casar com o que já existe: nenhum lançamento novo nasce.
@@ -1875,6 +1898,10 @@ async function aprovar(
         if (!(cc as any).active) throw new Error("O centro de custo escolhido foi desativado — escolha outro");
         centroDeCusto = String((cc as any).id);
       }
+
+      // Sem lançamento: só marca a linha (transferência, ou entrada que não tem cliente).
+      let semLancamento = p.kind === "internal_transfer";
+      const semCliente = saiSemReceita(p.kind, categoria);
 
       if (p.kind === "internal_transfer") {
         // Só marca as duas pernas: nenhum lançamento é criado.
@@ -2007,6 +2034,26 @@ async function aprovar(
             avisos.push(`${String(p.title).slice(0, 60)}: despesa lançada, mas a OC não foi ligada${eOc ? ` (${eOc.message})` : " (já tinha pagamento)"}`);
           }
         }
+      } else if (semCliente) {
+        // Dinheiro de outra conta da HBR ou aporte do sócio: não é receita e não tem cliente
+        // (observação do dono, 28/09/2026). A linha sai da fila marcada — a transferência como
+        // a que o motor reconhece sozinho; o aporte com marca própria, porque é dinheiro novo.
+        // Ligada a uma OS (o saldo escolhido no vínculo, "Sim, é desta", a anotação), a entrada é
+        // pagamento do serviço: marcar apagaria a resposta e a OS ficaria sem baixa — perguntar de
+        // novo, como a trava de contradição da receita (revisão de 28/09/2026).
+        const contradicao = contradicaoSemReceita(vinculo, osRespondida);
+        if (contradicao) throw new Error(contradicao);
+        // Nunca sozinha: sai da fila sem receita, é decisão de cada linha.
+        if (automatica) throw new Error(FRASE_SEM_RECEITA_SOZINHA);
+        const { error: eMarca } = await admin.from("bank_transactions").update({
+          reconciled: true,
+          dismissed_kind: semCliente.marca,
+          dismissed_reason: motivoDaEntradaSemCliente(semCliente, observacaoDa(ov)),
+          dismissed_at: new Date().toISOString(),
+          dismissed_by: userId,
+        }).eq("id", p.bank_transaction_id);
+        if (eMarca) throw eMarca;
+        semLancamento = true;
       } else if (p.kind === "create_receivable") {
         // Receita exige cliente (receivables.client_id é NOT NULL) e, sem ele, o
         // lançamento não teria a quem pertencer. Falhar aqui com motivo legível é melhor
@@ -2074,7 +2121,7 @@ async function aprovar(
       }).eq("id", p.id);
 
       await anotar(admin, {
-        acao: p.kind === "internal_transfer" ? "ignorou" : automatica ? "lancou_sozinho" : "aprovou_proposta",
+        acao: semLancamento ? "ignorou" : automatica ? "lancou_sozinho" : "aprovou_proposta",
         autor: userId,
         bank_transaction_id: p.bank_transaction_id,
         payable_id: criadoPara.get(p.id) ?? null,
@@ -2093,6 +2140,7 @@ async function aprovar(
           .then(undefined, () => { /* contador é telemetria: nunca derruba a aprovação */ });
       }
       feitos.push(p.id);
+      if (semLancamento) marcadasSemLancamento += 1;
     } catch (e) {
       console.error("[finance-review] falha ao aprovar", p.id, e);
       // Corrida (lançada entre a leitura e a gravação): a mesma frase, sem o texto do banco.
@@ -2111,9 +2159,12 @@ async function aprovar(
     acima_do_limite: acimaDoLimite,
     sem_resposta_de_os: semResposta,
     sem_destino: semDestino,
+    sem_receita: semReceita,
     avisos,
     pernas_de_parcelamento: pernasRetiradas,
-    message: `${feitos.length} lançamento(s) criado(s)`
+    message: `${feitos.length - marcadasSemLancamento} lançamento(s) criado(s)`
+      + (marcadasSemLancamento > 0
+        ? ` · ${marcadasSemLancamento} transferência(s) ou aporte(s) marcado(s), sem lançamento` : "")
       + (pernasRetiradas > 0
         ? ` · ${pernasRetiradas} parcela(s) da mesma compra saíram da fila junto` : "")
       + (acimaDoLimite.length
@@ -2122,6 +2173,8 @@ async function aprovar(
         ? ` · ${semResposta.length} com OS ou OC para responder ficaram para aprovação individual` : "")
       + (semDestino.length
         ? ` · ${semDestino.length} serviço(s) de terceiro sem "para onde foi" e "o que foi feito" ficaram para aprovação individual` : "")
+      + (semReceita.length
+        ? ` · ${semReceita.length} entrada(s) de transferência ou aporte de sócio ficaram para aprovação individual` : "")
       + (avisos.length ? ` · ${avisos.join(" · ")}` : "")
       + (falhas.length ? ` · ${falhas.length} falharam` : ""),
   });

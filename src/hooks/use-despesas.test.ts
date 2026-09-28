@@ -19,16 +19,17 @@ describe('paraDespesa', () => {
   });
 
   it('lançado sozinho pela regra; compra no cartão sai do cartão', () => {
-    const d = paraDespesa({ ...base, bank_transactions: { source_type: 'credit_card', description: 'POSTO X', counterparty_name: 'POSTO X', bank_connections: { label: 'C6', provider: 'pluggy' } },
+    const d = paraDespesa({ ...base, bank_transactions: { source_type: 'credit_card', description: 'POSTO X', counterparty_name: 'POSTO X', card_last_digits: '7130', bank_connections: { label: 'C6 - Conta PJ HBR', provider: 'pluggy' } },
       finance_review_queue: [{ automatica: 'regra', status: 'approved' }] }, grupos);
-    expect(d.deOnde).toBe('Cartão de crédito');
+    expect(d.deOnde).toBe('Cartão C6 final 7130');
     expect(d.quemClassificou).toBe('regra');
     expect(d.quem).toBe('POSTO X');
   });
 
   it('débito sem loja é marcado "sem quem recebeu"', () => {
-    const d = paraDespesa({ ...base, supplier_name: 'DEBITO DE CARTAO', bank_transactions: { source_type: 'bank', description: 'DEBITO DE CARTAO', bank_connections: { label: 'C6', provider: 'pluggy' } },
+    const d = paraDespesa({ ...base, supplier_name: 'DEBITO DE CARTAO', bank_transactions: { source_type: 'bank', description: 'DEBITO DE CARTAO', bank_connections: { label: 'Nubank PJ HBR', provider: 'pluggy' } },
       finance_review_queue: [{ automatica: null, status: 'approved' }] }, grupos);
+    expect(d.deOnde).toBe('Conta Nubank');
     expect(d.semNome).toBe(true);
     expect(d.quemClassificou).toBe('voce');
   });
@@ -38,6 +39,7 @@ describe('sem quem recebeu', () => {
   it('só vale quando há linha do banco: lançamento à mão sem nome não é "o banco não informou"', () => {
     const d = paraDespesa({ ...base, supplier_name: null, description: 'INSTALADORA BERLIM' }, grupos);
     expect(d.semNome).toBe(false);
+    expect(d.deOnde).toBe('—');
   });
 });
 

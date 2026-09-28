@@ -294,3 +294,28 @@ describe("serviço de terceiro sem 'para onde foi' não entra no lote (decisão 
     expect(motivoForaDoLote(anotada, LIMITE, { notes: "mão de obra da solda" })).toBeNull();
   });
 });
+
+describe('entrada que sai sem receita não entra no lote (revisão de 28/09/2026)', () => {
+  const entrada = (categoria: string) => proposta({ kind: 'create_receivable', suggested_category: categoria, nome: 'HBR ENGENHARIA' });
+
+  it('transferência ou aporte, sugerido ou escolhido na linha: uma a uma', () => {
+    expect(motivoForaDoLote(entrada('Transferência entre contas'), LIMITE)).toBe('sem_receita');
+    expect(motivoForaDoLote(entrada('Aporte de sócio'), LIMITE)).toBe('sem_receita');
+    // A categoria escolhida na linha vale mais que a sugerida — nos dois sentidos.
+    expect(motivoForaDoLote(entrada('Serviços prestados'), LIMITE, { category: 'Aporte de sócio' })).toBe('sem_receita');
+    expect(motivoForaDoLote(entrada('Aporte de sócio'), LIMITE, { category: 'Serviços prestados' })).toBeNull();
+  });
+
+  it('receita comum pequena continua no lote; a SAÍDA "Transferência entre contas" também', () => {
+    expect(motivoForaDoLote(entrada('Serviços prestados'), LIMITE)).toBeNull();
+    expect(motivoForaDoLote(proposta({ suggested_category: 'Transferência entre contas' }), LIMITE)).toBeNull();
+  });
+
+  it('no agrupado, a entrada sem receita fica fora do botão do grupo, com o motivo', () => {
+    const grupos = agruparPorFavorecido([entrada('Aporte de sócio'), entrada('Serviços prestados')], LIMITE, {});
+    const g = grupos.find((x) => x.propostas.length === 2)!;
+    expect(g.emLote).toHaveLength(1);
+    expect(g.individuais).toHaveLength(1);
+    expect(Object.values(g.motivos)).toEqual(['sem_receita']);
+  });
+});

@@ -28,6 +28,7 @@ import { useCorrigirLancamento, type TipoDeLancamento } from '@/hooks/use-lancam
 import { useI18n } from '@/i18n';
 import { toast } from 'sonner';
 import { Landmark, Lock } from 'lucide-react';
+import { BotaoVerOS } from '@/components/VerOSRapido';
 
 /** Sentinela de "nenhum" nos Selects: o Radix não aceita value vazio num item. */
 const NENHUM = '__nenhum__';
@@ -260,7 +261,11 @@ export function CorrigirLancamentoDialog({
           )}
 
           <div className={ehPagar ? 'sm:col-span-2' : undefined}>
-            <Label>{ehPagar ? 'OS (custo de qual serviço)' : 'OS'}</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label>{ehPagar ? 'OS (custo de qual serviço)' : 'OS'}</Label>
+              {/* Conferir a OS escolhida sem sair da correção (pedido do dono, 28/09/2026). */}
+              <BotaoVerOS osId={f.os || null} />
+            </div>
             <EntityCombobox
               value={f.os}
               onChange={(v) => mudar({ os: v })}

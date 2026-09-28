@@ -25,7 +25,10 @@ vi.mock('@/hooks/use-suppliers', () => ({
 vi.mock('@/hooks/use-financial-categories', () => ({
   useFinancialCategories: (type?: 'payable' | 'receivable') => ({
     data: type === 'receivable'
-      ? [{ name: 'Serviços prestados', dre_group: 'receita' }, { name: 'Sinal e adiantamento', dre_group: 'receita' }]
+      ? [
+          { name: 'Serviços prestados', dre_group: 'receita' }, { name: 'Sinal e adiantamento', dre_group: 'receita' },
+          { name: 'Aporte de sócio', dre_group: 'nao_operacional' },
+        ]
       : [{ name: 'Peças e materiais', dre_group: 'custo_direto' }],
     isLoading: false,
   }),
@@ -87,6 +90,30 @@ describe('regra de entrada no editor', () => {
     expect(screen.getByLabelText('CPF ou CNPJ de quem paga')).toHaveValue('12345678901');
     await user.click(screen.getByRole('button', { name: 'Salvar regra' }));
     expect(salvarMock.mock.calls[0][0]).toMatchObject({ direction: 'credit', set_client_id: 'c-joao', autonomy: 'suggest' });
+  });
+
+  it('aporte de sócio não tem cliente: salva sem ele, e continua só sugerindo', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    abrir({ match_type: 'document', match_value: '12345678901', direction: 'credit', set_client_id: null, set_category: 'Serviços prestados' });
+    // Receita comum sem cliente não salva.
+    expect(screen.getByRole('button', { name: 'Salvar regra' })).toBeDisabled();
+    const [, categoria] = screen.getAllByRole('combobox');
+    await user.click(categoria);
+    await user.click(await screen.findByText('Aporte de sócio'));
+    // O seletor de cliente dá lugar ao aviso, e a regra salva sem cliente.
+    expect(screen.getByText(/Sem cliente: Aporte de sócio não é receita/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Salvar regra' }));
+    expect(salvarMock.mock.calls[0][0]).toMatchObject({
+      direction: 'credit', set_client_id: null, set_category: 'Aporte de sócio', autonomy: 'suggest',
+    });
+  });
+
+  it('a frase da regra de aporte diz o documento, sem cliente', () => {
+    const r = {
+      id: 'r', match_type: 'document', match_value: '12345678901', direction: 'credit', set_client_id: null,
+      set_category: 'Aporte de sócio',
+    } as RegraFinanceira;
+    expect(frasearRegra(r)).toBe('dinheiro que entra de quem tem o CPF/CNPJ 123.456.789-01 → Aporte de sócio');
   });
 
   it('a frase da regra diz o documento e o cliente', () => {

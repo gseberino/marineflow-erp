@@ -260,12 +260,14 @@ export function CadastrarContraparteDialog({
  * bloqueado — é o que impede a receita (ou a despesa) em dobro.
  */
 export function VinculoDaLinha({
-  vinculo, escolha, onEscolher, ocupado,
+  vinculo, escolha, onEscolher, ocupado, semReceita = false,
 }: {
   vinculo: VinculoSugerido | null | undefined;
   escolha: EscolhaDeVinculo;
   onEscolher: (e: EscolhaDeVinculo) => void;
   ocupado: boolean;
+  /** Entrada classificada como transferência ou aporte: "nenhum destes" não lança receita. */
+  semReceita?: boolean;
 }) {
   const { formatCurrency } = useI18n();
   const opcoes = opcoesDoVinculo(vinculo);
@@ -312,7 +314,11 @@ export function VinculoDaLinha({
             type="radio" name={`vinculo-${principal.id}`} disabled={ocupado}
             checked={!efetivo && escolha === 'nenhum'} onChange={() => onEscolher('nenhum')}
           />
-          <span>Nenhum destes — lançar como {principal.lado === 'payable' ? 'despesa' : 'receita'} nova</span>
+          <span>
+            {semReceita
+              ? 'Nenhum destes — sai sem receita (transferência ou aporte)'
+              : `Nenhum destes — lançar como ${principal.lado === 'payable' ? 'despesa' : 'receita'} nova`}
+          </span>
         </label>
       </div>
     </div>

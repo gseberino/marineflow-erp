@@ -14,6 +14,7 @@
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
 import { regraDeFornecedorAlcanca, type FornecedorConhecido, type TransacaoOrfa } from "../../banking/proposals.ts";
 import { faltaNoDestino, precisaDeDestino } from "../../banking/destino.ts";
+import { entradaSemCliente } from "../../banking/entrada-sem-cliente.ts";
 
 /** Nome comparável: sem acento, caixa e espaços sobrando. */
 function comparavel(s: string): string {
@@ -313,8 +314,14 @@ async function criarRegraDeEntrada(args: Record<string, unknown>, ctx: ToolCtx) 
   if (!cat) {
     return { error: `A categoria de receita "${args.categoria}" não existe.`, categorias_disponiveis: cats.map((c) => c.name) };
   }
-  const cliente = await resolverClienteDito(ctx, String(args.cliente ?? ""));
-  if ("error" in cliente) return cliente;
+  // "O Pix do CPF do sócio é aporte": transferência e aporte não têm cliente (28/09/2026).
+  const semCliente = entradaSemCliente(cat.name);
+  let cliente: { id: string | null; nome: string | null } = { id: null, nome: null };
+  if (!semCliente) {
+    const dito = await resolverClienteDito(ctx, String(args.cliente ?? ""));
+    if ("error" in dito) return dito;
+    cliente = dito;
+  }
 
   const campos = {
     set_category: cat.name, set_dre_group: cat.dre_group, set_client_id: cliente.id, set_supplier_id: null,
@@ -356,7 +363,9 @@ async function criarRegraDeEntrada(args: Record<string, unknown>, ctx: ToolCtx) 
     ok: true, regra_id: regraId, cliente: cliente.nome, categoria: cat.name, documento: doc,
     entradas_deste_documento_no_extrato: count ?? 0,
     propostas_reclassificadas: Number((efeito as any)?.atualizadas ?? 0),
-    lembrete: "A regra só preenche o cliente: cada entrada continua esperando o OK do usuário na fila.",
+    lembrete: semCliente
+      ? `A regra só preenche a categoria (${cat.name}, sem cliente): cada entrada sai da fila sem receita, e só com o OK do usuário na própria linha.`
+      : "A regra só preenche o cliente: cada entrada continua esperando o OK do usuário na fila.",
   };
 }
 
@@ -368,7 +377,8 @@ export const financeRulesTools: ToolDef[] = [
       "Ensina o sistema a classificar despesas automaticamente. Use quando o usuário disser algo como " +
       "'toda transação com Mercado Livre é peças e materiais', 'pagamentos para Fulano são sempre pró-labore' " +
       "ou 'despesas do fornecedor X vão para categoria Y'. Também ensina ENTRADAS: 'o Pix do CPF X é do " +
-      "cliente Y' (sentido='entrada', reconhecer_por='documento', cliente). Ao criar, a regra também " +
+      "cliente Y' (sentido='entrada', reconhecer_por='documento', cliente) ou 'o Pix do CPF do sócio é aporte' " +
+      "(sem cliente). Ao criar, a regra também " +
       "reclassifica as propostas que já estão na fila aguardando decisão. Não altera " +
       "lançamentos já feitos.",
     input_schema: {
@@ -404,11 +414,14 @@ export const financeRulesTools: ToolDef[] = [
           enum: ["saida", "entrada"],
           description: "saida (padrão) = despesa. entrada = dinheiro que ENTRA: \"o Pix do CPF/CNPJ X é do cliente Y\" — "
             + "use quando alguém paga com o documento de outra pessoa. Exige reconhecer_por='documento', o CPF/CNPJ em "
-            + "valor_de_busca e `cliente`. Regra de entrada só sugere: a receita espera o OK do usuário.",
+            + "valor_de_busca e `cliente`. Exceção: categoria 'Aporte de sócio' ou 'Transferência entre contas' (\"o Pix "
+            + "do CPF do sócio é aporte\") não tem cliente — não pergunte nem mande `cliente`. Regra de entrada só sugere: "
+            + "a entrada espera o OK do usuário.",
         },
         cliente: {
           type: "string",
-          description: "Só com sentido='entrada': o cliente cadastrado (nome igual ao do cadastro, ou o id) dono do dinheiro.",
+          description: "Só com sentido='entrada': o cliente cadastrado (nome igual ao do cadastro, ou o id) dono do dinheiro. "
+            + "Não se usa com 'Aporte de sócio' nem 'Transferência entre contas'.",
         },
         substituir_regra_existente: {
           type: "boolean",
@@ -855,7 +868,9 @@ export const financeRulesTools: ToolDef[] = [
         },
         vinculos: {
           type: "object",
-          description: "Por proposta: o opcao_id escolhido (de listar_propostas_de_lancamento) para casar, ou \"nenhum\" para lançar novo.",
+          description: "Por proposta: o opcao_id escolhido (de listar_propostas_de_lancamento) para casar, ou \"nenhum\" para lançar novo. "
+            + "Numa ENTRADA com categoria 'Aporte de sócio' ou 'Transferência entre contas', \"nenhum\" tira a linha da fila SEM receita; "
+            + "casar ali é recusado — se o usuário disser que é pagamento de cliente, a categoria se troca na tela do Extrato.",
           additionalProperties: { type: "string" },
         },
         os: {

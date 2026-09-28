@@ -17,6 +17,7 @@ import { EntityCombobox } from '@/components/EntityCombobox';
 import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { MoneyInput } from '@/components/MoneyInput';
 import { Ajuda } from '@/components/Ajuda';
+import { BotaoVerOS } from '@/components/VerOSRapido';
 import { usePayees, useServiceOrdersVinculaveis, useClientesParaReceita, ROTULO_TIPO } from '@/hooks/use-payees';
 import { useSuppliers } from '@/hooks/use-suppliers';
 import { useFinanceRules } from '@/hooks/use-finance-review';
@@ -245,7 +246,11 @@ export function LancarDialog({ onFechar, tipoInicial = 'despesa', porOndeInicial
                 </div>
               )}
               <div className="sm:col-span-2">
-                <Label>OS (opcional)</Label>
+                {/* O mesmo cliente com mais de uma OS: conferir qual é antes de lançar (28/09/2026). */}
+                <div className="flex items-center justify-between gap-2">
+                  <Label>OS (opcional)</Label>
+                  <BotaoVerOS osId={os || null} />
+                </div>
                 <EntityCombobox value={os} onChange={setOs} options={[{ value: '', label: '— nenhuma' }, ...ordens.map((o) => ({ value: o.id, label: o.service_order_number, description: o.clients?.name ?? undefined }))]} placeholder="— nenhuma" fullWidth />
               </div>
             </div>

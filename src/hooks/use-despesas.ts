@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { lerEmPaginas } from '@/lib/ler-em-paginas';
 import { historicoSemIdentidade } from '../../supabase/functions/_shared/banking/proposals';
+import { origemDoDinheiro } from '@/lib/origem-do-dinheiro';
 
 export type QuemClassificou = 'regra' | 'confianca' | 'voce' | 'nota' | 'caixa' | 'mao';
 
@@ -29,7 +30,7 @@ export interface Despesa {
   /** Linha do DRE da categoria; "nao_operacional" = fica fora do resultado. */
   grupo: string | null;
   quem: string;
-  /** Conta de onde saiu (C6, Nubank, Caixa…), "Cartão de crédito" ou "—". */
+  /** De onde saiu: "Conta C6", "Cartão Nubank final 4922", "Caixa (dinheiro)"; "—" sem linha do banco. */
   deOnde: string;
   quemClassificou: QuemClassificou;
   os: string | null;
@@ -49,7 +50,8 @@ type Linha = {
   service_orders?: { service_order_number?: string } | null;
   bank_transactions?: {
     source_type?: string | null; description?: string | null; counterparty_name?: string | null;
-    bank_connections?: { label?: string | null; provider?: string | null } | null;
+    card_last_digits?: string | null;
+    bank_connections?: { label?: string | null; institution?: string | null; provider?: string | null } | null;
   } | null;
   finance_review_queue?: Array<{ automatica?: string | null; status?: string | null }> | null;
 };
@@ -65,8 +67,8 @@ export function paraDespesa(l: Linha, grupoDe: Map<string, string>): Despesa {
     : l.origin === 'fiscal_note' ? 'nota'
     : conta?.provider === 'caixa' ? 'caixa'
     : 'mao';
-  const deOnde = bt?.source_type === 'credit_card' ? 'Cartão de crédito'
-    : conta?.label ?? (bt ? 'Banco' : '—');
+  // O banco e o final do cartão: quem confere vai direto ao aplicativo certo (28/09/2026).
+  const deOnde = origemDoDinheiro(bt, conta) ?? '—';
   const quem = l.suppliers?.name ?? l.payees?.name ?? l.supplier_name ?? bt?.counterparty_name ?? l.description;
   const categoria = l.expense_category ?? 'Sem categoria';
   return {
@@ -92,7 +94,7 @@ export function useDespesas(de: string, ate: string) {
                    bank_transaction_id, linked_service_order_id, paid_amount, balance_amount, due_date, notes, cost_center_id,
                    suppliers!payables_supplier_id_fkey(name), payees!payables_payee_id_fkey(name),
                    service_orders!payables_linked_service_order_id_fkey(service_order_number),
-                   bank_transactions!payables_bank_transaction_id_fkey(source_type, description, counterparty_name, bank_connections(label, provider))`)
+                   bank_transactions!payables_bank_transaction_id_fkey(source_type, description, counterparty_name, card_last_digits, bank_connections(label, institution, provider))`)
           .neq('status', 'cancelled')
           .gte('issue_date', de).lte('issue_date', ate)
           .order('issue_date', { ascending: false }).order('id')

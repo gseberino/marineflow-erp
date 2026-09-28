@@ -24,6 +24,7 @@ import {
 } from '@/hooks/use-finance-review';
 import { useFinancialCategories } from '@/hooks/use-financial-categories';
 import { useClientesParaReceita } from '@/hooks/use-payees';
+import { entradaSemCliente } from '../../supabase/functions/_shared/banking/entrada-sem-cliente';
 import { Sparkles, Plus, Pause, Play, Check, X, Pencil, Wand2, Receipt, ChevronDown } from 'lucide-react';
 
 const ROTULO_ALVO: Record<RegraFinanceira['match_type'], string> = {
@@ -36,9 +37,13 @@ const ROTULO_ALVO: Record<RegraFinanceira['match_type'], string> = {
 /** Frase legível da regra. O gestor precisa reconhecer o que ensinou sem decifrar campos. */
 export function frasearRegra(r: RegraFinanceira, nomeFornecedor?: string, nomeCliente?: string): string {
   // Regra de entrada: "o Pix deste CPF/CNPJ é do cliente Y" (resposta 18 do dono, 26/09/2026).
-  if (r.direction === 'credit' && r.set_client_id) {
-    return `dinheiro que entra de quem tem o CPF/CNPJ ${formatarDoc(r.match_value.replace(/\D/g, ''))} → cliente ${nomeCliente ?? '(cadastro removido)'}`
-      + (r.set_category ? ` · ${r.set_category}` : '');
+  if (r.direction === 'credit' && (r.set_client_id || r.match_type === 'document')) {
+    const quem = `dinheiro que entra de quem tem o CPF/CNPJ ${formatarDoc(r.match_value.replace(/\D/g, ''))}`;
+    if (r.set_client_id) {
+      return `${quem} → cliente ${nomeCliente ?? '(cadastro removido)'}` + (r.set_category ? ` · ${r.set_category}` : '');
+    }
+    // Transferência ou aporte do sócio: sem cliente (28/09/2026).
+    return `${quem} → ${r.set_category ?? '—'}`;
   }
   const alvo = r.match_type === 'supplier'
     ? (nomeFornecedor || 'este fornecedor')
@@ -164,8 +169,11 @@ export function EditorDeRegra({ aberto, onFechar, regra }: EditorProps) {
 
   const documento = valor.replace(/\D/g, '');
   const documentoValido = documento.length === 11 || documento.length === 14;
+  // "O Pix do CPF do sócio é aporte": transferência e aporte não têm cliente (28/09/2026) — o
+  // banco aceita regra de entrada sem cliente, e ela continua só sugerindo.
+  const semCliente = entrada ? entradaSemCliente(categoria) : null;
   const podeSalvar = entrada
-    ? documentoValido && !!cliente && categoria.length > 0
+    ? documentoValido && (!!cliente || !!semCliente) && categoria.length > 0
     : valor.trim().length > 0 && categoria.length > 0;
 
   const trocarSentido = (novo: 'saida' | 'entrada') => {
@@ -187,7 +195,7 @@ export function EditorDeRegra({ aberto, onFechar, regra }: EditorProps) {
         set_category: categoria,
         set_dre_group: grupoDa(categoria),
         set_supplier_id: null,
-        set_client_id: cliente,
+        set_client_id: semCliente ? null : cliente,
         // O banco também garante (CHECK): regra que diz o cliente só sugere.
         autonomy: 'suggest',
         ...faixa,
@@ -247,18 +255,22 @@ export function EditorDeRegra({ aberto, onFechar, regra }: EditorProps) {
                 </div>
                 <div>
                   <Label className="text-xs">É do cliente</Label>
-                  <Select value={cliente} onValueChange={setCliente}>
-                    <SelectTrigger><SelectValue placeholder="Escolher o cliente" /></SelectTrigger>
-                    <SelectContent>
-                      {clientes.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  {semCliente ? (
+                    <p className="mt-2 text-xs text-muted-foreground">Sem cliente: {categoria} não é receita.</p>
+                  ) : (
+                    <Select value={cliente} onValueChange={setCliente}>
+                      <SelectTrigger><SelectValue placeholder="Escolher o cliente" /></SelectTrigger>
+                      <SelectContent>
+                        {clientes.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               </div>
               <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
-                Serve para quem paga com o CPF de outra pessoa (o marido pelo barco da esposa, a
-                empresa pelo sócio). A entrada chega na fila já com este cliente, e só vira receita
-                com o seu OK — regra de entrada nunca lança sozinha.
+                {semCliente
+                  ? `A entrada deste CPF/CNPJ chega na fila já como "${categoria}" e só sai com o seu OK, na própria linha — regra de entrada nunca lança sozinha.`
+                  : 'Serve para quem paga com o CPF de outra pessoa (o marido pelo barco da esposa, a empresa pelo sócio). A entrada chega na fila já com este cliente, e só vira receita com o seu OK — regra de entrada nunca lança sozinha.'}
               </p>
             </>
           ) : (

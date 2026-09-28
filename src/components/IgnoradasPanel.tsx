@@ -37,7 +37,9 @@ import { buscaAtiva, casaComBusca, type CriterioDeBusca } from '@/lib/busca-fina
 const CONSEQUENCIA: Record<string, string> = {
   duplicata: 'As transações voltam para a fila. Se elas forem mesmo duplicatas, você verá o mesmo movimento duas vezes.',
   fatura_cartao: 'O pagamento da fatura volta para a fila. Cuidado: os gastos do cartão já estão lançados item a item, então lançar a fatura de novo contaria tudo duas vezes.',
-  transferencia: 'As duas pernas da transferência voltam para a fila — o dinheiro que saiu de uma conta e entrou na outra.',
+  // A que o sistema reconheceu tem duas pernas; a entrada marcada à mão como transferência, uma.
+  transferencia: 'Voltam para a fila. Na transferência que o sistema reconheceu, as duas pernas voltam juntas — o dinheiro que saiu de uma conta e entrou na outra.',
+  aporte_socio: 'A entrada volta para a fila, para ser classificada de novo.',
   mecanica_cartao: 'Voltam para a fila. Estes lançamentos são mecânica do banco (limite, estorno, ajuste), não receita nem despesa.',
   parcela: 'ATENÇÃO: desfaz a COMPRA inteira. O lançamento criado é apagado e todas as parcelas voltam para a fila.',
   manual: 'As transações voltam para a fila.',

@@ -77,6 +77,7 @@ vi.mock('@/hooks/use-financial-categories', () => ({
           { name: 'Serviços prestados', dre_group: 'receita' },
           { name: 'Venda de peças e produtos', dre_group: 'receita' },
           { name: 'Sinal e adiantamento', dre_group: 'receita' },
+          { name: 'Transferência entre contas', dre_group: 'nao_operacional' },
         ]
       : [
           { name: 'Combustível e deslocamento', dre_group: 'custo_direto' },
@@ -100,6 +101,18 @@ vi.mock('@/hooks/use-cost-centers', async (importOriginal) => {
     }),
   };
 });
+
+// As contas da HBR como estão cadastradas: é delas que sai o "Conta C6", "Cartão Nubank final…".
+const { contasDaHBR } = vi.hoisted(() => ({
+  contasDaHBR: new Map([
+    ['c6', { id: 'c6', label: 'C6 - Conta PJ HBR', institution: null, provider: 'pluggy' }],
+    ['nu', { id: 'nu', label: 'Nubank PJ HBR', institution: null, provider: 'pluggy' }],
+  ]),
+}));
+vi.mock('@/hooks/use-bank-connections', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-bank-connections')>()),
+  useContasDaHBR: () => contasDaHBR,
+}));
 
 /**
  * O seletor de categoria do primeiro grupo.
@@ -908,5 +921,137 @@ describe('revisão de 27/09: centro escondido, contradição e cabeçalho do gru
     expect(overrides.g1).toMatchObject({
       destino: 'empresa', category: 'Serviços de terceiros para a empresa', costCenterId: 'cc-obra', notes: 'pintura da sede',
     });
+  });
+});
+
+/**
+ * Observações do dono de 28/09/2026: de qual conta ou cartão o dinheiro saiu (para ir direto ao
+ * aplicativo certo), entrada de transferência sem pedir cliente e a OS conferível sem sair da fila.
+ */
+describe('observações de 28/09: banco de origem, entrada sem cliente, ver a OS', () => {
+  afterEach(() => { estadoDaFila.dados = null; aprovarMock.mockClear(); });
+
+  const entrada = (id: string, categoria: string, extra: Record<string, unknown> = {}) => ({
+    id, kind: 'create_receivable', status: 'pending', bank_transaction_id: `t-${id}`, related_transaction_id: null,
+    title: 'Receita: HBR ENGENHARIA', reasoning: 'x', confidence: 40, suggested_amount: 2000, suggested_date: '2026-09-27',
+    suggested_category: categoria, suggested_description: 'HBR ENGENHARIA', suggested_supplier_id: null,
+    suggested_client_id: null, dre_group: 'nao_operacional', created_at: '2026-09-27T10:00:00Z',
+    bank_transactions: { counterparty_name: 'HBR ENGENHARIA', source_type: 'bank', bank_connection_id: 'nu', transaction_type: 'credit' },
+    ...extra,
+  });
+
+  it('a compra no cartão diz QUAL cartão: banco e final', async () => {
+    estadoDaFila.dados = [{
+      ...propostas[0],
+      bank_transactions: { counterparty_name: 'POSTO AGRICOPEL', source_type: 'credit_card', card_last_digits: '4922', bank_connection_id: 'nu' },
+    }];
+    renderInbox();
+    expect(await screen.findByText('Cartão Nubank final 4922')).toBeInTheDocument();
+  });
+
+  it('a transferência diz de qual conta saiu e em qual entrou', async () => {
+    estadoDaFila.dados = [{
+      ...propostas[2],
+      bank_transactions: { counterparty_name: null, source_type: 'bank', bank_connection_id: 'c6', transaction_type: 'debit' },
+      outra_perna: { source_type: 'bank', card_last_digits: null, bank_connection_id: 'nu', transaction_type: 'credit' },
+    }];
+    renderInbox();
+    expect(await screen.findByText('Conta C6 → Conta Nubank')).toBeInTheDocument();
+  });
+
+  it('entrada de transferência entre contas não pede cliente e aprova sem ele', async () => {
+    estadoDaFila.dados = [entrada('e20', 'Transferência entre contas')];
+    const user = userEvent.setup();
+    renderInbox();
+    expect(await screen.findByText(/Dinheiro de outra conta da HBR: não é receita e não tem cliente/)).toBeInTheDocument();
+    expect(screen.queryByText('De qual cliente veio?')).not.toBeInTheDocument();
+    // Sai da fila sem lançamento: não há centro de custo a escolher, só a observação.
+    expect(screen.getByRole('button', { name: '+ Observação' })).toBeInTheDocument();
+    // Sai sem receita: decisão desta linha, nunca do lote (revisão de 28/09/2026). Na lista é a
+    // seção que diz; o selo "Sai sem receita" é do agrupado (finance-inbox-grouping.test).
+    expect(screen.getByText(/Revisar uma a uma .*\(1\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/Aprovação em lote/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Aprovar e lançar' }));
+    // Vai a categoria que a linha mostrou: reclassificada no servidor com a tela aberta, a linha
+    // não pode sair com outra que ninguém viu.
+    expect(aprovarMock.mock.calls[0][0]).toEqual({ ids: ['e20'], overrides: { e20: { category: 'Transferência entre contas' } } });
+  });
+
+  it('entrada PEQUENA trocada para transferência na seção do lote ganha o botão dela', async () => {
+    // Abaixo do limite, sem pergunta: nasce no lote, onde a linha não tem botão próprio. Trocada
+    // para transferência, o "Aprovar selecionadas" a tira — sem o botão, não haveria saída.
+    estadoDaFila.dados = [entrada('e30', 'Outras receitas', { suggested_amount: 200, dre_group: 'receita' })];
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderInbox();
+    expect(await screen.findByText(/Aprovação em lote/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Aprovar e lançar' })).not.toBeInTheDocument();
+    await user.click(await seletorDeCategoria());
+    await user.click(await screen.findByText('Transferência entre contas'));
+    await user.click(await screen.findByRole('button', { name: 'Aprovar e lançar' }));
+    expect(aprovarMock.mock.calls[0][0]).toMatchObject({
+      ids: ['e30'], overrides: { e30: { category: 'Transferência entre contas' } },
+    });
+  });
+
+  it('casar numa entrada de transferência é contradição: "nenhum destes" é que sai sem receita', async () => {
+    estadoDaFila.dados = [entrada('e31', 'Transferência entre contas', {
+      vinculo_sugerido: { principal: {
+        tipo: 'receivable', id: 'r1', rotulo: 'Conta a receber de JOÃO', valor: 2000, confianca: 70,
+        nivel: 'weak', motivos: ['Valor exato'], diferenca: 0, lancamentoId: 'rec-1', lado: 'receivable', ordemDeServicoId: null,
+        clienteId: 'c-joao', clienteNome: 'JOÃO', converteOrcamento: false, jaLancado: false,
+      }, alternativas: [] },
+    })];
+    const user = userEvent.setup();
+    renderInbox();
+    await user.click(await screen.findByRole('radio', { name: /Casar com Conta a receber de JOÃO/ }));
+    const frase = /Casar ou registrar sinal diz que é recebimento de cliente/;
+    expect(await screen.findByText(frase)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: frase })).toBeDisabled();
+    await user.click(screen.getByRole('radio', { name: /Nenhum destes — sai sem receita/ }));
+    await user.click(await screen.findByRole('button', { name: 'Aprovar e lançar' }));
+    expect(aprovarMock.mock.calls[0][0]).toMatchObject({ ids: ['e31'], overrides: { e31: { vinculo: 'nenhum' } } });
+  });
+
+  it('transferência ou aporte ligado a uma OS não sai: escolha uma só', async () => {
+    estadoDaFila.dados = [entrada('e23', 'Aporte de sócio', { suggested_service_order_id: 'os9' })];
+    const user = userEvent.setup();
+    renderInbox();
+    // Sem resposta, a OS sugerida não liga: aprovar é possível.
+    expect(await screen.findByRole('button', { name: 'Aprovar e lançar' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Sim, é desta' }));
+    const frase = /ligada a uma OS, mas transferência e aporte de sócio não são receita/;
+    expect(await screen.findByText(frase)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: frase })).toBeDisabled();
+    // "Não é desta" desfaz a contradição.
+    await user.click(screen.getByRole('button', { name: 'mudar' }));
+    await user.click(await screen.findByRole('button', { name: 'Não é' }));
+    expect(await screen.findByRole('button', { name: 'Aprovar e lançar' })).toBeEnabled();
+    expect(screen.queryByText(frase)).not.toBeInTheDocument();
+  });
+
+  it('aporte de sócio também não pede cliente', async () => {
+    estadoDaFila.dados = [entrada('e21', 'Aporte de sócio')];
+    renderInbox();
+    expect(await screen.findByText(/Dinheiro do sócio entrando na empresa/)).toBeInTheDocument();
+    expect(screen.queryByText('De qual cliente veio?')).not.toBeInTheDocument();
+  });
+
+  it('receita de verdade continua pedindo o cliente', async () => {
+    estadoDaFila.dados = [entrada('e22', 'Serviços prestados', { dre_group: 'receita' })];
+    renderInbox();
+    expect(await screen.findByText('De qual cliente veio?')).toBeInTheDocument();
+    expect(screen.queryByText(/não é receita e não tem cliente/)).not.toBeInTheDocument();
+  });
+
+  it('a OS sugerida tem o botão de conferir, ao lado da pergunta', async () => {
+    estadoDaFila.dados = [{
+      id: 'p9', kind: 'create_payable', status: 'pending', bank_transaction_id: 't9', related_transaction_id: null,
+      title: 'Despesa: LOJA DE CABOS', reasoning: 'x', confidence: 92, suggested_amount: 1200, suggested_date: '2026-09-20',
+      suggested_category: 'Peças e materiais', suggested_description: 'LOJA DE CABOS', suggested_supplier_id: null,
+      suggested_service_order_id: 'os9', dre_group: 'custo_direto', created_at: '2026-09-20T10:00:00Z',
+    }];
+    renderInbox();
+    const pergunta = (await screen.findByText(/É desta OS\?/)).parentElement as HTMLElement;
+    expect(within(pergunta).getByRole('button', { name: 'Ver OS (só leitura)' })).toBeInTheDocument();
   });
 });

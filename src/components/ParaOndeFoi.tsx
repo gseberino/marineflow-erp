@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useServiceOrdersVinculaveis } from '@/hooks/use-payees';
+import { BotaoVerOS } from '@/components/VerOSRapido';
 import { useCostCenters, centrosParaEscolher } from '@/hooks/use-cost-centers';
 import {
   SERVICO_DE_CLIENTE, SERVICO_DA_EMPRESA, destinoEfetivo, fraseDaFalta, type FaltaNoDestino,
@@ -75,23 +76,27 @@ export function ParaOndeFoi({
       </div>
 
       {destino === 'cliente' && (
-        <Select
-          value={osMostrada}
-          onValueChange={(v) => onMudar({ serviceOrderId: v === SEM_OS ? null : v })}
-          disabled={ocupado}
-        >
-          <SelectTrigger className="h-8 max-w-[20rem] text-xs" aria-label="De qual OS">
-            <SelectValue placeholder="De qual OS?" />
-          </SelectTrigger>
-          <SelectContent>
-            {ordens.map((o) => (
-              <SelectItem key={o.id} value={o.id}>
-                {o.service_order_number} · {o.clients?.name ?? 'sem cliente'}{o.status === 'invoiced' ? ' (faturada)' : ''}
-              </SelectItem>
-            ))}
-            <SelectItem value={SEM_OS}>O serviço não tem OS no sistema</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex flex-wrap items-center gap-1">
+          <Select
+            value={osMostrada}
+            onValueChange={(v) => onMudar({ serviceOrderId: v === SEM_OS ? null : v })}
+            disabled={ocupado}
+          >
+            <SelectTrigger className="h-8 max-w-[20rem] text-xs" aria-label="De qual OS">
+              <SelectValue placeholder="De qual OS?" />
+            </SelectTrigger>
+            <SelectContent>
+              {ordens.map((o) => (
+                <SelectItem key={o.id} value={o.id}>
+                  {o.service_order_number} · {o.clients?.name ?? 'sem cliente'}{o.status === 'invoiced' ? ' (faturada)' : ''}
+                </SelectItem>
+              ))}
+              <SelectItem value={SEM_OS}>O serviço não tem OS no sistema</SelectItem>
+            </SelectContent>
+          </Select>
+          {/* O mesmo cliente com mais de uma OS: conferir qual é antes de aprovar (28/09/2026). */}
+          <BotaoVerOS osId={osMostrada && osMostrada !== SEM_OS ? osMostrada : null} />
+        </div>
       )}
 
       {destino === 'empresa' && (
@@ -134,16 +139,18 @@ export function ParaOndeFoi({
  * ruído nas centenas de linhas que não precisam deles.
  */
 export function ObservacaoECentro({
-  correcao, ehReceita, onMudar, ocupado,
+  correcao, ehReceita, semCentro = false, onMudar, ocupado,
 }: {
   correcao: Correcao | undefined;
   ehReceita: boolean;
+  /** Linha que sai da fila sem lançamento (transferência, aporte do sócio): só a observação. */
+  semCentro?: boolean;
   onMudar: (c: Partial<Correcao>) => void;
   ocupado: boolean;
 }) {
   const [aberto, setAberto] = useState(() => !!(correcao?.notes || correcao?.costCenterId));
   const { data: centros } = useCostCenters();
-  const opcoes = centrosParaEscolher(centros, ehReceita ? 'receivable' : 'payable', correcao?.costCenterId ?? null);
+  const opcoes = semCentro ? [] : centrosParaEscolher(centros, ehReceita ? 'receivable' : 'payable', correcao?.costCenterId ?? null);
 
   if (!aberto) {
     return (

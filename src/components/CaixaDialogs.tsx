@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label';
 import { EntityCombobox } from '@/components/EntityCombobox';
 import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { MoneyInput } from '@/components/MoneyInput';
+import { BotaoVerOS } from '@/components/VerOSRapido';
 import { useI18n } from '@/i18n';
 import { usePayees, useServiceOrdersVinculaveis, useClientesParaReceita, ROTULO_TIPO } from '@/hooks/use-payees';
 import { useSuppliers } from '@/hooks/use-suppliers';
@@ -71,8 +72,10 @@ export function AnotarTransacaoDialog({ onFechar }: { onFechar: () => void }) {
               <EntityCombobox value={cliente} onChange={setCliente} options={clientes.map((c) => ({ value: c.id, label: c.name }))} placeholder="De quem vai entrar?" fullWidth /></div>
           )}
           <div><Label>Categoria</Label><CategoriaDespesaSelect valor={categoria} onMudar={setCategoria} tipo={sentido === 'saida' ? 'payable' : 'receivable'} className="h-10 text-sm" /></div>
-          <div><Label>OS</Label>
-            <EntityCombobox value={os} onChange={setOs} options={[{ value: '', label: '— nenhuma' }, ...ordens.map((o) => ({ value: o.id, label: o.service_order_number }))]} placeholder="— nenhuma" fullWidth /></div>
+          {/* Número e cliente, e a OS conferível: o mesmo cliente pode ter mais de uma (28/09/2026). */}
+          <div>
+            <div className="flex items-center justify-between gap-2"><Label>OS</Label><BotaoVerOS osId={os || null} /></div>
+            <EntityCombobox value={os} onChange={setOs} options={[{ value: '', label: '— nenhuma' }, ...ordens.map((o) => ({ value: o.id, label: o.service_order_number, description: o.clients?.name ?? undefined }))]} placeholder="— nenhuma" fullWidth /></div>
           <div className="sm:col-span-2"><Label htmlFor="anot-desc">Descrição (opcional)</Label><Input id="anot-desc" value={descricao} onChange={(e) => setDescricao(e.target.value)} /></div>
         </div>
         <DialogFooter className="gap-2">
