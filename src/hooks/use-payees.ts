@@ -48,6 +48,8 @@ export const CATEGORIAS_COM_FAVORECIDO = [
   'Serviços de terceiros',
   // Serviço contratado para a própria HBR (27/09/2026): muitas vezes pago a uma pessoa, por CPF.
   'Serviços de terceiros para a empresa',
+  // Diária de freelancer (28/09/2026): o Pix entra no saldo DELE — sem favorecido, some da conta.
+  'Diárias de freelancers',
 ];
 
 /** Categorias em que a compra costuma pertencer a um serviço específico. */
