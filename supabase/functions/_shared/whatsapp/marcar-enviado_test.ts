@@ -125,14 +125,17 @@ const lerFonte = (relativo: string) => Deno.readTextFile(new URL(relativo, impor
 
 Deno.test("whatsapp-send: nenhum 400 depois de reservar a chave; campo obrigatório vem antes", async () => {
   const edge = await lerFonte("../../whatsapp-send/index.ts");
-  const reserva = edge.indexOf("reservarEnvio(");
+  // A edge reserva por reservarOuAguardar (29/09/2026), que espera o desfecho de outra
+  // tentativa antes de responder "já enviado".
+  const reserva = edge.indexOf("reservarOuAguardar(");
   const validacao = edge.indexOf("campoObrigatorioFaltando(body)");
   assert(reserva > 0, "a edge não reserva mais a chave? a guarda ficou cega");
   assert(validacao > 0, "a edge não chama campoObrigatorioFaltando");
   assert(validacao < reserva, "a checagem de campo obrigatório tem de vir ANTES da reserva da chave");
-  // Um 400 depois da reserva prende a chave: o pedido corrigido ouviria "já enviado".
+  // Um 400 depois da reserva prende a chave: o pedido corrigido ouviria "já enviado". (O 409
+  // em_andamento não prende: sai quando a chave é de OUTRA tentativa, não desta.)
   const depoisDaReserva = edge.slice(reserva);
-  assert(!/,\s*400\s*\)/.test(depoisDaReserva), "há um 400 depois de reservarEnvio: a chave ficaria presa");
+  assert(!/,\s*400\s*\)/.test(depoisDaReserva), "há um 400 depois de reservarOuAguardar: a chave ficaria presa");
 });
 
 Deno.test("modo de teste: a edge e as tools usam a mesma função, nenhuma lê o interruptor à mão", async () => {
