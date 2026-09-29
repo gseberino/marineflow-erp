@@ -498,8 +498,10 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
       (q) => q.not("bank_transaction_id", "is", null)),
   ]);
 
+  // Fornecedor desativado não é sugerido, nem pelo nome nem pelo documento (decisão do dono,
+  // 29/09/2026: a fila sugeria para linhas do C6 um fornecedor que ele tinha desativado).
   const { data: fornecedoresRows } = await admin
-    .from("suppliers").select("id, name, cnpj_cpf, trade_name").limit(2000);
+    .from("suppliers").select("id, name, cnpj_cpf, trade_name").not("active", "is", false).limit(2000);
   // Índice montado uma vez: comparar cada transação com 530 fornecedores limpando o nome
   // dos dois lados a cada comparação era metade do custo que estourava o limite de CPU.
   const fornecedores = indexarFornecedores((fornecedoresRows ?? []) as FornecedorConhecido[]);
@@ -980,8 +982,9 @@ async function reclassificar(admin: DbClient, soSemEvidencia = false) {
     });
   }
 
+  // Reavaliar também não sugere fornecedor desativado (a mesma regra da geração).
   const { data: fornecedoresRows } = await admin
-    .from("suppliers").select("id, name, cnpj_cpf, trade_name").limit(2000);
+    .from("suppliers").select("id, name, cnpj_cpf, trade_name").not("active", "is", false).limit(2000);
   const fornecedores = indexarFornecedores((fornecedoresRows ?? []) as FornecedorConhecido[]);
   const memoria = await montarMemoria(admin);
   const { data: regrasRows } = await admin

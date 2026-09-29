@@ -841,16 +841,23 @@ export function montarProposta(
   // quer que uma regra de texto genérica discorde disso.
   const regra = acharRegra(tx, regras, fornecedorId, fornecedores);
   const comoCasou = regra ? comoARegraDeFornecedorCasa(tx, regra, fornecedorId, obterIndice(fornecedores)) : null;
+  // Fornecedor desativado não volta pela regra (decisão do dono, 29/09/2026): o cadastro que
+  // chega aqui só tem os ativos (a fila filtra ao ler), e a regra que ainda aponta para um
+  // desativado continua dizendo a categoria, mas a linha fica sem fornecedor até alguém escolher.
+  const cadastrado = (id: string | null | undefined) =>
+    !!id && obterIndice(fornecedores).porNome.some((e) => e.fornecedor.id === id);
+  const fornecedorDaRegra = regra?.set_supplier_id
+    ? (cadastrado(regra.set_supplier_id) ? regra.set_supplier_id : null)
+    : regra?.match_type === "supplier" && cadastrado(regra.match_value) ? regra.match_value : null;
   /** A regra diz DE QUEM é a despesa: regra de fornecedor, ou qualquer regra com fornecedor. */
-  const fornecedorPelaRegra = !!regra && (!!regra.set_supplier_id || regra.match_type === "supplier");
+  const fornecedorPelaRegra = !!regra && (!!fornecedorDaRegra || regra.match_type === "supplier");
   if (regra) {
     if (regra.set_category) categoria = regra.set_category;
     if (regra.set_dre_group) dreGroup = regra.set_dre_group;
-    if (regra.set_supplier_id) fornecedorId = regra.set_supplier_id;
     // Regra de fornecedor também diz DE QUEM é a despesa, não só o que ela é. Sem isto a
     // compra continuaria atribuída a quem a resolução automática errou — e o custo por
     // fornecedor seguiria mentindo mesmo com a categoria já corrigida.
-    else if (regra.match_type === "supplier") fornecedorId = regra.match_value;
+    if (fornecedorDaRegra) fornecedorId = fornecedorDaRegra;
   }
   /**
    * O fornecedor FINAL da linha veio do nome cortado pelo banco: pela regra de fornecedor que

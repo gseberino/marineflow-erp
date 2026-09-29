@@ -347,6 +347,23 @@ describe("regras que o gestor ensina", () => {
     expect(comTexto.suggestedSupplierId).toBe("f-premel");
   });
 
+  it("regra que aponta para fornecedor DESATIVADO dá a categoria, mas não o fornecedor", () => {
+    // Decisão do dono (29/09/2026): fornecedor desativado não é sugerido. A fila lê só os
+    // ativos, então o desativado não está no cadastro que chega aqui — e a regra que ainda
+    // aponta para ele não pode trazê-lo de volta (foi o que aconteceu com o fornecedor do
+    // sócio, desativado e lançado de novo por uma regra).
+    const compra = tx({ description: "PREMEL - ITAJAI        ITAJAI        BRA", counterparty_name: "PREMEL - ITAJAI" });
+    const deTexto = regra({
+      id: "r-premel-texto", match_type: "text", match_value: "PREMEL",
+      set_category: "Peças e materiais", set_dre_group: "custo_direto", set_supplier_id: "f-premel",
+    });
+    const semOCadastro = montarProposta(compra, [], undefined, [deTexto]);
+    expect(semOCadastro.appliedRuleId).toBe("r-premel-texto");
+    expect(semOCadastro.suggestedCategory).toBe("Peças e materiais");
+    expect(semOCadastro.suggestedSupplierId).toBeNull();
+    expect(semOCadastro.fornecedorPelaRegra).toBe(false);
+  });
+
   it("regra de fornecedor alcança o nome cortado pelo banco e o documento", () => {
     const cadastro: FornecedorConhecido[] = [
       { id: "f-marine", name: "MARINE EXPRESS COMERCIAL IMPORTADORA LTDA", cnpj_cpf: "11.111.111/0001-11" },
