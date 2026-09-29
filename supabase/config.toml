@@ -116,6 +116,11 @@ verify_jwt = false
 [functions.receivable-reminders]
 verify_jwt = false
 
+# Conexão do WhatsApp (29/09/2026): o pg_cron chama o vigia só com x-cron-secret; a tela
+# chama com JWT e a função confere que é admin antes de falar com a Evolution.
+[functions.whatsapp-conexao]
+verify_jwt = false
+
 [functions.balance-reminders]
 verify_jwt = false
 

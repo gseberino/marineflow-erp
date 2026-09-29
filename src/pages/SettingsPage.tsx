@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TaskAutomationSettings } from '@/components/agenda/TaskAutomationSettings';
 import { InstallAgendaCard } from '@/components/agenda/InstallAgendaCard';
-import { DollarSign, Globe, Banknote, CreditCard, FileText, Tag, Package } from 'lucide-react';
+import { DollarSign, Globe, Banknote, CreditCard, FileText, Tag, Package, MessageCircle } from 'lucide-react';
 import { MasterDataPanel } from '@/components/MasterDataManagement';
 import { VerbosFiscaisGrid } from '@/components/fiscal/VerbosFiscaisGrid';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -24,6 +24,7 @@ import { FinanceReviewSettingsSection } from './settings/FinanceReviewSettingsSe
 import { QuoteSettingsSection } from './settings/QuoteSettingsSection';
 import { PaymentConditionsTab } from './settings/PaymentConditionsTab';
 import { PdfDefaultsSection } from './settings/PdfDefaultsSection';
+import { WhatsAppConexaoTab } from './settings/WhatsAppConexaoTab';
 
 const TERM_KEYS = [
   { key: 'terms_warranty', labelKey: 'termsWarranty' as const },
@@ -250,6 +251,10 @@ export default function SettingsPage() {
             <Package className="h-3.5 w-3.5 mr-1" />
             Categorias de Produto
           </TabsTrigger>
+          <TabsTrigger value="whatsapp">
+            <MessageCircle className="h-3.5 w-3.5 mr-1" />
+            WhatsApp
+          </TabsTrigger>
           <TabsTrigger value="system">Sistema</TabsTrigger>
         </TabsList>
 
@@ -287,6 +292,10 @@ export default function SettingsPage() {
               código de tributação é por verbo. Mesma ideia de herança, chave diferente porque
               a LC 116 organiza serviço por atividade, não por sistema. */}
           <VerbosFiscaisGrid />
+        </TabsContent>
+
+        <TabsContent value="whatsapp" className="mt-4 space-y-4">
+          <WhatsAppConexaoTab />
         </TabsContent>
 
         <TabsContent value="system" className="mt-4 space-y-4">

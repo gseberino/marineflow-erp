@@ -11,7 +11,17 @@ export type NotificationType =
   | 'QUOTE_APPROVED'
   | 'QUOTE_REJECTED'
   | 'TASK_REMINDER'
-  | 'TASK_ASSIGNED';
+  | 'TASK_ASSIGNED'
+  | 'WHATSAPP_CAIU'
+  | 'WHATSAPP_VOLTOU';
+
+/** Tipo gravado em app_notifications → tipo do sino. Desconhecido vira lembrete de tarefa. */
+const TIPO_DO_BANCO: Record<string, NotificationType> = {
+  task_reminder: 'TASK_REMINDER',
+  task_assigned: 'TASK_ASSIGNED',
+  whatsapp_caiu: 'WHATSAPP_CAIU',
+  whatsapp_voltou: 'WHATSAPP_VOLTOU',
+};
 
 export interface AppNotification {
   id: string;
@@ -222,9 +232,7 @@ export function useNotifications() {
 
   const dbItems: AppNotification[] = (dbQuery.data || []).map((n: any) => ({
     id: `db:${n.id}`,
-    type: (n.type === 'task_reminder' ? 'TASK_REMINDER'
-      : n.type === 'task_assigned' ? 'TASK_ASSIGNED'
-      : 'TASK_REMINDER') as NotificationType,
+    type: TIPO_DO_BANCO[n.type] ?? 'TASK_REMINDER',
     title: n.title,
     description: n.body || '',
     created_at: n.created_at,
