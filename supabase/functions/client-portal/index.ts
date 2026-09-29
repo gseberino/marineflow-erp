@@ -1,4 +1,13 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+// Edge Function: client-portal — APOSENTADA em 29/09/2026 (decisão do dono).
+//
+// Buscava o cliente por CPF/CNPJ ou por TRECHO de telefone/WhatsApp (5 dígitos bastavam) e
+// devolvia as OS dele com o share_token, que abre a página pública com o cadastro completo.
+// Estava quebrada desde maio (colunas renomeadas); consertar só isso teria aberto os dados de
+// 533 clientes. O filtro .or() ainda recebia o texto digitado sem escape.
+//
+// Fica como stub 410 (mesmo caminho das edges órfãs de 19/09): quem ainda chamar recebe
+// "não existe mais" em vez de erro, e nada é lido do banco. Apagar a função depois de alguns
+// dias sem chamadas.
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
@@ -7,60 +16,10 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const jr = (b: unknown, s = 200) =>
-  new Response(JSON.stringify(b), {
-    status: s,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-
-servirComCors(async (req) => {
+servirComCors((req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-
-  try {
-    const body = await req.json().catch(() => ({}));
-    const { identifier } = body;
-
-    if (!identifier || identifier.trim().length < 5) {
-      return jr({ error: "Identificador muito curto ou inválido." }, 400);
-    }
-
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const sb = createClient(SUPABASE_URL, SERVICE_KEY, {
-      auth: { persistSession: false },
-    });
-
-    const q = String(identifier).trim();
-    
-    // Busca cliente por CPF/CNPJ, Telefone, WhatsApp ou Email
-    const { data: clients, error: clientErr } = await sb
-      .from("clients")
-      .select("id, full_name_or_company_name")
-      .or(`cpf_cnpj.eq.${q},phone.ilike.%${q}%,whatsapp.ilike.%${q}%,email.ilike.${q}`)
-      .eq("active", true)
-      .limit(1);
-
-    if (clientErr || !clients || clients.length === 0) {
-      return jr({ error: "Nenhum cliente ativo encontrado com este dado." }, 404);
-    }
-
-    const clientId = clients[0].id;
-
-    // Busca as OSs do cliente
-    const { data: orders, error: orderErr } = await sb
-      .from("service_orders")
-      .select("id, service_order_number, status, grand_total, scheduled_start_at, created_at, share_token, vessels(boat_name)")
-      .eq("client_id", clientId)
-      .order("created_at", { ascending: false });
-
-    if (orderErr) throw orderErr;
-
-    return jr({ 
-      client: clients[0], 
-      orders: orders 
-    });
-
-  } catch (e: any) {
-    return jr({ error: e.message || "Erro interno do servidor" }, 500);
-  }
+  return new Response(
+    JSON.stringify({ error: "O portal do cliente foi desativado. Os documentos são enviados em PDF pelo WhatsApp." }),
+    { status: 410, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+  );
 });
