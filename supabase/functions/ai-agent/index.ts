@@ -42,6 +42,7 @@ import { STATUS_INJETAVEL, colunaDaEntidade } from "../_shared/ai/memory-scope.t
 import { podarHistoricoParaLLM } from "../_shared/ai/context-pruning.ts";
 import { filtrarPorCanal } from "../_shared/ai/channel-scope.ts";
 import { carregarJanela } from "../_shared/ai/history-window.ts";
+import { lerPedidoDePdf, textoDoAtalhoPdf } from "../_shared/ai/atalho-pdf.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -521,6 +522,37 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
       effectiveText = resolveOptionAsUserText(pendingOptions[idx - 1]);
       metadata.pending_options = null;
     }
+  }
+
+  // ---- Camada determinística (custo $0): "me manda o PDF do orçamento N" ----
+  // Pedido de PDF para si, e SÓ ele (leitor estrito em _shared/ai/atalho-pdf.ts: qualquer palavra
+  // a mais segue para o modelo), vai direto à mesma tool que o modelo chamaria. Decisão do dono,
+  // 29/09/2026: o pedido mais comum não precisa de ~17 s nem de uma chamada ao modelo.
+  // Interruptor: app_settings.ai_atalho_pdf = 'off'.
+  const pedidoDePdf = (settings.ai_atalho_pdf || "").trim().toLowerCase() === "off" ? null : lerPedidoDePdf(effectiveText);
+  const toolDoPdf = pedidoDePdf ? toolsByName["send_document_pdf_to_self"] : undefined;
+  if (pedidoDePdf && toolDoPdf && (!toolDoPdf.roles || toolDoPdf.roles.includes(appUser.role as Role))) {
+    let resultado: Record<string, unknown>;
+    try {
+      resultado = (await toolDoPdf.execute(pedidoDePdf, toolCtx)) as Record<string, unknown>;
+    } catch (e) {
+      resultado = { error: e instanceof Error ? e.message : String(e) };
+    }
+    const resposta = textoDoAtalhoPdf(resultado);
+    // No histórico como um turno comum: a próxima mensagem ao modelo sabe que o PDF já foi.
+    try {
+      await admin.from("ai_operator_messages").insert([
+        { session_id: sessionId, role: "user", content: text, source: "whatsapp" },
+        { session_id: sessionId, role: "assistant", content: resposta, source: "whatsapp" },
+      ]);
+    } catch (persistErr) {
+      console.error("[ai-agent][whatsapp] atalho do PDF: falha ao gravar o histórico:", persistErr);
+    }
+    await admin.from("ai_operator_sessions")
+      .update({ metadata, last_activity_at: new Date().toISOString() })
+      .eq("id", sessionId);
+    await queueWhatsAppReply(admin, phoneNormalized, resposta);
+    return jr({ ok: true, atalho: "pdf" });
   }
 
   // ---- Turno normal do LLM ----
