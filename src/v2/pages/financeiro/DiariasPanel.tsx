@@ -4,7 +4,7 @@
 // extrato no nome dele (Pix, Caixa) e o que um sócio pagou do próprio bolso para ele — não se
 // digita pagamento aqui: o banco traz. Aqui se lança o DIA.
 import { useState } from 'react';
-import { CalendarPlus, Pencil, Trash2 } from 'lucide-react';
+import { CalendarPlus, FileDown, FileText, Pencil, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -13,13 +13,14 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { useI18n } from '@/i18n';
 import {
-  ESTADO_DO_SALDO, PERIODOS, diaCurto, intervaloDoPeriodo, rotuloDaJornada,
+  ESTADO_DO_SALDO, PERIODOS, diaCurto, intervaloDoMes, intervaloDoPeriodo, rotuloDaJornada,
   type PeriodoDasDiarias,
 } from '@/lib/diarias';
 import {
   diaParaEditar, useContaCorrente, useExcluirDiaComDesfazer, useResumoFreelancers,
   type DiaParaEditar, type FreelancerNoResumo,
 } from '@/hooks/use-diarias';
+import { useDocumentosDasDiarias } from '@/hooks/use-documentos-diarias';
 import { RegistrarDiaDialog } from './RegistrarDiaDialog';
 import { GradeDiarias } from './GradeDiarias';
 
@@ -48,6 +49,9 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
   const resumo = useResumoFreelancers(de, ate);
   const pessoas = resumo.data?.pessoas ?? [];
   const [registrando, setRegistrando] = useState<Registrando | null>(null);
+  const documentos = useDocumentosDasDiarias();
+  // O que os documentos cobrem: na grade, o mês que está na tela; nas outras abas, o período.
+  const intervalo = aba === 'grade' ? intervaloDoMes(filtro.mes) : { de, ate };
 
   const barra = (
     <div className="flex flex-wrap items-center gap-2">
@@ -68,10 +72,23 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
           </SelectContent>
         </Select>
       )}
-      <Button size="sm" className="ml-auto gap-1.5"
-              onClick={() => setRegistrando({ favorecidoId: aba === 'extrato' ? filtro.favorecidoId : null })}>
-        <CalendarPlus className="h-4 w-4" /> Registrar dia
-      </Button>
+      <div className="ml-auto flex flex-wrap gap-2">
+        {aba === 'extrato' && filtro.favorecidoId && (
+          <Button size="sm" variant="outline" className="gap-1.5" disabled={!!documentos.gerando}
+                  onClick={() => { void documentos.extratoEmPdf(filtro.favorecidoId!, intervalo.de, intervalo.ate); }}>
+            <FileText className="h-4 w-4" /> {documentos.gerando === 'pdf' ? 'Gerando…' : 'Extrato em PDF'}
+          </Button>
+        )}
+        <Button size="sm" variant="outline" className="gap-1.5" disabled={!!documentos.gerando || pessoas.length === 0}
+                title="Todos os dias e pagamentos do período, de todos os freelancers, para o contador"
+                onClick={() => { void documentos.csvDoPeriodo(pessoas.map((p) => p.id), intervalo.de, intervalo.ate); }}>
+          <FileDown className="h-4 w-4" /> {documentos.gerando === 'csv' ? 'Gerando…' : 'Planilha do contador (CSV)'}
+        </Button>
+        <Button size="sm" className="gap-1.5"
+                onClick={() => setRegistrando({ favorecidoId: aba === 'extrato' ? filtro.favorecidoId : null })}>
+          <CalendarPlus className="h-4 w-4" /> Registrar dia
+        </Button>
+      </div>
     </div>
   );
 
@@ -90,7 +107,9 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
         </Card>
       ) : aba === 'resumo' ? (
         <Resumo pessoas={pessoas} total={resumo.data!} onVerExtrato={onVerExtrato}
-                onRegistrar={(id) => setRegistrando({ favorecidoId: id })} />
+                onRegistrar={(id) => setRegistrando({ favorecidoId: id })}
+                gerandoPdf={documentos.gerando === 'pdf'}
+                onPdf={(id) => { void documentos.extratoEmPdf(id, de, ate); }} />
       ) : aba === 'grade' ? (
         <GradeDiarias
           pessoas={pessoas}
@@ -117,11 +136,13 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
   );
 }
 
-function Resumo({ pessoas, total, onVerExtrato, onRegistrar }: {
+function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPdf, gerandoPdf }: {
   pessoas: FreelancerNoResumo[];
   total: { trabalhado: number; pago: number; dias: number; deve: number; adiantado: number };
   onVerExtrato: (id: string) => void;
   onRegistrar: (id: string) => void;
+  onPdf: (id: string) => void;
+  gerandoPdf: boolean;
 }) {
   const { formatCurrency, formatDate } = useI18n();
   return (
@@ -167,6 +188,7 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar }: {
               </dl>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button size="sm" variant="outline" onClick={() => onVerExtrato(p.id)}>Ver extrato</Button>
+                <Button size="sm" variant="outline" disabled={gerandoPdf} onClick={() => onPdf(p.id)}>Extrato em PDF</Button>
                 <Button size="sm" variant="ghost" onClick={() => onRegistrar(p.id)}>Registrar dia</Button>
               </div>
             </Card>

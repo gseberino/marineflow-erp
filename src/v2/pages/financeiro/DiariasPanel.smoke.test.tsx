@@ -12,8 +12,19 @@ import { DiariasPanel } from './DiariasPanel';
 
 const rpc = vi.fn();
 const toastFn = vi.fn();
+const exportToCSV = vi.fn();
 
-vi.mock('@/integrations/supabase/client', () => ({ supabase: { rpc: (...a: unknown[]) => rpc(...a) } }));
+vi.mock('@/integrations/supabase/client', () => ({
+  supabase: {
+    rpc: (...a: unknown[]) => rpc(...a),
+    // Só a leitura do cadastro dos freelancers (CPF e PIX) que os documentos fazem.
+    from: () => ({ select: () => ({ in: async () => ({ data: [
+      { id: 'r', name: 'Roberto', document: '12345678940', pix_key: null },
+      { id: 'm', name: 'Mickael', document: '98765432100', pix_key: null },
+    ], error: null }) }) }),
+  },
+}));
+vi.mock('@/lib/export-utils', () => ({ exportToCSV: (...a: unknown[]) => exportToCSV(...a) }));
 vi.mock('sonner', () => ({
   toast: Object.assign((...a: unknown[]) => toastFn(...a), { success: vi.fn(), error: vi.fn() }),
 }));
@@ -45,6 +56,7 @@ const contaVazia = (id: string, nome: string, desde: string) => ({
 
 beforeEach(() => {
   toastFn.mockReset();
+  exportToCSV.mockReset();
   rpc.mockReset();
   rpc.mockImplementation(async (nome: string, args: Record<string, unknown>) => {
     switch (nome) {
@@ -136,6 +148,22 @@ describe('DiariasPanel', () => {
       p_favorecido_id: 'r', p_data: '2026-09-16', p_jornada: 'meio', p_os_ids: null, p_observacao: null,
       p_extras: null, p_descontos: null, p_valor_diaria: null, p_origem: 'painel',
     });
+  });
+
+  it('a planilha do contador junta os dois freelancers do mês da grade, com CPF', async () => {
+    const user = userEvent.setup();
+    renderizar('grade');
+    await screen.findByText('Setembro de 2026');
+    await user.click(screen.getByRole('button', { name: /Planilha do contador/ }));
+    await waitFor(() => expect(exportToCSV).toHaveBeenCalledTimes(1));
+    const [linhas, arquivo] = exportToCSV.mock.calls[0] as [Array<Record<string, string>>, string];
+    // A grade pede o mês inteiro às funções do banco, para cada freelancer.
+    expect(chamadas('conta_corrente_freelancer')).toContainEqual({ p_favorecido_id: 'r', p_de: '2026-09-01', p_ate: '2026-09-30' });
+    expect(linhas.map((l) => `${l.data} ${l.tipo} ${l.freelancer}`)).toEqual([
+      '16/09/2026 Diária Roberto', '22/09/2026 Pagamento Roberto',
+    ]);
+    expect(linhas[0].cpf).toBe('123.456.789-40');
+    expect(arquivo).toMatch(/\.csv$/);
   });
 
   it('grade: "Não trabalhou" grava a falta; dia antes do início da conta corrente não abre', async () => {

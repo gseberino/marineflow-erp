@@ -84,7 +84,11 @@ export function useResumoFreelancers(de: string | null, ate: string | null) {
   });
 }
 
-async function lerContaCorrente(favorecidoId: string, de: string | null, ate: string | null): Promise<ContaCorrente> {
+/** Chave única da conta de um freelancer num período — a tela, a grade e os documentos a dividem. */
+export const chaveDaConta = (favorecidoId: string, de: string | null, ate: string | null) =>
+  ['diarias', 'conta', favorecidoId, de, ate] as const;
+
+export async function lerContaCorrente(favorecidoId: string, de: string | null, ate: string | null): Promise<ContaCorrente> {
   const { data, error } = await supabase.rpc('conta_corrente_freelancer' as never, {
     p_favorecido_id: favorecidoId, p_de: de, p_ate: ate,
   } as never);
@@ -105,7 +109,7 @@ async function lerContaCorrente(favorecidoId: string, de: string | null, ate: st
 
 export function useContaCorrente(favorecidoId: string | null, de: string | null, ate: string | null) {
   return useQuery({
-    queryKey: ['diarias', 'conta', favorecidoId, de, ate],
+    queryKey: chaveDaConta(favorecidoId ?? '', de, ate),
     enabled: !!favorecidoId,
     queryFn: () => lerContaCorrente(favorecidoId!, de, ate),
     staleTime: 30_000,
@@ -119,7 +123,7 @@ export function useContaCorrente(favorecidoId: string | null, de: string | null,
 export function useContasDoPeriodo(favorecidoIds: string[], de: string, ate: string) {
   return useQueries({
     queries: favorecidoIds.map((id) => ({
-      queryKey: ['diarias', 'conta', id, de, ate],
+      queryKey: chaveDaConta(id, de, ate),
       queryFn: () => lerContaCorrente(id, de, ate),
       staleTime: 30_000,
     })),

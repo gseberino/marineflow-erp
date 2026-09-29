@@ -52,6 +52,13 @@ de diária; dia = `work_shifts`; pagamento = o lançamento que já vem do extrat
    grava a falta (valor zero) — apagar é o "Excluir" da lista, com Desfazer. Dia antes do início da
    conta corrente e dia no futuro ficam fechados na grade e no formulário.
 3. **Extrato em PDF** com assinatura e **CSV mensal** para o contador.
+   `src/lib/extrato-diarias.ts` (puro, testado) monta o HTML A4 e as linhas do CSV;
+   `use-documentos-diarias.ts` renderiza o PDF no servidor (`/api/pdf`, o mesmo Chromium dos
+   orçamentos) e cai na impressão do navegador se o servidor não responder. Não usa o
+   `PDFData` de `_shared/pdf/documento.ts`: aquele modelo é de OS/orçamento e é dividido com as
+   funções do servidor. O documento é de prestação de serviço por dia — sem horário, sem
+   "jornada"/"ponto" no papel. O CSV (`;`, BOM, fórmula neutralizada por `exportToCSV`) junta
+   todos os freelancers do período (na grade, o mês da tela).
 4. **Assistente:** `registrar_diaria` + `consultar_freelancer` no lugar das 5 de jornada; prompt;
    confirmação com o pedido resolvido. Fecha a paridade tela ↔ assistente (o hook da tela entra em
    `paridade-tela-assistente.test.ts` junto com a tool).

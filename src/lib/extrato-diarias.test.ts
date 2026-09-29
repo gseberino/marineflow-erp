@@ -1,0 +1,93 @@
+import { describe, it, expect } from 'vitest';
+import type { ContaCorrente } from '@/hooks/use-diarias';
+import { documentoFormatado, linhasDoCsv, montarExtratoHtml, nomeDoArquivo, textoDoPeriodo } from './extrato-diarias';
+
+const conta = (o: Partial<ContaCorrente> = {}): ContaCorrente => ({
+  favorecido: { id: 'r', nome: 'Roberto Daniel', desde: '2026-08-25', saldo_inicial: 0, diaria: 160 },
+  de: '2026-09-01', ate: '2026-09-30', saldo_anterior: 70, dias: 1.5, trabalhado: 260, pago: 100, saldo_final: 230,
+  estado: 'deve',
+  linhas: [
+    { data: '2026-09-16', tipo: 'dia', id: 'd1', jornada: 'inteiro', fracao: 1, valor_diaria: 160, extras: 20, descontos: 0,
+      trabalhado: 180, pago: 0, descricao: null, conta: null, categoria: null, observacao: 'Gerador do Marcelo',
+      os: [{ id: 'o1', numero: 'OS-0042' }], saldo: 250 },
+    { data: '2026-09-17', tipo: 'dia', id: 'd2', jornada: 'meio', fracao: 0.5, valor_diaria: 160, extras: 0, descontos: 0,
+      trabalhado: 80, pago: 0, descricao: null, conta: null, categoria: null, observacao: null, os: [], saldo: 330 },
+    { data: '2026-09-16', tipo: 'pagamento', id: 'p1', jornada: null, fracao: null, valor_diaria: null, extras: null,
+      descontos: null, trabalhado: 0, pago: 100, descricao: 'Pix enviado para Roberto', conta: 'C6 - Conta PJ HBR',
+      categoria: 'Diárias de freelancers', observacao: null, os: [], saldo: 230 },
+  ],
+  ...o,
+});
+
+describe('extrato de diárias em PDF', () => {
+  const html = montarExtratoHtml({
+    empresa: { nome: 'HBR Marine Solutions', cnpj: '50057049000159', cidade: 'Itajaí/SC' },
+    freelancer: { nome: 'Roberto Daniel', documento: '12345678940', pix: 'roberto@pix' },
+    conta: conta(),
+    geradoEm: new Date(2026, 8, 29, 14, 5),
+  });
+
+  it('traz o resumo, os dias com a OS, os pagamentos com a conta e o estado em palavras', () => {
+    expect(html).toContain('Extrato de diárias');
+    expect(html).toContain('01/09/2026 a 30/09/2026');
+    expect(html).toContain('CPF 123.456.789-40');
+    expect(html).toContain('CNPJ 50.057.049/0001-59');
+    expect(html).toContain('OS-0042');
+    expect(html).toContain('Gerador do Marcelo');
+    expect(html).toContain('Meio período');
+    expect(html).toContain('C6 - Conta PJ HBR');
+    expect(html).toMatch(/R\$ 230,00 \(a pagar ao prestador\)/);
+    expect(html).toContain('Saldo antes do período');
+    expect(html).toContain('Gerado em 29/09/2026 às 14:05');
+  });
+
+  it('tem as duas linhas de assinatura: empresa e prestador, com o CPF', () => {
+    const assinaturas = html.slice(html.indexOf('<div class="assinaturas">'));
+    expect(assinaturas).toContain('HBR Marine Solutions');
+    expect(assinaturas).toContain('Roberto Daniel<br>CPF 123.456.789-40');
+  });
+
+  it('não registra horário: é prestação por dia, não ponto', () => {
+    expect(html).not.toMatch(/entrada|saída|expediente|ponto/i);
+  });
+
+  it('texto do cadastro não vira código na página', () => {
+    const h = montarExtratoHtml({
+      empresa: { nome: 'HBR', cnpj: null, cidade: null },
+      freelancer: { nome: '<script>alert(1)</script>', documento: null, pix: null },
+      conta: conta(), geradoEm: new Date(),
+    });
+    expect(h).not.toContain('<script>alert(1)</script>');
+    expect(h).toContain('&lt;script&gt;');
+  });
+
+  it('período e nome do arquivo acompanham o que foi pedido', () => {
+    expect(textoDoPeriodo(conta({ de: null, ate: null }))).toBe('desde 25/08/2026');
+    expect(nomeDoArquivo('extrato-diarias', 'Roberto Daniel Corrêa', conta(), 'pdf')).toBe('extrato-diarias-roberto-daniel-correa-2026-09.pdf');
+    expect(nomeDoArquivo('diarias', '', conta({ de: '2026-08-25', ate: null }), 'csv')).toBe('diarias-historico.csv');
+  });
+});
+
+describe('CSV do contador', () => {
+  const linhas = linhasDoCsv([{ conta: conta(), documento: '12345678940' }]);
+
+  it('uma linha por dia e por pagamento, em ordem de data, dia antes do pagamento no mesmo dia', () => {
+    expect(linhas.map((l) => `${l.data} ${l.tipo}`)).toEqual([
+      '16/09/2026 Diária', '16/09/2026 Pagamento', '17/09/2026 Diária',
+    ]);
+  });
+
+  it('valores com vírgula, meia diária como 0,5, e o pagamento com a conta de origem', () => {
+    const [dia, pagamento, meio] = linhas;
+    expect(dia).toMatchObject({ cpf: '123.456.789-40', jornada: 'Dia inteiro', diarias: '1', valor_diaria: '160,00',
+      extras: '20,00', trabalhado: '180,00', pago: '', os: 'OS-0042', observacao: 'Gerador do Marcelo' });
+    expect(meio).toMatchObject({ jornada: 'Meio período', diarias: '0,5', trabalhado: '80,00' });
+    expect(pagamento).toMatchObject({ tipo: 'Pagamento', pago: '100,00', trabalhado: '', conta: 'C6 - Conta PJ HBR',
+      categoria: 'Diárias de freelancers', observacao: 'Pix enviado para Roberto' });
+  });
+
+  it('documento de outro formato passa como veio', () => {
+    expect(documentoFormatado('')).toBe('');
+    expect(documentoFormatado('abc')).toBe('abc');
+  });
+});
