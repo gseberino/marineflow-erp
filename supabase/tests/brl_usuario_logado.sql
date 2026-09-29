@@ -19,7 +19,12 @@ declare
   v_det text;
   m int;
 begin
-  select id into v_admin from public.app_users where role = 'admin' limit 1;
+  -- O admin que existe no login e está ativo: há cadastros antigos de admin em app_users sem
+  -- usuário no auth, e com eles as funções de cargo respondem false.
+  select a.id into v_admin
+    from public.app_users a join auth.users u on u.id = a.id
+   where a.role = 'admin' and a.active
+   limit 1;
   perform set_config('request.jwt.claims',
     json_build_object('sub', v_admin::text, 'role', 'authenticated')::text, true);
 
