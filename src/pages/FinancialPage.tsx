@@ -37,6 +37,7 @@ import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { Send, Pencil } from 'lucide-react';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { LinkDoArquivo } from '@/lib/arquivo-privado';
 
 function getStatusBadgeClass(status: string, dueDate: string) {
   const isOverdue = status !== 'paid' && status !== 'cancelled' && new Date(dueDate) < new Date();
@@ -375,9 +376,9 @@ export default function FinancialPage() {
             const url = soeReceipt || (p as any).receipt_url;
             if (!url) return <span className="text-muted-foreground">—</span>;
             return (
-              <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary inline-flex items-center justify-center hover:underline" title="Ver comprovante">
+              <LinkDoArquivo bucket="expense-receipts" valor={url} className="text-primary inline-flex items-center justify-center hover:underline" title="Ver comprovante">
                 <Paperclip className="h-4 w-4" />
-              </a>
+              </LinkDoArquivo>
             );
           })()}
         </td>

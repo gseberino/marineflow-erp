@@ -89,7 +89,12 @@ const TABELAS = {
 };
 
 const cliente = fazerCliente(TABELAS);
-vi.mock('@/integrations/supabase/client', () => ({ supabase: fazerCliente({}) }));
+// A imagem da assinatura vem da edge assinatura-do-link (bucket privado desde 29/09/2026).
+const LINK_TEMPORARIO = 'https://sb.example/storage/v1/object/sign/signatures/os-1/1.png?token=t';
+const invocar = vi.hoisted(() => vi.fn(async () => ({
+  data: { imagem_url: 'https://sb.example/storage/v1/object/sign/signatures/os-1/1.png?token=t' }, error: null,
+})));
+vi.mock('@/integrations/supabase/client', () => ({ supabase: { ...fazerCliente({}), functions: { invoke: invocar } } }));
 vi.mock('@/integrations/supabase/share-client', () => ({ createShareClient: () => cliente }));
 
 const abrir = () =>
@@ -161,6 +166,26 @@ describe('PublicServiceOrderView — smoke de render', () => {
       expect(buildHTMLDocument(baixados[0].dados, baixados[0].opcoes)).toContain('Válido até 20/08/2026');
     } finally {
       delete ORDEM.quote_validity_date;
+    }
+  });
+
+  // Desde 29/09/2026 o bucket das assinaturas é privado e o banco guarda só o caminho. O
+  // cliente sem login vê a imagem por um link temporário que a edge dá depois de conferir o
+  // token; o caminho gravado nunca vai para o <img> (não abriria, e não é link).
+  it('assinado: a imagem vem do link temporário da assinatura-do-link', async () => {
+    ORDEM.signed_at = '2026-08-02T12:00:00Z';
+    (TABELAS as Record<string, unknown>).service_order_signatures = [{
+      id: 's-1', signature_image_url: 'os-1/1.png', accepted_name: 'Cliente Teste',
+      signed_at: '2026-08-02T12:00:00Z', superseded_at: null, document_hash: 'h',
+    }];
+    try {
+      abrir();
+      const img = await screen.findByAltText('Assinatura do cliente');
+      expect(img.getAttribute('src')).toBe(LINK_TEMPORARIO);
+      expect(invocar).toHaveBeenCalledWith('assinatura-do-link', { body: { share_token: 'tok-1' } });
+    } finally {
+      ORDEM.signed_at = null;
+      (TABELAS as Record<string, unknown>).service_order_signatures = [];
     }
   });
 });

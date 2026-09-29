@@ -20,6 +20,7 @@ import { PaymentDialog } from '@/components/PaymentDialog';
 import { CorrigirLancamentoDialog } from '@/components/CorrigirLancamentoDialog';
 import { DesfazerOuCancelarDialog, type AcaoNoLancamento } from '@/components/DesfazerOuCancelarDialog';
 import { AcoesDaLinha, type AcaoDaLinha } from '@/components/AcoesDaLinha';
+import { LinkDoArquivo } from '@/lib/arquivo-privado';
 import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
 import { DataTable, type DataColumn, type SortState } from '@/v2/components/DataTable';
 
@@ -265,14 +266,14 @@ export function ContasAPagarLista({ onNovaConta }: {
         const soeReceipt = p.service_order_expenses?.find?.((e) => e?.receipt_url)?.receipt_url;
         const url = soeReceipt || p.receipt_url;
         if (!url) return <span className="text-muted-foreground">—</span>;
+        // Bucket privado: o link temporário é gerado no clique (LinkDoArquivo já para o clique na linha).
         return (
-          <a
-            href={url} target="_blank" rel="noopener noreferrer" title="Ver comprovante"
+          <LinkDoArquivo
+            bucket="expense-receipts" valor={url} title="Ver comprovante"
             className="inline-flex items-center gap-1 text-accent underline-offset-2 hover:underline"
-            onClick={(e) => e.stopPropagation()}
           >
             <Paperclip className="h-4 w-4" /> Ver
-          </a>
+          </LinkDoArquivo>
         );
       },
     },

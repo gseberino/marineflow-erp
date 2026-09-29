@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { depositAmountFromPcts, signalPctsFromInstallments, computeScheduleFromParts, CONDICAO_PADRAO, type DepositInstallment } from '@/lib/quote-deposit';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 import { addDays, format, parseISO } from 'date-fns';
+import { LinkDoArquivo } from '@/lib/arquivo-privado';
 
 const PAYMENT_METHODS = [
   { value: 'pix',           label: 'PIX' },
@@ -239,8 +240,8 @@ export function RegisterDepositDialog({
       const path = `deposits/${serviceOrderId}/${uuid}.${ext}`;
       const { error: upErr } = await supabase.storage.from('expense-receipts').upload(path, file, { contentType: file.type, upsert: false });
       if (upErr) throw upErr;
-      const { data: urlData } = supabase.storage.from('expense-receipts').getPublicUrl(path);
-      setReceiptUrl(urlData.publicUrl);
+      // Bucket privado desde 29/09/2026: receipt_url guarda o caminho; a tela gera o link na hora.
+      setReceiptUrl(path);
       setReceiptPath(path);
       toast({ title: 'Comprovante anexado' });
     } catch (err: any) {
@@ -557,9 +558,9 @@ export function RegisterDepositDialog({
             <Label>Comprovante <span className="text-muted-foreground font-normal">(opcional)</span></Label>
             {receiptUrl ? (
               <div className="flex items-center gap-2 text-sm">
-                <a href={receiptUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-blue-600 underline">
+                <LinkDoArquivo bucket="expense-receipts" valor={receiptUrl} className="flex items-center gap-1 text-blue-600 underline">
                   <Paperclip className="h-3.5 w-3.5" /> Comprovante anexado
-                </a>
+                </LinkDoArquivo>
                 <Button type="button" variant="ghost" size="sm" onClick={handleRemoveReceipt}
                   className="h-6 px-2 text-muted-foreground" aria-label="Remover o comprovante anexado">
                   <X className="h-3.5 w-3.5" />

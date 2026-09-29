@@ -103,8 +103,9 @@ servirComCors(async (req) => {
     if (uploadErr) {
       return jsonResponse({ error: 'Falha ao salvar imagem.', detail: uploadErr.message }, 500);
     }
-    const { data: pub } = admin.storage.from('signatures').getPublicUrl(filename);
-    const signatureUrl = pub.publicUrl;
+    // Bucket privado desde 29/09/2026: grava o CAMINHO (não o link público); quem mostra gera
+    // um link temporário (_shared/arquivo-privado.ts, assinatura-do-link).
+    const signatureUrl = filename;
 
     // ---- upload do PDF arquivado (opcional, mas fortemente recomendado) ----
     let signedPdfUrl: string | null = null;
@@ -120,8 +121,7 @@ servirComCors(async (req) => {
             .from('signatures')
             .upload(pdfFilename, pdfBytes, { contentType: 'application/pdf', upsert: false });
           if (!pdfErr) {
-            const { data: pdfPub } = admin.storage.from('signatures').getPublicUrl(pdfFilename);
-            signedPdfUrl = pdfPub.publicUrl;
+            signedPdfUrl = pdfFilename; // caminho no bucket privado
           } else {
             console.warn('[submit-signature] PDF upload falhou:', pdfErr.message);
           }

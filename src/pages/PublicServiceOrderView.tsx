@@ -151,6 +151,21 @@ export default function PublicServiceOrderView() {
     };
   }, [token, reload]);
 
+  // Imagem da assinatura: o bucket é privado desde 29/09/2026, e quem está sem login recebe um
+  // link temporário pela função assinatura-do-link (confere o token; o PDF assinado não sai por
+  // lá). undefined = carregando; null = sem imagem.
+  const assinaturaGravada = data?.signature?.signature_image_url ?? null;
+  const [imagemDaAssinatura, setImagemDaAssinatura] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!token || !assinaturaGravada) { setImagemDaAssinatura(null); return; }
+    let cancelado = false;
+    setImagemDaAssinatura(undefined);
+    supabase.functions.invoke('assinatura-do-link', { body: { share_token: token } })
+      .then(({ data: r }) => { if (!cancelado) setImagemDaAssinatura((r as { imagem_url?: string | null } | null)?.imagem_url ?? null); })
+      .catch(() => { if (!cancelado) setImagemDaAssinatura(null); });
+    return () => { cancelado = true; };
+  }, [token, assinaturaGravada]);
+
   // Texto consolidado dos termos (mesma lógica do PDF)
   const termsText = useMemo(() => {
     if (!data) return '';
@@ -737,12 +752,14 @@ export default function PublicServiceOrderView() {
               {isSigned && signature ? (
                 <div className="space-y-3">
                   <div className="rounded-lg border bg-background p-4">
-                    {signature.signature_image_url ? (
+                    {imagemDaAssinatura ? (
                       <img
-                        src={signature.signature_image_url}
+                        src={imagemDaAssinatura}
                         alt="Assinatura do cliente"
                         className="mx-auto max-h-32"
                       />
+                    ) : imagemDaAssinatura === undefined && signature.signature_image_url ? (
+                      <p className="text-center text-sm text-muted-foreground">Carregando a assinatura…</p>
                     ) : (
                       <p className="text-center text-sm text-muted-foreground">
                         Assinatura registrada (imagem não disponível)

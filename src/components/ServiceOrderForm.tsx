@@ -1645,8 +1645,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         .from('expense-receipts')
         .upload(path, file, { contentType: file.type, upsert: false });
       if (upErr) throw upErr;
-      const { data: urlData } = supabase.storage.from('expense-receipts').getPublicUrl(path);
-      setExpForm((prev) => ({ ...prev, receipt_url: urlData.publicUrl, receipt_storage_path: path }));
+      // Bucket privado desde 29/09/2026: receipt_url guarda o caminho; a tela gera o link na hora.
+      setExpForm((prev) => ({ ...prev, receipt_url: path, receipt_storage_path: path }));
       toast.success('Comprovante anexado');
     } catch (e: any) {
       toast.error(e.message || 'Erro ao enviar comprovante');

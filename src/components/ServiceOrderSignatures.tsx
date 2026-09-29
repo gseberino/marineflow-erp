@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { PenLine, FileSignature, AlertTriangle, ExternalLink, FileText } from 'lucide-react';
+import { useLinkDoArquivo } from '@/lib/arquivo-privado';
 
 interface Props {
   serviceOrderId: string;
@@ -74,6 +75,9 @@ export function ServiceOrderSignatures({ serviceOrderId }: Props) {
 
 function SignatureCard({ sig, status }: { sig: SignatureRow; status: 'active' | 'superseded' }) {
   const isSuperseded = status === 'superseded';
+  // Bucket privado desde 29/09/2026: a coluna guarda o caminho e o link é temporário.
+  const imagem = useLinkDoArquivo('signatures', sig.signature_image_url);
+  const pdf = useLinkDoArquivo('signatures', sig.signed_pdf_url);
   return (
     <div
       className={`rounded-lg border p-4 space-y-3 ${
@@ -98,15 +102,15 @@ function SignatureCard({ sig, status }: { sig: SignatureRow; status: 'active' | 
         )}
       </div>
 
-      {sig.signature_image_url ? (
+      {imagem.url ? (
         <a
-          href={sig.signature_image_url}
+          href={imagem.url}
           target="_blank"
           rel="noopener noreferrer"
           className="block rounded-md border bg-background p-2 hover:border-accent transition-colors"
         >
           <img
-            src={sig.signature_image_url}
+            src={imagem.url}
             alt={`Assinatura de ${sig.accepted_name}`}
             className="h-24 w-auto mx-auto object-contain"
             loading="lazy"
@@ -116,13 +120,15 @@ function SignatureCard({ sig, status }: { sig: SignatureRow; status: 'active' | 
             Abrir imagem original
           </p>
         </a>
+      ) : imagem.carregando ? (
+        <p className="text-xs text-muted-foreground">Carregando a imagem da assinatura…</p>
       ) : (
         <p className="text-xs text-muted-foreground italic">Imagem da assinatura indisponível.</p>
       )}
 
-      {sig.signed_pdf_url ? (
+      {pdf.url ? (
         <a
-          href={sig.signed_pdf_url}
+          href={pdf.url}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-between gap-2 rounded-md border bg-primary/5 hover:bg-primary/10 transition-colors p-3"
@@ -136,6 +142,8 @@ function SignatureCard({ sig, status }: { sig: SignatureRow; status: 'active' | 
           </div>
           <ExternalLink className="h-4 w-4 text-muted-foreground" />
         </a>
+      ) : pdf.carregando ? (
+        <p className="text-xs text-muted-foreground">Carregando o PDF arquivado…</p>
       ) : (
         <p className="text-xs text-muted-foreground italic">
           PDF arquivado indisponível para esta assinatura (assinatura registrada antes da arquivação automática).

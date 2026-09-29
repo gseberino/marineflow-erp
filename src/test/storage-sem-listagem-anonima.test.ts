@@ -380,7 +380,7 @@ describe("quem enxerga o quê — a leitura segue a tabela dona do caminho", () 
     ["tecnico", "sinalQueOTecnicoSubiu", true, "quem anexou remove o que acabou de anexar"],
     ["tecnico", "fotoDaOs", true, "service_order_photos: qualquer logado"],
     ["tecnico", "fotoDoLevantamento", true, "service_surveys: todo mundo menos vendedor externo"],
-    ["tecnico", "assinatura", false, "só a edge submit-signature mexe, com a chave de serviço"],
+    ["tecnico", "assinatura", false, "só admin/financeiro veem assinatura e PDF assinado (traz CPF e endereço)"],
     ["tecnico", "status", false, "nenhuma tela lê o bucket de status pela API"],
 
     ["externo", "despesa", true, "service_order_expenses: qualquer logado"],
@@ -388,14 +388,17 @@ describe("quem enxerga o quê — a leitura segue a tabela dona do caminho", () 
     ["externo", "sinalQueOTecnicoSubiu", false, "payments: só admin/financeiro"],
     ["externo", "fotoDaOs", true, "service_order_photos: qualquer logado"],
     ["externo", "fotoDoLevantamento", false, "service_surveys: NOT is_external_seller"],
+    ["externo", "assinatura", false, "só admin/financeiro veem assinatura e PDF assinado"],
 
     ["financeiro", "despesa", true, "qualquer logado"],
     ["financeiro", "sinal", true, "payments: admin/financeiro"],
     ["financeiro", "sinalQueOTecnicoSubiu", true, "payments: admin/financeiro"],
     ["financeiro", "fotoDoLevantamento", true, "não é vendedor externo"],
+    ["financeiro", "assinatura", true, "ficha da OS: link temporário da assinatura (bucket privado desde 29/09)"],
 
     ["admin", "sinal", true, "payments: admin/financeiro"],
     ["admin", "fotoDoLevantamento", true, "não é vendedor externo"],
+    ["admin", "assinatura", true, "ficha da OS: link temporário da assinatura (bucket privado desde 29/09)"],
   ];
 
   it("cada perfil enxerga exatamente o que a tabela dona do caminho deixa", () => {
@@ -480,6 +483,17 @@ const QUEM_FAZ: Record<string, { perfis: (keyof typeof PERFIS)[]; objeto: (p: Pe
     objeto: () => OBJETOS.despesa,
     porque: "remover comprovante da despesa: o caminho vem da despesa salva, que outro pode ter subido",
   },
+  // Buckets privados desde 29/09/2026: a tela gera link temporário para mostrar.
+  "src/lib/arquivo-privado.tsx signatures.createSignedUrl": {
+    perfis: ["financeiro", "admin"],
+    objeto: () => OBJETOS.assinatura,
+    porque: "ficha da OS: ver a assinatura e o PDF assinado (técnico e vendedor não veem: o PDF traz CPF e endereço)",
+  },
+  "src/lib/arquivo-privado.tsx expense-receipts.createSignedUrl": {
+    perfis: ["tecnico", "externo", "financeiro", "admin"],
+    objeto: () => OBJETOS.despesa,
+    porque: "ver o comprovante da despesa da OS (o do sinal segue a tabela payments: admin/financeiro)",
+  },
 };
 
 describe("front — toda operação que exige SELECT tem a regra para quem a faz", () => {
@@ -517,10 +531,10 @@ describe("front — toda operação que exige SELECT tem a regra para quem a faz
 });
 
 describe("edge functions — os quatro buckets só com a chave de serviço", () => {
-  // O bucket 'signatures' não ganhou leitura para logado porque só a edge submit-signature
-  // mexe nele, com o cliente `admin` (chave de serviço, que ignora a RLS). Se uma função
-  // passar a usar o cliente do usuário nesses buckets, essa premissa cai e a regra precisa
-  // ser revista.
+  // As edges mexem nesses buckets só com o cliente `admin` (chave de serviço, que ignora a
+  // RLS): submit-signature grava, assinatura-do-link dá o link temporário da imagem ao cliente
+  // sem login. Leitura de logado em 'signatures' é só admin/financeiro (29/09/2026). Se uma
+  // função passar a usar o cliente do usuário nesses buckets, essa premissa cai.
   it("toda chamada de Storage nos quatro buckets usa o cliente admin", () => {
     // Aqui basta o from(): o método pode vir depois, numa variável, e continua sendo o cliente
     // que decide se a RLS vale.
@@ -536,7 +550,7 @@ describe("edge functions — os quatro buckets só com a chave de serviço", () 
       }
     }
     expect(comUsuario).toEqual([]);
-    // submit-signature: upload + getPublicUrl do PNG e do PDF assinado.
-    expect(vistasComAdmin).toBeGreaterThanOrEqual(4);
+    // submit-signature: upload do PNG e do PDF assinado; assinatura-do-link: link temporário.
+    expect(vistasComAdmin).toBeGreaterThanOrEqual(3);
   });
 });

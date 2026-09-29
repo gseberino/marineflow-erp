@@ -12,7 +12,16 @@ import { EntityCombobox } from '@/components/EntityCombobox';
 import { StatusBadge } from '@/components/StatusBadge';
 import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { useI18n } from '@/i18n';
+import { LinkDoArquivo, useLinkDoArquivo } from '@/lib/arquivo-privado';
 import type { Dispatch, SetStateAction } from 'react';
+
+/** Miniatura do comprovante (bucket privado: o link é temporário e gerado aqui). */
+function MiniaturaDoComprovante({ valor, className }: { valor: string; className: string }) {
+  const { url } = useLinkDoArquivo('expense-receipts', valor);
+  return url
+    ? <img src={url} alt="Comprovante" className={className} />
+    : <span className={`${className} inline-flex items-center justify-center bg-muted`}><FileImage className="h-4 w-4 text-muted-foreground" /></span>;
+}
 
 interface ExpensesTimeDialogsProps {
   isNew: boolean;
@@ -157,24 +166,19 @@ export function ExpensesTimeDialogs(props: ExpensesTimeDialogsProps) {
                       {expForm.receipt_url ? (
                         <div className="flex items-center gap-2 mt-1 p-2 rounded-md border bg-background">
                           {/\.(png|jpe?g|gif|webp|svg)$/i.test(expForm.receipt_url) ? (
-                            <img
-                              src={expForm.receipt_url}
-                              alt="Comprovante"
-                              className="h-[60px] w-[60px] object-cover rounded border"
-                            />
+                            <MiniaturaDoComprovante valor={expForm.receipt_url} className="h-[60px] w-[60px] object-cover rounded border" />
                           ) : (
                             <div className="h-[60px] w-[60px] flex items-center justify-center rounded border bg-muted">
                               <FileText className="h-6 w-6 text-muted-foreground" />
                             </div>
                           )}
-                          <a
-                            href={expForm.receipt_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <LinkDoArquivo
+                            bucket="expense-receipts"
+                            valor={expForm.receipt_url}
                             className="text-xs text-primary hover:underline truncate flex-1"
                           >
                             Ver comprovante
-                          </a>
+                          </LinkDoArquivo>
                           <Button
                             type="button"
                             variant="ghost"
@@ -288,14 +292,14 @@ export function ExpensesTimeDialogs(props: ExpensesTimeDialogsProps) {
                         <td className="px-4 py-3 text-center hidden md:table-cell">
                           {exp.receipt_url ? (
                             /\.(png|jpe?g|gif|webp|svg)$/i.test(exp.receipt_url) ? (
-                              <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="inline-block">
-                                <img src={exp.receipt_url} alt="Comprovante" className="h-8 w-8 object-cover rounded border inline-block" />
-                              </a>
+                              <LinkDoArquivo bucket="expense-receipts" valor={exp.receipt_url} className="inline-block" title="Ver comprovante">
+                                <MiniaturaDoComprovante valor={exp.receipt_url} className="h-8 w-8 object-cover rounded border inline-block" />
+                              </LinkDoArquivo>
                             ) : (
-                              <a href={exp.receipt_url} target="_blank" rel="noopener noreferrer" className="text-primary inline-flex items-center gap-1 hover:underline">
+                              <LinkDoArquivo bucket="expense-receipts" valor={exp.receipt_url} className="text-primary inline-flex items-center gap-1 hover:underline" title="Ver comprovante">
                                 <FileImage className="h-4 w-4" />
                                 <ExternalLink className="h-3 w-3" />
-                              </a>
+                              </LinkDoArquivo>
                             )
                           ) : (
                             <span className="text-muted-foreground">—</span>

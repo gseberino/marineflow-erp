@@ -10,6 +10,10 @@ verify_jwt = false
 [functions.submit-signature]
 verify_jwt = false
 
+# Página pública da OS (cliente sem login): link temporário da imagem da assinatura.
+[functions.assinatura-do-link]
+verify_jwt = false
+
 [functions.whatsapp-process-scheduled]
 verify_jwt = false
 
