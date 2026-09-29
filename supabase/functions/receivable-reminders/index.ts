@@ -7,7 +7,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { normalizePhoneNumber } from "../_shared/whatsapp/normalize.ts";
-import { chaveDeEnvio, liberarEnvio, reservarEnvio } from "../_shared/whatsapp/idempotencia.ts";
+import { chaveDeEnvio, reservarEnvio } from "../_shared/whatsapp/idempotencia.ts";
+import { enviarLembrete } from "./enviar.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
@@ -120,17 +121,13 @@ servirComCors(async (req) => {
         skipped++;
         continue;
       }
-      try {
-        await provider.sendText(phoneClean, message);
-        await admin
-          .from("receivables")
-          .update({ reminder_sent_at: new Date().toISOString() })
-          .eq("id", rec.id);
+      // Só conta como enviado (e só grava reminder_sent_at) se o provedor confirmou: ver enviar.ts.
+      const envio = await enviarLembrete({ admin, provider, chave, phone: phoneClean, message, recebivelId: rec.id });
+      if (envio.ok) {
         sent++;
-      } catch (sendErr: any) {
-        await liberarEnvio(admin, chave);
+      } else {
         errors++;
-        console.error(`[receivable-reminders] erro no envio ${rec.id}:`, sendErr?.message || sendErr);
+        console.error(`[receivable-reminders] erro no envio ${rec.id}:`, envio.erro);
       }
     }
 
