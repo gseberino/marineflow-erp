@@ -804,8 +804,13 @@ export function useMarcarDuplicata() {
   return useMutation({
     mutationFn: async (v: { propostaId: string; bankTransactionId: string | null }) => {
       if (v.bankTransactionId) {
+        // A marca 'duplicata' é o que tira a linha do fluxo de caixa, do saldo e da previsão; só o
+        // texto deixava a duplicata contando em Entrou/Saiu (achado de 29/09/2026).
         const { error } = await supabase.from('bank_transactions')
-          .update({ reconciled: true, dismissed_reason: 'Duplicata' } as never)
+          .update({
+            reconciled: true, dismissed_kind: 'duplicata', dismissed_reason: 'Duplicata',
+            dismissed_at: new Date().toISOString(),
+          } as never)
           .eq('id', v.bankTransactionId);
         if (error) throw error;
       }

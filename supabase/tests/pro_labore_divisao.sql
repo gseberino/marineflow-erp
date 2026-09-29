@@ -29,6 +29,9 @@ declare
   g record;
   v text;
   v_n integer;
+  v_m date;
+  v_a numeric;
+  v_b numeric;
 begin
   select * into g from _grupo;
   if g.raiz is null then
@@ -114,17 +117,68 @@ begin
     insert into _resultado values ('T6 separar de novo não muda nada', v = '0', v || ' lançamento(s) mudariam');
   end;
 
-  -- T7. O Extrato com saldo mostra a linha dividida uma vez só.
+  -- T7. O Extrato com saldo mostra a linha dividida uma vez só. Pega a divisão mais recente da
+  --     CONTA (a de cartão aparece na fatura, não no extrato da conta — em 29/09 a mais recente
+  --     passou a ser uma compra no cartão, e o teste acusava falha que não existia).
   select count(*) into v_n
-    from public.bank_transactions t
-    cross join lateral public.extrato_da_conta(t.bank_connection_id, g.data, g.data) e
-   where t.id = g.linha and e.id = g.linha;
+    from (select p.bank_transaction_id as linha
+            from public.payables p
+            join public.payables x on x.divisao_id = p.id and x.status <> 'cancelled'
+            join public.bank_transactions bt on bt.id = p.bank_transaction_id
+           where p.divisao_id is null and p.status = 'paid' and coalesce(bt.source_type, 'bank') <> 'credit_card'
+           order by p.issue_date desc, p.id limit 1) gb
+    join public.bank_transactions t on t.id = gb.linha
+    cross join lateral public.extrato_da_conta(t.bank_connection_id, t.transaction_date, t.transaction_date) e
+   where e.id = gb.linha;
   insert into _resultado values ('T7 extrato: uma linha', v_n = 1, v_n || ' linha(s)');
 
   -- T8. A Conciliação não acusa diferença nas partes.
   select count(*) into v_n from public.conciliacao_lancamentos
    where id in (g.raiz, g.parte) and coalesce(diferenca, 0) <> 0;
   insert into _resultado values ('T8 conciliação sem diferença', v_n = 0, v_n || ' parte(s) com diferença');
+
+  -- T11. Gasto pessoal desconta do pró-labore (migration 20260929100000): no mês do Pix dividido
+  --      (o mês bate o mínimo), R$ 100 de gasto tiram R$ 100 do pró-labore dos Pix.
+  begin
+    v_m := date_trunc('month', g.data)::date;
+    perform public.separar_pro_labore(v_m, (v_m + interval '1 month - 1 day')::date, null);
+    select coalesce(sum(amount), 0) into v_a from public.payables
+     where payee_id = g.socio and status = 'paid' and expense_category = 'Pró-labore'
+       and issue_date >= v_m and issue_date < (v_m + interval '1 month')::date;
+    insert into public.payables (description, issue_date, due_date, amount, paid_amount, balance_amount, status, expense_category, origin)
+    values ('teste automático: gasto pessoal', g.data, g.data, 100, 100, 0, 'paid', 'Gasto Pessoal Sócio - Descontar PL', 'manual');
+    perform public.separar_pro_labore(v_m, (v_m + interval '1 month - 1 day')::date, null);
+    select coalesce(sum(amount), 0) into v_b from public.payables
+     where payee_id = g.socio and status = 'paid' and expense_category = 'Pró-labore'
+       and issue_date >= v_m and issue_date < (v_m + interval '1 month')::date;
+    raise exception 'fim do teste' using errcode = 'P0001', detail = v_a || '|' || v_b;
+  exception when sqlstate 'P0001' then
+    get stacked diagnostics v = pg_exception_detail;
+    insert into _resultado values ('T11 gasto pessoal tira do pró-labore',
+      split_part(v, '|', 1)::numeric - split_part(v, '|', 2)::numeric = least(100, split_part(v, '|', 1)::numeric),
+      'pró-labore dos Pix no mês: ' || replace(v, '|', ' → '));
+  end;
+
+  -- T12. Em nenhum mês aberto o pró-labore passa do mínimo menos os gastos pessoais do mês.
+  begin
+    perform public.separar_pro_labore(null, null, null);
+    select count(*) into v_n from (
+      select date_trunc('month', p.issue_date)::date as m, sum(p.amount) as pl
+        from public.payables p
+       where p.payee_id = g.socio and p.status = 'paid' and p.expense_category = 'Pró-labore'
+         and not public.periodo_esta_fechado(p.issue_date)
+       group by 1) s
+     where public._salario_minimo_em(s.m) is not null
+       and s.pl > greatest(0, public._salario_minimo_em(s.m)
+                   - coalesce((select sum(x.amount) from public.payables x
+                                where x.status = 'paid' and x.expense_category = 'Gasto Pessoal Sócio - Descontar PL'
+                                  and date_trunc('month', x.issue_date)::date = s.m
+                                  and (x.payee_id = g.socio or x.payee_id is null)), 0)) + 0.005;
+    raise exception 'fim do teste' using errcode = 'P0001', detail = v_n::text;
+  exception when sqlstate 'P0001' then
+    get stacked diagnostics v = pg_exception_detail;
+    insert into _resultado values ('T12 nenhum mês passa do mínimo menos os gastos', v = '0', v || ' mês(es) acima');
+  end;
 end $$;
 
 -- T9. Só o sistema chama a separação e as peças internas.
