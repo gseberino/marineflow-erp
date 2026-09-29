@@ -145,11 +145,9 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "skip_service_order_step",
   "block_service_order_step",
 
-  // — Jornada da equipe —
-  "registrar_jornada",
-  "fechar_jornada",
-  "minhas_horas",
-  "apurar_pagamento",
+  // — Diárias de freelancers (28/09/2026: substituem as 4 de jornada do perfil — D7 do dono) —
+  "registrar_diaria",
+  "consultar_freelancer",
 
   // — Fiscal: espelho e consulta (emitir é risco alto e entra sempre) —
   "preview_fiscal_note",

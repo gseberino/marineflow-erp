@@ -10,7 +10,9 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const RAIZ = join(__dirname, '..', '..');
-const HOOKS_DE_LANCAMENTO = ['src/hooks/use-lancamentos.ts', 'src/hooks/use-conciliacao.ts', 'src/hooks/use-financial.ts', 'src/hooks/use-contraparte.ts', 'src/hooks/use-fechamento.ts', 'src/hooks/use-extrato-conta.ts', 'src/hooks/use-caixa.ts'];
+// use-diarias.ts (28/09/2026): registrar, apagar e consultar diária — o assistente faz o mesmo
+// pelas tools de diarias.ts (registrar_diaria e consultar_freelancer).
+const HOOKS_DE_LANCAMENTO = ['src/hooks/use-lancamentos.ts', 'src/hooks/use-conciliacao.ts', 'src/hooks/use-financial.ts', 'src/hooks/use-contraparte.ts', 'src/hooks/use-fechamento.ts', 'src/hooks/use-extrato-conta.ts', 'src/hooks/use-caixa.ts', 'src/hooks/use-diarias.ts'];
 const PASTA_DAS_TOOLS = 'supabase/functions/_shared/ai/tools';
 
 /** Funções do banco que MUDAM lançamento e que a tela chama. */

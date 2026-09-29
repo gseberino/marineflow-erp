@@ -62,6 +62,12 @@ de diária; dia = `work_shifts`; pagamento = o lançamento que já vem do extrat
 4. **Assistente:** `registrar_diaria` + `consultar_freelancer` no lugar das 5 de jornada; prompt;
    confirmação com o pedido resolvido. Fecha a paridade tela ↔ assistente (o hook da tela entra em
    `paridade-tela-assistente.test.ts` junto com a tool).
+   Feito em `tools/diarias.ts`: jornada `inteiro|meio|faltou|apagar` ("apagar" só para dia lançado
+   por engano — a tela exclui, a paridade exige; "faltou" grava a ausência). O resumo da pendência
+   (`resumirDiaria`, chamado em `buildPendingSummary`) mostra o dia resolvido e o que já estava
+   lançado; depois do "sim" o `aviso` traz a frase do banco e o saldo com a pessoa. Nome acha só
+   quem tem perfil de diária e está ativo. Custo: ~480 tokens por chamada contra 1.155 das 5
+   antigas. `jornada.ts` apagado; `_shared/payroll/calculo.ts` e as tabelas de folha ficam, sem uso.
 5. **Lucro por OS com mão de obra real:** `vw_os_profitability` soma o valor dos dias rateado pelas
    OS; `get_os_profitability` passa a ler a view. Mostrar ao dono a lista de margens antes/depois.
 6. **Aposentar o app** (só leitura).

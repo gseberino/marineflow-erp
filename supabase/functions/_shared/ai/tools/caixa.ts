@@ -187,7 +187,7 @@ async function categoriaDoTexto(ctx: ToolCtx, texto: string, valor: number): Pro
   return valida && "nome" in valida ? { nome: valida.nome, motivo: d.motivo } : null;
 }
 
-async function osPeloNumero(ctx: ToolCtx, numero: unknown): Promise<{ id: string; numero: string } | { error: string } | null> {
+export async function osPeloNumero(ctx: ToolCtx, numero: unknown): Promise<{ id: string; numero: string } | { error: string } | null> {
   if (!numero) return null;
   const n = String(numero).replace(/\D/g, "");
   if (!n) return { error: `Não entendi a OS "${numero}".` };

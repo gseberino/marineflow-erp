@@ -51,13 +51,18 @@ const SEMPRE_NO_PERFIL_ANTIGO = [
 // Decisão do dono (Frente C): as que o prompt ensina e o perfil escondia sem motivo. A terceira
 // (update_service) entrou na integração de 26/09/2026: pela rede, o cadastro fiscal em lote
 // virava uma confirmação por serviço.
-const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service"];
+// Decisão D7 do dono (28/09/2026): as 4 de jornada do perfil — nunca chamadas — saíram, e as 2 de
+// diárias entraram no lugar (fechar_folha, a quinta, também saiu; era risco alto e não estava aqui).
+const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer"];
+const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento"];
 
 const ordenado = (xs: Iterable<string>) => [...new Set(xs)].sort();
 
-Deno.test("perfil no código = banco de 26/09 ∪ SEMPRE_NO_PERFIL antigo ∪ as acrescentadas — nem mais, nem menos", () => {
+Deno.test("perfil no código = (banco de 26/09 − removidas) ∪ SEMPRE_NO_PERFIL antigo ∪ as acrescentadas — nem mais, nem menos", () => {
   assertEquals(BANCO_EM_26_09.length, 127);
-  assertEquals(ordenado(PERFIL_OPERACAO), ordenado([...BANCO_EM_26_09, ...SEMPRE_NO_PERFIL_ANTIGO, ...ACRESCENTADAS]));
+  const base = BANCO_EM_26_09.filter((n) => !REMOVIDAS.includes(n));
+  assertEquals(base.length, 127 - REMOVIDAS.length);
+  assertEquals(ordenado(PERFIL_OPERACAO), ordenado([...base, ...SEMPRE_NO_PERFIL_ANTIGO, ...ACRESCENTADAS]));
 });
 
 Deno.test("todo nome do perfil e da lista SO_PELA_REDE existe em allTools, e as duas listas não se cruzam", () => {

@@ -41,7 +41,8 @@ import { financeRulesTools } from "./finance-rules.ts";
 import { lancamentoTools } from "./lancamentos.ts";
 import { fechamentoTools } from "./fechamento.ts";
 import { caixaTools } from "./caixa.ts";
-import { jornadaTools } from "./jornada.ts";
+// Diárias de freelancers (28/09/2026): substituem as 5 de jornada, que nunca foram chamadas (D7).
+import { diariasTools } from "./diarias.ts";
 import { followupTools } from "./followups.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
@@ -91,7 +92,7 @@ export const allTools: ToolDef[] = [
   ...lancamentoTools,
   ...fechamentoTools,
   ...caixaTools,
-  ...jornadaTools,
+  ...diariasTools,
   ...followupTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
