@@ -20,6 +20,9 @@ const chamadas = vi.hoisted(() => ({
   publicas: 0,
   invocacoes: [] as Record<string, unknown>[],
   resposta: { data: { success: true } as unknown, error: null as unknown },
+  /** Respostas em sequência, uma por tentativa; vazia = usa `resposta`. */
+  fila: [] as Array<{ data: unknown; error: unknown }>,
+  avisos: { sucesso: [] as string[], erro: [] as string[] },
 }));
 
 vi.mock('@/integrations/supabase/client', () => ({
@@ -38,7 +41,7 @@ vi.mock('@/integrations/supabase/client', () => ({
     functions: {
       invoke: async (_nome: string, { body }: { body: Record<string, unknown> }) => {
         chamadas.invocacoes.push(body);
-        return chamadas.resposta;
+        return chamadas.fila.shift() ?? chamadas.resposta;
       },
     },
   },
@@ -47,7 +50,13 @@ vi.mock('@/lib/pdf-generator', () => ({
   generatePDFBlob: async () => new Blob(['%PDF-1.7'], { type: 'application/pdf' }),
   DEFAULT_PDF_OPTIONS: {},
 }));
-vi.mock('sonner', () => ({ toast: { loading: () => 't', success: () => {}, error: () => {} } }));
+vi.mock('sonner', () => ({
+  toast: {
+    loading: () => 't',
+    success: (m: string) => { chamadas.avisos.sucesso.push(m); },
+    error: (m: string) => { chamadas.avisos.erro.push(m); },
+  },
+}));
 
 import { useWhatsAppSend } from './use-whatsapp-send';
 
@@ -63,16 +72,26 @@ const payload = {
   pdfData: { serviceOrder: {} }, documentType: 'quote' as const, filename: 'Orcamento-ORC-00108.pdf',
 };
 
-async function enviar(resposta: { data: unknown; error: unknown }) {
+async function enviar(resposta: { data: unknown; error: unknown }, retry = { autoRetry: false, maxAttempts: 1 }) {
   chamadas.resposta = resposta;
   const hook = montar();
   let ok = false;
-  await act(async () => { ok = await hook.current.send(payload, { autoRetry: false, maxAttempts: 1 }); });
+  await act(async () => { ok = await hook.current.send(payload, retry); });
   return ok;
 }
 
+/** O erro que o supabase-js entrega quando a função responde não-2xx: o corpo fica em `context`. */
+function erroDaFuncao(status: number, corpo: Record<string, unknown>) {
+  return Object.assign(new Error('Edge Function returned a non-2xx status code'), {
+    name: 'FunctionsHttpError',
+    context: new Response(JSON.stringify(corpo), { status }),
+  });
+}
+const erroDeRede = () => Object.assign(new Error('Failed to send a request to the Edge Function'), { name: 'FunctionsFetchError' });
+
 beforeEach(() => {
   chamadas.upload = []; chamadas.assinadas = []; chamadas.removidos = []; chamadas.publicas = 0; chamadas.invocacoes = [];
+  chamadas.fila = []; chamadas.avisos = { sucesso: [], erro: [] };
 });
 
 describe('PDF enviado pela tela', () => {
@@ -106,5 +125,51 @@ describe('PDF enviado pela tela', () => {
     expect(await enviar({ data: null, error: erroRede })).toBe(false);
     expect(chamadas.upload).toHaveLength(1);
     expect(chamadas.removidos).toEqual([]);
+  });
+});
+
+// O defeito de 29/09/2026 (Diário de Bordo): depois de um erro de rede, a repetição automática
+// ouvia "já enviado" da função enquanto a primeira tentativa ainda esperava a Evolution — e a
+// tela dizia "Enviado" mesmo quando a primeira falhava. A função agora só diz "já enviado"
+// quando a anterior CONCLUIU, e responde 409 em_andamento quando não sabe; a tela tem de
+// ler as duas respostas sem mentir.
+describe('reenvio depois de erro', () => {
+  const comRepeticao = { autoRetry: true, maxAttempts: 3 };
+
+  it('"não confirmou" (409 em_andamento): não diz Enviado, não repete e manda conferir', async () => {
+    const ok = await enviar(
+      { data: null, error: erroDaFuncao(409, { error: 'A tentativa anterior desta mesma mensagem ainda não confirmou se saiu. Confira no WhatsApp antes de mandar de novo.', em_andamento: true }) },
+      comRepeticao,
+    );
+    expect(ok).toBe(false);
+    expect(chamadas.invocacoes).toHaveLength(1);
+    expect(chamadas.avisos.sucesso).toEqual([]);
+    expect(chamadas.avisos.erro).toEqual([expect.stringContaining('Confira no WhatsApp')]);
+  });
+
+  it('rede caiu e a anterior de fato chegou: diz que foi a anterior, não este clique', async () => {
+    chamadas.fila = [
+      { data: null, error: erroDeRede() },
+      { data: { success: true, deduplicated: true }, error: null },
+    ];
+    const ok = await enviar({ data: null, error: null }, comRepeticao);
+    expect(ok).toBe(true);
+    expect(chamadas.invocacoes).toHaveLength(2);
+    expect(chamadas.avisos.sucesso).toEqual(['Enviado: a tentativa anterior já tinha chegado, não mandei de novo.']);
+  }, 10_000);
+
+  it('clique duplo: "já tinha sido enviada", sem fingir um envio novo', async () => {
+    await enviar({ data: { success: true, deduplicated: true }, error: null });
+    expect(chamadas.avisos.sucesso).toEqual(['Esta mensagem já tinha sido enviada há pouco; não mandei de novo.']);
+  });
+
+  it('erro da função mostra o motivo que ela escreveu, não "non-2xx status code"', async () => {
+    await enviar({ data: null, error: erroDaFuncao(400, { error: 'Telefone inválido (precisa incluir DDI+DDD)' }) });
+    expect(chamadas.avisos.erro).toEqual(['Falha após 1 tentativa: Telefone inválido (precisa incluir DDI+DDD)']);
+  });
+
+  it('o PDF desta tentativa sai do bucket quando a função responde "não confirmou"', async () => {
+    await enviar({ data: null, error: erroDaFuncao(409, { error: 'x', em_andamento: true }) });
+    expect(chamadas.removidos).toEqual(chamadas.upload);
   });
 });

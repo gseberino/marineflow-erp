@@ -8,7 +8,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { z } from "https://esm.sh/zod@3.23.8";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { normalizePhoneNumber } from "../_shared/whatsapp/normalize.ts";
-import { concluirEnvio, liberarEnvio, reservarEnvio } from "../_shared/whatsapp/idempotencia.ts";
+import { concluirEnvio, liberarEnvio, reservarOuAguardar } from "../_shared/whatsapp/idempotencia.ts";
 import {
   campoObrigatorioFaltando,
   decidirMarcarEnviado,
@@ -42,7 +42,8 @@ const BodySchema = z.object({
   receivable_id: z.string().uuid().optional(),
   context: z.string().max(64).optional(),
   // Idempotência: quem chama manda uma chave estável para "esta mensagem, para este
-  // destinatário, nesta ocasião". Chave já usada = já enviada = responde sem reenviar.
+  // destinatário, nesta ocasião". Chave já usada e concluída = já enviada = responde sem
+  // reenviar; usada e sem desfecho = 409 em_andamento.
   dedupe_key: z.string().min(4).max(200).optional(),
 });
 
@@ -121,14 +122,24 @@ servirComCors(async (req) => {
       return jr({ error: "Telefone inválido (precisa incluir DDI+DDD)" }, 400);
     }
 
-    // Reserva a chave ANTES de chamar o provedor. Repetida: já foi; não envia de novo.
+    // Reserva a chave ANTES de chamar o provedor. Já reservada: "já enviado" só se a outra
+    // tentativa CONCLUIU; sem desfecho, responde que não confirmou (reservarOuAguardar).
     // Banco indisponível para a reserva: segue e envia (duplicado raro < cobrança que não sai).
     const chave = body.dedupe_key || null;
     if (chave) {
-      const reserva = await reservarEnvio(supabaseAdmin, chave, { phone: phoneClean, contexto: body.context });
-      if (reserva === "repetida") {
-        console.info(`[whatsapp-send] chave repetida, não reenviado: ${chave}`);
+      const reserva = await reservarOuAguardar(supabaseAdmin, chave, { phone: phoneClean, contexto: body.context });
+      if (reserva === "ja_enviada") {
+        console.info(`[whatsapp-send] chave já concluída, não reenviado: ${chave}`);
         return jr({ success: true, deduplicated: true, kind: body.kind, messageId: null });
+      }
+      if (reserva === "em_andamento") {
+        // 409 e não 2xx: quem chama não pode ler isto como enviado. em_andamento diz à tela
+        // que repetir agora não adianta (a mesma chave daria a mesma resposta).
+        console.warn(`[whatsapp-send] chave sem desfecho da tentativa anterior: ${chave}`);
+        return jr({
+          error: "A tentativa anterior desta mesma mensagem ainda não confirmou se saiu. Confira no WhatsApp antes de mandar de novo.",
+          em_andamento: true,
+        }, 409);
       }
       if (reserva === "nova") liberarReservaPendente = () => liberarEnvio(supabaseAdmin, chave);
     }

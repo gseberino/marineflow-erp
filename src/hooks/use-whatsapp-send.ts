@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { chaveDeEnvioDoPainel } from '@/lib/hash-curto';
+import { extractInvokeErrorBody } from '@/lib/invoke-error';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
@@ -81,12 +82,18 @@ async function apagarPdf(path: string): Promise<void> {
   if (error) console.warn(`[whatsapp] não apaguei documents/${path}:`, error.message);
 }
 
+/**
+ * A função não confirmou se a tentativa anterior desta mesma mensagem saiu (whatsapp-send,
+ * 409 `em_andamento`). Não é falha nem sucesso: é "confira antes de mandar de novo".
+ */
+class EnvioSemConfirmacao extends Error {}
+
 export function useWhatsAppSend() {
   const [sending, setSending] = useState(false);
   const [attemptInfo, setAttemptInfo] = useState('');
   const queryClient = useQueryClient();
 
-  async function attemptSend(payload: WhatsAppSendPayload, attempt: number): Promise<void> {
+  async function attemptSend(payload: WhatsAppSendPayload, attempt: number): Promise<{ jaEnviada: boolean }> {
     const phoneClean = payload.phone.replace(/\D/g, '');
     const invokeBody: Record<string, unknown> = {
       phone: phoneClean,
@@ -132,8 +139,17 @@ export function useWhatsAppSend() {
       // já desistiu, e o arquivo pode sair. Erro de rede ou de relay NÃO é resposta — a função
       // pode ainda estar enviando, e apagar agora tiraria o arquivo debaixo dela.
       respostaDefinitiva = !error || (error as { name?: string }).name === 'FunctionsHttpError';
-      if (error) throw error;
+      if (error) {
+        // O motivo verdadeiro vem no corpo; error.message é só "Edge Function returned a
+        // non-2xx status code".
+        const corpo = await extractInvokeErrorBody(error);
+        const motivo = typeof corpo?.error === 'string' ? corpo.error
+          : corpo?.error ? JSON.stringify(corpo.error) : (error as Error).message;
+        if (corpo?.em_andamento === true) throw new EnvioSemConfirmacao(motivo);
+        throw new Error(motivo);
+      }
       if ((data as any)?.error) throw new Error((data as any).error);
+      return { jaEnviada: (data as any)?.deduplicated === true };
     } finally {
       if (arquivo && respostaDefinitiva) await apagarPdf(arquivo);
     }
@@ -151,6 +167,7 @@ export function useWhatsAppSend() {
     );
     const total = retry.autoRetry ? Math.max(1, retry.maxAttempts) : 1;
     let lastErr: any = null;
+    let feitas = 0;
     try {
       for (let attempt = 1; attempt <= total; attempt++) {
         try {
@@ -158,9 +175,16 @@ export function useWhatsAppSend() {
             setAttemptInfo(`Tentativa ${attempt}/${total}…`);
             toast.loading(`Reenviando (tentativa ${attempt}/${total})…`, { id: tId });
           }
-          await attemptSend(payload, attempt);
+          feitas = attempt;
+          const { jaEnviada } = await attemptSend(payload, attempt);
+          // "Já enviada" só chega quando a tentativa anterior CONCLUIU (whatsapp-send): é
+          // verdade que saiu, mas não foi este clique — a tela diz qual dos dois.
           toast.success(
-            attempt > 1 ? `Enviado na tentativa ${attempt}/${total}!` : 'Enviado com sucesso!',
+            jaEnviada
+              ? attempt > 1
+                ? 'Enviado: a tentativa anterior já tinha chegado, não mandei de novo.'
+                : 'Esta mensagem já tinha sido enviada há pouco; não mandei de novo.'
+              : attempt > 1 ? `Enviado na tentativa ${attempt}/${total}!` : 'Enviado com sucesso!',
             { id: tId },
           );
           queryClient.invalidateQueries({ queryKey: ['whatsapp-send-status'] });
@@ -169,6 +193,8 @@ export function useWhatsAppSend() {
         } catch (err: any) {
           lastErr = err;
           console.warn(`WhatsApp tentativa ${attempt}/${total} falhou`, err);
+          // Repetir não resolve: a mesma chave daria a mesma resposta, e a anterior pode ainda sair.
+          if (err instanceof EnvioSemConfirmacao) break;
           if (attempt < total) {
             const delay = Math.min(8000, 1000 * Math.pow(2, attempt - 1));
             await new Promise((r) => setTimeout(r, delay));
@@ -178,10 +204,14 @@ export function useWhatsAppSend() {
       throw lastErr || new Error('Falha desconhecida');
     } catch (err: any) {
       console.error('WhatsApp erro final', err);
-      toast.error(
-        `Falha após ${total} tentativa${total > 1 ? 's' : ''}: ${err?.message || 'erro desconhecido'}`,
-        { id: tId },
-      );
+      if (err instanceof EnvioSemConfirmacao) {
+        toast.error(err.message, { id: tId, duration: 12000 });
+      } else {
+        toast.error(
+          `Falha após ${feitas} tentativa${feitas > 1 ? 's' : ''}: ${err?.message || 'erro desconhecido'}`,
+          { id: tId },
+        );
+      }
       queryClient.invalidateQueries({ queryKey: ['whatsapp-send-status'] });
       queryClient.invalidateQueries({ queryKey: ['whatsapp-send-history'] });
       return false;

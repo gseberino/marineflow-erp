@@ -11,16 +11,26 @@
  * telas não repetirem o mesmo erro de engolir o motivo.
  */
 export async function extractInvokeErrorMessage(error: unknown): Promise<string> {
+  const parsed = await extractInvokeErrorBody(error);
+  if (parsed?.error) return String(parsed.error);
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * O corpo JSON que a função devolveu junto com o erro, para quem precisa de mais que a
+ * mensagem (ex.: o `em_andamento` do whatsapp-send). `null` se não houver corpo JSON.
+ */
+export async function extractInvokeErrorBody(error: unknown): Promise<Record<string, unknown> | null> {
   if (error && typeof error === 'object' && 'context' in error) {
     const ctx = (error as { context?: unknown }).context;
     if (ctx && typeof (ctx as Response).json === 'function') {
       try {
         const parsed = await (ctx as Response).clone().json();
-        if (parsed?.error) return String(parsed.error);
+        return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
       } catch {
-        // corpo não era JSON — cai para a mensagem genérica abaixo
+        // corpo não era JSON
       }
     }
   }
-  return error instanceof Error ? error.message : String(error);
+  return null;
 }
