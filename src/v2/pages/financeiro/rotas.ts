@@ -52,6 +52,7 @@ export const PARA_QUE_SERVE = {
   aging: 'Quem deve à empresa e a quem a empresa deve, por tempo de atraso: a vencer, 1–30, 31–60, 61–90 e mais de 90 dias.',
   diarias: 'Os dias que cada freelancer trabalhou, o que ele recebeu e o saldo com ele: você deve, adiantado ou quitado. O pagamento vem do extrato; aqui se lança o dia.',
   diariasExtrato: 'Dia a dia de um freelancer, com o saldo corrido: cada diária e cada pagamento, com a conta de onde saiu.',
+  diariasGrade: 'O mês inteiro de todos os freelancers: clique num dia para marcar dia inteiro, meio período ou falta, e para corrigir ou excluir.',
 } as const;
 
 export const COMODOS: Record<Comodo, DefinicaoDoComodo> = {
@@ -87,6 +88,7 @@ export const COMODOS: Record<Comodo, DefinicaoDoComodo> = {
     comodo: 'diarias', secao: 'diarias', nome: 'Diárias', paraQueServe: PARA_QUE_SERVE.diarias,
     abas: [
       { aba: 'resumo', rotulo: 'Resumo', paraQueServe: PARA_QUE_SERVE.diarias },
+      { aba: 'grade', rotulo: 'Grade do mês', paraQueServe: PARA_QUE_SERVE.diariasGrade },
       { aba: 'extrato', rotulo: 'Extrato', paraQueServe: PARA_QUE_SERVE.diariasExtrato },
     ],
   },

@@ -14,29 +14,22 @@ import { useI18n } from '@/i18n';
 import { hojeLocal } from '@/lib/dia';
 import { JORNADAS, valorDoDia, type Jornada } from '@/lib/diarias';
 import { useServiceOrdersVinculaveis } from '@/hooks/use-payees';
-import { useRegistrarDiaria, type FreelancerNoResumo, type OSDoDia } from '@/hooks/use-diarias';
+import { useRegistrarDiaria, type DiaParaEditar, type FreelancerNoResumo } from '@/hooks/use-diarias';
 
-export interface DiaParaEditar {
-  favorecidoId: string;
-  data: string;
-  jornada: Jornada;
-  valorDiaria: number;
-  extras: number;
-  descontos: number;
-  observacao: string | null;
-  os: OSDoDia[];
-}
+export type { DiaParaEditar };
 
 interface Props {
   pessoas: FreelancerNoResumo[];
-  /** Pessoa já escolhida (botão "Registrar dia" do cartão dela). */
+  /** Pessoa já escolhida (botão "Registrar dia" do cartão dela, ou a célula da grade). */
   favorecidoInicial?: string | null;
+  /** Data já escolhida (a célula da grade). */
+  dataInicial?: string | null;
   /** Corrigir um dia já lançado: pessoa e data ficam fixas — são a identidade do dia. */
   editar?: DiaParaEditar | null;
   onFechar: () => void;
 }
 
-export function RegistrarDiaDialog({ pessoas, favorecidoInicial, editar, onFechar }: Props) {
+export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, editar, onFechar }: Props) {
   const { formatCurrency } = useI18n();
   const registrar = useRegistrarDiaria();
   const { data: ordens = [] } = useServiceOrdersVinculaveis({ incluirFaturadas: true });
@@ -44,7 +37,7 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, editar, onFecha
   const [favorecidoId, setFavorecidoId] = useState<string>(
     editar?.favorecidoId ?? favorecidoInicial ?? (pessoas.length === 1 ? pessoas[0].id : ''),
   );
-  const [data, setData] = useState<string>(editar?.data ?? hojeLocal());
+  const [data, setData] = useState<string>(editar?.data ?? dataInicial ?? hojeLocal());
   const [jornada, setJornada] = useState<Jornada>(editar?.jornada ?? 'inteiro');
   const [osIds, setOsIds] = useState<string[]>(editar?.os.map((o) => o.id) ?? []);
   const [extras, setExtras] = useState<number>(editar?.extras ?? 0);
@@ -67,9 +60,13 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, editar, onFecha
   }, [ordens, editar]);
   const osParaAdicionar = ordens.filter((o) => !osIds.includes(o.id));
 
+  // Antes do início da conta corrente o dia não entra no saldo (foi acertado por fora): aceitar
+  // a data faria o dia "sumir" depois de salvo.
+  const desde = pessoa?.desde ?? null;
   const erro = !favorecidoId ? 'Escolha o freelancer.'
     : !data ? 'Informe a data.'
     : data > hoje ? 'A data não pode estar no futuro.'
+    : desde && data < desde ? `A conta corrente começa em ${desde.split('-').reverse().join('/')}.`
     : jornada !== 'faltou' && diaria <= 0 ? 'Informe o valor da diária.'
     : null;
 
@@ -110,7 +107,8 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, editar, onFecha
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="dia-data">Data</Label>
-            <Input id="dia-data" type="date" value={data} max={hoje} onChange={(e) => setData(e.target.value)} disabled={!!editar} />
+            <Input id="dia-data" type="date" value={data} min={desde ?? undefined} max={hoje}
+                   onChange={(e) => setData(e.target.value)} disabled={!!editar} />
           </div>
 
           <div className="space-y-1.5 sm:col-span-2">

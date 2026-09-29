@@ -1,6 +1,6 @@
 # MarineFlow — Diárias de freelancers (Roberto, Mickael)
 
-**Data:** 28/09/2026 · **Status:** Passo 0 no ar (dados); Passo 1 em andamento (branch `session/diarias`)
+**Data:** 28/09/2026 · **Status:** Passos 0 e 1 no ar (29/09, main a15931d3); Passo 2 no branch `session/diarias`
 
 Traz para dentro do ERP o controle que vivia fora dele: a planilha `Controle_Freelancers_HBR.xlsx` e o
 app em artifact "Diárias e pagamentos | HBR" (https://claude.ai/artifact/UyLYGqmLXsX5Z7JYKK4Jnh).
@@ -45,6 +45,12 @@ de diária; dia = `work_shifts`; pagamento = o lançamento que já vem do extrat
    `resumo_freelancers`, beneficiário no bolso do sócio, trava da folha, D10) + importação +
    Financeiro › Diárias (Resumo e Extrato). Teste: `supabase/tests/diarias_conta_corrente.sql`.
 2. **Grade do mês + ficha do dia** (dia inteiro / meio / não trabalhou, lista do dia, Desfazer).
+   Só frontend (`GradeDiarias.tsx`, `FichaDoDia.tsx`). **Não reaproveita o `WeekView` da Agenda:**
+   ele é pessoa × 7 dias, interno a uma página de 1.549 linhas, e ~80% dele desenha cartões de OS e
+   tarefa; a semelhança é só "matriz com clique na célula". Extrair um componente comum obrigaria a
+   mexer numa tela que funciona sem um segundo uso que precise do mesmo. Na ficha, "Não trabalhou"
+   grava a falta (valor zero) — apagar é o "Excluir" da lista, com Desfazer. Dia antes do início da
+   conta corrente e dia no futuro ficam fechados na grade e no formulário.
 3. **Extrato em PDF** com assinatura e **CSV mensal** para o contador.
 4. **Assistente:** `registrar_diaria` + `consultar_freelancer` no lugar das 5 de jornada; prompt;
    confirmação com o pedido resolvido. Fecha a paridade tela ↔ assistente (o hook da tela entra em

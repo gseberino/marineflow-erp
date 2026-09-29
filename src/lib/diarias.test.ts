@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { diaCurto, intervaloDoPeriodo, rotuloDaJornada, valorDoDia } from './diarias';
+import {
+  diaCurto, diasDoMes, ehFimDeSemana, intervaloDoMes, intervaloDoPeriodo, mesDe, nomeDoMes, rotuloDaJornada,
+  somarMes, valorDoDia,
+} from './diarias';
 
 describe('diárias — regras da tela', () => {
   it('o valor do dia é a mesma conta da coluna gerada no banco', () => {
@@ -21,6 +24,23 @@ describe('diárias — regras da tela', () => {
   it('o dia curto é o do calendário, não o de meia-noite em UTC', () => {
     expect(diaCurto('2026-09-24')).toBe('qui 24/09');
     expect(diaCurto('2026-09-07')).toBe('seg 07/09');
+  });
+
+  it('a grade tem todos os dias do mês e anda de mês em mês, virando o ano', () => {
+    expect(diasDoMes('2026-09')).toHaveLength(30);
+    expect(diasDoMes('2028-02')).toHaveLength(29);
+    expect(diasDoMes('2026-09')[0]).toBe('2026-09-01');
+    expect(intervaloDoMes('2026-02')).toEqual({ de: '2026-02-01', ate: '2026-02-28' });
+    expect(somarMes('2026-12', 1)).toBe('2027-01');
+    expect(somarMes('2026-01', -1)).toBe('2025-12');
+    expect(mesDe('2026-09-24')).toBe('2026-09');
+    expect(nomeDoMes('2026-09')).toBe('Setembro de 2026');
+  });
+
+  it('fim de semana é sábado e domingo do calendário', () => {
+    expect(ehFimDeSemana('2026-09-26')).toBe(true);
+    expect(ehFimDeSemana('2026-09-27')).toBe(true);
+    expect(ehFimDeSemana('2026-09-28')).toBe(false);
   });
 
   it('a jornada tem o nome da tela', () => {

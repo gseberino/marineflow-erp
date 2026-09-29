@@ -1,7 +1,8 @@
 // Diárias de freelancers: leitura do saldo e registro do dia, pelas funções do banco
 // (migration 20260928190000). A tela não calcula saldo nem grava direto em tabela: a mesma função
 // serve a tela e o assistente, com a mesma trava de quem pode.
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import type { EstadoDoSaldo, Jornada } from '@/lib/diarias';
 
@@ -83,30 +84,66 @@ export function useResumoFreelancers(de: string | null, ate: string | null) {
   });
 }
 
+async function lerContaCorrente(favorecidoId: string, de: string | null, ate: string | null): Promise<ContaCorrente> {
+  const { data, error } = await supabase.rpc('conta_corrente_freelancer' as never, {
+    p_favorecido_id: favorecidoId, p_de: de, p_ate: ate,
+  } as never);
+  if (error) throw error;
+  const c = data as unknown as ContaCorrente;
+  return {
+    ...c,
+    saldo_anterior: num(c.saldo_anterior), dias: num(c.dias), trabalhado: num(c.trabalhado),
+    pago: num(c.pago), saldo_final: num(c.saldo_final),
+    favorecido: { ...c.favorecido, saldo_inicial: num(c.favorecido.saldo_inicial), diaria: numOuNulo(c.favorecido.diaria) },
+    linhas: (c.linhas ?? []).map((l) => ({
+      ...l, trabalhado: num(l.trabalhado), pago: num(l.pago), saldo: num(l.saldo),
+      fracao: numOuNulo(l.fracao), valor_diaria: numOuNulo(l.valor_diaria),
+      extras: numOuNulo(l.extras), descontos: numOuNulo(l.descontos), os: l.os ?? [],
+    })),
+  };
+}
+
 export function useContaCorrente(favorecidoId: string | null, de: string | null, ate: string | null) {
   return useQuery({
     queryKey: ['diarias', 'conta', favorecidoId, de, ate],
     enabled: !!favorecidoId,
-    queryFn: async (): Promise<ContaCorrente> => {
-      const { data, error } = await supabase.rpc('conta_corrente_freelancer' as never, {
-        p_favorecido_id: favorecidoId, p_de: de, p_ate: ate,
-      } as never);
-      if (error) throw error;
-      const c = data as unknown as ContaCorrente;
-      return {
-        ...c,
-        saldo_anterior: num(c.saldo_anterior), dias: num(c.dias), trabalhado: num(c.trabalhado),
-        pago: num(c.pago), saldo_final: num(c.saldo_final),
-        favorecido: { ...c.favorecido, saldo_inicial: num(c.favorecido.saldo_inicial), diaria: numOuNulo(c.favorecido.diaria) },
-        linhas: (c.linhas ?? []).map((l) => ({
-          ...l, trabalhado: num(l.trabalhado), pago: num(l.pago), saldo: num(l.saldo),
-          fracao: numOuNulo(l.fracao), valor_diaria: numOuNulo(l.valor_diaria),
-          extras: numOuNulo(l.extras), descontos: numOuNulo(l.descontos), os: l.os ?? [],
-        })),
-      };
-    },
+    queryFn: () => lerContaCorrente(favorecidoId!, de, ate),
     staleTime: 30_000,
   });
+}
+
+/**
+ * A conta de cada freelancer no mesmo intervalo — é o que a grade do mês desenha. Mesma chave da
+ * conta de um só: abrir o Extrato depois da grade não busca de novo.
+ */
+export function useContasDoPeriodo(favorecidoIds: string[], de: string, ate: string) {
+  return useQueries({
+    queries: favorecidoIds.map((id) => ({
+      queryKey: ['diarias', 'conta', id, de, ate],
+      queryFn: () => lerContaCorrente(id, de, ate),
+      staleTime: 30_000,
+    })),
+  });
+}
+
+/** O dia como o formulário de correção precisa dele. */
+export interface DiaParaEditar {
+  favorecidoId: string;
+  data: string;
+  jornada: Jornada;
+  valorDiaria: number;
+  extras: number;
+  descontos: number;
+  observacao: string | null;
+  os: OSDoDia[];
+}
+
+export function diaParaEditar(favorecidoId: string, l: LinhaDaContaCorrente): DiaParaEditar {
+  return {
+    favorecidoId, data: l.data, jornada: l.jornada ?? 'inteiro',
+    valorDiaria: l.valor_diaria ?? 0, extras: l.extras ?? 0, descontos: l.descontos ?? 0,
+    observacao: l.observacao, os: l.os,
+  };
 }
 
 export interface PedidoDeDiaria {
@@ -173,6 +210,34 @@ export function useApagarDiaria() {
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['diarias'] }),
   });
+}
+
+/**
+ * Excluir não pergunta: apaga e oferece Desfazer, que registra o dia de novo exatamente como era.
+ * Um só lugar para o Extrato e a ficha do dia se comportarem igual.
+ */
+export function useExcluirDiaComDesfazer() {
+  const apagar = useApagarDiaria();
+  const registrar = useRegistrarDiaria();
+  const excluir = async (diariaId: string) => {
+    try {
+      const r = await apagar.mutateAsync(diariaId);
+      toast(r.message, {
+        duration: 9000,
+        action: {
+          label: 'Desfazer',
+          onClick: () => {
+            registrar.mutateAsync(pedidoParaDesfazer(r.apagado))
+              .then(() => toast.success('Dia restaurado.'))
+              .catch((e: Error) => toast.error(e.message || 'Não deu para restaurar o dia.'));
+          },
+        },
+      });
+    } catch (e) {
+      toast.error((e as Error).message || 'Não deu para excluir o dia.');
+    }
+  };
+  return { excluir, excluindo: apagar.isPending };
 }
 
 /** O pedido que reconstrói um dia apagado, exatamente como era. */

@@ -50,6 +50,48 @@ export function valorDoDia(jornada: Jornada, diaria: number, extras = 0, descont
   return Math.round((fracao * diaria + extras - descontos) * 100) / 100;
 }
 
+// ── Grade do mês ────────────────────────────────────────────────────────────────────────────
+
+/** 'AAAA-MM' de uma data 'AAAA-MM-DD'. */
+export function mesDe(data: string): string {
+  return data.slice(0, 7);
+}
+
+/** Soma meses a 'AAAA-MM' (negativo volta). */
+export function somarMes(mes: string, n: number): string {
+  const [a, m] = mes.split('-').map(Number);
+  const d = new Date(a, m - 1 + n, 1);
+  return `${d.getFullYear()}-${dois(d.getMonth() + 1)}`;
+}
+
+/** Primeiro e último dia do mês, 'AAAA-MM-DD'. */
+export function intervaloDoMes(mes: string): { de: string; ate: string } {
+  const [a, m] = mes.split('-').map(Number);
+  return { de: `${mes}-01`, ate: `${mes}-${dois(new Date(a, m, 0).getDate())}` };
+}
+
+/** Todos os dias do mês, em ordem. */
+export function diasDoMes(mes: string): string[] {
+  const { ate } = intervaloDoMes(mes);
+  const ultimo = Number(ate.slice(8));
+  return Array.from({ length: ultimo }, (_, i) => `${mes}-${dois(i + 1)}`);
+}
+
+const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+
+/** "Setembro de 2026". */
+export function nomeDoMes(mes: string): string {
+  const [a, m] = mes.split('-').map(Number);
+  const nome = MESES[m - 1];
+  return `${nome.charAt(0).toUpperCase()}${nome.slice(1)} de ${a}`;
+}
+
+export function ehFimDeSemana(data: string): boolean {
+  const [a, m, d] = data.split('-').map(Number);
+  const dia = new Date(a, m - 1, d).getDay();
+  return dia === 0 || dia === 6;
+}
+
 const DIAS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 
 /** "qui 24/09" — o mesmo formato das mensagens do banco. */

@@ -5,7 +5,6 @@
 // digita pagamento aqui: o banco traz. Aqui se lança o DIA.
 import { useState } from 'react';
 import { CalendarPlus, Pencil, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -18,37 +17,49 @@ import {
   type PeriodoDasDiarias,
 } from '@/lib/diarias';
 import {
-  pedidoParaDesfazer, useApagarDiaria, useContaCorrente, useRegistrarDiaria, useResumoFreelancers,
-  type FreelancerNoResumo, type LinhaDaContaCorrente,
+  diaParaEditar, useContaCorrente, useExcluirDiaComDesfazer, useResumoFreelancers,
+  type DiaParaEditar, type FreelancerNoResumo,
 } from '@/hooks/use-diarias';
-import { RegistrarDiaDialog, type DiaParaEditar } from './RegistrarDiaDialog';
+import { RegistrarDiaDialog } from './RegistrarDiaDialog';
+import { GradeDiarias } from './GradeDiarias';
 
 export interface FiltroDasDiarias {
   periodo: PeriodoDasDiarias;
   favorecidoId: string | null;
+  /** Mês da grade, 'AAAA-MM'. */
+  mes: string;
 }
 
 interface Props {
-  aba: 'resumo' | 'extrato';
+  aba: 'resumo' | 'extrato' | 'grade';
   filtro: FiltroDasDiarias;
   onFiltro: (f: FiltroDasDiarias) => void;
   onVerExtrato: (favorecidoId: string) => void;
+}
+
+interface Registrando {
+  favorecidoId?: string | null;
+  dataInicial?: string | null;
+  editar?: DiaParaEditar;
 }
 
 export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
   const { de, ate } = intervaloDoPeriodo(filtro.periodo);
   const resumo = useResumoFreelancers(de, ate);
   const pessoas = resumo.data?.pessoas ?? [];
-  const [registrando, setRegistrando] = useState<{ favorecidoId?: string | null; editar?: DiaParaEditar } | null>(null);
+  const [registrando, setRegistrando] = useState<Registrando | null>(null);
 
   const barra = (
     <div className="flex flex-wrap items-center gap-2">
-      <Select value={filtro.periodo} onValueChange={(v) => onFiltro({ ...filtro, periodo: v as PeriodoDasDiarias })}>
-        <SelectTrigger className="h-9 w-40" aria-label="Período"><SelectValue /></SelectTrigger>
-        <SelectContent>
-          {PERIODOS.map((p) => <SelectItem key={p.valor} value={p.valor}>{p.rotulo}</SelectItem>)}
-        </SelectContent>
-      </Select>
+      {/* A grade anda de mês em mês pelas setas dela; o período vale para Resumo e Extrato. */}
+      {aba !== 'grade' && (
+        <Select value={filtro.periodo} onValueChange={(v) => onFiltro({ ...filtro, periodo: v as PeriodoDasDiarias })}>
+          <SelectTrigger className="h-9 w-40" aria-label="Período"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {PERIODOS.map((p) => <SelectItem key={p.valor} value={p.valor}>{p.rotulo}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      )}
       {aba === 'extrato' && (
         <Select value={filtro.favorecidoId ?? ''} onValueChange={(v) => onFiltro({ ...filtro, favorecidoId: v })}>
           <SelectTrigger className="h-9 w-56 max-w-full" aria-label="Freelancer"><SelectValue placeholder="Escolha o freelancer" /></SelectTrigger>
@@ -80,6 +91,14 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
       ) : aba === 'resumo' ? (
         <Resumo pessoas={pessoas} total={resumo.data!} onVerExtrato={onVerExtrato}
                 onRegistrar={(id) => setRegistrando({ favorecidoId: id })} />
+      ) : aba === 'grade' ? (
+        <GradeDiarias
+          pessoas={pessoas}
+          mes={filtro.mes}
+          onMes={(mes) => onFiltro({ ...filtro, mes })}
+          onEditar={(d) => setRegistrando({ editar: d })}
+          onNovo={(favorecidoId, data) => setRegistrando({ favorecidoId, dataInicial: data })}
+        />
       ) : (
         <Extrato favorecidoId={filtro.favorecidoId} de={de} ate={ate}
                  onEditar={(d) => setRegistrando({ editar: d })} />
@@ -89,6 +108,7 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
         <RegistrarDiaDialog
           pessoas={pessoas}
           favorecidoInicial={registrando.favorecidoId}
+          dataInicial={registrando.dataInicial}
           editar={registrando.editar}
           onFechar={() => setRegistrando(null)}
         />
@@ -168,8 +188,7 @@ function Extrato({ favorecidoId, de, ate, onEditar }: {
 }) {
   const { formatCurrency } = useI18n();
   const conta = useContaCorrente(favorecidoId, de, ate);
-  const apagar = useApagarDiaria();
-  const registrar = useRegistrarDiaria();
+  const { excluir, excluindo } = useExcluirDiaComDesfazer();
 
   if (!favorecidoId) {
     return <Card className="p-6 text-center text-sm text-muted-foreground">Escolha o freelancer para ver o extrato.</Card>;
@@ -180,26 +199,6 @@ function Extrato({ favorecidoId, de, ate, onEditar }: {
   }
   const c = conta.data!;
   const estado = ESTADO_DO_SALDO[c.estado];
-
-  // Excluir não pergunta: apaga e oferece Desfazer, que registra o dia de novo exatamente como era.
-  async function excluir(l: LinhaDaContaCorrente) {
-    try {
-      const r = await apagar.mutateAsync(l.id);
-      toast(r.message, {
-        duration: 9000,
-        action: {
-          label: 'Desfazer',
-          onClick: () => {
-            registrar.mutateAsync(pedidoParaDesfazer(r.apagado))
-              .then(() => toast.success('Dia restaurado.'))
-              .catch((e: Error) => toast.error(e.message || 'Não deu para restaurar o dia.'));
-          },
-        },
-      });
-    } catch (e) {
-      toast.error((e as Error).message || 'Não deu para excluir o dia.');
-    }
-  }
 
   return (
     <div className="space-y-3">
@@ -271,17 +270,10 @@ function Extrato({ favorecidoId, de, ate, onEditar }: {
               {l.tipo === 'dia' ? (
                 <AcoesDaLinha
                   rotulo={`dia ${diaCurto(l.data)}`}
-                  ocupada={apagar.isPending}
+                  ocupada={excluindo}
                   menu={[
-                    {
-                      texto: 'Corrigir o dia', icone: Pencil,
-                      onClick: () => onEditar({
-                        favorecidoId: c.favorecido.id, data: l.data, jornada: l.jornada ?? 'inteiro',
-                        valorDiaria: l.valor_diaria ?? 0, extras: l.extras ?? 0, descontos: l.descontos ?? 0,
-                        observacao: l.observacao, os: l.os,
-                      }),
-                    },
-                    { texto: 'Excluir o dia', icone: Trash2, perigo: true, onClick: () => { void excluir(l); } },
+                    { texto: 'Corrigir o dia', icone: Pencil, onClick: () => onEditar(diaParaEditar(c.favorecido.id, l)) },
+                    { texto: 'Excluir o dia', icone: Trash2, perigo: true, onClick: () => { void excluir(l.id); } },
                   ]}
                 />
               ) : (
