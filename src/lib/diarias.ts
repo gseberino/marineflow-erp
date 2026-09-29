@@ -86,6 +86,24 @@ export function nomeDoMes(mes: string): string {
   return `${nome.charAt(0).toUpperCase()}${nome.slice(1)} de ${a}`;
 }
 
+/**
+ * Os dias de `de` a `ate` (inclusive) para lançar de uma vez; sábado e domingo só se marcados.
+ * Mesma regra da ferramenta do assistente (tools/diarias.ts): dia útil por padrão.
+ */
+export function datasDoIntervalo(de: string, ate: string, incluir: { sabado?: boolean; domingo?: boolean } = {}): string[] {
+  if (!de || !ate || de > ate) return [];
+  const out: string[] = [];
+  const [a, m, d] = de.split('-').map(Number);
+  for (let i = 0; i < 400; i++) {
+    const dia = new Date(a, m - 1, d + i);
+    const iso = `${dia.getFullYear()}-${dois(dia.getMonth() + 1)}-${dois(dia.getDate())}`;
+    if (iso > ate) break;
+    const dow = dia.getDay();
+    if ((dow !== 6 || incluir.sabado) && (dow !== 0 || incluir.domingo)) out.push(iso);
+  }
+  return out;
+}
+
 export function ehFimDeSemana(data: string): boolean {
   const [a, m, d] = data.split('-').map(Number);
   const dia = new Date(a, m - 1, d).getDay();

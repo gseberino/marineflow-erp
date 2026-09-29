@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  diaCurto, diasDoMes, ehFimDeSemana, intervaloDoMes, intervaloDoPeriodo, mesDe, nomeDoMes, rotuloDaJornada,
+  datasDoIntervalo, diaCurto, diasDoMes, ehFimDeSemana, intervaloDoMes, intervaloDoPeriodo, mesDe, nomeDoMes, rotuloDaJornada,
   somarMes, valorDoDia,
 } from './diarias';
 
@@ -35,6 +35,15 @@ describe('diárias — regras da tela', () => {
     expect(somarMes('2026-01', -1)).toBe('2025-12');
     expect(mesDe('2026-09-24')).toBe('2026-09');
     expect(nomeDoMes('2026-09')).toBe('Setembro de 2026');
+  });
+
+  it('vários dias: só dias úteis por padrão; sábado e domingo só se marcados', () => {
+    // 19/09/2026 foi sábado.
+    expect(datasDoIntervalo('2026-09-19', '2026-09-23')).toEqual(['2026-09-21', '2026-09-22', '2026-09-23']);
+    expect(datasDoIntervalo('2026-09-19', '2026-09-21', { sabado: true })).toEqual(['2026-09-19', '2026-09-21']);
+    expect(datasDoIntervalo('2026-09-19', '2026-09-21', { sabado: true, domingo: true })).toHaveLength(3);
+    expect(datasDoIntervalo('2026-09-30', '2026-10-01')).toEqual(['2026-09-30', '2026-10-01']);
+    expect(datasDoIntervalo('2026-09-25', '2026-09-21')).toEqual([]);
   });
 
   it('fim de semana é sábado e domingo do calendário', () => {

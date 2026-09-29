@@ -4,7 +4,7 @@
 // Simula só a fronteira com o banco (supabase.rpc): os hooks de verdade rodam, então o teste pega
 // o que a tela manda para as funções do banco — que é o que importa.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
@@ -164,6 +164,23 @@ describe('DiariasPanel', () => {
     ]);
     expect(linhas[0].cpf).toBe('123.456.789-40');
     expect(arquivo).toMatch(/\.csv$/);
+  });
+
+  it('vários dias: só os dias úteis que faltam; o já lançado fica como está', async () => {
+    const user = userEvent.setup();
+    renderizar('extrato');
+    await screen.findByText('OS OS-0042');
+    await user.click(screen.getByRole('button', { name: /Registrar dia/ }));
+    const dialogo = await screen.findByRole('dialog');
+    await user.click(within(dialogo).getByRole('button', { name: 'Vários dias' }));
+    fireEvent.change(within(dialogo).getByLabelText('De'), { target: { value: '2026-09-14' } });
+    fireEvent.change(within(dialogo).getByLabelText('Até'), { target: { value: '2026-09-20' } });
+    // 14 a 20/09: dias úteis 14–18; o 16 já tem dia lançado → entram 14, 15, 17 e 18.
+    const botao = await within(dialogo).findByRole('button', { name: 'Registrar 4 dias' });
+    expect(within(dialogo).getByText(/1 já lançado fica como está/)).toBeInTheDocument();
+    await user.click(botao);
+    await waitFor(() => expect(chamadas('registrar_diaria').map((a) => a.p_data)).toEqual(['2026-09-14', '2026-09-15', '2026-09-17', '2026-09-18']));
+    expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_favorecido_id: 'r', p_jornada: 'inteiro', p_origem: 'painel' });
   });
 
   it('grade: "Não trabalhou" grava a falta; dia antes do início da conta corrente não abre', async () => {

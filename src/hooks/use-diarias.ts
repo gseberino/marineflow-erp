@@ -170,25 +170,52 @@ export interface ResultadoDaDiaria {
   message: string;
 }
 
+/** Os argumentos de `registrar_diaria` para um pedido — um lugar só, para um dia e para vários. */
+function paramsDoPedido(p: PedidoDeDiaria) {
+  return {
+    p_favorecido_id: p.favorecidoId,
+    p_data: p.data,
+    p_jornada: p.jornada,
+    p_os_ids: p.osIds ?? null,
+    p_observacao: p.observacao ?? null,
+    p_extras: p.extras ?? null,
+    p_descontos: p.descontos ?? null,
+    p_valor_diaria: p.valorDiaria ?? null,
+    p_origem: 'painel',
+  };
+}
+
 export function useRegistrarDiaria() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (p: PedidoDeDiaria): Promise<ResultadoDaDiaria> => {
-      const { data, error } = await supabase.rpc('registrar_diaria' as never, {
-        p_favorecido_id: p.favorecidoId,
-        p_data: p.data,
-        p_jornada: p.jornada,
-        p_os_ids: p.osIds ?? null,
-        p_observacao: p.observacao ?? null,
-        p_extras: p.extras ?? null,
-        p_descontos: p.descontos ?? null,
-        p_valor_diaria: p.valorDiaria ?? null,
-        p_origem: 'painel',
-      } as never);
+      const { data, error } = await supabase.rpc('registrar_diaria' as never, paramsDoPedido(p) as never);
       if (error) throw error;
       return data as unknown as ResultadoDaDiaria;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['diarias'] }),
+  });
+}
+
+/**
+ * Vários dias de uma vez (o "+ dias" do app antigo): a mesma função do banco, um dia por vez, e a
+ * tela se atualiza uma vez só no fim. Quem chama passa só os dias que ainda não estão lançados —
+ * dia já lançado no intervalo fica como está. Um dia recusado não impede os outros; volta na lista.
+ */
+export function useRegistrarVariosDias() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ pedido, datas }: { pedido: Omit<PedidoDeDiaria, 'data'>; datas: string[] }) => {
+      const feitos: string[] = [];
+      const falhas: { data: string; erro: string }[] = [];
+      for (const data of datas) {
+        const { error } = await supabase.rpc('registrar_diaria' as never, paramsDoPedido({ ...pedido, data }) as never);
+        if (error) falhas.push({ data, erro: error.message });
+        else feitos.push(data);
+      }
+      return { feitos, falhas };
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['diarias'] }),
   });
 }
 

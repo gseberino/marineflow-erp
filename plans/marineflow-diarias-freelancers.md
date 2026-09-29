@@ -80,15 +80,16 @@ de diária; dia = `work_shifts`; pagamento = o lançamento que já vem do extrat
    fora. Teste: `supabase/tests/lucro_por_os_mao_de_obra.sql`.
 6. **Aposentar o app** (só leitura).
 
-## Melhorias anotadas (não construídas)
+## Melhorias
 
-- **Vários dias de uma vez pelo assistente** (teste do dono, 29/09/2026): "o Mickael faltou desde o
-  dia 19/09" gravou só o dia 19 — e a confirmação também mostrava só o 19. `registrar_diaria` recebe
-  UMA data. Falta aceitar intervalo ("desde 19/09", "a semana toda", "de segunda até hoje"): um
-  `data_ate` (ou lista de datas) resolvido na tool, confirmação listando os dias (e quantos já
-  estavam lançados), e dias úteis por padrão (sábado/domingo só se disser). O banco já é idempotente
-  por dia, então é repetir `registrar_diaria` por data. Na tela, o mesmo vale para o "+ dias" do app
-  antigo (lançar um intervalo num formulário só).
+- **Vários dias de uma vez — FEITO em 29/09/2026** (teste do dono: "o Mickael faltou desde o dia
+  19/09" gravava só o dia 19). Assistente: `registrar_diaria` aceita `data_ate` e `fim_de_semana`;
+  `data` entende o dia da semana ("segunda" = a mais recente até hoje); só dias úteis por padrão;
+  até 31 dias; nunca no futuro; `apagar` é um dia de cada vez. Tela: "Registrar dia" › "Vários
+  dias" (De/Até, sábado e domingo marcáveis). Nos dois, **dia já lançado no intervalo fica como
+  está** — o intervalo só preenche o que falta (um "faltou desde…" não pode apagar um dia inteiro
+  lançado no meio); corrigir é registrar aquele dia sozinho. Sem mudança no banco: é
+  `registrar_diaria` por data. Obs.: 19/09/2026 foi sábado — em dias úteis o intervalo começa no 21.
 
 ## Armadilhas já medidas
 

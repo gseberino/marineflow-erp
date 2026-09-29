@@ -293,7 +293,8 @@ Roberto e Mickael trabalham por DIA. O DIA se registra com registrar_diaria; o P
 - "o Roberto não veio hoje", "Mickael faltou ontem" → registrar_diaria com jornada='faltou'. Falta é REGISTRO (valor zero): não apaga nada.
 - "Roberto trabalhou hoje", "diária do Mickael ontem" → jornada='inteiro'. "meio período", "só de manhã" → 'meio'.
 - "…na OS 1234" → os='1234'. Duas OS no mesmo dia → os='1234, 1250' (o valor do dia se divide igual). Se disserem o barco ou o cliente sem o número, ache a OS antes (search_vessels / list_service_orders) e passe o número.
-- "lancei o dia 24 do Roberto por engano" → jornada='apagar'. Só para ERRO de lançamento; quem não veio é 'faltou'.
+- VÁRIOS DIAS numa chamada só: "faltou desde 19/09" → data='19/09', data_ate='hoje'; "a semana toda", "de segunda até hoje" → data='segunda', data_ate='hoje'; "de 21 a 25/09" → data='21/09', data_ate='25/09'. Sábado e domingo só entram se a pessoa disser (fim_de_semana=true). Dia já lançado no intervalo fica como está — para mudar um deles, registre aquele dia sozinho. Não chame a ferramenta uma vez por dia.
+- "lancei o dia 24 do Roberto por engano" → jornada='apagar'. Só para ERRO de lançamento, e um dia de cada vez; quem não veio é 'faltou'.
 - Um dia por pessoa: repetir a data CORRIGE o dia ("era meio, foi inteiro"). Não pergunte se é para lançar de novo.
 - A diária vem do cadastro: NÃO pergunte valor nem horário, e não invente. Pergunte só o que faltar — quem, e se foi inteiro, meio ou falta.
 - O sistema pede "sim" sempre. Depois, confirme com a frase que a ferramenta devolveu (ela já traz o saldo com a pessoa).

@@ -5,7 +5,7 @@
 // Rodar com:
 //   deno test --allow-all supabase/functions/_shared/ai/tools/diarias_test.ts
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { diaCurto, diariasTools, intervaloDito, resolverDiaria, resumirDiaria } from "./diarias.ts";
+import { dataDoDito, datasDoIntervalo, diaCurto, diariasTools, intervaloDito, resolverDiaria, resumirDiaria } from "./diarias.ts";
 
 /** Banco falso: só o que as tools leem. */
 function admin(opcoes: { diaLancado?: boolean } = {}) {
@@ -169,4 +169,58 @@ Deno.test("período dito e dia curto, em Brasília", () => {
   assertEquals(intervaloDito("mes_passado", new Date("2026-01-10T15:00:00Z")), { de: "2025-12-01", ate: "2025-12-31" });
   assertEquals(intervaloDito("tudo", agora), { de: null, ate: null });
   assertEquals(diaCurto("2026-09-24"), "qui 24/09");
+});
+
+// ── Vários dias ("faltou desde 19/09", "a semana toda", "de segunda até hoje") — pedido do dono, 29/09 ──
+
+Deno.test("dia da semana é o mais recente até hoje; o intervalo pula sábado e domingo, salvo pedido", () => {
+  const terca = new Date("2026-09-29T15:00:00Z");
+  assertEquals(dataDoDito("segunda", terca), "2026-09-28");
+  assertEquals(dataDoDito("terça", terca), "2026-09-29");
+  assertEquals(dataDoDito("sexta-feira", terca), "2026-09-25");
+  assertEquals(dataDoDito("domingo", terca), "2026-09-27");
+  assertEquals(dataDoDito("19/09/2026", terca), "2026-09-19");
+  // 19/09/2026 foi sábado: "desde 19/09" em dias úteis começa na segunda, 21.
+  assertEquals(datasDoIntervalo("2026-09-19", "2026-09-29"), ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25", "2026-09-28", "2026-09-29"]);
+  assertEquals(datasDoIntervalo("2026-09-19", "2026-09-21", true), ["2026-09-19", "2026-09-20", "2026-09-21"]);
+  assertEquals(datasDoIntervalo("2026-09-26", "2026-09-27"), []);
+});
+
+Deno.test("resolver com data_ate: lista os dias; invertido, futuro, grande demais e apagar em lote viram pergunta", async () => {
+  const { c } = ctx();
+  const p = await resolverDiaria(c as never, { freelancer: "mickael", jornada: "faltou", data: "19/09/2026", data_ate: "25/09/2026" });
+  if ("error" in p) throw new Error(p.error);
+  assertEquals(p.intervalo, true);
+  assertEquals(p.datas, ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25"]);
+
+  const erro = async (a: Record<string, unknown>) => String(((await resolverDiaria(c as never, { freelancer: "mickael", jornada: "faltou", ...a })) as { error?: string }).error);
+  assertStringIncludes(await erro({ data: "25/09/2026", data_ate: "19/09/2026" }), "invertido");
+  assertStringIncludes(await erro({ data: "25/09/2026", data_ate: "31/12/2099" }), "futuro");
+  assertStringIncludes(await erro({ data: "01/01/2026", data_ate: "30/06/2026" }), "grande demais");
+  assertStringIncludes(await erro({ data: "26/09/2026", data_ate: "27/09/2026" }), "Nenhum dia útil");
+  assertStringIncludes(await erro({ jornada: "apagar", data: "21/09/2026", data_ate: "25/09/2026" }), "um dia de cada vez");
+});
+
+Deno.test("vários dias: registra só os que faltam — o dia já lançado no meio fica como está", async () => {
+  const { c, chamadas } = ctx({ diaLancado: true }); // 24/09 já tem meio período do Roberto
+  const r = await tool("registrar_diaria").execute(
+    { freelancer: "roberto", jornada: "faltou", data: "21/09/2026", data_ate: "25/09/2026" }, c as never) as Record<string, any>;
+  const registradas = chamadas.filter((x) => x.n === "registrar_diaria").map((x) => x.a.p_data);
+  assertEquals(registradas, ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-25"]);
+  assertEquals(r.registrados, registradas);
+  assertStringIncludes(String(r.aviso), "4 dia(s) registrado(s): 21/09, 22/09, 23/09, 25/09.");
+  assertStringIncludes(String(r.aviso), "Já lançados, mantidos: 24/09 (meio período).");
+});
+
+Deno.test("vários dias: a confirmação lista os dias, o total e o que fica como está", async () => {
+  const txt = String(await resumirDiaria(ctx({ diaLancado: true }).c as never,
+    { freelancer: "roberto", jornada: "inteiro", data: "21/09/2026", data_ate: "25/09/2026" })).replace(/\u00a0/g, " ");
+  assertStringIncludes(txt, "*Roberto Daniel Rodrigues Correa* · *dia inteiro* · 4 dia(s) de seg 21/09 a sex 25/09 (só dias úteis) · R$ 160,00 cada, R$ 640,00 no total");
+  assertStringIncludes(txt, "Dias: 21/09, 22/09, 23/09, 25/09");
+  assertStringIncludes(txt, "Já lançados, ficam como estão: 24/09 (meio período).");
+});
+
+Deno.test("jornada 'apagar' com data_ate é recusada antes de virar pendência", () => {
+  const r = tool("registrar_diaria").preValidar!({ freelancer: "roberto", jornada: "apagar", data: "21/09", data_ate: "25/09" }, {} as never);
+  assertStringIncludes(String(r?.error), "um dia de cada vez");
 });
