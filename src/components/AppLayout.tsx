@@ -10,7 +10,7 @@ import {
   DollarSign, BarChart3, Settings, ChevronLeft, ChevronRight, Menu, TrendingUp,
   Warehouse, Building2, Wrench, History, LogOut, CalendarDays, MessageCircle,
   Database, ChevronDown, Rocket, ShoppingCart, FileDown, Target, CheckCircle2, Bell, CalendarClock, Truck, Camera, FileText, Bot, Boxes, LayoutGrid, ListChecks,
-  Sparkles, ArrowLeftRight, TrendingDown, Wallet, Wand2, Landmark, Receipt
+  Sparkles, ArrowLeftRight, TrendingDown, Wallet, Wand2, Landmark, Receipt, HardHat
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -270,6 +270,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         // Despesas (26/09/2026): o que JÁ saiu e em que categoria entrou. Contas a Pagar é o que
         // ainda se deve; faltava um lugar para o dono ver para onde foi o dinheiro.
         { label: 'Despesas', icon: Receipt, path: '/v2/financial/despesas', roles: ['admin', 'financial'] },
+        // Diárias (28/09/2026): dias dos freelancers e o saldo com cada um (decisão D6 do dono).
+        { label: 'Diárias', icon: HardHat, path: '/v2/financial/diarias', roles: ['admin', 'financial'] },
       ],
     },
     {

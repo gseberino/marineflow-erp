@@ -53,6 +53,8 @@ describe('menu lateral', () => {
       // Despesas (26/09/2026): o que JÁ saiu e em que categoria entrou; Contas a Pagar é o que se deve.
       // Cobranças saiu em 26/09/2026: virou aba de Contas a Receber (é a mesma conversa).
       'Contas a Receber', 'Contas a Pagar', 'Despesas',
+      // Diárias (28/09/2026): os dias dos freelancers e o saldo com cada um.
+      'Diárias',
     ]);
   });
 

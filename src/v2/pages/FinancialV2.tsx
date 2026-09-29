@@ -23,6 +23,7 @@ import { V2Shell } from '@/v2/components/V2Shell';
 import { AvisoAbasMudaram } from '@/v2/components/AvisoAbasMudaram';
 import { VisaoGeral } from '@/v2/pages/financeiro/VisaoGeral';
 import { ContasAPagarLista } from '@/v2/pages/financeiro/ContasAPagarLista';
+import { DiariasPanel, type FiltroDasDiarias } from '@/v2/pages/financeiro/DiariasPanel';
 import {
   COMODOS, resolverFinanceiro, rotaDoComodo, paraQueServeDe, type Comodo,
 } from '@/v2/pages/financeiro/rotas';
@@ -43,6 +44,7 @@ import '@/v2/tokens.css';
      /v2/financial/reconciliation  Conciliação: Conciliação · Fechar o mês
      /v2/financial/payables        Contas a Pagar: Em aberto · Reembolsos · Comissões
      /v2/financial/despesas        Despesas
+     /v2/financial/diarias[/aba]   Diárias: Resumo · Extrato (freelancers, 28/09/2026)
      /v2/financial/banks           Contas bancárias
      /v2/financial/cadastro        Saúde do cadastro (a casa é Fornecedores; o link antigo
                                    continua abrindo o painel)
@@ -72,6 +74,8 @@ export default function FinancialV2() {
   const [sementeRegra, setSementeRegra] = useState<SementeDeRegra | null>(null);
   // A conta escolhida nas fichas do Extrato sobrevive à troca de aba.
   const [contaDoExtrato, setContaDoExtrato] = useState<string | null>(null);
+  // Diárias: o período e o freelancer escolhidos sobrevivem à troca entre Resumo e Extrato.
+  const [filtroDiarias, setFiltroDiarias] = useState<FiltroDasDiarias>({ periodo: 'mes', favorecidoId: null });
   const { data: pendingReimb } = usePendingReimbursements();
 
   if (rota.tipo === 'redirecionar') {
@@ -111,6 +115,15 @@ export default function FinancialV2() {
         return <ContasAPagarLista onNovaConta={() => setLancar({ tipo: 'despesa', porOnde: 'depois' })} />;
       case 'despesas':
         return <DespesasPanel />;
+      case 'diarias':
+        return (
+          <DiariasPanel
+            aba={a === 'extrato' ? 'extrato' : 'resumo'}
+            filtro={filtroDiarias}
+            onFiltro={setFiltroDiarias}
+            onVerExtrato={(id) => { setFiltroDiarias({ ...filtroDiarias, favorecidoId: id }); irPara('diarias', 'extrato'); }}
+          />
+        );
       case 'bancos':
         return <BankSourcesPanel />;
       case 'cadastro':

@@ -9,7 +9,7 @@
 // deixou de existir leva ao lugar novo (tabela ANTIGAS abaixo). Tudo aqui é puro, para o
 // mapa de links antigos ser testado sem montar a tela.
 
-export type Comodo = 'visao' | 'extrato' | 'conciliacao' | 'pagar' | 'despesas' | 'bancos' | 'cadastro';
+export type Comodo = 'visao' | 'extrato' | 'conciliacao' | 'pagar' | 'despesas' | 'diarias' | 'bancos' | 'cadastro';
 
 export interface AbaDoComodo {
   aba: string;
@@ -50,6 +50,8 @@ export const PARA_QUE_SERVE = {
   cadastro: 'Cadastros que atrapalham o reconhecimento automático (apelido ruim, CNPJ faltando ou duplicado), com a correção sugerida.',
   banks: 'Os bancos ligados ao sistema e o saldo de cada conta. O dia a dia do que entrou e saiu fica no Extrato.',
   aging: 'Quem deve à empresa e a quem a empresa deve, por tempo de atraso: a vencer, 1–30, 31–60, 61–90 e mais de 90 dias.',
+  diarias: 'Os dias que cada freelancer trabalhou, o que ele recebeu e o saldo com ele: você deve, adiantado ou quitado. O pagamento vem do extrato; aqui se lança o dia.',
+  diariasExtrato: 'Dia a dia de um freelancer, com o saldo corrido: cada diária e cada pagamento, com a conta de onde saiu.',
 } as const;
 
 export const COMODOS: Record<Comodo, DefinicaoDoComodo> = {
@@ -80,6 +82,14 @@ export const COMODOS: Record<Comodo, DefinicaoDoComodo> = {
     ],
   },
   despesas: { comodo: 'despesas', secao: 'despesas', nome: 'Despesas', paraQueServe: PARA_QUE_SERVE.despesas, abas: [] },
+  // Diárias de freelancers (28/09/2026): destino próprio no menu (decisão D6 do dono).
+  diarias: {
+    comodo: 'diarias', secao: 'diarias', nome: 'Diárias', paraQueServe: PARA_QUE_SERVE.diarias,
+    abas: [
+      { aba: 'resumo', rotulo: 'Resumo', paraQueServe: PARA_QUE_SERVE.diarias },
+      { aba: 'extrato', rotulo: 'Extrato', paraQueServe: PARA_QUE_SERVE.diariasExtrato },
+    ],
+  },
   bancos: { comodo: 'bancos', secao: 'banks', nome: 'Contas bancárias', paraQueServe: PARA_QUE_SERVE.banks, abas: [] },
   cadastro: { comodo: 'cadastro', secao: 'cadastro', nome: 'Saúde do cadastro', paraQueServe: PARA_QUE_SERVE.cadastro, abas: [] },
 };

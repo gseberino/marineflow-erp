@@ -1,0 +1,296 @@
+// Financeiro › Diárias: quanto cada freelancer trabalhou, quanto recebeu e o saldo com ele.
+//
+// O saldo vem pronto do banco (saldo inicial + trabalhado − pago). O "pago" é o que já veio do
+// extrato no nome dele (Pix, Caixa) e o que um sócio pagou do próprio bolso para ele — não se
+// digita pagamento aqui: o banco traz. Aqui se lança o DIA.
+import { useState } from 'react';
+import { CalendarPlus, Pencil, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { useI18n } from '@/i18n';
+import {
+  ESTADO_DO_SALDO, PERIODOS, diaCurto, intervaloDoPeriodo, rotuloDaJornada,
+  type PeriodoDasDiarias,
+} from '@/lib/diarias';
+import {
+  pedidoParaDesfazer, useApagarDiaria, useContaCorrente, useRegistrarDiaria, useResumoFreelancers,
+  type FreelancerNoResumo, type LinhaDaContaCorrente,
+} from '@/hooks/use-diarias';
+import { RegistrarDiaDialog, type DiaParaEditar } from './RegistrarDiaDialog';
+
+export interface FiltroDasDiarias {
+  periodo: PeriodoDasDiarias;
+  favorecidoId: string | null;
+}
+
+interface Props {
+  aba: 'resumo' | 'extrato';
+  filtro: FiltroDasDiarias;
+  onFiltro: (f: FiltroDasDiarias) => void;
+  onVerExtrato: (favorecidoId: string) => void;
+}
+
+export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
+  const { de, ate } = intervaloDoPeriodo(filtro.periodo);
+  const resumo = useResumoFreelancers(de, ate);
+  const pessoas = resumo.data?.pessoas ?? [];
+  const [registrando, setRegistrando] = useState<{ favorecidoId?: string | null; editar?: DiaParaEditar } | null>(null);
+
+  const barra = (
+    <div className="flex flex-wrap items-center gap-2">
+      <Select value={filtro.periodo} onValueChange={(v) => onFiltro({ ...filtro, periodo: v as PeriodoDasDiarias })}>
+        <SelectTrigger className="h-9 w-40" aria-label="Período"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {PERIODOS.map((p) => <SelectItem key={p.valor} value={p.valor}>{p.rotulo}</SelectItem>)}
+        </SelectContent>
+      </Select>
+      {aba === 'extrato' && (
+        <Select value={filtro.favorecidoId ?? ''} onValueChange={(v) => onFiltro({ ...filtro, favorecidoId: v })}>
+          <SelectTrigger className="h-9 w-56 max-w-full" aria-label="Freelancer"><SelectValue placeholder="Escolha o freelancer" /></SelectTrigger>
+          <SelectContent>
+            {pessoas.map((p) => <SelectItem key={p.id} value={p.id}>{p.nome}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      )}
+      <Button size="sm" className="ml-auto gap-1.5"
+              onClick={() => setRegistrando({ favorecidoId: aba === 'extrato' ? filtro.favorecidoId : null })}>
+        <CalendarPlus className="h-4 w-4" /> Registrar dia
+      </Button>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {barra}
+      {resumo.isLoading ? (
+        <Skeleton className="h-48 w-full" />
+      ) : resumo.error ? (
+        <Card className="border-destructive/40 p-4 text-sm text-destructive">
+          Não deu para carregar as diárias: {(resumo.error as Error).message}
+        </Card>
+      ) : pessoas.length === 0 ? (
+        <Card className="p-6 text-center text-sm text-muted-foreground">
+          Nenhum freelancer com diária cadastrada. O valor da diária fica no cadastro de jornada do favorecido.
+        </Card>
+      ) : aba === 'resumo' ? (
+        <Resumo pessoas={pessoas} total={resumo.data!} onVerExtrato={onVerExtrato}
+                onRegistrar={(id) => setRegistrando({ favorecidoId: id })} />
+      ) : (
+        <Extrato favorecidoId={filtro.favorecidoId} de={de} ate={ate}
+                 onEditar={(d) => setRegistrando({ editar: d })} />
+      )}
+
+      {registrando && (
+        <RegistrarDiaDialog
+          pessoas={pessoas}
+          favorecidoInicial={registrando.favorecidoId}
+          editar={registrando.editar}
+          onFechar={() => setRegistrando(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function Resumo({ pessoas, total, onVerExtrato, onRegistrar }: {
+  pessoas: FreelancerNoResumo[];
+  total: { trabalhado: number; pago: number; dias: number; deve: number; adiantado: number };
+  onVerExtrato: (id: string) => void;
+  onRegistrar: (id: string) => void;
+}) {
+  const { formatCurrency, formatDate } = useI18n();
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        {([
+          ['Trabalhado no período', formatCurrency(total.trabalhado), `${total.dias.toLocaleString('pt-BR')} diárias`],
+          ['Pago no período', formatCurrency(total.pago), 'do extrato e do bolso de sócio'],
+          ['Você deve (acumulado)', formatCurrency(total.deve), 'até o fim do período'],
+          ['Adiantado (acumulado)', formatCurrency(total.adiantado), 'pago antes do trabalho'],
+        ] as const).map(([rotulo, valor, nota]) => (
+          <Card key={rotulo} className="min-w-0 p-3">
+            <p className="truncate text-xs text-muted-foreground">{rotulo}</p>
+            <p className="truncate text-lg font-semibold tabular-nums">{valor}</p>
+            <p className="truncate text-xs text-muted-foreground">{nota}</p>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        {pessoas.map((p) => {
+          const estado = ESTADO_DO_SALDO[p.estado];
+          return (
+            <Card key={p.id} className="min-w-0 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-lg font-semibold">{p.nome}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {p.diaria != null ? <>Diária <span className="tabular-nums">{formatCurrency(p.diaria)}</span></> : 'Sem diária no cadastro'}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-muted-foreground">Saldo acumulado</p>
+                  <p className={`text-2xl font-bold tabular-nums ${estado.classe}`}>{formatCurrency(Math.abs(p.saldo_final))}</p>
+                  <Badge variant="outline" className={estado.classe}>{estado.rotulo}</Badge>
+                </div>
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-2 border-t pt-3 text-sm sm:grid-cols-4">
+                <div><dt className="text-xs text-muted-foreground">Dias</dt><dd className="font-medium tabular-nums">{p.dias.toLocaleString('pt-BR')}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">Trabalhado</dt><dd className="font-medium tabular-nums">{formatCurrency(p.trabalhado)}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">Pago</dt><dd className="font-medium tabular-nums">{formatCurrency(p.pago)}</dd></div>
+                <div><dt className="text-xs text-muted-foreground">Último pagamento</dt><dd className="font-medium tabular-nums">{p.ultimo_pagamento ? formatDate(p.ultimo_pagamento) : '—'}</dd></div>
+              </dl>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => onVerExtrato(p.id)}>Ver extrato</Button>
+                <Button size="sm" variant="ghost" onClick={() => onRegistrar(p.id)}>Registrar dia</Button>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Saldo = saldo inicial + dias trabalhados (diária + extras − descontos) − o que ele recebeu. Os pagamentos vêm do extrato; não se digitam aqui.
+      </p>
+    </div>
+  );
+}
+
+function Extrato({ favorecidoId, de, ate, onEditar }: {
+  favorecidoId: string | null;
+  de: string | null;
+  ate: string | null;
+  onEditar: (d: DiaParaEditar) => void;
+}) {
+  const { formatCurrency } = useI18n();
+  const conta = useContaCorrente(favorecidoId, de, ate);
+  const apagar = useApagarDiaria();
+  const registrar = useRegistrarDiaria();
+
+  if (!favorecidoId) {
+    return <Card className="p-6 text-center text-sm text-muted-foreground">Escolha o freelancer para ver o extrato.</Card>;
+  }
+  if (conta.isLoading) return <Skeleton className="h-48 w-full" />;
+  if (conta.error) {
+    return <Card className="border-destructive/40 p-4 text-sm text-destructive">Não deu para carregar o extrato: {(conta.error as Error).message}</Card>;
+  }
+  const c = conta.data!;
+  const estado = ESTADO_DO_SALDO[c.estado];
+
+  // Excluir não pergunta: apaga e oferece Desfazer, que registra o dia de novo exatamente como era.
+  async function excluir(l: LinhaDaContaCorrente) {
+    try {
+      const r = await apagar.mutateAsync(l.id);
+      toast(r.message, {
+        duration: 9000,
+        action: {
+          label: 'Desfazer',
+          onClick: () => {
+            registrar.mutateAsync(pedidoParaDesfazer(r.apagado))
+              .then(() => toast.success('Dia restaurado.'))
+              .catch((e: Error) => toast.error(e.message || 'Não deu para restaurar o dia.'));
+          },
+        },
+      });
+    } catch (e) {
+      toast.error((e as Error).message || 'Não deu para excluir o dia.');
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        {([
+          [c.de ? 'Saldo antes do período' : 'Saldo inicial', formatCurrency(c.saldo_anterior)],
+          ['Trabalhado', formatCurrency(c.trabalhado)],
+          ['Pago', formatCurrency(c.pago)],
+          ['Saldo no fim', formatCurrency(c.saldo_final)],
+        ] as const).map(([rotulo, valor]) => (
+          <Card key={rotulo} className="min-w-0 p-3">
+            <p className="truncate text-xs text-muted-foreground">{rotulo}</p>
+            <p className="truncate font-semibold tabular-nums">{valor}</p>
+          </Card>
+        ))}
+      </div>
+      <div className="text-sm">
+        <Badge variant="outline" className={estado.classe}>{estado.rotulo}</Badge>
+        <span className="ml-2 text-muted-foreground">
+          {c.favorecido.desde ? `Conta corrente desde ${diaCurto(c.favorecido.desde)}/${c.favorecido.desde.slice(0, 4)}.` : ''}
+          {' '}Saldo positivo = você deve; negativo = pagou adiantado.
+        </span>
+      </div>
+
+      {c.linhas.length === 0 ? (
+        <Card className="p-6 text-center text-sm text-muted-foreground">Nenhum dia nem pagamento neste período.</Card>
+      ) : (
+        <Card className="divide-y p-0">
+          {c.linhas.map((l) => (
+            <div key={`${l.tipo}-${l.id}`} className="flex min-w-0 items-start gap-3 p-3">
+              <div className="w-16 shrink-0 text-sm">
+                <p className="font-semibold tabular-nums">{diaCurto(l.data).slice(4)}</p>
+                <p className="text-xs text-muted-foreground">{diaCurto(l.data).slice(0, 3)}</p>
+              </div>
+              <div className="min-w-0 flex-1">
+                {l.tipo === 'dia' ? (
+                  <>
+                    <div className="flex flex-wrap items-center gap-x-2 text-sm">
+                      <Badge variant="outline" className={l.jornada === 'faltou' ? 'text-muted-foreground' : 'text-success'}>
+                        {rotuloDaJornada(l.jornada)}
+                      </Badge>
+                      {l.os.length > 0 && <span className="min-w-0 truncate">OS {l.os.map((o) => o.numero).join(', ')}</span>}
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {l.jornada === 'faltou' ? 'Sem diária' : `${l.fracao === 0.5 ? '½ × ' : ''}${formatCurrency(l.valor_diaria ?? 0)}`}
+                      {l.extras ? ` + extras ${formatCurrency(l.extras)}` : ''}
+                      {l.descontos ? ` − desc. ${formatCurrency(l.descontos)}` : ''}
+                      {l.observacao ? ` · ${l.observacao}` : ''}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center gap-x-2 text-sm">
+                      <Badge variant="outline" className="text-sky-700 dark:text-sky-400">Pagamento</Badge>
+                      <span className="min-w-0 truncate">{l.conta}</span>
+                    </div>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {l.descricao}{l.categoria ? ` · ${l.categoria}` : ''}
+                    </p>
+                  </>
+                )}
+              </div>
+              <div className="shrink-0 text-right">
+                <p className={`font-semibold tabular-nums ${l.tipo === 'pagamento' ? 'text-success' : ''}`}>
+                  {l.tipo === 'pagamento' ? `− ${formatCurrency(l.pago)}` : formatCurrency(l.trabalhado)}
+                </p>
+                <p className="text-xs tabular-nums text-muted-foreground">saldo {formatCurrency(l.saldo)}</p>
+              </div>
+              {l.tipo === 'dia' ? (
+                <AcoesDaLinha
+                  rotulo={`dia ${diaCurto(l.data)}`}
+                  ocupada={apagar.isPending}
+                  menu={[
+                    {
+                      texto: 'Corrigir o dia', icone: Pencil,
+                      onClick: () => onEditar({
+                        favorecidoId: c.favorecido.id, data: l.data, jornada: l.jornada ?? 'inteiro',
+                        valorDiaria: l.valor_diaria ?? 0, extras: l.extras ?? 0, descontos: l.descontos ?? 0,
+                        observacao: l.observacao, os: l.os,
+                      }),
+                    },
+                    { texto: 'Excluir o dia', icone: Trash2, perigo: true, onClick: () => { void excluir(l); } },
+                  ]}
+                />
+              ) : (
+                <span className="w-8 shrink-0" aria-hidden />
+              )}
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
