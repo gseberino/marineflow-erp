@@ -70,7 +70,25 @@ de diária; dia = `work_shifts`; pagamento = o lançamento que já vem do extrat
    antigas. `jornada.ts` apagado; `_shared/payroll/calculo.ts` e as tabelas de folha ficam, sem uso.
 5. **Lucro por OS com mão de obra real:** `vw_os_profitability` soma o valor dos dias rateado pelas
    OS; `get_os_profitability` passa a ler a view. Mostrar ao dono a lista de margens antes/depois.
+   Migration `20260929173000_lucro_por_os_com_mao_de_obra`: `v_custo_real_mao_de_obra_por_os`
+   passa a ler as diárias (work_shift_os, partes iguais) em vez da folha fechada (sempre vazia);
+   `vw_os_profitability` desconta `labor_cost_real` do lucro e ganha, no fim, `labor_cost_real`,
+   `labor_days`, `labor_sold` e `hours_sold`. A tela soma a mão de obra no custo e mostra a coluna
+   "Mão de obra (diárias)". A tool lê a view (corrige também o custo das peças, que usava o preço de
+   venda). **Antes/depois medido em 29/09: nenhuma OS muda** — nenhum dos 18 dias estava ligado a
+   OS; a margem passa a descontar a mão de obra conforme os dias forem ligados. A do dono continua
+   fora. Teste: `supabase/tests/lucro_por_os_mao_de_obra.sql`.
 6. **Aposentar o app** (só leitura).
+
+## Melhorias anotadas (não construídas)
+
+- **Vários dias de uma vez pelo assistente** (teste do dono, 29/09/2026): "o Mickael faltou desde o
+  dia 19/09" gravou só o dia 19 — e a confirmação também mostrava só o 19. `registrar_diaria` recebe
+  UMA data. Falta aceitar intervalo ("desde 19/09", "a semana toda", "de segunda até hoje"): um
+  `data_ate` (ou lista de datas) resolvido na tool, confirmação listando os dias (e quantos já
+  estavam lançados), e dias úteis por padrão (sábado/domingo só se disser). O banco já é idempotente
+  por dia, então é repetir `registrar_diaria` por data. Na tela, o mesmo vale para o "+ dias" do app
+  antigo (lançar um intervalo num formulário só).
 
 ## Armadilhas já medidas
 

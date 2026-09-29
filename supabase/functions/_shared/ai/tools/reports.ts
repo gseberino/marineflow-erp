@@ -53,7 +53,7 @@ export const reportTools: ToolDef[] = [
   },
   {
     name: "get_os_profitability",
-    description: "Analisa a lucratividade detalhada de uma Ordem de Serviço.",
+    description: "Analisa a lucratividade detalhada de uma Ordem de Serviço: receita, custo de peças, deslocamento, despesas, comissões e mão de obra real das diárias, lucro e margem.",
     input_schema: {
       type: "object",
       properties: { service_order_id: { type: "string" } },
@@ -65,21 +65,39 @@ export const reportTools: ToolDef[] = [
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
-      const { admin } = ctx;
-      const { data: so, error } = await admin
-        .from("service_orders")
-        .select("grand_total, labor_cost_total, parts_cost_total, travel_cost_total, operational_cost_total")
-        .eq("id", args.service_order_id)
-        .single();
+      // Lê a MESMA view da tela "Lucro por OS" (vw_os_profitability): o assistente e a tela não
+      // podem dizer margens diferentes. Até 29/09/2026 esta tool somava por conta própria, sem
+      // mão de obra e com o preço de VENDA das peças no lugar do custo (parts_cost_total).
+      const { data: v, error } = await ctx.admin
+        .from("vw_os_profitability")
+        .select("service_order_number, revenue, parts_cost, travel_cost, operational_cost, commission_cost, labor_cost_real, labor_days, labor_sold, hours_sold, net_profit, net_margin_percent")
+        .eq("os_id", args.service_order_id)
+        .maybeSingle();
       if (error) throw error;
-      const revenue = Number(so.grand_total);
-      const directCosts = Number(so.parts_cost_total) + Number(so.travel_cost_total) + Number(so.operational_cost_total);
-      const grossProfit = revenue - directCosts;
+      if (!v) return { error: "OS não encontrada." };
+      const n = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
+      const custos = {
+        pecas: n(v.parts_cost), deslocamento: n(v.travel_cost), despesas: n(v.operational_cost),
+        comissoes: n(v.commission_cost), mao_de_obra_diarias: n(v.labor_cost_real),
+      };
+      const gestor = ctx.userRole === "admin" || ctx.userRole === "financial";
       return {
-        receita: revenue,
-        custos_diretos: directCosts,
-        lucro_bruto: grossProfit,
-        margem: revenue > 0 ? (grossProfit / revenue) * 100 : 0,
+        os: v.service_order_number,
+        receita: n(v.revenue),
+        custos,
+        custo_total: n(Object.values(custos).reduce((s, x) => s + x, 0)),
+        lucro: n(v.net_profit),
+        margem: n(v.net_margin_percent),
+        mao_de_obra: {
+          vendida: n(v.labor_sold),
+          horas_vendidas: n(v.hours_sold),
+          custo_real_diarias: n(v.labor_cost_real),
+          // Quantos dias e quem: detalhe de pagamento de pessoa — só para quem vê as diárias.
+          ...(gestor ? { dias_de_diarista: n(v.labor_days) } : {}),
+        },
+        observacao: Number(v.labor_days) > 0
+          ? "A mão de obra do dono não é apontada e não entra no custo."
+          : "Nenhuma diária de freelancer ligada a esta OS: a mão de obra não está descontada (a do dono nunca entra). Ligar os dias à OS em Financeiro › Diárias.",
       };
     },
   },

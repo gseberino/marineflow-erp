@@ -310,7 +310,7 @@ function ProfitabilityTab() {
   const [period, setPeriod] = useState('30');
   const { data, isLoading, error, refetch } = useProfitabilityReport(Number(period));
 
-  type ProfitRow = { id: string; number: string; client: string; revenue: number; cost: number; profit: number; margin: number };
+  type ProfitRow = { id: string; number: string; client: string; revenue: number; cost: number; labor: number; profit: number; margin: number };
   const cols: DataColumn<ProfitRow>[] = [
     {
       key: 'number', header: 'OS / Cliente', minWidth: 190, priority: 0,
@@ -328,6 +328,12 @@ function ProfitabilityTab() {
       render: (r) => <StatusChip tone={(r.margin || 0) > 30 ? 'success' : 'warning'}>{(r.margin || 0).toFixed(1)}%</StatusChip>,
     },
     { key: 'cost', header: 'Custo total', minWidth: 116, priority: 3, align: 'right', detailLabel: 'Custo', render: (r) => <span className="text-destructive">{formatCurrency(r.cost)}</span> },
+    // Mão de obra real das diárias ligadas à OS (29/09/2026). Traço = nenhum dia ligado: a margem
+    // ainda não desconta mão de obra nessa OS.
+    {
+      key: 'labor', header: 'Mão de obra (diárias)', minWidth: 132, priority: 4, align: 'right', detailLabel: 'Mão de obra (diárias)',
+      render: (r) => (r.labor ? formatCurrency(r.labor) : <span className="text-muted-foreground" title="Nenhum dia de freelancer ligado a esta OS">–</span>),
+    },
   ];
 
   const d = data as (typeof data & { totalRevenue?: number; totalProfit?: number; avgMargin?: number; topOS?: ProfitRow[]; rows?: ProfitRow[] }) | undefined;
@@ -362,7 +368,7 @@ function ProfitabilityTab() {
                 size="sm" variant="outline" className="gap-1.5"
                 onClick={() => exportCSV('lucratividade.csv', (d.rows || []).map((r) => ({
                   OS: r.number, Cliente: r.client, Faturamento: r.revenue,
-                  'Custo Total': r.cost, 'Lucro Líquido': r.profit, 'Margem %': r.margin,
+                  'Custo Total': r.cost, 'Mão de obra (diárias)': r.labor, 'Lucro Líquido': r.profit, 'Margem %': r.margin,
                 })))}
               >
                 <Download className="h-4 w-4" /> CSV

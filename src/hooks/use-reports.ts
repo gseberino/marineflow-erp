@@ -294,7 +294,11 @@ export function useProfitabilityReport(periodDays: number = 30) {
         number: o.service_order_number,
         client: o.client_name,
         revenue: Number(o.revenue || 0),
-        cost: Number(o.parts_cost || 0) + Number(o.travel_cost || 0) + Number(o.operational_cost || 0) + Number(o.commission_cost || 0),
+        // Desde 29/09/2026 o lucro da view desconta a mão de obra real das diárias; o custo tem de
+        // somar a mesma parcela, senão custo + lucro deixa de fechar com o faturamento.
+        cost: Number(o.parts_cost || 0) + Number(o.travel_cost || 0) + Number(o.operational_cost || 0) + Number(o.commission_cost || 0)
+          + Number(o.labor_cost_real || 0),
+        labor: Number(o.labor_cost_real || 0),
         profit: Number(o.net_profit || 0),
         margin: Number(o.net_margin_percent || 0),
         status: o.status,
