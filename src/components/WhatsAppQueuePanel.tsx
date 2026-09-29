@@ -12,6 +12,11 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { toast } from '@/hooks/use-toast';
 import { Gauge, Play, RefreshCw, Trash2, ShieldAlert } from 'lucide-react';
 import { format } from 'date-fns';
@@ -34,6 +39,8 @@ function statusBadge(s: string) {
   return <Badge variant={variant} className="text-xs">{label}</Badge>;
 }
 
+const mensagens = (n: number) => (n === 1 ? '1 mensagem' : `${n} mensagens`);
+
 export function WhatsAppQueuePanel() {
   const qc = useQueryClient();
   const [enabled, setEnabled] = useState(true);
@@ -43,6 +50,8 @@ export function WhatsAppQueuePanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  // Qual limpeza está esperando o "sim": apagar da fila não tem desfazer.
+  const [apagar, setApagar] = useState<'pending' | 'failed' | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -77,17 +86,21 @@ export function WhatsAppQueuePanel() {
     queryKey: ['wa-queue-stats'],
     queryFn: async () => {
       const since = new Date(Date.now() - 60 * 60_000).toISOString();
-      const [pending, sending, sentLastHour, failed] = await Promise.all([
+      const [pending, sending, sentLastHour, failed, failedTotal] = await Promise.all([
         supabase.from('whatsapp_send_queue').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
         supabase.from('whatsapp_send_queue').select('id', { count: 'exact', head: true }).eq('status', 'sending'),
         supabase.from('whatsapp_send_queue').select('id', { count: 'exact', head: true }).eq('status', 'sent').gte('sent_at', since),
         supabase.from('whatsapp_send_queue').select('id', { count: 'exact', head: true }).eq('status', 'failed').gte('updated_at', since),
+        // O "apagar as que falharam" apaga TODAS, não só as da última hora: a contagem que o
+        // botão mostra tem de ser a mesma coisa que ele apaga.
+        supabase.from('whatsapp_send_queue').select('id', { count: 'exact', head: true }).eq('status', 'failed'),
       ]);
       return {
         pending: pending.count || 0,
         sending: sending.count || 0,
         sentLastHour: sentLastHour.count || 0,
         failedLastHour: failed.count || 0,
+        failedTotal: failedTotal.count || 0,
       };
     },
     refetchInterval: 10000,
@@ -234,21 +247,57 @@ export function WhatsAppQueuePanel() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        {/* Eram cinco botões iguais lado a lado, e os dois "Limpar" apagavam da fila num clique,
+            sem confirmação. Padrão AcoesDaLinha (pedido do dono de 23/09/2026): o de todo dia à
+            vista, o resto no menu, e apagar só depois de um "sim". */}
+        <div className="flex flex-wrap items-center gap-2">
           <Button onClick={handleSave} disabled={saving}>{saving ? 'Salvando…' : 'Salvar limites'}</Button>
-          <Button variant="outline" onClick={handleRunNow} disabled={running}>
-            <Play className="h-4 w-4 mr-2" />{running ? 'Executando…' : 'Processar fila agora'}
-          </Button>
-          <Button variant="outline" onClick={() => refetch()}>
-            <RefreshCw className="h-4 w-4 mr-2" />Atualizar
-          </Button>
-          <Button variant="outline" onClick={() => purgeMutation.mutate('pending')} disabled={!stats?.pending}>
-            <Trash2 className="h-4 w-4 mr-2" />Limpar pendentes
-          </Button>
-          <Button variant="outline" onClick={() => purgeMutation.mutate('failed')} disabled={!stats?.failedLastHour}>
-            <Trash2 className="h-4 w-4 mr-2" />Limpar falhas
-          </Button>
+          <AcoesDaLinha
+            rotulo="a fila de envio do WhatsApp"
+            className="justify-start"
+            rapidas={[{
+              texto: running ? 'Executando…' : 'Processar fila agora', icone: Play,
+              onClick: handleRunNow, desabilitada: running,
+            }]}
+            menu={[
+              { texto: 'Atualizar a lista', icone: RefreshCw, onClick: () => refetch() },
+              {
+                texto: `Apagar as que aguardam (${stats?.pending ?? 0})`, icone: Trash2, perigo: true,
+                onClick: () => setApagar('pending'), desabilitada: !stats?.pending,
+              },
+              {
+                texto: `Apagar as que falharam (${stats?.failedTotal ?? 0})`, icone: Trash2, perigo: true,
+                onClick: () => setApagar('failed'), desabilitada: !stats?.failedTotal,
+              },
+            ]}
+          />
         </div>
+
+        <AlertDialog open={apagar !== null} onOpenChange={(aberto) => { if (!aberto) setApagar(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {apagar === 'pending'
+                  ? `Apagar ${mensagens(stats?.pending ?? 0)} que aguardam envio?`
+                  : `Apagar ${mensagens(stats?.failedTotal ?? 0)} que falharam?`}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {apagar === 'pending'
+                  ? 'Elas saem da fila e não serão enviadas. Não dá para desfazer.'
+                  : 'O registro dessas falhas some da fila, inclusive as de antes da última hora. Não dá para desfazer.'}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Voltar</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => { if (apagar) purgeMutation.mutate(apagar); setApagar(null); }}
+              >
+                Apagar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Itens recentes */}
         <div>

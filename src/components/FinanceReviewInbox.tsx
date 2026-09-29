@@ -31,6 +31,7 @@ import { BuscaFinanceira } from '@/components/BuscaFinanceira';
 import { EvidenciaDaLinha, VinculoDaLinha } from '@/components/ExtratoIdentificacao';
 import { ParaOndeFoi, ObservacaoECentro } from '@/components/ParaOndeFoi';
 import { BotaoVerOS } from '@/components/VerOSRapido';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { useContasDaHBR } from '@/hooks/use-bank-connections';
 import { origemDoDinheiro } from '@/lib/origem-do-dinheiro';
 import {
@@ -655,39 +656,21 @@ function LinhaProposta({
               </Tooltip>
             )}
 
-            {!transferencia && !anomalia && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="sm" variant="ghost" disabled={ocupado} onClick={onCriarRegra}
-                    aria-label="Criar uma regra a partir desta linha">
-                    <Wand2 className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Criar uma regra a partir desta linha</TooltipContent>
-              </Tooltip>
-            )}
-
-            {!anomalia && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="sm" variant="ghost" disabled={ocupado} onClick={onDuplicata}
-                    aria-label="É duplicata — tirar da fila">
-                    <CopyX className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>É duplicata — tirar da fila</TooltipContent>
-              </Tooltip>
-            )}
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button size="sm" variant="ghost" disabled={ocupado} onClick={onRecusar}
-                  aria-label="Descartar esta proposta">
-                  <X className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Descartar esta proposta</TooltipContent>
-            </Tooltip>
+            {/* O resto no menu (padrão AcoesDaLinha, pedido do dono de 23/09/2026): eram quatro
+                ícones lado a lado, e "Descartar" ficava encostado em "Aprovar" com o mesmo peso.
+                Duplicata e descarte tiram a linha da fila sem lançar: vão por último, em alerta. */}
+            <AcoesDaLinha
+              rotulo={p.title}
+              tituloDoMenu={p.title}
+              ocupada={ocupado}
+              menu={[
+                ...(!transferencia && !anomalia
+                  ? [{ texto: 'Criar uma regra a partir desta linha', icone: Wand2, onClick: onCriarRegra }] : []),
+                ...(!anomalia
+                  ? [{ texto: 'É duplicata — tirar da fila', icone: CopyX, onClick: onDuplicata, perigo: true }] : []),
+                { texto: 'Descartar esta proposta', icone: X, onClick: onRecusar, perigo: true },
+              ]}
+            />
           </div>
         </TooltipProvider>
       </div>

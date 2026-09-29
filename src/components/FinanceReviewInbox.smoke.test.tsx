@@ -263,7 +263,7 @@ describe('OS sugerida é pergunta', () => {
       clienteNome: null, converteOrcamento: false, jaLancado: false,
     }, alternativas: [] } }];
     renderInbox();
-    expect(await screen.findByText(/Despesa: LOJA DE CABOS/)).toBeInTheDocument();
+    expect(await screen.findByText('Despesa: LOJA DE CABOS')).toBeInTheDocument();
     expect(screen.queryByText(/É desta OS\?/)).not.toBeInTheDocument();
   });
 
@@ -407,7 +407,7 @@ describe('agrupado por favorecido', () => {
     renderInbox();
 
     await user.click(await screen.findByText(/Ver as 23 linhas/));
-    const item = await screen.findByText(/ABSURDAMENTE LONGO/);
+    const item = await screen.findByText('Despesa: EC *ESTABELECIMENTO COM NOME ABSURDAMENTE LONGO QUE NAO CABE NA LINHA SAO PAULO BRA');
     expect(item.className).toMatch(/truncate/);
   });
 
@@ -487,7 +487,7 @@ describe('agrupado por favorecido', () => {
     ];
     renderInbox();
     expect(await screen.findByText(/Alertas do vigilante/)).toBeInTheDocument();
-    expect(screen.getByText(/UNIFIQUE — R\$ 900,00/)).toBeInTheDocument();
+    expect(screen.getByText('Valor acima do padrão: UNIFIQUE — R$ 900,00 (costuma ser ~R$ 300,00)')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Ciente — tirar da lista/ })).toBeInTheDocument();
     // O alerta não entra na contagem do lote nem do grupo: continuam as 22 miúdas.
     expect(screen.getByText('22 propostas')).toBeInTheDocument();
@@ -563,8 +563,8 @@ describe('ações da linha', () => {
     // novo — o gestor recusaria a mesma linha para sempre.
     const user = userEvent.setup();
     renderInbox();
-    const botoes = await screen.findAllByRole('button', { name: /duplicata/i });
-    await user.click(botoes[0]);
+    await user.click(await screen.findByRole('button', { name: /Mais ações para Despesa: POSTO AGRICOPEL/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /duplicata/i }));
     expect(duplicataMock).toHaveBeenCalledWith(
       expect.objectContaining({ propostaId: 'p1', bankTransactionId: 't1' }),
     );
@@ -573,11 +573,27 @@ describe('ações da linha', () => {
   it('dá para ensinar uma regra a partir da linha que está na tela', async () => {
     const user = userEvent.setup();
     renderInbox();
-    const botoes = await screen.findAllByRole('button', { name: /regra a partir desta linha/i });
-    await user.click(botoes[0]);
+    await user.click(await screen.findByRole('button', { name: /Mais ações para Despesa: POSTO AGRICOPEL/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /regra a partir desta linha/i }));
     expect(regraMock).toHaveBeenCalledWith(
       expect.objectContaining({ set_category: 'Combustível e deslocamento' }),
     );
+  });
+
+  it('na linha só fica o Aprovar; descartar e duplicata esperam no menu, no fim', async () => {
+    // Eram quatro ícones lado a lado, com "Descartar" encostado em "Aprovar" e do mesmo
+    // tamanho (padrão AcoesDaLinha, pedido do dono de 23/09/2026).
+    const user = userEvent.setup();
+    renderInbox();
+    await screen.findByRole('button', { name: /Mais ações para Despesa: POSTO AGRICOPEL/i });
+    expect(screen.queryByRole('button', { name: /Descartar esta proposta/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /duplicata/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Mais ações para Despesa: POSTO AGRICOPEL/i }));
+    const itens = (await screen.findAllByRole('menuitem')).map((i) => i.textContent);
+    expect(itens).toEqual([
+      'Criar uma regra a partir desta linha', 'É duplicata — tirar da fila', 'Descartar esta proposta',
+    ]);
   });
 
   it('proposta vinda de regra se identifica como tal', async () => {
@@ -680,14 +696,14 @@ describe('entrada e saída convivendo na fila', () => {
     estadoDaFila.dados = [propostas[0], propostas[1], entrada];
     renderInbox();
     await user.click(await screen.findByRole('button', { name: /Entradas \(1\)/ }));
-    expect(await screen.findByText(/CRISLAINE/)).toBeInTheDocument();
+    expect(await screen.findByText('Receita: CRISLAINE REGINA CIOLI')).toBeInTheDocument();
     expect(screen.queryByText(/POSTO AGRICOPEL/)).not.toBeInTheDocument();
   });
 
   it('some quando só há um dos dois — filtro de uma opção é ruído', async () => {
     estadoDaFila.dados = [propostas[0], propostas[1]];
     renderInbox();
-    await screen.findByText(/POSTO AGRICOPEL/);
+    await screen.findByText('Despesa: POSTO AGRICOPEL LTDA');
     expect(screen.queryByRole('button', { name: /Entradas \(/ })).not.toBeInTheDocument();
   });
 
@@ -815,7 +831,8 @@ describe('serviço de terceiro pergunta para onde foi', () => {
     }];
     const user = userEvent.setup();
     renderInbox();
-    await user.click(await screen.findByRole('button', { name: /regra a partir desta linha/i }));
+    await user.click(await screen.findByRole('button', { name: /Mais ações para Receita: MARIA SILVA/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /regra a partir desta linha/i }));
     expect(regraMock).toHaveBeenCalledWith({
       match_type: 'document', match_value: '12345678901', direction: 'credit',
       set_client_id: 'c-joao', set_category: 'Serviços prestados',
@@ -832,7 +849,8 @@ describe('serviço de terceiro pergunta para onde foi', () => {
     }];
     const user = userEvent.setup();
     renderInbox();
-    await user.click(await screen.findByRole('button', { name: /regra a partir desta linha/i }));
+    await user.click(await screen.findByRole('button', { name: /Mais ações para Receita: PIX RECEBIDO/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /regra a partir desta linha/i }));
     expect(regraMock).not.toHaveBeenCalled();
   });
 });
