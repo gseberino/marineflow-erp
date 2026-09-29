@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Anchor, Loader2, Eye, EyeOff, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { mensagemDeErroDeAutenticacao } from '@/lib/auth-error';
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
@@ -38,8 +39,8 @@ export default function ResetPasswordPage() {
       if (error) throw error;
       setDone(true);
       setTimeout(() => navigate('/'), 2000);
-    } catch (err: any) {
-      toast.error(err.message || 'Erro ao redefinir senha');
+    } catch (err) {
+      toast.error(mensagemDeErroDeAutenticacao(err, 'Erro ao redefinir senha'));
     } finally {
       setLoading(false);
     }

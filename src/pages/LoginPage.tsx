@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Loader2, Eye, EyeOff, CheckCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { mensagemDeErroDeAutenticacao } from '@/lib/auth-error';
 
 export default function LoginPage() {
   const { signIn } = useAuth();
@@ -52,17 +53,8 @@ export default function LoginPage() {
     try {
       await signIn(email, password);
       navigate('/');
-    } catch (err: any) {
-      const msg = err?.message || '';
-      if (msg.includes('Invalid login credentials')) {
-        toast.error('Email ou senha incorretos');
-      } else if (msg.includes('Email not confirmed')) {
-        toast.error('Confirme seu email antes de entrar');
-      } else if (msg.includes('Too many requests')) {
-        toast.error('Muitas tentativas. Aguarde alguns minutos.');
-      } else {
-        toast.error(msg || 'Erro ao fazer login');
-      }
+    } catch (err) {
+      toast.error(mensagemDeErroDeAutenticacao(err, 'Erro ao fazer login'));
     } finally {
       setLoading(false);
     }
