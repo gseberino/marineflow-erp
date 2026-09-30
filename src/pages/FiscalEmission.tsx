@@ -46,7 +46,9 @@ import {
   tomadorDaNota, totalDaNota, itensDaNota, tipoDaNota,
   dataDaNota, naturezaDaNota, ehDevolucao, textoBuscavelDaNota,
   contaParaFaturamento,
+  prazoDeCancelamento,
 } from '@/lib/nota-fiscal-leitura';
+import { montarParcelas, intervaloDasParcelas, parcelasParaLancar as calcularParcelasParaLancar } from '@/lib/fiscal-parcelas';
 import { MultiFilterBar } from '@/components/MultiFilterBar';
 import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
@@ -638,7 +640,7 @@ export default function FiscalEmission() {
   /**
    * O plano de parcelas que a PROPRIA NOTA declarou, palavra por palavra.
    *
-   * O dialogo reconstruia as parcelas com buildSchedule(total, n, 1o vencimento,
+   * O dialogo reconstruia as parcelas com montarParcelas(total, n, 1o vencimento,
    * intervalo) -- uma aproximacao que so acerta quando o plano e perfeitamente regular.
    * Na NF-e 2/25 a nota diz 5.237,99 / 5.237,99 / 5.238,02 e a reconstrucao dava
    * 5.238,00 tres vezes: tres centavos de diferenca entre o titulo e o documento que o
@@ -1106,29 +1108,6 @@ export default function FiscalEmission() {
     setViewDoc(doc);
   };
 
-  /**
-   * O que ainda dá para fazer com esta nota, e até quando.
-   *
-   * A janela de 24h não é decoração: passada ela, a SEFAZ recusa o cancelamento e o
-   * caminho passa a ser emitir uma NF-e de devolução. Quem descobre isso na hora de
-   * cancelar já perdeu o prazo.
-   */
-  const prazosDaNota = (doc: any) => {
-    if (!doc || doc.status !== 'authorized') return null;
-    const bruta = doc.authorized_at || doc.provider_status?.sefaz?.authorized_at;
-    if (!bruta) return null;
-    const horas = (Date.now() - new Date(bruta).getTime()) / 3_600_000;
-    const restam = 24 - horas;
-    return {
-      horas,
-      dentroDoPrazo: restam > 0,
-      // Em horas enquanto faz sentido contar assim; em dias quando já passou.
-      texto: restam > 0
-        ? 'Faltam ' + Math.floor(restam) + 'h' + Math.round((restam % 1) * 60) + 'min para cancelar sem ônus.'
-        : 'O prazo de 24h para cancelamento venceu há ' + Math.floor(horas / 24) + ' dia(s).',
-    };
-  };
-
   // "Gerar devolução" a partir de uma nota AUTORIZADA: cria uma NF-e de devolução
   // de venda (entrada, finNFe=4, CFOP 1202/2202) espelhando exatamente a nota
   // original (itens, impostos, cliente) e referenciando-a POR ITEM (VC02-14:
@@ -1496,7 +1475,7 @@ export default function FiscalEmission() {
   const totalDespesas = activeItems.reduce((s, it) => s + (it.other_expenses || 0), 0);
   // IPI devolvido (vIPIDevol) — na devolução do Simples ele soma "por fora" ao
   // TOTAL DA NOTA (vNF, regra W16-10), mas NÃO à base das parcelas/net_amount.
-  // Por isso fica separado de `total` (que alimenta buildSchedule): o total exibido
+  // Por isso fica separado de `total` (que alimenta montarParcelas): o total exibido
   // é grandTotal; as duplicatas continuam usando `total`.
   const totalIpiDevol = activeItems.reduce(
     (s, it) => s + Math.round((it.ipiUnit || 0) * (it.quantity || 0) * 100) / 100, 0,
@@ -1545,7 +1524,7 @@ export default function FiscalEmission() {
     // Plano de pagamento (à vista/parcelado) definido na emissão — só faz
     // sentido em naturezas com pagamento (venda); vira os recebíveis depois.
     payment_terms: (selectedNature.hasPayment && payMode === 'parcelado' && payFirstDue)
-      ? { mode: 'parcelado', method: '14', installments: buildSchedule(total, payN, payFirstDue, payInterval, '14') }
+      ? { mode: 'parcelado', method: '14', installments: montarParcelas(total, payN, payFirstDue, payInterval, '14') }
       : (selectedNature.hasPayment ? { mode: 'avista', method: paymentMethod, installments: null } : null),
     presence_indicator: presenceIndicator,
     consumer_final: consumerFinal,
@@ -1962,23 +1941,6 @@ export default function FiscalEmission() {
     await handleSendEmail(doc, def);
   };
 
-  // Monta o cronograma de parcelas: divide o total em N (a última parcela recebe
-  // o arredondamento para o somatório fechar exato) e distribui os vencimentos a
-  // partir da 1ª data, de X em X dias.
-  const buildSchedule = (total: number, n: number, firstDue: string, intervalDays: number, method: string) => {
-    const per = Math.floor((total / n) * 100) / 100;
-    const parcels: Array<{ due_date: string; amount: number; method: string }> = [];
-    let acc = 0;
-    for (let i = 0; i < n; i++) {
-      const amount = i === n - 1 ? Math.round((total - acc) * 100) / 100 : per;
-      acc += amount;
-      const d = new Date(`${firstDue}T00:00:00`);
-      d.setDate(d.getDate() + i * intervalDays);
-      parcels.push({ due_date: d.toISOString().slice(0, 10), amount, method });
-    }
-    return parcels;
-  };
-
   const openSettleDialog = (doc: any) => {
     setSettleTarget(doc);
     setSettleAjustado(false);
@@ -1997,9 +1959,7 @@ export default function FiscalEmission() {
       setSettleMode('parcelado');
       setSettleN(inst.length);
       setSettleFirstDue(inst[0].due_date);
-      const d0 = new Date(inst[0].due_date + 'T00:00:00').getTime();
-      const d1 = new Date(inst[1].due_date + 'T00:00:00').getTime();
-      setSettleInterval(Math.max(1, Math.round((d1 - d0) / 86400000)));
+      setSettleInterval(intervaloDasParcelas(inst));
       setSettleMethod(metodo);
       return;
     }
@@ -2023,14 +1983,16 @@ export default function FiscalEmission() {
    * altera parcelas, vencimento, intervalo ou forma de pagamento, a conta passa a ser
    * recalculada a partir do que ele escolheu -- e a tela avisa que isso diverge da nota.
    */
-  const parcelasParaLancar = (): Array<{ due_date: string; amount: number; method: string }> | null => {
-    if (settleMode !== 'parcelado') return null;
-    if (!settleAjustado && settleParcelasDaNota && settleParcelasDaNota.length > 0) {
-      return settleParcelasDaNota;
-    }
-    if (settleN < 1 || !settleFirstDue) return null;
-    return buildSchedule(totalDaNota(settleTarget), settleN, settleFirstDue, settleInterval, settleMethod);
-  };
+  const parcelasParaLancar = () => calcularParcelasParaLancar({
+    modo: settleMode === 'parcelado' ? 'parcelado' : 'avista',
+    ajustado: settleAjustado,
+    parcelasDaNota: settleParcelasDaNota,
+    total: totalDaNota(settleTarget),
+    n: settleN,
+    primeiroVencimento: settleFirstDue,
+    intervaloDias: settleInterval,
+    metodo: settleMethod,
+  });
 
   // "Baixar estoque + gerar recebível(is)" (opt-in) numa NF-e AVULSA autorizada.
   // À vista → 1 recebível hoje; parcelado → 1 recebível por parcela (vencimentos).
@@ -2873,7 +2835,7 @@ export default function FiscalEmission() {
           {/* Os dados que só existem depois da autorização e que o formulário não tem
               onde mostrar: chave, protocolo e o relógio do cancelamento. */}
           {viewDoc && (() => {
-            const prazo = prazosDaNota(viewDoc);
+            const prazo = prazoDeCancelamento(viewDoc);
             const st = STATUS_MAP[viewDoc.status] ?? STATUS_MAP.draft;
             return (
               <div className="rounded-lg border bg-muted/40 p-3 text-xs space-y-1.5">
@@ -3310,7 +3272,7 @@ export default function FiscalEmission() {
                         </div>
                       </div>
                       {(() => {
-                        const sched = payN >= 1 && payFirstDue ? buildSchedule(total, payN, payFirstDue, payInterval, paymentMethod) : [];
+                        const sched = payN >= 1 && payFirstDue ? montarParcelas(total, payN, payFirstDue, payInterval, paymentMethod) : [];
                         return (
                           <div className="rounded-md border bg-muted/30 max-h-36 overflow-y-auto">
                             <table className="w-full text-xs">

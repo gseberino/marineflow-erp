@@ -232,3 +232,35 @@ export function textoBuscavelDaNota(doc: unknown): string {
     .join(' ')
     .toLowerCase();
 }
+
+/**
+ * Prazo de 24 h para cancelar a nota autorizada sem ônus. `null` se a nota não está
+ * autorizada ou não tem hora de autorização.
+ *
+ * A janela de 24h não é decoração: passada ela, a SEFAZ recusa o cancelamento e o caminho
+ * passa a ser emitir uma NF-e de devolução. Quem descobre isso na hora de cancelar já perdeu
+ * o prazo.
+ *
+ * Extraído de FiscalEmission.tsx (D33, 30/09/2026). Os minutos eram arredondados à parte das
+ * horas e podiam mostrar "Faltam 3h60min"; agora saem da conta em minutos inteiros.
+ */
+export function prazoDeCancelamento(
+  doc: unknown,
+  agora: number = Date.now(),
+): { horas: number; dentroDoPrazo: boolean; texto: string } | null {
+  const d = doc as { status?: string; authorized_at?: string | null; provider_status?: Payload | null } | null;
+  if (!d || d.status !== 'authorized') return null;
+  const bruta = d.authorized_at || d.provider_status?.sefaz?.authorized_at;
+  if (!bruta) return null;
+  const horas = (agora - new Date(bruta).getTime()) / 3_600_000;
+  const restam = 24 - horas;
+  const minutos = Math.floor(restam * 60);
+  return {
+    horas,
+    dentroDoPrazo: restam > 0,
+    // Em horas enquanto faz sentido contar assim; em dias quando já passou.
+    texto: restam > 0
+      ? 'Faltam ' + Math.floor(minutos / 60) + 'h' + (minutos % 60) + 'min para cancelar sem ônus.'
+      : 'O prazo de 24h para cancelamento venceu há ' + Math.floor(horas / 24) + ' dia(s).',
+  };
+}

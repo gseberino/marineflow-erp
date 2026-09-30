@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   tomadorDaNota, totalDaNota, itensDaNota, tipoDaNota, resumirNota,
   dataDaNota, naturezaDaNota, ehDevolucao, textoBuscavelDaNota,
-  contaParaFaturamento,
+  contaParaFaturamento, prazoDeCancelamento,
 } from './nota-fiscal-leitura';
 
 /**
@@ -298,5 +298,34 @@ describe('o que conta como faturamento', () => {
       .reduce((s, d) => s + totalDaNota(d), 0);
     expect(Math.round(somadas * 100) / 100).toBe(2800.38);
     expect(36214.00 - 33413.62).toBeCloseTo(2800.38, 2);
+  });
+});
+
+describe('prazoDeCancelamento', () => {
+  const autorizada = { status: 'authorized', authorized_at: '2026-09-30T10:00:00-03:00' };
+  const h = (x: number) => Date.parse('2026-09-30T13:00:00Z') + x * 3_600_000; // 13:00Z = 10:00 de Brasília
+
+  it('conta horas e minutos inteiros até as 24 h', () => {
+    expect(prazoDeCancelamento(autorizada, h(2.5))?.texto).toBe('Faltam 21h30min para cancelar sem ônus.');
+  });
+
+  it('nunca mostra 60 minutos (a conta antiga dava \'3h60min\' com 3,999 h restantes)', () => {
+    const r = prazoDeCancelamento(autorizada, h(24 - 3.9995))!;
+    expect(r.dentroDoPrazo).toBe(true);
+    expect(r.texto).toBe('Faltam 3h59min para cancelar sem ônus.');
+  });
+
+  it('depois das 24 h, conta em dias', () => {
+    const r = prazoDeCancelamento(autorizada, h(24 * 3 + 1))!;
+    expect(r.dentroDoPrazo).toBe(false);
+    expect(r.texto).toBe('O prazo de 24h para cancelamento venceu há 3 dia(s).');
+  });
+
+  it('só nota autorizada, com hora de autorização (coluna ou SEFAZ)', () => {
+    expect(prazoDeCancelamento({ status: 'rejected', authorized_at: '2026-09-30T10:00:00-03:00' })).toBeNull();
+    expect(prazoDeCancelamento({ status: 'authorized' })).toBeNull();
+    expect(prazoDeCancelamento(null)).toBeNull();
+    const pelaSefaz = { status: 'authorized', provider_status: { sefaz: { authorized_at: '2026-09-30T10:00:00-03:00' } } };
+    expect(prazoDeCancelamento(pelaSefaz, h(1))?.texto).toBe('Faltam 23h0min para cancelar sem ônus.');
   });
 });
