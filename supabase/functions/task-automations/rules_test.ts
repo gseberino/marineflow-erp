@@ -569,3 +569,10 @@ Deno.test("isResolved r19: sem validade no orçamento, usa o padrão da empresa"
     "Validade alterada (agora até 25/01/2026)",
   );
 });
+
+Deno.test("R15: confirmado só vale para o horário que o cliente confirmou (remarcou → vale de novo pedir)", async () => {
+  const { confirmadoParaAData } = await import("./rules.ts");
+  assertEquals(confirmadoParaAData("2026-10-02T12:00:00+00:00", "2026-10-02T12:00:00.000Z"), true);
+  assertEquals(confirmadoParaAData("2026-10-02T12:00:00+00:00", "2026-10-03T12:00:00.000Z"), false);
+  assertEquals(confirmadoParaAData(null, "2026-10-02T12:00:00.000Z"), false);
+});

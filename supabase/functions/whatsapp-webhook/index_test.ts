@@ -90,3 +90,12 @@ Deno.test("sem o secret configurado, rejeita tudo com 500 (fail-closed)", async 
     Deno.env.set("EVOLUTION_WEBHOOK_TOKEN", anterior);
   }
 });
+
+Deno.test("confirmação do agendamento: só a mensagem RECEBIDA e curta chega à RPC do SIM", async () => {
+  const fonte = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
+  const bloco = fonte.slice(fonte.indexOf("if (!event.fromMe && body) {"), fonte.indexOf("if (leadId) {"));
+  assertStringIncludes(bloco, "registrar_confirmacao_do_cliente");
+  assertStringIncludes(bloco, "body.trim().length <= 60");
+  // Fire-and-forget: a RPC nunca derruba nem atrasa o webhook.
+  assertStringIncludes(bloco, ".then(() => {}, () => {})");
+});

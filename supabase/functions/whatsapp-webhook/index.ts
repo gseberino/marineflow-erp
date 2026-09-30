@@ -411,6 +411,13 @@ export async function handler(req: Request): Promise<Response> {
       // e vai para o dono (waiting_reply). A resposta é DADO, não comando — a RPC só registra.
       admin.rpc("followup_registrar_resposta", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
         .then(() => {}, () => {});
+      // Confirmação do agendamento (30/09/2026): o "SIM" de quem recebeu o pedido da Agenda. A RPC
+      // só confirma concordância curta ("sim", "confirmo", 👍) de cliente com pedido nas últimas
+      // 72 h; "sim, mas preciso remarcar" não confirma. Frase longa nem chega a ela.
+      if (body.trim().length <= 60) {
+        admin.rpc("registrar_confirmacao_do_cliente", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
+          .then(() => {}, () => {});
+      }
     }
 
     if (leadId) {

@@ -456,6 +456,15 @@ const r14: Rule = {
   },
 };
 
+/**
+ * O cliente confirmou ESTE horário? (registrar_confirmacao_do_cliente grava o scheduled_start_at
+ * confirmado; remarcou → a confirmação antiga não vale para a data nova.) 30/09/2026.
+ */
+export function confirmadoParaAData(confirmadoPara: string | null | undefined, agendadoPara: string | null | undefined): boolean {
+  if (!confirmadoPara || !agendadoPara) return false;
+  return new Date(confirmadoPara).getTime() === new Date(agendadoPara).getTime();
+}
+
 // R15: a alternativa ESCOLHIDA no lugar do envio automático ao cliente (R9).
 // Em vez de o sistema mandar WhatsApp sozinho na véspera, ele cria uma TAREFA sua:
 // "confirmar com fulano o atendimento de amanhã". Você abre a agenda, vê a lista do dia e
@@ -475,7 +484,7 @@ const r15: Rule = {
     const limite = new Date(Date.now() + 48 * 3600000);
     const { data } = await db
       .from('service_orders')
-      .select('id, service_order_number, scheduled_start_at, client_id, clients(name, phone, whatsapp, opt_out_whatsapp)')
+      .select('id, service_order_number, scheduled_start_at, client_id, client_confirmed_for, clients(name, phone, whatsapp, opt_out_whatsapp)')
       .eq('status', 'scheduled')
       .gte('scheduled_start_at', agora.toISOString())
       .lte('scheduled_start_at', limite.toISOString())
@@ -483,6 +492,8 @@ const r15: Rule = {
     return (data || [])
       // Sem telefone não há o que confirmar — a tarefa só geraria ruído.
       .filter((o: any) => String(o.clients?.whatsapp || o.clients?.phone || '').replace(/\D/g, '').length >= 10)
+      // Já confirmado para ESTA data (respondeu SIM): não há o que pedir.
+      .filter((o: any) => !confirmadoParaAData(o.client_confirmed_for, o.scheduled_start_at))
       .map((o: any) => {
         const dia = String(o.scheduled_start_at).slice(0, 10);
         const hora = new Date(o.scheduled_start_at).toLocaleTimeString('pt-BR', {
@@ -501,7 +512,8 @@ const r15: Rule = {
           // o aviso, para você não tentar o WhatsApp e esbarrar no bloqueio.
           notes: o.clients?.opt_out_whatsapp
             ? '⚠️ Este cliente pediu para não receber WhatsApp — confirme por telefone.'
-            : 'Use o botão de confirmação na Agenda para mandar a mensagem — nada é enviado sozinho.',
+            : 'Use "Pedir confirmação" neste cartão: o cliente recebe a mensagem pedindo SIM e, quando '
+              + 'responde, a OS fica confirmada e esta tarefa se fecha sozinha. Nada é enviado sem o seu clique.',
         };
       });
   },
@@ -509,11 +521,12 @@ const r15: Rule = {
     const id = entityIdFromKey(task.automation_key);
     const dia = task.automation_key.split(':')[3];
     const { data } = await db.from('service_orders')
-      .select('status, scheduled_start_at').eq('id', id).maybeSingle();
+      .select('status, scheduled_start_at, client_confirmed_for').eq('id', id).maybeSingle();
     if (!data) return 'OS não existe mais';
     if (data.status !== 'scheduled') return `OS mudou para ${data.status}`;
     if (!data.scheduled_start_at) return 'OS perdeu o agendamento';
     if (String(data.scheduled_start_at).slice(0, 10) !== dia) return 'Atendimento foi remarcado';
+    if (confirmadoParaAData(data.client_confirmed_for, data.scheduled_start_at)) return 'Cliente confirmou pelo WhatsApp';
     // Passou a hora: confirmar depois não serve para nada.
     if (new Date(data.scheduled_start_at) < new Date()) return 'Atendimento já aconteceu';
     return null;
