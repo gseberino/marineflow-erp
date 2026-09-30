@@ -35,6 +35,38 @@ async function resolverCentroDeCusto(ctx: ToolCtx, dito: string): Promise<{ id: 
 }
 
 /**
+ * Categoria dita pelo usuário → o nome exato do plano de contas (29/09/2026, "sim" do dono: o
+ * assistente troca a categoria ao aprovar, como a tela). A finance-review grava o texto que
+ * receber, então o nome se resolve aqui, só entre as ativas do tipo da proposta. Categoria
+ * restrita (pró-labore, retirada…) só o administrador escolhe — a mesma regra da tela e da RLS.
+ */
+async function resolverCategoriaDita(
+  ctx: ToolCtx,
+  dito: string,
+  tipo: "payable" | "receivable",
+): Promise<{ nome: string } | { error: string; opcoes?: string[] }> {
+  const { data } = await ctx.sb
+    .from("financial_categories")
+    .select("name, sensitive")
+    .eq("type", tipo)
+    .eq("active", true)
+    .order("name");
+  const ativas = (data ?? []) as Array<{ name: string; sensitive: boolean | null }>;
+  const alvo = comparavel(dito);
+  const achada = ativas.find((c) => comparavel(c.name) === alvo);
+  if (!achada) {
+    return {
+      error: `Não há categoria de ${tipo === "payable" ? "saída" : "entrada"} chamada "${dito}". Pergunte ao usuário qual destas é.`,
+      opcoes: ativas.filter((c) => !c.sensitive || ctx.userRole === "admin").map((c) => c.name),
+    };
+  }
+  if (achada.sensitive && ctx.userRole !== "admin") {
+    return { error: `"${achada.name}" é categoria restrita: só o administrador lança nela.` };
+  }
+  return { nome: achada.name };
+}
+
+/**
  * Quem pode operar o financeiro pelo agente.
  *
  * NÃO usar NON_TECHNICIAN_ROLES aqui: ele inclui seller e external_seller, e a RLS destas
@@ -846,7 +878,8 @@ export const financeRulesTools: ToolDef[] = [
       "já existe, quando o usuário escolheu um vínculo. Linha com vínculo sugerido é recusada pelo " +
       "servidor sem a escolha: pergunte e passe em `vinculos`. Serviço de terceiro (servico_de_terceiro na " +
       "lista) exige para onde foi e o que foi feito: pergunte e passe `destino` (cliente + os, ou empresa + " +
-      "centro_de_custo) e `observacao`. Só use quando o usuário confirmar quais aprovar.",
+      "centro_de_custo) e `observacao`. Se o usuário mandar trocar a categoria sugerida, passe a nova em " +
+      "`categoria` (o nome dito; o sistema confere no plano de contas). Só use quando o usuário confirmar quais aprovar.",
     input_schema: {
       type: "object",
       properties: {
@@ -881,6 +914,12 @@ export const financeRulesTools: ToolDef[] = [
         oc: {
           type: "object",
           description: "Por proposta: o oc_id que o usuário confirmou que este pagamento quita, ou \"nenhuma\".",
+          additionalProperties: { type: "string" },
+        },
+        categoria: {
+          type: "object",
+          description: "Por proposta: a categoria que o usuário mandou usar NO LUGAR da sugerida (ex.: \"Alimentação de campo\"). "
+            + "Só quando ele pedir a troca; nome fora do plano de contas volta como pergunta, com as opções.",
           additionalProperties: { type: "string" },
         },
       },
@@ -925,6 +964,26 @@ export const financeRulesTools: ToolDef[] = [
       }
       for (const [id, v] of Object.entries((args.observacao ?? {}) as Record<string, string>)) {
         if (String(v ?? "").trim()) de(id).notes = String(v).trim().slice(0, 1000);
+      }
+      // Troca de categoria pedida pelo usuário: o tipo (saída/entrada) vem da própria proposta.
+      const categorias = Object.entries((args.categoria ?? {}) as Record<string, string>)
+        .filter(([, v]) => String(v ?? "").trim());
+      if (categorias.length) {
+        const { data: props } = await ctx.sb
+          .from("finance_review_queue")
+          .select("id, kind")
+          .in("id", categorias.map(([id]) => id));
+        const tipoDe = new Map(((props ?? []) as any[]).map((p) => [String(p.id), String(p.kind)]));
+        for (const [id, v] of categorias) {
+          const kind = tipoDe.get(id);
+          if (!kind) return { error: `A proposta ${id} não está na caixa de entrada.` };
+          if (kind !== "create_payable" && kind !== "create_receivable") {
+            return { error: "Esta proposta não tem categoria para trocar (é transferência entre contas)." };
+          }
+          const r = await resolverCategoriaDita(ctx, String(v), kind === "create_receivable" ? "receivable" : "payable");
+          if ("error" in r) return r;
+          de(id).category = r.nome;
+        }
       }
       return await chamarFinanceReview(ctx, { action: "approve", ids: args.ids, overrides });
     },

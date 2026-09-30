@@ -261,3 +261,81 @@ Deno.test("regra de entrada de aporte do sócio: sem cliente, sem perguntar clie
     globalThis.fetch = original;
   }
 });
+
+/* Trocar a categoria ao aprovar pelo WhatsApp (29/09/2026, "sim" do dono): o nome dito vira o
+   nome exato do plano de contas, do tipo da proposta; categoria restrita só para o administrador. */
+function sbComPropostasECategorias(
+  propostas: Array<{ id: string; kind: string }>,
+  categorias: Array<{ name: string; type: string; sensitive?: boolean }>,
+) {
+  return {
+    from: (tabela: string) => {
+      const filtros: Record<string, unknown> = {};
+      const b: any = {
+        select: () => b,
+        eq: (c: string, v: unknown) => { filtros[c] = v; return b; },
+        in: (_c: string, ids: string[]) => Promise.resolve({ data: propostas.filter((p) => ids.includes(p.id)), error: null }),
+        order: () => Promise.resolve({
+          data: tabela === "financial_categories"
+            ? categorias.filter((c) => c.type === filtros.type).map((c) => ({ name: c.name, sensitive: !!c.sensitive }))
+            : [],
+          error: null,
+        }),
+      };
+      return b;
+    },
+  };
+}
+
+Deno.test("aprovar troca a categoria pelo nome dito, conferido no plano de contas", async () => {
+  Deno.env.set("SUPABASE_URL", "https://exemplo.supabase.co");
+  const original = globalThis.fetch;
+  let corpo: any = null;
+  globalThis.fetch = ((_url: string, init?: RequestInit) => {
+    corpo = JSON.parse(String(init?.body ?? "{}"));
+    return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  }) as typeof fetch;
+  const sb = sbComPropostasECategorias(
+    [{ id: "p1", kind: "create_payable" }, { id: "p2", kind: "create_receivable" }, { id: "p3", kind: "internal_transfer" }],
+    [
+      { name: "Alimentação de campo", type: "payable" },
+      { name: "Pró-labore", type: "payable", sensitive: true },
+      { name: "Receita de serviços", type: "receivable" },
+    ],
+  );
+  try {
+    const admin = { sb, admin: {}, userId: "u", userRole: "admin" as const, jwt: "jwt", appOrigin: "", settings: {} };
+    await tool("aprovar_propostas_de_lancamento").execute(
+      { ids: ["p1", "p2"], categoria: { p1: "alimentacao de CAMPO", p2: "Receita de serviços" } }, admin as never);
+    assertEquals(corpo.overrides, { p1: { category: "Alimentação de campo" }, p2: { category: "Receita de serviços" } });
+
+    // Nome fora do plano volta como pergunta, com as opções do tipo certo.
+    const fora = await tool("aprovar_propostas_de_lancamento").execute(
+      { ids: ["p1"], categoria: { p1: "Lanche" } }, admin as never) as any;
+    assertEquals(typeof fora.error, "string");
+    assertEquals(fora.opcoes, ["Alimentação de campo", "Pró-labore"]);
+
+    // Categoria de saída numa entrada não existe para ela.
+    const tipoErrado = await tool("aprovar_propostas_de_lancamento").execute(
+      { ids: ["p2"], categoria: { p2: "Alimentação de campo" } }, admin as never) as any;
+    assertEquals(typeof tipoErrado.error, "string");
+
+    // Transferência não tem categoria para trocar.
+    const transf = await tool("aprovar_propostas_de_lancamento").execute(
+      { ids: ["p3"], categoria: { p3: "Alimentação de campo" } }, admin as never) as any;
+    assertEquals(typeof transf.error, "string");
+
+    // Restrita: o financeiro não escolhe, nem a vê nas opções.
+    corpo = null;
+    const financeiro = { ...admin, userRole: "financial" as const };
+    const restrita = await tool("aprovar_propostas_de_lancamento").execute(
+      { ids: ["p1"], categoria: { p1: "Pró-labore" } }, financeiro as never) as any;
+    assertEquals(typeof restrita.error, "string");
+    assertEquals(corpo, null);
+    const opcoesDoFinanceiro = await tool("aprovar_propostas_de_lancamento").execute(
+      { ids: ["p1"], categoria: { p1: "Lanche" } }, financeiro as never) as any;
+    assertEquals(opcoesDoFinanceiro.opcoes, ["Alimentação de campo"]);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
