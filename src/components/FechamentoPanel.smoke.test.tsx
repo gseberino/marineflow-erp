@@ -5,7 +5,7 @@
 // somando em vez de subtrair). O que decide se dá para fechar o mês é se cada conta
 // confere agora — e é isso que este teste fixa.
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 import { FechamentoPanel } from './FechamentoPanel';
@@ -35,6 +35,11 @@ vi.mock('@/hooks/use-fechamento', () => ({
   useConferenciasDeSaldo: () => ({ data: conferencias }),
   useChecklistDoMes: () => ({ isLoading: false, data: checklist.atual }),
   ROTULO_DA_ACAO: { cancelou_lancamento: 'Cancelou lançamento' },
+}));
+
+const demonstrativo = vi.hoisted(() => ({ gerar: vi.fn() }));
+vi.mock('@/hooks/use-demonstrativo-do-mes', () => ({
+  useDemonstrativoDoMes: () => ({ gerar: demonstrativo.gerar, gerando: false }),
 }));
 
 vi.mock('@/hooks/use-bank-connections', () => ({
@@ -79,5 +84,18 @@ describe('FechamentoPanel — conferência de saldo', () => {
     expect(screen.getByText(/\(aviso\)/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Fechar [a-zç]+\/\d{4}$/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Fechar mesmo assim…' })).toBeInTheDocument();
+  });
+});
+
+describe('FechamentoPanel — demonstrativo do mês', () => {
+  it('o botão gera o demonstrativo do mês escolhido, dizendo se está fechado', () => {
+    renderPainel();
+    const botao = screen.getByRole('button', { name: /Demonstrativo de .+ \(PDF\)/ });
+    fireEvent.click(botao);
+    expect(demonstrativo.gerar).toHaveBeenCalledTimes(1);
+    const [ano, mes, fechado] = demonstrativo.gerar.mock.calls[0];
+    expect(typeof ano).toBe('number');
+    expect(mes).toBeGreaterThanOrEqual(1);
+    expect(fechado).toBe(false);
   });
 });

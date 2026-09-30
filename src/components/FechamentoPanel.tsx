@@ -23,7 +23,8 @@ import {
   useTrilhaDeConciliacao, useConferenciasDeSaldo, useChecklistDoMes, ROTULO_DA_ACAO,
 } from '@/hooks/use-fechamento';
 import { useBankConnections } from '@/hooks/use-bank-connections';
-import { Lock, LockOpen, ScrollText, Scale, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import { useDemonstrativoDoMes } from '@/hooks/use-demonstrativo-do-mes';
+import { Lock, LockOpen, ScrollText, Scale, AlertTriangle, CheckCircle2, XCircle, FileText } from 'lucide-react';
 
 const MESES = [
   'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
@@ -49,6 +50,7 @@ export function FechamentoPanel() {
   const [assimMesmo, setAssimMesmo] = useState(false);
   const [motivoPendencia, setMotivoPendencia] = useState('');
   const checklist = useChecklistDoMes(ano, mes);
+  const demonstrativo = useDemonstrativoDoMes();
 
   const { data: conexoes = [] } = useBankConnections();
 
@@ -121,6 +123,16 @@ export function FechamentoPanel() {
           >
             <Lock className="mr-2 h-4 w-4" />
             Fechar {MESES[mes - 1]}/{ano}
+          </Button>
+          {/* Para conferir no papel antes (ou depois) de fechar — pedido do dono, 29/09/2026. */}
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={demonstrativo.gerando}
+            onClick={() => demonstrativo.gerar(ano, mes, periodos.some((p) => p.ano === ano && p.mes === mes && !p.reaberto_em))}
+          >
+            <FileText className="mr-2 h-4 w-4" />
+            {demonstrativo.gerando ? 'Gerando…' : `Demonstrativo de ${MESES[mes - 1]} (PDF)`}
           </Button>
         </div>
 
