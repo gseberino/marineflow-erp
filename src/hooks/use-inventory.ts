@@ -110,39 +110,22 @@ export function useAdjustStock() {
       reason: string;
       notes?: string;
     }) => {
-      const { data: product, error: pErr } = await supabase
-        .from('products')
-        .select('stock_quantity')
-        .eq('id', input.product_id)
-        .single();
-      if (pErr) throw new Error('Produto não encontrado: ' + pErr.message);
-
-      const current = product.stock_quantity ?? 0;
-      const delta = input.new_quantity - current;
-
-      const { error: uErr } = await supabase
-        .from('products')
-        .update({ stock_quantity: input.new_quantity })
-        .eq('id', input.product_id);
-      if (uErr) throw new Error('Erro ao atualizar estoque: ' + uErr.message);
-
-      const { error: mErr } = await supabase
-        .from('inventory_movements')
-        .insert({
-          product_id: input.product_id,
-          movement_type: 'manual_adjustment',
-          quantity_delta: delta,
-          reference_type: 'manual_adjustment',
-          notes: input.reason + (input.notes ? ': ' + input.notes : ''),
-        });
-      if (mErr) throw new Error('Erro ao registrar movimento: ' + mErr.message);
+      // Fase E (30/09/2026): o saldo só muda por movimento. A função do banco lê o saldo atual
+      // pela soma dos movimentos, com o produto travado, e grava o ajuste numa transação só.
+      const { data, error } = await supabase.rpc('ajustar_estoque' as never, {
+        p_produto: input.product_id,
+        p_nova_quantidade: input.new_quantity,
+        p_motivo: input.reason + (input.notes ? ': ' + input.notes : ''),
+      } as never);
+      if (error) throw new Error('Erro ao ajustar estoque: ' + error.message);
+      const r = data as unknown as { anterior: number; nova: number };
 
       writeAuditLog({
         table_name: 'products',
         record_id: input.product_id,
         action: 'update',
-        previous_value: { stock_quantity: current },
-        new_value: { stock_quantity: input.new_quantity },
+        previous_value: { stock_quantity: r.anterior },
+        new_value: { stock_quantity: r.nova },
         reason: input.reason,
       });
     },
@@ -164,32 +147,14 @@ export function useAddStockEntry() {
       unit_cost?: number;
       notes?: string;
     }) => {
-      const { data: product, error: pErr } = await supabase
-        .from('products')
-        .select('stock_quantity')
-        .eq('id', input.product_id)
-        .single();
-      if (pErr) throw new Error('Produto não encontrado: ' + pErr.message);
-
-      const newQty = (product.stock_quantity ?? 0) + input.quantity;
-
-      const { error: uErr } = await supabase
-        .from('products')
-        .update({ stock_quantity: newQty })
-        .eq('id', input.product_id);
-      if (uErr) throw new Error('Erro ao atualizar estoque: ' + uErr.message);
-
-      const { error: mErr } = await supabase
-        .from('inventory_movements')
-        .insert({
-          product_id: input.product_id,
-          movement_type: 'purchase',
-          quantity_delta: input.quantity,
-          unit_cost_snapshot: input.unit_cost ?? null,
-          reference_type: 'manual_entry',
-          notes: input.notes || null,
-        });
-      if (mErr) throw new Error('Erro ao registrar movimento: ' + mErr.message);
+      // Fase E: a entrada é um movimento; o saldo sobe pela soma (função do banco, uma transação).
+      const { error } = await supabase.rpc('entrada_de_estoque' as never, {
+        p_produto: input.product_id,
+        p_quantidade: input.quantity,
+        p_custo: input.unit_cost ?? null,
+        p_notas: input.notes || null,
+      } as never);
+      if (error) throw new Error('Erro ao registrar entrada: ' + error.message);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['inventory'] });

@@ -248,22 +248,17 @@ export const productTools: ToolDef[] = [
       if (blocked) return blocked;
       const { admin, userId } = ctx;
       const { product_id, new_quantity, reason } = args;
-      const { data: prod } = await admin.from("products").select("stock_quantity").eq("id", product_id).single();
-      const delta = new_quantity - (prod?.stock_quantity || 0);
-
-      const { error: updateErr } = await admin.from("products").update({ stock_quantity: new_quantity }).eq("id", product_id);
-      if (updateErr) throw updateErr;
-
-      await admin.from("inventory_movements").insert({
-        product_id,
-        quantity_delta: delta,
-        movement_type: "manual_adjustment",
-        notes: reason,
-        created_by: userId,
-        adjusted_by: userId,
+      // Fase E (30/09/2026): o saldo só muda por movimento. A função do banco calcula o delta pela
+      // soma dos movimentos, com o produto travado, e grava quem fez (p_autor = app_users.id).
+      const { data, error } = await admin.rpc("ajustar_estoque", {
+        p_produto: product_id,
+        p_nova_quantidade: new_quantity,
+        p_motivo: reason,
+        p_autor: userId,
       });
+      if (error) return { error: `Erro ao ajustar estoque: ${error.message}` };
 
-      return { ok: true, new_quantity };
+      return { ok: true, new_quantity, anterior: data?.anterior, delta: data?.delta };
     },
   },
   {
@@ -429,21 +424,17 @@ export const productTools: ToolDef[] = [
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
-      const { admin } = ctx;
-      const { data: product, error: pErr } = await admin.from("products").select("stock_quantity").eq("id", args.product_id).single();
-      if (pErr) return { error: `Produto não encontrado: ${pErr.message}` };
-      const newQty = (product?.stock_quantity ?? 0) + args.quantity;
-      const { error: uErr } = await admin.from("products").update({ stock_quantity: newQty }).eq("id", args.product_id);
-      if (uErr) return { error: `Erro ao atualizar estoque: ${uErr.message}` };
-      const { error: mErr } = await admin.from("inventory_movements").insert({
-        product_id: args.product_id,
-        movement_type: "purchase",
-        quantity_delta: args.quantity,
-        unit_cost_snapshot: args.unit_cost ?? null,
-        reference_type: "manual_entry",
-        notes: args.notes || null,
+      const { admin, userId } = ctx;
+      // Fase E: a entrada é um movimento; o saldo sobe pela soma (função do banco, uma transação).
+      const { data, error } = await admin.rpc("entrada_de_estoque", {
+        p_produto: args.product_id,
+        p_quantidade: args.quantity,
+        p_custo: args.unit_cost ?? null,
+        p_notas: args.notes || null,
+        p_autor: userId,
       });
-      if (mErr) return { error: `Erro ao registrar movimento: ${mErr.message}` };
+      if (error) return { error: `Erro ao registrar entrada: ${error.message}` };
+      const newQty = data?.nova;
       return { ok: true, new_quantity: newQty };
     },
   },

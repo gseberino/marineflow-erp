@@ -193,16 +193,28 @@ export function useImportRows() {
           }
           
           if (movementInserts.length > 0) {
-            try {
-              await supabase.from('inventory_movements').insert(movementInserts);
-            } catch {
-              // Non-critical: inventory movement logging failed
-            }
+            // O saldo é a soma dos movimentos (fase E): sem este movimento o saldo da planilha
+            // se perde no próximo ajuste. O supabase-js devolve o erro, não lança.
+            const { error: mErr } = await supabase.from('inventory_movements').insert(movementInserts);
+            if (mErr) throw new Error('Produtos importados, mas o saldo inicial não foi registrado: ' + mErr.message);
           }
         }
         for (const u of updates) {
-          const typedData = u.data as Record<string, string | number | boolean | null>;
-          await supabase.from('products').update(typedData as any).eq('id', u.id);
+          // Fase E: o saldo da planilha não é gravado direto no produto (o banco recusa); se veio,
+          // vira um ajuste para a quantidade informada, com movimento.
+          const { stock_quantity: saldoDaPlanilha, ...resto } = u.data as Record<string, string | number | boolean | null>;
+          if (Object.keys(resto).length > 0) {
+            const { error } = await supabase.from('products').update(resto as any).eq('id', u.id);
+            if (error) throw new Error('Erro ao atualizar produto: ' + error.message);
+          }
+          if (saldoDaPlanilha != null && saldoDaPlanilha !== '' && Number.isFinite(Number(saldoDaPlanilha))) {
+            const { error } = await supabase.rpc('ajustar_estoque' as never, {
+              p_produto: u.id,
+              p_nova_quantidade: Number(saldoDaPlanilha),
+              p_motivo: 'Importação de planilha (substituir)',
+            } as never);
+            if (error) throw new Error('Erro ao ajustar o estoque pela planilha: ' + error.message);
+          }
           updated++;
         }
       }

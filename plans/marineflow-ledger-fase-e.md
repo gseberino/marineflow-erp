@@ -102,3 +102,30 @@ ou cancelamento). Preço, custo médio e histórico de preço não entram aqui.
 
 ## 7. Ordem e tamanho
 E1 (2–3 h) → E2 (2 h) → E3 (1 h, fora do horário de uso) → E4 (30 min) → E5 (30 min). Um dia.
+
+## 8. Execução
+
+- **E3 + E5 — 20/09/2026** (`20260920110000_ledger_fase_e3_saldo_por_soma.sql`): saldo de abertura
+  (92 movimentos `cutover_fase_e`), recálculo pela soma ADIADO para o commit, vigia
+  `estoque_saldos_divergentes()`.
+- **E1 + E2 — 30/09/2026** (`20260930140000_estoque_so_por_movimento.sql`):
+  - Funções novas `ajustar_estoque(produto, contagem, motivo, autor)` e
+    `entrada_de_estoque(produto, qtd, custo, notas, autor)`: leem o saldo pela soma, com o produto
+    travado, e gravam o movimento numa transação só. A tela de Estoque (v1 e v2), a substituição da
+    importação CSV e as tools `adjust_inventory`/`register_stock_entry` passam por elas.
+  - As 10 funções do banco que escreviam o saldo (a busca de 20/09 pegou 9; `confirm_nfe_import`
+    escrevia dentro de um SET de várias colunas) perderam a escrita direta. O movimento de cada uma já
+    era gravado. `produce_composed_product` e `trg_so_status_stock` leem o saldo novo pela soma.
+  - `revert_nfe_import` NÃO tinha defeito: ela apaga os movimentos, e o gatilho da E3 dispara em
+    DELETE também.
+  - O recálculo continua ADIADO: se alguma escrita direta tivesse escapado, com recálculo imediato ela
+    contaria em dobro em silêncio.
+  - Ficaram, de propósito, os caminhos do modelo antigo (flag `stock_model_v2` desligada) em
+    `use-service-order-parts`, `use-service-orders`, `cascade-updates` e `applyStockDelta`. Com o v2
+    ligado não rodam; se rodassem, a escrita direta seria recusada (erro ignorado ali) e o movimento
+    que eles gravam em seguida acerta o saldo.
+- **E4 — 30/09/2026** (`20260930150000_estoque_porta_fechada.sql`), aplicada depois da tela e do
+  agente no ar: gatilho `trg_estoque_saldo_so_por_movimento` recusa mudar `stock_quantity` fora do
+  recálculo (que liga `estoque.via_movimento` em volta do próprio UPDATE; o Supabase não aceita esse
+  parâmetro no SET da função). Gravar o produto com o mesmo saldo continua livre.
+- Teste: `supabase/tests/estoque_so_por_movimento.sql` (13 cenários, termina em ROLLBACK).

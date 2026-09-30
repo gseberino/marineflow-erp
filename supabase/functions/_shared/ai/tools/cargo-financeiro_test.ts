@@ -104,6 +104,8 @@ Deno.test("adjust_inventory continua com gate de aprovação e autoria", () => {
   // Escrita destrutiva de estoque não pode voltar a executar direto.
   assertEquals(/^\s{4}risk:\s*"high"/m.test(tool.corpo), true, "adjust_inventory precisa ser risk: high");
   assertEquals(temBarreiraDeCargo(tool.corpo), true, "adjust_inventory precisa barrar por cargo");
-  // Movimento sem autor é indistinguível de movimento do sistema.
-  assertEquals(/created_by:\s*userId/.test(tool.corpo), true, "o movimento precisa gravar created_by");
+  // Movimento sem autor é indistinguível de movimento do sistema. Desde a fase E (30/09/2026) o
+  // movimento é gravado pela função ajustar_estoque, que recebe o autor em p_autor.
+  assertEquals(/ajustar_estoque/.test(tool.corpo) && /p_autor:\s*userId/.test(tool.corpo), true,
+    "o ajuste precisa ir pela função do banco com o autor (p_autor: userId)");
 });
