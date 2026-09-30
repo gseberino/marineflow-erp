@@ -534,6 +534,7 @@ async function sincronizarConexao(
     let atualizadas = 0;
     let valorMudou = 0;
     let reenvios = 0;
+    let provaveis = 0;
     let duplicatasDevolvidas = 0;
     const datasQueChegaram: string[] = [];
 
@@ -619,13 +620,29 @@ async function sincronizarConexao(
         // O banco às vezes reenvia a mesma transação com outro código (29/09/2026: 9 em dobro).
         // A regra conta pelo conteúdo e não mexe em repetição legítima: _shared/banking/reenvio.ts.
         const guardadas = await guardadasDoMesmoConteudo(admin, conta.id, deCodigoNovo);
-        const { reais: novas, reenvios: reenviosDaConta } = separarReenvios(linhas, deCodigoNovo, guardadas);
-        for (const { linha, guardada } of reenviosDaConta) {
+        const separadas = separarReenvios(linhas, deCodigoNovo, guardadas);
+        for (const { linha, guardada } of separadas.reenvios) {
           const patch = { bank_ref_id: linha.bank_ref_id, ...mudancasDoProvedor(guardada, linha) };
           const { error } = await admin.from("bank_transactions").update(patch).eq("id", guardada.id);
           if (error) throw error;
           reenvios++;
         }
+        // Cópia a mais de uma linha já importada: grava (nada se perde), mas fora da fila, como
+        // as 9 de 29/09 foram marcadas à mão. Se for compra de verdade, volta em Extrato › Fora da fila.
+        const agora = new Date().toISOString();
+        const novas = [
+          ...separadas.reais,
+          ...separadas.provaveis.map(({ linha }) => ({
+            ...linha,
+            reconciled: true,
+            dismissed_kind: "duplicata",
+            dismissed_at: agora,
+            dismissed_reason:
+              `Provável reenvio do banco: igual a uma linha de ${linha.transaction_date.split("-").reverse().join("/")} já importada ` +
+              "(mesmo valor, descrição e conta), com outro código. Se for uma compra de verdade, devolva à fila (Extrato › Fora da fila).",
+          })),
+        ];
+        provaveis += separadas.provaveis.length;
         if (novas.length === 0) break gravar;
 
         for (let i = 0; i < novas.length; i += 200) {
@@ -647,13 +664,14 @@ async function sincronizarConexao(
       atualizadas > 0 ? `${atualizadas} atualizada(s) pelo banco (pendente → lançada, fatura, parcela)` : null,
       valorMudou > 0 ? `${valorMudou} com valor diferente no banco (não alterado — confira)` : null,
       reenvios > 0 ? `${reenvios} reenviada(s) pelo banco com código novo (reconhecidas, não entraram em dobro)` : null,
+      provaveis > 0 ? `${provaveis} cópia(s) de linha já importada, marcada(s) como duplicata (se alguma for compra de verdade, devolva em Extrato › Fora da fila)` : null,
     ].filter(Boolean).join(" · ");
     const dataMaisRecente = transacaoMaisRecente(conexao.last_transaction_date, datasQueChegaram, hoje);
 
     await registrarResultado(admin, conexao.id, "ok", mensagem, importadas, dataMaisRecente);
     return {
       conexao: rotulo, status: "ok", mensagem, importadas, ja_existiam: jaExistiam, atualizadas,
-      valor_mudou: valorMudou, reenvios, duplicatas_ainda_devolvidas: duplicatasDevolvidas,
+      valor_mudou: valorMudou, reenvios, provaveis_reenvios: provaveis, duplicatas_ainda_devolvidas: duplicatasDevolvidas,
     };
   } catch (e) {
     let msg = String((e as Error)?.message ?? e).slice(0, 300);
