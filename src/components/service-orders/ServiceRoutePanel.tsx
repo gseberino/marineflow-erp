@@ -9,6 +9,7 @@ import {
   ClipboardPen, Printer, Ruler, ShieldAlert, Sparkles, Trash2, Undo2, Wand2, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { StepFocusMode } from './StepFocusMode';
 import { SheetEntryDialog } from './SheetEntryDialog';
 import { useViaDoTecnico } from '@/hooks/use-via-do-tecnico';
@@ -371,17 +372,6 @@ export function ServiceRoutePanel({
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-0.5">
-                    {step.status !== 'pending' && (
-                      <Button aria-label="Voltar este passo para pendente"
-                        variant="ghost" size="icon" className="h-7 w-7"
-                        title="Voltar para pendente"
-                        onClick={() => reopen.mutate(step, {
-                          onError: (e: any) => toast.error(e?.message || 'Erro'),
-                        })}
-                      >
-                        <Undo2 className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
                     <Button aria-label="Subir este passo no roteiro"
                       variant="ghost" size="icon" className="h-7 w-7"
                       title="Subir" disabled={index <= 0}
@@ -396,16 +386,26 @@ export function ServiceRoutePanel({
                     >
                       <ArrowDown className="h-3.5 w-3.5" />
                     </Button>
-                    <Button aria-label="Remover este passo do roteiro"
-                      variant="ghost" size="icon" className="h-7 w-7"
-                      title="Remover passo"
-                      onClick={() => remove.mutate(
-                        { id: step.id, serviceOrderId: serviceOrderId! },
-                        { onError: (e: any) => toast.error(e?.message || 'Erro') },
-                      )}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    {/* Voltar para pendente e Remover nos três pontinhos (padrão AcoesDaLinha, 30/09/2026):
+                        o Remover apagava o passo num clique, encostado no "descer". */}
+                    <AcoesDaLinha
+                      rotulo={`passo ${step.seq} (${step.title})`}
+                      menu={[
+                        ...(step.status !== 'pending'
+                          ? [{
+                              texto: 'Voltar para pendente', icone: Undo2,
+                              onClick: () => reopen.mutate(step, { onError: (e: any) => toast.error(e?.message || 'Erro') }),
+                            }]
+                          : []),
+                        {
+                          texto: 'Remover passo', icone: Trash2, perigo: true,
+                          onClick: () => remove.mutate(
+                            { id: step.id, serviceOrderId: serviceOrderId! },
+                            { onError: (e: any) => toast.error(e?.message || 'Erro') },
+                          ),
+                        },
+                      ]}
+                    />
                   </div>
                 </div>
               );

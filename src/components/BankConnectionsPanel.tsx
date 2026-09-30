@@ -12,6 +12,7 @@ import {
 import { toast } from 'sonner';
 import { RefreshCw, Plus, Power, AlertTriangle, CheckCircle2, Link2 } from 'lucide-react';
 import { SaldosDasContas } from '@/components/SaldosDasContas';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { cn } from '@/lib/utils';
 
 /**
@@ -382,19 +383,23 @@ export function BankConnectionsPanel() {
                 </div>
               )}
               {c.provider !== 'caixa' && !inativa && desativando !== c.id && (
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button size="sm" variant="outline" onClick={() => handleSincronizar(c.id)} disabled={sincronizar.isPending}>
-                    <RefreshCw className="h-3 w-3 mr-1" />Buscar
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => handleSincronizar(c.id, true)}
-                    disabled={sincronizar.isPending} title="Rebusca o último ano inteiro">
-                    Histórico
-                  </Button>
-                  <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setDesativando(c.id)}
-                    title="Para de buscar o extrato desta conta; nada do que já entrou é apagado">
-                    Desativar
-                  </Button>
-                </div>
+                // Buscar à vista; o resto nos três pontinhos, com Desativar marcado e no fim (padrão AcoesDaLinha).
+                <AcoesDaLinha
+                  className="shrink-0"
+                  rotulo={`conta ${c.label}`}
+                  ocupada={sincronizar.isPending}
+                  rapidas={[{ texto: 'Buscar', icone: RefreshCw, onClick: () => handleSincronizar(c.id), desabilitada: sincronizar.isPending }]}
+                  menu={[
+                    {
+                      texto: 'Buscar o último ano', onClick: () => handleSincronizar(c.id, true), desabilitada: sincronizar.isPending,
+                      titulo: 'Rebusca o último ano inteiro: traz o que tiver faltado, sem duplicar',
+                    },
+                    {
+                      texto: 'Desativar', perigo: true, onClick: () => setDesativando(c.id),
+                      titulo: 'Para de buscar o extrato desta conta; nada do que já entrou é apagado',
+                    },
+                  ]}
+                />
               )}
               {/* Confirmação na própria ficha: um clique distraído não pode parar o extrato. */}
               {c.provider !== 'caixa' && !inativa && desativando === c.id && (

@@ -1,3 +1,4 @@
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { useMemo, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -204,15 +205,6 @@ export function SurveyQuestionsSection() {
 
                             {pendente && (
                               <div className="flex shrink-0 gap-1">
-                                <Button aria-label="Descartar esta pergunta"
-                                  size="sm" variant="ghost" className="h-7 px-2 text-destructive"
-                                  title="Descartar esta pergunta"
-                                  onClick={() => reject.mutate(q, {
-                                    onError: (e: any) => toast.error(e?.message || 'Erro'),
-                                  })}
-                                >
-                                  <X className="h-3.5 w-3.5" />
-                                </Button>
                                 <Button aria-label="Editar antes de aprovar"
                                   size="sm" variant="outline" className="h-7 px-2"
                                   title="Editar antes de aprovar"
@@ -230,6 +222,14 @@ export function SurveyQuestionsSection() {
                                 >
                                   <Check className="h-3.5 w-3.5" />
                                 </Button>
+                                {/* Descartar nos três pontinhos, longe do Aprovar (padrão AcoesDaLinha, 30/09/2026). */}
+                                <AcoesDaLinha
+                                  rotulo={`rascunho da IA: ${q.question ?? ''}`}
+                                  menu={[{
+                                    texto: 'Descartar esta pergunta', icone: X, perigo: true,
+                                    onClick: () => reject.mutate(q, { onError: (e: any) => toast.error(e?.message || 'Erro') }),
+                                  }]}
+                                />
                               </div>
                             )}
                           </div>

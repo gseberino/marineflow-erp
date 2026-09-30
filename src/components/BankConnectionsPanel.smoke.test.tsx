@@ -97,8 +97,9 @@ describe('BankConnectionsPanel', () => {
     ativarMock.mockClear();
     const user = userEvent.setup();
     renderPainel();
-    const [primeira] = await screen.findAllByRole('button', { name: 'Desativar' });
-    await user.click(primeira);
+    // Desativar mora nos três pontinhos (padrão AcoesDaLinha, 30/09/2026), marcado como perigo.
+    await user.click((await screen.findAllByRole('button', { name: /Mais ações para conta/ }))[0]);
+    await user.click(await screen.findByRole('menuitem', { name: /Desativar/ }));
     expect(ativarMock).not.toHaveBeenCalled();
     expect(screen.getByText(/As transações já/)).toBeInTheDocument();
 
@@ -106,7 +107,8 @@ describe('BankConnectionsPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Não' }));
     expect(ativarMock).not.toHaveBeenCalled();
 
-    await user.click((await screen.findAllByRole('button', { name: 'Desativar' }))[0]);
+    await user.click((await screen.findAllByRole('button', { name: /Mais ações para conta/ }))[0]);
+    await user.click(await screen.findByRole('menuitem', { name: /Desativar/ }));
     await user.click(screen.getByRole('button', { name: 'Sim, desativar' }));
     expect(ativarMock).toHaveBeenCalledWith({ id: 'c1', active: false });
   });
