@@ -9,7 +9,8 @@
 //
 // A janela de busca é deliberadamente sobreposta ao que já foi importado: banco às vezes
 // disponibiliza lançamento com atraso, e perder transação é muito pior que reprocessar —
-// o id do provedor em bank_ref_id impede duplicata.
+// o id do provedor em bank_ref_id impede duplicata. Quando o próprio provedor troca o id da
+// mesma transação (29/09/2026), a regra de reenvio por conteúdo evita a linha em dobro.
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
@@ -19,6 +20,7 @@ import {
 import {
   JANELA_INICIAL_DIAS, inicioDaBusca, mudancasDoProvedor, transacaoMaisRecente, type EstadoDaLinha,
 } from "../_shared/banking/janela-de-busca.ts";
+import { type LinhaDoExtrato, type LinhaGuardada, separarReenvios } from "../_shared/banking/reenvio.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
@@ -531,6 +533,8 @@ async function sincronizarConexao(
     let jaExistiam = 0;
     let atualizadas = 0;
     let valorMudou = 0;
+    let reenvios = 0;
+    let duplicatasDevolvidas = 0;
     const datasQueChegaram: string[] = [];
 
     // Saúde da conexão, gravada a cada sincronização: consentimento de Open Finance vence
@@ -580,15 +584,18 @@ async function sincronizarConexao(
         // (bank_ref_id, source_type) é a rede de segurança; esta consulta evita depender
         // dela e permite contar quantas eram realmente novas.
         const refs = linhas.map((l) => l.bank_ref_id);
-        const existentes = new Map<string, EstadoDaLinha & { id: string; amount: number }>();
+        const existentes = new Map<string, EstadoDaLinha & { id: string; amount: number; dismissed_kind: string | null }>();
         for (let i = 0; i < refs.length; i += 200) {
           const { data, error } = await admin
             .from("bank_transactions")
-            .select("id, bank_ref_id, tx_status, bill_id, installment_label, amount")
+            .select("id, bank_ref_id, tx_status, bill_id, installment_label, amount, dismissed_kind")
             .in("bank_ref_id", refs.slice(i, i + 200));
           if (error) throw error;
           for (const r of (data || []) as any[]) if (r.bank_ref_id) existentes.set(String(r.bank_ref_id), r);
         }
+        // Diagnóstico: o banco ainda devolve uma linha que já foi marcada como duplicata? Se sim,
+        // ele manda as duas versões e a regra de reenvio não teria como separar.
+        for (const l of linhas) if (existentes.get(l.bank_ref_id)?.dismissed_kind === "duplicata") duplicatasDevolvidas++;
 
         // Do que já estava, atualiza o que o banco mudou: a compra "pendente" que ele lançou,
         // com a fatura e a parcela. Antes a sincronização só inseria, e a pendente ficava
@@ -605,8 +612,20 @@ async function sincronizarConexao(
           atualizadas++;
         }
 
-        const novas = linhas.filter((l) => !existentes.has(l.bank_ref_id));
-        jaExistiam += linhas.length - novas.length;
+        const deCodigoNovo = linhas.filter((l) => !existentes.has(l.bank_ref_id));
+        jaExistiam += linhas.length - deCodigoNovo.length;
+        if (deCodigoNovo.length === 0) break gravar;
+
+        // O banco às vezes reenvia a mesma transação com outro código (29/09/2026: 9 em dobro).
+        // A regra conta pelo conteúdo e não mexe em repetição legítima: _shared/banking/reenvio.ts.
+        const guardadas = await guardadasDoMesmoConteudo(admin, conta.id, deCodigoNovo);
+        const { reais: novas, reenvios: reenviosDaConta } = separarReenvios(linhas, deCodigoNovo, guardadas);
+        for (const { linha, guardada } of reenviosDaConta) {
+          const patch = { bank_ref_id: linha.bank_ref_id, ...mudancasDoProvedor(guardada, linha) };
+          const { error } = await admin.from("bank_transactions").update(patch).eq("id", guardada.id);
+          if (error) throw error;
+          reenvios++;
+        }
         if (novas.length === 0) break gravar;
 
         for (let i = 0; i < novas.length; i += 200) {
@@ -627,11 +646,15 @@ async function sincronizarConexao(
       base,
       atualizadas > 0 ? `${atualizadas} atualizada(s) pelo banco (pendente → lançada, fatura, parcela)` : null,
       valorMudou > 0 ? `${valorMudou} com valor diferente no banco (não alterado — confira)` : null,
+      reenvios > 0 ? `${reenvios} reenviada(s) pelo banco com código novo (reconhecidas, não entraram em dobro)` : null,
     ].filter(Boolean).join(" · ");
     const dataMaisRecente = transacaoMaisRecente(conexao.last_transaction_date, datasQueChegaram, hoje);
 
     await registrarResultado(admin, conexao.id, "ok", mensagem, importadas, dataMaisRecente);
-    return { conexao: rotulo, status: "ok", mensagem, importadas, ja_existiam: jaExistiam, atualizadas, valor_mudou: valorMudou };
+    return {
+      conexao: rotulo, status: "ok", mensagem, importadas, ja_existiam: jaExistiam, atualizadas,
+      valor_mudou: valorMudou, reenvios, duplicatas_ainda_devolvidas: duplicatasDevolvidas,
+    };
   } catch (e) {
     let msg = String((e as Error)?.message ?? e).slice(0, 300);
 
@@ -654,6 +677,39 @@ async function sincronizarConexao(
     await registrarResultado(admin, conexao.id, "error", msg, 0, null);
     return { conexao: rotulo, status: "error", mensagem: msg, importadas: 0 };
   }
+}
+
+/**
+ * As linhas já gravadas da conta com a mesma data e o mesmo valor das de código novo (fora as
+ * marcadas como duplicata). A comparação do conteúdo completo é feita em separarReenvios.
+ * Paginado: o PostgREST corta em 1.000 linhas sem avisar.
+ */
+async function guardadasDoMesmoConteudo(
+  admin: DbClient,
+  contaId: string,
+  novas: LinhaDoExtrato[],
+): Promise<Array<LinhaGuardada & EstadoDaLinha>> {
+  const datas = [...new Set(novas.map((l) => String(l.transaction_date).slice(0, 10)))];
+  const valores = [...new Set(novas.map((l) => Math.abs(Number(l.amount) || 0)))];
+  const saida: Array<LinhaGuardada & EstadoDaLinha> = [];
+  for (let i = 0; i < datas.length; i += 50) {
+    for (let de = 0; ; de += 1000) {
+      const { data, error } = await admin
+        .from("bank_transactions")
+        .select("id, bank_ref_id, transaction_date, amount, transaction_type, description, installment_label, card_last_digits, provider_account_id, tx_status, bill_id")
+        .eq("provider_account_id", contaId)
+        .eq("provider", "pluggy")
+        .in("transaction_date", datas.slice(i, i + 50))
+        .in("amount", valores)
+        .or("dismissed_kind.is.null,dismissed_kind.neq.duplicata")
+        .order("id")
+        .range(de, de + 999);
+      if (error) throw error;
+      saida.push(...((data || []) as any[]));
+      if (!data || data.length < 1000) break;
+    }
+  }
+  return saida;
 }
 
 async function registrarResultado(
