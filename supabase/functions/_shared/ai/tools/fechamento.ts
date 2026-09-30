@@ -46,10 +46,15 @@ export const fechamentoTools: ToolDef[] = [
     name: "verificar_mes",
     description:
       "Responde 'o mês está pronto para fechar?': saldo de cada conta confere com o banco, extrato sem nada esperando, " +
-      "sem despesa em dobro, lançamentos batendo com o extrato, tudo com categoria. Sem mês, usa o mês passado. Só leitura.",
+      "sem despesa em dobro, lançamentos batendo com o extrato, tudo com categoria. Sem mês, usa o mês passado. Só leitura. " +
+      "Para mostrar QUAIS linhas estão por trás de uma pendência, repita com `detalhar` = a chave da pendência.",
     input_schema: {
       type: "object",
-      properties: { mes: { type: "number", description: "1 a 12" }, ano: { type: "number" } },
+      properties: {
+        mes: { type: "number", description: "1 a 12" },
+        ano: { type: "number" },
+        detalhar: { type: "string", description: "Chave de uma pendência (vem em `pendencias[].chave`) para listar as linhas dela." },
+      },
     },
     risk: "low",
     roles: CARGOS_FINANCEIRO,
@@ -57,13 +62,24 @@ export const fechamentoTools: ToolDef[] = [
       const b = semAcesso(ctx);
       if (b) return b;
       const { ano, mes } = mesDosArgs(args);
+      // As linhas por trás de uma pendência — a mesma lista do "Ver" da tela (30/09/2026).
+      if (args.detalhar) {
+        const { data, error } = await ctx.sb.rpc("linhas_do_checklist", { p_ano: ano, p_mes: mes, p_chave: String(args.detalhar) });
+        if (error) return { error: error.message };
+        const linhas = (data ?? []) as Array<Record<string, unknown>>;
+        return {
+          mes: `${String(mes).padStart(2, "0")}/${ano}`, pendencia: String(args.detalhar), total: linhas.length,
+          linhas: linhas.slice(0, 30).map((l) => ({ data: l.data, valor: l.valor, descricao: l.descricao, quem: l.quem, detalhe: l.detalhe })),
+          ...(linhas.length > 30 ? { aviso: `Mostrando 30 de ${linhas.length}; a lista inteira está em Conciliação › Fechar o mês › Ver.` } : {}),
+        };
+      }
       const { data, error } = await ctx.sb.rpc("checklist_do_mes", { p_ano: ano, p_mes: mes });
       if (error) return { error: error.message };
       const r = data as { pronto: boolean; itens: Array<Record<string, unknown>> };
       return {
         mes: `${String(mes).padStart(2, "0")}/${ano}`,
         pronto: r.pronto,
-        pendencias: r.itens.filter((i) => !i.ok).map((i) => ({ o_que: i.titulo, detalhe: i.detalhe, bloqueia: i.bloqueia })),
+        pendencias: r.itens.filter((i) => !i.ok).map((i) => ({ chave: i.chave, o_que: i.titulo, detalhe: i.detalhe, bloqueia: i.bloqueia })),
         ok: r.itens.filter((i) => i.ok).map((i) => i.titulo),
       };
     },

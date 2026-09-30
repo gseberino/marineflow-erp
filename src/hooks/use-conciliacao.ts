@@ -72,15 +72,22 @@ export interface LinhaDoExtratoLivre {
  * recebíveis estão marcados como PAGOS. O dinheiro entrou no banco, alguém deu baixa no
  * sistema, e os dois lados nunca se encontraram.
  */
-export function useLancamentosSemExtrato(lado?: LadoDoLancamento) {
+/**
+ * Mês escolhido na Conciliação (pedido do dono, 30/09/2026): o filtro vai ao BANCO, porque as listas
+ * trazem só 500 linhas — filtrar na tela deixaria um mês antigo vazio sem aviso.
+ */
+export interface PeriodoDaConciliacao { de: string; ate: string }
+
+export function useLancamentosSemExtrato(lado?: LadoDoLancamento, periodo?: PeriodoDaConciliacao | null) {
   return useQuery({
-    queryKey: ['conciliacao-sem-extrato', lado ?? 'todos'],
+    queryKey: ['conciliacao-sem-extrato', lado ?? 'todos', periodo?.de ?? null],
     queryFn: async (): Promise<LancamentoParaConciliar[]> => {
       let q = supabase
         .from('conciliacao_lancamentos' as never)
         .select('*')
         .eq('situacao', 'sem_extrato');
       if (lado) q = q.eq('lado', lado);
+      if (periodo) q = q.gte('issue_date', periodo.de).lte('issue_date', periodo.ate);
 
       // Ordem estável: o PostgREST corta em 1000 linhas em silêncio, e sem ordem definida
       // a página 2 pode repetir a 1. Data primeiro, id como desempate.
@@ -96,9 +103,9 @@ export function useLancamentosSemExtrato(lado?: LadoDoLancamento) {
 }
 
 /** Já conciliados — para conferir, e para achar diferença de valor que passou batido. */
-export function useLancamentosConciliados(apenasComDiferenca = false) {
+export function useLancamentosConciliados(apenasComDiferenca = false, periodo?: PeriodoDaConciliacao | null) {
   return useQuery({
-    queryKey: ['conciliacao-conciliados', apenasComDiferenca],
+    queryKey: ['conciliacao-conciliados', apenasComDiferenca, periodo?.de ?? null],
     queryFn: async (): Promise<LancamentoParaConciliar[]> => {
       let q = supabase
         .from('conciliacao_lancamentos' as never)
@@ -109,6 +116,10 @@ export function useLancamentosConciliados(apenasComDiferenca = false) {
       // (diferença zero) quando a compra inteira já estava lançada: 4 das 17 são assim (revisão
       // de 27/09/2026).
       if (apenasComDiferenca) q = q.or('and(diferenca.neq.0,compra_parcelada.eq.false),lancada_em_dobro.eq.true');
+      // A data do extrato, e a do lançamento quando não há (a mesma regra do "Mês pronto?").
+      if (periodo) {
+        q = q.or(`and(extrato_data.gte.${periodo.de},extrato_data.lte.${periodo.ate}),and(extrato_data.is.null,issue_date.gte.${periodo.de},issue_date.lte.${periodo.ate})`);
+      }
 
       const { data, error } = await q
         .order('extrato_data', { ascending: false, nullsFirst: false })

@@ -7,6 +7,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import { I18nProvider } from '@/i18n';
 import { FechamentoPanel } from './FechamentoPanel';
 
@@ -34,6 +35,14 @@ vi.mock('@/hooks/use-fechamento', () => ({
   }),
   useConferenciasDeSaldo: () => ({ data: conferencias }),
   useChecklistDoMes: () => ({ isLoading: false, data: checklist.atual }),
+  useLinhasDoChecklist: (_a: number, _m: number, chave: string | null) => ({
+    isLoading: false, error: null,
+    data: chave === 'extrato_tratado'
+      ? [{ tipo: 'extrato', id: 't1', data: '2026-08-12', valor: -350, descricao: 'Pix enviado para Kamell', quem: 'KAMELL', detalhe: 'Saída esperando destino no Extrato.' }]
+      : chave === 'outras_despesas'
+        ? [{ tipo: 'payable', id: 'p1', data: '2026-08-03', valor: -12.5, descricao: 'Tarifa', quem: null, detalhe: null }]
+        : [],
+  }),
   ROTULO_DA_ACAO: { cancelou_lancamento: 'Cancelou lançamento' },
 }));
 
@@ -49,11 +58,13 @@ vi.mock('@/hooks/use-bank-connections', () => ({
 function renderPainel() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
+    <MemoryRouter>
     <QueryClientProvider client={qc}>
       <I18nProvider>
         <FechamentoPanel />
       </I18nProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -97,5 +108,22 @@ describe('FechamentoPanel — demonstrativo do mês', () => {
     expect(typeof ano).toBe('number');
     expect(mes).toBeGreaterThanOrEqual(1);
     expect(fechado).toBe(false);
+  });
+});
+
+describe('FechamentoPanel — Ver as linhas de um aviso', () => {
+  it('o aviso com pendência abre a lista; lançamento tem Corrigir; linha do banco leva ao Extrato', () => {
+    renderPainel();
+    // Item OK não tem botão; item com pendência tem "Ver N".
+    expect(screen.queryByRole('button', { name: 'Ver 0' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Ver 36' }));
+    expect(screen.getByText('Pix enviado para Kamell')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Abrir a fila do Extrato' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Corrigir' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ver 2' }));
+    expect(screen.getByText('Tarifa')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Corrigir' })).toBeInTheDocument();
   });
 });

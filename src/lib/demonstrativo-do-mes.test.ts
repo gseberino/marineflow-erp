@@ -92,3 +92,12 @@ describe('demonstrativo do mês', () => {
     expect(grupos[2].categorias.map((c) => c.categoria)).toEqual(['Pró-labore', 'Gasto Pessoal Sócio - Descontar PL', 'Alimentação de campo']);
   });
 });
+
+describe('demonstrativo cabe na folha', () => {
+  it('tabelas com largura fixa por coluna e quebra dentro da célula (as colunas saíam cortadas em 30/09)', () => {
+    const html = montar();
+    expect(html).toContain('table-layout: fixed');
+    expect(html).toContain('overflow-wrap: anywhere');
+    expect(html).toContain('<table class="lancs"><colgroup>');
+  });
+});

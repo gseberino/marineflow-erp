@@ -10,7 +10,7 @@
 //   · candidato do extrato só pode ter o SINAL certo — casar saída com entrada é erro
 //     silencioso, porque o valor bate.
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
@@ -82,11 +82,16 @@ const { estado, conciliarMock } = vi.hoisted(() => ({
   },
 }));
 
+const pedidos = vi.hoisted(() => ({ periodo: undefined as unknown }));
+
 vi.mock('@/hooks/use-conciliacao', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/hooks/use-conciliacao')>();
   return {
     ...real,
-    useLancamentosSemExtrato: () => ({ data: estado.semExtrato, isLoading: false, error: estado.erro }),
+    useLancamentosSemExtrato: (_lado: unknown, periodo: unknown) => {
+      pedidos.periodo = periodo;
+      return { data: estado.semExtrato, isLoading: false, error: estado.erro };
+    },
     useLancamentosConciliados: () => ({ data: estado.conciliados, isLoading: false, error: null }),
     useExtratoLivre: (lado: string | null) => ({
       // Espelha o filtro real do hook: só o sinal compatível com o lado do lançamento.
@@ -196,5 +201,17 @@ describe('conciliação (parte do lançamento)', () => {
     renderPanel();
     expect(await screen.findByText(/Não deu para carregar a conciliação/)).toBeInTheDocument();
     expect(screen.getByText(/PGRST201/)).toBeInTheDocument();
+  });
+});
+
+describe('conciliação — filtro de mês', () => {
+  it('o mês escolhido vai para a consulta (no banco), e "Todos os meses" limpa', async () => {
+    renderPanel();
+    await screen.findByText('Conciliação');
+    expect(pedidos.periodo ?? null).toBeNull();
+    fireEvent.change(screen.getByLabelText('Mês da conciliação'), { target: { value: '2026-08' } });
+    expect(pedidos.periodo).toEqual({ de: '2026-08-01', ate: '2026-08-31' });
+    fireEvent.click(screen.getByRole('button', { name: 'Todos os meses' }));
+    expect(pedidos.periodo ?? null).toBeNull();
   });
 });

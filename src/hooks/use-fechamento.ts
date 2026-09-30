@@ -59,6 +59,31 @@ export function useChecklistDoMes(ano: number, mes: number) {
   });
 }
 
+/** Uma linha por trás de um item do "Mês pronto?" (linhas_do_checklist, os mesmos filtros). */
+export interface LinhaDoAviso {
+  tipo: 'conta' | 'extrato' | 'payable' | 'receivable';
+  id: string;
+  data: string | null;
+  /** Saída negativa, entrada positiva. */
+  valor: number;
+  descricao: string;
+  quem: string | null;
+  detalhe: string | null;
+}
+
+export function useLinhasDoChecklist(ano: number, mes: number, chave: string | null) {
+  return useQuery({
+    queryKey: ['linhas-do-checklist', ano, mes, chave],
+    enabled: !!chave && ano > 2000 && mes >= 1 && mes <= 12,
+    queryFn: async (): Promise<LinhaDoAviso[]> => {
+      const { data, error } = await supabase.rpc('linhas_do_checklist' as never, { p_ano: ano, p_mes: mes, p_chave: chave } as never);
+      if (error) throw error;
+      return (data ?? []) as unknown as LinhaDoAviso[];
+    },
+    staleTime: 10_000,
+  });
+}
+
 /**
  * Fechar o mês pela função do banco: ela roda a verificação de novo no clique e só fecha
  * com tudo verde — ou com o motivo escrito, que vai para a trilha junto com o retrato.

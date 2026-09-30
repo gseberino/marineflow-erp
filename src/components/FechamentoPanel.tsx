@@ -21,7 +21,9 @@ import { useI18n } from '@/i18n';
 import {
   usePeriodosFechados, useFecharPeriodo, useReabrirPeriodo,
   useTrilhaDeConciliacao, useConferenciasDeSaldo, useChecklistDoMes, ROTULO_DA_ACAO,
+  type ItemDoChecklist,
 } from '@/hooks/use-fechamento';
+import { LinhasDoAvisoDialog } from '@/components/LinhasDoAvisoDialog';
 import { useBankConnections } from '@/hooks/use-bank-connections';
 import { useDemonstrativoDoMes } from '@/hooks/use-demonstrativo-do-mes';
 import { Lock, LockOpen, ScrollText, Scale, AlertTriangle, CheckCircle2, XCircle, FileText } from 'lucide-react';
@@ -51,6 +53,8 @@ export function FechamentoPanel() {
   const [motivoPendencia, setMotivoPendencia] = useState('');
   const checklist = useChecklistDoMes(ano, mes);
   const demonstrativo = useDemonstrativoDoMes();
+  // "Ver" num aviso do "Mês pronto?": a lista das linhas, com o Corrigir (pedido do dono, 30/09/2026).
+  const [avisoAberto, setAvisoAberto] = useState<ItemDoChecklist | null>(null);
 
   const { data: conexoes = [] } = useBankConnections();
 
@@ -161,6 +165,11 @@ export function FechamentoPanel() {
                   <span className="block">{i.titulo}{!i.ok && !i.bloqueia ? ' (aviso)' : ''}</span>
                   <span className="block text-xs text-muted-foreground">{i.detalhe}</span>
                 </span>
+                {!i.ok && i.quantidade > 0 && (
+                  <Button size="sm" variant="outline" className="h-7 shrink-0 text-xs" onClick={() => setAvisoAberto(i)}>
+                    Ver {i.quantidade}
+                  </Button>
+                )}
               </li>
             ))}
           </ul>
@@ -187,6 +196,7 @@ export function FechamentoPanel() {
             )
           )}
         </div>
+        <LinhasDoAvisoDialog ano={ano} mes={mes} item={avisoAberto} onFechar={() => setAvisoAberto(null)} />
       </Card>
 
       {periodos.length > 0 && (

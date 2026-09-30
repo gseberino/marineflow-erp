@@ -29,3 +29,18 @@ Deno.test("financeiro não fecha mês pelo assistente", async () => {
   const r = await t.execute({ mes: 8 }, ctx as never) as { error?: string };
   assertEquals(typeof r.error, "string");
 });
+
+Deno.test("verificar_mes com detalhar lista as linhas da pendência (a mesma lista do Ver da tela)", async () => {
+  const t = fechamentoTools.find((x) => x.name === "verificar_mes")!;
+  let chamada: any = null;
+  const linhas = Array.from({ length: 35 }, (_, i) => ({ tipo: "extrato", id: `t${i}`, data: "2026-08-10", valor: -10 - i, descricao: `Pix ${i}`, quem: "X", detalhe: null }));
+  const ctx = {
+    sb: { rpc: (nome: string, a: unknown) => { chamada = { nome, a }; return Promise.resolve({ data: linhas, error: null }); } },
+    admin: {}, userId: "u", userRole: "admin" as const, jwt: "", appOrigin: "", settings: {},
+  };
+  const r = await t.execute({ mes: 8, ano: 2026, detalhar: "extrato_tratado" }, ctx as never) as any;
+  assertEquals(chamada, { nome: "linhas_do_checklist", a: { p_ano: 2026, p_mes: 8, p_chave: "extrato_tratado" } });
+  assertEquals(r.total, 35);
+  assertEquals(r.linhas.length, 30);
+  assertEquals(typeof r.aviso, "string");
+});

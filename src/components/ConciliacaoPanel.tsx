@@ -27,7 +27,7 @@ import { useI18n } from '@/i18n';
 import {
   useLancamentosSemExtrato, useLancamentosConciliados, useExtratoLivre,
   useConciliarLancamento, useDesconciliarLancamento,
-  type LancamentoParaConciliar, type LadoDoLancamento, type LinhaDoExtratoLivre,
+  type LancamentoParaConciliar, type PeriodoDaConciliacao, type LadoDoLancamento, type LinhaDoExtratoLivre,
 } from '@/hooks/use-conciliacao';
 import { Link2, Link2Off, Search, AlertTriangle, CheckCircle2, ArrowRight } from 'lucide-react';
 
@@ -61,9 +61,16 @@ export function ConciliacaoPanel() {
   const [ladoFiltro, setLadoFiltro] = useState<LadoDoLancamento | 'todos'>('todos');
   const [busca, setBusca] = useState('');
   const [abertoId, setAbertoId] = useState<string | null>(null);
+  // 'AAAA-MM', ou vazio = todos os meses (pedido do dono, 30/09/2026: filtrar como no Fechar o mês).
+  const [mesFiltro, setMesFiltro] = useState('');
+  const periodo = useMemo((): PeriodoDaConciliacao | null => {
+    if (!/^\d{4}-\d{2}$/.test(mesFiltro)) return null;
+    const [a, m] = mesFiltro.split('-').map(Number);
+    return { de: `${mesFiltro}-01`, ate: new Date(Date.UTC(a, m, 0)).toISOString().slice(0, 10) };
+  }, [mesFiltro]);
 
-  const semExtrato = useLancamentosSemExtrato(ladoFiltro === 'todos' ? undefined : ladoFiltro);
-  const conciliados = useLancamentosConciliados();
+  const semExtrato = useLancamentosSemExtrato(ladoFiltro === 'todos' ? undefined : ladoFiltro, periodo);
+  const conciliados = useLancamentosConciliados(false, periodo);
   // Os com problema vêm à parte e inteiros: a lista de conciliados traz só os 500 mais recentes
   // (1.791 em 27/09/2026, corte em 28/04) e as compras lançadas em dobro são de 2025 e do começo
   // de 2026 — ficavam fora da tela mesmo marcadas.
@@ -201,6 +208,16 @@ export function ConciliacaoPanel() {
           </span>
         )}
 
+        <div className="flex items-center gap-1">
+          <Input
+            type="month" value={mesFiltro} onChange={(e) => setMesFiltro(e.target.value)}
+            className="h-9 w-40" aria-label="Mês da conciliação"
+          />
+          {mesFiltro && (
+            <Button size="sm" variant="ghost" className="h-9 px-2" onClick={() => setMesFiltro('')}>Todos os meses</Button>
+          )}
+        </div>
+
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -222,6 +239,8 @@ export function ConciliacaoPanel() {
           <p className="text-sm text-muted-foreground">
             {busca
               ? 'Nada encontrado com esse termo.'
+              : mesFiltro
+                ? 'Nada neste mês.'
               : aba === 'sem_extrato'
                 ? 'Todo lançamento tem par no extrato.'
                 : 'Nenhum lançamento conciliado ainda.'}

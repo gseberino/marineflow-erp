@@ -123,13 +123,13 @@ export function montarDemonstrativoHtml(p: {
 
   const blocoChecklist = checklist
     ? `<h2>O mês está pronto? ${checklist.pronto ? '— sim' : '— ainda não'}</h2>
-  <table><thead><tr><th>Conferência</th><th>Situação</th><th>Detalhe</th></tr></thead><tbody>
+  <table><colgroup><col style="width:40%"><col style="width:12%"><col style="width:48%"></colgroup><thead><tr><th>Conferência</th><th>Situação</th><th>Detalhe</th></tr></thead><tbody>
   ${checklist.itens.map((i) => `<tr><td>${esc(i.titulo)}</td><td class="b">${i.ok ? 'OK' : i.bloqueia ? 'Falta' : 'Aviso'}</td><td>${esc(i.detalhe)}</td></tr>`).join('')}
   </tbody></table>`
     : '<p class="vazio">A lista do "Mês pronto?" não respondeu na hora de gerar.</p>';
 
   const blocoDre = `<h2>Resultado do mês (DRE, pela data do lançamento)</h2>
-  <table><thead><tr><th>Linha</th><th class="n">Valor</th><th class="n">% da receita</th></tr></thead><tbody>
+  <table><colgroup><col style="width:60%"><col style="width:22%"><col style="width:18%"></colgroup><thead><tr><th>Linha</th><th class="n">Valor</th><th class="n">% da receita</th></tr></thead><tbody>
   ${dre.linhas.map((l) => `<tr class="${l.total ? 'total' : ''}"><td>${esc(l.rotulo)}</td><td class="n">${brl(l.valor)}</td><td class="n">${pct(l.percentual)}</td></tr>
     ${(l.detalhe ?? []).map((d) => `<tr class="det"><td>${esc(d.categoria)}</td><td class="n">${brl(d.valor)}</td><td></td></tr>`).join('')}`).join('')}
   </tbody></table>
@@ -158,7 +158,7 @@ export function montarDemonstrativoHtml(p: {
   const blocoLancamentos = grupos.length
     ? `<h2 class="quebra">Lançamentos do mês, para conferir linha a linha (${lancamentos.length})</h2>
   ${grupos.map((g) => `<h3>${esc(g.rotulo)} — ${brl(g.total)}</h3>
-  <table><thead><tr><th style="width:44px">Data</th><th>Descrição</th><th>Quem</th><th style="width:62px">Situação</th><th class="n" style="width:86px">Valor</th><th style="width:26px">✓</th></tr></thead><tbody>
+  <table class="lancs"><colgroup><col style="width:9%"><col style="width:38%"><col style="width:23%"><col style="width:11%"><col style="width:14%"><col style="width:5%"></colgroup><thead><tr><th>Data</th><th>Descrição</th><th>Quem</th><th>Situação</th><th class="n">Valor</th><th>✓</th></tr></thead><tbody>
   ${g.categorias.map((c) => `<tr class="cat"><td colspan="4">${esc(c.categoria)}</td><td class="n">${brl(c.total)}</td><td></td></tr>
     ${c.linhas.map((l) => `<tr><td>${diaMes(l.data)}</td><td>${esc(l.descricao)}</td><td>${esc(l.quem ?? '')}</td><td>${esc(SITUACAO[l.situacao ?? ''] ?? l.situacao ?? '')}</td><td class="n">${brl(l.valor)}</td><td class="caixa"></td></tr>`).join('')}`).join('')}
   </tbody></table>`).join('')}`
@@ -170,26 +170,29 @@ export function montarDemonstrativoHtml(p: {
 <meta charset="utf-8">
 <title>${esc(titulo)} — ${esc(empresa.nome)}</title>
 <style>
-  @page { size: A4; margin: 12mm; }
+  @page { size: A4; margin: 10mm; }
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; color: #10293a; font-size: 10.5px; margin: 0; }
+  html, body { width: 100%; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #10293a; font-size: 10px; margin: 0; }
   .topo { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #10293a; padding-bottom: 6px; }
   .topo h1 { margin: 0; font-size: 16px; }
   .topo .emp { font-size: 10px; color: #4b616f; }
   .selo { display: inline-block; margin-top: 3px; padding: 1px 6px; border: 1px solid #4b616f; border-radius: 3px; font-size: 9.5px; }
-  .resumo { display: flex; gap: 8px; margin: 10px 0 2px; }
-  .resumo div { flex: 1; border: 1px solid #cfd8da; border-radius: 4px; padding: 5px 7px; }
+  .resumo { display: flex; gap: 6px; margin: 10px 0 2px; }
+  .resumo div { flex: 1 1 0; min-width: 0; border: 1px solid #cfd8da; border-radius: 4px; padding: 5px 6px; }
   .resumo span { display: block; color: #4b616f; font-size: 9px; }
   .resumo b { font-size: 13px; }
-  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
-  th, td { border: 1px solid #cfd8da; padding: 3px 5px; text-align: left; vertical-align: top; }
+  /* Largura fixa por coluna e quebra dentro da célula: uma descrição longa do banco não empurra
+     a tabela para fora da folha (o dono imprimiu em 30/09 e as colunas saíram cortadas). */
+  table { width: 100%; max-width: 100%; border-collapse: collapse; margin-top: 4px; table-layout: fixed; }
+  th, td { border: 1px solid #cfd8da; padding: 3px 4px; text-align: left; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; }
+  table.lancs { font-size: 9px; }
   th { background: #eef2f3; font-size: 9.5px; }
   td.n, th.n { text-align: right; white-space: nowrap; }
   td.b { font-weight: bold; }
   tr.total td { background: #eef2f3; font-weight: bold; }
   tr.det td:first-child { padding-left: 16px; color: #4b616f; }
   tr.cat td { background: #f6f8f9; font-weight: bold; }
-  td.caixa { width: 26px; }
   h2 { font-size: 12px; margin: 14px 0 2px; }
   h3 { font-size: 11px; margin: 10px 0 0; }
   h2.quebra { page-break-before: always; }
