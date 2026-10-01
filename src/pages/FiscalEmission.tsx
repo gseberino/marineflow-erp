@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/PageHeader';
 // registrado como MF-AUD-069 (decompor). Montar aqui é o menor diff possível.
 import { NfseSection } from '@/components/fiscal/NfseSection';
 import { BaixaDaNotaAvulsaDialog } from '@/components/fiscal/BaixaDaNotaAvulsaDialog';
+import { CancelarNotaDialog, CartaDeCorrecaoDialog } from '@/components/fiscal/CancelarOuCorrigirNota';
 import { AddressFields } from '@/components/AddressFields';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
 import { ProductFormDialog } from '@/components/ProductFormDialog';
@@ -89,7 +90,6 @@ const PRESENCE_INDICATORS = [
   { value: 0, label: 'Não se aplica' },
 ];
 
-const MIN_JUSTIFICATION_LENGTH = 15; // mesmo mínimo exigido pela SEFAZ, checado de novo no backend
 
 const BRAZILIAN_STATES = [
   'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG',
@@ -513,9 +513,7 @@ export default function FiscalEmission() {
   const preflightOk = preflight.every((p) => p.ok);
 
   const [cancelTarget, setCancelTarget] = useState<{ id: string; authorized_at?: string | null } | null>(null);
-  const [cancelReason, setCancelReason] = useState('');
   const [correctionTarget, setCorrectionTarget] = useState<{ id: string; number?: number; series?: number } | null>(null);
-  const [correctionText, setCorrectionText] = useState('');
   // Documento cujo erro está sendo inspecionado no diálogo de detalhes.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [errorDetail, setErrorDetail] = useState<any | null>(null);
@@ -1589,50 +1587,6 @@ export default function FiscalEmission() {
     }
   };
 
-  const handleConfirmCancel = async () => {
-    if (!cancelTarget || cancelReason.trim().length < MIN_JUSTIFICATION_LENGTH) return;
-    markBusy(cancelTarget.id, true);
-    try {
-      const { data, error } = await supabase.functions.invoke('fiscal-emit', {
-        body: { action: 'cancel', document_id: cancelTarget.id, reason: cancelReason.trim() },
-      });
-      if (error) throw new Error(await extractInvokeErrorMessage(error));
-      if (data?.error) throw new Error(data.error);
-      toast.success('Cancelamento solicitado. Acompanhe o status.');
-      markBusy(cancelTarget.id, false);
-      setCancelTarget(null);
-      setCancelReason('');
-      qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
-    } catch (err: any) {
-      toast.error('Erro ao cancelar: ' + err.message);
-      markBusy(cancelTarget.id, false);
-    }
-  };
-
-  // Carta de Correção Eletrônica (CC-e): corrige erros que NÃO alteram valores,
-  // impostos, destinatário ou datas (ex.: endereço, observações). Prazo legal
-  // de 30 dias. O backend (action="correction") exige nota autorizada + mínimo
-  // de 15 caracteres.
-  const handleConfirmCorrection = async () => {
-    if (!correctionTarget || correctionText.trim().length < MIN_JUSTIFICATION_LENGTH) return;
-    markBusy(correctionTarget.id, true);
-    try {
-      const { data, error } = await supabase.functions.invoke('fiscal-emit', {
-        body: { action: 'correction', document_id: correctionTarget.id, text: correctionText.trim() },
-      });
-      if (error) throw new Error(await extractInvokeErrorMessage(error));
-      if (data?.error) throw new Error(data.error);
-      toast.success('Carta de Correção enviada. Acompanhe o status.');
-      markBusy(correctionTarget.id, false);
-      setCorrectionTarget(null);
-      setCorrectionText('');
-      qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
-    } catch (err: any) {
-      toast.error('Erro ao enviar a correção: ' + err.message);
-      markBusy(correctionTarget.id, false);
-    }
-  };
-
   // Abre DANFE/XML pelo proxy autenticado — as URLs de artefato da Contora
   // exigem o Bearer token, então não dá para abrir direto no navegador
   // ("Bearer token ausente"). O edge function busca com o token e devolve os
@@ -2246,7 +2200,7 @@ export default function FiscalEmission() {
                               ? [{ texto: 'Baixar estoque + gerar recebível', icone: Boxes, onClick: () => setSettleTarget(doc) }] : []),
                             ...(ehNfe ? [{
                               texto: 'Carta de correção (CC-e)', icone: Pencil,
-                              onClick: () => { setCorrectionTarget({ id: doc.id, number: doc.number, series: doc.series }); setCorrectionText(''); },
+                              onClick: () => setCorrectionTarget({ id: doc.id, number: doc.number, series: doc.series }),
                             }] : []),
                             { texto: 'Atualizar situação na SEFAZ', icone: RefreshCw, onClick: () => handleRefreshStatus(doc.id) },
                             {
@@ -3415,78 +3369,26 @@ export default function FiscalEmission() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Dialog: cancelar ── */}
-      <Dialog open={!!cancelTarget} onOpenChange={(o) => { if (!o) { setCancelTarget(null); setCancelReason(''); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Cancelar NF-e</DialogTitle>
-            <DialogDescription>Informe o motivo do cancelamento (a SEFAZ exige pelo menos {MIN_JUSTIFICATION_LENGTH} caracteres).</DialogDescription>
-          </DialogHeader>
-          {(() => {
-            // Janela padrão de cancelamento sem ônus: 24h após a autorização.
-            const authAt = cancelTarget?.authorized_at ? new Date(cancelTarget.authorized_at).getTime() : null;
-            const hrs = authAt ? (Date.now() - authAt) / 3_600_000 : null;
-            if (hrs == null) return null;
-            return hrs > 24 ? (
-              <p className="text-xs text-destructive bg-destructive/10 rounded-md p-2">
-                ⚠ Já se passaram {Math.floor(hrs)}h da autorização — o prazo de 24h para cancelamento sem ônus
-                venceu. A SEFAZ pode recusar o cancelamento; se for só corrigir um dado, use a CC-e.
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Dentro do prazo de 24h (autorizada há {Math.floor(hrs)}h{Math.round((hrs % 1) * 60)}min).
-              </p>
-            );
-          })()}
-          <Textarea value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="Ex.: Erro de digitação no endereço do destinatário" />
-          <p className={`text-xs ${cancelReason.trim().length < MIN_JUSTIFICATION_LENGTH ? 'text-muted-foreground' : 'text-success'}`}>
-            {cancelReason.trim().length}/{MIN_JUSTIFICATION_LENGTH} caracteres mínimos
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCancelTarget(null)}>Voltar</Button>
-            <Button
-              variant="destructive"
-              disabled={cancelReason.trim().length < MIN_JUSTIFICATION_LENGTH || (cancelTarget ? busyDocIds.has(cancelTarget.id) : false)}
-              onClick={handleConfirmCancel}
-            >
-              {cancelTarget && busyDocIds.has(cancelTarget.id) ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Confirmar Cancelamento
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Dialog: Carta de Correção (CC-e) ── */}
-      <Dialog open={!!correctionTarget} onOpenChange={(o) => { if (!o) { setCorrectionTarget(null); setCorrectionText(''); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Carta de Correção — NF-e {correctionTarget?.series}/{correctionTarget?.number}</DialogTitle>
-            <DialogDescription>
-              Corrija erros que <strong>não</strong> alteram valores, impostos, destinatário ou datas (ex.: endereço,
-              informações complementares). Prazo legal: 30 dias da emissão.
-            </DialogDescription>
-          </DialogHeader>
-          <Textarea
-            value={correctionText}
-            onChange={(e) => setCorrectionText(e.target.value)}
-            placeholder="Ex.: No campo Informações Complementares, onde se lê X, leia-se Y."
-            rows={4}
-          />
-          <p className={`text-xs ${correctionText.trim().length < MIN_JUSTIFICATION_LENGTH ? 'text-muted-foreground' : 'text-success'}`}>
-            {correctionText.trim().length}/{MIN_JUSTIFICATION_LENGTH} caracteres mínimos
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCorrectionTarget(null)}>Voltar</Button>
-            <Button
-              disabled={correctionText.trim().length < MIN_JUSTIFICATION_LENGTH || (correctionTarget ? busyDocIds.has(correctionTarget.id) : false)}
-              onClick={handleConfirmCorrection}
-            >
-              {correctionTarget && busyDocIds.has(correctionTarget.id) ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Enviar Correção
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Cancelar e Carta de Correção: componentes com o próprio texto, montados por nota (D33).
+          Antes o motivo digitado para uma nota aparecia ao abrir o cancelamento de outra. */}
+      {cancelTarget && (
+        <CancelarNotaDialog
+          key={cancelTarget.id}
+          alvo={cancelTarget}
+          ocupado={busyDocIds.has(cancelTarget.id)}
+          marcarOcupado={markBusy}
+          onClose={() => setCancelTarget(null)}
+        />
+      )}
+      {correctionTarget && (
+        <CartaDeCorrecaoDialog
+          key={correctionTarget.id}
+          alvo={correctionTarget}
+          ocupado={busyDocIds.has(correctionTarget.id)}
+          marcarOcupado={markBusy}
+          onClose={() => setCorrectionTarget(null)}
+        />
+      )}
 
       {/* ── Dialog: exportar XMLs do período (contadora) ── */}
       <Dialog open={showExport} onOpenChange={(o) => { if (!exporting) setShowExport(o); }}>
