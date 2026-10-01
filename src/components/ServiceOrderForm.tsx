@@ -19,6 +19,7 @@ import { useViaDoTecnico, viaHeaderFromOrder } from '@/hooks/use-via-do-tecnico'
 import { isoParaInputLocal, inputLocalParaIso } from '@/lib/datetime-local';
 import { AvisoAntesDaVia } from '@/components/service-order/aviso-antes-da-via';
 import { ViaEntryDialog } from '@/components/service-orders/ViaEntryDialog';
+import { printCommissioningSheet } from '@/lib/folha-comissionamento';
 import { useSOLinkedPOs, useUpdatePurchaseOrder } from '@/hooks/use-purchase-orders';
 import {
   useCreateServiceOrder,
@@ -93,7 +94,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, AlertTriangle, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Copy, Download, Loader2, DollarSign, Percent, Hash, MoreHorizontal, ClipboardPen } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, AlertTriangle, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Copy, Download, Loader2, DollarSign, Percent, Hash, MoreHorizontal, ClipboardPen, ClipboardCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
@@ -140,6 +141,21 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const [lancarViaAberto, setLancarViaAberto] = useState(false);
   const imprimirVia = () => {
     if (!viaDoTecnico.imprimir()) toast.error('O navegador bloqueou a janela de impressão. Libere o pop-up e tente de novo.');
+  };
+  // Folha de comissionamento (versão de teste): um bloco por equipamento reconhecido nas
+  // peças da OS, identificação já preenchida, valores sempre do manual do modelo.
+  const imprimirComissionamento = () => {
+    const via = viaHeaderFromOrder(orderData);
+    const veiculo = [via.assetType, [via.assetMaker, via.assetModel].filter(Boolean).join(' '), via.assetName]
+      .filter(Boolean).join(' · ');
+    const ok = printCommissioningSheet(
+      {
+        orderNumber: via.orderNumber, vehicle: veiculo, clientName: via.clientName,
+        technicianName: via.technicianName, companyName: appSettings?.company_name || null,
+      },
+      ((parts || []) as any[]).map((p) => ({ name: p.products?.name || 'Item sem cadastro', quantity: p.quantity })),
+    );
+    if (!ok) toast.error('O navegador bloqueou a janela de impressão. Libere o pop-up e tente de novo.');
   };
   const issRatePct = Number(appSettings?.iss_rate_pct ?? 5) || 0;
   // Padrão da empresa para a validade (app_settings, senão 15) — pela função única do PDF,
@@ -2015,6 +2031,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   {orderId && (
                     <DropdownMenuItem onClick={() => setLancarViaAberto(true)} className="gap-2">
                       <ClipboardPen className="h-4 w-4" /> Lançar a via
+                    </DropdownMenuItem>
+                  )}
+                  {orderId && (
+                    <DropdownMenuItem onClick={imprimirComissionamento} className="gap-2">
+                      <ClipboardCheck className="h-4 w-4" /> Folha de comissionamento
                     </DropdownMenuItem>
                   )}
 

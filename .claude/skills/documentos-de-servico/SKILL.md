@@ -35,6 +35,35 @@ Regras que os testes guardam:
   cliente"), nunca recado para o escritório.
 - Hora de agendamento: o formulário converte com `src/lib/datetime-local.ts`. Mandar o texto
   do `datetime-local` direto gravava a hora local como UTC (3 h de diferença).
+- Roteiro: a via (menu Ações) leva só a segurança de cada sistema (`passosDeSeguranca`);
+  o painel Roteiro imprime o roteiro completo.
+
+Fase 2 (01/10/2026), campos que só existem para a via:
+- `service_orders.technician_instructions` ("Instrução ao técnico") e `site_access` ("Local do
+  serviço e acesso", sugerido de `vessels.access_notes`).
+- `service_order_services.technician_instructions`, `field_status` (a_fazer, so_levantar,
+  aguarda_peca, feito, parcial, nao_feito) e `field_status_note` — controle "Na via do
+  técnico" embaixo de cada linha (`line-via-tecnico.tsx`).
+- Contato no local = `requested_by_contact_id` → `vessel_contacts` (nome, função, telefone).
+- Antes de imprimir, `faltasDaVia` lista o que vai faltar no papel (`aviso-antes-da-via.tsx`).
+- Volta do papel: "Lançar a via" (`ViaEntryDialog` + `use-lancar-via`). O relato entra
+  EMBAIXO das notas do técnico, com data; a tela da OS recebe as notas novas para o
+  salvamento automático não desfazê-las.
+
+### Folha de comissionamento (versão de teste)
+
+`src/lib/folha-comissionamento.ts`, menu Ações → "Folha de comissionamento". Um bloco por
+equipamento reconhecido pelo nome das peças da OS (`tipoDeEquipamento`: DC-DC, carregador,
+inversor, MPPT, lítio, nessa ordem), identificação preenchida, coluna "Esperado (manual,
+pág.)" em toda linha — NUNCA valor de torque/tensão/corrente fixo (regra do dono). Serve a
+todas as marcas. Instrumentos da HBR: multímetro + alicate DC, torquímetro, testador Ikro,
+scanner Multimec X3. Registro dos valores no sistema (5c) espera o teste em campo.
+
+### Atenção: o portal do cliente lê `select('*')` como anon
+
+`PublicServiceOrderView` lê `service_orders`, `vessels` e `service_order_parts` com `*`.
+Custos, comissão, notas internas e as colunas da via chegam ao navegador do cliente (não
+aparecem na tela). Achado em 01/10/2026, aguardando decisão do dono.
 
 ## A distinção que importa
 
