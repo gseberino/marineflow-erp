@@ -16,9 +16,11 @@
 
 begin;
 
--- Sem isto, um erro no meio deixaria a transação num estado em que o ROLLBACK final é a
--- única coisa que roda — e o resultado sairia parecendo sucesso.
-\set ON_ERROR_STOP on
+-- Um erro no meio precisa PARAR tudo; senão o ROLLBACK final seria a única coisa a rodar e o
+-- resultado pareceria sucesso. Pelo `supabase db query` isso já acontece (o primeiro erro aborta
+-- o arquivo). Pelo psql, rode com `-v ON_ERROR_STOP=1`. (Havia aqui um `\set ON_ERROR_STOP on`,
+-- comando do psql que o `db query` não entende: o teste não rodava do jeito que este cabeçalho
+-- ensina. Tirado em 01/10/2026.)
 
 do $$
 declare
@@ -32,7 +34,7 @@ begin
   -- ── Dois usuários de mentira, um de cada lado da fronteira ────────────────────
   -- `app_users.id` referencia auth.users em produção; inserir direto aqui funciona porque a
   -- transação inteira é desfeita e nenhuma FK é validada contra auth no meio do caminho.
-  insert into public.app_users (id, role, active, name, email)
+  insert into public.app_users (id, role, active, full_name, email)
   values
     (v_tecnico, 'technician', true, 'Técnico de teste', 'tecnico.teste@invalido.local'),
     (v_admin,   'admin',      true, 'Admin de teste',   'admin.teste@invalido.local');
