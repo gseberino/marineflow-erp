@@ -47,6 +47,25 @@ export interface RouteSheetExtras {
     skipped?: string | null;
     photoUrl?: string | null;
   }>;
+  /**
+   * Quanto do roteiro vai para o papel. `seguranca` (a via do menu Ações) leva só os
+   * blocos "antes de mexer" e "antes de entregar" de cada sistema — os passos genéricos de
+   * execução ficam de fora (decisão do dono, 01/10/2026). `completo` (o painel Roteiro)
+   * imprime todos, para o roteiro continuar sendo testado à parte.
+   */
+  roteiro?: 'seguranca' | 'completo';
+}
+
+/**
+ * Os passos de segurança do roteiro: abertura e fechamento de cada sistema. Roteiro antigo,
+ * sem chave de bloco, contribui só com os passos marcados como segurança.
+ */
+export function passosDeSeguranca(steps: ServiceOrderStep[]): ServiceOrderStep[] {
+  return steps.filter((s) => {
+    const chave = s.block_key ?? '';
+    if (chave) return chave.startsWith('abertura:') || chave.startsWith('fechamento:');
+    return s.kind === 'safety';
+  });
 }
 
 /** Azul-marinho da HBR, o mesmo do PDF que o cliente já recebe. */
@@ -197,7 +216,9 @@ export function buildRouteSheetHtml(
   extras: RouteSheetExtras = {},
 ): string {
   // Sugestão da IA ainda não aprovada não é roteiro: não vai para o papel.
-  const passos = steps.filter((s) => !isAiDraft(s));
+  const aprovados = steps.filter((s) => !isAiDraft(s));
+  const soSeguranca = extras.roteiro === 'seguranca';
+  const passos = soSeguranca ? passosDeSeguranca(aprovados) : aprovados;
   const groups = groupStepsByBlock(passos);
   const numero = escapeHtml(header.orderNumber);
 
@@ -353,8 +374,10 @@ export function buildRouteSheetHtml(
 
   const roteiroHtml = passos.length ? `
     <div class="secao">
-      <div class="sectitle">Roteiro de execução</div>
-      <div class="roteironote">Marque cada passo ao terminar, nunca antes. Interrompido? Volte três
+      <div class="sectitle">${soSeguranca ? 'Segurança por sistema' : 'Roteiro de execução'}</div>
+      <div class="roteironote">${soSeguranca
+        ? 'Antes de mexer e antes de entregar, em cada sistema tocado. '
+        : ''}Marque cada passo ao terminar, nunca antes. Interrompido? Volte três
         passos e confira antes de seguir. Travou? Anote o motivo ao lado do passo.</div>
     </div>
     ${blocksHtml}` : '';
@@ -474,7 +497,7 @@ export function buildRouteSheetHtml(
         ${header.companyName ? `<span class="coname">${escapeHtml(header.companyName)}</span>` : ''}
       </div>
       <div class="doctype">
-        <div class="kind">Via do técnico</div>
+        <div class="kind">${soSeguranca || !passos.length ? 'Via do técnico' : 'Via do técnico · roteiro completo'}</div>
         <div class="num">${numero}</div>
       </div>
     </div>

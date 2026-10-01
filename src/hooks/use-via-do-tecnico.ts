@@ -56,7 +56,11 @@ export function useViaDoTecnico(serviceOrderId: string | undefined, header: ViaD
   const { data: survey } = useServiceOrderSurvey(serviceOrderId);
   const { data: settings } = useAppSettings();
 
-  const imprimir = useCallback((): boolean => {
+  /**
+   * `via` (menu Ações): a folha do técnico, com só a segurança de cada sistema do roteiro.
+   * `roteiro` (painel Roteiro): a mesma folha com o roteiro completo, para testá-lo à parte.
+   */
+  const imprimir = useCallback((modo: 'via' | 'roteiro' = 'via'): boolean => {
     const cabecalho: RouteSheetHeader = {
       ...header,
       orderNumber: header.orderNumber || 'OS',
@@ -66,6 +70,7 @@ export function useViaDoTecnico(serviceOrderId: string | undefined, header: ViaD
       companyPhone: settings?.phone || null,
     };
     const extras: RouteSheetExtras = {
+      roteiro: modo === 'via' ? 'seguranca' : 'completo',
       services: ((services ?? []) as any[]).map((s) => ({
         id: s.id ?? null,
         name: s.name_snapshot || s.services?.name || 'Serviço',

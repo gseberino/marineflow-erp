@@ -130,7 +130,9 @@ export function ServiceRoutePanel({
   }
 
   function handlePrint() {
-    const ok = viaDoTecnico.imprimir();
+    // Aqui sai o roteiro inteiro, para testar o roteiro à parte; a via do menu Ações leva
+    // só a segurança de cada sistema.
+    const ok = viaDoTecnico.imprimir('roteiro');
     if (!ok) toast.error('O navegador bloqueou a janela de impressão. Libere o pop-up e tente de novo.');
   }
 
@@ -157,7 +159,7 @@ export function ServiceRoutePanel({
             <Wand2 className="h-4 w-4 mr-1.5" /> Gerar do catálogo
           </Button>
           <Button size="sm" variant="outline" onClick={handlePrint} disabled={steps.length === 0}>
-            <Printer className="h-4 w-4 mr-1.5" /> Imprimir folha
+            <Printer className="h-4 w-4 mr-1.5" /> Imprimir roteiro completo
           </Button>
           <Button
             size="sm" variant="outline"

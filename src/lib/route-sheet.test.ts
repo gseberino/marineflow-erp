@@ -318,3 +318,39 @@ describe('via do técnico — folha de rosto e volta (avaliação 01/10)', () =>
     expect(html).toContain('"OS-00104 · pág. " counter(page) " de " counter(pages)');
   });
 });
+
+/**
+ * Decisão do dono, 01/10/2026: a via do menu Ações leva só a segurança de cada sistema;
+ * o roteiro completo continua saindo pelo painel Roteiro, para ser testado à parte.
+ */
+describe('via do técnico — roteiro só com a segurança de cada sistema', () => {
+  const roteiro = [
+    step({ id: 'a', seq: 1, block: '1 · Antes de mexer — Hidráulico', block_key: 'abertura:hidraulico', title: 'Fechar o registro' }),
+    step({ id: 'b', seq: 2, block: '2 · Troca do cano', block_key: 'linha:x', title: 'Confirmar que a peça nova é equivalente' }),
+    step({ id: 'c', seq: 3, block: '3 · Antes de entregar — Hidráulico', block_key: 'fechamento:hidraulico', title: 'Reabrir o registro devagar' }),
+  ];
+
+  it('na via, ficam a abertura e o fechamento do sistema; o corpo genérico sai', () => {
+    const html = buildRouteSheetHtml(header, roteiro, [], { roteiro: 'seguranca' });
+    expect(html).toContain('Segurança por sistema');
+    expect(html).toContain('Fechar o registro');
+    expect(html).toContain('Reabrir o registro devagar');
+    expect(html).not.toContain('Confirmar que a peça nova é equivalente');
+  });
+
+  it('roteiro antigo, sem chave de bloco, contribui só com passos de segurança', () => {
+    const html = buildRouteSheetHtml(header, [
+      step({ id: 'd', kind: 'safety', title: 'Desligar a chave geral' }),
+      step({ id: 'e', seq: 2, kind: 'do', title: 'Instalar o inversor' }),
+    ], [], { roteiro: 'seguranca' });
+    expect(html).toContain('Desligar a chave geral');
+    expect(html).not.toContain('Instalar o inversor');
+  });
+
+  it('no painel Roteiro, sai tudo, para testar o roteiro à parte', () => {
+    const html = buildRouteSheetHtml(header, roteiro, [], { roteiro: 'completo' });
+    expect(html).toContain('Roteiro de execução');
+    expect(html).toContain('roteiro completo');
+    expect(html).toContain('Confirmar que a peça nova é equivalente');
+  });
+});
