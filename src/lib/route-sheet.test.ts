@@ -77,17 +77,20 @@ describe('folha A4 do roteiro', () => {
     expect(html).toContain('Passo &amp; teste &lt;b&gt;');
   });
 
-  it('imprime aviso claro quando não há roteiro, em vez de folha em branco', () => {
+  it('sem roteiro, a seção some — nada de recado para o escritório na folha do técnico', () => {
     const html = buildRouteSheetHtml(header, []);
-    expect(html).toContain('ainda não tem roteiro gerado');
+    expect(html).not.toContain('ainda não tem roteiro');
+    expect(html).not.toContain('Roteiro de execução');
+    expect(html).toContain('Chegada');
   });
 
-  it('soma o tempo previsto no cabeçalho', () => {
+  it('não imprime soma de tempo padrão como se fosse a estimativa da OS', () => {
     const html = buildRouteSheetHtml(header, [
       step({ id: 'a', standard_minutes: 45 }),
       step({ id: 'b', standard_minutes: 90 }),
     ]);
-    expect(html).toContain('Previsto: <b>2h15</b>');
+    expect(html).not.toContain('Previsto:');
+    expect(html).not.toContain('2h15');
   });
 
   it('sempre traz as duas assinaturas e a instrução do que fazer ao travar', () => {
@@ -125,7 +128,7 @@ describe('folha do roteiro — marca, anotações e materiais', () => {
 
   it('lista a separação de materiais com quantidade, unidade e SKU', () => {
     const html = buildRouteSheetHtml(header, [step()], [material()]);
-    expect(html).toContain('Separação de materiais');
+    expect(html).toContain('separação de materiais');
     expect(html).toContain('2 m');
     expect(html).toContain('Cabo 16mm² preto');
     expect(html).toContain('CB-16-PT');
@@ -148,7 +151,7 @@ describe('folha do roteiro — marca, anotações e materiais', () => {
     );
     // Aparece só na separação geral, nunca como material da etapa.
     expect(html).not.toContain('Material desta etapa:');
-    expect(html).toContain('Separação de materiais');
+    expect(html).toContain('separação de materiais');
   });
 
   it('escreve o escopo do bloco compartilhado, que era o que faltava', () => {
@@ -180,7 +183,7 @@ describe('folha do roteiro — marca, anotações e materiais', () => {
         { question: 'Há espaço no painel?', skipped: 'não deu para abrir' },
       ],
     });
-    expect(html).toContain('Serviços contratados');
+    expect(html).toContain('Serviços desta OS');
     expect(html).toContain('Instalação de inversor');
     expect(html).toContain('× 2 un');
     expect(html).toContain('Victron 3000VA');
@@ -194,7 +197,124 @@ describe('folha do roteiro — marca, anotações e materiais', () => {
 
   it('sem serviços nem levantamento, as seções novas simplesmente não aparecem', () => {
     const html = buildRouteSheetHtml(header, [step()], []);
-    expect(html).not.toContain('Serviços contratados');
+    expect(html).not.toContain('Serviços desta OS');
     expect(html).not.toContain('>Levantamento<');
+  });
+});
+
+/**
+ * Avaliação de 01/10/2026: a via imprimia só o nome dos serviços e deixava de fora o que
+ * já estava no sistema. Estes testes guardam o que o técnico precisa ler sem poder ligar.
+ */
+describe('via do técnico — folha de rosto e volta (avaliação 01/10)', () => {
+  const rosto = {
+    orderNumber: 'OS-00104',
+    clientName: 'Flávio',
+    clientPhone: '(47) 99999-0000',
+    clientWhatsapp: '47 99999-0000',
+    requestedBy: 'Marinheiro João',
+    assetName: 'Itapoã',
+    assetType: 'Motorhome',
+    assetMaker: 'Itapoã',
+    assetModel: 'Sprinter',
+    marinaName: 'Marina Itajaí',
+    dockPosition: 'B-12',
+    scheduledAt: '2026-09-28T12:00:00Z',
+    problemDescription: 'Converter a geladeira para 12V\nSinal na aprovação: R$ 1.500,00\nCortesia: LED 12V',
+    companyPhone: '(47) 3333-0000',
+  };
+
+  it('traz veículo, local, vaga e com quem falar — tudo que já está no cadastro', () => {
+    const html = buildRouteSheetHtml(rosto, []);
+    expect(html).toContain('Motorhome · Itapoã Sprinter');
+    expect(html).toContain('Marina Itajaí · vaga B-12');
+    // Mesmo número no telefone e no WhatsApp sai uma vez só.
+    expect(html).toContain('tel./WhatsApp (47) 99999-0000');
+    expect(html).toContain('Pedido por: <b>Marinheiro João</b>');
+    expect(html).toContain('Escritório: <b>(47) 3333-0000</b>');
+  });
+
+  it('imprime o pedido do cliente e corta toda linha com valor em reais', () => {
+    const html = buildRouteSheetHtml(rosto, []);
+    expect(html).toContain('Pedido do cliente');
+    expect(html).toContain('Converter a geladeira para 12V');
+    expect(html).toContain('Cortesia: LED 12V');
+    expect(html).not.toContain('R$');
+    expect(html).not.toContain('1.500');
+  });
+
+  it('corta valor também do texto dos serviços', () => {
+    const html = buildRouteSheetHtml(rosto, [], [], {
+      services: [{ name: 'Instalação', notes: 'Trocar o inversor\nValor da mão de obra: R$ 900,00' }],
+    });
+    expect(html).toContain('Trocar o inversor');
+    expect(html).not.toMatch(/R\$\s?\d/);
+  });
+
+  it('nunca leva o link do portal do cliente, que mostra preço', () => {
+    const html = buildRouteSheetHtml(rosto, [step()]);
+    expect(html).not.toContain('/view/');
+    expect(html).not.toContain('OS no sistema');
+  });
+
+  it('avisa quando não há material lançado, em vez de sumir com a seção', () => {
+    const html = buildRouteSheetHtml(rosto, []);
+    expect(html).toContain('Nenhum material lançado nesta OS');
+  });
+
+  it('diz onde falta informação, para o técnico confirmar antes de sair', () => {
+    const html = buildRouteSheetHtml({ orderNumber: 'OS-1', clientName: 'Sem fone' }, []);
+    expect(html).toContain('Local não informado na OS');
+    expect(html).toContain('sem telefone no cadastro');
+    expect(html).toContain('A combinar com o escritório');
+  });
+
+  it('não imprime término anterior ao início', () => {
+    const html = buildRouteSheetHtml(
+      { ...rosto, scheduledAt: '2026-09-28T12:00:00Z', scheduledEndAt: '2026-09-24T21:00:00Z' },
+      [],
+    );
+    expect(html).not.toContain('→');
+  });
+
+  it('escreve a regra de escopo: achado fora da lista não se executa sem aprovação', () => {
+    const html = buildRouteSheetHtml(rosto, []);
+    expect(html).toContain('Achou outro defeito ou algo fora desta lista?');
+    expect(html).toContain('não execute');
+  });
+
+  it('cada serviço tem a volta: feito, parcial ou não feito, e o material dele', () => {
+    const html = buildRouteSheetHtml(rosto, [], [
+      { id: 'm1', quantity: 1, notes: null, service_order_service_id: 'linha-1',
+        products: { name: 'Compressor 12V', sku: null, unit: 'un' } },
+    ], { services: [{ id: 'linha-1', name: 'Conversão para 12V' }] });
+    expect(html).toContain('1 · Conversão para 12V');
+    expect(html).toContain('Material deste serviço:');
+    expect(html).toContain('não feito');
+    expect(html).toContain('parcial');
+  });
+
+  it('passo feito no sistema sai marcado; sugestão da IA não aprovada não sai', () => {
+    const html = buildRouteSheetHtml(rosto, [
+      step({ id: 'a', seq: 1, title: 'Desligar o disjuntor geral', status: 'done' }),
+      step({ id: 'b', seq: 2, title: 'Passo que a IA sugeriu', origin: 'ai' as any }),
+    ]);
+    expect(html).toContain('Feito (registrado no sistema)');
+    expect(html).toContain('✓');
+    expect(html).not.toContain('Passo que a IA sugeriu');
+  });
+
+  it('assinatura do cliente diz o que ele atesta, com nome, data e hora', () => {
+    const html = buildRouteSheetHtml(rosto, []);
+    expect(html).toContain('Recebi os serviços marcados como feitos acima, testados na minha presença.');
+    expect(html).toContain('Nome legível');
+    expect(html).toContain('hora ____:____');
+    expect(html).toContain('Chegada');
+    expect(html).toContain('Saída');
+  });
+
+  it('número da OS e página em toda folha impressa', () => {
+    const html = buildRouteSheetHtml(rosto, []);
+    expect(html).toContain('"OS-00104 · pág. " counter(page) " de " counter(pages)');
   });
 });

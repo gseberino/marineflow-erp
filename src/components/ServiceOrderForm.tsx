@@ -15,7 +15,8 @@ import { useProducts } from '@/hooks/use-products';
 import { useServices } from '@/hooks/use-services';
 import { useCardFees } from '@/hooks/use-card-fees';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { useViaDoTecnico } from '@/hooks/use-via-do-tecnico';
+import { useViaDoTecnico, viaHeaderFromOrder } from '@/hooks/use-via-do-tecnico';
+import { isoParaInputLocal, inputLocalParaIso } from '@/lib/datetime-local';
 import { useSOLinkedPOs, useUpdatePurchaseOrder } from '@/hooks/use-purchase-orders';
 import {
   useCreateServiceOrder,
@@ -132,15 +133,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const { data: appSettings } = useAppSettings();
   // Via do técnico (job card): a folha de roteiro terminada — roteiro, materiais, serviços
   // contratados e levantamento com fotos, sem preço. Mesmo documento do painel de Roteiro.
-  const viaDoTecnico = useViaDoTecnico(orderId, {
-    orderNumber: orderData?.service_order_number,
-    clientName: (orderData?.clients as any)?.name,
-    assetName: (orderData?.vessels as any)?.name,
-    marinaName: (orderData as any)?.marinas?.name,
-    technicianName: (orderData as any)?.service_order_technicians?.[0]?.app_users?.full_name,
-    scheduledAt: (orderData as any)?.scheduled_start_at,
-    shareUrl: orderData?.share_token ? `${window.location.origin}/view/${orderData.share_token}` : null,
-  });
+  const viaDoTecnico = useViaDoTecnico(orderId, viaHeaderFromOrder(orderData));
   const issRatePct = Number(appSettings?.iss_rate_pct ?? 5) || 0;
   // Padrão da empresa para a validade (app_settings, senão 15) — pela função única do PDF,
   // a mesma do envio pela tela, do portal e do assistente.
@@ -649,8 +642,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         customer_po_number: d.customer_po_number || '',
         customer_buyer_name: d.customer_buyer_name || '',
         requested_by_contact_id: d.requested_by_contact_id || '',
-        scheduled_start_at: d.scheduled_start_at ? d.scheduled_start_at.slice(0, 16) : '',
-        scheduled_end_at: d.scheduled_end_at ? d.scheduled_end_at.slice(0, 16) : '',
+        scheduled_start_at: isoParaInputLocal(d.scheduled_start_at),
+        scheduled_end_at: isoParaInputLocal(d.scheduled_end_at),
         problem_description: d.problem_description || '',
         initial_findings: d.initial_findings || '',
         diagnosis: d.diagnosis || '',
@@ -806,8 +799,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     const uuidOrNull = (v: string | null | undefined) => (v && v.trim() !== '' ? v : null);
     return {
       ...formForSave,
-      scheduled_start_at: form.scheduled_start_at || null,
-      scheduled_end_at: form.scheduled_end_at || null,
+      scheduled_start_at: inputLocalParaIso(form.scheduled_start_at),
+      scheduled_end_at: inputLocalParaIso(form.scheduled_end_at),
       commissioned_user_id: uuidOrNull(form.commissioned_user_id),
       requested_by_contact_id: uuidOrNull(form.requested_by_contact_id),
       marina_id: uuidOrNull(form.marina_id),
@@ -835,8 +828,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
       const payload = {
         ...formForSave,
-        scheduled_start_at: form.scheduled_start_at || null,
-        scheduled_end_at: form.scheduled_end_at || null,
+        scheduled_start_at: inputLocalParaIso(form.scheduled_start_at),
+        scheduled_end_at: inputLocalParaIso(form.scheduled_end_at),
         commissioned_user_id: uuidOrNull(form.commissioned_user_id),
         requested_by_contact_id: uuidOrNull(form.requested_by_contact_id),
         marina_id: uuidOrNull(form.marina_id),
@@ -1585,7 +1578,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       await addTime.mutateAsync({
         service_order_id: orderId,
         ...timeForm,
-        ended_at: timeForm.ended_at || undefined,
+        started_at: inputLocalParaIso(timeForm.started_at),
+        ended_at: inputLocalParaIso(timeForm.ended_at) ?? undefined,
       });
       setTimeForm({ technician_user_id: '', started_at: '', ended_at: '', duration_minutes: 0, billable: true, notes: '' });
       setShowTimeForm(false);

@@ -12,8 +12,29 @@ description: Quais documentos uma ordem de serviço gera, o que entra em cada um
 | **Ordem de serviço** | cliente, depois | sim |
 | **Fatura** | cliente/financeiro | sim |
 | **Recibo** | cliente, no pagamento | sim |
-| **Folha de roteiro** | técnico, em campo | sim, pelo painel de roteiro |
-| **Via da equipe técnica** | técnico, em campo | a construir |
+| **Via do técnico** (a folha de roteiro terminada) | técnico, em campo | sim — menu Ações da OS e painel de Roteiro |
+
+### Via do técnico — como é montada hoje (01/10/2026)
+
+`src/lib/route-sheet.ts` (`buildRouteSheetHtml`) + `src/hooks/use-via-do-tecnico.ts`
+(`viaHeaderFromOrder` é o único montador do cabeçalho; os dois botões usam o mesmo).
+Ordem da folha: rosto (veículo, quando, onde, com quem falar, pedido do cliente) → antes de
+sair (materiais, ou o aviso de que não há nenhum) → limite de escopo → um cartão por serviço
+com a volta (feito / parcial / não feito) → levantamento → roteiro, se houver → chegada e
+saída, relato, material extra, assinaturas com o que o cliente atesta. Número da OS e
+"pág. X de Y" pelo `@page`.
+
+Regras que os testes guardam:
+- **Linha com R$ não sai** (`semValores`), nem da descrição nem do texto dos serviços.
+- **As observações da OS (`extra_notes`) não saem**: carregam condição de pagamento e, em
+  algumas OS, valores. Ressalva técnica vai para a instrução ao técnico (fase 2 da avaliação).
+- **O link do portal do cliente (`/view/<token>`) não sai**: a página mostra preço e o botão
+  "Aprovar e Assinar".
+- Sugestão da IA não aprovada não vai para o papel; passo já feito sai marcado.
+- Campo vazio vira frase para o técnico ("Local não informado na OS. Confirme com o
+  cliente"), nunca recado para o escritório.
+- Hora de agendamento: o formulário converte com `src/lib/datetime-local.ts`. Mandar o texto
+  do `datetime-local` direto gravava a hora local como UTC (3 h de diferença).
 
 ## A distinção que importa
 

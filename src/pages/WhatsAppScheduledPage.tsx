@@ -35,6 +35,7 @@ import {
   type ScheduledSend, type ScheduledSendStatus,
 } from '@/hooks/use-whatsapp-scheduled';
 import { useAuth } from '@/hooks/use-auth';
+import { isoParaInputLocal } from '@/lib/datetime-local';
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -84,9 +85,9 @@ function EditScheduleDialog({
   onClose: () => void;
 }) {
   const update = useUpdateScheduledSend();
-  const [scheduledAt, setScheduledAt] = useState(
-    job.scheduled_at ? job.scheduled_at.slice(0, 16) : ''
-  );
+  // Hora local no campo: cortar o texto do banco mostraria a hora UTC, e salvar sem mexer
+  // empurraria o envio 3 horas para frente.
+  const [scheduledAt, setScheduledAt] = useState(isoParaInputLocal(job.scheduled_at));
   const [message, setMessage] = useState(job.message || '');
 
   const handleSave = async () => {

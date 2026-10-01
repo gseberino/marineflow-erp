@@ -29,7 +29,7 @@ const SO_SELECT = `
 const SO_DETAIL_SELECT = `
   *,
   clients(name, phone, whatsapp, email),
-  vessels(name, manufacturer, model, current_dock_position),
+  vessels(name, manufacturer, model, current_dock_position, asset_type),
   marinas(name, latitude, longitude),
   service_order_parts(*, products(*)),
   service_order_services(*, services(name)),
@@ -68,7 +68,7 @@ const SO_DETAIL_SELECT_TECNICO = `
   cancelled_at, cancellation_reason, reopened_at, reopen_reason, reminder_sent_at,
   created_by, created_at, updated_at,
   clients(name, phone, whatsapp, email),
-  vessels(name, manufacturer, model, current_dock_position),
+  vessels(name, manufacturer, model, current_dock_position, asset_type),
   marinas(name, latitude, longitude),
   service_order_parts_tecnico(*, products(id, name, sku, image_url, unit)),
   service_order_services_tecnico(*, services(name)),

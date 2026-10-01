@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
 import { ServiceRoutePanel } from '@/components/service-orders/ServiceRoutePanel';
+import { viaHeaderFromOrder } from '@/hooks/use-via-do-tecnico';
 import { SurveyPanel } from '@/components/service-orders/SurveyPanel';
 
 function TimelineTab({ id }: { id: string }) {
@@ -139,12 +140,7 @@ export default function ServiceOrderDetail() {
           <ServiceRoutePanel
             serviceOrderId={id}
             orderNumber={order?.service_order_number}
-            clientName={order?.clients?.name}
-            assetName={order?.vessels?.name}
-            marinaName={order?.marinas?.name}
-            technicianName={order?.service_order_technicians?.[0]?.app_users?.full_name}
-            scheduledAt={order?.scheduled_start_at}
-            shareUrl={order?.share_token ? `${window.location.origin}/view/${order.share_token}` : null}
+            viaHeader={viaHeaderFromOrder(order)}
           />
         </div>
       </TabsContent>

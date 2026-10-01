@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { StepFocusMode } from './StepFocusMode';
 import { SheetEntryDialog } from './SheetEntryDialog';
-import { useViaDoTecnico } from '@/hooks/use-via-do-tecnico';
+import { useViaDoTecnico, type ViaDoTecnicoHeader } from '@/hooks/use-via-do-tecnico';
 import { LineSystemPicker } from '@/components/service-order/line-system-picker';
 import {
   useServiceOrderSteps, useGenerateSteps, useReorderSteps, useDeleteStep,
@@ -55,18 +55,12 @@ function StatusPill({ step }: { step: ServiceOrderStep }) {
  * O técnico usa o Modo Foco; aqui é a visão de quem planeja e confere.
  */
 export function ServiceRoutePanel({
-  serviceOrderId, orderNumber, clientName, assetName, assetType, marinaName,
-  technicianName, scheduledAt, shareUrl,
+  serviceOrderId, orderNumber, viaHeader,
 }: {
   serviceOrderId: string | undefined;
   orderNumber?: string;
-  clientName?: string | null;
-  assetName?: string | null;
-  assetType?: string | null;
-  marinaName?: string | null;
-  technicianName?: string | null;
-  scheduledAt?: string | null;
-  shareUrl?: string | null;
+  /** Cabeçalho da via do técnico — `viaHeaderFromOrder(order)`, o mesmo do menu Ações. */
+  viaHeader?: ViaDoTecnicoHeader;
 }) {
   const { data: steps = [], isLoading } = useServiceOrderSteps(serviceOrderId);
   const { data: reasons = [] } = useStopReasons();
@@ -74,9 +68,7 @@ export function ServiceRoutePanel({
   const { data: settings } = useAppSettings();
   // A via do técnico completa (roteiro + materiais + serviços + levantamento), a mesma que o
   // menu Ações da OS imprime.
-  const viaDoTecnico = useViaDoTecnico(serviceOrderId, {
-    orderNumber, clientName, assetName, assetType, marinaName, technicianName, scheduledAt, shareUrl,
-  });
+  const viaDoTecnico = useViaDoTecnico(serviceOrderId, { orderNumber, ...viaHeader });
   // Serviço genérico ("diagnóstico no local") só ganha bloco de segurança
   // depois que alguém disser qual sistema ele toca NESTA OS.
   const { data: semSistema = [] } = useLinesMissingSystem(serviceOrderId);
