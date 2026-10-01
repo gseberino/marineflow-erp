@@ -59,11 +59,25 @@ pág.)" em toda linha — NUNCA valor de torque/tensão/corrente fixo (regra do 
 todas as marcas. Instrumentos da HBR: multímetro + alicate DC, torquímetro, testador Ikro,
 scanner Multimec X3. Registro dos valores no sistema (5c) espera o teste em campo.
 
-### Atenção: o portal do cliente lê `select('*')` como anon
+### O link público da OS só lê colunas do cliente (corrigido em 01/10/2026)
 
-`PublicServiceOrderView` lê `service_orders`, `vessels` e `service_order_parts` com `*`.
-Custos, comissão, notas internas e as colunas da via chegam ao navegador do cliente (não
-aparecem na tela). Achado em 01/10/2026, aguardando decisão do dono.
+`PublicServiceOrderView` e o PDF do portal (`carregarPDFData(id, sb, { publico: true })`)
+pedem só as colunas de `supabase/functions/_shared/pdf/colunas-publicas.ts`. No banco
+(migration `20261001230000`), o anon tem SELECT **por coluna** nas 10 tabelas que o link
+alcança — todas menos `COLUNAS_INTERNAS` (custo de peça, comissão, notas internas, custo e
+margem de produto, taxa de cartão…). Consequências:
+- **`select('*')` como anon dá 42501.** Qualquer leitura nova pelo link precisa de colunas
+  explícitas.
+- **Coluna nova nessas tabelas nasce fechada para o anon.** Se o portal precisar dela,
+  incluir em `colunas-publicas.ts` E numa migration que faça o grant.
+- Nomes enganosos: `labor_cost_total`, `parts_cost_total`, `operational_cost_total`,
+  `subcontract_cost_total` de `service_orders` são valores de VENDA (entram no subtotal); as
+  notas do técnico e as observações financeiras saem no documento da OS do cliente — por
+  isso ficam públicas. Margem de verdade está em `service_order_parts.unit_cost_snapshot`.
+- O anon não lê `services`: o PDF público usa `name_snapshot` (o embed `services(name)`
+  derrubava a consulta com 42501).
+- `colunas-publicas.test.ts` amarra a lista do código à da migration e confere os campos do
+  hash da assinatura.
 
 ## A distinção que importa
 
