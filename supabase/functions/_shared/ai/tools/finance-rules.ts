@@ -1143,8 +1143,9 @@ export const financeRulesTools: ToolDef[] = [
     name: "cadastrar_favorecido",
     description:
       "Cadastra quem recebe dinheiro sem ser fornecedor: sócio, funcionário, diarista, prestador ou " +
-      "comissionado. Use quando o usuário disser 'cadastre o Fulano como diarista' ou ao lançar uma " +
-      "despesa de pró-labore para alguém que ainda não existe.",
+      "comissionado. Use ao lançar uma despesa de pró-labore para alguém que ainda não existe. " +
+      "Freelancer que recebe por DIA (diarista): use cadastrar_freelancer — esta aqui não cria a diária, e sem ela " +
+      "o dia trabalhado não pode ser registrado.",
     input_schema: {
       type: "object",
       properties: {

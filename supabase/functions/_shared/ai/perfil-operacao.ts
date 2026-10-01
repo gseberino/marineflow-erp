@@ -148,6 +148,8 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   // — Diárias de freelancers (28/09/2026: substituem as 4 de jornada do perfil — D7 do dono) —
   "registrar_diaria",
   "consultar_freelancer",
+  // 01/10/2026: o dono pediu "cadastre o João Marcelo" e o assistente não tinha como.
+  "cadastrar_freelancer",
 
   // — Fiscal: espelho e consulta (emitir é risco alto e entra sempre) —
   "preview_fiscal_note",

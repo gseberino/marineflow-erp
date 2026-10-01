@@ -53,7 +53,8 @@ const SEMPRE_NO_PERFIL_ANTIGO = [
 // virava uma confirmação por serviço.
 // Decisão D7 do dono (28/09/2026): as 4 de jornada do perfil — nunca chamadas — saíram, e as 2 de
 // diárias entraram no lugar (fechar_folha, a quinta, também saiu; era risco alto e não estava aqui).
-const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer"];
+// 01/10/2026: cadastrar_freelancer — o dono pediu um cadastro pelo WhatsApp e não havia como.
+const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer", "cadastrar_freelancer"];
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento"];
 
 const ordenado = (xs: Iterable<string>) => [...new Set(xs)].sort();
