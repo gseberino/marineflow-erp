@@ -1,7 +1,7 @@
 // Parcelas da nota (duplicatas da NF-e e recebíveis da baixa da nota avulsa). Extraído de
 // FiscalEmission.tsx no D33 (30/09/2026); a divisão em ponto flutuante saía torta por centavos.
 import { describe, it, expect } from 'vitest';
-import { montarParcelas, intervaloDasParcelas, parcelasParaLancar, type Parcela } from './fiscal-parcelas';
+import { montarParcelas, intervaloDasParcelas, parcelasParaLancar, planoInicialDaBaixa, type Parcela } from './fiscal-parcelas';
 
 const valores = (ps: Parcela[]) => ps.map((p) => p.amount);
 const somaEmCentavos = (ps: Parcela[]) => ps.reduce((s, p) => s + Math.round(p.amount * 100), 0);
@@ -76,5 +76,58 @@ describe('parcelasParaLancar', () => {
   it('sem plano da nota e sem dados suficientes, nada a lançar', () => {
     expect(parcelasParaLancar({ ...base, parcelasDaNota: null, n: 0 })).toBeNull();
     expect(parcelasParaLancar({ ...base, parcelasDaNota: null, primeiroVencimento: '' })).toBeNull();
+  });
+});
+
+describe('planoInicialDaBaixa', () => {
+  const diaLocal = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  it('nota parcelada: o plano dela, intacto, mesmo desigual (NF-e 2/25)', () => {
+    const doc = {
+      payment_terms: {
+        mode: 'parcelado', method: '14',
+        installments: [
+          { due_date: '2026-08-10', amount: 5237.99, method: '14' },
+          { due_date: '2026-09-09', amount: 5237.99 },
+          { due_date: '2026-10-09', amount: 5238.02, method: '14' },
+        ],
+      },
+    };
+    const p = planoInicialDaBaixa(doc);
+    expect(p.modo).toBe('parcelado');
+    expect(p.n).toBe(3);
+    expect(p.primeiroVencimento).toBe('2026-08-10');
+    expect(p.intervaloDias).toBe(30);
+    expect(p.metodo).toBe('14');
+    expect(valores(p.parcelasDaNota!)).toEqual([5237.99, 5237.99, 5238.02]);
+    // parcela sem forma de pagamento herda a da nota
+    expect(p.parcelasDaNota![1].method).toBe('14');
+  });
+
+  it('uma parcela só não é plano parcelado', () => {
+    const doc = { payment_terms: { mode: 'parcelado', installments: [{ due_date: '2026-08-10', amount: 100 }] }, authorized_at: '2026-08-01T12:00:00-03:00' };
+    const p = planoInicialDaBaixa(doc);
+    expect(p.modo).toBe('avista');
+    expect(p.parcelasDaNota).toBeNull();
+  });
+
+  it('nota sem plano: à vista, vencimento no dia LOCAL da nota (não no dia UTC)', () => {
+    const noite = '2026-09-10T22:30:00-03:00'; // em UTC já é 11/09
+    const p = planoInicialDaBaixa({ status: 'authorized', authorized_at: noite });
+    expect(p).toMatchObject({ modo: 'avista', n: 2, intervaloDias: 30, parcelasDaNota: null });
+    expect(p.primeiroVencimento).toBe(diaLocal(noite));
+  });
+
+  it('forma de pagamento: a do plano, senão a do pagamento declarado, senão 15', () => {
+    expect(planoInicialDaBaixa({ request_payload: { payments: [{ method: '03' }] } }).metodo).toBe('03');
+    expect(planoInicialDaBaixa({}).metodo).toBe('15');
+  });
+
+  it('nota sem data nenhuma: parte de agora', () => {
+    const agora = new Date(2026, 9, 1, 9, 0, 0);
+    expect(planoInicialDaBaixa({}, agora).primeiroVencimento).toBe('2026-10-01');
   });
 });

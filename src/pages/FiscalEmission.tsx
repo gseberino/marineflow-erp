@@ -4,6 +4,7 @@ import { PageHeader } from '@/components/PageHeader';
 // [F-NFSE-01] NFS-e vive em componente próprio: este arquivo tem 3.505 linhas e já está
 // registrado como MF-AUD-069 (decompor). Montar aqui é o menor diff possível.
 import { NfseSection } from '@/components/fiscal/NfseSection';
+import { BaixaDaNotaAvulsaDialog } from '@/components/fiscal/BaixaDaNotaAvulsaDialog';
 import { AddressFields } from '@/components/AddressFields';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
 import { ProductFormDialog } from '@/components/ProductFormDialog';
@@ -47,7 +48,7 @@ import {
   dataDaNota, naturezaDaNota, ehDevolucao,
   prazoDeCancelamento,
 } from '@/lib/nota-fiscal-leitura';
-import { montarParcelas, intervaloDasParcelas, parcelasParaLancar as calcularParcelasParaLancar } from '@/lib/fiscal-parcelas';
+import { montarParcelas } from '@/lib/fiscal-parcelas';
 import { naturezasDasNotas, filtrarNotas, estatisticasDoMes, validadeDoCertificado } from '@/lib/fiscal-painel';
 import { montarCorpoDaEmissao } from '@/lib/fiscal-corpo-emissao';
 import { MultiFilterBar } from '@/components/MultiFilterBar';
@@ -535,24 +536,6 @@ export default function FiscalEmission() {
    */
   const [viewDoc, setViewDoc] = useState<any | null>(null);
   const [settleTarget, setSettleTarget] = useState<any | null>(null);
-  const [settleMode, setSettleMode] = useState<'avista' | 'parcelado'>('avista');
-  const [settleN, setSettleN] = useState(2);
-  const [settleInterval, setSettleInterval] = useState(30);
-  const [settleFirstDue, setSettleFirstDue] = useState('');
-  const [settleMethod, setSettleMethod] = useState('15');
-  /**
-   * O plano de parcelas que a PROPRIA NOTA declarou, palavra por palavra.
-   *
-   * O dialogo reconstruia as parcelas com montarParcelas(total, n, 1o vencimento,
-   * intervalo) -- uma aproximacao que so acerta quando o plano e perfeitamente regular.
-   * Na NF-e 2/25 a nota diz 5.237,99 / 5.237,99 / 5.238,02 e a reconstrucao dava
-   * 5.238,00 tres vezes: tres centavos de diferenca entre o titulo e o documento que o
-   * cliente recebeu. Enquanto ninguem mexer nos campos, agora vale o que esta na nota.
-   */
-  const [settleParcelasDaNota, setSettleParcelasDaNota] =
-    useState<Array<{ due_date: string; amount: number; method: string }> | null>(null);
-  /** Vira true assim que o usuario edita algo: dai em diante a conta e recalculada. */
-  const [settleAjustado, setSettleAjustado] = useState(false);
   // Por documento (não um único valor global) — senão a conclusão da ação de
   // um documento pode reabilitar/destravar o botão de outro ainda em voo.
   const [busyDocIds, setBusyDocIds] = useState<Set<string>>(new Set());
@@ -1806,88 +1789,6 @@ export default function FiscalEmission() {
     await handleSendEmail(doc, def);
   };
 
-  const openSettleDialog = (doc: any) => {
-    setSettleTarget(doc);
-    setSettleAjustado(false);
-    const pt = doc.payment_terms;
-    const inst = Array.isArray(pt?.installments) ? pt.installments : [];
-    const metodo = String(pt?.method || doc.request_payload?.payments?.[0]?.method || '15');
-
-    if (pt?.mode === 'parcelado' && inst.length > 1) {
-      // O plano da nota, guardado como esta. Os campos abaixo sao so a leitura dele para
-      // quem quiser ajustar -- nao sao a fonte do que sera lancado.
-      setSettleParcelasDaNota(inst.map((p: any) => ({
-        due_date: String(p.due_date),
-        amount: Number(p.amount),
-        method: String(p.method || metodo),
-      })));
-      setSettleMode('parcelado');
-      setSettleN(inst.length);
-      setSettleFirstDue(inst[0].due_date);
-      setSettleInterval(intervaloDasParcelas(inst));
-      setSettleMethod(metodo);
-      return;
-    }
-
-    setSettleParcelasDaNota(null);
-    setSettleMode('avista');
-    setSettleN(2);
-    setSettleInterval(30);
-    // A nota nao declarou plano. "Hoje + 30 dias" era um chute que nao vem de lugar
-    // nenhum -- e para uma nota de meses atras produzia um vencimento no futuro sem
-    // relacao com a venda. A data da propria nota e o unico ponto de partida honesto.
-    const daNota = dataDaNota(doc);
-    setSettleFirstDue((daNota ? new Date(daNota) : new Date()).toISOString().slice(0, 10));
-    setSettleMethod(metodo);
-  };
-
-  /**
-   * As parcelas que serao lancadas de fato.
-   *
-   * Enquanto o usuario nao mexe em nada, vale o plano da nota, intacto. Assim que ele
-   * altera parcelas, vencimento, intervalo ou forma de pagamento, a conta passa a ser
-   * recalculada a partir do que ele escolheu -- e a tela avisa que isso diverge da nota.
-   */
-  const parcelasParaLancar = () => calcularParcelasParaLancar({
-    modo: settleMode === 'parcelado' ? 'parcelado' : 'avista',
-    ajustado: settleAjustado,
-    parcelasDaNota: settleParcelasDaNota,
-    total: totalDaNota(settleTarget),
-    n: settleN,
-    primeiroVencimento: settleFirstDue,
-    intervaloDias: settleInterval,
-    metodo: settleMethod,
-  });
-
-  // "Baixar estoque + gerar recebível(is)" (opt-in) numa NF-e AVULSA autorizada.
-  // À vista → 1 recebível hoje; parcelado → 1 recebível por parcela (vencimentos).
-  // Baixa o estoque dos itens ligados a produto. Idempotente (some após lançar).
-  const handleSettleStock = async (doc: any, installments: Array<{ due_date: string; amount: number; method: string }> | null) => {
-    markBusy(doc.id, true);
-    const tId = toast.loading('Baixando estoque e gerando recebível(is)…');
-    try {
-      const { data, error } = await (supabase.rpc as any)('settle_nfe_stock_and_receivable', {
-        p_document_id: doc.id,
-        p_installments: installments && installments.length ? installments : null,
-      });
-      if (error) throw new Error(error.message);
-      if (data && data.ok === false) throw new Error(data.error || 'Falha ao lançar.');
-      const nItems = Number(data?.stock_items ?? 0);
-      const nParc = Number(data?.installments ?? 1);
-      toast.success(
-        `${nParc > 1 ? `${nParc} recebíveis gerados` : 'Recebível gerado'}${nItems > 0 ? ` · estoque baixado (${nItems} item${nItems > 1 ? 'ns' : ''})` : ''}.`,
-        { id: tId },
-      );
-      setSettleTarget(null);
-      qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
-      qc.invalidateQueries({ queryKey: ['products'] });
-      qc.invalidateQueries({ queryKey: ['receivables'] });
-    } catch (err: any) {
-      toast.error('Erro ao lançar estoque/recebível: ' + (err?.message || 'desconhecido'), { id: tId });
-    } finally {
-      markBusy(doc.id, false);
-    }
-  };
 
   // Export de XMLs autorizados de um período + um resumo CSV (livro de saída),
   // num único .zip para a contadora. Os XMLs são baixados pelo proxy autenticado
@@ -2342,7 +2243,7 @@ export default function FiscalEmission() {
                             ...(doc.request_payload && !devolucao ? [{ texto: 'Duplicar para nova nota', icone: Copy, onClick: () => handleReemitFromDoc(doc) }] : []),
                             ...(ehNfe && !devolucao && doc.access_key ? [{ texto: 'Gerar devolução', icone: Undo2, onClick: () => handleGenerateReturn(doc) }] : []),
                             ...(!devolucao && doc.origin_type === 'manual' && doc.client_id && !doc.stock_settled_at
-                              ? [{ texto: 'Baixar estoque + gerar recebível', icone: Boxes, onClick: () => openSettleDialog(doc) }] : []),
+                              ? [{ texto: 'Baixar estoque + gerar recebível', icone: Boxes, onClick: () => setSettleTarget(doc) }] : []),
                             ...(ehNfe ? [{
                               texto: 'Carta de correção (CC-e)', icone: Pencil,
                               onClick: () => { setCorrectionTarget({ id: doc.id, number: doc.number, series: doc.series }); setCorrectionText(''); },
@@ -3685,177 +3586,16 @@ export default function FiscalEmission() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Dialog: baixar estoque + recebível (à vista / parcelado) ── */}
-      <Dialog open={!!settleTarget} onOpenChange={(o) => { if (!o) setSettleTarget(null); }}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Baixar estoque + gerar recebível</DialogTitle>
-            <DialogDescription>
-              NF-e {settleTarget?.series}/{settleTarget?.number} — total {formatCurrency(totalDaNota(settleTarget))}.
-              Baixa o estoque dos itens ligados a produto e gera o financeiro. Idempotente.
-            </DialogDescription>
-          </DialogHeader>
-          {settleTarget && (() => {
-            // O valor que vira CONTA A RECEBER. Ler pelo pagamento declarado dava o numero
-            // certo por coincidencia na venda a vista e errado em tudo mais -- e um titulo
-            // nasce uma vez so.
-            const total = totalDaNota(settleTarget);
-            const schedule = parcelasParaLancar() ?? [];
-            const planoDaNota = settleParcelasDaNota;
-            const somaDoPlano = schedule.reduce((acc, p) => acc + p.amount, 0);
-            const difere = Math.abs(somaDoPlano - total) > 0.005;
-            const semPlanoNaNota = !planoDaNota;
-            return (
-              <div className="space-y-3">
-                {/* O que a NOTA diz, antes de qualquer campo editável: é contra isto que o
-                    lançamento tem de fechar, e era justamente o que não aparecia. */}
-                {planoDaNota ? (
-                  <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-2.5 text-xs">
-                    <p className="font-semibold text-emerald-900">
-                      Plano declarado na nota — {planoDaNota.length}x
-                    </p>
-                    <ul className="mt-1 space-y-0.5 text-emerald-800">
-                      {planoDaNota.map((p, i) => (
-                        <li key={i} className="flex justify-between gap-2 tabular-nums">
-                          <span>{i + 1}/{planoDaNota.length} · vence {formatDate(p.due_date)}</span>
-                          <span className="font-medium">{formatCurrency(p.amount)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                    {!settleAjustado && (
-                      <p className="mt-1.5 text-[11px] text-emerald-700">
-                        Será lançado exatamente assim, no centavo.
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900">
-                    <p className="font-semibold">Esta nota não declarou plano de pagamento.</p>
-                    <p className="mt-0.5 text-amber-800">
-                      Não há o que copiar do documento, então o vencimento abaixo parte da
-                      data da própria nota — confira antes de confirmar.
-                    </p>
-                  </div>
-                )}
-
-                {settleAjustado && planoDaNota && (
-                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-900">
-                    <p className="font-semibold">Você alterou o plano.</p>
-                    <p className="mt-0.5 text-amber-800">
-                      O que será lançado deixa de bater com a nota que o cliente recebeu.
-                    </p>
-                    <Button
-                      type="button" variant="outline" size="sm" className="mt-1.5 h-7 text-[11px]"
-                      onClick={() => {
-                        setSettleAjustado(false);
-                        setSettleMode('parcelado');
-                        setSettleN(planoDaNota.length);
-                        setSettleFirstDue(planoDaNota[0].due_date);
-                        setSettleMethod(planoDaNota[0].method);
-                      }}
-                    >
-                      Voltar ao plano da nota
-                    </Button>
-                  </div>
-                )}
-
-                <div className="flex gap-2">
-                  <Button
-                    type="button" size="sm"
-                    variant={settleMode === 'avista' ? 'default' : 'outline'}
-                    onClick={() => { setSettleMode('avista'); if (planoDaNota) setSettleAjustado(true); }}
-                  >À vista</Button>
-                  <Button
-                    type="button" size="sm"
-                    variant={settleMode === 'parcelado' ? 'default' : 'outline'}
-                    onClick={() => { setSettleMode('parcelado'); if (semPlanoNaNota) setSettleAjustado(true); }}
-                  >Parcelado</Button>
-                </div>
-
-                {settleMode === 'parcelado' && (
-                  <>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <Label className="text-xs">Parcelas</Label>
-                        <Input type="number" min={2} max={60} className="h-8 text-xs"
-                          value={settleN}
-                          onChange={(e) => { setSettleAjustado(true); setSettleN(Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 1))); }} />
-                      </div>
-                      <div>
-                        <Label className="text-xs">1º vencimento</Label>
-                        <Input type="date" className="h-8 text-xs"
-                          value={settleFirstDue}
-                          onChange={(e) => { setSettleAjustado(true); setSettleFirstDue(e.target.value); }} />
-                      </div>
-                      <div>
-                        <Label className="text-xs">Intervalo (dias)</Label>
-                        <Input type="number" min={1} max={365} className="h-8 text-xs"
-                          value={settleInterval}
-                          onChange={(e) => { setSettleAjustado(true); setSettleInterval(Math.max(1, parseInt(e.target.value, 10) || 30)); }} />
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="text-xs">Forma de pagamento</Label>
-                      <Select value={settleMethod} onValueChange={(v) => { setSettleAjustado(true); setSettleMethod(v); }}>
-                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {PAYMENT_METHODS.filter((m) => m.value !== '90').map((m) => (
-                            <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Prévia das parcelas */}
-                    <div className="rounded-lg border bg-muted/30 max-h-40 overflow-y-auto">
-                      <table className="w-full text-xs">
-                        <thead className="text-muted-foreground">
-                          <tr><th className="text-left px-2 py-1">Parcela</th><th className="text-left px-2 py-1">Vencimento</th><th className="text-right px-2 py-1">Valor</th></tr>
-                        </thead>
-                        <tbody>
-                          {schedule.map((p, i) => (
-                            <tr key={i} className="border-t">
-                              <td className="px-2 py-1">{i + 1}/{schedule.length}</td>
-                              <td className="px-2 py-1">{formatDate(p.due_date)}</td>
-                              <td className="px-2 py-1 text-right font-medium">{formatCurrency(p.amount)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {/* A conferencia que faltava: a soma das parcelas contra o total da
-                        nota. Um titulo que nao fecha com o documento so aparecia meses
-                        depois, na cobranca. */}
-                    <p className={difere ? 'text-[11px] font-medium text-destructive' : 'text-[11px] text-muted-foreground'}>
-                      {difere
-                        ? `Atenção: as parcelas somam ${formatCurrency(somaDoPlano)}, e a nota é de ${formatCurrency(total)}.`
-                        : `As parcelas somam ${formatCurrency(somaDoPlano)} — fecha com a nota.`}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">
-                      Gera um recebível por parcela em Contas a Receber; você registra o pagamento de cada uma quando for paga.
-                    </p>
-                  </>
-                )}
-                {settleMode === 'avista' && (
-                  <p className="text-xs text-muted-foreground">
-                    Gera <strong>um recebível único</strong> de {formatCurrency(total)}, o valor total da nota.
-                  </p>
-                )}
-              </div>
-            );
-          })()}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSettleTarget(null)} disabled={settleTarget ? busyDocIds.has(settleTarget.id) : false}>Voltar</Button>
-            <Button
-              disabled={settleTarget ? busyDocIds.has(settleTarget.id) : false}
-              onClick={() => handleSettleStock(settleTarget, parcelasParaLancar())}
-            >
-              {settleTarget && busyDocIds.has(settleTarget.id) ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Boxes className="h-4 w-4 mr-2" />}
-              Confirmar lançamento
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Baixar estoque + gerar recebível (nota avulsa): componente próprio com o seu estado (D33). */}
+      {settleTarget && (
+        <BaixaDaNotaAvulsaDialog
+          key={settleTarget.id}
+          doc={settleTarget}
+          ocupado={busyDocIds.has(settleTarget.id)}
+          marcarOcupado={markBusy}
+          onClose={() => setSettleTarget(null)}
+        />
+      )}
 
       {/* Cadastro do cliente (popup) — editar na hora durante a emissão. */}
       <ClientFormDialog
