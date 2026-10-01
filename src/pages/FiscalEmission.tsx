@@ -49,6 +49,7 @@ import {
 } from '@/lib/nota-fiscal-leitura';
 import { montarParcelas, intervaloDasParcelas, parcelasParaLancar as calcularParcelasParaLancar } from '@/lib/fiscal-parcelas';
 import { naturezasDasNotas, filtrarNotas, estatisticasDoMes, validadeDoCertificado } from '@/lib/fiscal-painel';
+import { montarCorpoDaEmissao } from '@/lib/fiscal-corpo-emissao';
 import { MultiFilterBar } from '@/components/MultiFilterBar';
 import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
@@ -57,10 +58,10 @@ import { parseLegacyAddress } from '@/lib/address-legacy';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { buildEspelhoHtml } from '@/lib/danfe-espelho';
 import { extractInvokeErrorMessage } from '@/lib/invoke-error';
-import { buildEmissionItem, computeReturnIcmsRate } from '@/lib/fiscal-emission-item';
+import { computeReturnIcmsRate } from '@/lib/fiscal-emission-item';
 import { computeDraftMeta, normalizeDraftState, natureLabel, type FiscalDraftState } from '@/lib/fiscal-draft-state';
 import { buildDanfeFilename } from '@/lib/danfe-filename';
-import { BLOCK_SEPARATOR, buildDevolucaoInfo, composeAdditionalInfo, stripManagedBlocks, stripPurchaseBlock } from '@/lib/nfe-info-complementar';
+import { buildDevolucaoInfo, stripManagedBlocks, stripPurchaseBlock } from '@/lib/nfe-info-complementar';
 // Reaproveita os mesmos módulos que a edge function fiscal-emit usa no
 // servidor — evita duplicar a lista de formas de pagamento, natureza de
 // operação/CFOP e o CFOP padrão.
@@ -1415,52 +1416,14 @@ export default function FiscalEmission() {
 
   // Campos comuns do body de emissão — usados TANTO pela emissão real quanto
   // pelo espelho (preview), para o espelho refletir exatamente o que será emitido.
-  const buildEmissionBody = () => ({
-    client_id: clientId || null,
-    nature_of_operation: natureOfOperation,
-    // Venda a PRAZO (parcelada) → tPag = Duplicata Mercantil (14): a Contora/SEFAZ
-    // exige o método 14 quando há grupo de cobrança (fatura+duplicatas), então o
-    // método do seletor não se aplica ao parcelado. À vista → o método escolhido.
-    // Enviar o método REAL da nota faz o espelho mostrar o MESMO que será emitido.
-    payment_method: (selectedNature.hasPayment && payMode === 'parcelado' && payFirstDue) ? '14' : paymentMethod,
-    // Plano de pagamento (à vista/parcelado) definido na emissão — só faz
-    // sentido em naturezas com pagamento (venda); vira os recebíveis depois.
-    payment_terms: (selectedNature.hasPayment && payMode === 'parcelado' && payFirstDue)
-      ? { mode: 'parcelado', method: '14', installments: montarParcelas(total, payN, payFirstDue, payInterval, '14') }
-      : (selectedNature.hasPayment ? { mode: 'avista', method: paymentMethod, installments: null } : null),
-    presence_indicator: presenceIndicator,
-    consumer_final: consumerFinal,
-    // Ordem garantida por contrato (ver composeAdditionalInfo): pedido/comprador
-    // → devolução/texto livre → declaração obrigatória do Simples, por último.
-    additional_info: composeAdditionalInfo({
-      purchaseOrder, buyer: buyerName,
-      freeText: [devolucaoInfo, additionalInfo].filter(Boolean).join(BLOCK_SEPARATOR),
-      isReturn, // devolução: omite a frase de crédito de IPI (ver composeAdditionalInfo)
-    }) || undefined,
-    // Guardados tambem em colunas proprias (restaura ao duplicar; nota pesquisavel).
-    customer_po_number: purchaseOrder.trim() || undefined,
-    customer_buyer_name: buyerName.trim() || undefined,
-    referenced_access_key: selectedNature.requiresReference ? (referencedAccessKey || undefined) : undefined,
-    recipient: {
-      name: recipientName,
-      document: recipientDocument,
-      email: recipientEmail || undefined,
-      state_registration_indicator: recipientIeIndicator,
-      state_registration: recipientIeIndicator === 1 ? (recipientIe || undefined) : undefined,
-      address: {
-        street: address.address_line_1,
-        number: address.address_number,
-        complement: address.address_complement || undefined,
-        district: address.neighborhood,
-        city_name: address.city,
-        state_code: address.state,
-        postal_code: address.postal_code,
-      },
-    },
-    // Mapeamento extraído para função pura e TESTADA (src/lib/fiscal-emission-item):
-    // o projeto não roda type-check no build, então o teste é a rede que pega typo
-    // de campo (foi assim que other_expenses ia zerado).
-    items: activeItems.map(buildEmissionItem),
+  // O conteúdo da nota, em função pura e testada (src/lib/fiscal-corpo-emissao.ts, D33).
+  const buildEmissionBody = () => montarCorpoDaEmissao({
+    clientId, natureOfOperation, selectedNature, paymentMethod,
+    payMode, payN, payFirstDue, payInterval, total,
+    presenceIndicator, consumerFinal, purchaseOrder, buyerName,
+    devolucaoInfo, additionalInfo, isReturn, referencedAccessKey,
+    recipientName, recipientDocument, recipientEmail, recipientIeIndicator, recipientIe,
+    address, activeItems,
   });
 
   // Espelho LOCAL (fallback): o servidor devolve o payload EXATO da emissão
