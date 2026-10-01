@@ -10,6 +10,11 @@
 //
 // Toda diária pede confirmação (D8): mexe no que outra pessoa recebe. A confirmação mostra o pedido
 // JÁ RESOLVIDO ("Roberto · qui 24/09 · dia inteiro · R$ 160,00 · OS 1234"), e o que era antes.
+//
+// Freelancer NOVO (01/10/2026, o João Marcelo no lugar do Mickael): cadastrar_freelancer. Antes não
+// havia caminho — cadastrar_favorecido cria só o favorecido, e sem a diária registrar_diaria recusa o
+// dia. Quem decide se cria ou reaproveita um cadastro é a função do banco (cadastrar_freelancer,
+// migration 20261001210000); a confirmação é a própria função simulando, sem gravar.
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
 import { dataDita, escolherPorNome, normal, osPeloNumero } from "./caixa.ts";
 
@@ -104,6 +109,17 @@ export interface PedidoDeDiaria {
   jornada: Jornada;
   os: { id: string; numero: string }[];
   observacao: string | null;
+  /** Valor DITO para o dia ("na quarta foram 130"); nulo = a diária do cadastro. */
+  valorDiaria: number | null;
+}
+
+/** "130", "130,00", "R$ 1.300,50", 130 → número; o resto, nulo. */
+export function numeroDito(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  const s = String(v ?? "").replace(/R\$|\s/g, "");
+  if (!s) return null;
+  const n = Number(s.includes(",") ? s.replace(/\./g, "").replace(",", ".") : s);
+  return Number.isFinite(n) ? n : null;
 }
 
 /** Até 31 dias por pedido — mais que isso é engano de data, não pedido. */
@@ -140,7 +156,13 @@ export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>
     if (achada) os.push(achada);
   }
   const observacao = typeof args.observacao === "string" && args.observacao.trim() ? args.observacao.trim() : null;
-  return { freelancer: f, data, datas, intervalo, fimDeSemana, jornada, os, observacao };
+  // Valor do dia só vale para quem trabalhou; numa falta (ou ao apagar) não há o que valer.
+  let valorDiaria: number | null = null;
+  if (args.valor_diaria != null && args.valor_diaria !== "" && jornada !== "faltou" && jornada !== "apagar") {
+    valorDiaria = numeroDito(args.valor_diaria);
+    if (valorDiaria == null || valorDiaria <= 0) return { error: `Não entendi o valor do dia: "${args.valor_diaria}".` };
+  }
+  return { freelancer: f, data, datas, intervalo, fimDeSemana, jornada, os, observacao, valorDiaria };
 }
 
 type DiaLancado = { id: string; fracao: number; valorDia: number };
@@ -163,6 +185,12 @@ const ddmm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 
 const rotuloDaFracao = (f: number) => (f === 1 ? "dia inteiro" : f === 0.5 ? "meio período" : "faltou");
 
+/** Valor dito diferente do cadastro: a confirmação deixa claro que não é a diária de sempre. */
+function linhaDoValorDito(p: PedidoDeDiaria, perfil: Perfil | undefined): string[] {
+  if (p.valorDiaria == null || !perfil || perfil.valor_diaria === p.valorDiaria) return [];
+  return [`Diária ${p.intervalo ? "desses dias" : "desse dia"}: ${brl.format(p.valorDiaria)} (a do cadastro é ${brl.format(perfil.valor_diaria ?? 0)}).`];
+}
+
 /** O texto da confirmação: o pedido resolvido, e como o dia está hoje quando já existe. */
 export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
   const p = await resolverDiaria(ctx, args);
@@ -176,9 +204,10 @@ export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>)
       : `Apagar o dia de ${quem} — não há dia lançado nessa data; nada vai mudar.`;
   }
   const perfil = p.freelancer.perfis.find((x) => x.vigencia_inicio <= p.data && (!x.vigencia_fim || x.vigencia_fim >= p.data));
-  const valor = p.jornada === "faltou" ? 0 : (perfil?.valor_diaria ?? 0) * FRACAO[p.jornada];
+  const valor = p.jornada === "faltou" ? 0 : (p.valorDiaria ?? perfil?.valor_diaria ?? 0) * FRACAO[p.jornada];
   const linhas = [`Registrar diária: ${quem} · *${ROTULO[p.jornada]}*${p.jornada === "faltou" ? " (sem diária)" : ` · ${brl.format(valor)}`}` +
     (p.os.length ? ` · OS ${p.os.map((o) => o.numero).join(", ")}` : "")];
+  linhas.push(...linhaDoValorDito(p, perfil));
   if (p.os.length > 1) linhas.push("O valor do dia se divide em partes iguais entre as OS.");
   if (p.observacao) linhas.push(`Observação: ${p.observacao}`);
   if (atual) linhas.push(`Hoje está lançado: ${rotuloDaFracao(atual.fracao)} (${brl.format(atual.valorDia)}) — vai ser corrigido, não duplicado.`);
@@ -197,12 +226,13 @@ async function resumirIntervalo(ctx: ToolCtx, p: PedidoDeDiaria): Promise<string
   const primeiro = p.datas[0];
   const ultimo = p.datas[p.datas.length - 1];
   const perfil = p.freelancer.perfis.find((x) => x.vigencia_inicio <= primeiro && (!x.vigencia_fim || x.vigencia_fim >= primeiro));
-  const valor = p.jornada === "faltou" ? 0 : (perfil?.valor_diaria ?? 0) * FRACAO[p.jornada];
+  const valor = p.jornada === "faltou" ? 0 : (p.valorDiaria ?? perfil?.valor_diaria ?? 0) * FRACAO[p.jornada];
   const linhas = [
     `Registrar diária: *${p.freelancer.nome}* · *${ROTULO[p.jornada]}* · ${novos.length} dia(s) de ${diaCurto(primeiro)} a ${diaCurto(ultimo)}` +
       (p.fimDeSemana ? "" : " (só dias úteis)") +
       (p.jornada === "faltou" ? " (sem diária)" : ` · ${brl.format(valor)} cada, ${brl.format(valor * novos.length)} no total`) +
       (p.os.length ? ` · OS ${p.os.map((o) => o.numero).join(", ")}` : ""),
+    ...linhaDoValorDito(p, perfil),
   ];
   if (novos.length) linhas.push(`Dias: ${novos.map(ddmm).join(", ")}`);
   if (lancados.size) {
@@ -247,6 +277,80 @@ async function saldoDito(ctx: ToolCtx, f: Freelancer): Promise<string> {
   return c && !("error" in c) ? ` Saldo com ${f.nome}: ${brl.format(Math.abs(Number(c.saldo_final) || 0))} (${ESTADO[String(c.estado)] ?? c.estado}).` : "";
 }
 
+// ── Cadastro de freelancer novo ──────────────────────────────────────────────────────────────────
+
+const TIPOS_DE_CHAVE = ["cpf", "cnpj", "email", "telefone", "aleatoria"] as const;
+const ROTULO_DA_CHAVE: Record<string, string> = { cpf: "CPF", cnpj: "CNPJ", email: "e-mail", telefone: "telefone", aleatoria: "chave aleatória" };
+const textoOuNulo = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+
+/**
+ * Os argumentos do cadastro como a função do banco recebe — a MESMA montagem para simular (a
+ * confirmação) e para gravar. Só o que a pessoa disse: o tipo da chave Pix, quem já existe, a
+ * conta corrente e a regra por CPF ficam com o banco.
+ */
+export interface ParamsDoCadastro {
+  p_nome: string;
+  p_valor_diaria: number;
+  p_desde: string | null;
+  p_chave_pix: string | null;
+  p_tipo_chave: string | null;
+  p_documento: string | null;
+  p_telefone: string | null;
+  p_observacao: string | null;
+}
+
+export function paramsDoCadastro(args: Record<string, unknown>, hoje = new Date()): ParamsDoCadastro | { error: string } {
+  const nome = textoOuNulo(args.nome);
+  if (!nome) return { error: "Qual o nome do freelancer?" };
+  const valor = numeroDito(args.valor_diaria);
+  if (valor == null || valor <= 0) return { error: `Qual o valor da diária de ${nome}? (não invente: pergunte)` };
+  let desde: string | null = null;
+  if (args.desde != null && args.desde !== "") {
+    desde = dataDoDito(args.desde, hoje);
+    if (!desde) return { error: `Não entendi desde quando: "${args.desde}". Use hoje, ontem, dd/mm ou o dia da semana.` };
+  }
+  const tipo = textoOuNulo(args.tipo_chave)?.toLowerCase() ?? null;
+  if (tipo && !TIPOS_DE_CHAVE.includes(tipo as typeof TIPOS_DE_CHAVE[number])) {
+    return { error: `Tipo de chave Pix "${args.tipo_chave}" não existe: use cpf, cnpj, email, telefone ou aleatoria.` };
+  }
+  return {
+    p_nome: nome, p_valor_diaria: valor, p_desde: desde,
+    p_chave_pix: textoOuNulo(args.chave_pix), p_tipo_chave: tipo,
+    p_documento: textoOuNulo(args.cpf), p_telefone: textoOuNulo(args.telefone), p_observacao: textoOuNulo(args.observacao),
+  };
+}
+
+const semCodigo = (m: unknown) => String(m ?? "").replace(/^(P0001|42501|23514|23505):\s*/, "");
+
+/**
+ * O texto da confirmação: a função do banco SIMULANDO o cadastro (p_simular, sem gravar) — se cria
+ * ou reaproveita um favorecido, o tipo da chave que ela entendeu, se nasce a regra por CPF. Uma
+ * recusa (já tem diária, chave ambígua) aparece aqui, antes do "sim".
+ */
+export async function resumirCadastro(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
+  const p = paramsDoCadastro(args);
+  if ("error" in p) return null;
+  const desde = p.p_desde ?? dataDita("hoje")!;
+  const linhas = [`Cadastrar freelancer: *${p.p_nome}* · diária de ${brl.format(p.p_valor_diaria)} · desde ${diaCurto(desde)}`];
+  const { data, error } = await ctx.admin.rpc("cadastrar_freelancer", { ...p, p_simular: true, p_autor: null });
+  if (error) {
+    linhas.push(`⚠️ ${semCodigo(error.message)} — o sistema vai recusar.`);
+    return linhas.join("\n");
+  }
+  const s = (data ?? {}) as Record<string, any>;
+  if (s.chave_pix) linhas.push(`Pix (${ROTULO_DA_CHAVE[s.tipo_chave] ?? s.tipo_chave}): ${s.chave_pix}`);
+  if (s.acao === "diaria_no_cadastro_existente") {
+    linhas.push(`Já existe o favorecido *${s.nome}*, sem diária: ele ganha a diária — não nasce um cadastro novo.`);
+  }
+  linhas.push(s.regra === "criada"
+    ? "Pix para o CPF dele vão entrar sozinhos em Diárias de freelancers."
+    : s.regra === "ja_existia"
+    ? `Já existe regra para o CPF dele (${s.regra_categoria ?? "sem categoria"}); fica como está.`
+    : "Sem CPF: os Pix para ele vão pedir a sua confirmação na fila do extrato.");
+  linhas.push("Meio período = metade da diária. Ele passa a aparecer em Financeiro › Diárias.");
+  return linhas.join("\n");
+}
+
 /**
  * Vários dias: registra, um por um, só os que ainda não estão lançados (o banco é idempotente por
  * dia, mas aqui NÃO se corrige dia existente — "faltou desde 19/09" não pode apagar um dia inteiro
@@ -265,7 +369,7 @@ async function registrarIntervalo(ctx: ToolCtx, p: PedidoDeDiaria) {
     const r = await chamar(ctx, "registrar_diaria", {
       p_favorecido_id: p.freelancer.id, p_data: d, p_jornada: p.jornada,
       p_os_ids: p.os.length ? p.os.map((o) => o.id) : null, p_observacao: p.observacao,
-      p_extras: null, p_descontos: null, p_valor_diaria: null, p_origem: "agente",
+      p_extras: null, p_descontos: null, p_valor_diaria: p.valorDiaria, p_origem: "agente",
     }) as Record<string, unknown>;
     if (r && "error" in r) falhas.push(`${ddmm(d)}: ${r.error}`);
     else feitos.push(d);
@@ -280,10 +384,11 @@ export const diariasTools: ToolDef[] = [
   {
     name: "registrar_diaria",
     description:
-      "Registra o DIA de um freelancer de diária (Roberto, Mickael): 'o Roberto não veio hoje' (faltou), 'Mickael fez meio período " +
+      "Registra o DIA de um freelancer de diária já cadastrado: 'o Roberto não veio hoje' (faltou), 'Mickael fez meio período " +
       "ontem', 'Roberto trabalhou dia inteiro na OS 1234'. Um dia por pessoa: repetir a mesma data CORRIGE o dia, não duplica. " +
       "'faltou' grava a ausência (valor zero); 'apagar' só para dia lançado por ENGANO. A diária vem do cadastro — não pergunte " +
-      "valor nem horário. Não é pagamento (pagamento vem do extrato; em dinheiro é lancar_no_caixa) nem hora de OS " +
+      "valor nem horário; valor_diaria só quando a pessoa DISSER outro valor para o dia ('na quarta foram 130'). Freelancer que " +
+      "ainda não existe: cadastrar_freelancer antes. Não é pagamento (pagamento vem do extrato; em dinheiro é lancar_no_caixa) nem hora de OS " +
       "(log_service_order_hours). Vários dias ('faltou desde 19/09', 'a semana toda', 'de segunda até hoje'): data + data_ate; " +
       "só dias úteis, salvo fim_de_semana; dia já lançado no intervalo fica como está. Pede confirmação.",
     input_schema: {
@@ -296,6 +401,7 @@ export const diariasTools: ToolDef[] = [
         jornada: { type: "string", enum: [...JORNADAS], description: "inteiro, meio, faltou (não veio) ou apagar (lançado por engano; um dia só)." },
         os: { type: "string", description: "Número da OS em que trabalhou; duas OS separadas por vírgula (o dia se divide igual)." },
         observacao: { type: "string", description: "Serviço feito, obra, barco — se a pessoa disser." },
+        valor_diaria: { type: "number", description: "Só se a pessoa DISSER o valor do dia, diferente do cadastro (em reais). Sem isso vale a diária do cadastro." },
       },
       required: ["freelancer", "jornada"],
     },
@@ -327,7 +433,7 @@ export const diariasTools: ToolDef[] = [
         p_jornada: p.jornada,
         p_os_ids: p.os.length ? p.os.map((o) => o.id) : null,
         p_observacao: p.observacao,
-        p_extras: null, p_descontos: null, p_valor_diaria: null,
+        p_extras: null, p_descontos: null, p_valor_diaria: p.valorDiaria,
         p_origem: "agente",
       }) as Record<string, unknown>;
       if (r && "error" in r) return r;
@@ -376,6 +482,45 @@ export const diariasTools: ToolDef[] = [
         saldo: Number(c.saldo_final), situacao: ESTADO[c.estado] ?? c.estado,
         ultimos_lancamentos: linhas,
       };
+    },
+  },
+  {
+    name: "cadastrar_freelancer",
+    description:
+      "Cadastra um freelancer NOVO de diária: 'cadastre o João Marcelo, diária de 150, Pix e-mail joao@…', 'entrou um ajudante " +
+      "novo'. Cria tudo de uma vez: o favorecido (ou usa o que já existe com o mesmo nome/CPF), a diária, a conta corrente desde " +
+      "o primeiro dia de trabalho e, com CPF, a regra que lança os Pix dele sozinhos. Precisa do nome e do valor da diária — se " +
+      "faltar o valor, PERGUNTE; não invente. Chave Pix, CPF e telefone só se a pessoa disser. desde = primeiro dia trabalhado, " +
+      "quando for antes de hoje ('começou terça'). Os dias trabalhados vêm depois, com registrar_diaria. Para freelancer de diária " +
+      "não use cadastrar_favorecido (ele não cria a diária). Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nome: { type: "string", description: "Nome como a pessoa disse; o nome completo, se ela der." },
+        valor_diaria: { type: "number", description: "Valor do dia inteiro, em reais (meio período = metade)." },
+        desde: { type: "string", description: "Primeiro dia de trabalho: 'hoje' (padrão), 'terça', dd/mm. Nunca no futuro." },
+        chave_pix: { type: "string", description: "A chave Pix como foi dita." },
+        tipo_chave: { type: "string", enum: [...TIPOS_DE_CHAVE], description: "Se a pessoa disser (ou se for óbvio: e-mail tem @). Número de 11 dígitos: pergunte se é CPF ou telefone." },
+        cpf: { type: "string", description: "CPF (ou CNPJ), se a pessoa disser." },
+        telefone: { type: "string", description: "Telefone/WhatsApp dele, se a pessoa disser." },
+        observacao: { type: "string", description: "Ex.: 'entrou no lugar do Mickael'." },
+      },
+      required: ["nome", "valor_diaria"],
+    },
+    risk: "medium",
+    roles: CARGOS,
+    preValidar(args) {
+      const p = paramsDoCadastro(args ?? {});
+      return "error" in p ? p : null;
+    },
+    async execute(args, ctx) {
+      const b = semAcesso(ctx);
+      if (b) return b;
+      const p = paramsDoCadastro(args);
+      if ("error" in p) return p;
+      const r = await chamar(ctx, "cadastrar_freelancer", { ...p, p_simular: false }) as Record<string, unknown>;
+      if (r && "error" in r) return r;
+      return { ...r, aviso: String(r?.message ?? "") };
     },
   },
 ];

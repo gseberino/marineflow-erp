@@ -5,10 +5,13 @@
 // Rodar com:
 //   deno test --allow-all supabase/functions/_shared/ai/tools/diarias_test.ts
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { dataDoDito, datasDoIntervalo, diaCurto, diariasTools, intervaloDito, resolverDiaria, resumirDiaria } from "./diarias.ts";
+import {
+  dataDoDito, datasDoIntervalo, diaCurto, diariasTools, intervaloDito, numeroDito, paramsDoCadastro, resolverDiaria,
+  resumirCadastro, resumirDiaria,
+} from "./diarias.ts";
 
-/** Banco falso: só o que as tools leem. */
-function admin(opcoes: { diaLancado?: boolean } = {}) {
+/** Banco falso: só o que as tools leem. `simulacao` é o que cadastrar_freelancer devolve simulando. */
+function admin(opcoes: { diaLancado?: boolean; simulacao?: { data?: unknown; error?: { message: string } } } = {}) {
   const tabelas: Record<string, any[]> = {
     work_profiles: [
       { id: "wp-rob", payee_id: "p-rob", valor_diaria: 160, vigencia_inicio: "2026-08-23", vigencia_fim: null, modo_pagamento: "diaria",
@@ -39,11 +42,16 @@ function admin(opcoes: { diaLancado?: boolean } = {}) {
     };
     return q;
   };
-  return { from: consulta };
+  const simuladas: Record<string, unknown>[] = [];
+  const rpc = (n: string, a: Record<string, unknown>) => {
+    simuladas.push({ n, ...a });
+    return Promise.resolve({ data: opcoes.simulacao?.data ?? null, error: opcoes.simulacao?.error ?? null });
+  };
+  return { from: consulta, rpc, simuladas };
 }
 
 type Chamada = { n: string; a: Record<string, unknown> };
-function ctx(opcoes: { diaLancado?: boolean; cargo?: string } = {}) {
+function ctx(opcoes: { diaLancado?: boolean; cargo?: string; simulacao?: { data?: unknown; error?: { message: string } } } = {}) {
   const chamadas: Chamada[] = [];
   const rpc = (n: string, a: Record<string, unknown>) => {
     chamadas.push({ n, a });
@@ -51,6 +59,7 @@ function ctx(opcoes: { diaLancado?: boolean; cargo?: string } = {}) {
     if (n === "conta_corrente_freelancer") return Promise.resolve({ data: { saldo_final: 290, estado: "deve", dias: 12, trabalhado: 1820, pago: 1530, linhas: [] }, error: null });
     if (n === "apagar_diaria") return Promise.resolve({ data: { ok: true, apagado: {}, message: "Diária de Roberto em qui 24/09 apagada." }, error: null });
     if (n === "resumo_freelancers") return Promise.resolve({ data: { pessoas: [{ nome: "Roberto", dias: 12, trabalhado: 1980, pago: 1530, saldo_final: 450, estado: "deve" }] }, error: null });
+    if (n === "cadastrar_freelancer") return Promise.resolve({ data: { ok: true, acao: "criado", message: "João Marcelo cadastrado: diária de R$ 150,00 desde ter 29/09." }, error: null });
     return Promise.resolve({ data: null, error: { message: `rpc inesperada ${n}` } });
   };
   return {
@@ -60,12 +69,14 @@ function ctx(opcoes: { diaLancado?: boolean; cargo?: string } = {}) {
 }
 const tool = (nome: string) => diariasTools.find((t) => t.name === nome)!;
 
-Deno.test("duas ferramentas: registrar pede confirmação, consultar só lê; as duas só para gestor", () => {
-  assertEquals(diariasTools.map((t) => t.name).sort(), ["consultar_freelancer", "registrar_diaria"]);
+Deno.test("três ferramentas: registrar e cadastrar pedem confirmação, consultar só lê; todas só para gestor", () => {
+  assertEquals(diariasTools.map((t) => t.name).sort(), ["cadastrar_freelancer", "consultar_freelancer", "registrar_diaria"]);
   assertEquals(tool("registrar_diaria").risk, "medium");
+  assertEquals(tool("cadastrar_freelancer").risk, "medium");
   assertEquals(tool("consultar_freelancer").risk, "low");
   for (const t of diariasTools) assertEquals(t.roles, ["admin", "financial"]);
   assertEquals((tool("registrar_diaria").input_schema as any).required, ["freelancer", "jornada"]);
+  assertEquals((tool("cadastrar_freelancer").input_schema as any).required, ["nome", "valor_diaria"]);
   assertEquals((tool("registrar_diaria").input_schema as any).properties.jornada.enum, ["inteiro", "meio", "faltou", "apagar"]);
 });
 
@@ -223,4 +234,83 @@ Deno.test("vários dias: a confirmação lista os dias, o total e o que fica com
 Deno.test("jornada 'apagar' com data_ate é recusada antes de virar pendência", () => {
   const r = tool("registrar_diaria").preValidar!({ freelancer: "roberto", jornada: "apagar", data: "21/09", data_ate: "25/09" }, {} as never);
   assertStringIncludes(String(r?.error), "um dia de cada vez");
+});
+
+// ── Valor dito para o dia ("na quarta foram 130") — pedido do dono, 01/10/2026 ──
+
+Deno.test("valor dito: vai para o banco só nesse dia, aparece na confirmação; falta ignora o valor", async () => {
+  assertEquals(numeroDito(130), 130);
+  assertEquals(numeroDito("130,00"), 130);
+  assertEquals(numeroDito("R$ 1.300,50"), 1300.5);
+  assertEquals(numeroDito("cento e trinta"), null);
+
+  const { c, chamadas } = ctx();
+  await tool("registrar_diaria").execute({ freelancer: "mickael", data: "24/09/2026", jornada: "inteiro", valor_diaria: 150 }, c as never);
+  assertEquals(chamadas.find((x) => x.n === "registrar_diaria")!.a.p_valor_diaria, 150);
+
+  const txt = String(await resumirDiaria(ctx().c as never, { freelancer: "mickael", data: "24/09/2026", jornada: "inteiro", valor_diaria: "150" })).replace(/ /g, " ");
+  assertStringIncludes(txt, "*dia inteiro* · R$ 150,00");
+  assertStringIncludes(txt, "Diária desse dia: R$ 150,00 (a do cadastro é R$ 130,00).");
+
+  const falta = await resolverDiaria(c as never, { freelancer: "mickael", jornada: "faltou", valor_diaria: 150 });
+  if ("error" in falta) throw new Error(falta.error);
+  assertEquals(falta.valorDiaria, null);
+  const ruim = await resolverDiaria(c as never, { freelancer: "mickael", jornada: "inteiro", valor_diaria: "muito" });
+  assertStringIncludes(String((ruim as { error: string }).error), "valor do dia");
+});
+
+// ── Freelancer novo (o João Marcelo no lugar do Mickael) — pedido do dono, 01/10/2026 ──
+
+Deno.test("cadastro: monta só o que a pessoa disse; sem nome ou sem valor é pergunta antes da pendência", () => {
+  const quinta = new Date("2026-10-01T15:00:00Z");
+  const p = paramsDoCadastro({ nome: " João Marcelo ", valor_diaria: "150", desde: "terça", chave_pix: "freefiregokdarix@gmail.com" }, quinta);
+  if ("error" in p) throw new Error(p.error);
+  assertEquals(p, {
+    p_nome: "João Marcelo", p_valor_diaria: 150, p_desde: "2026-09-29",
+    p_chave_pix: "freefiregokdarix@gmail.com", p_tipo_chave: null,
+    p_documento: null, p_telefone: null, p_observacao: null,
+  });
+  assertStringIncludes(String((paramsDoCadastro({ valor_diaria: 150 }) as { error: string }).error), "nome");
+  assertStringIncludes(String((paramsDoCadastro({ nome: "João" }) as { error: string }).error), "valor da diária de João");
+  assertStringIncludes(String((paramsDoCadastro({ nome: "João", valor_diaria: 150, tipo_chave: "pix" }) as { error: string }).error), "não existe");
+
+  const recusa = tool("cadastrar_freelancer").preValidar!({ nome: "João" }, {} as never);
+  assertStringIncludes(String(recusa?.error), "valor da diária");
+  assertEquals(tool("cadastrar_freelancer").preValidar!({ nome: "João", valor_diaria: 150 }, {} as never), null);
+});
+
+Deno.test("cadastro: grava pela função do banco, com quem pediu e sem simular; técnico não cadastra", async () => {
+  const { c, chamadas } = ctx();
+  const r = await tool("cadastrar_freelancer").execute(
+    { nome: "João Marcelo", valor_diaria: 150, chave_pix: "freefiregokdarix@gmail.com", tipo_chave: "email" }, c as never) as Record<string, unknown>;
+  assertEquals(chamadas.length, 1);
+  assertEquals(chamadas[0].n, "cadastrar_freelancer");
+  assertEquals(chamadas[0].a.p_simular, false);
+  assertEquals(chamadas[0].a.p_autor, "u-dono");
+  assertEquals(chamadas[0].a.p_tipo_chave, "email");
+  assertStringIncludes(String(r.aviso), "João Marcelo cadastrado");
+
+  const tec = ctx({ cargo: "technician" });
+  const r2 = await tool("cadastrar_freelancer").execute({ nome: "João", valor_diaria: 150 }, tec.c as never) as { error?: string };
+  assertEquals(typeof r2.error, "string");
+  assertEquals(tec.chamadas.length, 0);
+});
+
+Deno.test("cadastro: a confirmação é a função do banco simulando — cadastro novo, existente e recusa", async () => {
+  const novo = ctx({ simulacao: { data: { acao: "criado", nome: "João Marcelo", chave_pix: "freefiregokdarix@gmail.com", tipo_chave: "email", regra: "sem_cpf" } } });
+  const txt = String(await resumirCadastro(novo.c as never, { nome: "João Marcelo", valor_diaria: 150, desde: "29/09/2026", chave_pix: "freefiregokdarix@gmail.com" })).replace(/ /g, " ");
+  assertStringIncludes(txt, "Cadastrar freelancer: *João Marcelo* · diária de R$ 150,00 · desde ter 29/09");
+  assertStringIncludes(txt, "Pix (e-mail): freefiregokdarix@gmail.com");
+  assertStringIncludes(txt, "Sem CPF: os Pix para ele vão pedir a sua confirmação");
+  const sim = (novo.c.admin as any).simuladas[0];
+  assertEquals([sim.n, sim.p_simular, sim.p_autor], ["cadastrar_freelancer", true, null]);
+
+  const existente = ctx({ simulacao: { data: { acao: "diaria_no_cadastro_existente", nome: "José da Silva", regra: "criada" } } });
+  const txt2 = String(await resumirCadastro(existente.c as never, { nome: "jose da silva", valor_diaria: 120, cpf: "123.456.789-09" }));
+  assertStringIncludes(txt2, "Já existe o favorecido *José da Silva*, sem diária");
+  assertStringIncludes(txt2, "Pix para o CPF dele vão entrar sozinhos");
+
+  const recusa = ctx({ simulacao: { error: { message: "P0001: Roberto já tem diária cadastrada (veja em Financeiro › Diárias)." } } });
+  const txt3 = String(await resumirCadastro(recusa.c as never, { nome: "Roberto", valor_diaria: 160 }));
+  assertStringIncludes(txt3, "⚠️ Roberto já tem diária cadastrada (veja em Financeiro › Diárias). — o sistema vai recusar.");
 });

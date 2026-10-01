@@ -1,5 +1,5 @@
 import { resumirPedido } from "./tools/caixa.ts";
-import { resumirDiaria } from "./tools/diarias.ts";
+import { resumirCadastro, resumirDiaria } from "./tools/diarias.ts";
 import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
 import {
   callClaude,
@@ -144,6 +144,7 @@ const TOOL_LABELS_PT: Record<string, string> = {
   lancar_no_caixa: "Lançar no Caixa (dinheiro)",
   ajustar_saldo_do_caixa: "Acertar o Caixa pela contagem",
   registrar_diaria: "Registrar diária",
+  cadastrar_freelancer: "Cadastrar freelancer",
   anotar_transacao_do_banco: "Anotar transação que o banco vai trazer",
   configurar_lancamento_automatico: "Ligar/desligar o lançar sozinho",
   // As que pedem confirmação quando chegam pela rede de segurança (perfil-operacao.ts,
@@ -307,6 +308,14 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
   if (toolName === "registrar_diaria") {
     try {
       const r = await resumirDiaria({ admin } as unknown as ToolCtx, args);
+      if (r) return r;
+    } catch { /* cai no resumo genérico */ }
+  }
+  // Freelancer novo: o "sim" é sobre o que a função do banco VAI fazer (ela simula sem gravar) —
+  // cadastro novo ou o favorecido que já existe, a chave Pix entendida, a regra por CPF.
+  if (toolName === "cadastrar_freelancer") {
+    try {
+      const r = await resumirCadastro({ admin } as unknown as ToolCtx, args);
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
   }

@@ -90,6 +90,17 @@ de diária; dia = `work_shifts`; pagamento = o lançamento que já vem do extrat
   está** — o intervalo só preenche o que falta (um "faltou desde…" não pode apagar um dia inteiro
   lançado no meio); corrigir é registrar aquele dia sozinho. Sem mudança no banco: é
   `registrar_diaria` por data. Obs.: 19/09/2026 foi sábado — em dias úteis o intervalo começa no 21.
+- **Freelancer novo pelo assistente — FEITO em 01/10/2026** (o dono pediu "cadastre o João Marcelo,
+  entrou no lugar do Mickael" e o assistente respondeu que só dava pela tela, que não existe). Função
+  `cadastrar_freelancer` (migration `20261001210000`): favorecido (ou o que já existe com o MESMO
+  nome/CPF — nome parecido não conta) + diária + conta corrente desde o primeiro dia + categoria +
+  regra por CPF quando há CPF; `p_simular` devolve o que faria, e é o texto da confirmação. Tool
+  `cadastrar_freelancer` no perfil; `cadastrar_favorecido` passa a mandar diarista para ela. Junto:
+  `registrar_diaria` aceita `valor_diaria` só quando a pessoa diz outro valor para o dia ("na
+  quarta foram 130") — a tela já permitia. João Marcelo cadastrado pela função (R$ 150 desde
+  29/09, Pix e-mail, sem CPF) com 29/09 R$ 150, 30/09 R$ 130 e 01/10 R$ 150. Mickael mantido.
+  Teste: `supabase/tests/cadastrar_freelancer.sql`. A tela não tem "Novo freelancer" (só o
+  assistente) — pergunta ao dono.
 
 ## Armadilhas já medidas
 
