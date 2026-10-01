@@ -44,11 +44,11 @@ import { maskCPFCNPJ } from '@/lib/masks';
 import { parseNfeReferenceXml } from '@/lib/nfe-xml-parser';
 import {
   tomadorDaNota, totalDaNota, itensDaNota, tipoDaNota,
-  dataDaNota, naturezaDaNota, ehDevolucao, textoBuscavelDaNota,
-  contaParaFaturamento,
+  dataDaNota, naturezaDaNota, ehDevolucao,
   prazoDeCancelamento,
 } from '@/lib/nota-fiscal-leitura';
 import { montarParcelas, intervaloDasParcelas, parcelasParaLancar as calcularParcelasParaLancar } from '@/lib/fiscal-parcelas';
+import { naturezasDasNotas, filtrarNotas, estatisticasDoMes, validadeDoCertificado } from '@/lib/fiscal-painel';
 import { MultiFilterBar } from '@/components/MultiFilterBar';
 import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
@@ -68,7 +68,7 @@ import {
   PAYMENT_METHODS, NATURE_OF_OPERATION_OPTIONS, findNatureOfOperation, computeCfop,
 } from '../../supabase/functions/_shared/fiscal/payload-builder';
 import {
-  resolveProductFiscal, type GlobalFiscalDefaults, type ResolvedProductFiscal,
+  resolveProductFiscal, globalFiscalDefaultsFromSettings, type GlobalFiscalDefaults, type ResolvedProductFiscal,
 } from '../../supabase/functions/_shared/fiscal/product-fiscal';
 
 // Indicador de IE do destinatário (indIEDest).
@@ -306,133 +306,35 @@ export default function FiscalEmission() {
   const { data: company, isLoading: loadingCompany } = useCompanyFiscalSettings();
   const { data: documents, isLoading: loadingDocs } = useIssuedFiscalDocuments();
 
-  /**
-   * As naturezas que existem NESTAS notas, não uma lista fixa.
-   *
-   * A natureza é texto livre na emissão ("Venda de mercadoria", "Devolução de compra", e o
-   * que mais for escrito amanhã). Uma lista fixa no código envelheceria calada: a natureza
-   * nova simplesmente não apareceria como opção de filtro e ninguém saberia por quê.
-   */
-  const naturezasExistentes = useMemo(() => {
-    const vistas = new Set<string>();
-    for (const doc of (documents ?? []) as any[]) {
-      const n = naturezaDaNota(doc);
-      if (n) vistas.add(n);
-    }
-    return [...vistas].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [documents]);
+  // Filtro, naturezas e números do mês: src/lib/fiscal-painel.ts (D33), com teste.
+  const naturezasExistentes = useMemo(() => naturezasDasNotas(documents), [documents]);
 
-  const notasFiltradas = useMemo(() => {
-    const busca = String(filtroNotas.search ?? '').trim().toLowerCase();
-    const status = filtroNotas.status as string[];
-    const tipos = filtroNotas.tipo as string[];
-    const naturezas = filtroNotas.natureza as string[];
-    const ambientes = filtroNotas.ambiente as string[];
-    const de = String(filtroNotas.dateFrom ?? '');
-    const ate = String(filtroNotas.dateTo ?? '');
-
-    return ((documents ?? []) as any[]).filter((doc) => {
-      if (status.length && !status.includes(doc.status)) return false;
-      if (tipos.length && !tipos.includes(tipoDaNota(doc))) return false;
-      if (naturezas.length && !naturezas.includes(naturezaDaNota(doc))) return false;
-      if (ambientes.length && !ambientes.includes(doc.environment ?? 'producao')) return false;
-
-      if (de || ate) {
-        // Compara pelo DIA local da nota. Recortar por string ISO cortaria errado a nota
-        // emitida à noite, cuja hora UTC já caiu no dia seguinte.
-        const bruta = dataDaNota(doc);
-        if (!bruta) return false;
-        const d = new Date(bruta);
-        const dia = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        if (de && dia < de) return false;
-        if (ate && dia > ate) return false;
-      }
-
-      if (busca && !textoBuscavelDaNota(doc).includes(busca)) return false;
-      return true;
-    });
-  }, [documents, filtroNotas]);
+  const notasFiltradas = useMemo(() => filtrarNotas((documents ?? []) as any[], filtroNotas), [documents, filtroNotas]);
   const { data: fiscalEnv } = useFiscalEnvironment();
   const isProducao = fiscalEnv === 'producao';
   const { data: health } = useFiscalDiagnostics();
   const { data: clients } = useClients();
 
-  // Métricas do mês corrente para o Painel de Saúde Fiscal (calculadas do
-  // histórico já carregado — no volume do HBR as 100 notas recentes cobrem o mês).
-  /**
-   * O faturamento do mes. Medido em 23/09/2026: o painel mostrava R$ 0,00 em setembro.
-   *
-   * Tres defeitos somados, todos herdados de ler a nota pelo campo errado:
-   *
-   *  1. o valor vinha de `payments[0].amount`, a forma de pagamento declarada. A NFS-e nao
-   *     tem esse campo -- e a unica nota de setembro e uma NFS-e de R$ 500, entao o mes
-   *     inteiro aparecia zerado. Em agosto faltavam R$ 2.800,38 pelo mesmo motivo;
-   *  2. o mes vinha de `created_at`, que e quando a LINHA nasceu, em UTC -- nota emitida a
-   *     noite no fim do mes caia no mes seguinte;
-   *  3. nota de HOMOLOGACAO entrava na conta. Julho mostrava R$ 8.100 quando o faturamento
-   *     real foi R$ 4.050: metade era um teste que nao vale nada fiscalmente.
-   *
-   * Devolucao tambem fica de fora, e por um motivo diferente dos outros: ela E uma nota
-   * autorizada de verdade, mas nao e receita -- e mercadoria voltando para o fornecedor.
-   * Soma-la infla o faturamento com dinheiro que ninguem recebeu.
-   */
-  const monthStats = useMemo(() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = now.getMonth();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const month = (documents || []).filter((d: any) => {
-      const bruta = dataDaNota(d);
-      if (!bruta) return false;
-      const dt = new Date(bruta);
-      return dt.getFullYear() === y && dt.getMonth() === m;
-    });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const by = (s: string) => month.filter((d: any) => d.status === s);
-    const authorized = by('authorized');
-    const faturaveis = authorized.filter(contaParaFaturamento);
-    const faturamento = faturaveis.reduce(
-      (sum: number, d: unknown) => sum + totalDaNota(d),
-      0,
-    );
-    const foraDoFaturamento = authorized.length - faturaveis.length;
-    const rejected = by('rejected').length;
-    const cancelled = by('cancelled').length;
-    // Proxy da cota Contora: eventos que chegaram à SEFAZ (autorizada+rejeitada+cancelada).
-    const eventos = authorized.length + rejected + cancelled;
-    return {
-      authorized: authorized.length, rejected, cancelled, faturamento, eventos,
-      faturaveis: faturaveis.length, foraDoFaturamento,
-    };
-  }, [documents]);
+  // Métricas do mês corrente para o Painel de Saúde Fiscal (calculadas do histórico já
+  // carregado: no volume da HBR as 100 notas recentes cobrem o mês). Por que devolução e
+  // homologação ficam fora: ver estatisticasDoMes.
+  const monthStats = useMemo(() => estatisticasDoMes(documents), [documents]);
 
   // Validade do certificado A1 → dias a vencer (alerta antecipado de "apagão fiscal").
-  const certInfo = useMemo(() => {
-    const vu = health?.company?.certificate_valid_until as string | undefined;
-    if (!vu) return null;
-    const days = Math.floor((new Date(`${vu}T23:59:59`).getTime() - Date.now()) / 86_400_000);
-    return { validUntil: vu, days };
-  }, [health]);
+  const certInfo = useMemo(
+    () => validadeDoCertificado(health?.company?.certificate_valid_until as string | undefined),
+    [health],
+  );
   const { data: products } = useProducts();
   const { data: productCategories } = useProductCategories();
   const { data: appSettings } = useAppSettings();
 
-  // Defaults fiscais globais (fim da hierarquia produto→categoria→global). O
-  // hook devolve um mapa key→value; convertemos para o formato do resolver.
-  const globalFiscalDefaults: GlobalFiscalDefaults = useMemo(() => {
-    const m = appSettings || {};
-    const n = (k: string) => (m[k] != null && m[k] !== '' && !Number.isNaN(Number(m[k])) ? Number(m[k]) : undefined);
-    return {
-      default_csosn: m['default_csosn'] || undefined,
-      default_fiscal_origin: n('default_fiscal_origin'),
-      default_icms_rate: n('default_icms_rate'),
-      default_ipi_rate: n('default_ipi_rate'),
-      default_pis_rate: n('default_pis_rate'),
-      default_cofins_rate: n('default_cofins_rate'),
-      default_pis_cst: m['default_pis_cst'] || undefined,
-      default_cofins_cst: m['default_cofins_cst'] || undefined,
-    };
-  }, [appSettings]);
+  // Defaults fiscais globais (fim da hierarquia produto→categoria→global): a MESMA conversão
+  // do fiscal-emit, numa função só (globalFiscalDefaultsFromSettings).
+  const globalFiscalDefaults: GlobalFiscalDefaults = useMemo(
+    () => globalFiscalDefaultsFromSettings(appSettings),
+    [appSettings],
+  );
 
   // Resolve os campos fiscais efetivos de um produto (produto→categoria→global),
   // para pré-preencher os impostos do item. Mesmo cálculo do servidor.

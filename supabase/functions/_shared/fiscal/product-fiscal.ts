@@ -75,6 +75,33 @@ function firstNum(...vals: Array<number | null | undefined>): number | undefined
   return undefined;
 }
 
+/**
+ * Os padrões fiscais globais (fim da hierarquia produto → categoria → global) a partir de
+ * app_settings, um mapa chave → valor. Um lugar só para a tela de emissão (que pré-preenche os
+ * impostos do item) e o fiscal-emit (que calcula os da nota): antes cada um tinha a sua cópia
+ * desta conta (D33, 01/10/2026). Valor vazio ou que não é número fica de fora, e o resolver usa
+ * o fallback.
+ */
+export function globalFiscalDefaultsFromSettings(
+  settings: Record<string, unknown> | null | undefined,
+): GlobalFiscalDefaults {
+  const texto = (k: string) => (settings?.[k] == null ? "" : String(settings[k]));
+  const numero = (k: string) => {
+    const v = texto(k);
+    return v !== "" && !Number.isNaN(Number(v)) ? Number(v) : undefined;
+  };
+  return {
+    default_csosn: texto("default_csosn") || undefined,
+    default_fiscal_origin: numero("default_fiscal_origin"),
+    default_icms_rate: numero("default_icms_rate"),
+    default_ipi_rate: numero("default_ipi_rate"),
+    default_pis_rate: numero("default_pis_rate"),
+    default_cofins_rate: numero("default_cofins_rate"),
+    default_pis_cst: texto("default_pis_cst") || undefined,
+    default_cofins_cst: texto("default_cofins_cst") || undefined,
+  };
+}
+
 export function resolveProductFiscal(
   product: ProductFiscalInput | null | undefined,
   category?: CategoryFiscalDefaults | null,

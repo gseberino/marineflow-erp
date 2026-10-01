@@ -23,6 +23,7 @@ import {
   type BuildNfePayloadInput,
 } from "../_shared/fiscal/payload-builder.ts";
 import {
+  globalFiscalDefaultsFromSettings,
   resolveProductFiscal,
   type CategoryFiscalDefaults,
   type GlobalFiscalDefaults,
@@ -394,17 +395,8 @@ async function loadGlobalFiscalDefaults(admin: any): Promise<GlobalFiscalDefault
   const { data } = await admin.from("app_settings").select("key, value");
   const m: Record<string, string> = {};
   for (const row of data ?? []) if (row?.key != null) m[String(row.key)] = String(row.value ?? "");
-  const numOrNull = (v: string | undefined) => (v != null && v !== "" && !Number.isNaN(Number(v)) ? Number(v) : undefined);
-  return {
-    default_csosn: m["default_csosn"] || undefined,
-    default_fiscal_origin: numOrNull(m["default_fiscal_origin"]),
-    default_icms_rate: numOrNull(m["default_icms_rate"]),
-    default_ipi_rate: numOrNull(m["default_ipi_rate"]),
-    default_pis_rate: numOrNull(m["default_pis_rate"]),
-    default_cofins_rate: numOrNull(m["default_cofins_rate"]),
-    default_pis_cst: m["default_pis_cst"] || undefined,
-    default_cofins_cst: m["default_cofins_cst"] || undefined,
-  };
+  // A mesma conversão que a tela usa para pré-preencher os impostos (uma função só).
+  return globalFiscalDefaultsFromSettings(m);
 }
 
 // Carrega em lote os produtos referenciados pelos itens (por product_id) e as
