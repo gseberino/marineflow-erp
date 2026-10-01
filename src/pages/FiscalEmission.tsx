@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { NfseSection } from '@/components/fiscal/NfseSection';
 import { BaixaDaNotaAvulsaDialog } from '@/components/fiscal/BaixaDaNotaAvulsaDialog';
 import { CancelarNotaDialog, CartaDeCorrecaoDialog } from '@/components/fiscal/CancelarOuCorrigirNota';
+import { ExportarXmlsDialog } from '@/components/fiscal/ExportarXmlsDialog';
 import { AddressFields } from '@/components/AddressFields';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
 import { ProductFormDialog } from '@/components/ProductFormDialog';
@@ -55,7 +56,6 @@ import { montarCorpoDaEmissao } from '@/lib/fiscal-corpo-emissao';
 import { MultiFilterBar } from '@/components/MultiFilterBar';
 import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
-import { createZipBlob, type ZipEntry } from '@/lib/zip';
 import { parseLegacyAddress } from '@/lib/address-legacy';
 import { CSOSN_OPTIONS, FISCAL_ORIGIN_OPTIONS } from '@/lib/price-calculator';
 import { buildEspelhoHtml } from '@/lib/danfe-espelho';
@@ -372,14 +372,8 @@ export default function FiscalEmission() {
 
   const [showClientForm, setShowClientForm] = useState(false);
 
-  // Export de XMLs / relatório p/ contadora (período).
+  // Export de XMLs / relatório p/ contadora (período): componente próprio (D33).
   const [showExport, setShowExport] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [exportFrom, setExportFrom] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
-  });
-  const [exportTo, setExportTo] = useState(() => new Date().toISOString().slice(0, 10));
 
   const [showEmit, setShowEmit] = useState(false);
   const [emitting, setEmitting] = useState(false);
@@ -1744,106 +1738,6 @@ export default function FiscalEmission() {
   };
 
 
-  // Export de XMLs autorizados de um período + um resumo CSV (livro de saída),
-  // num único .zip para a contadora. Os XMLs são baixados pelo proxy autenticado
-  // (action "artifact") — as URLs da Contora exigem token; o CSV é montado a
-  // partir dos próprios registros (série/nº, chave, data, valor, destinatário).
-  const handleExportXmls = async () => {
-    if (!exportFrom || !exportTo || exportFrom > exportTo) {
-      toast.error('Informe um período válido (início ≤ fim).');
-      return;
-    }
-    setExporting(true);
-    const tId = toast.loading('Consultando notas do período…');
-    try {
-      // Converte os limites do dia LOCAL para instantes UTC — authorized_at é
-      // timestamptz; comparar string ingênua colocaria notas da virada do dia no
-      // mês errado. Inclui autorizadas E canceladas (a contadora precisa da
-      // cancelada no livro; senão o número parece uma inutilização/lacuna).
-      const fromInstant = new Date(`${exportFrom}T00:00:00`).toISOString();
-      const toInstant = new Date(`${exportTo}T23:59:59.999`).toISOString();
-      const { data: docs, error } = await supabase.from('issued_fiscal_documents')
-        .select('id, series, number, access_key, status, authorized_at, environment, request_payload')
-        .in('status', ['authorized', 'cancelled'])
-        .gte('authorized_at', fromInstant)
-        .lte('authorized_at', toInstant)
-        .order('number', { ascending: true });
-      if (error) throw error;
-      if (!docs?.length) {
-        toast.error('Nenhuma NF-e autorizada/cancelada nesse período.', { id: tId });
-        return;
-      }
-
-      // CSV com ; (Excel pt-BR) e BOM UTF-8; sanitiza campos livres.
-      const csvSafe = (s: string) => String(s ?? '').replace(/[;\r\n]+/g, ' ').trim();
-      const rows = ['Serie;Numero;Chave de Acesso;Data;Valor Total;Destinatario;CNPJ/CPF;Situacao;Ambiente'];
-      const entries: ZipEntry[] = [];
-      let ok = 0;
-      let failed = 0;
-
-      for (let i = 0; i < docs.length; i++) {
-        const d = docs[i];
-        toast.loading(`Baixando XML ${i + 1}/${docs.length}…`, { id: tId });
-        // request_payload é jsonb (tipo Json) — narrowing local para os campos que o CSV usa.
-        const payload = (d.request_payload ?? {}) as {
-          recipient?: { name?: string; document?: string };
-          payments?: Array<{ amount?: number }>;
-        };
-        const rec = payload.recipient || {};
-        // Mesmo valor e mesma data da lista e do DANFE -- o CSV vai para a contadora, e
-        // tres numeros diferentes para a mesma nota e pior que nenhum.
-        const total = totalDaNota(d);
-        const dataBruta = dataDaNota(d);
-        const dateStr = dataBruta ? new Date(dataBruta).toLocaleDateString('pt-BR') : '';
-        rows.push([
-          d.series, d.number, d.access_key || '', dateStr,
-          total.toFixed(2).replace('.', ','),
-          csvSafe(rec.name || ''), rec.document || '',
-          d.status === 'cancelled' ? 'Cancelada' : 'Autorizada',
-          d.environment === 'producao' ? 'Producao' : 'Homologacao',
-        ].join(';'));
-
-        try {
-          const { data: xmlData, error: xmlErr } = await supabase.functions.invoke('fiscal-emit', {
-            body: { action: 'artifact', document_id: d.id, artifact: 'xml_authorized' },
-          });
-          if (xmlErr) throw xmlErr;
-          const text = xmlData instanceof Blob
-            ? await xmlData.text()
-            : typeof xmlData === 'string'
-              ? xmlData
-              : new TextDecoder().decode(xmlData as ArrayBuffer);
-          if (text && text.trim().startsWith('<')) {
-            const num = String(d.number).padStart(9, '0');
-            entries.push({ name: `NFe-${d.series}-${num}-${d.access_key || d.id}.xml`, content: text });
-            ok++;
-          } else {
-            failed++;
-          }
-        } catch {
-          failed++;
-        }
-      }
-
-      entries.push({ name: '_resumo-livro-saida.csv', content: '﻿' + rows.join('\r\n') + '\r\n' });
-      const blob = createZipBlob(entries);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `NFe-XMLs_${exportFrom}_a_${exportTo}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-
-      toast.success(`Exportadas ${ok} nota(s)${failed ? ` (${failed} XML não baixado)` : ''} + resumo CSV.`, { id: tId });
-      setShowExport(false);
-    } catch (err: any) {
-      toast.error('Erro ao exportar: ' + (err?.message || 'desconhecido'), { id: tId });
-    } finally {
-      setExporting(false);
-    }
-  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -3390,39 +3284,8 @@ export default function FiscalEmission() {
         />
       )}
 
-      {/* ── Dialog: exportar XMLs do período (contadora) ── */}
-      <Dialog open={showExport} onOpenChange={(o) => { if (!exporting) setShowExport(o); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Exportar XMLs para a contadora</DialogTitle>
-            <DialogDescription>
-              Baixa, num único arquivo .zip, os XMLs de todas as NF-es <strong>autorizadas</strong> no
-              período escolhido, mais um resumo em CSV (livro de saída: série/nº, chave, data, valor, destinatário).
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Início</Label>
-              <Input type="date" value={exportFrom} max={exportTo} onChange={(e) => setExportFrom(e.target.value)} />
-            </div>
-            <div>
-              <Label>Fim</Label>
-              <Input type="date" value={exportTo} min={exportFrom} onChange={(e) => setExportTo(e.target.value)} />
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Cada XML é baixado com autenticação (a chave/token nunca sai do servidor). Em períodos com muitas
-            notas o download pode levar alguns segundos.
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowExport(false)} disabled={exporting}>Voltar</Button>
-            <Button onClick={handleExportXmls} disabled={exporting}>
-              {exporting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileDown className="h-4 w-4 mr-2" />}
-              Exportar .zip
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Exportar XMLs para a contadora: componente com o próprio período e progresso (D33). */}
+      {showExport && <ExportarXmlsDialog onClose={() => setShowExport(false)} />}
 
       {/* ── Dialog: detalhe do erro (mensagem completa + técnico) ── */}
       <Dialog open={!!errorDetail} onOpenChange={(o) => { if (!o) setErrorDetail(null); }}>
