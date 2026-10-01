@@ -14,13 +14,17 @@ begin;
 
 create temp table _resultado (teste text, ok boolean, detalhe text) on commit drop;
 
--- O Pix dividido mais recente: principal, parte e a linha do banco.
+-- O Pix dividido PELO PRÓ-LABORE mais recente: principal (pró-labore), parte (retirada) e a
+-- linha do banco. Só esse tipo de divisão: desde 30/09 há divisões de outro tipo (o reembolso de
+-- diárias pago pelo sócio, em três partes), e com elas T3/T5b/T11 acusavam falha que não existia
+-- (T3 somava só uma parte; T5b e T11 supõem a regra do pró-labore e um mês que bate o mínimo).
 create temp table _grupo on commit drop as
 select p.id as raiz, x.id as parte, p.bank_transaction_id as linha, p.payee_id as socio,
        p.issue_date as data, p.amount + x.amount as total
   from public.payables p
   join public.payables x on x.divisao_id = p.id and x.status <> 'cancelled'
  where p.divisao_id is null and p.status = 'paid'
+   and p.expense_category = 'Pró-labore' and x.expense_category = 'Retirada de sócio'
  order by p.issue_date desc, p.id
  limit 1;
 
