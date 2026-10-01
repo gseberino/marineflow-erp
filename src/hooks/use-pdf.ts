@@ -16,8 +16,9 @@ import {
 export async function carregarPDFData(
   serviceOrderId: string,
   db: LeitorDoBanco = supabase,
+  opcoes: { publico?: boolean } = {},
 ): Promise<PDFData> {
-  return montarPDFData(serviceOrderId, db);
+  return montarPDFData(serviceOrderId, db, opcoes);
 }
 
 export function usePDFData(serviceOrderId: string | undefined) {

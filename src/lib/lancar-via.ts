@@ -34,17 +34,19 @@ export function linhasParaGravar(l: LancamentoDaVia): Array<{
     }));
 }
 
-/** O bloco que entra nas notas do técnico. Vazio quando o papel não trouxe texto. */
-export function registroDaVia(l: LancamentoDaVia, quando: Date): string {
+/**
+ * O que o papel trouxe, separado por destino. As notas do técnico saem impressas no
+ * documento da OS do cliente; o material além do previsto é conversa de margem e vai para
+ * as notas internas, que o cliente não vê. Cada parte vem vazia quando o papel não trouxe.
+ */
+export function registroDaVia(l: LancamentoDaVia, quando: Date): { tecnico: string; interno: string } {
   const relato = (l.relato || '').trim();
   const material = (l.materialExtra || '').trim();
-  if (!relato && !material) return '';
   const data = quando.toLocaleDateString('pt-BR');
-  return [
-    `[Via lançada em ${data}]`,
-    relato && `O que encontrei / pendente / vigiar: ${relato}`,
-    material && `Material além do previsto: ${material}`,
-  ].filter(Boolean).join('\n');
+  return {
+    tecnico: relato ? `[Via lançada em ${data}]\nO que encontrei / pendente / vigiar: ${relato}` : '',
+    interno: material ? `[Via lançada em ${data}]\nMaterial além do previsto: ${material}` : '',
+  };
 }
 
 /** Junta o registro novo embaixo do que já existia, sem perder nada. */

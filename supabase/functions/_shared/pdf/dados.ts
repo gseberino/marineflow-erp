@@ -5,6 +5,10 @@
  * exatamente como a tela monta. src/hooks/use-pdf.ts delega para cá.
  */
 import type { PDFData } from './documento.ts';
+import {
+  OS_PUBLICA, CLIENTE_PUBLICO, VEICULO_PUBLICO, MARINA_PUBLICA, LINHA_SERVICO_PUBLICA,
+  PECA_PUBLICA, PRODUTO_PUBLICO, DESPESA_PUBLICA,
+} from './colunas-publicas.ts';
 
 /**
  * O mínimo que a montagem precisa de um cliente do banco: `.from(tabela)`.
@@ -108,23 +112,45 @@ function buildSurveyForPdf(raw: unknown): PDFData['survey'] {
 export async function carregarPDFData(
   serviceOrderId: string,
   db: LeitorDoBanco,
+  /**
+   * `publico`: quem lê é o link do cliente (anônimo). Pede só as colunas liberadas em
+   * colunas-publicas.ts — o banco recusa as internas para o anônimo, e `*` derrubaria a
+   * consulta inteira. A tela e o assistente seguem lendo tudo.
+   * Sem `services(name)` aqui: o anônimo não lê o catálogo, e o embed derrubava a consulta
+   * inteira com 42501 — o "Baixar PDF" do portal falhava assim até 01/10/2026. O nome vem
+   * de `name_snapshot`, gravado na própria linha.
+   */
+  opcoes: { publico?: boolean } = {},
 ): Promise<PDFData> {
-  const [soRes, settingsRes, receivablesRes] = await Promise.all([
-    db.from('service_orders')
-      .select(`
+  // O que é igual para os dois leitores (o levantamento, as fotos, a condição de pagamento).
+  const comuns = `
+        service_surveys!service_surveys_service_order_id_fkey(
+          answered_at, confidence_rationale, status,
+          service_survey_answers(seq, question_snapshot, answer_value, skipped_reason, photo_path)),
+        service_order_photos!service_order_photos_service_order_id_fkey(public_url, created_at),
+        payment_condition_presets(label, installments)`;
+  const selecao = opcoes.publico
+    ? `
+        ${OS_PUBLICA},
+        clients(${CLIENTE_PUBLICO}),
+        vessels(${VEICULO_PUBLICO}),
+        marinas(${MARINA_PUBLICA}),
+        service_order_services(${LINHA_SERVICO_PUBLICA}),
+        service_order_parts(${PECA_PUBLICA}, products(${PRODUTO_PUBLICO})),
+        service_order_expenses(${DESPESA_PUBLICA}),${comuns}
+      `
+    : `
         *,
         clients(*),
         vessels(*),
         marinas(*),
         service_order_services(*, services(name)),
         service_order_parts(*, products(name, sku, image_url)),
-        service_surveys!service_surveys_service_order_id_fkey(
-          answered_at, confidence_rationale, status,
-          service_survey_answers(seq, question_snapshot, answer_value, skipped_reason, photo_path)),
-        service_order_expenses(category, description, amount, paid_by),
-        service_order_photos!service_order_photos_service_order_id_fkey(public_url, created_at),
-        payment_condition_presets(label, installments)
-      `)
+        service_order_expenses(category, description, amount, paid_by),${comuns}
+      `;
+  const [soRes, settingsRes, receivablesRes] = await Promise.all([
+    db.from('service_orders')
+      .select(selecao)
       .eq('id', serviceOrderId)
       .single(),
     db.from('app_settings')

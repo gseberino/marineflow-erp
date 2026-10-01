@@ -34,7 +34,7 @@ export interface ViaEntryService {
  * além do previsto. Campo em branco não muda nada.
  */
 export function ViaEntryDialog({
-  open, onOpenChange, orderId, orderNumber, services, notasAtuais, checkInAt, checkOutAt, onSaved,
+  open, onOpenChange, orderId, orderNumber, services, notasAtuais, notasInternasAtuais, checkInAt, checkOutAt, onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -42,10 +42,12 @@ export function ViaEntryDialog({
   orderNumber?: string | null;
   services: ViaEntryService[];
   notasAtuais?: string | null;
+  /** Notas internas: o material além do previsto vai para lá (o cliente não vê). */
+  notasInternasAtuais?: string | null;
   checkInAt?: string | null;
   checkOutAt?: string | null;
   /** Para a tela da OS acompanhar as notas novas (o salvamento automático não pode desfazer). */
-  onSaved?: (r: { technicianNotes?: string }) => void;
+  onSaved?: (r: { technicianNotes?: string; internalNotes?: string }) => void;
 }) {
   const lancar = useLancarVia();
 
@@ -68,8 +70,8 @@ export function ViaEntryDialog({
 
   async function salvar() {
     try {
-      const r = await lancar.mutateAsync({ orderId, notasAtuais, lancamento: l });
-      onSaved?.({ technicianNotes: r.technicianNotes });
+      const r = await lancar.mutateAsync({ orderId, notasAtuais, notasInternasAtuais, lancamento: l });
+      onSaved?.({ technicianNotes: r.technicianNotes, internalNotes: r.internalNotes });
       toast.success(r.servicos
         ? `Via lançada: ${r.servicos} serviço(s) atualizado(s).`
         : 'Via lançada.');
@@ -148,7 +150,7 @@ export function ViaEntryDialog({
           <Textarea id="via-material" rows={2} value={l.materialExtra}
             onChange={(e) => setL((p) => ({ ...p, materialExtra: e.target.value }))} />
           <p className="mt-1 text-xs text-muted-foreground">
-            Vai para as notas da OS. Para cobrar, lance a peça na OS como de costume.
+            Vai para as notas internas da OS (o cliente não vê). Para cobrar, lance a peça na OS como de costume.
           </p>
         </div>
 

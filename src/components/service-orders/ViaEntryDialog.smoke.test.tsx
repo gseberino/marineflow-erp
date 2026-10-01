@@ -9,7 +9,7 @@ const { chamadas } = vi.hoisted(() => ({ chamadas: [] as any[] }));
 
 vi.mock('@/hooks/use-lancar-via', () => ({
   useLancarVia: () => ({
-    mutateAsync: async (args: any) => { chamadas.push(args); return { servicos: 1, technicianNotes: 'notas novas' }; },
+    mutateAsync: async (args: any) => { chamadas.push(args); return { servicos: 1, technicianNotes: 'notas novas', internalNotes: undefined }; },
     isPending: false,
   }),
 }));
@@ -60,6 +60,6 @@ describe('ViaEntryDialog — Lançar a via', () => {
     expect(chamadas[0].notasAtuais).toBe('antes');
     expect(chamadas[0].lancamento.servicos.l1).toEqual({ situacao: 'nao_feito', motivo: 'faltou o filtro secador' });
     // A tela da OS recebe as notas novas, para o salvamento automático não desfazê-las.
-    expect(onSaved).toHaveBeenCalledWith({ technicianNotes: 'notas novas' });
+    expect(onSaved).toHaveBeenCalledWith({ technicianNotes: 'notas novas', internalNotes: undefined });
   });
 });

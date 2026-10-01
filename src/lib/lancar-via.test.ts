@@ -21,22 +21,25 @@ describe('Lançar a via — o papel vira dado', () => {
     ]);
   });
 
-  it('o relato entra embaixo das notas que já existiam, com a data — nada se perde', () => {
-    const registro = registroDaVia(
-      { ...vazio, relato: 'Vazamento na conexão da bomba', materialExtra: '2 abraçadeiras' },
+  it('o relato entra embaixo das notas do técnico, com a data — nada se perde', () => {
+    const { tecnico } = registroDaVia(
+      { ...vazio, relato: 'Vazamento na conexão da bomba' },
       new Date(2026, 9, 1),
     );
-    expect(registro).toBe(
-      '[Via lançada em 01/10/2026]\n'
-      + 'O que encontrei / pendente / vigiar: Vazamento na conexão da bomba\n'
-      + 'Material além do previsto: 2 abraçadeiras',
-    );
-    expect(juntarNotas('Check-in do técnico.', registro)).toBe(`Check-in do técnico.\n\n${registro}`);
-    expect(juntarNotas(null, registro)).toBe(registro);
+    expect(tecnico).toBe('[Via lançada em 01/10/2026]\nO que encontrei / pendente / vigiar: Vazamento na conexão da bomba');
+    expect(juntarNotas('Check-in do técnico.', tecnico)).toBe(`Check-in do técnico.\n\n${tecnico}`);
+    expect(juntarNotas(null, tecnico)).toBe(tecnico);
+  });
+
+  it('material além do previsto vai para as notas internas, não para o documento do cliente', () => {
+    // As notas do técnico saem impressas no documento da OS do cliente; margem não.
+    const r = registroDaVia({ ...vazio, materialExtra: '2 abraçadeiras' }, new Date(2026, 9, 1));
+    expect(r.tecnico).toBe('');
+    expect(r.interno).toBe('[Via lançada em 01/10/2026]\nMaterial além do previsto: 2 abraçadeiras');
   });
 
   it('papel sem texto não cria registro vazio nas notas', () => {
-    expect(registroDaVia({ ...vazio, relato: '   ' }, new Date())).toBe('');
+    expect(registroDaVia({ ...vazio, relato: '   ' }, new Date())).toEqual({ tecnico: '', interno: '' });
     expect(juntarNotas('notas antigas', '')).toBe('notas antigas');
   });
 

@@ -15,6 +15,9 @@ import { carregarPDFData } from '@/hooks/use-pdf';
 import { documentTypeFor } from '@/lib/document-type';
 import { SignaturePad } from '@/components/SignaturePad';
 import { computeDocumentHash } from '@/lib/document-hash';
+import {
+  OS_PUBLICA, CLIENTE_PUBLICO, VEICULO_PUBLICO, LINHA_SERVICO_PUBLICA, PECA_PUBLICA, PRODUTO_PUBLICO,
+} from '../../supabase/functions/_shared/pdf/colunas-publicas';
 import { toast } from 'sonner';
 
 const fmtCurrency = (n: number) =>
@@ -73,9 +76,11 @@ export default function PublicServiceOrderView() {
 
     (async () => {
       try {
+        // Só as colunas que o cliente pode ver (colunas-publicas.ts). O banco recusa ao
+        // anônimo as internas — custo, comissão, notas internas —, e `*` derrubaria a página.
         const { data: order, error: orderErr } = await sb
           .from('service_orders')
-          .select('*')
+          .select(OS_PUBLICA)
           .eq('share_token', token)
           .maybeSingle();
 
@@ -89,17 +94,17 @@ export default function PublicServiceOrderView() {
         }
 
         const [clientRes, vesselRes, partsRes, servicesRes, settingsRes, sigRes, presetRes] = await Promise.all([
-          sb.from('clients').select('*').eq('id', order.client_id).maybeSingle(),
+          sb.from('clients').select(CLIENTE_PUBLICO).eq('id', order.client_id).maybeSingle(),
           order.vessel_id
-            ? sb.from('vessels').select('*').eq('id', order.vessel_id).maybeSingle()
+            ? sb.from('vessels').select(VEICULO_PUBLICO).eq('id', order.vessel_id).maybeSingle()
             : Promise.resolve({ data: null, error: null }),
           sb
             .from('service_order_parts')
-            .select('*, products(name, sku)')
+            .select(`${PECA_PUBLICA}, products(${PRODUTO_PUBLICO})` as const)
             .eq('service_order_id', order.id),
           sb
             .from('service_order_services')
-            .select('*')
+            .select(LINHA_SERVICO_PUBLICA)
             .eq('service_order_id', order.id),
           sb.from('app_settings').select('key, value'),
           sb
@@ -240,7 +245,7 @@ export default function PublicServiceOrderView() {
    * recebíveis, pagamentos, despesas — volta vazio, como já vinha.
    */
   const montarPdf = async (): Promise<PDFData> => {
-    const d = await carregarPDFData(order.id, sb);
+    const d = await carregarPDFData(order.id, sb, { publico: true });
     // Rascunho é ORÇAMENTO. É esta linha que devolve o cabeçalho certo, a
     // validade, e que suprime a nota técnica interna no documento do cliente.
     return { ...d, documentType: documentTypeFor(order.status) };

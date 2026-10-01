@@ -2402,11 +2402,13 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           orderNumber={orderData?.service_order_number}
           services={(soServices || []) as any[]}
           notasAtuais={form.technician_notes}
+          notasInternasAtuais={form.internal_notes}
           checkInAt={(orderData as any)?.check_in_at}
           checkOutAt={(orderData as any)?.check_out_at}
           // A tela acompanha as notas novas — o salvamento automático não pode desfazê-las.
-          onSaved={({ technicianNotes }) => {
+          onSaved={({ technicianNotes, internalNotes }) => {
             if (technicianNotes !== undefined) set('technician_notes', technicianNotes);
+            if (internalNotes !== undefined) set('internal_notes', internalNotes);
           }}
         />
       )}
