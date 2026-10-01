@@ -133,6 +133,11 @@ export function GeneralSections(props: GeneralSectionsProps) {
                 set('requested_by_contact_id', '');
                 const vessel = allVessels?.find(v => v.id === vesselId);
                 if (vessel?.marina_id) set('marina_id', vessel.marina_id);
+                // O local e acesso padrão do veículo vira sugestão; o que já foi
+                // escrito nesta OS não é sobrescrito.
+                if (vessel?.access_notes) {
+                  setForm((f) => (f.site_access ? f : { ...f, site_access: vessel.access_notes }));
+                }
               }}
               onVesselCreated={(vessel) => {
                 set('vessel_id', vessel.id);
@@ -205,6 +210,23 @@ export function GeneralSections(props: GeneralSectionsProps) {
                 )}
               </div>
             )}
+          </div>
+
+          {/* Onde o serviço acontece: motorhome muda de lugar a cada serviço, barco
+              tem vaga. Vem sugerido do cadastro do veículo; sai na via do técnico. */}
+          <div className="sm:col-span-2">
+            <Label htmlFor="os-local-acesso">
+              Local do serviço e acesso{' '}
+              <span className="text-xs font-normal text-muted-foreground">— sai na via do técnico</span>
+            </Label>
+            <Textarea
+              id="os-local-acesso"
+              value={form.site_access || ''}
+              onChange={(e) => set('site_access', e.target.value)}
+              rows={2}
+              disabled={isLocked}
+              placeholder="Endereço ou vaga, como entrar, onde está a chave, portaria, horário permitido"
+            />
           </div>
 
           {/* Pedido do cliente: viaja até a NF-e ao faturar e sai no início das
@@ -321,6 +343,22 @@ export function GeneralSections(props: GeneralSectionsProps) {
             </div>
           </div>
           <Textarea value={form.problem_description} onChange={(e) => set('problem_description', e.target.value)} rows={3} disabled={isLocked} />
+        </div>
+        {/* Sai só na via do técnico: o lugar das ressalvas que hoje se perdem nas
+            observações do orçamento (decisão de 01/10/2026). */}
+        <div>
+          <Label htmlFor="os-instrucao-tecnico">
+            Instrução ao técnico{' '}
+            <span className="text-xs font-normal text-muted-foreground">— sai só na via do técnico</span>
+          </Label>
+          <Textarea
+            id="os-instrucao-tecnico"
+            value={form.technician_instructions || ''}
+            onChange={(e) => set('technician_instructions', e.target.value)}
+            rows={2}
+            disabled={isLocked}
+            placeholder="Ressalvas, o que não fazer, o que precisa de aprovação antes, onde parar"
+          />
         </div>
         <Collapsible>
           <CollapsibleTrigger asChild>

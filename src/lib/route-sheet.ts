@@ -23,6 +23,19 @@ export interface RouteSheetHeader {
   scheduledEndAt?: string | null;
   /** O pedido do cliente (descrição da OS). Linhas com valor em R$ não saem. */
   problemDescription?: string | null;
+  /** Instrução do escritório ao técnico (ressalvas, o que não fazer). Só sai aqui. */
+  technicianInstructions?: string | null;
+  /** Onde o serviço acontece e como entrar — da OS, ou o padrão do veículo. */
+  siteAccess?: string | null;
+  /** Quem estará no local (contato do veículo escolhido como solicitante). */
+  onSiteContact?: { name?: string | null; role?: string | null; phone?: string | null } | null;
+  /** O que já se sabe do sistema elétrico do veículo, do cadastro. */
+  vehicleElectrical?: {
+    batteryBank?: string | null;
+    inverterCharger?: string | null;
+    shorePower?: string | null;
+    notes?: string | null;
+  } | null;
   /** Identidade da empresa — a mesma do PDF do orçamento. */
   companyName?: string | null;
   companyLogoUrl?: string | null;
@@ -40,6 +53,11 @@ export interface RouteSheetExtras {
     quantity?: number | null;
     unit?: string | null;
     notes?: string | null;
+    /** Instrução do escritório para este serviço. */
+    technicianInstructions?: string | null;
+    /** a_fazer | so_levantar | aguarda_peca | feito | parcial | nao_feito */
+    fieldStatus?: string | null;
+    fieldStatusNote?: string | null;
   }>;
   survey?: Array<{
     question: string;
@@ -102,6 +120,25 @@ export function semValores(texto: string | null | undefined): string {
     .filter((linha) => !/R\$/i.test(linha))
     .join('\n')
     .trim();
+}
+
+/**
+ * O que vai faltar no papel — o aviso antes de imprimir. O escritório decide se completa ou
+ * imprime assim; o técnico, sem poder ligar, é quem pagaria pela lacuna.
+ */
+export function faltasDaVia(
+  h: RouteSheetHeader,
+  materials: RouteMaterial[],
+  quantidadeDeServicos: number,
+): string[] {
+  const faltas: string[] = [];
+  if (!h.marinaName && !h.dockPosition && !(h.siteAccess || '').trim()) faltas.push('local e acesso');
+  const temTelefone = (h.clientPhone || h.clientWhatsapp || h.onSiteContact?.phone || '').trim();
+  if (!temTelefone) faltas.push('telefone de contato');
+  if (!h.scheduledAt) faltas.push('data e hora');
+  if (quantidadeDeServicos === 0) faltas.push('serviços');
+  if (!materials.length) faltas.push('material (nenhum lançado)');
+  return faltas;
 }
 
 /** Texto corrido com quebra de linha preservada, um parágrafo por linha. */
@@ -169,10 +206,24 @@ function whereLine(h: RouteSheetHeader): string {
     h.marinaName && escapeHtml(h.marinaName),
     h.dockPosition && `vaga ${escapeHtml(h.dockPosition)}`,
   ].filter(Boolean);
-  return partes.length
-    ? `<b>${partes.join(' · ')}</b>`
-    : '<span class="vazio">Local não informado na OS. Confirme com o cliente antes de sair.</span>';
+  const acesso = semValores(h.siteAccess);
+  if (!partes.length && !acesso) {
+    return '<span class="vazio">Local não informado na OS. Confirme com o cliente antes de sair.</span>';
+  }
+  return [
+    partes.length ? `<b>${partes.join(' · ')}</b>` : '',
+    acesso ? `<div class="acesso">${paragrafos(acesso)}</div>` : '',
+  ].join('');
 }
+
+/** Rótulo e frase de cada situação do serviço na via. */
+const SITUACAO: Record<string, { selo: string; frase?: string; pede_volta: boolean }> = {
+  so_levantar: { selo: 'SÓ LEVANTAR', frase: 'Medir, fotografar e anotar. Não executar.', pede_volta: true },
+  aguarda_peca: { selo: 'AGUARDA PEÇA', frase: 'Peça ainda não chegou: só execute se ela estiver com você.', pede_volta: true },
+  feito: { selo: 'JÁ FEITO', frase: 'Registrado como feito. Não precisa refazer.', pede_volta: false },
+  parcial: { selo: 'PARCIAL', frase: 'Começado numa visita anterior: continuar.', pede_volta: true },
+  nao_feito: { selo: 'NÃO FEITO NA ÚLTIMA VISITA', pede_volta: true },
+};
 
 function contactLines(h: RouteSheetHeader): string {
   const linhas: string[] = [];
@@ -185,7 +236,12 @@ function contactLines(h: RouteSheetHeader): string {
     linhas.push(`Cliente: <b>${escapeHtml(h.clientName)}</b>${
       numeros ? ` — ${numeros}` : ' — <span class="vazio">sem telefone no cadastro</span>'}`);
   }
-  if (h.requestedBy && h.requestedBy.trim() && h.requestedBy.trim() !== (h.clientName || '').trim()) {
+  const contato = h.onSiteContact;
+  if (contato?.name) {
+    linhas.push(`No local: <b>${escapeHtml(contato.name)}</b>${
+      contato.role ? ` (${escapeHtml(contato.role)})` : ''}${
+      contato.phone ? ` — tel. ${escapeHtml(contato.phone)}` : ''}`);
+  } else if (h.requestedBy && h.requestedBy.trim() && h.requestedBy.trim() !== (h.clientName || '').trim()) {
     linhas.push(`Pedido por: <b>${escapeHtml(h.requestedBy)}</b>`);
   }
   if (h.companyPhone) linhas.push(`Escritório: <b>${escapeHtml(h.companyPhone)}</b>`);
@@ -226,6 +282,20 @@ export function buildRouteSheetHtml(
   const veiculo = vehicleLine(header);
   const contatos = contactLines(header);
   const pedido = semValores(header.problemDescription);
+  const instrucoes = semValores(header.technicianInstructions);
+  const eletrico = header.vehicleElectrical;
+  const linhasEletricas = [
+    eletrico?.batteryBank && `Banco de baterias: ${escapeHtml(eletrico.batteryBank)}`,
+    eletrico?.inverterCharger && `Inversor/carregador: ${escapeHtml(eletrico.inverterCharger)}`,
+    eletrico?.shorePower && `Energia de terra/tomada: ${escapeHtml(eletrico.shorePower)}`,
+    eletrico?.notes && semValores(eletrico.notes) && `Observações: ${escapeHtml(semValores(eletrico.notes))}`,
+  ].filter(Boolean);
+  // O que já se sabe do sistema elétrico chega ao técnico antes de ele abrir o quadro.
+  const eletricoHtml = linhasEletricas.length ? `
+    <div class="secao">
+      <div class="sectitle">O que já sabemos do sistema elétrico deste veículo</div>
+      <div class="pedido">${linhasEletricas.map((l) => `<p>${l}</p>`).join('')}</div>
+    </div>` : '';
   const rostoHtml = `
     <div class="rosto">
       <div class="campo"><span class="lab">Veículo</span>${veiculo || '<span class="vazio">não informado</span>'}</div>
@@ -238,7 +308,13 @@ export function buildRouteSheetHtml(
     <div class="secao">
       <div class="sectitle">Pedido do cliente</div>
       <div class="pedido">${paragrafos(pedido)}</div>
-    </div>` : ''}`;
+    </div>` : ''}
+    ${instrucoes ? `
+    <div class="instrucao">
+      <div class="lab">Instruções do escritório</div>
+      ${paragrafos(instrucoes)}
+    </div>` : ''}
+    ${eletricoHtml}`;
 
   // ── Antes de sair: separação de materiais (ou o aviso de que não há nenhum) ──
   const materiaisHtml = materials.length ? `
@@ -279,18 +355,25 @@ export function buildRouteSheetHtml(
           ? ` <span class="sku">× ${escapeHtml(String(s.quantity))}${s.unit ? ` ${escapeHtml(s.unit)}` : ''}</span>` : '';
         const descricao = semValores(s.description);
         const notas = semValores(s.notes);
+        const instrucao = semValores(s.technicianInstructions);
+        const situacao = SITUACAO[s.fieldStatus || ''];
+        const notaSituacao = semValores(s.fieldStatusNote);
         return `
         <div class="svc">
-          <div class="svctitle">${i + 1} · ${escapeHtml(s.name)}${qtd}</div>
+          <div class="svctitle">${i + 1} · ${escapeHtml(s.name)}${qtd}${
+            situacao ? ` <span class="selo">${situacao.selo}</span>` : ''}</div>
+          ${situacao?.frase ? `<div class="situacao">${situacao.frase}</div>` : ''}
+          ${notaSituacao ? `<div class="situacao">${escapeHtml(notaSituacao)}</div>` : ''}
+          ${instrucao ? `<div class="instrucao sm"><span class="lab">Instrução</span>${paragrafos(instrucao)}</div>` : ''}
           ${descricao ? `<div class="detail">${paragrafos(descricao)}</div>` : ''}
           ${notas ? `<div class="detail">${paragrafos(notas)}</div>` : ''}
           ${doServico.length ? `<div class="svcmat"><span class="matlabel">Material deste serviço:</span>
             ${doServico.map((m) => materialLine(m)).join(' &nbsp;·&nbsp; ')}</div>` : ''}
-          <div class="volta">
+          ${situacao && !situacao.pede_volta ? '' : `<div class="volta">
             <span class="check sm"></span> feito &nbsp;&nbsp;
             <span class="check sm"></span> parcial &nbsp;&nbsp;
             <span class="check sm"></span> não feito &nbsp;·&nbsp; motivo: <span class="rule inline"></span>
-          </div>
+          </div>`}
         </div>`;
       }).join('')}
     </div>` : '';
@@ -423,6 +506,13 @@ export function buildRouteSheetHtml(
   .sectitle { font-size: 11pt; text-transform: uppercase; letter-spacing: .06em; font-weight: bold;
               padding: 2mm 0 1mm; border-bottom: 1pt solid #000; margin-bottom: 2mm; }
   .pedido { font-size: 10pt; line-height: 1.4; }
+  .acesso { font-size: 9.5pt; margin-top: .8mm; }
+  .instrucao { border-left: 2.5pt solid #000; padding: 1.5mm 0 1.5mm 3mm; margin-bottom: 4mm;
+               font-size: 10pt; line-height: 1.4; page-break-inside: avoid; }
+  .instrucao.sm { font-size: 9pt; margin: 1.5mm 0; border-left-width: 1.8pt; }
+  .selo { font-size: 7.5pt; font-weight: bold; letter-spacing: .05em; border: 1pt solid #000;
+          padding: 0 1.2mm; white-space: nowrap; vertical-align: 1px; }
+  .situacao { font-size: 9pt; font-weight: bold; margin-top: .8mm; }
   .aviso { border: 1.2pt solid #000; padding: 2.5mm 3mm; margin-bottom: 4mm; font-size: 10pt;
            page-break-inside: avoid; }
   .limite { border: 1pt dashed #000; padding: 2.5mm 3mm; margin-bottom: 5mm; font-size: 10pt;

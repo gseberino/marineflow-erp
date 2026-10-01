@@ -157,7 +157,7 @@ export default function VesselList() {
                         <Ship className="h-4 w-4 text-accent shrink-0" />
                         <div>
                           <p className="font-medium text-accent hover:underline">{v.name}</p>
-                          <p className="text-xs text-muted-foreground">{v.asset_type || 'Lancha'} • {v.manufacturer} {v.model}</p>
+                          <p className="text-xs text-muted-foreground">{v.asset_type || 'Tipo não informado'} • {v.manufacturer} {v.model}</p>
                         </div>
                       </Link>
                     </td>

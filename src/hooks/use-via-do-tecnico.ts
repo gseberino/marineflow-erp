@@ -11,12 +11,15 @@
  * Decisões de 01/10/2026: o pedido do cliente (descrição da OS) sai na via; o link do
  * portal do cliente não sai (mostra preço).
  */
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useServiceOrderSteps, useRouteMaterials } from '@/hooks/use-service-steps';
 import { useServiceOrderServices } from '@/hooks/use-service-orders';
 import { useServiceOrderSurvey, surveyPhotoUrl } from '@/hooks/use-service-survey';
 import { useAppSettings } from '@/hooks/use-app-settings';
-import { printRouteSheet, type RouteSheetHeader, type RouteSheetExtras } from '@/lib/route-sheet';
+import { VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
+import {
+  printRouteSheet, faltasDaVia, type RouteSheetHeader, type RouteSheetExtras,
+} from '@/lib/route-sheet';
 
 /** O que a via precisa saber da OS — tudo já está no detalhe que a tela carrega. */
 export type ViaDoTecnicoHeader = Omit<
@@ -46,6 +49,25 @@ export function viaHeaderFromOrder(order: any): ViaDoTecnicoHeader {
     scheduledAt: order.scheduled_start_at ?? null,
     scheduledEndAt: order.scheduled_end_at ?? null,
     problemDescription: order.problem_description ?? null,
+    technicianInstructions: order.technician_instructions ?? null,
+    // O local da OS manda; sem ele, vale o padrão do cadastro do veículo.
+    siteAccess: order.site_access || order.vessels?.access_notes || null,
+    onSiteContact: order.requested_by_contact
+      ? {
+          name: order.requested_by_contact.full_name ?? null,
+          role: VESSEL_CONTACT_ROLES.find((r) => r.value === order.requested_by_contact.role)?.label
+            ?? order.requested_by_contact.role ?? null,
+          phone: order.requested_by_contact.phone ?? null,
+        }
+      : null,
+    vehicleElectrical: order.vessels
+      ? {
+          batteryBank: order.vessels.battery_bank_summary ?? null,
+          inverterCharger: order.vessels.inverter_charger_summary ?? null,
+          shorePower: order.vessels.shore_power_type ?? null,
+          notes: order.vessels.electrical_system_notes ?? null,
+        }
+      : null,
   };
 }
 
@@ -78,6 +100,9 @@ export function useViaDoTecnico(serviceOrderId: string | undefined, header: ViaD
         quantity: s.quantity ?? null,
         unit: s.billing_unit_snapshot || null,
         notes: s.notes || null,
+        technicianInstructions: s.technician_instructions || null,
+        fieldStatus: s.field_status || null,
+        fieldStatusNote: s.field_status_note || null,
       })),
       survey: (((survey as any)?.service_survey_answers ?? []) as any[])
         .slice()
@@ -92,5 +117,11 @@ export function useViaDoTecnico(serviceOrderId: string | undefined, header: ViaD
     return printRouteSheet(cabecalho, steps, materials, extras);
   }, [header, settings, services, survey, steps, materials]);
 
-  return { imprimir, carregando: carregandoPassos };
+  // O que vai faltar no papel, para o aviso antes de imprimir.
+  const faltas = useMemo(
+    () => faltasDaVia(header as RouteSheetHeader, materials, (services ?? []).length),
+    [header, materials, services],
+  );
+
+  return { imprimir, carregando: carregandoPassos, faltas };
 }

@@ -51,7 +51,8 @@ const empty: TablesInsert<'vessels'> = {
   current_dock_position: '',
   marina_id: undefined,
   active: true,
-  asset_type: 'Lancha',
+  asset_type: '',
+  access_notes: '',
 };
 
 export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, onCreated }: Props) {
@@ -88,7 +89,8 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
         current_dock_position: vessel.current_dock_position ?? '',
         marina_id: vessel.marina_id ?? undefined,
         active: vessel.active,
-        asset_type: vessel.asset_type ?? 'Lancha',
+        asset_type: vessel.asset_type ?? '',
+        access_notes: vessel.access_notes ?? '',
       });
     } else {
       setForm({ ...empty, client_id: initialClientId || '' });
@@ -99,6 +101,10 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!form.asset_type) {
+      toast.error('Escolha o tipo da unidade (lancha, motorhome, camper…).');
+      return;
+    }
     try {
       const selectedMarina = marinas?.find(m => m.id === form.marina_id);
       const payload = {
@@ -138,9 +144,11 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="col-span-2 sm:col-span-1">
               <Label>Tipo de Unidade *</Label>
-              <Select value={form.asset_type || 'Lancha'} onValueChange={v => set('asset_type', v)}>
-                <SelectTrigger>
-                  <SelectValue />
+              {/* Sem tipo pré-escolhido: o padrão "Lancha" transformava van e picape em
+                  lancha (HOMEBUS, Iveco e Hilux, achados em 01/10/2026). */}
+              <Select value={form.asset_type || undefined} onValueChange={v => set('asset_type', v)}>
+                <SelectTrigger aria-label="Tipo de unidade">
+                  <SelectValue placeholder="Escolha o tipo" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Lancha">Lancha</SelectItem>
@@ -243,6 +251,17 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
             <div>
               <Label>{t.vessels.dockPosition}</Label>
               <Input value={form.current_dock_position ?? ''} onChange={e => set('current_dock_position', e.target.value)} />
+            </div>
+            {/* Sugerido em cada OS nova deste veículo e impresso na via do técnico. */}
+            <div className="col-span-2">
+              <Label htmlFor="veiculo-acesso">Local e acesso</Label>
+              <Textarea
+                id="veiculo-acesso"
+                value={form.access_notes ?? ''}
+                onChange={e => set('access_notes', e.target.value)}
+                placeholder="Onde fica guardado, como entrar, onde está a chave, portaria, horário"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">Vem sugerido em cada OS nova e sai na via do técnico.</p>
             </div>
             <div className="col-span-2">
               <Label>{t.vessels.batteryBank}</Label>

@@ -96,7 +96,7 @@ export default function VesselsListV2() {
               {v.name}
             </Link>
             <span className="block truncate text-xs text-muted-foreground">
-              {v.asset_type || 'Lancha'} · {[v.manufacturer, v.model].filter(Boolean).join(' ') || '—'}
+              {v.asset_type || 'Tipo não informado'} · {[v.manufacturer, v.model].filter(Boolean).join(' ') || '—'}
             </span>
           </span>
         </span>
@@ -226,7 +226,7 @@ export default function VesselsListV2() {
                   key={v.id}
                   title={v.name}
                   lines={[
-                    `${v.asset_type || 'Lancha'} · ${[v.manufacturer, v.model].filter(Boolean).join(' ') || '—'}`,
+                    `${v.asset_type || 'Tipo não informado'} · ${[v.manufacturer, v.model].filter(Boolean).join(' ') || '—'}`,
                     [v.clients?.name, v.marinas?.name, v.length_feet ? `${v.length_feet} ft` : null, v.year].filter(Boolean).join(' · ') || '—',
                   ]}
                   onClick={() => navigate(`/v2/vessels/${v.id}`)}

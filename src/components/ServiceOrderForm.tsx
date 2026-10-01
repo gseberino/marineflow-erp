@@ -17,6 +17,8 @@ import { useCardFees } from '@/hooks/use-card-fees';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { useViaDoTecnico, viaHeaderFromOrder } from '@/hooks/use-via-do-tecnico';
 import { isoParaInputLocal, inputLocalParaIso } from '@/lib/datetime-local';
+import { AvisoAntesDaVia } from '@/components/service-order/aviso-antes-da-via';
+import { ViaEntryDialog } from '@/components/service-orders/ViaEntryDialog';
 import { useSOLinkedPOs, useUpdatePurchaseOrder } from '@/hooks/use-purchase-orders';
 import {
   useCreateServiceOrder,
@@ -91,7 +93,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Plus, Trash2, AlertTriangle, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Copy, Download, Loader2, DollarSign, Percent, Hash, MoreHorizontal } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, AlertTriangle, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Copy, Download, Loader2, DollarSign, Percent, Hash, MoreHorizontal, ClipboardPen } from 'lucide-react';
 import { toast } from 'sonner';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
@@ -134,6 +136,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Via do técnico (job card): a folha de roteiro terminada — roteiro, materiais, serviços
   // contratados e levantamento com fotos, sem preço. Mesmo documento do painel de Roteiro.
   const viaDoTecnico = useViaDoTecnico(orderId, viaHeaderFromOrder(orderData));
+  const [faltasDaVia, setFaltasDaVia] = useState<string[] | null>(null);
+  const [lancarViaAberto, setLancarViaAberto] = useState(false);
+  const imprimirVia = () => {
+    if (!viaDoTecnico.imprimir()) toast.error('O navegador bloqueou a janela de impressão. Libere o pop-up e tente de novo.');
+  };
   const issRatePct = Number(appSettings?.iss_rate_pct ?? 5) || 0;
   // Padrão da empresa para a validade (app_settings, senão 15) — pela função única do PDF,
   // a mesma do envio pela tela, do portal e do assistente.
@@ -346,6 +353,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     scheduled_start_at: '',
     scheduled_end_at: '',
     problem_description: '',
+    // Via do técnico (fase 2): o que o escritório escreve só para o técnico.
+    technician_instructions: '',
+    site_access: '',
     initial_findings: '',
     diagnosis: '',
     solution_applied: '',
@@ -645,6 +655,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         scheduled_start_at: isoParaInputLocal(d.scheduled_start_at),
         scheduled_end_at: isoParaInputLocal(d.scheduled_end_at),
         problem_description: d.problem_description || '',
+        technician_instructions: d.technician_instructions || '',
+        site_access: d.site_access || '',
         initial_findings: d.initial_findings || '',
         diagnosis: d.diagnosis || '',
         solution_applied: d.solution_applied || '',
@@ -1991,11 +2003,18 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   {orderId && (
                     <DropdownMenuItem
                       onClick={() => {
-                        if (!viaDoTecnico.imprimir()) toast.error('O navegador bloqueou a janela de impressão. Libere o pop-up e tente de novo.');
+                        // O que vai faltar no papel aparece antes; o escritório decide.
+                        if (viaDoTecnico.faltas.length) setFaltasDaVia(viaDoTecnico.faltas);
+                        else imprimirVia();
                       }}
                       className="gap-2"
                     >
                       <Printer className="h-4 w-4" /> Via do técnico
+                    </DropdownMenuItem>
+                  )}
+                  {orderId && (
+                    <DropdownMenuItem onClick={() => setLancarViaAberto(true)} className="gap-2">
+                      <ClipboardPen className="h-4 w-4" /> Lançar a via
                     </DropdownMenuItem>
                   )}
 
@@ -2347,6 +2366,29 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         osCollections={osCollections}
         commissionableUsers={commissionableUsers}
       />
+
+      {/* Via do técnico: aviso do que vai faltar no papel, e o lançamento do papel de volta. */}
+      <AvisoAntesDaVia
+        faltas={faltasDaVia}
+        onFechar={() => setFaltasDaVia(null)}
+        onImprimir={() => { setFaltasDaVia(null); imprimirVia(); }}
+      />
+      {orderId && (
+        <ViaEntryDialog
+          open={lancarViaAberto}
+          onOpenChange={setLancarViaAberto}
+          orderId={orderId}
+          orderNumber={orderData?.service_order_number}
+          services={(soServices || []) as any[]}
+          notasAtuais={form.technician_notes}
+          checkInAt={(orderData as any)?.check_in_at}
+          checkOutAt={(orderData as any)?.check_out_at}
+          // A tela acompanha as notas novas — o salvamento automático não pode desfazê-las.
+          onSaved={({ technicianNotes }) => {
+            if (technicianNotes !== undefined) set('technician_notes', technicianNotes);
+          }}
+        />
+      )}
 
       {/* Stock Alert Dialog — shown when part has insufficient stock */}
       {stockAlert && orderId && (

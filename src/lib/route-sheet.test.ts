@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildRouteSheetHtml } from './route-sheet';
+import { buildRouteSheetHtml, faltasDaVia } from './route-sheet';
 import type { ServiceOrderStep, RouteMaterial } from '@/hooks/use-service-steps';
 
 function step(over: Partial<ServiceOrderStep> = {}): ServiceOrderStep {
@@ -352,5 +352,69 @@ describe('via do técnico — roteiro só com a segurança de cada sistema', () 
     expect(html).toContain('Roteiro de execução');
     expect(html).toContain('roteiro completo');
     expect(html).toContain('Confirmar que a peça nova é equivalente');
+  });
+});
+
+/** Fase 2 (01/10/2026): o que o escritório escreve para o técnico. */
+describe('via do técnico — fase 2: instrução, local, contato no local e situação', () => {
+  const base = { orderNumber: 'OS-00200', clientName: 'Cliente' };
+
+  it('instrução do escritório sai logo depois do pedido, sem linha com R$', () => {
+    const html = buildRouteSheetHtml({
+      ...base,
+      problemDescription: 'Instalar DC-DC',
+      technicianInstructions: 'Não furar o painel de madeira\nCobrar sinal de R$ 500,00',
+    }, []);
+    expect(html).toContain('Instruções do escritório');
+    expect(html).toContain('Não furar o painel de madeira');
+    expect(html).not.toContain('R$');
+    expect(html.indexOf('Pedido do cliente')).toBeLessThan(html.indexOf('Instruções do escritório'));
+  });
+
+  it('local e acesso preenchem o "Onde" mesmo sem marina', () => {
+    const html = buildRouteSheetHtml({ ...base, siteAccess: 'Rua X, 100 — chave com o caseiro' }, []);
+    expect(html).toContain('Rua X, 100 — chave com o caseiro');
+    expect(html).not.toContain('Local não informado na OS');
+  });
+
+  it('contato no local sai com função e telefone', () => {
+    const html = buildRouteSheetHtml({
+      ...base, onSiteContact: { name: 'Seu João', role: 'Marinheiro', phone: '(47) 98888-0000' },
+    }, []);
+    expect(html).toContain('No local: <b>Seu João</b> (Marinheiro) — tel. (47) 98888-0000');
+  });
+
+  it('o que já se sabe do sistema elétrico do veículo vai junto', () => {
+    const html = buildRouteSheetHtml({
+      ...base, vehicleElectrical: { batteryBank: '2× lítio 12V 200Ah', inverterCharger: 'MultiPlus 12/3000' },
+    }, []);
+    expect(html).toContain('O que já sabemos do sistema elétrico deste veículo');
+    expect(html).toContain('Banco de baterias: 2× lítio 12V 200Ah');
+    expect(html).toContain('Inversor/carregador: MultiPlus 12/3000');
+  });
+
+  it('serviço "só levantar" diz para não executar; "já feito" não pede volta', () => {
+    const html = buildRouteSheetHtml(base, [], [], {
+      services: [
+        { name: 'Tampa da boia', fieldStatus: 'so_levantar', technicianInstructions: 'Fotografar o modelo' },
+        { name: 'Desmontagem', fieldStatus: 'feito' },
+      ],
+    });
+    expect(html).toContain('SÓ LEVANTAR');
+    expect(html).toContain('Medir, fotografar e anotar. Não executar.');
+    expect(html).toContain('Fotografar o modelo');
+    expect(html).toContain('JÁ FEITO');
+    // Um cartão pede a volta (só levantar), o outro não (já feito).
+    expect(html.match(/class="volta"/g)).toHaveLength(1);
+  });
+
+  it('aviso antes de imprimir: lista o que vai faltar no papel', () => {
+    expect(faltasDaVia(base, [], 0)).toEqual([
+      'local e acesso', 'telefone de contato', 'data e hora', 'serviços', 'material (nenhum lançado)',
+    ]);
+    const completo = {
+      ...base, siteAccess: 'Marina', clientPhone: '47 9999', scheduledAt: '2026-10-02T12:00:00Z',
+    };
+    expect(faltasDaVia(completo, [{ id: 'm', quantity: 1, notes: null, service_order_service_id: null }], 2)).toEqual([]);
   });
 });

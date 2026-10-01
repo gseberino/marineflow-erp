@@ -7760,6 +7760,9 @@ export type Database = {
       }
       service_order_services: {
         Row: {
+          field_status: string
+          field_status_note: string | null
+          technician_instructions: string | null
           billing_unit_snapshot: string
           created_at: string | null
           description_snapshot: string | null
@@ -7786,6 +7789,9 @@ export type Database = {
           warranty_months: number | null
         }
         Insert: {
+          field_status?: string
+          field_status_note?: string | null
+          technician_instructions?: string | null
           billing_unit_snapshot?: string
           created_at?: string | null
           description_snapshot?: string | null
@@ -7812,6 +7818,9 @@ export type Database = {
           warranty_months?: number | null
         }
         Update: {
+          field_status?: string
+          field_status_note?: string | null
+          technician_instructions?: string | null
           billing_unit_snapshot?: string
           created_at?: string | null
           description_snapshot?: string | null
@@ -8272,6 +8281,8 @@ export type Database = {
       }
       service_orders: {
         Row: {
+          site_access: string | null
+          technician_instructions: string | null
           cancellation_reason: string | null
           cancelled_at: string | null
           card_fee_amount: number
@@ -8357,6 +8368,8 @@ export type Database = {
           vessel_id: string
         }
         Insert: {
+          site_access?: string | null
+          technician_instructions?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           card_fee_amount?: number
@@ -8442,6 +8455,8 @@ export type Database = {
           vessel_id: string
         }
         Update: {
+          site_access?: string | null
+          technician_instructions?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           card_fee_amount?: number
@@ -9822,6 +9837,7 @@ export type Database = {
       }
       vessels: {
         Row: {
+          access_notes: string | null
           active: boolean
           asset_type: string | null
           battery_bank_summary: string | null
@@ -9851,6 +9867,7 @@ export type Database = {
           year: number | null
         }
         Insert: {
+          access_notes?: string | null
           active?: boolean
           asset_type?: string | null
           battery_bank_summary?: string | null
@@ -9880,6 +9897,7 @@ export type Database = {
           year?: number | null
         }
         Update: {
+          access_notes?: string | null
           active?: boolean
           asset_type?: string | null
           battery_bank_summary?: string | null
@@ -11207,6 +11225,9 @@ export type Database = {
       }
       service_order_services_tecnico: {
         Row: {
+          field_status: string | null
+          field_status_note: string | null
+          technician_instructions: string | null
           billing_unit_snapshot: string | null
           created_at: string | null
           description_snapshot: string | null
@@ -11229,6 +11250,9 @@ export type Database = {
           warranty_months: number | null
         }
         Insert: {
+          field_status?: string | null
+          field_status_note?: string | null
+          technician_instructions?: string | null
           billing_unit_snapshot?: string | null
           created_at?: string | null
           description_snapshot?: string | null
@@ -11251,6 +11275,9 @@ export type Database = {
           warranty_months?: number | null
         }
         Update: {
+          field_status?: string | null
+          field_status_note?: string | null
+          technician_instructions?: string | null
           billing_unit_snapshot?: string | null
           created_at?: string | null
           description_snapshot?: string | null
@@ -11361,6 +11388,8 @@ export type Database = {
       }
       service_orders_tecnico: {
         Row: {
+          site_access: string | null
+          technician_instructions: string | null
           cancellation_reason: string | null
           cancelled_at: string | null
           check_in_at: string | null
@@ -11415,6 +11444,8 @@ export type Database = {
           vessel_id: string | null
         }
         Insert: {
+          site_access?: string | null
+          technician_instructions?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           check_in_at?: string | null
@@ -11469,6 +11500,8 @@ export type Database = {
           vessel_id?: string | null
         }
         Update: {
+          site_access?: string | null
+          technician_instructions?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           check_in_at?: string | null

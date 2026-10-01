@@ -7,6 +7,7 @@ import { ServiceTimer } from '@/components/ServiceTimer';
 import { useServiceOrderSteps } from '@/hooks/use-service-steps';
 import { useLinesMissingSystem } from '@/hooks/use-service-systems';
 import { LineSystemPicker } from './line-system-picker';
+import { LineViaTecnico } from './line-via-tecnico';
 import { useI18n } from '@/i18n';
 import { ServiceCardFormComponent, QuickDiscountPopover, BILLING_UNIT_LABELS } from './form-parts';
 
@@ -258,8 +259,14 @@ export function ServicesSection(props: ServicesSectionProps) {
                   ) : undefined,
                   // Abaixo da linha, com a largura toda: aqui o aviso não
                   // disputa espaço com o nome do serviço.
-                  below: orderId && pendentePorLinha.has(s.id) ? (
-                    <LineSystemPicker linha={pendentePorLinha.get(s.id)!} />
+                  below: orderId ? (
+                    <>
+                      {pendentePorLinha.has(s.id) && (
+                        <LineSystemPicker linha={pendentePorLinha.get(s.id)!} />
+                      )}
+                      {/* Como a linha sai na via do técnico (fase 2, 01/10/2026). */}
+                      <LineViaTecnico line={s} orderId={orderId} />
+                    </>
                   ) : undefined,
                 });
               })}
