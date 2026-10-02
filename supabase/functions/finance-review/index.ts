@@ -2111,6 +2111,14 @@ async function aprovar(
         if (e2) throw e2;
         recebidoPara.set(p.id, (criado as any).id as string);
         await admin.from("bank_transactions").update({ reconciled: true }).eq("id", p.bank_transaction_id);
+        // A receita nasce paga: o pagamento é o próprio Pix desta linha (forma A, F1, 02/10/2026).
+        // Antes nascia sem pagamento: 68 receitas pagas sem dizer de onde. Quem preenche data,
+        // forma e o vínculo com a linha é o banco. Se falhar, a receita já existe e a conferência
+        // (conferencia_dos_pagamentos) acusa "pago diferente da soma"; a função é idempotente.
+        const { error: ePag } = await admin.rpc("registrar_pagamento_da_receita_do_extrato", {
+          p_receivable_id: (criado as any).id,
+        });
+        if (ePag) console.error("registrar_pagamento_da_receita_do_extrato", ePag);
       }
 
       await admin.from("finance_review_queue").update({
