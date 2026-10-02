@@ -1785,8 +1785,9 @@ export default function FiscalEmission() {
                   && !!doc.request_payload;
                 const emAndamento = ['draft', 'queued', 'processing'].includes(doc.status);
                 return (
-                  // Clicar na linha abre a nota, como era antes do menu de ações; o
-                  // clique nos botões não sobe até aqui porque o menu para a propagação.
+                  // Clicar na linha abre a nota, como era antes do menu de ações. O clique
+                  // nas ações não sobe até aqui porque o AcoesDaLinha para a propagação (desde
+                  // 01/10/2026; antes não parava, e "Duplicar" abria a nota só para leitura).
                   <TableRow
                     key={doc.id}
                     className="hover:bg-muted/30 cursor-pointer"

@@ -64,7 +64,16 @@ export function AcoesDaLinha({
   const perigosas = itens.filter((a) => a.perigo);
 
   return (
-    <div className={cn('flex items-start justify-end gap-1', className)}>
+    // O clique (e o Enter) nas ações PARA aqui. Muitas listas abrem o item ao clicar na linha,
+    // e no React o clique num item do menu sobe até a linha mesmo com o menu desenhado fora
+    // dela (portal). Sem isto, na lista de notas (01/10/2026): "Duplicar para nova nota" e
+    // "Corrigir e reemitir" abriam a nota SÓ PARA LEITURA (não dava para emitir), "Cancelar
+    // nota" abria o cancelamento e a nota ao mesmo tempo, e o botão PDF também abria a nota.
+    <div
+      className={cn('flex items-start justify-end gap-1', className)}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
       {rapidas.map((a) => (
         <Button
           key={a.texto}

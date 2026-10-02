@@ -97,4 +97,35 @@ describe('AcoesDaLinha', () => {
     expect(screen.getByRole('button', { name: 'Ver' })).toBeDisabled();
     expect(screen.getByRole('button', { name: /mais ações/i })).toBeDisabled();
   });
+
+  it('o clique nas ações não aciona a linha (lista que abre o item ao clicar na linha)', async () => {
+    // Defeito de 01/10/2026 na lista de notas: o clique no item do menu subia até a linha (o
+    // React leva o evento do portal para o pai), e "Duplicar para nova nota" abria a nota só
+    // para leitura. Vale para o botão rápido, os três pontinhos e o item do menu.
+    const user = userEvent.setup();
+    const abrirLinha = vi.fn();
+    const duplicar = vi.fn();
+    const pdf = vi.fn();
+    render(
+      <table>
+        <tbody>
+          <tr onClick={abrirLinha} onKeyDown={abrirLinha}>
+            <td>
+              <AcoesDaLinha
+                rotulo="NF-e 2/31"
+                rapidas={[{ texto: 'PDF', onClick: pdf }]}
+                menu={[{ texto: 'Ver detalhes', onClick: vi.fn() }, { texto: 'Duplicar para nova nota', onClick: duplicar }]}
+              />
+            </td>
+          </tr>
+        </tbody>
+      </table>,
+    );
+    await user.click(screen.getByRole('button', { name: 'PDF' }));
+    expect(pdf).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: /mais ações para NF-e 2\/31/i }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Duplicar para nova nota' }));
+    expect(duplicar).toHaveBeenCalledTimes(1);
+    expect(abrirLinha).not.toHaveBeenCalled();
+  });
 });
