@@ -117,13 +117,14 @@ function RevenueTab() {
         <>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {/* A tabela de pagamentos tem só as baixas feitas no sistema; o dinheiro que entrou
-                no banco está no Fluxo de caixa. O nome diz qual é qual. */}
-            <KPIStat label="Pagamentos registrados" value={formatCurrency(data.totalReceived)} hint="baixas feitas no sistema" />
+                no banco está no Fluxo de caixa. O nome diz qual é qual. Só contas a receber:
+                as baixas de contas a pagar ficam de fora (eram somadas até 02/10/2026). */}
+            <KPIStat label="Recebimentos registrados" value={formatCurrency(data.totalReceived)} hint="baixas de contas a receber feitas no sistema" />
             <KPIStat label="Ticket médio (OS concluída)" value={formatCurrency(data.avgTicket)} />
             <KPIStat label="OS faturadas" value={String(data.invoicedCount)} />
             <KPIStat label="Margem estimada" value={formatCurrency(data.margin)} hint="valor das OS menos as peças" />
           </div>
-          <ChartCard title="Pagamentos registrados por mês (últimos 6 meses)">
+          <ChartCard title="Recebimentos registrados por mês (últimos 6 meses)">
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={data.monthlyRevenue}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />

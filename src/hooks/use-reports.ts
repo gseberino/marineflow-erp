@@ -27,11 +27,15 @@ export function useRevenueReport(periodDays: number) {
     queryFn: async () => {
       const since = daysAgo(periodDays);
 
+      // `payments` guarda também as baixas de contas a PAGAR: sem o filtro de conta a receber, o
+      // "recebido" somava dinheiro que saiu (setembro: R$ 13.447,99 recebidos + R$ 3.504,20 pagos
+      // apareciam como R$ 16.952,19 — medido em 02/10/2026).
       const [paymentsRes, ordersRes, partsRes] = await Promise.all([
         supabase
           .from('payments')
           .select('amount, payment_date, status, receivable_id')
           .eq('status', 'confirmed')
+          .not('receivable_id', 'is', null)
           .gte('payment_date', since.slice(0, 10)),
         supabase
           .from('service_orders')
@@ -78,6 +82,7 @@ export function useRevenueReport(periodDays: number) {
         .from('payments')
         .select('amount, payment_date, status')
         .eq('status', 'confirmed')
+        .not('receivable_id', 'is', null)
         .gte('payment_date', sixMonthsAgo.toISOString().slice(0, 10));
 
       (allPayments ?? []).forEach(p => {

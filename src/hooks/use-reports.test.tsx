@@ -23,10 +23,21 @@ const { tabelas } = vi.hoisted(() => ({
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
+  // Aplica os filtros de igualdade e de "não é nulo": é por eles que o relatório separa
+  // recebimento de baixa de conta a pagar. Os de data passam direto.
   const builder = (tabela: string): any => {
+    const filtros: Array<(l: Record<string, unknown>) => boolean> = [];
     const o: any = {};
-    for (const k of ['select', 'eq', 'gte', 'lte', 'order', 'in', 'is', 'not', 'limit', 'neq']) o[k] = () => o;
-    o.then = (res: any) => Promise.resolve({ data: tabelas[tabela] ?? [], error: null }).then(res);
+    for (const k of ['select', 'gte', 'lte', 'order', 'in', 'is', 'limit', 'neq']) o[k] = () => o;
+    o.eq = (col: string, v: unknown) => { filtros.push((l) => l[col] === v); return o; };
+    o.not = (col: string, op: string, v: unknown) => {
+      if (op === 'is' && v === null) filtros.push((l) => l[col] != null);
+      return o;
+    };
+    o.then = (res: any) => Promise.resolve({
+      data: ((tabelas[tabela] ?? []) as Record<string, unknown>[]).filter((l) => filtros.every((f) => f(l))),
+      error: null,
+    }).then(res);
     return o;
   };
   return { supabase: { from: (t: string) => builder(t) } };
@@ -56,5 +67,28 @@ describe('critério da Operação: só OS aprovada', () => {
     expect(d.topClients.map((c) => c.name)).toEqual(['Marina Azul', 'Iate Clube']);
     // 1.000 + 500 de OS aprovadas, menos só as peças delas (100) — a peça do rascunho não conta.
     expect(d.margin).toBe(1400);
+  });
+});
+
+describe('recebimentos registrados: só baixa de conta a receber', () => {
+  it('a baixa de uma conta a pagar não entra no recebido nem no gráfico do mês', async () => {
+    // Antes de 02/10/2026 o relatório somava os dois: setembro mostrava R$ 16.952,19 com
+    // R$ 13.447,99 recebidos e R$ 3.504,20 pagos a fornecedores.
+    const hoje = new Date();
+    const dia = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
+    tabelas.payments = [
+      { amount: 300, payment_date: dia, status: 'confirmed', receivable_id: 'r1', payable_id: null },
+      { amount: 200, payment_date: dia, status: 'confirmed', receivable_id: null, payable_id: 'p1' },
+      { amount: 50, payment_date: dia, status: 'cancelled', receivable_id: 'r2', payable_id: null },
+    ];
+    try {
+      const { result } = renderHook(() => useRevenueReport(30), { wrapper });
+      await waitFor(() => expect(result.current.data).toBeDefined());
+      const d = result.current.data!;
+      expect(d.totalReceived).toBe(300);
+      expect(d.monthlyRevenue.reduce((s, m) => s + m.value, 0)).toBe(300);
+    } finally {
+      tabelas.payments = [];
+    }
   });
 });
