@@ -156,6 +156,56 @@ export function useDesfazerAprovacao() {
   });
 }
 
+/**
+ * Conta a receber casada com o banco por UM pagamento passa a valer o que entrou no banco
+ * (02/10/2026). Banco maior: o cliente pagou a mais. Banco menor: desconto. A função do banco
+ * recusa o caso com mais de um pagamento.
+ */
+export function useAjustarAoValorDoBanco() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { tipo: TipoDeLancamento; id: string; motivo?: string | null }) =>
+      chamar('ajustar_ao_valor_do_banco', { p_tipo: v.tipo, p_id: v.id, p_motivo: v.motivo ?? null }),
+    onSuccess: (r) => { recarregarFinanceiro(qc); toast.success(r.message); },
+    onError: (e) => toast.error(mensagemDoErro(e)),
+  });
+}
+
+/** A linha do banco ligada ao lançamento, os pagamentos dele e se nasceu do extrato. */
+export function useVinculoComExtrato(tipo: TipoDeLancamento, id: string | null | undefined, linhaId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['vinculo-com-extrato', tipo, id, linhaId],
+    enabled: !!id && !!linhaId,
+    queryFn: async () => {
+      const [linha, pagamentos, origem] = await Promise.all([
+        supabase.from('bank_transactions')
+          .select('id, transaction_date, description, amount, reconciled_payment_id')
+          .eq('id', linhaId!).maybeSingle(),
+        supabase.from('payments')
+          .select('id, amount, payment_date')
+          .eq(tipo === 'payable' ? 'payable_id' : 'receivable_id', id!)
+          .eq('status', 'confirmed'),
+        supabase.from('conciliacao_lancamentos' as never)
+          .select('nasceu_do_extrato')
+          .eq('lado', tipo).eq('id', id!).maybeSingle(),
+      ]);
+      if (linha.error) throw linha.error;
+      if (pagamentos.error) throw pagamentos.error;
+      if (origem.error) throw origem.error;
+      const l = linha.data as { transaction_date: string; description: string | null; amount: number; reconciled_payment_id: string | null } | null;
+      if (!l) return null;
+      return {
+        linha: {
+          data: l.transaction_date, descricao: l.description ?? '', valor: Number(l.amount), pagamentoId: l.reconciled_payment_id,
+        },
+        pagamentos: ((pagamentos.data ?? []) as Array<{ id: string; amount: number; payment_date: string }>)
+          .map((x) => ({ id: x.id, valor: Number(x.amount), data: x.payment_date })),
+        nasceuDoExtrato: !!(origem.data as { nasceu_do_extrato?: boolean } | null)?.nasceu_do_extrato,
+      };
+    },
+  });
+}
+
 export function useCancelarLancamento() {
   const qc = useQueryClient();
   return useMutation({

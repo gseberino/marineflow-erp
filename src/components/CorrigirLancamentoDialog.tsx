@@ -5,8 +5,9 @@
 // errado num lançamento se corrige, e cada correção vai para a trilha com o antes e o depois.
 //
 // Duas coisas NÃO se corrigem aqui, de propósito:
-//   * o valor de um lançamento que veio do banco — o número é o do extrato. Se ele está
-//     errado, o caminho é desfazer a aprovação;
+//   * o valor de um lançamento ligado ao banco — o número é o do extrato. A caixa "Ligado ao
+//     extrato" (VinculoComExtrato, 02/10/2026) diz o que não bate e oferece o conserto:
+//     ajustar ao valor do banco (conta a receber com um pagamento só) ou desfazer o vínculo;
 //   * lançamento de mês fechado — só a observação muda. O banco recusa o resto e a tela avisa
 //     antes, para ninguém preencher o formulário à toa.
 import { useEffect, useMemo, useState } from 'react';
@@ -29,6 +30,7 @@ import { useI18n } from '@/i18n';
 import { toast } from 'sonner';
 import { Landmark, Lock } from 'lucide-react';
 import { BotaoVerOS } from '@/components/VerOSRapido';
+import { VinculoComExtrato } from '@/components/VinculoComExtrato';
 
 /** Sentinela de "nenhum" nos Selects: o Radix não aceita value vazio num item. */
 const NENHUM = '__nenhum__';
@@ -297,7 +299,7 @@ export function CorrigirLancamentoDialog({
                 <Input readOnly value={formatCurrency(f.amount)} className="bg-muted" />
                 <p className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
                   <Landmark className="h-3 w-3 shrink-0" />
-                  Veio do extrato. Para mudar, desfaça a aprovação.
+                  Ligado a uma linha do banco: o conserto está logo abaixo.
                 </p>
               </>
             ) : (
@@ -326,6 +328,20 @@ export function CorrigirLancamentoDialog({
             <Label htmlFor="corrigir-observacoes">Observações</Label>
             <Textarea id="corrigir-observacoes" rows={2} value={f.notes} onChange={(e) => mudar({ notes: e.target.value })} />
           </div>
+
+          {/* Qual aprovação, o que não bate e o conserto a um clique (pedido do dono, 02/10/2026). */}
+          {veioDoBanco && lancamento.bank_transaction_id && (
+            <div className="sm:col-span-2">
+              <VinculoComExtrato
+                tipo={tipo}
+                lancamentoId={lancamento.id}
+                valor={Number(lancamento.amount ?? 0)}
+                linhaId={lancamento.bank_transaction_id}
+                mesFechado={mesFechado}
+                onConcluido={onFechar}
+              />
+            </div>
+          )}
 
           {!nada && !soObservacao && (
             <div className="sm:col-span-2">

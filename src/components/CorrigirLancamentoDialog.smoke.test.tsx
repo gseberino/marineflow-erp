@@ -12,10 +12,16 @@ import { I18nProvider } from '@/i18n';
 import { CorrigirLancamentoDialog, camposQueMudaram, type Formulario } from './CorrigirLancamentoDialog';
 import { DesfazerOuCancelarDialog } from './DesfazerOuCancelarDialog';
 
-const { corrigirMock, desfazerMock, cancelarMock, periodos, pix } = vi.hoisted(() => ({
+const { corrigirMock, desfazerMock, cancelarMock, ajustarMock, vinculo, periodos, pix } = vi.hoisted(() => ({
   corrigirMock: vi.fn(),
   desfazerMock: vi.fn(),
   cancelarMock: vi.fn(),
+  ajustarMock: vi.fn(),
+  vinculo: { dado: null as null | {
+    linha: { data: string; descricao: string; valor: number; pagamentoId: string | null };
+    pagamentos: Array<{ id: string; valor: number; data: string }>;
+    nasceuDoExtrato: boolean;
+  } },
   periodos: { lista: [] as Array<{ ano: number; mes: number; reaberto_em: string | null }> },
   pix: { partes: null as null | Array<{ id: string; amount: number; expense_category: string | null; divisao_id: string | null }> },
 }));
@@ -25,6 +31,8 @@ vi.mock('@/hooks/use-lancamentos', async (importOriginal) => ({
   useCorrigirLancamento: () => ({ mutate: corrigirMock, isPending: false }),
   useDesfazerAprovacao: () => ({ mutate: desfazerMock, isPending: false }),
   useCancelarLancamento: () => ({ mutate: cancelarMock, isPending: false }),
+  useAjustarAoValorDoBanco: () => ({ mutate: ajustarMock, isPending: false }),
+  useVinculoComExtrato: () => ({ data: vinculo.dado, isLoading: false }),
   usePixDividido: () => ({ data: pix.partes }),
 }));
 vi.mock('@/hooks/use-fechamento', () => ({ usePeriodosFechados: () => ({ data: periodos.lista }) }));
@@ -61,7 +69,8 @@ function renderizar(ui: React.ReactElement) {
 
 beforeEach(() => {
   pix.partes = null;
-  corrigirMock.mockReset(); desfazerMock.mockReset(); cancelarMock.mockReset();
+  corrigirMock.mockReset(); desfazerMock.mockReset(); cancelarMock.mockReset(); ajustarMock.mockReset();
+  vinculo.dado = null;
   periodos.lista = [];
 });
 
@@ -69,7 +78,7 @@ describe('CorrigirLancamentoDialog', () => {
   it('abre para uma despesa PAGA, com o valor do banco travado', () => {
     renderizar(<CorrigirLancamentoDialog tipo="payable" lancamento={despesaPagaDoBanco} onFechar={() => {}} />);
     expect(screen.getByText('Corrigir conta a pagar')).toBeInTheDocument();
-    expect(screen.getByText(/Veio do extrato\. Para mudar, desfaça a aprovação/)).toBeInTheDocument();
+    expect(screen.getByText(/Ligado a uma linha do banco: o conserto está logo abaixo/)).toBeInTheDocument();
     // Tudo que pode estar errado numa despesa aprovada aparece para correção.
     for (const campo of ['Fornecedor', 'Categoria', 'Favorecido (pessoa)', 'OS (custo de qual serviço)', 'Data do lançamento']) {
       expect(screen.getByText(campo)).toBeInTheDocument();
@@ -101,6 +110,66 @@ describe('CorrigirLancamentoDialog', () => {
     await user.type(screen.getByRole('textbox', { name: /Observações/ }), 'conferido com a nota');
     await user.click(screen.getByRole('button', { name: 'Salvar correção' }));
     expect(corrigirMock.mock.calls[0][0].campos).toEqual({ notes: 'conferido com a nota' });
+  });
+});
+
+describe('CorrigirLancamentoDialog — ligado ao extrato (pedido do dono, 02/10/2026)', () => {
+  // O caso que motivou: sinal do ORÇ-00073 de R$ 1.865,47; o cliente pagou R$ 1.866,00.
+  const sinal = {
+    id: 'r73', description: 'Sinal — ORÇ-00073', amount: 1865.47, paid_amount: 1865.47, status: 'paid',
+    issue_date: '2026-07-31', due_date: '2026-07-31', notes: null, cost_center_id: null,
+    bank_transaction_id: 'bt73', category: 'Serviços prestados', client_id: 'cli', service_order_id: null,
+  };
+  const linhaDoSinal = {
+    linha: { data: '2026-07-30', descricao: 'RF SILVA ESTACIONAMENTOS LTDA', valor: 1866, pagamentoId: 'pg73' },
+    pagamentos: [{ id: 'pg73', valor: 1865.47, data: '2026-07-31' }],
+    nasceuDoExtrato: false,
+  };
+
+  it('diz o que não bate e ajusta ao valor do banco, com confirmação', async () => {
+    const user = userEvent.setup();
+    vinculo.dado = linhaDoSinal;
+    renderizar(<CorrigirLancamentoDialog tipo="receivable" lancamento={sinal} onFechar={() => {}} />);
+    expect(screen.getByText(/Ligado ao extrato: .*RF SILVA ESTACIONAMENTOS LTDA/)).toBeInTheDocument();
+    expect(screen.getByText(/o cliente pagou R\$\s?0,53 a mais que este lançamento/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Ajustar para R\$\s?1\.866,00/ }));
+    expect(ajustarMock).not.toHaveBeenCalled(); // o primeiro clique só mostra o que vai acontecer
+    expect(screen.getByText(/passam a valer R\$\s?1\.866,00, o que entrou no banco/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Confirmar ajuste' }));
+    expect(ajustarMock).toHaveBeenCalledTimes(1);
+    expect(ajustarMock.mock.calls[0][0]).toEqual({ tipo: 'receivable', id: 'r73' });
+  });
+
+  it('desfazer diz qual aprovação e o que acontece, e só age na confirmação', async () => {
+    const user = userEvent.setup();
+    vinculo.dado = linhaDoSinal;
+    renderizar(<CorrigirLancamentoDialog tipo="receivable" lancamento={sinal} onFechar={() => {}} />);
+    await user.click(screen.getByRole('button', { name: 'Desfazer o vínculo com o extrato' }));
+    expect(screen.getByText(/mantém este lançamento .* devolve a linha do banco para a fila do Extrato/)).toBeInTheDocument();
+    expect(desfazerMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: /Confirmar: desfazer o vínculo/ }));
+    expect(desfazerMock).toHaveBeenCalledTimes(1);
+    expect(desfazerMock.mock.calls[0][0]).toEqual({ tipo: 'receivable', id: 'r73' });
+  });
+
+  it('dois pagamentos: explica e não oferece o ajuste', () => {
+    vinculo.dado = {
+      linha: { data: '2026-05-20', descricao: 'RITA', valor: 25000, pagamentoId: 'a' },
+      pagamentos: [{ id: 'a', valor: 25000, data: '2026-05-20' }, { id: 'b', valor: 4000, data: '2026-07-20' }],
+      nasceuDoExtrato: false,
+    };
+    renderizar(<CorrigirLancamentoDialog tipo="receivable" lancamento={{ ...sinal, amount: 29000, paid_amount: 29000 }} onFechar={() => {}} />);
+    expect(screen.getByText(/tem 2 pagamento\(s\)/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Ajustar/ })).not.toBeInTheDocument();
+  });
+
+  it('mês fechado: explica e não oferece ajustar nem desfazer', () => {
+    vinculo.dado = linhaDoSinal;
+    periodos.lista = [{ ano: 2026, mes: 7, reaberto_em: null }];
+    renderizar(<CorrigirLancamentoDialog tipo="receivable" lancamento={sinal} onFechar={() => {}} />);
+    expect(screen.getByText(/para ajustar ou desfazer, reabra o mês/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Ajustar/ })).not.toBeInTheDocument();
   });
 });
 

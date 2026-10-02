@@ -276,6 +276,32 @@ export const lancamentoTools: ToolDef[] = [
   },
 
   {
+    name: "ajustar_lancamento_ao_valor_do_banco",
+    description:
+      "Conta a receber casada com o extrato que não bate com o banco (ex.: sinal de R$ 1.865,47 e o cliente pagou R$ 1.866,00): o lançamento e o pagamento passam a valer o que entrou no banco. Banco maior = o cliente pagou a mais (a diferença conta como recebida dele); banco menor = a diferença deixa de ser cobrada (desconto) — se o cliente ainda vai pagar o resto, NÃO use: o saldo fica em aberto. Só funciona com UM pagamento, e sendo o da linha do banco; com mais de um, o banco recusa e explica (confira os pagamentos). Só conta a receber. Diga o antes e o depois antes de pedir o sim. Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        receivable_id: { type: "string", description: "Conta a receber (de buscar_lancamentos)." },
+        motivo: { type: "string", description: "Por que ajustar — vai para a trilha." },
+      },
+      required: ["receivable_id"],
+    },
+    risk: "medium",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const bloqueio = blockTechnician(ctx);
+      if (bloqueio) return bloqueio;
+      if (typeof args.receivable_id !== "string" || !args.receivable_id) {
+        return { error: "Informe a conta a receber (receivable_id, de buscar_lancamentos)." };
+      }
+      return await chamar(ctx, "ajustar_ao_valor_do_banco", {
+        p_tipo: "receivable", p_id: args.receivable_id, p_motivo: typeof args.motivo === "string" ? args.motivo : null,
+      });
+    },
+  },
+
+  {
     name: "cancelar_lancamento",
     description:
       "Cancela um lançamento (o 'excluir' que não apaga): sai do resultado e das listas, mas fica registrado com o motivo. Se veio do extrato, a linha do banco vai para 'Fora da fila' com o mesmo motivo. Use para 'foi despesa pessoal', 'lançado em dobro', 'não aconteceu'. Se o lançamento é parte de um Pix dividido (pró-labore + retirada de sócio; buscar_lancamentos marca dividido), cancelar vale para o Pix inteiro: diga isso antes de pedir o sim; para mudar só uma parte, use update_payable. Motivo obrigatório. Pede confirmação.",
