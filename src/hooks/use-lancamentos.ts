@@ -72,6 +72,7 @@ export function recarregarFinanceiro(qc: QueryClient) {
     ['extrato-da-conta'], ['lancados-sozinhos'], ['checklist-do-mes'],
     ['dre-lancamentos'], ['saldo-das-contas'], ['despesas'], ['pix-dividido'],
     ['vinculo-com-extrato'], ['entrada-aplicada'], ['contas-em-aberto-do-cliente'], ['pagamentos-sem-pix'],
+    ['parece-pagar'], ['pix-da-conta'],
   ]) qc.invalidateQueries({ queryKey: k });
 }
 
@@ -266,6 +267,30 @@ export function useEntradaAplicada(linhaId: string | null | undefined) {
             pagamentoId: p.id, contaId: p.receivable_id, descricao: p.receivables?.description ?? 'Conta a receber', valor: Number(p.amount),
           })),
       };
+    },
+  });
+}
+
+/**
+ * As linhas do banco que pagaram esta conta sem ser ela a "dona" da linha (F4, 03/10/2026): um Pix
+ * que pagou várias contas, ou a segunda parcela de uma OS paga em dois Pix. A correção mostra a
+ * caixa "Ligado ao extrato" para cada uma.
+ */
+export function usePixDaConta(contaId: string | null | undefined, linhaDona: string | null | undefined) {
+  return useQuery({
+    queryKey: ['pix-da-conta', contaId, linhaDona ?? null],
+    enabled: !!contaId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('payments')
+        .select('id, bank_transaction_id')
+        .eq('receivable_id', contaId!)
+        .eq('status', 'confirmed')
+        .not('bank_transaction_id', 'is', null);
+      if (error) throw error;
+      const vistos = new Set<string>();
+      return ((data ?? []) as Array<{ id: string; bank_transaction_id: string }>)
+        .filter((p) => p.bank_transaction_id !== linhaDona && !vistos.has(p.bank_transaction_id) && !!vistos.add(p.bank_transaction_id))
+        .map((p) => ({ pagamentoId: p.id, linhaId: p.bank_transaction_id }));
     },
   });
 }

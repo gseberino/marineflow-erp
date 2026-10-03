@@ -16,6 +16,9 @@ import { regraDeFornecedorAlcanca, type FornecedorConhecido, type TransacaoOrfa 
 import { faltaNoDestino, precisaDeDestino } from "../../banking/destino.ts";
 import { entradaSemCliente } from "../../banking/entrada-sem-cliente.ts";
 import { orContem } from "../filtro-or.ts";
+import {
+  candidatosDosClientes, DIAS_DO_PAGAMENTO_A_MAO, fraseDoParecePagar, parecePagar, type ParecePagar,
+} from "../../banking/parece-pagar.ts";
 
 /** Nome comparável: sem acento, caixa e espaços sobrando. */
 function comparavel(s: string): string {
@@ -84,6 +87,54 @@ function bloqueiaSemAcesso(ctx: ToolCtx): { error: string } | null {
     return { error: "Apenas administrador ou financeiro podem operar esta parte do sistema." };
   }
   return null;
+}
+
+interface EntradaDaFila {
+  id: string;
+  kind: string;
+  bank_transaction_id: string | null;
+  suggested_client_id: string | null;
+  suggested_amount: number | null;
+  suggested_date: string | null;
+}
+
+/**
+ * "Parece pagar" (forma A, F4 — 03/10/2026): para cada entrada da fila com cliente identificado,
+ * as contas em aberto / pagamentos lançados à mão dele cuja soma bate com o Pix. Mesma regra da
+ * tela do Extrato (_shared/banking/parece-pagar.ts). Leitura que falha lança.
+ */
+async function parecePagarDasEntradas(ctx: ToolCtx, linhas: EntradaDaFila[]): Promise<Map<string, ParecePagar>> {
+  const entradas = linhas.filter((l) => l.kind === "create_receivable" && l.bank_transaction_id && l.suggested_client_id && l.suggested_date);
+  const out = new Map<string, ParecePagar>();
+  if (entradas.length === 0) return out;
+  const primeira = entradas.map((e) => String(e.suggested_date)).sort()[0];
+  const d = new Date(`${primeira.slice(0, 10)}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - DIAS_DO_PAGAMENTO_A_MAO);
+  const candidatos = await candidatosDosClientes(
+    ctx.sb, [...new Set(entradas.map((e) => e.suggested_client_id!))], d.toISOString().slice(0, 10),
+  );
+  for (const e of entradas) {
+    const r = parecePagar(
+      { valor: Math.abs(Number(e.suggested_amount ?? 0)), data: String(e.suggested_date) },
+      candidatos.get(e.suggested_client_id!) ?? [],
+    );
+    if (r) out.set(e.id, r);
+  }
+  return out;
+}
+
+const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+/** O que o modelo recebe: a frase e as aplicações prontas para aplicar_pix_em_contas. */
+function parecePagarParaOModelo(r: ParecePagar) {
+  return {
+    frase: fraseDoParecePagar(r, brl),
+    // Soma de 2+ contas que bate = perguntar ANTES de aprovar; "parte de uma conta" é só possibilidade.
+    perguntar_antes_de_aprovar: !r.parcial,
+    aplicacoes: r.itens.map((i) => i.tipo === "pagamento"
+      ? { pagamento_id: i.id }
+      : { receivable_id: i.id, valor: i.valor, ...(i.quitar ? { quitar: true } : {}) }),
+  };
 }
 
 /** Categorias ativas do plano de contas — o agente não pode inventar categoria. */
@@ -804,7 +855,11 @@ export const financeRulesTools: ToolDef[] = [
       "com valor, categoria, QUEM é a contraparte (e por qual prova), o que cadastrar quando ninguém foi " +
       "reconhecido e o VÍNCULO sugerido (conta, OS, pagamento/sinal que PODE JÁ ESTAR LANÇADO). Todo vínculo " +
       "é pergunta: antes de aprovar, pergunte se é aquele (casar) ou se é para lançar novo. Idem os_sugerida e " +
-      "oc_sugerida: pergunte 'é da OS X?' / 'paga a OC Y?' e passe a resposta em aprovar (os / oc).",
+      "oc_sugerida: pergunte 'é da OS X?' / 'paga a OC Y?' e passe a resposta em aprovar (os / oc). " +
+      "ENTRADA com parece_pagar: o Pix parece pagar contas que JÁ EXISTEM do cliente (soma bate). Pergunte " +
+      "'este Pix paga <frase>?'; com o sim, chame aplicar_pix_em_contas com bank_transaction_id e as aplicacoes " +
+      "dadas (a linha sai da fila); se o dono disser que é receita nova, aprove com vinculos[id]='nenhum'. " +
+      "Aprovar sem perguntar contaria o dinheiro duas vezes.",
     input_schema: {
       type: "object",
       properties: { limite: { type: "number" } },
@@ -814,7 +869,7 @@ export const financeRulesTools: ToolDef[] = [
     async execute(args, ctx) {
       const { data, error } = await ctx.sb
         .from("finance_review_queue")
-        .select("id, title, suggested_amount, suggested_category, suggested_date, confidence, kind, evidencia, vinculo_sugerido, suggested_service_order_id, suggested_purchase_order_id")
+        .select("id, title, suggested_amount, suggested_category, suggested_date, confidence, kind, evidencia, vinculo_sugerido, suggested_service_order_id, suggested_purchase_order_id, bank_transaction_id, suggested_client_id")
         .eq("status", "pending")
         .order("suggested_amount", { ascending: false })
         .limit(Number(args.limite ?? 30));
@@ -828,6 +883,7 @@ export const financeRulesTools: ToolDef[] = [
         idsOc.length ? ctx.sb.from("purchase_orders").select("id, po_number").in("id", idsOc) : Promise.resolve({ data: [] }),
       ]);
       const numeroDaOs = new Map(((oss ?? []) as any[]).map((o) => [o.id, o.service_order_number]));
+      const parece = await parecePagarDasEntradas(ctx, linhas as EntradaDaFila[]);
       const numeroDaOc = new Map(((ocs ?? []) as any[]).map((o) => [o.id, o.po_number]));
       // Resumo curto por linha: o modelo precisa do que decide, não do objeto inteiro.
       const quem = (e: any) => {
@@ -842,6 +898,8 @@ export const financeRulesTools: ToolDef[] = [
         propostas: linhas.map((p) => ({
           id: p.id, tipo: p.kind === "create_receivable" ? "entrada" : p.kind === "create_payable" ? "saida" : p.kind,
           titulo: p.title, valor: Number(p.suggested_amount ?? 0), data: p.suggested_date,
+          bank_transaction_id: p.bank_transaction_id ?? null,
+          parece_pagar: parece.has(p.id) ? parecePagarParaOModelo(parece.get(p.id)!) : null,
           categoria: p.suggested_category, confianca: p.confidence,
           quem: quem(p.evidencia),
           cadastrar: p.evidencia?.cadastrar ?? null,
@@ -884,7 +942,9 @@ export const financeRulesTools: ToolDef[] = [
       "servidor sem a escolha: pergunte e passe em `vinculos`. Serviço de terceiro (servico_de_terceiro na " +
       "lista) exige para onde foi e o que foi feito: pergunte e passe `destino` (cliente + os, ou empresa + " +
       "centro_de_custo) e `observacao`. Se o usuário mandar trocar a categoria sugerida, passe a nova em " +
-      "`categoria` (o nome dito; o sistema confere no plano de contas). Só use quando o usuário confirmar quais aprovar.",
+      "`categoria` (o nome dito; o sistema confere no plano de contas). Entrada com parece_pagar é recusada sem " +
+      "resposta: se paga as contas, use aplicar_pix_em_contas; se é receita nova, passe vinculos[id]='nenhum'. " +
+      "Só use quando o usuário confirmar quais aprovar.",
     input_schema: {
       type: "object",
       properties: {
@@ -937,6 +997,30 @@ export const financeRulesTools: ToolDef[] = [
     async execute(args, ctx) {
       const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
+      // Entrada que parece pagar contas que já existem (F4, 03/10/2026): sem resposta, recusa — a tela
+      // faz o mesmo. Foi aprovando Pix como receita nova que a de agosto contou R$ 4.800 duas vezes.
+      const ids: string[] = (Array.isArray(args.ids) ? args.ids : []).map(String);
+      const respondidas = new Set(Object.entries((args.vinculos ?? {}) as Record<string, string>).filter(([, v]) => !!v).map(([id]) => id));
+      const semResposta = ids.filter((id) => !respondidas.has(id));
+      if (semResposta.length) {
+        const { data: filas, error: erroFila } = await ctx.sb.from("finance_review_queue")
+          .select("id, kind, title, bank_transaction_id, suggested_client_id, suggested_amount, suggested_date")
+          .in("id", semResposta);
+        if (erroFila) throw new Error(`Não consegui ler as propostas: ${erroFila.message}`);
+        const parece = await parecePagarDasEntradas(ctx, (filas ?? []) as EntradaDaFila[]);
+        const fortes = ((filas ?? []) as Array<EntradaDaFila & { title: string }>)
+          .filter((f) => parece.get(f.id) && !parece.get(f.id)!.parcial);
+        if (fortes.length) {
+          return {
+            error: "Estas entradas parecem pagar contas que já existem — aprovar como receita nova contaria o dinheiro duas vezes. "
+              + "Pergunte ao usuário: se pagam, use aplicar_pix_em_contas; se são receita nova, repita com vinculos[id]='nenhum'.",
+            entradas: fortes.map((f) => ({
+              id: f.id, titulo: f.title, bank_transaction_id: f.bank_transaction_id,
+              parece_pagar: parecePagarParaOModelo(parece.get(f.id)!),
+            })),
+          };
+        }
+      }
       const overrides: Record<string, Record<string, unknown>> = {};
       const de = (id: string) => (overrides[id] ??= {});
       for (const [id, escolha] of Object.entries((args.vinculos ?? {}) as Record<string, string>)) {

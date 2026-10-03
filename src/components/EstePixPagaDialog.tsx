@@ -8,8 +8,11 @@
  * que sobra. A regra é a da função do banco aplicar_entrada_em_contas, repetida em
  * src/lib/este-pix-paga.ts para a tela avisar antes do clique (até R$ 10 a mais vira receita da
  * conta; até R$ 10 a menos pode quitar com desconto; a entrada é aplicada por inteiro).
+ *
+ * F4 (03/10/2026): pode abrir já preenchido com o que a linha "parece pagar" (contas e pagamentos à
+ * mão do cliente identificado cuja soma bate). Só preenche: quem aplica é a pessoa, no "Aplicar".
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -26,17 +29,20 @@ import {
   analisarItem, distribuirPeloVencimento, montarAplicacoes, resumir, type ItemDaAplicacao,
 } from '@/lib/este-pix-paga';
 import { ListChecks } from 'lucide-react';
+import type { ParecePagar } from '../../supabase/functions/_shared/banking/parece-pagar';
 
 type Escolha = { valor: number; quitar: boolean };
 
 export function EstePixPagaDialog({
-  aberto, onFechar, entradaId, clienteInicial, onConcluido,
+  aberto, onFechar, entradaId, clienteInicial, onConcluido, sugestao,
 }: {
   aberto: boolean;
   onFechar: () => void;
   entradaId: string | null;
   clienteInicial?: string | null;
   onConcluido?: () => void;
+  /** O que a linha parece pagar: abre com essas contas e pagamentos já marcados. */
+  sugestao?: ParecePagar | null;
 }) {
   const { formatCurrency, formatDate } = useI18n();
   const { data: entrada, isLoading: lendoEntrada } = useEntradaAplicada(aberto ? entradaId : null);
@@ -50,12 +56,21 @@ export function EstePixPagaDialog({
   const [ligados, setLigados] = useState<Set<string>>(new Set());
   const [confirmando, setConfirmando] = useState(false);
 
-  // Cada abertura começa do zero, com o cliente que a linha já sugeria.
+  // Cada abertura começa do zero, com o cliente que a linha já sugeria — e, se ela parece pagar
+  // contas que já existem, com elas marcadas. A sugestão é lida só na abertura: uma releitura da
+  // fila no meio não apaga o que a pessoa já mudou.
+  const sugestaoNaAbertura = useRef(sugestao);
+  sugestaoNaAbertura.current = sugestao;
+  const [preenchido, setPreenchido] = useState(false);
   useEffect(() => {
     if (!aberto) return;
+    const sug = sugestaoNaAbertura.current;
     setClienteId(clienteInicial ?? null);
-    setEscolhas({});
-    setLigados(new Set());
+    setEscolhas(sug
+      ? Object.fromEntries(sug.itens.filter((i) => i.tipo === 'conta').map((i) => [i.id, { valor: i.valor, quitar: i.quitar }]))
+      : {});
+    setLigados(new Set(sug ? sug.itens.filter((i) => i.tipo === 'pagamento').map((i) => i.id) : []));
+    setPreenchido(!!sug);
     setConfirmando(false);
   }, [aberto, entradaId, clienteInicial]);
 
@@ -71,6 +86,7 @@ export function EstePixPagaDialog({
   const resumo = resumir(restante, itens, valoresLigados, formatCurrency);
 
   const mudarCliente = (id: string) => {
+    setPreenchido(false);
     setClienteId(id || null);
     setEscolhas({});
     setLigados(new Set());
@@ -126,6 +142,11 @@ export function EstePixPagaDialog({
           <p className="text-sm">Esta entrada já está toda aplicada.</p>
         ) : (
           <div className="space-y-3">
+            {preenchido && (
+              <p className="rounded-md border border-primary/30 bg-primary/5 p-2 text-xs" data-testid="preenchido-pela-sugestao">
+                Já marquei o que esta entrada parece pagar. Confira os valores antes de aplicar.
+              </p>
+            )}
             <div className="space-y-1">
               <Label>De qual cliente são as contas?</Label>
               <EntityCombobox
@@ -279,14 +300,15 @@ export function EstePixPagaDialog({
 
 /** O botão que abre o "Este Pix paga…" a partir de uma entrada do banco. */
 export function BotaoEstePixPaga({
-  entradaId, clienteInicial, disabled, rotulo, variante = 'link', onConcluido,
+  entradaId, clienteInicial, disabled, rotulo, variante = 'link', onConcluido, sugestao,
 }: {
   entradaId: string;
   clienteInicial?: string | null;
   disabled?: boolean;
   rotulo?: string;
-  variante?: 'link' | 'outline';
+  variante?: 'link' | 'outline' | 'default';
   onConcluido?: () => void;
+  sugestao?: ParecePagar | null;
 }) {
   const [aberto, setAberto] = useState(false);
   return (
@@ -308,6 +330,7 @@ export function BotaoEstePixPaga({
         entradaId={entradaId}
         clienteInicial={clienteInicial}
         onConcluido={onConcluido}
+        sugestao={sugestao}
       />
     </>
   );
