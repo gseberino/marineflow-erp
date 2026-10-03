@@ -4,9 +4,12 @@
 //   POST { acao: "estado" }                  admin: conectado ou não, perfil, número, última queda
 //   POST { acao: "conectar", numero?, inicio? } admin: QR — e o código de 8 dígitos quando vem
 //                                            o número (conectar só com o celular)
+//   POST { acao: "reiniciar" }               admin: desconecta a sessão TRAVADA (aparece "open",
+//                                            mas o envio não sai) para ler o QR de novo
 //   POST com x-cron-secret                   pg_cron a cada 5 min: o vigia. Guarda o estado em
 //                                            whatsapp_conexao_vigia e avisa no sino dos admins
-//                                            quando fica 10 min fora do ar (e quando volta)
+//                                            quando fica 10 min fora do ar (e quando volta).
+//                                            "Fora do ar" inclui a sessão travada (conexao.ts)
 //
 // verify_jwt = false porque o pg_cron chama sem JWT. Quem não traz o segredo do cron precisa de
 // JWT de admin ativo — as duas portas são conferidas ANTES de qualquer chamada à Evolution.
@@ -16,8 +19,8 @@ import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
 import {
-  decidirVigia, type EstadoConexao, lerEstado, lerRespostaDoConnect, motivoDaQueda,
-  numeroParaPareamento, textoDoAviso,
+  confirmaTravada, decidirVigia, type EstadoConexao, hhmm, lerEstado, lerRespostaDoConnect, lerSaidas,
+  motivoDaQueda, numeroParaPareamento, suspeitaDeTravada, textoDoAviso,
 } from "./conexao.ts";
 
 const corsHeaders = {
@@ -44,10 +47,16 @@ interface Evolution {
   instancia: string;
 }
 
-async function chamar(evo: Evolution, caminho: string): Promise<{ ok: boolean; status: number; json: unknown }> {
+async function chamar(
+  evo: Evolution,
+  caminho: string,
+  opcoes: { method?: "GET" | "POST" | "DELETE"; body?: unknown } = {},
+): Promise<{ ok: boolean; status: number; json: unknown }> {
   try {
     const res = await fetch(`${evo.url}${caminho}`, {
-      headers: { apikey: evo.chave },
+      method: opcoes.method ?? "GET",
+      headers: { apikey: evo.chave, ...(opcoes.body !== undefined ? { "Content-Type": "application/json" } : {}) },
+      ...(opcoes.body !== undefined ? { body: JSON.stringify(opcoes.body) } : {}),
       signal: AbortSignal.timeout(12000),
     });
     const json = await res.json().catch(() => null);
@@ -70,6 +79,39 @@ async function estadoAtual(evo: Evolution): Promise<{ estado: EstadoConexao; det
   if (!r.ok) return { estado: "inacessivel", detalhe: detalheDoErro(r.status) };
   const estado = lerEstado(r.json);
   return estado ? { estado, detalhe: null } : { estado: "inacessivel", detalhe: "resposta inesperada" };
+}
+
+interface Situacao {
+  estado: EstadoConexao;
+  detalhe: string | null;
+  /** Quando saiu (relógio do PC) o envio que ficou sem confirmação; só no "travado". */
+  presaEmMs: number | null;
+}
+
+/**
+ * "open" da Evolution conferido contra o que o ERP mandou: envio de 10+ min sem confirmação
+ * e ainda PENDING como última mensagem da conversa = sessão travada. Se a conferência falhar,
+ * fica o "open" (o vigia não alarma por falta de resposta de uma consulta auxiliar).
+ */
+async function situacaoAtual(evo: Evolution, reconectadoEm: string | null): Promise<Situacao> {
+  const { estado, detalhe } = await estadoAtual(evo);
+  if (estado !== "open") return { estado, detalhe, presaEmMs: null };
+  const r = await chamar(evo, `/chat/findMessages/${evo.instancia}`, {
+    method: "POST", body: { where: { key: { fromMe: true } }, offset: 10, page: 1 },
+  });
+  if (!r.ok) return { estado, detalhe, presaEmMs: null };
+  const reconectadoEmMs = reconectadoEm ? new Date(reconectadoEm).getTime() : null;
+  const suspeita = suspeitaDeTravada(lerSaidas(r.json), Date.now(), reconectadoEmMs);
+  if (!suspeita) return { estado, detalhe, presaEmMs: null };
+  const c = await chamar(evo, `/chat/findChats/${evo.instancia}`, {
+    method: "POST", body: { where: { remoteJid: suspeita.remoteJid } },
+  });
+  if (!c.ok || !confirmaTravada(c.json, suspeita.id)) return { estado, detalhe, presaEmMs: null };
+  return {
+    estado: "travado",
+    detalhe: `a mensagem enviada às ${hhmm(suspeita.quandoMs)} não foi confirmada pelo WhatsApp`,
+    presaEmMs: suspeita.quandoMs,
+  };
 }
 
 interface Detalhes {
@@ -96,17 +138,22 @@ async function detalhesDaInstancia(evo: Evolution): Promise<Detalhes> {
 }
 
 async function vigiar(db: Db, evo: Evolution): Promise<Response> {
-  const { estado, detalhe } = await estadoAtual(evo);
-  const { data: anterior } = await db.from("whatsapp_conexao_vigia")
-    .select("estado, desde, avisado_em").eq("id", 1).maybeSingle();
+  const { data: anterior, error: erroLeitura } = await db.from("whatsapp_conexao_vigia")
+    .select("estado, desde, avisado_em, pedido_em").eq("id", 1).maybeSingle();
+  if (erroLeitura) throw new Error(`ler vigia: ${erroLeitura.message}`);
+  const { estado, detalhe } = await situacaoAtual(evo, anterior?.pedido_em ?? null);
   const agora = new Date();
-  const { registro, aviso } = decidirVigia(anterior ?? null, estado, agora);
+  const { registro, aviso } = decidirVigia(
+    anterior ? { estado: anterior.estado, desde: anterior.desde, avisado_em: anterior.avisado_em } : null,
+    estado,
+    agora,
+  );
 
   // Avisa ANTES de gravar: se a gravação falhar, a próxima rodada avisa de novo (repetir é
   // melhor que calar — o dono passou 4 horas sem saber em 29/09).
   if (aviso) {
-    let motivo: string | null = null;
-    if (aviso === "caiu" && estado !== "inacessivel") {
+    let motivo: string | null = estado === "travado" ? detalhe : null;
+    if (aviso === "caiu" && (estado === "close" || estado === "connecting")) {
       const d = await detalhesDaInstancia(evo);
       const daQuedaAtual = d.quedaEm &&
         new Date(d.quedaEm).getTime() >= new Date(registro.desde).getTime() - 15 * 60000;
@@ -172,18 +219,41 @@ servirComCors(async (req: Request) => {
     const body = await req.json().catch(() => ({})) as { acao?: string; numero?: string; inicio?: boolean };
 
     if (body.acao === "estado") {
-      const { estado, detalhe } = await estadoAtual(evo);
-      const d = estado === "inacessivel" ? null : await detalhesDaInstancia(evo);
       const { data: vigia } = await db.from("whatsapp_conexao_vigia")
-        .select("estado, desde, verificado_em").eq("id", 1).maybeSingle();
+        .select("estado, desde, verificado_em, pedido_em").eq("id", 1).maybeSingle();
+      const { estado, detalhe, presaEmMs } = await situacaoAtual(evo, vigia?.pedido_em ?? null);
+      const d = estado === "inacessivel" ? null : await detalhesDaInstancia(evo);
+      const caiu = estado === "close" || estado === "connecting";
       return jr({
         estado,
         detalhe,
         perfil: d?.perfil ?? null,
         numero: d?.numero ?? null,
-        queda: estado !== "open" && d?.quedaEm ? { em: d.quedaEm, motivo: motivoDaQueda(d.quedaCodigo) } : null,
-        vigia: vigia ?? null,
+        queda: caiu && d?.quedaEm ? { em: d.quedaEm, motivo: motivoDaQueda(d.quedaCodigo) } : null,
+        presa: presaEmMs ? { em: new Date(presaEmMs).toISOString() } : null,
+        vigia: vigia ? { estado: vigia.estado, desde: vigia.desde, verificado_em: vigia.verificado_em } : null,
       });
+    }
+
+    if (body.acao === "reiniciar") {
+      // Só a sessão travada: desconectar uma que funciona derrubaria o canal à toa.
+      const { data: vigia } = await db.from("whatsapp_conexao_vigia")
+        .select("pedido_em").eq("id", 1).maybeSingle();
+      const { estado, detalhe } = await situacaoAtual(evo, vigia?.pedido_em ?? null);
+      if (estado === "inacessivel") return jr({ ok: false, estado, detalhe });
+      if (estado !== "travado") {
+        return jr({
+          error: estado === "open"
+            ? "O WhatsApp está funcionando: não precisa desconectar."
+            : "Já está desconectado: é só conectar de novo.",
+        }, 409);
+      }
+      const r = await chamar(evo, `/instance/logout/${evo.instancia}`, { method: "DELETE" });
+      if (!r.ok) return jr({ ok: false, estado, detalhe: detalheDoErro(r.status) });
+      // A sessão velha fica para trás: o que ficou preso nela não conta mais para o vigia.
+      await db.from("whatsapp_conexao_vigia")
+        .update({ pedido_por: userId, pedido_em: new Date().toISOString() }).eq("id", 1);
+      return jr({ ok: true, estado: "close", detalhe: null });
     }
 
     if (body.acao === "conectar") {
@@ -202,7 +272,7 @@ servirComCors(async (req: Request) => {
       return jr({ ...lerRespostaDoConnect(r.json), detalhe: null });
     }
 
-    return jr({ error: "acao deve ser 'estado' ou 'conectar'" }, 400);
+    return jr({ error: "acao deve ser 'estado', 'conectar' ou 'reiniciar'" }, 400);
   } catch (err) {
     await logEdgeError(db, {
       context: "whatsapp-conexao",

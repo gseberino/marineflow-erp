@@ -4,9 +4,11 @@
 // reconectar exigia o Claude gerar o QR no PC. Agora a tela mostra o estado, gera o QR (para ler
 // de outra tela) ou o código de 8 dígitos (para conectar só com o celular, "Conectar com número
 // de telefone"), e o vigia da função whatsapp-conexao avisa no sino quando o número cai.
+// Em 03/10/2026 a sessão ficou "conectada" sem nada sair (PC voltou com o relógio errado): o
+// vigia passou a chamar isso de "travado", e daqui se desconecta para ler o QR de novo.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, Loader2, MessageCircle, QrCode, RefreshCw, Smartphone, WifiOff } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, MessageCircle, QrCode, RefreshCw, Smartphone, WifiOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,7 +16,7 @@ import { Label } from '@/components/ui/label';
 import { supabase } from '@/integrations/supabase/client';
 import { extractInvokeErrorMessage } from '@/lib/invoke-error';
 
-type Estado = 'open' | 'connecting' | 'close' | 'inacessivel';
+type Estado = 'open' | 'connecting' | 'close' | 'inacessivel' | 'travado';
 
 interface InfoDaConexao {
   estado: Estado;
@@ -22,6 +24,8 @@ interface InfoDaConexao {
   perfil: string | null;
   numero: string | null;
   queda: { em: string; motivo: string | null } | null;
+  /** Só no "travado": quando saiu o envio que o WhatsApp não confirmou. */
+  presa?: { em: string } | null;
   vigia: { estado: Estado; desde: string; verificado_em: string } | null;
 }
 
@@ -80,6 +84,24 @@ function Situacao({ info }: { info: InfoDaConexao }) {
       </div>
     );
   }
+  if (info.estado === 'travado') {
+    const quem = [info.perfil, formatarTelefone(info.numero)].filter(Boolean).join(' · ');
+    return (
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+        <div>
+          <p className="font-medium">Conectado, mas as mensagens não estão saindo</p>
+          {quem && <p className="text-sm text-muted-foreground break-words">{quem}</p>}
+          <p className="text-sm text-muted-foreground break-words">
+            {info.presa?.em
+              ? `A mensagem enviada ${quando(info.presa.em)} não foi confirmada pelo WhatsApp.`
+              : 'O WhatsApp não confirmou as últimas mensagens enviadas.'}
+            {' '}A sessão travou (costuma acontecer depois de o PC desligar sem querer): desconecte e leia o QR de novo.
+          </p>
+        </div>
+      </div>
+    );
+  }
   if (info.estado === 'inacessivel') {
     return (
       <div className="flex items-start gap-3">
@@ -124,6 +146,8 @@ export function WhatsAppConexaoTab({ intervaloMs = 4000 }: { intervaloMs?: numbe
   const [sessao, setSessao] = useState<RespostaDoConectar | null>(null);
   const [consultas, setConsultas] = useState(0);
   const [esgotou, setEsgotou] = useState(false);
+  const [confirmandoReinicio, setConfirmandoReinicio] = useState(false);
+  const [reiniciando, setReiniciando] = useState(false);
   const inicio = useRef(0);
   const emVoo = useRef(false);
   const preencheu = useRef(false);
@@ -184,8 +208,24 @@ export function WhatsAppConexaoTab({ intervaloMs = 4000 }: { intervaloMs?: numbe
     return () => clearInterval(id);
   }, [modo, pedir, intervaloMs]);
 
+  const reiniciar = async () => {
+    setReiniciando(true);
+    try {
+      const r = await chamar<{ ok: boolean; detalhe: string | null }>({ acao: 'reiniciar' });
+      if (!r.ok) throw new Error(r.detalhe ? `Não consegui desconectar: ${r.detalhe}.` : 'Não consegui desconectar.');
+      toast.success('Desconectado. Agora conecte de novo pelo QR ou pelo código.');
+      setConfirmandoReinicio(false);
+      await qc.invalidateQueries({ queryKey: ['whatsapp-conexao'] });
+    } catch (e) {
+      toast.error((e as Error).message || 'Não consegui desconectar.');
+    } finally {
+      setReiniciando(false);
+    }
+  };
+
   const numeroValido = numero.replace(/\D/g, '').length >= 10;
-  const conectado = info?.estado === 'open';
+  // Conectar só serve com o número desconectado; travado precisa desconectar antes.
+  const podeConectar = info?.estado === 'close' || info?.estado === 'connecting';
   const semCodigoAinda = modo === 'codigo' && !sessao?.codigo;
   // Um QR já aberto (sem número) não troca para código: a Evolution só gera o código ao iniciar.
   const codigoNaoVeio = semCodigoAinda && consultas >= 3 && !!sessao?.qr;
@@ -211,7 +251,29 @@ export function WhatsAppConexaoTab({ intervaloMs = 4000 }: { intervaloMs?: numbe
       )}
       {info && <Situacao info={info} />}
 
-      {info && !conectado && info.estado !== 'inacessivel' && !modo && (
+      {info?.estado === 'travado' && !modo && (
+        <div className="space-y-2 border-t pt-4">
+          {confirmandoReinicio ? (
+            <>
+              <p className="text-sm">
+                O WhatsApp fica desconectado do ERP até você ler o QR (ou digitar o código) no celular da HBR. Desconectar agora?
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="destructive" onClick={() => void reiniciar()} disabled={reiniciando}>
+                  {reiniciando && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Sim, desconectar
+                </Button>
+                <Button variant="ghost" onClick={() => setConfirmandoReinicio(false)} disabled={reiniciando}>Cancelar</Button>
+              </div>
+            </>
+          ) : (
+            <Button onClick={() => setConfirmandoReinicio(true)} className="w-full sm:w-auto">
+              <RefreshCw className="h-4 w-4 mr-2" /> Desconectar e ler o QR de novo
+            </Button>
+          )}
+        </div>
+      )}
+
+      {info && podeConectar && !modo && (
         <div className="space-y-4 border-t pt-4">
           {esgotou && (
             <p className="text-sm text-muted-foreground">O tempo para ler acabou. Peça de novo quando estiver com o celular na mão.</p>
@@ -290,7 +352,7 @@ export function WhatsAppConexaoTab({ intervaloMs = 4000 }: { intervaloMs?: numbe
       )}
 
       <p className="text-xs text-muted-foreground">
-        O ERP confere a conexão sozinho a cada 5 minutos e avisa no sino se o número ficar 10 minutos fora do ar.
+        O ERP confere a conexão sozinho a cada 5 minutos e avisa no sino se o número ficar 10 minutos fora do ar ou travado.
         {info?.vigia?.verificado_em ? ` Última conferência automática às ${hora(info.vigia.verificado_em)}.` : ''}
       </p>
     </div>

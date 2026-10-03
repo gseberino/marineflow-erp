@@ -5,7 +5,8 @@
 // conectado. Reconectar exigia o Claude gerar o QR no PC. Agora o ERP mostra o estado, gera o
 // QR (ou o código de 8 dígitos para conectar só com o celular) e avisa no sino quando cai.
 
-export type EstadoConexao = "open" | "connecting" | "close" | "inacessivel";
+// "travado" não vem da Evolution: é o vigia que conclui (ver suspeitaDeTravada).
+export type EstadoConexao = "open" | "connecting" | "close" | "inacessivel" | "travado";
 
 const ESTADOS_DA_EVOLUTION = new Set(["open", "connecting", "close"]);
 
@@ -64,6 +65,85 @@ export function motivoDaQueda(codigo: number | null | undefined): string | null 
 }
 
 // ---------------------------------------------------------------------------------------------
+// Sessão travada: a Evolution diz "open", mas o que o ERP manda não sai.
+//
+// Em 03/10/2026 o PC voltou de uma queda com o relógio errado; a instância ficou "open" e a
+// mensagem do Extrato das 15:25 ficou PENDING para sempre (nenhuma confirmação do servidor do
+// WhatsApp), sem que nada entrasse. Reiniciar o contêiner não resolveu: só desconectar e ler o QR
+// de novo. Em 45 dias de histórico, esse foi o ÚNICO envio do ERP sem nenhuma confirmação e ainda
+// PENDING — envio saudável recebe SERVER_ACK em segundos. Os 18 casos "sem confirmação" no
+// /chat/findMessages eram SERVER_ACK gravado direto no status (a API não devolve o status), por
+// isso a prova final vem do /chat/findChats, cuja última mensagem da conversa traz o status.
+
+/** Minutos sem confirmação antes de suspeitar de um envio (envio saudável confirma em segundos). */
+export const MINUTOS_SEM_CONFIRMACAO = 10;
+
+export interface SaidaRecente {
+  id: string;
+  remoteJid: string;
+  /** messageTimestamp em ms (relógio do PC). */
+  quandoMs: number;
+  /** Chegou ao menos uma confirmação (MessageUpdate: SERVER_ACK, DELIVERY_ACK, READ…). */
+  confirmada: boolean;
+  /** Mandada pela API (source "web"); as do próprio celular ficam de fora. */
+  peloErp: boolean;
+}
+
+/** Registros do POST /chat/findMessages (fromMe: true), no formato da Evolution 2.3. */
+export function lerSaidas(json: unknown): SaidaRecente[] {
+  const recs = (json as { messages?: { records?: unknown } } | null)?.messages?.records;
+  if (!Array.isArray(recs)) return [];
+  const saidas: SaidaRecente[] = [];
+  for (const r of recs as Array<Record<string, unknown>>) {
+    const key = r?.key as { id?: unknown; remoteJid?: unknown; fromMe?: unknown } | undefined;
+    const ts = Number(r?.messageTimestamp);
+    if (!key || key.fromMe !== true || typeof key.id !== "string" || typeof key.remoteJid !== "string") continue;
+    if (!Number.isFinite(ts) || ts <= 0) continue;
+    const upd = Array.isArray(r.MessageUpdate) ? r.MessageUpdate : [];
+    saidas.push({
+      id: key.id,
+      remoteJid: key.remoteJid,
+      quandoMs: ts * 1000,
+      confirmada: upd.length > 0,
+      peloErp: r.source === "web",
+    });
+  }
+  return saidas;
+}
+
+/**
+ * O envio do ERP que vale conferir: o mais novo com 10+ min, sem confirmação, mandado DEPOIS do
+ * último envio confirmado (se algo saiu depois, a sessão funciona) e depois da última reconexão
+ * pedida pela tela (o que ficou preso na sessão velha não conta). null = nada suspeito.
+ */
+export function suspeitaDeTravada(
+  saidas: SaidaRecente[],
+  agoraMs: number,
+  reconectadoEmMs: number | null = null,
+  minutos = MINUTOS_SEM_CONFIRMACAO,
+): SaidaRecente | null {
+  const doErp = saidas.filter((s) => s.peloErp);
+  const ultimaConfirmada = Math.max(0, ...doErp.filter((s) => s.confirmada).map((s) => s.quandoMs));
+  const corte = Math.max(ultimaConfirmada, reconectadoEmMs ?? 0);
+  const suspeitas = doErp
+    .filter((s) => !s.confirmada && s.quandoMs > corte && agoraMs - s.quandoMs >= minutos * 60000)
+    .sort((a, b) => b.quandoMs - a.quandoMs);
+  return suspeitas[0] ?? null;
+}
+
+/**
+ * Prova pelo POST /chat/findChats (where remoteJid): a suspeita ainda é a última mensagem da
+ * conversa e continua PENDING. Se alguém respondeu ou o status virou SERVER_ACK, não travou.
+ */
+export function confirmaTravada(chats: unknown, idDaSuspeita: string): boolean {
+  if (!Array.isArray(chats)) return false;
+  return chats.some((c) => {
+    const ultima = (c as { lastMessage?: { key?: { id?: unknown; fromMe?: unknown }; status?: unknown } })?.lastMessage;
+    return ultima?.key?.id === idDaSuspeita && ultima.key.fromMe === true && ultima.status === "PENDING";
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
 // Vigia: roda a cada 5 min pelo pg_cron e guarda uma linha só (whatsapp_conexao_vigia).
 
 export interface RegistroDoVigia {
@@ -110,8 +190,8 @@ export function decidirVigia(
   return { registro, aviso: null };
 }
 
-function hhmm(iso: string): string {
-  return new Date(iso).toLocaleTimeString("pt-BR", {
+export function hhmm(quando: string | number): string {
+  return new Date(quando).toLocaleTimeString("pt-BR", {
     timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit",
   });
 }
@@ -128,6 +208,12 @@ export function textoDoAviso(
     };
   }
   const desde = hhmm(registro.desde);
+  if (registro.estado === "travado") {
+    return {
+      title: "WhatsApp travado",
+      body: `Aparece conectado, mas as mensagens não estão saindo${motivo ? ` (${motivo})` : ""}. Toque para desconectar e ler o QR de novo.`,
+    };
+  }
   if (registro.estado === "inacessivel") {
     return {
       title: "WhatsApp fora do ar",
