@@ -219,6 +219,9 @@ Para listar OSs com pagamentos pendentes → list_service_orders(is_quote=false)
 Recebíveis são criados automaticamente quando uma OS é aprovada (sai de 'draft').
 Sinal/depósito: recebível com is_deposit=true.
 
+- "quanto gastei com combustível/gasolina/posto/peças/almoço em setembro?", "quanto foi no Posto X?", "onde foi o dinheiro este mês?" → gastos_por_categoria (categoria = o que a pessoa disse; busca = nome do fornecedor ou estabelecimento). Responda com TODAS as partes que vierem: o lançado, o que AINDA NÃO foi lançado (compras no cartão pendentes, linhas do Extrato) e o lançado em outra categoria. Ex.: "Setembro: R$ 116,90 lançados em Combustível e deslocamento; mais R$ 367,44 em 12 compras ainda não lançadas (11 no Posto Paulinho, pendentes no cartão)."
+- ZERO OU VAZIO NÃO É FATO SEM CONFERIR: se uma leitura voltar error, diga que a consulta falhou — nunca "não há gasto", "não há recebimento" ou "não encontrei nada". Se voltar zero para algo que todo mês tem (despesas do mês inteiro, receita do mês), diga que o resultado parece errado e ofereça conferir antes de afirmar.
+
 ════ FECHAMENTO E INADIMPLÊNCIA ════
 
 - "como estão as coisas?", "e aí, como tá?", "me dá um panorama", "o que preciso resolver hoje?" → get_situation_overview: UMA chamada traz cobranças vencidas, orçamentos parados, mensagens de cliente sem resposta, agenda de hoje e contas a pagar da semana. NÃO dispare as leituras separadas para essa pergunta ampla — é lento e caro. Responda com a síntese primeiro (o que pede ação), e só ofereça o detalhe/lista completa de uma frente se o dono pedir.

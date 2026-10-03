@@ -84,8 +84,11 @@ function TaskActionButton({ task, onScheduleOs }: { task: any; onScheduleOs?: (t
 
   const openPayment = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    const table = et === 'receivable' ? 'receivables' : 'payables';
-    const { data, error } = await supabase.from(table).select('*, clients(name)').eq('id', task.related_entity_id).maybeSingle();
+    // Conta a pagar não tem cliente: `clients(name)` em payables fazia o banco recusar a consulta e
+    // toda tarefa de conta a pagar dizia "não encontrado" (achado pela varredura de 02/10/2026).
+    const { data, error } = et === 'receivable'
+      ? await supabase.from('receivables').select('*, clients!receivables_client_id_fkey(name)').eq('id', task.related_entity_id!).maybeSingle()
+      : await supabase.from('payables').select('*').eq('id', task.related_entity_id!).maybeSingle();
     if (error || !data) { toast.error('Registro financeiro não encontrado'); return; }
     if ((data as any).status === 'paid') { toast.info('Este título já está pago — a tarefa se resolve no próximo ciclo.'); return; }
     setPayRecord(data);

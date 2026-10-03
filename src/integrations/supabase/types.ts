@@ -1932,6 +1932,174 @@ export type Database = {
           },
         ]
       }
+      anotacoes_do_extrato: {
+        Row: {
+          aplicada_em: string | null
+          bank_transaction_id: string | null
+          cancelada_em: string | null
+          categoria: string | null
+          cliente_id: string | null
+          criada_em: string
+          criada_por: string | null
+          data_exata: boolean
+          data_prevista: string
+          descricao: string | null
+          documento: string | null
+          favorecido_id: string | null
+          fornecedor_id: string | null
+          id: string
+          motivo_cancelamento: string | null
+          nome: string | null
+          os_id: string | null
+          sentido: string
+          status: string
+          valor: number
+        }
+        Insert: {
+          aplicada_em?: string | null
+          bank_transaction_id?: string | null
+          cancelada_em?: string | null
+          categoria?: string | null
+          cliente_id?: string | null
+          criada_em?: string
+          criada_por?: string | null
+          data_exata?: boolean
+          data_prevista: string
+          descricao?: string | null
+          documento?: string | null
+          favorecido_id?: string | null
+          fornecedor_id?: string | null
+          id?: string
+          motivo_cancelamento?: string | null
+          nome?: string | null
+          os_id?: string | null
+          sentido: string
+          status?: string
+          valor: number
+        }
+        Update: {
+          aplicada_em?: string | null
+          bank_transaction_id?: string | null
+          cancelada_em?: string | null
+          categoria?: string | null
+          cliente_id?: string | null
+          criada_em?: string
+          criada_por?: string | null
+          data_exata?: boolean
+          data_prevista?: string
+          descricao?: string | null
+          documento?: string | null
+          favorecido_id?: string | null
+          fornecedor_id?: string | null
+          id?: string
+          motivo_cancelamento?: string | null
+          nome?: string | null
+          os_id?: string | null
+          sentido?: string
+          status?: string
+          valor?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "anotacoes_do_extrato_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions_situacao"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "extrato_a_tratar"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "faturas_do_cartao"
+            referencedColumns: ["pagamento_id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "recebimentos_do_extrato"
+            referencedColumns: ["bank_transaction_id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_criada_por_fkey"
+            columns: ["criada_por"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_favorecido_id_fkey"
+            columns: ["favorecido_id"]
+            isOneToOne: false
+            referencedRelation: "payees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_fornecedor_id_fkey"
+            columns: ["fornecedor_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_os_id_fkey"
+            columns: ["os_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_os_id_fkey"
+            columns: ["os_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_os_id_fkey"
+            columns: ["os_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_os_id_fkey"
+            columns: ["os_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anotacoes_do_extrato_os_id_fkey"
+            columns: ["os_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+        ]
+      }
       api_references: {
         Row: {
           category: string
@@ -2456,6 +2624,8 @@ export type Database = {
           last_transaction_date: string | null
           provider: string
           provider_status: string | null
+          saldo_base: number | null
+          saldo_base_em: string | null
           sincronizacoes_vazias: number
           updated_at: string
         }
@@ -2475,6 +2645,8 @@ export type Database = {
           last_transaction_date?: string | null
           provider?: string
           provider_status?: string | null
+          saldo_base?: number | null
+          saldo_base_em?: string | null
           sincronizacoes_vazias?: number
           updated_at?: string
         }
@@ -2494,6 +2666,8 @@ export type Database = {
           last_transaction_date?: string | null
           provider?: string
           provider_status?: string | null
+          saldo_base?: number | null
+          saldo_base_em?: string | null
           sincronizacoes_vazias?: number
           updated_at?: string
         }
@@ -3092,6 +3266,13 @@ export type Database = {
             foreignKeyName: "commissions_payable_id_fkey"
             columns: ["payable_id"]
             isOneToOne: false
+            referencedRelation: "compras_parceladas_em_dobro"
+            referencedColumns: ["payable_id"]
+          },
+          {
+            foreignKeyName: "commissions_payable_id_fkey"
+            columns: ["payable_id"]
+            isOneToOne: false
             referencedRelation: "payables"
             referencedColumns: ["id"]
           },
@@ -3239,6 +3420,24 @@ export type Database = {
         }
         Relationships: []
       }
+      consulta_cnpj: {
+        Row: {
+          cnpj: string
+          consultado_em: string
+          dados: Json
+        }
+        Insert: {
+          cnpj: string
+          consultado_em?: string
+          dados: Json
+        }
+        Update: {
+          cnpj?: string
+          consultado_em?: string
+          dados?: Json
+        }
+        Relationships: []
+      }
       cost_centers: {
         Row: {
           active: boolean | null
@@ -3327,6 +3526,239 @@ export type Database = {
           source?: string
         }
         Relationships: []
+      }
+      email_accounts: {
+        Row: {
+          active: boolean
+          address: string
+          created_at: string
+          id: string
+          label: string | null
+          owner_consent_at: string | null
+          route_alias: string | null
+        }
+        Insert: {
+          active?: boolean
+          address: string
+          created_at?: string
+          id?: string
+          label?: string | null
+          owner_consent_at?: string | null
+          route_alias?: string | null
+        }
+        Update: {
+          active?: boolean
+          address?: string
+          created_at?: string
+          id?: string
+          label?: string | null
+          owner_consent_at?: string | null
+          route_alias?: string | null
+        }
+        Relationships: []
+      }
+      email_attachments: {
+        Row: {
+          created_at: string
+          filename: string | null
+          id: string
+          kind: string
+          message_id: string
+          mime_type: string | null
+          parsed_payload: Json | null
+          processed_at: string | null
+          size_bytes: number | null
+          storage_path: string | null
+        }
+        Insert: {
+          created_at?: string
+          filename?: string | null
+          id?: string
+          kind?: string
+          message_id: string
+          mime_type?: string | null
+          parsed_payload?: Json | null
+          processed_at?: string | null
+          size_bytes?: number | null
+          storage_path?: string | null
+        }
+        Update: {
+          created_at?: string
+          filename?: string | null
+          id?: string
+          kind?: string
+          message_id?: string
+          mime_type?: string | null
+          parsed_payload?: Json | null
+          processed_at?: string | null
+          size_bytes?: number | null
+          storage_path?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_attachments_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "email_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_messages: {
+        Row: {
+          account_id: string
+          auth_results: string | null
+          body_purged_at: string | null
+          body_text: string | null
+          cc_addresses: string[] | null
+          client_id: string | null
+          created_at: string
+          dedup_key: string
+          from_address: string
+          from_name: string | null
+          has_attachments: boolean
+          id: string
+          in_reply_to: string | null
+          match_confidence: number | null
+          match_reason: string | null
+          message_id: string | null
+          muted: boolean
+          raw_size: number | null
+          received_at: string
+          references_ids: string[] | null
+          subject: string | null
+          supplier_id: string | null
+          thread_key: string | null
+          to_addresses: string[] | null
+          triage_class: string | null
+          triage_confidence: number | null
+          triage_evidence: string | null
+          triage_fraud_alert: boolean
+          triage_reason: string | null
+          triaged_at: string | null
+        }
+        Insert: {
+          account_id: string
+          auth_results?: string | null
+          body_purged_at?: string | null
+          body_text?: string | null
+          cc_addresses?: string[] | null
+          client_id?: string | null
+          created_at?: string
+          dedup_key: string
+          from_address: string
+          from_name?: string | null
+          has_attachments?: boolean
+          id?: string
+          in_reply_to?: string | null
+          match_confidence?: number | null
+          match_reason?: string | null
+          message_id?: string | null
+          muted?: boolean
+          raw_size?: number | null
+          received_at: string
+          references_ids?: string[] | null
+          subject?: string | null
+          supplier_id?: string | null
+          thread_key?: string | null
+          to_addresses?: string[] | null
+          triage_class?: string | null
+          triage_confidence?: number | null
+          triage_evidence?: string | null
+          triage_fraud_alert?: boolean
+          triage_reason?: string | null
+          triaged_at?: string | null
+        }
+        Update: {
+          account_id?: string
+          auth_results?: string | null
+          body_purged_at?: string | null
+          body_text?: string | null
+          cc_addresses?: string[] | null
+          client_id?: string | null
+          created_at?: string
+          dedup_key?: string
+          from_address?: string
+          from_name?: string | null
+          has_attachments?: boolean
+          id?: string
+          in_reply_to?: string | null
+          match_confidence?: number | null
+          match_reason?: string | null
+          message_id?: string | null
+          muted?: boolean
+          raw_size?: number | null
+          received_at?: string
+          references_ids?: string[] | null
+          subject?: string | null
+          supplier_id?: string | null
+          thread_key?: string | null
+          to_addresses?: string[] | null
+          triage_class?: string | null
+          triage_confidence?: number | null
+          triage_evidence?: string | null
+          triage_fraud_alert?: boolean
+          triage_reason?: string | null
+          triaged_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_messages_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_messages_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_messages_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_sender_rules: {
+        Row: {
+          action: string
+          created_at: string
+          created_by: string | null
+          id: string
+          pattern: string
+          reason: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          pattern: string
+          reason?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          pattern?: string
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_sender_rules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       entity_open_loops: {
         Row: {
@@ -3917,6 +4349,7 @@ export type Database = {
       finance_review_queue: {
         Row: {
           applied_rule_id: string | null
+          automatica: string | null
           bank_transaction_id: string | null
           confidence: number
           created_at: string
@@ -3926,6 +4359,7 @@ export type Database = {
           decided_by: string | null
           decision_note: string | null
           dre_group: string | null
+          evidencia: Json | null
           id: string
           kind: string
           reasoning: string | null
@@ -3942,9 +4376,11 @@ export type Database = {
           suggested_supplier_id: string | null
           title: string
           updated_at: string
+          vinculo_sugerido: Json | null
         }
         Insert: {
           applied_rule_id?: string | null
+          automatica?: string | null
           bank_transaction_id?: string | null
           confidence?: number
           created_at?: string
@@ -3954,6 +4390,7 @@ export type Database = {
           decided_by?: string | null
           decision_note?: string | null
           dre_group?: string | null
+          evidencia?: Json | null
           id?: string
           kind: string
           reasoning?: string | null
@@ -3970,9 +4407,11 @@ export type Database = {
           suggested_supplier_id?: string | null
           title: string
           updated_at?: string
+          vinculo_sugerido?: Json | null
         }
         Update: {
           applied_rule_id?: string | null
+          automatica?: string | null
           bank_transaction_id?: string | null
           confidence?: number
           created_at?: string
@@ -3982,6 +4421,7 @@ export type Database = {
           decided_by?: string | null
           decision_note?: string | null
           dre_group?: string | null
+          evidencia?: Json | null
           id?: string
           kind?: string
           reasoning?: string | null
@@ -3998,6 +4438,7 @@ export type Database = {
           suggested_supplier_id?: string | null
           title?: string
           updated_at?: string
+          vinculo_sugerido?: Json | null
         }
         Relationships: [
           {
@@ -4034,6 +4475,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "faturas_do_cartao"
             referencedColumns: ["pagamento_id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "recebimentos_do_extrato"
+            referencedColumns: ["bank_transaction_id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_created_payable_id_fkey"
+            columns: ["created_payable_id"]
+            isOneToOne: false
+            referencedRelation: "compras_parceladas_em_dobro"
+            referencedColumns: ["payable_id"]
           },
           {
             foreignKeyName: "finance_review_queue_created_payable_id_fkey"
@@ -4076,6 +4531,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "faturas_do_cartao"
             referencedColumns: ["pagamento_id"]
+          },
+          {
+            foreignKeyName: "finance_review_queue_related_transaction_id_fkey"
+            columns: ["related_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "recebimentos_do_extrato"
+            referencedColumns: ["bank_transaction_id"]
           },
           {
             foreignKeyName: "finance_review_queue_suggested_client_id_fkey"
@@ -4158,6 +4620,7 @@ export type Database = {
           origin: string
           reasoning: string | null
           set_category: string | null
+          set_client_id: string | null
           set_dre_group: string | null
           set_supplier_id: string | null
           status: string
@@ -4179,6 +4642,7 @@ export type Database = {
           origin?: string
           reasoning?: string | null
           set_category?: string | null
+          set_client_id?: string | null
           set_dre_group?: string | null
           set_supplier_id?: string | null
           status?: string
@@ -4200,6 +4664,7 @@ export type Database = {
           origin?: string
           reasoning?: string | null
           set_category?: string | null
+          set_client_id?: string | null
           set_dre_group?: string | null
           set_supplier_id?: string | null
           status?: string
@@ -4207,6 +4672,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "finance_rules_set_client_id_fkey"
+            columns: ["set_client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "finance_rules_set_supplier_id_fkey"
             columns: ["set_supplier_id"]
@@ -4926,6 +5398,38 @@ export type Database = {
           },
         ]
       }
+      legacy_screen_hits: {
+        Row: {
+          hit_at: string
+          id: string
+          path: string
+          user_agent: string | null
+          user_id: string | null
+        }
+        Insert: {
+          hit_at?: string
+          id?: string
+          path: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          hit_at?: string
+          id?: string
+          path?: string
+          user_agent?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "legacy_screen_hits_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       maintenance_plans: {
         Row: {
           active: boolean
@@ -5047,6 +5551,7 @@ export type Database = {
           amount: number
           balance_amount: number | null
           bank_transaction_id: string | null
+          beneficiario_id: string | null
           cost_center_id: string | null
           created_at: string
           currency: string | null
@@ -5073,6 +5578,7 @@ export type Database = {
           amount: number
           balance_amount?: number | null
           bank_transaction_id?: string | null
+          beneficiario_id?: string | null
           cost_center_id?: string | null
           created_at?: string
           currency?: string | null
@@ -5099,6 +5605,7 @@ export type Database = {
           amount?: number
           balance_amount?: number | null
           bank_transaction_id?: string | null
+          beneficiario_id?: string | null
           cost_center_id?: string | null
           created_at?: string
           currency?: string | null
@@ -5149,6 +5656,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "faturas_do_cartao"
             referencedColumns: ["pagamento_id"]
+          },
+          {
+            foreignKeyName: "payables_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "recebimentos_do_extrato"
+            referencedColumns: ["bank_transaction_id"]
+          },
+          {
+            foreignKeyName: "payables_beneficiario_id_fkey"
+            columns: ["beneficiario_id"]
+            isOneToOne: false
+            referencedRelation: "payees"
+            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "payables_cost_center_id_fkey"
@@ -5238,6 +5759,7 @@ export type Database = {
           bank_branch: string | null
           bank_name: string | null
           commission_percentage: number | null
+          conta_corrente_desde: string | null
           created_at: string
           default_category: string | null
           document: string | null
@@ -5249,6 +5771,7 @@ export type Database = {
           phone: string | null
           pix_key: string | null
           pix_key_type: string | null
+          saldo_anterior: number
           updated_at: string
         }
         Insert: {
@@ -5259,6 +5782,7 @@ export type Database = {
           bank_branch?: string | null
           bank_name?: string | null
           commission_percentage?: number | null
+          conta_corrente_desde?: string | null
           created_at?: string
           default_category?: string | null
           document?: string | null
@@ -5270,6 +5794,7 @@ export type Database = {
           phone?: string | null
           pix_key?: string | null
           pix_key_type?: string | null
+          saldo_anterior?: number
           updated_at?: string
         }
         Update: {
@@ -5280,6 +5805,7 @@ export type Database = {
           bank_branch?: string | null
           bank_name?: string | null
           commission_percentage?: number | null
+          conta_corrente_desde?: string | null
           created_at?: string
           default_category?: string | null
           document?: string | null
@@ -5291,6 +5817,7 @@ export type Database = {
           phone?: string | null
           pix_key?: string | null
           pix_key_type?: string | null
+          saldo_anterior?: number
           updated_at?: string
         }
         Relationships: [
@@ -5400,6 +5927,41 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "payments_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions_situacao"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "extrato_a_tratar"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "faturas_do_cartao"
+            referencedColumns: ["pagamento_id"]
+          },
+          {
+            foreignKeyName: "payments_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "recebimentos_do_extrato"
+            referencedColumns: ["bank_transaction_id"]
+          },
+          {
+            foreignKeyName: "payments_payable_id_fkey"
+            columns: ["payable_id"]
+            isOneToOne: false
+            referencedRelation: "compras_parceladas_em_dobro"
+            referencedColumns: ["payable_id"]
+          },
+          {
             foreignKeyName: "payments_payable_id_fkey"
             columns: ["payable_id"]
             isOneToOne: false
@@ -5507,6 +6069,13 @@ export type Database = {
           work_profile_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "payroll_lines_payable_id_fkey"
+            columns: ["payable_id"]
+            isOneToOne: false
+            referencedRelation: "compras_parceladas_em_dobro"
+            referencedColumns: ["payable_id"]
+          },
           {
             foreignKeyName: "payroll_lines_payable_id_fkey"
             columns: ["payable_id"]
@@ -6212,19 +6781,19 @@ export type Database = {
       products_stock_backup_pre_v2: {
         Row: {
           backed_up_at: string | null
-          id: string | null
+          id: string
           reserved_quantity: number | null
           stock_quantity: number | null
         }
         Insert: {
           backed_up_at?: string | null
-          id?: string | null
+          id: string
           reserved_quantity?: number | null
           stock_quantity?: number | null
         }
         Update: {
           backed_up_at?: string | null
-          id?: string | null
+          id?: string
           reserved_quantity?: number | null
           stock_quantity?: number | null
         }
@@ -6346,6 +6915,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "purchase_orders_payable_id_fkey"
+            columns: ["payable_id"]
+            isOneToOne: false
+            referencedRelation: "compras_parceladas_em_dobro"
+            referencedColumns: ["payable_id"]
+          },
           {
             foreignKeyName: "purchase_orders_payable_id_fkey"
             columns: ["payable_id"]
@@ -6535,54 +7111,6 @@ export type Database = {
           },
         ]
       }
-      quote_request_supplier_terms: {
-        Row: {
-          created_at: string
-          discount: number
-          freight: number
-          notes: string | null
-          quote_request_id: string
-          supplier_id: string
-          updated_at: string
-          updated_by: string | null
-        }
-        Insert: {
-          created_at?: string
-          discount?: number
-          freight?: number
-          notes?: string | null
-          quote_request_id: string
-          supplier_id: string
-          updated_at?: string
-          updated_by?: string | null
-        }
-        Update: {
-          created_at?: string
-          discount?: number
-          freight?: number
-          notes?: string | null
-          quote_request_id?: string
-          supplier_id?: string
-          updated_at?: string
-          updated_by?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "quote_request_supplier_terms_quote_request_id_fkey"
-            columns: ["quote_request_id"]
-            isOneToOne: false
-            referencedRelation: "quote_requests"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "quote_request_supplier_terms_supplier_id_fkey"
-            columns: ["supplier_id"]
-            isOneToOne: false
-            referencedRelation: "suppliers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       quote_request_sends: {
         Row: {
           channel: string
@@ -6631,6 +7159,54 @@ export type Database = {
           },
           {
             foreignKeyName: "quote_request_sends_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_request_supplier_terms: {
+        Row: {
+          created_at: string
+          discount: number
+          freight: number
+          notes: string | null
+          quote_request_id: string
+          supplier_id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          discount?: number
+          freight?: number
+          notes?: string | null
+          quote_request_id: string
+          supplier_id: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          discount?: number
+          freight?: number
+          notes?: string | null
+          quote_request_id?: string
+          supplier_id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_request_supplier_terms_quote_request_id_fkey"
+            columns: ["quote_request_id"]
+            isOneToOne: false
+            referencedRelation: "quote_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_request_supplier_terms_supplier_id_fkey"
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
@@ -6889,6 +7465,13 @@ export type Database = {
             referencedColumns: ["pagamento_id"]
           },
           {
+            foreignKeyName: "receivables_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "recebimentos_do_extrato"
+            referencedColumns: ["bank_transaction_id"]
+          },
+          {
             foreignKeyName: "receivables_client_id_fkey"
             columns: ["client_id"]
             isOneToOne: false
@@ -7033,11 +7616,25 @@ export type Database = {
             referencedColumns: ["pagamento_id"]
           },
           {
+            foreignKeyName: "reconciliation_log_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "recebimentos_do_extrato"
+            referencedColumns: ["bank_transaction_id"]
+          },
+          {
             foreignKeyName: "reconciliation_log_finance_rule_id_fkey"
             columns: ["finance_rule_id"]
             isOneToOne: false
             referencedRelation: "finance_rules"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reconciliation_log_payable_id_fkey"
+            columns: ["payable_id"]
+            isOneToOne: false
+            referencedRelation: "compras_parceladas_em_dobro"
+            referencedColumns: ["payable_id"]
           },
           {
             foreignKeyName: "reconciliation_log_payable_id_fkey"
@@ -7105,7 +7702,7 @@ export type Database = {
           due_date: string | null
           expense_category: string | null
           fiscal_note_id: string | null
-          id: string | null
+          id: string
           issue_date: string | null
           linked_service_order_id: string | null
           notes: string | null
@@ -7131,7 +7728,7 @@ export type Database = {
           due_date?: string | null
           expense_category?: string | null
           fiscal_note_id?: string | null
-          id?: string | null
+          id: string
           issue_date?: string | null
           linked_service_order_id?: string | null
           notes?: string | null
@@ -7157,7 +7754,7 @@ export type Database = {
           due_date?: string | null
           expense_category?: string | null
           fiscal_note_id?: string | null
-          id?: string | null
+          id?: string
           issue_date?: string | null
           linked_service_order_id?: string | null
           notes?: string | null
@@ -7471,6 +8068,13 @@ export type Database = {
             foreignKeyName: "service_order_expenses_linked_payable_id_fkey"
             columns: ["linked_payable_id"]
             isOneToOne: false
+            referencedRelation: "compras_parceladas_em_dobro"
+            referencedColumns: ["payable_id"]
+          },
+          {
+            foreignKeyName: "service_order_expenses_linked_payable_id_fkey"
+            columns: ["linked_payable_id"]
+            isOneToOne: false
             referencedRelation: "payables"
             referencedColumns: ["id"]
           },
@@ -7770,15 +8374,14 @@ export type Database = {
       }
       service_order_services: {
         Row: {
-          field_status: string
-          field_status_note: string | null
-          technician_instructions: string | null
           billing_unit_snapshot: string
           created_at: string | null
           description_snapshot: string | null
           discount_amount: number
           discount_pct: number
           elapsed_minutes: number | null
+          field_status: string
+          field_status_note: string | null
           finished_at: string | null
           fiscal_verb: string | null
           id: string
@@ -7791,6 +8394,7 @@ export type Database = {
           service_system: string | null
           service_verb: string | null
           started_at: string | null
+          technician_instructions: string | null
           technician_user_id: string | null
           unit_price_snapshot: number
           updated_at: string | null
@@ -7799,15 +8403,14 @@ export type Database = {
           warranty_months: number | null
         }
         Insert: {
-          field_status?: string
-          field_status_note?: string | null
-          technician_instructions?: string | null
           billing_unit_snapshot?: string
           created_at?: string | null
           description_snapshot?: string | null
           discount_amount?: number
           discount_pct?: number
           elapsed_minutes?: number | null
+          field_status?: string
+          field_status_note?: string | null
           finished_at?: string | null
           fiscal_verb?: string | null
           id?: string
@@ -7820,6 +8423,7 @@ export type Database = {
           service_system?: string | null
           service_verb?: string | null
           started_at?: string | null
+          technician_instructions?: string | null
           technician_user_id?: string | null
           unit_price_snapshot?: number
           updated_at?: string | null
@@ -7828,15 +8432,14 @@ export type Database = {
           warranty_months?: number | null
         }
         Update: {
-          field_status?: string
-          field_status_note?: string | null
-          technician_instructions?: string | null
           billing_unit_snapshot?: string
           created_at?: string | null
           description_snapshot?: string | null
           discount_amount?: number
           discount_pct?: number
           elapsed_minutes?: number | null
+          field_status?: string
+          field_status_note?: string | null
           finished_at?: string | null
           fiscal_verb?: string | null
           id?: string
@@ -7849,6 +8452,7 @@ export type Database = {
           service_system?: string | null
           service_verb?: string | null
           started_at?: string | null
+          technician_instructions?: string | null
           technician_user_id?: string | null
           unit_price_snapshot?: number
           updated_at?: string | null
@@ -8291,8 +8895,6 @@ export type Database = {
       }
       service_orders: {
         Row: {
-          site_access: string | null
-          technician_instructions: string | null
           cancellation_reason: string | null
           cancelled_at: string | null
           card_fee_amount: number
@@ -8300,6 +8902,9 @@ export type Database = {
           card_installments: number | null
           check_in_at: string | null
           check_out_at: string | null
+          client_confirmation_requested_at: string | null
+          client_confirmed_at: string | null
+          client_confirmed_for: string | null
           client_id: string
           client_signature_url: string | null
           commission_amount: number | null
@@ -8362,12 +8967,14 @@ export type Database = {
           signed_at: string | null
           signed_by_name: string | null
           signed_document_hash: string | null
+          site_access: string | null
           solution_applied: string | null
           status: string
           subcontract_cost_total: number | null
           survey_id: string | null
           tax_amount: number | null
           technician_count_for_travel: number | null
+          technician_instructions: string | null
           technician_notes: string | null
           travel_cost_per_km: number | null
           travel_cost_total: number | null
@@ -8378,8 +8985,6 @@ export type Database = {
           vessel_id: string
         }
         Insert: {
-          site_access?: string | null
-          technician_instructions?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           card_fee_amount?: number
@@ -8387,6 +8992,9 @@ export type Database = {
           card_installments?: number | null
           check_in_at?: string | null
           check_out_at?: string | null
+          client_confirmation_requested_at?: string | null
+          client_confirmed_at?: string | null
+          client_confirmed_for?: string | null
           client_id: string
           client_signature_url?: string | null
           commission_amount?: number | null
@@ -8449,12 +9057,14 @@ export type Database = {
           signed_at?: string | null
           signed_by_name?: string | null
           signed_document_hash?: string | null
+          site_access?: string | null
           solution_applied?: string | null
           status?: string
           subcontract_cost_total?: number | null
           survey_id?: string | null
           tax_amount?: number | null
           technician_count_for_travel?: number | null
+          technician_instructions?: string | null
           technician_notes?: string | null
           travel_cost_per_km?: number | null
           travel_cost_total?: number | null
@@ -8465,8 +9075,6 @@ export type Database = {
           vessel_id: string
         }
         Update: {
-          site_access?: string | null
-          technician_instructions?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           card_fee_amount?: number
@@ -8474,6 +9082,9 @@ export type Database = {
           card_installments?: number | null
           check_in_at?: string | null
           check_out_at?: string | null
+          client_confirmation_requested_at?: string | null
+          client_confirmed_at?: string | null
+          client_confirmed_for?: string | null
           client_id?: string
           client_signature_url?: string | null
           commission_amount?: number | null
@@ -8536,12 +9147,14 @@ export type Database = {
           signed_at?: string | null
           signed_by_name?: string | null
           signed_document_hash?: string | null
+          site_access?: string | null
           solution_applied?: string | null
           status?: string
           subcontract_cost_total?: number | null
           survey_id?: string | null
           tax_amount?: number | null
           technician_count_for_travel?: number | null
+          technician_instructions?: string | null
           technician_notes?: string | null
           travel_cost_per_km?: number | null
           travel_cost_total?: number | null
@@ -9977,6 +10590,47 @@ export type Database = {
         }
         Relationships: []
       }
+      whatsapp_conexao_vigia: {
+        Row: {
+          avisado_em: string | null
+          desde: string
+          detalhe: string | null
+          estado: string
+          id: number
+          pedido_em: string | null
+          pedido_por: string | null
+          verificado_em: string
+        }
+        Insert: {
+          avisado_em?: string | null
+          desde?: string
+          detalhe?: string | null
+          estado: string
+          id?: number
+          pedido_em?: string | null
+          pedido_por?: string | null
+          verificado_em?: string
+        }
+        Update: {
+          avisado_em?: string | null
+          desde?: string
+          detalhe?: string | null
+          estado?: string
+          id?: number
+          pedido_em?: string | null
+          pedido_por?: string | null
+          verificado_em?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_conexao_vigia_pedido_por_fkey"
+            columns: ["pedido_por"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       whatsapp_conversation_assignments: {
         Row: {
           assigned_to: string | null
@@ -10390,10 +11044,38 @@ export type Database = {
           },
         ]
       }
+      whatsapp_send_idempotencia: {
+        Row: {
+          chave: string
+          concluido_em: string | null
+          contexto: string | null
+          criado_em: string
+          phone_normalized: string | null
+          provider_message_id: string | null
+        }
+        Insert: {
+          chave: string
+          concluido_em?: string | null
+          contexto?: string | null
+          criado_em?: string
+          phone_normalized?: string | null
+          provider_message_id?: string | null
+        }
+        Update: {
+          chave?: string
+          concluido_em?: string | null
+          contexto?: string | null
+          criado_em?: string
+          phone_normalized?: string | null
+          provider_message_id?: string | null
+        }
+        Relationships: []
+      }
       whatsapp_send_queue: {
         Row: {
           attempts: number
           created_at: string
+          dedupe_key: string | null
           failed_reason: string | null
           id: string
           max_attempts: number
@@ -10412,6 +11094,7 @@ export type Database = {
         Insert: {
           attempts?: number
           created_at?: string
+          dedupe_key?: string | null
           failed_reason?: string | null
           id?: string
           max_attempts?: number
@@ -10430,6 +11113,7 @@ export type Database = {
         Update: {
           attempts?: number
           created_at?: string
+          dedupe_key?: string | null
           failed_reason?: string | null
           id?: string
           max_attempts?: number
@@ -10620,14 +11304,78 @@ export type Database = {
           },
         ]
       }
+      work_shift_os: {
+        Row: {
+          created_at: string
+          service_order_id: string
+          shift_id: string
+        }
+        Insert: {
+          created_at?: string
+          service_order_id: string
+          shift_id: string
+        }
+        Update: {
+          created_at?: string
+          service_order_id?: string
+          shift_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_shift_os_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shift_os_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders_tecnico"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shift_os_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_labor_variance"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shift_os_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "v_service_order_margin"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_shift_os_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "vw_os_profitability"
+            referencedColumns: ["os_id"]
+          },
+          {
+            foreignKeyName: "work_shift_os_shift_id_fkey"
+            columns: ["shift_id"]
+            isOneToOne: false
+            referencedRelation: "work_shifts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_shifts: {
         Row: {
           aprovado_em: string | null
           aprovado_por: string | null
           created_at: string
           data: string
+          descontos: number
           duracao_minutos: number | null
+          extras: number
           fim: string | null
+          fracao: number | null
           id: string
           inicio: string | null
           intervalo_minutos: number
@@ -10638,6 +11386,8 @@ export type Database = {
           status: string
           tipo: string
           updated_at: string
+          valor_dia: number | null
+          valor_diaria: number | null
           work_profile_id: string
         }
         Insert: {
@@ -10645,8 +11395,11 @@ export type Database = {
           aprovado_por?: string | null
           created_at?: string
           data: string
+          descontos?: number
           duracao_minutos?: number | null
+          extras?: number
           fim?: string | null
+          fracao?: number | null
           id?: string
           inicio?: string | null
           intervalo_minutos?: number
@@ -10657,6 +11410,8 @@ export type Database = {
           status?: string
           tipo?: string
           updated_at?: string
+          valor_dia?: number | null
+          valor_diaria?: number | null
           work_profile_id: string
         }
         Update: {
@@ -10664,8 +11419,11 @@ export type Database = {
           aprovado_por?: string | null
           created_at?: string
           data?: string
+          descontos?: number
           duracao_minutos?: number | null
+          extras?: number
           fim?: string | null
+          fracao?: number | null
           id?: string
           inicio?: string | null
           intervalo_minutos?: number
@@ -10676,6 +11434,8 @@ export type Database = {
           status?: string
           tipo?: string
           updated_at?: string
+          valor_dia?: number | null
+          valor_diaria?: number | null
           work_profile_id?: string
         }
         Relationships: [
@@ -10955,11 +11715,27 @@ export type Database = {
           },
         ]
       }
+      compras_parceladas_em_dobro: {
+        Row: {
+          description: string | null
+          issue_date: string | null
+          lancado: number | null
+          loja: string | null
+          parcela_do_lancamento: number | null
+          parcelas: number | null
+          payable_id: string | null
+          payable_que_fica: string | null
+          transaction_date: string | null
+          valor_da_parcela: number | null
+        }
+        Relationships: []
+      }
       conciliacao_lancamentos: {
         Row: {
           amount: number | null
           bank_transaction_id: string | null
           categoria: string | null
+          compra_parcelada: boolean | null
           contraparte: string | null
           description: string | null
           diferenca: number | null
@@ -10970,8 +11746,22 @@ export type Database = {
           id: string | null
           issue_date: string | null
           lado: string | null
+          lancada_em_dobro: boolean | null
+          nasceu_do_extrato: boolean | null
+          parcelas: number | null
           situacao: string | null
           status: string | null
+        }
+        Relationships: []
+      }
+      conferencia_dos_pagamentos: {
+        Row: {
+          bank_transaction_id: string | null
+          calculado: number | null
+          descricao: string | null
+          gravado: number | null
+          problema: string | null
+          receivable_id: string | null
         }
         Relationships: []
       }
@@ -11107,6 +11897,30 @@ export type Database = {
         }
         Relationships: []
       }
+      recebimentos_do_extrato: {
+        Row: {
+          aplicado: number | null
+          bank_connection_id: string | null
+          bank_transaction_id: string | null
+          contas: number | null
+          data: string | null
+          dismissed_kind: string | null
+          documento: string | null
+          quem: string | null
+          receivable_ids: string[] | null
+          sobra: number | null
+          valor: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_transactions_bank_connection_id_fkey"
+            columns: ["bank_connection_id"]
+            isOneToOne: false
+            referencedRelation: "bank_connections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       service_order_parts_tecnico: {
         Row: {
           created_at: string | null
@@ -11235,13 +12049,12 @@ export type Database = {
       }
       service_order_services_tecnico: {
         Row: {
-          field_status: string | null
-          field_status_note: string | null
-          technician_instructions: string | null
           billing_unit_snapshot: string | null
           created_at: string | null
           description_snapshot: string | null
           elapsed_minutes: number | null
+          field_status: string | null
+          field_status_note: string | null
           finished_at: string | null
           fiscal_verb: string | null
           id: string | null
@@ -11253,6 +12066,7 @@ export type Database = {
           service_system: string | null
           service_verb: string | null
           started_at: string | null
+          technician_instructions: string | null
           technician_user_id: string | null
           updated_at: string | null
           warranty_days: number | null
@@ -11260,13 +12074,12 @@ export type Database = {
           warranty_months: number | null
         }
         Insert: {
-          field_status?: string | null
-          field_status_note?: string | null
-          technician_instructions?: string | null
           billing_unit_snapshot?: string | null
           created_at?: string | null
           description_snapshot?: string | null
           elapsed_minutes?: number | null
+          field_status?: string | null
+          field_status_note?: string | null
           finished_at?: string | null
           fiscal_verb?: string | null
           id?: string | null
@@ -11278,6 +12091,7 @@ export type Database = {
           service_system?: string | null
           service_verb?: string | null
           started_at?: string | null
+          technician_instructions?: string | null
           technician_user_id?: string | null
           updated_at?: string | null
           warranty_days?: number | null
@@ -11285,13 +12099,12 @@ export type Database = {
           warranty_months?: number | null
         }
         Update: {
-          field_status?: string | null
-          field_status_note?: string | null
-          technician_instructions?: string | null
           billing_unit_snapshot?: string | null
           created_at?: string | null
           description_snapshot?: string | null
           elapsed_minutes?: number | null
+          field_status?: string | null
+          field_status_note?: string | null
           finished_at?: string | null
           fiscal_verb?: string | null
           id?: string | null
@@ -11303,6 +12116,7 @@ export type Database = {
           service_system?: string | null
           service_verb?: string | null
           started_at?: string | null
+          technician_instructions?: string | null
           technician_user_id?: string | null
           updated_at?: string | null
           warranty_days?: number | null
@@ -11398,8 +12212,6 @@ export type Database = {
       }
       service_orders_tecnico: {
         Row: {
-          site_access: string | null
-          technician_instructions: string | null
           cancellation_reason: string | null
           cancelled_at: string | null
           check_in_at: string | null
@@ -11442,10 +12254,12 @@ export type Database = {
           signed_at: string | null
           signed_by_name: string | null
           signed_document_hash: string | null
+          site_access: string | null
           solution_applied: string | null
           status: string | null
           survey_id: string | null
           technician_count_for_travel: number | null
+          technician_instructions: string | null
           technician_notes: string | null
           travel_distance_km: number | null
           travel_hours: number | null
@@ -11454,8 +12268,6 @@ export type Database = {
           vessel_id: string | null
         }
         Insert: {
-          site_access?: string | null
-          technician_instructions?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           check_in_at?: string | null
@@ -11498,10 +12310,12 @@ export type Database = {
           signed_at?: string | null
           signed_by_name?: string | null
           signed_document_hash?: string | null
+          site_access?: string | null
           solution_applied?: string | null
           status?: string | null
           survey_id?: string | null
           technician_count_for_travel?: number | null
+          technician_instructions?: string | null
           technician_notes?: string | null
           travel_distance_km?: number | null
           travel_hours?: number | null
@@ -11510,8 +12324,6 @@ export type Database = {
           vessel_id?: string | null
         }
         Update: {
-          site_access?: string | null
-          technician_instructions?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           check_in_at?: string | null
@@ -11554,10 +12366,12 @@ export type Database = {
           signed_at?: string | null
           signed_by_name?: string | null
           signed_document_hash?: string | null
+          site_access?: string | null
           solution_applied?: string | null
           status?: string | null
           survey_id?: string | null
           technician_count_for_travel?: number | null
+          technician_instructions?: string | null
           technician_notes?: string | null
           travel_distance_km?: number | null
           travel_hours?: number | null
@@ -11644,55 +12458,45 @@ export type Database = {
       }
       v_custo_real_mao_de_obra_por_os: {
         Row: {
-          client_id: string | null
           custo_real_mao_de_obra: number | null
           dias_trabalhados: number | null
-          horas_apontadas: number | null
           pessoas: number | null
           primeiro_dia: string | null
           quem_trabalhou: string | null
           service_order_id: string | null
-          service_order_number: string | null
           ultimo_dia: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "service_orders_client_id_fkey"
-            columns: ["client_id"]
-            isOneToOne: false
-            referencedRelation: "clients"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "work_shifts_service_order_id_fkey"
+            foreignKeyName: "work_shift_os_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "work_shifts_service_order_id_fkey"
+            foreignKeyName: "work_shift_os_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "service_orders_tecnico"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "work_shifts_service_order_id_fkey"
+            foreignKeyName: "work_shift_os_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_labor_variance"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "work_shifts_service_order_id_fkey"
+            foreignKeyName: "work_shift_os_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "v_service_order_margin"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "work_shifts_service_order_id_fkey"
+            foreignKeyName: "work_shift_os_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
             referencedRelation: "vw_os_profitability"
@@ -11929,6 +12733,10 @@ export type Database = {
           created_at: string | null
           finished_at: string | null
           gross_profit: number | null
+          hours_sold: number | null
+          labor_cost_real: number | null
+          labor_days: number | null
+          labor_sold: number | null
           net_margin_percent: number | null
           net_profit: number | null
           operational_cost: number | null
@@ -11943,6 +12751,153 @@ export type Database = {
       }
     }
     Functions: {
+      _anotacoes_em_disputa: { Args: { p_anotacao: string }; Returns: string[] }
+      _anotacoes_gemeas_esperando: {
+        Args: { p_anotacao: string }
+        Returns: string[]
+      }
+      _anotacoes_repetidas_esperando: {
+        Args: { p_anotacao: string }
+        Returns: string[]
+      }
+      _aplicar_anotacao: {
+        Args: { p_anotacao: string; p_proposta: string }
+        Returns: undefined
+      }
+      _aplicar_pro_labore: {
+        Args: {
+          p_autor?: string
+          p_mes: string
+          p_pl: number
+          p_raiz: string
+          p_ret: number
+          p_salario: number
+        }
+        Returns: number
+      }
+      _autor_do_financeiro: { Args: { p_autor: string }; Returns: string }
+      _brl: { Args: { p_valor: number }; Returns: string }
+      _candidatas_da_anotacao: {
+        Args: { p_anotacao: string; p_incluir_anotadas?: boolean }
+        Returns: string[]
+      }
+      _confere_divisao_do_grupo: {
+        Args: { p_raiz: string }
+        Returns: undefined
+      }
+      _conta_caixa: { Args: never; Returns: string }
+      _conta_corrente_linhas: {
+        Args: { p_favorecido_id: string }
+        Returns: {
+          categoria: string
+          conta: string
+          criado_em: string
+          data: string
+          descontos: number
+          descricao: string
+          extras: number
+          fracao: number
+          id: string
+          jornada: string
+          observacao: string
+          os: Json
+          pago: number
+          tipo: string
+          trabalhado: number
+          valor_diaria: number
+        }[]
+      }
+      _dia_curto: { Args: { p: string }; Returns: string }
+      _divisao_de: { Args: { p_id: string }; Returns: Json }
+      _doc_normalizado: { Args: { p: string }; Returns: string }
+      _documento_contradiz: { Args: { a: string; b: string }; Returns: boolean }
+      _e_concordancia: { Args: { p_texto: string }; Returns: boolean }
+      _estado_do_saldo: {
+        Args: { p_dias: number; p_pago: number; p_saldo: number }
+        Returns: string
+      }
+      _hoje_brt: { Args: never; Returns: string }
+      _identidade_serve: {
+        Args: {
+          p_anotacao: string
+          p_cliente: string
+          p_favorecido: string
+          p_fornecedor: string
+          p_tx: string
+        }
+        Returns: boolean
+      }
+      _janela_tem_linha_anotada: {
+        Args: { p_anotacao: string }
+        Returns: boolean
+      }
+      _juntar_divisao: {
+        Args: { p_autor?: string; p_id: string; p_motivo: string }
+        Returns: string
+      }
+      _linha_do_caixa: {
+        Args: {
+          p_autor: string
+          p_data: string
+          p_descricao: string
+          p_fora_motivo: string
+          p_fora_tipo: string
+          p_quem: string
+          p_tipo: string
+          p_valor: number
+        }
+        Returns: string
+      }
+      _loja_da_parcela: {
+        Args: { p_descricao: string; p_quem: string }
+        Returns: string
+      }
+      _mesma_empresa: { Args: { p_a: string; p_b: string }; Returns: boolean }
+      _nasceu_do_extrato: {
+        Args: { p_id: string; p_tipo: string }
+        Returns: boolean
+      }
+      _nome_comparavel: { Args: { p: string }; Returns: string }
+      _nome_da_linha: {
+        Args: { p_descricao: string; p_nome: string }
+        Returns: string
+      }
+      _pagamentos_que_podem_ser_a_parcela: {
+        Args: {
+          p_emissao: string
+          p_fornecedor: string
+          p_valor: number
+          p_venc: string
+        }
+        Returns: Json
+      }
+      _proposta_da_anotacao: { Args: { p_anotacao: string }; Returns: string }
+      _quem_da_anotacao: {
+        Args: { p_anotacao: string }
+        Returns: {
+          q_cliente: string
+          q_diz_quem: boolean
+          q_doc: string
+          q_favorecido: string
+          q_fornecedor: string
+          q_nomes: string[]
+        }[]
+      }
+      _reacomodar_entrada: { Args: { p_tx: string }; Returns: boolean }
+      _recusa_se_mes_fechado: {
+        Args: { p_data: string; p_o_que: string }
+        Returns: undefined
+      }
+      _rotulo_jornada: { Args: { p_fracao: number }; Returns: string }
+      _salario_minimo_em: { Args: { p_data: string }; Returns: number }
+      _situacao_do_saldo: {
+        Args: { p_pago: number; p_status_atual: string; p_valor: number }
+        Returns: string
+      }
+      _socio_com_pro_labore_pelo_minimo: {
+        Args: { p_payee: string }
+        Returns: boolean
+      }
       ai_op_can_approve: {
         Args: { _action: string; _user_id: string }
         Returns: boolean
@@ -11951,6 +12906,60 @@ export type Database = {
         Args: { _pending_action_id: string; _user_id: string }
         Returns: boolean
       }
+      ajustar_ao_valor_do_banco: {
+        Args: {
+          p_autor?: string
+          p_id: string
+          p_motivo?: string
+          p_tipo: string
+        }
+        Returns: Json
+      }
+      ajustar_caixa: {
+        Args: { p_autor?: string; p_motivo: string; p_saldo_contado: number }
+        Returns: Json
+      }
+      ajustar_estoque: {
+        Args: {
+          p_autor?: string
+          p_motivo: string
+          p_nova_quantidade: number
+          p_produto: string
+        }
+        Returns: Json
+      }
+      anotar_transacao: {
+        Args: {
+          p_autor?: string
+          p_categoria?: string
+          p_cliente_id?: string
+          p_data?: string
+          p_descricao?: string
+          p_documento?: string
+          p_favorecido_id?: string
+          p_fornecedor_id?: string
+          p_nome?: string
+          p_os_id?: string
+          p_sentido: string
+          p_valor: number
+        }
+        Returns: Json
+      }
+      apagar_diaria: {
+        Args: { p_autor?: string; p_diaria_id: string }
+        Returns: Json
+      }
+      aplicar_anotacoes_pendentes: { Args: never; Returns: number }
+      aplicar_entrada_em_contas: {
+        Args: {
+          p_aplicacoes: Json
+          p_autor?: string
+          p_motivo?: string
+          p_transacao: string
+        }
+        Returns: Json
+      }
+      aplicar_reavaliacao_da_fila: { Args: { p_linhas: Json }; Returns: number }
       apply_service_material_kit: {
         Args: { p_service_id: string; p_service_order_id: string }
         Returns: Json
@@ -11994,6 +13003,43 @@ export type Database = {
           revenue: number
         }[]
       }
+      cadastrar_contraparte: {
+        Args: { p_autor?: string; p_dados: Json; p_tipo: string }
+        Returns: Json
+      }
+      cadastrar_freelancer: {
+        Args: {
+          p_autor?: string
+          p_chave_pix?: string
+          p_desde?: string
+          p_documento?: string
+          p_nome: string
+          p_observacao?: string
+          p_simular?: boolean
+          p_telefone?: string
+          p_tipo_chave?: string
+          p_valor_diaria: number
+        }
+        Returns: Json
+      }
+      calc_so_totals: {
+        Args: { so_id: string }
+        Returns: {
+          base: number
+          card_fee_amount: number
+          card_fee_percent: number
+          discount_amount: number
+          grand_total: number
+          labor_cost_total: number
+          labor_hours_total: number
+          operational_cost_total: number
+          parts_cost_total: number
+          subcontract_cost_total: number
+          subtotal: number
+          tax_amount: number
+          travel_billable: number
+        }[]
+      }
       cancel_followup_mission: {
         Args: { p_id: string; p_motivo?: string }
         Returns: boolean
@@ -12002,7 +13048,20 @@ export type Database = {
         Args: { p_reason: string; p_service_order_id: string }
         Returns: Json
       }
+      cancelar_lancamento: {
+        Args: {
+          p_autor?: string
+          p_id: string
+          p_motivo: string
+          p_tipo: string
+        }
+        Returns: Json
+      }
       categoria_e_sensivel: { Args: { nome: string }; Returns: boolean }
+      checklist_do_mes: {
+        Args: { p_ano: number; p_mes: number }
+        Returns: Json
+      }
       classify_free_text_materials: {
         Args: { p_textos: string[] }
         Returns: Json
@@ -12096,6 +13155,15 @@ export type Database = {
         }
         Returns: Json
       }
+      conciliar_lancamento: {
+        Args: {
+          p_autor?: string
+          p_id: string
+          p_tipo: string
+          p_transacao: string
+        }
+        Returns: Json
+      }
       confirm_nfe_import: {
         Args: {
           p_manual_mappings?: Json
@@ -12105,9 +13173,28 @@ export type Database = {
         }
         Returns: Json
       }
+      conta_corrente_freelancer: {
+        Args: {
+          p_ate?: string
+          p_autor?: string
+          p_de?: string
+          p_favorecido_id: string
+        }
+        Returns: Json
+      }
       convert_external_quote_to_so: {
         Args: { _quote_id: string }
         Returns: string
+      }
+      corrigir_lancamento: {
+        Args: {
+          p_autor?: string
+          p_campos: Json
+          p_id: string
+          p_motivo?: string
+          p_tipo: string
+        }
+        Returns: Json
       }
       count_purchase_shortages: { Args: { p_so_ids: string[] }; Returns: Json }
       create_followup_mission: {
@@ -12155,8 +13242,84 @@ export type Database = {
         }
         Returns: Json
       }
+      desfazer_aplicacao: {
+        Args: { p_autor?: string; p_motivo?: string; p_pagamento: string }
+        Returns: Json
+      }
+      desfazer_aprovacao: {
+        Args: {
+          p_autor?: string
+          p_id: string
+          p_motivo?: string
+          p_tipo: string
+        }
+        Returns: Json
+      }
+      dre_cobertura: {
+        Args: { p_ano: number }
+        Returns: {
+          despesa_lancada: number
+          entrada_banco: number
+          mes: number
+          receita_lancada: number
+          saida_banco: number
+        }[]
+      }
+      entrada_de_estoque: {
+        Args: {
+          p_autor?: string
+          p_custo?: number
+          p_notas?: string
+          p_produto: string
+          p_quantidade: number
+        }
+        Returns: Json
+      }
       estimate_from_cases: {
         Args: { p_min_casos?: number; p_service_id: string }
+        Returns: Json
+      }
+      estoque_saldos_divergentes: {
+        Args: never
+        Returns: {
+          diferenca: number
+          name: string
+          product_id: string
+          saldo: number
+          sku: string
+          soma: number
+        }[]
+      }
+      extrato_da_conta: {
+        Args: { p_ate: string; p_conexao: string; p_de: string }
+        Returns: {
+          categoria: string
+          contraparte: string
+          data: string
+          descricao: string
+          documento: string
+          id: string
+          lancamento_descricao: string
+          lancamento_id: string
+          lancamento_tipo: string
+          motivo_fora: string
+          pendente: boolean
+          proposta_id: string
+          quem: string
+          saldo_apos: number
+          situacao: string
+          tipo: string
+          tipo_fora: string
+          valor: number
+        }[]
+      }
+      fechar_mes: {
+        Args: {
+          p_ano: number
+          p_autor?: string
+          p_mes: number
+          p_motivo?: string
+        }
         Returns: Json
       }
       followup_registrar_resposta: {
@@ -12266,6 +13429,27 @@ export type Database = {
       is_admin_or_financial: { Args: { _user_id: string }; Returns: boolean }
       is_external_seller: { Args: { _user_id: string }; Returns: boolean }
       is_technician: { Args: { _user_id: string }; Returns: boolean }
+      lancar_no_caixa: {
+        Args: {
+          p_autor?: string
+          p_categoria?: string
+          p_cliente_id?: string
+          p_data?: string
+          p_descricao: string
+          p_favorecido_id?: string
+          p_fornecedor_id?: string
+          p_os_id?: string
+          p_pago_por?: string
+          p_sentido: string
+          p_socio_id?: string
+          p_valor: number
+        }
+        Returns: Json
+      }
+      ligar_parcela_ao_pagamento: {
+        Args: { p_pagamento: string; p_parcela: string }
+        Returns: Json
+      }
       lines_missing_system: {
         Args: { p_service_order_id: string }
         Returns: {
@@ -12278,6 +13462,10 @@ export type Database = {
           sistema_sugerido: string
           verbo_sugerido: string
         }[]
+      }
+      linhas_do_checklist: {
+        Args: { p_ano: number; p_chave: string; p_mes: number }
+        Returns: Json
       }
       log_app_error: {
         Args: {
@@ -12303,6 +13491,16 @@ export type Database = {
           product_id: string
         }[]
       }
+      mover_caixa: {
+        Args: {
+          p_autor?: string
+          p_data?: string
+          p_sentido: string
+          p_transacao_banco?: string
+          p_valor: number
+        }
+        Returns: Json
+      }
       next_document_number: { Args: never; Returns: number }
       next_fiscal_number: {
         Args: {
@@ -12316,6 +13514,10 @@ export type Database = {
       normalize_product_text: { Args: { t: string }; Returns: string }
       parse_answer_number: { Args: { p_answer: string }; Returns: number }
       parse_valor_ptbr: { Args: { p_texto: string }; Returns: number }
+      pedir_confirmacao_do_agendamento: {
+        Args: { p_autor?: string; p_os: string }
+        Returns: Json
+      }
       periodo_esta_fechado: { Args: { p_data: string }; Returns: boolean }
       pode_ver_folha: { Args: { _user_id: string }; Returns: boolean }
       preview_nfe_import: {
@@ -12341,35 +13543,8 @@ export type Database = {
         Returns: Json
       }
       prune_app_error_logs: { Args: { p_days?: number }; Returns: number }
+      raiz_do_cnpj_da_empresa: { Args: never; Returns: string }
       recalc_po_total: { Args: { p_po_id: string }; Returns: undefined }
-      dre_cobertura: {
-        Args: { p_ano: number }
-        Returns: {
-          mes: number
-          receita_lancada: number
-          entrada_banco: number
-          despesa_lancada: number
-          saida_banco: number
-        }[]
-      }
-      calc_so_totals: {
-        Args: { so_id: string }
-        Returns: {
-          labor_cost_total: number
-          parts_cost_total: number
-          labor_hours_total: number
-          operational_cost_total: number
-          travel_billable: number
-          subcontract_cost_total: number
-          discount_amount: number
-          tax_amount: number
-          subtotal: number
-          base: number
-          card_fee_percent: number
-          card_fee_amount: number
-          grand_total: number
-        }[]
-      }
       recalc_so_totals: { Args: { so_id: string }; Returns: undefined }
       receive_po: {
         Args: { p_due_days?: number; p_items: Json; p_po_id: string }
@@ -12457,6 +13632,33 @@ export type Database = {
         }
         Returns: Json
       }
+      registrar_confirmacao_do_cliente: {
+        Args: { p_body: string; p_message_id?: string; p_phone: string }
+        Returns: Json
+      }
+      registrar_diaria: {
+        Args: {
+          p_autor?: string
+          p_data: string
+          p_descontos?: number
+          p_extras?: number
+          p_favorecido_id: string
+          p_jornada: string
+          p_observacao?: string
+          p_origem?: string
+          p_os_ids?: string[]
+          p_valor_diaria?: number
+        }
+        Returns: Json
+      }
+      registrar_pagamento_da_receita_do_extrato: {
+        Args: { p_receivable_id: string }
+        Returns: string
+      }
+      registrar_sinal_pelo_extrato: {
+        Args: { p_autor?: string; p_orcamento: string; p_transacao: string }
+        Returns: Json
+      }
       related_materials: {
         Args: { p_min_juntos?: number; p_service_order_id: string }
         Returns: {
@@ -12505,7 +13707,12 @@ export type Database = {
           service_code: string
         }[]
       }
+      resumo_freelancers: {
+        Args: { p_ate?: string; p_autor?: string; p_de?: string }
+        Returns: Json
+      }
       revert_nfe_import: { Args: { p_note_id: string }; Returns: Json }
+      saldo_do_caixa: { Args: never; Returns: number }
       search_products_trgm: {
         Args: { _lim?: number; _term: string }
         Returns: {
@@ -12517,6 +13724,10 @@ export type Database = {
           sim: number
           sku: string
         }[]
+      }
+      separar_pro_labore: {
+        Args: { p_ate?: string; p_autor?: string; p_de?: string }
+        Returns: Json
       }
       service_system_label: { Args: { p_system: string }; Returns: string }
       set_fiscal_next_number: {
@@ -12577,6 +13788,13 @@ export type Database = {
           p_technician?: string
         }
         Returns: Json
+      }
+      soma_transacoes_conexao: {
+        Args: { p_ate: string; p_conexao: string }
+        Returns: {
+          quantidade: number
+          soma: number
+        }[]
       }
       stock_model_v2_on: { Args: never; Returns: boolean }
       suggest_nfe_service_orders: { Args: { p_note_id: string }; Returns: Json }

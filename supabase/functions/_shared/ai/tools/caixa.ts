@@ -13,6 +13,10 @@
 // acontecer de fato (resumirPedido, usado pelo agente).
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
 import { categoriaPeloTexto, type RegraFinanceira } from "../../banking/proposals.ts";
+import {
+  categoriaDaLinha, centavos, doMesmoRamoEmOutraCategoria, intervaloDoMes, linhaCasa, normal as normalG, resolverCategorias, somar,
+  type LancamentoLido, type LinhaSemLancamento,
+} from "../gastos.ts";
 
 const CARGOS_FINANCEIRO: Role[] = ["admin", "financial"];
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -519,13 +523,21 @@ export const caixaTools: ToolDef[] = [
   {
     name: "gastos_por_categoria",
     description:
-      "Quanto se gastou (ou recebeu) por categoria num mês, comparado ao mês anterior, com quem mais recebeu: 'quanto gastei com " +
-      "combustível em setembro?', 'onde foi o dinheiro este mês?'. Só leitura.",
+      "Quanto se gastou (ou recebeu) num mês ou período, com a resposta INTEIRA: 'quanto gastei com combustível em setembro?', " +
+      "'gasolina no mês passado', 'quanto foi no Posto Paulinho?', 'onde foi o dinheiro este mês?'. Em `categoria` passe o que a " +
+      "pessoa disse (nome de categoria ou palavra do dia a dia: gasolina, posto, almoço, peças); em `busca`, parte do nome do " +
+      "fornecedor ou estabelecimento. A resposta separa: `lancado` (o que já está nos lançamentos), `nao_lancado` (compras no " +
+      "cartão ainda pendentes e linhas do Extrato sem lançamento, reconhecidas pelo ramo do cartão e pelo texto) e " +
+      "`em_outra_categoria` (mesmo tipo de estabelecimento lançado em outra categoria, fora do total). Responda com as partes, " +
+      "não só o lançado. Se vier `error`, diga que não conseguiu consultar — NUNCA diga que não houve gasto. Só leitura.",
     input_schema: {
       type: "object",
       properties: {
-        categoria: { type: "string", description: "Parte do nome da categoria; omitir = todas." },
+        categoria: { type: "string", description: "O que a pessoa disse: 'combustível', 'gasolina', 'posto', 'peças', 'almoço'… Omitir = todas." },
+        busca: { type: "string", description: "Parte do nome do fornecedor, favorecido ou estabelecimento ('Posto Paulinho', 'Uber')." },
         mes: { type: "number" }, ano: { type: "number" },
+        de: { type: "string", description: "Início do período (AAAA-MM-DD), no lugar de mes/ano." },
+        ate: { type: "string", description: "Fim do período (AAAA-MM-DD)." },
         tipo: { type: "string", enum: ["despesa", "receita"], description: "Padrão: despesa." },
       },
     },
@@ -534,64 +546,213 @@ export const caixaTools: ToolDef[] = [
     async execute(args, ctx) {
       const b = semAcesso(ctx);
       if (b) return b;
-      const hoje = new Date();
-      const ano = Number(args.ano ?? hoje.getUTCFullYear());
-      const mes = Number(args.mes ?? hoje.getUTCMonth() + 1);
-      const intervalo = (a: number, m: number) => {
-        const ult = new Date(Date.UTC(a, m, 0)).getUTCDate();
-        return [`${a}-${String(m).padStart(2, "0")}-01`, `${a}-${String(m).padStart(2, "0")}-${ult}`];
-      };
-      const [aAnt, mAnt] = mes === 1 ? [ano - 1, 12] : [ano, mes - 1];
       const receita = args.tipo === "receita";
-      const tabela = receita ? "receivables" : "payables";
-      const colCat = receita ? "category" : "expense_category";
-      const ler = async (a: number, m: number) => {
-        const [de, ate] = intervalo(a, m);
-        const { data } = await ctx.sb.from(tabela)
-          .select(receita ? "amount, category, clients(name)" : "amount, expense_category, supplier_name, suppliers(name), payees(name)")
-          .neq("status", "cancelled").gte("issue_date", de).lte("issue_date", ate).limit(5000);
-        return (data ?? []) as any[];
-      };
-      const [atual, anterior, cats] = await Promise.all([
-        ler(ano, mes), ler(aAnt, mAnt),
-        ctx.sb.from("financial_categories").select("name, dre_group"),
+      const falhou = (o: string, e: { message?: string } | null) => ({
+        error: `Não consegui ler ${o} (${e?.message ?? "erro do banco"}). Diga ao dono que a consulta falhou — não que não houve ${receita ? "recebimento" : "gasto"}.`,
+      });
+
+      // ── Período ──────────────────────────────────────────────────────────────────────────
+      const hoje = new Date(Date.now() - 3 * 3600_000); // Brasília
+      let de: string, ate: string, rotulo: string;
+      let anterior: [string, string] | null = null;
+      if (args.de || args.ate) {
+        de = String(args.de ?? args.ate);
+        ate = String(args.ate ?? args.de);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(de) || !/^\d{4}-\d{2}-\d{2}$/.test(ate)) return { error: "Use de/ate no formato AAAA-MM-DD." };
+        rotulo = `${de.split("-").reverse().join("/")} a ${ate.split("-").reverse().join("/")}`;
+      } else {
+        const ano = Number(args.ano ?? hoje.getUTCFullYear());
+        const mes = Number(args.mes ?? hoje.getUTCMonth() + 1);
+        if (!(mes >= 1 && mes <= 12) || !(ano > 2000)) return { error: "Mês ou ano inválido." };
+        [de, ate] = intervaloDoMes(ano, mes);
+        rotulo = `${String(mes).padStart(2, "0")}/${ano}`;
+        anterior = mes === 1 ? intervaloDoMes(ano - 1, 12) : intervaloDoMes(ano, mes - 1);
+      }
+
+      // ── Plano de contas e regras de texto do dono ────────────────────────────────────────
+      const [catsRes, regrasRes] = await Promise.all([
+        ctx.sb.from("financial_categories").select("name, type, dre_group, active"),
+        ctx.admin.from("finance_rules")
+          .select("id, match_type, match_value, direction, set_category, set_dre_group, autonomy, status, min_amount, max_amount")
+          .eq("status", "active").eq("match_type", "text").limit(500),
       ]);
-      // Fatura do cartão, empréstimo, aplicação e transferência ficam FORA do resultado: a
-      // compra no cartão já foi contada quando aconteceu, e somar a fatura contava duas vezes
-      // (R$ 70,9 mil de fatura em 2026). Só entram se a pessoa perguntar por uma delas.
-      const foraDoResultado = new Set(((cats.data ?? []) as { name: string; dre_group: string | null }[])
-        .filter((c) => c.dre_group === "nao_operacional").map((c) => c.name));
-      const filtro = args.categoria ? normal(args.categoria) : null;
-      const passa = (r: any) => filtro ? normal(r[colCat]).includes(filtro) : !foraDoResultado.has(r[colCat]);
-      const fora = new Map<string, number>();
-      if (!filtro) {
-        for (const r of atual) if (foraDoResultado.has(r[colCat])) fora.set(r[colCat], (fora.get(r[colCat]) ?? 0) + Number(r.amount));
+      if (catsRes.error) return falhou("o plano de contas", catsRes.error);
+      const regras = (regrasRes.data ?? []) as unknown as RegraFinanceira[];
+      const cats = (catsRes.data ?? []) as { name: string; type: string; dre_group: string | null; active: boolean | null }[];
+      const doLado = cats.filter((c) => c.type === (receita ? "receivable" : "payable"));
+      // Fatura do cartão, empréstimo, aplicação e transferência ficam FORA do resultado: a compra
+      // no cartão já foi contada quando aconteceu (somar a fatura contava duas vezes). Só entram
+      // se a pessoa perguntar por uma delas.
+      const foraDoResultado = new Set(doLado.filter((c) => c.dre_group === "nao_operacional").map((c) => c.name));
+
+      let categorias: string[] | null = null;
+      let busca: string | null = args.busca ? String(args.busca) : null;
+      let comoEntendi = "todas as categorias";
+      if (args.categoria) {
+        const r = resolverCategorias(String(args.categoria), doLado.map((c) => c.name), regras);
+        if ("categorias" in r) {
+          categorias = r.categorias;
+          comoEntendi = `${r.categorias.join(", ")} (${r.como})`;
+        } else if (!busca) {
+          // Não é categoria: talvez seja um nome ("quanto gastei com o Roberto").
+          busca = String(args.categoria);
+          comoEntendi = `nenhuma categoria com "${args.categoria}"; procurei pelo nome no fornecedor, favorecido e descrição`
+            + (r.parecidas.length ? ` (categorias parecidas: ${r.parecidas.join(", ")})` : "");
+        } else {
+          return { error: `Nenhuma categoria com "${args.categoria}". Categorias de ${receita ? "receita" : "despesa"}: ${doLado.map((c) => c.name).join(", ")}.` };
+        }
       }
-      const somaPorCat = (rs: any[]) => {
-        const m = new Map<string, number>();
-        for (const r of rs.filter(passa)) m.set(r[colCat] ?? "(sem categoria)", (m.get(r[colCat] ?? "(sem categoria)") ?? 0) + Number(r.amount));
-        return m;
+      const passaCategoria = (c: string | null) =>
+        categorias ? categorias.some((x) => normalG(x) === normalG(c)) : !foraDoResultado.has(c ?? "");
+      const passaBusca = (texto: string) => !busca || normalG(texto).includes(normalG(busca));
+
+      // ── Lançamentos ──────────────────────────────────────────────────────────────────────
+      type Lido = LancamentoLido & { id: string };
+      const lerLancamentos = async (ini: string, fim: string): Promise<Lido[] | { error: string }> => {
+        const lidos: Lido[] = [];
+        for (let de0 = 0; de0 < 20000; de0 += 1000) {
+          const q = receita
+            ? ctx.sb.from("receivables")
+              .select("id, issue_date, amount, category, description, clients!receivables_client_id_fkey(name)")
+            : ctx.sb.from("payables")
+              .select("id, issue_date, amount, expense_category, description, supplier_name, suppliers!payables_supplier_id_fkey(name), payees!payables_payee_id_fkey(name), bank_transactions!payables_bank_transaction_id_fkey(payee_mcc, merchant_name)");
+          const { data, error } = await q.neq("status", "cancelled").gte("issue_date", ini).lte("issue_date", fim)
+            .order("id").range(de0, de0 + 999);
+          if (error) return falhou(receita ? "as contas a receber" : "as contas a pagar", error);
+          for (const r of (data ?? []) as any[]) {
+            const quem = receita ? r.clients?.name ?? null
+              : r.suppliers?.name ?? r.payees?.name ?? r.supplier_name ?? r.bank_transactions?.merchant_name ?? null;
+            lidos.push({
+              id: r.id, data: r.issue_date, valor: Number(r.amount), categoria: receita ? r.category : r.expense_category,
+              descricao: r.description ?? "", quem, mcc: receita ? null : r.bank_transactions?.payee_mcc ?? null,
+            });
+          }
+          if ((data ?? []).length < 1000) break;
+        }
+        return lidos;
       };
-      const agora = somaPorCat(atual);
-      const antes = somaPorCat(anterior);
-      const quem = new Map<string, number>();
-      for (const r of atual.filter(passa)) {
-        const n = receita ? r.clients?.name : (r.suppliers?.name ?? r.payees?.name ?? r.supplier_name);
-        if (n) quem.set(n, (quem.get(n) ?? 0) + Number(r.amount));
+      const atual = await lerLancamentos(de, ate);
+      if ("error" in atual) return atual;
+      const doPedido = atual.filter((l) => passaCategoria(l.categoria) && passaBusca(`${l.quem ?? ""} ${l.descricao}`));
+      const total = somar(doPedido, (l) => l.valor);
+
+      let totalAnterior: number | null = null;
+      if (anterior) {
+        const ant = await lerLancamentos(anterior[0], anterior[1]);
+        if ("error" in ant) return ant;
+        totalAnterior = somar(ant.filter((l) => passaCategoria(l.categoria) && passaBusca(`${l.quem ?? ""} ${l.descricao}`)), (l) => l.valor);
       }
-      const total = [...agora.values()].reduce((s, v) => s + v, 0);
-      const totalAntes = [...antes.values()].reduce((s, v) => s + v, 0);
+
+      const porCategoria = new Map<string, number>();
+      for (const l of doPedido) porCategoria.set(l.categoria ?? "(sem categoria)", (porCategoria.get(l.categoria ?? "(sem categoria)") ?? 0) + l.valor);
+      const quemMais = new Map<string, number>();
+      for (const l of doPedido) if (l.quem) quemMais.set(l.quem, (quemMais.get(l.quem) ?? 0) + l.valor);
+
+      // ── O que ainda não foi lançado (só despesa) ─────────────────────────────────────────
+      let naoLancado: Record<string, unknown> | undefined;
+      let emOutraCategoria: Record<string, unknown> | undefined;
+      if (!receita) {
+        const linhas: LinhaSemLancamento[] = [];
+        for (let de0 = 0; de0 < 20000; de0 += 1000) {
+          const { data, error } = await ctx.sb.from("bank_transactions")
+            .select("id, transaction_date, amount, merchant_name, counterparty_name, description, payee_mcc, tx_status")
+            .eq("transaction_type", "debit").is("dismissed_kind", null).eq("reconciled", false)
+            .gte("transaction_date", de).lte("transaction_date", ate).order("id").range(de0, de0 + 999);
+          if (error) return falhou("o extrato", error);
+          for (const t of (data ?? []) as any[]) {
+            linhas.push({
+              id: t.id, data: t.transaction_date, valor: Math.abs(Number(t.amount)),
+              quem: t.merchant_name ?? t.counterparty_name ?? t.description ?? "", mcc: t.payee_mcc ?? null,
+              pendente: String(t.tx_status ?? "").toUpperCase() === "PENDING", categoriaSugerida: null,
+            });
+          }
+          if ((data ?? []).length < 1000) break;
+        }
+        // Linha já lançada (conta a pagar ligada) ou transferência entre contas não entra.
+        const ids = linhas.map((l) => l.id);
+        const lancadas = new Set<string>();
+        const transferencias = new Set<string>();
+        const sugestao = new Map<string, string>();
+        for (let i = 0; i < ids.length; i += 200) {
+          const fatia = ids.slice(i, i + 200);
+          const [pg, fila] = await Promise.all([
+            ctx.sb.from("payables").select("bank_transaction_id").in("bank_transaction_id", fatia).neq("status", "cancelled"),
+            ctx.sb.from("finance_review_queue").select("bank_transaction_id, kind, suggested_category").in("bank_transaction_id", fatia).eq("status", "pending"),
+          ]);
+          if (pg.error) return falhou("as contas a pagar ligadas ao extrato", pg.error);
+          if (fila.error) return falhou("a fila do Extrato", fila.error);
+          for (const p of (pg.data ?? []) as any[]) lancadas.add(p.bank_transaction_id);
+          for (const q of (fila.data ?? []) as any[]) {
+            if (q.kind === "internal_transfer") transferencias.add(q.bank_transaction_id);
+            if (q.suggested_category) sugestao.set(q.bank_transaction_id, q.suggested_category);
+          }
+        }
+        // A mesma compra pendente que o banco depois fechou e já foi lançada: não conta de novo.
+        const jaLancadas = atual.map((l) => ({ k: `${normalG(l.quem)}|${centavos(l.valor)}`, d: Date.parse(l.data) }));
+        const repetida = (l: LinhaSemLancamento) => l.pendente && jaLancadas.some((x) =>
+          x.k === `${normalG(l.quem)}|${centavos(l.valor)}` && Math.abs(x.d - Date.parse(l.data)) <= 5 * 86_400_000);
+        const semLancamento = linhas
+          .filter((l) => !lancadas.has(l.id) && !transferencias.has(l.id) && !repetida(l))
+          .map((l) => ({ ...l, categoriaSugerida: sugestao.get(l.id) ?? null }))
+          .filter((l) => {
+            if (!linhaCasa(l, categorias, busca, regras)) return false;
+            if (categorias) return true;
+            const c = categoriaDaLinha(l, regras);
+            return !c || !foraDoResultado.has(c.categoria);
+          });
+        if (semLancamento.length) {
+          naoLancado = {
+            total: somar(semLancamento, (l) => l.valor),
+            quantidade: semLancamento.length,
+            pendentes_no_cartao: semLancamento.filter((l) => l.pendente).length,
+            itens: [...semLancamento].sort((a, b) => b.valor - a.valor).slice(0, 15).map((l) => {
+              const c = categoriaDaLinha(l, regras);
+              return {
+                data: l.data, quem: l.quem, valor: l.valor,
+                situacao: l.pendente ? "compra pendente no cartão (o banco ainda não fechou)"
+                  : sugestao.has(l.id) ? "na fila do Extrato" : "no extrato, sem lançamento",
+                categoria_indicada: c ? `${c.categoria} (${c.por})` : null,
+              };
+            }),
+          };
+        }
+        if (categorias) {
+          const outros = atual.filter((l) => doMesmoRamoEmOutraCategoria(l, categorias!) && passaBusca(`${l.quem ?? ""} ${l.descricao}`));
+          if (outros.length) {
+            emOutraCategoria = {
+              total: somar(outros, (l) => l.valor),
+              itens: outros.slice(0, 10).map((l) => ({ data: l.data, quem: l.quem ?? l.descricao, valor: l.valor, lancado_como: l.categoria })),
+              observacao: "Mesmo tipo de estabelecimento (pelo ramo do cartão), mas lançado em outra categoria: não entra no total. Pode ser certo (ex.: lanche no posto) ou um lançamento a corrigir.",
+            };
+          }
+        }
+      }
+
+      const totalNaoLancado = Number((naoLancado as { total?: number } | undefined)?.total ?? 0);
+      const fora = !categorias ? somar(atual.filter((l) => foraDoResultado.has(l.categoria ?? "")), (l) => l.valor) : 0;
       return {
-        mes: `${String(mes).padStart(2, "0")}/${ano}`,
-        total, total_mes_anterior: totalAntes,
-        variacao_pct: totalAntes > 0 ? Math.round(((total - totalAntes) / totalAntes) * 100) : null,
-        por_categoria: [...agora.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)
-          .map(([categoria, valor]) => ({ categoria, valor, mes_anterior: antes.get(categoria) ?? 0 })),
-        quem_mais_recebeu: [...quem.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([nome, valor]) => ({ nome, valor })),
-        fora_do_resultado: [...fora.entries()].map(([categoria, valor]) => ({ categoria, valor })),
-        observacao: fora.size
-          ? "O total não inclui o que fica fora do resultado (pagamento de fatura, empréstimo, aplicação, transferência entre contas): a compra no cartão já foi contada quando aconteceu."
-          : undefined,
+        periodo: rotulo,
+        tipo: receita ? "receita" : "despesa",
+        como_entendi: comoEntendi + (busca && args.busca ? `; nome contém "${busca}"` : ""),
+        lancado: {
+          total,
+          quantidade: doPedido.length,
+          por_categoria: [...porCategoria.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)
+            .map(([categoria, valor]) => ({ categoria, valor: centavos(valor) })),
+          itens: [...doPedido].sort((a, b) => b.valor - a.valor).slice(0, 12)
+            .map((l) => ({ data: l.data, quem: l.quem ?? l.descricao, valor: l.valor, categoria: l.categoria })),
+        },
+        ...(naoLancado ? { nao_lancado: naoLancado, total_com_nao_lancado: centavos(total + totalNaoLancado) } : {}),
+        ...(emOutraCategoria ? { em_outra_categoria: emOutraCategoria } : {}),
+        ...(totalAnterior != null ? {
+          mes_anterior_lancado: totalAnterior,
+          variacao_pct: totalAnterior > 0 ? Math.round(((total - totalAnterior) / totalAnterior) * 100) : null,
+        } : {}),
+        quem_mais_recebeu: [...quemMais.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([nome, valor]) => ({ nome, valor: centavos(valor) })),
+        ...(fora > 0 ? {
+          fora_do_resultado: fora,
+          observacao: "O total não inclui o que fica fora do resultado (pagamento de fatura, empréstimo, aplicação, transferência entre contas): a compra no cartão já foi contada quando aconteceu.",
+        } : {}),
       };
     },
   },

@@ -42,8 +42,16 @@ function arquivosTs(dir: string, achados: string[] = []): string[] {
  * que motivou este teste — sair de src/ não pode tirá-la da vigilância.
  */
 const PDF_COMPARTILHADO = join(process.cwd(), 'supabase', 'functions', '_shared', 'pdf');
+/**
+ * Todas as funções do servidor, não só o PDF (02/10/2026): a ferramenta do assistente
+ * gastos_por_categoria pedia `payees(name)` de `payables`, que tem DUAS chaves para payees
+ * (payee_id e beneficiario_id). O PostgREST recusava a consulta, a ferramenta engolia o erro e
+ * o assistente respondeu ao dono "não há nenhuma despesa em setembro". Fora da varredura,
+ * ninguém via.
+ */
+const FUNCOES = join(process.cwd(), 'supabase', 'functions');
 function arquivosVarridos(): string[] {
-  return [...arquivosTs(RAIZ), ...arquivosTs(PDF_COMPARTILHADO).filter((f) => !/_test\.ts$/.test(f))];
+  return [...arquivosTs(RAIZ), ...arquivosTs(FUNCOES).filter((f) => !/_test\.ts$/.test(f))];
 }
 
 /**
@@ -208,7 +216,51 @@ describe('colunas usadas em embed do PostgREST existem no banco', () => {
 
     expect(problemas, problemas.join('\n')).toEqual([]);
   });
+
+  // As colunas do PRIMEIRO nível também (02/10/2026): o teste de cima só olhava dentro dos
+  // embeds. Coluna errada na tabela principal recusa a consulta do mesmo jeito — e, numa
+  // ferramenta do assistente que engole o erro, vira "não há nada" dito como fato.
+  it('nenhum .select() cita coluna inexistente na tabela do .from()', () => {
+    const problemas: string[] = [];
+    // Exceções conhecidas, cada uma com o motivo. Não é para crescer: conserte a consulta.
+    const EXCECOES = new Set([
+      // Manutenção de 2026 (conserto de acentos importados errado): nada a chama, e os nomes de
+      // coluna são de um esquema antigo. Consertar antes de rodar de novo (02/10/2026).
+      join('supabase', 'functions', 'fix-db-encoding', 'index.ts'),
+    ]);
+    for (const arquivo of arquivosVarridos()) {
+      if ([...EXCECOES].some((e) => arquivo.endsWith(e))) continue;
+      const src = readFileSync(arquivo, 'utf8');
+      for (const { raiz, literais } of chamadasDeSelect(src, false)) {
+        const conhecidas = raiz ? tabelas.get(raiz) : undefined;
+        if (!conhecidas) continue;
+        for (const select of literais) {
+          if (select.includes('${')) continue;  // montado em tempo de execução
+          for (const col of colunasDoTopo(select)) {
+            if (!conhecidas.has(col)) {
+              problemas.push(`${arquivo.replace(process.cwd(), '')}: ${raiz}.${col} — coluna não existe`);
+            }
+          }
+        }
+      }
+    }
+    expect(problemas, problemas.join('\n')).toEqual([]);
+  });
 });
+
+/** As colunas simples do primeiro nível de um select (sem embeds, aliases, casts nem `*`). */
+function colunasDoTopo(select: string): string[] {
+  let nivel = 0;
+  let topo = '';
+  for (const ch of select) {
+    if (ch === '(') { nivel++; if (nivel === 1) topo += '('; continue; }
+    if (ch === ')') { nivel--; continue; }
+    if (nivel === 0) topo += ch;
+  }
+  return topo.split(',')
+    .map((c) => c.trim())
+    .filter((c) => c && !c.includes('(') && /^\w+$/.test(c));
+}
 
 /**
  * A segunda metade do mesmo estrago.
@@ -235,20 +287,31 @@ describe('embeds entre tabelas com mais de uma chave estrangeira', () => {
 
     for (const arquivo of arquivosVarridos()) {
       const src = readFileSync(arquivo, 'utf8');
-      for (const m of src.matchAll(/\.from\(\s*['"](\w+)['"]\s*\)([\s\S]{0,400}?)\.select\(\s*[`'"]([\s\S]*?)[`'"]\s*[,)]/g)) {
-        const raiz = m[1];
-        const select = m[3];
-        for (const { tabela, pai } of embedsDe(select, raiz)) {
-          const par = [pai, tabela].sort().join('|');
-          if ((relacoes.get(par) ?? 0) <= 1) continue;
-          // O hint vem colado no nome: `tabela!nome_da_fk(...)`.
-          const temHint = new RegExp(`${tabela}\\s*!\\s*\\w+\\s*\\(`).test(select);
-          if (!temHint) {
-            problemas.push(
-              `${arquivo.replace(process.cwd(), '')}: ${pai} → ${tabela}(…) sem ` +
-              '`!nome_da_fk` — há mais de uma chave entre as duas tabelas, o PostgREST ' +
-              'recusa a query inteira com PGRST201',
-            );
+      for (const { raiz, literais } of chamadasDeSelect(src)) {
+        for (const select of literais) {
+          for (const { tabela, pai } of embedsDe(select, raiz ?? '')) {
+            // O hint vem colado no nome: `tabela!nome_da_fk(...)`.
+            const temHint = new RegExp(`${tabela}\\s*!\\s*\\w+\\s*\\(`).test(select);
+            // Tabela dinâmica (`.from(tabela)`): não dá para saber o par, então todo embed
+            // do primeiro nível diz a chave — foi esse o formato de gastos_por_categoria.
+            if (!pai) {
+              if (raiz === null && !temHint) {
+                problemas.push(
+                  `${arquivo.replace(process.cwd(), '')}: .from(variável) → ${tabela}(…) sem ` +
+                  '`!nome_da_fk` — com a tabela numa variável, diga a chave em todo embed',
+                );
+              }
+              continue;
+            }
+            const par = [pai, tabela].sort().join('|');
+            if ((relacoes.get(par) ?? 0) <= 1) continue;
+            if (!temHint) {
+              problemas.push(
+                `${arquivo.replace(process.cwd(), '')}: ${pai} → ${tabela}(…) sem ` +
+                '`!nome_da_fk` — há mais de uma chave entre as duas tabelas, o PostgREST ' +
+                'recusa a query inteira com PGRST201',
+              );
+            }
           }
         }
       }
@@ -256,4 +319,66 @@ describe('embeds entre tabelas com mais de uma chave estrangeira', () => {
 
     expect(problemas, problemas.join('\n')).toEqual([]);
   });
+
+  it('pega o formato que derrubou gastos_por_categoria (02/10/2026)', () => {
+    const codigo = `const { data } = await ctx.sb.from(tabela)
+      .select(receita ? "amount, category, clients(name)" : "amount, expense_category, suppliers(name), payees(name)")
+      .neq("status", "cancelled");`;
+    const [chamada] = chamadasDeSelect(codigo);
+    expect(chamada.raiz).toBeNull();
+    expect(chamada.literais).toHaveLength(2);
+    expect(embedsDe(chamada.literais[1], '').map((e) => e.tabela)).toEqual(['suppliers', 'payees']);
+    // E o par em si é ambíguo nos tipos do banco: payee_id e beneficiario_id.
+    expect(relacoes.get(['payables', 'payees'].sort().join('|'))).toBeGreaterThan(1);
+  });
 });
+
+/**
+ * Cada `.select(...)` do arquivo com a tabela do `.from()` que vem antes (null quando a tabela
+ * está numa variável) e TODOS os textos entre os parênteses — inclusive os dois lados de um
+ * `cond ? "a" : "b"`, que a leitura antiga (só o primeiro literal) não via.
+ */
+function chamadasDeSelect(fonte: string, soComEmbed = true): Array<{ raiz: string | null; literais: string[] }> {
+  const src = fonte.replace(/\r\n/g, '\n');
+  const achados: Array<{ raiz: string | null; literais: string[] }> = [];
+  for (const m of src.matchAll(/\.select\(/g)) {
+    let nivel = 1, i = m.index! + m[0].length;
+    const inicio = i;
+    let aspas: string | null = null;
+    while (i < src.length && nivel > 0) {
+      const ch = src[i];
+      if (aspas) {
+        if (ch === '\\') i++;
+        else if (ch === aspas) aspas = null;
+      } else if (ch === '"' || ch === "'" || ch === '`') aspas = ch;
+      else if (ch === '(') nivel++;
+      else if (ch === ')') nivel--;
+      i++;
+    }
+    // Só o primeiro argumento: o segundo é `{ count: 'exact', head: true }`, não coluna.
+    let args = src.slice(inicio, i - 1);
+    {
+      let prof = 0; let q: string | null = null;
+      for (let k = 0; k < args.length; k++) {
+        const ch = args[k];
+        if (q) { if (ch === '\\') k++; else if (ch === q) q = null; continue; }
+        if (ch === '"' || ch === "'" || ch === '`') q = ch;
+        else if (ch === '(' || ch === '{' || ch === '[') prof++;
+        else if (ch === ')' || ch === '}' || ch === ']') prof--;
+        else if (ch === ',' && prof === 0) { args = args.slice(0, k); break; }
+      }
+    }
+    const literais = [...args.matchAll(/`([^`]*)`|"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'/g)]
+      .map((l) => l[1] ?? l[2] ?? l[3] ?? '')
+      .filter((l) => !soComEmbed || /\w\s*(?:!\s*\w+\s*)?\(/.test(l));   // só o que tem embed
+    if (literais.length === 0) continue;
+    // O .from() mais próximo antes do .select(), na mesma expressão (até 400 caracteres).
+    const antes = src.slice(Math.max(0, m.index! - 400), m.index!);
+    // `.from('x')`, `.from(tabela)` e `(supabase.from as any)('view_fora_dos_tipos')`.
+    const froms = [...antes.matchAll(/\.from(?:\s+as\s+\w+\s*\))?\(\s*(?:['"](\w+)['"]|([A-Za-z_$][\w$.]*))[^)]*\)/g)];
+    const ultimo = froms[froms.length - 1];
+    if (!ultimo) continue;
+    achados.push({ raiz: ultimo[1] ?? null, literais });
+  }
+  return achados;
+}
