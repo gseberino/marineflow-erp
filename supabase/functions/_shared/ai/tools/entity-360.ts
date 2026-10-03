@@ -104,11 +104,14 @@ export const entity360Tools: ToolDef[] = [
       const { sb } = ctx;
       const financeiroOk = podeVerFinanceiro(ctx);
 
-      const { data: cli } = await sb
+      // Leituras que decidem a resposta lançam quando falham (o assistente diz que a consulta
+      // falhou); engolidas, viravam "cliente não encontrado", "nenhuma OS" ou "sem dívidas" (02/10/2026).
+      const { data: cli, error: cliErr } = await sb
         .from("clients")
         .select("id, name, type, cpf_cnpj, phone, whatsapp, email, city, state, notes, active, created_at")
         .eq("id", args.client_id)
         .maybeSingle();
+      if (cliErr) throw cliErr;
       if (!cli) return { error: "Cliente não encontrado." };
 
       // Ativos + equipamentos (o "o quê" para sugerir serviço).
@@ -120,12 +123,13 @@ export const entity360Tools: ToolDef[] = [
         .limit(TETO);
 
       // Orçamentos abertos e OS recentes — o que está em jogo agora.
-      const { data: oss } = await sb
+      const { data: oss, error: ossErr } = await sb
         .from("service_orders")
         .select("id, service_order_number, status, quote_status, grand_total, created_at, updated_at, scheduled_start_at")
         .eq("client_id", cli.id)
         .order("created_at", { ascending: false })
         .limit(20);
+      if (ossErr) throw ossErr;
       const todas = (oss as any[]) || [];
       const orcamentosAbertos = todas
         .filter((o) => o.status === "draft" && ["sent", "awaiting_approval", "awaiting_deposit"].includes(o.quote_status || ""))
@@ -144,11 +148,13 @@ export const entity360Tools: ToolDef[] = [
       let financeiro: Record<string, unknown> | null = null;
       if (financeiroOk) {
         const hoje = new Date().toISOString().slice(0, 10);
-        const { data: recs } = await sb
+        // 'overdue' também está em aberto (o list_overdue_receivables já contava; aqui faltava).
+        const { data: recs, error: recsErr } = await sb
           .from("receivables")
           .select("amount, balance_amount, due_date, status")
           .eq("client_id", cli.id)
-          .in("status", ["pending", "partially_paid"]);
+          .in("status", ["pending", "overdue", "partially_paid"]);
+        if (recsErr) throw recsErr;
         let aberto = 0, vencido = 0;
         for (const r of (recs as any[]) || []) {
           const v = Number(r.balance_amount ?? r.amount) || 0;
@@ -238,11 +244,12 @@ export const entity360Tools: ToolDef[] = [
     roles: ["admin", "financial", "seller", "external_seller"],
     async execute(args, ctx) {
       const { sb } = ctx;
-      const { data: sup } = await sb
+      const { data: sup, error: supErr } = await sb
         .from("suppliers")
         .select("id, name, trade_name, cnpj_cpf, contact_name, phone, email, city, state, payment_terms, active, notes")
         .eq("id", args.supplier_id)
         .maybeSingle();
+      if (supErr) throw supErr;
       if (!sup) return { error: "Fornecedor não encontrado." };
 
       // O que ele fornece (com preço da última compra).
@@ -268,13 +275,20 @@ export const entity360Tools: ToolDef[] = [
       const totalResp = ((resps as any[]) || []).length;
       const ganhas = ((resps as any[]) || []).filter((r) => r.confirmed).length;
 
-      const { data: contas } = await sb
+      // Quanto se deve a ele: todas as contas em aberto (o total), a lista só com as primeiras.
+      // Conta cancelada guarda o saldo antigo — sem tirar paga e cancelada, ela aparecia como
+      // dívida; e a falha da leitura virava "nenhuma conta a pagar" (02/10/2026).
+      const { data: contasTodas, error: contasErr } = await sb
         .from("payables")
         .select("description, amount, balance_amount, due_date, status")
         .eq("supplier_id", sup.id)
         .gt("balance_amount", 0)
+        .not("status", "in", "(paid,cancelled)")
         .order("due_date", { ascending: true })
-        .limit(TETO);
+        .limit(500);
+      if (contasErr) throw contasErr;
+      const contas = ((contasTodas as any[]) || []).slice(0, TETO);
+      const totalDevido = r2(((contasTodas as any[]) || []).reduce((s, c) => s + (Number(c.balance_amount ?? c.amount) || 0), 0));
 
       const chave = chaveTelefone(sup.phone);
       let mensagens: unknown[] = [];
@@ -324,7 +338,9 @@ export const entity360Tools: ToolDef[] = [
           vezes_escolhido: ganhas,
           aproveitamento_pct: totalResp > 0 ? Math.round((ganhas / totalResp) * 100) : null,
         },
-        contas_a_pagar_em_aberto: ((contas as any[]) || []).map((c) => ({
+        total_devido_a_ele: totalDevido,
+        quantidade_de_contas_em_aberto: ((contasTodas as any[]) || []).length,
+        contas_a_pagar_em_aberto: contas.map((c) => ({
           descricao: c.description, saldo: r2(Number(c.balance_amount ?? c.amount) || 0), vencimento: c.due_date, status: c.status,
         })),
         conversa_recente: mensagens,

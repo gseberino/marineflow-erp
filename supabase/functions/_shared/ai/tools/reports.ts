@@ -3,7 +3,7 @@ import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.
 export const reportTools: ToolDef[] = [
   {
     name: "get_financial_dre",
-    description: "Retorna o DRE (Demonstrativo de Resultados) de um período específico.",
+    description: "DRE por CENTRO DE CUSTO e pela data de VENCIMENTO de um mês. Para 'como fechou o mês?', 'estamos no lucro?', use resultado_do_periodo (por categoria e data do lançamento, o mesmo número da tela).",
     input_schema: {
       type: "object",
       properties: { year: { type: "number" }, month: { type: "number" } },
@@ -22,9 +22,12 @@ export const reportTools: ToolDef[] = [
       const start = new Date(year, month - 1, 1).toISOString();
       const end = new Date(year, month, 0, 23, 59, 59).toISOString();
 
-      // Cancelados não são receita nem despesa.
-      const { data: rec } = await admin.from("receivables").select("amount, cost_centers(name, type)").neq("status", "cancelled").gte("due_date", start).lte("due_date", end);
-      const { data: pay } = await admin.from("payables").select("amount, cost_centers(name, type)").neq("status", "cancelled").gte("due_date", start).lte("due_date", end);
+      // Cancelados não são receita nem despesa. Leitura que falha lança (o assistente diz que a
+      // consulta falhou): engolida, virava "receita 0 / despesa 0" e um lucro falso (02/10/2026).
+      const { data: rec, error: recErr } = await admin.from("receivables").select("amount, cost_centers(name, type)").neq("status", "cancelled").gte("due_date", start).lte("due_date", end);
+      if (recErr) throw recErr;
+      const { data: pay, error: payErr } = await admin.from("payables").select("amount, cost_centers(name, type)").neq("status", "cancelled").gte("due_date", start).lte("due_date", end);
+      if (payErr) throw payErr;
 
       const summary: Record<string, number> = {};
       let totalRevenue = 0;

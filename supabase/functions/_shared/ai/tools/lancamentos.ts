@@ -55,8 +55,11 @@ export function termoDeBusca(texto: unknown): string | null {
   return limpo.length >= 2 ? limpo : null;
 }
 
+// Leitura que falha LANÇA (o executor devolve { error } e o assistente diz que a consulta
+// falhou). Engolir o erro virava "não encontrei" dito como fato — o defeito de 02/10/2026.
 async function idsPorNome(ctx: ToolCtx, tabela: string, termo: string): Promise<string[]> {
-  const { data } = await ctx.sb.from(tabela).select("id").ilike("name", `%${termo}%`).limit(50);
+  const { data, error } = await ctx.sb.from(tabela).select("id").ilike("name", `%${termo}%`).limit(50);
+  if (error) throw error;
   return ((data ?? []) as { id: string }[]).map((r) => r.id);
 }
 
@@ -89,11 +92,13 @@ async function lerPixDivididos(ctx: ToolCtx): Promise<Map<string, PixDividido>> 
   const campos = "id, divisao_id, amount, expense_category";
   const { data: partes, error } = await ctx.sb.from("payables").select(campos)
     .not("divisao_id", "is", null).neq("status", "cancelled").limit(1000);
-  if (error || !partes?.length) return new Map();
+  if (error) throw error;
+  if (!partes?.length) return new Map();
   const raizes = [...new Set((partes as MembroDoPix[]).map((p) => String(p.divisao_id)))];
   const principais: MembroDoPix[] = [];
   for (let i = 0; i < raizes.length; i += 100) {
-    const { data } = await ctx.sb.from("payables").select(campos).in("id", raizes.slice(i, i + 100)).neq("status", "cancelled");
+    const { data, error: erro } = await ctx.sb.from("payables").select(campos).in("id", raizes.slice(i, i + 100)).neq("status", "cancelled");
+    if (erro) throw erro;
     principais.push(...((data ?? []) as MembroDoPix[]));
   }
   return gruposDoPixDividido([...principais, ...(partes as MembroDoPix[])]);
@@ -131,8 +136,9 @@ export const lancamentoTools: ToolDef[] = [
 
       let osId: string | null = null;
       if (typeof args.os_numero === "string" && args.os_numero.trim()) {
-        const { data } = await ctx.sb.from("service_orders").select("id")
+        const { data, error } = await ctx.sb.from("service_orders").select("id")
           .ilike("service_order_number", `%${args.os_numero.trim()}%`).limit(1).maybeSingle();
+        if (error) throw error;
         if (!data) return { total: 0, lancamentos: [], aviso: `Nenhuma OS com número parecido com ${args.os_numero}.` };
         osId = (data as { id: string }).id;
       }
@@ -141,7 +147,9 @@ export const lancamentoTools: ToolDef[] = [
       // regra da RLS, que no WhatsApp não protege porque lá a consulta roda sem usuário.
       let sensiveis: string[] = [];
       if (ctx.userRole !== "admin") {
-        const { data } = await ctx.admin.from("financial_categories").select("name").eq("sensitive", true);
+        // Se falhar, recusa: sem a lista, quem não é admin veria pró-labore e retirada.
+        const { data, error } = await ctx.admin.from("financial_categories").select("name").eq("sensitive", true);
+        if (error) throw error;
         sensiveis = ((data ?? []) as { name: string }[]).map((c) => c.name);
       }
 
@@ -156,7 +164,7 @@ export const lancamentoTools: ToolDef[] = [
       const resultado: Array<Record<string, unknown>> = [];
 
       if (tipo !== "receber") {
-        const campos = "id, description, amount, paid_amount, status, issue_date, due_date, expense_category, supplier_name, bank_transaction_id, origin, divisao_id, suppliers!payables_supplier_id_fkey(name), payees(name), service_orders!payables_linked_service_order_id_fkey(service_order_number)";
+        const campos = "id, description, amount, paid_amount, status, issue_date, due_date, expense_category, supplier_name, bank_transaction_id, origin, divisao_id, suppliers!payables_supplier_id_fkey(name), payees!payables_payee_id_fkey(name), service_orders!payables_linked_service_order_id_fkey(service_order_number)";
         const [fornecedores, favorecidos] = termo
           ? await Promise.all([idsPorNome(ctx, "suppliers", termo), idsPorNome(ctx, "payees", termo)])
           : [[], []];

@@ -1233,12 +1233,29 @@ export const financeRulesTools: ToolDef[] = [
       const de = mes ? `${ano}-${String(mes).padStart(2, "0")}-01` : `${ano}-01-01`;
       const ate = mes ? `${ano}-${String(mes).padStart(2, "0")}-${ultimoDia}` : `${ano}-12-31`;
 
-      const [cats, pays, recs] = await Promise.all([
-        ctx.sb.from("financial_categories").select("name, type, dre_group"),
+      // Leitura que falha lança (o assistente diz que a consulta falhou): engolida, virava receita
+      // ou despesa 0 e um lucro ou prejuízo falso. Em páginas: o ano passa de 1.000 linhas e o
+      // servidor corta em silêncio (02/10/2026).
+      const lerTudo = async (montar: () => any): Promise<any[]> => {
+        const todas: any[] = [];
+        for (let i = 0; i < 50000; i += 1000) {
+          const { data, error } = await montar().order("id").range(i, i + 999);
+          if (error) throw error;
+          todas.push(...(data ?? []));
+          if ((data ?? []).length < 1000) break;
+        }
+        return todas;
+      };
+      const catsRes = await ctx.sb.from("financial_categories").select("name, type, dre_group");
+      if (catsRes.error) throw catsRes.error;
+      const [paysData, recsData] = await Promise.all([
         // Despesa cancelada não entra no resultado — mesma regra do DRE da tela.
-        ctx.sb.from("payables").select("amount, expense_category").neq("status", "cancelled").gte("issue_date", de).lte("issue_date", ate),
-        ctx.sb.from("receivables").select("amount, category, status").gte("issue_date", de).lte("issue_date", ate),
+        lerTudo(() => ctx.sb.from("payables").select("id, amount, expense_category").neq("status", "cancelled").gte("issue_date", de).lte("issue_date", ate)),
+        lerTudo(() => ctx.sb.from("receivables").select("id, amount, category, status").gte("issue_date", de).lte("issue_date", ate)),
       ]);
+      const cats = { data: catsRes.data };
+      const pays = { data: paysData };
+      const recs = { data: recsData };
 
       const grupoDe = new Map<string, string>();
       for (const c of (cats.data ?? []) as any[]) {
@@ -1261,11 +1278,20 @@ export const financeRulesTools: ToolDef[] = [
 
       // Este número engana quando a receita ainda não foi conciliada — a caixa de entrada
       // lança despesa sozinha e receita nunca, então o resultado nasce pessimista.
-      const { count: entradasPendentes } = await ctx.sb
+      const { count: entradasPendentes, error: entErr } = await ctx.sb
         .from("bank_transactions")
         .select("id", { count: "exact", head: true })
         .eq("transaction_type", "credit").eq("reconciled", false).eq("source_type", "bank")
         .gte("transaction_date", de).lte("transaction_date", ate);
+      if (entErr) throw entErr;
+      // E do lado da despesa: saídas ainda sem lançamento, inclusive compras no cartão que o banco
+      // ainda não fechou (setembro/2026 tinha 35, R$ 2.547,49, fora do resultado).
+      const saidas = await lerTudo(() => ctx.sb.from("bank_transactions")
+        .select("id, amount, tx_status").eq("transaction_type", "debit").eq("reconciled", false).is("dismissed_kind", null)
+        .gte("transaction_date", de).lte("transaction_date", ate));
+      const saidasSemLancamento = saidas.length;
+      const valorSemLancamento = Math.round(saidas.reduce((s, t) => s + Math.abs(Number(t.amount)), 0) * 100) / 100;
+      const pendentesNoCartao = saidas.filter((t) => String(t.tx_status ?? "").toUpperCase() === "PENDING").length;
 
       return {
         periodo: mes ? `${String(mes).padStart(2, "0")}/${ano}` : String(ano),
@@ -1281,6 +1307,11 @@ export const financeRulesTools: ToolDef[] = [
           ? `ATENÇÃO: ${entradasPendentes} entrada(s) do banco ainda não viraram receita lançada. ` +
             "O resultado acima está incompleto do lado da receita e parece pior do que é. " +
             "Avise isto ao usuário antes de comentar o número."
+          : null,
+        aviso_despesa: saidasSemLancamento > 0
+          ? `ATENÇÃO: ${saidasSemLancamento} saída(s) do banco (R$ ${valorSemLancamento.toFixed(2).replace(".", ",")}) ainda não viraram despesa lançada` +
+            (pendentesNoCartao ? `, ${pendentesNoCartao} delas compras no cartão que o banco ainda não fechou` : "") +
+            ". A despesa acima está incompleta e o resultado parece melhor do que é. Avise isto ao usuário."
           : null,
       };
     },

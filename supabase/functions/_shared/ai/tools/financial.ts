@@ -147,12 +147,14 @@ export const financialTools: ToolDef[] = [
       const recIds = (recs || []).map((r: any) => r.id);
       let payments: any[] = [];
       if (recIds.length > 0) {
-        const { data: pays } = await sb
+        // Sem checar o erro, uma falha virava "total pago 0" — "o cliente não pagou nada" (02/10/2026).
+        const { data: pays, error: payErr } = await sb
           .from("payments")
           .select("id, receivable_id, amount, payment_date, payment_method, notes")
           .in("receivable_id", recIds)
           .eq("status", "confirmed")
           .order("payment_date", { ascending: false });
+        if (payErr) throw payErr;
         payments = pays || [];
       }
 
@@ -538,28 +540,32 @@ export const financialTools: ToolDef[] = [
       }
       const fluxo = somarFluxoDoPeriodo(extrato.linhas, de, ate, hoje, extrato.opcoes);
 
-      // Pendências que pedem ação.
-      const { data: venc } = await sb
+      // Pendências que pedem ação. Leitura que falha vira { erro } no bloco — nunca 0 dito como
+      // fato (02/10/2026). Vencido inclui o status 'overdue' (antes só pending/partially_paid).
+      const { data: venc, error: vencErr } = await sb
         .from("receivables")
         .select("balance_amount, amount")
-        .in("status", ["pending", "partially_paid"])
+        .in("status", ["pending", "overdue", "partially_paid"])
         .eq("is_deposit", false)
         .lt("due_date", hoje);
       const vencidoTotal = ((venc as any[]) || []).reduce((a, r) => a + (Number(r.balance_amount ?? r.amount) || 0), 0);
 
+      // Conta cancelada guarda o saldo antigo: sem tirar paga e cancelada, ela contava como "a pagar".
       const em7 = somarDias(hoje, 7);
-      const { data: pag } = await sb
+      const { data: pag, error: pagErr } = await sb
         .from("payables")
         .select("amount, balance_amount, due_date")
         .lte("due_date", em7)
-        .gt("balance_amount", 0);
+        .gt("balance_amount", 0)
+        .not("status", "in", "(paid,cancelled)");
       const aPagar = ((pag as any[]) || []).reduce((a, p) => a + (Number(p.balance_amount ?? p.amount) || 0), 0);
 
-      const { count: osConcluidas } = await sb
+      const { count: osConcluidas, error: osErr } = await sb
         .from("service_orders")
         .select("id", { count: "exact", head: true })
         .in("status", ["completed", "invoiced"])
         .gte("updated_at", `${de}T00:00:00-03:00`);
+      const naoLi = (o: string, e: { message?: string }) => ({ erro: `não consegui ler ${o}: ${mensagemDoBanco(e)}` });
 
       const r2 = (n: number) => Math.round(n * 100) / 100;
       return {
@@ -580,10 +586,10 @@ export const financialTools: ToolDef[] = [
             .map(([motivo, v]) => [ROTULO_DO_DESTINO[motivo], v]),
         ),
         pendencias: {
-          a_receber_vencido: r2(vencidoTotal),
-          a_pagar_proximos_7_dias: r2(aPagar),
+          a_receber_vencido: vencErr ? naoLi("o a receber", vencErr) : r2(vencidoTotal),
+          a_pagar_proximos_7_dias: pagErr ? naoLi("o a pagar", pagErr) : r2(aPagar),
         },
-        os_concluidas_no_periodo: osConcluidas ?? 0,
+        os_concluidas_no_periodo: osErr ? naoLi("as OS", osErr) : osConcluidas ?? 0,
       };
     },
   },

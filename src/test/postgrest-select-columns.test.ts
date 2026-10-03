@@ -228,10 +228,12 @@ describe('colunas usadas em embed do PostgREST existem no banco', () => {
       // coluna são de um esquema antigo. Consertar antes de rodar de novo (02/10/2026).
       join('supabase', 'functions', 'fix-db-encoding', 'index.ts'),
     ]);
+    const consts = constantesDeTabela();
     for (const arquivo of arquivosVarridos()) {
       if ([...EXCECOES].some((e) => arquivo.endsWith(e))) continue;
       const src = readFileSync(arquivo, 'utf8');
-      for (const { raiz, literais } of chamadasDeSelect(src, false)) {
+      for (const { raizes, literais } of chamadasDeSelect(src, false, consts)) {
+        const raiz = raizes.length === 1 ? raizes[0] : null;
         const conhecidas = raiz ? tabelas.get(raiz) : undefined;
         if (!conhecidas) continue;
         for (const select of literais) {
@@ -282,65 +284,128 @@ describe('embeds entre tabelas com mais de uma chave estrangeira', () => {
     expect(relacoes.get(par)).toBeGreaterThan(1);
   });
 
-  it('todo embed de par ambíguo declara qual chave usar', () => {
-    const problemas: string[] = [];
+  it('todo embed de par ambíguo declara qual chave usar, e todo embed tem chave', () => {
+    const consts = constantesDeTabela();
+    const tabelas = nomesDeTabelas();
+    const problemas = varrerEmbeds(consts, tabelas);
+    expect(problemas, problemas.join('\n')).toEqual([]);
+  });
 
-    for (const arquivo of arquivosVarridos()) {
-      const src = readFileSync(arquivo, 'utf8');
-      for (const { raiz, literais } of chamadasDeSelect(src)) {
-        for (const select of literais) {
-          for (const { tabela, pai } of embedsDe(select, raiz ?? '')) {
-            // O hint vem colado no nome: `tabela!nome_da_fk(...)`.
-            const temHint = new RegExp(`${tabela}\\s*!\\s*\\w+\\s*\\(`).test(select);
-            // Tabela dinâmica (`.from(tabela)`): não dá para saber o par, então todo embed
-            // do primeiro nível diz a chave — foi esse o formato de gastos_por_categoria.
-            if (!pai) {
-              if (raiz === null && !temHint) {
-                problemas.push(
-                  `${arquivo.replace(process.cwd(), '')}: .from(variável) → ${tabela}(…) sem ` +
-                  '`!nome_da_fk` — com a tabela numa variável, diga a chave em todo embed',
-                );
-              }
-              continue;
-            }
-            const par = [pai, tabela].sort().join('|');
-            if ((relacoes.get(par) ?? 0) <= 1) continue;
-            if (!temHint) {
-              problemas.push(
-                `${arquivo.replace(process.cwd(), '')}: ${pai} → ${tabela}(…) sem ` +
-                '`!nome_da_fk` — há mais de uma chave entre as duas tabelas, o PostgREST ' +
-                'recusa a query inteira com PGRST201',
-              );
+  /** O que a regra acusa num trecho de código, com as constantes do próprio trecho. */
+  function problemasDe(codigo: string): string[] {
+    const consts = constantesDeTabela([codigo]);
+    return varrerEmbeds(consts, nomesDeTabelas(), [['trecho', codigo]]);
+  }
+
+  it('pega o formato que derrubou gastos_por_categoria (02/10/2026)', () => {
+    const codigo = `const tabela = receita ? "receivables" : "payables";
+      const { data } = await ctx.sb.from(tabela)
+      .select(receita ? "amount, category, clients(name)" : "amount, expense_category, suppliers(name), payees(name)")
+      .neq("status", "cancelled");`;
+    const [chamada] = chamadasDeSelect(codigo, true, constantesDeTabela([codigo]));
+    expect(chamada.raizes).toEqual(['receivables', 'payables']);
+    expect(chamada.literais).toHaveLength(2);
+    // payables → payees: payee_id e beneficiario_id. payables → clients: nenhuma chave.
+    expect(relacoes.get(['payables', 'payees'].sort().join('|'))).toBeGreaterThan(1);
+    const achados = problemasDe(codigo).join('\n');
+    expect(achados).toMatch(/payables → payees.*PGRST201/);
+    expect(achados).toMatch(/payables → clients.*nenhuma chave/);
+  });
+
+  it('pega o select guardado numa constante (buscar_lancamentos, 02/10/2026)', () => {
+    const codigo = `const campos = "id, amount, suppliers!payables_supplier_id_fkey(name), payees(name)";
+      let q = filtrar(ctx.sb.from("payables").select(campos).order("issue_date"));`;
+    const [chamada] = chamadasDeSelect(codigo);
+    expect(chamada.raizes).toEqual(['payables']);
+    expect(problemasDe(codigo).join('\n')).toMatch(/payables → payees.*PGRST201/);
+  });
+
+  it('pega o embed sem chave nenhuma (TaskCard: clients de payables, 02/10/2026)', () => {
+    const codigo = `const table = et === 'receivable' ? 'receivables' : 'payables';
+      const { data } = await supabase.from(table).select('*, clients(name)').eq('id', x).maybeSingle();`;
+    expect(problemasDe(codigo).join('\n')).toMatch(/payables → clients.*nenhuma chave/);
+  });
+});
+
+/** Nomes das TABELAS (não views) dos tipos gerados: só entre elas a falta de chave é certa. */
+function nomesDeTabelas(): Set<string> {
+  const src = readFileSync(TYPES, 'utf8').replace(/\r\n/g, '\n');
+  const ini = src.indexOf('\n    Tables: {');
+  const fim = src.indexOf('\n    Views: {', ini);
+  const trecho = src.slice(ini, fim);
+  return new Set([...trecho.matchAll(/^ {6}(\w+): \{$/gm)].map((m) => m[1]));
+}
+
+/**
+ * Constantes que guardam nome de tabela, em todos os arquivos varridos: `OS_TABELA =
+ * 'service_orders'`, `tabela = receita ? "receivables" : "payables"`. A tabela do `.from(X)`
+ * passa a ser cada valor possível de X.
+ */
+function constantesDeTabela(fontes?: string[]): Map<string, string[]> {
+  const mapa = new Map<string, string[]>();
+  const textos = fontes ?? arquivosVarridos().map((f) => readFileSync(f, 'utf8'));
+  for (const texto of textos) {
+    const src = texto.replace(/\r\n/g, '\n');
+    for (const m of src.matchAll(/(?:const|let)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*([^;\n]+)/g)) {
+      const valores = [...m[2].matchAll(/['"](\w+)['"]/g)].map((v) => v[1]);
+      // Só a expressão feita de literais (com ternário e `as const`): nome de tabela, não texto.
+      const resto = m[2].replace(/['"]\w+['"]/g, '').replace(/as const/g, '');
+      if (!valores.length || /[`(]/.test(resto)) continue;
+      const atual = mapa.get(m[1]) ?? [];
+      mapa.set(m[1], [...new Set([...atual, ...valores])]);
+    }
+  }
+  return mapa;
+}
+
+/** A regra dos embeds sobre os arquivos (ou trechos) dados. */
+function varrerEmbeds(
+  consts: Map<string, string[]>,
+  tabelasReais: Set<string>,
+  fontes?: Array<[string, string]>,
+): string[] {
+  const relacoes = relacoesEntre();
+  const problemas: string[] = [];
+  const lista = fontes ?? arquivosVarridos().map((f) => [f.replace(process.cwd(), ''), readFileSync(f, 'utf8')] as [string, string]);
+  for (const [nome, src] of lista) {
+    for (const { raizes, literais } of chamadasDeSelect(src, true, consts)) {
+      for (const select of literais) {
+        for (const { tabela, pai } of embedsDe(select, '')) {
+          // O hint vem colado no nome: `tabela!nome_da_fk(...)`.
+          const temHint = new RegExp(`${tabela}\\s*!\\s*\\w+\\s*\\(`).test(select);
+          if (temHint) continue;
+          const pais = pai ? [pai] : raizes;
+          if (pais.length === 0) {
+            problemas.push(`${nome}: .from(variável desconhecida) → ${tabela}(…) sem \`!nome_da_fk\` — diga a chave quando a tabela não é conhecida`);
+            continue;
+          }
+          for (const p of pais) {
+            const n = relacoes.get([p, tabela].sort().join('|')) ?? 0;
+            if (n > 1) {
+              problemas.push(`${nome}: ${p} → ${tabela}(…) sem \`!nome_da_fk\` — há mais de uma chave entre as duas tabelas, o PostgREST recusa a query inteira com PGRST201`);
+            } else if (n === 0 && tabelasReais.has(p) && tabelasReais.has(tabela)) {
+              problemas.push(`${nome}: ${p} → ${tabela}(…) — nenhuma chave entre as duas tabelas, o PostgREST recusa a query (PGRST200)`);
             }
           }
         }
       }
     }
-
-    expect(problemas, problemas.join('\n')).toEqual([]);
-  });
-
-  it('pega o formato que derrubou gastos_por_categoria (02/10/2026)', () => {
-    const codigo = `const { data } = await ctx.sb.from(tabela)
-      .select(receita ? "amount, category, clients(name)" : "amount, expense_category, suppliers(name), payees(name)")
-      .neq("status", "cancelled");`;
-    const [chamada] = chamadasDeSelect(codigo);
-    expect(chamada.raiz).toBeNull();
-    expect(chamada.literais).toHaveLength(2);
-    expect(embedsDe(chamada.literais[1], '').map((e) => e.tabela)).toEqual(['suppliers', 'payees']);
-    // E o par em si é ambíguo nos tipos do banco: payee_id e beneficiario_id.
-    expect(relacoes.get(['payables', 'payees'].sort().join('|'))).toBeGreaterThan(1);
-  });
-});
+  }
+  return problemas;
+}
 
 /**
  * Cada `.select(...)` do arquivo com a tabela do `.from()` que vem antes (null quando a tabela
  * está numa variável) e TODOS os textos entre os parênteses — inclusive os dois lados de um
  * `cond ? "a" : "b"`, que a leitura antiga (só o primeiro literal) não via.
  */
-function chamadasDeSelect(fonte: string, soComEmbed = true): Array<{ raiz: string | null; literais: string[] }> {
+function chamadasDeSelect(
+  fonte: string,
+  soComEmbed = true,
+  consts: Map<string, string[]> = new Map(),
+): Array<{ raiz: string | null; raizes: string[]; literais: string[] }> {
   const src = fonte.replace(/\r\n/g, '\n');
-  const achados: Array<{ raiz: string | null; literais: string[] }> = [];
+  const achados: Array<{ raiz: string | null; raizes: string[]; literais: string[] }> = [];
   for (const m of src.matchAll(/\.select\(/g)) {
     let nivel = 1, i = m.index! + m[0].length;
     const inicio = i;
@@ -368,6 +433,13 @@ function chamadasDeSelect(fonte: string, soComEmbed = true): Array<{ raiz: strin
         else if (ch === ',' && prof === 0) { args = args.slice(0, k); break; }
       }
     }
+    // `.select(campos)` com `const campos = "…"` no mesmo arquivo: era assim em
+    // buscar_lancamentos, com o mesmo `payees(name)` ambíguo, e a varredura não lia (02/10/2026).
+    const nome = args.trim();
+    if (/^[A-Za-z_$][\w$]*$/.test(nome)) {
+      const def = src.match(new RegExp(`(?:const|let)\\s+${nome.replace(/\$/g, '\\$')}\\s*(?::\\s*string\\s*)?=\\s*(\`[^\`]*\`|"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*')`));
+      if (def) args = def[1];
+    }
     const literais = [...args.matchAll(/`([^`]*)`|"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'/g)]
       .map((l) => l[1] ?? l[2] ?? l[3] ?? '')
       .filter((l) => !soComEmbed || /\w\s*(?:!\s*\w+\s*)?\(/.test(l));   // só o que tem embed
@@ -378,7 +450,8 @@ function chamadasDeSelect(fonte: string, soComEmbed = true): Array<{ raiz: strin
     const froms = [...antes.matchAll(/\.from(?:\s+as\s+\w+\s*\))?\(\s*(?:['"](\w+)['"]|([A-Za-z_$][\w$.]*))[^)]*\)/g)];
     const ultimo = froms[froms.length - 1];
     if (!ultimo) continue;
-    achados.push({ raiz: ultimo[1] ?? null, literais });
+    const raizes = ultimo[1] ? [ultimo[1]] : (consts.get(String(ultimo[2]).split('.').pop()!) ?? []);
+    achados.push({ raiz: ultimo[1] ?? null, raizes, literais });
   }
   return achados;
 }

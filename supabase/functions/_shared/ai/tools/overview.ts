@@ -8,7 +8,9 @@ import { vencimentoDoOrcamento } from "../../pdf/documento.ts";
 // orçamentos parados + mensagens sem resposta + agenda + contas a pagar), cada uma um
 // round-trip do LLM. Aqui o CÓDIGO executa os 5 blocos e devolve um resumo compacto; o
 // LLM só orquestra e narra. Espelha as MESMAS queries do resumo matinal (ai-daily-briefing),
-// que já rodam em produção. Cada bloco é best-effort: um erro nele não derruba os outros.
+// que já rodam em produção. Cada bloco é best-effort: um erro nele não derruba os outros —
+// e aparece como { erro } no bloco. O supabase-js NÃO lança: sem o throw depois de cada
+// leitura, o catch nunca disparava e a falha virava "0" ou "nada" (02/10/2026).
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const isoDate = (d: Date) => d.toISOString().slice(0, 10);
@@ -38,13 +40,14 @@ export const overviewTools: ToolDef[] = [
       // ── 1. Cobranças vencidas (mesma lógica do get_delinquency_plan) ──
       let cobrancas: Record<string, unknown> = { erro: "não consultado" };
       try {
-        const { data: recs } = await admin
+        const { data: recs, error: erro_recs } = await admin
           .from("receivables")
           .select("amount, balance_amount, due_date, clients(name)")
-          .in("status", ["pending", "partially_paid"])
+          .in("status", ["pending", "overdue", "partially_paid"])
           .eq("is_deposit", false)
           .lt("due_date", hojeIso)
           .limit(200);
+        if (erro_recs) throw erro_recs;
         const casos = ((recs as any[]) || [])
           .map((r) => ({
             cliente: r.clients?.name || "(sem cliente)",
@@ -63,13 +66,14 @@ export const overviewTools: ToolDef[] = [
       // ── 2. Orçamentos parados (draft + quote_status aberto, sem mexer há ≥ N dias) ──
       let orcamentos: Record<string, unknown> = { erro: "não consultado" };
       try {
-        const { data: openQuotes } = await admin
+        const { data: openQuotes, error: erro_openQuotes } = await admin
           .from("service_orders")
           .select("service_order_number, grand_total, updated_at, quote_status, created_at, quote_validity_days, quote_validity_date, clients(name)")
           .eq("status", "draft")
           .in("quote_status", ["sent", "awaiting_approval", "awaiting_deposit"])
           .order("updated_at", { ascending: true })
           .limit(50);
+        if (erro_openQuotes) throw erro_openQuotes;
         const flagged = ((openQuotes as any[]) || [])
           .map((q) => {
             const dias = Math.floor((now.getTime() - new Date(q.updated_at).getTime()) / 86400000);
@@ -95,7 +99,8 @@ export const overviewTools: ToolDef[] = [
       let mensagens: Record<string, unknown> = { erro: "não consultado" };
       try {
         const since7d = new Date(now.getTime() - 7 * 86400000).toISOString();
-        const { data: waitingRows } = await admin.rpc("whatsapp_pending_inbox", { _since: since7d, _limit: 15 });
+        const { data: waitingRows, error: erro_waitingRows } = await admin.rpc("whatsapp_pending_inbox", { _since: since7d, _limit: 15 });
+        if (erro_waitingRows) throw erro_waitingRows;
         const waiting = ((waitingRows as any[]) || []).slice();
         waiting.sort((a, b) => Number(b.is_client) - Number(a.is_client));
         mensagens = {
@@ -117,13 +122,14 @@ export const overviewTools: ToolDef[] = [
       try {
         const dayStart = `${hojeIso}T00:00:00`;
         const dayEnd = `${hojeIso}T23:59:59`;
-        const { data: hoje } = await admin
+        const { data: hoje, error: erro_hoje } = await admin
           .from("service_orders")
           .select("service_order_number, scheduled_start_at, status, clients(name)")
           .gte("scheduled_start_at", dayStart)
           .lte("scheduled_start_at", dayEnd)
           .order("scheduled_start_at", { ascending: true })
           .limit(30);
+        if (erro_hoje) throw erro_hoje;
         agenda = {
           quantidade: (hoje as any[])?.length || 0,
           itens: ((hoje as any[]) || []).slice(0, 8).map((o) => ({
@@ -139,12 +145,13 @@ export const overviewTools: ToolDef[] = [
       let contas_a_pagar: Record<string, unknown> = { erro: "não consultado" };
       try {
         const em7 = isoDate(new Date(now.getTime() + 7 * 86400000));
-        const { data: pag } = await admin
+        const { data: pag, error: erro_pag } = await admin
           .from("payables")
           .select("amount, balance_amount, due_date")
           .not("status", "in", "(paid,cancelled)")
           .lte("due_date", em7)
           .gt("balance_amount", 0);
+        if (erro_pag) throw erro_pag;
         const rows = (pag as any[]) || [];
         contas_a_pagar = {
           quantidade: rows.length,
@@ -155,7 +162,7 @@ export const overviewTools: ToolDef[] = [
       // "Sem próxima ação" (padrão Pipedrive): OS ativas sem tarefa viva vinculada
       let sem_proxima_acao: unknown = null;
       try {
-        const { data: activeSos } = await admin
+        const { data: activeSos, error: erro_activeSos } = await admin
           .from("service_orders")
           .select("id, service_order_number, status, clients(name)")
           // MF-AUD-006: a lista tinha três status inexistentes e faltava `open` — o
@@ -163,11 +170,13 @@ export const overviewTools: ToolDef[] = [
           // falso "está tudo coberto". Agora vem da constante única.
           .in("status", [...STATUS_OS_ATIVAS])
           .limit(100);
-        const { data: liveTasks } = await admin
+        if (erro_activeSos) throw erro_activeSos;
+        const { data: liveTasks, error: erro_liveTasks } = await admin
           .from("agenda_tasks")
           .select("related_entity_id")
           .eq("related_entity_type", "service_order")
           .in("status", ["pending", "in_progress"]);
+        if (erro_liveTasks) throw erro_liveTasks;
         const covered = new Set(((liveTasks as any[]) || []).map((t) => t.related_entity_id));
         const orphans = ((activeSos as any[]) || []).filter((o) => !covered.has(o.id));
         sem_proxima_acao = {

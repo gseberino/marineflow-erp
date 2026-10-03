@@ -23,7 +23,7 @@ function sbFalso(tabelas: Record<string, unknown[]>) {
       pedidos.push(pedido);
       // deno-lint-ignore no-explicit-any
       const q: any = {};
-      for (const m of ["select", "in", "gte", "lte", "lt", "gt", "eq", "order", "range"]) {
+      for (const m of ["select", "in", "gte", "lte", "lt", "gt", "eq", "not", "order", "range"]) {
         q[m] = (...a: unknown[]) => { pedido.filtros.push([m, ...a]); return q; };
       }
       // deno-lint-ignore no-explicit-any
