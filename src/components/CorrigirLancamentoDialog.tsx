@@ -25,7 +25,7 @@ import { useSuppliers } from '@/hooks/use-suppliers';
 import { useCostCenters, centrosParaEscolher } from '@/hooks/use-cost-centers';
 import { usePayees, useServiceOrdersVinculaveis, useClientesParaReceita, ROTULO_TIPO } from '@/hooks/use-payees';
 import { usePeriodosFechados } from '@/hooks/use-fechamento';
-import { useCorrigirLancamento, type TipoDeLancamento } from '@/hooks/use-lancamentos';
+import { useCorrigirLancamento, usePixDaConta, type TipoDeLancamento } from '@/hooks/use-lancamentos';
 import { useI18n } from '@/i18n';
 import { toast } from 'sonner';
 import { Landmark, Lock } from 'lucide-react';
@@ -138,6 +138,12 @@ export function CorrigirLancamentoDialog({
   useEffect(() => { setF(inicial); setMotivo(''); }, [inicial]);
 
   const veioDoBanco = !!lancamento?.bank_transaction_id;
+  // Pix que pagou esta conta sem ser ela a dona da linha (F4, 03/10/2026): um Pix para várias
+  // contas, ou a outra parte de uma OS paga em dois Pix.
+  const { data: outrosPix = [] } = usePixDaConta(
+    tipo === 'receivable' ? lancamento?.id : null,
+    lancamento?.bank_transaction_id ?? null,
+  );
   const mesFechado = useMemo(() => {
     const d = lancamento?.issue_date;
     if (!d) return false;
@@ -343,6 +349,20 @@ export function CorrigirLancamentoDialog({
               />
             </div>
           )}
+          {outrosPix.map((x) => (
+            <div key={x.linhaId} className="sm:col-span-2">
+              <VinculoComExtrato
+                tipo={tipo}
+                lancamentoId={lancamento.id}
+                valor={Number(lancamento.amount ?? 0)}
+                linhaId={x.linhaId}
+                mesFechado={mesFechado}
+                onConcluido={onFechar}
+                clienteId={lancamento.client_id ?? null}
+                pagamentoDaConta={x.pagamentoId}
+              />
+            </div>
+          ))}
 
           {!nada && !soObservacao && (
             <div className="sm:col-span-2">

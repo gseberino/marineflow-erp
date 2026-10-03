@@ -47,7 +47,7 @@ import {
 import {
   useFinanceReviewQueue, useGerarPropostas, useAprovarPropostas, useRecusarPropostas,
   useMarcarDuplicata, useCriarCategoriaDespesa, useReaplicarRegras, useClassificarComIA,
-  useLimiteLote, useRotulosDaPergunta, type PropostaFinanceira, type Correcao,
+  useLimiteLote, useRotulosDaPergunta, useParecePagarDaFila, type PropostaFinanceira, type Correcao,
 } from '@/hooks/use-finance-review';
 import {
   Sparkles, Check, X, ChevronDown, ArrowLeftRight, TrendingDown, TrendingUp, Info, RefreshCw,
@@ -55,8 +55,9 @@ import {
 } from 'lucide-react';
 import {
   agruparPorFavorecido, ordenarGrupos, resumoDoAgrupamento, SEM_CATEGORIA, ROTULO_DA_ORDEM, motivoForaDoLote,
-  type GrupoDeFavorecido, type OrdemDaFila, type MotivoForaDoLote,
+  pareceSemResposta, type GrupoDeFavorecido, type OrdemDaFila, type MotivoForaDoLote,
 } from '@/lib/finance-inbox-grouping';
+import { fraseDoParecePagar, type ParecePagar } from '../../supabase/functions/_shared/banking/parece-pagar';
 import { categoriaPorMcc } from '../../supabase/functions/_shared/banking/mcc';
 import { historicoSemIdentidade } from '../../supabase/functions/_shared/banking/proposals';
 import {
@@ -413,6 +414,56 @@ interface LinhaProps {
   mostrarAprovar?: boolean;
 }
 
+/**
+ * "Parece pagar" (forma A, F4 — 03/10/2026): as contas em aberto e os pagamentos lançados à mão do
+ * cliente identificado cuja soma bate com esta entrada. Só sugere: "Conferir e aplicar" abre o
+ * "Este Pix paga…" já marcado; "É receita nova" responde que não (a linha aprova como antes).
+ * "Pode ser parte de…" é só aviso, sem travar — cliente recorrente teria toda entrada perguntada.
+ */
+export function ParecePagarDaLinha({
+  parece, entradaId, clienteId, receitaNova, onReceitaNova, ocupado,
+}: {
+  parece: ParecePagar;
+  entradaId: string;
+  clienteId: string | null;
+  receitaNova: boolean;
+  onReceitaNova: (sim: boolean) => void;
+  ocupado?: boolean;
+}) {
+  const { formatCurrency } = useI18n();
+  const forte = !parece.parcial;
+  return (
+    <div
+      className={`mt-1 space-y-1.5 rounded-md border p-2 text-xs ${forte && !receitaNova ? 'border-amber-500/40 bg-amber-500/5' : 'bg-muted/30'}`}
+      data-testid="parece-pagar"
+    >
+      <p className="font-medium">
+        {forte ? 'Este Pix parece pagar contas que já existem' : 'Este Pix pode ser parte de uma conta que já existe'}
+      </p>
+      <p>{fraseDoParecePagar(parece, formatCurrency)}</p>
+      {forte && !receitaNova && (
+        <p className="text-muted-foreground">Se for isso, aprovar como receita nova contaria este dinheiro duas vezes.</p>
+      )}
+      {receitaNova && <p className="text-muted-foreground">Marcado como receita nova: a linha aprova como antes.</p>}
+      <div className="flex flex-wrap gap-2">
+        <BotaoEstePixPaga
+          entradaId={entradaId}
+          clienteInicial={clienteId}
+          sugestao={parece}
+          variante={forte && !receitaNova ? 'default' : 'outline'}
+          rotulo="Conferir e aplicar"
+          disabled={ocupado}
+        />
+        {forte && (
+          <Button type="button" size="sm" variant="outline" disabled={ocupado} onClick={() => onReceitaNova(!receitaNova)}>
+            {receitaNova ? 'Desfazer: não é receita nova' : 'É receita nova'}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function LinhaProposta({
   p, selecionada, onSelecionar, correcao, onCorrigir,
   onAprovar, onRecusar, onDuplicata, onCriarRegra, ocupado, modoLote, foraDoLote,
@@ -461,8 +512,13 @@ function LinhaProposta({
   // Serviço de terceiro: para onde foi e o que foi feito (decisão do dono, 26/09/2026).
   const perguntaDestino = !transferencia && !anomalia && !casando && precisaDeDestino(p.kind, categoria);
   const faltaDestino = perguntaDestino ? faltaNoDestinoDaLinha(p, correcao) : [];
+  // F4 (03/10/2026): a entrada parece pagar contas que já existem — aprovar como receita nova
+  // contaria o dinheiro duas vezes. Responde-se aplicando ou marcando "É receita nova".
+  const parece = p.kind === 'create_receivable' && !entradaSemLancamento ? p.parece_pagar ?? null : null;
+  const pareceAberto = !!parece && pareceSemResposta(p, correcao);
   const bloqueio = decidir
     ? (podeJaEstarLancado(p.vinculo_sugerido) ? 'Pode já estar lançado: escolha casar ou lançar novo' : 'O sistema sugeriu um vínculo: diga se é isso antes de aprovar')
+    : pareceAberto ? 'Este Pix parece pagar contas que já existem: confira e aplique, ou marque "É receita nova"'
     : faltaDestino.length > 0 ? fraseDaFalta(faltaDestino)
     : contradicao;
 
@@ -617,15 +673,27 @@ function LinhaProposta({
                 semReceita={entradaSemLancamento}
               />
               {/* Um Pix que paga contas que já existem — uma ou várias, ou o sinal lançado à mão
-                  (forma A, F2 — 02/10/2026). A sugestão acima só casa uma conta de valor parecido. */}
+                  (forma A, F2 — 02/10/2026). A sugestão acima só casa uma conta de valor parecido;
+                  quando a soma de várias bate, a caixa "Parece pagar" (F4) abre o diálogo preenchido. */}
               {p.kind === 'create_receivable' && p.bank_transaction_id && !entradaSemLancamento && (
-                <div className="mt-1">
-                  <BotaoEstePixPaga
+                parece ? (
+                  <ParecePagarDaLinha
+                    parece={parece}
                     entradaId={p.bank_transaction_id}
-                    clienteInicial={correcao?.clientId ?? p.suggested_client_id ?? null}
-                    disabled={ocupado}
+                    clienteId={correcao?.clientId ?? p.suggested_client_id ?? null}
+                    receitaNova={correcao?.vinculo === 'nenhum'}
+                    onReceitaNova={(sim) => onCorrigir({ ...correcao, vinculo: sim ? 'nenhum' : undefined })}
+                    ocupado={ocupado}
                   />
-                </div>
+                ) : (
+                  <div className="mt-1">
+                    <BotaoEstePixPaga
+                      entradaId={p.bank_transaction_id}
+                      clienteInicial={correcao?.clientId ?? p.suggested_client_id ?? null}
+                      disabled={ocupado}
+                    />
+                  </div>
+                )
               )}
             </>
           )}
@@ -924,7 +992,15 @@ export function FinanceReviewInbox({
 } = {}) {
   const { formatCurrency } = useI18n();
   const limiteLote = useLimiteLote();
-  const { data: propostas = [], isLoading, error: erroDaFila } = useFinanceReviewQueue();
+  const { data: brutas = [], isLoading, error: erroDaFila } = useFinanceReviewQueue();
+  const [correcoes, setCorrecoes] = useState<Record<string, Correcao>>({});
+  // "Parece pagar" (F4): calculado para a fila toda numa leitura; a linha, o lote e o grupo leem
+  // o mesmo campo (motivoForaDoLote tira do lote a entrada que parece pagar contas existentes).
+  const parecePagar = useParecePagarDaFila(brutas, correcoes);
+  const propostas = useMemo(
+    () => (parecePagar.size === 0 ? brutas : brutas.map((p) => (parecePagar.has(p.id) ? { ...p, parece_pagar: parecePagar.get(p.id) } : p))),
+    [brutas, parecePagar],
+  );
 
   const gerar = useGerarPropostas();
   const aprovar = useAprovarPropostas();
@@ -978,7 +1054,6 @@ export function FinanceReviewInbox({
   }, [todasNormais, busca]);
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set());
-  const [correcoes, setCorrecoes] = useState<Record<string, Correcao>>({});
   /** O destino que o cabeçalho de cada grupo escolheu ("Para onde foram estes serviços?"). */
   const [destinoDoGrupo, setDestinoDoGrupo] = useState<Record<string, 'cliente' | 'empresa' | undefined>>({});
   // Trabalhar cartão e conta separados é mais rápido: a fatura tem muitos gastos pequenos

@@ -10,6 +10,11 @@
  * Um Pix para várias contas (forma A, F2 — 02/10/2026): a caixa mostra as outras contas que a
  * mesma entrada pagou (cada uma pode sair dela: desfazer_aplicacao) e, se sobrou parte da entrada,
  * oferece aplicá-la em outra conta ("Este Pix paga…").
+ *
+ * F4 (03/10/2026): a conta paga por um Pix que NÃO é a "dona" da linha (o sinal do ORÇ-00077, pago
+ * pelo mesmo Pix do ORÇ-00074) não mostrava de onde veio o dinheiro. Com `pagamentoDaConta`, a caixa
+ * aparece também para ela, e o conserto é tirar ESTA conta da entrada (desfazer_aplicacao) — não
+ * desfazer a aprovação nem ajustar a linha, que pertencem à conta dona.
  */
 import { useState } from 'react';
 import { Landmark } from 'lucide-react';
@@ -26,7 +31,7 @@ import {
 type Confirmando = 'ajustar' | 'desfazer' | { tirar: string; descricao: string; valor: number } | null;
 
 export function VinculoComExtrato({
-  tipo, lancamentoId, valor, linhaId, mesFechado, onConcluido, clienteId,
+  tipo, lancamentoId, valor, linhaId, mesFechado, onConcluido, clienteId, pagamentoDaConta,
 }: {
   tipo: TipoDeLancamento;
   lancamentoId: string;
@@ -37,6 +42,11 @@ export function VinculoComExtrato({
   onConcluido: () => void;
   /** O cliente da conta: o "Este Pix paga…" da sobra já abre nele. */
   clienteId?: string | null;
+  /**
+   * A conta foi paga por esta linha mas não é a dona dela: o pagamento desta conta que veio da
+   * linha. Troca "Desfazer"/"Ajustar" por "Tirar esta conta desta entrada".
+   */
+  pagamentoDaConta?: string | null;
 }) {
   const { formatCurrency, formatDate } = useI18n();
   const { data, isLoading } = useVinculoComExtrato(tipo, lancamentoId, linhaId);
@@ -63,7 +73,11 @@ export function VinculoComExtrato({
     const depois = { onSuccess: () => { setConfirmando(null); onConcluido(); } };
     if (confirmando === 'ajustar') ajustar.mutate({ tipo, id: lancamentoId }, depois);
     else if (confirmando === 'desfazer') desfazer.mutate({ tipo, id: lancamentoId }, depois);
-    else if (confirmando) tirar.mutate({ pagamentoId: confirmando.tirar }, { onSuccess: () => setConfirmando(null) });
+    else if (confirmando) {
+      // Tirar ESTA conta muda o lançamento aberto na correção: ela fecha, como no desfazer.
+      const propria = confirmando.tirar === pagamentoDaConta;
+      tirar.mutate({ pagamentoId: confirmando.tirar }, { onSuccess: () => { setConfirmando(null); if (propria) onConcluido(); } });
+    }
   };
 
   const textoDaConfirmacao = confirmando === 'ajustar'
@@ -134,12 +148,25 @@ export function VinculoComExtrato({
               onConcluido={onConcluido}
             />
           )}
+          {pagamentoDaConta ? (
+            <Button
+              size="sm" variant="outline"
+              onClick={() => setConfirmando({
+                tirar: pagamentoDaConta,
+                descricao: 'Esta conta',
+                valor: data.pagamentos.find((x) => x.id === pagamentoDaConta)?.valor ?? 0,
+              })}
+            >
+              Tirar esta conta desta entrada
+            </Button>
+          ) : (<>
           {d.podeAjustar && d.rotuloDoAjuste && (
             <Button size="sm" variant={d.podeAplicarSobra ? 'outline' : 'default'} onClick={() => setConfirmando('ajustar')}>
               {d.rotuloDoAjuste}
             </Button>
           )}
           <Button size="sm" variant="outline" onClick={() => setConfirmando('desfazer')}>{rotuloDesfazer}</Button>
+          </>)}
         </div>
       )}
     </div>

@@ -17,7 +17,7 @@ const { propostas, estadoDaFila, aprovarMock, duplicataMock, regraMock, reaplica
   regraMock: vi.fn(),
   reaplicarMock: vi.fn(),
   /** Estado que os testes de erro e de agrupamento trocam; o resto usa o padrão. */
-  estadoDaFila: { error: null as Error | null, dados: null as unknown[] | null },
+  estadoDaFila: { error: null as Error | null, dados: null as unknown[] | null, parece: new Map<string, unknown>() },
   propostas: [
     {
       id: 'p1', kind: 'create_payable', status: 'pending',
@@ -64,6 +64,8 @@ vi.mock('@/hooks/use-finance-review', async (importOriginal) => {
     useClassificarComIA: () => ({ mutate: vi.fn(), isPending: false }),
     // O limite vem de app_settings; aqui fixo, para o teste não depender de rede.
     useLimiteLote: () => 500,
+    // A sugestão vem de uma leitura do banco; aqui, o que cada teste põe.
+    useParecePagarDaFila: () => estadoDaFila.parece,
   };
 });
 
@@ -177,6 +179,59 @@ describe('FinanceReviewInbox', () => {
   it('marca a transferência entre contas como fora do resultado', async () => {
     renderInbox();
     expect(await screen.findByText('Não entra no resultado')).toBeInTheDocument();
+  });
+});
+
+/**
+ * "Parece pagar" (forma A, F4 — 03/10/2026): a entrada de um cliente identificado cuja soma bate
+ * com contas que já existem não aprova como receita nova sem resposta — foi assim que agosto
+ * contou o Pix do Lenine duas vezes. "Parte de uma conta" é só aviso.
+ */
+describe('Pix que parece pagar contas que já existem', () => {
+  const entrada = {
+    id: 'pMP', kind: 'create_receivable', status: 'pending', bank_transaction_id: 'tMP', related_transaction_id: null,
+    title: 'Receita: MP MOTORHOMES', reasoning: 'x', confidence: 80, suggested_amount: 470, suggested_date: '2026-10-10',
+    suggested_category: 'Serviços prestados', suggested_description: 'MP MOTORHOMES', suggested_supplier_id: null,
+    suggested_client_id: 'cMP', dre_group: 'receita', created_at: '2026-10-10T10:00:00Z',
+  };
+  const soma = {
+    itens: [
+      { tipo: 'conta', id: 'r45', rotulo: 'OS-00045', saldo: 450, valor: 450, quitar: false },
+      { tipo: 'conta', id: 'r46', rotulo: 'OS-00046', saldo: 20, valor: 20, quitar: false },
+    ],
+    diferenca: 0, outraCombinacao: false, parcial: false,
+  };
+  afterEach(() => { estadoDaFila.dados = null; estadoDaFila.parece = new Map(); aprovarMock.mockClear(); });
+
+  it('não vai no lote e não aprova como receita nova sem resposta; "É receita nova" libera', async () => {
+    aprovarMock.mockClear();
+    estadoDaFila.dados = [entrada];
+    estadoDaFila.parece = new Map([['pMP', soma]]);
+    const user = userEvent.setup();
+    renderInbox();
+    expect(await screen.findByText(/Revisar uma a uma .*\(1\)/)).toBeInTheDocument();
+    const caixa = screen.getByTestId('parece-pagar');
+    expect(within(caixa).getByText(/^Parece pagar OS-00045 \(R\$\s?450,00\) \+ OS-00046 \(R\$\s?20,00\)\.$/)).toBeInTheDocument();
+    expect(within(caixa).getByRole('button', { name: /Conferir e aplicar/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Este Pix parece pagar contas que já existem/ })).toBeDisabled();
+
+    await user.click(within(caixa).getByRole('button', { name: 'É receita nova' }));
+    const liberado = screen.getByRole('button', { name: 'Aprovar e lançar' });
+    expect(liberado).toBeEnabled();
+    await user.click(liberado);
+    expect(aprovarMock.mock.calls[0][0]).toMatchObject({ ids: ['pMP'], overrides: { pMP: { vinculo: 'nenhum' } } });
+  });
+
+  it('"pode ser parte de uma conta" só avisa: aprova e vai no lote', async () => {
+    estadoDaFila.dados = [entrada];
+    estadoDaFila.parece = new Map([['pMP', {
+      itens: [{ tipo: 'conta', id: 'r51', rotulo: 'OS-00051', saldo: 1710, valor: 470, quitar: false }],
+      diferenca: -1240, outraCombinacao: false, parcial: true,
+    }]]);
+    renderInbox();
+    expect(await screen.findByText(/Este Pix pode ser parte de uma conta que já existe/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'É receita nova' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Aprovação em lote/)).toBeInTheDocument();
   });
 });
 

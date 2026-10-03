@@ -21,6 +21,16 @@ import type { Correcao, PropostaFinanceira } from '@/hooks/use-finance-review';
 import { saiSemReceita } from '../../supabase/functions/_shared/banking/entrada-sem-cliente';
 
 /** Por que a linha não entra no lote (nem no botão do grupo). */
+/**
+ * A entrada parece pagar contas que já existem (F4, 03/10/2026) e ninguém respondeu: aprovar
+ * como receita nova contaria o dinheiro duas vezes (foi o Pix do Lenine). "Parte de uma conta" é
+ * só aviso — cliente recorrente teria toda entrada travada. Responde-se aplicando no "Este Pix
+ * paga…" (a linha sai da fila) ou marcando "É receita nova" (vinculo = 'nenhum').
+ */
+export function pareceSemResposta(p: PropostaFinanceira, correcao?: Correcao): boolean {
+  return !!p.parece_pagar && !p.parece_pagar.parcial && !correcao?.vinculo;
+}
+
 export type MotivoForaDoLote =
   'transferencia' | 'sem_receita' | 'acima_do_limite' | 'responder_vinculo' | 'responder_os' | 'responder_destino';
 
@@ -47,6 +57,7 @@ export function motivoForaDoLote(
   if (saiSemReceita(p.kind, correcao?.category ?? p.suggested_category)) return 'sem_receita';
   if (!(Number(p.suggested_amount ?? 0) < limiteLote)) return 'acima_do_limite';
   if (precisaDecidir(p.vinculo_sugerido, correcao?.vinculo)) return 'responder_vinculo';
+  if (pareceSemResposta(p, correcao)) return 'responder_vinculo';
   if (perguntaDaOSAberta(p, correcao)) return 'responder_os';
   if (faltaNoDestinoDaLinha(p, correcao).length > 0) return 'responder_destino';
   return null;

@@ -75,6 +75,12 @@ Deno.test("nome parcial nunca é escolhido calado: vira pergunta", async () => {
   assertEquals(r.opcoes[0].id, "f");
 });
 
+/** A fila que a aprovação lê antes de aprovar: nenhuma entrada de cliente (só saídas). */
+function filaSemEntradas() {
+  const b: any = { select: () => b, in: () => Promise.resolve({ data: [], error: null }) };
+  return { from: () => b };
+}
+
 Deno.test("aprovar leva as respostas de OS e OC, e recusa número no lugar do id", async () => {
   Deno.env.set("SUPABASE_URL", "https://exemplo.supabase.co");
   const original = globalThis.fetch;
@@ -86,7 +92,8 @@ Deno.test("aprovar leva as respostas de OS e OC, e recusa número no lugar do id
   const os = "11111111-1111-1111-1111-111111111111";
   const oc = "22222222-2222-2222-2222-222222222222";
   try {
-    const ctx = { sb: {}, admin: {}, userId: "u", userRole: "admin" as const, jwt: "jwt", appOrigin: "", settings: {} };
+    // A aprovação lê a fila antes (F4: entrada que parece pagar contas existentes) — aqui, saídas.
+    const ctx = { sb: filaSemEntradas(), admin: {}, userId: "u", userRole: "admin" as const, jwt: "jwt", appOrigin: "", settings: {} };
     await tool("aprovar_propostas_de_lancamento").execute({ ids: ["p1", "p2"], os: { p1: os, p2: "nenhuma" }, oc: { p1: oc } }, ctx as never);
     const errado = await tool("aprovar_propostas_de_lancamento").execute({ ids: ["p1"], oc: { p1: "OC-0003" } }, ctx as never) as any;
     assertEquals(typeof errado.error, "string");
@@ -102,6 +109,8 @@ function sbComCentros(lista: Array<{ id: string; name: string }>) {
   const b: any = {
     select: () => b, eq: () => b,
     order: () => Promise.resolve({ data: lista.map((c) => ({ ...c, active: true })), error: null }),
+    // A leitura da fila (F4) antes de aprovar: nenhuma entrada de cliente.
+    in: () => Promise.resolve({ data: [], error: null }),
   };
   return { from: () => b };
 }

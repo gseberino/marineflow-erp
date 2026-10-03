@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 import { EstePixPagaDialog } from './EstePixPagaDialog';
+import type { ParecePagar } from '../../supabase/functions/_shared/banking/parece-pagar';
 
 const { aplicarMock, dados } = vi.hoisted(() => ({
   aplicarMock: vi.fn(),
@@ -27,12 +28,12 @@ vi.mock('@/hooks/use-payees', () => ({
   useClientesParaReceita: () => ({ data: [{ id: 'cli', name: 'Cliente Final' }] }),
 }));
 
-function renderizar() {
+function renderizar(sugestao?: ParecePagar) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider>
-        <EstePixPagaDialog aberto onFechar={() => {}} entradaId="btL" clienteInicial="cli" />
+        <EstePixPagaDialog aberto onFechar={() => {}} entradaId="btL" clienteInicial="cli" sugestao={sugestao} />
       </I18nProvider>
     </QueryClientProvider>,
   );
@@ -114,5 +115,31 @@ describe('EstePixPagaDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Aplicar' }));
     await user.click(screen.getByRole('button', { name: 'Confirmar' }));
     expect(aplicarMock.mock.calls[0][0].aplicacoes).toEqual([{ receivable_id: 'r1', valor: 995, quitar: true }]);
+  });
+
+  it('aberto pela sugestão (F4): contas e pagamento à mão já marcados, aplica com o mesmo clique', async () => {
+    const user = userEvent.setup();
+    dados.entrada = { data: '2026-08-11', valor: 4805, quem: 'CLIENTE', aplicado: 0, sobra: 4805, aplicacoes: [] };
+    dados.pagamentos = [{ id: 'pg9', contaId: 'r9', descricao: 'Sinal — ORÇ-00009', documento: null, data: '2026-08-11', valor: 5 }];
+    renderizar({
+      itens: [
+        { tipo: 'conta', id: 'r74', rotulo: 'Sinal — ORÇ-00074', saldo: 2280, valor: 2280, quitar: false },
+        { tipo: 'conta', id: 'r77', rotulo: 'Sinal — ORÇ-00077', saldo: 2520, valor: 2520, quitar: false },
+        { tipo: 'pagamento', id: 'pg9', rotulo: 'ORÇ-00009 (lançado à mão em 11/08)', saldo: 5, valor: 5, quitar: false },
+      ],
+      diferenca: 0, outraCombinacao: false, parcial: false,
+    });
+    expect(screen.getByTestId('preenchido-pela-sugestao')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Este Pix paga Sinal — ORÇ-00074' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Este Pix paga Sinal — ORÇ-00077' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Este Pix é o pagamento de Sinal — ORÇ-00009' })).toBeChecked();
+    expect(screen.getByRole('textbox', { name: 'Quanto vai para Sinal — ORÇ-00077' })).toHaveValue('2.520,00');
+    await user.click(screen.getByRole('button', { name: 'Aplicar' }));
+    await user.click(screen.getByRole('button', { name: 'Confirmar' }));
+    expect(aplicarMock.mock.calls[0][0].aplicacoes).toEqual([
+      { receivable_id: 'r74', valor: 2280, quitar: false },
+      { receivable_id: 'r77', valor: 2520, quitar: false },
+      { pagamento_id: 'pg9' },
+    ]);
   });
 });

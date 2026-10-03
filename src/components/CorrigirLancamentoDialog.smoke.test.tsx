@@ -12,7 +12,7 @@ import { I18nProvider } from '@/i18n';
 import { CorrigirLancamentoDialog, camposQueMudaram, type Formulario } from './CorrigirLancamentoDialog';
 import { DesfazerOuCancelarDialog } from './DesfazerOuCancelarDialog';
 
-const { corrigirMock, desfazerMock, cancelarMock, ajustarMock, tirarMock, entrada, vinculo, periodos, pix } = vi.hoisted(() => ({
+const { corrigirMock, desfazerMock, cancelarMock, ajustarMock, tirarMock, entrada, vinculo, periodos, pix, outrosPix } = vi.hoisted(() => ({
   corrigirMock: vi.fn(),
   desfazerMock: vi.fn(),
   cancelarMock: vi.fn(),
@@ -29,6 +29,7 @@ const { corrigirMock, desfazerMock, cancelarMock, ajustarMock, tirarMock, entrad
   } },
   periodos: { lista: [] as Array<{ ano: number; mes: number; reaberto_em: string | null }> },
   pix: { partes: null as null | Array<{ id: string; amount: number; expense_category: string | null; divisao_id: string | null }> },
+  outrosPix: { lista: [] as Array<{ pagamentoId: string; linhaId: string }> },
 }));
 
 vi.mock('@/hooks/use-lancamentos', async (importOriginal) => ({
@@ -44,6 +45,7 @@ vi.mock('@/hooks/use-lancamentos', async (importOriginal) => ({
   useAplicarEntradaEmContas: () => ({ mutate: vi.fn(), isPending: false }),
   useContasEmAbertoDoCliente: () => ({ data: [], isLoading: false }),
   usePagamentosSemPixDoCliente: () => ({ data: [] }),
+  usePixDaConta: () => ({ data: outrosPix.lista }),
 }));
 vi.mock('@/hooks/use-fechamento', () => ({ usePeriodosFechados: () => ({ data: periodos.lista }) }));
 vi.mock('@/hooks/use-suppliers', () => ({
@@ -83,6 +85,7 @@ beforeEach(() => {
   vinculo.dado = null;
   entrada.dado = null;
   periodos.lista = [];
+  outrosPix.lista = [];
 });
 
 describe('CorrigirLancamentoDialog', () => {
@@ -230,6 +233,47 @@ describe('CorrigirLancamentoDialog — um Pix para várias contas (forma A, F2, 
     expect(screen.getByRole('button', { name: /Aplicar os R\$\s?2\.520,00 que sobraram em outra conta/ })).toBeInTheDocument();
     // Ajustar continua possível (pagou a mais de propósito), mas como segunda opção.
     expect(screen.getByRole('button', { name: /Ajustar para R\$\s?4\.800,00/ })).toBeInTheDocument();
+  });
+});
+
+describe('CorrigirLancamentoDialog — conta paga por um Pix que não é dela (F4, 03/10/2026)', () => {
+  // O sinal do ORÇ-00077: pago pelo Pix do Lenine, mas a linha é "dona" do ORÇ-00074.
+  const sinal77 = {
+    id: 'r77', description: 'Sinal — ORÇ-00077', amount: 2520, paid_amount: 2520, status: 'paid',
+    issue_date: '2026-08-11', due_date: '2026-08-11', notes: null, cost_center_id: null,
+    bank_transaction_id: null, category: null, client_id: 'cli', service_order_id: null,
+  };
+
+  it('mostra de qual Pix veio e oferece tirar ESTA conta da entrada, não desfazer a aprovação', async () => {
+    const user = userEvent.setup();
+    outrosPix.lista = [{ pagamentoId: 'pb', linhaId: 'btL' }];
+    vinculo.dado = {
+      linha: { data: '2026-08-11', descricao: 'Pix recebido de LENINE LORI BROCCA', valor: 4800, pagamentoId: 'pa' },
+      pagamentos: [{ id: 'pb', valor: 2520, data: '2026-08-11' }],
+      nasceuDoExtrato: false,
+    };
+    entrada.dado = {
+      data: '2026-08-11', valor: 4800, quem: 'LENINE', aplicado: 4800, sobra: 0,
+      aplicacoes: [
+        { pagamentoId: 'pa', contaId: 'r74', descricao: 'Sinal — ORÇ-00074', valor: 2280 },
+        { pagamentoId: 'pb', contaId: 'r77', descricao: 'Sinal — ORÇ-00077', valor: 2520 },
+      ],
+    };
+    renderizar(<CorrigirLancamentoDialog tipo="receivable" lancamento={sinal77} onFechar={() => {}} />);
+    expect(screen.getByText(/Ligado ao extrato: .*Pix recebido de LENINE LORI BROCCA/)).toBeInTheDocument();
+    expect(screen.getByText(/pagou também Sinal — ORÇ-00074 \(R\$\s?2\.280,00\)/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Desfazer/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Ajustar/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Tirar esta conta desta entrada' }));
+    expect(tirarMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Confirmar: tirar desta entrada' }));
+    expect(tirarMock.mock.calls[0][0]).toEqual({ pagamentoId: 'pb' });
+  });
+
+  it('conta sem Pix nenhum: sem caixa', () => {
+    renderizar(<CorrigirLancamentoDialog tipo="receivable" lancamento={sinal77} onFechar={() => {}} />);
+    expect(screen.queryByText(/Ligado ao extrato/)).not.toBeInTheDocument();
   });
 });
 

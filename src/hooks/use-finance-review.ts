@@ -1,8 +1,12 @@
 // Caixa de entrada financeira: propostas do sistema aguardando decisão do gestor.
+import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { Identificacao } from '../../supabase/functions/_shared/banking/contraparte';
 import type { VinculoSugerido } from '../../supabase/functions/_shared/banking/vinculo';
+import {
+  candidatosDosClientes, DIAS_DO_PAGAMENTO_A_MAO, parecePagar, type ParecePagar,
+} from '../../supabase/functions/_shared/banking/parece-pagar';
 import { toast } from 'sonner';
 import { useAppSetting } from '@/hooks/use-app-settings';
 
@@ -76,6 +80,11 @@ export interface PropostaFinanceira {
   evidencia?: (Partial<Identificacao> & { anotacao?: { id?: string; os_id?: string | null } | null; motor?: number }) | null;
   /** O que a linha provavelmente paga (conta, pagamento já lançado, sinal, saldo de OS). */
   vinculo_sugerido?: VinculoSugerido | null;
+  /**
+   * Calculado na tela (não vem do banco): as contas em aberto ou os pagamentos lançados à mão do
+   * cliente identificado que esta entrada parece pagar (forma A, F4 — 03/10/2026).
+   */
+  parece_pagar?: ParecePagar | null;
   created_at: string;
   /** Identificação vinda do extrato, para decidir sem abrir o internet banking. */
   bank_transactions?: {
@@ -181,6 +190,45 @@ async function invokeReview<T>(body: Record<string, unknown>): Promise<T> {
   }
   if ((data as any)?.error) throw new Error((data as any).error);
   return data as T;
+}
+
+/**
+ * "Parece pagar" de cada entrada da fila (forma A, F4 — 03/10/2026): as contas que JÁ EXISTEM do
+ * cliente identificado (ou escolhido na linha) cuja soma bate com o Pix. Uma leitura para a fila
+ * toda; a regra é a de _shared/banking/parece-pagar.ts, a mesma do assistente.
+ */
+export function useParecePagarDaFila(
+  propostas: PropostaFinanceira[],
+  correcoes: Record<string, Correcao>,
+): Map<string, ParecePagar> {
+  const entradas = useMemo(() => propostas.flatMap((p) => {
+    if (p.kind !== 'create_receivable' || !p.bank_transaction_id) return [];
+    const cliente = correcoes[p.id]?.clientId ?? p.suggested_client_id;
+    if (!cliente || !p.suggested_date) return [];
+    return [{ id: p.id, cliente, valor: Math.abs(Number(p.suggested_amount ?? 0)), data: p.suggested_date }];
+  }), [propostas, correcoes]);
+  const clientes = useMemo(() => [...new Set(entradas.map((e) => e.cliente))].sort(), [entradas]);
+  const desde = useMemo(() => {
+    const primeira = entradas.map((e) => e.data).sort()[0];
+    if (!primeira) return '';
+    const d = new Date(`${primeira.slice(0, 10)}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - DIAS_DO_PAGAMENTO_A_MAO);
+    return d.toISOString().slice(0, 10);
+  }, [entradas]);
+  const { data: candidatos } = useQuery({
+    queryKey: ['parece-pagar', clientes, desde],
+    enabled: clientes.length > 0,
+    queryFn: () => candidatosDosClientes(supabase, clientes, desde),
+  });
+  return useMemo(() => {
+    const out = new Map<string, ParecePagar>();
+    if (!candidatos) return out;
+    for (const e of entradas) {
+      const r = parecePagar({ valor: e.valor, data: e.data }, candidatos.get(e.cliente) ?? []);
+      if (r) out.set(e.id, r);
+    }
+    return out;
+  }, [entradas, candidatos]);
 }
 
 /** Fila pendente, mais confiáveis primeiro — o lote começa pelo que é seguro aprovar em bloco. */
