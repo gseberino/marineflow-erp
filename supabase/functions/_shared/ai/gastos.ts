@@ -73,12 +73,23 @@ export interface LinhaSemLancamento {
   categoriaSugerida: string | null;
 }
 
+/**
+ * O nome do estabelecimento como uma pessoa leria: sem o prefixo do intermediador de pagamento
+ * ("DL*", "PAG*", "MP*") e com a marca separada do resto ("DL*UBERRIDES" → "UBER RIDES").
+ */
+export function nomeLegivel(quem: string): string {
+  return String(quem ?? "")
+    .replace(/^\s*(?:DL|PAG|MP|PG|EC|IFD|PICPAY|MERCADOPAGO|EBANX)\s*\*\s*/i, "")
+    .replace(/\bUBER(?=[A-Z])/gi, "UBER ")
+    .replace(/\*/g, " ");
+}
+
 /** A categoria que a linha indica: a sugestão do Extrato, o ramo do cartão ou o texto. */
 export function categoriaDaLinha(l: Pick<LinhaSemLancamento, "categoriaSugerida" | "mcc" | "quem">, regras: RegraFinanceira[] = []): { categoria: string; por: string } | null {
   if (l.categoriaSugerida) return { categoria: l.categoriaSugerida, por: "sugestão do Extrato" };
   const pelaMcc = categoriaPorMcc(l.mcc);
   if (pelaMcc) return { categoria: pelaMcc.categoria, por: `ramo do cartão: ${pelaMcc.rotulo}` };
-  const peloTexto = categoriaPeloTexto(l.quem, regras);
+  const peloTexto = categoriaPeloTexto(l.quem, regras) ?? categoriaPeloTexto(nomeLegivel(l.quem), regras);
   if (peloTexto) return { categoria: peloTexto.categoria, por: peloTexto.motivo };
   return null;
 }

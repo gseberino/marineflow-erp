@@ -82,3 +82,9 @@ Deno.test("soma sem erro de centavo e intervalo do mês", () => {
   assertEquals(intervaloDoMes(2026, 9), ["2026-09-01", "2026-09-30"]);
   assertEquals(intervaloDoMes(2028, 2), ["2028-02-01", "2028-02-29"]);
 });
+
+Deno.test("Uber pendente no cartão ('DL*UBERRIDES') conta como deslocamento", () => {
+  assertEquals(categoriaDaLinha({ categoriaSugerida: null, mcc: null, quem: "DL*UBERRIDES" })?.categoria, "Combustível e deslocamento");
+  // Nome comum não vira categoria por acaso.
+  assertEquals(categoriaDaLinha({ categoriaSugerida: null, mcc: null, quem: "KOCH HIPERMERCADO SA" }), null);
+});

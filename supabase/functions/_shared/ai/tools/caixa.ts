@@ -701,10 +701,23 @@ export const caixaTools: ToolDef[] = [
             return !c || !foraDoResultado.has(c.categoria);
           });
         if (semLancamento.length) {
+          // Por categoria indicada: no mês inteiro a lista de itens mostra só as maiores, e o
+          // assistente somou só o que viu ("R$ 70,98 no posto" em vez de R$ 356,51, 02/10/2026).
+          const porCategoriaNao = new Map<string, { valor: number; quantidade: number }>();
+          for (const l of semLancamento) {
+            const c = categoriaDaLinha(l, regras)?.categoria ?? "(sem categoria indicada)";
+            const atual = porCategoriaNao.get(c) ?? { valor: 0, quantidade: 0 };
+            atual.valor += l.valor;
+            atual.quantidade += 1;
+            porCategoriaNao.set(c, atual);
+          }
           naoLancado = {
             total: somar(semLancamento, (l) => l.valor),
             quantidade: semLancamento.length,
             pendentes_no_cartao: semLancamento.filter((l) => l.pendente).length,
+            por_categoria: [...porCategoriaNao.entries()].sort((a, b) => b[1].valor - a[1].valor)
+              .map(([categoria, v]) => ({ categoria, valor: centavos(v.valor), quantidade: v.quantidade })),
+            observacao: "Categoria indicada pela sugestão do Extrato, pelo ramo do cartão ou pelo nome do estabelecimento — ainda não confirmada por ninguém.",
             itens: [...semLancamento].sort((a, b) => b.valor - a.valor).slice(0, 15).map((l) => {
               const c = categoriaDaLinha(l, regras);
               return {

@@ -359,6 +359,9 @@ Deno.test("gastos_por_categoria: o mês todo — fatura fica fora do total, e o 
   assertEquals(r.fora_do_resultado, 900);
   // Sem lançamento: posto (139,30) + assinatura (466,75); a fatura de 100 na fila fica fora.
   assertEquals(r.nao_lancado.total, 606.05);
+  // Por categoria indicada: o combustível pendente aparece inteiro, não só o que coube nos itens.
+  const comb = r.nao_lancado.por_categoria.find((c: any) => c.categoria === "Combustível e deslocamento");
+  assertEquals(comb, { categoria: "Combustível e deslocamento", valor: 139.3, quantidade: 3 });
 });
 
 Deno.test("gastos_por_categoria: consulta recusada vira erro dito — nunca R$ 0", async () => {

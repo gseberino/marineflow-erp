@@ -102,3 +102,23 @@ Deno.test("fechamento: erro ao ler o extrato vira mensagem, não um zero", async
   const r = await t.execute({ period: "hoje" }, ctx as never) as { error?: string };
   assertEquals(r.error, "Não consegui ler o extrato: permission denied");
 });
+
+// 02/10/2026: "gasto total de setembro" chamou o fechamento com period 'mes' e veio OUTUBRO — 'mes'
+// só sabia o mês corrente. Com mes/ano, o mês passado inteiro.
+Deno.test("fechamento de um mês passado inteiro (mes/ano)", async () => {
+  const sb = sbFalso({
+    bank_transactions: [
+      { id: "s1", transaction_date: "2025-09-10", amount: 500, transaction_type: "credit", source_type: "bank", provider: "pluggy", bank_connection_id: "c6", dismissed_kind: null, tx_status: "POSTED", import_batch_id: null },
+      { id: "s2", transaction_date: "2025-09-20", amount: 120, transaction_type: "debit", source_type: "bank", provider: "pluggy", bank_connection_id: "c6", dismissed_kind: null, tx_status: "POSTED", import_batch_id: null },
+    ],
+  });
+  const t = financialTools.find((x) => x.name === "get_period_summary")!;
+  const ctx = { sb, admin: {}, userId: "u", userRole: "admin" as const, jwt: "", appOrigin: "", settings: {} };
+  // deno-lint-ignore no-explicit-any
+  const r = await t.execute({ mes: 9, ano: 2025 }, ctx as never) as any;
+  assertEquals([r.periodo, r.de, r.ate], ["09/2025", "2025-09-01", "2025-09-30"]);
+  assertEquals([r.entrou, r.saiu], [500, 120]);
+  // deno-lint-ignore no-explicit-any
+  const erro = await t.execute({ mes: 13, ano: 2025 }, ctx as never) as any;
+  assertEquals(typeof erro.error, "string");
+});

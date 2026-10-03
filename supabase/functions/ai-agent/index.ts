@@ -41,7 +41,7 @@ import { verifyPin } from "../_shared/ai/whatsapp-pin.ts";
 import { STATUS_INJETAVEL, colunaDaEntidade } from "../_shared/ai/memory-scope.ts";
 import { podarHistoricoParaLLM } from "../_shared/ai/context-pruning.ts";
 import { filtrarPorCanal } from "../_shared/ai/channel-scope.ts";
-import { carregarJanela } from "../_shared/ai/history-window.ts";
+import { carregarJanela, marcarResultadosAnteriores } from "../_shared/ai/history-window.ts";
 import { lerPedidoDePdf, textoDoAtalhoPdf } from "../_shared/ai/atalho-pdf.ts";
 
 const corsHeaders = {
@@ -558,7 +558,9 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   // ---- Turno normal do LLM ----
   // Janela pelas mensagens MAIS RECENTES (ver history-window.ts). Antes era ascending+limit, que
   // devolvia as mais antigas e congelava — o agente relia o pedido original a cada turno.
-  const rows = await carregarJanela(admin, sessionId);
+  // Resultados de ferramenta do histórico chegam marcados como de um turno anterior: o modelo
+  // consulta de novo em vez de repetir o número velho (02/10/2026, ver history-window.ts).
+  const rows = marcarResultadosAnteriores(await carregarJanela(admin, sessionId));
   const seedMessages = rows.map(rowToChatMessage);
   const alreadyPersistedCount = toAnthropicMessages(seedMessages).length;
   const historyMessages: ChatMessage[] = [...seedMessages, { role: "user", content: effectiveText }];
@@ -845,7 +847,7 @@ servirComCors(async (req) => {
       if (sessErr || !newSession) return jr({ error: `Falha ao criar sessão: ${sessErr?.message || "erro desconhecido"}` }, 500);
       sessionId = newSession.id;
     } else {
-      const rows = await carregarJanela(admin, sessionId);
+      const rows = marcarResultadosAnteriores(await carregarJanela(admin, sessionId));
       seedMessages = rows.map(rowToChatMessage);
       alreadyPersistedCount = toAnthropicMessages(seedMessages).length;
     }

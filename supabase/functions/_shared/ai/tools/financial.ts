@@ -509,11 +509,13 @@ export const financialTools: ToolDef[] = [
   {
     name: "get_period_summary",
     description:
-      "FECHAMENTO do período pelo EXTRATO: quanto ENTROU e quanto SAIU das contas e do Caixa (a mesma conta da Central de relatórios e do painel inicial), o saldo do período (entrou − saiu; NÃO é o saldo das contas) e as pendências que pedem ação (a receber vencido, contas a pagar vencendo, OS concluídas). Transferência entre contas próprias e crédito do cartão na conta vêm à parte, sem somar. Use para 'como foi hoje?', 'fechamento da semana', 'resumo do mês', 'quanto entrou esse mês'. Só leitura — não registra nada.",
+      "FECHAMENTO do período pelo EXTRATO: quanto ENTROU e quanto SAIU das contas e do Caixa (a mesma conta da Central de relatórios e do painel inicial), o saldo do período (entrou − saiu; NÃO é o saldo das contas) e as pendências que pedem ação (a receber vencido, contas a pagar vencendo, OS concluídas). Transferência entre contas próprias e crédito do cartão na conta vêm à parte, sem somar. Use para 'como foi hoje?', 'fechamento da semana', 'resumo do mês', 'quanto entrou esse mês' e, com mes/ano, um mês passado inteiro ('quanto entrou em setembro'). Só leitura — não registra nada.",
     input_schema: {
       type: "object",
       properties: {
         period: { type: "string", enum: ["hoje", "ontem", "semana", "mes"], description: "Período do fechamento (padrão: hoje). 'semana' = últimos 7 dias; 'mes' = mês corrente." },
+        mes: { type: "number", description: "Um mês inteiro (1 a 12), no lugar de period — ex.: setembro = 9." },
+        ano: { type: "number", description: "Ano do mês (padrão: o atual)." },
       },
     },
     risk: "low",
@@ -525,8 +527,21 @@ export const financialTools: ToolDef[] = [
 
       // Datas de Brasília: o servidor roda em UTC, e depois das 21h "hoje" já era amanhã.
       const hoje = hojeEmBrasilia();
-      const periodo = String(args.period || "hoje");
-      const { de, ate } = periodoDoFechamento(periodo, hoje);
+      let periodo = String(args.period || "hoje");
+      let { de, ate } = periodoDoFechamento(periodo, hoje);
+      // Um mês inteiro, inclusive passado (02/10/2026: "gasto total de setembro" caía no mês
+      // corrente, porque 'mes' só sabia o mês de hoje).
+      if (args.mes != null) {
+        const mes = Number(args.mes);
+        const ano = Number(args.ano ?? hoje.slice(0, 4));
+        if (!(mes >= 1 && mes <= 12) || !(ano > 2000)) return { error: "Mês precisa estar entre 1 e 12 (e o ano, completo)." };
+        const mm = String(mes).padStart(2, "0");
+        de = `${ano}-${mm}-01`;
+        ate = `${ano}-${mm}-${new Date(Date.UTC(ano, mes, 0)).getUTCDate()}`;
+        if (ate > hoje) ate = hoje;
+        if (de > hoje) return { error: "Esse mês ainda não começou." };
+        periodo = `${mm}/${ano}`;
+      }
 
       // ENTROU e SAIU: pelo extrato, com a regra da Central de relatórios e do painel inicial
       // (_shared/banking/fluxo-de-caixa.ts). Até 27/09/2026 a entrada vinha das baixas em

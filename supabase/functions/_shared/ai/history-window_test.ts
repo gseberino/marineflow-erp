@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { aparaJanela, TAMANHO_DA_JANELA, type LinhaHistorico } from "./history-window.ts";
+import { aparaJanela, marcarResultadosAnteriores, TAMANHO_DA_JANELA, type LinhaHistorico } from "./history-window.ts";
 
 // O que estes testes protegem: a janela volta para a API da Anthropic, que rejeita com 400 tanto
 // um `tool_result` sem o `tool_use` que o originou quanto um `tool_use` sem resultado. Cortar as
@@ -135,4 +135,24 @@ Deno.test("REGRESSÃO NOVO-agente-04: a janela alcança o FIM da conversa, não 
   assertEquals(nova[nova.length - 1].content, "conserte os itens que estão na lista errada");
   // E o corte é seguro: começa numa fala do usuário.
   assertEquals(nova.length > 0 && nova[0].role, "user");
+});
+
+// 02/10/2026: o assistente respondeu "rodei a consulta e veio zerado" sem chamar a ferramenta,
+// repetindo o R$ 0 de uma consulta anterior (quebrada). Resultado que volta do histórico vem
+// marcado como anterior, com a hora, para o modelo consultar de novo.
+Deno.test("resultado de ferramenta do histórico vem marcado como consulta anterior, com a hora", () => {
+  const linhas: LinhaHistorico[] = [
+    { role: "user", content: "quanto gastei de combustível?", tool_calls: null, tool_call_id: null, created_at: "2026-10-03T01:25:25Z" },
+    { role: "assistant", content: "", tool_calls: [{ id: "t1", type: "function", function: { name: "gastos_por_categoria", arguments: "{}" } }], tool_call_id: null, created_at: "2026-10-03T01:25:25Z" },
+    { role: "tool", content: '{"total":0}', tool_calls: null, tool_call_id: "t1", created_at: "2026-10-03T01:25:25Z" },
+    { role: "assistant", content: "Deu zero.", tool_calls: null, tool_call_id: null, created_at: "2026-10-03T01:25:25Z" },
+  ];
+  const marcadas = marcarResultadosAnteriores(linhas);
+  assertEquals(marcadas[2].content, '[Resultado de uma consulta anterior, de 02/10, 22:25. Para valores, totais e saldos, consulte de novo antes de responder: pode estar desatualizado.]\n{"total":0}');
+  // Fala do usuário e do assistente não mudam; o id do tool_result continua o mesmo.
+  assertEquals(marcadas[0].content, linhas[0].content);
+  assertEquals(marcadas[3].content, "Deu zero.");
+  assertEquals(marcadas[2].tool_call_id, "t1");
+  // Sem hora, sem "de …".
+  assertEquals(marcarResultadosAnteriores([{ ...linhas[2], created_at: null }])[0].content?.startsWith("[Resultado de uma consulta anterior. Para"), true);
 });

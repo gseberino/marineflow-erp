@@ -30,6 +30,34 @@ export interface LinhaHistorico {
   content: string | null;
   tool_calls: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> | null;
   tool_call_id: string | null;
+  /** Quando foi gravada — marca os resultados de consultas anteriores (marcarResultadosAnteriores). */
+  created_at?: string | null;
+}
+
+/**
+ * Todo resultado de ferramenta que volta do histórico é de um turno ANTERIOR (o turno atual ainda
+ * não foi gravado). Sem dizer isso, o modelo reaproveita o número velho em vez de consultar de novo.
+ *
+ * Caso de 02/10/2026: às 22:25 a ferramenta de gastos (ainda quebrada) devolveu R$ 0 de combustível;
+ * às 23:50, já corrigida, o dono perguntou de novo e o assistente respondeu "rodei a consulta e veio
+ * zerado" SEM chamar a ferramenta — repetiu o zero do histórico. O aviso vai no próprio resultado,
+ * que é onde o modelo olha, e é o mesmo a cada turno (não quebra o cache do prompt).
+ */
+export function marcarResultadosAnteriores<T extends LinhaHistorico>(linhas: T[]): T[] {
+  return linhas.map((l) => {
+    if (l.role !== "tool" || !l.content) return l;
+    let quando = "";
+    if (l.created_at) {
+      const d = new Date(l.created_at);
+      if (!Number.isNaN(d.getTime())) {
+        quando = `, de ${d.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`;
+      }
+    }
+    return {
+      ...l,
+      content: `[Resultado de uma consulta anterior${quando}. Para valores, totais e saldos, consulte de novo antes de responder: pode estar desatualizado.]\n${l.content}`,
+    };
+  });
 }
 
 /** Quantas mensagens voltam ao modelo. Era 30 (e pelo lado errado). O dobro cabe folgado no
