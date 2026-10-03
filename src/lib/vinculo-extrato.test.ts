@@ -101,3 +101,42 @@ describe('diagnosticoDoVinculo', () => {
     expect(nasceu.efeitoDoDesfazer).toMatch(/cancela este lançamento/);
   });
 });
+
+describe('diagnosticoDoVinculo — um Pix para várias contas (forma A, F2, 02/10/2026)', () => {
+  // O Pix de R$ 4.800 do Lenine: sinal do ORÇ-00074 (R$ 2.280) + sinal do ORÇ-00077 (R$ 2.520).
+  const linha = { data: '2026-08-11', descricao: 'LENINE', valor: 4800, pagamentoId: 'pa' };
+
+  it('a entrada pagou outra conta: diz qual e não oferece ajustar (contaria o dinheiro duas vezes)', () => {
+    const d = diagnosticoDoVinculo({
+      ...base, tipo: 'receivable', valor: 2280, linha, pagamentos: [pag('pa', 2280, '2026-08-11')],
+      outrasContas: [{ descricao: 'Sinal — ORÇ-00077', valor: 2520 }], sobraDaEntrada: 0,
+    });
+    expect(d.situacao).toBe('varias_contas');
+    expect(d.texto).toBe('Esta entrada de R$ 4800,00 pagou também Sinal — ORÇ-00077 (R$ 2520,00). Ela está toda aplicada.');
+    expect(d.podeAjustar).toBe(false);
+    expect(d.podeAplicarSobra).toBe(false);
+    expect(d.efeitoDoDesfazer).toMatch(/a entrada continua pagando as outras contas/);
+  });
+
+  it('Pix maior que a conta, sem outra conta ainda: oferece aplicar a sobra e avisa acima de R$ 10', () => {
+    const d = diagnosticoDoVinculo({
+      ...base, tipo: 'receivable', valor: 2280, linha, pagamentos: [pag('pa', 2280, '2026-08-11')],
+      sobraDaEntrada: 2520,
+    });
+    expect(d.situacao).toBe('banco_maior');
+    expect(d.texto).toMatch(/Acima de R\$ 10, avalie/);
+    expect(d.podeAplicarSobra).toBe(true);
+    expect(d.rotuloDaSobra).toBe('Aplicar os R$ 2520,00 que sobraram em outra conta');
+    expect(d.podeAjustar).toBe(true);
+  });
+
+  it('centavos a mais (ORÇ-00073) não falam em outra conta', () => {
+    const d = diagnosticoDoVinculo({
+      ...base, tipo: 'receivable', valor: 1865.47,
+      linha: { data: '2026-07-30', descricao: 'RF SILVA', valor: 1866, pagamentoId: 'p1' },
+      pagamentos: [pag('p1', 1865.47)], sobraDaEntrada: 0.53,
+    });
+    expect(d.texto).not.toMatch(/avalie/);
+    expect(d.podeAplicarSobra).toBe(true);
+  });
+});

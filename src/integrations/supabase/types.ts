@@ -5336,6 +5336,7 @@ export type Database = {
       payments: {
         Row: {
           amount: number
+          bank_transaction_id: string | null
           cancellation_reason: string | null
           cancelled_at: string | null
           card_fee_percent: number | null
@@ -5354,6 +5355,7 @@ export type Database = {
         }
         Insert: {
           amount: number
+          bank_transaction_id?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           card_fee_percent?: number | null
@@ -5372,6 +5374,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          bank_transaction_id?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           card_fee_percent?: number | null
@@ -5389,6 +5392,13 @@ export type Database = {
           status?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "payments_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "payments_payable_id_fkey"
             columns: ["payable_id"]

@@ -173,6 +173,10 @@ export async function carregarCandidatos(admin: DbClient): Promise<Candidate[]> 
   // 4. Pagamentos já registrados no ERP e ainda não ligados a nenhuma linha do extrato.
   //    Quem lança o recebimento na hora e importa o extrato depois não tem conta "em
   //    aberto" para casar — tem um pagamento para amarrar. Janela de 120 dias.
+  //    Pagamento que já veio de uma entrada (payments.bank_transaction_id, desde 02/10/2026:
+  //    um Pix pode pagar várias contas) não é candidato: casá-lo com outra linha trocaria a
+  //    origem dele e tiraria a aplicação do Pix certo. Os mais recentes primeiro, para o
+  //    limite não cortar justamente os que importam.
   const desde = new Date(Date.now() - 120 * 86_400_000).toISOString().slice(0, 10);
   const { data: pagamentos } = await admin
     .from("payments")
@@ -180,7 +184,9 @@ export async function carregarCandidatos(admin: DbClient): Promise<Candidate[]> 
              receivables(description, client_id, service_order_id, bank_transaction_id, clients(name, cpf_cnpj), service_orders(service_order_number)),
              payables(description, bank_transaction_id, suppliers(name, cnpj_cpf))`)
     .eq("status", "confirmed")
+    .is("bank_transaction_id", null)
     .gte("payment_date", desde)
+    .order("payment_date", { ascending: false })
     .limit(300);
 
   const { data: jaVinculados } = await admin

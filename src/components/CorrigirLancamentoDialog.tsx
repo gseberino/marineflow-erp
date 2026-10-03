@@ -339,6 +339,7 @@ export function CorrigirLancamentoDialog({
                 linhaId={lancamento.bank_transaction_id}
                 mesFechado={mesFechado}
                 onConcluido={onFechar}
+                clienteId={tipo === 'receivable' ? lancamento.client_id ?? null : null}
               />
             </div>
           )}

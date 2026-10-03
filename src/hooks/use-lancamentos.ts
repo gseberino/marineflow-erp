@@ -50,6 +50,11 @@ export interface RespostaDoLancamento {
   linha_do_extrato?: 'fora_da_fila' | 'fila' | null;
   pagamento_registrado?: boolean;
   valor_pago?: number;
+  /** aplicar_entrada_em_contas */
+  aplicado?: number;
+  contas?: number;
+  /** desfazer_aplicacao: nada mais da entrada ficou aplicado e ela voltou para a fila. */
+  entrada_livre?: boolean;
 }
 
 /**
@@ -66,6 +71,7 @@ export function recarregarFinanceiro(qc: QueryClient) {
     ['trilha-conciliacao'], ['dre'], ['dashboard'], ['aging-report'], ['service-orders'],
     ['extrato-da-conta'], ['lancados-sozinhos'], ['checklist-do-mes'],
     ['dre-lancamentos'], ['saldo-das-contas'], ['despesas'], ['pix-dividido'],
+    ['vinculo-com-extrato'], ['entrada-aplicada'], ['contas-em-aberto-do-cliente'], ['pagamentos-sem-pix'],
   ]) qc.invalidateQueries({ queryKey: k });
 }
 
@@ -211,6 +217,142 @@ export function useCancelarLancamento() {
   return useMutation({
     mutationFn: (v: { tipo: TipoDeLancamento; id: string; motivo: string }) =>
       chamar('cancelar_lancamento', { p_tipo: v.tipo, p_id: v.id, p_motivo: v.motivo }),
+    onSuccess: (r) => { recarregarFinanceiro(qc); toast.success(r.message); },
+    onError: (e) => toast.error(mensagemDoErro(e)),
+  });
+}
+
+// ── "Este Pix paga…" (forma A, F2 — 02/10/2026) ──────────────────────────────────────────
+// Uma entrada do banco pode pagar várias contas e uma conta pode receber de várias entradas.
+// A regra é a da função do banco aplicar_entrada_em_contas (src/lib/este-pix-paga.ts a repete
+// para a tela dizer antes do clique).
+
+/** Uma conta que esta entrada já pagou. */
+export interface AplicacaoDaEntrada {
+  pagamentoId: string;
+  contaId: string;
+  descricao: string;
+  valor: number;
+}
+
+/** A entrada como recebimento: o valor, o que já foi aplicado (e em quais contas) e a sobra. */
+export function useEntradaAplicada(linhaId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['entrada-aplicada', linhaId],
+    enabled: !!linhaId,
+    queryFn: async () => {
+      const [entrada, aplicacoes] = await Promise.all([
+        supabase.from('recebimentos_do_extrato' as never)
+          .select('bank_transaction_id, data, valor, quem, aplicado, sobra, contas')
+          .eq('bank_transaction_id', linhaId!).maybeSingle(),
+        supabase.from('payments')
+          .select('id, amount, receivable_id, receivables!inner(description)')
+          .eq('bank_transaction_id', linhaId!)
+          .eq('status', 'confirmed')
+          .not('receivable_id', 'is', null),
+      ]);
+      if (entrada.error) throw entrada.error;
+      if (aplicacoes.error) throw aplicacoes.error;
+      const e = entrada.data as { data: string; valor: number; quem: string | null; aplicado: number; sobra: number } | null;
+      if (!e) return null;
+      return {
+        data: e.data,
+        valor: Number(e.valor),
+        quem: e.quem ?? '',
+        aplicado: Number(e.aplicado),
+        sobra: Number(e.sobra),
+        aplicacoes: ((aplicacoes.data ?? []) as unknown as Array<{ id: string; amount: number; receivable_id: string; receivables: { description: string } | null }>)
+          .map((p): AplicacaoDaEntrada => ({
+            pagamentoId: p.id, contaId: p.receivable_id, descricao: p.receivables?.description ?? 'Conta a receber', valor: Number(p.amount),
+          })),
+      };
+    },
+  });
+}
+
+/** Contas a receber em aberto de um cliente, da que vence primeiro para a última. */
+export function useContasEmAbertoDoCliente(clienteId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['contas-em-aberto-do-cliente', clienteId],
+    enabled: !!clienteId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('receivables')
+        .select('id, description, due_date, amount, paid_amount, service_orders!receivables_service_order_id_fkey(service_order_number)')
+        .eq('client_id', clienteId!)
+        .in('status', ['pending', 'overdue', 'partially_paid'])
+        .order('due_date', { ascending: true });
+      if (error) throw error;
+      return ((data ?? []) as unknown as Array<{
+        id: string; description: string; due_date: string; amount: number; paid_amount: number | null;
+        service_orders: { service_order_number: string } | null;
+      }>).map((x) => ({
+        id: x.id,
+        descricao: x.description,
+        documento: x.service_orders?.service_order_number ?? null,
+        vencimento: x.due_date,
+        valor: Number(x.amount),
+        pago: Number(x.paid_amount ?? 0),
+        saldo: Math.round((Number(x.amount) - Number(x.paid_amount ?? 0)) * 100) / 100,
+      })).filter((x) => x.saldo > 0);
+    },
+  });
+}
+
+/**
+ * Pagamentos do cliente lançados à mão e ainda sem entrada do banco (o "Receber sinal" antes do
+ * Pix aparecer no extrato). Dinheiro em espécie fica de fora: não pode ser um Pix.
+ */
+export function usePagamentosSemPixDoCliente(clienteId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['pagamentos-sem-pix', clienteId],
+    enabled: !!clienteId,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('payments')
+        .select('id, amount, payment_date, receivable_id, receivables!inner(description, client_id, status, service_orders!receivables_service_order_id_fkey(service_order_number))')
+        .eq('receivables.client_id', clienteId!)
+        .neq('receivables.status', 'cancelled')
+        .eq('status', 'confirmed')
+        .is('bank_transaction_id', null)
+        .neq('payment_method', 'cash')
+        .order('payment_date', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return ((data ?? []) as unknown as Array<{
+        id: string; amount: number; payment_date: string; receivable_id: string;
+        receivables: { description: string; service_orders: { service_order_number: string } | null } | null;
+      }>).map((p) => ({
+        id: p.id,
+        contaId: p.receivable_id,
+        descricao: p.receivables?.description ?? 'Conta a receber',
+        documento: p.receivables?.service_orders?.service_order_number ?? null,
+        data: p.payment_date,
+        valor: Number(p.amount),
+      }));
+    },
+  });
+}
+
+export function useAplicarEntradaEmContas() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: {
+      bankTransactionId: string;
+      aplicacoes: Array<{ receivable_id: string; valor: number; quitar: boolean } | { pagamento_id: string }>;
+      motivo?: string | null;
+    }) => chamar('aplicar_entrada_em_contas', {
+      p_transacao: v.bankTransactionId, p_aplicacoes: v.aplicacoes, p_motivo: v.motivo ?? null,
+    }),
+    onSuccess: (r) => { recarregarFinanceiro(qc); toast.success(r.message); },
+    onError: (e) => toast.error(mensagemDoErro(e)),
+  });
+}
+
+/** Estorna o pagamento que a aplicação criou (ou desliga o já lançado) e, se nada mais da entrada ficou aplicado, ela volta para a fila. */
+export function useDesfazerAplicacao() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { pagamentoId: string; motivo?: string | null }) =>
+      chamar('desfazer_aplicacao', { p_pagamento: v.pagamentoId, p_motivo: v.motivo ?? null }),
     onSuccess: (r) => { recarregarFinanceiro(qc); toast.success(r.message); },
     onError: (e) => toast.error(mensagemDoErro(e)),
   });

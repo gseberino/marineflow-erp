@@ -56,7 +56,9 @@ const SEMPRE_NO_PERFIL_ANTIGO = [
 // 01/10/2026: cadastrar_freelancer — o dono pediu um cadastro pelo WhatsApp e não havia como.
 // 02/10/2026: ajustar_lancamento_ao_valor_do_banco — o botão novo da correção (paridade tela ×
 // assistente): o dono pediu o conserto a um clique para o lançamento que não bate com o banco.
-const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer", "cadastrar_freelancer", "ajustar_lancamento_ao_valor_do_banco"];
+// 02/10/2026: aplicar_pix_em_contas e desfazer_aplicacao_de_pix — "Este Pix paga…" (um Pix para
+// várias contas, forma A F2), as mesmas ações do Extrato e da correção.
+const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer", "cadastrar_freelancer", "ajustar_lancamento_ao_valor_do_banco", "aplicar_pix_em_contas", "desfazer_aplicacao_de_pix"];
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento"];
 
 const ordenado = (xs: Iterable<string>) => [...new Set(xs)].sort();

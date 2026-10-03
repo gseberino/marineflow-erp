@@ -191,6 +191,8 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "buscar_lancamentos",
   "desfazer_aprovacao_de_lancamento",
   "ajustar_lancamento_ao_valor_do_banco",
+  "aplicar_pix_em_contas",
+  "desfazer_aplicacao_de_pix",
   "casar_lancamento_com_extrato",
   "cadastrar_contraparte_do_extrato",
   "verificar_mes",

@@ -12,11 +12,16 @@ import { I18nProvider } from '@/i18n';
 import { CorrigirLancamentoDialog, camposQueMudaram, type Formulario } from './CorrigirLancamentoDialog';
 import { DesfazerOuCancelarDialog } from './DesfazerOuCancelarDialog';
 
-const { corrigirMock, desfazerMock, cancelarMock, ajustarMock, vinculo, periodos, pix } = vi.hoisted(() => ({
+const { corrigirMock, desfazerMock, cancelarMock, ajustarMock, tirarMock, entrada, vinculo, periodos, pix } = vi.hoisted(() => ({
   corrigirMock: vi.fn(),
   desfazerMock: vi.fn(),
   cancelarMock: vi.fn(),
   ajustarMock: vi.fn(),
+  tirarMock: vi.fn(),
+  entrada: { dado: null as null | {
+    data: string; valor: number; quem: string; aplicado: number; sobra: number;
+    aplicacoes: Array<{ pagamentoId: string; contaId: string; descricao: string; valor: number }>;
+  } },
   vinculo: { dado: null as null | {
     linha: { data: string; descricao: string; valor: number; pagamentoId: string | null };
     pagamentos: Array<{ id: string; valor: number; data: string }>;
@@ -34,6 +39,11 @@ vi.mock('@/hooks/use-lancamentos', async (importOriginal) => ({
   useAjustarAoValorDoBanco: () => ({ mutate: ajustarMock, isPending: false }),
   useVinculoComExtrato: () => ({ data: vinculo.dado, isLoading: false }),
   usePixDividido: () => ({ data: pix.partes }),
+  useEntradaAplicada: () => ({ data: entrada.dado, isLoading: false }),
+  useDesfazerAplicacao: () => ({ mutate: tirarMock, isPending: false }),
+  useAplicarEntradaEmContas: () => ({ mutate: vi.fn(), isPending: false }),
+  useContasEmAbertoDoCliente: () => ({ data: [], isLoading: false }),
+  usePagamentosSemPixDoCliente: () => ({ data: [] }),
 }));
 vi.mock('@/hooks/use-fechamento', () => ({ usePeriodosFechados: () => ({ data: periodos.lista }) }));
 vi.mock('@/hooks/use-suppliers', () => ({
@@ -69,8 +79,9 @@ function renderizar(ui: React.ReactElement) {
 
 beforeEach(() => {
   pix.partes = null;
-  corrigirMock.mockReset(); desfazerMock.mockReset(); cancelarMock.mockReset(); ajustarMock.mockReset();
+  corrigirMock.mockReset(); desfazerMock.mockReset(); cancelarMock.mockReset(); ajustarMock.mockReset(); tirarMock.mockReset();
   vinculo.dado = null;
+  entrada.dado = null;
   periodos.lista = [];
 });
 
@@ -170,6 +181,55 @@ describe('CorrigirLancamentoDialog — ligado ao extrato (pedido do dono, 02/10/
     renderizar(<CorrigirLancamentoDialog tipo="receivable" lancamento={sinal} onFechar={() => {}} />);
     expect(screen.getByText(/para ajustar ou desfazer, reabra o mês/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Ajustar/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('CorrigirLancamentoDialog — um Pix para várias contas (forma A, F2, 02/10/2026)', () => {
+  // O caso do Lenine: Pix de R$ 4.800 = sinal do ORÇ-00074 (R$ 2.280) + sinal do ORÇ-00077 (R$ 2.520).
+  const sinal74 = {
+    id: 'r74', description: 'Sinal — ORÇ-00074', amount: 2280, paid_amount: 2280, status: 'paid',
+    issue_date: '2026-08-11', due_date: '2026-08-11', notes: null, cost_center_id: null,
+    bank_transaction_id: 'btL', category: null, client_id: 'cli', service_order_id: null,
+  };
+  const linhaDoLenine = {
+    linha: { data: '2026-08-11', descricao: 'Pix recebido de LENINE LORI BROCCA', valor: 4800, pagamentoId: 'pa' },
+    pagamentos: [{ id: 'pa', valor: 2280, data: '2026-08-11' }],
+    nasceuDoExtrato: false,
+  };
+
+  it('diz que o Pix pagou também a outra conta, não oferece ajustar e deixa tirar a outra da entrada', async () => {
+    const user = userEvent.setup();
+    vinculo.dado = linhaDoLenine;
+    entrada.dado = {
+      data: '2026-08-11', valor: 4800, quem: 'LENINE', aplicado: 4800, sobra: 0,
+      aplicacoes: [
+        { pagamentoId: 'pa', contaId: 'r74', descricao: 'Sinal — ORÇ-00074', valor: 2280 },
+        { pagamentoId: 'pb', contaId: 'r77', descricao: 'Sinal — ORÇ-00077', valor: 2520 },
+      ],
+    };
+    renderizar(<CorrigirLancamentoDialog tipo="receivable" lancamento={sinal74} onFechar={() => {}} />);
+    expect(screen.getByText(/pagou também Sinal — ORÇ-00077 \(R\$\s?2\.520,00\)\. Ela está toda aplicada/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Ajustar/ })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Tirar desta entrada' }));
+    expect(tirarMock).not.toHaveBeenCalled(); // primeiro diz o que acontece
+    expect(screen.getByText(/"Sinal — ORÇ-00077" deixa de ser paga por esta entrada/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Confirmar: tirar desta entrada' }));
+    expect(tirarMock).toHaveBeenCalledTimes(1);
+    expect(tirarMock.mock.calls[0][0]).toEqual({ pagamentoId: 'pb' });
+  });
+
+  it('Pix maior que a conta: oferece aplicar a sobra em outra conta antes de ajustar', () => {
+    vinculo.dado = linhaDoLenine;
+    entrada.dado = {
+      data: '2026-08-11', valor: 4800, quem: 'LENINE', aplicado: 2280, sobra: 2520,
+      aplicacoes: [{ pagamentoId: 'pa', contaId: 'r74', descricao: 'Sinal — ORÇ-00074', valor: 2280 }],
+    };
+    renderizar(<CorrigirLancamentoDialog tipo="receivable" lancamento={sinal74} onFechar={() => {}} />);
+    expect(screen.getByText(/Acima de R\$ 10, avalie: se o Pix pagou também outra conta, aplique a sobra nela/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Aplicar os R\$\s?2\.520,00 que sobraram em outra conta/ })).toBeInTheDocument();
+    // Ajustar continua possível (pagou a mais de propósito), mas como segunda opção.
+    expect(screen.getByRole('button', { name: /Ajustar para R\$\s?4\.800,00/ })).toBeInTheDocument();
   });
 });
 

@@ -301,6 +301,87 @@ export const lancamentoTools: ToolDef[] = [
     },
   },
 
+  // "Este Pix paga…" (forma A, F2 — 02/10/2026): o mesmo que a tela do Extrato e a correção fazem.
+  {
+    name: "aplicar_pix_em_contas",
+    description:
+      "Um Pix (entrada do extrato) que paga uma ou mais contas a receber que já existem: ex.: um Pix de R$ 4.800 que pagou o sinal do ORÇ-00074 (R$ 2.280) e o do ORÇ-00077 (R$ 2.520), ou uma OS paga em dois Pix (aplique cada Pix na mesma conta, um de cada vez). Para cada conta, diga quanto do Pix vai para ela; o Pix tem de ser aplicado por inteiro (sobra é recusada). Até R$ 10 a mais numa conta vira receita dela; com quitar=true, até R$ 10 a menos vira desconto e a conta fica paga; acima disso o banco recusa e explica. Se o pagamento já tinha sido lançado à mão (o 'receber sinal') e o Pix só chegou depois, use pagamento_id no lugar de receivable_id e valor: o Pix passa a ser a origem dele, sem criar outro. Quem fez o Pix com outro nome é pergunta ao dono, nunca palpite. Diga as contas e os valores antes de pedir o sim. Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        bank_transaction_id: { type: "string", description: "A entrada do extrato (de listar_transacoes_pendentes)." },
+        aplicacoes: {
+          type: "array",
+          description: "As contas que o Pix paga: {receivable_id, valor, quitar?} para cada conta em aberto, ou {pagamento_id} para um pagamento já lançado à mão.",
+          items: {
+            type: "object",
+            properties: {
+              receivable_id: { type: "string", description: "Conta a receber em aberto (de buscar_lancamentos ou get_os_receivables)." },
+              valor: { type: "number", description: "Quanto do Pix vai para esta conta, em reais." },
+              quitar: { type: "boolean", description: "Se faltar até R$ 10 nesta conta, quitar com desconto." },
+              pagamento_id: { type: "string", description: "Pagamento já lançado à mão que este Pix é (no lugar de receivable_id e valor)." },
+            },
+          },
+        },
+        motivo: { type: "string", description: "Contexto para a trilha (ex.: 'o Lenine pagou os dois sinais num Pix só')." },
+      },
+      required: ["bank_transaction_id", "aplicacoes"],
+    },
+    risk: "medium",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const bloqueio = blockTechnician(ctx);
+      if (bloqueio) return bloqueio;
+      if (typeof args.bank_transaction_id !== "string" || !args.bank_transaction_id) {
+        return { error: "Informe a entrada do extrato (bank_transaction_id, de listar_transacoes_pendentes)." };
+      }
+      if (!Array.isArray(args.aplicacoes) || args.aplicacoes.length === 0) {
+        return { error: "Diga quais contas o Pix paga (aplicacoes)." };
+      }
+      const aplicacoes: Array<Record<string, unknown>> = [];
+      for (const item of args.aplicacoes as Array<Record<string, unknown>>) {
+        if (typeof item?.pagamento_id === "string" && item.pagamento_id) {
+          aplicacoes.push({ pagamento_id: item.pagamento_id });
+        } else if (typeof item?.receivable_id === "string" && item.receivable_id && Number(item.valor) > 0) {
+          aplicacoes.push({ receivable_id: item.receivable_id, valor: Number(item.valor), quitar: item.quitar === true });
+        } else {
+          return { error: "Cada item precisa de receivable_id e valor maior que zero, ou de pagamento_id." };
+        }
+      }
+      return await chamar(ctx, "aplicar_entrada_em_contas", {
+        p_transacao: args.bank_transaction_id,
+        p_aplicacoes: aplicacoes,
+        p_motivo: typeof args.motivo === "string" ? args.motivo : null,
+      });
+    },
+  },
+
+  {
+    name: "desfazer_aplicacao_de_pix",
+    description:
+      "Tira uma conta de um Pix que ela recebeu (inclusive de um Pix que pagou várias contas): estorna o pagamento que a aplicação criou (a conta volta a dever aquele valor, e o acréscimo ou o desconto feitos na aplicação voltam) ou, se era um pagamento lançado à mão, só o desliga do Pix e ele continua valendo. Se nada mais do Pix fica aplicado, ele volta para a fila do Extrato. Diga o que vai voltar a faltar antes de pedir o sim. Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        payment_id: { type: "string", description: "O pagamento que veio do Pix (de get_os_receivables)." },
+        motivo: { type: "string", description: "Por que desfazer — vai para a trilha." },
+      },
+      required: ["payment_id"],
+    },
+    risk: "medium",
+    roles: NON_TECHNICIAN_ROLES,
+    async execute(args, ctx) {
+      const bloqueio = blockTechnician(ctx);
+      if (bloqueio) return bloqueio;
+      if (typeof args.payment_id !== "string" || !args.payment_id) {
+        return { error: "Informe o pagamento (payment_id, de get_os_receivables)." };
+      }
+      return await chamar(ctx, "desfazer_aplicacao", {
+        p_pagamento: args.payment_id, p_motivo: typeof args.motivo === "string" ? args.motivo : null,
+      });
+    },
+  },
+
   {
     name: "cancelar_lancamento",
     description:

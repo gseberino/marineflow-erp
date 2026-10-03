@@ -32,6 +32,7 @@ import { EvidenciaDaLinha, VinculoDaLinha } from '@/components/ExtratoIdentifica
 import { ParaOndeFoi, ObservacaoECentro } from '@/components/ParaOndeFoi';
 import { BotaoVerOS } from '@/components/VerOSRapido';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { BotaoEstePixPaga } from '@/components/EstePixPagaDialog';
 import { useContasDaHBR } from '@/hooks/use-bank-connections';
 import { origemDoDinheiro } from '@/lib/origem-do-dinheiro';
 import {
@@ -615,6 +616,17 @@ function LinhaProposta({
                 ocupado={ocupado}
                 semReceita={entradaSemLancamento}
               />
+              {/* Um Pix que paga contas que já existem — uma ou várias, ou o sinal lançado à mão
+                  (forma A, F2 — 02/10/2026). A sugestão acima só casa uma conta de valor parecido. */}
+              {p.kind === 'create_receivable' && p.bank_transaction_id && !entradaSemLancamento && (
+                <div className="mt-1">
+                  <BotaoEstePixPaga
+                    entradaId={p.bank_transaction_id}
+                    clienteInicial={correcao?.clientId ?? p.suggested_client_id ?? null}
+                    disabled={ocupado}
+                  />
+                </div>
+              )}
             </>
           )}
 
