@@ -74,9 +74,11 @@ export interface Freelancer { id: string; nome: string; perfis: Perfil[] }
 
 /** Quem tem perfil de diária — só esses entram aqui (Alex e Felipe, por exemplo, não). */
 async function freelancersComDiaria(ctx: ToolCtx): Promise<Freelancer[]> {
-  const { data } = await ctx.admin.from("work_profiles")
+  const { data, error } = await ctx.admin.from("work_profiles")
     .select("id, payee_id, valor_diaria, vigencia_inicio, vigencia_fim, payees(id, name, active)")
     .eq("modo_pagamento", "diaria");
+  // Erro engolido viraria "nenhum freelancer com diária".
+  if (error) throw new Error(`Não consegui ler quem tem diária: ${error.message}`);
   const porPessoa = new Map<string, Freelancer>();
   for (const r of (data ?? []) as any[]) {
     const p = r.payees;

@@ -2,6 +2,7 @@ import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.
 import { normalizarTermo } from "../keyword-resolver.ts";
 import { produtoFiscalPendencias } from "../product-fiscal.ts";
 import { camposDeProduto, precoDeVenda } from "../product-create.ts";
+import { orContem } from "../filtro-or.ts";
 
 export const productTools: ToolDef[] = [
   {
@@ -20,7 +21,7 @@ export const productTools: ToolDef[] = [
         .from("products")
         .select("id, name, sku, brand, sale_price, stock_quantity, unit")
         .eq("active", true)
-        .or(`name.ilike.%${q}%,sku.ilike.%${q}%,brand.ilike.%${q}%`)
+        .or(orContem(["name", "sku", "brand"], q))
         .limit(limit);
       if (error) throw error;
       return { results: data };
@@ -56,12 +57,14 @@ export const productTools: ToolDef[] = [
       // Em paralelo: 25 buscas curtas custam menos que 25 turnos de conversa.
       await Promise.all(
         termos.map(async (q: string) => {
-          const { data } = await sb
+          const { data, error } = await sb
             .from("products")
             .select("id, name, sku, brand, sale_price, cost_price, unit")
             .eq("active", true)
-            .or(`name.ilike.%${q}%,sku.ilike.%${q}%,brand.ilike.%${q}%`)
+            .or(orContem(["name", "sku", "brand"], q))
             .limit(porTermo);
+          // Busca que falhou NÃO é "sem resultado": viraria valor provisório para um item que existe.
+          if (error) throw new Error(`Não consegui buscar "${q}": ${error.message}`);
           const opcoes = ((data as any[]) || []).map((p) => ({
             product_id: p.id,
             nome: p.name,
@@ -132,20 +135,23 @@ export const productTools: ToolDef[] = [
       const { sb } = ctx;
       const limite = Math.min(Number(args.limit) || 5, 15);
 
-      const { data: prod } = await sb
+      const { data: prod, error: erroProduto } = await sb
         .from("products")
         .select("id, name, sku, sale_price, cost_price, product_category_id")
         .eq("id", args.product_id)
         .maybeSingle();
+      if (erroProduto) throw new Error(`Não consegui ler o produto: ${erroProduto.message}`);
       if (!prod) return { error: "Produto não encontrado." };
 
       // Preço REALMENTE praticado: cada linha de peça guarda o snapshot do momento.
-      const { data: usos } = await sb
+      // Leitura que falha lança: "sem histórico" com erro engolido mandaria usar o catálogo.
+      const { data: usos, error: erroUsos } = await sb
         .from("service_order_parts")
         .select("quantity, unit_cost_snapshot, unit_sale_snapshot, created_at, service_orders(service_order_number, status, created_at, clients(name))")
         .eq("product_id", prod.id)
         .order("created_at", { ascending: false })
         .limit(limite);
+      if (erroUsos) throw new Error(`Não consegui ler o histórico de uso: ${erroUsos.message}`);
 
       const historico = ((usos as any[]) || []).map((u) => {
         const so = Array.isArray(u.service_orders) ? u.service_orders[0] : u.service_orders;
@@ -161,21 +167,23 @@ export const productTools: ToolDef[] = [
       });
 
       // Última compra por fornecedor (custo de entrada).
-      const { data: forn } = await sb
+      const { data: forn, error: erroForn } = await sb
         .from("product_suppliers")
         .select("last_purchase_price, last_purchase_date, cost_price, is_preferred, suppliers(name)")
         .eq("product_id", prod.id)
         .order("last_purchase_date", { ascending: false })
         .limit(3);
+      if (erroForn) throw new Error(`Não consegui ler as compras do produto: ${erroForn.message}`);
 
       // Margem padrão da CATEGORIA (varia por categoria — não presuma um valor fixo).
       let margemCategoria: number | null = null;
       if (prod.product_category_id) {
-        const { data: cat } = await sb
+        const { data: cat, error: erroCat } = await sb
           .from("product_categories")
           .select("name, default_profit_margin")
           .eq("id", prod.product_category_id)
           .maybeSingle();
+        if (erroCat) throw new Error(`Não consegui ler a categoria do produto: ${erroCat.message}`);
         margemCategoria = cat?.default_profit_margin != null ? Number(cat.default_profit_margin) : null;
       }
 
@@ -215,7 +223,7 @@ export const productTools: ToolDef[] = [
         .from("services")
         .select("id, name, description, billing_unit, default_price")
         .eq("active", true)
-        .or(`name.ilike.%${q}%,description.ilike.%${q}%`)
+        .or(orContem(["name", "description"], q))
         .limit(limit);
       if (error) throw error;
       return { results: data };
@@ -396,14 +404,19 @@ export const productTools: ToolDef[] = [
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
       const { admin } = ctx;
+      // O PostgREST não compara coluna com coluna: .filter("stock_quantity", "lte", "minimum_stock")
+      // comparava com o TEXTO "minimum_stock" e falhava SEMPRE. Lê quem tem mínimo e compara aqui.
       const { data, error } = await admin
         .from("products")
         .select("id, name, stock_quantity, minimum_stock, unit")
         .gt("minimum_stock", 0)
-        .filter("stock_quantity", "lte", "minimum_stock")
-        .order("name");
+        .eq("active", true)
+        .order("name")
+        .range(0, 999);
       if (error) throw error;
-      return { results: data };
+      const comMinimo = (data ?? []) as Array<{ stock_quantity: number | null; minimum_stock: number }>;
+      const abaixo = comMinimo.filter((p) => Number(p.stock_quantity ?? 0) <= Number(p.minimum_stock));
+      return { results: abaixo, produtos_com_minimo_cadastrado: comMinimo.length };
     },
   },
   {

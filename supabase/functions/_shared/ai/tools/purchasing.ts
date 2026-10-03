@@ -1,4 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { orContem } from "../filtro-or.ts";
 
 // Mesmo esquema de numeração não-atômico usado em useCreatePOFromOS (frontend) —
 // replicado aqui para gerar o mesmo formato "OC-00001".
@@ -241,7 +242,7 @@ export const purchasingTools: ToolDef[] = [
       const { data, error } = await sb
         .from("suppliers")
         .select("id, name, trade_name, cnpj_cpf, contact_name, phone, email, city, state, payment_terms, active")
-        .or(`name.ilike.%${q}%,trade_name.ilike.%${q}%,cnpj_cpf.ilike.%${q}%,phone.ilike.%${q}%,city.ilike.%${q}%`)
+        .or(orContem(["name", "trade_name", "cnpj_cpf", "phone", "city"], q))
         .limit(limit);
       if (error) throw error;
 

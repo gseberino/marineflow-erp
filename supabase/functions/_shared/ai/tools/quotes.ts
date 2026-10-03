@@ -166,20 +166,24 @@ export const quoteTools: ToolDef[] = [
       if (error) throw error;
       if (!req) return { error: "Cotação não encontrada." };
 
-      const { data: items } = await sb
+      // Leitura que falha lança: com erro engolido, todo fornecedor apareceria "sem resposta".
+      const { data: items, error: erroItens } = await sb
         .from("quote_request_items")
         .select("id, position, description, quantity, product_id")
         .eq("quote_request_id", req.id)
         .order("position", { ascending: true });
-      const { data: resps } = await sb
+      if (erroItens) throw new Error(`Não consegui ler os itens da cotação: ${erroItens.message}`);
+      const { data: resps, error: erroResps } = await sb
         .from("quote_responses")
         .select("id, supplier_id, quote_request_item_id, unit_price, lead_time_days, source, source_excerpt, confirmed")
         .eq("quote_request_id", req.id);
+      if (erroResps) throw new Error(`Não consegui ler as respostas dos fornecedores: ${erroResps.message}`);
 
       const supplierIds = [...new Set([...(req.sent_supplier_ids || []), ...((resps || []).map((r: any) => r.supplier_id))])].filter(Boolean);
-      const { data: sups } = supplierIds.length
+      const { data: sups, error: erroSups } = supplierIds.length
         ? await sb.from("suppliers").select("id, name").in("id", supplierIds)
-        : { data: [] };
+        : { data: [], error: null };
+      if (erroSups) throw new Error(`Não consegui ler os fornecedores: ${erroSups.message}`);
       const nameById: Record<string, string> = Object.fromEntries((sups || []).map((s: any) => [s.id, s.name]));
 
       const comparativo = (items || []).map((it: any) => {

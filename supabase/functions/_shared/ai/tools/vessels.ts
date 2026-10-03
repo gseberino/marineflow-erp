@@ -1,4 +1,5 @@
 import type { ToolDef } from "./registry.ts";
+import { orContem } from "../filtro-or.ts";
 
 export const vesselTools: ToolDef[] = [
   {
@@ -16,7 +17,7 @@ export const vesselTools: ToolDef[] = [
         .from("vessels")
         .select("id, name, manufacturer, model, year, client_id, marina_id")
         .eq("active", true)
-        .or(`name.ilike.%${q}%,model.ilike.%${q}%,manufacturer.ilike.%${q}%`)
+        .or(orContem(["name", "model", "manufacturer"], q))
         .limit(15);
       if (args.client_id) query = query.eq("client_id", args.client_id);
       const { data, error } = await query;

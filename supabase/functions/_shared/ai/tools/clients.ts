@@ -1,4 +1,5 @@
 import type { ToolDef } from "./registry.ts";
+import { orContem } from "../filtro-or.ts";
 
 // Campos de endereço/fiscais aceitos no cadastro e na atualização do cliente.
 // NÃO são cosméticos: sem documento e endereço completo a SEFAZ rejeita a NF-e — um cliente
@@ -46,7 +47,7 @@ export const clientTools: ToolDef[] = [
       const { data, error } = await sb
         .from("clients")
         .select("id, name, type, phone, whatsapp, email, cpf_cnpj")
-        .or(`name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%,whatsapp.ilike.%${q}%,cpf_cnpj.ilike.%${q}%`)
+        .or(orContem(["name", "email", "phone", "whatsapp", "cpf_cnpj"], q))
         .eq("active", true)
         .limit(limit);
       if (error) throw error;

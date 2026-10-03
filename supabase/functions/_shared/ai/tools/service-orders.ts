@@ -348,22 +348,26 @@ export const serviceOrderTools: ToolDef[] = [
         .maybeSingle();
       if (error) throw error;
       if (!so) return { error: "OS não encontrada" };
-      const { data: parts } = await sb
+      // Leitura que falha lança: com erro engolido a OS apareceria SEM peças/serviços/roteiro.
+      const { data: parts, error: erroPecas } = await sb
         .from("service_order_parts")
         .select("id, quantity, line_total_sale, products(name)")
         .eq("service_order_id", args.id);
-      const { data: services } = await sb
+      if (erroPecas) throw new Error(`Não consegui ler as peças da OS: ${erroPecas.message}`);
+      const { data: services, error: erroServicos } = await sb
         .from("service_order_services")
         .select("id, name_snapshot, quantity, unit_price_snapshot, line_total")
         .eq("service_order_id", args.id);
+      if (erroServicos) throw new Error(`Não consegui ler os serviços da OS: ${erroServicos.message}`);
 
       // Resumo do roteiro: sem isto o agente afirmaria que não há nada pendente
       // com passos abertos. O detalhe fica em get_service_order_route.
-      const { data: steps } = await sb
+      const { data: steps, error: erroRoteiro } = await sb
         .from("service_order_steps")
         .select("seq, title, status")
         .eq("service_order_id", args.id)
         .order("seq", { ascending: true });
+      if (erroRoteiro) throw new Error(`Não consegui ler o roteiro da OS: ${erroRoteiro.message}`);
 
       const roteiro = (steps || []).length === 0
         ? { tem_roteiro: false }

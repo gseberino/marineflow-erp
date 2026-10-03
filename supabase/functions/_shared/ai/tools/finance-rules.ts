@@ -15,6 +15,7 @@ import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./regist
 import { regraDeFornecedorAlcanca, type FornecedorConhecido, type TransacaoOrfa } from "../../banking/proposals.ts";
 import { faltaNoDestino, precisaDeDestino } from "../../banking/destino.ts";
 import { entradaSemCliente } from "../../banking/entrada-sem-cliente.ts";
+import { orContem } from "../filtro-or.ts";
 
 /** Nome comparável: sem acento, caixa e espaços sobrando. */
 function comparavel(s: string): string {
@@ -87,10 +88,12 @@ function bloqueiaSemAcesso(ctx: ToolCtx): { error: string } | null {
 
 /** Categorias ativas do plano de contas — o agente não pode inventar categoria. */
 async function categoriasValidas(ctx: ToolCtx, tipo: "payable" | "receivable" = "payable") {
-  const { data } = await ctx.sb
+  const { data, error } = await ctx.sb
     .from("financial_categories")
     .select("name, dre_group")
     .eq("type", tipo).eq("active", true);
+  // Lista vazia por erro faria toda categoria "não existir" — e o agente oferecer outra.
+  if (error) throw new Error(`Não consegui ler o plano de contas: ${error.message}`);
   return (data ?? []) as { name: string; dre_group: string | null }[];
 }
 
@@ -165,22 +168,24 @@ async function alcanceDaRegra(
     .select("id", { count: "exact", head: true })
     .eq("transaction_type", "debit");
 
+  // Contagem que falha lança: "a regra não alcança nenhuma linha" com erro engolido é falso.
+  const contar = (r: { count: number | null; error: { message: string } | null }) => {
+    if (r.error) throw new Error(`Não consegui contar as linhas que a regra alcança: ${r.error.message}`);
+    return r.count ?? 0;
+  };
   const escapado = valor.replace(/[%_]/g, "");
-  const porTrecho = await base()
-    .or(`description.ilike.%${escapado}%,counterparty_name.ilike.%${escapado}%`);
-  const trecho = porTrecho.count ?? 0;
+  const trecho = contar(await base().or(orContem(["description", "counterparty_name"], escapado)));
 
   if (tipo === "text") return { alcanca: trecho };
 
   if (tipo === "counterparty") {
-    const exato = await base().ilike("counterparty_name", escapado);
-    return { alcanca: exato.count ?? 0, alcanca_por_trecho: trecho };
+    const exato = contar(await base().ilike("counterparty_name", escapado));
+    return { alcanca: exato, alcanca_por_trecho: trecho };
   }
 
   if (tipo === "document") {
     const digitos = valor.replace(/\D/g, "");
-    const r = await base().eq("counterparty_document", digitos);
-    return { alcanca: r.count ?? 0 };
+    return { alcanca: contar(await base().eq("counterparty_document", digitos)) };
   }
 
   // Fornecedor: conta com as MESMAS provas do motor (documento, mesmo nome, nome cortado

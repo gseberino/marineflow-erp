@@ -633,21 +633,24 @@ export const financialTools: ToolDef[] = [
       const { data: recs, error } = await sb
         .from("receivables")
         .select("id, description, amount, balance_amount, due_date, client_id, service_order_id, clients(name)")
-        .in("status", ["pending", "partially_paid"])
+        .in("status", ["pending", "partially_paid", "overdue"])
         .eq("is_deposit", false)
         .lt("due_date", hojeIso)
+        .order("due_date", { ascending: true })
         .limit(200);
       if (error) throw error;
 
-      // Última cobrança enviada por cliente — evita cobrar de novo no mesmo dia.
+      // Última cobrança enviada por cliente — evita cobrar de novo no mesmo dia. Leitura que
+      // falha LANÇA: "nunca cobrado" com erro engolido levaria a cobrar a mesma pessoa duas vezes.
       const clientIds = [...new Set(((recs as any[]) || []).map((r) => r.client_id).filter(Boolean))];
       const ultimaCobranca: Record<string, string> = {};
       if (clientIds.length) {
-        const { data: cols } = await sb
+        const { data: cols, error: erroCobrancas } = await sb
           .from("collections")
           .select("client_id, last_auto_sent_at")
           .in("client_id", clientIds)
           .not("last_auto_sent_at", "is", null);
+        if (erroCobrancas) throw new Error(`Não consegui ler as cobranças já enviadas: ${erroCobrancas.message}`);
         for (const c of (cols as any[]) || []) {
           const k = String(c.client_id);
           if (!ultimaCobranca[k] || new Date(c.last_auto_sent_at) > new Date(ultimaCobranca[k])) {
@@ -679,7 +682,8 @@ export const financialTools: ToolDef[] = [
 
       // D21 (dono, 17/09/2026): abaixo do piso de materialidade a IA LISTA, mas não cobra.
       // Mandar mensagem por R$ 80 custa mais relação do que vale o dinheiro.
-      const { data: cfgPiso } = await ctx.admin.from("app_settings").select("value").eq("key", "collection_min_amount").maybeSingle();
+      const { data: cfgPiso, error: erroPiso } = await ctx.admin.from("app_settings").select("value").eq("key", "collection_min_amount").maybeSingle();
+      if (erroPiso) throw new Error(`Não consegui ler o piso de cobrança: ${erroPiso.message}`);
       const piso = Number((cfgPiso as { value?: string } | null)?.value) || 0;
       const cobraveis = casos.filter((c) => c.saldo >= piso).slice(0, limite);
       const abaixoDoPiso = casos.filter((c) => c.saldo < piso);

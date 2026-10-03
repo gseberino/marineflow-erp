@@ -31,7 +31,8 @@ export function mesDosArgs(args: Record<string, unknown>, hoje = new Date()): { 
 
 /** A conta pelo nome que a pessoa falou ("C6", "nubank", "caixa"). */
 async function acharConta(ctx: ToolCtx, nome: unknown): Promise<{ id: string; label: string } | { error: string }> {
-  const { data } = await ctx.admin.from("bank_connections").select("id, label").eq("active", true);
+  const { data, error } = await ctx.admin.from("bank_connections").select("id, label").eq("active", true);
+  if (error) return { error: `Não consegui ler as contas bancárias (${error.message}).` };
   const contas = (data ?? []) as { id: string; label: string }[];
   if (contas.length === 0) return { error: "Nenhuma conta conectada." };
   if (!nome) return contas.length === 1 ? contas[0] : { error: `Qual conta? ${contas.map((c) => c.label).join(", ")}` };
@@ -191,13 +192,16 @@ export const fechamentoTools: ToolDef[] = [
       const b = semAcesso(ctx);
       if (b) return b;
       const desde = new Date(Date.now() - Math.min(90, Number(args.dias ?? 7)) * 86_400_000).toISOString();
-      const [{ data }, { data: cfg }] = await Promise.all([
+      const [{ data, error }, { data: cfg, error: erroCfg }] = await Promise.all([
         ctx.admin.from("finance_review_queue")
           .select("title, suggested_amount, suggested_category, suggested_date, automatica, created_payable_id")
           .not("automatica", "is", null).eq("status", "approved").gte("decided_at", desde)
           .order("decided_at", { ascending: false }).limit(50),
         ctx.admin.from("app_settings").select("value").eq("key", "finance_auto_approve").maybeSingle(),
       ]);
+      // Erro engolido diria "nada lançado sozinho" e "desligado" — as duas coisas como fato.
+      if (error) throw new Error(`Não consegui ler o que foi lançado sozinho: ${error.message}`);
+      if (erroCfg) throw new Error(`Não consegui ler se o lançar sozinho está ligado: ${erroCfg.message}`);
       const lista = ((data ?? []) as any[]).map((l) => ({
         o_que: l.title, valor: Number(l.suggested_amount), categoria: l.suggested_category, data: l.suggested_date,
         por: l.automatica === "regra" ? "regra sua" : "confiança alta", payable_id: l.created_payable_id,

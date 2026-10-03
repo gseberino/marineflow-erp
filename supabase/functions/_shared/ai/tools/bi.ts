@@ -122,12 +122,14 @@ export const biTools: ToolDef[] = [
       const since = new Date(Date.now() - days * 86400000).toISOString();
       const startToday = new Date(new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10) + "T00:00:00-03:00").toISOString();
 
-      const { data: live } = await ctx.admin.from("agenda_tasks")
+      const { data: live, error: erroVivas } = await ctx.admin.from("agenda_tasks")
         .select("assignee_user_id, due_at, scheduled_start_at, source, app_users:assignee_user_id(full_name)")
         .in("status", ["pending", "in_progress"]).limit(500);
-      const { data: done } = await ctx.admin.from("agenda_tasks")
+      if (erroVivas) throw new Error(`Não consegui ler as tarefas abertas: ${erroVivas.message}`);
+      const { data: done, error: erroFeitas } = await ctx.admin.from("agenda_tasks")
         .select("assignee_user_id, created_at, completed_at, source, app_users:assignee_user_id(full_name)")
         .eq("status", "done").gte("completed_at", since).limit(500);
+      if (erroFeitas) throw new Error(`Não consegui ler as tarefas concluídas: ${erroFeitas.message}`);
 
       const anchor = (t: any) => t.due_at || t.scheduled_start_at;
       const byPerson = new Map<string, { pessoa: string; vivas: number; atrasadas: number; concluidas: number }>();
