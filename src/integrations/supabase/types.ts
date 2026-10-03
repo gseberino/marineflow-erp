@@ -776,6 +776,36 @@ export type Database = {
           },
         ]
       }
+      ai_gateway_workers: {
+        Row: {
+          allowed_sources: string[]
+          created_at: string
+          enabled: boolean
+          id: string
+          last_seen_at: string | null
+          token_hash: string
+          version: string | null
+        }
+        Insert: {
+          allowed_sources?: string[]
+          created_at?: string
+          enabled?: boolean
+          id: string
+          last_seen_at?: string | null
+          token_hash: string
+          version?: string | null
+        }
+        Update: {
+          allowed_sources?: string[]
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          last_seen_at?: string | null
+          token_hash?: string
+          version?: string | null
+        }
+        Relationships: []
+      }
       ai_inbound_sessions: {
         Row: {
           client_id: string | null
@@ -816,6 +846,120 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      ai_jobs: {
+        Row: {
+          allow_fallback: boolean
+          attempts: number
+          available_at: string
+          cancel_requested_at: string | null
+          completed_at: string | null
+          created_at: string
+          deadline_at: string | null
+          duration_ms: number | null
+          error: string | null
+          error_code: string | null
+          id: string
+          input: Json | null
+          json_schema: Json | null
+          lease_expires_at: string | null
+          lease_id: string | null
+          max_attempts: number
+          metadata: Json
+          model: string
+          model_used: string | null
+          priority: number
+          prompt: string
+          provider: string
+          provider_used: string | null
+          requested_by: string | null
+          response: Json | null
+          response_format: string
+          source: string
+          started_at: string | null
+          status: string
+          system_prompt: string | null
+          task_profile: string
+          timeout_seconds: number
+          updated_at: string
+          usage: Json | null
+          worker_id: string | null
+        }
+        Insert: {
+          allow_fallback?: boolean
+          attempts?: number
+          available_at?: string
+          cancel_requested_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          deadline_at?: string | null
+          duration_ms?: number | null
+          error?: string | null
+          error_code?: string | null
+          id?: string
+          input?: Json | null
+          json_schema?: Json | null
+          lease_expires_at?: string | null
+          lease_id?: string | null
+          max_attempts?: number
+          metadata?: Json
+          model?: string
+          model_used?: string | null
+          priority?: number
+          prompt: string
+          provider?: string
+          provider_used?: string | null
+          requested_by?: string | null
+          response?: Json | null
+          response_format?: string
+          source?: string
+          started_at?: string | null
+          status?: string
+          system_prompt?: string | null
+          task_profile?: string
+          timeout_seconds?: number
+          updated_at?: string
+          usage?: Json | null
+          worker_id?: string | null
+        }
+        Update: {
+          allow_fallback?: boolean
+          attempts?: number
+          available_at?: string
+          cancel_requested_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          deadline_at?: string | null
+          duration_ms?: number | null
+          error?: string | null
+          error_code?: string | null
+          id?: string
+          input?: Json | null
+          json_schema?: Json | null
+          lease_expires_at?: string | null
+          lease_id?: string | null
+          max_attempts?: number
+          metadata?: Json
+          model?: string
+          model_used?: string | null
+          priority?: number
+          prompt?: string
+          provider?: string
+          provider_used?: string | null
+          requested_by?: string | null
+          response?: Json | null
+          response_format?: string
+          source?: string
+          started_at?: string | null
+          status?: string
+          system_prompt?: string | null
+          task_profile?: string
+          timeout_seconds?: number
+          updated_at?: string
+          usage?: Json | null
+          worker_id?: string | null
+        }
+        Relationships: []
       }
       ai_learned_routines: {
         Row: {
@@ -12751,6 +12895,36 @@ export type Database = {
       }
     }
     Functions: {
+      _ai_gateway_auth: {
+        Args: { p_token: string; p_worker_id: string }
+        Returns: {
+          allowed_sources: string[]
+          created_at: string
+          enabled: boolean
+          id: string
+          last_seen_at: string | null
+          token_hash: string
+          version: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "ai_gateway_workers"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      _ai_gateway_reap: { Args: never; Returns: number }
+      _ai_orcamento_tecnico_montar: {
+        Args: {
+          p_client_id: string
+          p_indice: number
+          p_job_id: string
+          p_numero: string
+          p_uid: string
+          p_vessel_id: string
+        }
+        Returns: Json
+      }
       _anotacoes_em_disputa: { Args: { p_anotacao: string }; Returns: string[] }
       _anotacoes_gemeas_esperando: {
         Args: { p_anotacao: string }
@@ -12898,6 +13072,123 @@ export type Database = {
         Args: { p_payee: string }
         Returns: boolean
       }
+      ai_gateway_claim_job: {
+        Args: {
+          p_lease_seconds?: number
+          p_providers?: string[]
+          p_token: string
+          p_worker_id: string
+        }
+        Returns: {
+          allow_fallback: boolean
+          attempts: number
+          available_at: string
+          cancel_requested_at: string | null
+          completed_at: string | null
+          created_at: string
+          deadline_at: string | null
+          duration_ms: number | null
+          error: string | null
+          error_code: string | null
+          id: string
+          input: Json | null
+          json_schema: Json | null
+          lease_expires_at: string | null
+          lease_id: string | null
+          max_attempts: number
+          metadata: Json
+          model: string
+          model_used: string | null
+          priority: number
+          prompt: string
+          provider: string
+          provider_used: string | null
+          requested_by: string | null
+          response: Json | null
+          response_format: string
+          source: string
+          started_at: string | null
+          status: string
+          system_prompt: string | null
+          task_profile: string
+          timeout_seconds: number
+          updated_at: string
+          usage: Json | null
+          worker_id: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "ai_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      ai_gateway_complete_job: {
+        Args: {
+          p_duration_ms?: number
+          p_job_id: string
+          p_lease_id: string
+          p_model_used?: string
+          p_provider_used?: string
+          p_response: Json
+          p_token: string
+          p_usage?: Json
+          p_worker_id: string
+        }
+        Returns: boolean
+      }
+      ai_gateway_fail_job: {
+        Args: {
+          p_count_attempt?: boolean
+          p_duration_ms?: number
+          p_error: string
+          p_error_code: string
+          p_job_id: string
+          p_lease_id: string
+          p_model_used?: string
+          p_provider_used?: string
+          p_retry_after_seconds?: number
+          p_retryable?: boolean
+          p_token: string
+          p_usage?: Json
+          p_worker_id: string
+        }
+        Returns: string
+      }
+      ai_gateway_heartbeat: {
+        Args: {
+          p_job_id: string
+          p_lease_id: string
+          p_lease_seconds?: number
+          p_token: string
+          p_worker_id: string
+        }
+        Returns: string
+      }
+      ai_gateway_ping: {
+        Args: { p_token: string; p_version?: string; p_worker_id: string }
+        Returns: Json
+      }
+      ai_job_cancel: { Args: { p_job_id: string }; Returns: string }
+      ai_job_submit: {
+        Args: {
+          p_allow_fallback?: boolean
+          p_deadline_at?: string
+          p_input?: Json
+          p_json_schema?: Json
+          p_max_attempts?: number
+          p_metadata?: Json
+          p_model?: string
+          p_priority?: number
+          p_prompt: string
+          p_provider?: string
+          p_response_format?: string
+          p_system_prompt?: string
+          p_task_profile?: string
+          p_timeout_seconds?: number
+        }
+        Returns: string
+      }
       ai_op_can_approve: {
         Args: { _action: string; _user_id: string }
         Returns: boolean
@@ -12905,6 +13196,20 @@ export type Database = {
       ai_op_can_reject: {
         Args: { _pending_action_id: string; _user_id: string }
         Returns: boolean
+      }
+      ai_orcamento_tecnico_criar_rascunho: {
+        Args: {
+          p_client_id: string
+          p_indice: number
+          p_job_id: string
+          p_vessel_id: string
+        }
+        Returns: Json
+      }
+      ai_orcamento_tecnico_pacote: { Args: never; Returns: Json }
+      ai_orcamento_tecnico_solicitar: {
+        Args: { p_modelo?: string; p_pedido: string }
+        Returns: string
       }
       ajustar_ao_valor_do_banco: {
         Args: {

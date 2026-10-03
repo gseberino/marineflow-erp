@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowRightCircle, Copy, Download, ExternalLink, FileDown, FileText, History, Loader2,
-  MessageCircle, MoreHorizontal, Plus, Receipt, Send, Wrench,
+  MessageCircle, MoreHorizontal, Plus, Receipt, Send, Sparkles, Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -36,6 +36,8 @@ import { PDFOptionsDialog, type PDFAction } from '@/components/PDFOptionsDialog'
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
+import { OrcamentoTecnicoIADialog } from '@/components/orcamento-tecnico/OrcamentoTecnicoIADialog';
+import { useOptionalAuth } from '@/hooks/use-auth';
 import { exportToCSV } from '@/lib/export';
 import { PageShell } from '@/v2/components/PageShell';
 import { StatusChip } from '@/v2/components/StatusChip';
@@ -126,6 +128,10 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
   const [faturarTarget, setFaturarTarget] = useState<{ id: string; numero: string | null } | null>(null);
   const [stockConfirm, setStockConfirm] = useState<{ id: string; number: string } | null>(null);
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  // Orçamento técnico com IA: só o admin (é o uso individual da assinatura Claude do dono).
+  const auth = useOptionalAuth();
+  const podeUsarIA = !isOrders && auth?.user?.role === 'admin';
+  const [iaAberto, setIaAberto] = useState(false);
   const pdfGenCountRef = useRef(0);
   const { data: pdfData, error: pdfError } = usePDFData(pdfTarget?.id);
   // Padrão da empresa: as opções do documento (pdf_options_<tipo>) e a validade do orçamento
@@ -597,6 +603,11 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
             <Button variant="outline" size="sm" onClick={csvExport} className="hidden gap-1.5 sm:inline-flex">
               <Download className="h-4 w-4" /> Exportar CSV
             </Button>
+            {podeUsarIA && (
+              <Button variant="outline" onClick={() => setIaAberto(true)} className="gap-1.5" aria-label="Orçamento técnico com IA">
+                <Sparkles className="h-4 w-4" /> <span className="hidden sm:inline">Orçamento técnico com IA</span>
+              </Button>
+            )}
             <Link to="/v2/service-orders/new">
               <Button className="gap-1.5">
                 <Plus className="h-4 w-4" /> {isOrders ? 'Nova OS' : 'Novo Orçamento'}
@@ -845,6 +856,8 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
         serviceOrderId={faturarTarget?.id ?? null}
         orderNumber={faturarTarget?.numero ?? null}
       />
+
+      {podeUsarIA && <OrcamentoTecnicoIADialog aberto={iaAberto} onFechar={() => setIaAberto(false)} />}
     </V2Shell>
   );
 }
