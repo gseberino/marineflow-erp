@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQuery } from '@tanstack/react-query';
+import { orContem } from '../../supabase/functions/_shared/ai/filtro-or';
 
 export default function ExternalQuoteNewPage() {
   const navigate = useNavigate();
@@ -147,6 +148,16 @@ export default function ExternalQuoteNewPage() {
 
   // Duplicate Check Logic
   useEffect(() => {
+    // Nome ou telefone com vírgula/parênteses ("Silva, João", "(47) 9…") quebrava o .or() e o aviso
+    // de duplicidade sumia calado; telefone vazio comparava com "" e acusava qualquer cadastro sem
+    // telefone. O valor vai entre aspas (orContem) e o telefone só entra quando há um.
+    const filtroDeDuplicidade = (nome: string, telefone: string) => {
+      const partes = nome.trim().length >= 3 ? [orContem(['name'], nome)] : [];
+      const tel = telefone.replace(/["\\]/g, '').trim();
+      if (tel.length >= 5) partes.push(`phone.eq."${tel}"`);
+      return partes.join(',') || 'name.eq.""';
+    };
+
     const checkDuplicate = async () => {
       if ((leadName.length < 3 && leadPhone.length < 5) || leadId !== 'new') {
         setDuplicateWarning(null);
@@ -158,7 +169,7 @@ export default function ExternalQuoteNewPage() {
         const { data: existingClients } = await supabase
           .from('clients')
           .select('name, phone')
-          .or(`name.ilike.%${leadName}%,phone.eq.${leadPhone}`)
+          .or(filtroDeDuplicidade(leadName, leadPhone))
           .limit(1);
 
         if (existingClients && existingClients.length > 0) {
@@ -170,7 +181,7 @@ export default function ExternalQuoteNewPage() {
         const { data: existingLeads } = await supabase
           .from('external_quote_leads')
           .select('name, phone')
-          .or(`name.ilike.%${leadName}%,phone.eq.${leadPhone}`)
+          .or(filtroDeDuplicidade(leadName, leadPhone))
           .neq('id', leadId === 'new' ? '00000000-0000-0000-0000-000000000000' : leadId)
           .limit(1);
 

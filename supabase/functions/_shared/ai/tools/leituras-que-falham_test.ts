@@ -9,6 +9,7 @@ import { serviceOrderTools } from "./service-orders.ts";
 import { financialTools } from "./financial.ts";
 import { quoteTools } from "./quotes.ts";
 import { fechamentoTools } from "./fechamento.ts";
+import { whatsappTools } from "./whatsapp.ts";
 
 /** Banco de mentira: devolve as linhas da tabela; as tabelas em `falham` respondem com erro. */
 function bancoFalso(tabelas: Record<string, unknown[]>, falham: string[] = []) {
@@ -137,4 +138,36 @@ Deno.test("listar_lancados_sozinhos: fila ilegível não vira 'nada lançado'", 
     Error,
     "lançado sozinho",
   );
+});
+
+Deno.test("get_delinquency_plan: cliente com Pix esperando no Extrato sai da cobrança, com o porquê", async () => {
+  const vencido = { id: "r", amount: 500, balance_amount: 500, due_date: "2026-01-10", client_id: "c", clients: { name: "Cliente" } };
+  const db = bancoFalso({
+    receivables: [vencido], collections: [], app_settings: [],
+    finance_review_queue: [{ suggested_client_id: "c", suggested_amount: 500, suggested_date: "2026-10-02", title: "Receita: CLIENTE" }],
+  });
+  const r = await ferramenta(financialTools, "get_delinquency_plan").execute({}, contexto(db));
+  assertEquals(r.casos, []);
+  assertEquals(r.talvez_ja_pago.map((c: { cliente: string; pix_esperando_no_extrato: unknown[] }) => [c.cliente, c.pix_esperando_no_extrato.length]), [["Cliente", 1]]);
+  // E a leitura da fila que falha não vira "nenhum Pix esperando".
+  const falha = bancoFalso({ receivables: [vencido], collections: [], app_settings: [] }, ["finance_review_queue"]);
+  await assertRejects(() => ferramenta(financialTools, "get_delinquency_plan").execute({}, contexto(falha)), Error, "Pix que esperam no Extrato");
+});
+
+Deno.test("send_collection_reminder: com Pix do cliente esperando no Extrato, não cobra", async () => {
+  const db = bancoFalso({
+    collections: [{ id: "col", amount: 500, due_date: "2026-09-10", contact_whatsapp: "5547999990000", client_id: "c" }],
+    app_settings: [],
+    finance_review_queue: [{ suggested_client_id: "c", suggested_amount: 500, suggested_date: "2026-10-02", title: "Receita: CLIENTE" }],
+  });
+  const original = globalThis.fetch;
+  let enviou = false;
+  globalThis.fetch = (() => { enviou = true; return Promise.resolve(new Response("{}")); }) as typeof fetch;
+  try {
+    const r = await ferramenta(whatsappTools, "send_collection_reminder").execute({ collection_id: "col" }, contexto(db));
+    assertEquals(/Pix esperando no Extrato/.test(r.error), true);
+    assertEquals(enviou, false);
+  } finally {
+    globalThis.fetch = original;
+  }
 });

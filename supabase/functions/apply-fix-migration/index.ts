@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { chamadaInterna } from "../_shared/porta.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -8,6 +9,12 @@ const corsHeaders = {
 
 servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  // Manutenção de uma vez só (julho/2026), sem nada que a chame: escrevia com a chave de serviço
+  // para quem tivesse a chave anônima do site. Fechada até ser apagada do servidor (03/10/2026).
+  if (!chamadaInterna(req)) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,

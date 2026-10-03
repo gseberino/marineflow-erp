@@ -3,6 +3,7 @@
 // by re-applying the latest parser over their stored raw_payload.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { recusa, usuarioAtivo } from "../_shared/porta.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -47,6 +48,10 @@ function extractBodyAndType(p: any): { body: string; messageType: string } {
 
 servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // Botão da tela de registros do WhatsApp: administrador ou financeiro (03/10/2026).
+  const porta = await usuarioAtivo(req, ["admin", "financial"]);
+  if (!porta.ok) return recusa(porta, corsHeaders);
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;

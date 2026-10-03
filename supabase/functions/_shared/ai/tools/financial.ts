@@ -1,5 +1,6 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolCtx, type ToolDef } from "./registry.ts";
 import { mensagemDoBanco } from "./lancamentos.ts";
+import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
 import {
   COLUNAS_DO_FLUXO, FUNCAO_DA_RAIZ_DA_EMPRESA, ROTULO_DO_DESTINO, hojeEmBrasilia, mesesInteirosDoPeriodo, somarDias,
   somarFluxoDoPeriodo, type DestinoDeFora, type LinhaDoFluxo, type OpcoesDoFluxo,
@@ -685,8 +686,13 @@ export const financialTools: ToolDef[] = [
       const { data: cfgPiso, error: erroPiso } = await ctx.admin.from("app_settings").select("value").eq("key", "collection_min_amount").maybeSingle();
       if (erroPiso) throw new Error(`Não consegui ler o piso de cobrança: ${erroPiso.message}`);
       const piso = Number((cfgPiso as { value?: string } | null)?.value) || 0;
-      const cobraveis = casos.filter((c) => c.saldo >= piso).slice(0, limite);
-      const abaixoDoPiso = casos.filter((c) => c.saldo < piso);
+      // Cliente com Pix esperando no Extrato pode já ter pago: confere antes de cobrar (o Pix só
+      // abate a conta quando alguém o aplica). Sai da lista de cobrança, com o porquê.
+      const esperando = await pixEsperandoNoExtrato(ctx, [...new Set(casos.map((c) => c.client_id).filter(Boolean))] as string[]);
+      const talvezPago = casos.filter((c) => c.client_id && esperando.has(String(c.client_id)));
+      const semPix = casos.filter((c) => !(c.client_id && esperando.has(String(c.client_id))));
+      const cobraveis = semPix.filter((c) => c.saldo >= piso).slice(0, limite);
+      const abaixoDoPiso = semPix.filter((c) => c.saldo < piso);
 
       const total = cobraveis.reduce((a, c) => a + c.saldo, 0);
       return {
@@ -696,7 +702,13 @@ export const financialTools: ToolDef[] = [
         casos: cobraveis,
         piso_de_cobranca: piso,
         abaixo_do_piso: abaixoDoPiso.map((c) => ({ cliente: c.cliente, saldo: c.saldo, dias_atraso: c.dias_atraso })),
-        nota: `Não cobre quem já foi cobrado hoje nem valores abaixo de R$ ${piso} (só listados). Enviar cobrança é ação sensível — o sistema pede sua confirmação.`,
+        talvez_ja_pago: talvezPago.map((c) => ({
+          cliente: c.cliente, saldo: c.saldo, dias_atraso: c.dias_atraso,
+          pix_esperando_no_extrato: esperando.get(String(c.client_id)) ?? [],
+        })),
+        nota: `Não cobre quem já foi cobrado hoje nem valores abaixo de R$ ${piso} (só listados). `
+          + "Quem está em talvez_ja_pago tem Pix esperando no Extrato: confira se é o pagamento (Extrato › Este Pix paga…) antes de cobrar. "
+          + "Enviar cobrança é ação sensível — o sistema pede sua confirmação.",
       };
     },
   },

@@ -6,6 +6,7 @@
 // e o identify+forward continua valendo (nada quebra).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { chamadaInterna } from "../_shared/porta.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -18,6 +19,9 @@ function jr(body: unknown, status = 200) {
 
 servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  // Só o servidor chama (whatsapp-webhook e a repescagem de áudios, com a chave de serviço): de fora,
+  // qualquer um gastava a transcrição paga e reescrevia a mensagem (03/10/2026).
+  if (!chamadaInterna(req)) return jr({ error: "unauthorized" }, 401);
   try {
     const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
     // Sem chave ainda: não é erro fatal (o recurso simplesmente não está ligado).

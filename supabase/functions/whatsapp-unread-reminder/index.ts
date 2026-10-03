@@ -14,6 +14,11 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { chamadaInterna, recusa, usuarioAtivo } from "../_shared/porta.ts";
+
+// O tipo de createClient sem o esquema gerado não casa com o cliente criado aqui (TS2345).
+// deno-lint-ignore no-explicit-any
+type DbClient = any;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -30,7 +35,7 @@ function jr(body: unknown, status = 200) {
 }
 
 async function getSetting(
-  admin: ReturnType<typeof createClient>,
+  admin: DbClient,
   key: string,
   fallback: string,
 ): Promise<string> {
@@ -43,7 +48,7 @@ async function getSetting(
 }
 
 async function setSetting(
-  admin: ReturnType<typeof createClient>,
+  admin: DbClient,
   key: string,
   value: string,
 ): Promise<void> {
@@ -56,6 +61,13 @@ async function setSetting(
 servirComCors(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  // Enfileira WhatsApp de verdade: só o servidor (um agendamento futuro) ou o botão "Testar" das
+  // configurações, por administrador ou financeiro (03/10/2026).
+  if (!chamadaInterna(req)) {
+    const porta = await usuarioAtivo(req, ["admin", "financial"]);
+    if (!porta.ok) return recusa(porta, corsHeaders);
   }
 
   try {

@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.4';
 import webpush from 'npm:web-push@3.6.7';
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { recusa, usuarioAtivo } from "../_shared/porta.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -22,6 +23,11 @@ servirComCors(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // Só quem usa o sistema (a tela da OS avisa o técnico escalado). Com a chave anônima, qualquer um
+  // mandava notificação com título, texto e link arbitrários a qualquer usuário (03/10/2026).
+  const porta = await usuarioAtivo(req);
+  if (!porta.ok) return recusa(porta, corsHeaders);
 
   try {
     const { user_id, title, body, url } = await req.json();

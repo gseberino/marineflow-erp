@@ -16,6 +16,7 @@ import { fmtCurrency, vencimentoDoOrcamento } from "../../pdf/documento.ts";
 import { dataBR } from "../../pdf/datas.ts";
 import { guardarEEntregar, impressaoDigitalDoDocumento, montarDocumentoDaOrdem } from "../../pdf/gerar-e-guardar.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
+import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -585,6 +586,18 @@ export const whatsappTools: ToolDef[] = [
       const piso = Number((cfgPiso as { value?: string } | null)?.value) || 0;
       if (piso > 0 && Number(col.amount) < piso) {
         return { error: `Cobrança de R$ ${Number(col.amount).toFixed(2)} fica abaixo do piso de R$ ${piso} (Configurações): só listar, não cobrar por WhatsApp.` };
+      }
+      // Pix do cliente esperando no Extrato: pode ser este pagamento. Não cobra até decidir a linha
+      // (aplicar na conta, ou aprovar como receita nova) — cobrar quem pagou custa a relação.
+      if (col.client_id) {
+        const pix = (await pixEsperandoNoExtrato(ctx, [String(col.client_id)])).get(String(col.client_id)) ?? [];
+        if (pix.length) {
+          const lista = pix.map((p) => `R$ ${p.valor.toFixed(2)}${p.data ? ` de ${p.data}` : ""}`).join(", ");
+          return {
+            error: `Este cliente tem Pix esperando no Extrato (${lista}): pode ser este pagamento. `
+              + "Confira no Extrato (Este Pix paga…) antes de cobrar; se for outra coisa, decida a linha lá e cobre depois.",
+          };
+        }
       }
       // Perfil do contato: nome usado (display_name) e opt-out.
       let c: any = null;
