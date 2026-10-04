@@ -13,6 +13,8 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { useI18n } from '@/i18n';
 import { LinkDoArquivo, useLinkDoArquivo } from '@/lib/arquivo-privado';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { useConfirmacao } from '@/components/Confirmacao';
 import type { Dispatch, SetStateAction } from 'react';
 
 /** Miniatura do comprovante (bucket privado: o link é temporário e gerado aqui). */
@@ -74,9 +76,12 @@ export function ExpensesTimeDialogs(props: ExpensesTimeDialogsProps) {
     setQuickSupplierOpen, setQuickSupplierName,
   } = props;
   const { t, formatCurrency, formatDate, formatDateTime } = useI18n();
+  // Excluir despesa ia num clique, sem confirmar (inventário de 03/10/2026): menu + confirmação.
+  const { pedir, dialogo } = useConfirmacao();
 
   return (
     <>
+      {dialogo}
       {!isNew && (
         <Dialog open={showExpensesDialog} onOpenChange={setShowExpensesDialog}>
           <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -312,10 +317,18 @@ export function ExpensesTimeDialogs(props: ExpensesTimeDialogsProps) {
                               onClick={() => handleEditExpense(exp)}>
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
-                            <Button aria-label="Excluir esta despesa" variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                              onClick={() => removeExpense.mutate({ id: exp.id, service_order_id: orderId! })}>
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            <AcoesDaLinha
+                              rotulo={`despesa ${exp.description ?? ''}`}
+                              menu={[{
+                                texto: 'Excluir esta despesa', icone: Trash2, perigo: true,
+                                onClick: () => pedir({
+                                  titulo: 'Excluir esta despesa?',
+                                  descricao: `${exp.description ?? 'Despesa'} · ${formatCurrency(Number(exp.amount))}. Sai da OS e do custo dela.`,
+                                  confirmar: 'Excluir',
+                                  acao: () => removeExpense.mutate({ id: exp.id, service_order_id: orderId! }),
+                                }),
+                              }]}
+                            />
                           </div>
                         </td>
                       </tr>

@@ -10,6 +10,8 @@ import { LineSystemPicker } from './line-system-picker';
 import { LineViaTecnico } from './line-via-tecnico';
 import { useI18n } from '@/i18n';
 import { ServiceCardFormComponent, QuickDiscountPopover, BILLING_UNIT_LABELS } from './form-parts';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { useConfirmacao } from '@/components/Confirmacao';
 
 interface ServicesSectionProps {
   isNew: boolean;
@@ -66,9 +68,12 @@ export function ServicesSection(props: ServicesSectionProps) {
     [semSistema],
   );
   const { t, formatCurrency } = useI18n();
+  // Excluir serviço ia num clique, sem confirmar (inventário de 03/10/2026): agora no menu, confirmado.
+  const { pedir: pedirConfirmacao, dialogo } = useConfirmacao();
 
   return (
     <>
+      {dialogo}
       {/* E - Labor Services — always visible (with always-on entry row) */}
       <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
         <div className="p-5 border-b">
@@ -171,15 +176,18 @@ export function ServicesSection(props: ServicesSectionProps) {
               >
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-destructive"
-                onClick={opts.onDelete}
-                title="Excluir" aria-label="Excluir este serviço"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              <AcoesDaLinha
+                rotulo={opts.name}
+                menu={[{
+                  texto: 'Excluir este serviço', icone: Trash2, perigo: true,
+                  onClick: () => pedirConfirmacao({
+                    titulo: `Excluir ${opts.name}?`,
+                    descricao: opts.isDraft ? 'O serviço sai do rascunho.' : 'O serviço sai da OS e o total é recalculado.',
+                    confirmar: 'Excluir',
+                    acao: opts.onDelete,
+                  }),
+                }]}
+              />
             </div>
             {opts.below && <div className="px-4 pb-3">{opts.below}</div>}
             </div>

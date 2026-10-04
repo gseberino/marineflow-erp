@@ -195,11 +195,17 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPdf, gerandoPdf }
                 <div><dt className="text-xs text-muted-foreground">Pago</dt><dd className="font-medium tabular-nums">{formatCurrency(p.pago)}</dd></div>
                 <div><dt className="text-xs text-muted-foreground">Último pagamento</dt><dd className="font-medium tabular-nums">{p.ultimo_pagamento ? formatDate(p.ultimo_pagamento) : '—'}</dd></div>
               </dl>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" onClick={() => onVerExtrato(p.id)}>Ver extrato</Button>
-                <Button size="sm" variant="outline" disabled={gerandoPdf} onClick={() => onPdf(p.id)}>Extrato em PDF</Button>
-                <Button size="sm" variant="ghost" onClick={() => onRegistrar(p.id)}>Registrar dia</Button>
-              </div>
+              <AcoesDaLinha
+                className="mt-3 justify-start"
+                rotulo={p.nome}
+                rapidas={[
+                  { texto: 'Registrar dia', icone: CalendarPlus, onClick: () => onRegistrar(p.id) },
+                  { texto: 'Ver extrato', icone: FileText, onClick: () => onVerExtrato(p.id) },
+                ]}
+                menu={[
+                  { texto: 'Extrato em PDF', icone: FileDown, desabilitada: gerandoPdf, onClick: () => onPdf(p.id) },
+                ]}
+              />
             </Card>
           );
         })}

@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/i18n';
 import { PartCardFormComponent, QuickDiscountPopover } from './form-parts';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { useConfirmacao } from '@/components/Confirmacao';
 
 interface PartsSectionProps {
   isNew: boolean;
@@ -45,9 +47,12 @@ export function PartsSection(props: PartsSectionProps) {
     updatePartLine, removePart, addPart,
   } = props;
   const { t, formatCurrency } = useI18n();
+  // Excluir peça ia num clique, sem confirmar (inventário de 03/10/2026): agora no menu, confirmado.
+  const { pedir, dialogo } = useConfirmacao();
 
   return (
     <>
+      {dialogo}
       {/* F - Parts — always visible (with always-on entry row) */}
       <section className="rounded-xl border bg-card shadow-sm overflow-hidden">
         <div className="p-5 border-b">
@@ -152,15 +157,18 @@ export function PartsSection(props: PartsSectionProps) {
               >
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-destructive"
-                onClick={opts.onDelete}
-                title="Excluir" aria-label="Excluir este item"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
+              <AcoesDaLinha
+                rotulo={opts.name}
+                menu={[{
+                  texto: 'Excluir este item', icone: Trash2, perigo: true,
+                  onClick: () => pedir({
+                    titulo: `Excluir ${opts.name}?`,
+                    descricao: opts.isDraft ? 'O item sai do rascunho.' : 'O item sai da OS e o total é recalculado.',
+                    confirmar: 'Excluir',
+                    acao: opts.onDelete,
+                  }),
+                }]}
+              />
             </div>
           );
 

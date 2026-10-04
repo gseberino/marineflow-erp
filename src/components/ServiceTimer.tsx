@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
+import { useConfirmacao } from '@/components/Confirmacao';
 import { Play, Pause, Square, Timer } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -87,6 +88,9 @@ export function ServiceTimer({
     onUpdate();
   };
 
+  // Finalizar fecha o tempo da linha de vez (não há "retomar" na tela): pergunta antes (03/10/2026).
+  const { pedir, dialogo } = useConfirmacao();
+
   const handleStop = async () => {
     const elapsed = Math.floor(display / 60);
     const { error } = await supabase
@@ -130,6 +134,7 @@ export function ServiceTimer({
 
   return (
     <div className="inline-flex items-center gap-2">
+      {dialogo}
       <span className="font-mono text-xs tabular-nums">{fmt(display)}</span>
       {!running ? (
         <Button
@@ -159,7 +164,12 @@ export function ServiceTimer({
             variant="outline"
             size="icon"
             className="h-7 w-7 text-destructive"
-            onClick={handleStop}
+            onClick={() => pedir({
+              titulo: 'Finalizar o tempo deste serviço?',
+              descricao: `Fica registrado ${fmt(display)} de execução, e o relógio desta linha não volta a contar.`,
+              confirmar: 'Finalizar',
+              acao: () => { void handleStop(); },
+            })}
             title="Finalizar" aria-label="Finalizar"
           >
             <Square className="h-3.5 w-3.5" />

@@ -4,7 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useExternalQuotes, useUpdateExternalQuoteStatus } from '@/hooks/use-external-quotes';
-import { Check, X, Eye, User, Phone, Anchor, MessageCircle, AlertCircle } from 'lucide-react';
+import { Check, X, Eye, User, Phone, Anchor, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 
 export default function ExternalQuoteApprovalPage() {
   const navigate = useNavigate();
@@ -149,16 +150,13 @@ export default function ExternalQuoteApprovalPage() {
                   >
                     <X className="h-4 w-4" /> Recusar
                   </Button>
-                  <Button 
-                    variant="secondary" 
-                    className="w-full gap-2"
-                    onClick={() => navigate(`/external-quotes/${quote.id}`)}
-                  >
-                    <Eye className="h-4 w-4" /> Ver Detalhes
-                  </Button>
-                  <Button variant="ghost" className="w-full gap-2 text-xs h-8">
-                    <MessageCircle className="h-3 w-3" /> Falar com Vendedor
-                  </Button>
+                  {/* Aprovar e Recusar à vista; o resto no menu (padrão AcoesDaLinha, 03/10/2026).
+                      "Falar com Vendedor" saiu: não tinha ação nenhuma. */}
+                  <AcoesDaLinha
+                    rotulo={`orçamento externo de ${quote.client?.name || quote.lead?.name || 'cliente'}`}
+                    className="md:justify-center"
+                    menu={[{ texto: 'Ver detalhes', icone: Eye, onClick: () => navigate(`/external-quotes/${quote.id}`) }]}
+                  />
                 </div>
               </div>
             </Card>

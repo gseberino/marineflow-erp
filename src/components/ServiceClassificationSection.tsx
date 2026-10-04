@@ -16,6 +16,8 @@ import {
   DEPENDS_ON_ORDER_LABEL, systemChoiceToDb, systemDbToChoice,
 } from '@/hooks/use-service-systems';
 import { ServiceFormDialog } from '@/components/ServiceFormDialog';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { useConfirmacao } from '@/components/Confirmacao';
 
 /**
  * Fila de revisão da classificação do catálogo.
@@ -36,6 +38,8 @@ export function ServiceClassificationSection() {
   // Revisar a classificação e corrigir nome, descrição ou preço são a mesma
   // conversa — não faz sentido mandar o dono procurar o serviço noutra tela.
   const [editandoServico, setEditandoServico] = useState<ClassifiedService | null>(null);
+  // "Não usar mais" tirava o serviço do catálogo num clique (03/10/2026): menu + confirmação.
+  const { pedir, dialogo } = useConfirmacao();
 
   function valor(s: ClassifiedService) {
     return edicoes[s.id] ?? { system: s.service_system, verb: s.service_verb };
@@ -143,26 +147,27 @@ export function ServiceClassificationSection() {
                     <Button size="sm" disabled={confirm.isPending} onClick={() => confirmar(s)}>
                       <Check className="mr-1.5 h-3.5 w-3.5" /> Confirmar
                     </Button>
-                    <Button
-                      size="sm" variant="outline"
-                      title="Editar nome, descrição, preço e demais dados do serviço"
-                      onClick={() => setEditandoServico(s)}
-                    >
-                      <Pencil className="mr-1.5 h-3.5 w-3.5" /> Editar serviço
-                    </Button>
                     {/* Classificar o que não deveria existir é trabalho jogado
-                        fora — daqui mesmo se tira do catálogo. */}
-                    <Button
-                      size="sm" variant="ghost" className="text-destructive"
-                      title="Tirar do catálogo — as OS antigas não são afetadas"
-                      disabled={desativar.isPending}
-                      onClick={() => desativar.mutate(s, {
-                        onSuccess: () => toast.success(`"${s.name}" saiu do catálogo.`),
-                        onError: (e: any) => toast.error(e?.message || 'Erro ao inativar'),
-                      })}
-                    >
-                      <EyeOff className="mr-1.5 h-3.5 w-3.5" /> Não usar mais
-                    </Button>
+                        fora — daqui mesmo se tira do catálogo (no menu, com confirmação). */}
+                    <AcoesDaLinha
+                      rotulo={s.name}
+                      ocupada={desativar.isPending}
+                      menu={[
+                        { texto: 'Editar serviço', icone: Pencil, titulo: 'Editar nome, descrição, preço e demais dados do serviço', onClick: () => setEditandoServico(s) },
+                        {
+                          texto: 'Não usar mais', icone: EyeOff, perigo: true,
+                          onClick: () => pedir({
+                            titulo: `Tirar "${s.name}" do catálogo?`,
+                            descricao: 'Ele deixa de aparecer para novas OS e orçamentos. As OS antigas não são afetadas.',
+                            confirmar: 'Não usar mais',
+                            acao: () => desativar.mutate(s, {
+                              onSuccess: () => toast.success(`"${s.name}" saiu do catálogo.`),
+                              onError: (e: any) => toast.error(e?.message || 'Erro ao inativar'),
+                            }),
+                          }),
+                        },
+                      ]}
+                    />
                   </div>
                 </div>
               );
@@ -171,6 +176,7 @@ export function ServiceClassificationSection() {
         )}
       </Card>
 
+      {dialogo}
       <ServiceFormDialog
         open={!!editandoServico}
         onOpenChange={(aberto) => { if (!aberto) setEditandoServico(null); }}

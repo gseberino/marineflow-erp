@@ -5,7 +5,7 @@
 // pendências, que é o portão único de tudo que a IA faz em nome da empresa.
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Bot, ChevronDown, ChevronUp, Loader2, Power } from 'lucide-react';
+import { Bot, ChevronDown, ChevronUp, Power } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -21,6 +21,8 @@ import {
 } from '@/hooks/use-followup-missions';
 import { useOpenLoops } from '@/hooks/use-agenda';
 import { FollowupMissionButton } from '@/components/followups/FollowupMissionDialog';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { useConfirmacao } from '@/components/Confirmacao';
 import '@/v2/tokens.css';
 
 const TONE: Record<FollowupMissionStatus, StatusTone> = {
@@ -64,8 +66,9 @@ function CartaoMissao({ m }: { m: FollowupMission }) {
   const cancelar = useCancelFollowupMission();
   const emAndamento = m.status === 'active' || m.status === 'waiting_reply' || m.status === 'escalated';
 
+  const { pedir, dialogo } = useConfirmacao();
+
   async function encerrar() {
-    if (!window.confirm(`Encerrar o acompanhamento de ${m.contraparte_label}? A IA para de cobrar.`)) return;
     try {
       await cancelar.mutateAsync({ id: m.id, motivo: 'encerrada pelo dono no painel' });
       toast.success('Acompanhamento encerrado.');
@@ -101,11 +104,23 @@ function CartaoMissao({ m }: { m: FollowupMission }) {
                 <Link to={`/v2/service-orders/${m.service_order_id}`}>Abrir OS</Link>
               </Button>
             )}
-            {emAndamento && (
-              <Button size="sm" variant="outline" onClick={encerrar} disabled={cancelar.isPending}>
-                {cancelar.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />} Encerrar
-              </Button>
-            )}
+            {/* Encerrar era o terceiro botão, solto ao lado dos outros: desce para o menu. */}
+            <AcoesDaLinha
+              rotulo={m.contraparte_label}
+              ocupada={cancelar.isPending}
+              menu={emAndamento ? [{
+                texto: 'Encerrar o acompanhamento',
+                icone: Power,
+                perigo: true,
+                onClick: () => pedir({
+                  titulo: `Encerrar o acompanhamento de ${m.contraparte_label}?`,
+                  descricao: 'A IA para de cobrar.',
+                  confirmar: 'Encerrar',
+                  acao: () => { void encerrar(); },
+                }),
+              }] : []}
+            />
+            {dialogo}
           </>
         }
       />

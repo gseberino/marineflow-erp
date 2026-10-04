@@ -87,6 +87,11 @@ describe('FollowupMissionsV2 — IA acompanhando', () => {
     await userEvent.click(screen.getByRole('button', { name: /Trilha/ }));
     expect(await screen.findByText(/Rascunho para sua aprovação/)).toBeInTheDocument();
     expect(screen.getByText(/assistente da HBR/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Encerrar/ })).toBeInTheDocument();
+    // Encerrar mora no menu de três pontos e pede confirmação antes de parar a IA.
+    expect(screen.queryByRole('button', { name: /Encerrar/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Mais ações para Vanderlei Andrade' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Encerrar o acompanhamento/ }));
+    expect(await screen.findByText('Encerrar o acompanhamento de Vanderlei Andrade?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Encerrar' })).toBeInTheDocument();
   });
 });

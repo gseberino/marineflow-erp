@@ -11,6 +11,8 @@ import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/
 import { PageShell } from '@/v2/components/PageShell';
 import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
 import { V2Shell } from '@/v2/components/V2Shell';
+import { useConfirmacao } from '@/components/Confirmacao';
+import { toast } from 'sonner';
 import '@/v2/tokens.css';
 
 /* Onda C · CRM & Funil v2 — reescrita do Kanban sob o Princípio 0:
@@ -29,12 +31,14 @@ type SORow = {
   vessels?: { name?: string } | null;
 };
 
-const COLUMNS: { id: string; title: string; tone: StatusTone; isQuote: boolean; next?: { to: ServiceOrderStatus; label: string } }[] = [
-  { id: 'draft', title: 'Orçamentos', tone: 'warning', isQuote: true, next: { to: 'approved', label: 'Converter em OS' } },
-  { id: 'approved', title: 'Aprovado', tone: 'info', isQuote: false, next: { to: 'scheduled', label: 'Agendar' } },
-  { id: 'scheduled', title: 'Agendado', tone: 'info', isQuote: false, next: { to: 'in_progress', label: 'Iniciar' } },
-  { id: 'in_progress', title: 'Em Execução', tone: 'warning', isQuote: false, next: { to: 'completed', label: 'Concluir' } },
-  { id: 'completed', title: 'Concluído', tone: 'success', isQuote: false, next: { to: 'invoiced', label: 'Faturar' } },
+// `efeito`: o que o passo faz além de mudar a coluna — vai na confirmação (04/10/2026). Antes o
+// botão agia num clique: "Converter em OS" troca ORÇ→OS e "Concluir" lança as contas a receber.
+const COLUMNS: { id: string; title: string; tone: StatusTone; isQuote: boolean; next?: { to: ServiceOrderStatus; label: string; efeito: string } }[] = [
+  { id: 'draft', title: 'Orçamentos', tone: 'warning', isQuote: true, next: { to: 'approved', label: 'Converter em OS', efeito: 'O orçamento vira OS aprovada: o número passa de ORÇ para OS.' } },
+  { id: 'approved', title: 'Aprovado', tone: 'info', isQuote: false, next: { to: 'scheduled', label: 'Agendar', efeito: 'A OS passa para Agendado (a data continua sendo marcada na própria OS).' } },
+  { id: 'scheduled', title: 'Agendado', tone: 'info', isQuote: false, next: { to: 'in_progress', label: 'Iniciar', efeito: 'A OS entra em execução e o horário de chegada fica registrado agora.' } },
+  { id: 'in_progress', title: 'Em Execução', tone: 'warning', isQuote: false, next: { to: 'completed', label: 'Concluir', efeito: 'A OS é concluída, o horário de saída fica registrado e as contas a receber das parcelas são lançadas.' } },
+  { id: 'completed', title: 'Concluído', tone: 'success', isQuote: false, next: { to: 'invoiced', label: 'Faturar', efeito: 'A OS sai do funil como faturada.' } },
 ];
 
 const toneBorder: Record<StatusTone, string> = {
@@ -65,8 +69,15 @@ export default function CRMKanbanV2() {
     );
   });
 
+  const { pedir, dialogo } = useConfirmacao();
+
+  // O hook não avisa erro; sem o catch a falha sumia e o cartão só não mudava de coluna.
   const moveOrder = async (orderId: string, newStatus: ServiceOrderStatus) => {
-    await updateStatus.mutateAsync({ id: orderId, status: newStatus });
+    try {
+      await updateStatus.mutateAsync({ id: orderId, status: newStatus });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Não foi possível mudar a etapa.');
+    }
   };
 
   const renderCard = (order: SORow, col: (typeof COLUMNS)[number]) => (
@@ -108,7 +119,12 @@ export default function CRMKanbanV2() {
       </div>
       {col.next && (
         <div className="flex justify-end border-t pt-1.5">
-          <Button size="sm" variant="ghost" className="h-6 gap-1 px-2 text-xs text-accent" onClick={() => moveOrder(order.id, col.next!.to)}>
+          <Button size="sm" variant="ghost" className="h-6 gap-1 px-2 text-xs text-accent" onClick={() => pedir({
+              titulo: `${col.next!.label} — #${order.service_order_number}?`,
+              descricao: col.next!.efeito,
+              confirmar: col.next!.label,
+              acao: () => { void moveOrder(order.id, col.next!.to); },
+            })}>
             {col.next.label} <ArrowRight className="h-3 w-3" />
           </Button>
         </div>
@@ -178,6 +194,7 @@ export default function CRMKanbanV2() {
           target={whatsAppTarget}
         />
       )}
+      {dialogo}
     </V2Shell>
   );
 }
