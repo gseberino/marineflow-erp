@@ -1,4 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
 import { STATUS_OS_ATIVAS } from "../../service-order-status.ts";
 import { vencimentoDoOrcamento } from "../../pdf/documento.ts";
 
@@ -42,24 +43,31 @@ export const overviewTools: ToolDef[] = [
       try {
         const { data: recs, error: erro_recs } = await admin
           .from("receivables")
-          .select("amount, balance_amount, due_date, clients(name)")
+          .select("amount, balance_amount, due_date, client_id, clients(name)")
           .in("status", ["pending", "overdue", "partially_paid"])
           .eq("is_deposit", false)
           .lt("due_date", hojeIso)
           .limit(200);
         if (erro_recs) throw erro_recs;
+        // Cliente com Pix esperando no Extrato pode já ter pago (o Pix só abate quando aplicado).
+        const esperando = await pixEsperandoNoExtrato(ctx, [...new Set(((recs as any[]) || []).map((r) => r.client_id).filter(Boolean))] as string[]);
         const casos = ((recs as any[]) || [])
           .map((r) => ({
             cliente: r.clients?.name || "(sem cliente)",
+            talvez_ja_pago: !!(r.client_id && esperando.has(String(r.client_id))),
             saldo: r2(Number(r.balance_amount ?? r.amount) || 0),
             dias_atraso: Math.floor((now.getTime() - new Date(`${r.due_date}T00:00:00`).getTime()) / 86400000),
           }))
           .filter((c) => c.saldo > 0)
           .sort((a, b) => b.saldo - a.saldo);
+        const talvez = casos.filter((c) => c.talvez_ja_pago);
         cobrancas = {
           quantidade: casos.length,
           total_em_atraso: r2(casos.reduce((a, c) => a + c.saldo, 0)),
           topo: casos.slice(0, 5),
+          ...(talvez.length
+            ? { talvez_ja_pagos: { quantidade: talvez.length, valor: r2(talvez.reduce((a, c) => a + c.saldo, 0)), nota: "Estes clientes têm Pix esperando no Extrato: confira antes de cobrar." } }
+            : {}),
         };
       } catch (e) { cobrancas = { erro: (e as Error).message }; }
 
