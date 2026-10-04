@@ -33,29 +33,47 @@ export function useAddress() {
 
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastNominatimCall = useRef(0);
+  // As buscas (IBGE, ViaCEP, Nominatim) respondem DEPOIS: se a tela já fechou, não há o que
+  // atualizar. Sem isto, no CI a resposta do IBGE chegava com o ambiente de teste desmontado e
+  // derrubava a suíte ("window is not defined", 04/10/2026) — mesmo com todos os testes passando.
+  const montado = useRef(true);
+  // Só a resposta do ÚLTIMO estado escolhido vale: trocar de UF rápido não deixa as cidades do
+  // estado anterior chegarem depois e sobrescreverem as do novo.
+  const ufPedida = useRef('');
+
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, []);
 
   // Fetch states once on mount
   useEffect(() => {
     setStatesLoading(true);
     fetch('https://servicodados.ibge.gov.br/api/v1/localidades/estados?orderBy=nome')
       .then(r => r.json())
-      .then((data: IbgeState[]) => setStates(data))
-      .catch(() => setStates([]))
-      .finally(() => setStatesLoading(false));
+      .then((data: IbgeState[]) => { if (montado.current) setStates(data); })
+      .catch(() => { if (montado.current) setStates([]); })
+      .finally(() => { if (montado.current) setStatesLoading(false); });
   }, []);
 
   const setSelectedState = useCallback((uf: string) => {
     setSelectedStateInternal(uf);
+    ufPedida.current = uf;
     if (!uf) {
       setCities([]);
+      setCitiesLoading(false);
       return;
     }
     setCitiesLoading(true);
+    const vale = () => montado.current && ufPedida.current === uf;
     fetch(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios?orderBy=nome`)
       .then(r => r.json())
-      .then((data: Array<{ nome: string }>) => setCities(data.map(c => c.nome)))
-      .catch(() => setCities([]))
-      .finally(() => setCitiesLoading(false));
+      .then((data: Array<{ nome: string }>) => { if (vale()) setCities(data.map(c => c.nome)); })
+      .catch(() => { if (vale()) setCities([]); })
+      .finally(() => { if (vale()) setCitiesLoading(false); });
   }, []);
 
   const fetchByCep = useCallback(async (cep: string): Promise<ViaCepResult | null> => {
@@ -67,15 +85,15 @@ export function useAddress() {
       const r = await fetch(`https://viacep.com.br/ws/${clean}/json/`);
       const data: ViaCepResult = await r.json();
       if (data.erro) {
-        setCepError('CEP não encontrado');
+        if (montado.current) setCepError('CEP não encontrado');
         return null;
       }
       return data;
     } catch {
-      setCepError('Erro ao buscar CEP');
+      if (montado.current) setCepError('Erro ao buscar CEP');
       return null;
     } finally {
-      setCepLoading(false);
+      if (montado.current) setCepLoading(false);
     }
   }, []);
 
@@ -91,6 +109,7 @@ export function useAddress() {
       if (timeSinceLast < 1000) {
         await new Promise(resolve => setTimeout(resolve, 1000 - timeSinceLast));
       }
+      if (!montado.current) return;
       setAddressSearchLoading(true);
       try {
         lastNominatimCall.current = Date.now();
@@ -99,11 +118,11 @@ export function useAddress() {
           { headers: { 'User-Agent': 'MarineFlow-ERP/1.0' } }
         );
         const data: NominatimResult[] = await r.json();
-        setAddressSuggestions(data);
+        if (montado.current) setAddressSuggestions(data);
       } catch {
-        setAddressSuggestions([]);
+        if (montado.current) setAddressSuggestions([]);
       } finally {
-        setAddressSearchLoading(false);
+        if (montado.current) setAddressSearchLoading(false);
       }
     }, 400);
   }, []);
