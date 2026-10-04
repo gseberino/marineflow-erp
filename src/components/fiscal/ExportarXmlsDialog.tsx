@@ -1,7 +1,8 @@
 /**
- * "Exportar XMLs para a contadora": um .zip com os XMLs das NF-es autorizadas e canceladas de um
- * período + o resumo CSV do livro de saída. A cancelada vai junto de propósito: sem ela, o número
- * parece uma inutilização ou lacuna no livro.
+ * "Exportar XMLs para a contadora": um .zip com os XMLs das NF-e e NFS-e autorizadas e canceladas
+ * de um período + o resumo CSV do livro de saída. A cancelada vai junto de propósito: sem ela, o
+ * número parece uma inutilização ou lacuna no livro. As NFS-e entraram em 04/10/2026 (decisão do
+ * dono); o proxy já devolvia o XML delas (xml_nfse) pelo mesmo pedido "xml_authorized".
  *
  * Saiu de FiscalEmission.tsx no D33 (01/10/2026) com o próprio estado. O CSV, o nome de cada XML
  * e o período são funções puras e testadas (src/lib/fiscal-exportacao.ts); o JSX veio copiado.
@@ -21,7 +22,8 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { createZipBlob, type ZipEntry } from '@/lib/zip';
 import {
-  limitesDoPeriodo, nomeDoXml, periodoInicialDaExportacao, resumoDoLivroDeSaida,
+  janelaDaConsultaDeNfse, limitesDoPeriodo, nfseDoPeriodo, nomeDoXml, periodoInicialDaExportacao,
+  resumoDoLivroDeSaida,
 } from '@/lib/fiscal-exportacao';
 
 export function ExportarXmlsDialog({ onClose }: { onClose: () => void }) {
@@ -38,17 +40,32 @@ export function ExportarXmlsDialog({ onClose }: { onClose: () => void }) {
     setExporting(true);
     const tId = toast.loading('Consultando notas do período…');
     try {
-      // Autorizadas E canceladas, pelo instante da autorização dentro dos dias LOCAIS escolhidos.
+      // NF-e: autorizadas E canceladas, pelo instante da autorização dentro dos dias LOCAIS escolhidos.
       const { inicio, fim } = limitesDoPeriodo(exportFrom, exportTo);
-      const { data: docs, error } = await supabase.from('issued_fiscal_documents')
-        .select('id, series, number, access_key, status, authorized_at, environment, request_payload')
+      const { data: nfes, error } = await supabase.from('issued_fiscal_documents')
+        .select('id, document_type, series, number, access_key, status, authorized_at, environment, request_payload')
+        .neq('document_type', 'nfse')
         .in('status', ['authorized', 'cancelled'])
         .gte('authorized_at', inicio)
         .lte('authorized_at', fim)
         .order('number', { ascending: true });
       if (error) throw error;
-      if (!docs?.length) {
-        toast.error('Nenhuma NF-e autorizada/cancelada nesse período.', { id: tId });
+
+      // NFS-e: não tem authorized_at; a data é a do evento do provedor (dataDaNota). Consulta com
+      // folga pelo created_at e corta pela data da nota.
+      const janela = janelaDaConsultaDeNfse(inicio, fim);
+      const { data: nfsesDaJanela, error: erroNfse } = await supabase.from('issued_fiscal_documents')
+        .select('id, document_type, series, number, access_key, status, authorized_at, created_at, environment, request_payload, provider_status')
+        .eq('document_type', 'nfse')
+        .in('status', ['authorized', 'cancelled'])
+        .gte('created_at', janela.inicio)
+        .lte('created_at', janela.fim)
+        .order('number', { ascending: true });
+      if (erroNfse) throw erroNfse;
+
+      const docs = [...(nfes ?? []), ...nfseDoPeriodo(nfsesDaJanela ?? [], inicio, fim)];
+      if (!docs.length) {
+        toast.error('Nenhuma nota autorizada/cancelada nesse período.', { id: tId });
         return;
       }
 
@@ -84,7 +101,7 @@ export function ExportarXmlsDialog({ onClose }: { onClose: () => void }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `NFe-XMLs_${exportFrom}_a_${exportTo}.zip`;
+      a.download = `XMLs-notas-fiscais_${exportFrom}_a_${exportTo}.zip`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -105,8 +122,8 @@ export function ExportarXmlsDialog({ onClose }: { onClose: () => void }) {
         <DialogHeader>
           <DialogTitle>Exportar XMLs para a contadora</DialogTitle>
           <DialogDescription>
-            Baixa, num único arquivo .zip, os XMLs de todas as NF-es <strong>autorizadas e canceladas</strong> no
-            período escolhido, mais um resumo em CSV (livro de saída: série/nº, chave, data, valor, destinatário).
+            Baixa, num único arquivo .zip, os XMLs de todas as NF-e e NFS-e <strong>autorizadas e canceladas</strong> no
+            período escolhido, mais um resumo em CSV (livro de saída: modelo, série/nº, chave, data, valor, destinatário).
           </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-3">

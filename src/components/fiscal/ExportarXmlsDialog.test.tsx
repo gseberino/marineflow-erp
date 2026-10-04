@@ -10,17 +10,28 @@ const banco = vi.hoisted(() => ({
   zip: [] as Array<{ name: string; content: string }>,
   toasts: [] as string[],
   docs: [] as unknown[],
+  nfses: [] as unknown[],
 }));
 
+// Duas consultas: a das NF-e (neq document_type nfse) e a das NFS-e (eq document_type nfse).
 vi.mock('@/integrations/supabase/client', () => {
-  const consulta: Record<string, unknown> = {};
-  for (const m of ['select', 'in', 'gte', 'lte']) {
-    consulta[m] = (...args: unknown[]) => { banco.filtros.push([m, ...args]); return consulta; };
-  }
-  consulta.order = async () => ({ data: banco.docs, error: null });
+  const novaConsulta = () => {
+    let daNfse = false;
+    const consulta: Record<string, unknown> = {};
+    for (const m of ['select', 'in', 'gte', 'lte', 'neq']) {
+      consulta[m] = (...args: unknown[]) => { banco.filtros.push([m, ...args]); return consulta; };
+    }
+    consulta.eq = (...args: unknown[]) => {
+      banco.filtros.push(['eq', ...args]);
+      if (args[0] === 'document_type' && args[1] === 'nfse') daNfse = true;
+      return consulta;
+    };
+    consulta.order = async () => ({ data: daNfse ? banco.nfses : banco.docs, error: null });
+    return consulta;
+  };
   return {
     supabase: {
-      from: () => consulta,
+      from: () => novaConsulta(),
       functions: {
         invoke: async (_nome: string, opts: { body: { document_id: string } }) => {
           banco.invocacoes.push(opts.body);
@@ -57,6 +68,7 @@ beforeEach(() => {
   banco.zip = [];
   banco.toasts = [];
   banco.docs = [];
+  banco.nfses = [];
   URL.createObjectURL = vi.fn(() => 'blob:x');
   URL.revokeObjectURL = vi.fn();
   // o download é um clique num <a>: o jsdom não navega
@@ -94,7 +106,41 @@ describe('ExportarXmlsDialog', () => {
   it('período sem notas avisa e não gera arquivo', async () => {
     render(<ExportarXmlsDialog onClose={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: /Exportar .zip/ }));
-    await waitFor(() => expect(banco.toasts).toContain('erro: Nenhuma NF-e autorizada/cancelada nesse período.'));
+    await waitFor(() => expect(banco.toasts).toContain('erro: Nenhuma nota autorizada/cancelada nesse período.'));
     expect(banco.zip).toEqual([]);
+  });
+
+  it('NFS-e do período entram com XML e linha no CSV; a de fora do período (pela data da nota) não', async () => {
+    // O período padrão é do dia 1º do mês corrente até hoje (dia local).
+    const hoje = new Date();
+    const noPeriodo = new Date(hoje.getFullYear(), hoje.getMonth(), 1, 10, 0).toISOString();
+    const mesPassado = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 15, 10, 0).toISOString();
+    const servico = (id: string, number: number, quando: string) => ({
+      id, document_type: 'nfse', series: 1, number, access_key: `chave-s${number}`, status: 'authorized',
+      environment: 'producao', authorized_at: null, created_at: quando,
+      provider_status: { latest_event: { status: 'authorized', created_at: quando } },
+      request_payload: { taker: { name: 'TOMADOR', document: '65725468020' }, amounts: { net_amount: 800 } },
+    });
+    banco.docs = [nota('n31', 31)];
+    banco.nfses = [servico('s5', 5, noPeriodo), servico('s4', 4, mesPassado)];
+    const onClose = vi.fn();
+    render(<ExportarXmlsDialog onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: /Exportar .zip/ }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+
+    expect(banco.filtros).toContainEqual(['neq', 'document_type', 'nfse']);
+    expect(banco.filtros).toContainEqual(['eq', 'document_type', 'nfse']);
+    expect(banco.invocacoes).toEqual([
+      { action: 'artifact', document_id: 'n31', artifact: 'xml_authorized' },
+      { action: 'artifact', document_id: 's5', artifact: 'xml_authorized' },
+    ]);
+    expect(banco.zip.map((e) => e.name)).toEqual([
+      'NFe-2-000000031-chave-31.xml', 'NFSe-1-000000005-chave-s5.xml', '_resumo-livro-saida.csv',
+    ]);
+    const linhas = banco.zip[2].content.split('\r\n');
+    expect(linhas[1].startsWith('NF-e;2;31;')).toBe(true);
+    expect(linhas[2].startsWith('NFS-e;1;5;')).toBe(true);
+    expect(linhas[2]).toContain(';800,00;TOMADOR;65725468020;');
+    expect(banco.toasts).toContain('Exportadas 2 nota(s) + resumo CSV.');
   });
 });
