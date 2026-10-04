@@ -35,6 +35,10 @@ verify_jwt = false
 [functions.ai-agent]
 verify_jwt = false
 
+# Servidor MCP das ferramentas do ERP para o HBR AI Gateway: autentica pelo token de uso único do job.
+[functions.erp-mcp]
+verify_jwt = false
+
 # Cron interno (Fase 5): expira pendências vencidas (ai_operator_pending_actions).
 # O pg_cron chama só com x-cron-secret (sem Authorization), então o gateway não pode
 # exigir JWT. Ação idempotente e interna (só marca 'expired' o que passou de expires_at).

@@ -6,7 +6,17 @@
 // widget — que não muda nesta fase.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { ressalvaDoResultado, runAgentLoop, type Proposal } from "../_shared/ai/agent.ts";
+import { prepararFerramentasDoTurno, ressalvaDoResultado, runAgentLoop, type Proposal } from "../_shared/ai/agent.ts";
+import { respostaDoTurnoNoWhatsApp } from "../_shared/ai/whatsapp-resposta.ts";
+import {
+  enfileirarTurnoNoMax,
+  maxDisponivel,
+  modeloDoMax,
+  provedorDoTurno,
+  reservaLigada,
+  TIPO_DO_JOB,
+} from "../_shared/ai/max/claude-max.ts";
+import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { filtrarTools } from "../_shared/ai/intent-router.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
@@ -555,6 +565,33 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     return jr({ ok: true, atalho: "pdf" });
   }
 
+  return await turnoDoModeloNoWhatsApp({
+    admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText, permitirMax: true,
+  });
+}
+
+interface TurnoDoModelo {
+  admin: any;
+  sessionId: string;
+  phoneNormalized: string;
+  appUser: { id: string; role: string; full_name?: string | null };
+  settings: Record<string, string>;
+  toolCtx: any;
+  metadata: Record<string, any>;
+  effectiveText: string;
+  /** false na reserva: o Max já falhou neste turno, vai direto pelo OpenRouter. */
+  permitirMax: boolean;
+}
+
+/**
+ * O turno do modelo no WhatsApp. Com app_settings.ai_provedor_whatsapp = 'claude_max' (só para o
+ * admin — termos da assinatura) e o gateway no ar, o turno vira job para o Claude Max e a resposta
+ * sai por handleEntregaDoMax. Em qualquer outro caso — ou se o Max falhar depois — roda o loop do
+ * OpenRouter aqui, como sempre rodou.
+ */
+async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> {
+  const { admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText } = turno;
+
   // ---- Turno normal do LLM ----
   // Janela pelas mensagens MAIS RECENTES (ver history-window.ts). Antes era ascending+limit, que
   // devolvia as mais antigas e congelava — o agente relia o pedido original a cada turno.
@@ -592,17 +629,47 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     settings,
   );
 
-  const result = await runAgentLoop({
+  const loopParams = {
     system,
     messages: toAnthropicMessages(podarHistoricoParaLLM(historyMessages)),
     tools: toolsForRole,
     toolCtx,
     sessionId,
-    channel: "whatsapp",
-    effort: "low", // WhatsApp: conversa rápida, prioriza latência baixa
+    channel: "whatsapp" as const,
+    effort: "low" as const, // WhatsApp: conversa rápida, prioriza latência baixa
     maxIterations: MAX_ITERATIONS_WHATSAPP, // teto menor que o painel: protege a latência
     timeBudgetMs: 45_000, // WhatsApp é conversa: melhor responder rápido e pedir "continue"
-  });
+  };
+
+  // ---- Claude Max (assinatura do dono, pelo HBR AI Gateway) ----
+  if (turno.permitirMax && provedorDoTurno(settings, appUser.role) === "claude_max") {
+    if (await maxDisponivel(admin)) {
+      try {
+        const jobId = await enfileirarTurnoNoMax(admin, {
+          sessionId,
+          appUserId: appUser.id,
+          phone: phoneNormalized,
+          modelo: modeloDoMax(settings),
+          system,
+          messages: loopParams.messages,
+          ferramentas: await prepararFerramentasDoTurno(loopParams),
+          texto: effectiveText,
+        });
+        // As mensagens do turno são gravadas na entrega; aqui só o estado das camadas determinísticas.
+        await admin.from("ai_operator_sessions")
+          .update({ metadata, last_activity_at: new Date().toISOString() })
+          .eq("id", sessionId);
+        return jr({ ok: true, session_id: sessionId, claude_max: jobId });
+      } catch (e) {
+        console.error("[ai-agent][whatsapp] não consegui enfileirar no Claude Max; turno pelo OpenRouter:", e);
+      }
+    } else {
+      console.log("[ai-agent][whatsapp] Claude Max fora do ar (gateway sem sinal ou em pausa); turno pelo OpenRouter");
+    }
+  }
+
+  // ---- OpenRouter (loop aqui na edge) ----
+  const result = await runAgentLoop(loopParams);
 
   try {
     const newNativeSlice = result.messages.slice(alreadyPersistedCount);
@@ -615,33 +682,108 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     console.error("[ai-agent][whatsapp] falha ao persistir mensagens:", persistErr);
   }
 
-  let replyText: string;
-  // O turno passou pelo modelo: a pendência herdada (se havia) deixou de valer aqui — os ramos
-  // abaixo zeram ou trocam pending_confirm_action_id, e a marca de herança vai junto.
-  const newMetadata: Record<string, any> = { ...metadata, pendencia_herdada: false };
-
-  if (result.error) {
-    replyText = `⚠️ ${result.error}`;
-    newMetadata.pending_confirm_action_id = null;
-  } else if (result.options) {
-    replyText = formatOptionsAsNumberedText(result.options.question, result.options.options);
-    newMetadata.pending_options = result.options.options;
-    newMetadata.pending_confirm_action_id = null;
-  } else if (result.proposal) {
-    const proposal = result.proposal as Proposal;
-    replyText = `⚠️ ${proposal.title}\n${proposal.summary_markdown}${notaDeConfirmacao(proposal.risk_level)}`;
-    newMetadata.pending_confirm_action_id = proposal.pending_action_id;
-    newMetadata.pin_attempts = 0;
-    newMetadata.pending_options = null;
-  } else {
-    replyText = result.message.content || "Ok.";
-    newMetadata.pending_confirm_action_id = null;
-  }
-
+  const { replyText, metadata: newMetadata } = respostaDoTurnoNoWhatsApp(
+    { error: result.error, options: result.options, proposal: result.proposal as Proposal | undefined, texto: result.message.content },
+    metadata,
+  );
   await admin.from("ai_operator_sessions").update({ metadata: newMetadata, last_activity_at: new Date().toISOString() }).eq("id", sessionId);
   await queueWhatsAppReply(admin, phoneNormalized, replyText);
 
   return jr({ ok: true, session_id: sessionId });
+}
+
+/**
+ * Entrega de um turno do Claude Max (chamada pelo gatilho de ai_jobs via pg_net, x-cron-secret).
+ * Concluído: grava o turno, aplica pendência/opções e responde no WhatsApp. Falhou (PC desligado,
+ * limite da assinatura, erro): refaz o turno pelo OpenRouter (ai_whatsapp_max_reserva != 'off')
+ * ou avisa. Idempotente: ai_job_marcar_entregue só deixa passar uma vez.
+ */
+async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> {
+  const jobId = String(body.job_id || "");
+  const admin = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data: job } = await admin
+    .from("ai_jobs")
+    .select("id, status, requested_by, input, metadata, response, error, error_code, model_used, usage")
+    .eq("id", jobId)
+    .maybeSingle();
+  const meta = (job?.metadata ?? {}) as Record<string, any>;
+  if (!job || meta.tipo !== TIPO_DO_JOB) return jr({ error: "Job de turno do WhatsApp não encontrado" }, 404);
+  if (!["completed", "failed", "cancelled"].includes(job.status)) return jr({ error: "O job ainda não terminou" }, 409);
+
+  const { data: primeiraVez } = await admin.rpc("ai_job_marcar_entregue", { p_job_id: jobId });
+  if (primeiraVez !== true) return jr({ ok: true, ja_entregue: true });
+
+  const input = (job.input ?? {}) as Record<string, any>;
+  const sessionId = String(meta.session_id || input.sessao || "");
+  const phoneNormalized = String(meta.phone || "");
+  const texto = String(input.texto || "");
+
+  const { data: appUser } = await admin
+    .from("app_users")
+    .select("id, role, full_name")
+    .eq("id", job.requested_by)
+    .eq("ai_whatsapp_enabled", true)
+    .eq("active", true)
+    .maybeSingle();
+  if (!appUser || !sessionId || !phoneNormalized) return jr({ error: "Turno sem usuário, sessão ou telefone" }, 422);
+
+  const { data: sessionRow } = await admin.from("ai_operator_sessions").select("metadata").eq("id", sessionId).maybeSingle();
+  const metadata: Record<string, any> = (sessionRow?.metadata as any) || {};
+  const { data: settingsRows } = await admin.from("app_settings").select("key, value");
+  const settings: Record<string, string> = {};
+  (settingsRows || []).forEach((r: any) => {
+    if (r.key) settings[r.key] = String(r.value ?? "");
+  });
+
+  if (job.status === "completed") {
+    const resposta = String((job.response as any)?.text ?? "");
+    const usage = (job.usage ?? {}) as Record<string, any>;
+    try {
+      await admin.from("ai_operator_messages").insert([
+        { session_id: sessionId, role: "user", content: texto, source: "whatsapp" },
+        {
+          session_id: sessionId,
+          role: "assistant",
+          content: resposta || null,
+          source: "whatsapp",
+          tokens_in: usage.input_tokens ?? null,
+          tokens_out: usage.output_tokens ?? null,
+          cache_read_tokens: usage.cache_read_input_tokens ?? null,
+          cache_creation_tokens: usage.cache_creation_input_tokens ?? null,
+          // Assinatura, não OpenRouter: sem generation_id, para o ai-cost-reconcile não procurar
+          // um custo que não existe; o modelo diz de onde veio.
+          openrouter_generation_id: null,
+          model: `claude-max/${job.model_used ?? "desconhecido"}`,
+        },
+      ]);
+    } catch (persistErr) {
+      console.error("[ai-agent][max] falha ao gravar o turno:", persistErr);
+    }
+    const interrupcao = (meta.interrupcao ?? {}) as Record<string, any>;
+    const { replyText, metadata: novo } = respostaDoTurnoNoWhatsApp(
+      { proposal: interrupcao.proposal, options: interrupcao.options, texto: resposta },
+      metadata,
+    );
+    await admin.from("ai_operator_sessions").update({ metadata: novo, last_activity_at: new Date().toISOString() }).eq("id", sessionId);
+    await queueWhatsAppReply(admin, phoneNormalized, replyText);
+    return jr({ ok: true, entregue: "claude_max" });
+  }
+
+  console.warn(`[ai-agent][max] turno ${jobId} não veio do Max (${job.error_code ?? job.status}); ${reservaLigada(settings) ? "refazendo pelo OpenRouter" : "avisando o usuário"}`);
+  if (!reservaLigada(settings) || !texto) {
+    await queueWhatsAppReply(
+      admin,
+      phoneNormalized,
+      `⚠️ Não consegui responder pelo Claude agora (${job.error_code ?? "falha"}). Tente de novo em instantes.`,
+    );
+    return jr({ ok: true, entregue: "aviso" });
+  }
+  const toolCtx = { sb: admin, admin, userId: appUser.id, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings };
+  return await turnoDoModeloNoWhatsApp({
+    admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText: texto, permitirMax: false,
+  });
 }
 
 // ---------------- HANDLER ----------------
@@ -649,6 +791,15 @@ servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
     if (!Deno.env.get("OPENROUTER_API_KEY")) return jr({ error: "OPENROUTER_API_KEY não configurada no Supabase" }, 500);
+
+    // Entrega de turno do Claude Max: chamada pelo gatilho de ai_jobs (pg_net) com o segredo do cron.
+    if (req.headers.get("x-cron-secret")) {
+      const negado = verificarCronSecret(req, corsHeaders, "ai-agent");
+      if (negado) return negado;
+      const corpo = await req.json().catch(() => ({}));
+      if (corpo?.type === "entregar_turno_max") return await handleEntregaDoMax(corpo);
+      return jr({ error: "Tipo desconhecido" }, 400);
+    }
 
     const internalSecret = req.headers.get("x-internal-secret");
     if (internalSecret) return await handleWhatsAppTurn(req, internalSecret);

@@ -608,12 +608,233 @@ function temErro(resultado: unknown): boolean {
 }
 
 /**
+ * O que um turno vê e alcança. Calculado igual nos dois provedores do agente (OpenRouter, que roda
+ * o loop aqui, e Claude Max, que roda o loop no gateway local e chama cada ferramenta pelo erp-mcp).
+ */
+export interface FerramentasDoTurno {
+  /** Visíveis ao modelo: cargo e canal (params.tools) e depois o perfil de tools. */
+  tools: ToolDef[];
+  toolsByName: Record<string, ToolDef>;
+  /** Rede de segurança: SO_PELA_REDE dentre as já liberadas por cargo e canal. */
+  alcancaveisPelaRede: Record<string, ToolDef>;
+}
+
+export async function prepararFerramentasDoTurno(params: RunAgentLoopParams): Promise<FerramentasDoTurno> {
+  const tools = await aplicarPerfilDeTools(params.tools ?? allTools, params);
+  return {
+    tools,
+    toolsByName: Object.fromEntries(tools.map((t) => [t.name, t])),
+    // Rede de segurança do perfil: SÓ SO_PELA_REDE, e dela só o que cargo e canal já liberaram
+    // (params.tools). Nunca allTools, nunca outra tool fora do perfil (ver o comentário acima).
+    alcancaveisPelaRede: Object.fromEntries(
+      (params.tools ?? []).filter((t) => SO_PELA_REDE.has(t.name)).map((t) => [t.name, t]),
+    ),
+  };
+}
+
+/** Onde UMA chamada de ferramenta roda: o mesmo para o loop daqui e para o erp-mcp. */
+export interface AmbienteDaTool {
+  toolsByName: Record<string, ToolDef>;
+  alcancaveisPelaRede: Record<string, ToolDef>;
+  toolCtx: ToolCtx;
+  sessionId: string;
+  channel?: RunAgentLoopParams["channel"];
+}
+
+export interface ResultadoDaTool {
+  toolResult: unknown;
+  /** Pendência criada (ação sensível aguardando o dono). */
+  proposal?: Proposal;
+}
+
+/**
+ * Executa UMA chamada de ferramenta com todas as travas: perfil e rede de segurança, validação
+ * de argumentos, risco e autonomia, pré-validação, pendência para aprovação e auditoria.
+ * Extraída do loop em 03/10/2026 sem mudar uma regra — o erp-mcp (modo Claude Max) chama esta
+ * mesma função, então as travas são as mesmas nos dois provedores.
+ */
+export async function executarChamadaDeTool(
+  tc: { name: string; input: unknown },
+  amb: AmbienteDaTool,
+): Promise<ResultadoDaTool> {
+  // Escondida pelo perfil, em SO_PELA_REDE e liberada por cargo e canal → rede (ver acima).
+  const foraDoPerfil = amb.toolsByName[tc.name] ? undefined : amb.alcancaveisPelaRede[tc.name];
+  const toolDef = amb.toolsByName[tc.name] ?? foraDoPerfil;
+  const argumentosInvalidos = foraDoPerfil ? validarArgumentosDaTool(foraDoPerfil.input_schema, tc.input) : [];
+  let toolResult: unknown;
+  let createdPendingProposal: Proposal | undefined;
+  let executou = false;
+
+  const riscoDaTool = toolDef ? (toolDef.computeRisk ? toolDef.computeRisk(tc.input) : toolDef.risk) : "low";
+  // Pela rede, só roda direto o que o computeRisk CALCULA como low e rodaDiretoPelaRede aceita:
+  // declarada low E leitura ou escrita de sugestão/análise (ESCRITAS_VERIFICADAS_DA_REDE).
+  // Escrita low fora dessa lista, ou declarada acima de low e rebaixada pelo computeRisk, pede
+  // confirmação. Só sobe o risco, nunca rebaixa.
+  const effectiveRisk = foraDoPerfil && riscoDaTool === "low" && !rodaDiretoPelaRede(foraDoPerfil) ? "medium" : riscoDaTool;
+
+  // Autonomia concedida pelo dono para ESTA ação (Onda 2). Ações de dinheiro/destrutivas
+  // nunca entram aqui — ver NEVER_AUTONOMOUS. Pela rede também não: a autonomia foi dada
+  // pensando no modelo que VÊ a ferramenta, não no que a chama de memória do prompt. Os
+  // argumentos vão junto porque há trava por argumento: o envio do PDF ao cliente nunca roda
+  // sozinho (NEVER_AUTONOMOUS_WHEN).
+  const autonomo = toolDef && !foraDoPerfil
+    ? isAutonomyGranted(tc.name, effectiveRisk, amb.toolCtx.settings, tc.input as Record<string, unknown>)
+    : false;
+
+  if (!toolDef) {
+    toolResult = { error: `Tool desconhecida: ${tc.name}` };
+  } else if (argumentosInvalidos.length > 0) {
+    // Nada roda: devolve o que está errado JUNTO com o esquema, que o modelo não tinha visto.
+    toolResult = {
+      error: `Argumentos inválidos para ${tc.name}: ${argumentosInvalidos.join("; ")}.`,
+      input_schema: toolDef.input_schema,
+      instruction: "Nada foi executado. Corrija os argumentos seguindo o input_schema acima e chame a ferramenta de novo.",
+    };
+  } else if (effectiveRisk !== "low" && !autonomo) {
+    // Recusa barata ANTES de a pendência nascer (ToolDef.preValidar): o dono não vê no
+    // sino — nem aprova com PIN — um pedido que a execução vai recusar de qualquer jeito.
+    let recusa: ({ error: string } & Record<string, unknown>) | null = null;
+    try {
+      recusa = toolDef.preValidar?.(tc.input, amb.toolCtx) ?? null;
+    } catch (e: any) {
+      recusa = { error: `Falha ao validar o pedido: ${e?.message || "erro desconhecido"}` };
+    }
+    if (recusa) {
+      toolResult = recusa;
+      await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
+    } else {
+      // Interceptação por risco (Fase 3): não executa — grava a pendência e devolve
+      // um tool_result sintético. A tool real só roda via confirm_action, sem LLM.
+      //
+      // Quem pediu vai junto quando a tool pede (ToolDef.gravarSolicitante): a pendência é
+      // executada com o ctx de quem CONFIRMA, e um admin pode aprovar a de outro — a tool
+      // revalida com o cargo de quem pediu. Grava POR CIMA de qualquer `_solicitante` que
+      // tenha vindo nos argumentos do modelo, e o resumo é montado sem ele.
+      const entrada = { ...((tc.input ?? {}) as Record<string, unknown>) };
+      const solicitante = toolDef.gravarSolicitante ? await quemPede(amb.toolCtx) : null;
+      if (solicitante) delete entrada[CHAVE_DO_SOLICITANTE];
+      // O retrato do que o dono vai aprovar (ToolDef.retratoDaPendencia): mesma proteção do
+      // solicitante — o que veio do modelo sai, o gravado é o lido agora do banco.
+      if (toolDef.retratoDaPendencia) delete entrada[CHAVE_DO_RETRATO];
+      let retrato: Record<string, unknown> | null = null;
+      if (toolDef.retratoDaPendencia) {
+        try {
+          retrato = await toolDef.retratoDaPendencia(entrada, amb.toolCtx);
+        } catch { /* sem retrato: a execução segue sem comparar */ }
+      }
+      const limpa = !!solicitante || !!toolDef.retratoDaPendencia;
+      let resumo = await buildPendingSummary(amb.toolCtx.admin, tc.name, limpa ? entrada : tc.input as Record<string, unknown>);
+      if (solicitante) {
+        resumo += `\nPedido por: *${solicitante.nome || "—"}* (${ROTULO_DO_CARGO[solicitante.cargo] ?? solicitante.cargo})`;
+      }
+      const payloadDaPendencia = limpa
+        ? {
+          ...entrada,
+          ...(solicitante ? { [CHAVE_DO_SOLICITANTE]: solicitante } : {}),
+          ...(retrato ? { [CHAVE_DO_RETRATO]: retrato } : {}),
+        }
+        : tc.input;
+      const { data: pending, error: pendingErr } = await amb.toolCtx.admin
+        .from("ai_operator_pending_actions")
+        .insert({
+          session_id: amb.sessionId,
+          requested_by_user_id: amb.toolCtx.userId,
+          action_name: tc.name,
+          risk_level: effectiveRisk,
+          title: humanizeToolNamePt(tc.name),
+          summary: resumo,
+          payload: payloadDaPendencia,
+          status: "pending",
+          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        })
+        .select("id, title, summary, risk_level")
+        .single();
+
+      if (pendingErr || !pending) {
+        toolResult = { error: `Falha ao registrar pendência: ${pendingErr?.message || "erro desconhecido"}` };
+      } else {
+        toolResult = { pending: true, pending_action_id: pending.id, instruction: "Ação registrada para aprovação. Aguardando decisão do usuário — não repita a chamada." };
+        createdPendingProposal = { pending_action_id: pending.id, title: pending.title, summary_markdown: pending.summary, risk_level: pending.risk_level };
+      }
+      await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, { eventType: `pending_action:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
+    }
+  } else {
+    executou = true;
+    try {
+      toolResult = await toolDef.execute(tc.input, amb.toolCtx);
+    } catch (e: any) {
+      toolResult = { error: e?.message || "Falha na execução da tool" };
+    }
+    await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, {
+      eventType: `tool:${tc.name}`,
+      risk: toolDef.risk,
+      args: tc.input,
+      result: toolResult,
+      autonomous: effectiveRisk !== "low", // sensível que rodou direto = autonomia concedida
+    });
+  }
+
+  // Marca própria da rede: 'fora_do_perfil:%' na auditoria mostra quais ferramentas o prompt
+  // faz o modelo procurar fora do perfil — a que aparecer com frequência merece entrar nele.
+  // Rodou mas devolveu { error } (ou lançou, e o catch acima virou { error }) é falha, não
+  // execução: senão a auditoria diz que a rede resolveu quando o modelo recebeu erro.
+  if (foraDoPerfil) {
+    const desfecho = argumentosInvalidos.length > 0
+      ? "argumentos_invalidos"
+      : executou
+      ? (temErro(toolResult) ? "falha_na_execucao" : "executada")
+      : createdPendingProposal ? "pendencia" : "falha_ao_registrar_pendencia";
+    await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, {
+      eventType: `fora_do_perfil:${tc.name}`,
+      risk: effectiveRisk,
+      args: tc.input,
+      result: toolResult,
+      detalhe: { desfecho },
+    });
+  }
+
+  return { toolResult, ...(createdPendingProposal ? { proposal: createdPendingProposal } : {}) };
+}
+
+/**
+ * Depois de uma ferramenta, o turno para para esperar o usuário? Pendência criada, busca ambígua
+ * (desambiguação automática) ou present_options. `trabalhoComposto` = o modelo disparou várias
+ * ferramentas no mesmo turno; aí a busca ambígua volta ao modelo em vez de virar pergunta.
+ */
+export function interrupcaoDaTool(
+  tc: { name: string; input: unknown },
+  r: ResultadoDaTool,
+  trabalhoComposto: boolean,
+): { proposal?: Proposal; options?: OptionsData } | null {
+  const disambig = AUTO_DISAMBIG[tc.name];
+  const items: any[] = (r.toolResult as any)?.results ?? [];
+  // Em TRABALHO COMPOSTO (o modelo disparou várias buscas no mesmo turno, ex.: montar um
+  // orçamento com 20 itens), interromper a cada busca ambígua inviabiliza a tarefa: vira
+  // uma pergunta por item. Nesse caso devolvemos a lista ao modelo, que escolhe e informa
+  // o que escolheu — ou chama present_options por conta própria se estiver realmente em
+  // dúvida. A desambiguação forçada continua valendo quando a busca é o assunto do turno.
+  if (disambig && items.length > 1 && !trabalhoComposto) {
+    const searchQuery = (tc.input as any)?.query || (tc.input as any)?.client_id || "";
+    const top5 = items.slice(0, 5);
+    const options: OptionItem[] = top5.map((item) => ({ label: disambig.label(item).slice(0, 60), value: disambig.value(item) }));
+    if (items.length > 5) options.push({ label: "🔍 Refinar busca — digitar mais detalhes", value: "__refine__" });
+    return { options: { question: disambig.question(searchQuery, items.length), options } };
+  }
+  if (r.proposal) return { proposal: r.proposal };
+  if (tc.name === "present_options") {
+    const input = tc.input as any;
+    return { options: { question: input.question, options: input.options } };
+  }
+  return null;
+}
+
+/**
  * Loop de tool-calling agnóstico de canal. Recebe o histórico em formato nativo
  * Anthropic e devolve o resultado do turno (mensagem final, ou proposal/options
  * para a UI aguardar o usuário). Quem chama decide como renderizar cada canal.
  */
 export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTurnResult> {
-  const tools = await aplicarPerfilDeTools(params.tools ?? allTools, params);
+  const { tools, toolsByName, alcancaveisPelaRede } = await prepararFerramentasDoTurno(params);
   const model = params.model ?? MODEL_AGENT;
   const maxIterations = params.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   const messages: ClaudeMessage[] = params.messages.map((m) => ({ role: m.role, content: [...m.content] }));
@@ -621,12 +842,6 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
   const usageLog: ClaudeUsage[] = [];
 
   const toolSchemas = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
-  const toolsByName: Record<string, ToolDef> = Object.fromEntries(tools.map((t) => [t.name, t]));
-  // Rede de segurança do perfil: SÓ SO_PELA_REDE, e dela só o que cargo e canal já liberaram
-  // (params.tools). Nunca allTools, nunca outra tool fora do perfil (ver o comentário acima).
-  const alcancaveisPelaRede: Record<string, ToolDef> = Object.fromEntries(
-    (params.tools ?? []).filter((t) => SO_PELA_REDE.has(t.name)).map((t) => [t.name, t]),
-  );
 
   // ORÇAMENTO DE TEMPO — o que realmente protege o turno.
   // A Edge Function do Supabase tem teto de parede de ~150s: estourar devolve HTTP 546 e o
@@ -699,167 +914,12 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
     let shortCircuit: { proposal?: Proposal; options?: OptionsData } | null = null;
 
     for (const tc of toolUses) {
-      // Escondida pelo perfil, em SO_PELA_REDE e liberada por cargo e canal → rede (ver acima).
-      const foraDoPerfil = toolsByName[tc.name] ? undefined : alcancaveisPelaRede[tc.name];
-      const toolDef = toolsByName[tc.name] ?? foraDoPerfil;
-      const argumentosInvalidos = foraDoPerfil ? validarArgumentosDaTool(foraDoPerfil.input_schema, tc.input) : [];
-      let toolResult: unknown;
-      let createdPendingProposal: Proposal | undefined;
-      let executou = false;
-
-      const riscoDaTool = toolDef ? (toolDef.computeRisk ? toolDef.computeRisk(tc.input) : toolDef.risk) : "low";
-      // Pela rede, só roda direto o que o computeRisk CALCULA como low e rodaDiretoPelaRede aceita:
-      // declarada low E leitura ou escrita de sugestão/análise (ESCRITAS_VERIFICADAS_DA_REDE).
-      // Escrita low fora dessa lista, ou declarada acima de low e rebaixada pelo computeRisk, pede
-      // confirmação. Só sobe o risco, nunca rebaixa.
-      const effectiveRisk = foraDoPerfil && riscoDaTool === "low" && !rodaDiretoPelaRede(foraDoPerfil) ? "medium" : riscoDaTool;
-
-      // Autonomia concedida pelo dono para ESTA ação (Onda 2). Ações de dinheiro/destrutivas
-      // nunca entram aqui — ver NEVER_AUTONOMOUS. Pela rede também não: a autonomia foi dada
-      // pensando no modelo que VÊ a ferramenta, não no que a chama de memória do prompt. Os
-      // argumentos vão junto porque há trava por argumento: o envio do PDF ao cliente nunca roda
-      // sozinho (NEVER_AUTONOMOUS_WHEN).
-      const autonomo = toolDef && !foraDoPerfil
-        ? isAutonomyGranted(tc.name, effectiveRisk, params.toolCtx.settings, tc.input as Record<string, unknown>)
-        : false;
-
-      if (!toolDef) {
-        toolResult = { error: `Tool desconhecida: ${tc.name}` };
-      } else if (argumentosInvalidos.length > 0) {
-        // Nada roda: devolve o que está errado JUNTO com o esquema, que o modelo não tinha visto.
-        toolResult = {
-          error: `Argumentos inválidos para ${tc.name}: ${argumentosInvalidos.join("; ")}.`,
-          input_schema: toolDef.input_schema,
-          instruction: "Nada foi executado. Corrija os argumentos seguindo o input_schema acima e chame a ferramenta de novo.",
-        };
-      } else if (effectiveRisk !== "low" && !autonomo) {
-        // Recusa barata ANTES de a pendência nascer (ToolDef.preValidar): o dono não vê no
-        // sino — nem aprova com PIN — um pedido que a execução vai recusar de qualquer jeito.
-        let recusa: ({ error: string } & Record<string, unknown>) | null = null;
-        try {
-          recusa = toolDef.preValidar?.(tc.input, params.toolCtx) ?? null;
-        } catch (e: any) {
-          recusa = { error: `Falha ao validar o pedido: ${e?.message || "erro desconhecido"}` };
-        }
-        if (recusa) {
-          toolResult = recusa;
-          await writeAudit(params.toolCtx, params.sessionId, params.channel, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
-        } else {
-          // Interceptação por risco (Fase 3): não executa — grava a pendência e devolve
-          // um tool_result sintético. A tool real só roda via confirm_action, sem LLM.
-          //
-          // Quem pediu vai junto quando a tool pede (ToolDef.gravarSolicitante): a pendência é
-          // executada com o ctx de quem CONFIRMA, e um admin pode aprovar a de outro — a tool
-          // revalida com o cargo de quem pediu. Grava POR CIMA de qualquer `_solicitante` que
-          // tenha vindo nos argumentos do modelo, e o resumo é montado sem ele.
-          const entrada = { ...((tc.input ?? {}) as Record<string, unknown>) };
-          const solicitante = toolDef.gravarSolicitante ? await quemPede(params.toolCtx) : null;
-          if (solicitante) delete entrada[CHAVE_DO_SOLICITANTE];
-          // O retrato do que o dono vai aprovar (ToolDef.retratoDaPendencia): mesma proteção do
-          // solicitante — o que veio do modelo sai, o gravado é o lido agora do banco.
-          if (toolDef.retratoDaPendencia) delete entrada[CHAVE_DO_RETRATO];
-          let retrato: Record<string, unknown> | null = null;
-          if (toolDef.retratoDaPendencia) {
-            try {
-              retrato = await toolDef.retratoDaPendencia(entrada, params.toolCtx);
-            } catch { /* sem retrato: a execução segue sem comparar */ }
-          }
-          const limpa = !!solicitante || !!toolDef.retratoDaPendencia;
-          let resumo = await buildPendingSummary(params.toolCtx.admin, tc.name, limpa ? entrada : tc.input as Record<string, unknown>);
-          if (solicitante) {
-            resumo += `\nPedido por: *${solicitante.nome || "—"}* (${ROTULO_DO_CARGO[solicitante.cargo] ?? solicitante.cargo})`;
-          }
-          const payloadDaPendencia = limpa
-            ? {
-              ...entrada,
-              ...(solicitante ? { [CHAVE_DO_SOLICITANTE]: solicitante } : {}),
-              ...(retrato ? { [CHAVE_DO_RETRATO]: retrato } : {}),
-            }
-            : tc.input;
-          const { data: pending, error: pendingErr } = await params.toolCtx.admin
-            .from("ai_operator_pending_actions")
-            .insert({
-              session_id: params.sessionId,
-              requested_by_user_id: params.toolCtx.userId,
-              action_name: tc.name,
-              risk_level: effectiveRisk,
-              title: humanizeToolNamePt(tc.name),
-              summary: resumo,
-              payload: payloadDaPendencia,
-              status: "pending",
-              expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-            })
-            .select("id, title, summary, risk_level")
-            .single();
-
-          if (pendingErr || !pending) {
-            toolResult = { error: `Falha ao registrar pendência: ${pendingErr?.message || "erro desconhecido"}` };
-          } else {
-            toolResult = { pending: true, pending_action_id: pending.id, instruction: "Ação registrada para aprovação. Aguardando decisão do usuário — não repita a chamada." };
-            createdPendingProposal = { pending_action_id: pending.id, title: pending.title, summary_markdown: pending.summary, risk_level: pending.risk_level };
-          }
-          await writeAudit(params.toolCtx, params.sessionId, params.channel, { eventType: `pending_action:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
-        }
-      } else {
-        executou = true;
-        try {
-          toolResult = await toolDef.execute(tc.input, params.toolCtx);
-        } catch (e: any) {
-          toolResult = { error: e?.message || "Falha na execução da tool" };
-        }
-        await writeAudit(params.toolCtx, params.sessionId, params.channel, {
-          eventType: `tool:${tc.name}`,
-          risk: toolDef.risk,
-          args: tc.input,
-          result: toolResult,
-          autonomous: effectiveRisk !== "low", // sensível que rodou direto = autonomia concedida
-        });
-      }
-
-      // Marca própria da rede: 'fora_do_perfil:%' na auditoria mostra quais ferramentas o prompt
-      // faz o modelo procurar fora do perfil — a que aparecer com frequência merece entrar nele.
-      // Rodou mas devolveu { error } (ou lançou, e o catch acima virou { error }) é falha, não
-      // execução: senão a auditoria diz que a rede resolveu quando o modelo recebeu erro.
-      if (foraDoPerfil) {
-        const desfecho = argumentosInvalidos.length > 0
-          ? "argumentos_invalidos"
-          : executou
-          ? (temErro(toolResult) ? "falha_na_execucao" : "executada")
-          : createdPendingProposal ? "pendencia" : "falha_ao_registrar_pendencia";
-        await writeAudit(params.toolCtx, params.sessionId, params.channel, {
-          eventType: `fora_do_perfil:${tc.name}`,
-          risk: effectiveRisk,
-          args: tc.input,
-          result: toolResult,
-          detalhe: { desfecho },
-        });
-      }
-
-      toolEvents.push({ name: tc.name, args: tc.input, result: toolResult });
-      toolResults.push({ type: "tool_result", tool_use_id: tc.id, content: JSON.stringify(toolResult) });
-
-      if (!shortCircuit) {
-        const disambig = AUTO_DISAMBIG[tc.name];
-        const items: any[] = (toolResult as any)?.results ?? [];
-        // Em TRABALHO COMPOSTO (o modelo disparou várias buscas no mesmo turno, ex.: montar um
-        // orçamento com 20 itens), interromper a cada busca ambígua inviabiliza a tarefa: vira
-        // uma pergunta por item. Nesse caso devolvemos a lista ao modelo, que escolhe e informa
-        // o que escolheu — ou chama present_options por conta própria se estiver realmente em
-        // dúvida. A desambiguação forçada continua valendo quando a busca é o assunto do turno.
-        const trabalhoComposto = toolUses.length > 1;
-        if (disambig && items.length > 1 && !trabalhoComposto) {
-          const searchQuery = (tc.input as any)?.query || (tc.input as any)?.client_id || "";
-          const top5 = items.slice(0, 5);
-          const options: OptionItem[] = top5.map((item) => ({ label: disambig.label(item).slice(0, 60), value: disambig.value(item) }));
-          if (items.length > 5) options.push({ label: "🔍 Refinar busca — digitar mais detalhes", value: "__refine__" });
-          shortCircuit = { options: { question: disambig.question(searchQuery, items.length), options } };
-        } else if (createdPendingProposal) {
-          shortCircuit = { proposal: createdPendingProposal };
-        } else if (tc.name === "present_options") {
-          const input = tc.input as any;
-          shortCircuit = { options: { question: input.question, options: input.options } };
-        }
-      }
+      const r = await executarChamadaDeTool(tc, {
+        toolsByName, alcancaveisPelaRede, toolCtx: params.toolCtx, sessionId: params.sessionId, channel: params.channel,
+      });
+      toolEvents.push({ name: tc.name, args: tc.input, result: r.toolResult });
+      toolResults.push({ type: "tool_result", tool_use_id: tc.id, content: JSON.stringify(r.toolResult) });
+      if (!shortCircuit) shortCircuit = interrupcaoDaTool(tc, r, toolUses.length > 1);
     }
 
     messages.push({ role: "user", content: toolResults });

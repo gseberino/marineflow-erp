@@ -781,6 +781,7 @@ export type Database = {
           allowed_sources: string[]
           created_at: string
           enabled: boolean
+          estado: Json | null
           id: string
           last_seen_at: string | null
           token_hash: string
@@ -790,6 +791,7 @@ export type Database = {
           allowed_sources?: string[]
           created_at?: string
           enabled?: boolean
+          estado?: Json | null
           id: string
           last_seen_at?: string | null
           token_hash: string
@@ -799,6 +801,7 @@ export type Database = {
           allowed_sources?: string[]
           created_at?: string
           enabled?: boolean
+          estado?: Json | null
           id?: string
           last_seen_at?: string | null
           token_hash?: string
@@ -12901,6 +12904,7 @@ export type Database = {
           allowed_sources: string[]
           created_at: string
           enabled: boolean
+          estado: Json | null
           id: string
           last_seen_at: string | null
           token_hash: string
@@ -13072,6 +13076,7 @@ export type Database = {
         Args: { p_payee: string }
         Returns: boolean
       }
+      ai_claude_max_disponivel: { Args: never; Returns: boolean }
       ai_gateway_claim_job: {
         Args: {
           p_lease_seconds?: number
@@ -13166,10 +13171,20 @@ export type Database = {
         Returns: string
       }
       ai_gateway_ping: {
-        Args: { p_token: string; p_version?: string; p_worker_id: string }
+        Args: {
+          p_estado?: Json
+          p_token: string
+          p_version?: string
+          p_worker_id: string
+        }
         Returns: Json
       }
       ai_job_cancel: { Args: { p_job_id: string }; Returns: string }
+      ai_job_marcar_entregue: { Args: { p_job_id: string }; Returns: boolean }
+      ai_job_registrar_ferramenta: {
+        Args: { p_interrupcao?: Json; p_job_id: string; p_nome: string }
+        Returns: boolean
+      }
       ai_job_submit: {
         Args: {
           p_allow_fallback?: boolean

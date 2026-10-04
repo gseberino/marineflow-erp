@@ -18,7 +18,7 @@
  */
 
 /** Comparação em tempo constante para não vazar o segredo por timing. */
-function timingSafeEqual(a: string, b: string): boolean {
+export function timingSafeEqual(a: string, b: string): boolean {
   const enc = new TextEncoder();
   const ab = enc.encode(a);
   const bb = enc.encode(b);
