@@ -1136,10 +1136,11 @@ async function desfazerIgnorada(admin: DbClient, ids: string[], userId: string |
   }
 
   // Transferência entre contas tem duas pernas, e a proposta guarda a segunda.
-  const { data: propostas } = await admin
+  const { data: propostas, error: erroProp } = await admin
     .from("finance_review_queue")
     .select("id, bank_transaction_id, related_transaction_id, created_payable_id, created_receivable_id, status")
     .or(`bank_transaction_id.in.(${[...afetadas].join(",")}),related_transaction_id.in.(${[...afetadas].join(",")})`);
+  if (erroProp) throw erroProp;
   for (const p of (propostas ?? []) as any[]) {
     if (p.bank_transaction_id) afetadas.add(p.bank_transaction_id);
     if (p.related_transaction_id) afetadas.add(p.related_transaction_id);
@@ -1148,20 +1149,32 @@ async function desfazerIgnorada(admin: DbClient, ids: string[], userId: string |
   const lista = [...afetadas];
 
   // Lançamentos criados pelo motor a partir destas transações.
-  const { data: pagaveis } = await admin
+  const { data: pagaveis, error: erroPag } = await admin
     .from("payables").select("id, description, origin").in("bank_transaction_id", lista);
-  const { data: recebiveis } = await admin
+  if (erroPag) throw erroPag;
+  const { data: todasAsReceitas, error: erroRec } = await admin
     .from("receivables").select("id, description").in("bank_transaction_id", lista);
+  if (erroRec) throw erroRec;
 
   const apagaveis = (pagaveis ?? []).filter((p: any) => p.origin === "bank_reconciliation");
-  const preservados = (pagaveis ?? []).filter((p: any) => p.origin !== "bank_reconciliation");
+  // Conta a receber só sai se foi a FILA que a criou (created_receivable_id). Desde 02/10 uma
+  // linha pode ser a "dona" de um sinal ou de uma conta de OS (forma A): apagar tudo que aponta
+  // para a linha levaria a conta da OS junto (03/10/2026). As outras ficam, como as manuais.
+  const criadasPelaFila = new Set(
+    ((propostas ?? []) as any[]).map((p) => p.created_receivable_id).filter(Boolean),
+  );
+  const recebiveis = ((todasAsReceitas ?? []) as any[]).filter((r) => criadasPelaFila.has(r.id));
+  const preservados = [
+    ...(pagaveis ?? []).filter((p: any) => p.origin !== "bank_reconciliation"),
+    ...((todasAsReceitas ?? []) as any[]).filter((r) => !criadasPelaFila.has(r.id)),
+  ];
 
   if (apagaveis.length > 0) {
     const { error: e1 } = await admin.from("payables").delete().in("id", apagaveis.map((p: any) => p.id));
     if (e1) throw e1;
   }
-  if ((recebiveis ?? []).length > 0) {
-    const { error: e2 } = await admin.from("receivables").delete().in("id", (recebiveis ?? []).map((r: any) => r.id));
+  if (recebiveis.length > 0) {
+    const { error: e2 } = await admin.from("receivables").delete().in("id", recebiveis.map((r: any) => r.id));
     if (e2) throw e2;
   }
 
@@ -1194,7 +1207,7 @@ async function desfazerIgnorada(admin: DbClient, ids: string[], userId: string |
       acao: "devolveu",
       autor: userId,
       bank_transaction_id: id,
-      detalhe: `Devolvida à fila · ${apagaveis.length + (recebiveis ?? []).length} lançamento(s) desfeito(s)`,
+      detalhe: `Devolvida à fila · ${apagaveis.length + recebiveis.length} lançamento(s) desfeito(s)`,
       antes: { estado: "ignorada" },
       depois: { estado: "pendente" },
     });
@@ -1203,12 +1216,12 @@ async function desfazerIgnorada(admin: DbClient, ids: string[], userId: string |
   return jr({
     ok: true,
     transacoes: lista.length,
-    lancamentos_apagados: apagaveis.length + (recebiveis ?? []).length,
+    lancamentos_apagados: apagaveis.length + recebiveis.length,
     propostas_reabertas: idsPropostas.length,
     lancamentos_preservados: preservados.map((p: any) => p.description),
     message: `${lista.length} transação(ões) de volta à fila`
-      + (apagaveis.length + (recebiveis ?? []).length > 0
-        ? ` · ${apagaveis.length + (recebiveis ?? []).length} lançamento(s) desfeito(s)` : "")
+      + (apagaveis.length + recebiveis.length > 0
+        ? ` · ${apagaveis.length + recebiveis.length} lançamento(s) desfeito(s)` : "")
       + (preservados.length > 0
         ? ` · ${preservados.length} lançamento(s) manual(is) preservado(s), confira-os` : ""),
   });
