@@ -1,3 +1,8 @@
+> **HISTÓRICO (julho/2026) — a migração terminou.** A Evolution API é o provedor em produção desde o
+> cutover; os branches e passos abaixo são de quando a migração estava em andamento. Para o estado
+> atual da conexão, ver Configurações › WhatsApp no ERP e `supabase/functions/whatsapp-conexao`
+> (MF-AUD-004, marcado em 03/10/2026).
+
 # Handoff — Migração Z-API → Evolution API (MarineFlow ERP)
 
 > Documento de continuidade. Última atualização: cutover executado, em fase de

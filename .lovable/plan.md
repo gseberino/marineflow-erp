@@ -1,3 +1,7 @@
+> **HISTÓRICO (maio/2026) — não descreve o sistema atual.** Plano do protótipo feito no Lovable com
+> Gemini. O assistente de hoje roda com Claude, em `supabase/functions/ai-agent`, com as ferramentas
+> de `supabase/functions/_shared/ai/tools/` (MF-AUD-001, marcado em 03/10/2026).
+
 ## Visão Geral
 
 Implementar um **Agente de IA** integrado ao ERP, com chat flutuante disponível em todas as páginas autenticadas, capaz de **executar ações reais** no banco de dados (criar OS, agendar tarefas, cadastrar clientes, montar orçamentos, **enviar WhatsApp**) via *function calling* da Lovable AI Gateway (Gemini).
