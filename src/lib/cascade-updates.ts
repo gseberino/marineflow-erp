@@ -10,12 +10,22 @@ import { redistribuirRecebiveis } from '@/lib/receivable-redistribution';
  */
 export class GrandTotalBelowPaidError extends Error {}
 
+/**
+ * O supabase-js DEVOLVE o erro, não lança: nestas cascatas cada gravação era um `await` sem conferir,
+ * e uma falha no meio deixava metade feita, calada (inventário de 03/10/2026). Toda escrita e leitura
+ * daqui passa por este ajudante.
+ */
+function conferir<T extends { error: { message: string } | null }>(r: T, oQue: string): T {
+  if (r.error) throw new Error(`${oQue}: ${r.error.message}`);
+  return r;
+}
+
 export async function updateReceivableFromSO(serviceOrderId: string, newTotal: number) {
-  const { data: receivables } = await supabase
+  const { data: receivables } = conferir(await supabase
     .from('receivables')
     .select('*')
     .eq('service_order_id', serviceOrderId)
-    .not('status', 'eq', 'cancelled');
+    .not('status', 'eq', 'cancelled'), 'Não consegui ler as contas da OS');
 
   if (!receivables || receivables.length === 0) return;
 
@@ -31,11 +41,11 @@ export async function updateReceivableFromSO(serviceOrderId: string, newTotal: n
   }
 
   for (const alt of plano.alteracoes) {
-    await supabase.from('receivables').update({
+    conferir(await supabase.from('receivables').update({
       amount: alt.amount,
       balance_amount: alt.balance_amount,
       status: alt.status,
-    }).eq('id', alt.id);
+    }).eq('id', alt.id), 'Não consegui atualizar a conta da OS');
 
     await writeAuditLog({
       table_name: 'receivables',
@@ -80,176 +90,59 @@ export async function cancelServiceOrderCascade(serviceOrderId: string, reason: 
     };
   }
 
-  // ── Fallback: legacy sequential approach ─────────────────────────────────
-  console.warn('[cancelServiceOrderCascade] RPC unavailable, using fallback.', rpcErr);
-  let partsRestored = 0;
-  let receivablesCancelled = 0;
-  let paymentsCancelled = 0;
-  let collectionsCancelled = 0;
-  let depositPaid = 0;
-
-  // 1. Restore parts stock — só no modelo antigo. No v2 o físico nunca foi baixado no add
-  // (só reservado); ao cancelar, a reserva é recomputada pelo trigger e nada volta ao físico.
-  const { data: stockFlag } = await supabase.from('app_settings').select('value').eq('key', 'stock_model_v2').maybeSingle();
-  const stockV2 = String((stockFlag as any)?.value ?? '').toLowerCase() === 'on';
-
-  const { data: parts } = await supabase
-    .from('service_order_parts')
-    .select('*')
-    .eq('service_order_id', serviceOrderId);
-
-  if (!stockV2) {
-    for (const part of parts || []) {
-      const { data: prod } = await supabase
-        .from('products')
-        .select('stock_quantity')
-        .eq('id', part.product_id)
-        .single();
-
-      await supabase.from('products').update({
-        stock_quantity: (prod?.stock_quantity || 0) + part.quantity,
-      }).eq('id', part.product_id);
-
-      await supabase.from('inventory_movements').insert({
-        product_id: part.product_id,
-        movement_type: 'return',
-        quantity_delta: part.quantity,
-        reference_type: 'service_order_cancel',
-        reference_id: serviceOrderId,
-        unit_cost_snapshot: part.unit_cost_snapshot,
-      });
-
-      partsRestored++;
-    }
-  }
-
-  // 2. Cancel receivables and their payments
-  const { data: receivables } = await supabase
-    .from('receivables')
-    .select('*')
-    .eq('service_order_id', serviceOrderId);
-
-  for (const rec of receivables || []) {
-    if ((rec as any).is_deposit && Number((rec as any).paid_amount || 0) > 0) {
-      depositPaid += Number((rec as any).paid_amount);
-    }
-    const { data: payments } = await supabase
-      .from('payments')
-      .select('*')
-      .eq('receivable_id', rec.id)
-      .eq('status', 'confirmed');
-
-    for (const payment of payments || []) {
-      await supabase.from('payments').update({
-        status: 'cancelled',
-        cancelled_at: new Date().toISOString(),
-        cancellation_reason: reason,
-      }).eq('id', payment.id);
-
-      await supabase.from('bank_transactions').update({
-        reconciled: false,
-        reconciled_payment_id: null,
-      }).eq('reconciled_payment_id', payment.id);
-
-      await writeAuditLog({
-        table_name: 'payments',
-        record_id: payment.id,
-        action: 'cancel',
-        previous_value: { status: 'confirmed', amount: payment.amount },
-        new_value: { status: 'cancelled' },
-        reason,
-        triggered_by_table: 'service_orders',
-        triggered_by_id: serviceOrderId,
-      });
-      paymentsCancelled++;
-    }
-
-    await supabase.from('receivables').update({
-      status: 'cancelled',
-      balance_amount: 0,
-    }).eq('id', rec.id);
-
-    await writeAuditLog({
-      table_name: 'receivables',
-      record_id: rec.id,
-      action: 'cancel',
-      previous_value: { status: rec.status },
-      new_value: { status: 'cancelled' },
-      reason,
-      triggered_by_table: 'service_orders',
-      triggered_by_id: serviceOrderId,
-    });
-    receivablesCancelled++;
-  }
-
-  // 2b. Cancel linked collections (cobranças) — OS cancelada não pode ter cobrança pendente.
-  const { data: cancelledColls } = await supabase.from('collections')
-    .update({ status: 'cancelled' })
-    .eq('service_order_id', serviceOrderId)
-    .neq('status', 'cancelled')
-    .select('id');
-  collectionsCancelled = cancelledColls?.length ?? 0;
-
-  // 3. Update service order
-  await supabase.from('service_orders').update({
-    status: 'cancelled',
-    cancelled_at: new Date().toISOString(),
-    cancellation_reason: reason,
-  }).eq('id', serviceOrderId);
-
-  await writeAuditLog({
-    table_name: 'service_orders',
-    record_id: serviceOrderId,
-    action: 'cancel',
-    new_value: { status: 'cancelled' },
-    reason,
-  });
-
-  return {
-    parts_restored: partsRestored,
-    receivables_cancelled: receivablesCancelled,
-    payments_cancelled: paymentsCancelled,
-    collections_cancelled: collectionsCancelled,
-    deposit_paid: depositPaid,
-  };
+  // O caminho antigo, passo a passo no navegador, rodava quando a função falhava: sem transação (metade
+  // feita a cada erro) e soltando a linha do banco inteira mesmo quando o Pix paga outra conta — o
+  // defeito que a função do banco corrige desde 03/10/2026. Falhou a função, falha o cancelamento.
+  throw new Error(`Não consegui cancelar a OS: ${rpcErr?.message ?? 'resposta inesperada do banco'}`);
 }
 
 
 export async function reopenServiceOrder(serviceOrderId: string, reason: string) {
-  const { data: so } = await supabase
+  const { data: so } = conferir(await supabase
     .from('service_orders')
     .select('status')
     .eq('id', serviceOrderId)
-    .single();
+    .single(), 'Não consegui ler a OS');
 
   if (!so || !['invoiced', 'completed'].includes(so.status)) {
     throw new Error('Só é possível reabrir OS com status Faturada ou Concluída.');
   }
 
   // Cancel payments on receivables
-  const { data: receivables } = await supabase
+  const { data: receivables } = conferir(await supabase
     .from('receivables')
     .select('*')
-    .eq('service_order_id', serviceOrderId);
+    .eq('service_order_id', serviceOrderId), 'Não consegui ler as contas da OS');
+
+  // Pagamento que veio de uma linha do banco não se estorna daqui: um Pix pode pagar outras contas
+  // (forma A), e soltar a linha faria o dinheiro voltar para a fila e entrar em dobro (03/10/2026).
+  const idsDasContas = (receivables || []).map((r) => r.id);
+  if (idsDasContas.length > 0) {
+    const { data: doExtrato } = conferir(await supabase
+      .from('payments')
+      .select('id')
+      .in('receivable_id', idsDasContas)
+      .eq('status', 'confirmed')
+      .not('bank_transaction_id', 'is', null)
+      .limit(1), 'Não consegui ler os pagamentos da OS');
+    if ((doExtrato ?? []).length > 0) {
+      throw new Error('Esta OS tem pagamento que veio do extrato do banco. Para reabrir, desfaça antes o vínculo na correção do lançamento (Ligado ao extrato).');
+    }
+  }
 
   for (const rec of receivables || []) {
-    const { data: payments } = await supabase
+    const { data: payments } = conferir(await supabase
       .from('payments')
       .select('*')
       .eq('receivable_id', rec.id)
-      .eq('status', 'confirmed');
+      .eq('status', 'confirmed'), 'Não consegui ler os pagamentos da conta');
 
     for (const payment of payments || []) {
-      await supabase.from('payments').update({
+      conferir(await supabase.from('payments').update({
         status: 'cancelled',
         cancelled_at: new Date().toISOString(),
         cancellation_reason: `${reason} (reabertura de OS)`,
-      }).eq('id', payment.id);
-
-      await supabase.from('bank_transactions').update({
-        reconciled: false,
-        reconciled_payment_id: null,
-      }).eq('reconciled_payment_id', payment.id);
+      }).eq('id', payment.id), 'Não consegui estornar o pagamento');
 
       await writeAuditLog({
         table_name: 'payments',
@@ -263,11 +156,11 @@ export async function reopenServiceOrder(serviceOrderId: string, reason: string)
       });
     }
 
-    await supabase.from('receivables').update({
+    conferir(await supabase.from('receivables').update({
       paid_amount: 0,
       balance_amount: rec.amount,
       status: 'pending',
-    }).eq('id', rec.id);
+    }).eq('id', rec.id), 'Não consegui reabrir a conta');
 
     await writeAuditLog({
       table_name: 'receivables',
@@ -281,11 +174,11 @@ export async function reopenServiceOrder(serviceOrderId: string, reason: string)
     });
   }
 
-  await supabase.from('service_orders').update({
+  conferir(await supabase.from('service_orders').update({
     status: 'completed',
     reopened_at: new Date().toISOString(),
     reopen_reason: reason,
-  }).eq('id', serviceOrderId);
+  }).eq('id', serviceOrderId), 'Não consegui reabrir a OS');
 
   await writeAuditLog({
     table_name: 'service_orders',
@@ -298,71 +191,88 @@ export async function reopenServiceOrder(serviceOrderId: string, reason: string)
 }
 
 export async function recalcReceivableBalance(receivableId: string) {
-  const { data: payments } = await supabase
+  const { data: payments } = conferir(await supabase
     .from('payments')
     .select('amount')
     .eq('receivable_id', receivableId)
-    .eq('status', 'confirmed');
+    .eq('status', 'confirmed'), 'Não consegui ler os pagamentos da conta');
 
   const totalPaid = (payments || []).reduce((s, p) => s + Number(p.amount), 0);
 
-  const { data: rec } = await supabase
+  const { data: rec } = conferir(await supabase
     .from('receivables')
     .select('amount')
     .eq('id', receivableId)
-    .single();
+    .single(), 'Não consegui ler a conta');
 
   const amount = Number(rec?.amount || 0);
   const balance = Math.max(0, amount - totalPaid);
   const status = totalPaid >= amount ? 'paid' : totalPaid > 0 ? 'partially_paid' : 'pending';
 
-  await supabase.from('receivables').update({
+  conferir(await supabase.from('receivables').update({
     paid_amount: totalPaid,
     balance_amount: balance,
     status,
-  }).eq('id', receivableId);
+  }).eq('id', receivableId), 'Não consegui recalcular a conta');
 }
 
 export async function recalcPayableBalance(payableId: string) {
-  const { data: payments } = await supabase
+  const { data: payments } = conferir(await supabase
     .from('payments')
     .select('amount')
     .eq('payable_id', payableId)
-    .eq('status', 'confirmed');
+    .eq('status', 'confirmed'), 'Não consegui ler os pagamentos da conta');
 
   const totalPaid = (payments || []).reduce((s, p) => s + Number(p.amount), 0);
 
-  const { data: pay } = await supabase
+  const { data: pay } = conferir(await supabase
     .from('payables')
     .select('amount')
     .eq('id', payableId)
-    .single();
+    .single(), 'Não consegui ler a conta');
 
   const amount = Number(pay?.amount || 0);
   const balance = Math.max(0, amount - totalPaid);
   const status = totalPaid >= amount ? 'paid' : totalPaid > 0 ? 'partially_paid' : 'pending';
 
-  await supabase.from('payables').update({
+  conferir(await supabase.from('payables').update({
     paid_amount: totalPaid,
     balance_amount: balance,
     status,
-  }).eq('id', payableId);
+  }).eq('id', payableId), 'Não consegui recalcular a conta');
 }
 
 export async function cancelPaymentCascade(paymentId: string, reason: string) {
-  const { data: payment } = await supabase
+  const { data: payment } = conferir(await supabase
     .from('payments')
     .select('*')
     .eq('id', paymentId)
-    .single();
+    .single(), 'Não consegui ler o pagamento');
 
   if (!payment) throw new Error('Pagamento não encontrado');
 
-  await supabase.from('payments').update({
+  // Pagamento que veio de uma linha do banco (forma A): o "desfazer aplicação" do banco estorna o que
+  // a aplicação criou, devolve saldo/acréscimo/desconto e só solta a linha se ela não pagar mais nada.
+  // Se era um pagamento lançado à mão e só ligado ao Pix, ele só desliga — e o estorno segue abaixo.
+  if (payment.receivable_id && (payment as { bank_transaction_id?: string | null }).bank_transaction_id) {
+    conferir(await supabase.rpc('desfazer_aplicacao' as never, { p_pagamento: paymentId, p_motivo: reason } as never),
+      'Não consegui desfazer a aplicação do Pix');
+    const { data: depois } = conferir(await supabase.from('payments').select('status').eq('id', paymentId).single(),
+      'Não consegui reler o pagamento');
+    if ((depois as { status: string } | null)?.status === 'cancelled') {
+      await writeAuditLog({
+        table_name: 'payments', record_id: paymentId, action: 'cancel',
+        previous_value: { status: 'confirmed', amount: payment.amount }, new_value: { status: 'cancelled' }, reason,
+      });
+      return;
+    }
+  }
+
+  conferir(await supabase.from('payments').update({
     status: 'cancelled',
     cancelled_at: new Date().toISOString(),
     cancellation_reason: reason,
-  }).eq('id', paymentId);
+  }).eq('id', paymentId), 'Não consegui estornar o pagamento');
 
   if (payment.receivable_id) {
     await recalcReceivableBalance(payment.receivable_id);
@@ -372,17 +282,17 @@ export async function cancelPaymentCascade(paymentId: string, reason: string) {
   }
 
   // Undo bank reconciliation
-  await supabase.from('bank_transactions').update({
+  conferir(await supabase.from('bank_transactions').update({
     reconciled: false,
     reconciled_payment_id: null,
-  }).eq('reconciled_payment_id', paymentId);
+  }).eq('reconciled_payment_id', paymentId), 'Não consegui soltar a linha do extrato');
 
   // Undo technician expense reimbursement if this payment was the proof
-  await supabase.from('service_order_expenses').update({
+  conferir(await supabase.from('service_order_expenses').update({
     reimbursed: false,
     reimbursed_at: null,
     reimbursed_payment_id: null,
-  }).eq('reimbursed_payment_id', paymentId);
+  }).eq('reimbursed_payment_id', paymentId), 'Não consegui desfazer o reembolso');
 
   await writeAuditLog({
     table_name: 'payments',
