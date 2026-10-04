@@ -12,6 +12,7 @@
 // "[image]" e o agente pede o valor por texto. NUNCA lança erro fatal para quem chamou.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { chamadaInterna } from "../_shared/porta.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -39,6 +40,9 @@ Regras:
 
 servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  // Só o servidor chama (a ferramenta read_supplier_media do assistente, com a chave de serviço): de
+  // fora, qualquer um com a chave pública do site gastava a leitura paga (03/10/2026).
+  if (!chamadaInterna(req)) return jr({ error: "unauthorized" }, 401);
   try {
     const apiKey = Deno.env.get("OPENROUTER_API_KEY");
     if (!apiKey) return jr({ ok: false, disabled: "OPENROUTER_API_KEY não configurada" });
