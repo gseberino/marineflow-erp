@@ -271,6 +271,71 @@ export function useExcluirDiaComDesfazer() {
   return { excluir, excluindo: apagar.isPending };
 }
 
+// ── Freelancer novo (botão "Novo freelancer", pedido do dono 03/10/2026) ─────────────────────────
+// A mesma função do assistente (cadastrar_freelancer, migration 20261001210000): ela decide se cria
+// ou usa o favorecido que já existe, deduz o tipo da chave Pix e cria a regra por CPF. A tela primeiro
+// SIMULA (nada é gravado) e mostra o resultado; só então grava — o mesmo "sim" do WhatsApp.
+
+export interface PedidoDeCadastro {
+  nome: string;
+  valorDiaria: number;
+  /** Primeiro dia de trabalho, 'AAAA-MM-DD'; vazio = hoje. */
+  desde?: string;
+  chavePix?: string;
+  /** Vazio = o banco deduz do formato (e-mail, CNPJ, chave aleatória). */
+  tipoChave?: string;
+  cpf?: string;
+  telefone?: string;
+  observacao?: string;
+}
+
+export interface ResultadoDoCadastro {
+  acao: 'criado' | 'diaria_no_cadastro_existente';
+  favorecido_id: string | null;
+  nome: string;
+  valor_diaria: number;
+  desde: string;
+  chave_pix: string | null;
+  tipo_chave: string | null;
+  regra: 'criada' | 'ja_existia' | 'sem_cpf';
+  regra_categoria?: string | null;
+  message?: string;
+}
+
+const vazioNulo = (v?: string) => (v && v.trim() ? v.trim() : null);
+
+export function paramsDoCadastro(p: PedidoDeCadastro, simular: boolean) {
+  return {
+    p_nome: p.nome.trim(),
+    p_valor_diaria: p.valorDiaria,
+    p_desde: vazioNulo(p.desde),
+    p_chave_pix: vazioNulo(p.chavePix),
+    p_tipo_chave: vazioNulo(p.tipoChave),
+    p_documento: vazioNulo(p.cpf),
+    p_telefone: vazioNulo(p.telefone),
+    p_observacao: vazioNulo(p.observacao),
+    p_simular: simular,
+  };
+}
+
+async function chamarCadastro(p: PedidoDeCadastro, simular: boolean): Promise<ResultadoDoCadastro> {
+  const { data, error } = await supabase.rpc('cadastrar_freelancer' as never, paramsDoCadastro(p, simular) as never);
+  if (error) throw error;
+  const r = data as unknown as ResultadoDoCadastro;
+  return { ...r, valor_diaria: num(r.valor_diaria) };
+}
+
+/** O que o cadastro FARIA — nada é gravado. A recusa (já tem diária, chave ambígua) vem como erro. */
+export const simularCadastro = (p: PedidoDeCadastro) => chamarCadastro(p, true);
+
+export function useCadastrarFreelancer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: PedidoDeCadastro) => chamarCadastro(p, false),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['diarias'] }),
+  });
+}
+
 /** O pedido que reconstrói um dia apagado, exatamente como era. */
 export function pedidoParaDesfazer(a: DiariaApagada): PedidoDeDiaria {
   return {

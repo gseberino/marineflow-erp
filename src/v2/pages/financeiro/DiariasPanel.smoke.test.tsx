@@ -70,6 +70,15 @@ beforeEach(() => {
           observacao: 'Gerador do Marcelo', os_ids: ['o1'] } }, error: null };
       case 'registrar_diaria':
         return { data: { acao: 'atualizado', diaria_id: 'd1', message: 'ok' }, error: null };
+      case 'cadastrar_freelancer':
+        if (String(args.p_nome).startsWith('Roberto')) {
+          return { data: null, error: { message: 'Roberto já tem diária cadastrada (veja em Financeiro › Diárias).' } };
+        }
+        return { data: {
+          acao: 'criado', favorecido_id: args.p_simular ? null : 'j', nome: args.p_nome, valor_diaria: args.p_valor_diaria,
+          desde: args.p_desde, chave_pix: 'joao@exemplo.com', tipo_chave: 'email', regra: 'sem_cpf',
+          message: args.p_simular ? undefined : `${args.p_nome} cadastrado: diária de R$ 150,00 desde ter 29/09.`,
+        }, error: null };
       default:
         return { data: null, error: { message: `rpc inesperada: ${nome}` } };
     }
@@ -194,5 +203,49 @@ describe('DiariasPanel', () => {
     expect(within(ficha).getByText('Nada lançado neste dia.')).toBeInTheDocument();
     await user.click(within(ficha).getByRole('button', { name: 'Não trabalhou' }));
     await waitFor(() => expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_favorecido_id: 'm', p_data: '2026-09-14', p_jornada: 'faltou' }));
+  });
+
+  // ── Novo freelancer (pedido do dono, 03/10/2026) ──
+
+  function preencherCadastro(dialogo: HTMLElement, nome: string) {
+    fireEvent.change(within(dialogo).getByLabelText('Nome'), { target: { value: nome } });
+    fireEvent.change(within(dialogo).getByLabelText('Diária (R$)'), { target: { value: '15000' } });
+    fireEvent.change(within(dialogo).getByLabelText('Primeiro dia de trabalho'), { target: { value: '2026-09-29' } });
+    fireEvent.change(within(dialogo).getByLabelText('Chave Pix (opcional)'), { target: { value: 'joao@exemplo.com' } });
+  }
+
+  it('novo freelancer: confere primeiro (simula, nada gravado) e só então cadastra', async () => {
+    const user = userEvent.setup();
+    renderizar('resumo');
+    await screen.findByText('Roberto');
+    await user.click(screen.getByRole('button', { name: /Novo freelancer/ }));
+    const dialogo = await screen.findByRole('dialog');
+    preencherCadastro(dialogo, 'João Marcelo');
+    await user.click(within(dialogo).getByRole('button', { name: 'Conferir' }));
+
+    expect(await within(dialogo).findByText('Pix (e-mail): joao@exemplo.com')).toBeInTheDocument();
+    expect(within(dialogo).getByText(/Sem CPF: os Pix para ele vão pedir a sua confirmação/)).toBeInTheDocument();
+    expect(chamadas('cadastrar_freelancer')).toEqual([{
+      p_nome: 'João Marcelo', p_valor_diaria: 150, p_desde: '2026-09-29', p_chave_pix: 'joao@exemplo.com',
+      p_tipo_chave: null, p_documento: null, p_telefone: null, p_observacao: null, p_simular: true,
+    }]);
+
+    await user.click(within(dialogo).getByRole('button', { name: 'Cadastrar' }));
+    await waitFor(() => expect(chamadas('cadastrar_freelancer')).toHaveLength(2));
+    expect(chamadas('cadastrar_freelancer')[1]).toMatchObject({ p_nome: 'João Marcelo', p_simular: false });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('novo freelancer: a recusa do banco aparece na conferência e nada é gravado', async () => {
+    const user = userEvent.setup();
+    renderizar('resumo');
+    await screen.findByText('Roberto');
+    await user.click(screen.getByRole('button', { name: /Novo freelancer/ }));
+    const dialogo = await screen.findByRole('dialog');
+    preencherCadastro(dialogo, 'Roberto');
+    await user.click(within(dialogo).getByRole('button', { name: 'Conferir' }));
+    expect(await within(dialogo).findByRole('alert')).toHaveTextContent('Roberto já tem diária cadastrada');
+    expect(within(dialogo).queryByRole('button', { name: 'Cadastrar' })).not.toBeInTheDocument();
+    expect(chamadas('cadastrar_freelancer').every((a) => a.p_simular === true)).toBe(true);
   });
 });

@@ -4,7 +4,7 @@
 // extrato no nome dele (Pix, Caixa) e o que um sócio pagou do próprio bolso para ele — não se
 // digita pagamento aqui: o banco traz. Aqui se lança o DIA.
 import { useState } from 'react';
-import { CalendarPlus, FileDown, FileText, Pencil, Trash2 } from 'lucide-react';
+import { CalendarPlus, FileDown, FileText, Pencil, Trash2, UserPlus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -22,6 +22,7 @@ import {
 } from '@/hooks/use-diarias';
 import { useDocumentosDasDiarias } from '@/hooks/use-documentos-diarias';
 import { RegistrarDiaDialog } from './RegistrarDiaDialog';
+import { NovoFreelancerDialog } from './NovoFreelancerDialog';
 import { GradeDiarias } from './GradeDiarias';
 
 export interface FiltroDasDiarias {
@@ -49,6 +50,7 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
   const resumo = useResumoFreelancers(de, ate);
   const pessoas = resumo.data?.pessoas ?? [];
   const [registrando, setRegistrando] = useState<Registrando | null>(null);
+  const [cadastrando, setCadastrando] = useState(false);
   const documentos = useDocumentosDasDiarias();
   // O que os documentos cobrem: na grade, o mês que está na tela; nas outras abas, o período.
   const intervalo = aba === 'grade' ? intervaloDoMes(filtro.mes) : { de, ate };
@@ -84,6 +86,9 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
                 onClick={() => { void documentos.csvDoPeriodo(pessoas.map((p) => p.id), intervalo.de, intervalo.ate); }}>
           <FileDown className="h-4 w-4" /> {documentos.gerando === 'csv' ? 'Gerando…' : 'Planilha do contador (CSV)'}
         </Button>
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setCadastrando(true)}>
+          <UserPlus className="h-4 w-4" /> Novo freelancer
+        </Button>
         <Button size="sm" className="gap-1.5"
                 onClick={() => setRegistrando({ favorecidoId: aba === 'extrato' ? filtro.favorecidoId : null })}>
           <CalendarPlus className="h-4 w-4" /> Registrar dia
@@ -102,8 +107,11 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
           Não deu para carregar as diárias: {(resumo.error as Error).message}
         </Card>
       ) : pessoas.length === 0 ? (
-        <Card className="p-6 text-center text-sm text-muted-foreground">
-          Nenhum freelancer com diária cadastrada. O valor da diária fica no cadastro de jornada do favorecido.
+        <Card className="space-y-3 p-6 text-center text-sm text-muted-foreground">
+          <p>Nenhum freelancer com diária cadastrada.</p>
+          <Button size="sm" className="gap-1.5" onClick={() => setCadastrando(true)}>
+            <UserPlus className="h-4 w-4" /> Cadastrar o primeiro
+          </Button>
         </Card>
       ) : aba === 'resumo' ? (
         <Resumo pessoas={pessoas} total={resumo.data!} onVerExtrato={onVerExtrato}
@@ -132,6 +140,7 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
           onFechar={() => setRegistrando(null)}
         />
       )}
+      {cadastrando && <NovoFreelancerDialog onFechar={() => setCadastrando(false)} />}
     </div>
   );
 }

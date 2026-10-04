@@ -99,8 +99,13 @@ de diária; dia = `work_shifts`; pagamento = o lançamento que já vem do extrat
   `registrar_diaria` aceita `valor_diaria` só quando a pessoa diz outro valor para o dia ("na
   quarta foram 130") — a tela já permitia. João Marcelo cadastrado pela função (R$ 150 desde
   29/09, Pix e-mail, sem CPF) com 29/09 R$ 150, 30/09 R$ 130 e 01/10 R$ 150. Mickael mantido.
-  Teste: `supabase/tests/cadastrar_freelancer.sql`. A tela não tem "Novo freelancer" (só o
-  assistente) — pergunta ao dono.
+  Teste: `supabase/tests/cadastrar_freelancer.sql`.
+- **"Novo freelancer" na tela — FEITO em 03/10/2026** (o dono: "o botão na tela, eu quero sim").
+  Financeiro › Diárias, na barra e na tela vazia: `NovoFreelancerDialog.tsx` em duas etapas — o
+  formulário e a CONFERÊNCIA (a mesma `cadastrar_freelancer` com `p_simular`, nada gravado; a recusa
+  aparece ali), e só então "Cadastrar". Hooks `simularCadastro`/`useCadastrarFreelancer` em
+  `use-diarias.ts`. A tela não repete regra nenhuma: tipo da chave, cadastro existente e regra por
+  CPF são do banco.
 
 ## Armadilhas já medidas
 
