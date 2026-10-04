@@ -14,6 +14,10 @@ import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
+// O tipo de createClient sem o esquema gerado não casa com o cliente criado aqui (TS2345).
+// deno-lint-ignore no-explicit-any
+type DbClient = any;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -28,7 +32,7 @@ function jr(body: unknown, status = 200) {
 }
 
 async function getSetting(
-  admin: ReturnType<typeof createClient>,
+  admin: DbClient,
   key: string,
   fallback: string,
 ): Promise<string> {

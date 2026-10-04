@@ -49,11 +49,13 @@ jobs:
         with:
           deno-version: v2.x
 
-      # `--no-check` está dentro do script, e é dívida consciente: o type-check do Deno
-      # tropeça no node_modules/ do frontend ao resolver @types (NOVO-001 em
-      # audit/novos-achados.md). Os testes rodam; a checagem de tipos das Edge Functions
-      # ainda não é coberta por ninguém — resolver isso pede um deno.json próprio em
-      # supabase/functions/, que é tarefa à parte.
+      # Checagem de tipos das Edge Functions (NOVO-001 / MF-AUD-046, 03/10/2026): tsc não as cobre, e
+      # erro de tipo numa função só aparecia em produção. --node-modules-dir=none (no script) evita
+      # o node_modules/ do frontend, que fazia o Deno tropeçar nos pacotes npm: das funções.
+      - name: Typecheck (edge functions)
+        run: npm run check:edge
+
+      # Os testes seguem com --no-check: a checagem já rodou no passo acima.
       - name: Testes (edge functions)
         run: npm run test:edge
 
