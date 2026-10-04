@@ -42,6 +42,8 @@ const NAO_SAO_TOOLS = new Set<string>([
   "data_ate", "fim_de_semana",
   // valor dito para o dia (registrar_diaria) e cadastro de freelancer novo (01/10/2026)
   "valor_diaria",
+  // filtros de list_service_orders: situação do orçamento e ordem por valor (03/10/2026)
+  "quote_status", "order_by", "maior_valor",
   // argumentos e campos de tool
   "action_name", "asset_type", "billing_unit", "client_id", "collection_ids", "custom_message", "delay_minutes",
   "display_name", "due_at", "entity_id", "extra_notes", "fiscal_verb", "force_new", "from_user", "internal_notes",

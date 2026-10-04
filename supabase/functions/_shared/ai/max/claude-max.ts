@@ -18,22 +18,30 @@ import type { FerramentasDoTurno } from "../agent.ts";
 export const CHAVE_DO_PROVEDOR = "ai_provedor_whatsapp";
 export const CHAVE_DO_MODELO = "ai_whatsapp_max_modelo";
 export const CHAVE_DA_RESERVA = "ai_whatsapp_max_reserva";
+/** Chat do app (painel): mesma ideia, chave própria (03/10/2026). */
+export const CHAVE_DO_PROVEDOR_PAINEL = "ai_provedor_painel";
+export const CHAVE_DO_MODELO_PAINEL = "ai_painel_max_modelo";
 export const TIPO_DO_JOB = "agente_whatsapp";
+export const TIPO_DO_PAINEL = "agente_painel";
 /** O mesmo turno, para ensaio: o erp-mcp atende, mas não há entrega no WhatsApp (o gatilho ignora). */
 export const TIPO_DE_ENSAIO = "agente_ensaio";
+/** Tipos de job que o erp-mcp atende. */
+export const TIPOS_DO_AGENTE = new Set([TIPO_DO_JOB, TIPO_DO_PAINEL, TIPO_DE_ENSAIO]);
 
 export type ProvedorDoAgente = "claude_max" | "openrouter";
 export type NivelDoModelo = "haiku" | "sonnet" | "opus";
+export type CanalDoAgente = "whatsapp" | "panel";
 
-/** Quem atende o turno. Max só se a chave pedir E o usuário for o admin. */
-export function provedorDoTurno(settings: Record<string, string>, cargo: string): ProvedorDoAgente {
-  const pedido = (settings[CHAVE_DO_PROVEDOR] || "").trim().toLowerCase();
+/** Quem atende o turno. Max só se a chave do canal pedir E o usuário for o admin. */
+export function provedorDoTurno(settings: Record<string, string>, cargo: string, canal: CanalDoAgente = "whatsapp"): ProvedorDoAgente {
+  const chave = canal === "panel" ? CHAVE_DO_PROVEDOR_PAINEL : CHAVE_DO_PROVEDOR;
+  const pedido = (settings[chave] || "").trim().toLowerCase();
   if (pedido !== "claude_max") return "openrouter";
   return cargo === "admin" ? "claude_max" : "openrouter";
 }
 
-export function modeloDoMax(settings: Record<string, string>): NivelDoModelo {
-  const v = (settings[CHAVE_DO_MODELO] || "").trim().toLowerCase();
+export function modeloDoMax(settings: Record<string, string>, canal: CanalDoAgente = "whatsapp"): NivelDoModelo {
+  const v = (settings[canal === "panel" ? CHAVE_DO_MODELO_PAINEL : CHAVE_DO_MODELO] || "").trim().toLowerCase();
   return v === "haiku" || v === "opus" ? v : "sonnet";
 }
 
@@ -78,7 +86,7 @@ function cortar(t: string, n: number): string {
  * falou, as ferramentas chamadas e um trecho de cada resultado (os antigos já vêm podados por
  * podarHistoricoParaLLM). A última mensagem é a atual.
  */
-export function transcreverConversa(messages: ClaudeMessage[]): string {
+export function transcreverConversa(messages: ClaudeMessage[], canal: CanalDoAgente = "whatsapp"): string {
   const linhas: string[] = [];
   const anteriores = messages.slice(0, -1);
   for (const m of anteriores) {
@@ -103,7 +111,7 @@ export function transcreverConversa(messages: ClaudeMessage[]): string {
     historico = "[… conversa mais antiga omitida …]\n" + historico.slice(historico.length - LIMITE_DA_TRANSCRICAO);
   }
   return [
-    historico ? `Conversa recente no WhatsApp (mais antiga primeiro):\n<historico>\n${historico}\n</historico>\n` : "",
+    historico ? `Conversa recente ${canal === "panel" ? "no chat do app" : "no WhatsApp"} (mais antiga primeiro):\n<historico>\n${historico}\n</historico>\n` : "",
     `Mensagem atual do usuário — responda a ela:\n<mensagem>\n${atual}\n</mensagem>`,
   ].join("\n");
 }
@@ -129,10 +137,25 @@ export interface TurnoParaOMax {
   ferramentas: FerramentasDoTurno;
   /** O texto efetivo do usuário (o que a reserva do OpenRouter usaria). */
   texto: string;
+  /** Padrão: WhatsApp. O painel espera a resposta na própria requisição. */
+  canal?: CanalDoAgente;
 }
+
+/** Como cada canal enfileira: o WhatsApp responde depois; o painel espera na própria requisição. */
+const PERFIL_DO_CANAL: Record<CanalDoAgente, { tipo: string; effort: string; prioridade: number; prazoMs: number; timeoutS: number }> = {
+  // WhatsApp é conversa: na frente de pedidos longos; se o gateway não pegar em 75 s, o relógio
+  // do banco (_ai_gateway_reap) falha o job e a entrega refaz pelo OpenRouter. Effort "low" como
+  // o loop do OpenRouter no WhatsApp.
+  whatsapp: { tipo: TIPO_DO_JOB, effort: "low", prioridade: 50, prazoMs: 75_000, timeoutS: 150 },
+  // Painel: a tela está esperando — prazo curto para o gateway pegar (a própria edge refaz pelo
+  // OpenRouter se não pegar) e teto que cabe na janela da edge. Effort "medium" como no painel.
+  panel: { tipo: TIPO_DO_PAINEL, effort: "medium", prioridade: 60, prazoMs: 20_000, timeoutS: 110 },
+};
 
 /** A linha de ai_jobs do turno (pura, para testar). */
 export function linhaDoJob(t: TurnoParaOMax, token: string, tokenSha256: string, agora = Date.now()): Record<string, unknown> {
+  const canal: CanalDoAgente = t.canal ?? "whatsapp";
+  const p = PERFIL_DO_CANAL[canal];
   return {
     source: "marineflow",
     requested_by: t.appUserId,
@@ -140,7 +163,7 @@ export function linhaDoJob(t: TurnoParaOMax, token: string, tokenSha256: string,
     model: t.modelo,
     task_profile: "erp_agent",
     response_format: "text",
-    prompt: transcreverConversa(t.messages),
+    prompt: transcreverConversa(t.messages, canal),
     input: {
       system: textoDoSistema(t.system),
       mcp_token: token,
@@ -149,26 +172,23 @@ export function linhaDoJob(t: TurnoParaOMax, token: string, tokenSha256: string,
         rede: Object.keys(t.ferramentas.alcancaveisPelaRede),
       },
       sessao: t.sessionId,
-      canal: "whatsapp",
+      canal,
       texto: t.texto,
     },
     metadata: {
-      tipo: TIPO_DO_JOB,
+      tipo: p.tipo,
       versao: 1,
-      // Conversa no WhatsApp: prioriza latência, como o loop do OpenRouter (effort "low").
-      effort: "low",
+      effort: p.effort,
       session_id: t.sessionId,
-      phone: t.phone,
+      ...(canal === "whatsapp" ? { phone: t.phone } : {}),
       user_id: t.appUserId,
       mcp_token_sha256: tokenSha256,
     },
-    // WhatsApp é conversa: na frente de pedidos longos; se o gateway não pegar em 75 s, o
-    // relógio do banco (_ai_gateway_reap) falha o job e a entrega refaz pelo OpenRouter.
-    priority: 50,
-    timeout_seconds: 150,
+    priority: p.prioridade,
+    timeout_seconds: p.timeoutS,
     max_attempts: 1,
     allow_fallback: false,
-    deadline_at: new Date(agora + 75_000).toISOString(),
+    deadline_at: new Date(agora + p.prazoMs).toISOString(),
   };
 }
 
@@ -178,4 +198,24 @@ export async function enfileirarTurnoNoMax(admin: any, t: TurnoParaOMax): Promis
   const { data, error } = await admin.from("ai_jobs").insert(linhaDoJob(t, token, await sha256Hex(token))).select("id").single();
   if (error || !data?.id) throw new Error(`não consegui enfileirar o turno no Claude Max: ${error?.message ?? "sem id"}`);
   return data.id as string;
+}
+
+/** O que a edge do painel faz com o job que está esperando (pura, para testar). */
+export type DesfechoDoPainel =
+  | { tipo: "pronto" }
+  | { tipo: "esperar" }
+  | { tipo: "reserva"; motivo: string }
+  | { tipo: "tarde" };
+
+export function desfechoDoPainel(
+  job: { status: string; started_at?: string | null; error_code?: string | null } | null,
+  decorridoMs: number,
+  limites = { pegarMs: 20_000, esperarMs: 110_000 },
+): DesfechoDoPainel {
+  if (!job) return { tipo: "reserva", motivo: "job sumiu" };
+  if (job.status === "completed") return { tipo: "pronto" };
+  if (job.status === "failed" || job.status === "cancelled") return { tipo: "reserva", motivo: job.error_code || job.status };
+  if (job.status === "pending" && decorridoMs > limites.pegarMs) return { tipo: "reserva", motivo: "o gateway não pegou o pedido a tempo" };
+  if (decorridoMs > limites.esperarMs) return { tipo: "tarde" };
+  return { tipo: "esperar" };
 }

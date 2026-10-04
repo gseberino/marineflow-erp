@@ -13179,8 +13179,10 @@ export type Database = {
         }
         Returns: Json
       }
+      ai_gateway_status: { Args: never; Returns: Json }
       ai_job_cancel: { Args: { p_job_id: string }; Returns: string }
       ai_job_marcar_entregue: { Args: { p_job_id: string }; Returns: boolean }
+      ai_job_painel_desistir: { Args: { p_job_id: string }; Returns: boolean }
       ai_job_registrar_ferramenta: {
         Args: { p_interrupcao?: Json; p_job_id: string; p_nome: string }
         Returns: boolean

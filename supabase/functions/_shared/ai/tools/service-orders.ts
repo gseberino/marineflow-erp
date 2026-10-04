@@ -218,6 +218,54 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "Cancelado", invoiced: "Faturado", reopened: "Reaberto",
 };
 
+// Situação do ORÇAMENTO (service_orders.quote_status), separada da fase (status='draft').
+const SITUACOES = new Set(["draft", "sent", "awaiting_approval", "approved", "awaiting_deposit", "rejected"]);
+const SITUACAO_PT: Record<string, string> = {
+  rascunho: "draft", "em rascunho": "draft", "não enviado": "draft", "nao enviado": "draft",
+  enviado: "sent", enviada: "sent",
+  "aguardando aprovação": "awaiting_approval", "aguardando aprovacao": "awaiting_approval",
+  aprovado: "approved", aprovada: "approved",
+  "aguardando sinal": "awaiting_deposit",
+  recusado: "rejected", recusada: "rejected", rejeitado: "rejected", rejeitada: "rejected",
+};
+const SITUACAO_LABELS: Record<string, string> = {
+  draft: "Rascunho (não enviado)", sent: "Enviado", awaiting_approval: "Aguardando aprovação",
+  approved: "Aprovado", awaiting_deposit: "Aguardando sinal", rejected: "Recusado",
+};
+
+export interface FiltroDaListagem {
+  limite: number;
+  ordem: "recentes" | "maior_valor";
+  fase?: "orcamento" | "os";
+  status?: string;
+  situacao?: string;
+}
+
+/**
+ * Lê os argumentos de list_service_orders. "Rascunho" na fala do dono é orçamento AINDA NÃO
+ * ENVIADO (quote_status='draft'), não a fase inteira — que inclui os recusados.
+ */
+export function filtroDaListagem(args: Record<string, unknown>): FiltroDaListagem {
+  const limite = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
+  const ordem = args.order_by === "maior_valor" ? "maior_valor" : "recentes";
+  const qs = String(args.quote_status ?? "").trim().toLowerCase();
+  let situacao: string | undefined = qs ? (SITUACOES.has(qs) ? qs : SITUACAO_PT[qs]) : undefined;
+  let fase: FiltroDaListagem["fase"];
+  let status: string | undefined;
+  if (args.is_quote === true) fase = "orcamento";
+  else if (args.is_quote === false) fase = "os";
+  else if (args.status) {
+    const st = String(args.status).trim().toLowerCase();
+    if (st === "rascunho" && !situacao) situacao = "draft";
+    else status = STATUS_PT_EN[st] ?? String(args.status);
+  }
+  if (situacao) {
+    fase = "orcamento";
+    status = undefined;
+  }
+  return { limite, ordem, ...(fase ? { fase } : {}), ...(status ? { status } : {}), ...(situacao ? { situacao } : {}) };
+}
+
 /**
  * Adiciona um PRODUTO (do catálogo, incl. pendente ou kit/composto) como linha de PEÇA de uma
  * OS/orçamento. Fonte ÚNICA usada por add_service_order_item e add_kit_to_order — para que a
@@ -282,37 +330,48 @@ export const serviceOrderTools: ToolDef[] = [
   {
     name: "list_service_orders",
     description:
-      "Lista orçamentos ou ordens de serviço. IMPORTANTE: orçamentos têm status='draft' (número ORÇ-XXXXX). OS têm outros status (número OS-XXXXX). Use is_quote=true para listar apenas orçamentos, is_quote=false para listar apenas OS, ou omita para listar tudo.",
+      "Lista orçamentos ou ordens de serviço. Orçamentos têm status='draft' (número ORÇ-XXXXX) — isso é a FASE de orçamento, " +
+      "que inclui enviados, aguardando aprovação e RECUSADOS. A situação de cada orçamento vem em 'situacao' e filtra por quote_status: " +
+      "'em rascunho'/'não enviado' = quote_status='draft'; recusados = 'rejected'. Para 'qual o maior' use order_by='maior_valor'. " +
+      "Conte SEMPRE pelo campo 'total' (contagem real): a lista pode vir cortada pelo limit. OS têm outros status (número OS-XXXXX).",
     input_schema: {
       type: "object",
       properties: {
-        is_quote: { type: "boolean", description: "true=apenas orçamentos (draft), false=apenas OS (non-draft), omitir=todos" },
-        status: { type: "string", description: "Filtro por status específico (ex: 'approved', 'in_progress'). Ignorado se is_quote for fornecido." },
+        is_quote: { type: "boolean", description: "true=apenas orçamentos (fase draft), false=apenas OS (non-draft), omitir=todos" },
+        quote_status: {
+          type: "string",
+          enum: ["draft", "sent", "awaiting_approval", "approved", "awaiting_deposit", "rejected"],
+          description:
+            "Situação do orçamento: draft=rascunho (não enviado), sent=enviado, awaiting_approval=aguardando aprovação, " +
+            "approved=aprovado, awaiting_deposit=aguardando sinal, rejected=recusado. Implica is_quote=true.",
+        },
+        status: { type: "string", description: "Filtro por status da OS (ex: 'approved', 'in_progress'). Ignorado se is_quote ou quote_status for fornecido." },
+        order_by: { type: "string", enum: ["recentes", "maior_valor"], description: "recentes (padrão) ou maior_valor (do maior total para o menor)" },
         client_id: { type: "string" },
         vessel_id: { type: "string" },
-        limit: { type: "number", description: "Máximo de registros (padrão 20)" },
+        limit: { type: "number", description: "Máximo de registros (padrão 20, teto 50). O total real vem em 'total'." },
       },
     },
     risk: "low",
     async execute(args, { sb }) {
+      const f = filtroDaListagem(args);
       let query = sb
         .from("service_orders")
-        .select("id, service_order_number, status, grand_total, payment_status, scheduled_start_at, created_at, clients(name), vessels(name)")
-        .order("created_at", { ascending: false })
-        .limit(Math.min(Number(args.limit) || 20, 50));
+        .select(
+          "id, service_order_number, status, quote_status, grand_total, payment_status, scheduled_start_at, created_at, clients(name), vessels(name)",
+          { count: "exact" },
+        )
+        .order(f.ordem === "maior_valor" ? "grand_total" : "created_at", { ascending: false, nullsFirst: false })
+        .limit(f.limite);
 
-      if (args.is_quote === true) {
-        query = query.eq("status", "draft");
-      } else if (args.is_quote === false) {
-        query = query.neq("status", "draft");
-      } else if (args.status) {
-        const mappedStatus = STATUS_PT_EN[String(args.status).toLowerCase()] ?? args.status;
-        query = query.eq("status", mappedStatus);
-      }
+      if (f.fase === "orcamento") query = query.eq("status", "draft");
+      else if (f.fase === "os") query = query.neq("status", "draft");
+      else if (f.status) query = query.eq("status", f.status);
+      if (f.situacao) query = query.eq("quote_status", f.situacao);
 
       if (args.client_id) query = query.eq("client_id", args.client_id);
       if (args.vessel_id) query = query.eq("vessel_id", args.vessel_id);
-      const { data, error } = await query;
+      const { data, error, count } = await query;
       if (error) throw error;
 
       const mapped = (data || []).map((so: any) => ({
@@ -321,6 +380,9 @@ export const serviceOrderTools: ToolDef[] = [
         tipo: so.status === "draft" ? "Orçamento" : "OS",
         status: STATUS_LABELS[so.status] || so.status,
         status_raw: so.status,
+        ...(so.status === "draft"
+          ? { situacao: SITUACAO_LABELS[so.quote_status] || so.quote_status || "—", quote_status: so.quote_status ?? null }
+          : {}),
         status_pagamento: so.payment_status || null,
         cliente: so.clients?.name || "—",
         ativo: so.vessels?.name || "—",
@@ -328,7 +390,15 @@ export const serviceOrderTools: ToolDef[] = [
         agendado_para: so.scheduled_start_at || null,
         criado_em: so.created_at,
       }));
-      return { results: mapped };
+      // Contagem real ao lado da lista: o modelo contava o tamanho da lista e respondia o LIMITE
+      // como total ("50 orçamentos em rascunho" eram 51 na fase e 2 de fato em rascunho — 03/10/2026).
+      const total = typeof count === "number" ? count : mapped.length;
+      return {
+        results: mapped,
+        total,
+        mostrando: mapped.length,
+        ...(total > mapped.length ? { aviso: `Lista cortada: mostrando ${mapped.length} de ${total}. O total real é ${total}.` } : {}),
+      };
     },
   },
   {

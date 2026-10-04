@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TaskAutomationSettings } from '@/components/agenda/TaskAutomationSettings';
 import { InstallAgendaCard } from '@/components/agenda/InstallAgendaCard';
-import { DollarSign, Globe, Banknote, CreditCard, FileText, Tag, Package, MessageCircle } from 'lucide-react';
+import { DollarSign, Globe, Banknote, CreditCard, FileText, Tag, Package, MessageCircle, Bot } from 'lucide-react';
 import { MasterDataPanel } from '@/components/MasterDataManagement';
 import { VerbosFiscaisGrid } from '@/components/fiscal/VerbosFiscaisGrid';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -25,6 +25,7 @@ import { QuoteSettingsSection } from './settings/QuoteSettingsSection';
 import { PaymentConditionsTab } from './settings/PaymentConditionsTab';
 import { PdfDefaultsSection } from './settings/PdfDefaultsSection';
 import { WhatsAppConexaoTab } from './settings/WhatsAppConexaoTab';
+import { AssistenteIATab } from './settings/AssistenteIATab';
 
 const TERM_KEYS = [
   { key: 'terms_warranty', labelKey: 'termsWarranty' as const },
@@ -255,6 +256,10 @@ export default function SettingsPage() {
             <MessageCircle className="h-3.5 w-3.5 mr-1" />
             WhatsApp
           </TabsTrigger>
+          <TabsTrigger value="assistente">
+            <Bot className="h-3.5 w-3.5 mr-1" />
+            Assistente de IA
+          </TabsTrigger>
           <TabsTrigger value="system">Sistema</TabsTrigger>
         </TabsList>
 
@@ -296,6 +301,10 @@ export default function SettingsPage() {
 
         <TabsContent value="whatsapp" className="mt-4 space-y-4">
           <WhatsAppConexaoTab />
+        </TabsContent>
+
+        <TabsContent value="assistente" className="mt-4 space-y-4">
+          <AssistenteIATab />
         </TabsContent>
 
         <TabsContent value="system" className="mt-4 space-y-4">

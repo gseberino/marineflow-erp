@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertMatch, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   ADENDO_DO_MAX,
+  desfechoDoPainel,
   linhaDoJob,
   modeloDoMax,
   novoTokenDoMcp,
@@ -9,6 +10,7 @@ import {
   sha256Hex,
   textoDoSistema,
   TIPO_DO_JOB,
+  TIPO_DO_PAINEL,
   transcreverConversa,
 } from "./claude-max.ts";
 import type { ClaudeMessage } from "../anthropic.ts";
@@ -110,4 +112,52 @@ Deno.test("linha do job: perfil erp_agent, token só como hash no metadata, praz
   assertEquals(linha.metadata, { tipo: TIPO_DO_JOB, versao: 1, effort: "low", session_id: "s1", phone: "5547999990000", user_id: "u1", mcp_token_sha256: "HASH" });
   assert(!JSON.stringify(linha.metadata).includes("TOKEN"), "o token em claro nunca vai ao metadata");
   assertStringIncludes(linha.prompt, "<mensagem>\nmanda o PDF pro cliente");
+});
+
+Deno.test("painel: chave e modelo próprios, também só para o admin; a chave do WhatsApp não liga o painel", () => {
+  assertEquals(provedorDoTurno({ ai_provedor_whatsapp: "claude_max" }, "admin", "panel"), "openrouter");
+  assertEquals(provedorDoTurno({ ai_provedor_painel: "claude_max" }, "admin", "panel"), "claude_max");
+  assertEquals(provedorDoTurno({ ai_provedor_painel: "claude_max" }, "admin"), "openrouter");
+  assertEquals(provedorDoTurno({ ai_provedor_painel: "claude_max" }, "financial", "panel"), "openrouter");
+  assertEquals(modeloDoMax({ ai_whatsapp_max_modelo: "opus" }, "panel"), "sonnet");
+  assertEquals(modeloDoMax({ ai_painel_max_modelo: "haiku" }, "panel"), "haiku");
+});
+
+Deno.test("linha do job do painel: tipo próprio, sem telefone, prazo curto e teto que cabe na edge", () => {
+  const linha = linhaDoJob(
+    {
+      sessionId: "s2",
+      appUserId: "u1",
+      phone: "",
+      modelo: "opus",
+      system: [{ type: "text", text: "SISTEMA" }],
+      messages: conversa,
+      ferramentas: { tools: [{ name: "get_financial_dre" }] as never, toolsByName: {}, alcancaveisPelaRede: {} },
+      texto: "manda o PDF pro cliente",
+      canal: "panel",
+    },
+    "TOKEN",
+    "HASH",
+    Date.parse("2026-10-03T20:00:00Z"),
+  ) as Record<string, any>;
+  assertEquals(linha.metadata, { tipo: TIPO_DO_PAINEL, versao: 1, effort: "medium", session_id: "s2", user_id: "u1", mcp_token_sha256: "HASH" });
+  assertEquals(linha.input.canal, "panel");
+  assertEquals(linha.model, "opus");
+  assertEquals(linha.priority, 60);
+  assertEquals(linha.timeout_seconds, 110);
+  assertEquals(linha.deadline_at, "2026-10-03T20:00:20.000Z");
+  assertStringIncludes(linha.prompt, "Conversa recente no chat do app");
+});
+
+Deno.test("desfecho do painel: pronto, reserva, tarde ou esperar", () => {
+  const lim = { pegarMs: 20_000, esperarMs: 110_000 };
+  assertEquals(desfechoDoPainel(null, 1_000, lim), { tipo: "reserva", motivo: "job sumiu" });
+  assertEquals(desfechoDoPainel({ status: "completed" }, 500, lim), { tipo: "pronto" });
+  assertEquals(desfechoDoPainel({ status: "failed", error_code: "rate_limited" }, 5_000, lim), { tipo: "reserva", motivo: "rate_limited" });
+  assertEquals(desfechoDoPainel({ status: "cancelled" }, 5_000, lim), { tipo: "reserva", motivo: "cancelled" });
+  assertEquals(desfechoDoPainel({ status: "pending" }, 19_000, lim), { tipo: "esperar" });
+  assertEquals(desfechoDoPainel({ status: "pending" }, 21_000, lim).tipo, "reserva");
+  // Pego pelo gateway: espera até o teto, mesmo passando do prazo de pegar.
+  assertEquals(desfechoDoPainel({ status: "processing", started_at: "x" }, 60_000, lim), { tipo: "esperar" });
+  assertEquals(desfechoDoPainel({ status: "processing", started_at: "x" }, 111_000, lim), { tipo: "tarde" });
 });

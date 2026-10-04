@@ -14,7 +14,7 @@ import { executarChamadaDeTool, interrupcaoDaTool } from "../_shared/ai/agent.ts
 import type { Role } from "../_shared/ai/tools/index.ts";
 import { ferramentasDoJob } from "../_shared/ai/max/ferramentas-do-job.ts";
 import { responderMcp, type ServidorDoTurno } from "../_shared/ai/max/mcp.ts";
-import { sha256Hex, TIPO_DE_ENSAIO, TIPO_DO_JOB } from "../_shared/ai/max/claude-max.ts";
+import { sha256Hex, TIPOS_DO_AGENTE } from "../_shared/ai/max/claude-max.ts";
 import { timingSafeEqual } from "../_shared/cron-auth.ts";
 import { servirComCors } from "../_shared/cors.ts";
 
@@ -45,7 +45,7 @@ export async function handler(req: Request): Promise<Response> {
     .maybeSingle();
   const meta = (job?.metadata ?? {}) as Record<string, any>;
   if (
-    !job || job.status !== "processing" || (meta.tipo !== TIPO_DO_JOB && meta.tipo !== TIPO_DE_ENSAIO) || typeof meta.mcp_token_sha256 !== "string" ||
+    !job || job.status !== "processing" || !TIPOS_DO_AGENTE.has(meta.tipo) || typeof meta.mcp_token_sha256 !== "string" ||
     !job.started_at || Date.now() - Date.parse(job.started_at) > VALIDADE_MS ||
     !timingSafeEqual(await sha256Hex(token), meta.mcp_token_sha256)
   ) {
@@ -57,7 +57,10 @@ export async function handler(req: Request): Promise<Response> {
     .select("id, role, active, ai_whatsapp_enabled")
     .eq("id", job.requested_by)
     .maybeSingle();
-  if (!usuario?.active || !usuario.ai_whatsapp_enabled) return naoAutorizado();
+  const input = (job.input ?? {}) as Record<string, any>;
+  const canal = input.canal === "panel" ? "panel" : "whatsapp";
+  // WhatsApp exige o canal habilitado para o usuário; o painel só exige o usuário ativo.
+  if (!usuario?.active || (canal === "whatsapp" && !usuario.ai_whatsapp_enabled)) return naoAutorizado();
 
   const { data: linhas } = await admin.from("app_settings").select("key, value");
   const settings: Record<string, string> = {};
@@ -65,11 +68,11 @@ export async function handler(req: Request): Promise<Response> {
     if (r.key) settings[r.key] = String(r.value ?? "");
   });
 
-  const input = (job.input ?? {}) as Record<string, any>;
   const cargo = (usuario.role as Role) || ("unknown" as Role);
-  const { toolsByName, alcancaveisPelaRede } = ferramentasDoJob(cargo, input.ferramentas?.visiveis, input.ferramentas?.rede);
+  const { toolsByName, alcancaveisPelaRede } = ferramentasDoJob(cargo, input.ferramentas?.visiveis, input.ferramentas?.rede, canal);
   const sessionId = String(input.sessao ?? meta.session_id ?? "");
-  // Mesmo contexto do canal WhatsApp em ai-agent: sem JWT de usuário, client service-role.
+  // Mesmo contexto do canal WhatsApp em ai-agent: sem JWT de usuário, client service-role (no painel
+  // só o admin chega aqui pelo Max — ver provedorDoTurno).
   const toolCtx = { sb: admin, admin, userId: usuario.id, userRole: cargo, jwt: "", appOrigin: settings.app_public_url || "", settings };
 
   const servidor: ServidorDoTurno = {
@@ -81,7 +84,7 @@ export async function handler(req: Request): Promise<Response> {
         return { resultado: { error: "Turno encerrado: aguardando a decisão do usuário. Não chame mais ferramentas." } };
       }
       const tc = { name: nome, input: argumentos ?? {} };
-      const r = await executarChamadaDeTool(tc, { toolsByName, alcancaveisPelaRede, toolCtx, sessionId, channel: "whatsapp" });
+      const r = await executarChamadaDeTool(tc, { toolsByName, alcancaveisPelaRede, toolCtx, sessionId, channel: canal });
       // Sem desambiguação forçada aqui (trabalhoComposto=true): o MCP recebe uma chamada por vez e
       // não sabe se o modelo disparou várias; pendência e present_options continuam encerrando.
       const interrupcao = interrupcaoDaTool(tc, r, true);

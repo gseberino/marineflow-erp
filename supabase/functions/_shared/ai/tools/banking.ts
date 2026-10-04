@@ -15,6 +15,11 @@ import type { BankTx } from "../../banking/types.ts";
 
 /** Chama a banking-reconcile, que é quem sabe montar os candidatos a partir do banco. */
 async function callReconcile(ctx: { jwt: string }, body: Record<string, unknown>) {
+  // A banking-reconcile exige o JWT de quem pede (as baixas checam auth.uid()). WhatsApp e Claude
+  // Max não têm a sessão do navegador: avisa em vez de devolver um 401 que o modelo não sabe explicar.
+  if (!ctx.jwt) {
+    throw new Error("Sugerir conciliação precisa da sessão do app: use a tela de Conciliação ou o chat do app pelo OpenRouter.");
+  }
   const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/banking-reconcile`;
   const res = await fetch(url, {
     method: "POST",

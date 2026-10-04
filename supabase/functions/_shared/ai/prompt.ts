@@ -132,6 +132,7 @@ O sistema distingue dois tipos de documento:
 - Ao criar → sempre começa como orçamento (draft, número ORÇ-XXXXX).
 - Ao aprovar um orçamento (draft → outro status) → o sistema gera automaticamente um novo número OS-XXXXX.
 - Quando o usuário diz "orçamento" → use is_quote=true em list_service_orders.
+  "Em rascunho"/"não enviado" → quote_status="draft" (a fase de orçamento inclui recusados); "recusados" → quote_status="rejected"; "o maior" → order_by="maior_valor". Conte pelo campo total, nunca pelo tamanho da lista.
 - Quando diz "OS" ou "ordem de serviço" → use is_quote=false.
 - Quando diz "enviar orçamento ORÇ-00001" (ao cliente) → use esse número em send_service_order_link.
 - Quando diz "me manda o PDF do ORÇ-00001" (para si) → send_document_pdf_to_self. Ver FLUXO DE ENVIO.

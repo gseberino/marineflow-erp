@@ -10,9 +10,10 @@ export function ferramentasDoJob(
   cargo: Role,
   visiveis: unknown,
   rede: unknown,
+  canal: string = "whatsapp",
   todas: ToolDef[] = allTools,
 ): { toolsByName: Record<string, ToolDef>; alcancaveisPelaRede: Record<string, ToolDef> } {
-  const liberadas = filtrarPorCanal(todas.filter((t) => !t.roles || t.roles.includes(cargo)), "whatsapp");
+  const liberadas = filtrarPorCanal(todas.filter((t) => !t.roles || t.roles.includes(cargo)), canal);
   const porNome = new Map(liberadas.map((t) => [t.name, t]));
   const nomes = (v: unknown) => (Array.isArray(v) ? v.filter((n): n is string => typeof n === "string") : []);
   return {

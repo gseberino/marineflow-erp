@@ -9,12 +9,14 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { prepararFerramentasDoTurno, ressalvaDoResultado, runAgentLoop, type Proposal } from "../_shared/ai/agent.ts";
 import { respostaDoTurnoNoWhatsApp } from "../_shared/ai/whatsapp-resposta.ts";
 import {
+  desfechoDoPainel,
   enfileirarTurnoNoMax,
   maxDisponivel,
   modeloDoMax,
   provedorDoTurno,
   reservaLigada,
   TIPO_DO_JOB,
+  TIPO_DO_PAINEL,
 } from "../_shared/ai/max/claude-max.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { filtrarTools } from "../_shared/ai/intent-router.ts";
@@ -709,6 +711,7 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
     .eq("id", jobId)
     .maybeSingle();
   const meta = (job?.metadata ?? {}) as Record<string, any>;
+  if (job && meta.tipo === TIPO_DO_PAINEL) return await handleEntregaDoPainel(admin, job);
   if (!job || meta.tipo !== TIPO_DO_JOB) return jr({ error: "Job de turno do WhatsApp não encontrado" }, 404);
   if (!["completed", "failed", "cancelled"].includes(job.status)) return jr({ error: "O job ainda não terminou" }, 409);
 
@@ -739,28 +742,7 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
 
   if (job.status === "completed") {
     const resposta = String((job.response as any)?.text ?? "");
-    const usage = (job.usage ?? {}) as Record<string, any>;
-    try {
-      await admin.from("ai_operator_messages").insert([
-        { session_id: sessionId, role: "user", content: texto, source: "whatsapp" },
-        {
-          session_id: sessionId,
-          role: "assistant",
-          content: resposta || null,
-          source: "whatsapp",
-          tokens_in: usage.input_tokens ?? null,
-          tokens_out: usage.output_tokens ?? null,
-          cache_read_tokens: usage.cache_read_input_tokens ?? null,
-          cache_creation_tokens: usage.cache_creation_input_tokens ?? null,
-          // Assinatura, não OpenRouter: sem generation_id, para o ai-cost-reconcile não procurar
-          // um custo que não existe; o modelo diz de onde veio.
-          openrouter_generation_id: null,
-          model: `claude-max/${job.model_used ?? "desconhecido"}`,
-        },
-      ]);
-    } catch (persistErr) {
-      console.error("[ai-agent][max] falha ao gravar o turno:", persistErr);
-    }
+    await gravarTurnoDoMax(admin, sessionId, texto, resposta, job, "whatsapp");
     const interrupcao = (meta.interrupcao ?? {}) as Record<string, any>;
     const { replyText, metadata: novo } = respostaDoTurnoNoWhatsApp(
       { proposal: interrupcao.proposal, options: interrupcao.options, texto: resposta },
@@ -784,6 +766,150 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
   return await turnoDoModeloNoWhatsApp({
     admin, sessionId, phoneNormalized, appUser, settings, toolCtx, metadata, effectiveText: texto, permitirMax: false,
   });
+}
+
+
+/** Grava o turno do Max (pergunta e resposta) na conversa, com o modelo e o uso informados. */
+async function gravarTurnoDoMax(admin: any, sessionId: string, pergunta: string, resposta: string, job: Record<string, any>, source: "whatsapp" | "web") {
+  const usage = (job.usage ?? {}) as Record<string, any>;
+  try {
+    await admin.from("ai_operator_messages").insert([
+      { session_id: sessionId, role: "user", content: pergunta, source },
+      {
+        session_id: sessionId,
+        role: "assistant",
+        content: resposta || null,
+        source,
+        tokens_in: usage.input_tokens ?? null,
+        tokens_out: usage.output_tokens ?? null,
+        cache_read_tokens: usage.cache_read_input_tokens ?? null,
+        cache_creation_tokens: usage.cache_creation_input_tokens ?? null,
+        // Assinatura, não OpenRouter: sem generation_id, para o ai-cost-reconcile não procurar
+        // um custo que não existe; o modelo diz de onde veio.
+        openrouter_generation_id: null,
+        model: `claude-max/${job.model_used ?? "desconhecido"}`,
+      },
+    ]);
+    await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", sessionId);
+  } catch (persistErr) {
+    console.error("[ai-agent][max] falha ao gravar o turno:", persistErr);
+  }
+}
+
+/**
+ * Entrega de um turno do painel que a tela deixou de esperar (passou do tempo da edge): grava a
+ * resposta na conversa — a tela mostra ao reabrir. Se falhou, deixa o aviso. Se a própria edge já
+ * entregou (ou seguiu pelo OpenRouter), ai_job_marcar_entregue barra a duplicata.
+ */
+async function handleEntregaDoPainel(admin: any, job: Record<string, any>): Promise<Response> {
+  if (!["completed", "failed", "cancelled"].includes(job.status)) return jr({ error: "O job ainda não terminou" }, 409);
+  const meta = (job.metadata ?? {}) as Record<string, any>;
+  // Sem a marca, a tela ainda está esperando e a própria edge entrega.
+  if (meta.painel_tarde !== true) return jr({ ok: true, painel_esperando: true });
+  const { data: primeiraVez } = await admin.rpc("ai_job_marcar_entregue", { p_job_id: job.id });
+  if (primeiraVez !== true) return jr({ ok: true, ja_entregue: true });
+  const input = (job.input ?? {}) as Record<string, any>;
+  const sessionId = String(meta.session_id || input.sessao || "");
+  if (!sessionId) return jr({ error: "Turno sem sessão" }, 422);
+  const resposta = job.status === "completed"
+    ? String(job.response?.text ?? "")
+    : `⚠️ Não consegui terminar este pedido pelo Claude Max (${job.error_code ?? job.status}). Peça de novo.`;
+  await gravarTurnoDoMax(admin, sessionId, String(input.texto || ""), resposta, job, "web");
+  return jr({ ok: true, entregue: "painel" });
+}
+
+const dormir = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Chat do painel pelo Claude Max (03/10/2026): com ai_provedor_painel = 'claude_max' (só o admin) e
+ * o gateway no ar, enfileira e ESPERA o job aqui — a tela recebe a mesma resposta de sempre (texto,
+ * card de confirmação ou opções). null = siga pelo OpenRouter nesta mesma requisição (gateway não
+ * pegou em 20 s, falhou, ou o Max está desligado). Passou de ~110 s: marca o job "painel_tarde",
+ * devolve "ainda trabalhando" e o gatilho de entrega grava a resposta na conversa quando ficar pronta.
+ */
+async function turnoDoPainelPeloMax(p: {
+  admin: any;
+  userId: string;
+  userRole: string;
+  settings: Record<string, string>;
+  loopParams: Parameters<typeof runAgentLoop>[0];
+  texto: string;
+}): Promise<Response | null> {
+  if (provedorDoTurno(p.settings, p.userRole, "panel") !== "claude_max") return null;
+  if (!(await maxDisponivel(p.admin))) {
+    console.log("[ai-agent][painel] Claude Max fora do ar; turno pelo OpenRouter");
+    return null;
+  }
+  const inicio = Date.now();
+  let jobId: string;
+  try {
+    jobId = await enfileirarTurnoNoMax(p.admin, {
+      sessionId: p.loopParams.sessionId,
+      appUserId: p.userId,
+      phone: "",
+      modelo: modeloDoMax(p.settings, "panel"),
+      system: p.loopParams.system,
+      messages: p.loopParams.messages,
+      ferramentas: await prepararFerramentasDoTurno(p.loopParams),
+      texto: p.texto,
+      canal: "panel",
+    });
+  } catch (e) {
+    console.error("[ai-agent][painel] não consegui enfileirar no Claude Max; turno pelo OpenRouter:", e);
+    return null;
+  }
+
+  for (;;) {
+    await dormir(1000);
+    const { data: job } = await p.admin
+      .from("ai_jobs")
+      .select("id, status, started_at, error_code, response, metadata, model_used, usage")
+      .eq("id", jobId)
+      .maybeSingle();
+    const d = desfechoDoPainel(job, Date.now() - inicio);
+    if (d.tipo === "esperar") continue;
+
+    if (d.tipo === "reserva") {
+      // O gateway não pode pegar depois: cancela o pendente. Se ele pegou neste instante (nenhuma
+      // linha cancelada), continua esperando — nunca os dois respondendo o mesmo turno.
+      if (job?.status === "pending") {
+        const { data: cancelado } = await p.admin.from("ai_jobs")
+          .update({ status: "cancelled", completed_at: new Date().toISOString(), error_code: "cancelled", error: "O painel seguiu sem o Claude Max." })
+          .eq("id", jobId).eq("status", "pending")
+          .select("id");
+        if (!cancelado?.length) continue;
+      }
+      await p.admin.rpc("ai_job_marcar_entregue", { p_job_id: jobId });
+      if (!reservaLigada(p.settings)) {
+        const aviso = `⚠️ O Claude Max não respondeu (${d.motivo}) e a reserva pelo OpenRouter está desligada. Peça de novo em instantes.`;
+        await gravarTurnoDoMax(p.admin, p.loopParams.sessionId, p.texto, aviso, job ?? {}, "web");
+        return jr({ message: { role: "assistant", content: aviso }, tool_events: [], session_id: p.loopParams.sessionId });
+      }
+      console.warn(`[ai-agent][painel] turno ${jobId} vai pelo OpenRouter: ${d.motivo}`);
+      return null;
+    }
+
+    if (d.tipo === "tarde") {
+      // Só desiste se o job ainda não terminou; se terminou agora, a próxima volta entrega.
+      const { data: desistiu } = await p.admin.rpc("ai_job_painel_desistir", { p_job_id: jobId });
+      if (desistiu !== true) continue;
+      return jr({
+        message: { role: "assistant", content: "⏳ Ainda estou trabalhando nisso pelo Claude Max. A resposta vai aparecer nesta conversa quando ficar pronta — reabra em instantes." },
+        tool_events: [],
+        session_id: p.loopParams.sessionId,
+      });
+    }
+
+    // pronto
+    const resposta = String((job as any).response?.text ?? "");
+    const interrupcao = ((job as any).metadata?.interrupcao ?? {}) as Record<string, any>;
+    const { data: primeiraVez } = await p.admin.rpc("ai_job_marcar_entregue", { p_job_id: jobId });
+    if (primeiraVez === true) await gravarTurnoDoMax(p.admin, p.loopParams.sessionId, p.texto, resposta, job as any, "web");
+    const message = { role: "assistant", content: resposta };
+    if (interrupcao.proposal) return jr({ message, proposal: interrupcao.proposal, tool_events: [], session_id: p.loopParams.sessionId });
+    if (interrupcao.options) return jr({ message, options: interrupcao.options, tool_events: [], session_id: p.loopParams.sessionId });
+    return jr({ message, tool_events: [], session_id: p.loopParams.sessionId });
+  }
 }
 
 // ---------------- HANDLER ----------------
@@ -884,8 +1010,10 @@ servirComCors(async (req) => {
           actor_user_id: userId,
           actor_kind: "user",
           event_type: `reject:${pending.action_name}`,
-          event_category: userNote ? "learning" : "security",
-          payload: { args: pending.payload, user_note: userNote || null },
+          // O comentário do dono é aprendizado, mas a categoria fica a da AÇÃO: 'learning' não existe no
+          // CHECK de ai_operator_audit e fazia este insert falhar calado (achado de 03/10/2026).
+          event_category: "security",
+          payload: { args: pending.payload, user_note: userNote || null, ...(userNote ? { aprendizado: true } : {}) },
         });
         const restantesRej = await quantasPendenciasAbertas(admin, pending.session_id, { id: pendingActionId, created_at: pending.created_at });
         const rejectMsg = restantesRej > 0
@@ -921,8 +1049,8 @@ servirComCors(async (req) => {
         actor_user_id: userId,
         actor_kind: "user",
         event_type: `approve_execute:${pending.action_name}`,
-        event_category: userNote ? "learning" : "data",
-        payload: { args: pending.payload, risk: pending.risk_level, user_note: userNote || null, result_summary: JSON.stringify(execResult ?? null).slice(0, 500) },
+        event_category: "data", // ver a recusa acima: 'learning' estava fora do CHECK
+        payload: { args: pending.payload, risk: pending.risk_level, user_note: userNote || null, ...(userNote ? { aprendizado: true } : {}), result_summary: JSON.stringify(execResult ?? null).slice(0, 500) },
       });
 
       const executedAt = new Date().toISOString();
@@ -1063,15 +1191,23 @@ servirComCors(async (req) => {
       settings,
     );
 
-    const result = await runAgentLoop({
+    const loopParams = {
       system,
       messages: toAnthropicMessages(podarHistoricoParaLLM(historyMessages)),
       tools: toolsForRole,
       toolCtx: { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin, settings },
       sessionId: resolvedSessionId,
-      channel: "panel",
-      effort: "medium", // painel: trabalho complexo de ERP, tolera mais latência
-    });
+      channel: "panel" as const,
+      effort: "medium" as const, // painel: trabalho complexo de ERP, tolera mais latência
+    };
+
+    // Claude Max (ai_provedor_painel, só admin): espera aqui; se não der, segue pelo OpenRouter com o
+    // tempo que sobrou da janela da edge.
+    const inicioDoTurno = Date.now();
+    const peloMax = await turnoDoPainelPeloMax({ admin, userId, userRole, settings, loopParams, texto: ultimoTextoUsuario });
+    if (peloMax) return peloMax;
+
+    const result = await runAgentLoop({ ...loopParams, timeBudgetMs: Math.max(25_000, 100_000 - (Date.now() - inicioDoTurno)) });
 
     // ---- Persiste as mensagens novas deste turno (best-effort — não derruba a resposta) ----
     try {
