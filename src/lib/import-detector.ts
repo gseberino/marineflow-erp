@@ -226,16 +226,18 @@ export function transformValue(value: any, targetField: string): any {
     return ['Ativo', 'ativo', 'true', '1', 'Sim', 'sim', 'yes', 'Yes'].includes(str);
   }
 
+  // NOVO-import-01 (decisão do dono, 12/08/2026): texto num campo numérico ("sob consulta")
+  // NUNCA vira 0 calado — 0 parece preço válido, entra no produto e sai numa proposta. Volta
+  // null; applyMapping marca a célula e a conferência lista a linha.
   if (['sale_price', 'cost_price', 'default_price'].includes(targetField)) {
-    const num = parseNumeroBR(str);
-    return num === null ? 0 : num;
+    return parseNumeroBR(str);
   }
 
   if (['stock_quantity', 'minimum_stock'].includes(targetField)) {
     const num = parseNumeroBR(str);
     // Trunca em vez de arredondar: estoque de "1.500,80" é 1.500 unidades, não 1.501 —
     // arredondar para cima inventaria uma unidade que não existe na prateleira.
-    return num === null ? 0 : Math.trunc(num);
+    return num === null ? null : Math.trunc(num);
   }
 
   if (targetField === '_type') {
@@ -245,6 +247,47 @@ export function transformValue(value: any, targetField: string): any {
   }
 
   return str;
+}
+
+/** Campos numéricos em que texto não vira número. */
+export const CAMPOS_NUMERICOS = ['sale_price', 'cost_price', 'default_price', 'stock_quantity', 'minimum_stock'];
+
+/** Marca, na linha mapeada, os campos cuja célula tinha texto que não é número. */
+export const CAMPO_INVALIDO = '__invalidos';
+
+export interface CelulaInvalida {
+  /** Linha na planilha (1 é o cabeçalho). */
+  linha: number;
+  campo: string;
+  valor: string;
+}
+
+/** As células numéricas com texto que não é número — a lista da conferência (NOVO-import-01). */
+export function celulasInvalidas(rows: Record<string, any>[], mapping: ColumnMapping): CelulaInvalida[] {
+  const out: CelulaInvalida[] = [];
+  rows.forEach((row, i) => {
+    for (const [sourceCol, targetField] of Object.entries(mapping)) {
+      if (!targetField || !CAMPOS_NUMERICOS.includes(targetField)) continue;
+      const bruto = row[sourceCol];
+      const texto = bruto == null ? '' : String(bruto).trim();
+      if (texto !== '' && transformValue(bruto, targetField) === null) {
+        out.push({ linha: i + 2, campo: targetField, valor: texto });
+      }
+    }
+  });
+  return out;
+}
+
+/** O campo veio com texto que não é número nesta linha (ver CAMPO_INVALIDO). */
+export function campoInvalido(row: Record<string, any>, campo: string): boolean {
+  return Array.isArray(row?.[CAMPO_INVALIDO]) && row[CAMPO_INVALIDO].includes(campo);
+}
+
+/** A linha sem a marca e sem os campos inválidos — para atualizar sem apagar o que existe. */
+export function semCamposInvalidos(row: Record<string, any>): Record<string, any> {
+  const { [CAMPO_INVALIDO]: invalidos, ...resto } = row ?? {};
+  for (const campo of (Array.isArray(invalidos) ? invalidos : [])) delete resto[campo];
+  return resto;
 }
 
 export function applyMapping(
@@ -270,6 +313,10 @@ export function applyMapping(
       // última coluna preenchida vence. O que não pode é o vazio ganhar do preenchido.
       if (valor === null && mapped[targetField] != null) continue;
       mapped[targetField] = valor;
+      const texto = row[sourceCol] == null ? '' : String(row[sourceCol]).trim();
+      if (valor === null && texto !== '' && CAMPOS_NUMERICOS.includes(targetField)) {
+        mapped[CAMPO_INVALIDO] = [...(mapped[CAMPO_INVALIDO] ?? []), targetField];
+      }
     }
     return mapped;
   });

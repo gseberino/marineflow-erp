@@ -8,7 +8,9 @@
 // audit/novos-achados.md — e já estão corrigidos. Os casos marcados com o ID afirmam o
 // comportamento certo e explicam o que quebrava, para ninguém "simplificar" de volta.
 import { describe, it, expect } from 'vitest';
-import { parseCSVContent, detectFormat, transformValue, applyMapping } from './import-detector';
+import {
+  parseCSVContent, detectFormat, transformValue, applyMapping, celulasInvalidas, campoInvalido, semCamposInvalidos,
+} from './import-detector';
 
 describe('parseCSVContent — separador, aspas e linhas irregulares', () => {
   it('usa ponto e vírgula por padrão (é o que o Excel pt-BR gera)', () => {
@@ -125,14 +127,16 @@ describe('transformValue — converter texto de planilha em dado', () => {
     expect(transformValue('0,01', 'default_price')).toBe(0.01);
   });
 
-  it('preço ilegível vira 0 em vez de NaN', () => {
-    expect(transformValue('sob consulta', 'sale_price')).toBe(0);
+  // NOVO-import-01 (decisão do dono, 12/08/2026): era 0 — preço que parece válido e sai numa
+  // proposta. Agora null, e a conferência lista a linha (celulasInvalidas).
+  it('preço ilegível vira null, nunca 0 nem NaN', () => {
+    expect(transformValue('sob consulta', 'sale_price')).toBeNull();
   });
 
   it('estoque vira inteiro', () => {
     expect(transformValue('12', 'stock_quantity')).toBe(12);
     expect(transformValue('12,7', 'stock_quantity')).toBe(12);
-    expect(transformValue('abc', 'minimum_stock')).toBe(0);
+    expect(transformValue('abc', 'minimum_stock')).toBeNull();
   });
 
   it('PJ/PF viram company/individual, com company como padrão', () => {
@@ -204,10 +208,10 @@ describe('transformValue — converter texto de planilha em dado', () => {
     expect(transformValue('3,9', 'minimum_stock')).toBe(3);
   });
 
-  it('[NOVO-017] texto sem dígito nenhum continua caindo em 0', () => {
-    // Comportamento PRESERVADO de propósito: mudar para null/erro é decisão de produto,
-    // registrada no livro do turno. O que se corrigiu foi a leitura errada, não este contrato.
-    expect(transformValue('sob consulta', 'sale_price')).toBe(0);
+  it('[NOVO-017 / NOVO-import-01] texto sem dígito nenhum vira null (decisão do dono, 12/08/2026)', () => {
+    // Era 0, preservado até a decisão de produto. O dono decidiu: importar null e listar na
+    // conferência, nunca 0 calado (audit/relatorio-noturno-20260811.md, tabela de decisões).
+    expect(transformValue('sob consulta', 'sale_price')).toBeNull();
   });
 });
 
@@ -278,5 +282,33 @@ describe('applyMapping — do arquivo para os campos do sistema', () => {
   it('[NOVO-017] campo que só tem coluna vazia continua null', () => {
     const resultado = applyMapping([{ Celular: '' }], { Celular: 'phone' }, 'clients');
     expect(resultado[0].phone).toBeNull();
+  });
+});
+
+describe('NOVO-import-01 — texto no lugar de número é listado, nunca vira 0', () => {
+  const linhas = [
+    { Nome: 'Anodo', Preco: '35,90', Estoque: '3' },
+    { Nome: 'Bomba', Preco: 'sob consulta', Estoque: '2' },
+    { Nome: 'Cabo', Preco: '', Estoque: 'muitos' },
+  ];
+  const mapa = { Nome: 'name', Preco: 'sale_price', Estoque: 'stock_quantity' };
+
+  it('a conferência diz linha (1 é o cabeçalho), campo e o texto; célula vazia não entra', () => {
+    expect(celulasInvalidas(linhas, mapa)).toEqual([
+      { linha: 3, campo: 'sale_price', valor: 'sob consulta' },
+      { linha: 4, campo: 'stock_quantity', valor: 'muitos' },
+    ]);
+  });
+
+  it('a linha mapeada marca o campo inválido; atualizar sem ele não apaga o valor atual', () => {
+    const [ok, bomba, cabo] = applyMapping(linhas, mapa, 'products');
+    expect(campoInvalido(ok, 'sale_price')).toBe(false);
+    expect(campoInvalido(bomba, 'sale_price')).toBe(true);
+    expect(bomba.sale_price).toBeNull();
+    // Vazio é vazio, não texto inválido.
+    expect(campoInvalido(cabo, 'sale_price')).toBe(false);
+    expect(campoInvalido(cabo, 'stock_quantity')).toBe(true);
+    expect(semCamposInvalidos(bomba)).toEqual({ name: 'Bomba', stock_quantity: 2 });
+    expect(semCamposInvalidos(ok)).toEqual({ name: 'Anodo', sale_price: 35.9, stock_quantity: 3 });
   });
 });

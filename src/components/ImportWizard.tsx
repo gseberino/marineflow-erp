@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useI18n } from '@/i18n';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Upload, CheckCircle, AlertTriangle, ArrowLeft, ArrowRight, FileText, Loader2 } from 'lucide-react';
-import { parseCSVContent, detectFormat, applyMapping, type ParsedFile, type DetectionResult, type ColumnMapping } from '@/lib/import-detector';
+import { parseCSVContent, detectFormat, applyMapping, celulasInvalidas, type ParsedFile, type DetectionResult, type ColumnMapping } from '@/lib/import-detector';
 import { useCheckConflicts, useImportRows, type ConflictItem } from '@/hooks/use-import';
 
 type EntityType = 'products' | 'services' | 'clients' | 'suppliers' | 'auto';
@@ -58,6 +58,9 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
   const [conflicts, setConflicts] = useState<ConflictItem[]>([]);
   const [checking, setChecking] = useState(false);
   const [importResult, setImportResult] = useState<{ inserted: number; updated: number } | null>(null);
+  // Texto no lugar de número ("sob consulta"): a célula fica vazia, nunca 0 — e a conferência
+  // diz qual linha (NOVO-import-01, decisão do dono de 12/08/2026).
+  const invalidas = useMemo(() => (parsedFile ? celulasInvalidas(parsedFile.rows, mapping) : []), [parsedFile, mapping]);
 
   const checkConflicts = useCheckConflicts();
   const importRows = useImportRows();
@@ -324,6 +327,26 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
                 <p className="text-xs text-muted-foreground">{t.imports.conflicts}</p>
               </div>
             </div>
+
+            {invalidas.length > 0 && (
+              <div className="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm space-y-1" data-testid="celulas-invalidas">
+                <p className="font-medium flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-warning shrink-0" />
+                  {invalidas.length === 1 ? '1 célula com texto no lugar de número' : `${invalidas.length} células com texto no lugar de número`}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Entram vazias, nunca como 0: o produto novo fica sem preço (aparece em "sem preço" no catálogo) e o que já existe mantém o valor atual.
+                </p>
+                <ul className="text-xs space-y-0.5">
+                  {invalidas.slice(0, 20).map((c) => (
+                    <li key={`${c.linha}-${c.campo}`} className="break-words">
+                      Linha {c.linha} · {({ sale_price: 'preço de venda', cost_price: 'custo', default_price: 'preço', stock_quantity: 'estoque', minimum_stock: 'estoque mínimo' } as Record<string, string>)[c.campo] ?? c.campo}: "{c.valor}"
+                    </li>
+                  ))}
+                </ul>
+                {invalidas.length > 20 && <p className="text-xs text-muted-foreground">e mais {invalidas.length - 20}.</p>}
+              </div>
+            )}
 
             {conflicts.length > 0 && (
               <div className="space-y-2">

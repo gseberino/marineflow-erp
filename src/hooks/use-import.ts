@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { campoInvalido, semCamposInvalidos } from '@/lib/import-detector';
 
 export type ConflictItem = {
   incoming: Record<string, any>;
@@ -160,8 +161,10 @@ export function useImportRows() {
           const rows = chunk.map((r: any) => ({
             name: r.name as string,
             sku: (r.sku || null) as string | null,
-            sale_price: (r.sale_price || 0) as number,
-            cost_price: (r.cost_price || 0) as number,
+            // Texto no lugar do preço: o produto entra SEM preço (null), não com 0 — e a
+            // conferência listou a linha (NOVO-import-01, decisão do dono de 12/08/2026).
+            sale_price: (campoInvalido(r, 'sale_price') ? null : (r.sale_price || 0)) as number | null,
+            cost_price: (campoInvalido(r, 'cost_price') ? null : (r.cost_price || 0)) as number | null,
             stock_quantity: (r.stock_quantity || 0) as number,
             minimum_stock: (r.minimum_stock || 0) as number,
             unit: (r.unit || 'un') as string,
@@ -202,7 +205,8 @@ export function useImportRows() {
         for (const u of updates) {
           // Fase E: o saldo da planilha não é gravado direto no produto (o banco recusa); se veio,
           // vira um ajuste para a quantidade informada, com movimento.
-          const { stock_quantity: saldoDaPlanilha, ...resto } = u.data as Record<string, string | number | boolean | null>;
+          // Célula com texto no lugar do número não apaga o que o produto já tem (NOVO-import-01).
+          const { stock_quantity: saldoDaPlanilha, ...resto } = semCamposInvalidos(u.data) as Record<string, string | number | boolean | null>;
           if (Object.keys(resto).length > 0) {
             const { error } = await supabase.from('products').update(resto as any).eq('id', u.id);
             if (error) throw new Error('Erro ao atualizar produto: ' + error.message);
@@ -224,7 +228,7 @@ export function useImportRows() {
         for (const chunk of chunks(validServiceRows, 50)) {
           const rows = chunk.map((r: any) => ({
             name: r.name as string,
-            default_price: (r.default_price || 0) as number,
+            default_price: (campoInvalido(r, 'default_price') ? null : (r.default_price || 0)) as number | null,
             billing_unit: 'visit' as string,
             currency: 'BRL' as string,
             description: (r.notes || null) as string | null,
@@ -235,7 +239,9 @@ export function useImportRows() {
           inserted += chunk.length;
         }
         for (const u of updates) {
-          await supabase.from('services').update(u.data as any).eq('id', u.id);
+          // O supabase-js devolve o erro, não lança: sem conferir, a atualização falhava calada.
+          const { error } = await supabase.from('services').update(semCamposInvalidos(u.data) as any).eq('id', u.id);
+          if (error) throw new Error('Erro ao atualizar serviço: ' + error.message);
           updated++;
         }
       }
