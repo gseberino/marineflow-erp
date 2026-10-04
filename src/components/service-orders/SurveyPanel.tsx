@@ -15,9 +15,10 @@ import { toast } from 'sonner';
 import {
   useSurveyTrigger, useCaseEstimate, useSurveyQuestions, useServiceOrderSurvey,
   useStartSurvey, useAnswerSurvey, useCloseSurvey, useReopenSurvey, formatMinutes, finalContingency,
-  uploadSurveyPhoto, surveyPhotoUrl, usePreviousAnswers, howLongAgo, canReuseAnswer,
+  uploadSurveyPhoto, usePreviousAnswers, howLongAgo, canReuseAnswer,
   type SurveyQuestion,
 } from '@/hooks/use-service-survey';
+import { abrirFoto } from '@/lib/fotos-da-os';
 import { checkMeasure } from '@/lib/survey-measure';
 import { SuggestedMaterialsPanel } from './SuggestedMaterialsPanel';
 import { SurveySheetEntryDialog } from './SurveySheetEntryDialog';
@@ -359,12 +360,12 @@ export function SurveyPanel({
             </label>
             {subindo && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
             {foto && !subindo && (
-              <a
-                href={surveyPhotoUrl(foto)} target="_blank" rel="noreferrer"
+              <button
+                type="button" onClick={() => void abrirFoto(foto)}
                 className="text-xs text-primary underline"
               >
                 ver foto anexada
-              </a>
+              </button>
             )}
           </div>
 
@@ -521,12 +522,12 @@ export function SurveyPanel({
                       <span className="font-medium">{r.answer_value || '—'}</span>
                     )}
                     {r.photo_path && (
-                      <a
-                        href={surveyPhotoUrl(r.photo_path)} target="_blank" rel="noreferrer"
+                      <button
+                        type="button" onClick={() => void abrirFoto(r.photo_path)}
                         className="inline-flex items-center gap-1 text-xs text-primary underline"
                       >
                         <Camera className="h-3 w-3" /> foto
-                      </a>
+                      </button>
                     )}
                     <button
                       className="text-xs text-muted-foreground underline hover:text-foreground"

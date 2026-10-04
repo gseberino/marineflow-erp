@@ -243,11 +243,6 @@ export async function uploadSurveyPhoto(
   return path;
 }
 
-/** URL pública da foto — o bucket de fotos de OS já é público. */
-export function surveyPhotoUrl(path: string): string {
-  return supabase.storage.from('service-order-photos').getPublicUrl(path).data.publicUrl;
-}
-
 export function useAnswerSurvey() {
   const qc = useQueryClient();
   return useMutation({

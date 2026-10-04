@@ -5,6 +5,7 @@ import {
   carregarPDFData as montarPDFData,
   type LeitorDoBanco,
 } from '../../supabase/functions/_shared/pdf/dados';
+import { linksEmOrdem } from '@/lib/fotos-da-os';
 
 /**
  * Monta o PDFData de uma ordem — a única fonte.
@@ -18,7 +19,12 @@ export async function carregarPDFData(
   db: LeitorDoBanco = supabase,
   opcoes: { publico?: boolean } = {},
 ): Promise<PDFData> {
-  return montarPDFData(serviceOrderId, db, opcoes);
+  // Fotos da OS em bucket privado (04/10/2026): quem está logado gera o link temporário com a
+  // própria sessão. O link do cliente (público) não lê a tabela de fotos, então não assina nada.
+  return montarPDFData(serviceOrderId, db, {
+    ...opcoes,
+    assinarFotos: opcoes.publico ? undefined : (caminhos) => linksEmOrdem(caminhos),
+  });
 }
 
 export function usePDFData(serviceOrderId: string | undefined) {

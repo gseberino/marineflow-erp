@@ -494,6 +494,14 @@ const QUEM_FAZ: Record<string, { perfis: (keyof typeof PERFIS)[]; objeto: (p: Pe
     objeto: () => OBJETOS.despesa,
     porque: "ver o comprovante da despesa da OS (o do sinal segue a tabela payments: admin/financeiro)",
   },
+  // Fotos da OS privadas desde 04/10/2026: a galeria, o PDF e a via do técnico geram link
+  // temporário. A foto do LEVANTAMENTO passa pela mesma função; para o vendedor externo o
+  // Storage devolve erro só naquele caminho, e a foto fica de fora (a regra é a da tabela).
+  "src/lib/fotos-da-os.ts service-order-photos.createSignedUrls": {
+    perfis: ["tecnico", "externo", "financeiro", "admin"],
+    objeto: () => OBJETOS.fotoDaOs,
+    porque: "galeria de fotos da OS e galeria do PDF: qualquer logado vê a foto de OS",
+  },
 };
 
 describe("front — toda operação que exige SELECT tem a regra para quem a faz", () => {

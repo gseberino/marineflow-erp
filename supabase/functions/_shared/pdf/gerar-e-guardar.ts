@@ -15,6 +15,7 @@
 // cada tool — a para si nunca marca o orçamento como enviado; a para o cliente marca.
 
 import { carregarPDFData, type LeitorDoBanco } from "./dados.ts";
+import { linksDasFotosNoServidor } from "./fotos.ts";
 import { documentTypeFor, type OrderDocumentType } from "./document-type.ts";
 import {
   buildOrderHTML,
@@ -72,7 +73,10 @@ export async function montarDocumentoDaOrdem(
 ): Promise<{ ok: true; doc: DocumentoDaOrdem } | { ok: false; motivo: string }> {
   let dados;
   try {
-    dados = await carregarPDFData(ordem.id, admin);
+    // Fotos em bucket privado (04/10/2026): o link temporário sai com a chave de serviço.
+    dados = await carregarPDFData(ordem.id, admin, {
+      assinarFotos: (caminhos) => linksDasFotosNoServidor(admin, caminhos),
+    });
   } catch (e) {
     return { ok: false, motivo: `não consegui ler os dados do documento (${e instanceof Error ? e.message : String(e)})` };
   }

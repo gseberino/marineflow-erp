@@ -8437,7 +8437,7 @@ export type Database = {
           created_at: string
           id: string
           photo_type: string
-          public_url: string
+          public_url: string | null
           service_order_id: string
           step_id: string | null
           storage_path: string
@@ -8449,7 +8449,7 @@ export type Database = {
           created_at?: string
           id?: string
           photo_type?: string
-          public_url: string
+          public_url?: string | null
           service_order_id: string
           step_id?: string | null
           storage_path: string
@@ -8461,7 +8461,7 @@ export type Database = {
           created_at?: string
           id?: string
           photo_type?: string
-          public_url?: string
+          public_url?: string | null
           service_order_id?: string
           step_id?: string | null
           storage_path?: string

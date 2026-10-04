@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { useLinksDasFotos } from '@/lib/fotos-da-os';
 import { Button } from '@/components/ui/button';
 import { Camera, X, Loader2, Image as ImageIcon, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -52,6 +53,9 @@ export function ServiceOrderPhotos({ serviceOrderId }: Props) {
     enabled: !!serviceOrderId,
   });
 
+  // Links temporários das fotos (bucket privado): um pedido para a galeria inteira.
+  const { data: links = {} } = useLinksDasFotos(photos.map((p: any) => p.storage_path as string));
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -66,16 +70,13 @@ export function ServiceOrderPhotos({ serviceOrderId }: Props) {
         .upload(path, file, { contentType: file.type });
       if (upErr) throw upErr;
 
-      const { data: urlData } = supabase.storage
-        .from('service-order-photos')
-        .getPublicUrl(path);
-
       const { data: userData } = await supabase.auth.getUser();
 
+      // Bucket privado desde 04/10/2026: grava só o caminho; a galeria gera link temporário.
+      // (public_url ficou como coluna legada, sem NOT NULL.)
       const { error: dbErr } = await supabase.from('service_order_photos').insert({
         service_order_id: serviceOrderId,
         storage_path: path,
-        public_url: urlData.publicUrl,
         photo_type: photoType,
         uploaded_by: userData.user?.id ?? null,
       });
@@ -170,15 +171,21 @@ export function ServiceOrderPhotos({ serviceOrderId }: Props) {
               >
                 <button
                   type="button"
-                  onClick={() => setFullscreen(p.public_url)}
+                  onClick={() => links[p.storage_path] && setFullscreen(links[p.storage_path])}
                   className="block w-full h-full"
                 >
-                  <img
-                    src={p.public_url}
-                    alt={p.caption || TYPE_LABELS[type]}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
+                  {links[p.storage_path] ? (
+                    <img
+                      src={links[p.storage_path]}
+                      alt={p.caption || TYPE_LABELS[type]}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    </span>
+                  )}
                 </button>
                 <span
                   className={`absolute top-1 left-1 text-[10px] px-1.5 py-0.5 rounded font-medium ${TYPE_BADGE[type]}`}

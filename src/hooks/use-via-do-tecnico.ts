@@ -14,7 +14,8 @@
 import { useCallback, useMemo } from 'react';
 import { useServiceOrderSteps, useRouteMaterials } from '@/hooks/use-service-steps';
 import { useServiceOrderServices } from '@/hooks/use-service-orders';
-import { useServiceOrderSurvey, surveyPhotoUrl } from '@/hooks/use-service-survey';
+import { useServiceOrderSurvey } from '@/hooks/use-service-survey';
+import { useLinksDasFotos } from '@/lib/fotos-da-os';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
 import {
@@ -77,6 +78,12 @@ export function useViaDoTecnico(serviceOrderId: string | undefined, header: ViaD
   const { data: services } = useServiceOrderServices(serviceOrderId);
   const { data: survey } = useServiceOrderSurvey(serviceOrderId);
   const { data: settings } = useAppSettings();
+  // Fotos do levantamento em bucket privado (04/10/2026): os links temporários vêm ANTES do
+  // clique em imprimir — a folha abre numa janela nova e um await no meio a faria ser
+  // bloqueada como pop-up. Link que ainda não chegou só deixa a foto de fora do papel.
+  const { data: linksDasFotos = {} } = useLinksDasFotos(
+    (((survey as any)?.service_survey_answers ?? []) as any[]).map((a) => a.photo_path as string),
+  );
 
   /**
    * `via` (menu Ações): a folha do técnico, com só a segurança de cada sistema do roteiro.
@@ -111,11 +118,11 @@ export function useViaDoTecnico(serviceOrderId: string | undefined, header: ViaD
           question: a.question_snapshot || '',
           answer: a.answer_value ?? null,
           skipped: a.skipped_reason ?? null,
-          photoUrl: a.photo_path ? surveyPhotoUrl(a.photo_path) : null,
+          photoUrl: a.photo_path ? linksDasFotos[a.photo_path] ?? null : null,
         })),
     };
     return printRouteSheet(cabecalho, steps, materials, extras);
-  }, [header, settings, services, survey, steps, materials]);
+  }, [header, settings, services, survey, steps, materials, linksDasFotos]);
 
   // O que vai faltar no papel, para o aviso antes de imprimir.
   const faltas = useMemo(

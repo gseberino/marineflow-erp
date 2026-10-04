@@ -109,6 +109,28 @@ function buildSurveyForPdf(raw: unknown): PDFData['survey'] {
  * despesas) volta VAZIO, não com erro: as tabelas têm grant de select para
  * `anon`, e política ausente filtra linha, não derruba a consulta.
  */
+/**
+ * Os links da galeria, em ordem de criação. Falha ao gerar o link não derruba o PDF inteiro:
+ * a galeria sai sem as fotos e o motivo vai para o console (o documento continua certo).
+ */
+async function fotosDaGaleria(
+  // deno-lint-ignore no-explicit-any
+  linhas: any[] | null | undefined,
+  assinar: ((caminhos: string[]) => Promise<string[]>) | undefined,
+): Promise<string[]> {
+  const caminhos = [...(linhas ?? [])]
+    .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')))
+    .map((p) => p.storage_path as string)
+    .filter(Boolean);
+  if (!assinar || caminhos.length === 0) return [];
+  try {
+    return await assinar(caminhos);
+  } catch (e) {
+    console.warn('[pdf] fotos da OS sem link temporário:', e);
+    return [];
+  }
+}
+
 export async function carregarPDFData(
   serviceOrderId: string,
   db: LeitorDoBanco,
@@ -119,15 +141,21 @@ export async function carregarPDFData(
    * Sem `services(name)` aqui: o anônimo não lê o catálogo, e o embed derrubava a consulta
    * inteira com 42501 — o "Baixar PDF" do portal falhava assim até 01/10/2026. O nome vem
    * de `name_snapshot`, gravado na própria linha.
+   *
+   * `assinarFotos`: as fotos da OS ficam em bucket PRIVADO desde 04/10/2026, então a galeria
+   * precisa de link temporário — e quem gera é quem chama, com o próprio cliente: a tela com a
+   * sessão (src/lib/fotos-da-os.ts), o servidor com a chave de serviço (_shared/pdf/fotos.ts).
+   * Sem ele (o link público do cliente), a galeria sai vazia — como já saía: a regra da tabela
+   * service_order_photos só deixa o usuário logado ler.
    */
-  opcoes: { publico?: boolean } = {},
+  opcoes: { publico?: boolean; assinarFotos?: (caminhos: string[]) => Promise<string[]> } = {},
 ): Promise<PDFData> {
   // O que é igual para os dois leitores (o levantamento, as fotos, a condição de pagamento).
   const comuns = `
         service_surveys!service_surveys_service_order_id_fkey(
           answered_at, confidence_rationale, status,
           service_survey_answers(seq, question_snapshot, answer_value, skipped_reason, photo_path)),
-        service_order_photos!service_order_photos_service_order_id_fkey(public_url, created_at),
+        service_order_photos!service_order_photos_service_order_id_fkey(storage_path, created_at),
         payment_condition_presets(label, installments)`;
   const selecao = opcoes.publico
     ? `
@@ -321,12 +349,9 @@ export async function carregarPDFData(
       get('terms_responsibilities'),
     ].filter(Boolean).join('\n\n') || undefined,
     // NOVO-lev-17: a galeria lia `service_orders.photos`, coluna que NADA escreve —
-    // as fotos reais vivem em `service_order_photos.public_url`. Hoje há 0 fotos
-    // (mudança visual zero); quando existirem, a galeria funciona como desenhada.
-    photos: [...(((so as any).service_order_photos || []) as any[])]
-      .sort((a, b) => String(a.created_at ?? '').localeCompare(String(b.created_at ?? '')))
-      .map((p) => p.public_url)
-      .filter(Boolean),
+    // as fotos reais vivem em `service_order_photos`. Desde 04/10/2026 o bucket é privado: a
+    // linha guarda o caminho e o link temporário vem de `opcoes.assinarFotos`.
+    photos: await fotosDaGaleria((so as any).service_order_photos, opcoes.assinarFotos),
   };
   return pdfData;
 }
