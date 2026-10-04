@@ -1,22 +1,6 @@
+import { lazy, Suspense, type ComponentType } from 'react';
 import { V2Shell } from '@/v2/components/V2Shell';
 import '@/v2/tokens.css';
-import VesselDetail from '@/pages/VesselDetail';
-import ServiceOrderDetail from '@/pages/ServiceOrderDetail';
-import FiscalEmission from '@/pages/FiscalEmission';
-import SettingsPage from '@/pages/SettingsPage';
-import ImportFiscalXML from '@/pages/ImportFiscalXML';
-import WhatsAppLeadsPage from '@/pages/WhatsAppLeadsPage';
-import WhatsAppLogsPage from '@/pages/WhatsAppLogsPage';
-import WhatsAppScheduledPage from '@/pages/WhatsAppScheduledPage';
-import WhatsAppStatusPage from '@/pages/WhatsAppStatusPage';
-import ActiveProspectingPage from '@/pages/ActiveProspectingPage';
-import ExternalQuoteListPage from '@/pages/ExternalQuoteListPage';
-import ExternalQuoteNewPage from '@/pages/ExternalQuoteNewPage';
-import ExternalQuoteApprovalPage from '@/pages/ExternalQuoteApprovalPage';
-import ExternalSellerLeadsPage from '@/pages/ExternalSellerLeadsPage';
-import ExternalProductCatalogPage from '@/pages/ExternalProductCatalogPage';
-import ExternalQuoteDetailPage from '@/pages/ExternalQuoteDetailPage';
-import AgendaPage from '@/pages/AgendaPage';
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Onda C / Fase 3 · Rotas v2 por CASCA DE TEMA.
@@ -29,35 +13,52 @@ import AgendaPage from '@/pages/AgendaPage';
    inteiro consistente enquanto isso.
 ──────────────────────────────────────────────────────────────────────────── */
 
-const wrap = (Comp: React.ComponentType) =>
-  function WrappedV2() {
+/* Carregamento sob demanda (04/10/2026). Este arquivo importava as 17 telas de uma vez e o
+   App importa este arquivo direto — então OS, Fiscal, Configurações, Agenda e as telas de
+   orçamento externo iam TODAS no pacote do login (o chunk principal tinha 2,4 MB). Agora cada
+   tela vira um pedaço próprio, baixado quando a rota abre; a casca (menu, tema) já aparece e
+   só o miolo espera. */
+const wrap = (carregar: () => Promise<{ default: ComponentType }>) => {
+  const Tela = lazy(carregar);
+  return function WrappedV2() {
     return (
       <V2Shell>
-        <Comp />
+        <Suspense fallback={<CarregandoTela />}>
+          <Tela />
+        </Suspense>
       </V2Shell>
     );
   };
+};
+
+function CarregandoTela() {
+  return (
+    <div role="status" aria-label="Carregando" className="flex justify-center py-16">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+    </div>
+  );
+}
 
 /* A Agenda ficou fora da v2 até agora porque outra sessão a estava reescrevendo ao mesmo
    tempo (fios soltos, detector, caixa de entrada) — mexer nela em paralelo teria dado
    conflito. Aquela frente terminou, então ela entra aqui e o mapa v2 fica completo.
    Casca, não reescrita: a Agenda já é P0-limpa (a Semana empilha no celular, o calendário
    do mês encolhe os pinos) e o que faltava era tema, alternador claro/escuro e ⌘K. */
-export const AgendaV2 = wrap(AgendaPage);
+export const AgendaV2 = wrap(() => import('@/pages/AgendaPage'));
 
-export const VesselDetailV2 = wrap(VesselDetail);
-export const ServiceOrderDetailV2 = wrap(ServiceOrderDetail);
-export const FiscalEmissionV2 = wrap(FiscalEmission);
-export const SettingsV2 = wrap(SettingsPage);
-export const ImportFiscalXMLV2 = wrap(ImportFiscalXML);
-export const WhatsAppLeadsV2 = wrap(WhatsAppLeadsPage);
-export const WhatsAppLogsV2 = wrap(WhatsAppLogsPage);
-export const WhatsAppScheduledV2 = wrap(WhatsAppScheduledPage);
-export const WhatsAppStatusV2 = wrap(WhatsAppStatusPage);
-export const ActiveProspectingV2 = wrap(ActiveProspectingPage);
-export const ExternalQuoteListV2 = wrap(ExternalQuoteListPage);
-export const ExternalQuoteNewV2 = wrap(ExternalQuoteNewPage);
-export const ExternalQuoteApprovalV2 = wrap(ExternalQuoteApprovalPage);
-export const ExternalSellerLeadsV2 = wrap(ExternalSellerLeadsPage);
-export const ExternalProductCatalogV2 = wrap(ExternalProductCatalogPage);
-export const ExternalQuoteDetailV2 = wrap(ExternalQuoteDetailPage);
+export const VesselDetailV2 = wrap(() => import('@/pages/VesselDetail'));
+export const ServiceOrderDetailV2 = wrap(() => import('@/pages/ServiceOrderDetail'));
+export const FiscalEmissionV2 = wrap(() => import('@/pages/FiscalEmission'));
+export const SettingsV2 = wrap(() => import('@/pages/SettingsPage'));
+export const ImportFiscalXMLV2 = wrap(() => import('@/pages/ImportFiscalXML'));
+export const WhatsAppLeadsV2 = wrap(() => import('@/pages/WhatsAppLeadsPage'));
+export const WhatsAppLogsV2 = wrap(() => import('@/pages/WhatsAppLogsPage'));
+export const WhatsAppScheduledV2 = wrap(() => import('@/pages/WhatsAppScheduledPage'));
+export const WhatsAppStatusV2 = wrap(() => import('@/pages/WhatsAppStatusPage'));
+export const ActiveProspectingV2 = wrap(() => import('@/pages/ActiveProspectingPage'));
+export const ExternalQuoteListV2 = wrap(() => import('@/pages/ExternalQuoteListPage'));
+export const ExternalQuoteNewV2 = wrap(() => import('@/pages/ExternalQuoteNewPage'));
+export const ExternalQuoteApprovalV2 = wrap(() => import('@/pages/ExternalQuoteApprovalPage'));
+export const ExternalSellerLeadsV2 = wrap(() => import('@/pages/ExternalSellerLeadsPage'));
+export const ExternalProductCatalogV2 = wrap(() => import('@/pages/ExternalProductCatalogPage'));
+export const ExternalQuoteDetailV2 = wrap(() => import('@/pages/ExternalQuoteDetailPage'));

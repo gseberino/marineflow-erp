@@ -199,7 +199,7 @@ describe('AgendaPage — smoke de render (todas as visões)', () => {
     expect(screen.getByText('Sem prazo (1)')).toBeTruthy();
   });
 
-  it('a rota /v2/agenda renderiza a MESMA agenda dentro da casca de tema', () => {
+  it('a rota /v2/agenda renderiza a MESMA agenda dentro da casca de tema', async () => {
     // A v2 da Agenda e casca, nao reescrita: se este teste divergir do de cima, alguem
     // duplicou a logica em vez de reaproveitar.
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -210,6 +210,7 @@ describe('AgendaPage — smoke de render (todas as visões)', () => {
         </I18nProvider>
       </QueryClientProvider>,
     );
-    expect(screen.getByText('Cobrar Cliente Alpha — R$ 500')).toBeTruthy();
+    // A tela é carregada sob demanda dentro da casca (04/10/2026): espera o pedaço chegar.
+    expect(await screen.findByText('Cobrar Cliente Alpha — R$ 500', {}, { timeout: 5000 })).toBeTruthy();
   });
 });
