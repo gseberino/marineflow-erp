@@ -13,16 +13,44 @@
  *       node scripts/verifica-build-renderiza.mjs https://marineflow-erp.vercel.app/   (produção)
  *
  * Sai com código 1 se a página não renderizar — serve para CI e para o passo anterior ao push.
+ *
+ * 04/10/2026 — o portão testava o build ERRADO quando várias sessões rodavam neste PC: a porta
+ * era fixa (4173) e, no Windows, `spawn('npx', …, { shell: true })` + `kill()` matava só o
+ * cmd — o `vite preview` ficava vivo. Um esquecido de outra pasta (desde 03/10 17:20) segurava
+ * a porta; o preview novo não subia (--strictPort), mas a espera recebia 200 do esquecido. Deu
+ * "OK" falso e, depois, 466 erros falsos num build bom. Agora: porta livre escolhida na hora,
+ * vite rodado pelo node direto (o kill encerra o servidor de verdade) e conferência de que quem
+ * responde serve ESTE dist/.
  */
 import { spawn } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { createServer } from 'node:net';
+import { dirname, join } from 'node:path';
 import { chromium } from 'playwright';
 
 const alvoExterno = process.argv[2];
-const PORTA = 4173;
+
+/** Uma porta que ninguém está usando agora (o sistema escolhe). */
+function portaLivre() {
+  return new Promise((ok, falha) => {
+    const s = createServer();
+    s.once('error', falha);
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address();
+      s.close(() => ok(port));
+    });
+  });
+}
+
+/** O script de entrada que um index.html carrega (/assets/index-<hash>.js). */
+function entradaDo(html) {
+  return (html.match(/\/assets\/index-[^"']+\.js/) || [null])[0];
+}
 
 async function esperarServidor(url, tentativas = 40) {
   for (let i = 0; i < tentativas; i++) {
+    if (preview && preview.exitCode !== null) return false; // o vite saiu (porta tomada no meio?)
     try {
       const r = await fetch(url);
       if (r.ok) return true;
@@ -36,13 +64,23 @@ let preview = null;
 let url = alvoExterno;
 
 if (!alvoExterno) {
-  preview = spawn('npx', ['vite', 'preview', '--port', String(PORTA), '--strictPort'], {
-    stdio: 'ignore', shell: process.platform === 'win32',
+  const porta = await portaLivre();
+  const viteBin = join(dirname(createRequire(import.meta.url).resolve('vite/package.json')), 'bin', 'vite.js');
+  // Node direto, sem shell: o kill() encerra o próprio vite (com shell, no Windows, sobrava ele).
+  preview = spawn(process.execPath, [viteBin, 'preview', '--host', '127.0.0.1', '--port', String(porta), '--strictPort'], {
+    stdio: 'ignore',
   });
-  url = `http://localhost:${PORTA}/`;
+  process.on('exit', () => { if (preview && preview.exitCode === null) preview.kill(); });
+  url = `http://127.0.0.1:${porta}/`;
   if (!await esperarServidor(url)) {
     console.error('FALHOU: o servidor de preview não subiu. Rodou `npm run build` antes?');
-    preview.kill();
+    process.exit(1);
+  }
+  // Quem responde tem de servir ESTE build: mesmo script de entrada do dist/index.html.
+  const servido = entradaDo(await (await fetch(url)).text());
+  const local = entradaDo(readFileSync('dist/index.html', 'utf8'));
+  if (!local || servido !== local) {
+    console.error(`FALHOU: o servidor em ${url} não está servindo este dist/ (entrada ${servido} ≠ ${local}). O portão testaria outro build.`);
     process.exit(1);
   }
 }
@@ -87,6 +125,10 @@ if (!alvoExterno && estado.filhos > 0) {
 
 await browser.close();
 if (preview) preview.kill();
+
+// Erro de página (fatal) antes do barulho de console: com os 10 primeiros sendo 404 de console,
+// o erro que derrubava o portão nem aparecia na saída.
+erros.sort((a, b) => Number(a.startsWith('[console]')) - Number(b.startsWith('[console]')));
 
 const renderizou = estado.filhos > 0 && estado.htmlLen > 200;
 // Erro de página é fatal; erro de console pode ser barulho de terceiro (extensão, analytics).
