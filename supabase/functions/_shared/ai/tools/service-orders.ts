@@ -1,4 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { horariosDeBrasilia } from "../fuso.ts";
 import { dayOverloadNotice } from "./agenda.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
@@ -934,7 +935,9 @@ export const serviceOrderTools: ToolDef[] = [
       required: ["service_order_id", "scheduled_start_at"],
     },
     risk: "low",
-    async execute(args, { sb }) {
+    async execute(argsCrus, { sb }) {
+      // Hora sem fuso vira hora de Brasília (fuso.ts): 09:00 não pode virar 06:00.
+      const args = horariosDeBrasilia(argsCrus);
       // Conflito de agenda (tarefas + OS) via RPC única — mesma checagem da UI
       if (args.technician_user_id && args.scheduled_end_at) {
         const { data: confl } = await sb.rpc("get_agenda_conflicts", {

@@ -1,4 +1,5 @@
 import type { ToolDef } from "./registry.ts";
+import { horariosDeBrasilia } from "../fuso.ts";
 
 // Agenda & Tarefas 2.0 — tool set completo (Fase 3 do plano
 // plans/marineflow-agenda-tarefas.md §8). O agente é operador da agenda:
@@ -237,7 +238,9 @@ export const agendaTools: ToolDef[] = [
       required: ["title"],
     },
     risk: "low",
-    async execute(args, { sb, userId }) {
+    async execute(argsCrus, { sb, userId }) {
+      // Hora sem fuso vira hora de Brasília (fuso.ts): 09:00 não pode virar 06:00.
+      const args = horariosDeBrasilia(argsCrus);
       const kind = args.kind === "appointment" || args.scheduled_start_at ? "appointment" : "task";
       if (kind === "appointment" && !args.scheduled_start_at) {
         return { error: "Compromisso precisa de scheduled_start_at." };
@@ -310,7 +313,9 @@ export const agendaTools: ToolDef[] = [
       required: ["id"],
     },
     risk: "low",
-    async execute(args, { sb }) {
+    async execute(argsCrus, { sb }) {
+      // Hora sem fuso vira hora de Brasília (fuso.ts): 09:00 não pode virar 06:00.
+      const args = horariosDeBrasilia(argsCrus);
       const { id, ...rest } = args;
       if (rest.scheduled_start_at && rest.scheduled_end_at) {
         const { data: current } = await sb.from("agenda_tasks")

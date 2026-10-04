@@ -1,4 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { horariosDeBrasilia } from "../fuso.ts";
 import { sendWhatsapp } from "./whatsapp.ts";
 
 // Macros de FLUXO (Onda 2b) — "o LLM orquestra, o código executa".
@@ -113,7 +114,9 @@ export const flowMacroTools: ToolDef[] = [
     },
     risk: "high",
     roles: NON_TECHNICIAN_ROLES,
-    async execute(args, ctx) {
+    async execute(argsCrus, ctx) {
+      // Hora sem fuso vira hora de Brasília (fuso.ts): 09:00 não pode virar 06:00.
+      const args = horariosDeBrasilia(argsCrus);
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
       const { sb, admin, userId } = ctx;
