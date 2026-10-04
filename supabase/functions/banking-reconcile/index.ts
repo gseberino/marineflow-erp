@@ -13,11 +13,8 @@
 // usuário, validado aqui) e o cron da varredura diária (manda só x-cron-secret).
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import {
-  suggestMatches, pickAutoApply, suggestCombinations, statementSignature,
-  looksLikeInternalTransfer, findInternalTransfers,
-} from "../_shared/banking/matching.ts";
-import { carregarCandidatos } from "../_shared/banking/candidatos.ts";
+import { pickAutoApply, statementSignature } from "../_shared/banking/matching.ts";
+import { montarSugestoes } from "../_shared/banking/sugestoes.ts";
 import type { BankTx, Candidate, Suggestion } from "../_shared/banking/types.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
@@ -166,104 +163,13 @@ servirComCors(async (req) => {
       });
     }
 
-    // ── Transações pendentes ─────────────────────────────────────────────────
-    let txQuery = admin
-      .from("bank_transactions")
-      .select("id, transaction_date, description, amount, transaction_type, pix_end_to_end_id, counterparty_document, counterparty_name, bank_connection_id")
-      .eq("reconciled", false)
-      .order("transaction_date", { ascending: false })
-      .limit(body.limit ?? 200);
-    if (body.transaction_id) txQuery = txQuery.eq("id", body.transaction_id);
-
-    const { data: txRows, error: txErr } = await txQuery;
-    if (txErr) throw txErr;
-    const transactions = (txRows || []) as BankTx[];
-    if (transactions.length === 0) {
+    // ── Sugestões: o cálculo mora em _shared/banking/sugestoes.ts, o mesmo que a ferramenta
+    // sugerir_conciliacao do assistente usa direto (sugerir só lê; gravar continua aqui).
+    const { porTransacao: perTransaction, candidatosAvaliados, transferenciasInternas } =
+      await montarSugestoes(admin, { transactionId: body.transaction_id, limite: body.limit });
+    if (perTransaction.length === 0) {
       return jr({ transactions: [], applied: [], summary: { pendentes: 0, conciliadas: 0, sugeridas: 0, sem_candidato: 0 } });
     }
-
-    const candidates = await buildCandidates(admin);
-
-    // ── Memória: o que histórico parecido já ensinou sobre quem paga ─────────
-    const assinaturas = new Map<string, string>();
-    for (const tx of transactions) {
-      const sig = statementSignature(tx.description, tx.counterparty_name);
-      if (sig) assinaturas.set(tx.id, sig);
-    }
-    const memoriaPorTx = new Map<string, Map<string, number>>();
-    if (assinaturas.size > 0) {
-      const { data: memoria } = await admin
-        .from("reconciliation_memory")
-        .select("statement_key, client_id, hits")
-        .in("statement_key", Array.from(new Set(assinaturas.values())));
-      const porChave = new Map<string, Map<string, number>>();
-      for (const m of (memoria || []) as any[]) {
-        const mapa = porChave.get(m.statement_key) ?? new Map<string, number>();
-        mapa.set(m.client_id, Number(m.hits) || 1);
-        porChave.set(m.statement_key, mapa);
-      }
-      for (const [txId, sig] of assinaturas) {
-        const mapa = porChave.get(sig);
-        if (mapa) memoriaPorTx.set(txId, mapa);
-      }
-    }
-
-    // Nome da empresa para reconhecer dinheiro circulando entre contas próprias.
-    const { data: cfgEmpresa } = await admin
-      .from("app_settings")
-      .select("value")
-      .eq("key", "company_name")
-      .maybeSingle();
-    const companyName = (cfgEmpresa as any)?.value ?? null;
-
-    // ── Transferências entre contas da própria empresa ───────────────────────
-    // Com mais de uma conta conectada, o mesmo dinheiro aparece duas vezes: sai de uma e
-    // entra na outra. Sem parear, vira despesa e receita fantasmas — infla faturamento e
-    // custo ao mesmo tempo. Marcamos as duas pernas para saírem da caça a candidatos.
-    //
-    // O pareamento roda sobre TODAS as pendentes, não sobre o lote exibido: as duas pernas
-    // podem cair em páginas diferentes, e aí metade dos pares desaparece — foi o que
-    // aconteceu quando isto usava só o lote (15 pares vistos de 29 existentes).
-    const { data: universoParaPares } = await admin
-      .from("bank_transactions")
-      .select("id, transaction_date, description, amount, transaction_type, bank_connection_id")
-      .eq("reconciled", false)
-      .not("bank_connection_id", "is", null)
-      .limit(5000);
-    const paresInternos = findInternalTransfers((universoParaPares ?? transactions) as never[]);
-    const pernaDeTransferencia = new Map<string, string>();
-    for (const par of paresInternos) {
-      pernaDeTransferencia.set(par.saida.id, par.detail);
-      pernaDeTransferencia.set(par.entrada.id, par.detail);
-    }
-
-    // ── Pontuação ────────────────────────────────────────────────────────────
-    const perTransaction = transactions.map((tx) => {
-      // Duas formas de reconhecer o mesmo fenômeno: pelo nome da empresa no histórico, ou
-      // pelo par saída↔entrada entre contas conectadas. A segunda é mais forte, porque
-      // enxerga as duas pernas do movimento em vez de depender do texto.
-      const parInterno = pernaDeTransferencia.get(tx.id) ?? null;
-      const internalTransfer = !!parInterno ||
-        looksLikeInternalTransfer(tx.description, tx.counterparty_name, companyName);
-
-      // Transferência entre contas próprias não tem candidato a procurar: não é receita
-      // nem despesa, é o mesmo dinheiro mudando de lugar.
-      if (internalTransfer) {
-        return {
-          transaction: tx,
-          suggestions: [],
-          groups: [],
-          internalTransfer: true,
-          internalTransferDetail: parInterno,
-        };
-      }
-      const suggestions = suggestMatches(tx, candidates, {}, 5, memoriaPorTx.get(tx.id));
-      // Pagamento agrupado só interessa quando nenhuma conta sozinha explica o valor.
-      const grupos = suggestions.some((s) => Math.abs(s.difference) < 0.01)
-        ? []
-        : suggestCombinations(tx, candidates);
-      return { transaction: tx, suggestions, groups: grupos, internalTransfer: false, internalTransferDetail: null };
-    });
 
     // ── Camada de certeza: NÃO aplica mais sozinha ──────────────────────────────
     // Decisão do dono (26/09/2026): ligar dinheiro a conta, OS ou orçamento se faz por
@@ -301,12 +207,12 @@ servirComCors(async (req) => {
       })),
       applied,
       summary: {
-        pendentes: transactions.length,
+        pendentes: perTransaction.length,
         conciliadas: applied.length,
         sugeridas: restantes.filter((p) => p.suggestions.length > 0).length,
         sem_candidato: restantes.filter((p) => p.suggestions.length === 0).length,
-        candidatos_avaliados: candidates.length,
-        transferencias_internas: paresInternos.length,
+        candidatos_avaliados: candidatosAvaliados,
+        transferencias_internas: transferenciasInternas,
       },
     });
   } catch (e) {
@@ -314,18 +220,6 @@ servirComCors(async (req) => {
     return jr({ error: "unexpected_error", detail: String((e as Error)?.message ?? e) }, 500);
   }
 });
-
-/**
- * Tudo que uma transação do extrato poderia estar pagando.
- * A ordem importa pouco (o motor pontua), mas a abrangência importa muito: candidato
- * que não entra aqui simplesmente nunca é sugerido.
- */
-async function buildCandidates(admin: DbClient): Promise<Candidate[]> {
-  // Recebíveis, contas a pagar, cobranças, sinais de orçamento, pagamentos já lançados e
-  // saldo de OS vêm do módulo compartilhado — o mesmo que a fila do Extrato usa para não
-  // criar lançamento em dobro.
-  return await carregarCandidatos(admin);
-}
 
 /**
  * Aplica uma sugestão da camada de certeza.

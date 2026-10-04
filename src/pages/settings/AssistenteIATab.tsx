@@ -6,7 +6,7 @@
 // Termos da Anthropic: a assinatura é para uso individual do assinante — só o admin vai pelo Max;
 // os outros usuários seguem no OpenRouter mesmo com a chave ligada (a edge e o gateway conferem).
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Bot, CheckCircle2, Cpu, Info, Loader2, WifiOff } from 'lucide-react';
+import { Bot, CheckCircle2, Cpu, Info, Loader2, WifiOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -318,13 +318,6 @@ export function AssistenteIATab() {
             As outras funções de IA — revisão financeira, sugestão de NCM, acompanhamento de pendências, detector da caixa de
             mensagens, leitura de áudio e foto do WhatsApp, voz da agenda e triagem de e-mail — continuam no OpenRouter: rodam
             sozinhas, a qualquer hora ou sobre mensagens de terceiros, e custam pouco.
-          </span>
-        </p>
-        <p className="flex items-start gap-2">
-          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-          <span>
-            Pelo Max, o assistente usa as ferramentas como no WhatsApp, sem a sessão do navegador: “sugerir conciliação” só funciona
-            na tela de Conciliação ou no chat pelo OpenRouter.
           </span>
         </p>
       </div>

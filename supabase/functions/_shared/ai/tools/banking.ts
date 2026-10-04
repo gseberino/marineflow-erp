@@ -12,26 +12,7 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { suggestMatches } from "../../banking/matching.ts";
 import type { BankTx } from "../../banking/types.ts";
-
-/** Chama a banking-reconcile, que é quem sabe montar os candidatos a partir do banco. */
-async function callReconcile(ctx: { jwt: string }, body: Record<string, unknown>) {
-  // A banking-reconcile exige o JWT de quem pede (as baixas checam auth.uid()). WhatsApp e Claude
-  // Max não têm a sessão do navegador: avisa em vez de devolver um 401 que o modelo não sabe explicar.
-  if (!ctx.jwt) {
-    throw new Error("Sugerir conciliação precisa da sessão do app: use a tela de Conciliação ou o chat do app pelo OpenRouter.");
-  }
-  const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/banking-reconcile`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${ctx.jwt}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`banking-reconcile respondeu ${res.status}`);
-  return await res.json();
-}
+import { montarSugestoes } from "../../banking/sugestoes.ts";
 
 export const bankingTools: ToolDef[] = [
   {
@@ -85,14 +66,24 @@ export const bankingTools: ToolDef[] = [
       const bloqueio = blockTechnician(ctx);
       if (bloqueio) return bloqueio;
 
-      const data = await callReconcile(ctx, {
-        action: "suggest",
-        ...(args.transaction_id ? { transaction_id: args.transaction_id } : {}),
+      // O mesmo cálculo da tela de Conciliação, direto (03/10/2026). Antes ia por HTTP à
+      // banking-reconcile com o JWT do usuário — e no WhatsApp e no Claude Max não há sessão do
+      // navegador, então a sugestão nunca rodava fora do painel. Sugerir só lê, com a chave de
+      // serviço, como a edge já fazia; gravar continua só pela confirmação humana.
+      const r = await montarSugestoes(ctx.admin, {
+        ...(args.transaction_id ? { transactionId: String(args.transaction_id) } : {}),
       });
+      const resumo = {
+        pendentes: r.porTransacao.length,
+        sugeridas: r.porTransacao.filter((p) => p.suggestions.length > 0).length,
+        sem_candidato: r.porTransacao.filter((p) => p.suggestions.length === 0).length,
+        candidatos_avaliados: r.candidatosAvaliados,
+        transferencias_internas: r.transferenciasInternas,
+      };
 
       // Resposta enxuta: o modelo não precisa do objeto inteiro, precisa do essencial
       // para explicar a escolha ao usuário.
-      const itens = (data.transactions || []).map((t: any) => ({
+      const itens = r.porTransacao.map((t: any) => ({
         transacao: {
           id: t.transaction.id,
           data: t.transaction.transaction_date,
@@ -114,7 +105,7 @@ export const bankingTools: ToolDef[] = [
         })),
       }));
 
-      return { resumo: data.summary, itens };
+      return { resumo, itens };
     },
   },
 
