@@ -15,6 +15,7 @@
  * Sai com código 1 se a página não renderizar — serve para CI e para o passo anterior ao push.
  */
 import { spawn } from 'node:child_process';
+import { readdirSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const alvoExterno = process.argv[2];
@@ -64,6 +65,26 @@ try {
   erros.push(`navegação: ${String(e).slice(0, 200)}`);
 }
 
+// Abrir o login só avalia o chunk principal. As telas carregadas sob demanda (OS, Fiscal,
+// Configurações, Agenda… — 04/10/2026) só rodam quando a rota abre, e um ciclo entre chunks
+// ("Cannot access 'X' before initialization") nelas passaria por aqui sem ser visto. Então,
+// no build local, importa CADA chunk de dist/assets dentro da página: o erro de avaliação do
+// módulo aparece no import.
+let chunksAvaliados = 0;
+if (!alvoExterno && estado.filhos > 0) {
+  const chunks = readdirSync('dist/assets').filter((f) => f.endsWith('.js'));
+  const falhas = await page.evaluate(async (lista) => {
+    const out = [];
+    for (const f of lista) {
+      try { await import(`/assets/${f}`); } catch (e) { out.push(`${f}: ${e && e.message}`); }
+    }
+    return out;
+  }, chunks);
+  chunksAvaliados = chunks.length;
+  falhas.forEach((f) => erros.push(`chunk ${f.slice(0, 200)}`));
+  await page.waitForTimeout(500);
+}
+
 await browser.close();
 if (preview) preview.kill();
 
@@ -72,11 +93,16 @@ const renderizou = estado.filhos > 0 && estado.htmlLen > 200;
 const fatal = erros.filter((e) => !e.startsWith('[console]'));
 
 console.log(`#root: ${estado.filhos} filho(s), ${estado.htmlLen} caracteres`);
+if (chunksAvaliados) console.log(`chunks avaliados no navegador: ${chunksAvaliados}`);
 if (erros.length) {
   console.log(`\n${erros.length} erro(s):`);
   erros.slice(0, 10).forEach((e) => console.log(' · ' + e));
 }
 
+if (renderizou && fatal.length > 0 && fatal.every((e) => e.startsWith('chunk '))) {
+  console.error('\nFALHOU: o login abre, mas uma tela carregada sob demanda quebra ao abrir. Não publique este build.');
+  process.exit(1);
+}
 if (!renderizou || fatal.length > 0) {
   console.error('\nFALHOU: a aplicação NÃO renderizou. Não publique este build.');
   process.exit(1);

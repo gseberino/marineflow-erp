@@ -2,7 +2,9 @@ import type { Config } from "tailwindcss";
 
 export default {
   darkMode: ["class"],
-  content: ["./pages/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}"],
+  // Testes fora da varredura: o OFX de exemplo em bank-parser.test.ts ("[-3:BRT]") virava uma
+  // "classe" arbitrária e o build gerava CSS inválido (aviso css-syntax-error).
+  content: ["./pages/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}", "!./src/**/*.test.{ts,tsx}"],
   prefix: "",
   theme: {
     container: {

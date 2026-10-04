@@ -61,3 +61,10 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # Tela branca de 19/09 (ciclo entre chunks): tsc, testes e build passaram com o defeito.
+      # Abre o build num Chromium e importa cada chunk — as telas sob demanda também.
+      - name: Build abre no navegador
+        run: |
+          npx playwright install --with-deps chromium
+          node scripts/verifica-build-renderiza.mjs
