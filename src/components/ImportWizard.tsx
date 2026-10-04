@@ -212,21 +212,30 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
             )}
 
             {parsedFile && parsedFile.rows.length > 0 && (
-              <div className="overflow-x-auto scrollbar-thin max-h-40 rounded border">
-                <table className="text-xs w-full min-w-[600px]">
+              // Sem rolagem lateral (Princípio 0, 03/10/2026): a prévia encolhe e corta o texto; o valor
+              // inteiro fica no title. No celular, só as 3 primeiras colunas.
+              <div className="overflow-y-auto max-h-40 rounded border">
+                <table className="text-xs w-full table-fixed">
                   <thead><tr className="bg-muted/50">
-                    {parsedFile.headers.slice(0, 6).map(h => <th key={h} className="px-2 py-1 text-left font-medium">{h}</th>)}
-                    {parsedFile.headers.length > 6 && <th className="px-2 py-1">...</th>}
+                    {parsedFile.headers.slice(0, 6).map((h, c) => (
+                      <th key={h} className={`px-2 py-1 text-left font-medium truncate ${c >= 3 ? 'hidden sm:table-cell' : ''}`} title={h}>{h}</th>
+                    ))}
                   </tr></thead>
                   <tbody>
                     {parsedFile.rows.slice(0, 3).map((row, i) => (
                       <tr key={i} className="border-t">
-                        {parsedFile.headers.slice(0, 6).map(h => <td key={h} className="px-2 py-1 truncate max-w-[150px]">{row[h]}</td>)}
-                        {parsedFile.headers.length > 6 && <td className="px-2 py-1">...</td>}
+                        {parsedFile.headers.slice(0, 6).map((h, c) => (
+                          <td key={h} className={`px-2 py-1 truncate ${c >= 3 ? 'hidden sm:table-cell' : ''}`} title={String(row[h] ?? '')}>{row[h]}</td>
+                        ))}
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                {parsedFile.headers.length > 3 && (
+                  <p className="px-2 py-1 text-[11px] text-muted-foreground border-t">
+                    {parsedFile.headers.length} colunas no arquivo; a prévia mostra as primeiras.
+                  </p>
+                )}
               </div>
             )}
 
@@ -263,22 +272,22 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">{t.imports.configMappingDesc}</p>
 
-            <div className="overflow-x-auto scrollbar-thin max-h-[400px] rounded border">
-              <table className="text-sm w-full min-w-[500px]">
-                <thead><tr className="bg-muted/50">
-                  <th className="px-3 py-2 text-left font-medium">{t.imports.sourceColumn}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t.imports.sampleValue}</th>
-                  <th className="px-3 py-2 text-left font-medium">{t.imports.targetField}</th>
-                </tr></thead>
-                <tbody>
+            {/* Uma linha por coluna do arquivo; no celular, empilhada (sem rolagem lateral). */}
+            <div className="overflow-y-auto max-h-[400px] rounded border text-sm" data-testid="mapeamento">
+              <div className="hidden sm:grid grid-cols-3 gap-3 bg-muted/50 px-3 py-2 font-medium">
+                <span>{t.imports.sourceColumn}</span>
+                <span>{t.imports.sampleValue}</span>
+                <span>{t.imports.targetField}</span>
+              </div>
+              <div>
                   {parsedFile.headers.map(header => {
                     const sample = parsedFile.rows[0]?.[header] ?? '';
                     const fields = getFieldsForType(resolvedType);
                     return (
-                      <tr key={header} className="border-t">
-                        <td className="px-3 py-2 font-medium">{header}</td>
-                        <td className="px-3 py-2 text-muted-foreground truncate max-w-[150px]">{String(sample)}</td>
-                        <td className="px-3 py-2">
+                      <div key={header} className="grid grid-cols-1 sm:grid-cols-3 gap-1 sm:gap-3 items-center border-t px-3 py-2">
+                        <span className="font-medium break-words">{header}</span>
+                        <span className="text-muted-foreground truncate" title={String(sample)}>{String(sample)}</span>
+                        <div>
                           <Select
                             value={mapping[header] || '_ignore'}
                             onValueChange={v => setMapping(prev => ({ ...prev, [header]: v === '_ignore' ? null : v }))}
@@ -291,12 +300,11 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
                               ))}
                             </SelectContent>
                           </Select>
-                        </td>
-                      </tr>
+                        </div>
+                      </div>
                     );
                   })}
-                </tbody>
-              </table>
+              </div>
             </div>
 
             <div className="flex justify-between">

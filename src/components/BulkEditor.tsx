@@ -12,14 +12,36 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Search, Save, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
+// 03/10/2026: o saldo do produto só muda por movimento (ledger, fase E — o banco recusa a escrita
+// direta). A edição em lote gravava stock_quantity direto: salvar falhava no meio, com parte salva.
+// O estoque passa por ajustar_estoque (movimento com motivo); o resto, pela atualização normal. No
+// celular, cada item vira um cartão — nada de rolagem lateral (Princípio 0 da interface).
+
 interface BulkEditorProps {
   entityType: 'products' | 'services';
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }
 
+function useTelaEstreita(largura: number): boolean {
+  const consulta = `(max-width: ${largura - 1}px)`;
+  const [estreita, setEstreita] = useState(() => typeof window !== 'undefined' && window.matchMedia?.(consulta).matches === true);
+  useEffect(() => {
+    const mql = window.matchMedia?.(consulta);
+    if (!mql) return;
+    const mudou = () => setEstreita(mql.matches);
+    mql.addEventListener('change', mudou);
+    mudou();
+    return () => mql.removeEventListener('change', mudou);
+  }, [consulta]);
+  return estreita;
+}
+
 export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) {
   const { t, formatCurrency } = useI18n();
+  // A tabela precisa de ~1.050 px (9 colunas editáveis): abaixo disso, cartões — no celular e no
+  // tablet. O diálogo vai até 1.152 px (max-w-6xl).
+  const celular = useTelaEstreita(1100);
   const { data: products, refetch: refetchProducts } = useProducts();
   const { data: services, refetch: refetchServices } = useServices();
 
@@ -114,23 +136,47 @@ export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) 
 
   const handleSave = async () => {
     setSaving(true);
+    const table = entityType === 'products' ? 'products' : 'services';
+    const falharam: Record<string, Record<string, any>> = {};
+    let primeiroErro = '';
     try {
-      const table = entityType === 'products' ? 'products' : 'services';
       for (const [id, vals] of Object.entries(changes)) {
-        const { error } = await supabase.from(table).update(vals as any).eq('id', id);
-        if (error) throw error;
+        try {
+          const { stock_quantity: novoSaldo, ...resto } = vals as Record<string, any>;
+          if (Object.keys(resto).length > 0) {
+            const { error } = await supabase.from(table).update(resto as any).eq('id', id);
+            if (error) throw error;
+          }
+          if (entityType === 'products' && novoSaldo !== undefined) {
+            const { error } = await supabase.rpc('ajustar_estoque' as never, {
+              p_produto: id,
+              p_nova_quantidade: Number(novoSaldo) || 0,
+              p_motivo: 'Edição em lote',
+            } as never);
+            if (error) throw error;
+          }
+        } catch (err: any) {
+          falharam[id] = vals;
+          if (!primeiroErro) {
+            const nome = data.find((d) => d.id === id)?.name ?? id;
+            primeiroErro = `${nome}: ${err?.message ?? 'erro'}`;
+          }
+        }
       }
-      toast.success(t.imports.changesSaved);
-      setChanges({});
+      const n = Object.keys(falharam).length;
+      if (n === 0) toast.success(t.imports.changesSaved);
+      else toast.error(`${n} item(ns) não salvaram e continuam marcados. ${primeiroErro}`);
+      // O que salvou sai da lista de mudanças; o que falhou fica para tentar de novo.
+      setChanges(falharam);
       if (entityType === 'products') refetchProducts();
       else refetchServices();
-    } catch (err: any) {
-      toast.error(err.message);
     } finally {
       setSaving(false);
     }
   };
 
+  // Função, não componente: um componente declarado aqui dentro é um tipo novo a cada render, e o
+  // React desmontava o campo a cada tecla — perdia o foco depois do primeiro caractere (03/10/2026).
   const EditCell = ({ id, field, type = 'text', item }: { id: string; field: string; type?: string; item: any }) => {
     const val = getVal(item, field);
     const isChanged = changes[id]?.[field] !== undefined;
@@ -208,9 +254,58 @@ export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) 
           </div>
         )}
 
-        {/* Table */}
-        <div className="flex-1 overflow-x-auto scrollbar-thin border rounded">
-          <table className="text-xs w-full min-w-[1000px]">
+        {/* Celular: um cartão por item, campos empilhados (sem rolagem lateral). */}
+        {celular ? (
+          <div className="flex-1 overflow-y-auto space-y-2" data-testid="bulk-cartoes">
+            {filtered.map(item => {
+              const isSelected = selected.has(item.id);
+              const campo = (field: string, rotulo: string, type = 'text') => (
+                <label className="space-y-0.5 min-w-0">
+                  <span className="block text-[11px] text-muted-foreground">{rotulo}</span>
+                  {EditCell({ id: item.id, field: field, type: type, item: item })}
+                </label>
+              );
+              return (
+                <div key={item.id} className={`rounded border p-2 space-y-2 ${isSelected ? 'bg-accent/5' : ''}`}>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      aria-label={`Selecionar ${item.name}`}
+                      checked={isSelected}
+                      onCheckedChange={() => {
+                        const next = new Set(selected);
+                        if (isSelected) next.delete(item.id); else next.add(item.id);
+                        setSelected(next);
+                      }}
+                    />
+                    <div className="flex-1 min-w-0">{EditCell({ id: item.id, field: "name", item: item })}</div>
+                    <Switch aria-label={`${item.name} ativo`} checked={!!getVal(item, 'active')} onCheckedChange={v => setVal(item.id, 'active', v)} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {entityType === 'products' ? (
+                      <>
+                        {campo('sku', 'SKU')}
+                        {campo('category', t.products.category)}
+                        {campo('brand', t.products.brand)}
+                        {campo('cost_price', t.products.cost, 'number')}
+                        {campo('sale_price', t.products.salePrice, 'number')}
+                        {campo('stock_quantity', t.products.stock, 'number')}
+                        {campo('minimum_stock', t.products.min, 'number')}
+                      </>
+                    ) : (
+                      <>
+                        {campo('category', t.services.category)}
+                        {campo('billing_unit', t.services.billingUnit)}
+                        {campo('default_price', t.services.defaultPrice, 'number')}
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+        <div className="flex-1 overflow-y-auto border rounded">
+          <table className="text-xs w-full">
             <thead className="sticky top-0 bg-card z-10">
               <tr className="border-b bg-muted/50">
                 <th className="px-2 py-2 w-8"><Checkbox checked={selected.size === filtered.length && filtered.length > 0} onCheckedChange={toggleAll} /></th>
@@ -251,24 +346,24 @@ export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) 
                     </td>
                     {entityType === 'products' ? (
                       <>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="sku" item={item} /></td>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="name" item={item} /></td>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="category" item={item} /></td>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="brand" item={item} /></td>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="cost_price" type="number" item={item} /></td>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="sale_price" type="number" item={item} /></td>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="stock_quantity" type="number" item={item} /></td>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="minimum_stock" type="number" item={item} /></td>
+                        <td className="px-2 py-1">{EditCell({ id: item.id, field: "sku", item: item })}</td>
+                        <td className="px-2 py-1">{EditCell({ id: item.id, field: "name", item: item })}</td>
+                        <td className="px-2 py-1">{EditCell({ id: item.id, field: "category", item: item })}</td>
+                        <td className="px-2 py-1">{EditCell({ id: item.id, field: "brand", item: item })}</td>
+                        <td className="px-2 py-1">{EditCell({ id: item.id, field: "cost_price", type: "number", item: item })}</td>
+                        <td className="px-2 py-1">{EditCell({ id: item.id, field: "sale_price", type: "number", item: item })}</td>
+                        <td className="px-2 py-1">{EditCell({ id: item.id, field: "stock_quantity", type: "number", item: item })}</td>
+                        <td className="px-2 py-1">{EditCell({ id: item.id, field: "minimum_stock", type: "number", item: item })}</td>
                         <td className="px-2 py-1 text-center">
                           <Switch checked={!!getVal(item, 'active')} onCheckedChange={v => setVal(item.id, 'active', v)} />
                         </td>
                       </>
                     ) : (
                       <>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="name" item={item} /></td>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="category" item={item} /></td>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="billing_unit" item={item} /></td>
-                        <td className="px-2 py-1"><EditCell id={item.id} field="default_price" type="number" item={item} /></td>
+                        <td className="px-2 py-1">{EditCell({ id: item.id, field: "name", item: item })}</td>
+                        <td className="px-2 py-1">{EditCell({ id: item.id, field: "category", item: item })}</td>
+                        <td className="px-2 py-1">{EditCell({ id: item.id, field: "billing_unit", item: item })}</td>
+                        <td className="px-2 py-1">{EditCell({ id: item.id, field: "default_price", type: "number", item: item })}</td>
                         <td className="px-2 py-1 text-center">
                           <Switch checked={!!getVal(item, 'active')} onCheckedChange={v => setVal(item.id, 'active', v)} />
                         </td>
@@ -280,6 +375,7 @@ export function BulkEditor({ entityType, open, onOpenChange }: BulkEditorProps) 
             </tbody>
           </table>
         </div>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 pt-2 border-t">
