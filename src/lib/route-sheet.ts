@@ -86,6 +86,73 @@ export function passosDeSeguranca(steps: ServiceOrderStep[]): ServiceOrderStep[]
   });
 }
 
+/** Uma linha de `seguranca_da_via` (banco): um passo de segurança gerado sem gravar roteiro. */
+export interface LinhaDeSeguranca {
+  papel: string;
+  sistema: string;
+  bloco: string;
+  escopo: string | null;
+  identificado_por: string;
+  seq: number;
+  title: string;
+  detail: string | null;
+  kind: string;
+  is_killer: boolean;
+  requires_photo: boolean;
+  requires_measure: string | null;
+  measure_unit: string | null;
+  mode: string | null;
+  standard_minutes: number | null;
+}
+
+/**
+ * A segurança da via quando a OS NÃO tem roteiro (05/10/2026). Nenhuma OS ganhou roteiro desde
+ * 14/08, e a via saía sem os blocos "Antes de mexer" e "Antes de entregar". O banco devolve os
+ * mesmos blocos que o gerador gravaria (seguranca_da_via, só leitura); aqui eles viram passos com
+ * a mesma chave e o mesmo rótulo numerado, para a via imprimir igual. Quando o sistema saiu do
+ * texto do serviço (e não do cadastro), a nota do bloco diz isso.
+ */
+export function segurancaSemRoteiro(serviceOrderId: string, linhas: LinhaDeSeguranca[]): ServiceOrderStep[] {
+  const numeroDoBloco = new Map<string, number>();
+  return linhas.map((l, i) => {
+    const chave = `${l.papel}:${l.sistema}`;
+    if (!numeroDoBloco.has(chave)) numeroDoBloco.set(chave, numeroDoBloco.size + 1);
+    const nota = l.identificado_por === 'texto da linha'
+      ? `${l.escopo ?? ''} (sistema identificado pelo texto do serviço)`.trim()
+      : l.escopo;
+    return {
+      id: `seguranca-${i}`,
+      service_order_id: serviceOrderId,
+      service_order_service_id: null,
+      template_id: null,
+      seq: i + 1,
+      block: `${numeroDoBloco.get(chave)} · ${l.bloco}`,
+      block_key: chave,
+      block_note: nota,
+      title: l.title,
+      detail: l.detail,
+      kind: l.kind as ServiceOrderStep['kind'],
+      mode: (l.mode ?? 'read_do') as ServiceOrderStep['mode'],
+      standard_minutes: l.standard_minutes,
+      is_killer: l.is_killer,
+      requires_photo: l.requires_photo,
+      requires_measure: l.requires_measure,
+      measure_unit: l.measure_unit,
+      measure_value: null,
+      status: 'pending',
+      na_reason: null,
+      blocked_reason_code: null,
+      blocked_note: null,
+      assigned_user_id: null,
+      started_at: null,
+      completed_at: null,
+      actual_minutes: null,
+      origin: 'composed',
+      notes: null,
+    } as ServiceOrderStep;
+  });
+}
+
 /** Azul-marinho da HBR, o mesmo do PDF que o cliente já recebe. */
 const BRAND = '#002B5B';
 
@@ -130,8 +197,11 @@ export function faltasDaVia(
   h: RouteSheetHeader,
   materials: RouteMaterial[],
   quantidadeDeServicos: number,
+  /** A via não terá a parte de segurança: nem roteiro, nem sistema identificado nos serviços. */
+  semSeguranca = false,
 ): string[] {
   const faltas: string[] = [];
+  if (semSeguranca && quantidadeDeServicos > 0) faltas.push('segurança (nenhum sistema identificado nos serviços)');
   if (!h.marinaName && !h.dockPosition && !(h.siteAccess || '').trim()) faltas.push('local e acesso');
   const temTelefone = (h.clientPhone || h.clientWhatsapp || h.onSiteContact?.phone || '').trim();
   if (!temTelefone) faltas.push('telefone de contato');

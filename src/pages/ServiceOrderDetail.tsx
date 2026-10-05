@@ -14,6 +14,7 @@ import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
 import { ServiceRoutePanel } from '@/components/service-orders/ServiceRoutePanel';
 import { viaHeaderFromOrder } from '@/hooks/use-via-do-tecnico';
 import { SurveyPanel } from '@/components/service-orders/SurveyPanel';
+import { useRoteiroVisivel } from '@/hooks/use-roteiro-visivel';
 
 function TimelineTab({ id }: { id: string }) {
   const { data: history } = useRecordHistory('service_orders', id);
@@ -38,6 +39,8 @@ export default function ServiceOrderDetail() {
 
   const { data: order, isLoading, error } = useServiceOrder(isNew ? undefined : id);
   const [copied, setCopied] = useState(false);
+  // Roteiro e levantamento escondidos por padrão desde 05/10/2026 (ver use-roteiro-visivel.ts).
+  const roteiroVisivel = useRoteiroVisivel();
 
   // Enquanto é orçamento (draft), ainda dá tempo de levantar antes de dar o preço.
   const isQuote = order?.status === 'draft';
@@ -101,12 +104,14 @@ export default function ServiceOrderDetail() {
           )}
           {/* Roteiro (execução técnica) e Tarefas (agenda administrativa) são coisas
               diferentes de propósito — os nomes precisam deixar isso claro na tela. */}
-          <TabsTrigger value="route" className="flex items-center gap-1.5">
-            <Route className="h-3.5 w-3.5" /> Roteiro
-          </TabsTrigger>
+          {roteiroVisivel && (
+            <TabsTrigger value="route" className="flex items-center gap-1.5">
+              <Route className="h-3.5 w-3.5" /> Roteiro
+            </TabsTrigger>
+          )}
           {/* Levantamento só faz sentido enquanto é orçamento: depois de virar OS,
               o preço já foi dado e a pergunta certa chegou tarde. */}
-          {isQuote && (
+          {roteiroVisivel && isQuote && (
             <TabsTrigger value="survey" className="flex items-center gap-1.5">
               <ClipboardCheck className="h-3.5 w-3.5" /> Levantamento
             </TabsTrigger>
@@ -135,17 +140,19 @@ export default function ServiceOrderDetail() {
         />
       </TabsContent>
 
-      <TabsContent value="route" className="mt-0 p-4 lg:p-6">
-        <div className="max-w-3xl">
-          <ServiceRoutePanel
-            serviceOrderId={id}
-            orderNumber={order?.service_order_number}
-            viaHeader={viaHeaderFromOrder(order)}
-          />
-        </div>
-      </TabsContent>
+      {roteiroVisivel && (
+        <TabsContent value="route" className="mt-0 p-4 lg:p-6">
+          <div className="max-w-3xl">
+            <ServiceRoutePanel
+              serviceOrderId={id}
+              orderNumber={order?.service_order_number}
+              viaHeader={viaHeaderFromOrder(order)}
+            />
+          </div>
+        </TabsContent>
+      )}
 
-      {isQuote && (
+      {roteiroVisivel && isQuote && (
         <TabsContent value="survey" className="mt-0 p-4 lg:p-6">
           <div className="max-w-3xl">
             <SurveyPanel

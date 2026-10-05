@@ -12,6 +12,8 @@
  * portal do cliente não sai (mostra preço).
  */
 import { useCallback, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 import { useServiceOrderSteps, useRouteMaterials } from '@/hooks/use-service-steps';
 import { useServiceOrderServices } from '@/hooks/use-service-orders';
 import { useServiceOrderSurvey } from '@/hooks/use-service-survey';
@@ -19,7 +21,8 @@ import { useLinksDasFotos } from '@/lib/fotos-da-os';
 import { useAppSettings } from '@/hooks/use-app-settings';
 import { VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
 import {
-  printRouteSheet, faltasDaVia, type RouteSheetHeader, type RouteSheetExtras,
+  printRouteSheet, faltasDaVia, passosDeSeguranca, segurancaSemRoteiro,
+  type RouteSheetHeader, type RouteSheetExtras, type LinhaDeSeguranca,
 } from '@/lib/route-sheet';
 
 /** O que a via precisa saber da OS — tudo já está no detalhe que a tela carrega. */
@@ -85,6 +88,20 @@ export function useViaDoTecnico(serviceOrderId: string | undefined, header: ViaD
     (((survey as any)?.service_survey_answers ?? []) as any[]).map((a) => a.photo_path as string),
   );
 
+  // Segurança sem roteiro (05/10/2026): nenhuma OS ganhou roteiro desde 14/08 e a via saía sem os
+  // blocos de segurança. O banco devolve os blocos de cada sistema da OS SEM gravar roteiro
+  // (seguranca_da_via); vêm antes do clique, porque imprimir abre janela e não pode esperar.
+  const { data: linhasDeSeguranca = [], isSuccess: segurancaCarregada } = useQuery({
+    queryKey: ['seguranca-da-via', serviceOrderId],
+    enabled: !!serviceOrderId,
+    queryFn: async (): Promise<LinhaDeSeguranca[]> => {
+      const { data, error } = await supabase.rpc('seguranca_da_via', { p_service_order_id: serviceOrderId! });
+      if (error) throw error;
+      return (data ?? []) as LinhaDeSeguranca[];
+    },
+  });
+  const temSegurancaNoRoteiro = passosDeSeguranca(steps).length > 0;
+
   /**
    * `via` (menu Ações): a folha do técnico, com só a segurança de cada sistema do roteiro.
    * `roteiro` (painel Roteiro): a mesma folha com o roteiro completo, para testá-lo à parte.
@@ -121,13 +138,19 @@ export function useViaDoTecnico(serviceOrderId: string | undefined, header: ViaD
           photoUrl: a.photo_path ? linksDasFotos[a.photo_path] ?? null : null,
         })),
     };
-    return printRouteSheet(cabecalho, steps, materials, extras);
-  }, [header, settings, services, survey, steps, materials, linksDasFotos]);
+    const passos = modo === 'via' && !temSegurancaNoRoteiro && serviceOrderId
+      ? [...steps, ...segurancaSemRoteiro(serviceOrderId, linhasDeSeguranca)]
+      : steps;
+    return printRouteSheet(cabecalho, passos, materials, extras);
+  }, [header, settings, services, survey, steps, materials, linksDasFotos, temSegurancaNoRoteiro, linhasDeSeguranca, serviceOrderId]);
 
   // O que vai faltar no papel, para o aviso antes de imprimir.
   const faltas = useMemo(
-    () => faltasDaVia(header as RouteSheetHeader, materials, (services ?? []).length),
-    [header, materials, services],
+    () => faltasDaVia(
+      header as RouteSheetHeader, materials, (services ?? []).length,
+      segurancaCarregada && !temSegurancaNoRoteiro && linhasDeSeguranca.length === 0,
+    ),
+    [header, materials, services, temSegurancaNoRoteiro, linhasDeSeguranca, segurancaCarregada],
   );
 
   return { imprimir, carregando: carregandoPassos, faltas };

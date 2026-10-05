@@ -26,6 +26,7 @@ import { PaymentConditionsTab } from './settings/PaymentConditionsTab';
 import { PdfDefaultsSection } from './settings/PdfDefaultsSection';
 import { WhatsAppConexaoTab } from './settings/WhatsAppConexaoTab';
 import { AssistenteIATab } from './settings/AssistenteIATab';
+import { RoteiroExecucaoCard } from './settings/RoteiroExecucaoCard';
 
 const TERM_KEYS = [
   { key: 'terms_warranty', labelKey: 'termsWarranty' as const },
@@ -310,6 +311,7 @@ export default function SettingsPage() {
         <TabsContent value="system" className="mt-4 space-y-4">
           {languageContent}
           <InstallAgendaCard />
+          <RoteiroExecucaoCard />
           <TaskAutomationSettings />
           <MasterDataPanel />
         </TabsContent>

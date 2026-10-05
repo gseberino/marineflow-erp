@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildRouteSheetHtml, faltasDaVia } from './route-sheet';
+import { buildRouteSheetHtml, faltasDaVia, segurancaSemRoteiro, type LinhaDeSeguranca } from './route-sheet';
 import type { ServiceOrderStep, RouteMaterial } from '@/hooks/use-service-steps';
 
 function step(over: Partial<ServiceOrderStep> = {}): ServiceOrderStep {
@@ -416,5 +416,56 @@ describe('via do técnico — fase 2: instrução, local, contato no local e sit
       ...base, siteAccess: 'Marina', clientPhone: '47 9999', scheduledAt: '2026-10-02T12:00:00Z',
     };
     expect(faltasDaVia(completo, [{ id: 'm', quantity: 1, notes: null, service_order_service_id: null }], 2)).toEqual([]);
+  });
+});
+
+/**
+ * 05/10/2026: nenhuma OS ganhou roteiro desde 14/08, e a via saía sem a segurança. O banco devolve
+ * os blocos de cada sistema sem gravar roteiro (seguranca_da_via); a via imprime igual.
+ */
+describe('via do técnico — segurança sem roteiro', () => {
+  const linha = (over: Partial<LinhaDeSeguranca>): LinhaDeSeguranca => ({
+    papel: 'abertura', sistema: 'eletronico', bloco: 'Antes de mexer — Eletrônico',
+    escopo: 'Vale para: Instalação do GPS.', identificado_por: 'cadastro', seq: 1,
+    title: 'Desligar o disjuntor do painel', detail: null, kind: 'safety', is_killer: true,
+    requires_photo: false, requires_measure: null, measure_unit: null, mode: 'do_confirm', standard_minutes: 2,
+    ...over,
+  });
+  const linhas = [
+    linha({}),
+    linha({ seq: 2, title: 'Medir ausência de tensão' }),
+    linha({ papel: 'fechamento', bloco: 'Antes de entregar — Eletrônico', seq: 1, title: 'Religar e testar o equipamento' }),
+  ];
+
+  it('vira passos com a chave e o rótulo numerado do gerador, um número por bloco', () => {
+    const passos = segurancaSemRoteiro('os1', linhas);
+    expect(passos.map((p) => p.block_key)).toEqual(['abertura:eletronico', 'abertura:eletronico', 'fechamento:eletronico']);
+    expect(passos.map((p) => p.block)).toEqual([
+      '1 · Antes de mexer — Eletrônico', '1 · Antes de mexer — Eletrônico', '2 · Antes de entregar — Eletrônico',
+    ]);
+    expect(new Set(passos.map((p) => p.id)).size).toBe(3);
+  });
+
+  it('a via imprime a segurança gerada como imprimiria a do roteiro', () => {
+    const html = buildRouteSheetHtml(header, segurancaSemRoteiro('os1', linhas), [], { roteiro: 'seguranca' });
+    expect(html).toContain('Segurança por sistema');
+    expect(html).toContain('Desligar o disjuntor do painel');
+    expect(html).toContain('Religar e testar o equipamento');
+  });
+
+  it('sistema tirado do texto do serviço avisa na nota do bloco', () => {
+    const [p] = segurancaSemRoteiro('os1', [linha({ identificado_por: 'texto da linha' })]);
+    expect(p.block_note).toContain('sistema identificado pelo texto do serviço');
+  });
+
+  it('o aviso antes de imprimir diz quando a via vai sair sem segurança', () => {
+    const completo = {
+      orderNumber: 'OS-1', siteAccess: 'Marina', clientPhone: '47 9999', scheduledAt: '2026-10-02T12:00:00Z',
+    };
+    const material = [{ id: 'm', quantity: 1, notes: null, service_order_service_id: null }] as never;
+    expect(faltasDaVia(completo, material, 2, true)).toEqual(['segurança (nenhum sistema identificado nos serviços)']);
+    expect(faltasDaVia(completo, material, 2, false)).toEqual([]);
+    // Sem serviço nenhum, o aviso já é "serviços": não repete.
+    expect(faltasDaVia(completo, material, 0, true)).toEqual(['serviços']);
   });
 });

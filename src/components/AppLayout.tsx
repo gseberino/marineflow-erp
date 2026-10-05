@@ -36,6 +36,7 @@ import { useFinanceReviewCount } from '@/hooks/use-finance-review';
 import { toast } from 'sonner';
 import { Moon, Sun } from 'lucide-react';
 import { getThemeMode, THEME_EVENT, toggleThemeMode, type ThemeMode } from '@/v2/theme';
+import { useRoteiroVisivel } from '@/hooks/use-roteiro-visivel';
 
 /** Alternador ☀/🌙 do header — mesmo estado global dos botões das páginas v2. */
 function ThemeToggle() {
@@ -75,6 +76,8 @@ type NavItem = {
   icon: typeof LayoutDashboard;
   path: string;
   roles?: string[];
+  /** Só aparece com o roteiro de execução ligado (useRoteiroVisivel, 05/10/2026). */
+  soComRoteiro?: boolean;
 };
 
 type NavGroup = {
@@ -181,8 +184,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         { label: 'Ordens de Serviço', icon: ClipboardList, path: '/v2/service-orders' },
         { label: 'Orçamentos', icon: FileText, path: '/v2/quotes' },
         { label: 'Agenda', icon: CalendarDays, path: '/v2/agenda' },
-        { label: 'Quadro do Dia', icon: LayoutGrid, path: '/day-board', roles: ['admin', 'financial', 'technician'] },
-        { label: 'Roteiros Padrão', icon: ListChecks, path: '/step-templates', roles: ['admin', 'financial', 'technician'] },
+        { label: 'Quadro do Dia', icon: LayoutGrid, path: '/day-board', roles: ['admin', 'financial', 'technician'], soComRoteiro: true },
+        { label: 'Roteiros Padrão', icon: ListChecks, path: '/step-templates', roles: ['admin', 'financial', 'technician'], soComRoteiro: true },
         { label: 'Motor de Vendas', icon: Rocket, path: '/v2/prospecting', roles: ['admin'] },
         // Cobranças mudou para Financeiro (23/09/2026): perseguir quem deve é trabalho de
         // dinheiro, e ficava longe de Contas a Receber, que é a mesma conversa.
@@ -353,6 +356,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
     return pathname.startsWith(rota + '/');
   };
 
+  const roteiroVisivel = useRoteiroVisivel();
+
   // Filter items based on roles and dynamic permissions (metadata.visible_areas)
   const visibleAreas = (user?.metadata as any)?.visible_areas as string[] | undefined;
   // Support legacy department field too just in case
@@ -373,7 +378,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
     })
     .map((g) => ({
       ...g,
-      items: g.items.filter((i) => !i.roles || (user && i.roles.includes(user.role))),
+      items: g.items
+        .filter((i) => !i.soComRoteiro || roteiroVisivel)
+        .filter((i) => !i.roles || (user && i.roles.includes(user.role))),
     }))
     .filter((g) => g.items.length > 0);
 

@@ -14047,6 +14047,26 @@ export type Database = {
           sku: string
         }[]
       }
+      seguranca_da_via: {
+        Args: { p_service_order_id: string }
+        Returns: {
+          bloco: string
+          detail: string
+          escopo: string
+          identificado_por: string
+          is_killer: boolean
+          kind: string
+          measure_unit: string
+          mode: string
+          papel: string
+          requires_measure: string
+          requires_photo: boolean
+          seq: number
+          sistema: string
+          standard_minutes: number
+          title: string
+        }[]
+      }
       separar_pro_labore: {
         Args: { p_ate?: string; p_autor?: string; p_de?: string }
         Returns: Json

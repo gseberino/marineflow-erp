@@ -105,6 +105,7 @@ import {
 } from '@/hooks/use-description-analysis';
 import { DescriptionAnalysisDialog } from '@/components/service-orders/DescriptionAnalysisDialog';
 import { RelatedMaterialsPanel } from '@/components/service-orders/RelatedMaterialsPanel';
+import { useRoteiroVisivel } from '@/hooks/use-roteiro-visivel';
 
 interface Props {
   orderId?: string;
@@ -123,6 +124,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const navigate = useNavigate();
   const { t, formatCurrency, formatDateTime, formatDate } = useI18n();
   const isNew = !orderId;
+  const roteiroVisivel = useRoteiroVisivel();
 
   const { data: clients } = useClients();
   const { data: allVessels } = useVessels();
@@ -2273,7 +2275,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           histórico da casa. Fica logo abaixo das peças porque é ali que se
           percebe a falta — proteção e acessório são o que mais sai do
           orçamento por descuido e volta como prejuízo. */}
-      <RelatedMaterialsPanel serviceOrderId={orderId} />
+      {/* Escondido com o roteiro (05/10/2026): lança material sem recalcular o total da OS
+          (NOVO-lev-06) e nunca foi usado (as 333 peças são manuais). */}
+      {roteiroVisivel && <RelatedMaterialsPanel serviceOrderId={orderId} />}
 
       <ExpensesTimeDialogs
         isNew={isNew}
