@@ -189,11 +189,12 @@ export async function enviarOrdemAoCliente(p: {
 export type FormatoDoEnvio = "pdf_e_link" | "pdf" | "link";
 
 /**
- * Decisão do dono (26/09/2026): o padrão é o ARQUIVO PDF com o link na legenda — o cliente vê
- * o documento na conversa, sem abrir nada, e o link continua lá para aprovar e assinar.
- * "Só o link" é quando o dono pede.
+ * Decisão do dono (05/10/2026): o padrão é SÓ o ARQUIVO PDF — com a frase dele na legenda, se
+ * ele deu uma, ou sem texto. "Ainda não estou seguro de utilizar o link; a maioria dos clientes
+ * atendo de forma presencial." Número, total e link (pdf_e_link) e "só o link" são quando ele
+ * pede. (Até 05/10 o padrão era pdf_e_link — decisão de 26/09/2026.)
  */
-export const FORMATO_PADRAO: FormatoDoEnvio = "pdf_e_link";
+export const FORMATO_PADRAO: FormatoDoEnvio = "pdf";
 
 /**
  * O formato pedido. Ausente/vazio → o padrão. Valor desconhecido → null: a tool recusa em vez
@@ -640,7 +641,7 @@ export const whatsappTools: ToolDef[] = [
   {
     name: "send_service_order_link",
     description:
-      "Envia um orçamento/OS AO CLIENTE pelo WhatsApp, sempre para o WhatsApp/telefone do cadastro do cliente (não existe campo de telefone). Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. PADRÃO (formato='pdf_e_link'): o ARQUIVO PDF, igual ao botão Baixar, com o total e o link para ver online e aprovar na legenda. formato='pdf' manda SÓ o arquivo, sem número, total e link na legenda — use quando o usuário pedir 'só o PDF', 'sem o link' ou 'sem mensagem'; com custom_message, a frase dele vira a legenda inteira. formato='link' manda só o link, em texto — use apenas quando o usuário pedir 'só o link' ou quando o PDF falhar e ele aceitar. Vendedor externo só pode formato='link'. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número do documento (ex: 'ORÇ-00001' para orçamentos, 'OS-00042' para OS, ou o formato antigo 'OS-2026-XXXXX'). Prefira sempre o UUID.",
+      "Envia um orçamento/OS AO CLIENTE pelo WhatsApp, sempre para o WhatsApp/telefone do cadastro do cliente (não existe campo de telefone). Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. PADRÃO (formato='pdf', ou sem formato): SÓ o ARQUIVO PDF, igual ao botão Baixar — com custom_message, a frase do usuário é a legenda inteira; sem ela, vai sem texto. formato='pdf_e_link' acrescenta na legenda o número, o total e o link para ver online e aprovar — use SÓ quando o usuário pedir o link ou o total junto ('com o link', 'para ele aprovar online'). formato='link' manda só o link, em texto — use apenas quando o usuário pedir 'só o link' ou quando o PDF falhar e ele aceitar. Vendedor externo só pode formato='link'. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número do documento (ex: 'ORÇ-00001' para orçamentos, 'OS-00042' para OS, ou o formato antigo 'OS-2026-XXXXX'). Prefira sempre o UUID.",
     input_schema: {
       type: "object",
       properties: {
@@ -648,7 +649,7 @@ export const whatsappTools: ToolDef[] = [
         formato: {
           type: "string",
           enum: ["pdf_e_link", "pdf", "link"],
-          description: "pdf_e_link (padrão) = arquivo PDF com número, total e link na legenda; pdf = só o arquivo (legenda = custom_message, ou nenhuma); link = só o link em texto, quando o usuário pedir.",
+          description: "pdf (padrão) = só o arquivo (legenda = custom_message, ou nenhuma); pdf_e_link = arquivo com número, total e link na legenda, quando o usuário pedir o link; link = só o link em texto, quando o usuário pedir.",
         },
         custom_message: { type: "string", description: "Mensagem personalizada. No formato link substitui o texto padrão (se não trouxer o link, ele vai no fim; até 4000 caracteres); no pdf_e_link vira a primeira linha da legenda (número, total e link vêm sempre; até 800 caracteres); no pdf é a legenda inteira — a frase que o dono quer junto do arquivo (até 1000 caracteres; sem ela, o PDF vai sem texto)." },
       },

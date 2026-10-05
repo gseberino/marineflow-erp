@@ -188,9 +188,21 @@ async function executar(amb: ReturnType<typeof montarAmbiente>, args: Record<str
 }
 
 // ─── Formato padrão ──────────────────────────────────────────────────────────────────────
-Deno.test("sem formato, vai o ARQUIVO PDF com número, total e link /view na legenda", async () => {
+Deno.test("sem formato, o padrão (decisão do dono, 05/10/2026) é SÓ o arquivo, sem total nem link", async () => {
   const amb = montarAmbiente();
   const r = await executar(amb, { service_order_id: ORC.id });
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(r.formato, "pdf");
+  assertEquals(amb.chamadas.envio[0].kind, "document");
+  assertEquals(amb.chamadas.envio[0].document_caption, "");
+  const comFrase = montarAmbiente();
+  await executar(comFrase, { service_order_id: ORC.id, custom_message: "Bom dia, Nelson! Atualizei o orçamento." });
+  assertEquals(comFrase.chamadas.envio[0].document_caption, "Bom dia, Nelson! Atualizei o orçamento.");
+});
+
+Deno.test("formato 'pdf_e_link': o ARQUIVO PDF com número, total e link /view na legenda", async () => {
+  const amb = montarAmbiente();
+  const r = await executar(amb, { service_order_id: ORC.id, formato: "pdf_e_link" });
   assertEquals(r.ok, true, JSON.stringify(r));
   assertEquals(r.formato, "pdf_e_link");
   assertEquals(amb.chamadas.pdf.length, 1, "o PDF é renderizado uma vez");
@@ -209,14 +221,14 @@ Deno.test("sem formato, vai o ARQUIVO PDF com número, total e link /view na leg
 
 Deno.test("OS sai como Ordem de Serviço, com o mesmo link na legenda", async () => {
   const amb = montarAmbiente();
-  await executar(amb, { service_order_id: "OS-00087" });
+  await executar(amb, { service_order_id: "OS-00087", formato: "pdf_e_link" });
   assertStringIncludes(amb.chamadas.envio[0].document_caption, "Ordem de Serviço OS-00087 — Total");
   assertStringIncludes(amb.chamadas.envio[0].document_caption, "Para ver online e aprovar:");
 });
 
 Deno.test("mensagem personalizada abre a legenda, mas número, total e link vêm sempre", async () => {
   const amb = montarAmbiente();
-  await executar(amb, { service_order_id: ORC.id, custom_message: "Bom dia! Conforme conversamos:" });
+  await executar(amb, { service_order_id: ORC.id, formato: "pdf_e_link", custom_message: "Bom dia! Conforme conversamos:" });
   const legenda: string = amb.chamadas.envio[0].document_caption;
   assert(legenda.startsWith("Bom dia! Conforme conversamos:"));
   assertStringIncludes(legenda, "Orçamento ORÇ-00086 — Total");
@@ -464,7 +476,7 @@ Deno.test("modo de teste ligado: não diz que chegou ao cliente", async () => {
 Deno.test("modo ligado sem número: a edge não desvia, e a tool diz que foi ao cliente", async () => {
   for (const settings of [{ wa_test_mode: "true" }, { wa_test_mode: "true", wa_test_number: "" }] as Record<string, string>[]) {
     const amb = montarAmbiente({ settings });
-    const r = await executar(amb, { service_order_id: ORC.id });
+    const r = await executar(amb, { service_order_id: ORC.id, formato: "pdf_e_link" });
     assertEquals(r.ok, true, JSON.stringify(r));
     assertStringIncludes(r.enviado_para, "••••0000", JSON.stringify(settings));
     assert(!r.enviado_para.includes("TESTE"), r.enviado_para);
@@ -614,7 +626,9 @@ Deno.test("resumo mostra cliente, telefone mascarado, número, total e formato",
   assert(!pdf.includes(CLIENTE.whatsapp), "o telefone inteiro não aparece");
   assertStringIncludes(pdf, "ORÇ-00086");
   assertStringIncludes(pdf, "18.450,50");
-  assertStringIncludes(pdf, "PDF anexado");
+  assertStringIncludes(pdf, "só o PDF", "sem formato = o padrão, só o arquivo");
+  const comLink = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "pdf_e_link" });
+  assertStringIncludes(comLink!, "PDF anexado + link");
   const link = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "link" });
   assertStringIncludes(link!, "só o link");
   const cancelada = await resumirEnvioAoCliente(amb.admin, { service_order_id: CANCELADA.id });
@@ -673,12 +687,12 @@ Deno.test("resumo mostra a mensagem personalizada INTEIRA (antes cortava em 200)
 Deno.test("mensagem acima do limite: recusada antes da pendência e no execute; o resumo avisa", async () => {
   const amb = montarAmbiente();
   const enorme = "x".repeat(LIMITE_DA_MENSAGEM.pdf_e_link + 1);
-  const pre = tool.preValidar!({ service_order_id: ORC.id, custom_message: enorme }, amb.ctx() as any);
+  const pre = tool.preValidar!({ service_order_id: ORC.id, formato: "pdf_e_link", custom_message: enorme }, amb.ctx() as any);
   assertStringIncludes(String(pre?.error), "cabem até 800");
-  const r = await executar(amb, { service_order_id: ORC.id, custom_message: enorme });
+  const r = await executar(amb, { service_order_id: ORC.id, formato: "pdf_e_link", custom_message: enorme });
   assertStringIncludes(r.error, "cabem até 800");
   assertEquals(amb.chamadas.pdf.length + amb.chamadas.envio.length, 0);
-  const resumo = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, custom_message: enorme }, ONZE_DA_MANHA);
+  const resumo = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "pdf_e_link", custom_message: enorme }, ONZE_DA_MANHA);
   assertStringIncludes(resumo!, "o envio será recusado");
   // No 'link' o texto é a mensagem inteira: o mesmo tamanho passa.
   assertEquals(tool.preValidar!({ service_order_id: ORC.id, formato: "link", custom_message: enorme }, amb.ctx() as any), null);
@@ -753,7 +767,7 @@ Deno.test("no agente, com autonomia 'auto' gravada: o PDF vira pendência com re
   assert(pendencia, "a pendência foi gravada");
   assertEquals(pendencia.title, "Enviar orçamento/OS ao cliente (WhatsApp)");
   const resumo = String(pendencia.summary);
-  for (const trecho of ["Cliente Exemplo Silva", "••••0000", "ORÇ-00086", "18.450,50", "PDF anexado"]) {
+  for (const trecho of ["Cliente Exemplo Silva", "••••0000", "ORÇ-00086", "18.450,50", "só o PDF", "Legenda: nenhuma"]) {
     assertStringIncludes(resumo, trecho);
   }
   // Quem pediu vai no resumo (o admin que aprova no painel vê de quem é o pedido) e no
