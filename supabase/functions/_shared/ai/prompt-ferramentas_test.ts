@@ -38,6 +38,8 @@ import { clientTools } from "./tools/clients.ts";
  * confira a grafia contra allTools; se for campo ou valor, acrescente aqui.
  */
 const NAO_SAO_TOOLS = new Set<string>([
+  // ferramenta montada por turno (perfil enxuto do admin, 05/10/2026): não está em allTools
+  "ferramenta_extra",
   // argumentos de registrar_diaria para vários dias (29/09/2026)
   "data_ate", "fim_de_semana",
   // valor dito para o dia (registrar_diaria) e cadastro de freelancer novo (01/10/2026)

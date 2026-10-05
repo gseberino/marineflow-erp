@@ -15,7 +15,8 @@ import { allTools, type ToolCtx, type ToolDef } from "./tools/index.ts";
 import { CHAVE_DO_RETRATO, CHAVE_DO_SOLICITANTE, type Solicitante } from "./tools/registry.ts";
 import { isAutonomyGranted } from "./autonomy-policy.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
-import { PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from "./perfil-operacao.ts";
+import { PERFIL_ADMIN, PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from "./perfil-operacao.ts";
+import { construirFerramentaExtra, NOME_DA_FERRAMENTA_EXTRA } from "./ferramenta-extra.ts";
 
 export interface Proposal {
   pending_action_id: string;
@@ -508,7 +509,12 @@ function withTrailingCacheMark(messages: ClaudeMessage[]): ClaudeMessage[] {
  * ("use a list_low_stock"). Qualquer outro valor no setting, ou erro de leitura, devolve a
  * lista completa: o corte de custo nunca pode virar um agente sem mãos.
  */
-const PERFIL_DE_TOOLS = { validoAte: 0, ativo: false };
+const PERFIL_DE_TOOLS = { validoAte: 0, ativo: false, adminEnxuto: false };
+
+/** Só para testes: o perfil fica em cache por 5 minutos neste módulo. */
+export function zerarCacheDoPerfilDeTools() {
+  PERFIL_DE_TOOLS.validoAte = 0;
+}
 
 // Nome antigo mantido: o SEMPRE_NO_PERFIL daqui foi unificado com a lista que morava no banco
 // em PERFIL_OPERACAO (26/09/2026). Testes e outras frentes ainda importam por este nome.
@@ -525,25 +531,38 @@ function textoDoUltimoPedido(messages: ClaudeMessage[]): string {
   return "";
 }
 
-async function aplicarPerfilDeTools(todas: ToolDef[], params: RunAgentLoopParams): Promise<ToolDef[]> {
+/**
+ * 'admin_enxuto' (05/10/2026): os outros cargos seguem como em 'operacao'; o ADMIN vê só
+ * PERFIL_ADMIN (sem o "todo risco alto entra": o sino aprova pelo toolsByName global, e o que saiu
+ * fica ao alcance da ferramenta_extra). Voltar o setting para 'operacao' restaura o de antes.
+ */
+async function aplicarPerfilDeTools(
+  todas: ToolDef[],
+  params: RunAgentLoopParams,
+): Promise<{ tools: ToolDef[]; adminEnxuto: boolean }> {
   try {
     if (Date.now() > PERFIL_DE_TOOLS.validoAte) {
       const { data } = await params.toolCtx.admin
         .from("app_settings").select("key, value")
         .in("key", ["ai_tool_profile"]);
       const mapa = Object.fromEntries(((data ?? []) as { key: string; value: string }[]).map((r) => [r.key, r.value]));
-      PERFIL_DE_TOOLS.ativo = mapa.ai_tool_profile === "operacao";
+      PERFIL_DE_TOOLS.ativo = mapa.ai_tool_profile === "operacao" || mapa.ai_tool_profile === "admin_enxuto";
+      PERFIL_DE_TOOLS.adminEnxuto = mapa.ai_tool_profile === "admin_enxuto";
       PERFIL_DE_TOOLS.validoAte = Date.now() + 5 * 60_000;
     }
   } catch {
-    return todas;
+    return { tools: todas, adminEnxuto: false };
   }
-  if (!PERFIL_DE_TOOLS.ativo) return todas;
+  if (!PERFIL_DE_TOOLS.ativo) return { tools: todas, adminEnxuto: false };
   const pedido = textoDoUltimoPedido(params.messages).toLowerCase();
-  return todas.filter((t) =>
-    t.risk === "high" || PERFIL_OPERACAO.has(t.name) ||
-    (pedido.length > 0 && pedido.includes(t.name))
-  );
+  const pediuPeloNome = (t: ToolDef) => pedido.length > 0 && pedido.includes(t.name);
+  if (PERFIL_DE_TOOLS.adminEnxuto && params.toolCtx.userRole === "admin") {
+    return { tools: todas.filter((t) => PERFIL_ADMIN.has(t.name) || pediuPeloNome(t)), adminEnxuto: true };
+  }
+  return {
+    tools: todas.filter((t) => t.risk === "high" || PERFIL_OPERACAO.has(t.name) || pediuPeloNome(t)),
+    adminEnxuto: false,
+  };
 }
 
 /**
@@ -615,20 +634,24 @@ export interface FerramentasDoTurno {
   /** Visíveis ao modelo: cargo e canal (params.tools) e depois o perfil de tools. */
   tools: ToolDef[];
   toolsByName: Record<string, ToolDef>;
-  /** Rede de segurança: SO_PELA_REDE dentre as já liberadas por cargo e canal. */
+  /** Rede de segurança: SO_PELA_REDE (ou, no perfil enxuto do admin, tudo) dentre as liberadas por cargo e canal. */
   alcancaveisPelaRede: Record<string, ToolDef>;
 }
 
 export async function prepararFerramentasDoTurno(params: RunAgentLoopParams): Promise<FerramentasDoTurno> {
-  const tools = await aplicarPerfilDeTools(params.tools ?? allTools, params);
+  const { tools: doPerfil, adminEnxuto } = await aplicarPerfilDeTools(params.tools ?? allTools, params);
+  const visiveis = new Set(doPerfil.map((t) => t.name));
+  // Rede de segurança do perfil: o que cargo e canal já liberaram (params.tools) e não está à
+  // vista. Para os cargos em geral, SÓ SO_PELA_REDE (ver o comentário acima: roles frouxos). Para
+  // o admin no perfil enxuto (05/10/2026), tudo — o cargo dele libera tudo de qualquer jeito.
+  const rede = (params.tools ?? []).filter((t) => !visiveis.has(t.name) && (adminEnxuto || SO_PELA_REDE.has(t.name)));
+  const tools = adminEnxuto && rede.length > 0
+    ? [...doPerfil, construirFerramentaExtra(rede.map((t) => t.name))]
+    : doPerfil;
   return {
     tools,
     toolsByName: Object.fromEntries(tools.map((t) => [t.name, t])),
-    // Rede de segurança do perfil: SÓ SO_PELA_REDE, e dela só o que cargo e canal já liberaram
-    // (params.tools). Nunca allTools, nunca outra tool fora do perfil (ver o comentário acima).
-    alcancaveisPelaRede: Object.fromEntries(
-      (params.tools ?? []).filter((t) => SO_PELA_REDE.has(t.name)).map((t) => [t.name, t]),
-    ),
+    alcancaveisPelaRede: Object.fromEntries(rede.map((t) => [t.name, t])),
   };
 }
 
@@ -657,7 +680,32 @@ export async function executarChamadaDeTool(
   tc: { name: string; input: unknown },
   amb: AmbienteDaTool,
 ): Promise<ResultadoDaTool> {
-  // Escondida pelo perfil, em SO_PELA_REDE e liberada por cargo e canal → rede (ver acima).
+  // ferramenta_extra (perfil enxuto do admin, 05/10/2026): redespacha pelo caminho normal — à
+  // vista ou pela rede, com as mesmas travas. Só existe quando o turno a pôs em toolsByName.
+  if (tc.name === NOME_DA_FERRAMENTA_EXTRA && amb.toolsByName[tc.name]) {
+    const pedido = (tc.input ?? {}) as { nome?: unknown; argumentos?: unknown; descrever?: unknown };
+    const nome = typeof pedido.nome === "string" ? pedido.nome : "";
+    const alvo = nome && nome !== NOME_DA_FERRAMENTA_EXTRA
+      ? (amb.toolsByName[nome] ?? amb.alcancaveisPelaRede[nome])
+      : undefined;
+    if (!alvo) {
+      return { toolResult: { error: `A ferramenta '${nome || "(sem nome)"}' não está ao seu alcance. Use um nome da lista do campo 'nome'.` } };
+    }
+    if (pedido.descrever === true) {
+      return {
+        toolResult: {
+          nome: alvo.name,
+          description: alvo.description,
+          input_schema: alvo.input_schema,
+          instruction: "Nada foi executado. Para usar, chame ferramenta_extra de novo com nome e argumentos (sem descrever).",
+        },
+      };
+    }
+    const argumentos = pedido.argumentos && typeof pedido.argumentos === "object" ? pedido.argumentos : {};
+    return executarChamadaDeTool({ name: alvo.name, input: argumentos }, amb);
+  }
+
+  // Escondida pelo perfil e alcançável pela rede (SO_PELA_REDE, ou tudo no perfil enxuto do admin).
   const foraDoPerfil = amb.toolsByName[tc.name] ? undefined : amb.alcancaveisPelaRede[tc.name];
   const toolDef = amb.toolsByName[tc.name] ?? foraDoPerfil;
   const argumentosInvalidos = foraDoPerfil ? validarArgumentosDaTool(foraDoPerfil.input_schema, tc.input) : [];

@@ -4,7 +4,7 @@
 //   deno test --allow-all supabase/functions/_shared/ai/perfil-operacao_test.ts
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { runAgentLoop } from "./agent.ts";
-import { ehLeituraPeloNome, ESCRITAS_VERIFICADAS_DA_REDE, PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from "./perfil-operacao.ts";
+import { ehLeituraPeloNome, ESCRITAS_VERIFICADAS_DA_REDE, PERFIL_ADMIN, PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from "./perfil-operacao.ts";
 import { allTools } from "./tools/index.ts";
 
 Deno.env.set("OPENROUTER_API_KEY", "test-key-not-real");
@@ -196,4 +196,28 @@ Deno.test("comportamento: com o perfil ligado, o modelo recebe exatamente o de a
   assertEquals(ordenado(enviadas), ordenado([...esperadoAntes, ...ACRESCENTADAS]));
   // E a ORDEM continua a de allTools (prefixo de cache estável).
   assertEquals(enviadas, allTools.map((t) => t.name).filter((n) => enviadas.includes(n)));
+});
+
+/**
+ * Perfil enxuto do admin (05/10/2026): a rede do admin alcança TUDO que ficou fora de PERFIL_ADMIN,
+ * e a "leitura pelo nome" roda direto, sem confirmação. Então nenhuma delas pode gravar. Chamada a
+ * função do banco (.rpc) só para as conferidas como STABLE e sem insert/update/delete em 05/10.
+ */
+const RPC_SO_LEITURA_CONFERIDAS = new Set([
+  "should_survey_service", "extrato_da_conta", "bi_margin_by_category", "get_entity_open_loops", "bi_revenue_by_brand",
+  "whatsapp_pending_inbox", "bi_top_clients", "get_promo_candidates", "linhas_do_checklist", "checklist_do_mes",
+]);
+
+Deno.test("rede do admin: toda leitura pelo nome que roda direto só lê (rpc só às funções conferidas)", () => {
+  const leituras = allTools.filter((t) => !PERFIL_ADMIN.has(t.name) && rodaDiretoPelaRede(t) && ehLeituraPeloNome(t.name));
+  assertEquals(leituras.length >= 20, true, `só ${leituras.length} leituras — o recorte quebrou?`);
+  for (const t of leituras) {
+    const corpo = String(t.execute);
+    assertEquals(/\.(insert|update|upsert|delete)\(/.test(corpo), false, `${t.name} grava e passaria direto pela rede do admin`);
+    for (const m of corpo.matchAll(/\.rpc\(\s*["'`]([a-z_0-9]+)/g)) {
+      assertEquals(RPC_SO_LEITURA_CONFERIDAS.has(m[1]), true, `${t.name} chama a função ${m[1]}, que ninguém conferiu como só leitura`);
+    }
+  }
+  for (const n of ["check_in_service_order", "check_out_service_order"]) assertEquals(ehLeituraPeloNome(n), false, n);
+  for (const n of ["listar_x", "consultar_x", "verificar_x", "buscar_x", "resultado_x"]) assertEquals(ehLeituraPeloNome(n), true, n);
 });

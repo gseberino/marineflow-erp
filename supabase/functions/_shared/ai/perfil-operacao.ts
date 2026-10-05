@@ -303,6 +303,133 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Perfil do ADMINISTRADOR quando app_settings.ai_tool_profile = 'admin_enxuto' (05/10/2026).
+ *
+ * O admin é o único usuário real do assistente e recebia 166 ferramentas no painel (~36 mil tokens
+ * por chamada); em 60 dias usou 66. Proposta e medição: plans/marineflow-perfil-enxuto-admin.md.
+ * Fica: (A) o que o admin usou em 60 dias de auditoria e (B) o crítico ou raro que precisa estar à
+ * mão (fiscal, corrigir e desfazer dinheiro, funil e sinal, portão de comunicação, cadastro, ciclo
+ * de cotação, agenda). Saíram as 6 do levantamento (escondido da tela desde 05/10).
+ *
+ * O resto continua alcançável pela FERRAMENTA_EXTRA (agent.ts): com o perfil do admin, a rede de
+ * segurança alcança TUDO que cargo e canal liberam — para o admin o motivo de limitar a rede (roles
+ * frouxos que deixariam técnico e vendedor chegarem onde não devem) não existe. Pela rede, escrita
+ * pede confirmação; leitura roda direto (rodaDiretoPelaRede). Ferramenta que aparecer toda semana
+ * em 'fora_do_perfil:%' na auditoria volta para cá.
+ *
+ * Outros cargos não mudam: seguem com PERFIL_OPERACAO e a rede de SO_PELA_REDE.
+ */
+export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
+  // — (A) usadas pelo admin em 60 dias (05/08 a 04/10), menos as do levantamento —
+  "add_kit_to_order",
+  "add_material_to_order",
+  "add_service_order_item",
+  "add_service_to_order",
+  "anotar_transacao_do_banco",
+  "buscar_lancamentos",
+  "cancel_service_order",
+  "consultar_freelancer",
+  "create_client",
+  "create_product",
+  "create_quote_from_items",
+  "create_quote_request",
+  "create_service_order",
+  "create_supplier",
+  "create_vessel",
+  "criar_regra_financeira",
+  "duplicate_service_order",
+  "edit_service_order_item",
+  "gastos_por_categoria",
+  "get_client_360",
+  "get_client_history",
+  "get_delinquency_plan",
+  "get_os_receivables",
+  "get_period_summary",
+  "get_product_price_history",
+  "get_purchase_needs",
+  "get_service_order",
+  "get_whatsapp_conversation",
+  "identify_contact",
+  "lancar_no_caixa",
+  "list_overdue_receivables",
+  "list_reference_data",
+  "list_service_orders",
+  "list_unanswered_messages",
+  "listar_categorias_financeiras",
+  "listar_transacoes_pendentes",
+  "log_service_order_progress",
+  "present_options",
+  "read_supplier_messages",
+  "register_payment",
+  "registrar_diaria",
+  "remove_service_order_item",
+  "search_clients",
+  "search_products",
+  "search_products_batch",
+  "search_services",
+  "search_suppliers",
+  "search_vessels",
+  "send_document_pdf_to_self",
+  "send_service_order_link",
+  "send_supplier_quote_request",
+  "set_service_order_charges",
+  "size_dc_cable",
+  "sugerir_conciliacao",
+  "suggest_suppliers",
+  "update_client",
+  "update_product",
+  "update_service_order_notes",
+  "update_service_order_status",
+  "update_vessel",
+
+  // — (B) fiscal —
+  "preview_fiscal_note",
+  "preview_fiscal_service_note",
+  "emit_fiscal_note",
+  "emit_fiscal_service_note",
+  "list_fiscal_documents",
+
+  // — (B) dinheiro —
+  "cancelar_lancamento",
+  "desfazer_aprovacao_de_lancamento",
+  "aplicar_pix_em_contas",
+  "desfazer_aplicacao_de_pix",
+  "casar_lancamento_com_extrato",
+  "conciliar_transacao",
+  "create_receivable",
+  "create_payable",
+  "update_receivable",
+  "update_payable",
+
+  // — (B) funil —
+  "update_quote_status",
+  "approve_quote_full",
+  "register_deposit_and_convert",
+  "apply_service_order_discount",
+
+  // — (B) comunicacao —
+  "send_whatsapp_message",
+  "schedule_whatsapp_message",
+  "send_collection_reminder",
+  "link_contact_to_entity",
+
+  // — (B) cadastro —
+  "update_service",
+  "update_supplier",
+  "cadastrar_freelancer",
+
+  // — (B) cotacao —
+  "record_quote_response",
+  "get_quote_comparison",
+  "apply_quote_price",
+
+  // — (B) agenda —
+  "create_task",
+  "schedule_self_reminder",
+  "my_agenda",
+]);
+
+/**
  * As únicas ESCRITAS que a rede deixa rodar direto, sem confirmação: escrita de SUGESTÃO ou
  * ANÁLISE — não muda registro de negócio, não mexe em dinheiro nem em preço, não manda nada
  * para fora e não aprova nada. Com o porquê de cada uma, lido no execute.
@@ -326,12 +453,17 @@ export const ESCRITAS_VERIFICADAS_DA_REDE: Readonly<Record<string, string>> = {
 };
 
 /**
- * Leitura pelo nome (get_, list_, read_, check_, search_). O executor usa em rodaDiretoPelaRede;
+ * Leitura pelo nome (get_, list_, read_, check_ menos check_in_/check_out_, search_ e, desde
+ * 05/10/2026, listar_, consultar_, verificar_, buscar_, resultado_). O executor usa em rodaDiretoPelaRede;
  * perfil-operacao_test.ts confere que nenhuma "leitura pelo nome" de SO_PELA_REDE tem
  * insert/update/upsert/delete/rpc no execute — senão o nome estaria mentindo.
  */
 export function ehLeituraPeloNome(nome: string): boolean {
-  return /^(get_|list_|read_|check_|search_)/.test(nome);
+  // check_in_/check_out_ começam com check_ mas GRAVAM (entrada e saída do técnico na OS): a
+  // rede do admin (05/10/2026) passou a alcançá-las, então saem daqui. As leituras em português
+  // (listar_, consultar_, verificar_, buscar_, resultado_) entraram pelo mesmo motivo.
+  if (/^check_(in|out)_/.test(nome)) return false;
+  return /^(get_|list_|read_|check_|search_|listar_|consultar_|verificar_|buscar_|resultado_)/.test(nome);
 }
 
 /**
