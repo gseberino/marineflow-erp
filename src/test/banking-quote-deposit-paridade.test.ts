@@ -11,6 +11,7 @@ import {
   depositBaseFromOrder as baseFront,
   depositAmountFromPcts as amountFront,
   signalPctsFromInstallments as pctsFront,
+  computeSchedule as scheduleFront,
   type DepositInstallment,
   type DepositOrderLike,
 } from "@/lib/quote-deposit";
@@ -18,6 +19,7 @@ import {
   depositBaseFromOrder as baseEdge,
   depositAmountFromPcts as amountEdge,
   signalPctsFromInstallments as pctsEdge,
+  computeSchedule as scheduleEdge,
   expectedDepositAmount,
   expectedBalanceAmount,
 } from "../../supabase/functions/_shared/banking/quote-deposit";
@@ -48,6 +50,28 @@ const condicoes: (DepositInstallment[] | null)[] = [
 ];
 
 describe("paridade frontend × edge function", () => {
+  it("monta o mesmo cronograma (sinal + parcelas do saldo)", () => {
+    const comSaldo: (DepositInstallment[] | null)[] = [
+      ...condicoes,
+      // "100% Materiais na aprovação + Serviço na entrega" (preset real, caso do ORÇ-00112)
+      [
+        { label: "Sinal", tipo: "aprovacao", parts_pct: 100, services_pct: 0, expenses_pct: 0 },
+        { label: "Serviços", tipo: "entrega", parts_pct: 0, services_pct: 100, expenses_pct: 0 },
+      ],
+      // Três parcelas, uma por prazo, uma sem rótulo
+      [
+        { label: "Entrada", tipo: "aprovacao", services_pct: 30, parts_pct: 50, expenses_pct: 100 },
+        { tipo: "prazo", days_after_approval: 30, services_pct: 40, parts_pct: 25 },
+        { label: "Final", tipo: "entrega", services_pct: 30, parts_pct: 25 },
+      ],
+    ];
+    for (const ordem of ordens) {
+      for (const c of comSaldo) {
+        expect(scheduleEdge(ordem, c as never)).toEqual(scheduleFront(ordem, c));
+      }
+    }
+  });
+
   it("deriva a mesma base e o mesmo discountRatio", () => {
     for (const ordem of ordens) {
       expect(baseEdge(ordem)).toEqual(baseFront(ordem));

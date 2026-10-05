@@ -14,7 +14,7 @@ import { registrarEnvio } from "../comms/send-log.ts";
 import { documentTypeFor } from "../../pdf/document-type.ts";
 import { fmtCurrency, vencimentoDoOrcamento } from "../../pdf/documento.ts";
 import { dataBR } from "../../pdf/datas.ts";
-import { guardarEEntregar, impressaoDigitalDoDocumento, montarDocumentoDaOrdem } from "../../pdf/gerar-e-guardar.ts";
+import { guardarEEntregar, impressaoDigitalDoDocumento, montarDocumentoDaOrdem, montarResumoDeValores } from "../../pdf/gerar-e-guardar.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
 
@@ -186,7 +186,7 @@ export async function enviarOrdemAoCliente(p: {
  * só o arquivo — sem número, total e link na legenda. Para quando ele já conversou com o cliente
  * e só quer que o orçamento chegue; a legenda é a frase dele (custom_message) ou nenhuma.
  */
-export type FormatoDoEnvio = "pdf_e_link" | "pdf" | "link";
+export type FormatoDoEnvio = "pdf_e_link" | "pdf" | "link" | "resumo";
 
 /**
  * Decisão do dono (05/10/2026): o padrão é SÓ o ARQUIVO PDF — com a frase dele na legenda, se
@@ -208,7 +208,7 @@ export function formatoDoEnvio(args: { formato?: unknown } | null | undefined): 
   const bruto = args?.formato;
   if (bruto === undefined || bruto === null || String(bruto).trim() === "") return FORMATO_PADRAO;
   const f = String(bruto).trim().toLowerCase();
-  return f === "link" || f === "pdf_e_link" || f === "pdf" ? f : null;
+  return f === "link" || f === "pdf_e_link" || f === "pdf" || f === "resumo" ? f : null;
 }
 
 /**
@@ -228,7 +228,7 @@ export const CARGOS_DO_PDF_AO_CLIENTE: Role[] = ["admin", "financial", "seller"]
  * cortar depois mandaria ao cliente um texto que o dono não leu (até 26/09/2026 o resumo cortava
  * em 200 caracteres e o envio mandava tudo).
  */
-export const LIMITE_DA_MENSAGEM: Record<FormatoDoEnvio, number> = { pdf_e_link: 800, pdf: 1000, link: 4000 };
+export const LIMITE_DA_MENSAGEM: Record<FormatoDoEnvio, number> = { pdf_e_link: 800, pdf: 1000, link: 4000, resumo: 800 };
 
 /**
  * Formato e cargo do envio ao cliente — a MESMA checagem no gancho `preValidar` (antes de a
@@ -244,15 +244,15 @@ export function validarPedidoDeEnvio(
   ctx: Pick<ToolCtx, "userRole" | "userId">,
 ): ({ error: string } & Record<string, unknown>) | null {
   const formato = formatoDoEnvio(args);
-  if (!formato) return { error: `Formato "${String(args?.formato)}" não existe. Use 'pdf_e_link' (padrão), 'pdf' (só o arquivo) ou 'link'.` };
+  if (!formato) return { error: `Formato "${String(args?.formato)}" não existe. Use 'pdf' (padrão, só o arquivo), 'pdf_e_link', 'resumo' (valores em texto) ou 'link'.` };
   const mensagem = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
   if (mensagem.length > LIMITE_DA_MENSAGEM[formato]) {
     return {
-      error: `A mensagem personalizada tem ${mensagem.length} caracteres; ${formato === "link" ? "no envio só do link" : "junto do PDF"} cabem até ${LIMITE_DA_MENSAGEM[formato]}. Encurte e peça de novo.`,
+      error: `A mensagem personalizada tem ${mensagem.length} caracteres; ${formato === "link" ? "no envio só do link" : formato === "resumo" ? "no resumo de valores" : "junto do PDF"} cabem até ${LIMITE_DA_MENSAGEM[formato]}. Encurte e peça de novo.`,
       nada_enviado: true,
     };
   }
-  // Os dois formatos com arquivo levam preço e PIX: mesma lista de cargos.
+  // Os formatos com arquivo e o resumo levam preço e PIX: mesma lista de cargos.
   if (formato === "link") return null;
   if (cargosQueContam(args, ctx).every((c) => CARGOS_DO_PDF_AO_CLIENTE.includes(c as Role))) return null;
   const solicitante = lerSolicitante(args);
@@ -264,6 +264,20 @@ export function validarPedidoDeEnvio(
     alternativa: "formato 'link'",
     nada_enviado: true,
   };
+}
+
+/**
+ * O resumo de valores com a frase do dono (05/10/2026): ela entra logo depois do "Olá, Fulano!",
+ * antes dos valores — é o contexto da conversa ("como combinamos por telefone…"). Sem frase, o
+ * resumo vai como o botão da tela monta.
+ */
+export function resumoComFrase(resumo: string, frase: string): string {
+  const f = frase.trim();
+  if (!f) return resumo;
+  const linhas = resumo.split("\n");
+  const ola = linhas.findIndex((l) => l.startsWith("Olá"));
+  linhas.splice(ola >= 0 ? ola + 1 : 1, 0, f);
+  return linhas.join("\n");
 }
 
 /** "••••1234" — o dono reconhece o número pelo final; o resumo não expõe o telefone inteiro. */
@@ -372,6 +386,8 @@ export async function resumirEnvioAoCliente(
       ? "Formato: *PDF anexado + link* (o arquivo com preço e PIX vai na conversa)"
       : formato === "pdf"
       ? "Formato: *só o PDF*, sem link (o arquivo com preço e PIX vai na conversa)"
+      : formato === "resumo"
+      ? "Formato: *resumo de valores em texto* (sem PDF nem link) — vai exatamente isto:"
       : `Formato: ⚠️ "${String(args?.formato)}" não existe — o envio será recusado`,
   ];
   // A mensagem INTEIRA: o "sim" é sobre o texto que o cliente vai ler. Acima do limite o envio é
@@ -379,7 +395,16 @@ export async function resumirEnvioAoCliente(
   const mensagem = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
   // Só o PDF e sem frase: o dono tem de ver que vai o arquivo sozinho, sem texto nenhum.
   if (!mensagem && formato === "pdf") linhas.push("Legenda: nenhuma (só o arquivo)");
-  if (mensagem) {
+  // Resumo: o "sim" é sobre o TEXTO que o cliente vai ler — ele vai inteiro na confirmação, com a
+  // frase do dono já no lugar (05/10/2026).
+  if (formato === "resumo") {
+    const { data: linhasDeConfig } = await admin.from("app_settings").select("key, value");
+    const cfg: Record<string, string> = {};
+    for (const r of (linhasDeConfig ?? []) as Array<{ key: string; value: unknown }>) cfg[r.key] = String(r.value ?? "");
+    const montado = await montarResumoDeValores(admin, so, cfg);
+    linhas.push(montado.ok ? `\n${resumoComFrase(montado.texto, mensagem)}\n` : `⚠️ Não consegui montar o resumo (${montado.motivo}) — o envio será recusado.`);
+  }
+  if (mensagem && formato !== "resumo") {
     linhas.push(`${formato === "pdf" ? "Legenda" : "Mensagem"}: "${mensagem}"`);
     if (formato && mensagem.length > LIMITE_DA_MENSAGEM[formato]) {
       linhas.push(`⚠️ A mensagem tem ${mensagem.length} caracteres (limite ${LIMITE_DA_MENSAGEM[formato]}) — o envio será recusado.`);
@@ -641,17 +666,17 @@ export const whatsappTools: ToolDef[] = [
   {
     name: "send_service_order_link",
     description:
-      "Envia um orçamento/OS AO CLIENTE pelo WhatsApp, sempre para o WhatsApp/telefone do cadastro do cliente (não existe campo de telefone). Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. PADRÃO (formato='pdf', ou sem formato): SÓ o ARQUIVO PDF, igual ao botão Baixar — com custom_message, a frase do usuário é a legenda inteira; sem ela, vai sem texto. formato='pdf_e_link' acrescenta na legenda o número, o total e o link para ver online e aprovar — use SÓ quando o usuário pedir o link ou o total junto ('com o link', 'para ele aprovar online'). formato='link' manda só o link, em texto — use apenas quando o usuário pedir 'só o link' ou quando o PDF falhar e ele aceitar. Vendedor externo só pode formato='link'. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número do documento (ex: 'ORÇ-00001' para orçamentos, 'OS-00042' para OS, ou o formato antigo 'OS-2026-XXXXX'). Prefira sempre o UUID.",
+      "Envia um orçamento/OS AO CLIENTE pelo WhatsApp, sempre para o WhatsApp/telefone do cadastro do cliente (não existe campo de telefone). Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. PADRÃO (formato='pdf', ou sem formato): SÓ o ARQUIVO PDF, igual ao botão Baixar — com custom_message, a frase do usuário é a legenda inteira; sem ela, vai sem texto. formato='pdf_e_link' acrescenta na legenda o número, o total e o link para ver online e aprovar — use SÓ quando o usuário pedir o link ou o total junto ('com o link', 'para ele aprovar online'). formato='resumo' manda os VALORES EM TEXTO, sem PDF nem link: total, sinal para iniciar, chave PIX/banco e o saldo na conclusão, pela condição de pagamento do orçamento (o mesmo texto do botão 'Resumo' da tela) — use quando o usuário pedir 'manda os valores', 'o resumo', 'quanto ele paga de sinal'; com custom_message, a frase dele entra logo depois do cumprimento. formato='link' manda só o link, em texto — use apenas quando o usuário pedir 'só o link' ou quando o PDF falhar e ele aceitar. Vendedor externo só pode formato='link'. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número do documento (ex: 'ORÇ-00001' para orçamentos, 'OS-00042' para OS, ou o formato antigo 'OS-2026-XXXXX'). Prefira sempre o UUID.",
     input_schema: {
       type: "object",
       properties: {
         service_order_id: { type: "string", description: "UUID (campo id) ou número da OS (campo numero, ex: OS-2026-152542)" },
         formato: {
           type: "string",
-          enum: ["pdf_e_link", "pdf", "link"],
-          description: "pdf (padrão) = só o arquivo (legenda = custom_message, ou nenhuma); pdf_e_link = arquivo com número, total e link na legenda, quando o usuário pedir o link; link = só o link em texto, quando o usuário pedir.",
+          enum: ["pdf_e_link", "pdf", "resumo", "link"],
+          description: "pdf (padrão) = só o arquivo (legenda = custom_message, ou nenhuma); pdf_e_link = arquivo com número, total e link na legenda, quando o usuário pedir o link; resumo = valores em texto (total, sinal, PIX, saldo), sem PDF nem link; link = só o link em texto, quando o usuário pedir.",
         },
-        custom_message: { type: "string", description: "Mensagem personalizada. No formato link substitui o texto padrão (se não trouxer o link, ele vai no fim; até 4000 caracteres); no pdf_e_link vira a primeira linha da legenda (número, total e link vêm sempre; até 800 caracteres); no pdf é a legenda inteira — a frase que o dono quer junto do arquivo (até 1000 caracteres; sem ela, o PDF vai sem texto)." },
+        custom_message: { type: "string", description: "Mensagem personalizada. No formato link substitui o texto padrão (se não trouxer o link, ele vai no fim; até 4000 caracteres); no pdf_e_link vira a primeira linha da legenda (número, total e link vêm sempre; até 800 caracteres); no pdf é a legenda inteira — a frase que o dono quer junto do arquivo (até 1000 caracteres; sem ela, o PDF vai sem texto); no resumo entra logo depois do cumprimento (até 800)." },
       },
       required: ["service_order_id"],
     },
@@ -744,6 +769,44 @@ export const whatsappTools: ToolDef[] = [
           : { ok: true, messageId: envio.messageId ?? null };
         await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: msg, status: envio.ok ? "sent" : "failed" });
         return { ...r, ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}) };
+      }
+
+      // ── formato 'resumo': os valores em texto (05/10/2026) ─────────────────────────────
+      if (formato === "resumo") {
+        const resumo = await montarResumoDeValores(admin, so, settings);
+        if (!resumo.ok) {
+          await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[resumo] não montado: ${resumo.motivo}`, status: "failed" });
+          return { error: `Não consegui montar o resumo de valores (${resumo.motivo}). Nada foi enviado ao cliente.`, nada_enviado: true };
+        }
+        const frase = typeof args.custom_message === "string" ? args.custom_message.trim() : "";
+        const texto = resumoComFrase(resumo.texto, frase);
+        const gr = guardaDeEnvio(texto, { tipo: "os_link", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!so.client_id });
+        if (gr.bloqueado) {
+          await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[resumo] ${texto}`, status: "blocked", blockCode: gr.codigoBloqueio });
+          return { error: gr.motivo };
+        }
+        const envio = await enviarOrdemAoCliente({
+          phone,
+          serviceOrderId: so.id,
+          context: contexto,
+          jwt,
+          // Mesmo texto para o mesmo número no mesmo dia sai uma vez só; mudou um valor, a chave muda.
+          dedupeKey: chaveDeEnvio("os-resumo", so.id, digitos, diaLocal(), hashCurto(texto), marcaDeTeste),
+          conteudo: { kind: "text", message: texto },
+        });
+        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[resumo] ${texto}`, status: envio.ok ? "sent" : "failed" });
+        if (!envio.ok) return { error: `O WhatsApp não aceitou o resumo (${envio.error}). Nada foi confirmado como enviado.`, nada_enviado: !envio.semResposta };
+        if (envio.deduplicated) return { ok: true, deduplicated: true, aviso: `Este mesmo resumo (${resumo.rotulo} ${resumo.numero}) já foi enviado hoje para este cliente; não reenviei.` };
+        return {
+          ok: true,
+          formato: "resumo",
+          enviado_para: modoTeste ? "o número de TESTE do WhatsApp (modo de teste ligado), não o cliente" : `o WhatsApp do cliente (${mascararTelefone(phone)})`,
+          documento: `${resumo.rotulo} ${resumo.numero}`,
+          observacao: modoTeste
+            ? "O modo de teste do WhatsApp está ligado: o resumo foi para o número de teste, NÃO para o cliente. Diga isso."
+            : "O cliente recebeu o resumo de valores em texto (total, sinal, saldo e como pagar).",
+          ...(gr.avisos.length ? { avisos_estilo: gr.avisos } : {}),
+        };
       }
 
       // ── formato 'pdf_e_link': o arquivo do Baixar, com o link na legenda ──────────────

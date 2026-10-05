@@ -9,6 +9,7 @@ import {
   mascararTelefone,
   oQueMudouDesdeOPedido,
   resumirEnvioAoCliente,
+  resumoComFrase,
   whatsappTools,
 } from "./whatsapp.ts";
 import { impressaoDigitalDoDocumento } from "../../pdf/gerar-e-guardar.ts";
@@ -941,4 +942,68 @@ Deno.test("no agente, com autonomia 'auto' gravada: o link roda direto (Confian�
   assertEquals(amb.banco.inseridos.ai_operator_pending_actions, undefined);
   assertEquals(amb.chamadas.envio.length, 1);
   assertEquals(amb.chamadas.envio[0].kind, "text");
+});
+
+// ─── Resumo de valores em texto (05/10/2026) ─────────────────────────────────────────────
+const PRESET_MATERIAIS = {
+  label: "100% Materiais na aprovação + Serviço na entrega",
+  installments: [
+    { label: "Sinal", tipo: "aprovacao", parts_pct: 100, services_pct: 0, expenses_pct: 0 },
+    { label: "Serviços", tipo: "entrega", parts_pct: 0, services_pct: 100, expenses_pct: 0 },
+  ],
+};
+const ORC_COM_CONDICAO = { ...ORC, payment_condition_presets: PRESET_MATERIAIS, payment_conditions: PRESET_MATERIAIS.label };
+const sp = (t: string) => t.replace(/\u00a0/g, " ");
+
+Deno.test("formato 'resumo': manda TEXTO com total, sinal e saldo da condição — sem PDF", async () => {
+  const amb = montarAmbiente({ ordens: [ORC_COM_CONDICAO], settings: { company_name: "HBR Marine", pix_key: "12.345.678/0001-90" } });
+  const r = await executar(amb, { service_order_id: ORC.id, formato: "resumo" });
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(r.formato, "resumo");
+  assertEquals(amb.chamadas.pdf.length, 0, "não renderiza PDF");
+  assertEquals(amb.chamadas.envio[0].kind, "text");
+  assertEquals(amb.chamadas.envio[0].context, "quote");
+  const texto = sp(amb.chamadas.envio[0].message);
+  assertStringIncludes(texto, "Total: R$ 18.450,50");
+  assertStringIncludes(texto, "Sinal para iniciar: R$ 13.000,00");
+  assertStringIncludes(texto, "Serviços: R$ 6.000,00 — na entrega");
+  assertStringIncludes(texto, "Chave PIX: *12.345.678/0001-90*");
+  assert(!texto.includes("/view/"), "sem link");
+});
+
+Deno.test("formato 'resumo' com frase: ela entra logo depois do cumprimento", async () => {
+  const amb = montarAmbiente({ ordens: [ORC_COM_CONDICAO] });
+  await executar(amb, { service_order_id: ORC.id, formato: "resumo", custom_message: "Como conversamos por telefone, seguem os valores." });
+  const linhas: string[] = amb.chamadas.envio[0].message.split("\n");
+  const ola = linhas.findIndex((l) => l.startsWith("Olá"));
+  assertEquals(linhas[ola + 1], "Como conversamos por telefone, seguem os valores.");
+  assertEquals(resumoComFrase("a\nOlá, X!\nb", ""), "a\nOlá, X!\nb");
+});
+
+Deno.test("formato 'resumo': vendedor externo não manda (leva PIX) e nunca roda sem o sim", () => {
+  const ctx = (userRole: string, userId = "u1") => ({ userRole, userId }) as any;
+  assert(tool.preValidar!({ service_order_id: ORC.id, formato: "resumo" }, ctx("external_seller", "u9")));
+  assertEquals(tool.preValidar!({ service_order_id: ORC.id, formato: "resumo" }, ctx("admin")), null);
+  assertEquals(NEVER_AUTONOMOUS_WHEN.send_service_order_link!({ formato: "resumo" }), true);
+});
+
+Deno.test("resumo da confirmação do 'resumo' mostra o TEXTO inteiro que o cliente vai ler", async () => {
+  const amb = montarAmbiente({ ordens: [ORC_COM_CONDICAO] });
+  const r = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "resumo", custom_message: "Segue." });
+  assertStringIncludes(r!, "resumo de valores em texto");
+  assertStringIncludes(sp(r!), "Sinal para iniciar: R$ 13.000,00");
+  assertStringIncludes(r!, "Segue.");
+});
+
+Deno.test("parcelas PRÓPRIAS (sem condição pronta) entram no resumo — antes eram ignoradas", async () => {
+  const proprias = [
+    { label: "Entrada", tipo: "aprovacao", parts_pct: 50, services_pct: 50, expenses_pct: 0 },
+    { label: "Saldo", tipo: "entrega", parts_pct: 50, services_pct: 50, expenses_pct: 0 },
+  ];
+  const amb = montarAmbiente({ ordens: [{ ...ORC, payment_conditions: "50/50 combinado", custom_payment_installments: proprias }] });
+  await executar(amb, { service_order_id: ORC.id, formato: "resumo" });
+  const texto = sp(amb.chamadas.envio[0].message);
+  assertStringIncludes(texto, "_50/50 combinado_");
+  assertStringIncludes(texto, "Sinal para iniciar: R$ 9.500,00");
+  assertStringIncludes(texto, "Saldo: R$ 9.500,00 — na entrega");
 });

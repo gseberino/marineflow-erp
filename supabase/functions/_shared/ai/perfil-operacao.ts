@@ -38,6 +38,7 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "remove_service_order_item",
   "apply_service_order_discount",
   "set_service_order_charges",
+  "definir_condicao_pagamento", // 05/10/2026: condição de pagamento de orçamento existente
   "update_service_order_status",
   "update_service_order_notes",
   "update_quote_status",
@@ -373,6 +374,8 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "send_service_order_link",
   "send_supplier_quote_request",
   "set_service_order_charges",
+  // 05/10/2026: condição de pagamento de orçamento existente (pedido do dono no ORÇ-00112).
+  "definir_condicao_pagamento",
   "size_dc_cable",
   "sugerir_conciliacao",
   "suggest_suppliers",

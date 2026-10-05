@@ -27,6 +27,8 @@ import {
   tituloParaImpressao,
 } from "./documento.ts";
 import { renderizarPdf } from "./renderizar.ts";
+import { buildQuoteWhatsAppSummary } from "./resumo-whatsapp.ts";
+import { dataBR } from "./datas.ts";
 import { hashCurto } from "../whatsapp/idempotencia.ts";
 
 /** Bucket privado, sem policy nenhuma: só a chave de serviço lê e escreve. */
@@ -103,6 +105,50 @@ export async function montarDocumentoDaOrdem(
       total: fmtCurrency(Number(dados.serviceOrder.grand_total) || 0),
     },
   };
+}
+
+/**
+ * O resumo de valores em TEXTO (total, sinal, saldo, como pagar) — o mesmo do botão "Enviar via
+ * WhatsApp › Resumo" da tela (05/10/2026). Mesmas fontes do diálogo: os dados do PDF (carregarPDFData,
+ * com a condição de pagamento), as opções e a validade do documento (opcoesPadraoDoDocumento) e os
+ * dados da empresa em app_settings. O texto em si sai do espelho resumo-whatsapp.ts, que um teste
+ * de paridade mantém idêntico ao da tela.
+ */
+export async function montarResumoDeValores(
+  admin: LeitorDoBanco,
+  ordem: { id: string; status: string | null },
+  settings: Record<string, string>,
+): Promise<{ ok: true; texto: string; numero: string; rotulo: "Orçamento" | "Ordem de Serviço" } | { ok: false; motivo: string }> {
+  let dados;
+  try {
+    dados = await carregarPDFData(ordem.id, admin);
+  } catch (e) {
+    return { ok: false, motivo: `não consegui ler os dados do orçamento (${e instanceof Error ? e.message : String(e)})` };
+  }
+  const tipoDoc = documentTypeFor(ordem.status);
+  const opcoes: PDFOptions = opcoesPadraoDoDocumento(settings, tipoDoc, dados.serviceOrder);
+  if (opcoes.hideFinancials) return { ok: false, motivo: "o documento esconde os valores — não há resumo de valores para mandar" };
+  // deno-lint-ignore no-explicit-any
+  const so = dados.serviceOrder as Record<string, any>;
+  const texto = buildQuoteWhatsAppSummary({
+    numero: so.service_order_number,
+    clienteNome: dados.client?.name ?? null,
+    ativoNome: dados.vessel?.name ?? null,
+    orcamento: so,
+    parcelas: so.payment_condition_installments ?? null,
+    condicaoLabel: so.payment_condition_label ?? so.payment_conditions ?? null,
+    validadeDias: opcoes.validity?.days ?? null,
+    validadeAte: opcoes.validity?.mode === "date" && opcoes.validity.date ? dataBR(opcoes.validity.date) : null,
+    empresa: {
+      nome: settings.company_name,
+      pixKey: settings.pix_key,
+      bankName: settings.bank_name,
+      bankAgency: settings.bank_agency,
+      bankAccount: settings.bank_account,
+    },
+    opcoes,
+  });
+  return { ok: true, texto, numero: so.service_order_number, rotulo: tipoDoc === "quote" ? "Orçamento" : "Ordem de Serviço" };
 }
 
 /**

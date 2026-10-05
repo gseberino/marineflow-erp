@@ -131,6 +131,13 @@ async function fotosDaGaleria(
   }
 }
 
+/** As parcelas próprias do orçamento (custom_payment_installments), ou null se não houver. */
+// deno-lint-ignore no-explicit-any
+export function parcelasProprias(so: any): any[] | null {
+  const p = so?.custom_payment_installments;
+  return Array.isArray(p) && p.length > 0 ? p : null;
+}
+
 export async function carregarPDFData(
   serviceOrderId: string,
   db: LeitorDoBanco,
@@ -268,8 +275,15 @@ export async function carregarPDFData(
       operational_cost_total: so.operational_cost_total || 0,
       extra_notes: so.extra_notes ?? undefined,
       payment_conditions: (so as any).payment_conditions ?? undefined,
-      payment_condition_label: (so as any).payment_condition_presets?.label ?? null,
-      payment_condition_installments: (so as any).payment_condition_presets?.installments ?? null,
+      // A condição pronta (preset) manda; sem ela, as parcelas PRÓPRIAS do orçamento
+      // ("Personalizado" na tela, ou definidas pelo assistente). Até 05/10/2026 só o preset era
+      // lido: o PDF e o resumo de valores ignoravam as parcelas próprias que a tela já usava
+      // para calcular o sinal (nenhum orçamento as usava ainda — o assistente passou a gravar).
+      payment_condition_label: (so as any).payment_condition_presets?.label
+        ?? (parcelasProprias(so) ? ((so as any).payment_conditions ?? null) : null),
+      payment_condition_installments: (so as any).payment_condition_presets
+        ? ((so as any).payment_condition_presets.installments ?? null)
+        : parcelasProprias(so),
       subcontract_cost_total: (so as any).subcontract_cost_total || 0,
       financial_notes: (so as any).financial_notes ?? undefined,
       payment_method_preferred: (so as any).payment_method_preferred ?? undefined,

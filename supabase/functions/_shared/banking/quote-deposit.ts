@@ -65,6 +65,7 @@ export function depositAmountFromPcts(
 
 function normalizeInstallment(r: DepositInstallment) {
   return {
+    label: r.label ?? "",
     servicesPct: Number(r.services_pct ?? r.percent ?? 0),
     partsPct: Number(r.parts_pct ?? r.percent ?? 0),
     expensesPct: Number(r.expenses_pct ?? 0),
@@ -155,4 +156,65 @@ export function expectedBalanceAmount(
 ): number {
   const b = depositBaseFromOrder(order);
   return round2(Math.max(0, b.base - depositAmount));
+}
+
+/** Uma parcela do cronograma, com o valor já calculado (com desconto). Espelho de src/lib. */
+export interface ScheduleRow {
+  label: string;
+  amount: number;
+  /** dias após a aprovação (para dueBasis='days'). */
+  days: number;
+  /** vencimento: 'delivery' = na entrega; 'days' = aprovação + days. */
+  dueBasis: "delivery" | "days";
+}
+
+export interface PaymentSchedule {
+  /** soma das parcelas de SINAL (tipo 'aprovacao' ou dia 0), com desconto. */
+  signalAmount: number;
+  /** parcelas do SALDO (todas menos a entrada), cada uma já com desconto. */
+  balance: ScheduleRow[];
+  /** soma do saldo. */
+  balanceTotal: number;
+}
+
+/**
+ * Cronograma completo (sinal + saldo) — espelho de computeScheduleFromParts de
+ * src/lib/quote-deposit.ts (05/10/2026: o resumo de valores do assistente precisa das parcelas,
+ * não só do sinal). O teste de paridade compara as duas.
+ */
+export function computeScheduleFromParts(
+  laborCost: number,
+  partsCost: number,
+  expensesTotal: number,
+  discountRatio: number,
+  installments: DepositInstallment[] | null | undefined,
+): PaymentSchedule {
+  const rows = Array.isArray(installments) ? installments.map(normalizeInstallment) : [];
+  let signalAmount = 0;
+  const balance: ScheduleRow[] = [];
+  rows.forEach((r, i) => {
+    const amount = depositAmountFromPcts(
+      laborCost, partsCost, expensesTotal, discountRatio, r.servicesPct, r.partsPct, r.expensesPct,
+    );
+    if (isSignalInstallment(r)) {
+      signalAmount += amount;
+    } else if (amount > 0) {
+      const dueBasis: "delivery" | "days" = r.tipo === "entrega" ? "delivery" : "days";
+      balance.push({ label: r.label || `Parcela ${i + 1}`, amount, days: r.days, dueBasis });
+    }
+  });
+  return {
+    signalAmount: round2(signalAmount),
+    balance,
+    balanceTotal: round2(balance.reduce((s, b) => s + b.amount, 0)),
+  };
+}
+
+/** Como computeScheduleFromParts, mas partindo direto de um orçamento. */
+export function computeSchedule(
+  order: DepositOrderLike,
+  installments: DepositInstallment[] | null | undefined,
+): PaymentSchedule {
+  const b = depositBaseFromOrder(order);
+  return computeScheduleFromParts(b.laborCost, b.partsCost, b.expensesTotal, b.discountRatio, installments);
 }
