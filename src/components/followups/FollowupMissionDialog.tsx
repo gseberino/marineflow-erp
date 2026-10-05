@@ -17,6 +17,7 @@ import { useSuppliers } from '@/hooks/use-suppliers';
 import {
   useCreateFollowupMission,
   useFollowupMissionDaOrigem,
+  useFollowupSwitch,
   type FollowupContraparteTipo,
   type FollowupOrigemTipo,
 } from '@/hooks/use-followup-missions';
@@ -197,7 +198,13 @@ interface BotaoProps extends Pick<ButtonProps, 'size' | 'variant' | 'className'>
 export function FollowupMissionButton({ origem, contraparte, sugestaoObjetivo, sugestaoPrazo, size = 'sm', variant = 'outline', className, compacto }: BotaoProps) {
   const [aberto, setAberto] = useState(false);
   const { data: emAndamento } = useFollowupMissionDaOrigem(origem.tipo, origem.id);
+  const interruptor = useFollowupSwitch();
   const rotuloCls = compacto ? 'hidden sm:inline' : undefined;
+
+  // Interruptor desligado (05/10/2026): o botão de criar some — a missão nasceria parada e a tela
+  // prometeria um rascunho que não vem. Missão que já existe continua levando ao painel, onde se
+  // religa o acompanhamento.
+  if (!emAndamento && (interruptor.isLoading || !interruptor.ligado)) return null;
 
   if (emAndamento) {
     return (

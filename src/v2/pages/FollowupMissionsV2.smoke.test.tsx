@@ -9,7 +9,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { I18nProvider } from '@/i18n';
 import FollowupMissionsV2 from './FollowupMissionsV2';
 
-const { estado } = vi.hoisted(() => ({ estado: { missoes: [] as any[] } }));
+const { estado } = vi.hoisted(() => ({ estado: { missoes: [] as any[], ligado: true } }));
 
 vi.mock('@/hooks/use-followup-missions', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/hooks/use-followup-missions')>();
@@ -24,7 +24,7 @@ vi.mock('@/hooks/use-followup-missions', async (importOriginal) => {
       isLoading: false,
     }),
     useCancelFollowupMission: () => ({ mutateAsync: vi.fn(), isPending: false }),
-    useFollowupSwitch: () => ({ ligado: true, isLoading: false, alternar: vi.fn(), isPending: false }),
+    useFollowupSwitch: () => ({ ligado: estado.ligado, isLoading: false, alternar: vi.fn(), isPending: false }),
     useFollowupMissionDaOrigem: () => ({ data: null, isLoading: false }),
     useCreateFollowupMission: () => ({ mutateAsync: vi.fn(), isPending: false }),
   };
@@ -61,6 +61,7 @@ function renderPainel() {
 describe('FollowupMissionsV2 — IA acompanhando', () => {
   it('vazio ensina onde o botão fica, mostra o kill switch e lista o que depende deles', () => {
     estado.missoes = [];
+    estado.ligado = true;
     renderPainel();
     expect(screen.getByRole('heading', { name: /IA acompanhando/ })).toBeInTheDocument();
     expect(screen.getByText(/clique em "Deixar a IA acompanhar"/)).toBeInTheDocument();
@@ -69,6 +70,17 @@ describe('FollowupMissionsV2 — IA acompanhando', () => {
     expect(screen.getByText(/Depende deles/)).toBeInTheDocument();
     expect(screen.getByText('Entrega das baterias LiFePO4')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Deixar a IA acompanhar/ })).toBeInTheDocument();
+  });
+
+  // Desligado (05/10/2026): o botão de criar some; o painel e o interruptor ficam para religar.
+  it('interruptor desligado esconde o botão de criar missão, mas o painel e o interruptor seguem', () => {
+    estado.missoes = [];
+    estado.ligado = false;
+    renderPainel();
+    expect(screen.getByRole('switch', { name: /Acompanhamento pela IA/ })).toBeInTheDocument();
+    expect(screen.getByText('Entrega das baterias LiFePO4')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Deixar a IA acompanhar/ })).not.toBeInTheDocument();
+    estado.ligado = true;
   });
 
   it('mostra a missão com status legível e abre a trilha', async () => {

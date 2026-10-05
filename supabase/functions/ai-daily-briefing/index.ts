@@ -652,11 +652,16 @@ servirComCors(async (req) => {
         }
         personalBlocks.set(uid, bloco.join("\n"));
       }
-      // Caixa de entrada (Fase 9): sugestões esperando decisão — 1 linha, sem interromper
+      // Caixa de entrada (Fase 9): sugestões esperando decisão — 1 linha, sem interromper.
+      // Só as de produtor ATIVO (05/10/2026, decisão do dono): o detector de conversas do WhatsApp
+      // está pausado desde 30/09 e as 176 sugestões dele, paradas há semanas, faziam o resumo
+      // anunciar todo dia "186 sugestões esperando". Conta a cobrança de saldo (manual_text), que
+      // segue gravando. Se o detector voltar, tirar o filtro de origem.
       const { count: pendingSuggestions } = await admin
         .from("agenda_suggestions")
         .select("id", { count: "exact", head: true })
-        .eq("status", "pending");
+        .eq("status", "pending")
+        .neq("origin", "whatsapp");
       if ((pendingSuggestions ?? 0) > 0) {
         for (const uid of recIds) {
           const atual = personalBlocks.get(uid) || "\n📋 *Sua agenda hoje*";

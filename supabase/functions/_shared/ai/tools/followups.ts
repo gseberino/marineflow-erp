@@ -229,6 +229,15 @@ export const followupTools: ToolDef[] = [
     execute: async (args: any, ctx: ToolCtx) => {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
+      // Com o interruptor desligado (desde 15/09) a missão nascia e ficava parada: o assistente
+      // prometia que "a IA vai redigir" e nada acontecia (avaliação de 04/10). Recusa antes.
+      const settings = await lerSettings(ctx.admin, ["followup_missions_enabled"]);
+      if ((settings.followup_missions_enabled ?? "true").trim().toLowerCase() === "false") {
+        return {
+          error: "O acompanhamento pela IA está desligado. Nenhuma missão foi criada; para cobrar alguém agora, " +
+            "redija a mensagem com o dono e envie pelo caminho normal.",
+        };
+      }
       const { data, error } = await ctx.sb.rpc("create_followup_mission", {
         p_origem_tipo: args.origem_tipo,
         p_origem_id: args.origem_id && UUID_RE.test(args.origem_id) ? args.origem_id : null,
