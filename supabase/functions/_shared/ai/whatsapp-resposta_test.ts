@@ -34,3 +34,22 @@ Deno.test("erro vem na frente de tudo", () => {
   assertEquals(r.replyText, "⚠️ Falha ao chamar a Anthropic API");
   assertEquals(r.metadata.pending_confirm_action_id, null);
 });
+
+Deno.test("texto com pendência VIVA: guarda a referência e lembra dela (05/10/2026)", () => {
+  const viva = { title: "Enviar orçamento/OS ao cliente (WhatsApp)", risk_level: "high" };
+  const t = respostaDoTurnoNoWhatsApp({ texto: "Não consigo tirar o link desse formato." }, antes, viva);
+  assertEquals(t.metadata.pending_confirm_action_id, "velha");
+  assertEquals(t.metadata.pendencia_herdada, true, "sim sem PIN reapresenta em vez de executar");
+  assertStringIncludes(t.replyText, "Não consigo tirar o link desse formato.");
+  assertStringIncludes(t.replyText, "⏳ Ainda espera a sua resposta: *Enviar orçamento/OS ao cliente (WhatsApp)*");
+  assertStringIncludes(t.replyText, "Para rejeitar: *não*");
+  // Sem pendência viva (resolvida ou expirada), zera como sempre.
+  assertEquals(respostaDoTurnoNoWhatsApp({ texto: "ok" }, antes, null).metadata.pending_confirm_action_id, null);
+  // Pendência nova manda sobre a viva.
+  const nova = respostaDoTurnoNoWhatsApp(
+    { texto: "", proposal: { pending_action_id: "p2", title: "Enviar só o PDF", summary_markdown: "ORÇ-00113", risk_level: "high" } },
+    antes,
+    viva,
+  );
+  assertEquals(nova.metadata.pending_confirm_action_id, "p2");
+});

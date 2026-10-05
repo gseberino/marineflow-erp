@@ -40,6 +40,8 @@ import { allTools, toolsByName, type Role } from "../_shared/ai/tools/index.ts";
 import {
   checkWhatsAppRateLimit,
   decidirPendenciaHerdada,
+  pendenciaQueSegueEsperando,
+  cancelarPendenciaSubstituida,
   formatOptionsAsNumberedText,
   notaDeConfirmacao,
   parseConfirmationReply,
@@ -687,9 +689,11 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
   const { replyText, metadata: newMetadata } = respostaDoTurnoNoWhatsApp(
     { error: result.error, options: result.options, proposal: result.proposal as Proposal | undefined, texto: result.message.content },
     metadata,
+    await pendenciaQueSegueEsperando(admin, metadata),
   );
+  const avisoDeSubstituicao = await cancelarPendenciaSubstituida(admin, metadata, newMetadata, appUser.id);
   await admin.from("ai_operator_sessions").update({ metadata: newMetadata, last_activity_at: new Date().toISOString() }).eq("id", sessionId);
-  await queueWhatsAppReply(admin, phoneNormalized, replyText);
+  await queueWhatsAppReply(admin, phoneNormalized, replyText + avisoDeSubstituicao);
 
   return jr({ ok: true, session_id: sessionId });
 }
@@ -747,9 +751,11 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
     const { replyText, metadata: novo } = respostaDoTurnoNoWhatsApp(
       { proposal: interrupcao.proposal, options: interrupcao.options, texto: resposta },
       metadata,
+      await pendenciaQueSegueEsperando(admin, metadata),
     );
+    const avisoDeSubstituicao = await cancelarPendenciaSubstituida(admin, metadata, novo, appUser.id);
     await admin.from("ai_operator_sessions").update({ metadata: novo, last_activity_at: new Date().toISOString() }).eq("id", sessionId);
-    await queueWhatsAppReply(admin, phoneNormalized, replyText);
+    await queueWhatsAppReply(admin, phoneNormalized, replyText + avisoDeSubstituicao);
     return jr({ ok: true, entregue: "claude_max" });
   }
 

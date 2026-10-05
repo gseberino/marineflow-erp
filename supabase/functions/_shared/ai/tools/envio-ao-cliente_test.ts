@@ -225,9 +225,55 @@ Deno.test("mensagem personalizada abre a legenda, mas número, total e link vêm
 
 Deno.test("formato desconhecido é recusado — não adivinha", async () => {
   const amb = montarAmbiente();
-  const r = await executar(amb, { service_order_id: ORC.id, formato: "pdf" });
+  const r = await executar(amb, { service_order_id: ORC.id, formato: "word" });
   assertStringIncludes(r.error, "não existe");
   assertEquals(amb.chamadas.pdf.length + amb.chamadas.envio.length, 0);
+});
+
+// ─── Só o PDF (05/10/2026): sem número, total e link; a frase do dono é a legenda ─────────
+Deno.test("formato 'pdf' sem frase: vai só o arquivo, sem legenda nenhuma", async () => {
+  const amb = montarAmbiente();
+  const r = await executar(amb, { service_order_id: ORC.id, formato: "pdf" });
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(r.formato, "pdf");
+  assertEquals(amb.chamadas.envio.length, 1);
+  assertEquals(amb.chamadas.envio[0].kind, "document");
+  assertEquals(amb.chamadas.envio[0].document_caption, "");
+  assertEquals(amb.chamadas.envio[0].context, "quote", "continua marcando o orçamento como enviado");
+});
+
+Deno.test("formato 'pdf' com frase: a legenda é EXATAMENTE a frase, sem total nem link", async () => {
+  const amb = montarAmbiente();
+  const frase = "Miguel, como conversamos: já aplicamos 3% de desconto pela compra maior na Raymarine.";
+  await executar(amb, { service_order_id: ORC.id, formato: "pdf", custom_message: frase });
+  const legenda: string = amb.chamadas.envio[0].document_caption;
+  assertEquals(legenda, frase);
+  assert(!legenda.includes("/view/"), "sem link");
+  assert(!legenda.includes("Total"), "sem total");
+});
+
+Deno.test("formato 'pdf': vendedor externo não manda (leva preço e PIX), e o limite da frase é 1000", async () => {
+  const amb = montarAmbiente();
+  const r = await executar(amb, { service_order_id: ORC.id, formato: "pdf" }, "external_seller");
+  assertStringIncludes(r.error, "não manda o PDF");
+  const longa = await executar(montarAmbiente(), { service_order_id: ORC.id, formato: "pdf", custom_message: "x".repeat(1001) });
+  assertStringIncludes(longa.error, "cabem até 1000");
+  const cabe = await executar(montarAmbiente(), { service_order_id: ORC.id, formato: "pdf", custom_message: "x".repeat(1000) });
+  assertEquals(cabe.ok, true, JSON.stringify(cabe));
+});
+
+Deno.test("formato 'pdf' nunca roda sem o sim, mesmo com autonomia liberada", () => {
+  assertEquals(NEVER_AUTONOMOUS_WHEN.send_service_order_link!({ formato: "pdf" }), true);
+  assertEquals(formatoDoEnvio({ formato: " PDF " }), "pdf");
+});
+
+Deno.test("resumo do 'pdf' diz que vai só o arquivo — e se vai legenda", async () => {
+  const amb = montarAmbiente();
+  const semFrase = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "pdf" });
+  assertStringIncludes(semFrase!, "só o PDF");
+  assertStringIncludes(semFrase!, "Legenda: nenhuma");
+  const comFrase = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "pdf", custom_message: "Segue o orçamento." });
+  assertStringIncludes(comFrase!, 'Legenda: "Segue o orçamento."');
 });
 
 // ─── 1. Destino ──────────────────────────────────────────────────────────────────────────
@@ -817,7 +863,7 @@ Deno.test("no agente: vendedor externo pedindo SÓ o link vira pendência com qu
 });
 
 Deno.test("formato inexistente também é recusado antes da pendência", async () => {
-  const { amb, resultado } = await rodarNoAgente({ service_order_id: ORC.id, formato: "pdf" }, { settings: {} });
+  const { amb, resultado } = await rodarNoAgente({ service_order_id: ORC.id, formato: "word" }, { settings: {} });
   assertEquals(amb.banco.inseridos.ai_operator_pending_actions, undefined);
   assertStringIncludes((resultado.toolEvents[0].result as any).error, "não existe");
 });
@@ -870,7 +916,9 @@ Deno.test("preValidar da tool e execute usam a mesma checagem", () => {
   assert(pv({ service_order_id: ORC.id, formato: "pdf_e_link" }, ctx("external_seller", "u9")));
   assertEquals(pv({ service_order_id: ORC.id, formato: "link" }, ctx("external_seller", "u9")), null);
   assertEquals(pv({ service_order_id: ORC.id }, ctx("seller")), null);
-  assertStringIncludes(pv({ service_order_id: ORC.id, formato: "pdf" }, ctx("admin"))!.error, "não existe");
+  assertStringIncludes(pv({ service_order_id: ORC.id, formato: "word" }, ctx("admin"))!.error, "não existe");
+  assert(pv({ service_order_id: ORC.id, formato: "pdf" }, ctx("external_seller", "u9")), "só o PDF também leva preço e PIX");
+  assertEquals(pv({ service_order_id: ORC.id, formato: "pdf" }, ctx("admin")), null);
   assertEquals(tool.gravarSolicitante, true);
 });
 

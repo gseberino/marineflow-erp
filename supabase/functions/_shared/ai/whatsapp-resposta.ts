@@ -14,6 +14,8 @@ export interface DesfechoDoTurno {
 export function respostaDoTurnoNoWhatsApp(
   d: DesfechoDoTurno,
   metadata: Record<string, any>,
+  /** A pendência desta conversa que ainda espera resposta (pendenciaQueSegueEsperando). */
+  pendenciaViva: { title: string; risk_level?: string | null } | null = null,
 ): { replyText: string; metadata: Record<string, any> } {
   // O turno passou pelo modelo: a pendência herdada (se havia) deixou de valer aqui — os ramos
   // abaixo zeram ou trocam pending_confirm_action_id, e a marca de herança vai junto.
@@ -32,6 +34,14 @@ export function respostaDoTurnoNoWhatsApp(
     novo.pending_confirm_action_id = d.proposal.pending_action_id;
     novo.pin_attempts = 0;
     novo.pending_options = null;
+  } else if (pendenciaViva && metadata.pending_confirm_action_id) {
+    // Conversa no meio de uma pendência viva (05/10/2026): a referência fica, e o dono vê que ela
+    // ainda espera. Como na pendência herdada: "não" cancela, "sim <PIN>" aprova, e "sim" sem PIN
+    // a mostra de novo em vez de executar — o "sim" pode ser resposta a outra coisa.
+    replyText = `${d.texto || "Ok."}
+
+⏳ Ainda espera a sua resposta: *${pendenciaViva.title}*.${notaDeConfirmacao(pendenciaViva.risk_level)}`;
+    novo.pendencia_herdada = true;
   } else {
     replyText = d.texto || "Ok.";
     novo.pending_confirm_action_id = null;

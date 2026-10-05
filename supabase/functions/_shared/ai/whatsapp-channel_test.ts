@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
+  cancelarPendenciaSubstituida,
   decidirPendenciaHerdada,
   formatOptionsAsNumberedText,
   notaDeConfirmacao,
@@ -189,4 +190,48 @@ Deno.test("resolveOptionAsUserText: __refine__ vira pedido de mais detalhes", ()
 
 Deno.test("resolveOptionAsUserText: valor não-UUID vira só o label", () => {
   assertEquals(resolveOptionAsUserText({ label: "Sim", value: "sim" }), "Sim");
+});
+
+// ─── Uma pendência por conversa (05/10/2026) ─────────────────────────────────────────────
+function bancoDePendencias(viva: boolean) {
+  const gravado: { update?: Record<string, unknown>; filtros: unknown[][]; auditoria?: Record<string, unknown> } = { filtros: [] };
+  const admin = {
+    from(tabela: string) {
+      if (tabela === "ai_operator_audit") {
+        return { insert: (linha: Record<string, unknown>) => { gravado.auditoria = linha; return Promise.resolve({ error: null }); } };
+      }
+      const b: Record<string, unknown> = {};
+      b.update = (v: Record<string, unknown>) => { gravado.update = v; return b; };
+      b.eq = (...a: unknown[]) => { gravado.filtros.push(a); return b; };
+      b.select = () => Promise.resolve({ data: viva ? [{ title: "Enviar orçamento/OS ao cliente (WhatsApp)", action_name: "send_service_order_link", session_id: "s1" }] : [], error: null });
+      return b;
+    },
+  };
+  return { admin, gravado };
+}
+
+Deno.test("pendência nova cancela a anterior que ainda esperava, avisa e audita", async () => {
+  const { admin, gravado } = bancoDePendencias(true);
+  const aviso = await cancelarPendenciaSubstituida(admin, { pending_confirm_action_id: "velha" }, { pending_confirm_action_id: "nova" }, "u1");
+  assertEquals(gravado.update?.status, "rejected");
+  assertEquals(gravado.filtros, [["id", "velha"], ["status", "pending"]], "só cancela se ainda estava pendente");
+  assertEquals(gravado.auditoria?.event_type, "superseded:send_service_order_link");
+  assertEquals(gravado.auditoria?.event_category, "data");
+  assertEquals(gravado.auditoria?.actor_kind, "system");
+  assertEquals(aviso, "\n\n(O pedido anterior — Enviar orçamento/OS ao cliente (WhatsApp) — foi cancelado: vale só este.)");
+});
+
+Deno.test("sem troca de pendência, ou anterior já decidida: não mexe em nada", async () => {
+  for (const [antes, depois] of [
+    [{}, { pending_confirm_action_id: "nova" }],
+    [{ pending_confirm_action_id: "mesma" }, { pending_confirm_action_id: "mesma" }],
+    [{ pending_confirm_action_id: "velha" }, { pending_confirm_action_id: null }],
+  ] as const) {
+    const { admin, gravado } = bancoDePendencias(true);
+    assertEquals(await cancelarPendenciaSubstituida(admin, antes, depois, "u1"), "");
+    assertEquals(gravado.update, undefined);
+  }
+  const { admin, gravado } = bancoDePendencias(false);
+  assertEquals(await cancelarPendenciaSubstituida(admin, { pending_confirm_action_id: "velha" }, { pending_confirm_action_id: "nova" }, "u1"), "");
+  assertEquals(gravado.auditoria, undefined, "já decidida: sem auditoria nem aviso");
 });

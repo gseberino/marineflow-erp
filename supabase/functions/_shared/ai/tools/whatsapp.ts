@@ -181,8 +181,12 @@ export async function enviarOrdemAoCliente(p: {
 
 // ─── Envio de orçamento/OS ao cliente: formato, cargos e resumo da confirmação ──────────
 
-/** Os dois jeitos de mandar uma ordem ao cliente pelo assistente. */
-export type FormatoDoEnvio = "pdf_e_link" | "link";
+/**
+ * Os jeitos de mandar uma ordem ao cliente pelo assistente. 'pdf' (05/10/2026, pedido do dono):
+ * só o arquivo — sem número, total e link na legenda. Para quando ele já conversou com o cliente
+ * e só quer que o orçamento chegue; a legenda é a frase dele (custom_message) ou nenhuma.
+ */
+export type FormatoDoEnvio = "pdf_e_link" | "pdf" | "link";
 
 /**
  * Decisão do dono (26/09/2026): o padrão é o ARQUIVO PDF com o link na legenda — o cliente vê
@@ -203,7 +207,7 @@ export function formatoDoEnvio(args: { formato?: unknown } | null | undefined): 
   const bruto = args?.formato;
   if (bruto === undefined || bruto === null || String(bruto).trim() === "") return FORMATO_PADRAO;
   const f = String(bruto).trim().toLowerCase();
-  return f === "link" || f === "pdf_e_link" ? f : null;
+  return f === "link" || f === "pdf_e_link" || f === "pdf" ? f : null;
 }
 
 /**
@@ -216,13 +220,14 @@ export const CARGOS_DO_PDF_AO_CLIENTE: Role[] = ["admin", "financial", "seller"]
 /**
  * Tamanho máximo da mensagem personalizada, por formato. No PDF ela é a abertura da legenda, e
  * o whatsapp-send recusa legenda acima de 1024 caracteres — o resto da legenda (número, total e
- * link) ocupa ~160, então 800 deixa folga. No link ela é o texto inteiro (limite 4096).
+ * link) ocupa ~160, então 800 deixa folga. No 'pdf' ela é a legenda inteira (1000, abaixo dos
+ * 1024). No link ela é o texto inteiro (limite 4096).
  *
  * Recusa em vez de cortar: a confirmação mostra a mensagem INTEIRA, e o "sim" é sobre ela —
  * cortar depois mandaria ao cliente um texto que o dono não leu (até 26/09/2026 o resumo cortava
  * em 200 caracteres e o envio mandava tudo).
  */
-export const LIMITE_DA_MENSAGEM: Record<FormatoDoEnvio, number> = { pdf_e_link: 800, link: 4000 };
+export const LIMITE_DA_MENSAGEM: Record<FormatoDoEnvio, number> = { pdf_e_link: 800, pdf: 1000, link: 4000 };
 
 /**
  * Formato e cargo do envio ao cliente — a MESMA checagem no gancho `preValidar` (antes de a
@@ -238,15 +243,16 @@ export function validarPedidoDeEnvio(
   ctx: Pick<ToolCtx, "userRole" | "userId">,
 ): ({ error: string } & Record<string, unknown>) | null {
   const formato = formatoDoEnvio(args);
-  if (!formato) return { error: `Formato "${String(args?.formato)}" não existe. Use 'pdf_e_link' (padrão) ou 'link'.` };
+  if (!formato) return { error: `Formato "${String(args?.formato)}" não existe. Use 'pdf_e_link' (padrão), 'pdf' (só o arquivo) ou 'link'.` };
   const mensagem = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
   if (mensagem.length > LIMITE_DA_MENSAGEM[formato]) {
     return {
-      error: `A mensagem personalizada tem ${mensagem.length} caracteres; ${formato === "pdf_e_link" ? "junto do PDF" : "no envio só do link"} cabem até ${LIMITE_DA_MENSAGEM[formato]}. Encurte e peça de novo.`,
+      error: `A mensagem personalizada tem ${mensagem.length} caracteres; ${formato === "link" ? "no envio só do link" : "junto do PDF"} cabem até ${LIMITE_DA_MENSAGEM[formato]}. Encurte e peça de novo.`,
       nada_enviado: true,
     };
   }
-  if (formato !== "pdf_e_link") return null;
+  // Os dois formatos com arquivo levam preço e PIX: mesma lista de cargos.
+  if (formato === "link") return null;
   if (cargosQueContam(args, ctx).every((c) => CARGOS_DO_PDF_AO_CLIENTE.includes(c as Role))) return null;
   const solicitante = lerSolicitante(args);
   const outraPessoaPediu = !!solicitante && solicitante.user_id !== ctx.userId &&
@@ -363,13 +369,17 @@ export async function resumirEnvioAoCliente(
       ? "Formato: *só o link* (para ver online e aprovar)"
       : formato === "pdf_e_link"
       ? "Formato: *PDF anexado + link* (o arquivo com preço e PIX vai na conversa)"
+      : formato === "pdf"
+      ? "Formato: *só o PDF*, sem link (o arquivo com preço e PIX vai na conversa)"
       : `Formato: ⚠️ "${String(args?.formato)}" não existe — o envio será recusado`,
   ];
   // A mensagem INTEIRA: o "sim" é sobre o texto que o cliente vai ler. Acima do limite o envio é
   // recusado (validarPedidoDeEnvio), e o resumo diz isso em vez de mostrar um pedaço.
   const mensagem = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
+  // Só o PDF e sem frase: o dono tem de ver que vai o arquivo sozinho, sem texto nenhum.
+  if (!mensagem && formato === "pdf") linhas.push("Legenda: nenhuma (só o arquivo)");
   if (mensagem) {
-    linhas.push(`Mensagem: "${mensagem}"`);
+    linhas.push(`${formato === "pdf" ? "Legenda" : "Mensagem"}: "${mensagem}"`);
     if (formato && mensagem.length > LIMITE_DA_MENSAGEM[formato]) {
       linhas.push(`⚠️ A mensagem tem ${mensagem.length} caracteres (limite ${LIMITE_DA_MENSAGEM[formato]}) — o envio será recusado.`);
     } else if (formato === "link" && so.share_token && !mensagem.includes(so.share_token)) {
@@ -630,17 +640,17 @@ export const whatsappTools: ToolDef[] = [
   {
     name: "send_service_order_link",
     description:
-      "Envia um orçamento/OS AO CLIENTE pelo WhatsApp, sempre para o WhatsApp/telefone do cadastro do cliente (não existe campo de telefone). Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. PADRÃO (formato='pdf_e_link'): o ARQUIVO PDF, igual ao botão Baixar, com o total e o link para ver online e aprovar na legenda. formato='link' manda só o link, em texto — use apenas quando o usuário pedir 'só o link' ou quando o PDF falhar e ele aceitar. Vendedor externo só pode formato='link'. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número do documento (ex: 'ORÇ-00001' para orçamentos, 'OS-00042' para OS, ou o formato antigo 'OS-2026-XXXXX'). Prefira sempre o UUID.",
+      "Envia um orçamento/OS AO CLIENTE pelo WhatsApp, sempre para o WhatsApp/telefone do cadastro do cliente (não existe campo de telefone). Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. PADRÃO (formato='pdf_e_link'): o ARQUIVO PDF, igual ao botão Baixar, com o total e o link para ver online e aprovar na legenda. formato='pdf' manda SÓ o arquivo, sem número, total e link na legenda — use quando o usuário pedir 'só o PDF', 'sem o link' ou 'sem mensagem'; com custom_message, a frase dele vira a legenda inteira. formato='link' manda só o link, em texto — use apenas quando o usuário pedir 'só o link' ou quando o PDF falhar e ele aceitar. Vendedor externo só pode formato='link'. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número do documento (ex: 'ORÇ-00001' para orçamentos, 'OS-00042' para OS, ou o formato antigo 'OS-2026-XXXXX'). Prefira sempre o UUID.",
     input_schema: {
       type: "object",
       properties: {
         service_order_id: { type: "string", description: "UUID (campo id) ou número da OS (campo numero, ex: OS-2026-152542)" },
         formato: {
           type: "string",
-          enum: ["pdf_e_link", "link"],
-          description: "pdf_e_link (padrão) = arquivo PDF com o link na legenda; link = só o link em texto, quando o usuário pedir.",
+          enum: ["pdf_e_link", "pdf", "link"],
+          description: "pdf_e_link (padrão) = arquivo PDF com número, total e link na legenda; pdf = só o arquivo (legenda = custom_message, ou nenhuma); link = só o link em texto, quando o usuário pedir.",
         },
-        custom_message: { type: "string", description: "Mensagem personalizada. No formato link substitui o texto padrão (se não trouxer o link, ele vai no fim; até 4000 caracteres); no pdf_e_link vira a primeira linha da legenda (número, total e link vêm sempre; até 800 caracteres)." },
+        custom_message: { type: "string", description: "Mensagem personalizada. No formato link substitui o texto padrão (se não trouxer o link, ele vai no fim; até 4000 caracteres); no pdf_e_link vira a primeira linha da legenda (número, total e link vêm sempre; até 800 caracteres); no pdf é a legenda inteira — a frase que o dono quer junto do arquivo (até 1000 caracteres; sem ela, o PDF vai sem texto)." },
       },
       required: ["service_order_id"],
     },
@@ -738,23 +748,27 @@ export const whatsappTools: ToolDef[] = [
       // ── formato 'pdf_e_link': o arquivo do Baixar, com o link na legenda ──────────────
       const montado = await montarDocumentoDaOrdem(admin, so, settings);
       if (!montado.ok) {
-        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[pdf+link] não gerado: ${montado.motivo}`, status: "failed" });
+        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[${formato === "pdf" ? "pdf" : "pdf+link"}] não gerado: ${montado.motivo}`, status: "failed" });
         return anexoFalhou(montado.motivo);
       }
       const doc = montado.doc;
-      const abertura = typeof args.custom_message === "string" && args.custom_message.trim()
-        ? args.custom_message.trim()
-        : `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, segue ${doc.tipoDoc === "quote" ? "o orçamento" : "a ordem de serviço"} em PDF.`;
-      // Número, total e link vêm SEMPRE, mesmo com mensagem personalizada: o dono aprovou o
-      // envio vendo esses três no resumo da confirmação.
-      const legenda = `${abertura}\n\n${doc.rotulo} ${doc.numero} — Total ${doc.total}\nPara ver online e aprovar: ${link}`;
+      const personalizada = typeof args.custom_message === "string" ? args.custom_message.trim() : "";
+      const abertura = personalizada ||
+        `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, segue ${doc.tipoDoc === "quote" ? "o orçamento" : "a ordem de serviço"} em PDF.`;
+      // pdf_e_link: número, total e link vêm SEMPRE, mesmo com mensagem personalizada — o dono
+      // aprovou o envio vendo esses três no resumo. pdf: a legenda é só a frase dele (ou nada), e
+      // o resumo da confirmação mostrou exatamente isso.
+      const legenda = formato === "pdf"
+        ? personalizada
+        : `${abertura}\n\n${doc.rotulo} ${doc.numero} — Total ${doc.total}\nPara ver online e aprovar: ${link}`;
+      const marca = formato === "pdf" ? "[pdf]" : "[pdf+link]";
       // O whatsapp-send recusa legenda acima de 1024 caracteres (zod). Melhor dizer agora do
       // que gerar o PDF e ouvir um 400.
       if (legenda.length > 1024) return { error: "A mensagem personalizada ficou longa demais para a legenda do PDF (limite do WhatsApp). Encurte e tente de novo." };
       // Portão de comunicação ANTES de gerar o arquivo: fora da janela 8h–20h não adianta renderizar.
       const g = guardaDeEnvio(legenda, { tipo: "os_link", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!so.client_id });
       if (g.bloqueado) {
-        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[pdf+link] ${legenda}`, status: "blocked", blockCode: g.codigoBloqueio });
+        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `${marca} ${legenda}`, status: "blocked", blockCode: g.codigoBloqueio });
         return { error: g.motivo };
       }
 
@@ -781,7 +795,7 @@ export const whatsappTools: ToolDef[] = [
       });
       if (!entrega.ok) {
         // Renderizar, guardar ou assinar falhou: `entregar` nem foi chamado — nada saiu.
-        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[pdf+link] não gerado: ${entrega.motivo}`, status: "failed" });
+        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `${marca} não gerado: ${entrega.motivo}`, status: "failed" });
         return anexoFalhou(entrega.motivo);
       }
       const envio = entrega.valor;
@@ -794,7 +808,7 @@ export const whatsappTools: ToolDef[] = [
         // chave, se existe, é de um envio anterior JÁ CONCLUÍDO, e apagá-la abriria a porta
         // para mandar o mesmo PDF de novo; no 502 a própria edge já liberou.
         if (envio.semResposta) await liberarEnvio(admin, chave).catch(() => {});
-        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[pdf+link] ${legenda}`, status: "failed" });
+        await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `${marca} ${legenda}`, status: "failed" });
         if (envio.semResposta) {
           return {
             error: `O WhatsApp não confirmou o envio do PDF (${envio.error}): pode ter chegado ou não. Confira a conversa do cliente antes de reenviar.`,
@@ -808,12 +822,12 @@ export const whatsappTools: ToolDef[] = [
       if (envio.deduplicated) {
         return { ok: true, deduplicated: true, aviso: `Este mesmo PDF (${rotuloDoc}) já foi enviado hoje para este cliente; não reenviei.` };
       }
-      await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[pdf+link] ${legenda}`, status: "sent" });
+      await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `${marca} ${legenda}`, status: "sent" });
       // Modo de teste (calculado lá em cima): dizer "chegou ao cliente" seria fingir.
       // Sem URL e sem token no resultado: ele fica gravado no histórico do agente.
       return {
         ok: true,
-        formato: "pdf_e_link",
+        formato,
         enviado_para: modoTeste ? "o número de TESTE do WhatsApp (modo de teste ligado), não o cliente" : `o WhatsApp do cliente (${mascararTelefone(phone)})`,
         documento: rotuloDoc,
         cliente: doc.cliente,
@@ -821,6 +835,8 @@ export const whatsappTools: ToolDef[] = [
         arquivo: doc.nomeDoArquivo,
         observacao: modoTeste
           ? "O modo de teste do WhatsApp está ligado: o PDF foi para o número de teste, NÃO para o cliente. Diga isso."
+          : formato === "pdf"
+          ? (personalizada ? "O cliente recebeu o PDF com a sua frase na legenda (sem link)." : "O cliente recebeu só o PDF, sem texto nem link.")
           : "O cliente recebeu o PDF com o link para ver online e aprovar.",
         ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}),
       };

@@ -90,6 +90,34 @@ export async function pendenciaParaHerdar(
 }
 
 /**
+ * A pendência desta conversa ainda espera resposta (status pending e dentro do prazo)? Devolve o
+ * que o lembrete precisa mostrar; null = não há, ou já foi resolvida/expirou.
+ *
+ * POR QUE (05/10/2026): todo turno que passava pelo modelo e terminava em texto zerava
+ * pending_confirm_action_id — mas a pendência continuava viva por 24h. O dono pediu o PDF do
+ * ORÇ-00113 ao cliente (pendência criada), mandou "Sem o link, somente o pdf" (turno de texto: a
+ * referência sumiu) e depois "Não": o "não" foi para o modelo, que disse que cancelaria — e não
+ * havia como; o envio seguiu pendente.
+ */
+export async function pendenciaQueSegueEsperando(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  metadata: Record<string, unknown> | null | undefined,
+  agora: Date = new Date(),
+): Promise<{ title: string; risk_level: string | null } | null> {
+  const id = metadata?.pending_confirm_action_id;
+  if (typeof id !== "string" || !id) return null;
+  const { data: pendencia } = await admin
+    .from("ai_operator_pending_actions")
+    .select("status, expires_at, title, risk_level")
+    .eq("id", id)
+    .maybeSingle();
+  if (!pendencia || pendencia.status !== "pending") return null;
+  if (pendencia.expires_at && new Date(pendencia.expires_at).getTime() <= agora.getTime()) return null;
+  return { title: String(pendencia.title || "ação pendente"), risk_level: pendencia.risk_level ?? null };
+}
+
+/**
  * O que fazer com a resposta a uma pendência que veio da conversa anterior.
  *
  * Recusar é sempre seguro. Aprovar com PIN é intenção explícita. Aprovar SEM PIN ("sim", "ok",
@@ -190,4 +218,44 @@ export async function queueWhatsAppReply(admin: any, phoneNormalized: string, me
   }
   // Fallback: enfileira (o worker reenvia em ~1 min) para garantir entrega.
   await admin.from("whatsapp_send_queue").insert({ phone_normalized: phoneNormalized, message, source: "ai_agent" });
+}
+
+/**
+ * Uma pendência por conversa (05/10/2026): quando o turno cria uma pendência NOVA e a anterior
+ * ainda esperava, a anterior é cancelada — senão ela ficava órfã por 24h (a conversa só guarda
+ * uma referência), aprovável pelo sino do painel sem ninguém lembrar dela. Caso real: o dono
+ * pediu o ORÇ-00113 "sem o link" depois de um pedido com link; o primeiro envio seguia vivo.
+ * Devolve o aviso que vai junto da resposta ("" = nada foi cancelado).
+ */
+export async function cancelarPendenciaSubstituida(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  antes: Record<string, unknown>,
+  depois: Record<string, unknown>,
+  userId: string,
+): Promise<string> {
+  const velha = antes?.pending_confirm_action_id;
+  const nova = depois?.pending_confirm_action_id;
+  if (typeof velha !== "string" || !velha || !nova || velha === nova) return "";
+  const { data } = await admin
+    .from("ai_operator_pending_actions")
+    .update({ status: "rejected", rejected_by_user_id: userId, rejected_at: new Date().toISOString() })
+    .eq("id", velha)
+    .eq("status", "pending")
+    .select("title, action_name, session_id");
+  // deno-lint-ignore no-explicit-any
+  const p = (data as any[] | null)?.[0];
+  if (!p) return "";
+  await admin.from("ai_operator_audit").insert({
+    session_id: p.session_id,
+    pending_action_id: velha,
+    actor_user_id: userId,
+    actor_kind: "system",
+    event_type: `superseded:${p.action_name}`,
+    event_category: "data",
+    payload: { channel: "whatsapp", substituida_por: nova },
+  });
+  return `
+
+(O pedido anterior — ${p.title} — foi cancelado: vale só este.)`;
 }
