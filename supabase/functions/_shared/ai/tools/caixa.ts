@@ -164,6 +164,12 @@ async function pessoaPeloDocumento(ctx: ToolCtx, documento: unknown, sentido: "s
 
 const listaDeCadastros = (ps: Pessoa[]) => ps.map((x) => `${x.nome} (${x.tipo})`).join("; ");
 
+// Guarda de tipo: o tsc do app roda sem strictNullChecks, e lá `x && "error" in x` não estreita
+// o tipo depois do return (06/10/2026).
+export function ehErro(x: unknown): x is { error: string } {
+  return !!x && typeof x === "object" && "error" in x;
+}
+
 export async function categoriaValida(ctx: ToolCtx, dita: unknown, tipo: "payable" | "receivable"): Promise<{ nome: string } | { error: string } | null> {
   if (dita == null || dita === "") return null;
   const { data } = await ctx.admin.from("financial_categories").select("name").eq("type", tipo).eq("active", true);
@@ -289,9 +295,9 @@ export async function resolverPedidoDeCaixa(ctx: ToolCtx, args: Record<string, u
   }
 
   const cat = await categoriaValida(ctx, args.categoria, sentido === "recebimento" ? "receivable" : "payable");
-  if (cat && "error" in cat) return cat;
+  if (ehErro(cat)) return cat;
   const os = await osPeloNumero(ctx, args.os);
-  if (os && "error" in os) return os;
+  if (ehErro(os)) return os;
 
   // Ninguém disse a categoria: a padrão de quem recebeu; sem ela, o que o texto indica
   // ("almoço" → Alimentação de campo). Antes caía direto em "Outras despesas" (teste do
@@ -364,7 +370,7 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
       }
     } else if (args.documento) {
       const r = await pessoaPeloDocumento(ctx, args.documento, args.sentido === "entrada" ? "entrada" : "saida");
-      if (r && "error" in r) return `⚠️ ${r.error}`;
+      if (ehErro(r)) return `⚠️ ${r.error}`;
       if (r && "ambiguo" in r) return `⚠️ Mais de um cadastro com o documento ${String(args.documento)}: ${listaDeCadastros(r.ambiguo)}. Diga qual.`;
       if (r && "achado" in r) {
         pessoa = r.achado;
@@ -373,11 +379,11 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
       documentoSemCadastro = !!r && "nenhum" in r;
     }
     const os = await osPeloNumero(ctx, args.os);
-    if (os && "error" in os) return `⚠️ ${os.error}`;
+    if (ehErro(os)) return `⚠️ ${os.error}`;
     // A categoria que o execute VAI gravar: a dita (resolvida no plano de contas), senão a
     // padrão do favorecido, senão a do texto — o "sim" é sobre ela.
     const cat = await categoriaValida(ctx, args.categoria, args.sentido === "entrada" ? "receivable" : "payable");
-    if (cat && "error" in cat) return `⚠️ ${cat.error}`;
+    if (ehErro(cat)) return `⚠️ ${cat.error}`;
     const padrao = !cat && pessoa?.tipo === "favorecido" && pessoa.categoria ? pessoa.categoria : null;
     if (nomeLivre && !cat && !pelo && !os) {
       return `⚠️ "${nomeLivre}" não está no cadastro: diga a categoria (ex.: Alimentação de campo) para eu anotar só com o nome.`;
@@ -525,14 +531,14 @@ export const caixaTools: ToolDef[] = [
       } else if (args.documento) {
         // Sem nome dito, o CPF/CNPJ acha o cadastro (a confirmação mostrou qual).
         const r = await pessoaPeloDocumento(ctx, args.documento, sentido);
-        if (r && "error" in r) return r;
+        if (ehErro(r)) return r;
         if (r && "ambiguo" in r) return { error: `Mais de um cadastro com o documento ${String(args.documento)}: ${listaDeCadastros(r.ambiguo)}. Diga qual.` };
         if (r && "achado" in r) pessoa = r.achado;
       }
       const cat = await categoriaValida(ctx, args.categoria, sentido === "entrada" ? "receivable" : "payable");
-      if (cat && "error" in cat) return cat;
+      if (ehErro(cat)) return cat;
       const os = await osPeloNumero(ctx, args.os);
-      if (os && "error" in os) return os;
+      if (ehErro(os)) return os;
       let categoria = cat?.nome ?? (pessoa?.tipo === "favorecido" ? pessoa.categoria ?? null : null);
       // Sem categoria e sem ninguém do cadastro: o texto decide (a confirmação mostrou a mesma coisa).
       if (!categoria && (!args.quem || semCadastro) && sentido === "saida" && args.descricao) {

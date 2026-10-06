@@ -12,7 +12,7 @@
 // mesmo que a literatura de agentes em finanças usa: reversibilidade e alcance da escrita.
 
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
-import { categoriaValida } from "./caixa.ts";
+import { categoriaValida, ehErro } from "./caixa.ts";
 import { regraDeFornecedorAlcanca, type FornecedorConhecido, type TransacaoOrfa } from "../../banking/proposals.ts";
 import { faltaNoDestino, precisaDeDestino } from "../../banking/destino.ts";
 import { entradaSemCliente } from "../../banking/entrada-sem-cliente.ts";
@@ -1256,7 +1256,7 @@ export const financeRulesTools: ToolDef[] = [
       const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
       const cat = await categoriaValida(ctx, args.categoria_padrao, "payable");
-      if (cat && "error" in cat) return cat;
+      if (ehErro(cat)) return cat;
       const { data, error } = await ctx.sb.from("payees").insert({
         name: String(args.nome).trim(),
         kind: args.tipo,
