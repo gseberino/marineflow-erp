@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Upload, CheckCircle, AlertTriangle, ArrowLeft, ArrowRight, FileText, Loader2 } from 'lucide-react';
-import { parseCSVContent, detectFormat, applyMapping, celulasInvalidas, type ParsedFile, type DetectionResult, type ColumnMapping } from '@/lib/import-detector';
+import { parseCSVContent, detectFormat, applyMapping, celulasInvalidas, colunasNoMesmoCampo, type ParsedFile, type DetectionResult, type ColumnMapping } from '@/lib/import-detector';
 import { useCheckConflicts, useImportRows, type ConflictItem } from '@/hooks/use-import';
 
 type EntityType = 'products' | 'services' | 'clients' | 'suppliers' | 'auto';
@@ -61,6 +61,8 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
   // Texto no lugar de número ("sob consulta"): a célula fica vazia, nunca 0 — e a conferência
   // diz qual linha (NOVO-import-01, decisão do dono de 12/08/2026).
   const invalidas = useMemo(() => (parsedFile ? celulasInvalidas(parsedFile.rows, mapping) : []), [parsedFile, mapping]);
+  // Duas colunas para o mesmo campo (NOVO-import-02): avisa, e diz em quantas linhas uma se perde.
+  const repetidas = useMemo(() => (parsedFile ? colunasNoMesmoCampo(parsedFile.rows, mapping) : []), [parsedFile, mapping]);
 
   const checkConflicts = useCheckConflicts();
   const importRows = useImportRows();
@@ -306,6 +308,26 @@ export function ImportWizard({ entityType, open, onOpenChange, onComplete }: Imp
                   })}
               </div>
             </div>
+
+            {repetidas.length > 0 && (
+              <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm" data-testid="colunas-repetidas">
+                <p className="font-medium">Mais de uma coluna vai para o mesmo campo:</p>
+                <ul className="mt-1 list-disc pl-5">
+                  {repetidas.map((g) => {
+                    const rotulo = (getFieldsForType(resolvedType) as Record<string, string>)[g.campo] ?? g.campo;
+                    return (
+                      <li key={g.campo}>
+                        <b>{g.colunas.join(' e ')}</b> → {rotulo}.{' '}
+                        {g.conflitos > 0
+                          ? `Em ${g.conflitos} linha(s) elas têm valores diferentes e só fica o da última preenchida (${g.colunas[g.colunas.length - 1]}).`
+                          : 'Quando só uma vem preenchida, ela é usada; nenhuma linha tem as duas com valores diferentes.'}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <p className="mt-1 text-xs text-muted-foreground">Se isso não for o que você quer, mude uma das colunas para "Ignorar" ou para outro campo.</p>
+              </div>
+            )}
 
             <div className="flex justify-between">
               <Button variant="outline" onClick={() => setStep(1)}><ArrowLeft className="h-4 w-4 mr-1" />{t.common.back}</Button>

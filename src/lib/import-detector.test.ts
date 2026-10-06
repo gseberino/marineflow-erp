@@ -9,7 +9,7 @@
 // comportamento certo e explicam o que quebrava, para ninguém "simplificar" de volta.
 import { describe, it, expect } from 'vitest';
 import {
-  parseCSVContent, detectFormat, transformValue, applyMapping, celulasInvalidas, campoInvalido, semCamposInvalidos,
+  parseCSVContent, detectFormat, transformValue, applyMapping, celulasInvalidas, campoInvalido, semCamposInvalidos, colunasNoMesmoCampo,
 } from './import-detector';
 
 describe('parseCSVContent — separador, aspas e linhas irregulares', () => {
@@ -310,5 +310,23 @@ describe('NOVO-import-01 — texto no lugar de número é listado, nunca vira 0'
     expect(campoInvalido(cabo, 'stock_quantity')).toBe(true);
     expect(semCamposInvalidos(bomba)).toEqual({ name: 'Bomba', stock_quantity: 2 });
     expect(semCamposInvalidos(ok)).toEqual({ name: 'Anodo', sale_price: 35.9, stock_quantity: 3 });
+  });
+});
+
+// NOVO-import-02 (06/10/2026): duas colunas para o mesmo campo — o mapeamento avisa.
+describe('colunasNoMesmoCampo', () => {
+  const mapping = { Celular: 'phone', Telefone: 'phone', Nome: 'name', Obs: null };
+
+  it('acha o grupo e conta só as linhas com valores DIFERENTES nas duas', () => {
+    const rows = [
+      { Celular: '47 99999-0000', Telefone: '', Nome: 'A' },            // só uma: sem conflito
+      { Celular: '47 99999-0000', Telefone: '47 3333-0000', Nome: 'B' }, // conflito
+      { Celular: ' 47 1 ', Telefone: '47 1', Nome: 'C' },                // iguais depois do trim
+    ];
+    expect(colunasNoMesmoCampo(rows, mapping)).toEqual([{ campo: 'phone', colunas: ['Celular', 'Telefone'], conflitos: 1 }]);
+  });
+
+  it('sem colunas repetidas (ou só ignoradas), nada a avisar', () => {
+    expect(colunasNoMesmoCampo([{ Nome: 'A' }], { Nome: 'name', Obs: null, Extra: null })).toEqual([]);
   });
 });

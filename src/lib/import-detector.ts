@@ -290,6 +290,40 @@ export function semCamposInvalidos(row: Record<string, any>): Record<string, any
   return resto;
 }
 
+/** Duas ou mais colunas do arquivo apontando para o MESMO campo do cadastro. */
+export interface ColunasNoMesmoCampo {
+  campo: string;
+  colunas: string[];
+  /** Linhas em que duas dessas colunas vêm preenchidas com valores DIFERENTES — uma se perde. */
+  conflitos: number;
+}
+
+/**
+ * Aviso do mapeamento (NOVO-import-02, 06/10/2026). applyMapping junta as colunas que vão para o
+ * mesmo campo (vazia não apaga a preenchida; entre duas preenchidas vale a última), mas quem importa
+ * não sabia que duas colunas iam para o mesmo lugar — "Celular" e "Telefone" para Telefone, por
+ * exemplo. Devolve os grupos e em quantas linhas há valores diferentes, que é onde se perde dado.
+ */
+export function colunasNoMesmoCampo(rows: Record<string, any>[], mapping: ColumnMapping): ColunasNoMesmoCampo[] {
+  const porCampo = new Map<string, string[]>();
+  for (const [coluna, campo] of Object.entries(mapping)) {
+    if (!campo) continue;
+    porCampo.set(campo, [...(porCampo.get(campo) ?? []), coluna]);
+  }
+  const grupos: ColunasNoMesmoCampo[] = [];
+  for (const [campo, colunas] of porCampo) {
+    if (colunas.length < 2) continue;
+    const conflitos = rows.filter((row) => {
+      const preenchidos = new Set(
+        colunas.map((c) => (row[c] == null ? '' : String(row[c]).trim())).filter((v) => v !== ''),
+      );
+      return preenchidos.size > 1;
+    }).length;
+    grupos.push({ campo, colunas, conflitos });
+  }
+  return grupos;
+}
+
 export function applyMapping(
   rows: Record<string, any>[],
   mapping: ColumnMapping,
