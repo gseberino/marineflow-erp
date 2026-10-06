@@ -11,6 +11,7 @@ import { LancarDialog, type TipoDeLancamento, type PorOnde } from '@/components/
 import { DespesasPanel } from '@/components/DespesasPanel';
 import { ConciliacaoPanel } from '@/components/ConciliacaoPanel';
 import { BankSourcesPanel } from '@/components/BankSourcesPanel';
+import { AtualizarExtrato } from '@/components/AtualizarExtrato';
 import type { SementeDeRegra } from '@/components/FinanceReviewInbox';
 import { FinanceRulesPanel, EditorDeRegra } from '@/components/FinanceRulesPanel';
 import { ExtratoPorConta, type VisaoDoExtrato } from '@/components/ExtratoPorConta';
@@ -29,6 +30,9 @@ import {
   COMODOS, resolverFinanceiro, rotaDoComodo, paraQueServeDe, type Comodo,
 } from '@/v2/pages/financeiro/rotas';
 import '@/v2/tokens.css';
+
+/** Cômodos que leem o extrato do banco: neles o cabeçalho ganha "Atualizar extrato". */
+const COMODOS_COM_EXTRATO = new Set<Comodo>(['visao', 'extrato', 'conciliacao', 'despesas', 'bancos']);
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Financeiro v2 — um cômodo por assunto (26/09/2026).
@@ -128,7 +132,7 @@ export default function FinancialV2() {
           />
         );
       case 'bancos':
-        return <BankSourcesPanel />;
+        return <BankSourcesPanel semBotaoGeral />;
       case 'cadastro':
         return (
           <div className="space-y-3">
@@ -155,9 +159,13 @@ export default function FinancialV2() {
         title={def.nome}
         description={paraQueServeDe(comodo, abaAtiva)}
         actions={
-          <Button className="gap-1.5" onClick={() => setLancar({})}>
-            <Plus className="h-4 w-4" /> Lançar
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {/* Onde se lê o extrato, o botão de trazer o que o banco mandou fica à mão (06/10/2026). */}
+            {COMODOS_COM_EXTRATO.has(comodo) && <AtualizarExtrato />}
+            <Button className="gap-1.5" onClick={() => setLancar({})}>
+              <Plus className="h-4 w-4" /> Lançar
+            </Button>
+          </div>
         }
       >
         <AvisoAbasMudaram />

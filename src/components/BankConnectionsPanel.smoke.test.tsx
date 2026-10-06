@@ -80,9 +80,9 @@ describe('BankConnectionsPanel', () => {
     expect(screen.getByText(/Ir para Demo/)).toBeInTheDocument();
   });
 
-  it('oferece buscar o extrato quando há conexões', async () => {
+  it('oferece atualizar o extrato quando há conexões', async () => {
     renderPainel();
-    expect(await screen.findByRole('button', { name: /Buscar extrato/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Atualizar extrato/i })).toBeInTheDocument();
   });
 
   // 26/09/2026: "Excluir" virou "Desativar". Excluir a conexão do C6 soltaria as 1.849
@@ -113,15 +113,15 @@ describe('BankConnectionsPanel', () => {
     expect(ativarMock).toHaveBeenCalledWith({ id: 'c1', active: false });
   });
 
-  it('conexão desativada aparece apagada, sem Buscar, com Reativar', async () => {
+  it('conexão desativada aparece apagada, sem Atualizar, com Reativar', async () => {
     ativarMock.mockClear();
     const user = userEvent.setup();
     renderPainel();
     expect(await screen.findByText('Conta antiga')).toBeInTheDocument();
     expect(screen.getByText('desativada')).toBeInTheDocument();
     expect(screen.getByText(/não é mais buscado/)).toBeInTheDocument();
-    // Duas conexões ativas com "Buscar"; a desativada não tem.
-    expect(screen.getAllByRole('button', { name: /^Buscar$/ })).toHaveLength(2);
+    // Duas conexões ativas com "Atualizar"; a desativada não tem.
+    expect(screen.getAllByRole('button', { name: /^Atualizar$/ })).toHaveLength(2);
     await user.click(screen.getByRole('button', { name: /Reativar/ }));
     expect(ativarMock).toHaveBeenCalledWith({ id: 'c3', active: true });
   });

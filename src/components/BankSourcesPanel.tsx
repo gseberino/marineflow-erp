@@ -15,7 +15,7 @@ import { Upload } from 'lucide-react';
  * trabalho diário de conciliar. Enquanto morava dentro da aba de conciliação, ficava
  * enterrada atrás de uma sub-aba e o usuário não a encontrava.
  */
-export function BankSourcesPanel() {
+export function BankSourcesPanel({ semBotaoGeral = false }: { semBotaoGeral?: boolean } = {}) {
   const { t, formatCurrency, formatDate } = useI18n();
   const importMutation = useImportBankTransactions();
   const [preview, setPreview] = useState<BankTransaction[] | null>(null);
@@ -67,7 +67,7 @@ export function BankSourcesPanel() {
 
   return (
     <div className="space-y-6">
-      <BankConnectionsPanel />
+      <BankConnectionsPanel semBotaoGeral={semBotaoGeral} />
 
       <div className="space-y-2">
         <div>

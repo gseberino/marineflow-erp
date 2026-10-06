@@ -14,7 +14,7 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
-  pluggyAuth, fetchItem, fetchAccounts, fetchTransactions, listItems,
+  pluggyAuth, fetchItem, fetchAccounts, fetchTransactions, listItems, listarWebhooks, criarWebhook,
   mapTransaction, accountSourceType, motivoDeCreditoEmCartao,
 } from "../_shared/banking/pluggy.ts";
 import {
@@ -22,6 +22,7 @@ import {
 } from "../_shared/banking/janela-de-busca.ts";
 import { type LinhaDoExtrato, type LinhaGuardada, separarReenvios } from "../_shared/banking/reenvio.ts";
 import { avisoDeFalhas, gravarEmLotes, type ResultadoDaGravacao } from "../_shared/banking/gravar-em-lotes.ts";
+import { eventosQueFaltam, semToken } from "../_shared/banking/aviso-do-pluggy.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
@@ -58,8 +59,10 @@ interface SyncBody {
    * `list_items` não sincroniza nada: só mostra o que as credenciais enxergam.
    * `backfill` rebusca o período e ATUALIZA o que já está gravado, em vez de só inserir o
    * que falta — é o único jeito de preencher campos que passaram a ser lidos depois.
+   * `registrar_aviso` cadastra no Pluggy o aviso (webhook) de "fui ao banco" que faz o extrato
+   * entrar sozinho (06/10/2026) — só o administrador.
    */
-  action?: "sync" | "list_items" | "backfill";
+  action?: "sync" | "list_items" | "backfill" | "registrar_aviso";
 }
 
 servirComCors(async (req) => {
@@ -74,11 +77,13 @@ servirComCors(async (req) => {
 
   const cronSecret = req.headers.get("x-cron-secret");
   const isCron = !!cronSecret && cronSecret === Deno.env.get("CRON_SECRET");
+  let userId: string | null = null;
   if (!isCron) {
     const token = (req.headers.get("Authorization") || "").replace("Bearer ", "");
     if (!token) return jr({ error: "unauthorized" }, 401);
     const { data, error } = await admin.auth.getUser(token);
     if (error || !data?.user) return jr({ error: "unauthorized" }, 401);
+    userId = data.user.id;
   }
 
   const clientId = Deno.env.get("PLUGGY_CLIENT_ID");
@@ -108,6 +113,28 @@ servirComCors(async (req) => {
         // provedor. É identificador, não segredo — e sem ele não há como saber a QUAL
         // aplicação o sistema está conectado quando a lista volta vazia.
         client_id_prefixo: clientId.slice(0, 8),
+      });
+    }
+
+    // Cadastra o aviso "fui ao banco" no Pluggy (06/10/2026). Mexe na conta do Pluggy: só admin
+    // (ou o servidor). O token do endereço é o segredo PLUGGY_WEBHOOK_TOKEN e não volta na resposta.
+    if (body.action === "registrar_aviso") {
+      if (!isCron) {
+        const { data: u } = await admin.from("app_users").select("role").eq("id", userId).maybeSingle();
+        if (u?.role !== "admin") return jr({ error: "forbidden", detail: "Só o administrador cadastra o aviso do Pluggy." }, 403);
+      }
+      const tokenDoAviso = Deno.env.get("PLUGGY_WEBHOOK_TOKEN");
+      if (!tokenDoAviso) return jr({ error: "not_configured", detail: "PLUGGY_WEBHOOK_TOKEN ausente nos secrets." }, 500);
+      const endereco = `${Deno.env.get("SUPABASE_URL")}/functions/v1/pluggy-webhook?token=${encodeURIComponent(tokenDoAviso)}`;
+      const apiKey = await pluggyAuth(clientId, clientSecret);
+      const existentes = await listarWebhooks(apiKey);
+      const faltam = eventosQueFaltam(existentes, endereco);
+      for (const ev of faltam) await criarWebhook(apiKey, ev, endereco);
+      return jr({
+        ok: true,
+        endereco: semToken(endereco),
+        cadastrados: faltam,
+        ja_existiam: existentes.map((w) => ({ event: w.event, url: semToken(w.url) })),
       });
     }
 
@@ -567,10 +594,14 @@ async function sincronizarConexao(
     // Saúde da conexão, gravada a cada sincronização: consentimento de Open Finance vence
     // em 12 meses e o item cai por MFA ou troca de senha. Sem isso a conexão morre calada
     // e o gestor descobre no fechamento, com o período já perdido.
+    // E a idade real do dado (06/10/2026): quando o Pluggy foi ao banco e quando volta. O MeuPluggy
+    // vai uma vez por dia; sem isto, "atualizado agora" parecia "tem a compra de agora".
     await admin.from("bank_connections").update({
       provider_status: statusItem || null,
       consent_expires_at: (item as any)?.consentExpiresAt
         ?? (item as any)?.consent?.expiresAt ?? null,
+      provider_updated_at: (item as any)?.lastUpdatedAt ?? null,
+      provider_next_sync_at: (item as any)?.nextAutoSyncAt ?? null,
     }).eq("id", conexao.id);
 
     for (const conta of contas) {

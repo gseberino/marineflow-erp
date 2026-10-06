@@ -2764,6 +2764,8 @@ export type Database = {
           last_transaction_date: string | null
           provider: string
           provider_status: string | null
+          provider_next_sync_at: string | null
+          provider_updated_at: string | null
           saldo_base: number | null
           saldo_base_em: string | null
           sincronizacoes_vazias: number
@@ -2785,6 +2787,8 @@ export type Database = {
           last_transaction_date?: string | null
           provider?: string
           provider_status?: string | null
+          provider_next_sync_at?: string | null
+          provider_updated_at?: string | null
           saldo_base?: number | null
           saldo_base_em?: string | null
           sincronizacoes_vazias?: number
@@ -2806,6 +2810,8 @@ export type Database = {
           last_transaction_date?: string | null
           provider?: string
           provider_status?: string | null
+          provider_next_sync_at?: string | null
+          provider_updated_at?: string | null
           saldo_base?: number | null
           saldo_base_em?: string | null
           sincronizacoes_vazias?: number

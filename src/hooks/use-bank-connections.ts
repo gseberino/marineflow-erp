@@ -15,6 +15,10 @@ export interface BankConnection {
   last_sync_message: string | null;
   last_sync_imported: number | null;
   last_transaction_date: string | null;
+  /** Quando o Pluggy foi ao banco por último (item.lastUpdatedAt) — a idade real do dado. */
+  provider_updated_at?: string | null;
+  /** Próxima ida automática do Pluggy ao banco (item.nextAutoSyncAt), se ele informar. */
+  provider_next_sync_at?: string | null;
 }
 
 export interface SyncResult {

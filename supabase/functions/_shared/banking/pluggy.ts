@@ -177,6 +177,22 @@ export async function listItems(
   }
 }
 
+/** Avisos (webhooks) cadastrados nesta aplicação do Pluggy. */
+export async function listarWebhooks(apiKey: string): Promise<Array<{ id: string; event: string; url: string }>> {
+  const data = await pluggyGet(apiKey, "/webhooks");
+  return ((data?.results ?? []) as any[]).map((w) => ({ id: String(w?.id ?? ""), event: String(w?.event ?? ""), url: String(w?.url ?? "") }));
+}
+
+/** Cadastra um aviso (webhook) no Pluggy: evento → endereço. */
+export async function criarWebhook(apiKey: string, event: string, url: string): Promise<void> {
+  const res = await fetch(`${PLUGGY_API}/webhooks`, {
+    method: "POST",
+    headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ event, url }),
+  });
+  if (!res.ok) throw new Error(`Pluggy /webhooks respondeu ${res.status}: ${(await res.text()).slice(0, 200)}`);
+}
+
 export async function fetchAccounts(apiKey: string, itemId: string): Promise<PluggyAccount[]> {
   const data = await pluggyGet(apiKey, `/accounts?itemId=${encodeURIComponent(itemId)}`);
   return (data?.results ?? []) as PluggyAccount[];

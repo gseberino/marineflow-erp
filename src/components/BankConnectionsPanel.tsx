@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { RefreshCw, Plus, Power, AlertTriangle, CheckCircle2, Link2 } from 'lucide-react';
 import { SaldosDasContas } from '@/components/SaldosDasContas';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { avisarResultadoDaBusca, quandoFoi } from '@/components/AtualizarExtrato';
 import { cn } from '@/lib/utils';
 
 /**
@@ -23,7 +24,7 @@ import { cn } from '@/lib/utils';
  * vínculo. Por isso a tela pede um código em vez de abrir a tela do banco — e explica de
  * onde tirar esse código, que é a parte que ninguém adivinha.
  */
-export function BankConnectionsPanel() {
+export function BankConnectionsPanel({ semBotaoGeral = false }: { semBotaoGeral?: boolean } = {}) {
   const { formatDate } = useI18n();
   const { data: conexoes, isLoading } = useBankConnections();
   const salvar = useSaveBankConnection();
@@ -65,7 +66,7 @@ export function BankConnectionsPanel() {
     }
     try {
       await salvar.mutateAsync(form);
-      toast.success('Conexão cadastrada. Use "Buscar extrato" para trazer as transações.');
+      toast.success('Conexão cadastrada. Use "Atualizar extrato" para trazer as transações.');
       setForm({ external_id: '', label: '', account_kind: 'bank' });
       setNovoAberto(false);
     } catch (e: any) {
@@ -75,15 +76,9 @@ export function BankConnectionsPanel() {
 
   const handleSincronizar = async (connectionId?: string, full = false) => {
     try {
-      const r = await sincronizar.mutateAsync({ connectionId, full });
-      const comErro = r.resultados.filter(x => x.status === 'error');
-      if (comErro.length > 0) {
-        toast.warning(comErro.map(x => `${x.conexao}: ${x.mensagem}`).join(' · '));
-      } else {
-        toast.success(r.message);
-      }
+      avisarResultadoDaBusca(await sincronizar.mutateAsync({ connectionId, full }));
     } catch (e: any) {
-      toast.error(e?.message || 'Não consegui buscar o extrato');
+      toast.error(e?.message || 'Não consegui atualizar o extrato');
     }
   };
 
@@ -174,10 +169,13 @@ export function BankConnectionsPanel() {
         <div className="flex gap-2">
           {(conexoes?.length ?? 0) > 0 && (
             <>
-              <Button size="sm" onClick={() => handleSincronizar()} disabled={sincronizar.isPending}>
-                <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${sincronizar.isPending ? 'animate-spin' : ''}`} />
-                {sincronizar.isPending ? 'Buscando...' : 'Buscar extrato'}
-              </Button>
+              {/* No Financeiro v2 o botão geral fica no cabeçalho da página (AtualizarExtrato). */}
+              {!semBotaoGeral && (
+                <Button size="sm" onClick={() => handleSincronizar()} disabled={sincronizar.isPending}>
+                  <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${sincronizar.isPending ? 'animate-spin' : ''}`} />
+                  {sincronizar.isPending ? 'Atualizando…' : 'Atualizar extrato'}
+                </Button>
+              )}
               {/* A sincronização normal só INSERE o que falta: transação importada antes de
                   um campo passar a ser lido fica sem ele para sempre. Este botão rebusca o
                   período e preenche o que está vazio, sem tocar em valor nem data. */}
@@ -366,6 +364,13 @@ export function BankConnectionsPanel() {
                     {c.last_synced_at && c.last_sync_status === 'ok' && ` · ${formatDate(c.last_synced_at)}`}
                   </p>
                 )}
+                {/* A idade do dado do BANCO: o Pluggy vai ao banco uma vez por dia; o clique só lê o que ele já trouxe. */}
+                {!inativa && c.provider !== 'caixa' && c.provider_updated_at && (
+                  <p className="text-xs text-muted-foreground mt-0.5" data-testid="dado-do-banco">
+                    Dado do banco de {quandoFoi(c.provider_updated_at)}
+                    {c.provider_next_sync_at && ` · próxima ida ao banco ${quandoFoi(c.provider_next_sync_at)}`}
+                  </p>
+                )}
                 {!c.last_synced_at && c.provider !== 'caixa' && (
                   <p className="text-xs text-muted-foreground mt-1">Ainda não sincronizada.</p>
                 )}
@@ -388,10 +393,10 @@ export function BankConnectionsPanel() {
                   className="shrink-0"
                   rotulo={`conta ${c.label}`}
                   ocupada={sincronizar.isPending}
-                  rapidas={[{ texto: 'Buscar', icone: RefreshCw, onClick: () => handleSincronizar(c.id), desabilitada: sincronizar.isPending }]}
+                  rapidas={[{ texto: 'Atualizar', icone: RefreshCw, onClick: () => handleSincronizar(c.id), desabilitada: sincronizar.isPending }]}
                   menu={[
                     {
-                      texto: 'Buscar o último ano', onClick: () => handleSincronizar(c.id, true), desabilitada: sincronizar.isPending,
+                      texto: 'Atualizar o último ano', onClick: () => handleSincronizar(c.id, true), desabilitada: sincronizar.isPending,
                       titulo: 'Rebusca o último ano inteiro: traz o que tiver faltado, sem duplicar',
                     },
                     {

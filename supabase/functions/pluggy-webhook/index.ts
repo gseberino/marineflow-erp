@@ -1,4 +1,6 @@
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { itemParaLer } from "../_shared/banking/aviso-do-pluggy.ts";
 // Edge Function: pluggy-webhook
 // Receptor dos webhooks do Pluggy (item/created, item/updated, item/error, ...).
 // Chega SEM Authorization — verify_jwt=false no config.toml, como fiscal-webhook.
@@ -33,6 +35,27 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/** Acha a conexão do item e chama a banking-sync só para ela, com o segredo do cron. */
+async function lerConexaoDoItem(itemId: string): Promise<void> {
+  const url = Deno.env.get("SUPABASE_URL")!;
+  const admin = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+  const { data, error } = await admin.from("bank_connections").select("id, label")
+    .eq("provider", "pluggy").eq("external_id", itemId).eq("active", true).maybeSingle();
+  if (error) throw new Error(`não li a conexão do item: ${error.message}`);
+  if (!data) {
+    console.log("[pluggy-webhook] item sem conexão ativa no ERP:", itemId);
+    return;
+  }
+  const segredo = Deno.env.get("CRON_SECRET");
+  if (!segredo) throw new Error("CRON_SECRET ausente");
+  const r = await fetch(`${url}/functions/v1/banking-sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-cron-secret": segredo },
+    body: JSON.stringify({ connection_id: data.id }),
+  });
+  console.log("[pluggy-webhook] leitura de", data.label, "→", r.status, (await r.text()).slice(0, 200));
+}
+
 servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jr({ error: "method_not_allowed" }, 405);
@@ -64,9 +87,19 @@ servirComCors(async (req) => {
 
   switch (event.event) {
     case "item/created":
-    case "item/updated":
-      // TODO Fase 1: enfileirar sync do item (contas + transações → bank_transactions).
+    case "item/updated": {
+      // O Pluggy acabou de ir ao banco: lê ESTA conexão agora, em vez de esperar as buscas das 06h
+      // e 15h (06/10/2026). Em segundo plano — o Pluggy quer a resposta em poucos segundos — e
+      // pela mesma banking-sync do botão, que não duplica nada (dedupe por bank_ref_id).
+      const itemId = itemParaLer(event);
+      if (itemId) {
+        const leitura = lerConexaoDoItem(itemId).catch((e) => console.error("[pluggy-webhook] leitura falhou:", e));
+        // deno-lint-ignore no-explicit-any
+        const rt = (globalThis as any).EdgeRuntime;
+        if (rt?.waitUntil) rt.waitUntil(leitura);
+      }
       break;
+    }
     case "item/error":
       console.warn("[pluggy-webhook] item com erro:", event.itemId, JSON.stringify(event.error ?? {}));
       break;
