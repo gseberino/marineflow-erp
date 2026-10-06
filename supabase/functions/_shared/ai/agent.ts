@@ -2,6 +2,7 @@ import { resumirPedido } from "./tools/caixa.ts";
 import { resumirCadastro, resumirDiaria } from "./tools/diarias.ts";
 import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
 import { resumirAgendamento } from "./tools/agendamento.ts";
+import { resumirMensagem } from "./tools/resposta.ts";
 import {
   callClaude,
   ClaudeApiError,
@@ -335,6 +336,13 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
   if (toolName === "schedule_whatsapp_message") {
     try {
       return await resumirAgendamento(admin, args);
+    } catch { /* cai no resumo genérico */ }
+  }
+  // Mensagem/resposta (06/10/2026): para quem, o número inteiro, A ÚLTIMA MENSAGEM que a pessoa
+  // mandou (o dono confere que a resposta casa com a pergunta) e a resposta inteira.
+  if (toolName === "send_whatsapp_message") {
+    try {
+      return await resumirMensagem(admin, args);
     } catch { /* cai no resumo genérico */ }
   }
   // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista

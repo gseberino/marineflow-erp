@@ -25,6 +25,7 @@ import {
   telefoneParaEnvio,
   validarAgendamento,
 } from "./agendamento.ts";
+import { validarMensagem } from "./resposta.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -478,13 +479,16 @@ export async function sendWhatsapp(phone: string, message: string, jwt: string, 
 export const whatsappTools: ToolDef[] = [
   {
     name: "send_whatsapp_message",
-    description: "Envia mensagem de WhatsApp via Evolution API. Forneça to_phone OU client_id (busca o WhatsApp/telefone do cliente).",
+    description:
+      "Envia mensagem de WhatsApp (sempre com a confirmação do usuário, que vê para quem, o número, a ÚLTIMA mensagem que a pessoa mandou e o texto). " +
+      "Forneça to_phone (o número da conversa, como veio de get_whatsapp_conversation) OU client_id. " +
+      "Para RESPONDER uma conversa, leia antes com get_whatsapp_conversation e chame esta tool com a resposta sugerida — a confirmação é a sugestão.",
     input_schema: {
       type: "object",
       properties: {
-        to_phone: { type: "string" },
-        client_id: { type: "string" },
-        message: { type: "string" },
+        to_phone: { type: "string", description: "Número do destinatário (o da conversa), em qualquer formato." },
+        client_id: { type: "string", description: "UUID do cliente do cadastro." },
+        message: { type: "string", description: "O texto que vai ao destinatário." },
       },
       required: ["message"],
     },
@@ -492,11 +496,15 @@ export const whatsappTools: ToolDef[] = [
     risk: "high",
     roles: NON_TECHNICIAN_ROLES,
     computeRisk: (args) => (args?.client_id ? "high" : "medium"),
+    // Mensagem vazia ou número inválido: recusado antes de pedir a confirmação (06/10/2026).
+    preValidar: (args) => validarMensagem(args),
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
+      const invalida = validarMensagem(args);
+      if (invalida) return invalida;
       const { sb, jwt } = ctx;
-      let phone = args.to_phone;
+      let phone: string | null = args.to_phone ? telefoneParaEnvio(args.to_phone) : null;
       if (!phone && args.client_id) {
         const { data: c } = await sb.from("clients").select("whatsapp, phone").eq("id", args.client_id).maybeSingle();
         phone = c?.whatsapp || c?.phone;

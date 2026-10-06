@@ -42,6 +42,8 @@ const NAO_SAO_TOOLS = new Set<string>([
   "ferramenta_extra",
   // argumento de schedule_whatsapp_message para contato novo (05/10/2026)
   "contact_name",
+  // argumento de send_whatsapp_message (roteiro de responder conversa, 06/10/2026)
+  "to_phone",
   // argumentos de registrar_diaria para vários dias (29/09/2026)
   "data_ate", "fim_de_semana",
   // valor dito para o dia (registrar_diaria) e cadastro de freelancer novo (01/10/2026)
