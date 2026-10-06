@@ -223,11 +223,8 @@ describe('colunas usadas em embed do PostgREST existem no banco', () => {
   it('nenhum .select() cita coluna inexistente na tabela do .from()', () => {
     const problemas: string[] = [];
     // Exceções conhecidas, cada uma com o motivo. Não é para crescer: conserte a consulta.
-    const EXCECOES = new Set([
-      // Manutenção de 2026 (conserto de acentos importados errado): nada a chama, e os nomes de
-      // coluna são de um esquema antigo. Consertar antes de rodar de novo (02/10/2026).
-      join('supabase', 'functions', 'fix-db-encoding', 'index.ts'),
-    ]);
+    // (A única, fix-db-encoding, saiu do repo em 06/10/2026 junto com a função.)
+    const EXCECOES = new Set<string>([]);
     const consts = constantesDeTabela();
     for (const arquivo of arquivosVarridos()) {
       if ([...EXCECOES].some((e) => arquivo.endsWith(e))) continue;

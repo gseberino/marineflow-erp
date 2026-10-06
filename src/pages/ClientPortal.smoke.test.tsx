@@ -4,7 +4,7 @@
 // não chama nenhuma função — quem guardou o endereço só lê o aviso.
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const chamou = vi.hoisted(() => ({ invoke: 0, from: 0 }));
@@ -26,9 +26,7 @@ describe('portal do cliente aposentado', () => {
     expect(chamou).toEqual({ invoke: 0, from: 0 });
   });
 
-  it('a função client-portal não lê mais o banco: só responde 410', () => {
-    const fonte = readFileSync(resolve(__dirname, '../../supabase/functions/client-portal/index.ts'), 'utf8');
-    expect(fonte).toContain('status: 410');
-    expect(fonte).not.toMatch(/createClient|SERVICE_ROLE|\.from\(/);
+  it('a função client-portal não existe mais (apagada do servidor em 03/10 e do repo em 06/10/2026)', () => {
+    expect(existsSync(resolve(__dirname, '../../supabase/functions/client-portal'))).toBe(false);
   });
 });

@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
  * como estava escrito, abriria dados de clientes: o "login" era digitar 5 dígitos de qualquer
  * telefone ou um CPF, e a resposta trazia as OS com o link público, que abre o cadastro
  * completo. A rota continua existindo só para quem guardou o endereço não cair numa tela
- * quebrada; a função client-portal responde 410 e não lê mais nada do banco.
+ * quebrada. A função client-portal foi apagada do servidor (03/10/2026) e do repo (06/10).
  */
 export default function ClientPortal() {
   return (
