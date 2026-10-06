@@ -397,10 +397,17 @@ export function buildNfseDraftPayload(
   const a = t.address ?? {};
   const amt = input.amounts ?? {};
 
+  // Sem alíquota não se monta nota (inventário 06/10/2026). Era `Number(s.issRate ?? 0)`: quem
+  // chamasse sem passar por validateNfseDraftInput emitia com ISS 0% sem ninguém ver. Hoje o
+  // único chamador valida antes; isto garante que um chamador novo não pule a regra.
+  if (s.issRate == null || !Number.isFinite(Number(s.issRate))) {
+    throw new Error("Alíquota de ISS ausente: valide com validateNfseDraftInput antes de montar a NFS-e.");
+  }
+
   const service: Record<string, unknown> = {
     description: String(s.description ?? "").trim(),
     cnae: onlyDigits(s.cnae),
-    iss_rate: Number(s.issRate ?? 0),
+    iss_rate: Number(s.issRate),
     iss_withheld: s.issWithheld === true,
   };
 

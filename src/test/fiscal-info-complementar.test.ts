@@ -84,6 +84,16 @@ describe("NFS-e: desconto incondicionado (vDescIncond)", () => {
     expect(p.amounts).not.toHaveProperty("net_amount");
   });
 
+  it("sem alíquota de ISS a nota não é montada (nunca sai com ISS 0% calado)", () => {
+    expect(() => buildNfseDraftPayload({
+      ...baseValida,
+      service: { ...baseValida.service, issRate: null },
+    })).toThrow(/Alíquota de ISS ausente/);
+    // 0 explícito continua valendo — é o caso de quem tem alíquota zero.
+    const p = buildNfseDraftPayload({ ...baseValida, service: { ...baseValida.service, issRate: 0 } }) as Record<string, any>;
+    expect(p.service.iss_rate).toBe(0);
+  });
+
   it("sem desconto, o payload não ganha campo nenhum a mais", () => {
     const p = buildNfseDraftPayload(baseValida) as Record<string, any>;
     expect(p.amounts).not.toHaveProperty("unconditional_discount");
