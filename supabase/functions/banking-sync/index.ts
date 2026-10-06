@@ -156,6 +156,12 @@ servirComCors(async (req) => {
     const importadas = resultados.reduce((s, r) => s + Number(r.importadas ?? 0), 0);
     const comErro = resultados.filter((r) => r.status === "error").length;
 
+    // Chegou transação nova: o motor do extrato (finance-review) roda JÁ, no fundo — não só às
+    // 06:10/15:10. Sem isso, um Pix anotado à mão esperava até a rodada seguinte para casar com
+    // a linha do banco (caso real do dono, 06/10/2026: o Pix ao Roberto das 18:06 só entraria no
+    // dia seguinte). Rodar a mais é inofensivo: o motor só olha o que está sem proposta.
+    if (importadas > 0) dispararMotorDoExtrato();
+
     return jr({
       ok: comErro === 0,
       message: `${importadas} transação(ões) nova(s)` + (comErro ? ` · ${comErro} conexão(ões) com erro` : ""),
@@ -166,6 +172,24 @@ servirComCors(async (req) => {
     return jr({ error: "unexpected_error", detail: String((e as Error)?.message ?? e) }, 500);
   }
 });
+
+/**
+ * Pede ao finance-review a rodada de propostas, sem prender a resposta da sincronização (o motor
+ * pode levar até 2 min). Mesma credencial do agendamento (x-cron-secret). Falha aqui não derruba
+ * a sincronização: a rodada agendada pega o que ficar.
+ */
+function dispararMotorDoExtrato(): void {
+  const url = Deno.env.get("SUPABASE_URL");
+  const segredo = Deno.env.get("CRON_SECRET");
+  if (!url || !segredo) return;
+  const rodada = fetch(`${url}/functions/v1/finance-review`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-cron-secret": segredo },
+    body: JSON.stringify({ action: "generate" }),
+  }).then((r) => r.body?.cancel()).catch((e) => console.error("[banking-sync] motor do extrato não rodou:", e));
+  const waitUntil = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil;
+  if (typeof waitUntil === "function") waitUntil(rodada);
+}
 
 /**
  * Rebusca o extrato e preenche os campos de identificação no que JÁ está gravado.

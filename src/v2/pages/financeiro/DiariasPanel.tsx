@@ -8,13 +8,15 @@ import { CalendarPlus, FileDown, FileText, Pencil, Trash2, UserPlus } from 'luci
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { useI18n } from '@/i18n';
+import { hojeLocal } from '@/lib/dia';
 import {
-  ESTADO_DO_SALDO, PERIODOS, diaCurto, intervaloDoMes, intervaloDoPeriodo, rotuloDaJornada,
-  type PeriodoDasDiarias,
+  ESTADO_DO_SALDO, PERIODOS, diaCurto, intervaloDoMes, pedidoDoPeriodo, rotuloDaJornada,
+  type PedidoDePeriodo, type PeriodoDasDiarias,
 } from '@/lib/diarias';
 import {
   diaParaEditar, useContaCorrente, useExcluirDiaComDesfazer, useResumoFreelancers,
@@ -27,6 +29,9 @@ import { GradeDiarias } from './GradeDiarias';
 
 export interface FiltroDasDiarias {
   periodo: PeriodoDasDiarias;
+  /** De/Até de "Escolher datas…" ('AAAA-MM-DD' ou vazio). */
+  de: string;
+  ate: string;
   favorecidoId: string | null;
   /** Mês da grade, 'AAAA-MM'. */
   mes: string;
@@ -46,25 +51,36 @@ interface Registrando {
 }
 
 export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
-  const { de, ate } = intervaloDoPeriodo(filtro.periodo);
-  const resumo = useResumoFreelancers(de, ate);
+  const periodo = pedidoDoPeriodo(filtro.periodo, { de: filtro.de, ate: filtro.ate });
+  const resumo = useResumoFreelancers(periodo.de, periodo.ate, periodo.atalho);
   const pessoas = resumo.data?.pessoas ?? [];
   const [registrando, setRegistrando] = useState<Registrando | null>(null);
   const [cadastrando, setCadastrando] = useState(false);
   const documentos = useDocumentosDasDiarias();
   // O que os documentos cobrem: na grade, o mês que está na tela; nas outras abas, o período.
-  const intervalo = aba === 'grade' ? intervaloDoMes(filtro.mes) : { de, ate };
+  const intervalo: PedidoDePeriodo = aba === 'grade' ? { ...intervaloDoMes(filtro.mes), atalho: null } : periodo;
+  const datasInvertidas = filtro.periodo === 'personalizado' && !!filtro.de && !!filtro.ate && filtro.de > filtro.ate;
 
   const barra = (
     <div className="flex flex-wrap items-center gap-2">
       {/* A grade anda de mês em mês pelas setas dela; o período vale para Resumo e Extrato. */}
       {aba !== 'grade' && (
         <Select value={filtro.periodo} onValueChange={(v) => onFiltro({ ...filtro, periodo: v as PeriodoDasDiarias })}>
-          <SelectTrigger className="h-9 w-40" aria-label="Período"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="h-9 w-56 max-w-full" aria-label="Período"><SelectValue /></SelectTrigger>
           <SelectContent>
             {PERIODOS.map((p) => <SelectItem key={p.valor} value={p.valor}>{p.rotulo}</SelectItem>)}
           </SelectContent>
         </Select>
+      )}
+      {aba !== 'grade' && filtro.periodo === 'personalizado' && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input type="date" className="h-9 w-40" aria-label="Data inicial" value={filtro.de} max={hojeLocal()}
+                 onChange={(e) => onFiltro({ ...filtro, de: e.target.value })} />
+          <span className="text-sm text-muted-foreground">até</span>
+          <Input type="date" className="h-9 w-40" aria-label="Data final" value={filtro.ate}
+                 onChange={(e) => onFiltro({ ...filtro, ate: e.target.value })} />
+          {datasInvertidas && <span className="text-sm text-destructive">A data inicial é depois da final.</span>}
+        </div>
       )}
       {aba === 'extrato' && (
         <Select value={filtro.favorecidoId ?? ''} onValueChange={(v) => onFiltro({ ...filtro, favorecidoId: v })}>
@@ -77,13 +93,13 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
       <div className="ml-auto flex flex-wrap gap-2">
         {aba === 'extrato' && filtro.favorecidoId && (
           <Button size="sm" variant="outline" className="gap-1.5" disabled={!!documentos.gerando}
-                  onClick={() => { void documentos.extratoEmPdf(filtro.favorecidoId!, intervalo.de, intervalo.ate); }}>
+                  onClick={() => { void documentos.extratoEmPdf(filtro.favorecidoId!, intervalo); }}>
             <FileText className="h-4 w-4" /> {documentos.gerando === 'pdf' ? 'Gerando…' : 'Extrato em PDF'}
           </Button>
         )}
         <Button size="sm" variant="outline" className="gap-1.5" disabled={!!documentos.gerando || pessoas.length === 0}
                 title="Todos os dias e pagamentos do período, de todos os freelancers, para o contador"
-                onClick={() => { void documentos.csvDoPeriodo(pessoas.map((p) => p.id), intervalo.de, intervalo.ate); }}>
+                onClick={() => { void documentos.csvDoPeriodo(pessoas.map((p) => p.id), intervalo); }}>
           <FileDown className="h-4 w-4" /> {documentos.gerando === 'csv' ? 'Gerando…' : 'Planilha do contador (CSV)'}
         </Button>
         <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setCadastrando(true)}>
@@ -100,7 +116,9 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
   return (
     <div className="space-y-4">
       {barra}
-      {resumo.isLoading ? (
+      {datasInvertidas ? (
+        <Card className="p-6 text-center text-sm text-muted-foreground">Acerte as datas para ver o período.</Card>
+      ) : resumo.isLoading ? (
         <Skeleton className="h-48 w-full" />
       ) : resumo.error ? (
         <Card className="border-destructive/40 p-4 text-sm text-destructive">
@@ -117,7 +135,8 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
         <Resumo pessoas={pessoas} total={resumo.data!} onVerExtrato={onVerExtrato}
                 onRegistrar={(id) => setRegistrando({ favorecidoId: id })}
                 gerandoPdf={documentos.gerando === 'pdf'}
-                onPdf={(id) => { void documentos.extratoEmPdf(id, de, ate); }} />
+                porPessoa={!!periodo.atalho}
+                onPdf={(id) => { void documentos.extratoEmPdf(id, periodo); }} />
       ) : aba === 'grade' ? (
         <GradeDiarias
           pessoas={pessoas}
@@ -127,7 +146,7 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
           onNovo={(favorecidoId, data) => setRegistrando({ favorecidoId, dataInicial: data })}
         />
       ) : (
-        <Extrato favorecidoId={filtro.favorecidoId} de={de} ate={ate}
+        <Extrato favorecidoId={filtro.favorecidoId} periodo={periodo}
                  onEditar={(d) => setRegistrando({ editar: d })} />
       )}
 
@@ -145,13 +164,23 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
   );
 }
 
-function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPdf, gerandoPdf }: {
+/** "desde 28/09", "28/09 a 06/10" — o período de UMA pessoa quando o atalho é por pessoa. */
+function textoDoPeriodoDaPessoa(de: string | null, ate: string | null): string | null {
+  const curto = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+  if (de && ate) return `${curto(de)} a ${curto(ate)}`;
+  if (de) return `desde ${curto(de)}`;
+  return null;
+}
+
+function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPdf, gerandoPdf, porPessoa }: {
   pessoas: FreelancerNoResumo[];
   total: { trabalhado: number; pago: number; dias: number; deve: number; adiantado: number };
   onVerExtrato: (id: string) => void;
   onRegistrar: (id: string) => void;
   onPdf: (id: string) => void;
   gerandoPdf: boolean;
+  /** O período é de cada um ("em aberto"): o cartão diz qual é o dele. */
+  porPessoa: boolean;
 }) {
   const { formatCurrency, formatDate } = useI18n();
   return (
@@ -181,6 +210,7 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPdf, gerandoPdf }
                   <p className="truncate text-lg font-semibold">{p.nome}</p>
                   <p className="text-sm text-muted-foreground">
                     {p.diaria != null ? <>Diária <span className="tabular-nums">{formatCurrency(p.diaria)}</span></> : 'Sem diária no cadastro'}
+                    {porPessoa && textoDoPeriodoDaPessoa(p.de, p.ate) && <> · período {textoDoPeriodoDaPessoa(p.de, p.ate)}</>}
                   </p>
                 </div>
                 <div className="text-right">
@@ -195,6 +225,11 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPdf, gerandoPdf }
                 <div><dt className="text-xs text-muted-foreground">Pago</dt><dd className="font-medium tabular-nums">{formatCurrency(p.pago)}</dd></div>
                 <div><dt className="text-xs text-muted-foreground">Último pagamento</dt><dd className="font-medium tabular-nums">{p.ultimo_pagamento ? formatDate(p.ultimo_pagamento) : '—'}</dd></div>
               </dl>
+              {p.pago_aguardando_banco > 0 && (
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                  Inclui <span className="tabular-nums">{formatCurrency(p.pago_aguardando_banco)}</span> lançado(s) à mão, aguardando o banco confirmar.
+                </p>
+              )}
               <AcoesDaLinha
                 className="mt-3 justify-start"
                 rotulo={p.nome}
@@ -211,20 +246,20 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPdf, gerandoPdf }
         })}
       </div>
       <p className="text-xs text-muted-foreground">
-        Saldo = saldo inicial + dias trabalhados (diária + extras − descontos) − o que ele recebeu. Os pagamentos vêm do extrato; não se digitam aqui.
+        Saldo = saldo inicial + dias trabalhados (diária + extras − descontos) − o que ele recebeu. Os pagamentos vêm do
+        extrato do banco; o Pix lançado à mão aparece na hora como "aguardando o banco" e já desconta.
       </p>
     </div>
   );
 }
 
-function Extrato({ favorecidoId, de, ate, onEditar }: {
+function Extrato({ favorecidoId, periodo, onEditar }: {
   favorecidoId: string | null;
-  de: string | null;
-  ate: string | null;
+  periodo: PedidoDePeriodo;
   onEditar: (d: DiaParaEditar) => void;
 }) {
   const { formatCurrency } = useI18n();
-  const conta = useContaCorrente(favorecidoId, de, ate);
+  const conta = useContaCorrente(favorecidoId, periodo.de, periodo.ate, periodo.atalho);
   const { excluir, excluindo } = useExcluirDiaComDesfazer();
 
   if (!favorecidoId) {
@@ -255,6 +290,7 @@ function Extrato({ favorecidoId, de, ate, onEditar }: {
       <div className="text-sm">
         <Badge variant="outline" className={estado.classe}>{estado.rotulo}</Badge>
         <span className="ml-2 text-muted-foreground">
+          {periodo.atalho && textoDoPeriodoDaPessoa(c.de, c.ate) ? `Período ${textoDoPeriodoDaPessoa(c.de, c.ate)}. ` : ''}
           {c.favorecido.desde ? `Conta corrente desde ${diaCurto(c.favorecido.desde)}/${c.favorecido.desde.slice(0, 4)}.` : ''}
           {' '}Saldo positivo = você deve; negativo = pagou adiantado.
         </span>
@@ -289,7 +325,14 @@ function Extrato({ favorecidoId, de, ate, onEditar }: {
                 ) : (
                   <>
                     <div className="flex flex-wrap items-center gap-x-2 text-sm">
-                      <Badge variant="outline" className="text-sky-700 dark:text-sky-400">Pagamento</Badge>
+                      {l.aguardando ? (
+                        <Badge variant="outline" className="text-amber-700 dark:text-amber-400"
+                               title="Lançado à mão; vira o pagamento do banco quando a linha chegar e for aprovada">
+                          Anotado
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-sky-700 dark:text-sky-400">Pagamento</Badge>
+                      )}
                       <span className="min-w-0 truncate">{l.conta}</span>
                     </div>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">

@@ -1,8 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import type { ContaCorrente } from '@/hooks/use-diarias';
-import { documentoFormatado, linhasDoCsv, montarExtratoHtml, nomeDoArquivo, textoDoPeriodo } from './extrato-diarias';
+import { documentoFormatado, linhasDoCsv, montarExtratoHtml, nomeDoArquivo, textoDoPeriodo, type ContaDoExtrato } from './extrato-diarias';
 
-const conta = (o: Partial<ContaCorrente> = {}): ContaCorrente => ({
+const conta = (o: Partial<ContaDoExtrato> = {}): ContaDoExtrato => ({
   favorecido: { id: 'r', nome: 'Roberto Daniel', desde: '2026-08-25', saldo_inicial: 0, diaria: 160 },
   de: '2026-09-01', ate: '2026-09-30', saldo_anterior: 70, dias: 1.5, trabalhado: 260, pago: 100, saldo_final: 230,
   estado: 'deve',
@@ -24,7 +23,8 @@ describe('extrato de diárias em PDF', () => {
     empresa: { nome: 'HBR Marine Solutions', cnpj: '50057049000159', cidade: 'Itajaí/SC' },
     freelancer: { nome: 'Roberto Daniel', documento: '12345678940', pix: 'roberto@pix' },
     conta: conta(),
-    geradoEm: new Date(2026, 8, 29, 14, 5),
+    // 17:05 UTC = 14:05 em Brasília — o documento escreve a hora de Brasília também no servidor.
+    geradoEm: new Date(Date.UTC(2026, 8, 29, 17, 5)),
   });
 
   it('traz o resumo, os dias com a OS, os pagamentos com a conta e o estado em palavras', () => {
@@ -64,7 +64,19 @@ describe('extrato de diárias em PDF', () => {
   it('período e nome do arquivo acompanham o que foi pedido', () => {
     expect(textoDoPeriodo(conta({ de: null, ate: null }))).toBe('desde 25/08/2026');
     expect(nomeDoArquivo('extrato-diarias', 'Roberto Daniel Corrêa', conta(), 'pdf')).toBe('extrato-diarias-roberto-daniel-correa-2026-09.pdf');
-    expect(nomeDoArquivo('diarias', '', conta({ de: '2026-08-25', ate: null }), 'csv')).toBe('diarias-historico.csv');
+    expect(nomeDoArquivo('diarias', '', conta({ de: '2026-08-25', ate: null }), 'csv')).toBe('diarias-desde-2026-08-25.csv');
+    expect(nomeDoArquivo('diarias', '', conta({ de: null, ate: null }), 'csv')).toBe('diarias-historico.csv');
+  });
+
+  it('Pix lançado à mão sai marcado: ainda não confirmado pelo banco', () => {
+    const c = conta();
+    c.linhas = [...c.linhas, { ...c.linhas[2], id: 'a1', aguardando: true, conta: 'Anotado — aguardando o banco' }];
+    const h = montarExtratoHtml({ empresa: { nome: 'HBR', cnpj: null, cidade: null },
+      freelancer: { nome: 'Roberto', documento: null, pix: null }, conta: c, geradoEm: new Date() });
+    expect(h).toContain('Pix lançado à mão *');
+    expect(h).toContain('ainda não confirmado pelo extrato do banco');
+    expect(html).not.toContain('ainda não confirmado');
+    expect(linhasDoCsv([{ conta: c, documento: null }]).filter((l) => l.tipo === 'Pagamento (aguardando o banco)')).toHaveLength(1);
   });
 });
 

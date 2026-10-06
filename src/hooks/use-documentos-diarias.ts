@@ -14,6 +14,7 @@ import {
   type EmpresaNoDocumento, type FreelancerNoDocumento,
 } from '@/lib/extrato-diarias';
 import { chaveDaConta, lerContaCorrente, type ContaCorrente } from '@/hooks/use-diarias';
+import type { PedidoDePeriodo } from '@/lib/diarias';
 
 async function lerEmpresa(): Promise<EmpresaNoDocumento> {
   const { data } = await supabase.from('app_settings').select('key, value').in('key', ['company_name', 'cnpj', 'city', 'state']);
@@ -47,13 +48,17 @@ export function useDocumentosDasDiarias() {
   const qc = useQueryClient();
   const [gerando, setGerando] = useState<'pdf' | 'csv' | null>(null);
 
-  const conta = (id: string, de: string | null, ate: string | null) =>
-    qc.fetchQuery({ queryKey: chaveDaConta(id, de, ate), queryFn: () => lerContaCorrente(id, de, ate), staleTime: 30_000 });
+  const conta = (id: string, p: PedidoDePeriodo) =>
+    qc.fetchQuery({
+      queryKey: chaveDaConta(id, p.de, p.ate, p.atalho),
+      queryFn: () => lerContaCorrente(id, p.de, p.ate, p.atalho),
+      staleTime: 30_000,
+    });
 
-  async function extratoEmPdf(favorecidoId: string, de: string | null, ate: string | null) {
+  async function extratoEmPdf(favorecidoId: string, periodo: PedidoDePeriodo) {
     setGerando('pdf');
     try {
-      const [c, empresa, pessoas] = await Promise.all([conta(favorecidoId, de, ate), lerEmpresa(), lerFreelancers([favorecidoId])]);
+      const [c, empresa, pessoas] = await Promise.all([conta(favorecidoId, periodo), lerEmpresa(), lerFreelancers([favorecidoId])]);
       const freelancer = pessoas.get(favorecidoId) ?? { nome: c.favorecido.nome, documento: null, pix: null };
       const html = montarExtratoHtml({ empresa, freelancer, conta: c, geradoEm: new Date() });
       const arquivo = nomeDoArquivo('extrato-diarias', freelancer.nome, c, 'pdf');
@@ -72,11 +77,12 @@ export function useDocumentosDasDiarias() {
   }
 
   /** Todos os dias e pagamentos do período, de todos os freelancers — a planilha do contador. */
-  async function csvDoPeriodo(favorecidoIds: string[], de: string | null, ate: string | null) {
+  async function csvDoPeriodo(favorecidoIds: string[], periodo: PedidoDePeriodo) {
     setGerando('csv');
+    const { de, ate } = periodo;
     try {
       const [contas, pessoas] = await Promise.all([
-        Promise.all(favorecidoIds.map((id) => conta(id, de, ate))),
+        Promise.all(favorecidoIds.map((id) => conta(id, periodo))),
         lerFreelancers(favorecidoIds),
       ]);
       const linhas = linhasDoCsv(contas.map((c: ContaCorrente) => ({ conta: c, documento: pessoas.get(c.favorecido.id)?.documento ?? null })));

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   datasDoIntervalo, diaCurto, diasDoMes, ehFimDeSemana, intervaloDoMes, intervaloDoPeriodo, mesDe, nomeDoMes, rotuloDaJornada,
-  somarMes, valorDoDia,
+  pedidoDoPeriodo, somarMes, valorDoDia,
 } from './diarias';
 
 describe('diárias — regras da tela', () => {
@@ -19,6 +19,16 @@ describe('diárias — regras da tela', () => {
     expect(intervaloDoPeriodo('mes_anterior', '2027-01-10')).toEqual({ de: '2026-12-01', ate: '2026-12-31' });
     expect(intervaloDoPeriodo('mes', '2028-02-10')).toEqual({ de: '2028-02-01', ate: '2028-02-29' });
     expect(intervaloDoPeriodo('tudo', '2026-09-28')).toEqual({ de: null, ate: null });
+  });
+
+  it('o pedido de período: atalho por pessoa vai para o banco; datas escolhidas e meses vão como De/Até', () => {
+    expect(pedidoDoPeriodo('em_aberto')).toEqual({ de: null, ate: null, atalho: 'em_aberto' });
+    expect(pedidoDoPeriodo('desde_ultimo_pagamento')).toEqual({ de: null, ate: null, atalho: 'desde_ultimo_pagamento' });
+    expect(pedidoDoPeriodo('ultimos_15_dias').atalho).toBe('ultimos_15_dias');
+    expect(pedidoDoPeriodo('semana_atual').atalho).toBe('semana_atual');
+    expect(pedidoDoPeriodo('personalizado', { de: '2026-09-14', ate: '' })).toEqual({ de: '2026-09-14', ate: null, atalho: null });
+    expect(pedidoDoPeriodo('mes', {}, '2026-10-06')).toEqual({ de: '2026-10-01', ate: '2026-10-31', atalho: null });
+    expect(pedidoDoPeriodo('tudo')).toEqual({ de: null, ate: null, atalho: null });
   });
 
   it('o dia curto é o do calendário, não o de meia-noite em UTC', () => {

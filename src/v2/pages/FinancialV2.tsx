@@ -77,7 +77,7 @@ export default function FinancialV2() {
   const [contaDoExtrato, setContaDoExtrato] = useState<string | null>(null);
   // Diárias: o período e o freelancer escolhidos sobrevivem à troca entre Resumo e Extrato.
   const [filtroDiarias, setFiltroDiarias] = useState<FiltroDasDiarias>(
-    () => ({ periodo: 'mes', favorecidoId: null, mes: hojeLocal().slice(0, 7) }),
+    () => ({ periodo: 'mes', de: '', ate: '', favorecidoId: null, mes: hojeLocal().slice(0, 7) }),
   );
   const { data: pendingReimb } = usePendingReimbursements();
 

@@ -5,7 +5,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { mensagemDoErro, recarregarFinanceiro } from '@/hooks/use-lancamentos';
 
-interface Resposta { ok: boolean; message: string; saldo_do_caixa?: number; aplicada?: boolean; ja_lancada?: boolean }
+interface Resposta {
+  ok: boolean; message: string; saldo_do_caixa?: number; aplicada?: boolean; ja_lancada?: boolean;
+  /** anotar_transacao: quantas anotações iguais (mesma pessoa, valor e dias) esta substituiu. */
+  substituidas?: number;
+}
 
 async function chamar(fn: string, args: Record<string, unknown>): Promise<Resposta> {
   const { data, error } = await supabase.rpc(fn as never, args as never);
@@ -20,7 +24,12 @@ function useAcaoDoCaixa<A>(fn: string, montar: (v: A) => Record<string, unknown>
     onSuccess: (r) => {
       recarregarFinanceiro(qc);
       qc.invalidateQueries({ queryKey: ['anotacoes-do-extrato'] });
+      // Pagamento a freelancer (Caixa, bolso do sócio ou Pix anotado) muda a conta corrente dele.
+      qc.invalidateQueries({ queryKey: ['diarias'] });
       if (r?.ok === false) toast.warning(r.message);
+      // Trocou uma anotação igual por esta: se eram DOIS pagamentos, um sumiu — o aviso não pode
+      // passar como sucesso de 4 segundos (caso do dono, 06/10/2026: dois "R$ 100 ao Roberto").
+      else if ((r?.substituidas ?? 0) > 0) toast.warning(r.message, { duration: 15_000 });
       else toast.success(r?.message ?? 'Feito');
     },
     onError: (e) => toast.error(mensagemDoErro(e)),

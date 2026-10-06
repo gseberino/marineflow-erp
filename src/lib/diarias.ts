@@ -7,7 +7,14 @@ import { hojeLocal } from '@/lib/dia';
 
 export type Jornada = 'inteiro' | 'meio' | 'faltou';
 export type EstadoDoSaldo = 'deve' | 'adiantado' | 'quitado' | 'semdias';
-export type PeriodoDasDiarias = 'mes' | 'mes_anterior' | 'tudo';
+/**
+ * Períodos do extrato e do resumo. "Em aberto" e "desde o último pagamento" dependem da pessoa e
+ * são calculados pelo banco (_periodo_do_atalho, migration 20261006200000); "personalizado" usa
+ * De/Até escolhidos na tela (pedido do dono, 06/10/2026).
+ */
+export type PeriodoDasDiarias =
+  | 'em_aberto' | 'desde_ultimo_pagamento' | 'ultimos_15_dias' | 'semana_atual'
+  | 'mes' | 'mes_anterior' | 'tudo' | 'personalizado';
 
 export const JORNADAS: { valor: Jornada; rotulo: string; fracao: number }[] = [
   { valor: 'inteiro', rotulo: 'Dia inteiro', fracao: 1 },
@@ -27,16 +34,43 @@ export const ESTADO_DO_SALDO: Record<EstadoDoSaldo, { rotulo: string; classe: st
 };
 
 export const PERIODOS: { valor: PeriodoDasDiarias; rotulo: string }[] = [
+  { valor: 'em_aberto', rotulo: 'Em aberto (a pagar)' },
+  { valor: 'desde_ultimo_pagamento', rotulo: 'Desde o último pagamento' },
+  { valor: 'ultimos_15_dias', rotulo: 'Últimos 15 dias' },
+  { valor: 'semana_atual', rotulo: 'Esta semana' },
   { valor: 'mes', rotulo: 'Este mês' },
   { valor: 'mes_anterior', rotulo: 'Mês anterior' },
   { valor: 'tudo', rotulo: 'Tudo' },
+  { valor: 'personalizado', rotulo: 'Escolher datas…' },
 ];
+
+/** O nome do atalho no banco, para os períodos que o banco calcula por pessoa. */
+const ATALHO_NO_BANCO: Partial<Record<PeriodoDasDiarias, string>> = {
+  em_aberto: 'em_aberto',
+  desde_ultimo_pagamento: 'desde_ultimo_pagamento',
+  ultimos_15_dias: 'ultimos_15_dias',
+  semana_atual: 'semana_atual',
+};
+
+/** O que vai para as funções do banco: De/Até, ou o atalho que o banco resolve por pessoa. */
+export interface PedidoDePeriodo { de: string | null; ate: string | null; atalho: string | null }
+
+export function pedidoDoPeriodo(
+  p: PeriodoDasDiarias,
+  escolhido: { de?: string | null; ate?: string | null } = {},
+  hoje: string = hojeLocal(),
+): PedidoDePeriodo {
+  const atalho = ATALHO_NO_BANCO[p];
+  if (atalho) return { de: null, ate: null, atalho };
+  if (p === 'personalizado') return { de: escolhido.de || null, ate: escolhido.ate || null, atalho: null };
+  return { ...intervaloDoPeriodo(p, hoje), atalho: null };
+}
 
 const dois = (n: number) => String(n).padStart(2, '0');
 
-/** De e até ('AAAA-MM-DD') do atalho; "tudo" é sem limite (o banco começa no início da conta). */
+/** De e até ('AAAA-MM-DD') dos períodos de calendário; os demais ficam sem limite aqui. */
 export function intervaloDoPeriodo(p: PeriodoDasDiarias, hoje: string = hojeLocal()): { de: string | null; ate: string | null } {
-  if (p === 'tudo') return { de: null, ate: null };
+  if (p !== 'mes' && p !== 'mes_anterior') return { de: null, ate: null };
   const [a, m] = hoje.split('-').map(Number);
   const ano = p === 'mes' ? a : m === 1 ? a - 1 : a;
   const mes = p === 'mes' ? m : m === 1 ? 12 : m - 1;

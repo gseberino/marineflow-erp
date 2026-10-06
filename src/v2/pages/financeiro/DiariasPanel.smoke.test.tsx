@@ -8,7 +8,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
-import { DiariasPanel } from './DiariasPanel';
+import { DiariasPanel, type FiltroDasDiarias } from './DiariasPanel';
 
 const rpc = vi.fn();
 const toastFn = vi.fn();
@@ -61,8 +61,17 @@ beforeEach(() => {
   rpc.mockImplementation(async (nome: string, args: Record<string, unknown>) => {
     switch (nome) {
       case 'resumo_freelancers':
+        if (args.p_atalho === 'em_aberto') {
+          return { data: { pessoas: [{ ...pessoas[0], de: '2026-09-23', ate: null, pago_aguardando_banco: 100 }],
+            trabalhado: 160, pago: 100, dias: 1, deve: 60, adiantado: 0 }, error: null };
+        }
         return { data: { pessoas, trabalhado: 2560, pago: 2130, dias: 16, deve: 450, adiantado: 20 }, error: null };
       case 'conta_corrente_freelancer':
+        if (args.p_atalho === 'em_aberto') {
+          return { data: { ...contaDoRoberto, de: '2026-09-23', ate: null, saldo_anterior: 0, pago: 100, pago_aguardando_banco: 100,
+            linhas: [{ ...contaDoRoberto.linhas[1], id: 'a1', data: '2026-10-06', conta: 'Anotado — aguardando o banco',
+              descricao: 'Adiantamento diarias', aguardando: true }] }, error: null };
+        }
         return { data: args.p_favorecido_id === 'r' ? contaDoRoberto : contaVazia('m', 'Mickael', '2026-09-10'), error: null };
       case 'apagar_diaria':
         return { data: { message: 'Diária de Roberto em qua 16/09 apagada.', apagado: {
@@ -85,12 +94,13 @@ beforeEach(() => {
   });
 });
 
-function renderizar(aba: 'resumo' | 'extrato' | 'grade', onVerExtrato = vi.fn()) {
+function renderizar(aba: 'resumo' | 'extrato' | 'grade', onVerExtrato = vi.fn(), filtro: Partial<FiltroDasDiarias> = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
       <I18nProvider>
-        <DiariasPanel aba={aba} filtro={{ periodo: 'tudo', favorecidoId: aba === 'extrato' ? 'r' : null, mes: '2026-09' }}
+        <DiariasPanel aba={aba}
+                      filtro={{ periodo: 'tudo', de: '', ate: '', favorecidoId: aba === 'extrato' ? 'r' : null, mes: '2026-09', ...filtro }}
                       onFiltro={vi.fn()} onVerExtrato={onVerExtrato} />
       </I18nProvider>
     </QueryClientProvider>,
@@ -167,7 +177,7 @@ describe('DiariasPanel', () => {
     await waitFor(() => expect(exportToCSV).toHaveBeenCalledTimes(1));
     const [linhas, arquivo] = exportToCSV.mock.calls[0] as [Array<Record<string, string>>, string];
     // A grade pede o mês inteiro às funções do banco, para cada freelancer.
-    expect(chamadas('conta_corrente_freelancer')).toContainEqual({ p_favorecido_id: 'r', p_de: '2026-09-01', p_ate: '2026-09-30' });
+    expect(chamadas('conta_corrente_freelancer')).toContainEqual({ p_favorecido_id: 'r', p_de: '2026-09-01', p_ate: '2026-09-30', p_atalho: null });
     expect(linhas.map((l) => `${l.data} ${l.tipo} ${l.freelancer}`)).toEqual([
       '16/09/2026 Diária Roberto', '22/09/2026 Pagamento Roberto',
     ]);
@@ -203,6 +213,35 @@ describe('DiariasPanel', () => {
     expect(within(ficha).getByText('Nada lançado neste dia.')).toBeInTheDocument();
     await user.click(within(ficha).getByRole('button', { name: 'Não trabalhou' }));
     await waitFor(() => expect(chamadas('registrar_diaria')[0]).toMatchObject({ p_favorecido_id: 'm', p_data: '2026-09-14', p_jornada: 'faltou' }));
+  });
+
+  // ── Períodos e Pix anotado (pedido do dono, 06/10/2026) ──
+
+  it('"em aberto": o banco calcula o período de cada um; o cartão diz desde quando e o Pix anotado', async () => {
+    renderizar('resumo', vi.fn(), { periodo: 'em_aberto' });
+    expect(await screen.findByText(/período desde 23\/09/)).toBeInTheDocument();
+    expect(screen.getByText(/lançado\(s\) à mão, aguardando o banco confirmar/)).toBeInTheDocument();
+    expect(chamadas('resumo_freelancers')[0]).toEqual({ p_de: null, p_ate: null, p_atalho: 'em_aberto' });
+  });
+
+  it('extrato: o Pix lançado à mão aparece como "Anotado", já descontando', async () => {
+    renderizar('extrato', vi.fn(), { periodo: 'em_aberto' });
+    expect(await screen.findByText('Anotado')).toBeInTheDocument();
+    expect(screen.getByText('Anotado — aguardando o banco')).toBeInTheDocument();
+    expect(chamadas('conta_corrente_freelancer')).toContainEqual({ p_favorecido_id: 'r', p_de: null, p_ate: null, p_atalho: 'em_aberto' });
+  });
+
+  it('"Escolher datas…": De/Até vão para o banco; datas invertidas não consultam', async () => {
+    renderizar('extrato', vi.fn(), { periodo: 'personalizado', de: '2026-09-14', ate: '2026-09-27' });
+    expect(await screen.findByLabelText('Data inicial')).toHaveValue('2026-09-14');
+    await waitFor(() => expect(chamadas('conta_corrente_freelancer')).toContainEqual(
+      { p_favorecido_id: 'r', p_de: '2026-09-14', p_ate: '2026-09-27', p_atalho: null }));
+  });
+
+  it('"Escolher datas…" com a inicial depois da final: avisa e não mostra período', async () => {
+    renderizar('resumo', vi.fn(), { periodo: 'personalizado', de: '2026-09-27', ate: '2026-09-14' });
+    expect(await screen.findByText('A data inicial é depois da final.')).toBeInTheDocument();
+    expect(screen.getByText('Acerte as datas para ver o período.')).toBeInTheDocument();
   });
 
   // ── Novo freelancer (pedido do dono, 03/10/2026) ──

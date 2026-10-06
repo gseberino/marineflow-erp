@@ -17,6 +17,11 @@ export interface FreelancerNoResumo {
   ultimo_pagamento: string | null;
   saldo_final: number;
   estado: EstadoDoSaldo;
+  /** O período desta pessoa (com "em aberto", cada um tem o seu). */
+  de: string | null;
+  ate: string | null;
+  /** Pix anotado à mão que o banco ainda não confirmou — já está no "pago". */
+  pago_aguardando_banco: number;
 }
 
 export interface ResumoDosFreelancers {
@@ -47,10 +52,14 @@ export interface LinhaDaContaCorrente {
   observacao: string | null;
   os: OSDoDia[];
   saldo: number;
+  /** Pagamento anotado à mão esperando a linha do banco (já desconta; migration 20261006200000). */
+  aguardando: boolean;
+  criado_em: string | null;
 }
 
 export interface ContaCorrente {
   favorecido: { id: string; nome: string; desde: string | null; saldo_inicial: number; diaria: number | null };
+  atalho: string | null;
   de: string | null;
   ate: string | null;
   saldo_anterior: number;
@@ -58,6 +67,7 @@ export interface ContaCorrente {
   dias: number;
   trabalhado: number;
   pago: number;
+  pago_aguardando_banco: number;
   saldo_final: number;
   estado: EstadoDoSaldo;
 }
@@ -65,17 +75,18 @@ export interface ContaCorrente {
 const num = (v: unknown) => (v == null ? 0 : Number(v));
 const numOuNulo = (v: unknown) => (v == null ? null : Number(v));
 
-export function useResumoFreelancers(de: string | null, ate: string | null) {
+export function useResumoFreelancers(de: string | null, ate: string | null, atalho: string | null = null) {
   return useQuery({
-    queryKey: ['diarias', 'resumo', de, ate],
+    queryKey: ['diarias', 'resumo', de, ate, atalho],
     queryFn: async (): Promise<ResumoDosFreelancers> => {
-      const { data, error } = await supabase.rpc('resumo_freelancers' as never, { p_de: de, p_ate: ate } as never);
+      const { data, error } = await supabase.rpc('resumo_freelancers' as never, { p_de: de, p_ate: ate, p_atalho: atalho } as never);
       if (error) throw error;
       const r = data as unknown as ResumoDosFreelancers;
       return {
         pessoas: (r.pessoas ?? []).map((p) => ({
           ...p, diaria: numOuNulo(p.diaria), dias: num(p.dias), trabalhado: num(p.trabalhado),
-          pago: num(p.pago), saldo_final: num(p.saldo_final),
+          pago: num(p.pago), saldo_final: num(p.saldo_final), pago_aguardando_banco: num(p.pago_aguardando_banco),
+          de: p.de ?? null, ate: p.ate ?? null,
         })),
         trabalhado: num(r.trabalhado), pago: num(r.pago), dias: num(r.dias), deve: num(r.deve), adiantado: num(r.adiantado),
       };
@@ -85,33 +96,37 @@ export function useResumoFreelancers(de: string | null, ate: string | null) {
 }
 
 /** Chave única da conta de um freelancer num período — a tela, a grade e os documentos a dividem. */
-export const chaveDaConta = (favorecidoId: string, de: string | null, ate: string | null) =>
-  ['diarias', 'conta', favorecidoId, de, ate] as const;
+export const chaveDaConta = (favorecidoId: string, de: string | null, ate: string | null, atalho: string | null = null) =>
+  ['diarias', 'conta', favorecidoId, de, ate, atalho] as const;
 
-export async function lerContaCorrente(favorecidoId: string, de: string | null, ate: string | null): Promise<ContaCorrente> {
+export async function lerContaCorrente(
+  favorecidoId: string, de: string | null, ate: string | null, atalho: string | null = null,
+): Promise<ContaCorrente> {
   const { data, error } = await supabase.rpc('conta_corrente_freelancer' as never, {
-    p_favorecido_id: favorecidoId, p_de: de, p_ate: ate,
+    p_favorecido_id: favorecidoId, p_de: de, p_ate: ate, p_atalho: atalho,
   } as never);
   if (error) throw error;
   const c = data as unknown as ContaCorrente;
   return {
     ...c,
+    atalho: c.atalho ?? null,
     saldo_anterior: num(c.saldo_anterior), dias: num(c.dias), trabalhado: num(c.trabalhado),
-    pago: num(c.pago), saldo_final: num(c.saldo_final),
+    pago: num(c.pago), saldo_final: num(c.saldo_final), pago_aguardando_banco: num(c.pago_aguardando_banco),
     favorecido: { ...c.favorecido, saldo_inicial: num(c.favorecido.saldo_inicial), diaria: numOuNulo(c.favorecido.diaria) },
     linhas: (c.linhas ?? []).map((l) => ({
       ...l, trabalhado: num(l.trabalhado), pago: num(l.pago), saldo: num(l.saldo),
       fracao: numOuNulo(l.fracao), valor_diaria: numOuNulo(l.valor_diaria),
       extras: numOuNulo(l.extras), descontos: numOuNulo(l.descontos), os: l.os ?? [],
+      aguardando: l.aguardando === true, criado_em: l.criado_em ?? null,
     })),
   };
 }
 
-export function useContaCorrente(favorecidoId: string | null, de: string | null, ate: string | null) {
+export function useContaCorrente(favorecidoId: string | null, de: string | null, ate: string | null, atalho: string | null = null) {
   return useQuery({
-    queryKey: chaveDaConta(favorecidoId ?? '', de, ate),
+    queryKey: chaveDaConta(favorecidoId ?? '', de, ate, atalho),
     enabled: !!favorecidoId,
-    queryFn: () => lerContaCorrente(favorecidoId!, de, ate),
+    queryFn: () => lerContaCorrente(favorecidoId!, de, ate, atalho),
     staleTime: 30_000,
   });
 }
