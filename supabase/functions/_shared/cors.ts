@@ -12,6 +12,8 @@
 //
 // Origens extras sem redeploy: segredo CORS_ORIGENS_EXTRA="https://a.com,https://b.com".
 
+import { logEdgeError } from "./log-error.ts";
+
 // O app vivo. hbrmarine.online segue na lista (domínio da empresa), mas hoje serve um build
 // antigo; quando o DNS passar a apontar para o Vercel, nada aqui precisa mudar.
 export const ORIGEM_PADRAO = "https://marineflow-erp.vercel.app";
@@ -84,7 +86,93 @@ export function aplicarCors(req: Request, res: Response): Response {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
 }
 
-/** Substituto de `Deno.serve(handler)`: mesma assinatura, resposta passa por aplicarCors. */
+// ── Registro de falha de TODA função (06/10/2026, inventário) ──────────────────────────────
+// Só 5 das 40 edges chamavam logEdgeError; nas outras, um 500 ficava só no log do Supabase, que
+// nem sempre está à mão — e "deu erro" virava pedir a mensagem a quem viu. Como as 40 passam por
+// aqui, o invólucro registra em app_error_logs (RPC log_app_error, que agrupa o mesmo erro numa
+// linha só) toda exceção não tratada e toda resposta 5xx, com o nome da função.
+
+export interface FalhaDaFuncao {
+  funcao: string;
+  mensagem: string;
+  status: number;
+  metodo: string;
+  error?: unknown;
+}
+export type RegistrarFalha = (falha: FalhaDaFuncao) => Promise<void>;
+
+/** "/functions/v1/banking-sync/x" ou "/banking-sync" → "banking-sync". */
+export function nomeDaFuncao(url: string): string {
+  const partes = new URL(url).pathname.split("/").filter(Boolean);
+  const i = partes.indexOf("v1");
+  return (i >= 0 ? partes[i + 1] : partes[0]) ?? "desconhecida";
+}
+
+/** Grava pela RPC com a chave de serviço do próprio ambiente da função. Nunca lança. */
+const registrarNoBanco: RegistrarFalha = async (f) => {
+  try {
+    const url = Deno.env.get("SUPABASE_URL");
+    const chave = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!url || !chave) return;
+
+    const cliente = {
+      rpc: (fn: string, args: unknown) =>
+        fetch(`${url}/rest/v1/rpc/${fn}`, {
+          method: "POST",
+          headers: { apikey: chave, Authorization: `Bearer ${chave}`, "Content-Type": "application/json" },
+          body: JSON.stringify(args),
+        }),
+    };
+    await logEdgeError(cliente, {
+      context: f.funcao,
+      message: f.mensagem,
+      action: `${f.metodo} → ${f.status}`,
+      details: { status: f.status },
+      error: f.error,
+    });
+  } catch {
+    /* um log que derruba a função seria pior que não ter log */
+  }
+};
+
+/** Resposta de falha: o status real (o ai-agent manda 200 com X-Actual-Status) e um trecho do corpo. */
+async function falhaDaResposta(res: Response): Promise<{ status: number; trecho: string } | null> {
+  const status = Number(res.headers.get("X-Actual-Status") ?? res.status);
+  if (!(status >= 500)) return null;
+  const trecho = await res.clone().text().then((t) => t.slice(0, 1500)).catch(() => "");
+  return { status, trecho };
+}
+
+/** O invólucro em si, separado do Deno.serve para poder ser testado. */
+export function comCorsERegistro(
+  handler: (req: Request) => Response | Promise<Response>,
+  registrar: RegistrarFalha = registrarNoBanco,
+): (req: Request) => Promise<Response> {
+  return async (req: Request) => {
+    const funcao = nomeDaFuncao(req.url);
+    let res: Response;
+    try {
+      res = await handler(req);
+    } catch (e) {
+      // Antes: o Deno respondia 500 sem CORS (o navegador nem lia o erro) e nada ficava gravado.
+      const mensagem = String((e as Error)?.message ?? e) || "exceção sem mensagem";
+      console.error(`[${funcao}] exceção não tratada:`, e);
+      await registrar({ funcao, mensagem: `Exceção não tratada: ${mensagem}`, status: 500, metodo: req.method, error: e });
+      res = new Response(JSON.stringify({ error: `Erro interno em ${funcao}: ${mensagem}` }), {
+        status: 500,
+        headers: { ...corsHeadersPara(req), "Content-Type": "application/json" },
+      });
+      return aplicarCors(req, res);
+    }
+    const falha = await falhaDaResposta(res);
+    if (falha) {
+      await registrar({ funcao, mensagem: falha.trecho || `HTTP ${falha.status} sem corpo`, status: falha.status, metodo: req.method });
+    }
+    return aplicarCors(req, res);
+  };
+}
+
+/** Substituto de `Deno.serve(handler)`: mesma assinatura, resposta passa por aplicarCors e falha é registrada. */
 export function servirComCors(handler: (req: Request) => Response | Promise<Response>): void {
-  Deno.serve(async (req: Request) => aplicarCors(req, await handler(req)));
+  Deno.serve(comCorsERegistro(handler));
 }

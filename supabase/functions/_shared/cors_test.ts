@@ -58,3 +58,46 @@ Deno.test("corsHeadersPara inclui os cabeçalhos extras e o cron secret", () => 
   assertEquals(h["Access-Control-Allow-Headers"].includes("x-cron-secret"), true);
   assertEquals(h["Access-Control-Allow-Headers"].endsWith("x-fiscal-signature"), true);
 });
+
+// ── Registro de falha de toda função (06/10/2026) ──
+import { comCorsERegistro, type FalhaDaFuncao, nomeDaFuncao } from "./cors.ts";
+
+function registro() {
+  const falhas: FalhaDaFuncao[] = [];
+  return { falhas, registrar: async (f: FalhaDaFuncao) => void falhas.push(f) };
+}
+const pedido = (caminho = "/functions/v1/banking-sync") =>
+  new Request(`https://x.supabase.co${caminho}`, { method: "POST", headers: { origin: "https://marineflow-erp.vercel.app" } });
+
+Deno.test("nomeDaFuncao: tira o nome do caminho, com ou sem /functions/v1", () => {
+  assertEquals(nomeDaFuncao("https://x.supabase.co/functions/v1/banking-sync"), "banking-sync");
+  assertEquals(nomeDaFuncao("https://x.supabase.co/functions/v1/erp-mcp/mcp"), "erp-mcp");
+  assertEquals(nomeDaFuncao("http://localhost:54321/fiscal-emit"), "fiscal-emit");
+});
+
+Deno.test("exceção não tratada vira 500 com CORS e fica registrada com o nome da função", async () => {
+  const r = registro();
+  const res = await comCorsERegistro(() => { throw new Error("coluna x não existe"); }, r.registrar)(pedido());
+  assertEquals(res.status, 500);
+  assertEquals(res.headers.get("Access-Control-Allow-Origin"), "https://marineflow-erp.vercel.app");
+  assertEquals((await res.json()).error, "Erro interno em banking-sync: coluna x não existe");
+  assertEquals(r.falhas.length, 1);
+  assertEquals(r.falhas[0].funcao, "banking-sync");
+  assertEquals(r.falhas[0].mensagem, "Exceção não tratada: coluna x não existe");
+});
+
+Deno.test("resposta 5xx é registrada com o corpo; o corpo segue intacto para quem chamou", async () => {
+  const r = registro();
+  const res = await comCorsERegistro(() => new Response('{"error":"Pluggy fora"}', { status: 502 }), r.registrar)(pedido());
+  assertEquals(res.status, 502);
+  assertEquals(await res.text(), '{"error":"Pluggy fora"}');
+  assertEquals(r.falhas.map((f) => [f.status, f.mensagem]), [[502, '{"error":"Pluggy fora"}']]);
+});
+
+Deno.test("o status real do X-Actual-Status (ai-agent) também conta; 2xx e 4xx não registram", async () => {
+  const r = registro();
+  await comCorsERegistro(() => new Response("{}", { status: 200, headers: { "X-Actual-Status": "500" } }), r.registrar)(pedido("/functions/v1/ai-agent"));
+  await comCorsERegistro(() => new Response("ok"), r.registrar)(pedido());
+  await comCorsERegistro(() => new Response("sem permissão", { status: 403 }), r.registrar)(pedido());
+  assertEquals(r.falhas.map((f) => [f.funcao, f.status]), [["ai-agent", 500]]);
+});
