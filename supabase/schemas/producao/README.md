@@ -1,6 +1,6 @@
 # Snapshot do schema de produção
 
-Gerado por `node scripts/snapshot-producao.mjs` em **2026-09-14 23:33:19.019177+00** (banco `postgres`),
+Gerado por `node scripts/snapshot-producao.mjs` em **2026-10-06 19:51:25.497093+00** (banco `postgres`),
 lendo os catálogos do Postgres pela CLI (`supabase db query --linked`) — sem pg_dump e sem Docker.
 
 **Por que existe (MF-AUD-058):** o histórico de migrations não reconstrói a produção — havia
@@ -14,30 +14,30 @@ fiel do que está no ar. Regenerar e olhar o `git diff` é a forma de ver deriva
 
 | objeto | quantidade |
 |---|---:|
-| versões em `schema_migrations` | 484 (última: `20260914120000`) |
+| versões em `schema_migrations` | 563 (última: `20261006150000`) |
 | schemas | 13 |
 | extensões | 10 |
 | enums / domains / tipos compostos | 0 / 0 / 0 |
 | sequências | 1 |
-| tabelas (colunas) | 129 (2015) |
-| tabelas com RLS | 129 de 129 |
-| chaves estrangeiras | 256 |
-| índices (fora de constraint) | 232 |
-| funções/procedures | 134 (65 SECURITY DEFINER) |
-| views | 20 |
-| triggers | 91 |
-| políticas de RLS | 267 (36 alcançam anon/public) |
-| grants de tabela | 401 |
-| crons | 19 |
-| buckets | 8 |
+| tabelas (colunas) | 143 (2213) |
+| tabelas com RLS | 143 de 143 |
+| chaves estrangeiras | 286 |
+| índices (fora de constraint) | 336 |
+| funções/procedures | 244 (146 SECURITY DEFINER) |
+| views | 22 |
+| triggers | 108 |
+| políticas de RLS | 281 (31 alcançam anon/public) |
+| grants de tabela | 431 |
+| crons | 26 |
+| buckets | 10 |
 
 ## Sinais que valem olhar
 
 - Tabelas **sem RLS**: —
 - Funções SECURITY DEFINER **sem `search_path` fixo**: —
-- Funções **executáveis por anon** (ACL padrão ou grant explícito): 2 — `ai_so_status_change_hook()`, `share_token_da_requisicao()`
+- Funções **executáveis por anon** (ACL padrão ou grant explícito): 9 — `_e_concordancia(p_texto text)`, `ai_gateway_claim_job(p_worker_id text, p_token text, p_providers text[], p_lease_seconds integer)`, `ai_gateway_complete_job(p_worker_id text, p_token text, p_job_id uuid, p_lease_id uuid, p_response jsonb, p_provider_used text, p_model_used text, p_duration_ms integer, p_usage jsonb)`, `ai_gateway_fail_job(p_worker_id text, p_token text, p_job_id uuid, p_lease_id uuid, p_error_code text, p_error text, p_retryable boolean, p_retry_after_seconds integer, p_count_attempt boolean, p_provider_used text, p_model_used text, p_duration_ms integer, p_usage jsonb)`, `ai_gateway_heartbeat(p_worker_id text, p_token text, p_job_id uuid, p_lease_id uuid, p_lease_seconds integer)`, `ai_gateway_ping(p_worker_id text, p_token text, p_version text, p_estado jsonb)`, `calc_so_totals(so_id uuid)`, `share_token_da_requisicao()`, `whatsapp_send_queue_idempotencia()`
 - Views **sem `security_invoker`**: —
-- Buckets **públicos**: `company-assets`, `documents`, `expense-receipts`, `product-images`, `service-order-photos`, `signatures`, `whatsapp_status`
+- Buckets **públicos**: `company-assets`, `product-images`, `whatsapp_status`
 
 ## Arquivos
 

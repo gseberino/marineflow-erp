@@ -62,6 +62,103 @@ GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE 
 GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.bank_transactions_situacao TO authenticated;
 GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.bank_transactions_situacao TO service_role;
 
+-- ── compras_parceladas_em_dobro ──
+CREATE VIEW public.compras_parceladas_em_dobro WITH (security_invoker=on) AS
+ WITH parcelas AS (
+         SELECT p.id AS payable_id,
+            p.amount AS lancado,
+            p.issue_date,
+            p.description,
+            bt.bank_connection_id,
+            bt.amount AS parcela,
+            bt.transaction_date,
+            split_part(bt.installment_label, '/'::text, 1)::integer AS k,
+            split_part(bt.installment_label, '/'::text, 2)::integer AS n,
+            _loja_da_parcela(bt.counterparty_name, bt.description) AS loja
+           FROM payables p
+             JOIN bank_transactions bt ON bt.id = p.bank_transaction_id
+          WHERE p.status <> 'cancelled'::text AND bt.installment_label ~ '^\d{1,2}/\d{1,2}$'::text AND split_part(bt.installment_label, '/'::text, 2)::integer >= 2
+        ), saltos AS (
+         SELECT parcelas.payable_id,
+            parcelas.lancado,
+            parcelas.issue_date,
+            parcelas.description,
+            parcelas.bank_connection_id,
+            parcelas.parcela,
+            parcelas.transaction_date,
+            parcelas.k,
+            parcelas.n,
+            parcelas.loja,
+            parcelas.parcela - lag(parcelas.parcela) OVER (PARTITION BY parcelas.bank_connection_id, parcelas.loja, parcelas.n ORDER BY parcelas.parcela, parcelas.k, parcelas.payable_id) AS salto
+           FROM parcelas
+        ), compras AS (
+         SELECT saltos.payable_id,
+            saltos.lancado,
+            saltos.issue_date,
+            saltos.description,
+            saltos.bank_connection_id,
+            saltos.parcela,
+            saltos.transaction_date,
+            saltos.k,
+            saltos.n,
+            saltos.loja,
+            saltos.salto,
+            sum(
+                CASE
+                    WHEN saltos.salto IS NULL OR saltos.salto > (saltos.n::numeric * 0.01) THEN 1
+                    ELSE 0
+                END) OVER (PARTITION BY saltos.bank_connection_id, saltos.loja, saltos.n ORDER BY saltos.parcela, saltos.k, saltos.payable_id) AS compra
+           FROM saltos
+        ), grupos AS (
+         SELECT compras.bank_connection_id,
+            compras.loja,
+            compras.n,
+            compras.compra,
+            count(*) AS lancamentos,
+            count(DISTINCT compras.k) AS parcelas_distintas,
+            count(*) FILTER (WHERE abs(compras.lancado - compras.n::numeric * compras.parcela) <= ((compras.n * (compras.n - 1))::numeric * 0.01)) AS inteiras,
+            max(compras.transaction_date - (compras.k - 1) * 30) - min(compras.transaction_date - (compras.k - 1) * 30) AS folga_da_compra
+           FROM compras
+          GROUP BY compras.bank_connection_id, compras.loja, compras.n, compras.compra
+        ), marcadas AS (
+         SELECT c.payable_id,
+            c.lancado,
+            c.issue_date,
+            c.description,
+            c.bank_connection_id,
+            c.parcela,
+            c.transaction_date,
+            c.k,
+            c.n,
+            c.loja,
+            c.salto,
+            c.compra,
+            g.lancamentos,
+            g.parcelas_distintas,
+            g.inteiras,
+            g.folga_da_compra,
+            first_value(c.payable_id) OVER (PARTITION BY c.bank_connection_id, c.loja, c.n, c.compra ORDER BY (abs(c.lancado - c.n::numeric * c.parcela) <= ((c.n * (c.n - 1))::numeric * 0.01)) DESC, c.k, c.payable_id) AS fica
+           FROM compras c
+             JOIN grupos g ON NOT g.bank_connection_id IS DISTINCT FROM c.bank_connection_id AND g.loja = c.loja AND g.n = c.n AND g.compra = c.compra
+        )
+ SELECT payable_id,
+    fica AS payable_que_fica,
+    loja,
+    n AS parcelas,
+    k AS parcela_do_lancamento,
+    parcela AS valor_da_parcela,
+    lancado,
+    issue_date,
+    transaction_date,
+    description
+   FROM marcadas
+  WHERE inteiras >= 1 AND lancamentos > 1 AND parcelas_distintas = lancamentos AND folga_da_compra <= 35 AND payable_id <> fica;
+COMMENT ON VIEW public.compras_parceladas_em_dobro IS 'Lançamentos que repetem uma compra parcelada já lançada pelo valor inteiro (fica o da parcela mais antiga). Ver 20260927120000.';
+-- ACL: postgres=arwdDxtm/postgres authenticated=arwd/postgres service_role=arwdDxtm/postgres
+GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.compras_parceladas_em_dobro TO postgres;
+GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.compras_parceladas_em_dobro TO authenticated;
+GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.compras_parceladas_em_dobro TO service_role;
+
 -- ── conciliacao_lancamentos ──
 CREATE VIEW public.conciliacao_lancamentos WITH (security_invoker=on) AS
  SELECT 'payable'::text AS lado,
@@ -71,22 +168,41 @@ CREATE VIEW public.conciliacao_lancamentos WITH (security_invoker=on) AS
     p.status,
     p.due_date,
     p.issue_date,
-    p.supplier_name AS contraparte,
+    COALESCE(s.name, p.supplier_name) AS contraparte,
     p.expense_category AS categoria,
     p.bank_transaction_id,
         CASE
             WHEN p.bank_transaction_id IS NOT NULL THEN 'conciliado'::text
+            WHEN p.payment_method = 'credito_fornecedor'::text THEN 'fora_do_banco'::text
             ELSE 'sem_extrato'::text
         END AS situacao,
     bt.transaction_date AS extrato_data,
     bt.amount AS extrato_valor,
     bt.description AS extrato_descricao,
         CASE
-            WHEN p.bank_transaction_id IS NOT NULL THEN round(p.amount - bt.amount, 2)
+            WHEN p.bank_transaction_id IS NOT NULL THEN round(COALESCE(g.soma, p.amount) - bt.amount, 2)
             ELSE NULL::numeric
-        END AS diferenca
+        END AS diferenca,
+    p.origin = 'bank_reconciliation'::text OR (EXISTS ( SELECT 1
+           FROM finance_review_queue q
+          WHERE q.created_payable_id = p.id)) AS nasceu_do_extrato,
+        CASE
+            WHEN bt.installment_label ~ '^\d{1,2}/\d{1,2}$'::text AND split_part(bt.installment_label, '/'::text, 2)::integer >= 2 THEN abs(p.amount - split_part(bt.installment_label, '/'::text, 2)::integer::numeric * bt.amount) <= ((split_part(bt.installment_label, '/'::text, 2)::integer * (split_part(bt.installment_label, '/'::text, 2)::integer - 1))::numeric * 0.01)
+            ELSE false
+        END AS compra_parcelada,
+        CASE
+            WHEN bt.installment_label ~ '^\d{1,2}/\d{1,2}$'::text THEN split_part(bt.installment_label, '/'::text, 2)::integer
+            ELSE NULL::integer
+        END AS parcelas,
+    d.payable_id IS NOT NULL AS lancada_em_dobro
    FROM payables p
      LEFT JOIN bank_transactions bt ON bt.id = p.bank_transaction_id
+     LEFT JOIN suppliers s ON s.id = p.supplier_id
+     LEFT JOIN compras_parceladas_em_dobro d ON d.payable_id = p.id
+     LEFT JOIN LATERAL ( SELECT sum(x.amount) AS soma
+           FROM payables x
+          WHERE x.bank_transaction_id = p.bank_transaction_id AND x.status <> 'cancelled'::text AND COALESCE(x.divisao_id, x.id) = COALESCE(p.divisao_id, p.id)) g ON p.bank_transaction_id IS NOT NULL
+  WHERE p.status <> 'cancelled'::text
 UNION ALL
  SELECT 'receivable'::text AS lado,
     r.id,
@@ -99,24 +215,141 @@ UNION ALL
     r.category AS categoria,
     r.bank_transaction_id,
         CASE
-            WHEN r.bank_transaction_id IS NOT NULL THEN 'conciliado'::text
+            WHEN COALESCE(r.bank_transaction_id, lp.linha) IS NOT NULL THEN 'conciliado'::text
             ELSE 'sem_extrato'::text
         END AS situacao,
     bt.transaction_date AS extrato_data,
     bt.amount AS extrato_valor,
     bt.description AS extrato_descricao,
         CASE
-            WHEN r.bank_transaction_id IS NOT NULL THEN round(r.amount - bt.amount, 2)
+            WHEN bt.id IS NOT NULL THEN round(COALESCE(apl.total, r.amount) - bt.amount, 2)
             ELSE NULL::numeric
-        END AS diferenca
+        END AS diferenca,
+    (EXISTS ( SELECT 1
+           FROM finance_review_queue q
+          WHERE q.created_receivable_id = r.id)) AS nasceu_do_extrato,
+    false AS compra_parcelada,
+    NULL::integer AS parcelas,
+    false AS lancada_em_dobro
    FROM receivables r
-     LEFT JOIN bank_transactions bt ON bt.id = r.bank_transaction_id
-     LEFT JOIN clients c ON c.id = r.client_id;
+     LEFT JOIN LATERAL ( SELECT p.bank_transaction_id AS linha
+           FROM payments p
+          WHERE p.receivable_id = r.id AND p.status = 'confirmed'::text AND p.bank_transaction_id IS NOT NULL
+          ORDER BY p.payment_date DESC, p.created_at DESC
+         LIMIT 1) lp ON r.bank_transaction_id IS NULL
+     LEFT JOIN bank_transactions bt ON bt.id = COALESCE(r.bank_transaction_id, lp.linha)
+     LEFT JOIN LATERAL ( SELECT sum(x.amount) AS total
+           FROM payments x
+          WHERE x.bank_transaction_id = bt.id AND x.status = 'confirmed'::text AND x.receivable_id IS NOT NULL) apl ON bt.id IS NOT NULL
+     LEFT JOIN clients c ON c.id = r.client_id
+  WHERE r.status <> 'cancelled'::text;
 COMMENT ON VIEW public.conciliacao_lancamentos IS 'Conciliacao vista do lado certo: um lancamento por linha (pagar ou receber), com a linha do extrato que casou e a diferenca. situacao = conciliado | sem_extrato.';
 -- ACL: postgres=arwdDxtm/postgres authenticated=arwd/postgres service_role=arwdDxtm/postgres
 GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.conciliacao_lancamentos TO postgres;
 GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.conciliacao_lancamentos TO authenticated;
 GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.conciliacao_lancamentos TO service_role;
+
+-- ── recebimentos_do_extrato ──
+CREATE VIEW public.recebimentos_do_extrato WITH (security_invoker=on) AS
+ SELECT t.id AS bank_transaction_id,
+    t.bank_connection_id,
+    t.transaction_date AS data,
+    t.amount AS valor,
+    COALESCE(t.counterparty_name, t.description) AS quem,
+    t.counterparty_document AS documento,
+    t.dismissed_kind,
+    COALESCE(a.aplicado, 0::numeric) AS aplicado,
+    round(t.amount - COALESCE(a.aplicado, 0::numeric), 2) AS sobra,
+    COALESCE(a.contas, 0::bigint) AS contas,
+    a.receivable_ids
+   FROM bank_transactions t
+     LEFT JOIN LATERAL ( SELECT sum(p.amount) AS aplicado,
+            count(DISTINCT p.receivable_id) AS contas,
+            array_agg(DISTINCT p.receivable_id) AS receivable_ids
+           FROM payments p
+          WHERE p.bank_transaction_id = t.id AND p.status = 'confirmed'::text AND p.receivable_id IS NOT NULL) a ON true
+  WHERE t.transaction_type = 'credit'::text;
+COMMENT ON VIEW public.recebimentos_do_extrato IS 'Cada entrada do banco como recebimento: quanto dela foi aplicado em contas a receber (pagamentos confirmados que vieram dela) e quanto sobra.';
+-- ACL: postgres=arwdDxtm/postgres authenticated=arwd/postgres service_role=arwdDxtm/postgres
+GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.recebimentos_do_extrato TO postgres;
+GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.recebimentos_do_extrato TO authenticated;
+GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.recebimentos_do_extrato TO service_role;
+
+-- ── conferencia_dos_pagamentos ──
+CREATE VIEW public.conferencia_dos_pagamentos WITH (security_invoker=on) AS
+ WITH pagos AS (
+         SELECT r.id,
+            r.description,
+            r.amount,
+            r.paid_amount,
+            r.status,
+            r.bank_transaction_id,
+            COALESCE(sum(p.amount) FILTER (WHERE p.status = 'confirmed'::text), 0::numeric) AS soma
+           FROM receivables r
+             LEFT JOIN payments p ON p.receivable_id = r.id
+          GROUP BY r.id
+        )
+ SELECT 'pago_diferente_da_soma'::text AS problema,
+    g.id AS receivable_id,
+    NULL::uuid AS bank_transaction_id,
+    g.description AS descricao,
+    g.paid_amount AS gravado,
+    g.soma AS calculado
+   FROM pagos g
+  WHERE g.status <> 'cancelled'::text AND round(COALESCE(g.paid_amount, 0::numeric), 2) <> round(g.soma, 2)
+UNION ALL
+ SELECT 'situacao_diferente'::text AS problema,
+    g.id AS receivable_id,
+    NULL::uuid AS bank_transaction_id,
+    g.description AS descricao,
+    NULL::numeric AS gravado,
+    g.soma AS calculado
+   FROM pagos g
+  WHERE g.status <> 'cancelled'::text AND g.amount > 0::numeric AND
+        CASE
+            WHEN round(g.soma, 2) >= round(g.amount, 2) THEN 'paid'::text
+            WHEN g.soma > 0::numeric THEN 'partially_paid'::text
+            ELSE 'aberta'::text
+        END <>
+        CASE
+            WHEN g.status = ANY (ARRAY['pending'::text, 'overdue'::text]) THEN 'aberta'::text
+            ELSE g.status
+        END
+UNION ALL
+ SELECT 'entrada_aplicada_a_mais'::text AS problema,
+    NULL::uuid AS receivable_id,
+    e.bank_transaction_id,
+    e.quem AS descricao,
+    e.valor AS gravado,
+    e.aplicado AS calculado
+   FROM recebimentos_do_extrato e
+  WHERE e.aplicado > (e.valor + 0.005)
+UNION ALL
+ SELECT 'conta_ligada_sem_pagamento_da_linha'::text AS problema,
+    g.id AS receivable_id,
+    g.bank_transaction_id,
+    g.description AS descricao,
+    NULL::numeric AS gravado,
+    NULL::numeric AS calculado
+   FROM pagos g
+  WHERE g.status <> 'cancelled'::text AND g.bank_transaction_id IS NOT NULL AND NOT (EXISTS ( SELECT 1
+           FROM payments p
+          WHERE p.receivable_id = g.id AND p.status = 'confirmed'::text AND p.bank_transaction_id = g.bank_transaction_id))
+UNION ALL
+ SELECT 'linha_aponta_pagamento_de_outra'::text AS problema,
+    p.receivable_id,
+    t.id AS bank_transaction_id,
+    COALESCE(t.counterparty_name, t.description) AS descricao,
+    t.amount AS gravado,
+    p.amount AS calculado
+   FROM bank_transactions t
+     JOIN payments p ON p.id = t.reconciled_payment_id
+  WHERE p.status = 'confirmed'::text AND p.receivable_id IS NOT NULL AND p.bank_transaction_id IS DISTINCT FROM t.id;
+COMMENT ON VIEW public.conferencia_dos_pagamentos IS 'Onde "pago = soma dos pagamentos" e "entrada aplicada ≤ valor da entrada" discordam do que está gravado. Vazia = tudo bate.';
+-- ACL: postgres=arwdDxtm/postgres authenticated=arwd/postgres service_role=arwdDxtm/postgres
+GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.conferencia_dos_pagamentos TO postgres;
+GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.conferencia_dos_pagamentos TO authenticated;
+GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.conferencia_dos_pagamentos TO service_role;
 
 -- ── erp_open_loop_facts ──
 CREATE VIEW public.erp_open_loop_facts WITH (security_invoker=on) AS
@@ -350,10 +583,10 @@ CREATE VIEW public.faturas_do_cartao WITH (security_invoker=on) AS
             b.amount,
             b.description
            FROM bank_transactions b
-          WHERE b.source_type = 'bank'::text AND b.transaction_type = 'debit'::text AND (b.description ~~* '%FAT%CARTAO%'::text OR b.description ~~* '%FATURA%CART%'::text OR b.description ~~* '%PGTO%CARTAO%'::text OR b.description = 'DEBITO DE CARTAO'::text) AND round(b.amount::numeric, 2) = c.total AND b.transaction_date >= c.ultima_compra AND b.transaction_date <= (c.ultima_compra + '45 days'::interval)
+          WHERE b.source_type = 'bank'::text AND b.transaction_type = 'debit'::text AND (b.description ~~* '%FAT%CARTAO%'::text OR b.description ~~* '%FATURA%CART%'::text OR b.description ~~* '%PGTO%CARTAO%'::text) AND round(b.amount::numeric, 2) = c.total AND b.transaction_date >= c.ultima_compra AND b.transaction_date <= (c.ultima_compra + '45 days'::interval)
           ORDER BY b.transaction_date
          LIMIT 1) pg ON true;
-COMMENT ON VIEW public.faturas_do_cartao IS 'Uma linha por fatura de cartao (bill_id): compras, periodo, total, cartoes do ciclo e o pagamento no extrato quando o valor casa exatamente. O pagamento e sugestao — o provedor nao entrega esse vinculo.';
+COMMENT ON VIEW public.faturas_do_cartao IS 'Uma linha por fatura de cartao (bill_id): compras, periodo, total, cartoes do ciclo e o pagamento no extrato quando o valor casa exatamente. O pagamento e sugestao — o provedor nao entrega esse vinculo. "DEBITO DE CARTAO" (compra no debito) NAO e pagamento de fatura (26/09/2026).';
 -- ACL: postgres=arwdDxtm/postgres authenticated=arwd/postgres service_role=arwdDxtm/postgres
 GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.faturas_do_cartao TO postgres;
 GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.faturas_do_cartao TO authenticated;
@@ -418,7 +651,10 @@ CREATE VIEW public.service_order_services_tecnico WITH (security_invoker=on) AS
     warranty_months,
     warranty_expires_at,
     created_at,
-    updated_at
+    updated_at,
+    technician_instructions,
+    field_status,
+    field_status_note
    FROM service_order_services;
 COMMENT ON VIEW public.service_order_services_tecnico IS 'Serviços da OS sem unit_price/line_total/desconto (NOVO-008). security_invoker=on.';
 -- ACL: postgres=arwdDxtm/postgres authenticated=arwd/postgres service_role=arwdDxtm/postgres
@@ -465,7 +701,6 @@ CREATE VIEW public.service_orders_tecnico WITH (security_invoker=on) AS
     signed_document_hash,
     requires_resignature,
     resignature_requested_at,
-    photos,
     survey_id,
     estimate_confidence,
     customer_po_number,
@@ -480,9 +715,10 @@ CREATE VIEW public.service_orders_tecnico WITH (security_invoker=on) AS
     reminder_sent_at,
     created_by,
     created_at,
-    updated_at
+    updated_at,
+    technician_instructions,
+    site_access
    FROM service_orders;
-COMMENT ON VIEW public.service_orders_tecnico IS 'OS sem nenhuma coluna de valor nem de situação financeira, para o cargo técnico (NOVO-006/020). security_invoker=on: a RLS de service_orders continua valendo — restringe COLUNA, nunca LINHA. Colunas listadas uma a uma de propósito: coluna de valor nova não entra sozinha.';
 -- ACL: postgres=arwdDxtm/postgres authenticated=arwd/postgres service_role=arwdDxtm/postgres
 GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.service_orders_tecnico TO postgres;
 GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.service_orders_tecnico TO authenticated;
@@ -583,49 +819,31 @@ GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE 
 
 -- ── v_custo_real_mao_de_obra_por_os ──
 CREATE VIEW public.v_custo_real_mao_de_obra_por_os WITH (security_invoker=on) AS
- WITH dias AS (
-         SELECT pl.id AS payroll_line_id,
-            pl.payroll_period_id,
-            pl.work_profile_id,
-            (d.value ->> 'turno_id'::text)::uuid AS turno_id,
-            (d.value ->> 'data'::text)::date AS data,
-            d.value ->> 'tipo'::text AS tipo,
-            COALESCE((d.value ->> 'valor'::text)::numeric, 0::numeric) AS valor_do_dia
-           FROM payroll_lines pl
-             CROSS JOIN LATERAL jsonb_array_elements(COALESCE(pl.detalhamento, '[]'::jsonb)) d(value)
-          WHERE (d.value ->> 'turno_id'::text) IS NOT NULL
-        ), com_os AS (
-         SELECT dias.payroll_line_id,
-            dias.payroll_period_id,
-            dias.work_profile_id,
-            dias.turno_id,
-            dias.data,
-            dias.tipo,
-            dias.valor_do_dia,
-            ws.service_order_id,
-            ws.duracao_minutos,
-            COALESCE(py.name, au.full_name, 'equipe'::text) AS quem
-           FROM dias
-             JOIN work_shifts ws ON ws.id = dias.turno_id
-             JOIN work_profiles wp ON wp.id = dias.work_profile_id
-             LEFT JOIN payees py ON py.id = wp.payee_id
-             LEFT JOIN app_users au ON au.id = wp.app_user_id
-          WHERE ws.service_order_id IS NOT NULL
+ WITH partes AS (
+         SELECT wo.service_order_id,
+            ws.id AS shift_id,
+            wp.payee_id,
+            p.name AS pessoa,
+            ws.data,
+            ws.fracao,
+            ws.valor_dia,
+            count(*) OVER (PARTITION BY ws.id) AS n_os
+           FROM work_shift_os wo
+             JOIN work_shifts ws ON ws.id = wo.shift_id
+             JOIN work_profiles wp ON wp.id = ws.work_profile_id
+             LEFT JOIN payees p ON p.id = wp.payee_id
+          WHERE ws.fracao IS NOT NULL
         )
- SELECT c.service_order_id,
-    so.service_order_number,
-    so.client_id,
-    count(*) AS dias_trabalhados,
-    count(DISTINCT c.work_profile_id) AS pessoas,
-    round(sum(COALESCE(c.duracao_minutos, 0))::numeric / 60.0, 2) AS horas_apontadas,
-    round(sum(c.valor_do_dia), 2) AS custo_real_mao_de_obra,
-    min(c.data) AS primeiro_dia,
-    max(c.data) AS ultimo_dia,
-    string_agg(DISTINCT c.quem, ', '::text ORDER BY c.quem) AS quem_trabalhou
-   FROM com_os c
-     JOIN service_orders so ON so.id = c.service_order_id
-  GROUP BY c.service_order_id, so.service_order_number, so.client_id;
-COMMENT ON VIEW public.v_custo_real_mao_de_obra_por_os IS 'Custo de mao de obra EFETIVAMENTE PAGO por OS, lido do detalhamento das linhas de folha ja fechadas -- nao do valor de referencia de hora. Cobre apenas turnos com service_order_id preenchido: dia de oficina e deslocamento nao entram, e um turno divide-se por uma OS so. Comparar com o previsto de get_os_profitability e o que revela orcamento de mao de obra fora da realidade.';
+ SELECT service_order_id,
+    round(sum(valor_dia / n_os::numeric), 2) AS custo_real_mao_de_obra,
+    round(sum(fracao / n_os::numeric), 2) AS dias_trabalhados,
+    count(DISTINCT payee_id) AS pessoas,
+    string_agg(DISTINCT pessoa, ', '::text) AS quem_trabalhou,
+    min(data) AS primeiro_dia,
+    max(data) AS ultimo_dia
+   FROM partes
+  GROUP BY service_order_id;
+COMMENT ON VIEW public.v_custo_real_mao_de_obra_por_os IS 'Custo real de mão de obra de cada OS: o valor dos dias de diarista ligados a ela (work_shift_os), divididos em partes iguais entre as OS do mesmo dia.';
 -- ACL: postgres=arwdDxtm/postgres authenticated=arwd/postgres service_role=arwdDxtm/postgres
 GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.v_custo_real_mao_de_obra_por_os TO postgres;
 GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.v_custo_real_mao_de_obra_por_os TO authenticated;
@@ -655,53 +873,6 @@ COMMENT ON VIEW public.v_estoque_entradas_pendentes IS 'Peças usadas cuja entra
 GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.v_estoque_entradas_pendentes TO postgres;
 GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.v_estoque_entradas_pendentes TO authenticated;
 GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.v_estoque_entradas_pendentes TO service_role;
-
--- ── v_estoque_variancia ──
-CREATE VIEW public.v_estoque_variancia WITH (security_invoker=on) AS
- WITH mov AS (
-         SELECT inventory_movements.product_id,
-            sum(inventory_movements.quantity_delta) FILTER (WHERE inventory_movements.movement_type = 'purchase'::text) AS compras,
-            sum(inventory_movements.quantity_delta) FILTER (WHERE inventory_movements.movement_type = ANY (ARRAY['service_order_usage'::text, 'service_usage'::text])) AS baixas,
-            sum(inventory_movements.quantity_delta) FILTER (WHERE inventory_movements.movement_type = 'return'::text) AS estornos,
-            sum(inventory_movements.quantity_delta) FILTER (WHERE inventory_movements.movement_type = 'manual_adjustment'::text) AS ajustes,
-            sum(inventory_movements.quantity_delta) AS soma_ledger,
-            count(*) AS qtd_movimentos
-           FROM inventory_movements
-          GROUP BY inventory_movements.product_id
-        )
- SELECT p.id AS product_id,
-    p.name,
-    p.sku,
-    p.brand,
-    p.stock_quantity AS saldo_atual,
-    p.reserved_quantity AS reservado,
-    p.stock_quantity - COALESCE(p.reserved_quantity, 0::numeric) AS disponivel,
-    p.sale_price,
-    round(p.stock_quantity * COALESCE(p.sale_price, 0::numeric), 2) AS valor_em_risco,
-    b.stock_quantity AS saldo_no_backup,
-    p.stock_quantity - COALESCE(b.stock_quantity, 0::numeric) AS delta_desde_backup,
-    COALESCE(m.compras, 0::numeric) AS compras,
-    COALESCE(m.baixas, 0::numeric) AS baixas,
-    COALESCE(m.estornos, 0::numeric) AS estornos,
-    COALESCE(m.ajustes, 0::numeric) AS ajustes,
-    COALESCE(m.qtd_movimentos, 0::bigint) AS qtd_movimentos,
-        CASE
-            WHEN p.stock_quantity < 0::numeric THEN 'estoque negativo'::text
-            WHEN p.stock_quantity > 0::numeric AND COALESCE(m.compras, 0::numeric) = 0::numeric AND COALESCE(m.ajustes, 0::numeric) = 0::numeric THEN 'estoque sem nenhuma compra'::text
-            WHEN COALESCE(m.estornos, 0::numeric) > (- COALESCE(m.baixas, 0::numeric)) THEN 'estornou mais do que baixou'::text
-            WHEN COALESCE(p.reserved_quantity, 0::numeric) > p.stock_quantity THEN 'reserva maior que o estoque'::text
-            WHEN p.stock_quantity <> COALESCE(b.stock_quantity, 0::numeric) AND COALESCE(m.qtd_movimentos, 0::bigint) = 0 THEN 'mudou sem nenhum movimento'::text
-            ELSE 'sem contradicao aparente'::text
-        END AS contradicao
-   FROM products p
-     LEFT JOIN products_stock_backup_pre_v2 b ON b.id = p.id
-     LEFT JOIN mov m ON m.product_id = p.id
-  WHERE p.active;
-COMMENT ON VIEW public.v_estoque_variancia IS 'Fase B do plano de estoque: aponta contradições entre saldo e histórico. Só leitura. Dirige a contagem física; não substitui o saldo.';
--- ACL: postgres=arwdDxtm/postgres authenticated=arwd/postgres service_role=arwdDxtm/postgres
-GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.v_estoque_variancia TO postgres;
-GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.v_estoque_variancia TO authenticated;
-GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.v_estoque_variancia TO service_role;
 
 -- ── v_service_order_labor_variance ──
 CREATE VIEW public.v_service_order_labor_variance WITH (security_invoker=on) AS
@@ -868,6 +1039,16 @@ CREATE VIEW public.vw_os_profitability WITH (security_invoker=on) AS
            FROM commissions
           WHERE commissions.status <> 'cancelled'::text
           GROUP BY commissions.service_order_id
+        ), mao_de_obra AS (
+         SELECT v_custo_real_mao_de_obra_por_os.service_order_id,
+            v_custo_real_mao_de_obra_por_os.custo_real_mao_de_obra,
+            v_custo_real_mao_de_obra_por_os.dias_trabalhados
+           FROM v_custo_real_mao_de_obra_por_os
+        ), horas_vendidas AS (
+         SELECT service_order_services.service_order_id,
+            sum(service_order_services.quantity) FILTER (WHERE service_order_services.billing_unit_snapshot = 'hour'::text) AS horas
+           FROM service_order_services
+          GROUP BY service_order_services.service_order_id
         )
  SELECT so.id AS os_id,
     so.service_order_number,
@@ -878,21 +1059,26 @@ CREATE VIEW public.vw_os_profitability WITH (security_invoker=on) AS
     COALESCE(so.operational_cost_total, 0::numeric) AS operational_cost,
     COALESCE(com.total_commission, 0::numeric) AS commission_cost,
     so.grand_total - COALESCE(oc.total_parts_cost, 0::numeric) AS gross_profit,
-    so.grand_total - COALESCE(oc.total_parts_cost, 0::numeric) - COALESCE(so.travel_cost_total, 0::numeric) - COALESCE(so.operational_cost_total, 0::numeric) - COALESCE(com.total_commission, 0::numeric) AS net_profit,
+    so.grand_total - COALESCE(oc.total_parts_cost, 0::numeric) - COALESCE(so.travel_cost_total, 0::numeric) - COALESCE(so.operational_cost_total, 0::numeric) - COALESCE(com.total_commission, 0::numeric) - COALESCE(mo.custo_real_mao_de_obra, 0::numeric) AS net_profit,
         CASE
-            WHEN so.grand_total > 0::numeric THEN (so.grand_total - COALESCE(oc.total_parts_cost, 0::numeric) - COALESCE(so.travel_cost_total, 0::numeric) - COALESCE(so.operational_cost_total, 0::numeric) - COALESCE(com.total_commission, 0::numeric)) / so.grand_total * 100::numeric
+            WHEN so.grand_total > 0::numeric THEN (so.grand_total - COALESCE(oc.total_parts_cost, 0::numeric) - COALESCE(so.travel_cost_total, 0::numeric) - COALESCE(so.operational_cost_total, 0::numeric) - COALESCE(com.total_commission, 0::numeric) - COALESCE(mo.custo_real_mao_de_obra, 0::numeric)) / so.grand_total * 100::numeric
             ELSE 0::numeric
         END AS net_margin_percent,
     so.created_at,
     so.check_out_at AS finished_at,
-    c.name AS client_name
+    c.name AS client_name,
+    COALESCE(mo.custo_real_mao_de_obra, 0::numeric) AS labor_cost_real,
+    COALESCE(mo.dias_trabalhados, 0::numeric) AS labor_days,
+    COALESCE(so.labor_cost_total, 0::numeric) AS labor_sold,
+    COALESCE(hv.horas, 0::numeric) AS hours_sold
    FROM service_orders so
      LEFT JOIN os_costs oc ON oc.service_order_id = so.id
      LEFT JOIN os_commissions com ON com.service_order_id = so.id
+     LEFT JOIN mao_de_obra mo ON mo.service_order_id = so.id
+     LEFT JOIN horas_vendidas hv ON hv.service_order_id = so.id
      LEFT JOIN clients c ON c.id = so.client_id;
--- ACL: postgres=arwdDxtm/postgres anon=arwd/postgres authenticated=arwd/postgres service_role=arwdDxtm/postgres
+-- ACL: postgres=arwdDxtm/postgres authenticated=arwd/postgres service_role=arwdDxtm/postgres
 GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.vw_os_profitability TO postgres;
-GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.vw_os_profitability TO anon;
 GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE public.vw_os_profitability TO authenticated;
 GRANT INSERT, SELECT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, m ON TABLE public.vw_os_profitability TO service_role;
 

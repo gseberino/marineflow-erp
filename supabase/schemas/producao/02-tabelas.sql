@@ -209,6 +209,82 @@ CREATE TABLE public.ai_daily_briefings (
 );
 ALTER TABLE public.ai_daily_briefings ENABLE ROW LEVEL SECURITY;
 
+-- ── ai_followup_events ──
+CREATE TABLE public.ai_followup_events (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  mission_id uuid NOT NULL,
+  tipo text NOT NULL,
+  conteudo text,
+  classificacao text,
+  evidencia text,
+  pending_action_id uuid,
+  whatsapp_message_id uuid,
+  meta jsonb DEFAULT '{}'::jsonb NOT NULL,
+  created_by uuid,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT ai_followup_events_tipo_check CHECK (tipo = ANY (ARRAY['created'::text, 'erp_check'::text, 'erp_resolved'::text, 'draft'::text, 'touch_sent'::text, 'reply'::text, 'skipped'::text, 'escalated'::text, 'resolved'::text, 'cancelled'::text, 'expired'::text, 'note'::text])),
+  CONSTRAINT ai_followup_events_pkey PRIMARY KEY (id)
+);
+COMMENT ON TABLE public.ai_followup_events IS 'Trilha da missão: cada toque, rascunho, resposta e decisão. Toda mensagem que sai é auditável aqui.';
+ALTER TABLE public.ai_followup_events ENABLE ROW LEVEL SECURITY;
+
+-- ── ai_followup_missions ──
+CREATE TABLE public.ai_followup_missions (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  objetivo text NOT NULL,
+  contraparte_tipo text NOT NULL,
+  contraparte_id uuid,
+  contraparte_phone text NOT NULL,
+  contraparte_label text NOT NULL,
+  origem_tipo text NOT NULL,
+  origem_id uuid,
+  service_order_id uuid,
+  open_loop_id uuid,
+  criterio_erp text DEFAULT 'manual'::text NOT NULL,
+  prazo_final timestamp with time zone,
+  max_toques integer DEFAULT 3 NOT NULL,
+  toques_feitos integer DEFAULT 0 NOT NULL,
+  proximo_toque_em timestamp with time zone,
+  ultimo_toque_em timestamp with time zone,
+  autonomia text DEFAULT 'draft'::text NOT NULL,
+  status text DEFAULT 'active'::text NOT NULL,
+  resolucao text,
+  resolucao_evidencia text,
+  resolvida_em timestamp with time zone,
+  criada_por uuid,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  updated_at timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT ai_followup_missions_autonomia_check CHECK (autonomia = ANY (ARRAY['draft'::text, 'auto'::text])),
+  CONSTRAINT ai_followup_missions_contraparte_tipo_check CHECK (contraparte_tipo = ANY (ARRAY['client'::text, 'supplier'::text, 'lead'::text])),
+  CONSTRAINT ai_followup_missions_criterio_erp_check CHECK (criterio_erp = ANY (ARRAY['task_done'::text, 'quote_decided'::text, 'open_loop_resolved'::text, 'manual'::text])),
+  CONSTRAINT ai_followup_missions_max_toques_check CHECK (max_toques >= 1 AND max_toques <= 6),
+  CONSTRAINT ai_followup_missions_origem_tipo_check CHECK (origem_tipo = ANY (ARRAY['agenda_task'::text, 'quote'::text, 'open_loop'::text, 'manual'::text])),
+  CONSTRAINT ai_followup_missions_status_check CHECK (status = ANY (ARRAY['active'::text, 'waiting_reply'::text, 'resolved'::text, 'escalated'::text, 'cancelled'::text, 'expired'::text])),
+  CONSTRAINT ai_followup_missions_pkey PRIMARY KEY (id)
+);
+COMMENT ON TABLE public.ai_followup_missions IS 'Missão de acompanhamento: a IA cobra um terceiro (fornecedor/cliente) sobre um compromisso até resolver. Copiloto: cada toque passa pelo portão de aprovação.';
+COMMENT ON COLUMN public.ai_followup_missions.criterio_erp IS 'Como o ERP prova que resolveu sem falar com ninguém: task_done (tarefa concluída), quote_decided (orçamento aprovado/rejeitado), open_loop_resolved (fio solto fechado), manual.';
+COMMENT ON COLUMN public.ai_followup_missions.status IS 'active = cobrando · waiting_reply = o terceiro respondeu, o dono decide · resolved · escalated (teto/prazo) · cancelled · expired';
+ALTER TABLE public.ai_followup_missions ENABLE ROW LEVEL SECURITY;
+
+-- ── ai_gateway_workers ──
+CREATE TABLE public.ai_gateway_workers (
+  id text NOT NULL,
+  token_hash text NOT NULL,
+  enabled boolean DEFAULT true NOT NULL,
+  allowed_sources text[] DEFAULT ARRAY['marineflow'::text] NOT NULL,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  last_seen_at timestamp with time zone,
+  version text,
+  estado jsonb,
+  CONSTRAINT ai_gateway_workers_hash_chk CHECK (token_hash ~ '^[0-9a-f]{64}$'::text),
+  CONSTRAINT ai_gateway_workers_id_chk CHECK (id ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'::text),
+  CONSTRAINT ai_gateway_workers_pkey PRIMARY KEY (id)
+);
+COMMENT ON TABLE public.ai_gateway_workers IS 'Workers autorizados do HBR AI Gateway. Guarda só o sha256 do token. Sem policy: ninguém lê pela API.';
+COMMENT ON COLUMN public.ai_gateway_workers.estado IS 'Último estado informado pelo worker no ping: providers (disponível/pausa até/motivo), jobs ativos e máximo.';
+ALTER TABLE public.ai_gateway_workers ENABLE ROW LEVEL SECURITY;
+
 -- ── ai_inbound_sessions ──
 CREATE TABLE public.ai_inbound_sessions (
   id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -223,6 +299,62 @@ CREATE TABLE public.ai_inbound_sessions (
   CONSTRAINT ai_inbound_sessions_phone_key UNIQUE (phone)
 );
 ALTER TABLE public.ai_inbound_sessions ENABLE ROW LEVEL SECURITY;
+
+-- ── ai_jobs ──
+CREATE TABLE public.ai_jobs (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  updated_at timestamp with time zone DEFAULT now() NOT NULL,
+  available_at timestamp with time zone DEFAULT now() NOT NULL,
+  deadline_at timestamp with time zone,
+  started_at timestamp with time zone,
+  completed_at timestamp with time zone,
+  status text DEFAULT 'pending'::text NOT NULL,
+  source text DEFAULT 'marineflow'::text NOT NULL,
+  requested_by uuid,
+  provider text DEFAULT 'claude-local'::text NOT NULL,
+  model text DEFAULT 'sonnet'::text NOT NULL,
+  task_profile text DEFAULT 'text'::text NOT NULL,
+  response_format text DEFAULT 'text'::text NOT NULL,
+  json_schema jsonb,
+  system_prompt text,
+  prompt text NOT NULL,
+  input jsonb,
+  response jsonb,
+  error text,
+  error_code text,
+  metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
+  priority smallint DEFAULT 0 NOT NULL,
+  attempts smallint DEFAULT 0 NOT NULL,
+  max_attempts smallint DEFAULT 3 NOT NULL,
+  timeout_seconds integer DEFAULT 300 NOT NULL,
+  allow_fallback boolean DEFAULT false NOT NULL,
+  worker_id text,
+  lease_id uuid,
+  lease_expires_at timestamp with time zone,
+  cancel_requested_at timestamp with time zone,
+  provider_used text,
+  model_used text,
+  duration_ms integer,
+  usage jsonb,
+  CONSTRAINT ai_jobs_attempts_chk CHECK (attempts >= 0 AND max_attempts >= 1 AND max_attempts <= 10),
+  CONSTRAINT ai_jobs_input_chk CHECK (input IS NULL OR octet_length(input::text) <= 1000000),
+  CONSTRAINT ai_jobs_json_schema_chk CHECK ((response_format <> 'json_schema'::text OR json_schema IS NOT NULL) AND (json_schema IS NULL OR jsonb_typeof(json_schema) = 'object'::text)),
+  CONSTRAINT ai_jobs_metadata_chk CHECK (jsonb_typeof(metadata) = 'object'::text AND octet_length(metadata::text) <= 20000),
+  CONSTRAINT ai_jobs_model_chk CHECK (model ~ '^[a-z0-9][a-z0-9._-]{0,63}$'::text),
+  CONSTRAINT ai_jobs_priority_chk CHECK (priority >= '-100'::integer AND priority <= 100),
+  CONSTRAINT ai_jobs_prompt_chk CHECK (char_length(prompt) >= 1 AND char_length(prompt) <= 200000),
+  CONSTRAINT ai_jobs_provider_chk CHECK (provider ~ '^[a-z0-9][a-z0-9-]{0,31}$'::text),
+  CONSTRAINT ai_jobs_response_format_chk CHECK (response_format = ANY (ARRAY['text'::text, 'json'::text, 'json_schema'::text])),
+  CONSTRAINT ai_jobs_source_chk CHECK (source ~ '^[a-z0-9][a-z0-9_-]{0,31}$'::text),
+  CONSTRAINT ai_jobs_status_chk CHECK (status = ANY (ARRAY['pending'::text, 'processing'::text, 'completed'::text, 'failed'::text, 'cancelled'::text])),
+  CONSTRAINT ai_jobs_system_prompt_chk CHECK (system_prompt IS NULL OR char_length(system_prompt) <= 50000),
+  CONSTRAINT ai_jobs_task_profile_chk CHECK (task_profile ~ '^[a-z0-9][a-z0-9_-]{0,31}$'::text),
+  CONSTRAINT ai_jobs_timeout_chk CHECK (timeout_seconds >= 10 AND timeout_seconds <= 3600),
+  CONSTRAINT ai_jobs_pkey PRIMARY KEY (id)
+);
+COMMENT ON TABLE public.ai_jobs IS 'Fila de jobs de IA do MarineFlow executados pelo HBR AI Gateway local. Escrita só pelas funções ai_job_* e ai_gateway_*.';
+ALTER TABLE public.ai_jobs ENABLE ROW LEVEL SECURITY;
 
 -- ── ai_learned_routines ──
 CREATE TABLE public.ai_learned_routines (
@@ -550,6 +682,35 @@ CREATE TABLE public.ai_workflows (
 );
 ALTER TABLE public.ai_workflows ENABLE ROW LEVEL SECURITY;
 
+-- ── anotacoes_do_extrato ──
+CREATE TABLE public.anotacoes_do_extrato (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  sentido text NOT NULL,
+  valor numeric NOT NULL,
+  data_prevista date NOT NULL,
+  documento text,
+  nome text,
+  fornecedor_id uuid,
+  favorecido_id uuid,
+  cliente_id uuid,
+  categoria text,
+  os_id uuid,
+  descricao text,
+  status text DEFAULT 'aguardando'::text NOT NULL,
+  bank_transaction_id uuid,
+  criada_por uuid,
+  criada_em timestamp with time zone DEFAULT now() NOT NULL,
+  aplicada_em timestamp with time zone,
+  data_exata boolean DEFAULT false NOT NULL,
+  motivo_cancelamento text,
+  cancelada_em timestamp with time zone,
+  CONSTRAINT anotacoes_do_extrato_sentido_check CHECK (sentido = ANY (ARRAY['debit'::text, 'credit'::text])),
+  CONSTRAINT anotacoes_do_extrato_status_check CHECK (status = ANY (ARRAY['aguardando'::text, 'aplicada'::text, 'cancelada'::text])),
+  CONSTRAINT anotacoes_do_extrato_valor_check CHECK (valor > 0::numeric),
+  CONSTRAINT anotacoes_do_extrato_pkey PRIMARY KEY (id)
+);
+ALTER TABLE public.anotacoes_do_extrato ENABLE ROW LEVEL SECURITY;
+
 -- ── api_references ──
 CREATE TABLE public.api_references (
   id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -680,7 +841,7 @@ CREATE TABLE public.audit_log (
   reason text,
   triggered_by_table text,
   triggered_by_id uuid,
-  CONSTRAINT audit_log_action_check CHECK (action = ANY (ARRAY['update'::text, 'cancel'::text, 'reopen'::text, 'reversal'::text, 'cascade_update'::text, 'client_signature'::text, 'whatsapp_send'::text, 'whatsapp_send_api'::text, 'whatsapp_received'::text, 'lead_created'::text, 'lead_matched'::text, 'lead_converted'::text])),
+  CONSTRAINT audit_log_action_check CHECK (action = ANY (ARRAY['update'::text, 'cancel'::text, 'reopen'::text, 'reversal'::text, 'cascade_update'::text, 'client_signature'::text, 'whatsapp_send'::text, 'whatsapp_send_api'::text, 'whatsapp_received'::text, 'whatsapp_preview'::text, 'whatsapp_send_open'::text, 'whatsapp_unread_reminder_enqueued'::text, 'lead_created'::text, 'lead_matched'::text, 'lead_converted'::text, 'import_xml'::text, 'confirm_import'::text, 'revert_import'::text])),
   CONSTRAINT audit_log_pkey PRIMARY KEY (id)
 );
 ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
@@ -753,6 +914,8 @@ CREATE TABLE public.bank_connections (
   consent_expires_at timestamp with time zone,
   provider_status text,
   sincronizacoes_vazias integer DEFAULT 0 NOT NULL,
+  saldo_base numeric(14,2),
+  saldo_base_em date,
   CONSTRAINT bank_connections_account_kind_check CHECK (account_kind = ANY (ARRAY['bank'::text, 'credit_card'::text])),
   CONSTRAINT bank_connections_last_sync_status_check CHECK (last_sync_status = ANY (ARRAY['ok'::text, 'error'::text, 'never'::text])),
   CONSTRAINT bank_connections_pkey PRIMARY KEY (id)
@@ -760,6 +923,7 @@ CREATE TABLE public.bank_connections (
 COMMENT ON TABLE public.bank_connections IS 'Conexoes de leitura de extrato (Open Finance). external_id = itemId do Pluggy.';
 COMMENT ON COLUMN public.bank_connections.last_synced_at IS 'Ultima sincronizacao bem-sucedida. Serve de alarme: consentimento do Open Finance expira e a coleta para em silencio.';
 COMMENT ON COLUMN public.bank_connections.consent_expires_at IS 'Vencimento do consentimento de Open Finance (12 meses). Sem aviso, a conexão morre calada e o gestor descobre no fechamento, com o período já perdido.';
+COMMENT ON COLUMN public.bank_connections.saldo_base IS 'Saldo do banco menos a soma das transações importadas no dia em que a base foi fixada. saldo_base + soma(transações até hoje) deve dar o saldo atual do banco.';
 ALTER TABLE public.bank_connections ENABLE ROW LEVEL SECURITY;
 
 -- ── bank_transactions ──
@@ -1005,6 +1169,16 @@ COMMENT ON COLUMN public.company_fiscal_settings.nfse_municipal_registration_in_
 COMMENT ON COLUMN public.company_fiscal_settings.nfse_default_series IS 'Serie padrao da NFS-e. Separada de nfe_series_producao: sao numeracoes independentes.';
 ALTER TABLE public.company_fiscal_settings ENABLE ROW LEVEL SECURITY;
 
+-- ── consulta_cnpj ──
+CREATE TABLE public.consulta_cnpj (
+  cnpj text NOT NULL,
+  dados jsonb NOT NULL,
+  consultado_em timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT consulta_cnpj_cnpj_check CHECK (cnpj ~ '^\d{14}$'::text),
+  CONSTRAINT consulta_cnpj_pkey PRIMARY KEY (cnpj)
+);
+ALTER TABLE public.consulta_cnpj ENABLE ROW LEVEL SECURITY;
+
 -- ── cost_centers ──
 CREATE TABLE public.cost_centers (
   id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -1057,6 +1231,92 @@ COMMENT ON TABLE public.dc_ampacity_ratings IS 'ABYC E-11, Tabelas VI-A (conduto
    resistência. 30 bitolas × 3 temperaturas de isolação. Os CHECK reproduzem as
    conferências de consistência: linha incoerente é recusada, não guardada.';
 ALTER TABLE public.dc_ampacity_ratings ENABLE ROW LEVEL SECURITY;
+
+-- ── email_accounts ──
+CREATE TABLE public.email_accounts (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  address text NOT NULL,
+  label text,
+  route_alias text,
+  active boolean DEFAULT true NOT NULL,
+  owner_consent_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT email_accounts_pkey PRIMARY KEY (id),
+  CONSTRAINT email_accounts_address_key UNIQUE (address)
+);
+COMMENT ON TABLE public.email_accounts IS 'Caixas de e-mail espelhadas no ERP. owner_consent_at é obrigatório para caixa nominal de terceiro.';
+ALTER TABLE public.email_accounts ENABLE ROW LEVEL SECURITY;
+
+-- ── email_attachments ──
+CREATE TABLE public.email_attachments (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  message_id uuid NOT NULL,
+  filename text,
+  mime_type text,
+  size_bytes integer,
+  storage_path text,
+  kind text DEFAULT 'outro'::text NOT NULL,
+  parsed_payload jsonb,
+  processed_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT email_attachments_kind_check CHECK (kind = ANY (ARRAY['nfe_xml'::text, 'boleto_pdf'::text, 'danfe'::text, 'imagem'::text, 'planilha'::text, 'outro'::text])),
+  CONSTRAINT email_attachments_pkey PRIMARY KEY (id)
+);
+ALTER TABLE public.email_attachments ENABLE ROW LEVEL SECURITY;
+
+-- ── email_messages ──
+CREATE TABLE public.email_messages (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  account_id uuid NOT NULL,
+  dedup_key text NOT NULL,
+  message_id text,
+  in_reply_to text,
+  references_ids text[],
+  thread_key text,
+  from_name text,
+  from_address text NOT NULL,
+  to_addresses text[],
+  cc_addresses text[],
+  subject text,
+  body_text text,
+  received_at timestamp with time zone NOT NULL,
+  raw_size integer,
+  has_attachments boolean DEFAULT false NOT NULL,
+  auth_results text,
+  client_id uuid,
+  supplier_id uuid,
+  match_confidence numeric,
+  match_reason text,
+  triage_class text,
+  triage_confidence numeric,
+  triage_evidence text,
+  triage_reason text,
+  triage_fraud_alert boolean DEFAULT false NOT NULL,
+  triaged_at timestamp with time zone,
+  muted boolean DEFAULT false NOT NULL,
+  body_purged_at timestamp with time zone,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT email_messages_triage_class_check CHECK (triage_class = ANY (ARRAY['ignore'::text, 'notify'::text, 'respond'::text, 'document'::text, 'urgent'::text])),
+  CONSTRAINT email_messages_pkey PRIMARY KEY (id),
+  CONSTRAINT email_messages_dedup_unique UNIQUE (account_id, dedup_key)
+);
+COMMENT ON COLUMN public.email_messages.dedup_key IS 'Message-ID normalizado, ou chave sintética remetente|assunto|minuto quando o cabeçalho falta.';
+COMMENT ON COLUMN public.email_messages.auth_results IS 'Authentication-Results da entrega original. Encaminhamento quebra SPF: ler, nunca recalcular.';
+ALTER TABLE public.email_messages ENABLE ROW LEVEL SECURITY;
+
+-- ── email_sender_rules ──
+CREATE TABLE public.email_sender_rules (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  pattern text NOT NULL,
+  action text NOT NULL,
+  reason text,
+  created_by uuid,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT email_sender_rules_action_check CHECK (action = ANY (ARRAY['ignore_always'::text, 'always_notify'::text])),
+  CONSTRAINT email_sender_rules_pkey PRIMARY KEY (id),
+  CONSTRAINT email_sender_rules_pattern_key UNIQUE (pattern)
+);
+ALTER TABLE public.email_sender_rules ENABLE ROW LEVEL SECURITY;
 
 -- ── entity_open_loops ──
 CREATE TABLE public.entity_open_loops (
@@ -1252,6 +1512,10 @@ CREATE TABLE public.finance_review_queue (
   suggested_payee_id uuid,
   suggested_service_order_id uuid,
   suggested_purchase_order_id uuid,
+  evidencia jsonb,
+  vinculo_sugerido jsonb,
+  automatica text,
+  CONSTRAINT finance_review_queue_automatica_check CHECK (automatica = ANY (ARRAY['regra'::text, 'confianca'::text])),
   CONSTRAINT finance_review_queue_confidence_check CHECK (confidence >= 0 AND confidence <= 100),
   CONSTRAINT finance_review_queue_kind_check CHECK (kind = ANY (ARRAY['create_payable'::text, 'create_receivable'::text, 'internal_transfer'::text, 'categorize'::text, 'anomaly'::text])),
   CONSTRAINT finance_review_queue_status_check CHECK (status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text, 'superseded'::text])),
@@ -1260,6 +1524,9 @@ CREATE TABLE public.finance_review_queue (
 COMMENT ON TABLE public.finance_review_queue IS 'Propostas do sistema aguardando decisao do gestor. Aprovar cria lancamento; nada aqui movimenta dinheiro.';
 COMMENT ON COLUMN public.finance_review_queue.reasoning IS 'Por que o sistema propos isto — a trilha guarda a decisao, nao apenas a acao.';
 COMMENT ON COLUMN public.finance_review_queue.applied_rule_id IS 'Regra que classificou esta proposta. Permite auditar a regra pelo resultado dela.';
+COMMENT ON COLUMN public.finance_review_queue.evidencia IS 'Quem é a contraparte e por qual prova (documento, conta, histórico, nome); o que cadastrar quando nada foi reconhecido.';
+COMMENT ON COLUMN public.finance_review_queue.vinculo_sugerido IS 'O que a transação provavelmente paga: recebível ou conta em aberto, pagamento já lançado, sinal de orçamento, saldo de OS. Com alternativas.';
+COMMENT ON COLUMN public.finance_review_queue.automatica IS 'Aprovada sem clique: por regra com autonomia, ou por confiança alta (finance_auto_approve). Tudo desfazível.';
 ALTER TABLE public.finance_review_queue ENABLE ROW LEVEL SECURITY;
 
 -- ── finance_rules ──
@@ -1283,7 +1550,9 @@ CREATE TABLE public.finance_rules (
   created_by uuid,
   created_at timestamp with time zone DEFAULT now() NOT NULL,
   updated_at timestamp with time zone DEFAULT now() NOT NULL,
+  set_client_id uuid,
   CONSTRAINT finance_rules_autonomy_check CHECK (autonomy = ANY (ARRAY['suggest'::text, 'apply'::text])),
+  CONSTRAINT finance_rules_cliente_so_por_documento_na_entrada CHECK (set_client_id IS NULL OR match_type = 'document'::text AND direction = 'credit'::text AND autonomy = 'suggest'::text),
   CONSTRAINT finance_rules_direction_check CHECK (direction = ANY (ARRAY['debit'::text, 'credit'::text, 'any'::text])),
   CONSTRAINT finance_rules_match_type_check CHECK (match_type = ANY (ARRAY['document'::text, 'supplier'::text, 'counterparty'::text, 'text'::text])),
   CONSTRAINT finance_rules_origin_check CHECK (origin = ANY (ARRAY['user'::text, 'ai'::text])),
@@ -1292,6 +1561,7 @@ CREATE TABLE public.finance_rules (
 );
 COMMENT ON TABLE public.finance_rules IS 'O que o gestor ensinou ao sistema sobre as próprias despesas. A IA propõe (status proposed); quem aceita é gente.';
 COMMENT ON COLUMN public.finance_rules.autonomy IS 'suggest = preenche e espera confirmação; apply = lança sozinha, marcada como criada por regra.';
+COMMENT ON COLUMN public.finance_rules.set_client_id IS 'Regra de entrada: o cliente dono deste CPF/CNPJ. Só com match_type=document, direction=credit e autonomy=suggest.';
 ALTER TABLE public.finance_rules ENABLE ROW LEVEL SECURITY;
 
 -- ── financial_categories ──
@@ -1519,6 +1789,18 @@ COMMENT ON COLUMN public.issued_fiscal_documents.customer_po_number IS 'Ordem de
 COMMENT ON COLUMN public.issued_fiscal_documents.customer_buyer_name IS 'Nome do comprador do cliente. Sai no início do infCpl, junto do pedido.';
 ALTER TABLE public.issued_fiscal_documents ENABLE ROW LEVEL SECURITY;
 
+-- ── legacy_screen_hits ──
+CREATE TABLE public.legacy_screen_hits (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  path text NOT NULL,
+  user_id uuid DEFAULT auth.uid(),
+  user_agent text,
+  hit_at timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT legacy_screen_hits_pkey PRIMARY KEY (id)
+);
+COMMENT ON TABLE public.legacy_screen_hits IS 'Acessos às telas legadas (?legacy=1). Base para apagar em 15/10/2026 o que ninguém abriu (MF-AUD-037).';
+ALTER TABLE public.legacy_screen_hits ENABLE ROW LEVEL SECURITY;
+
 -- ── maintenance_plans ──
 CREATE TABLE public.maintenance_plans (
   id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -1588,11 +1870,16 @@ CREATE TABLE public.payables (
   sub_category character varying,
   fiscal_note_id uuid,
   payee_id uuid,
+  divisao_id uuid,
+  beneficiario_id uuid,
   CONSTRAINT chk_payables_origin CHECK (origin = ANY (ARRAY['manual'::text, 'service_order_expense'::text, 'bank_reconciliation'::text, 'fiscal_note'::text, 'commission'::text, 'purchase_order'::text, 'folha'::text])),
   CONSTRAINT payables_status_check CHECK (status = ANY (ARRAY['pending'::text, 'partially_paid'::text, 'paid'::text, 'overdue'::text, 'cancelled'::text])),
-  CONSTRAINT payables_pkey PRIMARY KEY (id)
+  CONSTRAINT payables_pkey PRIMARY KEY (id),
+  CONSTRAINT payables_uma_por_transacao EXCLUDE USING gist (bank_transaction_id WITH =, COALESCE(divisao_id, id) WITH <>) WHERE (bank_transaction_id IS NOT NULL)
 );
 COMMENT ON COLUMN public.payables.payee_id IS 'Favorecido pessoa física/prestador. Complementar a supplier_id, nunca simultâneo a ele.';
+COMMENT ON COLUMN public.payables.divisao_id IS 'Parte de um pagamento dividido (ex.: pró-labore + retirada de sócio no mesmo Pix): aponta para o lançamento principal do grupo, que fica com divisao_id nulo. As partes somam o valor da linha do banco.';
+COMMENT ON COLUMN public.payables.beneficiario_id IS 'Quem recebeu o dinheiro quando o lançamento está no nome de outro favorecido (bolso do sócio: payee = sócio a reembolsar).';
 ALTER TABLE public.payables ENABLE ROW LEVEL SECURITY;
 
 -- ── payees ──
@@ -1616,6 +1903,8 @@ CREATE TABLE public.payees (
   updated_at timestamp with time zone DEFAULT now() NOT NULL,
   commission_percentage numeric(5,2),
   app_user_id uuid,
+  conta_corrente_desde date,
+  saldo_anterior numeric(12,2) DEFAULT 0 NOT NULL,
   CONSTRAINT payees_account_type_check CHECK (account_type = ANY (ARRAY['corrente'::text, 'poupanca'::text, 'pagamento'::text])),
   CONSTRAINT payees_kind_check CHECK (kind = ANY (ARRAY['socio'::text, 'funcionario'::text, 'diarista'::text, 'prestador'::text, 'comissionado'::text])),
   CONSTRAINT payees_pix_key_type_check CHECK (pix_key_type = ANY (ARRAY['cpf'::text, 'cnpj'::text, 'email'::text, 'telefone'::text, 'aleatoria'::text])),
@@ -1625,6 +1914,8 @@ COMMENT ON TABLE public.payees IS 'Favorecidos que recebem dinheiro sem ser forn
 COMMENT ON COLUMN public.payees.kind IS 'socio = pró-labore (fora do resultado operacional); funcionario = folha; diarista = apoio pontual; prestador = PJ de serviço; comissionado = recebe percentual sobre venda.';
 COMMENT ON COLUMN public.payees.commission_percentage IS 'Percentual habitual de comissão. Padrão para novas vendas; sempre editável na venda.';
 COMMENT ON COLUMN public.payees.app_user_id IS 'Conta de acesso desta pessoa, quando ela passar a usar o sistema. Nulo = trabalha e recebe, mas nao acessa. O perfil de pagamento continua apontando para o favorecido: e a identidade de pagamento, e o historico nao muda de dono.';
+COMMENT ON COLUMN public.payees.conta_corrente_desde IS 'Dias e pagamentos antes desta data não entram no saldo do freelancer (acertados por fora).';
+COMMENT ON COLUMN public.payees.saldo_anterior IS 'Saldo na data de início: positivo = a empresa devia a ele; negativo = tinha adiantado.';
 ALTER TABLE public.payees ENABLE ROW LEVEL SECURITY;
 
 -- ── payment_condition_presets ──
@@ -1658,6 +1949,7 @@ CREATE TABLE public.payments (
   status text DEFAULT 'confirmed'::text,
   receipt_url text,
   receipt_storage_path text,
+  bank_transaction_id uuid,
   CONSTRAINT chk_payment_target CHECK (receivable_id IS NOT NULL AND payable_id IS NULL OR receivable_id IS NULL AND payable_id IS NOT NULL),
   CONSTRAINT payments_payment_method_check CHECK (payment_method = ANY (ARRAY['pix'::text, 'credit_card'::text, 'debit_card'::text, 'cash'::text, 'bank_transfer'::text, 'check'::text])),
   CONSTRAINT payments_status_check CHECK (status = ANY (ARRAY['confirmed'::text, 'cancelled'::text])),
@@ -1665,6 +1957,7 @@ CREATE TABLE public.payments (
 );
 COMMENT ON COLUMN public.payments.receipt_url IS 'URL pública do comprovante anexado (bucket expense-receipts).';
 COMMENT ON COLUMN public.payments.receipt_storage_path IS 'Caminho do comprovante no storage (para remoção/gestão).';
+COMMENT ON COLUMN public.payments.bank_transaction_id IS 'De qual linha do banco (Pix, TED…) veio este pagamento. Vários pagamentos podem vir da mesma linha: um Pix que pagou várias contas.';
 ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 
 -- ── payroll_lines ──
@@ -1906,15 +2199,6 @@ COMMENT ON COLUMN public.products.conductor_insulation_c IS 'Temperatura da isol
    aguenta.';
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 
--- ── products_stock_backup_pre_v2 ──
-CREATE TABLE public.products_stock_backup_pre_v2 (
-  id uuid,
-  stock_quantity numeric(10,3),
-  reserved_quantity numeric,
-  backed_up_at timestamp with time zone
-);
-ALTER TABLE public.products_stock_backup_pre_v2 ENABLE ROW LEVEL SECURITY;
-
 -- ── purchase_order_items ──
 CREATE TABLE public.purchase_order_items (
   id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -1994,6 +2278,23 @@ CREATE TABLE public.quote_request_sends (
 COMMENT ON TABLE public.quote_request_sends IS 'Cada tentativa REAL de envio de uma cotacao a um fornecedor. O status vive em whatsapp_send_queue (via queue_id) — aqui fica so o vinculo, para nao existir duas versoes da mesma verdade.';
 COMMENT ON COLUMN public.quote_request_sends.queue_id IS 'Linha da fila que carrega esta mensagem. O worker atualiza status/failed_reason la; a tela le por juncao.';
 ALTER TABLE public.quote_request_sends ENABLE ROW LEVEL SECURITY;
+
+-- ── quote_request_supplier_terms ──
+CREATE TABLE public.quote_request_supplier_terms (
+  quote_request_id uuid NOT NULL,
+  supplier_id uuid NOT NULL,
+  freight numeric(12,2) DEFAULT 0 NOT NULL,
+  discount numeric(12,2) DEFAULT 0 NOT NULL,
+  notes text,
+  updated_by uuid,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  updated_at timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT quote_request_supplier_terms_discount_check CHECK (discount >= 0::numeric),
+  CONSTRAINT quote_request_supplier_terms_freight_check CHECK (freight >= 0::numeric),
+  CONSTRAINT quote_request_supplier_terms_pkey PRIMARY KEY (quote_request_id, supplier_id)
+);
+COMMENT ON TABLE public.quote_request_supplier_terms IS 'Frete e desconto negociados por fornecedor dentro de uma cotação; entram no total do pacote (itens - desconto + frete).';
+ALTER TABLE public.quote_request_supplier_terms ENABLE ROW LEVEL SECURITY;
 
 -- ── quote_requests ──
 CREATE TABLE public.quote_requests (
@@ -2098,36 +2399,6 @@ COMMENT ON COLUMN public.reconciliation_memory.statement_key IS 'Tokens identifi
 COMMENT ON COLUMN public.reconciliation_memory.hits IS 'Quantas vezes essa ligacao foi confirmada. Mais confirmacoes, mais confianca no casamento.';
 ALTER TABLE public.reconciliation_memory ENABLE ROW LEVEL SECURITY;
 
--- ── reparo_coremma_20260805 ──
-CREATE TABLE public.reparo_coremma_20260805 (
-  id uuid,
-  supplier_name text,
-  expense_category text,
-  description text,
-  issue_date date,
-  due_date date,
-  amount numeric(12,2),
-  currency text,
-  status text,
-  payment_method text,
-  paid_amount numeric(12,2),
-  balance_amount numeric(12,2),
-  linked_service_order_id uuid,
-  notes text,
-  created_at timestamp with time zone,
-  updated_at timestamp with time zone,
-  supplier_id uuid,
-  origin text,
-  bank_transaction_id uuid,
-  cost_center_id uuid,
-  sub_category character varying,
-  fiscal_note_id uuid,
-  payee_id uuid,
-  reparado_em timestamp with time zone
-);
-COMMENT ON TABLE public.reparo_coremma_20260805 IS 'Cópia das 82 despesas atribuídas por engano à Coremma (nome fantasia "Itajai" casava com qualquer estabelecimento de Itajaí). Devolvidas à fila em 05/08/2026 para reclassificação.';
-ALTER TABLE public.reparo_coremma_20260805 ENABLE ROW LEVEL SECURITY;
-
 -- ── saved_filters ──
 CREATE TABLE public.saved_filters (
   id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -2137,7 +2408,7 @@ CREATE TABLE public.saved_filters (
   created_at timestamp with time zone DEFAULT now(),
   user_id uuid,
   is_default boolean DEFAULT false NOT NULL,
-  CONSTRAINT saved_filters_filter_type_check CHECK (filter_type = ANY (ARRAY['payable'::text, 'receivable'::text, 'service_orders'::text, 'quotes'::text, 'products'::text, 'vessels'::text, 'agenda'::text, 'clients'::text, 'suppliers'::text, 'marinas'::text, 'services'::text, 'inventory'::text, 'purchase_orders'::text, 'collections'::text, 'crm'::text, 'external_quotes'::text, 'whatsapp_leads'::text, 'whatsapp_scheduled'::text, 'whatsapp_logs'::text])),
+  CONSTRAINT saved_filters_filter_type_check CHECK (filter_type = ANY (ARRAY['payable'::text, 'receivable'::text, 'service_orders'::text, 'quotes'::text, 'products'::text, 'vessels'::text, 'agenda'::text, 'clients'::text, 'suppliers'::text, 'marinas'::text, 'services'::text, 'inventory'::text, 'purchase_orders'::text, 'collections'::text, 'crm'::text, 'external_quotes'::text, 'whatsapp_leads'::text, 'whatsapp_scheduled'::text, 'whatsapp_logs'::text, 'fiscal_documents'::text])),
   CONSTRAINT saved_filters_pkey PRIMARY KEY (id)
 );
 ALTER TABLE public.saved_filters ENABLE ROW LEVEL SECURITY;
@@ -2257,7 +2528,7 @@ CREATE TABLE public.service_order_photos (
   service_order_id uuid NOT NULL,
   uploaded_by uuid,
   storage_path text NOT NULL,
-  public_url text NOT NULL,
+  public_url text,
   caption text,
   photo_type text DEFAULT 'progress'::text NOT NULL,
   step_id uuid,
@@ -2265,6 +2536,7 @@ CREATE TABLE public.service_order_photos (
   CONSTRAINT service_order_photos_photo_type_check CHECK (photo_type = ANY (ARRAY['before'::text, 'progress'::text, 'after'::text, 'problem'::text])),
   CONSTRAINT service_order_photos_pkey PRIMARY KEY (id)
 );
+COMMENT ON COLUMN public.service_order_photos.public_url IS 'LEGADO: link público de quando o bucket service-order-photos era público (até 04/10/2026). Não é mais gravado; a tela e o PDF geram link temporário a partir de storage_path.';
 ALTER TABLE public.service_order_photos ENABLE ROW LEVEL SECURITY;
 
 -- ── service_order_services ──
@@ -2293,6 +2565,10 @@ CREATE TABLE public.service_order_services (
   service_system text,
   service_verb text,
   fiscal_verb text,
+  technician_instructions text,
+  field_status text DEFAULT 'a_fazer'::text NOT NULL,
+  field_status_note text,
+  CONSTRAINT service_order_services_field_status_check CHECK (field_status = ANY (ARRAY['a_fazer'::text, 'so_levantar'::text, 'aguarda_peca'::text, 'feito'::text, 'parcial'::text, 'nao_feito'::text])),
   CONSTRAINT service_order_services_pkey PRIMARY KEY (id)
 );
 COMMENT ON COLUMN public.service_order_services.service_system IS 'Sistema que ESTA linha toca. Sobrepõe o do catálogo — é assim que um serviço
@@ -2305,6 +2581,9 @@ COMMENT ON COLUMN public.service_order_services.fiscal_verb IS 'Verbo fiscal DES
    código de tributação — verbo genérico não passa por cima do cadastro que a
    contabilidade fez. Os dez verbos têm hoje valores idênticos (14.01 / ISS 3%),
    então escolhê-lo não altera imposto: ele liga a herança que já existe.';
+COMMENT ON COLUMN public.service_order_services.technician_instructions IS 'Instrução ao técnico para este serviço. Sai no cartão do serviço na via do técnico.';
+COMMENT ON COLUMN public.service_order_services.field_status IS 'Situação na via: a_fazer | so_levantar (medir/fotografar, não executar) | aguarda_peca | feito | parcial | nao_feito. Os três últimos vêm do papel, pela tela Lançar a via.';
+COMMENT ON COLUMN public.service_order_services.field_status_note IS 'Motivo do parcial/não feito, ou observação da situação.';
 ALTER TABLE public.service_order_services ENABLE ROW LEVEL SECURITY;
 
 -- ── service_order_signatures ──
@@ -2458,7 +2737,6 @@ CREATE TABLE public.service_orders (
   travel_hours numeric DEFAULT 0,
   ferry_cost numeric DEFAULT 0,
   travel_type text DEFAULT 'comercial'::text,
-  photos jsonb DEFAULT '[]'::jsonb,
   reminder_sent_at timestamp with time zone,
   discount_services_pct numeric(5,2) DEFAULT 0 NOT NULL,
   discount_parts_pct numeric(5,2) DEFAULT 0 NOT NULL,
@@ -2476,6 +2754,11 @@ CREATE TABLE public.service_orders (
   survey_id uuid,
   estimate_confidence text,
   contingency_pct numeric(5,2),
+  client_confirmation_requested_at timestamp with time zone,
+  client_confirmed_at timestamp with time zone,
+  client_confirmed_for timestamp with time zone,
+  technician_instructions text,
+  site_access text,
   CONSTRAINT service_orders_estimate_confidence_check CHECK (estimate_confidence IS NULL OR (estimate_confidence = ANY (ARRAY['alta'::text, 'media'::text, 'baixa'::text]))),
   CONSTRAINT service_orders_invoicing_status_check CHECK (invoicing_status = ANY (ARRAY['not_invoiced'::text, 'invoiced'::text, 'partially_invoiced'::text])),
   CONSTRAINT service_orders_payment_status_check CHECK (payment_status = ANY (ARRAY['unpaid'::text, 'partially_paid'::text, 'paid'::text])),
@@ -2490,6 +2773,9 @@ CREATE TABLE public.service_orders (
 );
 COMMENT ON COLUMN public.service_orders.customer_po_number IS 'Ordem de compra do cliente, capturada na OS/orçamento e levada à emissão da NF-e.';
 COMMENT ON COLUMN public.service_orders.customer_buyer_name IS 'Comprador informado pelo cliente; default do campo Comprador na emissão da NF-e.';
+COMMENT ON COLUMN public.service_orders.client_confirmed_for IS 'O horário (scheduled_start_at) que o cliente confirmou por WhatsApp. Remarcou → a confirmação antiga não vale para a data nova.';
+COMMENT ON COLUMN public.service_orders.technician_instructions IS 'Instrução do escritório ao técnico: ressalvas, o que não fazer, o que pedir aprovação. Sai só na via do técnico.';
+COMMENT ON COLUMN public.service_orders.site_access IS 'Onde o serviço acontece e como entrar (endereço, vaga, chave, portaria, horário). Preenchido a partir do veículo; sai na via do técnico.';
 ALTER TABLE public.service_orders ENABLE ROW LEVEL SECURITY;
 
 -- ── service_step_blocks ──
@@ -2912,11 +3198,42 @@ CREATE TABLE public.vessels (
   active boolean DEFAULT true NOT NULL,
   created_at timestamp with time zone DEFAULT now() NOT NULL,
   updated_at timestamp with time zone DEFAULT now() NOT NULL,
-  asset_type text DEFAULT 'Lancha'::text,
+  asset_type text,
+  access_notes text,
   CONSTRAINT vessels_pkey PRIMARY KEY (id)
 );
 COMMENT ON COLUMN public.vessels.asset_type IS 'Tipo do ativo (Lancha, Veleiro, Catamarã, Motorhome, Camper, Trailer)';
+COMMENT ON COLUMN public.vessels.access_notes IS 'Local e acesso padrão do veículo (marina/vaga, endereço de guarda, chave, portaria). Sugerido em cada OS nova.';
 ALTER TABLE public.vessels ENABLE ROW LEVEL SECURITY;
+
+-- ── whatsapp_acompanhamentos ──
+CREATE TABLE public.whatsapp_acompanhamentos (
+  id uuid DEFAULT gen_random_uuid() NOT NULL,
+  phone_normalized text NOT NULL,
+  contato text,
+  modo text DEFAULT 'acompanhar'::text NOT NULL,
+  intervalo_min integer DEFAULT 120 NOT NULL,
+  ate timestamp with time zone DEFAULT (now() + '7 days'::interval) NOT NULL,
+  lembrar_em timestamp with time zone,
+  promessa text,
+  status text DEFAULT 'ativo'::text NOT NULL,
+  encerrado_motivo text,
+  ultimo_aviso_em timestamp with time zone,
+  avisos_dia date,
+  avisos_no_dia integer DEFAULT 0 NOT NULL,
+  criado_por uuid,
+  origem_mensagem uuid,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  updated_at timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT whatsapp_acompanhamentos_intervalo_chk CHECK (intervalo_min >= 15 AND intervalo_min <= 10080),
+  CONSTRAINT whatsapp_acompanhamentos_lembrar_chk CHECK (modo = 'acompanhar'::text OR lembrar_em IS NOT NULL),
+  CONSTRAINT whatsapp_acompanhamentos_modo_chk CHECK (modo = ANY (ARRAY['acompanhar'::text, 'lembrar_em'::text, 'promessa'::text])),
+  CONSTRAINT whatsapp_acompanhamentos_promessa_len CHECK (promessa IS NULL OR char_length(promessa) <= 1000),
+  CONSTRAINT whatsapp_acompanhamentos_status_chk CHECK (status = ANY (ARRAY['ativo'::text, 'encerrado'::text])),
+  CONSTRAINT whatsapp_acompanhamentos_pkey PRIMARY KEY (id)
+);
+COMMENT ON TABLE public.whatsapp_acompanhamentos IS 'Conversas que o dono pediu para acompanhar (avisos no intervalo com sugestão de resposta), lembretes de responder numa hora e promessas dele detectadas nas mensagens. O vigia é a edge acompanhar-conversas.';
+ALTER TABLE public.whatsapp_acompanhamentos ENABLE ROW LEVEL SECURITY;
 
 -- ── whatsapp_blocked_numbers ──
 CREATE TABLE public.whatsapp_blocked_numbers (
@@ -2929,6 +3246,23 @@ CREATE TABLE public.whatsapp_blocked_numbers (
   CONSTRAINT whatsapp_blocked_numbers_phone_normalized_key UNIQUE (phone_normalized)
 );
 ALTER TABLE public.whatsapp_blocked_numbers ENABLE ROW LEVEL SECURITY;
+
+-- ── whatsapp_conexao_vigia ──
+CREATE TABLE public.whatsapp_conexao_vigia (
+  id smallint DEFAULT 1 NOT NULL,
+  estado text NOT NULL,
+  desde timestamp with time zone DEFAULT now() NOT NULL,
+  verificado_em timestamp with time zone DEFAULT now() NOT NULL,
+  detalhe text,
+  avisado_em timestamp with time zone,
+  pedido_por uuid,
+  pedido_em timestamp with time zone,
+  CONSTRAINT whatsapp_conexao_vigia_estado_check CHECK (estado = ANY (ARRAY['open'::text, 'connecting'::text, 'close'::text, 'inacessivel'::text, 'travado'::text])),
+  CONSTRAINT whatsapp_conexao_vigia_id_check CHECK (id = 1),
+  CONSTRAINT whatsapp_conexao_vigia_pkey PRIMARY KEY (id)
+);
+COMMENT ON TABLE public.whatsapp_conexao_vigia IS 'Uma linha: estado da conexão do WhatsApp visto pelo vigia (whatsapp-conexao, a cada 5 min). Só service role.';
+ALTER TABLE public.whatsapp_conexao_vigia ENABLE ROW LEVEL SECURITY;
 
 -- ── whatsapp_conversation_assignments ──
 CREATE TABLE public.whatsapp_conversation_assignments (
@@ -3055,6 +3389,20 @@ CREATE TABLE public.whatsapp_scheduled_sends (
 );
 ALTER TABLE public.whatsapp_scheduled_sends ENABLE ROW LEVEL SECURITY;
 
+-- ── whatsapp_send_idempotencia ──
+CREATE TABLE public.whatsapp_send_idempotencia (
+  chave text NOT NULL,
+  phone_normalized text,
+  contexto text,
+  provider_message_id text,
+  criado_em timestamp with time zone DEFAULT now() NOT NULL,
+  concluido_em timestamp with time zone,
+  CONSTRAINT whatsapp_send_idempotencia_pkey PRIMARY KEY (chave)
+);
+COMMENT ON TABLE public.whatsapp_send_idempotencia IS 'Chaves de envio já usadas pela edge whatsapp-send (dedupe_key). Linhas com mais de 30 dias são apagadas pela própria edge.';
+COMMENT ON COLUMN public.whatsapp_send_idempotencia.concluido_em IS 'Quando o provedor confirmou o envio. Vazia = envio em andamento ou tentativa que morreu no meio: a edge whatsapp-send não responde "já enviado" por ela. (O receivable-reminders reserva chaves próprias e não preenche esta coluna.)';
+ALTER TABLE public.whatsapp_send_idempotencia ENABLE ROW LEVEL SECURITY;
+
 -- ── whatsapp_send_queue ──
 CREATE TABLE public.whatsapp_send_queue (
   id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -3073,8 +3421,10 @@ CREATE TABLE public.whatsapp_send_queue (
   zapi_message_id text,
   created_at timestamp with time zone DEFAULT now() NOT NULL,
   updated_at timestamp with time zone DEFAULT now() NOT NULL,
+  dedupe_key text,
   CONSTRAINT whatsapp_send_queue_pkey PRIMARY KEY (id)
 );
+COMMENT ON COLUMN public.whatsapp_send_queue.dedupe_key IS 'Chave de idempotência. Preenchida pelo gatilho para origens automáticas; linha repetida é descartada.';
 ALTER TABLE public.whatsapp_send_queue ENABLE ROW LEVEL SECURITY;
 
 -- ── whatsapp_status_scheduled ──
@@ -3144,6 +3494,16 @@ CREATE TABLE public.work_profiles (
 COMMENT ON TABLE public.work_profiles IS 'Como cada pessoa e paga, com vigencia. Mudar o valor-hora hoje nao altera o que ja foi pago: fecha-se o perfil antigo e abre-se outro.';
 ALTER TABLE public.work_profiles ENABLE ROW LEVEL SECURITY;
 
+-- ── work_shift_os ──
+CREATE TABLE public.work_shift_os (
+  shift_id uuid NOT NULL,
+  service_order_id uuid NOT NULL,
+  created_at timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT work_shift_os_pkey PRIMARY KEY (shift_id, service_order_id)
+);
+COMMENT ON TABLE public.work_shift_os IS 'Em quais OS o dia foi trabalhado. O valor do dia se divide em partes iguais entre elas (decisão do dono, 28/09/2026).';
+ALTER TABLE public.work_shift_os ENABLE ROW LEVEL SECURITY;
+
 -- ── work_shifts ──
 CREATE TABLE public.work_shifts (
   id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -3163,9 +3523,17 @@ CREATE TABLE public.work_shifts (
   created_at timestamp with time zone DEFAULT now() NOT NULL,
   updated_at timestamp with time zone DEFAULT now() NOT NULL,
   service_order_id uuid,
+  fracao numeric(3,2),
+  valor_diaria numeric(12,2),
+  extras numeric(12,2) DEFAULT 0 NOT NULL,
+  descontos numeric(12,2) DEFAULT 0 NOT NULL,
+  valor_dia numeric(12,2) GENERATED ALWAYS AS ((((COALESCE(fracao, (0)::numeric) * COALESCE(valor_diaria, (0)::numeric)) + extras) - descontos)) STORED,
   CONSTRAINT work_shifts_aprovacao_tem_autor CHECK (status = 'rascunho'::text OR aprovado_por IS NOT NULL AND aprovado_em IS NOT NULL),
+  CONSTRAINT work_shifts_dia_tem_valor CHECK (fracao IS NULL OR valor_diaria IS NOT NULL AND valor_diaria > 0::numeric),
   CONSTRAINT work_shifts_duracao_minutos_check CHECK (duracao_minutos >= 0),
+  CONSTRAINT work_shifts_extras_descontos CHECK (extras >= 0::numeric AND descontos >= 0::numeric),
   CONSTRAINT work_shifts_fim_depois_do_inicio CHECK (fim IS NULL OR inicio IS NULL OR fim >= inicio),
+  CONSTRAINT work_shifts_fracao_do_dia CHECK (fracao IS NULL OR fracao = 0::numeric AND tipo = 'falta'::text OR (fracao = ANY (ARRAY[0.5, 1::numeric])) AND tipo = 'diaria'::text),
   CONSTRAINT work_shifts_intervalo_minutos_check CHECK (intervalo_minutos >= 0),
   CONSTRAINT work_shifts_origem_check CHECK (origem = ANY (ARRAY['whatsapp'::text, 'painel'::text, 'agente'::text, 'importado'::text])),
   CONSTRAINT work_shifts_status_check CHECK (status = ANY (ARRAY['rascunho'::text, 'aprovado'::text, 'pago'::text])),
@@ -3174,6 +3542,10 @@ CREATE TABLE public.work_shifts (
 );
 COMMENT ON TABLE public.work_shifts IS 'Jornada trabalhada, independente de OS. Base do que a PESSOA recebe; time_entries continua sendo a base do que o CLIENTE paga.';
 COMMENT ON COLUMN public.work_shifts.service_order_id IS 'OS em que o dia foi trabalhado, quando o dia inteiro foi de uma so. Opcional: dia de oficina, deslocamento e administrativo nao tem OS -- e e justamente por eles nao caberem em time_entries (service_order_id NOT NULL) que work_shifts existe.';
+COMMENT ON COLUMN public.work_shifts.fracao IS 'Dia de diarista: 1 = dia inteiro, 0.5 = meio período, 0 = faltou (tipo falta). Nulo = turno por hora.';
+COMMENT ON COLUMN public.work_shifts.valor_diaria IS 'Diária GRAVADA no lançamento (vinda do perfil vigente na data). Mudar o cadastro não reescreve o dia.';
+COMMENT ON COLUMN public.work_shifts.extras IS 'O que o freelancer pagou do próprio bolso e a empresa devolve (almoço, transporte, material). O que a empresa pagou direto não entra aqui.';
+COMMENT ON COLUMN public.work_shifts.valor_dia IS 'fracao × valor_diaria + extras − descontos. Base do saldo e do custo da OS.';
 ALTER TABLE public.work_shifts ENABLE ROW LEVEL SECURITY;
 
 -- ── work_stop_reasons ──
