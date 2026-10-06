@@ -141,6 +141,14 @@ export function doMes(lancamentos: LancamentoDRE[], ano: number, mes: number): L
 
 export const ROTULOS_GRUPO = ROTULO_GRUPO;
 
+/**
+ * A base do resultado, dita na tela (06/10/2026). useLancamentosDRE agrupa contas a pagar e a
+ * receber pela DATA DE EMISSÃO (issue_date): é competência, não caixa. Sem dizer, quem compara com
+ * o extrato acha que o número está errado.
+ */
+export const BASE_DO_DRE =
+  'Base: competência — cada conta entra no mês em que foi emitida, paga ou não. O dinheiro que de fato entrou e saiu do banco está no Fluxo de caixa.';
+
 /** O que o selo de confiabilidade mostra: a conta, não só o veredicto. */
 export interface CoberturaDoDRE {
   receita: number;

@@ -10,7 +10,7 @@ import { useI18n } from '@/i18n';
 import { useAuth } from '@/hooks/use-auth';
 import { useFluxoDeCaixa } from '@/hooks/use-fluxo-de-caixa';
 import { useLancamentosDRE } from '@/hooks/use-dre';
-import { montarDRE, doMes, coberturaDoDRE } from '@/lib/dre';
+import { montarDRE, doMes, coberturaDoDRE, BASE_DO_DRE } from '@/lib/dre';
 import { hojeEmBrasilia, nomeDoMes, ultimosMeses } from '@/lib/fluxo-de-caixa';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -128,6 +128,8 @@ export function ResumoDoMes() {
           </span>
         </p>
       )}
+
+      <p className="text-xs text-muted-foreground">Vendido e Resultado — {BASE_DO_DRE}</p>
 
       <p className="text-xs text-muted-foreground">
         Mês a mês: <Link to="/v2/reports/fluxo" className="underline underline-offset-2 hover:text-foreground">Fluxo de caixa</Link>

@@ -13,7 +13,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { useI18n } from '@/i18n';
 import { useAuth } from '@/hooks/use-auth';
 import { exportToCSV } from '@/lib/export';
-import { montarDRE, doMes, coberturaDoDRE } from '@/lib/dre';
+import { montarDRE, doMes, coberturaDoDRE, BASE_DO_DRE } from '@/lib/dre';
 // Os lançamentos do ano, com o grupo do plano de contas: a mesma leitura serve o Resumo do
 // mês da Central de relatórios, para "vendido" e "resultado" não terem dois números.
 import { useLancamentosDRE } from '@/hooks/use-dre';
@@ -118,6 +118,8 @@ export function DREPanel() {
           </span>
         </div>
       )}
+
+      <p className="text-xs text-muted-foreground" data-testid="base-do-dre">{BASE_DO_DRE}</p>
 
       {/* Primeiro elemento da tela, de propósito: quem lê um resultado precisa saber o
           quanto ele é confiável ANTES de ler o número, não depois. */}
