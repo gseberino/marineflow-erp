@@ -1,5 +1,27 @@
 # AI Operator — Setup (Fase 1: migração para Claude via OpenRouter)
 
+## Como está em 06/10/2026 (ler antes do resto)
+
+O resto deste documento é o setup da Fase 1 (julho) e da Fase 4 e continua valendo como
+histórico. O que mudou desde então:
+
+- **Dois caminhos para o modelo.** O padrão continua sendo o OpenRouter
+  (`_shared/ai/models.ts`: `anthropic/claude-sonnet-5` no agente, `anthropic/claude-haiku-4.5`
+  nas tarefas leves). Desde 03/10 o **admin** (só o dono, por causa dos termos da assinatura) pode ir
+  pela **assinatura Claude Max**: o turno vira um job em `ai_jobs`, o HBR AI Gateway (no PC do dono)
+  roda o Claude Code com o servidor MCP `erp` (edge function `erp-mcp`), e cada ferramenta executa no
+  servidor com as mesmas travas de risco, PIN e auditoria. Detalhes em `_shared/ai/max/claude-max.ts`.
+- **Chaves em `app_settings`** (Configurações › Assistente de IA):
+  `ai_provedor_whatsapp` e `ai_provedor_painel` (`claude_max` | `openrouter`), `ai_whatsapp_max_modelo`,
+  `ai_painel_max_modelo`, `ai_whatsapp_max_reserva` (`off` desliga a reserva). Com o gateway fora do
+  ar, ou se o Max falhar, o turno é refeito pelo OpenRouter — por isso `OPENROUTER_API_KEY` continua
+  obrigatória.
+- **Perfil de ferramentas do admin:** `ai_tool_profile = 'admin_enxuto'` (ligado em 05/10/2026). O admin
+  vê só as ~92 ferramentas do `PERFIL_ADMIN` mais `ferramenta_extra`, que alcança as outras pela rede.
+  Para voltar ao perfil completo: `ai_tool_profile = 'operacao'`.
+- **Deploy:** além de `ai-agent`, publique `erp-mcp` sempre que mexer em `_shared/ai/` — os dois
+  executam as mesmas ferramentas.
+
 Este documento cobre os passos manuais que um operador humano precisa executar para o
 assistente de IA do MarineFlow ERP (`supabase/functions/ai-agent`) funcionar em produção
 depois da migração de Gemini para Claude. O modelo é roteado via **OpenRouter** (não a API
