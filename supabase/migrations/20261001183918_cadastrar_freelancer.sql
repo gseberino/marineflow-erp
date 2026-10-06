@@ -207,5 +207,5 @@ revoke all on function public.cadastrar_freelancer(text, numeric, date, text, te
 grant execute on function public.cadastrar_freelancer(text, numeric, date, text, text, text, text, text, boolean, uuid) to authenticated, service_role;
 
 insert into supabase_migrations.schema_migrations (version, name)
-values ('20261001210000', 'cadastrar_freelancer')
+values ('20261001183918', 'cadastrar_freelancer')
 on conflict (version) do nothing;

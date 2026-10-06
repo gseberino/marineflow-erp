@@ -272,7 +272,7 @@ export function useExcluirDiaComDesfazer() {
 }
 
 // ── Freelancer novo (botão "Novo freelancer", pedido do dono 03/10/2026) ─────────────────────────
-// A mesma função do assistente (cadastrar_freelancer, migration 20261001210000): ela decide se cria
+// A mesma função do assistente (cadastrar_freelancer, migration 20261001183918): ela decide se cria
 // ou usa o favorecido que já existe, deduz o tipo da chave Pix e cria a regra por CPF. A tela primeiro
 // SIMULA (nada é gravado) e mostra o resultado; só então grava — o mesmo "sim" do WhatsApp.
 

@@ -3,9 +3,11 @@
 -- Guarda o e-mail que chega, sem nenhuma IA envolvida. A triagem (E2) só preenche
 -- colunas desta tabela depois. Ver plans/marineflow-email-agente.md.
 --
--- NÃO APLICADA. Este arquivo existe para revisão; a aplicação depende de autorização
--- explícita e de a Fase E0 (canal de entrada) ter sido validada primeiro — sem canal,
--- estas tabelas ficariam vazias.
+-- APLICADA em produção (as tabelas existem; conferido em 06/10/2026). Nasceu com a versão
+-- 20260803120000, a mesma de `sugestao_de_sistema_na_linha`, e por isso ficou sem registro
+-- próprio; em 06/10/2026 ganhou a versão 20260803120002, registrada à mão.
+-- (Texto original: "NÃO APLICADA. Este arquivo existe para revisão; a aplicação depende de
+-- autorização explícita e de a Fase E0 (canal de entrada) ter sido validada primeiro".)
 --
 -- Decisões de segurança tomadas aqui, e por quê:
 --   · Bucket PRIVADO. Todos os buckets existentes no projeto são públicos, incluindo o

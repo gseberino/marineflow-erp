@@ -92,7 +92,7 @@ de diária; dia = `work_shifts`; pagamento = o lançamento que já vem do extrat
   `registrar_diaria` por data. Obs.: 19/09/2026 foi sábado — em dias úteis o intervalo começa no 21.
 - **Freelancer novo pelo assistente — FEITO em 01/10/2026** (o dono pediu "cadastre o João Marcelo,
   entrou no lugar do Mickael" e o assistente respondeu que só dava pela tela, que não existe). Função
-  `cadastrar_freelancer` (migration `20261001210000`): favorecido (ou o que já existe com o MESMO
+  `cadastrar_freelancer` (migration `20261001183918`): favorecido (ou o que já existe com o MESMO
   nome/CPF — nome parecido não conta) + diária + conta corrente desde o primeiro dia + categoria +
   regra por CPF quando há CPF; `p_simular` devolve o que faria, e é o texto da confirmação. Tool
   `cadastrar_freelancer` no perfil; `cadastrar_favorecido` passa a mandar diarista para ela. Junto:

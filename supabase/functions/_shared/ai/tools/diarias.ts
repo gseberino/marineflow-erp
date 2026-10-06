@@ -14,7 +14,7 @@
 // Freelancer NOVO (01/10/2026, o João Marcelo no lugar do Mickael): cadastrar_freelancer. Antes não
 // havia caminho — cadastrar_favorecido cria só o favorecido, e sem a diária registrar_diaria recusa o
 // dia. Quem decide se cria ou reaproveita um cadastro é a função do banco (cadastrar_freelancer,
-// migration 20261001210000); a confirmação é a própria função simulando, sem gravar.
+// migration 20261001183918); a confirmação é a própria função simulando, sem gravar.
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
 import { dataDita, escolherPorNome, normal, osPeloNumero } from "./caixa.ts";
 

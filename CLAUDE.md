@@ -5,40 +5,41 @@ Este repositório é editado por **várias sessões de IA ao mesmo tempo** (work
 de minuto em minuto na `main`). As regras abaixo não são preferência de estilo: cada uma nasceu de um
 incidente já ocorrido aqui. Valem independentemente da tarefa em curso.
 
-1. **`supabase db push` NÃO É UTILIZÁVEL neste projeto. Migration se aplica por
-   `supabase db query --linked -f <arquivo>` — e a versão se registra à mão, no mesmo ato.**
+1. **Migration se aplica por `supabase db query --linked -f <arquivo>` — e a versão se registra
+   à mão, no mesmo ato. `supabase db push` não se usa.**
 
-   Medido em 12/08/2026, e é maior do que se supunha: **297 versões registradas no banco ×
-   252 arquivos em disco**, com a deriva correndo nos **dois sentidos**:
-
-   - **159 versões registradas sem arquivo local** (154 delas anteriores a qualquer trabalho
-     recente, cobrindo abril→agosto). É o que faz o `db push` abortar com
-     `LegacyDbPushMissingLocalError` antes de aplicar seja o que for.
-   - **114 arquivos em disco cuja versão nunca foi registrada** — consequência direta de
-     `db query -f`, que **executa o SQL mas não escreve em `schema_migrations`**.
+   **Por que não o `db push`** (revisto em 06/10/2026): o histórico já não o impede — em 12/08
+   eram 297 versões no banco × 252 arquivos, com deriva nos dois sentidos; em 06/10 eram 563 × 561,
+   nenhum arquivo sem registro, e o `db push --dry-run` só acusava 3 migrations de 01/10
+   registradas duas vezes (acertadas no mesmo dia: arquivos renomeados para a versão que guarda o
+   SQL, registros manuais vazios apagados). O motivo agora é outro: o `db push` aplica **de uma
+   vez todo arquivo da pasta que não tem registro**. Aqui migration se commita ANTES de ser
+   autorizada (regra abaixo) e várias sessões commitam ao mesmo tempo — o push aplicaria o que
+   ainda espera o OK do dono, inclusive de outra frente. A E1 do e-mail nasceu assim
+   ("NÃO APLICADA. Este arquivo existe para revisão").
 
    **Na prática, aplicar uma migration são dois passos:**
 
    ```bash
    npx supabase db query --linked -f supabase/migrations/<arquivo>.sql
    npx supabase db query --linked -e "insert into supabase_migrations.schema_migrations \
-     (version, name) values ('<AAAAMMDDHHMMSS>', '<nome_sem_a_data>') on conflict (version) do nothing;"
+     (version, name) values ('<AAAAMMDDHHMMSS>', '<nome_sem_a_data>');"
    ```
 
-   Pular o segundo passo faz o arquivo virar o 115º sem registro. **`migration repair
-   --status reverted`, que o CLI sugere, NÃO se usa aqui**: marcaria como revertidas 154
-   migrations que de fato rodaram em produção — escrever no histórico que algo não aconteceu,
-   quando aconteceu.
+   **Sem `on conflict do nothing` no registro**: versão repetida TEM de dar erro. Com o
+   `do nothing`, a colisão da E1 (mesma versão de `sugestao_de_sistema_na_linha`) passou calada
+   e a migration ficou sem registro de 03/08 a 06/10. Se a ferramenta de migration do MCP for usada,
+   ela registra sozinha com o horário em que rodou: renomeie o arquivo para essa versão em vez de
+   registrar uma segunda (foi assim que nasceram as 3 duplicatas de 01/10). Versão repetida entre
+   arquivos é barrada por `src/test/migrations-versao-unica.test.ts`.
+
+   **`migration repair --status reverted`, que o CLI sugere, NÃO se usa aqui**: escreveria no
+   histórico que migrations aplicadas em produção não aconteceram.
 
    **Continua valendo, e por cima disto:** nenhuma migration é aplicada sem o arquivo
    commitado ANTES em `supabase/migrations/`. Sem exceção — inclusive correção de dados.
    Motivo original: em 09/08/2026 a `20260809140033_corrige_categorias_que_o_mcc_desmente` foi
-   aplicada e não existia em disco (NOVO-003); só foi recuperada porque o Postgres guardava o
-   SQL. Entre as 159 há **uma correção de segurança de RLS que existe apenas no banco**
-   (MF-AUD-021) — o repositório, hoje, não reconstrói a produção.
-
-   A reconstrução do histórico via `db pull` está agendada como tarefa própria **para depois
-   de 01/09** (ver MF-AUD-058). Não é caminho crítico, e não se faz às pressas.
+   aplicada e não existia em disco (NOVO-003); só foi recuperada porque o Postgres guardava o SQL.
 
 2. **Commit que atende achado da auditoria referencia o ID na mensagem** (`MF-AUD-0XX`).
    Motivo: é o que permite dizer, meses depois, o que foi feito e o que continua aberto sem reler 27 commits.

@@ -48,7 +48,7 @@ describe('portal do cliente — colunas públicas × internas', () => {
 
   it('a migration fecha exatamente as colunas internas do código', () => {
     const sql = readFileSync(
-      resolve(__dirname, '../../supabase/migrations/20261001230000_portal_cliente_sem_colunas_internas.sql'),
+      resolve(__dirname, '../../supabase/migrations/20261001190104_portal_cliente_sem_colunas_internas.sql'),
       'utf8',
     );
     const json = sql.match(/internas jsonb := '([\s\S]*?)'::jsonb/)![1];

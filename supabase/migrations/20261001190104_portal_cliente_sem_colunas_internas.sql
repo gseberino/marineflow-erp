@@ -54,5 +54,5 @@ begin
 end $$;
 
 insert into supabase_migrations.schema_migrations (version, name)
-values ('20261001230000', 'portal_cliente_sem_colunas_internas')
+values ('20261001190104', 'portal_cliente_sem_colunas_internas')
 on conflict (version) do nothing;

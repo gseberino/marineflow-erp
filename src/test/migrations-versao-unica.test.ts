@@ -30,18 +30,11 @@ const PADRAO = /^(\d{14})_(.+)\.sql$/;
  * outro arquivo com o mesmo prefixo E se a colisão deixar de existir como está aqui (aí a
  * exceção sobra e tem de sair, para não virar buraco permanente).
  *
- * 20260803120000: em schema_migrations a versão pertence a `sugestao_de_sistema_na_linha`
- * (aplicada). `email_espelho_fase_e1` diz no cabeçalho "NÃO APLICADA", mas as tabelas dela
- * (public.email_accounts) existem em produção sem nenhum registro em schema_migrations — foram
- * criadas por fora. Um `db push` nunca a rodaria. Renomeá-la é decisão da frente do e-mail,
- * não desta; até lá ela fica visível aqui.
+ * Vazia desde 06/10/2026: a única (20260803120000, `email_espelho_fase_e1` ×
+ * `sugestao_de_sistema_na_linha`) virou 20260803120002, registrada à mão — as tabelas do
+ * e-mail já existiam em produção.
  */
-const COLISOES_CONHECIDAS: Record<string, string[]> = {
-  "20260803120000": [
-    "20260803120000_email_espelho_fase_e1.sql",
-    "20260803120000_sugestao_de_sistema_na_linha.sql",
-  ],
-};
+const COLISOES_CONHECIDAS: Record<string, string[]> = {};
 
 function arquivosDeMigration(): string[] {
   return readdirSync(DIR_MIGRATIONS).filter((f) => f.endsWith(".sql")).sort();

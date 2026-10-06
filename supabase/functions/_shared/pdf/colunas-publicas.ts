@@ -8,7 +8,7 @@
  *
  * Duas camadas, que precisam concordar:
  *  1. O portal e o PDF do portal pedem SÓ as colunas abaixo (`*_PUBLICA`).
- *  2. O banco (migration 20261001230000) tira do anônimo o SELECT das colunas em
+ *  2. O banco (migration 20261001190104) tira do anônimo o SELECT das colunas em
  *     `COLUNAS_INTERNAS`. Mesmo quem chamar a API direto com o token não as lê.
  * O teste colunas-publicas.test.ts garante que nenhuma lista pública peça coluna interna e
  * que a migration fecha exatamente as colunas daqui.

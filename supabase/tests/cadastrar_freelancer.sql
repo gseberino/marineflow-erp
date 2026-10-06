@@ -1,7 +1,7 @@
 -- Prova: cadastrar_freelancer cria favorecido + diária + conta corrente + categoria (+ regra por
 -- CPF), simula sem gravar, reaproveita só cadastro de MESMO nome/CPF, recusa duplicado, chave
 -- ambígua, início no futuro e quem não é admin/financeiro
--- (migration 20261001210000_cadastrar_freelancer).
+-- (migration 20261001183918_cadastrar_freelancer).
 --
 -- ═══ COMO RODAR ═══
 --

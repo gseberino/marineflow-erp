@@ -63,7 +63,7 @@ scanner Multimec X3. Registro dos valores no sistema (5c) espera o teste em camp
 
 `PublicServiceOrderView` e o PDF do portal (`carregarPDFData(id, sb, { publico: true })`)
 pedem só as colunas de `supabase/functions/_shared/pdf/colunas-publicas.ts`. No banco
-(migration `20261001230000`), o anon tem SELECT **por coluna** nas 10 tabelas que o link
+(migration `20261001190104`), o anon tem SELECT **por coluna** nas 10 tabelas que o link
 alcança — todas menos `COLUNAS_INTERNAS` (custo de peça, comissão, notas internas, custo e
 margem de produto, taxa de cartão…). Consequências:
 - **`select('*')` como anon dá 42501.** Qualquer leitura nova pelo link precisa de colunas

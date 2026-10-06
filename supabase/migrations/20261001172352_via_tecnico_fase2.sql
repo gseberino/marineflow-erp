@@ -75,5 +75,5 @@ from public.service_order_services;
 
 -- Registro com a versão do ARQUIVO, para um db push futuro não reexecutar.
 insert into supabase_migrations.schema_migrations (version, name)
-values ('20261001200000', 'via_tecnico_fase2')
+values ('20261001172352', 'via_tecnico_fase2')
 on conflict (version) do nothing;
