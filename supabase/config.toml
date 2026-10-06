@@ -132,3 +132,7 @@ verify_jwt = false
 # Chamada pelo pg_cron, que manda só x-cron-secret (sem Authorization).
 [functions.whatsapp-repescar-audios]
 verify_jwt = false
+
+# Vigia de conversas acompanhadas e promessas do dono (06/10/2026): chamado pelo pg_cron com x-cron-secret.
+[functions.acompanhar-conversas]
+verify_jwt = false

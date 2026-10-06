@@ -58,7 +58,7 @@ const SEMPRE_NO_PERFIL_ANTIGO = [
 // assistente): o dono pediu o conserto a um clique para o lançamento que não bate com o banco.
 // 02/10/2026: aplicar_pix_em_contas e desfazer_aplicacao_de_pix — "Este Pix paga…" (um Pix para
 // várias contas, forma A F2), as mesmas ações do Extrato e da correção.
-const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer", "cadastrar_freelancer", "ajustar_lancamento_ao_valor_do_banco", "aplicar_pix_em_contas", "desfazer_aplicacao_de_pix", "definir_condicao_pagamento"];
+const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer", "cadastrar_freelancer", "ajustar_lancamento_ao_valor_do_banco", "aplicar_pix_em_contas", "desfazer_aplicacao_de_pix", "definir_condicao_pagamento", "acompanhar_conversa", "listar_acompanhamentos", "parar_acompanhamento"];
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento"];
 
 const ordenado = (xs: Iterable<string>) => [...new Set(xs)].sort();

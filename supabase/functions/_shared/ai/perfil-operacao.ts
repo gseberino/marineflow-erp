@@ -39,6 +39,7 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "apply_service_order_discount",
   "set_service_order_charges",
   "definir_condicao_pagamento", // 05/10/2026: condição de pagamento de orçamento existente
+  "acompanhar_conversa", "listar_acompanhamentos", "parar_acompanhamento", // 06/10/2026: acompanhar conversa
   "update_service_order_status",
   "update_service_order_notes",
   "update_quote_status",
@@ -376,6 +377,10 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "set_service_order_charges",
   // 05/10/2026: condição de pagamento de orçamento existente (pedido do dono no ORÇ-00112).
   "definir_condicao_pagamento",
+  // 06/10/2026: acompanhar conversa e lembrar de responder (plans/marineflow-acompanhar-conversa.md).
+  "acompanhar_conversa",
+  "listar_acompanhamentos",
+  "parar_acompanhamento",
   "size_dc_cable",
   "sugerir_conciliacao",
   "suggest_suppliers",

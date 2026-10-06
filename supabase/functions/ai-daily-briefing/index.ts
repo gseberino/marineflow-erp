@@ -214,25 +214,57 @@ servirComCors(async (req) => {
       .eq("status", "pending");
 
     // ── Mensagens esperando resposta (Fase 1 · fatia Mensagens) ──
-    // Fonte da verdade via RPC whatsapp_pending_inbox: já exclui listas de transmissão e a
-    // equipe interna. Janela recente (7 dias) para manter o digest quieto e acionável;
-    // a consulta sob demanda ("quem me mandou?") continua mostrando tudo. Clientes primeiro.
+    // 06/10/2026: whatsapp_esperando_resposta separa cliente (inclusive pelo telefone do cadastro),
+    // fornecedor e outros contatos, e marca as que terminaram num "ok/obrigado" — essas só contam.
+    // Janela de 7 dias para o resumo ficar quieto e acionável; "quem me mandou?" continua mostrando tudo.
     const since7d = new Date(now.getTime() - 7 * 86400000).toISOString();
-    const { data: waitingRows } = await admin.rpc("whatsapp_pending_inbox", { _since: since7d, _limit: 12 });
-    const waiting = ((waitingRows as any[]) || []).slice();
-    waiting.sort((a: any, b: any) => Number(b.is_client) - Number(a.is_client)); // sort estável preserva recência
-    const topWaiting = waiting.slice(0, 6);
+    const { data: waitingRows } = await admin.rpc("whatsapp_esperando_resposta", { _since: since7d, _limit: 60 });
+    const todasEsperando = ((waitingRows as any[]) || []);
+    const encerradas = todasEsperando.filter((w: any) => w.encerrada);
+    const waiting = todasEsperando.filter((w: any) => !w.encerrada);
+    const porCategoria = (c: string) => waiting.filter((w: any) => w.categoria === c);
+    const clientesEsperando = porCategoria("cliente");
+    const fornecedoresEsperando = porCategoria("fornecedor");
+    const outrosEsperando = porCategoria("contato");
+    const haQuanto = (iso: string) => {
+      const mins = Math.max(0, Math.round((now.getTime() - new Date(iso).getTime()) / 60000));
+      return mins < 60 ? `${mins} min` : mins < 1440 ? `${Math.round(mins / 60)} h` : `${Math.round(mins / 1440)} d`;
+    };
     const waitingLines: string[] = [];
     if (waiting.length > 0) {
-      waitingLines.push(`💬 Esperando resposta: *${waiting.length}*`);
-      for (const w of topWaiting) {
-        const mins = Math.max(0, Math.round((now.getTime() - new Date(w.last_inbound_at as string).getTime()) / 60000));
-        const ha = mins < 60 ? `${mins} min` : mins < 1440 ? `${Math.round(mins / 60)} h` : `${Math.round(mins / 1440)} d`;
-        waitingLines.push(`   • ${w.contato}${w.is_client ? " (cliente)" : ""} — há ${ha}${mediaHint(w.last_body)}`);
+      const partes = [
+        clientesEsperando.length ? `${clientesEsperando.length} cliente(s)` : "",
+        outrosEsperando.length ? `${outrosEsperando.length} outro(s)` : "",
+        fornecedoresEsperando.length ? `${fornecedoresEsperando.length} fornecedor(es)` : "",
+      ].filter(Boolean).join(" · ");
+      waitingLines.push(`💬 Esperando resposta: *${waiting.length}* (${partes})`);
+      for (const w of clientesEsperando.slice(0, 5)) {
+        waitingLines.push(`   • *${w.contato}* (cliente) — há ${haQuanto(w.last_inbound_at)}${mediaHint(w.last_body)}`);
       }
-      if (waiting.length > topWaiting.length) waitingLines.push(`   …e mais ${waiting.length - topWaiting.length}`);
+      for (const w of outrosEsperando.slice(0, Math.max(0, 6 - Math.min(5, clientesEsperando.length)))) {
+        waitingLines.push(`   • ${w.contato} — há ${haQuanto(w.last_inbound_at)}${mediaHint(w.last_body)}`);
+      }
+      const mostrados = Math.min(5, clientesEsperando.length) + Math.min(Math.max(0, 6 - Math.min(5, clientesEsperando.length)), outrosEsperando.length);
+      const resto = clientesEsperando.length + outrosEsperando.length - mostrados;
+      if (resto > 0) waitingLines.push(`   …e mais ${resto}`);
+      if (fornecedoresEsperando.length) waitingLines.push(`   🏭 Fornecedores: ${fornecedoresEsperando.map((w: any) => w.contato).slice(0, 4).join(", ")}${fornecedoresEsperando.length > 4 ? "…" : ""}`);
     } else {
       waitingLines.push(`💬 Esperando resposta: *0* ✅`);
+    }
+    if (encerradas.length) waitingLines.push(`   (+${encerradas.length} só disseram "ok/obrigado" — não precisam de resposta)`);
+
+    // Conversas que o dono pediu para acompanhar e promessas dele para hoje (06/10/2026).
+    try {
+      const fimDoDia = new Date(now.getTime() + 24 * 3600000).toISOString();
+      const { data: acomp } = await admin.from("whatsapp_acompanhamentos")
+        .select("contato, phone_normalized, modo, lembrar_em").eq("status", "ativo").limit(50);
+      const lista = (acomp as any[]) || [];
+      const acompanhando = lista.filter((a) => a.modo === "acompanhar");
+      const promessasHoje = lista.filter((a) => a.modo === "promessa" && a.lembrar_em && a.lembrar_em <= fimDoDia);
+      if (acompanhando.length) waitingLines.push(`👁️ Acompanhando: ${acompanhando.map((a) => a.contato || a.phone_normalized).slice(0, 5).join(", ")}`);
+      if (promessasHoje.length) waitingLines.push(`🤝 Promessas suas para hoje: *${promessasHoje.length}* (${promessasHoje.map((a) => a.contato || a.phone_normalized).slice(0, 4).join(", ")})`);
+    } catch (_e) {
+      // Enriquecimento: nunca derruba o resumo.
     }
 
     // ── Caixa de entrada financeira: propostas de lançamento esperando o gestor ──

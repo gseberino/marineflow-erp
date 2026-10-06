@@ -45,6 +45,7 @@ import { caixaTools } from "./caixa.ts";
 import { diariasTools } from "./diarias.ts";
 import { followupTools } from "./followups.ts";
 import { condicaoPagamentoTools } from "./condicao-pagamento.ts";
+import { acompanhamentoTools } from "./acompanhamento.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -79,6 +80,7 @@ export const allTools: ToolDef[] = [
   ...fiscalEmitTools,
   ...whatsappTools,
   ...whatsappHistoryTools,
+  ...acompanhamentoTools,
   ...documentoPdfTools,
   ...uiTools,
   ...memoryTools,
