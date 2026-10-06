@@ -21,6 +21,7 @@ import {
   JANELA_INICIAL_DIAS, inicioDaBusca, mudancasDoProvedor, transacaoMaisRecente, type EstadoDaLinha,
 } from "../_shared/banking/janela-de-busca.ts";
 import { type LinhaDoExtrato, type LinhaGuardada, separarReenvios } from "../_shared/banking/reenvio.ts";
+import { avisoDeFalhas, gravarEmLotes, type ResultadoDaGravacao } from "../_shared/banking/gravar-em-lotes.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
@@ -536,6 +537,7 @@ async function sincronizarConexao(
     let reenvios = 0;
     let provaveis = 0;
     let duplicatasDevolvidas = 0;
+    const naoGravadas: ResultadoDaGravacao["falhas"] = [];
     const datasQueChegaram: string[] = [];
 
     // Saúde da conexão, gravada a cada sincronização: consentimento de Open Finance vence
@@ -645,12 +647,11 @@ async function sincronizarConexao(
         provaveis += separadas.provaveis.length;
         if (novas.length === 0) break gravar;
 
-        for (let i = 0; i < novas.length; i += 200) {
-          const lote = novas.slice(i, i + 200);
-          const { error } = await admin.from("bank_transactions").insert(lote);
-          if (error) throw error;
-          importadas += lote.length;
-        }
+        // Lote que falha é refeito linha a linha: uma linha ruim não derruba as outras 199.
+        const gravacao = await gravarEmLotes(novas, async (lote) => await admin.from("bank_transactions").insert(lote));
+        importadas += gravacao.gravadas;
+        jaExistiam += gravacao.jaExistiam;
+        naoGravadas.push(...gravacao.falhas);
       }
 
       if (origem === "bank") await conferirSaldoAcumulado(admin, conexao, conta);
@@ -665,8 +666,12 @@ async function sincronizarConexao(
       valorMudou > 0 ? `${valorMudou} com valor diferente no banco (não alterado — confira)` : null,
       reenvios > 0 ? `${reenvios} reenviada(s) pelo banco com código novo (reconhecidas, não entraram em dobro)` : null,
       provaveis > 0 ? `${provaveis} cópia(s) de linha já importada, marcada(s) como duplicata (se alguma for compra de verdade, devolva em Extrato › Fora da fila)` : null,
+      avisoDeFalhas(naoGravadas),
     ].filter(Boolean).join(" · ");
-    const dataMaisRecente = transacaoMaisRecente(conexao.last_transaction_date, datasQueChegaram, hoje);
+    if (naoGravadas.length > 0) console.error("[banking-sync] linhas não gravadas", rotulo, naoGravadas.slice(0, 5));
+    // Com linha de fora, a data guardada não anda: a próxima busca volta à mesma janela e tenta
+    // de novo (as que entraram agora são reconhecidas e não duplicam).
+    const dataMaisRecente = transacaoMaisRecente(conexao.last_transaction_date, naoGravadas.length > 0 ? [] : datasQueChegaram, hoje);
 
     await registrarResultado(admin, conexao.id, "ok", mensagem, importadas, dataMaisRecente);
     return {
