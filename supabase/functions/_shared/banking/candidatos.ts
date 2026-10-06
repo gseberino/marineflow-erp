@@ -35,12 +35,13 @@ export async function carregarCandidatos(admin: DbClient): Promise<Candidate[]> 
   const candidates: Candidate[] = [];
 
   // 1. Contas a receber em aberto.
-  const { data: receivables } = await admin
+  const { data: receivables, error: erroReceivables } = await admin
     .from("receivables")
     .select("id, description, balance_amount, due_date, client_id, service_order_id, clients(name, cpf_cnpj), service_orders(service_order_number)")
     .in("status", ABERTOS)
     .gt("balance_amount", 0)
     .limit(500);
+  if (erroReceivables) throw new Error(`Não consegui ler receivables para os candidatos do extrato: ${erroReceivables.message}`);
 
   for (const r of (receivables ?? []) as any[]) {
     const cliente = r.clients;
@@ -61,12 +62,13 @@ export async function carregarCandidatos(admin: DbClient): Promise<Candidate[]> 
 
   // 1b. Contas a pagar em aberto — a nota fiscal lançada e paga depois por Pix, por
   //     exemplo. Sem elas a saída do banco voltava como despesa nova.
-  const { data: payables } = await admin
+  const { data: payables, error: erroPayables } = await admin
     .from("payables")
     .select("id, description, balance_amount, due_date, supplier_id, suppliers(name, cnpj_cpf)")
     .in("status", ABERTOS)
     .gt("balance_amount", 0)
     .limit(500);
+  if (erroPayables) throw new Error(`Não consegui ler payables para os candidatos do extrato: ${erroPayables.message}`);
 
   for (const p of (payables ?? []) as any[]) {
     candidates.push({
@@ -82,12 +84,13 @@ export async function carregarCandidatos(admin: DbClient): Promise<Candidate[]> 
   }
 
   // 2. Cobranças avulsas (sem conta a receber por trás — as demais já entraram acima).
-  const { data: collections } = await admin
+  const { data: collections, error: erroCollections } = await admin
     .from("collections")
     .select("id, description, amount, due_date, client_id, receivable_id, clients(name, cpf_cnpj)")
     .is("receivable_id", null)
     .not("status", "in", '("paid","cancelled")')
     .limit(200);
+  if (erroCollections) throw new Error(`Não consegui ler collections para os candidatos do extrato: ${erroCollections.message}`);
 
   for (const c of (collections ?? []) as any[]) {
     const cliente = c.clients;
@@ -106,11 +109,12 @@ export async function carregarCandidatos(admin: DbClient): Promise<Candidate[]> 
 
   // 3. Sinal de orçamento. Inclui os marcados como "aguardando sinal" e os enviados ao
   //    cliente (podem ter sido aprovados por WhatsApp sem ninguém mexer no status).
-  const { data: settings } = await admin
+  const { data: settings, error: erroSettings } = await admin
     .from("app_settings").select("key, value").eq("key", "quote_deposit_percentage").maybeSingle();
+  if (erroSettings) throw new Error(`Não consegui ler app_settings para os candidatos do extrato: ${erroSettings.message}`);
   const globalPct = Number((settings as any)?.value ?? 30) || 30;
 
-  const { data: quotes } = await admin
+  const { data: quotes, error: erroQuotes } = await admin
     .from("service_orders")
     .select(`id, service_order_number, quote_status, status, grand_total, created_at,
              labor_cost_total, parts_cost_total, operational_cost_total, travel_cost_total,
@@ -121,19 +125,22 @@ export async function carregarCandidatos(admin: DbClient): Promise<Candidate[]> 
     .in("quote_status", ["awaiting_deposit", "sent"])
     .not("status", "in", '("cancelled")')
     .limit(200);
+  if (erroQuotes) throw new Error(`Não consegui ler service_orders para os candidatos do extrato: ${erroQuotes.message}`);
   const listaDeOrcamentos = (quotes ?? []) as any[];
 
   // Sinal já pago: o orçamento não está mais esperando dinheiro. Uma consulta para todos.
   const comSinalPago = new Set<string>();
   for (const ids of fatias(listaDeOrcamentos.map((q) => q.id as string))) {
-    const { data } = await admin.from("receivables")
+    const { data, error: erroData } = await admin.from("receivables")
       .select("service_order_id").in("service_order_id", ids).eq("is_deposit", true).eq("status", "paid");
+    if (erroData) throw new Error(`Não consegui ler receivables para os candidatos do extrato: ${erroData.message}`);
     for (const r of (data ?? []) as any[]) comSinalPago.add(r.service_order_id);
   }
 
   // Condições pré-cadastradas: alguns orçamentos guardam só o rótulo em
   // `payment_conditions`, sem o id do preset — o mesmo fallback da tela de orçamento.
-  const { data: presets } = await admin.from("payment_condition_presets").select("id, label, installments");
+  const { data: presets, error: erroPresets } = await admin.from("payment_condition_presets").select("id, label, installments");
+  if (erroPresets) throw new Error(`Não consegui ler payment_condition_presets para os candidatos do extrato: ${erroPresets.message}`);
   const presetPorLabel = new Map<string, any>(((presets ?? []) as any[]).map((p) => [String(p.label), p]));
 
   for (const q of listaDeOrcamentos) {
@@ -178,7 +185,7 @@ export async function carregarCandidatos(admin: DbClient): Promise<Candidate[]> 
   //    origem dele e tiraria a aplicação do Pix certo. Os mais recentes primeiro, para o
   //    limite não cortar justamente os que importam.
   const desde = new Date(Date.now() - 120 * 86_400_000).toISOString().slice(0, 10);
-  const { data: pagamentos } = await admin
+  const { data: pagamentos, error: erroPagamentos } = await admin
     .from("payments")
     .select(`id, amount, payment_date, receivable_id, payable_id, notes,
              receivables(description, client_id, service_order_id, bank_transaction_id, clients(name, cpf_cnpj), service_orders(service_order_number)),
@@ -188,9 +195,11 @@ export async function carregarCandidatos(admin: DbClient): Promise<Candidate[]> 
     .gte("payment_date", desde)
     .order("payment_date", { ascending: false })
     .limit(300);
+  if (erroPagamentos) throw new Error(`Não consegui ler payments para os candidatos do extrato: ${erroPagamentos.message}`);
 
-  const { data: jaVinculados } = await admin
+  const { data: jaVinculados, error: erroJaVinculados } = await admin
     .from("bank_transactions").select("reconciled_payment_id").not("reconciled_payment_id", "is", null);
+  if (erroJaVinculados) throw new Error(`Não consegui ler bank_transactions para os candidatos do extrato: ${erroJaVinculados.message}`);
   const vinculados = new Set(((jaVinculados ?? []) as any[]).map((r) => r.reconciled_payment_id));
 
   for (const p of (pagamentos ?? []) as any[]) {
@@ -221,18 +230,20 @@ export async function carregarCandidatos(admin: DbClient): Promise<Candidate[]> 
   }
 
   // 5. Saldo de OS ativa ainda não lançado como conta a receber.
-  const { data: orders } = await admin
+  const { data: orders, error: erroOrders } = await admin
     .from("service_orders")
     .select("id, service_order_number, grand_total, created_at, client_id, clients(name, cpf_cnpj)")
     .in("status", OS_ATIVAS)
     .gt("grand_total", 0)
     .limit(200);
+  if (erroOrders) throw new Error(`Não consegui ler service_orders para os candidatos do extrato: ${erroOrders.message}`);
   const listaDeOS = (orders ?? []) as any[];
 
   const lancadoPorOS = new Map<string, number>();
   for (const ids of fatias(listaDeOS.map((o) => o.id as string))) {
-    const { data } = await admin.from("receivables")
+    const { data, error: erroData } = await admin.from("receivables")
       .select("service_order_id, amount").in("service_order_id", ids).neq("status", "cancelled");
+    if (erroData) throw new Error(`Não consegui ler receivables para os candidatos do extrato: ${erroData.message}`);
     for (const r of (data ?? []) as any[]) {
       lancadoPorOS.set(r.service_order_id, (lancadoPorOS.get(r.service_order_id) ?? 0) + Number(r.amount || 0));
     }
