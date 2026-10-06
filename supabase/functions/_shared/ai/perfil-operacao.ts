@@ -66,14 +66,6 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "create_supplier",
   "list_reference_data",
 
-  // — Levantamento antes de orçar —
-  "check_needs_survey",
-  "start_service_survey",
-  "record_survey_answer",
-  "assess_survey_confidence",
-  "close_service_survey",
-  "survey_material_list",
-
   // — Cotação a fornecedor, estoque e compras —
   "get_purchase_needs",
   "suggest_suppliers",
@@ -136,16 +128,8 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "add_service_order_expense",
   "attach_photo_to_service_order",
 
-  // — Roteiro de execução da OS —
-  "get_service_order_route",
-  "generate_service_order_route",
-  "get_route_drafting_context",
-  "save_drafted_route_steps",
-  "add_service_order_step",
-  "start_service_order_step",
-  "complete_service_order_step",
-  "skip_service_order_step",
-  "block_service_order_step",
+  // Levantamento e roteiro de execução saíram em 06/10/2026: os dois foram escondidos da tela
+  // em 05/10 (chave roteiro_execucao_visivel) e o prompt deixou de ensiná-los.
 
   // — Diárias de freelancers (28/09/2026: substituem as 4 de jornada do perfil — D7 do dono) —
   "registrar_diaria",
@@ -275,11 +259,7 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   "get_fiscal_document",
   "list_pending_fiscal_products",
 
-  // — Roteiro: manutenção da lista de passos (a execução do passo a passo está no perfil) —
-  "remove_service_order_step",
-  "reopen_service_order_step",
-  "reorder_service_order_step",
-  "review_ai_step", // também em FORA_DO_WHATSAPP: revisar rascunho é trabalho de tela
+  // (Roteiro: as 4 de manutenção de passos saíram em 06/10/2026 com o roteiro escondido.)
 
   // — Gasto de campo lançado errado: desfazer é raro (lançar está no perfil) —
   "remove_service_order_expense",

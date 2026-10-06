@@ -432,7 +432,7 @@ export const serviceOrderTools: ToolDef[] = [
       if (erroServicos) throw new Error(`Não consegui ler os serviços da OS: ${erroServicos.message}`);
 
       // Resumo do roteiro: sem isto o agente afirmaria que não há nada pendente
-      // com passos abertos. O detalhe fica em get_service_order_route.
+      // com passos abertos. (Roteiro escondido desde 05/10/2026: o resumo fica, o detalhe não é ensinado.)
       const { data: steps, error: erroRoteiro } = await sb
         .from("service_order_steps")
         .select("seq, title, status")
@@ -449,7 +449,6 @@ export const serviceOrderTools: ToolDef[] = [
             travados: steps.filter((s: any) => s.status === "blocked").length,
             proximo: (steps.find((s: any) => s.status === "in_progress")
               || steps.find((s: any) => s.status === "pending"))?.title || null,
-            detalhe_em: "get_service_order_route",
           };
 
       return {
@@ -612,7 +611,7 @@ export const serviceOrderTools: ToolDef[] = [
       required: ["id", "status"],
     },
     risk: "low",
-    async execute(args, { sb, admin }) {
+    async execute(args, { sb, admin, settings }) {
       const { data: current } = await sb
         .from("service_orders")
         .select("status, service_order_number")
@@ -622,7 +621,9 @@ export const serviceOrderTools: ToolDef[] = [
       // D11 (dono, 17/09/2026): concluir exige levantamento respondido nos serviços marcados
       // "exige levantamento" — a mesma trava do botão da tela, para o agente não passar por
       // fora dela.
-      if (args.status === "completed") {
+      // O portão do levantamento só vale com o levantamento à vista (chave roteiro_execucao_visivel,
+      // 05/10/2026): escondido, ele travaria a conclusão sem ter como responder.
+      if (args.status === "completed" && String(settings?.roteiro_execucao_visivel ?? "").trim().toLowerCase() === "true") {
         const { data: linhas } = await sb
           .from("service_order_services")
           .select("service_id, name_snapshot, services!inner(requires_survey)")
@@ -638,7 +639,7 @@ export const serviceOrderTools: ToolDef[] = [
           const pendentes = exigem.filter((l) => !ok.has(String(l.service_id))).map((l) => l.name_snapshot);
           if (pendentes.length > 0) {
             return {
-              error: `Não dá para concluir: falta responder o levantamento de ${pendentes.join(", ")} (marcados como "exige levantamento"). Use start_service_survey / record_survey_answer / close_service_survey primeiro.`,
+              error: `Não dá para concluir: falta responder o levantamento de ${pendentes.join(", ")} (marcados como "exige levantamento"). Responda o levantamento na aba Levantamento da OS antes de concluir.`,
               levantamentos_pendentes: pendentes,
             };
           }

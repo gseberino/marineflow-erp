@@ -59,15 +59,23 @@ const SEMPRE_NO_PERFIL_ANTIGO = [
 // 02/10/2026: aplicar_pix_em_contas e desfazer_aplicacao_de_pix — "Este Pix paga…" (um Pix para
 // várias contas, forma A F2), as mesmas ações do Extrato e da correção.
 const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer", "cadastrar_freelancer", "ajustar_lancamento_ao_valor_do_banco", "aplicar_pix_em_contas", "desfazer_aplicacao_de_pix", "definir_condicao_pagamento", "acompanhar_conversa", "listar_acompanhamentos", "parar_acompanhamento"];
-const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento"];
+// 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
+// roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.
+const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento",
+  "check_needs_survey", "start_service_survey", "record_survey_answer", "assess_survey_confidence",
+  "close_service_survey", "survey_material_list",
+  "get_service_order_route", "generate_service_order_route", "get_route_drafting_context",
+  "save_drafted_route_steps", "add_service_order_step", "start_service_order_step",
+  "complete_service_order_step", "skip_service_order_step", "block_service_order_step"];
+const semRemovidas = (xs: string[]) => xs.filter((n) => !REMOVIDAS.includes(n));
 
 const ordenado = (xs: Iterable<string>) => [...new Set(xs)].sort();
 
 Deno.test("perfil no código = (banco de 26/09 − removidas) ∪ SEMPRE_NO_PERFIL antigo ∪ as acrescentadas — nem mais, nem menos", () => {
   assertEquals(BANCO_EM_26_09.length, 127);
   const base = BANCO_EM_26_09.filter((n) => !REMOVIDAS.includes(n));
-  assertEquals(base.length, 127 - REMOVIDAS.length);
-  assertEquals(ordenado(PERFIL_OPERACAO), ordenado([...base, ...SEMPRE_NO_PERFIL_ANTIGO, ...ACRESCENTADAS]));
+  assertEquals(base.length, 127 - REMOVIDAS.filter((n) => BANCO_EM_26_09.includes(n)).length);
+  assertEquals(ordenado(PERFIL_OPERACAO), ordenado(semRemovidas([...base, ...SEMPRE_NO_PERFIL_ANTIGO, ...ACRESCENTADAS])));
 });
 
 Deno.test("todo nome do perfil e da lista SO_PELA_REDE existe em allTools, e as duas listas não se cruzam", () => {
@@ -98,7 +106,7 @@ Deno.test("SO_PELA_REDE: pela rede, roda direto só leitura e escrita de sugest�
     .filter((n) => porNome.get(n)!.risk === "low" && !ehLeituraPeloNome(n) && !rodaDiretoPelaRede(porNome.get(n)!))
     .sort();
   assertEquals(escritasLowConfirmadas, [
-    "convert_external_quote_to_so", "create_composed_product", "reorder_service_order_step", "review_entity_note",
+    "convert_external_quote_to_so", "create_composed_product", "review_entity_note",
   ]);
   // E nada de risco medium/high roda direto pela rede.
   for (const n of SO_PELA_REDE) {
@@ -193,7 +201,7 @@ Deno.test("comportamento: com o perfil ligado, o modelo recebe exatamente o de a
   const antigo = new Set([...BANCO_EM_26_09, ...SEMPRE_NO_PERFIL_ANTIGO]);
   const esperadoAntes = allTools.filter((t) => t.risk === "high" || antigo.has(t.name)).map((t) => t.name);
 
-  assertEquals(ordenado(enviadas), ordenado([...esperadoAntes, ...ACRESCENTADAS]));
+  assertEquals(ordenado(enviadas), ordenado(semRemovidas([...esperadoAntes, ...ACRESCENTADAS])));
   // E a ORDEM continua a de allTools (prefixo de cache estável).
   assertEquals(enviadas, allTools.map((t) => t.name).filter((n) => enviadas.includes(n)));
 });

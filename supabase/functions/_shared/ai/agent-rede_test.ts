@@ -142,7 +142,7 @@ function comExecuteFalso(nome: string, resposta: (args: Record<string, unknown>)
 const LEITURA = "get_comms_log"; // leitura, risco low
 const ESCRITA_VERIFICADA = "interpret_customer_reply"; // escrita de análise (ESCRITAS_VERIFICADAS_DA_REDE), risco low
 const ESCRITA_MEDIA = "remove_service_order_expense"; // escrita de risco medium
-const ESCRITA_MEDIA_AUTONOMIZAVEL = "remove_service_order_step"; // medium e fora de NEVER_AUTONOMOUS
+const ESCRITA_MEDIA_AUTONOMIZAVEL = "criar_categoria_de_despesa"; // medium e fora de NEVER_AUTONOMOUS (06/10: o roteiro saiu da rede)
 const COM_ESQUEMA = "list_entity_notes"; // obrigatórios e enum, para a validação de argumentos
 
 // ---------- tool SINTÉTICA de escrita, FORA do perfil e FORA de SO_PELA_REDE ----------
@@ -256,7 +256,7 @@ Deno.test("rede: o modelo cria a nota e tenta aprová-la no mesmo turno — a no
 });
 
 Deno.test("rede: escrita de risco low que não é sugestão/análise vira pendência (nota, preço/fiscal, OS, roteiro, catálogo)", async () => {
-  const CONFIRMADAS = ["review_entity_note", "convert_external_quote_to_so", "reorder_service_order_step", "create_composed_product"];
+  const CONFIRMADAS = ["review_entity_note", "convert_external_quote_to_so", "create_composed_product"];
   for (const nome of CONFIRMADAS) {
     const real = porNomeReal.get(nome)!;
     assertEquals(SO_PELA_REDE.has(nome), true, nome);
@@ -298,7 +298,7 @@ Deno.test("rede: autonomia concedida não dispensa a confirmação pela rede (ma
   // Pela rede: pendência, mesmo com autonomia.
   execucoes = [];
   const pelaRede = montar({ tools: [comExecuteFalso(ESCRITA_MEDIA_AUTONOMIZAVEL)], settings });
-  const s1 = mockFetchSequence([chamaTool(ESCRITA_MEDIA_AUTONOMIZAVEL, { step_id: "p1" })]);
+  const s1 = mockFetchSequence([chamaTool(ESCRITA_MEDIA_AUTONOMIZAVEL, { nome: "Taxas", grupo: "despesa_operacional" })]);
   const r1 = await withFetch(s1.fetchStub, () => runAgentLoop(pelaRede.params));
   assertEquals(execucoes, []);
   assertEquals(pelaRede.pendingRows.length, 1);
@@ -307,7 +307,7 @@ Deno.test("rede: autonomia concedida não dispensa a confirmação pela rede (ma
   // Controle: o nome no pedido põe a tool à vista → a autonomia vale e ela roda sozinha.
   execucoes = [];
   const aVista = montar({ tools: [comExecuteFalso(ESCRITA_MEDIA_AUTONOMIZAVEL)], settings, pedido: `use a ${ESCRITA_MEDIA_AUTONOMIZAVEL} no p1` });
-  const s2 = mockFetchSequence([chamaTool(ESCRITA_MEDIA_AUTONOMIZAVEL, { step_id: "p1" }), respondeTexto("feito")]);
+  const s2 = mockFetchSequence([chamaTool(ESCRITA_MEDIA_AUTONOMIZAVEL, { nome: "Taxas", grupo: "despesa_operacional" }), respondeTexto("feito")]);
   await withFetch(s2.fetchStub, () => runAgentLoop(aVista.params));
   assertEquals(toolsEnviadas(s2.calls).includes(ESCRITA_MEDIA_AUTONOMIZAVEL), true);
   assertEquals(execucoes, [ESCRITA_MEDIA_AUTONOMIZAVEL]);
@@ -424,22 +424,22 @@ Deno.test("rede limitada a SO_PELA_REDE: role frouxo não devolve a vendedor/té
   }
 });
 
-Deno.test("rede: de SO_PELA_REDE, alcança só o que o cargo libera (técnico: passo do roteiro sim, memória não)", async () => {
-  const REORDENAR = "reorder_service_order_step"; // sem roles
+Deno.test("rede: de SO_PELA_REDE, alcança só o que o cargo libera (técnico: leitura sem cargo sim, memória não)", async () => {
+  // 06/10/2026: o exemplo era um passo do roteiro (reorder_service_order_step); o roteiro saiu da
+  // rede com o módulo escondido. A regra é a mesma com uma leitura sem roles.
+  const MANUTENCAO = "list_maintenance_due"; // sem roles, leitura
   const MEMORIA = "remember_about_entity"; // NON_TECHNICIAN_ROLES
-  assertEquals(SO_PELA_REDE.has(REORDENAR) && SO_PELA_REDE.has(MEMORIA), true);
-  const tools = porCargo("technician").map((t) => (t.name === REORDENAR ? comExecuteFalso(REORDENAR) : t));
+  assertEquals(SO_PELA_REDE.has(MANUTENCAO) && SO_PELA_REDE.has(MEMORIA), true);
+  const tools = porCargo("technician").map((t) => (t.name === MANUTENCAO ? comExecuteFalso(MANUTENCAO) : t));
   assertEquals(tools.some((t) => t.name === MEMORIA), false);
 
-  // Alcançada: vira pendência (é escrita fora de ESCRITAS_VERIFICADAS_DA_REDE), não "Tool desconhecida".
+  // Alcançada: leitura roda direto e fica marcada na auditoria — não "Tool desconhecida".
   execucoes = [];
   const a = montar({ tools, role: "technician" });
-  const sa = mockFetchSequence([chamaTool(REORDENAR, { step_id: "p1", direction: "up" }), respondeTexto("feito")]);
-  const ra = await withFetch(sa.fetchStub, () => runAgentLoop(a.params));
-  assertEquals(execucoes, []);
-  assertEquals(ra.proposal?.risk_level, "medium");
-  assertEquals(a.pendingRows.map((p) => p.action_name), [REORDENAR]);
-  assertEquals(marcasDaRede(a.auditRows), [{ tool: REORDENAR, desfecho: "pendencia" }]);
+  const sa = mockFetchSequence([chamaTool(MANUTENCAO, {}), respondeTexto("feito")]);
+  await withFetch(sa.fetchStub, () => runAgentLoop(a.params));
+  assertEquals(execucoes, [MANUTENCAO]);
+  assertEquals(marcasDaRede(a.auditRows), [{ tool: MANUTENCAO, desfecho: "executada" }]);
 
   const b = montar({ tools, role: "technician" });
   const sb = mockFetchSequence([chamaTool(MEMORIA, { scope: "client", entity_id: "c1", title: "t", body: "b" }), respondeTexto("ok")]);
