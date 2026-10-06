@@ -18,7 +18,7 @@ vi.mock('@/hooks/use-auth', () => ({
     signOut: vi.fn(),
   }),
 }));
-vi.mock('@/hooks/use-agenda', () => ({ useSuggestions: () => ({ data: [] }) }));
+vi.mock('@/hooks/use-agenda', () => ({ useSuggestionsCount: () => ({ data: 0 }) }));
 vi.mock('@/hooks/use-finance-review', () => ({ useFinanceReviewCount: () => ({ data: 7 }) }));
 vi.mock('@/hooks/use-push-notifications', () => ({
   usePushNotifications: () => {},

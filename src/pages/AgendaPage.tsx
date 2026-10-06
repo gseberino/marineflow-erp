@@ -25,6 +25,7 @@ import {
   useQuickSchedule,
   useSaveAgendaTask,
   useSuggestions,
+  useSuggestionsCount,
   useAutoCreated,
   useUndoAutoCreated,
   useOpenLoops,
@@ -149,6 +150,7 @@ export default function AgendaPage() {
   const { data: liveTasks = [], isLoading: loadingLive } = useLiveTasks();
   const { data: doneTasks = [], isLoading: loadingDone } = useCompletedTasks(doneDays);
   const { data: suggestions = [], isLoading: loadingSuggestions } = useSuggestions();
+  const { data: sugestoesPendentes = 0 } = useSuggestionsCount();
   // Fios que dependem de uma ação nossa. Fica aqui em cima (e não dentro da view) porque
   // o número aparece no botão da visão, do mesmo jeito que o da caixa de entrada.
   const { data: loopsOurs = [] } = useOpenLoops('ours');
@@ -378,9 +380,9 @@ export default function AgendaPage() {
             <Button size="sm" variant={view === 'inbox' ? 'default' : 'ghost'} onClick={() => setView('inbox')}
               className="relative">
               Caixa de entrada
-              {suggestions.length > 0 && (
+              {sugestoesPendentes > 0 && (
                 <span className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
-                  {suggestions.length}
+                  {sugestoesPendentes}
                 </span>
               )}
             </Button>
@@ -500,7 +502,7 @@ export default function AgendaPage() {
         ) : view === 'esperando' ? (
           <EsperandoView loops={loopsOurs} />
         ) : view === 'inbox' ? (
-          <InboxView suggestions={suggestions} />
+          <InboxView suggestions={suggestions} total={sugestoesPendentes} />
         ) : view === 'done' ? (
           <DoneView
             tasks={applyTaskFilters(doneTasks || [])}
@@ -667,7 +669,7 @@ function EsperandoView({ loops: todos }: { loops: OpenLoop[] }) {
 // INBOX VIEW — sugestões extraídas de conversas e recados (Fase 9)
 // A IA propõe; quem decide é você. Nada aqui virou tarefa ainda.
 // ============================================================
-function InboxView({ suggestions }: { suggestions: any[] }) {
+function InboxView({ suggestions, total }: { suggestions: any[]; total: number }) {
   const fromChat = suggestions.filter((s: any) => s.origin === 'whatsapp');
   const fromVoice = suggestions.filter((s: any) => s.origin !== 'whatsapp');
   const { data: autoCreated = [] } = useAutoCreated();
@@ -675,6 +677,12 @@ function InboxView({ suggestions }: { suggestions: any[] }) {
 
   return (
     <div className="space-y-5 max-w-2xl">
+      {total > suggestions.length && (
+        <p className="text-xs text-muted-foreground" data-testid="sugestoes-cortadas">
+          Mostrando as {suggestions.length} de maior confiança de {total} sugestões esperando.
+          Decida estas e as próximas aparecem.
+        </p>
+      )}
       {autoCreated.length > 0 && (
         <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
           <p className="text-xs font-semibold text-primary">

@@ -31,7 +31,7 @@ import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { DiagnosticExportButton } from '@/components/DiagnosticExportButton';
 import { Button } from '@/components/ui/button';
 import { usePushNotifications, requestPushPermission } from '@/hooks/use-push-notifications';
-import { useSuggestions } from '@/hooks/use-agenda';
+import { useSuggestionsCount } from '@/hooks/use-agenda';
 import { useFinanceReviewCount } from '@/hooks/use-finance-review';
 import { toast } from 'sonner';
 import { Moon, Sun } from 'lucide-react';
@@ -119,10 +119,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const { t } = useI18n();
   const { user, signOut } = useAuth();
   usePushNotifications();
-  // Quantas sugestões esperam decisão. Consulta leve e cacheada (a mesma que a Agenda usa),
+  // Quantas sugestões esperam decisão: só a contagem (a lista para em 100), cacheada,
   // então montar no layout não custa uma ida extra ao banco por tela.
-  const { data: sugestoes = [] } = useSuggestions();
-  const sugestoesPendentes = sugestoes.length;
+  const { data: sugestoesPendentes = 0 } = useSuggestionsCount();
   // Mesmo raciocínio para o financeiro: uma fila de aprovação que ninguém vê é uma fila
   // que ninguém trabalha. Só a contagem, não as linhas.
   const { data: propostasPendentes = 0 } = useFinanceReviewCount();

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { ListChecks, AlertTriangle, Inbox } from 'lucide-react';
-import { useLiveTasks, useSuggestions } from '@/hooks/use-agenda';
+import { useLiveTasks, useSuggestionsCount } from '@/hooks/use-agenda';
 import { cn } from '@/lib/utils';
 
 interface DashboardTasksWidgetProps {
@@ -14,7 +14,7 @@ interface DashboardTasksWidgetProps {
 export function DashboardTasksWidget({ to = '/agenda', className }: DashboardTasksWidgetProps = {}) {
   const navigate = useNavigate();
   const { data: tasks = [] } = useLiveTasks();
-  const { data: suggestions = [] } = useSuggestions();
+  const { data: sugestoesPendentes = 0 } = useSuggestionsCount();
 
   const now = new Date();
   const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -29,7 +29,7 @@ export function DashboardTasksWidget({ to = '/agenda', className }: DashboardTas
     return anchor && new Date(anchor) >= startToday && new Date(anchor) < endToday;
   }).length;
 
-  if (tasks.length === 0 && suggestions.length === 0) return null;
+  if (tasks.length === 0 && sugestoesPendentes === 0) return null;
 
   return (
     <button
@@ -50,9 +50,9 @@ export function DashboardTasksWidget({ to = '/agenda', className }: DashboardTas
         )}
         <span className="text-sm text-muted-foreground">{today} para hoje</span>
         <span className="text-sm text-muted-foreground">{tasks.length} em aberto</span>
-        {suggestions.length > 0 && (
+        {sugestoesPendentes > 0 && (
           <span className="inline-flex items-center gap-1.5 text-sm font-medium text-primary">
-            <Inbox className="h-4 w-4" /> {suggestions.length} sugestão(ões) esperando
+            <Inbox className="h-4 w-4" /> {sugestoesPendentes} sugestão(ões) esperando
           </span>
         )}
         <span className="ml-auto text-xs text-primary">Abrir agenda →</span>

@@ -12,7 +12,7 @@ import AgendaPage from './AgendaPage';
 import { AgendaV2 } from '@/v2/pages/wrapped';
 
 // vi.mock é içado para o topo do módulo — helpers/fixtures precisam de vi.hoisted
-const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops } = vi.hoisted(() => {
+const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem } = vi.hoisted(() => {
   const queryBuilder = (): any => {
     const o: any = {};
     for (const k of ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'lt', 'gt', 'order',
@@ -83,7 +83,9 @@ const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops } = v
       atrasado: false, entity_type: 'client', entity_id: 'c-2', entity_name: 'Cliente Beta',
     },
   ];
-  return { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops };
+  // Contagem do banco das sugestões pendentes (0 = igual ao tamanho da lista).
+  const contagem = { total: 0 };
+  return { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem };
 });
 
 vi.mock('@/integrations/supabase/client', () => ({
@@ -102,6 +104,7 @@ vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: { id: 'u1', role: '
 
 vi.mock('@/hooks/use-agenda', () => ({
   useSuggestions: () => q(suggestions),
+  useSuggestionsCount: () => q(contagem.total || suggestions.length),
   useAcceptSuggestion: mut,
   useDismissSuggestion: mut,
   useVoiceCapture: mut,
@@ -175,6 +178,21 @@ describe('AgendaPage — smoke de render (todas as visões)', () => {
     expect(screen.getAllByText('Aceitar').length).toBe(2);
     expect(screen.getByText('Seus recados (1)')).toBeTruthy();
     expect(screen.getByText('Detectado nas conversas (1)')).toBeTruthy();
+  });
+
+  it('com mais de 100 sugestões, o selo mostra o total do banco e a lista avisa o corte', async () => {
+    // A lista para em 100; o selo contava a lista e travava em "100" (inventário 06/10/2026).
+    contagem.total = 250;
+    try {
+      const user = userEvent.setup();
+      renderPage();
+      const aba = screen.getByRole('button', { name: /Caixa de entrada/ });
+      expect(aba.textContent).toContain('250');
+      await user.click(aba);
+      expect(screen.getByTestId('sugestoes-cortadas').textContent).toContain('2 de maior confiança de 250');
+    } finally {
+      contagem.total = 0;
+    }
   });
 
   it('a visão "Depende de você" lista os fios com contato, prazo e a frase original', async () => {

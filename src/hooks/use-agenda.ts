@@ -509,6 +509,26 @@ export function useSuggestions() {
   });
 }
 
+/**
+ * Quantas sugestões esperam decisão — contagem do banco, não o tamanho da lista. A lista
+ * (useSuggestions) para em 100; contar por ela travava o selo em "100" (inventário 06/10/2026).
+ * A chave começa com 'agenda-suggestions', então aceitar/descartar já a atualiza.
+ */
+export function useSuggestionsCount() {
+  return useQuery({
+    queryKey: ['agenda-suggestions', 'contagem'],
+    refetchInterval: 2 * 60 * 1000,
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from('agenda_suggestions')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending');
+      if (error) throw error;
+      return count ?? 0;
+    },
+  });
+}
+
 /** Tarefas que o sistema criou SOZINHO nas últimas 24h (Fase 11) — sempre desfazíveis. */
 export function useAutoCreated() {
   return useQuery({

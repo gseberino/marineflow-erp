@@ -82,6 +82,7 @@ vi.mock('@/integrations/supabase/client', () => ({
 }));
 vi.mock('@/hooks/use-agenda', () => ({
   useSuggestions: () => q([]),
+  useSuggestionsCount: () => q(0),
   useAcceptSuggestion: mut,
   useDismissSuggestion: mut,
   useVoiceCapture: mut,
