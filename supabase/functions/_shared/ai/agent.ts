@@ -1,6 +1,7 @@
 import { resumirPedido } from "./tools/caixa.ts";
 import { resumirCadastro, resumirDiaria } from "./tools/diarias.ts";
 import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
+import { resumirAgendamento } from "./tools/agendamento.ts";
 import {
   callClaude,
   ClaudeApiError,
@@ -327,6 +328,13 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
     try {
       const r = await resumirEnvioAoCliente(admin, args);
       if (r) return r;
+    } catch { /* cai no resumo genérico */ }
+  }
+  // Mensagem agendada (05/10/2026): para quem (cliente, conversa existente ou contato NOVO), o
+  // número inteiro para conferir, o dia por extenso no horário de Brasília e a mensagem inteira.
+  if (toolName === "schedule_whatsapp_message") {
+    try {
+      return await resumirAgendamento(admin, args);
     } catch { /* cai no resumo genérico */ }
   }
   // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista

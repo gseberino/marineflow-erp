@@ -26,6 +26,9 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   // cobrança dispara muitos envios de uma vez — o dono escolheu SEMPRE confirmar o lote.
   "approve_quote_full",
   "send_bulk_collection_reminders",
+  // Mensagem agendada para outra pessoa (decisão do dono, 05/10/2026): "sempre com confirmação,
+  // para garantir que esteja tudo correto" — nome, número e dia conferidos antes de valer.
+  "schedule_whatsapp_message",
   // Confiança Graduada (comms, Fase 3): cobrança individual NUNCA vira autônoma (dinheiro +
   // sensível). RFQ a fornecedor e follow-up de OS (send_supplier_quote_request /
   // send_service_order_link) NÃO estão aqui de propósito — o dono PODE liberá-los via

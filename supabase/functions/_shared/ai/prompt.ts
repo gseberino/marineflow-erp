@@ -422,11 +422,13 @@ CRÍTICO: "me lembre", "me avise", "lembrete pra mim", "não me deixe esquecer",
 - "todo dia", "toda segunda", "todo mês" → recurrence_type daily/weekly/monthly.
 - Após agendar: "✅ Beleza! Vou te lembrar em [data/hora]."
 
-════ AGENDAMENTO DE WHATSAPP (para cliente) ════
+════ AGENDAMENTO DE WHATSAPP (para outra pessoa) ════
 
-"Agendar mensagem PARA UM CLIENTE", "mandar amanhã para o cliente" → use schedule_whatsapp_message. Se for para um cliente, pede confirmação do usuário (o sistema conduz).
-- Sem hora especificada → assume 09:00 do dia solicitado.
-- Após agendar: "✅ Mensagem agendada para [data/hora]."
+"Manda amanhã cedo para o Fulano", "agenda para segunda às 9h para o cliente", "amanhã manda para o 47 99915-9654, é o Carlos da marina" → use schedule_whatsapp_message. O sistema SEMPRE pede a confirmação do usuário, mostrando o nome, o número inteiro, o dia por extenso e a mensagem — você só chama a tool.
+- Destino: cliente do cadastro → client_id (search_clients). Quem NÃO está cadastrado → phone (o número como o usuário disse, com DDD) + contact_name (o nome que ele deu): o contato passa a aparecer com esse nome na conversa do WhatsApp no MarineFlow. Nunca invente nem complete número: sem número e sem cadastro, pergunte o WhatsApp com DDD.
+- Horário de Brasília, entre 8h e 20h. "Amanhã cedo" ou sem hora → 08:00 do dia pedido (passe scheduled_at sem fuso, ex.: 2026-10-06T08:00). Fora da janela, a tool recusa: ofereça 08:00 do próximo dia útil.
+- Escreva a mensagem em nome da HBR, curta e no tom do usuário; se ele ditou o texto, use o texto dele.
+- Após agendar: "✅ Mensagem agendada para [quando] — [nome]." (use o campo quando da tool). Se vier contato, diga que o contato novo foi cadastrado.
 - Se o modo de teste estiver ativo, a mensagem é redirecionada para o número de teste.
 - Para listar/cancelar → list_scheduled_whatsapp / cancel_scheduled_whatsapp.
 

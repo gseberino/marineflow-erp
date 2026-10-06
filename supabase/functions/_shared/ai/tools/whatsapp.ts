@@ -17,6 +17,14 @@ import { dataBR } from "../../pdf/datas.ts";
 import { guardarEEntregar, impressaoDigitalDoDocumento, montarDocumentoDaOrdem, montarResumoDeValores } from "../../pdf/gerar-e-guardar.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
+import {
+  cadastrarContatoDoAgendamento,
+  horarioDoAgendamento,
+  quandoPorExtenso,
+  telefoneLegivel,
+  telefoneParaEnvio,
+  validarAgendamento,
+} from "./agendamento.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -909,14 +917,15 @@ export const whatsappTools: ToolDef[] = [
   {
     name: "schedule_whatsapp_message",
     description:
-      "Agenda uma mensagem WhatsApp para ser enviada em data/hora específica. Use para 'agendar envio', 'mandar amanhã', 'lembrete automático' etc. Para envios com link de OS, informe service_order_id.",
+      "Agenda uma mensagem WhatsApp para OUTRA PESSOA em data/hora específica (horário de Brasília). Use para 'manda amanhã cedo para o Fulano', 'agenda para segunda às 9h'. 'Amanhã cedo' = 08:00. Só entre 8h e 20h. Destino: client_id (cliente do cadastro) OU phone (o número que o usuário disser, com DDD) + contact_name (o nome, quando a pessoa não está cadastrada — vira o nome da conversa no MarineFlow). Nunca invente número: sem número e sem cadastro, pergunte. Sempre pede a confirmação do usuário, que vê o nome, o número inteiro, o dia e a mensagem. Para envios com link de OS, informe service_order_id.",
     input_schema: {
       type: "object",
       properties: {
-        phone: { type: "string", description: "Telefone do destinatário com DDI+DDD (ex: 5547999999999). Obrigatório se não informar client_id." },
+        phone: { type: "string", description: "WhatsApp do destinatário, como o usuário disser (ex.: '47 99915-9654'; o sistema completa o 55). Obrigatório se não informar client_id." },
         client_id: { type: "string", description: "UUID do cliente — busca o WhatsApp/telefone automaticamente." },
+        contact_name: { type: "string", description: "Nome de quem vai receber, quando NÃO é cliente do cadastro (ex.: 'Carlos da Marina X'). Vira o nome da conversa no MarineFlow." },
         message: { type: "string", description: "Texto da mensagem a ser enviada." },
-        scheduled_at: { type: "string", description: "Data e hora do envio em ISO 8601 (ex: 2026-05-10T09:00:00)." },
+        scheduled_at: { type: "string", description: "Data e hora do envio, horário de Brasília (ex.: 2026-10-06T08:00). Entre 8h e 20h." },
         recurrence_type: { type: "string", enum: ["once", "daily", "weekly", "monthly"], description: "Recorrência do envio. Padrão: once." },
         service_order_id: { type: "string", description: "UUID ou número da OS para envio de link (send_mode=link)." },
         send_mode: { type: "string", enum: ["text", "link"], description: "Modo de envio. Padrão: text. Use 'link' para enviar o link público de uma OS." },
@@ -927,18 +936,23 @@ export const whatsappTools: ToolDef[] = [
     risk: "high",
     roles: NON_TECHNICIAN_ROLES,
     computeRisk: (args) => (args?.client_id || args?.service_order_id ? "high" : "medium"),
+    // Número, horário e mensagem conferidos ANTES da pendência (05/10/2026): o dono não aprova um
+    // agendamento que vai falhar, nem um "08:00" que sairia às 05:00.
+    preValidar: (args) => validarAgendamento(args),
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
+      const invalido = validarAgendamento(args);
+      if (invalido) return invalido;
       const { sb, admin, userId } = ctx;
-      let phone = args.phone;
+      let phone = telefoneParaEnvio(args.phone);
       const clientId = args.client_id || null;
 
-      if (!phone && clientId) {
+      if (clientId) {
         const { data: c } = await sb.from("clients").select("whatsapp, phone").eq("id", clientId).maybeSingle();
-        phone = c?.whatsapp || c?.phone;
+        phone = telefoneParaEnvio(c?.whatsapp || c?.phone) ?? phone;
       }
-      if (!phone) return { error: "Telefone não informado. Forneça phone ou client_id." };
+      if (!phone) return { error: "Telefone não informado ou inválido. Forneça o WhatsApp com DDD, ou o cliente do cadastro." };
 
       let soId: string | null = null;
       if (args.service_order_id) {
@@ -951,14 +965,16 @@ export const whatsappTools: ToolDef[] = [
         }
       }
 
-      const scheduledAt = new Date(args.scheduled_at).toISOString();
+      const hora = horarioDoAgendamento(args.scheduled_at);
+      if ("error" in hora) return hora;
+      const scheduledAt = hora.iso;
       const sendMode = args.send_mode || (soId ? "link" : "text");
       const recurrenceType = args.recurrence_type || "once";
 
       const { data: created, error: insErr } = await admin
         .from("whatsapp_scheduled_sends")
         .insert({
-          phone: String(phone).replace(/\D/g, ""),
+          phone,
           message: args.message,
           scheduled_at: scheduledAt,
           next_run_at: scheduledAt,
@@ -976,13 +992,20 @@ export const whatsappTools: ToolDef[] = [
         .single();
 
       if (insErr) return { error: insErr.message };
+      // Contato novo: o nome vai para a conversa do WhatsApp no MarineFlow (não cria cliente).
+      const contato = !clientId && typeof args.contact_name === "string"
+        ? await cadastrarContatoDoAgendamento(admin, phone, args.contact_name)
+        : null;
       return {
         ok: true,
         scheduled_id: created.id,
-        phone: created.phone,
-        scheduled_at: created.scheduled_at,
+        para: telefoneLegivel(phone),
+        quando: `${quandoPorExtenso(created.scheduled_at)} (Brasília)`,
         recurrence_type: created.recurrence_type,
         message_preview: created.message.slice(0, 100),
+        ...(contato === "criado" ? { contato: `Contato novo cadastrado no WhatsApp do MarineFlow: ${String(args.contact_name).trim()}` } : {}),
+        ...(contato === "nomeado" ? { contato: `A conversa desse número passou a se chamar ${String(args.contact_name).trim()}` } : {}),
+        orientacao: "Confirme ao usuário para quem, o número e o dia/hora por extenso (campo 'quando').",
       };
     },
   },

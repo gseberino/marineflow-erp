@@ -31,6 +31,8 @@ export function comFusoDeBrasilia(valor: unknown): unknown {
 /** Os campos de horário que as ferramentas do assistente gravam. */
 export const CAMPOS_DE_HORARIO = [
   "scheduled_start_at", "scheduled_end_at", "due_at", "snoozed_until",
+  // 05/10/2026: mensagem agendada — "08:00" sem fuso saía às 05:00 em Brasília.
+  "scheduled_at",
 ] as const;
 
 /** Devolve os argumentos com cada campo de horário presente convertido. */
