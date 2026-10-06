@@ -1345,13 +1345,6 @@ export type Database = {
             referencedColumns: ["product_id"]
           },
           {
-            foreignKeyName: "ai_operator_draft_items_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
-            referencedColumns: ["product_id"]
-          },
-          {
             foreignKeyName: "ai_operator_draft_items_service_id_fkey"
             columns: ["service_id"]
             isOneToOne: false
@@ -4237,13 +4230,6 @@ export type Database = {
             referencedRelation: "v_estoque_entradas_pendentes"
             referencedColumns: ["product_id"]
           },
-          {
-            foreignKeyName: "external_quote_parts_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
-            referencedColumns: ["product_id"]
-          },
         ]
       }
       external_quote_services: {
@@ -5051,13 +5037,6 @@ export type Database = {
             referencedColumns: ["product_id"]
           },
           {
-            foreignKeyName: "fiscal_note_items_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
-            referencedColumns: ["product_id"]
-          },
-          {
             foreignKeyName: "fiscal_note_items_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
@@ -5314,13 +5293,6 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "v_estoque_entradas_pendentes"
-            referencedColumns: ["product_id"]
-          },
-          {
-            foreignKeyName: "inventory_movements_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
             referencedColumns: ["product_id"]
           },
           {
@@ -6422,13 +6394,6 @@ export type Database = {
             referencedRelation: "v_estoque_entradas_pendentes"
             referencedColumns: ["product_id"]
           },
-          {
-            foreignKeyName: "price_update_suggestions_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
-            referencedColumns: ["product_id"]
-          },
         ]
       }
       product_aliases: {
@@ -6476,13 +6441,6 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "v_estoque_entradas_pendentes"
-            referencedColumns: ["product_id"]
-          },
-          {
-            foreignKeyName: "product_aliases_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
             referencedColumns: ["product_id"]
           },
         ]
@@ -6589,13 +6547,6 @@ export type Database = {
             referencedColumns: ["product_id"]
           },
           {
-            foreignKeyName: "product_components_component_product_id_fkey"
-            columns: ["component_product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
-            referencedColumns: ["product_id"]
-          },
-          {
             foreignKeyName: "product_components_parent_product_id_fkey"
             columns: ["parent_product_id"]
             isOneToOne: false
@@ -6614,13 +6565,6 @@ export type Database = {
             columns: ["parent_product_id"]
             isOneToOne: false
             referencedRelation: "v_estoque_entradas_pendentes"
-            referencedColumns: ["product_id"]
-          },
-          {
-            foreignKeyName: "product_components_parent_product_id_fkey"
-            columns: ["parent_product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
             referencedColumns: ["product_id"]
           },
         ]
@@ -6677,13 +6621,6 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "v_estoque_entradas_pendentes"
-            referencedColumns: ["product_id"]
-          },
-          {
-            foreignKeyName: "product_price_history_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
             referencedColumns: ["product_id"]
           },
         ]
@@ -6757,13 +6694,6 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "v_estoque_entradas_pendentes"
-            referencedColumns: ["product_id"]
-          },
-          {
-            foreignKeyName: "product_suppliers_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
             referencedColumns: ["product_id"]
           },
           {
@@ -6925,27 +6855,6 @@ export type Database = {
           },
         ]
       }
-      products_stock_backup_pre_v2: {
-        Row: {
-          backed_up_at: string | null
-          id: string
-          reserved_quantity: number | null
-          stock_quantity: number | null
-        }
-        Insert: {
-          backed_up_at?: string | null
-          id: string
-          reserved_quantity?: number | null
-          stock_quantity?: number | null
-        }
-        Update: {
-          backed_up_at?: string | null
-          id?: string
-          reserved_quantity?: number | null
-          stock_quantity?: number | null
-        }
-        Relationships: []
-      }
       purchase_order_items: {
         Row: {
           created_at: string
@@ -6997,13 +6906,6 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "v_estoque_entradas_pendentes"
-            referencedColumns: ["product_id"]
-          },
-          {
-            foreignKeyName: "purchase_order_items_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
             referencedColumns: ["product_id"]
           },
           {
@@ -7212,13 +7114,6 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "v_estoque_entradas_pendentes"
-            referencedColumns: ["product_id"]
-          },
-          {
-            foreignKeyName: "quote_request_items_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
             referencedColumns: ["product_id"]
           },
           {
@@ -7837,87 +7732,6 @@ export type Database = {
           },
         ]
       }
-      reparo_coremma_20260805: {
-        Row: {
-          amount: number | null
-          balance_amount: number | null
-          bank_transaction_id: string | null
-          cost_center_id: string | null
-          created_at: string | null
-          currency: string | null
-          description: string | null
-          due_date: string | null
-          expense_category: string | null
-          fiscal_note_id: string | null
-          id: string
-          issue_date: string | null
-          linked_service_order_id: string | null
-          notes: string | null
-          origin: string | null
-          paid_amount: number | null
-          payee_id: string | null
-          payment_method: string | null
-          reparado_em: string | null
-          status: string | null
-          sub_category: string | null
-          supplier_id: string | null
-          supplier_name: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          amount?: number | null
-          balance_amount?: number | null
-          bank_transaction_id?: string | null
-          cost_center_id?: string | null
-          created_at?: string | null
-          currency?: string | null
-          description?: string | null
-          due_date?: string | null
-          expense_category?: string | null
-          fiscal_note_id?: string | null
-          id: string
-          issue_date?: string | null
-          linked_service_order_id?: string | null
-          notes?: string | null
-          origin?: string | null
-          paid_amount?: number | null
-          payee_id?: string | null
-          payment_method?: string | null
-          reparado_em?: string | null
-          status?: string | null
-          sub_category?: string | null
-          supplier_id?: string | null
-          supplier_name?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          amount?: number | null
-          balance_amount?: number | null
-          bank_transaction_id?: string | null
-          cost_center_id?: string | null
-          created_at?: string | null
-          currency?: string | null
-          description?: string | null
-          due_date?: string | null
-          expense_category?: string | null
-          fiscal_note_id?: string | null
-          id?: string
-          issue_date?: string | null
-          linked_service_order_id?: string | null
-          notes?: string | null
-          origin?: string | null
-          paid_amount?: number | null
-          payee_id?: string | null
-          payment_method?: string | null
-          reparado_em?: string | null
-          status?: string | null
-          sub_category?: string | null
-          supplier_id?: string | null
-          supplier_name?: string | null
-          updated_at?: string | null
-        }
-        Relationships: []
-      }
       saved_filters: {
         Row: {
           created_at: string | null
@@ -8370,13 +8184,6 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "v_estoque_entradas_pendentes"
-            referencedColumns: ["product_id"]
-          },
-          {
-            foreignKeyName: "service_order_parts_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
             referencedColumns: ["product_id"]
           },
           {
@@ -10123,13 +9930,6 @@ export type Database = {
             referencedColumns: ["product_id"]
           },
           {
-            foreignKeyName: "services_material_kit_product_id_fkey"
-            columns: ["material_kit_product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
-            referencedColumns: ["product_id"]
-          },
-          {
             foreignKeyName: "services_system_fk"
             columns: ["service_system"]
             isOneToOne: false
@@ -10207,13 +10007,6 @@ export type Database = {
             columns: ["internal_product_id"]
             isOneToOne: false
             referencedRelation: "v_estoque_entradas_pendentes"
-            referencedColumns: ["product_id"]
-          },
-          {
-            foreignKeyName: "supplier_product_mappings_internal_product_id_fkey"
-            columns: ["internal_product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
             referencedColumns: ["product_id"]
           },
           {
@@ -10396,13 +10189,6 @@ export type Database = {
             columns: ["product_id"]
             isOneToOne: false
             referencedRelation: "v_estoque_entradas_pendentes"
-            referencedColumns: ["product_id"]
-          },
-          {
-            foreignKeyName: "survey_material_rules_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
             referencedColumns: ["product_id"]
           },
           {
@@ -10712,6 +10498,66 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      whatsapp_acompanhamentos: {
+        Row: {
+          ate: string
+          avisos_dia: string | null
+          avisos_no_dia: number
+          contato: string | null
+          created_at: string
+          criado_por: string | null
+          encerrado_motivo: string | null
+          id: string
+          intervalo_min: number
+          lembrar_em: string | null
+          modo: string
+          origem_mensagem: string | null
+          phone_normalized: string
+          promessa: string | null
+          status: string
+          ultimo_aviso_em: string | null
+          updated_at: string
+        }
+        Insert: {
+          ate?: string
+          avisos_dia?: string | null
+          avisos_no_dia?: number
+          contato?: string | null
+          created_at?: string
+          criado_por?: string | null
+          encerrado_motivo?: string | null
+          id?: string
+          intervalo_min?: number
+          lembrar_em?: string | null
+          modo?: string
+          origem_mensagem?: string | null
+          phone_normalized: string
+          promessa?: string | null
+          status?: string
+          ultimo_aviso_em?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ate?: string
+          avisos_dia?: string | null
+          avisos_no_dia?: number
+          contato?: string | null
+          created_at?: string
+          criado_por?: string | null
+          encerrado_motivo?: string | null
+          id?: string
+          intervalo_min?: number
+          lembrar_em?: string | null
+          modo?: string
+          origem_mensagem?: string | null
+          phone_normalized?: string
+          promessa?: string | null
+          status?: string
+          ultimo_aviso_em?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       whatsapp_blocked_numbers: {
         Row: {
@@ -12137,13 +11983,6 @@ export type Database = {
             referencedColumns: ["product_id"]
           },
           {
-            foreignKeyName: "service_order_parts_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "v_estoque_variancia"
-            referencedColumns: ["product_id"]
-          },
-          {
             foreignKeyName: "service_order_parts_service_order_id_fkey"
             columns: ["service_order_id"]
             isOneToOne: false
@@ -12687,28 +12526,6 @@ export type Database = {
           ultimo_alerta?: never
           unidades_a_lancar?: never
           vezes_que_ficou_negativo?: never
-        }
-        Relationships: []
-      }
-      v_estoque_variancia: {
-        Row: {
-          ajustes: number | null
-          baixas: number | null
-          brand: string | null
-          compras: number | null
-          contradicao: string | null
-          delta_desde_backup: number | null
-          disponivel: number | null
-          estornos: number | null
-          name: string | null
-          product_id: string | null
-          qtd_movimentos: number | null
-          reservado: number | null
-          saldo_atual: number | null
-          saldo_no_backup: number | null
-          sale_price: number | null
-          sku: string | null
-          valor_em_risco: number | null
         }
         Relationships: []
       }
@@ -14194,6 +14011,19 @@ export type Database = {
       wa_extract_body_text: { Args: { p: Json }; Returns: string }
       wa_extract_message_type: { Args: { p: Json }; Returns: string }
       wa_normalize_phone: { Args: { raw: string }; Returns: string }
+      whatsapp_esperando_resposta: {
+        Args: { _limit?: number; _since?: string }
+        Returns: {
+          categoria: string
+          contato: string
+          encerrada: boolean
+          last_body: string
+          last_inbound_at: string
+          last_outbound_at: string
+          phone: string
+          unread_count: number
+        }[]
+      }
       whatsapp_pending_inbox: {
         Args: { _limit?: number; _since?: string }
         Returns: {
