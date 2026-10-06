@@ -19,7 +19,8 @@
  *
  *   POST /api/pdf            body: { html: string, filename?: string }
  *     Authorization: Bearer <JWT do Supabase>   (usuário logado)   — ou —
- *     x-share-token: <token do link público>    (portal do cliente)
+ *     x-share-token: <token do link público>    (portal do cliente)        — ou —
+ *     x-pdf-token: <token de uso único>          (assistente, documento sem ordem)
  *     → 200 application/pdf | 401 | 400 | 500
  *
  *   GET /api/pdf?health=1    → um PDF mínimo, sem auth: prova que o Chromium sobe aqui.
@@ -110,6 +111,22 @@ async function shareTokenValido(token: string): Promise<boolean> {
 }
 
 /**
+ * Token de uso único para documento SEM ordem (extrato de diárias pelo assistente do WhatsApp,
+ * 06/10/2026). Só a edge function emite (emitir_token_de_pdf, service_role); aqui ele é CONSUMIDO
+ * — vale uma chamada e 3 minutos (migration 20261006210000).
+ */
+async function pdfTokenValido(token: string): Promise<boolean> {
+  if (!SUPABASE_URL || !SUPABASE_KEY || token.length < 32) return false;
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/consumir_token_de_pdf`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_token: token }),
+  });
+  if (!r.ok) return false;
+  return (await r.json()) === true;
+}
+
+/**
  * O binário do Chromium vem comprimido no pacote e é extraído para /tmp na primeira
  * chamada. Com Fluid Compute, duas requisições podem cair na MESMA instância ao mesmo
  * tempo — e foi o que aconteceu no primeiro teste em produção: uma extraía enquanto a
@@ -188,7 +205,11 @@ export default async function handler(req: Req, res: ServerResponse): Promise<vo
 
     const jwt = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
     const share = String(req.headers['x-share-token'] || '').trim();
-    const autorizado = jwt ? await usuarioValido(jwt) : share ? await shareTokenValido(share) : false;
+    const umaVez = String(req.headers['x-pdf-token'] || '').trim();
+    const autorizado = jwt ? await usuarioValido(jwt)
+      : share ? await shareTokenValido(share)
+      : umaVez ? await pdfTokenValido(umaVez)
+      : false;
     if (!autorizado) return responderJson(res, 401, { error: 'Não autenticado.' });
 
     const corpo = await lerCorpo(req);

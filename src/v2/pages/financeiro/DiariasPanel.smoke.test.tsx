@@ -28,7 +28,10 @@ vi.mock('@/lib/export-utils', () => ({ exportToCSV: (...a: unknown[]) => exportT
 vi.mock('sonner', () => ({
   toast: Object.assign((...a: unknown[]) => toastFn(...a), { success: vi.fn(), error: vi.fn() }),
 }));
-vi.mock('@/hooks/use-payees', () => ({ useServiceOrdersVinculaveis: () => ({ data: [] }) }));
+vi.mock('@/hooks/use-payees', () => ({
+  useServiceOrdersVinculaveis: () => ({ data: [] }),
+  usePayees: () => ({ data: [{ id: 's1', name: 'Gustavo', kind: 'socio' }] }),
+}));
 
 const pessoas = [
   { id: 'r', nome: 'Roberto', diaria: 160, desde: '2026-08-25', dias: 12, trabalhado: 1980, pago: 1530,
@@ -79,6 +82,9 @@ beforeEach(() => {
           observacao: 'Gerador do Marcelo', os_ids: ['o1'] } }, error: null };
       case 'registrar_diaria':
         return { data: { acao: 'atualizado', diaria_id: 'd1', message: 'ok' }, error: null };
+      case 'anotar_transacao':
+      case 'lancar_no_caixa':
+        return { data: { ok: true, message: 'Anotado.' }, error: null };
       case 'cadastrar_freelancer':
         if (String(args.p_nome).startsWith('Roberto')) {
           return { data: null, error: { message: 'Roberto já tem diária cadastrada (veja em Financeiro › Diárias).' } };
@@ -242,6 +248,30 @@ describe('DiariasPanel', () => {
     renderizar('resumo', vi.fn(), { periodo: 'personalizado', de: '2026-09-27', ate: '2026-09-14' });
     expect(await screen.findByText('A data inicial é depois da final.')).toBeInTheDocument();
     expect(screen.getByText('Acerte as datas para ver o período.')).toBeInTheDocument();
+  });
+
+  it('registrar pagamento por Pix: anota para o banco casar, na categoria das diárias; bolso do sócio leva o sócio', async () => {
+    const user = userEvent.setup();
+    renderizar('extrato');
+    await screen.findByText('OS OS-0042');
+    await user.click(screen.getByRole('button', { name: /^Registrar pagamento$/ }));
+    const dialogo = await screen.findByRole('dialog');
+    fireEvent.change(within(dialogo).getByLabelText('Valor (R$)'), { target: { value: '10000' } });
+    fireEvent.change(within(dialogo).getByLabelText('Data do pagamento'), { target: { value: '2026-09-30' } });
+    await user.click(within(dialogo).getByRole('button', { name: 'Registrar pagamento' }));
+    await waitFor(() => expect(chamadas('anotar_transacao')).toHaveLength(1));
+    expect(chamadas('anotar_transacao')[0]).toMatchObject({
+      p_sentido: 'saida', p_valor: 100, p_data: '2026-09-30', p_favorecido_id: 'r', p_categoria: 'Diárias de freelancers',
+      p_descricao: 'Pagamento de diárias — Roberto',
+    });
+
+    await user.click(screen.getByRole('button', { name: /^Registrar pagamento$/ }));
+    const outro = await screen.findByRole('dialog');
+    fireEvent.change(within(outro).getByLabelText('Valor (R$)'), { target: { value: '5000' } });
+    await user.click(within(outro).getByRole('radio', { name: /Do bolso de um sócio/ }));
+    await user.click(within(outro).getByRole('button', { name: 'Registrar pagamento' }));
+    await waitFor(() => expect(chamadas('lancar_no_caixa')).toHaveLength(1));
+    expect(chamadas('lancar_no_caixa')[0]).toMatchObject({ p_pago_por: 'socio', p_socio_id: 's1', p_favorecido_id: 'r', p_valor: 50 });
   });
 
   // ── Novo freelancer (pedido do dono, 03/10/2026) ──

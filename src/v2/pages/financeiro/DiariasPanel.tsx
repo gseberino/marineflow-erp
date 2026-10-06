@@ -1,10 +1,11 @@
 // Financeiro › Diárias: quanto cada freelancer trabalhou, quanto recebeu e o saldo com ele.
 //
 // O saldo vem pronto do banco (saldo inicial + trabalhado − pago). O "pago" é o que já veio do
-// extrato no nome dele (Pix, Caixa) e o que um sócio pagou do próprio bolso para ele — não se
-// digita pagamento aqui: o banco traz. Aqui se lança o DIA.
+// extrato no nome dele (Pix, Caixa), o que um sócio pagou do próprio bolso para ele e — desde
+// 06/10/2026 — o Pix lançado à mão que o banco ainda não confirmou ("Anotado"). Aqui se lança o
+// DIA e, por "Registrar pagamento", o que foi pago (as mesmas funções do "Lançar" e do assistente).
 import { useState } from 'react';
-import { CalendarPlus, FileDown, FileText, Pencil, Trash2, UserPlus } from 'lucide-react';
+import { Banknote, CalendarPlus, FileDown, FileText, Pencil, Trash2, UserPlus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -25,6 +26,7 @@ import {
 import { useDocumentosDasDiarias } from '@/hooks/use-documentos-diarias';
 import { RegistrarDiaDialog } from './RegistrarDiaDialog';
 import { NovoFreelancerDialog } from './NovoFreelancerDialog';
+import { RegistrarPagamentoDialog } from './RegistrarPagamentoDialog';
 import { GradeDiarias } from './GradeDiarias';
 
 export interface FiltroDasDiarias {
@@ -56,6 +58,8 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
   const pessoas = resumo.data?.pessoas ?? [];
   const [registrando, setRegistrando] = useState<Registrando | null>(null);
   const [cadastrando, setCadastrando] = useState(false);
+  /** undefined = fechado; null = aberto sem pessoa escolhida. */
+  const [pagando, setPagando] = useState<string | null | undefined>(undefined);
   const documentos = useDocumentosDasDiarias();
   // O que os documentos cobrem: na grade, o mês que está na tela; nas outras abas, o período.
   const intervalo: PedidoDePeriodo = aba === 'grade' ? { ...intervaloDoMes(filtro.mes), atalho: null } : periodo;
@@ -105,6 +109,10 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
         <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setCadastrando(true)}>
           <UserPlus className="h-4 w-4" /> Novo freelancer
         </Button>
+        <Button size="sm" variant="outline" className="gap-1.5" disabled={pessoas.length === 0}
+                onClick={() => setPagando(aba === 'extrato' ? filtro.favorecidoId : null)}>
+          <Banknote className="h-4 w-4" /> Registrar pagamento
+        </Button>
         <Button size="sm" className="gap-1.5"
                 onClick={() => setRegistrando({ favorecidoId: aba === 'extrato' ? filtro.favorecidoId : null })}>
           <CalendarPlus className="h-4 w-4" /> Registrar dia
@@ -136,6 +144,7 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
                 onRegistrar={(id) => setRegistrando({ favorecidoId: id })}
                 gerandoPdf={documentos.gerando === 'pdf'}
                 porPessoa={!!periodo.atalho}
+                onPagar={(id) => setPagando(id)}
                 onPdf={(id) => { void documentos.extratoEmPdf(id, periodo); }} />
       ) : aba === 'grade' ? (
         <GradeDiarias
@@ -160,6 +169,9 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
         />
       )}
       {cadastrando && <NovoFreelancerDialog onFechar={() => setCadastrando(false)} />}
+      {pagando !== undefined && (
+        <RegistrarPagamentoDialog pessoas={pessoas} favorecidoInicial={pagando} onFechar={() => setPagando(undefined)} />
+      )}
     </div>
   );
 }
@@ -172,11 +184,12 @@ function textoDoPeriodoDaPessoa(de: string | null, ate: string | null): string |
   return null;
 }
 
-function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPdf, gerandoPdf, porPessoa }: {
+function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, gerandoPdf, porPessoa }: {
   pessoas: FreelancerNoResumo[];
   total: { trabalhado: number; pago: number; dias: number; deve: number; adiantado: number };
   onVerExtrato: (id: string) => void;
   onRegistrar: (id: string) => void;
+  onPagar: (id: string) => void;
   onPdf: (id: string) => void;
   gerandoPdf: boolean;
   /** O período é de cada um ("em aberto"): o cartão diz qual é o dele. */
@@ -238,6 +251,7 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPdf, gerandoPdf, 
                   { texto: 'Ver extrato', icone: FileText, onClick: () => onVerExtrato(p.id) },
                 ]}
                 menu={[
+                  { texto: 'Registrar pagamento', icone: Banknote, onClick: () => onPagar(p.id) },
                   { texto: 'Extrato em PDF', icone: FileDown, desabilitada: gerandoPdf, onClick: () => onPdf(p.id) },
                 ]}
               />
@@ -247,7 +261,8 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPdf, gerandoPdf, 
       </div>
       <p className="text-xs text-muted-foreground">
         Saldo = saldo inicial + dias trabalhados (diária + extras − descontos) − o que ele recebeu. Os pagamentos vêm do
-        extrato do banco; o Pix lançado à mão aparece na hora como "aguardando o banco" e já desconta.
+        extrato do banco; o Pix registrado à mão ("Registrar pagamento" ou "Lançar") aparece na hora como "aguardando o
+        banco" e já desconta — não lance de novo quando a linha do banco chegar.
       </p>
     </div>
   );

@@ -1,5 +1,5 @@
 import { resumirPedido } from "./tools/caixa.ts";
-import { resumirCadastro, resumirDiaria } from "./tools/diarias.ts";
+import { resumirCadastro, resumirDiaria, resumirPagamento } from "./tools/diarias.ts";
 import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
 import { resumirAgendamento } from "./tools/agendamento.ts";
 import { resumirMensagem } from "./tools/resposta.ts";
@@ -148,6 +148,7 @@ const TOOL_LABELS_PT: Record<string, string> = {
   ajustar_saldo_do_caixa: "Acertar o Caixa pela contagem",
   registrar_diaria: "Registrar diária",
   cadastrar_freelancer: "Cadastrar freelancer",
+  registrar_pagamento_freelancer: "Pagamento a freelancer",
   anotar_transacao_do_banco: "Anotar transação que o banco vai trazer",
   configurar_lancamento_automatico: "Ligar/desligar o lançar sozinho",
   // As que pedem confirmação quando chegam pela rede de segurança (perfil-operacao.ts,
@@ -332,6 +333,14 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
   if (toolName === "cadastrar_freelancer") {
     try {
       const r = await resumirCadastro({ admin } as unknown as ToolCtx, args);
+      if (r) return r;
+    } catch { /* cai no resumo genérico */ }
+  }
+  // Pagamento a freelancer: quem, quanto, como (Pix anotado, Caixa ou bolso do sócio) e o saldo
+  // com ele antes e depois — o "sim" é sobre o dinheiro resolvido.
+  if (toolName === "registrar_pagamento_freelancer") {
+    try {
+      const r = await resumirPagamento({ admin } as unknown as ToolCtx, args);
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
   }

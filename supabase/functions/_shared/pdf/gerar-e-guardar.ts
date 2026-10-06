@@ -176,7 +176,9 @@ export async function guardarEEntregar<T>(p: {
   // deno-lint-ignore no-explicit-any
   admin: any;
   doc: Pick<DocumentoDaOrdem, "html" | "nomeDoArquivo">;
-  shareToken: string;
+  /** Token do link da ordem — ou, para documento sem ordem (extrato de diárias), `pdfToken`. */
+  shareToken?: string;
+  pdfToken?: string;
   /** app_settings.app_public_url — o endereço do ERP no Vercel. */
   baseUrl: string;
   /** Prefixo do aviso no log quando o arquivo não pôde ser apagado. */
@@ -188,6 +190,7 @@ export async function guardarEEntregar<T>(p: {
     html: p.doc.html,
     filename: p.doc.nomeDoArquivo,
     shareToken: p.shareToken,
+    pdfToken: p.pdfToken,
   });
   if (!render.ok) return { ok: false, motivo: render.motivo };
 

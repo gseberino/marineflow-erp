@@ -17,6 +17,12 @@
 // migration 20261001183918); a confirmação é a própria função simulando, sem gravar.
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
 import { dataDita, escolherPorNome, normal, osPeloNumero } from "./caixa.ts";
+import { enviarDocumentoWhatsapp } from "./whatsapp.ts";
+import { CONTEXTO_DO_ENVIO } from "./documentos-pdf.ts";
+import { chaveDeEnvio, liberarEnvio } from "../../whatsapp/idempotencia.ts";
+import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
+import { guardarEEntregar, limitarNomeDoArquivo } from "../../pdf/gerar-e-guardar.ts";
+import { montarExtratoHtml, nomeDoArquivo, type ContaDoExtrato } from "../../diarias/extrato.ts";
 
 const CARGOS: Role[] = ["admin", "financial"];
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -253,21 +259,44 @@ async function chamar(ctx: ToolCtx, fn: string, params: Record<string, unknown>)
   return data;
 }
 
-const PERIODOS = ["tudo", "este_mes", "mes_passado"] as const;
+/**
+ * Períodos que a pessoa pode pedir (06/10/2026: "em aberto", "desde o último pagamento", 15 dias,
+ * semana — além do mês e do tudo). Quem calcula é o banco (_periodo_do_atalho): "em aberto" de um
+ * freelancer não é o do outro.
+ */
+const PERIODOS = ["tudo", "em_aberto", "desde_ultimo_pagamento", "ultimos_15_dias", "semana_atual", "este_mes", "mes_passado"] as const;
+const ATALHO_NO_BANCO: Record<string, string | null> = {
+  tudo: null, em_aberto: "em_aberto", desde_ultimo_pagamento: "desde_ultimo_pagamento",
+  ultimos_15_dias: "ultimos_15_dias", semana_atual: "semana_atual", este_mes: "este_mes", mes_passado: "mes_anterior",
+};
 
-/** De/até do período dito, em Brasília. "tudo" = desde o início da conta corrente. */
-export function intervaloDito(periodo: unknown, hoje = new Date()): { de: string | null; ate: string | null } {
-  const base = new Date(hoje.getTime() - 3 * 3600_000);
-  const ano = base.getUTCFullYear();
-  const mes = base.getUTCMonth();
-  const doMes = (a: number, m: number) => {
-    const ini = new Date(Date.UTC(a, m, 1));
-    const fim = new Date(Date.UTC(a, m + 1, 0));
-    return { de: ini.toISOString().slice(0, 10), ate: fim.toISOString().slice(0, 10) };
-  };
-  if (periodo === "este_mes") return doMes(ano, mes);
-  if (periodo === "mes_passado") return doMes(mes === 0 ? ano - 1 : ano, mes === 0 ? 11 : mes - 1);
-  return { de: null, ate: null };
+export type PeriodoPedido = { p_de: string | null; p_ate: string | null; p_atalho: string | null };
+
+/**
+ * O período como a pessoa disse: datas ("de 14/09 a 27/09", "desde segunda") mandam; sem datas,
+ * o atalho. Devolve a pergunta quando não entende — sem consultar nada.
+ */
+export function periodoDito(args: Record<string, unknown>, hoje = new Date()): PeriodoPedido | { error: string } {
+  const temDe = args.de != null && args.de !== "";
+  const temAte = args.ate != null && args.ate !== "";
+  if (temDe || temAte) {
+    const de = temDe ? dataDoDito(args.de, hoje) : null;
+    const ate = temAte ? dataDoDito(args.ate, hoje) : null;
+    if (temDe && !de) return { error: `Não entendi a data inicial "${args.de}". Use dd/mm, ontem ou o dia da semana.` };
+    if (temAte && !ate) return { error: `Não entendi a data final "${args.ate}". Use dd/mm, hoje ou o dia da semana.` };
+    if (de && ate && de > ate) return { error: `O período está invertido: ${diaCurto(de)} a ${diaCurto(ate)}.` };
+    return { p_de: de, p_ate: ate, p_atalho: null };
+  }
+  const p = String(args.periodo ?? "tudo");
+  if (!(p in ATALHO_NO_BANCO)) return { error: `Período "${args.periodo}" não existe: use ${PERIODOS.join(", ")}, ou datas.` };
+  return { p_de: null, p_ate: null, p_atalho: ATALHO_NO_BANCO[p] };
+}
+
+/** "desde 28/09", "14/09 a 27/09" — o período que o banco resolveu, para a resposta. */
+function periodoResolvido(c: { de?: string | null; ate?: string | null }): string {
+  if (c.de && c.ate) return `${ddmm(c.de)} a ${ddmm(c.ate)}`;
+  if (c.de) return `desde ${ddmm(c.de)}`;
+  return "desde o início da conta corrente";
 }
 
 const ESTADO: Record<string, string> = {
@@ -382,6 +411,120 @@ async function registrarIntervalo(ctx: ToolCtx, p: PedidoDeDiaria) {
   return { ok: falhas.length === 0, registrados: feitos, mantidos, falhas, aviso: `${partes.join(" ")}${await saldoDito(ctx, p.freelancer)}`.trim() };
 }
 
+// ── Pagamento a freelancer (06/10/2026) ──────────────────────────────────────────────────────────
+// "paguei 100 pro Roberto no Pix", "dei 50 em dinheiro pro João", "paguei do meu bolso". As MESMAS
+// funções do botão "Lançar" da tela: Pix → anotar_transacao (espera a linha do banco e, até lá,
+// aparece no extrato de diárias como "aguardando o banco", já descontando); dinheiro →
+// lancar_no_caixa (sai do Caixa); bolso do sócio → lancar_no_caixa como reembolso ao sócio, com o
+// freelancer gravado como quem recebeu (D1).
+
+const FORMAS = ["pix", "dinheiro", "bolso_do_socio"] as const;
+type Forma = typeof FORMAS[number];
+const ROTULO_DA_FORMA: Record<Forma, string> = { pix: "Pix", dinheiro: "dinheiro do Caixa", bolso_do_socio: "do bolso do sócio" };
+const CATEGORIA_DIARIAS = "Diárias de freelancers";
+
+export interface PedidoDePagamento {
+  freelancer: Freelancer;
+  valor: number;
+  forma: Forma;
+  /** A data dita; nula = hoje (no Pix, sem data exata a anotação espera alguns dias de folga). */
+  data: string | null;
+  socio: { id: string; nome: string } | null;
+  observacao: string | null;
+}
+
+async function acharSocio(ctx: ToolCtx, dito: unknown): Promise<{ id: string; nome: string } | { error: string }> {
+  const { data, error } = await ctx.admin.from("payees").select("id, name, app_user_id").eq("kind", "socio").eq("active", true);
+  if (error) return { error: `Falha ao ler os sócios: ${error.message}` };
+  const socios = ((data ?? []) as any[]).map((s) => ({ id: s.id as string, nome: s.name as string, app: s.app_user_id as string | null }));
+  if (!socios.length) return { error: "Não há sócio cadastrado nos favorecidos." };
+  if (dito) {
+    const r = escolherPorNome(String(dito), socios);
+    if ("achado" in r) return { id: r.achado.id, nome: r.achado.nome };
+    return { error: `Qual sócio pagou: ${socios.map((s) => s.nome).join(" ou ")}?` };
+  }
+  const euMesmo = ctx.userId ? socios.find((s) => s.app === ctx.userId) : undefined;
+  if (euMesmo) return { id: euMesmo.id, nome: euMesmo.nome };
+  if (socios.length === 1) return { id: socios[0].id, nome: socios[0].nome };
+  return { error: `Qual sócio pagou: ${socios.map((s) => s.nome).join(" ou ")}?` };
+}
+
+export async function resolverPagamento(ctx: ToolCtx, args: Record<string, unknown>): Promise<PedidoDePagamento | { error: string }> {
+  const forma = String(args.forma ?? "") as Forma;
+  if (!FORMAS.includes(forma)) return { error: `Como foi pago? pix, dinheiro ou bolso_do_socio.` };
+  const valor = numeroDito(args.valor);
+  if (valor == null || valor <= 0) return { error: "Qual o valor pago? (não invente: pergunte)" };
+  const f = await acharFreelancer(ctx, args.freelancer);
+  if ("error" in f) return f;
+  let data: string | null = null;
+  if (args.data != null && args.data !== "") {
+    data = dataDoDito(args.data);
+    if (!data) return { error: `Não entendi a data "${args.data}". Use hoje, ontem, dd/mm ou o dia da semana.` };
+    if (data > dataDita("hoje")!) return { error: "Pagamento no futuro não se lança: lance quando pagar." };
+  }
+  let socio: { id: string; nome: string } | null = null;
+  if (forma === "bolso_do_socio") {
+    const s = await acharSocio(ctx, args.socio);
+    if ("error" in s) return s;
+    socio = s;
+  }
+  const observacao = textoOuNulo(args.observacao);
+  return { freelancer: f, valor: Math.round(valor * 100) / 100, forma, data, socio, observacao };
+}
+
+const descricaoDoPagamento = (p: PedidoDePagamento) =>
+  p.observacao ?? `Pagamento de diárias — ${p.freelancer.nome.split(" ")[0]}`;
+
+/** A confirmação: quem, quanto, como, quando — e o saldo com ele antes e depois. */
+export async function resumirPagamento(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
+  const p = await resolverPagamento(ctx, args);
+  if ("error" in p) return null;
+  const quando = diaCurto(p.data ?? dataDita("hoje")!);
+  const linhas = [`Pagamento a *${p.freelancer.nome}*: *${brl.format(p.valor)}* ${p.forma === "pix" ? "por Pix" : `em ${ROTULO_DA_FORMA[p.forma]}`} · ${quando}` +
+    (p.socio ? ` · pago por ${p.socio.nome} (fica como reembolso a ele)` : "")];
+  linhas.push(`Descrição: ${descricaoDoPagamento(p)} · ${CATEGORIA_DIARIAS}`);
+  const { data: c } = await ctx.admin.rpc("conta_corrente_freelancer", { p_favorecido_id: p.freelancer.id, p_autor: null });
+  if (c && c.saldo_final != null) {
+    const antes = Number(c.saldo_final);
+    linhas.push(`Saldo com ele: ${brl.format(antes)} → ${brl.format(antes - p.valor)}${antes - p.valor < 0 ? " (fica adiantado)" : ""}`);
+  }
+  if (p.forma === "pix") {
+    linhas.push("O Pix fica anotado: aparece já no extrato de diárias (\"aguardando o banco\") e vira o pagamento quando a linha do banco chegar. Se você já lançou este mesmo Pix, responda não.");
+  }
+  return linhas.join("\n");
+}
+
+async function registrarPagamento(ctx: ToolCtx, p: PedidoDePagamento) {
+  const desc = descricaoDoPagamento(p);
+  if (p.forma === "pix") {
+    return await chamar(ctx, "anotar_transacao", {
+      p_sentido: "saida", p_valor: p.valor, p_data: p.data, p_documento: null, p_nome: null,
+      p_fornecedor_id: null, p_favorecido_id: p.freelancer.id, p_cliente_id: null,
+      p_categoria: CATEGORIA_DIARIAS, p_os_id: null, p_descricao: desc,
+    }) as Record<string, unknown>;
+  }
+  return await chamar(ctx, "lancar_no_caixa", {
+    p_sentido: "saida", p_valor: p.valor, p_descricao: desc, p_data: p.data, p_categoria: CATEGORIA_DIARIAS,
+    p_fornecedor_id: null, p_favorecido_id: p.freelancer.id, p_cliente_id: null, p_os_id: null,
+    p_pago_por: p.forma === "dinheiro" ? "caixa" : "socio", p_socio_id: p.socio?.id ?? null,
+  }) as Record<string, unknown>;
+}
+
+// ── Extrato em PDF pelo WhatsApp (06/10/2026) ────────────────────────────────────────────────────
+// "me manda o extrato do Roberto", "o PDF do que falta pagar pro João". O MESMO documento do botão
+// "Extrato em PDF" da tela (_shared/diarias/extrato.ts) e o MESMO caminho do PDF do orçamento:
+// renderiza no /api/pdf, guarda por minutos num bucket privado, manda pela Evolution, apaga. A
+// credencial é um token de uso único (emitir_token_de_pdf) — extrato não tem link de ordem.
+
+const janelaDeDoisMinutos = () => Math.floor(Date.now() / 120_000);
+
+async function falhaDoExtrato(motivo: string) {
+  return {
+    error: `Não consegui mandar o extrato: ${motivo}.`,
+    orientacao: "Diga que o anexo falhou (sem fingir que mandou); o extrato em PDF também sai pela tela, em Financeiro › Diárias › Extrato.",
+  };
+}
+
 export const diariasTools: ToolDef[] = [
   {
     name: "registrar_diaria",
@@ -447,12 +590,19 @@ export const diariasTools: ToolDef[] = [
     name: "consultar_freelancer",
     description:
       "Quanto se deve a um freelancer de diária e o que ele trabalhou e recebeu: 'quanto devo pro Roberto?', 'quantos dias o Mickael " +
-      "fez esse mês?', 'como está o saldo dos freelancers?'. Sem nome, mostra todos. Só consulta — não grava nada.",
+      "fez esse mês?', 'o que falta pagar pro João?' (periodo=em_aberto), 'o que ele fez desde o último pagamento?', 'de 14/09 a 27/09' " +
+      "(de/ate). Sem nome, mostra todos. Só consulta — não grava nada. Para o PDF do extrato, enviar_extrato_freelancer.",
     input_schema: {
       type: "object",
       properties: {
         freelancer: { type: "string", description: "Nome; vazio = todos." },
-        periodo: { type: "string", enum: [...PERIODOS], description: "tudo (padrão: saldo acumulado), este_mes, mes_passado." },
+        periodo: {
+          type: "string", enum: [...PERIODOS],
+          description: "tudo (padrão: saldo acumulado), em_aberto (o que falta pagar, desde o último acerto), desde_ultimo_pagamento, " +
+            "ultimos_15_dias, semana_atual, este_mes, mes_passado. Ignorado se vier de/ate.",
+        },
+        de: { type: "string", description: "Data inicial dita (dd/mm, 'segunda'), para período livre." },
+        ate: { type: "string", description: "Data final dita (dd/mm, 'hoje'), para período livre." },
       },
     },
     risk: "low",
@@ -460,26 +610,29 @@ export const diariasTools: ToolDef[] = [
     async execute(args, ctx) {
       const b = semAcesso(ctx);
       if (b) return b;
-      const { de, ate } = intervaloDito(args.periodo);
+      const periodo = periodoDito(args);
+      if ("error" in periodo) return periodo;
       if (!args.freelancer) {
-        const r = await chamar(ctx, "resumo_freelancers", { p_de: de, p_ate: ate }) as Record<string, unknown>;
+        const r = await chamar(ctx, "resumo_freelancers", periodo) as Record<string, unknown>;
         if (r && "error" in r) return r;
         const pessoas = ((r?.pessoas ?? []) as any[]).map((x) => ({
-          nome: x.nome, dias: Number(x.dias), trabalhado: Number(x.trabalhado), pago: Number(x.pago),
+          nome: x.nome, periodo: periodoResolvido(x), dias: Number(x.dias), trabalhado: Number(x.trabalhado), pago: Number(x.pago),
+          ...(Number(x.pago_aguardando_banco) > 0 ? { pago_lancado_a_mao_aguardando_banco: Number(x.pago_aguardando_banco) } : {}),
           saldo: Number(x.saldo_final), situacao: ESTADO[x.estado] ?? x.estado, ultimo_pagamento: x.ultimo_pagamento,
         }));
-        return { periodo: de ? `${de} a ${ate}` : "desde o início da conta corrente", pessoas };
+        return { pessoas };
       }
       const f = await acharFreelancer(ctx, args.freelancer);
       if ("error" in f) return f;
-      const c = await chamar(ctx, "conta_corrente_freelancer", { p_favorecido_id: f.id, p_de: de, p_ate: ate }) as Record<string, any>;
+      const c = await chamar(ctx, "conta_corrente_freelancer", { p_favorecido_id: f.id, ...periodo }) as Record<string, any>;
       if (c && "error" in c) return c;
       const linhas = ((c?.linhas ?? []) as any[]).slice(-15).map((l) => l.tipo === "dia"
         ? { data: l.data, dia: rotuloDaFracao(Number(l.fracao)), valor: Number(l.trabalhado), os: (l.os ?? []).map((o: any) => o.numero) }
-        : { data: l.data, pagamento: Number(l.pago), de_onde: l.conta });
+        : { data: l.data, pagamento: Number(l.pago), de_onde: l.aguardando ? "lançado à mão, aguardando o banco" : l.conta });
       return {
         freelancer: f.nome,
-        periodo: c.de ? `${c.de} a ${c.ate ?? "hoje"}` : "desde o início da conta corrente",
+        periodo: periodoResolvido(c),
+        saldo_antes_do_periodo: Number(c.saldo_anterior),
         dias: Number(c.dias), trabalhado: Number(c.trabalhado), pago: Number(c.pago),
         saldo: Number(c.saldo_final), situacao: ESTADO[c.estado] ?? c.estado,
         ultimos_lancamentos: linhas,
@@ -523,6 +676,129 @@ export const diariasTools: ToolDef[] = [
       const r = await chamar(ctx, "cadastrar_freelancer", { ...p, p_simular: false }) as Record<string, unknown>;
       if (r && "error" in r) return r;
       return { ...r, aviso: String(r?.message ?? "") };
+    },
+  },
+  {
+    name: "registrar_pagamento_freelancer",
+    description:
+      "Registra o que se PAGOU a um freelancer de diária: 'paguei 100 pro Roberto no Pix', 'dei 50 em dinheiro pro João', " +
+      "'paguei o Mickael do meu bolso'. forma: pix (Pix/transferência já feito — fica anotado e casa com a linha do banco; já " +
+      "aparece no extrato de diárias), dinheiro (sai do Caixa) ou bolso_do_socio (vira reembolso ao sócio). Não é o dia trabalhado " +
+      "(registrar_diaria). Valor e forma são obrigatórios: se faltar, PERGUNTE. Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        freelancer: { type: "string", description: "Nome como a pessoa falou." },
+        valor: { type: "number", description: "Valor pago, em reais." },
+        forma: { type: "string", enum: [...FORMAS], description: "pix, dinheiro ou bolso_do_socio." },
+        data: { type: "string", description: "Quando pagou: 'hoje' (padrão), 'ontem', dd/mm, dia da semana." },
+        socio: { type: "string", description: "Só no bolso_do_socio, se a pessoa disser qual (padrão: quem está falando)." },
+        observacao: { type: "string", description: "Ex.: 'adiantamento', 'acerto da quinzena'." },
+      },
+      required: ["freelancer", "valor", "forma"],
+    },
+    risk: "medium",
+    roles: CARGOS,
+    preValidar(args) {
+      if (!FORMAS.includes(String(args?.forma ?? "") as Forma)) return { error: "Como foi pago? pix, dinheiro ou bolso_do_socio." };
+      const v = numeroDito(args?.valor);
+      if (v == null || v <= 0) return { error: "Qual o valor pago? (não invente: pergunte)" };
+      return null;
+    },
+    async execute(args, ctx) {
+      const b = semAcesso(ctx);
+      if (b) return b;
+      const p = await resolverPagamento(ctx, args);
+      if ("error" in p) return p;
+      const r = await registrarPagamento(ctx, p);
+      if (r && "error" in r) return r;
+      if (r && r.ok === false) return { ok: false, aviso: String(r.message ?? "Não lancei.") };
+      return { ok: true, aviso: `${String(r?.message ?? "Pagamento lançado.")}${await saldoDito(ctx, p.freelancer)}`.trim() };
+    },
+  },
+  {
+    name: "enviar_extrato_freelancer",
+    description:
+      "Manda o EXTRATO de diárias de um freelancer em PDF para o WhatsApp de QUEM PEDIU (o mesmo PDF do botão 'Extrato em PDF' da " +
+      "tela, com saldo e linhas de assinatura): 'me manda o extrato do Roberto', 'o PDF do que falta pagar pro João' (periodo=em_aberto), " +
+      "'extrato do Mickael de 14/09 a 27/09' (de/ate). Sem período = o histórico inteiro.",
+    input_schema: {
+      type: "object",
+      properties: {
+        freelancer: { type: "string", description: "Nome como a pessoa falou." },
+        periodo: { type: "string", enum: [...PERIODOS], description: "Como em consultar_freelancer; padrão tudo." },
+        de: { type: "string", description: "Data inicial dita, para período livre." },
+        ate: { type: "string", description: "Data final dita, para período livre." },
+      },
+      required: ["freelancer"],
+    },
+    // Só para quem pede, e o conteúdo é o que ele já vê na tela: nada a confirmar.
+    risk: "low",
+    roles: CARGOS,
+    async execute(args, ctx) {
+      const b = semAcesso(ctx);
+      if (b) return b;
+      const periodo = periodoDito(args);
+      if ("error" in periodo) return periodo;
+      const f = await acharFreelancer(ctx, args.freelancer);
+      if ("error" in f) return f;
+      const { admin } = ctx;
+
+      // Destino: o telefone de quem pediu, do cadastro — nunca de um texto.
+      const { data: u, error: uErr } = await admin.from("app_users").select("phone_normalized").eq("id", ctx.userId).maybeSingle();
+      if (uErr) return { error: `Falha ao ler o seu cadastro: ${uErr.message}` };
+      const telefone = String(u?.phone_normalized ?? "").replace(/\D/g, "");
+      if (!telefone) return { error: "Você não tem um WhatsApp cadastrado para receber o PDF. Cadastre em Configurações → Usuários (aba IA/Zap)." };
+
+      const conta = await chamar(ctx, "conta_corrente_freelancer", { p_favorecido_id: f.id, ...periodo }) as Record<string, any>;
+      if (conta && "error" in conta) return await falhaDoExtrato(String(conta.error));
+      const { data: cad } = await admin.from("payees").select("name, document, pix_key").eq("id", f.id).maybeSingle();
+      const s = ctx.settings;
+      const html = montarExtratoHtml({
+        empresa: { nome: s.company_name || "HBR", cnpj: s.cnpj || null, cidade: [s.city, s.state].filter(Boolean).join("/") || null },
+        freelancer: { nome: cad?.name ?? f.nome, documento: cad?.document ?? null, pix: cad?.pix_key ?? null },
+        conta: conta as unknown as ContaDoExtrato,
+        geradoEm: new Date(),
+      });
+      const arquivo = limitarNomeDoArquivo(nomeDoArquivo("extrato-diarias", f.nome, conta as ContaDoExtrato, "pdf"));
+
+      const { data: token, error: tErr } = await admin.rpc("emitir_token_de_pdf", { p_finalidade: `extrato de diárias de ${f.nome}` });
+      if (tErr || !token) return await falhaDoExtrato(`sem credencial para o servidor de PDF (${tErr?.message ?? "token vazio"})`);
+
+      const saldo = Number(conta.saldo_final) || 0;
+      const legenda = `📄 Extrato de diárias — ${f.nome}\nPeríodo: ${periodoResolvido(conta)}\n` +
+        `Saldo: ${brl.format(Math.abs(saldo))} (${ESTADO[String(conta.estado)] ?? conta.estado})`;
+      const chave = chaveDeEnvio("agente-extrato-diarias", f.id, telefone, periodoResolvido(conta), saldo, Number(conta.pago), janelaDeDoisMinutos());
+
+      const entrega = await guardarEEntregar({
+        admin,
+        doc: { html, nomeDoArquivo: arquivo },
+        pdfToken: String(token),
+        baseUrl: s.app_public_url || "",
+        rotuloDoLog: "enviar_extrato_freelancer",
+        entregar: (url) => enviarDocumentoWhatsapp({
+          phone: telefone, url, filename: arquivo, caption: legenda,
+          context: CONTEXTO_DO_ENVIO, jwt: ctx.jwt, dedupeKey: chave,
+        }),
+      });
+      if (!entrega.ok) return await falhaDoExtrato(entrega.motivo);
+      const envio = entrega.valor;
+      if (!envio.ok) {
+        // Mesma regra do PDF do orçamento: tool que desistiu sem resposta libera a reserva.
+        if (envio.semResposta) await liberarEnvio(admin, chave).catch(() => {});
+        return await falhaDoExtrato(envio.error);
+      }
+      if (envio.deduplicated) return { ok: true, deduplicated: true, aviso: `Esse mesmo extrato de ${f.nome} já foi mandado há instantes; não reenviei.` };
+      const modoTeste = desviadoPorTeste(ctx.settings);
+      return {
+        ok: true,
+        enviado_para: modoTeste ? "o número de TESTE do WhatsApp (modo de teste ligado)" : "o WhatsApp de quem pediu",
+        freelancer: f.nome, periodo: periodoResolvido(conta), saldo, situacao: ESTADO[String(conta.estado)] ?? conta.estado,
+        arquivo,
+        observacao: modoTeste
+          ? "O modo de teste do WhatsApp está ligado: o arquivo foi para o número de teste, não para quem pediu. Diga isso."
+          : "O arquivo já chegou no WhatsApp de quem pediu.",
+      };
     },
   },
 ];

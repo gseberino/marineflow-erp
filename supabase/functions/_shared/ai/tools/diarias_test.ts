@@ -6,12 +6,13 @@
 //   deno test --allow-all supabase/functions/_shared/ai/tools/diarias_test.ts
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  dataDoDito, datasDoIntervalo, diaCurto, diariasTools, intervaloDito, numeroDito, paramsDoCadastro, resolverDiaria,
-  resumirCadastro, resumirDiaria,
+  dataDoDito, datasDoIntervalo, diaCurto, diariasTools, numeroDito, paramsDoCadastro, periodoDito, resolverDiaria,
+  resolverPagamento, resumirCadastro, resumirDiaria, resumirPagamento,
 } from "./diarias.ts";
 
 /** Banco falso: só o que as tools leem. `simulacao` é o que cadastrar_freelancer devolve simulando. */
-function admin(opcoes: { diaLancado?: boolean; simulacao?: { data?: unknown; error?: { message: string } } } = {}) {
+type Opcoes = { diaLancado?: boolean; cargo?: string; semTelefone?: boolean; simulacao?: { data?: unknown; error?: { message: string } } };
+function admin(opcoes: Opcoes = {}) {
   const tabelas: Record<string, any[]> = {
     work_profiles: [
       { id: "wp-rob", payee_id: "p-rob", valor_diaria: 160, vigencia_inicio: "2026-08-23", vigencia_fim: null, modo_pagamento: "diaria",
@@ -25,6 +26,11 @@ function admin(opcoes: { diaLancado?: boolean; simulacao?: { data?: unknown; err
       ? [{ id: "ws-1", work_profile_id: "wp-rob", data: "2026-09-24", fracao: 0.5, valor_diaria: 160, valor_dia: 80 }]
       : [],
     service_orders: [{ id: "os60", service_order_number: "OS-00060" }, { id: "os61", service_order_number: "OS-00061" }],
+    payees: [
+      { id: "s-gus", name: "Gustavo Seberino da Silva", kind: "socio", active: true, app_user_id: "u-dono" },
+      { id: "s-out", name: "Outro Sócio", kind: "socio", active: true, app_user_id: null },
+    ],
+    app_users: [{ id: "u-dono", phone_normalized: opcoes.semTelefone ? null : "5547999990000" }],
   };
   const consulta = (nome: string) => {
     const q: any = {
@@ -38,6 +44,7 @@ function admin(opcoes: { diaLancado?: boolean; simulacao?: { data?: unknown; err
         q._rows = q._rows.filter((r: any) => String(r.service_order_number ?? "").includes(alvo));
         return q;
       },
+      maybeSingle() { return Promise.resolve({ data: q._rows[0] ?? null, error: null }); },
       then(res: any) { return Promise.resolve({ data: q._rows, error: null }).then(res); },
     };
     return q;
@@ -51,7 +58,7 @@ function admin(opcoes: { diaLancado?: boolean; simulacao?: { data?: unknown; err
 }
 
 type Chamada = { n: string; a: Record<string, unknown> };
-function ctx(opcoes: { diaLancado?: boolean; cargo?: string; simulacao?: { data?: unknown; error?: { message: string } } } = {}) {
+function ctx(opcoes: Opcoes = {}) {
   const chamadas: Chamada[] = [];
   const rpc = (n: string, a: Record<string, unknown>) => {
     chamadas.push({ n, a });
@@ -60,6 +67,8 @@ function ctx(opcoes: { diaLancado?: boolean; cargo?: string; simulacao?: { data?
     if (n === "apagar_diaria") return Promise.resolve({ data: { ok: true, apagado: {}, message: "Diária de Roberto em qui 24/09 apagada." }, error: null });
     if (n === "resumo_freelancers") return Promise.resolve({ data: { pessoas: [{ nome: "Roberto", dias: 12, trabalhado: 1980, pago: 1530, saldo_final: 450, estado: "deve" }] }, error: null });
     if (n === "cadastrar_freelancer") return Promise.resolve({ data: { ok: true, acao: "criado", message: "João Marcelo cadastrado: diária de R$ 150,00 desde ter 29/09." }, error: null });
+    if (n === "anotar_transacao") return Promise.resolve({ data: { ok: true, aplicada: false, message: "Anotado. Quando a transação chegar do banco, ela já entra classificada." }, error: null });
+    if (n === "lancar_no_caixa") return Promise.resolve({ data: { ok: true, message: "Lançado: R$ 50,00." }, error: null });
     return Promise.resolve({ data: null, error: { message: `rpc inesperada ${n}` } });
   };
   return {
@@ -69,11 +78,16 @@ function ctx(opcoes: { diaLancado?: boolean; cargo?: string; simulacao?: { data?
 }
 const tool = (nome: string) => diariasTools.find((t) => t.name === nome)!;
 
-Deno.test("três ferramentas: registrar e cadastrar pedem confirmação, consultar só lê; todas só para gestor", () => {
-  assertEquals(diariasTools.map((t) => t.name).sort(), ["cadastrar_freelancer", "consultar_freelancer", "registrar_diaria"]);
+Deno.test("cinco ferramentas: as que gravam pedem confirmação, consultar e o PDF para si não; todas só para gestor", () => {
+  assertEquals(diariasTools.map((t) => t.name).sort(), [
+    "cadastrar_freelancer", "consultar_freelancer", "enviar_extrato_freelancer", "registrar_diaria", "registrar_pagamento_freelancer",
+  ]);
   assertEquals(tool("registrar_diaria").risk, "medium");
   assertEquals(tool("cadastrar_freelancer").risk, "medium");
+  assertEquals(tool("registrar_pagamento_freelancer").risk, "medium");
   assertEquals(tool("consultar_freelancer").risk, "low");
+  assertEquals(tool("enviar_extrato_freelancer").risk, "low");
+  assertEquals((tool("registrar_pagamento_freelancer").input_schema as any).required, ["freelancer", "valor", "forma"]);
   for (const t of diariasTools) assertEquals(t.roles, ["admin", "financial"]);
   assertEquals((tool("registrar_diaria").input_schema as any).required, ["freelancer", "jornada"]);
   assertEquals((tool("cadastrar_freelancer").input_schema as any).required, ["nome", "valor_diaria"]);
@@ -170,16 +184,82 @@ Deno.test("consultar: sem nome, todos pelo resumo; com nome, a conta corrente de
   const r2 = await tool("consultar_freelancer").execute({ freelancer: "mickael", periodo: "este_mes" }, um.c as never) as Record<string, unknown>;
   assertEquals(um.chamadas[0].n, "conta_corrente_freelancer");
   assertEquals(um.chamadas[0].a.p_favorecido_id, "p-mic");
-  assertEquals(typeof um.chamadas[0].a.p_de, "string");
+  assertEquals([um.chamadas[0].a.p_de, um.chamadas[0].a.p_atalho], [null, "este_mes"]);
   assertEquals(r2.situacao, "você deve a ele");
+
+  // "o que falta pagar" vai como atalho para o banco; datas ditas vão como De/Até.
+  const aberto = ctx();
+  await tool("consultar_freelancer").execute({ periodo: "em_aberto" }, aberto.c as never);
+  assertEquals(aberto.chamadas[0].a, { p_de: null, p_ate: null, p_atalho: "em_aberto", p_autor: "u-dono" });
 });
 
-Deno.test("período dito e dia curto, em Brasília", () => {
-  const agora = new Date("2026-09-29T15:00:00Z");
-  assertEquals(intervaloDito("este_mes", agora), { de: "2026-09-01", ate: "2026-09-30" });
-  assertEquals(intervaloDito("mes_passado", new Date("2026-01-10T15:00:00Z")), { de: "2025-12-01", ate: "2025-12-31" });
-  assertEquals(intervaloDito("tudo", agora), { de: null, ate: null });
+Deno.test("período dito: atalhos, datas e o que vira pergunta; dia curto em Brasília", () => {
+  const agora = new Date("2026-10-06T15:00:00Z"); // terça
+  assertEquals(periodoDito({ periodo: "mes_passado" }, agora), { p_de: null, p_ate: null, p_atalho: "mes_anterior" });
+  assertEquals(periodoDito({}, agora), { p_de: null, p_ate: null, p_atalho: null });
+  assertEquals(periodoDito({ periodo: "desde_ultimo_pagamento" }, agora), { p_de: null, p_ate: null, p_atalho: "desde_ultimo_pagamento" });
+  assertEquals(periodoDito({ de: "14/09/2026", ate: "27/09/2026", periodo: "em_aberto" }, agora), { p_de: "2026-09-14", p_ate: "2026-09-27", p_atalho: null });
+  assertEquals(periodoDito({ de: "segunda" }, agora), { p_de: "2026-10-05", p_ate: null, p_atalho: null });
+  assertStringIncludes(String((periodoDito({ de: "27/09/2026", ate: "14/09/2026" }, agora) as { error: string }).error), "invertido");
+  assertStringIncludes(String((periodoDito({ periodo: "quinzena" }, agora) as { error: string }).error), "não existe");
   assertEquals(diaCurto("2026-09-24"), "qui 24/09");
+});
+
+// ── Pagamento a freelancer pelo WhatsApp (06/10/2026) ──
+
+Deno.test("pagamento: Pix vira anotação (espera o banco), dinheiro sai do Caixa, bolso é do sócio que fala", async () => {
+  const pix = ctx();
+  const r = await tool("registrar_pagamento_freelancer").execute({ freelancer: "roberto", valor: 100, forma: "pix" }, pix.c as never) as Record<string, unknown>;
+  const an = pix.chamadas.find((x) => x.n === "anotar_transacao")!.a;
+  assertEquals([an.p_sentido, an.p_valor, an.p_favorecido_id, an.p_categoria, an.p_data], ["saida", 100, "p-rob", "Diárias de freelancers", null]);
+  assertStringIncludes(String(r.aviso), "Anotado");
+  assertStringIncludes(String(r.aviso), "Saldo com Roberto");
+
+  const din = ctx();
+  await tool("registrar_pagamento_freelancer").execute({ freelancer: "mickael", valor: "50,00", forma: "dinheiro", data: "ontem" }, din.c as never);
+  const cx = din.chamadas.find((x) => x.n === "lancar_no_caixa")!.a;
+  assertEquals([cx.p_pago_por, cx.p_valor, cx.p_favorecido_id, cx.p_socio_id], ["caixa", 50, "p-mic", null]);
+  assertEquals(typeof cx.p_data, "string");
+
+  const bolso = ctx();
+  await tool("registrar_pagamento_freelancer").execute({ freelancer: "roberto", valor: 80, forma: "bolso_do_socio" }, bolso.c as never);
+  const sx = bolso.chamadas.find((x) => x.n === "lancar_no_caixa")!.a;
+  assertEquals([sx.p_pago_por, sx.p_socio_id, sx.p_favorecido_id], ["socio", "s-gus", "p-rob"]);
+});
+
+Deno.test("pagamento: sem valor ou forma é pergunta antes da pendência; futuro e técnico recusados", async () => {
+  assertStringIncludes(String(tool("registrar_pagamento_freelancer").preValidar!({ freelancer: "roberto", forma: "pix" }, {} as never)?.error), "valor");
+  assertStringIncludes(String(tool("registrar_pagamento_freelancer").preValidar!({ freelancer: "roberto", valor: 10 }, {} as never)?.error), "Como foi pago");
+  const futuro = await resolverPagamento(ctx().c as never, { freelancer: "roberto", valor: 10, forma: "pix", data: "31/12/2099" });
+  assertStringIncludes(String((futuro as { error: string }).error), "futuro");
+  const tec = ctx({ cargo: "technician" });
+  const r = await tool("registrar_pagamento_freelancer").execute({ freelancer: "roberto", valor: 10, forma: "pix" }, tec.c as never) as { error?: string };
+  assertEquals(typeof r.error, "string");
+  assertEquals(tec.chamadas.length, 0);
+});
+
+Deno.test("pagamento: a confirmação diz quanto, como, o saldo antes e depois, e o aviso do Pix repetido", async () => {
+  const txt = String(await resumirPagamento(ctx({ simulacao: { data: { saldo_final: 1090 } } }).c as never,
+    { freelancer: "roberto", valor: 100, forma: "pix", observacao: "adiantamento" })).replace(/ /g, " ");
+  assertStringIncludes(txt, "Pagamento a *Roberto Daniel Rodrigues Correa*: *R$ 100,00* por Pix");
+  assertStringIncludes(txt, "Saldo com ele: R$ 1.090,00 → R$ 990,00");
+  assertStringIncludes(txt, "Descrição: adiantamento · Diárias de freelancers");
+  assertStringIncludes(txt, "Se você já lançou este mesmo Pix, responda não");
+});
+
+// ── Extrato em PDF pelo WhatsApp (06/10/2026) ──
+
+Deno.test("extrato em PDF: período ruim e falta de WhatsApp viram resposta antes de gerar qualquer coisa", async () => {
+  const ruim = ctx();
+  const r1 = await tool("enviar_extrato_freelancer").execute({ freelancer: "roberto", periodo: "quinzena" }, ruim.c as never) as { error?: string };
+  assertStringIncludes(String(r1.error), "não existe");
+  const semFone = ctx({ semTelefone: true });
+  const r2 = await tool("enviar_extrato_freelancer").execute({ freelancer: "roberto" }, semFone.c as never) as { error?: string };
+  assertStringIncludes(String(r2.error), "WhatsApp cadastrado");
+  assertEquals(semFone.chamadas.length, 0);
+  const tec = ctx({ cargo: "technician" });
+  const r3 = await tool("enviar_extrato_freelancer").execute({ freelancer: "roberto" }, tec.c as never) as { error?: string };
+  assertEquals(typeof r3.error, "string");
 });
 
 // ── Vários dias ("faltou desde 19/09", "a semana toda", "de segunda até hoje") — pedido do dono, 29/09 ──

@@ -12,6 +12,10 @@
  * de serviço nele, recusaria (ela não é um usuário) sem nem olhar o token.
  *
  * O token não sai daqui: não vai para legenda, texto nem para o resultado que o modelo lê.
+ *
+ * Documento que NÃO é de uma ordem (o extrato de diárias, 06/10/2026) não tem token de link: vai
+ * com `pdfToken` — de uso único, 3 minutos, emitido por `emitir_token_de_pdf` (migration
+ * 20261006210000) — no cabeçalho `x-pdf-token`. Um dos dois, nunca os dois.
  */
 
 const LIMITE_DE_ESPERA_MS = 30_000;
@@ -27,21 +31,26 @@ export async function renderizarPdf(params: {
   baseUrl: string;
   html: string;
   filename: string;
-  shareToken: string;
+  /** O token do link público da ordem (orçamento/OS). */
+  shareToken?: string;
+  /** Ou o token de uso único, para documento sem ordem. */
+  pdfToken?: string;
   /** Injetável para teste. */
   fetchFn?: typeof fetch;
   limiteMs?: number;
 }): Promise<ResultadoRender> {
   const base = (params.baseUrl || '').replace(/\/+$/, '');
   if (!/^https:\/\//.test(base)) return { ok: false, motivo: 'endereço público do ERP (app_public_url) ausente ou inválido' };
-  if (!params.shareToken) return { ok: false, motivo: 'a ordem não tem token de link' };
+  const credencial: Record<string, string> | null = params.pdfToken ? { 'x-pdf-token': params.pdfToken }
+    : params.shareToken ? { 'x-share-token': params.shareToken } : null;
+  if (!credencial) return { ok: false, motivo: params.pdfToken === undefined ? 'a ordem não tem token de link' : 'faltou o token do documento' };
 
   const controle = new AbortController();
   const relogio = setTimeout(() => controle.abort(), params.limiteMs ?? LIMITE_DE_ESPERA_MS);
   try {
     const r = await (params.fetchFn ?? fetch)(`${base}/api/pdf`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-share-token': params.shareToken },
+      headers: { 'Content-Type': 'application/json', ...credencial },
       body: JSON.stringify({ html: params.html, filename: params.filename }),
       signal: controle.signal,
     });
