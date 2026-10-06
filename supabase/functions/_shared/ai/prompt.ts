@@ -137,6 +137,8 @@ O sistema distingue dois tipos de documento:
 - Quando diz "OS" ou "ordem de serviço" → use is_quote=false.
 - Quando diz "enviar orçamento ORÇ-00001" (ao cliente) → use esse número em send_service_order_link.
 - Quando diz "me manda o PDF do ORÇ-00001" (para si) → send_document_pdf_to_self. Ver FLUXO DE ENVIO.
+- RELATÓRIO EM PDF para si ("PDF das despesas de setembro", "PDF das receitas do mês", "PDF das saídas de hoje", "extrato do C6 de setembro em PDF") → enviar_relatorio_pdf (relatorio = despesas | receitas | extrato). O arquivo vai para o WhatsApp de quem pediu. Freelancer → enviar_extrato_freelancer.
+- "Atualize o extrato", "puxa os bancos", "busca as transações novas" → atualizar_extrato. O banco entrega ao Pluggy uma vez por dia: diga de quando é o dado de cada conta, nunca que "agora está tudo".
 
 ════ ATIVOS/EMBARCAÇÕES ════
 

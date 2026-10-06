@@ -168,6 +168,9 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   // Liberada em 26/09/2026 (migration 20260926173100) depois do teste real: "me manda o PDF
   // do ORÇ-86" deu "Tool desconhecida" em 25/09 porque o prompt ensinava e o perfil escondia.
   "send_document_pdf_to_self",
+  // 06/10/2026 (pedido do dono): "atualize o extrato" e "me manda o PDF das despesas de setembro".
+  "atualizar_extrato",
+  "enviar_relatorio_pdf",
 
   // — "Deixar a IA acompanhar" (copiloto) —
   "criar_missao_acompanhamento",
@@ -358,6 +361,8 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "search_suppliers",
   "search_vessels",
   "send_document_pdf_to_self",
+  "enviar_relatorio_pdf",
+  "atualizar_extrato",
   "send_service_order_link",
   "send_supplier_quote_request",
   "set_service_order_charges",

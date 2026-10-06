@@ -586,6 +586,8 @@ export const caixaTools: ToolDef[] = [
       const b = semAcesso(ctx);
       if (b) return b;
       const receita = args.tipo === "receita";
+      // O PDF de relatório (relatorios.ts) pede a lista inteira; o modelo recebe as maiores.
+      const completo = (args as Record<string, unknown>).lista_completa === true;
       const falhou = (o: string, e: { message?: string } | null) => ({
         error: `Não consegui ler ${o} (${e?.message ?? "erro do banco"}). Diga ao dono que a consulta falhou — não que não houve ${receita ? "recebimento" : "gasto"}.`,
       });
@@ -757,7 +759,7 @@ export const caixaTools: ToolDef[] = [
             por_categoria: [...porCategoriaNao.entries()].sort((a, b) => b[1].valor - a[1].valor)
               .map(([categoria, v]) => ({ categoria, valor: centavos(v.valor), quantidade: v.quantidade })),
             observacao: "Categoria indicada pela sugestão do Extrato, pelo ramo do cartão ou pelo nome do estabelecimento — ainda não confirmada por ninguém.",
-            itens: [...semLancamento].sort((a, b) => b.valor - a.valor).slice(0, 15).map((l) => {
+            itens: [...semLancamento].sort((a, b) => b.valor - a.valor).slice(0, completo ? undefined : 15).map((l) => {
               const c = categoriaDaLinha(l, regras);
               return {
                 data: l.data, quem: l.quem, valor: l.valor,
@@ -773,7 +775,7 @@ export const caixaTools: ToolDef[] = [
           if (outros.length) {
             emOutraCategoria = {
               total: somar(outros, (l) => l.valor),
-              itens: outros.slice(0, 10).map((l) => ({ data: l.data, quem: l.quem ?? l.descricao, valor: l.valor, lancado_como: l.categoria })),
+              itens: outros.slice(0, completo ? undefined : 10).map((l) => ({ data: l.data, quem: l.quem ?? l.descricao, valor: l.valor, lancado_como: l.categoria })),
               observacao: "Mesmo tipo de estabelecimento (pelo ramo do cartão), mas lançado em outra categoria: não entra no total. Pode ser certo (ex.: lanche no posto) ou um lançamento a corrigir.",
             };
           }
@@ -789,9 +791,9 @@ export const caixaTools: ToolDef[] = [
         lancado: {
           total,
           quantidade: doPedido.length,
-          por_categoria: [...porCategoria.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)
+          por_categoria: [...porCategoria.entries()].sort((a, b) => b[1] - a[1]).slice(0, completo ? undefined : 12)
             .map(([categoria, valor]) => ({ categoria, valor: centavos(valor) })),
-          itens: [...doPedido].sort((a, b) => b.valor - a.valor).slice(0, 12)
+          itens: [...doPedido].sort((a, b) => b.valor - a.valor).slice(0, completo ? undefined : 12)
             .map((l) => ({ data: l.data, quem: l.quem ?? l.descricao, valor: l.valor, categoria: l.categoria })),
         },
         ...(naoLancado ? { nao_lancado: naoLancado, total_com_nao_lancado: centavos(total + totalNaoLancado) } : {}),
