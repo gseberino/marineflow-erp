@@ -120,89 +120,89 @@ export function VerbosFiscaisGrid() {
             {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
           </div>
         ) : (
-          <div className="overflow-x-auto scrollbar-thin">
-            <table className="w-full text-sm min-w-[760px]">
-              <thead>
-                <tr className="border-b bg-muted/50 text-left text-muted-foreground">
-                  <th className="px-3 py-2 font-medium">Verbo</th>
-                  <th className="px-3 py-2 font-medium">Cód. nacional</th>
-                  <th className="px-3 py-2 font-medium">CNAE</th>
-                  <th className="px-3 py-2 font-medium">ISS %</th>
-                  <th className="px-3 py-2 font-medium">Justificativa</th>
-                  <th className="px-3 py-2 w-10" />
-                </tr>
-              </thead>
-              <tbody>
-                {(verbos ?? []).map((v) => {
-                  const r = rascunhos[v.verb_slug] ?? rascunhoDe(v);
-                  const mudou = alterada(v);
-                  const set = (campo: keyof Rascunho, valor: string) =>
-                    setRascunhos((a) => ({ ...a, [v.verb_slug]: { ...r, [campo]: valor } }));
+          // Sem tabela de largura fixa (era min-w 760px: rolagem lateral em Configurações › Fiscal,
+          // inventário de 06/10). No computador, colunas; no celular, cada verbo empilha com rótulo.
+          <div className="text-sm" data-testid="verbos-fiscais">
+            <div className="hidden sm:grid-cols-[minmax(0,1.3fr)_6.5rem_6.5rem_4.5rem_minmax(0,1fr)_2rem] sm:grid gap-3 border-b bg-muted/50 px-3 py-2 text-left font-medium text-muted-foreground">
+              <span>Verbo</span><span>Cód. nacional</span><span>CNAE</span><span>ISS %</span><span>Justificativa</span><span />
+            </div>
+            {(verbos ?? []).map((v) => {
+              const r = rascunhos[v.verb_slug] ?? rascunhoDe(v);
+              const mudou = alterada(v);
+              const set = (campo: keyof Rascunho, valor: string) =>
+                setRascunhos((a) => ({ ...a, [v.verb_slug]: { ...r, [campo]: valor } }));
+              const rotulo = (texto: string) => <span className="text-xs text-muted-foreground sm:hidden">{texto}</span>;
 
-                  return (
-                    <tr key={v.verb_slug} className="border-b last:border-0">
-                      <td className="px-3 py-2">
-                        <div className="font-medium">{v.name}</div>
-                        {/* Quantos serviços herdam daqui: mexer no verbo de 84 serviços não é
-                            o mesmo que mexer no que ninguém usa. */}
-                        <div className="text-xs text-muted-foreground">
-                          {v.servicos === 0 ? 'nenhum serviço' : `${v.servicos} serviço${v.servicos > 1 ? 's' : ''}`}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <Input
-                          value={r.default_national_tax_code}
-                          onChange={(e) => set('default_national_tax_code', e.target.value)}
-                          placeholder="140101"
-                          inputMode="numeric"
-                          maxLength={6}
-                          className="h-8 w-24 font-mono text-xs"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <Input
-                          value={r.default_cnae}
-                          onChange={(e) => set('default_cnae', e.target.value)}
-                          placeholder="3313901"
-                          inputMode="numeric"
-                          maxLength={7}
-                          className="h-8 w-24 font-mono text-xs"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <Input
-                          value={r.default_iss_rate}
-                          onChange={(e) => set('default_iss_rate', e.target.value)}
-                          placeholder="5"
-                          inputMode="decimal"
-                          className="h-8 w-16 text-xs"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <Input
-                          value={r.notes}
-                          onChange={(e) => set('notes', e.target.value)}
-                          placeholder="por que este código"
-                          className="h-8 min-w-[140px] text-xs"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <Button aria-label="Salvar este código fiscal"
-                          size="icon"
-                          variant={mudou ? 'default' : 'ghost'}
-                          className="h-7 w-7"
-                          disabled={!mudou || salvar.isPending}
-                          onClick={() => aplicar(v)}
-                          title={mudou ? 'Salvar este verbo' : 'Nada alterado'}
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+              return (
+                <div key={v.verb_slug} className="grid grid-cols-2 sm:grid-cols-[minmax(0,1.3fr)_6.5rem_6.5rem_4.5rem_minmax(0,1fr)_2rem] items-center gap-x-3 gap-y-1.5 border-b px-3 py-2 last:border-0">
+                  <div className="col-span-2 min-w-0 sm:col-span-1">
+                    <div className="font-medium">{v.name}</div>
+                    {/* Quantos serviços herdam daqui: mexer no verbo de 84 serviços não é
+                        o mesmo que mexer no que ninguém usa. */}
+                    <div className="text-xs text-muted-foreground">
+                      {v.servicos === 0 ? 'nenhum serviço' : `${v.servicos} serviço${v.servicos > 1 ? 's' : ''}`}
+                    </div>
+                  </div>
+                  <label className="flex flex-col gap-0.5">
+                    {rotulo('Cód. nacional')}
+                    <Input
+                      value={r.default_national_tax_code}
+                      onChange={(e) => set('default_national_tax_code', e.target.value)}
+                      placeholder="140101"
+                      inputMode="numeric"
+                      maxLength={6}
+                      aria-label={`Código nacional de ${v.name}`}
+                      className="h-8 w-full font-mono text-xs"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-0.5">
+                    {rotulo('CNAE')}
+                    <Input
+                      value={r.default_cnae}
+                      onChange={(e) => set('default_cnae', e.target.value)}
+                      placeholder="3313901"
+                      inputMode="numeric"
+                      maxLength={7}
+                      aria-label={`CNAE de ${v.name}`}
+                      className="h-8 w-full font-mono text-xs"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-0.5">
+                    {rotulo('ISS %')}
+                    <Input
+                      value={r.default_iss_rate}
+                      onChange={(e) => set('default_iss_rate', e.target.value)}
+                      placeholder="5"
+                      inputMode="decimal"
+                      aria-label={`ISS de ${v.name}`}
+                      className="h-8 w-full text-xs"
+                    />
+                  </label>
+                  <label className="col-span-2 flex flex-col gap-0.5 sm:col-span-1">
+                    {rotulo('Justificativa')}
+                    <Input
+                      value={r.notes}
+                      onChange={(e) => set('notes', e.target.value)}
+                      placeholder="por que este código"
+                      aria-label={`Justificativa de ${v.name}`}
+                      className="h-8 w-full text-xs"
+                    />
+                  </label>
+                  <div className="flex justify-end">
+                    <Button aria-label="Salvar este código fiscal"
+                      size="icon"
+                      variant={mudou ? 'default' : 'ghost'}
+                      className="h-7 w-7"
+                      disabled={!mudou || salvar.isPending}
+                      onClick={() => aplicar(v)}
+                      title={mudou ? 'Salvar este verbo' : 'Nada alterado'}
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </CardContent>
