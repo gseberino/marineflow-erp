@@ -1,4 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { ESQUEMA_DA_FORMA, formaDePagamento, validarForma } from "./forma-de-pagamento.ts";
 import { horariosDeBrasilia } from "../fuso.ts";
 import { sendWhatsapp } from "./whatsapp.ts";
 
@@ -102,7 +103,7 @@ export const flowMacroTools: ToolDef[] = [
         service_order_id: { type: "string", description: "UUID do orçamento (draft)." },
         deposit_amount: { type: "number", description: "Valor do sinal JÁ PAGO." },
         payment_date: { type: "string", description: "Data do pagamento do sinal (ISO date)." },
-        payment_method: { type: "string", description: "Forma de pagamento do sinal." },
+        payment_method: { ...ESQUEMA_DA_FORMA, description: `Forma de pagamento do sinal: ${ESQUEMA_DA_FORMA.description}` },
         card_fee_percent: { type: "number", description: "Taxa de cartão em %, se houver." },
         follow_up_in_days: { type: "number", description: "Opcional: agenda um lembrete de follow-up PARA VOCÊ em N dias (às 08:00)." },
         scheduled_start_at: { type: "string", description: "Opcional: agenda a OS para esta data/hora (ISO)." },
@@ -114,11 +115,14 @@ export const flowMacroTools: ToolDef[] = [
     },
     risk: "high",
     roles: NON_TECHNICIAN_ROLES,
+    preValidar: (args) => validarForma(args),
     async execute(argsCrus, ctx) {
       // Hora sem fuso vira hora de Brasília (fuso.ts): 09:00 não pode virar 06:00.
       const args = horariosDeBrasilia(argsCrus);
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
+      const forma = validarForma(args);
+      if (forma) return forma;
       const { sb, admin, userId } = ctx;
       const passos: Array<Record<string, unknown>> = [];
 
@@ -127,7 +131,7 @@ export const flowMacroTools: ToolDef[] = [
         p_service_order_id: args.service_order_id,
         p_amount: args.deposit_amount,
         p_payment_date: String(args.payment_date).split("T")[0],
-        p_payment_method: args.payment_method,
+        p_payment_method: formaDePagamento(args.payment_method),
         p_card_fee_percent: args.card_fee_percent || 0,
         p_notes: args.notes || null,
       });

@@ -1,4 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolCtx, type ToolDef } from "./registry.ts";
+import { ESQUEMA_DA_FORMA, formaDePagamento, validarForma } from "./forma-de-pagamento.ts";
 import { mensagemDoBanco } from "./lancamentos.ts";
 import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
 import {
@@ -376,7 +377,7 @@ export const financialTools: ToolDef[] = [
         payable_id: { type: "string" },
         amount: { type: "number" },
         payment_date: { type: "string", description: "ISO date" },
-        payment_method: { type: "string" },
+        payment_method: ESQUEMA_DA_FORMA,
         installments: { type: "number" },
         card_fee_percent: { type: "number" },
         notes: { type: "string" },
@@ -385,16 +386,20 @@ export const financialTools: ToolDef[] = [
     },
     risk: "high",
     roles: NON_TECHNICIAN_ROLES,
+    // Forma que o banco não aceita é recusada ANTES da pendência, não depois do PIN (05/10/2026).
+    preValidar: (args) => validarForma(args),
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
+      const forma = validarForma(args);
+      if (forma) return forma;
       const { admin } = ctx;
       const { data, error } = await admin.rpc("register_payment_and_update_balance", {
         p_receivable_id: args.receivable_id || null,
         p_payable_id: args.payable_id || null,
         p_amount: args.amount,
         p_payment_date: String(args.payment_date).split("T")[0],
-        p_payment_method: args.payment_method,
+        p_payment_method: formaDePagamento(args.payment_method),
         p_installments: args.installments || 1,
         p_card_fee_percent: args.card_fee_percent || 0,
         p_net_amount: args.amount,
@@ -413,7 +418,7 @@ export const financialTools: ToolDef[] = [
         service_order_id: { type: "string", description: "UUID do orçamento (draft)" },
         amount: { type: "number" },
         payment_date: { type: "string", description: "ISO date" },
-        payment_method: { type: "string" },
+        payment_method: ESQUEMA_DA_FORMA,
         card_fee_percent: { type: "number" },
         notes: { type: "string" },
       },
@@ -421,15 +426,18 @@ export const financialTools: ToolDef[] = [
     },
     risk: "high",
     roles: NON_TECHNICIAN_ROLES,
+    preValidar: (args) => validarForma(args),
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
+      const forma = validarForma(args);
+      if (forma) return forma;
       const { admin } = ctx;
       const { data, error } = await admin.rpc("register_deposit_and_convert", {
         p_service_order_id: args.service_order_id,
         p_amount: args.amount,
         p_payment_date: String(args.payment_date).split("T")[0],
-        p_payment_method: args.payment_method,
+        p_payment_method: formaDePagamento(args.payment_method),
         p_card_fee_percent: args.card_fee_percent || 0,
         p_notes: args.notes || null,
       });
