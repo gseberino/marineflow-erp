@@ -1,5 +1,5 @@
 // Canonical types for the WhatsApp provider abstraction layer.
-// Both ZapiProvider and EvolutionProvider implement WhatsAppProvider.
+// O EvolutionProvider implementa WhatsAppProvider (o Z-API saiu em 06/10/2026).
 
 export type SendResult =
   | { ok: true; providerMessageId: string }
@@ -49,7 +49,7 @@ export interface WhatsAppProvider {
   parseIncomingWebhook(payload: unknown): IncomingMessageEvent | null;
 
   // ─── Capacidades OPCIONAIS (aditivas) ──────────────────────────────────────
-  // O EvolutionProvider implementa; o ZapiProvider pode não implementar. Os callers
+  // Opcional na interface (o EvolutionProvider implementa). Os callers
   // DEVEM usar feature-guard (ex.: provider.sendImage?.(...)). Nunca quebra o caminho
   // vivo de mensagens: só adiciona.
   /** Envia uma imagem ao chat (vitrine de produto, arte promocional). */
