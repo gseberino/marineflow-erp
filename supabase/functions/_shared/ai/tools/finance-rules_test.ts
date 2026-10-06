@@ -348,3 +348,24 @@ Deno.test("aprovar troca a categoria pelo nome dito, conferido no plano de conta
     globalThis.fetch = original;
   }
 });
+
+// ─── cadastrar_favorecido com categoria padrão (06/10/2026): a regra "todo Pix para a Eliane é alimentação" ───
+Deno.test("cadastrar_favorecido grava a categoria padrão validada; categoria inexistente é recusada", async () => {
+  const { financeRulesTools } = await import("./finance-rules.ts");
+  const t = financeRulesTools.find((x) => x.name === "cadastrar_favorecido")!;
+  const inseridos: any[] = [];
+  const admin = {
+    from: (tab: string) => {
+      const q: any = { select: () => q, eq: () => q, then: (ok: any) => Promise.resolve({ data: tab === "financial_categories" ? [{ name: "Alimentação de campo" }] : [], error: null }).then(ok) };
+      return q;
+    },
+  };
+  const sb = { from: () => ({ insert: (v: any) => { inseridos.push(v); return { select: () => ({ single: () => Promise.resolve({ data: { id: "p1" }, error: null }) }) }; } }) };
+  const c = { sb, admin, userId: "u", userRole: "admin", jwt: "jwt", appOrigin: "", settings: {} } as any;
+  const r = await t.execute({ nome: "Eliane Aparecida Uberti", tipo: "prestador", categoria_padrao: "alimentação de campo" }, c) as any;
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(inseridos[0].default_category, "Alimentação de campo");
+  const ruim = await t.execute({ nome: "X", tipo: "prestador", categoria_padrao: "festa" }, c) as any;
+  assertEquals(typeof ruim.error, "string");
+  assertEquals(inseridos.length, 1);
+});

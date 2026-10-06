@@ -44,7 +44,8 @@ export const FORA_DO_WHATSAPP: ReadonlySet<string> = new Set([
   "aprovar_propostas_de_lancamento",
   "recusar_propostas_de_lancamento",
   "listar_propostas_de_lancamento",
-  "cadastrar_favorecido",
+  // cadastrar_favorecido VOLTOU ao WhatsApp em 06/10/2026: é a regra "todo Pix para a Eliane é
+  // alimentação", pedida pelo dono no próprio WhatsApp — o assistente não conseguia criá-la.
   "listar_favorecidos",
 
   // — Produto composto e produção: cadastro estrutural do catálogo —

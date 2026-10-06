@@ -12,6 +12,7 @@
 // mesmo que a literatura de agentes em finanças usa: reversibilidade e alcance da escrita.
 
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
+import { categoriaValida } from "./caixa.ts";
 import { regraDeFornecedorAlcanca, type FornecedorConhecido, type TransacaoOrfa } from "../../banking/proposals.ts";
 import { faltaNoDestino, precisaDeDestino } from "../../banking/destino.ts";
 import { entradaSemCliente } from "../../banking/entrada-sem-cliente.ts";
@@ -1233,6 +1234,8 @@ export const financeRulesTools: ToolDef[] = [
     description:
       "Cadastra quem recebe dinheiro sem ser fornecedor: sócio, funcionário, diarista, prestador ou " +
       "comissionado. Use ao lançar uma despesa de pró-labore para alguém que ainda não existe. " +
+      "Também é a REGRA 'todo pagamento para Fulano é <categoria>': com categoria_padrao, os Pix para essa pessoa " +
+      "chegam do banco já classificados nela (ex.: Eliane, que faz as refeições → prestador, Alimentação de campo). " +
       "Freelancer que recebe por DIA (diarista): use cadastrar_freelancer — esta aqui não cria a diária, e sem ela " +
       "o dia trabalhado não pode ser registrado.",
     input_schema: {
@@ -1243,6 +1246,7 @@ export const financeRulesTools: ToolDef[] = [
         documento: { type: "string", description: "CPF ou CNPJ, só números." },
         chave_pix: { type: "string" },
         percentual_comissao: { type: "number", description: "Só para comissionado." },
+        categoria_padrao: { type: "string", description: "Categoria de despesa em que TODO pagamento a essa pessoa entra (ex.: Alimentação de campo)." },
       },
       required: ["nome", "tipo"],
     },
@@ -1251,9 +1255,12 @@ export const financeRulesTools: ToolDef[] = [
     async execute(args, ctx) {
       const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
+      const cat = await categoriaValida(ctx, args.categoria_padrao, "payable");
+      if (cat && "error" in cat) return cat;
       const { data, error } = await ctx.sb.from("payees").insert({
         name: String(args.nome).trim(),
         kind: args.tipo,
+        ...(cat ? { default_category: cat.nome } : {}),
         document: args.documento ? String(args.documento).replace(/\D/g, "") : null,
         pix_key: args.chave_pix ?? null,
         commission_percentage: args.tipo === "comissionado" ? args.percentual_comissao ?? null : null,
@@ -1265,7 +1272,7 @@ export const financeRulesTools: ToolDef[] = [
         }
         return { error: error.message };
       }
-      return { ok: true, id: (data as any).id, nome: args.nome, tipo: args.tipo };
+      return { ok: true, id: (data as any).id, nome: args.nome, tipo: args.tipo, ...(cat ? { categoria_padrao: cat.nome } : {}) };
     },
   },
 

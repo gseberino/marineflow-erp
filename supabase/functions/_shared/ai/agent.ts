@@ -297,6 +297,19 @@ async function resolveIdLabel(admin: any, key: string, id: string): Promise<stri
  * puro, então não há perda de negrito lá). Não expõe a descrição técnica da tool (escrita
  * para o modelo, não para o usuário) nem UUIDs crus quando dá pra resolver o nome real.
  */
+/**
+ * Ferramentas cujo resumo já RESOLVE o pedido (cadastro, categoria, OS): quando ele não resolve, o
+ * resumo é uma linha "⚠️ …" — e isso é uma recusa, não algo a aprovar. Até 06/10/2026 virava
+ * pendência mesmo assim, e o modelo dizia "preparei, falta a sua confirmação" (Pix da Eliane).
+ */
+const RESUMO_QUE_RESOLVE = new Set(["lancar_no_caixa", "anotar_transacao_do_banco"]);
+
+export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
+  const t = resumo.trim();
+  if (!RESUMO_QUE_RESOLVE.has(toolName) || !t.startsWith("⚠️") || t.includes("\n")) return null;
+  return { error: t.replace(/^⚠️\s*/, ""), nada_registrado: true };
+}
+
 async function buildPendingSummary(admin: any, toolName: string, args: Record<string, unknown>): Promise<string> {
   // Dinheiro vivo e anotação: a confirmação mostra o pedido JÁ RESOLVIDO (categoria, quem,
   // Caixa ou bolso do sócio) — o "sim" tem de ser sobre o que vai acontecer de fato.
@@ -798,29 +811,35 @@ export async function executarChamadaDeTool(
           ...(retrato ? { [CHAVE_DO_RETRATO]: retrato } : {}),
         }
         : tc.input;
-      const { data: pending, error: pendingErr } = await amb.toolCtx.admin
-        .from("ai_operator_pending_actions")
-        .insert({
-          session_id: amb.sessionId,
-          requested_by_user_id: amb.toolCtx.userId,
-          action_name: tc.name,
-          risk_level: effectiveRisk,
-          title: humanizeToolNamePt(tc.name),
-          summary: resumo,
-          payload: payloadDaPendencia,
-          status: "pending",
-          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        })
-        .select("id, title, summary, risk_level")
-        .single();
-
-      if (pendingErr || !pending) {
-        toolResult = { error: `Falha ao registrar pendência: ${pendingErr?.message || "erro desconhecido"}` };
+      const recusaDoResumo = resumoQueRecusa(tc.name, resumo);
+      if (recusaDoResumo) {
+        toolResult = recusaDoResumo;
+        await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
       } else {
-        toolResult = { pending: true, pending_action_id: pending.id, instruction: "Ação registrada para aprovação. Aguardando decisão do usuário — não repita a chamada." };
-        createdPendingProposal = { pending_action_id: pending.id, title: pending.title, summary_markdown: pending.summary, risk_level: pending.risk_level };
+        const { data: pending, error: pendingErr } = await amb.toolCtx.admin
+          .from("ai_operator_pending_actions")
+          .insert({
+            session_id: amb.sessionId,
+            requested_by_user_id: amb.toolCtx.userId,
+            action_name: tc.name,
+            risk_level: effectiveRisk,
+            title: humanizeToolNamePt(tc.name),
+            summary: resumo,
+            payload: payloadDaPendencia,
+            status: "pending",
+            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          })
+          .select("id, title, summary, risk_level")
+          .single();
+
+        if (pendingErr || !pending) {
+          toolResult = { error: `Falha ao registrar pendência: ${pendingErr?.message || "erro desconhecido"}` };
+        } else {
+          toolResult = { pending: true, pending_action_id: pending.id, instruction: "Ação registrada para aprovação. Aguardando decisão do usuário — não repita a chamada." };
+          createdPendingProposal = { pending_action_id: pending.id, title: pending.title, summary_markdown: pending.summary, risk_level: pending.risk_level };
+        }
+        await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, { eventType: `pending_action:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
       }
-      await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, { eventType: `pending_action:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
     }
   } else {
     executou = true;

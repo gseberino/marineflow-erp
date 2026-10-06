@@ -164,7 +164,7 @@ async function pessoaPeloDocumento(ctx: ToolCtx, documento: unknown, sentido: "s
 
 const listaDeCadastros = (ps: Pessoa[]) => ps.map((x) => `${x.nome} (${x.tipo})`).join("; ");
 
-async function categoriaValida(ctx: ToolCtx, dita: unknown, tipo: "payable" | "receivable"): Promise<{ nome: string } | { error: string } | null> {
+export async function categoriaValida(ctx: ToolCtx, dita: unknown, tipo: "payable" | "receivable"): Promise<{ nome: string } | { error: string } | null> {
   if (dita == null || dita === "") return null;
   const { data } = await ctx.admin.from("financial_categories").select("name").eq("type", tipo).eq("active", true);
   const nomes = ((data ?? []) as { name: string }[]).map((c) => c.name);
@@ -229,6 +229,11 @@ export interface PedidoResolvido {
   /** De onde veio a categoria, quando ninguém a disse ("padrão de Fulano", "“almoço” no texto"). */
   origemDaCategoria: string | null;
   pessoa: Pessoa | null;
+  /**
+   * Para quem foi, quando não está no cadastro (06/10/2026): gasto do dia a dia ("493 pra Eliane,
+   * alimentação") não precisa de cadastro — o nome vai junto da descrição e a categoria classifica.
+   */
+  nomeLivre?: string | null;
   os: { id: string; numero: string } | null;
   pagoPor: "caixa" | "socio";
   socio: Pessoa | null;
@@ -253,16 +258,20 @@ export async function resolverPedidoDeCaixa(ctx: ToolCtx, args: Record<string, u
 
   const pessoas = args.quem || args.socio ? await listaDePessoas(ctx) : [];
   let pessoa: Pessoa | null = null;
+  let nomeLivre: string | null = null;
   if (args.quem) {
     const alvo = sentido === "recebimento" ? pessoas.filter((p) => p.tipo === "cliente") : pessoas.filter((p) => p.tipo !== "cliente");
     const r = escolherPorNome(String(args.quem), alvo);
     if ("ambiguo" in r) return { error: `Qual "${args.quem}"? ${r.ambiguo.map((p) => `${p.nome} (${p.tipo})`).join("; ")}` };
     if ("nenhum" in r) {
-      return { error: sentido === "recebimento"
-        ? `Não achei o cliente "${args.quem}". Cadastre o cliente ou diga o nome como está no cadastro.`
-        : `Não achei "${args.quem}" entre favorecidos e fornecedores. Posso lançar sem ninguém, ou cadastre antes (cadastrar_favorecido).` };
+      if (sentido === "recebimento") {
+        return { error: `Não achei o cliente "${args.quem}". Cadastre o cliente ou diga o nome como está no cadastro.` };
+      }
+      // Gasto para quem não está no cadastro: lança com o nome na descrição (06/10/2026).
+      nomeLivre = String(args.quem).trim();
+    } else {
+      pessoa = r.achado;
     }
-    pessoa = r.achado;
   }
   if (sentido === "recebimento" && !pessoa) return { error: "Dinheiro que entra precisa de cliente: de quem veio?" };
 
@@ -298,7 +307,10 @@ export async function resolverPedidoDeCaixa(ctx: ToolCtx, args: Record<string, u
     if (pelo) { categoria = pelo.nome; origemDaCategoria = `pelo texto: ${pelo.motivo}`; }
   }
 
-  return { sentido, valor, descricao, data, categoria, origemDaCategoria, pessoa, os, pagoPor, socio };
+  return {
+    sentido, valor, descricao: nomeLivre ? `${nomeLivre} — ${descricao}` : descricao,
+    data, categoria, origemDaCategoria, pessoa, nomeLivre, os, pagoPor, socio,
+  };
 }
 
 /** O texto da confirmação: o que vai acontecer, com tudo resolvido. */
@@ -314,6 +326,7 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
         ? `- Categoria: *${p.categoria}*${p.origemDaCategoria ? ` (${p.origemDaCategoria})` : ""}`
         : `- Categoria: *${p.sentido === "gasto" ? "Outras despesas" : "Serviços prestados"}* (não reconheci pelo texto — diga a categoria se quiser outra)`,
       p.pessoa ? `- ${p.pessoa.tipo === "cliente" ? "Cliente" : p.pessoa.tipo === "favorecido" ? "Para (favorecido)" : "Fornecedor"}: ${p.pessoa.nome}` : null,
+      p.nomeLivre ? `- Para: *${p.nomeLivre}* (sem cadastro — o nome fica na descrição)` : null,
       p.os ? `- OS: ${p.os.numero}` : null,
       p.pagoPor === "socio"
         ? `- Pago do bolso de *${p.socio?.nome}*: fica como reembolso a pagar a ele (o Caixa não mexe)`
@@ -322,13 +335,15 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
   }
   if (nome === "anotar_transacao_do_banco") {
     const quando = dataDita(args.data) ?? "hoje";
-    const pelo = !args.categoria && !args.quem && args.sentido !== "entrada" && args.descricao
+    // A categoria pelo texto vale sem ninguém dito OU com nome sem cadastro (não há padrão de favorecido).
+    const pelo = !args.categoria && args.sentido !== "entrada" && args.descricao
       ? await categoriaDoTexto(ctx, String(args.descricao), Number(args.valor) || 0)
       : null;
     // O "sim" é sobre o CADASTRO que vai ser usado, não sobre o nome dito: "fernando" pode
     // ser o Fernando Nunes Fachini EPP. Mostrar o resolvido é o que torna a escolha manual.
     let quem: string | null = null;
     let pessoa: Pessoa | null = null;
+    let nomeLivre: string | null = null;
     let documentoSemCadastro = false;
     let cadastroSemDocumento = false;
     if (args.quem) {
@@ -336,12 +351,17 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
       const alvo = args.sentido === "entrada" ? todas.filter((x) => x.tipo === "cliente") : todas.filter((x) => x.tipo !== "cliente");
       const r = escolherPorNome(String(args.quem), alvo);
       if ("ambiguo" in r) return `⚠️ Qual "${args.quem}"? ${r.ambiguo.map((x) => `${x.nome} (${x.tipo})`).join("; ")}`;
-      if ("nenhum" in r) return `⚠️ Não achei "${args.quem}". Cadastre antes ou diga como está no cadastro.`;
-      const conferido = conferirDocumentoDoCadastro(r.achado, args.documento);
-      if ("error" in conferido) return `⚠️ ${conferido.error}`;
-      cadastroSemDocumento = conferido.semDocumentoNoCadastro;
-      pessoa = r.achado;
-      quem = `${r.achado.nome} (${r.achado.tipo})`;
+      if ("nenhum" in r) {
+        // Sem cadastro (06/10/2026): vale o nome dito + a categoria. Casa com a transação que chegar
+        // com ESSE nome no extrato (nome igual — regra do dono de 26/09).
+        nomeLivre = String(args.quem).trim();
+      } else {
+        const conferido = conferirDocumentoDoCadastro(r.achado, args.documento);
+        if ("error" in conferido) return `⚠️ ${conferido.error}`;
+        cadastroSemDocumento = conferido.semDocumentoNoCadastro;
+        pessoa = r.achado;
+        quem = `${r.achado.nome} (${r.achado.tipo})`;
+      }
     } else if (args.documento) {
       const r = await pessoaPeloDocumento(ctx, args.documento, args.sentido === "entrada" ? "entrada" : "saida");
       if (r && "error" in r) return `⚠️ ${r.error}`;
@@ -359,20 +379,25 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
     const cat = await categoriaValida(ctx, args.categoria, args.sentido === "entrada" ? "receivable" : "payable");
     if (cat && "error" in cat) return `⚠️ ${cat.error}`;
     const padrao = !cat && pessoa?.tipo === "favorecido" && pessoa.categoria ? pessoa.categoria : null;
+    if (nomeLivre && !cat && !pelo && !os) {
+      return `⚠️ "${nomeLivre}" não está no cadastro: diga a categoria (ex.: Alimentação de campo) para eu anotar só com o nome.`;
+    }
+    const pelaFrase = !cat && !padrao && pelo && (!args.quem || nomeLivre);
     return [
       `- Quando chegar do banco: ${args.sentido === "entrada" ? "entrada" : "saída"} de *${brl.format(Number(args.valor) || 0)}* (${quando})`,
       args.documento ? `- Para o documento ${String(args.documento)}` : null,
       quem ? `- Classificar como: *${quem}*` : null,
+      nomeLivre ? `- Para: *${nomeLivre}* (sem cadastro — entra classificada quando chegar do banco com esse mesmo nome)` : null,
       cadastroSemDocumento
         ? `- ⚠️ ${pessoa!.nome} não tem CPF/CNPJ no cadastro: não dá para conferir que ${docFormatado(args.documento)} é dele. Confira antes do "sim".`
         : null,
       cat ? `- Categoria: *${cat.nome}*` : null,
       padrao ? `- Categoria: *${padrao}* (padrão de ${pessoa!.nome})` : null,
-      !cat && !padrao && pelo ? `- Categoria: *${pelo.nome}* (pelo texto: ${pelo.motivo})` : null,
+      pelaFrase ? `- Categoria: *${pelo!.nome}* (pelo texto: ${pelo!.motivo})` : null,
       os ? `- OS: ${os.numero}` : null,
       documentoSemCadastro
         ? "- Nenhum cadastro com esse CPF/CNPJ: se a transação chegar com o nome de quem recebeu, ela não entra classificada (cadastre antes para entrar)."
-        : !quem ? "- Sem dizer para quem foi: só vale para compra no débito ou transferência SEM nome no extrato." : null,
+        : !quem && !nomeLivre ? "- Sem dizer para quem foi: só vale para compra no débito ou transferência SEM nome no extrato." : null,
       "- Se houver mais de uma transação desse valor nesses dias, ou se a que chegou for de outro nome, nada é aplicado: eu pergunto.",
     ].filter(Boolean).join("\n");
   }
@@ -401,7 +426,7 @@ export const caixaTools: ToolDef[] = [
         descricao: { type: "string", description: "O que foi, com as palavras da pessoa." },
         data: { type: "string", description: "'hoje' (padrão), 'ontem', dd/mm." },
         categoria: { type: "string", description: "Se a pessoa disser. Sem ela, o sistema usa a padrão de quem recebeu ou deduz pelo texto (almoço → Alimentação de campo); a confirmação mostra qual." },
-        quem: { type: "string", description: "Favorecido/fornecedor (gasto) ou cliente (recebimento), pelo nome." },
+        quem: { type: "string", description: "Favorecido/fornecedor (gasto) ou cliente (recebimento), pelo nome. Gasto para quem não está no cadastro: o nome vai na descrição." },
         os: { type: "string", description: "Número da OS, se o gasto foi para um serviço." },
         pago_por: { type: "string", enum: ["caixa", "bolso_do_socio"], description: "bolso_do_socio = saiu do dinheiro pessoal: vira reembolso." },
         socio: { type: "string", description: "Qual sócio pagou, se pago_por = bolso_do_socio." },
@@ -457,7 +482,8 @@ export const caixaTools: ToolDef[] = [
       "classifica como fornecedor TSD', 'o Pix de 800 do Fulano de hoje é da OS-60'. Quando a linha chegar, ela entra na fila já " +
       "classificada; se já chegou, classifica na hora. Passe SEMPRE 'quem' quando a pessoa disser (e o documento, se disser): " +
       "sem dizer para quem foi, só vale para transação sem nome no extrato (débito no cartão, transferência sem nome) — " +
-      "Pix com nome exige o nome (decisão do dono). Só o CPF/CNPJ, sem o nome, também serve: o sistema acha o cadastro " +
+      "Pix com nome exige o nome (decisão do dono). Quem NÃO está no cadastro também serve: passe o nome e a categoria (gasto do dia a dia " +
+      "não precisa de cadastro). Só o CPF/CNPJ, sem o nome, também serve: o sistema acha o cadastro " +
       "por ele. Débito no cartão NÃO leva documento (a linha chega sem CNPJ e não casaria). Pede confirmação.",
     input_schema: {
       type: "object",
@@ -466,8 +492,8 @@ export const caixaTools: ToolDef[] = [
         valor: { type: "number" },
         data: { type: "string", description: "'hoje' (padrão), 'ontem', dd/mm." },
         documento: { type: "string", description: "CPF/CNPJ de quem recebeu/pagou, se a pessoa disse. Sem 'quem', acha o cadastro por ele. Nunca em débito no cartão." },
-        quem: { type: "string", description: "Fornecedor/favorecido (saída) ou cliente (entrada), pelo nome." },
-        categoria: { type: "string" },
+        quem: { type: "string", description: "Para quem foi (saída) ou de quem veio (entrada), pelo nome. NÃO precisa estar cadastrado: sem cadastro, vale o nome + a categoria." },
+        categoria: { type: "string", description: "Categoria de despesa/receita. Obrigatória quando 'quem' não está no cadastro (ou deduzida do texto)." },
         os: { type: "string" },
         descricao: { type: "string" },
       },
@@ -483,15 +509,19 @@ export const caixaTools: ToolDef[] = [
       if (!(valor > 0)) return { error: "Qual o valor?" };
       const data = dataDita(args.data);
       let pessoa: Pessoa | null = null;
+      let semCadastro = false;
       if (args.quem) {
         const todas = await listaDePessoas(ctx);
         const alvo = sentido === "entrada" ? todas.filter((p) => p.tipo === "cliente") : todas.filter((p) => p.tipo !== "cliente");
         const r = escolherPorNome(String(args.quem), alvo);
         if ("ambiguo" in r) return { error: `Qual "${args.quem}"? ${r.ambiguo.map((p) => `${p.nome} (${p.tipo})`).join("; ")}` };
-        if ("nenhum" in r) return { error: `Não achei "${args.quem}". Cadastre antes ou diga como está no cadastro.` };
-        const conferido = conferirDocumentoDoCadastro(r.achado, args.documento);
-        if ("error" in conferido) return conferido;
-        pessoa = r.achado;
+        if ("nenhum" in r) {
+          semCadastro = true; // vale o nome dito (p_nome) + a categoria
+        } else {
+          const conferido = conferirDocumentoDoCadastro(r.achado, args.documento);
+          if ("error" in conferido) return conferido;
+          pessoa = r.achado;
+        }
       } else if (args.documento) {
         // Sem nome dito, o CPF/CNPJ acha o cadastro (a confirmação mostrou qual).
         const r = await pessoaPeloDocumento(ctx, args.documento, sentido);
@@ -504,9 +534,12 @@ export const caixaTools: ToolDef[] = [
       const os = await osPeloNumero(ctx, args.os);
       if (os && "error" in os) return os;
       let categoria = cat?.nome ?? (pessoa?.tipo === "favorecido" ? pessoa.categoria ?? null : null);
-      // Sem categoria e sem ninguém dito: o texto decide (a confirmação mostrou a mesma coisa).
-      if (!categoria && !args.quem && sentido === "saida" && args.descricao) {
+      // Sem categoria e sem ninguém do cadastro: o texto decide (a confirmação mostrou a mesma coisa).
+      if (!categoria && (!args.quem || semCadastro) && sentido === "saida" && args.descricao) {
         categoria = (await categoriaDoTexto(ctx, String(args.descricao), valor))?.nome ?? null;
+      }
+      if (semCadastro && !categoria && !os) {
+        return { error: `"${String(args.quem)}" não está no cadastro: diga a categoria para eu anotar só com o nome.` };
       }
       return await chamar(ctx, "anotar_transacao", {
         p_sentido: sentido, p_valor: valor, p_data: data,

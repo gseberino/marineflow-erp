@@ -46,6 +46,8 @@ const NAO_SAO_TOOLS = new Set<string>([
   "to_phone",
   // argumentos de acompanhar_conversa (06/10/2026)
   "intervalo_horas", "lembrar_em",
+  // argumento de cadastrar_favorecido (regra "todo pagamento para Fulano é <categoria>", 06/10/2026)
+  "categoria_padrao",
   // argumentos de registrar_diaria para vários dias (29/09/2026)
   "data_ate", "fim_de_semana",
   // valor dito para o dia (registrar_diaria) e cadastro de freelancer novo (01/10/2026)

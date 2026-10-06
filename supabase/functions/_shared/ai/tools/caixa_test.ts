@@ -376,3 +376,48 @@ Deno.test("gastos_por_categoria: nome que não é categoria vira busca pelo nome
   assertStringIncludes(r.como_entendi, "procurei pelo nome");
   assertEquals(r.nao_lancado.total, 139.3);
 });
+
+// ─── Sem cadastro (06/10/2026): "Pix de 493 para a Eliane Aparecida Uberti, alimentação" ─────────
+Deno.test("Pix para quem não está no cadastro: anota com o nome dito e a categoria, sem pedir cadastro", async () => {
+  let chamada: any = null;
+  const c = ctx((n, a) => { chamada = { n, a }; return Promise.resolve({ data: { ok: true, message: "Anotado." }, error: null }); });
+  const args = { valor: 493, quem: "Eliane Aparecida Uberti", categoria: "Alimentação de campo", descricao: "Alimentação minha e dos freelancers" };
+  const resumo = await resumirPedido(c as never, "anotar_transacao_do_banco", args);
+  assertEquals(resumo!.startsWith("⚠️"), false, resumo!);
+  assertStringIncludes(resumo!, "Para: *Eliane Aparecida Uberti* (sem cadastro");
+  assertStringIncludes(resumo!, "Categoria: *Alimentação de campo*");
+  const t = caixaTools.find((x) => x.name === "anotar_transacao_do_banco")!;
+  const r = await t.execute(args, c as never) as any;
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(chamada.n, "anotar_transacao");
+  assertEquals(chamada.a.p_nome, "Eliane Aparecida Uberti");
+  assertEquals(chamada.a.p_categoria, "Alimentação de campo");
+  assertEquals([chamada.a.p_fornecedor_id, chamada.a.p_favorecido_id, chamada.a.p_cliente_id], [null, null, null]);
+});
+
+Deno.test("sem cadastro: a categoria pode vir do texto; sem categoria nenhuma, pergunta (sem gravar)", async () => {
+  const c = ctx();
+  const peloTexto = await resumirPedido(c as never, "anotar_transacao_do_banco", { valor: 80, quem: "Dona Maria", descricao: "almoço da equipe" });
+  assertStringIncludes(peloTexto!, "Categoria: *Alimentação de campo* (pelo texto");
+  const semPista = await resumirPedido(c as never, "anotar_transacao_do_banco", { valor: 80, quem: "Dona Maria", descricao: "acerto" });
+  assertStringIncludes(semPista!, "diga a categoria");
+  let gravou = false;
+  const g = ctx(() => { gravou = true; return Promise.resolve({ data: {}, error: null }); });
+  const t = caixaTools.find((x) => x.name === "anotar_transacao_do_banco")!;
+  const r = await t.execute({ valor: 80, quem: "Dona Maria" }, g as never) as any;
+  assertStringIncludes(String(r.error), "diga a categoria");
+  assertEquals(gravou, false);
+});
+
+Deno.test("dinheiro para quem não está no cadastro: lança com o nome na descrição", async () => {
+  const p = await resolverPedidoDeCaixa(ctx() as never, { valor: 60, quem: "Eliane Aparecida Uberti", descricao: "marmitas", categoria: "Alimentação de campo" });
+  if ("error" in p) throw new Error(p.error);
+  assertEquals(p.pessoa, null);
+  assertEquals(p.nomeLivre, "Eliane Aparecida Uberti");
+  assertEquals(p.descricao, "Eliane Aparecida Uberti — marmitas");
+  const resumo = await resumirPedido(ctx() as never, "lancar_no_caixa", { valor: 60, quem: "Eliane Aparecida Uberti", descricao: "marmitas", categoria: "Alimentação de campo" });
+  assertStringIncludes(resumo!, "Para: *Eliane Aparecida Uberti* (sem cadastro");
+  // Recebimento continua exigindo o cliente do cadastro.
+  const rec = await resolverPedidoDeCaixa(ctx() as never, { sentido: "recebimento", valor: 60, quem: "Fulano Novo", descricao: "x" });
+  assertStringIncludes((rec as any).error, "Não achei o cliente");
+});
