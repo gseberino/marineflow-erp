@@ -143,13 +143,34 @@ const r2: Rule = {
   },
 };
 
+/**
+ * Cobrança abaixo deste valor não vira tarefa (06/10/2026, inventário): saldo de R$ 20 virava
+ * "URGENTE: cliente em atraso" ao lado das cobranças de milhares. Padrão R$ 50; ajuste em
+ * app_settings.cobranca_valor_minimo (0 desliga o corte).
+ */
+export const COBRANCA_MINIMA_PADRAO = 50;
+
+export async function cobrancaMinima(db: any): Promise<number> {
+  const { data } = await db.from('app_settings')
+    .select('value').eq('key', 'cobranca_valor_minimo').maybeSingle();
+  const v = Number(String(data?.value ?? '').replace(',', '.'));
+  return Number.isFinite(v) && v >= 0 && String(data?.value ?? '').trim() !== '' ? v : COBRANCA_MINIMA_PADRAO;
+}
+
+/** O que falta receber da conta (o saldo, ou o valor cheio quando o saldo não foi gravado). */
+export const valorEmAberto = (r: { balance_amount?: number | null; amount?: number | null }) =>
+  Number(r.balance_amount ?? r.amount ?? 0);
+
 async function receivableResolved(db: any, key: string): Promise<string | null> {
   const id = entityIdFromKey(key);
-  const { data } = await db.from('receivables')
-    .select('status, balance_amount').eq('id', id).maybeSingle();
+  const [{ data }, minimo] = await Promise.all([
+    db.from('receivables').select('status, amount, balance_amount').eq('id', id).maybeSingle(),
+    cobrancaMinima(db),
+  ]);
   if (!data) return 'Recebível não existe mais';
   if (data.status === 'paid') return 'Pagamento registrado';
   if (data.status === 'cancelled') return 'Recebível cancelado';
+  if (valorEmAberto(data) < minimo) return 'Saldo abaixo do mínimo de cobrança';
   return null;
 }
 
@@ -165,7 +186,8 @@ const r3: Rule = {
       .gte('due_date', todayISO())
       .lte('due_date', inDaysISO(3))
       .limit(50);
-    return (data || []).map((r: any) => ({
+    const minimo = await cobrancaMinima(db);
+    return (data || []).filter((r: any) => valorEmAberto(r) >= minimo).map((r: any) => ({
       automation_key: keyOf('r3', 'recv', r.id),
       title: `Cobrar ${r.clients?.name || 'cliente'} — ${fmtBRL(r.balance_amount ?? r.amount)} vence ${fmtDate(r.due_date)}`,
       priority: 'normal' as const,
@@ -191,7 +213,8 @@ const r4: Rule = {
       .in('status', ['pending', 'partially_paid'])
       .lt('due_date', todayISO())
       .limit(50);
-    return (data || []).map((r: any) => ({
+    const minimo = await cobrancaMinima(db);
+    return (data || []).filter((r: any) => valorEmAberto(r) >= minimo).map((r: any) => ({
       automation_key: keyOf('r4', 'recv', r.id),
       title: `URGENTE: ${r.clients?.name || 'cliente'} em atraso — ${fmtBRL(r.balance_amount ?? r.amount)} venceu ${fmtDate(r.due_date)}`,
       priority: 'urgent' as const,

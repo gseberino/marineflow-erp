@@ -3,6 +3,7 @@ import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, entityIdFromKey, keyOf, fmtBRL, fmtDate, dueAt,
   isManualDismissal, dismissCooldownDays, businessDaysBetween, vencimentoDoOrcamento, notaDoVencimento,
+  cobrancaMinima, COBRANCA_MINIMA_PADRAO,
 } from "./rules.ts";
 
 Deno.test("isManualDismissal: conclusão MANUAL recente bloqueia recriação", () => {
@@ -575,4 +576,51 @@ Deno.test("R15: confirmado só vale para o horário que o cliente confirmou (rem
   assertEquals(confirmadoParaAData("2026-10-02T12:00:00+00:00", "2026-10-02T12:00:00.000Z"), true);
   assertEquals(confirmadoParaAData("2026-10-02T12:00:00+00:00", "2026-10-03T12:00:00.000Z"), false);
   assertEquals(confirmadoParaAData(null, "2026-10-02T12:00:00.000Z"), false);
+});
+
+// Cobrança pequena não vira tarefa (06/10/2026): saldo de R$ 20 virava "URGENTE: cliente em atraso".
+/** Banco de mentira por tabela: receivables devolve a lista; app_settings devolve o mínimo. */
+function bancoDeCobranca(contas: unknown[], minimo?: string) {
+  return {
+    from(tabela: string) {
+      const q: Record<string, unknown> = {};
+      for (const m of ["select", "eq", "in", "lt", "lte", "gt", "gte", "order", "limit", "not", "is"]) q[m] = () => q;
+      q.maybeSingle = async () => ({ data: tabela === "app_settings" ? (minimo === undefined ? null : { value: minimo }) : contas[0] ?? null });
+      q.then = (ok: (r: unknown) => unknown) => Promise.resolve({ data: tabela === "receivables" ? contas : [], error: null }).then(ok);
+      return q;
+    },
+  };
+}
+
+Deno.test("cobrancaMinima: padrão R$ 50, aceita vírgula, 0 desliga, lixo volta ao padrão", async () => {
+  assertEquals(await cobrancaMinima(bancoDeCobranca([])), COBRANCA_MINIMA_PADRAO);
+  assertEquals(await cobrancaMinima(bancoDeCobranca([], "120,5")), 120.5);
+  assertEquals(await cobrancaMinima(bancoDeCobranca([], "0")), 0);
+  assertEquals(await cobrancaMinima(bancoDeCobranca([], "abc")), COBRANCA_MINIMA_PADRAO);
+  assertEquals(await cobrancaMinima(bancoDeCobranca([], " ")), COBRANCA_MINIMA_PADRAO);
+});
+
+Deno.test("r3/r4: conta com saldo abaixo do mínimo não vira tarefa (saldo vazio usa o valor cheio)", async () => {
+  const contas = [
+    { id: "a", description: "Saldo pequeno", amount: 900, balance_amount: 20, due_date: "2026-10-08", client_id: "c", clients: { name: "X" } },
+    { id: "b", description: "Saldo grande", amount: 900, balance_amount: 600, due_date: "2026-10-08", client_id: "c", clients: { name: "X" } },
+    { id: "c", description: "Sem saldo gravado", amount: 300, balance_amount: null, due_date: "2026-10-08", client_id: "c", clients: { name: "X" } },
+  ];
+  for (const id of ["r3", "r4"]) {
+    // deno-lint-ignore no-explicit-any
+    const tarefas = await ruleById(id)!.find(bancoDeCobranca(contas) as any);
+    assertEquals(tarefas.map((t: { automation_key: string }) => t.automation_key), [`${id}:recv:b`, `${id}:recv:c`]);
+    // mínimo 0 = cobra tudo, como antes
+    // deno-lint-ignore no-explicit-any
+    assertEquals((await ruleById(id)!.find(bancoDeCobranca(contas, "0") as any)).length, 3);
+  }
+});
+
+Deno.test("isResolved r3: tarefa aberta de conta que ficou abaixo do mínimo se fecha sozinha", async () => {
+  const r3 = ruleById("r3")!;
+  assertEquals(
+    // deno-lint-ignore no-explicit-any
+    await r3.isResolved(bancoDeCobranca([{ status: "partially_paid", amount: 900, balance_amount: 20 }]) as any, { automation_key: "r3:recv:x" }),
+    "Saldo abaixo do mínimo de cobrança",
+  );
 });
