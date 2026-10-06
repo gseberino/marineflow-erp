@@ -227,6 +227,168 @@ export function montarExtratoHtml(p: {
 </html>`;
 }
 
+// ── Recibo do acerto (06/10/2026) ───────────────────────────────────────────────────────────
+// O acerto fecha o período ao pagar (acertos_diarias, migration 20261006220000). O recibo é dele:
+// número sequencial, competência (de–até), os dias, os vales já pagos, o valor deste acerto por
+// extenso e a assinatura de quem recebe — o que o art. 320 do Código Civil pede de uma quitação.
+
+/** O acerto como a tabela acertos_diarias guarda (a foto do período). */
+export interface AcertoNoDocumento {
+  numero: number;
+  de: string;
+  ate: string;
+  saldo_anterior: number;
+  dias: number;
+  trabalhado: number;
+  pago_no_periodo: number;
+  valor_do_acerto: number;
+}
+
+const UNIDADES = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez', 'onze', 'doze', 'treze',
+  'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'];
+const DEZENAS = ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa'];
+const CENTENAS = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos'];
+
+/** 0–999 por extenso ("cento e vinte e três"). */
+function ateMil(n: number): string {
+  if (n === 0) return '';
+  if (n === 100) return 'cem';
+  const c = Math.floor(n / 100);
+  const resto = n % 100;
+  const partes: string[] = [];
+  if (c) partes.push(CENTENAS[c]);
+  if (resto < 20) { if (resto) partes.push(UNIDADES[resto]); }
+  else {
+    partes.push(DEZENAS[Math.floor(resto / 10)] + (resto % 10 ? ` e ${UNIDADES[resto % 10]}` : ''));
+  }
+  return partes.join(' e ');
+}
+
+/** Valor em reais por extenso: 1.250,50 → "mil, duzentos e cinquenta reais e cinquenta centavos". */
+export function valorPorExtenso(valor: number): string {
+  const centavosTotais = Math.round(Math.abs(Number(valor) || 0) * 100);
+  const reais = Math.floor(centavosTotais / 100);
+  const centavos = centavosTotais % 100;
+  const milhoes = Math.floor(reais / 1_000_000);
+  const milhares = Math.floor((reais % 1_000_000) / 1000);
+  const unidades = reais % 1000;
+  // O "e" entre grupos só quando o grupo seguinte é redondo ou menor que cem: "mil e cem",
+  // "mil e cinquenta", mas "mil duzentos e cinquenta".
+  const comE = (n: number) => n < 100 || n % 100 === 0;
+  let texto = '';
+  const juntar = (g: string, sep: string) => { texto = texto ? `${texto}${sep}${g}` : g; };
+  if (milhoes) juntar(`${ateMil(milhoes)} ${milhoes === 1 ? 'milhão' : 'milhões'}`, '');
+  if (milhares) juntar(milhares === 1 ? 'mil' : `${ateMil(milhares)} mil`, unidades === 0 && comE(milhares) ? ' e ' : ', ');
+  if (unidades) juntar(ateMil(unidades), comE(unidades) ? ' e ' : ' ');
+  const deReais = reais > 0 && unidades === 0 && milhares === 0 && milhoes > 0 ? ' de' : '';
+  const parteReais = reais ? `${texto}${deReais} ${reais === 1 ? 'real' : 'reais'}` : '';
+  const parteCentavos = centavos ? `${ateMil(centavos)} ${centavos === 1 ? 'centavo' : 'centavos'}` : '';
+  if (parteReais && parteCentavos) return `${parteReais} e ${parteCentavos}`;
+  return parteReais || parteCentavos || 'zero real';
+}
+
+const MESES_POR_EXTENSO = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+const dataPorExtenso = (g: Date) => {
+  const b = new Date(g.getTime() - 3 * 3600_000);
+  return `${b.getUTCDate()} de ${MESES_POR_EXTENSO[b.getUTCMonth()]} de ${b.getUTCFullYear()}`;
+};
+
+/** "0001" — o número do recibo como vai no papel e no nome do arquivo. */
+export const numeroDoRecibo = (n: number) => String(n).padStart(4, '0');
+
+/**
+ * O recibo do acerto, em A4. As linhas (dias e vales) vêm da conta corrente do MESMO período do
+ * acerto (conta_corrente_freelancer de–até); os totais vêm da foto do acerto, que não muda.
+ */
+export function montarReciboHtml(p: {
+  empresa: EmpresaNoDocumento;
+  freelancer: FreelancerNoDocumento;
+  acerto: AcertoNoDocumento;
+  linhas: LinhaDoExtrato[];
+  geradoEm: Date;
+}): string {
+  const { empresa, freelancer, acerto } = p;
+  const dias = p.linhas.filter((l) => l.tipo === 'dia');
+  const vales = p.linhas.filter((l) => l.tipo === 'pagamento');
+  const aReceber = acerto.valor_do_acerto > 0;
+  const competencia = `${dataBR(acerto.de)} a ${dataBR(acerto.ate)}`;
+  const cpf = freelancer.documento ? `, CPF ${esc(documentoFormatado(freelancer.documento))}` : '';
+
+  const linhaDoDia = (l: LinhaDoExtrato) => `
+      <tr><td>${dataBR(l.data)}</td><td>${diaDaSemana(l.data)}</td><td>${esc(tipoDoDia(l.jornada))}</td>
+        <td>${esc(l.os.map((o) => o.numero).join(', '))}</td><td class="n">${brl(l.trabalhado)}</td></tr>`;
+  const linhaDoVale = (l: LinhaDoExtrato) => `
+      <tr><td>${dataBR(l.data)}</td><td>${esc(l.descricao ?? '')}${l.aguardando ? ' *' : ''}</td><td class="n">${brl(l.pago)}</td></tr>`;
+
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Recibo de diárias nº ${numeroDoRecibo(acerto.numero)} — ${esc(freelancer.nome)}</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #10293a; font-size: 11px; margin: 0; }
+  .topo { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #10293a; padding-bottom: 6px; }
+  .topo h1 { margin: 0; font-size: 18px; letter-spacing: .5px; }
+  .topo .emp { font-size: 10px; color: #4b616f; text-align: right; }
+  .valor { font-size: 20px; font-weight: bold; text-align: right; margin: 10px 0 4px; }
+  .texto { font-size: 12px; line-height: 1.6; margin: 8px 0 12px; text-align: justify; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  th, td { border: 1px solid #cfd8da; padding: 3px 5px; text-align: left; }
+  th { background: #eef2f3; font-size: 10px; }
+  td.n, th.n { text-align: right; white-space: nowrap; }
+  h2 { font-size: 11.5px; margin: 12px 0 2px; }
+  .conta td { border: none; padding: 2px 5px; }
+  .conta tr.total td { border-top: 1px solid #10293a; font-weight: bold; font-size: 12px; }
+  .nota { color: #4b616f; font-size: 9.5px; margin-top: 6px; }
+  .local { margin-top: 26px; }
+  .assinatura { margin: 46px auto 0; width: 60%; border-top: 1px solid #4b616f; padding-top: 4px; text-align: center; font-size: 10.5px; page-break-inside: avoid; }
+  .rodape { margin-top: 18px; color: #7f929c; font-size: 9px; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+  <div class="topo">
+    <div><h1>RECIBO DE DIÁRIAS Nº ${numeroDoRecibo(acerto.numero)}</h1><div class="emp" style="text-align:left">Competência: ${competencia}</div></div>
+    <div class="emp"><b>${esc(empresa.nome)}</b><br>${empresa.cnpj ? `CNPJ ${esc(documentoFormatado(empresa.cnpj))}` : ''}</div>
+  </div>
+
+  <div class="valor">${aReceber ? brl(acerto.valor_do_acerto) : 'Sem valor a receber'}</div>
+
+  <p class="texto">${aReceber
+    ? `Recebi de <b>${esc(empresa.nome)}</b> a importância de <b>${brl(acerto.valor_do_acerto)}</b> (${esc(valorPorExtenso(acerto.valor_do_acerto))}), referente ao acerto de ${numero(acerto.dias)} diária(s) de prestação de serviços no período de ${competencia}, já descontados os valores recebidos antecipadamente, conforme o detalhamento abaixo, dando plena quitação do período.`
+    : `Declaro que, no período de ${competencia}, prestei ${numero(acerto.dias)} diária(s) de serviço a <b>${esc(empresa.nome)}</b> e já recebi antecipadamente ${brl(acerto.pago_no_periodo)}, ficando ${acerto.valor_do_acerto < 0 ? `um adiantamento de ${brl(-acerto.valor_do_acerto)} a compensar em dias futuros` : 'o período quitado'}.`}</p>
+
+  <h2>Dias trabalhados</h2>
+  <table>
+    <thead><tr><th>Data</th><th>Dia</th><th>Tipo</th><th>OS</th><th class="n">Valor</th></tr></thead>
+    <tbody>${dias.length ? dias.map(linhaDoDia).join('') : '<tr><td colspan="5">Nenhum dia no período.</td></tr>'}</tbody>
+  </table>
+
+  ${vales.length ? `<h2>Vales e adiantamentos já pagos no período</h2>
+  <table>
+    <thead><tr><th>Data</th><th>Identificação</th><th class="n">Valor</th></tr></thead>
+    <tbody>${vales.map(linhaDoVale).join('')}</tbody>
+  </table>` : ''}
+
+  <h2>Acerto</h2>
+  <table class="conta">
+    ${acerto.saldo_anterior ? `<tr><td>${acerto.saldo_anterior > 0 ? 'Saldo a receber de antes do período' : 'Adiantamento de antes do período'}</td><td class="n">${brl(Math.abs(acerto.saldo_anterior))}</td></tr>` : ''}
+    <tr><td>Trabalhado no período (${numero(acerto.dias)} diária(s))</td><td class="n">${brl(acerto.trabalhado)}</td></tr>
+    <tr><td>(−) Vales e adiantamentos já pagos</td><td class="n">${brl(acerto.pago_no_periodo)}</td></tr>
+    <tr class="total"><td>${aReceber ? 'Valor deste recibo' : 'Saldo'}</td><td class="n">${brl(acerto.valor_do_acerto)}</td></tr>
+  </table>
+  ${vales.some((l) => l.aguardando) ? '<p class="nota">* Pix lançado à mão, ainda não confirmado pelo extrato do banco quando o acerto foi fechado.</p>' : ''}
+  ${freelancer.pix ? `<p class="nota">Chave Pix do prestador: ${esc(freelancer.pix)}</p>` : ''}
+
+  <p class="local">${esc(empresa.cidade || '')}${empresa.cidade ? ', ' : ''}${dataPorExtenso(p.geradoEm)}.</p>
+  <div class="assinatura">${esc(freelancer.nome)}${cpf}</div>
+
+  <div class="rodape"><span>Prestação de serviços por dia · acerto nº ${numeroDoRecibo(acerto.numero)}</span><span>Gerado em ${quandoEmBrasilia(p.geradoEm)}</span></div>
+</body>
+</html>`;
+}
+
 // ── CSV do contador ─────────────────────────────────────────────────────────────────────────
 
 export interface LinhaDoCsv {

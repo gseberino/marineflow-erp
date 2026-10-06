@@ -10,10 +10,10 @@ import { downloadBlob } from '@/lib/download';
 import { exportToCSV } from '@/lib/export-utils';
 import { credencialDaSessao, renderizarNoServidor } from '@/lib/pdf-server';
 import {
-  COLUNAS_DO_CSV, linhasDoCsv, montarExtratoHtml, nomeDoArquivo,
+  COLUNAS_DO_CSV, linhasDoCsv, montarExtratoHtml, montarReciboHtml, nomeDoArquivo, numeroDoRecibo,
   type EmpresaNoDocumento, type FreelancerNoDocumento,
 } from '@/lib/extrato-diarias';
-import { chaveDaConta, lerContaCorrente, type ContaCorrente } from '@/hooks/use-diarias';
+import { chaveDaConta, lerContaCorrente, type Acerto, type ContaCorrente } from '@/hooks/use-diarias';
 import type { PedidoDePeriodo } from '@/lib/diarias';
 
 async function lerEmpresa(): Promise<EmpresaNoDocumento> {
@@ -76,6 +76,29 @@ export function useDocumentosDasDiarias() {
     }
   }
 
+  /** O recibo numerado do acerto: totais da foto do acerto; dias e vales da conta do mesmo período. */
+  async function reciboEmPdf(favorecidoId: string, acerto: Acerto) {
+    setGerando('pdf');
+    try {
+      const periodo: PedidoDePeriodo = { de: acerto.de, ate: acerto.ate, atalho: null };
+      const [c, empresa, pessoas] = await Promise.all([conta(favorecidoId, periodo), lerEmpresa(), lerFreelancers([favorecidoId])]);
+      const freelancer = pessoas.get(favorecidoId) ?? { nome: c.favorecido.nome, documento: null, pix: null };
+      const html = montarReciboHtml({ empresa, freelancer, acerto, linhas: c.linhas, geradoEm: new Date() });
+      const arquivo = nomeDoArquivo(`recibo-diarias-${numeroDoRecibo(acerto.numero)}`, freelancer.nome, acerto, 'pdf');
+      const pdf = await renderizarNoServidor(html, arquivo, await credencialDaSessao());
+      if (pdf) {
+        downloadBlob(pdf, arquivo);
+        toast.success(`Recibo baixado: ${arquivo}`);
+      } else if (!imprimir(html)) {
+        toast.error('O navegador bloqueou a janela de impressão. Libere pop-ups para este site e tente de novo.');
+      }
+    } catch (e) {
+      toast.error((e as Error).message || 'Não deu para gerar o recibo.');
+    } finally {
+      setGerando(null);
+    }
+  }
+
   /** Todos os dias e pagamentos do período, de todos os freelancers — a planilha do contador. */
   async function csvDoPeriodo(favorecidoIds: string[], periodo: PedidoDePeriodo) {
     setGerando('csv');
@@ -100,5 +123,5 @@ export function useDocumentosDasDiarias() {
     }
   }
 
-  return { extratoEmPdf, csvDoPeriodo, gerando };
+  return { extratoEmPdf, reciboEmPdf, csvDoPeriodo, gerando };
 }

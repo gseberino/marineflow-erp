@@ -136,9 +136,12 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "consultar_freelancer",
   // 01/10/2026: o dono pediu "cadastre o João Marcelo" e o assistente não tinha como.
   "cadastrar_freelancer",
-  // 06/10/2026: pagar ("paguei 100 pro Roberto no Pix") e o extrato em PDF pelo WhatsApp.
+  // 06/10/2026: pagar ("paguei 100 pro Roberto no Pix"), o extrato/recibo em PDF e o acerto.
   "registrar_pagamento_freelancer",
   "enviar_extrato_freelancer",
+  "fechar_acerto_freelancer",
+  "reabrir_acerto_freelancer",
+  "enviar_acerto_ao_freelancer",
 
   // — Fiscal: espelho e consulta (emitir é risco alto e entra sempre) —
   "preview_fiscal_note",
@@ -409,7 +412,9 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "update_supplier",
   "cadastrar_freelancer",
 
-  // — (B) diárias: pagar e mandar o extrato pelo WhatsApp (pedido do dono, 06/10/2026) —
+  // — (B) diárias: pagar e extrato/recibo pelo WhatsApp (pedido do dono, 06/10/2026). As três do
+  //   acerto (fechar, reabrir, mandar ao freelancer) ficam na rede: uso de quinzena em quinzena, e
+  //   o perfil enxuto tem teto de 100 ferramentas — pela rede, escrita pede "sim" do mesmo jeito —
   "registrar_pagamento_freelancer",
   "enviar_extrato_freelancer",
 

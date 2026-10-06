@@ -7,11 +7,14 @@
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   dataDoDito, datasDoIntervalo, diaCurto, diariasTools, numeroDito, paramsDoCadastro, periodoDito, resolverDiaria,
-  resolverPagamento, resumirCadastro, resumirDiaria, resumirPagamento,
+  resolverPagamento, resumirAcerto, resumirCadastro, resumirDiaria, resumirEnvioAoFreelancer, resumirPagamento,
 } from "./diarias.ts";
 
 /** Banco falso: só o que as tools leem. `simulacao` é o que cadastrar_freelancer devolve simulando. */
-type Opcoes = { diaLancado?: boolean; cargo?: string; semTelefone?: boolean; simulacao?: { data?: unknown; error?: { message: string } } };
+type Opcoes = {
+  diaLancado?: boolean; cargo?: string; semTelefone?: boolean; semAcerto?: boolean; acertoReaberto?: boolean;
+  simulacao?: { data?: unknown; error?: { message: string } };
+};
 function admin(opcoes: Opcoes = {}) {
   const tabelas: Record<string, any[]> = {
     work_profiles: [
@@ -31,11 +34,15 @@ function admin(opcoes: Opcoes = {}) {
       { id: "s-out", name: "Outro Sócio", kind: "socio", active: true, app_user_id: null },
     ],
     app_users: [{ id: "u-dono", phone_normalized: opcoes.semTelefone ? null : "5547999990000" }],
+    acertos_diarias: opcoes.semAcerto ? [] : [
+      { id: "ac-1", numero: 1, favorecido_id: "p-rob", de: "2026-09-01", ate: "2026-09-15", saldo_anterior: 0, dias: 10,
+        trabalhado: 1600, pago_no_periodo: 600, valor_do_acerto: 1000, status: opcoes.acertoReaberto ? "reaberto" : "fechado" },
+    ],
   };
   const consulta = (nome: string) => {
     const q: any = {
       _rows: [...(tabelas[nome] ?? [])],
-      select() { return q; }, limit() { return q; },
+      select() { return q; }, limit() { return q; }, order() { return q; },
       eq(coluna: string, valor: unknown) { q._rows = q._rows.filter((r: any) => r[coluna] === valor); return q; },
       in(coluna: string, valores: unknown[]) { q._rows = q._rows.filter((r: any) => valores.includes(r[coluna])); return q; },
       not(coluna: string, _op: string, _v: unknown) { q._rows = q._rows.filter((r: any) => r[coluna] != null); return q; },
@@ -69,6 +76,8 @@ function ctx(opcoes: Opcoes = {}) {
     if (n === "cadastrar_freelancer") return Promise.resolve({ data: { ok: true, acao: "criado", message: "João Marcelo cadastrado: diária de R$ 150,00 desde ter 29/09." }, error: null });
     if (n === "anotar_transacao") return Promise.resolve({ data: { ok: true, aplicada: false, message: "Anotado. Quando a transação chegar do banco, ela já entra classificada." }, error: null });
     if (n === "lancar_no_caixa") return Promise.resolve({ data: { ok: true, message: "Lançado: R$ 50,00." }, error: null });
+    if (n === "fechar_acerto_diarias") return Promise.resolve({ data: { ok: true, numero: 2, valor_do_acerto: 290, message: "Acerto nº 0002 fechado: … Os dias até 01/10 ficam travados." }, error: null });
+    if (n === "reabrir_acerto_diarias") return Promise.resolve({ data: { ok: true, message: "Acerto nº 0001 de Roberto reaberto." }, error: null });
     return Promise.resolve({ data: null, error: { message: `rpc inesperada ${n}` } });
   };
   return {
@@ -78,10 +87,12 @@ function ctx(opcoes: Opcoes = {}) {
 }
 const tool = (nome: string) => diariasTools.find((t) => t.name === nome)!;
 
-Deno.test("cinco ferramentas: as que gravam pedem confirmação, consultar e o PDF para si não; todas só para gestor", () => {
+Deno.test("oito ferramentas: as que gravam ou mandam a terceiro pedem confirmação, consultar e o PDF para si não; todas só para gestor", () => {
   assertEquals(diariasTools.map((t) => t.name).sort(), [
-    "cadastrar_freelancer", "consultar_freelancer", "enviar_extrato_freelancer", "registrar_diaria", "registrar_pagamento_freelancer",
+    "cadastrar_freelancer", "consultar_freelancer", "enviar_acerto_ao_freelancer", "enviar_extrato_freelancer", "fechar_acerto_freelancer",
+    "reabrir_acerto_freelancer", "registrar_diaria", "registrar_pagamento_freelancer",
   ]);
+  for (const n of ["fechar_acerto_freelancer", "reabrir_acerto_freelancer", "enviar_acerto_ao_freelancer"]) assertEquals(tool(n).risk, "medium");
   assertEquals(tool("registrar_diaria").risk, "medium");
   assertEquals(tool("cadastrar_freelancer").risk, "medium");
   assertEquals(tool("registrar_pagamento_freelancer").risk, "medium");
@@ -393,4 +404,50 @@ Deno.test("cadastro: a confirmação é a função do banco simulando — cadast
   const recusa = ctx({ simulacao: { error: { message: "P0001: Roberto já tem diária cadastrada (veja em Financeiro › Diárias)." } } });
   const txt3 = String(await resumirCadastro(recusa.c as never, { nome: "Roberto", valor_diaria: 160 }));
   assertStringIncludes(txt3, "⚠️ Roberto já tem diária cadastrada (veja em Financeiro › Diárias). — o sistema vai recusar.");
+});
+
+// ── Acerto (fechar ao pagar), recibo e conferência do freelancer (06/10/2026) ──
+
+Deno.test("acerto: fechar chama a função do banco com quem pediu; a confirmação é a simulação dela", async () => {
+  const { c, chamadas } = ctx();
+  const r = await tool("fechar_acerto_freelancer").execute({ freelancer: "roberto", ate: "01/10/2026" }, c as never) as Record<string, unknown>;
+  assertEquals(chamadas[0].n, "fechar_acerto_diarias");
+  assertEquals([chamadas[0].a.p_favorecido_id, chamadas[0].a.p_ate, chamadas[0].a.p_simular, chamadas[0].a.p_autor], ["p-rob", "2026-10-01", false, "u-dono"]);
+  assertStringIncludes(String(r.aviso), "travados");
+
+  const txt = String(await resumirAcerto(ctx({ simulacao: { data: {
+    de: "2026-09-16", ate: "2026-10-01", dias: 2.5, trabalhado: 400, saldo_anterior: 0, pago_no_periodo: 100, valor_do_acerto: 300, pago_aguardando_banco: 100,
+  } } }).c as never, { freelancer: "roberto" })).replace(/\u00a0/g, " ");
+  assertStringIncludes(txt, "Fechar acerto de *Roberto Daniel Rodrigues Correa*: 16/09 a 01/10");
+  assertStringIncludes(txt, "2,5 diária(s) = R$ 400,00 · vales já pagos R$ 100,00");
+  assertStringIncludes(txt, "*A pagar neste acerto: R$ 300,00*");
+  assertStringIncludes(txt, "Pix lançados à mão");
+
+  const recusa = String(await resumirAcerto(ctx({ simulacao: { error: { message: "P0001: Nada a fechar: o acerto nº 0001 de Roberto já vai até 15/09." } } }).c as never, { freelancer: "roberto" }));
+  assertStringIncludes(recusa, "⚠️ Nada a fechar");
+});
+
+Deno.test("acerto: reabrir pede motivo antes da pendência e reabre o último", async () => {
+  assertStringIncludes(String(tool("reabrir_acerto_freelancer").preValidar!({ freelancer: "roberto" }, {} as never)?.error), "motivo");
+  const { c, chamadas } = ctx();
+  const r = await tool("reabrir_acerto_freelancer").execute({ freelancer: "roberto", motivo: "dia 10 errado" }, c as never) as Record<string, unknown>;
+  assertEquals(chamadas[0].n, "reabrir_acerto_diarias");
+  assertEquals([chamadas[0].a.p_acerto_id, chamadas[0].a.p_motivo], ["ac-1", "dia 10 errado"]);
+  assertStringIncludes(String(r.aviso), "reaberto");
+});
+
+Deno.test("acerto ao freelancer: sem telefone, sem acerto ou acerto reaberto não manda nada", async () => {
+  const semFone = ctx();
+  const r1 = await tool("enviar_acerto_ao_freelancer").execute({ freelancer: "roberto" }, semFone.c as never) as { error?: string };
+  assertStringIncludes(String(r1.error), "não tem telefone no cadastro");
+  const semAcerto = ctx({ semAcerto: true });
+  const r2 = await tool("enviar_acerto_ao_freelancer").execute({ freelancer: "roberto" }, semAcerto.c as never) as { error?: string };
+  assertStringIncludes(String(r2.error), "ainda não tem acerto fechado");
+  const reaberto = ctx({ acertoReaberto: true });
+  const r3 = await tool("enviar_acerto_ao_freelancer").execute({ freelancer: "roberto", numero: "1" }, reaberto.c as never) as { error?: string };
+  assertStringIncludes(String(r3.error), "está reaberto");
+  const txt = String(await resumirEnvioAoFreelancer(ctx().c as never, { freelancer: "roberto" })).replace(/\u00a0/g, " ");
+  assertStringIncludes(txt, "recibo nº 0001");
+  assertStringIncludes(txt, "SEM TELEFONE NO CADASTRO");
+  assertStringIncludes(txt, "responder OK");
 });

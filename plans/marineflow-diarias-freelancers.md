@@ -107,6 +107,48 @@ de diária; dia = `work_shifts`; pagamento = o lançamento que já vem do extrat
   `use-diarias.ts`. A tela não repete regra nenhuma: tipo da chave, cadastro existente e regra por
   CPF são do banco.
 
+## Rodada de 06/10/2026 — Pix lançado à mão, períodos, WhatsApp e acerto
+
+Pedido do dono: "lancei pelo Lançar o Pix que já fiz e não apareceu no extrato de diárias (o de
+dinheiro/bolso apareceu)"; filtrar por período livre ("o período não pago", "duas semanas"); extrato
+em PDF, consulta e lançamento também pelo WhatsApp; revisar o módulo e pesquisar o mercado.
+
+**Causa do "não apareceu":** o "Lançar" com Pix grava uma ANOTAÇÃO (anotacoes_do_extrato) que
+espera a linha do banco; o pagamento só nascia quando o motor do extrato (06:10 e 15:10) casava as
+duas e o lançamento era aprovado. Caso real: Pix de R$ 100 ao Roberto às 17:36/17:39 (a 2ª anotação
+substituiu a 1ª — era o mesmo Pix); a linha chegou às 18:06 e só entraria no dia seguinte.
+
+Decisões do dono (caixa de perguntas): o Pix anotado **aparece e já desconta**; períodos "em
+aberto", "últimos 15 dias", "desde o último pagamento", "semana atual" + datas livres; PDF pelo
+WhatsApp **do mesmo jeito que o do orçamento**; da pesquisa, as quatro: vale separado, fechar ao
+pagar, recibo numerado, extrato ao freelancer com "conferido".
+
+- **Fase 1** (migration `20261006200000`): a conta corrente inclui a anotação sem lançamento como
+  "Anotado — aguardando o banco" (sai quando o lançamento existe; recusada na fila não conta);
+  `_periodo_do_atalho` por pessoa; `conta_corrente_freelancer`/`resumo_freelancers` com `p_atalho`.
+  `banking-sync` dispara o motor do extrato quando chega transação nova. Tela: períodos + "Escolher
+  datas…", linha "Anotado", cartão com o período de cada um; aviso longo quando uma anotação
+  substitui outra igual. O extrato (PDF/CSV) passou a `_shared/diarias/extrato.ts`.
+- **Fase 2** (migration `20261006210000`): token de uso único (3 min) para o `/api/pdf` renderizar
+  documento sem ordem (`x-pdf-token`; só service_role emite). Assistente: `consultar_freelancer` com
+  os períodos e datas; `registrar_pagamento_freelancer` (Pix → anotação; dinheiro → Caixa; bolso do
+  sócio → reembolso); `enviar_extrato_freelancer` (extrato ou recibo, ao WhatsApp de quem pediu).
+  Tela: "Registrar pagamento".
+- **Fase 3** (migration `20261006220000`): `acertos_diarias` — fechar o período ao pagar (foto:
+  dias, vales já pagos, a pagar), recibo nº sequencial, dias TRAVADOS até a data (trigger), reabrir
+  só o último e com motivo. **Vale** = pagamento feito dentro do período aberto (o acerto o desconta;
+  não se marca pagamento por pagamento). Recibo em A4 com valor por extenso, competência e
+  assinatura (art. 320 CC). `enviar_acerto_ao_freelancer` manda o recibo ao WhatsApp dele pedindo
+  OK; o webhook chama `registrar_conferencia_do_freelancer` (mesma `_e_concordancia` da confirmação
+  do agendamento) e avisa o dono. Tela: bloco "Acertos" no Extrato (fechar com conferência, recibo,
+  reabrir), dias travados sem Corrigir/Excluir. As 3 tools do acerto ficam fora do perfil enxuto do
+  admin (teto de 100), alcançáveis pela rede.
+- Testes SQL: `diarias_pix_anotado_e_periodos.sql` (11), `token_de_pdf.sql` (7),
+  `diarias_acerto_e_recibo.sql` (14); os antigos das Diárias passam com as migrations novas.
+- Pesquisa (apps BR/estrangeiros, repositórios): ver o relatório da conversa de 06/10/2026 —
+  o que ficou de fora: mensagem automática ao freelancer quando o dia é lançado, lembrete de
+  "N dias sem pagar", foto/GPS (baixa prioridade para 3 pessoas).
+
 ## Armadilhas já medidas
 
 - Lançar a diária como despesa da OS (`so_expense_add`) **sobe o preço do cliente** (faturável por

@@ -351,6 +351,104 @@ export function useCadastrarFreelancer() {
   });
 }
 
+// ── Acerto: fechar o período ao pagar (pedido do dono 06/10/2026; migration 20261006220000) ──────
+// O acerto é a FOTO do período (dias, vales já pagos, a pagar), gera o recibo nº e trava os dias até
+// a data. As mesmas funções do assistente (fechar_acerto_freelancer / reabrir_acerto_freelancer).
+
+export interface Acerto {
+  id: string;
+  numero: number;
+  favorecido_id: string;
+  de: string;
+  ate: string;
+  saldo_anterior: number;
+  dias: number;
+  trabalhado: number;
+  pago_no_periodo: number;
+  valor_do_acerto: number;
+  status: 'fechado' | 'reaberto';
+  criado_em: string;
+  reaberto_em: string | null;
+  motivo_reabertura: string | null;
+  enviado_ao_freelancer_em: string | null;
+  conferido_em: string | null;
+  conferido_texto: string | null;
+}
+
+export interface SimulacaoDoAcerto {
+  favorecido: string;
+  de: string;
+  ate: string;
+  saldo_anterior: number;
+  dias: number;
+  trabalhado: number;
+  pago_no_periodo: number;
+  valor_do_acerto: number;
+  pago_aguardando_banco: number;
+  resumo: string;
+}
+
+export function useAcertos(favorecidoId: string | null) {
+  return useQuery({
+    queryKey: ['diarias', 'acertos', favorecidoId],
+    enabled: !!favorecidoId,
+    queryFn: async (): Promise<Acerto[]> => {
+      const { data, error } = await supabase.from('acertos_diarias' as never)
+        .select('id, numero, favorecido_id, de, ate, saldo_anterior, dias, trabalhado, pago_no_periodo, valor_do_acerto, status, criado_em, reaberto_em, motivo_reabertura, enviado_ao_freelancer_em, conferido_em, conferido_texto')
+        .eq('favorecido_id', favorecidoId!)
+        .order('numero', { ascending: false });
+      if (error) throw error;
+      return ((data ?? []) as unknown as Acerto[]).map((a) => ({
+        ...a, saldo_anterior: num(a.saldo_anterior), dias: num(a.dias), trabalhado: num(a.trabalhado),
+        pago_no_periodo: num(a.pago_no_periodo), valor_do_acerto: num(a.valor_do_acerto),
+      }));
+    },
+    staleTime: 30_000,
+  });
+}
+
+/** O dia está dentro de um acerto fechado? Devolve o acerto (para dizer qual) ou nada. */
+export function acertoQueTrava(acertos: Acerto[] | undefined, data: string): Acerto | null {
+  return (acertos ?? []).find((a) => a.status === 'fechado' && a.de <= data && data <= a.ate) ?? null;
+}
+
+/** O que o acerto FARIA — nada é gravado. A recusa ("nada a fechar") vem como erro. */
+export async function simularAcerto(favorecidoId: string, ate: string | null): Promise<SimulacaoDoAcerto> {
+  const { data, error } = await supabase.rpc('fechar_acerto_diarias' as never, {
+    p_favorecido_id: favorecidoId, p_ate: ate, p_simular: true,
+  } as never);
+  if (error) throw error;
+  const s = data as unknown as SimulacaoDoAcerto;
+  return { ...s, saldo_anterior: num(s.saldo_anterior), dias: num(s.dias), trabalhado: num(s.trabalhado),
+    pago_no_periodo: num(s.pago_no_periodo), valor_do_acerto: num(s.valor_do_acerto), pago_aguardando_banco: num(s.pago_aguardando_banco) };
+}
+
+export function useFecharAcerto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ favorecidoId, ate }: { favorecidoId: string; ate: string | null }) => {
+      const { data, error } = await supabase.rpc('fechar_acerto_diarias' as never, {
+        p_favorecido_id: favorecidoId, p_ate: ate, p_simular: false,
+      } as never);
+      if (error) throw error;
+      return data as unknown as { id: string; numero: number; message: string };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['diarias'] }),
+  });
+}
+
+export function useReabrirAcerto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ acertoId, motivo }: { acertoId: string; motivo: string }) => {
+      const { data, error } = await supabase.rpc('reabrir_acerto_diarias' as never, { p_acerto_id: acertoId, p_motivo: motivo } as never);
+      if (error) throw error;
+      return data as unknown as { message: string };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['diarias'] }),
+  });
+}
+
 /** O pedido que reconstrói um dia apagado, exatamente como era. */
 export function pedidoParaDesfazer(a: DiariaApagada): PedidoDeDiaria {
   return {

@@ -5,7 +5,7 @@
 // 06/10/2026 — o Pix lançado à mão que o banco ainda não confirmou ("Anotado"). Aqui se lança o
 // DIA e, por "Registrar pagamento", o que foi pago (as mesmas funções do "Lançar" e do assistente).
 import { useState } from 'react';
-import { Banknote, CalendarPlus, FileDown, FileText, Pencil, Trash2, UserPlus } from 'lucide-react';
+import { Banknote, CalendarPlus, FileDown, FileText, Lock, Pencil, Trash2, UserPlus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -20,10 +20,12 @@ import {
   type PedidoDePeriodo, type PeriodoDasDiarias,
 } from '@/lib/diarias';
 import {
-  diaParaEditar, useContaCorrente, useExcluirDiaComDesfazer, useResumoFreelancers,
-  type DiaParaEditar, type FreelancerNoResumo,
+  acertoQueTrava, diaParaEditar, useAcertos, useContaCorrente, useExcluirDiaComDesfazer, useResumoFreelancers,
+  type Acerto, type DiaParaEditar, type FreelancerNoResumo,
 } from '@/hooks/use-diarias';
 import { useDocumentosDasDiarias } from '@/hooks/use-documentos-diarias';
+import { numeroDoRecibo } from '@/lib/extrato-diarias';
+import { AcertosDoFreelancer } from './AcertosDoFreelancer';
 import { RegistrarDiaDialog } from './RegistrarDiaDialog';
 import { NovoFreelancerDialog } from './NovoFreelancerDialog';
 import { RegistrarPagamentoDialog } from './RegistrarPagamentoDialog';
@@ -156,7 +158,9 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
         />
       ) : (
         <Extrato favorecidoId={filtro.favorecidoId} periodo={periodo}
-                 onEditar={(d) => setRegistrando({ editar: d })} />
+                 onEditar={(d) => setRegistrando({ editar: d })}
+                 gerandoPdf={documentos.gerando === 'pdf'}
+                 onRecibo={(id, a) => { void documentos.reciboEmPdf(id, a); }} />
       )}
 
       {registrando && (
@@ -268,13 +272,16 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
   );
 }
 
-function Extrato({ favorecidoId, periodo, onEditar }: {
+function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
   favorecidoId: string | null;
   periodo: PedidoDePeriodo;
   onEditar: (d: DiaParaEditar) => void;
+  onRecibo: (favorecidoId: string, a: Acerto) => void;
+  gerandoPdf: boolean;
 }) {
   const { formatCurrency } = useI18n();
   const conta = useContaCorrente(favorecidoId, periodo.de, periodo.ate, periodo.atalho);
+  const acertos = useAcertos(favorecidoId);
   const { excluir, excluindo } = useExcluirDiaComDesfazer();
 
   if (!favorecidoId) {
@@ -310,6 +317,9 @@ function Extrato({ favorecidoId, periodo, onEditar }: {
           {' '}Saldo positivo = você deve; negativo = pagou adiantado.
         </span>
       </div>
+
+      <AcertosDoFreelancer favorecidoId={c.favorecido.id} nome={c.favorecido.nome} acertos={acertos.data ?? []}
+                           gerandoPdf={gerandoPdf} onRecibo={(a) => onRecibo(c.favorecido.id, a)} />
 
       {c.linhas.length === 0 ? (
         <Card className="p-6 text-center text-sm text-muted-foreground">Nenhum dia nem pagamento neste período.</Card>
@@ -366,7 +376,10 @@ function Extrato({ favorecidoId, periodo, onEditar }: {
                 <AcoesDaLinha
                   rotulo={`dia ${diaCurto(l.data)}`}
                   ocupada={excluindo}
-                  menu={[
+                  // Dia dentro de acerto fechado: travado (o banco recusaria). Reabrir é no bloco Acertos.
+                  menu={acertoQueTrava(acertos.data, l.data) ? [
+                    { texto: `Travado no acerto nº ${numeroDoRecibo(acertoQueTrava(acertos.data, l.data)!.numero)}`, icone: Lock, desabilitada: true, onClick: () => {} },
+                  ] : [
                     { texto: 'Corrigir o dia', icone: Pencil, onClick: () => onEditar(diaParaEditar(c.favorecido.id, l)) },
                     { texto: 'Excluir o dia', icone: Trash2, perigo: true, onClick: () => { void excluir(l.id); } },
                   ]}

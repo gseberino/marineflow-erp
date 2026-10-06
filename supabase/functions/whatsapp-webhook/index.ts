@@ -417,6 +417,10 @@ export async function handler(req: Request): Promise<Response> {
       if (body.trim().length <= 60) {
         admin.rpc("registrar_confirmacao_do_cliente", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
           .then(() => {}, () => {});
+        // Conferência do acerto de diárias (06/10/2026): o "ok"/"confere" do freelancer a quem o
+        // recibo foi mandado nos últimos 7 dias. Mesma regra de concordância curta.
+        admin.rpc("registrar_conferencia_do_freelancer", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
+          .then(() => {}, () => {});
       }
     }
 

@@ -50,7 +50,7 @@ export const PARA_QUE_SERVE = {
   cadastro: 'Cadastros que atrapalham o reconhecimento automático (apelido ruim, CNPJ faltando ou duplicado), com a correção sugerida.',
   banks: 'Os bancos ligados ao sistema e o saldo de cada conta. O dia a dia do que entrou e saiu fica no Extrato.',
   aging: 'Quem deve à empresa e a quem a empresa deve, por tempo de atraso: a vencer, 1–30, 31–60, 61–90 e mais de 90 dias.',
-  diarias: 'Os dias que cada freelancer trabalhou, o que ele recebeu e o saldo com ele: você deve, adiantado ou quitado. O pagamento vem do extrato; aqui se lança o dia.',
+  diarias: 'Os dias que cada freelancer trabalhou, o que ele recebeu e o saldo com ele: você deve, adiantado ou quitado. O pagamento vem do extrato do banco (ou "Registrar pagamento"); aqui se lança o dia e se fecha o acerto.',
   diariasExtrato: 'Dia a dia de um freelancer, com o saldo corrido: cada diária e cada pagamento, com a conta de onde saiu.',
   diariasGrade: 'O mês inteiro de todos os freelancers: clique num dia para marcar dia inteiro, meio período ou falta, e para corrigir ou excluir.',
 } as const;

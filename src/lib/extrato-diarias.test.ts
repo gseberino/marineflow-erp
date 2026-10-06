@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { documentoFormatado, linhasDoCsv, montarExtratoHtml, nomeDoArquivo, textoDoPeriodo, type ContaDoExtrato } from './extrato-diarias';
+import {
+  documentoFormatado, linhasDoCsv, montarExtratoHtml, montarReciboHtml, nomeDoArquivo, textoDoPeriodo, valorPorExtenso, type ContaDoExtrato,
+} from './extrato-diarias';
 
 const conta = (o: Partial<ContaDoExtrato> = {}): ContaDoExtrato => ({
   favorecido: { id: 'r', nome: 'Roberto Daniel', desde: '2026-08-25', saldo_inicial: 0, diaria: 160 },
@@ -101,5 +103,47 @@ describe('CSV do contador', () => {
   it('documento de outro formato passa como veio', () => {
     expect(documentoFormatado('')).toBe('');
     expect(documentoFormatado('abc')).toBe('abc');
+  });
+});
+
+describe('recibo do acerto', () => {
+  it('valor por extenso em reais, com o "e" no lugar certo', () => {
+    expect(valorPorExtenso(190)).toBe('cento e noventa reais');
+    expect(valorPorExtenso(100)).toBe('cem reais');
+    expect(valorPorExtenso(1)).toBe('um real');
+    expect(valorPorExtenso(21.5)).toBe('vinte e um reais e cinquenta centavos');
+    expect(valorPorExtenso(1250)).toBe('mil duzentos e cinquenta reais');
+    expect(valorPorExtenso(1100)).toBe('mil e cem reais');
+    expect(valorPorExtenso(2000)).toBe('dois mil reais');
+    expect(valorPorExtenso(1_200_000)).toBe('um milhão e duzentos mil reais');
+    expect(valorPorExtenso(2_000_000)).toBe('dois milhões de reais');
+    expect(valorPorExtenso(0.01)).toBe('um centavo');
+    expect(valorPorExtenso(0)).toBe('zero real');
+  });
+
+  const acerto = { numero: 7, de: '2026-09-16', ate: '2026-09-30', saldo_anterior: 0, dias: 1.5, trabalhado: 260, pago_no_periodo: 100, valor_do_acerto: 160 };
+  const recibo = montarReciboHtml({
+    empresa: { nome: 'HBR Marine Solutions', cnpj: '50057049000159', cidade: 'Itajaí/SC' },
+    freelancer: { nome: 'Roberto Daniel', documento: '12345678940', pix: 'roberto@pix' },
+    acerto, linhas: conta().linhas, geradoEm: new Date(Date.UTC(2026, 9, 1, 15, 0)),
+  });
+
+  it('número, competência, valor por extenso, vales descontados e a assinatura do prestador', () => {
+    expect(recibo).toContain('RECIBO DE DIÁRIAS Nº 0007');
+    expect(recibo).toContain('Competência: 16/09/2026 a 30/09/2026');
+    expect(recibo).toContain('(cento e sessenta reais)');
+    expect(recibo).toContain('Vales e adiantamentos já pagos no período');
+    expect(recibo).toContain('Pix enviado para Roberto');
+    expect(recibo).toContain('Itajaí/SC, 1 de outubro de 2026.');
+    expect(recibo.slice(recibo.indexOf('class="assinatura"'))).toContain('Roberto Daniel, CPF 123.456.789-40');
+    expect(recibo).toContain('Chave Pix do prestador: roberto@pix');
+  });
+
+  it('sem valor a receber, vira declaração (não "recebi")', () => {
+    const h = montarReciboHtml({ empresa: { nome: 'HBR', cnpj: null, cidade: null }, freelancer: { nome: 'R', documento: null, pix: null },
+      acerto: { ...acerto, valor_do_acerto: -40 }, linhas: [], geradoEm: new Date() });
+    expect(h).toContain('Sem valor a receber');
+    expect(h).toContain('um adiantamento de R$ 40,00 a compensar');
+    expect(h).not.toContain('Recebi de');
   });
 });

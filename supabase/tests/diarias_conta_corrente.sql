@@ -183,8 +183,9 @@ begin
   insert into _resultado values ('T14 anon',
     not has_function_privilege('anon', 'public.registrar_diaria(uuid, date, text, uuid[], text, numeric, numeric, numeric, text, uuid)', 'execute')
     and not has_function_privilege('anon', 'public.apagar_diaria(uuid, uuid)', 'execute')
-    and not has_function_privilege('anon', 'public.conta_corrente_freelancer(uuid, date, date, uuid)', 'execute')
-    and not has_function_privilege('anon', 'public.resumo_freelancers(date, date, uuid)', 'execute')
+    -- 06/10/2026: as duas ganharam p_atalho (migration 20261006200000).
+    and not has_function_privilege('anon', 'public.conta_corrente_freelancer(uuid, date, date, uuid, text)', 'execute')
+    and not has_function_privilege('anon', 'public.resumo_freelancers(date, date, uuid, text)', 'execute')
     and not has_function_privilege('anon', 'public._conta_corrente_linhas(uuid)', 'execute')
     and not has_function_privilege('authenticated', 'public._conta_corrente_linhas(uuid)', 'execute')
     and not has_table_privilege('anon', 'public.work_shift_os', 'select'),

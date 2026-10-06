@@ -22,7 +22,7 @@ import { CONTEXTO_DO_ENVIO } from "./documentos-pdf.ts";
 import { chaveDeEnvio, liberarEnvio } from "../../whatsapp/idempotencia.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 import { guardarEEntregar, limitarNomeDoArquivo } from "../../pdf/gerar-e-guardar.ts";
-import { montarExtratoHtml, nomeDoArquivo, type ContaDoExtrato } from "../../diarias/extrato.ts";
+import { montarExtratoHtml, montarReciboHtml, nomeDoArquivo, numeroDoRecibo, type ContaDoExtrato } from "../../diarias/extrato.ts";
 
 const CARGOS: Role[] = ["admin", "financial"];
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -520,9 +520,134 @@ const janelaDeDoisMinutos = () => Math.floor(Date.now() / 120_000);
 
 async function falhaDoExtrato(motivo: string) {
   return {
-    error: `Não consegui mandar o extrato: ${motivo}.`,
-    orientacao: "Diga que o anexo falhou (sem fingir que mandou); o extrato em PDF também sai pela tela, em Financeiro › Diárias › Extrato.",
+    error: `Não consegui mandar o PDF: ${motivo}.`,
+    orientacao: "Diga que o anexo falhou (sem fingir que mandou); o extrato e o recibo em PDF também saem pela tela, em Financeiro › Diárias › Extrato.",
   };
+}
+
+type DocumentoPronto = { html: string; arquivo: string; legenda: string; chave: string };
+
+async function cadastroDoFreelancer(ctx: ToolCtx, f: Freelancer) {
+  const { data } = await ctx.admin.from("payees").select("name, document, pix_key, phone").eq("id", f.id).maybeSingle();
+  return { nome: (data?.name as string) ?? f.nome, documento: (data?.document as string) ?? null, pix: (data?.pix_key as string) ?? null,
+    telefone: String(data?.phone ?? "").replace(/\D/g, "") };
+}
+
+const empresaDosSettings = (s: Record<string, string>) =>
+  ({ nome: s.company_name || "HBR", cnpj: s.cnpj || null, cidade: [s.city, s.state].filter(Boolean).join("/") || null });
+
+/** O extrato do período (o mesmo do botão da tela). */
+async function documentoDoExtrato(ctx: ToolCtx, f: Freelancer, periodo: PeriodoPedido): Promise<DocumentoPronto | { error: string }> {
+  const conta = await chamar(ctx, "conta_corrente_freelancer", { p_favorecido_id: f.id, ...periodo }) as Record<string, any>;
+  if (conta && "error" in conta) return { error: String(conta.error) };
+  const cad = await cadastroDoFreelancer(ctx, f);
+  const html = montarExtratoHtml({
+    empresa: empresaDosSettings(ctx.settings), freelancer: cad, conta: conta as unknown as ContaDoExtrato, geradoEm: new Date(),
+  });
+  const saldo = Number(conta.saldo_final) || 0;
+  return {
+    html,
+    arquivo: limitarNomeDoArquivo(nomeDoArquivo("extrato-diarias", f.nome, conta as ContaDoExtrato, "pdf")),
+    legenda: `📄 Extrato de diárias — ${f.nome}\nPeríodo: ${periodoResolvido(conta)}\nSaldo: ${brl.format(Math.abs(saldo))} (${ESTADO[String(conta.estado)] ?? conta.estado})`,
+    chave: chaveDeEnvio("agente-extrato-diarias", f.id, periodoResolvido(conta), saldo, Number(conta.pago)),
+  };
+}
+
+type Acerto = { id: string; numero: number; de: string; ate: string; saldo_anterior: number; dias: number; trabalhado: number;
+  pago_no_periodo: number; valor_do_acerto: number; status: string };
+
+/** O acerto pedido (pelo número) ou o último fechado da pessoa. */
+async function acertoDe(ctx: ToolCtx, f: Freelancer, numero?: unknown): Promise<Acerto | { error: string }> {
+  let q = ctx.admin.from("acertos_diarias")
+    .select("id, numero, de, ate, saldo_anterior, dias, trabalhado, pago_no_periodo, valor_do_acerto, status")
+    .eq("favorecido_id", f.id);
+  const n = numero == null || numero === "" ? null : Number(String(numero).replace(/\D/g, ""));
+  q = n ? q.eq("numero", n) : q.eq("status", "fechado").order("ate", { ascending: false }).limit(1);
+  const { data, error } = await q;
+  if (error) return { error: `Falha ao ler os acertos: ${error.message}` };
+  const a = (data ?? [])[0] as any;
+  if (!a) return { error: n ? `Não achei o acerto nº ${n} de ${f.nome}.` : `${f.nome} ainda não tem acerto fechado. Feche com fechar_acerto_freelancer.` };
+  return { ...a, saldo_anterior: Number(a.saldo_anterior), dias: Number(a.dias), trabalhado: Number(a.trabalhado),
+    pago_no_periodo: Number(a.pago_no_periodo), valor_do_acerto: Number(a.valor_do_acerto) };
+}
+
+/** O recibo do acerto: totais da foto; linhas (dias e vales) da conta corrente do mesmo período. */
+async function documentoDoRecibo(ctx: ToolCtx, f: Freelancer, a: Acerto): Promise<DocumentoPronto | { error: string }> {
+  const conta = await chamar(ctx, "conta_corrente_freelancer", { p_favorecido_id: f.id, p_de: a.de, p_ate: a.ate }) as Record<string, any>;
+  if (conta && "error" in conta) return { error: String(conta.error) };
+  const cad = await cadastroDoFreelancer(ctx, f);
+  const n = numeroDoRecibo(a.numero);
+  return {
+    html: montarReciboHtml({ empresa: empresaDosSettings(ctx.settings), freelancer: cad, acerto: a, linhas: conta.linhas ?? [], geradoEm: new Date() }),
+    arquivo: limitarNomeDoArquivo(nomeDoArquivo(`recibo-diarias-${n}`, f.nome, { de: a.de, ate: a.ate }, "pdf")),
+    legenda: `🧾 Recibo de diárias nº ${n} — ${f.nome}\nPeríodo: ${ddmm(a.de)} a ${ddmm(a.ate)}\n` +
+      `Trabalhado ${brl.format(a.trabalhado)} · vales ${brl.format(a.pago_no_periodo)} · a pagar ${brl.format(a.valor_do_acerto)}` +
+      (a.status !== "fechado" ? "\n⚠️ Este acerto foi REABERTO." : ""),
+    chave: chaveDeEnvio("agente-recibo-diarias", f.id, a.numero, a.status),
+  };
+}
+
+/** Renderiza com token de uso único, guarda por minutos, manda pela Evolution e apaga. */
+async function mandarPdf(ctx: ToolCtx, telefone: string, doc: DocumentoPronto, contexto: string, rotulo: string) {
+  const { data: token, error: tErr } = await ctx.admin.rpc("emitir_token_de_pdf", { p_finalidade: rotulo });
+  if (tErr || !token) return { ok: false as const, motivo: `sem credencial para o servidor de PDF (${tErr?.message ?? "token vazio"})` };
+  const chave = chaveDeEnvio(doc.chave, telefone, janelaDeDoisMinutos());
+  const entrega = await guardarEEntregar({
+    admin: ctx.admin,
+    doc: { html: doc.html, nomeDoArquivo: doc.arquivo },
+    pdfToken: String(token),
+    baseUrl: ctx.settings.app_public_url || "",
+    rotuloDoLog: rotulo,
+    entregar: (url) => enviarDocumentoWhatsapp({ phone: telefone, url, filename: doc.arquivo, caption: doc.legenda, context: contexto, jwt: ctx.jwt, dedupeKey: chave }),
+  });
+  if (!entrega.ok) return { ok: false as const, motivo: entrega.motivo };
+  const envio = entrega.valor;
+  if (!envio.ok) {
+    // Mesma regra do PDF do orçamento: tool que desistiu sem resposta libera a reserva.
+    if (envio.semResposta) await liberarEnvio(ctx.admin, chave).catch(() => {});
+    return { ok: false as const, motivo: envio.error };
+  }
+  return { ok: true as const, deduplicated: !!envio.deduplicated, modoTeste: desviadoPorTeste(ctx.settings) };
+}
+
+async function telefoneDeQuemPediu(ctx: ToolCtx): Promise<string | { error: string }> {
+  const { data: u, error } = await ctx.admin.from("app_users").select("phone_normalized").eq("id", ctx.userId).maybeSingle();
+  if (error) return { error: `Falha ao ler o seu cadastro: ${error.message}` };
+  const t = String(u?.phone_normalized ?? "").replace(/\D/g, "");
+  return t || { error: "Você não tem um WhatsApp cadastrado para receber o PDF. Cadastre em Configurações → Usuários (aba IA/Zap)." };
+}
+
+/** Contexto do envio ao FREELANCER (não é cliente nem o dono; nunca 'quote'). */
+const CONTEXTO_AO_FREELANCER = "diarias_ao_freelancer";
+
+/** A confirmação do acerto: a função do banco simulando — período, dias, vales, a pagar. */
+export async function resumirAcerto(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
+  const f = await acharFreelancer(ctx, args.freelancer);
+  if ("error" in f) return null;
+  const ate = args.ate ? dataDoDito(args.ate) : null;
+  const { data, error } = await ctx.admin.rpc("fechar_acerto_diarias", { p_favorecido_id: f.id, p_ate: ate, p_simular: true, p_autor: null });
+  if (error) return `Fechar acerto de *${f.nome}*\n⚠️ ${semCodigo(error.message)} — o sistema vai recusar.`;
+  const s = data as Record<string, any>;
+  const linhas = [`Fechar acerto de *${f.nome}*: ${ddmm(s.de)} a ${ddmm(s.ate)}`,
+    `${String(s.dias).replace(".", ",")} diária(s) = ${brl.format(Number(s.trabalhado))}` +
+      (Number(s.saldo_anterior) ? ` · saldo anterior ${brl.format(Number(s.saldo_anterior))}` : "") +
+      ` · vales já pagos ${brl.format(Number(s.pago_no_periodo))}`,
+    `*A pagar neste acerto: ${brl.format(Number(s.valor_do_acerto))}*`,
+    `Os dias até ${ddmm(s.ate)} ficam travados (reabrir só pela tela ou pedindo, com motivo).`];
+  if (Number(s.pago_aguardando_banco) > 0) linhas.push(`⚠️ ${brl.format(Number(s.pago_aguardando_banco))} dos vales são Pix lançados à mão que o banco ainda não confirmou.`);
+  return linhas.join("\n");
+}
+
+/** A confirmação do envio ao freelancer: o quê, para que número, e o que acontece com a resposta. */
+export async function resumirEnvioAoFreelancer(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
+  const f = await acharFreelancer(ctx, args.freelancer);
+  if ("error" in f) return null;
+  const a = await acertoDe(ctx, f, args.numero);
+  if ("error" in a) return `Mandar ao freelancer\n⚠️ ${a.error}`;
+  const cad = await cadastroDoFreelancer(ctx, f);
+  return [`Mandar a *${f.nome}* (WhatsApp ${cad.telefone || "SEM TELEFONE NO CADASTRO"}) o recibo nº ${numeroDoRecibo(a.numero)}`,
+    `${ddmm(a.de)} a ${ddmm(a.ate)} · a pagar ${brl.format(a.valor_do_acerto)}`,
+    "A mensagem pede para ele conferir e responder OK; a resposta fica registrada no acerto."].join("\n");
 }
 
 export const diariasTools: ToolDef[] = [
@@ -719,16 +844,19 @@ export const diariasTools: ToolDef[] = [
   {
     name: "enviar_extrato_freelancer",
     description:
-      "Manda o EXTRATO de diárias de um freelancer em PDF para o WhatsApp de QUEM PEDIU (o mesmo PDF do botão 'Extrato em PDF' da " +
-      "tela, com saldo e linhas de assinatura): 'me manda o extrato do Roberto', 'o PDF do que falta pagar pro João' (periodo=em_aberto), " +
-      "'extrato do Mickael de 14/09 a 27/09' (de/ate). Sem período = o histórico inteiro.",
+      "Manda o EXTRATO ou o RECIBO de diárias de um freelancer em PDF para o WhatsApp de QUEM PEDIU (os mesmos PDFs da tela): " +
+      "'me manda o extrato do Roberto', 'o PDF do que falta pagar pro João' (periodo=em_aberto), 'extrato do Mickael de 14/09 a " +
+      "27/09' (de/ate), 'me manda o recibo do último acerto do João' (documento=recibo; numero se disser). Sem período = o histórico " +
+      "inteiro. Para mandar AO FREELANCER, enviar_acerto_ao_freelancer.",
     input_schema: {
       type: "object",
       properties: {
         freelancer: { type: "string", description: "Nome como a pessoa falou." },
-        periodo: { type: "string", enum: [...PERIODOS], description: "Como em consultar_freelancer; padrão tudo." },
-        de: { type: "string", description: "Data inicial dita, para período livre." },
-        ate: { type: "string", description: "Data final dita, para período livre." },
+        documento: { type: "string", enum: ["extrato", "recibo"], description: "extrato (padrão) ou recibo de um acerto fechado." },
+        periodo: { type: "string", enum: [...PERIODOS], description: "Só no extrato; como em consultar_freelancer; padrão tudo." },
+        de: { type: "string", description: "Só no extrato: data inicial dita." },
+        ate: { type: "string", description: "Só no extrato: data final dita." },
+        numero: { type: "string", description: "Só no recibo: o nº do acerto, se a pessoa disser (padrão: o último)." },
       },
       required: ["freelancer"],
     },
@@ -738,66 +866,138 @@ export const diariasTools: ToolDef[] = [
     async execute(args, ctx) {
       const b = semAcesso(ctx);
       if (b) return b;
-      const periodo = periodoDito(args);
-      if ("error" in periodo) return periodo;
+      const recibo = args.documento === "recibo";
+      const periodo = recibo ? null : periodoDito(args);
+      if (periodo && "error" in periodo) return periodo;
       const f = await acharFreelancer(ctx, args.freelancer);
       if ("error" in f) return f;
-      const { admin } = ctx;
+      const telefone = await telefoneDeQuemPediu(ctx);
+      if (typeof telefone !== "string") return telefone;
 
-      // Destino: o telefone de quem pediu, do cadastro — nunca de um texto.
-      const { data: u, error: uErr } = await admin.from("app_users").select("phone_normalized").eq("id", ctx.userId).maybeSingle();
-      if (uErr) return { error: `Falha ao ler o seu cadastro: ${uErr.message}` };
-      const telefone = String(u?.phone_normalized ?? "").replace(/\D/g, "");
-      if (!telefone) return { error: "Você não tem um WhatsApp cadastrado para receber o PDF. Cadastre em Configurações → Usuários (aba IA/Zap)." };
-
-      const conta = await chamar(ctx, "conta_corrente_freelancer", { p_favorecido_id: f.id, ...periodo }) as Record<string, any>;
-      if (conta && "error" in conta) return await falhaDoExtrato(String(conta.error));
-      const { data: cad } = await admin.from("payees").select("name, document, pix_key").eq("id", f.id).maybeSingle();
-      const s = ctx.settings;
-      const html = montarExtratoHtml({
-        empresa: { nome: s.company_name || "HBR", cnpj: s.cnpj || null, cidade: [s.city, s.state].filter(Boolean).join("/") || null },
-        freelancer: { nome: cad?.name ?? f.nome, documento: cad?.document ?? null, pix: cad?.pix_key ?? null },
-        conta: conta as unknown as ContaDoExtrato,
-        geradoEm: new Date(),
-      });
-      const arquivo = limitarNomeDoArquivo(nomeDoArquivo("extrato-diarias", f.nome, conta as ContaDoExtrato, "pdf"));
-
-      const { data: token, error: tErr } = await admin.rpc("emitir_token_de_pdf", { p_finalidade: `extrato de diárias de ${f.nome}` });
-      if (tErr || !token) return await falhaDoExtrato(`sem credencial para o servidor de PDF (${tErr?.message ?? "token vazio"})`);
-
-      const saldo = Number(conta.saldo_final) || 0;
-      const legenda = `📄 Extrato de diárias — ${f.nome}\nPeríodo: ${periodoResolvido(conta)}\n` +
-        `Saldo: ${brl.format(Math.abs(saldo))} (${ESTADO[String(conta.estado)] ?? conta.estado})`;
-      const chave = chaveDeEnvio("agente-extrato-diarias", f.id, telefone, periodoResolvido(conta), saldo, Number(conta.pago), janelaDeDoisMinutos());
-
-      const entrega = await guardarEEntregar({
-        admin,
-        doc: { html, nomeDoArquivo: arquivo },
-        pdfToken: String(token),
-        baseUrl: s.app_public_url || "",
-        rotuloDoLog: "enviar_extrato_freelancer",
-        entregar: (url) => enviarDocumentoWhatsapp({
-          phone: telefone, url, filename: arquivo, caption: legenda,
-          context: CONTEXTO_DO_ENVIO, jwt: ctx.jwt, dedupeKey: chave,
-        }),
-      });
-      if (!entrega.ok) return await falhaDoExtrato(entrega.motivo);
-      const envio = entrega.valor;
-      if (!envio.ok) {
-        // Mesma regra do PDF do orçamento: tool que desistiu sem resposta libera a reserva.
-        if (envio.semResposta) await liberarEnvio(admin, chave).catch(() => {});
-        return await falhaDoExtrato(envio.error);
+      let doc: DocumentoPronto | { error: string };
+      if (recibo) {
+        const a = await acertoDe(ctx, f, args.numero);
+        if ("error" in a) return a;
+        doc = await documentoDoRecibo(ctx, f, a);
+      } else {
+        doc = await documentoDoExtrato(ctx, f, periodo as PeriodoPedido);
       }
-      if (envio.deduplicated) return { ok: true, deduplicated: true, aviso: `Esse mesmo extrato de ${f.nome} já foi mandado há instantes; não reenviei.` };
-      const modoTeste = desviadoPorTeste(ctx.settings);
+      if ("error" in doc) return await falhaDoExtrato(doc.error);
+
+      const envio = await mandarPdf(ctx, telefone, doc, CONTEXTO_DO_ENVIO, `${recibo ? "recibo" : "extrato"} de diárias de ${f.nome}`);
+      if (!envio.ok) return await falhaDoExtrato(envio.motivo);
+      if (envio.deduplicated) return { ok: true, deduplicated: true, aviso: `Esse mesmo PDF de ${f.nome} já foi mandado há instantes; não reenviei.` };
       return {
         ok: true,
-        enviado_para: modoTeste ? "o número de TESTE do WhatsApp (modo de teste ligado)" : "o WhatsApp de quem pediu",
-        freelancer: f.nome, periodo: periodoResolvido(conta), saldo, situacao: ESTADO[String(conta.estado)] ?? conta.estado,
-        arquivo,
-        observacao: modoTeste
+        enviado_para: envio.modoTeste ? "o número de TESTE do WhatsApp (modo de teste ligado)" : "o WhatsApp de quem pediu",
+        freelancer: f.nome, documento: recibo ? "recibo" : "extrato", arquivo: doc.arquivo,
+        observacao: envio.modoTeste
           ? "O modo de teste do WhatsApp está ligado: o arquivo foi para o número de teste, não para quem pediu. Diga isso."
           : "O arquivo já chegou no WhatsApp de quem pediu.",
+      };
+    },
+  },
+  {
+    name: "fechar_acerto_freelancer",
+    description:
+      "FECHA o acerto de um freelancer ao pagar: 'fecha o acerto do Roberto', 'acerta a quinzena do João até sexta'. Do dia seguinte " +
+      "ao último acerto até 'ate' (padrão hoje): guarda a foto (dias, vales já pagos, a pagar), gera o recibo numerado e TRAVA os dias " +
+      "até essa data. Não registra o pagamento do acerto (isso é registrar_pagamento_freelancer, ou vem do banco). Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        freelancer: { type: "string", description: "Nome como a pessoa falou." },
+        ate: { type: "string", description: "Até que dia fechar: 'hoje' (padrão), 'sexta', dd/mm." },
+      },
+      required: ["freelancer"],
+    },
+    risk: "medium",
+    roles: CARGOS,
+    async execute(args, ctx) {
+      const b = semAcesso(ctx);
+      if (b) return b;
+      const f = await acharFreelancer(ctx, args.freelancer);
+      if ("error" in f) return f;
+      const ate = args.ate ? dataDoDito(args.ate) : null;
+      if (args.ate && !ate) return { error: `Não entendi até quando: "${args.ate}". Use hoje, dd/mm ou o dia da semana.` };
+      const r = await chamar(ctx, "fechar_acerto_diarias", { p_favorecido_id: f.id, p_ate: ate, p_simular: false }) as Record<string, unknown>;
+      if (r && "error" in r) return r;
+      return { ok: true, numero: r?.numero, valor_do_acerto: r?.valor_do_acerto,
+        aviso: `${String(r?.message ?? "Acerto fechado.")} O recibo sai com enviar_extrato_freelancer (documento=recibo) ou vai a ele com enviar_acerto_ao_freelancer.` };
+    },
+  },
+  {
+    name: "reabrir_acerto_freelancer",
+    description:
+      "REABRE o último acerto de um freelancer para corrigir um dia travado: 'reabre o acerto do Roberto, o dia 24 estava errado'. " +
+      "Só o último acerto, e com o motivo (fica registrado). Depois de corrigir, feche de novo. Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        freelancer: { type: "string", description: "Nome como a pessoa falou." },
+        motivo: { type: "string", description: "Por que reabrir — obrigatório; pergunte se a pessoa não disser." },
+      },
+      required: ["freelancer", "motivo"],
+    },
+    risk: "medium",
+    roles: CARGOS,
+    preValidar(args) {
+      return textoOuNulo(args?.motivo) ? null : { error: "Qual o motivo de reabrir o acerto? (fica registrado)" };
+    },
+    async execute(args, ctx) {
+      const b = semAcesso(ctx);
+      if (b) return b;
+      const f = await acharFreelancer(ctx, args.freelancer);
+      if ("error" in f) return f;
+      const a = await acertoDe(ctx, f);
+      if ("error" in a) return a;
+      const r = await chamar(ctx, "reabrir_acerto_diarias", { p_acerto_id: a.id, p_motivo: textoOuNulo(args.motivo) }) as Record<string, unknown>;
+      if (r && "error" in r) return r;
+      return { ok: true, aviso: String(r?.message ?? "Acerto reaberto.") };
+    },
+  },
+  {
+    name: "enviar_acerto_ao_freelancer",
+    description:
+      "Manda AO FREELANCER, no WhatsApp dele (do cadastro), o recibo do acerto em PDF, pedindo que confira e responda OK — a " +
+      "resposta fica registrada no acerto: 'manda o recibo pro João conferir'. Precisa de acerto fechado (fechar_acerto_freelancer) " +
+      "e do telefone no cadastro. Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        freelancer: { type: "string", description: "Nome como a pessoa falou." },
+        numero: { type: "string", description: "O nº do acerto, se a pessoa disser (padrão: o último)." },
+      },
+      required: ["freelancer"],
+    },
+    risk: "medium",
+    roles: CARGOS,
+    async execute(args, ctx) {
+      const b = semAcesso(ctx);
+      if (b) return b;
+      const f = await acharFreelancer(ctx, args.freelancer);
+      if ("error" in f) return f;
+      const a = await acertoDe(ctx, f, args.numero);
+      if ("error" in a) return a;
+      if (a.status !== "fechado") return { error: `O acerto nº ${numeroDoRecibo(a.numero)} está reaberto: feche de novo antes de mandar.` };
+      const cad = await cadastroDoFreelancer(ctx, f);
+      if (!cad.telefone) return { error: `${f.nome} não tem telefone no cadastro. Cadastre o WhatsApp dele em Financeiro › Favorecidos e peça de novo.` };
+      const doc = await documentoDoRecibo(ctx, f, a);
+      if ("error" in doc) return await falhaDoExtrato(doc.error);
+      const primeiro = f.nome.split(" ")[0];
+      doc.legenda = `Olá, ${primeiro}! Segue o recibo das suas diárias de ${ddmm(a.de)} a ${ddmm(a.ate)}: ` +
+        `${String(a.dias).replace(".", ",")} diária(s), ${brl.format(a.trabalhado)}; vales já pagos ${brl.format(a.pago_no_periodo)}; ` +
+        `a receber ${brl.format(a.valor_do_acerto)}.\nConfere? Se estiver tudo certo, responda *OK*.`;
+      const envio = await mandarPdf(ctx, cad.telefone, doc, CONTEXTO_AO_FREELANCER, `recibo de diárias ao freelancer ${f.nome}`);
+      if (!envio.ok) return await falhaDoExtrato(envio.motivo);
+      if (envio.deduplicated) return { ok: true, deduplicated: true, aviso: `Esse recibo já foi mandado a ${f.nome} há instantes; não reenviei.` };
+      // Registra o envio: é o que faz o "OK" dele (whatsapp-webhook → registrar_conferencia_do_freelancer) ter a quem se referir.
+      await ctx.admin.from("acertos_diarias").update({ enviado_ao_freelancer_em: new Date().toISOString(), telefone_enviado: cad.telefone }).eq("id", a.id);
+      return {
+        ok: true,
+        aviso: envio.modoTeste
+          ? `Modo de teste do WhatsApp ligado: o recibo nº ${numeroDoRecibo(a.numero)} foi para o número de TESTE, não para ${f.nome}.`
+          : `Recibo nº ${numeroDoRecibo(a.numero)} mandado a ${f.nome}. Quando ele responder OK, fica registrado no acerto e você recebe um aviso.`,
       };
     },
   },

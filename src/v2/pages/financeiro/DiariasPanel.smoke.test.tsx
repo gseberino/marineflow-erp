@@ -17,13 +17,25 @@ const exportToCSV = vi.fn();
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     rpc: (...a: unknown[]) => rpc(...a),
-    // Só a leitura do cadastro dos freelancers (CPF e PIX) que os documentos fazem.
-    from: () => ({ select: () => ({ in: async () => ({ data: [
-      { id: 'r', name: 'Roberto', document: '12345678940', pix_key: null },
-      { id: 'm', name: 'Mickael', document: '98765432100', pix_key: null },
-    ], error: null }) }) }),
+    // A leitura do cadastro dos freelancers (CPF e PIX) que os documentos fazem, e a dos acertos.
+    from: (tabela: string) => ({ select: () => ({
+      in: async () => ({ data: [
+        { id: 'r', name: 'Roberto', document: '12345678940', pix_key: null },
+        { id: 'm', name: 'Mickael', document: '98765432100', pix_key: null },
+      ], error: null }),
+      eq: () => ({ order: async () => ({ data: tabela === 'acertos_diarias' ? acertosNoBanco : [], error: null }) }),
+    }) }),
   },
 }));
+
+/** O acerto nº 0001 do Roberto trava 01/09 a 16/09 (o dia 16/09 do extrato fica travado). */
+let acertosNoBanco: unknown[] = [];
+const acertoDoRoberto = {
+  id: 'ac1', numero: 1, favorecido_id: 'r', de: '2026-09-01', ate: '2026-09-16', saldo_anterior: 0, dias: 1,
+  trabalhado: 180, pago_no_periodo: 0, valor_do_acerto: 180, status: 'fechado', criado_em: '2026-09-17T12:00:00Z',
+  reaberto_em: null, motivo_reabertura: null, enviado_ao_freelancer_em: '2026-09-17T12:05:00Z', conferido_em: '2026-09-17T13:00:00Z',
+  conferido_texto: 'ok',
+};
 vi.mock('@/lib/export-utils', () => ({ exportToCSV: (...a: unknown[]) => exportToCSV(...a) }));
 vi.mock('sonner', () => ({
   toast: Object.assign((...a: unknown[]) => toastFn(...a), { success: vi.fn(), error: vi.fn() }),
@@ -58,6 +70,7 @@ const contaVazia = (id: string, nome: string, desde: string) => ({
 });
 
 beforeEach(() => {
+  acertosNoBanco = [];
   toastFn.mockReset();
   exportToCSV.mockReset();
   rpc.mockReset();
@@ -85,6 +98,11 @@ beforeEach(() => {
       case 'anotar_transacao':
       case 'lancar_no_caixa':
         return { data: { ok: true, message: 'Anotado.' }, error: null };
+      case 'fechar_acerto_diarias':
+        return args.p_simular
+          ? { data: { favorecido: 'Roberto', de: '2026-09-17', ate: args.p_ate, saldo_anterior: 180, dias: 0, trabalhado: 0,
+              pago_no_periodo: 100, valor_do_acerto: 80, pago_aguardando_banco: 0, resumo: '' }, error: null }
+          : { data: { id: 'ac2', numero: 2, message: 'Acerto nº 0002 fechado.' }, error: null };
       case 'cadastrar_freelancer':
         if (String(args.p_nome).startsWith('Roberto')) {
           return { data: null, error: { message: 'Roberto já tem diária cadastrada (veja em Financeiro › Diárias).' } };
@@ -272,6 +290,32 @@ describe('DiariasPanel', () => {
     await user.click(within(outro).getByRole('button', { name: 'Registrar pagamento' }));
     await waitFor(() => expect(chamadas('lancar_no_caixa')).toHaveLength(1));
     expect(chamadas('lancar_no_caixa')[0]).toMatchObject({ p_pago_por: 'socio', p_socio_id: 's1', p_favorecido_id: 'r', p_valor: 50 });
+  });
+
+  // ── Acerto (pedido do dono, 06/10/2026) ──
+
+  it('acerto: o bloco mostra o recibo e o "conferido"; o dia dentro do acerto fica travado', async () => {
+    acertosNoBanco = [acertoDoRoberto];
+    const user = userEvent.setup();
+    renderizar('extrato');
+    expect(await screen.findByText('nº 0001')).toBeInTheDocument();
+    expect(screen.getByText(/Conferido/)).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /Mais ações para dia qua 16\/09/i }));
+    const travado = await screen.findByRole('menuitem', { name: /Travado no acerto nº 0001/ });
+    expect(travado).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByRole('menuitem', { name: /Excluir o dia/ })).not.toBeInTheDocument();
+  });
+
+  it('fechar acerto: confere (simula) pela data e só então fecha', async () => {
+    const user = userEvent.setup();
+    renderizar('extrato');
+    await screen.findByText('OS OS-0042');
+    await user.click(screen.getByRole('button', { name: /Fechar acerto/ }));
+    const dialogo = await screen.findByRole('dialog');
+    expect(await within(dialogo).findByText('A pagar neste acerto')).toBeInTheDocument();
+    expect(chamadas('fechar_acerto_diarias')[0]).toMatchObject({ p_favorecido_id: 'r', p_simular: true });
+    await user.click(within(dialogo).getByRole('button', { name: 'Fechar acerto' }));
+    await waitFor(() => expect(chamadas('fechar_acerto_diarias').some((a) => a.p_simular === false)).toBe(true));
   });
 
   // ── Novo freelancer (pedido do dono, 03/10/2026) ──
