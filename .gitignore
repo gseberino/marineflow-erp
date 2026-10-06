@@ -29,3 +29,6 @@ supabase/.temp/
 
 # fotos baixadas do catálogo do fabricante (pesadas; refazíveis pelos scripts)
 .catalogo-fotos/
+
+# Relatórios gerados localmente (os 40 de staging de 19/05/2026 saíram do repo em 06/10/2026)
+reports/
