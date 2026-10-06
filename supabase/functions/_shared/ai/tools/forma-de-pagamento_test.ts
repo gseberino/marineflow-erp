@@ -37,7 +37,9 @@ Deno.test("as três tools recusam a forma desconhecida ANTES da pendência e lis
 
 Deno.test("o caso da MP Motor Homes: 'dinheiro' chega ao banco como 'cash'", async () => {
   const chamadas: Record<string, unknown>[] = [];
-  const admin = { rpc: (_n: string, p: Record<string, unknown>) => { chamadas.push(p); return Promise.resolve({ data: { ok: true }, error: null }); } };
+  // A tool também lê o orçamento para lançar o saldo (06/10/2026): orçamento sem itens, saldo zero.
+  const semLinhas = { select: () => semLinhas, eq: () => semLinhas, maybeSingle: () => Promise.resolve({ data: { service_order_number: "ORÇ-00095", grand_total: 800 }, error: null }) };
+  const admin = { from: () => semLinhas, rpc: (_n: string, p: Record<string, unknown>) => { chamadas.push(p); return Promise.resolve({ data: { ok: true }, error: null }); } };
   const ctx = { sb: admin, admin, userId: "u1", userRole: "admin", jwt: "", appOrigin: "", settings: {} } as never;
   const r = await tool("register_deposit_and_convert").execute(
     { service_order_id: "92165492-234f-4f16-802e-0ecb13f752b6", amount: 800, payment_date: "2026-10-03", payment_method: "dinheiro" },

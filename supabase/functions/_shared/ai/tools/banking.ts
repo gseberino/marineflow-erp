@@ -171,6 +171,8 @@ export const bankingTools: ToolDef[] = [
           p_card_fee_percent: 0,
           p_net_amount: Number(tx.amount),
           p_notes: notas,
+          // Pelo WhatsApp não há sessão: quem pediu vai junto e o banco confere o cargo (06/10/2026).
+          p_autor: ctx.userId || null,
         });
         if (error) throw error;
         paymentId = (data as any)?.payment_id ?? null;

@@ -1,7 +1,7 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { normalizarTermo } from "../keyword-resolver.ts";
 import { produtoFiscalPendencias } from "../product-fiscal.ts";
-import { camposDeProduto, precoDeVenda } from "../product-create.ts";
+import { camposDeProduto, precoDeVenda, taxasPadrao } from "../product-create.ts";
 import { orContem } from "../filtro-or.ts";
 
 export const productTools: ToolDef[] = [
@@ -296,12 +296,19 @@ export const productTools: ToolDef[] = [
       required: ["name"],
     },
     risk: "low",
-    async execute(args, { sb }) {
+    async execute(args, { sb, settings }) {
       // NOVO-agente-06: `insert(args)` cru gravava o produto com preço de venda ZERO sempre que o
       // modelo mandasse custo + margem (que é o que o próprio schema pede). Ver product-create.ts.
       const { linha, ignorados } = camposDeProduto(args as Record<string, unknown>);
-      const venda = precoDeVenda(args as Record<string, unknown>);
-      if (venda !== null) linha.sale_price = venda;
+      // Mesma conta e mesmos padrões do cadastro da tela (06/10/2026); o imposto e a comissão
+      // usados ficam gravados no produto, como a tela grava.
+      const taxas = taxasPadrao(settings);
+      const venda = precoDeVenda(args as Record<string, unknown>, taxas);
+      if (venda !== null) {
+        linha.sale_price = venda;
+        linha.icms_rate = taxas.imposto;
+        linha.commission_rate = taxas.comissao;
+      }
 
       const { data, error } = await sb.from("products").insert(linha).select().single();
       if (error) throw error;

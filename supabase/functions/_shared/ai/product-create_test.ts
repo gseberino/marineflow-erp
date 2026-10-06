@@ -1,13 +1,28 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { camposDeProduto, precoDeVenda, COLUNAS_DE_PRODUTO } from "./product-create.ts";
+import { camposDeProduto, precoDeVenda, taxasPadrao, COLUNAS_DE_PRODUTO } from "./product-create.ts";
 
 // Regra de dinheiro: é ela que decide por quanto a HBR vende. O bug que estes testes travam
 // (NOVO-agente-06) criou 39 produtos ativos valendo R$ 0,00 porque a margem era aceita e ignorada.
 
 Deno.test("custo + margem viram preço de venda — o caso que criava produto valendo zero", () => {
-  assertEquals(precoDeVenda({ cost_price: 28, profit_margin: 30 }), 36.4);
-  assertEquals(precoDeVenda({ cost_price: 180, profit_margin: 30 }), 234);
-  assertEquals(precoDeVenda({ cost_price: 4.5, profit_margin: 30 }), 5.85);
+  // Sem imposto nem comissão: custo ÷ (1 − margem), a mesma conta da tela.
+  assertEquals(precoDeVenda({ cost_price: 28, profit_margin: 30 }), 40);
+  assertEquals(precoDeVenda({ cost_price: 180, profit_margin: 30 }), 257.14);
+  assertEquals(precoDeVenda({ cost_price: 4.5, profit_margin: 30 }), 6.43);
+});
+
+Deno.test("imposto e comissão saem do preço, como no cadastro da tela (06/10/2026)", () => {
+  // Caso real: Quadro de distribuição, custo 280, margem 30%, imposto 6%, comissão 3%.
+  // A conta antiga (custo × 1,3) dava R$ 364; a tela dá R$ 459,02.
+  assertEquals(precoDeVenda({ cost_price: 280, profit_margin: 30 }, { imposto: 6, comissao: 3 }), 459.02);
+  // Soma ≥ 100% não é preço: não inventa.
+  assertEquals(precoDeVenda({ cost_price: 100, profit_margin: 90 }, { imposto: 6, comissao: 4 }), null);
+});
+
+Deno.test("padrões do cadastro: alíquota do Simples (6% sem configuração) e comissão padrão", () => {
+  assertEquals(taxasPadrao({ simples_aliquota: "6", default_commission_rate: "3" }), { imposto: 6, comissao: 3 });
+  assertEquals(taxasPadrao({}), { imposto: 6, comissao: 0 });
+  assertEquals(taxasPadrao(undefined), { imposto: 6, comissao: 0 });
 });
 
 Deno.test("preço informado MANDA sobre a conta — o dono pode ter negociado", () => {
@@ -21,7 +36,7 @@ Deno.test("sem custo ou sem margem não inventa preço", () => {
 });
 
 Deno.test("zero e negativo não são preço — entram como 'não sei'", () => {
-  assertEquals(precoDeVenda({ sale_price: 0, cost_price: 28, profit_margin: 30 }), 36.4);
+  assertEquals(precoDeVenda({ sale_price: 0, cost_price: 28, profit_margin: 30 }), 40);
   assertEquals(precoDeVenda({ cost_price: 0, profit_margin: 30 }), null);
   assertEquals(precoDeVenda({ cost_price: -5, profit_margin: 30 }), null);
   assertEquals(precoDeVenda({ cost_price: 28, profit_margin: 0 }), null);
@@ -33,7 +48,7 @@ Deno.test("texto no lugar de número não vira NaN gravado no banco", () => {
 });
 
 Deno.test("arredonda a centavo — preço com dízima não vai para o orçamento", () => {
-  assertEquals(precoDeVenda({ cost_price: 10, profit_margin: 33.333 }), 13.33);
+  assertEquals(precoDeVenda({ cost_price: 10, profit_margin: 30 }), 14.29);
 });
 
 Deno.test("allowlist deixa passar só coluna que existe na tabela", () => {
@@ -60,13 +75,14 @@ Deno.test("as 16 colunas do input_schema estão na allowlist", () => {
 });
 
 Deno.test("REGRESSÃO: os 11 produtos de 31/08 agora nasceriam com preço", () => {
-  // Argumentos reais da sessão 3ac5b84a, que geraram sale_price = 0.
+  // Argumentos reais da sessão 3ac5b84a, que geraram sale_price = 0. Valores com os padrões do
+  // cadastro da tela (imposto 6%, comissão 3%) desde 06/10/2026 — antes eram custo × 1,3.
   const reais = [
-    { name: "Cabo de bateria flexível 50mm²", cost_price: 28, profit_margin: 30, esperado: 36.4 },
-    { name: "Cabo de bateria flexível 70mm²", cost_price: 42, profit_margin: 30, esperado: 54.6 },
-    { name: "Terminal a compressão (olhal)",  cost_price: 6,  profit_margin: 30, esperado: 7.8 },
-    { name: "Fusível Classe T 300A",          cost_price: 180, profit_margin: 30, esperado: 234 },
-    { name: "Quadro de distribuição 220V",    cost_price: 280, profit_margin: 30, esperado: 364 },
+    { name: "Cabo de bateria flexível 50mm²", cost_price: 28, profit_margin: 30, esperado: 45.9 },
+    { name: "Cabo de bateria flexível 70mm²", cost_price: 42, profit_margin: 30, esperado: 68.85 },
+    { name: "Terminal a compressão (olhal)",  cost_price: 6,  profit_margin: 30, esperado: 9.84 },
+    { name: "Fusível Classe T 300A",          cost_price: 180, profit_margin: 30, esperado: 295.08 },
+    { name: "Quadro de distribuição 220V",    cost_price: 280, profit_margin: 30, esperado: 459.02 },
   ];
-  for (const p of reais) assertEquals(precoDeVenda(p), p.esperado, p.name);
+  for (const p of reais) assertEquals(precoDeVenda(p, { imposto: 6, comissao: 3 }), p.esperado, p.name);
 });

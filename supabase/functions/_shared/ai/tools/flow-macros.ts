@@ -2,6 +2,7 @@ import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.
 import { ESQUEMA_DA_FORMA, formaDePagamento, validarForma } from "./forma-de-pagamento.ts";
 import { horariosDeBrasilia } from "../fuso.ts";
 import { sendWhatsapp } from "./whatsapp.ts";
+import { descreverSaldo, parcelasDoSaldo } from "./saldo-do-sinal.ts";
 
 // Macros de FLUXO (Onda 2b) — "o LLM orquestra, o código executa".
 // Cada uma colapsa um procedimento de vários passos numa única tool de risco alto:
@@ -127,18 +128,26 @@ export const flowMacroTools: ToolDef[] = [
       const passos: Array<Record<string, unknown>> = [];
 
       // 1) Núcleo: sinal + conversão. Se falhar, para aqui — não dá pra agendar OS que não converteu.
+      // O saldo vira conta a receber junto, como no "Receber sinal" da tela (06/10/2026).
+      const dataDoSinal = String(args.payment_date).split("T")[0];
+      const saldo = await parcelasDoSaldo(ctx, String(args.service_order_id), Number(args.deposit_amount), dataDoSinal);
+      if ("error" in saldo) {
+        return { ok: false, passos: [{ passo: "sinal+conversão", status: "✖", erro: saldo.error }], nota: "Nada foi feito." };
+      }
       const { error: convErr } = await admin.rpc("register_deposit_and_convert", {
         p_service_order_id: args.service_order_id,
         p_amount: args.deposit_amount,
-        p_payment_date: String(args.payment_date).split("T")[0],
+        p_payment_date: dataDoSinal,
         p_payment_method: formaDePagamento(args.payment_method),
         p_card_fee_percent: args.card_fee_percent || 0,
         p_notes: args.notes || null,
+        p_balance_installments: saldo.parcelas.length ? saldo.parcelas : null,
+        p_create_collections: true,
       });
       if (convErr) {
         return { ok: false, passos: [{ passo: "sinal+conversão", status: "✖", erro: convErr.message }], nota: "Nada foi agendado — a conversão falhou." };
       }
-      passos.push({ passo: "sinal+conversão", status: "✔" });
+      passos.push({ passo: "sinal+conversão", status: "✔", saldo: descreverSaldo(saldo.parcelas) });
 
       // nº atual da OS (mesma linha; ganha novo número ao converter)
       const { data: so } = await sb.from("service_orders").select("service_order_number, client_id").eq("id", args.service_order_id).maybeSingle();

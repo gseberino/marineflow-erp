@@ -145,6 +145,21 @@ export function textoDaPendenciaReapresentada(pendencia: {
   return `${cabecalho}\n⚠️ ${pendencia.title}\n${pendencia.summary ?? ""}${notaDeConfirmacao(pendencia.risk_level)}`;
 }
 
+/**
+ * O próximo pedido da mesma leva, mostrado logo depois de decidir o anterior (06/10/2026).
+ *
+ * POR QUE: pedidos em lote ("registra as diárias da semana", "dá baixa nesses 6") criam várias
+ * pendências, mas o WhatsApp só apresentava a primeira; as outras ficavam escondidas e venciam em
+ * 24h — 10 de 12 diárias (29/09) e 5 de 6 baixas (21/08). O painel já encadeava.
+ */
+export function textoDaProximaPendencia(
+  pendencia: { title: string; summary?: string | null; risk_level?: string | null },
+  restantes: number,
+): string {
+  const cabecalho = restantes > 1 ? `Próximo pedido (faltam ${restantes}):` : "Último pedido que falta:";
+  return `${cabecalho}\n⚠️ ${pendencia.title}\n${pendencia.summary ?? ""}${notaDeConfirmacao(pendencia.risk_level)}`;
+}
+
 /** Sessão de WhatsApp: reusa se ativa há menos de 4h, senão cria uma nova (levando a pendência viva). */
 export async function resolveOrCreateWhatsAppSession(admin: any, phoneNormalized: string, appUserId: string): Promise<string> {
   const fourHoursAgoIso = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();

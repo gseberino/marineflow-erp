@@ -2,6 +2,7 @@ import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolCtx, type ToolDef } fro
 import { ESQUEMA_DA_FORMA, formaDePagamento, validarForma } from "./forma-de-pagamento.ts";
 import { mensagemDoBanco } from "./lancamentos.ts";
 import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
+import { descreverSaldo, parcelasDoSaldo } from "./saldo-do-sinal.ts";
 import {
   COLUNAS_DO_FLUXO, FUNCAO_DA_RAIZ_DA_EMPRESA, ROTULO_DO_DESTINO, hojeEmBrasilia, mesesInteirosDoPeriodo, somarDias,
   somarFluxoDoPeriodo, type DestinoDeFora, type LinhaDoFluxo, type OpcoesDoFluxo,
@@ -404,6 +405,9 @@ export const financialTools: ToolDef[] = [
         p_card_fee_percent: args.card_fee_percent || 0,
         p_net_amount: args.amount,
         p_notes: args.notes || null,
+        // O assistente roda sem sessão (service role): quem pediu vai junto e o banco confere o
+        // cargo. Sem isto, toda baixa voltava "acesso negado" (06/10/2026).
+        p_autor: ctx.userId || null,
       });
       if (error) return { error: error.message };
       return { ok: true, payment_id: (data as any)?.payment_id };
@@ -411,7 +415,7 @@ export const financialTools: ToolDef[] = [
   },
   {
     name: "register_deposit_and_convert",
-    description: "Registra o pagamento do sinal de um orçamento e converte automaticamente em Ordem de Serviço (RPC atômica).",
+    description: "Registra o pagamento do sinal de um orçamento e converte automaticamente em Ordem de Serviço (RPC atômica). O SALDO vira conta a receber junto (pela condição de pagamento; sem ela, o restante na entrega).",
     input_schema: {
       type: "object",
       properties: {
@@ -433,16 +437,22 @@ export const financialTools: ToolDef[] = [
       const forma = validarForma(args);
       if (forma) return forma;
       const { admin } = ctx;
+      const dataDoSinal = String(args.payment_date).split("T")[0];
+      // O saldo vira conta a receber junto, como no "Receber sinal" da tela (06/10/2026).
+      const saldo = await parcelasDoSaldo(ctx, String(args.service_order_id), Number(args.amount), dataDoSinal);
+      if ("error" in saldo) return { error: saldo.error };
       const { data, error } = await admin.rpc("register_deposit_and_convert", {
         p_service_order_id: args.service_order_id,
         p_amount: args.amount,
-        p_payment_date: String(args.payment_date).split("T")[0],
+        p_payment_date: dataDoSinal,
         p_payment_method: formaDePagamento(args.payment_method),
         p_card_fee_percent: args.card_fee_percent || 0,
         p_notes: args.notes || null,
+        p_balance_installments: saldo.parcelas.length ? saldo.parcelas : null,
+        p_create_collections: true,
       });
       if (error) return { error: error.message };
-      return { ok: true, result: data };
+      return { ok: true, result: data, saldo: descreverSaldo(saldo.parcelas) };
     },
   },
   {

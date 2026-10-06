@@ -46,6 +46,7 @@ import {
   notaDeConfirmacao,
   parseConfirmationReply,
   textoDaPendenciaReapresentada,
+  textoDaProximaPendencia,
   parseOptionReply,
   queueWhatsAppReply,
   resolveOptionAsUserText,
@@ -379,7 +380,7 @@ async function resolveWhatsAppConfirmation(
       event_category: "security",
       payload: { channel: "whatsapp", args: pending.payload },
     });
-    return { message: `❌ Ação rejeitada: ${pending.title}.`, metadata: clearedMetadata };
+    return await comAProximaPendencia(admin, pending, `❌ Ação rejeitada: ${pending.title}.`, clearedMetadata);
   }
 
   // approve — ações high exigem PIN (telefone sozinho é autenticação fraca)
@@ -425,7 +426,31 @@ async function resolveWhatsAppConfirmation(
     payload: { channel: "whatsapp", args: pending.payload, risk: pending.risk_level, result_summary: JSON.stringify(execResult ?? null).slice(0, 500) },
   });
   const message = execError ? `⚠️ ${pending.title} — falhou: ${execError}` : `✅ ${pending.title} — executado.${ressalvaDoResultado(execResult)}`;
-  return { message, metadata: clearedMetadata };
+  return await comAProximaPendencia(admin, pending, message, clearedMetadata);
+}
+
+/**
+ * Depois de decidir um pedido, apresenta o próximo da mesma leva (06/10/2026) — como o painel já
+ * fazia. Sem isto, num lote só o primeiro chegava ao dono e os outros venciam escondidos.
+ * Não vale para a rejeição por PIN errado 3 vezes: ali a conversa para, por segurança.
+ */
+async function comAProximaPendencia(
+  admin: any,
+  pending: { id: string; session_id: string | null; created_at: string },
+  mensagem: string,
+  metadataLimpa: Record<string, any>,
+): Promise<{ message: string; metadata: Record<string, any> }> {
+  const decidida = { id: pending.id, created_at: pending.created_at };
+  const proxima = await proximaPendenciaDaSessao(admin, pending.session_id, decidida);
+  if (!proxima) return { message: mensagem, metadata: metadataLimpa };
+  const restantes = await quantasPendenciasAbertas(admin, pending.session_id, decidida);
+  return {
+    message: `${mensagem}\n\n${textoDaProximaPendencia(
+      { title: proxima.title, summary: proxima.summary_markdown, risk_level: proxima.risk_level },
+      Math.max(restantes, 1),
+    )}`,
+    metadata: { ...metadataLimpa, pending_confirm_action_id: proxima.pending_action_id },
+  };
 }
 
 /** 3 tentativas de PIN erradas: avisa todo admin com telefone cadastrado. */

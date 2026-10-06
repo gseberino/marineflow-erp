@@ -473,63 +473,102 @@ export const soOpsTools: ToolDef[] = [
     },
     risk: "medium",
     roles: NON_TECHNICIAN_ROLES,
-    async execute(args, { sb, admin }) {
-      const { data: origem } = await sb
+    async execute(args, { sb, admin, userId }) {
+      // 06/10/2026: a cópia perdia TODAS as peças (faltava unit_sale_snapshot, obrigatório; o erro
+      // do insert era ignorado e a resposta dizia "copiei 2") e numerava por "último + 1", fora do
+      // contador — a ORÇ-00112 (04/10) nasceu sem peças e roubou o número do orçamento seguinte.
+      // Agora: mesma cópia da tela (useDuplicateServiceOrder), número do contador oficial, erro de
+      // cada gravação conferido e, se algo falhar, a cópia incompleta é desfeita.
+      const { data: origem, error: errOrigem } = await sb
         .from("service_orders")
-        .select("*")
+        .select("*, service_order_parts(*), service_order_services(*)")
         .eq("id", args.service_order_id)
         .maybeSingle();
+      if (errOrigem) return { error: `Não consegui ler a OS de origem: ${errOrigem.message}` };
       if (!origem) return { error: "Ordem de serviço não encontrada." };
 
-      // Numeração: mesmo esquema das demais criações (não-atômico, como o front).
-      const { data: ultima } = await admin
-        .from("service_orders").select("service_order_number")
-        .order("created_at", { ascending: false }).limit(1);
-      let seq = 1;
-      const ref = ultima?.[0]?.service_order_number;
-      if (ref) {
-        const m = String(ref).match(/(\d+)$/);
-        if (m) seq = parseInt(m[1], 10) + 1;
-      }
+      const { data: seq, error: errSeq } = await admin.rpc("next_document_number");
+      if (errSeq || seq == null) return { error: `Não consegui gerar o número do orçamento: ${errSeq?.message ?? "sem resposta"}` };
       const numero = `ORÇ-${String(seq).padStart(5, "0")}`;
 
-      const o = origem as any;
-      const { data: nova, error: errNova } = await sb.from("service_orders").insert({
-        service_order_number: numero,
-        client_id: args.client_id || o.client_id,
-        vessel_id: args.vessel_id || o.vessel_id,
-        marina_id: o.marina_id,
-        description: o.description,
-        status: "draft",
-        labor_cost_total: o.labor_cost_total,
-        parts_cost_total: o.parts_cost_total,
-        travel_cost_total: o.travel_cost_total,
-        is_travel_billable: o.is_travel_billable,
-        subcontract_cost_total: o.subcontract_cost_total,
-        discount_amount: o.discount_amount,
-        tax_amount: o.tax_amount,
-        grand_total: o.grand_total,
-      }).select("id, service_order_number").single();
-      if (errNova) throw errNova;
+      // O que descreve o serviço vai junto; execução, assinatura, pagamento, confirmação do cliente
+      // e totais (recalculados a partir dos itens) ficam na original — a lista da tela, mais os
+      // campos de execução e de confirmação que não fazem sentido num orçamento novo.
+      const {
+        id: _id, created_at: _c, updated_at: _u, service_order_number: _n,
+        scheduled_start_at: _s1, scheduled_end_at: _s2, check_in_at: _ci, check_out_at: _co,
+        client_signature_url: _sig, signed_at: _sa, signed_by_name: _sb, signed_document_hash: _sh,
+        requires_resignature: _rr, resignature_requested_at: _rra, share_token: _st,
+        payment_status: _ps, payment_method: _pm, payment_condition_preset_id: _pp,
+        payment_conditions: _pc, card_installments: _ci2, invoicing_status: _is,
+        reopen_reason: _rre, reopened_at: _ra, cancellation_reason: _cr, cancelled_at: _ca,
+        grand_total: _gt, labor_cost_total: _lt, parts_cost_total: _pt, operational_cost_total: _ot,
+        travel_cost_total: _tt, subcontract_cost_total: _sct, labor_hours_total: _lh,
+        commissioned_user_id: _cu, commission_amount: _cam, converted_to_os_at: _cv, quote_status: _qs,
+        original_quote_amount: _oq, survey_id: _sv, reminder_sent_at: _rs, quote_validity_date: _qvd,
+        client_confirmed_at: _cc, client_confirmed_for: _cf, client_confirmation_requested_at: _ccr,
+        diagnosis: _dg, solution_applied: _sol, customer_visible_report: _cvr,
+        service_order_parts: pecas, service_order_services: servicos,
+        ...copia
+        // deno-lint-ignore no-explicit-any
+      } = origem as any;
 
+      const { data: nova, error: errNova } = await sb.from("service_orders").insert({
+        ...copia,
+        service_order_number: numero,
+        client_id: args.client_id || copia.client_id,
+        vessel_id: args.vessel_id || copia.vessel_id,
+        status: "draft",
+        quote_status: "draft",
+        converted_to_os_at: null,
+        created_by: userId || copia.created_by || null,
+        priority: copia.priority || "normal",
+        discount_amount: copia.discount_amount || 0,
+        tax_amount: copia.tax_amount || 0,
+      }).select("id, service_order_number").single();
+      if (errNova) return { error: `Não consegui criar a cópia: ${errNova.message}` };
+      // deno-lint-ignore no-explicit-any
       const novoId = (nova as any).id;
 
-      const { data: pecas } = await sb.from("service_order_parts")
-        .select("product_id, quantity, unit_cost_snapshot, line_total_cost, line_total_sale")
-        .eq("service_order_id", args.service_order_id);
-      if (pecas?.length) {
-        await sb.from("service_order_parts").insert(
-          (pecas as any[]).map((p) => ({ ...p, service_order_id: novoId })),
-        );
+      const desfazer = async (motivo: string) => {
+        await admin.from("service_order_parts").delete().eq("service_order_id", novoId);
+        await admin.from("service_order_services").delete().eq("service_order_id", novoId);
+        await admin.from("service_orders").delete().eq("id", novoId);
+        return { error: `A cópia não foi feita (${motivo}). Nada ficou gravado.` };
+      };
+
+      const listaDePecas = Array.isArray(pecas) ? pecas : [];
+      if (listaDePecas.length) {
+        // deno-lint-ignore no-explicit-any
+        const { error } = await sb.from("service_order_parts").insert(listaDePecas.map((p: any) => ({
+          service_order_id: novoId,
+          product_id: p.product_id,
+          quantity: p.quantity,
+          unit_cost_snapshot: p.unit_cost_snapshot,
+          unit_sale_snapshot: p.unit_sale_snapshot,
+          line_total_cost: p.line_total_cost,
+          line_total_sale: p.line_total_sale,
+          currency_snapshot: p.currency_snapshot,
+          notes: p.notes,
+        })));
+        if (error) return await desfazer(`peças: ${error.message}`);
       }
 
-      const { data: servicos } = await sb.from("service_order_services")
-        .select("service_id, name_snapshot, billing_unit_snapshot, quantity, unit_price_snapshot, line_total")
-        .eq("service_order_id", args.service_order_id);
-      if (servicos?.length) {
-        await sb.from("service_order_services").insert(
-          (servicos as any[]).map((s) => ({ ...s, service_order_id: novoId })),
-        );
+      const listaDeServicos = Array.isArray(servicos) ? servicos : [];
+      if (listaDeServicos.length) {
+        // deno-lint-ignore no-explicit-any
+        const { error } = await sb.from("service_order_services").insert(listaDeServicos.map((s: any) => ({
+          service_order_id: novoId,
+          service_id: s.service_id,
+          name_snapshot: s.name_snapshot,
+          description_snapshot: s.description_snapshot,
+          billing_unit_snapshot: s.billing_unit_snapshot,
+          quantity: s.quantity,
+          unit_price_snapshot: s.unit_price_snapshot,
+          line_total: s.line_total,
+          notes: s.notes,
+        })));
+        if (error) return await desfazer(`serviços: ${error.message}`);
       }
 
       await recalcularOSComCascata(sb, novoId);
@@ -537,9 +576,10 @@ export const soOpsTools: ToolDef[] = [
       return {
         ok: true,
         nova_os_id: novoId,
+        // deno-lint-ignore no-explicit-any
         numero: (nova as any).service_order_number,
-        copiados: { pecas: pecas?.length ?? 0, servicos: servicos?.length ?? 0 },
-        aviso: "Criada em rascunho. Roteiro, horas e despesas NÃO são copiados.",
+        copiados: { pecas: listaDePecas.length, servicos: listaDeServicos.length },
+        aviso: "Criada em rascunho. Roteiro, horas, despesas e a condição de pagamento NÃO são copiados (como na tela).",
       };
     },
   },

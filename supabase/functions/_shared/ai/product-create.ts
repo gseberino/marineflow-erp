@@ -45,10 +45,17 @@ export function camposDeProduto(args: Record<string, unknown>): { linha: LinhaDe
  * Preço de venda a gravar, ou `null` quando não há como calcular.
  *
  * Regra: preço informado MANDA (o dono pode ter negociado um valor que não sai de conta nenhuma).
- * Sem preço informado, custo × (1 + margem/100). Sem custo ou sem margem, não inventa — devolve
- * null e o produto entra sem preço, agora com aviso explícito de que falta.
+ * Sem preço informado, a MESMA conta do cadastro da tela (src/lib/price-calculator.ts): margem,
+ * imposto e comissão saem do preço de venda → custo ÷ (1 − margem − imposto − comissão).
+ * Até 06/10/2026 era custo × (1 + margem): 11 produtos do assistente saíram ~20% abaixo da tela
+ * (ex.: Quadro de distribuição a R$ 364; pela tela, R$ 459).
+ * Sem custo ou sem margem, ou com a soma ≥ 100%, não inventa — devolve null e o produto entra sem
+ * preço, com aviso explícito de que falta.
  */
-export function precoDeVenda(args: { sale_price?: unknown; cost_price?: unknown; profit_margin?: unknown }): number | null {
+export function precoDeVenda(
+  args: { sale_price?: unknown; cost_price?: unknown; profit_margin?: unknown },
+  taxas: TaxasDoPreco = { imposto: 0, comissao: 0 },
+): number | null {
   const informado = Number(args.sale_price);
   if (Number.isFinite(informado) && informado > 0) return arredonda(informado);
 
@@ -57,7 +64,28 @@ export function precoDeVenda(args: { sale_price?: unknown; cost_price?: unknown;
   if (!Number.isFinite(custo) || custo <= 0) return null;
   if (!Number.isFinite(margem) || margem <= 0) return null;
 
-  return arredonda(custo * (1 + margem / 100));
+  // Em pontos percentuais, como a tela: subtrair inteiros é exato.
+  const divisor = (100 - margem - taxas.imposto - taxas.comissao) / 100;
+  if (divisor <= 1e-9) return null;
+  return arredonda(custo / divisor);
+}
+
+export interface TaxasDoPreco {
+  /** % de imposto sobre a venda (no cadastro da tela: alíquota do Simples). */
+  imposto: number;
+  /** % de comissão sobre a venda. */
+  comissao: number;
+}
+
+/** Os mesmos padrões que o cadastro da tela aplica a produto novo (ProductFormDialog). */
+export function taxasPadrao(settings: Record<string, string> | undefined): TaxasDoPreco {
+  const s = settings || {};
+  const imposto = Number(s.simples_aliquota);
+  const comissao = Number(s.default_commission_rate);
+  return {
+    imposto: Number.isFinite(imposto) && imposto > 0 ? imposto : 6,
+    comissao: Number.isFinite(comissao) && comissao > 0 ? comissao : 0,
+  };
 }
 
 function arredonda(n: number): number {
