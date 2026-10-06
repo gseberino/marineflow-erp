@@ -27,6 +27,7 @@ import { PdfDefaultsSection } from './settings/PdfDefaultsSection';
 import { WhatsAppConexaoTab } from './settings/WhatsAppConexaoTab';
 import { AssistenteIATab } from './settings/AssistenteIATab';
 import { RoteiroExecucaoCard } from './settings/RoteiroExecucaoCard';
+import { AcompanhamentoIACard } from './settings/AcompanhamentoIACard';
 
 const TERM_KEYS = [
   { key: 'terms_warranty', labelKey: 'termsWarranty' as const },
@@ -312,6 +313,7 @@ export default function SettingsPage() {
           {languageContent}
           <InstallAgendaCard />
           <RoteiroExecucaoCard />
+          <AcompanhamentoIACard />
           <TaskAutomationSettings />
           <MasterDataPanel />
         </TabsContent>

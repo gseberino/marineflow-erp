@@ -49,6 +49,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { statusConfig } from '@/lib/constants';
 import { FilterPresets } from '@/components/FilterPresets';
 import { downloadCSV } from '@/lib/download';
+import { useFollowupSwitch } from '@/hooks/use-followup-missions';
 
 type ViewMode = 'today' | 'week' | 'month' | 'done' | 'inbox' | 'esperando';
 
@@ -106,6 +107,8 @@ export default function AgendaPage() {
       ? (v as ViewMode) : 'today';
   });
   const [cursor, setCursor] = useState(() => new Date());
+  // Acompanhamento pela IA desligado (desde 15/09): o link some; religa em Configurações › Sistema.
+  const acompanhamento = useFollowupSwitch();
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
   const [osDialogOpen, setOsDialogOpen] = useState(false);
@@ -391,10 +394,12 @@ export default function AgendaPage() {
               )}
             </Button>
             {/* O que depende DELES e a IA está cobrando: painel próprio (as missões do
-                "Deixar a IA acompanhar"). Link, não hook: a agenda não carrega mais uma query. */}
-            <Button asChild size="sm" variant="ghost">
-              <Link to="/v2/agenda/acompanhamentos">IA acompanhando</Link>
-            </Button>
+                "Deixar a IA acompanhar"). Só com o acompanhamento ligado (06/10/2026). */}
+            {acompanhamento.ligado && !acompanhamento.isLoading && (
+              <Button asChild size="sm" variant="ghost">
+                <Link to="/v2/agenda/acompanhamentos">IA acompanhando</Link>
+              </Button>
+            )}
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
