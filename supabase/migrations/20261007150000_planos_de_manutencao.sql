@@ -214,9 +214,12 @@ $$;
 
 -- ─── 4. A view ──────────────────────────────────────────────────────────────────────────────
 -- Uma linha por plano ATIVO. `name` e `plan_name` são a mesma coisa (os dois nomes, para a tela e o
--- assistente). window_opens_on segue o contrato: 21 dias antes (o D-21 do primeiro toque) ou o fim
--- do adiamento — advance_days NÃO entra aqui (o primeiro toque ao cliente é fixo em D-21).
+-- assistente). window_opens_on = quando a tarefa do DONO abre: advance_days antes do vencimento
+-- ("avisar X dias antes" na tela; padrão 21, igual ao primeiro toque) ou o fim do adiamento. O
+-- primeiro toque ao CLIENTE é fixo em D-21 e calculado pela edge lembretes-de-revisao, não daqui.
 -- tem_os_agendada inclui 'approved' (OS aprovada esperando agenda também é trabalho marcado).
+alter table public.maintenance_plans alter column advance_days set default 21;
+
 create or replace view public.v_maintenance_plans_due
 with (security_invoker = on) as
 with base as (
@@ -255,13 +258,13 @@ select b.id as plan_id,
        b.source,
        b.notes,
        b.next_due_on,
-       greatest(b.next_due_on - 21, b.snoozed_until) as window_opens_on,
+       greatest(b.next_due_on - coalesce(b.advance_days, 21), b.snoozed_until) as window_opens_on,
        b.snoozed_until,
        (b.next_due_on - b.hoje) as dias_para_vencer,
        case
          when b.snoozed_until > b.hoje then 'adiada'
          when b.next_due_on < b.hoje then 'vencida'
-         when b.next_due_on - b.hoje <= 21 then 'na_janela'
+         when b.next_due_on - b.hoje <= coalesce(b.advance_days, 21) then 'na_janela'
          else 'em_dia'
        end as situacao,
        (os.id is not null) as tem_os_agendada,

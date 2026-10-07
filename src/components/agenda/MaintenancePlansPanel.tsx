@@ -46,14 +46,14 @@ interface Formulario {
 }
 
 const VAZIO: Formulario = {
-  name: '', months: '12', value: '', scope: '', lastAt: '', advance: '14',
+  name: '', months: '12', value: '', scope: '', lastAt: '', advance: '21',
   sistema: QUALQUER, verbo: QUALQUER, palavras: '', lembrete: true, source: 'manual',
 };
 
 function doPlano(p: PlanoDeManutencao): Formulario {
   return {
     name: p.name, months: String(p.interval_months), value: p.estimated_value != null ? String(p.estimated_value) : '',
-    scope: p.scope ?? '', lastAt: p.last_service_at ?? '', advance: String(p.advance_days ?? 14),
+    scope: p.scope ?? '', lastAt: p.last_service_at ?? '', advance: String(p.advance_days ?? 21),
     sistema: p.service_system ?? QUALQUER, verbo: p.service_verb ?? QUALQUER,
     palavras: (p.match_keywords ?? []).join(', '), lembrete: p.client_reminder_enabled !== false, source: p.source ?? 'manual',
   };
