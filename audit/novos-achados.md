@@ -2506,3 +2506,16 @@ porque só o dono pode preenchê-las.
   construtor recusar emissão com alíquota ausente em vez de mandar zero.
 - **Não corrigido:** regra 3, e a alíquota correta é decisão da contadora — a
   Contora está aguardando a confirmação de 3% desde 19/08.
+
+### [NOVO-planos-front-01] Prospecção › Orçamentos Pendentes manda WhatsApp ao cliente pelo whatsapp-send-text cru
+
+- **Onde:** `src/pages/ActiveProspectingPage.tsx` (aba Orçamentos Pendentes, `handleSend` →
+  `useSendWhatsAppText` → edge `whatsapp-send-text`).
+- **O quê:** o texto gerado pela IA vai direto ao cliente, sem conferir `clients.opt_out_whatsapp`,
+  sem guarda de horário (compliance-guard / janela útil), sem respeitar o modo de teste
+  (`wa_test_mode`) e sem registrar em `ai_comms_log`. É o mesmo defeito que a spec dos planos de
+  manutenção mandou corrigir na aba Revisões preventivas — corrigido lá em 07/10/2026 (envio pelo
+  fluxo com pendência + "sim" do dono); a aba de orçamentos ficou como estava.
+- **Consertar seria:** enviar pelo mesmo fluxo de pendência (ex.: `send_whatsapp_message` do
+  assistente, que pede confirmação) ou pela fila com as guardas, como a R15.
+- **Não corrigido:** fora do escopo da frente TELAS dos planos (regra 3).

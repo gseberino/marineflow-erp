@@ -15,6 +15,7 @@ import { PaymentDialog } from '@/components/PaymentDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useSnoozeTask, type RelatedEntityType } from '@/hooks/use-agenda';
 import { PedirConfirmacaoButton } from '@/components/agenda/PedirConfirmacaoButton';
+import { AcoesDaTarefaDeRevisao, planoDaChaveR14 } from '@/components/agenda/PlanoDialogs';
 
 const ENTITY_CONFIG: Record<RelatedEntityType, { label: string; Icon: typeof Briefcase; route: (id: string) => string }> = {
   // Rotas da v2 (20/09/2026): as telas legadas saem em 15/10 e a OC ganhou detalhe próprio em
@@ -81,6 +82,9 @@ function TaskActionButton({ task, onScheduleOs }: { task: any; onScheduleOs?: (t
   if (et === 'service_order' && task.automation_key?.startsWith('r15:') && task.related_entity_id) {
     return <PedirConfirmacaoButton osId={task.related_entity_id} />;
   }
+  // R14: "Propor revisão" — o serviço feito ou o adiamento mudam o ciclo do plano (07/10/2026).
+  const planoR14 = et === 'vessel' ? planoDaChaveR14(task.automation_key) : null;
+  if (planoR14) return <AcoesDaTarefaDeRevisao planId={planoR14} rotulo={task.title} />;
 
   const openPayment = async (e: React.MouseEvent) => {
     e.stopPropagation();
