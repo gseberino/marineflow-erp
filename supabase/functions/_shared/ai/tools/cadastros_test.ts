@@ -276,6 +276,20 @@ Deno.test("update_marina: nome exato desempata; ambíguo devolve opções; desat
   assertStringIncludes(semRua.error, "rua");
 });
 
+// 07/10/2026: a tabela ganhou o bairro (migration 20261007161000_marina_bairro) — antes o campo
+// "bairro" não existia nem na tool nem na tabela.
+Deno.test("update_marina e create_marina: bairro vai para a coluna própria, fora da rua", async () => {
+  const db = bancoFalso({ marinas: MARINAS() });
+  const r = await tool("update_marina").execute({ marina: "Porto Belo", neighborhood: " Centro " }, ctxCom(db)) as any;
+  assert(r.ok, JSON.stringify(r));
+  assertEquals(db.chamadas.update[0][1], { neighborhood: "Centro" });
+  const c = await tool("create_marina").execute({
+    name: "Marina Penha", address_line_1: "Rua B", address_number: "7", neighborhood: "Armação",
+  }, ctxCom(db)) as any;
+  assert(c.ok, JSON.stringify(c));
+  assertEquals(db.chamadas.insert[0][1], { name: "Marina Penha", address_line_1: "Rua B, 7", neighborhood: "Armação" });
+});
+
 Deno.test("update_marina: leitura que falha lança", async () => {
   const db = bancoFalso({ marinas: MARINAS() }, { marinas: "boom" });
   await assertRejects(() => tool("update_marina").execute({ marina: "Porto Belo", phone: "47999991234" }, ctxCom(db)));

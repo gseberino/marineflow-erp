@@ -14,6 +14,9 @@ const DETECTOR_LABEL: Record<string, string> = {
   voice_note: 'Seu recado',
 };
 
+/** Os motivos de descarte mais comuns, a um toque; o campo aceita qualquer outro. */
+const MOTIVOS_RAPIDOS = ['Já resolvido', 'Não é tarefa', 'Duplicada', 'Entendeu errado'];
+
 function fmtWhen(s: any): string | null {
   const iso = s.suggested_start_at || s.suggested_due_at;
   if (!iso) return null;
@@ -34,10 +37,21 @@ export function SuggestionCard({ suggestion }: { suggestion: any }) {
   const dismiss = useDismissSuggestion();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(suggestion.title);
+  // Motivo do descarte (07/10/2026): a coluna dismiss_reason existia e a tela nunca preenchia.
+  // Opcional — é o que ensina o detector a não sugerir de novo o que não serve.
+  const [descartando, setDescartando] = useState(false);
+  const [motivo, setMotivo] = useState('');
 
   const when = fmtWhen(suggestion);
   const isVoice = suggestion.origin !== 'whatsapp';
   const busy = accept.isPending || dismiss.isPending;
+
+  const descartar = () => {
+    dismiss.mutate({ id: suggestion.id, reason: motivo.trim() || undefined }, {
+      onSuccess: () => toast.success('Descartada'),
+      onError: (e: any) => toast.error(e?.message || 'Erro'),
+    });
+  };
 
   const doAccept = () => {
     accept.mutate(
@@ -100,13 +114,32 @@ export function SuggestionCard({ suggestion }: { suggestion: any }) {
           <Pencil className="h-3.5 w-3.5 mr-1" /> {editing ? 'Cancelar' : 'Ajustar'}
         </Button>
         <Button aria-label="Descartar esta sugestão" size="sm" variant="ghost" className="h-7 text-muted-foreground" disabled={busy}
-          onClick={() => dismiss.mutate({ id: suggestion.id }, {
-            onSuccess: () => toast.success('Descartada'),
-            onError: (e: any) => toast.error(e?.message || 'Erro'),
-          })}>
+          aria-expanded={descartando}
+          onClick={() => setDescartando((v) => !v)}>
           <X className="h-3.5 w-3.5" />
         </Button>
       </div>
+
+      {descartando && (
+        <div className="space-y-1.5 rounded border border-dashed p-2">
+          <div className="flex flex-wrap gap-1">
+            {MOTIVOS_RAPIDOS.map((m) => (
+              <Button key={m} type="button" size="sm" variant={motivo === m ? 'secondary' : 'outline'}
+                className="h-6 px-2 text-[11px]" onClick={() => setMotivo(motivo === m ? '' : m)}>
+                {m}
+              </Button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <Input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Motivo (opcional)"
+              aria-label="Motivo do descarte" className="h-7 min-w-0 flex-1 text-xs"
+              onKeyDown={(e) => { if (e.key === 'Enter') descartar(); }} />
+            <Button size="sm" variant="destructive" className="h-7 shrink-0" disabled={busy} onClick={descartar}>
+              Descartar
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

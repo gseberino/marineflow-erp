@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -16,6 +16,14 @@ import { useServiceOrders } from '@/hooks/use-service-orders';
 import { useCollectionTemplates, useCreateCollection } from '@/hooks/use-collections';
 import { supabase } from '@/integrations/supabase/client';
 import { maskPhone } from '@/lib/masks';
+import {
+  escolherRecebivel, recebivelDaEscolha, saldoDoRecebivel, type RecebivelDaOS,
+} from '@/lib/recebivel-da-cobranca';
+
+/** Situações em que a cobrança ainda espera pagamento (as mesmas de criar_cobranca). */
+const COBRANCA_ABERTA = ['pending', 'sent', 'viewed', 'overdue', 'disputed'];
+const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const ddmm = (iso: string | null) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : '—');
 
 interface Props { open: boolean; onOpenChange: (v: boolean) => void }
 
@@ -33,6 +41,12 @@ export function CreateCollectionDialog({ open, onOpenChange }: Props) {
   const [templateId, setTemplateId] = useState<string>('');
   const [sendMethod, setSendMethod] = useState<'text_link' | 'text' | 'pdf'>('text_link');
   const [autoRule, setAutoRule] = useState(false);
+  // A conta a receber que esta cobrança cobra (07/10/2026): sem o vínculo, a cobrança nunca
+  // fica paga sozinha quando a conta é paga (gatilho sync_collection_from_receivable).
+  const [contasDaOS, setContasDaOS] = useState<RecebivelDaOS[] | null>(null);
+  const [erroDasContas, setErroDasContas] = useState<string | null>(null);
+  const [parcelaId, setParcelaId] = useState('');
+  const [jaCobrada, setJaCobrada] = useState<string | null>(null);
 
   const { data: clients } = useClients();
   const { data: serviceOrders } = useServiceOrders();
@@ -45,28 +59,73 @@ export function CreateCollectionDialog({ open, onOpenChange }: Props) {
     );
   }, [serviceOrders]);
 
-  // Auto-fill from selected SO
+  // OS escolhida: o cliente dela e as contas a receber (para ligar a cobrança à parcela em aberto).
+  // Só a troca de OS recarrega: a lista de OS sendo relida (foco na janela) não pode apagar a
+  // parcela já escolhida — por isso a OS é lida pela ref, não é dependência do efeito.
+  const osRef = useRef(eligibleSO);
+  osRef.current = eligibleSO;
   useEffect(() => {
+    setContasDaOS(null); setErroDasContas(null); setParcelaId(''); setJaCobrada(null);
     if (origin !== 'os' || !serviceOrderId) return;
+    let vivo = true;
     (async () => {
-      const so = eligibleSO.find(s => s.id === serviceOrderId);
+      const so = osRef.current.find(s => s.id === serviceOrderId);
       if (!so) return;
       setClientId(so.client_id);
-      const { data: rec } = await supabase
+      const { data, error } = await supabase
         .from('receivables')
-        .select('id, amount, balance_amount, due_date')
+        .select('id, description, amount, balance_amount, due_date, status')
         .eq('service_order_id', serviceOrderId)
-        .order('due_date', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (rec) {
-        setAmount(String(rec.balance_amount ?? rec.amount ?? so.grand_total ?? ''));
-        setDueDate(rec.due_date || '');
-      } else {
+        .neq('status', 'cancelled')
+        .order('due_date', { ascending: true })
+        .limit(50);
+      if (!vivo) return;
+      // Leitura que falha não vira "OS sem conta": a cobrança sairia sem vínculo sem ninguém saber.
+      if (error) { setErroDasContas(`Não consegui ler as contas a receber desta OS (${error.message}).`); return; }
+      const contas = (data ?? []) as RecebivelDaOS[];
+      setContasDaOS(contas);
+      const escolha = escolherRecebivel(contas);
+      if (escolha.tipo === 'uma') {
+        setAmount(String(saldoDoRecebivel(escolha.recebivel)));
+        setDueDate(escolha.recebivel.due_date || '');
+      } else if (escolha.tipo === 'sem_conta') {
         setAmount(String(so.grand_total ?? ''));
       }
     })();
-  }, [serviceOrderId, origin, eligibleSO]);
+    return () => { vivo = false; };
+  }, [serviceOrderId, origin]);
+
+  const escolha = useMemo(
+    () => (origin === 'os' && contasDaOS ? escolherRecebivel(contasDaOS, parcelaId) : null),
+    [origin, contasDaOS, parcelaId],
+  );
+  const recebivel = escolha ? recebivelDaEscolha(escolha) : null;
+
+  // A mesma parcela não ganha duas cobranças abertas (criar_cobranca recusa igual).
+  useEffect(() => {
+    setJaCobrada(null);
+    if (!recebivel) return;
+    let vivo = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from('collections')
+        .select('id, amount, due_date')
+        .eq('receivable_id', recebivel.id)
+        .in('status', COBRANCA_ABERTA)
+        .limit(1);
+      if (!vivo) return;
+      if (error) { setJaCobrada(`Não consegui conferir as cobranças desta parcela (${error.message}).`); return; }
+      const ja = (data ?? [])[0] as { amount: number; due_date: string } | undefined;
+      if (ja) setJaCobrada(`Já existe cobrança aberta para esta parcela (${brl(Number(ja.amount))}, vence ${ddmm(ja.due_date)}). Altere a existente.`);
+    })();
+    return () => { vivo = false; };
+  }, [recebivel?.id]);
+
+  const escolherParcela = (id: string) => {
+    setParcelaId(id);
+    const r = contasDaOS?.find((c) => c.id === id);
+    if (r) { setAmount(String(saldoDoRecebivel(r))); setDueDate(r.due_date || ''); }
+  };
 
   // Default contact from client
   const selectedClient = clients?.find(c => c.id === clientId);
@@ -93,9 +152,14 @@ export function CreateCollectionDialog({ open, onOpenChange }: Props) {
     setAmount(''); setDueDate(''); setContactName(''); setContactPhone('');
     setContactWhatsapp(''); setOverrideContact(false); setTemplateId('');
     setSendMethod('text_link'); setAutoRule(false);
+    setContasDaOS(null); setErroDasContas(null); setParcelaId(''); setJaCobrada(null);
   };
 
-  const canSave = clientId && amount && dueDate && (origin === 'standalone' ? description : serviceOrderId);
+  // Na OS: as contas lidas, a parcela escolhida quando há várias, nada pago por inteiro e sem cobrança repetida.
+  const vinculoOk = origin === 'standalone' || (
+    !!escolha && !erroDasContas && !jaCobrada && escolha.tipo !== 'pagas' && !(escolha.tipo === 'escolher' && !recebivel)
+  );
+  const canSave = clientId && amount && dueDate && (origin === 'standalone' ? description : serviceOrderId) && vinculoOk;
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -103,6 +167,7 @@ export function CreateCollectionDialog({ open, onOpenChange }: Props) {
     await create.mutateAsync({
       client_id: clientId,
       service_order_id: origin === 'os' ? serviceOrderId : null,
+      receivable_id: origin === 'os' ? recebivel?.id ?? null : null,
       description: origin === 'standalone' ? description : null,
       standalone_amount: origin === 'standalone' ? Number(amount) : null,
       amount: Number(amount),
@@ -145,6 +210,36 @@ export function CreateCollectionDialog({ open, onOpenChange }: Props) {
                   ))}
                 </SelectContent>
               </Select>
+              {erroDasContas && <p className="text-xs text-destructive">{erroDasContas}</p>}
+              {escolha?.tipo === 'pagas' && (
+                <p className="text-xs text-destructive">As contas a receber desta OS estão pagas: não há o que cobrar.</p>
+              )}
+              {escolha?.tipo === 'sem_conta' && (
+                <p className="text-xs text-muted-foreground">
+                  Esta OS ainda não tem conta a receber: a cobrança fica sem vínculo e não se marca como paga sozinha.
+                </p>
+              )}
+              {escolha?.tipo === 'uma' && (
+                <p className="text-xs text-muted-foreground">
+                  Cobra «{escolha.recebivel.description ?? 'parcela'}» — fica paga sozinha quando a conta for paga.
+                </p>
+              )}
+              {escolha?.tipo === 'escolher' && (
+                <div className="space-y-1">
+                  <Label>Parcela *</Label>
+                  <Select value={parcelaId} onValueChange={escolherParcela}>
+                    <SelectTrigger><SelectValue placeholder={`${escolha.abertas.length} parcelas em aberto — qual?`} /></SelectTrigger>
+                    <SelectContent>
+                      {escolha.abertas.map((r) => (
+                        <SelectItem key={r.id} value={r.id}>
+                          {r.description ?? 'Parcela'} · {brl(saldoDoRecebivel(r))} · vence {ddmm(r.due_date)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {jaCobrada && <p className="text-xs text-destructive">{jaCobrada}</p>}
             </div>
           ) : (
             <div className="space-y-2">

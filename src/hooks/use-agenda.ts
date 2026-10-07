@@ -601,11 +601,21 @@ export function useAcceptSuggestion() {
       };
       const { data: task, error } = await supabase.from('agenda_tasks').insert(row).select('id').single();
       if (error) throw error;
-      const { error: updErr } = await supabase.from('agenda_suggestions').update({
+      // Só aceita sugestão AINDA pendente (07/10/2026), como o assistente (agenda-sugestoes.ts):
+      // dois cliques — ou a tela e o WhatsApp — criavam duas tarefas. E se a marcação falha ou a
+      // sugestão já tinha sido decidida, a tarefa recém-criada é apagada: senão sobrava tarefa órfã
+      // e a sugestão continuava na caixa.
+      const { data: marcadas, error: updErr } = await supabase.from('agenda_suggestions').update({
         status: 'accepted', resolved_at: new Date().toISOString(),
         resolved_by: me, created_task_id: task.id,
-      }).eq('id', suggestion.id);
-      if (updErr) throw updErr;
+      }).eq('id', suggestion.id).eq('status', 'pending').select('id');
+      if (updErr || !marcadas?.length) {
+        const { error: delErr } = await supabase.from('agenda_tasks').delete().eq('id', task.id);
+        if (updErr) {
+          throw new Error(`Não consegui marcar a sugestão como aceita (${updErr.message}).${delErr ? ' A tarefa criada ficou na agenda — apague-a.' : ' Nada foi criado.'}`);
+        }
+        throw new Error(`Esta sugestão já foi decidida (aceita ou descartada).${delErr ? ' A tarefa criada agora ficou na agenda — apague-a.' : ' Nada foi criado de novo.'}`);
+      }
       return task.id as string;
     },
     onSuccess: () => { invalidateSuggestions(qc); invalidateTaskQueries(qc); },
@@ -617,10 +627,11 @@ export function useDismissSuggestion() {
   return useMutation({
     mutationFn: async ({ id, reason }: { id: string; reason?: string }) => {
       const { data: u } = await supabase.auth.getUser();
+      // Só descarta a que ainda está pendente: descartar não desfaz um aceite feito noutro lugar.
       const { error } = await supabase.from('agenda_suggestions').update({
         status: 'dismissed', resolved_at: new Date().toISOString(),
-        resolved_by: u?.user?.id ?? null, dismiss_reason: reason ?? null,
-      }).eq('id', id);
+        resolved_by: u?.user?.id ?? null, dismiss_reason: reason?.trim() || null,
+      }).eq('id', id).eq('status', 'pending');
       if (error) throw error;
     },
     onSuccess: () => invalidateSuggestions(qc),

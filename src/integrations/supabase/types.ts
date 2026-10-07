@@ -5626,6 +5626,7 @@ export type Database = {
           latitude: number | null
           longitude: number | null
           name: string
+          neighborhood: string | null
           phone: string | null
           postal_code: string | null
           state: string | null
@@ -5645,6 +5646,7 @@ export type Database = {
           latitude?: number | null
           longitude?: number | null
           name: string
+          neighborhood?: string | null
           phone?: string | null
           postal_code?: string | null
           state?: string | null
@@ -5664,6 +5666,7 @@ export type Database = {
           latitude?: number | null
           longitude?: number | null
           name?: string
+          neighborhood?: string | null
           phone?: string | null
           postal_code?: string | null
           state?: string | null
