@@ -186,25 +186,25 @@ export function ConfiguracoesFiscaisDialog({ company, onClose, onTestarEmail }: 
         </DialogHeader>
         <div className="space-y-3">
           <div>
-            <Label>Razão Social</Label>
-            <Input value={settingsForm.legal_name} onChange={(e) => setSettingsForm((p) => ({ ...p, legal_name: e.target.value }))} />
+            <Label htmlFor="cfg-razao-social">Razão Social</Label>
+            <Input id="cfg-razao-social" value={settingsForm.legal_name} onChange={(e) => setSettingsForm((p) => ({ ...p, legal_name: e.target.value }))} />
           </div>
           <div>
-            <Label>Nome Fantasia</Label>
-            <Input value={settingsForm.trade_name} onChange={(e) => setSettingsForm((p) => ({ ...p, trade_name: e.target.value }))} />
+            <Label htmlFor="cfg-nome-fantasia">Nome Fantasia</Label>
+            <Input id="cfg-nome-fantasia" value={settingsForm.trade_name} onChange={(e) => setSettingsForm((p) => ({ ...p, trade_name: e.target.value }))} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>CNPJ</Label>
-              <Input
+              <Label htmlFor="cfg-cnpj">CNPJ</Label>
+              <Input id="cfg-cnpj"
                 value={maskCPFCNPJ(settingsForm.cnpj)}
                 onChange={(e) => setSettingsForm((p) => ({ ...p, cnpj: e.target.value.replace(/\D/g, '').slice(0, 14) }))}
               />
             </div>
             <div>
-              <Label>Regime Tributário</Label>
+              <Label htmlFor="cfg-regime-tributario">Regime Tributário</Label>
               <Select value={settingsForm.tax_regime} onValueChange={(v) => setSettingsForm((p) => ({ ...p, tax_regime: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger id="cfg-regime-tributario"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="mei">MEI</SelectItem>
                   <SelectItem value="simples">Simples Nacional</SelectItem>
@@ -216,17 +216,17 @@ export function ConfiguracoesFiscaisDialog({ company, onClose, onTestarEmail }: 
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <Label>Inscrição Estadual</Label>
-              <Input value={settingsForm.state_registration} onChange={(e) => setSettingsForm((p) => ({ ...p, state_registration: e.target.value }))} />
+              <Label htmlFor="cfg-inscricao-estadual">Inscrição Estadual</Label>
+              <Input id="cfg-inscricao-estadual" value={settingsForm.state_registration} onChange={(e) => setSettingsForm((p) => ({ ...p, state_registration: e.target.value }))} />
             </div>
             <div>
-              <Label>Inscrição Municipal</Label>
-              <Input value={settingsForm.municipal_registration} onChange={(e) => setSettingsForm((p) => ({ ...p, municipal_registration: e.target.value }))} />
+              <Label htmlFor="cfg-inscricao-municipal">Inscrição Municipal</Label>
+              <Input id="cfg-inscricao-municipal" value={settingsForm.municipal_registration} onChange={(e) => setSettingsForm((p) => ({ ...p, municipal_registration: e.target.value }))} />
             </div>
             <div>
-              <Label>UF <span className="text-destructive">*</span></Label>
+              <Label htmlFor="cfg-uf">UF <span className="text-destructive">*</span></Label>
               <Select value={settingsForm.state_code} onValueChange={(v) => setSettingsForm((p) => ({ ...p, state_code: v }))}>
-                <SelectTrigger className={!settingsForm.state_code ? 'border-destructive' : ''}><SelectValue placeholder="UF" /></SelectTrigger>
+                <SelectTrigger id="cfg-uf" className={!settingsForm.state_code ? 'border-destructive' : ''}><SelectValue placeholder="UF" /></SelectTrigger>
                 <SelectContent>
                   {BRAZILIAN_STATES.map((uf) => (
                     <SelectItem key={uf} value={uf}>{uf}</SelectItem>
@@ -239,24 +239,24 @@ export function ConfiguracoesFiscaisDialog({ company, onClose, onTestarEmail }: 
           {/* Endereço do emitente — registro interno (a nota usa o cadastro da Contora). */}
           <div className="grid grid-cols-6 gap-2">
             <div className="col-span-4">
-              <Label className="text-xs">Logradouro</Label>
-              <Input className="h-8 text-xs" value={settingsForm.street} onChange={(e) => setSettingsForm((p) => ({ ...p, street: e.target.value }))} />
+              <Label htmlFor="cfg-logradouro" className="text-xs">Logradouro</Label>
+              <Input id="cfg-logradouro" className="h-8 text-xs" value={settingsForm.street} onChange={(e) => setSettingsForm((p) => ({ ...p, street: e.target.value }))} />
             </div>
             <div className="col-span-2">
-              <Label className="text-xs">Número</Label>
-              <Input className="h-8 text-xs" value={settingsForm.number} onChange={(e) => setSettingsForm((p) => ({ ...p, number: e.target.value }))} />
+              <Label htmlFor="cfg-numero" className="text-xs">Número</Label>
+              <Input id="cfg-numero" className="h-8 text-xs" value={settingsForm.number} onChange={(e) => setSettingsForm((p) => ({ ...p, number: e.target.value }))} />
             </div>
             <div className="col-span-2">
-              <Label className="text-xs">Bairro</Label>
-              <Input className="h-8 text-xs" value={settingsForm.district} onChange={(e) => setSettingsForm((p) => ({ ...p, district: e.target.value }))} />
+              <Label htmlFor="cfg-bairro" className="text-xs">Bairro</Label>
+              <Input id="cfg-bairro" className="h-8 text-xs" value={settingsForm.district} onChange={(e) => setSettingsForm((p) => ({ ...p, district: e.target.value }))} />
             </div>
             <div className="col-span-2">
-              <Label className="text-xs">Cidade</Label>
-              <Input className="h-8 text-xs" value={settingsForm.city_name} onChange={(e) => setSettingsForm((p) => ({ ...p, city_name: e.target.value }))} />
+              <Label htmlFor="cfg-cidade" className="text-xs">Cidade</Label>
+              <Input id="cfg-cidade" className="h-8 text-xs" value={settingsForm.city_name} onChange={(e) => setSettingsForm((p) => ({ ...p, city_name: e.target.value }))} />
             </div>
             <div className="col-span-2">
-              <Label className="text-xs">CEP</Label>
-              <Input className="h-8 text-xs" value={settingsForm.postal_code} onChange={(e) => setSettingsForm((p) => ({ ...p, postal_code: e.target.value.replace(/\D/g, '').slice(0, 8) }))} />
+              <Label htmlFor="cfg-cep" className="text-xs">CEP</Label>
+              <Input id="cfg-cep" className="h-8 text-xs" value={settingsForm.postal_code} onChange={(e) => setSettingsForm((p) => ({ ...p, postal_code: e.target.value.replace(/\D/g, '').slice(0, 8) }))} />
             </div>
           </div>
 
@@ -272,17 +272,17 @@ export function ConfiguracoesFiscaisDialog({ company, onClose, onTestarEmail }: 
             <p className="text-sm font-semibold">Numeração da NF-e (produção)</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs">Série de produção</Label>
-                <Input
+                <Label htmlFor="cfg-serie-de-producao" className="text-xs">Série de produção</Label>
+                <Input id="cfg-serie-de-producao"
                   type="number" min={1} className="h-8 text-xs"
                   value={settingsForm.nfe_series_producao}
                   onChange={(e) => setSettingsForm((p) => ({ ...p, nfe_series_producao: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
                 />
               </div>
               <div>
-                <Label className="text-xs">Ajustar próximo número</Label>
+                <Label htmlFor="cfg-ajustar-proximo-numero" className="text-xs">Ajustar próximo número</Label>
                 <div className="flex gap-1.5">
-                  <Input
+                  <Input id="cfg-ajustar-proximo-numero"
                     type="number" min={1} className="h-8 text-xs"
                     placeholder="ex.: 1"
                     value={nextNumberInput}
@@ -307,12 +307,12 @@ export function ConfiguracoesFiscaisDialog({ company, onClose, onTestarEmail }: 
             <p className="text-sm font-semibold">NFS-e — Nota Fiscal de Serviço</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs">Padrão de emissão</Label>
+                <Label htmlFor="cfg-padrao-de-emissao" className="text-xs">Padrão de emissão</Label>
                 <Select
                   value={settingsForm.nfse_standard}
                   onValueChange={(v) => setSettingsForm((p) => ({ ...p, nfse_standard: v }))}
                 >
-                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectTrigger id="cfg-padrao-de-emissao" className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="nacional">Nacional (Itajaí usa este)</SelectItem>
                     <SelectItem value="municipal">Municipal (layout próprio)</SelectItem>
@@ -320,16 +320,16 @@ export function ConfiguracoesFiscaisDialog({ company, onClose, onTestarEmail }: 
                 </Select>
               </div>
               <div>
-                <Label className="text-xs">Série da NFS-e</Label>
-                <Input
+                <Label htmlFor="cfg-serie-da-nfs-e" className="text-xs">Série da NFS-e</Label>
+                <Input id="cfg-serie-da-nfs-e"
                   type="number" min={1} className="h-8 text-xs"
                   value={settingsForm.nfse_default_series}
                   onChange={(e) => setSettingsForm((p) => ({ ...p, nfse_default_series: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
                 />
               </div>
               <div>
-                <Label className="text-xs">% total do Simples (pTotTribSN)</Label>
-                <Input
+                <Label htmlFor="cfg-total-do-simples-ptottribsn" className="text-xs">% total do Simples (pTotTribSN)</Label>
+                <Input id="cfg-total-do-simples-ptottribsn"
                   type="number" min={0} max={100} step="0.01" className="h-8 text-xs"
                   placeholder="ex.: 6,00"
                   value={settingsForm.nfse_total_tax_rate_sn}
@@ -337,8 +337,8 @@ export function ConfiguracoesFiscaisDialog({ company, onClose, onTestarEmail }: 
                 />
               </div>
               <div>
-                <Label className="text-xs">Código IBGE do município</Label>
-                <Input
+                <Label htmlFor="cfg-codigo-ibge-do-municipio" className="text-xs">Código IBGE do município</Label>
+                <Input id="cfg-codigo-ibge-do-municipio"
                   className="h-8 text-xs" placeholder="Itajaí = 4208203"
                   value={settingsForm.ibge_city_code}
                   onChange={(e) => setSettingsForm((p) => ({ ...p, ibge_city_code: e.target.value.replace(/\D/g, '').slice(0, 7) }))}

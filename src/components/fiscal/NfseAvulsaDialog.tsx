@@ -167,8 +167,8 @@ export function NfseAvulsaDialog({ open, onOpenChange }: {
               />
             </div>
             <div>
-              <Label>Descrição do serviço *</Label>
-              <Textarea
+              <Label htmlFor="nfse-descricao-do-servico">Descrição do serviço *</Label>
+              <Textarea id="nfse-descricao-do-servico"
                 value={descricao}
                 onChange={(e) => setDescricao(e.target.value)}
                 rows={3}
@@ -178,13 +178,13 @@ export function NfseAvulsaDialog({ open, onOpenChange }: {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label>Valor do serviço *</Label>
-                <MoneyInput value={valor} onValueChange={setValor} className="mt-1" />
+                <Label htmlFor="nfse-valor-do-servico">Valor do serviço *</Label>
+                <MoneyInput id="nfse-valor-do-servico" value={valor} onValueChange={setValor} className="mt-1" />
               </div>
               <div>
-                <Label>Atividade (verbo fiscal)</Label>
+                <Label htmlFor="nfse-atividade-verbo-fiscal">Atividade (verbo fiscal)</Label>
                 <Select value={verbo} onValueChange={aplicarVerbo}>
-                  <SelectTrigger className="mt-1"><SelectValue placeholder="Escolher…" /></SelectTrigger>
+                  <SelectTrigger id="nfse-atividade-verbo-fiscal" className="mt-1"><SelectValue placeholder="Escolher…" /></SelectTrigger>
                   <SelectContent>
                     {verbos.map((v) => (
                       <SelectItem key={v.verb_slug} value={v.verb_slug}>
@@ -197,16 +197,16 @@ export function NfseAvulsaDialog({ open, onOpenChange }: {
             </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <Label className="text-xs">Código nacional *</Label>
-                <Input value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder="140101" className="mt-1" inputMode="numeric" />
+                <Label htmlFor="nfse-codigo-nacional" className="text-xs">Código nacional *</Label>
+                <Input id="nfse-codigo-nacional" value={codigo} onChange={(e) => setCodigo(e.target.value)} placeholder="140101" className="mt-1" inputMode="numeric" />
               </div>
               <div>
-                <Label className="text-xs">CNAE</Label>
-                <Input value={cnae} onChange={(e) => setCnae(e.target.value)} placeholder="3317102" className="mt-1" inputMode="numeric" />
+                <Label htmlFor="nfse-cnae" className="text-xs">CNAE</Label>
+                <Input id="nfse-cnae" value={cnae} onChange={(e) => setCnae(e.target.value)} placeholder="3317102" className="mt-1" inputMode="numeric" />
               </div>
               <div>
-                <Label className="text-xs">ISS (%)</Label>
-                <Input type="number" min="0" max="100" step="0.01" value={issRate} onChange={(e) => setIssRate(e.target.value)} placeholder="3" className="mt-1" />
+                <Label htmlFor="nfse-iss" className="text-xs">ISS (%)</Label>
+                <Input id="nfse-iss" type="number" min="0" max="100" step="0.01" value={issRate} onChange={(e) => setIssRate(e.target.value)} placeholder="3" className="mt-1" />
               </div>
             </div>
             <label className="flex items-center gap-2 text-sm">
