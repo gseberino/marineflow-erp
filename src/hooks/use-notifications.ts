@@ -13,7 +13,9 @@ export type NotificationType =
   | 'TASK_REMINDER'
   | 'TASK_ASSIGNED'
   | 'WHATSAPP_CAIU'
-  | 'WHATSAPP_VOLTOU';
+  | 'WHATSAPP_VOLTOU'
+  | 'VIGIA_NEGOCIO'
+  | 'REGRA_APRENDIDA';
 
 /** Tipo gravado em app_notifications → tipo do sino. Desconhecido vira lembrete de tarefa. */
 const TIPO_DO_BANCO: Record<string, NotificationType> = {
@@ -21,6 +23,9 @@ const TIPO_DO_BANCO: Record<string, NotificationType> = {
   task_assigned: 'TASK_ASSIGNED',
   whatsapp_caiu: 'WHATSAPP_CAIU',
   whatsapp_voltou: 'WHATSAPP_VOLTOU',
+  // 07/10/2026: o vigia do negócio (segunda e dia 1) e o aprendizado de regra pelo assistente.
+  vigia_negocio: 'VIGIA_NEGOCIO',
+  regra_aprendida: 'REGRA_APRENDIDA',
 };
 
 export interface AppNotification {

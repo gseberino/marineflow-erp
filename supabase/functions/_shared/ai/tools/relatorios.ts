@@ -21,6 +21,7 @@ import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 import { BUCKET_DO_PDF, guardarEEntregar } from "../../pdf/gerar-e-guardar.ts";
 import { renderizarPdf } from "../../pdf/renderizar.ts";
 import { montarRelatorioHtml, nomeDoRelatorio, reais, type Relatorio } from "../../pdf/relatorio.ts";
+import { lerAnalise, nomeDoSistema } from "../../financeiro/vigia-do-negocio.ts";
 
 const CARGOS: Role[] = ["admin", "financial"];
 export const CONTEXTO_DO_RELATORIO = "agente_relatorio_pdf";
@@ -300,6 +301,37 @@ const quando = (iso: string | null | undefined) => {
 };
 
 export const relatorioTools: ToolDef[] = [
+  {
+    name: "analise_do_negocio",
+    description:
+      "Vigia do negócio: margem e prejuízo, ponto de equilíbrio (quanto a HBR precisa faturar por mês para não ter prejuízo), " +
+      "despesa por categoria que subiu em relação aos meses anteriores, e de quais serviços (por sistema: elétrico DC, " +
+      "refrigeração…) vem a receita e o lucro. Use para 'como está minha margem?', 'estou tendo prejuízo?', 'qual serviço dá " +
+      "mais dinheiro?', 'o que subiu de despesa?', 'onde investir em marketing?'. Só leitura.",
+    input_schema: {
+      type: "object",
+      properties: { meses: { type: "number", description: "Quantos meses olhar para trás (3 a 24). Padrão 6." } },
+    },
+    risk: "low",
+    roles: CARGOS,
+    async execute(args, ctx) {
+      const b = semAcesso(ctx);
+      if (b) return b;
+      const { data, error } = await ctx.sb.rpc("analise_do_negocio", { p_meses: Number(args.meses) || 6 });
+      if (error) return { error: `Não consegui fazer a análise (${error.message}). Diga que a consulta falhou — não invente números.` };
+      const lido = lerAnalise(data ?? {}, reais);
+      return {
+        ...(data as Record<string, unknown>),
+        por_sistema: ((data as any)?.por_sistema ?? []).map((s: any) => ({ ...s, sistema: nomeDoSistema(s.sistema) })),
+        leitura: lido.constatacoes,
+        sugestao: lido.sugestao,
+        observacao:
+          "Responda com a leitura (constatações) e a sugestão, em poucas linhas. Conclusão sobre lucro/prejuízo só de mês com " +
+          "pronto=true; os demais são parciais (há lançamentos por fazer). O ponto de equilíbrio é estimativa pela média dos " +
+          "meses fechados. Se mao_de_obra_sem_os tiver valor, diga que a margem por serviço está otimista (diárias sem OS).",
+      };
+    },
+  },
   {
     name: "atualizar_extrato",
     description:
