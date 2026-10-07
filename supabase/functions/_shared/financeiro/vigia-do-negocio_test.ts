@@ -32,7 +32,7 @@ Deno.test("dado real de 07/10: julho acima do equilíbrio, despesa em alta, elé
   assertStringIncludes(r.constatacoes[0], "✅ jul/26 faturou R$ 47447.36, acima do mínimo de R$ 31430.81");
   assertStringIncludes(r.constatacoes[1], "*Compras de mercadorias* em jul/26: R$ 8101.54 contra R$ 3673.90");
   assertStringIncludes(r.constatacoes[1], "Outras 1 categorias");
-  assertStringIncludes(r.constatacoes[2], "*elétrico DC* trouxe 62.1% da receita");
+  assertStringIncludes(r.constatacoes[2], "*elétrico DC* trouxe 62,1% da receita");
   assertStringIncludes(r.sugestao!, "divulgação de *elétrico DC*");
   // As ressalvas: agosto não fechado e as diárias sem OS.
   assertStringIncludes(r.constatacoes[3], "ago/26");
