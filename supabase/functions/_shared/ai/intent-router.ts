@@ -20,7 +20,7 @@ const SINAIS: Record<Dominio, RegExp> = {
   cadastro: /cadastr|cri(ar|a|e)\s+(um |uma )?(cliente|produto|fornecedor|servi[çc]o|ve[íi]culo|barco|marina|ativo)|(cliente|produto|fornecedor|ativo) novo|novo (cliente|produto|fornecedor)|atualiz|corrig|pre[çc]o do produto|\bncm\b|editar cadastro/,
   fiscal: /nota fiscal|nf-?e|nfs-?e|sefaz|danfe|emitir nota|espelho|fiscal|imposto/,
   comunicacao: /whatsapp|mensagem|enviar|mandar|responder|follow-?up|lembrete|avisar|inbox|caixa de entrada/,
-  crm: /manuten|revis[ãa]o|reativ|cliente sumido|parado h|oportunidade|prospec/,
+  crm: /manuten|revis|plano|reativ|cliente sumido|parado h|oportunidade|prospec/,
   campo: /cheguei|comecei|terminei|check-?in|check-?out|estou no|no barco|foto do servi/,
 };
 

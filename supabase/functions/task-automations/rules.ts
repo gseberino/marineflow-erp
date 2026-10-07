@@ -438,48 +438,92 @@ const r12: Rule = {
   },
 };
 
-// R14 (Fase 8): plano de manutenção entrou na janela → propor revisão
+// R14 (Fase 8; reescrita em 07/10/2026 sobre v_maintenance_plans_due): plano entrou na janela →
+// propor revisão. Mesmo id e mesma chave de antes (r14:plan:<id>:<last_service_at|first>) para não
+// perder a configuração nem duplicar tarefa viva. O vencimento e a janela vêm da VIEW (antes a regra
+// calculava o seu, em UTC e com advance_days; a tela calculava outro). A tarefa nasce às 08:00 do
+// dia em que a janela abre (21 dias antes, ou o fim do adiamento) e se resolve quando o ciclo muda
+// (serviço feito), o plano é adiado, ganha OS agendada ou é desligado.
+export interface PlanoDaR14 {
+  plan_id: string;
+  plan_name: string;
+  vessel_id: string;
+  vessel_name: string | null;
+  client_id: string | null;
+  client_name: string | null;
+  scope: string | null;
+  estimated_value: number | string | null;
+  last_service_at: string | null;
+  next_due_on: string;
+  window_opens_on: string;
+  situacao: string;
+  tem_os_agendada: boolean;
+}
+
+/** A tarefa da R14 para um plano da view, ou null (adiado, com OS agendada ou fora da janela). */
+export function candidatoDaR14(p: PlanoDaR14, hoje: string): RuleCandidate | null {
+  if (p.situacao === 'adiada' || p.tem_os_agendada || p.window_opens_on > hoje) return null;
+  const notas = [
+    `Vence ${fmtDate(p.next_due_on)}${p.situacao === 'vencida' ? ' (VENCIDA)' : ''}.`,
+    p.client_name ? `Cliente: ${p.client_name}.` : null,
+    p.scope ? `Escopo: ${p.scope}.` : null,
+    Number(p.estimated_value) > 0 ? `Valor estimado: ${fmtBRL(Number(p.estimated_value))}.` : null,
+    p.last_service_at ? `Último serviço: ${fmtDate(p.last_service_at)}.` : 'Sem serviço anterior registrado.',
+    'O lembrete ao cliente (com o seu sim) chega pelo WhatsApp de terça a quinta.',
+  ].filter(Boolean).join('\n');
+  return {
+    automation_key: keyOf('r14', 'plan', p.plan_id, p.last_service_at || 'first'),
+    title: `Propor revisão: ${p.plan_name} — ${p.vessel_name || 'embarcação'}`,
+    priority: p.situacao === 'vencida' ? 'high' : 'normal',
+    assignee: 'admin',
+    due_at: dueAt(p.window_opens_on),
+    related_entity_type: 'vessel',
+    related_entity_id: p.vessel_id,
+    client_id: p.client_id,
+    notes: notas,
+  };
+}
+
+/** Por que a tarefa da R14 deixou de valer, ou null. */
+export function resolucaoDaR14(
+  bucket: string,
+  plano: { active: boolean } | null,
+  daView: { last_service_at: string | null; snoozed_until: string | null; tem_os_agendada: boolean; os_agendada_numero?: string | null } | null,
+  hoje: string,
+): string | null {
+  if (!plano) return 'Plano não existe mais';
+  if (!plano.active || !daView) return 'Plano desativado';
+  if ((daView.last_service_at || 'first') !== bucket) return 'Serviço registrado no plano';
+  if (daView.snoozed_until && daView.snoozed_until > hoje) return `Adiado até ${fmtDate(daView.snoozed_until)}`;
+  if (daView.tem_os_agendada) return `${daView.os_agendada_numero || 'OS'} aberta para a embarcação`;
+  return null;
+}
+
 const r14: Rule = {
   id: 'r14',
   label: 'Plano de manutenção vencendo',
   defaultEnabled: true,
   async find(db) {
-    const { data } = await db
-      .from('maintenance_plans')
-      .select('id, name, interval_months, advance_days, last_service_at, estimated_value, created_at, vessels(id, name, client_id, clients(name))')
-      .eq('active', true)
-      .limit(200);
-    const today = new Date();
-    return ((data as any[]) || [])
-      .filter((p) => {
-        const base = p.last_service_at ? new Date(p.last_service_at) : new Date(p.created_at);
-        const due = new Date(base);
-        due.setMonth(due.getMonth() + Number(p.interval_months));
-        due.setDate(due.getDate() - Number(p.advance_days || 0));
-        return due <= today;
-      })
-      .map((p) => ({
-        automation_key: keyOf('r14', 'plan', p.id, p.last_service_at || 'first'),
-        title: `Propor revisão: ${p.name} — ${p.vessels?.name || 'embarcação'} (${p.vessels?.clients?.name || 'cliente'})` +
-          (p.estimated_value ? ` · ~${fmtBRL(Number(p.estimated_value))}` : ''),
-        priority: 'high' as const,
-        assignee: 'admin' as const,
-        due_at: dueAt(todayISO()),
-        related_entity_type: 'vessel',
-        related_entity_id: p.vessels?.id || null,
-        client_id: p.vessels?.client_id || null,
-      }));
+    const hoje = diaBR(new Date());
+    const { data, error } = await db
+      .from('v_maintenance_plans_due')
+      .select('plan_id, plan_name, vessel_id, vessel_name, client_id, client_name, scope, estimated_value, last_service_at, next_due_on, window_opens_on, situacao, tem_os_agendada')
+      .lte('window_opens_on', hoje)
+      .limit(500);
+    if (error) throw error;
+    return ((data as PlanoDaR14[]) || [])
+      .map((p) => candidatoDaR14(p, hoje))
+      .filter((c): c is RuleCandidate => c !== null);
   },
   async isResolved(db, task) {
     const id = entityIdFromKey(task.automation_key);
     const bucket = task.automation_key.split(':')[3];
-    const { data } = await db.from('maintenance_plans')
-      .select('active, last_service_at').eq('id', id).maybeSingle();
-    if (!data) return 'Plano não existe mais';
-    if (!data.active) return 'Plano desativado';
-    // last_service_at mudou desde a criação da tarefa = serviço registrado
-    if ((data.last_service_at || 'first') !== bucket) return 'Serviço registrado no plano';
-    return null;
+    const { data: plano, error } = await db.from('maintenance_plans').select('active').eq('id', id).maybeSingle();
+    if (error) throw error;
+    const { data: daView, error: eV } = await db.from('v_maintenance_plans_due')
+      .select('last_service_at, snoozed_until, tem_os_agendada, os_agendada_numero').eq('plan_id', id).maybeSingle();
+    if (eV) throw eV;
+    return resolucaoDaR14(bucket, plano, daView, diaBR(new Date()));
   },
 };
 

@@ -133,3 +133,7 @@ verify_jwt = false
 # Vigia de conversas acompanhadas e promessas do dono (06/10/2026): chamado pelo pg_cron com x-cron-secret.
 [functions.acompanhar-conversas]
 verify_jwt = false
+
+# Lembretes de revisão dos planos de manutenção (07/10/2026): pg_cron com x-cron-secret, terça a quinta 09:05.
+[functions.lembretes-de-revisao]
+verify_jwt = false
