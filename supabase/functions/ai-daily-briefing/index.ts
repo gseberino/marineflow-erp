@@ -294,6 +294,14 @@ servirComCors(async (req) => {
         for (const a of alertas.slice(0, 3)) filaFinanceiraLines.push(`   • ${String(a.title).slice(0, 110)}`);
         if (alertas.length > 3) filaFinanceiraLines.push(`   …e mais ${alertas.length - 3} na caixa de entrada`);
       }
+      // Regras que o sistema aprendeu e esperam o dono conferir (07/10/2026: "sempre registrar e
+      // notificar"). Propostas não lançam nada até serem aceitas.
+      const { count: regrasEsperando } = await admin
+        .from("finance_rules").select("id", { count: "exact", head: true })
+        .eq("origin", "ai").eq("status", "proposed");
+      if ((regrasEsperando ?? 0) > 0) {
+        filaFinanceiraLines.push(`🧠 Regras que aprendi esperando você conferir: *${regrasEsperando}* (Extrato › Regras)`);
+      }
     } catch (e) {
       console.warn("[ai-daily-briefing] bloco da fila financeira falhou:", (e as Error).message);
     }
