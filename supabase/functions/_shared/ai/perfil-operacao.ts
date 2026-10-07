@@ -210,6 +210,10 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   // Só pela rede, cada update_service virava uma pendência — 10 serviços, 10 "sim" a mais
   // (conferência de 26/09/2026). À vista, segue o risco low que declara e o "sim" do prompt basta.
   "update_service",
+  // cadastros (07/10/2026): editar marina e os contatos da embarcação (pedido do dono).
+  "update_marina",
+  "add_vessel_contact",
+  "update_vessel_contact",
 ]);
 
 /**
@@ -432,6 +436,11 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "create_task",
   "schedule_self_reminder",
   "my_agenda",
+
+  // cadastros (07/10/2026): editar marina e os contatos da embarcação (pedido do dono).
+  "update_marina",
+  "add_vessel_contact",
+  "update_vessel_contact",
 ]);
 
 /**

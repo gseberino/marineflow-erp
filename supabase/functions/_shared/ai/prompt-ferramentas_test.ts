@@ -56,6 +56,8 @@ const NAO_SAO_TOOLS = new Set<string>([
   "bolso_do_socio", "em_aberto", "desde_ultimo_pagamento",
   // filtros de list_service_orders: situação do orçamento e ordem por valor (03/10/2026)
   "quote_status", "order_by", "maior_valor",
+  // cadastros (07/10/2026): argumentos e campos de resultado de search_clients/create_client
+  "incluir_inativos", "ja_cadastrado", "possiveis_duplicados", "confirmar_duplicado",
   // argumentos e campos de tool
   "action_name", "asset_type", "billing_unit", "client_id", "collection_ids", "custom_message", "delay_minutes",
   "display_name", "due_at", "entity_id", "extra_notes", "fiscal_verb", "force_new", "from_user", "internal_notes",
