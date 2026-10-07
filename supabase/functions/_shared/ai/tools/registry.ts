@@ -19,6 +19,11 @@ export interface ToolCtx {
   jwt: string;
   appOrigin: string;
   settings: Record<string, string>;
+  /**
+   * De onde veio o pedido (07/10/2026): no chat do app um documento pode voltar como link para
+   * baixar; no WhatsApp ele vai como arquivo na conversa. Ausente = WhatsApp (o comportamento antigo).
+   */
+  canal?: "panel" | "whatsapp";
 }
 
 /** Cargos que podem ver/chamar tools financeiras/compras/preço (todos menos technician —

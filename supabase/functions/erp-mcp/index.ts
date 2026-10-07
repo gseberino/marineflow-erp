@@ -58,7 +58,7 @@ export async function handler(req: Request): Promise<Response> {
     .eq("id", job.requested_by)
     .maybeSingle();
   const input = (job.input ?? {}) as Record<string, any>;
-  const canal = input.canal === "panel" ? "panel" : "whatsapp";
+  const canal: "panel" | "whatsapp" = input.canal === "panel" ? "panel" : "whatsapp";
   // WhatsApp exige o canal habilitado para o usuário; o painel só exige o usuário ativo.
   if (!usuario?.active || (canal === "whatsapp" && !usuario.ai_whatsapp_enabled)) return naoAutorizado();
 
@@ -73,7 +73,7 @@ export async function handler(req: Request): Promise<Response> {
   const sessionId = String(input.sessao ?? meta.session_id ?? "");
   // Mesmo contexto do canal WhatsApp em ai-agent: sem JWT de usuário, client service-role (no painel
   // só o admin chega aqui pelo Max — ver provedorDoTurno).
-  const toolCtx = { sb: admin, admin, userId: usuario.id, userRole: cargo, jwt: "", appOrigin: settings.app_public_url || "", settings };
+  const toolCtx = { sb: admin, admin, userId: usuario.id, userRole: cargo, jwt: "", appOrigin: settings.app_public_url || "", settings, canal };
 
   const servidor: ServidorDoTurno = {
     listar: () => Object.values(toolsByName).map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema })),
