@@ -80,6 +80,11 @@ const NAO_SAO_TOOLS = new Set<string>([
   // status do orçamento no funil (update_quote_status), que não é status de OS
   "awaiting_deposit",
   ...STATUS_OS,
+  // financeiro (07/10/2026): argumentos de alterar_anotacao_do_extrato, listar_anotacoes_do_extrato,
+  // estornar_pagamento, registrar_contato_de_cobranca, list_pending_collections, alterar_favorecido,
+  // create_payable e o período de consultar_freelancer
+  "novo_valor", "nova_categoria", "nova_data", "parada_ha_mais_de_dias", "payable_id", "prometeu_em", "prometeu_pagar",
+  "chave_pix", "tipo_chave_pix", "due_date", "expense_category", "este_mes",
 ]);
 
 function textoDoPrompt(): string {

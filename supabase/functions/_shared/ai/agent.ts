@@ -19,6 +19,8 @@ import { isAutonomyGranted } from "./autonomy-policy.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
 import { PERFIL_ADMIN, PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from "./perfil-operacao.ts";
 import { construirFerramentaExtra, NOME_DA_FERRAMENTA_EXTRA } from "./ferramenta-extra.ts";
+// financeiro (07/10/2026): títulos e resumos das ferramentas novas (anotação, estorno, cobrança, favorecido).
+import { RESUMO_QUE_RESOLVE_DO_FINANCEIRO, resumirDoFinanceiro, TITULOS_DO_FINANCEIRO } from "./tools/resumos-do-financeiro.ts";
 
 export interface Proposal {
   pending_action_id: string;
@@ -171,6 +173,8 @@ const TOOL_LABELS_PT: Record<string, string> = {
   dismiss_agenda_suggestions: "Descartar sugestão da agenda",
   update_task: "Alterar tarefa da agenda",
 };
+// financeiro (07/10/2026): anotação de Pix, estorno, cobrança formal e favorecido.
+Object.assign(TOOL_LABELS_PT, TITULOS_DO_FINANCEIRO);
 
 function humanizeToolNamePt(name: string): string {
   return TOOL_LABELS_PT[name] || humanizeToolName(name);
@@ -312,6 +316,8 @@ async function resolveIdLabel(admin: any, key: string, id: string): Promise<stri
  * pendência mesmo assim, e o modelo dizia "preparei, falta a sua confirmação" (Pix da Eliane).
  */
 const RESUMO_QUE_RESOLVE = new Set(["lancar_no_caixa", "anotar_transacao_do_banco"]);
+// financeiro (07/10/2026): o alvo que não foi achado (ou foi achado mais de um) é recusa, não pendência.
+for (const nome of RESUMO_QUE_RESOLVE_DO_FINANCEIRO) RESUMO_QUE_RESOLVE.add(nome);
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();
@@ -320,6 +326,14 @@ export function resumoQueRecusa(toolName: string, resumo: string): { error: stri
 }
 
 async function buildPendingSummary(admin: any, toolName: string, args: Record<string, unknown>): Promise<string> {
+  // financeiro (07/10/2026): anotação de Pix, estorno, cobrança e favorecido — o "sim" é sobre o
+  // alvo resolvido (qual anotação, qual pagamento, qual cobrança, qual favorecido) e o antes/depois.
+  if (toolName in TITULOS_DO_FINANCEIRO) {
+    try {
+      const r = await resumirDoFinanceiro(admin, toolName, args);
+      if (r) return r;
+    } catch { /* cai no resumo genérico */ }
+  }
   // Dinheiro vivo e anotação: a confirmação mostra o pedido JÁ RESOLVIDO (categoria, quem,
   // Caixa ou bolso do sócio) — o "sim" tem de ser sobre o que vai acontecer de fato.
   if (toolName === "lancar_no_caixa" || toolName === "anotar_transacao_do_banco") {

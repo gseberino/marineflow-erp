@@ -26,6 +26,8 @@ import {
   validarAgendamento,
 } from "./agendamento.ts";
 import { validarMensagem } from "./resposta.ts";
+// Frente financeiro (07/10/2026): o lembrete enviado entra no histórico da cobrança, como na tela.
+import { registrarEnvioDaCobranca } from "./cobrancas.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -629,10 +631,14 @@ export const whatsappTools: ToolDef[] = [
       const { sb, admin, jwt } = ctx;
       const { data: col, error } = await sb
         .from("collections")
-        .select("id, amount, due_date, contact_whatsapp, phone, contact_name, client_id, description")
+        .select("id, amount, due_date, contact_whatsapp, phone, contact_name, client_id, description, status")
         .eq("id", args.collection_id)
         .maybeSingle();
       if (error || !col) return { error: "Cobrança não encontrada" };
+      // Cobrança paga ou cancelada não se cobra (07/10/2026): cobrar quem pagou custa a relação.
+      if (col.status === "paid" || col.status === "cancelled") {
+        return { error: `Esta cobrança está ${col.status === "paid" ? "paga" : "cancelada"}: não mando lembrete.` };
+      }
       // D21 (dono, 17/09/2026): piso de materialidade — abaixo dele não se cobra por mensagem.
       const { data: cfgPiso } = await admin.from("app_settings").select("value").eq("key", "collection_min_amount").maybeSingle();
       const piso = Number((cfgPiso as { value?: string } | null)?.value) || 0;
@@ -672,11 +678,13 @@ export const whatsappTools: ToolDef[] = [
         return { error: g.motivo };
       }
       const r = await sendWhatsapp(phone, msg, jwt, chaveDeEnvio("cobranca", col.id, diaLocal()));
-      if (r.ok && !r.deduplicated) {
-        await admin.from("collections").update({ last_auto_sent_at: new Date().toISOString() }).eq("id", col.id);
-      }
+      // Enviado: o contato 'whatsapp_sent' no histórico e a situação 'enviada', como a tela faz
+      // (useSendCollectionWhatsApp) — antes só o last_auto_sent_at mudava (07/10/2026).
+      const avisoDoRegistro = r.ok && !r.deduplicated
+        ? await registrarEnvioDaCobranca(admin, col, ctx.userId, "Lembrete enviado pelo assistente (WhatsApp)")
+        : null;
       await registrarEnvio(admin, { tipo: "cobranca", audiencia: "cliente", entityKind: "client", entityId: col.client_id, phone, preview: msg, status: r.ok ? "sent" : "failed" });
-      return { ...r, ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}) };
+      return { ...r, ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}), ...(avisoDoRegistro ? { aviso: avisoDoRegistro } : {}) };
     },
   },
   {

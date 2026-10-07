@@ -27,9 +27,11 @@ import { montarExtratoHtml, montarReciboHtml, nomeDoArquivo, numeroDoRecibo, typ
 const CARGOS: Role[] = ["admin", "financial"];
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const DIAS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
-const JORNADAS = ["inteiro", "meio", "faltou", "apagar"] as const;
+// "manter" (07/10/2026): só mexer nos extras/descontos (ou na OS, na observação) do dia já lançado —
+// "desconta 30 da diária do Mickael de ontem". Vira a jornada que o dia já tem.
+const JORNADAS = ["inteiro", "meio", "faltou", "apagar", "manter"] as const;
 type Jornada = typeof JORNADAS[number];
-const ROTULO: Record<Jornada, string> = { inteiro: "dia inteiro", meio: "meio período", faltou: "faltou", apagar: "apagar" };
+const ROTULO: Record<Jornada, string> = { inteiro: "dia inteiro", meio: "meio período", faltou: "faltou", apagar: "apagar", manter: "como está" };
 const FRACAO: Record<string, number> = { inteiro: 1, meio: 0.5, faltou: 0 };
 
 function semAcesso(ctx: ToolCtx): { error: string } | null {
@@ -119,6 +121,11 @@ export interface PedidoDeDiaria {
   observacao: string | null;
   /** Valor DITO para o dia ("na quarta foram 130"); nulo = a diária do cadastro. */
   valorDiaria: number | null;
+  /** Extras e descontos DO DIA (o total, como na tela); nulo = deixa como está (07/10/2026). */
+  extras: number | null;
+  descontos: number | null;
+  /** O dia já lançado, quando a jornada dita foi "manter". */
+  atual?: DiaLancado | null;
 }
 
 /** "130", "130,00", "R$ 1.300,50", 130 → número; o resto, nulo. */
@@ -147,6 +154,7 @@ export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>
   let intervalo = false;
   if (args.data_ate != null && args.data_ate !== "") {
     if (jornada === "apagar") return { error: "Apagar é um dia de cada vez: diga qual dia." };
+    if (jornada === "manter") return { error: "Mexer só em extras/descontos é um dia de cada vez: diga qual dia." };
     const ate = dataDoDito(args.data_ate);
     if (!ate) return { error: `Não entendi até quando: "${args.data_ate}". Use hoje, ontem, dd/mm ou o dia da semana.` };
     if (ate < data) return { error: `O intervalo está invertido: ${diaCurto(data)} a ${diaCurto(ate)}.` };
@@ -170,19 +178,43 @@ export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>
     valorDiaria = numeroDito(args.valor_diaria);
     if (valorDiaria == null || valorDiaria <= 0) return { error: `Não entendi o valor do dia: "${args.valor_diaria}".` };
   }
-  return { freelancer: f, data, datas, intervalo, fimDeSemana, jornada, os, observacao, valorDiaria };
+  // Extras e descontos do dia (07/10/2026): os mesmos campos do "Registrar dia" da tela.
+  const extras = valorDoDito(args.extras);
+  const descontos = valorDoDito(args.descontos);
+  if (extras === undefined) return { error: `Não entendi o valor dos extras: "${args.extras}".` };
+  if (descontos === undefined) return { error: `Não entendi o valor dos descontos: "${args.descontos}".` };
+  let atual: DiaLancado | null = null;
+  if (jornada === "manter") {
+    atual = await diaLancado(ctx, f, data);
+    if (!atual) return { error: `Não há dia lançado para ${f.nome} em ${diaCurto(data)}: diga se foi dia inteiro, meio período ou falta.` };
+    if (extras == null && descontos == null && valorDiaria == null && !os.length && !observacao) {
+      return { error: "Diga o que mudar no dia: extras, descontos, OS, observação ou o valor." };
+    }
+  }
+  const resolvida: Jornada = atual ? (atual.fracao === 1 ? "inteiro" : atual.fracao === 0.5 ? "meio" : "faltou") : jornada;
+  return { freelancer: f, data, datas, intervalo, fimDeSemana, jornada: resolvida, os, observacao, valorDiaria, extras, descontos, atual };
 }
 
-type DiaLancado = { id: string; fracao: number; valorDia: number };
+/** Extra/desconto dito: nulo = não disse; undefined = disse algo que não é valor (vira pergunta). */
+function valorDoDito(v: unknown): number | null | undefined {
+  if (v == null || v === "") return null;
+  const n = numeroDito(v);
+  return n == null || n < 0 ? undefined : Math.round(n * 100) / 100;
+}
+
+type DiaLancado = { id: string; fracao: number; valorDia: number; valorDiaria: number; extras: number; descontos: number };
 
 /** Os dias já lançados para a pessoa nessas datas (no máximo um por data, pelo índice do banco). */
 async function diasLancados(ctx: ToolCtx, f: Freelancer, datas: string[]): Promise<Map<string, DiaLancado>> {
   const { data: linhas } = await ctx.admin.from("work_shifts")
-    .select("id, data, fracao, valor_diaria, valor_dia")
+    .select("id, data, fracao, valor_diaria, valor_dia, extras, descontos")
     .in("work_profile_id", f.perfis.map((p) => p.id))
     .in("data", datas)
     .not("fracao", "is", null);
-  return new Map(((linhas ?? []) as any[]).map((d) => [String(d.data), { id: d.id as string, fracao: Number(d.fracao), valorDia: Number(d.valor_dia) }]));
+  return new Map(((linhas ?? []) as any[]).map((d) => [String(d.data), {
+    id: d.id as string, fracao: Number(d.fracao), valorDia: Number(d.valor_dia),
+    valorDiaria: Number(d.valor_diaria), extras: Number(d.extras ?? 0), descontos: Number(d.descontos ?? 0),
+  }]));
 }
 
 async function diaLancado(ctx: ToolCtx, f: Freelancer, data: string): Promise<DiaLancado | null> {
@@ -199,6 +231,18 @@ function linhaDoValorDito(p: PedidoDeDiaria, perfil: Perfil | undefined): string
   return [`Diária ${p.intervalo ? "desses dias" : "desse dia"}: ${brl.format(p.valorDiaria)} (a do cadastro é ${brl.format(perfil.valor_diaria ?? 0)}).`];
 }
 
+/** Extras e descontos ditos, com o antes quando o dia já existe (o banco substitui, não soma). */
+function linhasDosExtras(p: PedidoDeDiaria, atual: DiaLancado | null): string[] {
+  const linhas: string[] = [];
+  const uma = (rotulo: string, novo: number | null, antes: number | undefined) => {
+    if (novo == null) return;
+    linhas.push(`${rotulo}${p.intervalo ? " (cada dia)" : ""}: ${atual && antes !== novo ? `${brl.format(antes ?? 0)} → ` : ""}*${brl.format(novo)}*`);
+  };
+  uma("Extras", p.extras, atual?.extras);
+  uma("Descontos", p.descontos, atual?.descontos);
+  return linhas;
+}
+
 /** O texto da confirmação: o pedido resolvido, e como o dia está hoje quando já existe. */
 export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
   const p = await resolverDiaria(ctx, args);
@@ -212,10 +256,15 @@ export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>)
       : `Apagar o dia de ${quem} — não há dia lançado nessa data; nada vai mudar.`;
   }
   const perfil = p.freelancer.perfis.find((x) => x.vigencia_inicio <= p.data && (!x.vigencia_fim || x.vigencia_fim >= p.data));
-  const valor = p.jornada === "faltou" ? 0 : (p.valorDiaria ?? perfil?.valor_diaria ?? 0) * FRACAO[p.jornada];
-  const linhas = [`Registrar diária: ${quem} · *${ROTULO[p.jornada]}*${p.jornada === "faltou" ? " (sem diária)" : ` · ${brl.format(valor)}`}` +
+  // O banco guarda a diária e os extras/descontos do dia já lançado quando não vêm ditos (07/10/2026).
+  const extras = p.extras ?? atual?.extras ?? 0;
+  const descontos = p.descontos ?? atual?.descontos ?? 0;
+  const base = (p.jornada === "faltou" ? 0 : (p.valorDiaria ?? (atual?.valorDiaria || null) ?? perfil?.valor_diaria ?? 0) * FRACAO[p.jornada]);
+  const valor = Math.round((base + extras - descontos) * 100) / 100;
+  const linhas = [`Registrar diária: ${quem} · *${ROTULO[p.jornada]}*${p.jornada === "faltou" && !extras ? " (sem diária)" : ` · ${brl.format(valor)}`}` +
     (p.os.length ? ` · OS ${p.os.map((o) => o.numero).join(", ")}` : "")];
   linhas.push(...linhaDoValorDito(p, perfil));
+  linhas.push(...linhasDosExtras(p, atual));
   if (p.os.length > 1) linhas.push("O valor do dia se divide em partes iguais entre as OS.");
   if (p.observacao) linhas.push(`Observação: ${p.observacao}`);
   if (atual) linhas.push(`Hoje está lançado: ${rotuloDaFracao(atual.fracao)} (${brl.format(atual.valorDia)}) — vai ser corrigido, não duplicado.`);
@@ -234,13 +283,15 @@ async function resumirIntervalo(ctx: ToolCtx, p: PedidoDeDiaria): Promise<string
   const primeiro = p.datas[0];
   const ultimo = p.datas[p.datas.length - 1];
   const perfil = p.freelancer.perfis.find((x) => x.vigencia_inicio <= primeiro && (!x.vigencia_fim || x.vigencia_fim >= primeiro));
-  const valor = p.jornada === "faltou" ? 0 : (p.valorDiaria ?? perfil?.valor_diaria ?? 0) * FRACAO[p.jornada];
+  const valor = (p.jornada === "faltou" ? 0 : (p.valorDiaria ?? perfil?.valor_diaria ?? 0) * FRACAO[p.jornada]) +
+    (p.extras ?? 0) - (p.descontos ?? 0);
   const linhas = [
     `Registrar diária: *${p.freelancer.nome}* · *${ROTULO[p.jornada]}* · ${novos.length} dia(s) de ${diaCurto(primeiro)} a ${diaCurto(ultimo)}` +
       (p.fimDeSemana ? "" : " (só dias úteis)") +
-      (p.jornada === "faltou" ? " (sem diária)" : ` · ${brl.format(valor)} cada, ${brl.format(valor * novos.length)} no total`) +
+      (p.jornada === "faltou" && !p.extras ? " (sem diária)" : ` · ${brl.format(valor)} cada, ${brl.format(valor * novos.length)} no total`) +
       (p.os.length ? ` · OS ${p.os.map((o) => o.numero).join(", ")}` : ""),
     ...linhaDoValorDito(p, perfil),
+    ...linhasDosExtras(p, null),
   ];
   if (novos.length) linhas.push(`Dias: ${novos.map(ddmm).join(", ")}`);
   if (lancados.size) {
@@ -400,7 +451,7 @@ async function registrarIntervalo(ctx: ToolCtx, p: PedidoDeDiaria) {
     const r = await chamar(ctx, "registrar_diaria", {
       p_favorecido_id: p.freelancer.id, p_data: d, p_jornada: p.jornada,
       p_os_ids: p.os.length ? p.os.map((o) => o.id) : null, p_observacao: p.observacao,
-      p_extras: null, p_descontos: null, p_valor_diaria: p.valorDiaria, p_origem: "agente",
+      p_extras: p.extras, p_descontos: p.descontos, p_valor_diaria: p.valorDiaria, p_origem: "agente",
     }) as Record<string, unknown>;
     if (r && "error" in r) falhas.push(`${ddmm(d)}: ${r.error}`);
     else feitos.push(d);
@@ -660,7 +711,10 @@ export const diariasTools: ToolDef[] = [
       "valor nem horário; valor_diaria só quando a pessoa DISSER outro valor para o dia ('na quarta foram 130'). Freelancer que " +
       "ainda não existe: cadastrar_freelancer antes. Não é pagamento (pagamento vem do extrato; em dinheiro é lancar_no_caixa) nem hora de OS " +
       "(log_service_order_hours). Vários dias ('faltou desde 19/09', 'a semana toda', 'de segunda até hoje'): data + data_ate; " +
-      "só dias úteis, salvo fim_de_semana; dia já lançado no intervalo fica como está. Pede confirmação.",
+      "só dias úteis, salvo fim_de_semana; dia já lançado no intervalo fica como está. EXTRAS e DESCONTOS do dia, como na tela: " +
+      "'diária inteira mais 50 de almoço' (extras=50, observacao='almoço'), 'desconta 30 da diária do Mickael de ontem, chegou " +
+      "atrasado' (jornada='manter', descontos=30) — o valor é o TOTAL do dia e substitui o que havia (a confirmação mostra o antes). " +
+      "Pede confirmação.",
     input_schema: {
       type: "object",
       properties: {
@@ -668,10 +722,15 @@ export const diariasTools: ToolDef[] = [
         data: { type: "string", description: "'hoje' (padrão), 'ontem', dd/mm ou dia da semana ('segunda'). Num intervalo, o primeiro dia." },
         data_ate: { type: "string", description: "Só para vários dias: o último dia ('hoje', dd/mm, 'sexta'). Nunca no futuro." },
         fim_de_semana: { type: "boolean", description: "Num intervalo, incluir sábado e domingo — só se a pessoa disser." },
-        jornada: { type: "string", enum: [...JORNADAS], description: "inteiro, meio, faltou (não veio) ou apagar (lançado por engano; um dia só)." },
+        jornada: {
+          type: "string", enum: [...JORNADAS],
+          description: "inteiro, meio, faltou (não veio), apagar (lançado por engano; um dia só) ou manter (o dia já lançado fica como está; só muda extras, descontos, OS ou observação).",
+        },
         os: { type: "string", description: "Número da OS em que trabalhou; duas OS separadas por vírgula (o dia se divide igual)." },
         observacao: { type: "string", description: "Serviço feito, obra, barco — se a pessoa disser." },
         valor_diaria: { type: "number", description: "Só se a pessoa DISSER o valor do dia, diferente do cadastro (em reais). Sem isso vale a diária do cadastro." },
+        extras: { type: "number", description: "Extras do dia em reais (almoço, condução, hora a mais) — o total do dia. Só se a pessoa disser." },
+        descontos: { type: "number", description: "Descontos do dia em reais (atraso, vale) — o total do dia. Só se a pessoa disser." },
       },
       required: ["freelancer", "jornada"],
     },
@@ -679,9 +738,10 @@ export const diariasTools: ToolDef[] = [
     roles: CARGOS,
     preValidar(args) {
       if (!JORNADAS.includes(String(args?.jornada ?? "") as Jornada)) {
-        return { error: `Jornada "${args?.jornada}" não existe: use inteiro, meio, faltou ou apagar.` };
+        return { error: `Jornada "${args?.jornada}" não existe: use inteiro, meio, faltou, apagar ou manter.` };
       }
       if (args?.jornada === "apagar" && args?.data_ate) return { error: "Apagar é um dia de cada vez: diga qual dia." };
+      if (args?.jornada === "manter" && args?.data_ate) return { error: "Mexer só em extras/descontos é um dia de cada vez: diga qual dia." };
       return null;
     },
     async execute(args, ctx) {
@@ -703,7 +763,7 @@ export const diariasTools: ToolDef[] = [
         p_jornada: p.jornada,
         p_os_ids: p.os.length ? p.os.map((o) => o.id) : null,
         p_observacao: p.observacao,
-        p_extras: null, p_descontos: null, p_valor_diaria: p.valorDiaria,
+        p_extras: p.extras, p_descontos: p.descontos, p_valor_diaria: p.valorDiaria,
         p_origem: "agente",
       }) as Record<string, unknown>;
       if (r && "error" in r) return r;
@@ -716,7 +776,8 @@ export const diariasTools: ToolDef[] = [
     description:
       "Quanto se deve a um freelancer de diária e o que ele trabalhou e recebeu: 'quanto devo pro Roberto?', 'quantos dias o Mickael " +
       "fez esse mês?', 'o que falta pagar pro João?' (periodo=em_aberto), 'o que ele fez desde o último pagamento?', 'de 14/09 a 27/09' " +
-      "(de/ate). Sem nome, mostra todos. Só consulta — não grava nada. Para o PDF do extrato, enviar_extrato_freelancer.",
+      "(de/ate), 'quanto o Roberto tem de extra este mês?' (extras_no_periodo e descontos_no_periodo, com o freelancer). " +
+      "Sem nome, mostra todos. Só consulta — não grava nada. Para o PDF do extrato, enviar_extrato_freelancer.",
     input_schema: {
       type: "object",
       properties: {
@@ -751,14 +812,24 @@ export const diariasTools: ToolDef[] = [
       if ("error" in f) return f;
       const c = await chamar(ctx, "conta_corrente_freelancer", { p_favorecido_id: f.id, ...periodo }) as Record<string, any>;
       if (c && "error" in c) return c;
-      const linhas = ((c?.linhas ?? []) as any[]).slice(-15).map((l) => l.tipo === "dia"
-        ? { data: l.data, dia: rotuloDaFracao(Number(l.fracao)), valor: Number(l.trabalhado), os: (l.os ?? []).map((o: any) => o.numero) }
+      const todas = (c?.linhas ?? []) as any[];
+      const linhas = todas.slice(-15).map((l) => l.tipo === "dia"
+        ? {
+          data: l.data, dia: rotuloDaFracao(Number(l.fracao)), valor: Number(l.trabalhado), os: (l.os ?? []).map((o: any) => o.numero),
+          // Extras e descontos do dia (07/10/2026): "quanto o Roberto tem de extra este mês?".
+          ...(Number(l.extras) > 0 ? { extras: Number(l.extras) } : {}),
+          ...(Number(l.descontos) > 0 ? { descontos: Number(l.descontos) } : {}),
+          ...(l.observacao ? { observacao: l.observacao } : {}),
+        }
         : { data: l.data, pagamento: Number(l.pago), de_onde: l.aguardando ? "lançado à mão, aguardando o banco" : l.conta });
+      const dias = todas.filter((l) => l.tipo === "dia");
+      const soma = (k: string) => Math.round(dias.reduce((s, l) => s + (Number(l[k]) || 0), 0) * 100) / 100;
       return {
         freelancer: f.nome,
         periodo: periodoResolvido(c),
         saldo_antes_do_periodo: Number(c.saldo_anterior),
         dias: Number(c.dias), trabalhado: Number(c.trabalhado), pago: Number(c.pago),
+        extras_no_periodo: soma("extras"), descontos_no_periodo: soma("descontos"),
         saldo: Number(c.saldo_final), situacao: ESTADO[c.estado] ?? c.estado,
         ultimos_lancamentos: linhas,
       };

@@ -63,6 +63,9 @@ const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_serv
 ACRESCENTADAS.push("update_marina", "add_vessel_contact", "update_vessel_contact");
 // operacional (07/10/2026): via do técnico e caixa de sugestões da agenda.
 ACRESCENTADAS.push("update_service_order_via", "list_agenda_suggestions", "accept_agenda_suggestions", "dismiss_agenda_suggestions");
+// financeiro (07/10/2026): anotações de Pix, estorno, cobrança formal e favorecido — o que só a tela fazia.
+ACRESCENTADAS.push("listar_anotacoes_do_extrato", "alterar_anotacao_do_extrato", "estornar_pagamento", "criar_cobranca",
+  "registrar_contato_de_cobranca", "alterar_cobranca", "alterar_favorecido");
 // 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
 // roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento",

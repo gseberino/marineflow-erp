@@ -40,6 +40,8 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   // é a IA falando com TERCEIRO em nome da empresa. Autonomia por tipo só na Fase 3, e aí
   // sai daqui de propósito, com a promoção/demoção do dossiê.
   "followup_send_touch",
+  // financeiro (07/10/2026): estorno mexe em dinheiro (a conta volta a dever) — sempre com o "sim".
+  "estornar_pagamento",
 ]);
 
 /**

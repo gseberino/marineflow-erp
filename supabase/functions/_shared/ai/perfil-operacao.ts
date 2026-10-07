@@ -221,6 +221,16 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "list_agenda_suggestions",
   "accept_agenda_suggestions",
   "dismiss_agenda_suggestions",
+
+  // financeiro (07/10/2026): o que só a tela fazia — anotações de Pix que esperam o banco, estorno
+  // de pagamento, cobrança formal e editar/desativar favorecido.
+  "listar_anotacoes_do_extrato",
+  "alterar_anotacao_do_extrato",
+  "estornar_pagamento",
+  "criar_cobranca",
+  "registrar_contato_de_cobranca",
+  "alterar_cobranca",
+  "alterar_favorecido",
 ]);
 
 /**
@@ -451,9 +461,15 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   // list_agenda_suggestions fica de fora de propósito: é leitura, a rede a roda direto, e o
   // perfil enxuto tem teto de 105 (agent-perfil-admin_test.ts).
   "update_service_order_via",
-  "accept_agenda_suggestions",
-  "dismiss_agenda_suggestions",
   "update_task",
+  // financeiro (07/10/2026): pedido do dono — o que só a tela fazia passa a ser feito conversando.
+  "alterar_anotacao_do_extrato",
+  "estornar_pagamento",
+  "criar_cobranca",
+  "registrar_contato_de_cobranca",
+  // 07/10/2026 (junção das frentes): alterar_favorecido, alterar_cobranca, accept/dismiss_agenda_suggestions
+  // e listar_anotacoes_do_extrato ficam na rede (ferramenta_extra): uso raro (o detector de sugestões
+  // está pausado) ou leitura que a rede roda direto. Teto de tokens em agent-perfil-admin_test.ts.
 ]);
 
 /**
