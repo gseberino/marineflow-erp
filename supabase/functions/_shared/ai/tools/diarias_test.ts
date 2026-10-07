@@ -102,7 +102,8 @@ Deno.test("oito ferramentas: as que gravam ou mandam a terceiro pedem confirmaç
   for (const t of diariasTools) assertEquals(t.roles, ["admin", "financial"]);
   assertEquals((tool("registrar_diaria").input_schema as any).required, ["freelancer", "jornada"]);
   assertEquals((tool("cadastrar_freelancer").input_schema as any).required, ["nome", "valor_diaria"]);
-  assertEquals((tool("registrar_diaria").input_schema as any).properties.jornada.enum, ["inteiro", "meio", "faltou", "apagar"]);
+  // "manter" (07/10/2026): só extras/descontos do dia já lançado.
+  assertEquals((tool("registrar_diaria").input_schema as any).properties.jornada.enum, ["inteiro", "meio", "faltou", "apagar", "manter"]);
 });
 
 Deno.test("a descrição separa diária de pagamento, de hora de OS e de 'apagar'", () => {
@@ -183,6 +184,55 @@ Deno.test("jornada inválida é recusada antes de virar pendência", () => {
   const r = tool("registrar_diaria").preValidar!({ freelancer: "roberto", jornada: "folga" }, {} as never);
   assertStringIncludes(String(r?.error), "não existe");
   assertEquals(tool("registrar_diaria").preValidar!({ freelancer: "roberto", jornada: "meio" }, {} as never), null);
+});
+
+// Extras e descontos do dia (07/10/2026): os mesmos campos do "Registrar dia" da tela.
+Deno.test("'diária inteira mais 50 de almoço': extras vão para a função do banco e para a confirmação", async () => {
+  const { c, chamadas } = ctx();
+  const args = { freelancer: "roberto", data: "24/09/2026", jornada: "inteiro", extras: 50, observacao: "almoço" };
+  const resumo = String(await resumirDiaria(c as never, args)).replace(/ /g, " ");
+  assertStringIncludes(resumo, "*dia inteiro* · R$ 210,00");
+  assertStringIncludes(resumo, "Extras: *R$ 50,00*");
+  await tool("registrar_diaria").execute(args, c as never);
+  const reg = chamadas.find((x) => x.n === "registrar_diaria")!;
+  assertEquals(reg.a.p_extras, 50);
+  assertEquals(reg.a.p_descontos, null);
+  assertEquals(reg.a.p_observacao, "almoço");
+});
+
+Deno.test("'desconta 30 da diária de ontem': jornada 'manter' vira a do dia lançado; sem dia, pergunta", async () => {
+  const comDia = ctx({ diaLancado: true });
+  const args = { freelancer: "roberto", data: "24/09/2026", jornada: "manter", descontos: 30 };
+  const resumo = String(await resumirDiaria(comDia.c as never, args)).replace(/ /g, " ");
+  assertStringIncludes(resumo, "*meio período* · R$ 50,00");
+  assertStringIncludes(resumo, "Descontos: R$ 0,00 → *R$ 30,00*");
+  await tool("registrar_diaria").execute(args, comDia.c as never);
+  const reg = comDia.chamadas.find((x) => x.n === "registrar_diaria")!;
+  assertEquals(reg.a.p_jornada, "meio");
+  assertEquals(reg.a.p_descontos, 30);
+  assertEquals(reg.a.p_extras, null);
+
+  const semDia = ctx();
+  const r = await tool("registrar_diaria").execute(args, semDia.c as never) as { error?: string };
+  assertStringIncludes(String(r.error), "Não há dia lançado");
+  assertEquals(semDia.chamadas.length, 0);
+  assertStringIncludes(String(tool("registrar_diaria").preValidar!({ freelancer: "roberto", jornada: "manter", data_ate: "hoje" }, {} as never)?.error), "um dia de cada vez");
+  const ruim = await resolverDiaria(comDia.c as never, { freelancer: "roberto", data: "24/09/2026", jornada: "manter", descontos: "trinta" });
+  assertStringIncludes(String((ruim as { error: string }).error), "descontos");
+});
+
+Deno.test("'quanto o Roberto tem de extra este mês?': consultar soma extras e descontos do período", async () => {
+  const { c } = ctx();
+  const linhas = [
+    { tipo: "dia", data: "2026-10-01", fracao: 1, trabalhado: 210, extras: 50, descontos: 0, os: [] },
+    { tipo: "dia", data: "2026-10-02", fracao: 1, trabalhado: 130, extras: 0, descontos: 30, os: [] },
+    { tipo: "pagamento", data: "2026-10-03", pago: 100, conta: "C6" },
+  ];
+  const comLinhas = { ...c, sb: { rpc: () => Promise.resolve({ data: { saldo_final: 240, estado: "deve", dias: 2, trabalhado: 340, pago: 100, saldo_anterior: 0, linhas }, error: null }) } };
+  const r = await tool("consultar_freelancer").execute({ freelancer: "roberto", periodo: "este_mes" }, comLinhas as never) as Record<string, any>;
+  assertEquals(r.extras_no_periodo, 50);
+  assertEquals(r.descontos_no_periodo, 30);
+  assertEquals(r.ultimos_lancamentos[0].extras, 50);
 });
 
 Deno.test("consultar: sem nome, todos pelo resumo; com nome, a conta corrente dele", async () => {

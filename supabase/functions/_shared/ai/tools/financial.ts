@@ -3,6 +3,8 @@ import { ESQUEMA_DA_FORMA, formaDePagamento, validarForma } from "./forma-de-pag
 import { mensagemDoBanco } from "./lancamentos.ts";
 import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
 import { descreverSaldo, parcelasDoSaldo } from "./saldo-do-sinal.ts";
+import { SITUACOES_ABERTAS } from "./cobrancas.ts";
+import { contaAPagarDita } from "./favorecidos.ts";
 import {
   COLUNAS_DO_FLUXO, FUNCAO_DA_RAIZ_DA_EMPRESA, ROTULO_DO_DESTINO, hojeEmBrasilia, mesesInteirosDoPeriodo, somarDias,
   somarFluxoDoPeriodo, type DestinoDeFora, type LinhaDoFluxo, type OpcoesDoFluxo,
@@ -103,23 +105,54 @@ async function corrigirPeloBanco(
 export const financialTools: ToolDef[] = [
   {
     name: "list_pending_collections",
-    description: "Lista cobranças pendentes ou atrasadas. Pode filtrar por client_id.",
+    description:
+      "Lista as cobranças em aberto (pendente, enviada, visualizada, vencida, em disputa), com o cliente, a OS e a última promessa de " +
+      "pagamento registrada. Pode filtrar por client_id. 'quem prometeu pagar e não pagou?', 'quem prometeu pagar esta semana?' → " +
+      "promessas='vencidas' (promessa com data já passada e a cobrança ainda aberta) ou 'todas' (só as que têm promessa).",
     input_schema: {
       type: "object",
-      properties: { client_id: { type: "string" } },
+      properties: {
+        client_id: { type: "string" },
+        promessas: { type: "string", enum: ["vencidas", "todas"], description: "Só as cobranças com promessa de pagamento: vencidas (a data prometida passou) ou todas." },
+      },
     },
     risk: "low",
     async execute(args, { sb }) {
+      // Eram 'pending', 'overdue' e 'scheduled' — que não existe: 'enviada', 'visualizada' e 'em
+      // disputa' sumiam da lista (07/10/2026). A lista é a das situações abertas da tela.
       let query = sb
         .from("collections")
-        .select("id, client_id, due_date, amount, status, contact_name, contact_whatsapp, description")
-        .in("status", ["pending", "overdue", "scheduled"])
+        .select("id, client_id, due_date, amount, status, contact_name, contact_whatsapp, description, receivable_id, clients!collections_client_id_fkey(name), service_orders!collections_service_order_id_fkey(service_order_number)")
+        .in("status", SITUACOES_ABERTAS)
         .order("due_date", { ascending: true })
-        .limit(50);
+        .limit(args.promessas ? 300 : 50);
       if (args.client_id) query = query.eq("client_id", args.client_id);
       const { data, error } = await query;
       if (error) throw error;
-      return { results: data };
+      const cobrancas = (data ?? []) as any[];
+      // A última promessa de cada cobrança (o "prometeu pagar em" da tela). Leitura que falha lança:
+      // "ninguém prometeu" por erro engolido seria afirmação falsa.
+      const promessa = new Map<string, string>();
+      for (let i = 0; i < cobrancas.length; i += 100) {
+        const ids = cobrancas.slice(i, i + 100).map((c) => c.id);
+        const { data: contatos, error: erro } = await sb.from("collection_contacts")
+          .select("collection_id, promised_date, created_at").in("collection_id", ids)
+          .eq("contact_type", "payment_promised").not("promised_date", "is", null)
+          .order("created_at", { ascending: false });
+        if (erro) throw new Error(`Não consegui ler as promessas de pagamento: ${erro.message}`);
+        for (const c of (contatos ?? []) as any[]) if (!promessa.has(c.collection_id)) promessa.set(c.collection_id, c.promised_date);
+      }
+      const hoje = hojeEmBrasilia();
+      const results = cobrancas.map((c) => {
+        const p = promessa.get(c.id) ?? null;
+        return {
+          id: c.id, client_id: c.client_id, cliente: c.clients?.name ?? c.contact_name ?? null,
+          os: c.service_orders?.service_order_number ?? null, descricao: c.description, valor: Number(c.amount),
+          vencimento: c.due_date, status: c.status, contact_name: c.contact_name, contact_whatsapp: c.contact_whatsapp,
+          ...(p ? { prometeu_pagar_em: p, promessa_vencida: p < hoje } : {}),
+        };
+      }).filter((c) => !args.promessas || (c.prometeu_pagar_em && (args.promessas !== "vencidas" || c.promessa_vencida)));
+      return { results, total: results.length };
     },
   },
   {
@@ -153,7 +186,7 @@ export const financialTools: ToolDef[] = [
         // Sem checar o erro, uma falha virava "total pago 0" — "o cliente não pagou nada" (02/10/2026).
         const { data: pays, error: payErr } = await sb
           .from("payments")
-          .select("id, receivable_id, amount, payment_date, payment_method, notes")
+          .select("id, receivable_id, amount, payment_date, payment_method, notes, bank_transaction_id")
           .in("receivable_id", recIds)
           .eq("status", "confirmed")
           .order("payment_date", { ascending: false });
@@ -181,6 +214,9 @@ export const financialTools: ToolDef[] = [
           is_sinal: r.is_deposit,
         })),
         pagamentos: payments.map((p: any) => ({
+          // O id é o que desfazer_aplicacao_de_pix e estornar_pagamento pedem (07/10/2026).
+          payment_id: p.id,
+          veio_do_extrato: !!p.bank_transaction_id,
           valor: p.amount,
           data: p.payment_date,
           forma: p.payment_method,
@@ -338,34 +374,41 @@ export const financialTools: ToolDef[] = [
   },
   {
     name: "create_payable",
-    description: "Cria uma conta a pagar (despesa).",
+    description:
+      "Cria uma conta a pagar (despesa a vencer): 'lança uma conta a pagar de 300 para a Eliane, vence dia 10, alimentação'. Em " +
+      "favorecido passe o nome dito (favorecido ou fornecedor do cadastro; o sistema acha — quem não está no cadastro vai com o nome na " +
+      "descrição). Sem categoria, vale a padrão do favorecido. Vencimento como foi dito ('dia 10', dd/mm).",
     input_schema: {
       type: "object",
       properties: {
         description: { type: "string" },
-        issue_date: { type: "string", description: "Data de emissão (ISO date)" },
-        due_date: { type: "string", description: "Data de vencimento (ISO date)" },
+        issue_date: { type: "string", description: "Data de emissão (ISO date). Padrão: hoje." },
+        due_date: { type: "string", description: "Vencimento: ISO date ou como foi dito ('dia 10', dd/mm, 'sexta')." },
         amount: { type: "number" },
-        expense_category: { type: "string" },
+        expense_category: { type: "string", description: "Categoria de despesa como foi dita ('alimentação'); o sistema acha no plano de contas." },
+        favorecido: { type: "string", description: "Para quem é, pelo nome (favorecido ou fornecedor do cadastro)." },
         supplier_id: { type: "string" },
-        linked_service_order_id: { type: "string" },
+        linked_service_order_id: { type: "string", description: "OS a que o custo pertence: uuid ou número ('OS-00060')." },
         notes: { type: "string" },
       },
-      required: ["description", "issue_date", "due_date", "amount"],
+      required: ["description", "due_date", "amount"],
     },
     risk: "low",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
-      const { admin } = ctx;
-      const { data, error } = await admin
+      // Frente financeiro (07/10/2026): favorecido pelo nome, categoria e vencimento como ditos — a
+      // mesma resolução do lançamento do Caixa. Antes os argumentos iam crus para o insert.
+      const r = await contaAPagarDita(ctx, args);
+      if ("error" in r) return r;
+      const { data, error } = await ctx.admin
         .from("payables")
-        .insert({ ...args, balance_amount: args.amount, paid_amount: 0, status: "pending" })
+        .insert(r.linha)
         .select()
         .single();
-      if (error) throw error;
-      return { ok: true, payable: data };
+      if (error) return { error: `Não consegui criar a conta a pagar: ${mensagemDoBanco(error)}` };
+      return { ok: true, payable: data, ...(r.aviso ? { aviso: r.aviso } : {}) };
     },
   },
   {

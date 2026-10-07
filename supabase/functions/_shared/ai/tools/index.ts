@@ -47,6 +47,11 @@ import { diariasTools } from "./diarias.ts";
 import { followupTools } from "./followups.ts";
 import { condicaoPagamentoTools } from "./condicao-pagamento.ts";
 import { acompanhamentoTools } from "./acompanhamento.ts";
+// financeiro (07/10/2026): anotações de Pix, estorno, cobrança formal e favorecido.
+import { anotacaoTools } from "./anotacoes.ts";
+import { estornoTools } from "./estorno.ts";
+import { cobrancaTools } from "./cobrancas.ts";
+import { favorecidoTools } from "./favorecidos.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -100,6 +105,11 @@ export const allTools: ToolDef[] = [
   ...caixaTools,
   ...diariasTools,
   ...followupTools,
+  // financeiro (07/10/2026)
+  ...anotacaoTools,
+  ...estornoTools,
+  ...cobrancaTools,
+  ...favorecidoTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export const toolsByName: Record<string, ToolDef> = Object.fromEntries(allTools.map((t) => [t.name, t]));

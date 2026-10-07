@@ -3,6 +3,7 @@ import { ESQUEMA_DA_FORMA, formaDePagamento, validarForma } from "./forma-de-pag
 import { horariosDeBrasilia } from "../fuso.ts";
 import { sendWhatsapp } from "./whatsapp.ts";
 import { descreverSaldo, parcelasDoSaldo } from "./saldo-do-sinal.ts";
+import { registrarEnvioDaCobranca } from "./cobrancas.ts";
 
 // Macros de FLUXO (Onda 2b) — "o LLM orquestra, o código executa".
 // Cada uma colapsa um procedimento de vários passos numa única tool de risco alto:
@@ -50,10 +51,15 @@ export const flowMacroTools: ToolDef[] = [
       for (const id of ids) {
         const { data: col } = await sb
           .from("collections")
-          .select("id, amount, due_date, contact_whatsapp, phone, contact_name, client_id, last_auto_sent_at")
+          .select("id, amount, due_date, contact_whatsapp, phone, contact_name, client_id, last_auto_sent_at, status")
           .eq("id", id)
           .maybeSingle();
         if (!col) { falhas.push({ id, motivo: "cobrança não encontrada" }); continue; }
+        // Paga ou cancelada não se cobra (07/10/2026).
+        if (col.status === "paid" || col.status === "cancelled") {
+          pulados.push({ cliente: col.contact_name || null, motivo: col.status === "paid" ? "cobrança paga" : "cobrança cancelada" });
+          continue;
+        }
 
         // Não recobrar quem já foi cobrado hoje (mesma regra do get_delinquency_plan).
         if (col.last_auto_sent_at && String(col.last_auto_sent_at).slice(0, 10) === hoje) {
@@ -74,8 +80,9 @@ export const flowMacroTools: ToolDef[] = [
 
         const r = await sendWhatsapp(phone, msg, jwt);
         if ((r as { ok?: boolean }).ok) {
-          await admin.from("collections").update({ last_auto_sent_at: new Date().toISOString() }).eq("id", col.id);
-          enviados.push({ cliente: col.contact_name || null, valor: Number(col.amount) || 0 });
+          // O contato 'whatsapp_sent' e a situação 'enviada', como a tela (07/10/2026).
+          const aviso = await registrarEnvioDaCobranca(admin, col, ctx.userId, "Lembrete enviado pelo assistente (lote, WhatsApp)");
+          enviados.push({ cliente: col.contact_name || null, valor: Number(col.amount) || 0, ...(aviso ? { aviso } : {}) });
         } else {
           falhas.push({ cliente: col.contact_name || null, motivo: (r as { error?: string }).error || "falha no envio" });
         }

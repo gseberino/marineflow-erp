@@ -210,6 +210,16 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   // Só pela rede, cada update_service virava uma pendência — 10 serviços, 10 "sim" a mais
   // (conferência de 26/09/2026). À vista, segue o risco low que declara e o "sim" do prompt basta.
   "update_service",
+
+  // financeiro (07/10/2026): o que só a tela fazia — anotações de Pix que esperam o banco, estorno
+  // de pagamento, cobrança formal e editar/desativar favorecido.
+  "listar_anotacoes_do_extrato",
+  "alterar_anotacao_do_extrato",
+  "estornar_pagamento",
+  "criar_cobranca",
+  "registrar_contato_de_cobranca",
+  "alterar_cobranca",
+  "alterar_favorecido",
 ]);
 
 /**
@@ -432,6 +442,15 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "create_task",
   "schedule_self_reminder",
   "my_agenda",
+
+  // financeiro (07/10/2026): pedido do dono — o que só a tela fazia passa a ser feito conversando.
+  "listar_anotacoes_do_extrato",
+  "alterar_anotacao_do_extrato",
+  "estornar_pagamento",
+  "criar_cobranca",
+  "registrar_contato_de_cobranca",
+  "alterar_cobranca",
+  "alterar_favorecido",
 ]);
 
 /**
