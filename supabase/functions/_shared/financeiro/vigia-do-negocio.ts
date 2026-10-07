@@ -24,6 +24,9 @@ const NOME_DO_SISTEMA: Record<string, string> = {
   eletrico_dc: "elétrico DC", eletrico_ac: "elétrico AC", eletronico: "eletrônica", refrigeracao: "refrigeração",
   hidraulico: "hidráulica", gas: "gás", mecanico: "mecânica", estrutural: "estrutural", sem_sistema: "sem sistema definido",
 };
+/** 62.1 → "62,1" (vírgula, como o dono lê). */
+export const pct = (n: number | null | undefined) => (n == null ? "?" : String(n).replace(".", ","));
+
 export const nomeDoSistema = (s: string) => NOME_DO_SISTEMA[s] ?? s.replace(/_/g, " ");
 
 const MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -48,7 +51,7 @@ export function lerAnalise(a: Analise, reais: (n: number) => string): { constata
     const min = eq.receita_minima_por_mes ?? 0;
     const r = ultimoFechado.receita;
     const base = eq.so_meses_prontos ? "" : " (estimativa: ainda há poucos meses fechados)";
-    const sugestaoDeMargem = `subir a margem ou o volume: com margem de contribuição de ${eq.margem_de_contribuicao_pct}% e ${reais(eq.despesas_fixas_por_mes ?? 0)} de despesas fixas por mês, cada ${reais(1000)} vendido a mais cobre ${reais(10 * (eq.margem_de_contribuicao_pct ?? 0))} de custo fixo. Me peça a margem por serviço para ver onde ajustar.`;
+    const sugestaoDeMargem = `subir a margem ou o volume: com margem de contribuição de ${pct(eq.margem_de_contribuicao_pct)}% e ${reais(eq.despesas_fixas_por_mes ?? 0)} de despesas fixas por mês, cada ${reais(1000)} vendido a mais cobre ${reais(10 * (eq.margem_de_contribuicao_pct ?? 0))} de custo fixo. Me peça a margem por serviço para ver onde ajustar.`;
     if (ultimoFechado.resultado < 0) {
       const custos = ultimoFechado.custo_direto + ultimoFechado.despesas;
       constatacoes.push(`⚠️ ${nomeDoMes(ultimoFechado.mes)} fechou com prejuízo de ${reais(-ultimoFechado.resultado)}: faturou ${reais(r)} e gastou ${reais(custos)} (${reais(ultimoFechado.custo_direto)} de custo direto, ${reais(ultimoFechado.despesas)} de despesas).` +
@@ -76,12 +79,12 @@ export function lerAnalise(a: Analise, reais: (n: number) => string): { constata
   const alvo = a.margem_alvo_pct ?? 30;
   const fraco = sistemas.find((s) => s.os >= 2 && s.margem_pct != null && s.margem_pct < alvo);
   if (fraco) {
-    constatacoes.push(`🔧 Serviços de *${nomeDoSistema(fraco.sistema)}* deram ${fraco.margem_pct}% de margem (alvo: ${alvo}%) em ${fraco.os} OS — vale rever o preço.`);
+    constatacoes.push(`🔧 Serviços de *${nomeDoSistema(fraco.sistema)}* deram ${pct(fraco.margem_pct)}% de margem (alvo: ${alvo}%) em ${fraco.os} OS — vale rever o preço.`);
   } else if (forte) {
-    constatacoes.push(`🎯 *${nomeDoSistema(forte.sistema)}* trouxe ${forte.pct_da_receita}% da receita das OS (${reais(forte.receita)}, margem ${forte.margem_pct}%).`);
+    constatacoes.push(`🎯 *${nomeDoSistema(forte.sistema)}* trouxe ${pct(forte.pct_da_receita)}% da receita das OS (${reais(forte.receita)}, margem ${pct(forte.margem_pct)}%).`);
   }
   if (forte && !sugestao) {
-    sugestao = `trabalhar a divulgação de *${nomeDoSistema(forte.sistema)}*: é ${forte.pct_da_receita}% da receita das OS. Anúncio, post com antes/depois de um serviço feito ou contato com clientes antigos desse tipo de serviço trazem mais do que já dá certo.`;
+    sugestao = `trabalhar a divulgação de *${nomeDoSistema(forte.sistema)}*: é ${pct(forte.pct_da_receita)}% da receita das OS. Anúncio, post com antes/depois de um serviço feito ou contato com clientes antigos desse tipo de serviço trazem mais do que já dá certo.`;
   }
 
   // Ressalvas que mudam a leitura
