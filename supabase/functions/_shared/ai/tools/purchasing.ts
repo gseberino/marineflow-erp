@@ -1,5 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
-import { orContem } from "../filtro-or.ts";
+import { buscarCadastro } from "../busca-cadastro.ts";
 
 // Mesmo esquema de numeração não-atômico usado em useCreatePOFromOS (frontend) —
 // replicado aqui para gerar o mesmo formato "OC-00001".
@@ -220,11 +220,11 @@ export const purchasingTools: ToolDef[] = [
   {
     name: "search_suppliers",
     description:
-      "Busca FORNECEDORES por nome, nome fantasia, CNPJ/CPF, telefone ou cidade. Use para achar o supplier_id quando o produto NÃO está no catálogo (aí suggest_suppliers não serve), para pesquisar se uma marca/fornecedor já é cadastrado, ou antes de disparar cotação. Só leitura.",
+      "Busca FORNECEDORES por nome, nome fantasia, contato ou cidade (sem precisar de acento), CNPJ/CPF ou telefone (com ou sem pontos/traço/DDD). Use para achar o supplier_id quando o produto NÃO está no catálogo (aí suggest_suppliers não serve), para pesquisar se um fornecedor já é cadastrado, ou antes de disparar cotação. NÃO busca por marca de produto (fornecedor não tem marca no cadastro). Só leitura.",
     input_schema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Nome, marca, CNPJ, telefone ou cidade." },
+        query: { type: "string", description: "Nome, nome fantasia, contato, CNPJ/CPF, telefone ou cidade." },
         limit: { type: "number", description: "Máximo de resultados (padrão 10, teto 25)." },
       },
       required: ["query"],
@@ -239,12 +239,17 @@ export const purchasingTools: ToolDef[] = [
       if (q.length < 2) return { error: "Termo de busca muito curto. Diga o nome (ou parte) do fornecedor." };
       const limit = Math.min(Number(args.limit) || 10, 25);
 
-      const { data, error } = await sb
-        .from("suppliers")
-        .select("id, name, trade_name, cnpj_cpf, contact_name, phone, email, city, state, payment_terms, active")
-        .or(orContem(["name", "trade_name", "cnpj_cpf", "phone", "city"], q))
-        .limit(limit);
-      if (error) throw error;
+      // Sem acento e por dígitos (busca-cadastro.ts, 07/10/2026): o ILIKE não achava o CNPJ gravado
+      // "12.063.636/0001-61" por "12063636000161", e a descrição prometia "marca", que fornecedor
+      // não tem. Leitura que falha lança — não vira "nenhum fornecedor, cadastre".
+      const data = await buscarCadastro(
+        sb,
+        "suppliers",
+        "id, name, trade_name, display_name, cnpj_cpf, contact_name, phone, email, city, state, payment_terms, active",
+        q,
+        { texto: ["name", "trade_name", "display_name", "contact_name", "city"], documento: ["cnpj_cpf"], telefone: ["phone"] },
+        { limite: limit },
+      );
 
       const results = ((data as any[]) || []).map((s) => ({
         supplier_id: s.id,

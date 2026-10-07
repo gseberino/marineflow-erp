@@ -1,5 +1,6 @@
 import type { ToolCtx, ToolDef } from "./registry.ts";
 import { chaveTelefone } from "../phone.ts";
+import { contatosDasEmbarcacoes } from "./vessels.ts";
 
 // Ficha 360 — visão unificada por entidade (Fase 3 · Etapa 1).
 // Ver plans/marineflow-contexto-unificado-escopo.md
@@ -93,7 +94,7 @@ export const entity360Tools: ToolDef[] = [
   {
     name: "get_client_360",
     description:
-      "RETRATO COMPLETO de um cliente numa única consulta: dados, ativos e seus equipamentos, orçamentos e OS (abertos e últimos), situação financeira, últimas mensagens de WhatsApp e notas fiscais. Use quando pedirem 'me resume o João', 'o que temos com esse cliente', 'como está a conta dele' — em vez de disparar várias buscas. Responda com a SÍNTESE antes do detalhe. Técnico não recebe as seções de dinheiro.",
+      "RETRATO COMPLETO de um cliente numa única consulta: dados, ativos e seus equipamentos (com a marina e os CONTATOS de cada embarcação — marinheiro, comandante, com contact_id), orçamentos e OS (abertos e últimos), situação financeira, últimas mensagens de WhatsApp e notas fiscais. Use quando pedirem 'me resume o João', 'o que temos com esse cliente', 'como está a conta dele' — em vez de disparar várias buscas. Responda com a SÍNTESE antes do detalhe. Técnico não recebe as seções de dinheiro.",
     input_schema: {
       type: "object",
       properties: { client_id: { type: "string", description: "UUID do cliente (use search_clients para achar)." } },
@@ -117,10 +118,14 @@ export const entity360Tools: ToolDef[] = [
       // Ativos + equipamentos (o "o quê" para sugerir serviço).
       const { data: ativos } = await sb
         .from("vessels")
-        .select("id, name, manufacturer, model, year, asset_type, engine_brand, engine_model, battery_bank_summary, inverter_charger_summary, navigation_electronics_summary")
+        .select("id, name, manufacturer, model, year, asset_type, engine_brand, engine_model, battery_bank_summary, inverter_charger_summary, navigation_electronics_summary, marinas(name, contact_name, phone)")
         .eq("client_id", cli.id)
         .eq("active", true)
         .limit(TETO);
+      // Contatos da embarcação e a marina (07/10/2026): "quem é o contato da embarcação do Nelson
+      // na marina?" se responde daqui. Erro de leitura lança — "sem contato" por falha levaria a
+      // cadastrar o mesmo marinheiro de novo.
+      const contatosPorAtivo = await contatosDasEmbarcacoes(sb, ((ativos as any[]) || []).map((v) => v.id));
 
       // Orçamentos abertos e OS recentes — o que está em jogo agora.
       const { data: oss, error: ossErr } = await sb
@@ -220,6 +225,8 @@ export const entity360Tools: ToolDef[] = [
             v.inverter_charger_summary ? `Inversor: ${String(v.inverter_charger_summary).slice(0, 70)}` : null,
             v.navigation_electronics_summary ? `Eletrônica: ${String(v.navigation_electronics_summary).slice(0, 70)}` : null,
           ].filter(Boolean),
+          marina: v.marinas ? { nome: v.marinas.name, contato: v.marinas.contact_name || null, telefone: v.marinas.phone || null } : null,
+          contatos: contatosPorAtivo[v.id] ?? [],
         })),
         orcamentos_abertos: orcamentosAbertos,
         os_em_andamento: osEmAndamento,
