@@ -210,6 +210,13 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   // Só pela rede, cada update_service virava uma pendência — 10 serviços, 10 "sim" a mais
   // (conferência de 26/09/2026). À vista, segue o risco low que declara e o "sim" do prompt basta.
   "update_service",
+
+  // operacional (07/10/2026): via do técnico (situação de cada serviço, chegada e saída com a
+  // hora dita) e a caixa de sugestões da agenda — pedidos do dono para fazer conversando.
+  "update_service_order_via",
+  "list_agenda_suggestions",
+  "accept_agenda_suggestions",
+  "dismiss_agenda_suggestions",
 ]);
 
 /**
@@ -432,6 +439,15 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "create_task",
   "schedule_self_reminder",
   "my_agenda",
+
+  // operacional (07/10/2026): a via do técnico, aceitar/descartar sugestão da caixa e
+  // update_task (parar de repetir / mudar a regra) — pela rede, cada uma pedia um "sim".
+  // list_agenda_suggestions fica de fora de propósito: é leitura, a rede a roda direto, e o
+  // perfil enxuto tem teto de 105 (agent-perfil-admin_test.ts).
+  "update_service_order_via",
+  "accept_agenda_suggestions",
+  "dismiss_agenda_suggestions",
+  "update_task",
 ]);
 
 /**

@@ -3,6 +3,8 @@ import { horariosDeBrasilia } from "../fuso.ts";
 import { dayOverloadNotice } from "./agenda.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
+import { acharOS } from "./os-referencia.ts";
+import { ehErro } from "./caixa.ts";
 
 /**
  * Recalcula os totais da OS após inserir/alterar item — best-effort, não deve derrubar a
@@ -404,7 +406,7 @@ export const serviceOrderTools: ToolDef[] = [
   },
   {
     name: "get_service_order",
-    description: "Detalhes completos de uma OS incluindo itens e serviços.",
+    description: "Detalhes completos de uma OS incluindo itens e serviços — cada serviço com a situação na via do técnico (situacao_na_via: a_fazer, so_levantar, aguarda_peca, feito, parcial, nao_feito) e o motivo.",
     input_schema: {
       type: "object",
       properties: { id: { type: "string" } },
@@ -427,7 +429,7 @@ export const serviceOrderTools: ToolDef[] = [
       if (erroPecas) throw new Error(`Não consegui ler as peças da OS: ${erroPecas.message}`);
       const { data: services, error: erroServicos } = await sb
         .from("service_order_services")
-        .select("id, name_snapshot, quantity, unit_price_snapshot, line_total")
+        .select("id, name_snapshot, quantity, unit_price_snapshot, line_total, field_status, field_status_note")
         .eq("service_order_id", args.id);
       if (erroServicos) throw new Error(`Não consegui ler os serviços da OS: ${erroServicos.message}`);
 
@@ -472,6 +474,10 @@ export const serviceOrderTools: ToolDef[] = [
           quantidade: s.quantity,
           preco_unitario: s.unit_price_snapshot,
           total: s.line_total,
+          // 07/10/2026: a situação na via do técnico (a fazer, feito, parcial, não feito…) e o
+          // motivo — sem isto "o que ficou pendente na via?" não tinha resposta.
+          situacao_na_via: s.field_status || "a_fazer",
+          ...(s.field_status_note ? { motivo_na_via: s.field_status_note } : {}),
         })),
       };
     },
@@ -1073,36 +1079,61 @@ export const serviceOrderTools: ToolDef[] = [
   {
     name: "update_service_order_notes",
     description:
-      "Edita os TEXTOS de um orçamento/OS que já existe: extra_notes = 'Observações para impressão' (aparecem no PDF do cliente: condições, ressalvas, garantias, prazos) e internal_notes = notas internas (nunca vão ao PDF). Por padrão SUBSTITUI o texto; mode='append' acrescenta uma linha ao que já está lá. Para orçamento novo, passe os campos direto em create_service_order.",
+      "Edita os TEXTOS de um orçamento/OS que já existe — os mesmos campos da tela (Observações e Laudos Técnicos). " +
+      "Laudo do serviço: initial_findings = Constatações Iniciais (o que se encontrou ao chegar), diagnosis = Diagnóstico, " +
+      "solution_applied = Solução Aplicada, customer_visible_report = Relatório para o cliente (aparece no link do cliente), " +
+      "technician_notes = Notas do Técnico. Escritório: extra_notes = 'Observações para impressão' (saem no PDF: condições, ressalvas, garantias, prazos) " +
+      "e internal_notes = notas internas (nunca vão ao cliente). Aceita o NÚMERO da OS em `os` (OS-00112, ORÇ-00112) ou o id. " +
+      "Por padrão SUBSTITUI o texto do campo; mode='append' acrescenta embaixo do que já está lá. Texto vindo de áudio: escreva limpo, em frases, sem inventar o que não foi dito. " +
+      "Técnico grava só o laudo (não as observações de impressão nem as notas internas). Para orçamento novo, passe os campos direto em create_service_order.",
     input_schema: {
       type: "object",
       properties: {
+        os: { type: "string", description: "Número do orçamento/OS como foi dito (OS-00112, ORÇ-00112, 112). Use isto OU service_order_id." },
         service_order_id: { type: "string", description: "UUID do orçamento/OS." },
+        initial_findings: { type: "string", description: "Constatações Iniciais. String vazia limpa o campo." },
+        diagnosis: { type: "string", description: "Diagnóstico. String vazia limpa o campo." },
+        solution_applied: { type: "string", description: "Solução Aplicada. String vazia limpa o campo." },
+        customer_visible_report: { type: "string", description: "Relatório para o cliente (visível no link do cliente). String vazia limpa o campo." },
+        technician_notes: { type: "string", description: "Notas do Técnico. String vazia limpa o campo." },
         extra_notes: { type: "string", description: "Observações para impressão (visíveis ao cliente no PDF). String vazia limpa o campo." },
         internal_notes: { type: "string", description: "Notas internas (não aparecem no PDF). String vazia limpa o campo." },
         mode: { type: "string", enum: ["replace", "append"], description: "replace (padrão) troca o texto inteiro; append acrescenta ao final." },
       },
-      required: ["service_order_id"],
     },
     risk: "low",
-    roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
       // Até 16/09/2026 só create_service_order aceitava extra_notes: o agente sabia o que o
       // campo era (o prompt explica) e não tinha COMO gravá-lo numa OS existente — respondia
       // que tinha feito, ou tentava outra tool. Esta é a tool que faltava.
-      const blocked = blockTechnician(ctx);
-      if (blocked) return blocked;
+      //
+      // 07/10/2026 (frente operacional): passou a gravar também o LAUDO — constatação,
+      // diagnóstico, solução e relatório ao cliente —, os campos que a tela edita na seção
+      // "Observações e Laudos Técnicos" (ServiceOrderForm.tsx, salvos direto em service_orders).
+      // O técnico ganhou acesso porque é ele quem dita o diagnóstico em campo; as observações de
+      // impressão e as notas internas (margem, material além do previsto) continuam fora dele.
       const { sb } = ctx;
-      const guard = await assertEditableSo(sb, args.service_order_id);
-      if (guard) return guard;
-      if (args.extra_notes == null && args.internal_notes == null) {
-        return { error: "Informe extra_notes e/ou internal_notes." };
+      const camposDoLaudo = ["initial_findings", "diagnosis", "solution_applied", "customer_visible_report", "technician_notes"] as const;
+      const camposDoEscritorio = ["extra_notes", "internal_notes"] as const;
+      const pedidos = [...camposDoLaudo, ...camposDoEscritorio].filter((c) => args[c] != null);
+      if (pedidos.length === 0) {
+        return { error: "Diga o que gravar: diagnóstico, solução aplicada, relatório ao cliente, constatações, notas do técnico, observações para impressão ou notas internas." };
       }
-      const { data: so } = await sb
+      if (camposDoEscritorio.some((c) => args[c] != null)) {
+        const blocked = blockTechnician(ctx);
+        if (blocked) return { error: "Técnico grava o laudo (diagnóstico, solução, relatório ao cliente, constatações, notas do técnico) — observações para impressão e notas internas são do escritório." };
+      }
+      const achada = await acharOS(ctx, args);
+      if (ehErro(achada)) return achada;
+      // Mesma trava da tela (isLocked): faturada ou cancelada não edita.
+      const guard = await assertEditableSo(sb, achada.id);
+      if (guard) return guard;
+      const { data: so, error: erroLeitura } = await sb
         .from("service_orders")
-        .select("id, service_order_number, extra_notes, internal_notes")
-        .eq("id", args.service_order_id)
+        .select(`id, service_order_number, ${pedidos.join(", ")}`)
+        .eq("id", achada.id)
         .maybeSingle();
+      if (erroLeitura) return { error: `Não consegui ler a OS para gravar o texto: ${erroLeitura.message}` };
       if (!so) return { error: "Orçamento/OS não encontrado." };
 
       const append = args.mode === "append";
@@ -1113,8 +1144,14 @@ export const serviceOrderTools: ToolDef[] = [
         return (a ? `${a}\n${n}` : n).slice(0, 8000);
       };
       const patch: Record<string, string> = {};
-      if (args.extra_notes != null) patch.extra_notes = junta(so.extra_notes, args.extra_notes);
-      if (args.internal_notes != null) patch.internal_notes = junta(so.internal_notes, args.internal_notes);
+      // O texto que estava lá e foi trocado volta no resultado: substituir apaga, e o dono
+      // precisa saber o que sumiu (a tela mostra o campo antes de ele apagar; aqui não).
+      const substituido: Record<string, string> = {};
+      for (const c of pedidos) {
+        patch[c] = junta(so[c], args[c]);
+        const antes = String(so[c] ?? "").trim();
+        if (!append && antes && antes !== patch[c]) substituido[c] = antes;
+      }
 
       const { error } = await sb.from("service_orders").update(patch).eq("id", so.id);
       if (error) throw error;
@@ -1122,8 +1159,8 @@ export const serviceOrderTools: ToolDef[] = [
         ok: true,
         os: so.service_order_number,
         modo: append ? "acrescentado" : "substituído",
-        extra_notes: patch.extra_notes ?? String(so.extra_notes ?? ""),
-        internal_notes: patch.internal_notes ?? String(so.internal_notes ?? ""),
+        gravado: patch,
+        ...(Object.keys(substituido).length ? { texto_anterior_substituido: substituido } : {}),
       };
     },
   },

@@ -165,6 +165,11 @@ const TOOL_LABELS_PT: Record<string, string> = {
   remove_service_order_expense: "Remover gasto da OS",
   create_composed_product: "Criar produto composto/kit",
   criar_categoria_de_despesa: "Criar categoria de despesa",
+  // operacional (07/10/2026)
+  update_service_order_via: "Lançar a via do técnico",
+  accept_agenda_suggestions: "Aceitar sugestão da agenda",
+  dismiss_agenda_suggestions: "Descartar sugestão da agenda",
+  update_task: "Alterar tarefa da agenda",
 };
 
 function humanizeToolNamePt(name: string): string {
