@@ -72,6 +72,12 @@ ACRESCENTADAS.push(
   "get_purchase_order", "update_purchase_order_status", "update_purchase_order", "delete_purchase_order",
   "list_quote_requests", "close_quote_request", "reopen_quote_request", "set_quote_supplier_terms",
 );
+// planos de manutenção (07/10/2026): planos, serviço feito, adiar, sugerir, lembrete ao cliente e métricas.
+ACRESCENTADAS.push(
+  "list_maintenance_plans", "create_maintenance_plan", "update_maintenance_plan", "register_plan_service",
+  "snooze_maintenance_plan", "suggest_maintenance_plans", "send_maintenance_reminder_now",
+  "enviar_lembrete_de_revisao", "maintenance_reminder_metrics",
+);
 // 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
 // roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento",

@@ -6,6 +6,8 @@ import { resumirMensagem } from "./tools/resposta.ts";
 // fiscal e compras (07/10/2026): resumos da confirmação (nota ao cliente, receber e excluir OC).
 import { resumirEnvioDaNota } from "./tools/nota-fiscal-pdf.ts";
 import { resumirExclusaoDeOC, resumirRecebimento } from "./tools/compras-ciclo.ts";
+// planos de manutenção (07/10/2026): título e resumo do lembrete de revisão ao cliente.
+import { resumirLembreteDeRevisao, TITULOS_DOS_PLANOS } from "./tools/planos-manutencao.ts";
 import {
   callClaude,
   ClaudeApiError,
@@ -181,6 +183,8 @@ const TOOL_LABELS_PT: Record<string, string> = {
 };
 // financeiro (07/10/2026): anotação de Pix, estorno, cobrança formal e favorecido.
 Object.assign(TOOL_LABELS_PT, TITULOS_DO_FINANCEIRO);
+// planos de manutenção (07/10/2026): planos e lembrete de revisão ao cliente.
+Object.assign(TOOL_LABELS_PT, TITULOS_DOS_PLANOS);
 
 function humanizeToolNamePt(name: string): string {
   return TOOL_LABELS_PT[name] || humanizeToolName(name);
@@ -329,6 +333,9 @@ for (const nome of RESUMO_QUE_RESOLVE_DO_FINANCEIRO) RESUMO_QUE_RESOLVE.add(nome
 RESUMO_QUE_RESOLVE.add("send_fiscal_pdf_to_client");
 RESUMO_QUE_RESOLVE.add("receive_purchase_order");
 RESUMO_QUE_RESOLVE.add("delete_purchase_order");
+// planos de manutenção (07/10/2026): lembrete que não dá para montar (opt-out, sem telefone, os 3
+// toques já foram) é recusa — o resumo diz por quê numa linha "⚠️".
+RESUMO_QUE_RESOLVE.add("send_maintenance_reminder_now");
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();
@@ -420,6 +427,14 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
   if (toolName === "receive_purchase_order") {
     try {
       return await resumirRecebimento(admin, args);
+    } catch { /* cai no resumo genérico */ }
+  }
+  // planos de manutenção (07/10/2026): o "sim" é sobre o TEXTO EXATO que vai ao cliente, o número
+  // inteiro e qual lembrete do ciclo é (1º, 2º, último ou campanha).
+  if (toolName === "enviar_lembrete_de_revisao" || toolName === "send_maintenance_reminder_now") {
+    try {
+      const r = await resumirLembreteDeRevisao(admin, toolName, args);
+      if (r) return r;
     } catch { /* cai no resumo genérico */ }
   }
   if (toolName === "delete_purchase_order") {

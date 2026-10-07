@@ -36,6 +36,7 @@ import { AgendaTaskDialog, type ExistingTask } from '@/components/AgendaTaskDial
 import { FocusMode } from '@/components/agenda/FocusMode';
 import { OnMyWayButton } from '@/components/agenda/OnMyWayButton';
 import { SuggestionCard } from '@/components/agenda/SuggestionCard';
+import { RevisoesPanel } from '@/components/agenda/RevisoesPanel';
 import { VoiceCaptureButton } from '@/components/agenda/VoiceCaptureButton';
 import { InstallAgendaButton } from '@/components/agenda/InstallAgendaButton';
 import {
@@ -52,7 +53,8 @@ import { FilterPresets } from '@/components/FilterPresets';
 import { downloadCSV } from '@/lib/download';
 import { useFollowupSwitch } from '@/hooks/use-followup-missions';
 
-type ViewMode = 'today' | 'week' | 'month' | 'done' | 'inbox' | 'esperando';
+// 'revisoes' (07/10/2026): planos de manutenção vencendo, vencidos, adiados e quem respondeu ao lembrete.
+type ViewMode = 'today' | 'week' | 'month' | 'done' | 'inbox' | 'esperando' | 'revisoes';
 
 function startOfWeek(d: Date): Date {
   const date = new Date(d);
@@ -104,12 +106,15 @@ export default function AgendaPage() {
     const v = searchParams.get('view');
     // Esta lista tem de andar junto com o ViewMode: um valor que exista lá e falte aqui
     // cai em 'today' sem erro nenhum — e o link salvo no celular abre a tela errada.
-    return (['today', 'week', 'month', 'done', 'inbox', 'esperando'] as const).includes(v as any)
+    return (['today', 'week', 'month', 'done', 'inbox', 'esperando', 'revisoes'] as const).includes(v as any)
       ? (v as ViewMode) : 'today';
   });
   const [cursor, setCursor] = useState(() => new Date());
   // Acompanhamento pela IA desligado (desde 15/09): o link some; religa em Configurações › Sistema.
   const acompanhamento = useFollowupSwitch();
+  // Revisões mostram valor estimado (dinheiro): técnico não vê a aba (07/10/2026).
+  const { user: usuario } = useAuth();
+  const veRevisoes = usuario?.role !== 'technician';
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
   const [osDialogOpen, setOsDialogOpen] = useState(false);
@@ -276,6 +281,7 @@ export default function AgendaPage() {
   const isLoading = view === 'today' ? (loadingOrders || loadingLive)
     : view === 'done' ? loadingDone
     : view === 'inbox' ? loadingSuggestions
+    : view === 'revisoes' ? false // o painel tem o próprio carregando
     : (loadingOrders || loadingTasks);
 
 
@@ -395,6 +401,11 @@ export default function AgendaPage() {
                 </span>
               )}
             </Button>
+            {veRevisoes && (
+              <Button size="sm" variant={view === 'revisoes' ? 'default' : 'ghost'} onClick={() => setView('revisoes')}>
+                Revisões
+              </Button>
+            )}
             {/* O que depende DELES e a IA está cobrando: painel próprio (as missões do
                 "Deixar a IA acompanhar"). Só com o acompanhamento ligado (06/10/2026). */}
             {acompanhamento.ligado && !acompanhamento.isLoading && (
@@ -417,7 +428,7 @@ export default function AgendaPage() {
                 </SelectContent>
               </Select>
             )}
-            {view !== 'today' && view !== 'done' && (
+            {view !== 'today' && view !== 'done' && view !== 'revisoes' && (
               <>
                 <Button size="sm" variant="outline" onClick={() => handleNav(-1)}>
                   <ChevronLeft className="h-4 w-4" />
@@ -499,6 +510,8 @@ export default function AgendaPage() {
               completeTask.mutate({ id, done }, { onError: (e: any) => toast.error(e?.message || 'Erro ao concluir') })}
             onScheduleOs={(t) => { setScheduleOsId(t.related_entity_id); setOsDialogOpen(true); }}
           />
+        ) : view === 'revisoes' && veRevisoes ? (
+          <RevisoesPanel />
         ) : view === 'esperando' ? (
           <EsperandoView loops={loopsOurs} />
         ) : view === 'inbox' ? (

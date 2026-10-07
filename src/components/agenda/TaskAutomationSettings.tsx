@@ -8,9 +8,77 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Cog, AlertTriangle, ListChecks, X } from 'lucide-react';
+import { Cog, AlertTriangle, ListChecks, X, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { CHAVE_CAMPANHA_TEMPORADA, CHAVE_LEMBRETES_REVISAO } from '@/hooks/use-planos-manutencao';
+import { interruptorLigado } from '@/lib/planos-manutencao';
+
+/**
+ * Lembretes de revisão (07/10/2026). Decisão do dono: mensagem ao cliente sai SEMPRE com o "sim"
+ * dele — o sistema prepara e pergunta no WhatsApp do dono. Por isso ligar não pede a palavra
+ * LIGAR como as regras de envio automático acima: nada sai sozinho. Padrão 'on' (sem a chave =
+ * ligado), igual à função lembretes-de-revisao que lê estas chaves.
+ */
+const INTERRUPTORES_DE_REVISAO = [
+  {
+    chave: CHAVE_LEMBRETES_REVISAO,
+    label: 'Lembretes de revisão ao cliente (com seu sim)',
+    description: 'De terça a quinta, às 9h05: para cada plano 21 dias antes do vencimento, 7 dias antes (se o cliente não respondeu) e 14 dias depois (se não respondeu e não há OS agendada), o sistema monta a mensagem e pergunta a você no WhatsApp "posso mandar?". No máximo 3 por vencimento; quem respondeu PARAR não recebe mais.',
+  },
+  {
+    chave: CHAVE_CAMPANHA_TEMPORADA,
+    label: 'Campanha de temporada set–out (com seu sim)',
+    description: 'Entre 15/09 e 31/10, uma mensagem por cliente com serviço concluído e sem revisão vencendo de outubro a dezembro, oferecendo deixar a parte elétrica conferida antes do verão. Também só sai com o seu sim.',
+  },
+];
+
+function RevisoesSettings() {
+  const qc = useQueryClient();
+  const { data: valores = {}, error } = useQuery({
+    queryKey: ['revisoes-settings'],
+    queryFn: async () => {
+      const { data, error: e } = await supabase.from('app_settings').select('key, value')
+        .in('key', INTERRUPTORES_DE_REVISAO.map((i) => i.chave));
+      if (e) throw e;
+      return Object.fromEntries((data || []).map((s: any) => [s.key, s.value])) as Record<string, string>;
+    },
+  });
+  const salvar = useMutation({
+    mutationFn: async ({ chave, ligado }: { chave: string; ligado: boolean }) => {
+      const { error: e } = await supabase.from('app_settings').upsert(
+        { key: chave, value: ligado ? 'on' : 'off' },
+        { onConflict: 'key' },
+      );
+      if (e) throw e;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['revisoes-settings'] }),
+    onError: (e: any) => toast.error(e?.message || 'Erro ao salvar'),
+  });
+
+  return (
+    <div className="rounded-md border p-3 space-y-3">
+      <p className="text-sm font-medium flex items-center gap-1.5">
+        <Wrench className="h-4 w-4 text-primary" /> Revisões (planos de manutenção)
+      </p>
+      {error && <p className="text-xs text-destructive">Não deu para ler estes interruptores: {(error as Error).message}</p>}
+      {INTERRUPTORES_DE_REVISAO.map((i) => (
+        <div key={i.chave} className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">{i.label}</p>
+            <p className="text-xs text-muted-foreground">{i.description}</p>
+          </div>
+          <Switch
+            aria-label={i.label}
+            checked={interruptorLigado(valores[i.chave])}
+            disabled={!!error}
+            onCheckedChange={(v) => salvar.mutate({ chave: i.chave, ligado: v })}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** Modelos de checklist por tipo de serviço (app_settings.task_checklist_templates). */
 function ChecklistTemplatesEditor() {
@@ -92,7 +160,7 @@ const RULE_DEFS: { id: string; label: string; description: string; defaultEnable
   { id: 'r8', label: 'Estoque abaixo do mínimo', description: 'Tarefa "Repor produto" enquanto o estoque estiver abaixo do mínimo.', defaultEnabled: true },
   { id: 'r11', label: 'Nota fiscal com pendência', description: 'Tarefa para o financeiro quando uma NF fica com erro/rejeitada.', defaultEnabled: true },
   { id: 'r12', label: 'Orçamento externo aguardando análise', description: 'Tarefa quando um orçamento submetido fica 2 dias sem análise.', defaultEnabled: true },
-  { id: 'r14', label: 'Plano de manutenção vencendo', description: 'Tarefa "Propor revisão" quando um plano de manutenção da embarcação entra na janela.', defaultEnabled: true },
+  { id: 'r14', label: 'Plano de manutenção vencendo', description: 'Tarefa "Propor revisão: plano — embarcação" quando o plano entra na janela (21 dias antes do vencimento), com escopo, valor estimado e último serviço nas notas. Fecha sozinha quando o serviço é registrado (OS concluída que casa com o plano, ou "Serviço feito"), quando o plano é adiado ou desligado. Os lembretes ao cliente são outra coisa: ficam logo abaixo, em Revisões.', defaultEnabled: true },
   { id: 'r18', label: 'Cotação criada e não enviada', description: 'Tarefa "Enviar a cotação" quando ela tem fornecedor escolhido mas o pedido nunca saiu. Existe por um caso real: três cotações ficaram 11 dias exibindo "enviada" sem que nenhuma mensagem tivesse sido despachada. Fecha sozinha assim que o envio acontece.', defaultEnabled: true },
   { id: 'r17', label: 'Cotação sem resposta do fornecedor', description: 'Tarefa "Cobrar resposta" quando uma cotação passa de 3 dias úteis do ENVIO sem nenhum preço registrado (a janela normal de resposta é de 3 a 5 dias úteis). Só vale para cotação de fato enviada — sem envio, quem tem pendência é você, e isso vira a tarefa acima. Some sozinha quando alguém responde ou a cotação é fechada. Nada é enviado ao fornecedor sem você mandar.', defaultEnabled: true },
   { id: 'r16', label: 'OS comprometida com item a comprar', description: 'Uma tarefa por OS quando falta material para executar — conta o disponível (físico menos reservado) e desconta o que já está em ordem de compra aberta. É a rede do aviso que aparece na aprovação do orçamento: se você clicar em "Depois", a pendência volta aqui. Fecha sozinha quando a peça entra ou o pedido é feito.', defaultEnabled: true },
@@ -277,6 +345,8 @@ export function TaskAutomationSettings() {
           </div>
         ))}
       </div>
+
+      <RevisoesSettings />
 
       <ClientFacingConfirm
         open={!!confirmando}

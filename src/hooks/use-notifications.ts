@@ -15,10 +15,13 @@ export type NotificationType =
   | 'WHATSAPP_CAIU'
   | 'WHATSAPP_VOLTOU'
   | 'VIGIA_NEGOCIO'
-  | 'REGRA_APRENDIDA';
+  | 'REGRA_APRENDIDA'
+  | 'REVISAO_RESPOSTA'
+  | 'AGENDAMENTO_CONFIRMADO'
+  | 'FOLLOWUP_MISSION';
 
 /** Tipo gravado em app_notifications → tipo do sino. Desconhecido vira lembrete de tarefa. */
-const TIPO_DO_BANCO: Record<string, NotificationType> = {
+export const TIPO_DO_BANCO: Record<string, NotificationType> = {
   task_reminder: 'TASK_REMINDER',
   task_assigned: 'TASK_ASSIGNED',
   whatsapp_caiu: 'WHATSAPP_CAIU',
@@ -26,6 +29,12 @@ const TIPO_DO_BANCO: Record<string, NotificationType> = {
   // 07/10/2026: o vigia do negócio (segunda e dia 1) e o aprendizado de regra pelo assistente.
   vigia_negocio: 'VIGIA_NEGOCIO',
   regra_aprendida: 'REGRA_APRENDIDA',
+  // 07/10/2026: resposta do cliente ao lembrete de revisão (registrar_resposta_da_revisao), e dois tipos
+  // que já eram gravados e caíam no genérico: o SIM da confirmação do agendamento (R15, 30/09) e o
+  // aviso das missões do "Deixar a IA acompanhar" (ai-followup-runner).
+  revisao_resposta: 'REVISAO_RESPOSTA',
+  agendamento_confirmado: 'AGENDAMENTO_CONFIRMADO',
+  followup_mission: 'FOLLOWUP_MISSION',
 };
 
 export interface AppNotification {

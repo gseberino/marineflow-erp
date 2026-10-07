@@ -46,6 +46,10 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   // a terceiro, que não se desfaz; excluir OC é destrutivo. Sempre com o "sim".
   "send_fiscal_pdf_to_client",
   "delete_purchase_order",
+  // planos de manutenção (07/10/2026): lembrete de revisão é mensagem a CLIENTE em nome da empresa —
+  // decisão do dono: sempre com o "sim" dele antes.
+  "enviar_lembrete_de_revisao",
+  "send_maintenance_reminder_now",
 ]);
 
 /**

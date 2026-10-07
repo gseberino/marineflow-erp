@@ -240,6 +240,12 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "send_fiscal_pdf_to_self", "send_fiscal_pdf_to_client",
   "get_purchase_order", "update_purchase_order_status", "update_purchase_order", "delete_purchase_order",
   "list_quote_requests", "close_quote_request", "reopen_quote_request", "set_quote_supplier_terms",
+
+  // planos de manutenção (07/10/2026): planos por embarcação, serviço feito, adiar, sugerir a partir das
+  //   OS, lembrete ao cliente com o sim do dono (enviar_lembrete_de_revisao é o que o "sim" executa) e métricas.
+  "list_maintenance_plans", "create_maintenance_plan", "update_maintenance_plan", "register_plan_service",
+  "snooze_maintenance_plan", "suggest_maintenance_plans", "send_maintenance_reminder_now",
+  "enviar_lembrete_de_revisao", "maintenance_reminder_metrics",
 ]);
 
 /**
@@ -487,6 +493,11 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "send_fiscal_pdf_to_self", "send_fiscal_pdf_to_client",
   // Na junção (07/10/2026) update_purchase_order_status e close_quote_request também foram para a
   // rede: o dono não usa o módulo de compras no dia a dia, e o perfil enxuto passou do teto.
+  // planos de manutenção (07/10/2026): NENHUMA à vista. O perfil enxuto já está no teto (110,
+  //   agent-perfil-admin_test.ts) e o teto não sobe sem o dono. As 9 o admin alcança pela ferramenta_extra:
+  //   list_maintenance_plans roda direto (leitura pelo nome); escrita pede o "sim" — e também
+  //   suggest_maintenance_plans e maintenance_reminder_metrics, que leem mas não têm nome de leitura.
+  //   O "sim" dos lembretes diários não depende disto (o ai-agent executa por toolsByName).
 ]);
 
 /**
