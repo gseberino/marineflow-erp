@@ -1,7 +1,7 @@
 // Parcelas da nota (duplicatas da NF-e e recebíveis da baixa da nota avulsa). Extraído de
 // FiscalEmission.tsx no D33 (30/09/2026); a divisão em ponto flutuante saía torta por centavos.
 import { describe, it, expect } from 'vitest';
-import { montarParcelas, intervaloDasParcelas, parcelasParaLancar, planoInicialDaBaixa, type Parcela } from './fiscal-parcelas';
+import { metodoDoRecebimentoNaHora, montarParcelas, intervaloDasParcelas, parcelasParaLancar, planoInicialDaBaixa, type Parcela } from './fiscal-parcelas';
 
 const valores = (ps: Parcela[]) => ps.map((p) => p.amount);
 const somaEmCentavos = (ps: Parcela[]) => ps.reduce((s, p) => s + Math.round(p.amount * 100), 0);
@@ -129,5 +129,13 @@ describe('planoInicialDaBaixa', () => {
   it('nota sem data nenhuma: parte de agora', () => {
     const agora = new Date(2026, 9, 1, 9, 0, 0);
     expect(planoInicialDaBaixa({}, agora).primeiroVencimento).toBe('2026-10-01');
+  });
+});
+
+describe('metodoDoRecebimentoNaHora', () => {
+  it('dinheiro, cheque, cartões, Pix e transferência viram recebimento; boleto, crédito loja e outros não', () => {
+    expect(['01', '02', '03', '04', '17', '16', '18'].map(metodoDoRecebimentoNaHora))
+      .toEqual(['cash', 'check', 'credit_card', 'debit_card', 'pix', 'bank_transfer', 'bank_transfer']);
+    expect(['15', '05', '99', '90', '14', '', null].map(metodoDoRecebimentoNaHora)).toEqual([null, null, null, null, null, null, null]);
   });
 });

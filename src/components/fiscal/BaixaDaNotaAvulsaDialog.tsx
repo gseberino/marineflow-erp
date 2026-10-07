@@ -23,7 +23,9 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { useI18n } from '@/i18n';
 import { totalDaNota } from '@/lib/nota-fiscal-leitura';
-import { parcelasParaLancar as calcularParcelasParaLancar, planoInicialDaBaixa, type Parcela } from '@/lib/fiscal-parcelas';
+import { metodoDoRecebimentoNaHora, parcelasParaLancar as calcularParcelasParaLancar, planoInicialDaBaixa, type Parcela } from '@/lib/fiscal-parcelas';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useRegisterPayment } from '@/hooks/use-financial';
 import { PAYMENT_METHODS } from '../../../supabase/functions/_shared/fiscal/payload-builder';
 
 export function BaixaDaNotaAvulsaDialog({ doc, ocupado, marcarOcupado, onClose }: {
@@ -49,6 +51,10 @@ export function BaixaDaNotaAvulsaDialog({ doc, ocupado, marcarOcupado, onClose }
   const settleParcelasDaNota = inicial.parcelasDaNota;
   /** Vira true assim que o usuário edita algo: daí em diante a conta é recalculada. */
   const [settleAjustado, setSettleAjustado] = useState(false);
+  /** Venda de balcão: o cliente pagou na hora — registra o pagamento junto (só à vista). */
+  const [recebidoNaHora, setRecebidoNaHora] = useState(false);
+  const registrarPagamento = useRegisterPayment();
+  const metodoNaHora = metodoDoRecebimentoNaHora(settleMethod);
 
   const parcelasParaLancar = () => calcularParcelasParaLancar({
     modo: settleMode === 'parcelado' ? 'parcelado' : 'avista',
@@ -72,13 +78,30 @@ export function BaixaDaNotaAvulsaDialog({ doc, ocupado, marcarOcupado, onClose }
         p_document_id: alvo.id,
         p_installments: installments && installments.length ? installments : null,
       } as never);
-      const data = resposta as { ok?: boolean; error?: string; stock_items?: number; installments?: number } | null;
+      const data = resposta as { ok?: boolean; error?: string; stock_items?: number; installments?: number; receivable_id?: string; amount?: number; issue_date?: string } | null;
       if (error) throw new Error(error.message);
       if (data && data.ok === false) throw new Error(data.error || 'Falha ao lançar.');
       const nItems = Number(data?.stock_items ?? 0);
       const nParc = Number(data?.installments ?? 1);
+      // Já recebido no balcão: o pagamento entra agora, pela mesma função do "Registrar pagamento".
+      // Se falhar, o recebível já existe — o aviso diz para registrar à mão, sem desfazer a baixa.
+      let pago = false;
+      if (recebidoNaHora && metodoNaHora && settleMode === 'avista' && data?.receivable_id) {
+        try {
+          await registrarPagamento.mutateAsync({
+            receivable_id: data.receivable_id,
+            amount: Number(data.amount ?? totalDaNota(alvo)),
+            payment_date: String(data.issue_date ?? new Date().toISOString().slice(0, 10)),
+            payment_method: metodoNaHora,
+            notes: 'Recebido no balcão (baixa da NF-e avulsa)',
+          });
+          pago = true;
+        } catch (e) {
+          toast.warning(`Estoque baixado e recebível gerado, mas o pagamento não foi registrado (${(e as Error)?.message ?? 'erro'}). Registre em Contas a Receber.`);
+        }
+      }
       toast.success(
-        `${nParc > 1 ? `${nParc} recebíveis gerados` : 'Recebível gerado'}${nItems > 0 ? ` · estoque baixado (${nItems} item${nItems > 1 ? 'ns' : ''})` : ''}.`,
+        `${pago ? 'Recebido e lançado como pago' : nParc > 1 ? `${nParc} recebíveis gerados` : 'Recebível gerado'}${nItems > 0 ? ` · estoque baixado (${nItems} item${nItems > 1 ? 'ns' : ''})` : ''}.`,
         { id: tId },
       );
       onClose();
@@ -247,6 +270,16 @@ export function BaixaDaNotaAvulsaDialog({ doc, ocupado, marcarOcupado, onClose }
                 <p className="text-xs text-muted-foreground">
                   Gera <strong>um recebível único</strong> de {formatCurrency(total)}, o valor total da nota.
                 </p>
+              )}
+              {settleMode === 'avista' && metodoNaHora && (
+                <label className="flex items-start gap-2 rounded-lg border p-2.5 text-xs" data-testid="recebido-na-hora">
+                  <Checkbox checked={recebidoNaHora} onCheckedChange={(v) => setRecebidoNaHora(v === true)} className="mt-0.5" />
+                  <span>
+                    <span className="font-medium">Já recebi no balcão</span> — registra o pagamento de {formatCurrency(total)} agora
+                    (mesma forma de pagamento da nota), e a conta já nasce paga.
+                    {metodoNaHora === 'pix' && ' Quando o Pix aparecer no Extrato, ele se liga a este pagamento.'}
+                  </span>
+                </label>
               )}
             </div>
           );
