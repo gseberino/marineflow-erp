@@ -1,5 +1,11 @@
 # MarineFlow — Agenda & Tarefas 2.0
 
+> **Atualização 07/10/2026.** O detector de sugestões foi PAUSADO em 30/09 (decisão do dono, depois de
+> 186 sugestões sem nenhuma aceita) e o resumo da manhã passou a contar só as da cobrança de saldo; o
+> "IA acompanha" está desligado desde 15/09 (interruptor) e o cron dele pausado em 05/10 — o botão some
+> com o interruptor desligado (Configurações › Sistema). Desde 06/10 a cobrança automática ignora saldo
+> abaixo de R$ 50 (`cobranca_valor_minimo`) e o selo da caixa de entrada conta no banco (não para em 100).
+>
 > **Estado em 20/09/2026 (leia antes do plano).** Este é o plano de 23/07. Fases 0–11 estão em produção desde
 > 23–27/07 (motor de 15 regras a cada 15 min, caixa de sugestões com IA, voz, PWA); retomada de
 > 28–29/08 deployada (/agenda na v2, widget no painel, erro 23514 visível, aba Tarefas na
