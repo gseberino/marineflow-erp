@@ -217,6 +217,14 @@ describe('AgendaPage — smoke de render (todas as visões)', () => {
     expect(screen.getByText('Sem prazo (1)')).toBeTruthy();
   });
 
+  it('a visão Revisões (planos de manutenção, 07/10/2026) abre sem lançar', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole('button', { name: 'Revisões' }));
+    // Banco falso sem planos: a tela explica onde criar, em vez de ficar em branco.
+    expect(await screen.findByText(/Nenhum plano de manutenção ativo/)).toBeTruthy();
+  });
+
   it('a rota /v2/agenda renderiza a MESMA agenda dentro da casca de tema', async () => {
     // A v2 da Agenda e casca, nao reescrita: se este teste divergir do de cima, alguem
     // duplicou a logica em vez de reaproveitar.
