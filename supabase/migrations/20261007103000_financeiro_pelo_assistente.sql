@@ -192,5 +192,5 @@ begin
 end $$;
 
 insert into supabase_migrations.schema_migrations (version, name)
-values ('20261007100000', 'financeiro_pelo_assistente')
+values ('20261007103000', 'financeiro_pelo_assistente')
 on conflict do nothing;
