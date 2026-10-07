@@ -52,7 +52,7 @@ vi.mock('@/integrations/supabase/client', () => {
 vi.mock('@/hooks/use-audit-log', () => ({ writeAuditLog: vi.fn(async () => undefined) }));
 
 import {
-  cancelPaymentCascade, cancelServiceOrderCascade, recalcReceivableBalance, reopenServiceOrder, updateReceivableFromSO,
+  cancelPaymentCascade, cancelServiceOrderCascade, recalcPayableBalance, recalcReceivableBalance, reopenServiceOrder, updateReceivableFromSO,
   GrandTotalBelowPaidError,
 } from './cascade-updates';
 
@@ -179,5 +179,31 @@ describe('recalcReceivableBalance', () => {
     banco.respostas['receivables.select'] = ok({ amount: 1000 });
     await recalcReceivableBalance('r1');
     expect(gravacoes('receivables')[0].valores).toEqual({ paid_amount: 500, balance_amount: 500, status: 'partially_paid' });
+  });
+});
+
+// Contas a pagar tinham a mesma conta sem teste (inventário de 07/10/2026).
+describe('recalcPayableBalance', () => {
+  it('pago, parcial e pendente pelo que foi pago de verdade', async () => {
+    banco.respostas['payments.select'] = ok([{ amount: 1000 }]);
+    banco.respostas['payables.select'] = ok({ amount: 1000 });
+    await recalcPayableBalance('p1');
+    expect(gravacoes('payables')[0].valores).toEqual({ paid_amount: 1000, balance_amount: 0, status: 'paid' });
+  });
+
+  it('sem pagamento: pendente com o saldo cheio; pago a mais não deixa saldo negativo', async () => {
+    banco.respostas['payments.select'] = [ok([]), ok([{ amount: 700 }, { amount: 400 }])];
+    banco.respostas['payables.select'] = ok({ amount: 1000 });
+    await recalcPayableBalance('p1');
+    await recalcPayableBalance('p1');
+    const [antes, depois] = gravacoes('payables').map((g) => g.valores);
+    expect(antes).toEqual({ paid_amount: 0, balance_amount: 1000, status: 'pending' });
+    expect(depois).toEqual({ paid_amount: 1100, balance_amount: 0, status: 'paid' });
+  });
+
+  it('leitura que falha pára antes de gravar', async () => {
+    banco.respostas['payments.select'] = falha('permission denied');
+    await expect(recalcPayableBalance('p1')).rejects.toThrow(/pagamentos/);
+    expect(gravacoes('payables')).toHaveLength(0);
   });
 });
