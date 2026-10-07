@@ -47,6 +47,9 @@ import { diariasTools } from "./diarias.ts";
 import { followupTools } from "./followups.ts";
 import { condicaoPagamentoTools } from "./condicao-pagamento.ts";
 import { acompanhamentoTools } from "./acompanhamento.ts";
+// fiscal e compras (07/10/2026): PDF da nota pelo WhatsApp; OC e cotação até o fim.
+import { notaFiscalPdfTools } from "./nota-fiscal-pdf.ts";
+import { comprasCicloTools } from "./compras-ciclo.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -100,6 +103,9 @@ export const allTools: ToolDef[] = [
   ...caixaTools,
   ...diariasTools,
   ...followupTools,
+  // fiscal e compras (07/10/2026)
+  ...notaFiscalPdfTools,
+  ...comprasCicloTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export const toolsByName: Record<string, ToolDef> = Object.fromEntries(allTools.map((t) => [t.name, t]));

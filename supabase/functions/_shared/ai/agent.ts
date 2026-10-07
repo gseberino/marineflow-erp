@@ -3,6 +3,9 @@ import { resumirAcerto, resumirCadastro, resumirDiaria, resumirEnvioAoFreelancer
 import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
 import { resumirAgendamento } from "./tools/agendamento.ts";
 import { resumirMensagem } from "./tools/resposta.ts";
+// fiscal e compras (07/10/2026): resumos da confirmação (nota ao cliente, receber e excluir OC).
+import { resumirEnvioDaNota } from "./tools/nota-fiscal-pdf.ts";
+import { resumirExclusaoDeOC, resumirRecebimento } from "./tools/compras-ciclo.ts";
 import {
   callClaude,
   ClaudeApiError,
@@ -165,6 +168,9 @@ const TOOL_LABELS_PT: Record<string, string> = {
   remove_service_order_expense: "Remover gasto da OS",
   create_composed_product: "Criar produto composto/kit",
   criar_categoria_de_despesa: "Criar categoria de despesa",
+  // fiscal e compras (07/10/2026)
+  send_fiscal_pdf_to_client: "Enviar nota fiscal ao cliente (WhatsApp)",
+  delete_purchase_order: "Excluir ordem de compra",
 };
 
 function humanizeToolNamePt(name: string): string {
@@ -307,6 +313,11 @@ async function resolveIdLabel(admin: any, key: string, id: string): Promise<stri
  * pendência mesmo assim, e o modelo dizia "preparei, falta a sua confirmação" (Pix da Eliane).
  */
 const RESUMO_QUE_RESOLVE = new Set(["lancar_no_caixa", "anotar_transacao_do_banco"]);
+// fiscal e compras (07/10/2026): nota que não serve (cancelada, sem PDF, duas na OS), OC que não
+// recebe ou não se exclui — o resumo já diz por quê, numa linha "⚠️": é recusa, não pendência.
+RESUMO_QUE_RESOLVE.add("send_fiscal_pdf_to_client");
+RESUMO_QUE_RESOLVE.add("receive_purchase_order");
+RESUMO_QUE_RESOLVE.add("delete_purchase_order");
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();
@@ -377,6 +388,24 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
   if (toolName === "send_whatsapp_message") {
     try {
       return await resumirMensagem(admin, args);
+    } catch { /* cai no resumo genérico */ }
+  }
+  // fiscal e compras (07/10/2026): o "sim" é sobre a nota, o cliente e o telefone inteiro do
+  // cadastro; sobre o que chega de cada item da OC e o que acontece depois (estoque, conta a
+  // pagar); e sobre qual OC some. Os resumos moram ao lado das tools.
+  if (toolName === "send_fiscal_pdf_to_client") {
+    try {
+      return await resumirEnvioDaNota(admin, args);
+    } catch { /* cai no resumo genérico */ }
+  }
+  if (toolName === "receive_purchase_order") {
+    try {
+      return await resumirRecebimento(admin, args);
+    } catch { /* cai no resumo genérico */ }
+  }
+  if (toolName === "delete_purchase_order") {
+    try {
+      return await resumirExclusaoDeOC(admin, args);
     } catch { /* cai no resumo genérico */ }
   }
   // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista

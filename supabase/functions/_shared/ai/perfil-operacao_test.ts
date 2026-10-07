@@ -59,6 +59,12 @@ const SEMPRE_NO_PERFIL_ANTIGO = [
 // 02/10/2026: aplicar_pix_em_contas e desfazer_aplicacao_de_pix — "Este Pix paga…" (um Pix para
 // várias contas, forma A F2), as mesmas ações do Extrato e da correção.
 const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer", "cadastrar_freelancer", "registrar_pagamento_freelancer", "enviar_extrato_freelancer", "fechar_acerto_freelancer", "reabrir_acerto_freelancer", "enviar_acerto_ao_freelancer", "ajustar_lancamento_ao_valor_do_banco", "aplicar_pix_em_contas", "desfazer_aplicacao_de_pix", "definir_condicao_pagamento", "acompanhar_conversa", "listar_acompanhamentos", "parar_acompanhamento", "atualizar_extrato", "enviar_relatorio_pdf"];
+// fiscal e compras (07/10/2026): PDF da nota pelo WhatsApp e OC/cotação até o fim (pedido aprovado).
+ACRESCENTADAS.push(
+  "send_fiscal_pdf_to_self", "send_fiscal_pdf_to_client",
+  "get_purchase_order", "update_purchase_order_status", "update_purchase_order", "delete_purchase_order",
+  "list_quote_requests", "close_quote_request", "reopen_quote_request", "set_quote_supplier_terms",
+);
 // 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
 // roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento",

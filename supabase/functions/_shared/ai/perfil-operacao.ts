@@ -210,6 +210,13 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   // Só pela rede, cada update_service virava uma pendência — 10 serviços, 10 "sim" a mais
   // (conferência de 26/09/2026). À vista, segue o risco low que declara e o "sim" do prompt basta.
   "update_service",
+
+  // fiscal e compras (07/10/2026): PDF da nota pelo WhatsApp (para si e ao cliente) e OC/cotação
+  //   até o fim (situação, edição, exclusão de rascunho, listar/fechar/cancelar/reabrir cotação,
+  //   frete e desconto). Pedido aprovado pelo dono; o prompt ensina.
+  "send_fiscal_pdf_to_self", "send_fiscal_pdf_to_client",
+  "get_purchase_order", "update_purchase_order_status", "update_purchase_order", "delete_purchase_order",
+  "list_quote_requests", "close_quote_request", "reopen_quote_request", "set_quote_supplier_terms",
 ]);
 
 /**
@@ -432,6 +439,13 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "create_task",
   "schedule_self_reminder",
   "my_agenda",
+
+  // fiscal e compras (07/10/2026): só as 4 do dia a dia, por causa do teto do perfil enxuto (105,
+  //   agent-perfil-admin_test.ts; estava em 101). As outras 6 (get_purchase_order, update_purchase_order,
+  //   delete_purchase_order, list_quote_requests, reopen_quote_request, set_quote_supplier_terms) o
+  //   admin alcança pela ferramenta_extra: leitura roda direto, escrita pede o "sim".
+  "send_fiscal_pdf_to_self", "send_fiscal_pdf_to_client",
+  "update_purchase_order_status", "close_quote_request",
 ]);
 
 /**

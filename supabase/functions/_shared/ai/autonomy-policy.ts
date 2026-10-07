@@ -40,6 +40,10 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   // é a IA falando com TERCEIRO em nome da empresa. Autonomia por tipo só na Fase 3, e aí
   // sai daqui de propósito, com a promoção/demoção do dossiê.
   "followup_send_touch",
+  // fiscal e compras (07/10/2026): o PDF da nota ao cliente é arquivo com valores e dados fiscais
+  // a terceiro, que não se desfaz; excluir OC é destrutivo. Sempre com o "sim".
+  "send_fiscal_pdf_to_client",
+  "delete_purchase_order",
 ]);
 
 /**
