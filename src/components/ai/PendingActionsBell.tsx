@@ -41,6 +41,9 @@ function labelFor(name: string): string {
     send_collection_reminder: 'Enviar lembrete de cobrança',
     send_service_order_link: 'Enviar orçamento/OS ao cliente (WhatsApp)',
     schedule_whatsapp_message: 'Agendar WhatsApp a cliente',
+    // fiscal e compras (07/10/2026)
+    send_fiscal_pdf_to_client: 'Enviar nota fiscal ao cliente (WhatsApp)',
+    delete_purchase_order: 'Excluir ordem de compra',
   };
   return map[name] || name.replace(/_/g, ' ');
 }

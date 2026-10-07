@@ -15,7 +15,8 @@ import { documentTypeFor } from "../../pdf/document-type.ts";
 import { fmtCurrency, vencimentoDoOrcamento } from "../../pdf/documento.ts";
 import { dataBR } from "../../pdf/datas.ts";
 import { guardarEEntregar, impressaoDigitalDoDocumento, montarDocumentoDaOrdem, montarResumoDeValores } from "../../pdf/gerar-e-guardar.ts";
-import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
+import { desviadoPorTeste, modoDeTesteSemNumero, numeroDeTesteAtivo } from "../../whatsapp/marcar-enviado.ts";
+import { normalizePhoneNumber } from "../../whatsapp/normalize.ts";
 import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
 import {
   cadastrarContatoDoAgendamento,
@@ -30,6 +31,10 @@ import { validarMensagem } from "./resposta.ts";
 import { registrarEnvioDaCobranca } from "./cobrancas.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Pedido de cotação sem cotação (07/10/2026): crie antes, como a tela. */
+export const SEM_COTACAO =
+  "Para mandar pedido de cotação, crie a cotação antes (create_quote_request, com os fornecedores e os itens) e mande pelo quote_request_id — é ela que leva o código COT e os itens numerados e registra quem recebeu.";
 
 // Prévia amigável de mídia ("identificar e encaminhar" — sem custo de vision/transcrição).
 function prettyPreview(body?: string | null): string | null {
@@ -524,94 +529,149 @@ export const whatsappTools: ToolDef[] = [
       // O passo a passo do ciclo (ler resposta -> registrar preço -> comparar -> aplicar ->
       // gerar OC) vivia aqui E na seção COTAÇÃO A FORNECEDORES do system prompt. Uma cópia
       // basta, e o lugar do workflow é o prompt — descrição de tool é contrato.
-      "Envia um pedido de COTAÇÃO por WhatsApp a um ou mais FORNECEDORES (ação sensível — pede confirmação). Informe supplier_ids (ache com suggest_suppliers) e os itens a cotar. MOSTRE a prévia da mensagem e a lista de fornecedores antes de confirmar. O envio é o começo do ciclo de cotação, não o fim.",
+      "Envia o pedido de uma COTAÇÃO já criada (create_quote_request) por WhatsApp aos FORNECEDORES dela (ação sensível — pede confirmação). Informe quote_request_id (o id ou o código COT-XXXXX): vão o código e os itens numerados, o que faz a resposta do fornecedor voltar interpretável. supplier_ids só se for mandar a parte dos fornecedores (ou acrescentar um). Vai pela FILA de envio, como o botão Enviar da tela, e fica registrado quem recebeu. O envio é o começo do ciclo de cotação, não o fim.",
     input_schema: {
       type: "object",
       properties: {
-        supplier_ids: { type: "array", items: { type: "string" }, description: "UUIDs dos fornecedores (de suggest_suppliers/create_supplier)." },
-        items: {
-          type: "array",
-          description: "Itens a cotar.",
-          items: {
-            type: "object",
-            properties: { description: { type: "string" }, quantity: { type: "number" } },
-            required: ["description"],
-          },
-        },
+        quote_request_id: { type: "string", description: "Id ou código (COT-XXXXX) da cotação criada com create_quote_request. Obrigatório." },
+        supplier_ids: { type: "array", items: { type: "string" }, description: "Só se for mandar a uma parte dos fornecedores da cotação, ou acrescentar um (de suggest_suppliers/create_supplier). Sem isto, vai a todos os da cotação." },
         notes: { type: "string", description: "Observação opcional que VAI na mensagem (ex.: condição de pagamento). NÃO use para prazo (quem define é o fornecedor, só se ele perguntar) nem para descrever a aplicação/'pra que serve' (confunde quem atende)." },
-        quote_request_id: { type: "string", description: "UUID de uma cotação criada com create_quote_request. FORMA PREFERIDA: manda o código COT-XXXXX e os itens numerados, o que faz a resposta do fornecedor voltar interpretável." },
       },
+      required: ["quote_request_id"],
     },
     risk: "high",
     roles: NON_TECHNICIAN_ROLES,
-    async execute(args, { sb, admin, jwt }) {
-      let supplierIds: string[] = Array.isArray(args.supplier_ids) ? args.supplier_ids : [];
-      let items: any[] = Array.isArray(args.items) ? args.items : [];
-      let codigo = "";
+    // Sem cotação não há envio (07/10/2026): o pedido avulso não tinha código nem itens
+    // numerados, não ficava em quote_request_sends e a resposta não tinha onde ser registrada.
+    preValidar: (args) => (args?.quote_request_id ? null : { error: SEM_COTACAO }),
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx);
+      if (blocked) return blocked;
+      // Admin e financeiro: as policies de quote_requests/quote_request_sends (pelo WhatsApp o
+      // assistente grava sem RLS).
+      if (!["admin", "financial"].includes(ctx.userRole)) return { error: "Cotação a fornecedor é do administrador e do financeiro." };
+      if (!args.quote_request_id) return { error: SEM_COTACAO };
+      const { admin, userId, settings } = ctx;
 
-      // Caminho preferido: a cotação já existe → usa código + itens numerados dela.
-      if (args.quote_request_id) {
-        const { data: req } = await sb
-          .from("quote_requests")
-          .select("id, code, sent_supplier_ids, notes")
-          .eq("id", args.quote_request_id)
-          .maybeSingle();
-        if (!req) return { error: "Cotação não encontrada." };
-        const { data: qItems } = await sb
-          .from("quote_request_items")
-          .select("position, description, quantity")
-          .eq("quote_request_id", req.id)
-          .order("position", { ascending: true });
-        codigo = req.code;
-        if (supplierIds.length === 0) supplierIds = (req.sent_supplier_ids as string[]) || [];
-        items = (qItems || []).map((i: any) => ({ position: i.position, description: i.description, quantity: Number(i.quantity) }));
-        // req.notes fica INTERNO de propósito: aplicação ("pra que serve") e prazo NÃO vão na
-        // mensagem ao fornecedor — descrever a aplicação confunde quem atende, e o prazo quem
-        // define é o fornecedor. Só um args.notes explícito (ex.: condição de pagamento) é enviado.
+      // ── A cotação, os itens e os fornecedores (leitura que falha não vira "não achei") ──
+      const ref = String(args.quote_request_id).trim();
+      const digitosDaCotacao = ref.replace(/\D/g, "").replace(/^0+(?=\d)/, "");
+      let q = admin.from("quote_requests").select("id, code, status, sent_supplier_ids");
+      q = UUID_RE.test(ref) ? q.eq("id", ref) : q.eq("code", `COT-${digitosDaCotacao.padStart(5, "0")}`);
+      const { data: req, error: reqErr } = await q.maybeSingle();
+      if (reqErr) return { error: `A consulta da cotação falhou (${reqErr.message}). Nada foi enviado.` };
+      if (!req) return { error: `Cotação ${ref} não encontrada. Nada foi enviado.` };
+      if (req.status !== "open") return { error: `A cotação ${req.code} está ${req.status === "closed" ? "fechada" : "cancelada"} — reabra antes de mandar.` };
+      const { data: qItems, error: itErr } = await admin
+        .from("quote_request_items")
+        .select("position, description, quantity")
+        .eq("quote_request_id", req.id)
+        .order("position", { ascending: true });
+      if (itErr) return { error: `A consulta dos itens da cotação falhou (${itErr.message}). Nada foi enviado.` };
+      const items = (qItems || []) as Array<{ position: number; description: string; quantity: number }>;
+      if (!items.length) return { error: `A cotação ${req.code} não tem itens para mandar.` };
+      const daCotacao: string[] = (req.sent_supplier_ids as string[]) || [];
+      const pedidos: string[] = Array.isArray(args.supplier_ids) && args.supplier_ids.length ? [...new Set(args.supplier_ids as string[])] : daCotacao;
+      if (!pedidos.length) return { error: `A cotação ${req.code} não tem fornecedor. Diga para quem mandar (supplier_ids).` };
+
+      // Modo de teste: a fila NÃO aplica wa_test_mode (quem aplica é o whatsapp-send) — o desvio é
+      // feito aqui, como na tela. Ligado sem número de teste, a tela recusa: aqui também.
+      const numeroDeTeste = numeroDeTesteAtivo(settings);
+      if (modoDeTesteSemNumero(settings)) return { error: "Modo de teste do WhatsApp ligado sem número de teste configurado. Nada foi enviado." };
+
+      const { data: suppliers, error: supErr } = await admin.from("suppliers").select("id, name, trade_name, phone, opt_out_whatsapp").in("id", pedidos);
+      if (supErr) return { error: `A consulta dos fornecedores falhou (${supErr.message}). Nada foi enviado.` };
+      const byId: Record<string, any> = Object.fromEntries((suppliers || []).map((s: any) => [s.id, s]));
+
+      // Fornecedor novo na cotação (pedido para alguém fora da lista): entra em sent_supplier_ids,
+      // como o "incluir fornecedor" da tela — senão a resposta dele não teria cotação onde cair.
+      const novos = pedidos.filter((id) => byId[id] && !daCotacao.includes(id));
+      if (novos.length) {
+        const { error: incErr } = await admin.from("quote_requests").update({ sent_supplier_ids: [...daCotacao, ...novos] }).eq("id", req.id);
+        if (incErr) return { error: `Não consegui incluir o fornecedor na cotação (${incErr.message}). Nada foi enviado.` };
       }
 
-      if (supplierIds.length === 0) return { error: "Informe ao menos um fornecedor (supplier_ids) ou uma cotação com fornecedores." };
-      if (items.length === 0) return { error: "Informe ao menos um item para cotar." };
-
-      const { data: comp } = await sb.from("app_settings").select("value").eq("key", "company_name").maybeSingle();
-      const company = comp?.value || "nossa empresa";
-      const { data: suppliers } = await sb.from("suppliers").select("id, name, trade_name, phone, opt_out_whatsapp").in("id", supplierIds);
-      const byId: Record<string, any> = Object.fromEntries((suppliers || []).map((s: any) => [s.id, s]));
+      const company = settings.company_name || "nossa empresa";
       // Itens NUMERADOS: é o que faz o fornecedor responder "1 - R$ 850 - 5 dias".
       const itemLines = items
-        .map((it, i) => `${it.position ?? i + 1}. ${it.quantity ? `${it.quantity}x ` : ""}${it.description ?? ""}`.trimEnd())
+        .map((it, i) => `${it.position ?? i + 1}. ${it.quantity ? `${Number(it.quantity)}x ` : ""}${it.description ?? ""}`.trimEnd())
         .join("\n");
+      // Mensagem ENXUTA de propósito, IDÊNTICA à do botão Enviar da tela (useSendQuoteRequest): o
+      // fornecedor não recebe dois formatos conforme quem disparou. Saudação + itens numerados; sem
+      // descrever a aplicação, sem estipular prazo, sem ensinar a responder. Só um args.notes
+      // explícito (ex.: condição de pagamento) vai junto; req.notes fica interno.
+      const msg =
+        `Olá, tudo bem? Aqui é da ${company}.\n` +
+        `Gostaríamos de uma cotação (${req.code}):\n${itemLines}` +
+        `${args.notes ? `\n\n${args.notes}` : ""}\n\n` +
+        `Obrigado!`;
 
       const resultados: Array<{ fornecedor: string; status: string }> = [];
       const avisos = new Set<string>();
-      for (const sid of supplierIds) {
+      let enfileirados = 0;
+      for (const sid of pedidos) {
         const sup = byId[sid];
         if (!sup) { resultados.push({ fornecedor: sid, status: "não encontrado" }); continue; }
         const nomeForn = sup.trade_name || sup.name || sid;
         if (sup.opt_out_whatsapp) { resultados.push({ fornecedor: nomeForn, status: "opt-out (não receber)" }); continue; }
-        if (!sup.phone) { resultados.push({ fornecedor: nomeForn, status: "sem WhatsApp cadastrado" }); continue; }
-        // Mensagem ENXUTA de propósito: saudação neutra (sem razão social, que às vezes é
-        // genérica) + itens numerados. Sem descrever a aplicação, sem estipular prazo e sem
-        // ensinar o fornecedor a responder — ele responde pela lista. (Ver feedback do dono.)
-        const msg =
-          `Olá, tudo bem? Aqui é da ${company}.\n` +
-          `Gostaríamos de uma cotação${codigo ? ` (${codigo})` : ""}:\n${itemLines}` +
-          `${args.notes ? `\n\n${args.notes}` : ""}\n\n` +
-          `Obrigado!`;
+        // Mesma normalização e mesma régua de número da tela (normalizeWhatsappPhone/isUsableWhatsappPhone).
+        const phone = normalizePhoneNumber(String(sup.phone || ""));
+        if (!(phone.startsWith("55") && (phone.length === 12 || phone.length === 13))) {
+          resultados.push({ fornecedor: nomeForn, status: sup.phone ? "telefone inválido" : "sem WhatsApp cadastrado" });
+          continue;
+        }
         // Portão de comunicação: conformidade (bloqueia) + estilo (avisa).
         const g = guardaDeEnvio(msg, { tipo: "cotacao", audiencia: "fornecedor", canal: "whatsapp", destinatarioIdentificado: true });
         if (g.bloqueado) {
           resultados.push({ fornecedor: nomeForn, status: `bloqueado: ${g.motivo}` });
-          await registrarEnvio(admin, { tipo: "cotacao", audiencia: "fornecedor", entityKind: "supplier", entityId: sid, phone: sup.phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });
+          await registrarEnvio(admin, { tipo: "cotacao", audiencia: "fornecedor", entityKind: "supplier", entityId: sid, phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });
           continue;
         }
         g.avisos.forEach((a) => avisos.add(a));
-        const r = await sendWhatsapp(sup.phone, msg, jwt, chaveDeEnvio("cotacao", codigo || hashCurto(itemLines), sid, diaLocal()));
-        resultados.push({ fornecedor: nomeForn, status: r.ok ? (r.deduplicated ? "já enviado hoje" : "enviado") : `falhou: ${r.error}` });
-        await registrarEnvio(admin, { tipo: "cotacao", audiencia: "fornecedor", entityKind: "supplier", entityId: sid, phone: sup.phone, preview: msg, status: r.ok ? "sent" : "failed" });
+        const destino = numeroDeTeste ?? phone;
+        // Pela FILA, como a tela (07/10/2026): o worker repete sozinho e a mensagem sobrevive ao
+        // WhatsApp fora do ar. Antes ia direto e não gravava quote_request_sends — a cotação dizia
+        // "enviada" sem registro de quem recebeu. A dedupe_key (índice único da fila) faz o mesmo
+        // pedido repetido no mesmo dia não sair duas vezes.
+        const { data: fila, error: qErr } = await admin.from("whatsapp_send_queue").insert({
+          phone_normalized: destino,
+          message: msg,
+          source: "quote_request",
+          source_ref_id: req.id,
+          priority: 2,
+          dedupe_key: chaveDeEnvio("cotacao-fila", req.code, sid, diaLocal(), hashCurto(msg), numeroDeTeste ? "teste" : null),
+        }).select("id").single();
+        if (qErr) {
+          const repetido = qErr.code === "23505";
+          resultados.push({ fornecedor: nomeForn, status: repetido ? "já enviado hoje" : `falhou: ${qErr.message}` });
+          if (!repetido) await registrarEnvio(admin, { tipo: "cotacao", audiencia: "fornecedor", entityKind: "supplier", entityId: sid, phone, preview: msg, status: "failed" });
+          continue;
+        }
+        const { error: envErr } = await admin.from("quote_request_sends").insert({
+          quote_request_id: req.id,
+          supplier_id: sid,
+          phone_normalized: destino,
+          queue_id: fila.id,
+          created_by: userId || null,
+        });
+        enfileirados++;
+        resultados.push({ fornecedor: nomeForn, status: envErr ? `na fila (mas o registro do envio falhou: ${envErr.message})` : "na fila de envio" });
+        await registrarEnvio(admin, { tipo: "cotacao", audiencia: "fornecedor", entityKind: "supplier", entityId: sid, phone, preview: msg, status: "sent" });
       }
-      const enviados = resultados.filter((r) => r.status === "enviado").length;
-      return { ok: true, cotacao: codigo || null, enviados, total: supplierIds.length, resultados, ...(avisos.size ? { avisos_estilo: [...avisos] } : {}) };
+      if (!enfileirados) {
+        return { error: `Nenhum envio saiu. ${resultados.map((r) => `${r.fornecedor}: ${r.status}`).join(" · ")}`, cotacao: req.code, resultados };
+      }
+      return {
+        ok: true,
+        cotacao: req.code,
+        enviados: enfileirados,
+        total: pedidos.length,
+        resultados,
+        observacao: numeroDeTeste
+          ? "Modo de teste do WhatsApp ligado: foi para o número de TESTE, não aos fornecedores. Diga isso."
+          : "Vai pela fila de envio: sai em até um minuto (se o WhatsApp estiver fora do ar, sai quando voltar).",
+        ...(avisos.size ? { avisos_estilo: [...avisos] } : {}),
+      };
     },
   },
   {

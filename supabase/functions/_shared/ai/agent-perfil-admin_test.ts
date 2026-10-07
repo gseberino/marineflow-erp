@@ -68,9 +68,11 @@ Deno.test("admin_enxuto: o admin vê só PERFIL_ADMIN + ferramenta_extra, e a re
   // Teto do perfil enxuto. Era < 100 (92 em 05/10); em 06/10 entraram as tools de acerto das
   // Diárias e atualizar_extrato/enviar_relatorio_pdf, pedidas pelo dono para usar no dia a dia → 101.
   // Subir de novo só com motivo: cada tool visível custa tokens em toda mensagem.
-  // financeiro (07/10/2026): +7 (anotações de Pix, estorno, cobrança formal, favorecido), aprovadas pelo
-  // dono para fazer conversando o que só a tela fazia → 108.
-  assert(visiveis.length <= 108, `admin vê ${visiveis.length}`);
+  // 07/10/2026 (junção das quatro frentes aprovadas pelo dono): ficaram visíveis só as de uso diário
+  // — via do técnico, update_task, anotação de Pix, estorno, criar cobrança/registrar contato e o PDF
+  // da nota — e o resto (marina, contatos da embarcação, favorecido, sugestões, compras) foi para a
+  // rede → 109. Teto 110.
+  assert(visiveis.length <= 110, `admin vê ${visiveis.length}`);
   // A rede é o complemento: nada à vista está na rede, e o que saiu está.
   assertEquals(Object.keys(r.alcancaveisPelaRede).filter((n) => r.toolsByName[n]), []);
   assert(r.alcancaveisPelaRede["list_low_stock"], "list_low_stock devia estar ao alcance da rede");

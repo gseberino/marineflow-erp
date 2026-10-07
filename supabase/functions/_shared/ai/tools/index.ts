@@ -54,6 +54,9 @@ import { anotacaoTools } from "./anotacoes.ts";
 import { estornoTools } from "./estorno.ts";
 import { cobrancaTools } from "./cobrancas.ts";
 import { favorecidoTools } from "./favorecidos.ts";
+// fiscal e compras (07/10/2026): PDF da nota pelo WhatsApp; OC e cotação até o fim.
+import { notaFiscalPdfTools } from "./nota-fiscal-pdf.ts";
+import { comprasCicloTools } from "./compras-ciclo.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -114,6 +117,9 @@ export const allTools: ToolDef[] = [
   ...estornoTools,
   ...cobrancaTools,
   ...favorecidoTools,
+  // fiscal e compras (07/10/2026)
+  ...notaFiscalPdfTools,
+  ...comprasCicloTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export const toolsByName: Record<string, ToolDef> = Object.fromEntries(allTools.map((t) => [t.name, t]));

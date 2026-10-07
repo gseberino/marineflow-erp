@@ -3,6 +3,9 @@ import { resumirAcerto, resumirCadastro, resumirDiaria, resumirEnvioAoFreelancer
 import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
 import { resumirAgendamento } from "./tools/agendamento.ts";
 import { resumirMensagem } from "./tools/resposta.ts";
+// fiscal e compras (07/10/2026): resumos da confirmação (nota ao cliente, receber e excluir OC).
+import { resumirEnvioDaNota } from "./tools/nota-fiscal-pdf.ts";
+import { resumirExclusaoDeOC, resumirRecebimento } from "./tools/compras-ciclo.ts";
 import {
   callClaude,
   ClaudeApiError,
@@ -172,6 +175,9 @@ const TOOL_LABELS_PT: Record<string, string> = {
   accept_agenda_suggestions: "Aceitar sugestão da agenda",
   dismiss_agenda_suggestions: "Descartar sugestão da agenda",
   update_task: "Alterar tarefa da agenda",
+  // fiscal e compras (07/10/2026)
+  send_fiscal_pdf_to_client: "Enviar nota fiscal ao cliente (WhatsApp)",
+  delete_purchase_order: "Excluir ordem de compra",
 };
 // financeiro (07/10/2026): anotação de Pix, estorno, cobrança formal e favorecido.
 Object.assign(TOOL_LABELS_PT, TITULOS_DO_FINANCEIRO);
@@ -318,6 +324,11 @@ async function resolveIdLabel(admin: any, key: string, id: string): Promise<stri
 const RESUMO_QUE_RESOLVE = new Set(["lancar_no_caixa", "anotar_transacao_do_banco"]);
 // financeiro (07/10/2026): o alvo que não foi achado (ou foi achado mais de um) é recusa, não pendência.
 for (const nome of RESUMO_QUE_RESOLVE_DO_FINANCEIRO) RESUMO_QUE_RESOLVE.add(nome);
+// fiscal e compras (07/10/2026): nota que não serve (cancelada, sem PDF, duas na OS), OC que não
+// recebe ou não se exclui — o resumo já diz por quê, numa linha "⚠️": é recusa, não pendência.
+RESUMO_QUE_RESOLVE.add("send_fiscal_pdf_to_client");
+RESUMO_QUE_RESOLVE.add("receive_purchase_order");
+RESUMO_QUE_RESOLVE.add("delete_purchase_order");
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();
@@ -396,6 +407,24 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
   if (toolName === "send_whatsapp_message") {
     try {
       return await resumirMensagem(admin, args);
+    } catch { /* cai no resumo genérico */ }
+  }
+  // fiscal e compras (07/10/2026): o "sim" é sobre a nota, o cliente e o telefone inteiro do
+  // cadastro; sobre o que chega de cada item da OC e o que acontece depois (estoque, conta a
+  // pagar); e sobre qual OC some. Os resumos moram ao lado das tools.
+  if (toolName === "send_fiscal_pdf_to_client") {
+    try {
+      return await resumirEnvioDaNota(admin, args);
+    } catch { /* cai no resumo genérico */ }
+  }
+  if (toolName === "receive_purchase_order") {
+    try {
+      return await resumirRecebimento(admin, args);
+    } catch { /* cai no resumo genérico */ }
+  }
+  if (toolName === "delete_purchase_order") {
+    try {
+      return await resumirExclusaoDeOC(admin, args);
     } catch { /* cai no resumo genérico */ }
   }
   // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista

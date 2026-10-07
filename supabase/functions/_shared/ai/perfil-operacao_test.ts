@@ -66,6 +66,12 @@ ACRESCENTADAS.push("update_service_order_via", "list_agenda_suggestions", "accep
 // financeiro (07/10/2026): anotações de Pix, estorno, cobrança formal e favorecido — o que só a tela fazia.
 ACRESCENTADAS.push("listar_anotacoes_do_extrato", "alterar_anotacao_do_extrato", "estornar_pagamento", "criar_cobranca",
   "registrar_contato_de_cobranca", "alterar_cobranca", "alterar_favorecido");
+// fiscal e compras (07/10/2026): PDF da nota pelo WhatsApp e OC/cotação até o fim (pedido aprovado).
+ACRESCENTADAS.push(
+  "send_fiscal_pdf_to_self", "send_fiscal_pdf_to_client",
+  "get_purchase_order", "update_purchase_order_status", "update_purchase_order", "delete_purchase_order",
+  "list_quote_requests", "close_quote_request", "reopen_quote_request", "set_quote_supplier_terms",
+);
 // 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
 // roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento",

@@ -42,6 +42,10 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   "followup_send_touch",
   // financeiro (07/10/2026): estorno mexe em dinheiro (a conta volta a dever) — sempre com o "sim".
   "estornar_pagamento",
+  // fiscal e compras (07/10/2026): o PDF da nota ao cliente é arquivo com valores e dados fiscais
+  // a terceiro, que não se desfaz; excluir OC é destrutivo. Sempre com o "sim".
+  "send_fiscal_pdf_to_client",
+  "delete_purchase_order",
 ]);
 
 /**

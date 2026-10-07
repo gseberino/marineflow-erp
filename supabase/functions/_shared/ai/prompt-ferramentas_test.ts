@@ -86,6 +86,9 @@ const NAO_SAO_TOOLS = new Set<string>([
   "novo_valor", "nova_categoria", "nova_data", "parada_ha_mais_de_dias", "payable_id", "prometeu_em", "prometeu_pagar",
   "chave_pix", "tipo_chave_pix", "due_date", "expense_category", "este_mes",
 ]);
+// fiscal e compras (07/10/2026): argumentos de close_quote_request e receive_purchase_order
+NAO_SAO_TOOLS.add("gerar_oc");
+NAO_SAO_TOOLS.add("receber_tudo");
 
 function textoDoPrompt(): string {
   // Os dois canais: o bloco estável é o mesmo, mas o volátil do WhatsApp tem texto próprio.

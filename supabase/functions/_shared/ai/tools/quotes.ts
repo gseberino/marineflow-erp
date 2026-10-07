@@ -1,5 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
-import { generatePONumber } from "./purchasing.ts";
+import { gerarOCDaCotacao, localizarCotacao } from "./compras-base.ts";
 import { chaveTelefone } from "../phone.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 
@@ -245,41 +245,67 @@ export const quoteTools: ToolDef[] = [
 
       let q = sb.from("quote_requests").select("id, code, status");
       q = args.quote_request_id ? q.eq("id", args.quote_request_id) : q.eq("code", String(args.code).toUpperCase());
-      const { data: req } = await q.maybeSingle();
+      const { data: req, error: reqErr } = await q.maybeSingle();
+      if (reqErr) return { error: `A consulta da cotação falhou (${reqErr.message}). Tente de novo.` };
       if (!req) return { error: "Cotação não encontrada." };
       if (req.status !== "open") return { error: `Cotação ${req.code} está ${req.status} — reabra antes de registrar respostas.` };
 
-      const { data: item } = await sb
+      const { data: item, error: itemErr } = await sb
         .from("quote_request_items")
         .select("id, description")
         .eq("quote_request_id", req.id)
         .eq("position", Number(args.item_position))
         .maybeSingle();
+      if (itemErr) return { error: `A consulta dos itens da cotação falhou (${itemErr.message}). Tente de novo.` };
       if (!item) return { error: `Item ${args.item_position} não existe na cotação ${req.code}.` };
 
-      const { data, error } = await sb
+      // Uma resposta por (cotação, fornecedor, item), como a tela (useRecordQuoteResponse): o preço
+      // de novo CORRIGE, não empilha. Até 07/10/2026 a tool sempre inseria — "corrige o preço do
+      // item 2" deixava duas ofertas do mesmo fornecedor no comparativo. Não há índice único no
+      // banco: a de antes é achada aqui (a mais recente, se o histórico já tiver repetidas).
+      const { data: antes, error: antesErr } = await sb
         .from("quote_responses")
-        .insert({
-          quote_request_id: req.id,
-          supplier_id: args.supplier_id,
-          quote_request_item_id: item.id,
-          unit_price: args.unit_price ?? null,
-          lead_time_days: args.lead_time_days ?? null,
-          source: args.source || "text",
-          source_excerpt: args.source_excerpt ?? null,
-          confirmed: false,
-        })
-        .select("id")
-        .single();
-      if (error) throw error;
+        .select("id, unit_price, confirmed")
+        .eq("quote_request_id", req.id)
+        .eq("supplier_id", args.supplier_id)
+        .eq("quote_request_item_id", item.id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (antesErr) return { error: `A consulta das respostas da cotação falhou (${antesErr.message}). Tente de novo.` };
+      const existente = (antes ?? [])[0] as { id: string; unit_price: number | null; confirmed: boolean } | undefined;
 
+      const campos = {
+        quote_request_id: req.id,
+        supplier_id: args.supplier_id,
+        quote_request_item_id: item.id,
+        unit_price: args.unit_price ?? null,
+        lead_time_days: args.lead_time_days ?? null,
+        source: args.source || "text",
+        source_excerpt: args.source_excerpt ?? null,
+      };
+      let responseId: string;
+      if (existente) {
+        // `confirmed` fica como estava (a tela também não mexe): corrigir o preço não desfaz a escolha.
+        const { error } = await sb.from("quote_responses").update(campos).eq("id", existente.id);
+        if (error) throw error;
+        responseId = existente.id;
+      } else {
+        const { data, error } = await sb.from("quote_responses").insert({ ...campos, confirmed: false }).select("id").single();
+        if (error) throw error;
+        responseId = data.id;
+      }
+
+      const mudouEscolhido = !!existente?.confirmed && Number(existente.unit_price) !== Number(args.unit_price ?? NaN);
       return {
         ok: true,
-        response_id: data.id,
+        response_id: responseId,
         cotacao: req.code,
         item: `${args.item_position}. ${item.description}`,
         registrado: { preco_unitario: args.unit_price ?? null, prazo_dias: args.lead_time_days ?? null, origem: args.source || "text" },
-        aviso: "Registrado como proposta. Nada foi aplicado ao orçamento ainda.",
+        ...(existente ? { corrigido: `substituiu o preço anterior deste fornecedor (${existente.unit_price ?? "sem preço"})` } : {}),
+        aviso: mudouEscolhido
+          ? "Este era o preço ESCOLHIDO e já tinha ido para o orçamento: o orçamento continua com o valor antigo até aplicar de novo (apply_quote_price)."
+          : "Registrado como proposta. Nada foi aplicado ao orçamento ainda.",
       };
     },
   },
@@ -410,79 +436,35 @@ export const quoteTools: ToolDef[] = [
       const { sb, admin, userId } = ctx;
       if (!args.quote_request_id && !args.code) return { error: "Informe quote_request_id ou code (COT-XXXXX)." };
 
-      let q = sb.from("quote_requests").select("id, code, service_order_id");
-      q = args.quote_request_id ? q.eq("id", args.quote_request_id) : q.eq("code", String(args.code).toUpperCase());
-      const { data: req } = await q.maybeSingle();
-      if (!req) return { error: "Cotação não encontrada." };
+      const achada = await localizarCotacao(sb, { cotacao: args.quote_request_id ?? args.code });
+      if ("erro" in achada) return { error: achada.erro };
+      const req = achada.cotacao;
+      if (req.status === "cancelled") return { error: `A cotação ${req.code} está cancelada. Reabra antes de gerar a OC.` };
 
-      const { data: resps } = await sb
-        .from("quote_responses")
-        .select("id, quote_request_item_id, unit_price")
-        .eq("quote_request_id", req.id)
-        .eq("supplier_id", args.supplier_id)
-        .eq("confirmed", true);
-      if (!resps || resps.length === 0) {
-        return { error: "Nenhum preço confirmado desse fornecedor nesta cotação. Use apply_quote_price para escolher antes de gerar a OC." };
-      }
-
-      const itemIds = resps.map((r: any) => r.quote_request_item_id).filter(Boolean);
-      const { data: items } = await sb
-        .from("quote_request_items")
-        .select("id, product_id, description, quantity")
-        .in("id", itemIds);
-      const itemById: Record<string, any> = Object.fromEntries((items || []).map((i: any) => [i.id, i]));
-
-      const linhas = resps
-        .map((r: any) => {
-          const it = itemById[r.quote_request_item_id];
-          if (!it) return null;
-          const qty = Number(it.quantity) || 1;
-          const cost = Number(r.unit_price) || 0;
-          return { product_id: it.product_id ?? null, description: it.description, quantity: qty, unit_cost: cost, subtotal: qty * cost };
-        })
-        .filter(Boolean) as Array<Record<string, any>>;
-      if (linhas.length === 0) return { error: "Não consegui montar os itens da OC a partir da cotação." };
-
-      const total = Math.round(linhas.reduce((a, l) => a + Number(l.subtotal), 0) * 100) / 100;
-      const poNumber = await generatePONumber(admin);
-
-      // created_by e total_amount são NOT NULL nesta tabela — preenchidos explicitamente.
-      const { data: po, error: poErr } = await sb
-        .from("purchase_orders")
-        .insert({
-          po_number: poNumber,
-          supplier_id: args.supplier_id,
-          service_order_id: req.service_order_id ?? null,
-          expected_date: args.expected_date ?? null,
-          notes: args.notes ?? `Gerada da cotação ${req.code}`,
-          status: "draft",
-          total_amount: total,
-          created_by: userId,
-        })
-        .select("id, po_number")
-        .single();
-      if (poErr) throw poErr;
-
-      const { error: itErr } = await sb.from("purchase_order_items").insert(
-        linhas.map((l) => ({
-          purchase_order_id: po.id,
-          product_id: l.product_id,
-          description: l.description,
-          quantity: l.quantity,
-          unit_cost: l.unit_cost,
-        })),
-      );
-      if (itErr) throw itErr;
+      // Desde 07/10/2026 pelo mesmo caminho da tela (gerarOCDaCotacao): OC com número, itens
+      // conferidos (OC desfeita se não entram) e a cotação FECHADA no fim — antes ela ficava
+      // aberta, cobrando resposta de uma compra já feita.
+      const gerada = await gerarOCDaCotacao(sb, admin, {
+        cotacao: req,
+        supplierId: args.supplier_id,
+        somenteEscolhidos: true,
+        expected_date: args.expected_date,
+        notes: args.notes,
+        userId,
+      });
+      if ("erro" in gerada) return { error: gerada.erro };
 
       const { data: sup } = await sb.from("suppliers").select("name").eq("id", args.supplier_id).maybeSingle();
       return {
         ok: true,
-        ordem_de_compra: po.po_number,
-        purchase_order_id: po.id,
+        ordem_de_compra: gerada.po.po_number,
+        purchase_order_id: gerada.po.id,
         fornecedor: sup?.name || args.supplier_id,
         cotacao: req.code,
-        itens: linhas.map((l) => ({ descricao: l.description, quantidade: l.quantity, custo_unitario: l.unit_cost })),
-        total,
+        cotacao_fechada: !gerada.avisoDoFechamento,
+        itens: gerada.linhas.map((l) => ({ descricao: l.description, quantidade: l.quantity, custo_unitario: l.unit_cost })),
+        total: gerada.total,
+        ...(gerada.avisoDoFechamento ? { aviso: gerada.avisoDoFechamento } : {}),
       };
     },
   },

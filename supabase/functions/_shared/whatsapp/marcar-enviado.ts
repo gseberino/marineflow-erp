@@ -36,6 +36,16 @@ export function desviadoPorTeste(settings: Configuracoes): boolean {
   return numeroDeTesteAtivo(settings) !== null;
 }
 
+/**
+ * Modo de teste LIGADO e SEM número de teste (07/10/2026). Para quem grava direto na FILA
+ * (whatsapp_send_queue), que não passa pelo whatsapp-send e não aplica o desvio: a tela recusa
+ * enviar assim (useSendQuoteRequest), e o pedido de cotação do assistente também. A conta do
+ * interruptor continua num lugar só — aqui.
+ */
+export function modoDeTesteSemNumero(settings: Configuracoes): boolean {
+  return (settings.wa_test_mode ?? settings.zapi_test_mode) === "true" && numeroDeTesteAtivo(settings) === null;
+}
+
 /** O corpo do whatsapp-send no que importa para a validação por tipo. */
 export type CorpoDoEnvio = {
   kind: "text" | "link" | "document";

@@ -231,6 +231,13 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "registrar_contato_de_cobranca",
   "alterar_cobranca",
   "alterar_favorecido",
+
+  // fiscal e compras (07/10/2026): PDF da nota pelo WhatsApp (para si e ao cliente) e OC/cotação
+  //   até o fim (situação, edição, exclusão de rascunho, listar/fechar/cancelar/reabrir cotação,
+  //   frete e desconto). Pedido aprovado pelo dono; o prompt ensina.
+  "send_fiscal_pdf_to_self", "send_fiscal_pdf_to_client",
+  "get_purchase_order", "update_purchase_order_status", "update_purchase_order", "delete_purchase_order",
+  "list_quote_requests", "close_quote_request", "reopen_quote_request", "set_quote_supplier_terms",
 ]);
 
 /**
@@ -470,6 +477,13 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   // 07/10/2026 (junção das frentes): alterar_favorecido, alterar_cobranca, accept/dismiss_agenda_suggestions
   // e listar_anotacoes_do_extrato ficam na rede (ferramenta_extra): uso raro (o detector de sugestões
   // está pausado) ou leitura que a rede roda direto. Teto de tokens em agent-perfil-admin_test.ts.
+  // fiscal e compras (07/10/2026): só as 4 do dia a dia, por causa do teto do perfil enxuto (105,
+  //   agent-perfil-admin_test.ts; estava em 101). As outras 6 (get_purchase_order, update_purchase_order,
+  //   delete_purchase_order, list_quote_requests, reopen_quote_request, set_quote_supplier_terms) o
+  //   admin alcança pela ferramenta_extra: leitura roda direto, escrita pede o "sim".
+  "send_fiscal_pdf_to_self", "send_fiscal_pdf_to_client",
+  // Na junção (07/10/2026) update_purchase_order_status e close_quote_request também foram para a
+  // rede: o dono não usa o módulo de compras no dia a dia, e o perfil enxuto passou do teto.
 ]);
 
 /**

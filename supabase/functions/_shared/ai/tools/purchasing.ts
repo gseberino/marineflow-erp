@@ -1,17 +1,16 @@
-import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { blockTechnician, NON_TECHNICIAN_ROLES, type Role, type ToolDef } from "./registry.ts";
 import { buscarCadastro } from "../busca-cadastro.ts";
+import { CARGOS_DE_COMPRAS, criarOC, itensDitos } from "./compras-base.ts";
+import { resolverRecebimento } from "./compras-ciclo.ts";
 
-// Mesmo esquema de numeração não-atômico usado em useCreatePOFromOS (frontend) —
-// replicado aqui para gerar o mesmo formato "OC-00001".
-export async function generatePONumber(admin: any): Promise<string> {
-  const { data } = await admin.from("purchase_orders").select("po_number").order("created_at", { ascending: false }).limit(1);
-  let seq = 1;
-  const last = data?.[0]?.po_number;
-  if (last) {
-    const match = String(last).match(/(\d+)$/);
-    if (match) seq = parseInt(match[1], 10) + 1;
-  }
-  return `OC-${String(seq).padStart(5, "0")}`;
+// O número da OC (mesmo esquema não-atômico de useCreatePOFromOS, "OC-00001") mora em
+// compras-base.ts desde 07/10/2026, junto de criarOC, que as três tools de criar OC usam.
+// Continua saindo daqui para quem já importava.
+export { generatePONumber } from "./compras-base.ts";
+
+/** Compras é do admin e do financeiro (policies de purchase_orders); revalida no execute. */
+function cargoDeCompras(ctx: { userRole: string }) {
+  return CARGOS_DE_COMPRAS.includes(ctx.userRole as Role) ? null : { error: "Ordem de compra é do administrador e do financeiro." };
 }
 
 export const purchasingTools: ToolDef[] = [
@@ -42,18 +41,25 @@ export const purchasingTools: ToolDef[] = [
       required: ["supplier_id"],
     },
     risk: "low",
-    async execute(args, { sb, userId }) {
-      const { supplier_id, service_order_id, items, ...rest } = args;
-      const { data: po, error } = await sb
-        .from("purchase_orders")
-        .insert({ ...rest, supplier_id, service_order_id, status: rest.status || "draft", created_by: userId })
-        .select()
-        .single();
-      if (error) throw error;
-      if (Array.isArray(items) && items.length > 0) {
-        await sb.from("purchase_order_items").insert(items.map((it: any) => ({ ...it, purchase_order_id: po.id })));
-      }
-      return { ok: true, purchase_order: po };
+    async execute(args, ctx) {
+      const blocked = blockTechnician(ctx) ?? cargoDeCompras(ctx);
+      if (blocked) return blocked;
+      const { sb, admin, userId } = ctx;
+      // Até 07/10/2026 esta tool inseria SEM po_number (NOT NULL, sem default: falhava sempre) e
+      // ignorava o erro dos itens (OC vazia dita "criada"). Agora é o caminho da tela: número
+      // gerado, itens conferidos, e OC desfeita se os itens não entram (criarOC).
+      const lidos = itensDitos(args.items);
+      if ("erro" in lidos) return { error: lidos.erro };
+      const criada = await criarOC(sb, admin, {
+        supplier_id: args.supplier_id,
+        service_order_id: args.service_order_id ?? null,
+        expected_date: args.expected_date ?? null,
+        notes: args.notes ?? null,
+        status: "draft",
+        created_by: userId,
+      }, lidos.itens);
+      if ("erro" in criada) return { error: criada.erro };
+      return { ok: true, purchase_order: criada.po, ordem_de_compra: criada.po.po_number };
     },
   },
   {
@@ -148,30 +154,22 @@ export const purchasingTools: ToolDef[] = [
     async execute(args, ctx) {
       const blocked = blockTechnician(ctx);
       if (blocked) return blocked;
+      const cargo = cargoDeCompras(ctx);
+      if (cargo) return cargo;
       const { admin } = ctx;
-      const poNumber = await generatePONumber(admin);
-      const { data: po, error: poErr } = await admin
-        .from("purchase_orders")
-        .insert({
-          po_number: poNumber,
-          service_order_id: args.service_order_id,
-          supplier_id: args.supplier_id ?? null,
-          expected_date: args.expected_date ?? null,
-          notes: args.notes ?? null,
-          status: "draft",
-        })
-        .select()
-        .single();
-      if (poErr) throw poErr;
-
-      const { error: itemErr } = await admin.from("purchase_order_items").insert({
-        purchase_order_id: po.id,
-        product_id: args.product_id,
-        description: args.product_name,
-        quantity: args.quantity,
-        unit_cost: args.unit_cost,
-      });
-      if (itemErr) throw itemErr;
+      // Mesmo caminho de useCreatePOFromOS; desde 07/10/2026 por criarOC: item que não entra
+      // desfaz a OC (antes ficava uma OC vazia de pé e a OS ia para "Aguardando peças" à toa).
+      const lidos = itensDitos([{ product_id: args.product_id, descricao: args.product_name, quantidade: args.quantity, custo_unitario: args.unit_cost }]);
+      if ("erro" in lidos) return { error: lidos.erro };
+      const criada = await criarOC(admin, admin, {
+        service_order_id: args.service_order_id,
+        supplier_id: args.supplier_id ?? null,
+        expected_date: args.expected_date ?? null,
+        notes: args.notes ?? null,
+        status: "draft",
+      }, lidos.itens);
+      if ("erro" in criada) return { error: criada.erro };
+      const po = criada.po;
 
       await admin
         .from("service_orders")
@@ -184,14 +182,32 @@ export const purchasingTools: ToolDef[] = [
   },
   {
     name: "receive_purchase_order",
-    description: "Registra o recebimento (total ou parcial) de itens de uma ordem de compra — RPC atômica que atualiza estoque e gera conta a pagar.",
+    description:
+      "Registra o que CHEGOU de uma ordem de compra (tudo ou só parte) — a mesma rotina do 'Receber itens' da tela: dá entrada no estoque e, quando a OC fica completa, gera a conta a pagar. Ache a OC pelo número (ordem_de_compra: OC-00012 ou 12), pelo fornecedor ou pela OS. Diga os itens que chegaram em itens [{n (o número do item em get_purchase_order) ou descricao, quantidade}] — ex.: 'chegou incompleta, recebe só 2 das 4 baterias' = itens [{descricao:'bateria', quantidade:2}]; ou receber_tudo=true para tudo o que falta. Não recebe mais do que falta, nem OC cancelada.",
     input_schema: {
       type: "object",
       properties: {
-        po_id: { type: "string" },
+        ordem_de_compra: { type: "string", description: "Número da OC (OC-00012, 12) ou o id." },
+        fornecedor: { type: "string", description: "Nome do fornecedor, para achar a OC em aberto dele ('a OC da Victron')." },
+        os: { type: "string", description: "OS/orçamento de origem, para achar a OC dela." },
+        itens: {
+          type: "array",
+          description: "O que chegou: cada item pelo número na lista (n) ou pela descrição, com a quantidade que chegou AGORA.",
+          items: {
+            type: "object",
+            properties: {
+              n: { type: "number", description: "Número do item na OC (1, 2, 3…), como get_purchase_order mostra." },
+              descricao: { type: "string", description: "Descrição do item, se não souber o número." },
+              quantidade: { type: "number", description: "Quantidade que chegou agora." },
+            },
+            required: ["quantidade"],
+          },
+        },
+        receber_tudo: { type: "boolean", description: "true = chegou tudo o que faltava." },
+        po_id: { type: "string", description: "(antigo) id da OC — prefira ordem_de_compra." },
         items: {
           type: "array",
-          description: "Itens recebidos com a quantidade recebida",
+          description: "(antigo) [{po_item_id, received_qty}] — prefira itens.",
           items: {
             type: "object",
             properties: { po_item_id: { type: "string" }, received_qty: { type: "number" } },
@@ -200,21 +216,42 @@ export const purchasingTools: ToolDef[] = [
         },
         due_days: { type: "number", description: "Prazo em dias para a conta a pagar gerada. Padrão: 30." },
       },
-      required: ["po_id", "items"],
     },
     risk: "high",
-    roles: NON_TECHNICIAN_ROLES,
+    // Admin e financeiro, como as policies de purchase_orders (07/10/2026: pelo WhatsApp o
+    // assistente grava sem RLS, e o vendedor recebia OC por aqui).
+    roles: CARGOS_DE_COMPRAS,
     async execute(args, ctx) {
-      const blocked = blockTechnician(ctx);
+      const blocked = blockTechnician(ctx) ?? cargoDeCompras(ctx);
       if (blocked) return blocked;
       const { admin } = ctx;
+      // Tudo conferido ANTES da rotina do banco (07/10/2026): receive_po não confere se o item é
+      // da OC, nem a situação dela, e grava o movimento de estoque com a quantidade PEDIDA mesmo
+      // quando corta o recebido no que faltava — receber 5 de um item que só faltavam 2 punha 5
+      // no estoque. Item de texto livre (sem produto) derruba a rotina inteira (o movimento de
+      // estoque exige produto): sai recusado aqui, com o motivo.
+      const pedido = await resolverRecebimento(admin, args);
+      if ("erro" in pedido) return { error: pedido.erro, ...(pedido.opcoes ? { opcoes: pedido.opcoes } : {}) };
+      const { oc, linhas } = pedido;
       const { data, error } = await admin.rpc("receive_po", {
-        p_po_id: args.po_id,
-        p_items: args.items,
-        p_due_days: args.due_days || 30,
+        p_po_id: oc.id,
+        p_items: linhas.map((l) => ({ po_item_id: l.item.id, received_qty: l.quantidade })),
+        p_due_days: Number(args.due_days) > 0 ? Number(args.due_days) : 30,
       });
-      if (error) return { error: error.message };
-      return { ok: true, result: data };
+      if (error) return { error: `O recebimento não foi registrado: ${error.message}` };
+      const r = (data ?? {}) as { status?: string; payable_id?: string | null; all_received?: boolean };
+      return {
+        ok: true,
+        ordem_de_compra: oc.po_number,
+        recebido: linhas.map((l) => ({ item: `${l.n}. ${l.item.description}`, chegou: l.quantidade, faltava: l.faltava, falta_agora: l.faltava - l.quantidade })),
+        situacao: r.all_received ? "recebida (completa)" : "recebida em parte",
+        conta_a_pagar: r.payable_id
+          ? "gerada (veja em Contas a pagar)"
+          : r.all_received
+          ? (oc.supplier_id ? "já existia" : "não gerada: a OC não tem fornecedor")
+          : "ainda não: a conta a pagar nasce quando a OC fica completa (é a mesma regra da tela)",
+        estoque: "entrada registrada pelo movimento de compra",
+      };
     },
   },
   {
