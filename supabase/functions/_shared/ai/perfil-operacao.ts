@@ -214,6 +214,13 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "update_marina",
   "add_vessel_contact",
   "update_vessel_contact",
+
+  // operacional (07/10/2026): via do técnico (situação de cada serviço, chegada e saída com a
+  // hora dita) e a caixa de sugestões da agenda — pedidos do dono para fazer conversando.
+  "update_service_order_via",
+  "list_agenda_suggestions",
+  "accept_agenda_suggestions",
+  "dismiss_agenda_suggestions",
 ]);
 
 /**
@@ -437,10 +444,16 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "schedule_self_reminder",
   "my_agenda",
 
-  // cadastros (07/10/2026): editar marina e os contatos da embarcação (pedido do dono).
-  "update_marina",
-  "add_vessel_contact",
-  "update_vessel_contact",
+  // cadastros (07/10/2026): update_marina, add_vessel_contact e update_vessel_contact ficam na
+  // rede (ferramenta_extra) — uso raro; o perfil enxuto tem teto de tokens (agent-perfil-admin_test.ts).
+  // operacional (07/10/2026): a via do técnico, aceitar/descartar sugestão da caixa e
+  // update_task (parar de repetir / mudar a regra) — pela rede, cada uma pedia um "sim".
+  // list_agenda_suggestions fica de fora de propósito: é leitura, a rede a roda direto, e o
+  // perfil enxuto tem teto de 105 (agent-perfil-admin_test.ts).
+  "update_service_order_via",
+  "accept_agenda_suggestions",
+  "dismiss_agenda_suggestions",
+  "update_task",
 ]);
 
 /**

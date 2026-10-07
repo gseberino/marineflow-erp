@@ -46,6 +46,9 @@ const NAO_SAO_TOOLS = new Set<string>([
   "to_phone",
   // argumentos de acompanhar_conversa (06/10/2026)
   "intervalo_horas", "lembrar_em",
+  // operacional (07/10/2026): repetição de tarefa, caixa de sugestões, via e laudo da OS
+  "dias_da_semana", "dia_do_mes", "repetir_a_cada", "parar_de_repetir", "todas_de_hoje",
+  "situacao_na_via", "customer_visible_report", "initial_findings", "solution_applied",
   // argumento de cadastrar_favorecido (regra "todo pagamento para Fulano é <categoria>", 06/10/2026)
   "categoria_padrao",
   // argumentos de registrar_diaria para vários dias (29/09/2026)

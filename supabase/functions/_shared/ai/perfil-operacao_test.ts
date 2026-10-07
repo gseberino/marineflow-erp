@@ -61,6 +61,8 @@ const SEMPRE_NO_PERFIL_ANTIGO = [
 const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer", "cadastrar_freelancer", "registrar_pagamento_freelancer", "enviar_extrato_freelancer", "fechar_acerto_freelancer", "reabrir_acerto_freelancer", "enviar_acerto_ao_freelancer", "ajustar_lancamento_ao_valor_do_banco", "aplicar_pix_em_contas", "desfazer_aplicacao_de_pix", "definir_condicao_pagamento", "acompanhar_conversa", "listar_acompanhamentos", "parar_acompanhamento", "atualizar_extrato", "enviar_relatorio_pdf"];
 // cadastros (07/10/2026): editar marina e os contatos da embarcação.
 ACRESCENTADAS.push("update_marina", "add_vessel_contact", "update_vessel_contact");
+// operacional (07/10/2026): via do técnico e caixa de sugestões da agenda.
+ACRESCENTADAS.push("update_service_order_via", "list_agenda_suggestions", "accept_agenda_suggestions", "dismiss_agenda_suggestions");
 // 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
 // roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento",
