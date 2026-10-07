@@ -1,4 +1,4 @@
-import { RefreshCw } from 'lucide-react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useBankConnections, useSyncBank, type BankConnection, type SyncResult } from '@/hooks/use-bank-connections';
@@ -54,6 +54,17 @@ export function dadoMaisVelho(conexoes: BankConnection[]): { iso: string; conta:
   return pior;
 }
 
+/**
+ * Dado do banco com mais de 36 h: o Pluggy vai ao banco uma vez por dia, então passar de um dia e
+ * meio quer dizer que uma ida falhou (consentimento, banco fora do ar). O selo fica amarelo.
+ */
+export const HORAS_PARA_ATRASADO = 36;
+export function estaAtrasado(iso: string | null | undefined, agora = new Date()): boolean {
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) && agora.getTime() - t > HORAS_PARA_ATRASADO * 3600_000;
+}
+
 /** Aviso do resultado da busca: o mesmo em toda tela. */
 export function avisarResultadoDaBusca(r: SyncResult) {
   const comErro = r.resultados.filter((x) => x.status === 'error');
@@ -69,6 +80,7 @@ export function AtualizarExtrato({ className, comSelo = true }: { className?: st
 
   const velho = dadoMaisVelho(buscaveis);
   const quando = quandoFoi(velho?.iso);
+  const atrasado = estaAtrasado(velho?.iso);
 
   const atualizar = async () => {
     try {
@@ -82,11 +94,19 @@ export function AtualizarExtrato({ className, comSelo = true }: { className?: st
     <div className={cn('flex items-center gap-2', className)}>
       {comSelo && quando && (
         <span
-          className="hidden text-xs text-muted-foreground sm:inline"
+          className={cn(
+            'items-center gap-1 text-xs',
+            // Atrasado aparece também no celular: é o aviso que importa.
+            atrasado ? 'inline-flex rounded-md bg-warning/15 px-2 py-1 font-medium text-warning' : 'hidden text-muted-foreground sm:inline-flex',
+          )}
           data-testid="idade-do-extrato"
-          title={`O banco manda o extrato ao Pluggy uma vez por dia; o dado mais antigo é o de ${velho!.conta}. Em Cadastros › Contas bancárias, cada conta mostra o seu.`}
+          data-atrasado={atrasado ? 'sim' : undefined}
+          title={atrasado
+            ? `${velho!.conta} está sem dado novo do banco desde ${quando}. O Pluggy vai ao banco uma vez por dia: confira em Cadastros › Contas bancárias se a conexão pede para reconectar no meu.pluggy.ai.`
+            : `O banco manda o extrato ao Pluggy uma vez por dia; o dado mais antigo é o de ${velho!.conta}. Em Cadastros › Contas bancárias, cada conta mostra o seu.`}
         >
-          Bancos: dado de {quando}
+          {atrasado && <AlertTriangle className="h-3.5 w-3.5" />}
+          {atrasado ? `${velho!.conta}: sem dado novo desde ${quando}` : `Bancos: dado de ${quando}`}
         </span>
       )}
       <Button variant="outline" className="gap-1.5" onClick={atualizar} disabled={sincronizar.isPending}>

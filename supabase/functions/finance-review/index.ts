@@ -354,9 +354,21 @@ async function vigiar(admin: DbClient) {
   }
   const porTipo: Record<string, number> = {};
   for (const a of novos) porTipo[a.tipo] = (porTipo[a.tipo] ?? 0) + 1;
+
+  // Aprendizado do dia: padrões repetidos nas decisões viram regras PROPOSTAS (avisadas no sino).
+  // Falhar aqui não derruba o vigilante.
+  let regrasAprendidas = 0;
+  try {
+    regrasAprendidas = await proporRegrasNoBanco(admin);
+  } catch (e) {
+    console.warn("[finance-review][vigiar] propor regras falhou:", (e as Error)?.message ?? e);
+  }
+
   return jr({
     ok: true, alertas: novos.length, ja_avisados: alertas.length - novos.length, por_tipo: porTipo,
-    message: novos.length ? `${novos.length} alerta(s) novo(s) na caixa de entrada` : "Nada novo (já avisado antes).",
+    regras_aprendidas: regrasAprendidas,
+    message: (novos.length ? `${novos.length} alerta(s) novo(s) na caixa de entrada` : "Nada novo (já avisado antes).") +
+      (regrasAprendidas ? ` · ${regrasAprendidas} regra(s) aprendida(s)` : ""),
   });
 }
 
@@ -1383,6 +1395,21 @@ async function classificarComIA(admin: DbClient) {
  * observou um padrão, não recebeu uma ordem — e um padrão pode ser três erros iguais.
  */
 async function proporRegras(admin: DbClient) {
+  const n = await proporRegrasNoBanco(admin);
+  return jr({
+    ok: true,
+    propostas: n,
+    message: n ? `${n} regra(s) sugerida(s) a partir do que você já decidiu` : "Nenhum padrão novo o bastante para virar regra",
+  });
+}
+
+/**
+ * O mesmo, sem resposta HTTP: grava as propostas e devolve quantas. Roda também todo dia, no fim do
+ * vigilante (07/10/2026, pedido do dono: o assistente aprende regras sozinho, mas registra e avisa —
+ * o aviso no sino é o gatilho trg_avisar_regra_aprendida, migration 20261007110000). Antes só rodava
+ * quando alguém apertava "Sugerir regras", e em 30 dias ninguém apertou.
+ */
+async function proporRegrasNoBanco(admin: DbClient): Promise<number> {
   const lancamentos = await lerTudo<{
     supplier_id: string | null; supplier_name: string | null; expense_category: string;
   }>((de, ate) =>
@@ -1418,9 +1445,7 @@ async function proporRegras(admin: DbClient) {
   const padroes = sugerirRegras(decisoes, (existentes ?? []) as unknown as RegraFinanceira[], 3,
     (fornecedores ?? []) as FornecedorConhecido[]);
 
-  if (padroes.length === 0) {
-    return jr({ ok: true, propostas: 0, message: "Nenhum padrão novo o bastante para virar regra" });
-  }
+  if (padroes.length === 0) return 0;
 
   const { error } = await admin.from("finance_rules").insert(
     padroes.map((p) => ({
@@ -1437,12 +1462,7 @@ async function proporRegras(admin: DbClient) {
     })),
   );
   if (error) throw error;
-
-  return jr({
-    ok: true,
-    propostas: padroes.length,
-    message: `${padroes.length} regra(s) sugerida(s) a partir do que você já decidiu`,
-  });
+  return padroes.length;
 }
 
 /**

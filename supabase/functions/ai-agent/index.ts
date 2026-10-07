@@ -306,7 +306,7 @@ async function quantasPendenciasAbertas(
 
 async function approveAndExecutePendingAction(
   admin: any,
-  toolCtx: { sb: any; admin: any; userId: string; userRole: Role; jwt: string; appOrigin: string; settings: Record<string, string> },
+  toolCtx: { sb: any; admin: any; userId: string; userRole: Role; jwt: string; appOrigin: string; settings: Record<string, string>; canal?: "panel" | "whatsapp" },
   pending: { id: string; action_name: string; payload: unknown },
   actorUserId: string,
 ): Promise<{ locked: boolean; execError?: string; execResult: unknown }> {
@@ -355,7 +355,7 @@ async function resolveWhatsAppConfirmation(
   admin: any,
   metadata: Record<string, any>,
   appUser: { id: string; role: string; full_name: string | null; ai_whatsapp_pin_hash: string | null },
-  toolCtx: { sb: any; admin: any; userId: string; userRole: Role; jwt: string; appOrigin: string; settings: Record<string, string> },
+  toolCtx: { sb: any; admin: any; userId: string; userRole: Role; jwt: string; appOrigin: string; settings: Record<string, string>; canal?: "panel" | "whatsapp" },
   confirmation: { decision: "approve"; pin?: string } | { decision: "reject" },
 ): Promise<{ message: string; metadata: Record<string, any> }> {
   const pendingActionId = metadata.pending_confirm_action_id as string;
@@ -1068,7 +1068,7 @@ servirComCors(async (req) => {
       // ai_op_protect_pending_action rejeita pending -> executed direto.
       const { locked, execError, execResult } = await approveAndExecutePendingAction(
         admin,
-        { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin: appOriginConfirm, settings },
+        { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin: appOriginConfirm, settings, canal: "panel" as const },
         pending,
         userId,
       );
@@ -1226,7 +1226,7 @@ servirComCors(async (req) => {
       system,
       messages: toAnthropicMessages(podarHistoricoParaLLM(historyMessages)),
       tools: toolsForRole,
-      toolCtx: { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin, settings },
+      toolCtx: { sb, admin, userId, userRole: userRole as Role, jwt, appOrigin, settings, canal: "panel" as const },
       sessionId: resolvedSessionId,
       channel: "panel" as const,
       effort: "medium" as const, // painel: trabalho complexo de ERP, tolera mais latência

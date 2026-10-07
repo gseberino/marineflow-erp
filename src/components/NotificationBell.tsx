@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, DollarSign, Package, Clock, AlertTriangle, Check, CheckCheck, XCircle, ListChecks, UserPlus, WifiOff, MessageCircle } from 'lucide-react';
+import { Bell, DollarSign, Package, Clock, AlertTriangle, Check, CheckCheck, XCircle, ListChecks, UserPlus, WifiOff, MessageCircle, TrendingUp, BookOpen } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,8 @@ const typeConfig: Record<NotificationType, { Icon: typeof Bell; className: strin
   TASK_ASSIGNED: { Icon: UserPlus, className: 'text-primary bg-primary/10' },
   WHATSAPP_CAIU: { Icon: WifiOff, className: 'text-destructive bg-destructive/10' },
   WHATSAPP_VOLTOU: { Icon: MessageCircle, className: 'text-emerald-600 bg-emerald-500/10' },
+  VIGIA_NEGOCIO: { Icon: TrendingUp, className: 'text-primary bg-primary/10' },
+  REGRA_APRENDIDA: { Icon: BookOpen, className: 'text-primary bg-primary/10' },
 };
 
 function timeAgo(iso: string): string {

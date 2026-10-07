@@ -3,7 +3,7 @@ import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, entityIdFromKey, keyOf, fmtBRL, fmtDate, dueAt,
   isManualDismissal, dismissCooldownDays, businessDaysBetween, vencimentoDoOrcamento, notaDoVencimento,
-  cobrancaMinima, COBRANCA_MINIMA_PADRAO,
+  cobrancaMinima,
 } from "./rules.ts";
 
 Deno.test("isManualDismissal: conclusão MANUAL recente bloqueia recriação", () => {
@@ -592,12 +592,12 @@ function bancoDeCobranca(contas: unknown[], minimo?: string) {
   };
 }
 
-Deno.test("cobrancaMinima: padrão R$ 50, aceita vírgula, 0 desliga, lixo volta ao padrão", async () => {
-  assertEquals(await cobrancaMinima(bancoDeCobranca([])), COBRANCA_MINIMA_PADRAO);
+Deno.test("cobrancaMinima: o piso da régua (collection_min_amount); sem chave ou inválido = sem corte", async () => {
+  assertEquals(await cobrancaMinima(bancoDeCobranca([], "200")), 200);
   assertEquals(await cobrancaMinima(bancoDeCobranca([], "120,5")), 120.5);
+  assertEquals(await cobrancaMinima(bancoDeCobranca([])), 0);
   assertEquals(await cobrancaMinima(bancoDeCobranca([], "0")), 0);
-  assertEquals(await cobrancaMinima(bancoDeCobranca([], "abc")), COBRANCA_MINIMA_PADRAO);
-  assertEquals(await cobrancaMinima(bancoDeCobranca([], " ")), COBRANCA_MINIMA_PADRAO);
+  assertEquals(await cobrancaMinima(bancoDeCobranca([], "abc")), 0);
 });
 
 Deno.test("r3/r4: conta com saldo abaixo do mínimo não vira tarefa (saldo vazio usa o valor cheio)", async () => {
@@ -608,7 +608,7 @@ Deno.test("r3/r4: conta com saldo abaixo do mínimo não vira tarefa (saldo vazi
   ];
   for (const id of ["r3", "r4"]) {
     // deno-lint-ignore no-explicit-any
-    const tarefas = await ruleById(id)!.find(bancoDeCobranca(contas) as any);
+    const tarefas = await ruleById(id)!.find(bancoDeCobranca(contas, "200") as any);
     assertEquals(tarefas.map((t: { automation_key: string }) => t.automation_key), [`${id}:recv:b`, `${id}:recv:c`]);
     // mínimo 0 = cobra tudo, como antes
     // deno-lint-ignore no-explicit-any
@@ -620,7 +620,7 @@ Deno.test("isResolved r3: tarefa aberta de conta que ficou abaixo do mínimo se 
   const r3 = ruleById("r3")!;
   assertEquals(
     // deno-lint-ignore no-explicit-any
-    await r3.isResolved(bancoDeCobranca([{ status: "partially_paid", amount: 900, balance_amount: 20 }]) as any, { automation_key: "r3:recv:x" }),
+    await r3.isResolved(bancoDeCobranca([{ status: "partially_paid", amount: 900, balance_amount: 20 }], "200") as any, { automation_key: "r3:recv:x" }),
     "Saldo abaixo do mínimo de cobrança",
   );
 });

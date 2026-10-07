@@ -171,6 +171,8 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   // 06/10/2026 (pedido do dono): "atualize o extrato" e "me manda o PDF das despesas de setembro".
   "atualizar_extrato",
   "enviar_relatorio_pdf",
+  // 07/10/2026: vigia do negócio (margem, equilíbrio, despesa em alta, receita por serviço).
+  "analise_do_negocio",
 
   // — "Deixar a IA acompanhar" (copiloto) —
   "criar_missao_acompanhamento",
@@ -391,6 +393,7 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "send_document_pdf_to_self",
   "enviar_relatorio_pdf",
   "atualizar_extrato",
+  "analise_do_negocio",
   "send_service_order_link",
   "send_supplier_quote_request",
   "set_service_order_charges",

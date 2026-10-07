@@ -18,8 +18,10 @@ import { caixaTools, normal } from "./caixa.ts";
 import { enviarDocumentoWhatsapp } from "./whatsapp.ts";
 import { chaveDeEnvio, liberarEnvio } from "../../whatsapp/idempotencia.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
-import { guardarEEntregar } from "../../pdf/gerar-e-guardar.ts";
+import { BUCKET_DO_PDF, guardarEEntregar } from "../../pdf/gerar-e-guardar.ts";
+import { renderizarPdf } from "../../pdf/renderizar.ts";
 import { montarRelatorioHtml, nomeDoRelatorio, reais, type Relatorio } from "../../pdf/relatorio.ts";
+import { lerAnalise, nomeDoSistema } from "../../financeiro/vigia-do-negocio.ts";
 
 const CARGOS: Role[] = ["admin", "financial"];
 export const CONTEXTO_DO_RELATORIO = "agente_relatorio_pdf";
@@ -217,6 +219,53 @@ async function relatorioDeExtrato(args: Record<string, unknown>, ctx: ToolCtx, e
   };
 }
 
+// ── PDF para baixar no chat do app (07/10/2026) ──────────────────────────────────────────────
+
+/** Quanto vale o link de baixar, e quanto tempo o arquivo fica antes da faxina. */
+export const VALIDADE_DO_LINK_S = 30 * 60;
+const VIDA_DO_ARQUIVO_MS = 2 * 3600_000;
+const PASTA_DO_PAINEL = "agente/painel";
+
+/**
+ * No chat do app o relatório volta como link (não vai para o WhatsApp): renderiza, guarda no bucket
+ * privado e assina por 30 min. Não apaga na hora — a pessoa baixa depois de ler a resposta —; a
+ * cada geração, os arquivos da pasta com mais de 2 h são apagados (faxina de passagem).
+ */
+// deno-lint-ignore no-explicit-any
+async function guardarParaBaixar(admin: any, html: string, nomeDoArquivo: string, pdfToken: string, baseUrl: string): Promise<{ ok: true; url: string } | { ok: false; motivo: string }> {
+  const render = await renderizarPdf({ baseUrl, html, filename: nomeDoArquivo, pdfToken });
+  if (!render.ok) return { ok: false, motivo: render.motivo };
+  const armazem = admin.storage.from(BUCKET_DO_PDF);
+  const caminho = `${PASTA_DO_PAINEL}/${crypto.randomUUID()}/${nomeDoArquivo}`;
+  const { error: upErr } = await armazem.upload(caminho, render.pdf, { contentType: "application/pdf", upsert: false });
+  if (upErr) return { ok: false, motivo: `não consegui guardar o arquivo (${upErr.message})` };
+  const { data: assinada, error: urlErr } = await armazem.createSignedUrl(caminho, VALIDADE_DO_LINK_S, { download: nomeDoArquivo });
+  if (urlErr || !assinada?.signedUrl) return { ok: false, motivo: `não consegui gerar o link (${urlErr?.message ?? "sem URL"})` };
+  await faxinaDoPainel(admin).catch((e) => console.warn("[enviar_relatorio_pdf] faxina:", e));
+  return { ok: true, url: assinada.signedUrl };
+}
+
+// deno-lint-ignore no-explicit-any
+async function faxinaDoPainel(admin: any): Promise<void> {
+  const armazem = admin.storage.from(BUCKET_DO_PDF);
+  const { data: pastas } = await armazem.list(PASTA_DO_PAINEL, { limit: 200 });
+  const velhas: string[] = [];
+  for (const p of (pastas ?? []) as any[]) {
+    const criado = Date.parse(p.created_at ?? p.updated_at ?? "");
+    if (p.id === null) {
+      // Pasta (um pedido): olha o arquivo de dentro.
+      const { data: dentro } = await armazem.list(`${PASTA_DO_PAINEL}/${p.name}`, { limit: 5 });
+      for (const a of (dentro ?? []) as any[]) {
+        const t = Date.parse(a.created_at ?? "");
+        if (Number.isFinite(t) && Date.now() - t > VIDA_DO_ARQUIVO_MS) velhas.push(`${PASTA_DO_PAINEL}/${p.name}/${a.name}`);
+      }
+    } else if (Number.isFinite(criado) && Date.now() - criado > VIDA_DO_ARQUIVO_MS) {
+      velhas.push(`${PASTA_DO_PAINEL}/${p.name}`);
+    }
+  }
+  if (velhas.length) await armazem.remove(velhas);
+}
+
 // ── Chamada à busca do extrato ───────────────────────────────────────────────────────────────
 
 /** Mesma credencial que o finance-rules usa: JWT no painel; no WhatsApp, o segredo do cron + quem pediu. */
@@ -252,6 +301,37 @@ const quando = (iso: string | null | undefined) => {
 };
 
 export const relatorioTools: ToolDef[] = [
+  {
+    name: "analise_do_negocio",
+    description:
+      "Vigia do negócio: margem e prejuízo, ponto de equilíbrio (quanto a HBR precisa faturar por mês para não ter prejuízo), " +
+      "despesa por categoria que subiu em relação aos meses anteriores, e de quais serviços (por sistema: elétrico DC, " +
+      "refrigeração…) vem a receita e o lucro. Use para 'como está minha margem?', 'estou tendo prejuízo?', 'qual serviço dá " +
+      "mais dinheiro?', 'o que subiu de despesa?', 'onde investir em marketing?'. Só leitura.",
+    input_schema: {
+      type: "object",
+      properties: { meses: { type: "number", description: "Quantos meses olhar para trás (3 a 24). Padrão 6." } },
+    },
+    risk: "low",
+    roles: CARGOS,
+    async execute(args, ctx) {
+      const b = semAcesso(ctx);
+      if (b) return b;
+      const { data, error } = await ctx.sb.rpc("analise_do_negocio", { p_meses: Number(args.meses) || 6 });
+      if (error) return { error: `Não consegui fazer a análise (${error.message}). Diga que a consulta falhou — não invente números.` };
+      const lido = lerAnalise(data ?? {}, reais);
+      return {
+        ...(data as Record<string, unknown>),
+        por_sistema: ((data as any)?.por_sistema ?? []).map((s: any) => ({ ...s, sistema: nomeDoSistema(s.sistema) })),
+        leitura: lido.constatacoes,
+        sugestao: lido.sugestao,
+        observacao:
+          "Responda com a leitura (constatações) e a sugestão, em poucas linhas. Conclusão sobre lucro/prejuízo só de mês com " +
+          "pronto=true; os demais são parciais (há lançamentos por fazer). O ponto de equilíbrio é estimativa pela média dos " +
+          "meses fechados. Se mao_de_obra_sem_os tiver valor, diga que a margem por serviço está otimista (diárias sem OS).",
+      };
+    },
+  },
   {
     name: "atualizar_extrato",
     description:
@@ -320,6 +400,7 @@ export const relatorioTools: ToolDef[] = [
         busca: { type: "string", description: "Parte do nome do fornecedor, estabelecimento ou texto do extrato." },
         conta: { type: "string", description: "relatorio=extrato: parte do nome da conta (C6, Nubank); vazio = todas." },
         sentido: { type: "string", enum: ["saidas", "entradas", "todas"], description: "relatorio=extrato. Padrão: todas." },
+        tambem_no_whatsapp: { type: "boolean", description: "Só no chat do app: mandar também para o WhatsApp de quem pediu (se pedirem)." },
       },
       required: ["relatorio"],
     },
@@ -331,10 +412,16 @@ export const relatorioTools: ToolDef[] = [
       if (b) return b;
       const empresa = String(ctx.settings.company_name || "HBR Marine");
 
-      const { data: u, error: uErr } = await ctx.admin.from("app_users").select("phone_normalized").eq("id", ctx.userId).maybeSingle();
-      if (uErr) return { error: `Falha ao ler o seu cadastro: ${uErr.message}` };
-      const telefone = String(u?.phone_normalized ?? "").replace(/\D/g, "");
-      if (!telefone) return { error: "Você não tem um WhatsApp cadastrado para receber o PDF. Cadastre em Configurações → Usuários (aba IA/Zap)." };
+      // No chat do app, o PDF volta como link para baixar; o WhatsApp só se pedirem também.
+      const peloLink = ctx.canal === "panel";
+      const peloWhatsapp = !peloLink || args.tambem_no_whatsapp === true;
+      let telefone = "";
+      if (peloWhatsapp) {
+        const { data: u, error: uErr } = await ctx.admin.from("app_users").select("phone_normalized").eq("id", ctx.userId).maybeSingle();
+        if (uErr) return { error: `Falha ao ler o seu cadastro: ${uErr.message}` };
+        telefone = String(u?.phone_normalized ?? "").replace(/\D/g, "");
+        if (!telefone) return { error: "Você não tem um WhatsApp cadastrado para receber o PDF. Cadastre em Configurações → Usuários (aba IA/Zap)." };
+      }
 
       const montado = args.relatorio === "extrato" ? await relatorioDeExtrato(args, ctx, empresa)
         : args.relatorio === "despesas" || args.relatorio === "receitas" ? await relatorioDeGastos(args, ctx, empresa)
@@ -344,8 +431,32 @@ export const relatorioTools: ToolDef[] = [
 
       const html = montarRelatorioHtml(montado.relatorio);
       const nomeDoArquivo = nomeDoRelatorio(montado.partesDoNome.filter(Boolean));
-      const { data: token, error: tErr } = await ctx.admin.rpc("emitir_token_de_pdf", { p_finalidade: `relatorio:${args.relatorio}` });
-      if (tErr || !token) return { error: `Não consegui gerar o PDF: sem credencial para o servidor de PDF (${tErr?.message ?? "token vazio"}).` };
+      const emitirToken = async () => {
+        const { data: token, error: tErr } = await ctx.admin.rpc("emitir_token_de_pdf", { p_finalidade: `relatorio:${args.relatorio}` });
+        return tErr || !token ? { error: `Não consegui gerar o PDF: sem credencial para o servidor de PDF (${tErr?.message ?? "token vazio"}).` } : { token: String(token) };
+      };
+
+      let link: string | null = null;
+      if (peloLink) {
+        const t = await emitirToken();
+        if ("error" in t) return t;
+        const r = await guardarParaBaixar(ctx.admin, html, nomeDoArquivo, t.token, ctx.settings.app_public_url || "");
+        if (!r.ok) return { error: `Não consegui gerar o PDF: ${r.motivo}. Diga que falhou; os números podem ir em texto.` };
+        link = r.url;
+        if (!peloWhatsapp) {
+          return {
+            ok: true,
+            link_para_baixar: link,
+            arquivo: nomeDoArquivo,
+            resumo: montado.legenda.replace(/^📄 /, ""),
+            observacao: "Responda com o resumo em uma linha e o link EXATAMENTE neste formato markdown: [Baixar o PDF](link_para_baixar). O link vale 30 minutos. Se quiserem no WhatsApp, chame de novo com tambem_no_whatsapp=true.",
+          };
+        }
+      }
+
+      const t = await emitirToken();
+      if ("error" in t) return t;
+      const token = t.token;
 
       // O mesmo relatório para a mesma pessoa em 2 minutos não sai duas vezes.
       const chave = chaveDeEnvio("agente-relatorio", nomeDoArquivo, telefone, String(html.length), Math.floor(Date.now() / 120_000));
@@ -366,9 +477,10 @@ export const relatorioTools: ToolDef[] = [
         if (envio.semResposta) await liberarEnvio(ctx.admin, chave).catch(() => {});
         return { error: `O PDF ficou pronto, mas o envio pelo WhatsApp falhou: ${envio.error}.` };
       }
-      if (envio.deduplicated) return { ok: true, deduplicated: true, aviso: "Esse mesmo relatório já foi mandado há instantes; não reenviei." };
+      if (envio.deduplicated) return { ok: true, deduplicated: true, aviso: "Esse mesmo relatório já foi mandado há instantes; não reenviei.", ...(link ? { link_para_baixar: link } : {}) };
       return {
         ok: true,
+        ...(link ? { link_para_baixar: link } : {}),
         enviado_para: desviadoPorTeste(ctx.settings) ? "o número de TESTE do WhatsApp (modo de teste ligado)" : "o WhatsApp de quem pediu",
         arquivo: nomeDoArquivo,
         resumo: montado.legenda.replace(/^📄 /, ""),

@@ -17,6 +17,7 @@ import { diaBR, somarDiasAoDia } from "../_shared/pdf/datas.ts";
 import { historicoSemIdentidade } from "../_shared/banking/proposals.ts";
 import { normalizeText } from "../_shared/banking/matching.ts";
 import { linhasDoExtratoNoResumo } from "./extrato.ts";
+import { lerAnalise } from "../_shared/financeiro/vigia-do-negocio.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -293,6 +294,14 @@ servirComCors(async (req) => {
         for (const a of alertas.slice(0, 3)) filaFinanceiraLines.push(`   • ${String(a.title).slice(0, 110)}`);
         if (alertas.length > 3) filaFinanceiraLines.push(`   …e mais ${alertas.length - 3} na caixa de entrada`);
       }
+      // Regras que o sistema aprendeu e esperam o dono conferir (07/10/2026: "sempre registrar e
+      // notificar"). Propostas não lançam nada até serem aceitas.
+      const { count: regrasEsperando } = await admin
+        .from("finance_rules").select("id", { count: "exact", head: true })
+        .eq("origin", "ai").eq("status", "proposed");
+      if ((regrasEsperando ?? 0) > 0) {
+        filaFinanceiraLines.push(`🧠 Regras que aprendi esperando você conferir: *${regrasEsperando}* (Extrato › Regras)`);
+      }
     } catch (e) {
       console.warn("[ai-daily-briefing] bloco da fila financeira falhou:", (e as Error).message);
     }
@@ -550,6 +559,26 @@ servirComCors(async (req) => {
       console.warn("[ai-daily-briefing] varredura de conciliação falhou:", e);
     }
 
+    // ── Vigia do negócio (07/10/2026, pedido do dono) ─────────────────────────────────────
+    // Segunda-feira e dia 1 (ou ?vigia=1 para pré-visualizar): ponto de equilíbrio × último mês
+    // fechado, despesa por categoria em alta, concentração/margem por sistema. Leitura em
+    // _shared/financeiro/vigia-do-negocio.ts; números da rpc analise_do_negocio. Best-effort.
+    const vigiaLines: string[] = [];
+    let vigiaSugestao: string | null = null;
+    const hojeBRT = new Date(now.getTime() - 3 * 3600_000);
+    const diaDoVigia = hojeBRT.getUTCDay() === 1 || hojeBRT.getUTCDate() === 1 || new URL(req.url).searchParams.get("vigia") === "1";
+    if (diaDoVigia) {
+      try {
+        const { data: analise, error: aErr } = await admin.rpc("analise_do_negocio", { p_meses: 6 });
+        if (aErr) throw aErr;
+        const lido = lerAnalise(analise ?? {}, (v) => fmt.format(v));
+        if (lido.constatacoes.length) vigiaLines.push("", lido.titulo, ...lido.constatacoes.map((c) => `• ${c}`));
+        vigiaSugestao = lido.sugestao;
+      } catch (e) {
+        console.warn("[ai-daily-briefing] vigia do negócio falhou:", (e as Error).message);
+      }
+    }
+
     // Sugestão do dia (Onda 1): 1 sugestão acionável, rotativa por dia — reusa os candidatos
     // já levantados (orçamentos parados, recebíveis vencidos, OS paradas). Uma por dia, sem spam.
     const sugestoes: string[] = [];
@@ -577,7 +606,10 @@ servirComCors(async (req) => {
       sugestoes.push(`olhar a semana de *${d.slice(8, 10)}/${d.slice(5, 7)}*: os pagamentos previstos passam dos recebimentos em ${fmt.format(-semanaNoVermelho.saldo)}. Antecipar uma cobrança ou combinar um vencimento resolve.`);
     }
     const diaDoAno = Math.floor((now.getTime() - new Date(now.getFullYear(), 0, 0).getTime()) / 86400000);
-    const sugestaoLine = sugestoes.length > 0 ? `💡 *Sugestão de hoje:* ${sugestoes[diaDoAno % sugestoes.length]}` : "";
+    // No dia do vigia, a sugestão é a dele (margem ou marketing); nos outros, a rotativa.
+    const sugestaoLine = vigiaSugestao
+      ? `💡 *Sugestão de hoje:* ${vigiaSugestao}`
+      : sugestoes.length > 0 ? `💡 *Sugestão de hoje:* ${sugestoes[diaDoAno % sugestoes.length]}` : "";
 
     // Ações rápidas (Bloco A' · Ciclo 2): o Evolution não tem botão nativo, então a versão
     // acionável no WhatsApp é um menu "tap-e-responde" — comandos concretos que o agente já
@@ -613,6 +645,7 @@ servirComCors(async (req) => {
       ...filaFinanceiraLines,
       ...extratoNoResumo.linhas,
       ...conselheiroLines,
+      ...vigiaLines,
       ...conciliaLines,
       ...stuckLines,
       ...manutLines,
@@ -738,6 +771,16 @@ servirComCors(async (req) => {
     }));
     const { data: inserted, error: qErr } = await admin.from("whatsapp_send_queue").insert(rows).select("id");
     if (qErr) throw qErr;
+
+    // O vigia também fica no sino de quem decide (admin e financeiro), para consultar depois.
+    if (vigiaLines.length) {
+      const { data: quemDecide } = await admin.from("app_users").select("id").eq("active", true).in("role", ["admin", "financial"]);
+      const corpo = vigiaLines.slice(2).join("\n").replace(/\*/g, "").slice(0, 900);
+      const { error: nErr } = await admin.from("app_notifications").insert(((quemDecide ?? []) as any[]).map((u) => ({
+        user_id: u.id, type: "vigia_negocio", title: "Vigia do negócio", body: corpo, navigate_to: "/v2/financial",
+      })));
+      if (nErr) console.warn("[ai-daily-briefing] sino do vigia falhou:", nErr.message);
+    }
 
     return jr({
       ok: true,

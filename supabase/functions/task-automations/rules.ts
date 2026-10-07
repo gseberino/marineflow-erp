@@ -145,16 +145,20 @@ const r2: Rule = {
 
 /**
  * Cobrança abaixo deste valor não vira tarefa (06/10/2026, inventário): saldo de R$ 20 virava
- * "URGENTE: cliente em atraso" ao lado das cobranças de milhares. Padrão R$ 50; ajuste em
- * app_settings.cobranca_valor_minimo (0 desliga o corte).
+ * "URGENTE: cliente em atraso" ao lado das cobranças de milhares.
+ *
+ * O piso é o MESMO da régua de cobrança (app_settings.collection_min_amount, R$ 200 desde 17/09):
+ * receivable-reminders, get_delinquency_plan e send_collection_reminder já o liam. Uma regra só para
+ * "quanto vale cobrar" — a 1ª versão criou uma chave à parte, e duas chaves para o mesmo padrão
+ * divergem em silêncio. Sem a chave (ou valor inválido), sem corte, como nos outros três.
  */
-export const COBRANCA_MINIMA_PADRAO = 50;
+export const CHAVE_DO_PISO_DE_COBRANCA = 'collection_min_amount';
 
 export async function cobrancaMinima(db: any): Promise<number> {
   const { data } = await db.from('app_settings')
-    .select('value').eq('key', 'cobranca_valor_minimo').maybeSingle();
+    .select('value').eq('key', CHAVE_DO_PISO_DE_COBRANCA).maybeSingle();
   const v = Number(String(data?.value ?? '').replace(',', '.'));
-  return Number.isFinite(v) && v >= 0 && String(data?.value ?? '').trim() !== '' ? v : COBRANCA_MINIMA_PADRAO;
+  return Number.isFinite(v) && v > 0 ? v : 0;
 }
 
 /** O que falta receber da conta (o saldo, ou o valor cheio quando o saldo não foi gravado). */

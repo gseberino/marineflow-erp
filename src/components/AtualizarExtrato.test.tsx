@@ -17,7 +17,7 @@ vi.mock('@/hooks/use-bank-connections', () => ({
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } }));
 
-import { AtualizarExtrato, conexoesBuscaveis, dadoMaisVelho, quandoFoi } from './AtualizarExtrato';
+import { AtualizarExtrato, conexoesBuscaveis, dadoMaisVelho, estaAtrasado, quandoFoi } from './AtualizarExtrato';
 
 const conexao = (p: Partial<BankConnection>): BankConnection => ({
   id: 'c', provider: 'pluggy', external_id: 'x', label: 'C6', institution: null, account_kind: 'bank', active: true,
@@ -57,5 +57,17 @@ describe('AtualizarExtrato', () => {
     expect(quandoFoi('2026-10-07T12:00:00Z', agora)).toBe('amanhã às 09:00');
     expect(quandoFoi('2026-10-01T12:00:00Z', agora)).toBe('01/10 às 09:00');
     expect(quandoFoi(null, agora)).toBeNull();
+  });
+
+  it('mais de 36 h sem dado novo do banco = atrasado (aviso amarelo, também no celular)', () => {
+    const agora = new Date('2026-10-07T12:00:00Z');
+    expect(estaAtrasado('2026-10-06T12:00:00Z', agora)).toBe(false);
+    expect(estaAtrasado('2026-10-05T23:00:00Z', agora)).toBe(true);
+    expect(estaAtrasado(null, agora)).toBe(false);
+    estado.conexoes = [conexao({ label: 'Nubank', provider_updated_at: '2026-09-30T12:00:00Z' })];
+    render(<AtualizarExtrato />);
+    const selo = screen.getByTestId('idade-do-extrato');
+    expect(selo.getAttribute('data-atrasado')).toBe('sim');
+    expect(selo.textContent).toContain('Nubank: sem dado novo desde');
   });
 });
