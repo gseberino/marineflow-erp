@@ -232,3 +232,35 @@ export function clienteGenerico(nome: string | null | undefined): boolean {
   const n = trechoDeNome(nome ?? "").toLowerCase();
   return n === "cliente_final" || n.startsWith("cliente_final_") || n.startsWith("teste");
 }
+
+// ---------------------------------------------------------------------------------------------
+// Índice (Fase 3)
+// ---------------------------------------------------------------------------------------------
+
+/** A pasta registrada mais funda que contém o caminho (chaves do mapa em minúsculas). */
+export function pastaQueContem<T>(caminhoLower: string, pastas: Map<string, T>): T | null {
+  const partes = caminhoLower.split("/");
+  for (let n = partes.length - 1; n > 1; n--) {
+    const p = pastas.get(partes.slice(0, n).join("/"));
+    if (p) return p;
+  }
+  return null;
+}
+
+/** "0026.007.26_Madu_I" → "0026.007.26"; nome sem número → null. */
+export function codigoNoNome(nome: string): string | null {
+  const m = /^(\d{4}\.\d{3}\.\d{2})(?:[_\s-]|$)/.exec(nome.trim());
+  return m ? m[1] : null;
+}
+
+/** O caminho é filho direto (não neto) da pasta? Tudo em minúsculas. */
+export function filhaDireta(caminhoLower: string, paiLower: string): boolean {
+  const pai = paiLower.replace(/\/+$/, "");
+  if (!caminhoLower.startsWith(pai + "/")) return false;
+  return !caminhoLower.slice(pai.length + 1).includes("/");
+}
+
+export function extensaoDe(nome: string): string | null {
+  const i = nome.lastIndexOf(".");
+  return i > 0 && i < nome.length - 1 ? nome.slice(i + 1).toLowerCase().slice(0, 10) : null;
+}

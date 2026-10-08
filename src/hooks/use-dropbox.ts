@@ -96,3 +96,52 @@ export function usePedirAoDropbox() {
     },
   });
 }
+
+export interface ArquivoDoBarco {
+  id: string;
+  nome: string;
+  caminho: string;
+  extensao: string | null;
+  tamanho: number | null;
+  modificado_em: string | null;
+  origem: 'dono' | 'sistema';
+  /** O trecho entre a pasta do barco e o arquivo ("1- DOC's/Orçamentos e OS"). */
+  subpasta: string;
+}
+
+/** Os arquivos das pastas do barco (índice da Fase 3), do mais novo para o mais antigo. */
+export function useArquivosDoBarco(vesselId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['dropbox-arquivos', vesselId],
+    enabled: !!vesselId,
+    queryFn: async (): Promise<ArquivoDoBarco[]> => {
+      const { data: pastas, error: e1 } = await db
+        .from('pastas_dropbox')
+        .select('id, caminho')
+        .eq('vessel_id', vesselId);
+      if (e1) throw new Error(e1.message);
+      if (!pastas?.length) return [];
+      const caminhoDa = new Map<string, string>((pastas as Array<{ id: string; caminho: string }>).map((p) => [p.id, p.caminho]));
+      const { data, error } = await db
+        .from('arquivos_dropbox')
+        .select('id, nome, caminho, extensao, tamanho, modificado_em, origem, pasta_id')
+        .in('pasta_id', [...caminhoDa.keys()])
+        .eq('apagado', false)
+        .order('modificado_em', { ascending: false })
+        .limit(500);
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as Array<Omit<ArquivoDoBarco, 'subpasta'> & { pasta_id: string }>).map((a) => {
+        const base = caminhoDa.get(a.pasta_id) ?? '';
+        const dir = a.caminho.slice(0, a.caminho.length - a.nome.length - 1);
+        const subpasta = dir.toLowerCase().startsWith(base.toLowerCase()) ? dir.slice(base.length).replace(/^\/+/, '') : dir;
+        return { ...a, subpasta };
+      });
+    },
+  });
+}
+
+/** Abre o arquivo no site do Dropbox (a pasta dele, com a pré-visualização do arquivo). */
+export function linkDoArquivo(caminho: string, nome: string): string {
+  const dir = caminho.slice(0, caminho.length - nome.length - 1);
+  return `${linkNoDropbox(dir)}?preview=${encodeURIComponent(nome)}`;
+}
