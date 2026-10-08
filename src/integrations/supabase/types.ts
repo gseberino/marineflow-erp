@@ -11225,6 +11225,7 @@ export type Database = {
       }
       whatsapp_leads: {
         Row: {
+          dados_site: Json | null
           assigned_to: string | null
           created_at: string
           first_message: string | null
@@ -11238,12 +11239,14 @@ export type Database = {
           muted_at: string | null
           name: string | null
           notes: string | null
+          origem: string | null
           phone_normalized: string
           status: string
           unread_count: number | null
           updated_at: string
         }
         Insert: {
+          dados_site?: Json | null
           assigned_to?: string | null
           created_at?: string
           first_message?: string | null
@@ -11257,12 +11260,14 @@ export type Database = {
           muted_at?: string | null
           name?: string | null
           notes?: string | null
+          origem?: string | null
           phone_normalized: string
           status?: string
           unread_count?: number | null
           updated_at?: string
         }
         Update: {
+          dados_site?: Json | null
           assigned_to?: string | null
           created_at?: string
           first_message?: string | null
@@ -11276,6 +11281,7 @@ export type Database = {
           muted_at?: string | null
           name?: string | null
           notes?: string | null
+          origem?: string | null
           phone_normalized?: string
           status?: string
           unread_count?: number | null

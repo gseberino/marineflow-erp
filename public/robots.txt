@@ -1,3 +1,7 @@
+# Sistema interno (MarineFlow). Os robôs podem entrar para LER o noindex das páginas;
+# bloquear aqui faria o Google manter a tela de login nos resultados.
+# O site público da empresa é https://www.hbrmarine.com.br
+
 User-agent: Googlebot
 Allow: /
 

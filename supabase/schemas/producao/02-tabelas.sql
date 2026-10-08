@@ -3293,6 +3293,9 @@ CREATE TABLE public.whatsapp_leads (
   last_inbound_at timestamp with time zone,
   last_outbound_at timestamp with time zone,
   muted_at timestamp with time zone,
+  origem text,
+  dados_site jsonb,
+  CONSTRAINT whatsapp_leads_origem_check CHECK (origem IS NULL OR origem = 'site'::text),
   CONSTRAINT whatsapp_leads_status_check CHECK (status = ANY (ARRAY['pending'::text, 'linked'::text, 'converted'::text, 'discarded'::text])),
   CONSTRAINT whatsapp_leads_pkey PRIMARY KEY (id),
   CONSTRAINT whatsapp_leads_phone_normalized_key UNIQUE (phone_normalized)

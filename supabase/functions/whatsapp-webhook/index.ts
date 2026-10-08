@@ -6,6 +6,7 @@ import { EVOLUTION_STATUS_MAP } from "../_shared/whatsapp/evolution-provider.ts"
 import { classificarResposta } from "../_shared/ai/comms/reply-router.ts";
 import { lerDataDaResposta } from "../_shared/revisao/data-da-resposta.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { avisoDoLeadDoSite, lerMensagemDoSite, type DadosDoSite } from "../_shared/whatsapp/lead-do-site.ts";
 
 // Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
 // fecha o loop no ai_comms_log (marca respondido + intenção) e HONRA OPT-OUT sozinho.
@@ -118,6 +119,30 @@ async function notifyAssignedReminder(
     );
   } catch (e) {
     console.error("notifyAssignedReminder failed", e);
+  }
+}
+
+// Contato que veio pelo formulário do site (08/10/2026): avisa o dono com os dados lidos e o que
+// falta pedir. Vale mesmo com o aviso genérico de lead desligado (whatsapp_reminder_enabled);
+// desliga com app_settings.whatsapp_aviso_lead_site = 'false'. Nada vai para o cliente.
+async function avisarLeadDoSite(admin: any, phone: string, dados: DadosDoSite, jaCadastrado: boolean) {
+  try {
+    const { data: settings } = await admin
+      .from("app_settings")
+      .select("key, value")
+      .in("key", ["whatsapp_aviso_lead_site", "whatsapp_reminder_recipients"]);
+    const sMap = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
+    if (String(sMap.whatsapp_aviso_lead_site ?? "true").toLowerCase() === "false") return;
+    const recipients: string[] = String(sMap.whatsapp_reminder_recipients || "")
+      .split(/[,s]+/)
+      .map((p: string) => p.replace(/D/g, ""))
+      .filter((p: string) => p.length >= 10 && p !== phone);
+    if (recipients.length === 0) return;
+    const provider = createWhatsAppProvider();
+    const texto = avisoDoLeadDoSite(dados, phone, jaCadastrado);
+    await Promise.all(recipients.map((to) => provider.sendText(to, texto).catch(() => null)));
+  } catch (e) {
+    console.error("avisarLeadDoSite failed", e);
   }
 }
 
@@ -390,7 +415,24 @@ export async function handler(req: Request): Promise<Response> {
 
     if (insErr) return jr({ error: "db_error", details: insErr.message }, 500);
 
-    if (isNewLead && !event.fromMe) {
+    // Veio pelo formulário do site? Marca a origem no lead (só na primeira vez) e avisa o dono.
+    const doSite = !event.fromMe ? lerMensagemDoSite(body) : null;
+    if (doSite) {
+      if (leadId != null) {
+        const { data: atual } = await admin.from("whatsapp_leads").select("origem, first_message").eq("id", leadId).maybeSingle();
+        if (atual && !atual.origem) {
+          await admin.from("whatsapp_leads").update({
+            origem: "site",
+            dados_site: doSite,
+            first_message: atual.first_message ?? body,
+            ...(doSite.nome ? { name: doSite.nome } : {}),
+          }).eq("id", leadId);
+        }
+      }
+      const aviso = avisarLeadDoSite(admin, phone, doSite, Boolean(clientId));
+      // @ts-ignore EdgeRuntime existe no Supabase; fora dele, segue sem esperar.
+      if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(aviso);
+    } else if (isNewLead && !event.fromMe) {
       notifyAssignedReminder(admin, phone, event.senderName, body).catch(console.error);
     }
 
