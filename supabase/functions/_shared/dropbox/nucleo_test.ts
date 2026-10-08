@@ -85,3 +85,39 @@ Deno.test("link no site: codifica cada parte do caminho", () => {
     "https://www.dropbox.com/home/MANAGEMENT/COMMERCIAL/B2C/0016.013.25_Dona%20V",
   );
 });
+
+import { clienteGenerico, dataEmSaoPaulo, nomeDaPasta, nomeDoPdf, nomeDoPdfAssinado, trechoDeNome } from "./nucleo.ts";
+
+Deno.test("nome da pasta: no estilo do dono, sem acento e com _", () => {
+  assertEquals(nomeDaPasta("0026.007.26", "Madu I", "Edson Luiz Rudek Junior"), "0026.007.26_Madu_I");
+  assertEquals(nomeDaPasta("0026.007.26", "Comandante Zepi", "Ribas"), "0026.007.26_Comandante_Zepi");
+  assertEquals(nomeDaPasta("0026.007.26", "S.I. 8.5 Automático", "x"), "0026.007.26_S.I._8.5_Automatico");
+});
+
+Deno.test("nome da pasta: barco genérico leva o cliente junto", () => {
+  assertEquals(nomeDaPasta("0026.007.26", "Motorhome", "Sandro Poeta"), "0026.007.26_Sandro_Poeta_Motorhome");
+  assertEquals(nomeDaPasta("0026.007.26", "Ônibus", "Cris e Talyta"), "0026.007.26_Cris_e_Talyta_Onibus");
+  assertEquals(nomeDaPasta("0026.007.26", "", "José"), "0026.007.26_Jose");
+  assertEquals(nomeDaPasta("0026.007.26", null, null), "0026.007.26_Sem_nome");
+});
+
+Deno.test("trecho de nome: tira barra, aspas e espaços duplos", () => {
+  assertEquals(trechoDeNome('  A/B "C"  d  '), "A_B_C_d");
+});
+
+Deno.test("nome do PDF: data, número com Ç e versão", () => {
+  assertEquals(nomeDoPdf("2026-10-08", "ORÇ-00112", 2), "2026-10-08 ORÇ-00112 v2.pdf");
+  assertEquals(nomeDoPdf("2026-10-08", "OS/00112", 1), "2026-10-08 OS-00112 v1.pdf");
+  assertEquals(nomeDoPdfAssinado("2026-10-08", "OS-00112"), "2026-10-08 OS-00112 assinado.pdf");
+});
+
+Deno.test("data em São Paulo: 02:00 UTC ainda é o dia anterior", () => {
+  assertEquals(dataEmSaoPaulo(new Date("2026-10-08T02:00:00Z")), "2026-10-07");
+  assertEquals(dataEmSaoPaulo(new Date("2026-10-08T15:00:00Z")), "2026-10-08");
+});
+
+Deno.test("cliente genérico não ganha pasta", () => {
+  assertEquals(clienteGenerico("Cliente Final"), true);
+  assertEquals(clienteGenerico("TESTE AUDITORIA CLAUDE"), true);
+  assertEquals(clienteGenerico("Acrisio Lopes Cançado Filho"), false);
+});

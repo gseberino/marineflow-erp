@@ -84,6 +84,7 @@ import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles } from 'l
 import { decideAutosave } from '@/lib/autosave-guard';
 import { documentTypeFor, documentLabelFor, isQuoteStatus } from '@/lib/document-type';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { AcoesDropboxDaOrdem } from '@/components/dropbox/PastaNoDropbox';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
@@ -2040,6 +2041,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                       <ClipboardCheck className="h-4 w-4" /> Folha de comissionamento
                     </DropdownMenuItem>
                   )}
+                  {orderId && <AcoesDropboxDaOrdem orderId={orderId} vesselId={orderData?.vessel_id} />}
 
                   {(currentStatus === 'completed' || currentStatus === 'invoiced') && (
                     <DropdownMenuItem onClick={() => openPdfDialog('invoice')} className="gap-2">

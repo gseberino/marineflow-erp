@@ -163,3 +163,72 @@ export function urlDeAutorizacao(p: { appKey: string; redirectUri: string; estad
 export function linkNoSite(caminho: string): string {
   return "https://www.dropbox.com/home" + caminho.split("/").map((p) => encodeURIComponent(p)).join("/");
 }
+
+// ---------------------------------------------------------------------------------------------
+// Nomes de pasta e de arquivo (Fase 2B/2C)
+// ---------------------------------------------------------------------------------------------
+
+/** O estilo das pastas do dono: sem acento, palavras unidas por "_" ("0021.002.26_Onibus_Cris_e_Talyta"). */
+export function trechoDeNome(texto: string): string {
+  return (texto || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^A-Za-z0-9.-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^[_.-]+|[_.-]+$/g, "")
+    .slice(0, 60);
+}
+
+// Nome de barco que não identifica ninguém sozinho: a pasta leva o cliente junto
+// ("0015.012.25_Sandro_Poeta_Motorhome").
+const GENERICOS = new Set([
+  "motorhome", "motor home", "mh", "lancha", "barco", "bote", "onibus", "trailer", "camper",
+  "catamara", "veleiro", "embarcacao", "veiculo", "equipamento", "automovel", "teste",
+]);
+
+export function nomeDaPasta(codigo: string, barco: string | null, cliente: string | null): string {
+  const b = trechoDeNome(barco ?? "");
+  const c = trechoDeNome(cliente ?? "");
+  const generico = !b || GENERICOS.has(b.toLowerCase().replace(/_/g, " "));
+  const partes = generico ? [c, b] : [b];
+  const nome = partes.filter(Boolean).join("_") || "Sem_nome";
+  return `${codigo}_${nome}`;
+}
+
+/** As subpastas do modelo do dono (a da 0016.013.25_Dona V), mais as fotos. */
+export const SUBPASTAS = [
+  "1- DOC's",
+  "1- DOC's/Orçamentos e OS",
+  "2- ELÉTRICA",
+  "2- ELÉTRICA/1- DOC'S",
+  "2- ELÉTRICA/2- DWG",
+  "2- ELÉTRICA/3- PDF",
+  "2- ELÉTRICA/4- CONFIG",
+  "3- FOTOS",
+];
+
+export const PASTA_DOS_PDFS = "1- DOC's/Orçamentos e OS";
+
+/** A data de hoje em São Paulo, AAAA-MM-DD (o nome do arquivo usa o dia do dono, não o UTC). */
+export function dataEmSaoPaulo(agora = new Date()): string {
+  const p = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" })
+    .format(agora);
+  return p; // en-CA já sai AAAA-MM-DD
+}
+
+/** "2026-10-08 ORÇ-00112 v2.pdf" — o número fica com o Ç (o cabeçalho escapa). */
+export function nomeDoPdf(data: string, numero: string, versao: number): string {
+  const n = (numero || "documento").replace(/[\/:*?"<>|]+/g, "-").trim();
+  return `${data} ${n} v${versao}.pdf`;
+}
+
+export function nomeDoPdfAssinado(data: string, numero: string): string {
+  const n = (numero || "documento").replace(/[\/:*?"<>|]+/g, "-").trim();
+  return `${data} ${n} assinado.pdf`;
+}
+
+/** Cliente genérico não ganha pasta (é um balaio de orçamentos avulsos). */
+export function clienteGenerico(nome: string | null | undefined): boolean {
+  const n = trechoDeNome(nome ?? "").toLowerCase();
+  return n === "cliente_final" || n.startsWith("cliente_final_") || n.startsWith("teste");
+}
