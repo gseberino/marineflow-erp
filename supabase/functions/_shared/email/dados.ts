@@ -106,3 +106,19 @@ export function resumoDosDados(d: DadosDoEmail | null | undefined, reais: (n: nu
   }
   return partes.length ? partes.join(" · ") : null;
 }
+
+/**
+ * Fornecedor do e-mail pelo CNPJ do EMITENTE da NF-e anexa (08/10/2026): o endereço de quem manda
+ * a nota quase nunca está no cadastro, mas o CNPJ dela é documento — e documento identifica.
+ * Só NF-e destinada à HBR; se as notas apontam para fornecedores diferentes, não escolhe nenhum.
+ * `porCnpj`: só dígitos → id do fornecedor.
+ */
+export function fornecedorPelaNota(d: DadosDoEmail | null | undefined, porCnpj: Map<string, string>): string | null {
+  const ids = new Set<string>();
+  for (const n of d?.nfes ?? []) {
+    if (!n.para_empresa) continue;
+    const id = porCnpj.get(String(n.emitente_cnpj ?? "").replace(/\D/g, ""));
+    if (id) ids.add(id);
+  }
+  return ids.size === 1 ? [...ids][0] : null;
+}

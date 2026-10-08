@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { extrairDados, resumoDosDados } from "./dados.ts";
+import { extrairDados, fornecedorPelaNota, resumoDosDados } from "./dados.ts";
 import { dvChaveAcesso } from "./nfe-identify.ts";
 import { mod10, mod11Barcode } from "./boleto.ts";
 import type { InboundEmail } from "./types.ts";
@@ -66,4 +66,16 @@ Deno.test("boleto no PDF (leitor injetado); linha com DV errado é ignorada", as
 
 Deno.test("sem nada a extrair: null", async () => {
   assertEquals(await extrairDados(email("só um oi", []), null, null), null);
+});
+
+Deno.test("fornecedorPelaNota: CNPJ do emitente identifica; ambíguo ou de terceiro, não", () => {
+  const nfe = (cnpj: string | null, para = true) => ({ anexo_indice: 0, chave: "x", emitente: null, emitente_cnpj: cnpj, numero: null, serie: null, valor: null, data: null, para_empresa: para });
+  const mapa = new Map([["02559947000324", "correa"], ["12696968000183", "kamell"]]);
+  assertEquals(fornecedorPelaNota({ nfes: [nfe("02.559.947/0003-24")], boletos: [] }, mapa), "correa");
+  assertEquals(fornecedorPelaNota({ nfes: [nfe("02559947000324"), nfe("02559947000324")], boletos: [] }, mapa), "correa");
+  assertEquals(fornecedorPelaNota({ nfes: [nfe("02559947000324"), nfe("12696968000183")], boletos: [] }, mapa), null);
+  assertEquals(fornecedorPelaNota({ nfes: [nfe("02559947000324", false)], boletos: [] }, mapa), null);
+  assertEquals(fornecedorPelaNota({ nfes: [nfe("99999999000199")], boletos: [] }, mapa), null);
+  assertEquals(fornecedorPelaNota({ nfes: [nfe(null)], boletos: [] }, mapa), null);
+  assertEquals(fornecedorPelaNota(null, mapa), null);
 });
