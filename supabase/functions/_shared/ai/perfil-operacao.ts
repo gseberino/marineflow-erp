@@ -287,6 +287,12 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
  * para PERFIL_OPERACAO.
  */
 export const SO_PELA_REDE: ReadonlySet<string> = new Set([
+  // — Dropbox (08/10/2026): arquivos e pasta do barco, e mandar um PDF de lá para quem pede.
+  //   As duas consultas só leem o índice (arquivos_dropbox/pastas_dropbox); o envio vai só para
+  //   o próprio WhatsApp de quem pede (ver ESCRITAS_VERIFICADAS_DA_REDE). Lista enxuta cheia (113). —
+  "buscar_arquivos_do_barco",
+  "consultar_pasta_do_barco",
+  "enviar_arquivo_do_dropbox",
   // — E-mail (08/10/2026): silenciar um remetente é gesto raro e pede confirmação. —
   "silenciar_remetente_email",
   // — Memória por entidade: as notas APROVADAS já chegam prontas no contexto (ai-agent), então
@@ -526,6 +532,8 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
  * com preço no catálogo) — nenhuma das cinco com uso na auditoria até 26/09.
  */
 export const ESCRITAS_VERIFICADAS_DA_REDE: Readonly<Record<string, string>> = {
+  enviar_arquivo_do_dropbox:
+    "envio para o PRÓPRIO WhatsApp de quem pede (telefone do cadastro, nunca de texto), só PDF que já é dele no Dropbox; o arquivo fica 3 min no bucket privado e é apagado — como send_document_pdf_to_self",
   remember_about_entity:
     "sugestão: a nota nasce 'candidate' e só entra no contexto do agente depois que o dono aprova (review_entity_note, que pela rede pede confirmação)",
   interpret_customer_reply:

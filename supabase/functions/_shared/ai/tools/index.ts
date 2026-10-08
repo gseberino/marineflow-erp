@@ -60,6 +60,8 @@ import { notaFiscalPdfTools } from "./nota-fiscal-pdf.ts";
 import { comprasCicloTools } from "./compras-ciclo.ts";
 // planos de manutenção (07/10/2026): planos, lembretes de revisão ao cliente (com o sim do dono) e métricas.
 import { planosManutencaoTools } from "./planos-manutencao.ts";
+// Dropbox (08/10/2026): buscar arquivos do barco, a pasta do barco e mandar um PDF para quem pede.
+import { dropboxTools } from "./dropbox.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -96,6 +98,7 @@ export const allTools: ToolDef[] = [
   ...whatsappHistoryTools,
   ...acompanhamentoTools,
   ...documentoPdfTools,
+  ...dropboxTools,
   ...relatorioTools,
   ...emailTools,
   ...uiTools,
