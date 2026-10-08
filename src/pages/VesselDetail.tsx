@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { ArrowLeft, Ship, Anchor, Battery, Radio, Zap, Edit } from 'lucide-react';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
 import { RecordHistory } from '@/components/RecordHistory';
+import { PastaDoBarcoBotao } from '@/components/dropbox/PastaNoDropbox';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 
@@ -71,6 +72,7 @@ export default function VesselDetail() {
             {vessel.manufacturer} {vessel.model} {vessel.year ? `(${vessel.year})` : ''} • {vessel.length_feet ? `${vessel.length_feet} ft` : ''} • {t.vessels.owner}: {clientName}
           </p>
         </div>
+        {id && <PastaDoBarcoBotao vesselId={id} />}
         <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
           <Edit className="h-4 w-4 mr-1" /> {t.common.edit}
         </Button>
