@@ -352,6 +352,25 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
   }
+  // Resposta a e-mail (08/10/2026): o "sim" é sobre o texto EXATO que vai sair, de qual caixa e
+  // para quem — lido do rascunho guardado, não do que o modelo diz.
+  if (toolName === "enviar_resposta_email") {
+    try {
+      const { data: r } = await admin.from("email_respostas")
+        .select("para, assunto, texto, status, email_accounts(address)").eq("id", String(args.rascunho_id ?? "")).maybeSingle();
+      if (r) {
+        if (r.status !== "rascunho") return `⚠️ Esse rascunho já está ${r.status}.`;
+        return [
+          `Enviar resposta por e-mail`,
+          `De: ${(r as any).email_accounts?.address ?? "?"}`,
+          `Para: ${r.para}`,
+          `Assunto: ${r.assunto}`,
+          "",
+          String(r.texto).slice(0, 1500),
+        ].join("\n");
+      }
+    } catch { /* cai no resumo genérico */ }
+  }
   // Dinheiro vivo e anotação: a confirmação mostra o pedido JÁ RESOLVIDO (categoria, quem,
   // Caixa ou bolso do sócio) — o "sim" tem de ser sobre o que vai acontecer de fato.
   if (toolName === "lancar_no_caixa" || toolName === "anotar_transacao_do_banco") {

@@ -153,3 +153,8 @@ verify_jwt = false
 # 5 min (x-cron-secret) e o botão "Salvar no Dropbox agora" (admin ativo, usuarioAtivo).
 [functions.dropbox-worker]
 verify_jwt = false
+
+# email-responder (08/10/2026): o assistente chama com x-cron-secret (WhatsApp, sem JWT) ou com o JWT
+# do admin (painel); a própria função confere os dois.
+[functions.email-responder]
+verify_jwt = false

@@ -190,6 +190,40 @@ export class ClienteImap {
     return null;
   }
 
+  /** Pastas da caixa, com os atributos (\Sent, \Drafts…). */
+  async listarPastas(): Promise<{ nome: string; atributos: string[] }[]> {
+    const r = await this.exigirOk(`LIST "" "*"`, "LIST");
+    const out: { nome: string; atributos: string[] }[] = [];
+    for (const x of r.respostas) {
+      const m = x.texto.match(/^\* LIST \(([^)]*)\) (?:"[^"]*"|NIL) (.+)$/i);
+      if (!m) continue;
+      const nome = m[2].trim().replace(/^"(.*)"$/, "$1").replace(/\\"/g, '"');
+      out.push({ nome, atributos: m[1].split(/\s+/).filter(Boolean) });
+    }
+    return out;
+  }
+
+  /**
+   * Guarda uma cópia da mensagem ENVIADA na pasta "Enviados" (a resposta que o dono aprovou aparece
+   * no programa de e-mail dele). É o único comando que escreve na caixa, e só ACRESCENTA — usado
+   * pela função email-responder, nunca pela leitura.
+   */
+  async anexarNaPasta(pasta: string, mensagem: Uint8Array): Promise<void> {
+    const tag = `A${++this.seq}`;
+    await this.fluxo.write(enc.encode(`${tag} APPEND ${aspas(pasta)} (\\Seen) {${mensagem.length}}\r\n`));
+    const cont = await this.lerLinha();
+    if (!cont.startsWith("+")) throw new Error(`IMAP APPEND recusado: ${cont.slice(0, 120)}`);
+    await this.fluxo.write(mensagem);
+    await this.fluxo.write(enc.encode("\r\n"));
+    for (;;) {
+      const linha = await this.lerLinha();
+      if (linha.startsWith(`${tag} `)) {
+        if (!/^A\d+ OK/i.test(linha)) throw new Error(`IMAP APPEND recusado: ${linha.slice(0, 120)}`);
+        return;
+      }
+    }
+  }
+
   async sair(): Promise<void> {
     try { await this.comando("LOGOUT"); } catch { /* indo embora de qualquer jeito */ }
     this.fechar();

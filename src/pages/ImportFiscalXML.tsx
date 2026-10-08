@@ -34,6 +34,7 @@ import {
 import { parseNfeSupplierNote } from '@/lib/nfe-xml-parser';
 import { extractInvokeErrorMessage } from '@/lib/invoke-error';
 import { PerguntasDaNota, parcelasComPergunta, type ParcelaDaImportacao } from '@/components/PerguntasDaNota';
+import { NotasRecebidasPorEmail } from '@/components/fiscal/NotasRecebidasPorEmail';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface NFeItem {
@@ -257,23 +258,31 @@ export default function ImportFiscalXML() {
   })();
 
   // ── Upload & parse XML ─────────────────────────────────────────────────
-  const handleUpload = async () => {
-    if (!file) return;
+  // Origem: o arquivo que a pessoa subiu ou a NF-e que chegou por e-mail (08/10/2026) — a mesma
+  // conferência nos dois casos; a do e-mail o servidor lê do anexo guardado.
+  const handleUpload = async (doEmail?: { anexoId: string }) => {
+    if (!file && !doEmail) return;
     setUploading(true);
     try {
-      const reader = new FileReader();
-      const xmlBase64 = await new Promise<string>((resolve, reject) => {
-        reader.onload = (e) => {
-          const b64 = (e.target?.result as string).split(',')[1];
-          if (b64) resolve(b64);
-          else reject(new Error('Falha ao codificar arquivo'));
-        };
-        reader.onerror = () => reject(new Error('Erro ao ler arquivo'));
-        reader.readAsDataURL(file);
-      });
+      let corpo: Record<string, string>;
+      if (doEmail) {
+        corpo = { email_attachment_id: doEmail.anexoId };
+      } else {
+        const reader = new FileReader();
+        const xmlBase64 = await new Promise<string>((resolve, reject) => {
+          reader.onload = (e) => {
+            const b64 = (e.target?.result as string).split(',')[1];
+            if (b64) resolve(b64);
+            else reject(new Error('Falha ao codificar arquivo'));
+          };
+          reader.onerror = () => reject(new Error('Erro ao ler arquivo'));
+          reader.readAsDataURL(file!);
+        });
+        corpo = { xmlBase64 };
+      }
 
       const { data, error } = await supabase.functions.invoke('process-nfe-xml', {
-        body: { xmlBase64 },
+        body: corpo,
       });
 
       // A mensagem útil ("Arquivo não é uma NF-e válida", "chave de acesso
@@ -568,6 +577,11 @@ export default function ImportFiscalXML() {
         description="Importe XMLs de NF-e para dar entrada no estoque, registrar fornecedores e gerar contas a pagar automaticamente."
       />
 
+      {/* ── NF-e que chegou por e-mail (08/10/2026): a mesma conferência do arquivo ── */}
+      {!showConfirm && (
+        <NotasRecebidasPorEmail ocupado={uploading} onConferir={(anexoId) => handleUpload({ anexoId })} />
+      )}
+
       {/* ── Upload area (oculta enquanto uma nota está sendo conferida) ── */}
       {!showConfirm && (
       <Card className="border-dashed border-2 bg-muted/20">
@@ -597,7 +611,7 @@ export default function ImportFiscalXML() {
           </Button>
           {file && (
             <Button
-              onClick={handleUpload}
+              onClick={() => handleUpload()}
               disabled={uploading}
               className="w-full max-w-xs"
             >

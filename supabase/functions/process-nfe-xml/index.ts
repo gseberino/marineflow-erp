@@ -61,7 +61,10 @@ function block(xml: string, name: string): string {
  */
 function decodeXml(base64: string): string {
   const bin = atob(base64);
-  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return decodeXmlBytes(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+}
+
+function decodeXmlBytes(bytes: Uint8Array): string {
   const head = new TextDecoder("ascii").decode(bytes.slice(0, 200));
   const declared = /encoding=["']([^"']+)["']/i.exec(head)?.[1] ?? "utf-8";
   const label = /8859|latin/i.test(declared) ? "iso-8859-1" : "utf-8";
@@ -115,14 +118,27 @@ servirComCors(async (req) => {
 
   try {
     const body = await req.json();
-    if (!body.xmlBase64) throw new Error("XML não fornecido (xmlBase64 ausente)");
 
     // ── 1. Decode XML ──────────────────────────────────────────────────────
+    // Ou o arquivo que a pessoa subiu (xmlBase64), ou a NF-e que chegou por E-MAIL
+    // (email_attachment_id, 08/10/2026): a tela "Notas recebidas por e-mail" só diz qual anexo; o
+    // XML é lido aqui, do bucket privado, e segue exatamente o mesmo caminho e a mesma conferência.
     let xmlText: string;
-    try {
-      xmlText = decodeXml(body.xmlBase64);
-    } catch {
-      throw new Error("Base64 inválido — verifique o encoding do arquivo XML.");
+    if (body.email_attachment_id) {
+      const { data: anexo, error: aErr } = await supabase.from("email_attachments")
+        .select("storage_path, kind").eq("id", String(body.email_attachment_id)).maybeSingle();
+      if (aErr) throw new Error(`Não consegui ler o anexo do e-mail: ${aErr.message}`);
+      if (!anexo?.storage_path || anexo.kind !== "nfe_xml") throw new Error("Esse anexo de e-mail não é um XML de NF-e.");
+      const { data: arquivo, error: dErr } = await supabase.storage.from("email-attachments").download(anexo.storage_path);
+      if (dErr || !arquivo) throw new Error(`Não consegui baixar o XML do e-mail: ${dErr?.message ?? "arquivo ausente"}`);
+      xmlText = decodeXmlBytes(new Uint8Array(await arquivo.arrayBuffer()));
+    } else {
+      if (!body.xmlBase64) throw new Error("XML não fornecido (xmlBase64 ausente)");
+      try {
+        xmlText = decodeXml(body.xmlBase64);
+      } catch {
+        throw new Error("Base64 inválido — verifique o encoding do arquivo XML.");
+      }
     }
 
     // ── 2. Validate minimal NFe structure ─────────────────────────────────

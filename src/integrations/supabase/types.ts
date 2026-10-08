@@ -3952,6 +3952,7 @@ export type Database = {
           alerted_at: string | null
           imap_uid: number | null
           imap_uidvalidity: number | null
+          dados_extraidos: Json | null
         }
         Insert: {
           account_id: string
@@ -3987,6 +3988,7 @@ export type Database = {
           alerted_at?: string | null
           imap_uid?: number | null
           imap_uidvalidity?: number | null
+          dados_extraidos?: Json | null
         }
         Update: {
           account_id?: string
@@ -4022,6 +4024,7 @@ export type Database = {
           alerted_at?: string | null
           imap_uid?: number | null
           imap_uidvalidity?: number | null
+          dados_extraidos?: Json | null
         }
         Relationships: [
           {
@@ -4043,6 +4046,63 @@ export type Database = {
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_respostas: {
+        Row: {
+          account_id: string
+          assunto: string
+          criado_em: string
+          criado_por: string | null
+          enviado_em: string | null
+          erro: string | null
+          id: string
+          message_id: string
+          para: string
+          status: string
+          texto: string
+        }
+        Insert: {
+          account_id: string
+          assunto: string
+          criado_em?: string
+          criado_por?: string | null
+          enviado_em?: string | null
+          erro?: string | null
+          id?: string
+          message_id: string
+          para: string
+          status?: string
+          texto: string
+        }
+        Update: {
+          account_id?: string
+          assunto?: string
+          criado_em?: string
+          criado_por?: string | null
+          enviado_em?: string | null
+          erro?: string | null
+          id?: string
+          message_id?: string
+          para?: string
+          status?: string
+          texto?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_respostas_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "email_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_respostas_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "email_messages"
             referencedColumns: ["id"]
           },
         ]

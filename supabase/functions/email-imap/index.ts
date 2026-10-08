@@ -23,6 +23,9 @@ import { matchSender, type MatchCandidate } from "../_shared/email/sender-match.
 import { triageEmail, type Triage } from "../_shared/email/triage.ts";
 import { MAX_URGENTES_PADRAO } from "../_shared/email/digest.ts";
 import { displaySender } from "../_shared/email/normalize.ts";
+import { extrairDados } from "../_shared/email/dados.ts";
+import type { InboundEmail } from "../_shared/email/types.ts";
+import { extractText, getDocumentProxy } from "npm:unpdf@0.12.1";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -40,6 +43,14 @@ const MAX_BYTES_ANEXO = 20 * 1024 * 1024;
 /** Só o que chegou nesse intervalo é classificado e pode virar aviso. */
 const JANELA_DA_TRIAGEM_MS = 48 * 3600_000;
 const BUCKET = "email-attachments";
+/** PDFs lidos por rodada (boleto): a leitura gasta CPU, e o teto da função é 2 s. */
+const MAX_PDFS_POR_RODADA = 4;
+
+async function lerPdf(bytes: Uint8Array): Promise<string> {
+  const doc = await getDocumentProxy(bytes);
+  const { text } = await extractText(doc, { mergePages: true });
+  return Array.isArray(text) ? text.join("\n") : String(text ?? "");
+}
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -81,6 +92,45 @@ async function avisarUrgente(admin: Db, conta: string, remetente: string, assunt
   if (rows.length) await admin.from("whatsapp_send_queue").insert(rows);
 }
 
+/**
+ * `?reextrair=1`: e-mails já guardados com anexo e sem dados extraídos (os que entraram antes da
+ * etapa 4) — relê os anexos do bucket, sem ir à caixa de novo. Até 15 por chamada.
+ */
+async function reextrair(admin: Db, cnpjEmpresa: string | null): Promise<Record<string, number>> {
+  const { data: msgs, error } = await admin.from("email_messages")
+    .select("id, subject, body_text, received_at, email_attachments(id, filename, mime_type, storage_path)")
+    .eq("has_attachments", true).is("dados_extraidos", null).order("received_at", { ascending: false }).limit(15);
+  if (error) throw new Error(error.message);
+  let lidos = 0, comDados = 0, pdfs = 0;
+  for (const m of (msgs ?? []) as any[]) {
+    const anexos: InboundEmail["attachments"] = [];
+    const idDoIndice: string[] = [];
+    for (const a of (m.email_attachments ?? []) as any[]) {
+      const ehUtil = /xml|pdf/i.test(`${a.mime_type ?? ""} ${a.filename ?? ""}`);
+      let content: Uint8Array | null = null;
+      if (ehUtil && a.storage_path) {
+        const { data: arq } = await admin.storage.from(BUCKET).download(a.storage_path);
+        if (arq) content = new Uint8Array(await arq.arrayBuffer());
+      }
+      anexos.push({ filename: a.filename, mimeType: a.mime_type, size: content?.length ?? null, content });
+      idDoIndice.push(a.id);
+    }
+    const usarPdf = anexos.some((a) => a.content && (a.mimeType ?? "").includes("pdf")) && pdfs < MAX_PDFS_POR_RODADA;
+    if (usarPdf) pdfs++;
+    const email: InboundEmail = {
+      messageId: null, inReplyTo: null, references: [], from: { name: null, address: "" }, to: [], cc: [],
+      subject: m.subject, text: m.body_text, html: null, receivedAt: m.received_at, headers: {}, attachments: anexos, rawSize: null,
+    };
+    const dados = await extrairDados(email, cnpjEmpresa, usarPdf ? lerPdf : null);
+    // {} marca "já relido, nada encontrado" (sem isso a mesma mensagem voltaria toda vez).
+    const gravar = dados ? { ...dados, nfes: dados.nfes.map((n) => ({ ...n, anexo_id: idDoIndice[n.anexo_indice] ?? null })) } : {};
+    await admin.from("email_messages").update({ dados_extraidos: gravar }).eq("id", m.id);
+    lidos++;
+    if (dados) comDados++;
+  }
+  return { relidos: lidos, com_dados: comDados };
+}
+
 servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   const negado = verificarCronSecret(req, corsHeaders, "email-imap");
@@ -96,6 +146,16 @@ servirComCors(async (req) => {
   if (cErr) return jr({ error: `não li as caixas: ${cErr.message}` }, 500);
 
   const { data: regras } = await admin.from("email_sender_rules").select("pattern, action");
+  const { data: cfgCnpj } = await admin.from("app_settings").select("value").eq("key", "cnpj").maybeSingle();
+  const cnpjEmpresa = cfgCnpj?.value ? String(cfgCnpj.value) : null;
+  let pdfsLidos = 0;
+  if (new URL(req.url).searchParams.get("reextrair") === "1") {
+    try {
+      return jr({ ok: true, ...(await reextrair(admin, cnpjEmpresa)), ms: Date.now() - inicio });
+    } catch (e) {
+      return jr({ error: String((e as Error)?.message ?? e) }, 500);
+    }
+  }
   let cands: MatchCandidate[] | null = null;
   let jaAvisados = diagnostico ? 0 : await avisadosHoje(admin);
   const resultados: Record<string, unknown>[] = [];
@@ -150,6 +210,26 @@ servirComCors(async (req) => {
           const { error: upErr } = await admin.storage.from(BUCKET)
             .upload(storagePathFor(id, a.filename, i), a.content, { contentType: a.mimeType ?? "application/octet-stream", upsert: true });
           if (upErr) console.warn("[email-imap] anexo não subiu:", upErr.message);
+        }
+
+        // Etapa 4 (08/10/2026): NF-e anexa e boleto, conferidos por DV. Só informa — a NF-e aparece
+        // em Entrada de Mercadoria › "Notas recebidas por e-mail"; nada vira lançamento sozinho.
+        try {
+          const temPdf = email.attachments.some((a) => (a.mimeType ?? "").includes("pdf"));
+          const usarPdf = temPdf && pdfsLidos < MAX_PDFS_POR_RODADA;
+          if (usarPdf) pdfsLidos++;
+          const dados = await extrairDados(email, cnpjEmpresa, usarPdf ? lerPdf : null);
+          if (dados) {
+            const { data: linhas } = await admin.from("email_attachments").select("id, storage_path").eq("message_id", id);
+            const idPorCaminho = new Map(((linhas ?? []) as { id: string; storage_path: string }[]).map((l) => [l.storage_path, l.id]));
+            const nfes = dados.nfes.map((n) => ({
+              ...n,
+              anexo_id: idPorCaminho.get(storagePathFor(id, email.attachments[n.anexo_indice]?.filename ?? null, n.anexo_indice)) ?? null,
+            }));
+            await admin.from("email_messages").update({ dados_extraidos: { ...dados, nfes } }).eq("id", id);
+          }
+        } catch (e) {
+          console.warn("[email-imap] extração de NF-e/boleto falhou:", (e as Error)?.message ?? e);
         }
 
         // Triagem só do que é recente: o histórico entra calado.

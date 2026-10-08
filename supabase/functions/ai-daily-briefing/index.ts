@@ -19,6 +19,7 @@ import { normalizeText } from "../_shared/banking/matching.ts";
 import { linhasDoExtratoNoResumo } from "./extrato.ts";
 import { lerAnalise } from "../_shared/financeiro/vigia-do-negocio.ts";
 import { montarSecaoEmail, type EmailDigestItem } from "../_shared/email/digest.ts";
+import { resumoDosDados } from "../_shared/email/dados.ts";
 import { embarcacoesComPlano, secaoDeRevisoes, type PlanoDoResumo, type SecaoDeRevisoes } from "./revisoes.ts";
 
 const corsHeaders = {
@@ -612,12 +613,14 @@ servirComCors(async (req) => {
     try {
       const desde = new Date(now.getTime() - 24 * 3600_000).toISOString();
       const { data: emails, error: eErr } = await admin.from("email_messages")
-        .select("id, from_name, from_address, subject, received_at, triage_class, triage_fraud_alert, muted, clients(name), suppliers(name), email_attachments(kind)")
+        .select("id, from_name, from_address, subject, received_at, triage_class, triage_fraud_alert, muted, dados_extraidos, clients(name), suppliers(name), email_attachments(kind)")
         .gte("received_at", desde).not("triage_class", "is", null).order("received_at", { ascending: false }).limit(200);
       if (eErr) throw eErr;
       const itens: EmailDigestItem[] = ((emails ?? []) as any[]).filter((m) => !m.muted).map((m) => {
         const kinds = ((m.email_attachments ?? []) as { kind: string }[]).map((a) => a.kind);
-        const resumoAnexo = kinds.includes("nfe_xml") ? "NF-e anexa" : kinds.includes("boleto_pdf") ? "boleto anexo" : null;
+        // NF-e e boleto conferidos por DV (etapa 4); sem dado extraído, só o tipo do anexo.
+        const resumoAnexo = resumoDosDados(m.dados_extraidos, (v) => fmt.format(v))
+          ?? (kinds.includes("nfe_xml") ? "NF-e anexa" : kinds.includes("boleto_pdf") ? "boleto anexo" : null);
         return {
           classe: m.triage_class,
           remetente: m.clients?.name ?? m.suppliers?.name ?? m.from_name ?? m.from_address,
