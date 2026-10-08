@@ -90,6 +90,7 @@ const PurchasingHubPage = lazy(() => import("./pages/PurchasingHubPage"));
 const QuoteRequestsPage = lazy(() => import("./pages/QuoteRequestsPage"));
 const QuoteRequestDetailPage = lazy(() => import("./pages/QuoteRequestDetailPage"));
 const AIActivityPage = lazy(() => import("./pages/AIActivityPage"));
+const TriagemFotosPage = lazy(() => import("./pages/TriagemFotosPage"));
 
 /**
  * Fallback do carregamento sob demanda: as páginas viram chunks separados, então
@@ -311,6 +312,11 @@ const App = () => (
                         } />
                         <Route path="/audit-log" element={
                           <ProtectedRoute roles={['admin']} groupId="sistema"><LegadoOuV2 to="/v2/audit-log" legacy={<AuditLogPage />} /></ProtectedRoute>
+                        } />
+                        <Route path="/fotos" element={
+                          <ProtectedRoute roles={['admin']} groupId="operacional">
+                            <TriagemFotosPage />
+                          </ProtectedRoute>
                         } />
                         <Route path="/ai-activity" element={
                           <ProtectedRoute roles={['admin']} groupId="sistema">

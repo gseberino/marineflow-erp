@@ -159,6 +159,44 @@ export class Dropbox {
     return await r.json() as MetadadosArquivo;
   }
 
+  /** Endpoint do servidor de conteúdo que responde JSON (ex.: files/get_thumbnail_batch). */
+  async rpcConteudo<T>(rota: string, corpo: unknown): Promise<T> {
+    const r = await this.chamar((token) =>
+      new Request(`${CONTEUDO}/2/${rota}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(corpo),
+      })
+    );
+    return await r.json() as T;
+  }
+
+  /**
+   * Baixa um arquivo pelo id ("id:...") ou caminho. `limiteBytes` evita trazer para a memória da
+   * função algo grande demais: confere o tamanho no cabeçalho antes de ler o corpo.
+   */
+  async baixar(alvo: string, limiteBytes = 25 * 1024 * 1024): Promise<{ bytes: Uint8Array<ArrayBuffer>; nome: string }> {
+    const arg = argParaCabecalho({ path: alvo });
+    const r = await this.chamar((token) =>
+      new Request(`${CONTEUDO}/2/files/download`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Dropbox-API-Arg": arg },
+      })
+    );
+    let nome = "";
+    try {
+      nome = String((JSON.parse(r.headers.get("Dropbox-API-Result") ?? "{}") as { name?: string }).name ?? "");
+    } catch { /* sem metadados no cabeçalho */ }
+    const tamanho = Number(r.headers.get("Content-Length") ?? "0");
+    if (tamanho > limiteBytes) {
+      await r.body?.cancel();
+      throw new ErroDropbox(`Arquivo grande demais (${Math.round(tamanho / 1048576)} MB).`, 413, "grande_demais", false);
+    }
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    if (bytes.length > limiteBytes) throw new ErroDropbox("Arquivo grande demais.", 413, "grande_demais", false);
+    return { bytes, nome };
+  }
+
   /** Revoga o token de acesso atual (desconectar). */
   async revogar(): Promise<void> {
     await this.chamar((token) =>

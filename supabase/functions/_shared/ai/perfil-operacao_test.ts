@@ -117,7 +117,8 @@ Deno.test("SO_PELA_REDE: pela rede, roda direto só leitura e escrita de sugest�
   const porNome = new Map(allTools.map((t) => [t.name, t]));
   const diretas = [...SO_PELA_REDE].filter((n) => rodaDiretoPelaRede(porNome.get(n)!));
   const escritasDiretas = diretas.filter((n) => !ehLeituraPeloNome(n)).sort();
-  assertEquals(escritasDiretas, ["interpret_customer_reply", "remember_about_entity"]);
+  // enviar_arquivo_do_dropbox (08/10/2026): só para o próprio WhatsApp de quem pede, como send_document_pdf_to_self.
+  assertEquals(escritasDiretas, ["enviar_arquivo_do_dropbox", "interpret_customer_reply", "remember_about_entity"]);
   assertEquals(escritasDiretas, Object.keys(ESCRITAS_VERIFICADAS_DA_REDE).sort(), "lista verificada com nome que não é escrita low de SO_PELA_REDE");
 
   // As escritas de risco low que, pela rede, pedem confirmação (conferência de 26/09/2026).

@@ -264,3 +264,75 @@ export function extensaoDe(nome: string): string | null {
   const i = nome.lastIndexOf(".");
   return i > 0 && i < nome.length - 1 ? nome.slice(i + 1).toLowerCase().slice(0, 10) : null;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Triagem das fotos de "Envio da câmera" (Fase 4)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Dia e hora em que a foto foi tirada. O celular nomeia "2026-09-26 17.44.07.jpg" na hora LOCAL;
+ * sem esse padrão, cai na data do arquivo (client_modified, UTC) convertida para São Paulo.
+ */
+export function quandoFoiTirada(nome: string, clientModified?: string | null): { dia: string; hora: string } | null {
+  const m = /^(\d{4}-\d{2}-\d{2})[ _](\d{2})[.\-:](\d{2})/.exec(nome);
+  if (m) return { dia: m[1], hora: `${m[2]}:${m[3]}` };
+  if (!clientModified) return null;
+  const d = new Date(clientModified);
+  if (Number.isNaN(d.getTime())) return null;
+  const hora = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }).format(d);
+  return { dia: dataEmSaoPaulo(d), hora };
+}
+
+/** Foto, vídeo ou print de tela (o celular salva print em PNG; foto em JPG/HEIC). */
+export function tipoDeMidia(nome: string): "foto" | "video" | "print" | "outro" {
+  const e = extensaoDe(nome) ?? "";
+  if (["jpg", "jpeg", "heic", "heif", "webp"].includes(e)) return "foto";
+  if (["mov", "mp4", "m4v", "3gp"].includes(e)) return "video";
+  if (e === "png") return "print";
+  return "outro";
+}
+
+/** "<pasta do barco>/3- FOTOS/2026-09-26 OS-00105" (sem OS: só o dia). */
+export function pastaDasFotos(pastaDoBarco: string, dia: string, numero?: string | null): string {
+  const n = (numero ?? "").replace(/[\/:*?"<>|]+/g, "-").trim();
+  return `${pastaDoBarco.replace(/\/+$/, "")}/3- FOTOS/${n ? `${dia} ${n}` : dia}`;
+}
+
+export type SinalDaOs = {
+  id: string;
+  /** Datas (AAAA-MM-DD, São Paulo) em que algo dessa OS aconteceu, com o peso e o motivo. */
+  eventos: Array<{ dia: string; peso: number; motivo: string }>;
+  /** Período agendado [início, fim] em AAAA-MM-DD. */
+  agendado?: [string, string] | null;
+};
+
+const SOMA_DIAS = (dia: string, n: number) => {
+  const d = new Date(`${dia}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+/**
+ * Nota de uma OS para as fotos de um dia: eventos no próprio dia valem inteiro, no dia antes/depois
+ * metade; estar dentro do período agendado vale 3. Devolve a nota e os motivos (para a tela dizer
+ * POR QUE sugeriu — a escolha é sempre do dono).
+ */
+export function notaDaOsNoDia(dia: string, os: SinalDaOs): { nota: number; motivos: string[] } {
+  let nota = 0;
+  const motivos = new Set<string>();
+  const vizinhos = new Set([SOMA_DIAS(dia, -1), SOMA_DIAS(dia, 1)]);
+  for (const e of os.eventos) {
+    if (e.dia === dia) {
+      nota += e.peso;
+      motivos.add(e.motivo);
+    } else if (vizinhos.has(e.dia)) {
+      nota += e.peso / 2;
+      motivos.add(`${e.motivo} (dia ${e.dia.slice(8)}/${e.dia.slice(5, 7)})`);
+    }
+  }
+  if (os.agendado && os.agendado[0] <= dia && dia <= os.agendado[1]) {
+    nota += 3;
+    motivos.add("agendada para esse dia");
+  }
+  return { nota, motivos: [...motivos] };
+}

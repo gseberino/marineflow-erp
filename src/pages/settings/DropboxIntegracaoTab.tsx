@@ -213,6 +213,9 @@ export function DropboxIntegracaoTab() {
                 {ocupado === 'indice' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
                 Atualizar agora
               </Button>
+              <Button variant="outline" size="sm" asChild className="ml-2">
+                <a href="/fotos">Triagem de fotos</a>
+              </Button>
             </div>
           )}
           {info.conta.ultimo_erro && (

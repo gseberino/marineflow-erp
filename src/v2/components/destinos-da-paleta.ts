@@ -5,8 +5,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Anchor, ArrowLeftRight, BarChart3, Boxes, Building2, CalendarDays, ClipboardList, CornerDownRight,
   DollarSign, FileText, Landmark, LayoutDashboard, MessageCircle, Package, Receipt, Settings, Ship,
-  Sparkles, Target, TrendingDown, TrendingUp, Truck, Users, Wrench,
-} from 'lucide-react';
+  Sparkles, Target, TrendingDown, TrendingUp, Truck, Users, Wrench, Camera } from 'lucide-react';
 
 export type ItemDaPaleta = {
   label: string;
@@ -27,6 +26,7 @@ export const NAV: { group: string; items: ItemDaPaleta[] }[] = [
       { label: 'Ordens de Serviço', to: '/v2/service-orders', icon: ClipboardList },
       { label: 'Orçamentos', to: '/v2/quotes', icon: FileText },
       { label: 'Agenda', to: '/v2/agenda', icon: CalendarDays },
+      { label: 'Triagem de fotos', to: '/fotos', icon: Camera },
     ],
   },
   {
