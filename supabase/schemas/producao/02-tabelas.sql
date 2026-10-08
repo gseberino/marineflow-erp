@@ -1719,6 +1719,31 @@ COMMENT ON COLUMN public.inventory_movements.reverses_movement_id IS 'Baixa que 
 ALTER TABLE public.inventory_movements ENABLE ROW LEVEL SECURITY;
 
 -- ── invoices ──
+CREATE TABLE public.instagram_conexao (
+  id smallint DEFAULT 1 NOT NULL,
+  access_token text NOT NULL,
+  expira_em timestamp with time zone,
+  renovado_em timestamp with time zone,
+  ultima_busca timestamp with time zone,
+  ultimo_erro text,
+  atualizado_em timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT instagram_conexao_id_check CHECK (id = 1),
+  CONSTRAINT instagram_conexao_pkey PRIMARY KEY (id)
+);
+ALTER TABLE public.instagram_conexao ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE public.instagram_posts (
+  id text NOT NULL,
+  tipo text NOT NULL,
+  imagem text NOT NULL,
+  permalink text NOT NULL,
+  legenda text,
+  publicado_em timestamp with time zone,
+  buscado_em timestamp with time zone DEFAULT now() NOT NULL,
+  CONSTRAINT instagram_posts_pkey PRIMARY KEY (id)
+);
+ALTER TABLE public.instagram_posts ENABLE ROW LEVEL SECURITY;
+
 CREATE TABLE public.invoices (
   id uuid DEFAULT gen_random_uuid() NOT NULL,
   invoice_number text NOT NULL,

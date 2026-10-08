@@ -168,3 +168,6 @@ verify_jwt = false
 # (usuarioAtivo) — o padrão das funções que agem com a chave de serviço.
 [functions.dropbox-fotos]
 verify_jwt = false
+
+[functions.instagram-feed]
+verify_jwt = false
