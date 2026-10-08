@@ -33,6 +33,19 @@ export function idsDeReferencia(v: string | null | undefined): string[] {
   return (String(v ?? "").match(/<[^>]+>/g) ?? []).map((s) => s.slice(1, -1));
 }
 
+/**
+ * Tira o enchimento invisível dos e-mails de propaganda (o "preheader": centenas de &zwnj; e
+ * caracteres de largura zero) — sem isso o texto que o assistente lê vira ruído (GoDaddy, 28/07).
+ */
+export function limparTexto(t: string | null | undefined): string | null {
+  if (t == null) return null;
+  return String(t)
+    .replace(/&(zwnj|zwj|nbsp|shy);/gi, " ")
+    .replace(/[\u200b-\u200d\u2060\ufeff\u00ad\u034f]/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
 export async function mimeParaInbound(
   bruto: Uint8Array,
   opts: { recebidoEmFallback: string | null; tamanho: number | null },
@@ -54,7 +67,7 @@ export async function mimeParaInbound(
     to: lista(p.to),
     cc: lista(p.cc),
     subject: p.subject ?? null,
-    text: p.text ?? null,
+    text: limparTexto(p.text),
     html: p.html ?? null,
     receivedAt: recebido,
     headers,

@@ -51,3 +51,9 @@ Deno.test("sem Date usa a data de chegada do servidor", async () => {
 });
 
 Deno.test("idsDeReferencia", () => assertEquals(idsDeReferencia("<a@b>  <c@d>"), ["a@b", "c@d"]));
+
+Deno.test("limparTexto: tira o enchimento invisível da propaganda", async () => {
+  const { limparTexto } = await import("./mime.ts");
+  assertEquals(limparTexto("Oferta &zwnj; &zwnj; &zwnj;\u200b\u200c fim"), "Oferta fim");
+  assertEquals(limparTexto(null), null);
+});
