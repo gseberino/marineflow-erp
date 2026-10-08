@@ -23,7 +23,7 @@ import { matchSender, type MatchCandidate } from "../_shared/email/sender-match.
 import { triageEmail, type Triage } from "../_shared/email/triage.ts";
 import { MAX_URGENTES_PADRAO } from "../_shared/email/digest.ts";
 import { displaySender } from "../_shared/email/normalize.ts";
-import { extrairDados } from "../_shared/email/dados.ts";
+import { extrairDados, fornecedorPelaNota } from "../_shared/email/dados.ts";
 import type { InboundEmail } from "../_shared/email/types.ts";
 import { extractText, getDocumentProxy } from "npm:unpdf@0.12.1";
 
@@ -68,6 +68,27 @@ async function candidatos(admin: Db): Promise<MatchCandidate[]> {
   return out;
 }
 
+/** CNPJ (só dígitos) → fornecedor, para ligar o e-mail pela NF-e anexa. */
+async function fornecedoresPorCnpj(admin: Db): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (let ini = 0; ini < 20000; ini += 1000) {
+    const { data, error } = await admin.from("suppliers").select("id, cnpj_cpf").not("cnpj_cpf", "is", null).order("id").range(ini, ini + 999);
+    if (error) throw new Error(`não li suppliers: ${error.message}`);
+    for (const r of data ?? []) {
+      const d = String(r.cnpj_cpf ?? "").replace(/\D/g, "");
+      if (d.length === 14) out.set(d, r.id);
+    }
+    if ((data ?? []).length < 1000) break;
+  }
+  return out;
+}
+
+/** Sem cadastro pelo remetente: liga pelo CNPJ do emitente da NF-e (documento identifica). */
+function ligacaoPelaNota(dados: Parameters<typeof fornecedorPelaNota>[0], porCnpj: Map<string, string>) {
+  const id = fornecedorPelaNota(dados, porCnpj);
+  return id ? { supplier_id: id, match_confidence: 1, match_reason: "nfe_cnpj" } : {};
+}
+
 /** Urgentes já avisados hoje (Brasília), para o teto. */
 async function avisadosHoje(admin: Db): Promise<number> {
   const inicio = new Date(Date.now() - 3 * 3600_000);
@@ -97,8 +118,9 @@ async function avisarUrgente(admin: Db, conta: string, remetente: string, assunt
  * etapa 4) — relê os anexos do bucket, sem ir à caixa de novo. Até 15 por chamada.
  */
 async function reextrair(admin: Db, cnpjEmpresa: string | null): Promise<Record<string, number>> {
+  const porCnpj = await fornecedoresPorCnpj(admin);
   const { data: msgs, error } = await admin.from("email_messages")
-    .select("id, subject, body_text, received_at, email_attachments(id, filename, mime_type, storage_path)")
+    .select("id, subject, body_text, received_at, client_id, supplier_id, email_attachments(id, filename, mime_type, storage_path)")
     .eq("has_attachments", true).is("dados_extraidos", null).order("received_at", { ascending: false }).limit(15);
   if (error) throw new Error(error.message);
   let lidos = 0, comDados = 0, pdfs = 0;
@@ -124,7 +146,8 @@ async function reextrair(admin: Db, cnpjEmpresa: string | null): Promise<Record<
     const dados = await extrairDados(email, cnpjEmpresa, usarPdf ? lerPdf : null);
     // {} marca "já relido, nada encontrado" (sem isso a mesma mensagem voltaria toda vez).
     const gravar = dados ? { ...dados, nfes: dados.nfes.map((n) => ({ ...n, anexo_id: idDoIndice[n.anexo_indice] ?? null })) } : {};
-    await admin.from("email_messages").update({ dados_extraidos: gravar }).eq("id", m.id);
+    const ligar = m.client_id || m.supplier_id ? {} : ligacaoPelaNota(dados, porCnpj);
+    await admin.from("email_messages").update({ dados_extraidos: gravar, ...ligar }).eq("id", m.id);
     lidos++;
     if (dados) comDados++;
   }
@@ -157,6 +180,7 @@ servirComCors(async (req) => {
     }
   }
   let cands: MatchCandidate[] | null = null;
+  let porCnpj: Map<string, string> | null = null;
   let jaAvisados = diagnostico ? 0 : await avisadosHoje(admin);
   const resultados: Record<string, unknown>[] = [];
 
@@ -186,6 +210,7 @@ servirComCors(async (req) => {
       if (diagnostico) { r.uidvalidity = caixa.uidValidity; continue; }
 
       cands ??= await candidatos(admin);
+      porCnpj ??= await fornecedoresPorCnpj(admin);
       let cursor = ultimo;
       for (const uid of uids.slice(0, LOTE)) {
         if (Date.now() - inicio > ORCAMENTO_MS) { r.parou = "tempo da rodada"; break; }
@@ -226,7 +251,8 @@ servirComCors(async (req) => {
               ...n,
               anexo_id: idPorCaminho.get(storagePathFor(id, email.attachments[n.anexo_indice]?.filename ?? null, n.anexo_indice)) ?? null,
             }));
-            await admin.from("email_messages").update({ dados_extraidos: { ...dados, nfes } }).eq("id", id);
+            const ligar = match ? {} : ligacaoPelaNota(dados, porCnpj);
+            await admin.from("email_messages").update({ dados_extraidos: { ...dados, nfes }, ...ligar }).eq("id", id);
           }
         } catch (e) {
           console.warn("[email-imap] extração de NF-e/boleto falhou:", (e as Error)?.message ?? e);
