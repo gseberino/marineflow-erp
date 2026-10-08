@@ -4,8 +4,8 @@
 // luz, ainda não paguei". A tela é o "Cancelar (estornar)" do PaymentDialog (cancelPaymentCascade em
 // src/lib/cascade-updates.ts): pagamento cancelado com o motivo, conta recalculada, reembolso de gasto
 // da OS desfeito, auditoria. Aqui é a função estornar_pagamento (migration 20261007100000), com os
-// mesmos efeitos e p_autor — o assistente roda sem sessão, e a tela grava passo a passo pelo
-// navegador com a sessão do usuário.
+// mesmos efeitos e p_autor — o assistente roda sem sessão. Desde 07/10/2026 a tela também chama
+// estornar_pagamento (antes gravava passo a passo pelo navegador).
 //
 // Pagamento que veio do EXTRATO não se estorna: a linha do banco é a prova de que o dinheiro andou.
 // O caminho é desfazer a aplicação do Pix (conta a receber) ou a aprovação do lançamento (conta a

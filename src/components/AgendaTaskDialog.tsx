@@ -23,6 +23,9 @@ import {
 import { useClients } from '@/hooks/use-clients';
 import { useQuery } from '@tanstack/react-query';
 import { FollowupMissionButton } from '@/components/followups/FollowupMissionDialog';
+import {
+  descreverRepeticao, lerRepeticao, LETRA_DO_DIA, montarRrule, NOME_DO_DIA,
+} from '@/lib/regra-de-repeticao';
 
 /** Modelos de checklist (app_settings.task_checklist_templates) — padrão ServiceM8/FieldPulse. */
 export function useChecklistTemplates() {
@@ -196,6 +199,11 @@ export function AgendaTaskDialog({
   const [reminderKeys, setReminderKeys] = useState<string[]>([]);
   const [repeat, setRepeat] = useState<'none' | 'DAILY' | 'WEEKLY' | 'MONTHLY'>('none');
   const [repeatUntil, setRepeatUntil] = useState('');
+  // Intervalo e dias da semana (07/10/2026): a regra do assistente ("a cada 15 dias", "toda segunda
+  // e quinta") chegava aqui e era regravada sem eles. Partes que o diálogo não edita voltam como vieram.
+  const [repeatInterval, setRepeatInterval] = useState('1');
+  const [repeatDays, setRepeatDays] = useState<number[]>([]);
+  const [repeatOther, setRepeatOther] = useState<string[]>([]);
 
   const entityOptions = useEntityOptions(entityType);
 
@@ -221,10 +229,12 @@ export function AgendaTaskDialog({
       setEntityId(existing.related_entity_id || '');
       setChecklist(Array.isArray(existing.checklist) ? existing.checklist : []);
       setReminderKeys([]); // presets não são re-derivados; lembretes existentes ficam
-      const freq = existing.rrule?.match(/FREQ=(DAILY|WEEKLY|MONTHLY)/)?.[1];
-      setRepeat((freq as any) || 'none');
-      const until = existing.rrule?.match(/UNTIL=(\d{4})(\d{2})(\d{2})/);
-      setRepeatUntil(until ? `${until[1]}-${until[2]}-${until[3]}` : '');
+      const regra = lerRepeticao(existing.rrule, existing.scheduled_start_at || existing.due_at);
+      setRepeat(regra?.freq ?? 'none');
+      setRepeatUntil(regra?.ate ?? '');
+      setRepeatInterval(String(regra?.intervalo ?? 1));
+      setRepeatDays(regra?.dias ?? []);
+      setRepeatOther(regra?.outras ?? []);
     } else {
       setKind('task');
       setTitle('');
@@ -246,9 +256,22 @@ export function AgendaTaskDialog({
       setReminderKeys([]);
       setRepeat('none');
       setRepeatUntil('');
+      setRepeatInterval('1');
+      setRepeatDays([]);
+      setRepeatOther([]);
     }
     setNewItem('');
   }, [open, existing, prefillTechnicianId, prefillDate, prefillEntity]);
+
+  const repeticaoAtual = (freq: 'DAILY' | 'WEEKLY' | 'MONTHLY') => ({
+    freq,
+    intervalo: Math.min(365, Math.max(1, parseInt(repeatInterval, 10) || 1)),
+    dias: freq === 'WEEKLY' ? repeatDays : [],
+    ate: repeatUntil,
+    outras: repeatOther,
+  });
+  const alternarDia = (d: number) =>
+    setRepeatDays((atual) => (atual.includes(d) ? atual.filter((x) => x !== d) : [...atual, d].sort()));
 
   const handleSave = async () => {
     if (!title.trim()) {
@@ -280,7 +303,7 @@ export function AgendaTaskDialog({
 
     const rrule = repeat === 'none'
       ? null
-      : `FREQ=${repeat}${repeatUntil ? `;UNTIL=${repeatUntil.replace(/-/g, '')}` : ''}`;
+      : montarRrule(repeticaoAtual(repeat), anchor);
 
     const payload: AgendaTaskInput = {
       id: existing?.id,
@@ -537,23 +560,57 @@ export function AgendaTaskDialog({
           </div>
 
           {(!existing || existing.source === 'manual' || existing.source === 'ai') && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>Repetir</Label>
-                <Select value={repeat} onValueChange={(v) => setRepeat(v as any)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Não repete</SelectItem>
-                    <SelectItem value="DAILY">Todo dia</SelectItem>
-                    <SelectItem value="WEEKLY">Toda semana</SelectItem>
-                    <SelectItem value="MONTHLY">Todo mês</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {repeat !== 'none' && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
-                  <Label>Repetir até (opcional)</Label>
-                  <Input type="date" value={repeatUntil} onChange={(e) => setRepeatUntil(e.target.value)} />
+                  <Label>Repetir</Label>
+                  <Select value={repeat} onValueChange={(v) => setRepeat(v as any)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Não repete</SelectItem>
+                      <SelectItem value="DAILY">Por dia</SelectItem>
+                      <SelectItem value="WEEKLY">Por semana</SelectItem>
+                      <SelectItem value="MONTHLY">Por mês</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {repeat !== 'none' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="repetir-a-cada">
+                      A cada ({repeat === 'DAILY' ? 'dias' : repeat === 'WEEKLY' ? 'semanas' : 'meses'})
+                    </Label>
+                    <Input id="repetir-a-cada" type="number" min={1} max={365} inputMode="numeric"
+                      value={repeatInterval} onChange={(e) => setRepeatInterval(e.target.value)} />
+                  </div>
+                )}
+              </div>
+              {repeat === 'WEEKLY' && (
+                <div className="space-y-2">
+                  <Label>Nos dias</Label>
+                  <div className="flex flex-wrap gap-1.5" role="group" aria-label="Dias da semana">
+                    {LETRA_DO_DIA.map((letra, d) => (
+                      <Button key={d} type="button" size="sm" className="h-8 w-8 p-0"
+                        variant={repeatDays.includes(d) ? 'default' : 'outline'}
+                        aria-pressed={repeatDays.includes(d)} aria-label={NOME_DO_DIA[d]} title={NOME_DO_DIA[d]}
+                        onClick={() => alternarDia(d)}>
+                        {letra}
+                      </Button>
+                    ))}
+                  </div>
+                  {repeatDays.length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">Sem dia marcado, repete no dia da semana da tarefa.</p>
+                  )}
+                </div>
+              )}
+              {repeat !== 'none' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label>Repetir até (opcional)</Label>
+                    <Input type="date" value={repeatUntil} onChange={(e) => setRepeatUntil(e.target.value)} />
+                  </div>
+                  <p className="self-end pb-2 text-xs text-muted-foreground" data-testid="resumo-da-repeticao">
+                    Repete {descreverRepeticao(repeticaoAtual(repeat))}
+                  </p>
                 </div>
               )}
             </div>

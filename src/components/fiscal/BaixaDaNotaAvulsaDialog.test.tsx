@@ -15,13 +15,16 @@ vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     rpc: async (nome: string, args: unknown) => {
       banco.chamadas.push({ nome, args });
-      return { data: { ok: true, stock_items: 1, installments: 3 }, error: null };
+      if (nome === 'register_payment_and_update_balance') return { data: { payment_id: 'pg-1' }, error: null };
+      return { data: { ok: true, stock_items: 1, installments: 3, receivable_id: 'rec-1', amount: 500, issue_date: '2026-09-10' }, error: null };
     },
   },
 }));
+vi.mock('@/hooks/use-audit-log', () => ({ writeAuditLog: vi.fn(async () => undefined) }));
 vi.mock('sonner', () => ({
   toast: {
     loading: () => 't1',
+    warning: (m: string) => banco.toasts.push(`aviso: ${m}`),
     success: (m: string) => banco.toasts.push(m),
     error: (m: string) => banco.toasts.push(`erro: ${m}`),
   },
@@ -104,5 +107,32 @@ describe('BaixaDaNotaAvulsaDialog', () => {
   it('com a nota ocupada, não deixa confirmar de novo', () => {
     montar(aVista, true);
     expect((screen.getByRole('button', { name: /Confirmar lançamento/ }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+// Venda de balcão (07/10/2026): o cliente pagou na hora e o recebível nascia em aberto.
+describe('Já recebi no balcão', () => {
+  beforeEach(() => { banco.chamadas = []; banco.toasts = []; });
+
+  it('à vista no cartão: a opção aparece e, marcada, registra o pagamento pela mesma função da tela', async () => {
+    montar(aVista);
+    const opcao = screen.getByTestId('recebido-na-hora');
+    fireEvent.click(opcao.querySelector('button')!);
+    fireEvent.click(screen.getByRole('button', { name: /Confirmar lançamento/ }));
+    await waitFor(() => expect(banco.chamadas.map((c) => c.nome)).toEqual(['settle_nfe_stock_and_receivable', 'register_payment_and_update_balance']));
+    const pagamento = banco.chamadas[1].args as Record<string, unknown>;
+    expect(pagamento).toMatchObject({ p_receivable_id: 'rec-1', p_amount: 500, p_payment_method: 'credit_card', p_payment_date: '2026-09-10' });
+    await waitFor(() => expect(banco.toasts.join(' | ')).toContain('Recebido e lançado como pago'));
+  });
+
+  it('sem marcar, só a baixa (o recebível fica em aberto, como antes)', async () => {
+    montar(aVista);
+    fireEvent.click(screen.getByRole('button', { name: /Confirmar lançamento/ }));
+    await waitFor(() => expect(banco.chamadas.map((c) => c.nome)).toEqual(['settle_nfe_stock_and_receivable']));
+  });
+
+  it('parcelado não oferece (cada parcela é paga quando vencer)', () => {
+    montar(parcelada);
+    expect(screen.queryByTestId('recebido-na-hora')).toBeNull();
   });
 });

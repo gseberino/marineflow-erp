@@ -4,6 +4,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { lerEmPaginas } from '@/lib/ler-em-paginas';
 import { totaisPorFavorecido, type LancamentoDoFavorecido } from '@/lib/favorecidos-no-ano';
+import {
+  mudancaDaRegra, regrasDaMudanca, SITUACOES_DA_MUDANCA, type RegraDoExtrato,
+} from '../../supabase/functions/_shared/banking/pausa-do-favorecido';
 
 export type TipoFavorecido = 'socio' | 'funcionario' | 'diarista' | 'prestador' | 'comissionado';
 
@@ -117,19 +120,36 @@ export function useTotaisDosFavorecidos(ano: number) {
   });
 }
 
+/**
+ * O que vai para o banco ao salvar um favorecido: SÓ os campos enviados (07/10/2026).
+ *
+ * Antes, `document` ausente virava null — e o botão Desativar/Reativar da lista, que manda só
+ * { id, active }, apagava o CPF/CNPJ de quem era desativado. Sem documento o favorecido some do
+ * casamento pelo extrato e do "pelo mesmo CPF/CNPJ" dos totais do ano.
+ * Documento só com dígitos: é assim que ele casa com o extrato, onde vem sem máscara.
+ */
+export function camposDoFavorecido(f: Partial<Favorecido> & { id?: string }): Record<string, unknown> {
+  const { id: _id, ...campos } = f;
+  const linha: Record<string, unknown> = { ...campos };
+  if ('document' in f) {
+    const digitos = f.document ? f.document.replace(/\D/g, '') : '';
+    linha.document = digitos || null;
+  }
+  return linha;
+}
+
 export function useSalvarPayee() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (f: Partial<Favorecido> & { id?: string }) => {
-      // Documento só com dígitos: é assim que ele casa com o extrato, onde vem sem máscara.
-      const limpo = { ...f, document: f.document ? f.document.replace(/\D/g, '') : null };
+      const linha = camposDoFavorecido(f);
       if (f.id) {
-        const { error } = await supabase.from('payees').update(limpo as never).eq('id', f.id);
+        const { error } = await supabase.from('payees').update(linha as never).eq('id', f.id);
         if (error) throw error;
         return f.id;
       }
       const { data, error } = await supabase
-        .from('payees').insert(limpo as never).select('id').single();
+        .from('payees').insert(linha as never).select('id').single();
       if (error) throw error;
       return (data as any).id as string;
     },
@@ -143,6 +163,65 @@ export function useSalvarPayee() {
         : e.message || 'Não foi possível salvar';
       toast.error(msg);
     },
+  });
+}
+
+/** Hoje em Brasília, dd/mm/aaaa — a data que vai na marca da regra pausada. */
+function hojeNaMarca(): string {
+  return new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10).split('-').reverse().join('/');
+}
+
+/**
+ * Desativar/reativar um favorecido (07/10/2026), como o assistente faz (alterar_favorecido).
+ *
+ * Regra do dono "Desativar cadastro: pausar as regras dele": senão o próximo Pix volta a entrar
+ * classificado no favorecido desativado. Desativar pausa as regras do extrato que apontam para
+ * ele (CPF/CNPJ ou nome completo) com a marca na nota; reativar devolve as que foram pausadas por
+ * isso, na situação de antes. Marca e escolha são as mesmas do assistente
+ * (supabase/functions/_shared/banking/pausa-do-favorecido.ts): o que um pausa, o outro reativa.
+ * As regras são lidas ANTES de mudar o cadastro; leitura que falha não mexe em nada.
+ * Só `active` vai para o cadastro — o documento e o resto ficam como estão.
+ */
+export async function mudarAtivoDoFavorecido(
+  f: Pick<Favorecido, 'id' | 'name' | 'document'>, ativar: boolean,
+): Promise<{ regras: number; aviso: string | null }> {
+  const { data, error } = await supabase
+    .from('finance_rules')
+    .select('id, match_type, match_value, set_category, status, note')
+    .in('status', SITUACOES_DA_MUDANCA(ativar))
+    .limit(1000);
+  if (error) throw new Error(`Não consegui ler as regras do extrato (${error.message}). Nada mudou.`);
+  const regras = regrasDaMudanca(f, (data ?? []) as unknown as RegraDoExtrato[], ativar);
+
+  const { error: e1 } = await supabase.from('payees').update({ active: ativar } as never).eq('id', f.id);
+  if (e1) throw e1;
+
+  let mudadas = 0;
+  let aviso: string | null = null;
+  const hoje = hojeNaMarca();
+  for (const regra of regras) {
+    const { error: e2 } = await supabase.from('finance_rules')
+      .update(mudancaDaRegra(regra, f, ativar, hoje) as never).eq('id', regra.id);
+    if (e2) {
+      aviso = `O favorecido foi ${ativar ? 'reativado' : 'desativado'}, mas não consegui ${ativar ? 'reativar' : 'pausar'} todas as regras do extrato dele (${e2.message}): confira em Regras do extrato.`;
+    } else mudadas++;
+  }
+  return { regras: mudadas, aviso };
+}
+
+export function useAlternarAtivoDoFavorecido() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ favorecido, ativar }: { favorecido: Pick<Favorecido, 'id' | 'name' | 'document'>; ativar: boolean }) =>
+      mudarAtivoDoFavorecido(favorecido, ativar),
+    onSuccess: (r, { ativar }) => {
+      const regras = r.regras ? ` ${r.regras} regra(s) do extrato ${ativar ? 'voltaram a valer' : 'pausada(s)'}.` : '';
+      toast.success(`Favorecido ${ativar ? 'reativado' : 'desativado'}.${regras}`);
+      if (r.aviso) toast.warning(r.aviso);
+      qc.invalidateQueries({ queryKey: ['payees'] });
+      qc.invalidateQueries({ queryKey: ['finance-rules'] });
+    },
+    onError: (e: Error) => toast.error(e.message || 'Não foi possível mudar o favorecido'),
   });
 }
 

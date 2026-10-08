@@ -114,6 +114,13 @@ async function runRules(db: Db, settings: Record<string, string>) {
         const inserted = await createTaskFromCandidate(db, c, assigneeId);
         if (inserted) {
           created.push(c.automation_key);
+          // planos de manutenção (07/10/2026): a trilha do plano registra a tarefa da R14. Best-effort.
+          if (c.automation_key.startsWith("r14:")) {
+            await db.from("maintenance_plan_events").insert({
+              plan_id: c.automation_key.split(":")[2], vessel_id: c.related_entity_id, client_id: c.client_id ?? null,
+              tipo: "task_created", detalhe: { automation_key: c.automation_key },
+            });
+          }
           // lembrete padrão no app quando a tarefa tem prazo
           if (c.due_at && assigneeId) {
             const { data: t } = await db.from("agenda_tasks")

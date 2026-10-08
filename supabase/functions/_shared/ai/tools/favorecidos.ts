@@ -5,8 +5,8 @@
 // e src/components/PayeeFormDialog.tsx → useSalvarPayee): grava direto em `payees`, documento só com
 // dígitos. Aqui são os mesmos campos.
 //
-// Desativar faz uma coisa a mais que a tela, por regra do dono ("Desativar cadastro: pausar as regras
-// dele", 28/09/2026): desativar o cadastro não desliga quem aponta para ele, e o próximo Pix voltaria a
+// Desativar, por regra do dono ("Desativar cadastro: pausar as regras dele", 28/09/2026) — e desde
+// 07/10/2026 a tela faz igual, pelo mesmo _shared/banking/pausa-do-favorecido.ts: desativar o cadastro não desliga quem aponta para ele, e o próximo Pix voltaria a
 // entrar classificado no favorecido desativado. As regras do extrato que apontam para ele — pelo
 // CPF/CNPJ dele, ou pelo nome COMPLETO dele no extrato — são pausadas junto, com uma marca na nota;
 // reativar o favorecido reativa as que foram pausadas por isso. A confirmação lista quais.
@@ -17,6 +17,10 @@ import {
   alvoDoRetrato, brl, CARGOS_DO_FINANCEIRO, dataFuturaDita, ehUuid, ordemDita, semAcessoDoFinanceiro, valorDito,
 } from "./financeiro-comum.ts";
 import { hojeEmBrasilia } from "../../banking/fluxo-de-caixa.ts";
+import {
+  marcarPausa, mudancaDaRegra, regrasDaMudanca as escolherRegrasDaMudanca, regrasQueApontam, SITUACOES_DA_MUDANCA, tirarPausa,
+  type RegraDoExtrato,
+} from "../../banking/pausa-do-favorecido.ts";
 
 const TIPOS = ["socio", "funcionario", "diarista", "prestador", "comissionado"];
 const TIPOS_DE_CHAVE = ["cpf", "cnpj", "email", "telefone", "aleatoria"];
@@ -63,35 +67,10 @@ export function tipoDaChave(chave: string, dito?: unknown): string | { error: st
   return { error: `Não reconheci o tipo da chave Pix "${chave}": diga se é cpf, cnpj, email, telefone ou aleatoria.` };
 }
 
-type Regra = { id: string; match_type: string; match_value: string; set_category: string | null; status: string; note: string | null };
-const marcaDoFavorecido = (id: string) => `fav:${id}]`;
-
-/** A marca que a desativação deixa na nota da regra: guarda a situação de antes para a volta. */
-export function marcarPausa(nota: string | null, f: { id: string; name: string }, statusAntes: string, hoje: string): string {
-  return `${nota ?? ""} [pausada ao desativar o favorecido ${f.name} em ${hoje} · era ${statusAntes} · ${marcaDoFavorecido(f.id)}`.trim();
-}
-
-/** Reativar: a situação de antes (a marca diz) e a nota sem a marca. */
-export function tirarPausa(nota: string | null, idDoFavorecido: string): { status: string; note: string | null } {
-  const texto = String(nota ?? "");
-  const fim = texto.indexOf(marcaDoFavorecido(idDoFavorecido));
-  const inicio = fim < 0 ? -1 : texto.lastIndexOf("[pausada ao desativar o favorecido", fim);
-  if (inicio < 0) return { status: "active", note: nota };
-  const marca = texto.slice(inicio, fim + marcaDoFavorecido(idDoFavorecido).length);
-  const antes = marca.match(/· era (active|proposed) ·/)?.[1] ?? "active";
-  const resto = (texto.slice(0, inicio) + texto.slice(fim + marcaDoFavorecido(idDoFavorecido).length)).replace(/\s+/g, " ").trim();
-  return { status: antes, note: resto || null };
-}
-
-/** As regras do extrato que apontam para este favorecido: pelo documento dele, ou pelo nome completo. */
-export function regrasQueApontam(f: FavorecidoLido, regras: Regra[]): Regra[] {
-  const doc = String(f.document ?? "").replace(/\D/g, "");
-  const nome = normal(f.name);
-  return regras.filter((r) =>
-    (r.match_type === "document" && doc.length >= 11 && String(r.match_value ?? "").replace(/\D/g, "") === doc) ||
-    (r.match_type === "counterparty" && nome.includes(" ") && ` ${normal(r.match_value)} `.includes(` ${nome} `))
-  );
-}
+type Regra = RegraDoExtrato;
+// A marca na nota, quem aponta e o que muda em cada regra moram em _shared/banking/pausa-do-favorecido.ts
+// (07/10/2026): a tela de Favorecidos (use-payees.ts) faz a MESMA coisa, com a mesma marca.
+export { marcarPausa, regrasQueApontam, tirarPausa };
 
 async function lerRegras(cliente: ToolCtx["sb"], status: string[]): Promise<Regra[] | { error: string }> {
   const { data, error } = await cliente.from("finance_rules").select("id, match_type, match_value, set_category, status, note")
@@ -102,12 +81,8 @@ async function lerRegras(cliente: ToolCtx["sb"], status: string[]): Promise<Regr
 
 /** Desativar: as que apontam e estão valendo. Reativar: as que foram pausadas por esta desativação. */
 async function regrasDaMudanca(cliente: ToolCtx["sb"], f: FavorecidoLido, ativar: boolean): Promise<Regra[] | { error: string }> {
-  if (ativar) {
-    const pausadas = await lerRegras(cliente, ["paused"]);
-    return ehErro(pausadas) ? pausadas : pausadas.filter((r) => String(r.note ?? "").includes(marcaDoFavorecido(f.id)));
-  }
-  const valendo = await lerRegras(cliente, ["active", "proposed"]);
-  return ehErro(valendo) ? valendo : regrasQueApontam(f, valendo);
+  const lidas = await lerRegras(cliente, SITUACOES_DA_MUDANCA(ativar));
+  return ehErro(lidas) ? lidas : escolherRegrasDaMudanca(f, lidas, ativar);
 }
 
 const rotuloDaRegra = (r: Regra) =>
@@ -249,7 +224,7 @@ export const favorecidoTools: ToolDef[] = [
       let aviso: string | null = null;
       const hoje = hojeEmBrasilia().split("-").reverse().join("/");
       for (const regra of regras) {
-        const patch = m.ativar ? tirarPausa(regra.note, f.id) : { status: "paused", note: marcarPausa(regra.note, f, regra.status, hoje) };
+        const patch = mudancaDaRegra(regra, f, !!m.ativar, hoje);
         const { error: e } = await ctx.sb.from("finance_rules").update(patch).eq("id", regra.id);
         if (e) aviso = `O favorecido foi ${m.ativar ? "reativado" : "desativado"}, mas não consegui ${m.ativar ? "reativar" : "pausar"} todas as regras do extrato dele (${mensagemDoBanco(e)}): confira em Regras do extrato.`;
         else regrasMudadas++;

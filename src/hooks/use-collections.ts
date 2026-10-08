@@ -325,14 +325,36 @@ export function useMarkCollectionPaid() {
       confirmed_by: 'manual' | 'whatsapp';
       notes?: string;
     }) => {
-      // Busca receivable_id vinculado antes de atualizar.
-      // maybeSingle() em vez de single() — collection pode não existir (race condition),
-      // nesse caso não bloqueia o fluxo.
-      const { data: col } = await supabase
+      // A conta a receber ligada à cobrança. Leitura que falha PÁRA: seguir sem ela marcaria a
+      // cobrança paga sem registrar o pagamento na conta.
+      const { data: col, error: erroLeitura } = await supabase
         .from('collections')
         .select('receivable_id')
         .eq('id', input.id)
         .maybeSingle();
+      if (erroLeitura) throw erroLeitura;
+
+      // Primeiro o pagamento na conta (07/10/2026): antes a cobrança era marcada paga e o erro do
+      // register_payment_and_update_balance era ignorado — mês fechado, valor acima do saldo ou
+      // falta de permissão deixavam a cobrança "paga" e a conta devendo. Agora, se o pagamento
+      // não entra, nada muda. (O gatilho trg_sync_collection_from_receivable marca a cobrança
+      // quando a conta fica paga; o update abaixo grava forma e quem confirmou.)
+      if (col?.receivable_id) {
+        // Normaliza p_payment_date para DATE (YYYY-MM-DD) — o RPC espera DATE, não TIMESTAMP.
+        const paymentDateOnly = input.payment_date.split('T')[0];
+        const { error: erroPagamento } = await supabase.rpc('register_payment_and_update_balance', {
+          p_receivable_id:    col.receivable_id,
+          p_payable_id:       null,
+          p_amount:           input.paid_amount,
+          p_payment_date:     paymentDateOnly,
+          p_payment_method:   input.paid_method,
+          p_installments:     1,
+          p_card_fee_percent: 0,
+          p_net_amount:       input.paid_amount,
+          p_notes:            input.notes || `Confirmado via cobrança`,
+        });
+        if (erroPagamento) throw erroPagamento;
+      }
 
       const { error } = await supabase
         .from('collections')
@@ -346,30 +368,13 @@ export function useMarkCollectionPaid() {
         .eq('id', input.id);
       if (error) throw error;
 
-      // Se a cobrança tem recebível vinculado, sincroniza o pagamento no financeiro.
-      // O trigger trg_sync_collection_from_receivable cuidará do caminho inverso
-      // (receivable pago → collection paga), mas aqui é collection → receivable.
-      if (col?.receivable_id) {
-        // Normaliza p_payment_date para DATE (YYYY-MM-DD) — o RPC espera DATE, não TIMESTAMP.
-        const paymentDateOnly = input.payment_date.split('T')[0];
-        await supabase.rpc('register_payment_and_update_balance', {
-          p_receivable_id:    col.receivable_id,
-          p_payable_id:       null,
-          p_amount:           input.paid_amount,
-          p_payment_date:     paymentDateOnly,
-          p_payment_method:   input.paid_method,
-          p_installments:     1,
-          p_card_fee_percent: 0,
-          p_net_amount:       input.paid_amount,
-          p_notes:            input.notes || `Confirmado via cobrança`,
-        });
-      }
-
-      await supabase.from('collection_contacts').insert({
+      // O registro do contato é histórico: se falhar, o pagamento já entrou — avisa, não desfaz.
+      const { error: erroContato } = await supabase.from('collection_contacts').insert({
         collection_id: input.id,
         contact_type: 'paid',
         notes: input.notes || `Pago via ${input.paid_method}`,
       } as never);
+      if (erroContato) toast.warning(`Pagamento registrado, mas o histórico de contatos não foi gravado (${erroContato.message}).`);
       return true;
     },
     onSuccess: (_, vars) => {

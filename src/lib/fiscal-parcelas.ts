@@ -72,6 +72,23 @@ export interface PlanoDaBaixa {
  * honesto; "hoje + 30" não vinha de lugar nenhum). A data é o dia LOCAL da nota: pela hora UTC,
  * a nota emitida depois das 21h sugeria o dia seguinte (corrigido no D33, 01/10/2026).
  */
+/**
+ * Forma de pagamento da nota (tPag da NF-e) → a do recebimento (payments.payment_method), para
+ * "Já recebi no balcão" (07/10/2026, venda avulsa com nota: o cliente pagou na hora e o recebível
+ * nascia em aberto). Boleto, crédito loja e "outros" não são recebimento na hora: null.
+ */
+export function metodoDoRecebimentoNaHora(tPag: string | null | undefined): 'cash' | 'check' | 'credit_card' | 'debit_card' | 'pix' | 'bank_transfer' | null {
+  switch (String(tPag ?? '')) {
+    case '01': return 'cash';
+    case '02': return 'check';
+    case '03': return 'credit_card';
+    case '04': return 'debit_card';
+    case '17': return 'pix';
+    case '16': case '18': return 'bank_transfer';
+    default: return null;
+  }
+}
+
 export function planoInicialDaBaixa(doc: unknown, agora: Date = new Date()): PlanoDaBaixa {
   const d = doc as {
     payment_terms?: { mode?: string; method?: string; installments?: unknown } | null;

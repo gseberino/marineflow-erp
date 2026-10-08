@@ -152,17 +152,47 @@ describe('cancelPaymentCascade', () => {
     expect(gravacoes('payments')).toEqual([]);
   });
 
-  it('pagamento à mão ligado ao Pix: o banco só desliga, e o estorno segue', async () => {
+  it('pagamento à mão ligado ao Pix: o banco só desliga, e o estorno segue pela função do banco', async () => {
     banco.respostas['payments.select'] = [
       ok({ id: 'p1', amount: 500, receivable_id: 'r1', payable_id: null, bank_transaction_id: 'bt1' }),
       ok({ status: 'confirmed' }),
-      ok([]),
     ];
     banco.respostas['rpc.desfazer_aplicacao'] = ok({ ok: true });
-    banco.respostas['receivables.select'] = ok({ amount: 500 });
+    banco.respostas['rpc.estornar_pagamento'] = ok({ ok: true });
     await cancelPaymentCascade('p1', 'estorno');
-    expect(gravacoes('payments')[0].valores).toMatchObject({ status: 'cancelled' });
-    expect(gravacoes('receivables')[0].valores).toMatchObject({ status: 'pending', paid_amount: 0, balance_amount: 500 });
+    expect(banco.chamadas.map((c) => c.alvo)).toContain('rpc.desfazer_aplicacao');
+    expect(banco.chamadas.find((c) => c.alvo === 'rpc.estornar_pagamento')?.valores).toEqual({ p_pagamento: 'p1', p_motivo: 'estorno' });
+    expect(gravacoes('payments')).toEqual([]);
+    expect(gravacoes('receivables')).toEqual([]);
+  });
+
+  // 07/10/2026: o estorno gravava passo a passo pelo navegador — em mês fechado o pagamento ficava
+  // cancelado e a conta sem recalcular. Agora é estornar_pagamento, numa transação só.
+  it('pagamento lançado à mão: uma chamada a estornar_pagamento, nada gravado pelo navegador', async () => {
+    banco.respostas['payments.select'] = ok({ id: 'p1', amount: 800, receivable_id: 'r1', payable_id: null, bank_transaction_id: null });
+    banco.respostas['rpc.estornar_pagamento'] = ok({ ok: true });
+    await cancelPaymentCascade('p1', 'duplicado');
+    expect(banco.chamadas.filter((c) => c.op === 'rpc').map((c) => c.alvo)).toEqual(['rpc.estornar_pagamento']);
+    expect(gravacoes('payments')).toEqual([]);
+    expect(gravacoes('receivables')).toEqual([]);
+    expect(gravacoes('bank_transactions')).toEqual([]);
+    expect(gravacoes('service_order_expenses')).toEqual([]);
+  });
+
+  it('mês fechado: o banco recusa o estorno inteiro e o erro chega à tela', async () => {
+    banco.respostas['payments.select'] = ok({ id: 'p1', amount: 800, receivable_id: null, payable_id: 'y1', bank_transaction_id: null });
+    banco.respostas['rpc.estornar_pagamento'] = falha('O mês 09/2026 está fechado');
+    await expect(cancelPaymentCascade('p1', 'duplicado')).rejects.toThrow('Não consegui estornar o pagamento: O mês 09/2026 está fechado');
+    expect(gravacoes('payments')).toEqual([]);
+  });
+
+  it('conta a pagar que veio do extrato: não estorna, diz o caminho (desfazer a aprovação)', async () => {
+    banco.respostas['payments.select'] = ok({ id: 'p1', amount: 114, receivable_id: null, payable_id: 'y1', bank_transaction_id: 'bt9' });
+    banco.respostas['rpc.estornar_pagamento'] = falha('Este pagamento veio do extrato do banco: não se estorna, desfaz-se a aplicação do Pix (conta a receber) ou a aprovação do lançamento (conta a pagar) — a linha volta para a fila do Extrato.');
+    await expect(cancelPaymentCascade('p1', 'x')).rejects.toThrow('Desfazer a aprovação');
+    expect(banco.chamadas.some((c) => c.alvo === 'rpc.desfazer_aplicacao')).toBe(false);
+    expect(gravacoes('payments')).toEqual([]);
+    expect(gravacoes('bank_transactions')).toEqual([]);
   });
 
   it('erro do desfazer_aplicacao pára o estorno', async () => {

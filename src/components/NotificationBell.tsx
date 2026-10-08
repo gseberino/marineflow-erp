@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, DollarSign, Package, Clock, AlertTriangle, Check, CheckCheck, XCircle, ListChecks, UserPlus, WifiOff, MessageCircle, TrendingUp, BookOpen } from 'lucide-react';
+import { Bell, DollarSign, Package, Clock, AlertTriangle, Check, CheckCheck, XCircle, ListChecks, UserPlus, WifiOff, MessageCircle, TrendingUp, BookOpen, Wrench, CalendarCheck, Bot } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,10 @@ const typeConfig: Record<NotificationType, { Icon: typeof Bell; className: strin
   WHATSAPP_VOLTOU: { Icon: MessageCircle, className: 'text-emerald-600 bg-emerald-500/10' },
   VIGIA_NEGOCIO: { Icon: TrendingUp, className: 'text-primary bg-primary/10' },
   REGRA_APRENDIDA: { Icon: BookOpen, className: 'text-primary bg-primary/10' },
+  // 07/10/2026: cliente respondeu ao lembrete de revisão; SIM do agendamento; missão da IA.
+  REVISAO_RESPOSTA: { Icon: Wrench, className: 'text-primary bg-primary/10' },
+  AGENDAMENTO_CONFIRMADO: { Icon: CalendarCheck, className: 'text-emerald-600 bg-emerald-500/10' },
+  FOLLOWUP_MISSION: { Icon: Bot, className: 'text-violet-600 bg-violet-500/10' },
 };
 
 function timeAgo(iso: string): string {

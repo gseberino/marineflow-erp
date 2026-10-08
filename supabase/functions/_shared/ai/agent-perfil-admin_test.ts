@@ -72,7 +72,8 @@ Deno.test("admin_enxuto: o admin vê só PERFIL_ADMIN + ferramenta_extra, e a re
   // — via do técnico, update_task, anotação de Pix, estorno, criar cobrança/registrar contato e o PDF
   // da nota — e o resto (marina, contatos da embarcação, favorecido, sugestões, compras) foi para a
   // rede → 109. Teto 110.
-  assert(visiveis.length <= 110, `admin vê ${visiveis.length}`);
+  // 08/10/2026: listar_emails e ler_email (o dono pediu o assistente lendo as caixas) → 111. Teto 112.
+  assert(visiveis.length <= 112, `admin vê ${visiveis.length}`);
   // A rede é o complemento: nada à vista está na rede, e o que saiu está.
   assertEquals(Object.keys(r.alcancaveisPelaRede).filter((n) => r.toolsByName[n]), []);
   assert(r.alcancaveisPelaRede["list_low_stock"], "list_low_stock devia estar ao alcance da rede");

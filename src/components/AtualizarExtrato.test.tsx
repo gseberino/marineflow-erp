@@ -34,7 +34,7 @@ describe('AtualizarExtrato', () => {
   });
 
   it('com conta de banco, mostra o botão e busca todas', async () => {
-    estado.conexoes = [conexao({ provider_updated_at: '2026-10-06T12:00:00Z' })];
+    estado.conexoes = [conexao({ provider_updated_at: new Date(Date.now() - 2 * 3600_000).toISOString() }) /* relativo ao agora: data fixa vira "atrasado" depois de 36 h */];
     render(<AtualizarExtrato />);
     await userEvent.click(screen.getByRole('button', { name: /Atualizar extrato/ }));
     expect(estado.chamadas).toEqual([{}]);

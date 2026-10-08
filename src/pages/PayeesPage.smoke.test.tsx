@@ -13,8 +13,8 @@ import PayeesPage from './PayeesPage';
 import type { Favorecido } from '@/hooks/use-payees';
 import { totaisPorFavorecido } from '@/lib/favorecidos-no-ano';
 
-const { favorecidos, salvarMock, totaisMock } = vi.hoisted(() => ({
-  salvarMock: vi.fn(),
+const { favorecidos, alternarMock, totaisMock } = vi.hoisted(() => ({
+  alternarMock: vi.fn(),
   totaisMock: vi.fn(),
   favorecidos: [
     {
@@ -47,7 +47,7 @@ vi.mock('@/hooks/use-payees', async (importOriginal) => {
   return {
     ...real,
     usePayees: () => ({ data: favorecidos, isLoading: false }),
-    useSalvarPayee: () => ({ mutate: salvarMock, isPending: false }),
+    useAlternarAtivoDoFavorecido: () => ({ mutate: alternarMock, isPending: false }),
     useTotaisDosFavorecidos: (ano: number) => totaisMock(ano),
   };
 });
@@ -110,11 +110,28 @@ describe('PayeesPage', () => {
     expect(screen.getByText('Inativo')).toBeInTheDocument();
   });
 
-  it('desativar não apaga — só marca inativo', async () => {
+  // 07/10/2026: desativar mandava { id, active } para o salvar, que apagava o CPF/CNPJ (document
+  // ausente virava null), e não pausava as regras do extrato. Agora é o "desativar" próprio
+  // (só o ativo + pausa as regras, como o assistente), no menu da linha e com confirmação.
+  it('desativar não apaga — pede confirmação e desativa pelo caminho que preserva o documento', async () => {
     const user = userEvent.setup();
+    alternarMock.mockClear();
     renderPagina();
-    await user.click(await screen.findByLabelText(/Desativar Gustavo/i));
-    expect(salvarMock).toHaveBeenCalledWith({ id: 'p1', active: false });
+    await user.click(await screen.findByRole('button', { name: /mais ações para favorecido Gustavo/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /Desativar/ }));
+    expect(alternarMock).not.toHaveBeenCalled();
+    expect(await screen.findByText(/regras do extrato que apontam/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Desativar' }));
+    expect(alternarMock).toHaveBeenCalledWith({ favorecido: favorecidos[0], ativar: false });
+  });
+
+  it('reativar o inativo não pede confirmação', async () => {
+    const user = userEvent.setup();
+    alternarMock.mockClear();
+    renderPagina();
+    await user.click(await screen.findByRole('button', { name: /mais ações para favorecido João/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /Reativar/ }));
+    expect(alternarMock).toHaveBeenCalledWith({ favorecido: favorecidos[2], ativar: true });
   });
 
   it('filtra por tipo', async () => {

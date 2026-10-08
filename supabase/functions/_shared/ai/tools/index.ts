@@ -28,6 +28,7 @@ import { whatsappTools } from "./whatsapp.ts";
 import { whatsappHistoryTools } from "./whatsapp-history.ts";
 import { documentoPdfTools } from "./documentos-pdf.ts";
 import { relatorioTools } from "./relatorios.ts";
+import { emailTools } from "./email.ts";
 import { uiTools } from "./ui.ts";
 import { memoryTools } from "./memory.ts";
 import { learningTools } from "./learning.ts";
@@ -57,6 +58,8 @@ import { favorecidoTools } from "./favorecidos.ts";
 // fiscal e compras (07/10/2026): PDF da nota pelo WhatsApp; OC e cotação até o fim.
 import { notaFiscalPdfTools } from "./nota-fiscal-pdf.ts";
 import { comprasCicloTools } from "./compras-ciclo.ts";
+// planos de manutenção (07/10/2026): planos, lembretes de revisão ao cliente (com o sim do dono) e métricas.
+import { planosManutencaoTools } from "./planos-manutencao.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -94,6 +97,7 @@ export const allTools: ToolDef[] = [
   ...acompanhamentoTools,
   ...documentoPdfTools,
   ...relatorioTools,
+  ...emailTools,
   ...uiTools,
   ...memoryTools,
   ...learningTools,
@@ -120,6 +124,8 @@ export const allTools: ToolDef[] = [
   // fiscal e compras (07/10/2026)
   ...notaFiscalPdfTools,
   ...comprasCicloTools,
+  // planos de manutenção (07/10/2026)
+  ...planosManutencaoTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export const toolsByName: Record<string, ToolDef> = Object.fromEntries(allTools.map((t) => [t.name, t]));

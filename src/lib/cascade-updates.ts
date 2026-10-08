@@ -242,6 +242,16 @@ export async function recalcPayableBalance(payableId: string) {
   }).eq('id', payableId), 'Não consegui recalcular a conta');
 }
 
+/** Pagamento que veio do extrato: o caminho que devolve a linha para a fila, em vez do estorno. */
+function orientacaoDoExtrato(p: { receivable_id?: string | null; payable_id?: string | null }): string {
+  return p.payable_id
+    ? 'Este pagamento veio do extrato do banco: não se estorna aqui. Em Contas a pagar, abra "Corrigir" neste lançamento e, '
+      + 'no quadro "Ligado ao extrato", use "Desfazer a aprovação" (ou "Desfazer o vínculo com o extrato") — a linha volta '
+      + 'para a fila do Extrato.'
+    : 'Este pagamento veio do extrato do banco: não se estorna aqui. Em Contas a receber, abra "Corrigir" nesta conta e, '
+      + 'no quadro "Ligado ao extrato", desfaça o vínculo — a linha volta para a fila do Extrato.';
+}
+
 export async function cancelPaymentCascade(paymentId: string, reason: string) {
   const { data: payment } = conferir(await supabase
     .from('payments')
@@ -268,38 +278,18 @@ export async function cancelPaymentCascade(paymentId: string, reason: string) {
     }
   }
 
-  conferir(await supabase.from('payments').update({
-    status: 'cancelled',
-    cancelled_at: new Date().toISOString(),
-    cancellation_reason: reason,
-  }).eq('id', paymentId), 'Não consegui estornar o pagamento');
-
-  if (payment.receivable_id) {
-    await recalcReceivableBalance(payment.receivable_id);
+  // O estorno em si (07/10/2026) é a função do banco estornar_pagamento — a mesma do assistente:
+  // cancela o pagamento com o motivo, recalcula a conta, desfaz o reembolso de gasto da OS e grava a
+  // auditoria NUMA transação. Antes a tela gravava passo a passo pelo navegador: em mês fechado o
+  // gatilho da conta recusava o recálculo DEPOIS de o pagamento já estar cancelado — o pagamento
+  // ficava estornado e a conta continuava paga.
+  // Pagamento que veio do EXTRATO a função recusa: a linha do banco é a prova de que o dinheiro
+  // andou. O Pix aplicado numa conta a receber já foi tratado acima (desfazer_aplicacao); o resto
+  // (lançamento aprovado do extrato, linha conciliada) tem caminho próprio, que devolve a linha para
+  // a fila — a tela diz qual, em vez de cancelar o pagamento e deixar a linha presa à conta.
+  const { error } = await supabase.rpc('estornar_pagamento' as never, { p_pagamento: paymentId, p_motivo: reason } as never);
+  if (error) {
+    if (/veio do extrato/i.test(error.message)) throw new Error(orientacaoDoExtrato(payment));
+    throw new Error(`Não consegui estornar o pagamento: ${error.message}`);
   }
-  if (payment.payable_id) {
-    await recalcPayableBalance(payment.payable_id);
-  }
-
-  // Undo bank reconciliation
-  conferir(await supabase.from('bank_transactions').update({
-    reconciled: false,
-    reconciled_payment_id: null,
-  }).eq('reconciled_payment_id', paymentId), 'Não consegui soltar a linha do extrato');
-
-  // Undo technician expense reimbursement if this payment was the proof
-  conferir(await supabase.from('service_order_expenses').update({
-    reimbursed: false,
-    reimbursed_at: null,
-    reimbursed_payment_id: null,
-  }).eq('reimbursed_payment_id', paymentId), 'Não consegui desfazer o reembolso');
-
-  await writeAuditLog({
-    table_name: 'payments',
-    record_id: paymentId,
-    action: 'cancel',
-    previous_value: { status: 'confirmed', amount: payment.amount },
-    new_value: { status: 'cancelled' },
-    reason,
-  });
 }

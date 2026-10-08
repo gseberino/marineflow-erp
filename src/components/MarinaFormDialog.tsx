@@ -57,7 +57,7 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
         address_line_1: marina.address_line_1 ?? '',
         address_number: '',
         address_complement: '',
-        neighborhood: '',
+        neighborhood: marina.neighborhood ?? '',
         city: marina.city ?? '',
         state: marina.state ?? '',
         country: marina.country ?? 'Brazil',
@@ -84,6 +84,9 @@ export function MarinaFormDialog({ open, onOpenChange, marina, onSaved }: Props)
         phone: form.phone || null,
         email: form.email || null,
         address_line_1: fullAddress || null,
+        // Bairro (07/10/2026): o campo aparecia e o CEP o preenchia, mas a tabela não tinha a coluna —
+        // era descartado ao salvar. Agora é gravado (migration 20261007161000_marina_bairro).
+        neighborhood: form.neighborhood || null,
         city: form.city || null,
         state: form.state || null,
         postal_code: form.postal_code || null,

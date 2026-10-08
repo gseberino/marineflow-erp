@@ -18,6 +18,8 @@ import { historicoSemIdentidade } from "../_shared/banking/proposals.ts";
 import { normalizeText } from "../_shared/banking/matching.ts";
 import { linhasDoExtratoNoResumo } from "./extrato.ts";
 import { lerAnalise } from "../_shared/financeiro/vigia-do-negocio.ts";
+import { montarSecaoEmail, type EmailDigestItem } from "../_shared/email/digest.ts";
+import { embarcacoesComPlano, secaoDeRevisoes, type PlanoDoResumo, type SecaoDeRevisoes } from "./revisoes.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -151,9 +153,52 @@ servirComCors(async (req) => {
       }
     }
 
+    // ── Revisões: planos de manutenção com lembretes (07/10/2026) ──
+    // Planos primeiro (view v_maintenance_plans_due): vencendo em 30 dias, vencidas, quem respondeu
+    // ao lembrete nas últimas 24h e lembretes esperando o "sim" do dono. Até regerar os tipos
+    // (07/10/2026) a view e a tabela de eventos vão por nome. Falha de leitura vira linha de aviso,
+    // não silêncio — e a heurística abaixo segue valendo para tudo, como antes.
+    let revisoes: SecaoDeRevisoes = { linhas: [], sugestao: null, acao: null };
+    let comPlano = new Set<string>();
+    try {
+      const { data: planosDue, error: pErr } = await admin
+        .from("v_maintenance_plans_due")
+        .select("plan_id, vessel_id, vessel_name, client_name, name, estimated_value, next_due_on, dias_para_vencer, situacao")
+        .limit(1000);
+      if (pErr) throw pErr;
+      const desde24h = new Date(now.getTime() - 24 * 3600000).toISOString();
+      const { data: respostas, error: rErr } = await admin
+        .from("maintenance_plan_events")
+        .select("plan_id, detalhe")
+        .eq("tipo", "client_replied")
+        .gte("created_at", desde24h)
+        .limit(50);
+      if (rErr) throw rErr;
+      const { count: aguardandoSim, error: aErr } = await admin
+        .from("ai_operator_pending_actions")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "pending")
+        .eq("action_name", "enviar_lembrete_de_revisao");
+      if (aErr) throw aErr;
+      const planosLidos = ((planosDue as any[]) || []) as PlanoDoResumo[];
+      comPlano = embarcacoesComPlano(planosLidos);
+      const fmtRev = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+      revisoes = secaoDeRevisoes(
+        planosLidos,
+        ((respostas as any[]) || []).map((r) => ({ plan_id: String(r.plan_id), texto: r.detalhe?.texto ?? null })),
+        aguardandoSim ?? 0,
+        (v) => fmtRev.format(v),
+        diaBR(now),
+      );
+    } catch (e) {
+      console.warn("[ai-daily-briefing] revisões falharam:", (e as Error).message);
+      revisoes = { linhas: ["", "🛠️ Revisões: não deu para ler os planos de manutenção agora."], sugestao: null, acao: null };
+    }
+
     // Manutenção preventiva (CRM proativo): ativos com serviço concluído há 12+ meses.
     // Num negócio náutico de serviço, cada um destes é um orçamento em potencial — e todo
     // orçamento novo cai no loop de cotação. Best-effort: nunca derruba o digest.
+    // 07/10/2026: só para embarcações SEM plano — as com plano estão na seção Revisões acima.
     const manutLines: string[] = [];
     const manutCandidatos: Array<{ ativo: string; cliente: string; meses: number }> = [];
     try {
@@ -169,6 +214,7 @@ servirComCors(async (req) => {
         const when = so.check_out_at || so.scheduled_end_at || so.updated_at;
         if (!when) continue;
         const k = String(so.vessel_id);
+        if (comPlano.has(k)) continue;
         if (!lastByVessel[k] || new Date(when).getTime() > new Date(lastByVessel[k]).getTime()) lastByVessel[k] = when;
       }
       const vesselIds = Object.keys(lastByVessel);
@@ -189,7 +235,7 @@ servirComCors(async (req) => {
         }
         manutCandidatos.sort((a, b) => b.meses - a.meses);
         if (manutCandidatos.length > 0) {
-          manutLines.push(`🔧 Revisão vencida (12+ meses): *${manutCandidatos.length}*`);
+          manutLines.push(`🔧 Sem plano, último serviço há 12+ meses: *${manutCandidatos.length}*`);
           for (const c of manutCandidatos.slice(0, 3)) {
             manutLines.push(`   • ${c.ativo} — ${c.cliente} · ${c.meses} meses`);
           }
@@ -559,6 +605,34 @@ servirComCors(async (req) => {
       console.warn("[ai-daily-briefing] varredura de conciliação falhou:", e);
     }
 
+    // ── E-mail (08/10/2026): o que chegou nas caixas financeiro@ e gustavo@ nas últimas 24 h, já
+    // classificado pela triagem do email-imap. Pouco de propósito (_shared/email/digest.ts): urgente,
+    // esperando resposta e documentos em linha; informativo e filtrado só em número. Best-effort.
+    const emailLines: string[] = [];
+    try {
+      const desde = new Date(now.getTime() - 24 * 3600_000).toISOString();
+      const { data: emails, error: eErr } = await admin.from("email_messages")
+        .select("id, from_name, from_address, subject, received_at, triage_class, triage_fraud_alert, muted, clients(name), suppliers(name), email_attachments(kind)")
+        .gte("received_at", desde).not("triage_class", "is", null).order("received_at", { ascending: false }).limit(200);
+      if (eErr) throw eErr;
+      const itens: EmailDigestItem[] = ((emails ?? []) as any[]).filter((m) => !m.muted).map((m) => {
+        const kinds = ((m.email_attachments ?? []) as { kind: string }[]).map((a) => a.kind);
+        const resumoAnexo = kinds.includes("nfe_xml") ? "NF-e anexa" : kinds.includes("boleto_pdf") ? "boleto anexo" : null;
+        return {
+          classe: m.triage_class,
+          remetente: m.clients?.name ?? m.suppliers?.name ?? m.from_name ?? m.from_address,
+          assunto: m.subject,
+          recebidoEm: m.received_at,
+          resumoAnexo,
+          alertaFraude: !!m.triage_fraud_alert,
+        };
+      });
+      const secao = montarSecaoEmail(itens);
+      if (secao) emailLines.push("", secao);
+    } catch (e) {
+      console.warn("[ai-daily-briefing] bloco de e-mail falhou:", (e as Error).message);
+    }
+
     // ── Vigia do negócio (07/10/2026, pedido do dono) ─────────────────────────────────────
     // Segunda-feira e dia 1 (ou ?vigia=1 para pré-visualizar): ponto de equilíbrio × último mês
     // fechado, despesa por categoria em alta, concentração/margem por sistema. Leitura em
@@ -598,6 +672,7 @@ servirComCors(async (req) => {
       const dias = Math.floor((now.getTime() - new Date(o.updated_at).getTime()) / 86400000);
       sugestoes.push(`retomar a *${o.service_order_number}*${nome ? ` (${nome})` : ""}, parada há ${dias}d.`);
     }
+    if (revisoes.sugestao) sugestoes.push(revisoes.sugestao); // planos de manutenção (07/10/2026)
     for (const c of manutCandidatos.slice(0, 3)) {
       sugestoes.push(`oferecer revisão do *${c.ativo}* (${c.cliente}) — ${c.meses} meses sem serviço. Me peça que eu preparo o orçamento.`);
     }
@@ -628,6 +703,7 @@ servirComCors(async (req) => {
     if (missaoLines.length > 0) quickActions.push(`   • *Como estão os acompanhamentos da IA?*`);
     if (filaFinanceiraCount > 0) quickActions.push(`   • *O que está esperando na caixa de entrada financeira?*`);
     quickActions.push(...extratoNoResumo.acoes);
+    if (revisoes.acao) quickActions.push(revisoes.acao);
     const quickActionLines = quickActions.length > 0
       ? ["", "⚡ *Ações rápidas* (responda com uma):", ...quickActions]
       : [];
@@ -646,8 +722,10 @@ servirComCors(async (req) => {
       ...extratoNoResumo.linhas,
       ...conselheiroLines,
       ...vigiaLines,
+      ...emailLines,
       ...conciliaLines,
       ...stuckLines,
+      ...revisoes.linhas,
       ...manutLines,
       ...stockLines,
       ...waitingLines,

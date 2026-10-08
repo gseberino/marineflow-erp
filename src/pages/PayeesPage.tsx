@@ -12,12 +12,11 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
-} from '@/components/ui/tooltip';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { useConfirmacao } from '@/components/Confirmacao';
 import { PayeeFormDialog } from '@/components/PayeeFormDialog';
 import {
-  usePayees, useSalvarPayee, useTotaisDosFavorecidos, ROTULO_TIPO, type Favorecido, type TipoFavorecido,
+  usePayees, useAlternarAtivoDoFavorecido, useTotaisDosFavorecidos, ROTULO_TIPO, type Favorecido, type TipoFavorecido,
 } from '@/hooks/use-payees';
 import { somaDosFavorecidos, type TotalDoFavorecido } from '@/lib/favorecidos-no-ano';
 import { hojeLocal } from '@/lib/dia';
@@ -88,7 +87,6 @@ function RecebidoNoAno({ total, ano }: { total: TotalDoFavorecido | undefined; a
 
 export default function PayeesPage() {
   const { data: favorecidos = [], isLoading } = usePayees(false);   // inclui inativos
-  const salvar = useSalvarPayee();
   const { formatCurrency } = useI18n();
 
   const anoAtual = Number(hojeLocal().slice(0, 4));
@@ -122,8 +120,18 @@ export default function PayeesPage() {
     [totais.data, visiveis],
   );
 
-  const alternarAtivo = (f: Favorecido) =>
-    salvar.mutate({ id: f.id, active: !f.active });
+  // Desativar/reativar manda SÓ o "ativo" (o documento fica) e pausa/devolve as regras do extrato
+  // que apontam para a pessoa — o mesmo que o assistente faz (07/10/2026).
+  const alternar = useAlternarAtivoDoFavorecido();
+  const { pedir, dialogo } = useConfirmacao();
+  const pedirDesativar = (f: Favorecido) => pedir({
+    titulo: `Desativar ${f.name}?`,
+    descricao: 'Some das listas; os pagamentos antigos continuam no histórico. As regras do extrato que apontam '
+      + 'para ele (pelo CPF/CNPJ ou pelo nome completo) são pausadas — senão o próximo Pix entraria nele de novo. '
+      + 'Reativar devolve essas regras.',
+    confirmar: 'Desativar',
+    acao: () => alternar.mutate({ favorecido: f, ativar: false }),
+  });
 
   return (
     <V2Shell>
@@ -197,8 +205,7 @@ export default function PayeesPage() {
               </p>
             </Card>
           ) : (
-            <TooltipProvider>
-              <div className="space-y-2">
+            <div className="space-y-2">
                 {visiveis.map((f) => (
                   <Card key={f.id} className={`p-3 ${f.active ? '' : 'opacity-60'}`}>
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -236,40 +243,26 @@ export default function PayeesPage() {
                         {totais.data && <RecebidoNoAno total={totais.data.get(f.id)} ano={ano} />}
                       </div>
 
-                      <div className="flex shrink-0 gap-1">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button size="sm" variant="ghost" aria-label={`Editar ${f.name}`}
-                              onClick={() => setEditando(f)}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Editar</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            {/* Desativar, nunca apagar: pagamentos antigos apontam para cá,
-                                e apagar deixaria despesas órfãs no histórico. */}
-                            <Button size="sm" variant="ghost" disabled={salvar.isPending}
-                              aria-label={`${f.active ? 'Desativar' : 'Reativar'} ${f.name}`}
-                              onClick={() => alternarAtivo(f)}>
-                              {f.active ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {f.active ? 'Desativar (some das listas, histórico fica)' : 'Reativar'}
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
+                      {/* Desativar, nunca apagar: pagamentos antigos apontam para cá, e apagar deixaria
+                          despesas órfãs no histórico. Desativar pausa as regras do extrato dele (07/10/2026). */}
+                      <AcoesDaLinha
+                        rotulo={`favorecido ${f.name}`}
+                        ocupada={alternar.isPending}
+                        rapidas={[{ texto: 'Editar', icone: Pencil, onClick: () => setEditando(f) }]}
+                        menu={[f.active
+                          ? { texto: 'Desativar', icone: UserX, perigo: true, onClick: () => pedirDesativar(f),
+                              titulo: 'Some das listas; o histórico fica' }
+                          : { texto: 'Reativar', icone: UserCheck, onClick: () => alternar.mutate({ favorecido: f, ativar: true }) }]}
+                      />
                     </div>
                   </Card>
                 ))}
-              </div>
-            </TooltipProvider>
+            </div>
           )}
         </div>
       </PageShell>
 
+      {dialogo}
       <PayeeFormDialog aberto={criando} onFechar={() => setCriando(false)} />
       {editando && (
         <PayeeFormDialog

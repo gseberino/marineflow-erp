@@ -134,16 +134,16 @@ export function useCreatePurchaseOrder() {
 export function useUpdatePurchaseOrder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, ...values }: Partial<PurchaseOrder> & { id: string }) => {
+    mutationFn: async ({ id, statusEsperado, ...values }: Partial<PurchaseOrder> & { id: string; statusEsperado?: POStatus }) => {
       const { purchase_order_items: _items, suppliers: _s, service_orders: _so, ...fields } = values as any;
-      const { data, error } = await supabase
-        .from('purchase_orders')
-        .update(fields)
-        .eq('id', id)
-        .select()
-        .single();
+      let q = supabase.from('purchase_orders').update(fields).eq('id', id);
+      // Gravação condicional (07/10/2026): a tela decidiu o que permitir pela situação que VIU; se a OC
+      // foi recebida ou cancelada nesse meio-tempo, nada muda (como as tools do assistente).
+      if (statusEsperado) q = q.eq('status', statusEsperado);
+      const { data, error } = await q.select();
       if (error) throw error;
-      return data;
+      if (!data?.length) throw new Error('A ordem de compra mudou de situação enquanto você editava. Recarregue e confira.');
+      return data[0];
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchase-orders'] });
@@ -157,8 +157,17 @@ export function useDeletePurchaseOrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('purchase_orders').delete().eq('id', id);
+      // Só rascunho sem nada recebido se exclui (07/10/2026, as travas de delete_purchase_order do
+      // assistente): OC enviada se cancela (fica a trilha); recebida tem estoque e conta a pagar.
+      const { data: itens, error: erroItens } = await supabase
+        .from('purchase_order_items').select('received_qty').eq('purchase_order_id', id);
+      if (erroItens) throw erroItens;
+      if ((itens ?? []).some((i: { received_qty: number | null }) => Number(i.received_qty ?? 0) > 0)) {
+        throw new Error('Esta OC já tem item recebido — não se exclui.');
+      }
+      const { data, error } = await supabase.from('purchase_orders').delete().eq('id', id).eq('status', 'draft').select('id');
       if (error) throw error;
+      if (!data?.length) throw new Error('Só rascunho se exclui. Para desistir de uma OC enviada, cancele.');
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchase-orders'] });

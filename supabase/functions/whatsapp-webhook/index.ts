@@ -4,6 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { EVOLUTION_STATUS_MAP } from "../_shared/whatsapp/evolution-provider.ts";
 import { classificarResposta } from "../_shared/ai/comms/reply-router.ts";
+import { lerDataDaResposta } from "../_shared/revisao/data-da-resposta.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 // Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
@@ -421,6 +422,14 @@ export async function handler(req: Request): Promise<Response> {
         // recibo foi mandado nos últimos 7 dias. Mesma regra de concordância curta.
         admin.rpc("registrar_conferencia_do_freelancer", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
           .then(() => {}, () => {});
+      }
+      // Resposta ao lembrete de revisão (07/10/2026): só vale para quem recebeu lembrete/campanha nos
+      // últimos 21 dias (a RPC confere). PARAR → opt-out; "sim" → tarefa "Agendar revisão"; uma data
+      // ("dia 15", "mês que vem" — lida aqui, com teste) → adia o plano; outro texto → sino.
+      if (body.trim().length <= 500) {
+        admin.rpc("registrar_resposta_da_revisao", {
+          p_telefone: phone, p_texto: body, p_mensagem: msg?.id ?? null, p_data: lerDataDaResposta(body),
+        }).then(() => {}, () => {});
       }
     }
 

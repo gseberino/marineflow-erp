@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useI18n } from '@/i18n';
 import { useVessel } from '@/hooks/use-vessels';
 import { statusConfig } from '@/lib/constants';
@@ -20,6 +20,8 @@ export default function VesselDetail() {
   const { t, formatCurrency, formatDate } = useI18n();
   const { data: vessel, isLoading } = useVessel(id);
   const [editOpen, setEditOpen] = useState(false);
+  const [searchParams] = useSearchParams();
+  const abaInicial = searchParams.get('tab') || 'overview';
 
   const { data: orders } = useQuery({
     queryKey: ['service-orders', 'vessel', id],
@@ -74,7 +76,8 @@ export default function VesselDetail() {
         </Button>
       </div>
 
-      <Tabs defaultValue="overview">
+      {/* ?tab=maintenance: a Prospecção e a aba Revisões abrem direto nos planos (07/10/2026). */}
+      <Tabs defaultValue={abaInicial}>
         <TabsList className="flex h-auto w-full flex-wrap justify-start">
           <TabsTrigger value="overview">{t.common.overview}</TabsTrigger>
           <TabsTrigger value="technical">{t.vessels.technicalProfile}</TabsTrigger>

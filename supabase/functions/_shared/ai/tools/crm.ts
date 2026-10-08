@@ -1,4 +1,6 @@
 import type { ToolDef } from "./registry.ts";
+// planos de manutenção (07/10/2026): quem tem plano vem do plano (v_maintenance_plans_due).
+import { lerPlanosDue } from "../../revisao/lembretes.ts";
 
 // CRM proativo (Fase 2) — SÓ LEITURA, sem schema novo.
 // A ideia: um negócio náutico de serviço vive de manutenção recorrente. Em vez de esperar o
@@ -54,7 +56,7 @@ export const crmTools: ToolDef[] = [
   {
     name: "list_maintenance_due",
     description:
-      "Lista ATIVOS (embarcações/motorhomes) que passaram do intervalo de manutenção — sem serviço concluído há X meses, ou nunca atendidos. Traz o cliente, quando foi o último serviço e os EQUIPAMENTOS do ativo, para você sugerir o que revisar (ex.: revisão anual do inversor/baterias). Só leitura — não envia nada ao cliente.",
+      "Lista ATIVOS (embarcações/motorhomes) que passaram do intervalo de manutenção. PRIMEIRO os PLANOS DE MANUTENÇÃO vencendo em 30 dias ou vencidos (vencimento exato do plano); depois, marcados 'sem plano', os ativos SEM plano parados há X meses ou nunca atendidos (heurística). Traz o cliente, o último serviço e os EQUIPAMENTOS do ativo, para você sugerir o que revisar. Só leitura — não envia nada ao cliente.",
     input_schema: {
       type: "object",
       properties: {
@@ -68,6 +70,33 @@ export const crmTools: ToolDef[] = [
       const meses = Number(args.months) > 0 ? Number(args.months) : 12;
       const incluirNunca = args.include_never_serviced !== false;
       const limite = Math.min(Number(args.limit) || 15, 50);
+
+      // Planos primeiro (07/10/2026): o vencimento do plano é o que vale; a heurística de meses
+      // fica só para quem NÃO tem plano. Falha ao ler os planos é dita, não vira "nenhum plano".
+      let planosVencendo: Array<Record<string, unknown>> = [];
+      let comPlano = new Set<string>();
+      let avisoDosPlanos: string | null = null;
+      try {
+        const planos = await lerPlanosDue(sb);
+        comPlano = new Set(planos.map((p) => p.vessel_id));
+        planosVencendo = planos
+          .filter((p) => p.situacao !== "adiada" && p.dias_para_vencer <= 30)
+          .slice(0, limite)
+          .map((p) => ({
+            vessel_id: p.vessel_id,
+            ativo: p.vessel_name,
+            cliente: p.client_name || "—",
+            client_id: p.client_id,
+            plano: p.plan_name,
+            vence: p.next_due_on,
+            dias_para_vencer: p.dias_para_vencer,
+            situacao: p.situacao,
+            ultimo_servico: p.last_service_at,
+            valor_estimado: p.estimated_value != null ? Number(p.estimated_value) : null,
+          }));
+      } catch (e) {
+        avisoDosPlanos = `Não consegui ler os planos de manutenção (${e instanceof Error ? e.message : String(e)}); abaixo só a heurística.`;
+      }
 
       const ultimoPorAtivo = await ultimoServicoPor(sb, "vessel_id");
 
@@ -83,15 +112,19 @@ export const crmTools: ToolDef[] = [
           const ultimo = ultimoPorAtivo[String(v.id)] || null;
           return { v, ultimo, meses: mesesDesde(ultimo) };
         })
+        .filter((c) => !comPlano.has(String(c.v.id)))
         .filter((c) => (c.ultimo === null ? incluirNunca : (c.meses ?? 0) >= meses))
         // Nunca atendidos por último: o vencido de verdade tem prioridade comercial.
         .sort((a, b) => (b.meses ?? -1) - (a.meses ?? -1))
         .slice(0, limite);
 
       return {
-        criterio: `sem serviço concluído há ${meses}+ meses${incluirNunca ? " (inclui nunca atendidos)" : ""}`,
+        planos_vencendo: planosVencendo,
+        ...(avisoDosPlanos ? { aviso_planos: avisoDosPlanos } : {}),
+        criterio: `sem plano: sem serviço concluído há ${meses}+ meses${incluirNunca ? " (inclui nunca atendidos)" : ""}`,
         count: candidatos.length,
         results: candidatos.map((c) => ({
+          sem_plano: true,
           vessel_id: c.v.id,
           ativo: c.v.name,
           tipo: c.v.asset_type || null,

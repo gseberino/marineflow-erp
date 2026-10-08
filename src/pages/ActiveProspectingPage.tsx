@@ -10,10 +10,10 @@ import { useSendWhatsAppText } from '@/hooks/use-whatsapp-inbox';
 import { toast } from 'sonner';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { RevisoesPreventivas } from '@/components/agenda/RevisoesPreventivas';
 
 export default function ActiveProspectingPage() {
   const [abandonedQuotes, setAbandonedQuotes] = useState<any[]>([]);
-  const [maintenanceTargets, setMaintenanceTargets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTarget, setSelectedTarget] = useState<any>(null);
   const [draftMsg, setDraftMsg] = useState('');
@@ -38,29 +38,7 @@ export default function ActiveProspectingPage() {
         .limit(20);
 
       setAbandonedQuotes(quotes || []);
-
-      // 2. Embarcações que precisam de manutenção (última OS concluída há > 6 meses)
-      const sixMonthsAgo = new Date();
-      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-
-      // Usando uma query simples para pegar OS antigas e agrupar (simplificado para demonstração)
-      const { data: oldOs } = await supabase
-        .from('service_orders')
-        .select('*, clients(name, phone, whatsapp), vessels(name, engine_type)')
-        .eq('status', 'completed')
-        .lte('created_at', sixMonthsAgo.toISOString())
-        .order('created_at', { ascending: false })
-        .limit(20);
-
-      // Filtrar duplicatas de embarcações
-      const uniqueVessels = new Map();
-      oldOs?.forEach(os => {
-        if (os.vessel_id && !uniqueVessels.has(os.vessel_id)) {
-          uniqueVessels.set(os.vessel_id, os);
-        }
-      });
-      setMaintenanceTargets(Array.from(uniqueVessels.values()));
-
+      // Revisões preventivas saíram daqui em 07/10/2026: vêm dos planos (RevisoesPreventivas).
     } catch (e) {
       console.error(e);
       toast.error('Erro ao buscar alvos de prospecção');
@@ -73,18 +51,12 @@ export default function ActiveProspectingPage() {
     fetchTargets();
   }, []);
 
-  const generateSalesCopy = async (type: 'quote' | 'maintenance', target: any) => {
+  const generateSalesCopy = async (target: any) => {
     setIsGenerating(true);
     const clientName = target.clients?.name?.split(' ')[0] || 'Cliente';
     const total = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(target.grand_total || 0);
-    
-    let prompt = '';
-    if (type === 'quote') {
-      prompt = `Crie uma mensagem curta de WhatsApp muito persuasiva e educada para ${clientName}. Ele tem um orçamento (OS #${target.service_order_number}) de ${total} parado no status rascunho. O objetivo é fechar a venda agora. Ofereça de forma sutil uma facilidade (tipo parcelamento ou prioridade na agenda). Use gatilhos mentais. Não pareça desesperado.`;
-    } else {
-      const boat = target.vessels?.name || 'sua embarcação';
-      prompt = `Crie uma mensagem curta de WhatsApp para ${clientName}. Já faz mais de 6 meses que fizemos a última revisão no ${boat}. Sugira uma manutenção preventiva para evitar dores de cabeça e garantir a diversão no fim de semana. Seja muito amigável e focado em segurança e tranquilidade.`;
-    }
+
+    const prompt = `Crie uma mensagem curta de WhatsApp muito persuasiva e educada para ${clientName}. Ele tem um orçamento (OS #${target.service_order_number}) de ${total} parado no status rascunho. O objetivo é fechar a venda agora. Ofereça de forma sutil uma facilidade (tipo parcelamento ou prioridade na agenda). Use gatilhos mentais. Não pareça desesperado.`;
 
     try {
       const { data, error } = await supabase.functions.invoke('ai-agent', {
@@ -102,21 +74,17 @@ export default function ActiveProspectingPage() {
     } catch (e) {
       console.error(e);
       // Fallbacks elegantes se a IA falhar
-      if (type === 'quote') {
-        setDraftMsg(`Olá ${clientName}, tudo bem? Estou revisando aqui o orçamento da sua OS #${target.service_order_number}. Queria ver com você se ficou alguma dúvida e se podemos aprovar para eu já garantir o seu horário na nossa agenda da semana. Conseguimos facilitar o pagamento se precisar! Me avise.`);
-      } else {
-        setDraftMsg(`Olá ${clientName}, tudo joia? Notei no nosso sistema que já faz um tempinho desde a última revisão do ${target.vessels?.name}. Para garantir sua tranquilidade e segurança nos próximos passeios, que tal agendarmos uma manutenção preventiva? Assim evitamos imprevistos. Um abraço!`);
-      }
+      setDraftMsg(`Olá ${clientName}, tudo bem? Estou revisando aqui o orçamento da sua OS #${target.service_order_number}. Queria ver com você se ficou alguma dúvida e se podemos aprovar para eu já garantir o seu horário na nossa agenda da semana. Conseguimos facilitar o pagamento se precisar! Me avise.`);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleOpenDialog = (target: any, type: 'quote' | 'maintenance') => {
-    setSelectedTarget({ ...target, _type: type });
+  const handleOpenDialog = (target: any) => {
+    setSelectedTarget(target);
     setDraftMsg('');
     setDialogOpen(true);
-    generateSalesCopy(type, target);
+    generateSalesCopy(target);
   };
 
   const handleSend = async () => {
@@ -133,11 +101,7 @@ export default function ActiveProspectingPage() {
       toast.success('Mensagem de prospecção enviada!');
       setDialogOpen(false);
       // Remover da lista
-      if (selectedTarget._type === 'quote') {
-        setAbandonedQuotes(q => q.filter(x => x.id !== selectedTarget.id));
-      } else {
-        setMaintenanceTargets(m => m.filter(x => x.id !== selectedTarget.id));
-      }
+      setAbandonedQuotes(q => q.filter(x => x.id !== selectedTarget.id));
     } catch (e) {
       console.error(e);
     }
@@ -177,7 +141,7 @@ export default function ActiveProspectingPage() {
           </TabsTrigger>
           <TabsTrigger value="maintenance" className="data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none py-3 px-6">
             <History className="h-4 w-4 mr-2" />
-            Revisões Preventivas ({maintenanceTargets.length})
+            Revisões Preventivas
           </TabsTrigger>
         </TabsList>
 
@@ -205,7 +169,7 @@ export default function ActiveProspectingPage() {
                     <p className="text-2xl font-bold mb-4">
                       {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(quote.grand_total || 0)}
                     </p>
-                    <Button className="w-full" onClick={() => handleOpenDialog(quote, 'quote')}>
+                    <Button className="w-full" onClick={() => handleOpenDialog(quote)}>
                       <Sparkles className="h-4 w-4 mr-2 text-yellow-300" />
                       Criar Abordagem com IA
                     </Button>
@@ -217,34 +181,9 @@ export default function ActiveProspectingPage() {
         </TabsContent>
 
         <TabsContent value="maintenance" className="pt-6">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {loading ? (
-               <p className="text-muted-foreground">Analisando base de dados...</p>
-            ) : maintenanceTargets.length === 0 ? (
-              <div className="col-span-full py-12 text-center bg-card rounded-xl border border-dashed">
-                <p className="text-muted-foreground">Todas as embarcações estão com a manutenção em dia!</p>
-              </div>
-            ) : (
-              maintenanceTargets.map(target => (
-                <Card key={target.id} className="hover:border-primary/50 transition-colors">
-                  <CardHeader className="pb-3">
-                    <Badge variant="outline" className="bg-blue-100 text-blue-800 w-fit">Prevenção</Badge>
-                    <CardTitle className="text-lg mt-2">{target.vessels?.name}</CardTitle>
-                    <CardDescription>Cliente: {target.clients?.name}</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Última revisão: {new Date(target.created_at).toLocaleDateString('pt-BR')}
-                    </p>
-                    <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white" onClick={() => handleOpenDialog(target, 'maintenance')}>
-                      <Sparkles className="h-4 w-4 mr-2 text-yellow-300" />
-                      Oferecer Revisão (IA)
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))
-            )}
-          </div>
+          {/* 07/10/2026: lê os planos (view) e o histórico pela data do SERVIÇO, respeita opt-out e
+              OS mais nova, e envia só pelo fluxo com pendência + "sim" do dono. */}
+          <RevisoesPreventivas />
         </TabsContent>
       </Tabs>
 

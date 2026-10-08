@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { ChevronDown, Download, PackageCheck, Pencil, Plus, Trash2, Truck } from 'lucide-react';
+import { Download, PackageCheck, Pencil, Plus, Trash2, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
@@ -19,13 +19,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { useConfirmacao } from '@/components/Confirmacao';
+import { motivoDaTrava, podeCancelar, podeEditar, podeExcluir, situacoesPermitidas } from '@/lib/travas-da-oc';
 import { PageShell } from '@/v2/components/PageShell';
 import { KPIStat } from '@/v2/components/KPIStat';
 import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
@@ -66,11 +62,21 @@ function POFormDialog({ open, onOpenChange, editing }: {
   const updateNewItem = (idx: number, field: string, val: string) =>
     setNewItems((prev) => prev.map((it, i) => (i === idx ? { ...it, [field]: val } : it)));
 
+  // Situações que o diálogo oferece (07/10/2026): na OC nova, rascunho ou enviada; na edição, a atual
+  // e as que o menu permitiria (src/lib/travas-da-oc.ts). Antes listava todas — até "recebida", que
+  // marcava a OC sem dar entrada no estoque nem criar a conta a pagar.
+  const situacoes: POStatus[] = isEdit && editing ? [editing.status, ...situacoesPermitidas(editing)] : ['draft', 'sent'];
+  const trava = isEdit && editing ? motivoDaTrava(editing, 'editar') : null;
+
   const handleSave = async () => {
     if (!supplierId) { toast.error('Selecione um fornecedor'); return; }
+    if (trava) { toast.error(trava); return; }
     try {
       if (isEdit && editing) {
-        await updatePO.mutateAsync({ id: editing.id, supplier_id: supplierId || null, expected_date: expectedDate || null, notes: notes || null, status });
+        await updatePO.mutateAsync({
+          id: editing.id, supplier_id: supplierId || null, expected_date: expectedDate || null, notes: notes || null, status,
+          statusEsperado: editing.status,
+        });
         for (const ni of newItems) {
           if (!ni.description.trim()) continue;
           await addItem.mutateAsync({
@@ -103,6 +109,7 @@ function POFormDialog({ open, onOpenChange, editing }: {
           <DialogTitle>{isEdit ? `Editar ${editing?.po_number}` : 'Nova Ordem de Compra'}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
+          {trava && <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">{trava}</p>}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Fornecedor *</Label>
@@ -118,7 +125,7 @@ function POFormDialog({ open, onOpenChange, editing }: {
               <Select value={status} onValueChange={(v) => setStatus(v as POStatus)}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {ALL_STATUSES.map((s) => <SelectItem key={s} value={s}>{PO_STATUS_LABELS[s]}</SelectItem>)}
+                  {situacoes.map((s) => <SelectItem key={s} value={s}>{PO_STATUS_LABELS[s]}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -148,14 +155,19 @@ function POFormDialog({ open, onOpenChange, editing }: {
                     <span className="min-w-0 flex-1 truncate">{item.description}</span>
                     <span className="w-14 text-right text-muted-foreground tabular-nums">x{item.quantity}</span>
                     <span className="w-20 text-right text-muted-foreground tabular-nums">{fmtBRL(Number(item.unit_cost))}</span>
-                    <button
-                      type="button"
-                      aria-label="Remover item"
-                      onClick={() => removeItem.mutate({ itemId: item.id, poId: editing!.id })}
-                      className="ml-1 text-destructive hover:opacity-70"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    {Number(item.received_qty ?? 0) > 0 ? (
+                      <span className="ml-1 w-3.5" title="Já teve quantidade recebida — não se remove" />
+                    ) : (
+                      <button
+                        type="button"
+                        aria-label="Remover item"
+                        disabled={!!trava}
+                        onClick={() => removeItem.mutate({ itemId: item.id, poId: editing!.id })}
+                        className="ml-1 text-destructive hover:opacity-70 disabled:opacity-30"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -177,7 +189,7 @@ function POFormDialog({ open, onOpenChange, editing }: {
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={handleSave} disabled={isPending}>
+          <Button onClick={handleSave} disabled={isPending || !!trava}>
             {isPending ? 'Salvando…' : isEdit ? 'Salvar alterações' : 'Criar PO'}
           </Button>
         </DialogFooter>
@@ -192,12 +204,12 @@ export default function PurchaseOrdersV2() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<PurchaseOrder | null>(null);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
   const [sort, setSort] = useState<SortState>({ key: 'po_number', dir: 'asc' });
 
   const { data: orders, isLoading, error } = usePurchaseOrders();
   const deletePO = useDeletePurchaseOrder();
   const updatePO = useUpdatePurchaseOrder();
+  const { pedir, dialogo } = useConfirmacao();
 
   const filtered = useMemo(() => {
     let list = orders ?? [];
@@ -233,36 +245,52 @@ export default function PurchaseOrdersV2() {
   const handleEdit = (po: PurchaseOrder) => { setEditing(po); setFormOpen(true); };
   const handleNew = () => { setEditing(null); setFormOpen(true); };
 
-  const statusMenu = (po: PurchaseOrder) => (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Mudar status">
-          <ChevronDown className="h-4 w-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {/* 'received' e 'partial' saem daqui de proposito. Marcar o status direto NAO da
-            entrada no estoque nem gera a conta a pagar — quem faz isso e a rotina de
-            recebimento (RPC receive_po), no detalhe da OC. Em 29/08/2026 havia duas OCs
-            marcadas 'received' com zero itens recebidos e zero movimento de estoque,
-            justamente por este menu. */}
-        {ALL_STATUSES
-          .filter((s) => s !== po.status && s !== 'received' && s !== 'partial')
-          .map((s) => (
-            <DropdownMenuItem key={s} onClick={() => updatePO.mutate({ id: po.id, status: s })} className="gap-2">
-              {PO_STATUS_LABELS[s]}
-            </DropdownMenuItem>
-          ))}
-        {po.status !== 'received' && po.status !== 'cancelled' && (
-          <DropdownMenuItem className="gap-2" onClick={() => navigate(`/v2/purchase-orders/${po.id}`)}>
-            <PackageCheck className="h-3.5 w-3.5 text-success" /> Receber itens…
-          </DropdownMenuItem>
-        )}
-        <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => setDeleteId(po.id)}>
-          <Trash2 className="h-3.5 w-3.5" /> Excluir
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+  // Ações da linha (07/10/2026): só o que a situação da OC permite — as travas do assistente
+  // (src/lib/travas-da-oc.ts). 'received' e 'partial' nunca saem daqui: marcar a situação direto NÃO
+  // dá entrada no estoque nem gera a conta a pagar — quem faz isso é o recebimento (RPC receive_po),
+  // no detalhe da OC. Em 29/08/2026 havia duas OCs marcadas 'received' com zero itens recebidos e zero
+  // movimento de estoque, justamente por este menu. Cancelar e excluir pedem confirmação.
+  const mudarSituacao = (po: PurchaseOrder, s: POStatus) =>
+    updatePO.mutate({ id: po.id, status: s, statusEsperado: po.status });
+
+  const acoesDaLinha = (po: PurchaseOrder, comEditar: boolean) => (
+    <AcoesDaLinha
+      rotulo={`ordem de compra ${po.po_number}`}
+      tituloDoMenu={po.po_number}
+      ocupada={updatePO.isPending || deletePO.isPending}
+      rapidas={comEditar && podeEditar(po) ? [{ texto: 'Editar', icone: Pencil, onClick: () => handleEdit(po) }] : []}
+      menu={[
+        ...situacoesPermitidas(po).filter((s) => s !== 'cancelled').map((s) => ({
+          texto: s === 'draft' ? 'Voltar para rascunho' : `Marcar como ${PO_STATUS_LABELS[s].toLowerCase()}`,
+          onClick: () => mudarSituacao(po, s),
+        })),
+        ...(po.status !== 'received' && po.status !== 'cancelled'
+          ? [{ texto: 'Receber itens…', icone: PackageCheck, onClick: () => navigate(`/v2/purchase-orders/${po.id}`) }]
+          : []),
+        ...(podeCancelar(po)
+          ? [{
+              texto: 'Cancelar a OC', perigo: true,
+              onClick: () => pedir({
+                titulo: `Cancelar a ${po.po_number}?`,
+                descricao: 'A OC fica cancelada (não some) e pode voltar para rascunho depois.',
+                confirmar: 'Cancelar a OC',
+                acao: () => mudarSituacao(po, 'cancelled'),
+              }),
+            }]
+          : []),
+        ...(podeExcluir(po)
+          ? [{
+              texto: 'Excluir', icone: Trash2, perigo: true,
+              onClick: () => pedir({
+                titulo: `Excluir a ${po.po_number}?`,
+                descricao: 'Esta ação não pode ser desfeita. Todos os itens desta OC serão removidos.',
+                confirmar: 'Excluir',
+                acao: () => deletePO.mutate(po.id),
+              }),
+            }]
+          : []),
+      ]}
+    />
   );
 
   const columns: DataColumn<PurchaseOrder>[] = [
@@ -404,14 +432,7 @@ export default function PurchaseOrdersV2() {
                 onSort={handleSort}
                 onRowClick={(po) => navigate(`/v2/purchase-orders/${po.id}`)}
                 emptyMessage="Nenhuma ordem de compra encontrada."
-                rowActions={(po) => (
-                  <>
-                    <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Editar esta ordem de compra" title="Editar" onClick={() => handleEdit(po)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    {statusMenu(po)}
-                  </>
-                )}
+                rowActions={(po) => acoesDaLinha(po, true)}
               />
             </div>
             <div className="space-y-2.5 md:hidden">
@@ -430,8 +451,8 @@ export default function PurchaseOrdersV2() {
                   actions={
                     <>
                       <Button className="flex-1" onClick={() => navigate(`/v2/purchase-orders/${po.id}`)}>Abrir</Button>
-                      <Button variant="outline" onClick={() => handleEdit(po)}>Editar</Button>
-                      {statusMenu(po)}
+                      {podeEditar(po) && <Button variant="outline" onClick={() => handleEdit(po)}>Editar</Button>}
+                      {acoesDaLinha(po, false)}
                     </>
                   }
                 />
@@ -458,25 +479,7 @@ export default function PurchaseOrdersV2() {
         />
       )}
 
-      <AlertDialog open={!!deleteId} onOpenChange={(v) => !v && setDeleteId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir ordem de compra?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta ação não pode ser desfeita. Todos os itens desta PO serão removidos.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={async () => { if (deleteId) await deletePO.mutateAsync(deleteId); setDeleteId(null); }}
-            >
-              Excluir
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {dialogo}
     </V2Shell>
   );
 }

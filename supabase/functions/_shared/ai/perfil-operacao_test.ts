@@ -58,7 +58,7 @@ const SEMPRE_NO_PERFIL_ANTIGO = [
 // assistente): o dono pediu o conserto a um clique para o lançamento que não bate com o banco.
 // 02/10/2026: aplicar_pix_em_contas e desfazer_aplicacao_de_pix — "Este Pix paga…" (um Pix para
 // várias contas, forma A F2), as mesmas ações do Extrato e da correção.
-const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer", "cadastrar_freelancer", "registrar_pagamento_freelancer", "enviar_extrato_freelancer", "fechar_acerto_freelancer", "reabrir_acerto_freelancer", "enviar_acerto_ao_freelancer", "ajustar_lancamento_ao_valor_do_banco", "aplicar_pix_em_contas", "desfazer_aplicacao_de_pix", "definir_condicao_pagamento", "acompanhar_conversa", "listar_acompanhamentos", "parar_acompanhamento", "atualizar_extrato", "enviar_relatorio_pdf", "analise_do_negocio"];
+const ACRESCENTADAS = ["link_contact_to_entity", "update_supplier", "update_service", "registrar_diaria", "consultar_freelancer", "cadastrar_freelancer", "registrar_pagamento_freelancer", "enviar_extrato_freelancer", "fechar_acerto_freelancer", "reabrir_acerto_freelancer", "enviar_acerto_ao_freelancer", "ajustar_lancamento_ao_valor_do_banco", "aplicar_pix_em_contas", "desfazer_aplicacao_de_pix", "definir_condicao_pagamento", "acompanhar_conversa", "listar_acompanhamentos", "parar_acompanhamento", "atualizar_extrato", "enviar_relatorio_pdf", "analise_do_negocio", "listar_emails", "ler_email"];
 // cadastros (07/10/2026): editar marina e os contatos da embarcação.
 ACRESCENTADAS.push("update_marina", "add_vessel_contact", "update_vessel_contact");
 // operacional (07/10/2026): via do técnico e caixa de sugestões da agenda.
@@ -71,6 +71,12 @@ ACRESCENTADAS.push(
   "send_fiscal_pdf_to_self", "send_fiscal_pdf_to_client",
   "get_purchase_order", "update_purchase_order_status", "update_purchase_order", "delete_purchase_order",
   "list_quote_requests", "close_quote_request", "reopen_quote_request", "set_quote_supplier_terms",
+);
+// planos de manutenção (07/10/2026): planos, serviço feito, adiar, sugerir, lembrete ao cliente e métricas.
+ACRESCENTADAS.push(
+  "list_maintenance_plans", "create_maintenance_plan", "update_maintenance_plan", "register_plan_service",
+  "snooze_maintenance_plan", "suggest_maintenance_plans", "send_maintenance_reminder_now",
+  "enviar_lembrete_de_revisao", "maintenance_reminder_metrics",
 );
 // 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
 // roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.

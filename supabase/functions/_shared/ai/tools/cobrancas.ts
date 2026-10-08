@@ -7,8 +7,9 @@
 // CollectionDetailSheet e o cancelar — todos gravam direto em `collections` e `collection_contacts`
 // (use-collections.ts). Aqui são os MESMOS campos, com uma diferença de propósito: a cobrança da OS
 // nasce LIGADA à conta a receber em aberto (receivable_id). A tela lê a conta para sugerir valor e
-// vencimento, mas não grava o vínculo — e sem ele o gatilho que marca a cobrança como paga quando a
-// conta é paga (sync_collection_from_receivable) não tem o que marcar.
+// vencimento, mas não gravava o vínculo — e sem ele o gatilho que marca a cobrança como paga quando a
+// conta é paga (sync_collection_from_receivable) não tem o que marcar. Desde 07/10/2026 a tela grava
+// também, pela mesma regra (src/lib/recebivel-da-cobranca.ts).
 //
 // Pagar NÃO é daqui: pagamento é register_payment na conta (a cobrança ligada fica paga sozinha).
 import { blockTechnician, lerRetrato, type Role, type ToolCtx, type ToolDef } from "./registry.ts";

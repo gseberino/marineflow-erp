@@ -16,6 +16,7 @@ const CAMPOS_MARINA = {
   address_line_1: { type: "string", description: "Rua/logradouro (número e complemento à parte)." },
   address_number: { type: "string", description: "Número — só junto com a rua (address_line_1)." },
   address_complement: { type: "string", description: "Complemento — só junto com a rua (address_line_1)." },
+  neighborhood: { type: "string", description: "Bairro." },
   city: { type: "string" },
   state: { type: "string", description: "UF com 2 letras." },
   latitude: { type: "number" },
@@ -26,7 +27,8 @@ const CAMPOS_MARINA = {
 
 /**
  * Monta o que vai para `marinas` do jeito da tela: rua, número e complemento num campo só
- * (address_line_1 = "Rua X, 123, Sala 2" — a tabela não tem colunas separadas nem bairro),
+ * (address_line_1 = "Rua X, 123, Sala 2" — a tabela não tem colunas separadas; o bairro tem coluna
+ * própria desde 07/10/2026, neighborhood),
  * telefone "(47) 99999-9999", CEP "88385-000", UF maiúscula. Só o que veio preenchido.
  */
 function montarMarina(args: Record<string, unknown>): Record<string, unknown> | { error: string } {
