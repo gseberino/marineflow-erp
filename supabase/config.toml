@@ -163,3 +163,8 @@ verify_jwt = false
 # 10 min (x-cron-secret) e o botão "Atualizar agora" das Configurações (admin ativo).
 [functions.dropbox-indice]
 verify_jwt = false
+
+# Triagem de fotos do Dropbox (Fase 4, 08/10/2026): só admin ativo, conferido por dentro
+# (usuarioAtivo) — o padrão das funções que agem com a chave de serviço.
+[functions.dropbox-fotos]
+verify_jwt = false

@@ -159,6 +159,18 @@ export class Dropbox {
     return await r.json() as MetadadosArquivo;
   }
 
+  /** Endpoint do servidor de conteúdo que responde JSON (ex.: files/get_thumbnail_batch). */
+  async rpcConteudo<T>(rota: string, corpo: unknown): Promise<T> {
+    const r = await this.chamar((token) =>
+      new Request(`${CONTEUDO}/2/${rota}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(corpo),
+      })
+    );
+    return await r.json() as T;
+  }
+
   /**
    * Baixa um arquivo pelo id ("id:...") ou caminho. `limiteBytes` evita trazer para a memória da
    * função algo grande demais: confere o tamanho no cabeçalho antes de ler o corpo.

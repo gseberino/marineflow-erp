@@ -159,3 +159,40 @@ Deno.test("índice: extensão", () => {
   assertEquals(extensaoDe("sem_extensao"), null);
   assertEquals(extensaoDe(".oculto"), null);
 });
+
+import { notaDaOsNoDia, pastaDasFotos, quandoFoiTirada, tipoDeMidia } from "./nucleo.ts";
+
+Deno.test("fotos: dia e hora pelo nome do celular; sem padrão, pela data do arquivo em SP", () => {
+  assertEquals(quandoFoiTirada("2026-09-26 17.44.07.jpg"), { dia: "2026-09-26", hora: "17:44" });
+  assertEquals(quandoFoiTirada("IMG_3098.MOV", "2026-09-27T01:30:00Z"), { dia: "2026-09-26", hora: "22:30" });
+  assertEquals(quandoFoiTirada("IMG_3098.MOV", null), null);
+});
+
+Deno.test("fotos: foto, vídeo e print", () => {
+  assertEquals(tipoDeMidia("a.JPG"), "foto");
+  assertEquals(tipoDeMidia("a.heic"), "foto");
+  assertEquals(tipoDeMidia("a.mov"), "video");
+  assertEquals(tipoDeMidia("2026-10-03 13.16.51.png"), "print");
+  assertEquals(tipoDeMidia("a.pdf"), "outro");
+});
+
+Deno.test("fotos: pasta de destino com e sem OS", () => {
+  assertEquals(pastaDasFotos("/M/B2C/0016.013.25_Dona V", "2026-09-26", "OS-00105"), "/M/B2C/0016.013.25_Dona V/3- FOTOS/2026-09-26 OS-00105");
+  assertEquals(pastaDasFotos("/M/B2C/0016.013.25_Dona V/", "2026-09-26"), "/M/B2C/0016.013.25_Dona V/3- FOTOS/2026-09-26");
+});
+
+Deno.test("fotos: nota da OS no dia — evento no dia vale inteiro, vizinho metade, agenda 3", () => {
+  const os = {
+    id: "o1",
+    eventos: [
+      { dia: "2026-09-26", peso: 3, motivo: "entrada no barco" },
+      { dia: "2026-09-25", peso: 2, motivo: "mensagem da OS no WhatsApp" },
+    ],
+    agendado: ["2026-09-24", "2026-09-27"] as [string, string],
+  };
+  const r = notaDaOsNoDia("2026-09-26", os);
+  assertEquals(r.nota, 3 + 1 + 3);
+  assertEquals(r.motivos.includes("entrada no barco"), true);
+  assertEquals(r.motivos.includes("agendada para esse dia"), true);
+  assertEquals(notaDaOsNoDia("2026-10-10", os).nota, 0);
+});
