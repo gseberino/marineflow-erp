@@ -98,14 +98,16 @@ servirComCors(async (req) => {
 
   if (acao === "status") {
     const { data } = await db.from("integracao_dropbox")
-      .select("conta_id, email, nome, conectado_em, ultimo_uso_em, ultimo_erro, ultimo_erro_em")
+      .select("conta_id, email, nome, conectado_em, ultimo_uso_em, ultimo_erro, ultimo_erro_em, indice_atualizado_em, indice_carga_inicial")
       .eq("id", 1).maybeSingle();
+    const { count: arquivos } = await db.from("arquivos_dropbox").select("id", { count: "exact", head: true }).eq("apagado", false);
     return jr({
       configurado: !!c,
       conectado: !!data,
       conta: data ?? null,
       pastaBase,
       linkPastaBase: linkNoSite(pastaBase),
+      indice: data ? { arquivos: arquivos ?? 0, atualizadoEm: data.indice_atualizado_em, lendoHistorico: data.indice_carga_inicial } : null,
       redirectUri: redirectUri(),
     });
   }

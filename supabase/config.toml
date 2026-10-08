@@ -158,3 +158,8 @@ verify_jwt = false
 # do admin (painel); a própria função confere os dois.
 [functions.email-responder]
 verify_jwt = false
+
+# Índice do Dropbox (Fase 3, 08/10/2026): duas portas, conferidas por dentro — o pg_cron a cada
+# 10 min (x-cron-secret) e o botão "Atualizar agora" das Configurações (admin ativo).
+[functions.dropbox-indice]
+verify_jwt = false

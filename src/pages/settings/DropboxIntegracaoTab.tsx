@@ -26,6 +26,7 @@ interface EstadoDoDropbox {
   pastaBase: string;
   linkPastaBase: string;
   redirectUri: string;
+  indice: { arquivos: number; atualizadoEm: string | null; lendoHistorico: boolean } | null;
 }
 
 interface ResultadoDoTeste {
@@ -55,7 +56,7 @@ const quando = (iso: string | null | undefined) =>
 export function DropboxIntegracaoTab() {
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
-  const [ocupado, setOcupado] = useState<'conectar' | 'testar' | 'desconectar' | null>(null);
+  const [ocupado, setOcupado] = useState<'conectar' | 'testar' | 'desconectar' | 'indice' | null>(null);
   const [confirmandoSaida, setConfirmandoSaida] = useState(false);
   const [teste, setTeste] = useState<ResultadoDoTeste | null>(null);
 
@@ -98,6 +99,22 @@ export function DropboxIntegracaoTab() {
       toast.success('O Dropbox respondeu.');
     } catch (e) {
       toast.error((e as Error).message || 'O teste falhou.');
+    } finally {
+      setOcupado(null);
+      qc.invalidateQueries({ queryKey: ['dropbox-conexao'] });
+    }
+  };
+
+  const atualizarIndice = async () => {
+    setOcupado('indice');
+    try {
+      const { data, error } = await supabase.functions.invoke('dropbox-indice', { body: {} });
+      if (error) throw new Error(await extractInvokeErrorMessage(error));
+      const r = data as { gravados?: number; novasPastas?: number; emDia?: boolean; motivo?: string };
+      if (r.motivo) toast.info(r.motivo);
+      else toast.success(`Índice atualizado: ${r.gravados ?? 0} arquivo(s) lido(s)${r.novasPastas ? `, ${r.novasPastas} pasta(s) nova(s)` : ''}${r.emDia ? '' : ' — continua na próxima rodada'}.`);
+    } catch (e) {
+      toast.error((e as Error).message || 'Não consegui atualizar o índice.');
     } finally {
       setOcupado(null);
       qc.invalidateQueries({ queryKey: ['dropbox-conexao'] });
@@ -183,6 +200,21 @@ export function DropboxIntegracaoTab() {
               </a>
             </dd>
           </dl>
+          {info.indice && (
+            <div className="text-sm rounded-lg border p-3 space-y-2">
+              <p>
+                <strong>Arquivos indexados:</strong> {info.indice.arquivos.toLocaleString('pt-BR')}
+                {' · '}última leitura {quando(info.indice.atualizadoEm)}
+              </p>
+              {info.indice.lendoHistorico && (
+                <p className="text-muted-foreground">Lendo o histórico das pastas aos poucos (a cada 10 minutos). Pode levar algumas horas na primeira vez.</p>
+              )}
+              <Button variant="outline" size="sm" onClick={atualizarIndice} disabled={ocupado !== null}>
+                {ocupado === 'indice' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                Atualizar agora
+              </Button>
+            </div>
+          )}
           {info.conta.ultimo_erro && (
             <p className="text-sm text-destructive break-words">
               Último erro ({quando(info.conta.ultimo_erro_em)}): {info.conta.ultimo_erro}

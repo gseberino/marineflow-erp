@@ -13,6 +13,8 @@ import { ArrowLeft, Ship, Anchor, Battery, Radio, Zap, Edit } from 'lucide-react
 import { VesselFormDialog } from '@/components/VesselFormDialog';
 import { RecordHistory } from '@/components/RecordHistory';
 import { PastaDoBarcoBotao } from '@/components/dropbox/PastaNoDropbox';
+import { ArquivosDoBarco } from '@/components/dropbox/ArquivosDoBarco';
+import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 
@@ -21,6 +23,8 @@ export default function VesselDetail() {
   const { t, formatCurrency, formatDate } = useI18n();
   const { data: vessel, isLoading } = useVessel(id);
   const [editOpen, setEditOpen] = useState(false);
+  const { user } = useAuth();
+  const ehAdmin = user?.role === 'admin';
   const [searchParams] = useSearchParams();
   const abaInicial = searchParams.get('tab') || 'overview';
 
@@ -86,8 +90,15 @@ export default function VesselDetail() {
           <TabsTrigger value="history">{t.vessels.serviceHistory}</TabsTrigger>
           <TabsTrigger value="maintenance">Manutenção</TabsTrigger>
           <TabsTrigger value="tasks">Tarefas</TabsTrigger>
+          {ehAdmin && <TabsTrigger value="arquivos">Arquivos</TabsTrigger>}
           <TabsTrigger value="audit">Histórico de Edições</TabsTrigger>
         </TabsList>
+
+        {ehAdmin && id && (
+          <TabsContent value="arquivos" className="mt-4">
+            <ArquivosDoBarco vesselId={id} />
+          </TabsContent>
+        )}
 
         <TabsContent value="overview" className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="rounded-xl border bg-card p-5 shadow-sm">

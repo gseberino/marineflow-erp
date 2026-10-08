@@ -121,3 +121,41 @@ Deno.test("cliente genérico não ganha pasta", () => {
   assertEquals(clienteGenerico("TESTE AUDITORIA CLAUDE"), true);
   assertEquals(clienteGenerico("Acrisio Lopes Cançado Filho"), false);
 });
+
+import { codigoNoNome, extensaoDe, filhaDireta, pastaQueContem } from "./nucleo.ts";
+
+Deno.test("índice: arquivo cai na pasta registrada mais funda", () => {
+  const pastas = new Map([
+    ["/management/commercial/b2c/0020.001.26_la_osadia", "principal"],
+    ["/management/commercial/b2c/0020.001.26_la_osadia/1- doc's", "subpasta"],
+    ["/management/commercial/b2c/0016.013.25_dona v", "dona v"],
+  ]);
+  assertEquals(pastaQueContem("/management/commercial/b2c/0020.001.26_la_osadia/1- doc's/x.pdf", pastas), "subpasta");
+  assertEquals(pastaQueContem("/management/commercial/b2c/0020.001.26_la_osadia/1- elétrica/a/b.dwg", pastas), "principal");
+  assertEquals(pastaQueContem("/management/commercial/b2c/0016.013.25_dona v/2- elétrica/x.pdf", pastas), "dona v");
+  assertEquals(pastaQueContem("/management/commercial/b2c/solto.pdf", pastas), null);
+  // "dona v" não pode casar com "dona vitória" (prefixo de texto, não de pasta)
+  assertEquals(pastaQueContem("/management/commercial/b2c/0016.013.25_dona vitoria/x.pdf", pastas), null);
+});
+
+Deno.test("índice: número no nome da pasta nova", () => {
+  assertEquals(codigoNoNome("0026.007.26_Madu_I"), "0026.007.26");
+  assertEquals(codigoNoNome("0016.013.25_Dona V"), "0016.013.25");
+  assertEquals(codigoNoNome("0026.007.26"), "0026.007.26");
+  assertEquals(codigoNoNome("MH - Rosangela"), null);
+  assertEquals(codigoNoNome("0026.007.267_x"), null);
+});
+
+Deno.test("índice: filha direta de B2C", () => {
+  const b2c = "/management/commercial/b2c";
+  assertEquals(filhaDireta("/management/commercial/b2c/0026.007.26_x", b2c), true);
+  assertEquals(filhaDireta("/management/commercial/b2c/0026.007.26_x/1- doc's", b2c), false);
+  assertEquals(filhaDireta("/management/commercial/b2b/fibrafort", b2c), false);
+  assertEquals(filhaDireta("/management/commercial/b2c", b2c), false);
+});
+
+Deno.test("índice: extensão", () => {
+  assertEquals(extensaoDe("ORÇ-00113 v1.PDF"), "pdf");
+  assertEquals(extensaoDe("sem_extensao"), null);
+  assertEquals(extensaoDe(".oculto"), null);
+});
