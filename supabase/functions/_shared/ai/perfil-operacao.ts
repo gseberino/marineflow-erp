@@ -176,6 +176,7 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   // 08/10/2026: e-mails das caixas financeiro@ e gustavo@ (email-imap).
   "listar_emails",
   "ler_email",
+  "rascunhar_resposta_email",
 
   // — "Deixar a IA acompanhar" (copiloto) —
   "criar_missao_acompanhamento",
@@ -407,6 +408,7 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "analise_do_negocio",
   "listar_emails",
   "ler_email",
+  "rascunhar_resposta_email",
   "send_service_order_link",
   "send_supplier_quote_request",
   "set_service_order_charges",

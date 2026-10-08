@@ -148,3 +148,8 @@ verify_jwt = false
 # sem JWT — quem prova que o pedido foi nosso é o state assinado com o DROPBOX_APP_SECRET.
 [functions.dropbox-conectar]
 verify_jwt = false
+
+# email-responder (08/10/2026): o assistente chama com x-cron-secret (WhatsApp, sem JWT) ou com o JWT
+# do admin (painel); a própria função confere os dois.
+[functions.email-responder]
+verify_jwt = false
