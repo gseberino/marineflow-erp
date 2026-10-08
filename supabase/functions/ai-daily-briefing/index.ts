@@ -18,6 +18,7 @@ import { historicoSemIdentidade } from "../_shared/banking/proposals.ts";
 import { normalizeText } from "../_shared/banking/matching.ts";
 import { linhasDoExtratoNoResumo } from "./extrato.ts";
 import { lerAnalise } from "../_shared/financeiro/vigia-do-negocio.ts";
+import { montarSecaoEmail, type EmailDigestItem } from "../_shared/email/digest.ts";
 import { embarcacoesComPlano, secaoDeRevisoes, type PlanoDoResumo, type SecaoDeRevisoes } from "./revisoes.ts";
 
 const corsHeaders = {
@@ -604,6 +605,34 @@ servirComCors(async (req) => {
       console.warn("[ai-daily-briefing] varredura de conciliação falhou:", e);
     }
 
+    // ── E-mail (08/10/2026): o que chegou nas caixas financeiro@ e gustavo@ nas últimas 24 h, já
+    // classificado pela triagem do email-imap. Pouco de propósito (_shared/email/digest.ts): urgente,
+    // esperando resposta e documentos em linha; informativo e filtrado só em número. Best-effort.
+    const emailLines: string[] = [];
+    try {
+      const desde = new Date(now.getTime() - 24 * 3600_000).toISOString();
+      const { data: emails, error: eErr } = await admin.from("email_messages")
+        .select("id, from_name, from_address, subject, received_at, triage_class, triage_fraud_alert, muted, clients(name), suppliers(name), email_attachments(kind)")
+        .gte("received_at", desde).not("triage_class", "is", null).order("received_at", { ascending: false }).limit(200);
+      if (eErr) throw eErr;
+      const itens: EmailDigestItem[] = ((emails ?? []) as any[]).filter((m) => !m.muted).map((m) => {
+        const kinds = ((m.email_attachments ?? []) as { kind: string }[]).map((a) => a.kind);
+        const resumoAnexo = kinds.includes("nfe_xml") ? "NF-e anexa" : kinds.includes("boleto_pdf") ? "boleto anexo" : null;
+        return {
+          classe: m.triage_class,
+          remetente: m.clients?.name ?? m.suppliers?.name ?? m.from_name ?? m.from_address,
+          assunto: m.subject,
+          recebidoEm: m.received_at,
+          resumoAnexo,
+          alertaFraude: !!m.triage_fraud_alert,
+        };
+      });
+      const secao = montarSecaoEmail(itens);
+      if (secao) emailLines.push("", secao);
+    } catch (e) {
+      console.warn("[ai-daily-briefing] bloco de e-mail falhou:", (e as Error).message);
+    }
+
     // ── Vigia do negócio (07/10/2026, pedido do dono) ─────────────────────────────────────
     // Segunda-feira e dia 1 (ou ?vigia=1 para pré-visualizar): ponto de equilíbrio × último mês
     // fechado, despesa por categoria em alta, concentração/margem por sistema. Leitura em
@@ -693,6 +722,7 @@ servirComCors(async (req) => {
       ...extratoNoResumo.linhas,
       ...conselheiroLines,
       ...vigiaLines,
+      ...emailLines,
       ...conciliaLines,
       ...stuckLines,
       ...revisoes.linhas,

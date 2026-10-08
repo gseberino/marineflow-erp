@@ -173,6 +173,9 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "enviar_relatorio_pdf",
   // 07/10/2026: vigia do negócio (margem, equilíbrio, despesa em alta, receita por serviço).
   "analise_do_negocio",
+  // 08/10/2026: e-mails das caixas financeiro@ e gustavo@ (email-imap).
+  "listar_emails",
+  "ler_email",
 
   // — "Deixar a IA acompanhar" (copiloto) —
   "criar_missao_acompanhamento",
@@ -283,6 +286,8 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
  * para PERFIL_OPERACAO.
  */
 export const SO_PELA_REDE: ReadonlySet<string> = new Set([
+  // — E-mail (08/10/2026): silenciar um remetente é gesto raro e pede confirmação. —
+  "silenciar_remetente_email",
   // — Memória por entidade: as notas APROVADAS já chegam prontas no contexto (ai-agent), então
   //   anotar/revisar/listar é gesto raro. Anotar roda direto (a nota nasce candidata); revisar
   //   (aprovar/rejeitar) pede confirmação pela rede — é o portão humano da memória —
@@ -400,6 +405,8 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   "enviar_relatorio_pdf",
   "atualizar_extrato",
   "analise_do_negocio",
+  "listar_emails",
+  "ler_email",
   "send_service_order_link",
   "send_supplier_quote_request",
   "set_service_order_charges",

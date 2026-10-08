@@ -3822,6 +3822,15 @@ export type Database = {
           label: string | null
           owner_consent_at: string | null
           route_alias: string | null
+          history_days: number
+          imap_host: string | null
+          imap_last_uid: number | null
+          imap_port: number
+          imap_uidvalidity: number | null
+          last_sync_at: string | null
+          last_sync_message: string | null
+          last_sync_status: string | null
+          secret_name: string | null
         }
         Insert: {
           active?: boolean
@@ -3831,6 +3840,15 @@ export type Database = {
           label?: string | null
           owner_consent_at?: string | null
           route_alias?: string | null
+          history_days?: number
+          imap_host?: string | null
+          imap_last_uid?: number | null
+          imap_port?: number
+          imap_uidvalidity?: number | null
+          last_sync_at?: string | null
+          last_sync_message?: string | null
+          last_sync_status?: string | null
+          secret_name?: string | null
         }
         Update: {
           active?: boolean
@@ -3840,6 +3858,15 @@ export type Database = {
           label?: string | null
           owner_consent_at?: string | null
           route_alias?: string | null
+          history_days?: number
+          imap_host?: string | null
+          imap_last_uid?: number | null
+          imap_port?: number
+          imap_uidvalidity?: number | null
+          last_sync_at?: string | null
+          last_sync_message?: string | null
+          last_sync_status?: string | null
+          secret_name?: string | null
         }
         Relationships: []
       }
@@ -3922,6 +3949,9 @@ export type Database = {
           triage_fraud_alert: boolean
           triage_reason: string | null
           triaged_at: string | null
+          alerted_at: string | null
+          imap_uid: number | null
+          imap_uidvalidity: number | null
         }
         Insert: {
           account_id: string
@@ -3954,6 +3984,9 @@ export type Database = {
           triage_fraud_alert?: boolean
           triage_reason?: string | null
           triaged_at?: string | null
+          alerted_at?: string | null
+          imap_uid?: number | null
+          imap_uidvalidity?: number | null
         }
         Update: {
           account_id?: string
@@ -3986,6 +4019,9 @@ export type Database = {
           triage_fraud_alert?: boolean
           triage_reason?: string | null
           triaged_at?: string | null
+          alerted_at?: string | null
+          imap_uid?: number | null
+          imap_uidvalidity?: number | null
         }
         Relationships: [
           {

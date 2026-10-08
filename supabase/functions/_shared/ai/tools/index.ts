@@ -28,6 +28,7 @@ import { whatsappTools } from "./whatsapp.ts";
 import { whatsappHistoryTools } from "./whatsapp-history.ts";
 import { documentoPdfTools } from "./documentos-pdf.ts";
 import { relatorioTools } from "./relatorios.ts";
+import { emailTools } from "./email.ts";
 import { uiTools } from "./ui.ts";
 import { memoryTools } from "./memory.ts";
 import { learningTools } from "./learning.ts";
@@ -96,6 +97,7 @@ export const allTools: ToolDef[] = [
   ...acompanhamentoTools,
   ...documentoPdfTools,
   ...relatorioTools,
+  ...emailTools,
   ...uiTools,
   ...memoryTools,
   ...learningTools,
