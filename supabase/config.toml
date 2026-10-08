@@ -142,3 +142,9 @@ verify_jwt = false
 # função confere o segredo (verificarCronSecret), como ai-daily-briefing e finance-review.
 [functions.email-imap]
 verify_jwt = false
+
+# Conexão com o Dropbox (Fase 2A, 08/10/2026): duas portas. O POST da tela confere admin ativo
+# por dentro (usuarioAtivo); o GET é o navegador voltando do dropbox.com depois do "Permitir",
+# sem JWT — quem prova que o pedido foi nosso é o state assinado com o DROPBOX_APP_SECRET.
+[functions.dropbox-conectar]
+verify_jwt = false

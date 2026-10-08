@@ -1,0 +1,87 @@
+import { assert, assertEquals, assertNotEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import {
+  argParaCabecalho,
+  assinarEstado,
+  cifrar,
+  conferirEstado,
+  decidirErro,
+  decifrar,
+  linkNoSite,
+  paraBase64,
+  urlDeAutorizacao,
+} from "./nucleo.ts";
+
+const CHAVE = paraBase64(new Uint8Array(32).map((_, i) => i + 1));
+
+Deno.test("cabeçalho: acentos viram \\uXXXX e o resto fica igual", () => {
+  const s = argParaCabecalho({ path: "/MANAGEMENT/COMMERCIAL/B2C/0026.007.26_Ônibus/ORÇ-00112 Ã.pdf", mode: "add" });
+  assert(/^[\x20-\x7e]+$/.test(s), "só ASCII imprimível");
+  assert(s.includes("\\u00d4nibus"));
+  assert(s.includes("OR\\u00c7-00112"));
+  assert(s.includes("\\u00c3.pdf"));
+  assertEquals(JSON.parse(s).path, "/MANAGEMENT/COMMERCIAL/B2C/0026.007.26_Ônibus/ORÇ-00112 Ã.pdf");
+});
+
+Deno.test("cabeçalho: emoji e DEL também escapam e o JSON volta igual", () => {
+  const original = { path: "/a/barco ⛵ 🚤\u007f.pdf" };
+  const s = argParaCabecalho(original);
+  assert(/^[\x20-\x7e]+$/.test(s));
+  assertEquals(JSON.parse(s), original);
+});
+
+Deno.test("cifra: ida e volta, e cada cifra sai diferente (iv aleatório)", async () => {
+  const a = await cifrar("refresh-token-de-teste", CHAVE);
+  const b = await cifrar("refresh-token-de-teste", CHAVE);
+  assertNotEquals(a, b);
+  assertEquals(await decifrar(a, CHAVE), "refresh-token-de-teste");
+});
+
+Deno.test("cifra: chave errada não decifra", async () => {
+  const outra = paraBase64(new Uint8Array(32).fill(9));
+  const c = await cifrar("x", CHAVE);
+  await assertRejects(() => decifrar(c, outra));
+});
+
+Deno.test("cifra: chave de tamanho errado é recusada", async () => {
+  await assertRejects(() => cifrar("x", paraBase64(new Uint8Array(16))), Error, "32 bytes");
+});
+
+Deno.test("estado: confere, vence e não aceita adulteração", async () => {
+  const agora = 1_800_000_000_000;
+  const e = await assinarEstado("user-1", "segredo", agora, 10);
+  assertEquals((await conferirEstado(e, "segredo", agora + 60_000))?.uid, "user-1");
+  assertEquals(await conferirEstado(e, "segredo", agora + 11 * 60_000), null, "venceu");
+  assertEquals(await conferirEstado(e, "outro-segredo", agora), null, "segredo errado");
+  const [corpo, ass] = e.split(".");
+  const forjado = btoa(JSON.stringify({ uid: "intruso", exp: agora + 1e9, n: "x" })).replace(/=+$/, "");
+  assertEquals(await conferirEstado(`${forjado}.${ass}`, "segredo", agora), null, "corpo trocado");
+  assertEquals(await conferirEstado(corpo, "segredo", agora), null, "sem assinatura");
+  assertEquals(await conferirEstado("", "segredo", agora), null);
+});
+
+Deno.test("erros: 401 renova, 429 espera o Retry-After, 5xx repete depois, 409 desiste", () => {
+  assertEquals(decidirErro(401, null), { tipo: "renovar_token" });
+  assertEquals(decidirErro(429, "7"), { tipo: "esperar", segundos: 7 });
+  assertEquals(decidirErro(429, null), { tipo: "esperar", segundos: 5 });
+  assertEquals(decidirErro(429, "99999"), { tipo: "esperar", segundos: 300 });
+  assertEquals(decidirErro(503, null), { tipo: "repetir_depois" });
+  assertEquals(decidirErro(409, null), { tipo: "desistir" });
+  assertEquals(decidirErro(400, null), { tipo: "desistir" });
+});
+
+Deno.test("autorização: pede refresh token (offline) e manda o redirect e o state", () => {
+  const u = new URL(urlDeAutorizacao({ appKey: "abc", redirectUri: "https://x.supabase.co/functions/v1/dropbox-conectar", estado: "e.s" }));
+  assertEquals(u.origin + u.pathname, "https://www.dropbox.com/oauth2/authorize");
+  assertEquals(u.searchParams.get("token_access_type"), "offline");
+  assertEquals(u.searchParams.get("response_type"), "code");
+  assertEquals(u.searchParams.get("client_id"), "abc");
+  assertEquals(u.searchParams.get("state"), "e.s");
+  assertEquals(u.searchParams.get("redirect_uri"), "https://x.supabase.co/functions/v1/dropbox-conectar");
+});
+
+Deno.test("link no site: codifica cada parte do caminho", () => {
+  assertEquals(
+    linkNoSite("/MANAGEMENT/COMMERCIAL/B2C/0016.013.25_Dona V"),
+    "https://www.dropbox.com/home/MANAGEMENT/COMMERCIAL/B2C/0016.013.25_Dona%20V",
+  );
+});
