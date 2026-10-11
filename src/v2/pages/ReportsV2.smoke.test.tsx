@@ -129,11 +129,18 @@ const SECOES = ['Resumo do mês', 'Fluxo de caixa', 'Resultado (DRE)', 'Para ond
 
 describe('Central de relatórios', () => {
   it('o link antigo /v2/reports abre o Resumo do mês, com as seis seções como abas', async () => {
-    renderCentral('/v2/reports');
-    expect(await screen.findByRole('heading', { level: 1, name: 'Central de relatórios' })).toBeInTheDocument();
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(SECOES);
-    expect(screen.getByRole('tab', { selected: true })).toHaveTextContent('Resumo do mês');
-    expect(screen.getByText('As abas mudaram de lugar.')).toBeInTheDocument();
+    // O aviso das abas tem prazo (AVISO_VALE_ATE): fixa a data dentro dele para o teste não vencer.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-05T12:00:00-03:00'));
+    try {
+      renderCentral('/v2/reports');
+      expect(await screen.findByRole('heading', { level: 1, name: 'Central de relatórios' })).toBeInTheDocument();
+      expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(SECOES);
+      expect(screen.getByRole('tab', { selected: true })).toHaveTextContent('Resumo do mês');
+      expect(screen.getByText('As abas mudaram de lugar.')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('Resumo do mês: quatro números, cada um dizendo de onde vem', async () => {

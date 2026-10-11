@@ -252,8 +252,15 @@ describe('Financeiro — um cômodo por assunto', () => {
   });
 
   it('mostra o aviso de que as abas mudaram de lugar', async () => {
-    renderFinanceiro('/v2/financial/inbox');
-    expect(await screen.findByText('As abas mudaram de lugar.')).toBeInTheDocument();
+    // O aviso tem prazo (AVISO_VALE_ATE): fixa a data dentro dele para o teste não vencer.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-05T12:00:00-03:00'));
+    try {
+      renderFinanceiro('/v2/financial/inbox');
+      expect(await screen.findByText('As abas mudaram de lugar.')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
