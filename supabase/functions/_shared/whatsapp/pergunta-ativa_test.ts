@@ -114,7 +114,7 @@ Deno.test("regra 2: comando explícito vence a pergunta aberta e a citação", (
 });
 
 Deno.test("regra 3: citação — pergunta de CMP aberta, fechada (reabrir), outra origem, fora do registro", () => {
-  const citadaCmp = (status: string) => ({ id: "p-velha", origem: "comprovante" as const, tipo: "pergunta", referencia_id: "c-1", status, passo: "cobrar" });
+  const citadaCmp = (status: string) => ({ id: "p-velha", origem: "comprovante" as const, tipo: "pergunta", referencia_id: "c-1", status, passo: "tipo_na_os" });
   assertEquals(quem(estado({ citada: citadaCmp("aberta") }), { citado: "WA-P" }).destino, "comprovante");
   assertEquals(quem(estado({ citada: citadaCmp("respondida") }), { citado: "WA-V" }).destino, "comprovante_reabrir");
   assertEquals(quem(estado({ ativa: null, citada: citadaCmp("expirada") }), { citado: "WA-V", valida: false }).destino, "comprovante_reabrir");
@@ -398,6 +398,16 @@ Deno.test("F3: o passo 'banco' (pergunta do extrato) tem nome legível e segue a
   assertEquals(quem(estado({ ativa: banco, pendencia: pendencia(ABERTA_EM) })).destino, "ambiguo");
   assertEquals(quem(estado({ ativa: { ...banco, interrompida_em: ABERTA_EM } })).destino, "ambiguo");
   assertStringIncludes(textoDoDesempate(estado({ ativa: banco, pendencia: pendencia(ABERTA_EM) })), "CMP-00124 (a linha do extrato)");
+});
+
+Deno.test("ajustes do dono: os passos 'tipo_na_os' e 'banco_quem' têm nome legível; 'cobrar' não existe mais", () => {
+  assertEquals(passoLegivel("tipo_na_os"), "se é peça ou despesa da OS");
+  assertEquals(passoLegivel("banco_quem"), "quem pagou a compra que não apareceu no extrato");
+  assertEquals(passoLegivel("cobrar"), "a pergunta");
+  const quemPagou = ativa({ passo: "banco_quem" });
+  assertEquals(quem(estado({ ativa: quemPagou })).destino, "comprovante");
+  assertStringIncludes(textoDoDesempate(estado({ ativa: quemPagou, pendencia: pendencia(ABERTA_EM) })),
+    "CMP-00124 (quem pagou a compra que não apareceu no extrato)");
 });
 
 Deno.test("pareceRespostaCurta: sim/não/ok ou só número; frase não", () => {

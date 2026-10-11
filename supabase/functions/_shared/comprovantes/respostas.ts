@@ -16,12 +16,17 @@
 //
 // F3 (11/10/2026 — spec-f3.md, 4.2): o passo "banco" (a pergunta do extrato de um CMP já gravado).
 // "0"/"nenhuma destas" = não; o número só vale na lista (azul) — no verde só sim/não ligam ou recusam.
+//
+// Ajustes do dono (11/10/2026 — spec-ajustes-dono.md): o "cobrar do cliente?" saiu (o comprovante
+// nunca aparece para o cliente); no lugar, o passo "tipo_na_os" (peça ou despesa da OS). O passo
+// "quem_pagou" do PESSOAL é um sim/não ("saiu da conta da empresa?"). O passo "banco_quem" (regra E:
+// 5 dias sem aparecer em conta da empresa) vai à mesma RPC do "banco" e só manda o número da opção.
 import { dataEmSaoPaulo } from "../dropbox/nucleo.ts";
 import { lerNumero, lerSimNao, normalizarResposta, type Opcao } from "../whatsapp/pergunta-ativa.ts";
 
 export type Palavra =
   | "estoque" | "insumo" | "empresa" | "pessoal" | "os"
-  | "cobrar" | "custo"
+  | "peca" | "despesa"
   | "socio" | "tecnico" | "cliente"
   | "pix" | "debito" | "credito" | "dinheiro" | "boleto" | "transferencia";
 
@@ -38,10 +43,20 @@ export type Interpretacao =
   | { tipo: "nome"; texto: string };
 
 export type Passo =
-  | "valor" | "para_que" | "qual_os" | "mesma_compra" | "como_pagou" | "quem_pagou" | "qual_tecnico" | "cobrar" | "categoria"
+  | "valor" | "para_que" | "qual_os" | "mesma_compra" | "como_pagou" | "quem_pagou" | "qual_tecnico" | "tipo_na_os" | "categoria"
   | "data" | "confirmar" | "corrigir"
   /** F3: "apareceu no extrato, ligo?" (verde: sim/não) ou a lista de linhas com "0 Nenhuma destas" (azul). */
-  | "banco";
+  | "banco"
+  /** Regra E: "esta compra ainda não apareceu em nenhuma conta da empresa. Quem pagou?" (CMP já gravado). */
+  | "banco_quem";
+
+/**
+ * Os passos da pergunta de um CMP JÁ gravado (a conciliação com o extrato): a resposta vai a
+ * comprovante_banco_responder, não ao comprovante_responder (que ignora o gravado).
+ */
+export function ehPassoDoExtrato(passo: string | null | undefined): boolean {
+  return passo === "banco" || passo === "banco_quem";
+}
 
 // ---------------------------------------------------------------------------------------------
 // Os menus fixos (o banco manda as opções; estes valem quando a pergunta não as trouxe)
@@ -63,9 +78,19 @@ export const MENU_QUEM_PAGOU: Opcao[] = [
   { n: 4, rotulo: "O cliente pagou direto", valor: "cliente" },
 ];
 
-export const MENU_COBRAR: Opcao[] = [
-  { n: 1, rotulo: "Cobrar do cliente (entra no total da OS)", valor: "cobrar" },
-  { n: 2, rotulo: "Custo da HBR (não entra no total)", valor: "custo" },
+/**
+ * Quem pagou no PESSOAL (ajustes do dono): da empresa vira gasto pessoal do sócio (desconta do
+ * pró-labore); do bolso ou do cartão pessoal, só o arquivo — nunca reembolso.
+ */
+export const MENU_QUEM_PAGOU_PESSOAL: Opcao[] = [
+  { n: 1, rotulo: "Sim, da conta ou do cartão da empresa (vira gasto pessoal do sócio, descontado do pró-labore)", valor: "empresa" },
+  { n: 2, rotulo: "Não, do meu bolso ou do meu cartão pessoal (só guardo o arquivo)", valor: "socio" },
+];
+
+/** Peça ou despesa da OS (ajustes do dono): o comprovante nunca muda o total da OS nem aparece para o cliente. */
+export const MENU_TIPO_NA_OS: Opcao[] = [
+  { n: 1, rotulo: "Peça ou material da OS (não lanço custo: a peça entra pela OS)", valor: "peca" },
+  { n: 2, rotulo: "Despesa da OS (combustível, alimentação, frete, ferramenta…): custo interno, não aparece para o cliente", valor: "despesa" },
 ];
 
 export const MENU_MESMA_COMPRA: Opcao[] = [
@@ -84,22 +109,22 @@ export const MENU_CORRIGIR: Opcao[] = [
   { n: 3, rotulo: "Para quê", valor: "para_que" },
   { n: 4, rotulo: "Como foi pago", valor: "como_pagou" },
   { n: 5, rotulo: "Quem pagou", valor: "quem_pagou" },
-  { n: 6, rotulo: "Cobrar ou não", valor: "cobrar" },
+  { n: 6, rotulo: "Peça ou despesa", valor: "tipo_na_os" },
   { n: 7, rotulo: "Categoria", valor: "categoria" },
   { n: 8, rotulo: "Cancelar este comprovante", valor: "cancelar" },
   { n: 9, rotulo: "Deixar para depois", valor: "depois" },
 ];
 
 /**
- * As opções que valem para o passo: as do banco; sem elas, o menu fixo do passo (se há). O passo
- * "banco" (F3) não tem menu fixo: valem só as linhas que a pergunta trouxe.
+ * As opções que valem para o passo: as do banco; sem elas, o menu fixo do passo (se há). Os passos
+ * "banco" (F3) e "banco_quem" (regra E) não têm menu fixo: valem só as opções que a pergunta trouxe.
  */
 export function opcoesDoPasso(passo: string | null | undefined, opcoes: Opcao[] | null | undefined): Opcao[] {
   if (Array.isArray(opcoes) && opcoes.length > 0) return opcoes;
   switch (passo) {
     case "como_pagou": return MENU_COMO_PAGOU;
     case "quem_pagou": return MENU_QUEM_PAGOU;
-    case "cobrar": return MENU_COBRAR;
+    case "tipo_na_os": return MENU_TIPO_NA_OS;
     case "mesma_compra": return MENU_MESMA_COMPRA;
     case "categoria": return MENU_CATEGORIA;
     case "corrigir": return MENU_CORRIGIR;
@@ -276,21 +301,32 @@ const PALAVRAS_DO_PASSO: Record<string, Record<string, Palavra>> = {
     "empresa": "empresa", "a empresa": "empresa", "foi a empresa": "empresa", "caixa": "empresa", "do caixa": "empresa", "hbr": "empresa",
     "eu": "socio", "fui eu": "socio", "eu paguei": "socio", "paguei eu": "socio", "do meu bolso": "socio", "meu bolso": "socio",
     "eu do meu bolso": "socio", "socio": "socio", "o socio": "socio",
+    // PESSOAL (ajustes do dono): "do meu cartão pessoal" é dinheiro do sócio; "cartão da empresa" é a empresa
+    "meu cartao": "socio", "meu cartao pessoal": "socio", "cartao pessoal": "socio", "do meu cartao": "socio",
+    "do meu cartao pessoal": "socio", "no meu cartao": "socio", "no meu cartao pessoal": "socio",
+    "conta da empresa": "empresa", "cartao da empresa": "empresa", "da conta da empresa": "empresa", "do cartao da empresa": "empresa",
+    "no cartao da empresa": "empresa", "conta pj": "empresa", "cartao pj": "empresa",
     "tecnico": "tecnico", "um tecnico": "tecnico", "o tecnico": "tecnico", "foi o tecnico": "tecnico",
     "cliente": "cliente", "o cliente": "cliente", "cliente pagou": "cliente", "o cliente pagou": "cliente",
     "cliente pagou direto": "cliente", "o cliente pagou direto": "cliente",
   },
-  cobrar: {
-    "cobrar": "cobrar", "cobra": "cobrar", "cliente paga": "cobrar", "cobrar do cliente": "cobrar", "cobra do cliente": "cobrar",
-    "cobrar a parte": "cobrar", "cobra a parte": "cobrar", "repassa": "cobrar", "repassar": "cobrar", "repassa pro cliente": "cobrar",
-    "custo": "custo", "hbr": "custo", "custo da hbr": "custo", "por nossa conta": "custo", "nossa conta": "custo",
-    "da casa": "custo", "nao cobrar": "custo", "nao cobra": "custo", "custo nosso": "custo", "e custo": "custo",
-    "por conta da casa": "custo", "por conta da hbr": "custo", "por conta nossa": "custo", "e por conta da casa": "custo",
+  // ajustes do dono (11/10/2026): peça ou despesa da OS — nunca "cobrar do cliente"
+  tipo_na_os: {
+    "peca": "peca", "pecas": "peca", "e peca": "peca", "foi peca": "peca", "uma peca": "peca", "material": "peca",
+    "materiais": "peca", "e material": "peca", "peca ou material": "peca", "peca da os": "peca", "material da os": "peca",
+    "despesa": "despesa", "despesas": "despesa", "e despesa": "despesa", "foi despesa": "despesa", "uma despesa": "despesa",
+    "despesa da os": "despesa", "custo": "despesa", "custo interno": "despesa", "e custo": "despesa", "gasto": "despesa",
   },
 };
 
+/** As palavras que dizem "despesa da OS" (os exemplos do menu e os gastos de campo mais comuns). */
+const DESPESA_DE_CAMPO = new Set([
+  "despesa", "despesas", "custo", "gasto", "combustivel", "gasolina", "diesel", "etanol", "alimentacao", "almoco", "janta",
+  "lanche", "refeicao", "frete", "ferramenta", "ferramentas", "pedagio", "estacionamento", "uber", "hotel", "hospedagem",
+]);
+
 /**
- * A frase com UMA palavra-chave do passo ("paguei no débito", "pode cobrar", "é custo nosso",
+ * A frase com UMA palavra-chave do passo ("paguei no débito", "foi gasolina", "é peça do motor",
  * "eu paguei do meu bolso"): vale se aparece exatamente uma classe; duas ("débito ou crédito?") não.
  */
 const CHAVES_DO_PASSO: Record<string, Array<[Palavra, (tokens: string[], frase: string) => boolean]>> = {
@@ -302,15 +338,14 @@ const CHAVES_DO_PASSO: Record<string, Array<[Palavra, (tokens: string[], frase: 
     ["boleto", (k) => k.includes("boleto")],
     ["transferencia", (k) => k.includes("transferencia") || k.includes("ted") || k.includes("transf")],
   ],
-  cobrar: [
-    // "não cobra(r)" é custo; "cobr…" sem o "não" antes é cobrar
-    ["cobrar", (k, f) => k.some((t) => t.startsWith("cobr")) && !/\bnao cobr/.test(f)],
-    ["custo", (k, f) => k.includes("custo") || k.includes("hbr") || / nossa conta /.test(` ${f} `) || / da casa /.test(` ${f} `)
-      || /\bnao cobr/.test(f)],
+  tipo_na_os: [
+    ["peca", (k) => k.some((t) => t === "peca" || t === "pecas" || t === "material" || t === "materiais")],
+    ["despesa", (k) => k.some((t) => DESPESA_DE_CAMPO.has(t))],
   ],
   quem_pagou: [
-    ["empresa", (k) => k.includes("empresa") || k.includes("caixa")],
-    ["socio", (k) => k.includes("eu") || k.includes("bolso") || k.includes("socio")],
+    // "cartão da empresa" é a empresa; "meu cartão pessoal" é o sócio
+    ["empresa", (k) => k.includes("empresa") || k.includes("caixa") || k.includes("pj")],
+    ["socio", (k) => k.includes("eu") || k.includes("bolso") || k.includes("socio") || k.includes("pessoal") || k.includes("meu")],
     ["tecnico", (k) => k.includes("tecnico")],
     ["cliente", (k) => k.includes("cliente")],
   ],
@@ -337,7 +372,7 @@ const PALAVRAS_DO_CORRIGIR: Record<string, string> = {
   "para que": "para_que", "para": "para_que", "destino": "para_que", "os": "para_que",
   "como pagou": "como_pagou", "forma": "como_pagou", "pagamento": "como_pagou", "como foi pago": "como_pagou",
   "quem pagou": "quem_pagou", "quem": "quem_pagou",
-  "cobrar": "cobrar", "cobrar ou nao": "cobrar",
+  "peca ou despesa": "tipo_na_os", "peca": "tipo_na_os", "despesa": "tipo_na_os", "tipo": "tipo_na_os",
   "categoria": "categoria", "a categoria": "categoria",
   "cancelar": "cancelar", "cancela": "cancelar",
   "depois": "depois", "deixar para depois": "depois", "deixa pra depois": "depois", "mais tarde": "depois",
@@ -449,11 +484,89 @@ function respostaDoExtrato(t: string, menu: Opcao[]): Interpretacao | null {
   return linhas.includes(n) ? { tipo: "opcao", n } : { tipo: "ok" };
 }
 
+/** A opção cujo rótulo começa por "Sim"/"Não" (o menu do PESSOAL: "Saiu da conta ou do cartão da EMPRESA?"). */
+function opcaoDoSimNao(menu: Opcao[], sn: "sim" | "nao"): number | null {
+  const o = menu.find((x) => new RegExp(`^${sn}\\b`).test(normalizarResposta(x.rotulo)));
+  return o ? o.n : null;
+}
+
+/** "o roberto (tecnico: reembolso nas diarias)" → "roberto" (o nome do técnico na opção payee:). */
+function nomeDaOpcao(o: Opcao): string {
+  return normalizarResposta(o.rotulo).replace(/\s*\(.*$/, "").replace(/^(?:o|a)\s+/, "").trim();
+}
+
+const QUEM_PAGOU_EMPRESA = new Set([
+  "empresa", "a empresa", "foi a empresa", "da empresa", "conta da empresa", "cartao da empresa", "pela empresa", "hbr", "pj",
+  "a empresa pagou", "foi a empresa mesmo", "empresa mesmo", "vai aparecer", "ainda vai aparecer",
+]);
+const QUEM_PAGOU_EU = new Set([
+  "eu", "fui eu", "eu paguei", "paguei eu", "do meu bolso", "meu bolso", "eu do meu bolso", "socio", "o socio",
+  "meu cartao", "meu cartao pessoal", "do meu cartao", "do meu cartao pessoal", "no meu cartao pessoal", "cartao pessoal",
+  "eu no meu cartao", "eu paguei do meu bolso", "eu paguei no meu cartao",
+]);
+const QUEM_PAGOU_PESSOAL = new Set([
+  "pessoal", "gasto pessoal", "foi pessoal", "foi gasto pessoal", "e pessoal", "particular", "compra pessoal", "foi compra pessoal",
+]);
+
+/**
+ * Regra E (ajustes do dono): "Quem pagou?" de um CMP gravado que não apareceu em conta da empresa.
+ * Só manda o NÚMERO da opção (opcao n) ao banco: a palavra ("empresa", "eu", "do meu bolso",
+ * "pessoal") e o nome do técnico viram o número da opção que tem aquele valor (empresa, socio,
+ * pessoal, payee:<uuid>); no menu do PESSOAL (sem "socio" ou sem "pessoal"), "eu" e "pessoal" são a
+ * mesma resposta ("não foi a empresa"). Número fora do menu, "o técnico" com mais de um e sim/não
+ * sem rótulo que bata viram "ok" (o banco pergunta de novo, em vez de escapar ao assistente). O
+ * resto (pedido, pergunta, texto longo) é null: vai ao assistente.
+ */
+function respostaDoQuemPagou(original: string, t: string, menu: Opcao[]): Interpretacao | null {
+  const max = menu.reduce((m, o) => Math.max(m, o.n), 0);
+  const n = lerNumero(t, Math.max(max, 1));
+  if (n !== null) return menu.some((o) => o.n === n) ? { tipo: "opcao", n } : { tipo: "ok" };
+  const comRotulo = numeroComRotulo("banco_quem", t, menu);
+  if (comRotulo !== null) return { tipo: "opcao", n: comRotulo };
+  // "5 gasto pessoal", "3 - o Roberto": vale se o texto depois do número dá a mesma opção
+  const eco = /^0*(\d{1,2})\s*[-).:]*\s+(.+)$/.exec(t);
+  if (eco) {
+    const doResto = respostaDoQuemPagou(eco[2], eco[2], menu);
+    return doResto?.tipo === "opcao" && doResto.n === Number(eco[1]) ? doResto : { tipo: "ok" };
+  }
+  if (/^0*\d{1,2}$/.test(t)) return { tipo: "ok" };
+  const sn = lerSimNao(t);
+  if (sn === "sim" || sn === "nao") {
+    const o = opcaoDoSimNao(menu, sn);
+    return o !== null ? { tipo: "opcao", n: o } : { tipo: "ok" };
+  }
+  if (sn === "ok") return { tipo: "ok" };
+  const t2 = semEnchimento(t);
+  const pelo = (valor: string, outro?: string) => {
+    const o = menu.find((x) => x.valor === valor) ?? (outro ? menu.find((x) => x.valor === outro) : undefined);
+    return o ? { tipo: "opcao" as const, n: o.n } : null;
+  };
+  if (QUEM_PAGOU_EMPRESA.has(t) || QUEM_PAGOU_EMPRESA.has(t2)) return pelo("empresa") ?? { tipo: "ok" };
+  if (QUEM_PAGOU_EU.has(t) || QUEM_PAGOU_EU.has(t2)) return pelo("socio", "pessoal") ?? { tipo: "ok" };
+  if (QUEM_PAGOU_PESSOAL.has(t) || QUEM_PAGOU_PESSOAL.has(t2)) return pelo("pessoal", "socio") ?? { tipo: "ok" };
+  if (pareceConversa(original, t) || t.split(" ").length > 4) return null;
+  const tecnicos = menu.filter((o) => String(o.valor ?? "").startsWith("payee:"));
+  if (["tecnico", "o tecnico", "foi o tecnico", "um tecnico"].includes(t)) {
+    return tecnicos.length === 1 ? { tipo: "opcao", n: tecnicos[0].n } : { tipo: "ok" };
+  }
+  // o nome do técnico ("o Roberto", "foi o João", "roberto silva"): a opção cujo nome começa por ele
+  if (t2.replace(/[^a-z]/g, "").length >= 3) {
+    const achados = tecnicos.filter((o) => {
+      const nome = nomeDaOpcao(o);
+      return nome === t2 || nome.startsWith(`${t2} `) || t2.startsWith(`${nome} `) || nome.split(" ")[0] === t2;
+    });
+    if (achados.length === 1) return { tipo: "opcao", n: achados[0].n };
+    if (achados.length > 1) return { tipo: "ok" };
+  }
+  return null;
+}
+
 /**
  * O que a resposta quer dizer no passo (null = não é resposta: texto livre, que vai ao assistente
  * com a pergunta ainda aberta). sim/não/ok valem em qualquer passo (o banco decide o que fazem); no
  * confirmar, só eles — um número ou uma frase curta lá voltam como "ok" (nunca aprovam e pedem o
- * sim de novo, em vez de escapar ao assistente).
+ * sim de novo, em vez de escapar ao assistente). No quem_pagou do PESSOAL ("Saiu da conta ou do
+ * cartão da EMPRESA? 1 Sim… 2 Não…"), o sim/não é a opção com esse rótulo.
  */
 export function interpretarResposta(
   passo: string | null | undefined,
@@ -468,6 +581,7 @@ export function interpretarResposta(
   const menu = opcoesDoPasso(passo, opcoes);
 
   if (passo === "banco") return respostaDoExtrato(t, menu);
+  if (passo === "banco_quem") return respostaDoQuemPagou(original, t, menu);
   if (passo === "confirmar") {
     if (sn) return { tipo: sn };
     if (lerNumero(t, 99) !== null) return { tipo: "ok" };
@@ -477,6 +591,10 @@ export function interpretarResposta(
     return null;
   }
   if (passo === "valor" && CERTO_NO_VALOR.has(t)) return { tipo: "sim" };
+  if (passo === "quem_pagou" && (sn === "sim" || sn === "nao")) {
+    const o = opcaoDoSimNao(menu, sn);
+    if (o !== null) return { tipo: "opcao", n: o };
+  }
   if (sn) return { tipo: sn };
 
   const n = lerNumero(t, menu.length);
@@ -527,7 +645,7 @@ export function interpretarResposta(
     }
     case "como_pagou":
     case "quem_pagou":
-    case "cobrar": {
+    case "tipo_na_os": {
       if (n !== null) return { tipo: "opcao", n };
       if (comRotulo !== null) return { tipo: "opcao", n: comRotulo };
       if (numeroQueNaoBate) return null;
@@ -535,8 +653,8 @@ export function interpretarResposta(
       if (palavra) return { tipo: "palavra", valor: palavra };
       const pelo = opcaoPeloRotulo(t, menu);
       if (pelo !== null) return { tipo: "opcao", n: pelo };
-      // "por conta da casa", "pode cobrar", "cobra sim" começam como pedido, mas são a resposta do passo
-      if (pareceConversa(original, t) && !t.startsWith("pode cobr") && !t.startsWith("cobra") && !t.startsWith("por conta")) return null;
+      // "lança como despesa", "lance como peça" começam como pedido, mas são a resposta do peça ou despesa
+      if (pareceConversa(original, t) && !(passo === "tipo_na_os" && /^lanc[ae]r?\b/.test(t) && !/\?/.test(original))) return null;
       const chave = chaveUnica(passo, t);
       return chave ? { tipo: "palavra", valor: chave } : null;
     }

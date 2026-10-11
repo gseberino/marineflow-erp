@@ -3,17 +3,18 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   classeDoComando,
+  ehPassoDoExtrato,
   type Interpretacao,
   interpretarResposta,
   lerComando,
   lerData,
   lerOs,
   lerValor,
-  MENU_COBRAR,
   MENU_COMO_PAGOU,
   MENU_CORRIGIR,
   MENU_MESMA_COMPRA,
   MENU_QUEM_PAGOU,
+  MENU_TIPO_NA_OS,
   opcoesDoPasso,
   pareceDica,
   respostaNaoEntendida,
@@ -205,24 +206,53 @@ Deno.test("passo quem_pagou: eu / do meu bolso = sócio; técnico; cliente; empr
   ], [["4", null], ["3", { tipo: "opcao", n: 3 }]]);
 });
 
-Deno.test("passo cobrar: opção, sim/não, cobrar/custo e sinônimos", () => {
-  tabela("cobrar", [], [
+Deno.test("passo tipo_na_os (ajustes do dono): peça ou despesa da OS; o 'cobrar' não existe mais", () => {
+  assertEquals(opcoesDoPasso("tipo_na_os", []), MENU_TIPO_NA_OS);
+  assertEquals(MENU_TIPO_NA_OS.map((o) => o.valor), ["peca", "despesa"]);
+  assertEquals(opcoesDoPasso("cobrar", []), []);
+  tabela("tipo_na_os", [], [
     ["1", { tipo: "opcao", n: 1 }],
     ["2", { tipo: "opcao", n: 2 }],
     ["3", null],
+    ["peça", { tipo: "palavra", valor: "peca" }],
+    ["Peças", { tipo: "palavra", valor: "peca" }],
+    ["material", { tipo: "palavra", valor: "peca" }],
+    ["despesa", { tipo: "palavra", valor: "despesa" }],
+    ["🎤 Despesa da OS.", { tipo: "palavra", valor: "despesa" }],
+    ["custo interno", { tipo: "palavra", valor: "despesa" }],
+    ["foi gasolina", { tipo: "palavra", valor: "despesa" }],
+    ["almoço do técnico", { tipo: "palavra", valor: "despesa" }],
+    ["é a peça do motor", { tipo: "palavra", valor: "peca" }],
+    ["lança como despesa", { tipo: "palavra", valor: "despesa" }],
+    ["1 peça", { tipo: "opcao", n: 1 }],
+    ["2 - despesa", { tipo: "opcao", n: 2 }],
+    ["1 despesa", null], // número e rótulo que não batem
+    ["peça ou despesa?", null],
+    ["material e frete", null], // duas classes: não adivinha
+    ["manda o orçamento do Brisa", null],
+    // sim/não não respondem peça ou despesa: o banco decide (pede de novo)
     ["sim", { tipo: "sim" }],
-    ["não", { tipo: "nao" }],
-    ["cobrar", { tipo: "palavra", valor: "cobrar" }],
-    ["cobra", { tipo: "palavra", valor: "cobrar" }],
-    ["cliente paga", { tipo: "palavra", valor: "cobrar" }],
-    ["custo", { tipo: "palavra", valor: "custo" }],
-    ["HBR", { tipo: "palavra", valor: "custo" }],
-    ["por nossa conta", { tipo: "palavra", valor: "custo" }],
-    ["da casa", { tipo: "palavra", valor: "custo" }],
-    ["não cobrar", { tipo: "palavra", valor: "custo" }],
-    ["🎤 Custo da HBR.", { tipo: "palavra", valor: "custo" }],
-    ["🎤 Cobra do cliente.", { tipo: "palavra", valor: "cobrar" }],
+    // "cobrar" não é mais palavra de nenhum passo
+    ["cobrar do cliente", null],
   ]);
+});
+
+Deno.test("passo quem_pagou do PESSOAL (ajustes do dono): sim/não pelo rótulo do menu; cartão pessoal = sócio", () => {
+  const PESSOAL: Opcao[] = [
+    { n: 1, rotulo: "Sim, da conta ou do cartão da empresa (vira gasto pessoal do sócio, descontado do pró-labore)", valor: "empresa" },
+    { n: 2, rotulo: "Não, do meu bolso ou do meu cartão pessoal (só guardo o arquivo)", valor: "socio" },
+  ];
+  tabela("quem_pagou", PESSOAL, [
+    ["sim", { tipo: "opcao", n: 1 }],
+    ["🎤 Não.", { tipo: "opcao", n: 2 }],
+    ["1", { tipo: "opcao", n: 1 }],
+    ["2", { tipo: "opcao", n: 2 }],
+    ["do meu cartão pessoal", { tipo: "palavra", valor: "socio" }],
+    ["foi no cartão da empresa", { tipo: "palavra", valor: "empresa" }],
+    ["a empresa", { tipo: "palavra", valor: "empresa" }],
+  ]);
+  // no menu de sempre (sem rótulo Sim/Não) o sim/não continua indo ao banco
+  tabela("quem_pagou", MENU_QUEM_PAGOU, [["sim", { tipo: "sim" }], ["não", { tipo: "nao" }]]);
 });
 
 // ─── técnico / categoria / corrigir ───────────────────────────────────────────────────────
@@ -248,6 +278,7 @@ Deno.test("passo corrigir: 1-9 e as palavras do menu (Categoria entrou na revis�
     ["valor", { tipo: "opcao", n: 1 }],
     ["a data", { tipo: "opcao", n: 2 }],
     ["quem pagou", { tipo: "opcao", n: 5 }],
+    ["peça ou despesa", { tipo: "opcao", n: 6 }],
     ["categoria", { tipo: "opcao", n: 7 }],
     ["cancelar", { tipo: "opcao", n: 8 }],
     ["depois", { tipo: "opcao", n: 9 }],
@@ -359,12 +390,11 @@ Deno.test("eco do menu, ordinais e frases faladas valem no passo (uma palavra-ch
     ["é pro estoque", { tipo: "palavra", valor: "estoque" }],
     ["4 - estoque", { tipo: "opcao", n: 4 }],
   ]);
-  tabela("cobrar", MENU_COBRAR, [
-    ["pode cobrar", { tipo: "palavra", valor: "cobrar" }],
-    ["cobra sim", { tipo: "palavra", valor: "cobrar" }],
-    ["é custo nosso", { tipo: "palavra", valor: "custo" }],
-    ["por conta da casa", { tipo: "palavra", valor: "custo" }],
-    ["não cobra", { tipo: "palavra", valor: "custo" }],
+  tabela("tipo_na_os", MENU_TIPO_NA_OS, [
+    ["é peça", { tipo: "palavra", valor: "peca" }],
+    ["foi combustível", { tipo: "palavra", valor: "despesa" }],
+    ["segunda opção", { tipo: "opcao", n: 2 }],
+    ["2) despesa da os", { tipo: "opcao", n: 2 }],
   ]);
   tabela("quem_pagou", MENU_QUEM_PAGOU, [
     ["eu paguei do meu bolso", { tipo: "palavra", valor: "socio" }],
@@ -447,6 +477,64 @@ Deno.test("F3 parser, azul: o número da linha, 0 e 'nenhuma destas' = não; sim
   // sem opções fixas: valem só as que a pergunta trouxe
   assertEquals(opcoesDoPasso("banco", []), []);
   assertEquals(opcoesDoPasso("banco", AZUL), AZUL);
+});
+
+// ─── regra E: "quem pagou?" depois de 5 dias sem aparecer em conta da empresa ───────────────
+
+const QUEM: Opcao[] = [
+  { n: 1, rotulo: "A empresa (ainda vai aparecer no extrato: continuo esperando até 09/11)", valor: "empresa" },
+  { n: 2, rotulo: "Eu, do meu bolso ou do meu cartão pessoal (fica como reembolso para você)", valor: "socio" },
+  { n: 3, rotulo: "O Roberto (técnico: reembolso nas Diárias)", valor: "payee:11111111-0000-4000-8000-000000000001" },
+  { n: 4, rotulo: "O João Paulo (técnico: reembolso nas Diárias)", valor: "payee:11111111-0000-4000-8000-000000000002" },
+  { n: 5, rotulo: "Foi gasto pessoal, no meu cartão (só guardo o arquivo)", valor: "pessoal" },
+];
+const QUEM_PESSOAL: Opcao[] = [
+  { n: 1, rotulo: "A empresa (ainda vai aparecer no extrato: continuo esperando até 09/11)", valor: "empresa" },
+  { n: 2, rotulo: "Não foi a empresa: do meu bolso ou cartão pessoal (só guardo o arquivo)", valor: "pessoal" },
+];
+const quemPagou = (opcoes: Opcao[], t: string) => interpretarResposta("banco_quem", opcoes, t, AGORA);
+
+Deno.test("regra E, banco_quem: só o número da opção vai ao banco (palavra e nome viram o número)", () => {
+  assertEquals(ehPassoDoExtrato("banco_quem"), true);
+  assertEquals(ehPassoDoExtrato("banco"), true);
+  assertEquals(ehPassoDoExtrato("confirmar"), false);
+  assertEquals(opcoesDoPasso("banco_quem", []), []);
+  const casos: Array<[string, Interpretacao | null]> = [
+    ["1", { tipo: "opcao", n: 1 }],
+    ["🎤 Três.", { tipo: "opcao", n: 3 }],
+    ["a empresa", { tipo: "opcao", n: 1 }],
+    ["foi a empresa", { tipo: "opcao", n: 1 }],
+    ["eu", { tipo: "opcao", n: 2 }],
+    ["do meu bolso", { tipo: "opcao", n: 2 }],
+    ["meu cartão pessoal", { tipo: "opcao", n: 2 }],
+    ["gasto pessoal", { tipo: "opcao", n: 5 }],
+    ["pessoal", { tipo: "opcao", n: 5 }],
+    ["o Roberto", { tipo: "opcao", n: 3 }],
+    ["foi o Roberto", { tipo: "opcao", n: 3 }],
+    ["joão", { tipo: "opcao", n: 4 }],
+    ["João Paulo", { tipo: "opcao", n: 4 }],
+    ["5 gasto pessoal", { tipo: "opcao", n: 5 }],
+    // dois técnicos: "o técnico" não escolhe (o banco pergunta de novo)
+    ["o técnico", { tipo: "ok" }],
+    // fora do menu, sim/não sem rótulo e ok: o banco pergunta de novo (não escapa ao assistente)
+    ["9", { tipo: "ok" }],
+    ["sim", { tipo: "ok" }],
+    ["ok", { tipo: "ok" }],
+    // pedido ou pergunta ao assistente
+    ["quanto deu o extrato do C6?", null],
+    ["manda o orçamento do Brisa", null],
+    ["Felipe", null],
+  ];
+  for (const [t, esperado] of casos) assertEquals(quemPagou(QUEM, t), esperado, t);
+});
+
+Deno.test("regra E, banco_quem do PESSOAL: 'eu' e 'pessoal' são a mesma resposta (não foi a empresa); 'não' pelo rótulo", () => {
+  for (const t of ["eu", "do meu bolso", "pessoal", "meu cartão pessoal", "não"]) {
+    assertEquals(quemPagou(QUEM_PESSOAL, t), { tipo: "opcao", n: 2 }, t);
+  }
+  assertEquals(quemPagou(QUEM_PESSOAL, "a empresa"), { tipo: "opcao", n: 1 });
+  assertEquals(quemPagou(QUEM_PESSOAL, "o técnico"), { tipo: "ok" });
+  assertEquals(quemPagou(QUEM_PESSOAL, "3"), { tipo: "ok" });
 });
 
 Deno.test("pareceDica e respostaNaoEntendida: o texto solto depois da foto e a mensagem curta sem sentido", () => {

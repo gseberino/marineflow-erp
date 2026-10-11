@@ -39,6 +39,8 @@ export type DestinoDoArquivo = {
   os: { numero: string; vessel_id: string | null; client_id: string | null; barco: string | null; cliente: string | null; pasta_registrada: boolean } | null;
   forma: string | null;
   conta: string | null;
+  /** Ajustes do dono: no PESSOAL, "empresa" = saiu da conta/cartão da empresa (o nome leva o pagamento). */
+  quem_pagou?: string | null;
   mes: string | null;
   dropbox_id: string | null;
   dropbox_caminho: string | null;
@@ -85,9 +87,17 @@ function reaisNoNome(v: string | number | null): string | null {
 }
 
 /**
+ * O PESSOAL que saiu da conta/cartão da empresa (ajustes do dono: gasto pessoal do sócio, descontado
+ * do pró-labore). `quem_pagou` = "empresa", ou a conta que o banco mandou (do bolso ela é nula).
+ */
+function pessoalPagoPelaEmpresa(d: DestinoDoArquivo): boolean {
+  return d.destino === "pessoal" && (d.quem_pagou === "empresa" || (d.quem_pagou == null && Boolean(d.conta)));
+}
+
+/**
  * "AAAA-MM-DD HHhMM CMP-00124 SIGLA R$ 62,00 Fornecedor - DESTINO - PAGAMENTO CONTA.ext".
- * Hora só se lida; fornecedor sem acento, até 40; pessoal sem "PAGAMENTO CONTA"; até 200 caracteres
- * (corta o fornecedor primeiro).
+ * Hora só se lida; fornecedor sem acento, até 40; pessoal sem "PAGAMENTO CONTA" — a não ser o pago
+ * pela empresa ("… - PESSOAL - CREDITO EMPRESA"); até 200 caracteres (corta o fornecedor primeiro).
  */
 export function nomeFinal(d: DestinoDoArquivo): string {
   const ext = extensaoDoCaminho(d.arquivo_path) ?? extensaoDoMime(d.arquivo_mime ?? "") ?? extensaoDoCaminho(d.dropbox_caminho) ?? "bin";
@@ -99,9 +109,10 @@ export function nomeFinal(d: DestinoDoArquivo): string {
   let destino: string | null = null;
   if (d.destino === "os" && d.os) destino = limparNome(`${d.os.numero} ${d.os.barco || d.os.cliente || ""}`);
   else if (d.destino) destino = DESTINO_NO_NOME[d.destino] ?? null;
-  const pagamento = d.destino === "pessoal"
+  const conta = d.conta ? limparNome(d.conta).toUpperCase() : pessoalPagoPelaEmpresa(d) ? "EMPRESA" : null;
+  const pagamento = d.destino === "pessoal" && !pessoalPagoPelaEmpresa(d)
     ? null
-    : [PAGAMENTO[d.forma ?? ""] ?? null, d.conta ? limparNome(d.conta).toUpperCase() : null].filter(Boolean).join(" ") || null;
+    : [PAGAMENTO[d.forma ?? ""] ?? null, conta].filter(Boolean).join(" ") || null;
   const fim = [destino, pagamento].filter(Boolean).map((s) => ` - ${s}`).join("");
 
   let fornecedor = fornecedorNoNome(semCpf(d.fornecedor));
@@ -174,8 +185,9 @@ export function caminhoDoIndicePessoal(mes: string): string {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Uma linha de comprovantes_indice_do_mes (RPC 19). O banco manda `os` (o número) e `cobrar_cliente`
- * já como 'sim' | 'nao' | 'a_parte'; a forma booleana (com `cobrar_a_parte`) também vale.
+ * Uma linha de comprovantes_indice_do_mes (RPC 19). O banco manda `os` (o número) e, desde os ajustes
+ * do dono (11/10/2026), `na_os` ('peca' | 'despesa' | 'ja_lancado'): o comprovante da OS só comprova
+ * a peça ou o lançamento que já estava nela, ou é custo interno — nunca cobrança do cliente.
  */
 export type LinhaDoIndice = {
   codigo: string;
@@ -190,8 +202,7 @@ export type LinhaDoIndice = {
   os?: string | null;
   os_numero?: string | null;
   barco?: string | null;
-  cobrar_cliente?: boolean | "sim" | "nao" | "a_parte" | null;
-  cobrar_a_parte?: boolean | null;
+  na_os?: "peca" | "despesa" | "ja_lancado" | string | null;
   quem_pagou?: string | null;
   forma?: string | null;
   situacao?: string | null;
@@ -200,9 +211,14 @@ export type LinhaDoIndice = {
 };
 
 export const COLUNAS_DO_INDICE = [
-  "Código", "Data", "Hora", "Tipo", "Valor", "Fornecedor", "CNPJ", "Destino", "OS", "Barco", "Cobrar do cliente", "Quem pagou",
+  "Código", "Data", "Hora", "Tipo", "Valor", "Fornecedor", "CNPJ", "Destino", "OS", "Barco", "Na OS", "Quem pagou",
   "Forma", "Situação", "Pendências", "Arquivo",
 ] as const;
+
+/** O que o comprovante é na OS (nunca aparece para o cliente). */
+const NA_OS_NO_INDICE: Record<string, string> = {
+  peca: "peça (só comprova)", despesa: "despesa interna", ja_lancado: "já lançado na OS (só comprova)",
+};
 
 const DESTINO_NO_INDICE: Record<string, string> = { os: "OS", estoque: "Estoque", insumo: "Insumo", empresa: "Empresa", pessoal: "Pessoal" };
 const QUEM_NO_INDICE: Record<string, string> = { empresa: "empresa", socio: "sócio", tecnico: "técnico", cliente: "cliente" };
@@ -217,7 +233,7 @@ const SITUACAO_NO_INDICE: Record<string, string> = {
   aguardando_banco: "esperando o banco", conciliado: "ligado ao extrato", abandonado: "sem linha no extrato",
 };
 const PENDENCIA_NO_INDICE: Record<string, string> = {
-  dar_entrada: "dar entrada no estoque", incluir_na_os: "incluir as peças na OS", cobrar_a_parte: "cobrar à parte",
+  dar_entrada: "dar entrada no estoque", incluir_na_os: "lançar a peça na OS",
   acerto_tecnico: "acerto do técnico", classificar_no_extrato: "classificar no Extrato",
 };
 
@@ -239,12 +255,6 @@ function valorBr(v: string | number | null | undefined): string {
   return n.toFixed(2).replace(".", ",");
 }
 
-function cobrarNoIndice(l: LinhaDoIndice): string {
-  if (l.cobrar_a_parte === true || l.cobrar_cliente === "a_parte") return "à parte";
-  if (l.cobrar_cliente === true || l.cobrar_cliente === "sim") return "sim";
-  if (l.cobrar_cliente === false || l.cobrar_cliente === "nao") return "não";
-  return "";
-}
 
 /** O CSV inteiro do mês (BOM + cabeçalho + uma linha por CMP, por número; CRLF no fim de cada linha). */
 export function csvDoIndice(linhas: LinhaDoIndice[]): string {
@@ -265,7 +275,7 @@ export function csvDoIndice(linhas: LinhaDoIndice[]): string {
       DESTINO_NO_INDICE[l.destino ?? ""] ?? "",
       l.os_numero ?? l.os ?? "",
       l.barco ?? "",
-      cobrarNoIndice(l),
+      NA_OS_NO_INDICE[l.na_os ?? ""] ?? "",
       QUEM_NO_INDICE[l.quem_pagou ?? ""] ?? "",
       FORMA_NO_INDICE[l.forma ?? ""] ?? "",
       SITUACAO_NO_INDICE[l.situacao ?? ""] ?? (l.situacao ?? ""),

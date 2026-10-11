@@ -12,9 +12,17 @@
 // F3 (11/10/2026 — spec-f3.md, 4.3): a pergunta do extrato (verde: "apareceu no extrato, ligo?";
 // azul: a lista com "0 Nenhuma destas"), os resultados da resposta, o "No extrato:" do cartão e os
 // efeitos novos do plano e da gravação (ligar_linha, aguardar_banco, reembolso_tecnico).
+//
+// Ajustes do dono (11/10/2026 — spec-ajustes-dono.md): o comprovante NUNCA aparece para o cliente
+// nem muda o total da OS — o "cobrar do cliente?" saiu; na OS, primeiro o lançamento que já existe
+// (só comprova), senão "peça ou despesa" (a despesa é custo interno). O sim já lança a linha no
+// Extrato (aprovada no sim). PESSOAL pago pela empresa é gasto pessoal do sócio (desconta do
+// pró-labore). Lançamento que já existe só tem o vazio preenchido. "Quem pagou?" depois de 5 dias
+// sem aparecer em conta da empresa (regra E). O reembolso nas Diárias é "reembolso de despesa paga
+// pelo técnico".
 import { type Opcao, passoLegivel } from "../whatsapp/pergunta-ativa.ts";
 import { diaMes, faixaDeCodigos, formatarCnpj, formatarReais, horaNoNome, PASTA_COMPROVANTES, TIPO_NO_AVISO } from "./nucleo.ts";
-import { type Interpretacao, opcoesDoPasso } from "./respostas.ts";
+import { type Interpretacao, MENU_QUEM_PAGOU_PESSOAL, opcoesDoPasso } from "./respostas.ts";
 
 // ---------------------------------------------------------------------------------------------
 // As formas do banco (spec 2.3, 2.6.2, 2.6.3)
@@ -26,9 +34,26 @@ export type OsDoCmp = {
   barco: string | null;
   cliente: string | null;
   status: string;
-  faturada: boolean;
-  assinada: boolean;
+  faturada?: boolean;
+  assinada?: boolean;
   pasta_registrada?: boolean;
+};
+
+/**
+ * O que o banco achou já lançado na OS para o comprovante (`_comprovante_lancamento_na_os`): uma
+ * despesa ou uma peça (o CMP só comprova), ou duas ou mais iguais (`ambiguo`: não escolhe nenhuma).
+ */
+export type LancamentoNaOs = {
+  /** "despesa" ou "peca" (o lançamento que já está na OS); ausente com `ambiguo`. */
+  tipo?: "despesa" | "peca" | string;
+  /** Quantos lançamentos iguais há na OS (2+: o CMP não escolhe nenhum). */
+  ambiguo?: number;
+  id?: string | null;
+  descricao?: string | null;
+  categoria?: string | null;
+  produto?: string | null;
+  valor?: string | number | null;
+  data?: string | null;
 };
 
 export type CmpResumo = {
@@ -53,7 +78,10 @@ export type CmpResumo = {
   cnpj_confianca?: string | null;
   destino?: string | null;
   os?: OsDoCmp | null;
-  cobrar_cliente?: boolean | null;
+  /** Ajustes do dono: peça ou despesa da OS (nulo = não perguntado, ou resolvido pelo lançamento que já existe). */
+  tipo_na_os?: "peca" | "despesa" | string | null;
+  /** O lançamento que já está na OS e que o CMP só comprova (ou `ambiguo`). */
+  na_os?: LancamentoNaOs | null;
   quem_pagou?: string | null;
   pagador_nome?: string | null;
   categoria?: string | null;
@@ -92,8 +120,11 @@ export type LinhaDoBanco = {
   /** A compra ainda está PENDING no cartão (sem proposta na fila do Extrato). */
   pendente?: boolean;
   acao?: AcaoNaLinha | string | null;
-  /** A linha já virou lançamento. */
-  lancamento?: { categoria?: string | null; descricao?: string | null } | null;
+  /**
+   * A linha já virou lançamento. `os_numero` nulo = a OS dele está vazia (o CMP preenche); ausente =
+   * o banco não disse (o texto não promete preencher a OS).
+   */
+  lancamento?: { categoria?: string | null; descricao?: string | null; os_numero?: string | null } | null;
   /** A conta a pagar em aberto que o CMP anexou (casar; conflito). */
   conta_aberta?: { descricao?: string | null; valor?: string | number | null } | null;
   motivos?: string[];
@@ -103,7 +134,6 @@ export type LinhaDoBanco = {
 /** A última avaliação do CMP contra o extrato (`Avaliacao`). */
 export type AvaliacaoDoBanco = {
   regra?: string | null;
-  so_registro?: boolean;
   nivel: "verde" | "azul" | "cinza" | string;
   linhas: LinhaDoBanco[];
   /** Quantas candidatas ficaram fora da lista (só as 3 mais próximas vão nela). */
@@ -113,7 +143,8 @@ export type AvaliacaoDoBanco = {
 
 /** `CmpResumo.banco` (`BancoNoResumo`). */
 export type BancoNoResumo = {
-  estado: "esperando" | "perguntar" | "pergunta_aberta" | "ligado" | "abandonado" | "so_registro" | string;
+  /** "banco_quem": a regra E (5 dias sem aparecer em conta da empresa) espera o "quem pagou?". */
+  estado: "esperando" | "perguntar" | "pergunta_aberta" | "ligado" | "abandonado" | "banco_quem" | string;
   nivel?: string | null;
   desde?: string | null;
   /** O dia do abandono (30 dias; 45 no crédito). */
@@ -122,7 +153,11 @@ export type BancoNoResumo = {
   candidatos?: number;
 };
 
-/** A pergunta do extrato (`PerguntaDoBancoF3`): passo "banco" no registro único da F2. */
+/**
+ * A pergunta do extrato (`PerguntaDoBancoF3`): passo "banco" no registro único da F2. Regra E
+ * (ajustes do dono): passo "banco_quem" ("Quem pagou?"), com as opções empresa / socio /
+ * payee:<uuid> / pessoal e `banco.nivel` = "cinza".
+ */
 export type PerguntaDoExtrato = {
   pergunta_id: string;
   dedupe_key: string;
@@ -133,16 +168,39 @@ export type PerguntaDoExtrato = {
   banco: AvaliacaoDoBanco | null;
 };
 
-/** O que comprovante_banco_responder devolve (`RespostaDoBanco`). */
+/** A proposta da fila do Extrato que o sim do dono aprova (R11; null = nada a aprovar agora). */
+export type AAprovar = { proposta_id?: string | null } | null;
+
+/**
+ * O que comprovante_banco_responder devolve (`RespostaDoBanco`). Regra E (passo banco_quem):
+ * "esperando" (a empresa pagou: continua esperando o extrato), "regravado" (desfez e gravou de novo
+ * com o pagador certo, na mesma transação: `gravacao`) ou "nao_trocado" (bloqueio ou erro de rota:
+ * nada mudou, `motivo`/`bloqueios`).
+ */
 export type RespostaDoBanco = {
-  resultado: "ligado" | "recusado" | "mudou" | "invalida" | "ok_nao_aprova" | "ignorada" | "nao_ligado" | string;
+  resultado:
+    | "ligado" | "recusado" | "mudou" | "invalida" | "ok_nao_aprova" | "ignorada" | "nao_ligado"
+    | "esperando" | "regravado" | "nao_trocado" | string;
   cmp?: CmpResumo | null;
   /** O efeito ligar_linha gravado (como, mensagens da rota…). */
   ligacao?: Efeito | null;
   proxima?: PerguntaDoExtrato | null;
   motivo?: string | null;
   ate?: string | null;
+  /** Ajustes do dono: a proposta classificada que o sim aprova (o edge chama o finance-review). */
+  aprovar?: AAprovar;
+  /** Regra E, "regravado": a gravação de novo. */
+  gravacao?: Gravacao | null;
+  /** Regra E, "nao_trocado": os bloqueios do desfazer (os mesmos do cancelar). */
+  bloqueios?: Array<{ efeito?: string; motivo?: string; como_destravar?: string }>;
 };
+
+/**
+ * O resultado da aprovação da linha no Extrato pelo sim (a ação approve_cmp do finance-review):
+ * ok = lançada; nada = não havia proposta a aprovar ainda; ok false = falhou (o próximo "gerar" do
+ * Extrato tenta de novo).
+ */
+export type Aprovacao = { ok: boolean; nada?: boolean; motivo?: string | null };
 
 export type Efeito = { tipo: string; [campo: string]: unknown };
 
@@ -177,6 +235,8 @@ export type Gravacao = {
   pasta?: string | null;
   /** F3: o nível da avaliação do plano e se há pergunta do extrato a fazer logo depois (azul). */
   banco?: { nivel?: string | null; perguntar?: boolean } | null;
+  /** Ajustes do dono: ligou e classificou na gravação — a proposta que o sim aprova. */
+  aprovar?: AAprovar;
 };
 
 export const MAX_MENSAGEM = 4096;
@@ -235,11 +295,6 @@ function osComNome(os: OsDoCmp, sep = " "): string {
   return nome ? `${os.numero}${sep}${nome}` : os.numero;
 }
 
-/** "já foi concluída" ou "já está faturada" (OS concluída ainda não foi cobrada do cliente). */
-function osFechada(os: OsDoCmp | null | undefined): string {
-  return os?.status === "completed" ? "já foi concluída" : "já está faturada";
-}
-
 /** "CMP-00124 (1 de 4) · cupom NFC-e · Auto Posto Exemplo · 10/10 · R$ 62,00". */
 export function cabecalho(p: Pick<PerguntaDoBanco, "cmp" | "posicao" | "total">): string {
   const c = p.cmp;
@@ -257,25 +312,12 @@ function linhas(opcoes: Opcao[]): string {
   return opcoes.map((o) => `${o.n} ${o.rotulo}`).join("\n");
 }
 
-/** O menu do "cobrar" muda com a OS: aberta, assinada ou já concluída/faturada (o total não muda). */
-function menuDoCobrar(cmp: CmpResumo, opcoes: Opcao[]): Opcao[] {
-  const os = cmp.os;
-  const rotulo = (valor: string, atual: string) => {
-    if (valor === "cobrar") {
-      if (os?.faturada) return "Cobrar à parte (fica a lembrança de cobrar)";
-      if (os?.assinada) return "Cobrar do cliente (muda o total e a OS vai pedir nova assinatura)";
-      return "Cobrar do cliente (entra no total da OS)";
-    }
-    if (valor === "custo") return os?.faturada ? "Custo da HBR" : "Custo da HBR (não entra no total)";
-    return atual;
-  };
-  return opcoesDoPasso("cobrar", opcoes).map((o) => ({ ...o, rotulo: rotulo(o.valor, o.rotulo) }));
-}
-
 /** O texto do passo (depois do cabeçalho). */
 export function textoDoPasso(p: PerguntaDoBanco): string {
   const c = p.cmp;
-  const menu = opcoesDoPasso(p.passo, p.opcoes);
+  // o quem pagou do PESSOAL é um sim/não (o banco manda as opções; sem elas, o menu fixo dele)
+  const pessoal = p.passo === "quem_pagou" && c.destino === "pessoal";
+  const menu = pessoal && !(Array.isArray(p.opcoes) && p.opcoes.length) ? MENU_QUEM_PAGOU_PESSOAL : opcoesDoPasso(p.passo, p.opcoes);
   switch (p.passo) {
     case "valor": {
       const lido = formatarReais(c.valor_lido ?? null);
@@ -299,16 +341,14 @@ export function textoDoPasso(p: PerguntaDoBanco): string {
     case "como_pagou":
       return `Como foi pago?\n${linhas(menu)}`;
     case "quem_pagou":
-      return `Quem pagou?\n${linhas(menu)}`;
+      return pessoal
+        ? `Gasto pessoal. Saiu da conta ou do cartão da EMPRESA?\n${linhas(menu)}`
+        : `Quem pagou?\n${linhas(menu)}`;
     case "qual_tecnico":
       return `Qual técnico pagou?\n${linhas(menu)}\nOu escreva o nome.`;
-    case "cobrar": {
-      const os = c.os;
-      const intro = os?.faturada
-        ? `A ${os.numero} ${osFechada(os)}: o total dela não muda. Cobrar do cliente à parte ou é custo da HBR?`
-        : `Para a ${os ? osComNome(os, " · ") : "OS"}. Cobrar do cliente?`;
-      return `${intro}\n${linhas(menuDoCobrar(c, p.opcoes))}`;
-    }
+    case "tipo_na_os":
+      // ajustes do dono: o comprovante nunca entra no total nem aparece para o cliente
+      return `Para a ${c.os ? osComNome(c.os, " · ") : "OS"}: o que foi esta compra?\n${linhas(menu)}`;
     case "categoria":
       return `Qual a categoria?\n${linhas(menu)}\nOu escreva o nome da categoria.`;
     case "data":
@@ -360,14 +400,26 @@ function formaComArtigo(forma: string | null | undefined): string {
 
 export const PENDENCIA_TEXTO: Record<string, string> = {
   dar_entrada: "dar entrada no estoque",
-  incluir_na_os: "incluir as peças na OS",
-  cobrar_a_parte: "cobrar à parte",
+  // ajustes do dono: o comprovante de peça só comprova; a peça entra pela OS
+  incluir_na_os: "lançar a peça na OS, se ainda não lançou",
   acerto_tecnico: "acerto do técnico",
   classificar_no_extrato: "classificar no Extrato",
-  ajustar_recebiveis: "ajustar os recebíveis da OS",
   dar_baixa: "dar baixa na conta a pagar",
   conferir_estorno: "conferir a despesa da compra estornada no banco",
+  // regra E (revisão dos ajustes): o dono disse que não foi a empresa e a compra apareceu numa conta dela
+  conferir_quem_pagou: "conferir quem pagou: a compra apareceu numa conta da empresa",
 };
+
+/** "a despesa (Combustível e deslocamento) R$ 62,00 de 10/10" — o que já estava lançado na OS. */
+function jaLancadoNaOs(n: LancamentoNaOs, c: CmpResumo): string {
+  const valor = formatarReais((n.valor as string | number | null | undefined) ?? c.valor ?? null);
+  const dia = diaMes(String(n.data ?? "")) ?? null;
+  const oQue = n.tipo === "peca"
+    ? (typeof n.produto === "string" && n.produto.trim() ? n.produto.trim().slice(0, 60) : "a peça")
+    : (typeof n.categoria === "string" && n.categoria ? n.categoria
+      : typeof n.descricao === "string" && n.descricao.trim() ? n.descricao.trim().replace(/["\n\r]+/g, " ").slice(0, 60) : "a despesa");
+  return [oQue, valor, dia ? `de ${dia}` : null].filter(Boolean).join(" ");
+}
 
 function destinoNoResumo(c: CmpResumo, comCategoria = true): string {
   const cat = comCategoria && c.categoria ? ` · ${c.categoria}` : "";
@@ -376,22 +428,31 @@ function destinoNoResumo(c: CmpResumo, comCategoria = true): string {
       if (!c.os) return `OS${cat}`;
       const base = osComNome(c.os);
       if (c.quem_pagou === "cliente") return `${base} · o cliente pagou direto`;
-      if (c.cobrar_cliente === true) {
-        return `${base} · ${c.os.faturada ? `cobrar à parte (${c.os.numero} ${osFechada(c.os)}: o total não muda)` : "cobrado do cliente (entra no total)"}${cat}`;
-      }
-      if (c.cobrar_cliente === false) return `${base} · custo da HBR (não entra no total)${cat}`;
+      // ajustes do dono: nada do comprovante aparece para o cliente nem muda o total da OS. O que o
+      // dono escolheu (peça ou despesa) vale antes do lançamento que o banco achou na OS (a mesma
+      // ordem do plano: o achado só vale com tipo_na_os nulo).
+      if (c.tipo_na_os === "peca") return `${base} · peça/material (só comprova; lance a peça na OS se ainda não lançou)`;
+      if (c.tipo_na_os === "despesa") return `${base} · despesa da OS (custo interno: não aparece para o cliente)${cat}`;
+      const n = c.na_os;
+      if (n && typeof n.ambiguo === "number") return `${base} · só comprova (há ${n.ambiguo} lançamentos iguais na OS)`;
+      if (n && n.tipo) return `${base} · já lançado na OS: ${jaLancadoNaOs(n, c)} (só comprova)`;
       return `${base}${cat}`;
     }
     case "estoque": return `estoque${cat}`;
     case "insumo": return `insumo${cat}`;
     case "empresa": return `empresa (sem OS)${cat}`;
-    case "pessoal": return "pessoal";
+    case "pessoal":
+      // ajustes do dono: PESSOAL que saiu da empresa é gasto pessoal do sócio (desconta do pró-labore)
+      return c.quem_pagou === "empresa"
+        ? "PESSOAL, pago pela empresa (gasto pessoal do sócio: desconta do pró-labore do mês)"
+        : "pessoal";
     default: return "a definir";
   }
 }
 
 function pagoNoResumo(c: CmpResumo): string | null {
-  if (c.destino === "pessoal" || c.mesma_compra) return null;
+  // PESSOAL só mostra o pagamento quando saiu da empresa (a forma decide a linha do extrato)
+  if ((c.destino === "pessoal" && c.quem_pagou !== "empresa") || c.mesma_compra) return null;
   const forma = c.forma ? FORMA_TEXTO[c.forma] ?? c.forma : null;
   let quem: string | null;
   switch (c.quem_pagou) {
@@ -422,6 +483,12 @@ function qualRegistro(ef: Efeito): string {
   return [desc, cat].filter(Boolean).join(" · ");
 }
 
+/** "a peça (Filtro de óleo, R$ 62,00)" do efeito anexar_peca. */
+function pecaDoEfeito(ef: Efeito, c: CmpResumo): string {
+  const produto = typeof ef.produto === "string" && ef.produto.trim() ? ef.produto.trim().replace(/["\n\r]+/g, " ").slice(0, 60) : null;
+  return [produto, reaisDoEfeito(ef, c)].filter(Boolean).join(", ");
+}
+
 /** Uma frase por efeito do plano (o "Vou: …" do resumo). */
 export function frasesDoPlano(plano: Plano | null | undefined, c: CmpResumo): string[] {
   const frases: string[] = [];
@@ -429,29 +496,26 @@ export function frasesDoPlano(plano: Plano | null | undefined, c: CmpResumo): st
     const os = numeroDaOs(ef, c);
     switch (ef.tipo) {
       case "despesa_os": {
-        let f: string;
+        // ajustes do dono: a despesa do comprovante é custo INTERNO (nunca faturável, nunca no documento do cliente)
         const oQue = ef.nota === true ? "o valor da nota" : "a despesa";
-        if (ef.billable === true) f = `lançar ${oQue} na ${os}, cobrada do cliente (o total da OS sobe ${reaisDoEfeito(ef, c)})`;
-        else if (ef.cobrar_a_parte === true) f = `lançar ${oQue} na ${os} marcada "cobrar à parte" (o total não muda)`;
-        else f = `lançar ${oQue} na ${os} como custo da HBR (o total não muda)`;
+        let f = `lançar ${oQue} na ${os} como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS)`;
         if (ef.paid_by === "technician") f += `, paga pelo ${c.pagador_nome ?? "técnico"}`;
         frases.push(f);
         break;
       }
       case "anexar_despesa": {
         const qual = qualRegistro(ef);
-        const cobrada = ef.billable === true ? ", cobrada do cliente" : ef.billable === false ? ", custo da HBR" : "";
-        frases.push(`usar a despesa que já está na ${os}${qual ? ` (${qual}${cobrada}, ${reaisDoEfeito(ef, c)}, ${diaMes(String(ef.data ?? c.data ?? "")) ?? "mesmo dia"})` : ` (${reaisDoEfeito(ef, c)}, ${diaMes(String(ef.data ?? c.data ?? "")) ?? "mesmo dia"})`} — não lanço de novo`);
+        const dia = diaMes(String(ef.data ?? c.data ?? "")) ?? "mesmo dia";
+        frases.push(`usar a despesa que já está na ${os} (${[qual || null, reaisDoEfeito(ef, c), dia].filter(Boolean).join(", ")}): só comprovo, não lanço de novo`);
         break;
       }
-      case "ajustar_despesa":
-        if (ef.campo === "billable_to_client") {
-          frases.push(ef.depois === true
-            ? `passar essa despesa a cobrada do cliente (o total da ${os} sobe)`
-            : `passar essa despesa a custo da HBR (o total da ${os} desce)`);
-        } else {
-          frases.push(ef.depois === true ? 'marcar essa despesa "cobrar à parte" (o total não muda)' : 'tirar dela o "cobrar à parte"');
-        }
+      case "anexar_peca":
+        frases.push(`usar a peça que já está na ${os} (${pecaDoEfeito(ef, c)}): só comprovo, não lanço custo`);
+        break;
+      case "comprovar_na_os":
+        frases.push(ef.motivo === "ambiguo"
+          ? `guardar o comprovante como prova da ${os} sem escolher lançamento (não lanço custo)`
+          : `guardar o comprovante como prova da peça da ${os} (não lanço custo)`);
         break;
       case "itens_da_nota": {
         const n = Number(ef.itens ?? 0);
@@ -500,7 +564,7 @@ export function frasesDoPlano(plano: Plano | null | undefined, c: CmpResumo): st
         frases.push(fraseDoAguardarBanco(ef, c, true));
         break;
       case "reembolso_tecnico":
-        frases.push(`lançar ${reaisDoEfeito(ef, c)} como reembolso ao ${String(ef.favorecido_nome ?? c.pagador_nome ?? "técnico")} nas Diárias (entra no próximo acerto dele)`);
+        frases.push(`lançar ${reaisDoEfeito(ef, c)} nas Diárias do ${String(ef.favorecido_nome ?? c.pagador_nome ?? "técnico")} como reembolso de despesa paga pelo técnico (entra no próximo acerto dele)`);
         break;
       case "nada":
         if (ef.motivo === "pessoal") frases.push("só guardar o arquivo em PESSOAL (nada no financeiro)");
@@ -521,20 +585,52 @@ export function frasesDoPlano(plano: Plano | null | undefined, c: CmpResumo): st
   return frases;
 }
 
-/** Os avisos que vão no resumo (um por linha). Os desconhecidos não aparecem. */
-export function textosDosAvisos(avisos: string[], c: CmpResumo): string[] {
+/** O extra de almoço do dia (`extra_do_dia` do efeito reembolso_tecnico) e de quem é o reembolso. */
+function almocoNoExtra(efeitos: Efeito[] | null | undefined, c: CmpResumo): { nome: string; valor: string; dia: string | null } {
+  const ef = (Array.isArray(efeitos) ? efeitos : []).find((e) => e?.tipo === "reembolso_tecnico" && e.extra_do_dia && typeof e.extra_do_dia === "object");
+  const extra = (ef?.extra_do_dia ?? {}) as { valor?: string | number | null; data?: string | null };
+  return {
+    nome: String(ef?.favorecido_nome ?? c.pagador_nome ?? "técnico"),
+    valor: formatarReais(extra.valor ?? null) ?? "o extra",
+    dia: diaMes(extra.data ?? c.data ?? null),
+  };
+}
+
+/** A categoria do lançamento que já existia (o banco não troca: só preenche o vazio). */
+function categoriaQueJaEstava(efeitos: Efeito[] | null | undefined): string | null {
+  for (const e of Array.isArray(efeitos) ? efeitos : []) {
+    const d = e?.diferente && typeof e.diferente === "object" ? e.diferente as { categoria?: unknown } : null;
+    if (typeof d?.categoria === "string" && d.categoria.trim()) return d.categoria.trim().slice(0, 80);
+  }
+  return null;
+}
+
+/**
+ * Os avisos que vão no resumo (um por linha). Os desconhecidos não aparecem. `efeitos` (do plano ou
+ * da gravação) dão o extra de almoço e a categoria que já estava; `gravado` = depois do sim (o
+ * aviso do almoço não pede mais o sim).
+ */
+export function textosDosAvisos(avisos: string[], c: CmpResumo, efeitos: Efeito[] | null = null, gravado = false): string[] {
   const os = c.os?.numero ?? "OS";
   const valor = formatarReais(c.valor ?? c.valor_lido ?? null) ?? "o valor";
+  const almoco = almocoNoExtra(efeitos, c);
+  const ambiguo = c.na_os && typeof c.na_os.ambiguo === "number" && c.na_os.ambiguo > 1 ? c.na_os.ambiguo : 2;
+  const jaEstava = categoriaQueJaEstava(efeitos);
   const mapa: Record<string, string> = {
-    os_faturada_total_nao_muda: `A ${os} ${osFechada(c.os)}: o total não muda.`,
-    os_assinada_pede_nova_assinatura: `A ${os} foi assinada pelo cliente: incluir no total pede nova assinatura.`,
     duplicado_ambiguo: "Há mais de um lançamento igual já feito: não lanço; fica para classificar no Extrato.",
     sem_socio_cadastrado: "Não achei o seu cadastro de sócio para o reembolso: se foi a empresa, *corrigir quem*.",
     valor_incerto: `Li o valor sem certeza total: confira. Se não for ${valor}: *corrigir valor 52,00*.`,
     parecido_sem_identidade: "Já há um lançamento do mesmo valor e data, de outro fornecedor: confira se não é o mesmo gasto.",
-    recebiveis_nao_mudam: `A ${os} já tem cobrança emitida (saldo ou parcelas): o total sobe, mas a cobrança não — fica a pendência de ajustar os recebíveis.`,
-    cobranca_da_despesa_nao_muda: `A despesa que já está na ${os} é cobrada do cliente e a OS ${osFechada(c.os)}: a cobrança dela não muda por aqui.`,
     pecas_da_nota_ja_na_os: `Peças desta nota já estão na ${os}: o custo delas já conta; não lanço o valor da nota de novo.`,
+    // ajustes do dono (11/10/2026)
+    varios_na_os: `Há ${ambiguo} lançamentos de ${valor} na ${os} sem comprovante: não liguei a nenhum e não lancei custo.` +
+      (gravado ? "" : ' Se for um gasto novo, responda *não* e escolha "Peça ou despesa".'),
+    almoco_ja_no_extra: gravado
+      ? `O ${almoco.nome} já tinha recebido ${almoco.valor} de almoço (extra da diária${almoco.dia ? ` de ${almoco.dia}` : ""}): confira se o reembolso não ficou em dobro.`
+      : `O ${almoco.nome} já recebeu ${almoco.valor} de almoço (extra da diária${almoco.dia ? ` de ${almoco.dia}` : ""}). Reembolsar mesmo assim? *sim* grava; ` +
+        'se o extra já pagou este almoço, responda *não* e escolha "Cancelar este comprovante" (nada é lançado).',
+    categoria_existente_diferente: `O lançamento que já existe está como ${jaEstava ?? "outra categoria"}: não troco (só preencho o que está vazio). ` +
+      "Se estiver errado, corrija no Extrato.",
     categoria_inativa: "A categoria não está mais ativa: escolha outra (*corrigir categoria*).",
     // F3 / F2b
     tecnico_fora_das_diarias: `O ${c.pagador_nome ?? "técnico"} não tem diária nas Diárias: o reembolso fica como pendência "acerto do técnico".`,
@@ -542,6 +638,10 @@ export function textosDosAvisos(avisos: string[], c: CmpResumo): string[] {
     conta_aberta_e_linha_lancada:
       "A conta a pagar deste gasto continua em aberto e a linha do banco já virou outro lançamento: é o mesmo gasto duas vezes. Cancele um dos dois no Financeiro; não ligo a linha.",
     despesa_ja_reembolsada: `A despesa da OS já foi reembolsada ao ${c.pagador_nome ?? "técnico"} (Financeiro › Reembolsos): não lanço outro reembolso nas Diárias.`,
+    // revisão dos ajustes: do bolso do sócio, com a conta do fornecedor ainda a pagar
+    conta_aberta_paga_pelo_socio: "A conta a pagar deste fornecedor (mesmo valor) continua em aberto: não lanço reembolso para você, seria o mesmo " +
+      "gasto duas vezes. Se você pagou essa conta do seu bolso, cancele-a em Financeiro › Contas a pagar e lance o seu reembolso " +
+      "(Lançar › Do bolso de um sócio); se a empresa ainda vai pagá-la, fica assim.",
   };
   return [...new Set(avisos)].map((a) => mapa[a]).filter((x): x is string => Boolean(x));
 }
@@ -576,7 +676,7 @@ export function textoDoResumo(p: PerguntaDoBanco): string {
   if (pasta) partes.push(`Arquivo: ${pasta}.`);
   const avisos = [...(p.avisos ?? []), ...(p.plano?.avisos ?? [])];
   // "(confira)" já está na linha do valor: o aviso do valor incerto vira a saída (*corrigir valor*)
-  partes.push(...textosDosAvisos(avisos, c));
+  partes.push(...textosDosAvisos(avisos, c, p.plano?.efeitos ?? null));
   partes.push("Responda *sim* para gravar ou *não* para corrigir.");
   return cortar(partes.join("\n"));
 }
@@ -611,8 +711,48 @@ const EFEITOS_DO_FINANCEIRO = new Set([
   "ligar_linha", "aguardar_banco", "reembolso_tecnico",
 ]);
 
-/** O que foi feito, no passado (gravação e cartão). */
-export function frasesDaGravacao(efeitos: Efeito[] | null | undefined, c: CmpResumo): string[] {
+/**
+ * "a OS e a categoria" do `corrigido` de um lançamento que já existia (ajustes do dono: o banco só
+ * preenche o que estava vazio; nunca troca).
+ */
+function preenchidosNoLancamento(corrigido: unknown): string[] {
+  if (!corrigido || typeof corrigido !== "object") return [];
+  const chaves = Object.keys(corrigido as object);
+  const campos: string[] = [];
+  if (chaves.some((k) => /os|service_order/i.test(k))) campos.push("a OS");
+  if (chaves.some((k) => /categ/i.test(k))) campos.push("a categoria");
+  return campos;
+}
+
+/** O motivo da aprovação que falhou, para o dono: código conhecido em texto fixo; frase das nossas rotas até 120; o resto, "erro no sistema". */
+export function motivoDaAprovacao(motivo: string | null | undefined): string {
+  const m = String(motivo ?? "").replace(/\s+/g, " ").trim();
+  const fixos: Record<string, string> = {
+    autor_diferente: "a aprovação é só do dono do comprovante",
+    sem_resposta: "o Extrato não respondeu",
+    nao_aprovada: "a linha não foi aprovada",
+    proposta_mudou: "a linha mudou na fila do Extrato",
+    linha_lancada: "a linha já virou outro lançamento",
+  };
+  if (fixos[m]) return fixos[m];
+  if (!m || /^[a-z_:0-9]{1,60}$/.test(m)) return "erro no sistema";
+  const cru = /violat|constraint|relation|column|syntax|function|null value|duplicate key|permission denied|does not exist|invalid input|operator|\bsql\b|\berror\b/i
+    .test(m);
+  return cru ? "erro no sistema" : m.replace(/[.\s]+$/u, "").slice(0, 120);
+}
+
+/** A linha classificada pelo CMP: lançada pelo sim, ou o que falta (a próxima rodada do Extrato tenta de novo). */
+function lancadaNoExtrato(c: CmpResumo, ef: Efeito | null, aprovacao: Aprovacao | null | undefined): { lancada: boolean; falha: string | null } {
+  if (aprovacao && !aprovacao.ok) return { lancada: false, falha: motivoDaAprovacao(aprovacao.motivo) };
+  if (aprovacao?.ok && !aprovacao.nada) return { lancada: true, falha: null };
+  return { lancada: Boolean(ef?.aprovado && typeof ef.aprovado === "object"), falha: null };
+}
+
+/**
+ * O que foi feito, no passado (gravação e cartão). `aprovacao`: o resultado da aprovação da linha
+ * pelo sim (ajustes do dono), quando o edge acabou de tentar; sem ela, o `aprovado` do efeito.
+ */
+export function frasesDaGravacao(efeitos: Efeito[] | null | undefined, c: CmpResumo, aprovacao: Aprovacao | null = null): string[] {
   const frases: string[] = [];
   const lista = Array.isArray(efeitos) ? efeitos : [];
   const temF2b = lista.some((x) => x.tipo === "nada" && x.motivo === "tecnico_f2b");
@@ -620,21 +760,23 @@ export function frasesDaGravacao(efeitos: Efeito[] | null | undefined, c: CmpRes
     const os = numeroDaOs(ef, c);
     switch (ef.tipo) {
       case "despesa_os": {
-        let f: string;
-        if (ef.billable === true) f = `lancei a despesa na ${os}, cobrada do cliente`;
-        else if (ef.cobrar_a_parte === true || (c.cobrar_cliente === true && c.os?.faturada)) f = `lancei a despesa na ${os} marcada "cobrar à parte"`;
-        else f = `lancei a despesa na ${os} como custo da HBR`;
+        let f = `lancei a despesa na ${os} como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS)`;
         if (ef.paid_by === "technician" || c.quem_pagou === "tecnico") f += `, paga pelo ${c.pagador_nome ?? "técnico"}`;
         frases.push(f);
         break;
       }
       case "anexar_despesa":
-        frases.push(`usei a despesa que já estava na ${os} (não lancei de novo)`);
+        frases.push(`usei a despesa que já estava na ${os}: só comprovei, não lancei de novo`);
         break;
-      case "ajustar_despesa":
-        frases.push(ef.campo === "billable_to_client"
-          ? (ef.depois === true ? "passei essa despesa a cobrada do cliente" : "passei essa despesa a custo da HBR")
-          : (ef.depois === true ? 'marquei essa despesa "cobrar à parte"' : 'tirei dela o "cobrar à parte"'));
+      case "anexar_peca": {
+        const produto = typeof ef.produto === "string" && ef.produto.trim() ? ` (${ef.produto.trim().replace(/["\n\r]+/g, " ").slice(0, 60)})` : "";
+        frases.push(`usei a peça que já estava na ${os}${produto}: só comprovei, não lancei custo`);
+        break;
+      }
+      case "comprovar_na_os":
+        frases.push(ef.motivo === "ambiguo"
+          ? `guardei o comprovante como prova da ${os} sem escolher lançamento (não lancei custo)`
+          : `guardei o comprovante como prova da peça da ${os} (não lancei custo)`);
         break;
       case "itens_da_nota": {
         const n = Array.isArray(ef.itens) ? ef.itens.length : Number(ef.itens ?? 0);
@@ -647,17 +789,28 @@ export function frasesDaGravacao(efeitos: Efeito[] | null | undefined, c: CmpRes
       case "mesma_compra":
         frases.push(`guardei só o arquivo, junto do ${String(ef.cmp ?? "outro comprovante")} (a mesma compra)`);
         break;
-      case "anotar":
-        frases.push(ef.resultado === "aplicada"
-          ? "classifiquei a linha do banco (falta aprovar no Extrato)"
-          : `anotei ${formaComArtigo(c.forma)} para quando o banco trouxer`);
+      case "anotar": {
+        if (ef.resultado !== "aplicada") {
+          frases.push(`anotei ${formaComArtigo(c.forma)} para quando o banco trouxer`);
+          break;
+        }
+        // o banco já trouxe: a anotação classificou a linha; o sim aprova (ajustes do dono)
+        const l = lancadaNoExtrato(c, null, aprovacao);
+        frases.push(l.lancada
+          ? `lancei a linha do banco no Extrato ${comoClassifica(c, false)}`
+          : l.falha
+          ? `classifiquei a linha do banco, mas não consegui aprovar agora (${l.falha}): tento de novo na próxima rodada do Extrato`
+          : "classifiquei a linha do banco (lanço no Extrato na próxima rodada)");
         break;
+      }
       case "anexar_anotacao":
         frases.push("usei a anotação que já esperava o banco");
         break;
       case "anexar_lancamento": {
-        const corrigido = ef.corrigido && typeof ef.corrigido === "object" && Object.keys(ef.corrigido as object).length > 0;
-        frases.push(corrigido ? "anexei ao lançamento que já existia e corrigi a categoria/OS dele" : "anexei ao lançamento que já existia (não lancei de novo)");
+        const campos = preenchidosNoLancamento(ef.corrigido);
+        frases.push(campos.length
+          ? `anexei ao lançamento que já existia e preenchi ${campos.join(" e ")}, que estava${campos.length > 1 ? "m" : ""} vazi${campos.length > 1 ? "as" : "a"}`
+          : "anexei ao lançamento que já existia (não lancei de novo)");
         break;
       }
       case "caixa":
@@ -672,13 +825,13 @@ export function frasesDaGravacao(efeitos: Efeito[] | null | undefined, c: CmpRes
           : "nada no financeiro agora: a compra no crédito entra pela fatura");
         break;
       case "ligar_linha":
-        frases.push(fraseDoLigarNaGravacao(ef, c));
+        frases.push(fraseDoLigarNaGravacao(ef, c, aprovacao));
         break;
       case "aguardar_banco":
         frases.push(fraseDoAguardarBanco(ef, c, false));
         break;
       case "reembolso_tecnico":
-        frases.push(`lancei ${formatarReais((ef.valor as string | number | null | undefined) ?? c.valor ?? null) ?? "o valor"} como reembolso ao ${String(ef.favorecido_nome ?? c.pagador_nome ?? "técnico")} nas Diárias`);
+        frases.push(`lancei ${formatarReais((ef.valor as string | number | null | undefined) ?? c.valor ?? null) ?? "o valor"} nas Diárias do ${String(ef.favorecido_nome ?? c.pagador_nome ?? "técnico")} como reembolso de despesa paga pelo técnico`);
         break;
       case "nada":
         if (ef.motivo === "pessoal") frases.push("só guardei o arquivo (nada no financeiro)");
@@ -709,20 +862,22 @@ export function frasesDaGravacao(efeitos: Efeito[] | null | undefined, c: CmpRes
  * "CMP-00124 gravado: <o que foi feito>. Arquivo: <pasta>." + as mensagens da rota + a próxima
  * pergunta ("Próximo: …") ou "Fila vazia: …". F3: sem próxima e com a pergunta do extrato aberta
  * logo depois da gravação (azul), a cauda é "No extrato: <a pergunta>" no lugar de "Fila vazia".
+ * `aprovacao`: o sim já lançou a linha no Extrato (ajustes do dono), ou o porquê de não.
  */
 export function textoDaGravacao(p: {
   cmp: CmpResumo;
   gravacao: Gravacao | null;
   proxima: PerguntaDoBanco | null;
   banco?: PerguntaDoExtrato | null;
+  aprovacao?: Aprovacao | null;
 }): string {
   const c = p.cmp;
-  const frases = frasesDaGravacao(p.gravacao?.efeitos, c);
+  const frases = frasesDaGravacao(p.gravacao?.efeitos, c, p.aprovacao ?? null);
   const pasta = p.gravacao?.pasta ?? pastaNoTexto(c);
   let texto = `${c.codigo} gravado: ${frases.join("; ")}.${pasta ? ` Arquivo: ${pasta}.` : ""}`;
   const mensagens = (p.gravacao?.mensagens ?? []).filter((m) => typeof m === "string" && m.trim());
   if (mensagens.length) texto += `\n${mensagens.map((m) => m.trim().slice(0, 300)).join("\n")}`;
-  const avisos = textosDosAvisos((p.gravacao?.avisos ?? []).filter((a) => a !== "valor_incerto"), c);
+  const avisos = textosDosAvisos((p.gravacao?.avisos ?? []).filter((a) => a !== "valor_incerto"), c, p.gravacao?.efeitos ?? null, true);
   if (avisos.length) texto += `\n${avisos.join("\n")}`;
   if (p.proxima) texto += `\n\nPróximo: ${textoDaPergunta(p.proxima)}`;
   else if (p.banco) texto += `\n\nNo extrato: ${textoDaPerguntaDoExtrato(p.banco)}`;
@@ -906,7 +1061,10 @@ export type ItemPendente = {
   situacao: string;
   falta?: string | null;
   pendencias?: string[];
-  /** F3: "perguntar" = falta ligar ao extrato (a pergunta do extrato espera a vez ou a resposta). */
+  /**
+   * F3: "perguntar" = falta ligar ao extrato (a pergunta do extrato espera a vez ou a resposta).
+   * Regra E: "banco_quem" = falta dizer quem pagou (não apareceu em conta da empresa em 5 dias).
+   */
   banco?: string | null;
   /** F3: a NF-e que o CMP espera chegou por e-mail e ainda não foi importada. */
   nota_no_email?: boolean;
@@ -926,6 +1084,7 @@ function linhaPendente(i: ItemPendente, n: number): string {
   if (GRAVADOS_DE_FATO.has(i.situacao)) {
     const faltas = (i.pendencias ?? []).map((q) => PENDENCIA_TEXTO[q] ?? q);
     if (i.banco === "perguntar") faltas.push("ligar ao extrato");
+    if (ehEstadoDoQuemPagou(i.banco)) faltas.push("quem pagou (não apareceu no extrato)");
     const rotulo = i.situacao === "gravado" ? "gravado" : SITUACAO_NA_LISTA[i.situacao];
     falta = `${rotulo}; falta: ${faltas.join(", ") || "nada"}`;
   } else if (i.situacao === "aguardando_xml" && i.nota_no_email) {
@@ -977,9 +1136,10 @@ export function textoDoCartao(c: CmpResumo, efeitos: Efeito[] | null | undefined
 }
 
 const DESFEITO_TEXTO: Record<string, string> = {
-  despesa_os: "a despesa da OS",
+  despesa_os: "a despesa interna da OS",
   anexar_despesa: "o vínculo com a despesa da OS",
-  ajustar_despesa: "a cobrança da despesa (voltou como era)",
+  anexar_peca: "o vínculo com a peça da OS",
+  comprovar_na_os: "o comprovante como prova da OS",
   itens_da_nota: "o vínculo dos itens da nota com a OS",
   anotar: "a anotação do extrato",
   anexar_anotacao: "o vínculo com a anotação",
@@ -992,9 +1152,10 @@ const DESFEITO_TEXTO: Record<string, string> = {
   reembolso_tecnico: "o reembolso nas Diárias",
 };
 
+/** ligar_linha cuja linha o sim aprovou (ajustes do dono): o cancelar desfaz a aprovação também. */
+const DESFEITO_LIGAR_APROVADO = "a aprovação e a ligação com a linha do banco (a linha volta para a fila do Extrato)";
+
 const BLOQUEIO_TEXTO: Record<string, string> = {
-  os_faturada: "a OS já está faturada com a despesa cobrada; tire a despesa pela tela da OS e cancele de novo",
-  abaixo_do_pago: "sem a despesa, o total da OS fica abaixo do que o cliente já pagou; ajuste pela tela da OS",
   anotacao_aplicada: "a linha do banco já recebeu a classificação; corrija pelo Extrato",
   mes_fechado: "o mês está fechado no financeiro; reabra o mês e cancele de novo",
   reembolso_pago: "o reembolso já foi pago; desfaça o pagamento e cancele de novo",
@@ -1009,6 +1170,8 @@ const BLOQUEIO_DA_F3: Record<string, string> = {
   linha_lancada: "a linha do banco já virou lançamento: desfaça pelo Extrato e cancele de novo",
   linha_casada: "a linha do banco já deu baixa na conta a pagar: desfaça pelo Extrato e cancele de novo",
   reembolso_acertado: "o reembolso já está num acerto fechado das Diárias: reabra o acerto em Financeiro › Diárias e cancele de novo",
+  // revisão dos ajustes: o reembolso já foi pago ao técnico num pagamento dividido (Pix, Caixa ou bolso do sócio)
+  reembolso_dividido: "o reembolso já foi pago ao técnico num pagamento dividido: desfaça a divisão em Financeiro › Diárias e cancele de novo",
 };
 
 function textoDoBloqueioDaF3(b: { motivo?: string; como_destravar?: string }): string | null {
@@ -1021,18 +1184,28 @@ function textoDoBloqueioDaF3(b: { motivo?: string; como_destravar?: string }): s
 export type Cancelamento = {
   ok?: boolean;
   codigo?: string;
-  desfeitos?: Array<string | { tipo?: string }>;
+  /** `aprovado` no ligar_linha: o sim tinha aprovado a linha (o cancelar desfez a aprovação). */
+  desfeitos?: Array<string | { tipo?: string; aprovado?: unknown }>;
   avisos?: string[];
   /** Os CMPs guardados como "a mesma compra" deste (continuam: só arquivo). */
   mesma_compra?: string[];
   bloqueios?: Array<{ efeito?: string; motivo?: string; como_destravar?: string }>;
 };
 
+/** Os bloqueios do desfazer (cancelar e trocar quem pagou), em texto do dono. */
+function textoDosBloqueios(bloqueios: Cancelamento["bloqueios"]): string[] {
+  return (bloqueios ?? [])
+    .map((b) => textoDoBloqueioDaF3(b) ?? BLOQUEIO_TEXTO[String(b.motivo)] ?? b.como_destravar ?? b.motivo)
+    .filter((x): x is string => typeof x === "string" && x.trim() !== "")
+    .map((x) => x.replace(/[\r\n]+/g, " ").trim().slice(0, 200));
+}
+
 /** "CMP-00124 cancelado (<motivo>). Desfeito: …" ou "Não cancelei o CMP-00124: … Nada mudou." */
 export function textoDoCancelamento(codigo: string, motivo: string | null, r: Cancelamento | null): string {
   if (r?.ok) {
     const desfeitos = [...new Set((r.desfeitos ?? []).map((d) => {
       const tipo = typeof d === "string" ? d : String(d?.tipo ?? "");
+      if (tipo === "ligar_linha" && typeof d === "object" && d?.aprovado) return DESFEITO_LIGAR_APROVADO;
       return DESFEITO_TEXTO[tipo] ?? null;
     }).filter((x): x is string => Boolean(x)))];
     const lista = desfeitos.length ? desfeitos.join(", ") : "nada (ainda não tinha sido gravado)";
@@ -1043,9 +1216,7 @@ export function textoDoCancelamento(codigo: string, motivo: string | null, r: Ca
       : "";
     return cortar(`${codigo} cancelado${m ? ` (${m})` : ""}. Desfeito: ${lista}. Arquivo em COMPROVANTES/_CANCELADOS.${aviso}`);
   }
-  const bloqueios = (r?.bloqueios ?? [])
-    .map((b) => textoDoBloqueioDaF3(b) ?? BLOQUEIO_TEXTO[String(b.motivo)] ?? b.como_destravar ?? b.motivo)
-    .filter(Boolean);
+  const bloqueios = textoDosBloqueios(r?.bloqueios);
   return cortar(`Não cancelei o ${codigo}: ${bloqueios.join("; ") || "a gravação não pôde ser desfeita"}. Nada mudou.`);
 }
 
@@ -1114,32 +1285,38 @@ function comoClassifica(c: CmpResumo, comBarco = true): string {
   return os ? `na ${os}` : "com os dados do comprovante";
 }
 
-/** Para onde o lançamento que já existe é corrigido (categoria do CMP diferente, ou a OS dele); null = nada a corrigir. */
-function paraOndeCorrige(c: CmpResumo, l: LinhaDoBanco): string | null {
-  const os = c.destino === "os" && c.os ? osComNome(c.os) : null;
-  const outraCategoria = Boolean(c.categoria) && c.categoria !== (l.lancamento?.categoria ?? null);
-  if (!outraCategoria && !os) return null;
-  return [c.categoria ?? null, os].filter(Boolean).join(", ");
+/**
+ * Regra G (ajustes do dono): o lançamento que já existe só tem o VAZIO preenchido — "(preencho a
+ * OS-00112 Brisa, que está vazia)" / "(nada a preencher)"; nunca "corrijo para". A OS só entra quando
+ * o banco disse que ela está vazia (`os_numero` nulo); sem o lançamento, nada é prometido ("").
+ */
+function oQuePreenche(c: CmpResumo, l: LinhaDoBanco | null): string {
+  const lanc = l?.lancamento;
+  if (!lanc || typeof lanc !== "object") return "";
+  const campos: string[] = [];
+  if (c.destino === "os" && c.os && "os_numero" in lanc && !lanc.os_numero) campos.push(`a ${osComNome(c.os)}`);
+  if (c.categoria && !String(lanc.categoria ?? "").trim()) campos.push(`a categoria ${c.categoria}`);
+  if (!campos.length) return " (nada a preencher)";
+  return ` (preencho ${campos.join(" e ")}, que ${campos.length > 1 ? "estão vazias" : "está vazia"})`;
 }
 
-/** O que ligar faz com a linha, no presente (a pergunta do extrato): "classifico a linha como …". */
+/** O que ligar faz com a linha, no presente (a pergunta do extrato): "lanço a linha no Extrato como …". */
 export function acaoNoTexto(c: CmpResumo, l: LinhaDoBanco): string {
   switch (l.acao) {
-    case "anexar": {
-      const para = paraOndeCorrige(c, l);
-      return para ? `uso o lançamento que já existe dela e corrijo para ${para}` : "uso o lançamento que já existe dela";
-    }
+    case "anexar":
+      return `uso o lançamento que já existe dela${oQuePreenche(c, l)}`;
     case "casar": {
       const desc = descricaoCurta(l.conta_aberta?.descricao)?.replace(/"/g, "'") ?? null;
       const valor = reaisDaLinha(l.conta_aberta?.valor ?? null);
       return `dou baixa na conta a pagar${desc ? ` "${desc}"` : ""}${valor ? ` (${valor})` : ""} com ela`;
     }
     case "aguardar":
-      return "classifico quando o cartão confirmar a compra";
+      return "lanço quando o cartão confirmar a compra (aprovada no seu sim)";
     case "conflito":
       return textoDoConflito(l);
     default:
-      return `classifico a linha ${comoClassifica(c)} (falta aprovar no Extrato)`;
+      // ajustes do dono: o sim já aprova a linha no Extrato (ligar = classificar + aprovar)
+      return `lanço a linha no Extrato ${comoClassifica(c)} (aprovada no seu sim)`;
   }
 }
 
@@ -1159,39 +1336,55 @@ function fraseDoLigarNoPlano(ef: Efeito, c: CmpResumo): string {
   const detalhe = l ? [descricaoCurta(l.conta), descricaoCurta(l.descricao ?? l.nome), reaisDaLinha(l.valor)].filter(Boolean).join(", ") : "";
   let fim: string;
   switch (acao) {
-    case "anexar": {
-      const para = paraOndeCorrige(c, l ?? { data: null, valor: null });
-      fim = para ? `usar o lançamento que já existe dela e corrigir para ${para}` : "usar o lançamento que já existe dela";
+    case "anexar":
+      fim = `usar o lançamento que já existe dela${oQuePreenche(c, l)}`;
       break;
-    }
     case "casar":
       fim = "dar baixa na conta a pagar com ela";
       break;
     case "aguardar":
-      fim = "classificá-la quando o cartão confirmar a compra";
+      fim = "lançá-la no Extrato quando o cartão confirmar a compra (aprovada no seu sim)";
       break;
     default:
-      fim = `classificá-la ${comoClassifica(c)} (falta aprovar no Extrato)`;
+      fim = `lançá-la no Extrato ${comoClassifica(c)} (aprovada no seu sim)`;
   }
   return `ligar ${onde}${dia ? ` de ${dia}` : ""}${detalhe ? ` (${detalhe})` : ""} e ${fim}`;
 }
 
-/** O efeito ligar_linha gravado (gravação, varredura, sim do dono), no passado, pelo `como`. */
-function fraseDoLigarNaGravacao(ef: Efeito, c: CmpResumo): string {
+/**
+ * O efeito ligar_linha gravado (gravação, varredura, sim do dono), no passado, pelo `como`. No
+ * "classificou", o sim aprova a linha (ajustes do dono): lançada, falhou agora (tento de novo) ou a
+ * proposta ainda não está na fila (lanço quando ela entrar).
+ */
+function fraseDoLigarNaGravacao(ef: Efeito, c: CmpResumo, aprovacao: Aprovacao | null = null): string {
   const l = (ef.linha && typeof ef.linha === "object" ? ef.linha : null) as LinhaDoBanco | null;
   const dia = diaMes(l?.data ?? c.banco?.linha?.data ?? null);
   const de = dia ? ` de ${dia}` : "";
   switch (String(ef.como ?? "")) {
-    case "anexou":
-      return `liguei à linha do banco${de} e anexei ao lançamento dela`;
+    case "anexou": {
+      const campos = preenchidosNoLancamento(ef.corrigido);
+      return campos.length
+        ? `liguei à linha do banco${de} e anexei ao lançamento dela (preenchi ${campos.join(" e ")}, que estava${campos.length > 1 ? "m" : ""} vazi${campos.length > 1 ? "as" : "a"})`
+        : `liguei à linha do banco${de} e anexei ao lançamento dela`;
+    }
     case "casou":
       return `liguei à linha do banco${de} e dei baixa na conta a pagar`;
     case "aguardando":
       return c.forma === "credito" || l?.cartao
-        ? `liguei à compra do cartão${de} (classifico quando ela for confirmada)`
-        : `liguei à linha do banco${de} (classifico quando ela entrar na fila do Extrato)`;
-    default:
-      return `liguei à linha do banco${de} e a classifiquei (falta aprovar no Extrato)`;
+        ? `liguei à compra do cartão${de} (lanço no Extrato quando ela for confirmada)`
+        : `liguei à linha do banco${de} (lanço no Extrato quando ela entrar na fila)`;
+    default: {
+      // revisão dos ajustes: o dono desfez no Extrato a aprovação que o sim fez — a linha é dele (nunca aprovo de novo)
+      if (ef.aprovado_desfeito && typeof ef.aprovado_desfeito === "object" && !ef.aprovado) {
+        return `liguei à linha do banco${de}; a aprovação foi desfeita no Extrato e a linha ficou para você classificar lá`;
+      }
+      const a = lancadaNoExtrato(c, ef, aprovacao);
+      if (a.lancada) return `liguei à linha do banco${de} e lancei no Extrato ${comoClassifica(c, false)}`;
+      if (a.falha) {
+        return `liguei à linha do banco${de} e a classifiquei, mas não consegui aprovar agora (${a.falha}): tento de novo na próxima rodada do Extrato`;
+      }
+      return `liguei à linha do banco${de} e a classifiquei ${comoClassifica(c, false)} (lanço no Extrato na próxima rodada)`;
+    }
   }
 }
 
@@ -1237,6 +1430,7 @@ function linhasDaPergunta(p: PerguntaDoExtrato): Array<{ n: number; texto: strin
  */
 export function textoDaPerguntaDoExtrato(p: PerguntaDoExtrato, prefixo: string | null = null): string {
   const c = p.cmp;
+  if (p.passo === "banco_quem") return textoDaPerguntaDoQuemPagou(p, prefixo);
   const linhas = linhasDaPergunta(p);
   const partes = [cabecalho({ cmp: c })];
   if (ehPerguntaAzul(p)) {
@@ -1270,9 +1464,27 @@ export function textoDaPerguntaDoExtrato(p: PerguntaDoExtrato, prefixo: string |
   return cortar(prefixo ? `${prefixo}\n${corpo}` : corpo);
 }
 
-/** A retomada do vigia: "Ainda falta ligar o CMP-00124 ao extrato." */
-export function prefixoDaPerguntaDoExtrato(p: Pick<PerguntaDoExtrato, "cmp" | "retomada">, motivo: string): string | null {
-  return motivo === "vigia" && p.retomada ? `Ainda falta ligar o ${p.cmp.codigo} ao extrato.` : null;
+/**
+ * Regra E (ajustes do dono): o CMP gravado não apareceu em nenhuma conta da empresa em 5 dias.
+ * "Esta compra de 10/10 ainda não apareceu em nenhuma conta da empresa. Quem pagou?" + as opções do
+ * banco (a empresa / eu / o técnico / gasto pessoal; no PESSOAL, só a empresa ou não).
+ */
+export function textoDaPerguntaDoQuemPagou(p: PerguntaDoExtrato, prefixo: string | null = null): string {
+  const c = p.cmp;
+  const dia = diaMes(c.data);
+  const opcoes = (Array.isArray(p.opcoes) ? p.opcoes : []).filter((o) => o.n > 0);
+  const corpo = [
+    cabecalho({ cmp: c }),
+    `Esta compra${dia ? ` de ${dia}` : ""} ainda não apareceu em nenhuma conta da empresa. Quem pagou?`,
+    ...opcoes.map((o) => `${o.n} ${String(o.rotulo ?? "").replace(/[\r\n]+/g, " ").trim()}`),
+  ].join("\n");
+  return cortar(prefixo ? `${prefixo}\n${corpo}` : corpo);
+}
+
+/** A retomada do vigia: "Ainda falta ligar o CMP-00124 ao extrato." (regra E: "… saber quem pagou o CMP-00124."). */
+export function prefixoDaPerguntaDoExtrato(p: Pick<PerguntaDoExtrato, "cmp" | "retomada"> & { passo?: string }, motivo: string): string | null {
+  if (motivo !== "vigia" || !p.retomada) return null;
+  return p.passo === "banco_quem" ? `Ainda falta saber quem pagou o ${p.cmp.codigo}.` : `Ainda falta ligar o ${p.cmp.codigo} ao extrato.`;
 }
 
 /** "à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98)" (do CmpResumo.banco.linha). */
@@ -1285,14 +1497,20 @@ function linhaLigada(c: CmpResumo): string {
   return `à linha${dia ? ` de ${dia}` : ""}${conta ? ` do ${conta}` : ""}${valor ? ` (${valor})` : ""}`;
 }
 
-/** "CMP-00124 ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98): classifiquei como …." + as mensagens da rota. */
-export function textoDoLigado(c: CmpResumo, ligacao: Efeito | null | undefined): string {
+/**
+ * "CMP-00124 ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98): lancei no Extrato como …." + as
+ * mensagens da rota. `aprovacao` (ajustes do dono): o sim aprovou a linha, falhou agora (tento de novo
+ * na próxima rodada) ou a proposta ainda não estava na fila.
+ */
+export function textoDoLigado(c: CmpResumo, ligacao: Efeito | null | undefined, aprovacao: Aprovacao | null = null): string {
   const como = String(ligacao?.como ?? c.banco?.linha?.como ?? "");
   let frase: string;
   switch (como) {
     case "anexou": {
-      const corrigido = ligacao?.corrigido && typeof ligacao.corrigido === "object" && Object.keys(ligacao.corrigido as object).length > 0;
-      frase = corrigido ? "a linha já estava lançada: anexei e corrigi a categoria/OS" : "a linha já estava lançada: anexei";
+      const campos = preenchidosNoLancamento(ligacao?.corrigido);
+      frase = campos.length
+        ? `a linha já estava lançada: anexei e preenchi ${campos.join(" e ")}, que estava${campos.length > 1 ? "m" : ""} vazi${campos.length > 1 ? "as" : "a"}`
+        : "a linha já estava lançada: anexei";
       break;
     }
     case "casou": {
@@ -1302,10 +1520,16 @@ export function textoDoLigado(c: CmpResumo, ligacao: Efeito | null | undefined):
       break;
     }
     case "aguardando":
-      frase = "classifico assim que a compra entrar na fila do Extrato";
+      frase = "lanço no Extrato assim que a compra entrar na fila (aprovada no seu sim)";
       break;
-    default:
-      frase = `classifiquei ${comoClassifica(c, false)} (falta aprovar no Extrato)`;
+    default: {
+      const a = lancadaNoExtrato(c, ligacao ?? null, aprovacao);
+      frase = a.lancada
+        ? `lancei no Extrato ${comoClassifica(c, false)}`
+        : a.falha
+        ? `classifiquei a linha ${comoClassifica(c, false)}, mas não consegui aprovar agora (${a.falha}): tento de novo na próxima rodada do Extrato`
+        : `classifiquei ${comoClassifica(c, false)} (lanço no Extrato na próxima rodada)`;
+    }
   }
   const daRota = ligacao?.mensagens;
   const mensagens = (Array.isArray(daRota) ? daRota as unknown[] : [])
@@ -1327,6 +1551,73 @@ export function textoDoMudou(codigo: string, ate: string | null | undefined, nov
   return `As linhas do extrato mudaram desde a pergunta. Não há mais linha que sirva: o ${codigo} continua esperando o extrato${dia ? ` (até ${dia})` : ""}.`;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Regra E (ajustes do dono): os resultados do "quem pagou?"
+// ---------------------------------------------------------------------------------------------
+
+/** O estado do CMP (no cartão e nos pendentes) que espera o "quem pagou?" da regra E. */
+export function ehEstadoDoQuemPagou(estado: string | null | undefined): boolean {
+  return estado === "banco_quem" || estado === "quem_pagou";
+}
+
+/** "a empresa pagou": "Ok: o CMP-00124 continua esperando o extrato (até 09/11)." */
+export function textoDoQuemEsperando(codigo: string, ate: string | null | undefined): string {
+  const dia = diaMes(ate ?? null);
+  return `Ok: o ${codigo} continua esperando o extrato${dia ? ` (até ${dia})` : ""}.`;
+}
+
+/** "pago por você" / "pago pelo Roberto" / "gasto pessoal" (o CMP depois de gravado de novo). */
+function quemPagouNoTexto(c: CmpResumo): string {
+  if (c.destino === "pessoal") return "gasto pessoal";
+  if (c.quem_pagou === "tecnico") return `pago pelo ${c.pagador_nome ?? "técnico"}`;
+  if (c.quem_pagou === "socio") return "pago por você";
+  return "pago pela empresa";
+}
+
+/**
+ * Desfez o que estava gravado e gravou de novo com o pagador certo (na mesma transação):
+ * "CMP-00124 corrigido: pago pelo Roberto. Feito: <frases da gravação>." + os avisos (o do almoço
+ * que já está no extra da diária, por exemplo).
+ */
+export function textoDoRegravado(c: CmpResumo, gravacao: Gravacao | null | undefined, aprovacao: Aprovacao | null = null): string {
+  const frases = frasesDaGravacao(gravacao?.efeitos, c, aprovacao);
+  const pasta = gravacao?.pasta ?? pastaNoTexto(c);
+  const partes = [`${c.codigo} corrigido: ${quemPagouNoTexto(c)}. Feito: ${frases.join("; ")}.${pasta ? ` Arquivo: ${pasta}.` : ""}`];
+  const mensagens = (gravacao?.mensagens ?? []).filter((m) => typeof m === "string" && m.trim()).map((m) => m.trim().slice(0, 300));
+  partes.push(...mensagens);
+  partes.push(...textosDosAvisos((gravacao?.avisos ?? []).filter((a) => a !== "valor_incerto"), c, gravacao?.efeitos ?? null, true));
+  return cortar(partes.join("\n"));
+}
+
+/**
+ * Não deu para trocar (bloqueio do desfazer ou erro da rota): "Não troquei quem pagou o CMP-00124:
+ * <bloqueio e como destravar>. Nada mudou." A mensagem crua do Postgres nunca vai ao dono.
+ */
+export function textoDoNaoTrocado(
+  codigo: string,
+  r: Pick<RespostaDoBanco, "motivo" | "bloqueios"> | null,
+  numero: number | null = null,
+  codigoDoErro: string | null = null,
+): string {
+  const cmpN = `*cmp ${numero ?? "N"}*`;
+  const deNovo = (t: string) => t.replace(/ e cancele de novo\b/g, ` e mande ${cmpN} para responder de novo`);
+  const bloqueios = textoDosBloqueios(r?.bloqueios).map(deNovo);
+  let porque: string;
+  if (bloqueios.length) porque = bloqueios.join("; ");
+  else {
+    const m = String(r?.motivo ?? "").trim();
+    const doBloqueio = textoDoBloqueioDaF3({ motivo: m }) ?? BLOQUEIO_TEXTO[m];
+    porque = doBloqueio ? deNovo(doBloqueio) : motivoDoNaoLigado(m, numero, codigoDoErro);
+  }
+  return cortar(`Não troquei quem pagou o ${codigo}: ${porque}. Nada mudou.`);
+}
+
+/** A resposta não serve ao "quem pagou?": o número da opção. */
+export function textoInvalidaDoQuemPagou(codigo: string, opcoes: number): string {
+  const n = Math.max(1, Math.trunc(Number(opcoes)) || 1);
+  return `Para o ${codigo}, responda o número de quem pagou (${n === 1 ? "1" : `1 a ${n}`}).`;
+}
+
 /** A resposta não serve à pergunta do extrato (e o "ok"/número no verde): o que responder. */
 export function textoInvalidaDoExtrato(codigo: string, azul: boolean, linhas = 3): string {
   if (!azul) return `Responda *sim* se essa linha é do ${codigo}, ou *não*.`;
@@ -1341,7 +1632,6 @@ const MOTIVO_DO_NAO_LIGADO: Record<string, string> = {
   ja_ligado: "ele já está ligado a essa linha",
   ja_ligado_a_outra: "ele já está ligado a outra linha do extrato",
   cancelado: "ele foi cancelado",
-  so_registro: "ele é PESSOAL: só fica registrado",
   situacao: "ele não está mais esperando o banco",
   conflito: "a conta a pagar dele continua em aberto e essa linha já virou outro lançamento (o mesmo gasto duas vezes): cancele um dos dois no Financeiro",
 };
@@ -1385,8 +1675,9 @@ function bancoNoCartao(c: CmpResumo): string | null {
       return `ligado ${linhaLigada(c)}`;
     case "abandonado":
       return `não apareceu em ${c.forma === "credito" ? 45 : 30} dias: classifique no Extrato`;
-    case "so_registro":
-      return "só registrado (PESSOAL)";
+    case "banco_quem":
+    case "quem_pagou":
+      return `falta saber quem pagou (não apareceu em conta da empresa: *cmp ${numeroDoCmp(c) ?? "N"}* para responder)`;
     default:
       return null;
   }

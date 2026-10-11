@@ -36,6 +36,11 @@ Deno.test("nomeFinal: sem hora, destinos, pagamentos, conta do sócio e pessoal 
   assertEquals(nomeFinal(d({ destino: "empresa", os: null, forma: "dinheiro", conta: "CAIXA" })).endsWith(" - EMPRESA - DINHEIRO CAIXA.jpg"), true);
   assertEquals(nomeFinal(d({ destino: "insumo", os: null, forma: "dinheiro", conta: "BOLSO GUSTAVO" })).endsWith(" - INSUMO - DINHEIRO BOLSO GUSTAVO.jpg"), true);
   assertEquals(nomeFinal(d({ destino: "pessoal", os: null, forma: "credito", conta: null })), "2026-10-10 12h57 CMP-00124 NFCE R$ 62,00 Auto Posto Exemplo - PESSOAL.jpg");
+  // ajustes do dono: PESSOAL do bolso continua sem pagamento; o que saiu da empresa leva "PAGAMENTO CONTA"
+  assertEquals(nomeFinal(d({ destino: "pessoal", os: null, forma: "credito", conta: null, quem_pagou: "socio" })).endsWith(" - PESSOAL.jpg"), true);
+  assertEquals(nomeFinal(d({ destino: "pessoal", os: null, forma: "credito", conta: null, quem_pagou: "empresa" })),
+    "2026-10-10 12h57 CMP-00124 NFCE R$ 62,00 Auto Posto Exemplo - PESSOAL - CREDITO EMPRESA.jpg");
+  assertEquals(nomeFinal(d({ destino: "pessoal", os: null, forma: "debito", conta: "C6 PJ" })).endsWith(" - PESSOAL - DEBITO C6 PJ.jpg"), true);
   assertEquals(nomeFinal(d({ forma: "transferencia" })).includes(" - TRANSF EMPRESA."), true);
   assertEquals(nomeFinal(d({ forma: "credito_loja", conta: null })).endsWith(" - CRED-LOJA.jpg"), true);
   assertEquals(nomeFinal(d({ os: { ...d().os!, barco: null } })).includes(" - OS-00112 João - "), true);
@@ -98,8 +103,8 @@ Deno.test("csvDoIndice: BOM, ';', CRLF, vírgula decimal, aspas, por número, se
     },
     {
       codigo: "CMP-00124", numero: 124, data: "2026-10-10", hora: "12:57:56", tipo: "nfce", valor: "62.00", fornecedor: "Auto Posto Exemplo",
-      cnpj: "11222333000181", destino: "os", os_numero: "OS-00112", barco: "Brisa", cobrar_cliente: true, cobrar_a_parte: true,
-      quem_pagou: "socio", forma: "dinheiro", situacao: "gravado", pendencias: ["cobrar_a_parte", "dar_entrada"],
+      cnpj: "11222333000181", destino: "os", os_numero: "OS-00112", barco: "Brisa", na_os: "despesa",
+      quem_pagou: "socio", forma: "dinheiro", situacao: "gravado", pendencias: ["incluir_na_os", "dar_entrada"],
       arquivo: "/B2C/0021_Brisa/1- DOC's/Compras/a.jpg",
     },
   ];
@@ -108,10 +113,10 @@ Deno.test("csvDoIndice: BOM, ';', CRLF, vírgula decimal, aspas, por número, se
   assert(csv.endsWith("\r\n"));
   const linhasCsv = csv.slice(1).split("\r\n");
   assertEquals(linhasCsv[0], COLUNAS_DO_INDICE.join(";"));
-  assertEquals(linhasCsv[0], "Código;Data;Hora;Tipo;Valor;Fornecedor;CNPJ;Destino;OS;Barco;Cobrar do cliente;Quem pagou;Forma;Situação;Pendências;Arquivo");
+  assertEquals(linhasCsv[0], "Código;Data;Hora;Tipo;Valor;Fornecedor;CNPJ;Destino;OS;Barco;Na OS;Quem pagou;Forma;Situação;Pendências;Arquivo");
   assertEquals(
     linhasCsv[1],
-    "CMP-00124;10/10/2026;12:57;cupom NFC-e;62,00;Auto Posto Exemplo;11.222.333/0001-81;OS;OS-00112;Brisa;à parte;sócio;dinheiro;gravado;cobrar à parte, dar entrada no estoque;/B2C/0021_Brisa/1- DOC's/Compras/a.jpg",
+    "CMP-00124;10/10/2026;12:57;cupom NFC-e;62,00;Auto Posto Exemplo;11.222.333/0001-81;OS;OS-00112;Brisa;despesa interna;sócio;dinheiro;gravado;lançar a peça na OS, dar entrada no estoque;/B2C/0021_Brisa/1- DOC's/Compras/a.jpg",
   );
   assertEquals(
     linhasCsv[2],
@@ -122,17 +127,18 @@ Deno.test("csvDoIndice: BOM, ';', CRLF, vírgula decimal, aspas, por número, se
   assertEquals(csvDoIndice([]), `﻿${COLUNAS_DO_INDICE.join(";")}\r\n`);
 });
 
-Deno.test("csvDoIndice: a forma que a N5 devolve (os = número, cobrar_cliente em texto, sem numero)", () => {
+Deno.test("csvDoIndice: a forma que a N5 devolve (os = número, na_os em texto, sem numero); nada de cobrar do cliente", () => {
   const csv = csvDoIndice([
-    { codigo: "CMP-00125", data: "2026-10-11", tipo: "pix", valor: "10.00", destino: "empresa", cobrar_cliente: null, situacao: "gravado", pendencias: [] },
-    { codigo: "CMP-00124", data: "2026-10-10", tipo: "nfce", valor: "62.00", destino: "os", os: "OS-00112", barco: "Brisa", cobrar_cliente: "a_parte", situacao: "gravado", pendencias: [] },
-    { codigo: "CMP-00126", data: "2026-10-12", tipo: "nfce", valor: "5.00", destino: "os", os: "OS-00113", cobrar_cliente: "nao", situacao: "gravado", pendencias: [] },
+    { codigo: "CMP-00125", data: "2026-10-11", tipo: "pix", valor: "10.00", destino: "empresa", na_os: null, situacao: "gravado", pendencias: [] },
+    { codigo: "CMP-00124", data: "2026-10-10", tipo: "nfce", valor: "62.00", destino: "os", os: "OS-00112", barco: "Brisa", na_os: "ja_lancado", situacao: "gravado", pendencias: [] },
+    { codigo: "CMP-00126", data: "2026-10-12", tipo: "nfce", valor: "5.00", destino: "os", os: "OS-00113", na_os: "peca", situacao: "gravado", pendencias: [] },
   ]);
   const linhas = csv.slice(1).split("\r\n");
   assertEquals(linhas[1].split(";").slice(0, 1), ["CMP-00124"], "por número (o código tem os zeros)");
-  assertEquals(linhas[1].split(";").slice(8, 11), ["OS-00112", "Brisa", "à parte"]);
-  assertEquals(linhas[3].split(";")[10], "não");
+  assertEquals(linhas[1].split(";").slice(8, 11), ["OS-00112", "Brisa", "já lançado na OS (só comprova)"]);
+  assertEquals(linhas[3].split(";")[10], "peça (só comprova)");
   assertEquals(linhas[2].split(";")[10], "");
+  assertEquals(/cobrar|cobrança/i.test(csv), false);
 });
 
 Deno.test("campoCsv: quebra de linha entre aspas e fórmula neutralizada", () => {

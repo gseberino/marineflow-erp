@@ -19,9 +19,14 @@ import {
   textoDaPerguntaDoExtrato,
   textoDoLigado,
   textoDoMudou,
+  textoDoNaoTrocado,
+  textoDoQuemEsperando,
   textoDoRecusado,
+  textoDoRegravado,
   textoInvalidaDoExtrato,
+  textoInvalidaDoQuemPagou,
   textoNaoLigado,
+  motivoDaAprovacao,
   textosDosAvisos,
   textoDaGravacao,
   textoDaPergunta,
@@ -51,7 +56,7 @@ function cmp(extra: Partial<CmpResumo> = {}): CmpResumo {
   return {
     id: "c-1", codigo: "CMP-00124", numero: 124, situacao: "perguntando", tipo: "nfce", valor: "62.00", valor_lido: "62.00",
     valor_confianca: "alta", data: "2026-10-10", hora: "12:57:56", forma: "debito", fornecedor: "Auto Posto Exemplo",
-    fornecedor_origem: "cadastro", cnpj: "11222333000181", cnpj_confianca: "alta", destino: "os", os: OS, cobrar_cliente: null,
+    fornecedor_origem: "cadastro", cnpj: "11222333000181", cnpj_confianca: "alta", destino: "os", os: OS, tipo_na_os: null,
     quem_pagou: null, pagador_nome: null, categoria: null, pendencias: [], gravado_em: null, ...extra,
   };
 }
@@ -66,10 +71,10 @@ function pergunta(passo: string, extra: Partial<PerguntaDoBanco> = {}, c: Partia
 // ─── cabeçalho ────────────────────────────────────────────────────────────────────────────
 
 Deno.test("cabeçalho: o exemplo da spec, posição só com fila, fornecedor da Receita ou CNPJ, valor (confira)", () => {
-  assertEquals(cabecalho(pergunta("cobrar")), "CMP-00124 (1 de 4) · cupom NFC-e · Auto Posto Exemplo · 10/10 · R$ 62,00");
-  assertEquals(cabecalho(pergunta("cobrar", { total: 1 })), "CMP-00124 · cupom NFC-e · Auto Posto Exemplo · 10/10 · R$ 62,00");
-  assertEquals(cabecalho(pergunta("cobrar", {}, { fornecedor_origem: "receita", fornecedor: "POSTO LTDA" })).split(" · ")[2], "POSTO LTDA (Receita)");
-  assertEquals(cabecalho(pergunta("cobrar", {}, { fornecedor: null, fornecedor_origem: null })).split(" · ")[2], "CNPJ 11.222.333/0001-81");
+  assertEquals(cabecalho(pergunta("tipo_na_os")), "CMP-00124 (1 de 4) · cupom NFC-e · Auto Posto Exemplo · 10/10 · R$ 62,00");
+  assertEquals(cabecalho(pergunta("tipo_na_os", { total: 1 })), "CMP-00124 · cupom NFC-e · Auto Posto Exemplo · 10/10 · R$ 62,00");
+  assertEquals(cabecalho(pergunta("tipo_na_os", {}, { fornecedor_origem: "receita", fornecedor: "POSTO LTDA" })).split(" · ")[2], "POSTO LTDA (Receita)");
+  assertEquals(cabecalho(pergunta("tipo_na_os", {}, { fornecedor: null, fornecedor_origem: null })).split(" · ")[2], "CNPJ 11.222.333/0001-81");
   const semNada = cabecalho(pergunta("valor", { total: 1 }, { fornecedor: null, cnpj: null, valor: null, valor_lido: null, data: null, tipo: "pix" }));
   assertEquals(semNada, "CMP-00124 · comprovante de Pix");
   // selo média, ainda não confirmado: "(confira)"; selo baixa (o banco não copia): "(confira)"
@@ -105,7 +110,7 @@ Deno.test("passos: os textos fixos da tabela 3.3", () => {
   assertStringIncludes(textoDaPergunta(pergunta("categoria")), "8 Outras despesas\nOu escreva o nome da categoria.");
   assertStringIncludes(
     textoDaPergunta(pergunta("corrigir")),
-    "CMP-00124: o que corrigir?\n1 Valor\n2 Data\n3 Para quê\n4 Como foi pago\n5 Quem pagou\n6 Cobrar ou não\n7 Categoria\n8 Cancelar este comprovante\n9 Deixar para depois",
+    "CMP-00124: o que corrigir?\n1 Valor\n2 Data\n3 Para quê\n4 Como foi pago\n5 Quem pagou\n6 Peça ou despesa\n7 Categoria\n8 Cancelar este comprovante\n9 Deixar para depois",
   );
   assertEquals(
     textoDaPergunta(pergunta("qual_tecnico", { opcoes: [{ n: 1, rotulo: "Roberto", valor: "payee:1" }, { n: 2, rotulo: "Felipe", valor: "payee:2" }] })),
@@ -113,20 +118,24 @@ Deno.test("passos: os textos fixos da tabela 3.3", () => {
   );
 });
 
-Deno.test("passo cobrar: OS aberta, assinada e já faturada (o número vem das opções do banco)", () => {
-  const opcoes = [{ n: 1, rotulo: "x", valor: "cobrar" }, { n: 2, rotulo: "y", valor: "custo" }];
-  assertStringIncludes(
-    textoDaPergunta(pergunta("cobrar", { opcoes })),
-    "Para a OS-00112 · Brisa. Cobrar do cliente?\n1 Cobrar do cliente (entra no total da OS)\n2 Custo da HBR (não entra no total)",
-  );
-  assertStringIncludes(
-    textoDaPergunta(pergunta("cobrar", { opcoes }, { os: { ...OS, assinada: true } })),
-    "1 Cobrar do cliente (muda o total e a OS vai pedir nova assinatura)",
-  );
-  assertStringIncludes(
-    textoDaPergunta(pergunta("cobrar", { opcoes }, { os: { ...OS, status: "invoiced", faturada: true } })),
-    "A OS-00112 já está faturada: o total dela não muda. Cobrar do cliente à parte ou é custo da HBR?\n1 Cobrar à parte (fica a lembrança de cobrar)\n2 Custo da HBR",
-  );
+Deno.test("passo tipo_na_os (ajustes do dono): peça ou despesa da OS, em qualquer status; nada de cobrar do cliente", () => {
+  const esperado = "CMP-00124 (1 de 4) · cupom NFC-e · Auto Posto Exemplo · 10/10 · R$ 62,00\n" +
+    "Para a OS-00112 · Brisa: o que foi esta compra?\n" +
+    "1 Peça ou material da OS (não lanço custo: a peça entra pela OS)\n" +
+    "2 Despesa da OS (combustível, alimentação, frete, ferramenta…): custo interno, não aparece para o cliente";
+  assertEquals(textoDaPergunta(pergunta("tipo_na_os")), esperado);
+  // as opções do banco valem (o rótulo é o dele); a OS faturada pergunta igual (o total nunca muda)
+  const opcoes = [{ n: 1, rotulo: "Peça", valor: "peca" }, { n: 2, rotulo: "Despesa", valor: "despesa" }];
+  assertStringIncludes(textoDaPergunta(pergunta("tipo_na_os", { opcoes }, { os: { ...OS, status: "invoiced", faturada: true } })),
+    "Para a OS-00112 · Brisa: o que foi esta compra?\n1 Peça\n2 Despesa");
+  assertEquals(/cobr/i.test(textoDaPergunta(pergunta("tipo_na_os"))), false);
+});
+
+Deno.test("passo quem_pagou do PESSOAL (ajustes do dono): saiu da conta ou do cartão da EMPRESA?", () => {
+  const t = textoDaPergunta(pergunta("quem_pagou", {}, { destino: "pessoal", os: null }));
+  assertStringIncludes(t, "\nGasto pessoal. Saiu da conta ou do cartão da EMPRESA?\n" +
+    "1 Sim, da conta ou do cartão da empresa (vira gasto pessoal do sócio, descontado do pró-labore)\n" +
+    "2 Não, do meu bolso ou do meu cartão pessoal (só guardo o arquivo)");
 });
 
 Deno.test("prefixos: primeira do lote (4 e 1), retomada do vigia", () => {
@@ -144,7 +153,7 @@ Deno.test("prefixos: primeira do lote (4 e 1), retomada do vigia", () => {
 
 const PLANO_A = {
   efeitos: [
-    { tipo: "despesa_os", os_id: "os-1", os_numero: "OS-00112", billable: false, cobrar_a_parte: false, direto: false, paid_by: "company", categoria: "Peças e materiais" },
+    { tipo: "despesa_os", os_id: "os-1", os_numero: "OS-00112", paid_by: "company", categoria: "Combustível e deslocamento" },
     { tipo: "anotar", forma: "debito", categoria: "Peças e materiais", documento: true },
   ],
   avisos: [],
@@ -152,42 +161,93 @@ const PLANO_A = {
   pasta: "barco",
 };
 
-Deno.test("resumo: o exemplo da spec, linha por linha", () => {
-  const p = pergunta("confirmar", { plano: PLANO_A, versao: 7, pasta: "Brisa/1- DOC's/Compras" }, { cobrar_cliente: false, situacao: "aguardando_sim" });
+Deno.test("resumo: o exemplo da spec, linha por linha (despesa da OS = custo interno)", () => {
+  const p = pergunta("confirmar", { plano: PLANO_A, versao: 7, pasta: "Brisa/1- DOC's/Compras" }, {
+    tipo_na_os: "despesa", categoria: "Combustível e deslocamento", situacao: "aguardando_sim",
+  });
   assertEquals(
     textoDoResumo(p),
     [
       "CMP-00124 · confira antes de gravar:",
       "• R$ 62,00 em 10/10 às 12h57 · Auto Posto Exemplo",
-      "• Para: OS-00112 Brisa · custo da HBR (não entra no total)",
+      "• Para: OS-00112 Brisa · despesa da OS (custo interno: não aparece para o cliente) · Combustível e deslocamento",
       "• Pago: débito, pela empresa (se não foi a empresa: *corrigir quem*)",
-      "Vou: lançar a despesa na OS-00112 como custo da HBR (o total não muda); anotar o débito para quando o banco trouxer (se já trouxe, classifico a linha).",
+      "Vou: lançar a despesa na OS-00112 como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS); anotar o débito para quando o banco trouxer (se já trouxe, classifico a linha).",
       "Arquivo: Brisa/1- DOC's/Compras.",
       "Responda *sim* para gravar ou *não* para corrigir.",
     ].join("\n"),
   );
   assertEquals(textoDaPergunta(p), textoDoResumo(p), "no confirmar a pergunta é o resumo");
+  assertEquals(/cobr|falta aprovar/i.test(textoDoResumo(p)), false);
 });
 
-Deno.test("resumo: avisos (faturada, assinada, duplicado) e os desconhecidos ficam fora", () => {
+Deno.test("resumo (ajustes do dono): peça, já lançado na OS, ambíguo e PESSOAL pago pela empresa", () => {
+  const para = (c: Partial<CmpResumo>) => textoDoResumo(pergunta("confirmar", { plano: { efeitos: [] } }, c)).split("\n")[2];
+  assertEquals(para({ tipo_na_os: "peca", categoria: "Peças e materiais" }),
+    "• Para: OS-00112 Brisa · peça/material (só comprova; lance a peça na OS se ainda não lançou)");
+  assertEquals(para({ na_os: { tipo: "despesa", categoria: "Combustível e deslocamento", valor: "62.00", data: "2026-10-10" } }),
+    "• Para: OS-00112 Brisa · já lançado na OS: Combustível e deslocamento R$ 62,00 de 10/10 (só comprova)");
+  assertEquals(para({ na_os: { tipo: "peca", produto: "Filtro de óleo", valor: "62.00" } }),
+    "• Para: OS-00112 Brisa · já lançado na OS: Filtro de óleo R$ 62,00 (só comprova)");
+  assertEquals(para({ na_os: { ambiguo: 2 } }), "• Para: OS-00112 Brisa · só comprova (há 2 lançamentos iguais na OS)");
+  // o que o dono escolheu no corrigir vale antes do lançamento achado (a ordem do plano)
+  assertEquals(para({ tipo_na_os: "despesa", na_os: { tipo: "despesa", categoria: "Outras despesas", valor: "62.00" } }),
+    "• Para: OS-00112 Brisa · despesa da OS (custo interno: não aparece para o cliente)");
+  const pessoal =textoDoResumo(pergunta("confirmar", { plano: { efeitos: [{ tipo: "anotar", forma: "credito" }] } },
+    { destino: "pessoal", os: null, quem_pagou: "empresa", forma: "credito", categoria: "Gasto Pessoal Sócio - Descontar PL" }));
+  assertStringIncludes(pessoal, "• Para: PESSOAL, pago pela empresa (gasto pessoal do sócio: desconta do pró-labore do mês)");
+  assertStringIncludes(pessoal, "• Pago: crédito, pela empresa");
+  // do bolso: só o arquivo, sem "Pago:"
+  const doBolso = textoDoResumo(pergunta("confirmar", { plano: { efeitos: [{ tipo: "nada", motivo: "pessoal" }] } },
+    { destino: "pessoal", os: null, quem_pagou: "socio" }));
+  assertStringIncludes(doBolso, "• Para: pessoal\nVou: só guardar o arquivo em PESSOAL (nada no financeiro).");
+});
+
+Deno.test("resumo: avisos (vários na OS, almoço no extra, categoria que já estava, duplicado) e os desconhecidos ficam fora", () => {
   const p = pergunta("confirmar", {
-    plano: { ...PLANO_A, avisos: ["os_assinada_pede_nova_assinatura", "duplicado_ambiguo", "categoria_inativa"] },
-    avisos: ["os_faturada_total_nao_muda", "valor_incerto"],
-  });
+    plano: { ...PLANO_A, avisos: ["varios_na_os", "duplicado_ambiguo", "categoria_inativa_x", "os_faturada_total_nao_muda"] },
+    avisos: ["os_assinada_pede_nova_assinatura", "valor_incerto"],
+  }, { na_os: { ambiguo: 2 } });
   const t = textoDoResumo(p);
-  assertStringIncludes(t, "A OS-00112 já está faturada: o total não muda.");
-  assertStringIncludes(t, "A OS-00112 foi assinada pelo cliente: incluir no total pede nova assinatura.");
+  assertStringIncludes(t, 'Há 2 lançamentos de R$ 62,00 na OS-00112 sem comprovante: não liguei a nenhum e não lancei custo. Se for um gasto novo, responda *não* e escolha "Peça ou despesa".');
   assertStringIncludes(t, "Há mais de um lançamento igual já feito: não lanço; fica para classificar no Extrato.");
-  assert(!t.includes("categoria_inativa") && !t.includes("valor_incerto"));
+  assert(!t.includes("faturada") && !t.includes("assinada") && !t.includes("valor_incerto"), "os avisos de cobrança saíram");
+  // o almoço que já está no extra da diária (resposta 6): avisa sem bloquear
+  const comAlmoco = textoDoResumo(pergunta("confirmar", {
+    plano: {
+      efeitos: [{ tipo: "reembolso_tecnico", favorecido_nome: "João", valor: "35.00", extra_do_dia: { valor: "20.00", data: "2026-09-16" } }],
+      avisos: ["almoco_ja_no_extra"],
+    },
+  }, { quem_pagou: "tecnico", pagador_nome: "João", categoria: "Alimentação de campo" }));
+  // revisão dos ajustes: o aviso diz a saída (o menu do corrigir não tem "não reembolsar")
+  assertStringIncludes(semNbsp(comAlmoco), "O João já recebeu R$ 20,00 de almoço (extra da diária de 16/09). Reembolsar mesmo assim? *sim* grava; " +
+    'se o extra já pagou este almoço, responda *não* e escolha "Cancelar este comprovante" (nada é lançado).');
+  // a categoria do lançamento que já existe não é trocada (regra G)
+  assertEquals(
+    textosDosAvisos(["categoria_existente_diferente"], cmp(), [{ tipo: "anexar_lancamento", diferente: { categoria: "Outras despesas" } }]),
+    ["O lançamento que já existe está como Outras despesas: não troco (só preencho o que está vazio). Se estiver errado, corrija no Extrato."],
+  );
 });
 
-Deno.test("frasesDoPlano: uma frase por efeito da 3.3", () => {
+Deno.test("frasesDoPlano: uma frase por efeito da 3.3 (com os ajustes do dono)", () => {
   const c = cmp({ pagador_nome: "Roberto" });
   const f = (efeitos: Array<Record<string, unknown>>) => frasesDoPlano({ efeitos: efeitos as Array<{ tipo: string }> }, c);
-  assertEquals(f([{ tipo: "despesa_os", os_numero: "OS-00112", billable: true }]), ["lançar a despesa na OS-00112, cobrada do cliente (o total da OS sobe R$ 62,00)"]);
-  assertEquals(f([{ tipo: "despesa_os", os_numero: "OS-00112", billable: false, cobrar_a_parte: true }]), ['lançar a despesa na OS-00112 marcada "cobrar à parte" (o total não muda)']);
-  assertEquals(f([{ tipo: "despesa_os", os_numero: "OS-00112", billable: false, paid_by: "technician" }]), ["lançar a despesa na OS-00112 como custo da HBR (o total não muda), paga pelo Roberto"]);
-  assertEquals(f([{ tipo: "anexar_despesa", os_numero: "OS-00112", valor: "62.00", data: "2026-10-10" }]), ["usar a despesa que já está na OS-00112 (R$ 62,00, 10/10) — não lanço de novo"]);
+  assertEquals(f([{ tipo: "despesa_os", os_numero: "OS-00112" }]), [
+    "lançar a despesa na OS-00112 como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS)",
+  ]);
+  assertEquals(f([{ tipo: "despesa_os", os_numero: "OS-00112", paid_by: "technician" }]), [
+    "lançar a despesa na OS-00112 como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS), paga pelo Roberto",
+  ]);
+  assertEquals(f([{ tipo: "despesa_os", os_numero: "OS-00112", nota: true }])[0].startsWith("lançar o valor da nota na OS-00112 como custo interno"), true);
+  assertEquals(f([{ tipo: "anexar_despesa", os_numero: "OS-00112", valor: "62.00", data: "2026-10-10" }]), ["usar a despesa que já está na OS-00112 (R$ 62,00, 10/10): só comprovo, não lanço de novo"]);
+  assertEquals(f([{ tipo: "anexar_peca", os_numero: "OS-00112", so_part_id: "sp-1", produto: "Filtro de óleo", valor: "62.00" }]), [
+    "usar a peça que já está na OS-00112 (Filtro de óleo, R$ 62,00): só comprovo, não lanço custo",
+  ]);
+  assertEquals(f([{ tipo: "comprovar_na_os", os_numero: "OS-00112", motivo: "peca" }]), ["guardar o comprovante como prova da peça da OS-00112 (não lanço custo)"]);
+  assertEquals(f([{ tipo: "comprovar_na_os", os_numero: "OS-00112", motivo: "ambiguo" }]), [
+    "guardar o comprovante como prova da OS-00112 sem escolher lançamento (não lanço custo)",
+  ]);
+  assertEquals(f([{ tipo: "pendencia", qual: "incluir_na_os" }]), ['deixar a pendência "lançar a peça na OS, se ainda não lançou"']);
   assertEquals(f([{ tipo: "itens_da_nota", nfe_numero: "12345", os_numero: "OS-00112", itens: 3 }]), ["ligar os 3 itens da nota 12345 à OS-00112"]);
   assertEquals(f([{ tipo: "aguardar_nota", os_id: null }]), ["esperar a nota (XML) entrar no sistema para ligar os itens"]);
   assertEquals(f([{ tipo: "anotar", forma: "pix" }]), ["anotar o Pix para quando o banco trouxer (se já trouxe, classifico a linha)"]);
@@ -206,16 +266,29 @@ Deno.test("frasesDoPlano: uma frase por efeito da 3.3", () => {
 // ─── gravação e demais mensagens ──────────────────────────────────────────────────────────
 
 Deno.test("gravado: efeitos no passado, a pasta e o próximo (ou fila vazia)", () => {
-  const c = cmp({ situacao: "gravado", cobrar_cliente: false });
+  const c = cmp({ situacao: "gravado", tipo_na_os: "despesa" });
   const gravacao = {
     situacao: "gravado",
-    efeitos: [{ tipo: "despesa_os", so_expense_id: "e-1", os_id: "os-1", billable: false, direto: false }, { tipo: "anotar", anotacao_id: "a-1", resultado: "aguardando" }],
+    efeitos: [{ tipo: "despesa_os", so_expense_id: "e-1", os_id: "os-1" }, { tipo: "anotar", anotacao_id: "a-1", resultado: "aguardando" }],
     avisos: [], mensagens: [], mes: "2026-10-01",
   };
   assertEquals(
     textoDaGravacao({ cmp: c, gravacao, proxima: null }),
-    "CMP-00124 gravado: lancei a despesa na OS-00112 como custo da HBR; anotei o débito para quando o banco trouxer. Arquivo: Brisa/1- DOC's/Compras.\n\nFila vazia: não há mais comprovantes para conferir.",
+    "CMP-00124 gravado: lancei a despesa na OS-00112 como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS); anotei o débito para quando o banco trouxer. Arquivo: Brisa/1- DOC's/Compras.\n\nFila vazia: não há mais comprovantes para conferir.",
   );
+  // peça, peça que já estava e despesa que já estava: só comprova
+  const g = (ef: Record<string, unknown>) => frasesDaGravacao([ef as { tipo: string }], c);
+  assertEquals(g({ tipo: "anexar_despesa" }), ["usei a despesa que já estava na OS-00112: só comprovei, não lancei de novo"]);
+  assertEquals(g({ tipo: "anexar_peca", produto: "Filtro de óleo" }), ["usei a peça que já estava na OS-00112 (Filtro de óleo): só comprovei, não lancei custo"]);
+  assertEquals(g({ tipo: "comprovar_na_os", motivo: "peca" }), ["guardei o comprovante como prova da peça da OS-00112 (não lancei custo)"]);
+  assertEquals(g({ tipo: "comprovar_na_os", motivo: "ambiguo" }), ["guardei o comprovante como prova da OS-00112 sem escolher lançamento (não lancei custo)"]);
+  // regra G: o lançamento que já existia só teve o vazio preenchido
+  assertEquals(g({ tipo: "anexar_lancamento", corrigido: { linked_service_order_id: { antes: null } } }), [
+    "anexei ao lançamento que já existia e preenchi a OS, que estava vazia",
+  ]);
+  assertEquals(g({ tipo: "anexar_lancamento", corrigido: { linked_service_order_id: {}, expense_category: {} } }), [
+    "anexei ao lançamento que já existia e preenchi a OS e a categoria, que estavam vazias",
+  ]);
   const proxima = pergunta("para_que", { posicao: 1, total: 3, opcoes: [{ n: 1, rotulo: "Estoque", valor: "estoque" }] }, { codigo: "CMP-00125", numero: 125 });
   const t = textoDaGravacao({ cmp: c, gravacao: { ...gravacao, mensagens: ["o mês está fechado: só anexei"] }, proxima });
   assertStringIncludes(t, "\no mês está fechado: só anexei\n\nPróximo: CMP-00125 (1 de 3)");
@@ -236,10 +309,10 @@ Deno.test("gravado: a anotação recusada pela rota (ambígua) e o técnico (F2b
     textoDaGravacao({ cmp: c, gravacao: { situacao: "gravado", efeitos: [{ tipo: "nada", motivo: "anotacao_recusada" }, { tipo: "pendencia", qual: "classificar_no_extrato" }] }, proxima: null }),
     'CMP-00124 gravado: não anotei no extrato (fica para classificar no Extrato); deixei a pendência "classificar no Extrato".',
   );
-  const t = cmp({ situacao: "gravado", quem_pagou: "tecnico", pagador_nome: "Roberto", cobrar_cliente: false });
+  const t = cmp({ situacao: "gravado", quem_pagou: "tecnico", pagador_nome: "Roberto", tipo_na_os: "despesa" });
   assertStringIncludes(
-    textoDaGravacao({ cmp: t, gravacao: { situacao: "gravado", efeitos: [{ tipo: "despesa_os", billable: false }, { tipo: "nada", motivo: "tecnico_f2b" }] }, proxima: null }),
-    "lancei a despesa na OS-00112 como custo da HBR, paga pelo Roberto; anotei que o Roberto pagou",
+    textoDaGravacao({ cmp: t, gravacao: { situacao: "gravado", efeitos: [{ tipo: "despesa_os" }, { tipo: "nada", motivo: "tecnico_f2b" }] }, proxima: null }),
+    "lancei a despesa na OS-00112 como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS), paga pelo Roberto; anotei que o Roberto pagou",
   );
 });
 
@@ -306,10 +379,11 @@ Deno.test("pendentes: o exemplo da spec; vazio não manda; mais de 10 → 'e mai
 });
 
 Deno.test("cartão: gravado, esperando a nota, cancelado (sem 'para cancelar')", () => {
-  const c = cmp({ situacao: "gravado", cobrar_cliente: true });
+  const c = cmp({ situacao: "gravado", tipo_na_os: "despesa" });
   assertEquals(
-    textoDoCartao(c, [{ tipo: "despesa_os", billable: true }]),
-    "CMP-00124 (gravado): R$ 62,00 em 10/10 · Auto Posto Exemplo · OS-00112 Brisa · cobrado do cliente (entra no total). Feito: lancei a despesa na OS-00112, cobrada do cliente. Para cancelar: *cancelar cmp 124 motivo*.",
+    textoDoCartao(c, [{ tipo: "despesa_os" }]),
+    "CMP-00124 (gravado): R$ 62,00 em 10/10 · Auto Posto Exemplo · OS-00112 Brisa · despesa da OS (custo interno: não aparece para o cliente). " +
+      "Feito: lancei a despesa na OS-00112 como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS). Para cancelar: *cancelar cmp 124 motivo*.",
   );
   assertStringIncludes(textoDoCartao(cmp({ situacao: "aguardando_xml" }), [{ tipo: "aguardar_nota" }]), "CMP-00124 (esperando a nota)");
   assertEquals(textoDoCartao(cmp({ situacao: "cancelado" }), []).includes("Para cancelar"), false);
@@ -318,9 +392,12 @@ Deno.test("cartão: gravado, esperando a nota, cancelado (sem 'para cancelar')",
 Deno.test("cancelamento: desfeito, recusado com o caminho, sem nada gravado", () => {
   assertEquals(
     textoDoCancelamento("CMP-00124", "comprei em dobro", { ok: true, desfeitos: [{ tipo: "despesa_os" }, { tipo: "anotar" }, "pendencia"] }),
-    "CMP-00124 cancelado (comprei em dobro). Desfeito: a despesa da OS, a anotação do extrato, a pendência. Arquivo em COMPROVANTES/_CANCELADOS.",
+    "CMP-00124 cancelado (comprei em dobro). Desfeito: a despesa interna da OS, a anotação do extrato, a pendência. Arquivo em COMPROVANTES/_CANCELADOS.",
   );
   assertEquals(
+    textoDoCancelamento("CMP-00124", "foi pessoal", { ok: true, desfeitos: [{ tipo: "anexar_peca" }, { tipo: "comprovar_na_os" }] }),
+    "CMP-00124 cancelado (foi pessoal). Desfeito: o vínculo com a peça da OS, o comprovante como prova da OS. Arquivo em COMPROVANTES/_CANCELADOS.",
+  );  assertEquals(
     textoDoCancelamento("CMP-00124", "x", { ok: false, bloqueios: [{ efeito: "anotar", motivo: "anotacao_aplicada" }] }),
     "Não cancelei o CMP-00124: a linha do banco já recebeu a classificação; corrija pelo Extrato. Nada mudou.",
   );
@@ -410,7 +487,7 @@ function perguntaDoExtrato(linhas: LinhaDoBanco[], azul: boolean, extra: Partial
   return {
     pergunta_id: "p-9", dedupe_key: "cmp:p:p-9", cmp: cmpDoExtrato(c), passo: "banco",
     opcoes: azul ? [...opcoes, { n: 0, rotulo: "Nenhuma destas", valor: "nenhum" }] : opcoes,
-    retomada: false, banco: { regra: "debito", so_registro: false, nivel: azul ? "azul" : "verde", linhas, mais: 0, hash: "h" }, ...extra,
+    retomada: false, banco: { regra: "debito", nivel: azul ? "azul" : "verde", linhas, mais: 0, hash: "h" }, ...extra,
   };
 }
 
@@ -435,16 +512,24 @@ Deno.test("F3 pergunta verde: o exemplo da spec, ao pé da letra", () => {
     [
       "CMP-00124 · cupom NFC-e · AutoZone · 08/10 · R$ 50,98",
       "Apareceu no extrato: C6 - Conta PJ HBR · 08/10 · DEBITO DE CARTAO · R$ 50,98.",
-      "É deste comprovante? Se for, ligo e classifico a linha como Peças e materiais, OS-00112 Brisa (falta aprovar no Extrato).",
+      "É deste comprovante? Se for, ligo e lanço a linha no Extrato como Peças e materiais, OS-00112 Brisa (aprovada no seu sim).",
       "Responda *sim* para ligar ou *não* se não for essa.",
     ].join("\n"),
   );
-  // a ação de cada linha: anexar (com e sem correção), casar, aguardar
+  // a ação de cada linha: anexar (só preenche o vazio: regra G), casar, aguardar
   const t = (l: Partial<LinhaDoBanco>, c: Partial<CmpResumo> = {}) => textoDaPerguntaDoExtrato(perguntaDoExtrato([{ ...DEBITO, ...l }], false, {}, c));
-  assertStringIncludes(t({ acao: "anexar", lancamento: { categoria: "Outras despesas" } }), "Se for, ligo e uso o lançamento que já existe dela e corrijo para Peças e materiais, OS-00112 Brisa.");
-  assertStringIncludes(t({ acao: "anexar", lancamento: { categoria: "Peças e materiais" } }, { destino: "empresa", os: null }), "Se for, ligo e uso o lançamento que já existe dela.");
+  assertStringIncludes(t({ acao: "anexar", lancamento: { categoria: "Outras despesas", os_numero: null } }),
+    "Se for, ligo e uso o lançamento que já existe dela (preencho a OS-00112 Brisa, que está vazia).");
+  assertStringIncludes(t({ acao: "anexar", lancamento: { categoria: null, os_numero: null } }),
+    "Se for, ligo e uso o lançamento que já existe dela (preencho a OS-00112 Brisa e a categoria Peças e materiais, que estão vazias).");
+  assertStringIncludes(t({ acao: "anexar", lancamento: { categoria: "Outras despesas", os_numero: "OS-00090" } }),
+    "Se for, ligo e uso o lançamento que já existe dela (nada a preencher).");
+  // sem saber da OS do lançamento (banco antigo), não promete preencher a OS
+  assertStringIncludes(t({ acao: "anexar", lancamento: { categoria: "Peças e materiais" } }, { destino: "empresa", os: null }),
+    "Se for, ligo e uso o lançamento que já existe dela (nada a preencher).");
+  assertEquals(/corrijo|corrigir para/.test(t({ acao: "anexar", lancamento: { categoria: "Outras despesas" } })), false);
   assertStringIncludes(t({ acao: "casar", conta_aberta: { descricao: "Fatura AutoZone", valor: "50.98" } }), 'Se for, ligo e dou baixa na conta a pagar "Fatura AutoZone" (R$ 50,98) com ela.');
-  assertStringIncludes(t({ acao: "aguardar", cartao: true, pendente: true }), "Se for, ligo e classifico quando o cartão confirmar a compra.");
+  assertStringIncludes(t({ acao: "aguardar", cartao: true, pendente: true }), "Se for, ligo e lanço quando o cartão confirmar a compra (aprovada no seu sim).");
   // sem a avaliação (só as opções): a linha pelo rótulo, sem prometer a ação
   const semAvaliacao = textoDaPerguntaDoExtrato({ ...perguntaDoExtrato([DEBITO], false), banco: null, opcoes: [{ n: 1, rotulo: "C6 · 08/10 · R$ 50,98", valor: "tx:t-1" }] });
   assertStringIncludes(semAvaliacao, "Apareceu no extrato: C6 · 08/10 · R$ 50,98.\nÉ deste comprovante?\nResponda *sim*");
@@ -463,7 +548,7 @@ Deno.test("F3 pergunta azul: lista numerada, '0 Nenhuma destas' e 'Há mais N' c
       "1 C6 - Conta PJ HBR · 08/10 · DEBITO DE CARTAO · R$ 50,98",
       "2 C6 - Conta PJ HBR · 09/10 · DEBITO DE CARTAO · R$ 50,98",
       "0 Nenhuma destas",
-      "Responda o número da linha certa (ou 0). Ligando, classifico a linha como Peças e materiais (falta aprovar no Extrato).",
+      "Responda o número da linha certa (ou 0). Ligando, lanço a linha no Extrato como Peças e materiais (aprovada no seu sim).",
     ].join("\n"),
   );
   const comMais = textoDaPerguntaDoExtrato({ ...p, banco: { ...p.banco!, mais: 2 } });
@@ -485,12 +570,17 @@ Deno.test("F3 plano: ligar_linha, aguardar_banco (débito, Pix, azul), crédito 
   const linha = { data: "2026-10-08", valor: "50.98", descricao: "DEBITO DE CARTAO", conta: "C6 - Conta PJ HBR", cartao: false, acao: "classificar", lancamento: null, conta_aberta: null };
   assertEquals(
     f([{ tipo: "ligar_linha", bank_transaction_id: "t-1", nivel: "verde", acao: "classificar", linha }]),
-    ["ligar à linha do banco de 08/10 (C6 - Conta PJ HBR, DEBITO DE CARTAO, R$ 50,98) e classificá-la como Peças e materiais, OS-00112 Brisa (falta aprovar no Extrato)"],
+    ["ligar à linha do banco de 08/10 (C6 - Conta PJ HBR, DEBITO DE CARTAO, R$ 50,98) e lançá-la no Extrato como Peças e materiais, OS-00112 Brisa (aprovada no seu sim)"],
   );
   assertEquals(f([{ tipo: "ligar_linha", acao: "casar", linha: { ...linha, acao: "casar" } }])[0].endsWith("e dar baixa na conta a pagar com ela"), true);
   assertEquals(
     f([{ tipo: "ligar_linha", acao: "aguardar", linha: { ...linha, conta: "C6 - Cartão", descricao: "AUTOZONE BALNEARIO CAM", valor: "28.98", cartao: true, acao: "aguardar" } }], { forma: "credito" }),
-    ["ligar à compra do cartão de 08/10 (C6 - Cartão, AUTOZONE BALNEARIO CAM, R$ 28,98) e classificá-la quando o cartão confirmar a compra"],
+    ["ligar à compra do cartão de 08/10 (C6 - Cartão, AUTOZONE BALNEARIO CAM, R$ 28,98) e lançá-la no Extrato quando o cartão confirmar a compra (aprovada no seu sim)"],
+  );
+  assertEquals(
+    f([{ tipo: "ligar_linha", acao: "anexar", linha: { ...linha, acao: "anexar", lancamento: { categoria: "Peças e materiais", os_numero: null } } }])[0]
+      .endsWith("e usar o lançamento que já existe dela (preencho a OS-00112 Brisa, que está vazia)"),
+    true,
   );
   assertEquals(f([{ tipo: "aguardar_banco", regra: "debito", nivel: "cinza" }]), ["nada no financeiro agora: quando o débito aparecer no extrato, pergunto se é este"]);
   assertEquals(f([{ tipo: "aguardar_banco", regra: "pix", nivel: "cinza" }], { forma: "pix" }), ["nada no financeiro agora: quando o Pix aparecer no extrato, pergunto qual linha é"]);
@@ -501,7 +591,7 @@ Deno.test("F3 plano: ligar_linha, aguardar_banco (débito, Pix, azul), crédito 
   assertEquals(f([{ tipo: "aguardar_fatura" }], { forma: "credito_loja" }), ["nada no financeiro agora: a compra no crédito entra pela fatura"]);
   assertEquals(
     f([{ tipo: "reembolso_tecnico", favorecido_id: "p-rob", favorecido_nome: "Roberto", valor: "62.00", data: "2026-10-08" }]),
-    ["lançar R$ 62,00 como reembolso ao Roberto nas Diárias (entra no próximo acerto dele)"],
+    ["lançar R$ 62,00 nas Diárias do Roberto como reembolso de despesa paga pelo técnico (entra no próximo acerto dele)"],
   );
 });
 
@@ -511,25 +601,47 @@ Deno.test("F3 gravação e cartão: ligar_linha pelo 'como', aguardar_banco, ree
     banco: { estado: "ligado", nivel: "verde", desde: "2026-10-10", ate: null, linha: { data: "2026-10-08", valor: "50.98", descricao: "DEBITO DE CARTAO", conta: "C6 - Conta PJ HBR", como: "classificou" } },
   });
   const g = (ef: Record<string, unknown>, c: CmpResumo = ligado) => frasesDaGravacao([ef as { tipo: string }], c);
-  assertEquals(g({ tipo: "ligar_linha", como: "classificou" }), ["liguei à linha do banco de 08/10 e a classifiquei (falta aprovar no Extrato)"]);
+  // ajustes do dono: o sim aprova a linha — lançada, falhou agora, ou a proposta ainda não está na fila
+  assertEquals(g({ tipo: "ligar_linha", como: "classificou" }), [
+    "liguei à linha do banco de 08/10 e a classifiquei como Peças e materiais, OS-00112 (lanço no Extrato na próxima rodada)",
+  ]);
+  assertEquals(g({ tipo: "ligar_linha", como: "classificou", aprovado: { payable_id: "pay-1" } }), [
+    "liguei à linha do banco de 08/10 e lancei no Extrato como Peças e materiais, OS-00112",
+  ]);
+  // revisão dos ajustes: o dono desfez a aprovação no Extrato — a linha é dele, nada de "lanço na próxima rodada"
+  assertEquals(g({ tipo: "ligar_linha", como: "classificou", aprovado_desfeito: { payable_id: "pay-1", desfeito_em: "2026-10-11" } }), [
+    "liguei à linha do banco de 08/10; a aprovação foi desfeita no Extrato e a linha ficou para você classificar lá",
+  ]);
+  assertEquals(frasesDaGravacao([{ tipo: "ligar_linha", como: "classificou" }], ligado, { ok: true }), [
+    "liguei à linha do banco de 08/10 e lancei no Extrato como Peças e materiais, OS-00112",
+  ]);
+  assertEquals(frasesDaGravacao([{ tipo: "ligar_linha", como: "classificou" }], ligado, { ok: false, motivo: "Esta linha acabou de ser lançada por outro caminho — revise a fila" }), [
+    "liguei à linha do banco de 08/10 e a classifiquei, mas não consegui aprovar agora (Esta linha acabou de ser lançada por outro caminho — revise a fila): tento de novo na próxima rodada do Extrato",
+  ]);
   assertEquals(g({ tipo: "ligar_linha", como: "anexou" }), ["liguei à linha do banco de 08/10 e anexei ao lançamento dela"]);
+  assertEquals(g({ tipo: "ligar_linha", como: "anexou", corrigido: { linked_service_order_id: { antes: null } } }), [
+    "liguei à linha do banco de 08/10 e anexei ao lançamento dela (preenchi a OS, que estava vazia)",
+  ]);
   assertEquals(g({ tipo: "ligar_linha", como: "casou" }), ["liguei à linha do banco de 08/10 e dei baixa na conta a pagar"]);
-  assertEquals(g({ tipo: "ligar_linha", como: "aguardando" }, { ...ligado, forma: "credito" }), ["liguei à compra do cartão de 08/10 (classifico quando ela for confirmada)"]);
+  assertEquals(g({ tipo: "ligar_linha", como: "aguardando" }, { ...ligado, forma: "credito" }), ["liguei à compra do cartão de 08/10 (lanço no Extrato quando ela for confirmada)"]);
   assertEquals(g({ tipo: "aguardar_banco", regra: "debito", nivel: "cinza" }), ["quando o débito aparecer no extrato, pergunto se é este"]);
   assertEquals(g({ tipo: "reembolso_tecnico", reembolso_id: "r-1", valor: "62.00" }, cmpDoExtrato({ quem_pagou: "tecnico", pagador_nome: "Roberto" })), [
-    "lancei R$ 62,00 como reembolso ao Roberto nas Diárias",
+    "lancei R$ 62,00 nas Diárias do Roberto como reembolso de despesa paga pelo técnico",
   ]);
+  // a anotação da F2 aplicada na hora: o sim aprova também
+  assertEquals(frasesDaGravacao([{ tipo: "anotar", resultado: "aplicada" }], ligado, { ok: true }), ["lancei a linha do banco no Extrato como Peças e materiais, OS-00112"]);
+  assertEquals(frasesDaGravacao([{ tipo: "anotar", resultado: "aplicada" }], ligado), ["classifiquei a linha do banco (lanço no Extrato na próxima rodada)"]);
   // o reembolso substitui a pendência "acerto do técnico" da F2: nada de "ainda não entra nas Diárias"
-  const tecnico = frasesDaGravacao([{ tipo: "despesa_os", billable: false }, { tipo: "reembolso_tecnico", valor: "62.00" }], cmpDoExtrato({ quem_pagou: "tecnico", pagador_nome: "Roberto" }));
+  const tecnico = frasesDaGravacao([{ tipo: "despesa_os" }, { tipo: "reembolso_tecnico", valor: "62.00" }], cmpDoExtrato({ quem_pagou: "tecnico", pagador_nome: "Roberto" }));
   assertEquals(tecnico.some((x) => x.includes("ainda não entra")), false);
 
   // depois de gravar com azul: "No extrato: <a pergunta>" no lugar de "Fila vazia"
   const azul = perguntaDoExtrato([DEBITO, { ...DEBITO, n: 2, id: "t-2", data: "2026-10-09" }], true);
   const t = textoDaGravacao({
     cmp: cmpDoExtrato(), proxima: null, banco: azul,
-    gravacao: { situacao: "aguardando_banco", efeitos: [{ tipo: "despesa_os", billable: false }, { tipo: "aguardar_banco", regra: "debito", nivel: "azul" }], banco: { nivel: "azul", perguntar: true } },
+    gravacao: { situacao: "aguardando_banco", efeitos: [{ tipo: "despesa_os" }, { tipo: "aguardar_banco", regra: "debito", nivel: "azul" }], banco: { nivel: "azul", perguntar: true } },
   });
-  assertStringIncludes(t, "CMP-00124 gravado: lancei a despesa na OS-00112 como custo da HBR; já há linhas parecidas no extrato: pergunto qual é. Arquivo: Brisa/1- DOC's/Compras.");
+  assertStringIncludes(t, "CMP-00124 gravado: lancei a despesa na OS-00112 como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS); já há linhas parecidas no extrato: pergunto qual é. Arquivo: Brisa/1- DOC's/Compras.");
   assertStringIncludes(t, "\n\nNo extrato: CMP-00124 · cupom NFC-e · AutoZone · 08/10 · R$ 50,98\nApareceram no extrato linhas");
   assertEquals(t.includes("Fila vazia"), false);
 
@@ -542,7 +654,8 @@ Deno.test("F3 gravação e cartão: ligar_linha pelo 'como', aguardar_banco, ree
   assertStringIncludes(cartao(ligado.banco), "No extrato: ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98).");
   assertStringIncludes(cartao({ estado: "abandonado" }, { situacao: "abandonado" }), "No extrato: não apareceu em 30 dias: classifique no Extrato.");
   assertStringIncludes(cartao({ estado: "abandonado" }, { situacao: "abandonado", forma: "credito" }), "não apareceu em 45 dias");
-  assertStringIncludes(cartao({ estado: "so_registro" }, { destino: "pessoal" }), "No extrato: só registrado (PESSOAL).");
+  // regra E: falta o "quem pagou?"
+  assertStringIncludes(cartao({ estado: "banco_quem" }), "No extrato: falta saber quem pagou (não apareceu em conta da empresa: *cmp 124* para responder).");
   // CMP que não procura linha (sem banco): o cartão de antes
   assertEquals(textoDoCartao(cmp({ situacao: "gravado" }), [{ tipo: "caixa" }]).includes("No extrato"), false);
 });
@@ -552,15 +665,30 @@ Deno.test("F3 resultados da resposta: ligado (por como), recusado, mudou, invál
     situacao: "conciliado",
     banco: { estado: "ligado", linha: { data: "2026-10-08", valor: "50.98", descricao: "DEBITO DE CARTAO", conta: "C6 - Conta PJ HBR", como: "classificou" } },
   });
+  // ajustes do dono: o sim aprova a linha (lancei), falhou agora (tento de novo) ou a proposta ainda não estava na fila
   assertEquals(
-    textoDoLigado(ligado, { tipo: "ligar_linha", como: "classificou", mensagens: [] }),
-    "CMP-00124 ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98): classifiquei como Peças e materiais, OS-00112 (falta aprovar no Extrato).",
+    textoDoLigado(ligado, { tipo: "ligar_linha", como: "classificou", mensagens: [] }, { ok: true }),
+    "CMP-00124 ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98): lancei no Extrato como Peças e materiais, OS-00112.",
   );
-  assertStringIncludes(textoDoLigado(ligado, { tipo: "ligar_linha", como: "anexou", corrigido: { expense_category: { antes: "Outras despesas", depois: "Peças e materiais" } } }),
-    ": a linha já estava lançada: anexei e corrigi a categoria/OS.");
+  assertEquals(
+    textoDoLigado(ligado, { tipo: "ligar_linha", como: "classificou" }, { ok: false, motivo: "linha_lancada" }),
+    "CMP-00124 ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98): classifiquei a linha como Peças e materiais, OS-00112, mas não consegui aprovar agora (a linha já virou outro lançamento): tento de novo na próxima rodada do Extrato.",
+  );
+  assertEquals(
+    textoDoLigado(ligado, { tipo: "ligar_linha", como: "classificou" }),
+    "CMP-00124 ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98): classifiquei como Peças e materiais, OS-00112 (lanço no Extrato na próxima rodada).",
+  );
+  assertStringIncludes(textoDoLigado(ligado, { tipo: "ligar_linha", como: "classificou" }, { ok: true, nada: true }), "(lanço no Extrato na próxima rodada)");
+  // regra G: o lançamento que já existia só teve o vazio preenchido
+  assertStringIncludes(textoDoLigado(ligado, { tipo: "ligar_linha", como: "anexou", corrigido: { expense_category: { antes: null, depois: "Peças e materiais" } } }),
+    ": a linha já estava lançada: anexei e preenchi a categoria, que estava vazia.");
   assertStringIncludes(textoDoLigado(ligado, { tipo: "ligar_linha", como: "anexou", corrigido: {} }), ": a linha já estava lançada: anexei.");
   assertStringIncludes(textoDoLigado(ligado, { tipo: "ligar_linha", como: "casou", conta_aberta: { descricao: "Fatura AutoZone" } }), ': dei baixa na conta a pagar "Fatura AutoZone".');
-  assertStringIncludes(textoDoLigado(ligado, { tipo: "ligar_linha", como: "aguardando" }), ": classifico assim que a compra entrar na fila do Extrato.");
+  assertStringIncludes(textoDoLigado(ligado, { tipo: "ligar_linha", como: "aguardando" }), ": lanço no Extrato assim que a compra entrar na fila (aprovada no seu sim).");
+  // o motivo da aprovação que falhou nunca leva a mensagem crua do Postgres
+  assertEquals(motivoDaAprovacao('duplicate key value violates unique constraint "payables_uma_por_transacao"'), "erro no sistema");
+  assertEquals(motivoDaAprovacao("approve_cmp:500"), "erro no sistema");
+  assertEquals(motivoDaAprovacao(null), "erro no sistema");
   assertEquals(
     textoDoLigado(ligado, { tipo: "ligar_linha", como: "classificou", mensagens: ["O mês 09/2026 está fechado: só classifiquei."] }).split("\n")[1],
     "O mês 09/2026 está fechado: só classifiquei.",
@@ -611,6 +739,16 @@ Deno.test("F3 pendentes, avisos, cancelamento e bloqueios", () => {
   assertEquals(
     textoDoCancelamento("CMP-00124", "comprei em dobro", { ok: true, desfeitos: [{ tipo: "ligar_linha" }, { tipo: "reembolso_tecnico" }, { tipo: "aguardar_banco" }] }),
     "CMP-00124 cancelado (comprei em dobro). Desfeito: a ligação com a linha do banco (a linha volta para a fila do Extrato), o reembolso nas Diárias. Arquivo em COMPROVANTES/_CANCELADOS.",
+  );
+  // a linha que o sim aprovou: o cancelar desfaz a aprovação também
+  assertEquals(
+    textoDoCancelamento("CMP-00124", "comprei em dobro", { ok: true, desfeitos: [{ tipo: "ligar_linha", aprovado: { payable_id: "pay-1" } }] }),
+    "CMP-00124 cancelado (comprei em dobro). Desfeito: a aprovação e a ligação com a linha do banco (a linha volta para a fila do Extrato). Arquivo em COMPROVANTES/_CANCELADOS.",
+  );
+  // regra E nos pendentes: falta o "quem pagou?"
+  assertStringIncludes(
+    textoDosPendentes({ abertos: [{ codigo: "CMP-00131", situacao: "aguardando_banco", banco: "banco_quem", pendencias: [] }], total: 1 }) ?? "",
+    "CMP-00131 — esperando o banco; falta: quem pagou (não apareceu no extrato)",
   );
   // o banco monta o texto do bloqueio com o dia da linha e o nº do acerto (como_destravar)
   assertEquals(
@@ -697,19 +835,112 @@ Deno.test("F2b despesa já reembolsada e F3 estorno: textos do plano, da gravaç
   );
 });
 
-Deno.test("F3: nenhum texto passa de 4096, nenhum tem emoji nem CPF", () => {
+// ─── revisão dos ajustes do dono (11/10/2026) ───────────────────────────────────────────────────
+
+Deno.test("revisão dos ajustes: a vigia do quem pagou, o sócio com a conta do fornecedor em aberto e o reembolso já dividido", () => {
+  const c = cmpDoExtrato({ quem_pagou: "socio" });
+  assertStringIncludes(
+    textoDosPendentes({ abertos: [{ codigo: "CMP-00131", situacao: "gravado", pendencias: ["conferir_quem_pagou"] }], total: 1 }) ?? "",
+    "falta: conferir quem pagou: a compra apareceu numa conta da empresa",
+  );
+  const [aviso] = textosDosAvisos(["conta_aberta_paga_pelo_socio"], c);
+  assertStringIncludes(aviso, "A conta a pagar deste fornecedor (mesmo valor) continua em aberto: não lanço reembolso para você");
+  assertEquals(/\n/.test(aviso), false);
+  // o bloqueio do reembolso já pago num pagamento dividido: o texto do banco (Pix/Caixa ou bolso do sócio)
+  assertEquals(
+    textoDoCancelamento("CMP-00124", "x", { ok: false, bloqueios: [{
+      efeito: "reembolso_tecnico", motivo: "reembolso_dividido",
+      como_destravar: "o reembolso já foi pago ao técnico num pagamento dividido: desfaça a divisão em Financeiro › Diárias (Desfazer a divisão) e cancele de novo",
+    }] }),
+    "Não cancelei o CMP-00124: o reembolso já foi pago ao técnico num pagamento dividido: desfaça a divisão em Financeiro › Diárias (Desfazer a divisão) e cancele de novo. Nada mudou.",
+  );
+  assertStringIncludes(
+    textoDoCancelamento("CMP-00124", "x", { ok: false, bloqueios: [{ efeito: "reembolso_tecnico", motivo: "reembolso_dividido" }] }),
+    "desfaça a divisão em Financeiro › Diárias e cancele de novo",
+  );
+});
+
+// ─── regra E (ajustes do dono): "quem pagou?" depois de 5 dias sem aparecer em conta da empresa ──
+
+const QUEM_OPCOES = [
+  { n: 1, rotulo: "A empresa (ainda vai aparecer no extrato: continuo esperando até 09/11)", valor: "empresa" },
+  { n: 2, rotulo: "Eu, do meu bolso ou do meu cartão pessoal (fica como reembolso para você)", valor: "socio" },
+  { n: 3, rotulo: "O Roberto (técnico: reembolso nas Diárias)", valor: "payee:p-rob" },
+  { n: 4, rotulo: "Foi gasto pessoal, no meu cartão (só guardo o arquivo)", valor: "pessoal" },
+];
+
+function perguntaDoQuem(extra: Partial<PerguntaDoExtrato> = {}, c: Partial<CmpResumo> = {}): PerguntaDoExtrato {
+  return {
+    pergunta_id: "p-q", dedupe_key: "cmp:p:p-q", cmp: cmpDoExtrato({ data: "2026-10-10", ...c }), passo: "banco_quem", opcoes: QUEM_OPCOES,
+    retomada: false, banco: { nivel: "cinza", linhas: [], hash: "h" }, ...extra,
+  };
+}
+
+Deno.test("regra E: a pergunta 'quem pagou?' ao pé da letra e a retomada do vigia", () => {
+  assertEquals(
+    textoDaPerguntaDoExtrato(perguntaDoQuem()),
+    [
+      "CMP-00124 · cupom NFC-e · AutoZone · 10/10 · R$ 50,98",
+      "Esta compra de 10/10 ainda não apareceu em nenhuma conta da empresa. Quem pagou?",
+      "1 A empresa (ainda vai aparecer no extrato: continuo esperando até 09/11)",
+      "2 Eu, do meu bolso ou do meu cartão pessoal (fica como reembolso para você)",
+      "3 O Roberto (técnico: reembolso nas Diárias)",
+      "4 Foi gasto pessoal, no meu cartão (só guardo o arquivo)",
+    ].join("\n"),
+  );
+  assertEquals(prefixoDaPerguntaDoExtrato({ ...perguntaDoQuem(), retomada: true }, "vigia"), "Ainda falta saber quem pagou o CMP-00124.");
+  assertEquals(textoInvalidaDoQuemPagou("CMP-00124", 4), "Para o CMP-00124, responda o número de quem pagou (1 a 4).");
+});
+
+Deno.test("regra E: esperando, regravado (com o aviso do almoço) e não trocado", () => {
+  assertEquals(textoDoQuemEsperando("CMP-00124", "2026-11-09"), "Ok: o CMP-00124 continua esperando o extrato (até 09/11).");
+  const pelo = cmpDoExtrato({ situacao: "gravado", quem_pagou: "tecnico", pagador_nome: "Roberto", categoria: "Alimentação de campo" });
+  const regravado = textoDoRegravado(pelo, {
+    situacao: "gravado", pasta: "Brisa/1- DOC's/Compras",
+    efeitos: [{ tipo: "despesa_os" }, { tipo: "reembolso_tecnico", favorecido_nome: "Roberto", valor: "50.98", extra_do_dia: { valor: "20.00", data: "2026-10-10" } }],
+    avisos: ["almoco_ja_no_extra"],
+  });
+  assertStringIncludes(regravado, "CMP-00124 corrigido: pago pelo Roberto. Feito: lancei a despesa na OS-00112 como custo interno");
+  assertStringIncludes(regravado, "lancei R$ 50,98 nas Diárias do Roberto como reembolso de despesa paga pelo técnico. Arquivo: Brisa/1- DOC's/Compras.");
+  assertStringIncludes(semNbsp(regravado), "O Roberto já tinha recebido R$ 20,00 de almoço (extra da diária de 10/10): confira se o reembolso não ficou em dobro.");
+  assertStringIncludes(textoDoRegravado(cmpDoExtrato({ quem_pagou: "socio" }), { situacao: "gravado", efeitos: [{ tipo: "reembolso_socio" }] }),
+    "CMP-00124 corrigido: pago por você. Feito: lancei R$ 50,98 como reembolso a você.");
+  assertStringIncludes(textoDoRegravado(cmpDoExtrato({ destino: "pessoal", os: null, quem_pagou: "socio" }), { situacao: "gravado", efeitos: [{ tipo: "nada", motivo: "pessoal" }] }),
+    "CMP-00124 corrigido: gasto pessoal. Feito: só guardei o arquivo (nada no financeiro).");
+  assertEquals(
+    textoDoNaoTrocado("CMP-00124", { bloqueios: [{ efeito: "anotar", motivo: "anotacao_aplicada" }] }, 124),
+    "Não troquei quem pagou o CMP-00124: a linha do banco já recebeu a classificação; corrija pelo Extrato. Nada mudou.",
+  );
+  assertEquals(
+    textoDoNaoTrocado("CMP-00124", { motivo: "mes_fechado" }, 124),
+    "Não troquei quem pagou o CMP-00124: o mês está fechado no financeiro; reabra o mês e mande *cmp 124* para responder de novo. Nada mudou.",
+  );
+  assertEquals(
+    textoDoNaoTrocado("CMP-00124", { motivo: 'new row for relation "x" violates check constraint "y"' }, 124, "23514"),
+    "Não troquei quem pagou o CMP-00124: deu um erro no sistema (código 23514). Nada mudou.",
+  );
+});
+
+Deno.test("F3: nenhum texto passa de 4096, nenhum tem emoji nem CPF; nenhum fala em cobrar nem em 'falta aprovar'", () => {
   const longa = { ...DEBITO, descricao: "Y".repeat(5000), conta: "Z".repeat(5000) };
   const textos = [
     textoDaPerguntaDoExtrato(perguntaDoExtrato([longa, longa, longa], true, { banco: { nivel: "azul", linhas: [longa, longa, longa], mais: 40 } })),
     textoDaPerguntaDoExtrato(perguntaDoExtrato([DEBITO], false)),
     textoDoLigado(cmpDoExtrato(), { tipo: "ligar_linha", como: "classificou", mensagens: ["m".repeat(5000)] }),
+    textoDoLigado(cmpDoExtrato(), { tipo: "ligar_linha", como: "classificou" }, { ok: false, motivo: "x".repeat(5000) }),
     textoDoRecusado("CMP-00124", "2026-11-07", true),
     textoDoMudou("CMP-00124", null, null),
     textoNaoLigado("CMP-00124", "x".repeat(5000), 124),
+    textoDaPerguntaDoExtrato(perguntaDoQuem({ opcoes: [{ n: 1, rotulo: "r".repeat(5000), valor: "empresa" }] })),
+    textoDoRegravado(cmpDoExtrato(), { situacao: "gravado", efeitos: [], mensagens: ["m".repeat(5000)] }),
+    textoDoNaoTrocado("CMP-00124", { motivo: "x".repeat(5000) }, 124),
+    textoDoResumo(pergunta("confirmar", { plano: PLANO_A })),
+    textoDaPergunta(pergunta("tipo_na_os")),
   ];
   for (const s of textos) {
     assert(s.length <= MAX_MENSAGEM, `${s.length}`);
     assertEquals(/\p{Extended_Pictographic}/u.test(s), false, s.slice(0, 80));
     assertEquals(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/.test(s), false, "sem CPF");
+    assertEquals(/cobr|falta aprovar/i.test(s), false, s.slice(0, 120));
   }
 });

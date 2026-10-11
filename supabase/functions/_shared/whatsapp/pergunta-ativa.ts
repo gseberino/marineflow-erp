@@ -525,13 +525,16 @@ const PASSO_LEGIVEL: Record<string, string> = {
   como_pagou: "como foi pago",
   quem_pagou: "quem pagou",
   qual_tecnico: "qual técnico",
-  cobrar: "cobrar do cliente ou não",
+  // ajustes do dono (11/10/2026): no lugar do "cobrar do cliente?", peça ou despesa da OS
+  tipo_na_os: "se é peça ou despesa da OS",
   categoria: "a categoria",
   data: "a data",
   confirmar: "gravar ou não",
   corrigir: "o que corrigir",
   // F3 (spec-f3.md, 4.2): a pergunta "apareceu no extrato, ligo?" de um CMP já gravado
   banco: "a linha do extrato",
+  // regra E (ajustes do dono, 11/10/2026): 5 dias sem aparecer em conta da empresa
+  banco_quem: "quem pagou a compra que não apareceu no extrato",
 };
 
 export function passoLegivel(passo: string | null | undefined): string {
