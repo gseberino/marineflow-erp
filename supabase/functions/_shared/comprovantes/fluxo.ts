@@ -14,6 +14,14 @@
 // cada vez (responder / pendentes / desempatar), grava só depois do "sim" (o banco grava pelas rotas
 // que já existem) e leva o arquivo ao destino final no Dropbox com o índice do mês. Desligada, o
 // caminho é o da F1, sem mudança.
+//
+// F3 (11/10/2026 — spec-f3.md, 4.4): a pergunta do extrato ("apareceu no extrato, ligo?"), no mesmo
+// registro único (passo "banco"): o banco escolhe as linhas e o nível (comprovante_banco_proxima) e
+// aplica a resposta (comprovante_banco_responder, com o autor = o dono); aqui só se abre, envia e
+// fala. Abre depois da gravação (azul), no "cmp N" com a pergunta pendente e pelo vigia
+// (comprovantes_vigia_banco: horário, espaçamento e limite são do banco; a fila da F2 vem primeiro).
+// Sem conversa ligada ou com o modo de teste do whatsapp-send, nada é perguntado. O índice da pasta
+// PESSOAL (padrão do dono: a contadora não vê os pessoais) é regravado pelo vigia como o do mês.
 import { EvolutionProvider } from "../whatsapp/evolution-provider.ts";
 import type { IncomingMessageEvent } from "../whatsapp/types.ts";
 import { type Dono, donoDoWhatsApp } from "../whatsapp/dono.ts";
@@ -65,14 +73,25 @@ import {
   type Cancelamento,
   type CmpResumo,
   type Efeito,
+  ehPerguntaAzul,
   type Gravacao,
   historicoDoFluxo,
   type ItemPendente,
   MARCA_DO_FLUXO,
   motivoDoNaoGravado,
+  motivoDoNaoLigado,
   numeroDoCmp,
   type PerguntaDoBanco,
+  type PerguntaDoExtrato,
   prefixoDaPergunta,
+  prefixoDaPerguntaDoExtrato,
+  type RespostaDoBanco,
+  textoDaPerguntaDoExtrato,
+  textoDoLigado,
+  textoDoMudou,
+  textoDoRecusado,
+  textoInvalidaDoExtrato,
+  textoNaoLigado,
   TEXTO_CORRIGIR_COMO,
   TEXTO_FALHA,
   TEXTO_SEM_CMP,
@@ -92,6 +111,7 @@ import {
   textoNaoEntendi,
   textoNaoExiste,
   textoNaoGravado,
+  textosDosAvisos,
   textoOcupado,
   textoOkNaoAprova,
   textoPulado,
@@ -102,6 +122,7 @@ import {
 } from "./conversa.ts";
 import {
   caminhoDoIndice,
+  caminhoDoIndicePessoal,
   csvDoIndice,
   type DestinoDoArquivo,
   type LinhaDoIndice,
@@ -648,7 +669,12 @@ export async function talvezAvisar(phone: string, forcar: boolean, deps: Depende
         try {
           // a abertura pergunta o CMP que ACABOU de chegar (o banco devolve na ordem do número), não um
           // antigo da fila; sem perguntar agora (ocupado, conversa em andamento), uma linha avisa
-          const r = await abrirPergunta(phone, "abertura", deps, null, ordem[0]?.id ?? null);
+          let r = await abrirPergunta(phone, "abertura", deps, null, ordem[0]?.id ?? null);
+          // F3: ocupado com a pergunta do extrato (o vigia abre e ela vale 2 h)? O comprovante novo passa
+          // na frente: ela cede a vez (fecha "substituida"; o vigia volta a ela depois) e a F2 pergunta já
+          if (!r.perguntou && r.motivo === "ocupado" && await cederPerguntaDoExtrato(phone, deps)) {
+            r = await abrirPergunta(phone, "abertura", deps, null, ordem[0]?.id ?? null);
+          }
           if (!r.perguntou && r.motivo && ["ocupado", "conversa_em_andamento", "pausada"].includes(r.motivo)) {
             const codigos = ordem.map((x) => x.codigo).filter((c): c is string => Boolean(c));
             const numero = Number(/(\d+)$/.exec(codigos[0] ?? "")?.[1] ?? 0) || null;
@@ -746,12 +772,19 @@ export type ContagemDoVigia = {
   /** Linhas que a rede de 1 h do banco encerrou (sem_desfecho) e quantas seguiram ao assistente. */
   sem_desfecho: number;
   encaminhados: number;
-  /** F2: arquivos levados ao destino final, índices do mês regravados, CNPJs consultados, perguntas abertas. */
+  /**
+   * F2: arquivos levados ao destino final, índices regravados, CNPJs consultados, perguntas abertas.
+   * F3: `indices` inclui os da pasta PESSOAL e `perguntas` as do extrato (a forma da resposta não muda;
+   * o log do vigia traz os dois números à parte).
+   */
   movidos: number;
   indices: number;
   cnpj: number;
   perguntas: number;
 };
+
+/** F3: no máximo 5 telefones por rodada do vigia para a pergunta do extrato (R6). */
+const LIMITE_DO_VIGIA_DO_BANCO = 5;
 
 type ItemDoBaixar = { id: string; wa_key?: unknown; phone_normalized?: string; wa_message_id?: string; recebido_em?: string };
 
@@ -768,6 +801,8 @@ export async function vigiar(deps: DependenciasDoFluxo, orcamentoMs = ORCAMENTO_
     expurgados: Number(lote?.expurgados ?? 0), sem_desfecho: Number(lote?.sem_desfecho ?? 0), encaminhados: 0,
     movidos: 0, indices: 0, cnpj: 0, perguntas: 0,
   };
+  /** F3, só para o log: quantos dos índices são da pasta PESSOAL e quantas perguntas são do extrato. */
+  const f3 = { indices_pessoais: 0, perguntas_banco: 0 };
   const temTempo = () => deps.agora().getTime() - inicio < orcamentoMs;
   const bucket = deps.admin.storage.from(BUCKET);
 
@@ -842,6 +877,13 @@ export async function vigiar(deps: DependenciasDoFluxo, orcamentoMs = ORCAMENTO_
     await cada<string>(conversa.indices, "indice", async (mes) => {
       if (await atualizarIndice(mes, deps)) n.indices++;
     });
+    // F3: o índice próprio da pasta PESSOAL (o do mês, da contadora, não lista os pessoais)
+    await cada<string>(conversa.indices_pessoais, "indice_pessoal", async (mes) => {
+      if (await atualizarIndicePessoal(mes, deps)) {
+        n.indices++;
+        f3.indices_pessoais++;
+      }
+    });
     // o CNPJ antes das perguntas: o cabeçalho já sai com o nome da Receita
     await cada<string>((Array.isArray(conversa.cnpj) ? conversa.cnpj : []).slice(0, LIMITE_DE_CNPJ), "cnpj", async (c) => {
       await consultarCnpj(c, deps);
@@ -851,7 +893,25 @@ export async function vigiar(deps: DependenciasDoFluxo, orcamentoMs = ORCAMENTO_
       if (await perguntarProximo(phone, "vigia", deps)) n.perguntas++;
     });
   }
-  deps.log("vigia", { ...n, ms: deps.agora().getTime() - inicio });
+
+  // F3: a pergunta do extrato, DEPOIS da conversa da F2 (o banco só devolve o telefone que passou no
+  // horário, no espaçamento de 4 h, no limite de 3 e com a fila da F2 vazia). Erro só registra.
+  if (temTempo()) {
+    // deno-lint-ignore no-explicit-any
+    let banco: any = null;
+    try {
+      banco = await rpc(deps, "comprovantes_vigia_banco", { p_limite: LIMITE_DO_VIGIA_DO_BANCO });
+    } catch (e) {
+      deps.log("vigia_banco_falhou", { codigo: codigoDoErro(e) });
+    }
+    await cada<string>(banco?.perguntar, "perguntar_banco", async (phone) => {
+      if (await perguntarBanco(phone, "vigia", deps)) {
+        n.perguntas++;
+        f3.perguntas_banco++;
+      }
+    });
+  }
+  deps.log("vigia", { ...n, ...f3, ms: deps.agora().getTime() - inicio });
   return n;
 }
 
@@ -965,11 +1025,14 @@ export async function enviarAoDono(
  * resposta não serviu, o "responda sim a este resumo"). Nos dois casos, o envio confirmado fica
  * registrado na pergunta (enviada_em + o id do WhatsApp: a citação do reenvio também acha).
  */
+/** A pergunta que a mensagem abre: a da fila da F2 (PerguntaDoBanco) ou a do extrato da F3 (PerguntaDoExtrato). */
+type PerguntaQueAbre = { pergunta_id: string; passo: string; cmp?: { id?: string | null } | null };
+
 async function enviarMensagem(
   phone: string,
   texto: string,
   chave: string,
-  abre: PerguntaDoBanco | null,
+  abre: PerguntaQueAbre | null,
   deps: DependenciasDoFluxo,
   reenvia: string | null = null,
 ): Promise<boolean> {
@@ -1063,6 +1126,88 @@ export async function retomar(p: { phone: string }, deps: DependenciasDoFluxo): 
 }
 
 // ---------------------------------------------------------------------------------------------
+// F3: a pergunta do extrato (comprovante_banco_proxima = R3 da spec-f3.md)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * R3 sem enviar: a pergunta do extrato aberta pelo banco, ou null (desligada, cinza, ocupado, modo
+ * de teste, erro). `motivo` ∈ vigia, depois_de_gravar, pendentes, cmp, reabrir; o vigia é quem
+ * respeita horário/espaçamento (o banco confere). Nunca lança: a falha vira log com o código.
+ */
+async function abrirPerguntaDoExtrato(
+  phone: string,
+  motivo: string,
+  cmp: string | null,
+  deps: DependenciasDoFluxo,
+): Promise<PerguntaDoExtrato | null> {
+  if (await modoDeTesteLigado(deps)) {
+    deps.log("pergunta_extrato_recusada", { motivo: "modo_de_teste" });
+    return null;
+  }
+  try {
+    // deno-lint-ignore no-explicit-any
+    const r = await rpc<any>(deps, "comprovante_banco_proxima", { p_phone: phone, p_motivo: motivo, p_cmp: cmp ?? null });
+    if (!r?.perguntou || typeof r?.pergunta_id !== "string") {
+      deps.log("pergunta_extrato_nao_aberta", { motivo: typeof r?.motivo === "string" ? r.motivo.slice(0, 40) : null, origem: motivo });
+      return null;
+    }
+    return r as PerguntaDoExtrato;
+  } catch (e) {
+    deps.log("pergunta_extrato_falhou", { codigo: codigoDoErro(e), origem: motivo });
+    return null;
+  }
+}
+
+/**
+ * R10: a pergunta do extrato aberta no telefone cede a vez ao comprovante novo (só ela: a da F2 e a
+ * pendência do assistente, não). true = cedeu. Nunca lança: a falha vira log com o código.
+ */
+async function cederPerguntaDoExtrato(phone: string, deps: DependenciasDoFluxo): Promise<boolean> {
+  try {
+    const r = await rpc<{ cedeu?: boolean; codigo?: string | null }>(deps, "comprovante_banco_ceder", { p_phone: phone });
+    if (r?.cedeu) deps.log("pergunta_extrato_cedeu", { codigo: typeof r.codigo === "string" ? r.codigo.slice(0, 20) : null });
+    return Boolean(r?.cedeu);
+  } catch (e) {
+    deps.log("pergunta_extrato_ceder_falhou", { codigo: codigoDoErro(e) });
+    return false;
+  }
+}
+
+/**
+ * Abre a pergunta do extrato (R3) e a envia (com a retomada do vigia: "Ainda falta ligar o CMP-00124
+ * ao extrato."). Envio não confirmado → comprovante_pergunta_nao_enviada (a tentativa conta, como na
+ * F2). true = perguntou.
+ */
+export async function perguntarBanco(phone: string, motivo: string, deps: DependenciasDoFluxo, cmp: string | null = null): Promise<boolean> {
+  const p = await abrirPerguntaDoExtrato(phone, motivo, cmp, deps);
+  if (!p) return false;
+  const texto = textoDaPerguntaDoExtrato(p, prefixoDaPerguntaDoExtrato(p, motivo));
+  const enviou = await enviarMensagem(phone, texto, p.dedupe_key, p, deps);
+  deps.log("pergunta_extrato", { id: p.cmp?.id ?? null, nivel: p.banco?.nivel ?? null, origem: motivo, enviada: enviou });
+  return enviou;
+}
+
+/**
+ * Depois de ligar (o dono respondeu): a próxima pergunta, a da fila da F2 primeiro (o comprovante
+ * novo espera mais que a linha do extrato), senão outra do extrato. Sem enviar; null = nenhuma.
+ */
+async function proximaDepoisDoExtrato(
+  phone: string,
+  deps: DependenciasDoFluxo,
+): Promise<{ f2: PerguntaDoBanco; extrato: null } | { f2: null; extrato: PerguntaDoExtrato } | null> {
+  if (await modoDeTesteLigado(deps)) return null;
+  try {
+    // deno-lint-ignore no-explicit-any
+    const r = await rpc<any>(deps, "comprovante_proxima_pergunta", { p_phone: phone, p_motivo: "depois_de_gravar", p_cmp: null });
+    if (r?.perguntou && typeof r?.pergunta_id === "string") return { f2: r as PerguntaDoBanco, extrato: null };
+  } catch (e) {
+    deps.log("pergunta_nao_aberta", { codigo: codigoDoErro(e) });
+  }
+  const b = await abrirPerguntaDoExtrato(phone, "depois_de_gravar", null, deps);
+  return b ? { f2: null, extrato: b } : null;
+}
+
+// ---------------------------------------------------------------------------------------------
 // responder / pendentes / desempatar (porta chamadaInterna: só o whatsapp-webhook)
 // ---------------------------------------------------------------------------------------------
 
@@ -1081,7 +1226,7 @@ type Recusa = { ok: false; motivo: string };
  * telefone do dono. O texto vem do corpo (o webhook leu do evento), nunca de whatsapp_messages.body
  * (que a equipe consegue editar).
  */
-async function conferirMensagemDoDono(messageId: unknown, phone: unknown, deps: DependenciasDoFluxo): Promise<{ ok: true } | Recusa> {
+async function conferirMensagemDoDono(messageId: unknown, phone: unknown, deps: DependenciasDoFluxo): Promise<{ ok: true; donoId: string } | Recusa> {
   if (typeof messageId !== "string" || !UUID.test(messageId) || typeof phone !== "string" || !/^\d{10,15}$/.test(phone)) {
     return { ok: false, motivo: "entrada_invalida" };
   }
@@ -1091,18 +1236,23 @@ async function conferirMensagemDoDono(messageId: unknown, phone: unknown, deps: 
   if (msg.phone_normalized !== phone) return { ok: false, motivo: "telefone_divergente" };
   const dono = await donoDoWhatsApp(deps.admin);
   if (!dono || dono.phone !== phone) return { ok: false, motivo: "dono_divergente" };
-  return { ok: true };
+  return { ok: true, donoId: dono.id };
 }
 
-type Contexto = { phone: string; messageId: string; chave: string; texto: string; estado: EstadoDoTelefone };
+/** `donoId`: quem responde (F3: o autor que comprovante_banco_responder confere contra o dono do CMP). */
+type Contexto = { phone: string; messageId: string; chave: string; texto: string; estado: EstadoDoTelefone; donoId?: string | null };
 type Saida = { status: 200; corpo: { tratada: boolean; resultado?: string; motivo?: string } };
 
 const DESTINOS_DO_RESPONDER = new Set(["comprovante", "comprovante_reabrir", "comando", "dica", "foto_do_cmp", "nao_entendi"]);
 
-/** A frase de resposta ao passo da última pergunta de CMP (a resposta atrasada): de dado, não sim/não/ok. */
+/**
+ * A frase de resposta ao passo da última pergunta de CMP (a resposta atrasada): de dado, não
+ * sim/não/ok. F3: a pergunta do extrato que fechou sem resposta não é reaberta por um número solto
+ * (o vigia pergunta de novo, com as linhas de agora); citando a mensagem dela, vale.
+ */
 function respondeAUltima(estado: EstadoDoTelefone, texto: string, agora: Date): boolean {
   const u = estado.ultima_do_cmp;
-  if (!u || estado.ativa) return false;
+  if (!u || estado.ativa || u.passo === "banco") return false;
   const i = interpretarResposta(u.passo, u.opcoes, texto, agora);
   return i !== null && i.tipo !== "sim" && i.tipo !== "nao" && i.tipo !== "ok";
 }
@@ -1136,7 +1286,7 @@ export async function responder(
     ehNaoEntendida: interp === null && respostaNaoEntendida(p.texto),
   });
   deps.log("responder", { destino: decisao.destino, motivo: decisao.motivo });
-  const ctx: Contexto = { phone: p.phone, messageId: p.message_id, chave: `cmp:r:${p.message_id}`, texto: p.texto, estado };
+  const ctx: Contexto = { phone: p.phone, messageId: p.message_id, chave: `cmp:r:${p.message_id}`, texto: p.texto, estado, donoId: conf.donoId };
 
   switch (decisao.destino) {
     case "assistente":
@@ -1172,6 +1322,8 @@ export async function responder(
       if (!alvo) return { status: 200, corpo: { tratada: false, resultado: "sem_pergunta" } };
       const i = alvo.id === ativa?.id ? interp : interpretarResposta(alvo.passo, alvo.opcoes, p.texto, agora);
       if (!i) return { status: 200, corpo: { tratada: false, resultado: "texto_livre" } };
+      // F3: a pergunta do extrato de um CMP já gravado tem a RPC dela (o comprovante_responder ignora o gravado)
+      if (alvo.passo === "banco") return await responderAoExtrato(alvo, i, ctx, deps);
       return await responderA(alvo, i, ctx, deps);
     }
   }
@@ -1199,6 +1351,126 @@ async function responderA(
     throw e;
   }
   return await falarDaResposta(r, { ...ctx, respondida: alvo.id, interp: i, passo: alvo.passo }, deps);
+}
+
+/**
+ * F3: comprovante_banco_responder (R4) na pergunta do extrato, com o autor = o dono (o banco confere
+ * contra o dono do CMP e is_admin). Se a RPC falhou, nada mudou: o aviso "mande de novo" sai com a
+ * MESMA chave do aviso do webhook (cmp:f:<mensagem>), como na F2.
+ */
+async function responderAoExtrato(
+  alvo: { id: string; passo: string | null; opcoes: Opcao[] },
+  i: Interpretacao,
+  ctx: Contexto,
+  deps: DependenciasDoFluxo,
+): Promise<Saida> {
+  let r: RespostaDoBanco;
+  try {
+    r = await rpc<RespostaDoBanco>(deps, "comprovante_banco_responder", {
+      p: { pergunta_id: alvo.id, message_id: ctx.messageId, interpretacao: i, autor: ctx.donoId ?? null },
+    });
+  } catch (e) {
+    await enviarAoDono(ctx.phone, TEXTO_FALHA, `cmp:f:${ctx.messageId}`, deps);
+    throw e;
+  }
+  return await falarDaRespostaDoExtrato(r, { ...ctx, respondida: alvo.id, interp: i, opcoes: alvo.opcoes }, deps);
+}
+
+/** O resultado da R4 vira o texto ao dono (spec-f3.md, 4.3). "ignorada": nada (tratada, sem mensagem). */
+async function falarDaRespostaDoExtrato(
+  r: RespostaDoBanco | null,
+  ctx: Contexto & { respondida: string; interp: Interpretacao; opcoes: Opcao[] },
+  deps: DependenciasDoFluxo,
+): Promise<Saida> {
+  const cmp = (r?.cmp ?? null) as CmpResumo | null;
+  const ativa = ctx.estado.ativa?.origem === "comprovante" ? ctx.estado.ativa : null;
+  const codigo = cmp?.codigo ?? (ativa?.id === ctx.respondida ? ativa.referencia_codigo : null) ?? "comprovante";
+  const numero = cmp ? numeroDoCmp(cmp) : null;
+  const resultado = String(r?.resultado ?? "");
+  const azul = ehPerguntaAzul({ opcoes: ctx.opcoes, banco: null });
+  const linhasNaLista = ctx.opcoes.filter((o) => o.n > 0).length;
+  const ate = r?.ate ?? cmp?.banco?.ate ?? null;
+  // o motivo da rota pode trazer dado: no log, só o que é código
+  const motivoDoLog = typeof r?.motivo === "string" && /^[a-z_]{1,40}$/.test(r.motivo) ? r.motivo : null;
+  deps.log("resposta_extrato", { id: cmp?.id ?? null, resultado, motivo: motivoDoLog });
+
+  switch (resultado) {
+    case "ignorada":
+      // CMP cancelado ou já ligado: a pergunta velha não faz nada (e não vai ao assistente)
+      return trata("ignorada");
+    case "ligado": {
+      if (!cmp) return trata("ligado");
+      // o "motivo" do ligado é o aviso da ligação (ex.: a linha já foi lançada em outro registro)
+      const aviso = typeof r?.motivo === "string" ? textosDosAvisos([r.motivo], cmp) : [];
+      const texto = [textoDoLigado(cmp, r?.ligacao ?? null), ...aviso].join("\n");
+      // a próxima: a que a R4 trouxe, senão a da fila da F2 primeiro e depois outra do extrato
+      const prox = r?.proxima
+        ? { f2: null, extrato: r.proxima }
+        : await proximaDepoisDoExtrato(ctx.phone, deps);
+      if (prox?.f2) {
+        await enviarMensagem(ctx.phone, `${texto}\n\nPróximo: ${textoDaPergunta(prox.f2)}`, prox.f2.dedupe_key, prox.f2, deps);
+      } else if (prox?.extrato) {
+        await enviarMensagem(ctx.phone, `${texto}\n\nPróximo: ${textoDaPerguntaDoExtrato(prox.extrato)}`, prox.extrato.dedupe_key, prox.extrato, deps);
+      } else {
+        await enviarMensagem(ctx.phone, texto, ctx.chave, null, deps);
+      }
+      // o par do histórico: o assistente fica sabendo da ligação feita pelo dono
+      emSegundoPlano(deps, "historico_extrato", gravarNoHistorico(ctx.phone, `${cmp.codigo} ligado ao extrato`, `${cmp.codigo} (id ${cmp.id})`, texto, deps));
+      return trata("ligado");
+    }
+    case "recusado":
+      // "nenhuma" (azul: 0/não) ou "nao_e_essa" (verde); sem o motivo, pelo menu da pergunta
+      await enviarMensagem(ctx.phone, textoDoRecusado(codigo, ate, r?.motivo ? r.motivo === "nenhuma" : azul), ctx.chave, null, deps);
+      return trata("recusado");
+    case "mudou": {
+      const nova = r?.proxima ?? null;
+      await enviarMensagem(ctx.phone, textoDoMudou(codigo, ate, nova), nova ? nova.dedupe_key : ctx.chave, nova, deps);
+      return trata("mudou");
+    }
+    case "invalida": {
+      const anterior = r?.motivo === "resposta_anterior_a_pergunta";
+      const proxima = r?.proxima ?? null;
+      const azulDaProxima = proxima ? ehPerguntaAzul(proxima) : azul;
+      const aviso = anterior
+        ? "Essa resposta chegou antes desta pergunta; responda de novo a ela:"
+        : r?.motivo === "pergunta_fechada"
+        ? "Essa pergunta já tinha fechado; esta é a de agora:"
+        : textoInvalidaDoExtrato(codigo, azulDaProxima, proxima ? proxima.opcoes.filter((o) => o.n > 0).length : linhasNaLista);
+      if (proxima) {
+        const nova = proxima.pergunta_id !== ctx.respondida;
+        await enviarMensagem(ctx.phone, `${aviso}\n${textoDaPerguntaDoExtrato(proxima)}`, nova ? proxima.dedupe_key : ctx.chave,
+          nova ? proxima : null, deps, nova ? null : proxima.pergunta_id);
+      } else if (anterior && cmp) {
+        // sem a pergunta de volta, reapresenta com o que o dono viu nela (as opções)
+        const deNovo: PerguntaDoExtrato = { pergunta_id: ctx.respondida, dedupe_key: ctx.chave, cmp, passo: "banco", opcoes: ctx.opcoes, banco: null };
+        await enviarMensagem(ctx.phone, `${aviso}\n${textoDaPerguntaDoExtrato(deNovo)}`, ctx.chave, null, deps, ctx.respondida);
+      } else {
+        await enviarMensagem(ctx.phone, aviso, ctx.chave, null, deps);
+      }
+      return trata("invalida");
+    }
+    case "ok_nao_aprova":
+      // "ok", número ou frase curta no verde: nunca liga; pede o sim de novo
+      await enviarMensagem(ctx.phone, textoInvalidaDoExtrato(codigo, false), ctx.chave, null, deps);
+      return trata("ok_nao_aprova");
+    case "nao_ligado": {
+      const codigoErro = typeof (r as { codigo_erro?: unknown })?.codigo_erro === "string" &&
+          /^[0-9A-Z]{5}$/.test(String((r as { codigo_erro?: unknown }).codigo_erro))
+        ? String((r as { codigo_erro?: unknown }).codigo_erro)
+        : null;
+      if (motivoDoNaoLigado(r?.motivo, numero, codigoErro).startsWith("deu um erro no sistema")) {
+        await logEdgeError(deps.admin, {
+          context: "comprovantes-whatsapp", action: "ligar_linha", level: "error",
+          message: `nao_ligado:${codigoErro ?? "sem_codigo"}`, details: { cmp_id: cmp?.id ?? null },
+        });
+      }
+      await enviarMensagem(ctx.phone, textoNaoLigado(codigo, r?.motivo, numero, codigoErro), ctx.chave, null, deps);
+      return trata("nao_ligado");
+    }
+    default:
+      deps.log("resposta_desconhecida", { resultado });
+      return trata("desconhecido");
+  }
 }
 
 /** O passo e as opções da pergunta citada que já fechou: o banco aplica a resposta ao que o dono VIU nela. */
@@ -1300,8 +1572,13 @@ async function falarDaResposta(
       return await falarDaPergunta(proxima, r?.motivo === "depois" ? textoPulado(codigo) : null, ctx, codigo, r, deps, resultado);
     case "gravado": {
       const gravacao = (r?.gravacao ?? null) as Gravacao | null;
-      const texto = textoDaGravacao({ cmp: cmp as CmpResumo, gravacao, proxima });
-      const { chave, abre } = chaveDaPergunta(proxima, ctx.respondida, ctx.chave);
+      // F3: sem próxima da fila e com linhas parecidas no extrato (azul), a pergunta do extrato sai
+      // na mesma mensagem ("No extrato: …"), com a chave dela
+      const banco = !proxima && gravacao?.banco?.perguntar === true && cmp?.id
+        ? await abrirPerguntaDoExtrato(ctx.phone, "depois_de_gravar", cmp.id, deps)
+        : null;
+      const texto = textoDaGravacao({ cmp: cmp as CmpResumo, gravacao, proxima, banco });
+      const { chave, abre } = banco ? { chave: banco.dedupe_key, abre: banco as PerguntaQueAbre } : chaveDaPergunta(proxima, ctx.respondida, ctx.chave);
       await enviarMensagem(ctx.phone, texto, chave, abre, deps);
       if (cmp?.id) {
         const soAGravacao = textoDaGravacao({ cmp, gravacao, proxima: null }).split("\n\n")[0];
@@ -1347,7 +1624,15 @@ async function falarDaPergunta(
  */
 async function falarDoEmpate(ctx: Contexto, deps: DependenciasDoFluxo): Promise<void> {
   const ativa = ctx.estado.ativa?.origem === "comprovante" ? ctx.estado.ativa : null;
-  if (ativa?.interrompida_em && !ctx.estado.pendencia) {
+  if (ativa?.interrompida_em && !ctx.estado.pendencia && ativa.passo === "banco") {
+    // F3: a pergunta do extrato reapresentada (a R3 recalcula as linhas)
+    const p = await abrirPerguntaDoExtrato(ctx.phone, "reabrir", ativa.referencia_id, deps);
+    if (p) {
+      await enviarMensagem(ctx.phone, `${textoRetomadaInterrompida(p.cmp?.codigo ?? ativa.referencia_codigo ?? "comprovante")}\n\n${textoDaPerguntaDoExtrato(p)}`,
+        p.dedupe_key, p, deps);
+      return;
+    }
+  } else if (ativa?.interrompida_em && !ctx.estado.pendencia) {
     // deno-lint-ignore no-explicit-any
     const r = await rpc<any>(deps, "comprovante_proxima_pergunta", { p_phone: ctx.phone, p_motivo: "reabrir", p_cmp: ativa.referencia_id });
     if (r?.perguntou) {
@@ -1382,6 +1667,7 @@ async function respostaAFoto(ctx: Contexto, deps: DependenciasDoFluxo, agora: Da
   if (foto.gravado || foto.situacao === "cancelado") return await executarComando({ comando: "cmp", numero }, ctx, deps);
   const ultima = await ultimaPerguntaDoCmp(foto.id, deps);
   const i = ultima ? interpretarResposta(ultima.passo, ultima.opcoes, ctx.texto, agora) : null;
+  if (ultima && i && ultima.passo === "banco") return await responderAoExtrato(ultima, i, ctx, deps);
   if (ultima && i && ultima.passo !== "confirmar") return await responderA(ultima, i, ctx, deps);
   if (pareceDica(ctx.texto)) {
     await rpc(deps, "comprovante_acrescentar_dica", { p_id: foto.id, p_texto: ctx.texto, p_message_id: ctx.messageId });
@@ -1394,6 +1680,13 @@ async function naoEntendi(ctx: Contexto, deps: DependenciasDoFluxo): Promise<Sai
   const ativa = ctx.estado.ativa?.origem === "comprovante" ? ctx.estado.ativa : null;
   if (!ativa) return { status: 200, corpo: { tratada: false, resultado: "assistente" } };
   const codigo = ativa.referencia_codigo ?? "comprovante";
+  if (ativa.passo === "banco") {
+    // F3: a pergunta do extrato de novo (a R3 recalcula as linhas); a da fila da F2 não serve aqui
+    const p = await abrirPerguntaDoExtrato(ctx.phone, "reabrir", ativa.referencia_id, deps);
+    if (p) await enviarMensagem(ctx.phone, `${textoNaoEntendi(codigo)}\n\n${textoDaPerguntaDoExtrato(p)}`, p.dedupe_key, p, deps);
+    else await enviarMensagem(ctx.phone, textoNaoEntendi(codigo), ctx.chave, null, deps);
+    return trata("nao_entendi");
+  }
   // deno-lint-ignore no-explicit-any
   const r = await rpc<any>(deps, "comprovante_proxima_pergunta", { p_phone: ctx.phone, p_motivo: "reabrir", p_cmp: ativa.referencia_id });
   if (r?.perguntou) {
@@ -1473,9 +1766,15 @@ async function executarComando(cmd: Comando, ctx: Contexto, deps: DependenciasDo
   switch (resultado) {
     case "desligada":
       return { status: 200, corpo: { tratada: false, resultado } };
-    case "cartao":
-      await falar(textoDoCartao(r.cmp as CmpResumo, (r.efeitos ?? []) as Efeito[]));
+    case "cartao": {
+      const c = r.cmp as CmpResumo;
+      await falar(textoDoCartao(c, (r.efeitos ?? []) as Efeito[]));
+      // F3: CMP gravado com a pergunta do extrato pendente → a pergunta, numa segunda mensagem
+      if (c?.id && (c.banco?.estado === "perguntar" || c.banco?.estado === "pergunta_aberta")) {
+        await perguntarBanco(ctx.phone, "cmp", deps, c.id);
+      }
       break;
+    }
     case "nao_existe":
       await falar(textoNaoExiste((cmd as { cmp?: number }).cmp ?? numero ?? 0));
       break;
@@ -1712,28 +2011,61 @@ export async function moverNoDropbox(id: string, deps: DependenciasDoFluxo): Pro
 }
 
 /**
- * Regrava o "_INDICE AAAA-MM.csv" do mês com TODOS os CMPs dele (inclusive os das pastas dos barcos,
- * PESSOAL e cancelados): substituir pelo rev guardado; conflito (o dono mexeu) → novo arquivo, e o
- * registro passa a apontar para ele.
+ * Regrava o "_INDICE AAAA-MM.csv" do mês com os CMPs que o banco manda (os das pastas dos barcos e os
+ * cancelados; desde a F3, sem os PESSOAIS, que têm o índice da pasta deles): substituir pelo rev
+ * guardado; conflito (o dono mexeu) → novo arquivo, e o registro passa a apontar para ele.
  */
 export async function atualizarIndice(mes: string, deps: DependenciasDoFluxo): Promise<boolean> {
+  return await gravarIndice(mes, INDICE_DO_MES, deps);
+}
+
+/**
+ * F3: regrava o "_INDICE PESSOAL AAAA-MM.csv" da pasta COMPROVANTES/PESSOAL/AAAA-MM (só os PESSOAIS:
+ * o índice da contadora não os lista). As mesmas regras do índice do mês (rev, conflito, backoff).
+ */
+export async function atualizarIndicePessoal(mes: string, deps: DependenciasDoFluxo): Promise<boolean> {
+  return await gravarIndice(mes, INDICE_PESSOAL, deps);
+}
+
+/** As RPCs, o registro e o caminho de cada índice (o do mês: RPCs 19-21 da F2; o PESSOAL: R7-R9 da F3). */
+type QualIndice = {
+  linhas: string;
+  gravado: string;
+  falhou: string;
+  tabela: string;
+  caminho: (mes: string) => string;
+  log: string;
+};
+
+const INDICE_DO_MES: QualIndice = {
+  linhas: "comprovantes_indice_do_mes", gravado: "comprovante_indice_gravado", falhou: "comprovante_indice_falhou",
+  tabela: "comprovantes_indice_mensal", caminho: caminhoDoIndice, log: "indice",
+};
+
+const INDICE_PESSOAL: QualIndice = {
+  linhas: "comprovantes_indice_pessoal_do_mes", gravado: "comprovante_indice_pessoal_gravado",
+  falhou: "comprovante_indice_pessoal_falhou", tabela: "comprovantes_indice_pessoal", caminho: caminhoDoIndicePessoal,
+  log: "indice_pessoal",
+};
+
+async function gravarIndice(mes: string, qual: QualIndice, deps: DependenciasDoFluxo): Promise<boolean> {
   const m = /^(\d{4}-\d{2})/.exec(String(mes ?? ""))?.[1];
   if (!m) return false;
   const pMes = `${m}-01`;
   const falhar = async (codigo: string) => {
-    const f = await rpc(deps, "comprovante_indice_falhou", { p_mes: pMes, p_erro: codigo.slice(0, 300) });
-    deps.log("indice_falhou", { mes: m, codigo, desistiu: Boolean(f?.desistiu) });
+    const f = await rpc(deps, qual.falhou, { p_mes: pMes, p_erro: codigo.slice(0, 300) });
+    deps.log(`${qual.log}_falhou`, { mes: m, codigo, desistiu: Boolean(f?.desistiu) });
     return false;
   };
   // deno-lint-ignore no-explicit-any
-  const r = await rpc<any>(deps, "comprovantes_indice_do_mes", { p_mes: pMes });
+  const r = await rpc<any>(deps, qual.linhas, { p_mes: pMes });
   const linhas = (Array.isArray(r) ? r : Array.isArray(r?.linhas) ? r.linhas : []) as LinhaDoIndice[];
 
   let registro: { caminho: string | null; rev: string | null };
   if (r && !Array.isArray(r) && ("rev" in r || "caminho" in r)) {
     registro = { caminho: r.caminho ?? null, rev: r.rev ?? null };
   } else {
-    const { data, error } = await deps.admin.from("comprovantes_indice_mensal").select("caminho, rev").eq("mes", pMes).maybeSingle();
+    const { data, error } = await deps.admin.from(qual.tabela).select("caminho, rev").eq("mes", pMes).maybeSingle();
     if (error) throw new FalhaDoFluxo(`ler_indice:${error.code ?? "erro"}`);
     registro = { caminho: data?.caminho ?? null, rev: data?.rev ?? null };
   }
@@ -1747,17 +2079,17 @@ export async function atualizarIndice(mes: string, deps: DependenciasDoFluxo): P
   if (!dbx) return await falhar("dropbox_sem_conexao");
 
   const comRev = Boolean(registro.caminho && registro.rev);
-  const caminho = comRev ? String(registro.caminho) : caminhoDoIndice(m);
+  const caminho = comRev ? String(registro.caminho) : qual.caminho(m);
   let meta: MetaDoDropbox & { conflito: boolean };
   try {
     meta = await dbx.substituir(caminho, new TextEncoder().encode(csvDoIndice(linhas)), comRev ? registro.rev : null);
   } catch (e) {
     return await falhar(codigoDoDropbox(e));
   }
-  await rpc(deps, "comprovante_indice_gravado", {
+  await rpc(deps, qual.gravado, {
     p_mes: pMes, p_dropbox_id: meta.id, p_caminho: meta.path_display, p_rev: meta.rev, p_linhas: linhas.length,
   });
-  deps.log("indice_gravado", { mes: m, linhas: linhas.length, conflito: meta.conflito });
+  deps.log(`${qual.log}_gravado`, { mes: m, linhas: linhas.length, conflito: meta.conflito });
   return true;
 }
 
