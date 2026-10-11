@@ -17,6 +17,19 @@ import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { useConfirmacao } from '@/components/Confirmacao';
 import type { Dispatch, SetStateAction } from 'react';
 
+/**
+ * A despesa que nasceu de um comprovante do WhatsApp (resposta 2 do dono, 11/10/2026): custo interno
+ * da OS, nunca cobrado (o banco recusa faturável com origem_codigo), fora de todo documento do
+ * cliente, contado no Lucro por OS. Não se edita nem se apaga aqui: o caminho é cancelar o CMP, que
+ * desfaz junto o que ele gravou no financeiro. Devolve o porquê (para o title e para o menu) ou nada.
+ */
+function despesaTravadaPeloComprovante(exp: { origem_codigo?: string | null }): string | null {
+  const cmp = exp.origem_codigo;
+  if (!cmp) return null;
+  const numero = Number(/(\d+)$/.exec(cmp)?.[1] ?? '') || 'N';
+  return `Nasceu do ${cmp}: para mudar, cancele o comprovante pelo WhatsApp ("cancelar cmp ${numero} motivo")`;
+}
+
 /** Miniatura do comprovante (bucket privado: o link é temporário e gerado aqui). */
 function MiniaturaDoComprovante({ valor, className }: { valor: string; className: string }) {
   const { url } = useLinkDoArquivo('expense-receipts', valor);
@@ -273,13 +286,19 @@ export function ExpensesTimeDialogs(props: ExpensesTimeDialogsProps) {
                     </tr>
                   </thead>
                   <tbody>
-                    {soExpenses.map((exp: any) => (
+                    {soExpenses.map((exp: any) => {
+                      const travada = despesaTravadaPeloComprovante(exp);
+                      return (
                       <tr key={exp.id} className="border-b last:border-0">
                         <td className="px-4 py-3 text-muted-foreground">{formatDate(exp.expense_date)}</td>
                         <td className="px-4 py-3"><StatusBadge className="bg-secondary text-secondary-foreground">{exp.category}</StatusBadge></td>
                         <td className="px-4 py-3 font-medium">
                           {exp.description}
-                          {exp.billable_to_client === false && (
+                          {exp.origem_codigo ? (
+                            <span className="ml-1 inline-flex" title="Não aparece para o cliente">
+                              <StatusBadge className="bg-muted text-muted-foreground">{exp.origem_codigo} · custo interno</StatusBadge>
+                            </span>
+                          ) : exp.billable_to_client === false && (
                             <StatusBadge className="bg-muted text-muted-foreground ml-1">Interno</StatusBadge>
                           )}
                         </td>
@@ -313,13 +332,21 @@ export function ExpensesTimeDialogs(props: ExpensesTimeDialogsProps) {
                         <td className="px-4 py-3 text-right font-semibold">{formatCurrency(Number(exp.amount))}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-1">
-                            <Button aria-label="Editar esta despesa" variant="ghost" size="icon" className="h-7 w-7"
-                              onClick={() => handleEditExpense(exp)}>
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
+                            {/* botão desabilitado não mostra o title em todo navegador: o porquê vai no envoltório */}
+                            <span className="inline-flex" title={travada ?? undefined}>
+                              <Button aria-label="Editar esta despesa" variant="ghost" size="icon" className="h-7 w-7"
+                                disabled={!!travada}
+                                onClick={() => handleEditExpense(exp)}>
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            </span>
                             <AcoesDaLinha
                               rotulo={`despesa ${exp.description ?? ''}`}
-                              menu={[{
+                              // no menu o motivo fica escrito (o title não aparece no celular)
+                              menu={[travada ? {
+                                texto: `Para excluir, cancele o ${exp.origem_codigo} pelo WhatsApp`, icone: Trash2, perigo: true,
+                                desabilitada: true, titulo: travada, onClick: () => {},
+                              } : {
                                 texto: 'Excluir esta despesa', icone: Trash2, perigo: true,
                                 onClick: () => pedir({
                                   titulo: 'Excluir esta despesa?',
@@ -332,7 +359,8 @@ export function ExpensesTimeDialogs(props: ExpensesTimeDialogsProps) {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
                 </div>

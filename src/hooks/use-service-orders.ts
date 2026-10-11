@@ -962,9 +962,12 @@ export function useDuplicateServiceOrder() {
         await supabase.from('service_order_parts').insert(parts);
       }
 
-      // 5. Copy expenses (no receipts, no payables)
-      if (source.service_order_expenses?.length > 0) {
-        const exps = source.service_order_expenses.map((e: any) => ({
+      // 5. Copy expenses (no receipts, no payables). A despesa que nasceu de um comprovante do WhatsApp
+      // (origem_codigo = "CMP-00124", resposta 2 do dono, 11/10/2026) é o custo interno DAQUELA OS, não
+      // composição de outra: não se copia — copiada, nasceria faturável e viraria cobrança na OS nova.
+      const despesasDaComposicao = (source.service_order_expenses ?? []).filter((e: any) => !e.origem_codigo);
+      if (despesasDaComposicao.length > 0) {
+        const exps = despesasDaComposicao.map((e: any) => ({
           service_order_id: newId,
           category: e.category,
           description: e.description,

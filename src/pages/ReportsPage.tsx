@@ -398,7 +398,7 @@ function ProfitabilityTab() {
                   <TableHead>OS / Cliente</TableHead>
                   <TableHead className="text-right">Faturamento</TableHead>
                   <TableHead className="text-right hidden sm:table-cell">Custo Total</TableHead>
-                  <TableHead className="text-right hidden md:table-cell" title="Despesa da OS que a HBR pagou e não cobra do cliente (já somada no custo total)">Custo HBR</TableHead>
+                  <TableHead className="text-right hidden md:table-cell" title="Custo interno da OS (despesa não faturável e a que nasceu de comprovante) que entra no lucro; o de deslocamento só no que passa do deslocamento cobrado. Já somado no custo total.">Custo HBR</TableHead>
                   <TableHead className="text-right">Lucro Líquido</TableHead>
                   <TableHead className="text-right">Margem</TableHead>
                 </TableRow>

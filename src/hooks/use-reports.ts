@@ -301,7 +301,9 @@ export function useProfitabilityReport(periodDays: number = 30) {
         revenue: Number(o.revenue || 0),
         // Desde 29/09/2026 o lucro da view desconta a mão de obra real das diárias; o custo tem de
         // somar a mesma parcela, senão custo + lucro deixa de fechar com o faturamento. Desde
-        // 11/10/2026 também o custo da HBR (hbr_cost: despesa da OS não cobrada do cliente).
+        // 11/10/2026 também o custo da HBR (hbr_cost: custo interno da OS — despesa não faturável e a
+        // que nasceu de comprovante — que entra no lucro; o de deslocamento só no que passa do
+        // deslocamento cobrado, para não contar a mesma viagem duas vezes).
         cost: Number(o.parts_cost || 0) + Number(o.travel_cost || 0) + Number(o.operational_cost || 0) + Number(o.commission_cost || 0)
           + Number(o.labor_cost_real || 0) + Number(o.hbr_cost || 0),
         labor: Number(o.labor_cost_real || 0),
