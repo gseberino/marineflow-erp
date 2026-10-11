@@ -83,8 +83,9 @@ export function FichaDoDia({ pessoa, data, linhas, onFechar, onEditar, onDetalhe
                       <Badge variant="outline">{rotuloDaJornada(dia.jornada)}</Badge>
                       <span className="font-medium tabular-nums">{formatCurrency(dia.trabalhado)}</span>
                     </div>
+                    {/* o número já vem como "OS-0042" (ou "ORÇ-…"): sem outro "OS " na frente */}
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {dia.os.length ? `OS ${dia.os.map((o) => o.numero).join(', ')}` : 'Sem OS'}
+                      {dia.os.length ? dia.os.map((o) => o.numero).join(', ') : 'Sem OS'}
                       {dia.extras ? ` · extras ${formatCurrency(dia.extras)}` : ''}
                       {dia.observacao ? ` · ${dia.observacao}` : ''}
                     </p>

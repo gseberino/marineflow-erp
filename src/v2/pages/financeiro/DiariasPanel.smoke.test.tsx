@@ -206,7 +206,9 @@ describe('DiariasPanel', () => {
 
   it('o extrato mostra o dia com a OS e o pagamento com a conta de onde saiu', async () => {
     renderizar('extrato');
-    expect(await screen.findByText('OS OS-0042')).toBeInTheDocument();
+    // o número já vem como "OS-0042" do banco: sem outro "OS " na frente
+    expect(await screen.findByText('OS-0042')).toBeInTheDocument();
+    expect(screen.queryByText('OS OS-0042')).not.toBeInTheDocument();
     expect(screen.getByText(/Gerador do Marcelo/)).toBeInTheDocument();
     expect(screen.getByText('C6 - Conta PJ HBR')).toBeInTheDocument();
     expect(screen.getByText(/Pix enviado para Roberto · Diárias de freelancers/)).toBeInTheDocument();
@@ -241,6 +243,9 @@ describe('DiariasPanel', () => {
     await user.click(celula);
     const ficha = await screen.findByRole('dialog');
     expect(within(ficha).getByText('Roberto · qua 16/09')).toBeInTheDocument();
+    // a OS do dia com o número como o banco manda (nada de "OS OS-0042")
+    expect(within(ficha).getByText(/^OS-0042/)).toBeInTheDocument();
+    expect(within(ficha).queryByText(/OS OS-/)).not.toBeInTheDocument();
     expect(within(ficha).getByRole('button', { name: 'Dia inteiro' })).toHaveAttribute('aria-pressed', 'true');
     await user.click(within(ficha).getByRole('button', { name: 'Meio período' }));
     await waitFor(() => expect(chamadas('registrar_diaria')).toHaveLength(1));
@@ -270,7 +275,7 @@ describe('DiariasPanel', () => {
   it('vários dias: só os dias úteis que faltam; o já lançado fica como está', async () => {
     const user = userEvent.setup();
     renderizar('extrato');
-    await screen.findByText('OS OS-0042');
+    await screen.findByText('OS-0042');
     await user.click(screen.getByRole('button', { name: /Registrar dia/ }));
     const dialogo = await screen.findByRole('dialog');
     await user.click(within(dialogo).getByRole('button', { name: 'Vários dias' }));
@@ -336,7 +341,7 @@ describe('DiariasPanel', () => {
   it('registrar pagamento por Pix: uma função do banco (a do assistente), sem reembolso em aberto tudo em Diárias; bolso do sócio leva o sócio', async () => {
     const user = userEvent.setup();
     renderizar('extrato');
-    await screen.findByText('OS OS-0042');
+    await screen.findByText('OS-0042');
     await user.click(screen.getByRole('button', { name: /^Registrar pagamento$/ }));
     const dialogo = await screen.findByRole('dialog');
     fireEvent.change(within(dialogo).getByLabelText('Valor (R$)'), { target: { value: '10000' } });
@@ -377,7 +382,7 @@ describe('DiariasPanel', () => {
   it('fechar acerto: confere (simula) pela data e só então fecha', async () => {
     const user = userEvent.setup();
     renderizar('extrato');
-    await screen.findByText('OS OS-0042');
+    await screen.findByText('OS-0042');
     await user.click(screen.getByRole('button', { name: /Fechar acerto/ }));
     const dialogo = await screen.findByRole('dialog');
     expect(await within(dialogo).findByText('A pagar neste acerto')).toBeInTheDocument();

@@ -390,7 +390,8 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
                       <Badge variant="outline" className={l.jornada === 'faltou' ? 'text-muted-foreground' : 'text-success'}>
                         {rotuloDaJornada(l.jornada)}
                       </Badge>
-                      {l.os.length > 0 && <span className="min-w-0 truncate">OS {l.os.map((o) => o.numero).join(', ')}</span>}
+                      {/* como no reembolso: o número já vem como "OS-0042" (ou "ORÇ-…") */}
+                      {l.os.length > 0 && <span className="min-w-0 truncate">{l.os.map((o) => o.numero).join(', ')}</span>}
                     </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {l.jornada === 'faltou' ? 'Sem diária' : `${l.fracao === 0.5 ? '½ × ' : ''}${formatCurrency(l.valor_diaria ?? 0)}`}
