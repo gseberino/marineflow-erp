@@ -11,7 +11,9 @@ import {
   lerLegenda,
   nomeNoDropbox,
   PASTA_A_CLASSIFICAR,
+  PASTA_CANCELADOS,
   PASTA_COMPROVANTES,
+  PASTA_PESSOAL,
   rotaDaMensagem,
   sha256HexSync,
   textoDoAviso,
@@ -352,4 +354,12 @@ Deno.test("chaveDoAviso: formato fixo e independente da ordem", () => {
   assertMatch(a, /^cmp:aviso:[0-9a-f]{16}$/);
   assertEquals(a, chaveDoAviso(["a-1", "b-2"]));
   assert(a !== chaveDoAviso(["a-1"]));
+});
+
+// ─── Pastas da F2 ─────────────────────────────────────────────────────────────────────────
+
+Deno.test("F2: _CANCELADOS e PESSOAL ficam dentro de COMPROVANTES (constantes, nunca de app_settings)", () => {
+  assertEquals(PASTA_CANCELADOS, "/MANAGEMENT/FINANCIALS/COMPROVANTES/_CANCELADOS");
+  assertEquals(PASTA_PESSOAL, "/MANAGEMENT/FINANCIALS/COMPROVANTES/PESSOAL");
+  assert(PASTA_CANCELADOS.startsWith(`${PASTA_COMPROVANTES}/`) && PASTA_PESSOAL.startsWith(`${PASTA_COMPROVANTES}/`));
 });

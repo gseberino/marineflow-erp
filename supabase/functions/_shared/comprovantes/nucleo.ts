@@ -14,6 +14,10 @@ import type { Modo } from "./modo.ts";
 /** A pasta dos comprovantes no Dropbox. CONSTANTE (decisão 9): app_settings não desvia arquivo. */
 export const PASTA_COMPROVANTES = "/MANAGEMENT/FINANCIALS/COMPROVANTES";
 export const PASTA_A_CLASSIFICAR = `${PASTA_COMPROVANTES}/_A CLASSIFICAR`;
+/** F2: o arquivo do CMP cancelado pelo dono (com " CANCELADO" no nome). */
+export const PASTA_CANCELADOS = `${PASTA_COMPROVANTES}/_CANCELADOS`;
+/** F2: os pessoais, por mês (PESSOAL/AAAA-MM); nada no financeiro. */
+export const PASTA_PESSOAL = `${PASTA_COMPROVANTES}/PESSOAL`;
 /** Como a pasta aparece no texto ao dono. */
 const PASTA_NO_AVISO = "COMPROVANTES/_A CLASSIFICAR";
 
@@ -182,7 +186,7 @@ export type DadosDoArquivo = {
   arquivo_mime: string | null;
 };
 
-const SIGLAS: Record<string, string> = {
+export const SIGLAS: Record<string, string> = {
   nfce: "NFCE",
   nfe_danfe: "NFE",
   nfe_xml: "NFE-XML",
@@ -202,7 +206,7 @@ const SIGLAS: Record<string, string> = {
 };
 
 /** Caracteres que o Dropbox (e o Windows do dono) não aceitam em nome de arquivo. */
-function limparNome(s: string): string {
+export function limparNome(s: string): string {
   return s.replace(/[\\/:*?"<>|]+/g, "-").replace(/[\u0000-\u001f\u007f]+/g, "").replace(/\s+/g, " ").trim();
 }
 
@@ -216,7 +220,7 @@ function diaDoRecebimento(recebidoEm: string | null | undefined): string {
 }
 
 /** "12:57:56" → "12h57"; desconhecida → null. */
-function horaNoNome(h: string | null | undefined): string | null {
+export function horaNoNome(h: string | null | undefined): string | null {
   const m = typeof h === "string" ? /^(\d{2}):(\d{2})/.exec(h) : null;
   return m ? `${m[1]}h${m[2]}` : null;
 }
@@ -231,14 +235,14 @@ export function formatarReais(v: string | number | null | undefined): string | n
 }
 
 /** Fornecedor do cadastro no nome do arquivo: sem acento, até 40 caracteres. */
-function fornecedorNoNome(nome: string | null | undefined): string | null {
+export function fornecedorNoNome(nome: string | null | undefined): string | null {
   if (!nome) return null;
   const s = limparNome(nome.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\x20-\x7e]/g, ""));
   const corte = s.slice(0, 40).trim();
   return corte || null;
 }
 
-function extensaoDoCaminho(caminho: string | null | undefined): string | null {
+export function extensaoDoCaminho(caminho: string | null | undefined): string | null {
   const m = typeof caminho === "string" ? /\.([a-z0-9]{2,5})$/i.exec(caminho) : null;
   return m ? m[1].toLowerCase() : null;
 }
@@ -288,7 +292,7 @@ export type ItemDoAviso = {
   duplicado: { codigo: string | null; data_compra: string | null; valor: string | number | null } | null;
 };
 
-const TIPO_NO_AVISO: Record<string, string> = {
+export const TIPO_NO_AVISO: Record<string, string> = {
   nfce: "cupom NFC-e",
   nfe_danfe: "nota fiscal (DANFE)",
   nfe_xml: "XML de nota fiscal",
@@ -309,7 +313,7 @@ const FECHO = "Ainda não lancei nada. Não precisa responder.";
 const MAX_AVISO = 4096;
 
 /** "2026-10-08" → "08/10". */
-function diaMes(d: string | null | undefined): string | null {
+export function diaMes(d: string | null | undefined): string | null {
   const v = diaValido(d);
   return v ? `${v.slice(8, 10)}/${v.slice(5, 7)}` : null;
 }
@@ -328,7 +332,7 @@ function horaEmSaoPaulo(iso: string): string | null {
 }
 
 /** "a", "a e b", "a, b e c"; mais de 5: "a, b, c, d, e e mais N". */
-function listaPt(itens: string[]): string {
+export function listaPt(itens: string[]): string {
   if (itens.length <= 1) return itens[0] ?? "";
   if (itens.length > 5) return `${itens.slice(0, 5).join(", ")} e mais ${itens.length - 5}`;
   return `${itens.slice(0, -1).join(", ")} e ${itens[itens.length - 1]}`;
@@ -340,7 +344,7 @@ function numeroDoCodigo(codigo: string | null): number | null {
 }
 
 /** "CMP-00123 a CMP-00127" quando contínuos; senão a lista (até 5 e "e mais N"). */
-function faixaDeCodigos(codigos: string[]): string {
+export function faixaDeCodigos(codigos: string[]): string {
   const comNumero = codigos.map((c) => ({ c, n: numeroDoCodigo(c) }));
   if (comNumero.length >= 3 && comNumero.every((x) => x.n !== null)) {
     const ordenados = [...comNumero].sort((a, b) => (a.n as number) - (b.n as number));
