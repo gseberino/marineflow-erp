@@ -44,6 +44,9 @@ import {
 } from "../_shared/banking/entrada-sem-cliente.ts";
 import { lerRespostaDaReceita } from "../_shared/banking/cnae.ts";
 import { PISO_DA_CONFIANCA, selecionarParaLancarSozinho, type LinhaCandidata } from "./lancar-sozinho.ts";
+import {
+  foraDasReservadas, linhasDeComprovante, mensagemDosComprovantes, reavaliarComprovantes, recusaDaLinhaDoCmp, reservadasDaRodada,
+} from "./comprovantes.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
 
@@ -763,20 +766,31 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   try {
     const { data: n } = await admin.rpc("aplicar_anotacoes_pendentes");
     anotadas = Number(n ?? 0);
-    if (anotadas > 0) {
+  } catch (e) {
+    console.error("[finance-review] aplicar anotações falhou", e);
+  }
+
+  // Comprovantes (F3, 11/10/2026): logo depois das anotações, os CMPs que esperam o banco são
+  // reavaliados contra as linhas que acabaram de chegar — ligam pela anotação já autorizada no "sim"
+  // do resumo, classificam a linha ligada, guardam os candidatos e marcam a pergunta do extrato. A
+  // linha ligada a um CMP (ou candidata de uma pergunta que espera o dono) é RESERVADA: o "lançar
+  // sozinho" não a toca — quem decide é o dono, no Extrato ou no WhatsApp. Erro = como antes da F3.
+  const cmp = await reavaliarComprovantes(admin);
+  const reservadas = await reservadasDaRodada(admin, cmp, linhas.map((l) => String(l.bank_transaction_id)));
+  if (anotadas > 0 || cmp.classificadas > 0) {
+    try {
       const { data: aplicadas } = await admin.from("anotacoes_do_extrato").select("bank_transaction_id")
         .eq("status", "aplicada").gte("aplicada_em", new Date(Date.now() - 10 * 60_000).toISOString());
       for (const a of (aplicadas ?? []) as any[]) if (a.bank_transaction_id) anotadasAgora.add(String(a.bank_transaction_id));
+    } catch (e) {
+      console.error("[finance-review] ler anotações aplicadas falhou", e);
     }
-  } catch (e) {
-    console.error("[finance-review] aplicar anotações falhou", e);
   }
 
   // Aplica de imediato o que as regras autônomas resolveram. Cada lançamento fica ligado à
   // regra que o criou, então desligar a regra e desfazer o que ela fez são a mesma consulta.
   let lancadasSozinhas = 0;
-  const idsAuto = autoAplicar
-    .filter((l) => !anotadasAgora.has(String(l.bank_transaction_id)))
+  const idsAuto = foraDasReservadas(autoAplicar, anotadasAgora, reservadas)
     .map((l) => idsPorTransacao.get(String(l.bank_transaction_id)))
     .filter((v): v is string => !!v);
   if (idsAuto.length > 0) {
@@ -801,7 +815,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   // O mutirão do histórico ("Incluir histórico antigo") só PROPÕE: lançar sozinho um lote de
   // linhas antigas de uma vez, com um clique dado para outra coisa, não é o que o dono ligou.
   if (autoLigado && !incluirHistorico) {
-    const jaPorRegra = new Set([...autoAplicar.map((l) => String(l.bank_transaction_id)), ...anotadasAgora]);
+    // as reservadas por um CMP também ficam fora (F3): a mesma trava do "já lançada pela regra"
+    const jaPorRegra = new Set([...autoAplicar.map((l) => String(l.bank_transaction_id)), ...anotadasAgora, ...reservadas]);
     // Transação com alerta do vigilante pendente não entra: o alerta existe para alguém olhar.
     const comAlerta = new Set<string>();
     const txs = linhas.filter((l) => l.kind === "create_payable").map((l) => String(l.bank_transaction_id));
@@ -843,6 +858,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     criadas > 0 ? `${criadas - lancadasSozinhas} proposta(s) para revisar` : "Nada novo para propor",
     completadas > 0 ? `${completadas} já na fila ganharam identificação` : "",
     anotadas > 0 ? `${anotadas} classificada(s) pelas suas anotações` : "",
+    mensagemDosComprovantes(cmp.ligados),
     lancadasSozinhas > 0 ? `${lancadasSozinhas} lançada(s) sozinha(s) — veja em "Lançados sozinhos"` : "",
     pares.length ? `${pares.length} transferência(s) entre contas` : "",
     parcelasDeCompraJaLancada > 0 ? `${parcelasDeCompraJaLancada} parcela(s) de compra já lançada saíram da fila` : "",
@@ -857,6 +873,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     parcelas_de_compra_ja_lancada: parcelasDeCompraJaLancada,
     elegiveis_lote: linhas.filter((l) => Number(l.suggested_amount) < limiteLote).length,
     limite_lote: limiteLote,
+    comprovantes_ligados: cmp.ligados,
     // Quantas transações antigas sobraram para a próxima chamada. Zero = mutirão terminado.
     restantes,
     message: partes.join(" · "),
@@ -1836,6 +1853,13 @@ async function aprovar(
     });
   }
 
+  // Comprovantes (F3): de quem é cada linha de saída. A linha cujo CMP anexou uma conta a pagar em
+  // aberto não ganha despesa nova (seria o mesmo gasto duas vezes): o caminho é casar. Erro na
+  // consulta = como antes da F3 (nada recusado por isso).
+  const doCmp = await linhasDeComprovante(admin, elegiveis
+    .filter((p) => p.kind === "create_payable" && p.bank_transaction_id)
+    .map((p) => String(p.bank_transaction_id)));
+
   for (const p of elegiveis) {
     try {
       const ov = overrides[p.id] ?? {};
@@ -1909,6 +1933,12 @@ async function aprovar(
         if ((sinal as any)?.receivable_id) recebidoPara.set(p.id, String((sinal as any).receivable_id));
         feitos.push(p.id);
         continue;
+      }
+
+      // F3: daqui em diante nasce despesa nova — não na linha cujo CMP já anexou a conta em aberto.
+      if (p.kind === "create_payable") {
+        const recusa = recusaDaLinhaDoCmp(doCmp.linhas.get(String(p.bank_transaction_id)));
+        if (recusa) throw new Error(recusa);
       }
 
       /**
