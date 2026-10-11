@@ -15,6 +15,14 @@ export type IncomingMessageEvent = {
   mediaUrl: string | null;
   senderName: string | null;
   timestamp: number;     // ms since epoch
+  // Campos novos (comprovantes, 11/10/2026), todos opcionais e calculados À PARTE: `text` e
+  // `messageType` seguem exatamente como antes (quotes.ts depende de body === "[document]").
+  // Vêm da mensagem desembrulhada de ephemeral/viewOnce/documentWithCaption.
+  mediaKind?: "image" | "document" | null; // foto ou documento (vídeo/áudio/figurinha = null)
+  caption?: string | null;                 // SÓ a legenda; nunca o nome do arquivo
+  mimetype?: string | null;                // o que o WhatsApp declarou
+  fileName?: string | null;                // nome do documento (informativo)
+  quotedId?: string | null;                // id da mensagem citada (data.contextInfo.stanzaId)
 };
 
 // Conteúdo de um Status/Stories do WhatsApp.

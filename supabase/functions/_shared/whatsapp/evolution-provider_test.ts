@@ -488,3 +488,161 @@ Deno.test("markRead: sends readMessages array with full jid", async () => {
   assertEquals(body.readMessages[0].id, "BAE009");
   assertEquals(body.readMessages[0].remoteJid, "5547999999999@s.whatsapp.net");
 });
+
+// ─── Campos novos para os comprovantes (11/10/2026) ──────────────────────────────────────
+// Regra (decisão 15): text, messageType e mediaUrl NÃO mudam em caso nenhum — quotes.ts depende de
+// body === "[document]". A paridade é conferida contra uma cópia congelada do parser de antes.
+
+/** O cálculo de text/messageType/mediaUrl do parser ANTES dos campos novos (copiado, não mexer). */
+// deno-lint-ignore no-explicit-any
+function parserAntigo(payload: any): { text: string | null; messageType: string; mediaUrl: string | null } | null {
+  const data = payload?.data;
+  const msgObj = data?.message;
+  if (!data?.key || !msgObj) return null;
+  let text: string | null = null;
+  let messageType = "text";
+  let mediaUrl: string | null = null;
+  const imgMsg = msgObj["imageMessage"];
+  const audMsg = msgObj["audioMessage"];
+  const vidMsg = msgObj["videoMessage"];
+  const docMsg = msgObj["documentMessage"];
+  if (imgMsg) {
+    messageType = "image";
+    text = String(imgMsg["caption"] ?? "") || null;
+    mediaUrl = String(imgMsg["url"] ?? imgMsg["mediaUrl"] ?? "") || null;
+  } else if (audMsg) {
+    messageType = "audio";
+    mediaUrl = String(audMsg["url"] ?? audMsg["mediaUrl"] ?? "") || null;
+  } else if (vidMsg) {
+    messageType = "video";
+    text = String(vidMsg["caption"] ?? "") || null;
+    mediaUrl = String(vidMsg["url"] ?? vidMsg["mediaUrl"] ?? "") || null;
+  } else if (docMsg) {
+    messageType = "document";
+    text = String(docMsg["caption"] ?? docMsg["fileName"] ?? "") || null;
+    mediaUrl = String(docMsg["url"] ?? docMsg["mediaUrl"] ?? "") || null;
+  } else {
+    const raw = msgObj["conversation"] ?? msgObj["extendedTextMessage"]?.["text"] ?? "";
+    text = String(raw).trim() || null;
+  }
+  return { text, messageType, mediaUrl };
+}
+
+const KEY = { remoteJid: "5547999999999@s.whatsapp.net", fromMe: false, id: "PAR001" };
+const up = (message: unknown, extra: Record<string, unknown> = {}) => ({ event: "messages.upsert", data: { key: KEY, message, ...extra } });
+
+const CASOS_DE_PARIDADE: Array<[string, unknown]> = [
+  ["texto (conversation)", up({ conversation: "Olá, quero informações" })],
+  ["texto com espaço", up({ conversation: "  oi  " })],
+  ["extendedTextMessage", up({ extendedTextMessage: { text: "Link com preview" } })],
+  ["foto com legenda", up({ imageMessage: { url: "https://mmg.whatsapp.net/img/test.jpg", caption: "Foto do barco", mimetype: "image/jpeg" } })],
+  ["foto sem legenda", up({ imageMessage: { url: "https://mmg.whatsapp.net/img/a.jpg", mimetype: "image/jpeg", viewOnce: false } })],
+  ["foto com mediaUrl", up({ imageMessage: { mediaUrl: "https://x/y.jpg" } })],
+  ["áudio", up({ audioMessage: { url: "https://mmg.whatsapp.net/audio/test.ogg" } })],
+  ["vídeo com legenda", up({ videoMessage: { url: "https://v/1.mp4", caption: "vídeo" } })],
+  ["documento com legenda", up({ documentMessage: { url: "https://mmg.whatsapp.net/doc/boleto.pdf", fileName: "boleto.pdf", caption: "Boleto de cobrança" } })],
+  ["documento sem legenda", up({ documentMessage: { url: "https://d/n.pdf", fileName: "NFe 123.pdf", mimetype: "application/pdf" } })],
+  ["documento sem nome nem legenda", up({ documentMessage: { url: "https://d/n.pdf" } })],
+  ["documentWithCaptionMessage", up({ documentWithCaptionMessage: { message: { documentMessage: { url: "https://d/c.pdf", fileName: "c.pdf", caption: "cupom", mimetype: "application/pdf" } } } })],
+  ["foto em ephemeralMessage", up({ ephemeralMessage: { message: { imageMessage: { url: "https://i/e.jpg", caption: "efêmera" } } } })],
+  ["foto em viewOnceMessageV2", up({ viewOnceMessageV2: { message: { imageMessage: { url: "https://i/v.jpg" } } } })],
+  ["texto citando (data.contextInfo)", up({ conversation: "isso aqui" }, { contextInfo: { stanzaId: "CITADA1", participant: "x" } })],
+  ["figurinha", up({ stickerMessage: { url: "https://s/1.webp" } })],
+  ["álbum", up({ albumMessage: { expectedImageCount: 3 } })],
+  ["reação", up({ reactionMessage: { text: "👍" } })],
+  ["mensagem vazia", up({})],
+];
+
+Deno.test("paridade: text, messageType e mediaUrl idênticos ao parser de antes em todos os casos", () => {
+  for (const [nome, payload] of CASOS_DE_PARIDADE) {
+    const novo = provider.parseIncomingWebhook(payload);
+    const antigo = parserAntigo(payload);
+    assertEquals(
+      novo ? { text: novo.text, messageType: novo.messageType, mediaUrl: novo.mediaUrl } : null,
+      antigo,
+      `caso: ${nome}`,
+    );
+  }
+});
+
+Deno.test("paridade: documento sem legenda continua com text = nome do arquivo ([document] não muda)", () => {
+  const e = provider.parseIncomingWebhook(up({ documentMessage: { url: "https://d/n.pdf", fileName: "NFe 123.pdf" } }));
+  assertEquals(e?.messageType, "document");
+  assertEquals(e?.text, "NFe 123.pdf");
+  const semNome = provider.parseIncomingWebhook(up({ documentMessage: { url: "https://d/n.pdf" } }));
+  assertEquals(semNome?.text, null); // o webhook grava "[document]", como hoje
+});
+
+Deno.test("campos novos: foto com legenda", () => {
+  const e = provider.parseIncomingWebhook(up({ imageMessage: { url: "https://i/1.jpg", caption: "cupom", mimetype: "image/jpeg" } }));
+  assertEquals(e?.mediaKind, "image");
+  assertEquals(e?.caption, "cupom");
+  assertEquals(e?.mimetype, "image/jpeg");
+  assertEquals(e?.fileName, null);
+  assertEquals(e?.quotedId, null);
+});
+
+Deno.test("campos novos: foto sem legenda (payload real: viewOnce booleano e contextInfo sem citação)", () => {
+  const e = provider.parseIncomingWebhook(up({
+    imageMessage: { url: "https://i/2.jpg", mimetype: "image/jpeg", viewOnce: false, contextInfo: { mentionedJid: [], groupMentions: [] } },
+    messageContextInfo: {},
+  }));
+  assertEquals(e?.mediaKind, "image");
+  assertEquals(e?.caption, null);
+  assertEquals(e?.quotedId, null);
+});
+
+Deno.test("campos novos: documento com legenda", () => {
+  const e = provider.parseIncomingWebhook(up({ documentMessage: { url: "https://d/b.pdf", fileName: "boleto.pdf", caption: "Boleto de cobrança", mimetype: "application/pdf" } }));
+  assertEquals(e?.mediaKind, "document");
+  assertEquals(e?.caption, "Boleto de cobrança");
+  assertEquals(e?.fileName, "boleto.pdf");
+  assertEquals(e?.mimetype, "application/pdf");
+});
+
+Deno.test("campos novos: documento sem legenda — caption nulo, nunca o nome do arquivo", () => {
+  const e = provider.parseIncomingWebhook(up({ documentMessage: { url: "https://d/n.pdf", fileName: "cupom posto.pdf", mimetype: "application/pdf" } }));
+  assertEquals(e?.mediaKind, "document");
+  assertEquals(e?.caption, null);
+  assertEquals(e?.fileName, "cupom posto.pdf");
+  assertEquals(e?.text, "cupom posto.pdf"); // o text de sempre
+});
+
+Deno.test("campos novos: documentWithCaptionMessage desembrulha; text/messageType seguem de antes", () => {
+  const e = provider.parseIncomingWebhook(up({
+    documentWithCaptionMessage: { message: { documentMessage: { url: "https://d/c.pdf", fileName: "c.pdf", caption: "nota OS 12", mimetype: "application/pdf" } } },
+  }));
+  assertEquals(e?.messageType, "text");
+  assertEquals(e?.text, null);
+  assertEquals(e?.mediaKind, "document");
+  assertEquals(e?.caption, "nota OS 12");
+  assertEquals(e?.fileName, "c.pdf");
+});
+
+Deno.test("campos novos: imagem dentro de ephemeralMessage e de viewOnceMessageV2", () => {
+  const ef = provider.parseIncomingWebhook(up({ ephemeralMessage: { message: { imageMessage: { url: "https://i/e.jpg", caption: "pix", mimetype: "image/jpeg" } } } }));
+  assertEquals(ef?.mediaKind, "image");
+  assertEquals(ef?.caption, "pix");
+  const vo = provider.parseIncomingWebhook(up({ viewOnceMessageV2: { message: { imageMessage: { url: "https://i/v.jpg" } } } }));
+  assertEquals(vo?.mediaKind, "image");
+  assertEquals(vo?.caption, null);
+  const duplo = provider.parseIncomingWebhook(up({ ephemeralMessage: { message: { viewOnceMessage: { message: { documentMessage: { fileName: "x.pdf" } } } } } }));
+  assertEquals(duplo?.mediaKind, "document");
+});
+
+Deno.test("campos novos: texto com data.contextInfo.stanzaId vira quotedId", () => {
+  const e = provider.parseIncomingWebhook(up({ conversation: "esse aqui é da OS 12" }, { contextInfo: { stanzaId: "CITADA1" } }));
+  assertEquals(e?.quotedId, "CITADA1");
+  assertEquals(e?.mediaKind, null);
+  assertEquals(e?.caption, null);
+  const dentro = provider.parseIncomingWebhook(up({ extendedTextMessage: { text: "ok", contextInfo: { stanzaId: "CITADA2" } } }));
+  assertEquals(dentro?.quotedId, "CITADA2");
+});
+
+Deno.test("campos novos: áudio, vídeo e figurinha não são mídia do fluxo", () => {
+  for (const m of [{ audioMessage: { url: "u" } }, { videoMessage: { url: "u", caption: "c" } }, { stickerMessage: { url: "u" } }]) {
+    const e = provider.parseIncomingWebhook(up(m));
+    assertEquals(e?.mediaKind, null);
+    assertEquals(e?.caption, null);
+  }
+});

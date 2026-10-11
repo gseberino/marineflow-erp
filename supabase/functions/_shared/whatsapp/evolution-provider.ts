@@ -31,6 +31,58 @@ const EVOLUTION_STATUS_MAP: Record<number, string> = {
   5: "played",
 };
 
+// ─── Campos de mídia para o fluxo de comprovantes (11/10/2026) ─────────────────────────────
+// Calculados À PARTE de text/messageType/mediaUrl, que não mudam em caso nenhum (quotes.ts depende
+// de body === "[document]"; um documentWithCaptionMessage continua "text" com body "[conteúdo
+// vazio]"). Conferido nos payloads reais (60 dias e o histórico inteiro): a legenda de PDF chega em
+// documentMessage.caption e a citação em data.contextInfo.stanzaId; nenhum envelope
+// ephemeral/viewOnce/documentWithCaption apareceu — o desembrulho é defesa.
+const ENVELOPES = [
+  "ephemeralMessage",
+  "viewOnceMessage",
+  "viewOnceMessageV2",
+  "viewOnceMessageV2Extension",
+  "documentWithCaptionMessage",
+];
+
+type Obj = Record<string, unknown>;
+const obj = (v: unknown): Obj | undefined => (v && typeof v === "object" && !Array.isArray(v) ? v as Obj : undefined);
+const textoOuNulo = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
+
+/** A mensagem de dentro dos envelopes, até 3 níveis. */
+function desembrulhar(msgObj: Obj): Obj {
+  let atual = msgObj;
+  for (let nivel = 0; nivel < 3; nivel++) {
+    const dentro = ENVELOPES.map((k) => obj(obj(atual[k])?.["message"])).find(Boolean);
+    if (!dentro) break;
+    atual = dentro;
+  }
+  return atual;
+}
+
+type CamposDeMidia = Pick<IncomingMessageEvent, "mediaKind" | "caption" | "mimetype" | "fileName" | "quotedId">;
+
+function camposDeMidia(data: Obj, msgObj: Obj): CamposDeMidia {
+  const inner = desembrulhar(msgObj);
+  const img = obj(inner["imageMessage"]);
+  const doc = obj(inner["documentMessage"]);
+  const stanza = (o: Obj | undefined) => textoOuNulo(obj(o?.["contextInfo"])?.["stanzaId"]);
+  const quotedId = stanza(data) ?? stanza(img) ?? stanza(doc) ?? stanza(obj(inner["extendedTextMessage"]));
+  if (img) {
+    return { mediaKind: "image", caption: textoOuNulo(img["caption"]), mimetype: textoOuNulo(img["mimetype"]), fileName: null, quotedId };
+  }
+  if (doc) {
+    return {
+      mediaKind: "document",
+      caption: textoOuNulo(doc["caption"]), // nunca o fileName (decisão 1)
+      mimetype: textoOuNulo(doc["mimetype"]),
+      fileName: textoOuNulo(doc["fileName"]),
+      quotedId,
+    };
+  }
+  return { mediaKind: null, caption: null, mimetype: null, fileName: null, quotedId };
+}
+
 export class EvolutionProvider implements WhatsAppProvider {
   private readonly baseUrl: string;
   private readonly headers: Record<string, string>;
@@ -295,7 +347,10 @@ export class EvolutionProvider implements WhatsAppProvider {
       const ts = data["messageTimestamp"];
       const timestamp = typeof ts === "number" ? ts * 1000 : Date.now();
 
-      return { from, messageId, fromMe, text, messageType, mediaUrl, senderName, timestamp };
+      return {
+        from, messageId, fromMe, text, messageType, mediaUrl, senderName, timestamp,
+        ...camposDeMidia(data, msgObj),
+      };
     } catch {
       return null;
     }
