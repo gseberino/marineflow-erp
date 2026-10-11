@@ -19,9 +19,15 @@
 -- Helpers internos (sem grant): _comprovante_normalizar, _comprovante_tipo_no_texto, _comprovante_e_nfe,
 -- _comprovante_os_info, _comprovante_os_por_numero, _comprovante_ler_dica, _comprovante_menu_para_que,
 -- _comprovante_categoria_provavel, _comprovante_socio, _comprovante_tecnicos, _comprovante_efetivo,
--- _comprovante_fornecedor, _comprovante_proximo_passo, _comprovante_resumo, _comprovante_opcoes_do_passo,
+-- _comprovante_fornecedor, _comprovante_lancamento_na_os, _comprovante_proximo_passo, _comprovante_resumo,
+-- _comprovante_opcoes_do_passo,
 -- _comprovante_montar_pergunta, _comprovante_entrar_na_fila, _comprovante_abrir_pergunta,
 -- _comprovante_vigia_pode, _comprovante_cmp_da_vigia, _comprovante_proxima.
+--
+-- Ajustes do dono (11/10/2026): o comprovante nunca é cobrado do cliente — na OS, primeiro procura o
+-- lançamento que já está nela (só comprova); sem ele, pergunta "peça ou despesa da OS" (passo
+-- tipo_na_os). PESSOAL pergunta quem pagou: da conta/cartão da empresa vira gasto pessoal do sócio
+-- (desconta do pró-labore); do bolso, só o arquivo.
 --
 -- Todas security definer, search_path vazio, execute só para service_role (14 e 15 também para
 -- authenticated, com checagem de admin dentro). Nenhuma devolve leitura, leitura_texto nem wa_key.
@@ -400,9 +406,15 @@ end $$;
 -- ---------------------------------------------------------------------------------------------
 -- Os valores que valem (o que o dono respondeu, ou o padrão que o resumo mostra):
 --   quem = o respondido; sem resposta = empresa (o resumo diz "se não foi a empresa: corrigir quem");
---   pagador = o respondido; sócio sem resposta = _comprovante_socio; técnico único = ele;
---   categoria = a respondida; senão os → provável ou "Peças e materiais"; estoque → "Compras de
---   mercadorias"; insumo → "Materiais e Insumos Operacionais"; empresa → provável; pessoal → nenhuma.
+--     PESSOAL = só o respondido (sem padrão: pergunta);
+--   pagador = o respondido; sócio sem resposta = _comprovante_socio; técnico único = ele; PESSOAL pago
+--     pela empresa = o sócio (_comprovante_socio do dono);
+--   categoria = a respondida; senão os → peça ("tipo_na_os" peca, ou a peça já na OS) "Peças e
+--     materiais", despesa já na OS → a dela, despesa nova → a provável do fornecedor (sem ela, o passo
+--     categoria pergunta), não perguntado → provável ou "Peças e materiais"; estoque → "Compras de
+--     mercadorias"; insumo → "Materiais e Insumos Operacionais"; empresa → provável; PESSOAL pago pela
+--     empresa → "Gasto Pessoal Sócio - Descontar PL" (a rotina do pró-labore desconta do mês); pessoal
+--     do bolso → nenhuma.
 -- ---------------------------------------------------------------------------------------------
 create or replace function public._comprovante_efetivo(c public.comprovantes)
 returns jsonb
@@ -417,10 +429,15 @@ declare
   v_cat text := nullif(btrim(coalesce(c.categoria, '')), '');
   v_tecnicos jsonb;
   v_ativa boolean := true;
+  v_na_os jsonb;
 begin
   v_quem := case when c.destino is null or c.destino = 'pessoal' then c.quem_pagou
                  else coalesce(c.quem_pagou, 'empresa') end;
-  if v_pagador is null and v_quem = 'socio' then
+  if c.destino = 'pessoal' and v_quem = 'empresa' then
+    -- compra pessoal que a empresa pagou: gasto pessoal do sócio, descontado do pró-labore do mês
+    v_pagador := coalesce(v_pagador, public._comprovante_socio(c.dono_id));
+    v_cat := 'Gasto Pessoal Sócio - Descontar PL';
+  elsif v_pagador is null and v_quem = 'socio' then
     v_pagador := public._comprovante_socio(c.dono_id);
   elsif v_pagador is null and v_quem = 'tecnico' then
     v_tecnicos := public._comprovante_tecnicos();
@@ -428,9 +445,21 @@ begin
       v_pagador := substr(v_tecnicos->0->>'valor', 7)::uuid;
     end if;
   end if;
-  if v_cat is null then
+  if v_cat is null and c.destino = 'os' then
+    if c.tipo_na_os = 'peca' then
+      v_cat := 'Peças e materiais';
+    elsif c.tipo_na_os = 'despesa' then
+      v_cat := public._comprovante_categoria_provavel(c.supplier_id);
+    else
+      v_na_os := public._comprovante_lancamento_na_os(c);
+      v_cat := case v_na_os->>'tipo'
+                 when 'despesa' then nullif(btrim(coalesce(v_na_os->>'categoria', '')), '')
+                 when 'peca' then 'Peças e materiais'
+                 else null end;
+      v_cat := coalesce(v_cat, public._comprovante_categoria_provavel(c.supplier_id), 'Peças e materiais');
+    end if;
+  elsif v_cat is null then
     v_cat := case c.destino
-               when 'os' then coalesce(public._comprovante_categoria_provavel(c.supplier_id), 'Peças e materiais')
                when 'estoque' then 'Compras de mercadorias'
                when 'insumo' then 'Materiais e Insumos Operacionais'
                when 'empresa' then public._comprovante_categoria_provavel(c.supplier_id)
@@ -528,6 +557,76 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
+-- O lançamento que JÁ está na OS e que este CMP comprova (ajustes do dono, 11/10/2026: o
+-- comprovante só concilia e comprova; nunca lança de novo o que foi lançado na OS à mão ou pelo
+-- assistente). Na ordem:
+--   1. despesa da OS: mesma OS, valor a ±0,01, data a ±3 dias, lançada à mão ou pelo assistente
+--      (origem_codigo nulo), sem outro CMP, de fornecedor que não contradiz (sem fornecedor, o mesmo
+--      do CMP ou o mesmo CNPJ) → {"tipo":"despesa","id","valor","data","descricao","categoria"};
+--   2. peça da OS: mesma OS, quantidade × custo a ±0,01, sem outro CMP, e o comprovante é de material
+--      (categoria dita ou provável de peças/materiais/mercadorias, ou nenhuma) → {"tipo":"peca","id","produto","valor"};
+--   3. duas ou mais (somando 1 e 2) → {"ambiguo":n}; nenhuma → nulo.
+-- ---------------------------------------------------------------------------------------------
+create or replace function public._comprovante_lancamento_na_os(c public.comprovantes)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_raiz text := public.raiz_do_cnpj_da_empresa();
+  v_docs text[];
+  v_desp uuid[];
+  v_pecas uuid[];
+  v_cat text;
+  r record;
+begin
+  if c.destino is distinct from 'os' or c.destino_os_id is null or c.valor_confirmado is null or c.data_confirmada is null then
+    return null;
+  end if;
+  select coalesce(array_agg(d), '{}'::text[]) into v_docs
+    from unnest(array[c.emitente_cnpj, c.favorecido_doc]) d
+   where d ~ '^[0-9]{14}$' and (v_raiz is null or left(d, 8) <> v_raiz);
+  select coalesce(array_agg(e.id order by e.expense_date, e.id), '{}'::uuid[]) into v_desp
+    from public.service_order_expenses e
+    left join public.suppliers s on s.id = e.supplier_id
+   where e.service_order_id = c.destino_os_id
+     and abs(e.amount - c.valor_confirmado) <= 0.01
+     and abs(e.expense_date - c.data_confirmada) <= 3
+     and e.origem_codigo is null
+     and not exists (select 1 from public.comprovantes y
+                      where y.so_expense_id = e.id and y.id <> c.id and y.situacao <> 'cancelado')
+     and (e.supplier_id is null or e.supplier_id = c.supplier_id
+          or regexp_replace(coalesce(s.cnpj_cpf, ''), '\D', '', 'g') = any (v_docs));
+  -- a peça só casa com comprovante de material: o cupom de almoço ou de combustível de R$ 62 numa OS com
+  -- uma peça de custo R$ 62 não é a peça (a categoria dita, senão a provável do fornecedor; nenhuma = pode ser)
+  v_cat := lower(coalesce(nullif(btrim(coalesce(c.categoria, '')), ''), public._comprovante_categoria_provavel(c.supplier_id), ''));
+  select coalesce(array_agg(sp.id order by sp.id), '{}'::uuid[]) into v_pecas
+    from public.service_order_parts sp
+   where sp.service_order_id = c.destino_os_id
+     and (v_cat = '' or v_cat in ('peças e materiais', 'materiais e insumos operacionais', 'compras de mercadorias'))
+     and abs(sp.quantity * sp.unit_cost_snapshot - c.valor_confirmado) <= 0.01
+     and not exists (select 1 from public.comprovantes y
+                      where y.so_part_id = sp.id and y.id <> c.id and y.situacao <> 'cancelado');
+  if cardinality(v_desp) + cardinality(v_pecas) >= 2 then
+    return jsonb_build_object('ambiguo', cardinality(v_desp) + cardinality(v_pecas));
+  elsif cardinality(v_desp) = 1 then
+    select e.id, e.amount, e.expense_date, e.description, e.category into r
+      from public.service_order_expenses e where e.id = v_desp[1];
+    return jsonb_build_object('tipo', 'despesa', 'id', r.id, 'valor', round(r.amount, 2)::text, 'data', r.expense_date,
+                              'descricao', left(r.description, 60), 'categoria', r.category);
+  elsif cardinality(v_pecas) = 1 then
+    select sp.id, round(sp.quantity * sp.unit_cost_snapshot, 2) as valor,
+           (select left(pr.name, 60) from public.products pr where pr.id = sp.product_id) as produto
+      into r
+      from public.service_order_parts sp where sp.id = v_pecas[1];
+    return jsonb_build_object('tipo', 'peca', 'id', r.id, 'produto', r.produto, 'valor', r.valor::text);
+  end if;
+  return null;
+end $$;
+
+-- ---------------------------------------------------------------------------------------------
 -- O próximo passo, na ordem fixa (no máximo 3 perguntas no caso comum)
 -- ---------------------------------------------------------------------------------------------
 create or replace function public._comprovante_proximo_passo(c public.comprovantes)
@@ -551,6 +650,12 @@ begin
     return 'qual_os';
   end if;
   if c.destino = 'pessoal' then
+    -- quem pagou: da conta/cartão da empresa (gasto pessoal do sócio) ou do bolso (só o arquivo)
+    if c.quem_pagou is null then
+      return 'quem_pagou';
+    elsif c.quem_pagou = 'empresa' and c.forma_confirmada is null then
+      return 'como_pagou';
+    end if;
     return 'confirmar';
   end if;
   -- a mesma compra de outro CMP: o dono disse que é → só o arquivo (nada mais a perguntar);
@@ -576,11 +681,13 @@ begin
      and jsonb_array_length(public._comprovante_tecnicos()) >= 2 then
     return 'qual_tecnico';
   end if;
-  if c.destino = 'os' and c.cobrar_cliente is null and v_ef->>'quem' <> 'cliente' then
-    return 'cobrar';        -- sempre: caso a caso, sem padrão
+  -- OS: o lançamento que já está nela só é comprovado; sem ele, "peça ou despesa da OS?"
+  if c.destino = 'os' and c.tipo_na_os is null and v_ef->>'quem' <> 'cliente'
+     and public._comprovante_lancamento_na_os(c) is null then
+    return 'tipo_na_os';
   end if;
   if not v_nfe and v_ef->>'quem' <> 'cliente'
-     and ((c.destino = 'empresa' and v_ef->>'categoria' is null)
+     and ((c.destino in ('empresa', 'os') and v_ef->>'categoria' is null)
           or not coalesce((v_ef->>'categoria_ativa')::boolean, true)) then
     return 'categoria';
   end if;
@@ -634,7 +741,10 @@ begin
                                        'cliente', v_os->'cliente', 'status', v_os->'status',
                                        'faturada', v_os->'faturada', 'assinada', v_os->'assinada',
                                        'pasta_registrada', v_os->'pasta_registrada') end,
-    'cobrar_cliente', c.cobrar_cliente,
+    'tipo_na_os', c.tipo_na_os,
+    -- o lançamento que já está na OS (só comprova): {"tipo","id","valor","data","descricao","categoria"|"produto"}
+    -- ou {"ambiguo":n}
+    'na_os', public._comprovante_lancamento_na_os(c),
     'quem_pagou', v_ef->>'quem',
     'pagador_nome', v_ef->>'pagador_nome',
     'categoria', v_ef->>'categoria',
@@ -682,6 +792,13 @@ begin
         jsonb_build_object('n', 5, 'rotulo', 'Boleto', 'valor', 'boleto'),
         jsonb_build_object('n', 6, 'rotulo', 'Transferência', 'valor', 'transferencia'));
     when 'quem_pagou' then
+      if c.destino = 'pessoal' then
+        -- gasto pessoal: saiu da conta/cartão da empresa (gasto pessoal do sócio) ou do bolso (só o arquivo)
+        return jsonb_build_array(
+          jsonb_build_object('n', 1, 'rotulo',
+            'Sim, da conta ou do cartão da empresa (vira gasto pessoal do sócio, descontado do pró-labore)', 'valor', 'empresa'),
+          jsonb_build_object('n', 2, 'rotulo', 'Não, do meu bolso ou do meu cartão pessoal (só guardo o arquivo)', 'valor', 'socio'));
+      end if;
       -- "do Caixa" só é verdade no dinheiro (depois de "corrigir quem" no Pix/débito, é a conta da empresa)
       return jsonb_build_array(
         jsonb_build_object('n', 1, 'rotulo',
@@ -694,23 +811,16 @@ begin
                 else '[]'::jsonb end;
     when 'qual_tecnico' then
       return public._comprovante_tecnicos();
-    when 'cobrar' then
-      v_os := public._comprovante_os_info(c.destino_os_id);
-      if coalesce((v_os->>'faturada')::boolean, false) then
-        return jsonb_build_array(
-          jsonb_build_object('n', 1, 'rotulo', 'Cobrar à parte (fica a lembrança de cobrar)', 'valor', 'cobrar'),
-          jsonb_build_object('n', 2, 'rotulo', 'Custo da HBR', 'valor', 'custo'));
-      end if;
+    when 'tipo_na_os' then
+      -- o comprovante nunca é cobrado do cliente: ou comprova a peça da OS, ou é custo interno dela
       return jsonb_build_array(
-        jsonb_build_object('n', 1, 'rotulo',
-          case when coalesce((v_os->>'assinada')::boolean, false)
-               then 'Cobrar do cliente (muda o total e a OS vai pedir nova assinatura)'
-               else 'Cobrar do cliente (entra no total da OS)' end, 'valor', 'cobrar'),
-        jsonb_build_object('n', 2, 'rotulo', 'Custo da HBR (não entra no total)', 'valor', 'custo'));
+        jsonb_build_object('n', 1, 'rotulo', 'Peça ou material da OS (não lanço custo: a peça entra pela OS)', 'valor', 'peca'),
+        jsonb_build_object('n', 2, 'rotulo',
+          'Despesa da OS (combustível, alimentação, frete, ferramenta…): custo interno, não aparece para o cliente', 'valor', 'despesa'));
     when 'categoria' then
-      -- a categoria padrão do destino vem primeiro (na OS, "Peças e materiais" não estava no menu)
+      -- a categoria padrão do destino vem primeiro; a despesa da OS não começa por "Peças e materiais"
       v_padrao := case c.destino
-                    when 'os' then 'Peças e materiais'
+                    when 'os' then case when c.tipo_na_os = 'despesa' then null else 'Peças e materiais' end
                     when 'estoque' then 'Compras de mercadorias'
                     when 'insumo' then 'Materiais e Insumos Operacionais'
                     else null end;
@@ -725,17 +835,24 @@ begin
                               where f.name = x.nome and f.type = 'payable' and coalesce(f.active, false))) t;
       return v_cats;
     when 'corrigir' then
-      -- por contexto: "Cobrar" só em OS; "Como foi pago", "Quem pagou" e "Categoria" fora da NF-e
-      -- (a conta é a da nota) e do pessoal (nada no financeiro)
+      -- por contexto: "Peça ou despesa" só em OS; "Como foi pago", "Quem pagou" e "Categoria" fora da
+      -- NF-e (a conta é a da nota); no PESSOAL, "Quem pagou" e, pago pela empresa, "Como foi pago"
       v_itens := array['Valor', 'Data', 'Para quê'];
       v_valores := array['valor', 'data', 'para_que'];
       if not v_nfe and c.destino is distinct from 'pessoal' then
         v_itens := v_itens || array['Como foi pago', 'Quem pagou'];
         v_valores := v_valores || array['como_pagou', 'quem_pagou'];
+      elsif c.destino = 'pessoal' then
+        if c.quem_pagou = 'empresa' then
+          v_itens := v_itens || 'Como foi pago'::text;
+          v_valores := v_valores || 'como_pagou'::text;
+        end if;
+        v_itens := v_itens || 'Quem pagou'::text;
+        v_valores := v_valores || 'quem_pagou'::text;
       end if;
       if c.destino = 'os' then
-        v_itens := v_itens || 'Cobrar ou não'::text;
-        v_valores := v_valores || 'cobrar'::text;
+        v_itens := v_itens || 'Peça ou despesa'::text;
+        v_valores := v_valores || 'tipo_na_os'::text;
       end if;
       if not v_nfe and c.destino is distinct from 'pessoal' then
         v_itens := v_itens || 'Categoria'::text;
@@ -837,11 +954,6 @@ begin
 
   if c.valor_confianca = 'media' and c.valor_confirmado is not distinct from c.valor then
     v_avisos := v_avisos || 'valor_incerto'::text;
-  end if;
-  if coalesce((v_os->>'faturada')::boolean, false) then
-    v_avisos := v_avisos || 'os_faturada_total_nao_muda'::text;
-  elsif coalesce((v_os->>'assinada')::boolean, false) and (w.passo = 'cobrar' or c.cobrar_cliente) then
-    v_avisos := v_avisos || 'os_assinada_pede_nova_assinatura'::text;
   end if;
 
   if w.passo = 'mesma_compra' then
@@ -1352,7 +1464,7 @@ declare
   n_forma text;
   n_quem text;
   n_pagador uuid;
-  n_cobrar boolean;
+  n_tipo_na_os text;
   n_categoria text;
   n_mesma uuid;
   n_outra boolean;
@@ -1415,7 +1527,7 @@ begin
 
   n_valor := c.valor_confirmado; n_data := c.data_confirmada; n_destino := c.destino; n_os := c.destino_os_id;
   n_forma := c.forma_confirmada; n_quem := c.quem_pagou; n_pagador := c.pagador_payee_id;
-  n_cobrar := c.cobrar_cliente; n_categoria := c.categoria; n_mesma := c.mesma_compra_de; n_outra := c.outra_compra;
+  n_tipo_na_os := c.tipo_na_os; n_categoria := c.categoria; n_mesma := c.mesma_compra_de; n_outra := c.outra_compra;
   n_adiado := c.adiado_ate;
 
   -- o valor da opção escolhida (do que o dono VIU nesta pergunta)
@@ -1597,10 +1709,14 @@ begin
         v_motivo := 'resposta_nao_serve';
       end if;
       if v_motivo is null and n_os is distinct from c.destino_os_id then
-        n_cobrar := null;            -- outra OS: cobrar ou não se decide de novo
+        n_tipo_na_os := null;        -- outra OS: peça ou despesa se decide de novo
       end if;
       if v_motivo is null and n_destino is distinct from 'os' then
-        n_os := null; n_cobrar := null;
+        n_os := null; n_tipo_na_os := null;
+      end if;
+      -- entrar ou sair do PESSOAL: "quem pagou" muda de sentido (empresa/bolso ≠ empresa/sócio/técnico)
+      if v_motivo is null and coalesce(n_destino = 'pessoal', false) is distinct from coalesce(c.destino = 'pessoal', false) then
+        n_quem := null; n_pagador := null;
       end if;
 
     when 'mesma_compra' then
@@ -1624,11 +1740,14 @@ begin
       end if;
 
     when 'quem_pagou' then
-      if v_tipo in ('opcao', 'palavra') and v_val in ('empresa', 'socio', 'tecnico')
-         or (v_tipo in ('opcao', 'palavra') and v_val = 'cliente' and c.destino = 'os') then
+      if v_tipo in ('opcao', 'palavra')
+         and ((c.destino = 'pessoal' and v_val in ('empresa', 'socio'))
+              or (c.destino is distinct from 'pessoal'
+                  and (v_val in ('empresa', 'socio', 'tecnico') or (v_val = 'cliente' and c.destino = 'os')))) then
         n_quem := v_val;
         n_pagador := null;
-        if v_val = 'socio' then
+        -- no PESSOAL, "do bolso" é só o arquivo: não precisa do sócio cadastrado
+        if v_val = 'socio' and c.destino is distinct from 'pessoal' then
           n_pagador := public._comprovante_socio(c.dono_id);
           if n_pagador is null then
             v_motivo := 'sem_socio_cadastrado';
@@ -1656,11 +1775,9 @@ begin
         v_motivo := case when v_tipo = 'opcao' then 'opcao_fora' else 'resposta_nao_serve' end;
       end if;
 
-    when 'cobrar' then
-      if (v_tipo in ('opcao', 'palavra') and v_val = 'cobrar') or v_tipo = 'sim' then
-        n_cobrar := true;
-      elsif (v_tipo in ('opcao', 'palavra') and v_val = 'custo') or v_tipo = 'nao' then
-        n_cobrar := false;
+    when 'tipo_na_os' then
+      if v_tipo in ('opcao', 'palavra') and v_val in ('peca', 'despesa') then
+        n_tipo_na_os := v_val;
       else
         v_motivo := case when v_tipo = 'opcao' then 'opcao_fora' else 'resposta_nao_serve' end;
       end if;
@@ -1723,16 +1840,16 @@ begin
         return jsonb_build_object('resultado', 'proximo', 'cmp', public._comprovante_resumo(c),
           'proxima', case when coalesce((v_prox->>'perguntou')::boolean, false) then v_prox - 'perguntou' end,
           'gravacao', null, 'motivo', 'depois');
-      elsif v_val = 'cobrar' and c.destino is distinct from 'os' then
+      elsif v_val = 'tipo_na_os' and c.destino is distinct from 'os' then
         v_motivo := 'opcao_fora';
       else
         v_forcar_passo := v_val;
         case v_val
           when 'valor' then n_valor := null;
-          when 'para_que' then n_destino := null; n_os := null; n_cobrar := null;
+          when 'para_que' then n_destino := null; n_os := null; n_tipo_na_os := null;
           when 'como_pagou' then n_forma := null;
           when 'quem_pagou' then n_quem := null; n_pagador := null;
-          when 'cobrar' then n_cobrar := null;
+          when 'tipo_na_os' then n_tipo_na_os := null;
           when 'categoria' then n_categoria := null;
           else null;
         end case;
@@ -1759,13 +1876,13 @@ begin
   v_mudou := n_valor is distinct from c.valor_confirmado or n_data is distinct from c.data_confirmada
              or n_destino is distinct from c.destino or n_os is distinct from c.destino_os_id
              or n_forma is distinct from c.forma_confirmada or n_quem is distinct from c.quem_pagou
-             or n_pagador is distinct from c.pagador_payee_id or n_cobrar is distinct from c.cobrar_cliente
+             or n_pagador is distinct from c.pagador_payee_id or n_tipo_na_os is distinct from c.tipo_na_os
              or n_categoria is distinct from c.categoria or n_mesma is distinct from c.mesma_compra_de
              or n_outra is distinct from c.outra_compra;
   update public.comprovantes x
      set valor_confirmado = n_valor, data_confirmada = n_data, destino = n_destino, destino_os_id = n_os,
          forma_confirmada = n_forma, quem_pagou = n_quem, pagador_payee_id = n_pagador,
-         cobrar_cliente = n_cobrar, categoria = n_categoria, mesma_compra_de = n_mesma, outra_compra = n_outra,
+         tipo_na_os = n_tipo_na_os, categoria = n_categoria, mesma_compra_de = n_mesma, outra_compra = n_outra,
          passo = v_forcar_passo,
          resumo_versao = x.resumo_versao + case when v_mudou then 1 else 0 end
    where x.id = c.id;
@@ -2079,7 +2196,10 @@ begin
       end if;
       update public.comprovantes x
          set destino = 'os', destino_os_id = (v_os->>'id')::uuid,
-             cobrar_cliente = case when x.destino_os_id = (v_os->>'id')::uuid then x.cobrar_cliente end,
+             tipo_na_os = case when x.destino_os_id = (v_os->>'id')::uuid then x.tipo_na_os end,
+             -- saiu do PESSOAL: "quem pagou" muda de sentido
+             quem_pagou = case when x.destino = 'pessoal' then null else x.quem_pagou end,
+             pagador_payee_id = case when x.destino = 'pessoal' then null else x.pagador_payee_id end,
              mesma_compra_de = null, outra_compra = null,
              passo = null, resumo_versao = x.resumo_versao + 1
        where x.id = c.id;
@@ -2092,12 +2212,16 @@ begin
       v_valor := p->>'destino';
       if v_valor in ('estoque', 'insumo', 'empresa', 'pessoal') then
         -- "corrigir para estoque": o destino dito, sem o menu
-        update public.comprovantes x set destino = v_valor, destino_os_id = null, cobrar_cliente = null, passo = null,
+        update public.comprovantes x set destino = v_valor, destino_os_id = null, tipo_na_os = null, passo = null,
                                         mesma_compra_de = null, outra_compra = null,
+                                        quem_pagou = case when coalesce(x.destino = 'pessoal', false) <> (v_valor = 'pessoal')
+                                                          then null else x.quem_pagou end,
+                                        pagador_payee_id = case when coalesce(x.destino = 'pessoal', false) <> (v_valor = 'pessoal')
+                                                                then null else x.pagador_payee_id end,
                                         resumo_versao = x.resumo_versao + 1 where x.id = c.id;
         v_corrigido := jsonb_build_object('campo', 'para', 'valor', v_valor);
       else
-        update public.comprovantes x set destino = null, destino_os_id = null, cobrar_cliente = null, passo = 'para_que',
+        update public.comprovantes x set destino = null, destino_os_id = null, tipo_na_os = null, passo = 'para_que',
                                         mesma_compra_de = null, outra_compra = null,
                                         resumo_versao = x.resumo_versao + 1 where x.id = c.id;
       end if;
@@ -2323,7 +2447,7 @@ begin
              'fornecedor', public._comprovante_fornecedor(f)->>'nome',
              'destino', f.destino,
              'os_numero', (select so.service_order_number from public.service_orders so where so.id = f.destino_os_id),
-             'cobrar_cliente', f.cobrar_cliente,
+             'tipo_na_os', f.tipo_na_os,
              'quem_pagou', f.quem_pagou,
              'forma', coalesce(f.forma_confirmada, f.forma_pagamento),
              'pendencias', to_jsonb(f.pendencias),
@@ -2501,6 +2625,7 @@ begin
     'public._comprovante_efetivo(public.comprovantes)',
     'public._comprovante_fornecedor(public.comprovantes)',
     'public._comprovante_mesma_compra(public.comprovantes)',
+    'public._comprovante_lancamento_na_os(public.comprovantes)',
     'public._comprovante_proximo_passo(public.comprovantes)',
     'public._comprovante_resumo(public.comprovantes)',
     'public._comprovante_opcoes_do_passo(public.comprovantes, text)',
@@ -2531,6 +2656,7 @@ revoke all on function public._comprovante_tecnicos() from public, anon, authent
 revoke all on function public._comprovante_efetivo(public.comprovantes) from public, anon, authenticated;
 revoke all on function public._comprovante_fornecedor(public.comprovantes) from public, anon, authenticated;
 revoke all on function public._comprovante_mesma_compra(public.comprovantes) from public, anon, authenticated;
+revoke all on function public._comprovante_lancamento_na_os(public.comprovantes) from public, anon, authenticated;
 revoke all on function public._comprovante_proximo_passo(public.comprovantes) from public, anon, authenticated;
 revoke all on function public._comprovante_resumo(public.comprovantes) from public, anon, authenticated;
 revoke all on function public._comprovante_opcoes_do_passo(public.comprovantes, text) from public, anon, authenticated;
@@ -2606,6 +2732,7 @@ declare
     'public._comprovante_efetivo(public.comprovantes)',
     'public._comprovante_fornecedor(public.comprovantes)',
     'public._comprovante_mesma_compra(public.comprovantes)',
+    'public._comprovante_lancamento_na_os(public.comprovantes)',
     'public._comprovante_proximo_passo(public.comprovantes)',
     'public._comprovante_resumo(public.comprovantes)',
     'public._comprovante_opcoes_do_passo(public.comprovantes, text)',

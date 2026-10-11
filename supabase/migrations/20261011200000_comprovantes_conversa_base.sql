@@ -1,8 +1,8 @@
 -- Comprovantes F2 (11/10/2026): colunas da conversa, registro único de pergunta ativa e a chave
 -- comprovante_conversa.
 --
--- A F2 conversa com o dono sobre cada CMP lido (para quê, como pagou, cobrar do cliente?), mostra
--- o resumo do que VAI fazer e só grava depois do sim. Esta migration só prepara o terreno:
+-- A F2 conversa com o dono sobre cada CMP lido (para quê, como pagou, peça ou despesa da OS?),
+-- mostra o resumo do que VAI fazer e só grava depois do sim. Esta migration só prepara o terreno:
 --   * colunas novas em comprovantes (respostas, plano, efeitos gravados, cancelamento, Dropbox,
 --     índice do mês e os ganchos da F3, que a F2 nunca preenche);
 --   * whatsapp_perguntas: o registro ÚNICO de pergunta ativa por telefone (índice único parcial),
@@ -28,7 +28,9 @@
 alter table public.comprovantes
   add column if not exists destino                  text,
   add column if not exists destino_os_id            uuid references public.service_orders(id) on delete set null,
-  add column if not exists cobrar_cliente           boolean,
+  -- ajustes do dono (11/10/2026): o comprovante nunca é cobrado do cliente; na OS, a pergunta é
+  -- "peça/material ou despesa da OS" (só quando não há lançamento igual já na OS)
+  add column if not exists tipo_na_os               text,
   add column if not exists quem_pagou               text,
   add column if not exists pagador_payee_id         uuid references public.payees(id) on delete set null,
   add column if not exists categoria                text,
@@ -47,6 +49,8 @@ alter table public.comprovantes
   add column if not exists plano                    jsonb,
   add column if not exists efeitos                  jsonb not null default '[]'::jsonb,
   add column if not exists so_expense_id            uuid references public.service_order_expenses(id) on delete set null,
+  -- a peça que já estava na OS e que o comprovante só comprova (ajustes do dono, 11/10/2026)
+  add column if not exists so_part_id               uuid references public.service_order_parts(id) on delete set null,
   add column if not exists anotacao_id              uuid references public.anotacoes_do_extrato(id) on delete set null,
   add column if not exists payable_id               uuid references public.payables(id) on delete set null,
   add column if not exists fiscal_note_id           uuid references public.fiscal_notes(id) on delete set null,
@@ -75,7 +79,8 @@ alter table public.comprovantes
   add column if not exists mensagens_de_dica        uuid[] not null default '{}';
 
 comment on column public.comprovantes.destino is 'F2: para quê (os, estoque, insumo, empresa, pessoal), respondido pelo dono ou lido da legenda.';
-comment on column public.comprovantes.cobrar_cliente is 'F2: compra de OS cobrada do cliente (true) ou custo da HBR (false). Nulo = não perguntado / não se aplica. Sempre perguntado, caso a caso.';
+comment on column public.comprovantes.tipo_na_os is 'F2 (ajustes do dono, 11/10/2026): na OS, peca (só comprova: a peça entra pela OS) ou despesa (custo interno da OS, que nunca aparece para o cliente). Nulo = não perguntado (há lançamento igual já na OS, ou não é de OS). O comprovante nunca é cobrado do cliente.';
+comment on column public.comprovantes.so_part_id is 'F2 (ajustes do dono, 11/10/2026): a peça que já estava na OS e que este CMP comprova (não lança custo).';
 comment on column public.comprovantes.valor_confirmado is 'F2: o valor que o dono confirmou (nasce do lido só com selo alta/media).';
 comment on column public.comprovantes.fornecedor_receita is 'F2: nome do fornecedor pela Receita (BrasilAPI, cache em cnpj_consultas). Nunca do OCR.';
 comment on column public.comprovantes.passo is 'F2: o passo da conversa em aberto (ou forçado por corrigir). Nulo = o próximo é calculado.';
@@ -116,8 +121,9 @@ begin
          'dinheiro', 'cheque', 'credito', 'debito', 'credito_loja', 'boleto', 'deposito', 'pix', 'transferencia', 'outro')$c$),
       ('comprovantes_fornecedor_receita_chk', $c$fornecedor_receita is null or char_length(fornecedor_receita) <= 200$c$),
       ('comprovantes_passo_chk', $c$passo is null or passo in (
-         'valor', 'para_que', 'qual_os', 'mesma_compra', 'como_pagou', 'quem_pagou', 'qual_tecnico', 'cobrar', 'categoria',
+         'valor', 'para_que', 'qual_os', 'mesma_compra', 'como_pagou', 'quem_pagou', 'qual_tecnico', 'tipo_na_os', 'categoria',
          'data', 'confirmar', 'corrigir')$c$),
+      ('comprovantes_tipo_na_os_chk', $c$tipo_na_os is null or tipo_na_os in ('peca', 'despesa')$c$),
       ('comprovantes_mensagens_de_dica_chk', $c$cardinality(mensagens_de_dica) <= 20$c$),
       ('comprovantes_mesma_compra_chk', $c$mesma_compra_de is null or mesma_compra_de <> id$c$),
       ('comprovantes_resumo_versao_chk', $c$resumo_versao >= 0$c$),
@@ -135,8 +141,8 @@ begin
       -- null", e apagar de verdade uma OS com CMP gravado esbarraria nele com um erro obscuro na tela.
       -- Quem garante a OS na gravação é o plano (falta "qual_os"); o número dela fica no plano gravado.
       ('comprovantes_situacao_gravada', $c$situacao not in ('gravado', 'aguardando_xml') or gravado_em is not null$c$),
-      ('comprovantes_pendencias_chk', $c$pendencias <@ array['dar_entrada', 'incluir_na_os', 'cobrar_a_parte', 'acerto_tecnico',
-         'classificar_no_extrato', 'ajustar_recebiveis', 'dar_baixa']::text[]$c$)
+      ('comprovantes_pendencias_chk', $c$pendencias <@ array['dar_entrada', 'incluir_na_os', 'acerto_tecnico',
+         'classificar_no_extrato', 'dar_baixa']::text[]$c$)
     ) as t(nome, def)
   loop
     if not exists (select 1 from pg_constraint where conrelid = 'public.comprovantes'::regclass and conname = v_c.nome) then
@@ -154,6 +160,8 @@ create index if not exists comprovantes_na_conversa
   on public.comprovantes (phone_normalized) where situacao in ('perguntando', 'aguardando_sim');
 create unique index if not exists comprovantes_uma_despesa
   on public.comprovantes (so_expense_id) where so_expense_id is not null;
+create unique index if not exists comprovantes_uma_peca
+  on public.comprovantes (so_part_id) where so_part_id is not null;
 create index if not exists comprovantes_anotacao on public.comprovantes (anotacao_id) where anotacao_id is not null;
 create index if not exists comprovantes_lancamento on public.comprovantes (payable_id) where payable_id is not null;
 create index if not exists comprovantes_nota on public.comprovantes (fiscal_note_id) where fiscal_note_id is not null;

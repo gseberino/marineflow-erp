@@ -3,32 +3,103 @@
 -- O plano (_comprovante_plano) decide, pela matriz 2.6.1 da spec, o que o sim do dono VAI fazer;
 -- o resumo mostra exatamente esse plano e o hash dele vai na pergunta: o sim é sobre o que vai
 -- acontecer de fato. A gravação (_comprovante_gravar) reaproveita SÓ rotas que já existem:
---   * despesa da OS aberta → so_expense_add (o único caminho de custo de OS que recalcula o total);
---   * OS concluída/faturada → INSERT direto não faturável, SEM recálculo (o total não muda; prova
---     no fim da função); "cobrar do cliente" fica marcado cobrar_a_parte;
---   * NF-e com XML → a OS vai pela linha da nota (fiscal_note_items.service_order_id), nunca por
---     despesa; nota que ainda não chegou → aguardando_xml (a manutenção liga quando chegar);
+--   * OS (ajustes do dono, 11/10/2026: "só pode aparecer para o cliente o que for lançado na OS, à mão
+--     ou pelo assistente"): o comprovante NUNCA muda o total da OS nem aparece no PDF/link do cliente.
+--     O lançamento que já está na OS (despesa ou peça) só é comprovado; sem ele, peça → só a prova (a
+--     peça entra pela OS) e despesa → custo INTERNO da OS: INSERT direto não faturável, com
+--     origem_codigo = o CMP, em qualquer status da OS, sem recálculo (prova no fim da função);
+--   * NF-e com XML → a OS vai pela linha da nota (fiscal_note_items.service_order_id); nota que ainda
+--     não chegou → aguardando_xml (a manutenção liga quando chegar);
 --   * pagamento pelo banco (Pix, débito, boleto…) da empresa → anotar_transacao (a "anotação antes do
---     banco"); se a linha já virou lançamento, ANEXA e corrige categoria/OS (corrigir_lancamento);
+--     banco"); se a linha já virou lançamento, ANEXA e só preenche o que está vazio (OS, categoria):
+--     nunca troca o que já foi lançado (resposta 8 do dono);
 --   * dinheiro da empresa → lancar_no_caixa('caixa'); do bolso do sócio → lancar_no_caixa('socio')
 --     (reembolso); crédito → nada (espera a fatura); técnico → só a despesa da OS (acerto = F2b);
+--   * PESSOAL pago pela conta/cartão da EMPRESA → o efeito de uma compra da empresa, em "Gasto Pessoal
+--     Sócio - Descontar PL" com o sócio de favorecido (a rotina do pró-labore desconta do mês); do
+--     bolso ou do cartão pessoal → só o arquivo;
 --   * antes de criar, procura o que já foi lançado igual — do MESMO fornecedor — e anexa em vez de
---     duplicar (a despesa da OS, a anotação, a conta do Caixa, a conta a pagar em aberto);
+--     duplicar (a despesa ou a peça da OS, a anotação, a conta do Caixa, a conta a pagar em aberto);
 --   * o CMP que o dono disse ser a mesma compra de outro CMP só guarda o arquivo.
 -- O CNPJ da HBR nunca é documento nem fornecedor. FKs só comprovantes → outras tabelas.
 --
--- DDL: service_order_expenses.cobrar_a_parte (nasce fechada ao anon, que lê por coluna).
+-- DDL: service_order_expenses.origem_codigo (o CMP de onde nasceu o custo interno: nunca faturável,
+-- fechada ao anon), a policy do link público recriada sem as linhas que nasceram de comprovante e a trava
+-- (gatilho) que só deixa o comprovante mudar ou apagar a despesa que nasceu dele.
 -- Não escreve dados. Idempotente.
 
 -- ---------------------------------------------------------------------------------------------
--- 1. Despesa "cobrar à parte"
+-- 1. O custo interno da OS que nasceu de comprovante (ajustes do dono, 11/10/2026)
 -- ---------------------------------------------------------------------------------------------
-alter table public.service_order_expenses
-  add column if not exists cobrar_a_parte boolean not null default false;
-comment on column public.service_order_expenses.cobrar_a_parte is
-  'Despesa a cobrar do cliente fora do total (a OS já estava concluída/faturada quando o comprovante chegou). Fica não faturável; o Lucro por OS não a conta como custo da HBR.';
+alter table public.service_order_expenses add column if not exists origem_codigo text;
+comment on column public.service_order_expenses.origem_codigo is
+  'O comprovante (CMP-00124) de onde nasceu esta despesa: custo INTERNO da OS, nunca faturável, fora de qualquer documento do cliente (PDF e link público), contado no Lucro por OS. Nulo = lançada à mão ou pelo assistente (aparece para o cliente como sempre).';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conrelid = 'public.service_order_expenses'::regclass
+                    and conname = 'service_order_expenses_origem_codigo_chk') then
+    alter table public.service_order_expenses add constraint service_order_expenses_origem_codigo_chk
+      check (origem_codigo is null or origem_codigo ~ '^CMP-[0-9]{5,}$');
+  end if;
+  -- a despesa que nasceu de comprovante nunca é faturável (nunca entra no total nem na cobrança)
+  if not exists (select 1 from pg_constraint where conrelid = 'public.service_order_expenses'::regclass
+                    and conname = 'service_order_expenses_origem_nao_faturavel') then
+    alter table public.service_order_expenses add constraint service_order_expenses_origem_nao_faturavel
+      check (origem_codigo is null or billable_to_client = false);
+  end if;
+end $$;
+create index if not exists service_order_expenses_origem
+  on public.service_order_expenses (origem_codigo) where origem_codigo is not null;
 -- o anon lê service_order_expenses POR COLUNA (20261001190104): a coluna nova não entra
-revoke select (cobrar_a_parte) on table public.service_order_expenses from anon;
+revoke select (origem_codigo) on table public.service_order_expenses from anon;
+-- o link público (anon com o share token da OS) nunca recebe a linha que nasceu de comprovante; o
+-- resto da regra é a de produção (11/10/2026)
+drop policy if exists anon_so_expenses_via_share_token on public.service_order_expenses;
+create policy anon_so_expenses_via_share_token on public.service_order_expenses
+  for select to anon
+  using (exists (select 1 from public.service_orders so
+                  where so.id = service_order_expenses.service_order_id and so.share_token is not null
+                    and so.share_token::text = public.share_token_da_requisicao())
+         and service_order_expenses.origem_codigo is null);
+
+-- A despesa que nasceu de comprovante só muda pelo comprovante (revisão de 11/10/2026): a tela trava
+-- editar/excluir e o assistente recusa, mas a policy de escrita é de todos os autenticados. Origem, valor
+-- e OS não mudam (origem só nasce no INSERT; faturável o CHECK já recusa); apagar só pelo cancelamento do
+-- próprio CMP (marca comprovantes.apagando na transação) ou pela OS apagada (a cascata).
+create or replace function public._despesa_de_comprovante_travada()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if tg_op = 'DELETE' then
+    if pg_trigger_depth() <= 1
+       and coalesce(current_setting('comprovantes.apagando', true), '') is distinct from old.origem_codigo then
+      raise exception 'Esta despesa é o custo interno do % (comprovante): para tirá-la, cancele o comprovante pelo WhatsApp (*cancelar cmp % motivo*).',
+        old.origem_codigo, ltrim(substr(old.origem_codigo, 5), '0') using errcode = '42501';
+    end if;
+    return old;
+  end if;
+  if new.origem_codigo is distinct from old.origem_codigo
+     or (old.origem_codigo is not null
+         and (new.amount is distinct from old.amount or new.service_order_id is distinct from old.service_order_id)) then
+    raise exception 'Esta despesa é o custo interno do % (comprovante): valor, OS e origem só mudam pelo comprovante (*corrigir cmp % …* antes de gravar, ou *cancelar cmp % motivo*).',
+      coalesce(old.origem_codigo, new.origem_codigo), ltrim(substr(coalesce(old.origem_codigo, new.origem_codigo), 5), '0'),
+      ltrim(substr(coalesce(old.origem_codigo, new.origem_codigo), 5), '0') using errcode = '42501';
+  end if;
+  return new;
+end $$;
+drop trigger if exists trg_despesa_de_comprovante_muda on public.service_order_expenses;
+create trigger trg_despesa_de_comprovante_muda
+  before update on public.service_order_expenses
+  for each row when (old.origem_codigo is not null or new.origem_codigo is not null)
+  execute function public._despesa_de_comprovante_travada();
+drop trigger if exists trg_despesa_de_comprovante_sai on public.service_order_expenses;
+create trigger trg_despesa_de_comprovante_sai
+  before delete on public.service_order_expenses
+  for each row when (old.origem_codigo is not null)
+  execute function public._despesa_de_comprovante_travada();
 
 -- ---------------------------------------------------------------------------------------------
 -- 2. O documento que vai na anotação: o CNPJ de quem recebeu (Pix/boleto) ou o do emitente com
@@ -121,12 +192,16 @@ end $$;
 --    * anexar exige IDENTIDADE (mesmo fornecedor do cadastro, mesmo CNPJ ou o nome dele no
 --      lançamento), não só valor e data: um R$ 50,00 de outra compra não é usado; o parecido sem
 --      identidade vira aviso (parecido_sem_identidade) e, no banco, "classificar no Extrato";
---    * a despesa anexada segue a resposta "cobrar ou não" (ajustar_despesa, com o "antes" para o
---      cancelar); OS faturada não muda de total: só o "cobrar à parte" ou o aviso;
 --    * conta a pagar já aberta para o gasto (a da despesa da OS, lançada com "também criar conta",
---      ou uma em aberto do mesmo fornecedor e valor): anexa, não lança outra (pendência de baixa);
---    * cobrar do cliente em OS aberta com recebíveis já emitidos: aviso + pendência ajustar_recebiveis;
---    * NF-e com OS concluída/faturada e "cobrar": pendência cobrar_a_parte (não incluir_na_os).
+--      ou uma em aberto do mesmo fornecedor e valor): anexa, não lança outra (pendência de baixa).
+--    Ajustes do dono (11/10/2026):
+--    * na OS, o lançamento que já está nela (despesa ou peça) só é comprovado (anexar_despesa,
+--      anexar_peca; dois ou mais iguais: comprovar_na_os + aviso varios_na_os); sem ele, o dono disse:
+--      peça → comprovar_na_os + pendência incluir_na_os; despesa → despesa_os (custo interno). Nada
+--      muda o total nem a cobrança da OS, em nenhum status;
+--    * PESSOAL pago pela empresa → o bloco geral (sem OS) em "Gasto Pessoal Sócio - Descontar PL";
+--    * o lançamento que já existe só ganha o que está vazio: a categoria dele vai no efeito
+--      (categoria_atual) e, diferente da do CMP, o resumo avisa (categoria_existente_diferente).
 -- ---------------------------------------------------------------------------------------------
 create or replace function public._comprovante_plano(p_id uuid)
 returns jsonb
@@ -170,7 +245,9 @@ declare
   v_link_desc text;
   v_bancaria boolean;
   v_financeiro_feito boolean := false;
-  v_billable_final boolean;
+  v_na_os jsonb;
+  v_link_tx uuid;
+  v_desp_anexada uuid;
 begin
   select * into c from public.comprovantes x where x.id = p_id;
   if not found then
@@ -192,7 +269,13 @@ begin
      and cardinality(v_falta) = 0 and public._comprovante_mesma_compra(c) is not null then
     v_falta := v_falta || 'mesma_compra'::text;
   end if;
-  if v_mesma_id is null and c.destino is not null and c.destino <> 'pessoal' and not v_nfe and c.forma_confirmada is null then
+  -- PESSOAL (ajustes do dono, 11/10/2026): quem pagou — da conta/cartão da EMPRESA vira gasto pessoal do
+  -- sócio (e então importa como foi pago); do bolso ou do cartão pessoal, só o arquivo
+  if c.destino = 'pessoal' and c.quem_pagou is null then
+    v_falta := v_falta || 'quem_pagou'::text;
+  end if;
+  if v_mesma_id is null and c.destino is not null and (c.destino <> 'pessoal' or c.quem_pagou = 'empresa')
+     and not v_nfe and c.forma_confirmada is null then
     v_falta := v_falta || 'como_pagou'::text;
   end if;
   if cardinality(v_falta) > 0 then
@@ -206,6 +289,20 @@ begin
   v_cat := v_ef->>'categoria';
   v_os := public._comprovante_os_info(c.destino_os_id);
   v_faturada := coalesce((v_os->>'faturada')::boolean, false);
+  -- OS (ajustes do dono, 11/10/2026): o lançamento que já está na OS só é comprovado; sem ele, o dono diz
+  -- se é peça ou despesa da OS (a despesa precisa de categoria; a da NF-e fica com a de peças)
+  if c.destino = 'os' and v_mesma_id is null and v_quem is distinct from 'cliente' then
+    v_na_os := public._comprovante_lancamento_na_os(c);
+    if c.tipo_na_os is null and v_na_os is null then
+      v_falta := v_falta || 'tipo_na_os'::text;
+    elsif c.tipo_na_os = 'despesa' and v_cat is null and not v_nfe then
+      v_falta := v_falta || 'categoria'::text;
+    end if;
+    if cardinality(v_falta) > 0 then
+      return jsonb_build_object('efeitos', '[]'::jsonb, 'avisos', '[]'::jsonb, 'situacao_final', null, 'pasta', null,
+                                'falta', to_jsonb(v_falta));
+    end if;
+  end if;
   v_forma := c.forma_confirmada;
   v_bancaria := v_forma in ('pix', 'transferencia', 'debito', 'boleto', 'deposito', 'cheque');
   -- quem é o fornecedor (para anexar só o que é DESTA compra)
@@ -220,8 +317,10 @@ begin
     -- a mesma compra de outro CMP: só o arquivo (o outro já lançou)
     v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'mesma_compra', 'cmp', v_mesma_codigo, 'cmp_id', v_mesma_id));
 
-  elsif c.destino = 'pessoal' then
-    -- L: só o arquivo em COMPROVANTES/PESSOAL
+  elsif c.destino = 'pessoal' and v_quem is distinct from 'empresa' then
+    -- L: do bolso ou do cartão pessoal do sócio — só o arquivo em COMPROVANTES/PESSOAL. O PESSOAL que a
+    -- conta ou o cartão da EMPRESA pagou segue o bloco geral (sem OS), como gasto pessoal do sócio:
+    -- "Gasto Pessoal Sócio - Descontar PL", com o sócio de favorecido (a rotina do pró-labore desconta)
     v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'nada', 'motivo', 'pessoal'));
 
   elsif v_nfe then
@@ -244,31 +343,42 @@ begin
       v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'aguardar_nota', 'os_id', c.destino_os_id));
       v_situacao := 'aguardando_xml';
     end if;
-    -- O custo da NF-e na OS (revisão de 11/10/2026): "custo da HBR" vira despesa da OS NÃO faturável
-    -- com o valor da nota — é o que o Lucro por OS desconta (nenhuma view lê a OS pela linha da nota);
-    -- "cobrar" com a OS já concluída/faturada vira a despesa "cobrar à parte" (o total não muda),
-    -- como no cupom. Com a OS aberta, "cobrar" = incluir as peças na OS pela tela (pendência). Se uma
-    -- peça da nota já entrou como peça da OS, o custo dela já está no Lucro: não lança a despesa.
-    if c.destino = 'os' and (c.cobrar_cliente is false or (c.cobrar_cliente and v_faturada)) then
-      if v_nota.id is not null and exists (
-           select 1 from public.fiscal_note_items i
-             join public.service_order_parts sp
-               on sp.service_order_id = c.destino_os_id and sp.product_id = coalesce(i.matched_product_id, i.product_id)
-            where i.fiscal_note_id = v_nota.id) then
-        v_avisos := v_avisos || 'pecas_da_nota_ja_na_os'::text;
-      else
+    -- O custo da NF-e na OS (ajustes do dono, 11/10/2026): a nota nunca é cobrada do cliente por aqui.
+    -- O lançamento que já está na OS só é comprovado; "peça" = as peças entram pela tela da OS
+    -- (pendência); "despesa" = custo interno da OS com o valor da nota (fora de qualquer documento do
+    -- cliente; o Lucro por OS desconta) — exceto se uma peça da nota já entrou como peça da OS (o custo
+    -- dela já está no Lucro).
+    if c.destino = 'os' then
+      if c.tipo_na_os is null and v_na_os->>'tipo' = 'despesa' then
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
-          'tipo', 'despesa_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero',
-          'billable', false, 'cobrar_a_parte', coalesce(c.cobrar_cliente, false), 'direto', v_faturada,
-          'paid_by', 'company', 'pagador_id', null, 'categoria', coalesce(v_cat, 'Peças e materiais'), 'nota', true));
+          'tipo', 'anexar_despesa', 'so_expense_id', (v_na_os->>'id')::uuid, 'os_numero', v_os->>'numero',
+          'valor', v_na_os->>'valor', 'data', v_na_os->'data', 'descricao', v_na_os->>'descricao',
+          'categoria', v_na_os->>'categoria', 'billable',
+          (select e.billable_to_client from public.service_order_expenses e where e.id = (v_na_os->>'id')::uuid)));
+      elsif c.tipo_na_os is null and v_na_os->>'tipo' = 'peca' then
+        v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+          'tipo', 'anexar_peca', 'so_part_id', (v_na_os->>'id')::uuid, 'os_numero', v_os->>'numero',
+          'produto', v_na_os->>'produto', 'valor', v_na_os->>'valor'));
+      elsif c.tipo_na_os is null and v_na_os ? 'ambiguo' then
+        v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+          'tipo', 'comprovar_na_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero', 'motivo', 'ambiguo',
+          'n', (v_na_os->>'ambiguo')::integer));
+        v_avisos := v_avisos || 'varios_na_os'::text;
+      elsif c.tipo_na_os = 'peca' then
+        v_pend := v_pend || 'incluir_na_os'::text;
+      elsif c.tipo_na_os = 'despesa' then
+        if v_nota.id is not null and exists (
+             select 1 from public.fiscal_note_items i
+               join public.service_order_parts sp
+                 on sp.service_order_id = c.destino_os_id and sp.product_id = coalesce(i.matched_product_id, i.product_id)
+              where i.fiscal_note_id = v_nota.id) then
+          v_avisos := v_avisos || 'pecas_da_nota_ja_na_os'::text;
+        else
+          v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+            'tipo', 'despesa_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero',
+            'categoria', coalesce(v_cat, 'Peças e materiais'), 'paid_by', 'company', 'pagador_id', null, 'nota', true));
+        end if;
       end if;
-    end if;
-    if c.destino = 'os' and c.cobrar_cliente then
-      -- OS já concluída/faturada: o total não muda — fica a lembrança de cobrar à parte
-      v_pend := v_pend || case when v_faturada then 'cobrar_a_parte' else 'incluir_na_os' end;
-    end if;
-    if c.destino = 'os' and v_faturada then
-      v_avisos := v_avisos || 'os_faturada_total_nao_muda'::text;
     end if;
 
   elsif v_quem = 'cliente' then
@@ -276,85 +386,44 @@ begin
     v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'nada', 'motivo', 'cliente_pagou'));
 
   else
-    -- ── (1) a OS: A/B/C (e G com paid_by technician) ──────────────────────────────────────
+    -- ── (1) a OS (ajustes do dono, 11/10/2026): o comprovante nunca é cobrado do cliente ─────
+    --   o lançamento que já está na OS (despesa ou peça, lançado à mão ou pelo assistente) só é
+    --   comprovado: anexa, nada nele muda; dois ou mais iguais: só a prova, sem escolher (aviso). Sem
+    --   nenhum, o dono disse: peça → só a prova (a peça entra pela OS: pendência de lançá-la, não lança
+    --   custo para não contar duas vezes); despesa → custo INTERNO da OS (não faturável, origem = o CMP,
+    --   em qualquer status da OS: o total não muda; fora dos documentos do cliente; entra no Lucro por OS).
     if c.destino = 'os' then
-      -- a despesa que já está na OS com o mesmo valor e data E do mesmo fornecedor
-      select count(*) into v_parecidos
-        from public.service_order_expenses e
-       where e.service_order_id = c.destino_os_id
-         and abs(e.amount - v_valor) <= 0.01 and abs(e.expense_date - v_data) <= 1
-         and not exists (select 1 from public.comprovantes y where y.so_expense_id = e.id);
-      select array_agg(e.id order by e.id) into v_ids
-        from public.service_order_expenses e
-        left join public.suppliers s on s.id = e.supplier_id
-       where e.service_order_id = c.destino_os_id
-         and abs(e.amount - v_valor) <= 0.01 and abs(e.expense_date - v_data) <= 1
-         and not exists (select 1 from public.comprovantes y where y.so_expense_id = e.id)
-         and ((v_sup is not null and e.supplier_id = v_sup)
-              or (regexp_replace(coalesce(s.cnpj_cpf, ''), '\D', '', 'g') = any (v_docs))
-              or public._comprovante_nome_confere(v_nome, coalesce(e.description, '') || ' ' || coalesce(e.notes, '')));
-      if coalesce(cardinality(v_ids), 0) = 1 then
-        select e.id, e.amount, e.expense_date, e.description, e.billable_to_client, e.cobrar_a_parte, e.linked_payable_id
-          into v_desp from public.service_order_expenses e where e.id = v_ids[1];
+      if c.tipo_na_os is null and v_na_os->>'tipo' = 'despesa' then
+        select e.id, e.amount, e.expense_date, e.description, e.billable_to_client, e.linked_payable_id, e.category
+          into v_desp from public.service_order_expenses e where e.id = (v_na_os->>'id')::uuid;
+        v_desp_anexada := v_desp.id;
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
           'tipo', 'anexar_despesa', 'so_expense_id', v_desp.id, 'os_numero', v_os->>'numero',
           'valor', v_desp.amount::text, 'data', v_desp.expense_date, 'descricao', left(v_desp.description, 60),
-          'billable', v_desp.billable_to_client));
-        -- a despesa anexada segue o "cobrar ou não" que o dono respondeu agora
-        if c.cobrar_cliente is not null and v_quem <> 'cliente' then
-          if not v_faturada and v_desp.billable_to_client is distinct from c.cobrar_cliente then
-            v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
-              'tipo', 'ajustar_despesa', 'so_expense_id', v_desp.id, 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero',
-              'campo', 'billable_to_client', 'antes', v_desp.billable_to_client, 'depois', c.cobrar_cliente, 'recalcular', true));
-            v_billable_final := c.cobrar_cliente;
-          elsif v_faturada and not v_desp.billable_to_client and v_desp.cobrar_a_parte is distinct from c.cobrar_cliente then
-            v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
-              'tipo', 'ajustar_despesa', 'so_expense_id', v_desp.id, 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero',
-              'campo', 'cobrar_a_parte', 'antes', v_desp.cobrar_a_parte, 'depois', c.cobrar_cliente, 'recalcular', false));
-          elsif v_faturada and v_desp.billable_to_client and not c.cobrar_cliente then
-            v_avisos := v_avisos || 'cobranca_da_despesa_nao_muda'::text;
-          end if;
-        end if;
+          'categoria', v_desp.category, 'billable', v_desp.billable_to_client));
         -- a despesa já tem conta a pagar (lançada com "também criar conta"): é ela o financeiro
         if v_desp.linked_payable_id is not null then
-          select p.id, p.status, p.description into v_link_id, v_link_status, v_link_desc
+          select p.id, p.status, p.description, p.bank_transaction_id into v_link_id, v_link_status, v_link_desc, v_link_tx
             from public.payables p where p.id = v_desp.linked_payable_id and p.status <> 'cancelled';
         end if;
-      elsif coalesce(cardinality(v_ids), 0) > 1 then
-        v_avisos := v_avisos || 'duplicado_ambiguo'::text;
-        v_pend := v_pend || 'classificar_no_extrato'::text;
-      else
-        if v_parecidos > 0 then
-          v_avisos := v_avisos || 'parecido_sem_identidade'::text;
-        end if;
-        v_billable_final := not v_faturada and coalesce(c.cobrar_cliente, false);
+      elsif c.tipo_na_os is null and v_na_os->>'tipo' = 'peca' then
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
-          'tipo', 'despesa_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero',
-          'billable', not v_faturada and coalesce(c.cobrar_cliente, false),
-          'cobrar_a_parte', v_faturada and coalesce(c.cobrar_cliente, false),
-          'direto', v_faturada,
+          'tipo', 'anexar_peca', 'so_part_id', (v_na_os->>'id')::uuid, 'os_numero', v_os->>'numero',
+          'produto', v_na_os->>'produto', 'valor', v_na_os->>'valor'));
+      elsif c.tipo_na_os is null and v_na_os ? 'ambiguo' then
+        v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+          'tipo', 'comprovar_na_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero', 'motivo', 'ambiguo',
+          'n', (v_na_os->>'ambiguo')::integer));
+        v_avisos := v_avisos || 'varios_na_os'::text;
+      elsif c.tipo_na_os = 'peca' then
+        v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+          'tipo', 'comprovar_na_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero', 'motivo', 'peca'));
+        v_pend := v_pend || 'incluir_na_os'::text;
+      else
+        v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+          'tipo', 'despesa_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero', 'categoria', v_cat,
           'paid_by', case when v_quem = 'tecnico' then 'technician' else 'company' end,
-          'pagador_id', case when v_quem = 'tecnico' then v_pagador end,
-          'categoria', coalesce(v_cat, 'Peças e materiais')));
-      end if;
-      if coalesce(v_billable_final, false) and not v_faturada then
-        if coalesce((v_os->>'assinada')::boolean, false) then
-          v_avisos := v_avisos || 'os_assinada_pede_nova_assinatura'::text;
-        end if;
-        -- o total da OS sobe, mas o recebível de saldo/parcelas já emitido não (a tela faz a cascata)
-        if exists (select 1 from public.receivables r
-                    where r.service_order_id = c.destino_os_id and r.status <> 'cancelled' and not coalesce(r.is_deposit, false))
-           or exists (select 1 from public.service_orders so
-                       where so.id = c.destino_os_id and coalesce(so.payment_status, 'unpaid') <> 'unpaid') then
-          v_avisos := v_avisos || 'recebiveis_nao_mudam'::text;
-          v_pend := v_pend || 'ajustar_recebiveis'::text;
-        end if;
-      end if;
-      if v_faturada then
-        v_avisos := v_avisos || 'os_faturada_total_nao_muda'::text;
-        if coalesce(c.cobrar_cliente, false) then
-          v_pend := v_pend || 'cobrar_a_parte'::text;
-        end if;
+          'pagador_id', case when v_quem = 'tecnico' then v_pagador end));
       end if;
     end if;
 
@@ -524,6 +593,23 @@ begin
     end if;
   end if;
 
+  -- ── resposta 8 do dono (11/10/2026): o lançamento que já existe só ganha o que está vazio (OS,
+  --    categoria); a categoria que ele já tem vai no efeito e, se difere da do CMP, o resumo avisa ──
+  v_efeitos := (select coalesce(jsonb_agg(case when e->>'tipo' = 'anexar_lancamento'
+                                               then e || jsonb_build_object('categoria_atual',
+                                                      (select p.expense_category from public.payables p where p.id = (e->>'payable_id')::uuid))
+                                               else e end order by o), '[]'::jsonb)
+                  from jsonb_array_elements(v_efeitos) with ordinality as t(e, o));
+  if v_cat is not null and exists (
+       select 1 from jsonb_array_elements(v_efeitos) e
+        where nullif(btrim(coalesce(case when e->>'tipo' = 'anexar_lancamento' then e->>'categoria_atual'
+                                         when e->>'tipo' = 'ligar_linha' then e->'linha'->'lancamento'->>'categoria' end, '')), '')
+              is not null
+          and lower(case when e->>'tipo' = 'anexar_lancamento' then e->>'categoria_atual'
+                         else e->'linha'->'lancamento'->>'categoria' end) <> lower(v_cat)) then
+    v_avisos := v_avisos || 'categoria_existente_diferente'::text;
+  end if;
+
   -- ── (3) pendências, sem repetir, na ordem em que apareceram ─────────────────────────────
   for v_q in select q from unnest(v_pend) with ordinality as t(q, o) group by q order by min(o) loop
     v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'pendencia', 'qual', v_q));
@@ -538,11 +624,10 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
--- 4. Despesa da OS. OS aberta → so_expense_add (recalcula). Concluída/faturada → INSERT direto não
---    faturável, sem recálculo, com a prova de que grand_total e operational_cost_total não mudaram.
---    Revisão de 11/10/2026: depois do lock da OS, confere de novo se ela foi concluída/faturada entre
---    o resumo e o sim (MFC01 = o resumo mudou; o responder mostra o novo). O fornecedor com a raiz da
---    HBR não vai à despesa.
+-- 4. Despesa da OS = custo INTERNO (ajustes do dono, 11/10/2026): INSERT direto não faturável, com
+--    origem_codigo = o CMP, em qualquer status da OS (aberta, concluída, faturada), sem recálculo —
+--    com a prova de que grand_total e operational_cost_total não mudaram. OS cancelada ou em
+--    rascunho recusa. O fornecedor com a raiz da HBR não vai à despesa.
 -- ---------------------------------------------------------------------------------------------
 create or replace function public._comprovante_despesa_da_os(p_cmp uuid, p_efeito jsonb, p_autor uuid, p_descricao text)
 returns uuid
@@ -556,13 +641,11 @@ declare
   v_os uuid := (p_efeito->>'os_id')::uuid;
   so record;
   v_id uuid;
-  v_r jsonb;
   v_tecnico uuid;
   v_depois record;
-  v_faturada boolean;
 begin
   select * into c from public.comprovantes x where x.id = p_cmp;
-  select s.id, s.status, s.invoicing_status, s.grand_total, s.operational_cost_total into so
+  select s.id, s.status, s.grand_total, s.operational_cost_total into so
     from public.service_orders s where s.id = v_os for update;
   if not found then
     raise exception 'A OS da despesa não existe mais.' using errcode = '22023';
@@ -570,93 +653,22 @@ begin
   if so.status in ('cancelled', 'draft') then
     raise exception 'A OS % está cancelada ou em rascunho.', p_efeito->>'os_numero' using errcode = '22023';
   end if;
-  v_faturada := so.status in ('completed', 'invoiced') or coalesce(so.invoicing_status, 'not_invoiced') <> 'not_invoiced';
-  if v_faturada is distinct from coalesce((p_efeito->>'direto')::boolean, false) then
-    raise exception 'A OS % mudou (concluída/faturada) desde o resumo.', p_efeito->>'os_numero' using errcode = 'MFC01';
-  end if;
   if p_efeito->>'paid_by' = 'technician' and p_efeito->>'pagador_id' is not null then
     select p.app_user_id into v_tecnico from public.payees p where p.id = (p_efeito->>'pagador_id')::uuid;
   end if;
-
-  if not v_faturada then
-    v_r := public.so_expense_add(v_os, p_efeito->>'categoria', p_descricao, c.valor_confirmado, c.data_confirmada,
-                                 p_efeito->>'paid_by', coalesce((p_efeito->>'billable')::boolean, false),
-                                 public._comprovante_fornecedor_efetivo(c, null), c.codigo);
-    v_id := (v_r->>'id')::uuid;
-    update public.service_order_expenses e
-       set created_by = p_autor, technician_user_id = coalesce(v_tecnico, e.technician_user_id)
-     where e.id = v_id;
-  else
-    insert into public.service_order_expenses (
-      service_order_id, category, description, amount, expense_date, paid_by, billable_to_client,
-      cobrar_a_parte, supplier_id, notes, created_by, technician_user_id
-    ) values (
-      v_os, p_efeito->>'categoria', p_descricao, c.valor_confirmado, c.data_confirmada, p_efeito->>'paid_by', false,
-      coalesce((p_efeito->>'cobrar_a_parte')::boolean, false), public._comprovante_fornecedor_efetivo(c, null), c.codigo,
-      p_autor, v_tecnico
-    ) returning id into v_id;
-    select s.grand_total, s.operational_cost_total into v_depois from public.service_orders s where s.id = v_os;
-    if v_depois.grand_total is distinct from so.grand_total
-       or v_depois.operational_cost_total is distinct from so.operational_cost_total then
-      raise exception 'O total da OS % mudou ao lançar a despesa à parte: nada foi gravado.', p_efeito->>'os_numero';
-    end if;
+  insert into public.service_order_expenses (
+    service_order_id, category, description, amount, expense_date, paid_by, billable_to_client,
+    origem_codigo, supplier_id, notes, created_by, technician_user_id
+  ) values (
+    v_os, p_efeito->>'categoria', p_descricao, c.valor_confirmado, c.data_confirmada, p_efeito->>'paid_by', false,
+    c.codigo, public._comprovante_fornecedor_efetivo(c, null), c.codigo, p_autor, v_tecnico
+  ) returning id into v_id;
+  select s.grand_total, s.operational_cost_total into v_depois from public.service_orders s where s.id = v_os;
+  if v_depois.grand_total is distinct from so.grand_total
+     or v_depois.operational_cost_total is distinct from so.operational_cost_total then
+    raise exception 'O total da OS % mudou ao lançar o custo interno do comprovante: nada foi gravado.', p_efeito->>'os_numero';
   end if;
   return v_id;
-end $$;
-
--- A despesa anexada passa a seguir o "cobrar ou não" (ajustar_despesa). Faturável ↔ não faturável em
--- OS aberta recalcula (so_recalc_operational_cost, o mesmo da tela); o "cobrar à parte" de OS
--- faturada não mexe no total (prova no fim). Devolve o efeito com o "antes" para o cancelar.
-create or replace function public._comprovante_ajustar_despesa(p_efeito jsonb, p_desfazer boolean default false)
-returns jsonb
-language plpgsql
-volatile
-security definer
-set search_path = ''
-as $$
-declare
-  v_id uuid := (p_efeito->>'so_expense_id')::uuid;
-  v_campo text := p_efeito->>'campo';
-  v_de boolean := case when p_desfazer then (p_efeito->>'depois')::boolean else (p_efeito->>'antes')::boolean end;
-  v_para boolean := case when p_desfazer then (p_efeito->>'antes')::boolean else (p_efeito->>'depois')::boolean end;
-  e record;
-  so record;
-  v_depois record;
-  v_faturada boolean;
-begin
-  select x.id, x.service_order_id, x.billable_to_client, x.cobrar_a_parte into e
-    from public.service_order_expenses x where x.id = v_id for update;
-  if not found then
-    return null;          -- a despesa sumiu (tirada pela tela): nada a ajustar
-  end if;
-  select s.id, s.status, s.invoicing_status, s.grand_total, s.operational_cost_total into so
-    from public.service_orders s where s.id = e.service_order_id for update;
-  v_faturada := so.status in ('completed', 'invoiced') or coalesce(so.invoicing_status, 'not_invoiced') <> 'not_invoiced';
-  if v_campo = 'billable_to_client' then
-    if e.billable_to_client is distinct from v_de then
-      return null;        -- alguém mudou pela tela: não mexe
-    end if;
-    if v_faturada then
-      raise exception 'A OS % já foi concluída/faturada: a cobrança da despesa não muda por aqui.', p_efeito->>'os_numero'
-        using errcode = case when p_desfazer then '22023' else 'MFC01' end;
-    end if;
-    update public.service_order_expenses x set billable_to_client = v_para where x.id = v_id;
-    perform public.so_recalc_operational_cost(e.service_order_id);
-  elsif v_campo = 'cobrar_a_parte' then
-    if e.cobrar_a_parte is distinct from v_de or e.billable_to_client then
-      return null;
-    end if;
-    update public.service_order_expenses x set cobrar_a_parte = v_para where x.id = v_id;
-    select s.grand_total, s.operational_cost_total into v_depois from public.service_orders s where s.id = so.id;
-    if v_depois.grand_total is distinct from so.grand_total or v_depois.operational_cost_total is distinct from so.operational_cost_total then
-      raise exception 'O total da OS % mudou ao marcar "cobrar à parte": nada foi gravado.', p_efeito->>'os_numero';
-    end if;
-  else
-    raise exception '_comprovante_ajustar_despesa: campo desconhecido' using errcode = '22023';
-  end if;
-  return jsonb_build_object('tipo', 'ajustar_despesa', 'so_expense_id', v_id, 'os_id', e.service_order_id,
-                            'campo', v_campo, 'antes', (p_efeito->>'antes')::boolean, 'depois', (p_efeito->>'depois')::boolean,
-                            'recalcular', v_campo = 'billable_to_client');
 end $$;
 
 -- NF-e: as linhas da nota SEM OS passam a apontar para a OS. Devolve os item_index (não os ids): o
@@ -681,9 +693,11 @@ begin
   return v;
 end $$;
 
--- O lançamento anexado (já existente) recebe a categoria e a OS do CMP — só o que difere, por
--- corrigir_lancamento (a rota da tela), guardando o "antes". Mês fechado (ou recusa da rota): só
--- anexa e devolve a mensagem.
+-- O lançamento que já existe só é CONCILIADO e COMPROVADO (resposta 8 do dono, 11/10/2026): recebe a
+-- categoria e a OS do CMP só onde está VAZIO, por corrigir_lancamento (a rota da tela), guardando o
+-- "antes" (nulo) para o cancelar — que só volta o campo se ele ainda tem o que foi preenchido. Nunca
+-- troca o que já foi lançado/aprovado: categoria diferente devolve "diferente" ({"categoria":"<a que
+-- já está>"}) e quem chama avisa. Mês fechado (ou recusa da rota): só anexa e devolve a mensagem.
 create or replace function public._comprovante_corrigir_lancamento(p_payable uuid, p_cat text, p_os uuid, p_codigo text, p_autor uuid)
 returns jsonb
 language plpgsql
@@ -695,24 +709,27 @@ declare
   v_pay record;
   v_campos jsonb := '{}'::jsonb;
   v_corr jsonb := '{}'::jsonb;
+  v_dif jsonb;
   v_t text;
 begin
   select p.expense_category, p.linked_service_order_id, p.issue_date, p.status into v_pay
     from public.payables p where p.id = p_payable;
   if not found or v_pay.status = 'cancelled' then
-    return jsonb_build_object('corrigido', '{}'::jsonb, 'mensagem', null);
+    return jsonb_build_object('corrigido', '{}'::jsonb, 'mensagem', null, 'diferente', null);
   end if;
-  if p_cat is not null and v_pay.expense_category is distinct from p_cat then
+  if p_cat is not null and nullif(btrim(coalesce(v_pay.expense_category, '')), '') is null then
     v_campos := v_campos || jsonb_build_object('expense_category', p_cat);
     v_corr := v_corr || jsonb_build_object('expense_category', jsonb_build_object('antes', v_pay.expense_category, 'depois', p_cat));
+  elsif p_cat is not null and lower(v_pay.expense_category) <> lower(p_cat) then
+    v_dif := jsonb_build_object('categoria', v_pay.expense_category);
   end if;
-  if p_os is not null and v_pay.linked_service_order_id is distinct from p_os then
+  if p_os is not null and v_pay.linked_service_order_id is null then
     v_campos := v_campos || jsonb_build_object('linked_service_order_id', p_os);
     v_corr := v_corr || jsonb_build_object('linked_service_order_id',
                                            jsonb_build_object('antes', v_pay.linked_service_order_id, 'depois', p_os));
   end if;
   if v_campos = '{}'::jsonb then
-    return jsonb_build_object('corrigido', '{}'::jsonb, 'mensagem', null);
+    return jsonb_build_object('corrigido', '{}'::jsonb, 'mensagem', null, 'diferente', v_dif);
   end if;
   begin
     perform public.corrigir_lancamento('payable', p_payable, v_campos, p_codigo, p_autor);
@@ -721,9 +738,10 @@ begin
     return jsonb_build_object('corrigido', '{}'::jsonb,
       'mensagem', case when public.periodo_esta_fechado(v_pay.issue_date)
                        then 'o mês está fechado: só anexei'
-                       else left('não corrigi o lançamento: ' || v_t, 200) end);
+                       else left('não preenchi o lançamento: ' || v_t, 200) end,
+      'diferente', v_dif);
   end;
-  return jsonb_build_object('corrigido', v_corr, 'mensagem', null);
+  return jsonb_build_object('corrigido', v_corr, 'mensagem', null, 'diferente', v_dif);
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
@@ -762,6 +780,9 @@ declare
   v_doc text;
   v_mes date;
   v_anotou boolean;
+  v_so_part uuid;
+  v_fav uuid;
+  v_avisos_g text[] := '{}';
 begin
   select * into c from public.comprovantes x where x.id = p_id for update;
   if not found then
@@ -785,6 +806,8 @@ begin
   v_ef := public._comprovante_efetivo(c);
   v_cat := v_ef->>'categoria';
   v_os := case when c.destino = 'os' then c.destino_os_id end;
+  -- PESSOAL que a empresa pagou: o favorecido é o sócio (a aprovação leva pela anotação; o pró-labore desconta)
+  v_fav := case when c.destino = 'pessoal' then nullif(v_ef->>'pagador_id', '')::uuid end;
   v_desc := left(c.codigo || ' · ' || public._comprovante_tipo_no_texto(c.tipo)
                  || coalesce(' · ' || (public._comprovante_fornecedor(c)->>'nome'), ''), 200);
 
@@ -793,20 +816,26 @@ begin
     case e->>'tipo'
       -- ── OS / nota ──────────────────────────────────────────────────────────────────────
       when 'despesa_os' then
+        -- custo interno da OS (não faturável, origem = o CMP): o total da OS não muda
         v_so_expense := public._comprovante_despesa_da_os(c.id, e, p_autor, v_desc);
         v_so_criada := true;
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
           'tipo', 'despesa_os', 'so_expense_id', v_so_expense, 'os_id', e->'os_id', 'os_numero', e->'os_numero',
-          'billable', e->'billable', 'cobrar_a_parte', e->'cobrar_a_parte', 'direto', e->'direto', 'paid_by', e->'paid_by'));
+          'paid_by', e->'paid_by'));
       when 'anexar_despesa' then
+        -- a despesa que já estava na OS: só comprova (nada nela muda)
         v_so_expense := (e->>'so_expense_id')::uuid;
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'anexar_despesa', 'so_expense_id', v_so_expense,
                                                                        'os_numero', e->'os_numero'));
-      when 'ajustar_despesa' then
-        v_r := public._comprovante_ajustar_despesa(e, false);
-        if v_r is not null then
-          v_efeitos := v_efeitos || jsonb_build_array(v_r || jsonb_build_object('os_numero', e->'os_numero'));
-        end if;
+      when 'anexar_peca' then
+        -- a peça que já estava na OS: só comprova (o custo é o da peça)
+        v_so_part := (e->>'so_part_id')::uuid;
+        v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'anexar_peca', 'so_part_id', v_so_part,
+                                                                       'os_numero', e->'os_numero', 'produto', e->'produto',
+                                                                       'valor', e->'valor'));
+      when 'comprovar_na_os' then
+        -- só a prova da OS (peça a lançar pela tela, ou vários lançamentos iguais): nenhum custo
+        v_efeitos := v_efeitos || jsonb_build_array(e);
       when 'itens_da_nota' then
         v_nota := (e->>'fiscal_note_id')::uuid;
         v_idx := public._comprovante_ligar_nota(v_nota, (e->>'os_id')::uuid);
@@ -824,7 +853,7 @@ begin
         v_anotou := true;
         begin
           v_r := public.anotar_transacao('saida', c.valor_confirmado, c.data_confirmada, v_doc,
-                                         null, public._comprovante_fornecedor_efetivo(c, v_doc), null, null, v_cat, v_os, v_desc, p_autor);
+                                         null, public._comprovante_fornecedor_efetivo(c, v_doc), v_fav, null, v_cat, v_os, v_desc, p_autor);
         exception when others then
           get stacked diagnostics v_t = message_text, v_estado = returned_sqlstate;
           -- o documento contradiz o cadastro (_anotacao_documento_confere): não anota; a linha do
@@ -846,8 +875,12 @@ begin
           if v_corr->>'mensagem' is not null then
             v_msgs := v_msgs || (v_corr->>'mensagem');
           end if;
+          if jsonb_typeof(v_corr->'diferente') = 'object' then
+            v_avisos_g := v_avisos_g || 'categoria_existente_diferente'::text;
+          end if;
           v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
-            'tipo', 'anexar_lancamento', 'payable_id', v_payable, 'corrigido', v_corr->'corrigido', 'origem', 'anotar'));
+            'tipo', 'anexar_lancamento', 'payable_id', v_payable, 'corrigido', v_corr->'corrigido', 'origem', 'anotar',
+            'categoria_existente', v_corr->'diferente'->'categoria'));
         elsif coalesce((v_r->>'ok')::boolean, false) then
           -- A1 (a linha não chegou) ou A2 (estava na fila e saiu classificada; falta aprovar)
           v_anotacao := (v_r->>'id')::uuid;
@@ -871,7 +904,7 @@ begin
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'anexar_anotacao', 'anotacao_id', v_anotacao));
       when 'caixa' then
         v_r := public.lancar_no_caixa('saida', c.valor_confirmado, v_desc, c.data_confirmada, e->>'categoria',
-                                      public._comprovante_fornecedor_efetivo(c, null), null, null, v_os, 'caixa', null, p_autor);
+                                      public._comprovante_fornecedor_efetivo(c, null), v_fav, null, v_os, 'caixa', null, p_autor);
         v_payable := (v_r->>'lancamento_id')::uuid;
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'caixa', 'payable_id', v_payable));
       when 'reembolso_socio' then
@@ -887,8 +920,12 @@ begin
         if v_corr->>'mensagem' is not null then
           v_msgs := v_msgs || (v_corr->>'mensagem');
         end if;
+        if jsonb_typeof(v_corr->'diferente') = 'object' then
+          v_avisos_g := v_avisos_g || 'categoria_existente_diferente'::text;
+        end if;
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
-          'tipo', 'anexar_lancamento', 'payable_id', v_payable, 'corrigido', v_corr->'corrigido', 'origem', e->'origem'));
+          'tipo', 'anexar_lancamento', 'payable_id', v_payable, 'corrigido', v_corr->'corrigido', 'origem', e->'origem',
+          'categoria_existente', v_corr->'diferente'->'categoria'));
       when 'aguardar_fatura' then
         v_aguardando := now();
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'aguardar_fatura'));
@@ -936,6 +973,7 @@ begin
          pagador_payee_id = coalesce(x.pagador_payee_id, nullif(v_ef->>'pagador_id', '')::uuid),
          categoria = coalesce(x.categoria, v_cat),
          so_expense_id = v_so_expense,
+         so_part_id = v_so_part,
          anotacao_id = v_anotacao,
          payable_id = v_payable,
          fiscal_note_id = coalesce(v_nota, x.fiscal_note_id),
@@ -957,7 +995,8 @@ begin
   return jsonb_build_object(
     'situacao', v_plano->>'situacao_final',
     'efeitos', v_efeitos,
-    'avisos', v_plano->'avisos',
+    'avisos', coalesce(v_plano->'avisos', '[]'::jsonb) || to_jsonb(case when coalesce(v_plano->'avisos', '[]'::jsonb) ? 'categoria_existente_diferente' then '{}'::text[]
+                                 else (select coalesce(array_agg(distinct a), '{}'::text[]) from unnest(v_avisos_g) a) end),
     'mensagens', to_jsonb(v_msgs),
     'mes', v_t,
     'pasta', case v_plano->>'pasta'
@@ -1017,10 +1056,10 @@ end $$;
 --    muda. Depois desfaz cada efeito (do último para o primeiro), queima o número e manda o
 --    arquivo para _CANCELADOS. O original no bucket não é apagado.
 --    Revisão de 11/10/2026: o lock do telefone vem ANTES do da linha (a mesma ordem do responder);
---    a anotação é travada na conferência (aplicada no meio = recusa tudo); a despesa não faturável de
---    OS já concluída/faturada sai sem recálculo (o total não muda, com prova); a faturável de OS
---    aberta não sai se o total ficar abaixo do que o cliente já pagou; os itens da nota voltam pelo
---    item_index (o reprocessamento da nota troca os ids).
+--    a anotação é travada na conferência (aplicada no meio = recusa tudo); os itens da nota voltam
+--    pelo item_index (o reprocessamento da nota troca os ids). Ajustes do dono (11/10/2026): o custo
+--    interno que o CMP lançou na OS sai sem recálculo em qualquer status (o total não muda, com
+--    prova); a despesa e a peça que já estavam na OS só são soltas.
 -- ---------------------------------------------------------------------------------------------
 create or replace function public.comprovante_cancelar(p_id uuid, p_motivo text, p_autor uuid)
 returns jsonb
@@ -1078,34 +1117,6 @@ begin
   -- ── 1. bloqueios ────────────────────────────────────────────────────────────────────────
   for e in select value from jsonb_array_elements(c.efeitos) loop
     case e->>'tipo'
-      when 'despesa_os' then
-        select s.id, s.amount, s.billable_to_client into v_desp
-          from public.service_order_expenses s where s.id = (e->>'so_expense_id')::uuid;
-        if v_desp.id is not null and not coalesce((e->>'direto')::boolean, false) and v_desp.billable_to_client then
-          v_os := public._comprovante_os_info((e->>'os_id')::uuid);
-          if coalesce((v_os->>'faturada')::boolean, false) then
-            v_bloq := v_bloq || jsonb_build_array(jsonb_build_object('efeito', 'despesa_os', 'motivo', 'os_faturada',
-              'como_destravar', 'a ' || (v_os->>'numero') || ' já foi faturada: tire a despesa pela tela da OS e cancele de novo'));
-          else
-            -- o total não pode ficar abaixo do que o cliente já pagou (a tela confere o mesmo)
-            select so.grand_total into v_so from public.service_orders so where so.id = (e->>'os_id')::uuid;
-            select coalesce(sum(r.paid_amount), 0) into v_pago
-              from public.receivables r where r.service_order_id = (e->>'os_id')::uuid and r.status <> 'cancelled';
-            if coalesce(v_so.grand_total, 0) - v_desp.amount < v_pago - 0.005 then
-              v_bloq := v_bloq || jsonb_build_array(jsonb_build_object('efeito', 'despesa_os', 'motivo', 'abaixo_do_pago',
-                'como_destravar', 'sem a despesa, o total da ' || coalesce(v_os->>'numero', 'OS') || ' fica abaixo do que o cliente já pagou: ajuste pela tela da OS'));
-            end if;
-          end if;
-        end if;
-      when 'ajustar_despesa' then
-        if coalesce((e->>'recalcular')::boolean, false)
-           and exists (select 1 from public.service_order_expenses s where s.id = (e->>'so_expense_id')::uuid) then
-          v_os := public._comprovante_os_info((e->>'os_id')::uuid);
-          if coalesce((v_os->>'faturada')::boolean, false) then
-            v_bloq := v_bloq || jsonb_build_array(jsonb_build_object('efeito', 'ajustar_despesa', 'motivo', 'os_faturada',
-              'como_destravar', 'a ' || (v_os->>'numero') || ' já foi faturada: a cobrança da despesa só muda pela tela da OS'));
-          end if;
-        end if;
       when 'anotar' then
         select a.status into v_status from public.anotacoes_do_extrato a where a.id = (e->>'anotacao_id')::uuid for update;
         if v_status = 'aplicada' then
@@ -1199,34 +1210,32 @@ begin
              where s.id = (e->>'so_expense_id')::uuid and s.linked_payable_id = (e->>'ligou_lancamento')::uuid;
           end if;
           v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'anexar_despesa', 'so_expense_id', e->'so_expense_id'));
-        when 'ajustar_despesa' then
-          if public._comprovante_ajustar_despesa(e, true) is not null then
-            v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'ajustar_despesa', 'so_expense_id', e->'so_expense_id'));
-          end if;
         when 'despesa_os' then
+          -- o custo interno que o CMP lançou (não faturável) sai sem recálculo, em qualquer status da OS:
+          -- o total não muda (prova). Se alguém o tornou faturável pela tela, sai pela rota da tela.
           select s.id, s.billable_to_client into v_desp from public.service_order_expenses s where s.id = (e->>'so_expense_id')::uuid;
           if v_desp.id is not null then
-            v_os := public._comprovante_os_info((e->>'os_id')::uuid);
-            if coalesce((e->>'direto')::boolean, false)
-               or (not v_desp.billable_to_client and coalesce((v_os->>'faturada')::boolean, false)) then
-              -- não faturável (e a OS fechada): sai sem recálculo — o total não muda (prova)
+            if v_desp.billable_to_client then
+              perform public.so_expense_remove(v_desp.id);
+            else
               select so.grand_total, so.operational_cost_total into v_so
                 from public.service_orders so where so.id = (e->>'os_id')::uuid for update;
+              -- o gatilho _despesa_de_comprovante_travada só deixa o próprio CMP apagar
+              perform set_config('comprovantes.apagando', c.codigo, true);
               delete from public.service_order_expenses s where s.id = v_desp.id;
+              perform set_config('comprovantes.apagando', '', true);
               if exists (select 1 from public.service_orders so
                           where so.id = (e->>'os_id')::uuid
                             and (so.grand_total is distinct from v_so.grand_total
                                  or so.operational_cost_total is distinct from v_so.operational_cost_total)) then
-                raise exception 'o total da % mudaria ao tirar a despesa', coalesce(v_os->>'numero', 'OS');
-              end if;
-            else
-              perform public.so_expense_remove(v_desp.id);
-              if v_desp.billable_to_client and coalesce((v_os->>'assinada')::boolean, false) then
-                v_avisos := v_avisos || 'os_assinada_pede_nova_assinatura'::text;
+                raise exception 'o total da % mudaria ao tirar a despesa', coalesce(e->>'os_numero', 'OS');
               end if;
             end if;
             v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'despesa_os', 'os_id', e->'os_id'));
           end if;
+        when 'anexar_peca', 'comprovar_na_os' then
+          -- só a prova: nada a desfazer na OS (o CMP solta a peça no fim)
+          v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', e->>'tipo', 'os_numero', e->'os_numero'));
         else
           null;    -- aguardar_nota, aguardar_fatura, mesma_compra, nada, pendencia_resolvida: nada a desfazer
       end case;
@@ -1250,6 +1259,7 @@ begin
          pendencias = '{}',
          passo = null,
          so_expense_id = null,
+         so_part_id = null,
          anotacao_id = case when v_anexou_anotacao then null else x.anotacao_id end,
          payable_id = case when v_anexou_lancamento then null else x.payable_id end,
          indice_mes = v_mes,
@@ -1288,13 +1298,13 @@ revoke all on function public._comprovante_fornecedor_efetivo(public.comprovante
 revoke all on function public._comprovante_nome_confere(text, text) from public, anon, authenticated, service_role;
 revoke all on function public._comprovante_plano(uuid) from public, anon, authenticated, service_role;
 revoke all on function public._comprovante_despesa_da_os(uuid, jsonb, uuid, text) from public, anon, authenticated, service_role;
-revoke all on function public._comprovante_ajustar_despesa(jsonb, boolean) from public, anon, authenticated, service_role;
 revoke all on function public._comprovante_ligar_nota(uuid, uuid) from public, anon, authenticated, service_role;
 revoke all on function public._comprovante_corrigir_lancamento(uuid, text, uuid, text, uuid) from public, anon, authenticated, service_role;
 revoke all on function public._comprovante_gravar(uuid, uuid, text) from public, anon, authenticated, service_role;
 revoke all on function public._comprovante_aplicar_notas_chegadas() from public, anon, authenticated, service_role;
 revoke all on function public.comprovante_cancelar(uuid, text, uuid) from public, anon, authenticated;
 grant execute on function public.comprovante_cancelar(uuid, text, uuid) to service_role;
+revoke all on function public._despesa_de_comprovante_travada() from public, anon, authenticated, service_role;
 
 -- ---------------------------------------------------------------------------------------------
 -- Prova
@@ -1308,11 +1318,11 @@ declare
     'public._comprovante_nome_confere(text, text)',
     'public._comprovante_plano(uuid)',
     'public._comprovante_despesa_da_os(uuid, jsonb, uuid, text)',
-    'public._comprovante_ajustar_despesa(jsonb, boolean)',
     'public._comprovante_ligar_nota(uuid, uuid)',
     'public._comprovante_corrigir_lancamento(uuid, text, uuid, text, uuid)',
     'public._comprovante_gravar(uuid, uuid, text)',
-    'public._comprovante_aplicar_notas_chegadas()'];
+    'public._comprovante_aplicar_notas_chegadas()',
+    'public._despesa_de_comprovante_travada()'];
 begin
   if has_function_privilege('anon', 'public.comprovante_cancelar(uuid, text, uuid)', 'execute')
      or has_function_privilege('authenticated', 'public.comprovante_cancelar(uuid, text, uuid)', 'execute') then
@@ -1327,8 +1337,31 @@ begin
       raise exception 'helper da gravação dos comprovantes exposto: %', v_f;
     end if;
   end loop;
-  if has_column_privilege('anon', 'public.service_order_expenses', 'cobrar_a_parte', 'select') then
-    raise exception 'cobrar_a_parte aberta para o anon (o link público mostraria a lembrança de cobrança)';
+  -- o custo interno que nasceu de comprovante: nunca faturável, fechado ao anon, fora do link público
+  if has_column_privilege('anon', 'public.service_order_expenses', 'origem_codigo', 'select') then
+    raise exception 'origem_codigo aberta para o anon (o link público saberia que a despesa nasceu de comprovante)';
+  end if;
+  if not exists (select 1 from pg_constraint where conrelid = 'public.service_order_expenses'::regclass
+                    and conname = 'service_order_expenses_origem_nao_faturavel'
+                    and pg_get_constraintdef(oid) like '%billable_to_client%') then
+    raise exception 'falta o CHECK que impede a despesa de comprovante de ser faturável';
+  end if;
+  if (select count(*) from pg_trigger
+       where tgrelid = 'public.service_order_expenses'::regclass and not tgisinternal and tgenabled <> 'D'
+         and tgname in ('trg_despesa_de_comprovante_muda', 'trg_despesa_de_comprovante_sai')) <> 2 then
+    raise exception 'falta a trava da despesa que nasceu de comprovante (muda/sai só pelo comprovante)';
+  end if;
+  if not exists (select 1 from pg_policies
+                  where schemaname = 'public' and tablename = 'service_order_expenses'
+                    and policyname = 'anon_so_expenses_via_share_token' and cmd = 'SELECT'
+                    and roles = array['anon']::name[] and qual ilike '%origem_codigo is null%'
+                    and qual ilike '%share_token_da_requisicao%') then
+    raise exception 'a policy do link público não tira a despesa que nasceu de comprovante (ou deixou de ser TO anon)';
+  end if;
+  if exists (select 1 from pg_policies
+              where schemaname = 'public' and tablename = 'service_order_expenses'
+                and roles && array['anon', 'public']::name[] and policyname <> 'anon_so_expenses_via_share_token') then
+    raise exception 'outra policy de service_order_expenses alcança o anon';
   end if;
   -- as rotas da despesa da OS continuam como estavam (assinatura, invoker e grants)
   if to_regprocedure('public.so_expense_add(uuid, text, text, numeric, date, text, boolean, uuid, text)') is null

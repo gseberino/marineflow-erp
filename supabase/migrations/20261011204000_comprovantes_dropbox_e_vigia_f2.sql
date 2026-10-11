@@ -185,7 +185,8 @@ end $$;
 -- ---------------------------------------------------------------------------------------------
 -- 19. comprovantes_indice_do_mes: uma linha por CMP do mês (gravados pelo indice_mes; os outros
 --     pelo mês da data), inclusive cancelados e os que estão nas pastas dos barcos e em PESSOAL.
---     Valores crus (o edge formata o CSV: ';', BOM, CRLF). CPF nunca.
+--     Valores crus (o edge formata o CSV: ';', BOM, CRLF). CPF nunca. "na_os" (ajustes do dono,
+--     11/10/2026): despesa (custo interno da OS), peca (comprova a peça a lançar) ou ja_lancado.
 -- ---------------------------------------------------------------------------------------------
 create or replace function public.comprovantes_indice_do_mes(p_mes date)
 returns jsonb
@@ -215,11 +216,11 @@ begin
            'destino', x.destino,
            'os', so.service_order_number,
            'barco', nullif(btrim(v.name), ''),
-           'cobrar_cliente', case when exists (select 1 from jsonb_array_elements(x.efeitos) e
-                                                where e->>'tipo' = 'despesa_os' and (e->>'cobrar_a_parte')::boolean)
-                                  then 'a_parte'
-                                  when x.cobrar_cliente then 'sim'
-                                  when not x.cobrar_cliente then 'nao' end,
+           'na_os', case when x.destino is distinct from 'os' then null
+                         when x.efeitos @> '[{"tipo": "despesa_os"}]'::jsonb then 'despesa'
+                         when x.efeitos @> '[{"tipo": "anexar_despesa"}]'::jsonb or x.efeitos @> '[{"tipo": "anexar_peca"}]'::jsonb
+                              or x.efeitos @> '[{"tipo": "comprovar_na_os", "motivo": "ambiguo"}]'::jsonb then 'ja_lancado'
+                         else x.tipo_na_os end,
            'quem_pagou', x.quem_pagou,
            'forma', coalesce(x.forma_confirmada, x.forma_pagamento),
            'situacao', x.situacao,
