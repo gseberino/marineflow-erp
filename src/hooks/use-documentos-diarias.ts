@@ -104,7 +104,7 @@ export function useDocumentosDasDiarias() {
 
   /**
    * Todos os dias, reembolsos de comprovantes e pagamentos do período, de todos os freelancers — a
-   * planilha do contador (o reembolso vai na coluna "Reembolso", a última).
+   * planilha do contador (o reembolso vai na última coluna, "Reembolso de despesa paga pelo técnico").
    */
   async function csvDoPeriodo(favorecidoIds: string[], periodo: PedidoDePeriodo) {
     setGerando('csv');

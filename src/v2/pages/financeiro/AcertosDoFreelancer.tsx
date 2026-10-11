@@ -5,7 +5,8 @@
 // Fechar tem conferência antes, como o "sim" do WhatsApp: a função do banco simula e a tela mostra.
 //
 // Reembolsos (F2b dos comprovantes, 11/10/2026): as despesas da empresa que ele pagou, com o
-// comprovante (CMP), entram no acerto a favor dele — na lista e na conferência, só quando há.
+// comprovante (CMP), entram no acerto a favor dele — na lista e na conferência, só quando há, com o
+// rótulo de todo lugar: "Reembolso de despesas pagas pelo técnico" (resposta 9 do dono).
 import { useEffect, useState } from 'react';
 import { CheckCircle2, FileDown, Lock, RotateCcw, Send } from 'lucide-react';
 import { toast } from 'sonner';
@@ -19,7 +20,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { useI18n } from '@/i18n';
 import { hojeLocal } from '@/lib/dia';
-import { numeroDoRecibo } from '@/lib/extrato-diarias';
+import { ROTULO_REEMBOLSOS, numeroDoRecibo } from '@/lib/extrato-diarias';
 import {
   simularAcerto, useFecharAcerto, useReabrirAcerto, type Acerto, type SimulacaoDoAcerto,
 } from '@/hooks/use-diarias';
@@ -68,7 +69,7 @@ export function AcertosDoFreelancer({ favorecidoId, nome, acertos, gerandoPdf, o
               <span className="font-semibold tabular-nums">nº {numeroDoRecibo(a.numero)}</span>
               <span className="tabular-nums">{ddmm(a.de)} a {ddmm(a.ate)}</span>
               <span className="text-muted-foreground">
-                {diasTexto(a.dias)}{a.reembolsos > 0 ? ` · reembolsos ${formatCurrency(a.reembolsos)}` : ''} · vales {formatCurrency(a.pago_no_periodo)}
+                {diasTexto(a.dias)}{a.reembolsos > 0 ? ` · ${ROTULO_REEMBOLSOS.toLowerCase()} ${formatCurrency(a.reembolsos)}` : ''} · vales {formatCurrency(a.pago_no_periodo)}
               </span>
               <span className="font-medium tabular-nums">a pagar {formatCurrency(a.valor_do_acerto)}</span>
               {a.status === 'reaberto' ? (
@@ -155,7 +156,7 @@ function FecharAcertoDialog({ favorecidoId, nome, onFechar }: { favorecidoId: st
               <>
                 <dt className="min-w-0 break-words text-muted-foreground">
                   {/* sem nenhum código (origem_codigo pode ser nulo), nada de "()" vazio */}
-                  (+) Reembolsos{codigosDosReembolsos(previa.reembolsos_itens) ? ` (${codigosDosReembolsos(previa.reembolsos_itens)})` : ''}
+                  (+) {ROTULO_REEMBOLSOS}{codigosDosReembolsos(previa.reembolsos_itens) ? ` (${codigosDosReembolsos(previa.reembolsos_itens)})` : ''}
                 </dt>
                 <dd className="text-right tabular-nums">{formatCurrency(previa.reembolsos)}</dd>
               </>

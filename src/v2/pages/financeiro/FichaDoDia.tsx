@@ -15,7 +15,7 @@ import {
   acertoQueTrava, comoTirarOReembolso, diaParaEditar, useAcertos, useExcluirDiaComDesfazer, useRegistrarDiaria,
   type DiaParaEditar, type FreelancerNoResumo, type LinhaDaContaCorrente,
 } from '@/hooks/use-diarias';
-import { descricaoDoReembolso } from '@/lib/extrato-diarias';
+import { ROTULO_REEMBOLSO, descricaoDoReembolso } from '@/lib/extrato-diarias';
 
 interface Props {
   pessoa: FreelancerNoResumo;
@@ -104,7 +104,10 @@ export function FichaDoDia({ pessoa, data, linhas, onFechar, onEditar, onDetalhe
                      title={`Para tirar, cancele o ${r.conta ?? 'comprovante'} pelo WhatsApp`}>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2">
-                      <Badge variant="outline" className="text-muted-foreground">Reembolso</Badge>
+                      {/* o mesmo selo do Extrato (resposta 9 do dono); no celular, corta com reticências */}
+                      <Badge variant="outline" className="min-w-0 max-w-full text-muted-foreground" title={ROTULO_REEMBOLSO}>
+                        <span className="truncate">{ROTULO_REEMBOLSO}</span>
+                      </Badge>
                       <span className="font-medium tabular-nums">+ {formatCurrency(r.trabalhado)}</span>
                     </div>
                     {/* o código uma vez só: a descrição do banco começa com "Reembolso CMP-00124 · " */}

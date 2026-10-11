@@ -12,12 +12,22 @@
 export type JornadaNoDocumento = 'inteiro' | 'meio' | 'faltou';
 export type EstadoNoDocumento = 'deve' | 'adiantado' | 'quitado' | 'semdias';
 
+// O rótulo do reembolso, o mesmo em todo lugar (resposta 9 do dono, 11/10/2026: "fica confuso
+// dependendo de quem está lendo" — "despesas pagas por mim" no recibo, "Reembolsos" solto na tela).
+// Quem lê o recibo, o extrato, a planilha da contadora ou a tela entende a mesma coisa. A tela
+// (src/lib/extrato-diarias.ts) e o assistente (tools/diarias.ts) importam daqui.
+/** Seções e totais: "Reembolso de despesas pagas pelo técnico". */
+export const ROTULO_REEMBOLSOS = 'Reembolso de despesas pagas pelo técnico';
+/** Uma linha, o selo e a planilha: "Reembolso de despesa paga pelo técnico". */
+export const ROTULO_REEMBOLSO = 'Reembolso de despesa paga pelo técnico';
+
 /**
  * A linha da conta corrente como as funções do banco devolvem (conta_corrente_freelancer).
  *
- * `reembolso` (F2b dos comprovantes, 11/10/2026): despesa da empresa que o prestador pagou do
+ * `reembolso` (F2b dos comprovantes, 11/10/2026): despesa da empresa que o técnico pagou do
  * bolso, com o comprovante (CMP). Soma a favor dele como o dia (`trabalhado` = o valor, `pago` = 0),
- * `conta` = o código do comprovante ("CMP-00124"), `categoria` e `os` vêm do comprovante.
+ * `conta` = o código do comprovante ("CMP-00124"), `categoria` e `os` vêm do comprovante. Coberto
+ * por um pagamento dividido (diárias + reembolso), `observacao` = "pago em DD/MM".
  */
 export interface LinhaDoExtrato {
   data: string;
@@ -119,6 +129,11 @@ const ESTADO_NO_PAPEL: Record<EstadoNoDocumento, string> = {
   semdias: 'sem dias lançados',
 };
 
+// O que é o extra e o que é o reembolso (resposta 6 do dono, 11/10/2026: o extra de R$ 20 é o
+// almoço, pago quando o freelancer traz o próprio). A nota do reembolso só sai quando há reembolso.
+const NOTA_DO_EXTRA = 'Extra = o almoço (quando ele traz o próprio) e outros acréscimos combinados do dia.';
+const NOTA_DO_REEMBOLSO = `${ROTULO_REEMBOLSOS} = despesa da empresa que ele pagou, com o comprovante (CMP) enviado pelo WhatsApp; a mesma despesa não entra também como extra.`;
+
 /** As linhas de reembolso (comprovante) de uma conta. */
 const reembolsosDe = (linhas: LinhaDoExtrato[]) => linhas.filter((l) => l.tipo === 'reembolso');
 
@@ -183,7 +198,7 @@ export function montarExtratoHtml(p: {
       </tr>`;
   const secaoDosReembolsos = reembolsos.length ? `
 
-  <h2>Reembolsos de despesas (comprovantes)</h2>
+  <h2>${ROTULO_REEMBOLSOS} (comprovantes)</h2>
   <table>
     <thead><tr><th>Data</th><th>Comprovante</th><th>Descrição</th><th>OS</th><th class="n">Valor</th></tr></thead>
     <tbody>${reembolsos.map(linhaDoReembolso).join('')}</tbody>
@@ -240,7 +255,7 @@ export function montarExtratoHtml(p: {
   <table>
     <thead><tr>
       <th class="n">${conta.de ? 'Saldo antes do período' : 'Saldo inicial'}</th><th class="n">Diárias</th>
-      <th class="n">Trabalhado</th>${comReembolso ? '<th class="n">Reembolsos</th>' : ''}<th class="n">Pago</th><th class="n">Saldo no fim do período</th>
+      <th class="n">Trabalhado</th>${comReembolso ? `<th class="n" style="white-space:normal">${ROTULO_REEMBOLSOS}</th>` : ''}<th class="n">Pago</th><th class="n">Saldo no fim do período</th>
     </tr></thead>
     <tbody><tr>
       <td class="n">${brl(conta.saldo_anterior)}</td><td class="n">${numero(conta.dias)}</td>
@@ -266,7 +281,7 @@ export function montarExtratoHtml(p: {
     ${pagamentos.length ? `<tfoot><tr><td colspan="3">${pagamentos.length} pagamento(s)</td><td class="n">${brl(conta.pago)}</td></tr></tfoot>` : ''}
   </table>
 
-  <p class="nota">Saldo positivo = valor a pagar ao prestador; negativo = pago adiantado. Extras são despesas pagas pelo prestador e reembolsadas.${comReembolso ? ' Reembolso (CMP) = despesa com o comprovante enviado pelo WhatsApp; a mesma despesa não entra também como extra do dia.' : ''}${aguardando ? ' * Pagamento lançado à mão, ainda não confirmado pelo extrato do banco.' : ''}</p>
+  <p class="nota">Saldo positivo = valor a pagar ao prestador; negativo = pago adiantado. ${NOTA_DO_EXTRA}${comReembolso ? ` ${NOTA_DO_REEMBOLSO}` : ''}${aguardando ? ' * Pagamento lançado à mão, ainda não confirmado pelo extrato do banco.' : ''}</p>
 
   <div class="assinaturas">
     <div>${esc(empresa.nome)}</div>
@@ -379,22 +394,24 @@ export function montarReciboHtml(p: {
       <tr><td>${dataBR(l.data)}</td><td>${esc(l.descricao ?? '')}${l.aguardando ? ' *' : ''}</td><td class="n">${brl(l.pago)}</td></tr>`;
   const linhaDoReembolso = (l: LinhaDoExtrato) => `
       <tr><td>${dataBR(l.data)}</td><td>${esc(l.conta ?? '')}</td><td>${esc(descricaoDoReembolso(l))}</td><td class="n">${brl(l.trabalhado)}</td></tr>`;
-  // O recibo é a declaração do prestador ("Recebi…"): as despesas foram pagas por ele, "por mim".
+  // O recibo é a declaração do prestador ("Recebi…"), mas quem mais lê é a contadora: o reembolso
+  // vai com o rótulo de todo lugar ("…pagas pelo técnico"), nunca "por mim" (resposta 9 do dono).
   const quaisComprovantes = codigos ? ` (${esc(codigos)})` : '';
+  const rotuloComCodigos = `${ROTULO_REEMBOLSOS.toLowerCase()}${quaisComprovantes}`;
   const reembolsoNaQuitacao = totalReembolsos > 0
-    ? ` e ao reembolso de ${brl(totalReembolsos)} em despesas pagas por mim${quaisComprovantes}` : '';
+    ? ` e ao ${rotuloComCodigos}: ${brl(totalReembolsos)}` : '';
   // sem valor a receber, o reembolso JÁ foi compensado neste acerto (nada "a reembolsar")
   const reembolsoNaDeclaracao = totalReembolsos > 0
-    ? `, paguei ${brl(totalReembolsos)} em despesas da empresa${quaisComprovantes}, compensadas neste acerto,` : '';
+    ? `, com o ${rotuloComCodigos}: ${brl(totalReembolsos)}, compensado neste acerto,` : '';
   const secaoDosReembolsos = reembolsos.length ? `
 
-  <h2>Reembolsos de despesas pagas pelo prestador</h2>
+  <h2>${ROTULO_REEMBOLSOS}</h2>
   <table>
     <thead><tr><th>Data</th><th>Comprovante</th><th>Descrição</th><th class="n">Valor</th></tr></thead>
     <tbody>${reembolsos.map(linhaDoReembolso).join('')}</tbody>
   </table>` : '';
   const linhaDoAcertoReembolsos = totalReembolsos > 0
-    ? `\n    <tr><td>(+) Reembolsos de despesas${reembolsos.length ? ` (${reembolsos.length} comprovante(s))` : ''}</td><td class="n">${brl(totalReembolsos)}</td></tr>` : '';
+    ? `\n    <tr><td>(+) ${ROTULO_REEMBOLSOS}${quaisComprovantes}</td><td class="n">${brl(totalReembolsos)}</td></tr>` : '';
 
   return `<!doctype html>
 <html lang="pt-BR">
@@ -494,8 +511,8 @@ const ORDEM_NO_DIA: Record<LinhaDoExtrato['tipo'], number> = { dia: 0, reembolso
 
 /**
  * Todos os dias, reembolsos e pagamentos das contas, em ordem de data (no mesmo dia: dia, reembolso,
- * pagamento). O reembolso leva o código do comprovante em "Conta de origem" e o valor na coluna
- * "Reembolso".
+ * pagamento). O reembolso leva o código do comprovante em "Conta de origem" e o valor na última
+ * coluna ("Reembolso de despesa paga pelo técnico").
  */
 export function linhasDoCsv(contas: Array<{ conta: ContaDoExtrato; documento: string | null }>): LinhaDoCsv[] {
   const linhas: Array<LinhaDoCsv & { _ordem: string }> = [];
@@ -506,7 +523,7 @@ export function linhasDoCsv(contas: Array<{ conta: ContaDoExtrato; documento: st
       linhas.push({
         _ordem: `${l.data}|${ORDEM_NO_DIA[l.tipo] ?? 2}|${conta.favorecido.nome}`,
         data: dataBR(l.data),
-        tipo: dia ? 'Diária' : reembolso ? 'Reembolso (comprovante)' : l.aguardando ? 'Pagamento (aguardando o banco)' : 'Pagamento',
+        tipo: dia ? 'Diária' : reembolso ? ROTULO_REEMBOLSO : l.aguardando ? 'Pagamento (aguardando o banco)' : 'Pagamento',
         freelancer: conta.favorecido.nome,
         cpf: documentoFormatado(documento),
         jornada: dia ? tipoDoDia(l.jornada) : '',
@@ -543,6 +560,7 @@ export const COLUNAS_DO_CSV: Array<{ header: string; key: keyof LinhaDoCsv }> = 
   { header: 'Categoria', key: 'categoria' },
   { header: 'OS', key: 'os' },
   { header: 'Observação / identificação', key: 'observacao' },
-  // F2b (11/10/2026): coluna nova À DIREITA, para a planilha da contadora não mudar de lugar.
-  { header: 'Reembolso', key: 'reembolso' },
+  // F2b (11/10/2026): coluna nova À DIREITA, para a planilha da contadora não mudar de lugar; com o
+  // rótulo de todo lugar (resposta 9 do dono).
+  { header: ROTULO_REEMBOLSO, key: 'reembolso' },
 ];

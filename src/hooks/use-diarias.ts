@@ -5,6 +5,8 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import type { EstadoDoSaldo, Jornada } from '@/lib/diarias';
+import { ROTULO_REEMBOLSOS } from '@/lib/extrato-diarias';
+import { mensagemDoErro, recarregarFinanceiro } from '@/hooks/use-lancamentos';
 
 export interface FreelancerNoResumo {
   id: string;
@@ -488,6 +490,205 @@ export function useReabrirAcerto() {
       return data as unknown as { message: string };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['diarias'] }),
+  });
+}
+
+// ── Pagamento dividido entre diárias e reembolso (resposta 4 do dono, 11/10/2026; 20261011301000) ──
+// Ao pagar o técnico, o banco PROPÕE a divisão pelos reembolsos em aberto dele (os do acerto primeiro,
+// por data, somando enquanto cabe no valor) e o dono confirma ou desmarca ("eu sempre vou sinalizar
+// o que é o que"). A parte do reembolso vai para a categoria de cada comprovante (sem categoria,
+// "Outras despesas"); o resto fica em "Diárias de freelancers" — o resultado não lê o reembolso como
+// mão de obra. O saldo com ele não muda: o pagamento inteiro continua descontando. As mesmas funções
+// do assistente (registrar_pagamento_freelancer e dividir_pagamento_freelancer).
+
+export const CATEGORIA_DIARIAS = 'Diárias de freelancers';
+/** Para onde vai o reembolso de um comprovante sem categoria ("Reembolso de despesas de campo" não existe). */
+export const CATEGORIA_DO_REEMBOLSO_SEM_CATEGORIA = 'Outras despesas';
+
+export type FormaDoPagamento = 'pix' | 'dinheiro' | 'socio';
+
+/** Um reembolso de comprovante que nenhum pagamento quitou ainda. */
+export interface ReembolsoEmAberto {
+  id: string;
+  /** "CMP-00124". */
+  codigo: string | null;
+  data: string;
+  valor: number;
+  categoria: string | null;
+  descricao: string | null;
+  /** O número do acerto em que ele entrou (fechado), ou nada. */
+  acerto: number | null;
+}
+
+export interface ParteDaDivisao { categoria: string; valor: number }
+
+export interface PropostaDeDivisao {
+  favorecido: { id: string; nome: string };
+  valor: number;
+  em_aberto: ReembolsoEmAberto[];
+  /** Os ids que o banco marcaria (cabem no valor). */
+  propostos: string[];
+  reembolsos: number;
+  diarias: number;
+  partes: ParteDaDivisao[];
+}
+
+export interface DivisaoDoPagamento {
+  id: string | null;
+  /** pendente = Pix anotado (divide quando a linha do banco for aprovada); aplicada = já dividido. */
+  status: 'pendente' | 'aplicada' | 'nenhuma' | 'desfeita';
+  diarias: number;
+  reembolsos: number;
+  partes: ParteDaDivisao[];
+}
+
+export interface ResultadoDoPagamento {
+  ok: boolean;
+  forma?: FormaDoPagamento;
+  anotacao_id?: string | null;
+  payable_id?: string | null;
+  divisao?: DivisaoDoPagamento | null;
+  message: string;
+  /** Pix anotado: quantas anotações iguais (mesma pessoa, valor e dias) esta substituiu (anotar_transacao). */
+  substituidas?: number;
+}
+
+const partesNumericas = (p: ParteDaDivisao[] | null | undefined): ParteDaDivisao[] =>
+  (p ?? []).map((x) => ({ categoria: x.categoria, valor: num(x.valor) }));
+
+/** O que o banco proporia para um pagamento deste valor — nada é gravado. */
+export async function lerPropostaDeDivisao(favorecidoId: string, valor: number): Promise<PropostaDeDivisao> {
+  const { data, error } = await supabase.rpc('proposta_de_divisao_do_pagamento' as never, {
+    p_favorecido_id: favorecidoId, p_valor: valor,
+  } as never);
+  if (error) throw error;
+  const p = data as unknown as PropostaDeDivisao;
+  return {
+    favorecido: p.favorecido,
+    valor: num(p.valor),
+    em_aberto: (p.em_aberto ?? []).map((r) => ({
+      id: r.id, codigo: r.codigo ?? null, data: r.data, valor: num(r.valor), categoria: r.categoria ?? null,
+      descricao: r.descricao ?? null, acerto: r.acerto == null ? null : Number(r.acerto),
+    })),
+    propostos: p.propostos ?? [],
+    reembolsos: num(p.reembolsos),
+    diarias: num(p.diarias),
+    partes: partesNumericas(p.partes),
+  };
+}
+
+/** A proposta para um valor: só quando há freelancer e valor. */
+export function usePropostaDeDivisao(favorecidoId: string | null | undefined, valor: number) {
+  return useQuery({
+    queryKey: ['diarias', 'proposta-de-divisao', favorecidoId ?? '', valor],
+    enabled: !!favorecidoId && valor > 0,
+    queryFn: () => lerPropostaDeDivisao(favorecidoId!, valor),
+    staleTime: 30_000,
+  });
+}
+
+const centavos = (v: number) => Math.round(v * 100) / 100;
+
+/**
+ * A divisão com os reembolsos MARCADOS na tela (o banco refaz a conta e recusa o que não cabe): a parte
+ * das diárias primeiro, depois uma por categoria, na ordem dos comprovantes.
+ */
+export function divisaoEscolhida(emAberto: ReembolsoEmAberto[], ids: readonly string[], valor: number) {
+  const marcados = emAberto.filter((r) => ids.includes(r.id));
+  const reembolsos = centavos(marcados.reduce((s, r) => s + r.valor, 0));
+  const diarias = centavos(valor - reembolsos);
+  const porCategoria = new Map<string, number>();
+  for (const r of marcados) {
+    const c = r.categoria?.trim() || CATEGORIA_DO_REEMBOLSO_SEM_CATEGORIA;
+    porCategoria.set(c, centavos((porCategoria.get(c) ?? 0) + r.valor));
+  }
+  const partes: ParteDaDivisao[] = [
+    ...(diarias > 0 ? [{ categoria: CATEGORIA_DIARIAS, valor: diarias }] : []),
+    ...[...porCategoria].map(([categoria, v]) => ({ categoria, valor: v })),
+  ];
+  return { marcados, reembolsos, diarias, partes, passou: reembolsos > valor + 0.005 };
+}
+
+/** O sufixo que o banco põe no pagamento já dividido ("… (inclui reembolso de despesas pagas pelo técnico: R$ 92,00)"). */
+const SUFIXO_DA_DIVISAO = `(inclui ${ROTULO_REEMBOLSOS.toLowerCase()}`;
+
+/** O pagamento da conta corrente já foi dividido entre diárias e reembolso? */
+export const pagamentoDividido = (l: Pick<LinhaDaContaCorrente, 'tipo' | 'aguardando' | 'descricao'>) =>
+  l.tipo === 'pagamento' && !l.aguardando && (l.descricao ?? '').toLowerCase().includes(SUFIXO_DA_DIVISAO);
+
+/**
+ * O pagamento que se pode dividir pela tela: o lançamento das Diárias numa linha do BANCO (Pix
+ * aprovado, venha da tela, do assistente ou da regra por CPF). Anotado ainda não tem lançamento (a
+ * divisão dele nasce no "Registrar pagamento"); Caixa e bolso de sócio dividem na hora de registrar.
+ * O banco confere de novo (mês fechado, outro favorecido) e recusa com o motivo.
+ */
+export function pagamentoQueSeDivide(l: LinhaDaContaCorrente): boolean {
+  if (l.tipo !== 'pagamento' || l.aguardando || !l.conta) return false;
+  if (l.conta === 'Caixa (dinheiro)' || l.conta === 'Sem conta ligada' || l.conta.startsWith('Bolso de ')) return false;
+  return l.categoria === CATEGORIA_DIARIAS || pagamentoDividido(l);
+}
+
+export interface PedidoDePagamento {
+  favorecidoId: string;
+  valor: number;
+  data: string;
+  forma: FormaDoPagamento;
+  socioId?: string | null;
+  /** Os reembolsos que este pagamento quita ([] = tudo em Diárias). */
+  reembolsos: string[];
+  descricao: string;
+}
+
+/**
+ * O aviso depois de registrar/dividir. A mesma regra do useAcaoDoCaixa: o Pix que TROCOU uma anotação igual
+ * (mesma pessoa, valor e dias) não pode passar como sucesso de 4 segundos — se eram dois pagamentos, um
+ * sumiu (caso do dono de 06/10/2026: dois "R$ 100 ao Roberto").
+ */
+export function avisarDoResultado(r: ResultadoDoPagamento | null | undefined) {
+  if (r?.ok === false) toast.warning(r.message);
+  else if ((r?.substituidas ?? 0) > 0) toast.warning(r?.message ?? 'Feito', { duration: 15_000 });
+  else toast.success(r?.message ?? 'Feito');
+}
+
+/** Registrar o pagamento ao freelancer já com a divisão (Pix anotado, Caixa ou bolso de sócio). */
+export function useRegistrarPagamentoDoFreelancer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: PedidoDePagamento): Promise<ResultadoDoPagamento> => {
+      const { data, error } = await supabase.rpc('registrar_pagamento_do_freelancer' as never, {
+        p_favorecido_id: p.favorecidoId, p_valor: p.valor, p_data: p.data, p_forma: p.forma,
+        p_socio_id: p.forma === 'socio' ? p.socioId ?? null : null, p_reembolsos: p.reembolsos, p_descricao: p.descricao,
+      } as never);
+      if (error) throw error;
+      return data as unknown as ResultadoDoPagamento;
+    },
+    onSuccess: (r) => {
+      recarregarFinanceiro(qc);
+      qc.invalidateQueries({ queryKey: ['anotacoes-do-extrato'] });
+      qc.invalidateQueries({ queryKey: ['diarias'] });
+      avisarDoResultado(r);
+    },
+    onError: (e) => toast.error(mensagemDoErro(e)),
+  });
+}
+
+/** Dividir (ou, com [] , juntar de volta) o pagamento das Diárias que já veio do banco. */
+export function useDividirPagamentoDoFreelancer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ payableId, reembolsos }: { payableId: string; reembolsos: string[] }): Promise<ResultadoDoPagamento> => {
+      const { data, error } = await supabase.rpc('dividir_pagamento_do_freelancer' as never, {
+        p_payable_id: payableId, p_reembolsos: reembolsos,
+      } as never);
+      if (error) throw error;
+      return data as unknown as ResultadoDoPagamento;
+    },
+    onSuccess: (r) => {
+      recarregarFinanceiro(qc);
+      qc.invalidateQueries({ queryKey: ['diarias'] });
+      avisarDoResultado(r);
+    },
+    onError: (e) => toast.error(mensagemDoErro(e)),
   });
 }
 

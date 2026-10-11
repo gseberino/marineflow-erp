@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  COLUNAS_DO_CSV, descricaoDoReembolso, documentoFormatado, linhasDoCsv, montarExtratoHtml, montarReciboHtml, nomeDoArquivo, textoDoPeriodo,
-  valorPorExtenso,
+  COLUNAS_DO_CSV, ROTULO_REEMBOLSO, ROTULO_REEMBOLSOS, descricaoDoReembolso, documentoFormatado, linhasDoCsv, montarExtratoHtml,
+  montarReciboHtml, nomeDoArquivo, textoDoPeriodo, valorPorExtenso,
   type ContaDoExtrato, type LinhaDoExtrato,
 } from './extrato-diarias';
 
@@ -53,6 +53,11 @@ describe('extrato de diárias em PDF', () => {
 
   it('não registra horário: é prestação por dia, não ponto', () => {
     expect(html).not.toMatch(/entrada|saída|expediente|ponto/i);
+  });
+
+  it('a nota diz o que é o extra: o almoço (resposta 6 do dono), não "despesa reembolsada"', () => {
+    expect(html).toContain('Extra = o almoço (quando ele traz o próprio) e outros acréscimos combinados do dia.');
+    expect(html).not.toContain('Extras são despesas pagas pelo prestador e reembolsadas');
   });
 
   it('texto do cadastro não vira código na página', () => {
@@ -171,17 +176,26 @@ const doc = {
   freelancer: { nome: 'Roberto Daniel', documento: null, pix: null },
 };
 
+describe('o rótulo do reembolso (resposta 9 do dono, 11/10/2026)', () => {
+  it('um texto que qualquer leitor entende: pagas pelo técnico, nunca "por mim"', () => {
+    expect(ROTULO_REEMBOLSOS).toBe('Reembolso de despesas pagas pelo técnico');
+    expect(ROTULO_REEMBOLSO).toBe('Reembolso de despesa paga pelo técnico');
+  });
+});
+
 describe('reembolso de comprovante no extrato em PDF', () => {
   const html = montarExtratoHtml({ ...doc, conta: contaComReembolso(), geradoEm: new Date(Date.UTC(2026, 8, 29, 17, 5)) });
 
-  it('o total ganha a coluna Reembolsos entre Trabalhado e Pago', () => {
-    expect(html).toContain('<th class="n">Trabalhado</th><th class="n">Reembolsos</th><th class="n">Pago</th>');
+  it('o total ganha a coluna do reembolso entre Trabalhado e Pago, com o rótulo inteiro', () => {
+    expect(html).toContain(
+      '<th class="n">Trabalhado</th><th class="n" style="white-space:normal">Reembolso de despesas pagas pelo técnico</th><th class="n">Pago</th>');
     expect(html).toMatch(/<td class="n">R\$ 260,00<\/td><td class="n">R\$ 62,00<\/td><td class="n">R\$ 100,00<\/td>/);
     expect(html).toMatch(/R\$ 292,00 \(a pagar ao prestador\)/);
   });
 
   it('seção própria com o código do comprovante, a descrição, a categoria, a OS e o valor; fora dos pagamentos', () => {
-    const secao = html.slice(html.indexOf('Reembolsos de despesas (comprovantes)'), html.indexOf('Pagamentos recebidos'));
+    expect(html).toContain('<h2>Reembolso de despesas pagas pelo técnico (comprovantes)</h2>');
+    const secao = html.slice(html.indexOf('Reembolso de despesas pagas pelo técnico (comprovantes)'), html.indexOf('Pagamentos recebidos'));
     expect(secao).toContain('<th>Data</th><th>Comprovante</th><th>Descrição</th><th>OS</th><th class="n">Valor</th>');
     expect(secao).toContain('<td>CMP-00124</td>');
     // a descrição sem o "Reembolso CMP-00124 · " que o banco grava: o código já está na coluna ao lado
@@ -191,7 +205,9 @@ describe('reembolso de comprovante no extrato em PDF', () => {
     expect(secao).toContain('1 reembolso(s)');
     expect(html.slice(html.indexOf('Pagamentos recebidos'))).not.toContain('CMP-00124');
     // reembolso e extra do dia não são a mesma coisa: a nota diz que a despesa não entra nos dois
-    expect(html).toContain('Reembolso (CMP) = despesa com o comprovante enviado pelo WhatsApp; a mesma despesa não entra também como extra do dia.');
+    expect(html).toContain('Extra = o almoço (quando ele traz o próprio) e outros acréscimos combinados do dia. '
+      + 'Reembolso de despesas pagas pelo técnico = despesa da empresa que ele pagou, com o comprovante (CMP) enviado pelo WhatsApp; '
+      + 'a mesma despesa não entra também como extra.');
   });
 
   it('descricaoDoReembolso: tira o prefixo do banco (com e sem fornecedor); o resto fica', () => {
@@ -227,16 +243,19 @@ describe('reembolso de comprovante no recibo do acerto', () => {
     valor_do_acerto: 252, reembolsos: 92 };
   const recibo = montarReciboHtml({ ...doc, acerto, linhas, geradoEm: new Date(Date.UTC(2026, 9, 1, 15, 0)) });
 
-  it('a conta do acerto soma os reembolsos antes dos vales, com quantos comprovantes', () => {
+  it('a conta do acerto soma o reembolso antes dos vales, com os códigos dos comprovantes', () => {
     const contaDoAcerto = recibo.slice(recibo.indexOf('<h2>Acerto</h2>'));
     expect(contaDoAcerto).toMatch(
-      /Trabalhado no período[\s\S]*\(\+\) Reembolsos de despesas \(2 comprovante\(s\)\)<\/td><td class="n">R\$ 92,00[\s\S]*\(−\) Vales/);
+      /Trabalhado no período[\s\S]*\(\+\) Reembolso de despesas pagas pelo técnico \(CMP-00124, CMP-00130\)<\/td><td class="n">R\$ 92,00[\s\S]*\(−\) Vales/);
   });
 
-  it('a quitação cita o reembolso e os códigos; a seção lista cada comprovante', () => {
-    expect(recibo).toContain('e ao reembolso de R$ 92,00 em despesas pagas por mim (CMP-00124, CMP-00130), já descontados');
+  it('a quitação cita o reembolso com o rótulo inequívoco e os códigos; a seção lista cada comprovante', () => {
+    expect(recibo).toContain('e ao reembolso de despesas pagas pelo técnico (CMP-00124, CMP-00130): R$ 92,00, já descontados');
+    // o texto que confundia (resposta 9 do dono) não volta
+    expect(recibo).not.toMatch(/por mim|pelo prestador/);
     expect(recibo).toContain('(duzentos e cinquenta e dois reais)');
-    const secao = recibo.slice(recibo.indexOf('Reembolsos de despesas pagas pelo prestador'), recibo.indexOf('<h2>Acerto</h2>'));
+    const secao = recibo.slice(recibo.indexOf('<h2>Reembolso de despesas pagas pelo técnico</h2>'), recibo.indexOf('<h2>Acerto</h2>'));
+    expect(secao).not.toBe('');
     expect(secao).toContain('CMP-00124');
     expect(secao).toContain('<td>CMP-00130</td><td>Posto</td>');
     expect(secao).not.toContain('Reembolso CMP-00130');
@@ -245,12 +264,22 @@ describe('reembolso de comprovante no recibo do acerto', () => {
 
   it('o total é o da foto do acerto, não a soma das linhas de hoje', () => {
     const h = montarReciboHtml({ ...doc, acerto: { ...acerto, reembolsos: 62 }, linhas, geradoEm: new Date() });
-    expect(h).toContain('e ao reembolso de R$ 62,00');
+    expect(h).toContain('e ao reembolso de despesas pagas pelo técnico (CMP-00124, CMP-00130): R$ 62,00');
   });
 
-  it('sem valor a receber, a declaração também diz o que ele pagou de despesa — já compensado neste acerto', () => {
+  it('sem nenhum código de comprovante, nada de "()" vazio', () => {
+    const semCodigo = linhas.map((l) => (l.tipo === 'reembolso' ? { ...l, conta: null } : l));
+    const h = montarReciboHtml({ ...doc, acerto, linhas: semCodigo, geradoEm: new Date() });
+    expect(h).toContain('e ao reembolso de despesas pagas pelo técnico: R$ 92,00');
+    expect(h).toContain('(+) Reembolso de despesas pagas pelo técnico</td>');
+    expect(h).not.toContain('()');
+  });
+
+  it('sem valor a receber, a declaração também diz o reembolso — já compensado neste acerto', () => {
     const h = montarReciboHtml({ ...doc, acerto: { ...acerto, valor_do_acerto: -8, pago_no_periodo: 360 }, linhas, geradoEm: new Date() });
-    expect(h).toContain('paguei R$ 92,00 em despesas da empresa (CMP-00124, CMP-00130), compensadas neste acerto, e já recebi antecipadamente R$ 360,00');
+    expect(h).toContain(
+      'com o reembolso de despesas pagas pelo técnico (CMP-00124, CMP-00130): R$ 92,00, compensado neste acerto, e já recebi antecipadamente R$ 360,00');
+    expect(h).not.toMatch(/por mim|paguei/);
     // a declaração assinada não pode dizer "a reembolsar" do que o próprio recibo já compensou
     expect(h).not.toContain('a reembolsar');
     expect(h).not.toContain('Recebi de');
@@ -268,9 +297,9 @@ describe('reembolso de comprovante no recibo do acerto', () => {
 describe('reembolso de comprovante no CSV do contador', () => {
   const linhas = linhasDoCsv([{ conta: contaComReembolso(), documento: '12345678940' }]);
 
-  it('no mesmo dia: o dia, o reembolso, o pagamento', () => {
+  it('no mesmo dia: o dia, o reembolso, o pagamento; o Tipo do reembolso é o rótulo inequívoco', () => {
     expect(linhas.map((l) => `${l.data} ${l.tipo}`)).toEqual([
-      '16/09/2026 Diária', '16/09/2026 Reembolso (comprovante)', '16/09/2026 Pagamento', '17/09/2026 Diária',
+      '16/09/2026 Diária', '16/09/2026 Reembolso de despesa paga pelo técnico', '16/09/2026 Pagamento', '17/09/2026 Diária',
     ]);
   });
 
@@ -281,8 +310,13 @@ describe('reembolso de comprovante no CSV do contador', () => {
     expect(linhas.filter((l) => l !== r).every((l) => l.reembolso === '')).toBe(true);
   });
 
-  it('a coluna nova é a última: a planilha da contadora não muda de lugar', () => {
-    expect(COLUNAS_DO_CSV.at(-1)).toEqual({ header: 'Reembolso', key: 'reembolso' });
+  it('a coluna nova é a última (a planilha da contadora não muda de lugar), com o rótulo inequívoco', () => {
+    expect(COLUNAS_DO_CSV.at(-1)).toEqual({ header: 'Reembolso de despesa paga pelo técnico', key: 'reembolso' });
     expect(COLUNAS_DO_CSV.at(-2)).toEqual({ header: 'Observação / identificação', key: 'observacao' });
+  });
+
+  it('sem reembolso, as linhas da planilha não falam de reembolso', () => {
+    const sem = linhasDoCsv([{ conta: conta(), documento: '12345678940' }]);
+    expect(sem.every((l) => l.reembolso === '' && !/reembols/i.test(l.tipo))).toBe(true);
   });
 });

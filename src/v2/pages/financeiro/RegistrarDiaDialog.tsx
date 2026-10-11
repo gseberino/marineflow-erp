@@ -243,7 +243,7 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
             <Label htmlFor="dia-extras">Extras (R$)</Label>
             <MoneyInput id="dia-extras" value={extras} onValueChange={setExtras} />
             <p className="text-xs text-muted-foreground">
-              Só o que ele pagou do bolso (almoço, transporte, material). A despesa com comprovante mandado pelo WhatsApp (CMP) já entra
+              O almoço (quando ele traz o próprio) e outros acréscimos combinados do dia. Despesa paga por ele com comprovante (CMP) entra
               como reembolso: não repita aqui.
             </p>
           </div>

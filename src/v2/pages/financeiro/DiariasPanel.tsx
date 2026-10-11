@@ -7,9 +7,14 @@
 //
 // Reembolso (F2b dos comprovantes, 11/10/2026): a despesa da empresa que ele pagou do bolso, com o
 // comprovante (CMP), soma a favor dele e entra no próximo acerto. Não se lança nem se apaga aqui:
-// nasce do SIM do comprovante pelo WhatsApp e só sai cancelando o CMP.
+// nasce do SIM do comprovante pelo WhatsApp e só sai cancelando o CMP. Rótulo de todo lugar:
+// "Reembolso de despesas pagas pelo técnico" (resposta 9 do dono).
+//
+// Pagamento dividido (resposta 4 do dono, 11/10/2026): o Pix das Diárias que veio do banco ganha
+// "Dividir: diárias e reembolso" quando há reembolso em aberto (a parte do reembolso vai para a
+// categoria de cada despesa; o saldo não muda) e, depois de dividido, "Desfazer a divisão".
 import { useState } from 'react';
-import { Banknote, CalendarPlus, FileDown, FileText, Lock, Pencil, Trash2, UserPlus } from 'lucide-react';
+import { Banknote, CalendarPlus, FileDown, FileText, Lock, Pencil, Split, Trash2, Undo2, UserPlus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -17,6 +22,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
+import { useConfirmacao } from '@/components/Confirmacao';
 import { useI18n } from '@/i18n';
 import { hojeLocal } from '@/lib/dia';
 import {
@@ -24,15 +30,16 @@ import {
   type PedidoDePeriodo, type PeriodoDasDiarias,
 } from '@/lib/diarias';
 import {
-  acertoQueTrava, comoTirarOReembolso, diaParaEditar, useAcertos, useContaCorrente, useExcluirDiaComDesfazer, useResumoFreelancers,
+  acertoQueTrava, comoTirarOReembolso, diaParaEditar, pagamentoDividido, pagamentoQueSeDivide, useAcertos, useContaCorrente,
+  useDividirPagamentoDoFreelancer, useExcluirDiaComDesfazer, usePropostaDeDivisao, useResumoFreelancers,
   type Acerto, type DiaParaEditar, type FreelancerNoResumo,
 } from '@/hooks/use-diarias';
 import { useDocumentosDasDiarias } from '@/hooks/use-documentos-diarias';
-import { descricaoDoReembolso, numeroDoRecibo } from '@/lib/extrato-diarias';
+import { ROTULO_REEMBOLSO, ROTULO_REEMBOLSOS, descricaoDoReembolso, numeroDoRecibo } from '@/lib/extrato-diarias';
 import { AcertosDoFreelancer } from './AcertosDoFreelancer';
 import { RegistrarDiaDialog } from './RegistrarDiaDialog';
 import { NovoFreelancerDialog } from './NovoFreelancerDialog';
-import { RegistrarPagamentoDialog } from './RegistrarPagamentoDialog';
+import { DividirPagamentoDialog, RegistrarPagamentoDialog, type PagamentoParaDividir } from './RegistrarPagamentoDialog';
 import { GradeDiarias } from './GradeDiarias';
 
 export interface FiltroDasDiarias {
@@ -208,7 +215,7 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
   const totais: Array<readonly [string, string, string]> = [
     ['Trabalhado no período', formatCurrency(total.trabalhado), `${total.dias.toLocaleString('pt-BR')} diárias`],
     ...(total.reembolsos > 0
-      ? [['Reembolsos no período', formatCurrency(total.reembolsos), 'despesas pagas por eles, com comprovante'] as const]
+      ? [[ROTULO_REEMBOLSOS, formatCurrency(total.reembolsos), 'no período, com comprovante (CMP)'] as const]
       : []),
     ['Pago no período', formatCurrency(total.pago), 'do extrato e do bolso de sócio'],
     ['Você deve (acumulado)', formatCurrency(total.deve), 'até o fim do período'],
@@ -219,7 +226,7 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
       <div className={`grid grid-cols-2 gap-2 ${totais.length > 4 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
         {totais.map(([rotulo, valor, nota]) => (
           <Card key={rotulo} className="min-w-0 p-3">
-            <p className="truncate text-xs text-muted-foreground">{rotulo}</p>
+            <p className="truncate text-xs text-muted-foreground" title={rotulo}>{rotulo}</p>
             <p className="truncate text-lg font-semibold tabular-nums">{valor}</p>
             <p className="truncate text-xs text-muted-foreground">{nota}</p>
           </Card>
@@ -250,8 +257,8 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
                 <div><dt className="text-xs text-muted-foreground">Dias</dt><dd className="font-medium tabular-nums">{p.dias.toLocaleString('pt-BR')}</dd></div>
                 <div><dt className="text-xs text-muted-foreground">Trabalhado</dt><dd className="font-medium tabular-nums">{formatCurrency(p.trabalhado)}</dd></div>
                 {p.reembolsos > 0 && (
-                  <div title="Despesas da empresa que ele pagou, com comprovante (CMP): entram no próximo acerto">
-                    <dt className="text-xs text-muted-foreground">Reembolsos</dt><dd className="font-medium tabular-nums">{formatCurrency(p.reembolsos)}</dd>
+                  <div className="min-w-0" title="Despesas da empresa que ele pagou, com comprovante (CMP): entram no próximo acerto">
+                    <dt className="text-xs text-muted-foreground">{ROTULO_REEMBOLSOS}</dt><dd className="font-medium tabular-nums">{formatCurrency(p.reembolsos)}</dd>
                   </div>
                 )}
                 <div><dt className="text-xs text-muted-foreground">Pago</dt><dd className="font-medium tabular-nums">{formatCurrency(p.pago)}</dd></div>
@@ -279,7 +286,7 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
         })}
       </div>
       <p className="text-xs text-muted-foreground">
-        Saldo = saldo inicial + dias trabalhados (diária + extras − descontos) + reembolsos (despesas que ele pagou, com comprovante) − o que ele recebeu. Os pagamentos vêm do
+        Saldo = saldo inicial + dias trabalhados (diária + extras − descontos) + reembolso de despesas pagas pelo técnico (com comprovante) − o que ele recebeu. Os pagamentos vêm do
         extrato do banco; o Pix registrado à mão ("Registrar pagamento" ou "Lançar") aparece na hora como "aguardando o
         banco" e já desconta — não lance de novo quando a linha do banco chegar.
       </p>
@@ -298,6 +305,15 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
   const conta = useContaCorrente(favorecidoId, periodo.de, periodo.ate, periodo.atalho);
   const acertos = useAcertos(favorecidoId);
   const { excluir, excluindo } = useExcluirDiaComDesfazer();
+  const [dividindo, setDividindo] = useState<PagamentoParaDividir | null>(null);
+  const juntar = useDividirPagamentoDoFreelancer();
+  // desfazer a divisão muda a categoria de lançamentos e devolve os reembolsos: pede confirmação (padrão do projeto)
+  const { pedir, dialogo } = useConfirmacao();
+  // "Dividir" só aparece com reembolso em aberto: uma pergunta ao banco por extrato (a lista em aberto
+  // não depende do valor; vai o do maior pagamento do banco ainda não dividido, se houver algum).
+  const divisiveis = (conta.data?.linhas ?? []).filter((l) => pagamentoQueSeDivide(l) && !pagamentoDividido(l));
+  const emAberto = usePropostaDeDivisao(favorecidoId, divisiveis.reduce((m, l) => Math.max(m, l.pago), 0));
+  const haReembolsoEmAberto = (emAberto.data?.em_aberto.length ?? 0) > 0;
 
   if (!favorecidoId) {
     return <Card className="p-6 text-center text-sm text-muted-foreground">Escolha o freelancer para ver o extrato.</Card>;
@@ -311,7 +327,7 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
   const totais: Array<readonly [string, string]> = [
     [c.de ? 'Saldo antes do período' : 'Saldo inicial', formatCurrency(c.saldo_anterior)],
     ['Trabalhado', formatCurrency(c.trabalhado)],
-    ...(c.reembolsos > 0 ? [['Reembolsos', formatCurrency(c.reembolsos)] as const] : []),
+    ...(c.reembolsos > 0 ? [[ROTULO_REEMBOLSOS, formatCurrency(c.reembolsos)] as const] : []),
     ['Pago', formatCurrency(c.pago)],
     ['Saldo no fim', formatCurrency(c.saldo_final)],
   ];
@@ -321,7 +337,7 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
       <div className={`grid grid-cols-2 gap-2 ${totais.length > 4 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
         {totais.map(([rotulo, valor]) => (
           <Card key={rotulo} className="min-w-0 p-3">
-            <p className="truncate text-xs text-muted-foreground">{rotulo}</p>
+            <p className="truncate text-xs text-muted-foreground" title={rotulo}>{rotulo}</p>
             <p className="truncate font-semibold tabular-nums">{valor}</p>
           </Card>
         ))}
@@ -353,14 +369,18 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
                 {l.tipo === 'reembolso' ? (
                   <>
                     <div className="flex flex-wrap items-center gap-x-2 text-sm">
-                      <Badge variant="outline" className="text-muted-foreground">Reembolso</Badge>
+                      {/* o rótulo inteiro (resposta 9 do dono); no celular, corta com reticências */}
+                      <Badge variant="outline" className="min-w-0 max-w-full text-muted-foreground" title={ROTULO_REEMBOLSO}>
+                        <span className="truncate">{ROTULO_REEMBOLSO}</span>
+                      </Badge>
                       <span className="min-w-0 truncate">{l.conta}</span>
                       {/* o número já vem como "OS-0042" (ou "ORÇ-…"): sem outro "OS " na frente */}
                       {l.os.length > 0 && <span className="min-w-0 truncate">{l.os.map((o) => o.numero).join(', ')}</span>}
                     </div>
-                    {/* a descrição sem o "Reembolso CMP-00124 · " do banco: o selo e o código já estão acima */}
+                    {/* a descrição sem o "Reembolso CMP-00124 · " do banco: o selo e o código já estão acima;
+                        coberto por um pagamento dividido, o banco diz quando ("pago em 12/10") */}
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {[descricaoDoReembolso(l), l.categoria].filter(Boolean).join(' · ')}
+                      {[descricaoDoReembolso(l), l.categoria, l.observacao].filter(Boolean).join(' · ')}
                     </p>
                     <p className="mt-0.5 text-xs text-muted-foreground">{comoTirarOReembolso(l.conta, acertoQueTrava(acertos.data, l.data))}</p>
                   </>
@@ -418,6 +438,30 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
                     { texto: 'Excluir o dia', icone: Trash2, perigo: true, onClick: () => { void excluir(l.id); } },
                   ]}
                 />
+              ) : pagamentoDividido(l) ? (
+                // Já dividido: juntar de volta (tudo em Diárias) libera os reembolsos para outra divisão.
+                <AcoesDaLinha
+                  rotulo={`pagamento ${diaCurto(l.data)}`}
+                  ocupada={juntar.isPending}
+                  menu={[{
+                    texto: 'Desfazer a divisão (tudo volta para Diárias)', icone: Undo2,
+                    onClick: () => pedir({
+                      titulo: 'Desfazer a divisão?',
+                      descricao: 'O pagamento volta inteiro para Diárias e os reembolsos voltam a ficar em aberto.',
+                      confirmar: 'Desfazer',
+                      acao: () => juntar.mutate({ payableId: l.id, reembolsos: [] }),
+                    }),
+                  }]}
+                />
+              ) : haReembolsoEmAberto && pagamentoQueSeDivide(l) ? (
+                <AcoesDaLinha
+                  rotulo={`pagamento ${diaCurto(l.data)}`}
+                  menu={[{
+                    texto: 'Dividir: diárias e reembolso', icone: Split,
+                    titulo: `Separar deste pagamento o ${ROTULO_REEMBOLSOS.toLowerCase()}`,
+                    onClick: () => setDividindo({ id: l.id, valor: l.pago, data: l.data }),
+                  }]}
+                />
               ) : (
                 // Pagamento vem do extrato; reembolso só sai cancelando o CMP: nenhum dos dois tem menu aqui.
                 <span className="w-8 shrink-0" aria-hidden />
@@ -426,6 +470,12 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
           ))}
         </Card>
       )}
+
+      {dividindo && (
+        <DividirPagamentoDialog favorecidoId={c.favorecido.id} nome={c.favorecido.nome} pagamento={dividindo}
+                                onFechar={() => setDividindo(null)} />
+      )}
+      {dialogo}
     </div>
   );
 }

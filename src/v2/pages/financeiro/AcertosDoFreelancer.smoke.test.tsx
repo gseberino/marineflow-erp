@@ -1,6 +1,7 @@
 // Acertos de um freelancer com reembolso de comprovante (F2b dos comprovantes, 11/10/2026): a lista
 // diz quanto de reembolso entrou em cada acerto e a conferência do "Fechar acerto" mostra a linha
-// "(+) Reembolsos (CMP-…)" entre o trabalhado e os vales — os números vêm da simulação do banco.
+// "(+) Reembolso de despesas pagas pelo técnico (CMP-…)" entre o trabalhado e os vales — os números
+// vêm da simulação do banco. O rótulo é o de todo lugar (resposta 9 do dono, 11/10/2026).
 //
 // Simula só a fronteira com o banco (supabase.rpc), na forma do contrato da spec F3 (3.7).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -63,11 +64,11 @@ async function rotulosDaConferencia() {
 describe('AcertosDoFreelancer com reembolso de comprovante', () => {
   it('a lista diz o reembolso do acerto; sem reembolso, a linha é a de antes', () => {
     renderizar([acerto(), acerto({ id: 'ac0', numero: 0, reembolsos: 0, status: 'reaberto' })]);
-    expect(screen.getByText(/1 diária\(s\) · reembolsos R\$\s?62,00 · vales R\$\s?100,00/)).toBeInTheDocument();
-    expect(screen.getAllByText(/diária\(s\)/).filter((e) => !/reembolsos/.test(e.textContent ?? ''))).toHaveLength(1);
+    expect(screen.getByText(/1 diária\(s\) · reembolso de despesas pagas pelo técnico R\$\s?62,00 · vales R\$\s?100,00/)).toBeInTheDocument();
+    expect(screen.getAllByText(/diária\(s\)/).filter((e) => !/reembolso/.test(e.textContent ?? ''))).toHaveLength(1);
   });
 
-  it('a conferência do fechamento mostra "(+) Reembolsos (CMP-…)" entre o trabalhado e os vales', async () => {
+  it('a conferência do fechamento mostra "(+) Reembolso de despesas pagas pelo técnico (CMP-…)" entre o trabalhado e os vales', async () => {
     simulacao = simulacaoComReembolsos([{ codigo: 'CMP-00124', valor: 62 }, { codigo: 'CMP-00130', valor: 30 }]);
     const user = userEvent.setup();
     renderizar([]);
@@ -75,11 +76,11 @@ describe('AcertosDoFreelancer com reembolso de comprovante', () => {
     const { dialogo, rotulos } = await rotulosDaConferencia();
 
     const iTrab = rotulos.findIndex((r) => r.startsWith('Trabalhado'));
-    const iReemb = rotulos.indexOf('(+) Reembolsos (CMP-00124, CMP-00130)');
+    const iReemb = rotulos.indexOf('(+) Reembolso de despesas pagas pelo técnico (CMP-00124, CMP-00130)');
     const iVales = rotulos.indexOf('(−) Vales já pagos');
     expect(iReemb).toBe(iTrab + 1);
     expect(iVales).toBe(iReemb + 1);
-    const valor = within(dialogo).getByText('(+) Reembolsos (CMP-00124, CMP-00130)').nextElementSibling;
+    const valor = within(dialogo).getByText('(+) Reembolso de despesas pagas pelo técnico (CMP-00124, CMP-00130)').nextElementSibling;
     expect(valor?.textContent).toMatch(/R\$\s?92,00/);
     expect(within(dialogo).getByText('A pagar neste acerto').nextElementSibling?.textContent).toMatch(/R\$\s?312,00/);
     expect(rpc).toHaveBeenCalledWith('fechar_acerto_diarias', expect.objectContaining({ p_favorecido_id: 'r', p_simular: true }));
@@ -91,17 +92,17 @@ describe('AcertosDoFreelancer com reembolso de comprovante', () => {
     renderizar([]);
     await user.click(screen.getByRole('button', { name: /Fechar acerto/ }));
     const { rotulos } = await rotulosDaConferencia();
-    expect(rotulos).toContain('(+) Reembolsos (CMP-00124, CMP-00125, CMP-00126 e mais 1)');
+    expect(rotulos).toContain('(+) Reembolso de despesas pagas pelo técnico (CMP-00124, CMP-00125, CMP-00126 e mais 1)');
   });
 
-  it('reembolso sem código de comprovante (origem_codigo nulo): "(+) Reembolsos", sem "()" vazio', async () => {
+  it('reembolso sem código de comprovante (origem_codigo nulo): só o rótulo, sem "()" vazio', async () => {
     const s = simulacaoComReembolsos([{ codigo: 'CMP-00124', valor: 62 }]);
     simulacao = { ...s, reembolsos_itens: s.reembolsos_itens.map((r) => ({ ...r, codigo: null })) };
     const user = userEvent.setup();
     renderizar([]);
     await user.click(screen.getByRole('button', { name: /Fechar acerto/ }));
     const { rotulos } = await rotulosDaConferencia();
-    expect(rotulos).toContain('(+) Reembolsos');
+    expect(rotulos).toContain('(+) Reembolso de despesas pagas pelo técnico');
     expect(rotulos.some((r) => r.includes('()'))).toBe(false);
   });
 
@@ -117,7 +118,7 @@ describe('AcertosDoFreelancer com reembolso de comprovante', () => {
     renderizar([]);
     await user.click(screen.getByRole('button', { name: /Fechar acerto/ }));
     const { rotulos } = await rotulosDaConferencia();
-    expect(rotulos.some((r) => r.includes('Reembolsos'))).toBe(false);
+    expect(rotulos.some((r) => r.includes('Reembolso'))).toBe(false);
     expect(rotulos).toContain('(−) Vales já pagos');
   });
 });

@@ -3816,6 +3816,79 @@ export type Database = {
         }
         Relationships: []
       }
+      diarias_pagamentos_divididos: {
+        Row: {
+          anotacao_id: string | null
+          aplicada_em: string | null
+          criado_em: string
+          criado_por: string | null
+          desfeita_em: string | null
+          favorecido_id: string
+          id: string
+          lancamentos: string[] | null
+          motivo: string | null
+          partes: Json
+          payable_id: string | null
+          reembolsos: string[]
+          status: string
+          tentada_em: string | null
+        }
+        Insert: {
+          anotacao_id?: string | null
+          aplicada_em?: string | null
+          criado_em?: string
+          criado_por?: string | null
+          desfeita_em?: string | null
+          favorecido_id: string
+          id?: string
+          lancamentos?: string[] | null
+          motivo?: string | null
+          partes?: Json
+          payable_id?: string | null
+          reembolsos: string[]
+          status?: string
+          tentada_em?: string | null
+        }
+        Update: {
+          anotacao_id?: string | null
+          aplicada_em?: string | null
+          criado_em?: string
+          criado_por?: string | null
+          desfeita_em?: string | null
+          favorecido_id?: string
+          id?: string
+          lancamentos?: string[] | null
+          motivo?: string | null
+          partes?: Json
+          payable_id?: string | null
+          reembolsos?: string[]
+          status?: string
+          tentada_em?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "diarias_pagamentos_divididos_anotacao_id_fkey"
+            columns: ["anotacao_id"]
+            isOneToOne: false
+            referencedRelation: "anotacoes_do_extrato"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "diarias_pagamentos_divididos_favorecido_id_fkey"
+            columns: ["favorecido_id"]
+            isOneToOne: false
+            referencedRelation: "payees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "diarias_pagamentos_divididos_payable_id_fkey"
+            columns: ["payable_id"]
+            isOneToOne: false
+            referencedRelation: "payables"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       email_accounts: {
         Row: {
           active: boolean
@@ -8457,6 +8530,7 @@ export type Database = {
           id: string
           linked_payable_id: string | null
           notes: string | null
+          origem_codigo: string | null
           paid_by: string
           receipt_storage_path: string | null
           receipt_url: string | null
@@ -8480,6 +8554,7 @@ export type Database = {
           id?: string
           linked_payable_id?: string | null
           notes?: string | null
+          origem_codigo?: string | null
           paid_by?: string
           receipt_storage_path?: string | null
           receipt_url?: string | null
@@ -8503,6 +8578,7 @@ export type Database = {
           id?: string
           linked_payable_id?: string | null
           notes?: string | null
+          origem_codigo?: string | null
           paid_by?: string
           receipt_storage_path?: string | null
           receipt_url?: string | null
@@ -14178,6 +14254,10 @@ export type Database = {
         }
         Returns: Json
       }
+      dividir_pagamento_do_freelancer: {
+        Args: { p_autor?: string; p_payable_id: string; p_reembolsos: string[] }
+        Returns: Json
+      }
       dre_cobertura: {
         Args: { p_ano: number }
         Returns: {
@@ -14489,6 +14569,10 @@ export type Database = {
         Args: { p_parent: string; p_qty?: number }
         Returns: Json
       }
+      proposta_de_divisao_do_pagamento: {
+        Args: { p_autor?: string; p_favorecido_id: string; p_valor: number }
+        Returns: Json
+      }
       prune_app_error_logs: { Args: { p_days?: number }; Returns: number }
       raiz_do_cnpj_da_empresa: { Args: never; Returns: string }
       reabrir_acerto_diarias: {
@@ -14610,6 +14694,19 @@ export type Database = {
       registrar_pagamento_da_receita_do_extrato: {
         Args: { p_receivable_id: string }
         Returns: string
+      }
+      registrar_pagamento_do_freelancer: {
+        Args: {
+          p_autor?: string
+          p_data: string
+          p_descricao: string
+          p_favorecido_id: string
+          p_forma: string
+          p_reembolsos: string[]
+          p_socio_id: string
+          p_valor: number
+        }
+        Returns: Json
       }
       registrar_resposta_da_revisao: {
         Args: {

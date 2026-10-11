@@ -18,6 +18,7 @@ import {
   diaParaEditar, useContasDoPeriodo,
   type DiaParaEditar, type FreelancerNoResumo, type LinhaDaContaCorrente,
 } from '@/hooks/use-diarias';
+import { ROTULO_REEMBOLSO, ROTULO_REEMBOLSOS } from '@/lib/extrato-diarias';
 import { FichaDoDia } from './FichaDoDia';
 
 interface Props {
@@ -75,7 +76,7 @@ export function GradeDiarias({ pessoas, mes, onMes, onEditar, onNovo }: Props) {
         </span>
       )}
       {c.reembolsos.map((r) => (
-        <span key={r.id} title={`Reembolso ${r.conta ?? ''}`.trim()}
+        <span key={r.id} title={`${ROTULO_REEMBOLSO} ${r.conta ?? ''}`.trim()}
               className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
           reemb. {formatCurrency(r.trabalhado)}
         </span>
@@ -159,7 +160,7 @@ export function GradeDiarias({ pessoas, mes, onMes, onEditar, onNovo }: Props) {
                 ['Trabalhado', (i: number) => formatCurrency(contas[i]?.data?.trabalhado ?? 0),
                   () => formatCurrency(contas.reduce((s, c) => s + (c.data?.trabalhado ?? 0), 0))],
                 // Só quando alguém tem reembolso no mês (F2b): sem ele, a grade é a de antes.
-                ...(reembolsosDoMes > 0 ? [['Reembolsos', (i: number) => formatCurrency(contas[i]?.data?.reembolsos ?? 0),
+                ...(reembolsosDoMes > 0 ? [[ROTULO_REEMBOLSOS, (i: number) => formatCurrency(contas[i]?.data?.reembolsos ?? 0),
                   () => formatCurrency(reembolsosDoMes)] as const] : []),
                 ['Pago', (i: number) => formatCurrency(contas[i]?.data?.pago ?? 0),
                   () => formatCurrency(contas.reduce((s, c) => s + (c.data?.pago ?? 0), 0))],
@@ -167,7 +168,7 @@ export function GradeDiarias({ pessoas, mes, onMes, onEditar, onNovo }: Props) {
                   () => formatCurrency(contas.reduce((s, c) => s + (c.data?.saldo_final ?? 0), 0))],
               ] as const).map(([rotulo, porPessoa, soma]) => (
                 <div key={rotulo} role="row" className="contents">
-                  <div role="rowheader" className="border-b bg-muted/50 px-2 py-1.5 text-xs font-semibold text-muted-foreground">{rotulo}</div>
+                  <div role="rowheader" title={rotulo} className="truncate border-b bg-muted/50 px-2 py-1.5 text-xs font-semibold text-muted-foreground">{rotulo}</div>
                   {pessoas.map((p, i) => (
                     <div key={p.id} role="gridcell" className="truncate border-b border-l bg-muted/50 px-2 py-1.5 text-right font-semibold tabular-nums">{porPessoa(i)}</div>
                   ))}
@@ -207,7 +208,7 @@ export function GradeDiarias({ pessoas, mes, onMes, onEditar, onNovo }: Props) {
             </Card>
           </div>
           <p className="text-xs text-muted-foreground">
-            Saldo acumulado = tudo trabalhado mais os reembolsos de comprovantes, até o fim deste mês, menos tudo pago, desde o início da conta corrente.
+            Saldo acumulado = tudo trabalhado mais o reembolso de despesas pagas pelo técnico, até o fim deste mês, menos tudo pago, desde o início da conta corrente.
           </p>
         </>
       )}
