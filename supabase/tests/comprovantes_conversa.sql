@@ -188,7 +188,9 @@ begin
   insert into _resultado values ('T8 débito + legenda com a OS: só cobrar e confirmar',
     v_p->>'passo' = 'cobrar' and jsonb_array_length(v_p->'opcoes') = 2 and (v_p->'primeira_do_lote'->>'n')::integer = 1
     and v_r->>'resultado' = 'resumo' and v_r->'proxima'->>'passo' = 'confirmar'
-    and v_efeitos = 'despesa_os,anotar'
+    -- o débito anota antes do banco na F2; com a F3 (20261011303000) espera a linha pela pergunta do
+    -- extrato (o C6 manda o débito sem documento: a anotação nunca casaria) — o teste é da ordem dos passos
+    and v_efeitos in ('despesa_os,anotar', 'despesa_os,aguardar_banco')
     and (v_r->'proxima'->'plano'->'efeitos'->0->>'billable')::boolean = false
     and (v_r->'proxima'->>'versao')::integer = (select resumo_versao from public.comprovantes where id = v_cmp)
     -- a pasta do barco só com pasta registrada ou pasta-base configurada (senão a do mês): o resumo diz onde vai de fato
@@ -336,8 +338,9 @@ begin
   insert into _resultado values ('T11 sim com versão velha mostra o resumo de novo; na versão certa grava',
     v_velha->>'resultado' = 'resumo' and v_velha->>'motivo' = 'versao_mudou' and v_velha->'proxima'->>'passo' = 'confirmar'
     and v_velha->'proxima'->>'pergunta_id' <> v_p->>'pergunta_id'
-    and v_sim->>'resultado' = 'gravado' and v_sit = 'gravado' and v_desp.n = 1 and v_desp.custo
-    and v_sim->'gravacao'->>'situacao' = 'gravado',
+    -- gravado (F2) ou esperando a linha do banco (o débito com a F3, 20261011303000)
+    and v_sim->>'resultado' = 'gravado' and v_sit in ('gravado', 'aguardando_banco') and v_desp.n = 1 and v_desp.custo
+    and v_sim->'gravacao'->>'situacao' = v_sit,
     'velha=' || coalesce(v_velha->>'resultado', '-') || '/' || coalesce(v_velha->>'motivo', '-')
     || ' sim=' || coalesce(v_sim->>'resultado', '-') || ' ' || coalesce(v_sim->>'motivo', '') || ' situacao=' || coalesce(v_sit, '-')
     || ' despesas=' || v_desp.n);

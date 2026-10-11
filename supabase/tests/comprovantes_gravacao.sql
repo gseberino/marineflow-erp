@@ -41,6 +41,13 @@ create function pg_temp._val() returns numeric language sql volatile as $$
   select round((1000 + random() * 8000)::numeric, 2)
 $$;
 create function pg_temp._hoje() returns date language sql stable as $$ select (now() at time zone 'America/Sao_Paulo')::date $$;
+-- CNPJ de mentira de quem recebe o Pix (raiz 7xxxxxxx: nunca a da HBR). A anotação "antes do banco"
+-- é do Pix ao CNPJ: com a F3 instalada (20261011303000), o débito e o Pix sem o CNPJ de quem recebeu
+-- esperam a linha pela pergunta do extrato em vez de anotar — os testes da anotação usam o Pix ao CNPJ,
+-- que anota nos dois esquemas (e a situação é "gravado" na F2, "aguardando_banco" com a F3).
+create function pg_temp._cnpj() returns text language sql volatile as $$
+  select '7' || lpad((floor(random() * 9999999))::bigint::text, 7, '0') || '0001' || lpad((floor(random() * 99))::bigint::text, 2, '0')
+$$;
 
 do $$
 declare
@@ -182,15 +189,16 @@ declare
   d record;
   a record;
 begin
-  v_cmp := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'debito', 'destino', 'os', 'os', v_os, 'cobrar', true));
+  v_cmp := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'pix', 'tipo', 'pix', 'favorecido', pg_temp._cnpj(),
+                                                'destino', 'os', 'os', v_os, 'cobrar', true));
   r := pg_temp._gravar(v_cmp);
   select * into c from public.comprovantes where id = v_cmp;
   select * into d from public.service_order_expenses where id = c.so_expense_id;
   select * into a from public.anotacoes_do_extrato where id = c.anotacao_id;
   perform pg_temp._guarda('A', v_cmp, v_os, v_val);
-  insert into _resultado values ('A/A1 cupom de OS aberta, débito: despesa faturável pela rota + anotação antes do banco',
+  insert into _resultado values ('A/A1 comprovante de OS aberta, Pix ao CNPJ: despesa faturável pela rota + anotação antes do banco',
     r->>'resultado' = 'gravado' and pg_temp._tipos(c.efeitos) = 'despesa_os,anotar' and c.efeitos->1->>'resultado' = 'aguardando'
-    and c.situacao = 'gravado' and c.gravado_por = pg_temp._dono() and c.aguardando_banco_desde is not null
+    and c.situacao in ('gravado', 'aguardando_banco') and c.gravado_por = pg_temp._dono() and c.aguardando_banco_desde is not null
     and d.billable_to_client and not d.cobrar_a_parte and d.amount = v_val and d.paid_by = 'company'
     and d.created_by = pg_temp._dono() and d.notes = c.codigo and d.description like c.codigo || ' · %'
     and (select operational_cost_total from public.service_orders where id = v_os) = v_val
@@ -202,7 +210,7 @@ begin
     'resultado=' || coalesce(r->>'resultado', '-') || ' ' || coalesce(r->>'motivo', '') || ' efeitos=' || pg_temp._tipos(c.efeitos)
     || ' despesa=' || coalesce(d.amount::text, '-') || ' anotacao=' || coalesce(a.status, '-'));
 exception when others then
-  insert into _resultado values ('A/A1 cupom de OS aberta, débito: despesa faturável pela rota + anotação antes do banco', false,
+  insert into _resultado values ('A/A1 comprovante de OS aberta, Pix ao CNPJ: despesa faturável pela rota + anotação antes do banco', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
@@ -218,7 +226,8 @@ declare
   v_status text;
 begin
   v_dubla := pg_temp._rota('anotar_transacao', '{"modo":"aplicada"}');
-  v_cmp := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'pix', 'destino', 'os', 'os', v_os, 'cobrar', false));
+  v_cmp := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'pix', 'tipo', 'pix', 'favorecido', pg_temp._cnpj(),
+                                                'destino', 'os', 'os', v_os, 'cobrar', false));
   r := pg_temp._gravar(v_cmp);
   select * into c from public.comprovantes where id = v_cmp;
   select status into v_status from public.anotacoes_do_extrato where id = c.anotacao_id;
@@ -259,7 +268,8 @@ begin
   values ('linha do banco de teste', pg_temp._hoje(), pg_temp._hoje(), v_val, v_val, 0, 'paid', 'Outras despesas', 'bank_reconciliation')
   returning id into v_pay;
   v_dubla := pg_temp._rota('anotar_transacao', jsonb_build_object('modo', 'ja_lancada', 'lancamento_id', v_pay));
-  v_cmp := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'debito', 'destino', 'os', 'os', v_os, 'cobrar', true));
+  v_cmp := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'pix', 'tipo', 'pix', 'favorecido', pg_temp._cnpj(),
+                                                'destino', 'os', 'os', v_os, 'cobrar', true));
   r := pg_temp._gravar(v_cmp);
   select * into c from public.comprovantes where id = v_cmp;
   select * into p from public.payables where id = v_pay;
@@ -486,7 +496,7 @@ declare
   v_chamadas_antes integer := 0;
   v_chamadas_depois integer := 0;
 begin
-  v_k := pg_temp._preparar(jsonb_build_object('valor', v_vk, 'forma', 'debito', 'destino', 'estoque'));
+  v_k := pg_temp._preparar(jsonb_build_object('valor', v_vk, 'forma', 'pix', 'tipo', 'pix', 'favorecido', pg_temp._cnpj(), 'destino', 'estoque'));
   rk := pg_temp._gravar(v_k);
   select * into ck from public.comprovantes where id = v_k;
   select * into ak from public.anotacoes_do_extrato where id = ck.anotacao_id;
@@ -952,6 +962,7 @@ declare
   v_dia_velho date := (date_trunc('month', now() - interval '25 years') + interval '14 days')::date;
   r jsonb;
   v1 jsonb; v2 jsonb; v3 jsonb; v4 jsonb; v5 jsonb; v6 jsonb;
+  v_linha_aplic uuid;
   v_curto text := 'nenhum erro';
   v_fila uuid;
   v_fila_r jsonb;
@@ -965,16 +976,28 @@ begin
   v1 := public.comprovante_cancelar(v_fat, 'quero desfazer', pg_temp._dono());
   v_ok := v_ok and not (v1->>'ok')::boolean and v1->'bloqueios'->0->>'motivo' = 'os_faturada'
           and exists (select 1 from public.service_order_expenses where id = (select so_expense_id from public.comprovantes where id = v_fat))
-          and (select situacao from public.comprovantes where id = v_fat) = 'gravado';
+          -- gravado (F2) ou esperando a compra no cartão (o crédito com a F3, 20261011303000)
+          and (select situacao from public.comprovantes where id = v_fat) in ('gravado', 'aguardando_banco');
   v_det := v_det || 'faturada=' || coalesce(v1->'bloqueios'->0->>'motivo', v1->>'ok') || ' ';
-  -- anotação já aplicada pelo Extrato → anotacao_aplicada
-  v_aplic := pg_temp._preparar(jsonb_build_object('valor', pg_temp._val(), 'forma', 'pix', 'destino', 'empresa', 'categoria', 'Outras despesas'));
+  -- anotação já aplicada pelo Extrato e a linha dela aprovada (virou lançamento) → anotacao_aplicada.
+  -- (Com a F3, a aplicada SEM lançamento na linha não bloqueia mais: o cancelamento devolve a linha ao
+  -- motor — teste GX6 de comprovantes_gravacao_f3.sql.)
+  v_aplic := pg_temp._preparar(jsonb_build_object('valor', pg_temp._val(), 'forma', 'pix', 'tipo', 'pix', 'favorecido', pg_temp._cnpj(),
+                                                  'destino', 'empresa', 'categoria', 'Outras despesas'));
   r := pg_temp._gravar(v_aplic);
-  update public.anotacoes_do_extrato set status = 'aplicada', aplicada_em = now()
+  insert into public.bank_transactions (transaction_date, description, amount, transaction_type, source_type)
+  values (pg_temp._hoje(), 'PIX ENVIADO TESTE F2', (select valor_confirmado from public.comprovantes where id = v_aplic), 'debit', 'bank')
+  returning id into v_linha_aplic;
+  insert into public.payables (description, issue_date, due_date, amount, paid_amount, balance_amount, status, expense_category,
+                               bank_transaction_id)
+  select 'Aprovado no Extrato (teste F2)', pg_temp._hoje(), pg_temp._hoje(), x.valor_confirmado, x.valor_confirmado, 0, 'paid',
+         'Outras despesas', v_linha_aplic
+    from public.comprovantes x where x.id = v_aplic;
+  update public.anotacoes_do_extrato set status = 'aplicada', aplicada_em = now(), bank_transaction_id = v_linha_aplic
    where id = (select anotacao_id from public.comprovantes where id = v_aplic);
   v2 := public.comprovante_cancelar(v_aplic, 'quero desfazer', pg_temp._dono());
   v_ok := v_ok and not (v2->>'ok')::boolean and v2->'bloqueios'->0->>'motivo' = 'anotacao_aplicada'
-          and (select situacao from public.comprovantes where id = v_aplic) = 'gravado';
+          and (select situacao from public.comprovantes where id = v_aplic) in ('gravado', 'aguardando_banco');
   v_det := v_det || 'aplicada=' || coalesce(v2->'bloqueios'->0->>'motivo', v2->>'ok') || ' ';
   -- Caixa num mês que depois foi fechado → mes_fechado (o mês de 25 anos atrás: nenhum lançamento real)
   v_mes := pg_temp._preparar(jsonb_build_object('valor', v_vm, 'forma', 'dinheiro', 'destino', 'insumo', 'quem', 'empresa',
