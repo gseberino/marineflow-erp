@@ -1,12 +1,14 @@
 -- Prova: gravação depois do sim e cancelamento (migration 20261011203000; usa 20261011200000-202000).
 --
 -- Uma linha por cenário da matriz 2.6.1 da spec da F2 (A-L) + A1/A2/A3 + anti-duplicado + cada linha
--- da tabela de cancelamento (desfaz e bloqueia). Revisão de 11/10/2026: anexar só do mesmo fornecedor
--- (AD), a despesa anexada segue o "cobrar ou não" (AJ), conta a pagar já aberta (PL/CA), a mesma
--- compra em dois CMPs (MC), a nota reprocessada (NR), a OS que mudou depois do sim (XF) e o
--- fornecedor que não vai à rota (FH). Prova também que a OS concluída/faturada NÃO muda
--- grand_total nem operational_cost_total, e que a despesa faturável em OS assinada liga
--- requires_resignature (o aviso do resumo confere com o efeito real).
+-- da tabela de cancelamento (desfaz e bloqueia). Revisão de 11/10/2026: anexar só do que não contradiz
+-- (AD), conta a pagar já aberta (PL/CA), a mesma compra em dois CMPs (MC), a nota reprocessada (NR), a
+-- OS que mudou depois do sim (XF) e o fornecedor que não vai à rota (FH).
+-- Ajustes do dono (11/10/2026): o comprovante nunca é cobrado do cliente — a despesa da OS é custo
+-- INTERNO (não faturável, origem = o CMP) e o total da OS não muda em NENHUM status (A, DI, S, XF); o
+-- lançamento que já está na OS só é comprovado (AN: despesa, peça, ambíguo; peça sem candidata = a
+-- pendência de lançá-la); o link público não vê o custo interno e vê a despesa manual (LP); o PESSOAL que
+-- a empresa pagou é gasto pessoal do sócio (L2); o lançamento que já existe só ganha o vazio (A3).
 --
 -- O caminho é o de verdade: o CMP entra na fila, a pergunta do confirmar é aberta pela RPC 7 e o sim
 -- vai pela RPC 9 (comprovante_responder), que chama _comprovante_gravar e as rotas.
@@ -128,7 +130,7 @@ begin
   returning id into v;
   perform public.comprovante_conversa_entrar(array[v]);
   update public.comprovantes
-     set destino = p->>'destino', destino_os_id = nullif(p->>'os', '')::uuid, cobrar_cliente = (p->>'cobrar')::boolean,
+     set destino = p->>'destino', destino_os_id = nullif(p->>'os', '')::uuid, tipo_na_os = p->>'tipo_na_os',
          quem_pagou = p->>'quem', pagador_payee_id = nullif(p->>'pagador', '')::uuid, categoria = p->>'categoria'
    where id = v;
   return v;
@@ -178,7 +180,7 @@ $$;
 
 create function pg_temp._mes(p date) returns date language sql immutable as $$ select date_trunc('month', p)::date $$;
 
--- ═══ A / A1 ═══════════════════════════════════════════════════════════════════════════════════
+-- ═══ A / A1: a despesa da OS é custo interno (ajustes do dono, 11/10/2026) ═══════════════════════
 do $$
 declare
   v_os uuid := pg_temp._os('open');
@@ -188,29 +190,34 @@ declare
   c record;
   d record;
   a record;
+  o record;
 begin
   v_cmp := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'pix', 'tipo', 'pix', 'favorecido', pg_temp._cnpj(),
-                                                'destino', 'os', 'os', v_os, 'cobrar', true));
+                                                'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa',
+                                                'categoria', 'Combustível e deslocamento'));
   r := pg_temp._gravar(v_cmp);
   select * into c from public.comprovantes where id = v_cmp;
   select * into d from public.service_order_expenses where id = c.so_expense_id;
   select * into a from public.anotacoes_do_extrato where id = c.anotacao_id;
+  select grand_total, operational_cost_total into o from public.service_orders where id = v_os;
   perform pg_temp._guarda('A', v_cmp, v_os, v_val);
-  insert into _resultado values ('A/A1 comprovante de OS aberta, Pix ao CNPJ: despesa faturável pela rota + anotação antes do banco',
+  insert into _resultado values ('A/A1 OS aberta, Pix ao CNPJ: a despesa é custo interno (não faturável, origem = o CMP, total igual) + anotação',
     r->>'resultado' = 'gravado' and pg_temp._tipos(c.efeitos) = 'despesa_os,anotar' and c.efeitos->1->>'resultado' = 'aguardando'
     and c.situacao in ('gravado', 'aguardando_banco') and c.gravado_por = pg_temp._dono() and c.aguardando_banco_desde is not null
-    and d.billable_to_client and not d.cobrar_a_parte and d.amount = v_val and d.paid_by = 'company'
+    and not d.billable_to_client and d.origem_codigo = c.codigo and d.amount = v_val and d.paid_by = 'company'
+    and d.category = 'Combustível e deslocamento'
     and d.created_by = pg_temp._dono() and d.notes = c.codigo and d.description like c.codigo || ' · %'
-    and (select operational_cost_total from public.service_orders where id = v_os) = v_val
-    and a.status = 'aguardando' and a.valor = v_val and a.os_id = v_os and a.categoria = 'Peças e materiais'
+    and o.grand_total = 0 and o.operational_cost_total = 0
+    and a.status = 'aguardando' and a.valor = v_val and a.os_id = v_os and a.categoria = 'Combustível e deslocamento'
     and a.descricao like c.codigo || ' · %' and a.sentido = 'debit'
     and c.dropbox_pendente = 'mover' and c.indice_mes = pg_temp._mes(pg_temp._hoje())
     and (select pendente from public.comprovantes_indice_mensal where mes = c.indice_mes)
-    and c.plano = r->'plano_mostrado' and c.quem_pagou = 'empresa' and c.categoria = 'Peças e materiais',
+    and c.plano = r->'plano_mostrado' and c.quem_pagou = 'empresa' and c.categoria = 'Combustível e deslocamento'
+    and c.tipo_na_os = 'despesa' and jsonb_array_length(r->'plano_mostrado'->'avisos') = 0,
     'resultado=' || coalesce(r->>'resultado', '-') || ' ' || coalesce(r->>'motivo', '') || ' efeitos=' || pg_temp._tipos(c.efeitos)
-    || ' despesa=' || coalesce(d.amount::text, '-') || ' anotacao=' || coalesce(a.status, '-'));
+    || ' despesa=' || coalesce(d.amount::text, '-') || '/' || coalesce(d.origem_codigo, '-') || ' anotacao=' || coalesce(a.status, '-'));
 exception when others then
-  insert into _resultado values ('A/A1 comprovante de OS aberta, Pix ao CNPJ: despesa faturável pela rota + anotação antes do banco', false,
+  insert into _resultado values ('A/A1 OS aberta, Pix ao CNPJ: a despesa é custo interno (não faturável, origem = o CMP, total igual) + anotação', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
@@ -227,7 +234,8 @@ declare
 begin
   v_dubla := pg_temp._rota('anotar_transacao', '{"modo":"aplicada"}');
   v_cmp := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'pix', 'tipo', 'pix', 'favorecido', pg_temp._cnpj(),
-                                                'destino', 'os', 'os', v_os, 'cobrar', false));
+                                                'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa',
+                                                'categoria', 'Combustível e deslocamento'));
   r := pg_temp._gravar(v_cmp);
   select * into c from public.comprovantes where id = v_cmp;
   select status into v_status from public.anotacoes_do_extrato where id = c.anotacao_id;
@@ -243,62 +251,92 @@ exception when others then
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
--- ═══ A3 (e o cancelamento que volta a correção) ═══════════════════════════════════════════════
+-- ═══ A3: a linha já virou lançamento — só concilia e comprova (resposta 8 do dono, 11/10/2026) ════
 do $$
 declare
   v_os uuid := pg_temp._os('open');
+  v_os2 uuid := pg_temp._os('open');
   v_val numeric := pg_temp._val();
+  v_val2 numeric := pg_temp._val();
   v_pay uuid;
+  v_pay2 uuid;
   v_cmp uuid;
+  v_cmp2 uuid;
   v_dubla boolean;
   r jsonb;
+  r2 jsonb;
   c record;
+  c2 record;
   p record;
-  v_canc jsonb;
   p2 record;
+  p3 record;
+  p4 record;
+  v_canc jsonb;
+  v_canc2 jsonb;
   v_ligada uuid;
   v_falhas text[];
 begin
   if to_regclass('public.ensaio_respostas') is null then
-    insert into _resultado values ('A3 a linha já virou lançamento: anexa e corrige categoria/OS; cancelar volta a correção', true,
+    insert into _resultado values ('A3 a linha já virou lançamento: só preenche o vazio (OS, categoria), avisa a categoria diferente; cancelar volta só o que preencheu', true,
       'pulado em produção: forçar "já lançada" pede o dublê do ensaio (A1 cobre a rota real)');
     return;
   end if;
+  -- (1) o lançamento já tem categoria: não troca (avisa); a OS vazia é preenchida
   insert into public.payables (description, issue_date, due_date, amount, paid_amount, balance_amount, status, expense_category, origin)
   values ('linha do banco de teste', pg_temp._hoje(), pg_temp._hoje(), v_val, v_val, 0, 'paid', 'Outras despesas', 'bank_reconciliation')
   returning id into v_pay;
   v_dubla := pg_temp._rota('anotar_transacao', jsonb_build_object('modo', 'ja_lancada', 'lancamento_id', v_pay));
   v_cmp := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'pix', 'tipo', 'pix', 'favorecido', pg_temp._cnpj(),
-                                                'destino', 'os', 'os', v_os, 'cobrar', true));
+                                                'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa',
+                                                'categoria', 'Combustível e deslocamento'));
   r := pg_temp._gravar(v_cmp);
+  -- (2) o lançamento sem categoria e sem OS: ganha as duas
+  insert into public.payables (description, issue_date, due_date, amount, paid_amount, balance_amount, status, expense_category, origin)
+  values ('linha do banco de teste 2', pg_temp._hoje(), pg_temp._hoje(), v_val2, v_val2, 0, 'paid', null, 'bank_reconciliation')
+  returning id into v_pay2;
+  perform pg_temp._rota('anotar_transacao', jsonb_build_object('modo', 'ja_lancada', 'lancamento_id', v_pay2));
+  v_cmp2 := pg_temp._preparar(jsonb_build_object('valor', v_val2, 'forma', 'pix', 'tipo', 'pix', 'favorecido', pg_temp._cnpj(),
+                                                 'destino', 'os', 'os', v_os2, 'tipo_na_os', 'despesa',
+                                                 'categoria', 'Combustível e deslocamento'));
+  r2 := pg_temp._gravar(v_cmp2);
   select * into c from public.comprovantes where id = v_cmp;
+  select * into c2 from public.comprovantes where id = v_cmp2;
   select * into p from public.payables where id = v_pay;
+  select * into p2 from public.payables where id = v_pay2;
   select linked_payable_id into v_ligada from public.service_order_expenses where id = c.so_expense_id;
   v_canc := public.comprovante_cancelar(v_cmp, 'teste do A3', pg_temp._dono());
-  select * into p2 from public.payables where id = v_pay;
+  v_canc2 := public.comprovante_cancelar(v_cmp2, 'teste do A3', pg_temp._dono());
+  select * into p3 from public.payables where id = v_pay;
+  select * into p4 from public.payables where id = v_pay2;
   select array_agg(nome) into v_falhas from (values
     ('gravou', r->>'resultado' = 'gravado' and pg_temp._tipos(c.efeitos) = 'despesa_os,anexar_lancamento'),
     ('anexou', c.payable_id = v_pay and c.anotacao_id is null),
-    ('guardou_o_antes', c.efeitos->1->'corrigido'->'expense_category'->>'antes' = 'Outras despesas'
-                        and c.efeitos->1->'corrigido'->'expense_category'->>'depois' = 'Peças e materiais'
-                        and c.efeitos->1->'corrigido'->'linked_service_order_id'->>'depois' = v_os::text),
-    ('corrigiu', p.expense_category = 'Peças e materiais' and p.linked_service_order_id = v_os),
+    ('nao_trocou_a_categoria', p.expense_category = 'Outras despesas'
+                               and not coalesce(c.efeitos->1->'corrigido' ? 'expense_category', false)),
+    ('avisou', r->'gravacao'->'avisos' @> '["categoria_existente_diferente"]'::jsonb
+               and c.efeitos->1->>'categoria_existente' = 'Outras despesas'),
+    ('preencheu_a_os', p.linked_service_order_id = v_os
+                       and c.efeitos->1->'corrigido'->'linked_service_order_id'->>'depois' = v_os::text),
     ('despesa_ligada', v_ligada = v_pay),
-    ('cancelou', (v_canc->>'ok')::boolean),
-    ('voltou_a_correcao', p2.expense_category = 'Outras despesas' and p2.linked_service_order_id is null and p2.status = 'paid'),
-    ('tirou_a_despesa', not exists (select 1 from public.service_order_expenses where service_order_id = v_os))
+    ('preencheu_o_vazio', r2->>'resultado' = 'gravado' and p2.expense_category = 'Combustível e deslocamento'
+                          and p2.linked_service_order_id = v_os2 and c2.efeitos->1->'corrigido' ? 'expense_category'
+                          and not (r2->'gravacao'->'avisos' @> '["categoria_existente_diferente"]'::jsonb)),
+    ('cancelou', (v_canc->>'ok')::boolean and (v_canc2->>'ok')::boolean),
+    ('voltou_so_o_que_preencheu', p3.expense_category = 'Outras despesas' and p3.linked_service_order_id is null and p3.status = 'paid'
+                                  and p4.expense_category is null and p4.linked_service_order_id is null and p4.status = 'paid'),
+    ('tirou_o_custo_interno', not exists (select 1 from public.service_order_expenses where service_order_id in (v_os, v_os2)))
   ) as t(nome, ok) where not coalesce(ok, false);
-  insert into _resultado values ('A3 a linha já virou lançamento: anexa e corrige categoria/OS; cancelar volta a correção',
+  insert into _resultado values ('A3 a linha já virou lançamento: só preenche o vazio (OS, categoria), avisa a categoria diferente; cancelar volta só o que preencheu',
     v_falhas is null,
     coalesce('falhou: ' || array_to_string(v_falhas, ', ') || ' | ', '')
-    || 'efeitos=' || pg_temp._tipos(c.efeitos) || ' categoria=' || coalesce(p.expense_category, '-') || '→' || coalesce(p2.expense_category, '-')
-    || ' cancelar=' || coalesce(v_canc::text, '-'));
+    || 'efeitos=' || pg_temp._tipos(c.efeitos) || ' categoria=' || coalesce(p.expense_category, '-') || '→' || coalesce(p3.expense_category, '-')
+    || ' vazio=' || coalesce(p2.expense_category, 'null') || '→' || coalesce(p4.expense_category, 'null'));
 exception when others then
-  insert into _resultado values ('A3 a linha já virou lançamento: anexa e corrige categoria/OS; cancelar volta a correção', false,
+  insert into _resultado values ('A3 a linha já virou lançamento: só preenche o vazio (OS, categoria), avisa a categoria diferente; cancelar volta só o que preencheu', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
--- ═══ B e C: OS concluída/faturada — o total não muda ══════════════════════════════════════════
+-- ═══ DI: o custo interno em OS concluída e faturada — o total nunca muda (ajustes do dono) ══════
 do $$
 declare
   v_osb uuid := pg_temp._os('completed');
@@ -314,12 +352,18 @@ declare
   db record;
   dc record;
   ob0 record; ob1 record; oc0 record; oc1 record;
+  v_check text := 'nenhum erro';
+  v_trava_sai text := 'apagou';
+  v_trava_muda text := 'mudou';
+  v_trava_ok text := 'recusou';
 begin
   select grand_total, operational_cost_total into ob0 from public.service_orders where id = v_osb;
   select grand_total, operational_cost_total into oc0 from public.service_orders where id = v_osc;
-  v_b := pg_temp._preparar(jsonb_build_object('valor', v_vb, 'forma', 'pix', 'destino', 'os', 'os', v_osb, 'cobrar', true));
+  v_b := pg_temp._preparar(jsonb_build_object('valor', v_vb, 'forma', 'credito', 'destino', 'os', 'os', v_osb,
+                                              'tipo_na_os', 'despesa', 'categoria', 'Alimentação de campo'));
   rb := pg_temp._gravar(v_b);
-  v_c := pg_temp._preparar(jsonb_build_object('valor', v_vc, 'forma', 'pix', 'destino', 'os', 'os', v_osc, 'cobrar', false));
+  v_c := pg_temp._preparar(jsonb_build_object('valor', v_vc, 'forma', 'credito', 'destino', 'os', 'os', v_osc,
+                                              'tipo_na_os', 'despesa', 'categoria', 'Pedágio e estacionamento'));
   rc := pg_temp._gravar(v_c);
   select * into cb from public.comprovantes where id = v_b;
   select * into cc from public.comprovantes where id = v_c;
@@ -327,22 +371,48 @@ begin
   select * into dc from public.service_order_expenses where id = cc.so_expense_id;
   select grand_total, operational_cost_total into ob1 from public.service_orders where id = v_osb;
   select grand_total, operational_cost_total into oc1 from public.service_orders where id = v_osc;
+  -- a despesa que nasceu de comprovante nunca é faturável (CHECK)
+  begin
+    update public.service_order_expenses set billable_to_client = true where id = cb.so_expense_id;
+  exception when check_violation then
+    v_check := sqlstate;
+  end;
+  -- revisão dos ajustes: a despesa do CMP só muda ou sai pelo comprovante (gatilho); o resto da linha muda
+  begin
+    delete from public.service_order_expenses where id = cb.so_expense_id;
+  exception when sqlstate '42501' then
+    v_trava_sai := sqlstate;
+  end;
+  begin
+    update public.service_order_expenses set amount = amount + 1 where id = cb.so_expense_id;
+  exception when sqlstate '42501' then
+    v_trava_muda := sqlstate;
+  end;
+  begin
+    update public.service_order_expenses set notes = 'conferida' where id = cb.so_expense_id;
+    v_trava_ok := 'mudou';
+  exception when others then
+    v_trava_ok := sqlstate;
+  end;
   perform pg_temp._guarda('B', v_b, v_osb, v_vb);
   perform pg_temp._guarda('C', v_c, v_osc, v_vc);
-  insert into _resultado values ('B OS concluída + cobrar: despesa à parte (não faturável), total da OS igual, pendência',
-    rb->>'resultado' = 'gravado' and (cb.efeitos->0->>'direto')::boolean and not db.billable_to_client and db.cobrar_a_parte
-    and cb.pendencias = array['cobrar_a_parte'] and rb->'avisos_mostrados' @> '["os_faturada_total_nao_muda"]'::jsonb
-    and rb->'plano_mostrado'->'avisos' @> '["os_faturada_total_nao_muda"]'::jsonb
-    and ob1.grand_total = ob0.grand_total and ob1.operational_cost_total = ob0.operational_cost_total,
-    'efeitos=' || pg_temp._tipos(cb.efeitos) || ' total ' || ob0.grand_total || '→' || ob1.grand_total
-    || ' op ' || ob0.operational_cost_total || '→' || ob1.operational_cost_total);
-  insert into _resultado values ('C OS faturada + custo da HBR: despesa não faturável, total da OS igual, sem pendência',
-    rc->>'resultado' = 'gravado' and (cc.efeitos->0->>'direto')::boolean and not dc.billable_to_client and not dc.cobrar_a_parte
-    and cardinality(cc.pendencias) = 0
-    and oc1.grand_total = oc0.grand_total and oc1.operational_cost_total = oc0.operational_cost_total,
-    'efeitos=' || pg_temp._tipos(cc.efeitos) || ' total ' || oc0.grand_total || '→' || oc1.grand_total);
+  insert into _resultado values ('DI custo interno em OS concluída e faturada: total igual, origem gravada, sem aviso nem pendência; o CHECK recusa faturável',
+    rb->>'resultado' = 'gravado' and pg_temp._tipos(cb.efeitos) = 'despesa_os,aguardar_fatura'
+    and not db.billable_to_client and db.origem_codigo = cb.codigo
+    and rc->>'resultado' = 'gravado' and pg_temp._tipos(cc.efeitos) = 'despesa_os,aguardar_fatura'
+    and not dc.billable_to_client and dc.origem_codigo = cc.codigo
+    and cardinality(cb.pendencias) = 0 and cardinality(cc.pendencias) = 0
+    and jsonb_array_length(rb->'plano_mostrado'->'avisos') = 0 and jsonb_array_length(rc->'plano_mostrado'->'avisos') = 0
+    and ob1.grand_total = ob0.grand_total and ob1.operational_cost_total = ob0.operational_cost_total
+    and oc1.grand_total = oc0.grand_total and oc1.operational_cost_total = oc0.operational_cost_total
+    and v_check = '23514' and v_trava_sai = '42501' and v_trava_muda = '42501' and v_trava_ok = 'mudou'
+    and exists (select 1 from public.service_order_expenses where id = cb.so_expense_id and amount = db.amount),
+    'concluida=' || pg_temp._tipos(cb.efeitos) || ' faturada=' || pg_temp._tipos(cc.efeitos)
+    || ' total ' || ob0.grand_total || '→' || ob1.grand_total || ' / ' || oc0.grand_total || '→' || oc1.grand_total
+    || ' check=' || v_check || ' trava=' || v_trava_sai || '/' || v_trava_muda || '/' || v_trava_ok);
 exception when others then
-  insert into _resultado values ('B/C OS concluída/faturada', false, 'erro: ' || sqlstate || ' ' || sqlerrm);
+  insert into _resultado values ('DI custo interno em OS concluída e faturada: total igual, origem gravada, sem aviso nem pendência; o CHECK recusa faturável', false,
+    'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
 -- ═══ D, E, F: dinheiro no Caixa, bolso do sócio, crédito ═════════════════════════════════════
@@ -407,24 +477,25 @@ declare
   cg record; ch record;
   dg record;
 begin
-  v_g := pg_temp._preparar(jsonb_build_object('valor', v_vg, 'forma', 'pix', 'destino', 'os', 'os', v_osg, 'cobrar', true,
-                                              'quem', 'tecnico', 'pagador', (select tecnico from _ctx)));
+  v_g := pg_temp._preparar(jsonb_build_object('valor', v_vg, 'forma', 'pix', 'destino', 'os', 'os', v_osg, 'tipo_na_os', 'despesa',
+                                              'categoria', 'Alimentação de campo', 'quem', 'tecnico', 'pagador', (select tecnico from _ctx)));
   rg := pg_temp._gravar(v_g);
   v_h := pg_temp._preparar(jsonb_build_object('valor', v_vh, 'forma', 'pix', 'destino', 'os', 'os', v_osh, 'quem', 'cliente'));
   rh := pg_temp._gravar(v_h);
   select * into cg from public.comprovantes where id = v_g;
   select * into ch from public.comprovantes where id = v_h;
   select * into dg from public.service_order_expenses where id = cg.so_expense_id;
-  insert into _resultado values ('G técnico pagou: despesa da OS paga pelo técnico, nada no financeiro (acerto = F2b)',
+  insert into _resultado values ('G técnico pagou: despesa da OS (custo interno) paga pelo técnico, nada no financeiro (acerto = F2b)',
     rg->>'resultado' = 'gravado' and pg_temp._tipos(cg.efeitos) = 'despesa_os,nada,pendencia:acerto_tecnico'
-    and dg.paid_by = 'technician' and dg.billable_to_client and cg.anotacao_id is null and cg.payable_id is null
+    and dg.paid_by = 'technician' and not dg.billable_to_client and dg.origem_codigo = cg.codigo
+    and cg.anotacao_id is null and cg.payable_id is null
     and cg.pendencias = array['acerto_tecnico'] and cg.efeitos->1->>'motivo' = 'tecnico_f2b'
     and not exists (select 1 from public.anotacoes_do_extrato where abs(valor - v_vg) < 0.005),
     'efeitos=' || pg_temp._tipos(cg.efeitos) || ' paid_by=' || coalesce(dg.paid_by, '-'));
   insert into _resultado values ('H cliente pagou direto: nada na OS, nada no financeiro',
     rh->>'resultado' = 'gravado' and pg_temp._tipos(ch.efeitos) = 'nada' and ch.efeitos->0->>'motivo' = 'cliente_pagou'
     and not exists (select 1 from public.service_order_expenses where service_order_id = v_osh)
-    and ch.so_expense_id is null and ch.anotacao_id is null and ch.payable_id is null and ch.cobrar_cliente is null,
+    and ch.so_expense_id is null and ch.anotacao_id is null and ch.payable_id is null and ch.tipo_na_os is null,
     'efeitos=' || pg_temp._tipos(ch.efeitos));
 exception when others then
   insert into _resultado values ('G/H técnico e cliente', false, 'erro: ' || sqlstate || ' ' || sqlerrm);
@@ -449,7 +520,7 @@ begin
   insert into public.fiscal_note_items (fiscal_note_id, item_index, description) values (v_nota, 1, 'item 1'), (v_nota, 2, 'item 2');
   insert into public.fiscal_note_items (fiscal_note_id, item_index, description, service_order_id) values (v_nota, 3, 'item 3', v_outra);
   v_i := pg_temp._preparar(jsonb_build_object('valor', pg_temp._val(), 'tipo', 'nfe_danfe', 'chave', v_chave,
-                                              'destino', 'os', 'os', v_os, 'cobrar', true));
+                                              'destino', 'os', 'os', v_os, 'tipo_na_os', 'peca'));
   ri := pg_temp._gravar(v_i);
   select * into ci from public.comprovantes where id = v_i;
   select count(*) into v_ligou from public.fiscal_note_items where fiscal_note_id = v_nota and service_order_id = v_os;
@@ -464,7 +535,7 @@ begin
     'efeitos=' || pg_temp._tipos(ci.efeitos) || ' ligadas=' || v_ligou);
 
   v_j := pg_temp._preparar(jsonb_build_object('valor', pg_temp._val(), 'tipo', 'nfe_xml', 'chave', v_chave_j,
-                                              'destino', 'os', 'os', v_os, 'cobrar', false));
+                                              'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa'));
   rj := pg_temp._gravar(v_j);
   select * into cj from public.comprovantes where id = v_j;
   insert into public.fiscal_notes (nfe_key, nfe_number, status) values (v_chave_j, '67890', 'confirmed') returning id into v_nota_j;
@@ -474,8 +545,8 @@ begin
   insert into _resultado values ('J NF-e ainda não importada: aguardando_xml; quando a nota chega, liga os itens e grava',
     rj->>'resultado' = 'gravado' and rj->'gravacao'->>'situacao' = 'aguardando_xml' and cj.situacao = 'aguardando_xml'
     and pg_temp._tipos(cj.efeitos) = 'aguardar_nota,despesa_os' and cj.gravado_em is not null
-    -- custo da HBR em NF-e: despesa NÃO faturável da OS com o valor da nota (o Lucro por OS desconta)
-    and (select not billable_to_client and not cobrar_a_parte from public.service_order_expenses where id = cj.so_expense_id)
+    -- a despesa da NF-e: custo interno da OS com o valor da nota (o Lucro por OS desconta; fora do cliente)
+    and (select not billable_to_client and origem_codigo = cj.codigo from public.service_order_expenses where id = cj.so_expense_id)
     and v_aplicadas >= 1 and cj2.situacao = 'gravado' and cj2.fiscal_note_id = v_nota_j
     and pg_temp._tipos(cj2.efeitos) = 'aguardar_nota,despesa_os,itens_da_nota'
     and (select service_order_id from public.fiscal_note_items where fiscal_note_id = v_nota_j) = v_os,
@@ -484,15 +555,16 @@ exception when others then
   insert into _resultado values ('I/J NF-e', false, 'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
--- ═══ K, L: estoque (dar entrada pelo XML) e pessoal (só arquivo) ═════════════════════════════
+-- ═══ K, L: estoque (dar entrada pelo XML) e pessoal (do bolso: só arquivo; da empresa: gasto do sócio) ═══
 do $$
 declare
   v_vk numeric := pg_temp._val();
   v_vl numeric := pg_temp._val();
-  v_k uuid; v_l uuid;
-  rk jsonb; rl jsonb;
-  ck record; cl record;
-  ak record;
+  v_vl2 numeric := pg_temp._val();
+  v_k uuid; v_l uuid; v_l2 uuid;
+  rk jsonb; rl jsonb; rl2 jsonb;
+  ck record; cl record; cl2 record;
+  ak record; al2 record;
   v_chamadas_antes integer := 0;
   v_chamadas_depois integer := 0;
 begin
@@ -504,50 +576,66 @@ begin
   if to_regclass('public.ensaio_chamadas') is not null then
     execute 'select count(*) from public.ensaio_chamadas' into v_chamadas_antes;
   end if;
-  v_l := pg_temp._preparar(jsonb_build_object('valor', v_vl, 'forma', 'pix', 'destino', 'pessoal'));
+  -- L1: do bolso (ou do cartão pessoal) — só o arquivo
+  v_l := pg_temp._preparar(jsonb_build_object('valor', v_vl, 'forma', 'pix', 'destino', 'pessoal', 'quem', 'socio'));
   rl := pg_temp._gravar(v_l);
   if to_regclass('public.ensaio_chamadas') is not null then
     execute 'select count(*) from public.ensaio_chamadas' into v_chamadas_depois;
   end if;
   select * into cl from public.comprovantes where id = v_l;
+  -- L2: a conta da EMPRESA pagou (Pix ao CNPJ): o efeito de uma compra, em gasto pessoal do sócio
+  v_l2 := pg_temp._preparar(jsonb_build_object('valor', v_vl2, 'forma', 'pix', 'tipo', 'pix', 'favorecido', pg_temp._cnpj(),
+                                               'destino', 'pessoal', 'quem', 'empresa'));
+  rl2 := pg_temp._gravar(v_l2);
+  select * into cl2 from public.comprovantes where id = v_l2;
+  select * into al2 from public.anotacoes_do_extrato where id = cl2.anotacao_id;
   insert into _resultado values ('K estoque: anota com "Compras de mercadorias" e deixa "dar entrada" (estoque só pelo XML)',
     rk->>'resultado' = 'gravado' and pg_temp._tipos(ck.efeitos) = 'anotar,pendencia:dar_entrada'
     and ak.categoria = 'Compras de mercadorias' and ak.os_id is null and ck.pendencias = array['dar_entrada'],
     'efeitos=' || pg_temp._tipos(ck.efeitos) || ' categoria=' || coalesce(ak.categoria, '-'));
-  insert into _resultado values ('L pessoal: só o arquivo em PESSOAL, nada no financeiro',
+  insert into _resultado values ('L1 pessoal do bolso: só o arquivo em PESSOAL, nada no financeiro',
     rl->>'resultado' = 'gravado' and pg_temp._tipos(cl.efeitos) = 'nada' and cl.efeitos->0->>'motivo' = 'pessoal'
     and rl->'plano_mostrado'->>'pasta' = 'pessoal' and cl.anotacao_id is null and cl.payable_id is null
-    and cl.so_expense_id is null and v_chamadas_depois = v_chamadas_antes
+    and cl.so_expense_id is null and v_chamadas_depois = v_chamadas_antes and cl.quem_pagou = 'socio'
     and not exists (select 1 from public.anotacoes_do_extrato where abs(valor - v_vl) < 0.005),
     'efeitos=' || pg_temp._tipos(cl.efeitos) || ' chamadas de rota=' || (v_chamadas_depois - v_chamadas_antes));
+  insert into _resultado values ('L2 pessoal pago pela empresa: anota em "Gasto Pessoal Sócio - Descontar PL" com o sócio de favorecido, sem OS',
+    rl2->>'resultado' = 'gravado' and pg_temp._tipos(cl2.efeitos) = 'anotar' and rl2->'plano_mostrado'->>'pasta' = 'pessoal'
+    and al2.categoria = 'Gasto Pessoal Sócio - Descontar PL' and al2.favorecido_id = (select socio from _ctx)
+    and al2.os_id is null and cl2.situacao in ('gravado', 'aguardando_banco')
+    and cl2.categoria = 'Gasto Pessoal Sócio - Descontar PL' and cl2.pagador_payee_id = (select socio from _ctx),
+    'efeitos=' || pg_temp._tipos(cl2.efeitos) || ' categoria=' || coalesce(al2.categoria, '-')
+    || ' favorecido=' || coalesce((al2.favorecido_id = (select socio from _ctx))::text, '-'));
 exception when others then
   insert into _resultado values ('K/L estoque e pessoal', false, 'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
--- ═══ OS assinada: incluir no total pede nova assinatura (aviso = efeito real) ════════════════
+-- ═══ S: OS assinada — o custo interno não mexe no total nem pede nova assinatura ═══════════════
 do $$
 declare
   v_os uuid := pg_temp._os('open', true);
   v_cmp uuid;
   r jsonb;
-  v_antes boolean;
-  v_depois boolean;
+  v_antes record;
+  v_depois record;
 begin
-  select requires_resignature into v_antes from public.service_orders where id = v_os;
-  v_cmp := pg_temp._preparar(jsonb_build_object('valor', pg_temp._val(), 'forma', 'debito', 'destino', 'os', 'os', v_os, 'cobrar', true));
+  select requires_resignature, grand_total into v_antes from public.service_orders where id = v_os;
+  v_cmp := pg_temp._preparar(jsonb_build_object('valor', pg_temp._val(), 'forma', 'debito', 'destino', 'os', 'os', v_os,
+                                                'tipo_na_os', 'despesa', 'categoria', 'Combustível e deslocamento'));
   r := pg_temp._gravar(v_cmp);
-  select requires_resignature into v_depois from public.service_orders where id = v_os;
-  insert into _resultado values ('S OS assinada + cobrar: o resumo avisa e a OS passa a pedir nova assinatura',
-    r->>'resultado' = 'gravado' and r->'plano_mostrado'->'avisos' @> '["os_assinada_pede_nova_assinatura"]'::jsonb
-    and r->'avisos_mostrados' @> '["os_assinada_pede_nova_assinatura"]'::jsonb
-    and not v_antes and v_depois,
-    'aviso=' || coalesce(r->'plano_mostrado'->>'avisos', '-') || ' requires_resignature ' || v_antes || '→' || v_depois);
+  select requires_resignature, grand_total into v_depois from public.service_orders where id = v_os;
+  insert into _resultado values ('S OS assinada: o custo interno não mexe no total nem pede nova assinatura (sem aviso)',
+    r->>'resultado' = 'gravado' and not (r->'plano_mostrado'->'avisos' @> '["os_assinada_pede_nova_assinatura"]'::jsonb)
+    and not (r->'avisos_mostrados' @> '["os_assinada_pede_nova_assinatura"]'::jsonb)
+    and not v_antes.requires_resignature and not v_depois.requires_resignature and v_depois.grand_total = v_antes.grand_total,
+    'avisos=' || coalesce(r->'plano_mostrado'->>'avisos', '-') || ' requires_resignature ' || v_antes.requires_resignature
+    || '→' || v_depois.requires_resignature);
 exception when others then
-  insert into _resultado values ('S OS assinada + cobrar: o resumo avisa e a OS passa a pedir nova assinatura', false,
+  insert into _resultado values ('S OS assinada: o custo interno não mexe no total nem pede nova assinatura (sem aviso)', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
--- ═══ Anti-duplicado: o que já foi lançado — DO MESMO FORNECEDOR — é anexado, nunca lançado de novo ═══
+-- ═══ Anti-duplicado: o que já foi lançado — e não contradiz o fornecedor — é anexado, nunca lançado de novo ═══
 do $$
 declare
   v_os uuid := pg_temp._os('open');
@@ -556,17 +644,22 @@ declare
   v_v3 numeric := pg_temp._val();
   v_v4 numeric := pg_temp._val();
   v_v5 numeric := pg_temp._val();
+  v_v6 numeric := pg_temp._val();
   v_cnpj text := '6' || lpad((floor(random() * 1e12))::bigint::text, 13, '0');
   v_sup uuid;
+  v_outro uuid;
   v_desp uuid;
   v_desp5 uuid;
   v_anot uuid;
   v_cx uuid;
-  c1 uuid; c2 uuid; c3 uuid; c4 uuid; c5 uuid;
+  c1 uuid; c2 uuid; c3 uuid; c4 uuid; c5 uuid; c6 uuid;
   r1 jsonb; r2 jsonb; r3 jsonb; r4 jsonb; r5 jsonb;
   x1 record; x2 record; x3 record; x4 record; x5 record;
+  x6 public.comprovantes;
 begin
   insert into public.suppliers (name, cnpj_cpf) values ('Fornecedor Teste F2 ' || pg_temp._letras(6), v_cnpj) returning id into v_sup;
+  insert into public.suppliers (name, cnpj_cpf) values ('Outro Fornecedor Teste F2 ' || pg_temp._letras(6), '8' || lpad((floor(random() * 1e12))::bigint::text, 13, '0'))
+  returning id into v_outro;
   insert into public.service_order_expenses (service_order_id, category, description, amount, expense_date, paid_by, billable_to_client, supplier_id)
   values (v_os, 'Peças e materiais', 'lançada antes pela tela', v_v1, pg_temp._hoje(), 'company', true, v_sup) returning id into v_desp;
   insert into public.anotacoes_do_extrato (sentido, valor, data_prevista, data_exata, documento, categoria, descricao, criada_por)
@@ -578,11 +671,14 @@ begin
   insert into public.payables (description, issue_date, due_date, amount, paid_amount, balance_amount, status, expense_category, origin, payment_method, supplier_id)
   values ('caixa de teste 3', pg_temp._hoje(), pg_temp._hoje(), v_v4, v_v4, 0, 'paid', 'Outras despesas', 'manual', 'cash', v_sup)
   returning id into v_cx;
-  -- uma despesa do MESMO valor e data na OS, mas de outro gasto (sem o fornecedor): não serve
+  -- a despesa do MESMO valor e data na OS, lançada sem fornecedor: não contradiz — o CMP só a comprova
   insert into public.service_order_expenses (service_order_id, category, description, amount, expense_date, paid_by, billable_to_client)
   values (v_os, 'Alimentação de campo', 'almoço da equipe', v_v5, pg_temp._hoje(), 'company', true) returning id into v_desp5;
+  -- a despesa do mesmo valor de OUTRO fornecedor: contradiz — não é dela (pergunta "peça ou despesa?")
+  insert into public.service_order_expenses (service_order_id, category, description, amount, expense_date, paid_by, billable_to_client, supplier_id)
+  values (v_os, 'Peças e materiais', 'peça de outro fornecedor', v_v6, pg_temp._hoje(), 'company', true, v_outro);
 
-  c1 := pg_temp._preparar(jsonb_build_object('valor', v_v1, 'forma', 'credito', 'destino', 'os', 'os', v_os, 'cobrar', true, 'fornecedor', v_sup));
+  c1 := pg_temp._preparar(jsonb_build_object('valor', v_v1, 'forma', 'credito', 'destino', 'os', 'os', v_os, 'fornecedor', v_sup));
   r1 := pg_temp._gravar(c1);
   c2 := pg_temp._preparar(jsonb_build_object('valor', v_v2, 'forma', 'pix', 'destino', 'empresa', 'categoria', 'Outras despesas', 'cnpj', v_cnpj));
   r2 := pg_temp._gravar(c2);
@@ -592,17 +688,19 @@ begin
   c4 := pg_temp._preparar(jsonb_build_object('valor', v_v4, 'forma', 'dinheiro', 'destino', 'empresa', 'quem', 'empresa',
                                              'categoria', 'Outras despesas', 'fornecedor', v_sup));
   r4 := pg_temp._gravar(c4);
-  c5 := pg_temp._preparar(jsonb_build_object('valor', v_v5, 'forma', 'credito', 'destino', 'os', 'os', v_os, 'cobrar', true, 'fornecedor', v_sup));
+  c5 := pg_temp._preparar(jsonb_build_object('valor', v_v5, 'forma', 'credito', 'destino', 'os', 'os', v_os, 'fornecedor', v_sup));
   r5 := pg_temp._gravar(c5);
+  c6 := pg_temp._preparar(jsonb_build_object('valor', v_v6, 'forma', 'credito', 'destino', 'os', 'os', v_os, 'fornecedor', v_sup));
   select * into x1 from public.comprovantes where id = c1;
   select * into x2 from public.comprovantes where id = c2;
   select * into x3 from public.comprovantes where id = c3;
   select * into x4 from public.comprovantes where id = c4;
   select * into x5 from public.comprovantes where id = c5;
+  select * into x6 from public.comprovantes where id = c6;
   perform pg_temp._guarda('AD1', c1, v_os, v_v1, v_desp);
   perform pg_temp._guarda('AD2', c2, null, v_v2, v_anot);
   perform pg_temp._guarda('AD4', c4, null, v_v4, v_cx);
-  insert into _resultado values ('AD anti-duplicado: anexa despesa, anotação e conta do Caixa DO MESMO FORNECEDOR; dois iguais = classificar no Extrato',
+  insert into _resultado values ('AD anti-duplicado: anexa despesa (a do fornecedor e a sem fornecedor), anotação e conta do Caixa; outro fornecedor não; dois iguais = classificar no Extrato',
     pg_temp._tipos(x1.efeitos) = 'anexar_despesa,aguardar_fatura' and x1.so_expense_id = v_desp
     and pg_temp._tipos(x2.efeitos) = 'anexar_anotacao' and x2.anotacao_id = v_anot
     and (select count(*) from public.anotacoes_do_extrato where abs(valor - v_v2) < 0.005) = 1
@@ -611,52 +709,106 @@ begin
     and (select count(*) from public.payables where abs(amount - v_v3) < 0.005) = 2
     and pg_temp._tipos(x4.efeitos) = 'anexar_lancamento' and x4.payable_id = v_cx and x4.efeitos->0->>'origem' = 'anterior'
     and (select count(*) from public.payables where abs(amount - v_v4) < 0.005) = 1
-    -- o parecido sem o mesmo fornecedor: lança a deste CMP e avisa (o dono confere no resumo)
-    and pg_temp._tipos(x5.efeitos) = 'despesa_os,aguardar_fatura' and x5.so_expense_id <> v_desp5
-    and r5->'plano_mostrado'->'avisos' @> '["parecido_sem_identidade"]'::jsonb,
+    -- a despesa sem fornecedor não contradiz: é ela
+    and pg_temp._tipos(x5.efeitos) = 'anexar_despesa,aguardar_fatura' and x5.so_expense_id = v_desp5
+    -- a de outro fornecedor contradiz: não é ela, e o dono diz "peça ou despesa"
+    and public._comprovante_lancamento_na_os(x6) is null and public._comprovante_proximo_passo(x6) = 'tipo_na_os',
     'despesa=' || pg_temp._tipos(x1.efeitos) || ' anotacao=' || pg_temp._tipos(x2.efeitos)
     || ' dois_caixas=' || pg_temp._tipos(x3.efeitos) || ' um_caixa=' || pg_temp._tipos(x4.efeitos)
-    || ' sem_identidade=' || pg_temp._tipos(x5.efeitos) || ' ' || coalesce(r5->'plano_mostrado'->>'avisos', '-'));
+    || ' sem_fornecedor=' || pg_temp._tipos(x5.efeitos) || ' outro_fornecedor=' || coalesce(public._comprovante_proximo_passo(x6), '-'));
 exception when others then
-  insert into _resultado values ('AD anti-duplicado: anexa despesa, anotação e conta do Caixa DO MESMO FORNECEDOR; dois iguais = classificar no Extrato', false,
+  insert into _resultado values ('AD anti-duplicado: anexa despesa (a do fornecedor e a sem fornecedor), anotação e conta do Caixa; outro fornecedor não; dois iguais = classificar no Extrato', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
--- ═══ AJ: a despesa anexada segue o "cobrar ou não" de agora (e o cancelar volta) ════════════════
+-- ═══ AN: o lançamento que já está na OS só é comprovado (ajustes do dono, 11/10/2026) ═══════════
 do $$
 declare
   v_os uuid := pg_temp._os('open');
   v_val numeric := pg_temp._val();
-  v_cnpj text := '5' || lpad((floor(random() * 1e12))::bigint::text, 13, '0');
-  v_sup uuid;
+  v_vp numeric := 2 * round(pg_temp._val() / 2, 2);
+  v_va numeric := pg_temp._val();
+  v_vs numeric := pg_temp._val();
   v_desp uuid;
-  v_cmp uuid;
-  r jsonb;
-  c record;
-  v_op_antes numeric;
-  v_op_depois numeric;
-  v_op_cancelado numeric;
-  v_canc jsonb;
+  v_peca uuid;
+  d0 record;
+  d1 record;
+  v_op0 numeric; v_gt0 numeric; v_op1 numeric; v_gt1 numeric; v_op2 numeric;
+  c1 uuid; c2 uuid; c3 uuid; c4 uuid;
+  r1 jsonb; r2 jsonb; r3 jsonb; r4 jsonb;
+  x1 record; x2 record; x3 record; x4 record;
+  k1 jsonb; k2 jsonb; k4 jsonb;
+  v_n_desp integer;
+  v_falhas text[];
+  v_alm public.comprovantes;
+  v_na_alm jsonb;
+  v_na_pec jsonb;
 begin
-  insert into public.suppliers (name, cnpj_cpf) values ('Fornecedor Teste F2 ' || pg_temp._letras(6), v_cnpj) returning id into v_sup;
-  perform public.so_expense_add(v_os, 'Peças e materiais', 'lançada antes, cobrada do cliente', v_val, pg_temp._hoje(), 'company', true, v_sup, null);
+  -- a despesa lançada pela tela, cobrada do cliente (faturável: entra no total)
+  perform public.so_expense_add(v_os, 'Frete e importação', 'frete lançado na OS', v_val, pg_temp._hoje(), 'company', true, null, null);
   select id into v_desp from public.service_order_expenses where service_order_id = v_os;
-  select operational_cost_total into v_op_antes from public.service_orders where id = v_os;
-  v_cmp := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'credito', 'destino', 'os', 'os', v_os,
-                                                'cobrar', false, 'fornecedor', v_sup));
-  r := pg_temp._gravar(v_cmp);
-  select * into c from public.comprovantes where id = v_cmp;
-  select operational_cost_total into v_op_depois from public.service_orders where id = v_os;
-  v_canc := public.comprovante_cancelar(v_cmp, 'era cobrado sim', pg_temp._dono());
-  select operational_cost_total into v_op_cancelado from public.service_orders where id = v_os;
-  insert into _resultado values ('AJ despesa anexada vira custo da HBR (recalcula); cancelar volta a cobrança',
-    r->>'resultado' = 'gravado' and pg_temp._tipos(c.efeitos) = 'anexar_despesa,ajustar_despesa,aguardar_fatura'
-    and v_op_antes = v_val and v_op_depois = 0
-    and (v_canc->>'ok')::boolean and v_op_cancelado = v_val
-    and (select billable_to_client from public.service_order_expenses where id = v_desp),
-    'efeitos=' || pg_temp._tipos(c.efeitos) || ' op ' || v_op_antes || '→' || v_op_depois || '→' || coalesce(v_op_cancelado::text, '-'));
+  select billable_to_client, amount, category, description into d0 from public.service_order_expenses where id = v_desp;
+  -- a peça lançada na OS (2 × o custo)
+  insert into public.service_order_parts (service_order_id, quantity, unit_cost_snapshot) values (v_os, 2, v_vp / 2)
+  returning id into v_peca;
+  -- duas despesas iguais lançadas na OS (ambíguo)
+  insert into public.service_order_expenses (service_order_id, category, description, amount, expense_date, paid_by, billable_to_client)
+  values (v_os, 'Alimentação de campo', 'almoço 1', v_va, pg_temp._hoje(), 'company', true),
+         (v_os, 'Alimentação de campo', 'almoço 2', v_va, pg_temp._hoje(), 'company', true);
+  select operational_cost_total, grand_total into v_op0, v_gt0 from public.service_orders where id = v_os;
+
+  c1 := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'credito', 'destino', 'os', 'os', v_os));
+  r1 := pg_temp._gravar(c1);
+  c2 := pg_temp._preparar(jsonb_build_object('valor', v_vp, 'forma', 'credito', 'destino', 'os', 'os', v_os));
+  r2 := pg_temp._gravar(c2);
+  c3 := pg_temp._preparar(jsonb_build_object('valor', v_va, 'forma', 'credito', 'destino', 'os', 'os', v_os));
+  r3 := pg_temp._gravar(c3);
+  c4 := pg_temp._preparar(jsonb_build_object('valor', v_vs, 'forma', 'credito', 'destino', 'os', 'os', v_os, 'tipo_na_os', 'peca'));
+  r4 := pg_temp._gravar(c4);
+  select * into x1 from public.comprovantes where id = c1;
+  select * into x2 from public.comprovantes where id = c2;
+  select * into x3 from public.comprovantes where id = c3;
+  select * into x4 from public.comprovantes where id = c4;
+  select billable_to_client, amount, category, description into d1 from public.service_order_expenses where id = v_desp;
+  select operational_cost_total, grand_total into v_op1, v_gt1 from public.service_orders where id = v_os;
+  select count(*) into v_n_desp from public.service_order_expenses where service_order_id = v_os;
+  -- a peça só casa com comprovante de material (revisão dos ajustes): o mesmo valor num cupom de almoço não é
+  -- a peça; de "Peças e materiais", é
+  select * into v_alm from public.comprovantes where id = c2;
+  v_alm.categoria := 'Alimentação de campo';
+  v_na_alm := public._comprovante_lancamento_na_os(v_alm);
+  v_alm.categoria := 'Peças e materiais';
+  v_na_pec := public._comprovante_lancamento_na_os(v_alm);
+  k1 := public.comprovante_cancelar(c1, 'anexei errado', pg_temp._dono());
+  k2 := public.comprovante_cancelar(c2, 'anexei errado', pg_temp._dono());
+  k4 := public.comprovante_cancelar(c4, 'foto errada', pg_temp._dono());
+  select operational_cost_total into v_op2 from public.service_orders where id = v_os;
+  select array_agg(nome) into v_falhas from (values
+    ('anexou_a_despesa', r1->>'resultado' = 'gravado' and pg_temp._tipos(x1.efeitos) = 'anexar_despesa,aguardar_fatura'
+                         and x1.so_expense_id = v_desp and x1.tipo_na_os is null and x1.categoria = 'Frete e importação'),
+    ('nada_na_despesa_mudou', d1.billable_to_client and d1.amount = d0.amount and d1.category = d0.category
+                              and d1.description = d0.description),
+    ('anexou_a_peca', r2->>'resultado' = 'gravado' and pg_temp._tipos(x2.efeitos) = 'anexar_peca,aguardar_fatura'
+                      and x2.so_part_id = v_peca and x2.categoria = 'Peças e materiais'),
+    ('peca_so_de_material', v_na_alm is null and v_na_pec->>'tipo' = 'peca' and v_na_pec->>'id' = v_peca::text),
+    ('ambiguo_so_prova', r3->>'resultado' = 'gravado' and pg_temp._tipos(x3.efeitos) = 'comprovar_na_os,aguardar_fatura'
+                         and r3->'plano_mostrado'->'avisos' @> '["varios_na_os"]'::jsonb and x3.so_expense_id is null
+                         and (x3.efeitos->0->>'n')::int = 2),
+    ('peca_sem_candidata', r4->>'resultado' = 'gravado' and pg_temp._tipos(x4.efeitos) = 'comprovar_na_os,aguardar_fatura,pendencia:incluir_na_os'
+                           and x4.pendencias = array['incluir_na_os'] and x4.efeitos->0->>'motivo' = 'peca'),
+    ('nenhum_custo_novo', v_n_desp = 3 and v_op1 = v_op0 and v_gt1 = v_gt0),
+    ('cancelar_so_solta', (k1->>'ok')::boolean and (k2->>'ok')::boolean and (k4->>'ok')::boolean
+                          and exists (select 1 from public.service_order_expenses where id = v_desp and billable_to_client)
+                          and exists (select 1 from public.service_order_parts where id = v_peca)
+                          and (select so_part_id from public.comprovantes where id = c2) is null and v_op2 = v_op0)
+  ) as t(nome, ok) where not coalesce(ok, false);
+  insert into _resultado values ('AN o que já está na OS só é comprovado: despesa e peça anexadas (nada nelas muda), ambíguo e peça nova sem custo',
+    v_falhas is null,
+    coalesce('falhou: ' || array_to_string(v_falhas, ', ') || ' | ', '')
+    || 'despesa=' || pg_temp._tipos(x1.efeitos) || ' peca=' || pg_temp._tipos(x2.efeitos) || ' ambiguo=' || pg_temp._tipos(x3.efeitos)
+    || ' sem_candidata=' || pg_temp._tipos(x4.efeitos) || ' op ' || v_op0 || '→' || v_op1 || '→' || coalesce(v_op2::text, '-'));
 exception when others then
-  insert into _resultado values ('AJ despesa anexada vira custo da HBR (recalcula); cancelar volta a cobrança', false,
+  insert into _resultado values ('AN o que já está na OS só é comprovado: despesa e peça anexadas (nada nelas muda), ambíguo e peça nova sem custo', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
@@ -692,7 +844,7 @@ begin
   values ('boleto do fornecedor', pg_temp._hoje() - 2, pg_temp._hoje() + 3, v_v2, 0, v_v2, 'pending', 'Outras despesas', 'manual', v_sup)
   returning id into v_pay2;
 
-  c1 := pg_temp._preparar(jsonb_build_object('valor', v_v1, 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'cobrar', true,
+  c1 := pg_temp._preparar(jsonb_build_object('valor', v_v1, 'forma', 'dinheiro', 'destino', 'os', 'os', v_os,
                                              'quem', 'empresa', 'fornecedor', v_sup));
   r1 := pg_temp._gravar(c1);
   c2 := pg_temp._preparar(jsonb_build_object('valor', v_v2, 'forma', 'pix', 'destino', 'empresa', 'categoria', 'Outras despesas',
@@ -729,8 +881,9 @@ declare
   v_cx integer;
   v_desp_n integer;
 begin
-  -- o cupom, em dinheiro, cobrado do cliente
-  c1 := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'cobrar', true, 'quem', 'empresa'));
+  -- o cupom, em dinheiro: despesa da OS (custo interno)
+  c1 := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa',
+                                             'categoria', 'Alimentação de campo', 'quem', 'empresa'));
   r1 := pg_temp._gravar(c1);
   -- o recibo da mesma compra: o passo "mesma compra" vem antes de tudo o mais
   c2 := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'tipo', 'recibo'));
@@ -745,7 +898,8 @@ begin
   select * into x2 from public.comprovantes where id = c2;
   select count(*) into v_cx from public.payables where abs(amount - v_val) < 0.005 and payment_method = 'cash';
   -- um terceiro do mesmo valor que o dono diz ser OUTRA compra: grava normal
-  c3 := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'credito', 'destino', 'os', 'os', v_os, 'cobrar', true));
+  c3 := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'credito', 'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa',
+                                             'categoria', 'Alimentação de campo'));
   update public.comprovantes set outra_compra = true where id = c3;
   v_outra := pg_temp._gravar(c3);
   select count(*) into v_desp_n from public.service_order_expenses where service_order_id = v_os and abs(amount - v_val) < 0.005;
@@ -780,7 +934,7 @@ begin
   insert into public.fiscal_notes (nfe_key, nfe_number, status) values (v_chave, '55555', 'confirmed') returning id into v_nota;
   insert into public.fiscal_note_items (fiscal_note_id, item_index, description) values (v_nota, 1, 'item 1'), (v_nota, 2, 'item 2');
   v_cmp := pg_temp._preparar(jsonb_build_object('valor', pg_temp._val(), 'tipo', 'nfe_danfe', 'chave', v_chave,
-                                                'destino', 'os', 'os', v_os, 'cobrar', true));
+                                                'destino', 'os', 'os', v_os, 'tipo_na_os', 'peca'));
   r := pg_temp._gravar(v_cmp);
   -- o reprocessamento da nota (sync_fiscal_note_items): apaga e reinsere as linhas, a OS fica pelo índice
   create temp table _itens on commit drop as select item_index, description, service_order_id from public.fiscal_note_items where fiscal_note_id = v_nota;
@@ -798,7 +952,7 @@ exception when others then
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
--- ═══ XF: cancelar com a OS que mudou depois do sim ═══════════════════════════════════════════════
+-- ═══ XF: cancelar o custo interno com a OS que mudou depois do sim (concluída, faturada e paga) ═══
 do $$
 declare
   v_os uuid := pg_temp._os('open');
@@ -809,32 +963,39 @@ declare
   r jsonb;
   v_antes record;
   v_depois record;
+  v_antes2 record;
+  v_depois2 record;
   v_canc jsonb;
   v_canc2 jsonb;
 begin
-  -- custo da HBR (não faturável) lançado com a OS aberta; a OS é concluída depois: sai sem recálculo
-  v_cmp := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'credito', 'destino', 'os', 'os', v_os, 'cobrar', false));
+  -- custo interno lançado com a OS aberta; a OS é concluída depois: sai sem recálculo
+  v_cmp := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'credito', 'destino', 'os', 'os', v_os,
+                                                'tipo_na_os', 'despesa', 'categoria', 'Alimentação de campo'));
   r := pg_temp._gravar(v_cmp);
   update public.service_orders set status = 'completed', labor_cost_total = 100, check_out_at = now() where id = v_os;
   select grand_total, operational_cost_total into v_antes from public.service_orders where id = v_os;
   v_canc := public.comprovante_cancelar(v_cmp, 'não era desta OS', pg_temp._dono());
   select grand_total, operational_cost_total into v_depois from public.service_orders where id = v_os;
-  -- cobrado do cliente numa OS aberta que o cliente já pagou inteira: tirar deixaria o total abaixo do pago
-  v_cmp2 := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'credito', 'destino', 'os', 'os', v_os2, 'cobrar', true));
+  -- a OS foi faturada e o cliente pagou tudo: o custo interno não está no total — cancela sem bloqueio
+  v_cmp2 := pg_temp._preparar(jsonb_build_object('valor', v_val, 'forma', 'credito', 'destino', 'os', 'os', v_os2,
+                                                 'tipo_na_os', 'despesa', 'categoria', 'Alimentação de campo'));
   r := pg_temp._gravar(v_cmp2);
-  insert into public.receivables (service_order_id, amount, paid_amount, status)
-  values (v_os2, v_val, v_val, 'paid');
+  update public.service_orders set invoicing_status = 'invoiced' where id = v_os2;
+  insert into public.receivables (service_order_id, amount, paid_amount, status) values (v_os2, v_val, v_val, 'paid');
+  select grand_total, operational_cost_total into v_antes2 from public.service_orders where id = v_os2;
   v_canc2 := public.comprovante_cancelar(v_cmp2, 'quero desfazer', pg_temp._dono());
-  insert into _resultado values ('XF cancelar: custo da HBR em OS já concluída sai sem mexer no total; abaixo do já pago recusa',
+  select grand_total, operational_cost_total into v_depois2 from public.service_orders where id = v_os2;
+  insert into _resultado values ('XF cancelar o custo interno: OS concluída ou faturada e paga, sai sem mexer no total e sem bloqueio',
     (v_canc->>'ok')::boolean and v_depois.grand_total = v_antes.grand_total
     and v_depois.operational_cost_total = v_antes.operational_cost_total
     and not exists (select 1 from public.service_order_expenses where service_order_id = v_os)
-    and not (v_canc2->>'ok')::boolean and v_canc2->'bloqueios'->0->>'motivo' = 'abaixo_do_pago'
-    and exists (select 1 from public.service_order_expenses where service_order_id = v_os2),
+    and (v_canc2->>'ok')::boolean and v_depois2.grand_total = v_antes2.grand_total
+    and v_depois2.operational_cost_total = v_antes2.operational_cost_total
+    and not exists (select 1 from public.service_order_expenses where service_order_id = v_os2),
     'concluida=' || coalesce(v_canc->>'ok', '-') || ' total ' || v_antes.grand_total || '→' || v_depois.grand_total
-    || ' pago=' || coalesce(v_canc2->'bloqueios'->0->>'motivo', v_canc2->>'ok'));
+    || ' faturada_paga=' || coalesce(v_canc2->>'ok', v_canc2->'bloqueios'->0->>'motivo'));
 exception when others then
-  insert into _resultado values ('XF cancelar: custo da HBR em OS já concluída sai sem mexer no total; abaixo do já pago recusa', false,
+  insert into _resultado values ('XF cancelar o custo interno: OS concluída ou faturada e paga, sai sem mexer no total e sem bloqueio', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
@@ -889,7 +1050,7 @@ declare
   v_ok boolean := true;
   v_dup jsonb;
 begin
-  -- despesa_os pela rota, faturável, OS aberta (A) + anotação aguardando: tudo some, o total volta
+  -- custo interno em OS aberta (A) + anotação aguardando: tudo some, o total continua o mesmo
   v_a := public.comprovante_cancelar(pg_temp._id('A'), 'comprei em dobro', pg_temp._dono());
   v_ok := v_ok and (v_a->>'ok')::boolean
           and not exists (select 1 from public.service_order_expenses where service_order_id = (select os from _cmps where nome = 'A'))
@@ -898,7 +1059,7 @@ begin
           and (select motivo_cancelamento from public.anotacoes_do_extrato where id = (select anotacao_id from public.comprovantes where id = pg_temp._id('A')))
               like 'CMP-%cancelado: comprei em dobro';
   v_det := v_det || 'A=' || coalesce(v_a->>'ok', '-') || ' ';
-  -- despesa_os direta (B): delete sem recálculo, o total da OS continua igual
+  -- custo interno em OS concluída (B): delete sem recálculo, o total da OS continua igual
   select grand_total, operational_cost_total into ob0 from public.service_orders where id = (select os from _cmps where nome = 'B');
   v_b := public.comprovante_cancelar(pg_temp._id('B'), 'não era da OS', pg_temp._dono());
   select grand_total, operational_cost_total into ob1 from public.service_orders where id = (select os from _cmps where nome = 'B');
@@ -944,10 +1105,10 @@ begin
   -- cancelar de novo: recusa (já cancelado), nada muda
   v_dup := public.comprovante_cancelar(pg_temp._id('A'), 'de novo', pg_temp._dono());
   v_ok := v_ok and not (v_dup->>'ok')::boolean and v_dup->'bloqueios'->0->>'motivo' = 'ja_cancelado';
-  insert into _resultado values ('X1 cancelar desfaz: despesa da OS (rota e direta), anotação, Caixa, itens da nota, pendência, anexos',
+  insert into _resultado values ('X1 cancelar desfaz: custo interno da OS (aberta e concluída), anotação, Caixa, itens da nota, pendência, anexos',
     v_ok, v_det || 'de_novo=' || coalesce(v_dup->'bloqueios'->0->>'motivo', '-'));
 exception when others then
-  insert into _resultado values ('X1 cancelar desfaz: despesa da OS (rota e direta), anotação, Caixa, itens da nota, pendência, anexos', false,
+  insert into _resultado values ('X1 cancelar desfaz: custo interno da OS (aberta e concluída), anotação, Caixa, itens da nota, pendência, anexos', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
@@ -969,16 +1130,15 @@ declare
   v_ok boolean := true;
   v_det text := '';
 begin
-  -- despesa faturável numa OS que depois foi faturada → os_faturada
-  v_fat := pg_temp._preparar(jsonb_build_object('valor', pg_temp._val(), 'forma', 'credito', 'destino', 'os', 'os', v_os, 'cobrar', true));
+  -- custo interno numa OS que depois foi faturada: NÃO bloqueia (o comprovante nunca mexeu no total)
+  v_fat := pg_temp._preparar(jsonb_build_object('valor', pg_temp._val(), 'forma', 'credito', 'destino', 'os', 'os', v_os,
+                                                'tipo_na_os', 'despesa', 'categoria', 'Alimentação de campo'));
   r := pg_temp._gravar(v_fat);
   update public.service_orders set invoicing_status = 'invoiced' where id = v_os;
   v1 := public.comprovante_cancelar(v_fat, 'quero desfazer', pg_temp._dono());
-  v_ok := v_ok and not (v1->>'ok')::boolean and v1->'bloqueios'->0->>'motivo' = 'os_faturada'
-          and exists (select 1 from public.service_order_expenses where id = (select so_expense_id from public.comprovantes where id = v_fat))
-          -- gravado (F2) ou esperando a compra no cartão (o crédito com a F3, 20261011303000)
-          and (select situacao from public.comprovantes where id = v_fat) in ('gravado', 'aguardando_banco');
-  v_det := v_det || 'faturada=' || coalesce(v1->'bloqueios'->0->>'motivo', v1->>'ok') || ' ';
+  v_ok := v_ok and (v1->>'ok')::boolean and not exists (select 1 from public.service_order_expenses where service_order_id = v_os)
+          and (select situacao from public.comprovantes where id = v_fat) = 'cancelado';
+  v_det := v_det || 'faturada=' || coalesce(v1->>'ok', v1->'bloqueios'->0->>'motivo') || ' ';
   -- anotação já aplicada pelo Extrato e a linha dela aprovada (virou lançamento) → anotacao_aplicada.
   -- (Com a F3, a aplicada SEM lançamento na linha não bloqueia mais: o cancelamento devolve a linha ao
   -- motor — teste GX6 de comprovantes_gravacao_f3.sql.)
@@ -1033,10 +1193,10 @@ begin
           'numero', (select numero from public.comprovantes where id = v_aplic)));
   v_ok := v_ok and v_curto = '22023' and v6->>'resultado' = 'motivo_obrigatorio';
   v_det := v_det || 'fila=' || coalesce(v_fila_r->>'ok', '-') || ' curto=' || v_curto || ' sem_motivo=' || coalesce(v6->>'resultado', '-');
-  insert into _resultado values ('X2 cancelar recusa (e nada muda): OS faturada, anotação aplicada, mês fechado, reembolso pago',
+  insert into _resultado values ('X2 cancelar recusa (e nada muda): anotação aplicada, mês fechado, reembolso pago; a OS faturada não bloqueia o custo interno',
     v_ok, v_det);
 exception when others then
-  insert into _resultado values ('X2 cancelar recusa (e nada muda): OS faturada, anotação aplicada, mês fechado, reembolso pago', false,
+  insert into _resultado values ('X2 cancelar recusa (e nada muda): anotação aplicada, mês fechado, reembolso pago; a OS faturada não bloqueia o custo interno', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
@@ -1072,6 +1232,53 @@ begin
     'passo=' || coalesce(v_p->>'passo', '-') || ' resultado=' || coalesce(r->>'resultado', '-'));
 exception when others then
   insert into _resultado values ('R rota que falha: não grava nada e a pergunta do sim continua aberta', false,
+    'erro: ' || sqlstate || ' ' || sqlerrm);
+end $$;
+
+-- ═══ LP: o link público (anon com o share token da OS) não vê o custo interno; vê a despesa manual ══
+do $$
+declare
+  v_os uuid := pg_temp._os('open');
+  v_token text;
+  v_manual uuid;
+  v_interna uuid;
+  v_cmp uuid;
+  r jsonb;
+  v_ve_manual integer;
+  v_ve_interna integer;
+  v_sem_token integer;
+  v_col text := 'nenhum erro';
+begin
+  select share_token::text into v_token from public.service_orders where id = v_os;
+  insert into public.service_order_expenses (service_order_id, category, description, amount, expense_date, paid_by, billable_to_client)
+  values (v_os, 'Frete e importação', 'frete lançado à mão', pg_temp._val(), pg_temp._hoje(), 'company', true)
+  returning id into v_manual;
+  v_cmp := pg_temp._preparar(jsonb_build_object('valor', pg_temp._val(), 'forma', 'credito', 'destino', 'os', 'os', v_os,
+                                                'tipo_na_os', 'despesa', 'categoria', 'Combustível e deslocamento'));
+  r := pg_temp._gravar(v_cmp);
+  select so_expense_id into v_interna from public.comprovantes where id = v_cmp;
+  -- como o link público: o papel anon com o token da OS na requisição (em produção, o cabeçalho
+  -- x-share-token; no ensaio, o dublê de share_token_da_requisicao lê ensaio.share_token)
+  perform set_config('request.headers', json_build_object('x-share-token', v_token)::text, true);
+  perform set_config('ensaio.share_token', v_token, true);
+  execute 'set local role anon';
+  select count(*) filter (where id = v_manual), count(*) filter (where id = v_interna) into v_ve_manual, v_ve_interna
+    from public.service_order_expenses where service_order_id = v_os;
+  begin
+    perform origem_codigo from public.service_order_expenses limit 1;
+  exception when insufficient_privilege then
+    v_col := sqlstate;
+  end;
+  perform set_config('request.headers', '{}', true);
+  perform set_config('ensaio.share_token', '', true);
+  select count(*) into v_sem_token from public.service_order_expenses where service_order_id = v_os;
+  execute 'reset role';
+  insert into _resultado values ('LP link público (anon com o token da OS): vê a despesa manual, não vê o custo interno nem a coluna da origem',
+    r->>'resultado' = 'gravado' and v_interna is not null and v_ve_manual = 1 and v_ve_interna = 0 and v_col = '42501' and v_sem_token = 0,
+    'manual=' || coalesce(v_ve_manual::text, '-') || ' interna=' || coalesce(v_ve_interna::text, '-') || ' coluna=' || v_col
+    || ' sem_token=' || coalesce(v_sem_token::text, '-'));
+exception when others then
+  insert into _resultado values ('LP link público (anon com o token da OS): vê a despesa manual, não vê o custo interno nem a coluna da origem', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 

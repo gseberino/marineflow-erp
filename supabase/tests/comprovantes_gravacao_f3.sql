@@ -30,6 +30,12 @@
 --       pela aba Reembolsos não ganha outro crédito
 --   GT1 técnico que saiu das Diárias (a diária tem de valer na compra e hoje): a pendência da F2
 --   GD1 a linha ligada foi estornada: desliga e deixa a pendência "conferir o estorno"
+-- Ajustes do dono (11/10/2026):
+--   GL1 o "extra" da diária é o almoço: a alimentação paga pelo técnico num dia com extra avisa (não
+--       bloqueia); outra categoria, ou dia sem extra, não avisa
+-- Revisão dos ajustes (11/10/2026):
+--   GS1 do bolso do sócio com a conta do fornecedor em aberto: anexa a conta e avisa, sem reembolso
+--   (a despesa da OS dos testes é o custo interno: "peça ou despesa?" = despesa)
 --
 -- ═══ COMO RODAR ═══ (só com o OK nomeado PF3-2 da spec da F3; também roda no ensaio PGlite da bancada)
 --
@@ -187,7 +193,7 @@ begin
   perform public.comprovante_conversa_entrar(array[v]);
   update public.comprovantes
      set destino = coalesce(p->>'destino', 'insumo'), destino_os_id = nullif(p->>'os', '')::uuid,
-         cobrar_cliente = (p->>'cobrar')::boolean, quem_pagou = p->>'quem', pagador_payee_id = nullif(p->>'pagador', '')::uuid,
+         tipo_na_os = p->>'tipo_na_os', quem_pagou = p->>'quem', pagador_payee_id = nullif(p->>'pagador', '')::uuid,
          categoria = p->>'categoria', outra_compra = true
    where id = v;
   perform pg_temp._livrar_perguntas();
@@ -389,13 +395,13 @@ declare
   re record;
   d record;
 begin
-  r := pg_temp._cmp(jsonb_build_object('valor', v_val, 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'cobrar', false,
+  r := pg_temp._cmp(jsonb_build_object('valor', v_val, 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa', 'categoria', 'Peças e materiais',
                                        'quem', 'tecnico', 'pagador', v_com, 'cnpj', pg_temp._cnpj(), 'receita', 'Posto Teste F3'));
   select * into c from public.comprovantes where id = (r->>'id')::uuid;
   select * into re from public.diarias_reembolsos where id = c.reembolso_id;
   select * into d from public.service_order_expenses where id = c.so_expense_id;
   perform pg_temp._guardar('GV7', c.id, null, v_com);
-  r2 := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'cobrar', false,
+  r2 := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa', 'categoria', 'Peças e materiais',
                                         'quem', 'tecnico', 'pagador', v_sem, 'cnpj', pg_temp._cnpj()));
   select * into c2 from public.comprovantes where id = (r2->>'id')::uuid;
   insert into _resultado values ('GV7 técnico com diária: reembolso nas Diárias (sem pendência); sem diária: a pendência da F2 e o aviso',
@@ -481,7 +487,7 @@ begin
   select reembolso_id into v_reemb4 from public.comprovantes where id = pg_temp._id('GV7');
   k := public.comprovante_cancelar(pg_temp._id('GV7'), 'o técnico não pagou', pg_temp._dono());
   -- GX5: reembolso dentro de um acerto já fechado → bloqueia
-  r := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'cobrar', false,
+  r := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa', 'categoria', 'Peças e materiais',
                                        'quem', 'tecnico', 'pagador', v_b, 'cnpj', pg_temp._cnpj()));
   select * into c5 from public.comprovantes where id = (r->>'id')::uuid;
   v_acerto := public.fechar_acerto_diarias(v_b, pg_temp._hoje(), false, pg_temp._dono());
@@ -490,7 +496,7 @@ begin
   insert into _resultado values ('GX4/GX5 cancelar o reembolso: período aberto tira o crédito; acerto fechado bloqueia',
     (k->>'ok')::boolean and (select status from public.diarias_reembolsos where id = v_reemb4) = 'cancelado'
     and (select motivo_cancelamento from public.diarias_reembolsos where id = v_reemb4) like 'CMP-% cancelado: o técnico não pagou'
-    and (v_acerto->>'ok')::boolean and v_acerto->>'message' like '%· reembolsos R$ %'
+    and (v_acerto->>'ok')::boolean and v_acerto->>'message' like '%· reembolso de despesas pagas pelo técnico R$ %'
     and not (k5->>'ok')::boolean and k5->'bloqueios' @> '[{"motivo":"reembolso_acertado"}]'::jsonb
     and k5->'bloqueios'->0->>'como_destravar' like 'reabra o acerto nº % em Financeiro › Diárias e cancele de novo'
     and (select status from public.diarias_reembolsos where id = c5.reembolso_id) = 'ativo'
@@ -567,17 +573,17 @@ begin
   insert into public.fiscal_note_items (fiscal_note_id, item_index, description) values (v_nota0, 1, 'item 1');
   perform pg_temp._confirmar_nota(v_nota0, 1);
   r0 := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'tipo', 'nfe_danfe', 'chave', v_chave0,
-                                        'destino', 'os', 'os', v_os, 'cobrar', true));
+                                        'destino', 'os', 'os', v_os, 'tipo_na_os', 'peca'));
   select * into c0 from public.comprovantes where id = (r0->>'id')::uuid;
   insert into public.fiscal_notes (nfe_key, nfe_number, status) values (v_chave1, '11111', 'pending') returning id into v_nota1;
   insert into public.fiscal_note_items (fiscal_note_id, item_index, description) values (v_nota1, 1, 'item 1');
   r1 := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'tipo', 'nfe_danfe', 'chave', v_chave1,
-                                        'destino', 'os', 'os', v_os, 'cobrar', true));
+                                        'destino', 'os', 'os', v_os, 'tipo_na_os', 'peca'));
   select * into c1 from public.comprovantes where id = (r1->>'id')::uuid;
   -- GN2: aguardando o XML; a nota entra pendente (process-nfe-xml): nada fecha; confirmada (Entrada de
   -- Mercadoria): a R5 (e o cron, até 2 min depois) fecha o CMP e liga os itens à OS
   r2 := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'tipo', 'nfe_xml', 'chave', v_chave2,
-                                        'destino', 'os', 'os', v_os, 'cobrar', false));
+                                        'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa'));
   select * into c2 from public.comprovantes where id = (r2->>'id')::uuid;
   if c2.situacao <> 'aguardando_xml' then
     raise exception 'GN2 deveria esperar o XML: %', c2.situacao;
@@ -593,7 +599,7 @@ begin
   select * into c2b from public.comprovantes where id = c2.id;
   -- GN3: a nota só chegou no e-mail (anexo ainda não importado): a varredura marca e o "pendentes" mostra
   r3 := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'tipo', 'nfe_danfe', 'chave', v_chave3,
-                                        'destino', 'os', 'os', v_os, 'cobrar', false));
+                                        'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa'));
   if exists (select 1 from information_schema.columns
               where table_schema = 'public' and table_name = 'email_messages' and column_name = 'account_id') then
     -- produção: uma conta de e-mail existente (o rollback desfaz)
@@ -639,7 +645,8 @@ declare
   v_pend boolean;
 begin
   update public.comprovantes_indice_pessoal set pendente = false where mes = v_mes;
-  r := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'credito', 'destino', 'pessoal', 'cnpj', pg_temp._cnpj()));
+  -- do bolso (ou do cartão pessoal): só o arquivo (o PESSOAL pergunta quem pagou: ajustes do dono, 11/10/2026)
+  r := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'credito', 'destino', 'pessoal', 'quem', 'socio', 'cnpj', pg_temp._cnpj()));
   select * into c from public.comprovantes where id = (r->>'id')::uuid;
   select pendente into v_pend from public.comprovantes_indice_pessoal where mes = v_mes;
   v_ind := public.comprovantes_indice_do_mes(v_mes);
@@ -681,7 +688,7 @@ begin
   perform pg_temp._livrar_perguntas();
   v_tx := pg_temp._linha(jsonb_build_object('valor', v_val));
   v_q := pg_temp._proposta(v_tx);
-  r := pg_temp._cmp(jsonb_build_object('valor', v_val, 'forma', 'debito', 'destino', 'os', 'os', v_os, 'cobrar', false,
+  r := pg_temp._cmp(jsonb_build_object('valor', v_val, 'forma', 'debito', 'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa', 'categoria', 'Peças e materiais',
                                        'cnpj', pg_temp._cnpj(), 'receita', 'Loja GA1 F3'));
   select * into c from public.comprovantes where id = (r->>'id')::uuid;
   insert into public.payables (description, issue_date, due_date, amount, paid_amount, balance_amount, status, expense_category,
@@ -807,7 +814,7 @@ begin
                                              billable_to_client, supplier_id, reimbursed)
   values (v_os, 'Peças e materiais', 'Despesa do técnico pelo app (GR1)', v_val, pg_temp._hoje(), 'technician', false, v_sup, false)
   returning id into v_e1;
-  r1 := pg_temp._cmp(jsonb_build_object('valor', v_val, 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'cobrar', false,
+  r1 := pg_temp._cmp(jsonb_build_object('valor', v_val, 'forma', 'dinheiro', 'destino', 'os', 'os', v_os,
                                         'quem', 'tecnico', 'pagador', v_tec, 'fornecedor', v_sup, 'cnpj', v_cnpj));
   select * into c1 from public.comprovantes where id = (r1->>'id')::uuid;
   select * into e1 from public.service_order_expenses where id = v_e1;
@@ -817,7 +824,7 @@ begin
                                              billable_to_client, supplier_id, reimbursed, reimbursed_at)
   values (v_os, 'Peças e materiais', 'Despesa já reembolsada (GR1)', v_val2, pg_temp._hoje(), 'technician', false, v_sup, true, now())
   returning id into v_e2;
-  r2 := pg_temp._cmp(jsonb_build_object('valor', v_val2, 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'cobrar', false,
+  r2 := pg_temp._cmp(jsonb_build_object('valor', v_val2, 'forma', 'dinheiro', 'destino', 'os', 'os', v_os,
                                         'quem', 'tecnico', 'pagador', v_tec, 'fornecedor', v_sup, 'cnpj', v_cnpj));
   select * into c2 from public.comprovantes where id = (r2->>'id')::uuid;
   insert into _resultado values ('GR1 despesa da OS paga pelo técnico: reembolsada pelas Diárias (sai da aba Reembolsos); cancelar volta; já reembolsada não ganha outro crédito',
@@ -854,7 +861,7 @@ begin
   values (v_tec, 'freelancer', 'diaria', 300, pg_temp._hoje() - 90, pg_temp._hoje() - 15);
   insert into public.work_profiles (payee_id, tipo_vinculo, modo_pagamento, vigencia_inicio)
   values (v_tec, 'freelancer', 'empreitada', pg_temp._hoje() - 14);
-  r := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'cobrar', false,
+  r := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'dinheiro', 'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa', 'categoria', 'Peças e materiais',
                                        'quem', 'tecnico', 'pagador', v_tec, 'cnpj', pg_temp._cnpj(), 'data', pg_temp._hoje() - 20));
   select * into c from public.comprovantes where id = (r->>'id')::uuid;
   insert into _resultado values ('GT1 técnico que saiu das Diárias (diária vencida, hoje empreitada): a pendência da F2 com o aviso, nenhum reembolso',
@@ -881,7 +888,7 @@ begin
   -- como candidata) e deixa a pendência para o dono decidir a despesa da OS
   v_tx := pg_temp._linha(jsonb_build_object('valor', v_val));
   perform pg_temp._proposta(v_tx);
-  r := pg_temp._cmp(jsonb_build_object('valor', v_val, 'forma', 'debito', 'destino', 'os', 'os', v_os, 'cobrar', false, 'cnpj', pg_temp._cnpj()));
+  r := pg_temp._cmp(jsonb_build_object('valor', v_val, 'forma', 'debito', 'destino', 'os', 'os', v_os, 'tipo_na_os', 'despesa', 'categoria', 'Peças e materiais', 'cnpj', pg_temp._cnpj()));
   select * into c from public.comprovantes where id = (r->>'id')::uuid;
   update public.bank_transactions set dismissed_kind = 'estornada', dismissed_reason = 'estorno (teste F3)', dismissed_at = now()
    where id = v_tx;
@@ -895,6 +902,87 @@ begin
     'antes=' || c.situacao || ' depois=' || c2.situacao || ' pendencias=' || array_to_string(c2.pendencias, ','));
 exception when others then
   insert into _resultado values ('GD1 a linha ligada foi estornada: desliga e deixa a pendência "conferir o estorno" (a despesa da OS fica para o dono)', false,
+    'erro: ' || sqlstate || ' ' || sqlerrm);
+end $$;
+
+-- ═══ GL1: o "extra" da diária é o almoço (resposta 6 do dono, 11/10/2026) ═══════════════════════
+do $$
+declare
+  v_os uuid := pg_temp._os();
+  v_tec uuid := pg_temp._freelancer(true);
+  v_perfil uuid;
+  v_dia date := pg_temp._hoje() - 2;
+  r_alm jsonb;
+  r_comb jsonb;
+  r_sem jsonb;
+  e jsonb;
+begin
+  select id into v_perfil from public.work_profiles where payee_id = v_tec;
+  -- no dia, a diária inteira com R$ 20 de extra (o almoço)
+  insert into public.work_shifts (work_profile_id, data, tipo, fracao, valor_diaria, extras)
+  values (v_perfil, v_dia, 'diaria', 1, 300, 20);
+  r_alm := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'dinheiro', 'destino', 'os', 'os', v_os,
+                                           'tipo_na_os', 'despesa', 'categoria', 'Alimentação de campo',
+                                           'quem', 'tecnico', 'pagador', v_tec, 'cnpj', pg_temp._cnpj(), 'data', v_dia));
+  -- outra categoria no mesmo dia: não avisa
+  r_comb := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'dinheiro', 'destino', 'os', 'os', v_os,
+                                            'tipo_na_os', 'despesa', 'categoria', 'Combustível e deslocamento',
+                                            'quem', 'tecnico', 'pagador', v_tec, 'cnpj', pg_temp._cnpj(), 'data', v_dia));
+  -- alimentação num dia sem o extra: não avisa
+  r_sem := pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'dinheiro', 'destino', 'os', 'os', v_os,
+                                           'tipo_na_os', 'despesa', 'categoria', 'Alimentação de campo',
+                                           'quem', 'tecnico', 'pagador', v_tec, 'cnpj', pg_temp._cnpj(), 'data', v_dia - 1));
+  e := pg_temp._efeito(r_alm->'plano_mostrado'->'efeitos', 'reembolso_tecnico');
+  insert into _resultado values ('GL1 almoço já no extra da diária: a alimentação paga pelo técnico avisa (e grava); outra categoria ou dia sem extra, não',
+    r_alm->>'resultado' = 'gravado' and r_alm->'plano_mostrado'->'avisos' @> '["almoco_ja_no_extra"]'::jsonb
+    and r_alm->'gravacao'->'avisos' @> '["almoco_ja_no_extra"]'::jsonb
+    and (e->'extra_do_dia'->>'valor')::numeric = 20 and (e->'extra_do_dia'->>'data')::date = v_dia
+    and exists (select 1 from public.diarias_reembolsos where origem_codigo = (select codigo from public.comprovantes where id = (r_alm->>'id')::uuid))
+    and r_comb->>'resultado' = 'gravado' and not (r_comb->'plano_mostrado'->'avisos' @> '["almoco_ja_no_extra"]'::jsonb)
+    and pg_temp._efeito(r_comb->'plano_mostrado'->'efeitos', 'reembolso_tecnico')->'extra_do_dia' = 'null'::jsonb
+    and r_sem->>'resultado' = 'gravado' and not (r_sem->'plano_mostrado'->'avisos' @> '["almoco_ja_no_extra"]'::jsonb),
+    'almoco=' || coalesce(r_alm->'plano_mostrado'->>'avisos', '-') || ' extra=' || coalesce(e->>'extra_do_dia', '-')
+    || ' combustivel=' || coalesce(r_comb->'plano_mostrado'->>'avisos', '-') || ' sem_extra=' || coalesce(r_sem->'plano_mostrado'->>'avisos', '-'));
+exception when others then
+  insert into _resultado values ('GL1 almoço já no extra da diária: a alimentação paga pelo técnico avisa (e grava); outra categoria ou dia sem extra, não', false,
+    'erro: ' || sqlstate || ' ' || sqlerrm);
+end $$;
+
+-- ═══ GS1: o sócio pagou do bolso a conta que a empresa ainda deve (revisão dos ajustes, 11/10/2026) ═══
+do $$
+declare
+  v_val numeric := pg_temp._val();
+  v_cnpj text := pg_temp._cnpj();
+  v_sup uuid;
+  v_pay uuid;
+  v_socio uuid;
+  r jsonb;
+  c record;
+  pay record;
+  v_reemb integer;
+begin
+  insert into public.payees (name, kind, active, app_user_id) values ('Sócio Teste GS1', 'socio', true, pg_temp._dono())
+  returning id into v_socio;
+  insert into public.suppliers (name, cnpj_cpf) values ('Fornecedor Bolso F3 ' || pg_temp._letras(5), v_cnpj) returning id into v_sup;
+  insert into public.payables (description, issue_date, due_date, amount, paid_amount, balance_amount, status, expense_category,
+                               supplier_id, origin)
+  values ('Conta aberta do fornecedor (GS1)', pg_temp._hoje(), pg_temp._hoje() + 5, v_val, 0, v_val, 'pending', 'Materiais e Insumos Operacionais',
+          v_sup, 'manual')
+  returning id into v_pay;
+  r := pg_temp._cmp(jsonb_build_object('valor', v_val, 'forma', 'pix', 'tipo', 'pix', 'favorecido', v_cnpj, 'fornecedor', v_sup,
+                                       'quem', 'socio'));
+  select * into c from public.comprovantes where id = (r->>'id')::uuid;
+  select * into pay from public.payables where id = v_pay;
+  select count(*) into v_reemb from public.payables where payee_id = v_socio and status <> 'cancelled';
+  insert into _resultado values ('GS1 do bolso do sócio com a conta do fornecedor em aberto: anexa a conta e avisa, sem reembolso (o gasto não conta duas vezes)',
+    r->>'resultado' = 'gravado'
+    and pg_temp._tipos(r->'plano_mostrado'->'efeitos') = 'anexar_lancamento,pendencia:dar_baixa'
+    and r->'plano_mostrado'->'avisos' @> '["conta_aberta_paga_pelo_socio"]'::jsonb
+    and c.payable_id = v_pay and pay.status = 'pending' and v_reemb = 0 and c.banco_regra is null,
+    'plano=' || pg_temp._tipos(r->'plano_mostrado'->'efeitos') || ' avisos=' || coalesce(r->'plano_mostrado'->>'avisos', '-')
+    || ' reembolsos=' || v_reemb || ' conta=' || coalesce(pay.status, '-'));
+exception when others then
+  insert into _resultado values ('GS1 do bolso do sócio com a conta do fornecedor em aberto: anexa a conta e avisa, sem reembolso (o gasto não conta duas vezes)', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 

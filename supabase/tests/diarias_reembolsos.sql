@@ -99,9 +99,9 @@ begin
   insert into _resultado values ('D3 acerto: a simulação lista os reembolsos; o fechado guarda a foto e mostra na mensagem',
     (s->>'reembolsos')::numeric = 62 and jsonb_array_length(s->'reembolsos_itens') = 1
     and s->'reembolsos_itens'->0->>'codigo' = 'CMP-99901' and (s->'reembolsos_itens'->0->>'valor')::numeric = 62
-    and (s->>'valor_do_acerto')::numeric = 362 and s->>'resumo' like '%· reembolsos R$ 62,00 · vales%'
+    and (s->>'valor_do_acerto')::numeric = 362 and s->>'resumo' like '%· reembolso de despesas pagas pelo técnico R$ 62,00 · vales%'
     and (f->>'ok')::boolean and v_ac.reembolsos = 62 and v_ac.trabalhado = 300 and v_ac.valor_do_acerto = 362
-    and f->>'message' like '%· reembolsos R$ 62,00%',
+    and f->>'message' like '%· reembolso de despesas pagas pelo técnico R$ 62,00%',
     coalesce(s->>'resumo', '-'));
 exception when others then
   insert into _resultado values ('D3 acerto: a simulação lista os reembolsos; o fechado guarda a foto e mostra na mensagem', false,

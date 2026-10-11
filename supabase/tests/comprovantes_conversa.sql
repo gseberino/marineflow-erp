@@ -2,7 +2,8 @@
 --
 --   T7  entrar na fila pré-preenche pela legenda ("empresa", "cupom OS N", nome do barco) e só
 --       confirma sozinho o valor de selo alta/média
---   T8  ordem dos passos: débito + legenda com a OS → só "cobrar" e "confirmar"
+--   T8  ordem dos passos: débito + legenda com a OS → só "peça ou despesa?" e "confirmar"; com a despesa
+--       igual já lançada na OS, direto ao "confirmar" (só comprova) — ajustes do dono de 11/10/2026
 --   T9  vigia: pausa do "sair", horário, conversa em andamento, espaçamento de 4 h e limite de 3
 --   T10 "ok" no confirmar devolve ok_nao_aprova e nada é gravado; "1" no confirmar também não aprova
 --   T11 sim com versão velha devolve resumo (versao_mudou); sim na versão certa grava
@@ -19,6 +20,10 @@
 --   T21 a abertura pergunta o CMP que chegou e conta o lote (os antigos à parte)
 --   T22 comprovantes_ja_lancados: o financeiro sabe que já foi lançado, sem ver o CMP
 --   T23 Dropbox: o fim de um "mover" velho não apaga o "cancelar" pedido no meio
+--   (ajustes do dono, 11/10/2026)
+--   T24 PESSOAL pergunta quem pagou: do bolso confirma direto (só o arquivo); da empresa vira gasto pessoal
+--       do sócio ("Gasto Pessoal Sócio - Descontar PL")
+--   T25 o passo "peça ou despesa": a palavra vale, o corrigir limpa e trocar a OS pergunta de novo
 --
 -- ═══ COMO RODAR ═══ (só com o OK nomeado P3 da spec da F2; também roda no ensaio PGlite da bancada)
 --
@@ -26,7 +31,7 @@
 --
 -- Seguro em produção: cria um dono de teste (admin com created_at em 2000, que vira o
 -- _comprovante_dono() só dentro da transação), OS/barcos/clientes de mentira, liga a conversa só
--- dentro da transação e termina em ROLLBACK. O T11 grava pela rota real (custo da HBR numa OS de
+-- dentro da transação e termina em ROLLBACK. O T11 grava pela rota real (custo interno numa OS de
 -- teste + anotação antes do banco com valor aleatório): tudo some no rollback. Sem id nem data fixa.
 --
 -- A tabela final tem de mostrar ok = true em todas as linhas. Uma linha false é defeito.
@@ -175,33 +180,63 @@ do $$
 declare
   v_os uuid := pg_temp._os('open');
   v_cmp uuid := pg_temp._cmp(jsonb_build_object('forma', 'debito', 'legenda', 'OS ' || pg_temp._os_num(v_os), 'dica', 'OS ' || pg_temp._os_num(v_os)));
+  v_os2 uuid := pg_temp._os('open');
+  v_val2 numeric := round((1000 + random() * 8000)::numeric, 2);
+  v_cmp2 uuid;
+  v_desp uuid;
   v_p jsonb;
   v_r jsonb;
+  v_p2 jsonb;
   v_efeitos text;
+  v_efeitos2 text;
+  v_sit text;
+  v_versao integer;
 begin
   perform pg_temp._livrar();
   perform public.comprovante_conversa_entrar(array[v_cmp]);
   v_p := public.comprovante_proxima_pergunta(pg_temp._phone(), 'abertura', null);
-  v_r := pg_temp._responder(v_p, jsonb_build_object('tipo', 'opcao', 'n', 2));
-  select string_agg(e->>'tipo', ',' order by o) into v_efeitos
+  -- 1 = peça ou material da OS (só comprova: a peça entra pela OS)
+  v_r := pg_temp._responder(v_p, jsonb_build_object('tipo', 'opcao', 'n', 1));
+  select string_agg(e->>'tipo' || case when e->>'tipo' = 'pendencia' then ':' || (e->>'qual') else '' end, ',' order by o)
+    into v_efeitos
     from jsonb_array_elements(v_r->'proxima'->'plano'->'efeitos') with ordinality as t(e, o);
-  insert into _resultado values ('T8 débito + legenda com a OS: só cobrar e confirmar',
-    v_p->>'passo' = 'cobrar' and jsonb_array_length(v_p->'opcoes') = 2 and (v_p->'primeira_do_lote'->>'n')::integer = 1
-    and v_r->>'resultado' = 'resumo' and v_r->'proxima'->>'passo' = 'confirmar'
+  select situacao, resumo_versao into v_sit, v_versao from public.comprovantes where id = v_cmp;
+  -- a despesa igual que já está na OS (lançada à mão): nada a perguntar, só comprova
+  perform pg_temp._livrar();
+  insert into public.service_order_expenses (service_order_id, category, description, amount, expense_date, paid_by, billable_to_client)
+  values (v_os2, 'Combustível e deslocamento', 'abastecimento lançado na OS', v_val2, pg_temp._hoje(), 'company', true)
+  returning id into v_desp;
+  v_cmp2 := pg_temp._cmp(jsonb_build_object('forma', 'debito', 'valor', v_val2,
+                                            'legenda', 'OS ' || pg_temp._os_num(v_os2), 'dica', 'OS ' || pg_temp._os_num(v_os2)));
+  perform public.comprovante_conversa_entrar(array[v_cmp2]);
+  v_p2 := public.comprovante_proxima_pergunta(pg_temp._phone(), 'abertura', null);
+  select string_agg(e->>'tipo', ',' order by o) into v_efeitos2
+    from jsonb_array_elements(v_p2->'plano'->'efeitos') with ordinality as t(e, o);
+  insert into _resultado values ('T8 débito + legenda com a OS: só "peça ou despesa?" e confirmar; despesa igual já na OS, direto ao confirmar',
+    v_p->>'passo' = 'tipo_na_os' and jsonb_array_length(v_p->'opcoes') = 2 and (v_p->'primeira_do_lote'->>'n')::integer = 1
+    and v_p->'opcoes'->0->>'valor' = 'peca' and v_p->'opcoes'->1->>'valor' = 'despesa'
+    and v_r->>'resultado' = 'resumo' and v_r->'proxima'->>'passo' = 'confirmar' and v_r->'cmp'->>'tipo_na_os' = 'peca'
+    and v_r->'cmp'->>'categoria' = 'Peças e materiais'
     -- o débito anota antes do banco na F2; com a F3 (20261011303000) espera a linha pela pergunta do
     -- extrato (o C6 manda o débito sem documento: a anotação nunca casaria) — o teste é da ordem dos passos
-    and v_efeitos in ('despesa_os,anotar', 'despesa_os,aguardar_banco')
-    and (v_r->'proxima'->'plano'->'efeitos'->0->>'billable')::boolean = false
-    and (v_r->'proxima'->>'versao')::integer = (select resumo_versao from public.comprovantes where id = v_cmp)
+    and v_efeitos in ('comprovar_na_os,anotar,pendencia:incluir_na_os', 'comprovar_na_os,aguardar_banco,pendencia:incluir_na_os')
+    and (v_r->'proxima'->>'versao')::integer = v_versao
     -- a pasta do barco só com pasta registrada ou pasta-base configurada (senão a do mês): o resumo diz onde vai de fato
     and v_r->'proxima'->>'pasta' like case when public._comprovante_usa_pasta_do_barco(public._comprovante_os_info(v_os))
                                            then '%/1- DOC''s/Compras' else 'COMPROVANTES/%' end
-    and (select situacao from public.comprovantes where id = v_cmp) = 'aguardando_sim',
+    and v_sit = 'aguardando_sim'
+    -- a despesa igual na OS: o resumo já vem (sem "peça ou despesa?") e só comprova
+    and v_p2->>'passo' = 'confirmar' and v_efeitos2 in ('anexar_despesa,anotar', 'anexar_despesa,aguardar_banco')
+    and v_p2->'plano'->'efeitos'->0->>'so_expense_id' = v_desp::text
+    and v_p2->'cmp'->'na_os'->>'tipo' = 'despesa' and v_p2->'cmp'->'na_os'->>'id' = v_desp::text
+    and v_p2->'cmp'->>'categoria' = 'Combustível e deslocamento' and v_p2->'cmp'->>'tipo_na_os' is null,
     'passo1=' || coalesce(v_p->>'passo', '-') || ' resultado=' || coalesce(v_r->>'resultado', '-')
-    || ' passo2=' || coalesce(v_r->'proxima'->>'passo', '-') || ' efeitos=' || coalesce(v_efeitos, '-'));
+    || ' passo2=' || coalesce(v_r->'proxima'->>'passo', '-') || ' efeitos=' || coalesce(v_efeitos, '-')
+    || ' ja_na_os=' || coalesce(v_p2->>'passo', '-') || '/' || coalesce(v_efeitos2, '-'));
   perform pg_temp._livrar();
 exception when others then
-  insert into _resultado values ('T8 débito + legenda com a OS: só cobrar e confirmar', false, 'erro: ' || sqlstate || ' ' || sqlerrm);
+  insert into _resultado values ('T8 débito + legenda com a OS: só "peça ou despesa?" e confirmar; despesa igual já na OS, direto ao confirmar', false,
+    'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
 -- ═══ T9 ═══════════════════════════════════════════════════════════════════════════════════════
@@ -296,7 +331,8 @@ begin
   perform pg_temp._livrar();
   delete from public.whatsapp_messages where phone_normalized = pg_temp._phone();
   perform public.comprovante_conversa_entrar(array[v_cmp]);
-  update public.comprovantes set destino = 'os', destino_os_id = v_os, cobrar_cliente = false where id = v_cmp;
+  update public.comprovantes set destino = 'os', destino_os_id = v_os, tipo_na_os = 'despesa', categoria = 'Combustível e deslocamento'
+   where id = v_cmp;
   v_p := public.comprovante_proxima_pergunta(pg_temp._phone(), 'cmp', v_cmp);
   v_ok := pg_temp._responder(v_p, jsonb_build_object('tipo', 'ok'));
   v_um := pg_temp._responder(v_p, jsonb_build_object('tipo', 'opcao', 'n', 1));
@@ -328,7 +364,8 @@ declare
 begin
   perform pg_temp._livrar();
   perform public.comprovante_conversa_entrar(array[v_cmp]);
-  update public.comprovantes set destino = 'os', destino_os_id = v_os, cobrar_cliente = false where id = v_cmp;
+  update public.comprovantes set destino = 'os', destino_os_id = v_os, tipo_na_os = 'despesa', categoria = 'Combustível e deslocamento'
+   where id = v_cmp;
   v_p := public.comprovante_proxima_pergunta(pg_temp._phone(), 'cmp', v_cmp);
   v_velha := pg_temp._responder(v_p, jsonb_build_object('tipo', 'sim'), (v_p->>'versao')::integer - 1);
   v_sim := pg_temp._responder(v_velha->'proxima', jsonb_build_object('tipo', 'sim'));
@@ -495,7 +532,8 @@ declare
 begin
   perform pg_temp._livrar();
   perform public.comprovante_conversa_entrar(array[v_cmp]);
-  update public.comprovantes set destino = 'os', destino_os_id = v_os, cobrar_cliente = false where id = v_cmp;
+  update public.comprovantes set destino = 'os', destino_os_id = v_os, tipo_na_os = 'despesa', categoria = 'Combustível e deslocamento'
+   where id = v_cmp;
   v_p := public.comprovante_proxima_pergunta(pg_temp._phone(), 'cmp', v_cmp);
   -- o envio da pergunta ainda não foi confirmado: o "sim" que chegou não é resposta a ela
   v_nao_enviada := public.comprovante_responder(jsonb_build_object('pergunta_id', v_p->>'pergunta_id',
@@ -590,36 +628,50 @@ declare
   v_os uuid := pg_temp._os('open');
   v_os_cmp uuid := pg_temp._cmp(jsonb_build_object('forma', 'pix'));
   v_pes uuid := pg_temp._cmp(jsonb_build_object('forma', 'pix'));
+  v_pes_emp uuid := pg_temp._cmp(jsonb_build_object('forma', 'pix'));
   v_din uuid := pg_temp._cmp(jsonb_build_object('forma', 'dinheiro'));
   c public.comprovantes;
   v_corr_os text;
   v_corr_pes text;
+  v_corr_pes_emp text;
+  v_quem_pes text;
   v_quem_pix text;
   v_quem_din text;
   v_cat_os text;
+  v_cat_desp text;
 begin
   perform pg_temp._livrar();
-  perform public.comprovante_conversa_entrar(array[v_os_cmp, v_pes, v_din]);
+  perform public.comprovante_conversa_entrar(array[v_os_cmp, v_pes, v_pes_emp, v_din]);
   update public.comprovantes set destino = 'os', destino_os_id = v_os where id in (v_os_cmp, v_din);
   update public.comprovantes set destino = 'pessoal' where id = v_pes;
+  update public.comprovantes set destino = 'pessoal', quem_pagou = 'empresa' where id = v_pes_emp;
   select * into c from public.comprovantes where id = v_os_cmp;
   select string_agg(o->>'valor', ',' order by (o->>'n')::int) into v_corr_os from jsonb_array_elements(public._comprovante_opcoes_do_passo(c, 'corrigir')) o;
   select o->>'rotulo' into v_quem_pix from jsonb_array_elements(public._comprovante_opcoes_do_passo(c, 'quem_pagou')) o where o->>'valor' = 'empresa';
   select o->>'rotulo' into v_cat_os from jsonb_array_elements(public._comprovante_opcoes_do_passo(c, 'categoria')) o where (o->>'n')::int = 1;
+  -- a despesa da OS não começa por "Peças e materiais"
+  c.tipo_na_os := 'despesa';
+  select o->>'rotulo' into v_cat_desp from jsonb_array_elements(public._comprovante_opcoes_do_passo(c, 'categoria')) o where (o->>'n')::int = 1;
   select * into c from public.comprovantes where id = v_pes;
   select string_agg(o->>'valor', ',' order by (o->>'n')::int) into v_corr_pes from jsonb_array_elements(public._comprovante_opcoes_do_passo(c, 'corrigir')) o;
+  select string_agg(o->>'valor', ',' order by (o->>'n')::int) into v_quem_pes from jsonb_array_elements(public._comprovante_opcoes_do_passo(c, 'quem_pagou')) o;
+  select * into c from public.comprovantes where id = v_pes_emp;
+  select string_agg(o->>'valor', ',' order by (o->>'n')::int) into v_corr_pes_emp from jsonb_array_elements(public._comprovante_opcoes_do_passo(c, 'corrigir')) o;
   select * into c from public.comprovantes where id = v_din;
   select o->>'rotulo' into v_quem_din from jsonb_array_elements(public._comprovante_opcoes_do_passo(c, 'quem_pagou')) o where o->>'valor' = 'empresa';
-  insert into _resultado values ('T16 menus por contexto: corrigir sem "cobrar" fora de OS; "empresa" pela forma; categoria da OS primeiro',
-    v_corr_os = 'valor,data,para_que,como_pagou,quem_pagou,cobrar,categoria,cancelar,depois'
-    and v_corr_pes = 'valor,data,para_que,cancelar,depois'
+  insert into _resultado values ('T16 menus por contexto: "peça ou despesa" só na OS; PESSOAL com quem pagou; "empresa" pela forma; categoria pelo destino',
+    v_corr_os = 'valor,data,para_que,como_pagou,quem_pagou,tipo_na_os,categoria,cancelar,depois'
+    and v_corr_pes = 'valor,data,para_que,quem_pagou,cancelar,depois'
+    and v_corr_pes_emp = 'valor,data,para_que,como_pagou,quem_pagou,cancelar,depois'
+    and v_quem_pes = 'empresa,socio'
     and v_quem_pix = 'A empresa (conta da empresa)' and v_quem_din = 'A empresa (dinheiro do Caixa)'
-    and v_cat_os = 'Peças e materiais',
-    'os=' || coalesce(v_corr_os, '-') || ' pessoal=' || coalesce(v_corr_pes, '-') || ' quem=' || coalesce(v_quem_pix, '-')
-    || '/' || coalesce(v_quem_din, '-') || ' categoria1=' || coalesce(v_cat_os, '-'));
+    and v_cat_os = 'Peças e materiais' and v_cat_desp = 'Combustível e deslocamento',
+    'os=' || coalesce(v_corr_os, '-') || ' pessoal=' || coalesce(v_corr_pes, '-') || '/' || coalesce(v_corr_pes_emp, '-')
+    || ' quem_pessoal=' || coalesce(v_quem_pes, '-') || ' quem=' || coalesce(v_quem_pix, '-') || '/' || coalesce(v_quem_din, '-')
+    || ' categoria1=' || coalesce(v_cat_os, '-') || '/' || coalesce(v_cat_desp, '-'));
   perform pg_temp._livrar();
 exception when others then
-  insert into _resultado values ('T16 menus por contexto: corrigir sem "cobrar" fora de OS; "empresa" pela forma; categoria da OS primeiro', false,
+  insert into _resultado values ('T16 menus por contexto: "peça ou despesa" só na OS; PESSOAL com quem pagou; "empresa" pela forma; categoria pelo destino', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
@@ -833,6 +885,91 @@ begin
     || ' depois_do_cancelar=' || coalesce(v_m2.dropbox_pendente, 'null'));
 exception when others then
   insert into _resultado values ('T23 Dropbox: o fim de um "mover" velho não apaga o "cancelar"; o do "cancelar" zera', false,
+    'erro: ' || sqlstate || ' ' || sqlerrm);
+end $$;
+
+-- ═══ T24: PESSOAL pergunta quem pagou (ajustes do dono, 11/10/2026) ═════════════════════════════
+do $$
+declare
+  v_bolso uuid := pg_temp._cmp(jsonb_build_object('forma', 'credito', 'legenda', 'pessoal'));
+  v_emp uuid := pg_temp._cmp(jsonb_build_object('forma', 'pix', 'legenda', 'pessoal'));
+  v_p jsonb;
+  v_r jsonb;
+  v_p2 jsonb;
+  v_r2 jsonb;
+begin
+  perform pg_temp._livrar();
+  perform public.comprovante_conversa_entrar(array[v_bolso]);
+  v_p := public.comprovante_proxima_pergunta(pg_temp._phone(), 'cmp', v_bolso);
+  -- 2 = do bolso ou do cartão pessoal: só o arquivo
+  v_r := pg_temp._responder(v_p, jsonb_build_object('tipo', 'opcao', 'n', 2));
+  perform pg_temp._livrar();
+  perform public.comprovante_conversa_entrar(array[v_emp]);
+  v_p2 := public.comprovante_proxima_pergunta(pg_temp._phone(), 'cmp', v_emp);
+  -- "empresa" (a palavra): gasto pessoal do sócio, com o efeito de uma compra da empresa
+  v_r2 := pg_temp._responder(v_p2, jsonb_build_object('tipo', 'palavra', 'valor', 'empresa'));
+  insert into _resultado values ('T24 PESSOAL pergunta quem pagou: do bolso, só o arquivo; da empresa, gasto pessoal do sócio',
+    v_p->>'passo' = 'quem_pagou' and jsonb_array_length(v_p->'opcoes') = 2
+    and v_p->'opcoes'->0->>'valor' = 'empresa' and v_p->'opcoes'->1->>'valor' = 'socio'
+    and v_r->>'resultado' = 'resumo' and v_r->'proxima'->>'passo' = 'confirmar'
+    and v_r->'proxima'->'plano'->'efeitos' = '[{"tipo": "nada", "motivo": "pessoal"}]'::jsonb
+    and v_r->'proxima'->'plano'->>'pasta' = 'pessoal' and v_r->'cmp'->>'categoria' is null
+    and v_p2->>'passo' = 'quem_pagou'
+    and v_r2->>'resultado' = 'resumo' and v_r2->'cmp'->>'quem_pagou' = 'empresa'
+    and v_r2->'cmp'->>'categoria' = 'Gasto Pessoal Sócio - Descontar PL'
+    -- o Pix sem o CNPJ de quem recebeu anota na F2; com a F3 espera a linha do extrato
+    and v_r2->'proxima'->'plano'->'efeitos'->0->>'tipo' in ('anotar', 'aguardar_banco')
+    and v_r2->'proxima'->'plano'->>'pasta' = 'pessoal',
+    'bolso=' || coalesce(v_p->>'passo', '-') || '/' || coalesce(v_r->>'resultado', '-')
+    || ' empresa=' || coalesce(v_r2->>'resultado', '-') || ' ' || coalesce(v_r2->'cmp'->>'categoria', '-')
+    || ' efeito=' || coalesce(v_r2->'proxima'->'plano'->'efeitos'->0->>'tipo', '-'));
+  perform pg_temp._livrar();
+exception when others then
+  insert into _resultado values ('T24 PESSOAL pergunta quem pagou: do bolso, só o arquivo; da empresa, gasto pessoal do sócio', false,
+    'erro: ' || sqlstate || ' ' || sqlerrm);
+end $$;
+
+-- ═══ T25: o passo "peça ou despesa" (ajustes do dono, 11/10/2026) ══════════════════════════════
+do $$
+declare
+  v_os uuid := pg_temp._os('open');
+  v_os2 uuid := pg_temp._os('open');
+  v_cmp uuid := pg_temp._cmp(jsonb_build_object('forma', 'pix'));
+  v_p jsonb;
+  v_r jsonb;
+  v_corr jsonb;
+  v_trocou jsonb;
+  v_tipo_depois text;
+begin
+  perform pg_temp._livrar();
+  perform public.comprovante_conversa_entrar(array[v_cmp]);
+  update public.comprovantes set destino = 'os', destino_os_id = v_os where id = v_cmp;
+  v_p := public.comprovante_proxima_pergunta(pg_temp._phone(), 'cmp', v_cmp);
+  -- "despesa" (a palavra): sem a categoria provável do fornecedor, pergunta a categoria
+  v_r := pg_temp._responder(v_p, jsonb_build_object('tipo', 'palavra', 'valor', 'despesa'));
+  -- corrigir "peça ou despesa" pelo menu: limpa e pergunta de novo
+  update public.comprovantes set categoria = 'Ferramentas e equipamentos', passo = null where id = v_cmp;
+  update public.whatsapp_perguntas set status = 'cancelada', fechada_em = now(), motivo = 'teste'
+   where phone_normalized = pg_temp._phone() and status = 'aberta';
+  update public.comprovantes set passo = 'corrigir' where id = v_cmp;
+  v_p := public.comprovante_proxima_pergunta(pg_temp._phone(), 'cmp', v_cmp);
+  v_corr := pg_temp._responder(v_p, jsonb_build_object('tipo', 'opcao', 'n',
+              (select (o->>'n')::int from jsonb_array_elements(v_p->'opcoes') o where o->>'valor' = 'tipo_na_os')));
+  -- a resposta de novo e a troca da OS: outra OS, "peça ou despesa" se decide de novo
+  perform pg_temp._responder(v_corr->'proxima', jsonb_build_object('tipo', 'opcao', 'n', 2));
+  v_trocou := public.comprovante_comando(jsonb_build_object('phone', pg_temp._phone(), 'comando', 'corrigir', 'campo', 'os',
+                'numero', pg_temp._os_num(v_os2)));
+  select tipo_na_os into v_tipo_depois from public.comprovantes where id = v_cmp;
+  insert into _resultado values ('T25 "peça ou despesa": a palavra vale, a despesa pede a categoria, o corrigir limpa e outra OS pergunta de novo',
+    v_r->>'resultado' = 'proximo' and v_r->'proxima'->>'passo' = 'categoria' and v_r->'cmp'->>'tipo_na_os' = 'despesa'
+    and v_r->'proxima'->'opcoes'->0->>'valor' = 'Combustível e deslocamento'
+    and v_corr->'proxima'->>'passo' = 'tipo_na_os' and v_corr->'proxima'->>'forcado' = 'true'
+    and v_trocou->>'resultado' = 'pergunta' and v_tipo_depois is null and v_trocou->'pergunta'->>'passo' = 'tipo_na_os',
+    'despesa=' || coalesce(v_r->'proxima'->>'passo', '-') || ' corrigir=' || coalesce(v_corr->'proxima'->>'passo', '-')
+    || ' outra_os=' || coalesce(v_trocou->'pergunta'->>'passo', v_trocou->>'motivo', '-') || '/' || coalesce(v_tipo_depois, 'null'));
+  perform pg_temp._livrar();
+exception when others then
+  insert into _resultado values ('T25 "peça ou despesa": a palavra vale, a despesa pede a categoria, o corrigir limpa e outra OS pergunta de novo', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
