@@ -7,6 +7,9 @@ import { classificarResposta } from "../_shared/ai/comms/reply-router.ts";
 import { lerDataDaResposta } from "../_shared/revisao/data-da-resposta.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { avisoDoLeadDoSite, lerMensagemDoSite, type DadosDoSite } from "../_shared/whatsapp/lead-do-site.ts";
+import { chamarReceberPorHttp, rotearMidiaDoDono } from "../_shared/comprovantes/webhook.ts";
+import { lerModoDoComprovante } from "../_shared/comprovantes/modo.ts";
+import { donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
 
 // Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
 // fecha o loop no ai_comms_log (marca respondido + intenção) e HONRA OPT-OUT sozinho.
@@ -296,14 +299,14 @@ export async function handler(req: Request): Promise<Response> {
     if (!event.fromMe) {
       const { data: aiUser } = await admin
         .from("app_users")
-        .select("id")
+        .select("id, role")
         .eq("phone_normalized", phone)
         .eq("ai_whatsapp_enabled", true)
         .eq("active", true)
         .maybeSingle();
 
       if (aiUser) {
-        const { data: msg } = await admin
+        const { data: msg, error: eMsg } = await admin
           .from("whatsapp_messages")
           .insert({
             direction: "inbound",
@@ -317,6 +320,9 @@ export async function handler(req: Request): Promise<Response> {
           })
           .select("id")
           .single();
+        // Sem a linha, a mensagem segue ao assistente como sempre (e fica fora do fluxo de
+        // comprovantes, que precisa do id). Só o código do erro: o corpo nunca vai para o log.
+        if (eMsg) console.error("[whatsapp-webhook] mensagem do funcionário não gravada:", eMsg.code ?? "erro");
 
         const dispatchToAgent = async () => {
           try {
@@ -349,9 +355,49 @@ export async function handler(req: Request): Promise<Response> {
             console.error("[whatsapp-webhook] falha ao disparar ai-agent:", e);
           }
         };
+        // Comprovantes (F1, 11/10/2026): foto/PDF do dono pode ir também (ou só) ao fluxo de
+        // comprovantes, conforme app_settings.comprovante_fluxo. Tudo aqui dentro do waitUntil — a
+        // resposta à Evolution não espera. Texto e áudio vão direto ao despacho de hoje, sem consulta
+        // nova; com "off" a mídia lê só a chave; qualquer erro cai no despacho de hoje, uma vez só.
+        const despachar = async () => {
+          if (event.mediaKind !== "image" && event.mediaKind !== "document") return await dispatchToAgent();
+          let despachou = false;
+          const despacharUmaVez = async () => {
+            despachou = true;
+            await dispatchToAgent();
+          };
+          try {
+            await rotearMidiaDoDono(
+              {
+                msgId: msg?.id ?? null,
+                appUserId: aiUser.id,
+                appUserRole: aiUser.role ?? null,
+                mediaKind: event.mediaKind,
+                caption: event.caption,
+                mimetype: event.mimetype,
+              },
+              {
+                lerModo: () => lerModoDoComprovante(admin),
+                dono: () => donoDoWhatsApp(admin),
+                chamarReceber: (corpo) =>
+                  chamarReceberPorHttp(corpo, {
+                    url: Deno.env.get("SUPABASE_URL") ?? "",
+                    chave: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+                  }),
+                despacharAoAgente: despacharUmaVez,
+                marcarEncaminhado: async (messageId) => {
+                  await admin.rpc("comprovante_ja_encaminhado", { p_message_id: messageId });
+                },
+              },
+            );
+          } catch (e) {
+            console.error("[whatsapp-webhook] roteamento do comprovante falhou:", (e as Error)?.name ?? "erro");
+            if (!despachou) await dispatchToAgent();
+          }
+        };
         const waitUntil = (globalThis as any).EdgeRuntime?.waitUntil;
-        if (typeof waitUntil === "function") waitUntil(dispatchToAgent());
-        else dispatchToAgent().catch(() => null); // fire-and-forget sem waitUntil disponível
+        if (typeof waitUntil === "function") waitUntil(despachar());
+        else despachar().catch(() => null); // fire-and-forget sem waitUntil disponível
 
         return jr({ ok: true, routed: "ai_operator", message_id: msg?.id });
       }

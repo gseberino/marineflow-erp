@@ -91,6 +91,115 @@ Deno.test("sem o secret configurado, rejeita tudo com 500 (fail-closed)", async 
   }
 });
 
+// ─── A emenda dos comprovantes (F1, 11/10/2026), no nível do handler ──────────────────────────
+// O webhook é o caminho de todo o WhatsApp: com o interruptor em "off", a foto do dono vai ao
+// ai-agent exatamente uma vez, nada vai ao comprovantes-whatsapp, a resposta à Evolution sai antes
+// do despacho terminar (waitUntil) e texto (ou mensagem que não foi gravada) não lê app_settings.
+// O banco (PostgREST) e as funções são um fetch falso que registra cada chamada.
+
+const ADMIN_ID = "0d0d0d0d-0000-4000-8000-0000000000aa";
+const MSG_GRAVADA = "11111111-0000-4000-8000-0000000000aa";
+
+function payloadDoDono(message: Record<string, unknown>, waId: string) {
+  return {
+    event: "messages.upsert",
+    data: {
+      key: { id: waId, remoteJid: "5547999990000@s.whatsapp.net", fromMe: false },
+      pushName: "Dono",
+      message,
+      messageTimestamp: 1760140857,
+    },
+  };
+}
+
+function bancoEFuncoesFalsos(op: { modo?: string; insertFalha?: boolean; segurarAgente?: Promise<void> } = {}) {
+  const chamadas: Array<{ metodo: string; caminho: string }> = [];
+  const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
+  const f = async (entrada: Request | URL | string, init?: RequestInit): Promise<Response> => {
+    const req = new Request(entrada, init);
+    const u = new URL(req.url);
+    chamadas.push({ metodo: req.method, caminho: u.pathname });
+    if (u.pathname === "/rest/v1/whatsapp_messages" && req.method === "GET") return json([]); // dedup: nova
+    if (u.pathname === "/rest/v1/app_users") return json([{ id: ADMIN_ID, role: "admin" }]);
+    if (u.pathname === "/rest/v1/whatsapp_messages" && req.method === "POST") {
+      return op.insertFalha ? json({ code: "23505", message: "falhou" }, 409) : json({ id: MSG_GRAVADA }, 201);
+    }
+    if (u.pathname === "/rest/v1/app_settings") return json([{ value: op.modo ?? "off" }]);
+    if (u.pathname === "/functions/v1/ai-agent") {
+      await op.segurarAgente;
+      return json({ ok: true });
+    }
+    return json({ inesperado: u.pathname }, 500);
+  };
+  const conta = (caminho: string, metodo?: string) =>
+    chamadas.filter((c) => c.caminho === caminho && (!metodo || c.metodo === metodo)).length;
+  return { f, chamadas, conta };
+}
+
+/** Roda o handler com o fetch falso e um EdgeRuntime.waitUntil que guarda a promessa. */
+async function comHandlerFalso(
+  falso: ReturnType<typeof bancoEFuncoesFalsos>,
+  payload: unknown,
+  depois: (res: Response, emSegundoPlano: Promise<unknown>[]) => Promise<void>,
+) {
+  const g = globalThis as unknown as { fetch: typeof fetch; EdgeRuntime?: unknown };
+  const fetchOriginal = g.fetch;
+  const runtimeOriginal = g.EdgeRuntime;
+  const emSegundoPlano: Promise<unknown>[] = [];
+  Deno.env.set("EVOLUTION_API_URL", "https://evo.exemplo.test");
+  Deno.env.set("EVOLUTION_API_KEY", "chave-de-fachada");
+  Deno.env.set("EVOLUTION_INSTANCE", "hbr-local");
+  Deno.env.set("AI_INTERNAL_SECRET", "interno-de-fachada");
+  g.fetch = falso.f as typeof fetch;
+  g.EdgeRuntime = { waitUntil: (p: Promise<unknown>) => emSegundoPlano.push(p) };
+  try {
+    const res = await handler(new Request(`${URL_FN}?token=${SEGREDO}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }));
+    await depois(res, emSegundoPlano);
+    await Promise.all(emSegundoPlano);
+  } finally {
+    g.fetch = fetchOriginal;
+    g.EdgeRuntime = runtimeOriginal;
+  }
+}
+
+Deno.test("comprovantes com off: foto do dono → 1 ai-agent, 0 comprovantes-whatsapp, resposta antes do despacho", async () => {
+  let soltar: () => void = () => {};
+  const segurarAgente = new Promise<void>((ok) => { soltar = ok; });
+  const falso = bancoEFuncoesFalsos({ modo: "off", segurarAgente });
+  await comHandlerFalso(falso, payloadDoDono({ imageMessage: { mimetype: "image/jpeg" } }, "WAID-HANDLER-1"), async (res, fundo) => {
+    assertEquals(res.status, 200);
+    assertEquals((await res.json()).routed, "ai_operator");
+    assertEquals(fundo.length, 1);
+    let terminou = false;
+    fundo[0].then(() => { terminou = true; });
+    await new Promise((ok) => setTimeout(ok, 20));
+    assertEquals(terminou, false, "a resposta saiu antes do despacho terminar");
+    soltar();
+    await fundo[0];
+  });
+  assertEquals(falso.conta("/functions/v1/ai-agent", "POST"), 1);
+  assertEquals(falso.conta("/functions/v1/comprovantes-whatsapp"), 0);
+  assertEquals(falso.conta("/rest/v1/app_settings"), 1, "com off a mídia lê só a chave");
+});
+
+Deno.test("comprovantes: texto do dono não lê app_settings; insert que falha cai no despacho de hoje, uma vez", async () => {
+  const texto = bancoEFuncoesFalsos({ modo: "dono" });
+  await comHandlerFalso(texto, payloadDoDono({ conversation: "quanto ficou a OS 123?" }, "WAID-HANDLER-2"), async () => {});
+  assertEquals(texto.conta("/functions/v1/ai-agent", "POST"), 1);
+  assertEquals(texto.conta("/rest/v1/app_settings"), 0);
+  assertEquals(texto.conta("/functions/v1/comprovantes-whatsapp"), 0);
+
+  const semLinha = bancoEFuncoesFalsos({ modo: "dono", insertFalha: true });
+  await comHandlerFalso(semLinha, payloadDoDono({ imageMessage: { mimetype: "image/jpeg" } }, "WAID-HANDLER-3"), async () => {});
+  assertEquals(semLinha.conta("/functions/v1/ai-agent", "POST"), 1);
+  assertEquals(semLinha.conta("/rest/v1/app_settings"), 0, "sem o id da mensagem nem consulta o modo");
+  assertEquals(semLinha.conta("/functions/v1/comprovantes-whatsapp"), 0);
+});
+
 Deno.test("confirmação do agendamento: só a mensagem RECEBIDA e curta chega à RPC do SIM", async () => {
   const fonte = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
   const bloco = fonte.slice(fonte.indexOf("if (!event.fromMe && body) {"), fonte.indexOf("if (leadId) {"));
