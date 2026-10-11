@@ -31,6 +31,7 @@ export type Database = {
           pago_no_periodo: number
           reaberto_em: string | null
           reaberto_por: string | null
+          reembolsos: number
           saldo_anterior: number
           status: string
           telefone_enviado: string | null
@@ -53,6 +54,7 @@ export type Database = {
           pago_no_periodo: number
           reaberto_em?: string | null
           reaberto_por?: string | null
+          reembolsos?: number
           saldo_anterior: number
           status?: string
           telefone_enviado?: string | null
@@ -75,6 +77,7 @@ export type Database = {
           pago_no_periodo?: number
           reaberto_em?: string | null
           reaberto_por?: string | null
+          reembolsos?: number
           saldo_anterior?: number
           status?: string
           telefone_enviado?: string | null

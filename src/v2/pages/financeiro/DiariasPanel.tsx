@@ -4,6 +4,10 @@
 // extrato no nome dele (Pix, Caixa), o que um sócio pagou do próprio bolso para ele e — desde
 // 06/10/2026 — o Pix lançado à mão que o banco ainda não confirmou ("Anotado"). Aqui se lança o
 // DIA e, por "Registrar pagamento", o que foi pago (as mesmas funções do "Lançar" e do assistente).
+//
+// Reembolso (F2b dos comprovantes, 11/10/2026): a despesa da empresa que ele pagou do bolso, com o
+// comprovante (CMP), soma a favor dele e entra no próximo acerto. Não se lança nem se apaga aqui:
+// nasce do SIM do comprovante pelo WhatsApp e só sai cancelando o CMP.
 import { useState } from 'react';
 import { Banknote, CalendarPlus, FileDown, FileText, Lock, Pencil, Trash2, UserPlus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -20,11 +24,11 @@ import {
   type PedidoDePeriodo, type PeriodoDasDiarias,
 } from '@/lib/diarias';
 import {
-  acertoQueTrava, diaParaEditar, useAcertos, useContaCorrente, useExcluirDiaComDesfazer, useResumoFreelancers,
+  acertoQueTrava, comoTirarOReembolso, diaParaEditar, useAcertos, useContaCorrente, useExcluirDiaComDesfazer, useResumoFreelancers,
   type Acerto, type DiaParaEditar, type FreelancerNoResumo,
 } from '@/hooks/use-diarias';
 import { useDocumentosDasDiarias } from '@/hooks/use-documentos-diarias';
-import { numeroDoRecibo } from '@/lib/extrato-diarias';
+import { descricaoDoReembolso, numeroDoRecibo } from '@/lib/extrato-diarias';
 import { AcertosDoFreelancer } from './AcertosDoFreelancer';
 import { RegistrarDiaDialog } from './RegistrarDiaDialog';
 import { NovoFreelancerDialog } from './NovoFreelancerDialog';
@@ -104,7 +108,7 @@ export function DiariasPanel({ aba, filtro, onFiltro, onVerExtrato }: Props) {
           </Button>
         )}
         <Button size="sm" variant="outline" className="gap-1.5" disabled={!!documentos.gerando || pessoas.length === 0}
-                title="Todos os dias e pagamentos do período, de todos os freelancers, para o contador"
+                title="Todos os dias, reembolsos e pagamentos do período, de todos os freelancers, para o contador"
                 onClick={() => { void documentos.csvDoPeriodo(pessoas.map((p) => p.id), intervalo); }}>
           <FileDown className="h-4 w-4" /> {documentos.gerando === 'csv' ? 'Gerando…' : 'Planilha do contador (CSV)'}
         </Button>
@@ -190,7 +194,7 @@ function textoDoPeriodoDaPessoa(de: string | null, ate: string | null): string |
 
 function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, gerandoPdf, porPessoa }: {
   pessoas: FreelancerNoResumo[];
-  total: { trabalhado: number; pago: number; dias: number; deve: number; adiantado: number };
+  total: { trabalhado: number; pago: number; reembolsos: number; dias: number; deve: number; adiantado: number };
   onVerExtrato: (id: string) => void;
   onRegistrar: (id: string) => void;
   onPagar: (id: string) => void;
@@ -200,15 +204,20 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
   porPessoa: boolean;
 }) {
   const { formatCurrency, formatDate } = useI18n();
+  // Reembolsos (F2b) só aparecem quando há: sem eles, a tela é a de antes.
+  const totais: Array<readonly [string, string, string]> = [
+    ['Trabalhado no período', formatCurrency(total.trabalhado), `${total.dias.toLocaleString('pt-BR')} diárias`],
+    ...(total.reembolsos > 0
+      ? [['Reembolsos no período', formatCurrency(total.reembolsos), 'despesas pagas por eles, com comprovante'] as const]
+      : []),
+    ['Pago no período', formatCurrency(total.pago), 'do extrato e do bolso de sócio'],
+    ['Você deve (acumulado)', formatCurrency(total.deve), 'até o fim do período'],
+    ['Adiantado (acumulado)', formatCurrency(total.adiantado), 'pago antes do trabalho'],
+  ];
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        {([
-          ['Trabalhado no período', formatCurrency(total.trabalhado), `${total.dias.toLocaleString('pt-BR')} diárias`],
-          ['Pago no período', formatCurrency(total.pago), 'do extrato e do bolso de sócio'],
-          ['Você deve (acumulado)', formatCurrency(total.deve), 'até o fim do período'],
-          ['Adiantado (acumulado)', formatCurrency(total.adiantado), 'pago antes do trabalho'],
-        ] as const).map(([rotulo, valor, nota]) => (
+      <div className={`grid grid-cols-2 gap-2 ${totais.length > 4 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
+        {totais.map(([rotulo, valor, nota]) => (
           <Card key={rotulo} className="min-w-0 p-3">
             <p className="truncate text-xs text-muted-foreground">{rotulo}</p>
             <p className="truncate text-lg font-semibold tabular-nums">{valor}</p>
@@ -236,9 +245,15 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
                   <Badge variant="outline" className={estado.classe}>{estado.rotulo}</Badge>
                 </div>
               </div>
-              <dl className="mt-3 grid grid-cols-2 gap-2 border-t pt-3 text-sm sm:grid-cols-4">
+              {/* Com reembolso são 5 campos: 3 por linha no celular grande, sem apertar a ponto de rolar de lado. */}
+              <dl className={`mt-3 grid grid-cols-2 gap-2 border-t pt-3 text-sm ${p.reembolsos > 0 ? 'sm:grid-cols-3' : 'sm:grid-cols-4'}`}>
                 <div><dt className="text-xs text-muted-foreground">Dias</dt><dd className="font-medium tabular-nums">{p.dias.toLocaleString('pt-BR')}</dd></div>
                 <div><dt className="text-xs text-muted-foreground">Trabalhado</dt><dd className="font-medium tabular-nums">{formatCurrency(p.trabalhado)}</dd></div>
+                {p.reembolsos > 0 && (
+                  <div title="Despesas da empresa que ele pagou, com comprovante (CMP): entram no próximo acerto">
+                    <dt className="text-xs text-muted-foreground">Reembolsos</dt><dd className="font-medium tabular-nums">{formatCurrency(p.reembolsos)}</dd>
+                  </div>
+                )}
                 <div><dt className="text-xs text-muted-foreground">Pago</dt><dd className="font-medium tabular-nums">{formatCurrency(p.pago)}</dd></div>
                 <div><dt className="text-xs text-muted-foreground">Último pagamento</dt><dd className="font-medium tabular-nums">{p.ultimo_pagamento ? formatDate(p.ultimo_pagamento) : '—'}</dd></div>
               </dl>
@@ -264,7 +279,7 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
         })}
       </div>
       <p className="text-xs text-muted-foreground">
-        Saldo = saldo inicial + dias trabalhados (diária + extras − descontos) − o que ele recebeu. Os pagamentos vêm do
+        Saldo = saldo inicial + dias trabalhados (diária + extras − descontos) + reembolsos (despesas que ele pagou, com comprovante) − o que ele recebeu. Os pagamentos vêm do
         extrato do banco; o Pix registrado à mão ("Registrar pagamento" ou "Lançar") aparece na hora como "aguardando o
         banco" e já desconta — não lance de novo quando a linha do banco chegar.
       </p>
@@ -293,16 +308,18 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
   }
   const c = conta.data!;
   const estado = ESTADO_DO_SALDO[c.estado];
+  const totais: Array<readonly [string, string]> = [
+    [c.de ? 'Saldo antes do período' : 'Saldo inicial', formatCurrency(c.saldo_anterior)],
+    ['Trabalhado', formatCurrency(c.trabalhado)],
+    ...(c.reembolsos > 0 ? [['Reembolsos', formatCurrency(c.reembolsos)] as const] : []),
+    ['Pago', formatCurrency(c.pago)],
+    ['Saldo no fim', formatCurrency(c.saldo_final)],
+  ];
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-        {([
-          [c.de ? 'Saldo antes do período' : 'Saldo inicial', formatCurrency(c.saldo_anterior)],
-          ['Trabalhado', formatCurrency(c.trabalhado)],
-          ['Pago', formatCurrency(c.pago)],
-          ['Saldo no fim', formatCurrency(c.saldo_final)],
-        ] as const).map(([rotulo, valor]) => (
+      <div className={`grid grid-cols-2 gap-2 ${totais.length > 4 ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
+        {totais.map(([rotulo, valor]) => (
           <Card key={rotulo} className="min-w-0 p-3">
             <p className="truncate text-xs text-muted-foreground">{rotulo}</p>
             <p className="truncate font-semibold tabular-nums">{valor}</p>
@@ -322,17 +339,32 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
                            gerandoPdf={gerandoPdf} onRecibo={(a) => onRecibo(c.favorecido.id, a)} />
 
       {c.linhas.length === 0 ? (
-        <Card className="p-6 text-center text-sm text-muted-foreground">Nenhum dia nem pagamento neste período.</Card>
+        <Card className="p-6 text-center text-sm text-muted-foreground">Nenhum dia, reembolso nem pagamento neste período.</Card>
       ) : (
         <Card className="divide-y p-0">
           {c.linhas.map((l) => (
-            <div key={`${l.tipo}-${l.id}`} className="flex min-w-0 items-start gap-3 p-3">
+            <div key={`${l.tipo}-${l.id}`} className="flex min-w-0 items-start gap-3 p-3"
+                 title={l.tipo === 'reembolso' ? `Para tirar, cancele o ${l.conta ?? 'comprovante'} pelo WhatsApp` : undefined}>
               <div className="w-16 shrink-0 text-sm">
                 <p className="font-semibold tabular-nums">{diaCurto(l.data).slice(4)}</p>
                 <p className="text-xs text-muted-foreground">{diaCurto(l.data).slice(0, 3)}</p>
               </div>
               <div className="min-w-0 flex-1">
-                {l.tipo === 'dia' ? (
+                {l.tipo === 'reembolso' ? (
+                  <>
+                    <div className="flex flex-wrap items-center gap-x-2 text-sm">
+                      <Badge variant="outline" className="text-muted-foreground">Reembolso</Badge>
+                      <span className="min-w-0 truncate">{l.conta}</span>
+                      {/* o número já vem como "OS-0042" (ou "ORÇ-…"): sem outro "OS " na frente */}
+                      {l.os.length > 0 && <span className="min-w-0 truncate">{l.os.map((o) => o.numero).join(', ')}</span>}
+                    </div>
+                    {/* a descrição sem o "Reembolso CMP-00124 · " do banco: o selo e o código já estão acima */}
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {[descricaoDoReembolso(l), l.categoria].filter(Boolean).join(' · ')}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{comoTirarOReembolso(l.conta, acertoQueTrava(acertos.data, l.data))}</p>
+                  </>
+                ) : l.tipo === 'dia' ? (
                   <>
                     <div className="flex flex-wrap items-center gap-x-2 text-sm">
                       <Badge variant="outline" className={l.jornada === 'faltou' ? 'text-muted-foreground' : 'text-success'}>
@@ -368,7 +400,9 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
               </div>
               <div className="shrink-0 text-right">
                 <p className={`font-semibold tabular-nums ${l.tipo === 'pagamento' ? 'text-success' : ''}`}>
-                  {l.tipo === 'pagamento' ? `− ${formatCurrency(l.pago)}` : formatCurrency(l.trabalhado)}
+                  {l.tipo === 'pagamento' ? `− ${formatCurrency(l.pago)}`
+                    : l.tipo === 'reembolso' ? `+ ${formatCurrency(l.trabalhado)}`
+                    : formatCurrency(l.trabalhado)}
                 </p>
                 <p className="text-xs tabular-nums text-muted-foreground">saldo {formatCurrency(l.saldo)}</p>
               </div>
@@ -385,6 +419,7 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
                   ]}
                 />
               ) : (
+                // Pagamento vem do extrato; reembolso só sai cancelando o CMP: nenhum dos dois tem menu aqui.
                 <span className="w-8 shrink-0" aria-hidden />
               )}
             </div>

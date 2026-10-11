@@ -76,7 +76,10 @@ export function useDocumentosDasDiarias() {
     }
   }
 
-  /** O recibo numerado do acerto: totais da foto do acerto; dias e vales da conta do mesmo período. */
+  /**
+   * O recibo numerado do acerto: totais da foto do acerto (inclusive `reembolsos`, F2b); dias,
+   * reembolsos (com o código CMP) e vales da conta do mesmo período.
+   */
   async function reciboEmPdf(favorecidoId: string, acerto: Acerto) {
     setGerando('pdf');
     try {
@@ -99,7 +102,10 @@ export function useDocumentosDasDiarias() {
     }
   }
 
-  /** Todos os dias e pagamentos do período, de todos os freelancers — a planilha do contador. */
+  /**
+   * Todos os dias, reembolsos de comprovantes e pagamentos do período, de todos os freelancers — a
+   * planilha do contador (o reembolso vai na coluna "Reembolso", a última).
+   */
   async function csvDoPeriodo(favorecidoIds: string[], periodo: PedidoDePeriodo) {
     setGerando('csv');
     const { de, ate } = periodo;
@@ -110,7 +116,7 @@ export function useDocumentosDasDiarias() {
       ]);
       const linhas = linhasDoCsv(contas.map((c: ContaCorrente) => ({ conta: c, documento: pessoas.get(c.favorecido.id)?.documento ?? null })));
       if (!linhas.length) {
-        toast.info('Nenhum dia nem pagamento no período.');
+        toast.info('Nenhum dia, reembolso nem pagamento no período.');
         return;
       }
       const arquivo = nomeDoArquivo('diarias', '', contas[0] ?? { de, ate }, 'csv');

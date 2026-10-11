@@ -12,14 +12,15 @@ import { AcoesDaLinha } from '@/components/AcoesDaLinha';
 import { useI18n } from '@/i18n';
 import { JORNADAS, diaCurto, rotuloDaJornada, type Jornada } from '@/lib/diarias';
 import {
-  diaParaEditar, useExcluirDiaComDesfazer, useRegistrarDiaria,
+  acertoQueTrava, comoTirarOReembolso, diaParaEditar, useAcertos, useExcluirDiaComDesfazer, useRegistrarDiaria,
   type DiaParaEditar, type FreelancerNoResumo, type LinhaDaContaCorrente,
 } from '@/hooks/use-diarias';
+import { descricaoDoReembolso } from '@/lib/extrato-diarias';
 
 interface Props {
   pessoa: FreelancerNoResumo;
   data: string;
-  /** As linhas deste freelancer nesta data (o dia, se houver, e os pagamentos). */
+  /** As linhas deste freelancer nesta data (o dia, se houver, os reembolsos e os pagamentos). */
   linhas: LinhaDaContaCorrente[];
   onFechar: () => void;
   onEditar: (d: DiaParaEditar) => void;
@@ -32,6 +33,10 @@ export function FichaDoDia({ pessoa, data, linhas, onFechar, onEditar, onDetalhe
   const { excluir, excluindo } = useExcluirDiaComDesfazer();
   const dia = linhas.find((l) => l.tipo === 'dia') ?? null;
   const pagamentos = linhas.filter((l) => l.tipo === 'pagamento');
+  // Reembolso de comprovante (F2b): só para ver; sai cancelando o CMP pelo WhatsApp (travado se o
+  // acerto do período já fechou).
+  const reembolsos = linhas.filter((l) => l.tipo === 'reembolso');
+  const acertos = useAcertos(reembolsos.length ? pessoa.id : null);
 
   async function marcar(jornada: Jornada) {
     if (dia?.jornada === jornada) return;
@@ -67,7 +72,7 @@ export function FichaDoDia({ pessoa, data, linhas, onFechar, onEditar, onDetalhe
 
         <div className="space-y-2">
           <p className="text-sm font-medium">Lançado neste dia</p>
-          {!dia && pagamentos.length === 0 ? (
+          {!dia && pagamentos.length === 0 && reembolsos.length === 0 ? (
             <p className="text-sm text-muted-foreground">Nada lançado neste dia.</p>
           ) : (
             <div className="divide-y rounded-md border">
@@ -94,6 +99,22 @@ export function FichaDoDia({ pessoa, data, linhas, onFechar, onEditar, onDetalhe
                   />
                 </div>
               )}
+              {reembolsos.map((r) => (
+                <div key={r.id} className="flex min-w-0 items-start gap-2 p-2 text-sm"
+                     title={`Para tirar, cancele o ${r.conta ?? 'comprovante'} pelo WhatsApp`}>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2">
+                      <Badge variant="outline" className="text-muted-foreground">Reembolso</Badge>
+                      <span className="font-medium tabular-nums">+ {formatCurrency(r.trabalhado)}</span>
+                    </div>
+                    {/* o código uma vez só: a descrição do banco começa com "Reembolso CMP-00124 · " */}
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {[r.conta, descricaoDoReembolso(r), r.categoria].filter(Boolean).join(' · ')}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{comoTirarOReembolso(r.conta, acertoQueTrava(acertos.data, r.data))}</p>
+                  </div>
+                </div>
+              ))}
               {pagamentos.map((p) => (
                 <div key={p.id} className="flex min-w-0 items-start gap-2 p-2 text-sm">
                   <div className="min-w-0 flex-1">

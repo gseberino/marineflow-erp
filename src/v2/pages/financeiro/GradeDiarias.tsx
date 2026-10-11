@@ -28,7 +28,9 @@ interface Props {
   onNovo: (favorecidoId: string, data: string) => void;
 }
 
-type Celula = { dia: LinhaDaContaCorrente | null; pagamentos: LinhaDaContaCorrente[] };
+/** O reembolso de comprovante (F2b) soma a favor dele: não é pagamento, tem a sua marca na célula. */
+type Celula = { dia: LinhaDaContaCorrente | null; pagamentos: LinhaDaContaCorrente[]; reembolsos: LinhaDaContaCorrente[] };
+const celulaVazia = (): Celula => ({ dia: null, pagamentos: [], reembolsos: [] });
 
 const ROTULO_CURTO = { inteiro: 'Dia', meio: 'Meio', faltou: 'Faltou' } as const;
 
@@ -47,14 +49,16 @@ export function GradeDiarias({ pessoas, mes, onMes, onEditar, onNovo }: Props) {
     pessoas.forEach((p, i) => {
       for (const l of contas[i]?.data?.linhas ?? []) {
         const k = `${p.id}|${l.data}`;
-        const c = m.get(k) ?? { dia: null, pagamentos: [] };
-        if (l.tipo === 'dia') c.dia = l; else c.pagamentos.push(l);
+        const c = m.get(k) ?? celulaVazia();
+        if (l.tipo === 'dia') c.dia = l;
+        else if (l.tipo === 'reembolso') c.reembolsos.push(l);
+        else c.pagamentos.push(l);
         m.set(k, c);
       }
     });
     return m;
   }, [pessoas, contas]);
-  const celula = (pessoaId: string, data: string): Celula => celulas.get(`${pessoaId}|${data}`) ?? { dia: null, pagamentos: [] };
+  const celula = (pessoaId: string, data: string): Celula => celulas.get(`${pessoaId}|${data}`) ?? celulaVazia();
   // Antes do início da conta corrente e no futuro não se lança: a célula fica apagada.
   const bloqueada = (p: FreelancerNoResumo, data: string) => data > hoje || (!!p.desde && data < p.desde);
 
@@ -70,6 +74,12 @@ export function GradeDiarias({ pessoas, mes, onMes, onEditar, onNovo }: Props) {
           {ROTULO_CURTO[c.dia.jornada ?? 'inteiro']}{c.dia.jornada !== 'faltou' ? ` ${formatCurrency(c.dia.trabalhado)}` : ''}
         </span>
       )}
+      {c.reembolsos.map((r) => (
+        <span key={r.id} title={`Reembolso ${r.conta ?? ''}`.trim()}
+              className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
+          reemb. {formatCurrency(r.trabalhado)}
+        </span>
+      ))}
       {c.pagamentos.map((p) => (
         <span key={p.id} className="rounded bg-sky-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-sky-700 dark:text-sky-400">
           pago {formatCurrency(p.pago)}
@@ -79,7 +89,10 @@ export function GradeDiarias({ pessoas, mes, onMes, onEditar, onNovo }: Props) {
   );
 
   const pessoaAberta = aberta ? pessoas.find((p) => p.id === aberta.pessoaId) : null;
-  const linhasAbertas = aberta ? (() => { const c = celula(aberta.pessoaId, aberta.data); return [...(c.dia ? [c.dia] : []), ...c.pagamentos]; })() : [];
+  const linhasAbertas = aberta
+    ? (() => { const c = celula(aberta.pessoaId, aberta.data); return [...(c.dia ? [c.dia] : []), ...c.reembolsos, ...c.pagamentos]; })()
+    : [];
+  const reembolsosDoMes = contas.reduce((s, c) => s + (c.data?.reembolsos ?? 0), 0);
 
   return (
     <div className="space-y-3">
@@ -145,6 +158,9 @@ export function GradeDiarias({ pessoas, mes, onMes, onEditar, onNovo }: Props) {
                   () => contas.reduce((s, c) => s + (c.data?.dias ?? 0), 0).toLocaleString('pt-BR')],
                 ['Trabalhado', (i: number) => formatCurrency(contas[i]?.data?.trabalhado ?? 0),
                   () => formatCurrency(contas.reduce((s, c) => s + (c.data?.trabalhado ?? 0), 0))],
+                // Só quando alguém tem reembolso no mês (F2b): sem ele, a grade é a de antes.
+                ...(reembolsosDoMes > 0 ? [['Reembolsos', (i: number) => formatCurrency(contas[i]?.data?.reembolsos ?? 0),
+                  () => formatCurrency(reembolsosDoMes)] as const] : []),
                 ['Pago', (i: number) => formatCurrency(contas[i]?.data?.pago ?? 0),
                   () => formatCurrency(contas.reduce((s, c) => s + (c.data?.pago ?? 0), 0))],
                 ['Saldo acumulado', (i: number) => formatCurrency(contas[i]?.data?.saldo_final ?? 0),
@@ -191,7 +207,7 @@ export function GradeDiarias({ pessoas, mes, onMes, onEditar, onNovo }: Props) {
             </Card>
           </div>
           <p className="text-xs text-muted-foreground">
-            Saldo acumulado = tudo trabalhado até o fim deste mês menos tudo pago, desde o início da conta corrente.
+            Saldo acumulado = tudo trabalhado mais os reembolsos de comprovantes, até o fim deste mês, menos tudo pago, desde o início da conta corrente.
           </p>
         </>
       )}

@@ -12,8 +12,11 @@ export interface FreelancerNoResumo {
   diaria: number | null;
   desde: string | null;
   dias: number;
+  /** Só os dias; os reembolsos vêm à parte. */
   trabalhado: number;
   pago: number;
+  /** Despesas da empresa que ele pagou, com comprovante (F2b, 11/10/2026): somam a favor dele. */
+  reembolsos: number;
   ultimo_pagamento: string | null;
   saldo_final: number;
   estado: EstadoDoSaldo;
@@ -28,6 +31,7 @@ export interface ResumoDosFreelancers {
   pessoas: FreelancerNoResumo[];
   trabalhado: number;
   pago: number;
+  reembolsos: number;
   dias: number;
   deve: number;
   adiantado: number;
@@ -35,9 +39,14 @@ export interface ResumoDosFreelancers {
 
 export interface OSDoDia { id: string; numero: string }
 
+/**
+ * Uma linha da conta corrente. `reembolso` (F2b dos comprovantes, migration 20261011301000): despesa
+ * da empresa que ele pagou do bolso, com comprovante — `trabalhado` = o valor, `pago` = 0, `conta` =
+ * o código CMP, `categoria`/`os` do comprovante. Só sai cancelando o CMP (não tem ação na tela).
+ */
 export interface LinhaDaContaCorrente {
   data: string;
-  tipo: 'dia' | 'pagamento';
+  tipo: 'dia' | 'pagamento' | 'reembolso';
   id: string;
   jornada: Jornada | null;
   fracao: number | null;
@@ -65,8 +74,10 @@ export interface ContaCorrente {
   saldo_anterior: number;
   linhas: LinhaDaContaCorrente[];
   dias: number;
+  /** Só os dias; saldo_final = saldo_anterior + trabalhado + reembolsos − pago. */
   trabalhado: number;
   pago: number;
+  reembolsos: number;
   pago_aguardando_banco: number;
   saldo_final: number;
   estado: EstadoDoSaldo;
@@ -85,10 +96,11 @@ export function useResumoFreelancers(de: string | null, ate: string | null, atal
       return {
         pessoas: (r.pessoas ?? []).map((p) => ({
           ...p, diaria: numOuNulo(p.diaria), dias: num(p.dias), trabalhado: num(p.trabalhado),
-          pago: num(p.pago), saldo_final: num(p.saldo_final), pago_aguardando_banco: num(p.pago_aguardando_banco),
-          de: p.de ?? null, ate: p.ate ?? null,
+          pago: num(p.pago), reembolsos: num(p.reembolsos), saldo_final: num(p.saldo_final),
+          pago_aguardando_banco: num(p.pago_aguardando_banco), de: p.de ?? null, ate: p.ate ?? null,
         })),
-        trabalhado: num(r.trabalhado), pago: num(r.pago), dias: num(r.dias), deve: num(r.deve), adiantado: num(r.adiantado),
+        trabalhado: num(r.trabalhado), pago: num(r.pago), reembolsos: num(r.reembolsos), dias: num(r.dias),
+        deve: num(r.deve), adiantado: num(r.adiantado),
       };
     },
     staleTime: 30_000,
@@ -111,7 +123,8 @@ export async function lerContaCorrente(
     ...c,
     atalho: c.atalho ?? null,
     saldo_anterior: num(c.saldo_anterior), dias: num(c.dias), trabalhado: num(c.trabalhado),
-    pago: num(c.pago), saldo_final: num(c.saldo_final), pago_aguardando_banco: num(c.pago_aguardando_banco),
+    pago: num(c.pago), reembolsos: num(c.reembolsos), saldo_final: num(c.saldo_final),
+    pago_aguardando_banco: num(c.pago_aguardando_banco),
     favorecido: { ...c.favorecido, saldo_inicial: num(c.favorecido.saldo_inicial), diaria: numOuNulo(c.favorecido.diaria) },
     linhas: (c.linhas ?? []).map((l) => ({
       ...l, trabalhado: num(l.trabalhado), pago: num(l.pago), saldo: num(l.saldo),
@@ -366,6 +379,8 @@ export interface Acerto {
   trabalhado: number;
   pago_no_periodo: number;
   valor_do_acerto: number;
+  /** Reembolsos de comprovantes do período, na foto do acerto (F2b). */
+  reembolsos: number;
   status: 'fechado' | 'reaberto';
   criado_em: string;
   reaberto_em: string | null;
@@ -373,6 +388,15 @@ export interface Acerto {
   enviado_ao_freelancer_em: string | null;
   conferido_em: string | null;
   conferido_texto: string | null;
+}
+
+/** Um reembolso que entra no acerto (a linha `reembolso` da conta corrente, F2b). */
+export interface ReembolsoNoAcerto {
+  data: string;
+  valor: number;
+  descricao: string | null;
+  /** O código do comprovante, "CMP-00124". */
+  codigo: string | null;
 }
 
 export interface SimulacaoDoAcerto {
@@ -385,6 +409,8 @@ export interface SimulacaoDoAcerto {
   pago_no_periodo: number;
   valor_do_acerto: number;
   pago_aguardando_banco: number;
+  reembolsos: number;
+  reembolsos_itens: ReembolsoNoAcerto[];
   resumo: string;
 }
 
@@ -394,13 +420,13 @@ export function useAcertos(favorecidoId: string | null) {
     enabled: !!favorecidoId,
     queryFn: async (): Promise<Acerto[]> => {
       const { data, error } = await supabase.from('acertos_diarias' as never)
-        .select('id, numero, favorecido_id, de, ate, saldo_anterior, dias, trabalhado, pago_no_periodo, valor_do_acerto, status, criado_em, reaberto_em, motivo_reabertura, enviado_ao_freelancer_em, conferido_em, conferido_texto')
+        .select('id, numero, favorecido_id, de, ate, saldo_anterior, dias, trabalhado, pago_no_periodo, valor_do_acerto, reembolsos, status, criado_em, reaberto_em, motivo_reabertura, enviado_ao_freelancer_em, conferido_em, conferido_texto')
         .eq('favorecido_id', favorecidoId!)
         .order('numero', { ascending: false });
       if (error) throw error;
       return ((data ?? []) as unknown as Acerto[]).map((a) => ({
         ...a, saldo_anterior: num(a.saldo_anterior), dias: num(a.dias), trabalhado: num(a.trabalhado),
-        pago_no_periodo: num(a.pago_no_periodo), valor_do_acerto: num(a.valor_do_acerto),
+        pago_no_periodo: num(a.pago_no_periodo), valor_do_acerto: num(a.valor_do_acerto), reembolsos: num(a.reembolsos),
       }));
     },
     staleTime: 30_000,
@@ -412,6 +438,18 @@ export function acertoQueTrava(acertos: Acerto[] | undefined, data: string): Ace
   return (acertos ?? []).find((a) => a.status === 'fechado' && a.de <= data && data <= a.ate) ?? null;
 }
 
+/**
+ * Como tirar um reembolso de comprovante (F2b), em texto visível (o `title` não aparece no celular): ele
+ * não se apaga na tela, sai cancelando o CMP pelo WhatsApp — o comando de verdade é "cancelar cmp 124
+ * motivo". Dentro de um acerto fechado o cancelamento é recusado: reabra o acerto antes.
+ */
+export function comoTirarOReembolso(codigo: string | null | undefined, acerto: Acerto | null): string {
+  const cmp = codigo || 'comprovante';
+  if (acerto) return `Travado no acerto nº ${String(acerto.numero).padStart(4, '0')} (reabra o acerto para cancelar o ${cmp}).`;
+  const numero = Number(/(\d+)$/.exec(codigo ?? '')?.[1] ?? '') || null;
+  return `Reembolso vem do comprovante: para tirar, mande "cancelar cmp ${numero ?? 'N'} motivo" no WhatsApp.`;
+}
+
 /** O que o acerto FARIA — nada é gravado. A recusa ("nada a fechar") vem como erro. */
 export async function simularAcerto(favorecidoId: string, ate: string | null): Promise<SimulacaoDoAcerto> {
   const { data, error } = await supabase.rpc('fechar_acerto_diarias' as never, {
@@ -420,7 +458,11 @@ export async function simularAcerto(favorecidoId: string, ate: string | null): P
   if (error) throw error;
   const s = data as unknown as SimulacaoDoAcerto;
   return { ...s, saldo_anterior: num(s.saldo_anterior), dias: num(s.dias), trabalhado: num(s.trabalhado),
-    pago_no_periodo: num(s.pago_no_periodo), valor_do_acerto: num(s.valor_do_acerto), pago_aguardando_banco: num(s.pago_aguardando_banco) };
+    pago_no_periodo: num(s.pago_no_periodo), valor_do_acerto: num(s.valor_do_acerto), pago_aguardando_banco: num(s.pago_aguardando_banco),
+    reembolsos: num(s.reembolsos),
+    reembolsos_itens: (s.reembolsos_itens ?? []).map((r) => ({
+      data: r.data, valor: num(r.valor), descricao: r.descricao ?? null, codigo: r.codigo ?? null,
+    })) };
 }
 
 export function useFecharAcerto() {

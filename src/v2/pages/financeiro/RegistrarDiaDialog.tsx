@@ -242,7 +242,10 @@ export function RegistrarDiaDialog({ pessoas, favorecidoInicial, dataInicial, ed
           <div className="space-y-1.5">
             <Label htmlFor="dia-extras">Extras (R$)</Label>
             <MoneyInput id="dia-extras" value={extras} onValueChange={setExtras} />
-            <p className="text-xs text-muted-foreground">Só o que ele pagou do bolso (almoço, transporte, material).</p>
+            <p className="text-xs text-muted-foreground">
+              Só o que ele pagou do bolso (almoço, transporte, material). A despesa com comprovante mandado pelo WhatsApp (CMP) já entra
+              como reembolso: não repita aqui.
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="dia-descontos">Descontos (R$)</Label>

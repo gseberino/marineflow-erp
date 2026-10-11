@@ -3,6 +3,9 @@
 // o recibo e reabrir o último — com motivo. As mesmas funções do assistente.
 //
 // Fechar tem conferência antes, como o "sim" do WhatsApp: a função do banco simula e a tela mostra.
+//
+// Reembolsos (F2b dos comprovantes, 11/10/2026): as despesas da empresa que ele pagou, com o
+// comprovante (CMP), entram no acerto a favor dele — na lista e na conferência, só quando há.
 import { useEffect, useState } from 'react';
 import { CheckCircle2, FileDown, Lock, RotateCcw, Send } from 'lucide-react';
 import { toast } from 'sonner';
@@ -24,6 +27,12 @@ import {
 const ddmm = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
 const diasTexto = (n: number) => `${n.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} diária(s)`;
 
+/** "CMP-00124, CMP-00130" — até três códigos; com mais, "e mais N" (o recibo lista todos). */
+function codigosDosReembolsos(itens: SimulacaoDoAcerto['reembolsos_itens']): string {
+  const codigos = [...new Set(itens.map((r) => r.codigo).filter((c): c is string => !!c))];
+  return codigos.length > 3 ? `${codigos.slice(0, 3).join(', ')} e mais ${codigos.length - 3}` : codigos.join(', ');
+}
+
 export function AcertosDoFreelancer({ favorecidoId, nome, acertos, gerandoPdf, onRecibo }: {
   favorecidoId: string;
   nome: string;
@@ -42,7 +51,7 @@ export function AcertosDoFreelancer({ favorecidoId, nome, acertos, gerandoPdf, o
         <div className="min-w-0">
           <p className="font-medium">Acertos</p>
           <p className="text-xs text-muted-foreground">
-            Fechar o acerto guarda o período, gera o recibo numerado e trava os dias até a data. Os pagamentos do período são os vales.
+            Fechar o acerto guarda o período, gera o recibo numerado e trava os dias e os reembolsos até a data. Os pagamentos do período são os vales.
           </p>
         </div>
         <Button size="sm" className="gap-1.5" onClick={() => setFechando(true)}>
@@ -58,7 +67,9 @@ export function AcertosDoFreelancer({ favorecidoId, nome, acertos, gerandoPdf, o
             <div key={a.id} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 p-2 text-sm">
               <span className="font-semibold tabular-nums">nº {numeroDoRecibo(a.numero)}</span>
               <span className="tabular-nums">{ddmm(a.de)} a {ddmm(a.ate)}</span>
-              <span className="text-muted-foreground">{diasTexto(a.dias)} · vales {formatCurrency(a.pago_no_periodo)}</span>
+              <span className="text-muted-foreground">
+                {diasTexto(a.dias)}{a.reembolsos > 0 ? ` · reembolsos ${formatCurrency(a.reembolsos)}` : ''} · vales {formatCurrency(a.pago_no_periodo)}
+              </span>
               <span className="font-medium tabular-nums">a pagar {formatCurrency(a.valor_do_acerto)}</span>
               {a.status === 'reaberto' ? (
                 <Badge variant="outline" className="text-amber-700 dark:text-amber-400" title={a.motivo_reabertura ?? undefined}>Reaberto</Badge>
@@ -140,6 +151,15 @@ function FecharAcertoDialog({ favorecidoId, nome, onFechar }: { favorecidoId: st
             <dt className="text-muted-foreground">Período</dt><dd className="text-right tabular-nums">{ddmm(previa.de)} a {ddmm(previa.ate)}</dd>
             {previa.saldo_anterior !== 0 && (<><dt className="text-muted-foreground">Saldo anterior</dt><dd className="text-right tabular-nums">{formatCurrency(previa.saldo_anterior)}</dd></>)}
             <dt className="text-muted-foreground">Trabalhado ({diasTexto(previa.dias)})</dt><dd className="text-right tabular-nums">{formatCurrency(previa.trabalhado)}</dd>
+            {previa.reembolsos > 0 && (
+              <>
+                <dt className="min-w-0 break-words text-muted-foreground">
+                  {/* sem nenhum código (origem_codigo pode ser nulo), nada de "()" vazio */}
+                  (+) Reembolsos{codigosDosReembolsos(previa.reembolsos_itens) ? ` (${codigosDosReembolsos(previa.reembolsos_itens)})` : ''}
+                </dt>
+                <dd className="text-right tabular-nums">{formatCurrency(previa.reembolsos)}</dd>
+              </>
+            )}
             <dt className="text-muted-foreground">(−) Vales já pagos</dt><dd className="text-right tabular-nums">{formatCurrency(previa.pago_no_periodo)}</dd>
             <dt className="font-semibold">A pagar neste acerto</dt><dd className="text-right font-semibold tabular-nums">{formatCurrency(previa.valor_do_acerto)}</dd>
             {previa.pago_aguardando_banco > 0 && (
@@ -179,7 +199,7 @@ function ReabrirAcertoDialog({ acerto, nome, onFechar }: { acerto: Acerto; nome:
         <DialogHeader>
           <DialogTitle>Reabrir o acerto nº {numeroDoRecibo(acerto.numero)} — {nome}</DialogTitle>
           <DialogDescription>
-            Os dias de {ddmm(acerto.de)} a {ddmm(acerto.ate)} voltam a poder ser corrigidos. O recibo deste acerto deixa de valer: feche de novo depois de corrigir.
+            Os dias e os reembolsos de {ddmm(acerto.de)} a {ddmm(acerto.ate)} voltam a poder ser corrigidos (o reembolso, cancelando o comprovante). O recibo deste acerto deixa de valer: feche de novo depois de corrigir.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-1.5">

@@ -64,6 +64,21 @@ const contaDoRoberto = {
       categoria: 'Diárias de freelancers', observacao: null, os: [], saldo: 80 },
   ],
 };
+/**
+ * Reembolso de comprovante (F2b, 11/10/2026), na forma do contrato da spec F3 (3.7): a linha
+ * `reembolso` soma a favor dele (trabalhado = valor, pago = 0, conta = código CMP) e o topo ganha
+ * `reembolsos`; saldo_final = anterior + trabalhado + reembolsos − pago.
+ */
+let comReembolso = false;
+const linhaDeReembolso = {
+  data: '2026-09-18', tipo: 'reembolso', id: 'rb1', jornada: null, fracao: null, valor_diaria: null, extras: null,
+  descontos: null, trabalhado: 62, pago: 0, descricao: 'Reembolso CMP-00124 · AutoZone', conta: 'CMP-00124',
+  categoria: 'Peças e materiais', observacao: null, os: [{ id: 'o1', numero: 'OS-0042' }], saldo: 242, aguardando: false,
+};
+const contaComReembolso = () => ({
+  ...contaDoRoberto, reembolsos: 62, saldo_final: 142,
+  linhas: [contaDoRoberto.linhas[0], linhaDeReembolso, { ...contaDoRoberto.linhas[1], saldo: 142 }],
+});
 const contaVazia = (id: string, nome: string, desde: string) => ({
   favorecido: { id, nome, desde, saldo_inicial: 0, diaria: 130 },
   de: null, ate: null, saldo_anterior: 0, dias: 0, trabalhado: 0, pago: 0, saldo_final: 0, estado: 'quitado', linhas: [],
@@ -71,6 +86,7 @@ const contaVazia = (id: string, nome: string, desde: string) => ({
 
 beforeEach(() => {
   acertosNoBanco = [];
+  comReembolso = false;
   toastFn.mockReset();
   exportToCSV.mockReset();
   rpc.mockReset();
@@ -81,6 +97,10 @@ beforeEach(() => {
           return { data: { pessoas: [{ ...pessoas[0], de: '2026-09-23', ate: null, pago_aguardando_banco: 100 }],
             trabalhado: 160, pago: 100, dias: 1, deve: 60, adiantado: 0 }, error: null };
         }
+        if (comReembolso) {
+          return { data: { pessoas: [{ ...pessoas[0], reembolsos: 62, saldo_final: 512 }, pessoas[1]],
+            trabalhado: 2560, pago: 2130, reembolsos: 62, dias: 16, deve: 512, adiantado: 20 }, error: null };
+        }
         return { data: { pessoas, trabalhado: 2560, pago: 2130, dias: 16, deve: 450, adiantado: 20 }, error: null };
       case 'conta_corrente_freelancer':
         if (args.p_atalho === 'em_aberto') {
@@ -88,7 +108,8 @@ beforeEach(() => {
             linhas: [{ ...contaDoRoberto.linhas[1], id: 'a1', data: '2026-10-06', conta: 'Anotado — aguardando o banco',
               descricao: 'Adiantamento diarias', aguardando: true }] }, error: null };
         }
-        return { data: args.p_favorecido_id === 'r' ? contaDoRoberto : contaVazia('m', 'Mickael', '2026-09-10'), error: null };
+        if (args.p_favorecido_id === 'r') return { data: comReembolso ? contaComReembolso() : contaDoRoberto, error: null };
+        return { data: contaVazia('m', 'Mickael', '2026-09-10'), error: null };
       case 'apagar_diaria':
         return { data: { message: 'Diária de Roberto em qua 16/09 apagada.', apagado: {
           favorecido_id: 'r', data: '2026-09-16', jornada: 'inteiro', valor_diaria: 160, extras: 20, descontos: 0,
@@ -316,6 +337,103 @@ describe('DiariasPanel', () => {
     expect(chamadas('fechar_acerto_diarias')[0]).toMatchObject({ p_favorecido_id: 'r', p_simular: true });
     await user.click(within(dialogo).getByRole('button', { name: 'Fechar acerto' }));
     await waitFor(() => expect(chamadas('fechar_acerto_diarias').some((a) => a.p_simular === false)).toBe(true));
+  });
+
+  // ── Reembolso do técnico pelo comprovante (F2b, 11/10/2026) ──
+
+  it('sem reembolso, a tela não fala de reembolso', async () => {
+    renderizar('resumo');
+    await screen.findByText('Roberto');
+    expect(screen.queryByText(/^Reembolsos/)).not.toBeInTheDocument();
+  });
+
+  it('resumo: o cartão da pessoa e o total do topo mostram os Reembolsos, entre Trabalhado e Pago', async () => {
+    comReembolso = true;
+    renderizar('resumo');
+    const rotuloDoTopo = await screen.findByText('Reembolsos no período');
+    const cartaoDoTopo = rotuloDoTopo.parentElement!;
+    expect(within(cartaoDoTopo).getByText(/R\$\s?62,00/)).toBeInTheDocument();
+
+    const rotulos = screen.getAllByText(/^(Trabalhado|Reembolsos|Pago)$/).map((e) => e.textContent);
+    // Só o Roberto tem reembolso: o cartão dele tem os três, na ordem; o do Mickael segue sem.
+    expect(rotulos).toEqual(['Trabalhado', 'Reembolsos', 'Pago', 'Trabalhado', 'Pago']);
+    const reembolsoDoRoberto = screen.getByText('Reembolsos').closest('div')!;
+    expect(within(reembolsoDoRoberto).getByText(/R\$\s?62,00/)).toBeInTheDocument();
+    expect(screen.getByText(
+      /Saldo = saldo inicial \+ dias trabalhados \(diária \+ extras − descontos\) \+ reembolsos \(despesas que ele pagou, com comprovante\) − o que ele recebeu\./,
+    )).toBeInTheDocument();
+  });
+
+  it('extrato: a linha de reembolso mostra o CMP, a descrição, a categoria, a OS e + valor, sem menu de ações', async () => {
+    comReembolso = true;
+    renderizar('extrato');
+    const codigo = await screen.findByText('CMP-00124');
+    const linha = codigo.closest('[title]') as HTMLElement;
+    expect(linha).toHaveAttribute('title', 'Para tirar, cancele o CMP-00124 pelo WhatsApp');
+    expect(within(linha).getByText('Reembolso')).toBeInTheDocument();
+    // o código uma vez só (no selo e ao lado): a descrição vem sem o "Reembolso CMP-00124 · " do banco
+    expect(within(linha).getByText('AutoZone · Peças e materiais')).toBeInTheDocument();
+    expect(within(linha).queryByText(/Reembolso CMP-00124/)).not.toBeInTheDocument();
+    // o número da OS já vem com o prefixo: nada de "OS OS-0042"
+    expect(within(linha).getByText('OS-0042')).toBeInTheDocument();
+    expect(within(linha).queryByText('OS OS-0042')).not.toBeInTheDocument();
+    // como tirar, visível (o title não aparece no celular): o comando de verdade do WhatsApp
+    expect(within(linha).getByText('Reembolso vem do comprovante: para tirar, mande "cancelar cmp 124 motivo" no WhatsApp.'))
+      .toBeInTheDocument();
+    expect(within(linha).getByText(/^\+ R\$\s?62,00$/)).toBeInTheDocument();
+    expect(within(linha).queryAllByRole('button')).toHaveLength(0);
+    // Só o dia tem "Mais ações" (o reembolso só sai cancelando o CMP; o pagamento vem do extrato).
+    expect(screen.getAllByRole('button', { name: /Mais ações para/ })).toHaveLength(1);
+    // O topo do extrato ganha o cartão Reembolsos.
+    const topo = screen.getAllByText('Reembolsos')[0].parentElement!;
+    expect(within(topo).getByText(/R\$\s?62,00/)).toBeInTheDocument();
+  });
+
+  it('extrato: o reembolso dentro de um acerto fechado diz que está travado e como destravar', async () => {
+    comReembolso = true;
+    acertosNoBanco = [{ ...acertoDoRoberto, ate: '2026-09-20', reembolsos: 62 }];
+    renderizar('extrato');
+    const codigo = await screen.findByText('CMP-00124');
+    const linha = codigo.closest('[title]') as HTMLElement;
+    expect(await within(linha).findByText('Travado no acerto nº 0001 (reabra o acerto para cancelar o CMP-00124).')).toBeInTheDocument();
+    expect(within(linha).queryByText(/para tirar, mande/)).not.toBeInTheDocument();
+  });
+
+  it('grade: o reembolso tem a marca dele na célula (não é "pago") e a linha Reembolsos no rodapé', async () => {
+    comReembolso = true;
+    renderizar('grade');
+    await screen.findByText('Setembro de 2026');
+    const celula = (await screen.findAllByRole('gridcell', { name: 'Roberto em sex 18/09' }))[0];
+    expect(within(celula).getByText(/reemb\. R\$\s?62,00/)).toBeInTheDocument();
+    expect(within(celula).queryByText(/pago/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('rowheader', { name: 'Reembolsos' }).length).toBeGreaterThan(0);
+
+    // A ficha do dia mostra o reembolso só para ver: sem "Corrigir"/"Excluir" (sai cancelando o CMP).
+    await userEvent.setup().click(celula);
+    const ficha = await screen.findByRole('dialog');
+    expect(within(ficha).queryByText('Nada lançado neste dia.')).not.toBeInTheDocument();
+    expect(within(ficha).getByText('Reembolso')).toBeInTheDocument();
+    expect(within(ficha).getByText(/^\+ R\$\s?62,00$/)).toBeInTheDocument();
+    // o código uma vez só, a descrição e a categoria; e como tirar, visível
+    expect(within(ficha).getByText('CMP-00124 · AutoZone · Peças e materiais')).toBeInTheDocument();
+    expect(await within(ficha).findByText('Reembolso vem do comprovante: para tirar, mande "cancelar cmp 124 motivo" no WhatsApp.'))
+      .toBeInTheDocument();
+    expect(within(ficha).queryByRole('button', { name: /Mais ações/ })).not.toBeInTheDocument();
+  });
+
+  it('a planilha do contador traz o reembolso com o código e a coluna Reembolso no fim', async () => {
+    comReembolso = true;
+    const user = userEvent.setup();
+    renderizar('grade');
+    await screen.findByText('Setembro de 2026');
+    await user.click(screen.getByRole('button', { name: /Planilha do contador/ }));
+    await waitFor(() => expect(exportToCSV).toHaveBeenCalledTimes(1));
+    const [linhas, , colunas] = exportToCSV.mock.calls[0] as [Array<Record<string, string>>, string, Array<{ header: string }>];
+    expect(linhas.map((l) => `${l.data} ${l.tipo}`)).toEqual([
+      '16/09/2026 Diária', '18/09/2026 Reembolso (comprovante)', '22/09/2026 Pagamento',
+    ]);
+    expect(linhas[1]).toMatchObject({ conta: 'CMP-00124', reembolso: '62,00', pago: '' });
+    expect(colunas.at(-1)?.header).toBe('Reembolso');
   });
 
   // ── Novo freelancer (pedido do dono, 03/10/2026) ──
