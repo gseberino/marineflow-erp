@@ -371,10 +371,12 @@ servirComCors(async (req) => {
           .eq("status", "pending").eq("kind", "create_payable")
           .order("suggested_date", { ascending: false }).limit(1000),
         // Anotações que a VARREDURA cancelou nas últimas 24h (as canceladas na hora já foram
-        // respondidas na conversa): valor, quem e o motivo.
+        // respondidas na conversa): valor, quem e o motivo. A que o dono desfez ao cancelar um
+        // comprovante (motivo "CMP-00124 cancelado: …", F2 de 11/10/2026) não é "não aplicada": fica fora.
         admin.from("anotacoes_do_extrato")
           .select("valor, criada_em, cancelada_em, motivo_cancelamento, nome, suppliers(name), payees(name), clients(name)")
-          .eq("status", "cancelada").not("motivo_cancelamento", "is", null).gte("cancelada_em", desde24h)
+          .eq("status", "cancelada").not("motivo_cancelamento", "is", null).not("motivo_cancelamento", "like", "CMP-%")
+          .gte("cancelada_em", desde24h)
           .order("cancelada_em", { ascending: false }).limit(50),
       ]);
       // Compra no débito (ou no cartão) sem loja: o banco só escreveu o meio de pagamento.
