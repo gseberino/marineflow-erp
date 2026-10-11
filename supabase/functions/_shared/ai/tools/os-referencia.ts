@@ -38,3 +38,42 @@ export async function acharOS(
   if ("erro" in achado) return { error: achado.erro };
   return { id: achado.ordem.id, numero: achado.ordem.service_order_number, status: achado.ordem.status };
 }
+
+// ── O número no lugar do uuid, para TODAS as tools (11/10/2026) ──────────────────────────────
+// Só ~5 tools usavam acharOS; ~46 recebiam a OS e só aceitavam o uuid ("invalid input syntax for
+// type uuid" com ORÇ-00112 no get_service_order). A troca roda em executarChamadaDeTool, antes do
+// risco, da pendência e da execução: a pendência grava o uuid e o OpenRouter e o Max ganham juntos.
+
+/** Chaves que, em qualquer tool, são a OS/orçamento. */
+const CHAVES_DA_OS = ["service_order_id", "linked_service_order_id", "os_id"];
+/** Tools em que o próprio `id` é a OS/orçamento (nas demais, `id` é tarefa, e-mail, nota…). */
+const TOOLS_COM_ID_DA_OS = new Set(["get_service_order", "update_service_order_status", "apply_service_order_discount", "update_quote_status"]);
+
+/** "OS-00112", "ORÇ-00112", "orc 112", "112" — número de documento e nada mais ("ultimo" e frases ficam). */
+function pareceNumeroDeOS(v: string): boolean {
+  const t = v.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return /^(ORCAMENTO|ORC|OS|ORDEM)?\d{1,8}$/.test(t);
+}
+
+/**
+ * Troca o número dito pelo uuid nas chaves da OS. Usa o cliente de quem pede (sb), não o admin.
+ * Número ambíguo (ORÇ e OS) ou não achado volta `{ error, opcoes }` e nada deve rodar. uuid,
+ * "ultimo" e texto sem cara de número seguem como vieram — a tool decide, como antes.
+ */
+export async function trocarNumeroDaOsPeloId(
+  nomeDaTool: string,
+  input: unknown,
+  sb: ToolCtx["sb"],
+): Promise<{ input: unknown } | { error: string; opcoes?: string[] }> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return { input };
+  const chaves = TOOLS_COM_ID_DA_OS.has(nomeDaTool) ? [...CHAVES_DA_OS, "id"] : CHAVES_DA_OS;
+  let trocado: Record<string, unknown> | null = null;
+  for (const chave of chaves) {
+    const v = (input as Record<string, unknown>)[chave];
+    if (typeof v !== "string" || UUID_RE.test(v.trim()) || !pareceNumeroDeOS(v)) continue;
+    const achada = await acharOS({ admin: sb }, { os: v });
+    if ("error" in achada) return achada;
+    trocado = { ...(trocado ?? (input as Record<string, unknown>)), [chave]: achada.id };
+  }
+  return { input: trocado ?? input };
+}

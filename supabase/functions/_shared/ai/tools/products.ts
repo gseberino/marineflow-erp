@@ -122,7 +122,7 @@ export const productTools: ToolDef[] = [
     input_schema: {
       type: "object",
       properties: {
-        product_id: { type: "string", description: "UUID do produto." },
+        product_id: { type: "string", description: "UUID do produto (em get_service_order é o product_id da peça, NÃO o item_id)." },
         limit: { type: "number", description: "Quantos usos anteriores trazer (padrão 5, teto 15)." },
       },
       required: ["product_id"],

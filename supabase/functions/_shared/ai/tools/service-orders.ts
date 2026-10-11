@@ -417,10 +417,10 @@ export const serviceOrderTools: ToolDef[] = [
   },
   {
     name: "get_service_order",
-    description: "Detalhes completos de uma OS incluindo itens e serviços — cada serviço com a situação na via do técnico (situacao_na_via: a_fazer, so_levantar, aguarda_peca, feito, parcial, nao_feito) e o motivo.",
+    description: "Detalhes completos de uma OS incluindo itens e serviços — cada serviço com a situação na via do técnico (situacao_na_via: a_fazer, so_levantar, aguarda_peca, feito, parcial, nao_feito) e o motivo. Em cada peça, item_id serve para editar/remover a linha e product_id para get_product_price_history.",
     input_schema: {
       type: "object",
-      properties: { id: { type: "string" } },
+      properties: { id: { type: "string", description: "UUID ou número (OS-00112 / ORÇ-00112)." } },
       required: ["id"],
     },
     risk: "low",
@@ -435,7 +435,7 @@ export const serviceOrderTools: ToolDef[] = [
       // Leitura que falha lança: com erro engolido a OS apareceria SEM peças/serviços/roteiro.
       const { data: parts, error: erroPecas } = await sb
         .from("service_order_parts")
-        .select("id, quantity, line_total_sale, products(name)")
+        .select("id, product_id, quantity, line_total_sale, products(name)")
         .eq("service_order_id", args.id);
       if (erroPecas) throw new Error(`Não consegui ler as peças da OS: ${erroPecas.message}`);
       const { data: services, error: erroServicos } = await sb
@@ -473,6 +473,9 @@ export const serviceOrderTools: ToolDef[] = [
         roteiro,
         parts: (parts || []).map((p: any) => ({
           item_id: p.id,
+          // O id do PRODUTO (11/10/2026): sem ele o modelo passava o item_id ao
+          // get_product_price_history e ouvia "Produto não encontrado." (9 vezes em 30/09).
+          product_id: p.product_id,
           tipo: "part",
           produto: p.products?.name || "Desconhecido",
           quantidade: p.quantity,

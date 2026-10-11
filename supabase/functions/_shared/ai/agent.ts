@@ -22,6 +22,7 @@ import {
 } from "./anthropic.ts";
 import { allTools, type ToolCtx, type ToolDef } from "./tools/index.ts";
 import { CHAVE_DO_RETRATO, CHAVE_DO_SOLICITANTE, type Solicitante } from "./tools/registry.ts";
+import { trocarNumeroDaOsPeloId } from "./tools/os-referencia.ts";
 import { isAutonomyGranted } from "./autonomy-policy.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
 import { PERFIL_ADMIN, PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from "./perfil-operacao.ts";
@@ -862,6 +863,18 @@ export async function executarChamadaDeTool(
   // Escondida pelo perfil e alcançável pela rede (SO_PELA_REDE, ou tudo no perfil enxuto do admin).
   const foraDoPerfil = amb.toolsByName[tc.name] ? undefined : amb.alcancaveisPelaRede[tc.name];
   const toolDef = amb.toolsByName[tc.name] ?? foraDoPerfil;
+  // Número da OS no lugar do uuid (11/10/2026): "ORÇ-00112" em service_order_id/os_id/… (e no `id`
+  // das tools da própria OS) vira o uuid AQUI, antes do risco, da pendência e da execução. A
+  // pendência grava o uuid; a aprovação mostra o número (resolveIdLabel). Falha ao consultar deixa
+  // o argumento como veio — a tool responde como antes.
+  let recusaDoNumero: { error: string; opcoes?: string[] } | null = null;
+  if (toolDef) {
+    try {
+      const trocado = await trocarNumeroDaOsPeloId(tc.name, tc.input, amb.toolCtx.sb);
+      if ("error" in trocado) recusaDoNumero = trocado;
+      else tc = { name: tc.name, input: trocado.input };
+    } catch { /* segue com o argumento original */ }
+  }
   const argumentosInvalidos = foraDoPerfil ? validarArgumentosDaTool(foraDoPerfil.input_schema, tc.input) : [];
   let toolResult: unknown;
   let createdPendingProposal: Proposal | undefined;
@@ -885,6 +898,10 @@ export async function executarChamadaDeTool(
 
   if (!toolDef) {
     toolResult = { error: `Tool desconhecida: ${tc.name}` };
+  } else if (recusaDoNumero) {
+    // Número ambíguo (ORÇ e OS) ou não achado: nada roda, e o modelo recebe as opções.
+    toolResult = recusaDoNumero;
+    await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
   } else if (argumentosInvalidos.length > 0) {
     // Nada roda: devolve o que está errado JUNTO com o esquema, que o modelo não tinha visto.
     toolResult = {
@@ -991,6 +1008,8 @@ export async function executarChamadaDeTool(
   if (foraDoPerfil) {
     const desfecho = argumentosInvalidos.length > 0
       ? "argumentos_invalidos"
+      : recusaDoNumero
+      ? "numero_da_os_recusado"
       : executou
       ? (temErro(toolResult) ? "falha_na_execucao" : "executada")
       : createdPendingProposal ? "pendencia" : "falha_ao_registrar_pendencia";
