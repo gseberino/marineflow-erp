@@ -12,10 +12,16 @@
 export type JornadaNoDocumento = 'inteiro' | 'meio' | 'faltou';
 export type EstadoNoDocumento = 'deve' | 'adiantado' | 'quitado' | 'semdias';
 
-/** A linha da conta corrente como as funções do banco devolvem (conta_corrente_freelancer). */
+/**
+ * A linha da conta corrente como as funções do banco devolvem (conta_corrente_freelancer).
+ *
+ * `reembolso` (F2b dos comprovantes, 11/10/2026): despesa da empresa que o prestador pagou do
+ * bolso, com o comprovante (CMP). Soma a favor dele como o dia (`trabalhado` = o valor, `pago` = 0),
+ * `conta` = o código do comprovante ("CMP-00124"), `categoria` e `os` vêm do comprovante.
+ */
 export interface LinhaDoExtrato {
   data: string;
-  tipo: 'dia' | 'pagamento';
+  tipo: 'dia' | 'pagamento' | 'reembolso';
   id: string;
   jornada: JornadaNoDocumento | null;
   fracao: number | null;
@@ -41,8 +47,11 @@ export interface ContaDoExtrato {
   saldo_anterior: number;
   linhas: LinhaDoExtrato[];
   dias: number;
+  /** Só os dias (diária + extras − descontos); os reembolsos vêm à parte. */
   trabalhado: number;
   pago: number;
+  /** Reembolsos de comprovantes no período (F2b). Ausente = o banco de antes da F2b = nenhum. */
+  reembolsos?: number;
   saldo_final: number;
   estado: EstadoNoDocumento;
 }
@@ -110,6 +119,28 @@ const ESTADO_NO_PAPEL: Record<EstadoNoDocumento, string> = {
   semdias: 'sem dias lançados',
 };
 
+/** As linhas de reembolso (comprovante) de uma conta. */
+const reembolsosDe = (linhas: LinhaDoExtrato[]) => linhas.filter((l) => l.tipo === 'reembolso');
+
+/**
+ * A descrição do reembolso para a tela, o PDF e o recibo: sem o "Reembolso CMP-00124 · " que o banco
+ * grava (o código e a palavra já aparecem ao lado — no selo e na coluna Comprovante). O CSV da
+ * contadora leva o texto inteiro.
+ */
+export function descricaoDoReembolso(l: Pick<LinhaDoExtrato, 'descricao'>): string {
+  return (l.descricao ?? '').replace(/^Reembolso\s+CMP-\d+\s*(?:·\s*)?/u, '').trim();
+}
+
+/** "CMP-00124, CMP-00130" — os códigos dos comprovantes, na ordem das linhas, sem repetir. */
+const codigosDe = (linhas: LinhaDoExtrato[]) => [...new Set(linhas.map((l) => l.conta).filter((c): c is string => !!c))].join(', ');
+
+/**
+ * O total dos reembolsos: o do banco quando vem (conta corrente e foto do acerto); sem ele (banco
+ * de antes da F2b), a soma das linhas. Sem reembolso, os documentos saem exatamente como antes.
+ */
+const totalDosReembolsos = (informado: number | null | undefined, linhas: LinhaDoExtrato[]) =>
+  informado != null ? Number(informado) || 0 : reembolsosDe(linhas).reduce((s, l) => s + (Number(l.trabalhado) || 0), 0);
+
 /** O extrato de um freelancer no período, em A4, com as duas linhas de assinatura. */
 export function montarExtratoHtml(p: {
   empresa: EmpresaNoDocumento;
@@ -121,6 +152,11 @@ export function montarExtratoHtml(p: {
   const dias = conta.linhas.filter((l) => l.tipo === 'dia');
   const pagamentos = conta.linhas.filter((l) => l.tipo === 'pagamento');
   const aguardando = pagamentos.some((l) => l.aguardando);
+  // Reembolso de comprovante (F2b): coluna no total e seção própria SÓ quando há — sem ele, o
+  // documento é byte a byte o de antes (teste em src/lib/extrato-diarias.test.ts).
+  const reembolsos = reembolsosDe(conta.linhas);
+  const totalReembolsos = totalDosReembolsos(conta.reembolsos, conta.linhas);
+  const comReembolso = totalReembolsos > 0 || reembolsos.length > 0;
 
   const linhaDoDia = (l: LinhaDoExtrato) => `
       <tr>
@@ -138,6 +174,21 @@ export function montarExtratoHtml(p: {
         <td>${dataBR(l.data)}</td><td>${esc(l.aguardando ? 'Pix lançado à mão *' : l.conta ?? '')}</td><td>${esc(l.descricao ?? '')}</td>
         <td class="n b">${brl(l.pago)}</td>
       </tr>`;
+  const linhaDoReembolso = (l: LinhaDoExtrato) => `
+      <tr>
+        <td>${dataBR(l.data)}</td><td>${esc(l.conta ?? '')}</td>
+        <td>${[descricaoDoReembolso(l), l.categoria ?? ''].filter(Boolean).map(esc).join(' · ')}</td>
+        <td>${esc(l.os.map((o) => o.numero).join(', '))}</td>
+        <td class="n b">${brl(l.trabalhado)}</td>
+      </tr>`;
+  const secaoDosReembolsos = reembolsos.length ? `
+
+  <h2>Reembolsos de despesas (comprovantes)</h2>
+  <table>
+    <thead><tr><th>Data</th><th>Comprovante</th><th>Descrição</th><th>OS</th><th class="n">Valor</th></tr></thead>
+    <tbody>${reembolsos.map(linhaDoReembolso).join('')}</tbody>
+    <tfoot><tr><td colspan="4">${reembolsos.length} reembolso(s)</td><td class="n">${brl(totalReembolsos)}</td></tr></tfoot>
+  </table>` : '';
 
   return `<!doctype html>
 <html lang="pt-BR">
@@ -189,11 +240,11 @@ export function montarExtratoHtml(p: {
   <table>
     <thead><tr>
       <th class="n">${conta.de ? 'Saldo antes do período' : 'Saldo inicial'}</th><th class="n">Diárias</th>
-      <th class="n">Trabalhado</th><th class="n">Pago</th><th class="n">Saldo no fim do período</th>
+      <th class="n">Trabalhado</th>${comReembolso ? '<th class="n">Reembolsos</th>' : ''}<th class="n">Pago</th><th class="n">Saldo no fim do período</th>
     </tr></thead>
     <tbody><tr>
       <td class="n">${brl(conta.saldo_anterior)}</td><td class="n">${numero(conta.dias)}</td>
-      <td class="n">${brl(conta.trabalhado)}</td><td class="n">${brl(conta.pago)}</td>
+      <td class="n">${brl(conta.trabalhado)}</td>${comReembolso ? `<td class="n">${brl(totalReembolsos)}</td>` : ''}<td class="n">${brl(conta.pago)}</td>
       <td class="n b">${brl(conta.saldo_final)} (${ESTADO_NO_PAPEL[conta.estado]})</td>
     </tr></tbody>
   </table>
@@ -206,7 +257,7 @@ export function montarExtratoHtml(p: {
     </tr></thead>
     <tbody>${dias.length ? dias.map(linhaDoDia).join('') : '<tr><td colspan="9" class="vazio">Nenhum dia lançado no período.</td></tr>'}</tbody>
     ${dias.length ? `<tfoot><tr><td colspan="8">${numero(conta.dias)} diária(s)</td><td class="n">${brl(conta.trabalhado)}</td></tr></tfoot>` : ''}
-  </table>
+  </table>${secaoDosReembolsos}
 
   <h2>Pagamentos recebidos</h2>
   <table>
@@ -215,7 +266,7 @@ export function montarExtratoHtml(p: {
     ${pagamentos.length ? `<tfoot><tr><td colspan="3">${pagamentos.length} pagamento(s)</td><td class="n">${brl(conta.pago)}</td></tr></tfoot>` : ''}
   </table>
 
-  <p class="nota">Saldo positivo = valor a pagar ao prestador; negativo = pago adiantado. Extras são despesas pagas pelo prestador e reembolsadas.${aguardando ? ' * Pagamento lançado à mão, ainda não confirmado pelo extrato do banco.' : ''}</p>
+  <p class="nota">Saldo positivo = valor a pagar ao prestador; negativo = pago adiantado. Extras são despesas pagas pelo prestador e reembolsadas.${comReembolso ? ' Reembolso (CMP) = despesa com o comprovante enviado pelo WhatsApp; a mesma despesa não entra também como extra do dia.' : ''}${aguardando ? ' * Pagamento lançado à mão, ainda não confirmado pelo extrato do banco.' : ''}</p>
 
   <div class="assinaturas">
     <div>${esc(empresa.nome)}</div>
@@ -242,6 +293,8 @@ export interface AcertoNoDocumento {
   trabalhado: number;
   pago_no_periodo: number;
   valor_do_acerto: number;
+  /** Reembolsos de comprovantes do período, na foto do acerto (F2b). Ausente = nenhum. */
+  reembolsos?: number;
 }
 
 const UNIDADES = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez', 'onze', 'doze', 'treze',
@@ -297,8 +350,9 @@ const dataPorExtenso = (g: Date) => {
 export const numeroDoRecibo = (n: number) => String(n).padStart(4, '0');
 
 /**
- * O recibo do acerto, em A4. As linhas (dias e vales) vêm da conta corrente do MESMO período do
- * acerto (conta_corrente_freelancer de–até); os totais vêm da foto do acerto, que não muda.
+ * O recibo do acerto, em A4. As linhas (dias, reembolsos e vales) vêm da conta corrente do MESMO
+ * período do acerto (conta_corrente_freelancer de–até); os totais vêm da foto do acerto, que não muda.
+ * Reembolso de comprovante (F2b) só aparece quando há: sem ele, o recibo é o de antes.
  */
 export function montarReciboHtml(p: {
   empresa: EmpresaNoDocumento;
@@ -310,6 +364,10 @@ export function montarReciboHtml(p: {
   const { empresa, freelancer, acerto } = p;
   const dias = p.linhas.filter((l) => l.tipo === 'dia');
   const vales = p.linhas.filter((l) => l.tipo === 'pagamento');
+  const reembolsos = reembolsosDe(p.linhas);
+  // O total é o da foto do acerto (não muda depois de fechado); os códigos, das linhas do período.
+  const totalReembolsos = totalDosReembolsos(acerto.reembolsos, p.linhas);
+  const codigos = codigosDe(reembolsos);
   const aReceber = acerto.valor_do_acerto > 0;
   const competencia = `${dataBR(acerto.de)} a ${dataBR(acerto.ate)}`;
   const cpf = freelancer.documento ? `, CPF ${esc(documentoFormatado(freelancer.documento))}` : '';
@@ -319,6 +377,24 @@ export function montarReciboHtml(p: {
         <td>${esc(l.os.map((o) => o.numero).join(', '))}</td><td class="n">${brl(l.trabalhado)}</td></tr>`;
   const linhaDoVale = (l: LinhaDoExtrato) => `
       <tr><td>${dataBR(l.data)}</td><td>${esc(l.descricao ?? '')}${l.aguardando ? ' *' : ''}</td><td class="n">${brl(l.pago)}</td></tr>`;
+  const linhaDoReembolso = (l: LinhaDoExtrato) => `
+      <tr><td>${dataBR(l.data)}</td><td>${esc(l.conta ?? '')}</td><td>${esc(descricaoDoReembolso(l))}</td><td class="n">${brl(l.trabalhado)}</td></tr>`;
+  // O recibo é a declaração do prestador ("Recebi…"): as despesas foram pagas por ele, "por mim".
+  const quaisComprovantes = codigos ? ` (${esc(codigos)})` : '';
+  const reembolsoNaQuitacao = totalReembolsos > 0
+    ? ` e ao reembolso de ${brl(totalReembolsos)} em despesas pagas por mim${quaisComprovantes}` : '';
+  // sem valor a receber, o reembolso JÁ foi compensado neste acerto (nada "a reembolsar")
+  const reembolsoNaDeclaracao = totalReembolsos > 0
+    ? `, paguei ${brl(totalReembolsos)} em despesas da empresa${quaisComprovantes}, compensadas neste acerto,` : '';
+  const secaoDosReembolsos = reembolsos.length ? `
+
+  <h2>Reembolsos de despesas pagas pelo prestador</h2>
+  <table>
+    <thead><tr><th>Data</th><th>Comprovante</th><th>Descrição</th><th class="n">Valor</th></tr></thead>
+    <tbody>${reembolsos.map(linhaDoReembolso).join('')}</tbody>
+  </table>` : '';
+  const linhaDoAcertoReembolsos = totalReembolsos > 0
+    ? `\n    <tr><td>(+) Reembolsos de despesas${reembolsos.length ? ` (${reembolsos.length} comprovante(s))` : ''}</td><td class="n">${brl(totalReembolsos)}</td></tr>` : '';
 
   return `<!doctype html>
 <html lang="pt-BR">
@@ -356,14 +432,14 @@ export function montarReciboHtml(p: {
   <div class="valor">${aReceber ? brl(acerto.valor_do_acerto) : 'Sem valor a receber'}</div>
 
   <p class="texto">${aReceber
-    ? `Recebi de <b>${esc(empresa.nome)}</b> a importância de <b>${brl(acerto.valor_do_acerto)}</b> (${esc(valorPorExtenso(acerto.valor_do_acerto))}), referente ao acerto de ${numero(acerto.dias)} diária(s) de prestação de serviços no período de ${competencia}, já descontados os valores recebidos antecipadamente, conforme o detalhamento abaixo, dando plena quitação do período.`
-    : `Declaro que, no período de ${competencia}, prestei ${numero(acerto.dias)} diária(s) de serviço a <b>${esc(empresa.nome)}</b> e já recebi antecipadamente ${brl(acerto.pago_no_periodo)}, ficando ${acerto.valor_do_acerto < 0 ? `um adiantamento de ${brl(-acerto.valor_do_acerto)} a compensar em dias futuros` : 'o período quitado'}.`}</p>
+    ? `Recebi de <b>${esc(empresa.nome)}</b> a importância de <b>${brl(acerto.valor_do_acerto)}</b> (${esc(valorPorExtenso(acerto.valor_do_acerto))}), referente ao acerto de ${numero(acerto.dias)} diária(s) de prestação de serviços no período de ${competencia}${reembolsoNaQuitacao}, já descontados os valores recebidos antecipadamente, conforme o detalhamento abaixo, dando plena quitação do período.`
+    : `Declaro que, no período de ${competencia}, prestei ${numero(acerto.dias)} diária(s) de serviço a <b>${esc(empresa.nome)}</b>${reembolsoNaDeclaracao} e já recebi antecipadamente ${brl(acerto.pago_no_periodo)}, ficando ${acerto.valor_do_acerto < 0 ? `um adiantamento de ${brl(-acerto.valor_do_acerto)} a compensar em dias futuros` : 'o período quitado'}.`}</p>
 
   <h2>Dias trabalhados</h2>
   <table>
     <thead><tr><th>Data</th><th>Dia</th><th>Tipo</th><th>OS</th><th class="n">Valor</th></tr></thead>
     <tbody>${dias.length ? dias.map(linhaDoDia).join('') : '<tr><td colspan="5">Nenhum dia no período.</td></tr>'}</tbody>
-  </table>
+  </table>${secaoDosReembolsos}
 
   ${vales.length ? `<h2>Vales e adiantamentos já pagos no período</h2>
   <table>
@@ -374,7 +450,7 @@ export function montarReciboHtml(p: {
   <h2>Acerto</h2>
   <table class="conta">
     ${acerto.saldo_anterior ? `<tr><td>${acerto.saldo_anterior > 0 ? 'Saldo a receber de antes do período' : 'Adiantamento de antes do período'}</td><td class="n">${brl(Math.abs(acerto.saldo_anterior))}</td></tr>` : ''}
-    <tr><td>Trabalhado no período (${numero(acerto.dias)} diária(s))</td><td class="n">${brl(acerto.trabalhado)}</td></tr>
+    <tr><td>Trabalhado no período (${numero(acerto.dias)} diária(s))</td><td class="n">${brl(acerto.trabalhado)}</td></tr>${linhaDoAcertoReembolsos}
     <tr><td>(−) Vales e adiantamentos já pagos</td><td class="n">${brl(acerto.pago_no_periodo)}</td></tr>
     <tr class="total"><td>${aReceber ? 'Valor deste recibo' : 'Saldo'}</td><td class="n">${brl(acerto.valor_do_acerto)}</td></tr>
   </table>
@@ -407,20 +483,30 @@ export interface LinhaDoCsv {
   categoria: string;
   os: string;
   observacao: string;
+  /** Reembolso de comprovante (F2b): o valor; vazio nas outras linhas. Coluna no FIM do arquivo. */
+  reembolso: string;
 }
 
 const dec = (v: number | null | undefined) => (v == null ? '' : (Number(v) || 0).toFixed(2).replace('.', ','));
 
-/** Todos os dias e pagamentos das contas, em ordem de data (dia antes de pagamento no mesmo dia). */
+/** Ordem no mesmo dia: o dia, depois o reembolso (os dois a favor dele), depois o pagamento. */
+const ORDEM_NO_DIA: Record<LinhaDoExtrato['tipo'], number> = { dia: 0, reembolso: 1, pagamento: 2 };
+
+/**
+ * Todos os dias, reembolsos e pagamentos das contas, em ordem de data (no mesmo dia: dia, reembolso,
+ * pagamento). O reembolso leva o código do comprovante em "Conta de origem" e o valor na coluna
+ * "Reembolso".
+ */
 export function linhasDoCsv(contas: Array<{ conta: ContaDoExtrato; documento: string | null }>): LinhaDoCsv[] {
   const linhas: Array<LinhaDoCsv & { _ordem: string }> = [];
   for (const { conta, documento } of contas) {
     for (const l of conta.linhas) {
       const dia = l.tipo === 'dia';
+      const reembolso = l.tipo === 'reembolso';
       linhas.push({
-        _ordem: `${l.data}|${dia ? 0 : 1}|${conta.favorecido.nome}`,
+        _ordem: `${l.data}|${ORDEM_NO_DIA[l.tipo] ?? 2}|${conta.favorecido.nome}`,
         data: dataBR(l.data),
-        tipo: dia ? 'Diária' : l.aguardando ? 'Pagamento (aguardando o banco)' : 'Pagamento',
+        tipo: dia ? 'Diária' : reembolso ? 'Reembolso (comprovante)' : l.aguardando ? 'Pagamento (aguardando o banco)' : 'Pagamento',
         freelancer: conta.favorecido.nome,
         cpf: documentoFormatado(documento),
         jornada: dia ? tipoDoDia(l.jornada) : '',
@@ -429,11 +515,12 @@ export function linhasDoCsv(contas: Array<{ conta: ContaDoExtrato; documento: st
         extras: dia ? dec(l.extras) : '',
         descontos: dia ? dec(l.descontos) : '',
         trabalhado: dia ? dec(l.trabalhado) : '',
-        pago: dia ? '' : dec(l.pago),
+        pago: dia || reembolso ? '' : dec(l.pago),
         conta: dia ? '' : l.conta ?? '',
         categoria: dia ? '' : l.categoria ?? '',
         os: l.os.map((o) => o.numero).join(', '),
         observacao: dia ? l.observacao ?? '' : l.descricao ?? '',
+        reembolso: reembolso ? dec(l.trabalhado) : '',
       });
     }
   }
@@ -456,4 +543,6 @@ export const COLUNAS_DO_CSV: Array<{ header: string; key: keyof LinhaDoCsv }> = 
   { header: 'Categoria', key: 'categoria' },
   { header: 'OS', key: 'os' },
   { header: 'Observação / identificação', key: 'observacao' },
+  // F2b (11/10/2026): coluna nova À DIREITA, para a planilha da contadora não mudar de lugar.
+  { header: 'Reembolso', key: 'reembolso' },
 ];

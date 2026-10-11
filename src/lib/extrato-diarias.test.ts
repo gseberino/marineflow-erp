@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  documentoFormatado, linhasDoCsv, montarExtratoHtml, montarReciboHtml, nomeDoArquivo, textoDoPeriodo, valorPorExtenso, type ContaDoExtrato,
+  COLUNAS_DO_CSV, descricaoDoReembolso, documentoFormatado, linhasDoCsv, montarExtratoHtml, montarReciboHtml, nomeDoArquivo, textoDoPeriodo,
+  valorPorExtenso,
+  type ContaDoExtrato, type LinhaDoExtrato,
 } from './extrato-diarias';
 
 const conta = (o: Partial<ContaDoExtrato> = {}): ContaDoExtrato => ({
@@ -145,5 +147,142 @@ describe('recibo do acerto', () => {
     expect(h).toContain('Sem valor a receber');
     expect(h).toContain('um adiantamento de R$ 40,00 a compensar');
     expect(h).not.toContain('Recebi de');
+  });
+});
+
+// ── Reembolso do técnico (F2b dos comprovantes, 11/10/2026) ──────────────────────────────────
+// A despesa da empresa que o prestador pagou do bolso, com comprovante, entra na conta corrente
+// dele como crédito (linha `reembolso`, conta = código CMP) e vai para o próximo acerto/recibo.
+
+const reembolso = (o: Partial<LinhaDoExtrato> = {}): LinhaDoExtrato => ({
+  data: '2026-09-16', tipo: 'reembolso', id: 'rb1', jornada: null, fracao: null, valor_diaria: null, extras: null,
+  descontos: null, trabalhado: 62, pago: 0, descricao: 'Reembolso CMP-00124 · AutoZone', conta: 'CMP-00124',
+  categoria: 'Peças e materiais', observacao: null, os: [{ id: 'o1', numero: 'OS-0042' }], saldo: 312, aguardando: false, ...o,
+});
+
+/** A conta do Roberto com um reembolso de R$ 62,00 no dia 16/09 (saldo final = 230 + 62). */
+const contaComReembolso = () => {
+  const c = conta({ reembolsos: 62, saldo_final: 292 });
+  c.linhas = [...c.linhas, reembolso()];
+  return c;
+};
+const doc = {
+  empresa: { nome: 'HBR Marine Solutions', cnpj: null, cidade: 'Itajaí/SC' },
+  freelancer: { nome: 'Roberto Daniel', documento: null, pix: null },
+};
+
+describe('reembolso de comprovante no extrato em PDF', () => {
+  const html = montarExtratoHtml({ ...doc, conta: contaComReembolso(), geradoEm: new Date(Date.UTC(2026, 8, 29, 17, 5)) });
+
+  it('o total ganha a coluna Reembolsos entre Trabalhado e Pago', () => {
+    expect(html).toContain('<th class="n">Trabalhado</th><th class="n">Reembolsos</th><th class="n">Pago</th>');
+    expect(html).toMatch(/<td class="n">R\$ 260,00<\/td><td class="n">R\$ 62,00<\/td><td class="n">R\$ 100,00<\/td>/);
+    expect(html).toMatch(/R\$ 292,00 \(a pagar ao prestador\)/);
+  });
+
+  it('seção própria com o código do comprovante, a descrição, a categoria, a OS e o valor; fora dos pagamentos', () => {
+    const secao = html.slice(html.indexOf('Reembolsos de despesas (comprovantes)'), html.indexOf('Pagamentos recebidos'));
+    expect(secao).toContain('<th>Data</th><th>Comprovante</th><th>Descrição</th><th>OS</th><th class="n">Valor</th>');
+    expect(secao).toContain('<td>CMP-00124</td>');
+    // a descrição sem o "Reembolso CMP-00124 · " que o banco grava: o código já está na coluna ao lado
+    expect(secao).toContain('<td>AutoZone · Peças e materiais</td>');
+    expect(secao).not.toContain('Reembolso CMP-00124');
+    expect(secao).toContain('OS-0042');
+    expect(secao).toContain('1 reembolso(s)');
+    expect(html.slice(html.indexOf('Pagamentos recebidos'))).not.toContain('CMP-00124');
+    // reembolso e extra do dia não são a mesma coisa: a nota diz que a despesa não entra nos dois
+    expect(html).toContain('Reembolso (CMP) = despesa com o comprovante enviado pelo WhatsApp; a mesma despesa não entra também como extra do dia.');
+  });
+
+  it('descricaoDoReembolso: tira o prefixo do banco (com e sem fornecedor); o resto fica', () => {
+    expect(descricaoDoReembolso({ descricao: 'Reembolso CMP-00124 · AutoZone (compra de 08/10)' })).toBe('AutoZone (compra de 08/10)');
+    expect(descricaoDoReembolso({ descricao: 'Reembolso CMP-00124' })).toBe('');
+    expect(descricaoDoReembolso({ descricao: 'Almoço do dia' })).toBe('Almoço do dia');
+    expect(descricaoDoReembolso({ descricao: null })).toBe('');
+  });
+
+  it('sem reembolso: nada de reembolso no papel, e "0" ou ausente dá o mesmo documento', () => {
+    const geradoEm = new Date(Date.UTC(2026, 8, 29, 17, 5));
+    const sem = montarExtratoHtml({ ...doc, conta: conta(), geradoEm });
+    expect(sem).not.toMatch(/Reembols|reembolsos|CMP-/);
+    expect(sem).toContain('<th class="n">Trabalhado</th><th class="n">Pago</th>');
+    expect(montarExtratoHtml({ ...doc, conta: conta({ reembolsos: 0 }), geradoEm })).toBe(sem);
+  });
+
+  it('banco de antes da F2b (sem o total): soma as linhas', () => {
+    const c = contaComReembolso();
+    delete c.reembolsos;
+    const h = montarExtratoHtml({ ...doc, conta: c, geradoEm: new Date() });
+    expect(h).toMatch(/<td class="n">R\$ 62,00<\/td><td class="n">R\$ 100,00<\/td>/);
+  });
+});
+
+describe('reembolso de comprovante no recibo do acerto', () => {
+  const linhas = [
+    ...conta().linhas, reembolso(),
+    reembolso({ id: 'rb2', data: '2026-09-25', trabalhado: 30, conta: 'CMP-00130', descricao: 'Reembolso CMP-00130 · Posto' }),
+  ];
+  // 260 trabalhado + 92 de reembolsos − 100 de vales = 252 a pagar.
+  const acerto = { numero: 8, de: '2026-09-16', ate: '2026-09-30', saldo_anterior: 0, dias: 1.5, trabalhado: 260, pago_no_periodo: 100,
+    valor_do_acerto: 252, reembolsos: 92 };
+  const recibo = montarReciboHtml({ ...doc, acerto, linhas, geradoEm: new Date(Date.UTC(2026, 9, 1, 15, 0)) });
+
+  it('a conta do acerto soma os reembolsos antes dos vales, com quantos comprovantes', () => {
+    const contaDoAcerto = recibo.slice(recibo.indexOf('<h2>Acerto</h2>'));
+    expect(contaDoAcerto).toMatch(
+      /Trabalhado no período[\s\S]*\(\+\) Reembolsos de despesas \(2 comprovante\(s\)\)<\/td><td class="n">R\$ 92,00[\s\S]*\(−\) Vales/);
+  });
+
+  it('a quitação cita o reembolso e os códigos; a seção lista cada comprovante', () => {
+    expect(recibo).toContain('e ao reembolso de R$ 92,00 em despesas pagas por mim (CMP-00124, CMP-00130), já descontados');
+    expect(recibo).toContain('(duzentos e cinquenta e dois reais)');
+    const secao = recibo.slice(recibo.indexOf('Reembolsos de despesas pagas pelo prestador'), recibo.indexOf('<h2>Acerto</h2>'));
+    expect(secao).toContain('CMP-00124');
+    expect(secao).toContain('<td>CMP-00130</td><td>Posto</td>');
+    expect(secao).not.toContain('Reembolso CMP-00130');
+    expect(secao).toContain('R$ 30,00');
+  });
+
+  it('o total é o da foto do acerto, não a soma das linhas de hoje', () => {
+    const h = montarReciboHtml({ ...doc, acerto: { ...acerto, reembolsos: 62 }, linhas, geradoEm: new Date() });
+    expect(h).toContain('e ao reembolso de R$ 62,00');
+  });
+
+  it('sem valor a receber, a declaração também diz o que ele pagou de despesa — já compensado neste acerto', () => {
+    const h = montarReciboHtml({ ...doc, acerto: { ...acerto, valor_do_acerto: -8, pago_no_periodo: 360 }, linhas, geradoEm: new Date() });
+    expect(h).toContain('paguei R$ 92,00 em despesas da empresa (CMP-00124, CMP-00130), compensadas neste acerto, e já recebi antecipadamente R$ 360,00');
+    // a declaração assinada não pode dizer "a reembolsar" do que o próprio recibo já compensou
+    expect(h).not.toContain('a reembolsar');
+    expect(h).not.toContain('Recebi de');
+  });
+
+  it('sem reembolso o recibo não fala de reembolso; "0" ou ausente dá o mesmo recibo', () => {
+    const base = { numero: 7, de: '2026-09-16', ate: '2026-09-30', saldo_anterior: 0, dias: 1.5, trabalhado: 260, pago_no_periodo: 100, valor_do_acerto: 160 };
+    const geradoEm = new Date(Date.UTC(2026, 9, 1, 15, 0));
+    const sem = montarReciboHtml({ ...doc, acerto: base, linhas: conta().linhas, geradoEm });
+    expect(sem).not.toMatch(/Reembols|reembolsos|CMP-/);
+    expect(montarReciboHtml({ ...doc, acerto: { ...base, reembolsos: 0 }, linhas: conta().linhas, geradoEm })).toBe(sem);
+  });
+});
+
+describe('reembolso de comprovante no CSV do contador', () => {
+  const linhas = linhasDoCsv([{ conta: contaComReembolso(), documento: '12345678940' }]);
+
+  it('no mesmo dia: o dia, o reembolso, o pagamento', () => {
+    expect(linhas.map((l) => `${l.data} ${l.tipo}`)).toEqual([
+      '16/09/2026 Diária', '16/09/2026 Reembolso (comprovante)', '16/09/2026 Pagamento', '17/09/2026 Diária',
+    ]);
+  });
+
+  it('o código vai em "Conta de origem", o valor na coluna Reembolso, a descrição e a OS como no extrato', () => {
+    const r = linhas[1];
+    expect(r).toMatchObject({ conta: 'CMP-00124', reembolso: '62,00', pago: '', trabalhado: '', observacao: 'Reembolso CMP-00124 · AutoZone',
+      os: 'OS-0042', categoria: 'Peças e materiais', jornada: '', diarias: '' });
+    expect(linhas.filter((l) => l !== r).every((l) => l.reembolso === '')).toBe(true);
+  });
+
+  it('a coluna nova é a última: a planilha da contadora não muda de lugar', () => {
+    expect(COLUNAS_DO_CSV.at(-1)).toEqual({ header: 'Reembolso', key: 'reembolso' });
+    expect(COLUNAS_DO_CSV.at(-2)).toEqual({ header: 'Observação / identificação', key: 'observacao' });
   });
 });
