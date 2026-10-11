@@ -62,6 +62,4 @@ export const LINHA_SERVICO_PUBLICA =
 export const PECA_PUBLICA =
   'id, quantity, unit_sale_snapshot, line_total_sale, discount_pct, discount_amount';
 export const PRODUTO_PUBLICO = 'name, sku, image_url';
-// billable_to_client (11/10/2026): o documento do cliente só lista a despesa cobrada dele — o custo
-// da HBR e o "cobrar à parte" (F2 dos comprovantes) ficam de fora. A coluna já era legível pelo anon.
-export const DESPESA_PUBLICA = 'category, description, amount, paid_by, billable_to_client';
+export const DESPESA_PUBLICA = 'category, description, amount, paid_by';

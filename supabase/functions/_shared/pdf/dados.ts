@@ -21,23 +21,6 @@ import {
 // deno-lint-ignore no-explicit-any
 export type LeitorDoBanco = { from: (tabela: string) => any };
 
-/**
- * As despesas da OS que aparecem no documento do cliente: as COBRADAS dele, quem quer que tenha
- * pagado — a mesma regra do total (so_recalc_operational_cost soma billable_to_client, sem olhar
- * paid_by).
- *
- * POR QUE (11/10/2026): o filtro olhava só `paid_by = 'company'`. A despesa não faturável — o
- * custo da HBR e o "cobrar à parte" que os comprovantes gravam em OS já faturada — sairia no
- * documento do cliente como se fosse cobrada; e a faturável paga pelo técnico (o cupom de OS
- * aberta com "cobrar do cliente") entrava no total sem aparecer na lista. `billable_to_client`
- * ausente (seletor antigo) conta como cobrada, que é o padrão da coluna. Muda o documento: é a
- * pendência 5 do dono (spec F2, seção 10).
- */
-// deno-lint-ignore no-explicit-any
-export function despesasDoCliente(linhas: any[] | null | undefined): any[] {
-  return (linhas || []).filter((e) => e != null && e.billable_to_client !== false);
-}
-
 // As linhas que a montagem soma e percorre. Com o cliente tipado da tela elas vinham dos
 // tipos gerados; com o leitor genérico, sem isto, virariam `any` em silêncio.
 type LinhaRecebivel = {
@@ -198,7 +181,7 @@ export async function carregarPDFData(
         marinas(*),
         service_order_services(*, services(name)),
         service_order_parts(*, products(name, sku, image_url)),
-        service_order_expenses(category, description, amount, paid_by, billable_to_client),${comuns}
+        service_order_expenses(category, description, amount, paid_by),${comuns}
       `;
   const [soRes, settingsRes, receivablesRes] = await Promise.all([
     db.from('service_orders')
@@ -362,9 +345,8 @@ export async function carregarPDFData(
       line_total: p.line_total_sale || 0,
       image_url: p.products?.image_url || null,
     })),
-    // Só a despesa cobrada do cliente, quem quer que tenha pagado (11/10/2026): o custo da HBR e o
-    // "cobrar à parte" (billable_to_client = false, F2 dos comprovantes) não entram no documento dele.
-    expenses: despesasDoCliente((so as any).service_order_expenses)
+    expenses: ((so as any).service_order_expenses || [])
+      .filter((e: any) => e.paid_by === 'company')
       .map((e: any) => ({
         category: e.category,
         description: e.description,
