@@ -163,6 +163,11 @@ export function primeiroAberto(p: Parecidos | null): CmpParecido | null {
 export interface Conferencia {
   gravado: CmpParecido | true | null;
   aberto: CmpParecido | null;
+  /**
+   * Só para o admin: o CMP gravado com um dos efeitos de `avisar` (não trava; quem chama diz ao dono o
+   * que ele é — ex.: o custo interno da OS, que o cliente não vê).
+   */
+  avisado?: CmpParecido | null;
 }
 
 /**
@@ -175,13 +180,18 @@ export interface Conferencia {
  */
 export async function conferirComprovantes(
   ctx: QuemConfere,
-  p: { valor: number; data: string | null; osId: string | null; efeitos: readonly string[] },
+  p: { valor: number; data: string | null; osId: string | null; efeitos: readonly string[]; avisar?: readonly string[] },
 ): Promise<Conferencia> {
   if (!autorDaConsulta(ctx) || !(p.valor > 0)) return { gravado: null, aberto: null };
   const ligada = conversaDosComprovantesLigada(ctx.settings);
   if (ctx.userRole === "admin") {
     const parecidos = await comprovantesParecidos(ctx, p);
-    return { gravado: gravadoComEfeito(parecidos, p.efeitos), aberto: ligada ? primeiroAberto(parecidos) : null };
+    const gravado = gravadoComEfeito(parecidos, p.efeitos);
+    return {
+      gravado,
+      aberto: ligada ? primeiroAberto(parecidos) : null,
+      avisado: !gravado && p.avisar?.length ? gravadoComEfeito(parecidos, p.avisar) : null,
+    };
   }
   const r = await comprovantesJaLancados(ctx, p);
   return { gravado: r?.ja_lancado ? true : null, aberto: null };
@@ -223,10 +233,38 @@ export function textoDaDespesaJaLancada(c: CmpParecido | true): string {
   return `Já lançado pelo ${c.codigo} (${valorEData(c)}) nesta OS.`;
 }
 
-/** Despesa da OS com um CMP aberto do mesmo valor: completar o CMP em vez de lançar à parte. */
+/**
+ * Despesa da OS POR CONTA DA CASA com um CMP aberto do mesmo valor: o CMP vira esse mesmo custo interno
+ * quando o dono o completar — completar em vez de lançar à parte.
+ */
 export function textoDaDespesaComCmpAberto(c: CmpParecido): string {
   return `Há o ${c.codigo} aberto com ${valorEData(c)}; completar o CMP? Responda *cmp ${numeroDoCmp(c)}*. ` +
     "Se for outro gasto, peça de novo dizendo 'mesmo assim'.";
+}
+
+/**
+ * Despesa COBRADA lançada com um CMP aberto do mesmo valor (ajustes do dono: o comprovante nunca cobra o
+ * cliente): quando o dono responder *cmp N*, o CMP acha esta despesa na OS e só a comprova.
+ */
+export function textoDaDespesaCobradaComCmpAberto(c: CmpParecido): string {
+  return `O ${c.codigo} (${valorEData(c)}) ainda está aberto: ele só comprova, não cobra o cliente. Lancei esta despesa ` +
+    `para o cliente; quando você responder *cmp ${numeroDoCmp(c)}*, o comprovante comprova esta, sem lançar outra.`;
+}
+
+/**
+ * Despesa COBRADA lançada numa OS onde um CMP já gravou o mesmo gasto como custo interno: o interno não
+ * aparece para o cliente; a cobrada é a que ele vê, e o Lucro por OS conta a compra uma vez só.
+ */
+export function textoDaDespesaInternaDoCmp(c: CmpParecido): string {
+  return `O ${c.codigo} (${valorEData(c)}) é só custo interno desta OS (não aparece para o cliente); lancei a despesa ` +
+    "cobrada do cliente. No Lucro por OS a compra conta uma vez só.";
+}
+
+/** remove_service_order_expense numa despesa que nasceu de um CMP: só sai cancelando o comprovante. */
+export function textoDaDespesaDoCmpNaoSai(codigo: string): string {
+  const n = String(codigo).match(/(\d+)\s*$/);
+  return `Essa despesa é o custo interno do ${codigo} (comprovante): não apago por aqui. Para tirá-la, cancele o ` +
+    `comprovante: *cancelar cmp ${n ? String(Number(n[1])) : codigo} motivo*.`;
 }
 
 /** 'CMP-00124', 'cmp 124', '124' → 'CMP-00124'; null se não der para ler. */
@@ -257,9 +295,11 @@ export const comprovanteTools: ToolDef[] = [
       "Consulta os comprovantes (CMP-00123) que o dono mandou pelo WhatsApp — foto/PDF de cupom, nota ou Pix — e o que o " +
       "sistema de comprovantes fez com cada um: 'o CMP-00124 foi gravado?', 'quais comprovantes estão em aberto?', 'tem " +
       "comprovante de 62 reais de ontem?', 'os comprovantes da OS X'. Traz situação, valor, data, fornecedor, destino (OS, " +
-      "estoque, insumo, empresa, pessoal), se é para cobrar do cliente, quem pagou, a forma, as pendências e a pasta no Dropbox. " +
-      "Só leitura; não grava nem completa comprovante (quem completa é o dono, respondendo *cmp N*). Se vier error, diga que a " +
-      "consulta falhou — não que não há comprovante.",
+      "estoque, insumo, empresa, pessoal), na OS se foi peça ou despesa (tipo_na_os: a despesa é custo interno, nunca aparece " +
+      "para o cliente nem muda o total da OS; a peça só comprova a peça lançada na OS), quem pagou, a forma, as pendências e a " +
+      "pasta no Dropbox. PESSOAL pago pela empresa é gasto pessoal do sócio (descontado do pró-labore). Só leitura; não grava " +
+      "nem completa comprovante (quem completa é o dono, respondendo *cmp N*). Se vier error, diga que a consulta falhou — não " +
+      "que não há comprovante.",
     input_schema: {
       type: "object",
       properties: {
@@ -270,9 +310,10 @@ export const comprovanteTools: ToolDef[] = [
           enum: SITUACOES,
           description: "lido/falhou = ainda não conferido; aguardando_vez/perguntando/aguardando_sim = na conversa com o dono; " +
             "gravado; aguardando_xml = esperando a nota entrar; cancelado. Gravados que pagaram pelo banco ou cartão da empresa: " +
-            "aguardando_banco = esperando a linha aparecer no extrato (o sistema pergunta ao dono 'apareceu no extrato, ligo?'); " +
-            "conciliado = ligado à linha do extrato (a linha fica classificada; aprovar continua no Extrato); abandonado = a linha " +
-            "não apareceu em 30 dias (45 no crédito): classificar no Extrato.",
+            "aguardando_banco = esperando a linha aparecer no extrato (o sistema pergunta ao dono 'apareceu no extrato, ligo?'; " +
+            "depois de 5 dias sem aparecer em nenhuma conta da empresa, pergunta 'quem pagou?'); conciliado = ligado à linha do " +
+            "extrato e lançado (aprovado no sim do dono); abandonado = a linha não apareceu em 30 dias (45 no crédito): " +
+            "classificar no Extrato.",
         },
         desde: { type: "string", description: "Data inicial: 'hoje', 'ontem', dd/mm ou AAAA-MM-DD." },
         ate: { type: "string", description: "Data final: 'hoje', 'ontem', dd/mm ou AAAA-MM-DD." },

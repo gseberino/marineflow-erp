@@ -22,7 +22,10 @@ import { CONTEXTO_DO_ENVIO } from "./documentos-pdf.ts";
 import { chaveDeEnvio, liberarEnvio } from "../../whatsapp/idempotencia.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 import { guardarEEntregar, limitarNomeDoArquivo } from "../../pdf/gerar-e-guardar.ts";
-import { montarExtratoHtml, montarReciboHtml, nomeDoArquivo, numeroDoRecibo, type ContaDoExtrato } from "../../diarias/extrato.ts";
+import {
+  montarExtratoHtml, montarReciboHtml, nomeDoArquivo, numeroDoRecibo, ROTULO_REEMBOLSO, ROTULO_REEMBOLSOS, type ContaDoExtrato,
+} from "../../diarias/extrato.ts";
+import { codigoDoCmp } from "./comprovantes.ts";
 
 const CARGOS: Role[] = ["admin", "financial"];
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -474,6 +477,13 @@ type Forma = typeof FORMAS[number];
 const ROTULO_DA_FORMA: Record<Forma, string> = { pix: "Pix", dinheiro: "dinheiro do Caixa", bolso_do_socio: "do bolso do sócio" };
 const CATEGORIA_DIARIAS = "Diárias de freelancers";
 
+/**
+ * Que reembolsos este pagamento quita (resposta 4 do dono, 11/10/2026: "sim, mas eu sempre vou
+ * sinalizar o que é o que"): a proposta do sistema (os do acerto primeiro, por data, enquanto cabem
+ * no valor), nenhum ("sem reembolso": tudo em Diárias) ou os CMPs que a pessoa disse.
+ */
+export type ReembolsosDoPagamento = { modo: "proposta" } | { modo: "nenhum" } | { modo: "codigos"; codigos: string[] };
+
 export interface PedidoDePagamento {
   freelancer: Freelancer;
   valor: number;
@@ -482,6 +492,96 @@ export interface PedidoDePagamento {
   data: string | null;
   socio: { id: string; nome: string } | null;
   observacao: string | null;
+  /** Ausente = a proposta (o padrão). */
+  reembolsos?: ReembolsosDoPagamento;
+}
+
+/** "proposta" (padrão) | "nenhum"/"sem reembolso" | "CMP-00124, cmp 130" (ou a lista) → o modo; inválido = erro. */
+export function reembolsosDitos(v: unknown): ReembolsosDoPagamento | { error: string } {
+  if (v == null || v === "") return { modo: "proposta" };
+  const lista = Array.isArray(v) ? v.map(String) : String(v).split(/[,;\n]| e /);
+  const ditos = lista.map((s) => s.trim()).filter(Boolean);
+  const so = normal(ditos.join(" "));
+  if (["proposta", "padrao", "sugestao", "o que o sistema propor", "sim"].includes(so)) return { modo: "proposta" };
+  if (["nenhum", "nenhuma", "sem reembolso", "sem reembolsos", "nao", "nada", "tudo em diarias", "nao dividir"].includes(so)) return { modo: "nenhum" };
+  const codigos = ditos.map((s) => codigoDoCmp(s.replace(/^o\s+/i, "")));
+  if (!codigos.length || codigos.some((c) => !c)) {
+    return { error: `Não entendi os reembolsos "${String(v)}". Diga "proposta", "sem reembolso" ou os CMPs (ex.: CMP-00124, CMP-00130).` };
+  }
+  return { modo: "codigos", codigos: [...new Set(codigos as string[])] };
+}
+
+/** Um reembolso em aberto do técnico (proposta_de_divisao_do_pagamento). */
+interface ReembolsoEmAberto { id: string; codigo: string | null; data: string; valor: number; categoria: string | null; descricao: string | null; acerto: number | null }
+
+/** A divisão que a confirmação mostra e que vai ao banco. */
+export interface DivisaoPedida {
+  /** Os reembolsos em aberto dele (vazio = não há o que dividir: o caminho de antes). */
+  emAberto: ReembolsoEmAberto[];
+  escolhidos: ReembolsoEmAberto[];
+  diarias: number;
+  reembolsos: number;
+}
+
+/**
+ * A divisão pedida: o banco propõe (proposta_de_divisao_do_pagamento, só leitura) e a pessoa
+ * confirma ou ajusta. CMP que não é reembolso em aberto dele, ou soma acima do valor, é recusado
+ * aqui com o porquê (o banco recusa de novo ao gravar).
+ */
+export async function divisaoPedida(
+  ctx: Pick<ToolCtx, "admin" | "userId">,
+  freelancer: Freelancer,
+  valor: number,
+  pedido: ReembolsosDoPagamento = { modo: "proposta" },
+): Promise<DivisaoPedida | { error: string }> {
+  const { data, error } = await ctx.admin.rpc("proposta_de_divisao_do_pagamento", {
+    p_favorecido_id: freelancer.id, p_valor: valor, p_autor: ctx.userId || null,
+  });
+  // função ainda não aplicada no banco: o pagamento de antes (sem divisão), a não ser que a pessoa tenha dito os CMPs
+  if (error && ["PGRST202", "42883"].includes(String(error.code ?? "")) && pedido.modo !== "codigos") {
+    return { emAberto: [], escolhidos: [], diarias: valor, reembolsos: 0 };
+  }
+  if (error) return { error: `Não consegui ler os reembolsos em aberto de ${freelancer.nome}: ${String(error.message).replace(/^(P0001|42501|22023):\s*/, "")}` };
+  const d = (data ?? {}) as Record<string, any>;
+  const emAberto: ReembolsoEmAberto[] = ((d.em_aberto ?? []) as any[]).map((r) => ({
+    id: String(r.id), codigo: r.codigo ?? null, data: String(r.data ?? ""), valor: Number(r.valor) || 0,
+    categoria: r.categoria ?? null, descricao: r.descricao ?? null, acerto: r.acerto == null ? null : Number(r.acerto),
+  }));
+  let escolhidos: ReembolsoEmAberto[];
+  if (pedido.modo === "nenhum") escolhidos = [];
+  else if (pedido.modo === "proposta") {
+    const ids = new Set(((d.propostos ?? []) as unknown[]).map(String));
+    escolhidos = emAberto.filter((r) => ids.has(r.id));
+  } else {
+    const faltando = pedido.codigos.filter((c) => !emAberto.some((r) => r.codigo === c));
+    if (faltando.length) {
+      return { error: `${faltando.join(", ")} não ${faltando.length > 1 ? "são reembolsos" : "é reembolso"} em aberto de ${freelancer.nome}` +
+        (emAberto.length ? ` (em aberto: ${emAberto.map((r) => r.codigo ?? "sem código").join(", ")}).` : " (ele não tem reembolso em aberto).") };
+    }
+    escolhidos = emAberto.filter((r) => r.codigo && pedido.codigos.includes(r.codigo));
+  }
+  const reembolsos = Math.round(escolhidos.reduce((s, r) => s + r.valor, 0) * 100) / 100;
+  if (reembolsos > valor + 0.005) {
+    return { error: `Os reembolsos escolhidos (${brl.format(reembolsos)}) passam do valor do pagamento (${brl.format(valor)}): escolha menos ou diga "sem reembolso".` };
+  }
+  return { emAberto, escolhidos, reembolsos, diarias: Math.round((valor - reembolsos) * 100) / 100 };
+}
+
+/**
+ * "Divido: Diárias R$ 408,00 · Reembolso de despesas pagas pelo técnico R$ 92,00 (CMP-00124,
+ * CMP-00130). Para não dividir: diga "sem reembolso"." — a linha do "sim". Sem reembolso em aberto,
+ * nada (o pagamento de antes).
+ */
+export function textoDaDivisao(d: DivisaoPedida): string | null {
+  if (!d.emAberto.length) return null;
+  if (!d.escolhidos.length) {
+    return `Sem dividir: tudo em Diárias (há ${ROTULO_REEMBOLSO.toLowerCase()} em aberto: ${d.emAberto.map((r) => r.codigo ?? "sem código").join(", ")}).`;
+  }
+  const codigos = d.escolhidos.map((r) => r.codigo ?? "sem código").join(", ");
+  const fora = d.emAberto.filter((r) => !d.escolhidos.includes(r)).map((r) => r.codigo ?? "sem código");
+  return `Divido: Diárias ${brl.format(d.diarias)} · ${ROTULO_REEMBOLSOS} ${brl.format(d.reembolsos)} (${codigos}).` +
+    (fora.length ? ` Ficam em aberto: ${fora.join(", ")}.` : "") +
+    ' Para não dividir: diga "sem reembolso".';
 }
 
 async function acharSocio(ctx: ToolCtx, dito: unknown): Promise<{ id: string; nome: string } | { error: string }> {
@@ -520,7 +620,9 @@ export async function resolverPagamento(ctx: ToolCtx, args: Record<string, unkno
     socio = s;
   }
   const observacao = textoOuNulo(args.observacao);
-  return { freelancer: f, valor: Math.round(valor * 100) / 100, forma, data, socio, observacao };
+  const reembolsos = reembolsosDitos(args.reembolsos);
+  if ("error" in reembolsos) return reembolsos;
+  return { freelancer: f, valor: Math.round(valor * 100) / 100, forma, data, socio, observacao, reembolsos };
 }
 
 const descricaoDoPagamento = (p: PedidoDePagamento) =>
@@ -534,6 +636,13 @@ export async function resumirPagamento(ctx: ToolCtx, args: Record<string, unknow
   const linhas = [`Pagamento a *${p.freelancer.nome}*: *${brl.format(p.valor)}* ${p.forma === "pix" ? "por Pix" : `em ${ROTULO_DA_FORMA[p.forma]}`} · ${quando}` +
     (p.socio ? ` · pago por ${p.socio.nome} (fica como reembolso a ele)` : "")];
   linhas.push(`Descrição: ${descricaoDoPagamento(p)} · ${CATEGORIA_DIARIAS}`);
+  // resposta 4 do dono: a divisão proposta entre diárias e reembolso (o dono confirma ou diz outra)
+  const div = await divisaoPedida(ctx, p.freelancer, p.valor, p.reembolsos);
+  if ("error" in div) linhas.push(`⚠️ ${div.error}`);
+  else {
+    const t = textoDaDivisao(div);
+    if (t) linhas.push(t);
+  }
   const { data: c } = await ctx.admin.rpc("conta_corrente_freelancer", { p_favorecido_id: p.freelancer.id, p_autor: null });
   if (c && c.saldo_final != null) {
     const antes = Number(c.saldo_final);
@@ -545,8 +654,80 @@ export async function resumirPagamento(ctx: ToolCtx, args: Record<string, unknow
   return linhas.join("\n");
 }
 
+const FORMA_NO_BANCO: Record<Forma, "pix" | "dinheiro" | "socio"> = { pix: "pix", dinheiro: "dinheiro", bolso_do_socio: "socio" };
+
+/** O sufixo que o banco põe no pagamento já dividido ("… (inclui reembolso de despesas pagas pelo técnico: R$ 92,00)"). */
+const SUFIXO_DA_DIVISAO = `(inclui ${ROTULO_REEMBOLSOS.toLowerCase()}`;
+
+/** Um pagamento das Diárias que veio do banco e se pode dividir (o mesmo critério da tela, use-diarias.ts). */
+export interface PagamentoQueSeDivide { id: string; data: string; valor: number; conta: string; dividido: boolean }
+
+/** A linha "pagamento" da conta corrente que se pode dividir: lançamento das Diárias numa linha do BANCO. */
+export function pagamentoQueSeDivide(l: Record<string, any>): PagamentoQueSeDivide | null {
+  const conta = String(l?.conta ?? "");
+  if (l?.tipo !== "pagamento" || l.aguardando || !l.id || !conta) return null;
+  if (conta === "Caixa (dinheiro)" || conta === "Sem conta ligada" || conta.startsWith("Bolso de ")) return null;
+  const dividido = String(l.descricao ?? "").toLowerCase().includes(SUFIXO_DA_DIVISAO);
+  if (l.categoria !== CATEGORIA_DIARIAS && !dividido) return null;
+  return { id: String(l.id), data: String(l.data ?? ""), valor: Number(l.pago) || 0, conta, dividido };
+}
+
+/**
+ * Qual pagamento dividir: os pagamentos das Diárias que vieram do banco (conta corrente inteira),
+ * filtrados pelo dia e pelo valor ditos. Nenhum ou mais de um = a pergunta, com as opções.
+ */
+async function pagamentoParaDividir(ctx: ToolCtx, f: Freelancer, args: Record<string, unknown>): Promise<PagamentoQueSeDivide | { error: string }> {
+  const c = await chamar(ctx, "conta_corrente_freelancer", { p_favorecido_id: f.id, p_de: null, p_ate: null, p_atalho: null }) as Record<string, any>;
+  if (c && "error" in c) return { error: String(c.error) };
+  let lista = ((c?.linhas ?? []) as any[]).map(pagamentoQueSeDivide).filter((x): x is PagamentoQueSeDivide => x !== null);
+  const dia = args.data != null && args.data !== "" ? dataDoDito(args.data) : null;
+  if (args.data != null && args.data !== "" && !dia) return { error: `Não entendi o dia "${String(args.data)}". Use dd/mm, 'ontem' ou o dia da semana.` };
+  const valor = numeroDito(args.valor);
+  if (dia) lista = lista.filter((x) => x.data === dia);
+  if (valor != null && valor > 0) lista = lista.filter((x) => Math.abs(x.valor - valor) < 0.005);
+  const filtro = [dia ? `em ${diaCurto(dia)}` : null, valor ? `de ${brl.format(valor)}` : null].filter(Boolean).join(" ");
+  if (!lista.length) {
+    return { error: `Não achei pagamento de diárias de ${f.nome} que veio do banco${filtro ? ` ${filtro}` : ""}. O Pix ainda só anotado ` +
+      "divide ao registrar (registrar_pagamento_freelancer); dinheiro e bolso do sócio dividem na hora." };
+  }
+  if (lista.length > 1) {
+    const ultimos = lista.slice(-5).map((x) => `${diaCurto(x.data)} ${brl.format(x.valor)}${x.dividido ? " (já dividido)" : ""}`);
+    return { error: `Qual pagamento de ${f.nome}: ${ultimos.join("; ")}? Diga o dia ou o valor.` };
+  }
+  return lista[0];
+}
+
+/** A confirmação da divisão: qual pagamento e como fica (para o "sim"). */
+export async function resumirDivisaoDoPagamento(ctx: ToolCtx, args: Record<string, unknown>): Promise<string | null> {
+  const f = await acharFreelancer(ctx, args.freelancer);
+  if ("error" in f) return null;
+  const pedido = reembolsosDitos(args.reembolsos);
+  if ("error" in pedido) return null;
+  const pag = await pagamentoParaDividir(ctx, f, args);
+  if ("error" in pag) return `Dividir pagamento de *${f.nome}*\n⚠️ ${pag.error}`;
+  const div = await divisaoPedida(ctx, f, pag.valor, pedido);
+  if ("error" in div) return `Dividir pagamento de *${f.nome}*\n⚠️ ${div.error}`;
+  const linhas = [`Dividir o pagamento de *${f.nome}*: ${brl.format(pag.valor)} · ${diaCurto(pag.data)} · ${pag.conta}`];
+  linhas.push(div.escolhidos.length
+    ? `Diárias ${brl.format(div.diarias)} · ${ROTULO_REEMBOLSOS} ${brl.format(div.reembolsos)} (${div.escolhidos.map((r) => r.codigo ?? "sem código").join(", ")}).`
+    : "Tudo em Diárias de freelancers (sem reembolso).");
+  linhas.push("O total do pagamento e o saldo com ele não mudam: só a categoria das partes.");
+  return linhas.join("\n");
+}
+
 async function registrarPagamento(ctx: ToolCtx, p: PedidoDePagamento) {
   const desc = descricaoDoPagamento(p);
+  // resposta 4 do dono: com reembolso a quitar, o pagamento vai já dividido (o mesmo caminho da tela)
+  const div = await divisaoPedida(ctx, p.freelancer, p.valor, p.reembolsos);
+  if ("error" in div) return div;
+  if (div.escolhidos.length) {
+    // a data como veio: sem a data dita, o Pix vai sem ela (a anotação espera a linha de D-3 a D+7, como
+    // no caminho sem divisão); dinheiro e bolso do sócio, o banco põe hoje
+    return await chamar(ctx, "registrar_pagamento_do_freelancer", {
+      p_favorecido_id: p.freelancer.id, p_valor: p.valor, p_data: p.data, p_forma: FORMA_NO_BANCO[p.forma],
+      p_socio_id: p.socio?.id ?? null, p_reembolsos: div.escolhidos.map((r) => r.id), p_descricao: desc,
+    }) as Record<string, unknown>;
+  }
   if (p.forma === "pix") {
     return await chamar(ctx, "anotar_transacao", {
       p_sentido: "saida", p_valor: p.valor, p_data: p.data, p_documento: null, p_nome: null,
@@ -611,10 +792,13 @@ async function documentoDoExtrato(ctx: ToolCtx, f: Freelancer, periodo: PeriodoP
 type Acerto = { id: string; numero: number; de: string; ate: string; saldo_anterior: number; dias: number; trabalhado: number;
   pago_no_periodo: number; valor_do_acerto: number; status: string; reembolsos?: number };
 
-/** " · reembolsos R$ 62,00" quando há (F2b); vazio sem reembolso (o texto de antes). */
+/**
+ * " · reembolso de despesas pagas pelo técnico R$ 62,00" quando há (F2b; o rótulo inequívoco é a
+ * resposta 9 do dono, 11/10/2026); vazio sem reembolso (o texto de antes).
+ */
 function reembolsosNoTexto(valor: unknown, separador = " · "): string {
   const n = Number(valor);
-  return Number.isFinite(n) && n > 0 ? `${separador}reembolsos ${brl.format(n)}` : "";
+  return Number.isFinite(n) && n > 0 ? `${separador}${ROTULO_REEMBOLSOS.toLowerCase()} ${brl.format(n)}` : "";
 }
 
 /** O acerto pedido (pelo número) ou o último fechado da pessoa. */
@@ -740,7 +924,7 @@ export const diariasTools: ToolDef[] = [
         os: { type: "string", description: "Número da OS em que trabalhou; duas OS separadas por vírgula (o dia se divide igual)." },
         observacao: { type: "string", description: "Serviço feito, obra, barco — se a pessoa disser." },
         valor_diaria: { type: "number", description: "Só se a pessoa DISSER o valor do dia, diferente do cadastro (em reais). Sem isso vale a diária do cadastro." },
-        extras: { type: "number", description: "Extras do dia em reais (almoço, condução, hora a mais) — o total do dia. Só se a pessoa disser." },
+        extras: { type: "number", description: "Extras do dia em reais (o almoço quando ele traz o próprio, condução, hora a mais) — o total do dia. Só se a pessoa disser." },
         descontos: { type: "number", description: "Descontos do dia em reais (atraso, vale) — o total do dia. Só se a pessoa disser." },
       },
       required: ["freelancer", "jornada"],
@@ -788,9 +972,10 @@ export const diariasTools: ToolDef[] = [
       "Quanto se deve a um freelancer de diária e o que ele trabalhou e recebeu: 'quanto devo pro Roberto?', 'quantos dias o Mickael " +
       "fez esse mês?', 'o que falta pagar pro João?' (periodo=em_aberto), 'o que ele fez desde o último pagamento?', 'de 14/09 a 27/09' " +
       "(de/ate), 'quanto o Roberto tem de extra este mês?' (extras_no_periodo e descontos_no_periodo, com o freelancer). " +
-      "reembolsos = despesas da empresa que ele pagou do bolso, com o comprovante (CMP-00124): somam a favor dele e entram no " +
-      "próximo acerto (para tirar um, o dono cancela o CMP). Sem nome, mostra todos. Só consulta — não grava nada. Para o PDF do " +
-      "extrato, enviar_extrato_freelancer.",
+      "reembolsos = reembolso de despesas pagas pelo técnico (despesas da empresa que ele pagou, com o comprovante CMP-00124): " +
+      "somam a favor dele e entram no próximo acerto (para tirar um, o dono cancela o CMP); a mesma despesa não entra também " +
+      "como extra (o extra de almoço é quando ele traz o próprio). Sem nome, mostra todos. Só consulta — não grava nada. Para o " +
+      "PDF do extrato, enviar_extrato_freelancer.",
     input_schema: {
       type: "object",
       properties: {
@@ -839,9 +1024,13 @@ export const diariasTools: ToolDef[] = [
             ...(l.observacao ? { observacao: l.observacao } : {}),
           };
         }
-        // F2b (11/10/2026): o reembolso de um comprovante é a favor dele, não pagamento
+        // F2b (11/10/2026): o reembolso de um comprovante é a favor dele, não pagamento; o rótulo
+        // inequívoco (resposta 9 do dono) e, se um pagamento dividido já o quitou, quando
         if (l.tipo === "reembolso") {
-          return { data: l.data, tipo: "reembolso", valor: Number(l.trabalhado), codigo: l.conta, descricao: l.descricao };
+          return {
+            data: l.data, tipo: ROTULO_REEMBOLSO.toLowerCase(), valor: Number(l.trabalhado), codigo: l.conta, descricao: l.descricao,
+            ...(l.observacao ? { observacao: l.observacao } : {}),
+          };
         }
         return { data: l.data, pagamento: Number(l.pago), de_onde: l.aguardando ? "lançado à mão, aguardando o banco" : l.conta };
       });
@@ -905,8 +1094,11 @@ export const diariasTools: ToolDef[] = [
     description:
       "Registra o que se PAGOU a um freelancer de diária: 'paguei 100 pro Roberto no Pix', 'dei 50 em dinheiro pro João', " +
       "'paguei o Mickael do meu bolso'. forma: pix (Pix/transferência já feito — fica anotado e casa com a linha do banco; já " +
-      "aparece no extrato de diárias), dinheiro (sai do Caixa) ou bolso_do_socio (vira reembolso ao sócio). Não é o dia trabalhado " +
-      "(registrar_diaria). Valor e forma são obrigatórios: se faltar, PERGUNTE. Pede confirmação.",
+      "aparece no extrato de diárias), dinheiro (sai do Caixa) ou bolso_do_socio (vira reembolso ao sócio). Com reembolso de " +
+      "despesas pagas pelo técnico em aberto (comprovantes CMP), o sistema PROPÕE dividir o pagamento entre Diárias e o " +
+      "reembolso (na categoria de cada comprovante) e a confirmação mostra a divisão: o dono confirma, diz 'sem reembolso' " +
+      "(reembolsos='nenhum') ou quais CMPs. Não é o dia trabalhado (registrar_diaria). Valor e forma são obrigatórios: se " +
+      "faltar, PERGUNTE. Pede confirmação.",
     input_schema: {
       type: "object",
       properties: {
@@ -916,6 +1108,11 @@ export const diariasTools: ToolDef[] = [
         data: { type: "string", description: "Quando pagou: 'hoje' (padrão), 'ontem', dd/mm, dia da semana." },
         socio: { type: "string", description: "Só no bolso_do_socio, se a pessoa disser qual (padrão: quem está falando)." },
         observacao: { type: "string", description: "Ex.: 'adiantamento', 'acerto da quinzena'." },
+        reembolsos: {
+          type: "string",
+          description: "Que reembolsos de despesas pagas pelo técnico este pagamento quita: 'proposta' (padrão: o que o sistema " +
+            "propõe), 'nenhum' (a pessoa disse 'sem reembolso': tudo em Diárias) ou os CMPs ditos ('CMP-00124, CMP-00130').",
+        },
       },
       required: ["freelancer", "valor", "forma"],
     },
@@ -925,7 +1122,8 @@ export const diariasTools: ToolDef[] = [
       if (!FORMAS.includes(String(args?.forma ?? "") as Forma)) return { error: "Como foi pago? pix, dinheiro ou bolso_do_socio." };
       const v = numeroDito(args?.valor);
       if (v == null || v <= 0) return { error: "Qual o valor pago? (não invente: pergunte)" };
-      return null;
+      const r = reembolsosDitos(args?.reembolsos);
+      return "error" in r ? r : null;
     },
     async execute(args, ctx) {
       const b = semAcesso(ctx);
@@ -936,6 +1134,55 @@ export const diariasTools: ToolDef[] = [
       if (r && "error" in r) return r;
       if (r && r.ok === false) return { ok: false, aviso: String(r.message ?? "Não lancei.") };
       return { ok: true, aviso: `${String(r?.message ?? "Pagamento lançado.")}${await saldoDito(ctx, p.freelancer)}`.trim() };
+    },
+  },
+  {
+    name: "dividir_pagamento_freelancer",
+    description:
+      "DIVIDE um pagamento de diárias que já veio do banco (o Pix aprovado no Extrato, ou lançado pela regra por CPF) entre " +
+      "Diárias e o reembolso de despesas pagas pelo técnico (os comprovantes CMP que ele pagou): 'aquele Pix de 500 pro Roberto " +
+      "tinha 92 de reembolso', 'divide o pagamento do João de sexta'. O sistema propõe os reembolsos em aberto (os do acerto " +
+      "primeiro, por data, enquanto cabem); a pessoa pode dizer quais CMPs ou 'sem reembolso' (junta de volta o que foi " +
+      "dividido). Pagamento em dinheiro ou do bolso do sócio já divide ao registrar (registrar_pagamento_freelancer). O total " +
+      "do pagamento e o saldo com ele não mudam: só a categoria das partes. Pede confirmação.",
+    input_schema: {
+      type: "object",
+      properties: {
+        freelancer: { type: "string", description: "Nome como a pessoa falou." },
+        data: { type: "string", description: "O dia do pagamento, se a pessoa disser ('sexta', dd/mm): escolhe entre vários." },
+        valor: { type: "number", description: "O valor do pagamento, se a pessoa disser: escolhe entre vários." },
+        reembolsos: {
+          type: "string",
+          description: "'proposta' (padrão), 'nenhum' (juntar de volta: tudo em Diárias) ou os CMPs ditos ('CMP-00124, CMP-00130').",
+        },
+      },
+      required: ["freelancer"],
+    },
+    risk: "medium",
+    roles: CARGOS,
+    preValidar(args) {
+      const r = reembolsosDitos(args?.reembolsos);
+      return "error" in r ? r : null;
+    },
+    async execute(args, ctx) {
+      const b = semAcesso(ctx);
+      if (b) return b;
+      const f = await acharFreelancer(ctx, args.freelancer);
+      if ("error" in f) return f;
+      const pedido = reembolsosDitos(args.reembolsos);
+      if ("error" in pedido) return pedido;
+      const pag = await pagamentoParaDividir(ctx, f, args);
+      if ("error" in pag) return pag;
+      const div = await divisaoPedida(ctx, f, pag.valor, pedido);
+      if ("error" in div) return div;
+      if (!div.emAberto.length && pedido.modo !== "nenhum" && !pag.dividido) {
+        return { ok: false, aviso: `Nada a dividir: ${f.nome} não tem ${ROTULO_REEMBOLSO.toLowerCase()} em aberto.` };
+      }
+      const r = await chamar(ctx, "dividir_pagamento_do_freelancer", {
+        p_payable_id: pag.id, p_reembolsos: div.escolhidos.map((x) => x.id),
+      }) as Record<string, unknown>;
+      if (r && "error" in r) return r;
+      return { ok: true, aviso: `${String(r?.message ?? "Feito.")}${await saldoDito(ctx, f)}`.trim() };
     },
   },
   {

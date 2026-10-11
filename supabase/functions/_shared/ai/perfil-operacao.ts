@@ -142,6 +142,10 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "fechar_acerto_freelancer",
   "reabrir_acerto_freelancer",
   "enviar_acerto_ao_freelancer",
+  // 11/10/2026 (resposta 4 do dono): dividir o Pix que veio do banco entre diárias e o reembolso de
+  // despesas pagas pelo técnico — paridade com o "Dividir" da tela. Como as do acerto, fica fora do
+  // PERFIL_ADMIN (teto do perfil enxuto): no admin, pela rede.
+  "dividir_pagamento_freelancer",
 
   // — Fiscal: espelho e consulta (emitir é risco alto e entra sempre) —
   "preview_fiscal_note",

@@ -1,8 +1,8 @@
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   autorDaConsulta, codigoDoCmp, comprovantesJaLancados, comprovantesParecidos, comprovanteTools, conferirComprovantes,
-  dataDaConsulta, gravadoComEfeito, primeiroAberto, textoDaDespesaComCmpAberto, textoDaDespesaJaLancada, textoDoAberto,
-  textoDoJaLancado,
+  dataDaConsulta, gravadoComEfeito, primeiroAberto, textoDaDespesaCobradaComCmpAberto, textoDaDespesaComCmpAberto,
+  textoDaDespesaDoCmpNaoSai, textoDaDespesaInternaDoCmp, textoDaDespesaJaLancada, textoDoAberto, textoDoJaLancado,
 } from "./comprovantes.ts";
 import { ehLeituraPeloNome, rodaDiretoPelaRede, SO_PELA_REDE } from "../perfil-operacao.ts";
 import { allTools } from "./index.ts";
@@ -171,6 +171,34 @@ Deno.test("conferirComprovantes: admin com a conversa ligada vê o gravado e o a
   assertEquals(r.gravado !== true && r.gravado?.codigo, "CMP-00123");
   assertEquals(r.aberto?.codigo, "CMP-00124");
   assertEquals(chamadas.map((x) => x.fn), ["comprovantes_parecidos"]);
+});
+
+// Revisão dos ajustes do dono (11/10/2026): o custo interno do CMP não trava a despesa cobrada — só avisa.
+Deno.test("conferirComprovantes: 'avisar' devolve o CMP com o efeito (só o admin, e só sem gravado que trava)", async () => {
+  const interno = { abertos: [], gravados: [{ codigo: "CMP-00125", numero: 125, valor: "62.00", data: "2026-10-10", os_id: "os-1", efeitos: ["despesa_os"] }] };
+  const { c } = cliente({ comprovantes_parecidos: { data: interno } });
+  const r = await conferirComprovantes({ admin: c, userId: "u-dono", userRole: "admin", settings: LIGADA },
+    { valor: 62, data: null, osId: "os-1", efeitos: ["anexar_despesa"], avisar: ["despesa_os"] });
+  assertEquals(r.gravado, null);
+  assertEquals(r.avisado?.codigo, "CMP-00125");
+  const { c: c2 } = cliente({ comprovantes_parecidos: { data: interno } });
+  const r2 = await conferirComprovantes({ admin: c2, userId: "u-dono", userRole: "admin", settings: LIGADA },
+    { valor: 62, data: null, osId: "os-1", efeitos: ["anexar_despesa", "despesa_os"], avisar: ["despesa_os"] });
+  assertEquals(r2.gravado !== true && r2.gravado?.codigo, "CMP-00125");
+  assertEquals(r2.avisado, null);
+  const g = interno.gravados[0];
+  assertEquals(
+    sem(textoDaDespesaInternaDoCmp(g)),
+    "O CMP-00125 (R$ 62,00 em 10/10) é só custo interno desta OS (não aparece para o cliente); lancei a despesa cobrada do cliente. " +
+      "No Lucro por OS a compra conta uma vez só.",
+  );
+  assertStringIncludes(sem(textoDaDespesaCobradaComCmpAberto(PARECIDOS.abertos[0])), "*cmp 124*");
+  assertEquals(textoDaDespesaDoCmpNaoSai("CMP-00124"),
+    "Essa despesa é o custo interno do CMP-00124 (comprovante): não apago por aqui. Para tirá-la, cancele o comprovante: *cancelar cmp 124 motivo*.");
+  for (const t of [textoDaDespesaInternaDoCmp(g), textoDaDespesaCobradaComCmpAberto(PARECIDOS.abertos[0]), textoDaDespesaDoCmpNaoSai("CMP-00124")]) {
+    assertEquals(t.includes("\n"), false);
+    assertEquals(/cobrar do cliente\?/i.test(t), false);
+  }
 });
 
 Deno.test("conferirComprovantes: conversa desligada ou em sombra — o aberto não conta (o gravado sim)", async () => {

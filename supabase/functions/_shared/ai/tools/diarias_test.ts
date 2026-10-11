@@ -6,9 +6,11 @@
 //   deno test --allow-all supabase/functions/_shared/ai/tools/diarias_test.ts
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  dataDoDito, datasDoIntervalo, diaCurto, diariasTools, numeroDito, paramsDoCadastro, periodoDito, resolverDiaria,
-  resolverPagamento, resumirAcerto, resumirCadastro, resumirDiaria, resumirEnvioAoFreelancer, resumirPagamento,
+  dataDoDito, datasDoIntervalo, diaCurto, diariasTools, numeroDito, pagamentoQueSeDivide, paramsDoCadastro, periodoDito, reembolsosDitos,
+  resolverDiaria, resolverPagamento, resumirAcerto, resumirCadastro, resumirDiaria, resumirDivisaoDoPagamento, resumirEnvioAoFreelancer,
+  resumirPagamento, textoDaDivisao,
 } from "./diarias.ts";
+import { buildPendingSummary } from "../agent.ts";
 
 /** Banco falso: só o que as tools leem. `simulacao` é o que cadastrar_freelancer devolve simulando. */
 type Opcoes = {
@@ -87,12 +89,12 @@ function ctx(opcoes: Opcoes = {}) {
 }
 const tool = (nome: string) => diariasTools.find((t) => t.name === nome)!;
 
-Deno.test("oito ferramentas: as que gravam ou mandam a terceiro pedem confirmação, consultar e o PDF para si não; todas só para gestor", () => {
+Deno.test("nove ferramentas: as que gravam ou mandam a terceiro pedem confirmação, consultar e o PDF para si não; todas só para gestor", () => {
   assertEquals(diariasTools.map((t) => t.name).sort(), [
-    "cadastrar_freelancer", "consultar_freelancer", "enviar_acerto_ao_freelancer", "enviar_extrato_freelancer", "fechar_acerto_freelancer",
-    "reabrir_acerto_freelancer", "registrar_diaria", "registrar_pagamento_freelancer",
+    "cadastrar_freelancer", "consultar_freelancer", "dividir_pagamento_freelancer", "enviar_acerto_ao_freelancer", "enviar_extrato_freelancer",
+    "fechar_acerto_freelancer", "reabrir_acerto_freelancer", "registrar_diaria", "registrar_pagamento_freelancer",
   ]);
-  for (const n of ["fechar_acerto_freelancer", "reabrir_acerto_freelancer", "enviar_acerto_ao_freelancer"]) assertEquals(tool(n).risk, "medium");
+  for (const n of ["fechar_acerto_freelancer", "reabrir_acerto_freelancer", "enviar_acerto_ao_freelancer", "dividir_pagamento_freelancer"]) assertEquals(tool(n).risk, "medium");
   assertEquals(tool("registrar_diaria").risk, "medium");
   assertEquals(tool("cadastrar_freelancer").risk, "medium");
   assertEquals(tool("registrar_pagamento_freelancer").risk, "medium");
@@ -490,7 +492,9 @@ Deno.test("F2b consultar: o reembolso é a favor dele (com o código do CMP), n�
   const comLinhas = { ...c, sb: { rpc: () => Promise.resolve({ data: conta, error: null }) } };
   const r = await tool("consultar_freelancer").execute({ freelancer: "roberto", periodo: "em_aberto" }, comLinhas as never) as Record<string, any>;
   assertEquals([r.trabalhado, r.reembolsos, r.pago, r.saldo], [300, 62, 100, 262]);
-  assertEquals(r.ultimos_lancamentos[1], { data: "2026-10-05", tipo: "reembolso", valor: 62, codigo: "CMP-00124", descricao: "Reembolso CMP-00124 · AutoZone" });
+  assertEquals(r.ultimos_lancamentos[1], {
+    data: "2026-10-05", tipo: "reembolso de despesa paga pelo técnico", valor: 62, codigo: "CMP-00124", descricao: "Reembolso CMP-00124 · AutoZone",
+  });
   assertEquals(r.ultimos_lancamentos[2], { data: "2026-10-06", pagamento: 100, de_onde: "C6" });
   // os extras do período continuam só dos dias
   assertEquals([r.extras_no_periodo, r.descontos_no_periodo], [0, 0]);
@@ -505,7 +509,10 @@ Deno.test("F2b consultar: o reembolso é a favor dele (com o código do CMP), n�
   const rt = await tool("consultar_freelancer").execute({}, todos as never) as { pessoas: Array<Record<string, unknown>> };
   assertEquals(rt.pessoas[0].reembolsos, 62);
   assertEquals("reembolsos" in rt.pessoas[1], false);
-  assertStringIncludes(tool("consultar_freelancer").description, "reembolsos = despesas da empresa que ele pagou");
+  assertStringIncludes(tool("consultar_freelancer").description, "reembolsos = reembolso de despesas pagas pelo técnico");
+  // resposta 6 do dono: o extra de almoço é quando ele traz o próprio; a mesma despesa não entra também como extra
+  assertStringIncludes(tool("consultar_freelancer").description, "o extra de almoço é quando ele traz o próprio");
+  assertStringIncludes((tool("registrar_diaria").input_schema as any).properties.extras.description, "o almoço quando ele traz o próprio");
 });
 
 Deno.test("F2b acerto: a confirmação diz os reembolsos (antes dos vales) só quando há", async () => {
@@ -513,12 +520,12 @@ Deno.test("F2b acerto: a confirmação diz os reembolsos (antes dos vales) só q
     de: "2026-09-16", ate: "2026-10-01", dias: 1, trabalhado: 300, saldo_anterior: 0, reembolsos, pago_no_periodo: 100, valor_do_acerto: 262,
   } } }).c;
   const com = String(await resumirAcerto(simular(62) as never, { freelancer: "roberto" })).replace(/ /g, " ");
-  assertStringIncludes(com, "1 diária(s) = R$ 300,00 · reembolsos R$ 62,00 · vales já pagos R$ 100,00");
+  assertStringIncludes(com, "1 diária(s) = R$ 300,00 · reembolso de despesas pagas pelo técnico R$ 62,00 · vales já pagos R$ 100,00");
   assertStringIncludes(com, "*A pagar neste acerto: R$ 262,00*");
   for (const sem of [0, undefined]) {
     const txt = String(await resumirAcerto(simular(sem) as never, { freelancer: "roberto" })).replace(/ /g, " ");
     assertStringIncludes(txt, "1 diária(s) = R$ 300,00 · vales já pagos R$ 100,00");
-    assertEquals(txt.includes("reembolsos"), false);
+    assertEquals(txt.includes("reembolso"), false);
   }
 });
 
@@ -545,4 +552,152 @@ Deno.test("acerto ao freelancer: sem telefone, sem acerto ou acerto reaberto nã
   assertStringIncludes(txt, "recibo nº 0001");
   assertStringIncludes(txt, "SEM TELEFONE NO CADASTRO");
   assertStringIncludes(txt, "responder OK");
+});
+
+// ── Resposta 4 do dono (11/10/2026): o pagamento ao técnico dividido entre diárias e reembolso ──
+
+const PROPOSTA = {
+  favorecido: { id: "p-rob", nome: "Roberto" }, valor: 500,
+  em_aberto: [
+    { id: "r-124", codigo: "CMP-00124", data: "2026-09-16", valor: 62, categoria: "Combustível e deslocamento", descricao: "AutoZone", acerto: 1 },
+    { id: "r-130", codigo: "CMP-00130", data: "2026-10-02", valor: 30, categoria: "Outras despesas", descricao: null, acerto: null },
+    { id: "r-131", codigo: "CMP-00131", data: "2026-10-05", valor: 15, categoria: "Alimentação de campo", descricao: null, acerto: null },
+  ],
+  propostos: ["r-124", "r-130"], reembolsos: 92, diarias: 408,
+  partes: [{ categoria: "Diárias de freelancers", valor: 408 }, { categoria: "Combustível e deslocamento", valor: 62 }, { categoria: "Outras despesas", valor: 30 }],
+};
+
+/** ctx com a proposta no banco (admin) e as RPCs da divisão (sb). */
+function ctxDaDivisao(linhas: Array<Record<string, unknown>> = []) {
+  const base = ctx({ simulacao: { data: PROPOSTA } });
+  const chamadas: Chamada[] = [];
+  const rpc = (n: string, a: Record<string, unknown>) => {
+    chamadas.push({ n, a });
+    if (n === "registrar_pagamento_do_freelancer") {
+      return Promise.resolve({ data: { ok: true, forma: a.p_forma, message: "Pix anotado. Divido quando a linha do banco for aprovada: Diárias R$ 408,00 · Reembolso de despesas pagas pelo técnico R$ 92,00." }, error: null });
+    }
+    if (n === "dividir_pagamento_do_freelancer") {
+      return Promise.resolve({ data: { ok: true, message: "Pagamento dividido: Diárias R$ 408,00 · Reembolso de despesas pagas pelo técnico R$ 92,00." }, error: null });
+    }
+    if (n === "conta_corrente_freelancer") return Promise.resolve({ data: { saldo_final: 0, estado: "quitado", linhas }, error: null });
+    if (n === "anotar_transacao") return Promise.resolve({ data: { ok: true, message: "Anotado." }, error: null });
+    return Promise.resolve({ data: null, error: { message: `rpc inesperada ${n}` } });
+  };
+  return { c: { ...base.c, sb: { rpc } }, chamadas };
+}
+
+Deno.test("divisão: o que a pessoa diz dos reembolsos (proposta, sem reembolso, os CMPs)", () => {
+  assertEquals(reembolsosDitos(undefined), { modo: "proposta" });
+  assertEquals(reembolsosDitos("proposta"), { modo: "proposta" });
+  assertEquals(reembolsosDitos("sem reembolso"), { modo: "nenhum" });
+  assertEquals(reembolsosDitos("nenhum"), { modo: "nenhum" });
+  assertEquals(reembolsosDitos("CMP-00124, cmp 130"), { modo: "codigos", codigos: ["CMP-00124", "CMP-00130"] });
+  assertEquals(reembolsosDitos(["124", "CMP-00124"]), { modo: "codigos", codigos: ["CMP-00124"] });
+  assertStringIncludes(String((reembolsosDitos("o do posto") as { error: string }).error), "Não entendi os reembolsos");
+  assertStringIncludes(String(tool("registrar_pagamento_freelancer").preValidar!({ freelancer: "roberto", valor: 10, forma: "pix", reembolsos: "xyz" }, {} as never)?.error), "Não entendi");
+});
+
+Deno.test("divisão: a confirmação do pagamento mostra a proposta (diárias × reembolso, os CMPs e o que fica em aberto)", async () => {
+  const { c } = ctxDaDivisao();
+  const txt = String(await resumirPagamento(c as never, { freelancer: "roberto", valor: 500, forma: "pix" })).replace(/ /g, " ");
+  assertStringIncludes(txt, "Divido: Diárias R$ 408,00 · Reembolso de despesas pagas pelo técnico R$ 92,00 (CMP-00124, CMP-00130). Ficam em aberto: CMP-00131. Para não dividir: diga \"sem reembolso\".");
+  const sem = String(await resumirPagamento(c as never, { freelancer: "roberto", valor: 500, forma: "pix", reembolsos: "sem reembolso" })).replace(/ /g, " ");
+  assertStringIncludes(sem, "Sem dividir: tudo em Diárias (há reembolso de despesa paga pelo técnico em aberto: CMP-00124, CMP-00130, CMP-00131).");
+  const so131 = String(await resumirPagamento(c as never, { freelancer: "roberto", valor: 500, forma: "pix", reembolsos: "CMP-00131" })).replace(/ /g, " ");
+  assertStringIncludes(so131, "Divido: Diárias R$ 485,00 · Reembolso de despesas pagas pelo técnico R$ 15,00 (CMP-00131).");
+  const outro = String(await resumirPagamento(c as never, { freelancer: "roberto", valor: 500, forma: "pix", reembolsos: "CMP-00999" }));
+  assertStringIncludes(outro, "⚠️ CMP-00999 não é reembolso em aberto de Roberto");
+  const passa = String(await resumirPagamento(c as never, { freelancer: "roberto", valor: 50, forma: "pix", reembolsos: "CMP-00124" })).replace(/ /g, " ");
+  assertStringIncludes(passa, "passam do valor do pagamento");
+  // sem reembolso em aberto: a confirmação de antes (nada de divisão)
+  assertEquals(textoDaDivisao({ emAberto: [], escolhidos: [], diarias: 100, reembolsos: 0 }), null);
+});
+
+Deno.test("divisão: registrar com reembolso vai a registrar_pagamento_do_freelancer (forma, a data como foi dita, os ids); 'sem reembolso' é o caminho de antes", async () => {
+  const pix = ctxDaDivisao();
+  const r = await tool("registrar_pagamento_freelancer").execute({ freelancer: "roberto", valor: 500, forma: "pix" }, pix.c as never) as Record<string, unknown>;
+  const reg = pix.chamadas.find((x) => x.n === "registrar_pagamento_do_freelancer")!.a;
+  assertEquals([reg.p_favorecido_id, reg.p_valor, reg.p_forma, reg.p_reembolsos, reg.p_socio_id, reg.p_autor], ["p-rob", 500, "pix", ["r-124", "r-130"], null, "u-dono"]);
+  // revisão dos ajustes: sem a data dita, o Pix vai sem ela (a anotação espera a linha de D-3 a D+7; com
+  // "hoje" fixo a janela era D±1 e o Pix de anteontem não casava)
+  assertEquals(reg.p_data, null, "sem data dita, o Pix vai sem data");
+  const ontem = ctxDaDivisao();
+  await tool("registrar_pagamento_freelancer").execute({ freelancer: "roberto", valor: 500, forma: "pix", data: "ontem" }, ontem.c as never);
+  assertEquals(/^\d{4}-\d{2}-\d{2}$/.test(String(ontem.chamadas.find((x) => x.n === "registrar_pagamento_do_freelancer")!.a.p_data)), true,
+    "a data dita vai como foi dita");
+  assertEquals(pix.chamadas.some((x) => x.n === "anotar_transacao"), false);
+  assertStringIncludes(String(r.aviso), "Divido quando a linha do banco for aprovada");
+
+  const bolso = ctxDaDivisao();
+  await tool("registrar_pagamento_freelancer").execute({ freelancer: "roberto", valor: 500, forma: "bolso_do_socio", reembolsos: "CMP-00131" }, bolso.c as never);
+  const b = bolso.chamadas.find((x) => x.n === "registrar_pagamento_do_freelancer")!.a;
+  assertEquals([b.p_forma, b.p_socio_id, b.p_reembolsos], ["socio", "s-gus", ["r-131"]]);
+
+  const semDividir = ctxDaDivisao();
+  await tool("registrar_pagamento_freelancer").execute({ freelancer: "roberto", valor: 500, forma: "pix", reembolsos: "sem reembolso" }, semDividir.c as never);
+  assertEquals(semDividir.chamadas.map((x) => x.n).includes("registrar_pagamento_do_freelancer"), false);
+  assertEquals(semDividir.chamadas.find((x) => x.n === "anotar_transacao")!.a.p_categoria, "Diárias de freelancers");
+
+  // CMP que não é dele: nada gravado
+  const errado = ctxDaDivisao();
+  const re = await tool("registrar_pagamento_freelancer").execute({ freelancer: "roberto", valor: 500, forma: "pix", reembolsos: "CMP-00999" }, errado.c as never) as { error?: string };
+  assertStringIncludes(String(re.error), "não é reembolso em aberto");
+  assertEquals(errado.chamadas.filter((x) => x.n !== "conta_corrente_freelancer").length, 0);
+});
+
+const PIX_DO_BANCO = { tipo: "pagamento", id: "pay-1", data: "2026-10-09", pago: 500, conta: "C6 - Conta PJ HBR", categoria: "Diárias de freelancers", aguardando: false, descricao: "Pix Roberto" };
+
+Deno.test("dividir_pagamento_freelancer: acha o Pix do banco, divide pela proposta; vários pedem qual; Caixa e anotado não se dividem", async () => {
+  // o critério da tela: lançamento das Diárias numa linha do banco
+  assertEquals(pagamentoQueSeDivide(PIX_DO_BANCO)?.id, "pay-1");
+  assertEquals(pagamentoQueSeDivide({ ...PIX_DO_BANCO, conta: "Caixa (dinheiro)" }), null);
+  assertEquals(pagamentoQueSeDivide({ ...PIX_DO_BANCO, aguardando: true }), null);
+  assertEquals(pagamentoQueSeDivide({ ...PIX_DO_BANCO, conta: "Bolso de Gustavo" }), null);
+  assertEquals(pagamentoQueSeDivide({ ...PIX_DO_BANCO, categoria: "Outras despesas" }), null);
+  assertEquals(pagamentoQueSeDivide({ ...PIX_DO_BANCO, categoria: "Combustível e deslocamento", descricao: "Pix (inclui reembolso de despesas pagas pelo técnico: R$ 92,00)" })?.dividido, true);
+
+  const um = ctxDaDivisao([PIX_DO_BANCO, { ...PIX_DO_BANCO, id: "pay-cx", conta: "Caixa (dinheiro)" }]);
+  const r = await tool("dividir_pagamento_freelancer").execute({ freelancer: "roberto" }, um.c as never) as Record<string, unknown>;
+  const d = um.chamadas.find((x) => x.n === "dividir_pagamento_do_freelancer")!.a;
+  assertEquals([d.p_payable_id, d.p_reembolsos, d.p_autor], ["pay-1", ["r-124", "r-130"], "u-dono"]);
+  assertStringIncludes(String(r.aviso), "Pagamento dividido");
+  // "sem reembolso" junta de volta (lista vazia)
+  const juntar = ctxDaDivisao([PIX_DO_BANCO]);
+  await tool("dividir_pagamento_freelancer").execute({ freelancer: "roberto", reembolsos: "sem reembolso" }, juntar.c as never);
+  assertEquals(juntar.chamadas.find((x) => x.n === "dividir_pagamento_do_freelancer")!.a.p_reembolsos, []);
+
+  const varios = ctxDaDivisao([PIX_DO_BANCO, { ...PIX_DO_BANCO, id: "pay-2", data: "2026-10-02", pago: 300 }]);
+  const rv = await tool("dividir_pagamento_freelancer").execute({ freelancer: "roberto" }, varios.c as never) as { error?: string };
+  assertStringIncludes(String(rv.error).replace(/ /g, " "), "Qual pagamento de Roberto Daniel Rodrigues Correa: sex 09/10 R$ 500,00; sex 02/10 R$ 300,00? Diga o dia ou o valor.");
+  assertEquals(varios.chamadas.some((x) => x.n === "dividir_pagamento_do_freelancer"), false);
+  // o valor dito escolhe
+  await tool("dividir_pagamento_freelancer").execute({ freelancer: "roberto", valor: 300 }, varios.c as never);
+  assertEquals(varios.chamadas.find((x) => x.n === "dividir_pagamento_do_freelancer")!.a.p_payable_id, "pay-2");
+
+  const nenhum = ctxDaDivisao([{ ...PIX_DO_BANCO, conta: "Caixa (dinheiro)" }]);
+  const rn = await tool("dividir_pagamento_freelancer").execute({ freelancer: "roberto" }, nenhum.c as never) as { error?: string };
+  assertStringIncludes(String(rn.error), "Não achei pagamento de diárias de Roberto Daniel Rodrigues Correa que veio do banco");
+
+  // a confirmação: qual pagamento e como fica
+  const txt = String(await resumirDivisaoDoPagamento(um.c as never, { freelancer: "roberto" })).replace(/ /g, " ");
+  assertStringIncludes(txt, "Dividir o pagamento de *Roberto Daniel Rodrigues Correa*: R$ 500,00 · sex 09/10 · C6 - Conta PJ HBR");
+  assertStringIncludes(txt, "Diárias R$ 408,00 · Reembolso de despesas pagas pelo técnico R$ 92,00 (CMP-00124, CMP-00130).");
+  // o "sim" pelo WhatsApp: o resumo do agent.ts é ESTE (antes caía no genérico e o dono confirmava sem ver
+  // a divisão). O agent chama só com o cliente service-role — que aqui faz as duas vezes.
+  const doAgente = ctxDaDivisao([PIX_DO_BANCO]);
+  const soAdmin = {
+    ...doAgente.c.admin,
+    rpc: (n: string, a: Record<string, unknown>) =>
+      n === "proposta_de_divisao_do_pagamento" ? doAgente.c.admin.rpc(n, a) : doAgente.c.sb.rpc(n, a),
+  };
+  const resumo = String(await buildPendingSummary(soAdmin, "dividir_pagamento_freelancer", { freelancer: "roberto" },
+    { userId: "u-dono", userRole: "admin" })).replace(/ /g, " ");
+  assertStringIncludes(resumo, "Dividir o pagamento de *Roberto Daniel Rodrigues Correa*: R$ 500,00 · sex 09/10 · C6 - Conta PJ HBR");
+  assertStringIncludes(resumo, "Diárias R$ 408,00 · Reembolso de despesas pagas pelo técnico R$ 92,00 (CMP-00124, CMP-00130).");
+  assertEquals(doAgente.chamadas.find((x) => x.n === "conta_corrente_freelancer")?.a.p_autor, "u-dono");
+  // técnico não divide
+  const tec = ctxDaDivisao([PIX_DO_BANCO]);
+  const rt = await tool("dividir_pagamento_freelancer").execute({ freelancer: "roberto" }, { ...tec.c, userRole: "technician" } as never) as { error?: string };
+  assertEquals(typeof rt.error, "string");
+  assertEquals(tec.chamadas.length, 0);
 });

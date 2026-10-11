@@ -1,5 +1,7 @@
 import { resumirPedido } from "./tools/caixa.ts";
-import { resumirAcerto, resumirCadastro, resumirDiaria, resumirEnvioAoFreelancer, resumirPagamento } from "./tools/diarias.ts";
+import {
+  resumirAcerto, resumirCadastro, resumirDiaria, resumirDivisaoDoPagamento, resumirEnvioAoFreelancer, resumirPagamento,
+} from "./tools/diarias.ts";
 import { resumirEnvioAoCliente } from "./tools/whatsapp.ts";
 import { resumirAgendamento } from "./tools/agendamento.ts";
 import { resumirMensagem } from "./tools/resposta.ts";
@@ -347,7 +349,7 @@ export function resumoQueRecusa(toolName: string, resumo: string): { error: stri
  * `quem` (comprovantes, revisão de 11/10/2026): quem pede o "sim" — a trava contra o dobro do
  * resumirPedido confere com ELE (o financeiro não vê o CMP do dono; sem usuário, não confere).
  */
-async function buildPendingSummary(
+export async function buildPendingSummary(
   admin: any,
   toolName: string,
   args: Record<string, unknown>,
@@ -409,6 +411,17 @@ async function buildPendingSummary(
   if (toolName === "registrar_pagamento_freelancer") {
     try {
       const r = await resumirPagamento({ admin } as unknown as ToolCtx, args);
+      if (r) return r;
+    } catch { /* cai no resumo genérico */ }
+  }
+  // Dividir o pagamento que veio do banco (resposta 4 do dono, 11/10/2026): qual pagamento e como fica —
+  // Diárias X · Reembolso de despesas pagas pelo técnico Y (CMPs) — para o dono confirmar ou ajustar.
+  if (toolName === "dividir_pagamento_freelancer") {
+    try {
+      // a conta corrente (qual pagamento veio do banco) é lida como na tool: pelo cliente da função, com quem
+      // pede de autor — aqui o service-role faz as duas vezes (o resumo só lê)
+      const r = await resumirDivisaoDoPagamento(
+        { admin, sb: admin, userId: quem.userId ?? null, userRole: quem.userRole } as unknown as ToolCtx, args);
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
   }
