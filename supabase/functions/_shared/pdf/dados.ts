@@ -21,6 +21,38 @@ import {
 // deno-lint-ignore no-explicit-any
 export type LeitorDoBanco = { from: (tabela: string) => any };
 
+/**
+ * As despesas da OS que aparecem no documento do cliente: as pagas pela empresa (o critério de
+ * sempre, para tudo que foi lançado à mão ou pelo assistente), MENOS a que nasceu de comprovante.
+ *
+ * POR QUE (ajustes do dono, 11/10/2026): "os comprovantes enviados via WhatsApp e classificados
+ * como despesa de uma OS devem apenas ser contabilizados para cálculo de lucro líquido e para
+ * análises. Só pode aparecer para o cliente o que for lançado na OS, e só quando lançado
+ * manualmente ou pelo assistente." A despesa do comprovante é custo interno (`origem_codigo` =
+ * "CMP-00124", nunca faturável): fica fora do PDF e do anexo. No link público o anon nem recebe a
+ * linha (a policy dele pede origem_codigo nulo), então sem a coluna a despesa conta como manual.
+ */
+// deno-lint-ignore no-explicit-any
+export function despesasDoCliente(linhas: any[] | null | undefined): any[] {
+  return (linhas || []).filter((e) => e != null && e.paid_by === 'company' && !e.origem_codigo);
+}
+
+/**
+ * A coluna `origem_codigo` nasce com a migration dos comprovantes (20261011203000). A tela ou a edge
+ * publicada antes dela não pode derrubar o PDF de TODA OS (o PostgREST recusa a coluna que não existe):
+ * só esse erro faz o seletor interno ser pedido de novo sem ela — sem a coluna não existe despesa de
+ * comprovante para tirar. Qualquer outro erro derruba como sempre (NOVO-lev-16).
+ */
+// deno-lint-ignore no-explicit-any
+export function faltaAColunaDoComprovante(erro: any): boolean {
+  return erro != null && /origem_codigo/.test(String(erro.message ?? '') + ' ' + String(erro.details ?? ''));
+}
+
+/** O seletor interno sem a coluna do comprovante (a leitura de antes da migration). */
+export function seletorSemOrigem(selecao: string): string {
+  return selecao.replace(', origem_codigo)', ')');
+}
+
 // As linhas que a montagem soma e percorre. Com o cliente tipado da tela elas vinham dos
 // tipos gerados; com o leitor genérico, sem isto, virariam `any` em silêncio.
 type LinhaRecebivel = {
@@ -181,13 +213,14 @@ export async function carregarPDFData(
         marinas(*),
         service_order_services(*, services(name)),
         service_order_parts(*, products(name, sku, image_url)),
-        service_order_expenses(category, description, amount, paid_by),${comuns}
+        service_order_expenses(category, description, amount, paid_by, origem_codigo),${comuns}
       `;
-  const [soRes, settingsRes, receivablesRes] = await Promise.all([
-    db.from('service_orders')
-      .select(selecao)
-      .eq('id', serviceOrderId)
-      .single(),
+  const pedirOrdem = (sel: string) => db.from('service_orders')
+    .select(sel)
+    .eq('id', serviceOrderId)
+    .single();
+  const [soPrimeiro, settingsRes, receivablesRes] = await Promise.all([
+    pedirOrdem(selecao),
     db.from('app_settings')
       .select('key, value'),
     // Todos os recebíveis não cancelados da OS — usado tanto para o
@@ -200,6 +233,9 @@ export async function carregarPDFData(
       .order('due_date', { ascending: true }),
   ]);
 
+  const soRes = soPrimeiro.error && !opcoes.publico && faltaAColunaDoComprovante(soPrimeiro.error)
+    ? await pedirOrdem(seletorSemOrigem(selecao))
+    : soPrimeiro;
   if (soRes.error) throw soRes.error;
   // NOVO-lev-16: cada `|| []`/`|| ''` daqui para baixo transformava FALHA em ausência —
   // app_settings falho saía como empresa "MarineFlow" sem CNPJ nem termos, e receivables
@@ -345,8 +381,8 @@ export async function carregarPDFData(
       line_total: p.line_total_sale || 0,
       image_url: p.products?.image_url || null,
     })),
-    expenses: ((so as any).service_order_expenses || [])
-      .filter((e: any) => e.paid_by === 'company')
+    // Pagas pela empresa, menos a despesa interna que nasceu de comprovante (ajustes do dono, 11/10/2026).
+    expenses: despesasDoCliente((so as any).service_order_expenses)
       .map((e: any) => ({
         category: e.category,
         description: e.description,
