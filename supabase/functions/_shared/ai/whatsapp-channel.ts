@@ -2,8 +2,18 @@
 // LLM (custo $0) ou monta o texto que o LLM não precisa formatar. A orquestração do
 // turno completo fica em ai-agent/index.ts (que já tem acesso a runAgentLoop,
 // buildSystemBlocks etc.) — este módulo só as partes puras/testáveis isoladamente.
-import { lerModoDoComprovante } from "../comprovantes/modo.ts";
+import { conversaDosComprovantesLigada, lerModoDoComprovante } from "../comprovantes/modo.ts";
 import { donoDoWhatsApp } from "../whatsapp/dono.ts";
+import {
+  encerrarPerguntasExternas,
+  lerEstadoDoTelefone,
+  marcarPerguntaEnviada,
+  type OrigemDaPergunta,
+  registrarPerguntaExternaDetalhada,
+  telefoneOcupado,
+  textoDoDesempate,
+  travaDaConfirmacao,
+} from "../whatsapp/pergunta-ativa.ts";
 
 const APPROVE_WORDS = ["sim", "s", "ok", "confirmar", "1"];
 const REJECT_WORDS = ["não", "nao", "n", "cancelar", "2"];
@@ -240,8 +250,12 @@ export async function checkWhatsAppRateLimit(admin: any, phoneNormalized: string
  * delay/presence e test mode); se falhar, cai no whatsapp_send_queue (worker a cada ~1 min)
  * para não perder a mensagem. O envio direto elimina o atraso de até ~60s do tick do worker,
  * que era a maior parte da latência percebida na conversa.
+ *
+ * Devolve o id do WhatsApp da mensagem enviada (o `messageId` do whatsapp-send), para o registro
+ * de pergunta ativa (F2 dos comprovantes, 11/10/2026) saber qual mensagem o dono está citando.
+ * null = caiu na fila ou o provedor não informou o id. Quem ignora o retorno não muda.
  */
-export async function queueWhatsAppReply(admin: any, phoneNormalized: string, message: string): Promise<void> {
+export async function queueWhatsAppReply(admin: any, phoneNormalized: string, message: string): Promise<string | null> {
   try {
     const url = `${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-send`;
     const res = await fetch(url, {
@@ -252,13 +266,17 @@ export async function queueWhatsAppReply(admin: any, phoneNormalized: string, me
       },
       body: JSON.stringify({ phone: phoneNormalized, message, kind: "text" }),
     });
-    const body = await res.json().catch(() => ({}));
-    if (res.ok && !(body as Record<string, unknown>)?.["error"]) return; // enviado na hora
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    if (res.ok && !body?.["error"]) { // enviado na hora
+      const id = body?.["messageId"];
+      return typeof id === "string" && id ? id : null;
+    }
   } catch (_e) {
     // rede/timeout — cai para a fila abaixo
   }
   // Fallback: enfileira (o worker reenvia em ~1 min) para garantir entrega.
   await admin.from("whatsapp_send_queue").insert({ phone_normalized: phoneNormalized, message, source: "ai_agent" });
+  return null;
 }
 
 /**
@@ -299,4 +317,164 @@ export async function cancelarPendenciaSubstituida(
   return `
 
 (O pedido anterior — ${p.title} — foi cancelado: vale só este.)`;
+}
+
+// ─── Registro único de pergunta ativa (F2 dos comprovantes, 11/10/2026) ─────────────────────
+// O dono recebe no mesmo WhatsApp perguntas que esperam "sim" ou um número: o menu dos
+// comprovantes (CMP), a pendência do assistente, o "posso mandar?" dos lembretes de revisão e da
+// campanha. O registro (whatsapp_perguntas, _shared/whatsapp/pergunta-ativa.ts) guarda UMA aberta
+// por telefone. Aqui ficam as peças do lado do assistente: a trava do "sim"/"1", o registro das
+// pendências do turno e o "dono ocupado" dos lembretes e do acompanhar-conversas.
+//
+// Com a conversa dos comprovantes desligada (o padrão: comprovante_conversa = 'off'), tudo aqui é o
+// comportamento de antes, SEM leitura nova: a decisão vem das app_settings que o chamador já leu.
+
+// conversaDosComprovantesLigada mora em comprovantes/modo.ts (as tools usam sem ciclo); reexportada aqui.
+export { conversaDosComprovantesLigada };
+
+const temOpcoes = (m: Record<string, unknown> | null | undefined) => Array.isArray(m?.pending_options) && m!.pending_options.length > 0;
+const temConfirmacao = (m: Record<string, unknown> | null | undefined) =>
+  typeof m?.pending_confirm_action_id === "string" && m.pending_confirm_action_id !== "";
+
+/** O que o turno deixa no registro: uma pergunta nova do assistente, encerrar as dele, ou nada. */
+export type RegistroDoTurno =
+  | { acao: "registrar"; tipo: "confirmacao" | "opcoes"; referencia_id: string; titulo: string }
+  | { acao: "encerrar" }
+  | null;
+
+/**
+ * Compara a sessão antes e depois do turno. Pendência NOVA → registrar (confirmação, referência =
+ * a pendência); lista de opções NOVA → registrar (opções, referência = a sessão); nada esperando
+ * resposta → encerrar as perguntas do assistente; a mesma pendência/lista de antes → nada (o
+ * registro dela já existe).
+ */
+export function registroDoTurno(
+  antes: Record<string, unknown> | null | undefined,
+  depois: Record<string, unknown> | null | undefined,
+  sessionId: string,
+  titulo: string | null | undefined,
+): RegistroDoTurno {
+  if (temConfirmacao(depois)) {
+    if (depois!.pending_confirm_action_id === antes?.pending_confirm_action_id) return null;
+    return { acao: "registrar", tipo: "confirmacao", referencia_id: String(depois!.pending_confirm_action_id), titulo: titulo || "pedido do assistente" };
+  }
+  if (temOpcoes(depois)) {
+    if (JSON.stringify(depois!.pending_options) === JSON.stringify(antes?.pending_options ?? null)) return null;
+    return { acao: "registrar", tipo: "opcoes", referencia_id: sessionId, titulo: titulo || "escolha da lista do assistente" };
+  }
+  return { acao: "encerrar" };
+}
+
+/** "(O CMP-00124 ficou para depois: *cmp 124* retoma.)" — a pergunta do CMP que este pedido tirou da vez. */
+export function avisoDoCmpSubstituido(codigo: string | null | undefined): string {
+  if (!codigo) return "";
+  const n = /(\d+)\s*$/.exec(codigo)?.[1];
+  return `\n\n(O ${codigo} ficou para depois: ${n ? `*cmp ${Number(n)}*` : "*pendentes*"} retoma.)`;
+}
+
+/**
+ * Pede à edge comprovantes-whatsapp para reabrir a pergunta do CMP que a pendência do assistente tinha
+ * tirado da vez (a pendência acabou de ser respondida). Sem esperar o vigia, que só pergunta em horário
+ * comercial. Nunca lança (sem ela, o vigia retoma depois).
+ */
+export async function retomarPerguntaDoComprovante(phone: string): Promise<void> {
+  try {
+    const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/comprovantes-whatsapp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
+      body: JSON.stringify({ acao: "retomar", phone }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    await res.body?.cancel().catch(() => {});
+  } catch {
+    /* o vigia retoma */
+  }
+}
+
+/**
+ * Envia a mensagem ao dono mantendo o registro em dia: registra a pergunta ANTES de enviar (a
+ * pergunta de comprovante aberta volta para a fila, sem perder o que já foi respondido — e o dono é
+ * avisado na própria mensagem: "(O CMP-00124 ficou para depois…)") e guarda o id do WhatsApp DEPOIS
+ * (é o que a citação do dono acha). Encerrar vem depois do envio (não atrasa a resposta); se fechou
+ * alguma pergunta do assistente, a do CMP que ela tinha tirado da vez é retomada. Conversa desligada
+ * ou nada a registrar = o queueWhatsAppReply de sempre. Nunca lança por causa do registro (as funções
+ * de pergunta-ativa.ts engolem o erro e só registram o código).
+ */
+export async function enviarComRegistro(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  phone: string,
+  texto: string,
+  registro: RegistroDoTurno,
+  p: { ligada: boolean; origem?: Exclude<OrigemDaPergunta, "comprovante">; retomar?: (phone: string) => Promise<void> },
+): Promise<string | null> {
+  if (!p.ligada || !registro) return await queueWhatsAppReply(admin, phone, texto);
+  if (registro.acao === "registrar") {
+    const r = await registrarPerguntaExternaDetalhada(admin, {
+      phone, origem: p.origem ?? "assistente", tipo: registro.tipo, referencia_id: registro.referencia_id, titulo: registro.titulo,
+    });
+    const nota = r.substituiu?.origem === "comprovante" ? avisoDoCmpSubstituido(r.substituiu.referencia_codigo) : "";
+    const waId = await queueWhatsAppReply(admin, phone, texto + nota);
+    await marcarPerguntaEnviada(admin, r.id, waId);
+    return waId;
+  }
+  const waId = await queueWhatsAppReply(admin, phone, texto);
+  const fechadas = await encerrarPerguntasExternas(admin, phone, "respondida");
+  if (fechadas > 0) {
+    try {
+      await (p.retomar ?? retomarPerguntaDoComprovante)(phone);
+    } catch {
+      /* o vigia retoma */
+    }
+  }
+  return waId;
+}
+
+/**
+ * A trava do "sim"/"1" (spec F2, 5.2): o dono respondeu algo que aprovaria (ou recusaria) a pendência
+ * do assistente, mas a pergunta aberta mais nova é a de um comprovante — o "1" era para o menu do
+ * CMP. Devolve o texto do desempate (nada é aprovado, nenhuma opção consumida) ou null para seguir
+ * como hoje. Só lê o banco quando há pendência na sessão, o texto parece confirmação/número e a
+ * conversa está ligada. Citar uma mensagem que não é a pergunta do CMP é apontar outra coisa: segue.
+ */
+export async function textoDaTravaDoComprovante(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  p: { phone: string; texto: string; citado: string | null; metadata: Record<string, unknown>; ligada: boolean },
+): Promise<string | null> {
+  if (!p.ligada) return null;
+  if (!temConfirmacao(p.metadata) && !temOpcoes(p.metadata)) return null;
+  if (!parseConfirmationReply(p.texto) && !/^\s*\d+\s*$/.test(p.texto)) return null;
+  const estado = await lerEstadoDoTelefone(admin, p.phone, p.citado);
+  if (p.citado) {
+    // A citação decide (regra 3 da 3.2): citou outra coisa → segue; citou uma pergunta de CMP (aberta
+    // ou já fechada) → era para o comprovante, e o "sim" não pode aprovar o pedido do assistente.
+    if (estado.citada?.origem !== "comprovante") return null;
+    return estado.conversa && estado.dono ? textoDoDesempate(estado) : null;
+  }
+  const t = travaDaConfirmacao(estado, p.texto, {
+    pending_confirm_action_id: p.metadata.pending_confirm_action_id,
+    pending_options: p.metadata.pending_options,
+  });
+  return t.travar ? t.texto : null;
+}
+
+/**
+ * Antes de perguntar algo ao dono por conta própria (lembretes de revisão, campanha,
+ * acompanhar-conversas): ele já tem uma pergunta aberta? Com a conversa ligada, o registro
+ * responde (pergunta de comprovante, do assistente ou de outro lembrete, e a pendência viva; erro
+ * na leitura = ocupado, quem chama adia). Desligada: exatamente a checagem de antes (a pendência
+ * viva desta conversa), sem consulta nova.
+ */
+export async function donoOcupadoParaPerguntar(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  p: { phone: string; metadata: Record<string, unknown> | null | undefined; ligada: boolean; agora?: Date },
+): Promise<{ ocupado: boolean; por: string | null }> {
+  if (!p.ligada) {
+    const viva = await pendenciaQueSegueEsperando(admin, p.metadata ?? {}, p.agora ?? new Date());
+    return viva ? { ocupado: true, por: "assistente" } : { ocupado: false, por: null };
+  }
+  const r = await telefoneOcupado(admin, p.phone);
+  return { ocupado: r.ocupado, por: r.ocupado ? (r.por?.origem ?? "desconhecida") : null };
 }

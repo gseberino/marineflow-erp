@@ -39,9 +39,13 @@ import { MAX_ITERATIONS_WHATSAPP, MODEL_AGENT, MODEL_LITE } from "../_shared/ai/
 import { allTools, toolsByName, type Role } from "../_shared/ai/tools/index.ts";
 import {
   checkWhatsAppRateLimit,
+  conversaDosComprovantesLigada,
   decidirPendenciaHerdada,
+  enviarComRegistro,
   pendenciaQueSegueEsperando,
   cancelarPendenciaSubstituida,
+  registroDoTurno,
+  textoDaTravaDoComprovante,
   formatOptionsAsNumberedText,
   notaDeConfirmacao,
   parseConfirmationReply,
@@ -357,7 +361,7 @@ async function resolveWhatsAppConfirmation(
   appUser: { id: string; role: string; full_name: string | null; ai_whatsapp_pin_hash: string | null },
   toolCtx: { sb: any; admin: any; userId: string; userRole: Role; jwt: string; appOrigin: string; settings: Record<string, string>; canal?: "panel" | "whatsapp" },
   confirmation: { decision: "approve"; pin?: string } | { decision: "reject" },
-): Promise<{ message: string; metadata: Record<string, any> }> {
+): Promise<{ message: string; metadata: Record<string, any>; titulo?: string | null }> {
   const pendingActionId = metadata.pending_confirm_action_id as string;
   const { data: pending } = await admin.from("ai_operator_pending_actions").select("*").eq("id", pendingActionId).maybeSingle();
   const clearedMetadata = { ...metadata, pending_confirm_action_id: null, pin_attempts: 0, pendencia_herdada: false };
@@ -439,7 +443,7 @@ async function comAProximaPendencia(
   pending: { id: string; session_id: string | null; created_at: string },
   mensagem: string,
   metadataLimpa: Record<string, any>,
-): Promise<{ message: string; metadata: Record<string, any> }> {
+): Promise<{ message: string; metadata: Record<string, any>; titulo?: string | null }> {
   const decidida = { id: pending.id, created_at: pending.created_at };
   const proxima = await proximaPendenciaDaSessao(admin, pending.session_id, decidida);
   if (!proxima) return { message: mensagem, metadata: metadataLimpa };
@@ -450,6 +454,8 @@ async function comAProximaPendencia(
       Math.max(restantes, 1),
     )}`,
     metadata: { ...metadataLimpa, pending_confirm_action_id: proxima.pending_action_id },
+    // O título vai para o registro de pergunta ativa (F2 dos comprovantes): é o que o dono lê no desempate.
+    titulo: proxima.title,
   };
 }
 
@@ -486,6 +492,10 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   if (!phoneNormalized || !appUserId || !text) {
     return jr({ error: "phone_normalized, app_user_id e text são obrigatórios" }, 400);
   }
+  // F2 dos comprovantes (11/10/2026): o webhook manda também o id da mensagem e o da mensagem que o
+  // dono citou (quotedId). Opcionais: quem chama sem eles (acompanhar-conversas) segue como antes.
+  const messageId = typeof body.message_id === "string" && body.message_id ? body.message_id : null;
+  const citado = typeof body.citado === "string" && body.citado ? body.citado : null;
 
   // Rate limit — custo $0, nem chega a resolver sessão/usuário.
   const withinLimit = await checkWhatsAppRateLimit(admin, phoneNormalized);
@@ -513,6 +523,19 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   // Sem JWT de usuário neste canal — sb e admin são o mesmo client service-role.
   const toolCtx = { sb: admin, admin, userId: appUserId, userRole: (appUser.role as Role) || "unknown", jwt: "", appOrigin: settings.app_public_url || "", settings };
 
+  // ---- Trava dos comprovantes (F2, 11/10/2026) ----
+  // "sim"/"1" com uma pendência do assistente esperando, mas a pergunta aberta mais nova é a de um
+  // comprovante (ou empata em < 2 min): era a resposta ao menu do CMP. Nada é aprovado e nenhuma
+  // opção é consumida; o dono responde de novo citando a mensagem certa. Com a conversa dos
+  // comprovantes desligada (app_settings), nenhuma leitura nova: segue como antes.
+  const conversaLigada = conversaDosComprovantesLigada(settings);
+  const trava = await textoDaTravaDoComprovante(admin, { phone: phoneNormalized, texto: text, citado, metadata, ligada: conversaLigada });
+  if (trava) {
+    console.log(`[ai-agent][whatsapp] trava do comprovante: sessao=${sessionId} mensagem=${messageId ?? "-"}`);
+    await queueWhatsAppReply(admin, phoneNormalized, trava);
+    return jr({ ok: true, travado: "comprovante" });
+  }
+
   // ---- Camada determinística (custo $0): confirmação de pendência ----
   const confirmation = parseConfirmationReply(text);
   if (metadata.pending_confirm_action_id) {
@@ -535,7 +558,12 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
       }
       const resolved = await resolveWhatsAppConfirmation(admin, metadata, appUser, toolCtx, confirmation);
       await admin.from("ai_operator_sessions").update({ metadata: resolved.metadata, last_activity_at: new Date().toISOString() }).eq("id", sessionId);
-      await queueWhatsAppReply(admin, phoneNormalized, resolved.message);
+      // Registro único (F2): a próxima pendência da leva vira a pergunta aberta; sem próxima, as do
+      // assistente se encerram (a pergunta de comprovante que esperava volta a poder abrir).
+      await enviarComRegistro(
+        admin, phoneNormalized, resolved.message,
+        registroDoTurno(metadata, resolved.metadata, sessionId, resolved.titulo), { ligada: conversaLigada },
+      );
       return jr({ ok: true });
     }
     // Não pareceu confirmação — segue pro LLM (usuário pode ter mudado de assunto).
@@ -718,7 +746,13 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
   );
   const avisoDeSubstituicao = await cancelarPendenciaSubstituida(admin, metadata, newMetadata, appUser.id);
   await admin.from("ai_operator_sessions").update({ metadata: newMetadata, last_activity_at: new Date().toISOString() }).eq("id", sessionId);
-  await queueWhatsAppReply(admin, phoneNormalized, replyText + avisoDeSubstituicao);
+  // Registro único (F2): pendência ou lista nova vira a pergunta aberta do telefone; nada esperando
+  // resposta encerra as do assistente. Conversa dos comprovantes desligada = o envio de sempre.
+  await enviarComRegistro(
+    admin, phoneNormalized, replyText + avisoDeSubstituicao,
+    registroDoTurno(metadata, newMetadata, sessionId, (result.proposal as Proposal | undefined)?.title ?? result.options?.question ?? null),
+    { ligada: conversaDosComprovantesLigada(settings) },
+  );
 
   return jr({ ok: true, session_id: sessionId });
 }
@@ -780,7 +814,12 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
     );
     const avisoDeSubstituicao = await cancelarPendenciaSubstituida(admin, metadata, novo, appUser.id);
     await admin.from("ai_operator_sessions").update({ metadata: novo, last_activity_at: new Date().toISOString() }).eq("id", sessionId);
-    await queueWhatsAppReply(admin, phoneNormalized, replyText + avisoDeSubstituicao);
+    // Registro único (F2): o mesmo do turno pelo OpenRouter.
+    await enviarComRegistro(
+      admin, phoneNormalized, replyText + avisoDeSubstituicao,
+      registroDoTurno(metadata, novo, sessionId, interrupcao.proposal?.title ?? interrupcao.options?.question ?? null),
+      { ligada: conversaDosComprovantesLigada(settings) },
+    );
     return jr({ ok: true, entregue: "claude_max" });
   }
 
