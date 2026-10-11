@@ -42,6 +42,8 @@ function montarDeps(): DependenciasDoFluxo {
     supabaseUrl: url,
     serviceRoleKey: chave,
     internalSecret: Deno.env.get("AI_INTERNAL_SECRET") ?? "",
+    // ajustes do dono (11/10/2026): o sim aprova a linha no Extrato pela chamada interna ao finance-review
+    cronSecret: Deno.env.get("CRON_SECRET") ?? "",
     waitUntil: typeof runtime?.waitUntil === "function" ? (p) => runtime.waitUntil(p) : undefined,
   };
 }

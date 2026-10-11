@@ -22,6 +22,13 @@
 // (comprovantes_vigia_banco: horário, espaçamento e limite são do banco; a fila da F2 vem primeiro).
 // Sem conversa ligada ou com o modo de teste do whatsapp-send, nada é perguntado. O índice da pasta
 // PESSOAL (padrão do dono: a contadora não vê os pessoais) é regravado pelo vigia como o do mês.
+//
+// Ajustes do dono (11/10/2026 — spec-ajustes-dono.md): o SIM já aprova a linha no Extrato — quando a
+// R4 ou a gravação devolvem `aprovar` (a proposta classificada), o edge chama o finance-review
+// (approve_cmp, interna, com o dono como quem decide) ANTES de montar o texto, que diz "lancei no
+// Extrato" ou "não consegui aprovar agora: tento de novo na próxima rodada" (o "gerar" tenta de
+// novo). A regra E ("quem pagou?" depois de 5 dias sem aparecer em conta da empresa) é o passo
+// "banco_quem" da mesma R4: esperando / regravado / não trocado.
 import { EvolutionProvider } from "../whatsapp/evolution-provider.ts";
 import type { IncomingMessageEvent } from "../whatsapp/types.ts";
 import { type Dono, donoDoWhatsApp } from "../whatsapp/dono.ts";
@@ -63,6 +70,7 @@ import {
 import {
   classeDoComando,
   type Comando,
+  ehPassoDoExtrato,
   type Interpretacao,
   interpretarResposta,
   lerComando,
@@ -70,9 +78,12 @@ import {
   respostaNaoEntendida,
 } from "./respostas.ts";
 import {
+  type AAprovar,
+  type Aprovacao,
   type Cancelamento,
   type CmpResumo,
   type Efeito,
+  ehEstadoDoQuemPagou,
   ehPerguntaAzul,
   type Gravacao,
   historicoDoFluxo,
@@ -89,8 +100,12 @@ import {
   textoDaPerguntaDoExtrato,
   textoDoLigado,
   textoDoMudou,
+  textoDoNaoTrocado,
+  textoDoQuemEsperando,
   textoDoRecusado,
+  textoDoRegravado,
   textoInvalidaDoExtrato,
+  textoInvalidaDoQuemPagou,
   textoNaoLigado,
   TEXTO_CORRIGIR_COMO,
   TEXTO_FALHA,
@@ -179,6 +194,13 @@ export type DependenciasDoFluxo = {
   sessaoDoWhatsApp?(phone: string, donoId: string): Promise<string>;
   /** F2, para os testes; o padrão é garantirPastaDoBarco (com pasta-base) ou pastaRegistradaDoBarco (null = nenhuma). */
   pastaDoBarco?(dbx: DropboxDoFluxo, p: { vesselId: string; clientId: string; barco: string | null; cliente: string | null; pastaBase: string }): Promise<PastaDoBarco | null>;
+  /** Ajustes do dono: o CRON_SECRET da chamada interna ao finance-review (approve_cmp). */
+  cronSecret?: string;
+  /**
+   * Ajustes do dono, para os testes: aprovar no Extrato a linha que o sim ligou. O padrão é o POST
+   * interno ao finance-review (approve_cmp, 15 s). Nunca lança: falha = { ok: false, motivo }.
+   */
+  aprovarNoExtrato?(cmpId: string, donoId: string): Promise<Aprovacao>;
 };
 
 /** Log padrão da função: uma linha JSON, só com os campos seguros que quem chama passou. */
@@ -1208,6 +1230,62 @@ async function proximaDepoisDoExtrato(
 }
 
 // ---------------------------------------------------------------------------------------------
+// Ajustes do dono: o sim aprova a linha no Extrato (finance-review, approve_cmp)
+// ---------------------------------------------------------------------------------------------
+
+const PRAZO_DA_APROVACAO_MS = 15_000;
+
+/**
+ * O POST interno ao finance-review (approve_cmp) com o CRON_SECRET e o dono como quem decide (a
+ * aprovação tem dono, como a da tela). Nunca lança: sem segredo, fora do ar ou sem resposta em 15 s
+ * = { ok: false } (o "gerar" do Extrato tenta de novo).
+ */
+async function aprovarPeloFinanceReview(cmpId: string, donoId: string, deps: DependenciasDoFluxo): Promise<Aprovacao> {
+  if (!deps.cronSecret) return { ok: false, motivo: "sem_resposta" };
+  try {
+    const res = await deps.fetch(`${deps.supabaseUrl}/functions/v1/finance-review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-cron-secret": deps.cronSecret },
+      body: JSON.stringify({ action: "approve_cmp", cmp_id: cmpId, acting_user_id: donoId }),
+      signal: AbortSignal.timeout(PRAZO_DA_APROVACAO_MS),
+    });
+    // deno-lint-ignore no-explicit-any
+    const j = await res.json().catch(() => null) as any;
+    if (!res.ok || !j || typeof j !== "object") return { ok: false, motivo: "sem_resposta" };
+    return { ok: j.ok === true, nada: j.nada === true, motivo: typeof j.motivo === "string" ? j.motivo.slice(0, 200) : null };
+  } catch {
+    return { ok: false, motivo: "sem_resposta" };
+  }
+}
+
+/**
+ * Se a R4/gravação disse qual proposta o sim aprova (`aprovar`), aprova agora — antes de montar o
+ * texto, que diz o que aconteceu. Sem `aprovar`, null (nada a aprovar agora: a linha já tinha
+ * lançamento, ou a proposta ainda não está na fila e o "gerar" aprova quando ela entrar). Nunca lança;
+ * o log leva só o código.
+ */
+async function aprovarSeHouver(
+  cmpId: string | null | undefined,
+  donoId: string | null | undefined,
+  aAprovar: AAprovar | undefined,
+  deps: DependenciasDoFluxo,
+): Promise<Aprovacao | null> {
+  if (!cmpId || !aAprovar || typeof aAprovar !== "object" || !aAprovar.proposta_id) return null;
+  let r: Aprovacao;
+  if (!donoId) r = { ok: false, motivo: "sem_resposta" };
+  else {
+    try {
+      r = await (deps.aprovarNoExtrato ? deps.aprovarNoExtrato(cmpId, donoId) : aprovarPeloFinanceReview(cmpId, donoId, deps));
+    } catch {
+      r = { ok: false, motivo: "sem_resposta" };
+    }
+  }
+  const motivo = typeof r?.motivo === "string" && /^[a-z_:0-9]{1,40}$/.test(r.motivo) ? r.motivo : r?.motivo ? "texto" : null;
+  deps.log("aprovacao_do_sim", { id: cmpId, ok: Boolean(r?.ok), nada: Boolean(r?.nada), motivo });
+  return r ?? { ok: false, motivo: "sem_resposta" };
+}
+
+// ---------------------------------------------------------------------------------------------
 // responder / pendentes / desempatar (porta chamadaInterna: só o whatsapp-webhook)
 // ---------------------------------------------------------------------------------------------
 
@@ -1252,7 +1330,7 @@ const DESTINOS_DO_RESPONDER = new Set(["comprovante", "comprovante_reabrir", "co
  */
 function respondeAUltima(estado: EstadoDoTelefone, texto: string, agora: Date): boolean {
   const u = estado.ultima_do_cmp;
-  if (!u || estado.ativa || u.passo === "banco") return false;
+  if (!u || estado.ativa || ehPassoDoExtrato(u.passo)) return false;
   const i = interpretarResposta(u.passo, u.opcoes, texto, agora);
   return i !== null && i.tipo !== "sim" && i.tipo !== "nao" && i.tipo !== "ok";
 }
@@ -1322,8 +1400,9 @@ export async function responder(
       if (!alvo) return { status: 200, corpo: { tratada: false, resultado: "sem_pergunta" } };
       const i = alvo.id === ativa?.id ? interp : interpretarResposta(alvo.passo, alvo.opcoes, p.texto, agora);
       if (!i) return { status: 200, corpo: { tratada: false, resultado: "texto_livre" } };
-      // F3: a pergunta do extrato de um CMP já gravado tem a RPC dela (o comprovante_responder ignora o gravado)
-      if (alvo.passo === "banco") return await responderAoExtrato(alvo, i, ctx, deps);
+      // F3: a pergunta do extrato de um CMP já gravado tem a RPC dela (o comprovante_responder ignora o
+      // gravado) — também o "quem pagou?" da regra E (passo banco_quem)
+      if (ehPassoDoExtrato(alvo.passo)) return await responderAoExtrato(alvo, i, ctx, deps);
       return await responderA(alvo, i, ctx, deps);
     }
   }
@@ -1373,13 +1452,13 @@ async function responderAoExtrato(
     await enviarAoDono(ctx.phone, TEXTO_FALHA, `cmp:f:${ctx.messageId}`, deps);
     throw e;
   }
-  return await falarDaRespostaDoExtrato(r, { ...ctx, respondida: alvo.id, interp: i, opcoes: alvo.opcoes }, deps);
+  return await falarDaRespostaDoExtrato(r, { ...ctx, respondida: alvo.id, interp: i, opcoes: alvo.opcoes, passo: alvo.passo }, deps);
 }
 
 /** O resultado da R4 vira o texto ao dono (spec-f3.md, 4.3). "ignorada": nada (tratada, sem mensagem). */
 async function falarDaRespostaDoExtrato(
   r: RespostaDoBanco | null,
-  ctx: Contexto & { respondida: string; interp: Interpretacao; opcoes: Opcao[] },
+  ctx: Contexto & { respondida: string; interp: Interpretacao; opcoes: Opcao[]; passo?: string | null },
   deps: DependenciasDoFluxo,
 ): Promise<Saida> {
   const cmp = (r?.cmp ?? null) as CmpResumo | null;
@@ -1387,6 +1466,7 @@ async function falarDaRespostaDoExtrato(
   const codigo = cmp?.codigo ?? (ativa?.id === ctx.respondida ? ativa.referencia_codigo : null) ?? "comprovante";
   const numero = cmp ? numeroDoCmp(cmp) : null;
   const resultado = String(r?.resultado ?? "");
+  const quemPagou = ctx.passo === "banco_quem";
   const azul = ehPerguntaAzul({ opcoes: ctx.opcoes, banco: null });
   const linhasNaLista = ctx.opcoes.filter((o) => o.n > 0).length;
   const ate = r?.ate ?? cmp?.banco?.ate ?? null;
@@ -1400,9 +1480,11 @@ async function falarDaRespostaDoExtrato(
       return trata("ignorada");
     case "ligado": {
       if (!cmp) return trata("ligado");
+      // ajustes do dono: o sim já aprova a linha no Extrato — antes do texto, que diz o que aconteceu
+      const aprovacao = await aprovarSeHouver(cmp.id, ctx.donoId, r?.aprovar, deps);
       // o "motivo" do ligado é o aviso da ligação (ex.: a linha já foi lançada em outro registro)
-      const aviso = typeof r?.motivo === "string" ? textosDosAvisos([r.motivo], cmp) : [];
-      const texto = [textoDoLigado(cmp, r?.ligacao ?? null), ...aviso].join("\n");
+      const aviso = typeof r?.motivo === "string" ? textosDosAvisos([r.motivo], cmp, r?.ligacao ? [r.ligacao] : null, true) : [];
+      const texto = [textoDoLigado(cmp, r?.ligacao ?? null, aprovacao), ...aviso].join("\n");
       // a próxima: a que a R4 trouxe, senão a da fila da F2 primeiro e depois outra do extrato
       const prox = r?.proxima
         ? { f2: null, extrato: r.proxima }
@@ -1431,18 +1513,23 @@ async function falarDaRespostaDoExtrato(
       const anterior = r?.motivo === "resposta_anterior_a_pergunta";
       const proxima = r?.proxima ?? null;
       const azulDaProxima = proxima ? ehPerguntaAzul(proxima) : azul;
+      const opcoesDaProxima = proxima ? proxima.opcoes.filter((o) => o.n > 0).length : linhasNaLista;
       const aviso = anterior
         ? "Essa resposta chegou antes desta pergunta; responda de novo a ela:"
         : r?.motivo === "pergunta_fechada"
         ? "Essa pergunta já tinha fechado; esta é a de agora:"
-        : textoInvalidaDoExtrato(codigo, azulDaProxima, proxima ? proxima.opcoes.filter((o) => o.n > 0).length : linhasNaLista);
+        : (proxima ? proxima.passo === "banco_quem" : quemPagou)
+        ? textoInvalidaDoQuemPagou(codigo, opcoesDaProxima)
+        : textoInvalidaDoExtrato(codigo, azulDaProxima, opcoesDaProxima);
       if (proxima) {
         const nova = proxima.pergunta_id !== ctx.respondida;
         await enviarMensagem(ctx.phone, `${aviso}\n${textoDaPerguntaDoExtrato(proxima)}`, nova ? proxima.dedupe_key : ctx.chave,
           nova ? proxima : null, deps, nova ? null : proxima.pergunta_id);
       } else if (anterior && cmp) {
         // sem a pergunta de volta, reapresenta com o que o dono viu nela (as opções)
-        const deNovo: PerguntaDoExtrato = { pergunta_id: ctx.respondida, dedupe_key: ctx.chave, cmp, passo: "banco", opcoes: ctx.opcoes, banco: null };
+        const deNovo: PerguntaDoExtrato = {
+          pergunta_id: ctx.respondida, dedupe_key: ctx.chave, cmp, passo: quemPagou ? "banco_quem" : "banco", opcoes: ctx.opcoes, banco: null,
+        };
         await enviarMensagem(ctx.phone, `${aviso}\n${textoDaPerguntaDoExtrato(deNovo)}`, ctx.chave, null, deps, ctx.respondida);
       } else {
         await enviarMensagem(ctx.phone, aviso, ctx.chave, null, deps);
@@ -1451,8 +1538,39 @@ async function falarDaRespostaDoExtrato(
     }
     case "ok_nao_aprova":
       // "ok", número ou frase curta no verde: nunca liga; pede o sim de novo
-      await enviarMensagem(ctx.phone, textoInvalidaDoExtrato(codigo, false), ctx.chave, null, deps);
+      await enviarMensagem(ctx.phone, quemPagou ? textoInvalidaDoQuemPagou(codigo, linhasNaLista) : textoInvalidaDoExtrato(codigo, false), ctx.chave, null, deps);
       return trata("ok_nao_aprova");
+    // ── regra E (ajustes do dono): o "quem pagou?" depois de 5 dias sem aparecer em conta da empresa ──
+    case "esperando":
+      // a empresa pagou: continua esperando o extrato (até os 30/45 dias)
+      await enviarMensagem(ctx.phone, textoDoQuemEsperando(codigo, ate), ctx.chave, null, deps);
+      return trata("esperando");
+    case "regravado": {
+      if (!cmp) return trata("regravado");
+      // desfez e gravou de novo, na mesma transação (o reembolso, o crédito nas Diárias ou só o arquivo)
+      const gravacao = (r?.gravacao ?? null) as Gravacao | null;
+      const aprovacao = await aprovarSeHouver(cmp.id, ctx.donoId, gravacao?.aprovar, deps);
+      const texto = textoDoRegravado(cmp, gravacao, aprovacao);
+      await enviarMensagem(ctx.phone, texto, ctx.chave, null, deps);
+      // o arquivo muda de nome/pasta (PESSOAL, BOLSO, TECNICO) e o assistente fica sabendo
+      depoisDoArquivo(ctx.phone, cmp.id, gravacao?.mes ?? null, `${cmp.codigo} corrigido (quem pagou)`, `${cmp.codigo} (id ${cmp.id})`, texto, deps);
+      return trata("regravado");
+    }
+    case "nao_trocado": {
+      const codigoErro = typeof (r as { codigo_erro?: unknown })?.codigo_erro === "string" &&
+          /^[0-9A-Z]{5}$/.test(String((r as { codigo_erro?: unknown }).codigo_erro))
+        ? String((r as { codigo_erro?: unknown }).codigo_erro)
+        : null;
+      const texto = textoDoNaoTrocado(codigo, r, numero, codigoErro);
+      if (texto.includes("deu um erro no sistema")) {
+        await logEdgeError(deps.admin, {
+          context: "comprovantes-whatsapp", action: "trocar_pagador", level: "error",
+          message: `nao_trocado:${codigoErro ?? "sem_codigo"}`, details: { cmp_id: cmp?.id ?? null },
+        });
+      }
+      await enviarMensagem(ctx.phone, texto, ctx.chave, null, deps);
+      return trata("nao_trocado");
+    }
     case "nao_ligado": {
       const codigoErro = typeof (r as { codigo_erro?: unknown })?.codigo_erro === "string" &&
           /^[0-9A-Z]{5}$/.test(String((r as { codigo_erro?: unknown }).codigo_erro))
@@ -1572,16 +1690,18 @@ async function falarDaResposta(
       return await falarDaPergunta(proxima, r?.motivo === "depois" ? textoPulado(codigo) : null, ctx, codigo, r, deps, resultado);
     case "gravado": {
       const gravacao = (r?.gravacao ?? null) as Gravacao | null;
+      // ajustes do dono: gravou e ligou à linha (verde) → o mesmo sim já aprova a linha no Extrato
+      const aprovacao = await aprovarSeHouver(cmp?.id, ctx.donoId, gravacao?.aprovar, deps);
       // F3: sem próxima da fila e com linhas parecidas no extrato (azul), a pergunta do extrato sai
       // na mesma mensagem ("No extrato: …"), com a chave dela
       const banco = !proxima && gravacao?.banco?.perguntar === true && cmp?.id
         ? await abrirPerguntaDoExtrato(ctx.phone, "depois_de_gravar", cmp.id, deps)
         : null;
-      const texto = textoDaGravacao({ cmp: cmp as CmpResumo, gravacao, proxima, banco });
+      const texto = textoDaGravacao({ cmp: cmp as CmpResumo, gravacao, proxima, banco, aprovacao });
       const { chave, abre } = banco ? { chave: banco.dedupe_key, abre: banco as PerguntaQueAbre } : chaveDaPergunta(proxima, ctx.respondida, ctx.chave);
       await enviarMensagem(ctx.phone, texto, chave, abre, deps);
       if (cmp?.id) {
-        const soAGravacao = textoDaGravacao({ cmp, gravacao, proxima: null }).split("\n\n")[0];
+        const soAGravacao = textoDaGravacao({ cmp, gravacao, proxima: null, aprovacao }).split("\n\n")[0];
         depoisDoArquivo(ctx.phone, cmp.id, gravacao?.mes ?? null, `${codigo} gravado`, `${codigo} (id ${cmp.id})`, soAGravacao, deps);
       }
       return trata(resultado);
@@ -1624,7 +1744,7 @@ async function falarDaPergunta(
  */
 async function falarDoEmpate(ctx: Contexto, deps: DependenciasDoFluxo): Promise<void> {
   const ativa = ctx.estado.ativa?.origem === "comprovante" ? ctx.estado.ativa : null;
-  if (ativa?.interrompida_em && !ctx.estado.pendencia && ativa.passo === "banco") {
+  if (ativa?.interrompida_em && !ctx.estado.pendencia && ehPassoDoExtrato(ativa.passo)) {
     // F3: a pergunta do extrato reapresentada (a R3 recalcula as linhas)
     const p = await abrirPerguntaDoExtrato(ctx.phone, "reabrir", ativa.referencia_id, deps);
     if (p) {
@@ -1667,7 +1787,7 @@ async function respostaAFoto(ctx: Contexto, deps: DependenciasDoFluxo, agora: Da
   if (foto.gravado || foto.situacao === "cancelado") return await executarComando({ comando: "cmp", numero }, ctx, deps);
   const ultima = await ultimaPerguntaDoCmp(foto.id, deps);
   const i = ultima ? interpretarResposta(ultima.passo, ultima.opcoes, ctx.texto, agora) : null;
-  if (ultima && i && ultima.passo === "banco") return await responderAoExtrato(ultima, i, ctx, deps);
+  if (ultima && i && ehPassoDoExtrato(ultima.passo)) return await responderAoExtrato(ultima, i, ctx, deps);
   if (ultima && i && ultima.passo !== "confirmar") return await responderA(ultima, i, ctx, deps);
   if (pareceDica(ctx.texto)) {
     await rpc(deps, "comprovante_acrescentar_dica", { p_id: foto.id, p_texto: ctx.texto, p_message_id: ctx.messageId });
@@ -1680,7 +1800,7 @@ async function naoEntendi(ctx: Contexto, deps: DependenciasDoFluxo): Promise<Sai
   const ativa = ctx.estado.ativa?.origem === "comprovante" ? ctx.estado.ativa : null;
   if (!ativa) return { status: 200, corpo: { tratada: false, resultado: "assistente" } };
   const codigo = ativa.referencia_codigo ?? "comprovante";
-  if (ativa.passo === "banco") {
+  if (ehPassoDoExtrato(ativa.passo)) {
     // F3: a pergunta do extrato de novo (a R3 recalcula as linhas); a da fila da F2 não serve aqui
     const p = await abrirPerguntaDoExtrato(ctx.phone, "reabrir", ativa.referencia_id, deps);
     if (p) await enviarMensagem(ctx.phone, `${textoNaoEntendi(codigo)}\n\n${textoDaPerguntaDoExtrato(p)}`, p.dedupe_key, p, deps);
@@ -1769,8 +1889,9 @@ async function executarComando(cmd: Comando, ctx: Contexto, deps: DependenciasDo
     case "cartao": {
       const c = r.cmp as CmpResumo;
       await falar(textoDoCartao(c, (r.efeitos ?? []) as Efeito[]));
-      // F3: CMP gravado com a pergunta do extrato pendente → a pergunta, numa segunda mensagem
-      if (c?.id && (c.banco?.estado === "perguntar" || c.banco?.estado === "pergunta_aberta")) {
+      // F3: CMP gravado com a pergunta do extrato pendente (ou o "quem pagou?" da regra E) → a
+      // pergunta, numa segunda mensagem
+      if (c?.id && (c.banco?.estado === "perguntar" || c.banco?.estado === "pergunta_aberta" || ehEstadoDoQuemPagou(c.banco?.estado))) {
         await perguntarBanco(ctx.phone, "cmp", deps, c.id);
       }
       break;

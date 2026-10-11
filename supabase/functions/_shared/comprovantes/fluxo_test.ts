@@ -910,7 +910,7 @@ const OS_INFO = { id: "os-1", numero: "OS-00112", barco: "Brisa", cliente: "Joã
 const CMP_RESUMO = {
   id: CMP_ID, codigo: "CMP-00124", numero: 124, situacao: "perguntando", tipo: "nfce", valor: "62.00", valor_lido: "62.00",
   valor_confianca: "alta", data: "2026-10-10", hora: "12:57:56", forma: "debito", fornecedor: "Auto Posto Exemplo",
-  fornecedor_origem: "cadastro", cnpj: CNPJ, cnpj_confianca: "alta", destino: null, os: null, cobrar_cliente: null,
+  fornecedor_origem: "cadastro", cnpj: CNPJ, cnpj_confianca: "alta", destino: null, os: null, tipo_na_os: null,
   quem_pagou: null, pagador_nome: null, categoria: null, pendencias: [], gravado_em: null,
 };
 
@@ -1105,7 +1105,12 @@ function bancoDaConversa(passo: string, responder: (a: Qualquer) => unknown, ext
 Deno.test("F2 responder: '1' no para quê → o banco recebe a opção; a próxima pergunta (nova) sai com a chave dela", async () => {
   const banco = bancoDaConversa("para_que", () => ({
     resultado: "proximo", cmp: { ...CMP_RESUMO, destino: "os", os: OS_INFO }, motivo: null, gravacao: null,
-    proxima: perguntaDoBanco("cobrar", { opcoes: [{ n: 1, rotulo: "x", valor: "cobrar" }, { n: 2, rotulo: "y", valor: "custo" }] }, { destino: "os", os: OS_INFO }),
+    proxima: perguntaDoBanco("tipo_na_os", {
+      opcoes: [
+        { n: 1, rotulo: "Peça ou material da OS (não lanço custo: a peça entra pela OS)", valor: "peca" },
+        { n: 2, rotulo: "Despesa da OS (combustível, alimentação, frete, ferramenta…): custo interno, não aparece para o cliente", valor: "despesa" },
+      ],
+    }, { destino: "os", os: OS_INFO }),
   }));
   const d = depsF2(banco);
   const r = await responder(CORPO_RESPONDER("🎤 Um."), d.deps);
@@ -1115,20 +1120,24 @@ Deno.test("F2 responder: '1' no para quê → o banco recebe a opção; a próxi
   });
   const [env] = d.enviosAoDono();
   assertEquals(env.dedupe_key, `cmp:p:${P_PROX}`);
-  assertStringIncludes(env.message, "Para a OS-00112 · Brisa. Cobrar do cliente?\n1 Cobrar do cliente (entra no total da OS)\n2 Custo da HBR (não entra no total)");
+  // ajustes do dono: no lugar do "Cobrar do cliente?", peça ou despesa da OS
+  assertStringIncludes(env.message, "Para a OS-00112 · Brisa: o que foi esta compra?\n1 Peça ou material da OS (não lanço custo: a peça entra pela OS)\n2 Despesa da OS");
+  assertEquals(/cobr/i.test(env.message), false);
   assertEquals(rpcs(banco, "pergunta_marcar_enviada")[0].args, { p_id: P_PROX, p_wa_message_id: "WA-OUT-1" });
 });
 
 Deno.test("F2 responder: o resumo, 'ok' que não aprova, 'sim' que grava → mover, índice e histórico", async () => {
-  const plano = { efeitos: [{ tipo: "despesa_os", os_numero: "OS-00112", billable: false }, { tipo: "anotar", forma: "debito" }], avisos: [], situacao_final: "gravado", pasta: "barco" };
-  // 1) "2" no cobrar → o resumo
-  const b1 = bancoDaConversa("cobrar", () => ({
+  const plano = { efeitos: [{ tipo: "despesa_os", os_numero: "OS-00112" }, { tipo: "anotar", forma: "debito" }], avisos: [], situacao_final: "gravado", pasta: "barco" };
+  // 1) "2" (despesa) no peça ou despesa → o resumo
+  const b1 = bancoDaConversa("tipo_na_os", () => ({
     resultado: "resumo", cmp: CMP_RESUMO, motivo: null, gravacao: null,
-    proxima: perguntaDoBanco("confirmar", { plano, versao: 3, pasta: "Brisa/1- DOC's/Compras" }, { destino: "os", os: OS_INFO, cobrar_cliente: false }),
+    proxima: perguntaDoBanco("confirmar", { plano, versao: 3, pasta: "Brisa/1- DOC's/Compras" }, { destino: "os", os: OS_INFO, tipo_na_os: "despesa" }),
   }));
   const d1 = depsF2(b1);
   await responder(CORPO_RESPONDER("2"), d1.deps);
+  assertEquals(rpcs(b1, "comprovante_responder")[0].args.p.interpretacao, { tipo: "opcao", n: 2 });
   assertStringIncludes(d1.enviosAoDono()[0].message, "CMP-00124 · confira antes de gravar:");
+  assertStringIncludes(d1.enviosAoDono()[0].message, "• Para: OS-00112 Brisa · despesa da OS (custo interno: não aparece para o cliente)");
   assertStringIncludes(d1.enviosAoDono()[0].message, "Responda *sim* para gravar ou *não* para corrigir.");
 
   // 2) "ok" no confirmar: só pede o sim; nada é gravado nem movido
@@ -1146,10 +1155,10 @@ Deno.test("F2 responder: o resumo, 'ok' que não aprova, 'sim' que grava → mov
   assertEquals(rpcs(b2b, "comprovante_responder")[0].args.p.interpretacao, { tipo: "ok" });
 
   // 3) "sim" → gravado
-  const gravado = { ...CMP_RESUMO, situacao: "gravado", destino: "os", os: OS_INFO, cobrar_cliente: false, gravado_em: "2026-10-10T22:41:00Z" };
+  const gravado = { ...CMP_RESUMO, situacao: "gravado", destino: "os", os: OS_INFO, tipo_na_os: "despesa", gravado_em: "2026-10-10T22:41:00Z" };
   const b3 = bancoDaConversa("confirmar", () => ({
     resultado: "gravado", cmp: gravado, proxima: null, motivo: null,
-    gravacao: { situacao: "gravado", efeitos: [{ tipo: "despesa_os", so_expense_id: "e-1", os_id: "os-1", billable: false, direto: false }, { tipo: "anotar", anotacao_id: "a-1", resultado: "aguardando" }], avisos: [], mensagens: [], mes: "2026-10-01" },
+    gravacao: { situacao: "gravado", efeitos: [{ tipo: "despesa_os", so_expense_id: "e-1", os_id: "os-1" }, { tipo: "anotar", anotacao_id: "a-1", resultado: "aguardando" }], avisos: [], mensagens: [], mes: "2026-10-01", aprovar: null },
   }), {
     comprovante_destino_do_arquivo: () => ({ data: {
       id: CMP_ID, codigo: "CMP-00124", situacao: "gravado", cancelado: false, tipo: "nfce", valor: "62.00", valor_confirmado: true, data: "2026-10-10",
@@ -1175,8 +1184,10 @@ Deno.test("F2 responder: o resumo, 'ok' que não aprova, 'sim' que grava → mov
   assertEquals(msg.dedupe_key, `cmp:r:${MSG_ID}`);
   assertEquals(
     msg.message,
-    "CMP-00124 gravado: lancei a despesa na OS-00112 como custo da HBR; anotei o débito para quando o banco trouxer. Arquivo: Brisa/1- DOC's/Compras.\n\nFila vazia: não há mais comprovantes para conferir.",
+    "CMP-00124 gravado: lancei a despesa na OS-00112 como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS); anotei o débito para quando o banco trouxer. Arquivo: Brisa/1- DOC's/Compras.\n\nFila vazia: não há mais comprovantes para conferir.",
   );
+  // sem `aprovar` na gravação (só anotou), o finance-review não é chamado
+  assertEquals(d3.envios.filter((e) => e.url.includes("finance-review")).length, 0);
   // o arquivo: pasta do barco + 1- DOC's/Compras, move_v2 pelo id, com o nome final
   const dbx = d3.dbx!.r;
   assertEquals(dbx.pastas, ["/MANAGEMENT/COMMERCIAL/B2C/0021.002.26_Brisa/1- DOC's/Compras"]);
@@ -1226,7 +1237,7 @@ Deno.test("F2 responder: pendência do assistente mais nova → assistente; empa
 
 Deno.test("F2 responder: citação de pergunta já fechada interpreta pelas opções DELA e responde a ela", async () => {
   const citada = { id: "p-velha", origem: "comprovante", tipo: "pergunta", referencia_id: CMP_ID, status: "respondida", passo: "como_pagou" };
-  const banco = bancoDaConversa("para_que", () => ({ resultado: "proximo", cmp: CMP_RESUMO, proxima: perguntaDoBanco("cobrar"), motivo: null }), {
+  const banco = bancoDaConversa("para_que", () => ({ resultado: "proximo", cmp: CMP_RESUMO, proxima: perguntaDoBanco("tipo_na_os"), motivo: null }), {
     pergunta_rotear: () => rotear("para_que", { citada }),
   }, {
     whatsapp_perguntas: [{ id: "p-velha", passo: "como_pagou", origem: "comprovante", opcoes: [{ n: 1, rotulo: "Pix", valor: "pix" }, { n: 2, rotulo: "Débito", valor: "debito" }] }],
@@ -1278,7 +1289,7 @@ Deno.test("F2 responder: não gravado (rota recusou) e ocupado (pendência viva)
 });
 
 Deno.test("F2 responder: envio da próxima pergunta não confirmado → comprovante_pergunta_nao_enviada", async () => {
-  const banco = bancoDaConversa("para_que", () => ({ resultado: "proximo", cmp: CMP_RESUMO, proxima: perguntaDoBanco("cobrar"), motivo: null }), {
+  const banco = bancoDaConversa("para_que", () => ({ resultado: "proximo", cmp: CMP_RESUMO, proxima: perguntaDoBanco("tipo_na_os"), motivo: null }), {
     comprovante_pergunta_nao_enviada: () => null,
   });
   await responder(CORPO_RESPONDER("2"), depsF2(banco, { envio: 502 }).deps);
@@ -1380,7 +1391,7 @@ Deno.test("F2 comandos: cancelar sem motivo não chama o banco; com motivo cance
   assertEquals(rpcs(banco, "comprovante_comando")[0].args.p, { phone: DONO.phone, message_id: MSG_ID, comando: "cancelar", numero: 124, motivo: "comprei em dobro" });
   assertEquals(
     d.enviosAoDono()[0].message,
-    "CMP-00124 cancelado (comprei em dobro). Desfeito: a despesa da OS, a anotação do extrato. Arquivo em COMPROVANTES/_CANCELADOS.",
+    "CMP-00124 cancelado (comprei em dobro). Desfeito: a despesa interna da OS, a anotação do extrato. Arquivo em COMPROVANTES/_CANCELADOS.",
   );
   assertEquals(d.dbx!.r.movidos, [{
     de: "id:abc",
@@ -1440,12 +1451,12 @@ Deno.test("F2 histórico: o par recente deste fluxo (< 2 h) ganha a linha nova e
 Deno.test("F2 desempatar: só com pergunta de CMP aberta, chave cmp:d", async () => {
   const banco = bancoFalso({
     tabelas: { whatsapp_messages: [TEXTO_MSG("1")] },
-    rpc: { pergunta_rotear: () => rotear("cobrar", { pendencia: { tipo: "confirmacao", id: "pa-1", titulo: "Lembrete ao cliente", desde: "2026-10-10T22:30:30Z" } }) },
+    rpc: { pergunta_rotear: () => rotear("tipo_na_os", { pendencia: { tipo: "confirmacao", id: "pa-1", titulo: "Lembrete ao cliente", desde: "2026-10-10T22:30:30Z" } }) },
   });
   const d = depsF2(banco);
   assertEquals(await desempatar({ message_id: MSG_ID, phone: DONO.phone, citado: null }, d.deps), { enviada: true });
   assertEquals(d.enviosAoDono()[0].dedupe_key, `cmp:d:${MSG_ID}`);
-  assertStringIncludes(d.enviosAoDono()[0].message, "CMP-00124 (cobrar do cliente ou não)");
+  assertStringIncludes(d.enviosAoDono()[0].message, "CMP-00124 (se é peça ou despesa da OS)");
   const sem = bancoFalso({ tabelas: { whatsapp_messages: [TEXTO_MSG("1")] }, rpc: { pergunta_rotear: () => rotear(null) } });
   assertEquals(await desempatar({ message_id: MSG_ID, phone: DONO.phone }, depsF2(sem).deps), { enviada: false });
 });
@@ -1904,7 +1915,7 @@ const LINHA_DEBITO = {
 /** O CMP da AutoZone (débito de R$ 50,98 em 08/10) gravado na OS-00112 e esperando o banco. */
 const CMP_NO_BANCO = {
   ...CMP_RESUMO, situacao: "aguardando_banco", fornecedor: "AutoZone", valor: "50.98", valor_lido: "50.98", data: "2026-10-08",
-  destino: "os", os: OS_INFO, cobrar_cliente: false, categoria: "Peças e materiais", quem_pagou: "empresa", gravado_em: "2026-10-10T22:41:00Z",
+  destino: "os", os: OS_INFO, tipo_na_os: "despesa", categoria: "Peças e materiais", quem_pagou: "empresa", gravado_em: "2026-10-10T22:41:00Z",
   banco: { estado: "pergunta_aberta", nivel: "verde", desde: "2026-10-10", ate: "2026-11-09", linha: null, candidatos: 1 },
 };
 
@@ -1921,7 +1932,7 @@ function perguntaDoExtrato(nivel: "verde" | "azul", extra: Linha = {}): Qualquer
   const linhas = nivel === "verde" ? [LINHA_DEBITO] : [LINHA_DEBITO, { ...LINHA_DEBITO, n: 2, id: TX_2, data: "2026-10-09", forte: false }];
   return {
     pergunta_id: id, dedupe_key: `cmp:p:${id}`, cmp: CMP_NO_BANCO, passo: "banco", opcoes: nivel === "verde" ? OPCOES_VERDE : OPCOES_AZUL,
-    retomada: false, banco: { regra: "debito", so_registro: false, nivel, linhas, mais: 0, hash: "h1" }, ...extra,
+    retomada: false, banco: { regra: "debito", nivel, linhas, mais: 0, hash: "h1" }, ...extra,
   };
 }
 
@@ -1959,7 +1970,7 @@ Deno.test("F3 gravado com linhas parecidas (azul): a pergunta do extrato sai na 
     resultado: "gravado", cmp: gravado, proxima: null, motivo: null,
     gravacao: {
       situacao: "aguardando_banco", avisos: [], mensagens: [], mes: "2026-10-01", banco: { nivel: "azul", perguntar: true },
-      efeitos: [{ tipo: "despesa_os", billable: false }, { tipo: "aguardar_banco", regra: "debito", nivel: "azul" }],
+      efeitos: [{ tipo: "despesa_os" }, { tipo: "aguardar_banco", regra: "debito", nivel: "azul" }],
     },
   }), {
     comprovante_banco_proxima: () => ({ perguntou: true, ...perguntaDoExtrato("azul") }),
@@ -1974,7 +1985,7 @@ Deno.test("F3 gravado com linhas parecidas (azul): a pergunta do extrato sai na 
   assertEquals(rpcs(banco, "comprovante_banco_proxima")[0].args, { p_phone: DONO.phone, p_motivo: "depois_de_gravar", p_cmp: CMP_ID });
   const [msg] = d.enviosAoDono();
   assertEquals(msg.dedupe_key, `cmp:p:${P_EXTRATO}`, "a chave é a da pergunta que a mensagem abre");
-  assertStringIncludes(msg.message, "CMP-00124 gravado: lancei a despesa na OS-00112 como custo da HBR; já há linhas parecidas no extrato: pergunto qual é.");
+  assertStringIncludes(msg.message, "CMP-00124 gravado: lancei a despesa na OS-00112 como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS); já há linhas parecidas no extrato: pergunto qual é.");
   assertStringIncludes(
     msg.message,
     "\n\nNo extrato: CMP-00124 · cupom NFC-e · AutoZone · 08/10 · R$ 50,98\nApareceram no extrato linhas que podem ser deste comprovante:\n" +
@@ -1996,11 +2007,24 @@ Deno.test("F3 gravado com linhas parecidas (azul): a pergunta do extrato sai na 
   assertStringIncludes(d2.enviosAoDono()[0].message, "quando o débito aparecer no extrato, pergunto se é este. Arquivo: Brisa/1- DOC's/Compras.\n\nFila vazia");
 });
 
-Deno.test("F3 responder: 'sim' ao verde → R4 com o autor = o dono → 'ligado', a próxima da fila da F2 e o par do histórico", async () => {
-  const banco = bancoDoExtrato("sim", OPCOES_VERDE, () => ({ resultado: "ligado", cmp: LIGADO, ligacao: LIGACAO, proxima: null, motivo: null, ate: null }), {
+/** O aprovarNoExtrato falso: registra as chamadas e devolve o resultado dado. */
+function aprovacaoFalsa(d: ReturnType<typeof depsF2>, resultado: { ok: boolean; nada?: boolean; motivo?: string | null } | Error) {
+  const chamadas: Array<[string, string]> = [];
+  d.deps.aprovarNoExtrato = (cmpId, donoId) => {
+    chamadas.push([cmpId, donoId]);
+    return resultado instanceof Error ? Promise.reject(resultado) : Promise.resolve(resultado);
+  };
+  return chamadas;
+}
+
+Deno.test("F3 responder: 'sim' ao verde → R4 com o autor = o dono → 'ligado' + a aprovação no Extrato (uma vez), a próxima da fila da F2 e o par do histórico", async () => {
+  const banco = bancoDoExtrato("sim", OPCOES_VERDE, () => ({
+    resultado: "ligado", cmp: LIGADO, ligacao: LIGACAO, proxima: null, motivo: null, ate: null, aprovar: { proposta_id: "q-1" },
+  }), {
     comprovante_proxima_pergunta: () => ({ perguntou: true, ...perguntaDoBanco("para_que", { opcoes: OPCOES_PARA_QUE }, { codigo: "CMP-00125", numero: 125 }) }),
   });
   const d = depsF2(banco);
+  const aprovacoes = aprovacaoFalsa(d, { ok: true });
   const r = await responder(CORPO_RESPONDER("sim"), d.deps);
   await d.esperarFundo();
   assertEquals(r.corpo, { tratada: true, resultado: "ligado" });
@@ -2008,9 +2032,11 @@ Deno.test("F3 responder: 'sim' ao verde → R4 com o autor = o dono → 'ligado'
     p: { pergunta_id: P_ID, message_id: MSG_ID, interpretacao: { tipo: "sim" }, autor: DONO.id },
   });
   assertEquals(rpcs(banco, "comprovante_responder").length, 0, "a pergunta do extrato nunca vai à RPC da F2");
+  // ajustes do dono: o sim já aprova a linha — uma vez, com o dono como quem decide
+  assertEquals(aprovacoes, [[CMP_ID, DONO.id]]);
   const [msg] = d.enviosAoDono();
   assert(msg.message.startsWith(
-    "CMP-00124 ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98): classifiquei como Peças e materiais, OS-00112 (falta aprovar no Extrato).\n\nPróximo: CMP-00125",
+    "CMP-00124 ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98): lancei no Extrato como Peças e materiais, OS-00112.\n\nPróximo: CMP-00125",
   ));
   assertEquals(msg.dedupe_key, `cmp:p:${P_PROX}`);
   assertEquals(rpcs(banco, "comprovante_proxima_pergunta")[0].args, { p_phone: DONO.phone, p_motivo: "depois_de_gravar", p_cmp: null });
@@ -2036,6 +2062,207 @@ Deno.test("F3 responder: 'sim' ao verde → R4 com o autor = o dono → 'ligado'
   await responder(CORPO_RESPONDER("sim"), d3.deps);
   assertEquals(d3.enviosAoDono()[0].dedupe_key, `cmp:r:${MSG_ID}`);
   assertEquals(d3.enviosAoDono()[0].message.includes("Próximo"), false);
+});
+
+Deno.test("ajustes do dono: a aprovação que falha vira 'tento de novo'; sem `aprovar` não chama; ok/número no verde não aprovam", async () => {
+  const semProxima = { comprovante_proxima_pergunta: () => ({ perguntou: false }), comprovante_banco_proxima: () => ({ perguntou: false }) };
+  // falhou: o texto diz que classificou e que tenta de novo na próxima rodada do Extrato
+  const falha = bancoDoExtrato("sim", OPCOES_VERDE, () => ({ resultado: "ligado", cmp: LIGADO, ligacao: LIGACAO, proxima: null, aprovar: { proposta_id: "q-1" } }), semProxima);
+  const df = depsF2(falha);
+  const chamadasDaFalha = aprovacaoFalsa(df, { ok: false, motivo: "Esta linha acabou de ser lançada por outro caminho — revise a fila" });
+  await responder(CORPO_RESPONDER("sim"), df.deps);
+  assertEquals(chamadasDaFalha.length, 1);
+  assertEquals(
+    df.enviosAoDono()[0].message,
+    "CMP-00124 ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98): classifiquei a linha como Peças e materiais, OS-00112, mas não consegui aprovar agora " +
+      "(Esta linha acabou de ser lançada por outro caminho — revise a fila): tento de novo na próxima rodada do Extrato.",
+  );
+  // a dependência que lança também vira "tento de novo" (nunca derruba a resposta)
+  const lanca = bancoDoExtrato("sim", OPCOES_VERDE, () => ({ resultado: "ligado", cmp: LIGADO, ligacao: LIGACAO, proxima: null, aprovar: { proposta_id: "q-1" } }), semProxima);
+  const dl = depsF2(lanca);
+  aprovacaoFalsa(dl, new Error("rede"));
+  assertEquals((await responder(CORPO_RESPONDER("sim"), dl.deps)).corpo, { tratada: true, resultado: "ligado" });
+  assertStringIncludes(dl.enviosAoDono()[0].message, "não consegui aprovar agora (o Extrato não respondeu): tento de novo na próxima rodada do Extrato.");
+
+  // sem `aprovar` (a proposta ainda não está na fila): não chama; o "gerar" aprova quando ela entrar
+  const sem = bancoDoExtrato("sim", OPCOES_VERDE, () => ({ resultado: "ligado", cmp: LIGADO, ligacao: LIGACAO, proxima: null, aprovar: null }), semProxima);
+  const ds = depsF2(sem);
+  const chamadasSem = aprovacaoFalsa(ds, { ok: true });
+  await responder(CORPO_RESPONDER("sim"), ds.deps);
+  assertEquals(chamadasSem.length, 0);
+  assertStringIncludes(ds.enviosAoDono()[0].message, ": classifiquei como Peças e materiais, OS-00112 (lanço no Extrato na próxima rodada).");
+
+  // "ok" e número no verde: a R4 não liga (ok_nao_aprova) e nada é aprovado
+  for (const texto of ["ok", "1"]) {
+    const ok = bancoDoExtrato(texto, OPCOES_VERDE, () => ({ resultado: "ok_nao_aprova", cmp: CMP_NO_BANCO, proxima: null }));
+    const dok = depsF2(ok);
+    const chamadasOk = aprovacaoFalsa(dok, { ok: true });
+    await responder(CORPO_RESPONDER(texto), dok.deps);
+    assertEquals(chamadasOk.length, 0, texto);
+    assertEquals(dok.enviosAoDono()[0].message.includes("lancei"), false);
+  }
+});
+
+Deno.test("ajustes do dono: o padrão do aprovarNoExtrato é o POST interno ao finance-review (approve_cmp, x-cron-secret, o dono)", async () => {
+  const semProxima = { comprovante_proxima_pergunta: () => ({ perguntou: false }), comprovante_banco_proxima: () => ({ perguntou: false }) };
+  const banco = bancoDoExtrato("sim", OPCOES_VERDE, () => ({ resultado: "ligado", cmp: LIGADO, ligacao: LIGACAO, proxima: null, aprovar: { proposta_id: "q-1" } }), semProxima);
+  const d = depsF2(banco);
+  d.deps.cronSecret = "segredo-do-cron";
+  const fetchDoEnvio = d.deps.fetch;
+  const pedidos: Array<{ headers: Record<string, string>; corpo: Qualquer }> = [];
+  d.deps.fetch = ((url: string, init?: RequestInit) => {
+    if (String(url).endsWith("/functions/v1/finance-review")) {
+      pedidos.push({ headers: init?.headers as Record<string, string>, corpo: JSON.parse(String(init?.body)) });
+      return Promise.resolve(new Response(JSON.stringify({ ok: true, proposta_id: "q-1", payable_id: "pay-1", registrado: true }), { status: 200 }));
+    }
+    return fetchDoEnvio(url, init);
+  }) as typeof fetch;
+  await responder(CORPO_RESPONDER("sim"), d.deps);
+  assertEquals(pedidos.length, 1);
+  assertEquals(pedidos[0].corpo, { action: "approve_cmp", cmp_id: CMP_ID, acting_user_id: DONO.id });
+  assertEquals(pedidos[0].headers["x-cron-secret"], "segredo-do-cron");
+  assertStringIncludes(d.enviosAoDono()[0].message, ": lancei no Extrato como Peças e materiais, OS-00112.");
+  assertEquals(d.logs.some((l) => JSON.stringify(l).includes("segredo-do-cron")), false, "o segredo nunca vai ao log");
+  // sem o segredo: não chama e o texto diz que tenta de novo
+  const sem = bancoDoExtrato("sim", OPCOES_VERDE, () => ({ resultado: "ligado", cmp: LIGADO, ligacao: LIGACAO, proxima: null, aprovar: { proposta_id: "q-1" } }), semProxima);
+  const ds = depsF2(sem);
+  await responder(CORPO_RESPONDER("sim"), ds.deps);
+  assertEquals(ds.envios.some((e) => e.url.includes("finance-review")), false);
+  assertStringIncludes(ds.enviosAoDono()[0].message, "não consegui aprovar agora (o Extrato não respondeu): tento de novo na próxima rodada do Extrato.");
+});
+
+Deno.test("ajustes do dono: o sim do resumo que grava e liga (verde) aprova a linha antes do texto", async () => {
+  const banco = bancoDaConversa("confirmar", () => ({
+    resultado: "gravado", cmp: LIGADO, proxima: null, motivo: null,
+    gravacao: {
+      situacao: "conciliado", avisos: [], mensagens: [], mes: "2026-10-01", aprovar: { proposta_id: "q-1" },
+      efeitos: [{ tipo: "despesa_os" }, { ...LIGACAO, origem: "gravacao" }],
+    },
+  }), { comprovante_destino_do_arquivo: () => ({ data: null }) });
+  const d = depsF2(banco);
+  const chamadas = aprovacaoFalsa(d, { ok: true });
+  await responder(CORPO_RESPONDER("sim"), d.deps);
+  await d.esperarFundo();
+  assertEquals(chamadas, [[CMP_ID, DONO.id]]);
+  assertStringIncludes(d.enviosAoDono()[0].message, "; liguei à linha do banco de 08/10 e lancei no Extrato como Peças e materiais, OS-00112.");
+});
+
+// ─── regra E (ajustes do dono): "quem pagou?" depois de 5 dias sem aparecer em conta da empresa ──
+
+const OPCOES_QUEM = [
+  { n: 1, rotulo: "A empresa (ainda vai aparecer no extrato: continuo esperando até 09/11)", valor: "empresa" },
+  { n: 2, rotulo: "Eu, do meu bolso ou do meu cartão pessoal (fica como reembolso para você)", valor: "socio" },
+  { n: 3, rotulo: "O Roberto (técnico: reembolso nas Diárias)", valor: "payee:p-rob" },
+  { n: 4, rotulo: "Foi gasto pessoal, no meu cartão (só guardo o arquivo)", valor: "pessoal" },
+];
+
+function bancoDoQuem(texto: string, responder: (a: Qualquer) => unknown, extra: Record<string, (a: Qualquer) => unknown> = {}) {
+  return bancoFalso({
+    tabelas: { whatsapp_messages: [TEXTO_MSG(texto)], ai_operator_messages: [], comprovantes_indice_mensal: [] },
+    rpc: {
+      pergunta_rotear: () => rotear("banco_quem", {
+        ativa: {
+          id: P_ID, origem: "comprovante", tipo: "pergunta", referencia_id: CMP_ID, referencia_codigo: "CMP-00124", passo: "banco_quem",
+          opcoes: OPCOES_QUEM, wa_message_id: "WA-P", aberta_em: "2026-10-10T22:30:00Z",
+        },
+      }),
+      comprovante_banco_responder: responder, pergunta_marcar_enviada: () => null, ...extra,
+    },
+  });
+}
+
+Deno.test("regra E: o 'quem pagou?' vai à R4 só com o número da opção (palavra e nome do técnico viram o número)", async () => {
+  for (const [texto, n] of [["3", 3], ["o Roberto", 3], ["do meu bolso", 2], ["a empresa", 1], ["gasto pessoal", 4]] as Array<[string, number]>) {
+    const banco = bancoDoQuem(texto, () => ({ resultado: "esperando", cmp: CMP_NO_BANCO, proxima: null, ate: "2026-11-09" }));
+    await responder(CORPO_RESPONDER(texto), depsF2(banco).deps);
+    assertEquals(rpcs(banco, "comprovante_banco_responder")[0].args.p, { pergunta_id: P_ID, message_id: MSG_ID, interpretacao: { tipo: "opcao", n }, autor: DONO.id }, texto);
+    assertEquals(rpcs(banco, "comprovante_responder").length, 0, "nunca vai à RPC da F2");
+  }
+  // pergunta ao assistente: não vai à R4
+  const livre = bancoDoQuem("quanto deu o extrato do C6?", () => { throw new Error("não devia chamar"); });
+  assertEquals((await responder(CORPO_RESPONDER("quanto deu o extrato do C6?"), depsF2(livre).deps)).corpo.tratada, false);
+});
+
+Deno.test("regra E: os três resultados — esperando, regravado (move o arquivo e o histórico) e não trocado", async () => {
+  // a empresa: continua esperando
+  const esperando = bancoDoQuem("1", () => ({ resultado: "esperando", cmp: CMP_NO_BANCO, proxima: null, ate: "2026-11-09" }));
+  const de = depsF2(esperando);
+  assertEquals((await responder(CORPO_RESPONDER("1"), de.deps)).corpo, { tratada: true, resultado: "esperando" });
+  assertEquals(de.enviosAoDono()[0].message, "Ok: o CMP-00124 continua esperando o extrato (até 09/11).");
+
+  // o técnico: desfez e gravou de novo (reembolso nas Diárias), com o aviso do almoço
+  const regravadoCmp = { ...CMP_NO_BANCO, situacao: "gravado", quem_pagou: "tecnico", pagador_nome: "Roberto", categoria: "Alimentação de campo" };
+  const regravado = bancoDoQuem("3", () => ({
+    resultado: "regravado", cmp: regravadoCmp, proxima: null,
+    gravacao: {
+      situacao: "gravado", mes: "2026-10-01", avisos: ["almoco_ja_no_extra"], mensagens: [],
+      efeitos: [{ tipo: "despesa_os", paid_by: "technician" }, { tipo: "reembolso_tecnico", favorecido_nome: "Roberto", valor: "50.98", extra_do_dia: { valor: "20.00", data: "2026-10-08" } }],
+    },
+  }), {
+    comprovante_destino_do_arquivo: () => ({ data: null }),
+    comprovantes_indice_do_mes: () => [],
+    comprovante_indice_gravado: () => null,
+  });
+  const dr = depsF2(regravado);
+  assertEquals((await responder(CORPO_RESPONDER("3"), dr.deps)).corpo, { tratada: true, resultado: "regravado" });
+  await dr.esperarFundo();
+  const texto = dr.enviosAoDono()[0].message.replace(/ /g, " ");
+  assert(texto.startsWith("CMP-00124 corrigido: pago pelo Roberto. Feito: lancei a despesa na OS-00112 como custo interno"));
+  assertStringIncludes(texto, "lancei R$ 50,98 nas Diárias do Roberto como reembolso de despesa paga pelo técnico.");
+  assertStringIncludes(texto, "O Roberto já tinha recebido R$ 20,00 de almoço (extra da diária de 08/10): confira se o reembolso não ficou em dobro.");
+  // o arquivo muda de nome/pasta pelo destino de agora; o assistente fica sabendo
+  assertEquals(rpcs(regravado, "comprovante_destino_do_arquivo")[0].args, { p_id: CMP_ID });
+  assertStringIncludes(String(regravado.inseridos.ai_operator_messages?.[0].content), "CMP-00124 corrigido (quem pagou)");
+
+  // bloqueado: nada mudou, com o caminho para destravar
+  const bloqueado = bancoDoQuem("2", () => ({
+    resultado: "nao_trocado", cmp: CMP_NO_BANCO, proxima: null, bloqueios: [{ efeito: "anotar", motivo: "anotacao_aplicada" }],
+  }));
+  const db = depsF2(bloqueado);
+  assertEquals((await responder(CORPO_RESPONDER("2"), db.deps)).corpo, { tratada: true, resultado: "nao_trocado" });
+  assertEquals(db.enviosAoDono()[0].message, "Não troquei quem pagou o CMP-00124: a linha do banco já recebeu a classificação; corrija pelo Extrato. Nada mudou.");
+  // erro cru da rota: texto fixo + só o código no app_error_logs
+  const cru = bancoDoQuem("2", () => ({ resultado: "nao_trocado", cmp: CMP_NO_BANCO, proxima: null, motivo: 'violates check constraint "AutoZone"', codigo_erro: "23514" }));
+  const dc = depsF2(cru);
+  await responder(CORPO_RESPONDER("2"), dc.deps);
+  assertEquals(dc.enviosAoDono()[0].message, "Não troquei quem pagou o CMP-00124: deu um erro no sistema (código 23514). Nada mudou.");
+  const erros = JSON.stringify(rpcs(cru, "log_app_error").map((c) => c.args));
+  assertStringIncludes(erros, "nao_trocado:23514");
+  assertEquals(erros.includes("AutoZone"), false);
+
+  // número fora do menu: a R4 devolve inválida; o texto pede o número de quem pagou
+  const fora = bancoDoQuem("9", () => ({ resultado: "invalida", cmp: CMP_NO_BANCO, proxima: null, motivo: "opcao_fora" }));
+  const dfo = depsF2(fora);
+  await responder(CORPO_RESPONDER("9"), dfo.deps);
+  assertEquals(rpcs(fora, "comprovante_banco_responder")[0].args.p.interpretacao, { tipo: "ok" });
+  assertEquals(dfo.enviosAoDono()[0].message, "Para o CMP-00124, responda o número de quem pagou (1 a 4).");
+});
+
+Deno.test("regra E: o vigia abre o 'quem pagou?' (R3 com passo banco_quem) com a retomada; o cmp N com a pergunta pendente", async () => {
+  const pergunta = {
+    perguntou: true, pergunta_id: P_EXTRATO, dedupe_key: `cmp:p:${P_EXTRATO}`, cmp: { ...CMP_NO_BANCO, data: "2026-10-03" }, passo: "banco_quem",
+    opcoes: OPCOES_QUEM, retomada: true, banco: { nivel: "cinza", linhas: [], hash: "h" },
+  };
+  const banco = bancoFalso({ rpc: { comprovante_banco_proxima: () => pergunta, pergunta_marcar_enviada: () => null } });
+  const d = depsF2(banco);
+  assertEquals(await perguntarBanco(DONO.phone, "vigia", d.deps), true);
+  const [msg] = d.enviosAoDono();
+  assertEquals(msg.dedupe_key, `cmp:p:${P_EXTRATO}`);
+  assertEquals(
+    msg.message,
+    "Ainda falta saber quem pagou o CMP-00124.\nCMP-00124 · cupom NFC-e · AutoZone · 03/10 · R$ 50,98\n" +
+      "Esta compra de 03/10 ainda não apareceu em nenhuma conta da empresa. Quem pagou?\n" +
+      OPCOES_QUEM.map((o) => `${o.n} ${o.rotulo}`).join("\n"),
+  );
+
+  const cartao = bancoDoComando(() => ({ resultado: "cartao", cmp: { ...CMP_NO_BANCO, banco: { estado: "banco_quem" } }, efeitos: [{ tipo: "aguardar_banco", regra: "debito", nivel: "cinza" }] }), {
+    comprovante_banco_proxima: () => ({ ...pergunta, retomada: false }),
+  });
+  const dc = depsF2(cartao);
+  await responder(CORPO_RESPONDER("cmp 124"), dc.deps);
+  assertStringIncludes(dc.enviosAoDono()[0].message, "No extrato: falta saber quem pagou (não apareceu em conta da empresa: *cmp 124* para responder).");
+  assertEquals(rpcs(cartao, "comprovante_banco_proxima")[0].args, { p_phone: DONO.phone, p_motivo: "cmp", p_cmp: CMP_ID });
+  assertStringIncludes(dc.enviosAoDono()[1].message, "Quem pagou?\n1 A empresa");
 });
 
 Deno.test("F3 responder: número no verde vira 'ok' (nunca liga); azul: '2' escolhe, '0' e 'nenhuma destas' recusam", async () => {
@@ -2201,15 +2428,15 @@ Deno.test("F3 responder: mensagem curta não entendida com a pergunta do extrato
 Deno.test("F3 cmp N: CMP gravado com a pergunta do extrato pendente → o cartão e, em seguida, a pergunta (R3 'cmp')", async () => {
   const pendente = { ...CMP_NO_BANCO, banco: { ...CMP_NO_BANCO.banco, estado: "perguntar" } };
   const banco = bancoDoComando(() => ({
-    resultado: "cartao", cmp: pendente, efeitos: [{ tipo: "despesa_os", billable: false }, { tipo: "aguardar_banco", regra: "debito", nivel: "cinza" }],
+    resultado: "cartao", cmp: pendente, efeitos: [{ tipo: "despesa_os" }, { tipo: "aguardar_banco", regra: "debito", nivel: "cinza" }],
   }), { comprovante_banco_proxima: () => ({ perguntou: true, ...perguntaDoExtrato("verde") }) });
   const d = depsF2(banco);
   await responder(CORPO_RESPONDER("cmp 124"), d.deps);
   const [cartao, pergunta] = d.enviosAoDono();
   assertEquals(
     cartao.message,
-    "CMP-00124 (esperando o banco): R$ 50,98 em 08/10 · AutoZone · OS-00112 Brisa · custo da HBR (não entra no total) · Peças e materiais. " +
-      "Feito: lancei a despesa na OS-00112 como custo da HBR; quando o débito aparecer no extrato, pergunto se é este. " +
+    "CMP-00124 (esperando o banco): R$ 50,98 em 08/10 · AutoZone · OS-00112 Brisa · despesa da OS (custo interno: não aparece para o cliente) · Peças e materiais. " +
+      "Feito: lancei a despesa na OS-00112 como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS); quando o débito aparecer no extrato, pergunto se é este. " +
       "No extrato: pergunta pendente (*cmp 124* para responder). Para cancelar: *cancelar cmp 124 motivo*.",
   );
   assertEquals(rpcs(banco, "comprovante_banco_proxima")[0].args, { p_phone: DONO.phone, p_motivo: "cmp", p_cmp: CMP_ID });
@@ -2221,7 +2448,12 @@ Deno.test("F3 cmp N: CMP gravado com a pergunta do extrato pendente → o cartã
   const dl = depsF2(ligado);
   await responder(CORPO_RESPONDER("cmp 124"), dl.deps);
   assertEquals(dl.enviosAoDono().length, 1);
-  assertStringIncludes(dl.enviosAoDono()[0].message, "Feito: liguei à linha do banco de 08/10 e a classifiquei (falta aprovar no Extrato). No extrato: ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98).");
+  assertStringIncludes(dl.enviosAoDono()[0].message, "Feito: liguei à linha do banco de 08/10 e a classifiquei como Peças e materiais, OS-00112 (lanço no Extrato na próxima rodada). No extrato: ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98).");
+  // a linha que o sim aprovou (R12 gravou `aprovado` no efeito): o cartão diz que lançou
+  const aprovada = bancoDoComando(() => ({ resultado: "cartao", cmp: LIGADO, efeitos: [{ ...LIGACAO, aprovado: { payable_id: "pay-1", proposta_id: "q-1" } }] }));
+  const dap = depsF2(aprovada);
+  await responder(CORPO_RESPONDER("cmp 124"), dap.deps);
+  assertStringIncludes(dap.enviosAoDono()[0].message, "Feito: liguei à linha do banco de 08/10 e lancei no Extrato como Peças e materiais, OS-00112.");
   assertEquals(rpcs(ligado, "comprovante_banco_proxima").length, 0);
 });
 
@@ -2254,7 +2486,7 @@ Deno.test("F3 vigia: a fila da F2 primeiro, depois a pergunta do extrato (R6 + R
   const doExtrato = d.enviosAoDono().find((m) => m.dedupe_key === `cmp:p:${P_EXTRATO}`);
   assert(doExtrato, "a pergunta do extrato saiu");
   assert(doExtrato.message.startsWith("Ainda falta ligar o CMP-00124 ao extrato.\nCMP-00124 · cupom NFC-e · AutoZone · 08/10 · R$ 50,98\n"));
-  assertStringIncludes(doExtrato.message, "É deste comprovante? Se for, ligo e classifico a linha como Peças e materiais, OS-00112 Brisa (falta aprovar no Extrato).");
+  assertStringIncludes(doExtrato.message, "É deste comprovante? Se for, ligo e lanço a linha no Extrato como Peças e materiais, OS-00112 Brisa (aprovada no seu sim).");
   // o índice PESSOAL: na pasta PESSOAL do mês, com nome próprio, e o registro pela R8
   const caminho = "/MANAGEMENT/FINANCIALS/COMPROVANTES/PESSOAL/2026-10/_INDICE PESSOAL 2026-10.csv";
   assertEquals(d.dbx!.r.substituidos[0].caminho, caminho);

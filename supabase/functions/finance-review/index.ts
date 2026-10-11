@@ -45,7 +45,8 @@ import {
 import { lerRespostaDaReceita } from "../_shared/banking/cnae.ts";
 import { PISO_DA_CONFIANCA, selecionarParaLancarSozinho, type LinhaCandidata } from "./lancar-sozinho.ts";
 import {
-  foraDasReservadas, linhasDeComprovante, mensagemDosComprovantes, reavaliarComprovantes, recusaDaLinhaDoCmp, reservadasDaRodada,
+  aprovarOsDaVarredura, type AprovarUma, foraDasReservadas, linhasDeComprovante, mensagemDosComprovantes, reavaliarComprovantes,
+  recusaDaLinhaDoCmp, reservadasDaRodada, responderApproveCmp,
 } from "./comprovantes.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
@@ -93,9 +94,13 @@ const JANELA_DIAS = 90;
 const LOTE_HISTORICO = 200;
 
 interface Body {
-  action?: "generate" | "approve" | "reject" | "suggest_rules" | "reclassify" | "classify_ai" | "undismiss" | "vigiar" | "consult_document";
+  action?:
+    | "generate" | "approve" | "reject" | "suggest_rules" | "reclassify" | "classify_ai" | "undismiss" | "vigiar" | "consult_document"
+    | "approve_cmp";
   /** consult_document: CNPJ (ou CPF) a consultar. */
   documento?: string;
+  /** approve_cmp (só interna): o comprovante cujo sim aprova a linha no Extrato. */
+  cmp_id?: string;
   /** generate: inclui o histórico inteiro, não só a janela. */
   incluir_historico?: boolean;
   ids?: string[];
@@ -187,6 +192,13 @@ servirComCors(async (req) => {
     if (action === "reject") return await recusar(admin, body.ids ?? [], userId, body.note ?? null);
     if (action === "suggest_rules") return await proporRegras(admin);
     if (action === "consult_document") return await consultarDocumento(admin, String(body.documento ?? ""), userId);
+    // Ajustes do dono (11/10/2026): o sim no WhatsApp aprova a linha que o comprovante ligou. Só a
+    // chamada interna do comprovantes-whatsapp (segredo + o dono em acting_user_id); com o JWT de um
+    // usuário, 401 — pela tela a aprovação é a de sempre.
+    if (action === "approve_cmp") {
+      const r = await responderApproveCmp(admin, { isCron, actingUserId: body.acting_user_id, cmpId: body.cmp_id }, aprovarUmaProposta(admin));
+      return jr(r.corpo, r.status);
+    }
     return jr({ error: "acao_desconhecida" }, 400);
   } catch (e) {
     console.error("[finance-review] erro:", e);
@@ -777,6 +789,13 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   // sozinho" não a toca — quem decide é o dono, no Extrato ou no WhatsApp. Erro = como antes da F3.
   const cmp = await reavaliarComprovantes(admin);
   const reservadas = await reservadasDaRodada(admin, cmp, linhas.map((l) => String(l.bank_transaction_id)));
+  // Ajustes do dono (11/10/2026): a linha que o sim do dono autorizou é aprovada aqui quando a
+  // proposta só apareceu agora (cartão que saiu de PENDING, rodada que não tinha passado) ou quando
+  // a aprovação no sim falhou — uma por vez, pelo mesmo aprovar, ANTES do "lançar sozinho".
+  let aprovadasDoSim = 0;
+  if (cmp.aprovar.length > 0) {
+    aprovadasDoSim = (await aprovarOsDaVarredura(admin, cmp.aprovar, aprovarUmaProposta(admin))).aprovadas;
+  }
   if (anotadas > 0 || cmp.classificadas > 0) {
     try {
       const { data: aplicadas } = await admin.from("anotacoes_do_extrato").select("bank_transaction_id")
@@ -858,7 +877,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     criadas > 0 ? `${criadas - lancadasSozinhas} proposta(s) para revisar` : "Nada novo para propor",
     completadas > 0 ? `${completadas} já na fila ganharam identificação` : "",
     anotadas > 0 ? `${anotadas} classificada(s) pelas suas anotações` : "",
-    mensagemDosComprovantes(cmp.ligados),
+    mensagemDosComprovantes(cmp.ligados, aprovadasDoSim),
     lancadasSozinhas > 0 ? `${lancadasSozinhas} lançada(s) sozinha(s) — veja em "Lançados sozinhos"` : "",
     pares.length ? `${pares.length} transferência(s) entre contas` : "",
     parcelasDeCompraJaLancada > 0 ? `${parcelasDeCompraJaLancada} parcela(s) de compra já lançada saíram da fila` : "",
@@ -874,6 +893,7 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     elegiveis_lote: linhas.filter((l) => Number(l.suggested_amount) < limiteLote).length,
     limite_lote: limiteLote,
     comprovantes_ligados: cmp.ligados,
+    comprovantes_aprovados: aprovadasDoSim,
     // Quantas transações antigas sobraram para a próxima chamada. Zero = mutirão terminado.
     restantes,
     message: partes.join(" · "),
@@ -1762,6 +1782,34 @@ async function osDaAnotacao(admin: DbClient, p: any): Promise<string | undefined
     .eq("status", "aplicada")
     .maybeSingle();
   return (data as any)?.os_id ?? undefined;
+}
+
+/**
+ * Ajustes do dono (11/10/2026): aprovar UMA proposta pelo mesmo caminho da tela, com o dono como
+ * quem decidiu (o sim dele no WhatsApp), e devolver o lançamento criado. Proposta já aprovada (a
+ * tela ou outra rodada chegou antes) devolve o lançamento dela — o registro no CMP é idempotente.
+ * A falha volta como texto do `aprovar` sem o título da proposta (o log de quem chama leva só código).
+ */
+function aprovarUmaProposta(admin: DbClient): AprovarUma {
+  return async (propostaId, autor) => {
+    const ler = () => admin.from("finance_review_queue").select("title, status, created_payable_id").eq("id", propostaId).maybeSingle();
+    const { data: antes, error: eAntes } = await ler();
+    if (eAntes) return { ok: false, motivo: "sem_resposta" };
+    if (!antes) return { ok: false, motivo: "proposta_mudou" };
+    if ((antes as any).status === "approved" && (antes as any).created_payable_id) {
+      return { ok: true, payable_id: String((antes as any).created_payable_id) };
+    }
+    if ((antes as any).status !== "pending") return { ok: false, motivo: "proposta_mudou" };
+    const corpo = await (await aprovar(admin, [propostaId], autor, {})).json().catch(() => ({}));
+    if (Number(corpo?.aprovadas ?? 0) !== 1) {
+      const titulo = String((antes as any).title ?? "");
+      const falha = String(corpo?.falhas?.[0] ?? corpo?.error ?? "nao_aprovada");
+      return { ok: false, motivo: (titulo && falha.startsWith(`${titulo}: `) ? falha.slice(titulo.length + 2) : falha).slice(0, 200) };
+    }
+    const { data: depois } = await ler();
+    const payable = (depois as any)?.created_payable_id;
+    return payable ? { ok: true, payable_id: String(payable) } : { ok: false, motivo: "nao_aprovada" };
+  };
 }
 
 /**
