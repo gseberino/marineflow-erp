@@ -386,7 +386,7 @@ function ProfitabilityTab() {
               <Button size="sm" variant="outline" className="gap-2 h-7 text-xs"
                 onClick={() => exportCSV('lucratividade.csv', data.rows.map((r: any) => ({
                   OS: r.number, Cliente: r.client, Faturamento: r.revenue,
-                  'Custo Total': r.cost, 'Lucro Líquido': r.profit, 'Margem %': r.margin,
+                  'Custo Total': r.cost, 'Custo HBR': r.hbr, 'Lucro Líquido': r.profit, 'Margem %': r.margin,
                 })))}
               >
                 <Download className="h-3 w-3" /> Exportar CSV
@@ -398,13 +398,14 @@ function ProfitabilityTab() {
                   <TableHead>OS / Cliente</TableHead>
                   <TableHead className="text-right">Faturamento</TableHead>
                   <TableHead className="text-right hidden sm:table-cell">Custo Total</TableHead>
+                  <TableHead className="text-right hidden md:table-cell" title="Despesa da OS que a HBR pagou e não cobra do cliente (já somada no custo total)">Custo HBR</TableHead>
                   <TableHead className="text-right">Lucro Líquido</TableHead>
                   <TableHead className="text-right">Margem</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.rows.length === 0 ? (
-                  <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">Sem dados no período</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Sem dados no período</TableCell></TableRow>
                 ) : data.rows.map((r, i) => (
                   <TableRow key={r.id}>
                     <TableCell>
@@ -413,6 +414,7 @@ function ProfitabilityTab() {
                     </TableCell>
                     <TableCell className="text-right font-mono">{formatCurrency(r.revenue)}</TableCell>
                     <TableCell className="text-right font-mono text-destructive hidden sm:table-cell">{formatCurrency(r.cost)}</TableCell>
+                    <TableCell className="text-right font-mono text-muted-foreground hidden md:table-cell">{formatCurrency(r.hbr)}</TableCell>
                     <TableCell className="text-right font-mono font-bold text-emerald-600">{formatCurrency(r.profit)}</TableCell>
                     <TableCell className="text-right font-mono">
                       <Badge variant="outline" className={(r.margin || 0) > 30 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}>

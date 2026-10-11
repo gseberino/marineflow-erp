@@ -71,17 +71,21 @@ export const reportTools: ToolDef[] = [
       // Lê a MESMA view da tela "Lucro por OS" (vw_os_profitability): o assistente e a tela não
       // podem dizer margens diferentes. Até 29/09/2026 esta tool somava por conta própria, sem
       // mão de obra e com o preço de VENDA das peças no lugar do custo (parts_cost_total).
-      const { data: v, error } = await ctx.admin
-        .from("vw_os_profitability")
-        .select("service_order_number, revenue, parts_cost, travel_cost, operational_cost, commission_cost, labor_cost_real, labor_days, labor_sold, hours_sold, net_profit, net_margin_percent")
-        .eq("os_id", args.service_order_id)
-        .maybeSingle();
+      // hbr_cost (11/10/2026, Lucro por OS com o custo da HBR): a despesa não cobrada do cliente já
+      // sai do net_profit; o custo tem de somá-la, senão custo + lucro deixa de fechar com a receita.
+      // A coluna nasce com a migration dela: antes, a leitura volta 42703 e vale a lista antiga.
+      const colunas = "service_order_number, revenue, parts_cost, travel_cost, operational_cost, commission_cost, labor_cost_real, labor_days, labor_sold, hours_sold, net_profit, net_margin_percent";
+      const ler = (sel: string) => ctx.admin.from("vw_os_profitability").select(sel).eq("os_id", args.service_order_id).maybeSingle();
+      let { data: v, error } = await ler(`${colunas}, hbr_cost`);
+      if (error && String(error.code) === "42703") ({ data: v, error } = await ler(colunas));
       if (error) throw error;
       if (!v) return { error: "OS não encontrada." };
       const n = (x: unknown) => Math.round((Number(x) || 0) * 100) / 100;
       const custos = {
         pecas: n(v.parts_cost), deslocamento: n(v.travel_cost), despesas: n(v.operational_cost),
         comissoes: n(v.commission_cost), mao_de_obra_diarias: n(v.labor_cost_real),
+        // o que a HBR pagou e não cobra do cliente (despesa não faturável da OS)
+        custo_hbr: n(v.hbr_cost),
       };
       const gestor = ctx.userRole === "admin" || ctx.userRole === "financial";
       return {

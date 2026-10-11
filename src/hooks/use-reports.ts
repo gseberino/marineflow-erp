@@ -300,10 +300,12 @@ export function useProfitabilityReport(periodDays: number = 30) {
         client: o.client_name,
         revenue: Number(o.revenue || 0),
         // Desde 29/09/2026 o lucro da view desconta a mão de obra real das diárias; o custo tem de
-        // somar a mesma parcela, senão custo + lucro deixa de fechar com o faturamento.
+        // somar a mesma parcela, senão custo + lucro deixa de fechar com o faturamento. Desde
+        // 11/10/2026 também o custo da HBR (hbr_cost: despesa da OS não cobrada do cliente).
         cost: Number(o.parts_cost || 0) + Number(o.travel_cost || 0) + Number(o.operational_cost || 0) + Number(o.commission_cost || 0)
-          + Number(o.labor_cost_real || 0),
+          + Number(o.labor_cost_real || 0) + Number(o.hbr_cost || 0),
         labor: Number(o.labor_cost_real || 0),
+        hbr: Number(o.hbr_cost || 0),
         profit: Number(o.net_profit || 0),
         margin: Number(o.net_margin_percent || 0),
         status: o.status,

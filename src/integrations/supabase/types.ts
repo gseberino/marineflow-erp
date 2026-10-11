@@ -13430,6 +13430,7 @@ export type Database = {
           created_at: string | null
           finished_at: string | null
           gross_profit: number | null
+          hbr_cost: number | null
           hours_sold: number | null
           labor_cost_real: number | null
           labor_days: number | null

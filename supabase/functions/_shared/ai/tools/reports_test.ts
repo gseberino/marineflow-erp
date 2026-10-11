@@ -9,18 +9,30 @@ import { reportTools } from "./reports.ts";
 const linha = {
   service_order_number: "OS-00075", revenue: 1000, parts_cost: 200, travel_cost: 50, operational_cost: 30,
   commission_cost: 20, labor_cost_real: 170, labor_days: 1, labor_sold: 600, hours_sold: 4, net_profit: 530, net_margin_percent: 53,
+  hbr_cost: 0,
 };
 
-function ctx(cargo: string, row: Record<string, unknown> | null = linha) {
+function ctx(cargo: string, row: Record<string, unknown> | null = linha, opcoes: { semHbrCost?: boolean } = {}) {
   const lidas: string[] = [];
+  const selects: string[] = [];
   const admin = {
     from(tabela: string) {
       lidas.push(tabela);
-      const q: any = { select() { return q; }, eq() { return q; }, maybeSingle: () => Promise.resolve({ data: row, error: null }) };
+      let sel = "";
+      const q: any = {
+        select(s: string) { sel = s; selects.push(s); return q; },
+        eq() { return q; },
+        // antes da migration do Lucro por OS com custo da HBR, a coluna não existe (42703)
+        maybeSingle: () => Promise.resolve(
+          opcoes.semHbrCost && sel.includes("hbr_cost")
+            ? { data: null, error: { code: "42703", message: "column vw_os_profitability.hbr_cost does not exist" } }
+            : { data: row, error: null },
+        ),
+      };
       return q;
     },
   };
-  return { c: { admin, sb: admin, userId: "u", userRole: cargo as any, jwt: "", appOrigin: "", settings: {} }, lidas };
+  return { c: { admin, sb: admin, userId: "u", userRole: cargo as any, jwt: "", appOrigin: "", settings: {} }, lidas, selects };
 }
 const tool = reportTools.find((t) => t.name === "get_os_profitability")!;
 
@@ -51,4 +63,23 @@ Deno.test("técnico não vê lucratividade; OS inexistente vira erro, não zero"
   assertEquals(typeof tec.error, "string");
   const nada = await tool.execute({ service_order_id: "x" }, ctx("admin", null).c as never) as { error?: string };
   assertEquals(nada.error, "OS não encontrada.");
+});
+
+// Lucro por OS com o custo da HBR (11/10/2026): a despesa não cobrada do cliente sai do lucro na view;
+// o custo do assistente tem de somá-la (custo_hbr), senão custo + lucro deixa de fechar com a receita.
+Deno.test("custo da HBR entra no custo e fecha com o lucro; antes da migration, lê sem a coluna", async () => {
+  const comHbr = { ...linha, hbr_cost: 40, net_profit: 490, net_margin_percent: 49 };
+  const { c, selects } = ctx("admin", comHbr);
+  const r = await tool.execute({ service_order_id: "os75" }, c as never) as Record<string, any>;
+  assertEquals(selects.length, 1);
+  assertStringIncludes(selects[0], "hbr_cost");
+  assertEquals(r.custos.custo_hbr, 40);
+  assertEquals(r.custo_total, 510);
+  assertEquals(r.receita - r.custo_total, r.lucro);
+  const antes = ctx("admin", linha, { semHbrCost: true });
+  const r2 = await tool.execute({ service_order_id: "os75" }, antes.c as never) as Record<string, any>;
+  assertEquals(antes.selects.length, 2);
+  assertEquals(antes.selects[1].includes("hbr_cost"), false);
+  assertEquals(r2.custos.custo_hbr, 0);
+  assertEquals(r2.custo_total, 470);
 });
