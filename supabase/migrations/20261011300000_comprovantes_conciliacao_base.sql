@@ -7,10 +7,12 @@
 -- 20261011302000; esta migration só prepara o terreno:
 --   * colunas novas em comprovantes: a regra de busca, a última avaliação (candidatas, hash, quando),
 --     a pergunta da F3 (perguntar, tentativas, última), as linhas que o dono recusou, quando a linha
---     foi explicada e quando a NF-e esperada chegou por e-mail;
+--     foi explicada, quando a NF-e esperada chegou por e-mail e quando o dono disse que a EMPRESA pagou
+--     a compra que ainda não apareceu no extrato (regra E, ajustes do dono de 11/10/2026);
 --   * o CHECK comprovantes_situacao_gravada passa a cobrir aguardando_banco, conciliado e abandonado;
 --   * o CHECK comprovantes_pendencias_chk ganha "conferir_estorno" (a linha ligada foi estornada no
---     banco: o dono decide o que fazer com a despesa da OS);
+--     banco: o dono decide o que fazer com a despesa da OS) e "conferir_quem_pagou" (regra E: o dono
+--     disse que não foi a empresa e a compra apareceu numa conta da empresa);
 --   * bank_transactions.nome_pelo_comprovante: a loja do CMP para a linha sem nome (o débito do C6
 --     chega como "DEBITO DE CARTAO", sem loja nem documento) — o Extrato mostra. Fora da lista
 --     PREENCHIVEIS do banking-sync: o Pluggy nunca a sobrescreve;
@@ -26,7 +28,6 @@
 -- ---------------------------------------------------------------------------------------------
 alter table public.comprovantes
   add column if not exists banco_regra               text,
-  add column if not exists banco_so_registro         boolean not null default false,
   add column if not exists banco_candidatos          jsonb not null default '[]'::jsonb,
   add column if not exists banco_avaliado_em         timestamptz,
   add column if not exists banco_hash                text,
@@ -35,10 +36,10 @@ alter table public.comprovantes
   add column if not exists banco_ultima_pergunta_em  timestamptz,
   add column if not exists banco_recusados           uuid[] not null default '{}',
   add column if not exists linha_explicada_em        timestamptz,
-  add column if not exists nota_no_email_em          timestamptz;
+  add column if not exists nota_no_email_em          timestamptz,
+  add column if not exists banco_quem_em             timestamptz;
 
 comment on column public.comprovantes.banco_regra is 'F3: como o CMP procura a linha do extrato (pix, boleto, debito, credito). Nulo = não procura (dinheiro, NF-e, sócio, técnico, cliente...).';
-comment on column public.comprovantes.banco_so_registro is 'F3: PESSOAL pago por forma bancária/crédito: os candidatos só ficam registrados (nunca pergunta, nunca liga, nunca reserva a linha) até o dono decidir (pendência 11.1).';
 comment on column public.comprovantes.banco_candidatos is 'F3: as candidatas da última avaliação (até 3, forma Candidata da spec 3.7).';
 comment on column public.comprovantes.banco_avaliado_em is 'F3: quando as candidatas foram calculadas pela última vez.';
 comment on column public.comprovantes.banco_hash is 'F3: md5 da lista mostrada (ids, ações e "há mais"): mudou = a pergunta aberta é refeita.';
@@ -48,6 +49,7 @@ comment on column public.comprovantes.banco_ultima_pergunta_em is 'F3: quando a 
 comment on column public.comprovantes.banco_recusados is 'F3: as linhas do extrato que o dono disse que NÃO são deste CMP (nunca voltam como candidatas).';
 comment on column public.comprovantes.linha_explicada_em is 'F3: quando a linha ligada foi explicada (proposta classificada, lançamento anexado ou conta baixada). Nulo com a linha ligada = a varredura tenta de novo.';
 comment on column public.comprovantes.nota_no_email_em is 'F3: a NF-e que o CMP espera (aguardando_xml) chegou anexada a um e-mail mas ainda não foi importada.';
+comment on column public.comprovantes.banco_quem_em is 'F3 (regra E, ajustes do dono de 11/10/2026): quando o dono respondeu "quem pagou?" (a compra não apareceu em nenhuma conta da empresa em 5 dias). "A empresa" = continua esperando o extrato (até o abandono) e não pergunta de novo; outro pagador = o CMP foi regravado sem procurar linha, e a varredura vigia se a compra aparece numa conta da empresa (pendência conferir_quem_pagou).';
 comment on column public.comprovantes.bank_transaction_id is 'F3: a linha do extrato ligada a este CMP (uma linha, um CMP não cancelado: comprovantes_uma_linha).';
 comment on column public.comprovantes.conciliacao is 'F3: o nível da última avaliação (verde, azul, cinza) ou o da ligação.';
 comment on column public.comprovantes.conciliado_em is 'F3: quando o CMP foi ligado à linha do extrato.';
@@ -66,11 +68,12 @@ begin
     alter table public.comprovantes drop constraint comprovantes_situacao_gravada;
   end if;
   -- a lista fechada de pendências ganha "conferir_estorno" (a linha ligada foi estornada no banco: o
-  -- dono decide o que fazer com a despesa da OS). Lista fechada: pendência nova sem o CHECK novo
-  -- derrubaria a varredura inteira do CMP.
+  -- dono decide o que fazer com a despesa da OS) e "conferir_quem_pagou" (regra E: depois de o dono
+  -- dizer que não foi a empresa, a compra apareceu numa conta da empresa). Lista fechada: pendência
+  -- nova sem o CHECK novo derrubaria a varredura inteira do CMP.
   if exists (select 1 from pg_constraint
               where conrelid = 'public.comprovantes'::regclass and conname = 'comprovantes_pendencias_chk'
-                and pg_get_constraintdef(oid) not like '%conferir_estorno%') then
+                and pg_get_constraintdef(oid) not like '%conferir_quem_pagou%') then
     alter table public.comprovantes drop constraint comprovantes_pendencias_chk;
   end if;
 
@@ -78,8 +81,8 @@ begin
     select * from (values
       ('comprovantes_situacao_gravada',
        $c$situacao not in ('gravado', 'aguardando_xml', 'aguardando_banco', 'conciliado', 'abandonado') or gravado_em is not null$c$),
-      ('comprovantes_pendencias_chk', $c$pendencias <@ array['dar_entrada', 'incluir_na_os', 'cobrar_a_parte', 'acerto_tecnico',
-         'classificar_no_extrato', 'ajustar_recebiveis', 'dar_baixa', 'conferir_estorno']::text[]$c$),
+      ('comprovantes_pendencias_chk', $c$pendencias <@ array['dar_entrada', 'incluir_na_os', 'acerto_tecnico',
+         'classificar_no_extrato', 'dar_baixa', 'conferir_estorno', 'conferir_quem_pagou']::text[]$c$),
       ('comprovantes_banco_regra_chk', $c$banco_regra is null or banco_regra in ('pix', 'boleto', 'debito', 'credito')$c$),
       ('comprovantes_banco_candidatos_chk',
        $c$jsonb_typeof(banco_candidatos) = 'array' and octet_length(banco_candidatos::text) <= 8192$c$),
@@ -133,9 +136,9 @@ declare
   v_col text;
 begin
   -- as colunas novas de comprovantes seguem a tabela: anon nada, authenticated só lê (policy do admin)
-  foreach v_col in array array['banco_regra', 'banco_so_registro', 'banco_candidatos', 'banco_avaliado_em', 'banco_hash',
+  foreach v_col in array array['banco_regra', 'banco_candidatos', 'banco_avaliado_em', 'banco_hash',
                                'banco_perguntar', 'banco_perguntas', 'banco_ultima_pergunta_em', 'banco_recusados',
-                               'linha_explicada_em', 'nota_no_email_em'] loop
+                               'linha_explicada_em', 'nota_no_email_em', 'banco_quem_em'] loop
     if not exists (select 1 from information_schema.columns
                     where table_schema = 'public' and table_name = 'comprovantes' and column_name = v_col) then
       raise exception 'coluna comprovantes.% não foi criada', v_col;
@@ -180,8 +183,9 @@ begin
   end if;
   if not exists (select 1 from pg_constraint
                   where conrelid = 'public.comprovantes'::regclass and conname = 'comprovantes_pendencias_chk'
-                    and pg_get_constraintdef(oid) like '%conferir_estorno%' and pg_get_constraintdef(oid) like '%acerto_tecnico%') then
-    raise exception 'CHECK comprovantes_pendencias_chk sem a pendência conferir_estorno da F3';
+                    and pg_get_constraintdef(oid) like '%conferir_estorno%' and pg_get_constraintdef(oid) like '%conferir_quem_pagou%'
+                    and pg_get_constraintdef(oid) like '%acerto_tecnico%') then
+    raise exception 'CHECK comprovantes_pendencias_chk sem as pendências conferir_estorno e conferir_quem_pagou da F3';
   end if;
 end $$;
 

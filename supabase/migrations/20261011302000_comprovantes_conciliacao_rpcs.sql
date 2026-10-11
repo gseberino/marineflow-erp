@@ -14,10 +14,14 @@
 -- o dono aprova a linha no Extrato, a varredura só ADOTA o lançamento dele (nunca corrige categoria
 -- nem OS sem SIM).
 --
--- LIGAR NÃO APROVA: ligar classifica a proposta da fila do Extrato pela rota da anotação que já existe
--- (_aplicar_anotacao: fornecedor, categoria, OS, confiança 99), anexa ao lançamento que já existe
--- (corrigindo categoria/OS) ou dá baixa na conta a pagar que o CMP anexou (conciliar_lancamento, só no
--- SIM). A aprovação continua sendo do dono no Extrato.
+-- Ligar classifica a proposta da fila do Extrato pela rota da anotação que já existe (_aplicar_anotacao:
+-- fornecedor, categoria, OS, confiança 99), anexa ao lançamento que já existe (preenchendo só o que está
+-- vazio: OS, categoria — resposta 8 do dono) ou dá baixa na conta a pagar que o CMP anexou
+-- (conciliar_lancamento, só no SIM). Ajustes do dono (11/10/2026): o SIM JÁ APROVA a linha no Extrato —
+-- a ligação autorizada por ele que termina em proposta classificada é aprovada pelo mesmo caminho da tela
+-- (finance-review "aprovar"; R11 diz qual proposta, R12 registra o lançamento); a compra que não aparece
+-- em nenhuma conta da empresa em 5 dias pergunta "quem pagou?" (regra E, passo banco_quem); o PESSOAL só
+-- procura linha quando a conta/cartão da empresa pagou (o "só registro" deixou de existir).
 --
 --   R1 comprovantes_reavaliar_banco(origem, autor)     a varredura (o finance-review chama logo depois
 --                                                       de aplicar_anotacoes_pendentes)
@@ -28,6 +32,8 @@
 --   R6 comprovantes_vigia_banco(limite)                telefones em que o vigia pode perguntar agora
 --   R10 comprovante_banco_ceder(phone)                 o comprovante NOVO do dono passa na frente da
 --                                                       pergunta do extrato aberta (ela fecha e volta depois)
+--   R11 comprovante_a_aprovar(cmp)                     a proposta que o SIM do dono aprova (ou nulo)
+--   R12 comprovante_aprovado(cmp, proposta, payable)   o lançamento que a aprovação do SIM criou
 --   extrato_da_conta (redefinida, MESMA casca: sql, invoker, search_path public, grants de hoje): a
 --   contraparte da linha sem nome passa a ser a loja do CMP (bank_transactions.nome_pelo_comprovante).
 --
@@ -36,7 +42,9 @@
 -- _comprovante_candidatos, _comprovante_recusar, _comprovante_indice_pendente,
 -- _comprovante_efeitos_com_ligacao, _comprovante_linha_explicar, _comprovante_ligar,
 -- _comprovante_desligar, _comprovantes_banco_varrer, _comprovante_banco_pode,
--- _comprovante_banco_resumo, _comprovante_banco_pergunta, _comprovante_banco_abrir.
+-- _comprovante_banco_resumo, _comprovante_banco_pergunta, _comprovante_banco_abrir,
+-- _comprovante_aparece_em_alguma_conta, _comprovante_quem_pode, _comprovante_opcoes_quem_pagou,
+-- _comprovante_a_aprovar, _comprovante_banco_saida.
 --
 -- Todas security definer, search_path vazio. Nenhuma devolve leitura, leitura_texto, wa_key nem CPF.
 -- Toda rota que grava financeiro recebe o autor: as que o edge chama com o dono recebem p_autor e
@@ -47,10 +55,11 @@
 -- 1. Quem procura linha e como
 -- ---------------------------------------------------------------------------------------------
 
--- {"regra","so_registro"} ou nulo. Procura só o CMP com valor e data confirmados, que não é "a mesma
--- compra" de outro (o principal é que procura), que não é NF-e (a conta é a da nota), pago pela
--- EMPRESA (padrão do dono: Pix, débito e crédito assumem a empresa; o resumo mostra), com forma
--- bancária ou crédito. PESSOAL com forma bancária/crédito: só registra (pendência do dono 11.1).
+-- {"regra"} ou nulo. Procura só o CMP com valor e data confirmados, que não é "a mesma compra" de outro
+-- (o principal é que procura), que não é NF-e (a conta é a da nota), pago pela EMPRESA (padrão do dono:
+-- Pix, débito e crédito assumem a empresa; o resumo mostra), com forma bancária ou crédito. PESSOAL só
+-- quando a conta ou o cartão da empresa pagou (resposta 1 do dono, 11/10/2026: vira gasto pessoal do
+-- sócio e a linha é dele como a de qualquer compra); o PESSOAL do bolso não procura (só o arquivo).
 create or replace function public._comprovante_banco_regra(c public.comprovantes)
 returns jsonb
 language plpgsql
@@ -59,26 +68,18 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_forma text;
   v_regra text;
 begin
   if c.id is null or c.valor_confirmado is null or c.data_confirmada is null or c.mesma_compra_de is not null
      or public._comprovante_e_nfe(c) then
     return null;
   end if;
-  v_forma := case when c.destino = 'pessoal' then coalesce(c.forma_confirmada, c.forma_pagamento) else c.forma_confirmada end;
-  v_regra := case v_forma when 'pix' then 'pix' when 'transferencia' then 'pix' when 'boleto' then 'boleto'
-                          when 'debito' then 'debito' when 'credito' then 'credito' end;
-  if v_regra is null then
+  v_regra := case c.forma_confirmada when 'pix' then 'pix' when 'transferencia' then 'pix' when 'boleto' then 'boleto'
+                                     when 'debito' then 'debito' when 'credito' then 'credito' end;
+  if v_regra is null or c.destino is null or public._comprovante_efetivo(c)->>'quem' is distinct from 'empresa' then
     return null;
   end if;
-  if c.destino = 'pessoal' then
-    return jsonb_build_object('regra', v_regra, 'so_registro', true);
-  end if;
-  if c.destino is null or public._comprovante_efetivo(c)->>'quem' is distinct from 'empresa' then
-    return null;
-  end if;
-  return jsonb_build_object('regra', v_regra, 'so_registro', false);
+  return jsonb_build_object('regra', v_regra);
 end $$;
 
 -- Os nomes comparáveis do CMP: cadastro (nome e fantasia) + Receita (fantasia, razão e o nome gravado
@@ -144,7 +145,9 @@ as $$
            'cartao', t.source_type = 'credit_card',
            'parcela', case when t.installment_label ~ '^[0-9]+/[0-9]+$' and t.installment_label <> '1/1' then t.installment_label end,
            'pendente', coalesce(t.tx_status, '') = 'PENDING',
-           'lancamento', (select jsonb_build_object('categoria', p.expense_category, 'descricao', left(p.description, 60))
+           'lancamento', (select jsonb_build_object('categoria', p.expense_category, 'descricao', left(p.description, 60),
+                                                    'os_numero', (select so.service_order_number from public.service_orders so
+                                                                   where so.id = p.linked_service_order_id))
                             from public.payables p
                            where p.bank_transaction_id = t.id and p.status <> 'cancelled'
                            order by p.divisao_id nulls first, p.created_at, p.id
@@ -318,14 +321,16 @@ begin
             or k.e2e) as bruto,
            exists (select 1 from public.comprovantes y
                     cross join lateral jsonb_array_elements(y.banco_candidatos) e
-                    where y.id <> c.id and y.situacao = 'aguardando_banco' and not y.banco_so_registro
+                    where y.id <> c.id and y.situacao = 'aguardando_banco'
                       and e->>'id' = k.id::text
                       and (coalesce((e->>'forte')::boolean, false) or coalesce(e->'motivos', '[]'::jsonb) ? 'disputada')) as disputada,
            -- a conta em aberto do CMP + a linha já lançada em outro registro: o mesmo gasto duas vezes
            (lc.lanc is not null and v_conta_aberta is not null) as conflito
       from cand k
       left join lateral (
-        select jsonb_build_object('categoria', p.expense_category, 'descricao', left(p.description, 60)) as lanc
+        select jsonb_build_object('categoria', p.expense_category, 'descricao', left(p.description, 60),
+                                  'os_numero', (select so.service_order_number from public.service_orders so
+                                                 where so.id = p.linked_service_order_id)) as lanc
           from public.payables p
          where p.bank_transaction_id = k.id and p.status <> 'cancelled'
          order by p.divisao_id nulls first, p.created_at, p.id
@@ -377,8 +382,7 @@ begin
   -- verde = UMA candidata na janela, e forte (regra do dono): com outra do mesmo valor, mesmo fraca
   -- (débito com o descritor cortado, Pix sem documento), o dono vê as duas na lista azul
   v_nivel := case when v_n = 0 then 'cinza' when v_n = 1 and v_fortes = 1 then 'verde' else 'azul' end;
-  return jsonb_build_object('regra', v_regra, 'so_registro', coalesce((v_r->>'so_registro')::boolean, false),
-                            'nivel', v_nivel, 'linhas', v_linhas, 'mais', greatest(v_n - 3, 0), 'hash', v_hash);
+  return jsonb_build_object('regra', v_regra, 'nivel', v_nivel, 'linhas', v_linhas, 'mais', greatest(v_n - 3, 0), 'hash', v_hash);
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
@@ -473,6 +477,8 @@ declare
   v_lancado_depois boolean := false;
   v_conflito jsonb;
   v_t text;
+  v_corr_r jsonb;
+  v_cat_existente text;
 begin
   select x.id, x.transaction_date, x.counterparty_name, x.merchant_name, x.description, x.nome_pelo_comprovante
     into t from public.bank_transactions x where x.id = p_tx for update;
@@ -496,21 +502,29 @@ begin
 
   if v_pay.id is not null then
     -- 1. a linha já virou lançamento
-    if v_pay.id = c.payable_id then
-      -- é o lançamento do próprio CMP (anexado na F2, ou a conta dele que ganhou a linha)
+    if v_pay.id = c.payable_id
+       or exists (select 1 from jsonb_array_elements(c.efeitos) e
+                   where e->>'tipo' = 'ligar_linha' and e->>'bank_transaction_id' = p_tx::text and not e ? 'desligado_em'
+                     and e->'aprovado'->>'payable_id' = v_pay.id::text) then
+      -- é o lançamento do próprio CMP (anexado na F2, a conta dele que ganhou a linha, ou o que o SIM do
+      -- dono aprovou: resposta 3)
       v_como := 'anexou';
       v_payable := v_pay.id;
       v_explicada := true;
     elsif v_cmp_pay.id is null or v_cmp_pay.status = 'cancelled' then
       v_payable := v_pay.id;
       if p_casar then
-        -- anexa no SIM do dono (a pergunta mostrou "uso o lançamento que já existe dela e corrijo
-        -- para …"): o lançamento recebe a categoria e a OS do CMP (só o que difere; o "antes" fica)
-        v_corr := public._comprovante_corrigir_lancamento(v_pay.id, v_cat, v_os, c.codigo, p_autor);
-        if v_corr->>'mensagem' is not null then
-          v_msgs := v_msgs || (v_corr->>'mensagem');
+        -- anexa no SIM do dono (a pergunta mostrou "uso o lançamento que já existe dela"): resposta 8 —
+        -- só preenche o que está vazio (OS, categoria; o "antes" fica); categoria diferente fica e avisa
+        v_corr_r := public._comprovante_corrigir_lancamento(v_pay.id, v_cat, v_os, c.codigo, p_autor);
+        if v_corr_r->>'mensagem' is not null then
+          v_msgs := v_msgs || (v_corr_r->>'mensagem');
         end if;
-        v_corr := coalesce(v_corr->'corrigido', '{}'::jsonb);
+        v_corr := coalesce(v_corr_r->'corrigido', '{}'::jsonb);
+        if jsonb_typeof(v_corr_r->'diferente') = 'object' then
+          v_cat_existente := v_corr_r->'diferente'->>'categoria';
+          v_aviso := 'categoria_existente_diferente';
+        end if;
         v_como := 'anexou';
       else
         -- varredura: a linha que o CMP ligou foi APROVADA pelo dono no Extrato (ou lançada por
@@ -588,10 +602,11 @@ begin
          where a.id = any (v_anots) and a.status = 'aguardando'
          order by a.criada_em limit 1;
         if v_anot is null then
+          -- PESSOAL pago pela empresa (resposta 1): o favorecido é o sócio (o pró-labore desconta)
           insert into public.anotacoes_do_extrato (sentido, valor, data_prevista, data_exata, documento, fornecedor_id,
-                                                   categoria, os_id, descricao, criada_por)
+                                                   favorecido_id, categoria, os_id, descricao, criada_por)
           values ('debit', c.valor_confirmado, c.data_confirmada, true, null, public._comprovante_fornecedor_efetivo(c, null),
-                  v_cat, v_os,
+                  case when c.destino = 'pessoal' then nullif(v_ef->>'pagador_id', '')::uuid end, v_cat, v_os,
                   left(c.codigo || ' · ' || public._comprovante_tipo_no_texto(c.tipo) || coalesce(' · ' || v_forn, ''), 200),
                   p_autor)
           returning id into v_anot;
@@ -620,7 +635,7 @@ begin
     'como', v_como, 'proposta_id', v_proposta, 'anotacao_id', v_anot, 'anotacao_criada', v_anot_criada,
     'payable_id', v_payable, 'corrigido', v_corr, 'mensagens', to_jsonb(v_msgs),
     'linha', public._comprovante_linha_curta(p_tx), 'ligou_despesa', v_ligou_despesa,
-    'lancado_depois', v_lancado_depois,
+    'lancado_depois', v_lancado_depois, 'categoria_existente', v_cat_existente,
     '_explicada', v_explicada, '_pendencia', v_pend, '_aviso', v_aviso, '_erro', v_erro, '_aplicou', v_aplicou,
     '_conflito', v_conflito);
 end $$;
@@ -669,9 +684,6 @@ begin
   end if;
   if c.bank_transaction_id is not null then
     return jsonb_build_object('ligado', false, 'motivo', case when c.bank_transaction_id = p_tx then 'ja_ligado' else 'ja_ligado_a_outra' end);
-  end if;
-  if c.banco_so_registro then
-    return jsonb_build_object('ligado', false, 'motivo', 'so_registro');
   end if;
   if c.situacao not in ('aguardando_banco', 'abandonado') then
     return jsonb_build_object('ligado', false, 'motivo', 'situacao');
@@ -732,7 +744,7 @@ begin
   -- a pergunta da F3 aberta deste CMP fecha (respondida no SIM/escolha; substituída nos outros)
   for v_w in
     select w.id from public.whatsapp_perguntas w
-     where w.referencia_id = c.id and w.status = 'aberta' and w.origem = 'comprovante' and w.passo = 'banco'
+     where w.referencia_id = c.id and w.status = 'aberta' and w.origem = 'comprovante' and w.passo in ('banco', 'banco_quem')
   loop
     perform public._pergunta_fechar(v_w, case when p_origem in ('sim', 'escolha') then 'respondida' else 'substituida' end,
                                     case when p_origem in ('sim', 'escolha') then null else 'ligado' end, null);
@@ -878,7 +890,126 @@ begin
   return v;
 end $$;
 
--- BancoNoResumo (CmpResumo.banco) ou nulo (CMP que não procura linha ou ainda não gravado)
+-- ---------------------------------------------------------------------------------------------
+-- 7b. Regra E (ajustes do dono, 11/10/2026): a compra que não apareceu em NENHUMA conta da empresa em
+--     5 dias → "quem pagou?" em vez de esperar 30 dias.
+-- ---------------------------------------------------------------------------------------------
+
+-- As linhas de saída de alguma conta da empresa (banco ou cartão, qualquer regra, até a dispensada) com o
+-- mesmo valor em D-1..D+5 (no cartão também a parcela 1/n), que não são de outro CMP nem foram recusadas
+-- pelo dono para este: onde a compra apareceu (ou pode ter aparecido).
+create or replace function public._comprovante_linhas_em_alguma_conta(c public.comprovantes)
+returns setof uuid
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select t.id from public.bank_transactions t
+   where t.transaction_type = 'debit'
+     and coalesce(t.source_type, 'bank') in ('bank', 'credit_card')
+     and t.transaction_date between c.data_confirmada - 1 and c.data_confirmada + 5
+     and (abs(t.amount - c.valor_confirmado) < 0.005
+          or (t.source_type = 'credit_card' and coalesce(t.installment_label, '') ~ '^1/([2-9]|[1-9][0-9])$'
+              and abs(t.amount * split_part(t.installment_label, '/', 2)::int - c.valor_confirmado)
+                  <= 0.01 * split_part(t.installment_label, '/', 2)::int))
+     and not (t.id = any (c.banco_recusados))
+     and not exists (select 1 from public.comprovantes y
+                      where y.bank_transaction_id = t.id and y.id <> c.id and y.situacao <> 'cancelado');
+$$;
+
+-- A compra apareceu (ou pode ter aparecido) em alguma conta da empresa: não pergunta "quem pagou".
+create or replace function public._comprovante_aparece_em_alguma_conta(c public.comprovantes)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (select 1 from public._comprovante_linhas_em_alguma_conta(c));
+$$;
+
+-- O extrato da empresa já chegou até o fim da janela da compra (D+5)? Cada conta da empresa (conexão ativa
+-- × banco/cartão; o Caixa não entra) que se mexeu perto da compra (linha entre D-30 e D+5) precisa ter uma
+-- linha de D+5 em diante IMPORTADA depois de D+5 (a parcela futura do cartão, importada antes, não conta).
+-- Sem isso o "não apareceu" pode ser só a sincronização parada (Nubank PJ sem linha nova desde 01/10 em
+-- 11/10/2026) e a pergunta viria cedo demais. A conta que não se mexeu no mês da compra (a Infinitepay,
+-- parada desde junho) não segura ninguém; se a compra aparecer nela depois da troca de quem pagou, a vigia
+-- do passo 4c da varredura avisa.
+create or replace function public._comprovante_extrato_em_dia(c public.comprovantes)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select c.data_confirmada is not null and not exists (
+    select 1
+      from (select distinct t.bank_connection_id as conexao, coalesce(t.source_type, 'bank') as fonte
+              from public.bank_transactions t
+              join public.bank_connections bc on bc.id = t.bank_connection_id and bc.active and coalesce(bc.provider, '') <> 'caixa'
+             where coalesce(t.source_type, 'bank') in ('bank', 'credit_card')
+               and t.transaction_date between c.data_confirmada - 30 and c.data_confirmada + 5) a
+     where not exists (select 1 from public.bank_transactions n
+                        where n.bank_connection_id = a.conexao and coalesce(n.source_type, 'bank') = a.fonte
+                          and n.transaction_date >= c.data_confirmada + 5
+                          and n.created_at >= ((c.data_confirmada + 5)::timestamp at time zone 'America/Sao_Paulo')));
+$$;
+
+-- Cabe perguntar "quem pagou?" deste CMP? Gravado esperando o banco, sem linha, pago pela empresa por
+-- forma bancária ou crédito (banco_regra), há 5 dias ou mais pela data da compra, o dono ainda não disse
+-- "a empresa", o extrato de todas as contas já chegou até D+5 e nenhuma conta mostra a compra.
+create or replace function public._comprovante_quem_pode(c public.comprovantes)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select c.id is not null and c.situacao = 'aguardando_banco' and c.bank_transaction_id is null
+         and c.banco_regra is not null and c.banco_quem_em is null and c.gravado_em is not null
+         and c.data_confirmada is not null and c.valor_confirmado is not null
+         and c.data_confirmada <= (now() at time zone 'America/Sao_Paulo')::date - 5
+         and not public._comprovante_aparece_em_alguma_conta(c)
+         and public._comprovante_extrato_em_dia(c);
+$$;
+
+-- As opções do "quem pagou?" (passo banco_quem): a empresa (continua esperando), eu (reembolso ao sócio),
+-- cada técnico (reembolso nas Diárias) e gasto pessoal (só o arquivo). PESSOAL que a empresa pagou: só
+-- "a empresa" ou "não foi a empresa" (do bolso ou cartão pessoal: só o arquivo).
+create or replace function public._comprovante_opcoes_quem_pagou(c public.comprovantes)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_ate date := (c.aguardando_banco_desde at time zone 'America/Sao_Paulo')::date
+                + case when c.banco_regra = 'credito' then 45 else 30 end;
+  v_empresa jsonb := jsonb_build_object('n', 1, 'valor', 'empresa', 'rotulo',
+    'A empresa (ainda vai aparecer no extrato: continuo esperando até ' || coalesce(to_char(v_ate, 'DD/MM'), 'o fim do prazo') || ')');
+  v_tecnicos jsonb;
+begin
+  if c.destino = 'pessoal' then
+    return jsonb_build_array(v_empresa,
+      jsonb_build_object('n', 2, 'valor', 'socio', 'rotulo', 'Não foi a empresa: do meu bolso ou cartão pessoal (só guardo o arquivo)'));
+  end if;
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'n', 2 + (t->>'n')::integer, 'valor', t->>'valor',
+           'rotulo', 'O ' || split_part(btrim(t->>'rotulo'), ' ', 1) || ' (técnico: reembolso nas Diárias)')
+           order by (t->>'n')::integer), '[]'::jsonb)
+    into v_tecnicos
+    from jsonb_array_elements(public._comprovante_tecnicos()) t;
+  return jsonb_build_array(v_empresa,
+           jsonb_build_object('n', 2, 'valor', 'socio', 'rotulo', 'Eu, do meu bolso ou do meu cartão pessoal (fica como reembolso para você)'))
+         || v_tecnicos
+         || jsonb_build_array(jsonb_build_object('n', 3 + jsonb_array_length(v_tecnicos), 'valor', 'pessoal',
+                                                 'rotulo', 'Foi gasto pessoal, no meu cartão (só guardo o arquivo)'));
+end $$;
+
+-- BancoNoResumo (CmpResumo.banco) ou nulo (CMP que não procura linha ou ainda não gravado). Estado
+-- "quem_pagou" (regra E): a compra não apareceu em nenhuma conta em 5 dias — a pergunta é "quem pagou?".
 create or replace function public._comprovante_banco_resumo(c public.comprovantes)
 returns jsonb
 language plpgsql
@@ -899,9 +1030,7 @@ begin
   end if;
   v_desde := (c.aguardando_banco_desde at time zone 'America/Sao_Paulo')::date;
   v_ate := v_desde + case when c.banco_regra = 'credito' then 45 else 30 end;
-  if c.banco_so_registro then
-    v_estado := 'so_registro';
-  elsif c.bank_transaction_id is not null then
+  if c.bank_transaction_id is not null then
     v_estado := 'ligado';
     select e into v_ef from jsonb_array_elements(c.efeitos) with ordinality as t(e, o)
      where e->>'tipo' = 'ligar_linha' and e->>'bank_transaction_id' = c.bank_transaction_id::text and not e ? 'desligado_em'
@@ -913,8 +1042,11 @@ begin
   elsif c.situacao = 'abandonado' then
     v_estado := 'abandonado';
   elsif exists (select 1 from public.whatsapp_perguntas w
-                 where w.referencia_id = c.id and w.status = 'aberta' and w.origem = 'comprovante' and w.passo = 'banco') then
+                 where w.referencia_id = c.id and w.status = 'aberta' and w.origem = 'comprovante'
+                   and w.passo in ('banco', 'banco_quem')) then
     v_estado := 'pergunta_aberta';
+  elsif c.banco_perguntar and coalesce(c.conciliacao, 'cinza') = 'cinza' and public._comprovante_quem_pode(c) then
+    v_estado := 'quem_pagou';
   elsif c.banco_perguntar then
     v_estado := 'perguntar';
   elsif c.situacao = 'aguardando_banco' then
@@ -925,13 +1057,16 @@ begin
   return jsonb_build_object(
     'estado', v_estado,
     'nivel', c.conciliacao,
-    'desde', case when v_estado in ('esperando', 'perguntar', 'pergunta_aberta', 'abandonado') then v_desde end,
-    'ate', case when v_estado in ('esperando', 'perguntar', 'pergunta_aberta') then v_ate end,
+    'desde', case when v_estado in ('esperando', 'perguntar', 'pergunta_aberta', 'abandonado', 'quem_pagou') then v_desde end,
+    'ate', case when v_estado in ('esperando', 'perguntar', 'pergunta_aberta', 'quem_pagou') then v_ate end,
     'linha', v_linha,
-    'candidatos', jsonb_array_length(c.banco_candidatos));
+    'candidatos', jsonb_array_length(c.banco_candidatos),
+    -- o SIM do dono já aprovou a linha no Extrato (resposta 3 do dono)
+    'aprovado', case when v_ef is not null then jsonb_typeof(v_ef->'aprovado') = 'object' end);
 end $$;
 
--- PerguntaDoBancoF3: o que o edge precisa para mandar a pergunta
+-- PerguntaDoBancoF3: o que o edge precisa para mandar a pergunta (passo banco = a linha do extrato;
+-- banco_quem = "quem pagou?" da regra E)
 create or replace function public._comprovante_banco_pergunta(c public.comprovantes, p_pergunta_id uuid, p_avaliacao jsonb, p_motivo text)
 returns jsonb
 language plpgsql
@@ -942,7 +1077,7 @@ as $$
 declare
   w record;
 begin
-  select x.id, x.dedupe_key, x.opcoes into w from public.whatsapp_perguntas x where x.id = p_pergunta_id;
+  select x.id, x.dedupe_key, x.opcoes, x.passo, x.dados into w from public.whatsapp_perguntas x where x.id = p_pergunta_id;
   if not found then
     raise exception '_comprovante_banco_pergunta: pergunta % não existe', p_pergunta_id using errcode = '22023';
   end if;
@@ -950,14 +1085,17 @@ begin
     'pergunta_id', w.id,
     'dedupe_key', w.dedupe_key,
     'cmp', public._comprovante_resumo(c),
-    'passo', 'banco',
+    'passo', coalesce(w.passo, 'banco'),
     'opcoes', w.opcoes,
     'retomada', coalesce(p_motivo, '') = 'vigia' and c.banco_ultima_pergunta_em is not null,
-    'banco', p_avaliacao);
+    'banco', p_avaliacao,
+    'ate', case when w.passo = 'banco_quem' then (w.dados->>'ate')::date end);
 end $$;
 
 -- Abre a pergunta da F3 de UM CMP (quem chama já decidiu que pode): recalcula e guarda a avaliação;
--- cinza = não pergunta. {"perguntou":true, ...PerguntaDoBancoF3} ou {"perguntou":false,"motivo"}.
+-- verde/azul = "apareceu no extrato, ligo?"; cinza = não pergunta — salvo a regra E (5 dias sem
+-- aparecer em conta nenhuma: "quem pagou?", passo banco_quem). {"perguntou":true, ...PerguntaDoBancoF3}
+-- ou {"perguntou":false,"motivo"}.
 create or replace function public._comprovante_banco_abrir(p_cmp uuid, p_motivo text)
 returns jsonb
 language plpgsql
@@ -968,47 +1106,62 @@ as $$
 declare
   c public.comprovantes;
   v_av jsonb;
+  v_quem boolean;
   v_opcoes jsonb;
   v_txs jsonb;
   v_abriu jsonb;
   v_pergunta jsonb;
+  v_ate date;
 begin
   select * into c from public.comprovantes x where x.id = p_cmp for update;
   if not found then
     raise exception '_comprovante_banco_abrir: comprovante % não existe', p_cmp using errcode = '22023';
   end if;
   v_av := public._comprovante_candidatos(c);
+  v_quem := v_av is not null and v_av->>'nivel' = 'cinza' and public._comprovante_quem_pode(c);
   update public.comprovantes x
      set banco_candidatos = coalesce(v_av->'linhas', '[]'::jsonb),
          banco_hash = v_av->>'hash',
          banco_avaliado_em = now(),
          conciliacao = coalesce(v_av->>'nivel', x.conciliacao),
-         banco_perguntar = coalesce(v_av->>'nivel', 'cinza') <> 'cinza'
+         banco_perguntar = coalesce(v_av->>'nivel', 'cinza') <> 'cinza' or v_quem
    where x.id = c.id;
-  if v_av is null or v_av->>'nivel' = 'cinza' then
+  if v_av is null or (v_av->>'nivel' = 'cinza' and not v_quem) then
     return jsonb_build_object('perguntou', false, 'motivo', 'cinza');
   end if;
-  if v_av->>'nivel' = 'verde' then
-    select jsonb_build_array(jsonb_build_object('n', 1, 'rotulo', public._comprovante_banco_rotulo(l), 'valor', 'tx:' || (l->>'id'))),
-           jsonb_build_array(l->>'id')
-      into v_opcoes, v_txs
-      from jsonb_array_elements(v_av->'linhas') l
-     where (l->>'forte')::boolean
-     limit 1;
+  if v_quem then
+    v_ate := (c.aguardando_banco_desde at time zone 'America/Sao_Paulo')::date
+             + case when c.banco_regra = 'credito' then 45 else 30 end;
+    v_opcoes := public._comprovante_opcoes_quem_pagou(c);
+    v_abriu := public._pergunta_abrir(jsonb_build_object(
+      'phone', c.phone_normalized, 'origem', 'comprovante', 'tipo', 'pergunta', 'referencia_id', c.id,
+      'referencia_codigo', c.codigo, 'passo', 'banco_quem', 'opcoes', v_opcoes,
+      'dados', jsonb_build_object('nivel', 'cinza', 'hash', v_av->>'hash', 'regra', v_av->>'regra', 'ate', v_ate,
+                                  'motivo', left(coalesce(p_motivo, ''), 30)),
+      'expira_em', now() + interval '2 hours'));
   else
-    select jsonb_agg(jsonb_build_object('n', (l->>'n')::integer, 'rotulo', public._comprovante_banco_rotulo(l), 'valor', 'tx:' || (l->>'id'))
-                     order by (l->>'n')::integer)
-             || jsonb_build_array(jsonb_build_object('n', 0, 'rotulo', 'Nenhuma destas', 'valor', 'nenhum')),
-           jsonb_agg(l->>'id' order by (l->>'n')::integer)
-      into v_opcoes, v_txs
-      from jsonb_array_elements(v_av->'linhas') l;
+    if v_av->>'nivel' = 'verde' then
+      select jsonb_build_array(jsonb_build_object('n', 1, 'rotulo', public._comprovante_banco_rotulo(l), 'valor', 'tx:' || (l->>'id'))),
+             jsonb_build_array(l->>'id')
+        into v_opcoes, v_txs
+        from jsonb_array_elements(v_av->'linhas') l
+       where (l->>'forte')::boolean
+       limit 1;
+    else
+      select jsonb_agg(jsonb_build_object('n', (l->>'n')::integer, 'rotulo', public._comprovante_banco_rotulo(l), 'valor', 'tx:' || (l->>'id'))
+                       order by (l->>'n')::integer)
+               || jsonb_build_array(jsonb_build_object('n', 0, 'rotulo', 'Nenhuma destas', 'valor', 'nenhum')),
+             jsonb_agg(l->>'id' order by (l->>'n')::integer)
+        into v_opcoes, v_txs
+        from jsonb_array_elements(v_av->'linhas') l;
+    end if;
+    v_abriu := public._pergunta_abrir(jsonb_build_object(
+      'phone', c.phone_normalized, 'origem', 'comprovante', 'tipo', 'pergunta', 'referencia_id', c.id,
+      'referencia_codigo', c.codigo, 'passo', 'banco', 'opcoes', v_opcoes,
+      'dados', jsonb_build_object('nivel', v_av->>'nivel', 'hash', v_av->>'hash', 'regra', v_av->>'regra', 'tx', v_txs,
+                                  'motivo', left(coalesce(p_motivo, ''), 30)),
+      'expira_em', now() + interval '2 hours'));
   end if;
-  v_abriu := public._pergunta_abrir(jsonb_build_object(
-    'phone', c.phone_normalized, 'origem', 'comprovante', 'tipo', 'pergunta', 'referencia_id', c.id,
-    'referencia_codigo', c.codigo, 'passo', 'banco', 'opcoes', v_opcoes,
-    'dados', jsonb_build_object('nivel', v_av->>'nivel', 'hash', v_av->>'hash', 'regra', v_av->>'regra', 'tx', v_txs,
-                                'motivo', left(coalesce(p_motivo, ''), 30)),
-    'expira_em', now() + interval '2 hours'));
   if not coalesce((v_abriu->>'ok')::boolean, false) then
     return jsonb_build_object('perguntou', false, 'motivo', 'ocupado', 'ocupado_por', v_abriu->'ocupado_por');
   end if;
@@ -1022,19 +1175,171 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
+-- 7c. O SIM do dono já aprova a linha no Extrato (resposta 3 do dono, 11/10/2026). A aprovação é a da
+--     tela (finance-review "aprovar", uma proposta por vez, decided_by = o dono); o banco só diz QUAL
+--     proposta e registra o lançamento que nasceu. Linha que já tem lançamento só é anexada (resposta 8):
+--     nada a aprovar.
+-- ---------------------------------------------------------------------------------------------
+
+-- {"cmp_id","proposta_id","autor"} ou nulo: CMP conciliado cuja ligação foi autorizada pelo dono (o SIM
+-- do resumo, o SIM/escolha da pergunta do extrato, a anotação que o SIM do resumo autorizou) e terminou
+-- em proposta CLASSIFICADA pela anotação do CMP, na linha ainda sem lançamento.
+create or replace function public._comprovante_a_aprovar(c public.comprovantes)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_ef jsonb;
+  v_anots uuid[];
+  v_prop uuid;
+begin
+  if c.id is null or c.situacao <> 'conciliado' or c.bank_transaction_id is null then
+    return null;
+  end if;
+  select e into v_ef from jsonb_array_elements(c.efeitos) with ordinality as t(e, o)
+   where e->>'tipo' = 'ligar_linha' and e->>'bank_transaction_id' = c.bank_transaction_id::text and not e ? 'desligado_em'
+   order by o desc limit 1;
+  if v_ef is null or coalesce(v_ef->>'origem', '') not in ('gravacao', 'sim', 'escolha', 'anotacao')
+     or coalesce(v_ef->>'como', '') <> 'classificou' then
+    return null;
+  end if;
+  -- o SIM aprova UMA vez: se a aprovação já houve e a linha está sem lançamento, o dono a desfez no
+  -- Extrato (desfazer_aprovacao: a proposta voltou a pendente) — a decisão é dele, nunca aprovar de novo
+  if v_ef ? 'aprovado' or v_ef ? 'aprovado_desfeito' then
+    return null;
+  end if;
+  if exists (select 1 from public.payables p where p.bank_transaction_id = c.bank_transaction_id and p.status <> 'cancelled') then
+    return null;
+  end if;
+  select coalesce(array_agg(distinct a), '{}'::uuid[]) into v_anots
+    from (select c.anotacao_id as a
+          union all
+          select (e->>'anotacao_id')::uuid from jsonb_array_elements(c.efeitos) e
+           where e->>'tipo' in ('ligar_linha', 'anotar', 'anexar_anotacao') and e->>'anotacao_id' is not null) s
+   where a is not null;
+  select q.id into v_prop from public.finance_review_queue q
+   where q.bank_transaction_id = c.bank_transaction_id and q.status = 'pending' and q.kind = 'create_payable'
+     and coalesce(q.evidencia->'anotacao'->>'id', '') ~ '^[0-9a-f-]{36}$'
+     and (q.evidencia->'anotacao'->>'id')::uuid = any (v_anots)
+   order by q.created_at desc, q.id
+   limit 1;
+  if v_prop is null then
+    return null;
+  end if;
+  return jsonb_build_object('cmp_id', c.id, 'proposta_id', v_prop, 'autor', c.dono_id);
+end $$;
+
+-- R11. comprovante_a_aprovar: a proposta que o SIM do dono aprova (ou nulo)
+create or replace function public.comprovante_a_aprovar(p_cmp uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  c public.comprovantes;
+begin
+  select * into c from public.comprovantes x where x.id = p_cmp;
+  if not found then
+    return null;
+  end if;
+  return public._comprovante_a_aprovar(c);
+end $$;
+
+-- R12. comprovante_aprovado: o finance-review aprovou a proposta: confere (aprovada, com o lançamento, na
+--      linha ligada) e grava o lançamento no CMP (payable_id, ligar_linha.aprovado, a despesa interna da
+--      OS ligada ao lançamento, "classificar no Extrato" resolvida, índice do mês). Idempotente.
+create or replace function public.comprovante_aprovado(p_cmp uuid, p_proposta uuid, p_payable uuid)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  c public.comprovantes;
+  v_phone text;
+  v_ef jsonb;
+  q record;
+  v_pay record;
+  v_novos jsonb := '[]'::jsonb;
+begin
+  select x.phone_normalized into v_phone from public.comprovantes x where x.id = p_cmp;
+  if v_phone is not null then
+    perform pg_advisory_xact_lock(hashtextextended('pergunta:' || v_phone, 0));
+  end if;
+  select * into c from public.comprovantes x where x.id = p_cmp for update;
+  if not found then
+    raise exception 'comprovante_aprovado: comprovante % não existe', p_cmp using errcode = '22023';
+  end if;
+  if c.situacao <> 'conciliado' or c.bank_transaction_id is null then
+    return jsonb_build_object('ok', false, 'codigo', c.codigo, 'motivo', 'sem_ligacao');
+  end if;
+  select e into v_ef from jsonb_array_elements(c.efeitos) with ordinality as t(e, o)
+   where e->>'tipo' = 'ligar_linha' and e->>'bank_transaction_id' = c.bank_transaction_id::text and not e ? 'desligado_em'
+   order by o desc limit 1;
+  if v_ef is null then
+    return jsonb_build_object('ok', false, 'codigo', c.codigo, 'motivo', 'sem_ligacao');
+  end if;
+  if v_ef->'aprovado'->>'payable_id' = p_payable::text and c.payable_id = p_payable then
+    return jsonb_build_object('ok', true, 'codigo', c.codigo, 'payable_id', p_payable, 'ja_estava', true);
+  end if;
+  select x.status, x.created_payable_id, x.bank_transaction_id into q from public.finance_review_queue x where x.id = p_proposta;
+  if q.status is distinct from 'approved' or q.created_payable_id is distinct from p_payable
+     or q.bank_transaction_id is distinct from c.bank_transaction_id then
+    return jsonb_build_object('ok', false, 'codigo', c.codigo, 'motivo', 'proposta_nao_aprovada');
+  end if;
+  select p.id, p.status, p.bank_transaction_id into v_pay from public.payables p where p.id = p_payable;
+  if v_pay.id is null or v_pay.status = 'cancelled' or v_pay.bank_transaction_id is distinct from c.bank_transaction_id then
+    return jsonb_build_object('ok', false, 'codigo', c.codigo, 'motivo', 'lancamento_fora_da_linha');
+  end if;
+  if 'classificar_no_extrato' = any (c.pendencias) then
+    v_novos := jsonb_build_array(jsonb_build_object('tipo', 'pendencia_resolvida', 'qual', 'classificar_no_extrato', 'em', now()));
+  end if;
+  update public.comprovantes x
+     set payable_id = p_payable,
+         linha_explicada_em = coalesce(x.linha_explicada_em, now()),
+         efeitos = public._comprovante_efeitos_com_ligacao(
+                     x.efeitos,
+                     v_ef || jsonb_build_object('payable_id', p_payable, 'lancado_depois', false,
+                                                'aprovado', jsonb_build_object('payable_id', p_payable, 'proposta_id', p_proposta,
+                                                                               'em', now())))
+                   || v_novos,
+         pendencias = array_remove(x.pendencias, 'classificar_no_extrato')
+   where x.id = c.id;
+  if c.so_expense_id is not null then
+    update public.service_order_expenses s set linked_payable_id = p_payable
+     where s.id = c.so_expense_id and s.linked_payable_id is null;
+  end if;
+  perform public._comprovante_indice_pendente(coalesce(c.indice_mes, c.data_confirmada));
+  return jsonb_build_object('ok', true, 'codigo', c.codigo, 'payable_id', p_payable, 'ja_estava', false);
+end $$;
+
+-- ---------------------------------------------------------------------------------------------
 -- 8. A varredura (2.7). Trava 'comprovantes:banco' SEM ESPERAR: ocupada (o finance-review e o cron ao
 --    mesmo tempo), pula os passos 1-6 e devolve só as reservadas — esperar a trava invertia a ordem
 --    com a do telefone ('pergunta:', que a manutenção pega antes) e podia dar deadlock.
 --    Roda a cada 2 min (cron) e em cada finance-review: só GRAVA quando algo mudou (nada de versão
 --    nova de linha nem trava de linha do banco à toa — lição do incidente de I/O de 17/08):
---      1 re-valida as ligadas cuja linha ainda não virou lançamento (só lê; desliga quando mudou);
+--      1 re-valida as ligadas cuja linha ainda não virou lançamento (só lê; desliga quando mudou; a
+--        aprovação do SIM que o dono desfez no Extrato fica desfeita: "classificar no Extrato");
 --      2 liga pela anotação aplicada / pelo lançamento do CMP que ganhou linha;
 --      3 explica as ligadas: só quando a linha tem proposta pendente ou lançamento (a compra PENDING
 --        do cartão espera ~13 dias sem nenhum dos dois) e só grava o que mudou; depois da aprovação
 --        do dono, ADOTA o lançamento dele (nunca corrige categoria nem OS sem SIM);
 --      4 reavalia as candidatas de quem espera (só lê) e grava só quando a lista, o nível ou o hash
 --        mudaram (até p_limite gravações por rodada; as outras ficam para a próxima);
---      5 abandona; 6 notas que chegaram e as que só chegaram no e-mail.
+--      4b regra E (ajustes do dono, 11/10/2026): sem linha em NENHUMA conta da empresa há 5 dias, com o
+--         extrato de todas em dia até D+5 → "quem pagou?" (só com a conversa ligada);
+--      4c a vigia depois da troca de quem pagou: a compra apareceu numa conta da empresa → pendência
+--         "conferir quem pagou" e a linha reservada (nunca ligada sozinha);
+--      5 abandona; 6 notas que chegaram e as que só chegaram no e-mail;
+--      7 (não na manutenção) as ligadas pelo SIM do dono cuja proposta classificada espera a
+--        aprovação: "aprovar" (resposta 3 do dono; o finance-review aprova uma por vez).
 --    Cada parte (e cada CMP) no seu bloco: falha numa vira aviso (só o sqlstate) e não desfaz as outras.
 --    Devolve Varredura.
 -- ---------------------------------------------------------------------------------------------
@@ -1072,11 +1377,12 @@ declare
   n_azuis integer := 0;
   n_cinzas integer := 0;
   n_abandonados integer := 0;
-  n_so_registro integer := 0;
+  n_quem integer := 0;
   n_notas integer := 0;
   n_classificadas integer := 0;
   v_perguntar jsonb := '[]'::jsonb;
   v_reservadas jsonb := '[]'::jsonb;
+  v_aprovar jsonb := '[]'::jsonb;
 begin
   if not pg_try_advisory_xact_lock(hashtextextended('comprovantes:banco', 0)) then
     -- a outra varredura já está fazendo isto agora: só as reservadas (o finance-review precisa delas)
@@ -1086,13 +1392,18 @@ begin
     end if;
     return jsonb_build_object(
       'avaliados', 0, 'ligados', 0, 'explicadas', 0, 'desligados', 0, 'verdes', 0, 'azuis', 0, 'cinzas', 0,
-      'abandonados', 0, 'so_registro', 0, 'notas', 0, 'perguntar', '[]'::jsonb, 'reservadas', v_reservadas,
-      'classificadas', 0, 'ocupada', true);
+      'abandonados', 0, 'notas', 0, 'perguntar', '[]'::jsonb, 'reservadas', v_reservadas,
+      'classificadas', 0, 'aprovar', '[]'::jsonb, 'ocupada', true);
   end if;
 
   -- ── 1. re-valida os ligados (só os de linha ainda sem lançamento: os outros não mudam mais) ──
   for r in
-    select x.id, x.bank_transaction_id, x.valor_confirmado, x.dono_id, x.so_expense_id
+    select x.id, x.bank_transaction_id, x.valor_confirmado, x.dono_id, x.so_expense_id, x.indice_mes, x.data_confirmada,
+           -- o lançamento que o SIM do dono aprovou nesta ligação (resposta 3), se houve
+           (select (e->'aprovado'->>'payable_id')::uuid from jsonb_array_elements(x.efeitos) e
+             where e->>'tipo' = 'ligar_linha' and e->>'bank_transaction_id' = x.bank_transaction_id::text
+               and not e ? 'desligado_em' and jsonb_typeof(e->'aprovado') = 'object'
+             limit 1) as aprovado_pay
       from public.comprovantes x
      where x.situacao = 'conciliado'
        and (x.bank_transaction_id is null
@@ -1142,6 +1453,25 @@ begin
         -- o dono recusou a proposta da linha no Extrato: não é desta compra
         perform public._comprovante_desligar(r.id, 'recusada_no_extrato', r.dono_id, true);
         n_desligados := n_desligados + 1;
+      elsif r.aprovado_pay is not null then
+        -- o lançamento que o SIM aprovou caiu (o dono usou "Desfazer aprovação" no Extrato: a proposta
+        -- voltou a pendente). A ligação fica (é a mesma compra), mas a decisão agora é do dono: o
+        -- "aprovado" vira "aprovado_desfeito" (o passo 7 nunca aprova de novo) e a linha fica com a
+        -- pendência "classificar no Extrato". Grava uma vez só: depois disso o "aprovado" não existe mais.
+        update public.comprovantes x
+           set efeitos = (select jsonb_agg(case when e->>'tipo' = 'ligar_linha'
+                                                     and e->>'bank_transaction_id' = r.bank_transaction_id::text
+                                                     and not e ? 'desligado_em' and jsonb_typeof(e->'aprovado') = 'object'
+                                                then (e - 'aprovado' - 'payable_id')
+                                                     || jsonb_build_object('aprovado_desfeito',
+                                                                           (e->'aprovado') || jsonb_build_object('desfeito_em', now()))
+                                                else e end order by o)
+                            from jsonb_array_elements(x.efeitos) with ordinality as t(e, o)),
+               payable_id = case when x.payable_id = r.aprovado_pay then null else x.payable_id end,
+               pendencias = case when 'classificar_no_extrato' = any (x.pendencias) then x.pendencias
+                                 else x.pendencias || 'classificar_no_extrato'::text end
+         where x.id = r.id;
+        perform public._comprovante_indice_pendente(coalesce(r.indice_mes, r.data_confirmada));
       end if;
     exception when others then
       raise warning 'comprovantes: re-validar a ligação falhou: %', sqlstate;
@@ -1156,7 +1486,7 @@ begin
         on a.id = x.anotacao_id and a.status = 'aplicada' and a.bank_transaction_id is not null
       left join public.payables p
         on p.id = x.payable_id and p.status <> 'cancelled' and p.bank_transaction_id is not null
-     where x.situacao in ('aguardando_banco', 'abandonado') and not x.banco_so_registro and x.bank_transaction_id is null
+     where x.situacao in ('aguardando_banco', 'abandonado') and x.bank_transaction_id is null
        and (a.id is not null or p.id is not null)
        -- a linha de outro CMP já deixou a pendência: não tenta de novo a cada rodada
        and not ('classificar_no_extrato' = any (x.pendencias)
@@ -1244,17 +1574,16 @@ begin
     end;
   end loop;
 
-  -- ── 4. candidatas de quem espera (e o registro do PESSOAL, até 30 dias): lê sempre, grava só a mudança ──
+  -- ── 4. candidatas de quem espera: lê sempre, grava só a mudança ──
   for c in
     select x.*
       from public.comprovantes x
      where x.numero is not null and x.bank_transaction_id is null and x.banco_regra is not null
-       and ((x.situacao = 'aguardando_banco' and not x.banco_so_registro)
-            or (x.banco_so_registro and x.situacao <> 'cancelado' and x.gravado_em > now() - interval '30 days'))
+       and x.situacao = 'aguardando_banco'
        -- só quem pode ter candidata: nunca avaliado, a conversa ligou depois (hash nulo), já tinha
        -- candidata, ou há linha de saída do mesmo valor na janela (o cartão: também a parcela 1/n)
        and (x.banco_avaliado_em is null
-            or (v_conversa and x.banco_hash is null and not x.banco_so_registro)
+            or (v_conversa and x.banco_hash is null)
             or jsonb_array_length(x.banco_candidatos) > 0
             or exists (select 1 from public.bank_transactions t
                         where t.transaction_type = 'debit'
@@ -1274,9 +1603,7 @@ begin
         continue;
       end if;
       n_avaliados := n_avaliados + 1;
-      if c.banco_so_registro then
-        n_so_registro := n_so_registro + 1;
-      elsif v_av->>'nivel' = 'verde' then
+      if v_av->>'nivel' = 'verde' then
         n_verdes := n_verdes + 1;
       elsif v_av->>'nivel' = 'azul' then
         n_azuis := n_azuis + 1;
@@ -1300,21 +1627,75 @@ begin
              banco_hash = case when v_conversa then v_av->>'hash' end,
              banco_avaliado_em = now(),
              conciliacao = v_av->>'nivel',
-             banco_perguntar = case when c.banco_so_registro or not v_conversa or v_av->>'nivel' = 'cinza' then false
+             banco_perguntar = case when not v_conversa or v_av->>'nivel' = 'cinza' then false
                                     when v_mudou then true
                                     else x.banco_perguntar end
        where x.id = c.id and x.bank_transaction_id is null and x.situacao = c.situacao;
       v_gravados := v_gravados + 1;
-      if v_mudou and not c.banco_so_registro then
+      if v_mudou then
         for v_w in
           select w.id from public.whatsapp_perguntas w
-           where w.referencia_id = c.id and w.status = 'aberta' and w.origem = 'comprovante' and w.passo = 'banco'
+           where w.referencia_id = c.id and w.status = 'aberta' and w.origem = 'comprovante' and w.passo in ('banco', 'banco_quem')
         loop
           perform public._pergunta_fechar(v_w, 'substituida', 'linhas_mudaram', null);
         end loop;
       end if;
     exception when others then
       raise warning 'comprovantes: avaliar candidatas falhou: %', sqlstate;
+    end;
+  end loop;
+
+  -- ── 4b. regra E (ajustes do dono, 11/10/2026): a compra que não apareceu em NENHUMA conta da empresa
+  --        em 5 dias → "quem pagou?" (o vigia da F3 pergunta; até p_limite marcações por rodada) ──
+  if v_conversa then
+    for r in
+      select x.id from public.comprovantes x
+       where x.situacao = 'aguardando_banco' and x.bank_transaction_id is null and x.banco_regra is not null
+         and not x.banco_perguntar and x.banco_quem_em is null and x.gravado_em is not null
+         and x.data_confirmada <= (now() at time zone 'America/Sao_Paulo')::date - 5
+       order by x.numero
+    loop
+      exit when v_lim is not null and n_quem >= v_lim;
+      begin
+        select * into c from public.comprovantes x where x.id = r.id;
+        if public._comprovante_quem_pode(c) then
+          update public.comprovantes x set banco_perguntar = true where x.id = r.id and not x.banco_perguntar;
+          n_quem := n_quem + 1;
+        end if;
+      exception when others then
+        raise warning 'comprovantes: marcar o "quem pagou?" falhou: %', sqlstate;
+      end;
+    end loop;
+  end if;
+
+  -- ── 4c. a vigia depois da troca de quem pagou (regra E): o dono disse que NÃO foi a empresa (eu, o
+  --        técnico, gasto pessoal) e a compra aparece depois numa conta da empresa (o extrato atrasado,
+  --        o cartão PJ confundido com o pessoal). Nada é ligado nem desfeito sozinho: as linhas ficam
+  --        reservadas (R2: o motor não as lança sozinho) e o CMP ganha a pendência "conferir quem pagou"
+  --        (sai com *feito cmp N* ou com o cancelamento). Uma vez por CMP: grava só quando acha ──
+  for c in
+    select x.* from public.comprovantes x
+     where x.banco_quem_em is not null and x.banco_regra is null and x.bank_transaction_id is null
+       and x.situacao in ('gravado', 'aguardando_xml') and x.banco_candidatos = '[]'::jsonb
+       and x.valor_confirmado is not null
+       and x.data_confirmada >= (now() at time zone 'America/Sao_Paulo')::date - 60
+     order by x.numero
+  loop
+    begin
+      select coalesce(jsonb_agg(jsonb_build_object('id', t.id, 'forte', true, 'vigia', true) order by t.transaction_date, t.id), '[]'::jsonb)
+        into v_l
+        from public.bank_transactions t
+       where t.id in (select public._comprovante_linhas_em_alguma_conta(c));
+      if jsonb_array_length(v_l) > 0 then
+        update public.comprovantes x
+           set banco_candidatos = v_l,
+               pendencias = case when 'conferir_quem_pagou' = any (x.pendencias) then x.pendencias
+                                 else x.pendencias || 'conferir_quem_pagou'::text end
+         where x.id = c.id;
+        perform public._comprovante_indice_pendente(coalesce(c.indice_mes, c.data_confirmada));
+      end if;
+    exception when others then
+      raise warning 'comprovantes: vigia da troca de quem pagou falhou: %', sqlstate;
     end;
   end loop;
 
@@ -1335,7 +1716,7 @@ begin
        where x.id = r.id;
       for v_w in
         select w.id from public.whatsapp_perguntas w
-         where w.referencia_id = r.id and w.status = 'aberta' and w.origem = 'comprovante' and w.passo = 'banco'
+         where w.referencia_id = r.id and w.status = 'aberta' and w.origem = 'comprovante' and w.passo in ('banco', 'banco_quem')
       loop
         perform public._pergunta_fechar(v_w, 'cancelada', 'abandonado', null);
       end loop;
@@ -1366,10 +1747,29 @@ begin
 
   -- ── quem o vigia pode perguntar e as linhas reservadas (a manutenção do cron não usa: não calcula) ──
   if not v_manutencao then
+    -- ── 7. as ligadas pelo SIM do dono cuja proposta classificada espera a aprovação (resposta 3): as
+    --       que a proposta só apareceu depois (cartão que saiu de PENDING, finance-review que não tinha
+    --       rodado) e as aprovações que falharam antes ──
+    for r in
+      select x.id from public.comprovantes x
+       where x.situacao = 'conciliado' and x.bank_transaction_id is not null
+         and not exists (select 1 from public.payables p
+                          where p.bank_transaction_id = x.bank_transaction_id and p.status <> 'cancelled')
+         and exists (select 1 from public.finance_review_queue q
+                      where q.bank_transaction_id = x.bank_transaction_id and q.status = 'pending')
+       order by x.numero
+    loop
+      exit when v_lim is not null and jsonb_array_length(v_aprovar) >= v_lim;
+      select * into c from public.comprovantes x where x.id = r.id;
+      v_l := public._comprovante_a_aprovar(c);
+      if v_l is not null then
+        v_aprovar := v_aprovar || jsonb_build_array(v_l);
+      end if;
+    end loop;
     select coalesce(jsonb_agg(t.phone order by t.phone), '[]'::jsonb) into v_perguntar
       from (select distinct x.phone_normalized as phone
               from public.comprovantes x
-             where x.banco_perguntar and x.situacao = 'aguardando_banco' and not x.banco_so_registro and x.banco_perguntas < 3
+             where x.banco_perguntar and x.situacao = 'aguardando_banco' and x.banco_perguntas < 3
                and (x.banco_ultima_pergunta_em is null or x.banco_ultima_pergunta_em <= now() - interval '4 hours')) t
      where public._comprovante_banco_pode(t.phone) is null;
     select coalesce(jsonb_agg(distinct l->>'bank_transaction_id'), '[]'::jsonb) into v_reservadas
@@ -1378,9 +1778,9 @@ begin
 
   return jsonb_build_object(
     'avaliados', n_avaliados, 'ligados', n_ligados, 'explicadas', n_explicadas, 'desligados', n_desligados,
-    'verdes', n_verdes, 'azuis', n_azuis, 'cinzas', n_cinzas, 'abandonados', n_abandonados, 'so_registro', n_so_registro,
+    'verdes', n_verdes, 'azuis', n_azuis, 'cinzas', n_cinzas, 'abandonados', n_abandonados,
     'notas', n_notas, 'perguntar', v_perguntar, 'reservadas', v_reservadas, 'classificadas', n_classificadas,
-    'ocupada', false);
+    'aprovar', v_aprovar, 'ocupada', false);
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
@@ -1412,7 +1812,8 @@ end $$;
 --                   pode mais ser lançada sozinha: devolvê-la só cresceria a lista para sempre);
 --       candidata = só a FORTE de um CMP com pergunta pendente/aberta (nunca o PESSOAL). As fracas de
 --                   um azul (pedágio de R$ 5,70, outra compra do mesmo valor) seguem o motor: reservá-las
---                   travava compras de outros até o dono responder ou o CMP ser abandonado.
+--                   travava compras de outros até o dono responder ou o CMP ser abandonado. Também a
+--                   linha da vigia da troca de quem pagou (4c), enquanto a pendência está aberta.
 --     conta_aberta_id = a conta a pagar em aberto que o CMP anexou (case pela Conciliação, não lance
 --     outra); na candidata, o aprovar diz "pode ser a do CMP" (não "é").
 -- ---------------------------------------------------------------------------------------------
@@ -1443,11 +1844,22 @@ begin
       cross join lateral jsonb_array_elements(x.banco_candidatos) e
       left join public.payables p
         on p.id = x.payable_id and p.status in ('pending', 'overdue', 'partially_paid') and p.bank_transaction_id is null
-     where x.situacao in ('aguardando_banco', 'abandonado') and not x.banco_so_registro
+     where x.situacao in ('aguardando_banco', 'abandonado')
        and coalesce((e->>'forte')::boolean, false)
        and (x.banco_perguntar
             or exists (select 1 from public.whatsapp_perguntas w
                         where w.referencia_id = x.id and w.status = 'aberta' and w.origem = 'comprovante' and w.passo = 'banco'))
+    union all
+    -- a vigia da troca de quem pagou (4c): a linha da empresa onde a compra apareceu depois que o dono
+    -- disse que não foi a empresa — enquanto a pendência "conferir quem pagou" está aberta e a linha
+    -- ainda não virou lançamento
+    select (e->>'id')::uuid, x.codigo, 'candidata'::text, null::uuid, 2, x.numero
+      from public.comprovantes x
+      cross join lateral jsonb_array_elements(x.banco_candidatos) e
+     where x.situacao in ('gravado', 'aguardando_xml') and 'conferir_quem_pagou' = any (x.pendencias)
+       and coalesce((e->>'vigia')::boolean, false)
+       and not exists (select 1 from public.payables l
+                        where l.bank_transaction_id = (e->>'id')::uuid and l.status <> 'cancelled')
   ), uma as (
     select distinct on (b.tx) b.* from base b
      where b.tx is not null and (p_transacoes is null or b.tx = any (p_transacoes))
@@ -1506,20 +1918,19 @@ begin
       return jsonb_build_object('perguntou', false, 'motivo', v_pode);
     end if;
     select x.id into v_cmp from public.comprovantes x
-     where x.phone_normalized = p_phone and x.banco_perguntar and x.situacao = 'aguardando_banco' and not x.banco_so_registro
+     where x.phone_normalized = p_phone and x.banco_perguntar and x.situacao = 'aguardando_banco'
        and x.banco_perguntas < 3
        and (x.banco_ultima_pergunta_em is null or x.banco_ultima_pergunta_em <= now() - interval '4 hours')
      order by x.gravado_em, x.numero
      limit 1;
   elsif v_cmp is not null then
-    select x.id, x.phone_normalized, x.situacao, x.banco_so_registro into r from public.comprovantes x where x.id = v_cmp;
-    if not found or r.phone_normalized <> p_phone or r.situacao not in ('aguardando_banco', 'abandonado') or r.banco_so_registro then
+    select x.id, x.phone_normalized, x.situacao into r from public.comprovantes x where x.id = v_cmp;
+    if not found or r.phone_normalized <> p_phone or r.situacao not in ('aguardando_banco', 'abandonado') then
       return jsonb_build_object('perguntou', false, 'motivo', 'nao_pergunta');
     end if;
   else
     select x.id into v_cmp from public.comprovantes x
      where x.phone_normalized = p_phone and x.banco_perguntar and x.situacao in ('aguardando_banco', 'abandonado')
-       and not x.banco_so_registro
      order by x.gravado_em, x.numero
      limit 1;
   end if;
@@ -1529,11 +1940,29 @@ begin
   return public._comprovante_banco_abrir(v_cmp, p_motivo);
 end $$;
 
+-- RespostaDoBanco: a mesma forma em todo resultado (as chaves de cada caso vêm em p_extra)
+create or replace function public._comprovante_banco_saida(p_resultado text, c public.comprovantes, p_motivo text, p_ate date,
+                                                          p_extra jsonb default '{}'::jsonb)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select jsonb_build_object('resultado', p_resultado, 'cmp', public._comprovante_resumo(c), 'ligacao', null, 'proxima', null,
+                            'motivo', p_motivo, 'ate', p_ate, 'aprovar', null, 'gravacao', null, 'bloqueios', null)
+         || coalesce(p_extra, '{}'::jsonb);
+$$;
+
 -- ---------------------------------------------------------------------------------------------
 -- R4. comprovante_banco_responder: a resposta do dono à pergunta da F3. Só vale a resposta mandada
 --     DEPOIS de a pergunta chegar a ele; as linhas mudaram (hash/nível) = "mudou" e a pergunta nova.
---     Verde: sim liga, não recusa a linha, número/ok não liga. Azul: N liga a N-ésima, 0/não recusa
---     todas as listadas, sim/ok pede o número. Erro da rota = nao_ligado, nada muda.
+--     Passo banco: verde — sim liga, não recusa a linha, número/ok não liga; azul — N liga a N-ésima,
+--     0/não recusa todas as listadas, sim/ok pede o número. Erro da rota = nao_ligado, nada muda. Ligou e
+--     a proposta saiu classificada: "aprovar" diz qual o finance-review aprova agora (resposta 3 do dono).
+--     Passo banco_quem (regra E): "a empresa" = continua esperando (esperando); os outros = desfaz o que
+--     foi gravado e grava de novo com quem pagou, na mesma transação (regravado); bloqueio ou erro da rota
+--     = nao_trocado, nada muda (a pergunta continua aberta).
 -- ---------------------------------------------------------------------------------------------
 create or replace function public.comprovante_banco_responder(p jsonb)
 returns jsonb
@@ -1551,6 +1980,7 @@ declare
   v_quando timestamptz;
   v_interp jsonb;
   v_tipo text;
+  v_passo text;
   v_n integer;
   v_av jsonb;
   v_nivel text;
@@ -1561,6 +1991,13 @@ declare
   v_prox jsonb;
   v_ate date;
   v_recusar uuid[];
+  v_val text;
+  v_nome text;
+  v_ids text[];
+  v_quem text;
+  v_pagador uuid;
+  v_troca jsonb;
+  v_aprovar jsonb;
 begin
   if p is null or jsonb_typeof(p) <> 'object' or jsonb_typeof(p->'interpretacao') is distinct from 'object' then
     raise exception 'comprovante_banco_responder: entrada inválida' using errcode = '22023';
@@ -1574,15 +2011,16 @@ begin
   end;
   v_interp := p->'interpretacao';
   v_tipo := v_interp->>'tipo';
-  if v_tipo is null or v_tipo not in ('opcao', 'sim', 'nao', 'ok') then
+  if v_tipo is null or v_tipo not in ('opcao', 'sim', 'nao', 'ok', 'palavra', 'nome') then
     raise exception 'comprovante_banco_responder: interpretação desconhecida' using errcode = '22023';
   end if;
 
   select x.id, x.phone_normalized, x.origem, x.passo, x.referencia_id into w
     from public.whatsapp_perguntas x where x.id = v_pid;
-  if not found or w.origem <> 'comprovante' or w.passo is distinct from 'banco' then
+  if not found or w.origem <> 'comprovante' or w.passo is null or w.passo not in ('banco', 'banco_quem') then
     raise exception 'comprovante_banco_responder: pergunta % não é da linha do extrato', v_pid using errcode = '22023';
   end if;
+  v_passo := w.passo;
   perform pg_advisory_xact_lock(hashtextextended('pergunta:' || w.phone_normalized, 0));
   select * into c from public.comprovantes x where x.id = w.referencia_id for update;
   if v_autor is null or v_autor is distinct from c.dono_id or not public.is_admin(v_autor) then
@@ -1590,12 +2028,10 @@ begin
   end if;
   v_ate := (c.aguardando_banco_desde at time zone 'America/Sao_Paulo')::date + case when c.banco_regra = 'credito' then 45 else 30 end;
   if c.situacao = 'cancelado' or c.bank_transaction_id is not null then
-    return jsonb_build_object('resultado', 'ignorada', 'cmp', public._comprovante_resumo(c), 'ligacao', null, 'proxima', null,
-                              'motivo', case when c.situacao = 'cancelado' then 'cancelado' else 'ja_ligado' end, 'ate', null);
+    return public._comprovante_banco_saida('ignorada', c, case when c.situacao = 'cancelado' then 'cancelado' else 'ja_ligado' end, null);
   end if;
   if not public._comprovante_conversa_ligada() then
-    return jsonb_build_object('resultado', 'ignorada', 'cmp', public._comprovante_resumo(c), 'ligacao', null, 'proxima', null,
-                              'motivo', 'desligada', 'ate', null);
+    return public._comprovante_banco_saida('ignorada', c, 'desligada', null);
   end if;
   if v_msg is not null then
     select m.occurred_at into v_quando from public.whatsapp_messages m where m.id = v_msg;
@@ -1610,31 +2046,94 @@ begin
 
   -- a pergunta já fechou (venceu, foi substituída): mostra a de agora
   if w.status <> 'aberta' then
-    v_prox := case when c.situacao in ('aguardando_banco', 'abandonado') and not c.banco_so_registro
-                   then public._comprovante_banco_abrir(c.id, 'reabrir') end;
+    v_prox := case when c.situacao in ('aguardando_banco', 'abandonado') then public._comprovante_banco_abrir(c.id, 'reabrir') end;
     select * into c from public.comprovantes x where x.id = c.id;
-    return jsonb_build_object('resultado', 'invalida', 'cmp', public._comprovante_resumo(c), 'ligacao', null,
-      'proxima', case when coalesce((v_prox->>'perguntou')::boolean, false) then v_prox - 'perguntou' end,
-      'motivo', 'pergunta_fechada', 'ate', v_ate);
+    return public._comprovante_banco_saida('invalida', c, 'pergunta_fechada', v_ate, jsonb_build_object(
+      'proxima', case when coalesce((v_prox->>'perguntou')::boolean, false) then v_prox - 'perguntou' end));
   end if;
 
   v_av := public._comprovante_candidatos(c);
   -- só vale o que o dono mandou depois de a pergunta chegar a ele
   if v_msg is null or w.enviada_em is null
      or v_quando < greatest(w.aberta_em + interval '2 seconds', w.enviada_em - interval '2 seconds') then
-    return jsonb_build_object('resultado', 'invalida', 'cmp', public._comprovante_resumo(c), 'ligacao', null,
-      'proxima', public._comprovante_banco_pergunta(c, w.id, v_av, 'reabrir'),
-      'motivo', 'resposta_anterior_a_pergunta', 'ate', v_ate);
+    return public._comprovante_banco_saida('invalida', c, 'resposta_anterior_a_pergunta', v_ate, jsonb_build_object(
+      'proxima', public._comprovante_banco_pergunta(c, w.id, v_av, 'reabrir')));
   end if;
 
+  -- ══ "quem pagou?" (regra E) ════════════════════════════════════════════════════════════════
+  if v_passo = 'banco_quem' then
+    -- a compra apareceu numa conta (ou não cabe mais perguntar): a pergunta de agora
+    if v_av is null or v_av->>'nivel' <> 'cinza' or not public._comprovante_quem_pode(c) then
+      perform public._pergunta_fechar(w.id, 'substituida', 'linhas_mudaram', v_msg);
+      v_prox := case when v_av is not null then public._comprovante_banco_abrir(c.id, 'reabrir') end;
+      select * into c from public.comprovantes x where x.id = c.id;
+      return public._comprovante_banco_saida('mudou', c, 'linhas_mudaram', v_ate, jsonb_build_object(
+        'proxima', case when coalesce((v_prox->>'perguntou')::boolean, false) then v_prox - 'perguntou' end));
+    end if;
+    if v_tipo = 'opcao' then
+      begin
+        v_n := (v_interp->>'n')::integer;
+      exception when others then
+        v_n := null;
+      end;
+      select o->>'valor' into v_val from jsonb_array_elements(w.opcoes) o where (o->>'n')::integer = v_n limit 1;
+    elsif v_tipo = 'palavra' then
+      select o->>'valor' into v_val from jsonb_array_elements(w.opcoes) o where o->>'valor' = v_interp->>'valor' limit 1;
+    elsif v_tipo = 'nome' then
+      -- o nome do técnico dito ("o Roberto"): um técnico só, pelo nome inteiro ou pela palavra
+      v_nome := public._comprovante_normalizar(v_interp->>'texto');
+      select array_agg(o->>'valor') into v_ids
+        from jsonb_array_elements(w.opcoes) o
+        join public.payees pe on o->>'valor' = 'payee:' || pe.id::text
+       where char_length(v_nome) >= 3
+         and (' ' || public._comprovante_normalizar(pe.name) || ' ') like ('% ' || v_nome || ' %');
+      if coalesce(cardinality(v_ids), 0) = 1 then
+        v_val := v_ids[1];
+      end if;
+    else
+      return public._comprovante_banco_saida('invalida', c, 'pede_numero', v_ate, jsonb_build_object(
+        'proxima', public._comprovante_banco_pergunta(c, w.id, v_av, 'reabrir')));
+    end if;
+    if v_val is null then
+      return public._comprovante_banco_saida('invalida', c, case when v_tipo = 'nome' then 'nome_nao_achado' else 'opcao_fora' end,
+        v_ate, jsonb_build_object('proxima', public._comprovante_banco_pergunta(c, w.id, v_av, 'reabrir')));
+    end if;
+    if v_val = 'empresa' then
+      -- a empresa pagou: continua esperando o extrato (até o abandono) e não pergunta de novo
+      update public.comprovantes x set banco_quem_em = now(), banco_perguntar = false where x.id = c.id;
+      perform public._pergunta_fechar(w.id, 'respondida', null, v_msg);
+      select * into c from public.comprovantes x where x.id = c.id;
+      return public._comprovante_banco_saida('esperando', c, null, v_ate);
+    end if;
+    v_quem := case when v_val = 'socio' then 'socio' when v_val = 'pessoal' then 'pessoal' else 'tecnico' end;
+    v_pagador := case when v_val like 'payee:%' then substr(v_val, 7)::uuid end;
+    begin
+      v_troca := public._comprovante_trocar_pagador(c.id, v_quem, v_pagador, v_autor);
+    exception when others then
+      get stacked diagnostics v_t = message_text;
+      select * into c from public.comprovantes x where x.id = c.id;
+      return public._comprovante_banco_saida('nao_trocado', c, left(v_t, 200), v_ate);
+    end;
+    if not coalesce((v_troca->>'ok')::boolean, false) then
+      select * into c from public.comprovantes x where x.id = c.id;
+      return public._comprovante_banco_saida('nao_trocado', c, coalesce(v_troca->'bloqueios'->0->>'motivo', 'bloqueado'), v_ate,
+        jsonb_build_object('bloqueios', v_troca->'bloqueios'));
+    end if;
+    perform public._pergunta_fechar(w.id, 'respondida', null, v_msg);
+    update public.whatsapp_perguntas x set resposta_message_id = coalesce(x.resposta_message_id, v_msg) where x.id = w.id;
+    select * into c from public.comprovantes x where x.id = c.id;
+    return public._comprovante_banco_saida('regravado', c, null, null, jsonb_build_object(
+      'gravacao', v_troca->'gravacao', 'aprovar', v_troca->'gravacao'->'aprovar'));
+  end if;
+
+  -- ══ a linha do extrato ═══════════════════════════════════════════════════════════════════════
   -- as linhas mudaram desde a pergunta: a pergunta nova (ou nada, se ficou cinza)
   if v_av is null or v_av->>'hash' is distinct from w.dados->>'hash' or v_av->>'nivel' is distinct from w.dados->>'nivel' then
     perform public._pergunta_fechar(w.id, 'substituida', 'linhas_mudaram', v_msg);
     v_prox := case when v_av is not null then public._comprovante_banco_abrir(c.id, 'reabrir') end;
     select * into c from public.comprovantes x where x.id = c.id;
-    return jsonb_build_object('resultado', 'mudou', 'cmp', public._comprovante_resumo(c), 'ligacao', null,
-      'proxima', case when coalesce((v_prox->>'perguntou')::boolean, false) then v_prox - 'perguntou' end,
-      'motivo', 'linhas_mudaram', 'ate', v_ate);
+    return public._comprovante_banco_saida('mudou', c, 'linhas_mudaram', v_ate, jsonb_build_object(
+      'proxima', case when coalesce((v_prox->>'perguntou')::boolean, false) then v_prox - 'perguntou' end));
   end if;
 
   v_nivel := w.dados->>'nivel';
@@ -1648,8 +2147,8 @@ begin
       v_recusar := v_txs[1:1];
     else
       -- número ou "ok" nunca ligam no verde: a pergunta continua
-      return jsonb_build_object('resultado', 'ok_nao_aprova', 'cmp', public._comprovante_resumo(c), 'ligacao', null,
-        'proxima', public._comprovante_banco_pergunta(c, w.id, v_av, 'reabrir'), 'motivo', null, 'ate', v_ate);
+      return public._comprovante_banco_saida('ok_nao_aprova', c, null, v_ate, jsonb_build_object(
+        'proxima', public._comprovante_banco_pergunta(c, w.id, v_av, 'reabrir')));
     end if;
   else
     if v_tipo = 'opcao' then
@@ -1663,14 +2162,14 @@ begin
       elsif v_n between 1 and cardinality(v_txs) then
         v_tx := v_txs[v_n];
       else
-        return jsonb_build_object('resultado', 'invalida', 'cmp', public._comprovante_resumo(c), 'ligacao', null,
-          'proxima', public._comprovante_banco_pergunta(c, w.id, v_av, 'reabrir'), 'motivo', 'opcao_fora', 'ate', v_ate);
+        return public._comprovante_banco_saida('invalida', c, 'opcao_fora', v_ate, jsonb_build_object(
+          'proxima', public._comprovante_banco_pergunta(c, w.id, v_av, 'reabrir')));
       end if;
     elsif v_tipo = 'nao' then
       v_recusar := v_txs;
     else
-      return jsonb_build_object('resultado', 'invalida', 'cmp', public._comprovante_resumo(c), 'ligacao', null,
-        'proxima', public._comprovante_banco_pergunta(c, w.id, v_av, 'reabrir'), 'motivo', 'pede_numero', 'ate', v_ate);
+      return public._comprovante_banco_saida('invalida', c, 'pede_numero', v_ate, jsonb_build_object(
+        'proxima', public._comprovante_banco_pergunta(c, w.id, v_av, 'reabrir')));
     end if;
   end if;
 
@@ -1684,13 +2183,15 @@ begin
     exception when others then
       get stacked diagnostics v_t = message_text;
       select * into c from public.comprovantes x where x.id = c.id;
-      return jsonb_build_object('resultado', 'nao_ligado', 'cmp', public._comprovante_resumo(c), 'ligacao', null, 'proxima', null,
-                                'motivo', left(regexp_replace(v_t, '^nao_ligado:', ''), 200), 'ate', v_ate);
+      return public._comprovante_banco_saida('nao_ligado', c, left(regexp_replace(v_t, '^nao_ligado:', ''), 200), v_ate);
     end;
     update public.whatsapp_perguntas x set resposta_message_id = coalesce(x.resposta_message_id, v_msg) where x.id = w.id;
     select * into c from public.comprovantes x where x.id = c.id;
-    return jsonb_build_object('resultado', 'ligado', 'cmp', public._comprovante_resumo(c), 'ligacao', v_l->'efeito',
-                              'proxima', null, 'motivo', v_l->>'aviso', 'ate', null);
+    -- resposta 3 do dono: o SIM já aprova a linha (a proposta classificada; o finance-review aprova)
+    v_aprovar := public._comprovante_a_aprovar(c);
+    return public._comprovante_banco_saida('ligado', c, v_l->>'aviso', null, jsonb_build_object(
+      'ligacao', v_l->'efeito',
+      'aprovar', case when v_aprovar is not null then jsonb_build_object('proposta_id', v_aprovar->'proposta_id') end));
   end if;
 
   -- recusou: as linhas não voltam; a próxima avaliação procura outras
@@ -1702,8 +2203,7 @@ begin
    where x.id = c.id;
   perform public._pergunta_fechar(w.id, 'respondida', null, v_msg);
   select * into c from public.comprovantes x where x.id = c.id;
-  return jsonb_build_object('resultado', 'recusado', 'cmp', public._comprovante_resumo(c), 'ligacao', null, 'proxima', null,
-                            'motivo', case when v_nivel = 'verde' then 'nao_e_essa' else 'nenhuma' end, 'ate', v_ate);
+  return public._comprovante_banco_saida('recusado', c, case when v_nivel = 'verde' then 'nao_e_essa' else 'nenhuma' end, v_ate);
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
@@ -1722,7 +2222,7 @@ begin
   select coalesce(jsonb_agg(t.phone order by t.phone), '[]'::jsonb) into v
     from (select distinct x.phone_normalized as phone
             from public.comprovantes x
-           where x.banco_perguntar and x.situacao = 'aguardando_banco' and not x.banco_so_registro and x.banco_perguntas < 3
+           where x.banco_perguntar and x.situacao = 'aguardando_banco' and x.banco_perguntas < 3
              and (x.banco_ultima_pergunta_em is null or x.banco_ultima_pergunta_em <= now() - interval '4 hours')
            order by 1
            limit least(greatest(coalesce(p_limite, 5), 1), 50)) t
@@ -1754,7 +2254,7 @@ begin
   perform pg_advisory_xact_lock(hashtextextended('pergunta:' || p_phone, 0));
   select x.id, x.referencia_codigo into w
     from public.whatsapp_perguntas x
-   where x.phone_normalized = p_phone and x.status = 'aberta' and x.origem = 'comprovante' and x.passo = 'banco'
+   where x.phone_normalized = p_phone and x.status = 'aberta' and x.origem = 'comprovante' and x.passo in ('banco', 'banco_quem')
    order by x.aberta_em desc
    limit 1;
   if not found then
@@ -1854,6 +2354,13 @@ revoke all on function public._comprovante_banco_resumo(public.comprovantes) fro
 revoke all on function public._comprovante_banco_pergunta(public.comprovantes, uuid, jsonb, text) from public, anon, authenticated, service_role;
 revoke all on function public._comprovante_banco_abrir(uuid, text) from public, anon, authenticated, service_role;
 revoke all on function public._comprovantes_banco_varrer(integer, text) from public, anon, authenticated, service_role;
+revoke all on function public._comprovante_linhas_em_alguma_conta(public.comprovantes) from public, anon, authenticated, service_role;
+revoke all on function public._comprovante_aparece_em_alguma_conta(public.comprovantes) from public, anon, authenticated, service_role;
+revoke all on function public._comprovante_extrato_em_dia(public.comprovantes) from public, anon, authenticated, service_role;
+revoke all on function public._comprovante_quem_pode(public.comprovantes) from public, anon, authenticated, service_role;
+revoke all on function public._comprovante_opcoes_quem_pagou(public.comprovantes) from public, anon, authenticated, service_role;
+revoke all on function public._comprovante_a_aprovar(public.comprovantes) from public, anon, authenticated, service_role;
+revoke all on function public._comprovante_banco_saida(text, public.comprovantes, text, date, jsonb) from public, anon, authenticated, service_role;
 
 revoke all on function public.comprovantes_reavaliar_banco(text, uuid) from public, anon, authenticated;
 revoke all on function public.comprovantes_linhas_da_conciliacao(uuid[]) from public, anon, authenticated;
@@ -1861,15 +2368,19 @@ revoke all on function public.comprovante_banco_proxima(text, text, uuid) from p
 revoke all on function public.comprovante_banco_responder(jsonb) from public, anon, authenticated;
 revoke all on function public.comprovantes_vigia_banco(integer) from public, anon, authenticated;
 revoke all on function public.comprovante_banco_ceder(text) from public, anon, authenticated;
+revoke all on function public.comprovante_a_aprovar(uuid) from public, anon, authenticated;
+revoke all on function public.comprovante_aprovado(uuid, uuid, uuid) from public, anon, authenticated;
 grant execute on function public.comprovantes_reavaliar_banco(text, uuid) to service_role;
 grant execute on function public.comprovantes_linhas_da_conciliacao(uuid[]) to service_role;
 grant execute on function public.comprovante_banco_proxima(text, text, uuid) to service_role;
 grant execute on function public.comprovante_banco_responder(jsonb) to service_role;
 grant execute on function public.comprovantes_vigia_banco(integer) to service_role;
 grant execute on function public.comprovante_banco_ceder(text) to service_role;
+grant execute on function public.comprovante_a_aprovar(uuid) to service_role;
+grant execute on function public.comprovante_aprovado(uuid, uuid, uuid) to service_role;
 
 -- ---------------------------------------------------------------------------------------------
--- Prova: R1-R4 e R6 só service_role; helpers sem grant; extrato_da_conta com os grants de hoje; as
+-- Prova: R1-R4, R6, R10-R12 só service_role; helpers sem grant; extrato_da_conta com os grants de hoje; as
 -- rotas que a F3 reaproveita (anotação, conciliação) com assinatura e grants iguais.
 -- ---------------------------------------------------------------------------------------------
 do $$
@@ -1881,7 +2392,9 @@ declare
     'public.comprovante_banco_proxima(text, text, uuid)',
     'public.comprovante_banco_responder(jsonb)',
     'public.comprovantes_vigia_banco(integer)',
-    'public.comprovante_banco_ceder(text)'];
+    'public.comprovante_banco_ceder(text)',
+    'public.comprovante_a_aprovar(uuid)',
+    'public.comprovante_aprovado(uuid, uuid, uuid)'];
   v_helpers text[] := array[
     'public._comprovante_banco_regra(public.comprovantes)',
     'public._comprovante_nomes(public.comprovantes)',
@@ -1899,7 +2412,14 @@ declare
     'public._comprovante_banco_resumo(public.comprovantes)',
     'public._comprovante_banco_pergunta(public.comprovantes, uuid, jsonb, text)',
     'public._comprovante_banco_abrir(uuid, text)',
-    'public._comprovantes_banco_varrer(integer, text)'];
+    'public._comprovantes_banco_varrer(integer, text)',
+    'public._comprovante_linhas_em_alguma_conta(public.comprovantes)',
+    'public._comprovante_aparece_em_alguma_conta(public.comprovantes)',
+    'public._comprovante_extrato_em_dia(public.comprovantes)',
+    'public._comprovante_quem_pode(public.comprovantes)',
+    'public._comprovante_opcoes_quem_pagou(public.comprovantes)',
+    'public._comprovante_a_aprovar(public.comprovantes)',
+    'public._comprovante_banco_saida(text, public.comprovantes, text, date, jsonb)'];
 begin
   foreach v_f in array v_rpcs || v_helpers loop
     if has_function_privilege('anon', v_f, 'execute') or has_function_privilege('authenticated', v_f, 'execute') then
@@ -1926,6 +2446,10 @@ begin
      or (select l.lanname from pg_proc p join pg_language l on l.oid = p.prolang
           where p.oid = 'public.extrato_da_conta(uuid, date, date)'::regprocedure) <> 'sql' then
     raise exception 'extrato_da_conta mudou de casca (deve seguir sql e invoker)';
+  end if;
+  -- o cancelamento do CMP aprovado pelo SIM desfaz a aprovação pela rota da tela (resposta 3)
+  if to_regprocedure('public.desfazer_aprovacao(text, uuid, text, uuid)') is null then
+    raise exception 'desfazer_aprovacao mudou de assinatura';
   end if;
   -- as rotas que a F3 reaproveita: assinatura e grants iguais
   if to_regprocedure('public._aplicar_anotacao(uuid, uuid)') is null

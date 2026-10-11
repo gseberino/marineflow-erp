@@ -15,7 +15,10 @@
 --   * comprovantes_vigia_conversa: + "indices_pessoais" (a mesma reserva de "indices");
 --   * _comprovantes_vigia_tem_trabalho: + índice pessoal vencido + a pergunta da F3 que o vigia pode
 --     fazer agora (com o dono ocupado, fora do horário ou a fila da F2 na frente, não conta);
---   * _comprovantes_manutencao: + (c) a varredura da F3 (limite de 20 CMPs na busca por passo).
+--   * _comprovantes_manutencao: + (c) a varredura da F3 (limite de 20 CMPs na busca por passo) e (d) a
+--     divisão do pagamento do técnico entre diárias e reembolso (resposta 4 do dono, 11/10/2026): a do Pix
+--     anotado se aplica até 2 min depois da aprovação da linha.
+-- O "quem pagou?" da regra E (ajustes do dono) é pergunta do extrato: a guarda já a conta (banco_perguntar).
 --
 -- DDL + funções. Não escreve dados. Idempotente.
 
@@ -120,11 +123,11 @@ begin
            'destino', x.destino,
            'os', so.service_order_number,
            'barco', nullif(btrim(v.name), ''),
-           'cobrar_cliente', case when exists (select 1 from jsonb_array_elements(x.efeitos) e
-                                                where e->>'tipo' = 'despesa_os' and (e->>'cobrar_a_parte')::boolean)
-                                  then 'a_parte'
-                                  when x.cobrar_cliente then 'sim'
-                                  when not x.cobrar_cliente then 'nao' end,
+           'na_os', case when x.destino is distinct from 'os' then null
+                         when x.efeitos @> '[{"tipo": "despesa_os"}]'::jsonb then 'despesa'
+                         when x.efeitos @> '[{"tipo": "anexar_despesa"}]'::jsonb or x.efeitos @> '[{"tipo": "anexar_peca"}]'::jsonb
+                              or x.efeitos @> '[{"tipo": "comprovar_na_os", "motivo": "ambiguo"}]'::jsonb then 'ja_lancado'
+                         else x.tipo_na_os end,
            'quem_pagou', x.quem_pagou,
            'forma', coalesce(x.forma_confirmada, x.forma_pagamento),
            'situacao', x.situacao,
@@ -175,11 +178,11 @@ begin
            'destino', x.destino,
            'os', so.service_order_number,
            'barco', nullif(btrim(v.name), ''),
-           'cobrar_cliente', case when exists (select 1 from jsonb_array_elements(x.efeitos) e
-                                                where e->>'tipo' = 'despesa_os' and (e->>'cobrar_a_parte')::boolean)
-                                  then 'a_parte'
-                                  when x.cobrar_cliente then 'sim'
-                                  when not x.cobrar_cliente then 'nao' end,
+           'na_os', case when x.destino is distinct from 'os' then null
+                         when x.efeitos @> '[{"tipo": "despesa_os"}]'::jsonb then 'despesa'
+                         when x.efeitos @> '[{"tipo": "anexar_despesa"}]'::jsonb or x.efeitos @> '[{"tipo": "anexar_peca"}]'::jsonb
+                              or x.efeitos @> '[{"tipo": "comprovar_na_os", "motivo": "ambiguo"}]'::jsonb then 'ja_lancado'
+                         else x.tipo_na_os end,
            'quem_pagou', x.quem_pagou,
            'forma', coalesce(x.forma_confirmada, x.forma_pagamento),
            'situacao', x.situacao,
@@ -430,14 +433,15 @@ as $$
     -- a pergunta do extrato que o vigia pode fazer agora (horário, espaçamento, limite; a F2 primeiro)
     or exists (select 1 from (select distinct x.phone_normalized as phone
                                 from public.comprovantes x
-                               where x.banco_perguntar and x.situacao = 'aguardando_banco' and not x.banco_so_registro
+                               where x.banco_perguntar and x.situacao = 'aguardando_banco'
                                  and x.banco_perguntas < 3
                                  and (x.banco_ultima_pergunta_em is null or x.banco_ultima_pergunta_em <= now() - interval '4 hours')) t
                 where public._comprovante_banco_pode(t.phone) is null);
 $$;
 
 -- ---------------------------------------------------------------------------------------------
--- 6. Manutenção só de banco (chamada pelo próprio pg_cron): corpo da F2 IGUAL + (c) a varredura da F3
+-- 6. Manutenção só de banco (chamada pelo próprio pg_cron): corpo da F2 IGUAL + (c) a varredura da F3 e
+--    (d) as divisões pendentes do pagamento do técnico (resposta 4 do dono)
 -- ---------------------------------------------------------------------------------------------
 create or replace function public._comprovantes_manutencao()
 returns integer
@@ -452,6 +456,7 @@ declare
   v_c integer := 0;
   v_d integer := 0;
   v_e integer := 0;
+  v_f integer := 0;
   v_varredura jsonb;
   r record;
 begin
@@ -521,7 +526,14 @@ begin
   exception when others then
     raise warning 'comprovantes: varredura do extrato falhou: %', sqlstate;
   end;
-  return v_a + v_b + v_c + v_d + v_e;
+  -- (d) resposta 4 do dono: o Pix ao técnico anotado com a divisão (diárias e reembolso) se divide quando a
+  --     linha dele é aprovada — venha a aprovação da tela, do assistente ou da regra por CPF
+  begin
+    v_f := public._diarias_aplicar_divisoes_pendentes(20);
+  exception when others then
+    raise warning 'diárias: divisões pendentes do pagamento falharam: %', sqlstate;
+  end;
+  return v_a + v_b + v_c + v_d + v_e + v_f;
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
@@ -593,8 +605,9 @@ begin
                     and tgrelid = 'public.comprovantes'::regclass and tgenabled <> 'D') then
     raise exception 'gatilho do índice pessoal ausente';
   end if;
-  if position('_comprovantes_banco_varrer' in pg_get_functiondef('public._comprovantes_manutencao()'::regprocedure)) = 0 then
-    raise exception 'a manutenção não chama a varredura da F3';
+  if position('_comprovantes_banco_varrer' in pg_get_functiondef('public._comprovantes_manutencao()'::regprocedure)) = 0
+     or position('_diarias_aplicar_divisoes_pendentes' in pg_get_functiondef('public._comprovantes_manutencao()'::regprocedure)) = 0 then
+    raise exception 'a manutenção não chama a varredura da F3 ou a divisão pendente do pagamento do técnico';
   end if;
   if exists (select 1 from pg_namespace where nspname = 'cron')
      and not exists (select 1 from cron.job where jobname = 'comprovantes-vigia'

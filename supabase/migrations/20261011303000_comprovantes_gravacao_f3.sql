@@ -26,6 +26,18 @@
 --   * _comprovante_aplicar_notas_chegadas: o miolo vira _comprovante_nota_aplicar (helper); só a nota
 --     confirmada fecha o CMP (a pendente não tem linhas e pode ser desistida);
 --   * comprovantes_pendentes: + CMP com pergunta do extrato a fazer e a NF-e que chegou por e-mail.
+-- Ajustes do dono (11/10/2026), nas definições finais acima (o hunk das respostas 1, 2 e 8 é o MESMO da
+-- cópia da F2, em 20261011203000):
+--   * 1: o PESSOAL que a conta/cartão da empresa pagou é gasto pessoal do sócio (sem OS, "Gasto Pessoal
+--     Sócio - Descontar PL", o sócio de favorecido na anotação e no Caixa); o do bolso, só o arquivo;
+--   * 2: na OS, o comprovante nunca é cobrado do cliente: o lançamento que já está nela só é comprovado;
+--     sem ele, peça (só a prova) ou despesa (custo interno, em qualquer status, total igual);
+--   * 3: a gravação que liga e classifica devolve "aprovar" (o finance-review aprova a proposta: o SIM
+--     já aprova a linha); o cancelamento desfaz a aprovação do SIM pela rota da tela;
+--   * 6: a alimentação paga pelo técnico num dia em que ele já tem o extra (o almoço) avisa;
+--   * 7: o miolo do cancelamento vira _comprovante_desfazer, que a troca de quem pagou (regra E,
+--     _comprovante_trocar_pagador) também usa: desfaz e grava de novo na mesma transação;
+--   * 8: o lançamento que já existe só ganha o que está vazio (aviso categoria_existente_diferente).
 -- Nova:
 --   R5 comprovante_nota_chegou(nota)   a nota CONFIRMADA fecha o CMP que a esperava (para a confirmação
 --                                      chamar; hoje quem fecha é o cron, até 2 min depois — o
@@ -86,7 +98,9 @@ declare
   v_link_desc text;
   v_bancaria boolean;
   v_financeiro_feito boolean := false;
-  v_billable_final boolean;
+  -- ajustes do dono (11/10/2026)
+  v_na_os jsonb;
+  v_extra jsonb;
   -- F3
   v_link_tx uuid;
   v_regra jsonb;
@@ -118,7 +132,13 @@ begin
      and cardinality(v_falta) = 0 and public._comprovante_mesma_compra(c) is not null then
     v_falta := v_falta || 'mesma_compra'::text;
   end if;
-  if v_mesma_id is null and c.destino is not null and c.destino <> 'pessoal' and not v_nfe and c.forma_confirmada is null then
+  -- PESSOAL (ajustes do dono, 11/10/2026): quem pagou — da conta/cartão da EMPRESA vira gasto pessoal do
+  -- sócio (e então importa como foi pago); do bolso ou do cartão pessoal, só o arquivo
+  if c.destino = 'pessoal' and c.quem_pagou is null then
+    v_falta := v_falta || 'quem_pagou'::text;
+  end if;
+  if v_mesma_id is null and c.destino is not null and (c.destino <> 'pessoal' or c.quem_pagou = 'empresa')
+     and not v_nfe and c.forma_confirmada is null then
     v_falta := v_falta || 'como_pagou'::text;
   end if;
   if cardinality(v_falta) > 0 then
@@ -132,6 +152,20 @@ begin
   v_cat := v_ef->>'categoria';
   v_os := public._comprovante_os_info(c.destino_os_id);
   v_faturada := coalesce((v_os->>'faturada')::boolean, false);
+  -- OS (ajustes do dono, 11/10/2026): o lançamento que já está na OS só é comprovado; sem ele, o dono diz
+  -- se é peça ou despesa da OS (a despesa precisa de categoria; a da NF-e fica com a de peças)
+  if c.destino = 'os' and v_mesma_id is null and v_quem is distinct from 'cliente' then
+    v_na_os := public._comprovante_lancamento_na_os(c);
+    if c.tipo_na_os is null and v_na_os is null then
+      v_falta := v_falta || 'tipo_na_os'::text;
+    elsif c.tipo_na_os = 'despesa' and v_cat is null and not v_nfe then
+      v_falta := v_falta || 'categoria'::text;
+    end if;
+    if cardinality(v_falta) > 0 then
+      return jsonb_build_object('efeitos', '[]'::jsonb, 'avisos', '[]'::jsonb, 'situacao_final', null, 'pasta', null,
+                                'falta', to_jsonb(v_falta));
+    end if;
+  end if;
   v_forma := c.forma_confirmada;
   v_bancaria := v_forma in ('pix', 'transferencia', 'debito', 'boleto', 'deposito', 'cheque');
   -- quem é o fornecedor (para anexar só o que é DESTA compra)
@@ -143,7 +177,7 @@ begin
   v_nome := public._comprovante_fornecedor(c)->>'nome';
   -- F3: a avaliação do extrato (só quem procura linha: a empresa pagou por forma bancária ou crédito)
   v_regra := public._comprovante_banco_regra(c);
-  if v_regra is not null and not coalesce((v_regra->>'so_registro')::boolean, false) then
+  if v_regra is not null then
     v_busca := true;
     v_av := public._comprovante_candidatos(c);
     v_nivel := v_av->>'nivel';
@@ -156,8 +190,10 @@ begin
     -- a mesma compra de outro CMP: só o arquivo (o outro já lançou)
     v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'mesma_compra', 'cmp', v_mesma_codigo, 'cmp_id', v_mesma_id));
 
-  elsif c.destino = 'pessoal' then
-    -- L: só o arquivo em COMPROVANTES/PESSOAL
+  elsif c.destino = 'pessoal' and v_quem is distinct from 'empresa' then
+    -- L: do bolso ou do cartão pessoal do sócio — só o arquivo em COMPROVANTES/PESSOAL. O PESSOAL que a
+    -- conta ou o cartão da EMPRESA pagou segue o bloco geral (sem OS), como gasto pessoal do sócio:
+    -- "Gasto Pessoal Sócio - Descontar PL", com o sócio de favorecido (a rotina do pró-labore desconta)
     v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'nada', 'motivo', 'pessoal'));
 
   elsif v_nfe then
@@ -182,31 +218,42 @@ begin
       v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'aguardar_nota', 'os_id', c.destino_os_id));
       v_situacao := 'aguardando_xml';
     end if;
-    -- O custo da NF-e na OS (revisão de 11/10/2026): "custo da HBR" vira despesa da OS NÃO faturável
-    -- com o valor da nota — é o que o Lucro por OS desconta (nenhuma view lê a OS pela linha da nota);
-    -- "cobrar" com a OS já concluída/faturada vira a despesa "cobrar à parte" (o total não muda),
-    -- como no cupom. Com a OS aberta, "cobrar" = incluir as peças na OS pela tela (pendência). Se uma
-    -- peça da nota já entrou como peça da OS, o custo dela já está no Lucro: não lança a despesa.
-    if c.destino = 'os' and (c.cobrar_cliente is false or (c.cobrar_cliente and v_faturada)) then
-      if v_nota.id is not null and exists (
-           select 1 from public.fiscal_note_items i
-             join public.service_order_parts sp
-               on sp.service_order_id = c.destino_os_id and sp.product_id = coalesce(i.matched_product_id, i.product_id)
-            where i.fiscal_note_id = v_nota.id) then
-        v_avisos := v_avisos || 'pecas_da_nota_ja_na_os'::text;
-      else
+    -- O custo da NF-e na OS (ajustes do dono, 11/10/2026): a nota nunca é cobrada do cliente por aqui.
+    -- O lançamento que já está na OS só é comprovado; "peça" = as peças entram pela tela da OS
+    -- (pendência); "despesa" = custo interno da OS com o valor da nota (fora de qualquer documento do
+    -- cliente; o Lucro por OS desconta) — exceto se uma peça da nota já entrou como peça da OS (o custo
+    -- dela já está no Lucro).
+    if c.destino = 'os' then
+      if c.tipo_na_os is null and v_na_os->>'tipo' = 'despesa' then
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
-          'tipo', 'despesa_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero',
-          'billable', false, 'cobrar_a_parte', coalesce(c.cobrar_cliente, false), 'direto', v_faturada,
-          'paid_by', 'company', 'pagador_id', null, 'categoria', coalesce(v_cat, 'Peças e materiais'), 'nota', true));
+          'tipo', 'anexar_despesa', 'so_expense_id', (v_na_os->>'id')::uuid, 'os_numero', v_os->>'numero',
+          'valor', v_na_os->>'valor', 'data', v_na_os->'data', 'descricao', v_na_os->>'descricao',
+          'categoria', v_na_os->>'categoria', 'billable',
+          (select e.billable_to_client from public.service_order_expenses e where e.id = (v_na_os->>'id')::uuid)));
+      elsif c.tipo_na_os is null and v_na_os->>'tipo' = 'peca' then
+        v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+          'tipo', 'anexar_peca', 'so_part_id', (v_na_os->>'id')::uuid, 'os_numero', v_os->>'numero',
+          'produto', v_na_os->>'produto', 'valor', v_na_os->>'valor'));
+      elsif c.tipo_na_os is null and v_na_os ? 'ambiguo' then
+        v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+          'tipo', 'comprovar_na_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero', 'motivo', 'ambiguo',
+          'n', (v_na_os->>'ambiguo')::integer));
+        v_avisos := v_avisos || 'varios_na_os'::text;
+      elsif c.tipo_na_os = 'peca' then
+        v_pend := v_pend || 'incluir_na_os'::text;
+      elsif c.tipo_na_os = 'despesa' then
+        if v_nota.id is not null and exists (
+             select 1 from public.fiscal_note_items i
+               join public.service_order_parts sp
+                 on sp.service_order_id = c.destino_os_id and sp.product_id = coalesce(i.matched_product_id, i.product_id)
+              where i.fiscal_note_id = v_nota.id) then
+          v_avisos := v_avisos || 'pecas_da_nota_ja_na_os'::text;
+        else
+          v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+            'tipo', 'despesa_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero',
+            'categoria', coalesce(v_cat, 'Peças e materiais'), 'paid_by', 'company', 'pagador_id', null, 'nota', true));
+        end if;
       end if;
-    end if;
-    if c.destino = 'os' and c.cobrar_cliente then
-      -- OS já concluída/faturada: o total não muda — fica a lembrança de cobrar à parte
-      v_pend := v_pend || case when v_faturada then 'cobrar_a_parte' else 'incluir_na_os' end;
-    end if;
-    if c.destino = 'os' and v_faturada then
-      v_avisos := v_avisos || 'os_faturada_total_nao_muda'::text;
     end if;
 
   elsif v_quem = 'cliente' then
@@ -214,86 +261,44 @@ begin
     v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'nada', 'motivo', 'cliente_pagou'));
 
   else
-    -- ── (1) a OS: A/B/C (e G com paid_by technician) ──────────────────────────────────────
+    -- ── (1) a OS (ajustes do dono, 11/10/2026): o comprovante nunca é cobrado do cliente ─────
+    --   o lançamento que já está na OS (despesa ou peça, lançado à mão ou pelo assistente) só é
+    --   comprovado: anexa, nada nele muda; dois ou mais iguais: só a prova, sem escolher (aviso). Sem
+    --   nenhum, o dono disse: peça → só a prova (a peça entra pela OS: pendência de lançá-la, não lança
+    --   custo para não contar duas vezes); despesa → custo INTERNO da OS (não faturável, origem = o CMP,
+    --   em qualquer status da OS: o total não muda; fora dos documentos do cliente; entra no Lucro por OS).
     if c.destino = 'os' then
-      -- a despesa que já está na OS com o mesmo valor e data E do mesmo fornecedor
-      select count(*) into v_parecidos
-        from public.service_order_expenses e
-       where e.service_order_id = c.destino_os_id
-         and abs(e.amount - v_valor) <= 0.01 and abs(e.expense_date - v_data) <= 1
-         and not exists (select 1 from public.comprovantes y where y.so_expense_id = e.id);
-      select array_agg(e.id order by e.id) into v_ids
-        from public.service_order_expenses e
-        left join public.suppliers s on s.id = e.supplier_id
-       where e.service_order_id = c.destino_os_id
-         and abs(e.amount - v_valor) <= 0.01 and abs(e.expense_date - v_data) <= 1
-         and not exists (select 1 from public.comprovantes y where y.so_expense_id = e.id)
-         and ((v_sup is not null and e.supplier_id = v_sup)
-              or (regexp_replace(coalesce(s.cnpj_cpf, ''), '\D', '', 'g') = any (v_docs))
-              or public._comprovante_nome_confere(v_nome, coalesce(e.description, '') || ' ' || coalesce(e.notes, '')));
-      if coalesce(cardinality(v_ids), 0) = 1 then
-        select e.id, e.amount, e.expense_date, e.description, e.billable_to_client, e.cobrar_a_parte, e.linked_payable_id
-          into v_desp from public.service_order_expenses e where e.id = v_ids[1];
+      if c.tipo_na_os is null and v_na_os->>'tipo' = 'despesa' then
+        select e.id, e.amount, e.expense_date, e.description, e.billable_to_client, e.linked_payable_id, e.category
+          into v_desp from public.service_order_expenses e where e.id = (v_na_os->>'id')::uuid;
         v_desp_anexada := v_desp.id;
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
           'tipo', 'anexar_despesa', 'so_expense_id', v_desp.id, 'os_numero', v_os->>'numero',
           'valor', v_desp.amount::text, 'data', v_desp.expense_date, 'descricao', left(v_desp.description, 60),
-          'billable', v_desp.billable_to_client));
-        -- a despesa anexada segue o "cobrar ou não" que o dono respondeu agora
-        if c.cobrar_cliente is not null and v_quem <> 'cliente' then
-          if not v_faturada and v_desp.billable_to_client is distinct from c.cobrar_cliente then
-            v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
-              'tipo', 'ajustar_despesa', 'so_expense_id', v_desp.id, 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero',
-              'campo', 'billable_to_client', 'antes', v_desp.billable_to_client, 'depois', c.cobrar_cliente, 'recalcular', true));
-            v_billable_final := c.cobrar_cliente;
-          elsif v_faturada and not v_desp.billable_to_client and v_desp.cobrar_a_parte is distinct from c.cobrar_cliente then
-            v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
-              'tipo', 'ajustar_despesa', 'so_expense_id', v_desp.id, 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero',
-              'campo', 'cobrar_a_parte', 'antes', v_desp.cobrar_a_parte, 'depois', c.cobrar_cliente, 'recalcular', false));
-          elsif v_faturada and v_desp.billable_to_client and not c.cobrar_cliente then
-            v_avisos := v_avisos || 'cobranca_da_despesa_nao_muda'::text;
-          end if;
-        end if;
+          'categoria', v_desp.category, 'billable', v_desp.billable_to_client));
         -- a despesa já tem conta a pagar (lançada com "também criar conta"): é ela o financeiro
         if v_desp.linked_payable_id is not null then
           select p.id, p.status, p.description, p.bank_transaction_id into v_link_id, v_link_status, v_link_desc, v_link_tx
             from public.payables p where p.id = v_desp.linked_payable_id and p.status <> 'cancelled';
         end if;
-      elsif coalesce(cardinality(v_ids), 0) > 1 then
-        v_avisos := v_avisos || 'duplicado_ambiguo'::text;
-        v_pend := v_pend || 'classificar_no_extrato'::text;
-      else
-        if v_parecidos > 0 then
-          v_avisos := v_avisos || 'parecido_sem_identidade'::text;
-        end if;
-        v_billable_final := not v_faturada and coalesce(c.cobrar_cliente, false);
+      elsif c.tipo_na_os is null and v_na_os->>'tipo' = 'peca' then
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
-          'tipo', 'despesa_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero',
-          'billable', not v_faturada and coalesce(c.cobrar_cliente, false),
-          'cobrar_a_parte', v_faturada and coalesce(c.cobrar_cliente, false),
-          'direto', v_faturada,
+          'tipo', 'anexar_peca', 'so_part_id', (v_na_os->>'id')::uuid, 'os_numero', v_os->>'numero',
+          'produto', v_na_os->>'produto', 'valor', v_na_os->>'valor'));
+      elsif c.tipo_na_os is null and v_na_os ? 'ambiguo' then
+        v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+          'tipo', 'comprovar_na_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero', 'motivo', 'ambiguo',
+          'n', (v_na_os->>'ambiguo')::integer));
+        v_avisos := v_avisos || 'varios_na_os'::text;
+      elsif c.tipo_na_os = 'peca' then
+        v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+          'tipo', 'comprovar_na_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero', 'motivo', 'peca'));
+        v_pend := v_pend || 'incluir_na_os'::text;
+      else
+        v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+          'tipo', 'despesa_os', 'os_id', c.destino_os_id, 'os_numero', v_os->>'numero', 'categoria', v_cat,
           'paid_by', case when v_quem = 'tecnico' then 'technician' else 'company' end,
-          'pagador_id', case when v_quem = 'tecnico' then v_pagador end,
-          'categoria', coalesce(v_cat, 'Peças e materiais')));
-      end if;
-      if coalesce(v_billable_final, false) and not v_faturada then
-        if coalesce((v_os->>'assinada')::boolean, false) then
-          v_avisos := v_avisos || 'os_assinada_pede_nova_assinatura'::text;
-        end if;
-        -- o total da OS sobe, mas o recebível de saldo/parcelas já emitido não (a tela faz a cascata)
-        if exists (select 1 from public.receivables r
-                    where r.service_order_id = c.destino_os_id and r.status <> 'cancelled' and not coalesce(r.is_deposit, false))
-           or exists (select 1 from public.service_orders so
-                       where so.id = c.destino_os_id and coalesce(so.payment_status, 'unpaid') <> 'unpaid') then
-          v_avisos := v_avisos || 'recebiveis_nao_mudam'::text;
-          v_pend := v_pend || 'ajustar_recebiveis'::text;
-        end if;
-      end if;
-      if v_faturada then
-        v_avisos := v_avisos || 'os_faturada_total_nao_muda'::text;
-        if coalesce(c.cobrar_cliente, false) then
-          v_pend := v_pend || 'cobrar_a_parte'::text;
-        end if;
+          'pagador_id', case when v_quem = 'tecnico' then v_pagador end));
       end if;
     end if;
 
@@ -482,14 +487,48 @@ begin
         return jsonb_build_object('efeitos', '[]'::jsonb, 'avisos', to_jsonb(v_avisos), 'situacao_final', null,
                                   'pasta', null, 'falta', jsonb_build_array('quem_pagou'));
       end if;
+      -- a conta a pagar EM ABERTO deste fornecedor e valor (os critérios do ramo da empresa, em qualquer
+      -- forma): o sócio pagou do bolso a conta que a empresa ainda deve? Reembolsar o sócio contaria o
+      -- gasto duas vezes (a conta do fornecedor + a conta ao sócio) e o fornecedor seguiria "a pagar".
+      -- Não lança reembolso: anexa a conta (só uma), deixa "dar baixa" e o aviso — quem pagou essa conta
+      -- (e o reembolso dele) o dono resolve pela tela. Vale também para a troca de quem pagou (regra E).
       select array_agg(p.id order by p.id) into v_ids
         from public.payables p
-       where p.payee_id = v_pagador and p.status <> 'cancelled' and p.bank_transaction_id is null
-         and p.payment_method is distinct from 'cash'
-         and abs(p.amount - v_valor) <= 0.01 and abs(p.issue_date - v_data) <= 1
-         and (p.supplier_id is null or v_sup is null or p.supplier_id = v_sup)
-         and not exists (select 1 from public.comprovantes y where y.payable_id = p.id);
-      if coalesce(cardinality(v_ids), 0) = 1 then
+        left join public.suppliers s on s.id = p.supplier_id
+        left join public.fiscal_notes fn on fn.id = p.fiscal_note_id
+       where p.status in ('pending', 'overdue', 'partially_paid') and p.bank_transaction_id is null
+         and p.payee_id is distinct from v_pagador
+         and abs(p.amount - v_valor) <= 0.01
+         and (abs(p.issue_date - v_data) <= 5 or abs(p.due_date - v_data) <= 5)
+         and not exists (select 1 from public.comprovantes y where y.payable_id = p.id)
+         and ((v_sup is not null and p.supplier_id = v_sup)
+              or regexp_replace(coalesce(s.cnpj_cpf, ''), '\D', '', 'g') = any (v_docs)
+              or regexp_replace(coalesce(fn.issuer_cnpj, ''), '\D', '', 'g') = any (v_docs)
+              or public._comprovante_nome_confere(v_nome, coalesce(p.supplier_name, '') || ' ' || coalesce(p.description, '')));
+      if coalesce(cardinality(v_ids), 0) > 0 then
+        if cardinality(v_ids) = 1 then
+          v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
+            'tipo', 'anexar_lancamento', 'payable_id', v_ids[1], 'conta', 'CONTA A PAGAR', 'origem', 'conta_em_aberto',
+            'valor', (select p.amount::text from public.payables p where p.id = v_ids[1]),
+            'data', (select coalesce(p.due_date, p.issue_date) from public.payables p where p.id = v_ids[1]),
+            'descricao', (select left(p.description, 60) from public.payables p where p.id = v_ids[1]),
+            'categoria', v_cat));
+        end if;
+        v_avisos := v_avisos || 'conta_aberta_paga_pelo_socio'::text;
+        v_pend := v_pend || 'dar_baixa'::text;
+        v_ids := null;
+      else
+        select array_agg(p.id order by p.id) into v_ids
+          from public.payables p
+         where p.payee_id = v_pagador and p.status <> 'cancelled' and p.bank_transaction_id is null
+           and p.payment_method is distinct from 'cash'
+           and abs(p.amount - v_valor) <= 0.01 and abs(p.issue_date - v_data) <= 1
+           and (p.supplier_id is null or v_sup is null or p.supplier_id = v_sup)
+           and not exists (select 1 from public.comprovantes y where y.payable_id = p.id);
+      end if;
+      if 'conta_aberta_paga_pelo_socio' = any (v_avisos) then
+        null;
+      elsif coalesce(cardinality(v_ids), 0) = 1 then
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
           'tipo', 'anexar_lancamento', 'payable_id', v_ids[1],
           'conta', 'BOLSO ' || upper(split_part(public._comprovante_normalizar(v_ef->>'pagador_nome'), ' ', 1)),
@@ -532,10 +571,24 @@ begin
                                                                        'pagador_id', v_pagador, 'pagador_nome', v_ef->>'pagador_nome'));
         v_avisos := v_avisos || 'despesa_ja_reembolsada'::text;
       elsif v_diaria then
+        -- resposta 6 do dono: o "extra" da diária é o almoço (quando o técnico traz o próprio); a
+        -- alimentação paga por ele num dia em que já tem o extra avisa no resumo (não bloqueia: o dono decide)
+        if v_cat = 'Alimentação de campo' then
+          select jsonb_build_object('valor', round(ws.extras, 2)::text, 'data', ws.data) into v_extra
+            from public.work_shifts ws
+            join public.work_profiles wp on wp.id = ws.work_profile_id
+           where wp.payee_id = v_pagador and ws.data = v_data and ws.fracao is not null and ws.extras > 0
+           order by ws.extras desc, ws.id
+           limit 1;
+          if v_extra is not null then
+            v_avisos := v_avisos || 'almoco_ja_no_extra'::text;
+          end if;
+        end if;
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
           'tipo', 'reembolso_tecnico', 'favorecido_id', v_pagador, 'favorecido_nome', v_ef->>'pagador_nome',
           'valor', v_valor::text, 'data', public._comprovante_reembolso_data(v_pagador, v_data),
-          'categoria', v_cat, 'os_id', case when c.destino = 'os' then c.destino_os_id end));
+          'categoria', v_cat, 'os_id', case when c.destino = 'os' then c.destino_os_id end,
+          'extra_do_dia', v_extra));
       else
         -- G: o técnico sem diária vigente fica fora das Diárias: nada no financeiro, a pendência da F2
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'nada', 'motivo', 'tecnico_f2b',
@@ -553,6 +606,23 @@ begin
     if v_cat is not null and not coalesce((v_ef->>'categoria_ativa')::boolean, true) then
       v_avisos := v_avisos || 'categoria_inativa'::text;
     end if;
+  end if;
+
+  -- ── resposta 8 do dono (11/10/2026): o lançamento que já existe só ganha o que está vazio (OS,
+  --    categoria); a categoria que ele já tem vai no efeito e, se difere da do CMP, o resumo avisa ──
+  v_efeitos := (select coalesce(jsonb_agg(case when e->>'tipo' = 'anexar_lancamento'
+                                               then e || jsonb_build_object('categoria_atual',
+                                                      (select p.expense_category from public.payables p where p.id = (e->>'payable_id')::uuid))
+                                               else e end order by o), '[]'::jsonb)
+                  from jsonb_array_elements(v_efeitos) with ordinality as t(e, o));
+  if v_cat is not null and exists (
+       select 1 from jsonb_array_elements(v_efeitos) e
+        where nullif(btrim(coalesce(case when e->>'tipo' = 'anexar_lancamento' then e->>'categoria_atual'
+                                         when e->>'tipo' = 'ligar_linha' then e->'linha'->'lancamento'->>'categoria' end, '')), '')
+              is not null
+          and lower(case when e->>'tipo' = 'anexar_lancamento' then e->>'categoria_atual'
+                         else e->'linha'->'lancamento'->>'categoria' end) <> lower(v_cat)) then
+    v_avisos := v_avisos || 'categoria_existente_diferente'::text;
   end if;
 
   -- ── (3) pendências, sem repetir, na ordem em que apareceram ─────────────────────────────
@@ -605,6 +675,10 @@ declare
   v_doc text;
   v_mes date;
   v_anotou boolean;
+  v_so_part uuid;
+  v_fav uuid;
+  v_avisos_g text[] := '{}';
+  v_aprovar jsonb;
   -- F3
   v_regra jsonb;
   v_av jsonb;
@@ -640,9 +714,11 @@ begin
   v_ef := public._comprovante_efetivo(c);
   v_cat := v_ef->>'categoria';
   v_os := case when c.destino = 'os' then c.destino_os_id end;
+  -- PESSOAL que a empresa pagou: o favorecido é o sócio (a aprovação leva pela anotação; o pró-labore desconta)
+  v_fav := case when c.destino = 'pessoal' then nullif(v_ef->>'pagador_id', '')::uuid end;
   v_desc := left(c.codigo || ' · ' || public._comprovante_tipo_no_texto(c.tipo)
                  || coalesce(' · ' || (public._comprovante_fornecedor(c)->>'nome'), ''), 200);
-  -- F3: a avaliação do extrato que o plano mostrou (fica guardada no CMP; o PESSOAL só registra)
+  -- F3: a avaliação do extrato que o plano mostrou (fica guardada no CMP)
   v_regra := public._comprovante_banco_regra(c);
   if v_regra is not null then
     v_av := public._comprovante_candidatos(c);
@@ -654,20 +730,26 @@ begin
     case e->>'tipo'
       -- ── OS / nota ──────────────────────────────────────────────────────────────────────
       when 'despesa_os' then
+        -- custo interno da OS (não faturável, origem = o CMP): o total da OS não muda
         v_so_expense := public._comprovante_despesa_da_os(c.id, e, p_autor, v_desc);
         v_so_criada := true;
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
           'tipo', 'despesa_os', 'so_expense_id', v_so_expense, 'os_id', e->'os_id', 'os_numero', e->'os_numero',
-          'billable', e->'billable', 'cobrar_a_parte', e->'cobrar_a_parte', 'direto', e->'direto', 'paid_by', e->'paid_by'));
+          'paid_by', e->'paid_by'));
       when 'anexar_despesa' then
+        -- a despesa que já estava na OS: só comprova (nada nela muda)
         v_so_expense := (e->>'so_expense_id')::uuid;
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'anexar_despesa', 'so_expense_id', v_so_expense,
                                                                        'os_numero', e->'os_numero'));
-      when 'ajustar_despesa' then
-        v_r := public._comprovante_ajustar_despesa(e, false);
-        if v_r is not null then
-          v_efeitos := v_efeitos || jsonb_build_array(v_r || jsonb_build_object('os_numero', e->'os_numero'));
-        end if;
+      when 'anexar_peca' then
+        -- a peça que já estava na OS: só comprova (o custo é o da peça)
+        v_so_part := (e->>'so_part_id')::uuid;
+        v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'anexar_peca', 'so_part_id', v_so_part,
+                                                                       'os_numero', e->'os_numero', 'produto', e->'produto',
+                                                                       'valor', e->'valor'));
+      when 'comprovar_na_os' then
+        -- só a prova da OS (peça a lançar pela tela, ou vários lançamentos iguais): nenhum custo
+        v_efeitos := v_efeitos || jsonb_build_array(e);
       when 'itens_da_nota' then
         v_nota := (e->>'fiscal_note_id')::uuid;
         v_idx := public._comprovante_ligar_nota(v_nota, (e->>'os_id')::uuid);
@@ -685,7 +767,7 @@ begin
         v_anotou := true;
         begin
           v_r := public.anotar_transacao('saida', c.valor_confirmado, c.data_confirmada, v_doc,
-                                         null, public._comprovante_fornecedor_efetivo(c, v_doc), null, null, v_cat, v_os, v_desc, p_autor);
+                                         null, public._comprovante_fornecedor_efetivo(c, v_doc), v_fav, null, v_cat, v_os, v_desc, p_autor);
         exception when others then
           get stacked diagnostics v_t = message_text, v_estado = returned_sqlstate;
           -- o documento contradiz o cadastro (_anotacao_documento_confere): não anota; a linha do
@@ -707,8 +789,12 @@ begin
           if v_corr->>'mensagem' is not null then
             v_msgs := v_msgs || (v_corr->>'mensagem');
           end if;
+          if jsonb_typeof(v_corr->'diferente') = 'object' then
+            v_avisos_g := v_avisos_g || 'categoria_existente_diferente'::text;
+          end if;
           v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
-            'tipo', 'anexar_lancamento', 'payable_id', v_payable, 'corrigido', v_corr->'corrigido', 'origem', 'anotar'));
+            'tipo', 'anexar_lancamento', 'payable_id', v_payable, 'corrigido', v_corr->'corrigido', 'origem', 'anotar',
+            'categoria_existente', v_corr->'diferente'->'categoria'));
         elsif coalesce((v_r->>'ok')::boolean, false) then
           -- A1 (a linha não chegou) ou A2 (estava na fila e saiu classificada; falta aprovar)
           v_anotacao := (v_r->>'id')::uuid;
@@ -732,7 +818,7 @@ begin
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'anexar_anotacao', 'anotacao_id', v_anotacao));
       when 'caixa' then
         v_r := public.lancar_no_caixa('saida', c.valor_confirmado, v_desc, c.data_confirmada, e->>'categoria',
-                                      public._comprovante_fornecedor_efetivo(c, null), null, null, v_os, 'caixa', null, p_autor);
+                                      public._comprovante_fornecedor_efetivo(c, null), v_fav, null, v_os, 'caixa', null, p_autor);
         v_payable := (v_r->>'lancamento_id')::uuid;
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'caixa', 'payable_id', v_payable));
       when 'reembolso_socio' then
@@ -748,8 +834,12 @@ begin
         if v_corr->>'mensagem' is not null then
           v_msgs := v_msgs || (v_corr->>'mensagem');
         end if;
+        if jsonb_typeof(v_corr->'diferente') = 'object' then
+          v_avisos_g := v_avisos_g || 'categoria_existente_diferente'::text;
+        end if;
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object(
-          'tipo', 'anexar_lancamento', 'payable_id', v_payable, 'corrigido', v_corr->'corrigido', 'origem', e->'origem'));
+          'tipo', 'anexar_lancamento', 'payable_id', v_payable, 'corrigido', v_corr->'corrigido', 'origem', e->'origem',
+          'categoria_existente', v_corr->'diferente'->'categoria'));
       when 'aguardar_fatura' then
         v_aguardando := now();
         v_efeitos := v_efeitos || jsonb_build_array(jsonb_build_object('tipo', 'aguardar_fatura'));
@@ -853,7 +943,7 @@ begin
 
   -- F3: a pergunta do extrato a fazer (o edge pergunta logo depois de gravar)
   v_perguntar := v_ligada is null and v_situacao = 'aguardando_banco' and v_av is not null
-                 and not coalesce((v_av->>'so_registro')::boolean, false) and v_av->>'nivel' in ('verde', 'azul');
+                 and v_av->>'nivel' in ('verde', 'azul');
 
   v_mes := date_trunc('month', c.data_confirmada)::date;
   update public.comprovantes x
@@ -864,7 +954,6 @@ begin
          linha_explicada_em = case when v_ligada is not null and v_explicada then now() end,
          reembolso_id = v_reembolso,
          banco_regra = v_regra->>'regra',
-         banco_so_registro = coalesce((v_regra->>'so_registro')::boolean, false),
          banco_candidatos = coalesce(v_av->'linhas', '[]'::jsonb),
          banco_hash = v_av->>'hash',
          banco_avaliado_em = case when v_av is not null then now() end,
@@ -879,6 +968,7 @@ begin
          pagador_payee_id = coalesce(x.pagador_payee_id, nullif(v_ef->>'pagador_id', '')::uuid),
          categoria = coalesce(x.categoria, v_cat),
          so_expense_id = v_so_expense,
+         so_part_id = v_so_part,
          anotacao_id = v_anotacao,
          payable_id = v_payable,
          fiscal_note_id = coalesce(v_nota, x.fiscal_note_id),
@@ -896,12 +986,18 @@ begin
   values (v_mes, true, now(), now())
   on conflict (mes) do update set pendente = true, proxima_em = now(), atualizado_em = now();
 
+  -- resposta 3 do dono: a linha ligada neste SIM e classificada já é aprovada (o finance-review aprova a proposta)
+  select * into c from public.comprovantes x where x.id = c.id;
+  v_aprovar := public._comprovante_a_aprovar(c);
+
   -- a pasta como o dono a vê, pela MESMA regra do edge (o "gravado" diz onde o arquivo vai de fato)
   v_t := to_char(v_mes, 'YYYY-MM');
   return jsonb_build_object(
     'situacao', v_situacao,
     'efeitos', v_efeitos,
-    'avisos', coalesce(v_plano->'avisos', '[]'::jsonb) || to_jsonb(v_avisos_f3),
+    'avisos', coalesce(v_plano->'avisos', '[]'::jsonb) || to_jsonb(v_avisos_f3) || to_jsonb(case when coalesce(v_plano->'avisos', '[]'::jsonb) ? 'categoria_existente_diferente' then '{}'::text[]
+                                 else (select coalesce(array_agg(distinct a), '{}'::text[]) from unnest(v_avisos_g) a) end),
+    'aprovar', case when v_aprovar is not null then jsonb_build_object('proposta_id', v_aprovar->'proposta_id') end,
     'mensagens', to_jsonb(v_msgs),
     'mes', v_t,
     'pasta', case v_plano->>'pasta'
@@ -1015,14 +1111,24 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
--- 4. comprovante_cancelar: corpo da F2 IGUAL + (F3) bloqueios: linha ligada que virou lançamento depois
---    da ligação (linha_lancada) ou casada (linha_casada), anexada com correção em mês fechado
---    (mes_fechado), reembolso em acerto fechado (reembolso_acertado); a anotação aplicada só bloqueia
---    quando a linha dela já tem lançamento. Desfaz: ligar_linha → _comprovante_desligar (a linha volta
---    para a fila do Extrato), reembolso_tecnico → cancelado, anotação aplicada sem lançamento → a
---    proposta volta para o motor; aguardar_banco → nada. banco_perguntar = false.
+-- 4. O miolo do cancelamento (_comprovante_desfazer): primeiro confere TODOS os bloqueios; com qualquer
+--    um, nada muda. Depois desfaz cada efeito (do último para o primeiro); rota que falhar desfaz tudo.
+--    Não mexe no CMP em si (quem chama decide: o cancelar queima o número; a troca de quem pagou, da
+--    regra E, grava de novo na mesma transação). Devolve {"ok","bloqueios","desfeitos","avisos",
+--    "anexou_anotacao","anexou_lancamento"}.
+--    Corpo da F2 + (F3) bloqueios: linha ligada que virou lançamento depois da ligação (linha_lancada) ou
+--    casada (linha_casada), anexada com correção em mês fechado (mes_fechado), reembolso em acerto
+--    fechado (reembolso_acertado); a anotação aplicada só bloqueia quando a linha dela já tem lançamento.
+--    Desfaz: ligar_linha → _comprovante_desligar (a linha volta para a fila do Extrato), reembolso_tecnico
+--    → cancelado, anotação aplicada sem lançamento → a proposta volta para o motor; aguardar_banco → nada.
+--    Ajustes do dono (11/10/2026): o lançamento que o SIM do dono aprovou (ligar_linha.aprovado) não
+--    bloqueia — desfaz-se pela rota da tela (desfazer_aprovacao: a linha volta para a fila), fora do mês
+--    fechado; o custo interno da OS sai sem recálculo em qualquer status; a despesa e a peça que já
+--    estavam na OS só são soltas; o reembolso já pago num pagamento dividido (resposta 4) bloqueia
+--    (reembolso_dividido: desfaz-se a divisão antes) e o que só estava na divisão pendente do Pix anotado
+--    sai dela.
 -- ---------------------------------------------------------------------------------------------
-create or replace function public.comprovante_cancelar(p_id uuid, p_motivo text, p_autor uuid)
+create or replace function public._comprovante_desfazer(c public.comprovantes, p_texto text, p_motivo text, p_autor uuid)
 returns jsonb
 language plpgsql
 volatile
@@ -1030,107 +1136,64 @@ security definer
 set search_path = ''
 as $$
 declare
-  c public.comprovantes;
-  v_phone text;
-  v_motivo text := nullif(btrim(coalesce(p_motivo, '')), '');
-  v_texto text;
   v_bloq jsonb := '[]'::jsonb;
   v_desf jsonb := '[]'::jsonb;
   v_avisos text[] := '{}';
-  v_copias text[];
   e jsonb;
-  v_os jsonb;
   v_status text;
   v_pay record;
   v_atual jsonb;
   v_campos jsonb;
   v_desp record;
   v_so record;
-  v_pago numeric;
   k text;
   v_anexou_anotacao boolean := false;
   v_anexou_lancamento boolean := false;
   v_t text;
-  v_mes date;
   v_pid uuid;
   v_n integer;
-  -- F3
   v_anot_tx uuid;
   v_lanc record;
   v_reemb record;
   v_acerto integer;
+  v_aprov_desfeita boolean;
+  v_divisao record;
+  v_resto uuid[];
+  v_valor_pix numeric;
 begin
-  if v_motivo is null or char_length(regexp_replace(v_motivo, '[^[:alpha:]]', '', 'g')) < 3 or char_length(v_motivo) > 300 then
-    raise exception 'comprovante_cancelar: diga o motivo (3 letras ou mais, até 300)' using errcode = '22023';
-  end if;
-  if p_autor is null or not public.is_admin(p_autor) then
-    raise exception 'Só o administrador cancela comprovante.' using errcode = '42501';
-  end if;
-  select x.phone_normalized into v_phone from public.comprovantes x where x.id = p_id;
-  if v_phone is not null then
-    perform pg_advisory_xact_lock(hashtextextended('pergunta:' || v_phone, 0));
-  end if;
-  select * into c from public.comprovantes x where x.id = p_id for update;
-  if not found or c.numero is null then
-    raise exception 'comprovante_cancelar: comprovante % não existe', p_id using errcode = '22023';
-  end if;
-  if c.situacao = 'cancelado' then
-    return jsonb_build_object('ok', false, 'codigo', c.codigo, 'bloqueios', jsonb_build_array(jsonb_build_object(
-      'efeito', 'cmp', 'motivo', 'ja_cancelado', 'como_destravar', null)));
-  end if;
-  v_texto := left(c.codigo || ' cancelado: ' || v_motivo, 300);
-
   -- ── 1. bloqueios ────────────────────────────────────────────────────────────────────────
   for e in select value from jsonb_array_elements(c.efeitos) loop
     case e->>'tipo'
-      when 'despesa_os' then
-        select s.id, s.amount, s.billable_to_client into v_desp
-          from public.service_order_expenses s where s.id = (e->>'so_expense_id')::uuid;
-        if v_desp.id is not null and not coalesce((e->>'direto')::boolean, false) and v_desp.billable_to_client then
-          v_os := public._comprovante_os_info((e->>'os_id')::uuid);
-          if coalesce((v_os->>'faturada')::boolean, false) then
-            v_bloq := v_bloq || jsonb_build_array(jsonb_build_object('efeito', 'despesa_os', 'motivo', 'os_faturada',
-              'como_destravar', 'a ' || (v_os->>'numero') || ' já foi faturada: tire a despesa pela tela da OS e cancele de novo'));
-          else
-            -- o total não pode ficar abaixo do que o cliente já pagou (a tela confere o mesmo)
-            select so.grand_total into v_so from public.service_orders so where so.id = (e->>'os_id')::uuid;
-            select coalesce(sum(r.paid_amount), 0) into v_pago
-              from public.receivables r where r.service_order_id = (e->>'os_id')::uuid and r.status <> 'cancelled';
-            if coalesce(v_so.grand_total, 0) - v_desp.amount < v_pago - 0.005 then
-              v_bloq := v_bloq || jsonb_build_array(jsonb_build_object('efeito', 'despesa_os', 'motivo', 'abaixo_do_pago',
-                'como_destravar', 'sem a despesa, o total da ' || coalesce(v_os->>'numero', 'OS') || ' fica abaixo do que o cliente já pagou: ajuste pela tela da OS'));
-            end if;
-          end if;
-        end if;
-      when 'ajustar_despesa' then
-        if coalesce((e->>'recalcular')::boolean, false)
-           and exists (select 1 from public.service_order_expenses s where s.id = (e->>'so_expense_id')::uuid) then
-          v_os := public._comprovante_os_info((e->>'os_id')::uuid);
-          if coalesce((v_os->>'faturada')::boolean, false) then
-            v_bloq := v_bloq || jsonb_build_array(jsonb_build_object('efeito', 'ajustar_despesa', 'motivo', 'os_faturada',
-              'como_destravar', 'a ' || (v_os->>'numero') || ' já foi faturada: a cobrança da despesa só muda pela tela da OS'));
-          end if;
-        end if;
       when 'anotar' then
         select a.status, a.bank_transaction_id into v_status, v_anot_tx
           from public.anotacoes_do_extrato a where a.id = (e->>'anotacao_id')::uuid for update;
-        -- F3: só bloqueia quando a linha da anotação já virou lançamento (sem ele, o cancelamento desfaz)
+        -- F3: só bloqueia quando a linha da anotação já virou lançamento (sem ele, o cancelamento desfaz) —
+        -- e não quando é o lançamento que o SIM do dono aprovou (ele se desfaz pela ligação)
         if v_status = 'aplicada'
-           and exists (select 1 from public.payables p where p.bank_transaction_id = v_anot_tx and p.status <> 'cancelled') then
+           and exists (select 1 from public.payables p
+                        where p.bank_transaction_id = v_anot_tx and p.status <> 'cancelled'
+                          and not exists (select 1 from jsonb_array_elements(c.efeitos) l
+                                           where l->>'tipo' = 'ligar_linha' and not l ? 'desligado_em'
+                                             and l->'aprovado'->>'payable_id' = p.id::text)) then
           v_bloq := v_bloq || jsonb_build_array(jsonb_build_object('efeito', 'anotar', 'motivo', 'anotacao_aplicada',
             'como_destravar', 'a linha do banco já recebeu a classificação; corrija pelo Extrato'));
         end if;
       when 'ligar_linha' then
         -- F3: a linha ligada virou lançamento depois da ligação (o dono aprovou no Extrato: a varredura só
         -- ADOTOU o lançamento dele, lancado_depois) ou foi casada: desfaz-se pelo Extrato. Só o lançamento
-        -- que já existia quando o CMP ligou (anexado no SIM) se desfaz por aqui.
+        -- que já existia quando o CMP ligou (anexado no SIM) e o que o SIM do dono aprovou se desfazem por aqui.
         if not e ? 'desligado_em' then
           select p.id, p.status, p.issue_date into v_lanc from public.payables p
            where p.bank_transaction_id = (e->>'bank_transaction_id')::uuid and p.status <> 'cancelled'
            order by p.divisao_id nulls first, p.created_at, p.id
            limit 1;
           if v_lanc.id is not null then
-            if e->>'como' = 'anexou' and (e->>'payable_id')::uuid = v_lanc.id
+            if e->'aprovado'->>'payable_id' = v_lanc.id::text then
+              if v_lanc.issue_date is not null and public.periodo_esta_fechado(v_lanc.issue_date) then
+                v_bloq := v_bloq || jsonb_build_array(jsonb_build_object('efeito', 'ligar_linha', 'motivo', 'mes_fechado',
+                  'como_destravar', 'reabra o mês em Financeiro › Fechamento e cancele de novo'));
+              end if;
+            elsif e->>'como' = 'anexou' and (e->>'payable_id')::uuid = v_lanc.id
                and not coalesce((e->>'lancado_depois')::boolean, false) then
               if coalesce(e->'corrigido', '{}'::jsonb) <> '{}'::jsonb and v_lanc.issue_date is not null
                  and public.periodo_esta_fechado(v_lanc.issue_date) then
@@ -1158,6 +1221,22 @@ begin
             v_bloq := v_bloq || jsonb_build_array(jsonb_build_object('efeito', 'reembolso_tecnico', 'motivo', 'reembolso_acertado',
               'como_destravar', 'reabra o acerto nº ' || lpad(v_acerto::text, 4, '0') || ' em Financeiro › Diárias e cancele de novo'));
           end if;
+          -- resposta 4 do dono: o reembolso já foi pago num pagamento DIVIDIDO (a parte dele está na
+          -- categoria deste CMP): tirar só o crédito deixaria a parte paga apontando para um reembolso
+          -- cancelado. Desfaz-se a divisão primeiro. (A divisão ainda pendente — o Pix anotado — não
+          -- bloqueia: o reembolso só sai dela, no passo 2.)
+          select d.payable_id, d.lancamentos into v_divisao
+            from public.diarias_pagamentos_divididos d
+           where (e->>'reembolso_id')::uuid = any (d.reembolsos) and d.status = 'aplicada'
+             and public._diarias_divisao_viva(d.status, d.payable_id, d.lancamentos)
+           order by d.aplicada_em desc nulls last
+           limit 1;
+          if found then
+            v_bloq := v_bloq || jsonb_build_array(jsonb_build_object('efeito', 'reembolso_tecnico', 'motivo', 'reembolso_dividido',
+              'como_destravar', case when coalesce(cardinality(v_divisao.lancamentos), 0) > 0
+                                     then 'o reembolso já foi pago ao técnico do bolso do sócio: cancele as contas ao sócio desse pagamento em Financeiro › Contas a pagar e cancele de novo'
+                                     else 'o reembolso já foi pago ao técnico num pagamento dividido: desfaça a divisão em Financeiro › Diárias (Desfazer a divisão) e cancele de novo' end));
+          end if;
         end if;
       when 'anexar_lancamento' then
         select p.status, p.issue_date into v_pay from public.payables p where p.id = (e->>'payable_id')::uuid;
@@ -1183,7 +1262,7 @@ begin
     end case;
   end loop;
   if jsonb_array_length(v_bloq) > 0 then
-    return jsonb_build_object('ok', false, 'codigo', c.codigo, 'bloqueios', v_bloq);
+    return jsonb_build_object('ok', false, 'bloqueios', v_bloq);
   end if;
 
   -- ── 2. desfaz, do último efeito para o primeiro (rota que falhar desfaz tudo) ────────────
@@ -1195,7 +1274,7 @@ begin
         when 'caixa', 'reembolso_socio' then
           v_pid := (e->>'payable_id')::uuid;
           if exists (select 1 from public.payables p where p.id = v_pid and p.status <> 'cancelled') then
-            perform public.cancelar_lancamento('payable', v_pid, v_texto, p_autor);
+            perform public.cancelar_lancamento('payable', v_pid, p_texto, p_autor);
             v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', e->>'tipo', 'payable_id', v_pid));
           end if;
         when 'anexar_lancamento' then
@@ -1210,7 +1289,7 @@ begin
               end if;
             end loop;
             if v_campos <> '{}'::jsonb then
-              perform public.corrigir_lancamento('payable', v_pid, v_campos, v_texto, p_autor);
+              perform public.corrigir_lancamento('payable', v_pid, v_campos, p_texto, p_autor);
             end if;
           end if;
           v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'anexar_lancamento', 'payable_id', v_pid,
@@ -1220,7 +1299,7 @@ begin
           v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'anexar_anotacao', 'anotacao_id', e->'anotacao_id'));
         when 'anotar' then
           update public.anotacoes_do_extrato a
-             set status = 'cancelada', cancelada_em = now(), motivo_cancelamento = v_texto
+             set status = 'cancelada', cancelada_em = now(), motivo_cancelamento = p_texto
            where a.id = (e->>'anotacao_id')::uuid and a.status = 'aguardando';
           if found then
             v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'anotar', 'anotacao_id', e->'anotacao_id'));
@@ -1239,26 +1318,57 @@ begin
              where q.bank_transaction_id = v_anot_tx and q.status = 'pending'
                and q.evidencia->'anotacao'->>'id' = e->>'anotacao_id';
             update public.anotacoes_do_extrato a
-               set status = 'cancelada', cancelada_em = now(), motivo_cancelamento = v_texto
+               set status = 'cancelada', cancelada_em = now(), motivo_cancelamento = p_texto
              where a.id = (e->>'anotacao_id')::uuid and a.status = 'aplicada';
             v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'anotar', 'anotacao_id', e->'anotacao_id'));
           end if;
         when 'ligar_linha' then
-          -- F3: a linha volta para a fila do Extrato (a proposta perde a classificação do CMP)
+          -- F3: a linha volta para a fila do Extrato (a proposta perde a classificação do CMP). A aprovação que
+          -- o SIM do dono fez (resposta 3) volta antes, pela rota da tela: o lançamento sai e a proposta volta.
           if not e ? 'desligado_em'
              and exists (select 1 from public.comprovantes x
                           where x.id = c.id and x.bank_transaction_id = (e->>'bank_transaction_id')::uuid) then
-            perform public._comprovante_desligar(c.id, 'cancelado: ' || v_motivo, p_autor, false);
-            v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'ligar_linha', 'bank_transaction_id', e->'bank_transaction_id'));
+            v_aprov_desfeita := false;
+            if e->'aprovado'->>'payable_id' is not null
+               and exists (select 1 from public.payables p
+                            where p.id = (e->'aprovado'->>'payable_id')::uuid and p.status <> 'cancelled'
+                              and p.bank_transaction_id = (e->>'bank_transaction_id')::uuid) then
+              perform public.desfazer_aprovacao('payable', (e->'aprovado'->>'payable_id')::uuid, p_texto, p_autor);
+              v_aprov_desfeita := true;
+            end if;
+            perform public._comprovante_desligar(c.id, 'cancelado: ' || p_motivo, p_autor, false);
+            v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'ligar_linha', 'bank_transaction_id', e->'bank_transaction_id',
+                                                                     'aprovado', v_aprov_desfeita));
           end if;
         when 'reembolso_tecnico' then
           -- F2b: o crédito sai da conta corrente do técnico (a trava recusa se o acerto fechou no meio)
           update public.diarias_reembolsos r
-             set status = 'cancelado', cancelado_em = now(), cancelado_por = p_autor, motivo_cancelamento = v_texto
+             set status = 'cancelado', cancelado_em = now(), cancelado_por = p_autor, motivo_cancelamento = p_texto
            where r.id = (e->>'reembolso_id')::uuid and r.status = 'ativo';
           if found then
             v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'reembolso_tecnico', 'reembolso_id', e->'reembolso_id'));
           end if;
+          -- o Pix anotado ao técnico que ia quitar este reembolso (divisão pendente): o reembolso sai dela e
+          -- o Pix divide só com os outros quando a linha for aprovada; sem nenhum outro, a divisão se desfaz
+          for v_divisao in
+            select d.id, d.favorecido_id, d.reembolsos, d.anotacao_id
+              from public.diarias_pagamentos_divididos d
+             where d.status = 'pendente' and (e->>'reembolso_id')::uuid = any (d.reembolsos)
+             for update
+          loop
+            v_resto := array_remove(v_divisao.reembolsos, (e->>'reembolso_id')::uuid);
+            select a.valor into v_valor_pix from public.anotacoes_do_extrato a where a.id = v_divisao.anotacao_id;
+            if cardinality(v_resto) = 0 or v_valor_pix is null then
+              update public.diarias_pagamentos_divididos d
+                 set status = 'desfeita', desfeita_em = now(), motivo = left(c.codigo || ' cancelado: o reembolso saiu da divisão', 200)
+               where d.id = v_divisao.id;
+            else
+              update public.diarias_pagamentos_divididos d
+                 set reembolsos = v_resto,
+                     partes = public._diarias_partes(v_divisao.favorecido_id, v_valor_pix, v_resto, v_divisao.id)->'partes'
+               where d.id = v_divisao.id;
+            end if;
+          end loop;
           -- a despesa da OS volta a "a reembolsar" (só a que este CMP marcou e nenhum pagamento reembolsou
           -- depois); a criada por este CMP sai em seguida, no despesa_os
           if e->>'despesa_reembolsada' is not null then
@@ -1285,43 +1395,93 @@ begin
              where s.id = (e->>'so_expense_id')::uuid and s.linked_payable_id = (e->>'ligou_lancamento')::uuid;
           end if;
           v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'anexar_despesa', 'so_expense_id', e->'so_expense_id'));
-        when 'ajustar_despesa' then
-          if public._comprovante_ajustar_despesa(e, true) is not null then
-            v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'ajustar_despesa', 'so_expense_id', e->'so_expense_id'));
-          end if;
         when 'despesa_os' then
+          -- o custo interno que o CMP lançou (não faturável) sai sem recálculo, em qualquer status da OS:
+          -- o total não muda (prova). Se alguém o tornou faturável pela tela, sai pela rota da tela.
           select s.id, s.billable_to_client into v_desp from public.service_order_expenses s where s.id = (e->>'so_expense_id')::uuid;
           if v_desp.id is not null then
-            v_os := public._comprovante_os_info((e->>'os_id')::uuid);
-            if coalesce((e->>'direto')::boolean, false)
-               or (not v_desp.billable_to_client and coalesce((v_os->>'faturada')::boolean, false)) then
-              -- não faturável (e a OS fechada): sai sem recálculo — o total não muda (prova)
+            if v_desp.billable_to_client then
+              perform public.so_expense_remove(v_desp.id);
+            else
               select so.grand_total, so.operational_cost_total into v_so
                 from public.service_orders so where so.id = (e->>'os_id')::uuid for update;
+              -- o gatilho _despesa_de_comprovante_travada só deixa o próprio CMP apagar
+              perform set_config('comprovantes.apagando', c.codigo, true);
               delete from public.service_order_expenses s where s.id = v_desp.id;
+              perform set_config('comprovantes.apagando', '', true);
               if exists (select 1 from public.service_orders so
                           where so.id = (e->>'os_id')::uuid
                             and (so.grand_total is distinct from v_so.grand_total
                                  or so.operational_cost_total is distinct from v_so.operational_cost_total)) then
-                raise exception 'o total da % mudaria ao tirar a despesa', coalesce(v_os->>'numero', 'OS');
-              end if;
-            else
-              perform public.so_expense_remove(v_desp.id);
-              if v_desp.billable_to_client and coalesce((v_os->>'assinada')::boolean, false) then
-                v_avisos := v_avisos || 'os_assinada_pede_nova_assinatura'::text;
+                raise exception 'o total da % mudaria ao tirar a despesa', coalesce(e->>'os_numero', 'OS');
               end if;
             end if;
             v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', 'despesa_os', 'os_id', e->'os_id'));
           end if;
+        when 'anexar_peca', 'comprovar_na_os' then
+          -- só a prova: nada a desfazer na OS (o CMP solta a peça no fim)
+          v_desf := v_desf || jsonb_build_array(jsonb_build_object('tipo', e->>'tipo', 'os_numero', e->'os_numero'));
         else
           null;    -- aguardar_nota, aguardar_fatura, aguardar_banco, mesma_compra, nada, pendencia_resolvida: nada a desfazer
       end case;
     end loop;
   exception when others then
     get stacked diagnostics v_t = message_text;
-    return jsonb_build_object('ok', false, 'codigo', c.codigo, 'bloqueios', jsonb_build_array(jsonb_build_object(
+    return jsonb_build_object('ok', false, 'bloqueios', jsonb_build_array(jsonb_build_object(
       'efeito', 'rota', 'motivo', 'erro_da_rota', 'como_destravar', left(v_t, 200))));
   end;
+  return jsonb_build_object('ok', true, 'bloqueios', '[]'::jsonb, 'desfeitos', v_desf, 'avisos', to_jsonb(v_avisos),
+                            'anexou_anotacao', v_anexou_anotacao, 'anexou_lancamento', v_anexou_lancamento);
+end $$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 4b. comprovante_cancelar: o mesmo de sempre por fora (o miolo é _comprovante_desfazer); depois queima o
+--     número, manda o arquivo para _CANCELADOS e refaz o índice do mês. O original no bucket fica.
+-- ---------------------------------------------------------------------------------------------
+create or replace function public.comprovante_cancelar(p_id uuid, p_motivo text, p_autor uuid)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  c public.comprovantes;
+  v_phone text;
+  v_motivo text := nullif(btrim(coalesce(p_motivo, '')), '');
+  v_texto text;
+  v_d jsonb;
+  v_avisos text[] := '{}';
+  v_copias text[];
+  v_mes date;
+  v_pid uuid;
+begin
+  if v_motivo is null or char_length(regexp_replace(v_motivo, '[^[:alpha:]]', '', 'g')) < 3 or char_length(v_motivo) > 300 then
+    raise exception 'comprovante_cancelar: diga o motivo (3 letras ou mais, até 300)' using errcode = '22023';
+  end if;
+  if p_autor is null or not public.is_admin(p_autor) then
+    raise exception 'Só o administrador cancela comprovante.' using errcode = '42501';
+  end if;
+  select x.phone_normalized into v_phone from public.comprovantes x where x.id = p_id;
+  if v_phone is not null then
+    perform pg_advisory_xact_lock(hashtextextended('pergunta:' || v_phone, 0));
+  end if;
+  select * into c from public.comprovantes x where x.id = p_id for update;
+  if not found or c.numero is null then
+    raise exception 'comprovante_cancelar: comprovante % não existe', p_id using errcode = '22023';
+  end if;
+  if c.situacao = 'cancelado' then
+    return jsonb_build_object('ok', false, 'codigo', c.codigo, 'bloqueios', jsonb_build_array(jsonb_build_object(
+      'efeito', 'cmp', 'motivo', 'ja_cancelado', 'como_destravar', null)));
+  end if;
+  v_texto := left(c.codigo || ' cancelado: ' || v_motivo, 300);
+
+  -- ── 1-2. bloqueios e desfazer (o miolo) ─────────────────────────────────────────────────
+  v_d := public._comprovante_desfazer(c, v_texto, v_motivo, p_autor);
+  if not coalesce((v_d->>'ok')::boolean, false) then
+    return jsonb_build_object('ok', false, 'codigo', c.codigo, 'bloqueios', v_d->'bloqueios');
+  end if;
+  v_avisos := array(select jsonb_array_elements_text(coalesce(v_d->'avisos', '[]'::jsonb)));
 
   -- ── 3. o CMP: número queimado, arquivo para _CANCELADOS, índice do mês refeito ───────────
   v_mes := coalesce(c.indice_mes,
@@ -1336,8 +1496,9 @@ begin
          pendencias = '{}',
          passo = null,
          so_expense_id = null,
-         anotacao_id = case when v_anexou_anotacao then null else x.anotacao_id end,
-         payable_id = case when v_anexou_lancamento then null else x.payable_id end,
+         so_part_id = null,
+         anotacao_id = case when coalesce((v_d->>'anexou_anotacao')::boolean, false) then null else x.anotacao_id end,
+         payable_id = case when coalesce((v_d->>'anexou_lancamento')::boolean, false) then null else x.payable_id end,
          banco_perguntar = false,
          indice_mes = v_mes,
          dropbox_pendente = 'cancelar',
@@ -1362,9 +1523,83 @@ begin
     v_avisos := v_avisos || 'outros_da_mesma_compra'::text;
   end if;
 
-  return jsonb_build_object('ok', true, 'codigo', c.codigo, 'desfeitos', v_desf,
+  return jsonb_build_object('ok', true, 'codigo', c.codigo, 'desfeitos', v_d->'desfeitos',
     'avisos', coalesce((select to_jsonb(array_agg(distinct a)) from unnest(v_avisos) a), '[]'::jsonb),
     'mesma_compra', to_jsonb(coalesce(v_copias, '{}'::text[])));
+end $$;
+
+-- ---------------------------------------------------------------------------------------------
+-- 4c. Regra E (ajustes do dono, 11/10/2026): o dono disse quem pagou a compra que não apareceu em
+--     nenhuma conta da empresa. Desfaz o que foi gravado (o mesmo miolo do cancelar, com os mesmos
+--     bloqueios) e grava DE NOVO com quem pagou — a mesma gravação de sempre (reembolso ao sócio por
+--     lancar_no_caixa('socio'), reembolso nas Diárias, ou só o arquivo em PESSOAL; o arquivo é
+--     renomeado/movido), tudo na mesma transação. Bloqueio = {"ok":false,"bloqueios"} e nada muda; erro
+--     de rota levanta (quem chama desfaz em subtransação). p_quem: socio (do bolso: reembolso; no PESSOAL,
+--     só o arquivo), tecnico (p_pagador = o técnico) ou pessoal (gasto pessoal no cartão dele: só o arquivo).
+-- ---------------------------------------------------------------------------------------------
+create or replace function public._comprovante_trocar_pagador(p_cmp uuid, p_quem text, p_pagador uuid, p_autor uuid)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  c public.comprovantes;
+  v_d jsonb;
+  v_grav jsonb;
+  v_texto text;
+begin
+  if p_quem is null or p_quem not in ('socio', 'tecnico', 'pessoal') or (p_quem = 'tecnico' and p_pagador is null) then
+    raise exception '_comprovante_trocar_pagador: quem pagou inválido' using errcode = '22023';
+  end if;
+  select * into c from public.comprovantes x where x.id = p_cmp for update;
+  if not found then
+    raise exception '_comprovante_trocar_pagador: comprovante % não existe', p_cmp using errcode = '22023';
+  end if;
+  if p_autor is null or p_autor is distinct from c.dono_id or not public.is_admin(p_autor) then
+    raise exception 'Só o dono diz quem pagou o comprovante.' using errcode = '42501';
+  end if;
+  if c.gravado_em is null or c.situacao not in ('aguardando_banco', 'abandonado') or c.bank_transaction_id is not null then
+    return jsonb_build_object('ok', false, 'codigo', c.codigo, 'bloqueios', jsonb_build_array(jsonb_build_object(
+      'efeito', 'cmp', 'motivo', 'situacao', 'como_destravar', 'o comprovante não está esperando o extrato')));
+  end if;
+  v_texto := left(c.codigo || ' regravado: quem pagou mudou', 300);
+  v_d := public._comprovante_desfazer(c, v_texto, 'quem pagou mudou', p_autor);
+  if not coalesce((v_d->>'ok')::boolean, false) then
+    return jsonb_build_object('ok', false, 'codigo', c.codigo, 'bloqueios', v_d->'bloqueios');
+  end if;
+  -- a anotação que já esperava este dinheiro (anexar_anotacao: a do dono, "vai sair um débito de R$ X")
+  -- dizia que a EMPRESA pagou: não foi. Ela sai (ainda esperando; a aplicada com lançamento já bloqueou
+  -- acima), senão classificaria a linha da empresa que um dia aparecesse com este mesmo gasto
+  update public.anotacoes_do_extrato a
+     set status = 'cancelada', cancelada_em = now(),
+         motivo_cancelamento = left(c.codigo || ': quem pagou não foi a empresa', 300)
+   where a.status = 'aguardando'
+     and a.id in (select (e->>'anotacao_id')::uuid from jsonb_array_elements(c.efeitos) e
+                   where e->>'tipo' = 'anexar_anotacao' and e->>'anotacao_id' is not null);
+  update public.comprovantes x
+     set quem_pagou = case when p_quem = 'pessoal' then 'socio' else p_quem end,
+         pagador_payee_id = case when p_quem = 'tecnico' then p_pagador end,
+         destino = case when p_quem = 'pessoal' then 'pessoal' else x.destino end,
+         destino_os_id = case when p_quem = 'pessoal' then null else x.destino_os_id end,
+         tipo_na_os = case when p_quem = 'pessoal' then null else x.tipo_na_os end,
+         -- já era uma compra própria (gravada sozinha): a pergunta "é a mesma compra?" não volta
+         outra_compra = case when x.mesma_compra_de is null then true else x.outra_compra end,
+         situacao = 'aguardando_sim', passo = null, gravado_em = null, gravado_por = null, plano = null,
+         efeitos = '[]'::jsonb, pendencias = '{}',
+         so_expense_id = null, so_part_id = null, anotacao_id = null, payable_id = null, reembolso_id = null,
+         bank_transaction_id = null, conciliacao = null, conciliado_em = null, linha_explicada_em = null,
+         aguardando_banco_desde = null, banco_regra = null, banco_candidatos = '[]'::jsonb, banco_hash = null,
+         banco_avaliado_em = null, banco_perguntar = false, banco_perguntas = 0, banco_ultima_pergunta_em = null,
+         -- a resposta fica marcada: a varredura vigia se a compra aparece numa conta da empresa (passo 4c)
+         banco_quem_em = now(),
+         resumo_versao = x.resumo_versao + 1
+   where x.id = c.id;
+  -- a mesma gravação de sempre, sobre o plano de agora
+  v_grav := public._comprovante_gravar(c.id, p_autor, md5(public._comprovante_plano(c.id)::text));
+  return jsonb_build_object('ok', true, 'codigo', c.codigo, 'resultado', 'regravado', 'gravacao', v_grav,
+                            'desfeitos', v_d->'desfeitos');
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
@@ -1455,7 +1690,10 @@ begin
                                        'cliente', v_os->'cliente', 'status', v_os->'status',
                                        'faturada', v_os->'faturada', 'assinada', v_os->'assinada',
                                        'pasta_registrada', v_os->'pasta_registrada') end,
-    'cobrar_cliente', c.cobrar_cliente,
+    'tipo_na_os', c.tipo_na_os,
+    -- o lançamento que já está na OS (só comprova): {"tipo","id","valor","data","descricao","categoria"|"produto"}
+    -- ou {"ambiguo":n}
+    'na_os', public._comprovante_lancamento_na_os(c),
     'quem_pagou', v_ef->>'quem',
     'pagador_nome', v_ef->>'pagador_nome',
     'categoria', v_ef->>'categoria',
@@ -1467,8 +1705,9 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
--- 7. comprovantes_pendentes: corpo da F2 IGUAL + o CMP com a pergunta do extrato a fazer ("banco":"perguntar")
---    e a NF-e que chegou por e-mail ("nota_no_email":true), mesmo antes dos 5 dias.
+-- 7. comprovantes_pendentes: corpo da F2 IGUAL + o CMP com a pergunta do extrato a fazer ("banco":"perguntar";
+--    "quem_pagou" quando a compra não apareceu em conta nenhuma em 5 dias — regra E) e a NF-e que chegou por
+--    e-mail ("nota_no_email":true), mesmo antes dos 5 dias.
 -- ---------------------------------------------------------------------------------------------
 create or replace function public.comprovantes_pendentes(p_phone text)
 returns jsonb
@@ -1496,7 +1735,9 @@ begin
            'falta', case when x.situacao in ('aguardando_vez', 'perguntando', 'aguardando_sim')
                          then coalesce(nullif(x.passo, 'confirmar'), public._comprovante_proximo_passo(x)) end,
            'pendencias', to_jsonb(x.pendencias),
-           'banco', case when x.banco_perguntar and x.situacao in ('aguardando_banco', 'abandonado') then 'perguntar' end,
+           'banco', case when x.banco_perguntar and x.situacao in ('aguardando_banco', 'abandonado')
+                         then case when coalesce(x.conciliacao, 'cinza') = 'cinza' and public._comprovante_quem_pode(x)
+                                   then 'quem_pagou' else 'perguntar' end end,
            'nota_no_email', x.situacao = 'aguardando_xml' and x.nota_no_email_em is not null) order by x.numero), '[]'::jsonb)
     into v_abertos
     from public.comprovantes x
@@ -1504,7 +1745,7 @@ begin
      and (x.situacao in ('aguardando_vez', 'perguntando', 'aguardando_sim')
           or (x.gravado_em is not null and x.situacao <> 'cancelado' and cardinality(x.pendencias) > 0)
           or (x.situacao = 'aguardando_xml' and x.gravado_em <= now() - interval '5 days')
-          or (x.situacao in ('aguardando_banco', 'abandonado') and x.banco_perguntar and not x.banco_so_registro)
+          or (x.situacao in ('aguardando_banco', 'abandonado') and x.banco_perguntar)
           or (x.situacao = 'aguardando_xml' and x.nota_no_email_em is not null));
   select count(*) into v_antigos from public.comprovantes x
    where x.phone_normalized = p_phone and x.dono_id = v_dono.id and x.modo = 'dono' and x.numero is not null
@@ -1521,6 +1762,8 @@ revoke all on function public._comprovante_nota_aplicar(uuid, uuid) from public,
 revoke all on function public._comprovante_aplicar_notas_chegadas() from public, anon, authenticated, service_role;
 revoke all on function public._comprovante_mesma_compra(public.comprovantes) from public, anon, authenticated, service_role;
 revoke all on function public._comprovante_resumo(public.comprovantes) from public, anon, authenticated, service_role;
+revoke all on function public._comprovante_desfazer(public.comprovantes, text, text, uuid) from public, anon, authenticated, service_role;
+revoke all on function public._comprovante_trocar_pagador(uuid, text, uuid, uuid) from public, anon, authenticated, service_role;
 revoke all on function public.comprovante_cancelar(uuid, text, uuid) from public, anon, authenticated;
 revoke all on function public.comprovante_nota_chegou(uuid) from public, anon, authenticated;
 revoke all on function public.comprovantes_pendentes(text) from public, anon, authenticated;
@@ -1544,7 +1787,9 @@ declare
     'public._comprovante_nota_aplicar(uuid, uuid)',
     'public._comprovante_aplicar_notas_chegadas()',
     'public._comprovante_mesma_compra(public.comprovantes)',
-    'public._comprovante_resumo(public.comprovantes)'];
+    'public._comprovante_resumo(public.comprovantes)',
+    'public._comprovante_desfazer(public.comprovantes, text, text, uuid)',
+    'public._comprovante_trocar_pagador(uuid, text, uuid, uuid)'];
   v_def text;
 begin
   foreach v_f in array v_rpcs || v_helpers loop
@@ -1565,12 +1810,18 @@ begin
   -- a gravação conhece os efeitos novos (efeito desconhecido levanta erro e nada é gravado)
   v_def := pg_get_functiondef('public._comprovante_gravar(uuid, uuid, text)'::regprocedure);
   if position('''ligar_linha''' in v_def) = 0 or position('''aguardar_banco''' in v_def) = 0
-     or position('''reembolso_tecnico''' in v_def) = 0 then
-    raise exception 'a gravação não conhece ligar_linha/aguardar_banco/reembolso_tecnico';
+     or position('''reembolso_tecnico''' in v_def) = 0 or position('''anexar_peca''' in v_def) = 0
+     or position('''comprovar_na_os''' in v_def) = 0 then
+    raise exception 'a gravação não conhece ligar_linha/aguardar_banco/reembolso_tecnico/anexar_peca/comprovar_na_os';
   end if;
-  v_def := pg_get_functiondef('public.comprovante_cancelar(uuid, text, uuid)'::regprocedure);
-  if position('_comprovante_desligar' in v_def) = 0 or position('reembolso_acertado' in v_def) = 0 then
-    raise exception 'o cancelamento não desfaz a ligação nem confere o acerto do reembolso';
+  v_def := pg_get_functiondef('public._comprovante_desfazer(public.comprovantes, text, text, uuid)'::regprocedure);
+  if position('_comprovante_desligar' in v_def) = 0 or position('reembolso_acertado' in v_def) = 0
+     or position('desfazer_aprovacao' in v_def) = 0 then
+    raise exception 'o miolo do cancelamento não desfaz a ligação (nem a aprovação do SIM) ou não confere o acerto do reembolso';
+  end if;
+  if position('_comprovante_desfazer' in pg_get_functiondef('public.comprovante_cancelar(uuid, text, uuid)'::regprocedure)) = 0
+     or position('_comprovante_desfazer' in pg_get_functiondef('public._comprovante_trocar_pagador(uuid, text, uuid, uuid)'::regprocedure)) = 0 then
+    raise exception 'o cancelamento e a troca de quem pagou não usam o mesmo miolo (_comprovante_desfazer)';
   end if;
 end $$;
 
