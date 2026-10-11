@@ -1,9 +1,22 @@
 import { NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
-import { conferirComprovantes, textoDaDespesaComCmpAberto, textoDaDespesaJaLancada } from "./comprovantes.ts";
+import {
+  conferirComprovantes, textoDaDespesaCobradaComCmpAberto, textoDaDespesaComCmpAberto, textoDaDespesaDoCmpNaoSai,
+  textoDaDespesaInternaDoCmp, textoDaDespesaJaLancada,
+} from "./comprovantes.ts";
 
-/** Efeitos de um CMP gravado que já puseram a despesa na OS (comprovantes_parecidos/ja_lancados). */
-export const EFEITOS_DA_DESPESA_DA_OS = ["despesa_os", "anexar_despesa"] as const;
+/**
+ * Efeitos de um CMP gravado que já puseram NA OS a despesa que o cliente vê (comprovantes_parecidos/
+ * ja_lancados): anexar_despesa = o CMP só comprovou a despesa lançada à mão ou pelo assistente.
+ */
+export const EFEITOS_DA_DESPESA_DA_OS = ["anexar_despesa"] as const;
+
+/**
+ * O custo INTERNO que um CMP gravou na OS (despesa_os: não faturável, nunca aparece para o cliente —
+ * ajustes do dono, 11/10/2026). Cobrar a mesma compra do cliente é lançar a despesa cobrada (o Lucro por
+ * OS conta uma vez só); lançar de novo como interna é que seria o gasto em dobro.
+ */
+export const EFEITOS_DO_CUSTO_INTERNO = ["despesa_os"] as const;
 
 /**
  * Paridade entre a TELA de edição da OS e o assistente.
@@ -66,7 +79,7 @@ export const soOpsTools: ToolDef[] = [
         notes: { type: "string" },
         mesmo_assim: {
           type: "boolean",
-          description: "Só quando esta ferramenta avisou de um comprovante (CMP) aberto com o mesmo valor e o dono disse que é OUTRO gasto ('mesmo assim').",
+          description: "Só na despesa POR CONTA DA CASA (billable=false), quando esta ferramenta avisou de um comprovante (CMP) aberto com o mesmo valor e o dono disse que é OUTRO gasto ('mesmo assim').",
         },
       },
       required: ["service_order_id", "description", "amount"],
@@ -74,18 +87,28 @@ export const soOpsTools: ToolDef[] = [
     risk: "low",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, ctx) {
-      // Comprovantes (F2, 11/10/2026): esta ferramenta grava sem "sim" — a trava contra o dobro
-      // fica aqui, sempre com quem pede. CMP que já lançou a despesa nesta OS: recusa. CMP aberto do
-      // mesmo valor (só com a conversa ligada): o dono completa o CMP (*cmp N*) ou pede de novo
-      // "mesmo assim". O financeiro não vê o CMP do dono, só que existe. Falha da consulta: segue.
+      // Comprovantes (F2, 11/10/2026; ajustes do dono): esta ferramenta grava sem "sim" — a trava contra o
+      // dobro fica aqui, sempre com quem pede. O comprovante nunca aparece para o cliente: só o que é lançado
+      // à mão ou pelo assistente. Então:
+      //   * CMP que comprovou uma despesa que JÁ está na OS (anexar_despesa): recusa (já está lá);
+      //   * CMP que gravou o custo INTERNO (despesa_os): a despesa COBRADA lança (é o que o dono pediu; o
+      //     Lucro por OS conta a compra uma vez só) e a resposta diz que o CMP é só custo interno; a despesa
+      //     por conta da casa igual recusa (aí, sim, seria o mesmo custo duas vezes);
+      //   * CMP aberto do mesmo valor (só com a conversa ligada): a COBRADA lança e o CMP vai só comprová-la
+      //     quando o dono responder *cmp N*; a por conta da casa pede *cmp N* ou "mesmo assim".
+      // O financeiro não vê o CMP do dono, só que existe. Falha da consulta: segue.
+      const faturavel = args.billable !== false;
       const cmp = await conferirComprovantes(ctx, {
         valor: Number(args.amount),
         data: /^\d{4}-\d{2}-\d{2}$/.test(String(args.expense_date ?? "")) ? String(args.expense_date) : null,
         osId: args.service_order_id ? String(args.service_order_id) : null,
-        efeitos: EFEITOS_DA_DESPESA_DA_OS,
+        efeitos: faturavel ? EFEITOS_DA_DESPESA_DA_OS : [...EFEITOS_DA_DESPESA_DA_OS, ...EFEITOS_DO_CUSTO_INTERNO],
+        avisar: faturavel ? EFEITOS_DO_CUSTO_INTERNO : [],
       });
       if (cmp.gravado) return { error: textoDaDespesaJaLancada(cmp.gravado), nada_registrado: true };
-      if (cmp.aberto && args.mesmo_assim !== true) return { error: textoDaDespesaComCmpAberto(cmp.aberto), nada_registrado: true };
+      if (cmp.aberto && !faturavel && args.mesmo_assim !== true) {
+        return { error: textoDaDespesaComCmpAberto(cmp.aberto), nada_registrado: true };
+      }
 
       const { data, error } = await ctx.sb.rpc("so_expense_add", {
         p_so_id: args.service_order_id,
@@ -100,11 +123,16 @@ export const soOpsTools: ToolDef[] = [
       });
       if (error) throw error;
       const r = (data ?? {}) as any;
+      const avisos = [
+        cmp.avisado ? textoDaDespesaInternaDoCmp(cmp.avisado) : null,
+        cmp.aberto && faturavel ? textoDaDespesaCobradaComCmpAberto(cmp.aberto) : null,
+      ].filter((x): x is string => Boolean(x));
       return {
         ok: true,
         despesa_id: r.id,
         novo_total_da_os: r.grand_total,
-        faturavel: args.billable !== false,
+        faturavel,
+        ...(avisos.length ? { aviso: avisos.join(" ") } : {}),
       };
     },
   },
@@ -112,7 +140,8 @@ export const soOpsTools: ToolDef[] = [
     name: "remove_service_order_expense",
     description:
       "Remove uma despesa lançada na OS e recalcula o total. Use quando disserem 'apaga aquela despesa', 'lancei errado'. " +
-      "Precisa do id da despesa — pegue em get_service_order, que traz as despesas.",
+      "Precisa do id da despesa — pegue em get_service_order, que traz as despesas. A despesa que nasceu de um comprovante " +
+      "(CMP, custo interno) não sai por aqui: sai cancelando o comprovante.",
     input_schema: {
       type: "object",
       properties: { expense_id: { type: "string", description: "UUID da despesa." } },
@@ -121,6 +150,14 @@ export const soOpsTools: ToolDef[] = [
     risk: "medium",
     roles: NON_TECHNICIAN_ROLES,
     async execute(args, { sb }) {
+      // O custo interno que nasceu de um CMP (origem_codigo) só sai pelo comprovante — como na tela (editar e
+      // excluir travados): apagá-lo aqui tiraria o custo do Lucro por OS e deixaria o CMP sem o que desfazer.
+      // O banco também recusa (gatilho); esta é a resposta clara. Falha da leitura: segue (o banco decide).
+      const { data: desp } = await sb.from("service_order_expenses").select("origem_codigo")
+        .eq("id", String(args.expense_id ?? "")).maybeSingle();
+      const origem = typeof (desp as { origem_codigo?: unknown } | null)?.origem_codigo === "string"
+        ? String((desp as { origem_codigo: string }).origem_codigo) : null;
+      if (origem) return { error: textoDaDespesaDoCmpNaoSai(origem), nada_removido: true };
       const { data, error } = await sb.rpc("so_expense_remove", { p_expense_id: args.expense_id });
       if (error) throw error;
       const r = (data ?? {}) as any;
