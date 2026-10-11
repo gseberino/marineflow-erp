@@ -171,3 +171,8 @@ verify_jwt = false
 
 [functions.instagram-feed]
 verify_jwt = false
+
+# Comprovantes (F1, 11/10/2026): duas portas, conferidas por dentro — receber (chamadaInterna, só o
+# whatsapp-webhook) e entrega/vigiar/repescar (x-cron-secret: gatilho de ai_jobs e pg_cron).
+[functions.comprovantes-whatsapp]
+verify_jwt = false
