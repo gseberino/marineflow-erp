@@ -1,6 +1,7 @@
 import type { ToolCtx, ToolDef } from "./registry.ts";
 import { chaveTelefone } from "../phone.ts";
 import { contatosDasEmbarcacoes } from "./vessels.ts";
+import { STATUS_OS_ATIVAS } from "../../service-order-status.ts";
 
 // Ficha 360 — visão unificada por entidade (Fase 3 · Etapa 1).
 // Ver plans/marineflow-contexto-unificado-escopo.md
@@ -141,7 +142,8 @@ export const entity360Tools: ToolDef[] = [
         .slice(0, TETO)
         .map((o) => ({ numero: o.service_order_number, etapa: o.quote_status, valor: r2(Number(o.grand_total) || 0), criado_em: o.created_at }));
       const osEmAndamento = todas
-        .filter((o) => ["open", "in_progress", "scheduled", "approved", "awaiting_parts"].includes(o.status))
+        // Lista única de "trabalho em aberto" (11/10/2026): a literal deixava de fora awaiting_client.
+        .filter((o) => STATUS_OS_ATIVAS.includes(o.status))
         .slice(0, TETO)
         .map((o) => ({ numero: o.service_order_number, status: o.status, valor: r2(Number(o.grand_total) || 0), agendado_para: o.scheduled_start_at }));
       const ultimasConcluidas = todas

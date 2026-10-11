@@ -175,7 +175,7 @@ export const fieldOpsTools: ToolDef[] = [
       const quando = dito ? dito.iso : new Date().toISOString();
       const patch: Record<string, unknown> = { check_in_at: quando };
       // Só promove para "em andamento" a partir de estados de trabalho — não mexe em concluída/faturada.
-      if (["open", "scheduled", "approved", "pending", "awaiting_parts"].includes(so.status)) {
+      if (["open", "scheduled", "approved", "awaiting_parts"].includes(so.status)) {
         patch.status = "in_progress";
       }
       const { error } = await sb.from("service_orders").update(patch).eq("id", so.id);

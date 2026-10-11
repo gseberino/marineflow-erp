@@ -5,6 +5,7 @@ import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
 import { acharOS } from "./os-referencia.ts";
 import { ehErro } from "./caixa.ts";
+import { ROTULOS_STATUS_OS, STATUS_OS } from "../../service-order-status.ts";
 
 /**
  * Recalcula os totais da OS após inserir/alterar item — best-effort, não deve derrubar a
@@ -204,22 +205,24 @@ const QUOTE_STATUS_TRANSITIONS: Record<string, string[]> = {
   rejected: ["draft"],
 };
 
+// Status da OS vêm de service-order-status.ts (espelho do CHECK service_orders_status_check).
+// Até 11/10/2026 este mapa traduzia para pending/waiting_parts/waiting_approval/reopened, que o
+// banco não tem: "aguardando peças" filtrava por waiting_parts e respondia 0 OS quando havia 2.
+// "Aguardando aprovação" é situação do ORÇAMENTO (quote_status) — fica em SITUACAO_PT.
 const STATUS_PT_EN: Record<string, string> = {
+  // Os rótulos da tela em minúsculas ("aberta", "aguardando cliente"…) valem como filtro.
+  ...Object.fromEntries(STATUS_OS.map((s) => [ROTULOS_STATUS_OS[s].toLowerCase(), s])),
   rascunho: "draft", orçamento: "draft", orcamento: "draft",
-  aberto: "open", pendente: "pending", aprovado: "approved",
+  aberto: "open", aprovado: "approved",
   agendado: "scheduled", "em andamento": "in_progress", "em execução": "in_progress",
   concluído: "completed", concluido: "completed",
   cancelado: "cancelled", faturado: "invoiced",
-  "aguardando peças": "waiting_parts", "aguardando aprovação": "waiting_approval",
-  reaberto: "reopened",
+  "aguardando peças": "awaiting_parts", "aguardando pecas": "awaiting_parts",
+  "aguardando cliente": "awaiting_client",
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  draft: "Orçamento", open: "Aberto", pending: "Pendente", approved: "Aprovado",
-  scheduled: "Agendado", in_progress: "Em andamento", waiting_parts: "Aguardando peças",
-  waiting_approval: "Aguardando aprovação", completed: "Concluído",
-  cancelled: "Cancelado", invoiced: "Faturado", reopened: "Reaberto",
-};
+const STATUS_LABELS: Record<string, string> = ROTULOS_STATUS_OS;
+const ehStatusDaOS = (s: string) => (STATUS_OS as readonly string[]).includes(s);
 
 // Situação do ORÇAMENTO (service_orders.quote_status), separada da fase (status='draft').
 const SITUACOES = new Set(["draft", "sent", "awaiting_approval", "approved", "awaiting_deposit", "rejected"]);
@@ -259,8 +262,13 @@ export function filtroDaListagem(args: Record<string, unknown>): FiltroDaListage
   else if (args.is_quote === false) fase = "os";
   else if (args.status) {
     const st = String(args.status).trim().toLowerCase();
+    const daOS = STATUS_PT_EN[st] ?? (ehStatusDaOS(st) ? st : undefined);
+    // Situação do orçamento dita como status ("aguardando aprovação", "recusado"): filtra a situação.
+    const doOrcamento = SITUACAO_PT[st] ?? (SITUACOES.has(st) ? st : undefined);
     if (st === "rascunho" && !situacao) situacao = "draft";
-    else status = STATUS_PT_EN[st] ?? String(args.status);
+    else if (!daOS && doOrcamento && !situacao) situacao = doOrcamento;
+    // Desconhecido segue cru e o execute recusa — filtrar por ele respondia "nenhuma OS".
+    else status = daOS ?? String(args.status);
   }
   if (situacao) {
     fase = "orcamento";
@@ -348,7 +356,7 @@ export const serviceOrderTools: ToolDef[] = [
             "Situação do orçamento: draft=rascunho (não enviado), sent=enviado, awaiting_approval=aguardando aprovação, " +
             "approved=aprovado, awaiting_deposit=aguardando sinal, rejected=recusado. Implica is_quote=true.",
         },
-        status: { type: "string", description: "Filtro por status da OS (ex: 'approved', 'in_progress'). Ignorado se is_quote ou quote_status for fornecido." },
+        status: { type: "string", description: `Filtro por status da OS: ${STATUS_OS.join(", ")}. Ignorado se is_quote ou quote_status for fornecido.` },
         order_by: { type: "string", enum: ["recentes", "maior_valor"], description: "recentes (padrão) ou maior_valor (do maior total para o menor)" },
         client_id: { type: "string" },
         vessel_id: { type: "string" },
@@ -358,6 +366,9 @@ export const serviceOrderTools: ToolDef[] = [
     risk: "low",
     async execute(args, { sb }) {
       const f = filtroDaListagem(args);
+      if (f.status && !ehStatusDaOS(f.status)) {
+        return { error: `Status inválido: ${f.status}. Válidos: ${STATUS_OS.join(", ")}.` };
+      }
       let query = sb
         .from("service_orders")
         .select(
@@ -606,11 +617,14 @@ export const serviceOrderTools: ToolDef[] = [
       type: "object",
       properties: {
         id: { type: "string", description: "UUID da OS/orçamento" },
+        // Mesma fonte do prompt e do CHECK do banco: pending/waiting_parts/waiting_approval/reopened
+        // eram recusados com 23514, e awaiting_parts/awaiting_client faltavam (11/10/2026).
         status: {
           type: "string",
-          enum: ["draft", "open", "pending", "approved", "scheduled", "in_progress", "waiting_parts", "waiting_approval", "completed", "cancelled", "invoiced", "reopened"],
+          enum: [...STATUS_OS],
           description:
-            "Novo status. 'draft'=Rascunho/Orçamento, 'open'=Aberto, 'pending'=Pendente, 'approved'=Aprovado, 'scheduled'=Agendado, 'in_progress'=Em andamento, 'waiting_parts'=Aguardando peças, 'waiting_approval'=Aguardando aprovação, 'completed'=Concluído, 'cancelled'=Cancelado, 'invoiced'=Faturado, 'reopened'=Reaberto",
+            "Novo status. " + STATUS_OS.map((s) => `'${s}'=${ROTULOS_STATUS_OS[s]}`).join(", ") +
+            ". Aguardando aprovação/sinal é situação do orçamento (quote_status) → use update_quote_status.",
         },
         cancellation_reason: { type: "string", description: "Motivo do cancelamento (quando status=cancelled)" },
       },
