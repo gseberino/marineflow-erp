@@ -19,13 +19,21 @@
 //     primeira é perguntada agora; as outras encadeiam no "sim"/"não" (comAProximaPendencia, que
 //     junta as pendências criadas no mesmo minuto). "sim, mas troca a data…" vai ao assistente,
 //     que refaz o pedido com o texto novo.
-// Não atropela o dono: se ele tem uma confirmação aberta, a rodada espera a próxima.
+// Não atropela o dono: se ele tem uma confirmação aberta, a rodada espera a próxima. Com a conversa
+// dos comprovantes ligada (F2, 11/10/2026), "aberta" é o registro único de pergunta ativa: a
+// pergunta de um comprovante também faz esperar, e o "posso mandar?" entra no registro (o "sim"/"1"
+// do dono vai para ele, não para o menu do CMP). Desligada: a checagem de antes, sem consulta nova.
 // Interruptores: app_settings.lembretes_revisao_ativo e campanha_temporada_ativa (padrão 'on').
 // ?dry=1 devolve o que seria proposto, sem gravar nada (qualquer dia da semana).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
-import { pendenciaQueSegueEsperando, queueWhatsAppReply, resolveOrCreateWhatsAppSession } from "../_shared/ai/whatsapp-channel.ts";
+import {
+  conversaDosComprovantesLigada,
+  donoOcupadoParaPerguntar,
+  enviarComRegistro,
+  resolveOrCreateWhatsAppSession,
+} from "../_shared/ai/whatsapp-channel.ts";
 import { numeroDeTesteAtivo } from "../_shared/whatsapp/marcar-enviado.ts";
 import { ehTerAQui, hojeEmBrasilia } from "../_shared/revisao/texto.ts";
 import {
@@ -63,6 +71,8 @@ async function proporAoDono(
   metadata: Record<string, unknown>,
   propostas: Proposta[],
   teste: boolean,
+  /** A conversa dos comprovantes está ligada (conversaDosComprovantesLigada): registra a pergunta. */
+  conversaLigada: boolean,
 ): Promise<string[]> {
   const ids: string[] = [];
   const expira = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -106,7 +116,14 @@ async function proporAoDono(
     },
   ]);
   if (eH) console.error("[lembretes-de-revisao] histórico não gravado", eH.message);
-  await queueWhatsAppReply(admin, dono.phone, pergunta);
+  // Registro único (F2): a pergunta entra ANTES do envio (uma pergunta de comprovante aberta volta
+  // para a fila) e o id da mensagem é guardado depois (é o que a citação do dono acha). A campanha
+  // de temporada é o toque 0.
+  await enviarComRegistro(
+    admin, dono.phone, pergunta,
+    { acao: "registrar", tipo: "confirmacao", referencia_id: ids[0], titulo: primeira.titulo },
+    { ligada: conversaLigada, origem: primeira.toque === 0 ? "campanha_temporada" : "lembrete_revisao" },
+  );
   await admin.from("ai_operator_audit").insert({
     session_id: sessao, actor_user_id: dono.id, actor_kind: "system", event_type: "lembretes_de_revisao:propostos",
     event_category: "data", payload: { pendencias: ids, clientes: propostas.map((p) => p.cliente) },
@@ -164,11 +181,17 @@ servirComCors(async (req) => {
     const sessao = await resolveOrCreateWhatsAppSession(admin, dono.phone, dono.id);
     const { data: s } = await admin.from("ai_operator_sessions").select("metadata").eq("id", sessao).maybeSingle();
     const metadata = (s?.metadata ?? {}) as Record<string, unknown>;
-    if (await pendenciaQueSegueEsperando(admin, metadata, agora)) {
-      return jr({ ok: true, adiado_por_pendencia: true, propostas: propostas.length, pulados: pulados.length });
+    // Uma pergunta por vez no WhatsApp do dono: a confirmação do assistente, a pergunta de um
+    // comprovante ou outro lembrete (com a conversa dos comprovantes ligada, pelo registro; erro na
+    // leitura = ocupado). A rodada espera a próxima.
+    const conversaLigada = conversaDosComprovantesLigada(settings);
+    const ocupado = await donoOcupadoParaPerguntar(admin, { phone: dono.phone, metadata, ligada: conversaLigada, agora });
+    if (ocupado.ocupado) {
+      // adiado_por_pendencia fica (é o que aparece nos diagnósticos de hoje); "por" diz quem segura
+      return jr({ ok: true, adiado_por_pendencia: true, adiado_por_pergunta: true, por: ocupado.por, propostas: propostas.length, pulados: pulados.length });
     }
 
-    const ids = await proporAoDono(admin, dono, sessao, metadata, propostas, teste);
+    const ids = await proporAoDono(admin, dono, sessao, metadata, propostas, teste, conversaLigada);
     return jr({ ok: true, propostas: ids.length, pulados: pulados.length });
   } catch (e) {
     console.error("[lembretes-de-revisao] erro", e);

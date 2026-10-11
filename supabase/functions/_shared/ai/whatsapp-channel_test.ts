@@ -1,16 +1,23 @@
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
+  avisoDoCmpSubstituido,
   cancelarPendenciaSubstituida,
   checkWhatsAppRateLimit,
+  conversaDosComprovantesLigada,
   decidirPendenciaHerdada,
+  donoOcupadoParaPerguntar,
+  enviarComRegistro,
   formatOptionsAsNumberedText,
   notaDeConfirmacao,
   parseConfirmationReply,
   parseOptionReply,
   pendenciaParaHerdar,
+  queueWhatsAppReply,
+  registroDoTurno,
   resolveOptionAsUserText,
   resolveOrCreateWhatsAppSession,
   textoDaPendenciaReapresentada,
+  textoDaTravaDoComprovante,
 } from "./whatsapp-channel.ts";
 
 // ─── Pendência que atravessa a troca de conversa (27/09/2026) ────────────────────────────
@@ -316,4 +323,376 @@ Deno.test("limite por minuto com dono: telefone de funcionário ou dono ilegíve
 Deno.test("limite por minuto: 10 ou mais no minuto bloqueia, nos dois modos", async () => {
   assertEquals(await checkWhatsAppRateLimit(bancoDoLimite({ value: "off" }, 10).admin, TELEFONE_DO_DONO), false);
   assertEquals(await checkWhatsAppRateLimit(bancoDoLimite({ value: "dono" }, 9).admin, TELEFONE_DO_DONO), true);
+});
+
+// ─── queueWhatsAppReply devolve o id da mensagem (F2 dos comprovantes, 11/10/2026) ───────
+// O registro de pergunta ativa guarda o id do WhatsApp do pedido, para a citação do dono achar
+// a pergunta certa. Enviado na hora → o messageId do whatsapp-send; fila ou erro → null.
+
+async function comFetch<T>(resposta: () => Promise<Response>, fn: () => Promise<T>): Promise<T> {
+  const original = globalThis.fetch;
+  globalThis.fetch = (() => resposta()) as typeof globalThis.fetch;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+function bancoDaFila() {
+  const fila: Record<string, unknown>[] = [];
+  const admin = {
+    from: (_t: string) => ({ insert: (l: Record<string, unknown>) => { fila.push(l); return Promise.resolve({ error: null }); } }),
+  };
+  return { admin, fila };
+}
+
+Deno.test("queueWhatsAppReply: enviado na hora devolve o messageId, sem fila", async () => {
+  const { admin, fila } = bancoDaFila();
+  const id = await comFetch(
+    () => Promise.resolve(new Response(JSON.stringify({ success: true, kind: "text", messageId: "3EB0ABC" }), { status: 200 })),
+    () => queueWhatsAppReply(admin, TELEFONE_DO_DONO, "oi"),
+  );
+  assertEquals(id, "3EB0ABC");
+  assertEquals(fila.length, 0);
+});
+
+Deno.test("queueWhatsAppReply: enviado sem id do provedor devolve null, sem fila", async () => {
+  const { admin, fila } = bancoDaFila();
+  const id = await comFetch(
+    () => Promise.resolve(new Response(JSON.stringify({ success: true, kind: "text", messageId: null }), { status: 200 })),
+    () => queueWhatsAppReply(admin, TELEFONE_DO_DONO, "oi"),
+  );
+  assertEquals(id, null);
+  assertEquals(fila.length, 0);
+});
+
+Deno.test("queueWhatsAppReply: erro do envio ou da rede cai na fila e devolve null", async () => {
+  for (
+    const resposta of [
+      () => Promise.resolve(new Response(JSON.stringify({ error: "x" }), { status: 500 })),
+      () => Promise.resolve(new Response(JSON.stringify({ error: "x", em_andamento: true }), { status: 409 })),
+      () => Promise.reject(new Error("rede")),
+    ]
+  ) {
+    const { admin, fila } = bancoDaFila();
+    assertEquals(await comFetch(resposta, () => queueWhatsAppReply(admin, TELEFONE_DO_DONO, "oi")), null);
+    assertEquals(fila, [{ phone_normalized: TELEFONE_DO_DONO, message: "oi", source: "ai_agent" }]);
+  }
+});
+
+// ─── Registro único de pergunta ativa (F2 dos comprovantes, 11/10/2026) ──────────────────
+// O dono recebe no mesmo WhatsApp o menu dos comprovantes, a pendência do assistente e o "posso
+// mandar?" dos lembretes. Um "sim"/"1" só vai para UM deles. As funções do registro
+// (_shared/whatsapp/pergunta-ativa.ts) falam com o banco por rpc: aqui o rpc é dublê, com as
+// formas da spec (2.4). Conversa desligada (o padrão) = comportamento de antes, sem leitura nova.
+
+const LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };
+const ABERTA_EM = "2026-10-11T13:00:00.000Z";
+const mais = (iso: string, ms: number) => new Date(Date.parse(iso) + ms).toISOString();
+
+/** Banco do registro: rpc com resposta por função, pendências por id, fila de envio; grava a ordem. */
+function bancoDoRegistro(rpcs: Record<string, unknown> = {}, pendencias: Record<string, unknown>[] = []) {
+  const ordem: string[] = [];
+  const chamadas: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const fila: Record<string, unknown>[] = [];
+  const admin = {
+    rpc(fn: string, args: Record<string, unknown>) {
+      ordem.push(`rpc:${fn}`);
+      chamadas.push({ fn, args });
+      const r = rpcs[fn];
+      if (r instanceof Error) return Promise.reject(r);
+      return Promise.resolve({ data: r ?? null, error: null });
+    },
+    from(tabela: string) {
+      ordem.push(`from:${tabela}`);
+      if (tabela === "whatsapp_send_queue") {
+        return { insert: (l: Record<string, unknown>) => { fila.push(l); return Promise.resolve({ error: null }); } };
+      }
+      let linhas = [...pendencias];
+      const q: any = {
+        select: () => q,
+        eq: (c: string, v: unknown) => { linhas = linhas.filter((l) => l[c] === v); return q; },
+        maybeSingle: () => Promise.resolve({ data: linhas[0] ?? null, error: null }),
+      };
+      return q;
+    },
+  };
+  return { admin, ordem, chamadas, fila };
+}
+
+/** whatsapp-send dublê: registra a ordem e devolve o messageId. */
+async function comEnvio<T>(ordem: string[], messageId: string | null, fn: () => Promise<T>): Promise<T> {
+  const original = globalThis.fetch;
+  globalThis.fetch = (() => {
+    ordem.push("envio");
+    return Promise.resolve(new Response(JSON.stringify({ success: true, kind: "text", messageId }), { status: 200 }));
+  }) as typeof globalThis.fetch;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = original;
+  }
+}
+
+/** O que pergunta_rotear devolve com uma pergunta aberta (de CMP, por padrão) e, se vier, a pendência viva. */
+function rotear(p: { pendenciaDesde?: string; citada?: Record<string, unknown> | null; ativa?: "comprovante" | "assistente" | null }) {
+  const origem = p.ativa === undefined ? "comprovante" : p.ativa;
+  return {
+    conversa: true,
+    dono: true,
+    ativa: origem
+      ? {
+        id: "perg-1", origem, tipo: origem === "comprovante" ? "pergunta" : "confirmacao", referencia_id: "cmp-1",
+        referencia_codigo: "CMP-00124", passo: "para_que", opcoes: [], wa_message_id: "WA-CMP", aberta_em: ABERTA_EM,
+      }
+      : null,
+    citada: p.citada ?? null,
+    pendencia: p.pendenciaDesde ? { tipo: "confirmacao", id: "pend-1", titulo: "Lançar no Caixa", desde: p.pendenciaDesde } : null,
+    cmp_em_contexto: null,
+  };
+}
+
+const COM_PENDENCIA = { pending_confirm_action_id: "pend-1" };
+
+Deno.test("conversaDosComprovantesLigada: só fluxo 'dono' E conversa 'on' (aspas, espaços e maiúsculas toleradas)", () => {
+  assertEquals(conversaDosComprovantesLigada(LIGADA), true);
+  assertEquals(conversaDosComprovantesLigada({ comprovante_fluxo: "\"dono\"", comprovante_conversa: " On " }), true);
+  for (
+    const s of [
+      {}, null, undefined, { comprovante_fluxo: "dono" }, { comprovante_conversa: "on" },
+      { comprovante_fluxo: "sombra", comprovante_conversa: "on" }, { comprovante_fluxo: "dono", comprovante_conversa: "off" },
+      { comprovante_fluxo: "dono", comprovante_conversa: "sim" },
+    ]
+  ) assertEquals(conversaDosComprovantesLigada(s as never), false, JSON.stringify(s));
+});
+
+Deno.test("trava: 'sim' com a pergunta de CMP mais nova que a pendência NÃO aprova — devolve o desempate", async () => {
+  const { admin, chamadas } = bancoDoRegistro({ pergunta_rotear: rotear({ pendenciaDesde: mais(ABERTA_EM, -10 * 60_000) }) });
+  const t = await textoDaTravaDoComprovante(admin, { phone: TELEFONE_DO_DONO, texto: "sim", citado: null, metadata: COM_PENDENCIA, ligada: true });
+  assertStringIncludes(String(t), "CMP-00124");
+  assertStringIncludes(String(t), "Lançar no Caixa");
+  assertStringIncludes(String(t), "citando a mensagem certa");
+  assertEquals(chamadas, [{ fn: "pergunta_rotear", args: { p_phone: TELEFONE_DO_DONO, p_citado: null } }]);
+});
+
+Deno.test("trava: '1' com lista do assistente e pergunta de CMP mais nova também trava; empate em < 2 min trava", async () => {
+  const opcoes = { pending_options: [{ label: "A", value: "a" }, { label: "B", value: "b" }] };
+  const velha = bancoDoRegistro({ pergunta_rotear: rotear({ pendenciaDesde: mais(ABERTA_EM, -30 * 60_000) }) });
+  assert(await textoDaTravaDoComprovante(velha.admin, { phone: TELEFONE_DO_DONO, texto: "1", citado: null, metadata: opcoes, ligada: true }));
+  const empate = bancoDoRegistro({ pergunta_rotear: rotear({ pendenciaDesde: mais(ABERTA_EM, 119_000) }) });
+  assert(await textoDaTravaDoComprovante(empate.admin, { phone: TELEFONE_DO_DONO, texto: "sim", citado: null, metadata: COM_PENDENCIA, ligada: true }));
+});
+
+Deno.test("trava: pendência mais nova (2 min ou mais), pergunta aberta do assistente ou nenhuma do CMP → aprova como hoje", async () => {
+  for (
+    const estado of [
+      rotear({ pendenciaDesde: mais(ABERTA_EM, 121_000) }),
+      rotear({ pendenciaDesde: ABERTA_EM, ativa: "assistente" }),
+      rotear({ pendenciaDesde: ABERTA_EM, ativa: null }),
+      { conversa: false, dono: true },
+    ]
+  ) {
+    const { admin } = bancoDoRegistro({ pergunta_rotear: estado });
+    assertEquals(
+      await textoDaTravaDoComprovante(admin, { phone: TELEFONE_DO_DONO, texto: "sim", citado: null, metadata: COM_PENDENCIA, ligada: true }),
+      null,
+      JSON.stringify(estado).slice(0, 80),
+    );
+  }
+});
+
+Deno.test("trava: a citação decide — citou o pedido do assistente (ou fora do registro) segue; citou pergunta de CMP trava", async () => {
+  const doAssistente = bancoDoRegistro({
+    pergunta_rotear: rotear({
+      pendenciaDesde: ABERTA_EM,
+      citada: { id: "p2", origem: "assistente", tipo: "confirmacao", referencia_id: "pend-1", status: "aberta", passo: null },
+    }),
+  });
+  assertEquals(
+    await textoDaTravaDoComprovante(doAssistente.admin, { phone: TELEFONE_DO_DONO, texto: "sim", citado: "WA-PEDIDO", metadata: COM_PENDENCIA, ligada: true }),
+    null,
+  );
+  assertEquals(doAssistente.chamadas[0].args, { p_phone: TELEFONE_DO_DONO, p_citado: "WA-PEDIDO" });
+  const fora = bancoDoRegistro({ pergunta_rotear: rotear({ pendenciaDesde: ABERTA_EM }) });
+  assertEquals(
+    await textoDaTravaDoComprovante(fora.admin, { phone: TELEFONE_DO_DONO, texto: "sim", citado: "WA-OUTRA", metadata: COM_PENDENCIA, ligada: true }),
+    null,
+  );
+  const cmpFechada = bancoDoRegistro({
+    pergunta_rotear: rotear({
+      ativa: null,
+      pendenciaDesde: ABERTA_EM,
+      citada: { id: "p0", origem: "comprovante", tipo: "pergunta", referencia_id: "cmp-1", status: "respondida", passo: "valor" },
+    }),
+  });
+  assert(await textoDaTravaDoComprovante(cmpFechada.admin, { phone: TELEFONE_DO_DONO, texto: "sim", citado: "WA-CMP", metadata: COM_PENDENCIA, ligada: true }));
+});
+
+Deno.test("trava: conversa desligada, sem pendência ou texto que não é confirmação → nenhuma leitura nova", async () => {
+  for (
+    const p of [
+      { texto: "sim", metadata: COM_PENDENCIA, ligada: false },
+      { texto: "sim", metadata: {}, ligada: true },
+      { texto: "sim", metadata: { pending_confirm_action_id: null, pending_options: [] }, ligada: true },
+      { texto: "quantas OS abertas temos?", metadata: COM_PENDENCIA, ligada: true },
+    ]
+  ) {
+    const { admin, ordem } = bancoDoRegistro({ pergunta_rotear: rotear({ pendenciaDesde: ABERTA_EM }) });
+    assertEquals(await textoDaTravaDoComprovante(admin, { phone: TELEFONE_DO_DONO, citado: null, ...p }), null);
+    assertEquals(ordem, [], JSON.stringify(p));
+  }
+});
+
+Deno.test("registroDoTurno: proposta nova registra; opções novas registram; texto puro encerra; a mesma de antes não mexe", () => {
+  assertEquals(registroDoTurno({}, { pending_confirm_action_id: "pend-9" }, "s1", "Enviar orçamento"), {
+    acao: "registrar", tipo: "confirmacao", referencia_id: "pend-9", titulo: "Enviar orçamento",
+  });
+  const lista = [{ label: "João", value: "c1" }, { label: "Maria", value: "c2" }];
+  assertEquals(registroDoTurno({ pending_options: null }, { pending_options: lista, pending_confirm_action_id: null }, "s1", "Qual cliente?"), {
+    acao: "registrar", tipo: "opcoes", referencia_id: "s1", titulo: "Qual cliente?",
+  });
+  assertEquals(registroDoTurno(COM_PENDENCIA, { pending_confirm_action_id: null, pending_options: null }, "s1", null), { acao: "encerrar" });
+  assertEquals(registroDoTurno({}, {}, "s1", null), { acao: "encerrar" });
+  // A pendência viva que segue esperando (turno de texto no meio dela) e a lista não consumida: nada.
+  assertEquals(registroDoTurno(COM_PENDENCIA, { ...COM_PENDENCIA, pendencia_herdada: true }, "s1", null), null);
+  assertEquals(registroDoTurno({ pending_options: lista }, { pending_options: lista }, "s1", null), null);
+  // A próxima pendência da leva (depois do "sim") registra; sem título, um rótulo genérico.
+  assertEquals(registroDoTurno(COM_PENDENCIA, { pending_confirm_action_id: "pend-2" }, "s1", undefined), {
+    acao: "registrar", tipo: "confirmacao", referencia_id: "pend-2", titulo: "pedido do assistente",
+  });
+});
+
+Deno.test("enviarComRegistro: registra ANTES do envio e guarda o id do WhatsApp DEPOIS", async () => {
+  const { admin, ordem, chamadas } = bancoDoRegistro({
+    pergunta_registrar_externa: { id: "perg-9", substituiu: { origem: "comprovante", referencia_codigo: "CMP-00124" } },
+  });
+  const wa = await comEnvio(ordem, "WA-9", () =>
+    enviarComRegistro(admin, TELEFONE_DO_DONO, "⚠️ Lançar no Caixa", {
+      acao: "registrar", tipo: "confirmacao", referencia_id: "pend-9", titulo: "Lançar no Caixa",
+    }, { ligada: true }));
+  assertEquals(wa, "WA-9");
+  assertEquals(ordem, ["rpc:pergunta_registrar_externa", "envio", "rpc:pergunta_marcar_enviada"]);
+  assertEquals(chamadas[0].args, {
+    p: { phone: TELEFONE_DO_DONO, origem: "assistente", tipo: "confirmacao", referencia_id: "pend-9", titulo: "Lançar no Caixa" },
+  });
+  assertEquals(chamadas[1].args, { p_id: "perg-9", p_wa_message_id: "WA-9" });
+});
+
+Deno.test("enviarComRegistro: origem dos lembretes; encerrar vem depois do envio; desligada = só o envio", async () => {
+  const lembrete = bancoDoRegistro({ pergunta_registrar_externa: { id: "perg-L" } });
+  await comEnvio(lembrete.ordem, "WA-L", () =>
+    enviarComRegistro(lembrete.admin, TELEFONE_DO_DONO, "posso mandar?", {
+      acao: "registrar", tipo: "confirmacao", referencia_id: "pend-L", titulo: "Lembrete",
+    }, { ligada: true, origem: "campanha_temporada" }));
+  assertEquals((lembrete.chamadas[0].args.p as Record<string, unknown>).origem, "campanha_temporada");
+
+  // encerrou alguma pergunta do assistente → a do CMP que ela tinha tirado da vez é retomada
+  // (revisão de 11/10/2026); nada encerrado → nada a retomar
+  const encerrar = bancoDoRegistro({ pergunta_encerrar_externa: 1 });
+  const retomar = (phone: string) => { encerrar.ordem.push(`retomar:${phone}`); return Promise.resolve(); };
+  await comEnvio(encerrar.ordem, "WA-E", () => enviarComRegistro(encerrar.admin, TELEFONE_DO_DONO, "ok", { acao: "encerrar" }, { ligada: true, retomar }));
+  assertEquals(encerrar.ordem, ["envio", "rpc:pergunta_encerrar_externa", `retomar:${TELEFONE_DO_DONO}`]);
+  assertEquals(encerrar.chamadas[0].args, { p_phone: TELEFONE_DO_DONO, p_status: "respondida" });
+  const nada = bancoDoRegistro({ pergunta_encerrar_externa: 0 });
+  const naoRetoma = () => { nada.ordem.push("retomar"); return Promise.resolve(); };
+  await comEnvio(nada.ordem, "WA-N", () => enviarComRegistro(nada.admin, TELEFONE_DO_DONO, "ok", { acao: "encerrar" }, { ligada: true, retomar: naoRetoma }));
+  assertEquals(nada.ordem, ["envio", "rpc:pergunta_encerrar_externa"]);
+  // retomar que falha não derruba a resposta (o vigia retoma)
+  const falha = bancoDoRegistro({ pergunta_encerrar_externa: 2 });
+  const wa = await comEnvio(falha.ordem, "WA-X", () =>
+    enviarComRegistro(falha.admin, TELEFONE_DO_DONO, "ok", { acao: "encerrar" }, { ligada: true, retomar: () => Promise.reject(new Error("rede")) }));
+  assertEquals(wa, "WA-X");
+
+  const registros = [
+    { acao: "encerrar" as const },
+    { acao: "registrar" as const, tipo: "confirmacao" as const, referencia_id: "x", titulo: "t" },
+    null,
+  ];
+  for (const registro of registros) {
+    const desligada = bancoDoRegistro();
+    await comEnvio(desligada.ordem, "WA-D", () => enviarComRegistro(desligada.admin, TELEFONE_DO_DONO, "oi", registro, { ligada: false }));
+    assertEquals(desligada.ordem, ["envio"], "desligada: nenhuma chamada nova ao banco");
+  }
+});
+
+Deno.test("enviarComRegistro: registro que falha não impede a mensagem (e nada é marcado sem id)", async () => {
+  const { admin, ordem } = bancoDoRegistro({ pergunta_registrar_externa: new Error("rede") });
+  const wa = await comEnvio(ordem, "WA-F", () =>
+    enviarComRegistro(admin, TELEFONE_DO_DONO, "pedido", { acao: "registrar", tipo: "confirmacao", referencia_id: "p", titulo: "t" }, { ligada: true }));
+  assertEquals(wa, "WA-F");
+  assertEquals(ordem, ["rpc:pergunta_registrar_externa", "envio"]);
+});
+
+Deno.test("donoOcupadoParaPerguntar: ligada pergunta ao registro (pergunta de CMP aberta adia; erro adia)", async () => {
+  const cmp = bancoDoRegistro({ pergunta_ocupado: { ocupado: true, por: { origem: "comprovante", titulo: "CMP-00124", desde: ABERTA_EM } } });
+  assertEquals(await donoOcupadoParaPerguntar(cmp.admin, { phone: TELEFONE_DO_DONO, metadata: {}, ligada: true }), { ocupado: true, por: "comprovante" });
+  assertEquals(cmp.chamadas, [{ fn: "pergunta_ocupado", args: { p_phone: TELEFONE_DO_DONO } }]);
+  const livre = bancoDoRegistro({ pergunta_ocupado: { ocupado: false, por: null } });
+  assertEquals(await donoOcupadoParaPerguntar(livre.admin, { phone: TELEFONE_DO_DONO, metadata: {}, ligada: true }), { ocupado: false, por: null });
+  const erro = bancoDoRegistro({ pergunta_ocupado: new Error("rede") });
+  assertEquals(await donoOcupadoParaPerguntar(erro.admin, { phone: TELEFONE_DO_DONO, metadata: {}, ligada: true }), { ocupado: true, por: "erro" });
+});
+
+Deno.test("donoOcupadoParaPerguntar: desligada = a checagem de antes (pendência viva da conversa), sem rpc", async () => {
+  const viva = bancoDoRegistro({}, [{ id: "pend-1", status: "pending", expires_at: "2999-01-01T00:00:00.000Z", title: "X", risk_level: "medium" }]);
+  assertEquals(
+    await donoOcupadoParaPerguntar(viva.admin, { phone: TELEFONE_DO_DONO, metadata: COM_PENDENCIA, ligada: false }),
+    { ocupado: true, por: "assistente" },
+  );
+  assertEquals(viva.chamadas.length, 0);
+  const nada = bancoDoRegistro();
+  assertEquals(await donoOcupadoParaPerguntar(nada.admin, { phone: TELEFONE_DO_DONO, metadata: {}, ligada: false }), { ocupado: false, por: null });
+  assertEquals(nada.ordem, [], "sem pendência na conversa: nem lê o banco");
+});
+
+// As pontas (index.ts sobe o servidor ao ser importado): conferidas pelo texto da fonte.
+const fonte = (rel: string) => Deno.readTextFileSync(new URL(rel, import.meta.url));
+
+Deno.test("ai-agent: a trava vem antes da camada do sim/não; toda resposta de turno passa pelo registro", () => {
+  const src = fonte("../../ai-agent/index.ts");
+  const trava = src.indexOf("textoDaTravaDoComprovante(admin");
+  const camada = src.indexOf("const confirmation = parseConfirmationReply(text)");
+  assert(trava > 0 && camada > trava, "a trava tem de vir antes de parseConfirmationReply");
+  assertStringIncludes(src, "body.citado");
+  assertStringIncludes(src, "body.message_id");
+  assertEquals((src.match(/enviarComRegistro\(/g) ?? []).length, 3, "decisão do sim/não, turno do OpenRouter e entrega do Max");
+  assertEquals(/queueWhatsAppReply\(admin, phoneNormalized, (replyText|resolved\.message)/.test(src), false, "resposta de turno saindo sem o registro");
+});
+
+Deno.test("lembretes-de-revisao e acompanhar-conversas: adiam pelo registro e o lembrete entra nele", () => {
+  const lembretes = fonte("../../lembretes-de-revisao/index.ts");
+  const acompanhar = fonte("../../acompanhar-conversas/index.ts");
+  for (const src of [lembretes, acompanhar]) {
+    assertStringIncludes(src, "donoOcupadoParaPerguntar(admin");
+    assertStringIncludes(src, "conversaDosComprovantesLigada(settings)");
+    assertEquals(src.includes("pendenciaQueSegueEsperando("), false, "a checagem antiga voltou");
+  }
+  assertStringIncludes(lembretes, "adiado_por_pergunta: true");
+  assertStringIncludes(lembretes, "primeira.toque === 0 ? \"campanha_temporada\" : \"lembrete_revisao\"");
+  assertEquals(lembretes.includes("queueWhatsAppReply("), false, "o 'posso mandar?' tem de sair pelo registro");
+});
+
+// Revisão de 11/10/2026: a pendência que tira a pergunta de um CMP da vez avisa na própria mensagem.
+Deno.test("enviarComRegistro: substituiu a pergunta de um CMP → a mensagem diz que ele ficou para depois", async () => {
+  assertEquals(avisoDoCmpSubstituido("CMP-00124"), "\n\n(O CMP-00124 ficou para depois: *cmp 124* retoma.)");
+  assertEquals(avisoDoCmpSubstituido(null), "");
+  const { admin, ordem } = bancoDoRegistro({
+    pergunta_registrar_externa: { id: "perg-9", substituiu: { origem: "comprovante", referencia_codigo: "CMP-00124" } },
+  });
+  const enviados: string[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = ((_u: unknown, init?: RequestInit) => {
+    ordem.push("envio");
+    enviados.push(String(JSON.parse(String(init?.body ?? "{}")).message ?? ""));
+    return Promise.resolve(new Response(JSON.stringify({ success: true, kind: "text", messageId: "WA-9" }), { status: 200 }));
+  }) as typeof globalThis.fetch;
+  try {
+    await enviarComRegistro(admin, TELEFONE_DO_DONO, "⚠️ Lançar no Caixa", {
+      acao: "registrar", tipo: "confirmacao", referencia_id: "pend-9", titulo: "Lançar no Caixa",
+    }, { ligada: true });
+  } finally {
+    globalThis.fetch = original;
+  }
+  assertEquals(enviados, ["⚠️ Lançar no Caixa\n\n(O CMP-00124 ficou para depois: *cmp 124* retoma.)"]);
 });

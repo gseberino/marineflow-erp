@@ -6,13 +6,20 @@
 //  2. AVISOS: para cada acompanhamento devido, pede ao assistente — pelo MESMO caminho de uma
 //     mensagem do dono (ai-agent, x-internal-secret) — que leia a conversa e sugira a resposta. O dono
 //     recebe a confirmação de sempre (sim / "não, muda…"). Nada sai para o contato sem esse sim.
-// Não atropela o dono: se ele tem uma confirmação aberta, o aviso espera a próxima rodada.
+// Não atropela o dono: se ele tem uma confirmação aberta, o aviso espera a próxima rodada. Com a
+// conversa dos comprovantes ligada (F2, 11/10/2026), "aberta" é o registro único de pergunta ativa:
+// a pergunta de um comprovante ou um "posso mandar?" dos lembretes também faz esperar. A pendência
+// que o assistente criar com o aviso entra no registro pelo próprio ai-agent.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { detectarPromessa } from "../_shared/ai/promessa.ts";
 import { type Acompanhamento, decidir, diaEmBrasilia, type EstadoDaConversa, horaDeAvisar, textoDoAviso } from "../_shared/ai/acompanhar.ts";
-import { pendenciaQueSegueEsperando, resolveOrCreateWhatsAppSession } from "../_shared/ai/whatsapp-channel.ts";
+import {
+  conversaDosComprovantesLigada,
+  donoOcupadoParaPerguntar,
+  resolveOrCreateWhatsAppSession,
+} from "../_shared/ai/whatsapp-channel.ts";
 import { telefoneLegivel } from "../_shared/ai/tools/agendamento.ts";
 
 const corsHeaders = {
@@ -70,8 +77,8 @@ async function detectarPromessas(admin: Db, dono: { id: string }, internos: Set<
   return { lidas: (msgs ?? []).length, criadas };
 }
 
-/** 2. Avisos devidos. */
-async function avisar(admin: Db, agora: Date) {
+/** 2. Avisos devidos. `conversaLigada` = conversa dos comprovantes ligada (conversaDosComprovantesLigada). */
+async function avisar(admin: Db, agora: Date, conversaLigada: boolean) {
   const { data: ativos, error } = await admin.from("whatsapp_acompanhamentos")
     .select("id, phone_normalized, contato, modo, intervalo_min, ate, lembrar_em, promessa, ultimo_aviso_em, avisos_dia, avisos_no_dia, created_at, criado_por")
     .eq("status", "ativo").order("created_at", { ascending: true }).limit(100);
@@ -100,10 +107,13 @@ async function avisar(admin: Db, agora: Date) {
     const dono = donos.get(a.criado_por);
     if (!dono) continue;
 
-    // Não atropela uma confirmação aberta do dono (o aviso traria outra e cancelaria a dele).
+    // Não atropela uma pergunta aberta do dono (o aviso traria outra e cancelaria a dele): a
+    // confirmação do assistente e, com a conversa dos comprovantes ligada, a pergunta de um
+    // comprovante ou um lembrete (registro único; erro na leitura = ocupado, espera a próxima rodada).
     const sessao = await resolveOrCreateWhatsAppSession(admin, dono.phone, dono.id);
     const { data: s } = await admin.from("ai_operator_sessions").select("metadata").eq("id", sessao).maybeSingle();
-    if (await pendenciaQueSegueEsperando(admin, s?.metadata ?? {}, agora)) {
+    const ocupado = await donoOcupadoParaPerguntar(admin, { phone: dono.phone, metadata: s?.metadata ?? {}, ligada: conversaLigada, agora });
+    if (ocupado.ocupado) {
       resultado.adiados_por_pendencia++;
       continue;
     }
@@ -154,7 +164,7 @@ servirComCors(async (req) => {
     const dono = ((usuarios ?? []) as any[]).find((u) => u.role === "admin" && u.ai_whatsapp_enabled && u.active && u.phone_normalized);
 
     const promessas = dono ? await detectarPromessas(admin, dono, internos, settings, agora) : { lidas: 0, criadas: 0, sem_dono: true };
-    const avisos = await avisar(admin, agora);
+    const avisos = await avisar(admin, agora, conversaDosComprovantesLigada(settings));
     return jr({ ok: true, promessas, avisos });
   } catch (e) {
     console.error("[acompanhar-conversas] erro", e);
