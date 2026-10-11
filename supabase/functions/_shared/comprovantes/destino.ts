@@ -159,6 +159,16 @@ export function caminhoDoIndice(mes: string): string {
   return `${PASTA_COMPROVANTES}/${m[1]}/${m[1]}-${m[2]}/_INDICE ${m[1]}-${m[2]}.csv`;
 }
 
+/**
+ * F3 (padrão do dono, spec-f3.md 2.10): o índice da contadora não lista os PESSOAIS; a pasta PESSOAL
+ * tem o próprio — "/MANAGEMENT/FINANCIALS/COMPROVANTES/PESSOAL/2026-10/_INDICE PESSOAL 2026-10.csv".
+ */
+export function caminhoDoIndicePessoal(mes: string): string {
+  const m = /^(\d{4})-(\d{2})/.exec(String(mes ?? ""));
+  if (!m) throw new Error("mes_invalido");
+  return `${PASTA_PESSOAL}/${m[1]}-${m[2]}/_INDICE PESSOAL ${m[1]}-${m[2]}.csv`;
+}
+
 // ---------------------------------------------------------------------------------------------
 // O índice do mês (CSV para a contadora): UTF-8 com BOM, ";", CRLF, decimal com vírgula
 // ---------------------------------------------------------------------------------------------
@@ -203,6 +213,8 @@ const FORMA_NO_INDICE: Record<string, string> = {
 const SITUACAO_NO_INDICE: Record<string, string> = {
   gravado: "gravado", aguardando_xml: "esperando a nota", cancelado: "cancelado", aguardando_vez: "em conferência",
   perguntando: "em conferência", aguardando_sim: "em conferência", lido: "a conferir", falhou: "a conferir",
+  // F3: gravado e esperando/ligado à linha do extrato, ou sem linha depois do prazo
+  aguardando_banco: "esperando o banco", conciliado: "ligado ao extrato", abandonado: "sem linha no extrato",
 };
 const PENDENCIA_NO_INDICE: Record<string, string> = {
   dar_entrada: "dar entrada no estoque", incluir_na_os: "incluir as peças na OS", cobrar_a_parte: "cobrar à parte",

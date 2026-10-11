@@ -13,6 +13,9 @@
 // ("1 pix", "4 - dinheiro") vale se os dois batem; no como pagou / quem pagou / cobrar / para quê,
 // vale a frase com UMA palavra-chave do passo ("paguei no débito", "pode cobrar", "é custo nosso");
 // "segunda opção"; o nome tem até 3 palavras (um recado ao assistente não vira nome de barco).
+//
+// F3 (11/10/2026 — spec-f3.md, 4.2): o passo "banco" (a pergunta do extrato de um CMP já gravado).
+// "0"/"nenhuma destas" = não; o número só vale na lista (azul) — no verde só sim/não ligam ou recusam.
 import { dataEmSaoPaulo } from "../dropbox/nucleo.ts";
 import { lerNumero, lerSimNao, normalizarResposta, type Opcao } from "../whatsapp/pergunta-ativa.ts";
 
@@ -36,7 +39,9 @@ export type Interpretacao =
 
 export type Passo =
   | "valor" | "para_que" | "qual_os" | "mesma_compra" | "como_pagou" | "quem_pagou" | "qual_tecnico" | "cobrar" | "categoria"
-  | "data" | "confirmar" | "corrigir";
+  | "data" | "confirmar" | "corrigir"
+  /** F3: "apareceu no extrato, ligo?" (verde: sim/não) ou a lista de linhas com "0 Nenhuma destas" (azul). */
+  | "banco";
 
 // ---------------------------------------------------------------------------------------------
 // Os menus fixos (o banco manda as opções; estes valem quando a pergunta não as trouxe)
@@ -85,7 +90,10 @@ export const MENU_CORRIGIR: Opcao[] = [
   { n: 9, rotulo: "Deixar para depois", valor: "depois" },
 ];
 
-/** As opções que valem para o passo: as do banco; sem elas, o menu fixo do passo (se há). */
+/**
+ * As opções que valem para o passo: as do banco; sem elas, o menu fixo do passo (se há). O passo
+ * "banco" (F3) não tem menu fixo: valem só as linhas que a pergunta trouxe.
+ */
 export function opcoesDoPasso(passo: string | null | undefined, opcoes: Opcao[] | null | undefined): Opcao[] {
   if (Array.isArray(opcoes) && opcoes.length > 0) return opcoes;
   switch (passo) {
@@ -413,6 +421,35 @@ function numeroPuro(t: string): number | null {
 const CERTO_NO_VALOR = new Set(["certo", "ta certo", "esta certo", "correto", "ta correto", "esta correto", "isso ai", "e isso"]);
 
 /**
+ * F3 (spec-f3.md, 4.2): "nenhuma destas" na pergunta do extrato. O 0 é a opção "Nenhuma destas" da
+ * lista (o lerNumero não lê 0); no verde, "não é essa" é o mesmo "não".
+ */
+const NENHUMA_DO_EXTRATO = new Set([
+  "0", "00", "zero", "opcao 0", "opcao zero", "numero 0",
+  "nenhum", "nenhuma", "nenhum desses", "nenhuma dessas", "nenhuma destas", "nenhum destes", "nenhum deles", "nenhuma delas",
+  "nao e nenhum", "nao e nenhuma", "nao eh nenhum", "nao eh nenhuma", "nao e nenhum desses", "nao e nenhuma dessas",
+  "nao e essa", "nao e esse", "nao eh essa", "nao eh esse", "nao e essa nao", "nao e esse nao",
+]);
+
+/**
+ * A resposta à pergunta do extrato (passo "banco"). Verde (sem a opção 0): sim/não/ok; um número
+ * vira "ok" — número nunca liga no verde (o banco pede o sim de novo). Azul (com a opção 0): o
+ * número da linha, ou 0/"nenhuma destas" (= não); número fora da lista vira "ok" (o banco pede o
+ * número de novo, em vez de o "4" escapar ao assistente). O resto (texto livre) é null.
+ */
+function respostaDoExtrato(t: string, menu: Opcao[]): Interpretacao | null {
+  if (NENHUMA_DO_EXTRATO.has(t)) return { tipo: "nao" };
+  const sn = lerSimNao(t);
+  if (sn) return { tipo: sn };
+  const n = lerNumero(t, 99);
+  if (n === null) return null;
+  const azul = menu.some((o) => o.n === 0);
+  if (!azul) return { tipo: "ok" };
+  const linhas = menu.filter((o) => o.n > 0).map((o) => o.n);
+  return linhas.includes(n) ? { tipo: "opcao", n } : { tipo: "ok" };
+}
+
+/**
  * O que a resposta quer dizer no passo (null = não é resposta: texto livre, que vai ao assistente
  * com a pergunta ainda aberta). sim/não/ok valem em qualquer passo (o banco decide o que fazem); no
  * confirmar, só eles — um número ou uma frase curta lá voltam como "ok" (nunca aprovam e pedem o
@@ -430,6 +467,7 @@ export function interpretarResposta(
   const sn = lerSimNao(t);
   const menu = opcoesDoPasso(passo, opcoes);
 
+  if (passo === "banco") return respostaDoExtrato(t, menu);
   if (passo === "confirmar") {
     if (sn) return { tipo: sn };
     if (lerNumero(t, 99) !== null) return { tipo: "ok" };

@@ -411,6 +411,44 @@ Deno.test("lerComando: correções faladas, cmp por extenso e adiamento", () => 
   assertEquals(classeDoComando(lerComando("cancela esse", AGORA)), "contexto");
 });
 
+// ─── F3: a pergunta do extrato (spec-f3.md, 4.2) ─────────────────────────────────────────
+
+const VERDE: Opcao[] = [{ n: 1, rotulo: "C6 - Conta PJ HBR · 08/10 · DEBITO DE CARTAO · R$ 50,98", valor: "tx:t-1" }];
+const AZUL: Opcao[] = [
+  { n: 1, rotulo: "C6 - Conta PJ HBR · 08/10 · DEBITO DE CARTAO · R$ 50,98", valor: "tx:t-1" },
+  { n: 2, rotulo: "C6 - Conta PJ HBR · 09/10 · DEBITO DE CARTAO · R$ 50,98", valor: "tx:t-2" },
+  { n: 3, rotulo: "C6 - Conta PJ HBR · 10/10 · DEBITO DE CARTAO · R$ 50,98", valor: "tx:t-3" },
+  { n: 0, rotulo: "Nenhuma destas", valor: "nenhum" },
+];
+const doExtrato = (opcoes: Opcao[], t: string) => interpretarResposta("banco", opcoes, t, AGORA);
+
+Deno.test("F3 parser, verde: sim liga, não/'não é essa'/0 recusa, número e ok nunca ligam (viram ok)", () => {
+  for (const t of ["sim", "Sim!", "🎤 Sim.", "isso mesmo", "pode"]) assertEquals(doExtrato(VERDE, t), { tipo: "sim" }, t);
+  for (const t of ["não", "nao", "Não é essa.", "nao e esse", "0", "zero", "nenhuma", "Nenhuma destas."]) {
+    assertEquals(doExtrato(VERDE, t), { tipo: "nao" }, t);
+  }
+  // número nunca liga no verde: volta "ok" (o banco pede o sim de novo)
+  for (const t of ["1", "um", "opção 1", "2", "ok", "beleza", "👍"]) assertEquals(doExtrato(VERDE, t), { tipo: "ok" }, t);
+  for (const t of ["quanto deu o extrato do C6?", "manda o orçamento do Brisa", "sim, mas é da OS 12"]) assertEquals(doExtrato(VERDE, t), null, t);
+});
+
+Deno.test("F3 parser, azul: o número da linha, 0 e 'nenhuma destas' = não; sim/ok e número fora da lista viram pedido do número", () => {
+  for (const [t, n] of [["2", 2], ["🎤 Dois.", 2], ["opção 3", 3], ["a 1", 1], ["primeira", 1], ["é a 2", 2]] as Array<[string, number]>) {
+    assertEquals(doExtrato(AZUL, t), { tipo: "opcao", n }, t);
+  }
+  const nenhuma = ["0", "0.", "zero", "nenhum", "nenhuma", "nenhum desses", "Nenhuma dessas.", "nenhuma destas", "nenhum destes",
+    "não é nenhum", "não é nenhuma", "não é essa", "não é esse", "não", "🎤 Nenhuma destas."];
+  for (const t of nenhuma) assertEquals(doExtrato(AZUL, t), { tipo: "nao" }, t);
+  assertEquals(doExtrato(AZUL, "sim"), { tipo: "sim" });
+  assertEquals(doExtrato(AZUL, "ok"), { tipo: "ok" });
+  // fora da lista (só há 1 a 3): não escapa ao assistente, o banco pede o número de novo
+  assertEquals(doExtrato(AZUL, "4"), { tipo: "ok" });
+  assertEquals(doExtrato(AZUL, "quanto deu o extrato?"), null);
+  // sem opções fixas: valem só as que a pergunta trouxe
+  assertEquals(opcoesDoPasso("banco", []), []);
+  assertEquals(opcoesDoPasso("banco", AZUL), AZUL);
+});
+
 Deno.test("pareceDica e respostaNaoEntendida: o texto solto depois da foto e a mensagem curta sem sentido", () => {
   for (const t of ["essa é da OS do Brisa", "gasolina do Brisa", "material da OS 112"]) assertEquals(pareceDica(t), true, t);
   for (const t of ["bom dia", "quanto ficou a OS 123?", "obrigado"]) assertEquals(pareceDica(t), false, t);

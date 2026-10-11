@@ -2,6 +2,7 @@
 import { assert, assertEquals, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   caminhoDoIndice,
+  caminhoDoIndicePessoal,
   campoCsv,
   COLUNAS_DO_INDICE,
   csvDoIndice,
@@ -157,4 +158,17 @@ Deno.test("nomeFinal e índice: o CPF do fornecedor MEI não aparece", () => {
   const nome = nomeFinal(d({ fornecedor: "FULANO DA SILVA 12345678900" }));
   assertEquals(nome.includes("12345678900"), false);
   assert(nome.includes("FULANO DA SILVA"));
+});
+
+Deno.test("F3: o índice da pasta PESSOAL mora nela, com nome próprio; as situações da conciliação no CSV", () => {
+  assertEquals(caminhoDoIndicePessoal("2026-10"), "/MANAGEMENT/FINANCIALS/COMPROVANTES/PESSOAL/2026-10/_INDICE PESSOAL 2026-10.csv");
+  assertEquals(caminhoDoIndicePessoal("2026-10-01"), caminhoDoIndicePessoal("2026-10"));
+  assertThrows(() => caminhoDoIndicePessoal("outubro"));
+  const csv = csvDoIndice([
+    { codigo: "CMP-00001", numero: 1, situacao: "aguardando_banco" },
+    { codigo: "CMP-00002", numero: 2, situacao: "conciliado" },
+    { codigo: "CMP-00003", numero: 3, situacao: "abandonado" },
+  ]);
+  const situacoes = csv.split("\r\n").slice(1, 4).map((l) => l.split(";")[13]);
+  assertEquals(situacoes, ["esperando o banco", "ligado ao extrato", "sem linha no extrato"]);
 });

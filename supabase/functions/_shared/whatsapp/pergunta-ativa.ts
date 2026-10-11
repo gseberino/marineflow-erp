@@ -14,6 +14,8 @@
 // Usado pelos três lotes da F2 (webhook e edge dos comprovantes, ai-agent, lembretes e
 // acompanhar-conversas). As chamadas ao banco nunca lançam: erro vira o caminho de hoje (ou "ocupado",
 // para quem só adia). Logs: só o código do erro, nunca texto do dono.
+// F3 (11/10/2026): a pergunta do extrato ("apareceu no extrato, ligo?") usa o mesmo registro, com
+// origem "comprovante" e passo "banco" — as mesmas regras de quem responde.
 
 export type OrigemDaPergunta = "comprovante" | "assistente" | "lembrete_revisao" | "campanha_temporada" | "acompanhar_conversa";
 export type Opcao = { n: number; rotulo: string; valor: string };
@@ -528,6 +530,8 @@ const PASSO_LEGIVEL: Record<string, string> = {
   data: "a data",
   confirmar: "gravar ou não",
   corrigir: "o que corrigir",
+  // F3 (spec-f3.md, 4.2): a pergunta "apareceu no extrato, ligo?" de um CMP já gravado
+  banco: "a linha do extrato",
 };
 
 export function passoLegivel(passo: string | null | undefined): string {

@@ -8,6 +8,10 @@
 // data do dia do envio), a categoria em todo destino, de QUAL registro é o "usar o que já existe";
 // OS concluída ≠ faturada; o CMP sem leitura diz de quando é a foto; os erros da rota viram texto do
 // dono (e o código vai para app_error_logs).
+//
+// F3 (11/10/2026 — spec-f3.md, 4.3): a pergunta do extrato (verde: "apareceu no extrato, ligo?";
+// azul: a lista com "0 Nenhuma destas"), os resultados da resposta, o "No extrato:" do cartão e os
+// efeitos novos do plano e da gravação (ligar_linha, aguardar_banco, reembolso_tecnico).
 import { type Opcao, passoLegivel } from "../whatsapp/pergunta-ativa.ts";
 import { diaMes, faixaDeCodigos, formatarCnpj, formatarReais, horaNoNome, PASTA_COMPROVANTES, TIPO_NO_AVISO } from "./nucleo.ts";
 import { type Interpretacao, opcoesDoPasso } from "./respostas.ts";
@@ -57,6 +61,87 @@ export type CmpResumo = {
   mesma_compra?: { codigo: string } | null;
   pendencias?: string[];
   gravado_em?: string | null;
+  /** F3: onde o CMP está na conciliação com o extrato (null = não procura linha). */
+  banco?: BancoNoResumo | null;
+};
+
+// ---------------------------------------------------------------------------------------------
+// F3: as formas da conciliação com o extrato (spec-f3.md, 3.7)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * O que ligar a linha faz com ela: classificar a proposta, anexar ao lançamento, casar com a conta aberta, esperar a compra
+ * confirmar. "conflito": o CMP anexou uma conta a pagar em aberto e a linha já virou OUTRO lançamento (o mesmo gasto duas
+ * vezes) — não liga; o dono cancela um dos dois no Financeiro.
+ */
+export type AcaoNaLinha = "classificar" | "anexar" | "casar" | "aguardar" | "conflito";
+
+/** Uma linha do extrato candidata a um CMP (`Candidata`) ou a do resumo (`LinhaCurta`). */
+export type LinhaDoBanco = {
+  n?: number;
+  id?: string;
+  data: string | null;
+  valor: string | number | null;
+  descricao?: string | null;
+  nome?: string | null;
+  conta?: string | null;
+  cartao?: boolean;
+  /** "1/3" na compra parcelada. */
+  parcela?: string | null;
+  total_da_compra?: string | number | null;
+  /** A compra ainda está PENDING no cartão (sem proposta na fila do Extrato). */
+  pendente?: boolean;
+  acao?: AcaoNaLinha | string | null;
+  /** A linha já virou lançamento. */
+  lancamento?: { categoria?: string | null; descricao?: string | null } | null;
+  /** A conta a pagar em aberto que o CMP anexou (casar; conflito). */
+  conta_aberta?: { descricao?: string | null; valor?: string | number | null } | null;
+  motivos?: string[];
+  forte?: boolean;
+};
+
+/** A última avaliação do CMP contra o extrato (`Avaliacao`). */
+export type AvaliacaoDoBanco = {
+  regra?: string | null;
+  so_registro?: boolean;
+  nivel: "verde" | "azul" | "cinza" | string;
+  linhas: LinhaDoBanco[];
+  /** Quantas candidatas ficaram fora da lista (só as 3 mais próximas vão nela). */
+  mais?: number;
+  hash?: string | null;
+};
+
+/** `CmpResumo.banco` (`BancoNoResumo`). */
+export type BancoNoResumo = {
+  estado: "esperando" | "perguntar" | "pergunta_aberta" | "ligado" | "abandonado" | "so_registro" | string;
+  nivel?: string | null;
+  desde?: string | null;
+  /** O dia do abandono (30 dias; 45 no crédito). */
+  ate?: string | null;
+  linha?: { data?: string | null; valor?: string | number | null; descricao?: string | null; conta?: string | null; como?: string | null } | null;
+  candidatos?: number;
+};
+
+/** A pergunta do extrato (`PerguntaDoBancoF3`): passo "banco" no registro único da F2. */
+export type PerguntaDoExtrato = {
+  pergunta_id: string;
+  dedupe_key: string;
+  cmp: CmpResumo;
+  passo: string;
+  opcoes: Opcao[];
+  retomada?: boolean;
+  banco: AvaliacaoDoBanco | null;
+};
+
+/** O que comprovante_banco_responder devolve (`RespostaDoBanco`). */
+export type RespostaDoBanco = {
+  resultado: "ligado" | "recusado" | "mudou" | "invalida" | "ok_nao_aprova" | "ignorada" | "nao_ligado" | string;
+  cmp?: CmpResumo | null;
+  /** O efeito ligar_linha gravado (como, mensagens da rota…). */
+  ligacao?: Efeito | null;
+  proxima?: PerguntaDoExtrato | null;
+  motivo?: string | null;
+  ate?: string | null;
 };
 
 export type Efeito = { tipo: string; [campo: string]: unknown };
@@ -83,7 +168,16 @@ export type PerguntaDoBanco = {
   pasta?: string | null;
 };
 
-export type Gravacao = { situacao: string; efeitos: Efeito[]; avisos?: string[]; mensagens?: string[]; mes?: string | null; pasta?: string | null };
+export type Gravacao = {
+  situacao: string;
+  efeitos: Efeito[];
+  avisos?: string[];
+  mensagens?: string[];
+  mes?: string | null;
+  pasta?: string | null;
+  /** F3: o nível da avaliação do plano e se há pergunta do extrato a fazer logo depois (azul). */
+  banco?: { nivel?: string | null; perguntar?: boolean } | null;
+};
 
 export const MAX_MENSAGEM = 4096;
 
@@ -272,6 +366,7 @@ export const PENDENCIA_TEXTO: Record<string, string> = {
   classificar_no_extrato: "classificar no Extrato",
   ajustar_recebiveis: "ajustar os recebíveis da OS",
   dar_baixa: "dar baixa na conta a pagar",
+  conferir_estorno: "conferir a despesa da compra estornada no banco",
 };
 
 function destinoNoResumo(c: CmpResumo, comCategoria = true): string {
@@ -393,13 +488,27 @@ export function frasesDoPlano(plano: Plano | null | undefined, c: CmpResumo): st
         break;
       }
       case "aguardar_fatura":
-        frases.push("nada no financeiro agora: a compra no crédito entra pela fatura");
+        // F3: a compra no crédito da empresa espera a linha do cartão (e pergunta); crédito na loja/outro segue a F2
+        frases.push(c.forma === "credito"
+          ? "nada no financeiro agora: quando a compra aparecer no cartão, pergunto se é esta"
+          : "nada no financeiro agora: a compra no crédito entra pela fatura");
+        break;
+      case "ligar_linha":
+        frases.push(fraseDoLigarNoPlano(ef, c));
+        break;
+      case "aguardar_banco":
+        frases.push(fraseDoAguardarBanco(ef, c, true));
+        break;
+      case "reembolso_tecnico":
+        frases.push(`lançar ${reaisDoEfeito(ef, c)} como reembolso ao ${String(ef.favorecido_nome ?? c.pagador_nome ?? "técnico")} nas Diárias (entra no próximo acerto dele)`);
         break;
       case "nada":
         if (ef.motivo === "pessoal") frases.push("só guardar o arquivo em PESSOAL (nada no financeiro)");
         else if (ef.motivo === "cliente_pagou") frases.push("nada no financeiro: o cliente pagou direto");
         else if (ef.motivo === "tecnico_f2b") {
           frases.push(`anotar que o ${c.pagador_nome ?? "técnico"} pagou; o reembolso dele ainda não entra nas Diárias: fica a pendência "acerto do técnico" para você acertar com ele`);
+        } else if (ef.motivo === "ja_reembolsado") {
+          frases.push(`nada no financeiro: a despesa da OS já foi reembolsada ao ${String(ef.pagador_nome ?? c.pagador_nome ?? "técnico")}`);
         } else frases.push("nada no financeiro: a conta vem da nota fiscal");
         break;
       case "pendencia":
@@ -427,6 +536,12 @@ export function textosDosAvisos(avisos: string[], c: CmpResumo): string[] {
     cobranca_da_despesa_nao_muda: `A despesa que já está na ${os} é cobrada do cliente e a OS ${osFechada(c.os)}: a cobrança dela não muda por aqui.`,
     pecas_da_nota_ja_na_os: `Peças desta nota já estão na ${os}: o custo delas já conta; não lanço o valor da nota de novo.`,
     categoria_inativa: "A categoria não está mais ativa: escolha outra (*corrigir categoria*).",
+    // F3 / F2b
+    tecnico_fora_das_diarias: `O ${c.pagador_nome ?? "técnico"} não tem diária nas Diárias: o reembolso fica como pendência "acerto do técnico".`,
+    linha_lancada_em_outro: "A linha do banco já foi lançada em outro registro: confira no Extrato.",
+    conta_aberta_e_linha_lancada:
+      "A conta a pagar deste gasto continua em aberto e a linha do banco já virou outro lançamento: é o mesmo gasto duas vezes. Cancele um dos dois no Financeiro; não ligo a linha.",
+    despesa_ja_reembolsada: `A despesa da OS já foi reembolsada ao ${c.pagador_nome ?? "técnico"} (Financeiro › Reembolsos): não lanço outro reembolso nas Diárias.`,
   };
   return [...new Set(avisos)].map((a) => mapa[a]).filter((x): x is string => Boolean(x));
 }
@@ -492,6 +607,8 @@ export function caminhoLegivel(caminho: string | null | undefined): string | nul
 
 const EFEITOS_DO_FINANCEIRO = new Set([
   "anotar", "anexar_anotacao", "anexar_lancamento", "caixa", "reembolso_socio", "aguardar_fatura", "nada", "mesma_compra",
+  // F3 / F2b
+  "ligar_linha", "aguardar_banco", "reembolso_tecnico",
 ]);
 
 /** O que foi feito, no passado (gravação e cartão). */
@@ -550,14 +667,27 @@ export function frasesDaGravacao(efeitos: Efeito[] | null | undefined, c: CmpRes
         frases.push(`lancei ${formatarReais(c.valor) ?? "o valor"} como reembolso a você`);
         break;
       case "aguardar_fatura":
-        frases.push("nada no financeiro agora: a compra no crédito entra pela fatura");
+        frases.push(c.forma === "credito"
+          ? "nada no financeiro agora: quando a compra aparecer no cartão, pergunto se é esta"
+          : "nada no financeiro agora: a compra no crédito entra pela fatura");
+        break;
+      case "ligar_linha":
+        frases.push(fraseDoLigarNaGravacao(ef, c));
+        break;
+      case "aguardar_banco":
+        frases.push(fraseDoAguardarBanco(ef, c, false));
+        break;
+      case "reembolso_tecnico":
+        frases.push(`lancei ${formatarReais((ef.valor as string | number | null | undefined) ?? c.valor ?? null) ?? "o valor"} como reembolso ao ${String(ef.favorecido_nome ?? c.pagador_nome ?? "técnico")} nas Diárias`);
         break;
       case "nada":
         if (ef.motivo === "pessoal") frases.push("só guardei o arquivo (nada no financeiro)");
         else if (ef.motivo === "cliente_pagou") frases.push("nada no financeiro: o cliente pagou direto");
         else if (ef.motivo === "tecnico_f2b") frases.push(`anotei que o ${c.pagador_nome ?? "técnico"} pagou; o reembolso dele ainda não entra nas Diárias (ficou a pendência "acerto do técnico")`);
         else if (ef.motivo === "anotacao_recusada") frases.push("não anotei no extrato (fica para classificar no Extrato)");
-        else frases.push("nada no financeiro: a conta vem da nota fiscal");
+        else if (ef.motivo === "ja_reembolsado") {
+          frases.push(`nada no financeiro: a despesa da OS já tinha sido reembolsada ao ${String(ef.pagador_nome ?? c.pagador_nome ?? "técnico")}`);
+        } else frases.push("nada no financeiro: a conta vem da nota fiscal");
         break;
       case "pendencia":
         if (ef.qual === "acerto_tecnico" && temF2b) break;
@@ -577,9 +707,15 @@ export function frasesDaGravacao(efeitos: Efeito[] | null | undefined, c: CmpRes
 
 /**
  * "CMP-00124 gravado: <o que foi feito>. Arquivo: <pasta>." + as mensagens da rota + a próxima
- * pergunta ("Próximo: …") ou "Fila vazia: …".
+ * pergunta ("Próximo: …") ou "Fila vazia: …". F3: sem próxima e com a pergunta do extrato aberta
+ * logo depois da gravação (azul), a cauda é "No extrato: <a pergunta>" no lugar de "Fila vazia".
  */
-export function textoDaGravacao(p: { cmp: CmpResumo; gravacao: Gravacao | null; proxima: PerguntaDoBanco | null }): string {
+export function textoDaGravacao(p: {
+  cmp: CmpResumo;
+  gravacao: Gravacao | null;
+  proxima: PerguntaDoBanco | null;
+  banco?: PerguntaDoExtrato | null;
+}): string {
   const c = p.cmp;
   const frases = frasesDaGravacao(p.gravacao?.efeitos, c);
   const pasta = p.gravacao?.pasta ?? pastaNoTexto(c);
@@ -588,7 +724,9 @@ export function textoDaGravacao(p: { cmp: CmpResumo; gravacao: Gravacao | null; 
   if (mensagens.length) texto += `\n${mensagens.map((m) => m.trim().slice(0, 300)).join("\n")}`;
   const avisos = textosDosAvisos((p.gravacao?.avisos ?? []).filter((a) => a !== "valor_incerto"), c);
   if (avisos.length) texto += `\n${avisos.join("\n")}`;
-  texto += p.proxima ? `\n\nPróximo: ${textoDaPergunta(p.proxima)}` : "\n\nFila vazia: não há mais comprovantes para conferir.";
+  if (p.proxima) texto += `\n\nPróximo: ${textoDaPergunta(p.proxima)}`;
+  else if (p.banco) texto += `\n\nNo extrato: ${textoDaPerguntaDoExtrato(p.banco)}`;
+  else texto += "\n\nFila vazia: não há mais comprovantes para conferir.";
   return cortar(texto);
 }
 
@@ -768,15 +906,30 @@ export type ItemPendente = {
   situacao: string;
   falta?: string | null;
   pendencias?: string[];
+  /** F3: "perguntar" = falta ligar ao extrato (a pergunta do extrato espera a vez ou a resposta). */
+  banco?: string | null;
+  /** F3: a NF-e que o CMP espera chegou por e-mail e ainda não foi importada. */
+  nota_no_email?: boolean;
 };
 
-const SITUACAO_NA_LISTA: Record<string, string> = { aguardando_xml: "esperando a nota (XML)" };
+const SITUACAO_NA_LISTA: Record<string, string> = {
+  aguardando_xml: "esperando a nota (XML)",
+  aguardando_banco: "esperando o banco", conciliado: "ligado ao extrato", abandonado: "sem linha no extrato",
+};
+
+/** F3: gravado de fato (o financeiro foi feito), mesmo esperando ou ligado à linha do extrato. */
+const GRAVADOS_DE_FATO = new Set(["gravado", "aguardando_banco", "conciliado", "abandonado"]);
 
 function linhaPendente(i: ItemPendente, n: number): string {
   const cab = [i.codigo, diaMes(i.data ?? null), formatarReais(i.valor ?? null), i.fornecedor || null].filter(Boolean).join(" · ");
   let falta: string;
-  if (i.situacao === "gravado") {
-    falta = `gravado; falta: ${(i.pendencias ?? []).map((q) => PENDENCIA_TEXTO[q] ?? q).join(", ") || "nada"}`;
+  if (GRAVADOS_DE_FATO.has(i.situacao)) {
+    const faltas = (i.pendencias ?? []).map((q) => PENDENCIA_TEXTO[q] ?? q);
+    if (i.banco === "perguntar") faltas.push("ligar ao extrato");
+    const rotulo = i.situacao === "gravado" ? "gravado" : SITUACAO_NA_LISTA[i.situacao];
+    falta = `${rotulo}; falta: ${faltas.join(", ") || "nada"}`;
+  } else if (i.situacao === "aguardando_xml" && i.nota_no_email) {
+    falta = "a nota chegou por e-mail: importe em Entrada de Mercadoria";
   } else if (SITUACAO_NA_LISTA[i.situacao]) {
     falta = SITUACAO_NA_LISTA[i.situacao];
   } else if (i.situacao === "aguardando_sim" || i.falta === "confirmar") {
@@ -805,9 +958,10 @@ export function textoDosPendentes(r: { abertos?: ItemPendente[]; total?: number;
 const SITUACAO_NO_CARTAO: Record<string, string> = {
   gravado: "gravado", aguardando_xml: "esperando a nota", cancelado: "cancelado",
   aguardando_vez: "na fila", perguntando: "em conferência", aguardando_sim: "esperando o seu sim",
+  aguardando_banco: "esperando o banco", conciliado: "ligado ao extrato", abandonado: "sem linha no extrato",
 };
 
-/** O cartão do "cmp N" de um CMP já gravado (ou cancelado). */
+/** O cartão do "cmp N" de um CMP já gravado (ou cancelado). F3: + "No extrato: <onde está>." */
 export function textoDoCartao(c: CmpResumo, efeitos: Efeito[] | null | undefined): string {
   const situacao = SITUACAO_NO_CARTAO[c.situacao] ?? "guardado";
   const resumo = [
@@ -818,7 +972,8 @@ export function textoDoCartao(c: CmpResumo, efeitos: Efeito[] | null | undefined
   if (c.situacao === "cancelado") return cortar(`${c.codigo} (${situacao}): ${resumo}.`);
   const feito = frasesDaGravacao(efeitos, c);
   const numero = numeroDoCmp(c);
-  return cortar(`${c.codigo} (${situacao}): ${resumo}. Feito: ${feito.join("; ")}. Para cancelar: *cancelar cmp ${numero ?? "N"} motivo*.`);
+  const extrato = bancoNoCartao(c);
+  return cortar(`${c.codigo} (${situacao}): ${resumo}. Feito: ${feito.join("; ")}.${extrato ? ` No extrato: ${extrato}.` : ""} Para cancelar: *cancelar cmp ${numero ?? "N"} motivo*.`);
 }
 
 const DESFEITO_TEXTO: Record<string, string> = {
@@ -832,6 +987,9 @@ const DESFEITO_TEXTO: Record<string, string> = {
   caixa: "a saída do Caixa (estornada)",
   reembolso_socio: "o reembolso",
   pendencia: "a pendência",
+  // F3 / F2b
+  ligar_linha: "a ligação com a linha do banco (a linha volta para a fila do Extrato)",
+  reembolso_tecnico: "o reembolso nas Diárias",
 };
 
 const BLOQUEIO_TEXTO: Record<string, string> = {
@@ -841,6 +999,24 @@ const BLOQUEIO_TEXTO: Record<string, string> = {
   mes_fechado: "o mês está fechado no financeiro; reabra o mês e cancele de novo",
   reembolso_pago: "o reembolso já foi pago; desfaça o pagamento e cancele de novo",
 };
+
+/**
+ * F3: os bloqueios com dia ou número no texto ("a linha do banco de 08/10 já virou lançamento…",
+ * "reabra o acerto nº 0007…"): o banco monta o texto (`como_destravar`, de um modelo fixo, sem dado do
+ * documento); sem ele, o texto sem o dia/número.
+ */
+const BLOQUEIO_DA_F3: Record<string, string> = {
+  linha_lancada: "a linha do banco já virou lançamento: desfaça pelo Extrato e cancele de novo",
+  linha_casada: "a linha do banco já deu baixa na conta a pagar: desfaça pelo Extrato e cancele de novo",
+  reembolso_acertado: "o reembolso já está num acerto fechado das Diárias: reabra o acerto em Financeiro › Diárias e cancele de novo",
+};
+
+function textoDoBloqueioDaF3(b: { motivo?: string; como_destravar?: string }): string | null {
+  const padrao = BLOQUEIO_DA_F3[String(b.motivo ?? "")];
+  if (!padrao) return null;
+  const doBanco = typeof b.como_destravar === "string" ? b.como_destravar.replace(/[\r\n]+/g, " ").trim().slice(0, 200) : "";
+  return doBanco || padrao;
+}
 
 export type Cancelamento = {
   ok?: boolean;
@@ -867,7 +1043,9 @@ export function textoDoCancelamento(codigo: string, motivo: string | null, r: Ca
       : "";
     return cortar(`${codigo} cancelado${m ? ` (${m})` : ""}. Desfeito: ${lista}. Arquivo em COMPROVANTES/_CANCELADOS.${aviso}`);
   }
-  const bloqueios = (r?.bloqueios ?? []).map((b) => BLOQUEIO_TEXTO[String(b.motivo)] ?? b.como_destravar ?? b.motivo).filter(Boolean);
+  const bloqueios = (r?.bloqueios ?? [])
+    .map((b) => textoDoBloqueioDaF3(b) ?? BLOQUEIO_TEXTO[String(b.motivo)] ?? b.como_destravar ?? b.motivo)
+    .filter(Boolean);
   return cortar(`Não cancelei o ${codigo}: ${bloqueios.join("; ") || "a gravação não pôde ser desfeita"}. Nada mudou.`);
 }
 
@@ -886,4 +1064,330 @@ export function historicoDoFluxo(resumo: string, referencia: string | null, text
     user: `${MARCA_DO_FLUXO} ${resumo}.`,
     assistant: `${texto}${referencia ? `\n\nReferência: ${referencia}.` : ""}`,
   };
+}
+
+// =============================================================================================
+// F3: a conversa da conciliação com o extrato (spec-f3.md, 4.3)
+// =============================================================================================
+//
+// O banco decide o nível (verde/azul/cinza), as linhas e o que ligar faz com cada uma; aqui só se
+// monta a mensagem. A linha do extrato vai ao dono (é dele); nunca ao log.
+
+/** "R$ 50,98" do valor da linha (a saída pode vir com sinal). */
+function reaisDaLinha(v: string | number | null | undefined): string | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Math.abs(Number(v));
+  return Number.isFinite(n) ? formatarReais(n) : null;
+}
+
+/** Texto do banco numa linha só, até 40 caracteres. */
+function descricaoCurta(s: string | null | undefined): string | null {
+  const t = String(s ?? "").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+  return t ? t.slice(0, 40).trim() : null;
+}
+
+/**
+ * "C6 - Conta PJ HBR · 08/10 · DEBITO DE CARTAO · R$ 50,98" + " (cartão)" + " · parcela 1/3 da
+ * compra de R$ 600,00" + " · ainda pendente no cartão" + " · já lançada (<categoria>)".
+ */
+export function linhaDoExtrato(l: LinhaDoBanco): string {
+  let s = [descricaoCurta(l.conta), diaMes(l.data ?? null), descricaoCurta(l.descricao ?? l.nome), reaisDaLinha(l.valor)]
+    .filter(Boolean)
+    .join(" · ");
+  if (l.cartao) s += " (cartão)";
+  if (l.parcela) {
+    const total = reaisDaLinha(l.total_da_compra);
+    s += ` · parcela ${String(l.parcela).trim()}${total ? ` da compra de ${total}` : ""}`;
+  }
+  if (l.pendente) s += " · ainda pendente no cartão";
+  if (l.lancamento) {
+    const cat = descricaoCurta(l.lancamento.categoria);
+    s += ` · já lançada${cat ? ` (${cat})` : ""}`;
+  }
+  return s;
+}
+
+/** "como Peças e materiais, OS-00112 Brisa" / "na OS-00112 Brisa" / "com os dados do comprovante". */
+function comoClassifica(c: CmpResumo, comBarco = true): string {
+  const os = c.destino === "os" && c.os ? (comBarco ? osComNome(c.os) : c.os.numero) : null;
+  if (c.categoria) return `como ${c.categoria}${os ? `, ${os}` : ""}`;
+  return os ? `na ${os}` : "com os dados do comprovante";
+}
+
+/** Para onde o lançamento que já existe é corrigido (categoria do CMP diferente, ou a OS dele); null = nada a corrigir. */
+function paraOndeCorrige(c: CmpResumo, l: LinhaDoBanco): string | null {
+  const os = c.destino === "os" && c.os ? osComNome(c.os) : null;
+  const outraCategoria = Boolean(c.categoria) && c.categoria !== (l.lancamento?.categoria ?? null);
+  if (!outraCategoria && !os) return null;
+  return [c.categoria ?? null, os].filter(Boolean).join(", ");
+}
+
+/** O que ligar faz com a linha, no presente (a pergunta do extrato): "classifico a linha como …". */
+export function acaoNoTexto(c: CmpResumo, l: LinhaDoBanco): string {
+  switch (l.acao) {
+    case "anexar": {
+      const para = paraOndeCorrige(c, l);
+      return para ? `uso o lançamento que já existe dela e corrijo para ${para}` : "uso o lançamento que já existe dela";
+    }
+    case "casar": {
+      const desc = descricaoCurta(l.conta_aberta?.descricao)?.replace(/"/g, "'") ?? null;
+      const valor = reaisDaLinha(l.conta_aberta?.valor ?? null);
+      return `dou baixa na conta a pagar${desc ? ` "${desc}"` : ""}${valor ? ` (${valor})` : ""} com ela`;
+    }
+    case "aguardar":
+      return "classifico quando o cartão confirmar a compra";
+    case "conflito":
+      return textoDoConflito(l);
+    default:
+      return `classifico a linha ${comoClassifica(c)} (falta aprovar no Extrato)`;
+  }
+}
+
+/** A linha já lançada em outro registro com a conta do CMP em aberto: "não ligo essa: a conta a pagar … — cancele um dos dois". */
+function textoDoConflito(l: LinhaDoBanco): string {
+  const desc = descricaoCurta(l.conta_aberta?.descricao)?.replace(/"/g, "'") ?? null;
+  const valor = reaisDaLinha(l.conta_aberta?.valor ?? null);
+  return `não ligo essa: a conta a pagar${desc ? ` "${desc}"` : ""}${valor ? ` (${valor})` : ""} continua em aberto e a linha já virou outro lançamento — o mesmo gasto duas vezes; cancele um dos dois no Financeiro`;
+}
+
+/** O efeito ligar_linha do plano (o "Vou:" do resumo, no verde): "ligar à linha do banco de 08/10 (…) e classificá-la como …". */
+function fraseDoLigarNoPlano(ef: Efeito, c: CmpResumo): string {
+  const l = (ef.linha && typeof ef.linha === "object" ? ef.linha : null) as LinhaDoBanco | null;
+  const acao = String(ef.acao ?? l?.acao ?? "classificar");
+  const onde = l?.cartao ? "à compra do cartão" : "à linha do banco";
+  const dia = diaMes(l?.data ?? null);
+  const detalhe = l ? [descricaoCurta(l.conta), descricaoCurta(l.descricao ?? l.nome), reaisDaLinha(l.valor)].filter(Boolean).join(", ") : "";
+  let fim: string;
+  switch (acao) {
+    case "anexar": {
+      const para = paraOndeCorrige(c, l ?? { data: null, valor: null });
+      fim = para ? `usar o lançamento que já existe dela e corrigir para ${para}` : "usar o lançamento que já existe dela";
+      break;
+    }
+    case "casar":
+      fim = "dar baixa na conta a pagar com ela";
+      break;
+    case "aguardar":
+      fim = "classificá-la quando o cartão confirmar a compra";
+      break;
+    default:
+      fim = `classificá-la ${comoClassifica(c)} (falta aprovar no Extrato)`;
+  }
+  return `ligar ${onde}${dia ? ` de ${dia}` : ""}${detalhe ? ` (${detalhe})` : ""} e ${fim}`;
+}
+
+/** O efeito ligar_linha gravado (gravação, varredura, sim do dono), no passado, pelo `como`. */
+function fraseDoLigarNaGravacao(ef: Efeito, c: CmpResumo): string {
+  const l = (ef.linha && typeof ef.linha === "object" ? ef.linha : null) as LinhaDoBanco | null;
+  const dia = diaMes(l?.data ?? c.banco?.linha?.data ?? null);
+  const de = dia ? ` de ${dia}` : "";
+  switch (String(ef.como ?? "")) {
+    case "anexou":
+      return `liguei à linha do banco${de} e anexei ao lançamento dela`;
+    case "casou":
+      return `liguei à linha do banco${de} e dei baixa na conta a pagar`;
+    case "aguardando":
+      return c.forma === "credito" || l?.cartao
+        ? `liguei à compra do cartão${de} (classifico quando ela for confirmada)`
+        : `liguei à linha do banco${de} (classifico quando ela entrar na fila do Extrato)`;
+    default:
+      return `liguei à linha do banco${de} e a classifiquei (falta aprovar no Extrato)`;
+  }
+}
+
+/** aguardar_banco (débito, ou Pix/boleto sem linha forte): o que acontece quando a linha aparecer. */
+function fraseDoAguardarBanco(ef: Efeito, c: CmpResumo, noPlano: boolean): string {
+  // na gravação, verde = a linha estava lá, mas ligar foi recusado (a baixa da conta: mês fechado…)
+  if (!noPlano && ef.nivel === "verde") return "não liguei agora à linha do extrato: pergunto de novo se é esta";
+  if (ef.nivel === "azul") {
+    return noPlano
+      ? "nada no financeiro agora (já há linhas parecidas no extrato: logo depois de gravar pergunto qual é)"
+      : "já há linhas parecidas no extrato: pergunto qual é";
+  }
+  const debito = ef.regra === "debito" || c.forma === "debito";
+  const esteOuEsta = c.forma === "transferencia" ? "esta" : "este";
+  const pergunta = debito || !noPlano ? `pergunto se é ${esteOuEsta}` : "pergunto qual linha é";
+  const quando = `quando ${formaComArtigo(c.forma)} aparecer no extrato, ${pergunta}`;
+  return noPlano ? `nada no financeiro agora: ${quando}` : quando;
+}
+
+/** A pergunta é a lista (azul, com "0 Nenhuma destas") ou o sim/não de uma linha só (verde)? */
+export function ehPerguntaAzul(p: Pick<PerguntaDoExtrato, "opcoes" | "banco">): boolean {
+  const opcoes = Array.isArray(p.opcoes) ? p.opcoes : [];
+  return opcoes.length ? opcoes.some((o) => o.n === 0) : p.banco?.nivel === "azul";
+}
+
+/** As linhas da pergunta na ordem das opções (a do banco pelo id "tx:<uuid>"; sem a avaliação, o rótulo da opção). */
+function linhasDaPergunta(p: PerguntaDoExtrato): Array<{ n: number; texto: string; linha: LinhaDoBanco | null }> {
+  const lidas = p.banco?.linhas;
+  const doBanco: LinhaDoBanco[] = Array.isArray(lidas) ? lidas : [];
+  const opcoes = (Array.isArray(p.opcoes) ? p.opcoes : []).filter((o) => o.n > 0);
+  if (!opcoes.length) return doBanco.map((l, i) => ({ n: l.n ?? i + 1, texto: linhaDoExtrato(l), linha: l }));
+  return opcoes.map((o) => {
+    const id = /^tx:(.+)$/.exec(String(o.valor ?? ""))?.[1] ?? null;
+    const l = (id ? doBanco.find((x) => x.id === id) : undefined) ?? doBanco.find((x) => x.n === o.n) ?? null;
+    return { n: o.n, texto: l ? linhaDoExtrato(l) : String(o.rotulo ?? "").trim(), linha: l };
+  });
+}
+
+/**
+ * A pergunta do extrato (cabeçalho da F2 sem "(1 de N)"). Verde: "Apareceu no extrato: <linha>. É
+ * deste comprovante? Se for, ligo e <ação>." Azul: as linhas numeradas, "0 Nenhuma destas" e, com
+ * mais de 3 candidatas, "Há mais N…".
+ */
+export function textoDaPerguntaDoExtrato(p: PerguntaDoExtrato, prefixo: string | null = null): string {
+  const c = p.cmp;
+  const linhas = linhasDaPergunta(p);
+  const partes = [cabecalho({ cmp: c })];
+  if (ehPerguntaAzul(p)) {
+    const zero = (p.opcoes ?? []).find((o) => o.n === 0)?.rotulo?.trim() || "Nenhuma destas";
+    partes.push("Apareceram no extrato linhas que podem ser deste comprovante:");
+    partes.push(...linhas.map((l) => `${l.n} ${l.texto}`));
+    partes.push(`0 ${zero}`);
+    // a linha em conflito (a conta do CMP em aberto + a linha já lançada) tem a frase própria, embaixo
+    const conhecidas = linhas.map((l) => l.linha).filter((l): l is LinhaDoBanco => l !== null && l.acao !== "conflito");
+    const acoes = new Set(conhecidas.map((l) => String(l.acao ?? "classificar")));
+    const ligando = acoes.size === 1
+      ? ` Ligando, ${acaoNoTexto(c, conhecidas[0])}.`
+      : acoes.size > 1
+      ? " Ligando, faço o que a linha escolhida pede (classificar, usar o lançamento que já existe ou dar baixa na conta a pagar)."
+      : "";
+    partes.push(`Responda o número da linha certa (ou 0).${ligando}`);
+    for (const l of linhas) {
+      if (l.linha?.acao === "conflito") partes.push(`A linha ${l.n}: ${textoDoConflito(l.linha)}.`);
+    }
+    const mais = Math.max(0, Math.trunc(Number(p.banco?.mais ?? 0)) || 0);
+    if (mais > 0) {
+      partes.push(`Há mais ${mais === 1 ? "1 linha igual" : `${mais} linhas iguais`} nesses dias: se não for nenhuma destas, responda 0 e classifique no Extrato.`);
+    }
+  } else {
+    const l = linhas[0] ?? null;
+    partes.push(`Apareceu no extrato: ${l?.texto || "uma linha do mesmo valor"}.`);
+    partes.push(l?.linha ? `É deste comprovante? Se for, ligo e ${acaoNoTexto(c, l.linha)}.` : "É deste comprovante?");
+    partes.push("Responda *sim* para ligar ou *não* se não for essa.");
+  }
+  const corpo = partes.join("\n");
+  return cortar(prefixo ? `${prefixo}\n${corpo}` : corpo);
+}
+
+/** A retomada do vigia: "Ainda falta ligar o CMP-00124 ao extrato." */
+export function prefixoDaPerguntaDoExtrato(p: Pick<PerguntaDoExtrato, "cmp" | "retomada">, motivo: string): string | null {
+  return motivo === "vigia" && p.retomada ? `Ainda falta ligar o ${p.cmp.codigo} ao extrato.` : null;
+}
+
+/** "à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98)" (do CmpResumo.banco.linha). */
+function linhaLigada(c: CmpResumo): string {
+  const l = c.banco?.linha;
+  if (!l) return "à linha do extrato";
+  const dia = diaMes(l.data ?? null);
+  const conta = descricaoCurta(l.conta);
+  const valor = reaisDaLinha(l.valor ?? null);
+  return `à linha${dia ? ` de ${dia}` : ""}${conta ? ` do ${conta}` : ""}${valor ? ` (${valor})` : ""}`;
+}
+
+/** "CMP-00124 ligado à linha de 08/10 do C6 - Conta PJ HBR (R$ 50,98): classifiquei como …." + as mensagens da rota. */
+export function textoDoLigado(c: CmpResumo, ligacao: Efeito | null | undefined): string {
+  const como = String(ligacao?.como ?? c.banco?.linha?.como ?? "");
+  let frase: string;
+  switch (como) {
+    case "anexou": {
+      const corrigido = ligacao?.corrigido && typeof ligacao.corrigido === "object" && Object.keys(ligacao.corrigido as object).length > 0;
+      frase = corrigido ? "a linha já estava lançada: anexei e corrigi a categoria/OS" : "a linha já estava lançada: anexei";
+      break;
+    }
+    case "casou": {
+      const conta = ligacao?.conta_aberta && typeof ligacao.conta_aberta === "object" ? ligacao.conta_aberta as { descricao?: string } : null;
+      const desc = descricaoCurta(conta?.descricao ?? (typeof ligacao?.descricao === "string" ? ligacao.descricao : null))?.replace(/"/g, "'");
+      frase = `dei baixa na conta a pagar${desc ? ` "${desc}"` : ""}`;
+      break;
+    }
+    case "aguardando":
+      frase = "classifico assim que a compra entrar na fila do Extrato";
+      break;
+    default:
+      frase = `classifiquei ${comoClassifica(c, false)} (falta aprovar no Extrato)`;
+  }
+  const daRota = ligacao?.mensagens;
+  const mensagens = (Array.isArray(daRota) ? daRota as unknown[] : [])
+    .filter((m): m is string => typeof m === "string" && m.trim() !== "")
+    .map((m) => m.trim().slice(0, 300));
+  return cortar([`${c.codigo} ligado ${linhaLigada(c)}: ${frase}.`, ...mensagens].join("\n"));
+}
+
+/** O dono disse que não é (verde) ou nenhuma destas (azul): a linha não volta a ser oferecida. */
+export function textoDoRecusado(codigo: string, ate: string | null | undefined, nenhuma: boolean): string {
+  const dia = diaMes(ate ?? null);
+  return `${nenhuma ? "Ok, nenhuma destas." : "Ok, não é essa."} O ${codigo} continua esperando a linha certa no extrato${dia ? ` (até ${dia})` : ""}.`;
+}
+
+/** O extrato mudou entre a pergunta e a resposta: a pergunta nova, ou o CMP continua esperando. */
+export function textoDoMudou(codigo: string, ate: string | null | undefined, nova: PerguntaDoExtrato | null): string {
+  if (nova) return cortar(`As linhas do extrato mudaram desde a pergunta.\n\n${textoDaPerguntaDoExtrato(nova)}`);
+  const dia = diaMes(ate ?? null);
+  return `As linhas do extrato mudaram desde a pergunta. Não há mais linha que sirva: o ${codigo} continua esperando o extrato${dia ? ` (até ${dia})` : ""}.`;
+}
+
+/** A resposta não serve à pergunta do extrato (e o "ok"/número no verde): o que responder. */
+export function textoInvalidaDoExtrato(codigo: string, azul: boolean, linhas = 3): string {
+  if (!azul) return `Responda *sim* se essa linha é do ${codigo}, ou *não*.`;
+  const n = Math.max(1, Math.trunc(Number(linhas)) || 1);
+  return `Responda o número da linha (${n === 1 ? "1" : `1 a ${n}`}) ou 0 se não for nenhuma.`;
+}
+
+/** Os códigos que _comprovante_ligar devolve quando não liga (o comprovante_banco_responder os repassa). */
+const MOTIVO_DO_NAO_LIGADO: Record<string, string> = {
+  linha_de_outro_cmp: "essa linha do extrato já está ligada a outro comprovante",
+  linha_nao_serve: "essa linha não serve mais para ele (o extrato mudou)",
+  ja_ligado: "ele já está ligado a essa linha",
+  ja_ligado_a_outra: "ele já está ligado a outra linha do extrato",
+  cancelado: "ele foi cancelado",
+  so_registro: "ele é PESSOAL: só fica registrado",
+  situacao: "ele não está mais esperando o banco",
+  conflito: "a conta a pagar dele continua em aberto e essa linha já virou outro lançamento (o mesmo gasto duas vezes): cancele um dos dois no Financeiro",
+};
+
+/**
+ * O motivo do "não liguei": o código da ligação em texto fixo; o erro conhecido da rota em texto fixo (o mesmo do não gravado); a frase das
+ * nossas rotas (mês fechado, linha já ligada…) até 200; a mensagem crua do Postgres nunca — vira
+ * "deu um erro no sistema (código X)".
+ */
+export function motivoDoNaoLigado(motivo: string | null | undefined, numero: number | null = null, codigoDoErro: string | null = null): string {
+  const codigo = String(motivo ?? "").trim();
+  if (MOTIVO_DO_NAO_LIGADO[codigo]) return MOTIVO_DO_NAO_LIGADO[codigo];
+  const r = motivoDoNaoGravado(motivo, numero);
+  if (r.conhecido) return r.texto;
+  if (/^[a-z_]{1,40}$/.test(codigo)) return "essa linha não serve mais para ele";
+  const m = codigo.replace(/^[0-9A-Z]{5}:\s*/, "").replace(/\s+/g, " ").trim();
+  const cru = !m ||
+    /violat|constraint|relation|column|syntax|function|null value|duplicate key|permission denied|does not exist|invalid input|operator|\bsql\b|\berror\b/i
+      .test(m);
+  if (!cru) return m.replace(/[.\s]+$/u, "").slice(0, 200);
+  return `deu um erro no sistema${codigoDoErro ? ` (código ${codigoDoErro})` : ""}`;
+}
+
+export function textoNaoLigado(codigo: string, motivo: string | null | undefined, numero: number | null = null, codigoDoErro: string | null = null): string {
+  return `Não liguei o ${codigo}: ${motivoDoNaoLigado(motivo, numero, codigoDoErro)}. Nada mudou. Responda de novo para tentar outra vez.`;
+}
+
+/** O "No extrato: …" do cartão (cmp N), pelo CmpResumo.banco. */
+function bancoNoCartao(c: CmpResumo): string | null {
+  const b = c.banco;
+  if (!b || typeof b !== "object") return null;
+  switch (b.estado) {
+    case "esperando": {
+      const dia = diaMes(b.ate ?? null);
+      return `esperando a linha${dia ? ` (até ${dia})` : ""}`;
+    }
+    case "perguntar":
+    case "pergunta_aberta":
+      return `pergunta pendente (*cmp ${numeroDoCmp(c) ?? "N"}* para responder)`;
+    case "ligado":
+      return `ligado ${linhaLigada(c)}`;
+    case "abandonado":
+      return `não apareceu em ${c.forma === "credito" ? 45 : 30} dias: classifique no Extrato`;
+    case "so_registro":
+      return "só registrado (PESSOAL)";
+    default:
+      return null;
+  }
 }

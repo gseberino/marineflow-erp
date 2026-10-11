@@ -12,6 +12,7 @@ import {
   marcarPerguntaEnviada,
   normalizarResposta,
   pareceRespostaCurta,
+  passoLegivel,
   type PerguntaAtiva,
   quemResponde,
   registrarPerguntaExterna,
@@ -387,6 +388,16 @@ Deno.test("interromperPergunta: chama pergunta_interromper e nunca lança", asyn
   assertEquals(b.chamadas, [{ nome: "pergunta_interromper", args: { p_phone: "5547999990000" } }]);
   await silenciar(() => interromperPergunta(adminFalso({ pergunta_interromper: new Error("rede") }).admin, "5547999990000"));
   await silenciar(() => interromperPergunta(adminFalso({ pergunta_interromper: { error: { code: "XX000" } } }).admin, "5547999990000"));
+});
+
+Deno.test("F3: o passo 'banco' (pergunta do extrato) tem nome legível e segue as mesmas regras de quem responde", () => {
+  assertEquals(passoLegivel("banco"), "a linha do extrato");
+  const banco = ativa({ passo: "banco" });
+  assertEquals(quem(estado({ ativa: banco })).destino, "comprovante");
+  // empate com a pendência do assistente vale igual (nunca liga uma linha que o dono não estava respondendo)
+  assertEquals(quem(estado({ ativa: banco, pendencia: pendencia(ABERTA_EM) })).destino, "ambiguo");
+  assertEquals(quem(estado({ ativa: { ...banco, interrompida_em: ABERTA_EM } })).destino, "ambiguo");
+  assertStringIncludes(textoDoDesempate(estado({ ativa: banco, pendencia: pendencia(ABERTA_EM) })), "CMP-00124 (a linha do extrato)");
 });
 
 Deno.test("pareceRespostaCurta: sim/não/ok ou só número; frase não", () => {
