@@ -153,7 +153,9 @@ servirComCors(async (req) => {
     // (campoObrigatorioFaltando): daí o "!" abaixo.
     if (body.kind === "text") {
       sendResult = await provider.sendText(phoneClean, body.message!);
-      messagePreview = body.message!.slice(0, 200);
+      // O aviso de comprovantes (F1, 11/10/2026) traz fornecedor e valor do dono, e audit_log é
+      // legível por qualquer logado: dele fica só a marca, nunca o texto.
+      messagePreview = body.context === "comprovante" ? "[aviso de comprovantes]" : body.message!.slice(0, 200);
     } else if (body.kind === "link") {
       sendResult = await provider.sendLink(
         phoneClean,
