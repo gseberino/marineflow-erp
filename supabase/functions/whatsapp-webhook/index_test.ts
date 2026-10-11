@@ -112,19 +112,45 @@ function payloadDoDono(message: Record<string, unknown>, waId: string) {
   };
 }
 
-function bancoEFuncoesFalsos(op: { modo?: string; insertFalha?: boolean; segurarAgente?: Promise<void> } = {}) {
-  const chamadas: Array<{ metodo: string; caminho: string }> = [];
+function bancoEFuncoesFalsos(op: {
+  modo?: string;
+  insertFalha?: boolean;
+  segurarAgente?: Promise<void>;
+  role?: string;
+  /** F2: o pergunta_rotear (sem ele, a RPC responde erro = conversa desligada). */
+  rotear?: unknown;
+  /** F2: a resposta do comprovantes-whatsapp. */
+  comprovantes?: { status: number; corpo: unknown };
+  transcricao?: string | null;
+} = {}) {
+  const chamadas: Array<{ metodo: string; caminho: string; corpo?: unknown }> = [];
   const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
   const f = async (entrada: Request | URL | string, init?: RequestInit): Promise<Response> => {
     const req = new Request(entrada, init);
     const u = new URL(req.url);
-    chamadas.push({ metodo: req.method, caminho: u.pathname });
+    const texto = req.method === "POST" ? await req.text().catch(() => "") : "";
+    let corpo: unknown = undefined;
+    try {
+      corpo = texto ? JSON.parse(texto) : undefined;
+    } catch { /* não é JSON */ }
+    chamadas.push({ metodo: req.method, caminho: u.pathname, corpo });
     if (u.pathname === "/rest/v1/whatsapp_messages" && req.method === "GET") return json([]); // dedup: nova
-    if (u.pathname === "/rest/v1/app_users") return json([{ id: ADMIN_ID, role: "admin" }]);
+    if (u.pathname === "/rest/v1/app_users") return json([{ id: ADMIN_ID, role: op.role ?? "admin" }]);
     if (u.pathname === "/rest/v1/whatsapp_messages" && req.method === "POST") {
       return op.insertFalha ? json({ code: "23505", message: "falhou" }, 409) : json({ id: MSG_GRAVADA }, 201);
     }
     if (u.pathname === "/rest/v1/app_settings") return json([{ value: op.modo ?? "off" }]);
+    if (u.pathname === "/rest/v1/rpc/pergunta_rotear") {
+      return op.rotear ? json(op.rotear) : json({ code: "PGRST202", message: "sem a função" }, 404);
+    }
+    if (u.pathname === "/rest/v1/rpc/pergunta_interromper") return json(true);
+    if (u.pathname === "/functions/v1/comprovantes-whatsapp") {
+      return json(op.comprovantes?.corpo ?? { tratada: true }, op.comprovantes?.status ?? 200);
+    }
+    if (u.pathname === "/functions/v1/whatsapp-transcribe-audio") {
+      return json(op.transcricao ? { ok: true, text: op.transcricao } : { ok: false });
+    }
+    if (u.pathname === "/functions/v1/whatsapp-send") return json({ success: true, messageId: "WA-OUT" });
     if (u.pathname === "/functions/v1/ai-agent") {
       await op.segurarAgente;
       return json({ ok: true });
@@ -133,7 +159,8 @@ function bancoEFuncoesFalsos(op: { modo?: string; insertFalha?: boolean; segurar
   };
   const conta = (caminho: string, metodo?: string) =>
     chamadas.filter((c) => c.caminho === caminho && (!metodo || c.metodo === metodo)).length;
-  return { f, chamadas, conta };
+  const corpos = (caminho: string) => chamadas.filter((c) => c.caminho === caminho).map((c) => c.corpo as Record<string, unknown>);
+  return { f, chamadas, conta, corpos };
 }
 
 /** Roda o handler com o fetch falso e um EdgeRuntime.waitUntil que guarda a promessa. */
@@ -186,11 +213,12 @@ Deno.test("comprovantes com off: foto do dono → 1 ai-agent, 0 comprovantes-wha
   assertEquals(falso.conta("/rest/v1/app_settings"), 1, "com off a mídia lê só a chave");
 });
 
-Deno.test("comprovantes: texto do dono não lê app_settings; insert que falha cai no despacho de hoje, uma vez", async () => {
+Deno.test("comprovantes: texto do dono não lê app_settings (F2: 1 RPC, o pergunta_rotear); insert que falha cai no despacho de hoje, uma vez", async () => {
   const texto = bancoEFuncoesFalsos({ modo: "dono" });
   await comHandlerFalso(texto, payloadDoDono({ conversation: "quanto ficou a OS 123?" }, "WAID-HANDLER-2"), async () => {});
   assertEquals(texto.conta("/functions/v1/ai-agent", "POST"), 1);
   assertEquals(texto.conta("/rest/v1/app_settings"), 0);
+  assertEquals(texto.conta("/rest/v1/rpc/pergunta_rotear", "POST"), 1, "a única leitura nova do texto do admin");
   assertEquals(texto.conta("/functions/v1/comprovantes-whatsapp"), 0);
 
   const semLinha = bancoEFuncoesFalsos({ modo: "dono", insertFalha: true });
@@ -207,4 +235,75 @@ Deno.test("confirmação do agendamento: só a mensagem RECEBIDA e curta chega �
   assertStringIncludes(bloco, "body.trim().length <= 60");
   // Fire-and-forget: a RPC nunca derruba nem atrasa o webhook.
   assertStringIncludes(bloco, ".then(() => {}, () => {})");
+});
+
+// ─── F2: texto e áudio do dono passam pelo registro de perguntas ──────────────────────────────
+
+const ROTEAR_COM_PERGUNTA = {
+  conversa: true, dono: true,
+  ativa: {
+    id: "p-1", origem: "comprovante", tipo: "pergunta", referencia_id: "c-1", referencia_codigo: "CMP-00124", passo: "para_que",
+    opcoes: [{ n: 1, rotulo: "OS-00112 · Brisa", valor: "os:1" }, { n: 2, rotulo: "Estoque", valor: "estoque" }],
+    wa_message_id: "WA-P", aberta_em: "2026-10-10T22:30:00Z",
+  },
+  citada: null, pendencia: null, cmp_em_contexto: null,
+};
+
+Deno.test("F2: texto de quem não é admin = zero leitura nova (nem o pergunta_rotear)", async () => {
+  const falso = bancoEFuncoesFalsos({ role: "technician", rotear: ROTEAR_COM_PERGUNTA });
+  await comHandlerFalso(falso, payloadDoDono({ conversation: "1" }, "WAID-F2-1"), async () => {});
+  assertEquals(falso.conta("/rest/v1/rpc/pergunta_rotear"), 0);
+  assertEquals(falso.conta("/functions/v1/ai-agent", "POST"), 1);
+  assertEquals(falso.conta("/functions/v1/comprovantes-whatsapp"), 0);
+});
+
+Deno.test("F2: admin com a conversa desligada = 1 RPC e o despacho de hoje (com message_id e citado)", async () => {
+  const falso = bancoEFuncoesFalsos({ rotear: { conversa: false, dono: true } });
+  const payload = payloadDoDono({ extendedTextMessage: { text: "1", contextInfo: { stanzaId: "WA-CITADA" } } }, "WAID-F2-2");
+  await comHandlerFalso(falso, payload, async () => {});
+  assertEquals(falso.conta("/rest/v1/rpc/pergunta_rotear", "POST"), 1);
+  assertEquals(falso.corpos("/rest/v1/rpc/pergunta_rotear")[0], { p_phone: "5547999990000", p_citado: "WA-CITADA" });
+  const [agente] = falso.corpos("/functions/v1/ai-agent");
+  assertEquals(agente.text, "1");
+  assertEquals(agente.message_id, MSG_GRAVADA);
+  assertEquals(agente.citado, "WA-CITADA");
+  assertEquals(falso.conta("/functions/v1/comprovantes-whatsapp"), 0);
+});
+
+Deno.test("F2: '1' com pergunta de CMP aberta vai ao responder e NÃO ao ai-agent", async () => {
+  const falso = bancoEFuncoesFalsos({ rotear: ROTEAR_COM_PERGUNTA });
+  await comHandlerFalso(falso, payloadDoDono({ conversation: "1" }, "WAID-F2-3"), async () => {});
+  assertEquals(falso.conta("/functions/v1/ai-agent"), 0);
+  assertEquals(falso.corpos("/functions/v1/comprovantes-whatsapp"), [{
+    acao: "responder", message_id: MSG_GRAVADA, phone: "5547999990000", texto: "1", citado: null, destino: "comprovante",
+  }]);
+});
+
+Deno.test("F2: responder que falha → aviso ao dono pelo whatsapp-send e nenhum despacho", async () => {
+  const falso = bancoEFuncoesFalsos({ rotear: ROTEAR_COM_PERGUNTA, comprovantes: { status: 500, corpo: { ok: false } } });
+  await comHandlerFalso(falso, payloadDoDono({ conversation: "1" }, "WAID-F2-4"), async () => {});
+  assertEquals(falso.conta("/functions/v1/ai-agent"), 0);
+  const [aviso] = falso.corpos("/functions/v1/whatsapp-send");
+  assertEquals(aviso.context, "comprovante");
+  assertEquals(aviso.dedupe_key, `cmp:f:${MSG_GRAVADA}`);
+});
+
+Deno.test("F2: áudio do admin com a conversa ligada transcreve uma vez só e a resposta vai ao responder", async () => {
+  const falso = bancoEFuncoesFalsos({ rotear: ROTEAR_COM_PERGUNTA, transcricao: "Opção dois." });
+  await comHandlerFalso(falso, payloadDoDono({ audioMessage: { mimetype: "audio/ogg" } }, "WAID-F2-5"), async () => {});
+  assertEquals(falso.conta("/functions/v1/whatsapp-transcribe-audio"), 1, "uma transcrição só (a do roteador)");
+  assertEquals(falso.conta("/functions/v1/ai-agent"), 0);
+  assertEquals(falso.corpos("/functions/v1/comprovantes-whatsapp")[0].texto, "Opção dois.");
+});
+
+// Revisão de 11/10/2026: texto livre com a pergunta de um CMP aberta vai ao assistente e a pergunta
+// fica "interrompida" (o próximo "sim"/número sem citar não vale para o CMP sem reapresentar a pergunta).
+Deno.test("F2: texto livre com pergunta de CMP aberta → pergunta_interromper e depois o ai-agent", async () => {
+  const falso = bancoEFuncoesFalsos({ rotear: ROTEAR_COM_PERGUNTA });
+  await comHandlerFalso(falso, payloadDoDono({ conversation: "quanto ficou a OS 123?" }, "WAID-F2-6"), async () => {});
+  assertEquals(falso.conta("/rest/v1/rpc/pergunta_interromper"), 1);
+  assertEquals(falso.conta("/functions/v1/ai-agent", "POST"), 1);
+  assertEquals(falso.conta("/functions/v1/comprovantes-whatsapp"), 0);
+  const ordem = falso.chamadas.map((c) => c.caminho).filter((c) => c === "/rest/v1/rpc/pergunta_interromper" || c === "/functions/v1/ai-agent");
+  assertEquals(ordem, ["/rest/v1/rpc/pergunta_interromper", "/functions/v1/ai-agent"]);
 });

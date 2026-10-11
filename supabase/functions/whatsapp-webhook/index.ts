@@ -7,9 +7,16 @@ import { classificarResposta } from "../_shared/ai/comms/reply-router.ts";
 import { lerDataDaResposta } from "../_shared/revisao/data-da-resposta.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { avisoDoLeadDoSite, lerMensagemDoSite, type DadosDoSite } from "../_shared/whatsapp/lead-do-site.ts";
-import { chamarReceberPorHttp, rotearMidiaDoDono } from "../_shared/comprovantes/webhook.ts";
+import {
+  avisarFalhaPorHttp,
+  chamarComprovantesPorHttp,
+  chamarReceberPorHttp,
+  rotearMidiaDoDono,
+  rotearTextoDoDono,
+} from "../_shared/comprovantes/webhook.ts";
 import { lerModoDoComprovante } from "../_shared/comprovantes/modo.ts";
 import { donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
+import { interromperPergunta, lerEstadoDoTelefone } from "../_shared/whatsapp/pergunta-ativa.ts";
 
 // Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
 // fecha o loop no ai_comms_log (marca respondido + intenção) e HONRA OPT-OUT sozinho.
@@ -324,31 +331,45 @@ export async function handler(req: Request): Promise<Response> {
         // comprovantes, que precisa do id). Só o código do erro: o corpo nunca vai para o log.
         if (eMsg) console.error("[whatsapp-webhook] mensagem do funcionário não gravada:", eMsg.code ?? "erro");
 
-        const dispatchToAgent = async () => {
+        // Áudio-comando do dono: transcreve o áudio ANTES de despachar, para o agente agir sobre o
+        // que foi FALADO (e não sobre "[audio]"). null = não deu (o agente pede para repetir/digitar).
+        const transcreverAudio = async (): Promise<string | null> => {
+          if (event.messageType !== "audio" || !msg?.id) return null;
           try {
-            // Áudio-comando do dono: transcreve o áudio ANTES de despachar, para o agente
-            // agir sobre o que foi FALADO (e não sobre "[audio]"). Roda no fundo (waitUntil),
-            // então o webhook responde rápido. Se falhar, cai em "[audio]" e o agente pede
-            // para repetir/digitar.
-            let dispatchText = body;
-            if (event.messageType === "audio" && msg?.id) {
-              try {
-                const tr = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-transcribe-audio`, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-                  },
-                  body: JSON.stringify({ message_id: msg.id }),
-                });
-                const trBody = await tr.json().catch(() => ({}));
-                if (trBody?.ok && trBody?.text) dispatchText = String(trBody.text);
-              } catch (_e) { /* mantém "[audio]" */ }
+            const tr = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/whatsapp-transcribe-audio`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+              },
+              body: JSON.stringify({ message_id: msg.id }),
+            });
+            const trBody = await tr.json().catch(() => ({}));
+            return trBody?.ok && trBody?.text ? String(trBody.text) : null;
+          } catch (_e) {
+            return null;
+          }
+        };
+        // Roda no fundo (waitUntil), então o webhook responde rápido. `textoPronto` (F2): o texto já
+        // lido/transcrito pelo roteador de comprovantes — não transcreve de novo. message_id e citado
+        // vão junto (a trava do "sim" no ai-agent; o ai-agent antigo ignora os campos).
+        const dispatchToAgent = async (textoPronto?: string) => {
+          try {
+            let dispatchText = textoPronto ?? body;
+            if (textoPronto === undefined && event.messageType === "audio" && msg?.id) {
+              dispatchText = (await transcreverAudio()) ?? body;
             }
             const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-agent`, {
               method: "POST",
               headers: { "Content-Type": "application/json", "x-internal-secret": Deno.env.get("AI_INTERNAL_SECRET") ?? "" },
-              body: JSON.stringify({ channel: "whatsapp", phone_normalized: phone, app_user_id: aiUser.id, text: dispatchText }),
+              body: JSON.stringify({
+                channel: "whatsapp",
+                phone_normalized: phone,
+                app_user_id: aiUser.id,
+                text: dispatchText,
+                message_id: msg?.id ?? null,
+                citado: event.quotedId ?? null,
+              }),
             });
             if (!res.ok) console.error("[whatsapp-webhook] ai-agent respondeu", res.status, await res.text().catch(() => ""));
           } catch (e) {
@@ -357,10 +378,40 @@ export async function handler(req: Request): Promise<Response> {
         };
         // Comprovantes (F1, 11/10/2026): foto/PDF do dono pode ir também (ou só) ao fluxo de
         // comprovantes, conforme app_settings.comprovante_fluxo. Tudo aqui dentro do waitUntil — a
-        // resposta à Evolution não espera. Texto e áudio vão direto ao despacho de hoje, sem consulta
-        // nova; com "off" a mídia lê só a chave; qualquer erro cai no despacho de hoje, uma vez só.
+        // resposta à Evolution não espera. Com "off" a mídia lê só a chave; qualquer erro cai no
+        // despacho de hoje, uma vez só.
+        // F2: o texto e o áudio do DONO (admin, mensagem gravada) passam pelo registro de perguntas —
+        // uma RPC (pergunta_rotear); conversa desligada = o despacho de hoje. De quem não é admin,
+        // ou sem o id da mensagem: zero leitura nova.
         const despachar = async () => {
-          if (event.mediaKind !== "image" && event.mediaKind !== "document") return await dispatchToAgent();
+          if (event.mediaKind !== "image" && event.mediaKind !== "document") {
+            const textoOuAudio = event.messageType === "text" || event.messageType === "audio";
+            if (!textoOuAudio || aiUser.role !== "admin" || !msg?.id) return await dispatchToAgent();
+            let despachouTexto = false;
+            const despacharTexto = async (texto?: string) => {
+              despachouTexto = true;
+              await dispatchToAgent(texto);
+            };
+            const url = Deno.env.get("SUPABASE_URL") ?? "";
+            const chave = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+            try {
+              await rotearTextoDoDono(
+                { msgId: msg.id, phone, tipo: event.messageType, texto: body, citado: event.quotedId ?? null },
+                {
+                  estado: (citado) => lerEstadoDoTelefone(admin, phone, citado),
+                  transcrever: transcreverAudio,
+                  chamarComprovantes: (corpo) => chamarComprovantesPorHttp(corpo, { url, chave }),
+                  despacharAoAgente: despacharTexto,
+                  avisarFalha: () => avisarFalhaPorHttp({ phone, msgId: msg.id }, { url, chave }),
+                  interromper: () => interromperPergunta(admin, phone),
+                },
+              );
+            } catch (e) {
+              console.error("[whatsapp-webhook] roteamento do texto do dono falhou:", (e as Error)?.name ?? "erro");
+              if (!despachouTexto) await dispatchToAgent();
+            }
+            return;
+          }
           let despachou = false;
           const despacharUmaVez = async () => {
             despachou = true;
