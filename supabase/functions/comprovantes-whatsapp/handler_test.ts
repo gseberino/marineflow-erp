@@ -97,7 +97,10 @@ Deno.test("porta do cron: entrega exige job_id uuid; vigiar responde a contagem;
   assertEquals((await m.handler(post({ acao: "entrega", job_id: "x" }, cron))).status, 400);
   const v = await m.handler(post({ acao: "vigiar" }, cron));
   assertEquals(v.status, 200);
-  assertEquals(await v.json(), { ok: true, baixados: 0, entregues: 0, reenfileirados: 0, dropbox: 0, apagados: 0, avisos: 0, expurgados: 0, sem_desfecho: 0, encaminhados: 0 });
+  assertEquals(await v.json(), {
+    ok: true, baixados: 0, entregues: 0, reenfileirados: 0, dropbox: 0, apagados: 0, avisos: 0, expurgados: 0, sem_desfecho: 0, encaminhados: 0,
+    movidos: 0, indices: 0, cnpj: 0, perguntas: 0,
+  });
   const r = await m.handler(post({ acao: "repescar", desde: "2026-10-01T00:00:00Z", limite: 20 }, cron));
   assertEquals(r.status, 409);
   assertEquals(await r.json(), { ok: false, motivo: "modo_off" });
@@ -113,4 +116,35 @@ Deno.test("CRON_SECRET ausente: recusa tudo pela porta do cron (fail-closed)", a
   } finally {
     ambiente();
   }
+});
+
+// ─── F2: as ações da conversa (só a porta interna) ────────────────────────────────────────
+
+Deno.test("F2: responder/pendentes/desempatar/retomar só pela porta interna; o cron não alcança", async () => {
+  const m = montador();
+  for (const acao of ["responder", "pendentes", "desempatar", "retomar"]) {
+    const r = await m.handler(post({ acao }, { "x-cron-secret": "segredo-do-cron-de-teste" }));
+    assertEquals(r.status, 400, acao);
+  }
+  for (const acao of ["responder", "pendentes", "desempatar", "retomar"]) {
+    const r = await m.handler(post({ acao }, { Authorization: "Bearer chave-anonima-publica" }));
+    assertEquals(r.status, 401, acao);
+  }
+  assertEquals(m.montou(), 0);
+});
+
+Deno.test("F2: entrada inválida no responder = 422 sem tocar o banco; pendentes/desempatar inválidos não enviam nada", async () => {
+  const m = montador();
+  const interna = { Authorization: "Bearer chave-de-servico-de-teste" };
+  const r = await m.handler(post({ acao: "responder", message_id: "x", phone: "5547999990000", texto: "1" }, interna));
+  assertEquals(r.status, 422);
+  assertEquals(await r.json(), { tratada: false, motivo: "entrada_invalida" });
+  const p = await m.handler(post({ acao: "pendentes", message_id: "x", phone: "1" }, interna));
+  assertEquals(await p.json(), { enviada: false, itens: 0 });
+  const d = await m.handler(post({ acao: "desempatar", message_id: "x", phone: "1" }, interna));
+  assertEquals(await d.json(), { enviada: false });
+  // retomar (revisão de 11/10/2026): telefone inválido não pergunta nada
+  const t = await m.handler(post({ acao: "retomar", phone: "1" }, interna));
+  assertEquals(await t.json(), { perguntou: false });
+  assertEquals(m.rpcs.length, 0);
 });

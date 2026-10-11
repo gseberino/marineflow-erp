@@ -1,7 +1,10 @@
 // Edge Function: comprovantes-whatsapp (F1, 11/10/2026 — spec-f1-final.md)
 //
-// Recebe, guarda e entrega a leitura dos comprovantes que o dono manda ao WhatsApp do sistema:
+// Recebe, guarda e entrega a leitura dos comprovantes que o dono manda ao WhatsApp do sistema e (F2)
+// conversa com ele sobre cada um:
 //   receber  ← whatsapp-webhook (chamadaInterna), quando app_settings.comprovante_fluxo ≠ off;
+//   responder, pendentes, desempatar ← whatsapp-webhook (chamadaInterna), com a conversa ligada (F2);
+//   retomar  ← ai-agent (chamadaInterna): a pendência que tirou a pergunta de um CMP foi respondida;
 //   entrega  ← gatilho _ai_jobs_comprovante_lido, quando o HBR Doc Worker termina a leitura;
 //   vigiar   ← pg_cron comprovantes-vigia (*/2, só quando há trabalho);
 //   repescar ← manual, com OK do dono.

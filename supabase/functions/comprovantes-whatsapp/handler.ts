@@ -1,15 +1,28 @@
-// As portas e as ações da edge comprovantes-whatsapp (F1, 11/10/2026 — spec-f1-final.md, 6.1/6.2).
-// Separado do index.ts para os testes exercitarem as portas sem subir servidor.
+// As portas e as ações da edge comprovantes-whatsapp (F1, 11/10/2026 — spec-f1-final.md, 6.1/6.2;
+// F2 — spec-f2.md, 5.8). Separado do index.ts para os testes exercitarem as portas sem subir servidor.
 //
 // A porta é escolhida PELO CABEÇALHO, antes de qualquer I/O (padrão do ai-agent):
 //   - com x-cron-secret → verificarCronSecret; aceita só entrega, vigiar e repescar
 //     (o gatilho de ai_jobs, o pg_cron comprovantes-vigia e a repescagem com OK);
-//   - sem ele → chamadaInterna (Bearer service role); aceita só receber (o whatsapp-webhook).
+//   - sem ele → chamadaInterna (Bearer service role); aceita só receber, responder, pendentes,
+//     desempatar (o whatsapp-webhook) e retomar (o ai-agent, quando a pendência que tirou a pergunta
+//     de um CMP foi respondida).
 import { ORIGEM_PADRAO } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { chamadaInterna } from "../_shared/porta.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
-import { codigoDoErro, type DependenciasDoFluxo, entregar, receber, repescar, vigiar } from "../_shared/comprovantes/fluxo.ts";
+import {
+  codigoDoErro,
+  type DependenciasDoFluxo,
+  desempatar,
+  entregar,
+  pendentes,
+  receber,
+  repescar,
+  responder,
+  retomar,
+  vigiar,
+} from "../_shared/comprovantes/fluxo.ts";
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -23,7 +36,7 @@ function jr(body: unknown, status = 200): Response {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACOES_DO_CRON = ["entrega", "vigiar", "repescar"];
-const ACOES_INTERNAS = ["receber"];
+const ACOES_INTERNAS = ["receber", "responder", "pendentes", "desempatar", "retomar"];
 
 /** `montarDeps` só é chamado DEPOIS da porta: requisição recusada não cria cliente nem toca o banco. */
 export function criarHandler(montarDeps: () => DependenciasDoFluxo): (req: Request) => Promise<Response> {
@@ -52,6 +65,13 @@ export function criarHandler(montarDeps: () => DependenciasDoFluxo): (req: Reque
         const r = await receber(corpo, deps);
         return jr(r.corpo, r.status);
       }
+      if (acao === "responder") {
+        const r = await responder(corpo, deps);
+        return jr(r.corpo, r.status);
+      }
+      if (acao === "pendentes") return jr(await pendentes(corpo, deps));
+      if (acao === "desempatar") return jr(await desempatar(corpo, deps));
+      if (acao === "retomar") return jr(await retomar(corpo, deps));
       if (acao === "entrega") {
         if (typeof corpo.job_id !== "string" || !UUID.test(corpo.job_id)) return jr({ ok: false, erro: "job_id_invalido" }, 400);
         const r = await entregar(corpo.job_id, deps);
