@@ -4,7 +4,7 @@
 // o dono pode ter renomeado ou movido; o caminho é atualizado, nada é renomeado do nosso lado.
 // Barco sem pasta: reserva o próximo número (proximo_codigo_projeto), cria
 // <pasta-base>/<NNNN.SSS.AA>_<Barco> com as subpastas do modelo do dono e registra.
-import { Dropbox, ErroDropbox } from "./cliente.ts";
+import { type Dropbox, ErroDropbox } from "./cliente.ts";
 import { nomeDaPasta, SUBPASTAS } from "./nucleo.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -14,7 +14,10 @@ export type PastaDoBarco = { id: string; caminho: string; codigo: string | null;
 
 type Metadados = { id: string; path_display: string };
 
-async function metadadosPorId(dbx: Dropbox, id: string): Promise<Metadados | null> {
+/** O que esta peça usa do cliente (o fluxo dos comprovantes passa o mesmo cliente, ou um dublê nos testes). */
+export type DropboxDaPasta = Pick<Dropbox, "rpc" | "criarPasta">;
+
+async function metadadosPorId(dbx: DropboxDaPasta, id: string): Promise<Metadados | null> {
   try {
     return await dbx.rpc<Metadados>("files/get_metadata", { path: id });
   } catch (e) {
@@ -23,30 +26,15 @@ async function metadadosPorId(dbx: Dropbox, id: string): Promise<Metadados | nul
   }
 }
 
-/** Cria a pasta; se já existir uma com o mesmo nome, devolve a existente. */
-async function criarOuAchar(dbx: Dropbox, caminho: string): Promise<Metadados> {
-  try {
-    const r = await dbx.rpc<{ metadata: Metadados }>("files/create_folder_v2", { path: caminho.normalize("NFC"), autorename: false });
-    return r.metadata;
-  } catch (e) {
-    if (e instanceof ErroDropbox && e.resumo.startsWith("path/conflict/folder")) {
-      return await dbx.rpc<Metadados>("files/get_metadata", { path: caminho.normalize("NFC") });
-    }
-    throw e;
-  }
-}
-
-export async function garantirPastaDoBarco(admin: Admin, dbx: Dropbox, p: {
-  vesselId: string;
-  clientId: string;
-  barco: string | null;
-  cliente: string | null;
-  pastaBase: string;
-}): Promise<PastaDoBarco> {
+/**
+ * A pasta registrada (pastas_dropbox, vinculada) do barco que ainda existe no Dropbox, pelo id; o
+ * caminho é atualizado se o dono renomeou ou moveu. null = nenhuma (nada é criado aqui).
+ */
+export async function pastaRegistradaDoBarco(admin: Admin, dbx: DropboxDaPasta, vesselId: string): Promise<PastaDoBarco | null> {
   const { data: existentes, error } = await admin
     .from("pastas_dropbox")
     .select("id, dropbox_id, caminho, codigo_projeto")
-    .eq("vessel_id", p.vesselId)
+    .eq("vessel_id", vesselId)
     .eq("situacao", "vinculada")
     .order("codigo_projeto", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: true });
@@ -60,12 +48,25 @@ export async function garantirPastaDoBarco(admin: Admin, dbx: Dropbox, p: {
     }
     return { id: reg.dropbox_id, caminho: m.path_display, codigo: reg.codigo_projeto, criada: false };
   }
+  return null;
+}
+
+export async function garantirPastaDoBarco(admin: Admin, dbx: DropboxDaPasta, p: {
+  vesselId: string;
+  clientId: string;
+  barco: string | null;
+  cliente: string | null;
+  pastaBase: string;
+}): Promise<PastaDoBarco> {
+  const registrada = await pastaRegistradaDoBarco(admin, dbx, p.vesselId);
+  if (registrada) return registrada;
 
   // Sem pasta: número novo.
   const { data: codigo, error: eCod } = await admin.rpc("proximo_codigo_projeto");
   if (eCod || !codigo) throw new Error(`não consegui o próximo número de projeto (${eCod?.message ?? "vazio"})`);
   const base = p.pastaBase.replace(/\/+$/, "");
-  const raiz = await criarOuAchar(dbx, `${base}/${nomeDaPasta(String(codigo), p.barco, p.cliente)}`);
+  // criarPasta: cria; se já existir uma com o mesmo nome, devolve a existente (o antigo criarOuAchar)
+  const raiz = await dbx.criarPasta(`${base}/${nomeDaPasta(String(codigo), p.barco, p.cliente)}`);
 
   // Subpastas em lote (um pedido só; se o Dropbox responder "em andamento", elas aparecem sozinhas).
   try {

@@ -196,3 +196,15 @@ Deno.test("fotos: nota da OS no dia — evento no dia vale inteiro, vizinho meta
   assertEquals(r.motivos.includes("agendada para esse dia"), true);
   assertEquals(notaDaOsNoDia("2026-10-10", os).nota, 0);
 });
+
+// ─── Comprovantes F2: a pasta das compras ─────────────────────────────────────────────────
+import { PASTA_DAS_COMPRAS, PASTA_DOS_PDFS, SUBPASTAS } from "./nucleo.ts";
+
+Deno.test("SUBPASTAS: o modelo do dono não muda com a F2 — 1- DOC's/Compras nasce no primeiro comprovante", () => {
+  assertEquals(PASTA_DAS_COMPRAS, "1- DOC's/Compras");
+  assertEquals(SUBPASTAS.includes(PASTA_DAS_COMPRAS), false);
+  assert(SUBPASTAS.includes("1- DOC's"), "o pai já existe em todo barco");
+  assert(SUBPASTAS.includes(PASTA_DOS_PDFS));
+  assertEquals(SUBPASTAS.length, 8);
+  assertEquals(new Set(SUBPASTAS).size, SUBPASTAS.length);
+});

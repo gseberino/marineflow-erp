@@ -209,6 +209,13 @@ export const SUBPASTAS = [
 
 export const PASTA_DOS_PDFS = "1- DOC's/Orçamentos e OS";
 
+/**
+ * Onde o comprovante de compra da OS fica, dentro da pasta do barco (comprovantes F2). NÃO entra
+ * em SUBPASTAS (revisão de 11/10/2026): o modelo de pasta do dono não muda antes de a F2 estar
+ * ligada — a pasta nasce no primeiro comprovante, porque o move_v2 e o upload criam o que falta.
+ */
+export const PASTA_DAS_COMPRAS = "1- DOC's/Compras";
+
 /** A data de hoje em São Paulo, AAAA-MM-DD (o nome do arquivo usa o dia do dono, não o UTC). */
 export function dataEmSaoPaulo(agora = new Date()): string {
   const p = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" })

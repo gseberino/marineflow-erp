@@ -159,6 +159,60 @@ export class Dropbox {
     return await r.json() as MetadadosArquivo;
   }
 
+  /**
+   * files/move_v2 (comprovantes F2). `de` = "id:..." ou caminho; o arquivo mantém o id (um arquivo
+   * físico só por documento). Com autorename, um nome repetido no destino vira "x (1).pdf": nunca
+   * sobrescreve. As pastas que faltarem no destino o Dropbox cria.
+   */
+  async mover(de: string, para: string, autorename = true): Promise<MetadadosArquivo> {
+    const r = await this.rpc<{ metadata: MetadadosArquivo }>("files/move_v2", {
+      from_path: de.startsWith("id:") ? de : de.normalize("NFC"),
+      to_path: para.normalize("NFC"),
+      autorename,
+      allow_ownership_transfer: false,
+    });
+    return r.metadata;
+  }
+
+  /**
+   * Regrava um arquivo nosso (o índice CSV do mês): upload com mode update + rev. Sem rev (primeira
+   * vez), "add" com autorename. Conflito de rev (o dono editou ou apagou o arquivo) → "add" com
+   * autorename num nome novo, e `conflito: true`: nunca apaga o que ele mexeu.
+   */
+  async substituir(caminho: string, bytes: Uint8Array<ArrayBuffer>, rev: string | null): Promise<MetadadosArquivo & { conflito: boolean }> {
+    if (!rev) return { ...(await this.enviar(caminho, bytes, true)), conflito: false };
+    const arg = argParaCabecalho({ path: caminho.normalize("NFC"), mode: { ".tag": "update", update: rev }, autorename: false, mute: true });
+    try {
+      const r = await this.chamar((token) =>
+        new Request(`${CONTEUDO}/2/files/upload`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/octet-stream", "Dropbox-API-Arg": arg },
+          body: bytes,
+        })
+      );
+      return { ...(await r.json() as MetadadosArquivo), conflito: false };
+    } catch (e) {
+      if (e instanceof ErroDropbox && e.status === 409 && /^path\/(conflict|not_found)/.test(e.resumo)) {
+        return { ...(await this.enviar(caminho, bytes, true)), conflito: true };
+      }
+      throw e;
+    }
+  }
+
+  /** files/create_folder_v2; se a pasta já existe ("path/conflict/folder"), devolve a existente. */
+  async criarPasta(caminho: string): Promise<{ id: string; path_display: string }> {
+    const path = caminho.normalize("NFC");
+    try {
+      const r = await this.rpc<{ metadata: { id: string; path_display: string } }>("files/create_folder_v2", { path, autorename: false });
+      return r.metadata;
+    } catch (e) {
+      if (e instanceof ErroDropbox && e.resumo.startsWith("path/conflict/folder")) {
+        return await this.rpc<{ id: string; path_display: string }>("files/get_metadata", { path });
+      }
+      throw e;
+    }
+  }
+
   /** Endpoint do servidor de conteúdo que responde JSON (ex.: files/get_thumbnail_batch). */
   async rpcConteudo<T>(rota: string, corpo: unknown): Promise<T> {
     const r = await this.chamar((token) =>
