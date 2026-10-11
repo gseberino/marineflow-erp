@@ -2,6 +2,8 @@
 // LLM (custo $0) ou monta o texto que o LLM não precisa formatar. A orquestração do
 // turno completo fica em ai-agent/index.ts (que já tem acesso a runAgentLoop,
 // buildSystemBlocks etc.) — este módulo só as partes puras/testáveis isoladamente.
+import { lerModoDoComprovante } from "../comprovantes/modo.ts";
+import { donoDoWhatsApp } from "../whatsapp/dono.ts";
 
 const APPROVE_WORDS = ["sim", "s", "ok", "confirmar", "1"];
 const REJECT_WORDS = ["não", "nao", "n", "cancelar", "2"];
@@ -197,15 +199,39 @@ export async function resolveOrCreateWhatsAppSession(admin: any, phoneNormalized
   return created.id;
 }
 
-/** ~10 msgs/min por telefone, contadas em whatsapp_messages (mensagens inbound). */
+/**
+ * Só o texto e o áudio do dono contam no limite por minuto? Com o fluxo de comprovantes em "dono"
+ * (decisão 8 de 11/10/2026), foto e PDF sem legenda do dono vão para o fluxo, não para o assistente:
+ * um lote de 20 cupons não pode calar o assistente para a próxima pergunta. Em "sombra" o assistente
+ * continua recebendo TODA foto (rota "ambos"), então tudo conta como hoje; telefone de funcionário
+ * também (o fluxo é só do dono). Erro ao ler a chave ou o dono = a contagem de sempre.
+ */
+async function contaSoTextoEAudio(admin: any, phoneNormalized: string): Promise<boolean> {
+  if ((await lerModoDoComprovante(admin)) !== "dono") return false;
+  try {
+    const dono = await donoDoWhatsApp(admin);
+    return dono?.phone === phoneNormalized;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ~10 msgs/min por telefone, contadas em whatsapp_messages (mensagens inbound). Com o fluxo de
+ * comprovantes em "dono", no telefone do dono só texto e áudio contam (contaSoTextoEAudio). Com
+ * "off" ou "sombra" (ou erro), a contagem é a de sempre.
+ */
 export async function checkWhatsAppRateLimit(admin: any, phoneNormalized: string, maxPerMinute = 10): Promise<boolean> {
   const oneMinuteAgoIso = new Date(Date.now() - 60_000).toISOString();
-  const { count } = await admin
+  const soTextoEAudio = await contaSoTextoEAudio(admin, phoneNormalized);
+  let consulta = admin
     .from("whatsapp_messages")
     .select("*", { count: "exact", head: true })
     .eq("phone_normalized", phoneNormalized)
     .eq("direction", "inbound")
     .gte("occurred_at", oneMinuteAgoIso);
+  if (soTextoEAudio) consulta = consulta.in("message_type", ["text", "audio"]);
+  const { count } = await consulta;
   return (count ?? 0) < maxPerMinute;
 }
 

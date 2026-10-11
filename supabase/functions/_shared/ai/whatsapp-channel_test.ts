@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   cancelarPendenciaSubstituida,
+  checkWhatsAppRateLimit,
   decidirPendenciaHerdada,
   formatOptionsAsNumberedText,
   notaDeConfirmacao,
@@ -234,4 +235,85 @@ Deno.test("sem troca de pendência, ou anterior já decidida: não mexe em nada"
   const { admin, gravado } = bancoDePendencias(false);
   assertEquals(await cancelarPendenciaSubstituida(admin, { pending_confirm_action_id: "velha" }, { pending_confirm_action_id: "nova" }, "u1"), "");
   assertEquals(gravado.auditoria, undefined, "já decidida: sem auditoria nem aviso");
+});
+
+
+// ─── Limite por minuto com o fluxo de comprovantes (decisão 8, 11/10/2026) ───────────────
+// Só no modo "dono" e só no telefone do dono foto/PDF não contam (eles vão para o fluxo, e um lote
+// de cupons calaria o assistente). Com "off" ou "sombra" (o assistente recebe toda foto), em outro
+// telefone, ou com erro ao ler a chave/o dono, a consulta é exatamente a de antes.
+
+const TELEFONE_DO_DONO = "5547999990000";
+
+/** Banco mínimo: devolve o modo e o dono, e registra a cadeia de filtros da contagem. */
+function bancoDoLimite(
+  modo: { value: string } | null | Error,
+  total: number,
+  dono: { id: string; phone_normalized: string } | Error = { id: "d1", phone_normalized: TELEFONE_DO_DONO },
+) {
+  const contagem: Array<[string, ...unknown[]]> = [];
+  const admin = {
+    from(tabela: string) {
+      if (tabela === "app_settings") {
+        const q: any = {
+          select: () => q,
+          eq: () => q,
+          maybeSingle: () => modo instanceof Error ? Promise.reject(modo) : Promise.resolve({ data: modo, error: null }),
+        };
+        return q;
+      }
+      if (tabela === "app_users") {
+        const q: any = {};
+        for (const m of ["select", "eq", "not", "order"]) q[m] = () => q;
+        q.limit = () => Promise.resolve(dono instanceof Error ? { data: null, error: { message: "db" } } : { data: [dono], error: null });
+        return q;
+      }
+      contagem.push(["from", tabela]);
+      const q: any = {};
+      for (const m of ["select", "eq", "gte", "in"]) q[m] = (...a: unknown[]) => { contagem.push([m, ...a]); return q; };
+      q.then = (ok: (v: unknown) => unknown, falha?: (e: unknown) => unknown) =>
+        Promise.resolve({ count: total, error: null }).then(ok, falha);
+      return q;
+    },
+  };
+  return { admin, contagem };
+}
+
+const FILTROS_DE_ANTES = (desde: unknown, telefone = TELEFONE_DO_DONO) => [
+  ["from", "whatsapp_messages"],
+  ["select", "*", { count: "exact", head: true }],
+  ["eq", "phone_normalized", telefone],
+  ["eq", "direction", "inbound"],
+  ["gte", "occurred_at", desde],
+];
+
+Deno.test("limite por minuto com off ou sombra (ou erro na chave): a consulta de antes, sem filtro de tipo", async () => {
+  // sombra: o assistente recebe toda foto (rota ambos) — um lote de 20 fotos segue com o teto de hoje
+  for (const modo of [{ value: "off" }, { value: "sombra" }, null, new Error("db"), { value: "lixo" }]) {
+    const { admin, contagem } = bancoDoLimite(modo, 3);
+    assertEquals(await checkWhatsAppRateLimit(admin, TELEFONE_DO_DONO), true);
+    assertEquals(contagem, FILTROS_DE_ANTES(contagem[4]?.[2]));
+    assertEquals(contagem.some(([m]) => m === "in"), false);
+  }
+});
+
+Deno.test("limite por minuto com dono: no telefone do dono só texto e áudio contam", async () => {
+  const { admin, contagem } = bancoDoLimite({ value: "dono" }, 3);
+  assertEquals(await checkWhatsAppRateLimit(admin, TELEFONE_DO_DONO), true);
+  assertEquals(contagem.slice(0, 5), FILTROS_DE_ANTES(contagem[4]?.[2]));
+  assertEquals(contagem[5], ["in", "message_type", ["text", "audio"]]);
+});
+
+Deno.test("limite por minuto com dono: telefone de funcionário ou dono ilegível conta tudo, como hoje", async () => {
+  const funcionario = bancoDoLimite({ value: "dono" }, 3);
+  assertEquals(await checkWhatsAppRateLimit(funcionario.admin, "5547988887777"), true);
+  assertEquals(funcionario.contagem, FILTROS_DE_ANTES(funcionario.contagem[4]?.[2], "5547988887777"));
+  const semDono = bancoDoLimite({ value: "dono" }, 3, new Error("db"));
+  assertEquals(await checkWhatsAppRateLimit(semDono.admin, TELEFONE_DO_DONO), true);
+  assertEquals(semDono.contagem.some(([m]) => m === "in"), false);
+});
+
+Deno.test("limite por minuto: 10 ou mais no minuto bloqueia, nos dois modos", async () => {
+  assertEquals(await checkWhatsAppRateLimit(bancoDoLimite({ value: "off" }, 10).admin, TELEFONE_DO_DONO), false);
+  assertEquals(await checkWhatsAppRateLimit(bancoDoLimite({ value: "dono" }, 9).admin, TELEFONE_DO_DONO), true);
 });

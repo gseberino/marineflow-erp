@@ -13,6 +13,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { chamadaInterna } from "../_shared/porta.ts";
+import { donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -53,10 +54,34 @@ servirComCors(async (req) => {
 
     const { data: msg } = await admin
       .from("whatsapp_messages")
-      .select("id, body, message_type, raw_payload")
+      .select("id, body, message_type, raw_payload, phone_normalized")
       .eq("id", message_id)
       .maybeSingle();
     if (!msg) return jr({ error: "mensagem não encontrada" }, 404);
+
+    // Comprovante do dono (F1, 11/10/2026): quem lê é o HBR Doc Worker, no PC e sem IA paga — esta
+    // leitura reescreveria o corpo da mensagem e mandaria o arquivo ao modelo. Hoje esta função só
+    // é chamada para mídia de fornecedor (read_supplier_media); a recusa é defesa em profundidade.
+    // Só a mensagem do telefone do dono pode estar no fluxo: a do fornecedor nem consulta a tabela
+    // nova (a cotação não passa a depender dela). Dono ilegível = confere assim mesmo; tabela que
+    // ainda não existe (função publicada antes da migration) = segue como antes; outro erro recusa.
+    let donoPhone: string | null | undefined;
+    try {
+      donoPhone = (await donoDoWhatsApp(admin))?.phone ?? null;
+    } catch {
+      donoPhone = undefined;
+    }
+    if (donoPhone === undefined || donoPhone === msg.phone_normalized) {
+      const { data: doFluxo, error: eFluxo } = await admin
+        .from("comprovantes")
+        .select("id")
+        .eq("whatsapp_message_id", message_id)
+        .limit(1)
+        .maybeSingle();
+      const tabelaAusente = eFluxo?.code === "42P01" || eFluxo?.code === "PGRST205";
+      if (eFluxo && !tabelaAusente) return jr({ error: "não consegui conferir o fluxo de comprovantes" }, 500);
+      if (doFluxo) return jr({ error: "mensagem do fluxo de comprovantes" }, 403);
+    }
 
     const kind = msg.message_type === "image" ? "image" : msg.message_type === "document" ? "document" : null;
     if (!kind) return jr({ ok: true, skipped: "não é documento nem imagem" });
