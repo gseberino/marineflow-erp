@@ -17,6 +17,7 @@ import { diaBR, somarDiasAoDia } from "../_shared/pdf/datas.ts";
 import { historicoSemIdentidade } from "../_shared/banking/proposals.ts";
 import { normalizeText } from "../_shared/banking/matching.ts";
 import { linhasDoExtratoNoResumo } from "./extrato.ts";
+import { canceladasSemComprovante, debitosSemComprovante, linhasDosComprovantes } from "./comprovantes.ts";
 import { lerAnalise } from "../_shared/financeiro/vigia-do-negocio.ts";
 import { montarSecaoEmail, type EmailDigestItem } from "../_shared/email/digest.ts";
 import { resumoDosDados } from "../_shared/email/dados.ts";
@@ -366,7 +367,7 @@ servirComCors(async (req) => {
           .not("automatica", "is", null).eq("status", "approved").gte("decided_at", desde24h)
           .order("decided_at", { ascending: false }).limit(200),
         admin.from("finance_review_queue")
-          .select(`suggested_amount, suggested_date, evidencia,
+          .select(`suggested_amount, suggested_date, evidencia, bank_transaction_id,
                    bank_transactions!finance_review_queue_bank_transaction_id_fkey ( description, counterparty_name, counterparty_document )`)
           .eq("status", "pending").eq("kind", "create_payable")
           .order("suggested_date", { ascending: false }).limit(1000),
@@ -374,7 +375,7 @@ servirComCors(async (req) => {
         // respondidas na conversa): valor, quem e o motivo. A que o dono desfez ao cancelar um
         // comprovante (motivo "CMP-00124 cancelado: …", F2 de 11/10/2026) não é "não aplicada": fica fora.
         admin.from("anotacoes_do_extrato")
-          .select("valor, criada_em, cancelada_em, motivo_cancelamento, nome, suppliers(name), payees(name), clients(name)")
+          .select("id, valor, criada_em, cancelada_em, motivo_cancelamento, nome, suppliers(name), payees(name), clients(name)")
           .eq("status", "cancelada").not("motivo_cancelamento", "is", null).not("motivo_cancelamento", "like", "CMP-%")
           .gte("cancelada_em", desde24h)
           .order("cancelada_em", { ascending: false }).limit(50),
@@ -386,11 +387,16 @@ servirComCors(async (req) => {
         return historicoSemIdentidade(t.counterparty_name || t.description)
           && /^(DEBITO|COMPRA)/.test(normalizeText(String(t.description ?? "")));
       });
-      // O que o dono já respondeu (anotação) não é perguntado de novo: só falta aprovar.
-      const debitos = semLoja.filter((l) => !l.evidencia?.anotacao);
-      const anotadosEsperando = semLoja.length - debitos.length;
+      // O que o dono já respondeu (anotação) não é perguntado de novo: só falta aprovar. F3 (11/10/2026,
+      // só remoção): nem a linha que um comprovante (CMP) já ligou ou que a pergunta do extrato espera;
+      // e a anotação de um CMP vivo não é "não aplicada". Erro na consulta = o bloco como antes.
+      const listaCanceladas = ((canceladas as any[]) || []);
+      const doCmp = semLoja.length || listaCanceladas.length
+        ? await linhasDosComprovantes(admin)
+        : { linhas: new Set<string>(), anotacoes: new Set<string>() };
+      const { debitos, anotadosEsperando } = debitosSemComprovante(semLoja, doCmp);
       const fmtExtrato = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-      const naoAplicadas = ((canceladas as any[]) || [])
+      const naoAplicadas = canceladasSemComprovante(listaCanceladas, doCmp)
         .filter((a) => new Date(a.cancelada_em).getTime() - new Date(a.criada_em).getTime() > 60_000)
         .map((a) => ({
           valor: a.valor,
