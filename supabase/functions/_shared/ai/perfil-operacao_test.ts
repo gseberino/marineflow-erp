@@ -142,13 +142,21 @@ Deno.test("SO_PELA_REDE: a 'leitura pelo nome' que roda direto não escreve (o n
   // O executor confia no nome (get_/list_/read_/check_/search_) para deixar rodar direto. Aqui se
   // confere, no corpo do execute, que nenhuma delas grava. Só o corpo do execute é lido: helper
   // em outra função não aparece — quem acrescentar leitura que delega tem de ler o helper.
+  // Função do banco (.rpc) só as de RPC_SO_LEITURA_CONFERIDAS (11/10/2026: consultar_comprovantes
+  // lê por comprovantes_consultar, conferida abaixo no texto da migration).
   const porNome = new Map(allTools.map((t) => [t.name, t]));
   const leituras = [...SO_PELA_REDE].filter((n) => ehLeituraPeloNome(n));
   assertEquals(leituras.length >= 10, true, `só ${leituras.length} leituras — o recorte quebrou?`);
   for (const n of leituras) {
     const corpo = String(porNome.get(n)!.execute);
-    assertEquals(/\.(insert|update|upsert|delete|rpc)\(/.test(corpo), false, `${n} tem escrita no execute e passaria direto pela rede`);
+    assertEquals(/\.(insert|update|upsert|delete)\(/.test(corpo), false, `${n} tem escrita no execute e passaria direto pela rede`);
+    for (const m of corpo.matchAll(/\.rpc\(\s*["'`]([a-z_0-9]+)/g)) {
+      assertEquals(RPC_SO_LEITURA_CONFERIDAS.has(m[1]), true, `${n} chama a função ${m[1]}, que ninguém conferiu como só leitura`);
+    }
+    assertEquals(/\.rpc\(\s*[^"'`\s]/.test(corpo), false, `${n} chama função do banco por nome montado: não dá para conferir`);
   }
+  // A leitura de comprovantes chama a função conferida (se trocar de função, este teste tem de mudar junto).
+  assertEquals(/\.rpc\(\s*["']comprovantes_consultar["']/.test(String(porNome.get("consultar_comprovantes")!.execute)), true);
 });
 
 Deno.test("acrescentadas que editam cadastro: serviço e fornecedor sem vendedor externo; vínculo de contato sem técnico", async () => {
@@ -234,7 +242,46 @@ Deno.test("comportamento: com o perfil ligado, o modelo recebe exatamente o de a
 const RPC_SO_LEITURA_CONFERIDAS = new Set([
   "should_survey_service", "extrato_da_conta", "bi_margin_by_category", "get_entity_open_loops", "bi_revenue_by_brand",
   "whatsapp_pending_inbox", "bi_top_clients", "get_promo_candidates", "linhas_do_checklist", "checklist_do_mes",
+  // Comprovantes (F2, 11/10/2026): conferida no texto da migration (teste abaixo).
+  "comprovantes_consultar",
 ]);
+
+/**
+ * comprovantes_consultar (migration 20261011202000, LOTE BANCO da F2): a função que a
+ * consultar_comprovantes chama e que a rede roda direto. Confere no TEXTO da migration que o corpo
+ * dela não grava nada nem chama função que grava. Enquanto o arquivo não existe no ramo (os lotes
+ * da F2 são escritos em paralelo), o teste fica ignorado — no fechamento ele existe e roda.
+ */
+const MIGRATION_DAS_LEITURAS_DE_CMP = new URL("../../../migrations/20261011202000_comprovantes_conversa_rpcs.sql", import.meta.url);
+const migrationDasLeiturasExiste = (() => {
+  try {
+    return Deno.statSync(MIGRATION_DAS_LEITURAS_DE_CMP).isFile;
+  } catch {
+    return false;
+  }
+})();
+
+Deno.test({
+  name: "comprovantes_consultar só lê: nenhum insert/update/delete nem rota que grava no corpo da função",
+  ignore: !migrationDasLeiturasExiste,
+  fn() {
+    const sql = Deno.readTextFileSync(MIGRATION_DAS_LEITURAS_DE_CMP).replace(/--[^\n]*/g, "");
+    const inicio = sql.search(/create\s+or\s+replace\s+function\s+public\.comprovantes_consultar\s*\(/i);
+    assertEquals(inicio >= 0, true, "a migration não cria public.comprovantes_consultar");
+    // O corpo vai do primeiro $$ (ou $tag$) depois do cabeçalho até o fechamento igual.
+    const resto = sql.slice(inicio);
+    const abre = resto.match(/\$([a-z_]*)\$/i);
+    assertEquals(!!abre, true, "corpo da função sem delimitador $$");
+    const corpoIni = resto.indexOf(abre![0]) + abre![0].length;
+    const corpo = resto.slice(corpoIni, resto.indexOf(abre![0], corpoIni)).toLowerCase();
+    assertEquals(corpo.length > 50, true, "corpo da função vazio — o recorte quebrou?");
+    assertEquals(/\b(insert\s+into|update\s+public\.|delete\s+from|perform\s+public\.)/.test(corpo), false,
+      "comprovantes_consultar grava (ou chama rota) e a rede a roda sem confirmação");
+    for (const rota of ["_comprovante_gravar", "comprovante_cancelar", "anotar_transacao", "lancar_no_caixa", "so_expense_add"]) {
+      assertEquals(corpo.includes(rota), false, `comprovantes_consultar chama ${rota}`);
+    }
+  },
+});
 
 Deno.test("rede do admin: toda leitura pelo nome que roda direto só lê (rpc só às funções conferidas)", () => {
   const leituras = allTools.filter((t) => !PERFIL_ADMIN.has(t.name) && rodaDiretoPelaRede(t) && ehLeituraPeloNome(t.name));

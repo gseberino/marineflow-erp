@@ -17,6 +17,7 @@ import {
   categoriaDaLinha, centavos, doMesmoRamoEmOutraCategoria, intervaloDoMes, linhaCasa, normal as normalG, resolverCategorias, somar,
   type LancamentoLido, type LinhaSemLancamento,
 } from "../gastos.ts";
+import { conferirComprovantes as conferirCmps, type QuemConfere, textoDoAberto, textoDoJaLancado } from "./comprovantes.ts";
 
 const CARGOS_FINANCEIRO: Role[] = ["admin", "financial"];
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -319,6 +320,30 @@ export async function resolverPedidoDeCaixa(ctx: ToolCtx, args: Record<string, u
   };
 }
 
+/**
+ * Comprovantes (F2, 11/10/2026): o mesmo gasto não entra duas vezes. O dono manda o cupom pelo
+ * WhatsApp (CMP-00123) e depois diz ao assistente "gastei 62 em dinheiro no posto": se um CMP já
+ * GRAVOU este tipo de lançamento (mesmo valor, data a ±1 dia, mesma OS), é recusa; se há um CMP
+ * ABERTO igual (só com a conversa ligada), a confirmação ganha uma linha de atenção (o dono decide:
+ * *não* e *cmp N*). Sempre com quem pede: o admin vê o CMP; o financeiro, só que existe (sem
+ * código nem valor). Efeitos do mesmo tipo: Caixa → caixa; bolso do sócio → reembolso_socio;
+ * anotação → anotar ou anexar_anotacao. Sem usuário ou falha da consulta = segue como antes da F2.
+ */
+export async function conferirComprovantes(
+  ctx: QuemConfere,
+  p: { valor: number; data: string | null; osId: string | null; efeitos: readonly string[] },
+): Promise<{ jaLancado: string | null; aberto: string | null }> {
+  const c = await conferirCmps(ctx, p);
+  return { jaLancado: c.gravado ? textoDoJaLancado(c.gravado) : null, aberto: c.aberto ? textoDoAberto(c.aberto) : null };
+}
+
+export const EFEITOS_DO_CAIXA = ["caixa"] as const;
+export const EFEITOS_DO_BOLSO_DO_SOCIO = ["reembolso_socio"] as const;
+export const EFEITOS_DA_ANOTACAO = ["anotar", "anexar_anotacao"] as const;
+
+/** A recusa da execução: a mesma frase do resumo, sem o ⚠️ (vira `error` da tool). */
+const recusaDoComprovante = (jaLancado: string) => ({ error: jaLancado.replace(/^⚠️\s*/, ""), nada_registrado: true as const });
+
 /** O texto da confirmação: o que vai acontecer, com tudo resolvido. */
 export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<string, unknown>): Promise<string | null> {
   if (nome === "lancar_no_caixa") {
@@ -326,6 +351,13 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
     if ("error" in p) return `⚠️ ${p.error}`;
     const quando = p.data ? p.data.split("-").reverse().join("/") : "hoje";
     if (p.sentido === "saque" || p.sentido === "deposito") return `- ${p.descricao}: *${brl.format(p.valor)}* · ${quando}`;
+    const cmp = p.sentido === "gasto"
+      ? await conferirComprovantes(ctx, {
+        valor: p.valor, data: p.data, osId: p.os?.id ?? null,
+        efeitos: p.pagoPor === "socio" ? EFEITOS_DO_BOLSO_DO_SOCIO : EFEITOS_DO_CAIXA,
+      })
+      : null;
+    if (cmp?.jaLancado) return cmp.jaLancado;
     return [
       `- ${p.sentido === "gasto" ? "Gasto" : "Recebimento"} de *${brl.format(p.valor)}* · ${p.descricao} · ${quando}`,
       p.categoria
@@ -337,6 +369,7 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
       p.pagoPor === "socio"
         ? `- Pago do bolso de *${p.socio?.nome}*: fica como reembolso a pagar a ele (o Caixa não mexe)`
         : `- ${p.sentido === "gasto" ? "Sai" : "Entra"} do *Caixa (dinheiro)*`,
+      cmp?.aberto ? `- ${cmp.aberto}` : null,
     ].filter(Boolean).join("\n");
   }
   if (nome === "anotar_transacao_do_banco") {
@@ -389,6 +422,10 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
       return `⚠️ "${nomeLivre}" não está no cadastro: diga a categoria (ex.: Alimentação de campo) para eu anotar só com o nome.`;
     }
     const pelaFrase = !cat && !padrao && pelo && (!args.quem || nomeLivre);
+    const cmp = args.sentido !== "entrada"
+      ? await conferirComprovantes(ctx, { valor: Number(args.valor) || 0, data: dataDita(args.data), osId: os?.id ?? null, efeitos: EFEITOS_DA_ANOTACAO })
+      : null;
+    if (cmp?.jaLancado) return cmp.jaLancado;
     return [
       `- Quando chegar do banco: ${args.sentido === "entrada" ? "entrada" : "saída"} de *${brl.format(Number(args.valor) || 0)}* (${quando})`,
       args.documento ? `- Para o documento ${String(args.documento)}` : null,
@@ -405,6 +442,7 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
         ? "- Nenhum cadastro com esse CPF/CNPJ: se a transação chegar com o nome de quem recebeu, ela não entra classificada (cadastre antes para entrar)."
         : !quem && !nomeLivre ? "- Sem dizer para quem foi: só vale para compra no débito ou transferência SEM nome no extrato." : null,
       "- Se houver mais de uma transação desse valor nesses dias, ou se a que chegou for de outro nome, nada é aplicado: eu pergunto.",
+      cmp?.aberto ? `- ${cmp.aberto}` : null,
     ].filter(Boolean).join("\n");
   }
   return null;
@@ -448,6 +486,14 @@ export const caixaTools: ToolDef[] = [
       if ("error" in p) return p;
       if (p.sentido === "saque" || p.sentido === "deposito") {
         return await chamar(ctx, "mover_caixa", { p_sentido: p.sentido, p_valor: p.valor, p_data: p.data, p_transacao_banco: null });
+      }
+      // Defesa (F2 dos comprovantes): entre o resumo e o "sim", um CMP pode ter gravado o mesmo gasto.
+      if (p.sentido === "gasto") {
+        const cmp = await conferirComprovantes(ctx, {
+          valor: p.valor, data: p.data, osId: p.os?.id ?? null,
+          efeitos: p.pagoPor === "socio" ? EFEITOS_DO_BOLSO_DO_SOCIO : EFEITOS_DO_CAIXA,
+        });
+        if (cmp.jaLancado) return recusaDoComprovante(cmp.jaLancado);
       }
       return await chamar(ctx, "lancar_no_caixa", {
         p_sentido: p.sentido === "gasto" ? "saida" : "entrada",
@@ -546,6 +592,11 @@ export const caixaTools: ToolDef[] = [
       }
       if (semCadastro && !categoria && !os) {
         return { error: `"${String(args.quem)}" não está no cadastro: diga a categoria para eu anotar só com o nome.` };
+      }
+      // Defesa (F2 dos comprovantes): entre o resumo e o "sim", um CMP pode ter anotado o mesmo pagamento.
+      if (sentido === "saida") {
+        const cmp = await conferirComprovantes(ctx, { valor, data, osId: os?.id ?? null, efeitos: EFEITOS_DA_ANOTACAO });
+        if (cmp.jaLancado) return recusaDoComprovante(cmp.jaLancado);
       }
       return await chamar(ctx, "anotar_transacao", {
         p_sentido: sentido, p_valor: valor, p_data: data,

@@ -92,10 +92,14 @@ NAO_SAO_TOOLS.add("receber_tudo");
 // planos de manutenção (07/10/2026): valor do filtro situação de list_maintenance_plans
 NAO_SAO_TOOLS.add("vencendo_30");
 
-function textoDoPrompt(): string {
-  // Os dois canais: o bloco estável é o mesmo, mas o volátil do WhatsApp tem texto próprio.
+/** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
+const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };
+
+function textoDoPrompt(settings: Record<string, string> = CONVERSA_LIGADA): string {
+  // Os dois canais: o bloco estável é o mesmo, mas o volátil do WhatsApp tem texto próprio. Com a
+  // conversa dos comprovantes ligada (o padrão aqui), entram também as linhas dos CMPs.
   return (["panel", "whatsapp"] as const)
-    .map((channel) => buildSystemBlocks({}, { userName: "Teste", userRole: "admin", channel }).map((b) => b.text).join("\n"))
+    .map((channel) => buildSystemBlocks(settings, { userName: "Teste", userRole: "admin", channel }).map((b) => b.text).join("\n"))
     .join("\n");
 }
 
@@ -224,4 +228,18 @@ Deno.test("update_supplier grava display_name de fato (o patch chega no UPDATE)"
   }) as { ok: boolean; alterado: Record<string, { de: unknown; para: unknown }> };
   assertEquals(updates, [{ display_name: "Nautimar" }]);
   assertEquals(r.alterado.display_name, { de: null, para: "Nautimar" });
+});
+
+// Comprovantes (F2, revisão de 11/10/2026): com a conversa desligada, ou em sombra, o assistente é o
+// de antes — nenhuma linha sobre CMP (a legenda do cupom ainda chega a ele e ele lança o que o dono pede).
+Deno.test("prompt: as linhas dos comprovantes só entram com a conversa ligada", () => {
+  for (const settings of [{}, { comprovante_fluxo: "sombra", comprovante_conversa: "on" }, { comprovante_fluxo: "dono", comprovante_conversa: "off" }] as Array<Record<string, string>>) {
+    const texto = textoDoPrompt(settings);
+    assertEquals(texto.includes("COMPROVANTES (CMP"), false, JSON.stringify(settings));
+    assertEquals(texto.includes("fluxo de comprovantes"), false, JSON.stringify(settings));
+  }
+  const ligada = textoDoPrompt();
+  assertEquals(ligada.includes("COMPROVANTES (CMP"), true);
+  assertEquals(ligada.includes("*cancelar cmp N*"), true);
+  assertEquals(ligada.includes("[image]/[document] do dono é do fluxo de comprovantes"), true);
 });

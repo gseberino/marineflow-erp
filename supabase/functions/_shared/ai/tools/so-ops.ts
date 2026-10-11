@@ -1,5 +1,9 @@
 import { NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
+import { conferirComprovantes, textoDaDespesaComCmpAberto, textoDaDespesaJaLancada } from "./comprovantes.ts";
+
+/** Efeitos de um CMP gravado que já puseram a despesa na OS (comprovantes_parecidos/ja_lancados). */
+export const EFEITOS_DA_DESPESA_DA_OS = ["despesa_os", "anexar_despesa"] as const;
 
 /**
  * Paridade entre a TELA de edição da OS e o assistente.
@@ -60,13 +64,30 @@ export const soOpsTools: ToolDef[] = [
         expense_date: { type: "string", description: "Data ISO (AAAA-MM-DD). Padrão: hoje." },
         supplier_id: { type: "string", description: "Fornecedor, se a despesa veio de um." },
         notes: { type: "string" },
+        mesmo_assim: {
+          type: "boolean",
+          description: "Só quando esta ferramenta avisou de um comprovante (CMP) aberto com o mesmo valor e o dono disse que é OUTRO gasto ('mesmo assim').",
+        },
       },
       required: ["service_order_id", "description", "amount"],
     },
     risk: "low",
     roles: NON_TECHNICIAN_ROLES,
-    async execute(args, { sb }) {
-      const { data, error } = await sb.rpc("so_expense_add", {
+    async execute(args, ctx) {
+      // Comprovantes (F2, 11/10/2026): esta ferramenta grava sem "sim" — a trava contra o dobro
+      // fica aqui, sempre com quem pede. CMP que já lançou a despesa nesta OS: recusa. CMP aberto do
+      // mesmo valor (só com a conversa ligada): o dono completa o CMP (*cmp N*) ou pede de novo
+      // "mesmo assim". O financeiro não vê o CMP do dono, só que existe. Falha da consulta: segue.
+      const cmp = await conferirComprovantes(ctx, {
+        valor: Number(args.amount),
+        data: /^\d{4}-\d{2}-\d{2}$/.test(String(args.expense_date ?? "")) ? String(args.expense_date) : null,
+        osId: args.service_order_id ? String(args.service_order_id) : null,
+        efeitos: EFEITOS_DA_DESPESA_DA_OS,
+      });
+      if (cmp.gravado) return { error: textoDaDespesaJaLancada(cmp.gravado), nada_registrado: true };
+      if (cmp.aberto && args.mesmo_assim !== true) return { error: textoDaDespesaComCmpAberto(cmp.aberto), nada_registrado: true };
+
+      const { data, error } = await ctx.sb.rpc("so_expense_add", {
         p_so_id: args.service_order_id,
         p_category: args.category || "other",
         p_description: args.description,

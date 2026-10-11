@@ -1,6 +1,7 @@
 import type { ClaudeTextBlock } from "./anthropic.ts";
 import { exemplaresParaPrompt } from "./comms/exemplars.ts";
 import { statusOsParaPrompt } from "../service-order-status.ts";
+import { conversaDosComprovantesLigada } from "../comprovantes/modo.ts";
 
 export interface PromptRuntimeCtx {
   userName: string;
@@ -20,6 +21,24 @@ export interface PromptRuntimeCtx {
 // quebrava no CHECK (23514) e o usuário via um erro incompreensível. Agora é gerada da
 // constante única, então o prompt não tem como divergir do banco.
 const STATUS_LABELS_TEXT = statusOsParaPrompt();
+
+/**
+ * Comprovantes (F2, 11/10/2026): as linhas do assistente sobre os CMPs só entram com a conversa
+ * dos comprovantes LIGADA (comprovante_fluxo = 'dono' e comprovante_conversa = 'on'). Com ela
+ * desligada, ou em sombra, a legenda do cupom chega ao assistente como hoje e ele lança o que o dono
+ * pede — nada muda para o dono. Ligar ou desligar invalida o cache do bloco estável uma vez.
+ */
+function linhaDosComprovantes(settings: Record<string, string>): string {
+  if (!conversaDosComprovantesLigada(settings)) return "";
+  return "\n- COMPROVANTES (CMP-00123): foto/PDF de cupom que o dono manda é tratado pelo sistema de comprovantes, que pergunta e grava sozinho. " +
+    "Não lance de novo o que tem CMP; para saber de um comprovante → consultar_comprovantes. Se uma ferramenta avisar de um CMP aberto, diga ao dono para " +
+    "responder *cmp N*. Para cancelar um CMP, oriente o dono a mandar *cancelar cmp N* e o motivo (você não cancela comprovante).";
+}
+
+const LINHAS_DOS_COMPROVANTES_NO_WHATSAPP = `
+- [image]/[document] do dono é do fluxo de comprovantes: não invente o conteúdo. As respostas
+  aos menus de CMP não chegam até você. Se o dono mandar "pendentes", não liste comprovantes
+  (quando há, o sistema já mandou a lista deles antes): responda as pendências gerais, como sempre.`;
 
 /**
  * Bloco ESTÁVEL do system prompt: persona, regras, fluxos, tabela de status,
@@ -238,7 +257,7 @@ Sinal/depósito: recebível com is_deposit=true.
 - Mês passado inteiro ("gasto total de setembro", "quanto entrou em agosto"): gastos_por_categoria com mes/ano (despesa ou receita) ou get_period_summary com mes/ano; get_period_summary sem mes/ano é o mês CORRENTE.
 - ZERO OU VAZIO NÃO É FATO SEM CONFERIR: se uma leitura voltar error, diga que a consulta falhou — nunca "não há gasto", "não há recebimento" ou "não encontrei nada". Se voltar zero para algo que todo mês tem (despesas do mês inteiro, receita do mês), diga que o resultado parece errado e ofereça conferir antes de afirmar.
 - GASTO AVULSO, SEM CADASTRO ("registra o Pix de 493 para a Eliane, alimentação", "paguei 60 em dinheiro na marmita"): NÃO precisa cadastrar ninguém — basta o nome e a CATEGORIA. Pix/transferência que vai chegar do banco → anotar_transacao_do_banco (quem = o nome como está no Pix, categoria); dinheiro → lancar_no_caixa (quem = o nome, categoria). Nunca peça para cadastrar a pessoa antes; se a categoria não estiver clara, pergunte só a categoria.
-- REGRA PARA SEMPRE ("todo pagamento para a Eliane é alimentação"): cadastrar_favorecido com tipo prestador e categoria_padrao = a categoria — os próximos Pix com esse nome entram classificados sozinhos. Pediu as duas coisas (o Pix de hoje e a regra)? Faça as duas.
+- REGRA PARA SEMPRE ("todo pagamento para a Eliane é alimentação"): cadastrar_favorecido com tipo prestador e categoria_padrao = a categoria — os próximos Pix com esse nome entram classificados sozinhos. Pediu as duas coisas (o Pix de hoje e a regra)? Faça as duas.${linhaDosComprovantes(settings)}
 
 ════ FECHAMENTO E INADIMPLÊNCIA ════
 
@@ -543,7 +562,7 @@ PROATIVIDADE:
 - SUGESTÃO POR TELA: se a tela aberta é de uma entidade (o CONTEXTO ATUAL traz cliente/ativo/fornecedor em contexto) e há UMA oportunidade clara e relevante — ativo vencido de revisão, orçamento parado, cobrança vencida, fornecedor com preço melhor — mencione-a de forma BREVE e ofereça o próximo passo concreto. No máximo UMA por conversa; se o dono ignorar, não repita. Nunca contate o cliente por conta própria.`;
 }
 
-function buildVolatileBlock(ctx: PromptRuntimeCtx): string {
+function buildVolatileBlock(ctx: PromptRuntimeCtx, settings: Record<string, string>): string {
   const now = new Date();
   const dateStr = now.toLocaleDateString("pt-BR", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const timeStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo" });
@@ -583,6 +602,8 @@ function buildVolatileBlock(ctx: PromptRuntimeCtx): string {
   da sua resposta, com a instrução certa. Se o dono quiser o envio de outro jeito, chame a
   tool de novo com o formato pedido (é um envio novo): o sistema cancela o pedido anterior
   sozinho e avisa — só vale o último.`;
+    // Comprovantes (F2): só com a conversa ligada — em sombra a legenda do cupom chega até aqui.
+    if (conversaDosComprovantesLigada(settings)) block += LINHAS_DOS_COMPROVANTES_NO_WHATSAPP;
   }
 
   return block;
@@ -609,6 +630,6 @@ export function buildSystemBlocks(settings: Record<string, string>, ctx: PromptR
     // A lição: com prefixo grande, o caro é a GRAVAÇÃO, não a expiração. O caminho para baratear
     // o miss é encolher o prefixo (Fases 1, 2, 4 e 5 do plano), não estender o cache.
     { type: "text", text: buildStableBlock(settings), cache_control: { type: "ephemeral" } },
-    { type: "text", text: buildVolatileBlock(ctx) },
+    { type: "text", text: buildVolatileBlock(ctx, settings) },
   ];
 }

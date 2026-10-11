@@ -1,5 +1,6 @@
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { caixaTools, dataDita, escolherPorNome, formasDoDocumento, resolverPedidoDeCaixa, resumirPedido } from "./caixa.ts";
+import { resumoQueRecusa } from "../agent.ts";
 
 /* O assessor pelo WhatsApp: "gastei 50 em dinheiro com almoço", "paguei 100 pro Roberto".
    O que se fixa aqui é a parte que interpreta a fala — nome, data, sócio, categoria — e o
@@ -420,4 +421,152 @@ Deno.test("dinheiro para quem não está no cadastro: lança com o nome na descr
   // Recebimento continua exigindo o cliente do cadastro.
   const rec = await resolverPedidoDeCaixa(ctx() as never, { sentido: "recebimento", valor: 60, quem: "Fulano Novo", descricao: "x" });
   assertStringIncludes((rec as any).error, "Não achei o cliente");
+});
+
+// ─── Comprovantes (F2, 11/10/2026): o mesmo gasto não entra duas vezes ─────────────────────────
+// O dono manda o cupom (CMP) e depois fala do mesmo gasto ao assistente. CMP GRAVADO com o mesmo
+// tipo de lançamento → recusa de uma linha (resumoQueRecusa); CMP ABERTO → linha de atenção no
+// resumo (só para o admin e com a conversa ligada). Sempre com QUEM PEDE: o resumo do agent.ts
+// recebe o usuário (revisão de 11/10/2026); sem ele, não há consulta. comprovantes_parecidos
+// (admin) e comprovantes_ja_lancados (financeiro, só o booleano) são dublês com a forma da spec.
+
+const sem = (s: unknown) => String(s).replace(/ /g, " ");
+const LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };
+
+function ctxComCmp(
+  respostas: { parecidos?: Record<string, unknown> | Error; jaLancados?: Record<string, unknown> | Error },
+  opcoes: {
+    semUsuario?: boolean; cargo?: string; userId?: string; settings?: Record<string, string>;
+    rpc?: (n: string, a: any) => any;
+  } = {},
+) {
+  const base = ctx(opcoes.rpc);
+  const consultas: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  const doBanco = base.admin as any;
+  const admin = {
+    from: (nome: string) => doBanco.from(nome),
+    rpc(fn: string, args: Record<string, unknown>) {
+      const r = fn === "comprovantes_parecidos" ? respostas.parecidos : fn === "comprovantes_ja_lancados" ? respostas.jaLancados : undefined;
+      if (r === undefined) return Promise.resolve({ data: null, error: { message: `rpc inesperada ${fn}` } });
+      consultas.push({ fn, args });
+      return r instanceof Error ? Promise.reject(r) : Promise.resolve({ data: r, error: null });
+    },
+  };
+  const quem = { userId: opcoes.userId ?? base.userId, userRole: opcoes.cargo ?? "admin", settings: opcoes.settings ?? LIGADA };
+  // Como o agent.ts monta o resumo: o client service-role e quem pede (sem sb).
+  const resumo = opcoes.semUsuario ? { admin } : { admin, ...quem };
+  // Como a tool executa: o ctx inteiro.
+  const execucao = { ...base, admin, ...quem };
+  return { resumo, execucao, consultas };
+}
+
+const GRAVADO_NO_CAIXA = {
+  abertos: [],
+  gravados: [{ codigo: "CMP-00123", numero: 123, valor: "62.00", data: "2026-10-10", os_id: null, efeitos: ["caixa"] }],
+};
+const GRAVADO_ANOTADO = {
+  abertos: [],
+  gravados: [{ codigo: "CMP-00123", numero: 123, valor: "62.00", data: "2026-10-10", os_id: null, efeitos: ["despesa_os", "anotar"] }],
+};
+const ABERTO = {
+  abertos: [{ codigo: "CMP-00124", numero: 124, valor: "62.00", data: "2026-10-10", fornecedor: "Auto Posto Exemplo" }],
+  gravados: [],
+};
+
+Deno.test("CMP gravado no Caixa: o resumo do lancar_no_caixa é UMA linha ⚠️ (vira recusa, não pendência)", async () => {
+  const { resumo, consultas } = ctxComCmp({ parecidos: GRAVADO_NO_CAIXA });
+  const r = await resumirPedido(resumo as never, "lancar_no_caixa", { valor: 62, descricao: "gasolina", data: "10/10/2026", categoria: "peças" });
+  assertEquals(sem(r), "⚠️ Já lançado pelo CMP-00123 (R$ 62,00 em 10/10). Nada foi lançado de novo.");
+  assertEquals(resumoQueRecusa("lancar_no_caixa", String(r))?.nada_registrado, true);
+  assertEquals(consultas[0], { fn: "comprovantes_parecidos", args: { p_valor: 62, p_data: "2026-10-10", p_os: null, p_autor: "u-dono" } });
+});
+
+Deno.test("resumo sem o usuário: nenhuma consulta e nenhuma linha (nunca cai no dono)", async () => {
+  const { resumo, consultas } = ctxComCmp({ parecidos: GRAVADO_NO_CAIXA }, { semUsuario: true });
+  const r = sem(await resumirPedido(resumo as never, "lancar_no_caixa", { valor: 62, descricao: "gasolina", categoria: "peças" }));
+  assertEquals(r.includes("CMP-"), false);
+  assertStringIncludes(r, "Caixa (dinheiro)");
+  assertEquals(consultas.length, 0);
+});
+
+Deno.test("CMP gravado no Caixa não trava o que é de outro tipo: bolso do sócio, recebimento, saque", async () => {
+  const { resumo } = ctxComCmp({ parecidos: GRAVADO_NO_CAIXA });
+  const socio = await resumirPedido(resumo as never, "lancar_no_caixa", { valor: 62, descricao: "peça", categoria: "peças", pago_por: "bolso_do_socio" });
+  assertStringIncludes(String(socio), "reembolso");
+  const { resumo: r2, consultas } = ctxComCmp({ parecidos: GRAVADO_NO_CAIXA });
+  await resumirPedido(r2 as never, "lancar_no_caixa", { sentido: "recebimento", valor: 62, descricao: "x", quem: "MP MOTOR HOMES" });
+  await resumirPedido(r2 as never, "lancar_no_caixa", { sentido: "saque", valor: 62 });
+  assertEquals(consultas.length, 0, "recebimento e saque nem consultam comprovante");
+});
+
+Deno.test("CMP aberto do mesmo valor, conversa ligada: o resumo ganha a linha de atenção (o dono decide)", async () => {
+  const { resumo } = ctxComCmp({ parecidos: ABERTO });
+  const r = sem(await resumirPedido(resumo as never, "lancar_no_caixa", { valor: 62, descricao: "gasolina", categoria: "peças" }));
+  assertStringIncludes(r, "Caixa (dinheiro)");
+  assertStringIncludes(r, "- Atenção: há o CMP-00124 aberto com R$ 62,00 em 10/10. Se for o mesmo gasto, responda *não* e depois *cmp 124*.");
+  assertEquals(resumoQueRecusa("lancar_no_caixa", r), null, "aberto não recusa: é pendência com aviso");
+  const a = sem(await resumirPedido(resumo as never, "anotar_transacao_do_banco", { valor: 62, quem: "Premel", categoria: "peças" }));
+  assertStringIncludes(a, "*cmp 124*");
+});
+
+Deno.test("CMP aberto com a conversa desligada ou em sombra: o resumo sai sem linha nova", async () => {
+  for (const settings of [{}, { comprovante_fluxo: "sombra", comprovante_conversa: "on" }, { comprovante_fluxo: "dono", comprovante_conversa: "off" }] as Array<Record<string, string>>) {
+    const { resumo } = ctxComCmp({ parecidos: ABERTO }, { settings });
+    const r = sem(await resumirPedido(resumo as never, "lancar_no_caixa", { valor: 62, descricao: "gasolina", categoria: "peças" }));
+    assertEquals(r.includes("Atenção"), false, JSON.stringify(settings));
+    assertEquals(r.includes("cmp"), false, JSON.stringify(settings));
+  }
+});
+
+Deno.test("CMP que já anotou o pagamento: o resumo do anotar_transacao_do_banco recusa; entrada não consulta", async () => {
+  const { resumo, consultas } = ctxComCmp({ parecidos: GRAVADO_ANOTADO });
+  const r = await resumirPedido(resumo as never, "anotar_transacao_do_banco", { valor: 62, quem: "Premel", os: "60", data: "10/10/2026" });
+  assertEquals(sem(r), "⚠️ Já lançado pelo CMP-00123 (R$ 62,00 em 10/10). Nada foi lançado de novo.");
+  assertEquals(consultas[0].args.p_os, "os60");
+  const entrada = await resumirPedido(resumo as never, "anotar_transacao_do_banco", { sentido: "entrada", valor: 62, quem: "MP MOTOR HOMES" });
+  assertEquals(String(entrada).startsWith("⚠️"), false);
+  assertEquals(consultas.length, 1);
+});
+
+Deno.test("financeiro: CMP gravado vira recusa SEM código, valor nem data; CMP aberto não aparece", async () => {
+  const fin = { cargo: "financial", userId: "u-fin" };
+  const ja = ctxComCmp({ jaLancados: { ja_lancado: true, aberto: false } }, fin);
+  const r = await resumirPedido(ja.resumo as never, "lancar_no_caixa", { valor: 62, descricao: "gasolina", data: "10/10/2026", categoria: "peças" });
+  assertEquals(r, "⚠️ Esse gasto já foi lançado por um comprovante do dono. Nada foi lançado de novo.");
+  assertEquals(resumoQueRecusa("lancar_no_caixa", String(r))?.nada_registrado, true);
+  assertEquals(ja.consultas, [{
+    fn: "comprovantes_ja_lancados",
+    args: { p_valor: 62, p_data: "2026-10-10", p_os: null, p_efeitos: ["caixa"], p_autor: "u-fin" },
+  }]);
+  const aberto = ctxComCmp({ jaLancados: { ja_lancado: false, aberto: true } }, fin);
+  const r2 = sem(await resumirPedido(aberto.resumo as never, "lancar_no_caixa", { valor: 62, descricao: "gasolina", categoria: "peças" }));
+  assertEquals(r2.includes("Atenção"), false, "o financeiro não vê o CMP aberto do dono");
+  assertEquals(r2.includes("CMP"), false);
+  const exec = await caixaTools.find((t) => t.name === "anotar_transacao_do_banco")!
+    .execute({ valor: 62, quem: "Premel", categoria: "peças" }, ctxComCmp({ jaLancados: { ja_lancado: true, aberto: false } }, fin).execucao as never) as any;
+  assertEquals(exec.error, "Esse gasto já foi lançado por um comprovante do dono. Nada foi lançado de novo.");
+});
+
+Deno.test("execute (defesa): CMP gravado entre o resumo e o 'sim' → recusa sem chamar a rota", async () => {
+  const rotas: string[] = [];
+  const rpc = (n: string) => { rotas.push(n); return Promise.resolve({ data: { ok: true }, error: null }); };
+  const caixa = ctxComCmp({ parecidos: GRAVADO_NO_CAIXA }, { rpc });
+  const r1 = await caixaTools.find((t) => t.name === "lancar_no_caixa")!.execute({ valor: 62, descricao: "gasolina", categoria: "peças" }, caixa.execucao as never) as any;
+  assertEquals(sem(r1.error), "Já lançado pelo CMP-00123 (R$ 62,00 em 10/10). Nada foi lançado de novo.");
+  assertEquals(r1.nada_registrado, true);
+  assertEquals(caixa.consultas[0].args.p_autor, "u-dono", "na execução vale o usuário do ctx");
+  const banco = ctxComCmp({ parecidos: GRAVADO_ANOTADO }, { rpc });
+  const r2 = await caixaTools.find((t) => t.name === "anotar_transacao_do_banco")!.execute({ valor: 62, quem: "Premel", categoria: "peças" }, banco.execucao as never) as any;
+  assertStringIncludes(sem(r2.error), "CMP-00123");
+  assertEquals(rotas, [], "nem lancar_no_caixa nem anotar_transacao foram chamadas");
+});
+
+Deno.test("execute: CMP só aberto, ou consulta que falha, não trava (o 'sim' já foi dado sobre o aviso)", async () => {
+  const rotas: string[] = [];
+  const rpc = (n: string) => { rotas.push(n); return Promise.resolve({ data: { ok: true }, error: null }); };
+  for (const parecidos of [ABERTO, new Error("rede")]) {
+    const { execucao } = ctxComCmp({ parecidos }, { rpc });
+    await caixaTools.find((t) => t.name === "lancar_no_caixa")!.execute({ valor: 62, descricao: "gasolina", categoria: "peças" }, execucao as never);
+  }
+  assertEquals(rotas, ["lancar_no_caixa", "lancar_no_caixa"]);
 });

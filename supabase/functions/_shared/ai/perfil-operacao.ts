@@ -293,6 +293,10 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   "buscar_arquivos_do_barco",
   "consultar_pasta_do_barco",
   "enviar_arquivo_do_dropbox",
+  // — Comprovantes (F2, 11/10/2026): o que o fluxo de comprovantes fez com cada CMP. Só leitura
+  //   (comprovantes_consultar devolve vazio para quem não é admin); o prompt ensina e as travas de
+  //   lançamento em dobro mandam o dono ao *cmp N*. O perfil do admin está no teto: fica na rede. —
+  "consultar_comprovantes",
   // — E-mail (08/10/2026): silenciar um remetente é gesto raro e pede confirmação. —
   "silenciar_remetente_email",
   // — Memória por entidade: as notas APROVADAS já chegam prontas no contexto (ai-agent), então

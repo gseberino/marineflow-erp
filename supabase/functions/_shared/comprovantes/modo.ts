@@ -34,3 +34,18 @@ export async function lerModoDoComprovante(admin: any): Promise<Modo> {
     return "off";
   }
 }
+
+/** "on", " On ", "\"on\"" → true; qualquer outra coisa → false. */
+function chaveLigada(v: unknown): boolean {
+  return typeof v === "string" && v.trim().replace(/^"(.*)"$/, "$1").trim().toLowerCase() === "on";
+}
+
+/**
+ * A conversa dos comprovantes (F2) está ligada? Só com comprovante_fluxo = 'dono' E
+ * comprovante_conversa = 'on' — a mesma regra de _comprovante_conversa_ligada() no banco, lida das
+ * app_settings que o chamador já carregou (nenhuma consulta a mais). Chave ausente = desligada.
+ * Mora aqui (e não no whatsapp-channel.ts) para as tools do assistente usarem sem ciclo de import.
+ */
+export function conversaDosComprovantesLigada(settings: Record<string, unknown> | null | undefined): boolean {
+  return modoDoValor(settings?.comprovante_fluxo) === "dono" && chaveLigada(settings?.comprovante_conversa);
+}

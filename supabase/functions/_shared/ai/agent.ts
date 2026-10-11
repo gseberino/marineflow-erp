@@ -343,7 +343,16 @@ export function resumoQueRecusa(toolName: string, resumo: string): { error: stri
   return { error: t.replace(/^⚠️\s*/, ""), nada_registrado: true };
 }
 
-async function buildPendingSummary(admin: any, toolName: string, args: Record<string, unknown>): Promise<string> {
+/**
+ * `quem` (comprovantes, revisão de 11/10/2026): quem pede o "sim" — a trava contra o dobro do
+ * resumirPedido confere com ELE (o financeiro não vê o CMP do dono; sem usuário, não confere).
+ */
+async function buildPendingSummary(
+  admin: any,
+  toolName: string,
+  args: Record<string, unknown>,
+  quem: Partial<Pick<ToolCtx, "userId" | "userRole" | "settings">> = {},
+): Promise<string> {
   // financeiro (07/10/2026): anotação de Pix, estorno, cobrança e favorecido — o "sim" é sobre o
   // alvo resolvido (qual anotação, qual pagamento, qual cobrança, qual favorecido) e o antes/depois.
   if (toolName in TITULOS_DO_FINANCEIRO) {
@@ -375,7 +384,7 @@ async function buildPendingSummary(admin: any, toolName: string, args: Record<st
   // Caixa ou bolso do sócio) — o "sim" tem de ser sobre o que vai acontecer de fato.
   if (toolName === "lancar_no_caixa" || toolName === "anotar_transacao_do_banco") {
     try {
-      const r = await resumirPedido({ admin } as unknown as ToolCtx, toolName, args);
+      const r = await resumirPedido({ admin, ...quem } as unknown as ToolCtx, toolName, args);
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
   }
@@ -903,7 +912,9 @@ export async function executarChamadaDeTool(
         } catch { /* sem retrato: a execução segue sem comparar */ }
       }
       const limpa = !!solicitante || !!toolDef.retratoDaPendencia;
-      let resumo = await buildPendingSummary(amb.toolCtx.admin, tc.name, limpa ? entrada : tc.input as Record<string, unknown>);
+      let resumo = await buildPendingSummary(amb.toolCtx.admin, tc.name, limpa ? entrada : tc.input as Record<string, unknown>, {
+        userId: amb.toolCtx.userId, userRole: amb.toolCtx.userRole, settings: amb.toolCtx.settings,
+      });
       if (solicitante) {
         resumo += `\nPedido por: *${solicitante.nome || "—"}* (${ROTULO_DO_CARGO[solicitante.cargo] ?? solicitante.cargo})`;
       }
