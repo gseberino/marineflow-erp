@@ -122,8 +122,8 @@ function FinanceiroLegadoOuV2() {
   const [params] = useSearchParams();
   const location = useLocation();
   if (params.get('legacy') === '1') return <FinancialPage />;
-  // Preserva a query (?tab=payables etc.) na travessia para a v2.
-  return <Navigate to={'/v2/financial' + location.search} replace />;
+  // Preserva a query (?tab=payables etc.) e o state na travessia para a v2.
+  return <Navigate to={'/v2/financial' + location.search} replace state={location.state} />;
 }
 
 /**
@@ -132,7 +132,7 @@ function FinanceiroLegadoOuV2() {
  * `?legacy=1` ainda abre a tela antiga — saída de emergência enquanto a
  * transição não termina (o código v1 permanece no repositório).
  */
-function LegadoOuV2({ to, legacy }: { to: string; legacy: ReactNode }) {
+export function LegadoOuV2({ to, legacy }: { to: string; legacy: ReactNode }) {
   const params = useParams();
   const location = useLocation();
   const querLegado = new URLSearchParams(location.search).get('legacy') === '1';
@@ -142,7 +142,9 @@ function LegadoOuV2({ to, legacy }: { to: string; legacy: ReactNode }) {
   if (querLegado) return <>{legacy}</>;
   let path = to;
   for (const [k, v] of Object.entries(params)) path = path.replace(`:${k}`, v ?? '');
-  return <Navigate to={path + location.search} replace />;
+  // O state vai junto: a devolução ao fornecedor (Importar XML) e o "Faturar" da OS chegam à
+  // emissão pelo atalho /fiscal/emissao levando a nota no state — sem ele, a tela abre vazia.
+  return <Navigate to={path + location.search} replace state={location.state} />;
 }
 
 const App = () => (
