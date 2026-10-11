@@ -1,4 +1,4 @@
--- Prova: conciliação dos comprovantes com o extrato (migrations 20261011300000-304000; usa a F1 e a F2).
+-- Prova: conciliação dos comprovantes com o extrato (migrations 20261011300000-304000 e 400000; usa a F1 e a F2).
 --
 --   T1  grants: R1-R10 só service_role; helpers para ninguém; tabelas novas fechadas ao anon
 --   T2  débito único sem nome → verde → "sim" liga: proposta classificada (anotação criada e aplicada,
@@ -41,6 +41,9 @@
 --   (revisão dos ajustes, 11/10/2026)
 --   T27 a aprovação do SIM que o dono desfez no Extrato nunca é refeita sozinha: pendência "classificar no
 --       Extrato"; a nova aprovação do dono é adotada (e o cancelamento do CMP recusa)
+--   (conta sem movimento, 11/10/2026)
+--   T28 a conta parada que sincroniza bem (ok, UPDATED, importada, o Pluggy no banco depois de D+5; D+13 no
+--       cartão) não segura o "quem pagou?"; manual, com erro, OUTDATED, cedo ou não importada, segura
 --
 -- ═══ COMO RODAR ═══ (só com o OK nomeado PF3-2 da spec da F3; também roda no ensaio PGlite da bancada)
 --
@@ -1480,6 +1483,116 @@ begin
    where id in (c4, c6, cx, cs, ct, cp, cb, ca) and situacao = 'aguardando_banco';
 exception when others then
   insert into _resultado values ('T26 regra E: 5 dias sem aparecer = "quem pagou?"; empresa marca; eu, técnico e pessoal regravam; bloqueio não muda nada', false,
+    'erro: ' || sqlstate || ' ' || sqlerrm);
+end $$;
+
+-- ═══ T28: regra E — a conta sem movimento que sincroniza bem não segura o "quem pagou?" (11/10/2026) ═══
+-- O Nubank PJ sincroniza todo dia (ok, UPDATED) sem linha nova desde 18/09: pela regra antiga ele segurava
+-- toda compra, o "quem pagou?" nunca era feito e o CMP virava 'abandonado'. A conexão sã, com o Pluggy indo
+-- ao banco depois de D+5 (D+13 no cartão) e o que ele trouxe já importado, deixa a conta em dia.
+do $$
+declare
+  v_d date := pg_temp._hoje() - 20;
+  v_d6 date := pg_temp._hoje() - 6;
+  v_ini6 timestamptz;
+  v_outras uuid[];
+  v_parada uuid;
+  v_cartao uuid;
+  x public.comprovantes;
+  c6 uuid;
+  x6 public.comprovantes;
+  a_manual boolean; b_sa boolean; c_erro boolean; c_outdated boolean; d_dentro_d5 boolean; f_nao_importada boolean;
+  e_cartao_d7 boolean; e_cartao_d13 boolean; g_doente boolean; g_sa boolean; g_marcou boolean;
+  v_falhas text[];
+begin
+  perform pg_temp._livrar();
+  -- só as contas deste teste contam (as outras ficam inativas só dentro da transação)
+  select coalesce(array_agg(id), '{}'::uuid[]) into v_outras from public.bank_connections where active;
+  update public.bank_connections set active = false where id = any (v_outras);
+  -- a conta PARADA: uma linha antiga perto da compra e nada de D+5 em diante
+  insert into public.bank_connections (provider, external_id, label, account_kind)
+  values ('manual', 'teste-f3-' || gen_random_uuid(), 'Conta Parada F3', 'bank') returning id into v_parada;
+  insert into public.bank_transactions (transaction_date, description, amount, transaction_type, source_type, bank_connection_id)
+  values (v_d - 2, 'LINHA ANTIGA', pg_temp._val(), 'debit', 'bank', v_parada);
+  x.data_confirmada := v_d;
+  v_ini6 := (v_d + 6)::timestamp at time zone 'America/Sao_Paulo';
+  -- (a) sem sincronização (a conexão manual): segura
+  a_manual := public._comprovante_extrato_em_dia(x);
+  -- (b) ok + UPDATED + o Pluggy no banco 1 h depois de D+5 terminar + importado depois: em dia
+  update public.bank_connections set last_sync_status = 'ok', provider_status = 'UPDATED',
+         provider_updated_at = v_ini6 + interval '1 hour', last_synced_at = v_ini6 + interval '65 minutes'
+   where id = v_parada;
+  b_sa := public._comprovante_extrato_em_dia(x);
+  -- (c) a última sincronização deu erro; o item está OUTDATED no Pluggy: segura
+  update public.bank_connections set last_sync_status = 'error' where id = v_parada;
+  c_erro := public._comprovante_extrato_em_dia(x);
+  update public.bank_connections set last_sync_status = 'ok', provider_status = 'OUTDATED' where id = v_parada;
+  c_outdated := public._comprovante_extrato_em_dia(x);
+  -- (d) o Pluggy foi ao banco ainda dentro de D+5: segura
+  update public.bank_connections set provider_status = 'UPDATED', provider_updated_at = v_ini6 - interval '1 minute'
+   where id = v_parada;
+  d_dentro_d5 := public._comprovante_extrato_em_dia(x);
+  -- (f) o que o Pluggy trouxe ainda não foi importado (last_synced_at antes de provider_updated_at): segura
+  update public.bank_connections set provider_updated_at = v_ini6 + interval '1 hour', last_synced_at = v_ini6 + interval '30 minutes'
+   where id = v_parada;
+  f_nao_importada := public._comprovante_extrato_em_dia(x);
+  -- (e) o CARTÃO parado: a sincronização sã em D+7 não basta (a compra do cartão chega dias depois); em D+13, sim
+  update public.bank_connections set active = false where id = v_parada;
+  insert into public.bank_connections (provider, external_id, label, account_kind, last_sync_status, provider_status,
+                                       provider_updated_at, last_synced_at)
+  values ('manual', 'teste-f3-' || gen_random_uuid(), 'Cartão Parado F3', 'credit_card', 'ok', 'UPDATED',
+          ((v_d + 7)::timestamp at time zone 'America/Sao_Paulo') + interval '1 hour',
+          ((v_d + 7)::timestamp at time zone 'America/Sao_Paulo') + interval '65 minutes')
+  returning id into v_cartao;
+  insert into public.bank_transactions (transaction_date, description, amount, transaction_type, source_type, bank_connection_id)
+  values (v_d - 2, 'COMPRA ANTIGA', pg_temp._val(), 'debit', 'credit_card', v_cartao);
+  e_cartao_d7 := public._comprovante_extrato_em_dia(x);
+  update public.bank_connections
+     set provider_updated_at = ((v_d + 13)::timestamp at time zone 'America/Sao_Paulo') + interval '1 hour',
+         last_synced_at = ((v_d + 13)::timestamp at time zone 'America/Sao_Paulo') + interval '65 minutes'
+   where id = v_cartao;
+  e_cartao_d13 := public._comprovante_extrato_em_dia(x);
+  -- (g) de ponta a ponta: o CMP de 6 dias com a conta parada. Com a sincronização em erro, não pergunta; sã
+  -- (o Pluggy foi ao banco hoje), o "quem pagou?" cabe e a varredura o marca
+  update public.bank_connections set active = false where id = v_cartao;
+  update public.bank_connections set active = true, last_sync_status = 'error' where id = v_parada;
+  c6 := (pg_temp._cmp(jsonb_build_object('valor', pg_temp._val(), 'forma', 'debito', 'cnpj', pg_temp._cnpj(), 'data', v_d6))->>'id')::uuid;
+  select * into x6 from public.comprovantes where id = c6;
+  g_doente := public._comprovante_quem_pode(x6);
+  update public.bank_connections set last_sync_status = 'ok', provider_status = 'UPDATED',
+         provider_updated_at = now(), last_synced_at = now()
+   where id = v_parada;
+  g_sa := public._comprovante_quem_pode(x6);
+  perform public.comprovantes_reavaliar_banco('teste', null);
+  select banco_perguntar into g_marcou from public.comprovantes where id = c6;
+  update public.bank_connections set active = false where id = v_parada;
+  update public.bank_connections set active = true where id = any (v_outras);
+
+  select array_agg(nome) into v_falhas from (values
+    ('a_manual_segura', not a_manual),
+    ('b_sa_em_dia', b_sa),
+    ('c_erro_segura', not c_erro),
+    ('c_outdated_segura', not c_outdated),
+    ('d_dentro_de_d5_segura', not d_dentro_d5),
+    ('f_nao_importada_segura', not f_nao_importada),
+    ('e_cartao_d7_segura', not e_cartao_d7),
+    ('e_cartao_d13_em_dia', e_cartao_d13),
+    ('g_doente_nao_pergunta', x6.situacao = 'aguardando_banco' and not g_doente),
+    ('g_sa_pergunta', g_sa and g_marcou)
+  ) as t(nome, ok) where not coalesce(ok, false);
+  insert into _resultado values ('T28 regra E: a conta sem movimento que sincroniza bem (D+6; D+13 no cartão) não segura o "quem pagou?"; manual, erro, OUTDATED, cedo ou não importada, segura',
+    v_falhas is null,
+    coalesce('falhou: ' || array_to_string(v_falhas, ', ') || ' | ', '')
+    || 'manual=' || coalesce(a_manual::text, '-') || ' sa=' || coalesce(b_sa::text, '-') || ' erro=' || coalesce(c_erro::text, '-')
+    || ' outdated=' || coalesce(c_outdated::text, '-') || ' d5=' || coalesce(d_dentro_d5::text, '-')
+    || ' nao_importada=' || coalesce(f_nao_importada::text, '-') || ' cartao_d7=' || coalesce(e_cartao_d7::text, '-')
+    || ' cartao_d13=' || coalesce(e_cartao_d13::text, '-') || ' cmp=' || coalesce(x6.situacao, '-') || '/'
+    || coalesce(g_doente::text, '-') || '/' || coalesce(g_sa::text, '-') || '/' || coalesce(g_marcou::text, '-'));
+  -- tira do caminho do T24 (a varredura de novo não pergunta dele)
+  update public.comprovantes set banco_quem_em = now(), banco_perguntar = false
+   where id = c6 and situacao = 'aguardando_banco';
+exception when others then
+  insert into _resultado values ('T28 regra E: a conta sem movimento que sincroniza bem (D+6; D+13 no cartão) não segura o "quem pagou?"; manual, erro, OUTDATED, cedo ou não importada, segura', false,
     'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
