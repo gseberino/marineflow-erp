@@ -18,11 +18,30 @@ import {
 const APPROVE_WORDS = ["sim", "s", "ok", "confirmar", "1"];
 const REJECT_WORDS = ["não", "nao", "n", "cancelar", "2"];
 
-export type ConfirmationReply = { decision: "approve"; pin?: string } | { decision: "reject" };
+// O que pode vir depois do "sim" sem mudar o pedido ("sim por favor", "sim pode mandar").
+// Só afirmação pura: "sim pode seguir", "sim tá certo", "sim isso mesmo" aprovavam antes e seguem
+// aprovando. Fica de fora o que junta pedido ("e", "tudo", "também"): "sim e manda" é outra coisa.
+const CORTESIA_DO_SIM = new Set([
+  ...APPROVE_WORDS, "por", "favor", "pf", "pfv", "pode", "mandar", "manda", "mande", "enviar", "envia", "envie",
+  "confirmo", "confirmado", "isso", "claro", "obrigado", "obrigada", "obg", "valeu", "vlw", "beleza", "blz",
+  "seguir", "segue", "siga", "fazer", "faz", "faça", "faca", "certo", "correto", "exato", "exatamente", "perfeito",
+  "mesmo", "é", "está", "esta", "tá", "ta", "fechado", "combinado", "ótimo", "otimo", "show",
+]);
+
+export type ConfirmationReply =
+  | { decision: "approve"; pin?: string; textoAMais?: true }
+  | { decision: "reject" };
 
 /**
  * Reconhece uma resposta de confirmação/rejeição, com PIN opcional depois da palavra
  * ("sim 4321"). Retorna null se o texto não parece uma confirmação (segue pro LLM).
+ *
+ * Sim com ajuste junto ("sim mas manda amanhã", "Sim ajuste para 2.000,44") NÃO aprova: até
+ * 11/10/2026 só a 1ª palavra contava e o pedido era executado como estava, perdendo o ajuste.
+ * Sem PIN, devolve null (o modelo refaz o pedido com o ajuste). Com PIN, marca `textoAMais` —
+ * o PIN não pode ir ao modelo, então quem chama responde sem executar. ⚠ "sim," (vírgula colada)
+ * já não é palavra de aprovação e segue ao modelo; se um dia a pontuação da 1ª palavra for
+ * normalizada, esta conferência da sobra tem de ir junto.
  */
 export function parseConfirmationReply(text: string): ConfirmationReply | null {
   const parts = text.trim().toLowerCase().split(/\s+/);
@@ -30,6 +49,10 @@ export function parseConfirmationReply(text: string): ConfirmationReply | null {
   if (APPROVE_WORDS.includes(first)) {
     const pinCandidate = parts[1];
     const pin = pinCandidate && /^\d{3,8}$/.test(pinCandidate) ? pinCandidate : undefined;
+    const sobra = parts.slice(pin ? 2 : 1).join(" ")
+      .replace(/[^\p{L}\p{N}\s]/gu, " ") // pontuação e emoji ("Sim 👍", "por favor!")
+      .split(/\s+/).filter((p) => p && !CORTESIA_DO_SIM.has(p));
+    if (sobra.length > 0) return pin ? { decision: "approve", pin, textoAMais: true } : null;
     return { decision: "approve", pin };
   }
   if (REJECT_WORDS.includes(first)) return { decision: "reject" };

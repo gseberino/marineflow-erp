@@ -153,6 +153,41 @@ Deno.test("parseConfirmationReply: ignora um 2º token que não parece PIN", () 
   assertEquals(parseConfirmationReply("sim por favor"), { decision: "approve", pin: undefined });
 });
 
+// 11/10/2026: só a 1ª palavra contava. "Sim ajuste para 2.000,44" com uma pendência viva aprovava o
+// pedido COMO ESTAVA e o ajuste se perdia (o dono escreve assim: "Sim envie, primeiro de bom dia…").
+Deno.test("parseConfirmationReply: sim com ajuste junto não aprova — vai ao modelo", () => {
+  for (const t of ["sim mas manda amanhã", "Sim ajuste para 2.000,44", "ok troca a data para sexta", "1 mas sem o link", "Sim envie, primeiro de bom dia"]) {
+    assertEquals(parseConfirmationReply(t), null, t);
+  }
+});
+
+Deno.test("parseConfirmationReply: sim com cortesia, emoji ou pontuação solta continua aprovando", () => {
+  for (const t of ["sim por favor", "sim pode mandar", "Sim 👍", "ok obrigado", "sim por favor!"]) {
+    assertEquals(parseConfirmationReply(t), { decision: "approve", pin: undefined }, t);
+  }
+  assertEquals(parseConfirmationReply("sim 4321 por favor"), { decision: "approve", pin: "4321" });
+  // Afirmação pura, que aprovava antes da conferência da sobra, continua aprovando (sem ida ao modelo).
+  for (const t of ["sim pode seguir", "sim pode fazer", "sim tá certo", "sim isso mesmo", "ok fechado", "sim é isso", "Sim perfeito"]) {
+    assertEquals(parseConfirmationReply(t), { decision: "approve", pin: undefined }, t);
+  }
+  // O que junta pedido não é cortesia: vai ao modelo.
+  for (const t of ["sim e manda", "sim pode mandar tudo", "sim faz também o outro"]) {
+    assertEquals(parseConfirmationReply(t), null, t);
+  }
+});
+
+Deno.test("parseConfirmationReply: PIN com ajuste junto é marcado (o PIN não pode ir ao modelo)", () => {
+  assertEquals(parseConfirmationReply("sim 4321 mas manda amanhã"), { decision: "approve", pin: "4321", textoAMais: true });
+});
+
+Deno.test("ai-agent: PIN com ajuste junto é tratado antes de resolveWhatsAppConfirmation", () => {
+  const src = Deno.readTextFileSync(new URL("../../ai-agent/index.ts", import.meta.url));
+  const camada = src.indexOf("const confirmation = parseConfirmationReply(text)");
+  const ajuste = src.indexOf("confirmation.textoAMais", camada);
+  const resolve = src.indexOf("await resolveWhatsAppConfirmation(", camada);
+  assert(ajuste > camada && resolve > ajuste, "textoAMais tem de ser conferido antes de aprovar");
+});
+
 Deno.test("parseConfirmationReply: reconhece rejeição", () => {
   assertEquals(parseConfirmationReply("não"), { decision: "reject" });
   assertEquals(parseConfirmationReply("nao"), { decision: "reject" });

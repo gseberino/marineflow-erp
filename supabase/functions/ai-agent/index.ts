@@ -539,7 +539,17 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   // ---- Camada determinística (custo $0): confirmação de pendência ----
   const confirmation = parseConfirmationReply(text);
   if (metadata.pending_confirm_action_id) {
-    if (confirmation) {
+    if (confirmation?.decision === "approve" && confirmation.textoAMais) {
+      // "sim <PIN> mas manda amanhã" (11/10/2026): aprovar executaria o pedido como está e perderia
+      // o ajuste; mandar ao modelo levaria o PIN junto. Nada é executado e a pendência segue esperando.
+      await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", sessionId);
+      await queueWhatsAppReply(
+        admin,
+        phoneNormalized,
+        "Não executei: veio um ajuste junto da confirmação. Para aprovar como está, mande só *sim* (ou *sim <SEU PIN>*, se o pedido for de alto risco). Para ajustar, escreva o ajuste sem começar por sim/ok, que eu refaço o pedido.",
+      );
+      return jr({ ok: true });
+    } else if (confirmation) {
       // Pendência que veio da conversa anterior (resolveOrCreateWhatsAppSession): aprovar sem
       // PIN a mostra de novo em vez de executar — o "ok" pode ser resposta a outra coisa.
       if (metadata.pendencia_herdada && decidirPendenciaHerdada(confirmation) === "reapresentar") {
