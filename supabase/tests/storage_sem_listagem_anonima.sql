@@ -1,6 +1,13 @@
 -- Prova: ninguém anônimo LISTA os buckets com dado de cliente
 -- (migration 20260927090000_buckets_sem_listagem_anonima).
 --
+-- Desde 11/10/2026 confere também o bucket 'comprovantes' (migration 20261011101000): cupons, notas
+-- e Pix do dono, sem policy nenhuma (só a service role). Nele a parte 1 cobra ZERO para o anônimo,
+-- a parte 1b cobra que NENHUMA regra de storage.objects cite o bucket, de papel nenhum, e a parte 1c
+-- cobra ZERO para o logado comum, o financeiro e o admin (pela API). Antes da 20261011101000 estar
+-- aplicada a parte 1b FALHA (o bucket não existe): rodar só depois dela. A transação segue READ
+-- ONLY: nada de objeto de mentira; com o bucket vazio a 1c avisa por NOTICE.
+--
 -- Ler a regra e concluir que ela funciona é o erro clássico da RLS: basta outra regra
 -- PERMISSIVE do mesmo bucket, criada à mão no painel, para abrir o caminho por OR. Aqui a
 -- prova é olhar com os olhos do anônimo — contando pela tabela e pela própria função de
@@ -50,8 +57,8 @@ declare
   v_n_fotos_os     integer;
   v_n_levantamento integer;
 begin
-  -- ═══ 1. O anônimo não enxerga nada nos quatro buckets ═══════════════════════════
-  foreach v_bucket in array array['signatures', 'expense-receipts', 'service-order-photos', 'whatsapp_status']
+  -- ═══ 1. O anônimo não enxerga nada nos quatro buckets (e no de comprovantes) ═════
+  foreach v_bucket in array array['signatures', 'expense-receipts', 'service-order-photos', 'whatsapp_status', 'comprovantes']
   loop
     select count(*) into v_total from storage.objects where bucket_id = v_bucket;
 
@@ -83,6 +90,43 @@ begin
       raise exception 'FALHOU: regra de leitura para anon/public cita o bucket % (tem % objeto(s) hoje): %', v_bucket, v_total, v_sobra;
     end if;
   end loop;
+
+  -- ═══ 1b. comprovantes: privado e sem regra NENHUMA (só a service role mexe) ═══════
+  if not exists (select 1 from storage.buckets where id = 'comprovantes' and public = false) then
+    raise exception 'FALHOU: o bucket comprovantes não existe ou não é privado';
+  end if;
+  select string_agg(policyname, ', ') into v_sobra
+    from pg_policies
+   where schemaname = 'storage'
+     and position('''comprovantes''' in coalesce(qual, '') || coalesce(with_check, '')) > 0;
+  if v_sobra is not null then
+    raise exception 'FALHOU: regra de storage cita o bucket comprovantes (ele é só da service role): %', v_sobra;
+  end if;
+
+  -- ═══ 1c. comprovantes com os olhos de cada LOGADO: zero para todos ════════════════
+  --   Pela API, nem o financeiro nem o próprio admin leem (o admin vê pelo servidor). Os usuários
+  --   são reais e ativos (cargo de app_users); um uuid fora de app_users faz o técnico. Com o bucket
+  --   vazio (antes da sombra) a contagem não prova nada: o NOTICE avisa e vale a parte 1b.
+  select count(*) into v_total from storage.objects where bucket_id = 'comprovantes';
+  for v_uid in
+    select gen_random_uuid()
+    union all (select u.id from public.app_users u where u.role = 'financial' and u.active order by u.created_at limit 1)
+    union all (select u.id from public.app_users u where u.role = 'admin' and u.active order by u.created_at limit 1)
+  loop
+    perform set_config('request.jwt.claim.sub', v_uid::text, true);
+    perform set_config('request.jwt.claims', json_build_object('sub', v_uid, 'role', 'authenticated')::text, true);
+    set local role authenticated;
+    select count(*) into v_visto from storage.objects where bucket_id = 'comprovantes';
+    select count(*) into v_listagem from storage.search('', 'comprovantes');
+    reset role;
+    if v_visto <> 0 or v_listagem <> 0 then
+      raise exception 'FALHOU: um logado (%) enxerga % objeto(s) e lista % item(ns) em comprovantes (o bucket tem %).',
+        v_uid, v_visto, v_listagem, v_total;
+    end if;
+  end loop;
+  if v_total = 0 then
+    raise notice 'parte 1c: comprovantes está vazio — "nenhum logado enxerga" ficou sem dado; conferido pelo texto na parte 1b';
+  end if;
 
   -- Quanto dado há para a parte 2 conferir por contagem. Onde for zero, a parte 3 confere pelo
   -- texto das regras e a parte 2 avisa por NOTICE.
@@ -289,7 +333,7 @@ select current_user as papel,
        b.id as bucket,
        (select count(*) from storage.objects o where o.bucket_id = b.id) as objetos_visiveis,
        (select count(*) from storage.search('', b.id)) as itens_na_raiz_pela_listagem
-  from (values ('signatures'), ('expense-receipts'), ('service-order-photos'), ('whatsapp_status')) as b(id)
+  from (values ('signatures'), ('expense-receipts'), ('service-order-photos'), ('whatsapp_status'), ('comprovantes')) as b(id)
  order by 3;
 
 rollback;
