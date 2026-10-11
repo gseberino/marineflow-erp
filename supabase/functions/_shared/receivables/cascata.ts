@@ -18,6 +18,7 @@
 // `redistribution.ts`, o mesmo módulo puro que a tela usa.
 
 import { redistribuirRecebiveis } from "./redistribution.ts";
+import { logEdgeError } from "../log-error.ts";
 
 /** Cliente Supabase — `any` de propósito: serve tanto ao `sb` (RLS) quanto ao `admin`. */
 // deno-lint-ignore no-explicit-any
@@ -98,8 +99,13 @@ export async function recalcularOSComCascata(
     // Engolir a falha da trilha é deliberado: o valor JÁ foi gravado, e derrubar a operação
     // aqui deixaria a alteração feita e o chamador achando que falhou — pior que uma linha de
     // auditoria faltando.
+    //
+    // A tabela é audit_log (SINGULAR). Até 11/10/2026 gravava em "audit_logs", que não existe;
+    // como o supabase-js devolve { error } em vez de lançar, o catch nunca via a falha e toda
+    // redistribuição feita pelo agente ficou sem trilha. Por isso o erro é conferido aqui (mesmo
+    // padrão do process-nfe-xml) e vai para app_error_logs, além do console.
     try {
-      await sb.from("audit_logs").insert({
+      const { error: erroTrilha } = await sb.from("audit_log").insert({
         table_name: "receivables",
         record_id: alt.id,
         action: "cascade_update",
@@ -113,6 +119,13 @@ export async function recalcularOSComCascata(
         triggered_by_table: "service_orders",
         triggered_by_id: soId,
       });
+      if (erroTrilha) {
+        console.error("[cascata] trilha de auditoria falhou para o recebível", alt.id, erroTrilha.message);
+        void logEdgeError(sb, {
+          context: "cascata", action: "audit_log",
+          message: `Falha ao gravar audit_log do recebível ${alt.id}: ${erroTrilha.message}`,
+        });
+      }
     } catch (e) {
       console.error("[cascata] trilha de auditoria falhou para o recebível", alt.id, e);
     }
