@@ -74,6 +74,18 @@ Deno.test("consultar_comprovantes: quem não é admin, ou filtro ilegível, não
   assertEquals(chamadas.length, 0);
 });
 
+Deno.test("F3: as situações da conciliação com o extrato estão no enum, na descrição e chegam ao banco", async () => {
+  const situacao = (tool.input_schema as { properties: { situacao: { enum: string[]; description: string } } }).properties.situacao;
+  for (const s of ["aguardando_banco", "conciliado", "abandonado"]) {
+    assertEquals(situacao.enum.includes(s), true, s);
+    assertStringIncludes(situacao.description, `${s} =`);
+    const { c, chamadas } = cliente({ comprovantes_consultar: { data: { itens: [], total: 0 } } });
+    await tool.execute({ situacao: s }, ctxDe(c));
+    assertEquals((chamadas[0].args.p as Record<string, unknown>).situacao, s);
+  }
+  assertStringIncludes(situacao.description, "45 no crédito");
+});
+
 Deno.test("codigoDoCmp e dataDaConsulta: como o dono fala", () => {
   assertEquals(codigoDoCmp("CMP-00124"), "CMP-00124");
   assertEquals(codigoDoCmp("cmp 124"), "CMP-00124");

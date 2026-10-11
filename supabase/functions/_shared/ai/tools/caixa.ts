@@ -339,7 +339,12 @@ export async function conferirComprovantes(
 
 export const EFEITOS_DO_CAIXA = ["caixa"] as const;
 export const EFEITOS_DO_BOLSO_DO_SOCIO = ["reembolso_socio"] as const;
-export const EFEITOS_DA_ANOTACAO = ["anotar", "anexar_anotacao"] as const;
+/**
+ * F3 (11/10/2026): o CMP que liga (ou vai ligar) a linha do banco também já cuida desse dinheiro —
+ * ligar_linha, aguardar_banco (débito/Pix esperando a linha) e aguardar_fatura (crédito esperando o
+ * cartão): o assistente não anota de novo o mesmo pagamento.
+ */
+export const EFEITOS_DA_ANOTACAO = ["anotar", "anexar_anotacao", "ligar_linha", "aguardar_banco", "aguardar_fatura"] as const;
 
 /** A recusa da execução: a mesma frase do resumo, sem o ⚠️ (vira `error` da tool). */
 const recusaDoComprovante = (jaLancado: string) => ({ error: jaLancado.replace(/^⚠️\s*/, ""), nada_registrado: true as const });

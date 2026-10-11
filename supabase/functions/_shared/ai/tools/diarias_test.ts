@@ -477,6 +477,51 @@ Deno.test("acerto: fechar chama a função do banco com quem pediu; a confirmaç
   assertStringIncludes(recusa, "⚠️ Nada a fechar");
 });
 
+// ── F2b: o reembolso do técnico (comprovante pago por ele) nas Diárias (11/10/2026) ──
+
+Deno.test("F2b consultar: o reembolso é a favor dele (com o código do CMP), não pagamento; o total vem à parte dos dias", async () => {
+  const { c } = ctx();
+  const linhas = [
+    { tipo: "dia", data: "2026-10-01", fracao: 1, trabalhado: 300, extras: 0, descontos: 0, os: [] },
+    { tipo: "reembolso", data: "2026-10-05", trabalhado: 62, pago: 0, conta: "CMP-00124", descricao: "Reembolso CMP-00124 · AutoZone", categoria: "Peças e materiais", os: [] },
+    { tipo: "pagamento", data: "2026-10-06", pago: 100, conta: "C6" },
+  ];
+  const conta = { saldo_final: 262, estado: "deve", dias: 1, trabalhado: 300, reembolsos: 62, pago: 100, saldo_anterior: 0, linhas };
+  const comLinhas = { ...c, sb: { rpc: () => Promise.resolve({ data: conta, error: null }) } };
+  const r = await tool("consultar_freelancer").execute({ freelancer: "roberto", periodo: "em_aberto" }, comLinhas as never) as Record<string, any>;
+  assertEquals([r.trabalhado, r.reembolsos, r.pago, r.saldo], [300, 62, 100, 262]);
+  assertEquals(r.ultimos_lancamentos[1], { data: "2026-10-05", tipo: "reembolso", valor: 62, codigo: "CMP-00124", descricao: "Reembolso CMP-00124 · AutoZone" });
+  assertEquals(r.ultimos_lancamentos[2], { data: "2026-10-06", pagamento: 100, de_onde: "C6" });
+  // os extras do período continuam só dos dias
+  assertEquals([r.extras_no_periodo, r.descontos_no_periodo], [0, 0]);
+  // banco de antes da F2b (sem a chave): reembolsos 0
+  const antes = { ...c, sb: { rpc: () => Promise.resolve({ data: { ...conta, reembolsos: undefined, linhas: [] }, error: null }) } };
+  assertEquals((await tool("consultar_freelancer").execute({ freelancer: "roberto" }, antes as never) as Record<string, any>).reembolsos, 0);
+  // todos: só quem tem reembolso ganha a chave
+  const todos = { ...c, sb: { rpc: () => Promise.resolve({ data: { pessoas: [
+    { nome: "Roberto", dias: 1, trabalhado: 300, reembolsos: 62, pago: 100, saldo_final: 262, estado: "deve" },
+    { nome: "Mickael", dias: 2, trabalhado: 260, reembolsos: 0, pago: 260, saldo_final: 0, estado: "quitado" },
+  ] }, error: null }) } };
+  const rt = await tool("consultar_freelancer").execute({}, todos as never) as { pessoas: Array<Record<string, unknown>> };
+  assertEquals(rt.pessoas[0].reembolsos, 62);
+  assertEquals("reembolsos" in rt.pessoas[1], false);
+  assertStringIncludes(tool("consultar_freelancer").description, "reembolsos = despesas da empresa que ele pagou");
+});
+
+Deno.test("F2b acerto: a confirmação diz os reembolsos (antes dos vales) só quando há", async () => {
+  const simular = (reembolsos: number | undefined) => ctx({ simulacao: { data: {
+    de: "2026-09-16", ate: "2026-10-01", dias: 1, trabalhado: 300, saldo_anterior: 0, reembolsos, pago_no_periodo: 100, valor_do_acerto: 262,
+  } } }).c;
+  const com = String(await resumirAcerto(simular(62) as never, { freelancer: "roberto" })).replace(/ /g, " ");
+  assertStringIncludes(com, "1 diária(s) = R$ 300,00 · reembolsos R$ 62,00 · vales já pagos R$ 100,00");
+  assertStringIncludes(com, "*A pagar neste acerto: R$ 262,00*");
+  for (const sem of [0, undefined]) {
+    const txt = String(await resumirAcerto(simular(sem) as never, { freelancer: "roberto" })).replace(/ /g, " ");
+    assertStringIncludes(txt, "1 diária(s) = R$ 300,00 · vales já pagos R$ 100,00");
+    assertEquals(txt.includes("reembolsos"), false);
+  }
+});
+
 Deno.test("acerto: reabrir pede motivo antes da pendência e reabre o último", async () => {
   assertStringIncludes(String(tool("reabrir_acerto_freelancer").preValidar!({ freelancer: "roberto" }, {} as never)?.error), "motivo");
   const { c, chamadas } = ctx();

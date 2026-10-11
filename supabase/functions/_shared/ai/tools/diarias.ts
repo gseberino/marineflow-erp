@@ -604,13 +604,23 @@ async function documentoDoExtrato(ctx: ToolCtx, f: Freelancer, periodo: PeriodoP
   };
 }
 
+/**
+ * A foto do acerto. `reembolsos` (F2b, 11/10/2026): as despesas da empresa que ele pagou do bolso,
+ * com o comprovante (CMP), que entram no acerto a favor dele.
+ */
 type Acerto = { id: string; numero: number; de: string; ate: string; saldo_anterior: number; dias: number; trabalhado: number;
-  pago_no_periodo: number; valor_do_acerto: number; status: string };
+  pago_no_periodo: number; valor_do_acerto: number; status: string; reembolsos?: number };
+
+/** " · reembolsos R$ 62,00" quando há (F2b); vazio sem reembolso (o texto de antes). */
+function reembolsosNoTexto(valor: unknown, separador = " · "): string {
+  const n = Number(valor);
+  return Number.isFinite(n) && n > 0 ? `${separador}reembolsos ${brl.format(n)}` : "";
+}
 
 /** O acerto pedido (pelo número) ou o último fechado da pessoa. */
 async function acertoDe(ctx: ToolCtx, f: Freelancer, numero?: unknown): Promise<Acerto | { error: string }> {
   let q = ctx.admin.from("acertos_diarias")
-    .select("id, numero, de, ate, saldo_anterior, dias, trabalhado, pago_no_periodo, valor_do_acerto, status")
+    .select("id, numero, de, ate, saldo_anterior, dias, trabalhado, pago_no_periodo, valor_do_acerto, status, reembolsos")
     .eq("favorecido_id", f.id);
   const n = numero == null || numero === "" ? null : Number(String(numero).replace(/\D/g, ""));
   q = n ? q.eq("numero", n) : q.eq("status", "fechado").order("ate", { ascending: false }).limit(1);
@@ -619,7 +629,7 @@ async function acertoDe(ctx: ToolCtx, f: Freelancer, numero?: unknown): Promise<
   const a = (data ?? [])[0] as any;
   if (!a) return { error: n ? `Não achei o acerto nº ${n} de ${f.nome}.` : `${f.nome} ainda não tem acerto fechado. Feche com fechar_acerto_freelancer.` };
   return { ...a, saldo_anterior: Number(a.saldo_anterior), dias: Number(a.dias), trabalhado: Number(a.trabalhado),
-    pago_no_periodo: Number(a.pago_no_periodo), valor_do_acerto: Number(a.valor_do_acerto) };
+    pago_no_periodo: Number(a.pago_no_periodo), valor_do_acerto: Number(a.valor_do_acerto), reembolsos: Number(a.reembolsos ?? 0) || 0 };
 }
 
 /** O recibo do acerto: totais da foto; linhas (dias e vales) da conta corrente do mesmo período. */
@@ -632,7 +642,7 @@ async function documentoDoRecibo(ctx: ToolCtx, f: Freelancer, a: Acerto): Promis
     html: montarReciboHtml({ empresa: empresaDosSettings(ctx.settings), freelancer: cad, acerto: a, linhas: conta.linhas ?? [], geradoEm: new Date() }),
     arquivo: limitarNomeDoArquivo(nomeDoArquivo(`recibo-diarias-${n}`, f.nome, { de: a.de, ate: a.ate }, "pdf")),
     legenda: `🧾 Recibo de diárias nº ${n} — ${f.nome}\nPeríodo: ${ddmm(a.de)} a ${ddmm(a.ate)}\n` +
-      `Trabalhado ${brl.format(a.trabalhado)} · vales ${brl.format(a.pago_no_periodo)} · a pagar ${brl.format(a.valor_do_acerto)}` +
+      `Trabalhado ${brl.format(a.trabalhado)}${reembolsosNoTexto(a.reembolsos)} · vales ${brl.format(a.pago_no_periodo)} · a pagar ${brl.format(a.valor_do_acerto)}` +
       (a.status !== "fechado" ? "\n⚠️ Este acerto foi REABERTO." : ""),
     chave: chaveDeEnvio("agente-recibo-diarias", f.id, a.numero, a.status),
   };
@@ -682,6 +692,7 @@ export async function resumirAcerto(ctx: ToolCtx, args: Record<string, unknown>)
   const linhas = [`Fechar acerto de *${f.nome}*: ${ddmm(s.de)} a ${ddmm(s.ate)}`,
     `${String(s.dias).replace(".", ",")} diária(s) = ${brl.format(Number(s.trabalhado))}` +
       (Number(s.saldo_anterior) ? ` · saldo anterior ${brl.format(Number(s.saldo_anterior))}` : "") +
+      reembolsosNoTexto(s.reembolsos) +
       ` · vales já pagos ${brl.format(Number(s.pago_no_periodo))}`,
     `*A pagar neste acerto: ${brl.format(Number(s.valor_do_acerto))}*`,
     `Os dias até ${ddmm(s.ate)} ficam travados (reabrir só pela tela ou pedindo, com motivo).`];
@@ -777,7 +788,9 @@ export const diariasTools: ToolDef[] = [
       "Quanto se deve a um freelancer de diária e o que ele trabalhou e recebeu: 'quanto devo pro Roberto?', 'quantos dias o Mickael " +
       "fez esse mês?', 'o que falta pagar pro João?' (periodo=em_aberto), 'o que ele fez desde o último pagamento?', 'de 14/09 a 27/09' " +
       "(de/ate), 'quanto o Roberto tem de extra este mês?' (extras_no_periodo e descontos_no_periodo, com o freelancer). " +
-      "Sem nome, mostra todos. Só consulta — não grava nada. Para o PDF do extrato, enviar_extrato_freelancer.",
+      "reembolsos = despesas da empresa que ele pagou do bolso, com o comprovante (CMP-00124): somam a favor dele e entram no " +
+      "próximo acerto (para tirar um, o dono cancela o CMP). Sem nome, mostra todos. Só consulta — não grava nada. Para o PDF do " +
+      "extrato, enviar_extrato_freelancer.",
     input_schema: {
       type: "object",
       properties: {
@@ -802,7 +815,10 @@ export const diariasTools: ToolDef[] = [
         const r = await chamar(ctx, "resumo_freelancers", periodo) as Record<string, unknown>;
         if (r && "error" in r) return r;
         const pessoas = ((r?.pessoas ?? []) as any[]).map((x) => ({
-          nome: x.nome, periodo: periodoResolvido(x), dias: Number(x.dias), trabalhado: Number(x.trabalhado), pago: Number(x.pago),
+          nome: x.nome, periodo: periodoResolvido(x), dias: Number(x.dias), trabalhado: Number(x.trabalhado),
+          // F2b: as despesas que ele pagou com comprovante (CMP), a favor dele, à parte dos dias
+          ...(Number(x.reembolsos) > 0 ? { reembolsos: Number(x.reembolsos) } : {}),
+          pago: Number(x.pago),
           ...(Number(x.pago_aguardando_banco) > 0 ? { pago_lancado_a_mao_aguardando_banco: Number(x.pago_aguardando_banco) } : {}),
           saldo: Number(x.saldo_final), situacao: ESTADO[x.estado] ?? x.estado, ultimo_pagamento: x.ultimo_pagamento,
         }));
@@ -813,22 +829,32 @@ export const diariasTools: ToolDef[] = [
       const c = await chamar(ctx, "conta_corrente_freelancer", { p_favorecido_id: f.id, ...periodo }) as Record<string, any>;
       if (c && "error" in c) return c;
       const todas = (c?.linhas ?? []) as any[];
-      const linhas = todas.slice(-15).map((l) => l.tipo === "dia"
-        ? {
-          data: l.data, dia: rotuloDaFracao(Number(l.fracao)), valor: Number(l.trabalhado), os: (l.os ?? []).map((o: any) => o.numero),
-          // Extras e descontos do dia (07/10/2026): "quanto o Roberto tem de extra este mês?".
-          ...(Number(l.extras) > 0 ? { extras: Number(l.extras) } : {}),
-          ...(Number(l.descontos) > 0 ? { descontos: Number(l.descontos) } : {}),
-          ...(l.observacao ? { observacao: l.observacao } : {}),
+      const linhas = todas.slice(-15).map((l) => {
+        if (l.tipo === "dia") {
+          return {
+            data: l.data, dia: rotuloDaFracao(Number(l.fracao)), valor: Number(l.trabalhado), os: (l.os ?? []).map((o: any) => o.numero),
+            // Extras e descontos do dia (07/10/2026): "quanto o Roberto tem de extra este mês?".
+            ...(Number(l.extras) > 0 ? { extras: Number(l.extras) } : {}),
+            ...(Number(l.descontos) > 0 ? { descontos: Number(l.descontos) } : {}),
+            ...(l.observacao ? { observacao: l.observacao } : {}),
+          };
         }
-        : { data: l.data, pagamento: Number(l.pago), de_onde: l.aguardando ? "lançado à mão, aguardando o banco" : l.conta });
+        // F2b (11/10/2026): o reembolso de um comprovante é a favor dele, não pagamento
+        if (l.tipo === "reembolso") {
+          return { data: l.data, tipo: "reembolso", valor: Number(l.trabalhado), codigo: l.conta, descricao: l.descricao };
+        }
+        return { data: l.data, pagamento: Number(l.pago), de_onde: l.aguardando ? "lançado à mão, aguardando o banco" : l.conta };
+      });
       const dias = todas.filter((l) => l.tipo === "dia");
       const soma = (k: string) => Math.round(dias.reduce((s, l) => s + (Number(l[k]) || 0), 0) * 100) / 100;
       return {
         freelancer: f.nome,
         periodo: periodoResolvido(c),
         saldo_antes_do_periodo: Number(c.saldo_anterior),
-        dias: Number(c.dias), trabalhado: Number(c.trabalhado), pago: Number(c.pago),
+        dias: Number(c.dias), trabalhado: Number(c.trabalhado),
+        // F2b: as despesas da empresa que ele pagou (comprovante), que entram no próximo acerto
+        reembolsos: Number(c.reembolsos ?? 0) || 0,
+        pago: Number(c.pago),
         extras_no_periodo: soma("extras"), descontos_no_periodo: soma("descontos"),
         saldo: Number(c.saldo_final), situacao: ESTADO[c.estado] ?? c.estado,
         ultimos_lancamentos: linhas,
@@ -1057,7 +1083,7 @@ export const diariasTools: ToolDef[] = [
       if ("error" in doc) return await falhaDoExtrato(doc.error);
       const primeiro = f.nome.split(" ")[0];
       doc.legenda = `Olá, ${primeiro}! Segue o recibo das suas diárias de ${ddmm(a.de)} a ${ddmm(a.ate)}: ` +
-        `${String(a.dias).replace(".", ",")} diária(s), ${brl.format(a.trabalhado)}; vales já pagos ${brl.format(a.pago_no_periodo)}; ` +
+        `${String(a.dias).replace(".", ",")} diária(s), ${brl.format(a.trabalhado)}${reembolsosNoTexto(a.reembolsos, "; ")}; vales já pagos ${brl.format(a.pago_no_periodo)}; ` +
         `a receber ${brl.format(a.valor_do_acerto)}.\nConfere? Se estiver tudo certo, responda *OK*.`;
       const envio = await mandarPdf(ctx, cad.telefone, doc, CONTEXTO_AO_FREELANCER, `recibo de diárias ao freelancer ${f.nome}`);
       if (!envio.ok) return await falhaDoExtrato(envio.motivo);

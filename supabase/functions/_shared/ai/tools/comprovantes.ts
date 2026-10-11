@@ -24,9 +24,14 @@ const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" 
 /** 'AAAA-MM-DD' → 'dd/mm'. */
 const ddmm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 
-/** As situações de um CMP (CHECK de comprovantes; as da F3 ainda não acontecem). */
-const SITUACOES = [
+/**
+ * As situações de um CMP (CHECK de comprovantes). F3 (11/10/2026): gravado e esperando a linha do
+ * banco (aguardando_banco), ligado a ela (conciliado) ou sem linha depois de 30 dias (45 no
+ * crédito: abandonado).
+ */
+export const SITUACOES = [
   "lido", "falhou", "aguardando_vez", "perguntando", "aguardando_sim", "gravado", "aguardando_xml", "cancelado",
+  "aguardando_banco", "conciliado", "abandonado",
 ];
 
 /** Um CMP parecido com o lançamento pedido (comprovantes_parecidos). */
@@ -264,7 +269,10 @@ export const comprovanteTools: ToolDef[] = [
           type: "string",
           enum: SITUACOES,
           description: "lido/falhou = ainda não conferido; aguardando_vez/perguntando/aguardando_sim = na conversa com o dono; " +
-            "gravado; aguardando_xml = esperando a nota entrar; cancelado.",
+            "gravado; aguardando_xml = esperando a nota entrar; cancelado. Gravados que pagaram pelo banco ou cartão da empresa: " +
+            "aguardando_banco = esperando a linha aparecer no extrato (o sistema pergunta ao dono 'apareceu no extrato, ligo?'); " +
+            "conciliado = ligado à linha do extrato (a linha fica classificada; aprovar continua no Extrato); abandonado = a linha " +
+            "não apareceu em 30 dias (45 no crédito): classificar no Extrato.",
         },
         desde: { type: "string", description: "Data inicial: 'hoje', 'ontem', dd/mm ou AAAA-MM-DD." },
         ate: { type: "string", description: "Data final: 'hoje', 'ontem', dd/mm ou AAAA-MM-DD." },

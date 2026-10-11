@@ -528,6 +528,22 @@ Deno.test("CMP que já anotou o pagamento: o resumo do anotar_transacao_do_banco
   assertEquals(consultas.length, 1);
 });
 
+Deno.test("F3: CMP que liga (ou espera) a linha do banco também trava o anotar_transacao_do_banco; não trava o Caixa", async () => {
+  for (const efeito of ["ligar_linha", "aguardar_banco", "aguardar_fatura"]) {
+    const gravado = { abertos: [], gravados: [{ codigo: "CMP-00124", numero: 124, valor: "62.00", data: "2026-10-10", os_id: null, efeitos: ["despesa_os", efeito] }] };
+    const { resumo } = ctxComCmp({ parecidos: gravado });
+    const r = await resumirPedido(resumo as never, "anotar_transacao_do_banco", { valor: 62, quem: "Premel", categoria: "peças", data: "10/10/2026" });
+    assertEquals(sem(r), "⚠️ Já lançado pelo CMP-00124 (R$ 62,00 em 10/10). Nada foi lançado de novo.", efeito);
+    // o gasto em dinheiro do Caixa é outro dinheiro: segue
+    const caixa = sem(await resumirPedido(resumo as never, "lancar_no_caixa", { valor: 62, descricao: "gasolina", categoria: "peças" }));
+    assertEquals(caixa.startsWith("⚠️"), false, efeito);
+  }
+  // o financeiro: o banco recebe os efeitos novos na lista (sem detalhe do CMP de volta)
+  const fin = ctxComCmp({ jaLancados: { ja_lancado: true, aberto: false } }, { cargo: "financial", userId: "u-fin" });
+  await resumirPedido(fin.resumo as never, "anotar_transacao_do_banco", { valor: 62, quem: "Premel", categoria: "peças", data: "10/10/2026" });
+  assertEquals(fin.consultas[0].args.p_efeitos, ["anotar", "anexar_anotacao", "ligar_linha", "aguardar_banco", "aguardar_fatura"]);
+});
+
 Deno.test("financeiro: CMP gravado vira recusa SEM código, valor nem data; CMP aberto não aparece", async () => {
   const fin = { cargo: "financial", userId: "u-fin" };
   const ja = ctxComCmp({ jaLancados: { ja_lancado: true, aberto: false } }, fin);
