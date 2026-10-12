@@ -31,7 +31,11 @@ export function CategoriesTab() {
     const color = type === 'payable' ? newPayColor : newRecColor;
     if (!name.trim()) return;
     try {
-      await createCat.mutateAsync({ name: name.trim(), type, color });
+      // Nasce num grupo do DRE (a coluna não tem padrão): sem grupo, o lançamento fica fora de
+      // todas as linhas do resultado e não há tela para dar o grupo depois.
+      await createCat.mutateAsync({
+        name: name.trim(), type, color, dre_group: type === 'receivable' ? 'receita' : 'despesa_operacional',
+      });
       if (type === 'payable') { setNewPayName(''); setNewPayColor('#6b7280'); setShowNewPay(false); }
       else { setNewRecName(''); setNewRecColor('#6b7280'); setShowNewRec(false); }
       toast.success(st.newCategory);

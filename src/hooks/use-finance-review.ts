@@ -592,7 +592,9 @@ export function useCriarCategoriaDespesa() {
         .insert({
           name: v.name,
           type: v.type ?? 'payable',
-          dre_group: v.dre_group ?? 'despesa_operacional',
+          // Sem sugestão, o padrão segue o tipo: a de entrada (Caixa › Anotar entrada) em despesa
+          // operacional faria o DRE subtrair o recebimento como despesa.
+          dre_group: v.dre_group ?? (v.type === 'receivable' ? 'receita' : 'despesa_operacional'),
           active: true,
           sort_order: 900,   // no fim da lista: o que é novo ainda não provou seu lugar
         } as never)

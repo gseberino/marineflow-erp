@@ -18,7 +18,7 @@ export function useFinancialCategories(type?: 'payable' | 'receivable') {
 export function useCreateFinancialCategory() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (cat: { name: string; type: 'payable' | 'receivable'; color?: string }) => {
+    mutationFn: async (cat: { name: string; type: 'payable' | 'receivable'; color?: string; dre_group?: string | null }) => {
       const { data, error } = await supabase.from('financial_categories').insert(cat).select().single();
       if (error) throw error;
       return data;
