@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { recalcTotals } from '@/hooks/use-service-orders';
 import { Button } from '@/components/ui/button';
 import { Link2, Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
@@ -63,6 +64,9 @@ function useAddRelated(serviceOrderId?: string) {
         notes: `Costuma acompanhar: ${item.por_causa_de} (${item.juntos} de ${item.de_total})`,
       });
       if (error) throw error;
+      // O total da OS não tem gatilho no banco: sem isto, grand_total, custo das peças e o
+      // recebível ficavam com o valor de antes da peça (o mesmo que o useAddServiceOrderPart faz).
+      await recalcTotals(serviceOrderId!);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['related-materials', serviceOrderId] });
@@ -70,6 +74,8 @@ function useAddRelated(serviceOrderId?: string) {
       // o item entrava no banco e a tela não refletia. Chaves reais:
       qc.invalidateQueries({ queryKey: ['so-parts', serviceOrderId] });
       qc.invalidateQueries({ queryKey: ['service-orders', serviceOrderId] });
+      qc.invalidateQueries({ queryKey: ['pdf-data'] });
+      qc.invalidateQueries({ queryKey: ['receivables'] });
       toast.success('Item lançado. Confira a quantidade.');
     },
     onError: (e: any) => toast.error(e?.message || 'Erro ao lançar'),
