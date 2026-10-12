@@ -89,12 +89,14 @@ export async function ensureCompletionReceivables(
     });
   } else {
     // Sem condição de parcelamento → título único do total (comportamento anterior).
+    // O número já vem com o prefixo ("OS-00075"/"ORÇ-00112"): sem "OS " na frente, que
+    // gravava "OS OS-00075" na descrição do recebível.
     const total = Number(o.grand_total || 0);
     if (total <= 0) return { created: 0, skipped: true };
     toInsert = [{
       service_order_id: o.id,
       client_id: o.client_id,
-      description: `OS ${o.service_order_number}`,
+      description: o.service_order_number,
       issue_date: input.completionDate,
       due_date: format(addDays(base, 30), 'yyyy-MM-dd'),
       amount: total,

@@ -38,13 +38,13 @@ const PRESET_AVISTA = {
  * Um supabase de mentira, com só o que esta função usa. `recebiveis` é o que a consulta de
  * idempotência devolve — é a variável do teste.
  */
-function montarSupabase(recebiveis: unknown[]) {
+function montarSupabase(recebiveis: unknown[], os: Record<string, unknown> = OS) {
   inserted.length = 0;
   fromMock.mockImplementation((tabela: string) => {
     if (tabela === 'service_orders') {
       const q: any = {};
       for (const k of ['select', 'eq']) q[k] = () => q;
-      q.maybeSingle = () => Promise.resolve({ data: OS });
+      q.maybeSingle = () => Promise.resolve({ data: os });
       return q;
     }
     if (tabela === 'payment_condition_presets') {
@@ -88,5 +88,27 @@ describe('recebíveis da OS concluída', () => {
     montarSupabase([]);
     const r = await ensureCompletionReceivables({ serviceOrderId: 'os-1', completionDate: '2026-08-13' });
     expect(r.created).toBe(1);
+  });
+});
+
+describe('descrição do título único (OS sem condição de parcelamento)', () => {
+  // O número já vem com o prefixo ("OS-00075"). Até 11/10/2026 a descrição era
+  // `OS ${número}` e gravava "OS OS-00075" no recebível (1 caso deste código no banco).
+  const SEM_CONDICAO = { ...OS, payment_condition_preset_id: null, custom_payment_installments: null };
+
+  it('é o número da OS, sem "OS " repetido', async () => {
+    montarSupabase([], SEM_CONDICAO);
+    const r = await ensureCompletionReceivables({ serviceOrderId: 'os-1', completionDate: '2026-08-13' });
+    expect(r).toEqual({ created: 1, skipped: false });
+    const titulo = inserted[0] as Record<string, unknown>;
+    expect(titulo.description).toBe('OS-00075');
+    expect(String(titulo.description)).not.toContain('OS OS-');
+    expect(titulo.amount).toBe(500);
+  });
+
+  it('orçamento virado OS mantém o próprio prefixo (ORÇ-)', async () => {
+    montarSupabase([], { ...SEM_CONDICAO, service_order_number: 'ORÇ-00112' });
+    await ensureCompletionReceivables({ serviceOrderId: 'os-1', completionDate: '2026-08-13' });
+    expect((inserted[0] as Record<string, unknown>).description).toBe('ORÇ-00112');
   });
 });

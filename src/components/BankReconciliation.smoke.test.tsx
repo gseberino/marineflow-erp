@@ -11,7 +11,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 import { BankReconciliation } from './BankReconciliation';
 
-const { transacoes, sugestoes } = vi.hoisted(() => {
+const { transacoes, sugestoes, ordens, inseridos } = vi.hoisted(() => {
   const transacoes = [
     {
       id: 'tx-1', transaction_date: '2026-07-27', description: 'PIX RECEBIDO RODRIGO',
@@ -60,20 +60,29 @@ const { transacoes, sugestoes } = vi.hoisted(() => {
     applied: [],
     summary: { pendentes: 2, conciliadas: 0, sugeridas: 1, sem_candidato: 1 },
   };
-  return { transacoes, sugestoes };
+  /** As OS que a busca da conciliação oferece; vazia, salvo no teste que vincula a uma OS. */
+  const ordens: Record<string, unknown>[] = [];
+  /** O que a tela inseriu, por tabela — para conferir a descrição que vai ao banco. */
+  const inseridos: { tabela: string; linha: Record<string, unknown> }[] = [];
+  return { transacoes, sugestoes, ordens, inseridos };
 });
 
 vi.mock('@/integrations/supabase/client', () => {
   const builder: any = {};
-  for (const k of ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'order', 'limit', 'is', 'not', 'update', 'insert']) {
+  let tabela = '';
+  for (const k of ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'order', 'limit', 'is', 'not', 'update']) {
     builder[k] = () => builder;
   }
+  builder.insert = (linha: Record<string, unknown>) => {
+    inseridos.push({ tabela, linha });
+    return builder;
+  };
   builder.single = async () => ({ data: null, error: null });
   builder.maybeSingle = async () => ({ data: null, error: null });
   builder.then = (res: any) => Promise.resolve({ data: [], error: null }).then(res);
   return {
     supabase: {
-      from: () => builder,
+      from: (t: string) => { tabela = t; return builder; },
       rpc: async () => ({ data: {}, error: null }),
       functions: { invoke: async () => ({ data: sugestoes, error: null }) },
     },
@@ -92,7 +101,7 @@ vi.mock('@/hooks/use-financial', () => ({
   useRegisterPayment: () => ({ mutateAsync: async () => ({}) }),
 }));
 
-vi.mock('@/hooks/use-service-orders', () => ({ useServiceOrders: () => ({ data: [] }) }));
+vi.mock('@/hooks/use-service-orders', () => ({ useServiceOrders: () => ({ data: ordens }) }));
 vi.mock('@/hooks/use-reconciliation', async (original) => {
   const real = await original<typeof import('@/hooks/use-reconciliation')>();
   return {
@@ -198,5 +207,33 @@ describe('BankReconciliation — render', () => {
     // Divergência de valor aparece duas vezes de propósito: como motivo da pontuação
     // e como alerta destacado, para que ninguém confirme sem ver a diferença.
     expect(screen.getAllByText(/a mais que o esperado/).length).toBeGreaterThan(0);
+  });
+
+  // O número da OS já vem com o prefixo ("OS-00060"). Até 11/10/2026 a despesa nascia
+  // como "Despesa OS OS-00060"; agora é "Despesa OS-00060", como o "Pagamento OS-…" do
+  // crédito.
+  it('débito vinculado a uma OS grava "Despesa OS-…", sem "OS " repetido', async () => {
+    const user = userEvent.setup();
+    ordens.splice(0, ordens.length, {
+      id: 'so-60', service_order_number: 'OS-00060', status: 'in_progress', grand_total: 900,
+      client_id: 'c1', clients: { name: 'Rodrigo' }, vessels: { name: 'Brisa' },
+    });
+    inseridos.length = 0;
+    try {
+      renderTela();
+      // Depois da análise, o crédito vira "Ver opções" e só a tarifa (débito) segue "Conciliar".
+      await screen.findByText(/Sinal do ORÇ-00070/);
+      await user.click(screen.getByRole('button', { name: /^Conciliar$/ }));
+      await user.click(await screen.findByRole('button', { name: /Vincular a uma OS/ }));
+      expect(await screen.findByText('OS-00060')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /Confirmar Conciliação/ }));
+
+      const despesa = inseridos.find((i) => i.tabela === 'payables');
+      expect(despesa?.linha.description).toBe('Despesa OS-00060');
+      expect(String(despesa?.linha.description)).not.toContain('OS OS-');
+      expect(despesa?.linha.linked_service_order_id).toBe('so-60');
+    } finally {
+      ordens.length = 0;
+    }
   });
 });

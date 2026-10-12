@@ -558,7 +558,9 @@ export function BankReconciliation() {
         }
       } else {
         const { data: pay } = await supabase.from('payables').insert({
-          description: `Despesa OS ${so.service_order_number}`,
+          // O número já traz o prefixo ("OS-00060"): "Despesa OS-00060", como o
+          // "Pagamento OS-00060" do crédito acima — nunca "Despesa OS OS-00060".
+          description: `Despesa ${so.service_order_number}`,
           linked_service_order_id: so.id, amount: Number(bankTx.amount),
           issue_date: bankTx.transaction_date, due_date: bankTx.transaction_date,
           paid_amount: Number(bankTx.amount), balance_amount: 0, status: 'paid',
