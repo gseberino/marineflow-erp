@@ -265,7 +265,7 @@ export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>)
   const base = (p.jornada === "faltou" ? 0 : (p.valorDiaria ?? (atual?.valorDiaria || null) ?? perfil?.valor_diaria ?? 0) * FRACAO[p.jornada]);
   const valor = Math.round((base + extras - descontos) * 100) / 100;
   const linhas = [`Registrar diária: ${quem} · *${ROTULO[p.jornada]}*${p.jornada === "faltou" && !extras ? " (sem diária)" : ` · ${brl.format(valor)}`}` +
-    (p.os.length ? ` · OS ${p.os.map((o) => o.numero).join(", ")}` : "")];
+    (p.os.length ? ` · ${p.os.map((o) => o.numero).join(", ")}` : "")];
   linhas.push(...linhaDoValorDito(p, perfil));
   linhas.push(...linhasDosExtras(p, atual));
   if (p.os.length > 1) linhas.push("O valor do dia se divide em partes iguais entre as OS.");
@@ -292,7 +292,7 @@ async function resumirIntervalo(ctx: ToolCtx, p: PedidoDeDiaria): Promise<string
     `Registrar diária: *${p.freelancer.nome}* · *${ROTULO[p.jornada]}* · ${novos.length} dia(s) de ${diaCurto(primeiro)} a ${diaCurto(ultimo)}` +
       (p.fimDeSemana ? "" : " (só dias úteis)") +
       (p.jornada === "faltou" && !p.extras ? " (sem diária)" : ` · ${brl.format(valor)} cada, ${brl.format(valor * novos.length)} no total`) +
-      (p.os.length ? ` · OS ${p.os.map((o) => o.numero).join(", ")}` : ""),
+      (p.os.length ? ` · ${p.os.map((o) => o.numero).join(", ")}` : ""),
     ...linhaDoValorDito(p, perfil),
     ...linhasDosExtras(p, null),
   ];

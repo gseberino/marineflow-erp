@@ -172,7 +172,9 @@ Deno.test("técnico e vendedor não registram nem consultam", async () => {
 
 Deno.test("a confirmação mostra o dia resolvido, a divisão entre OS e o que já estava lançado", async () => {
   const novo = String(await resumirDiaria(ctx().c as never, { freelancer: "roberto", data: "24/09/2026", jornada: "inteiro", os: "60, 61" })).replace(/ /g, " ");
-  assertStringIncludes(novo, "*Roberto Daniel Rodrigues Correa* · qui 24/09 · *dia inteiro* · R$ 160,00 · OS OS-00060, OS-00061");
+  // O número já vem com o prefixo do banco ("OS-00060"): nada de "OS OS-" (11/10/2026).
+  assertStringIncludes(novo, "*Roberto Daniel Rodrigues Correa* · qui 24/09 · *dia inteiro* · R$ 160,00 · OS-00060, OS-00061");
+  assertEquals(novo.includes("OS OS-"), false);
   assertStringIncludes(novo, "partes iguais");
 
   const corrigir = String(await resumirDiaria(ctx({ diaLancado: true }).c as never, { freelancer: "roberto", data: "24/09/2026", jornada: "inteiro" })).replace(/ /g, " ");
