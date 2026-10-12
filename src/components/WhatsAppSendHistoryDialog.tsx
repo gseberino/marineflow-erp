@@ -27,7 +27,8 @@ export function WhatsAppSendHistoryDialog({ serviceOrderId, serviceOrderNumber, 
         <DialogHeader>
           <DialogTitle>Histórico de envios WhatsApp</DialogTitle>
           <DialogDescription>
-            {serviceOrderNumber ? `OS ${serviceOrderNumber}` : 'Tentativas de envio via WhatsApp'}
+            {/* O número já traz o prefixo ("OS-00060"): sem "OS " na frente. */}
+            {serviceOrderNumber || 'Tentativas de envio via WhatsApp'}
           </DialogDescription>
         </DialogHeader>
 

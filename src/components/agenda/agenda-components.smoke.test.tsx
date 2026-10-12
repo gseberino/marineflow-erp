@@ -162,6 +162,16 @@ describe('componentes da Agenda 2.0 — smoke de render', () => {
     expect(screen.getByText(/as baterias chegam quarta/)).toBeTruthy();
   });
 
+  // O número da OS já vem com o prefixo ("OS-1042"). Até 11/10/2026 o rodapé do fio dizia
+  // "OS OS-1042". O título "OS OS-1042 — aguardando peças" vem do SQL (entity_open_loops) e
+  // fica para o lote do banco.
+  it('OpenLoopsPanel mostra o número da OS no rodapé do fio, sem "OS " repetido', () => {
+    wrap(<OpenLoopsPanel entityType="client" entityId="c-1" />);
+    // Os dois fios da OS-1042 (o do ERP e o da conversa) trazem o número no rodapé.
+    expect(screen.getAllByText('OS-1042').length).toBe(2);
+    expect(screen.queryByText('OS OS-1042')).toBeNull();
+  });
+
   it('ligar mensagem ao CLIENTE pede confirmação antes de salvar', async () => {
     const user = userEvent.setup();
     wrap(<TaskAutomationSettings />);

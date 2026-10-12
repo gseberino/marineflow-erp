@@ -79,7 +79,8 @@ function LinhaFio({ fio }: { fio: OpenLoop }) {
 
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
           {prazo && <span className={fio.atrasado ? 'text-destructive font-medium' : ''}>prazo {prazo}</span>}
-          {fio.service_order_number && <span>OS {fio.service_order_number}</span>}
+          {/* O número já traz o prefixo ("OS-00060"): sem "OS " na frente. */}
+          {fio.service_order_number && <span>{fio.service_order_number}</span>}
         </div>
       </div>
     </div>

@@ -108,6 +108,15 @@ describe('PurchaseOrderDetailV2 — smoke de render', () => {
     expect(screen.getByText('3 de 3')).toBeTruthy();
   });
 
+  // O número da OS já vem com o prefixo ("OS-00013"). Até 11/10/2026 a descrição dizia
+  // "Fornecedor Teste · OS OS-00013".
+  it('a descrição cita a OS pelo número, sem "OS " repetido', () => {
+    poMock.current = ocBase;
+    wrap();
+    expect(screen.getByText('Fornecedor Teste · OS-00013')).toBeTruthy();
+    expect(screen.queryByText(/OS OS-/)).toBeNull();
+  });
+
   it('OC inexistente não quebra a tela', () => {
     poMock.current = null;
     wrap();

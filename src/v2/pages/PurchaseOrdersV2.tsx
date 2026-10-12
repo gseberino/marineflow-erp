@@ -444,7 +444,8 @@ export default function PurchaseOrdersV2() {
                   badge={<StatusChip tone={PO_TONE[po.status]}>{PO_STATUS_LABELS[po.status]}</StatusChip>}
                   title={po.suppliers?.name ?? '—'}
                   lines={[
-                    po.service_orders?.service_order_number ? `OS ${po.service_orders.service_order_number}` : 'Sem OS vinculada',
+                    // O número já traz o prefixo ("OS-00060"): sem "OS " na frente.
+                    po.service_orders?.service_order_number || 'Sem OS vinculada',
                     `${po.expected_date ? format(new Date(po.expected_date), 'dd/MM/yyyy', { locale: ptBR }) + ' · ' : ''}${fmtBRL(po.total_amount ?? 0)}`,
                   ]}
                   onClick={() => navigate(`/v2/purchase-orders/${po.id}`)}

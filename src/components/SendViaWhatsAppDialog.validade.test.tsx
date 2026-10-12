@@ -16,10 +16,12 @@ import { buildHTMLDocument, type PDFData, type PDFDocumentType, type PDFOptions 
 import { ORCAMENTO } from '../../supabase/functions/_shared/pdf/amostras';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from './SendViaWhatsAppDialog';
 
-type Envio = { pdfData: PDFData; pdfOptions: PDFOptions; documentType: PDFDocumentType; mode: string };
+type Envio = { pdfData: PDFData; pdfOptions: PDFOptions; documentType: PDFDocumentType; mode: string; link_title?: string };
 
 const estado = vi.hoisted(() => ({
   enviados: [] as Envio[],
+  /** Os pedidos de texto à IA ("Gerar com IA"), para conferir como a OS é citada. */
+  pedidosAIA: [] as { body: { messages: { content: string }[] } }[],
   pdfData: null as unknown,
   // O padrão da empresa em produção hoje é 3 (app_settings.quote_validity_days).
   ajustes: { quote_validity_days: '3', company_name: 'HBR' } as Record<string, string>,
@@ -49,7 +51,11 @@ vi.mock('@/hooks/use-scheduled-sends', () => ({
 vi.mock('@/integrations/supabase/client', () => {
   const linha = { data: { whatsapp: '5547999990000', phone: null }, error: null };
   const q = { select: () => q, eq: () => q, maybeSingle: async () => linha };
-  return { supabase: { from: () => q, functions: { invoke: async () => ({ data: null, error: null }) } } };
+  const invoke = async (_nome: string, opcoes: { body: { messages: { content: string }[] } }) => {
+    estado.pedidosAIA.push(opcoes);
+    return { data: null, error: null };
+  };
+  return { supabase: { from: () => q, functions: { invoke } } };
 });
 vi.mock('sonner', () => ({ toast: { success: () => {}, error: () => {}, loading: () => 't' } }));
 
@@ -85,6 +91,7 @@ const documentoGerado = (e: Envio) => buildHTMLDocument({ ...e.pdfData, document
 
 beforeEach(() => {
   estado.enviados.length = 0;
+  estado.pedidosAIA.length = 0;
   estado.pdfData = ORCAMENTO; // quote_validity_days: 7, criado às 23h30 de 24/09 (Brasília)
 });
 
@@ -116,5 +123,36 @@ describe('Enviar via WhatsApp — validade no PDF anexado', () => {
     expect(envio.pdfOptions.validity).toEqual({ mode: 'date', date: '2026-10-10', days: 7 });
     expect(documentoGerado(envio)).toContain('Válido até 10/10/2026');
     expect(documentoGerado(envio)).not.toContain('Válido por');
+  });
+});
+
+// O número da OS já vem com o prefixo ("OS-00100"). Até 11/10/2026 o título do diálogo — que
+// também é o título do link que vai ao cliente — dizia "OS OS-00100", e o pedido à IA,
+// "sobre a OS OS-00100".
+describe('Enviar via WhatsApp — número da OS sem "OS " repetido', () => {
+  it('o título do diálogo e o do envio são "OS-00100"', async () => {
+    const envio = await enviarPeloDialogo(osAlvo);
+    expect(screen.getByText('OS-00100')).toBeInTheDocument();
+    expect(screen.queryByText(/OS OS-/)).not.toBeInTheDocument();
+    expect(envio.link_title).toBe('OS-00100');
+  });
+
+  it('o orçamento segue "Orçamento ORÇ-00100"', async () => {
+    const envio = await enviarPeloDialogo(orcamentoAlvo);
+    expect(envio.link_title).toBe('Orçamento ORÇ-00100');
+  });
+
+  it('o pedido de texto à IA cita "a OS-00100", sem "OS OS-"', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <SendViaWhatsAppDialog open onOpenChange={() => {}} target={osAlvo} />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /Gerar com IA/i }));
+    await waitFor(() => expect(estado.pedidosAIA).toHaveLength(1));
+    const pedido = estado.pedidosAIA[0].body.messages[0].content;
+    expect(pedido).toContain('sobre a OS-00100.');
+    expect(pedido).not.toContain('OS OS-');
   });
 });

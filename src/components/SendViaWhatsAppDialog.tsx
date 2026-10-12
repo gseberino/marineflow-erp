@@ -244,7 +244,8 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       const clientName = target.clientName?.split(' ')[0] || 'Cliente';
       const prompt = target.documentType === 'quote'
         ? `Crie uma mensagem curta de WhatsApp muito persuasiva e educada para ${clientName}. Ele tem um orçamento (${target.serviceOrderNumber}) pendente. O objetivo é fechar a venda agora. Ofereça de forma sutil uma facilidade ou prioridade na agenda. Use gatilhos mentais. Não pareça desesperado.`
-        : `Crie uma mensagem de follow-up profissional para ${clientName} sobre a OS ${target.serviceOrderNumber}. Seja prestativo e foque na excelência do serviço.`;
+        // O número já traz o prefixo ("OS-00100"): "sobre a OS-00100", nunca "sobre a OS OS-00100".
+        : `Crie uma mensagem de follow-up profissional para ${clientName} sobre a ${target.serviceOrderNumber}. Seja prestativo e foque na excelência do serviço.`;
 
       const { data, error } = await supabase.functions.invoke('ai-agent', {
         body: {
@@ -328,11 +329,12 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
 
   if (!target) return null;
 
+  // O número da OS já traz o prefixo ("OS-00100"): o título é ele, sem "OS " na frente.
   const titleLabel =
     target.kind === 'service_order'
       ? documentType === 'quote'
         ? `Orçamento ${target.serviceOrderNumber}`
-        : `OS ${target.serviceOrderNumber}`
+        : target.serviceOrderNumber
       : `Cobrança — ${target.description}`;
 
   async function handleSend() {

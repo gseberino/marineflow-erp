@@ -156,7 +156,10 @@ function DependeDeles({ missoes }: { missoes: FollowupMission[] }) {
             id={f.entity_name || (f.entity_type === 'supplier' ? 'Fornecedor' : 'Cliente')}
             badge={f.atrasado ? <StatusChip tone="critical" dot>atrasado</StatusChip> : f.due_at ? <StatusChip tone="neutral">até {fmtData(f.due_at)}</StatusChip> : null}
             title={f.title}
-            lines={[f.detail || f.evidence || (f.service_order_number ? `OS ${f.service_order_number}` : '')].filter(Boolean)}
+            lines={[
+              // O número da OS já traz o prefixo ("OS-00060"): sem "OS " na frente.
+              f.detail || f.evidence || f.service_order_number || '',
+            ].filter(Boolean)}
             severity={f.atrasado ? 'critical' : 'neutral'}
             actions={
               <FollowupMissionButton

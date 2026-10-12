@@ -9,7 +9,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { I18nProvider } from '@/i18n';
 import FollowupMissionsV2 from './FollowupMissionsV2';
 
-const { estado } = vi.hoisted(() => ({ estado: { missoes: [] as any[], ligado: true } }));
+const { estado } = vi.hoisted(() => ({ estado: { missoes: [] as any[], ligado: true, fios: null as any[] | null } }));
 
 vi.mock('@/hooks/use-followup-missions', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/hooks/use-followup-missions')>();
@@ -31,9 +31,10 @@ vi.mock('@/hooks/use-followup-missions', async (importOriginal) => {
 });
 
 // "Depende deles": um fio solto de fornecedor sem missão vira candidato com o botão ao lado.
+// `estado.fios` troca a lista num teste; nulo, vale o fio padrão.
 vi.mock('@/hooks/use-agenda', () => ({
   useOpenLoops: () => ({
-    data: [{
+    data: estado.fios ?? [{
       id: 'loop1', kind: 'entrega', source: 'conversation', title: 'Entrega das baterias LiFePO4',
       detail: 'Vanderlei prometeu para a próxima semana', due_at: '2026-09-22T12:00:00Z', priority: 'high',
       service_order_id: null, service_order_number: null, mentions: 2, evidence: null,
@@ -105,5 +106,25 @@ describe('FollowupMissionsV2 — IA acompanhando', () => {
     await userEvent.click(await screen.findByRole('menuitem', { name: /Encerrar o acompanhamento/ }));
     expect(await screen.findByText('Encerrar o acompanhamento de Vanderlei Andrade?')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Encerrar' })).toBeInTheDocument();
+  });
+
+  // O número da OS já vem com o prefixo ("OS-00060"). Até 11/10/2026 o fio sem detalhe nem
+  // frase mostrava "OS OS-00060".
+  it('fio sem detalhe mostra o número da OS, sem "OS " repetido', () => {
+    estado.missoes = [];
+    estado.fios = [{
+      id: 'loop2', kind: 'entrega', source: 'service_order', title: 'Peça do motor',
+      detail: null, due_at: null, priority: 'normal',
+      service_order_id: 'so-60', service_order_number: 'OS-00060', mentions: 1, evidence: null,
+      opened_at: '2026-09-10T12:00:00Z', last_seen_at: '2026-09-14T12:00:00Z', atrasado: false,
+      direction: 'theirs', entity_type: 'supplier', entity_id: 's2', entity_name: 'Fornecedor X',
+    }];
+    try {
+      renderPainel();
+      expect(screen.getByText('OS-00060')).toBeInTheDocument();
+      expect(screen.queryByText(/OS OS-/)).not.toBeInTheDocument();
+    } finally {
+      estado.fios = null;
+    }
   });
 });

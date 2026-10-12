@@ -149,8 +149,9 @@ export default function PurchaseOrderDetailV2() {
         ]}
         title={po.po_number}
         description={
+          // O número da OS já traz o prefixo ("OS-00060"): sem "OS " na frente.
           [po.suppliers?.name ?? 'Sem fornecedor',
-           po.service_orders?.service_order_number && `OS ${po.service_orders.service_order_number}`]
+           po.service_orders?.service_order_number]
             .filter(Boolean).join(' · ')
         }
         actions={

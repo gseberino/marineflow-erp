@@ -57,7 +57,8 @@ export function ReimbursementsPanel() {
                 <span className="shrink-0 font-semibold tabular-nums">{formatCurrency(Number(exp.amount))}</span>
               </span>
               <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                <span>OS {exp.service_orders?.service_order_number || '—'}</span>
+                {/* O número já traz o prefixo ("OS-00060"): sem "OS " na frente. */}
+                <span>{exp.service_orders?.service_order_number || 'OS —'}</span>
                 <span>·</span>
                 <span>{formatDate(exp.expense_date)}</span>
                 {exp.category && <StatusBadge className="bg-secondary text-secondary-foreground">{exp.category}</StatusBadge>}
