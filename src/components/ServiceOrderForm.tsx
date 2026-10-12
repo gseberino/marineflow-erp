@@ -2189,7 +2189,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         setQuickMarinaName={setQuickMarinaName}
         isOptimizing={isOptimizing}
         optimizeText={optimizeText}
-        onAnalisarDescricao={analisarDescricao}
+        // "Analisar" grava um levantamento e manda abrir a aba Levantamento: some junto com ela.
+        onAnalisarDescricao={roteiroVisivel ? analisarDescricao : undefined}
         analisandoDescricao={analisando}
       />
 
