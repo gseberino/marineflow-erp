@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, ChevronRight, Download, History, Truck } from 'lucide-react';
-import { toast } from 'sonner';
 import { useI18n } from '@/i18n';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
+import { NewQuoteRequestDialog } from '@/components/purchasing/NewQuoteRequestDialog';
+import type { NewQuoteItem } from '@/hooks/use-quote-requests';
 import { PageShell } from '@/v2/components/PageShell';
 import { KPIStat } from '@/v2/components/KPIStat';
 import { StatusChip } from '@/v2/components/StatusChip';
@@ -25,30 +26,52 @@ type SuggestionRow = {
   minimum_stock?: number | null;
   cost_price?: number | null;
   suppliers?: { name?: string } | null;
+  /** Físico − reservado (product_availability). */
+  available: number;
 };
+
+/** Quanto repor: até o dobro do mínimo, o que dá folga sem encalhar estoque (a mesma conta da v1). */
+const suggestedQty = (p: SuggestionRow) => Math.max(1, Number(p.minimum_stock ?? 0) * 2 - p.available);
 
 export default function SmartPurchaseV2() {
   const { formatCurrency } = useI18n();
-  const [generated, setGenerated] = useState(false);
+  const [quoteItems, setQuoteItems] = useState<NewQuoteItem[] | null>(null);
 
-  const { data: suggestions, isLoading } = useQuery({
+  // Os dois consertos da v1 (SmartPurchasePage), que esta tela tinha perdido:
+  // 1. `.filter('stock_quantity','lte','minimum_stock')` compara com o TEXTO 'minimum_stock' (o
+  //    PostgREST não compara coluna com coluna) — a consulta falhava e a tela dizia "Estoque
+  //    saudável!". A comparação é feita aqui.
+  // 2. Vale o DISPONÍVEL (físico − reservado): peça já prometida a uma OS não repõe prateleira.
+  const { data: suggestions, isLoading, error } = useQuery({
     queryKey: ['purchase-suggestions'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('products')
-        .select('*, suppliers!products_supplier_id_fkey(name, contact_name, phone)')
-        .filter('stock_quantity', 'lte', 'minimum_stock')
-        .order('stock_quantity', { ascending: true });
-      if (error) throw error;
-      return data as unknown as SuggestionRow[];
+    queryFn: async (): Promise<SuggestionRow[]> => {
+      const [prodRes, availRes] = await Promise.all([
+        supabase
+          .from('products')
+          .select('*, suppliers!products_supplier_id_fkey(name, contact_name, phone)')
+          .eq('active', true),
+        supabase.from('product_availability').select('id, stock_quantity, reserved_quantity'),
+      ]);
+      if (prodRes.error) throw prodRes.error;
+
+      const availById = new Map<string, number>();
+      for (const a of (availRes.data ?? []) as Array<{ id: string; stock_quantity: number | null; reserved_quantity: number | null }>) {
+        availById.set(a.id, Number(a.stock_quantity ?? 0) - Number(a.reserved_quantity ?? 0));
+      }
+
+      return ((prodRes.data ?? []) as unknown as Omit<SuggestionRow, 'available'>[])
+        .map((p) => ({ ...p, available: availById.get(p.id) ?? Number(p.stock_quantity ?? 0) }))
+        // Sem mínimo definido não há régua de reposição — pedir seria adivinhação.
+        .filter((p) => Number(p.minimum_stock ?? 0) > 0 && p.available <= Number(p.minimum_stock))
+        .sort((a, b) => a.available - b.available);
     },
   });
 
   const rows = suggestions ?? [];
   const stats = {
-    criticalItems: rows.filter((p) => (p.stock_quantity || 0) === 0).length,
+    criticalItems: rows.filter((p) => p.available <= 0).length,
     totalToRestock: rows.length,
-    estimatedCost: rows.reduce((s, p) => s + ((p.minimum_stock || 1) - (p.stock_quantity || 0)) * (p.cost_price || 0), 0),
+    estimatedCost: rows.reduce((s, p) => s + suggestedQty(p) * (Number(p.cost_price) || 0), 0),
   };
 
   const exportCsv = () => {
@@ -57,8 +80,9 @@ export default function SmartPurchaseV2() {
       SKU: s.sku || '',
       Fornecedor: s.suppliers?.name || '',
       'Estoque Atual': s.stock_quantity ?? 0,
+      Disponível: s.available,
       Mínimo: s.minimum_stock ?? 0,
-      Sugestão: Math.max(0, (s.minimum_stock ?? 0) * 2 - (s.stock_quantity ?? 0)),
+      Sugestão: suggestedQty(s),
     }));
     if (!out.length) return;
     const csv = [Object.keys(out[0]).join(','), ...out.map((r) => Object.values(r).map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
@@ -79,16 +103,16 @@ export default function SmartPurchaseV2() {
       ),
     },
     {
-      key: 'stock', header: 'Estoque atual', minWidth: 116, priority: 1, align: 'right',
+      key: 'stock', header: 'Disponível', minWidth: 116, priority: 1, align: 'right',
       render: (p) => (
-        <StatusChip tone={(p.stock_quantity || 0) === 0 ? 'critical' : 'warning'}>
-          {p.stock_quantity || 0} {p.unit || ''}
+        <StatusChip tone={p.available <= 0 ? 'critical' : 'warning'}>
+          {p.available} {p.unit || ''}
         </StatusChip>
       ),
     },
     {
       key: 'suggestion', header: 'Sugestão', minWidth: 96, priority: 1, align: 'right',
-      render: (p) => <span className="font-bold text-primary tabular-nums">+{(p.minimum_stock || 0) - (p.stock_quantity || 0) + 1}</span>,
+      render: (p) => <span className="font-bold text-primary tabular-nums">+{suggestedQty(p)}</span>,
     },
     {
       key: 'supplier', header: 'Fornecedor preferencial', minWidth: 180, priority: 2, detailLabel: 'Fornecedor',
@@ -110,7 +134,7 @@ export default function SmartPurchaseV2() {
         breadcrumb={[{ label: 'Estoque & Compras' }, { label: 'Assistente de Compras' }]}
         title="Assistente de Compras"
         count={stats.totalToRestock}
-        description="Reposição baseada em demanda real e estoque mínimo — selecione itens e gere a lista de compra."
+        description="Reposição pelo estoque disponível e o mínimo de cada produto — selecione itens e abra a cotação."
         actions={
           <Button variant="outline" size="sm" className="gap-1.5" onClick={exportCsv}>
             <Download className="h-4 w-4" /> Exportar CSV
@@ -129,16 +153,25 @@ export default function SmartPurchaseV2() {
           columns={columns}
           selectable
           isLoading={isLoading}
-          emptyMessage="Estoque saudável! Nenhuma reposição necessária no momento."
-          rowClassName={(p) => ((p.stock_quantity || 0) === 0 ? 'bg-destructive/5' : undefined)}
+          // Leitura que falhou não é "estoque saudável": diz que falhou.
+          emptyMessage={error
+            ? `Não deu para ler o estoque: ${(error as Error).message || 'erro desconhecido'}`
+            : 'Estoque saudável! Nenhuma reposição necessária no momento.'}
+          rowClassName={(p) => (p.available <= 0 ? 'bg-destructive/5' : undefined)}
           bulkBar={(keys, clear) => (
             <>
               <span className="font-semibold">{keys.length} item{keys.length > 1 ? 'ns' : ''} para cotação</span>
+              {/* Antes só dava um aviso e dizia "Lista gerada" — nada era criado. Abre a cotação
+                  com os itens escolhidos, como a v1. */}
               <Button
                 size="sm" variant="secondary" className="gap-1"
-                onClick={() => { toast.success(`${keys.length} itens prontos para cotação!`); setGenerated(true); clear(); }}
+                onClick={() => {
+                  setQuoteItems(rows.filter((p) => keys.includes(p.id))
+                    .map((p) => ({ description: p.name, quantity: suggestedQty(p), product_id: p.id })));
+                  clear();
+                }}
               >
-                Gerar lista de compra <ChevronRight className="h-3.5 w-3.5" />
+                Cotar selecionados <ChevronRight className="h-3.5 w-3.5" />
               </Button>
               <button type="button" className="ml-auto text-xs underline-offset-2 hover:underline" onClick={clear}>Cancelar</button>
             </>
@@ -155,12 +188,12 @@ export default function SmartPurchaseV2() {
             O sistema usa o último custo do XML como referência de preço.
           </span>
         </div>
-        {generated && (
-          <p className="text-xs text-muted-foreground">
-            Lista gerada — acompanhe em <span className="font-semibold text-foreground">Ordens de Compra</span>.
-          </p>
-        )}
       </PageShell>
+      <NewQuoteRequestDialog
+        open={quoteItems !== null}
+        onOpenChange={(aberto) => { if (!aberto) setQuoteItems(null); }}
+        prefilledItems={quoteItems ?? undefined}
+      />
     </V2Shell>
   );
 }
