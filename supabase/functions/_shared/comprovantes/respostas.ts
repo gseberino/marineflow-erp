@@ -21,6 +21,12 @@
 // nunca aparece para o cliente); no lugar, o passo "tipo_na_os" (peça ou despesa da OS). O passo
 // "quem_pagou" do PESSOAL é um sim/não ("saiu da conta da empresa?"). O passo "banco_quem" (regra E:
 // 5 dias sem aparecer em conta da empresa) vai à mesma RPC do "banco" e só manda o número da opção.
+//
+// A categoria como dica (11/10/2026 — spec-assistente-opera-cmp.md, B): no "para quê", "combustível",
+// "foi gasolina" ou "trata-se de combustível" é a CATEGORIA, não o destino — vira { tipo: "categoria" },
+// que o edge grava pelo comando corrigir (nunca vai ao comprovante_responder) e repergunta o destino
+// com o mesmo menu. "combustível da empresa" é destino e categoria juntos. "gasolina do Brisa" segue
+// sendo o nome do barco. "corrigir cmp N …" com o número dito vai sempre ao fluxo.
 import { dataEmSaoPaulo } from "../dropbox/nucleo.ts";
 import { lerNumero, lerSimNao, normalizarResposta, type Opcao } from "../whatsapp/pergunta-ativa.ts";
 
@@ -39,8 +45,14 @@ export type Interpretacao =
   | { tipo: "valor"; valor: string }
   | { tipo: "data"; data: string }
   | { tipo: "os"; numero: number }
-  | { tipo: "palavra"; valor: Palavra }
-  | { tipo: "nome"; texto: string };
+  /** `categoria` (B, 11/10/2026): "combustível da empresa" — o edge responde a palavra e grava a categoria pelo comando. */
+  | { tipo: "palavra"; valor: Palavra; categoria?: string }
+  | { tipo: "nome"; texto: string }
+  /**
+   * B (11/10/2026): só a categoria, no "para quê" ("combustível", "foi gasolina"). SÓ do edge: vira o
+   * comando corrigir categoria e NUNCA vai ao comprovante_responder (o banco não conhece este tipo).
+   */
+  | { tipo: "categoria"; categoria: string };
 
 export type Passo =
   | "valor" | "para_que" | "qual_os" | "mesma_compra" | "como_pagou" | "quem_pagou" | "qual_tecnico" | "tipo_na_os" | "categoria"
@@ -399,6 +411,68 @@ export function pareceConversa(original: string, t: string): boolean {
   return VERBOS_DE_PEDIDO.has(primeira) && !["sim", "nao", "ok", "isso", "e", "eh", "o", "a", "esse", "essa", "este", "esta"].includes(primeira);
 }
 
+// ---------------------------------------------------------------------------------------------
+// A categoria como dica (B, 11/10/2026)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * A palavra do dono (normalizada) → o nome da categoria no banco (financial_categories, tipo
+ * payable, ativas — conferidas em produção em 11/10/2026). O banco acha pelo nome exato.
+ */
+export const CATEGORIA_DA_PALAVRA: Record<string, string> = Object.fromEntries([
+  ["Combustível e deslocamento", ["combustivel", "gasolina", "diesel", "etanol", "abastecimento", "abasteci", "deslocamento", "uber", "taxi"]],
+  ["Alimentação de campo", ["alimentacao", "almoco", "janta", "jantar", "lanche", "refeicao", "marmita"]],
+  ["Pedágio e estacionamento", ["pedagio", "estacionamento"]],
+  ["Ferramentas e equipamentos", ["ferramenta", "ferramentas"]],
+  ["Frete e importação", ["frete"]],
+  ["Hospedagem e Hotelaria", ["hotel", "hospedagem", "pousada"]],
+].flatMap(([nome, palavras]) => (palavras as string[]).map((p) => [p, nome as string])));
+
+/** As palavras que só ligam a frase da dica ("foi", "trata-se de", "é do cupom"…), além do enchimento. */
+const LIGACAO_DA_DICA = new Set([
+  ...ENCHIMENTO, "foi", "e", "de", "do", "da", "com", "gasto", "compra", "trata", "se", "era", "esse", "essa", "isso", "cupom", "nota",
+]);
+
+/** O destino que pode vir junto da categoria ("combustível da empresa"). */
+const DESTINO_DA_DICA: Record<string, "empresa"> = { empresa: "empresa", adm: "empresa", administrativo: "empresa" };
+
+/**
+ * A palavra solta do dono ("combustível", "Almoço") ou o nome da categoria ("Pedágio e
+ * estacionamento") → o nome da categoria no banco; senão a frase curta de dica ("foi gasolina");
+ * null = não é uma das da tabela (quem chama manda o texto cru: o banco procura pelo nome).
+ */
+export function categoriaDaPalavra(texto: unknown): string | null {
+  const t = normalizarResposta(String(texto ?? ""));
+  if (!t) return null;
+  if (CATEGORIA_DA_PALAVRA[t]) return CATEGORIA_DA_PALAVRA[t];
+  const pelo = Object.values(CATEGORIA_DA_PALAVRA).find((nome) => normalizarResposta(nome) === t);
+  if (pelo) return pelo;
+  // no campo da categoria, "combustível da empresa" ainda é combustível (o destino vem por outro campo)
+  return dicaDeCategoria(String(texto ?? ""), t)?.categoria ?? null;
+}
+
+/**
+ * A frase do dono é só a categoria (e, talvez, a empresa)? "combustível", "foi gasolina", "é almoço",
+ * "trata-se de combustível" → a categoria; "combustível da empresa" → a categoria e o destino empresa.
+ * Só vale quando TODA palavra é da tabela, de ligação ou de destino, sem "?", sem dígito, sem cara de
+ * pedido, até 8 palavras e com exatamente UMA categoria. "gasolina do Brisa" (Brisa não é ligação) e
+ * "combustível e almoço" (duas) não são dica: seguem o caminho de sempre.
+ */
+export function dicaDeCategoria(original: string, t: string): { categoria: string; destino: "empresa" | null } | null {
+  if (!t || /\?/.test(original) || /\d/.test(t) || pareceConversa(original, t)) return null;
+  const palavras = t.replace(/[,;:()]/g, " ").split(/[\s-]+/).filter(Boolean);
+  if (palavras.length === 0 || palavras.length > 8) return null;
+  const categorias = new Set<string>();
+  let destino: "empresa" | null = null;
+  for (const p of palavras) {
+    const categoria = CATEGORIA_DA_PALAVRA[p];
+    if (categoria) categorias.add(categoria);
+    else if (DESTINO_DA_DICA[p]) destino = DESTINO_DA_DICA[p];
+    else if (!LIGACAO_DA_DICA.has(p)) return null;
+  }
+  return categorias.size === 1 ? { categoria: [...categorias][0], destino } : null;
+}
+
 /**
  * Nome (barco, cliente, técnico, categoria): sem o enchimento ("do", "barco", "o"…), 3 a 60 letras,
  * até 3 palavras, sem "?" e sem começar por verbo de pedido ("manda o orçamento do Brisa", "saldo
@@ -626,6 +700,14 @@ export function interpretarResposta(
       }
       const pelo = opcaoPeloRotulo(t, menu) ?? opcaoPeloRotulo(t2, menu);
       if (pelo !== null) return { tipo: "opcao", n: pelo };
+      if (passo === "para_que") {
+        // B (11/10/2026): "combustível" / "foi gasolina" é a categoria (o destino é reperguntado);
+        // "combustível da empresa", os dois juntos
+        const dica = dicaDeCategoria(original, t);
+        if (dica) {
+          return dica.destino ? { tipo: "palavra", valor: dica.destino, categoria: dica.categoria } : { tipo: "categoria", categoria: dica.categoria };
+        }
+      }
       if (passo === "para_que" && !pareceConversa(original, t)) {
         const chave = chaveUnica("para_que", t);
         if (chave) return { tipo: "palavra", valor: chave };
@@ -664,6 +746,15 @@ export function interpretarResposta(
       if (comRotulo !== null) return { tipo: "opcao", n: comRotulo };
       const pelo = opcaoPeloRotulo(t, menu) ?? opcaoPeloRotulo(t2, menu);
       if (pelo !== null) return { tipo: "opcao", n: pelo };
+      if (passo === "categoria") {
+        // B.4 (11/10/2026): "gasolina" acha "Combustível e deslocamento" — a opção do menu com esse
+        // nome; fora do menu (ex.: Frete), o nome exato (o banco acha pelo nome)
+        const dica = dicaDeCategoria(original, t);
+        if (dica) {
+          const o = menu.find((x) => x.valor === dica.categoria);
+          return o ? { tipo: "opcao", n: o.n } : { tipo: "nome", texto: dica.categoria };
+        }
+      }
       const nome = lerNome(original, t, passo === "categoria" ? 5 : 3);
       return nome ? { tipo: "nome", texto: nome } : null;
     }
@@ -743,11 +834,17 @@ export type Comando =
 
 export type ClasseDoComando = "pendentes" | "comprovante" | "contexto";
 
-/** "pendentes" = o comando pendentes; "comprovante" = cmp N / cancelar / feito / lote antigo; "contexto" = corrigir / pular / sair / cancelar esse. */
+/**
+ * "pendentes" = o comando pendentes; "comprovante" = cmp N / cancelar / feito / lote antigo e o corrigir
+ * COM o número do CMP; "contexto" = corrigir sem o número / pular / sair / cancelar esse.
+ * B.5 (11/10/2026): "corrigir cmp 1 valor 235,97" sem pergunta aberta ia ao assistente (todo corrigir
+ * era "contexto"); com o número dito, o alvo é inequívoco e vai sempre ao fluxo.
+ */
 export function classeDoComando(c: Comando | null): ClasseDoComando | null {
   if (!c) return null;
   if (c.comando === "pendentes") return "pendentes";
   if (c.comando === "cmp" || c.comando === "cancelar" || c.comando === "feito" || c.comando === "lote_antigo") return "comprovante";
+  if (c.comando === "corrigir" && typeof c.cmp === "number" && c.cmp > 0) return "comprovante";
   return "contexto";
 }
 

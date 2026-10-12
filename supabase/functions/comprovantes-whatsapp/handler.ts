@@ -5,14 +5,16 @@
 //   - com x-cron-secret → verificarCronSecret; aceita só entrega, vigiar e repescar
 //     (o gatilho de ai_jobs, o pg_cron comprovantes-vigia e a repescagem com OK);
 //   - sem ele → chamadaInterna (Bearer service role); aceita só receber, responder, pendentes,
-//     desempatar (o whatsapp-webhook) e retomar (o ai-agent, quando a pendência que tirou a pergunta
-//     de um CMP foi respondida).
+//     desempatar (o whatsapp-webhook), retomar (o ai-agent, quando a pendência que tirou a pergunta
+//     de um CMP foi respondida) e completar (o ai-agent e o erp-mcp, pela tool completar_comprovante:
+//     o que o dono disse em conversa sobre um CMP ainda não gravado — 11/10/2026).
 import { ORIGEM_PADRAO } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { chamadaInterna } from "../_shared/porta.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
 import {
   codigoDoErro,
+  completar,
   type DependenciasDoFluxo,
   desempatar,
   entregar,
@@ -36,7 +38,7 @@ function jr(body: unknown, status = 200): Response {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACOES_DO_CRON = ["entrega", "vigiar", "repescar"];
-const ACOES_INTERNAS = ["receber", "responder", "pendentes", "desempatar", "retomar"];
+const ACOES_INTERNAS = ["receber", "responder", "pendentes", "desempatar", "retomar", "completar"];
 
 /** `montarDeps` só é chamado DEPOIS da porta: requisição recusada não cria cliente nem toca o banco. */
 export function criarHandler(montarDeps: () => DependenciasDoFluxo): (req: Request) => Promise<Response> {
@@ -72,6 +74,10 @@ export function criarHandler(montarDeps: () => DependenciasDoFluxo): (req: Reque
       if (acao === "pendentes") return jr(await pendentes(corpo, deps));
       if (acao === "desempatar") return jr(await desempatar(corpo, deps));
       if (acao === "retomar") return jr(await retomar(corpo, deps));
+      if (acao === "completar") {
+        const r = await completar(corpo, deps);
+        return jr(r.corpo, r.status);
+      }
       if (acao === "entrega") {
         if (typeof corpo.job_id !== "string" || !UUID.test(corpo.job_id)) return jr({ ok: false, erro: "job_id_invalido" }, 400);
         const r = await entregar(corpo.job_id, deps);

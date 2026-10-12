@@ -148,3 +148,17 @@ Deno.test("F2: entrada inválida no responder = 422 sem tocar o banco; pendentes
   assertEquals(await t.json(), { perguntou: false });
   assertEquals(m.rpcs.length, 0);
 });
+
+// ─── o assistente opera o CMP (11/10/2026): a ação completar ─────────────────────────────
+
+Deno.test("completar: só pela porta interna (a tool completar_comprovante); o cron e a chave anônima não alcançam", async () => {
+  const m = montador();
+  assertEquals((await m.handler(post({ acao: "completar" }, { "x-cron-secret": "segredo-do-cron-de-teste" }))).status, 400);
+  assertEquals((await m.handler(post({ acao: "completar" }, { Authorization: "Bearer chave-anonima-publica" }))).status, 401);
+  assertEquals(m.montou(), 0);
+  // pela porta interna a ação existe: entrada inválida = 422, sem tocar o banco
+  const r = await m.handler(post({ acao: "completar", phone: "1", autor: "x", cmp: 1 }, { Authorization: "Bearer chave-de-servico-de-teste" }));
+  assertEquals(r.status, 422);
+  assertEquals(await r.json(), { ok: false, motivo: "entrada_invalida", aplicados: [], ignorados: [], enviada: false });
+  assertEquals(m.rpcs.length, 0);
+});

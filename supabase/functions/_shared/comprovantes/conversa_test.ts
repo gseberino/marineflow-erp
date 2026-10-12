@@ -48,6 +48,10 @@ import {
   textoNaoEntendi,
   textoQualCmp,
   textoRetomadaInterrompida,
+  comAPergunta,
+  textoDaCategoriaAnotada,
+  textoDoAnotadoNaConversa,
+  textosDosItensAnotados,
 } from "./conversa.ts";
 
 const OS = { id: "os-1", numero: "OS-00112", barco: "Brisa", cliente: "João", status: "in_progress", faturada: false, assinada: false, pasta_registrada: true };
@@ -943,4 +947,71 @@ Deno.test("F3: nenhum texto passa de 4096, nenhum tem emoji nem CPF; nenhum fala
     assertEquals(/\d{3}\.?\d{3}\.?\d{3}-?\d{2}/.test(s), false, "sem CPF");
     assertEquals(/cobr|falta aprovar/i.test(s), false, s.slice(0, 120));
   }
+});
+
+// ─── o assistente opera o CMP (11/10/2026 — spec-assistente-opera-cmp.md, A e B) ────────────
+
+Deno.test("A: textoDoAnotadoNaConversa — o caso real (categoria, valor com o do comprovante, motivo) e o 'Não usei'", () => {
+  const itens = [
+    { campo: "categoria", valor: "Combustível e deslocamento" },
+    { campo: "valor", valor: "235.97", lido: "204.87" },
+  ];
+  assertEquals(
+    semNbsp(textoDoAnotadoNaConversa("CMP-00001", itens, "cupom sem o gasto complementar de R$ 31,10; vale o valor do cartão", "OS-00999 (não achei essa OS)")),
+    "CMP-00001: anotei o que você disse na conversa: categoria Combustível e deslocamento, valor R$ 235,97 (no comprovante: R$ 204,87). " +
+      "Motivo: cupom sem o gasto complementar de R$ 31,10; vale o valor do cartão. Não usei: OS-00999 (não achei essa OS).",
+  );
+  // cada item como o dono lê
+  assertEquals(textosDosItensAnotados([
+    { campo: "data", valor: "2026-10-10" }, { campo: "os", valor: "OS-00112" }, { campo: "para", valor: "estoque" },
+    { campo: "para", valor: "insumo" }, { campo: "para", valor: "empresa" }, { campo: "para", valor: "pessoal" },
+    { campo: "forma", valor: "credito" }, { campo: "forma", valor: "dinheiro" }, { campo: "forma", valor: "transferencia" },
+    { campo: "quem_pagou", valor: "empresa" }, { campo: "quem_pagou", valor: "socio" }, { campo: "quem_pagou", valor: "tecnico", nome: "Roberto" },
+    { campo: "quem_pagou", valor: "cliente" }, { campo: "tipo_na_os", valor: "despesa" }, { campo: "tipo_na_os", valor: "peca" },
+    { campo: "valor", valor: "62.00", lido: "62.00" },
+  ]), [
+    "data 10/10", "para a OS-00112", "para o estoque", "para insumo", "para a empresa (sem OS)", "pessoal", "no crédito", "em dinheiro",
+    "na transferência", "pago pela empresa", "pago por você (reembolso)", "pago pelo técnico Roberto", "o cliente pagou direto",
+    "despesa da OS (custo interno)", "peça da OS", "valor R$ 62,00",
+  ]);
+  // o motivo vai numa linha só e cortado em 120; sem nada anotado, diz isso
+  const longo = textoDoAnotadoNaConversa("CMP-00001", itens, `linha 1\nlinha 2 ${"x".repeat(300)}`, null);
+  assertEquals(longo.includes("\n"), false);
+  const motivo = /Motivo: (.*)$/.exec(longo)?.[1] ?? "";
+  assert(motivo.length <= 121, `${motivo.length}`);
+  assertEquals(textoDoAnotadoNaConversa("CMP-00001", [], null, null), "CMP-00001: o que você disse na conversa já estava anotado.");
+  // nada anotado e algo para o passo dele (quem pagou, peça ou despesa): nunca "já estava anotado"
+  assertEquals(textoDoAnotadoNaConversa("CMP-00001", [], null, null, true),
+    "CMP-00001: o que você disse na conversa eu pergunto na sequência, um passo por vez.");
+  assertEquals(textoDoAnotadoNaConversa("CMP-00001", [], null, "técnico Zé (não achei esse técnico)"),
+    "CMP-00001: não anotei nada do que você disse na conversa. Não usei: técnico Zé (não achei esse técnico).");
+  // com a pergunta: sem emoji, até 4096
+  const p = pergunta("para_que", { opcoes: [{ n: 1, rotulo: "OS-00112 · Brisa", valor: "os:1" }, { n: 2, rotulo: "Empresa (sem OS)", valor: "empresa" }] });
+  const msg = comAPergunta(textoDoAnotadoNaConversa("CMP-00124", itens, "y".repeat(500), "z".repeat(500)), p);
+  assert(msg.length <= MAX_MENSAGEM);
+  assertEquals(/\p{Extended_Pictographic}/u.test(msg), false);
+  assertStringIncludes(msg, "\n\nCMP-00124 (1 de 4) · cupom NFC-e");
+  assert(comAPergunta("x".repeat(5000), p).length <= MAX_MENSAGEM);
+});
+
+Deno.test("A: o resumo mostra o valor do comprovante quando o gravado é outro (o do cartão, o corrigir valor)", () => {
+  const linhaDoValor = (c: Partial<CmpResumo>) => semNbsp(textoDoResumo(pergunta("confirmar", { plano: { efeitos: [] } }, c)).split("\n")[1]);
+  assertEquals(linhaDoValor({ valor: "235.97", valor_lido: "204.87" }), "• R$ 235,97 (no comprovante: R$ 204,87) em 10/10 às 12h57 · Auto Posto Exemplo");
+  // igual (ou diferença de centavo de arredondamento): nada a mais
+  assertEquals(linhaDoValor({ valor: "62.00", valor_lido: "62.00" }), "• R$ 62,00 em 10/10 às 12h57 · Auto Posto Exemplo");
+  assertEquals(linhaDoValor({ valor: "62.01", valor_lido: "62.00" }), "• R$ 62,01 em 10/10 às 12h57 · Auto Posto Exemplo");
+  // sem leitura: nada a comparar
+  assertEquals(linhaDoValor({ valor: "70.00", valor_lido: null, valor_confianca: "alta" }), "• R$ 70,00 em 10/10 às 12h57 · Auto Posto Exemplo");
+});
+
+Deno.test("B: textoDaCategoriaAnotada — no 'para quê' repergunta o destino; nos outros passos, só a linha", () => {
+  assertEquals(textoDaCategoriaAnotada("Combustível e deslocamento", "para_que"),
+    "Categoria anotada: Combustível e deslocamento. Foi para qual OS ou para a empresa?");
+  assertEquals(textoDaCategoriaAnotada("Combustível e deslocamento", "como_pagou"), "Categoria anotada: Combustível e deslocamento.");
+  assertEquals(textoDaCategoriaAnotada("", null), "Categoria anotada.");
+  // a mensagem: a linha, uma linha em branco e a pergunta inteira com o MESMO menu
+  const p = pergunta("para_que", { opcoes: [{ n: 1, rotulo: "OS-00112 · Brisa", valor: "os:1" }, { n: 2, rotulo: "Empresa (sem OS)", valor: "empresa" }] });
+  const msg = comAPergunta(textoDaCategoriaAnotada("Combustível e deslocamento", p.passo), p);
+  assert(msg.startsWith("Categoria anotada: Combustível e deslocamento. Foi para qual OS ou para a empresa?\n\nCMP-00124"));
+  assertStringIncludes(msg, "Para quê?\n1 OS-00112 · Brisa\n2 Empresa (sem OS)\nResponda o número, o nome do barco ou *os N*.");
 });

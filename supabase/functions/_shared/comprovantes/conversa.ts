@@ -646,6 +646,19 @@ export function textosDosAvisos(avisos: string[], c: CmpResumo, efeitos: Efeito[
   return [...new Set(avisos)].map((a) => mapa[a]).filter((x): x is string => Boolean(x));
 }
 
+/**
+ * " (no comprovante: R$ 204,87)" quando o valor que vai ser gravado difere do lido em mais de 0,01 (o
+ * dono corrigiu: o do cartão, com o gasto complementar). Sem isso, o resumo escondia o lido
+ * (11/10/2026, spec-assistente-opera-cmp.md 2.2.4).
+ */
+function valorDoComprovante(valor: string | number | null | undefined, lido: string | number | null | undefined): string {
+  if (valor == null || lido == null || valor === "" || lido === "") return "";
+  const [v, l] = [Number(valor), Number(lido)];
+  if (!Number.isFinite(v) || !Number.isFinite(l) || Math.abs(v - l) <= 0.01) return "";
+  const reais = formatarReais(l);
+  return reais ? ` (no comprovante: ${reais})` : "";
+}
+
 /** "em 10/10 às 12h57" — e, quando a leitura não trouxe a data, que é o dia do envio. */
 function quandoNoResumo(c: CmpResumo): string {
   const quando = diaMes(c.data) ?? "data a confirmar";
@@ -665,7 +678,7 @@ export function textoDoResumo(p: PerguntaDoBanco): string {
   const confira = valorSemConferir(c) && formatarReais(c.valor ?? c.valor_lido ?? null) ? " (confira)" : "";
   const partes = [
     `${c.codigo} · confira antes de gravar:`,
-    `• ${valor}${confira} ${quandoNoResumo(c)}${fornecedor ? ` · ${fornecedor}` : ""}`,
+    `• ${valor}${confira}${valorDoComprovante(c.valor, c.valor_lido)} ${quandoNoResumo(c)}${fornecedor ? ` · ${fornecedor}` : ""}`,
     `• Para: ${destinoNoResumo(c, !c.mesma_compra)}`,
   ];
   const pago = pagoNoResumo(c);
@@ -1025,6 +1038,108 @@ export function textoCorrigido(codigo: string, corrigido: { campo?: string; valo
   else if (corrigido.campo === "data") valor = diaMes(String(v ?? "")) ?? valor;
   else if (corrigido.campo === "forma") valor = FORMA_TEXTO[valor] ?? valor;
   return `${codigo}: ${CAMPO_NO_TEXTO[corrigido.campo] ?? corrigido.campo} corrigid${corrigido.campo === "data" || corrigido.campo === "forma" || corrigido.campo === "os" || corrigido.campo === "categoria" ? "a" : "o"} para ${valor}.`;
+}
+
+/**
+ * B (11/10/2026): a categoria dita no "para quê" ("combustível") foi anotada; no "para quê" o destino
+ * é reperguntado com o MESMO menu (a pergunta inteira vem depois desta linha). Neutro em gênero.
+ */
+export function textoDaCategoriaAnotada(categoria: string, passo: string | null | undefined): string {
+  const nome = String(categoria ?? "").replace(/[\n\r]+/g, " ").trim().slice(0, 80);
+  const base = nome ? `Categoria anotada: ${nome}.` : "Categoria anotada.";
+  return passo === "para_que" ? `${base} Foi para qual OS ou para a empresa?` : base;
+}
+
+/**
+ * Um campo que o assistente passou ao fluxo (completar_comprovante, A de 11/10/2026) e que ficou
+ * anotado no CMP: `valor` é o que o banco gravou (o número da OS, o nome da categoria…); `lido` é o
+ * valor do comprovante (no item do valor); `nome`, o técnico (quem pagou).
+ */
+export type ItemAnotado = { campo: string; valor: string | null; lido?: string | null; nome?: string | null };
+
+const DESTINO_ANOTADO: Record<string, string> = {
+  estoque: "para o estoque", insumo: "para insumo", empresa: "para a empresa (sem OS)", pessoal: "pessoal",
+};
+const QUEM_PAGOU_ANOTADO: Record<string, string> = {
+  empresa: "pago pela empresa", socio: "pago por você (reembolso)", cliente: "o cliente pagou direto",
+};
+
+function textoDoItemAnotado(i: ItemAnotado): string | null {
+  const v = String(i.valor ?? "");
+  switch (i.campo) {
+    case "valor": {
+      const reais = formatarReais(v);
+      return reais ? `valor ${reais}${valorDoComprovante(v, i.lido)}` : null;
+    }
+    case "data": {
+      const dia = diaMes(v);
+      return dia ? `data ${dia}` : null;
+    }
+    case "os":
+      return v ? `para a ${v}` : null;
+    case "para":
+      return DESTINO_ANOTADO[v] ?? null;
+    case "categoria":
+      return v ? `categoria ${v}` : null;
+    case "forma":
+      if (!FORMA_TEXTO[v]) return null;
+      return v === "dinheiro" ? "em dinheiro" : v === "transferencia" ? `na ${FORMA_TEXTO[v]}` : `no ${FORMA_TEXTO[v]}`;
+    case "quem_pagou":
+      if (v === "tecnico") return i.nome ? `pago pelo técnico ${String(i.nome).replace(/[\n\r]+/g, " ").slice(0, 60)}` : "pago por um técnico";
+      return QUEM_PAGOU_ANOTADO[v] ?? null;
+    case "tipo_na_os":
+      return v === "despesa" ? "despesa da OS (custo interno)" : v === "peca" ? "peça da OS" : null;
+    default:
+      return null;
+  }
+}
+
+/** Os itens anotados como o dono lê ("categoria Combustível e deslocamento", "valor R$ 235,97 (no comprovante: R$ 204,87)"). */
+export function textosDosItensAnotados(itens: ItemAnotado[]): string[] {
+  return itens.map(textoDoItemAnotado).filter((x): x is string => Boolean(x));
+}
+
+/** Texto do dono numa linha só: sem quebra, espaços juntos, cortado em `max` (com "…"). */
+function umaLinha(s: string | null | undefined, max: number): string {
+  const t = String(s ?? "").replace(/[\n\r\t]+/g, " ").replace(/\s+/g, " ").trim();
+  return t.length <= max ? t : `${t.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * A linha que vai ANTES da pergunta do fluxo quando o assistente completou o CMP com o que o dono
+ * disse em conversa (A, 11/10/2026): o que foi anotado, o motivo do valor diferente (até 120
+ * caracteres, só ao dono — nunca ao log) e o que não foi usado. Uma linha, sem emoji.
+ * `ficouParaDepois`: veio algo que o fluxo só usa no passo dele (quem pagou, peça ou despesa…) e o
+ * passo não chegou — sem nada anotado, "já estava anotado" seria mentira (o fluxo vai perguntar).
+ */
+export function textoDoAnotadoNaConversa(
+  codigo: string,
+  itens: ItemAnotado[],
+  observacao: string | null | undefined,
+  naoUsado: string | null | undefined,
+  ficouParaDepois = false,
+): string {
+  const partes = textosDosItensAnotados(itens);
+  const frases = [
+    partes.length
+      ? `${codigo}: anotei o que você disse na conversa: ${partes.join(", ")}.`
+      : naoUsado
+      ? `${codigo}: não anotei nada do que você disse na conversa.`
+      : ficouParaDepois
+      ? `${codigo}: o que você disse na conversa eu pergunto na sequência, um passo por vez.`
+      : `${codigo}: o que você disse na conversa já estava anotado.`,
+  ];
+  const motivo = umaLinha(observacao, 120);
+  if (motivo) frases.push(`Motivo: ${motivo}${/[.!…]$/.test(motivo) ? "" : "."}`);
+  const nao = umaLinha(naoUsado, 160);
+  if (nao) frases.push(`Não usei: ${nao}${/[.!…]$/.test(nao) ? "" : "."}`);
+  return frases.join(" ");
+}
+
+/** Uma linha antes (o "anotei", a categoria anotada) e a pergunta inteira, numa mensagem só (até 4096). */
+export function comAPergunta(antes: string | null | undefined, pergunta: PerguntaDoBanco): string {
+  const corpo = textoDaPergunta(pergunta);
+  return cortar(antes ? `${antes}\n\n${corpo}` : corpo);
 }
 
 /** O texto solto depois da foto virou dica do CMP que está chegando. */

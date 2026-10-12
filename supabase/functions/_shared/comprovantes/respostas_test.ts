@@ -2,7 +2,10 @@
 // (digitadas e transcritas do áudio pelo Whisper, com "🎤", maiúscula e ponto final) e os comandos.
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
+  CATEGORIA_DA_PALAVRA,
+  categoriaDaPalavra,
   classeDoComando,
+  dicaDeCategoria,
   ehPassoDoExtrato,
   type Interpretacao,
   interpretarResposta,
@@ -544,4 +547,106 @@ Deno.test("pareceDica e respostaNaoEntendida: o texto solto depois da foto e a m
   for (const t of ["quanto ficou a OS 123?", "manda o orçamento do Brisa pro cliente amanhã cedo", "bom dia", "?"]) {
     assertEquals(respostaNaoEntendida(t), false, t);
   }
+});
+
+// ─── B (11/10/2026): a categoria como dica no "para quê" ─────────────────────────────────────
+
+const dica = (t: string) => dicaDeCategoria(t, normalizarResposta(t));
+
+Deno.test("B: a tabela de palavras aponta só para os nomes de categoria que existem no banco", () => {
+  // conferidas em produção (financial_categories, payable, ativas) em 11/10/2026
+  const nomes = new Set(Object.values(CATEGORIA_DA_PALAVRA));
+  assertEquals([...nomes].sort(), [
+    "Alimentação de campo", "Combustível e deslocamento", "Ferramentas e equipamentos", "Frete e importação",
+    "Hospedagem e Hotelaria", "Pedágio e estacionamento",
+  ]);
+  for (const p of ["combustivel", "gasolina", "diesel", "etanol", "abastecimento", "abasteci", "deslocamento", "uber", "taxi"]) {
+    assertEquals(CATEGORIA_DA_PALAVRA[p], "Combustível e deslocamento", p);
+  }
+  for (const p of ["alimentacao", "almoco", "janta", "jantar", "lanche", "refeicao", "marmita"]) {
+    assertEquals(CATEGORIA_DA_PALAVRA[p], "Alimentação de campo", p);
+  }
+  assertEquals(CATEGORIA_DA_PALAVRA.pedagio, "Pedágio e estacionamento");
+  assertEquals(CATEGORIA_DA_PALAVRA.ferramentas, "Ferramentas e equipamentos");
+  assertEquals(CATEGORIA_DA_PALAVRA.frete, "Frete e importação");
+  assertEquals(CATEGORIA_DA_PALAVRA.pousada, "Hospedagem e Hotelaria");
+});
+
+Deno.test("B: dicaDeCategoria — só a categoria, a categoria com a empresa, e o que não é dica", () => {
+  for (const t of ["combustível", "Combustível", "🎤 Combustível.", "foi gasolina", "é almoço", "trata-se de combustível", "Trata-se de combustível.", "gasto de pedágio", "foi gasolina e diesel"]) {
+    const d = dica(t);
+    assertEquals(d?.destino, null, t);
+    assertEquals(typeof d?.categoria, "string", t);
+  }
+  assertEquals(dica("trata-se de combustível"), { categoria: "Combustível e deslocamento", destino: null });
+  assertEquals(dica("é almoço"), { categoria: "Alimentação de campo", destino: null });
+  assertEquals(dica("combustível da empresa"), { categoria: "Combustível e deslocamento", destino: "empresa" });
+  assertEquals(dica("almoço adm"), { categoria: "Alimentação de campo", destino: "empresa" });
+  for (const t of [
+    "gasolina do Brisa", // Brisa não é ligação: segue para o nome do barco
+    "combustível e almoço", // duas categorias
+    "combustível 235", // dígito
+    "combustível?", // pergunta
+    "lança combustível", // pedido
+    "empresa", // sem categoria
+    "O cupom saiu sem o gasto complementar, de 30 reais, no cartão a transação saiu correta, 235,97. Trata-se de combustível",
+    "foi gasolina do posto do lado da marina ontem de manhã bem cedo", // mais de 8 palavras
+  ]) {
+    assertEquals(dica(t), null, t);
+  }
+});
+
+Deno.test("B: categoriaDaPalavra — a palavra, o nome da categoria, a frase curta; o resto é null", () => {
+  assertEquals(categoriaDaPalavra("combustível"), "Combustível e deslocamento");
+  assertEquals(categoriaDaPalavra("Almoço"), "Alimentação de campo");
+  assertEquals(categoriaDaPalavra("Pedágio e estacionamento"), "Pedágio e estacionamento");
+  assertEquals(categoriaDaPalavra("foi gasolina"), "Combustível e deslocamento");
+  assertEquals(categoriaDaPalavra("combustível da empresa"), "Combustível e deslocamento");
+  assertEquals(categoriaDaPalavra("Outras despesas"), null); // fora da tabela: o banco acha pelo nome
+  assertEquals(categoriaDaPalavra(""), null);
+  assertEquals(categoriaDaPalavra(null), null);
+});
+
+Deno.test("B: no 'para quê', a categoria é dica (não vai ao banco como resposta); 'gasolina do Brisa' segue sendo o barco", () => {
+  tabela("para_que", MENU_PARA_QUE, [
+    ["combustível", { tipo: "categoria", categoria: "Combustível e deslocamento" }],
+    ["🎤 Foi gasolina.", { tipo: "categoria", categoria: "Combustível e deslocamento" }],
+    ["trata-se de combustível", { tipo: "categoria", categoria: "Combustível e deslocamento" }],
+    ["é almoço", { tipo: "categoria", categoria: "Alimentação de campo" }],
+    ["combustível da empresa", { tipo: "palavra", valor: "empresa", categoria: "Combustível e deslocamento" }],
+    // sem regressão
+    ["gasolina do Brisa", { tipo: "nome", texto: "gasolina do brisa" }],
+    ["empresa", { tipo: "palavra", valor: "empresa" }],
+    ["é da empresa", { tipo: "palavra", valor: "empresa" }],
+    ["Brisa", { tipo: "nome", texto: "brisa" }],
+    ["4", { tipo: "opcao", n: 4 }],
+    ["combustível e almoço", { tipo: "nome", texto: "combustivel e almoco" }],
+    ["quanto ficou a OS 123?", null],
+  ]);
+  // no "qual OS" a palavra não é categoria (o menu ali é só de OS)
+  assertEquals(i("qual_os", "combustível", MENU_PARA_QUE.slice(0, 3)), { tipo: "nome", texto: "combustivel" });
+});
+
+Deno.test("B.4: no passo categoria, a palavra acha a opção do menu; fora do menu, o nome exato", () => {
+  tabela("categoria", [], [
+    ["gasolina", { tipo: "opcao", n: 1 }], // 1 = Combustível e deslocamento (MENU_CATEGORIA)
+    ["foi almoço", { tipo: "opcao", n: 2 }],
+    ["pedágio", { tipo: "opcao", n: 3 }],
+    ["frete", { tipo: "nome", texto: "Frete e importação" }], // não está no menu: o nome exato
+    ["material de limpeza", { tipo: "nome", texto: "material de limpeza" }], // sem regressão
+  ]);
+  const doBanco: Opcao[] = [
+    { n: 1, rotulo: "Materiais e Insumos Operacionais", valor: "Materiais e Insumos Operacionais" },
+    { n: 2, rotulo: "Combustível e deslocamento", valor: "Combustível e deslocamento" },
+  ];
+  assertEquals(i("categoria", "combustível", doBanco), { tipo: "opcao", n: 2 });
+});
+
+Deno.test("B.5: 'corrigir cmp N …' com o número vai sempre ao fluxo; sem o número segue 'contexto'", () => {
+  assertEquals(classeDoComando(lerComando("corrigir cmp 1 valor 235,97", AGORA)), "comprovante");
+  assertEquals(lerComando("corrigir cmp 1 valor 235,97", AGORA), { comando: "corrigir", campo: "valor", valor: "235.97", cmp: 1 });
+  assertEquals(classeDoComando(lerComando("corrigir CMP-00001 categoria combustível", AGORA)), "comprovante");
+  assertEquals(classeDoComando(lerComando("corrigir valor 235,97", AGORA)), "contexto");
+  assertEquals(classeDoComando(lerComando("corrigir", AGORA)), "contexto");
+  assertEquals(classeDoComando(lerComando("corrigir valor", AGORA)), "contexto");
 });
