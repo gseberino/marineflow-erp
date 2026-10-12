@@ -42,26 +42,43 @@ export default function SmartPurchaseV2() {
   //    PostgREST não compara coluna com coluna) — a consulta falhava e a tela dizia "Estoque
   //    saudável!". A comparação é feita aqui.
   // 2. Vale o DISPONÍVEL (físico − reservado): peça já prometida a uma OS não repõe prateleira.
+  //
+  // E o de 11/10/2026: a tela lia TODOS os produtos ativos e TODO o product_availability e só
+  // então filtrava no navegador. O PostgREST corta em 1000 linhas sem avisar, e o erro do
+  // disponível era ignorado — o cálculo caía no físico e esquecia a reserva. Agora o mínimo
+  // é filtrado no servidor, o disponível vem só dos produtos que vieram, e erro é erro.
   const { data: suggestions, isLoading, error } = useQuery({
     queryKey: ['purchase-suggestions'],
     queryFn: async (): Promise<SuggestionRow[]> => {
-      const [prodRes, availRes] = await Promise.all([
-        supabase
-          .from('products')
-          .select('*, suppliers!products_supplier_id_fkey(name, contact_name, phone)')
-          .eq('active', true),
-        supabase.from('product_availability').select('id, stock_quantity, reserved_quantity'),
-      ]);
-      if (prodRes.error) throw prodRes.error;
+      // Sem mínimo definido não há régua de reposição — pedir seria adivinhação.
+      const { data: comMinimo, error: prodErr } = await supabase
+        .from('products')
+        .select('*, suppliers!products_supplier_id_fkey(name, contact_name, phone)')
+        .eq('active', true)
+        .gt('minimum_stock', 0);
+      if (prodErr) throw prodErr;
+
+      const produtos = (comMinimo ?? []) as unknown as Omit<SuggestionRow, 'available'>[];
+      if (produtos.length === 0) return [];
 
       const availById = new Map<string, number>();
-      for (const a of (availRes.data ?? []) as Array<{ id: string; stock_quantity: number | null; reserved_quantity: number | null }>) {
-        availById.set(a.id, Number(a.stock_quantity ?? 0) - Number(a.reserved_quantity ?? 0));
+      const ids = produtos.map((p) => p.id);
+      // Fatiado porque a lista de ids vai na URL.
+      for (let i = 0; i < ids.length; i += 200) {
+        const lote = ids.slice(i, i + 200);
+        const { data, error: availErr } = await supabase
+          .from('product_availability')
+          .select('id, stock_quantity, reserved_quantity')
+          .in('id', lote);
+        if (availErr) throw availErr;
+        for (const a of (data ?? []) as Array<{ id: string; stock_quantity: number | null; reserved_quantity: number | null }>) {
+          availById.set(a.id, Number(a.stock_quantity ?? 0) - Number(a.reserved_quantity ?? 0));
+        }
       }
 
-      return ((prodRes.data ?? []) as unknown as Omit<SuggestionRow, 'available'>[])
+      return produtos
         .map((p) => ({ ...p, available: availById.get(p.id) ?? Number(p.stock_quantity ?? 0) }))
-        // Sem mínimo definido não há régua de reposição — pedir seria adivinhação.
+        // Coluna com coluna fica aqui: o PostgREST não compara as duas.
         .filter((p) => Number(p.minimum_stock ?? 0) > 0 && p.available <= Number(p.minimum_stock))
         .sort((a, b) => a.available - b.available);
     },

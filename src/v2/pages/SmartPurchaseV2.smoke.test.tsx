@@ -10,7 +10,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 import SmartPurchaseV2 from './SmartPurchaseV2';
 
-const estado = vi.hoisted(() => ({ falhar: false }));
+const estado = vi.hoisted(() => ({
+  falhar: false,
+  falharDisponivel: false,
+  /** Os filtros que a tela pediu ao servidor, em ordem: ['gt', coluna, valor] / ['in', coluna, ids]. */
+  pedidos: [] as unknown[][],
+  /** Troca o catálogo num teste; nulo, vale `produtos`. */
+  catalogo: null as Array<Record<string, unknown>> | null,
+}));
 
 const produtos = [
   // disponível 2 − 1 reservado = 1, abaixo do mínimo 3: repõe até o dobro → 6 − 1 = 5
@@ -23,16 +30,34 @@ const produtos = [
     cost_price: 1, active: true, suppliers: null },
 ];
 
+// Um PostgREST de mentira que faz o que o de verdade faria com os filtros pedidos: `gt` no
+// mínimo e `in` nos ids. Assim o teste vê o que a tela PEDIU, não só o que ela mostrou.
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     from: (tabela: string) => ({
       select: () => {
+        const catalogo = (estado.catalogo ?? produtos) as Array<Record<string, any>>;
         if (tabela === 'product_availability') {
-          return Promise.resolve({ data: produtos.map(({ id, stock_quantity, reserved_quantity }) => ({ id, stock_quantity, reserved_quantity })), error: null });
+          return {
+            in: (coluna: string, ids: string[]) => {
+              estado.pedidos.push(['in', coluna, ids]);
+              if (estado.falharDisponivel) return Promise.resolve({ data: null, error: { message: 'permission denied for view product_availability' } });
+              const linhas = catalogo
+                .filter((p) => ids.includes(p.id))
+                .map(({ id, stock_quantity, reserved_quantity }) => ({ id, stock_quantity, reserved_quantity }));
+              return Promise.resolve({ data: linhas, error: null });
+            },
+          };
         }
         const recusa = { data: null, error: { message: 'invalid input syntax for type numeric: "minimum_stock"' } };
         return {
-          eq: () => Promise.resolve(estado.falhar ? { data: null, error: { message: 'sem conexão' } } : { data: produtos, error: null }),
+          eq: () => ({
+            gt: (coluna: string, valor: number) => {
+              estado.pedidos.push(['gt', coluna, valor]);
+              if (estado.falhar) return Promise.resolve({ data: null, error: { message: 'sem conexão' } });
+              return Promise.resolve({ data: catalogo.filter((p) => Number(p[coluna] ?? 0) > valor), error: null });
+            },
+          }),
           // o filtro coluna-a-coluna que o PostgREST não tem: 'minimum_stock' vira valor e o numeric recusa
           filter: () => ({ order: () => Promise.resolve(recusa) }),
         };
@@ -58,7 +83,12 @@ function renderTela() {
   );
 }
 
-beforeEach(() => { estado.falhar = false; });
+beforeEach(() => {
+  estado.falhar = false;
+  estado.falharDisponivel = false;
+  estado.pedidos.length = 0;
+  estado.catalogo = null;
+});
 
 describe('Assistente de Compras v2', () => {
   it('lista só o que está com o DISPONÍVEL no mínimo ou abaixo (e com mínimo definido)', async () => {
@@ -88,5 +118,48 @@ describe('Assistente de Compras v2', () => {
     renderTela();
     expect(await screen.findByText(/Não deu para ler o estoque/)).toBeInTheDocument();
     expect(screen.queryByText(/Estoque saudável/)).not.toBeInTheDocument();
+  });
+
+  // 11/10/2026: a tela lia todos os produtos e todo o disponível e filtrava no navegador — o
+  // PostgREST corta em 1000 linhas calado. Agora o mínimo vai ao servidor e o disponível é
+  // pedido só dos produtos que vieram.
+  it('pede ao servidor só os produtos com mínimo, e o disponível só deles', async () => {
+    renderTela();
+    await screen.findByText('Impelidor');
+    expect(estado.pedidos).toEqual([
+      ['gt', 'minimum_stock', 0],
+      ['in', 'id', ['p1', 'p2']],
+    ]);
+    // o p3, sem mínimo, nem chega a pedir disponível
+    expect(JSON.stringify(estado.pedidos)).not.toContain('p3');
+  });
+
+  it('nenhum produto com mínimo: não pede disponível e diz que está saudável', async () => {
+    estado.catalogo = [produtos[2]];
+    renderTela();
+    expect(await screen.findByText(/Estoque saudável/)).toBeInTheDocument();
+    expect(estado.pedidos).toEqual([['gt', 'minimum_stock', 0]]);
+  });
+
+  it('o disponível é pedido em lotes de 200 ids (a lista vai na URL)', async () => {
+    // Só a primeira está abaixo do mínimo: as outras 449 vêm do servidor, mas a tela não as lista.
+    estado.catalogo = Array.from({ length: 450 }, (_, i) => ({
+      id: `q${i}`, name: `Peça ${i}`, sku: null, unit: 'UN', stock_quantity: i === 0 ? 0 : 5, reserved_quantity: 0,
+      minimum_stock: 1, cost_price: 1, active: true, suppliers: null,
+    }));
+    renderTela();
+    await screen.findByText('Peça 0');
+    const lotes = estado.pedidos.filter((p) => p[0] === 'in').map((p) => (p[2] as string[]).length);
+    expect(lotes).toEqual([200, 200, 50]);
+  });
+
+  // Antes o erro do disponível era ignorado: o cálculo caía no físico, esquecia a reserva e a
+  // tela podia dizer "Estoque saudável!" com peça prometida a uma OS.
+  it('erro no disponível mostra o erro, nunca "Estoque saudável!"', async () => {
+    estado.falharDisponivel = true;
+    renderTela();
+    expect(await screen.findByText(/Não deu para ler o estoque: permission denied/)).toBeInTheDocument();
+    expect(screen.queryByText(/Estoque saudável/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Impelidor')).not.toBeInTheDocument();
   });
 });
