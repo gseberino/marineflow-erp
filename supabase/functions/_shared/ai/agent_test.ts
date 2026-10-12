@@ -3,7 +3,7 @@
 //   deno test --allow-env supabase/functions/_shared/ai/agent_test.ts
 import { assertEquals, assertExists, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { callClaude } from "./anthropic.ts";
-import { runAgentLoop } from "./agent.ts";
+import { interrupcaoDaTool, runAgentLoop } from "./agent.ts";
 import type { ToolDef } from "./tools/registry.ts";
 
 Deno.env.set("OPENROUTER_API_KEY", "test-key-not-real");
@@ -384,4 +384,13 @@ Deno.test("callClaude: retry em 429 respeita retry-after e sucede na 2ª tentati
   assertEquals(calls.length, 2);
   assertEquals(result.stopReason, "end_turn");
   assertEquals((result.content[0] as any).text, "ok");
+});
+
+Deno.test("interrupcaoDaTool: o fluxo que já falou com o dono encerra o turno (11/10/2026); pendência vem antes", () => {
+  const tc = { name: "completar_comprovante", input: { cmp: "1" } };
+  assertEquals(interrupcaoDaTool(tc, { toolResult: { ok: true }, fluxo: { codigo: "CMP-00001" } }, false), { fluxo: { codigo: "CMP-00001" } });
+  assertEquals(interrupcaoDaTool(tc, { toolResult: { ok: true }, fluxo: { codigo: "CMP-00001" } }, true), { fluxo: { codigo: "CMP-00001" } });
+  const proposal = { pending_action_id: "p1", title: "t", summary_markdown: "s", risk_level: "medium" as const };
+  assertEquals(interrupcaoDaTool(tc, { toolResult: {}, proposal, fluxo: { codigo: "CMP-00001" } }, false), { proposal });
+  assertEquals(interrupcaoDaTool(tc, { toolResult: { ok: true } }, false), null);
 });

@@ -301,6 +301,11 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   //   (comprovantes_consultar devolve vazio para quem não é admin); o prompt ensina e as travas de
   //   lançamento em dobro mandam o dono ao *cmp N*. O perfil do admin está no teto: fica na rede. —
   "consultar_comprovantes",
+  //   11/10/2026 (caso real do CMP-00001): o dono disse em conversa o que faltava ("vale o valor do
+  //   cartão, é combustível") e o assistente não tinha como passar ao fluxo. completar_comprovante só
+  //   anota no CMP pelas RPCs do fluxo e o fluxo pergunta; quem grava é o sim do dono. O perfil do
+  //   admin está no teto: fica na rede (roda direto: ESCRITAS_VERIFICADAS_DA_REDE).
+  "completar_comprovante",
   // — E-mail (08/10/2026): silenciar um remetente é gesto raro e pede confirmação. —
   "silenciar_remetente_email",
   // — Memória por entidade: as notas APROVADAS já chegam prontas no contexto (ai-agent), então
@@ -540,6 +545,12 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
  * com preço no catálogo) — nenhuma das cinco com uso na auditoria até 26/09.
  */
 export const ESCRITAS_VERIFICADAS_DA_REDE: Readonly<Record<string, string>> = {
+  // 11/10/2026: pela rede, a escrita viraria pendência — e o dono daria dois "sim" (o da pendência e o do resumo do CMP).
+  completar_comprovante:
+    "preenche só os campos do CMP do PRÓPRIO dono pelas RPCs do fluxo (comprovante_comando/comprovante_responder, as mesmas do " +
+    "menu e do *corrigir*); não grava financeiro nem aprova — o fluxo manda ao dono a próxima pergunta ou o resumo e só o *sim* " +
+    "dele grava (o banco recusa o sim sem mensagem do dono); a única mensagem é a pergunta do próprio fluxo ao WhatsApp do " +
+    "dono, como send_document_pdf_to_self",
   enviar_arquivo_do_dropbox:
     "envio para o PRÓPRIO WhatsApp de quem pede (telefone do cadastro, nunca de texto), só PDF que já é dele no Dropbox; o arquivo fica 3 min no bucket privado e é apagado — como send_document_pdf_to_self",
   remember_about_entity:

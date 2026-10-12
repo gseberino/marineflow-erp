@@ -44,3 +44,15 @@ Deno.test("canal do painel não aplica o corte do WhatsApp", () => {
   assertEquals(Object.keys(ferramentasDoJob("admin" as never, nomes, [], "whatsapp", todas).toolsByName), ["search_clients"]);
   assertEquals(Object.keys(ferramentasDoJob("admin" as never, nomes, [], "panel", todas).toolsByName), nomes);
 });
+
+// 11/10/2026: completar_comprovante não está à vista no perfil do admin (teto) — é pela ferramenta_extra
+// que o modelo, no Max, chega a ela (registrada ≠ ensinada: o erp-mcp precisa alcançá-la).
+Deno.test("completar_comprovante: ao alcance do admin no WhatsApp pela rede e no enum da ferramenta_extra (com as tools reais)", () => {
+  const r = ferramentasDoJob("admin" as never, ["search_clients", "ferramenta_extra"], ["completar_comprovante", "consultar_comprovantes"], "whatsapp");
+  assertEquals(Boolean(r.alcancaveisPelaRede.completar_comprovante), true);
+  const enumDaExtra = (r.toolsByName.ferramenta_extra.input_schema as any).properties.nome.enum as string[];
+  assertEquals(enumDaExtra.includes("completar_comprovante"), true);
+  // só do admin: o financeiro não alcança (roles), mesmo pedindo pela rede
+  const fin = ferramentasDoJob("financial" as never, ["search_clients", "ferramenta_extra"], ["completar_comprovante"], "whatsapp");
+  assertEquals(fin.alcancaveisPelaRede.completar_comprovante, undefined);
+});

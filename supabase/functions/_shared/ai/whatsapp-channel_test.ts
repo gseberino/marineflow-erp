@@ -5,6 +5,7 @@ import {
   checkWhatsAppRateLimit,
   conversaDosComprovantesLigada,
   decidirPendenciaHerdada,
+  destinoDoSimComPendencia,
   donoOcupadoParaPerguntar,
   enviarComRegistro,
   formatOptionsAsNumberedText,
@@ -183,9 +184,10 @@ Deno.test("parseConfirmationReply: PIN com ajuste junto é marcado (o PIN não p
 Deno.test("ai-agent: PIN com ajuste junto é tratado antes de resolveWhatsAppConfirmation", () => {
   const src = Deno.readTextFileSync(new URL("../../ai-agent/index.ts", import.meta.url));
   const camada = src.indexOf("const confirmation = parseConfirmationReply(text)");
-  const ajuste = src.indexOf("confirmation.textoAMais", camada);
+  // 11/10/2026: a decisão passou para destinoDoSimComPendencia (o PIN conferido no hash decide)
+  const ajuste = src.indexOf("destinoDoSimComPendencia(", camada);
   const resolve = src.indexOf("await resolveWhatsAppConfirmation(", camada);
-  assert(ajuste > camada && resolve > ajuste, "textoAMais tem de ser conferido antes de aprovar");
+  assert(ajuste > camada && resolve > ajuste, "o destino do sim (textoAMais + PIN) tem de ser decidido antes de aprovar");
 });
 
 Deno.test("parseConfirmationReply: reconhece rejeição", () => {
@@ -730,4 +732,57 @@ Deno.test("enviarComRegistro: substituiu a pergunta de um CMP → a mensagem diz
     globalThis.fetch = original;
   }
   assertEquals(enviados, ["⚠️ Lançar no Caixa\n\n(O CMP-00124 ficou para depois: *cmp 124* retoma.)"]);
+});
+
+// ─── 11/10/2026: o fluxo de comprovantes já falou (texto vazio) e o "sim + número + texto" ──────
+
+Deno.test("enviarComRegistro: texto vazio (o fluxo de comprovantes já falou) não chama o whatsapp-send — e ainda encerra e retoma", async () => {
+  const encerrar = bancoDoRegistro({ pergunta_encerrar_externa: 1 });
+  const retomar = (phone: string) => { encerrar.ordem.push(`retomar:${phone}`); return Promise.resolve(); };
+  const wa = await comEnvio(encerrar.ordem, "WA-X", () =>
+    enviarComRegistro(encerrar.admin, TELEFONE_DO_DONO, "", { acao: "encerrar" }, { ligada: true, retomar }));
+  assertEquals(wa, null);
+  assertEquals(encerrar.ordem, ["rpc:pergunta_encerrar_externa", `retomar:${TELEFONE_DO_DONO}`], "nada de envio nem de fila");
+  assertEquals(encerrar.fila.length, 0);
+  // nada encerrado: nem retoma
+  const nada = bancoDoRegistro({ pergunta_encerrar_externa: 0 });
+  await comEnvio(nada.ordem, "WA-N", () => enviarComRegistro(nada.admin, TELEFONE_DO_DONO, "  ", { acao: "encerrar" }, { ligada: true, retomar }));
+  assertEquals(nada.ordem, ["rpc:pergunta_encerrar_externa"]);
+  // sem registro a fazer (a mesma pendência de antes), ou com a conversa desligada: nada de nada
+  for (const [registro, ligada] of [[null, true], [{ acao: "encerrar" as const }, false]] as const) {
+    const b = bancoDoRegistro();
+    assertEquals(await comEnvio(b.ordem, "WA-D", () => enviarComRegistro(b.admin, TELEFONE_DO_DONO, "", registro, { ligada })), null);
+    assertEquals(b.ordem, []);
+  }
+});
+
+Deno.test("destinoDoSimComPendencia: 'sim + número + texto' só é barrado quando o número É o PIN; senão é conversa (vai ao modelo)", () => {
+  const ajuste = parseConfirmationReply("sim 235 reais");
+  assertEquals(ajuste, { decision: "approve", pin: "235", textoAMais: true });
+  assertEquals(destinoDoSimComPendencia(ajuste, true), "recusar_ajuste"); // o PIN não pode ir ao modelo
+  assertEquals(destinoDoSimComPendencia(ajuste, false), "modelo"); // 235 não é o PIN: é conversa
+  assertEquals(destinoDoSimComPendencia(parseConfirmationReply("sim"), false), "resolver");
+  assertEquals(destinoDoSimComPendencia(parseConfirmationReply("sim 4321"), true), "resolver");
+  assertEquals(destinoDoSimComPendencia(parseConfirmationReply("não"), false), "resolver");
+  assertEquals(destinoDoSimComPendencia(parseConfirmationReply("quanto deu o posto?"), false), "modelo");
+  assertEquals(destinoDoSimComPendencia(null, true), "modelo");
+});
+
+Deno.test("ai-agent: o destino do sim com pendência é decidido (com o PIN conferido no hash) antes de resolveWhatsAppConfirmation", () => {
+  const src = fonte("../../ai-agent/index.ts");
+  const camada = src.indexOf("const confirmation = parseConfirmationReply(text)");
+  const pin = src.indexOf("await verifyPin(confirmation.pin", camada);
+  const destino = src.indexOf("destinoDoSimComPendencia(", camada);
+  const resolve = src.indexOf("await resolveWhatsAppConfirmation(", camada);
+  assert(camada > 0 && pin > camada && destino > pin && resolve > destino, "PIN conferido → destino → só então resolver");
+  assertStringIncludes(src, 'destinoDoSim === "recusar_ajuste"');
+  assertStringIncludes(src, 'destinoDoSim === "resolver"');
+  // o turno do OpenRouter e a entrega do Max passam o fluxo adiante (sem mensagem dupla no WhatsApp)
+  assertStringIncludes(src, "fluxo: result.fluxo");
+  assertStringIncludes(src, "fluxo: interrupcao.fluxo");
+  // revisão de 11/10/2026: o Max que caiu DEPOIS de o fluxo falar não é refeito pelo OpenRouter (a
+  // tool rodaria de novo e a pergunta do CMP sairia duas vezes)
+  const entrega = src.indexOf('if (job.status === "completed" || interrupcao.fluxo)');
+  const reserva = src.indexOf("refazendo pelo OpenRouter");
+  assert(entrega > 0 && reserva > entrega, "a entrega com o fluxo tem de vir antes da reserva pelo OpenRouter");
 });

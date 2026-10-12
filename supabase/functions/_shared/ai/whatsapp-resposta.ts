@@ -1,13 +1,15 @@
 // Como um turno do modelo vira mensagem no WhatsApp e estado da sessão — o MESMO para os dois
 // provedores do agente (OpenRouter, que roda o loop na edge, e Claude Max, que roda no gateway
 // local). Extraído de ai-agent/index.ts em 03/10/2026 sem mudar o texto nem o metadata.
-import type { OptionsData, Proposal } from "./agent.ts";
+import type { FluxoQueFalou, OptionsData, Proposal } from "./agent.ts";
 import { formatOptionsAsNumberedText, notaDeConfirmacao } from "./whatsapp-channel.ts";
 
 export interface DesfechoDoTurno {
   error?: string;
   options?: OptionsData;
   proposal?: Proposal;
+  /** 11/10/2026: o fluxo de comprovantes já mandou a pergunta do CMP — o assistente não manda nada. */
+  fluxo?: FluxoQueFalou;
   texto: string;
 }
 
@@ -34,6 +36,11 @@ export function respostaDoTurnoNoWhatsApp(
     novo.pending_confirm_action_id = d.proposal.pending_action_id;
     novo.pin_attempts = 0;
     novo.pending_options = null;
+  } else if (d.fluxo) {
+    // A resposta ao dono é a mensagem do fluxo (a linha "anotei o que você disse" e a pergunta do CMP
+    // ou o resumo): texto vazio não é enviado (enviarComRegistro). As referências de pendência e de
+    // opções ficam como estavam — este turno não decidiu nenhuma delas.
+    replyText = "";
   } else if (pendenciaViva && metadata.pending_confirm_action_id) {
     // Conversa no meio de uma pendência viva (05/10/2026): a referência fica, e o dono vê que ela
     // ainda espera. Como na pendência herdada: "não" cancela, "sim <PIN>" aprova, e "sim" sem PIN

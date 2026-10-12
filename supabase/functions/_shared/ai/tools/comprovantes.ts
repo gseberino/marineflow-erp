@@ -12,12 +12,23 @@
 //   lançar em dobro o que um CMP já gravou (ou está para gravar). O admin vê o CMP (código, valor,
 //   data); o financeiro só sabe que existe (comprovantes_ja_lancados, sem detalhe nenhum).
 //
+// - completar_comprovante (11/10/2026 — spec-assistente-opera-cmp.md, A): o dono disse em conversa
+//   o que falta num CMP ainda não gravado ("saiu sem o gasto complementar; vale o do cartão, 235,97;
+//   é combustível"). A tool só NORMALIZA o argumento de negócio e o passa à edge
+//   comprovantes-whatsapp (ação completar), que aplica pelas mesmas RPCs do menu e manda ao dono a
+//   próxima pergunta ou o resumo. Ela não grava nada: só o *sim* do dono ao resumo grava. Quando o
+//   fluxo já falou no WhatsApp (ja_falou_ao_dono), o turno do assistente termina sem mensagem dele
+//   (fluxoQueFalou, agent.ts).
+//
 // Nada aqui grava em log valor, CNPJ, nome ou texto do documento: só códigos e erros do banco.
 //
 // Sem importar caixa.ts nem financeiro-comum.ts: caixa.ts importa este módulo, e financeiro-comum
 // importa caixa.ts — o ciclo deixaria constante em zona morta na carga do módulo.
 import type { Role, ToolCtx, ToolDef } from "./registry.ts";
 import { conversaDosComprovantesLigada } from "../../comprovantes/modo.ts";
+import { lerValor } from "../../comprovantes/respostas.ts";
+import { normalizarResposta } from "../../whatsapp/pergunta-ativa.ts";
+import { donoDoWhatsApp } from "../../whatsapp/dono.ts";
 
 const SO_ADMIN: Role[] = ["admin"];
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -288,6 +299,128 @@ export function dataDaConsulta(v: unknown, agora = new Date()): string | null {
   return `${ano}-${br[2].padStart(2, "0")}-${br[1].padStart(2, "0")}`;
 }
 
+// ─── completar_comprovante (A, 11/10/2026) ──────────────────────────────────────────────────────
+
+export const COMPLETAR_COMPROVANTE = "completar_comprovante";
+
+/**
+ * O fluxo de comprovantes já falou com o dono no WhatsApp (a pergunta seguinte ou o resumo do CMP)?
+ * Então o turno do assistente termina SEM mensagem dele (agent.ts, whatsapp-resposta.ts): a resposta
+ * ao dono é a do fluxo, que começa por "anotei o que você disse na conversa". Só para esta tool e só
+ * com ja_falou_ao_dono === true.
+ */
+export function fluxoQueFalou(nome: string, resultado: unknown): { codigo: string } | null {
+  if (nome !== COMPLETAR_COMPROVANTE || !resultado || typeof resultado !== "object") return null;
+  const r = resultado as { ja_falou_ao_dono?: unknown; cmp?: unknown };
+  if (r.ja_falou_ao_dono !== true) return null;
+  return { codigo: typeof r.cmp === "string" ? r.cmp : "" };
+}
+
+const PRAZO_DO_COMPLETAR_MS = 25_000;
+const SEM_O_FLUXO = "Não consegui falar com o sistema de comprovantes agora. Não chame de novo: consulte o CMP com " +
+  "consultar_comprovantes daqui a pouco (pode ter ficado anotado).";
+const DESTINOS_DO_CMP = ["os", "estoque", "insumo", "empresa", "pessoal"];
+const TIPOS_NA_OS = ["peca", "despesa"];
+const FORMAS_DO_CMP = ["pix", "debito", "credito", "dinheiro", "boleto", "transferencia"];
+const QUEM_PAGOU_DO_CMP = ["empresa", "socio", "tecnico", "cliente"];
+
+/** Texto do dono numa linha só, aparado e cortado em `max` (null = vazio). */
+function linhaCurta(v: unknown, max: number): string | null {
+  if (v == null) return null;
+  const t = String(v).replace(/[\n\r\t]+/g, " ").replace(/\s+/g, " ").trim();
+  return t ? t.slice(0, max).trim() : null;
+}
+
+/** 235.97, "235,97", "R$ 235,97" → "235.97"; null = não deu para ler (zero, negativo, acima de 999.999,99). */
+export function valorDoCompletar(v: unknown): string | null {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") return Number.isFinite(v) && v > 0 && v <= 999_999.99 ? (Math.round(v * 100) / 100).toFixed(2) : null;
+  return lerValor(normalizarResposta(String(v)));
+}
+
+/** "OS-00112", "ORÇ 112", "112" ou 112 → 112 (os dígitos do fim); null = não deu para ler. */
+export function numeroDaOsDita(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const m = /(\d{1,6})\s*$/.exec(String(v).trim());
+  const n = m ? Number(m[1]) : 0;
+  return n > 0 ? n : null;
+}
+
+/** 'AAAA-MM-DD' que existe no calendário (dataDaConsulta aceita "31/02"). */
+function diaQueExiste(iso: string | null): boolean {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+  const d = new Date(`${iso}T12:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso;
+}
+
+/** O que a edge respondeu vira o resultado para o modelo (spec 2.1, tabela; 2.2.6, os motivos). */
+// deno-lint-ignore no-explicit-any
+function resultadoDoCompletar(r: any, codigoPedido: string, numero: number, valorPedido: string | null): Record<string, unknown> {
+  if (!r || typeof r !== "object") return { error: SEM_O_FLUXO };
+  const codigo = typeof r.codigo === "string" && r.codigo ? r.codigo : codigoPedido;
+  if (r.ok !== true) {
+    switch (r.motivo) {
+      case "nao_e_o_dono": return { error: "Só o dono completa os comprovantes dele." };
+      case "desligada": return { error: "A conversa dos comprovantes está desligada: não há como completar o CMP por aqui." };
+      case "modo_de_teste":
+        return { error: "O WhatsApp está em modo de teste: a pergunta do CMP iria para o número de teste. Não completei." };
+      case "nao_existe": return { error: `Não achei o ${codigo}.` };
+      case "ja_gravado":
+        return { error: `O ${codigo} já foi gravado: para mudar, o dono manda *cancelar cmp ${numero} motivo* e o arquivo de novo.` };
+      case "ja_cancelado": return { error: `O ${codigo} foi cancelado.` };
+      // revisão de 11/10/2026: ainda sendo lido (ou fora da conversa) — nada foi anotado
+      case "fora_da_conversa":
+        return { error: `O ${codigo} ainda não está na conversa (o arquivo pode estar sendo lido): não anotei nada. Tente de novo daqui a pouco.` };
+      case "observacao_obrigatoria": {
+        const reais = (v: unknown) => brl.format(Number(v));
+        return {
+          error: `O valor ${reais(valorPedido)} é diferente do lido no comprovante (${reais(r.valor_lido)}). Passe em observacao o porquê, ` +
+            "como o dono disse; se ele não disse, pergunte.",
+        };
+      }
+      case "data_futura": return { error: "A data não pode ser futura." };
+      default: return { error: SEM_O_FLUXO };
+    }
+  }
+  const anotado = Array.isArray(r.anotado) ? r.anotado.filter((x: unknown) => typeof x === "string") as string[] : [];
+  const ignorado = Array.isArray(r.ignorados) ? r.ignorados.filter((x: unknown) => typeof x === "string") as string[] : [];
+  const naoUsei = typeof r.recusado?.texto === "string" ? r.recusado.texto : null;
+  // recusado sem nada anotado e sem mensagem do fluxo: nada mudou no CMP
+  if (naoUsei && anotado.length === 0 && r.enviada !== true) return { error: `Não usei ${naoUsei}: nada foi anotado no ${codigo}.` };
+  // Nada anotado com algo ignorado (o passo dele não chegou): "já estava assim" seria falso.
+  const abertura = anotado.length
+    ? `Anotei no ${codigo}`
+    : ignorado.length
+    ? `Ainda não anotei nada no ${codigo} (o sistema pergunta na sequência)`
+    : `O ${codigo} já estava assim`;
+  const base = {
+    ok: true, cmp: codigo, anotado, ignorado, ...(naoUsei ? { nao_usei: naoUsei } : {}), como_ficou: r.cmp ?? null,
+  };
+  if (r.enviada === true) {
+    return {
+      ...base,
+      proximo_passo: r.passo === "confirmar" ? "o resumo para o sim" : r.passo ?? null,
+      ja_falou_ao_dono: true,
+      texto_ao_dono: `${abertura}${anotado.length ? `: ${anotado.join(", ")}` : ""}. A próxima pergunta dele foi para o seu WhatsApp; só o seu *sim* ao resumo grava.`,
+      instruction: "O sistema de comprovantes já mandou ao dono, no WhatsApp, a próxima pergunta deste CMP (ou o resumo para o sim). " +
+        "Nada foi gravado no financeiro: só o sim do dono ao resumo grava. Não repita a pergunta nem o resumo e não peça o sim.",
+    };
+  }
+  if (r.ocupado === true) {
+    const titulo = typeof r.ocupado_por === "string" && r.ocupado_por.trim() ? r.ocupado_por.trim().slice(0, 80) : null;
+    return {
+      ...base,
+      ja_falou_ao_dono: false,
+      instruction: `Diga numa linha: "${abertura}. A pergunta dele vai depois que você responder${titulo ? `: ${titulo}` : " ao pedido que está aberto"}."`,
+    };
+  }
+  return {
+    ...base,
+    ja_falou_ao_dono: false,
+    instruction: `Diga numa linha: "${abertura}, mas a pergunta dele não saiu agora: mande *cmp ${numero}* para vê-la."`,
+  };
+}
+
 export const comprovanteTools: ToolDef[] = [
   {
     name: "consultar_comprovantes",
@@ -297,8 +430,8 @@ export const comprovanteTools: ToolDef[] = [
       "comprovante de 62 reais de ontem?', 'os comprovantes da OS X'. Traz situação, valor, data, fornecedor, destino (OS, " +
       "estoque, insumo, empresa, pessoal), na OS se foi peça ou despesa (tipo_na_os: a despesa é custo interno, nunca aparece " +
       "para o cliente nem muda o total da OS; a peça só comprova a peça lançada na OS), quem pagou, a forma, as pendências e a " +
-      "pasta no Dropbox. PESSOAL pago pela empresa é gasto pessoal do sócio (descontado do pró-labore). Só leitura; não grava " +
-      "nem completa comprovante (quem completa é o dono, respondendo *cmp N*). Se vier error, diga que a consulta falhou — não " +
+      "pasta no Dropbox. PESSOAL pago pela empresa é gasto pessoal do sócio (descontado do pró-labore). Só leitura; não grava; " +
+      "para completar um CMP com o que o dono disse: completar_comprovante. Se vier error, diga que a consulta falhou — não " +
       "que não há comprovante.",
     input_schema: {
       type: "object",
@@ -359,6 +492,124 @@ export const comprovanteTools: ToolDef[] = [
         return { error: `Não consegui consultar os comprovantes (${String(error.message ?? "erro do banco")}). Diga que a consulta falhou — não que não há comprovante.` };
       }
       return data ?? { itens: [], total: 0 };
+    },
+  },
+  {
+    name: COMPLETAR_COMPROVANTE,
+    description:
+      "Passa ao sistema de comprovantes o que o dono disse em conversa sobre um CMP ainda não gravado: o valor certo (ex.: o do " +
+      "cartão), a data, para quê (OS, estoque, insumo, empresa, pessoal), peça ou despesa da OS, a categoria (a palavra dele: " +
+      "combustível, almoço, pedágio…), a forma e quem pagou. Passe SÓ o que o dono disse; o que faltar o sistema pergunta a ele. " +
+      "NÃO grava nada no financeiro: o sistema manda ao dono, no WhatsApp, a próxima pergunta ou o resumo, e só o *sim* dele " +
+      "grava. Valor diferente do lido vai com observacao (o porquê, como o dono disse). Um CMP por vez. Comprovante já gravado " +
+      "não muda por aqui (*cancelar cmp N motivo*). Não lance o gasto por outra ferramenta.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cmp: { type: "string", description: "O comprovante: 'CMP-00001', 'cmp 1' ou '1'." },
+        valor: { type: "number", description: "O valor certo em reais, quando o dono disse outro (ex.: o do cartão)." },
+        observacao: {
+          type: "string",
+          description: "Por que o valor é outro, nas palavras do dono (até 200 caracteres). Obrigatória quando o valor muda.",
+        },
+        data: { type: "string", description: "Data da compra: 'hoje', 'ontem', dd/mm ou AAAA-MM-DD." },
+        destino: { type: "string", enum: DESTINOS_DO_CMP, description: "Para quê." },
+        os: { type: "string", description: "Quando foi para uma OS: 'OS-00112', 'ORÇ-00112' ou '112'." },
+        tipo_na_os: { type: "string", enum: TIPOS_NA_OS, description: "Na OS: peça/material ou despesa (custo interno)." },
+        categoria: { type: "string", description: "A palavra do dono (combustível, almoço, pedágio…) ou o nome da categoria." },
+        forma: { type: "string", enum: FORMAS_DO_CMP, description: "Como foi pago." },
+        quem_pagou: { type: "string", enum: QUEM_PAGOU_DO_CMP, description: "Quem pagou." },
+        tecnico: { type: "string", description: "O nome do técnico, quando quem_pagou é tecnico." },
+      },
+      required: ["cmp"],
+    },
+    risk: "low",
+    roles: SO_ADMIN,
+    async execute(args, ctx) {
+      if (ctx.userRole !== "admin") return { error: "Comprovantes: só o administrador completa." };
+      if (!conversaDosComprovantesLigada(ctx.settings)) {
+        return { error: "A conversa dos comprovantes está desligada: o CMP não se completa por aqui." };
+      }
+      // A pergunta vai ao WhatsApp DO DONO: só ele completa (nunca outro admin pelo painel).
+      let dono: { id: string; phone: string } | null;
+      try {
+        dono = await donoDoWhatsApp(ctx.admin);
+      } catch {
+        return { error: "Não consegui conferir o dono agora. Tente de novo daqui a pouco." };
+      }
+      if (!dono || dono.id !== ctx.userId) return { error: "Só o dono completa os comprovantes dele." };
+
+      // IA pensa, sistema preenche: aqui só se normaliza o que o dono disse; quem grava é o fluxo.
+      const codigo = codigoDoCmp(args.cmp);
+      if (!codigo) return { error: `Não entendi o comprovante "${String(args.cmp ?? "")}". Use CMP-00001, cmp 1 ou só o número.` };
+      const numero = Number(codigo.slice(4));
+      const corpo: Record<string, unknown> = { acao: "completar", phone: dono.phone, autor: ctx.userId, cmp: numero };
+      let pedidos = 0;
+      if (args.valor != null && args.valor !== "") {
+        const valor = valorDoCompletar(args.valor);
+        if (!valor) return { error: `Não entendi o valor "${String(args.valor)}". Use o valor em reais (ex.: 235,97).` };
+        corpo.valor = valor;
+        pedidos++;
+      }
+      if (args.data != null && args.data !== "") {
+        const data = dataDaConsulta(args.data);
+        if (!diaQueExiste(data)) return { error: `Não entendi a data "${String(args.data)}". Use dd/mm, 'ontem' ou AAAA-MM-DD.` };
+        corpo.data = data;
+        pedidos++;
+      }
+      const destino = args.destino == null || args.destino === "" ? null : String(args.destino);
+      if (destino && !DESTINOS_DO_CMP.includes(destino)) return { error: `destino aceita só: ${DESTINOS_DO_CMP.join(", ")}.` };
+      if (args.os != null && args.os !== "") {
+        const os = numeroDaOsDita(args.os);
+        if (!os) return { error: `Não entendi a OS "${String(args.os)}". Use OS-00112, ORÇ-00112 ou só o número.` };
+        if (destino && destino !== "os") return { error: "destino e os não combinam: com a OS, o destino é os." };
+        corpo.os = os;
+        corpo.destino = "os";
+        pedidos++;
+      } else if (destino) {
+        // "foi para uma OS" sem dizer qual não é erro: o menu do "para quê" já lista as OS
+        corpo.destino = destino;
+        pedidos++;
+      }
+      for (const [campo, valores] of [["tipo_na_os", TIPOS_NA_OS], ["forma", FORMAS_DO_CMP], ["quem_pagou", QUEM_PAGOU_DO_CMP]] as const) {
+        const v = args[campo];
+        if (v == null || v === "") continue;
+        if (!(valores as readonly string[]).includes(String(v))) return { error: `${campo} aceita só: ${valores.join(", ")}.` };
+        corpo[campo] = String(v);
+        pedidos++;
+      }
+      for (const [campo, max] of [["categoria", 80], ["tecnico", 60]] as const) {
+        const v = linhaCurta(args[campo], max);
+        if (!v) continue;
+        corpo[campo] = v;
+        pedidos++;
+      }
+      const observacao = linhaCurta(args.observacao, 200);
+      if (observacao) corpo.observacao = observacao;
+      if (pedidos === 0) return { error: "Diga o que completar (valor, para quê, OS, categoria, forma ou quem pagou)." };
+
+      const url = Deno.env.get("SUPABASE_URL");
+      const chave = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      if (!url || !chave) return { error: SEM_O_FLUXO };
+      // deno-lint-ignore no-explicit-any
+      let r: any;
+      try {
+        // A mesma porta do retomar (chamadaInterna): só outra função do servidor, com a chave de serviço.
+        const res = await fetch(`${url}/functions/v1/comprovantes-whatsapp`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${chave}` },
+          body: JSON.stringify(corpo),
+          signal: AbortSignal.timeout(PRAZO_DO_COMPLETAR_MS),
+        });
+        if (res.status !== 200) {
+          await res.body?.cancel().catch(() => {});
+          return { error: SEM_O_FLUXO };
+        }
+        r = await res.json();
+      } catch {
+        return { error: SEM_O_FLUXO };
+      }
+      return resultadoDoCompletar(r, codigo, numero, typeof corpo.valor === "string" ? corpo.valor : null);
     },
   },
 ];

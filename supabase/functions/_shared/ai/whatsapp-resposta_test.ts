@@ -53,3 +53,18 @@ Deno.test("texto com pendência VIVA: guarda a referência e lembra dela (05/10/
   );
   assertEquals(nova.metadata.pending_confirm_action_id, "p2");
 });
+
+Deno.test("fluxo (11/10/2026): o fluxo de comprovantes já falou — nada a enviar e as referências de pendência/opções intocadas", () => {
+  const r = respostaDoTurnoNoWhatsApp({ texto: "Anotei! Agora responda 8.", fluxo: { codigo: "CMP-00001" } }, antes);
+  assertEquals(r.replyText, "");
+  assertEquals(r.metadata.pending_confirm_action_id, "velha");
+  assertEquals(r.metadata.pending_options, antes.pending_options);
+  assertEquals(r.metadata.pendencia_herdada, false, "como em todo turno que passou pelo modelo");
+  assertEquals(r.metadata.outro, 1);
+  // com pendência viva também: o turno não a decidiu, e a mensagem é só a do fluxo
+  const viva = respostaDoTurnoNoWhatsApp({ texto: "x", fluxo: { codigo: "CMP-00001" } }, antes, { title: "Enviar PDF", risk_level: "high" });
+  assertEquals(viva.replyText, "");
+  assertEquals(viva.metadata.pending_confirm_action_id, "velha");
+  // erro e pendência nova continuam mandando
+  assertEquals(respostaDoTurnoNoWhatsApp({ texto: "", error: "falhou", fluxo: { codigo: "CMP-00001" } }, antes).replyText, "⚠️ falhou");
+});

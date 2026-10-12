@@ -41,6 +41,7 @@ import {
   checkWhatsAppRateLimit,
   conversaDosComprovantesLigada,
   decidirPendenciaHerdada,
+  destinoDoSimComPendencia,
   enviarComRegistro,
   pendenciaQueSegueEsperando,
   cancelarPendenciaSubstituida,
@@ -539,7 +540,13 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
   // ---- Camada determinística (custo $0): confirmação de pendência ----
   const confirmation = parseConfirmationReply(text);
   if (metadata.pending_confirm_action_id) {
-    if (confirmation?.decision === "approve" && confirmation.textoAMais) {
+    // "sim + número + texto" (11/10/2026): barrado como ajuste só quando o número É o PIN (o PIN não
+    // pode ir ao modelo); "sim 235 reais" com 235 que não é o PIN é conversa e vai ao modelo.
+    const pinConfere = confirmation?.decision === "approve" && confirmation.textoAMais && confirmation.pin
+      ? await verifyPin(confirmation.pin, appUser.ai_whatsapp_pin_hash)
+      : false;
+    const destinoDoSim = destinoDoSimComPendencia(confirmation, pinConfere);
+    if (destinoDoSim === "recusar_ajuste") {
       // "sim <PIN> mas manda amanhã" (11/10/2026): aprovar executaria o pedido como está e perderia
       // o ajuste; mandar ao modelo levaria o PIN junto. Nada é executado e a pendência segue esperando.
       await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", sessionId);
@@ -549,7 +556,7 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
         "Não executei: veio um ajuste junto da confirmação. Para aprovar como está, mande só *sim* (ou *sim <SEU PIN>*, se o pedido for de alto risco). Para ajustar, escreva o ajuste sem começar por sim/ok, que eu refaço o pedido.",
       );
       return jr({ ok: true });
-    } else if (confirmation) {
+    } else if (destinoDoSim === "resolver" && confirmation) {
       // Pendência que veio da conversa anterior (resolveOrCreateWhatsAppSession): aprovar sem
       // PIN a mostra de novo em vez de executar — o "ok" pode ser resposta a outra coisa.
       if (metadata.pendencia_herdada && decidirPendenciaHerdada(confirmation) === "reapresentar") {
@@ -576,7 +583,8 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
       );
       return jr({ ok: true });
     }
-    // Não pareceu confirmação — segue pro LLM (usuário pode ter mudado de assunto).
+    // Não pareceu confirmação (ou "sim" com número que não é o PIN e texto junto) — segue pro LLM
+    // (usuário pode ter mudado de assunto, ou está conversando sobre o pedido).
   } else if (confirmation?.decision === "approve" && confirmation.pin && await verifyPin(confirmation.pin, appUser.ai_whatsapp_pin_hash)) {
     // "sim <PIN>" sem nada esperando: responde aqui, sem o modelo. Passando adiante, o PIN iria
     // para o modelo e para o histórico da conversa. Só age quando o número É o PIN (conferido no
@@ -749,8 +757,9 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
     console.error("[ai-agent][whatsapp] falha ao persistir mensagens:", persistErr);
   }
 
+  // fluxo (11/10/2026): o fluxo de comprovantes já mandou a pergunta do CMP — o turno não manda mensagem.
   const { replyText, metadata: newMetadata } = respostaDoTurnoNoWhatsApp(
-    { error: result.error, options: result.options, proposal: result.proposal as Proposal | undefined, texto: result.message.content },
+    { error: result.error, options: result.options, proposal: result.proposal as Proposal | undefined, fluxo: result.fluxo, texto: result.message.content },
     metadata,
     await pendenciaQueSegueEsperando(admin, metadata),
   );
@@ -813,12 +822,16 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
     if (r.key) settings[r.key] = String(r.value ?? "");
   });
 
-  if (job.status === "completed") {
-    const resposta = String((job.response as any)?.text ?? "");
+  const interrupcao = (meta.interrupcao ?? {}) as Record<string, any>;
+  // 11/10/2026: o Max caiu DEPOIS de o fluxo de comprovantes falar com o dono (completar_comprovante
+  // rodou e a pergunta do CMP já saiu). Refazer pelo OpenRouter chamaria a tool de novo e o dono
+  // receberia a pergunta duas vezes: o turno fecha como o concluído, sem mensagem do assistente.
+  if (job.status === "completed" || interrupcao.fluxo) {
+    const resposta = job.status === "completed" ? String((job.response as any)?.text ?? "") : "";
     await gravarTurnoDoMax(admin, sessionId, texto, resposta, job, "whatsapp");
-    const interrupcao = (meta.interrupcao ?? {}) as Record<string, any>;
+    // fluxo (11/10/2026): a frase curta do Max fica só no histórico; a mensagem ao dono é a do fluxo.
     const { replyText, metadata: novo } = respostaDoTurnoNoWhatsApp(
-      { proposal: interrupcao.proposal, options: interrupcao.options, texto: resposta },
+      { proposal: interrupcao.proposal, options: interrupcao.options, fluxo: interrupcao.fluxo, texto: resposta },
       metadata,
       await pendenciaQueSegueEsperando(admin, metadata),
     );

@@ -23,6 +23,7 @@ import {
 import { allTools, type ToolCtx, type ToolDef } from "./tools/index.ts";
 import { CHAVE_DO_RETRATO, CHAVE_DO_SOLICITANTE, type Solicitante } from "./tools/registry.ts";
 import { trocarNumeroDaOsPeloId } from "./tools/os-referencia.ts";
+import { fluxoQueFalou } from "./tools/comprovantes.ts";
 import { isAutonomyGranted } from "./autonomy-policy.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
 import { PERFIL_ADMIN, PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from "./perfil-operacao.ts";
@@ -53,11 +54,21 @@ export interface ToolEvent {
   result: unknown;
 }
 
+/**
+ * Um fluxo do sistema já falou com o dono no WhatsApp neste turno (11/10/2026: o fluxo de
+ * comprovantes mandou a pergunta do CMP que completar_comprovante completou). O turno termina e o
+ * assistente não manda mensagem: a do fluxo é a resposta.
+ */
+export interface FluxoQueFalou {
+  codigo: string;
+}
+
 export interface AgentTurnResult {
   message: { role: "assistant"; content: string };
   toolEvents: ToolEvent[];
   proposal?: Proposal;
   options?: OptionsData;
+  fluxo?: FluxoQueFalou;
   /** Histórico completo atualizado (formato nativo Anthropic, sem o system). */
   messages: ClaudeMessage[];
   /** Uma entrada de usage por chamada à API feita neste turno. */
@@ -823,6 +834,8 @@ export interface ResultadoDaTool {
   toolResult: unknown;
   /** Pendência criada (ação sensível aguardando o dono). */
   proposal?: Proposal;
+  /** No WhatsApp: o fluxo de comprovantes já falou com o dono (fluxoQueFalou). */
+  fluxo?: FluxoQueFalou;
 }
 
 /**
@@ -1000,16 +1013,23 @@ export async function executarChamadaDeTool(
       autonomous: effectiveRisk !== "low", // sensível que rodou direto = autonomia concedida
     });
   }
+  // 11/10/2026: o fluxo de comprovantes já mandou a pergunta do CMP ao WhatsApp do dono — no
+  // WhatsApp o turno termina nela (sem uma segunda mensagem do assistente). No painel, o modelo
+  // responde no chat (canais diferentes, nada se repete).
+  const fluxo = executou && amb.channel === "whatsapp" && toolDef ? fluxoQueFalou(toolDef.name, toolResult) : null;
 
   // Marca própria da rede: 'fora_do_perfil:%' na auditoria mostra quais ferramentas o prompt
   // faz o modelo procurar fora do perfil — a que aparecer com frequência merece entrar nele.
   // Rodou mas devolveu { error } (ou lançou, e o catch acima virou { error }) é falha, não
   // execução: senão a auditoria diz que a rede resolveu quando o modelo recebeu erro.
+  // A ordem segue a da execução acima (11/10/2026): a recusa do número da OS vem ANTES dos
+  // argumentos inválidos, então o desfecho também — senão a auditoria diz "argumentos_invalidos"
+  // quando o modelo recebeu a recusa do número.
   if (foraDoPerfil) {
-    const desfecho = argumentosInvalidos.length > 0
-      ? "argumentos_invalidos"
-      : recusaDoNumero
+    const desfecho = recusaDoNumero
       ? "numero_da_os_recusado"
+      : argumentosInvalidos.length > 0
+      ? "argumentos_invalidos"
       : executou
       ? (temErro(toolResult) ? "falha_na_execucao" : "executada")
       : createdPendingProposal ? "pendencia" : "falha_ao_registrar_pendencia";
@@ -1022,19 +1042,20 @@ export async function executarChamadaDeTool(
     });
   }
 
-  return { toolResult, ...(createdPendingProposal ? { proposal: createdPendingProposal } : {}) };
+  return { toolResult, ...(createdPendingProposal ? { proposal: createdPendingProposal } : {}), ...(fluxo ? { fluxo } : {}) };
 }
 
 /**
  * Depois de uma ferramenta, o turno para para esperar o usuário? Pendência criada, busca ambígua
- * (desambiguação automática) ou present_options. `trabalhoComposto` = o modelo disparou várias
+ * (desambiguação automática), present_options ou (11/10/2026) um fluxo do sistema que já falou com o
+ * dono no WhatsApp (`fluxo`: a pergunta do CMP). `trabalhoComposto` = o modelo disparou várias
  * ferramentas no mesmo turno; aí a busca ambígua volta ao modelo em vez de virar pergunta.
  */
 export function interrupcaoDaTool(
   tc: { name: string; input: unknown },
   r: ResultadoDaTool,
   trabalhoComposto: boolean,
-): { proposal?: Proposal; options?: OptionsData } | null {
+): { proposal?: Proposal; options?: OptionsData; fluxo?: FluxoQueFalou } | null {
   const disambig = AUTO_DISAMBIG[tc.name];
   const items: any[] = (r.toolResult as any)?.results ?? [];
   // Em TRABALHO COMPOSTO (o modelo disparou várias buscas no mesmo turno, ex.: montar um
@@ -1050,6 +1071,7 @@ export function interrupcaoDaTool(
     return { options: { question: disambig.question(searchQuery, items.length), options } };
   }
   if (r.proposal) return { proposal: r.proposal };
+  if (r.fluxo) return { fluxo: r.fluxo };
   if (tc.name === "present_options") {
     const input = tc.input as any;
     return { options: { question: input.question, options: input.options } };
@@ -1140,7 +1162,7 @@ export async function runAgentLoop(params: RunAgentLoopParams): Promise<AgentTur
     // de decidir encerrar cedo — a API exige tool_result para toda tool_use da
     // mensagem anterior antes de qualquer novo conteúdo na próxima.
     const toolResults: ClaudeToolResultBlock[] = [];
-    let shortCircuit: { proposal?: Proposal; options?: OptionsData } | null = null;
+    let shortCircuit: { proposal?: Proposal; options?: OptionsData; fluxo?: FluxoQueFalou } | null = null;
 
     for (const tc of toolUses) {
       const r = await executarChamadaDeTool(tc, {

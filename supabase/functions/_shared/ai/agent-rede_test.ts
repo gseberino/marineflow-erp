@@ -8,7 +8,9 @@
 // Rodar com:
 //   deno test --allow-all supabase/functions/_shared/ai/agent-rede_test.ts
 import { assert, assertEquals, assertExists, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { runAgentLoop, validarArgumentosDaTool } from "./agent.ts";
+import { executarChamadaDeTool, interrupcaoDaTool, runAgentLoop, validarArgumentosDaTool } from "./agent.ts";
+import { construirFerramentaExtra, NOME_DA_FERRAMENTA_EXTRA } from "./ferramenta-extra.ts";
+import { COMPLETAR_COMPROVANTE } from "./tools/comprovantes.ts";
 import { NEVER_AUTONOMOUS } from "./autonomy-policy.ts";
 import { filtrarPorCanal } from "./channel-scope.ts";
 import { ESCRITAS_VERIFICADAS_DA_REDE, PERFIL_OPERACAO, SO_PELA_REDE } from "./perfil-operacao.ts";
@@ -97,7 +99,7 @@ function fakeAdmin() {
   return { admin, auditRows, pendingRows };
 }
 
-function montar(opts: { tools: ToolDef[]; role?: Role; settings?: Record<string, string>; channel?: "panel" | "whatsapp"; pedido?: string }) {
+function montar(opts: { tools: ToolDef[]; role?: Role; settings?: Record<string, string>; channel?: "panel" | "whatsapp"; pedido?: string; sb?: unknown }) {
   const { admin, auditRows, pendingRows } = fakeAdmin();
   const params = {
     system: [{ type: "text" as const, text: "teste" }],
@@ -105,7 +107,7 @@ function montar(opts: { tools: ToolDef[]; role?: Role; settings?: Record<string,
     channel: opts.channel ?? "panel",
     tools: opts.tools,
     messages: [{ role: "user" as const, content: [{ type: "text" as const, text: opts.pedido ?? "oi" }] }],
-    toolCtx: { sb: {}, admin, userId: "u1", userRole: opts.role ?? "admin", jwt: "jwt", appOrigin: "", settings: opts.settings ?? {} },
+    toolCtx: { sb: opts.sb ?? {}, admin, userId: "u1", userRole: opts.role ?? "admin", jwt: "jwt", appOrigin: "", settings: opts.settings ?? {} },
   };
   return { params, auditRows, pendingRows };
 }
@@ -559,4 +561,83 @@ Deno.test("validarArgumentosDaTool: nenhum schema real de allTools recusa uma ch
     for (const campo of s.required ?? []) args[campo] = s.properties?.[campo]?.enum?.[0] ?? "valor";
     assertEquals(validarArgumentosDaTool(t.input_schema, args), [], t.name);
   }
+});
+
+// ─── D3 (11/10/2026): a ordem do desfecho na auditoria segue a da execução ──────────────────
+
+Deno.test("rede: número da OS recusado E campo desconhecido → o modelo recebe a recusa do número, e a auditoria diz numero_da_os_recusado", async () => {
+  execucoes = [];
+  // service_orders sem o OS-99999 (localizarOrdem: .select().in("service_order_number", candidatos))
+  const sb = { from: () => ({ select: () => ({ in: () => Promise.resolve({ data: [], error: null }) }) }) };
+  const args = { scope: "client", entity_id: "c1", service_order_id: "OS-99999" };
+  // premissa: os argumentos TAMBÉM são inválidos (service_order_id não existe nesta tool)
+  assertEquals(validarArgumentosDaTool(porNomeReal.get(COM_ESQUEMA)!.input_schema, args), ["o campo 'service_order_id' não existe nesta ferramenta"]);
+  const { params, auditRows } = montar({ tools: [comExecuteFalso(COM_ESQUEMA)], sb });
+  const { fetchStub } = mockFetchSequence([chamaTool(COM_ESQUEMA, args), respondeTexto("não achei a OS")]);
+  const r = await withFetch(fetchStub, () => runAgentLoop(params));
+  assertEquals(execucoes, []);
+  const recusa = r.toolEvents[0].result as { error: string; input_schema?: unknown };
+  assertStringIncludes(recusa.error, "OS-99999");
+  assertEquals(recusa.input_schema, undefined, "a recusa do número vem antes dos argumentos inválidos");
+  assertEquals(marcasDaRede(auditRows), [{ tool: COM_ESQUEMA, desfecho: "numero_da_os_recusado" }]);
+});
+
+// ─── completar_comprovante (11/10/2026): o fluxo de comprovantes já falou com o dono ─────────
+
+const completarFalso = (jaFalou = true) =>
+  comExecuteFalso(COMPLETAR_COMPROVANTE, () => ({ ok: true, cmp: "CMP-00001", ja_falou_ao_dono: jaFalou, instruction: "o sistema já mandou a pergunta" }));
+const ARGS_DO_CASO_REAL = { cmp: "CMP-00001", valor: 235.97, categoria: "combustível", observacao: "cupom sem o gasto complementar; vale o do cartão" };
+
+Deno.test("rede: completar_comprovante no WhatsApp roda direto (sem pendência, sem dois 'sim') e o turno termina na pergunta do fluxo", async () => {
+  execucoes = [];
+  assertEquals(SO_PELA_REDE.has(COMPLETAR_COMPROVANTE), true);
+  assertEquals(COMPLETAR_COMPROVANTE in ESCRITAS_VERIFICADAS_DA_REDE, true);
+  const { params, auditRows, pendingRows } = montar({ tools: [completarFalso()], channel: "whatsapp" });
+  const { fetchStub, calls } = mockFetchSequence([chamaTool(COMPLETAR_COMPROVANTE, ARGS_DO_CASO_REAL), respondeTexto("Anotei! Responda 8 para empresa.")]);
+  const r = await withFetch(fetchStub, () => runAgentLoop(params));
+  assertEquals(toolsEnviadas(calls).includes(COMPLETAR_COMPROVANTE), false, "fora do perfil: só pela rede");
+  assertEquals(execucoes, [COMPLETAR_COMPROVANTE]);
+  assertEquals(pendingRows.length, 0);
+  assertEquals(r.proposal, undefined);
+  assertEquals(r.fluxo, { codigo: "CMP-00001" });
+  assertEquals(calls.length, 1, "o turno parou: o modelo não escreve uma segunda mensagem ao dono");
+  assertEquals(marcasDaRede(auditRows), [{ tool: COMPLETAR_COMPROVANTE, desfecho: "executada" }]);
+});
+
+Deno.test("rede: no painel, completar_comprovante não interrompe — o modelo responde no chat (o fluxo fala no WhatsApp)", async () => {
+  execucoes = [];
+  const { params } = montar({ tools: [completarFalso()], channel: "panel" });
+  const { fetchStub, calls } = mockFetchSequence([chamaTool(COMPLETAR_COMPROVANTE, ARGS_DO_CASO_REAL), respondeTexto("Anotei no CMP-00001.")]);
+  const r = await withFetch(fetchStub, () => runAgentLoop(params));
+  assertEquals(execucoes, [COMPLETAR_COMPROVANTE]);
+  assertEquals(r.fluxo, undefined);
+  assertEquals(calls.length, 2);
+  assertEquals(r.message.content, "Anotei no CMP-00001.");
+});
+
+Deno.test("ferramenta_extra (Max e perfil enxuto): completar_comprovante pela extra devolve o fluxo e interrompe; sem ja_falou_ao_dono, não", async () => {
+  const { admin, auditRows, pendingRows } = fakeAdmin();
+  const amb = {
+    toolsByName: { [NOME_DA_FERRAMENTA_EXTRA]: construirFerramentaExtra([COMPLETAR_COMPROVANTE]) },
+    alcancaveisPelaRede: { [COMPLETAR_COMPROVANTE]: completarFalso() },
+    toolCtx: { sb: {}, admin, userId: "u1", userRole: "admin" as const, jwt: "", appOrigin: "", settings: {} },
+    sessionId: "s1",
+    channel: "whatsapp" as const,
+  };
+  const tc = { name: NOME_DA_FERRAMENTA_EXTRA, input: { nome: COMPLETAR_COMPROVANTE, argumentos: ARGS_DO_CASO_REAL } };
+  const r = await executarChamadaDeTool(tc, amb);
+  assertEquals(r.fluxo, { codigo: "CMP-00001" });
+  assertEquals(r.proposal, undefined);
+  assertEquals(pendingRows.length, 0);
+  // o erp-mcp registra esta interrupção no job (a primeira vence) e o gateway encerra o turno
+  assertEquals(interrupcaoDaTool(tc, r, true), { fluxo: { codigo: "CMP-00001" } });
+  assertEquals(marcasDaRede(auditRows), [{ tool: COMPLETAR_COMPROVANTE, desfecho: "executada" }]);
+  // no painel, não há fluxo a interromper
+  const noPainel = await executarChamadaDeTool(tc, { ...amb, channel: "panel" as const });
+  assertEquals(noPainel.fluxo, undefined);
+  assertEquals(interrupcaoDaTool(tc, noPainel, true), null);
+  // o fluxo não falou (ocupado, envio que falhou): o modelo diz a linha da instruction
+  const calada = await executarChamadaDeTool(tc, { ...amb, alcancaveisPelaRede: { [COMPLETAR_COMPROVANTE]: completarFalso(false) } });
+  assertEquals(calada.fluxo, undefined);
+  assertEquals(interrupcaoDaTool(tc, calada, true), null);
 });

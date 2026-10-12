@@ -59,6 +59,22 @@ export function parseConfirmationReply(text: string): ConfirmationReply | null {
   return null;
 }
 
+/**
+ * O que fazer com a resposta quando há uma pendência esperando (11/10/2026). "sim <número> <texto>"
+ * era sempre barrado como "veio um ajuste junto" — também quando o número não era o PIN ("sim 235
+ * reais") — e nunca chegava ao modelo. Agora só é barrado quando o número É o PIN (conferido no
+ * hash por quem chama): o PIN nunca vai ao modelo. Sem o PIN certo, é conversa, como o "sim mas…" sem
+ * número. Risco aceito: um PIN digitado errado junto de texto passa ao modelo.
+ */
+export function destinoDoSimComPendencia(
+  c: ConfirmationReply | null,
+  pinConfere: boolean,
+): "recusar_ajuste" | "resolver" | "modelo" {
+  if (!c) return "modelo";
+  if (c.decision === "approve" && c.textoAMais) return pinConfere ? "recusar_ajuste" : "modelo";
+  return "resolver";
+}
+
 /** Reconhece a escolha de um número (1-indexed) dentro de uma lista de opções pendente. */
 export function parseOptionReply(text: string, optionCount: number): number | null {
   const trimmed = text.trim();
@@ -431,6 +447,21 @@ export async function enviarComRegistro(
   registro: RegistroDoTurno,
   p: { ligada: boolean; origem?: Exclude<OrigemDaPergunta, "comprovante">; retomar?: (phone: string) => Promise<void> },
 ): Promise<string | null> {
+  // Texto vazio (11/10/2026): o fluxo de comprovantes já falou com o dono neste turno — nada é
+  // enviado; o registro segue o de sempre (encerra as perguntas do assistente e retoma).
+  if (!texto.trim()) {
+    if (p.ligada && registro?.acao === "encerrar") {
+      const fechadas = await encerrarPerguntasExternas(admin, phone, "respondida");
+      if (fechadas > 0) {
+        try {
+          await (p.retomar ?? retomarPerguntaDoComprovante)(phone);
+        } catch {
+          /* o vigia retoma */
+        }
+      }
+    }
+    return null;
+  }
   if (!p.ligada || !registro) return await queueWhatsAppReply(admin, phone, texto);
   if (registro.acao === "registrar") {
     const r = await registrarPerguntaExternaDetalhada(admin, {

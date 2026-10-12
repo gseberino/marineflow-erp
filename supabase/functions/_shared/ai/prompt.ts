@@ -27,11 +27,18 @@ const STATUS_LABELS_TEXT = statusOsParaPrompt();
  * dos comprovantes LIGADA (comprovante_fluxo = 'dono' e comprovante_conversa = 'on'). Com ela
  * desligada, ou em sombra, a legenda do cupom chega ao assistente como hoje e ele lança o que o dono
  * pede — nada muda para o dono. Ligar ou desligar invalida o cache do bloco estável uma vez.
+ *
+ * 11/10/2026 (caso real do CMP-00001): o dono disse em conversa o que faltava no CMP e o assistente,
+ * sem como passar ao fluxo, mandou ele digitar "cmp 1" (e ensinou um passo que o fluxo nem faz). Agora
+ * o que ele diz vai a completar_comprovante, e quem pergunta e grava continua sendo o fluxo.
  */
 function linhaDosComprovantes(settings: Record<string, string>): string {
   if (!conversaDosComprovantesLigada(settings)) return "";
   return "\n- COMPROVANTES (CMP-00123): foto/PDF de cupom que o dono manda é tratado pelo sistema de comprovantes, que pergunta e grava sozinho. " +
-    "Não lance de novo o que tem CMP; para saber de um comprovante → consultar_comprovantes. Se uma ferramenta avisar de um CMP aberto, diga ao dono para " +
+    "Não lance de novo o que tem CMP; para saber de um comprovante → consultar_comprovantes. Quando o dono disser em conversa o que falta num CMP " +
+    "ainda não gravado (o valor certo, para quê, a OS, a categoria, a forma, quem pagou), passe só o que ele disse a completar_comprovante: o sistema " +
+    "manda a ele a próxima pergunta ou o resumo, e só o *sim* dele grava — não repita o resumo nem peça o sim, e não lance o gasto por outra ferramenta. " +
+    "Valor diferente do lido vai com a observação (o porquê, como ele disse). Se uma ferramenta avisar de um CMP aberto, diga ao dono para " +
     "responder *cmp N*. Para cancelar um CMP, oriente o dono a mandar *cancelar cmp N* e o motivo (você não cancela comprovante).";
 }
 
