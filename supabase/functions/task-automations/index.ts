@@ -11,7 +11,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, isManualDismissal, dismissCooldownDays,
-  type RuleCandidate,
+  textoDoLembreteDaOs, type RuleCandidate,
 } from "./rules.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
@@ -225,8 +225,10 @@ async function runTechnicianReminders(db: Db, settings: Record<string, string>) 
       });
       await db.from("whatsapp_send_queue").insert({
         phone_normalized: u.phone_normalized,
-        message: `🔧 Lembrete: ${quando} às ${hora} você tem a OS ${o.service_order_number}` +
-          ` — ${o.clients?.name || "cliente"}${o.vessels?.name ? ` (${o.vessels.name})` : ""}.`,
+        // o número já traz o prefixo ("OS-00060"): o texto mora em rules.ts para ter teste
+        message: textoDoLembreteDaOs({
+          quando, hora, numero: o.service_order_number, cliente: o.clients?.name, barco: o.vessels?.name,
+        }),
         source: "agenda-r10",
         source_ref_id: o.id,
         priority: 4,

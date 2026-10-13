@@ -8,7 +8,7 @@ import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { normalizePhoneNumber } from "../_shared/whatsapp/normalize.ts";
 import { chaveDeEnvio, reservarEnvio } from "../_shared/whatsapp/idempotencia.ts";
-import { enviarLembrete } from "./enviar.ts";
+import { descricaoDaCobranca, enviarLembrete } from "./enviar.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
@@ -97,7 +97,7 @@ servirComCors(async (req) => {
       const dueDateBR = dueDate.toLocaleDateString("pt-BR");
       const clientFirstName = (client?.name || "").split(" ")[0] || "Cliente";
       const soNumber = (rec as any).service_orders?.service_order_number || "";
-      const description = rec.description || (soNumber ? `OS ${soNumber}` : "cobrança pendente");
+      const description = descricaoDaCobranca(rec.description, soNumber);
       const balanceValue = Number(rec.balance_amount || rec.amount);
       if (pisoCobranca > 0 && balanceValue < pisoCobranca) {
         console.info(`[receivable-reminders] ${rec.id}: R$ ${balanceValue} abaixo do piso de R$ ${pisoCobranca}, sem lembrete.`);

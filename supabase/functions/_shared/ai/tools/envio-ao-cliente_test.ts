@@ -570,7 +570,9 @@ Deno.test("a edge reconheceu a chave: avisa sem fingir novo envio", async () => 
 });
 
 // ─── Formato 'link': o comportamento de antes (mais o vínculo) ──────────────────────────
-Deno.test("formato 'link': o mesmo texto e a mesma chave de antes, sem PDF", async () => {
+// O número já traz o prefixo ("ORÇ-00086", "OS-00087"): o texto ao cliente diz "do orçamento
+// ORÇ-…" ou "da OS-…", nunca "da OS ORÇ-…" (12/10/2026). A chave não muda: o texto não entra nela.
+Deno.test("formato 'link': o texto diz 'do orçamento ORÇ-…', a mesma chave de antes, sem PDF", async () => {
   const amb = montarAmbiente();
   const r = await executar(amb, { service_order_id: ORC.id, formato: "link" });
   assertEquals(r, { ok: true, messageId: "m1" });
@@ -579,8 +581,26 @@ Deno.test("formato 'link': o mesmo texto e a mesma chave de antes, sem PDF", asy
   const corpo = amb.chamadas.envio[0];
   assertEquals(corpo.kind, "text");
   assertEquals(corpo.phone, CLIENTE.whatsapp);
-  assertEquals(corpo.message, `Olá Cliente, segue o link da OS ORÇ-00086: https://erp.example/view/${ORC.share_token}`);
+  assertEquals(corpo.message, `Olá Cliente, segue o link do orçamento ORÇ-00086: https://erp.example/view/${ORC.share_token}`);
   assertEquals(corpo.dedupe_key, `os-link:${ORC.id}:5547999990000:2026-09-26`);
+});
+
+Deno.test("formato 'link' de uma OS (fora de orçamento): 'segue o link da OS-00087', sem 'OS OS-'", async () => {
+  const amb = montarAmbiente();
+  const r = await executar(amb, { service_order_id: OS.id, formato: "link" });
+  assertEquals(r.ok, true, JSON.stringify(r));
+  const corpo = amb.chamadas.envio[0];
+  assertEquals(corpo.message, `Olá Cliente, segue o link da OS-00087: https://erp.example/view/${OS.share_token}`);
+  assertEquals(corpo.context, "service_order");
+  assertEquals(corpo.dedupe_key, `os-link:${OS.id}:5547999990000:2026-09-26`);
+});
+
+Deno.test("OS sem link público: o erro ao modelo cita o número como vem", async () => {
+  const amb = montarAmbiente({ ordens: [{ ...OS, share_token: null }] });
+  const r = await executar(amb, { service_order_id: OS.id, formato: "link" });
+  assertStringIncludes(r.error, "A OS-00087 não possui link público ainda");
+  assertEquals(r.error.includes("OS OS-"), false, r.error);
+  assertEquals(amb.chamadas.envio.length, 0);
 });
 
 Deno.test("formato 'link' repetido no dia: mesma resposta de antes", async () => {

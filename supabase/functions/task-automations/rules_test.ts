@@ -624,3 +624,49 @@ Deno.test("isResolved r3: tarefa aberta de conta que ficou abaixo do mínimo se 
     "Saldo abaixo do mínimo de cobrança",
   );
 });
+
+// ── "OS OS-" (12/10/2026): o número da OS já traz o prefixo ("OS-00060", "ORÇ-00112"). O título
+// da tarefa e o lembrete ao técnico levam o número como vem, sem "OS " na frente.
+// deno-lint-ignore no-explicit-any
+function bancoDeOs(linhas: any[]) {
+  return {
+    from() {
+      // deno-lint-ignore no-explicit-any
+      const q: any = {};
+      for (const m of ["select", "eq", "is", "lt", "lte", "gt", "gte", "in", "order"]) q[m] = () => q;
+      q.limit = async () => ({ data: linhas, error: null });
+      return q;
+    },
+  };
+}
+
+Deno.test("find r1, r2 e r15: o título leva o número da OS como vem, sem 'OS OS-'", async () => {
+  const daqui = new Date(Date.now() + 24 * 3600000).toISOString();
+  const os = {
+    id: "so-60", service_order_number: "OS-00060", client_id: "c-1",
+    updated_at: "2026-10-01T12:00:00Z", scheduled_start_at: daqui, client_confirmed_for: null,
+    clients: { name: "Marina Azul", phone: "5547999990000", whatsapp: null, opt_out_whatsapp: false },
+  };
+  const [t1] = await ruleById("r1")!.find(bancoDeOs([os]));
+  const [t2] = await ruleById("r2")!.find(bancoDeOs([os]));
+  const [t15] = await ruleById("r15")!.find(bancoDeOs([os]));
+  assertEquals(t1.title, "Agendar OS-00060 — Marina Azul");
+  assertEquals(t2.title.startsWith("Verificar OS-00060 parada há "), true, t2.title);
+  assertEquals(t15.title.startsWith("Confirmar com Marina Azul a OS-00060 ("), true, t15.title);
+  for (const t of [t1, t2, t15]) assertEquals(t.title.includes("OS OS-"), false, t.title);
+  // o orçamento segue com o prefixo dele
+  const [orc] = await ruleById("r1")!.find(bancoDeOs([{ ...os, service_order_number: "ORÇ-00112" }]));
+  assertEquals(orc.title, "Agendar ORÇ-00112 — Marina Azul");
+});
+
+Deno.test("textoDoLembreteDaOs (r10): 'você tem a OS-00060', com e sem barco", async () => {
+  const { textoDoLembreteDaOs } = await import("./rules.ts");
+  assertEquals(
+    textoDoLembreteDaOs({ quando: "amanhã", hora: "09:00", numero: "OS-00060", cliente: "Marina Azul", barco: "Netuno" }),
+    "🔧 Lembrete: amanhã às 09:00 você tem a OS-00060 — Marina Azul (Netuno).",
+  );
+  assertEquals(
+    textoDoLembreteDaOs({ quando: "hoje", hora: "07:30", numero: "OS-00061", cliente: null, barco: null }),
+    "🔧 Lembrete: hoje às 07:30 você tem a OS-00061 — cliente.",
+  );
+});

@@ -10,6 +10,17 @@ import { concluirEnvio, liberarEnvio } from "../_shared/whatsapp/idempotencia.ts
 // deno-lint-ignore no-explicit-any
 type DbClient = any;
 
+/**
+ * O "referente a …" da cobrança. A descrição do recebível vence; sem ela, o número da OS como vem
+ * (já traz o prefixo: "OS-00060", "ORÇ-00112"), nunca "OS OS-00060"; sem os dois, "cobrança pendente".
+ */
+export function descricaoDaCobranca(
+  descricao: string | null | undefined,
+  numeroDaOs: string | null | undefined,
+): string {
+  return descricao || numeroDaOs || "cobrança pendente";
+}
+
 export async function enviarLembrete(p: {
   admin: DbClient;
   provider: Pick<WhatsAppProvider, "sendText">;

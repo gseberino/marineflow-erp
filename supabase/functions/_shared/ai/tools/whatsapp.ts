@@ -793,7 +793,8 @@ export const whatsappTools: ToolDef[] = [
         // cancela pagamentos e zera recebíveis — não é o caminho de uma ordem cancelada.
         return { error: `A ordem ${so.service_order_number} está CANCELADA: não se manda ao cliente. Se ela voltou a valer, mude o status dela na tela antes de mandar.` };
       }
-      if (!so.share_token) return { error: `A OS ${so.service_order_number} não possui link público ainda. Abra a OS no app, clique em "Compartilhar" para gerar o link, e tente novamente.` };
+      // O número já traz o prefixo ("OS-00060", "ORÇ-00112"): vai como vem, sem "OS " na frente.
+      if (!so.share_token) return { error: `A ${so.service_order_number} não possui link público ainda. Abra a OS no app, clique em "Compartilhar" para gerar o link, e tente novamente.` };
       // Destino: SÓ o cadastro do cliente da ordem. Nenhum telefone dos argumentos é lido —
       // é o que garante que o arquivo com preço e PIX vai para quem é dono do orçamento.
       const { data: c } = await admin.from("clients").select("whatsapp, phone, name, display_name, opt_out_whatsapp").eq("id", so.client_id).maybeSingle();
@@ -831,7 +832,8 @@ export const whatsappTools: ToolDef[] = [
         const personalizada = typeof args.custom_message === "string" ? args.custom_message.trim() : "";
         const msg = personalizada
           ? mensagemComLink(personalizada, link, so.share_token)
-          : `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, segue o link da OS ${so.service_order_number}: ${link}`;
+          // "do orçamento ORÇ-00112" ou "da OS-00060": o número já diz o que é (nunca "da OS ORÇ-…")
+          : `Olá${nomeUsado ? ` ${nomeUsado}` : ""}, segue o link ${contexto === "quote" ? `do orçamento ${so.service_order_number}` : `da ${so.service_order_number}`}: ${link}`;
         const g = guardaDeEnvio(msg, { tipo: "os_link", audiencia: "cliente", canal: "whatsapp", destinatarioIdentificado: !!so.client_id });
         if (g.bloqueado) {
           await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });

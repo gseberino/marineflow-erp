@@ -46,6 +46,21 @@ export const keyOf = (rule: string, entity: string, id: string, bucket?: string)
 /** id da entidade a partir da automation_key (3º segmento). */
 export const entityIdFromKey = (key: string) => key.split(':')[2] || '';
 
+/**
+ * R10: o lembrete ao técnico pelo WhatsApp da equipe. O número da OS já traz o prefixo
+ * ("OS-00060", "ORÇ-00112"), então vai como vem: "você tem a OS-00060", nunca "a OS OS-00060".
+ */
+export function textoDoLembreteDaOs(p: {
+  quando: string;
+  hora: string;
+  numero: string;
+  cliente?: string | null;
+  barco?: string | null;
+}): string {
+  return `🔧 Lembrete: ${p.quando} às ${p.hora} você tem a ${p.numero}` +
+    ` — ${p.cliente || 'cliente'}${p.barco ? ` (${p.barco})` : ''}.`;
+}
+
 const daysAgoISO = (days: number) => new Date(Date.now() - days * 86400000).toISOString();
 
 /**
@@ -87,7 +102,7 @@ const r1: Rule = {
       .limit(50);
     return (data || []).map((o: any) => ({
       automation_key: keyOf('r1', 'so', o.id),
-      title: `Agendar OS ${o.service_order_number} — ${o.clients?.name || 'sem cliente'}`,
+      title: `Agendar ${o.service_order_number} — ${o.clients?.name || 'sem cliente'}`,
       priority: 'high' as const,
       assignee: 'admin' as const,
       due_at: dueAt(inDaysISO(1)),
@@ -122,7 +137,7 @@ const r2: Rule = {
       const dias = Math.floor((Date.now() - new Date(o.updated_at).getTime()) / 86400000);
       return {
         automation_key: keyOf('r2', 'so', o.id),
-        title: `Verificar OS ${o.service_order_number} parada há ${dias} dias — ${o.clients?.name || ''}`.trim(),
+        title: `Verificar ${o.service_order_number} parada há ${dias} dias — ${o.clients?.name || ''}`.trim(),
         priority: 'normal' as const,
         assignee: 'admin' as const,
         due_at: dueAt(todayISO()),
@@ -572,7 +587,7 @@ const r15: Rule = {
         });
         return {
           automation_key: keyOf('r15', 'so', o.id, dia),
-          title: `Confirmar com ${o.clients?.name || 'o cliente'} a OS ${o.service_order_number} (${fmtDate(dia)} às ${hora})`,
+          title: `Confirmar com ${o.clients?.name || 'o cliente'} a ${o.service_order_number} (${fmtDate(dia)} às ${hora})`,
           priority: 'high' as const,
           assignee: 'admin' as const,
           due_at: dueAt(todayISO()),

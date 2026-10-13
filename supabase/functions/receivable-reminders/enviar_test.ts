@@ -61,3 +61,14 @@ Deno.test("WhatsApp confirmou: marca o recebível e conclui a reserva", async ()
   assertEquals(db.concluidas, [base.chave]);
   assertEquals(db.liberadas, []);
 });
+
+// "OS OS-" (12/10/2026): o número da OS já traz o prefixo ("OS-00060"). Sem descrição no
+// recebível, a cobrança cita o número como vem, nunca "OS OS-00060".
+Deno.test("descricaoDaCobranca: a descrição vence; sem ela, o número; sem os dois, 'cobrança pendente'", async () => {
+  const { descricaoDaCobranca } = await import("./enviar.ts");
+  assertEquals(descricaoDaCobranca("Saldo da OS-00060", "OS-00060"), "Saldo da OS-00060");
+  assertEquals(descricaoDaCobranca(null, "OS-00060"), "OS-00060");
+  assertEquals(descricaoDaCobranca("", "ORÇ-00112"), "ORÇ-00112");
+  assertEquals(descricaoDaCobranca(undefined, ""), "cobrança pendente");
+  assertEquals(descricaoDaCobranca(null, null), "cobrança pendente");
+});
