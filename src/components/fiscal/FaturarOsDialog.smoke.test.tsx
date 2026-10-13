@@ -117,7 +117,9 @@ describe('assistente Faturar OS', () => {
   it('abre com os dois cartões e explica a separação serviço×peça', async () => {
     estado.preflight = preflightBase();
     renderDialog();
-    expect(await screen.findByText(/Faturar OS OS-00099/)).toBeInTheDocument();
+    // O número já traz o prefixo ("OS-00099"): até 12/10/2026 o título dizia "Faturar OS OS-00099".
+    expect(await screen.findByText(/Faturar OS-00099/)).toBeInTheDocument();
+    expect(screen.queryByText(/Faturar OS OS-/)).toBeNull();
     expect(screen.getByText(/NFS-e — serviços/)).toBeInTheDocument();
     expect(screen.getByText(/NF-e — peças/)).toBeInTheDocument();
     expect(screen.getByText(/dois documentos/)).toBeInTheDocument();

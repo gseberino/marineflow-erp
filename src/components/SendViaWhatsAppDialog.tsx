@@ -339,9 +339,11 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
 
   async function handleSend() {
     if (!target) return;
+    // O número já traz o prefixo: a OS sai "OS-00100.pdf" (antes "OS-OS-00100.pdf"); o orçamento
+    // segue "Orcamento-ORÇ-00100.pdf".
     const defaultFilename =
       target.kind === 'service_order'
-        ? `${documentType === 'quote' ? 'Orcamento' : 'OS'}-${target.serviceOrderNumber}.pdf`
+        ? `${documentType === 'quote' ? `Orcamento-${target.serviceOrderNumber}` : target.serviceOrderNumber}.pdf`
         : `Cobranca-${target.receivableId.slice(0, 8)}.pdf`;
     const filename = clientSetting?.pdf_filename_pattern
       ? applyTemplateVariables(clientSetting.pdf_filename_pattern, templateVars)

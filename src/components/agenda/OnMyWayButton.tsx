@@ -78,7 +78,8 @@ export function OnMyWayButton({ order }: { order: any }) {
               <DialogTitle>Avisar {clientName}?</DialogTitle>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">
-              Envia agora, por WhatsApp, que a equipe está a caminho do atendimento da OS {order.service_order_number}.
+              {/* O número já traz o prefixo: "do atendimento da OS-00060". */}
+              Envia agora, por WhatsApp, que a equipe está a caminho do atendimento da {order.service_order_number || 'OS'}.
             </p>
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)} disabled={sending}>Cancelar</Button>

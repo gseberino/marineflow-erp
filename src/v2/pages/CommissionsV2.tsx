@@ -62,7 +62,8 @@ export function PainelDeComissoes() {
   const approveMutation = useMutation({
     mutationFn: async (commission: CommissionRow) => {
       const { data: payable, error: payErr } = await supabase.from('payables').insert({
-        description: `Comissão OS #${commission.service_orders?.service_order_number} - ${commission.app_users?.full_name}`,
+        // O número já traz o prefixo: "Comissão OS-00060 - Roberto".
+        description: `Comissão ${commission.service_orders?.service_order_number} - ${commission.app_users?.full_name}`,
         amount: commission.amount,
         balance_amount: commission.amount,
         issue_date: new Date().toISOString().split('T')[0],

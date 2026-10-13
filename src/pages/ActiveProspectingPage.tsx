@@ -56,7 +56,8 @@ export default function ActiveProspectingPage() {
     const clientName = target.clients?.name?.split(' ')[0] || 'Cliente';
     const total = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(target.grand_total || 0);
 
-    const prompt = `Crie uma mensagem curta de WhatsApp muito persuasiva e educada para ${clientName}. Ele tem um orçamento (OS #${target.service_order_number}) de ${total} parado no status rascunho. O objetivo é fechar a venda agora. Ofereça de forma sutil uma facilidade (tipo parcelamento ou prioridade na agenda). Use gatilhos mentais. Não pareça desesperado.`;
+    // O número já traz o prefixo ("ORÇ-00112"): vai como vem, sem "OS #" na frente.
+    const prompt = `Crie uma mensagem curta de WhatsApp muito persuasiva e educada para ${clientName}. Ele tem um orçamento (${target.service_order_number}) de ${total} parado no status rascunho. O objetivo é fechar a venda agora. Ofereça de forma sutil uma facilidade (tipo parcelamento ou prioridade na agenda). Use gatilhos mentais. Não pareça desesperado.`;
 
     try {
       const { data, error } = await supabase.functions.invoke('ai-agent', {
@@ -74,7 +75,7 @@ export default function ActiveProspectingPage() {
     } catch (e) {
       console.error(e);
       // Fallbacks elegantes se a IA falhar
-      setDraftMsg(`Olá ${clientName}, tudo bem? Estou revisando aqui o orçamento da sua OS #${target.service_order_number}. Queria ver com você se ficou alguma dúvida e se podemos aprovar para eu já garantir o seu horário na nossa agenda da semana. Conseguimos facilitar o pagamento se precisar! Me avise.`);
+      setDraftMsg(`Olá ${clientName}, tudo bem? Estou revisando aqui o seu orçamento ${target.service_order_number}. Queria ver com você se ficou alguma dúvida e se podemos aprovar para eu já garantir o seu horário na nossa agenda da semana. Conseguimos facilitar o pagamento se precisar! Me avise.`);
     } finally {
       setIsGenerating(false);
     }
@@ -163,7 +164,7 @@ export default function ActiveProspectingPage() {
                       <span className="text-xs text-muted-foreground">Há {Math.floor((Date.now() - new Date(quote.created_at).getTime()) / (1000 * 60 * 60 * 24))} dias</span>
                     </div>
                     <CardTitle className="text-lg mt-2">{quote.clients?.name}</CardTitle>
-                    <CardDescription>OS #{quote.service_order_number}</CardDescription>
+                    <CardDescription>{quote.service_order_number}</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <p className="text-2xl font-bold mb-4">

@@ -16,7 +16,7 @@ import { buildHTMLDocument, type PDFData, type PDFDocumentType, type PDFOptions 
 import { ORCAMENTO } from '../../supabase/functions/_shared/pdf/amostras';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from './SendViaWhatsAppDialog';
 
-type Envio = { pdfData: PDFData; pdfOptions: PDFOptions; documentType: PDFDocumentType; mode: string; link_title?: string };
+type Envio = { pdfData: PDFData; pdfOptions: PDFOptions; documentType: PDFDocumentType; mode: string; link_title?: string; filename?: string };
 
 const estado = vi.hoisted(() => ({
   enviados: [] as Envio[],
@@ -140,6 +140,18 @@ describe('Enviar via WhatsApp — número da OS sem "OS " repetido', () => {
   it('o orçamento segue "Orçamento ORÇ-00100"', async () => {
     const envio = await enviarPeloDialogo(orcamentoAlvo);
     expect(envio.link_title).toBe('Orçamento ORÇ-00100');
+  });
+
+  // O nome do PDF anexado punha "OS-" na frente do número que já o traz: "OS-OS-00100.pdf"
+  // (até 12/10/2026). O orçamento segue com "Orcamento-" na frente: "Orcamento-ORÇ-00100.pdf".
+  it('o PDF da OS se chama "OS-00100.pdf", não "OS-OS-00100.pdf"', async () => {
+    const envio = await enviarPeloDialogo(osAlvo);
+    expect(envio.filename).toBe('OS-00100.pdf');
+  });
+
+  it('o PDF do orçamento segue "Orcamento-ORÇ-00100.pdf"', async () => {
+    const envio = await enviarPeloDialogo(orcamentoAlvo);
+    expect(envio.filename).toBe('Orcamento-ORÇ-00100.pdf');
   });
 
   it('o pedido de texto à IA cita "a OS-00100", sem "OS OS-"', async () => {

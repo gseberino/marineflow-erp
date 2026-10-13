@@ -213,3 +213,13 @@ describe('ServiceOrderList — Envio via WhatsApp (wa.me + Evolution)', () => {
     openSpy.mockRestore();
   });
 });
+
+// O número da OS já traz o prefixo ("OS-001"). Até 12/10/2026 o leitor de tela anunciava o
+// botão de três pontinhos como "Mais ações da OS OS-001".
+describe('ServiceOrderList — número da OS sem "OS " repetido', () => {
+  it('o botão de mais ações se chama "Mais ações da OS-001"', async () => {
+    renderList();
+    expect(await screen.findByRole('button', { name: 'Mais ações da OS-001' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Mais ações da OS OS-/ })).not.toBeInTheDocument();
+  });
+});

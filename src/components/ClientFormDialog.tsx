@@ -414,7 +414,7 @@ function ZapiSettingsTab({ clientId }: { clientId: string }) {
             <Input
               value={draft.link_title}
               onChange={e => setDraft(d => ({ ...d, link_title: e.target.value }))}
-              placeholder="OS {os}"
+              placeholder="{os}"
             />
           </div>
           <div>
@@ -431,7 +431,7 @@ function ZapiSettingsTab({ clientId }: { clientId: string }) {
           <Input
             value={draft.pdf_filename_pattern}
             onChange={e => setDraft(d => ({ ...d, pdf_filename_pattern: e.target.value }))}
-            placeholder="OS-{os}-{cliente}.pdf"
+            placeholder="{os}-{cliente}.pdf"
           />
         </div>
       </div>

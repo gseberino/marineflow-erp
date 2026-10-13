@@ -243,7 +243,8 @@ export function FaturarOsDialog({ open, onOpenChange, serviceOrderId, orderNumbe
     <Dialog open={open} onOpenChange={(o) => { if (!emitindo) onOpenChange(o); }}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
-          <DialogTitle>Faturar OS {orderNumber ?? d?.os.numero ?? ''}</DialogTitle>
+          {/* O número já traz o prefixo ("OS-00060"); sem número, "Faturar OS". */}
+          <DialogTitle>Faturar {orderNumber || d?.os.numero || 'OS'}</DialogTitle>
           <DialogDescription>
             Serviço sai na <strong>NFS-e</strong> (prefeitura) e peça sai na <strong>NF-e</strong>{' '}
             (SEFAZ) — dois documentos, numerações separadas, como a lei manda para OS mista.

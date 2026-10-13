@@ -615,7 +615,7 @@ export default function ServiceOrderList() {
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-8 w-8"
-                              aria-label={`Mais ações da OS ${so.service_order_number}`}>
+                              aria-label={`Mais ações da ${so.service_order_number}`}>
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>

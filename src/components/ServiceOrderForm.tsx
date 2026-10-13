@@ -894,7 +894,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               body: {
                 user_id: uid,
                 title: 'Nova OS atribuída',
-                body: `Você foi atribuído à OS ${result.service_order_number ?? ''}`,
+                // O número já traz o prefixo ("OS-00060"): "atribuído à OS-00060".
+                body: `Você foi atribuído à ${result.service_order_number || 'OS'}`,
                 url: `/service-orders/${result.id}`,
               },
             }).catch((e) => console.warn('push notify failed', e));
@@ -975,7 +976,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
               body: {
                 user_id: uid,
                 title: 'Nova OS atribuída',
-                body: `Você foi atribuído à OS ${form.service_order_number ?? ''}`,
+                body: `Você foi atribuído à ${form.service_order_number || 'OS'}`,
                 url: `/service-orders/${orderId}`,
               },
             }).catch((e) => console.warn('push notify failed', e));

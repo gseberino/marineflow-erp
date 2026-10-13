@@ -190,9 +190,13 @@ async function fetchConflicts(params: {
   return data || [];
 }
 
-function conflictMessage(conflicts: any[]): string {
+/**
+ * O aviso de conflito. O `label` da OS em get_agenda_conflicts é o service_order_number, que já
+ * traz o prefixo ("OS-00060", "ORÇ-00112"): vai como vem. Exportada para o teste.
+ */
+export function conflictMessage(conflicts: any[]): string {
   const labels = conflicts.map((c: any) =>
-    c.source === 'service_order' ? `OS ${c.label}` : `"${c.label}"`).join(', ');
+    c.source === 'service_order' ? c.label : `"${c.label}"`).join(', ');
   return `Conflito de agenda: o responsável já tem ${labels} nesse horário.`;
 }
 
