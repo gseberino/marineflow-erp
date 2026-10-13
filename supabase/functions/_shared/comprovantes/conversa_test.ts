@@ -394,6 +394,44 @@ Deno.test("cartão: gravado, esperando a nota, cancelado (sem 'para cancelar')",
   assertEquals(textoDoCartao(cmp({ situacao: "cancelado" }), []).includes("Para cancelar"), false);
 });
 
+Deno.test("despesa de campo (13/10/2026): combustível, alimentação e pedágio numa OS são despesa pela categoria — o resumo e o cartão dizem; sem a chave, o texto de hoje", () => {
+  const campo = { tipo_na_os: "despesa", tipo_na_os_pela_categoria: true, categoria: "Combustível e deslocamento" } as const;
+  const p = pergunta("confirmar", { plano: PLANO_A, versao: 7, pasta: "Brisa/1- DOC's/Compras" }, { ...campo, situacao: "aguardando_sim" });
+  assertEquals(
+    textoDoResumo(p),
+    [
+      "CMP-00124 · confira antes de gravar:",
+      "• R$ 62,00 em 10/10 às 12h57 · Auto Posto Exemplo",
+      "• Para: OS-00112 Brisa · despesa da OS pela categoria (custo interno: não aparece para o cliente) · Combustível e deslocamento",
+      "• Pago: débito, pela empresa (se não foi a empresa: *corrigir quem*)",
+      "Vou: lançar a despesa na OS-00112 como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS); anotar o débito para quando o banco trouxer (se já trouxe, classifico a linha).",
+      "Arquivo: Brisa/1- DOC's/Compras.",
+      // nada grava sem o sim; o "não" leva ao menu do corrigir ("Peça ou despesa")
+      "Responda *sim* para gravar ou *não* para corrigir.",
+    ].join("\n"),
+  );
+  // a chave é opcional: ausente, false ou nula (o banco velho, ou o dono disse "despesa") = o texto de hoje
+  const para = (c: Partial<CmpResumo>) => textoDoResumo(pergunta("confirmar", { plano: { efeitos: [] } }, c)).split("\n")[2];
+  for (const pela of [undefined, false, null]) {
+    assertEquals(para({ tipo_na_os: "despesa", tipo_na_os_pela_categoria: pela, categoria: "Combustível e deslocamento" }),
+      "• Para: OS-00112 Brisa · despesa da OS (custo interno: não aparece para o cliente) · Combustível e deslocamento", String(pela));
+  }
+  // só o "despesa" fala da categoria: a peça e o lançamento que já está na OS ficam como estão
+  assertEquals(para({ tipo_na_os: "peca", tipo_na_os_pela_categoria: true, categoria: "Combustível e deslocamento" }),
+    "• Para: OS-00112 Brisa · peça/material (só comprova; lance a peça na OS se ainda não lançou)");
+  assertEquals(para({ tipo_na_os: null, tipo_na_os_pela_categoria: false, na_os: { tipo: "despesa", categoria: "Pedágio e estacionamento", valor: "62.00" } }),
+    "• Para: OS-00112 Brisa · já lançado na OS: Pedágio e estacionamento R$ 62,00 (só comprova)");
+  // o cliente pagou direto: nada a ver com a categoria
+  assertEquals(para({ ...campo, quem_pagou: "cliente" }), "• Para: OS-00112 Brisa · o cliente pagou direto");
+  // o cartão do "cmp N" do gravado (o resumo do gravado continua "despesa" pela categoria)
+  assertEquals(
+    textoDoCartao(cmp({ ...campo, situacao: "gravado" }), [{ tipo: "despesa_os" }]),
+    "CMP-00124 (gravado): R$ 62,00 em 10/10 · Auto Posto Exemplo · OS-00112 Brisa · despesa da OS pela categoria (custo interno: não aparece para o cliente) · Combustível e deslocamento. " +
+      "Feito: lancei a despesa na OS-00112 como custo interno (não muda o total nem aparece para o cliente; entra no Lucro por OS). Para cancelar: *cancelar cmp 124 motivo*.",
+  );
+  assertEquals(/cobr|falta aprovar/i.test(textoDoResumo(p)), false);
+});
+
 Deno.test("cancelamento: desfeito, recusado com o caminho, sem nada gravado", () => {
   assertEquals(
     textoDoCancelamento("CMP-00124", "comprei em dobro", { ok: true, desfeitos: [{ tipo: "despesa_os" }, { tipo: "anotar" }, "pendencia"] }),

@@ -15,7 +15,9 @@
 //
 // Ajustes do dono (11/10/2026 — spec-ajustes-dono.md): o comprovante NUNCA aparece para o cliente
 // nem muda o total da OS — o "cobrar do cliente?" saiu; na OS, primeiro o lançamento que já existe
-// (só comprova), senão "peça ou despesa" (a despesa é custo interno). O sim já lança a linha no
+// (só comprova), senão "peça ou despesa" (a despesa é custo interno) — menos a compra de
+// deslocamento/campo (combustível, alimentação, pedágio: a categoria marcada como de campo), que já é
+// despesa da OS sem perguntar e o resumo diz "pela categoria" (13/10/2026). O sim já lança a linha no
 // Extrato (aprovada no sim). PESSOAL pago pela empresa é gasto pessoal do sócio (desconta do
 // pró-labore). Lançamento que já existe só tem o vazio preenchido. "Quem pagou?" depois de 5 dias
 // sem aparecer em conta da empresa (regra E). O reembolso nas Diárias é "reembolso de despesa paga
@@ -80,6 +82,11 @@ export type CmpResumo = {
   os?: OsDoCmp | null;
   /** Ajustes do dono: peça ou despesa da OS (nulo = não perguntado, ou resolvido pelo lançamento que já existe). */
   tipo_na_os?: "peca" | "despesa" | string | null;
+  /**
+   * 13/10/2026: o "despesa" veio da categoria de campo (o dono não disse); o resumo diz "pela
+   * categoria". Ausente (banco antigo) ou false = o texto de sempre.
+   */
+  tipo_na_os_pela_categoria?: boolean | null;
   /** O lançamento que já está na OS e que o CMP só comprova (ou `ambiguo`). */
   na_os?: LancamentoNaOs | null;
   quem_pagou?: string | null;
@@ -437,7 +444,11 @@ function destinoNoResumo(c: CmpResumo, comCategoria = true): string {
       // dono escolheu (peça ou despesa) vale antes do lançamento que o banco achou na OS (a mesma
       // ordem do plano: o achado só vale com tipo_na_os nulo).
       if (c.tipo_na_os === "peca") return `${base} · peça/material (só comprova; lance a peça na OS se ainda não lançou)`;
-      if (c.tipo_na_os === "despesa") return `${base} · despesa da OS (custo interno: não aparece para o cliente)${cat}`;
+      if (c.tipo_na_os === "despesa") {
+        // 13/10/2026: combustível, alimentação e pedágio numa OS são despesa sem perguntar — o resumo diz que foi pela categoria
+        const qual = c.tipo_na_os_pela_categoria === true ? "despesa da OS pela categoria" : "despesa da OS";
+        return `${base} · ${qual} (custo interno: não aparece para o cliente)${cat}`;
+      }
       const n = c.na_os;
       if (n && typeof n.ambiguo === "number") return `${base} · só comprova (há ${n.ambiguo} lançamentos iguais na OS)`;
       if (n && n.tipo) return `${base} · já lançado na OS: ${jaLancadoNaOs(n, c)} (só comprova)`;
