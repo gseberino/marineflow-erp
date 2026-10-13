@@ -827,8 +827,10 @@ export type Comando =
   | ({ comando: "corrigir"; campo: "quem" } & Alvo)
   | ({ comando: "corrigir"; campo: "para"; destino?: DestinoSimples } & Alvo)
   | ({ comando: "corrigir"; campo: "categoria"; categoria?: string } & Alvo)
+  /** A (12/10/2026): a observação do dono no CMP; null = apagar. */
+  | ({ comando: "corrigir"; campo: "obs"; observacao: string | null } & Alvo)
   /** "corrigir valor" sem o valor: o edge responde como mandar (não vai ao banco). */
-  | { comando: "corrigir_incompleto"; campo: "valor" | "data" | "forma" | "os" }
+  | { comando: "corrigir_incompleto"; campo: "valor" | "data" | "forma" | "os" | "obs" }
   /** "corrigir" sozinho: no resumo, o menu do corrigir; fora dele, como mandar. */
   | { comando: "corrigir_menu" };
 
@@ -907,6 +909,9 @@ export function lerComando(texto: string, agora: Date = new Date()): Comando | n
     return { comando: "cancelar_contexto", motivo: motivo || null };
   }
 
+  const obs = lerObservacao(original);
+  if (obs) return obs;
+
   if (/^corrig(?:ir|e|a)$/.test(t)) return { comando: "corrigir_menu" };
   m = /^corrig(?:ir|e|a)\s+(.+)$/.exec(t);
   if (!m) return null;
@@ -947,6 +952,45 @@ export function lerComando(texto: string, agora: Date = new Date()): Comando | n
       : { comando: "corrigir", campo: "categoria", ...alvo };
   }
   return null;
+}
+
+/** A observação tem até 200 caracteres no banco (comprovantes_observacao_curta). */
+const MAX_OBSERVACAO = 200;
+/** "apagar", "-", "nenhuma", "sem obs": a observação some. */
+const APAGA_OBSERVACAO = new Set(["apagar", "-", "nenhuma", "sem obs", "sem observacao"]);
+
+/**
+ * A (12/10/2026): a observação do dono, lida do texto ORIGINAL (com acento e maiúsculas). Duas formas:
+ * "corrigir [cmp N] obs|observação [:|-] <texto>" e, sem o corrigir, "obs: <texto>"/"observação: <texto>"
+ * — o dois-pontos é obrigatório ali, porque "obs" solto no meio da conversa não é comando. Espaços
+ * juntos, sem as aspas e o ponto final das pontas; vazio = como mandar; "apagar" = null; acima de 200,
+ * 199 + "…".
+ */
+function lerObservacao(original: string): Comando | null {
+  const semMarca = comCmpOriginal(original.replace(/^[\s🎤"'“”‘’«»]+/u, ""));
+  let alvo: Alvo = {};
+  let resto: string;
+  const comCorrigir = /^corrig(?:ir|e|a)\s+(?:(?:o\s+)?cmp[\s-]*0*(\d{1,6})\s+)?(?:a\s+)?(?:obs|observa[cç][aã]o)\b\.?([\s\S]*)$/i
+    .exec(semMarca);
+  if (comCorrigir) {
+    if (comCorrigir[1]) alvo = { cmp: Number(comCorrigir[1]) };
+    // "corrigir obs -" é apagar (o hífen sozinho não é o separador)
+    resto = /^\s*[-–—]\s*$/.test(comCorrigir[2]) ? "-" : comCorrigir[2].replace(/^\s*[:\-–]?\s*/, "");
+  } else {
+    const semCorrigir = /^(?:obs|observa[cç][aã]o)\s*:\s*([\s\S]*)$/i.exec(semMarca);
+    if (!semCorrigir) return null;
+    resto = semCorrigir[1];
+  }
+  let texto = resto.replace(/\s+/g, " ").trim()
+    .replace(/^["'“”‘’«»]+/u, "")
+    .replace(/["'“”‘’«»\s]+$/u, "")
+    .replace(/\.+$/u, "")
+    .trim();
+  if (!texto) return { comando: "corrigir_incompleto", campo: "obs" };
+  if (APAGA_OBSERVACAO.has(normalizarResposta(texto)) || texto === "-") return { comando: "corrigir", campo: "obs", observacao: null, ...alvo };
+  const letras = Array.from(texto);
+  if (letras.length > MAX_OBSERVACAO) texto = `${letras.slice(0, MAX_OBSERVACAO - 1).join("").trimEnd()}…`;
+  return { comando: "corrigir", campo: "obs", observacao: texto, ...alvo };
 }
 
 /** O "c.m.p." / "comprovante 124" também no texto original (o motivo do cancelar sai dele). */

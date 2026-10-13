@@ -2604,8 +2604,9 @@ Deno.test("F3: nenhum console.* com valor, CNPJ, descrição da linha do banco, 
 
 // =============================================================================================
 // O assistente opera o CMP (11/10/2026 — spec-assistente-opera-cmp.md): a ação `completar` (A) e a
-// categoria como dica no "para quê" (B). O banco falso devolve as formas de comprovante_comando e
-// comprovante_responder; whatsapp-send é dublê.
+// categoria como dica no "para quê" (B). Desde 12/10/2026 (spec-observacao-atomica-prefixo.md, 3) a
+// ação chama UMA RPC, comprovante_completar (tudo ou nada): o banco falso devolve a forma da 3.2 e só
+// ela; whatsapp-send é dublê.
 // =============================================================================================
 
 const P_CAT = "44444444-0000-4000-8000-000000000011";
@@ -2622,77 +2623,90 @@ const OPCOES_9 = [
   { n: 7, rotulo: "Insumo", valor: "insumo" }, { n: 8, rotulo: "Empresa (sem OS)", valor: "empresa" }, { n: 9, rotulo: "Pessoal", valor: "pessoal" },
 ];
 
-/** A linha do CMP-00001 como estava em produção (11/10, depois da pergunta expirar): na fila, valor lido 204,87. */
-const CMP_00001 = {
-  id: CMP_ID, codigo: "CMP-00001", numero: 1, phone_normalized: DONO.phone, situacao: "aguardando_vez", modo: "dono", gravado_em: null,
-  valor: 204.87, valor_confirmado: 204.87, data_confirmada: "2026-10-11", destino: null, destino_os_id: null, categoria: null,
-  forma_confirmada: null, quem_pagou: null, tipo_na_os: null,
-};
 const RESUMO_00001 = { ...CMP_RESUMO, codigo: "CMP-00001", numero: 1, valor: "204.87", valor_lido: "204.87", data: "2026-10-11", forma: null };
 const LIGADA_NO_BANCO = [{ key: "comprovante_fluxo", value: "dono" }, { key: "comprovante_conversa", value: "on" }];
+const OBS_REAL = "cupom sem o gasto complementar de R$ 31,10; vale o valor do cartão";
 
 const CORPO_COMPLETAR = (extra: Linha = {}) => ({ phone: DONO.phone, autor: DONO.id, cmp: 1, ...extra });
 
-function bancoDoCompletar(
-  rpc: Record<string, (a: Qualquer) => unknown>,
-  op: { cmp?: Linha | null; settings?: Linha[] } = {},
-) {
-  return bancoFalso({
-    tabelas: {
-      app_settings: op.settings ?? LIGADA_NO_BANCO,
-      comprovantes: op.cmp === null ? [] : [{ ...CMP_00001, ...(op.cmp ?? {}) }],
-    },
-    rpc: { pergunta_marcar_enviada: () => null, comprovante_pergunta_nao_enviada: () => null, ...rpc },
-  });
+/** O que a RPC única devolve (3.2): `ok` com o que ficou anotado, ou a recusa com tudo desfeito. */
+function saidaDoCompletar(extra: Linha = {}): Qualquer {
+  return {
+    resultado: "ok", id: CMP_ID, codigo: "CMP-00001", valor_lido: "204.87", aplicados: [], ja_estava: [], ignorados: [], itens: [],
+    recusado: null, pergunta: null, ocupado: false, ocupado_por: null, desconhecido: null, ...extra,
+  };
 }
 
-/** O comprovante_comando do banco: cada campo do corrigir (ou o "cmp") devolve o que o `_comprovante_proxima` abriria. */
-function comandoQueCorrige(respostas: Record<string, Qualquer>) {
-  return (a: Qualquer) => {
-    const r = respostas[a.p.campo ?? a.p.comando];
-    if (!r) throw new Error(`campo inesperado: ${a.p.campo ?? a.p.comando}`);
-    return r;
+function recusadoDoCompletar(recusado: Linha, ignorados: string[] = []): Qualquer {
+  return saidaDoCompletar({ resultado: "recusado", recusado, ignorados });
+}
+
+/**
+ * O banco do completar: SÓ a RPC única tem dublê (comprovante_comando e comprovante_responder sem
+ * dublê viram erro: a edge não os chama mais) e as tabelas lidas ficam registradas (a edge não lê
+ * `comprovantes`: as recusas saem do banco).
+ */
+function bancoDoCompletar(saida: Qualquer | ((a: Qualquer) => Qualquer), op: { settings?: Linha[] } = {}) {
+  const banco = bancoFalso({
+    tabelas: { app_settings: op.settings ?? LIGADA_NO_BANCO, comprovantes: [{ id: CMP_ID, numero: 1, phone_normalized: DONO.phone }] },
+    rpc: {
+      pergunta_marcar_enviada: () => null,
+      comprovante_pergunta_nao_enviada: () => null,
+      comprovante_completar: typeof saida === "function" ? saida : () => saida,
+    },
+  });
+  const lidas: string[] = [];
+  const fromOriginal = banco.admin.from.bind(banco.admin);
+  banco.admin.from = (t: string) => {
+    lidas.push(t);
+    return fromOriginal(t);
   };
+  return { ...banco, lidas };
 }
 
 const RPCS_QUE_GRAVAM = ["comprovante_responder", "_comprovante_gravar", "comprovante_cancelar", "lancar_no_caixa", "so_expense_add"];
 
-Deno.test("completar — o caso real do CMP-00001: categoria + valor do cartão + o porquê → duas correções, UMA mensagem com o 'Para quê?', nada gravado", async () => {
-  const cmpComCategoria = { ...RESUMO_00001, categoria: "Combustível e deslocamento" };
-  const banco = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({
-      categoria: {
-        resultado: "pergunta", codigo: "CMP-00001", corrigido: { campo: "categoria", valor: "Combustível e deslocamento" },
-        pergunta: perguntaDoBanco("para_que", { pergunta_id: P_CAT, opcoes: OPCOES_9 }, cmpComCategoria),
-      },
-      valor: {
-        resultado: "pergunta", codigo: "CMP-00001", corrigido: { campo: "valor", valor: "235.97" },
-        pergunta: perguntaDoBanco("para_que", { pergunta_id: P_VALOR, opcoes: OPCOES_9 }, { ...cmpComCategoria, valor: "235.97" }),
-      },
-    }),
-  });
+Deno.test("completar — o caso real do CMP-00001: UMA chamada à RPC única, UMA mensagem com o 'Para quê?' e a 'Observação:', nada gravado", async () => {
+  const depois = { ...RESUMO_00001, valor: "235.97", categoria: "Combustível e deslocamento", observacao: OBS_REAL };
+  const banco = bancoDoCompletar(saidaDoCompletar({
+    aplicados: ["categoria", "valor", "obs"],
+    itens: [
+      { campo: "categoria", valor: "Combustível e deslocamento" },
+      { campo: "valor", valor: "235.97", lido: "204.87" },
+      { campo: "obs", valor: OBS_REAL },
+    ],
+    pergunta: perguntaDoBanco("para_que", { pergunta_id: P_VALOR, opcoes: OPCOES_9 }, depois),
+  }));
   const d = depsF2(banco);
-  const r = await completar(CORPO_COMPLETAR({
-    categoria: "combustível", valor: "235.97", observacao: "cupom sem o gasto complementar de R$ 31,10; vale o valor do cartão",
-  }), d.deps);
+  const r = await completar(CORPO_COMPLETAR({ categoria: "combustível", valor: "235.97", observacao: OBS_REAL }), d.deps);
 
   assertEquals(r.status, 200);
   assertEquals(r.corpo.ok, true);
   assertEquals(r.corpo.enviada, true);
   assertEquals(r.corpo.passo, "para_que");
-  assertEquals(r.corpo.aplicados, ["categoria", "valor"]);
+  assertEquals(r.corpo.aplicados, ["categoria", "valor", "obs"]);
   assertEquals(r.corpo.ignorados, []);
+  assertEquals((r.corpo.anotado ?? []).map(semNbsp), ["categoria Combustível e deslocamento", "valor R$ 235,97 (no comprovante: R$ 204,87)", "a observação"]);
+  assertEquals(r.corpo.valor_lido, "204.87");
   assertEquals(r.corpo.cmp?.valor, "235.97");
   assertEquals(r.corpo.cmp?.categoria, "Combustível e deslocamento");
-  // duas correções pelo comando, com o número do CMP e sem mensagem do dono; nenhuma resposta
-  assertEquals(rpcs(banco, "comprovante_comando").map((c) => c.args.p), [
-    { phone: DONO.phone, message_id: null, comando: "corrigir", cmp: 1, campo: "categoria", categoria: "Combustível e deslocamento" },
-    { phone: DONO.phone, message_id: null, comando: "corrigir", cmp: 1, campo: "valor", valor: "235.97" },
-  ]);
+  assertEquals(r.corpo.cmp?.observacao, OBS_REAL);
+  // UMA chamada, à RPC única: a categoria já traduzida pela palavra do dono e a observação junto
+  assertEquals(rpcs(banco, "comprovante_completar").map((c) => c.args), [{
+    p: {
+      phone: DONO.phone, autor: DONO.id, cmp: 1, valor: "235.97", data: null, os: null, destino: null, tipo_na_os: null,
+      categoria: "Combustível e deslocamento", forma: null, quem_pagou: null, tecnico: null, observacao: OBS_REAL,
+    },
+  }]);
+  // a edge não aplica nada sozinha: nenhum comando, nenhuma resposta, nenhuma leitura do CMP
+  assertEquals(rpcs(banco, "comprovante_comando").length, 0);
+  assertEquals(rpcs(banco, "comprovante_responder").length, 0);
+  assertEquals(banco.lidas.includes("comprovantes"), false, banco.lidas.join(","));
   // nada é gravado antes do SIM: nenhuma rota de gravação, nenhuma linha nova
   for (const nome of RPCS_QUE_GRAVAM) assertEquals(rpcs(banco, nome).length, 0, nome);
   assertEquals(Object.keys(banco.inseridos), []);
-  // UMA mensagem: a linha "anotei" e o "Para quê?" com o menu inteiro, com a chave da última pergunta
+  // UMA mensagem: a linha "anotei" (sem repetir a observação na lista), a "Observação:" no lugar do
+  // antigo "Motivo:" e o "Para quê?" com o menu inteiro, com a chave da pergunta que o banco devolveu
   const enviados = d.enviosAoDono();
   assertEquals(enviados.length, 1);
   assertEquals(enviados[0].dedupe_key, `cmp:p:${P_VALOR}`);
@@ -2700,198 +2714,128 @@ Deno.test("completar — o caso real do CMP-00001: categoria + valor do cartão 
   assert(
     msg.startsWith(
       "CMP-00001: anotei o que você disse na conversa: categoria Combustível e deslocamento, valor R$ 235,97 (no comprovante: R$ 204,87). " +
-        "Motivo: cupom sem o gasto complementar de R$ 31,10; vale o valor do cartão.\n\nCMP-00001",
+        `Observação: ${OBS_REAL}.\n\nCMP-00001`,
     ),
     msg,
   );
+  assertEquals(msg.includes("Motivo:"), false);
   assertStringIncludes(msg, "· R$ 235,97\nPara quê?\n1 OS-00112 · Brisa");
   assertStringIncludes(msg, "8 Empresa (sem OS)\n9 Pessoal\nResponda o número, o nome do barco ou *os N*.");
-  // só a última foi enviada (a primeira fechou sem envio, no banco)
   assertEquals(rpcs(banco, "pergunta_marcar_enviada").map((c) => c.args), [{ p_id: P_VALOR, p_wa_message_id: "WA-OUT-1" }]);
-  // o log não leva valor, categoria nem o porquê
+  // o log não leva valor, categoria nem a observação
   const log = JSON.stringify(d.logs);
-  for (const proibido of ["235", "204", "Combust", "cupom", "cartão"]) assertEquals(log.includes(proibido), false, proibido);
+  for (const proibido of ["235", "204", "Combust", "cupom", "cartão", "31,10"]) assertEquals(log.includes(proibido), false, proibido);
   assertEquals(d.logs.find((l) => l.evento === "completar")?.campos, {
-    id: CMP_ID, aplicados: 2, ignorados: 0, passo: "para_que", enviada: true, recusado: null,
+    id: CMP_ID, aplicados: 3, ignorados: 0, passo: "para_que", enviada: true, recusado: null,
   });
 });
 
-Deno.test("completar — a ordem fixa (categoria, os, para, valor, data, forma) e o campo igual ao do CMP não vai", async () => {
-  const pergunta = (id: string) => ({ resultado: "pergunta", codigo: "CMP-00001", corrigido: null, pergunta: perguntaDoBanco("tipo_na_os", { pergunta_id: id }) });
-  const banco = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({
-      categoria: pergunta("p-1"), os: pergunta("p-2"), valor: pergunta("p-3"), data: pergunta("p-4"), forma: pergunta("p-5"),
-    }),
-  });
+Deno.test("completar — o payload da RPC: a palavra do dono vira a categoria ('almoço' → 'Alimentação de campo'), sem palavra conhecida vai crua; com a OS, o destino é os", async () => {
+  const banco = bancoDoCompletar(saidaDoCompletar());
   await completar(CORPO_COMPLETAR({
-    forma: "debito", data: "2026-10-09", valor: "70.00", observacao: "o do cartão", os: 112, categoria: "almoço",
+    forma: "debito", data: "2026-10-09", valor: "70.00", observacao: "o do  cartão", os: "112", categoria: "almoço", tipo_na_os: "despesa",
+    quem_pagou: "tecnico", tecnico: "  Roberto ",
   }), depsF2(banco).deps);
-  assertEquals(rpcs(banco, "comprovante_comando").map((c) => c.args.p.campo), ["categoria", "os", "valor", "data", "forma"]);
-  assertEquals(rpcs(banco, "comprovante_comando")[1].args.p.numero, 112);
-  assertEquals(rpcs(banco, "comprovante_comando")[0].args.p.categoria, "Alimentação de campo");
-
-  // igual ao que já está: nem versão nem pergunta à toa (só o "para" muda)
-  const igual = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({
-      para: { resultado: "pergunta", codigo: "CMP-00001", corrigido: { campo: "para", valor: "estoque" }, pergunta: perguntaDoBanco("categoria") },
-    }),
-  }, { cmp: { categoria: "Combustível e deslocamento", valor_confirmado: 62, valor: 62, data_confirmada: "2026-10-10", forma_confirmada: "pix" } });
-  const r = await completar(CORPO_COMPLETAR({ categoria: "Combustível", destino: "estoque", valor: "62.00", data: "2026-10-10", forma: "pix" }), depsF2(igual).deps);
-  assertEquals(rpcs(igual, "comprovante_comando").map((c) => c.args.p), [
-    { phone: DONO.phone, message_id: null, comando: "corrigir", cmp: 1, campo: "para", destino: "estoque" },
-  ]);
-  assertEquals(r.corpo.aplicados, ["para"]);
-  assertEquals(r.corpo.ignorados, []);
+  assertEquals(rpcs(banco, "comprovante_completar")[0].args.p, {
+    phone: DONO.phone, autor: DONO.id, cmp: 1, valor: "70.00", data: "2026-10-09", os: 112, destino: "os", tipo_na_os: "despesa",
+    categoria: "Alimentação de campo", forma: "debito", quem_pagou: "tecnico", tecnico: "Roberto", observacao: "o do cartão",
+  });
+  const crua = bancoDoCompletar(saidaDoCompletar());
+  await completar(CORPO_COMPLETAR({ categoria: "material de limpeza", destino: "estoque" }), depsF2(crua).deps);
+  assertEquals(rpcs(crua, "comprovante_completar")[0].args.p.categoria, "material de limpeza");
+  assertEquals(rpcs(crua, "comprovante_completar")[0].args.p.destino, "estoque");
+  // só a observação também é pedido (ela fica guardada no CMP)
+  const so = bancoDoCompletar(saidaDoCompletar());
+  await completar(CORPO_COMPLETAR({ observacao: "complemento sem cupom" }), depsF2(so).deps);
+  assertEquals(rpcs(so, "comprovante_completar")[0].args.p.observacao, "complemento sem cupom");
 });
 
-Deno.test("completar — OS inválida para tudo depois dela (e a linha 'Não usei'); categoria não achada para antes de tudo", async () => {
-  const banco = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({
-      categoria: {
-        resultado: "pergunta", codigo: "CMP-00001", corrigido: { campo: "categoria", valor: "Alimentação de campo" },
-        pergunta: perguntaDoBanco("para_que", { pergunta_id: P_CAT, opcoes: OPCOES_9 }, RESUMO_00001),
-      },
-      os: { resultado: "invalida", codigo: "CMP-00001", motivo: "os_nao_existe" },
-    }),
-  });
+Deno.test("completar — recusa no meio (tudo ou nada): nada anotado, NENHUMA mensagem; o 'Não usei' pelo campo e pelo passo", async () => {
+  const banco = bancoDoCompletar(recusadoDoCompletar({ campo: "os", motivo: "os_nao_existe", passo: null }, ["categoria", "valor", "obs"]));
   const d = depsF2(banco);
   const r = await completar(CORPO_COMPLETAR({ categoria: "almoço", os: 999, valor: "210.00", observacao: "taxa" }), d.deps);
-  assertEquals(rpcs(banco, "comprovante_comando").map((c) => c.args.p.campo), ["categoria", "os"]);
-  assertEquals(r.corpo.recusado, { campo: "os", motivo: "os_nao_existe", texto: "OS-00999 (não achei essa OS)" });
-  assertEquals(r.corpo.aplicados, ["categoria"]);
-  assertEquals(r.corpo.ignorados, ["valor"]);
-  const [msg] = d.enviosAoDono();
-  assertStringIncludes(msg.message, "anotei o que você disse na conversa: categoria Alimentação de campo. Motivo: taxa. Não usei: OS-00999 (não achei essa OS).");
-  assertEquals(msg.dedupe_key, `cmp:p:${P_CAT}`);
-
-  const nada = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({ categoria: { resultado: "invalida", codigo: "CMP-00001", motivo: "categoria_nao_achada" } }),
-  });
-  const dn = depsF2(nada);
-  const rn = await completar(CORPO_COMPLETAR({ categoria: "material de limpeza", destino: "empresa" }), dn.deps);
-  assertEquals(rpcs(nada, "comprovante_comando").length, 1);
-  assertEquals(rn.corpo, {
-    ok: true, codigo: "CMP-00001", aplicados: [], ignorados: ["para"], anotado: [],
-    recusado: { campo: "categoria", motivo: "categoria_nao_achada", texto: 'categoria "material de limpeza" (não achei essa categoria)' },
+  assertEquals(r.corpo, {
+    ok: true, codigo: "CMP-00001", aplicados: [], ignorados: ["categoria", "valor", "obs"], anotado: [],
+    recusado: { campo: "os", motivo: "os_nao_existe", texto: "OS-00999 (não achei essa OS)" },
     passo: null, enviada: false, ocupado: false, ocupado_por: null, valor_lido: "204.87", cmp: null,
   });
-  assertEquals(dn.enviosAoDono().length, 0);
-});
-
-Deno.test("completar — dinheiro + sócio: o comando da forma e a resposta ao 'quem pagou?' sem mensagem do dono; o resumo vai com a linha 'anotei'", async () => {
-  const banco = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({
-      forma: { resultado: "pergunta", codigo: "CMP-00001", corrigido: { campo: "forma", valor: "dinheiro" }, pergunta: perguntaDoBanco("quem_pagou", { pergunta_id: P_QUEM }) },
-    }),
-    comprovante_responder: () => ({
-      resultado: "resumo", cmp: { ...RESUMO_00001, quem_pagou: "socio" }, motivo: null,
-      proxima: perguntaDoBanco("confirmar", { pergunta_id: P_RESUMO, plano: { efeitos: [] } }, {
-        ...RESUMO_00001, destino: "empresa", forma: "dinheiro", quem_pagou: "socio", categoria: "Outras despesas",
-      }),
-    }),
-  }, { cmp: { destino: "empresa" } });
-  const d = depsF2(banco);
-  const r = await completar(CORPO_COMPLETAR({ forma: "dinheiro", quem_pagou: "socio" }), d.deps);
-  assertEquals(rpcs(banco, "comprovante_responder").map((c) => c.args.p), [
-    { pergunta_id: P_QUEM, message_id: null, interpretacao: { tipo: "palavra", valor: "socio" }, versao: null },
-  ]);
-  assertEquals(r.corpo.aplicados, ["forma", "quem_pagou"]);
-  assertEquals(r.corpo.passo, "confirmar");
-  const [msg] = d.enviosAoDono();
-  assertEquals(msg.dedupe_key, `cmp:p:${P_RESUMO}`);
-  assert(
-    msg.message.startsWith("CMP-00001: anotei o que você disse na conversa: em dinheiro, pago por você (reembolso).\n\nCMP-00001 · confira antes de gravar:"),
-    msg.message,
-  );
-  assertStringIncludes(msg.message, "Responda *sim* para gravar ou *não* para corrigir.");
-  // o resumo nunca é respondido pelo completar (o sim é do dono)
-  assertEquals(rpcs(banco, "comprovante_responder").some((c) => c.args.p.interpretacao.tipo === "sim"), false);
-});
-
-Deno.test("completar — o passo que veio antes (como pagou) deixa o 'peça ou despesa' para depois; nunca responde confirmar nem mesma_compra", async () => {
-  const banco = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({
-      os: { resultado: "pergunta", codigo: "CMP-00001", corrigido: { campo: "os", valor: "OS-00112" }, pergunta: perguntaDoBanco("como_pagou", { pergunta_id: P_QUEM }) },
-    }),
-    comprovante_responder: () => {
-      throw new Error("não devia responder");
-    },
+  assertEquals(d.enviosAoDono().length, 0);
+  assertEquals(rpcs(banco, "comprovante_completar").length, 1);
+  assertEquals(rpcs(banco, "comprovante_comando").length + rpcs(banco, "comprovante_responder").length, 0);
+  assertEquals(d.logs.find((l) => l.evento === "completar")?.campos, {
+    id: CMP_ID, aplicados: 0, ignorados: 3, passo: null, enviada: false, recusado: "os",
   });
-  const d = depsF2(banco);
-  const r = await completar(CORPO_COMPLETAR({ os: "112", tipo_na_os: "despesa", quem_pagou: "empresa" }), d.deps);
-  assertEquals(r.corpo.aplicados, ["os"]);
-  assertEquals(r.corpo.ignorados, ["quem_pagou", "tipo_na_os"]);
-  assertEquals(r.corpo.passo, "como_pagou");
-  assertStringIncludes(d.enviosAoDono()[0].message, "anotei o que você disse na conversa: para a OS-00112.\n\n");
-  assertStringIncludes(d.enviosAoDono()[0].message, "Como foi pago?");
 
-  for (const passo of ["mesma_compra", "confirmar"]) {
-    const b = bancoDoCompletar({
-      comprovante_comando: comandoQueCorrige({
-        forma: { resultado: "pergunta", codigo: "CMP-00001", corrigido: null, pergunta: perguntaDoBanco(passo, { plano: { efeitos: [] } }) },
-      }),
-      comprovante_responder: () => {
-        throw new Error("não devia responder");
-      },
-    });
-    await completar(CORPO_COMPLETAR({ forma: "pix", quem_pagou: "socio", tipo_na_os: "peca" }), depsF2(b).deps);
-    assertEquals(rpcs(b, "comprovante_responder").length, 0, passo);
+  // a recusa do passo (o responder do banco): o porquê pela interpretação que o banco usou
+  const passo = bancoDoCompletar(recusadoDoCompletar({ campo: "quem_pagou", motivo: "resposta_nao_serve", passo: "quem_pagou" }, ["valor", "forma", "obs"]));
+  const dp = depsF2(passo);
+  const rp = await completar(CORPO_COMPLETAR({ valor: "210.00", observacao: "taxa", forma: "dinheiro", quem_pagou: "cliente" }), dp.deps);
+  assertEquals(rp.corpo.recusado, { campo: "quem_pagou", motivo: "resposta_nao_serve", texto: "quem pagou (não vale para este comprovante)" });
+  assertEquals([rp.corpo.aplicados, rp.corpo.anotado, rp.corpo.enviada], [[], [], false]);
+  assertEquals(dp.enviosAoDono().length, 0);
+
+  // a categoria que o banco não achou e a observação longa (a defesa do banco)
+  const casos: Array<[Linha, Linha, string]> = [
+    [{ campo: "categoria", motivo: "categoria_nao_achada", passo: null }, { categoria: "material de limpeza" }, 'categoria "material de limpeza" (não achei essa categoria)'],
+    [{ campo: "obs", motivo: "obs_longa", passo: null }, { observacao: "x" }, "a observação (a observação passa de 200 letras)"],
+  ];
+  for (const [recusado, corpo, texto] of casos) {
+    const b = bancoDoCompletar(recusadoDoCompletar(recusado));
+    const rr = await completar(CORPO_COMPLETAR(corpo), depsF2(b).deps);
+    assertEquals(rr.corpo.recusado?.texto, texto);
   }
 });
 
-Deno.test("completar — recusas ANTES de qualquer escrita (o porquê do valor, dono, telefone, modo de teste, gravado, cancelado, inexistente, data futura)", async () => {
-  const casos: Array<[string, Linha, { cmp?: Linha | null; settings?: Linha[] }, string]> = [
-    ["valor diferente do lido sem o porquê", { valor: "235.97" }, {}, "observacao_obrigatoria"],
-    ["autor que não é o dono", { autor: "0d0d0d0d-0000-4000-8000-000000000099" }, {}, "nao_e_o_dono"],
-    ["telefone que não é o do dono", { phone: "5547988887777" }, {}, "nao_e_o_dono"],
-    ["conversa desligada", { categoria: "x" }, { settings: [{ key: "comprovante_fluxo", value: "dono" }] }, "desligada"],
-    ["modo de teste", { categoria: "x" }, {
-      settings: [...LIGADA_NO_BANCO, { key: "wa_test_mode", value: "true" }, { key: "wa_test_number", value: "5511999990000" }],
-    }, "modo_de_teste"],
-    ["já gravado", { categoria: "x" }, { cmp: { gravado_em: "2026-10-11T22:00:00Z", situacao: "gravado" } }, "ja_gravado"],
-    ["cancelado", { categoria: "x" }, { cmp: { situacao: "cancelado" } }, "ja_cancelado"],
-    ["não existe", { categoria: "x" }, { cmp: null }, "nao_existe"],
-    // revisão de 11/10/2026: com legenda-chave o número nasce em 'na_fila' (ainda lendo)
-    ["ainda sendo lido", { categoria: "x" }, { cmp: { situacao: "na_fila" } }, "fora_da_conversa"],
-    ["recebido", { categoria: "x" }, { cmp: { situacao: "recebido" } }, "fora_da_conversa"],
-    ["abandonado", { categoria: "x" }, { cmp: { situacao: "abandonado" } }, "fora_da_conversa"],
-    ["de outro fluxo (sombra)", { categoria: "x" }, { cmp: { modo: "sombra" } }, "nao_existe"],
-    ["data futura", { data: "2026-10-12" }, {}, "data_futura"],
+Deno.test("completar — recusas: dono, conversa e modo de teste na edge SEM a RPC; as do banco (antes do bloco ou na corrida) viram o mesmo motivo", async () => {
+  const daEdge: Array<[string, Linha, Linha[] | undefined, string]> = [
+    ["autor que não é o dono", { autor: "0d0d0d0d-0000-4000-8000-000000000099" }, undefined, "nao_e_o_dono"],
+    ["telefone que não é o do dono", { phone: "5547988887777" }, undefined, "nao_e_o_dono"],
+    ["conversa desligada", { categoria: "x" }, [{ key: "comprovante_fluxo", value: "dono" }], "desligada"],
+    // o banco não sabe do modo de teste: a edge recusa antes
+    ["modo de teste", { categoria: "x" }, [...LIGADA_NO_BANCO, { key: "wa_test_mode", value: "true" }, { key: "wa_test_number", value: "5511999990000" }], "modo_de_teste"],
   ];
-  for (const [caso, extra, op, motivo] of casos) {
-    const banco = bancoDoCompletar({
-      comprovante_comando: () => {
-        throw new Error("não devia corrigir");
-      },
-    }, op);
+  for (const [caso, extra, settings, motivo] of daEdge) {
+    const banco = bancoDoCompletar(saidaDoCompletar(), { settings });
     const d = depsF2(banco);
-    d.deps.agora = () => new Date("2026-10-11T21:46:00Z");
     const r = await completar(CORPO_COMPLETAR(extra), d.deps);
-    assertEquals(r.status, 200, caso);
-    assertEquals(r.corpo.ok, false, caso);
-    assertEquals(r.corpo.motivo, motivo, caso);
-    assertEquals(rpcs(banco, "comprovante_comando").length + rpcs(banco, "comprovante_responder").length, 0, caso);
+    assertEquals([r.status, r.corpo.ok, r.corpo.motivo], [200, false, motivo], caso);
+    assertEquals(banco.chamadasRpc.filter((c) => c.nome.startsWith("comprovante")).length, 0, caso);
     assertEquals(d.enviosAoDono().length, 0, caso);
   }
-  // o valor lido vai junto da recusa (o assistente diz qual é)
-  const b = bancoDoCompletar({});
-  assertEquals((await completar(CORPO_COMPLETAR({ valor: "235.97" }), depsF2(b).deps)).corpo.valor_lido, "204.87");
-  // o mesmo valor do confirmado (já corrigido antes) não pede o porquê de novo
-  const jaCorrigido = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({
-      cmp: { resultado: "pergunta", pergunta: perguntaDoBanco("para_que", { pergunta_id: P_CAT, opcoes: OPCOES_9 }, RESUMO_00001) },
-    }),
-  }, { cmp: { valor_confirmado: 235.97 } });
-  const rj = await completar(CORPO_COMPLETAR({ valor: "235.97" }), depsF2(jaCorrigido).deps);
-  assertEquals(rj.corpo.ok, true);
-  assertEquals(rpcs(jaCorrigido, "comprovante_comando")[0].args.p, { phone: DONO.phone, message_id: null, comando: "cmp", numero: 1 });
+
+  // no banco: antes do bloco (nada escrito) ou a corrida no meio (o bloco desfeito)
+  const doBanco: Array<[Qualquer, string]> = [
+    [{ resultado: "nao_e_o_dono" }, "nao_e_o_dono"],
+    [{ resultado: "desligada" }, "desligada"],
+    [{ resultado: "nao_existe" }, "nao_existe"],
+    [{ resultado: "ja_cancelado", codigo: "CMP-00001" }, "ja_cancelado"],
+    [{ resultado: "ja_gravado", codigo: "CMP-00001" }, "ja_gravado"],
+    [{ resultado: "fora_da_conversa", codigo: "CMP-00001" }, "fora_da_conversa"],
+    [{ resultado: "data_futura", codigo: "CMP-00001" }, "data_futura"],
+    [{ resultado: "observacao_obrigatoria", codigo: "CMP-00001", valor_lido: "204.87" }, "observacao_obrigatoria"],
+    [saidaDoCompletar({ resultado: "ja_gravado", ignorados: ["valor"] }), "ja_gravado"],
+  ];
+  for (const [saida, motivo] of doBanco) {
+    const banco = bancoDoCompletar(saida);
+    const d = depsF2(banco);
+    const r = await completar(CORPO_COMPLETAR({ valor: "235.97" }), d.deps);
+    assertEquals([r.status, r.corpo.ok, r.corpo.motivo], [200, false, motivo], JSON.stringify(saida));
+    assertEquals([r.corpo.aplicados, r.corpo.enviada], [[], false], motivo);
+    assertEquals(d.enviosAoDono().length, 0, motivo);
+  }
+  // o valor lido e o código vão junto da recusa (o assistente diz qual é)
+  const obr = await completar(
+    CORPO_COMPLETAR({ valor: "235.97" }),
+    depsF2(bancoDoCompletar({ resultado: "observacao_obrigatoria", codigo: "CMP-00001", valor_lido: "204.87" })).deps,
+  );
+  assertEquals([obr.corpo.codigo, obr.corpo.valor_lido], ["CMP-00001", "204.87"]);
   // entrada fora do formato: 422 sem tocar o banco
   const ruins: Linha[] = [
     { cmp: 0 }, { cmp: "abc" }, { valor: "235,97" }, { data: "2026-02-31" }, { destino: "outro" }, { os: 112, destino: "estoque" },
-    { categoria: "x".repeat(81) }, { autor: "x" },
+    { categoria: "x".repeat(81) }, { observacao: "x".repeat(201) }, { autor: "x" },
   ];
   for (const ruim of ruins) {
-    const bx = bancoDoCompletar({});
+    const bx = bancoDoCompletar(saidaDoCompletar());
     const r = await completar(CORPO_COMPLETAR(ruim), depsF2(bx).deps);
     assertEquals(r.status, 422, JSON.stringify(ruim));
     assertEquals(r.corpo.motivo, "entrada_invalida");
@@ -2900,85 +2844,151 @@ Deno.test("completar — recusas ANTES de qualquer escrita (o porquê do valor, 
 });
 
 Deno.test("completar — ocupado: anota e não manda nada; envio não confirmado devolve a pergunta (o CMP volta à fila)", async () => {
-  const ocupado = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({
-      categoria: { resultado: "pergunta", codigo: "CMP-00001", corrigido: { campo: "categoria", valor: "Combustível e deslocamento" }, pergunta: null, motivo: "ocupado" },
-    }),
-  });
+  const ocupado = bancoDoCompletar(saidaDoCompletar({
+    aplicados: ["categoria"], itens: [{ campo: "categoria", valor: "Combustível e deslocamento" }],
+    ocupado: true, ocupado_por: "Enviar PDF ao cliente",
+  }));
   const d = depsF2(ocupado);
   const r = await completar(CORPO_COMPLETAR({ categoria: "combustível" }), d.deps);
-  assertEquals(r.corpo.ok, true);
-  assertEquals(r.corpo.enviada, false);
-  assertEquals(r.corpo.ocupado, true);
+  assertEquals([r.corpo.ok, r.corpo.enviada, r.corpo.ocupado, r.corpo.ocupado_por], [true, false, true, "Enviar PDF ao cliente"]);
   assertEquals(r.corpo.aplicados, ["categoria"]);
+  assertEquals(r.corpo.anotado, ["categoria Combustível e deslocamento"]);
   assertEquals(d.enviosAoDono().length, 0);
 
-  const falhou = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({
-      categoria: {
-        resultado: "pergunta", codigo: "CMP-00001", corrigido: { campo: "categoria", valor: "Combustível e deslocamento" },
-        pergunta: perguntaDoBanco("para_que", { pergunta_id: P_CAT, opcoes: OPCOES_9 }),
-      },
-    }),
-  });
+  const falhou = bancoDoCompletar(saidaDoCompletar({
+    aplicados: ["categoria"], itens: [{ campo: "categoria", valor: "Combustível e deslocamento" }],
+    pergunta: perguntaDoBanco("para_que", { pergunta_id: P_CAT, opcoes: OPCOES_9 }),
+  }));
   const df = depsF2(falhou, { envio: 502 });
   const rf = await completar(CORPO_COMPLETAR({ categoria: "combustível" }), df.deps);
-  assertEquals(rf.corpo.enviada, false);
-  assertEquals(rf.corpo.ocupado, false);
+  assertEquals([rf.corpo.enviada, rf.corpo.ocupado], [false, false]);
   assertEquals(rpcs(falhou, "comprovante_pergunta_nao_enviada")[0].args, { p_pergunta_id: P_CAT });
   assertEquals(rpcs(falhou, "pergunta_marcar_enviada").length, 0);
 });
 
-Deno.test("completar — nada a mudar (tudo igual): a pergunta do CMP como o *cmp N* abre, enviada", async () => {
-  const banco = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({
-      cmp: { resultado: "pergunta", pergunta: perguntaDoBanco("para_que", { pergunta_id: P_CAT, opcoes: OPCOES_9 }, RESUMO_00001) },
-    }),
-  }, { cmp: { categoria: "Combustível e deslocamento" } });
-  const d = depsF2(banco);
-  const r = await completar(CORPO_COMPLETAR({ categoria: "gasolina" }), d.deps);
-  assertEquals(rpcs(banco, "comprovante_comando").map((c) => c.args.p), [{ phone: DONO.phone, message_id: null, comando: "cmp", numero: 1 }]);
-  assertEquals(r.corpo.enviada, true);
-  assertEquals(r.corpo.aplicados, []);
-  assert(d.enviosAoDono()[0].message.startsWith("CMP-00001: o que você disse na conversa já estava anotado.\n\nCMP-00001"));
+Deno.test("completar — nada a mudar ('já estava anotado', com a observação igual na frase); algo para o passo dele; o resumo com a linha 'anotei'; o desconhecido vai ao log", async () => {
+  const igual = bancoDoCompletar(saidaDoCompletar({
+    ja_estava: ["categoria", "obs"],
+    pergunta: perguntaDoBanco("para_que", { pergunta_id: P_CAT, opcoes: OPCOES_9 }, { ...RESUMO_00001, observacao: "taxa de entrega" }),
+  }));
+  const d = depsF2(igual);
+  const r = await completar(CORPO_COMPLETAR({ categoria: "gasolina", observacao: "taxa de entrega" }), d.deps);
+  assertEquals([r.corpo.enviada, r.corpo.aplicados], [true, []]);
+  const msg = d.enviosAoDono()[0].message;
+  assert(msg.startsWith("CMP-00001: o que você disse na conversa já estava anotado. Observação: taxa de entrega.\n\nCMP-00001"), msg);
 
-  // revisão de 11/10/2026: nada anotado, mas o que o dono disse ficou para o passo dele ("é despesa da
-  // OS" no "para quê?") — a linha não pode dizer "já estava anotado" (o fluxo vai perguntar)
-  const ignorado = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({
-      cmp: { resultado: "pergunta", pergunta: perguntaDoBanco("para_que", { pergunta_id: P_CAT, opcoes: OPCOES_9 }, RESUMO_00001) },
-    }),
-    comprovante_responder: () => {
-      throw new Error("não devia responder");
-    },
-  });
+  // nada anotado, mas o que o dono disse ficou para o passo dele: nunca "já estava anotado"
+  const ignorado = bancoDoCompletar(saidaDoCompletar({
+    ignorados: ["tipo_na_os", "destino"], pergunta: perguntaDoBanco("para_que", { pergunta_id: P_CAT, opcoes: OPCOES_9 }, RESUMO_00001),
+  }));
   const di = depsF2(ignorado);
   const ri = await completar(CORPO_COMPLETAR({ destino: "os", tipo_na_os: "despesa" }), di.deps);
-  assertEquals(ri.corpo.aplicados, []);
   assertEquals(ri.corpo.ignorados, ["tipo_na_os", "destino"]);
   const msgi = di.enviosAoDono()[0].message;
   assert(msgi.startsWith("CMP-00001: o que você disse na conversa eu pergunto na sequência, um passo por vez.\n\nCMP-00001"), msgi);
   assertEquals(msgi.includes("já estava anotado"), false);
+
+  // dinheiro + sócio: o banco respondeu o "quem pagou?" e devolveu o resumo (o sim é do dono)
+  const resumo = bancoDoCompletar(saidaDoCompletar({
+    aplicados: ["forma", "quem_pagou"], itens: [{ campo: "forma", valor: "dinheiro" }, { campo: "quem_pagou", valor: "socio" }],
+    pergunta: perguntaDoBanco("confirmar", { pergunta_id: P_RESUMO, plano: { efeitos: [] } }, {
+      ...RESUMO_00001, destino: "empresa", forma: "dinheiro", quem_pagou: "socio", categoria: "Outras despesas", observacao: "pago no balcão",
+    }),
+  }));
+  const dr = depsF2(resumo);
+  const rr = await completar(CORPO_COMPLETAR({ forma: "dinheiro", quem_pagou: "socio" }), dr.deps);
+  assertEquals([rr.corpo.passo, rr.corpo.aplicados, rr.corpo.cmp?.observacao], ["confirmar", ["forma", "quem_pagou"], "pago no balcão"]);
+  const [mr] = dr.enviosAoDono();
+  assertEquals(mr.dedupe_key, `cmp:p:${P_RESUMO}`);
+  assert(
+    mr.message.startsWith("CMP-00001: anotei o que você disse na conversa: em dinheiro, pago por você (reembolso).\n\nCMP-00001 · confira antes de gravar:"),
+    mr.message,
+  );
+  assertStringIncludes(mr.message, "\n• Observação: pago no balcão\n");
+  assertStringIncludes(mr.message, "Responda *sim* para gravar ou *não* para corrigir.");
+
+  // o resultado que a edge não conhece (o banco parou de responder no meio) vai ao log, só o nome
+  const desconhecido = bancoDoCompletar(saidaDoCompletar({ desconhecido: "novo_resultado" }));
+  const dd = depsF2(desconhecido);
+  await completar(CORPO_COMPLETAR({ categoria: "x" }), dd.deps);
+  assertEquals(dd.logs.find((l) => l.evento === "completar_desconhecido")?.campos, { resultado: "novo_resultado" });
 });
 
-Deno.test("completar — a pergunta que o banco abriu é de OUTRO CMP: o laço não responde o passo dele com o que o dono disse deste", async () => {
-  const OUTRO = "22222222-0000-4000-8000-000000000099";
-  const banco = bancoDoCompletar({
-    comprovante_comando: comandoQueCorrige({
-      categoria: {
-        resultado: "pergunta", codigo: "CMP-00001", corrigido: { campo: "categoria", valor: "Combustível e deslocamento" },
-        pergunta: perguntaDoBanco("quem_pagou", { pergunta_id: P_QUEM }, { id: OUTRO, codigo: "CMP-00002", numero: 2 }),
-      },
+// ─── A observação pelo dono (12/10/2026): *corrigir obs …* e *observação: …* ─────────────────
+
+Deno.test("A obs: 'corrigir obs …' com a pergunta aberta → o comando com a observação; 'observação anotada' + a MESMA pergunta", async () => {
+  const banco = bancoDaConversa("para_que", () => {
+    throw new Error("não devia responder");
+  }, {
+    comprovante_comando: () => ({
+      resultado: "pergunta", codigo: "CMP-00124", corrigido: { campo: "obs", valor: "complemento sem cupom" },
+      pergunta: perguntaDoBanco("para_que", { pergunta_id: P_CAT, opcoes: OPCOES_PARA_QUE }, { observacao: "complemento sem cupom" }),
     }),
-    comprovante_responder: () => {
-      throw new Error("não devia responder o passo de outro CMP");
+  });
+  const d = depsF2(banco);
+  const r = await responder(CORPO_RESPONDER("Corrigir obs complemento sem cupom"), d.deps);
+  assertEquals(r.corpo, { tratada: true, resultado: "pergunta" });
+  assertEquals(rpcs(banco, "comprovante_comando")[0].args.p, {
+    phone: DONO.phone, message_id: MSG_ID, comando: "corrigir", campo: "obs", observacao: "complemento sem cupom",
+  });
+  assertEquals(rpcs(banco, "comprovante_responder").length, 0);
+  const [msg] = d.enviosAoDono();
+  assertEquals(msg.dedupe_key, `cmp:p:${P_CAT}`);
+  assert(msg.message.startsWith("CMP-00124: observação anotada: complemento sem cupom.\n\nCMP-00124"), msg.message);
+  assertStringIncludes(msg.message, "Para quê?\n1 OS-00112 · Brisa");
+
+  // sem o texto: como mandar, sem ir ao banco
+  const inc = bancoDaConversa("para_que", () => {
+    throw new Error("não devia responder");
+  });
+  const di = depsF2(inc);
+  await responder(CORPO_RESPONDER("corrigir obs"), di.deps);
+  assertEquals(rpcs(inc, "comprovante_comando").length, 0);
+  assertEquals(di.enviosAoDono()[0].message, "Para corrigir, mande junto o novo dado: *corrigir obs complemento sem cupom*.");
+
+  // a recusa do banco (acima de 200): o porquê
+  const longa = bancoDaConversa("para_que", () => {
+    throw new Error("não devia responder");
+  }, {
+    comprovante_comando: () => ({ resultado: "invalida", codigo: "CMP-00124", motivo: "obs_longa" }),
+  });
+  const dl = depsF2(longa);
+  await responder(CORPO_RESPONDER("corrigir obs x"), dl.deps);
+  assertEquals(dl.enviosAoDono()[0].message, "Não consegui corrigir o CMP-00124: a observação passa de 200 letras.");
+});
+
+Deno.test("A obs: 'observação: …' sem pergunta aberta, com CMP em contexto → o comando; o 'qual dos dois?' sugere *corrigir cmp N obs …*", async () => {
+  const contexto = { id: CMP_ID, codigo: "CMP-00124", situacao: "aguardando_vez", gravado: false };
+  const banco = bancoFalso({
+    tabelas: { whatsapp_messages: [TEXTO_MSG("x")] },
+    rpc: {
+      pergunta_rotear: () => rotear(null, { cmp_em_contexto: contexto }),
+      comprovante_comando: () => ({
+        resultado: "pergunta", codigo: "CMP-00124", corrigido: { campo: "obs", valor: "taxa de entrega" },
+        pergunta: perguntaDoBanco("para_que", { pergunta_id: P_CAT, opcoes: OPCOES_PARA_QUE }, { observacao: "taxa de entrega" }),
+      }),
+      pergunta_marcar_enviada: () => null,
     },
   });
   const d = depsF2(banco);
-  const r = await completar(CORPO_COMPLETAR({ categoria: "combustível", quem_pagou: "socio" }), d.deps);
-  assertEquals(rpcs(banco, "comprovante_responder").length, 0);
-  assertEquals(r.corpo.aplicados, ["categoria"]);
-  assertEquals(r.corpo.ignorados, ["quem_pagou"]);
+  const r = await responder(CORPO_RESPONDER("Observação: taxa de entrega"), d.deps);
+  assertEquals(r.corpo.tratada, true);
+  assertEquals(rpcs(banco, "comprovante_comando")[0].args.p, {
+    phone: DONO.phone, message_id: MSG_ID, comando: "corrigir", campo: "obs", observacao: "taxa de entrega",
+  });
+  assert(d.enviosAoDono()[0].message.startsWith("CMP-00124: observação anotada: taxa de entrega.\n\nCMP-00124"), d.enviosAoDono()[0].message);
+
+  // logo depois de gravar um e abrir o próximo: qual dos dois? (a sugestão já vem com o "obs")
+  const qual = bancoFalso({
+    tabelas: { whatsapp_messages: [TEXTO_MSG("x")] },
+    rpc: {
+      pergunta_rotear: () => rotear(null, { cmp_em_contexto: contexto }),
+      comprovante_comando: () => ({ resultado: "qual_cmp", gravado: "CMP-00123", aberto: "CMP-00124" }),
+    },
+  });
+  const dq = depsF2(qual);
+  await responder(CORPO_RESPONDER("obs: taxa de entrega"), dq.deps);
+  assertStringIncludes(dq.enviosAoDono()[0].message, "Para o CMP-00124: *corrigir cmp 124 obs taxa de entrega*.");
 });
 
 // ─── B: a categoria como dica no "para quê" ───────────────────────────────────────────────

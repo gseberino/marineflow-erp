@@ -414,3 +414,18 @@ Deno.test("pareceRespostaCurta: sim/não/ok ou só número; frase não", () => {
   for (const t of ["1", "sim", "não", "ok", "🎤 Dois.", "12"]) assertEquals(pareceRespostaCurta(t), true, t);
   for (const t of ["manda o orçamento", "", "quanto ficou?"]) assertEquals(pareceRespostaCurta(t), false, t);
 });
+
+// A (12/10/2026): "observação: …" sem pergunta aberta vai ao CMP em contexto, como o "corrigir …".
+Deno.test("regra 4 (observação): 'observação: x' com CMP em contexto não gravado → comprovante; sem CMP em contexto → assistente", () => {
+  const aberto = { id: "c-1", codigo: "CMP-00124", situacao: "perguntando", gravado: false };
+  for (const texto of ["observação: complemento sem cupom", "Obs: taxa de entrega", "🎤 Observação: taxa"]) {
+    assertEquals(
+      quem(estado({ ativa: null, cmp_em_contexto: aberto }), { texto, comando: "contexto" }),
+      { destino: "comprovante", motivo: "corrigir_cmp_em_contexto" },
+      texto,
+    );
+    assertEquals(quem(estado({ ativa: null }), { texto, comando: "contexto" }), { destino: "assistente", motivo: "contexto_sem_cmp" }, texto);
+  }
+  // com a pergunta do CMP aberta, vai ao comprovante como qualquer "contexto"
+  assertEquals(quem(estado(), { texto: "obs: x", comando: "contexto" }).destino, "comprovante");
+});

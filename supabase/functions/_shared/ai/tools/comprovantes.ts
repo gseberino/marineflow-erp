@@ -385,8 +385,14 @@ function resultadoDoCompletar(r: any, codigoPedido: string, numero: number, valo
   const anotado = Array.isArray(r.anotado) ? r.anotado.filter((x: unknown) => typeof x === "string") as string[] : [];
   const ignorado = Array.isArray(r.ignorados) ? r.ignorados.filter((x: unknown) => typeof x === "string") as string[] : [];
   const naoUsei = typeof r.recusado?.texto === "string" ? r.recusado.texto : null;
-  // recusado sem nada anotado e sem mensagem do fluxo: nada mudou no CMP
-  if (naoUsei && anotado.length === 0 && r.enviada !== true) return { error: `Não usei ${naoUsei}: nada foi anotado no ${codigo}.` };
+  // recusado sem nada anotado e sem mensagem do fluxo: nada mudou no CMP (12/10/2026: é tudo ou nada —
+  // a recusa de um campo desfaz o resto do pedido)
+  if (naoUsei && anotado.length === 0 && r.enviada !== true) {
+    return {
+      error: `Não usei ${naoUsei}: nada foi anotado no ${codigo} (é tudo ou nada: nem o resto do que você passou). ` +
+        "Corrija ou tire esse campo e chame de novo.",
+    };
+  }
   // Nada anotado com algo ignorado (o passo dele não chegou): "já estava assim" seria falso.
   const abertura = anotado.length
     ? `Anotei no ${codigo}`
@@ -501,8 +507,10 @@ export const comprovanteTools: ToolDef[] = [
       "cartão), a data, para quê (OS, estoque, insumo, empresa, pessoal), peça ou despesa da OS, a categoria (a palavra dele: " +
       "combustível, almoço, pedágio…), a forma e quem pagou. Passe SÓ o que o dono disse; o que faltar o sistema pergunta a ele. " +
       "NÃO grava nada no financeiro: o sistema manda ao dono, no WhatsApp, a próxima pergunta ou o resumo, e só o *sim* dele " +
-      "grava. Valor diferente do lido vai com observacao (o porquê, como o dono disse). Um CMP por vez. Comprovante já gravado " +
-      "não muda por aqui (*cancelar cmp N motivo*). Não lance o gasto por outra ferramenta.",
+      "grava. Valor diferente do lido vai com observacao (o porquê, como o dono disse); a observação fica guardada no CMP e " +
+      "vai na descrição do lançamento quando o dono der o sim. Pode mandar só a observação. É tudo ou nada: se um campo não " +
+      "serve, nada é anotado. Um CMP por vez. Comprovante já gravado não muda por aqui (*cancelar cmp N motivo*). Não lance o " +
+      "gasto por outra ferramenta.",
     input_schema: {
       type: "object",
       properties: {
@@ -510,7 +518,8 @@ export const comprovanteTools: ToolDef[] = [
         valor: { type: "number", description: "O valor certo em reais, quando o dono disse outro (ex.: o do cartão)." },
         observacao: {
           type: "string",
-          description: "Por que o valor é outro, nas palavras do dono (até 200 caracteres). Obrigatória quando o valor muda.",
+          description: "O que o dono disse para ficar anotado no comprovante (vai ao resumo, ao índice do mês e à descrição do " +
+            "lançamento), até 200 caracteres. Obrigatória quando o valor muda e o CMP ainda não tem observação.",
         },
         data: { type: "string", description: "Data da compra: 'hoje', 'ontem', dd/mm ou AAAA-MM-DD." },
         destino: { type: "string", enum: DESTINOS_DO_CMP, description: "Para quê." },
@@ -584,9 +593,13 @@ export const comprovanteTools: ToolDef[] = [
         corpo[campo] = v;
         pedidos++;
       }
+      // A (12/10/2026): a observação fica guardada no CMP — sozinha também é pedido
       const observacao = linhaCurta(args.observacao, 200);
-      if (observacao) corpo.observacao = observacao;
-      if (pedidos === 0) return { error: "Diga o que completar (valor, para quê, OS, categoria, forma ou quem pagou)." };
+      if (observacao) {
+        corpo.observacao = observacao;
+        pedidos++;
+      }
+      if (pedidos === 0) return { error: "Diga o que completar (valor, para quê, OS, categoria, forma, quem pagou ou observação)." };
 
       const url = Deno.env.get("SUPABASE_URL");
       const chave = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");

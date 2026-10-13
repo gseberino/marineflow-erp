@@ -52,6 +52,7 @@ import {
   textoDaCategoriaAnotada,
   textoDoAnotadoNaConversa,
   textosDosItensAnotados,
+  textoCorrigirIncompleto,
 } from "./conversa.ts";
 
 const OS = { id: "os-1", numero: "OS-00112", barco: "Brisa", cliente: "João", status: "in_progress", faturada: false, assinada: false, pasta_registrada: true };
@@ -951,15 +952,16 @@ Deno.test("F3: nenhum texto passa de 4096, nenhum tem emoji nem CPF; nenhum fala
 
 // ─── o assistente opera o CMP (11/10/2026 — spec-assistente-opera-cmp.md, A e B) ────────────
 
-Deno.test("A: textoDoAnotadoNaConversa — o caso real (categoria, valor com o do comprovante, motivo) e o 'Não usei'", () => {
+Deno.test("A: textoDoAnotadoNaConversa — o caso real (categoria, valor com o do comprovante, observação) e o 'Não usei'", () => {
   const itens = [
     { campo: "categoria", valor: "Combustível e deslocamento" },
     { campo: "valor", valor: "235.97", lido: "204.87" },
   ];
+  // 12/10/2026: a observação fica guardada no CMP; a frase deixa de ser "Motivo:" e vira "Observação:"
   assertEquals(
     semNbsp(textoDoAnotadoNaConversa("CMP-00001", itens, "cupom sem o gasto complementar de R$ 31,10; vale o valor do cartão", "OS-00999 (não achei essa OS)")),
     "CMP-00001: anotei o que você disse na conversa: categoria Combustível e deslocamento, valor R$ 235,97 (no comprovante: R$ 204,87). " +
-      "Motivo: cupom sem o gasto complementar de R$ 31,10; vale o valor do cartão. Não usei: OS-00999 (não achei essa OS).",
+      "Observação: cupom sem o gasto complementar de R$ 31,10; vale o valor do cartão. Não usei: OS-00999 (não achei essa OS).",
   );
   // cada item como o dono lê
   assertEquals(textosDosItensAnotados([
@@ -974,11 +976,11 @@ Deno.test("A: textoDoAnotadoNaConversa — o caso real (categoria, valor com o d
     "na transferência", "pago pela empresa", "pago por você (reembolso)", "pago pelo técnico Roberto", "o cliente pagou direto",
     "despesa da OS (custo interno)", "peça da OS", "valor R$ 62,00",
   ]);
-  // o motivo vai numa linha só e cortado em 120; sem nada anotado, diz isso
+  // a observação vai numa linha só e cortada em 120; sem nada anotado, diz isso
   const longo = textoDoAnotadoNaConversa("CMP-00001", itens, `linha 1\nlinha 2 ${"x".repeat(300)}`, null);
   assertEquals(longo.includes("\n"), false);
-  const motivo = /Motivo: (.*)$/.exec(longo)?.[1] ?? "";
-  assert(motivo.length <= 121, `${motivo.length}`);
+  const motivo = /Observação: (.*)$/.exec(longo)?.[1] ?? "";
+  assert(motivo.length > 100 && motivo.length <= 121, `${motivo.length}`);
   assertEquals(textoDoAnotadoNaConversa("CMP-00001", [], null, null), "CMP-00001: o que você disse na conversa já estava anotado.");
   // nada anotado e algo para o passo dele (quem pagou, peça ou despesa): nunca "já estava anotado"
   assertEquals(textoDoAnotadoNaConversa("CMP-00001", [], null, null, true),
@@ -1014,4 +1016,51 @@ Deno.test("B: textoDaCategoriaAnotada — no 'para quê' repergunta o destino; n
   const msg = comAPergunta(textoDaCategoriaAnotada("Combustível e deslocamento", p.passo), p);
   assert(msg.startsWith("Categoria anotada: Combustível e deslocamento. Foi para qual OS ou para a empresa?\n\nCMP-00124"));
   assertStringIncludes(msg, "Para quê?\n1 OS-00112 · Brisa\n2 Empresa (sem OS)\nResponda o número, o nome do barco ou *os N*.");
+});
+
+// ─── A observação guardada no CMP (12/10/2026 — spec-observacao-atomica-prefixo.md, 2.4) ─────
+
+Deno.test("A obs: o resumo traz a linha '• Observação:' depois do '• Pago:', numa linha só e cortada em 120", () => {
+  const resumo = (c: Partial<CmpResumo>) => textoDoResumo(pergunta("confirmar", { plano: { efeitos: [] } }, c)).split("\n");
+  const linhas = resumo({ destino: "empresa", os: null, quem_pagou: "empresa", observacao: "complemento de R$ 31,10 sem cupom" });
+  const i = linhas.findIndex((l) => l.startsWith("• Pago:"));
+  assert(i > 0, linhas.join("|"));
+  assertEquals(linhas[i + 1], "• Observação: complemento de R$ 31,10 sem cupom");
+  // sem pagador: logo depois do "Para:"
+  const semPago = resumo({ forma: null, observacao: "taxa de entrega" });
+  assertEquals(semPago.some((l) => l.startsWith("• Pago:")), false);
+  assertEquals(semPago[semPago.findIndex((l) => l.startsWith("• Para:")) + 1], "• Observação: taxa de entrega");
+  // sem observação: nenhuma linha a mais (o resumo de hoje)
+  assertEquals(resumo({ observacao: null }).some((l) => l.startsWith("• Observação")), false);
+  assertEquals(resumo({}).some((l) => l.startsWith("• Observação")), false);
+  // numa linha e cortada em 120 (com "…")
+  const longa = resumo({ observacao: `linha 1\nlinha 2 ${"x".repeat(300)}` }).find((l) => l.startsWith("• Observação: "))!;
+  assertEquals(longa.length <= "• Observação: ".length + 120, true, `${longa.length}`);
+  assert(longa.endsWith("…"));
+});
+
+Deno.test("A obs: textoCorrigido anota e apaga; o 'corrigir obs' sem texto ensina; o 'corrigir' sozinho cita *corrigir obs*", () => {
+  assertEquals(textoCorrigido("CMP-00001", { campo: "obs", valor: "complemento de R$ 31,10 sem cupom" }),
+    "CMP-00001: observação anotada: complemento de R$ 31,10 sem cupom.");
+  assertEquals(textoCorrigido("CMP-00001", { campo: "obs", valor: null }), "CMP-00001: observação apagada.");
+  assertEquals(textoCorrigido("CMP-00001", { campo: "obs", valor: `a\nb ${"y".repeat(200)}` })!.includes("\n"), false);
+  assertEquals(textoCorrigirIncompleto("obs"), "Para corrigir, mande junto o novo dado: *corrigir obs complemento sem cupom*.");
+  assertStringIncludes(TEXTO_CORRIGIR_COMO, "*corrigir categoria* ou *corrigir obs <texto>*.");
+});
+
+Deno.test("A obs: textoDoAnotadoNaConversa — a observação sai da lista, abre sozinha e vira 'Observação:'; o item da tool é 'a observação'", () => {
+  const obs = { campo: "obs", valor: "complemento de R$ 31,10 sem cupom" };
+  // com outro item: a lista não repete a observação; a frase "Observação:" vem depois
+  assertEquals(
+    semNbsp(textoDoAnotadoNaConversa("CMP-00001", [{ campo: "valor", valor: "235.97", lido: "204.87" }, obs], obs.valor, null)),
+    "CMP-00001: anotei o que você disse na conversa: valor R$ 235,97 (no comprovante: R$ 204,87). Observação: complemento de R$ 31,10 sem cupom.",
+  );
+  // só a observação anotada
+  assertEquals(textoDoAnotadoNaConversa("CMP-00001", [obs], obs.valor, null),
+    "CMP-00001: anotei a observação que você disse na conversa. Observação: complemento de R$ 31,10 sem cupom.");
+  // a observação já igual (nada anotado): a frase aparece
+  assertEquals(textoDoAnotadoNaConversa("CMP-00001", [], "taxa", null),
+    "CMP-00001: o que você disse na conversa já estava anotado. Observação: taxa.");
+  // a lista da tool diz "a observação" (o texto nunca vai ao modelo pela lista)
+  assertEquals(textosDosItensAnotados([{ campo: "categoria", valor: "Alimentação de campo" }, obs]), ["categoria Alimentação de campo", "a observação"]);
 });

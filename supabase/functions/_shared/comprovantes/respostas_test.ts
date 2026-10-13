@@ -650,3 +650,50 @@ Deno.test("B.5: 'corrigir cmp N …' com o número vai sempre ao fluxo; sem o n�
   assertEquals(classeDoComando(lerComando("corrigir", AGORA)), "contexto");
   assertEquals(classeDoComando(lerComando("corrigir valor", AGORA)), "contexto");
 });
+
+// ─── A observação (12/10/2026 — spec-observacao-atomica-prefixo.md, 2.2 e 2.4) ─────────────
+
+Deno.test("A obs: 'corrigir obs …', 'obs: …' e 'observação: …' leem o texto ORIGINAL (acento e maiúsculas)", () => {
+  const casos: Array<[string, unknown, string]> = [
+    ["corrigir obs complemento sem cupom", { comando: "corrigir", campo: "obs", observacao: "complemento sem cupom" }, "contexto"],
+    ["Corrigir observação: Complemento SEM cupom", { comando: "corrigir", campo: "obs", observacao: "Complemento SEM cupom" }, "contexto"],
+    ["corrigir a observacao - taxa de R$ 31,10", { comando: "corrigir", campo: "obs", observacao: "taxa de R$ 31,10" }, "contexto"],
+    ["corrigir cmp 1 obs x", { comando: "corrigir", campo: "obs", observacao: "x", cmp: 1 }, "comprovante"],
+    ["corrigir CMP-00001 observação: cupom sem o complemento", { comando: "corrigir", campo: "obs", observacao: "cupom sem o complemento", cmp: 1 }, "comprovante"],
+    ["obs: x", { comando: "corrigir", campo: "obs", observacao: "x" }, "contexto"],
+    ["Observação: x", { comando: "corrigir", campo: "obs", observacao: "x" }, "contexto"],
+    ["🎤 Observação: Complemento de 31 reais sem cupom.", { comando: "corrigir", campo: "obs", observacao: "Complemento de 31 reais sem cupom" }, "contexto"],
+    ['obs: "taxa   de\nentrega"', { comando: "corrigir", campo: "obs", observacao: "taxa de entrega" }, "contexto"],
+  ];
+  for (const [t, esperado, classe] of casos) {
+    const lido = lerComando(t, AGORA);
+    assertEquals(lido, esperado, t);
+    assertEquals(classeDoComando(lido), classe, t);
+  }
+});
+
+Deno.test("A obs: 'obs' sem dois-pontos não é comando; sem texto ensina; 'apagar' limpa; acima de 200 corta com '…'", () => {
+  // "obs" solto no meio da conversa não é comando
+  assertEquals(lerComando("obs x", AGORA), null);
+  assertEquals(lerComando("observação importante sobre a OS", AGORA), null);
+  // sem o texto
+  assertEquals(lerComando("corrigir obs", AGORA), { comando: "corrigir_incompleto", campo: "obs" });
+  assertEquals(lerComando("corrigir observação:", AGORA), { comando: "corrigir_incompleto", campo: "obs" });
+  assertEquals(lerComando("obs:", AGORA), { comando: "corrigir_incompleto", campo: "obs" });
+  // apagar
+  for (const t of ["corrigir obs apagar", "corrigir obs -", "corrigir obs nenhuma", "corrigir obs sem obs", "obs: sem observação", "corrigir cmp 2 obs apagar"]) {
+    const lido = lerComando(t, AGORA) as { comando: string; campo: string; observacao: unknown };
+    assertEquals(lido?.comando, "corrigir", t);
+    assertEquals(lido?.campo, "obs", t);
+    assertEquals(lido?.observacao, null, t);
+  }
+  // acima de 200: 199 + "…" (200 no total)
+  const longo = lerComando(`corrigir obs ${"a".repeat(250)}`, AGORA) as { observacao: string };
+  assertEquals(Array.from(longo.observacao).length, 200);
+  assertEquals(longo.observacao.endsWith("…"), true);
+  // exatamente 200 fica como veio
+  const exato = lerComando(`obs: ${"b".repeat(200)}`, AGORA) as { observacao: string };
+  assertEquals(exato.observacao, "b".repeat(200));
+  // os outros corrigir não mudam
+  assertEquals(lerComando("corrigir os 112", AGORA), { comando: "corrigir", campo: "os", numero: 112 });
+});

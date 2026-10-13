@@ -113,14 +113,15 @@ Deno.test("csvDoIndice: BOM, ';', CRLF, vírgula decimal, aspas, por número, se
   assert(csv.endsWith("\r\n"));
   const linhasCsv = csv.slice(1).split("\r\n");
   assertEquals(linhasCsv[0], COLUNAS_DO_INDICE.join(";"));
-  assertEquals(linhasCsv[0], "Código;Data;Hora;Tipo;Valor;Fornecedor;CNPJ;Destino;OS;Barco;Na OS;Quem pagou;Forma;Situação;Pendências;Arquivo");
+  // A (12/10/2026): "Observação" é a última coluna (sem observação, vazia)
+  assertEquals(linhasCsv[0], "Código;Data;Hora;Tipo;Valor;Fornecedor;CNPJ;Destino;OS;Barco;Na OS;Quem pagou;Forma;Situação;Pendências;Arquivo;Observação");
   assertEquals(
     linhasCsv[1],
-    "CMP-00124;10/10/2026;12:57;cupom NFC-e;62,00;Auto Posto Exemplo;11.222.333/0001-81;OS;OS-00112;Brisa;despesa interna;sócio;dinheiro;gravado;lançar a peça na OS, dar entrada no estoque;/B2C/0021_Brisa/1- DOC's/Compras/a.jpg",
+    "CMP-00124;10/10/2026;12:57;cupom NFC-e;62,00;Auto Posto Exemplo;11.222.333/0001-81;OS;OS-00112;Brisa;despesa interna;sócio;dinheiro;gravado;lançar a peça na OS, dar entrada no estoque;/B2C/0021_Brisa/1- DOC's/Compras/a.jpg;",
   );
   assertEquals(
     linhasCsv[2],
-    'CMP-00125;11/10/2026;;comprovante de Pix;1234,50;"Loja ""A""; B";;Pessoal;;;;;;cancelado;;/MANAGEMENT/FINANCIALS/COMPROVANTES/_CANCELADOS/x CANCELADO.jpg',
+    'CMP-00125;11/10/2026;;comprovante de Pix;1234,50;"Loja ""A""; B";;Pessoal;;;;;;cancelado;;/MANAGEMENT/FINANCIALS/COMPROVANTES/_CANCELADOS/x CANCELADO.jpg;',
   );
   assert(!csv.includes("12345678901"), "CPF nunca");
   assertEquals(linhasCsv.length, 4); // cabeçalho, 2 linhas, e o vazio depois do CRLF final
@@ -177,4 +178,22 @@ Deno.test("F3: o índice da pasta PESSOAL mora nela, com nome próprio; as situa
   ]);
   const situacoes = csv.split("\r\n").slice(1, 4).map((l) => l.split(";")[13]);
   assertEquals(situacoes, ["esperando o banco", "ligado ao extrato", "sem linha no extrato"]);
+});
+
+// A (12/10/2026): a observação do CMP é a ÚLTIMA coluna dos dois índices (o do mês e o PESSOAL),
+// sempre sem CPF (o banco já manda sem; aqui é a defesa) e com aspas quando tem ";".
+Deno.test("csvDoIndice: a observação na última coluna, sem CPF e com aspas quando há ';'", () => {
+  assertEquals(COLUNAS_DO_INDICE[COLUNAS_DO_INDICE.length - 1], "Observação");
+  const csv = csvDoIndice([
+    { codigo: "CMP-00001", numero: 1, data: "2026-10-11", valor: "235.97", situacao: "aguardando_vez", observacao: "complemento de R$ 31,10; sem cupom" },
+    { codigo: "CMP-00002", numero: 2, situacao: "gravado", observacao: "reembolso do 123.456.789-09 da compra" },
+    { codigo: "CMP-00003", numero: 3, situacao: "gravado", observacao: null },
+  ]);
+  const linhas = csv.slice(1).split("\r\n");
+  const colunas = COLUNAS_DO_INDICE.length;
+  assertEquals(linhas[1].endsWith(';"complemento de R$ 31,10; sem cupom"'), true, linhas[1]);
+  assertEquals(linhas[2].split(";")[colunas - 1], "reembolso do da compra");
+  assertEquals(csv.includes("123.456.789-09"), false, "CPF nunca");
+  assertEquals(linhas[3].split(";").length, colunas);
+  assertEquals(linhas[3].endsWith(";"), true, "sem observação, a coluna fica vazia");
 });

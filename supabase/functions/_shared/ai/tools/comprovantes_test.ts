@@ -5,7 +5,7 @@ import {
   textoDaDespesaCobradaComCmpAberto, textoDaDespesaComCmpAberto, textoDaDespesaDoCmpNaoSai, textoDaDespesaInternaDoCmp,
   textoDaDespesaJaLancada, textoDoAberto, textoDoJaLancado, valorDoCompletar,
 } from "./comprovantes.ts";
-import { ehLeituraPeloNome, rodaDiretoPelaRede, SO_PELA_REDE } from "../perfil-operacao.ts";
+import { ehLeituraPeloNome, ESCRITAS_VERIFICADAS_DA_REDE, rodaDiretoPelaRede, SO_PELA_REDE } from "../perfil-operacao.ts";
 import { allTools } from "./index.ts";
 import { criarHandler } from "../../../comprovantes-whatsapp/handler.ts";
 import type { DependenciasDoFluxo } from "../../comprovantes/fluxo.ts";
@@ -293,7 +293,10 @@ const respostaDaEdge = (corpo: unknown, status = 200) => () => new Response(JSON
 const ENVIADA = {
   ok: true, codigo: "CMP-00001", aplicados: ["categoria", "valor"], ignorados: [], passo: "para_que", enviada: true, ocupado: false, ocupado_por: null,
   anotado: ["categoria Combustível e deslocamento", "valor R$ 235,97 (no comprovante: R$ 204,87)"], recusado: null,
-  cmp: { valor: "235.97", data: "2026-10-11", destino: null, os: null, categoria: "Combustível e deslocamento", forma: null, quem_pagou: null, tipo_na_os: null },
+  cmp: {
+    valor: "235.97", data: "2026-10-11", destino: null, os: null, categoria: "Combustível e deslocamento", forma: null, quem_pagou: null, tipo_na_os: null,
+    observacao: "o do cartão",
+  },
 };
 
 Deno.test("completar_comprovante: escrita low só do admin, na rede e roda direto (verificada); registrada em allTools", () => {
@@ -307,6 +310,18 @@ Deno.test("completar_comprovante: escrita low só do admin, na rede e roda diret
   // registrada ≠ ensinada: a descrição diz o que ela NÃO faz
   assertStringIncludes(completarTool.description, "NÃO grava nada no financeiro");
   assertStringIncludes(completarTool.description, "só o *sim* dele");
+  // 12/10/2026: a observação fica guardada e o pedido é tudo ou nada
+  assertStringIncludes(completarTool.description, "a observação fica guardada no CMP");
+  assertStringIncludes(completarTool.description, "Pode mandar só a observação");
+  assertStringIncludes(completarTool.description, "É tudo ou nada");
+  const obs = (completarTool.input_schema as { properties: Record<string, { description: string }> }).properties.observacao.description;
+  assertStringIncludes(obs, "até 200 caracteres");
+  assertStringIncludes(obs, "Obrigatória quando o valor muda e o CMP ainda não tem observação");
+  // o porquê da escrita verificada diz a RPC única, o tudo ou nada e a observação
+  const porque = ESCRITAS_VERIFICADAS_DA_REDE[COMPLETAR_COMPROVANTE];
+  assertStringIncludes(porque, "inclusive a observação");
+  assertStringIncludes(porque, "comprovante_completar (numa transação só, tudo ou nada");
+  assertStringIncludes(porque, "só o *sim* dele grava");
 });
 
 Deno.test("completar_comprovante: só o admin, só o dono, com a conversa ligada e com algo a completar — senão nem chama a edge", async () => {
@@ -317,7 +332,7 @@ Deno.test("completar_comprovante: só o admin, só o dono, com a conversa ligada
       ["outro admin (não é o dono)", { cmp: "1", valor: 10 }, { userId: "outro-admin" }, "Só o dono"],
       ["sem dono", { cmp: "1", valor: 10 }, { admin: bancoDoDono(null) }, "Só o dono"],
       ["só o cmp", { cmp: "1" }, {}, "Diga o que completar"],
-      ["só o porquê", { cmp: "1", observacao: "vale o do cartão" }, {}, "Diga o que completar"],
+      ["observação em branco", { cmp: "1", observacao: "  \n " }, {}, "observação"],
       ["cmp ilegível", { cmp: "os 1", valor: 10 }, {}, "Não entendi o comprovante"],
       ["valor ilegível", { cmp: "1", valor: "duzentos" }, {}, "Não entendi o valor"],
       ["valor zero", { cmp: "1", valor: 0 }, {}, "Não entendi o valor"],
@@ -362,6 +377,20 @@ Deno.test("completar_comprovante: normaliza o que o dono disse e manda à porta 
   });
 });
 
+// A (12/10/2026): a observação fica guardada no CMP — sozinha também é pedido.
+Deno.test("completar_comprovante: só a observação chama a edge (ela fica guardada no CMP); o CMP como ficou traz a observação", async () => {
+  await comFetch(respostaDaEdge({ ...ENVIADA, aplicados: ["obs"], anotado: ["a observação"] }), async (chamadas) => {
+    const r = await completarTool.execute({ cmp: "1", observacao: " complemento de R$ 31,10\nsem cupom " }, ctxDoDono()) as Record<string, unknown>;
+    assertEquals(chamadas.length, 1);
+    assertEquals(chamadas[0].json, {
+      acao: "completar", phone: DONO_FONE, autor: DONO_ID, cmp: 1, observacao: "complemento de R$ 31,10 sem cupom",
+    });
+    assertEquals(r.ok, true);
+    assertEquals(r.anotado, ["a observação"]);
+    assertEquals((r.como_ficou as { observacao?: unknown }).observacao, "o do cartão");
+  });
+});
+
 Deno.test("completar_comprovante: os 4 desfechos — falou ao dono (só aqui ja_falou_ao_dono), ocupado, envio que falhou e as recusas", async () => {
   // 1) o fluxo mandou a pergunta: o turno termina nela
   await comFetch(respostaDaEdge(ENVIADA), async () => {
@@ -402,8 +431,10 @@ Deno.test("completar_comprovante: os 4 desfechos — falou ao dono (só aqui ja_
     [{ ok: false, motivo: "observacao_obrigatoria", valor_lido: "204.87" },
       "O valor R$ 235,97 é diferente do lido no comprovante (R$ 204,87). Passe em observacao o porquê, como o dono disse; se ele não disse, pergunte."],
     [{ ok: false, motivo: "data_futura" }, "A data não pode ser futura."],
+    // 12/10/2026: tudo ou nada — a recusa de um campo desfaz o resto
     [{ ok: true, codigo: "CMP-00001", aplicados: [], ignorados: [], anotado: [], enviada: false, recusado: { campo: "os", motivo: "os_nao_existe", texto: "OS-00999 (não achei essa OS)" } },
-      "Não usei OS-00999 (não achei essa OS): nada foi anotado no CMP-00001."],
+      "Não usei OS-00999 (não achei essa OS): nada foi anotado no CMP-00001 (é tudo ou nada: nem o resto do que você passou). " +
+      "Corrija ou tire esse campo e chame de novo."],
   ];
   for (const [edge, erro] of recusas) {
     await comFetch(respostaDaEdge(edge), async () => {
@@ -463,6 +494,7 @@ function bancoSimuladoDoCmp00001() {
     id: "22222222-0000-4000-8000-000000000001", codigo: "CMP-00001", numero: 1, phone_normalized: DONO_FONE, situacao: "aguardando_vez", modo: "dono",
     gravado_em: null as string | null, tipo: "nfce", valor: 204.87, valor_confirmado: 204.87, data_confirmada: "2026-10-11", destino: null as string | null,
     destino_os_id: null, categoria: null as string | null, forma_confirmada: null as string | null, quem_pagou: null, tipo_na_os: null, resumo_versao: 0,
+    observacao: null as string | null,
   };
   const OPCOES_PARA_QUE = [
     { n: 1, rotulo: "OS-00112 · Brisa", valor: "os:o1" }, { n: 2, rotulo: "OS-00118 · Dona V", valor: "os:o2" }, { n: 3, rotulo: "OS-00120 · Madu", valor: "os:o3" },
@@ -487,6 +519,7 @@ function bancoSimuladoDoCmp00001() {
     valor_lido: cmp.valor.toFixed(2), valor_confianca: "alta", data: cmp.data_confirmada, data_origem: "leitura", hora: "18:13:00",
     forma: cmp.forma_confirmada, fornecedor: "Auto Posto Exemplo", fornecedor_origem: "cadastro", cnpj: null, destino: cmp.destino, os: null,
     tipo_na_os: null, quem_pagou: null, pagador_nome: null, categoria: cmp.categoria, pendencias: [], gravado_em: cmp.gravado_em,
+    observacao: cmp.observacao,
   });
   const aberta = () => perguntas.find((p) => p.status === "aberta") ?? null;
   const abrir = () => {
@@ -513,9 +546,53 @@ function bancoSimuladoDoCmp00001() {
       } else if (p.campo === "valor") {
         cmp.valor_confirmado = Number(p.valor);
         corrigido = { campo: "valor", valor: p.valor };
+      } else if (p.campo === "obs") {
+        cmp.observacao = p.observacao ?? null;
+        corrigido = { campo: "obs", valor: cmp.observacao };
+      } else if (p.campo === "os") {
+        return { resultado: "invalida", codigo: cmp.codigo, motivo: "os_nao_existe" };
       } else throw new Error(`campo inesperado: ${p.campo}`);
       cmp.resumo_versao++;
       return { resultado: "pergunta", codigo: cmp.codigo, corrigido, pergunta: abrir() };
+    },
+    // A RPC única (12/10/2026): as recusas antes de escrever, as correções na ordem fixa pelo comando
+    // e TUDO OU NADA — a recusa no meio devolve o CMP e as perguntas ao retrato de antes do bloco.
+    comprovante_completar: ({ p }) => {
+      if (p.phone !== DONO_FONE || p.autor !== DONO_ID) return { resultado: "nao_e_o_dono" };
+      if (p.cmp !== cmp.numero) return { resultado: "nao_existe" };
+      if (cmp.gravado_em) return { resultado: "ja_gravado", codigo: cmp.codigo };
+      const lido = cmp.valor.toFixed(2);
+      if (p.valor && Math.abs(Number(p.valor) - cmp.valor) > 0.01 && Math.abs(Number(p.valor) - cmp.valor_confirmado) > 0.01 && !p.observacao && !cmp.observacao) {
+        return { resultado: "observacao_obrigatoria", codigo: cmp.codigo, valor_lido: lido };
+      }
+      const retrato = { cmp: { ...cmp }, perguntas: perguntas.map((x) => ({ ...x })) };
+      const aplicados: string[] = [];
+      const itens: Array<Record<string, unknown>> = [];
+      let pergunta: unknown = null;
+      const pedidos: Array<[string, Record<string, unknown>]> = [];
+      if (p.categoria && p.categoria !== cmp.categoria) pedidos.push(["categoria", { categoria: p.categoria }]);
+      if (p.os) pedidos.push(["os", { numero: p.os }]);
+      if (p.valor && Math.abs(Number(p.valor) - cmp.valor_confirmado) > 0.001) pedidos.push(["valor", { valor: p.valor }]);
+      if (p.observacao && p.observacao !== cmp.observacao) pedidos.push(["obs", { observacao: p.observacao }]);
+      for (const [campo, extra] of pedidos) {
+        const r = rpcs.comprovante_comando({ p: { phone: p.phone, message_id: null, comando: "corrigir", cmp: p.cmp, campo, ...extra } }) as Record<string, any>;
+        if (r.resultado !== "pergunta") {
+          Object.assign(cmp, retrato.cmp);
+          perguntas.splice(0, perguntas.length, ...retrato.perguntas);
+          return {
+            resultado: "recusado", id: cmp.id, codigo: cmp.codigo, valor_lido: lido, aplicados: [], ja_estava: [],
+            ignorados: pedidos.map(([c]) => c).filter((c) => c !== campo), itens: [], recusado: { campo, motivo: r.motivo, passo: null },
+            pergunta: null, ocupado: false, ocupado_por: null, desconhecido: null,
+          };
+        }
+        aplicados.push(campo);
+        itens.push({ campo, valor: r.corrigido.valor, ...(campo === "valor" ? { lido } : {}) });
+        pergunta = r.pergunta;
+      }
+      return {
+        resultado: "ok", id: cmp.id, codigo: cmp.codigo, valor_lido: lido, aplicados, ja_estava: [], ignorados: [], itens, recusado: null,
+        pergunta, ocupado: false, ocupado_por: null, desconhecido: null,
+      };
     },
     comprovante_responder: ({ p }) => {
       const w = perguntas.find((x) => x.id === p.pergunta_id)!;
@@ -629,15 +706,25 @@ Deno.test("o caso real de 11/10 de ponta a ponta: 'pode registrar pelo valor do 
   assertEquals(fluxoQueFalou(COMPLETAR_COMPROVANTE, r), { codigo: "CMP-00001" });
   assertEquals(banco.cmp.valor_confirmado, 235.97);
   assertEquals(banco.cmp.categoria, "Combustível e deslocamento");
+  // 12/10/2026: a observação fica guardada no CMP, por UMA chamada à RPC única
+  assertEquals(banco.cmp.observacao, "cupom sem o gasto complementar de R$ 31,10; vale o valor do cartão");
+  assertEquals(banco.rpcsChamadas.filter((n) => n === "comprovante_completar").length, 1);
+  assertEquals(banco.rpcsChamadas.filter((n) => n === "comprovante_comando" || n === "comprovante_responder").length, 0);
   assertEquals(banco.gravacoes(), 0);
   assertEquals(banco.cmp.gravado_em, null);
-  // UMA mensagem do fluxo: "anotei…" e o "Para quê?" com as 9 opções; só a última pergunta foi enviada
+  // UMA mensagem do fluxo: "anotei…", a observação e o "Para quê?" com as 9 opções; só a última pergunta foi enviada
   assertEquals(aoDono.length, 1);
   const primeira = sem(aoDono[0].message);
-  assert(primeira.startsWith("CMP-00001: anotei o que você disse na conversa: categoria Combustível e deslocamento, valor R$ 235,97 (no comprovante: R$ 204,87)."), primeira);
+  assert(
+    primeira.startsWith(
+      "CMP-00001: anotei o que você disse na conversa: categoria Combustível e deslocamento, valor R$ 235,97 (no comprovante: R$ 204,87). " +
+        "Observação: cupom sem o gasto complementar de R$ 31,10; vale o valor do cartão.",
+    ),
+    primeira,
+  );
   assertStringIncludes(primeira, "Para quê?\n1 OS-00112 · Brisa");
   assertStringIncludes(primeira, "9 Pessoal");
-  assertEquals(banco.perguntas.map((p) => [p.status, p.enviada]), [["substituida", false], ["aberta", true]]);
+  assertEquals(banco.perguntas.map((p) => [p.status, p.enviada]), [["substituida", false], ["substituida", false], ["aberta", true]]);
 
   // 2) o dono segue no fluxo: "8" (Empresa) → "Como foi pago?"; "3" (Crédito) → o resumo
   const responde = async (i: number, texto: string) =>
@@ -656,6 +743,8 @@ Deno.test("o caso real de 11/10 de ponta a ponta: 'pode registrar pelo valor do 
     assertStringIncludes(resumo, "CMP-00001 · confira antes de gravar:");
     assertStringIncludes(resumo, "• R$ 235,97 (no comprovante: R$ 204,87) em 11/10");
     assertStringIncludes(resumo, "• Para: empresa (sem OS) · Combustível e deslocamento");
+    // a observação faz parte do que o sim aprova (vai à descrição do lançamento)
+    assertStringIncludes(resumo, "\n• Observação: cupom sem o gasto complementar de R$ 31,10; vale o valor do cartão\n");
     assertStringIncludes(resumo, "Responda *sim* para gravar ou *não* para corrigir.");
     // até aqui: nada gravado (o resumo espera o sim do dono)
     assertEquals(banco.gravacoes(), 0);
@@ -673,4 +762,42 @@ Deno.test("o caso real de 11/10 de ponta a ponta: 'pode registrar pelo valor do 
   }
   // a tool e o fluxo nunca responderam o resumo por conta própria
   assertEquals(banco.rpcsChamadas.filter((n) => n === "comprovante_responder").length, 3);
+});
+
+// 12/10/2026 (spec-observacao-atomica-prefixo.md, 3): a correção do assistente é tudo ou nada. Uma
+// OS que não existe no meio do pedido não deixa a categoria nem o valor anotados, nada vai ao dono e
+// a tool pede para corrigir ou tirar o campo.
+Deno.test("tudo ou nada de ponta a ponta: a OS inexistente no meio → nada anotado no CMP-00001, nenhuma mensagem, a tool diz 'é tudo ou nada'", async () => {
+  const banco = bancoSimuladoDoCmp00001();
+  const aoDono: unknown[] = [];
+  const deps: DependenciasDoFluxo = {
+    admin: banco.admin,
+    whatsapp: null,
+    dropbox: () => Promise.resolve(null),
+    fetch: ((url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/functions/v1/whatsapp-send")) aoDono.push(JSON.parse(String(init?.body)));
+      return Promise.resolve(new Response(JSON.stringify({ success: true, messageId: "WA-OUT-1" }), { status: 200 }));
+    }) as typeof fetch,
+    agora: () => new Date("2026-10-11T22:47:00Z"),
+    log: () => {},
+    supabaseUrl: "https://ref.supabase.co",
+    serviceRoleKey: "chave-de-servico-de-teste",
+    internalSecret: "x",
+    waitUntil: () => {},
+    sessaoDoWhatsApp: () => Promise.resolve("sessao-1"),
+  };
+  const edge = criarHandler(() => deps);
+  const ctx = { sb: banco.admin, admin: banco.admin, userId: DONO_ID, userRole: "admin", jwt: "", appOrigin: "", settings: LIGADA } as never;
+  const r = await comFetch((url, init) => url === URL_DA_EDGE ? edge(new Request(url, init)) : new Response("{}", { status: 404 }), () =>
+    completarTool.execute({ cmp: "1", categoria: "combustível", os: "OS-00999", valor: 235.97, observacao: "o do cartão" }, ctx)) as Record<string, unknown>;
+  assertEquals(
+    sem(r.error),
+    "Não usei OS-00999 (não achei essa OS): nada foi anotado no CMP-00001 (é tudo ou nada: nem o resto do que você passou). " +
+      "Corrija ou tire esse campo e chame de novo.",
+  );
+  assertEquals(r.ja_falou_ao_dono, undefined);
+  // o CMP ficou como estava: nem a categoria (aplicada antes da OS) nem o valor nem a observação
+  assertEquals([banco.cmp.categoria, banco.cmp.valor_confirmado, banco.cmp.observacao, banco.cmp.resumo_versao], [null, 204.87, null, 0]);
+  assertEquals(banco.perguntas.length, 0);
+  assertEquals(aoDono.length, 0);
 });

@@ -212,8 +212,8 @@ export function pareceRespostaCurta(texto: string): boolean {
  *   2. comando explícito → comando (pendentes → pendentes: a lista e depois o assistente);
  *   3. citação de pergunta de comprovante → comprovante (aberta) / comprovante_reabrir (fechada);
  *      citação da FOTO de um CMP → foto_do_cmp; de outra origem, ou fora do registro → assistente;
- *   4. corrigir/pular/sair → comprovante com pergunta de CMP aberta (corrigir e cancelar esse: também
- *      com CMP em contexto); senão assistente;
+ *   4. corrigir/pular/sair → comprovante com pergunta de CMP aberta (corrigir, cancelar esse e
+ *      "obs: …": também com CMP em contexto); senão assistente;
  *   5. pergunta de CMP aberta e resposta válida: interrompida (o dono falou com o assistente depois
  *      dela) → ambiguo; pendência a menos de 2 min → ambiguo; pendência mais nova → assistente;
  *      senão comprovante;
@@ -258,7 +258,8 @@ export function quemResponde(p: {
   if (p.ehComando === "contexto") {
     if (ativaDoCmp) return { destino: "comprovante", motivo: "contexto_com_pergunta" };
     const t = normalizarResposta(p.texto);
-    const doContexto = t.startsWith("corrig") || t.startsWith("cancela");
+    // A (12/10/2026): "obs: …"/"observação: …" anota no CMP em contexto, como o corrigir
+    const doContexto = t.startsWith("corrig") || t.startsWith("cancela") || t.startsWith("obs");
     if (doContexto && e.cmp_em_contexto && !e.cmp_em_contexto.gravado) return { destino: "comprovante", motivo: "corrigir_cmp_em_contexto" };
     if (doContexto && e.cmp_em_contexto) return { destino: "comprovante", motivo: "corrigir_cmp_gravado" };
     return { destino: "assistente", motivo: "contexto_sem_cmp" };

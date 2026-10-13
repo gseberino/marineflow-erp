@@ -85,6 +85,11 @@ export type CmpResumo = {
   quem_pagou?: string | null;
   pagador_nome?: string | null;
   categoria?: string | null;
+  /**
+   * A (12/10/2026): o porquê/o que o dono disse do comprovante (uma linha, até 200), já sem CPF pelo
+   * banco. Vai ao resumo, ao índice do mês e à descrição do lançamento.
+   */
+  observacao?: string | null;
   /** O dono disse que é a mesma compra deste outro CMP (só o arquivo). */
   mesma_compra?: { codigo: string } | null;
   pendencias?: string[];
@@ -683,6 +688,9 @@ export function textoDoResumo(p: PerguntaDoBanco): string {
   ];
   const pago = pagoNoResumo(c);
   if (pago) partes.push(`• Pago: ${pago}`);
+  // A (12/10/2026): a observação faz parte do que o sim aprova (vai à descrição do lançamento)
+  const observacao = umaLinha(c.observacao, 120);
+  if (observacao) partes.push(`• Observação: ${observacao}`);
   const frases = frasesDoPlano(p.plano, c);
   if (frases.length) partes.push(`Vou: ${frases.join("; ")}.`);
   const pasta = p.pasta ?? pastaNoTexto(c);
@@ -1006,15 +1014,18 @@ export function textoSemMotivo(numero: number): string {
   return `Para cancelar, diga o motivo: *cancelar cmp ${numero} comprei em dobro*.`;
 }
 
-export function textoCorrigirIncompleto(campo: "valor" | "data" | "forma" | "os"): string {
-  const exemplo = { valor: "corrigir valor 62,50", data: "corrigir data 10/10", forma: "corrigir forma pix", os: "corrigir os 112" }[campo];
+export function textoCorrigirIncompleto(campo: "valor" | "data" | "forma" | "os" | "obs"): string {
+  const exemplo = {
+    valor: "corrigir valor 62,50", data: "corrigir data 10/10", forma: "corrigir forma pix", os: "corrigir os 112",
+    obs: "corrigir obs complemento sem cupom",
+  }[campo];
   return `Para corrigir, mande junto o novo dado: *${exemplo}*.`;
 }
 
 /** "corrigir" sozinho fora do resumo: como mandar. */
 export const TEXTO_CORRIGIR_COMO =
   "Para corrigir, mande junto o que muda: *corrigir valor 62,50*, *corrigir data 10/10*, *corrigir os 112*, *corrigir forma pix*, " +
-  "*corrigir para estoque*, *corrigir quem* ou *corrigir categoria*.";
+  "*corrigir para estoque*, *corrigir quem*, *corrigir categoria* ou *corrigir obs <texto>*.";
 
 export function textoNaoExiste(numero: number): string {
   return `Não achei o CMP-${String(numero).padStart(5, "0")}.`;
@@ -1032,6 +1043,11 @@ const CAMPO_NO_TEXTO: Record<string, string> = { valor: "valor", data: "data", f
 /** "CMP-00125: valor corrigido para R$ 70,00." — antes da pergunta seguinte (o dono vê QUAL mudou). */
 export function textoCorrigido(codigo: string, corrigido: { campo?: string; valor?: unknown } | null | undefined): string | null {
   if (!corrigido?.campo) return null;
+  // A (12/10/2026): a observação não é "corrigida para": é anotada (ou apagada); o texto já vem sem CPF
+  if (corrigido.campo === "obs") {
+    const obs = umaLinha(corrigido.valor == null ? null : String(corrigido.valor), 120);
+    return obs ? `${codigo}: observação anotada: ${obs}${/[.!…]$/.test(obs) ? "" : "."}` : `${codigo}: observação apagada.`;
+  }
   const v = corrigido.valor;
   let valor = String(v ?? "");
   if (corrigido.campo === "valor") valor = formatarReais(v as string) ?? valor;
@@ -1089,6 +1105,9 @@ function textoDoItemAnotado(i: ItemAnotado): string | null {
       return QUEM_PAGOU_ANOTADO[v] ?? null;
     case "tipo_na_os":
       return v === "despesa" ? "despesa da OS (custo interno)" : v === "peca" ? "peça da OS" : null;
+    // A (12/10/2026): só na lista `anotado` da tool; o texto do dono não vai ao modelo por aqui
+    case "obs":
+      return "a observação";
     default:
       return null;
   }
@@ -1107,10 +1126,12 @@ function umaLinha(s: string | null | undefined, max: number): string {
 
 /**
  * A linha que vai ANTES da pergunta do fluxo quando o assistente completou o CMP com o que o dono
- * disse em conversa (A, 11/10/2026): o que foi anotado, o motivo do valor diferente (até 120
- * caracteres, só ao dono — nunca ao log) e o que não foi usado. Uma linha, sem emoji.
+ * disse em conversa (A, 11/10/2026): o que foi anotado, a observação (até 120 caracteres, só ao
+ * dono — nunca ao log) e o que não foi usado. Uma linha, sem emoji.
  * `ficouParaDepois`: veio algo que o fluxo só usa no passo dele (quem pagou, peça ou despesa…) e o
  * passo não chegou — sem nada anotado, "já estava anotado" seria mentira (o fluxo vai perguntar).
+ * A (12/10/2026): a observação fica guardada no CMP. O item `obs` sai da lista (a frase
+ * "Observação: …" já a mostra) e, sozinho, abre com "anotei a observação…".
  */
 export function textoDoAnotadoNaConversa(
   codigo: string,
@@ -1119,18 +1140,21 @@ export function textoDoAnotadoNaConversa(
   naoUsado: string | null | undefined,
   ficouParaDepois = false,
 ): string {
-  const partes = textosDosItensAnotados(itens);
+  const partes = textosDosItensAnotados(itens.filter((i) => i.campo !== "obs"));
+  const obsAnotada = itens.some((i) => i.campo === "obs");
   const frases = [
     partes.length
       ? `${codigo}: anotei o que você disse na conversa: ${partes.join(", ")}.`
+      : obsAnotada
+      ? `${codigo}: anotei a observação que você disse na conversa.`
       : naoUsado
       ? `${codigo}: não anotei nada do que você disse na conversa.`
       : ficouParaDepois
       ? `${codigo}: o que você disse na conversa eu pergunto na sequência, um passo por vez.`
       : `${codigo}: o que você disse na conversa já estava anotado.`,
   ];
-  const motivo = umaLinha(observacao, 120);
-  if (motivo) frases.push(`Motivo: ${motivo}${/[.!…]$/.test(motivo) ? "" : "."}`);
+  const obs = umaLinha(observacao, 120);
+  if (obs) frases.push(`Observação: ${obs}${/[.!…]$/.test(obs) ? "" : "."}`);
   const nao = umaLinha(naoUsado, 160);
   if (nao) frases.push(`Não usei: ${nao}${/[.!…]$/.test(nao) ? "" : "."}`);
   return frases.join(" ");

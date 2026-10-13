@@ -208,11 +208,14 @@ export type LinhaDoIndice = {
   situacao?: string | null;
   pendencias?: string[] | null;
   arquivo?: string | null;
+  /** A (12/10/2026): a observação do dono no CMP, já sem CPF pelo banco. */
+  observacao?: string | null;
 };
 
+/** "Observação" (A, 12/10/2026) entra no FIM: quem abre o CSV pela posição das colunas não muda. */
 export const COLUNAS_DO_INDICE = [
   "Código", "Data", "Hora", "Tipo", "Valor", "Fornecedor", "CNPJ", "Destino", "OS", "Barco", "Na OS", "Quem pagou",
-  "Forma", "Situação", "Pendências", "Arquivo",
+  "Forma", "Situação", "Pendências", "Arquivo", "Observação",
 ] as const;
 
 /** O que o comprovante é na OS (nunca aparece para o cliente). */
@@ -281,6 +284,8 @@ export function csvDoIndice(linhas: LinhaDoIndice[]): string {
       SITUACAO_NO_INDICE[l.situacao ?? ""] ?? (l.situacao ?? ""),
       (l.pendencias ?? []).map((p) => PENDENCIA_NO_INDICE[p] ?? p).join(", "),
       l.arquivo ?? "",
+      // o banco já manda sem CPF (_comprovante_sem_cpf); aqui é a defesa
+      semCpf(l.observacao) ?? "",
     ].map(campoCsv).join(";");
   });
   return `﻿${[COLUNAS_DO_INDICE.join(";"), ...corpo].join("\r\n")}\r\n`;

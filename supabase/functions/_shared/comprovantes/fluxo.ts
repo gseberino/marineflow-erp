@@ -31,17 +31,17 @@
 // "banco_quem" da mesma R4: esperando / regravado / não trocado.
 //
 // O assistente opera o CMP (11/10/2026 — spec-assistente-opera-cmp.md): a ação `completar` recebe do
-// assistente (tool completar_comprovante) o que o dono disse em conversa e aplica pelas MESMAS RPCs do
-// menu e do *corrigir* (comprovante_comando campo a campo, comprovante_responder nos passos sem
-// comando), sem nada gravar no financeiro: a última pergunta (ou o resumo) vai ao dono numa mensagem
-// só, e só o sim dele grava. No "para quê", a palavra de categoria é dica (B): grava a categoria e
-// repergunta o destino com o mesmo menu.
+// assistente (tool completar_comprovante) o que o dono disse em conversa e aplica por uma RPC só
+// (comprovante_completar, 12/10/2026 — spec-observacao-atomica-prefixo.md), tudo ou nada; por dentro,
+// as mesmas do menu e do *corrigir* (comprovante_comando e comprovante_responder). Nada grava no
+// financeiro: a última pergunta (ou o resumo) vai ao dono numa mensagem só, e só o sim dele grava. No
+// "para quê", a palavra de categoria é dica (B): grava a categoria e repergunta o destino com o mesmo
+// menu. A observação do dono (*corrigir obs …*, *observação: …* ou a da tool) fica guardada no CMP.
 import { EvolutionProvider } from "../whatsapp/evolution-provider.ts";
 import type { IncomingMessageEvent } from "../whatsapp/types.ts";
 import { type Dono, donoDoWhatsApp } from "../whatsapp/dono.ts";
 import { pendenciaQueSegueEsperando, resolveOrCreateWhatsAppSession } from "../ai/whatsapp-channel.ts";
 import { logEdgeError } from "../log-error.ts";
-import { dataEmSaoPaulo } from "../dropbox/nucleo.ts";
 import { conversaDosComprovantesLigada, lerModoDoComprovante } from "./modo.ts";
 import {
   caminhoNoBucket,
@@ -71,7 +71,6 @@ import {
   type EstadoDoTelefone,
   lerEstadoDoTelefone,
   marcarPerguntaEnviada,
-  normalizarResposta,
   type Opcao,
   quemResponde,
   textoDoDesempate,
@@ -1919,13 +1918,19 @@ const MOTIVO_DO_CORRIGIR: Record<string, string> = {
   os_cancelada: "a OS está cancelada",
   os_rascunho: "a OS ainda é rascunho",
   categoria_nao_achada: "não achei essa categoria (mande *corrigir categoria* para ver a lista)",
+  obs_longa: "a observação passa de 200 letras",
 };
 
-/** O que vem depois de "corrigir" no texto do dono (para repetir no "qual dos dois?"). */
+/**
+ * O que vem depois de "corrigir" no texto do dono (para repetir no "qual dos dois?"). A (12/10/2026):
+ * "obs: <texto>"/"observação: <texto>", sem o corrigir, vira "obs <texto>".
+ */
 function comandoDoCorrigir(texto: string): string {
   const t = String(texto ?? "").trim().replace(/^[\s🎤"'“”‘’«»]+/u, "");
   const m = /^corrig\w*\s+(.+)$/i.exec(t);
-  return (m?.[1] ?? "").replace(/[.!]+$/u, "").slice(0, 60);
+  const obs = m ? null : /^(?:obs|observa[cç][aã]o)\s*:\s*(.+)$/is.exec(t);
+  const resto = m?.[1] ?? (obs ? `obs ${obs[1].replace(/\s+/g, " ").trim()}` : "");
+  return resto.replace(/[.!]+$/u, "").slice(0, 60);
 }
 
 /**
@@ -2136,8 +2141,9 @@ export async function desempatar(p: { message_id: string; phone: string; citado?
 // ---------------------------------------------------------------------------------------------
 // completar: o assistente passa ao fluxo o que o dono disse em conversa (A, 11/10/2026 —
 // spec-assistente-opera-cmp.md, 2.2). Porta chamadaInterna (o ai-agent e o erp-mcp, pela tool
-// completar_comprovante). Nenhuma RPC nova: comprovante_comando (corrigir campo a campo, com o
-// número do CMP) e comprovante_responder (os passos sem comando), as mesmas do menu. Nada grava no
+// completar_comprovante). Uma RPC só (comprovante_completar, 12/10/2026 —
+// spec-observacao-atomica-prefixo.md, 3), tudo ou nada; por dentro, as mesmas do menu
+// (comprovante_comando campo a campo, comprovante_responder nos passos sem comando). Nada grava no
 // financeiro: só o sim do dono ao resumo grava (o banco recusa o sim sem mensagem do dono).
 // ---------------------------------------------------------------------------------------------
 
@@ -2145,8 +2151,6 @@ const DESTINOS_DO_COMPLETAR = new Set(["os", "estoque", "insumo", "empresa", "pe
 const TIPOS_NA_OS_DO_COMPLETAR = new Set(["peca", "despesa"]);
 const FORMAS_DO_COMPLETAR = new Set(["pix", "debito", "credito", "dinheiro", "boleto", "transferencia"]);
 const QUEM_PAGOU_DO_COMPLETAR = new Set(["empresa", "socio", "tecnico", "cliente"]);
-/** As situações em que o CMP está (ou entra) na conversa: as que o corrigir e o *cmp N* aceitam. */
-const SITUACOES_DO_COMPLETAR = new Set(["lido", "falhou", "aguardando_vez", "perguntando", "aguardando_sim"]);
 
 /** O que a tool manda, já normalizado por ela (o edge reconfere tudo). */
 export type CorpoDoCompletar = {
@@ -2168,7 +2172,10 @@ export type CorpoDoCompletar = {
   forma?: string | null;
   quem_pagou?: string | null;
   tecnico?: string | null;
-  /** Por que o valor é outro, nas palavras do dono (vai só ao dono, nunca ao log). */
+  /**
+   * O que o dono disse para ficar anotado no CMP (o porquê do valor diferente, …). Fica guardada no
+   * comprovante (A, 12/10/2026): vai ao resumo, ao índice e à descrição do lançamento; nunca ao log.
+   */
   observacao?: string | null;
 };
 
@@ -2178,7 +2185,7 @@ export type ResultadoDoCompletar = {
   /** observacao_obrigatoria: o valor lido no comprovante ("204.87"). */
   valor_lido?: string | null;
   codigo?: string;
-  /** "categoria", "os", "para", "valor", "data", "forma", "quem_pagou", "tecnico", "tipo_na_os". */
+  /** "categoria", "os", "para", "valor", "data", "forma", "obs", "quem_pagou", "tecnico", "tipo_na_os". */
   aplicados: string[];
   /** O que veio e não foi usado (o passo não chegou, ou parou antes). */
   ignorados: string[];
@@ -2193,7 +2200,7 @@ export type ResultadoDoCompletar = {
   ocupado_por?: string | null;
   cmp?: {
     valor: string | null; data: string | null; destino: string | null; os: string | null; categoria: string | null;
-    forma: string | null; quem_pagou: string | null; tipo_na_os: string | null;
+    forma: string | null; quem_pagou: string | null; tipo_na_os: string | null; observacao: string | null;
   } | null;
 };
 
@@ -2280,6 +2287,7 @@ function rotuloDoNaoUsado(campo: string, corpo: CorpoDoCompletar): string {
     case "quem_pagou": return "quem pagou";
     case "tecnico": return `técnico ${String(corpo.tecnico ?? "").replace(/"/g, "").slice(0, 40)}`.trim();
     case "tipo_na_os": return "peça ou despesa";
+    case "obs": return "a observação";
     default: return campo;
   }
 }
@@ -2293,18 +2301,40 @@ function porqueDoNaoUsado(motivo: string, i: Interpretacao | null, passo: string
   return frase ? frase.charAt(0).toLowerCase() + frase.slice(1) : "não serve";
 }
 
-/** A pergunta que a RPC deixou aberta (`pergunta` do comando, `proxima` do responder) ou o "ocupado" (e com quê). */
-function perguntaQueFicou(
-  // deno-lint-ignore no-explicit-any
-  r: any,
-  chave: "pergunta" | "proxima",
-): { ultima: PerguntaDoBanco | null; ocupado: boolean; ocupadoPor: string | null } {
-  const ultima = (r?.[chave] ?? null) as PerguntaDoBanco | null;
-  return {
-    ultima,
-    ocupado: !ultima && r?.motivo === "ocupado",
-    ocupadoPor: !ultima && typeof r?.ocupado_por?.titulo === "string" ? r.ocupado_por.titulo : null,
-  };
+/**
+ * A resposta que o banco deu ao passo (a tabela das respostas da comprovante_completar): o porquê da
+ * recusa de um passo sai da mesma interpretação. Passo nulo (recusa de uma correção) = null.
+ */
+function interpretacaoDoPasso(passo: string | null, corpo: CorpoDoCompletar): Interpretacao | null {
+  switch (passo) {
+    case "quem_pagou": return corpo.quem_pagou ? { tipo: "palavra", valor: corpo.quem_pagou as Palavra } : null;
+    case "qual_tecnico": return corpo.tecnico ? { tipo: "nome", texto: corpo.tecnico } : null;
+    case "tipo_na_os": return corpo.tipo_na_os ? { tipo: "palavra", valor: corpo.tipo_na_os as Palavra } : null;
+    case "como_pagou": return corpo.forma ? { tipo: "palavra", valor: corpo.forma as Palavra } : null;
+    case "qual_os": return corpo.os ? { tipo: "os", numero: corpo.os } : null;
+    default: return null;
+  }
+}
+
+/** Uma lista de textos do banco (aplicados, ja_estava, ignorados); o resto é descartado. */
+function listaDoBanco(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+}
+
+/** Os itens anotados que o banco devolve ({campo, valor, lido?, nome?}). */
+function itensDoBanco(v: unknown): ItemAnotado[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((i) => i && typeof i === "object" && typeof (i as { campo?: unknown }).campo === "string")
+    .map((i) => {
+      const x = i as Record<string, unknown>;
+      return {
+        campo: String(x.campo),
+        valor: x.valor == null ? null : String(x.valor),
+        ...(x.lido != null ? { lido: String(x.lido) } : {}),
+        ...(x.nome != null ? { nome: String(x.nome) } : {}),
+      };
+    });
 }
 
 /** O CMP como ficou (o que vai ao assistente; o resumo do banco). */
@@ -2312,18 +2342,19 @@ function cmpDoCompletar(c: CmpResumo | null | undefined): ResultadoDoCompletar["
   if (!c) return null;
   return {
     valor: c.valor ?? null, data: c.data ?? null, destino: c.destino ?? null, os: c.os?.numero ?? null, categoria: c.categoria ?? null,
-    forma: c.forma ?? null, quem_pagou: c.quem_pagou ?? null, tipo_na_os: c.tipo_na_os ?? null,
+    forma: c.forma ?? null, quem_pagou: c.quem_pagou ?? null, tipo_na_os: c.tipo_na_os ?? null, observacao: c.observacao ?? null,
   };
 }
 
 /**
- * O assistente completa o CMP com o que o dono disse em conversa. Recusa ANTES de qualquer escrita
- * (entrada, dono, conversa, modo de teste, CMP, valor diferente do lido sem o porquê, data futura);
- * depois as correções pelo comprovante_comando, na ordem fixa (o que pode ser recusado primeiro);
- * depois as respostas aos passos sem comando (quem pagou, técnico, peça ou despesa) pelo
- * comprovante_responder, com message_id nulo — nunca o confirmar nem o mesma_compra. Uma mensagem
- * só ao dono, no fim: a linha "anotei o que você disse na conversa" e a última pergunta (ou o
- * resumo), com a chave dela. Cada RPC é uma transação: uma recusa no meio deixa o que veio antes.
+ * O assistente completa o CMP com o que o dono disse em conversa. A edge confere a entrada, o dono, a
+ * conversa e o modo de teste (o banco não sabe dele) e chama UMA RPC, comprovante_completar: as
+ * recusas antes de escrever (CMP, valor diferente do lido sem observação, data futura), as correções
+ * na ordem fixa pelo comprovante_comando e as respostas aos passos sem comando pelo
+ * comprovante_responder (nunca o confirmar nem o mesma_compra) — tudo numa transação, tudo ou nada.
+ * Uma recusa no meio não deixa nada anotado e nada é enviado (a tool pede para corrigir ou tirar o
+ * campo). Com `ok`, uma mensagem só ao dono: a linha "anotei o que você disse na conversa" e a última
+ * pergunta (ou o resumo), com a chave dela.
  */
 export async function completar(p: unknown, deps: DependenciasDoFluxo): Promise<{ status: 200 | 422; corpo: ResultadoDoCompletar }> {
   const corpo = corpoDoCompletar(p);
@@ -2341,188 +2372,61 @@ export async function completar(p: unknown, deps: DependenciasDoFluxo): Promise<
   if (!conversaDosComprovantesLigada(await lerConfiguracoes(deps, ["comprovante_fluxo", "comprovante_conversa"]))) return recusar("desligada");
   if (await modoDeTesteLigado(deps)) return recusar("modo_de_teste");
 
-  const { data: c, error } = await deps.admin.from("comprovantes")
-    .select("id, codigo, numero, situacao, modo, gravado_em, valor, valor_confirmado, data_confirmada, destino, destino_os_id, categoria, forma_confirmada, quem_pagou, tipo_na_os")
-    .eq("numero", corpo.cmp)
-    .eq("phone_normalized", corpo.phone)
-    .maybeSingle();
-  if (error) throw new FalhaDoFluxo(`ler_comprovante:${error.code ?? "erro"}`);
-  if (!c || c.modo !== "dono") return recusar("nao_existe");
-  const codigo = String(c.codigo ?? codigoDoNumero(corpo.cmp));
-  // cancelado antes de gravado: um CMP gravado e depois cancelado é "cancelado"
-  if (c.situacao === "cancelado") return recusar("ja_cancelado", { codigo });
-  if (c.gravado_em) return recusar("ja_gravado", { codigo });
-  // Revisão de 11/10/2026: o CMP ainda sendo lido (com legenda-chave o número nasce em 'na_fila') ou
-  // fora da conversa. O corrigir não recusa essas situações e o reabrir, sem achar ESTE CMP na
-  // conversa, abre a pergunta do primeiro da fila — e o laço abaixo responderia o passo de OUTRO
-  // CMP com o que o dono disse deste. Nada é escrito.
-  if (!SITUACOES_DO_COMPLETAR.has(String(c.situacao ?? ""))) return recusar("fora_da_conversa", { codigo });
-  const lido = numeroDoBanco(c.valor);
-  const confirmado = numeroDoBanco(c.valor_confirmado);
-  if (corpo.valor && lido !== null && Math.abs(Number(corpo.valor) - lido) > 0.01 &&
-    !(confirmado !== null && Math.abs(Number(corpo.valor) - confirmado) <= 0.01) && !corpo.observacao) {
-    return recusar("observacao_obrigatoria", { codigo, valor_lido: lido.toFixed(2) });
-  }
-  if (corpo.data && corpo.data > dataEmSaoPaulo(deps.agora())) return recusar("data_futura", { codigo });
+  // a categoria vai traduzida pela palavra do dono ("almoço" → "Alimentação de campo"), ou crua
+  const categoria = corpo.categoria ? (categoriaDaPalavra(corpo.categoria) ?? corpo.categoria) : null;
+  // deno-lint-ignore no-explicit-any
+  const r = await rpc<any>(deps, "comprovante_completar", { p: { ...corpo, categoria } });
+  const resultado = String(r?.resultado ?? "");
+  const temCodigo = typeof r?.codigo === "string" && r.codigo !== "";
+  const codigo = temCodigo ? String(r.codigo) : codigoDoNumero(corpo.cmp);
+  const lido = numeroDoBanco(r?.valor_lido);
+  const valorLido = lido !== null ? lido.toFixed(2) : null;
+  const ignorados = listaDoBanco(r?.ignorados);
+  if (r?.desconhecido != null) deps.log("completar_desconhecido", { resultado: String(r.desconhecido) });
 
-  const aplicados: string[] = [];
-  const jaEstava = new Set<string>();
-  const itens: ItemAnotado[] = [];
-  let recusado: ResultadoDoCompletar["recusado"] = null;
-  let ultima: PerguntaDoBanco | null = null;
-  let ocupado = false;
-  let ocupadoPor: string | null = null;
-  const lidoTexto = lido !== null ? lido.toFixed(2) : null;
-
-  // ── 1. as correções pelo comando (campo igual ao do CMP não vai: nem versão nem pergunta à toa) ──
-  const correcoes: Array<{ campo: string; dados: Record<string, unknown> }> = [];
-  if (corpo.categoria) {
-    const nome = categoriaDaPalavra(corpo.categoria) ?? corpo.categoria;
-    if (normalizarResposta(nome) !== normalizarResposta(String(c.categoria ?? ""))) correcoes.push({ campo: "categoria", dados: { categoria: nome } });
-    else jaEstava.add("categoria");
+  // ── recusa dentro do bloco: o banco desfez tudo (correções e perguntas); nenhuma mensagem ──
+  if (resultado === "recusado") {
+    const campo = String(r?.recusado?.campo ?? "");
+    const motivo = String(r?.recusado?.motivo ?? "");
+    const passo = typeof r?.recusado?.passo === "string" ? r.recusado.passo : null;
+    const recusado = { campo, motivo, texto: `${rotuloDoNaoUsado(campo, corpo)} (${porqueDoNaoUsado(motivo, interpretacaoDoPasso(passo, corpo), passo)})` };
+    deps.log("completar", { id: String(r?.id ?? ""), aplicados: 0, ignorados: ignorados.length, passo: null, enviada: false, recusado: campo });
+    return {
+      status: 200,
+      corpo: {
+        ok: true, codigo, aplicados: [], ignorados, anotado: [], recusado, passo: null, enviada: false, ocupado: false, ocupado_por: null,
+        valor_lido: valorLido, cmp: null,
+      },
+    };
   }
-  if (corpo.os) correcoes.push({ campo: "os", dados: { numero: corpo.os } });
-  if (corpo.destino && corpo.destino !== "os") {
-    if (corpo.destino !== c.destino) correcoes.push({ campo: "para", dados: { destino: corpo.destino } });
-    else jaEstava.add("para");
-  }
-  if (corpo.valor) {
-    if (confirmado !== null && Math.abs(Number(corpo.valor) - confirmado) <= 0.001) jaEstava.add("valor");
-    else correcoes.push({ campo: "valor", dados: { valor: corpo.valor } });
-  }
-  if (corpo.data) {
-    if (corpo.data === String(c.data_confirmada ?? "").slice(0, 10)) jaEstava.add("data");
-    else correcoes.push({ campo: "data", dados: { data: corpo.data } });
-  }
-  if (corpo.forma) {
-    if (corpo.forma === c.forma_confirmada) jaEstava.add("forma");
-    else correcoes.push({ campo: "forma", dados: { forma: corpo.forma } });
+  // ── as recusas antes de escrever (nao_existe, ja_gravado, observacao_obrigatoria…) e a corrida no
+  //    meio (o bloco desfeito): o motivo do banco ──
+  if (resultado !== "ok") {
+    return recusar(resultado || "desconhecido", { ...(temCodigo ? { codigo } : {}), ...(valorLido ? { valor_lido: valorLido } : {}) });
   }
 
-  for (const k of correcoes) {
-    // deno-lint-ignore no-explicit-any
-    const r = await rpc<any>(deps, "comprovante_comando", {
-      p: { phone: corpo.phone, message_id: null, comando: "corrigir", cmp: corpo.cmp, campo: k.campo, ...k.dados },
-    });
-    const resultado = String(r?.resultado ?? "");
-    if (resultado === "pergunta") {
-      aplicados.push(k.campo);
-      const v = r?.corrigido?.valor;
-      itens.push({ campo: k.campo, valor: v == null ? null : String(v), lido: k.campo === "valor" ? lidoTexto : null });
-      ({ ultima, ocupado, ocupadoPor } = perguntaQueFicou(r, "pergunta"));
-      continue;
-    }
-    if (resultado === "invalida") {
-      const motivo = String(r?.motivo ?? "");
-      recusado = { campo: k.campo, motivo, texto: `${rotuloDoNaoUsado(k.campo, corpo)} (${porqueDoNaoUsado(motivo, null, null)})` };
-      break;
-    }
-    if (["ja_gravado", "ja_cancelado", "nao_existe", "sem_cmp", "desligada"].includes(resultado)) {
-      // só numa corrida com o próprio dono (o que veio antes fica)
-      return recusar(resultado, { codigo, aplicados });
-    }
-    deps.log("completar_desconhecido", { resultado });
-    break;
-  }
-
-  // ── 2. sem nenhum comando (tudo igual): a pergunta do CMP, como o *cmp N* abre ──
-  if (correcoes.length === 0) {
-    // deno-lint-ignore no-explicit-any
-    const r = await rpc<any>(deps, "comprovante_comando", { p: { phone: corpo.phone, message_id: null, comando: "cmp", numero: corpo.cmp } });
-    const resultado = String(r?.resultado ?? "");
-    if (resultado === "pergunta") ({ ultima, ocupado, ocupadoPor } = perguntaQueFicou(r, "pergunta"));
-    else if (resultado === "nao_existe" || resultado === "desligada") return recusar(resultado, { codigo });
-  }
-
-  // ── 3. os passos sem comando: no máximo 4 voltas; nunca confirmar, mesma_compra nem os de dado ──
-  const respostas: Record<string, { campo: string; interp: Interpretacao } | null> = {
-    quem_pagou: corpo.quem_pagou ? { campo: "quem_pagou", interp: { tipo: "palavra", valor: corpo.quem_pagou as Palavra } } : null,
-    qual_tecnico: corpo.tecnico ? { campo: "tecnico", interp: { tipo: "nome", texto: corpo.tecnico } } : null,
-    tipo_na_os: corpo.tipo_na_os ? { campo: "tipo_na_os", interp: { tipo: "palavra", valor: corpo.tipo_na_os as Palavra } } : null,
-    como_pagou: corpo.forma ? { campo: "forma", interp: { tipo: "palavra", valor: corpo.forma as Palavra } } : null,
-    qual_os: corpo.os ? { campo: "os", interp: { tipo: "os", numero: corpo.os } } : null,
-  };
-  const respondidos = new Set<string>();
-  for (let volta = 0; volta < 4 && !recusado; volta++) {
-    const atual = ultima as PerguntaDoBanco | null;
-    if (!atual) break;
-    // só a pergunta DESTE CMP: o que o dono disse dele nunca responde o passo de outro
-    if (atual.cmp?.id && atual.cmp.id !== c.id) break;
-    const resposta = Object.prototype.hasOwnProperty.call(respostas, atual.passo) ? respostas[atual.passo] : null;
-    if (!resposta || respondidos.has(atual.passo)) break;
-    respondidos.add(atual.passo);
-    // deno-lint-ignore no-explicit-any
-    const r = await rpc<any>(deps, "comprovante_responder", {
-      p: { pergunta_id: atual.pergunta_id, message_id: null, interpretacao: resposta.interp, versao: null },
-    });
-    const resultado = String(r?.resultado ?? "");
-    if (resultado === "proximo" || resultado === "resumo") {
-      if (!aplicados.includes(resposta.campo)) aplicados.push(resposta.campo);
-      const depois = (r?.cmp ?? null) as CmpResumo | null;
-      if (atual.passo === "qual_tecnico") {
-        const nome = depois?.pagador_nome ?? corpo.tecnico;
-        const quem = itens.find((x) => x.campo === "quem_pagou");
-        if (quem) quem.nome = nome;
-        else itens.push({ campo: "quem_pagou", valor: "tecnico", nome });
-      } else if (atual.passo === "quem_pagou") {
-        itens.push({ campo: "quem_pagou", valor: corpo.quem_pagou ?? null });
-      } else if (atual.passo === "tipo_na_os") {
-        itens.push({ campo: "tipo_na_os", valor: corpo.tipo_na_os ?? null });
-      } else if (atual.passo === "como_pagou") {
-        itens.push({ campo: "forma", valor: corpo.forma ?? null });
-      } else if (atual.passo === "qual_os") {
-        itens.push({ campo: "os", valor: depois?.os?.numero ?? `OS-${String(corpo.os).padStart(5, "0")}` });
-      }
-      ({ ultima, ocupado, ocupadoPor } = perguntaQueFicou(r, "proxima"));
-      continue;
-    }
-    if (resultado === "invalida") {
-      const motivo = String(r?.motivo ?? "");
-      recusado = { campo: resposta.campo, motivo, texto: `${rotuloDoNaoUsado(resposta.campo, corpo)} (${porqueDoNaoUsado(motivo, resposta.interp, atual.passo)})` };
-      // a mesma pergunta de novo (ela segue aberta)
-      ultima = (r?.proxima ?? atual) as PerguntaDoBanco;
-      break;
-    }
-    if (resultado === "ignorada") {
-      return recusar(r?.motivo === "cancelado" ? "ja_cancelado" : r?.motivo === "desligada" ? "desligada" : "ja_gravado", { codigo, aplicados });
-    }
-    deps.log("completar_desconhecido", { resultado });
-    break;
-  }
-
-  // o que veio e não foi usado (o passo não chegou, ou parou antes)
-  const pedidos: string[] = [
-    ...(corpo.categoria ? ["categoria"] : []),
-    ...(corpo.os ? ["os"] : []),
-    ...(corpo.destino && corpo.destino !== "os" ? ["para"] : []),
-    ...(corpo.valor ? ["valor"] : []),
-    ...(corpo.data ? ["data"] : []),
-    ...(corpo.forma ? ["forma"] : []),
-    ...(corpo.quem_pagou ? ["quem_pagou"] : []),
-    ...(corpo.tecnico ? ["tecnico"] : []),
-    ...(corpo.tipo_na_os ? ["tipo_na_os"] : []),
-  ];
-  const usado = (campo: string) => aplicados.includes(campo) || jaEstava.has(campo) || recusado?.campo === campo;
-  const ignorados = pedidos.filter((campo) => !usado(campo));
-  // "foi para uma OS" sem dizer qual: o menu do "para quê" já lista as OS
-  if (corpo.destino === "os" && !corpo.os && c.destino !== "os") ignorados.push("destino");
-
-  // ── 4. uma mensagem só: a linha do que foi anotado e a última pergunta (ou o resumo) ──
+  // ── uma mensagem só: a linha do que foi anotado e a última pergunta (ou o resumo) ──
+  const itens = itensDoBanco(r?.itens);
+  const aplicados = listaDoBanco(r?.aplicados);
+  const final = (r?.pergunta ?? null) as PerguntaDoBanco | null;
+  // a observação da frase: a anotada agora (o banco já a manda sem CPF) ou a que já estava igual
+  const obsAnotada = itens.find((i) => i.campo === "obs")?.valor ?? null;
+  const obsIgual = listaDoBanco(r?.ja_estava).includes("obs") ? (final?.cmp?.observacao ?? semCpf(corpo.observacao)) : null;
   let enviada = false;
-  const final = ultima as PerguntaDoBanco | null;
   if (final) {
-    const linha = textoDoAnotadoNaConversa(codigo, itens, corpo.observacao, recusado?.texto ?? null, ignorados.length > 0);
+    const linha = textoDoAnotadoNaConversa(codigo, itens, obsAnotada ?? obsIgual, null, ignorados.length > 0);
     enviada = await enviarMensagem(corpo.phone, comAPergunta(linha, final), final.dedupe_key, final, deps);
   }
   deps.log("completar", {
-    id: String(c.id), aplicados: aplicados.length, ignorados: ignorados.length, passo: final?.passo ?? null, enviada,
-    recusado: recusado?.campo ?? null,
+    id: String(r?.id ?? ""), aplicados: aplicados.length, ignorados: ignorados.length, passo: final?.passo ?? null, enviada, recusado: null,
   });
   return {
     status: 200,
     corpo: {
-      ok: true, codigo, aplicados, ignorados, anotado: textosDosItensAnotados(itens), recusado, passo: final?.passo ?? null, enviada,
-      ocupado: !final && ocupado, ocupado_por: ocupadoPor, valor_lido: lidoTexto, cmp: cmpDoCompletar(final?.cmp),
+      ok: true, codigo, aplicados, ignorados, anotado: textosDosItensAnotados(itens), recusado: null, passo: final?.passo ?? null, enviada,
+      ocupado: !final && r?.ocupado === true,
+      ocupado_por: !final && typeof r?.ocupado_por === "string" ? r.ocupado_por : null,
+      valor_lido: valorLido, cmp: cmpDoCompletar(final?.cmp),
     },
   };
 }
