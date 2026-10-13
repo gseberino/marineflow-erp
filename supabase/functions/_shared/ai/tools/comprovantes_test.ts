@@ -324,6 +324,21 @@ Deno.test("completar_comprovante: escrita low só do admin, na rede e roda diret
   assertStringIncludes(porque, "só o *sim* dele grava");
 });
 
+Deno.test("despesa de campo (13/10/2026): as descrições dizem que combustível, alimentação e pedágio numa OS já são despesa — peça ou despesa só se o dono disse", () => {
+  assertStringIncludes(
+    completarTool.description,
+    "Combustível, alimentação e pedágio numa OS o sistema já trata como despesa da OS (custo interno) sem perguntar: mande peça ou despesa só se o dono disse.",
+  );
+  // logo depois da lista do que se passa (a frase vem depois da categoria)
+  assert(completarTool.description.indexOf("combustível, almoço, pedágio…)") < completarTool.description.indexOf("Combustível, alimentação e pedágio numa OS"));
+  const tipo = (completarTool.input_schema as { properties: Record<string, { description: string }> }).properties.tipo_na_os.description;
+  assertEquals(tipo, "Na OS: peça/material ou despesa (custo interno). Só se o dono disse: combustível, alimentação e pedágio já são despesa pela categoria.");
+  assertStringIncludes(tool.description, "(tipo_na_os: a despesa é custo interno");
+  assertStringIncludes(tool.description, "; combustível, alimentação e pedágio numa OS são despesa pela categoria, sem perguntar");
+  // o que já estava continua: só o dono grava, nada no financeiro
+  assertStringIncludes(completarTool.description, "NÃO grava nada no financeiro");
+});
+
 Deno.test("completar_comprovante: só o admin, só o dono, com a conversa ligada e com algo a completar — senão nem chama a edge", async () => {
   await comFetch(respostaDaEdge(ENVIADA), async (chamadas) => {
     const casos: Array<[string, Record<string, unknown>, Record<string, unknown>, string]> = [

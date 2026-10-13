@@ -435,7 +435,8 @@ export const comprovanteTools: ToolDef[] = [
       "sistema de comprovantes fez com cada um: 'o CMP-00124 foi gravado?', 'quais comprovantes estão em aberto?', 'tem " +
       "comprovante de 62 reais de ontem?', 'os comprovantes da OS X'. Traz situação, valor, data, fornecedor, destino (OS, " +
       "estoque, insumo, empresa, pessoal), na OS se foi peça ou despesa (tipo_na_os: a despesa é custo interno, nunca aparece " +
-      "para o cliente nem muda o total da OS; a peça só comprova a peça lançada na OS), quem pagou, a forma, as pendências e a " +
+      "para o cliente nem muda o total da OS; a peça só comprova a peça lançada na OS; combustível, alimentação e pedágio " +
+      "numa OS são despesa pela categoria, sem perguntar), quem pagou, a forma, as pendências e a " +
       "pasta no Dropbox. PESSOAL pago pela empresa é gasto pessoal do sócio (descontado do pró-labore). Só leitura; não grava; " +
       "para completar um CMP com o que o dono disse: completar_comprovante. Se vier error, diga que a consulta falhou — não " +
       "que não há comprovante.",
@@ -505,7 +506,9 @@ export const comprovanteTools: ToolDef[] = [
     description:
       "Passa ao sistema de comprovantes o que o dono disse em conversa sobre um CMP ainda não gravado: o valor certo (ex.: o do " +
       "cartão), a data, para quê (OS, estoque, insumo, empresa, pessoal), peça ou despesa da OS, a categoria (a palavra dele: " +
-      "combustível, almoço, pedágio…), a forma e quem pagou. Passe SÓ o que o dono disse; o que faltar o sistema pergunta a ele. " +
+      "combustível, almoço, pedágio…), a forma e quem pagou. Combustível, alimentação e pedágio numa OS o sistema já trata " +
+      "como despesa da OS (custo interno) sem perguntar: mande peça ou despesa só se o dono disse. " +
+      "Passe SÓ o que o dono disse; o que faltar o sistema pergunta a ele. " +
       "NÃO grava nada no financeiro: o sistema manda ao dono, no WhatsApp, a próxima pergunta ou o resumo, e só o *sim* dele " +
       "grava. Valor diferente do lido vai com observacao (o porquê, como o dono disse); a observação fica guardada no CMP e " +
       "vai na descrição do lançamento quando o dono der o sim. Pode mandar só a observação. É tudo ou nada: se um campo não " +
@@ -524,7 +527,12 @@ export const comprovanteTools: ToolDef[] = [
         data: { type: "string", description: "Data da compra: 'hoje', 'ontem', dd/mm ou AAAA-MM-DD." },
         destino: { type: "string", enum: DESTINOS_DO_CMP, description: "Para quê." },
         os: { type: "string", description: "Quando foi para uma OS: 'OS-00112', 'ORÇ-00112' ou '112'." },
-        tipo_na_os: { type: "string", enum: TIPOS_NA_OS, description: "Na OS: peça/material ou despesa (custo interno)." },
+        tipo_na_os: {
+          type: "string",
+          enum: TIPOS_NA_OS,
+          description: "Na OS: peça/material ou despesa (custo interno). Só se o dono disse: combustível, alimentação e pedágio já " +
+            "são despesa pela categoria.",
+        },
         categoria: { type: "string", description: "A palavra do dono (combustível, almoço, pedágio…) ou o nome da categoria." },
         forma: { type: "string", enum: FORMAS_DO_CMP, description: "Como foi pago." },
         quem_pagou: { type: "string", enum: QUEM_PAGOU_DO_CMP, description: "Quem pagou." },
