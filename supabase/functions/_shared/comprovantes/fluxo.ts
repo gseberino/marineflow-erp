@@ -1058,7 +1058,8 @@ export async function enviarAoDono(
 
 /**
  * Envia a mensagem. `abre` = a pergunta NOVA que ela abre: sem confirmação de envio, volta ao banco
- * (o CMP volta à fila; o vigia tenta depois). `reenvia` = a pergunta aberta que ela REAPRESENTA (a
+ * (o CMP volta à fila; a pergunta do vigia que não saiu não conta como tentativa e ele tenta de novo
+ * em 4 h — 13/10/2026). `reenvia` = a pergunta aberta que ela REAPRESENTA (a
  * resposta não serviu, o "responda sim a este resumo"). Nos dois casos, o envio confirmado fica
  * registrado na pergunta (enviada_em + o id do WhatsApp: a citação do reenvio também acha).
  */
@@ -1212,8 +1213,8 @@ async function cederPerguntaDoExtrato(phone: string, deps: DependenciasDoFluxo):
 
 /**
  * Abre a pergunta do extrato (R3) e a envia (com a retomada do vigia: "Ainda falta ligar o CMP-00124
- * ao extrato."). Envio não confirmado → comprovante_pergunta_nao_enviada (a tentativa conta, como na
- * F2). true = perguntou.
+ * ao extrato."). Envio não confirmado → comprovante_pergunta_nao_enviada (a tentativa do vigia que
+ * não saiu não conta: o banco a devolve — 13/10/2026). true = perguntou.
  */
 export async function perguntarBanco(phone: string, motivo: string, deps: DependenciasDoFluxo, cmp: string | null = null): Promise<boolean> {
   const p = await abrirPerguntaDoExtrato(phone, motivo, cmp, deps);
