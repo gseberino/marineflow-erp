@@ -29,7 +29,13 @@ Deno.test("resposta sem modelo grava o turno e volta; a letra sozinha só troca 
   assertStringIncludes(bloco, 'if (r.tipo === "resposta") {');
   assertStringIncludes(bloco, 'role: "user", content: text, source: "whatsapp"');
   assertStringIncludes(bloco, "return jr({ ok: true, secretario: comandoDoResumo.comando });");
-  assertStringIncludes(bloco, "effectiveText = r.texto;");
+  assertStringIncludes(bloco, 'if (r.tipo === "pedido") effectiveText = r.texto;');
   // nada de aprovar/rejeitar pendência aqui
   assert(!bloco.includes("resolveWhatsAppConfirmation"), "a camada não mexe em pendência");
+});
+
+Deno.test("Passo 3: 'seguir' (não era comando) deixa o texto do turno como veio", () => {
+  const bloco = turno.slice(turno.indexOf("comandos do resumo da manhã (secretário"), turno.indexOf("lerPedidoDePdf(effectiveText)"));
+  // só o pedido troca o texto; nenhuma outra atribuição a effectiveText na camada
+  assert((bloco.match(/effectiveText = /g) ?? []).length === 1, "uma única troca do texto do turno");
 });

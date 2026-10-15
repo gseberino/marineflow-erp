@@ -650,7 +650,8 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
         await queueWhatsAppReply(admin, phoneNormalized, r.texto);
         return jr({ ok: true, secretario: comandoDoResumo.comando });
       }
-      effectiveText = r.texto;
+      // "seguir" (Passo 3): não era comando (ex.: "pouco" sem a pergunta da sexta) — o texto segue como veio
+      if (r.tipo === "pedido") effectiveText = r.texto;
     }
   }
 

@@ -77,6 +77,15 @@ Deno.test("o '1', o 'sim' e o 'não' continuam do CMP mesmo com o formato novo",
   }
 });
 
+Deno.test("Passo 3: a revisão de uma vez, a cobrança antiga e a pergunta da sexta também vão ao assistente", async () => {
+  for (const t of ["C semana, B tira, G 15 dias", "F cobrar", "ajudou", "atrapalhou"]) {
+    const { d, c } = deps();
+    assertEquals(await rotearTextoDoDono(TEXTO(t), d), "assistente", t);
+    assertEquals(c.chamar.length, 0, t);
+    assertEquals(c.despachos, [t]);
+  }
+});
+
 Deno.test("áudio: a pergunta ao secretário usa a transcrição", async () => {
   const { d, c } = deps({ transcricao: "Lista." });
   assertEquals(await rotearTextoDoDono(TEXTO("[audio]", "audio"), d), "assistente");
