@@ -3,7 +3,10 @@
 // prazo vencido encerra; lembrete e promessa avisam uma vez na hora; só no horário comercial; o
 // texto pede ao assistente para ler, sugerir e chamar send_whatsapp_message.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { type Acompanhamento, decidir, horaDeAvisar, janelaDoEncerramento, tempoEsperando, textoDoAviso } from "./acompanhar.ts";
+import {
+  type Acompanhamento, aplicarFreio, AVISOS_POR_MENSAGEM, decidir, horaDeAvisar, janelaDoEncerramento, MOTIVO_FREIO, podeAvisarNoModo,
+  tempoEsperando, textoDoAviso,
+} from "./acompanhar.ts";
 import { conversaEncerradaPeloContato, MOTIVO_CONTATO_ENCERROU } from "../whatsapp/contato-encerrou.ts";
 
 // Terça 06/10/2026, 14:00 em Brasília.
@@ -96,4 +99,54 @@ Deno.test("janela do encerramento: 7 dias, mas nunca antes do acompanhamento nas
   assertEquals(janelaDoEncerramento({ created_at: "2026-09-17T12:00:00.000Z" }, agora), "2026-09-30T17:30:00.000Z");
   // Data ilegível: os últimos 7 dias.
   assertEquals(janelaDoEncerramento({ created_at: "" }, agora), "2026-09-30T17:30:00.000Z");
+});
+
+// ── Secretário, Passo 4 (15/10/2026): janela da manhã e freio ──────────────────────────────────
+
+// Das 07:30 às 09:30 só a manhã pergunta. Medido (02–15/10): 4 avisos de acompanhamento às 08:00
+// e 1 de promessa às 09:30, em cima da manhã. O lembrete pedido com hora é o alarme do dono.
+Deno.test("janela da manhã: acompanhamento e promessa só a partir das 09:30; lembrete pedido das 8h", () => {
+  const as = (hhmm: string, dia = "2026-10-07") => new Date(`${dia}T${hhmm}:00-03:00`);
+  assert(!podeAvisarNoModo("acompanhar", as("08:00")), "08:00: espera");
+  assert(!podeAvisarNoModo("acompanhar", as("09:29")));
+  assert(podeAvisarNoModo("acompanhar", as("09:30")), "09:30: avisa");
+  assert(!podeAvisarNoModo("promessa", as("09:15")));
+  assert(podeAvisarNoModo("promessa", as("09:45")));
+  assert(podeAvisarNoModo("lembrar_em", as("08:00")), "o alarme do dono não espera");
+  assert(!podeAvisarNoModo("lembrar_em", as("07:45")), "antes das 8h continua fora");
+  assert(!podeAvisarNoModo("acompanhar", as("20:10")), "depois das 20h continua fora");
+  assert(!podeAvisarNoModo("acompanhar", as("10:00", "2026-10-11")), "domingo continua fora");
+});
+
+// Caso Miguel (07–10/10): 7 dos 11 avisos repetiam a mesma última mensagem dele. O freio deixa 2 avisos
+// por mensagem e ESPERA (não encerra): quando ele escreve de novo, a conta é outra e o aviso volta.
+Deno.test("freio: 1º e 2º aviso da mesma mensagem avisam; o 3º espera; mensagem nova volta a avisar", () => {
+  assertEquals(AVISOS_POR_MENSAGEM, 2);
+  const avisar = { acao: "avisar" } as const;
+  assertEquals(aplicarFreio(avisar, base, 0), avisar, "1º aviso");
+  assertEquals(aplicarFreio(avisar, base, 1), avisar, "2º aviso");
+  assertEquals(aplicarFreio(avisar, base, 2), { acao: "esperar", motivo: MOTIVO_FREIO }, "3º: o freio segura");
+  assertEquals(aplicarFreio(avisar, base, 5), { acao: "esperar", motivo: MOTIVO_FREIO });
+  // mensagem nova dele: a referência muda (acomp:<id>:<nova>) e a contagem volta a 0
+  assertEquals(aplicarFreio(avisar, base, 0), avisar, "mensagem nova → avisa");
+  // limite das regras do dono (voz_unica_regras.freio_avisos)
+  assertEquals(aplicarFreio(avisar, base, 2, 3), avisar);
+  assertEquals(aplicarFreio(avisar, base, 3, 3), { acao: "esperar", motivo: MOTIVO_FREIO });
+});
+
+Deno.test("freio: sem contagem (erro de leitura) avisa; não mexe em lembrete, promessa, esperar nem encerrar", () => {
+  const avisar = { acao: "avisar" } as const;
+  assertEquals(aplicarFreio(avisar, base, null), avisar, "erro de leitura: melhor avisar que calar");
+  assertEquals(aplicarFreio(avisar, { modo: "lembrar_em" }, 9), avisar);
+  assertEquals(aplicarFreio(avisar, { modo: "promessa" }, 9), avisar);
+  assertEquals(aplicarFreio({ acao: "esperar" }, base, 9), { acao: "esperar" });
+  const enc = { acao: "encerrar", motivo: MOTIVO_CONTATO_ENCERROU } as const;
+  assertEquals(aplicarFreio(enc, base, 9), enc, "a desistência continua ganhando");
+});
+
+Deno.test("freio no caso Miguel: com a desistência do passo 0 encerrando antes, o freio corta o resto", () => {
+  // A desistência vem de decidir (antes do freio): o freio nunca a transforma em aviso.
+  const recebidas = ["André você demora muito pra responder e por isso acabei fechando com outra empresa. Obrigado"];
+  const d = decidir(base, { ...esperando(5), encerrouPeloContato: conversaEncerradaPeloContato(recebidas) }, AGORA);
+  assertEquals(aplicarFreio(d, base, 0), { acao: "encerrar", motivo: MOTIVO_CONTATO_ENCERROU });
 });

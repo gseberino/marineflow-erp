@@ -12,13 +12,26 @@
 // que o assistente criar com o aviso entra no registro pelo próprio ai-agent.
 // Contato que disse que fechou com outra empresa ou desistiu (15/10/2026): o acompanhamento se
 // encerra sozinho, sem aviso (regra de palavras, _shared/whatsapp/contato-encerrou.ts).
+// Secretário, Passo 4 (15/10/2026, spec-secretario-uma-voz.md):
+//  * janela da manhã: o aviso de acompanhamento e o de promessa só a partir das 09:30 (o lembrete
+//    pedido com hora segue das 8h); a detecção de promessas segue das 8h;
+//  * freio (app_settings.acompanhar_freio): no máximo 2 avisos sobre a mesma mensagem do contato; o
+//    aviso volta quando ele escreve de novo. Conta pelo portão (avisos_do_dono, referência
+//    acomp:<id>:<última recebida>): com o freio ligado, cada aviso que SAIU é registrado lá;
+//  * voz única em sombra (app_settings.voz_unica): os avisos que saíram são registrados no portão com o
+//    que ele faria (acordar, guardar, deixar). O que sai para o dono não muda.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { detectarPromessa } from "../_shared/ai/promessa.ts";
 import {
-  type Acompanhamento, decidir, diaEmBrasilia, type EstadoDaConversa, horaDeAvisar, janelaDoEncerramento, textoDoAviso,
+  type Acompanhamento, aplicarFreio, decidir, diaEmBrasilia, type EstadoDaConversa, horaDeAvisar, janelaDoEncerramento,
+  MOTIVO_FREIO, podeAvisarNoModo, textoDoAviso,
 } from "../_shared/ai/acompanhar.ts";
+import { avisoDoAcompanhamento, referenciaDoAcompanhamento } from "../_shared/uma-voz/fontes.ts";
+import {
+  avisosDestaMensagem, modoDoRegistroDoAcompanhamento, type PortaoDaRodada, portaoDasConfiguracoes, registrarNoPortao,
+} from "../_shared/uma-voz/registrar.ts";
 import { conversaEncerradaPeloContato, ULTIMAS_RECEBIDAS } from "../_shared/whatsapp/contato-encerrou.ts";
 import {
   conversaDosComprovantesLigada,
@@ -92,24 +105,43 @@ async function detectarPromessas(admin: Db, dono: { id: string }, internos: Set<
 }
 
 /** 2. Avisos devidos. `conversaLigada` = conversa dos comprovantes ligada (conversaDosComprovantesLigada). */
-async function avisar(admin: Db, agora: Date, conversaLigada: boolean) {
+async function avisar(admin: Db, agora: Date, conversaLigada: boolean, portao: PortaoDaRodada) {
   const { data: ativos, error } = await admin.from("whatsapp_acompanhamentos")
     .select("id, phone_normalized, contato, modo, intervalo_min, ate, lembrar_em, promessa, ultimo_aviso_em, avisos_dia, avisos_no_dia, created_at, criado_por")
     .eq("status", "ativo").order("created_at", { ascending: true }).limit(100);
   if (error) throw error;
-  const resultado = { avaliados: 0, avisados: 0, encerrados: 0, adiados_por_pendencia: 0 };
+  const resultado = {
+    avaliados: 0, avisados: 0, encerrados: 0, adiados_por_pendencia: 0, na_janela_da_manha: 0, parados_pelo_freio: 0, no_portao: 0,
+  };
   const donos = new Map<string, { id: string; phone: string } | null>();
 
   for (const a of (ativos ?? []) as Array<Acompanhamento & { criado_por: string | null }>) {
     resultado.avaliados++;
     const conversa = await estadoDaConversa(admin, a, agora);
-    const d = decidir(a, conversa, agora);
+    let d = decidir(a, conversa, agora);
     if (d.acao === "encerrar") {
       await admin.from("whatsapp_acompanhamentos").update({ status: "encerrado", encerrado_motivo: d.motivo, updated_at: agora.toISOString() }).eq("id", a.id);
       resultado.encerrados++;
       continue;
     }
     if (d.acao !== "avisar" || resultado.avisados >= AVISOS_POR_RODADA) continue;
+
+    // Janela da manhã: acompanhamento e promessa esperam as 09:30 (o devido continua devido).
+    if (!podeAvisarNoModo(a.modo, agora)) {
+      resultado.na_janela_da_manha++;
+      continue;
+    }
+
+    // Freio: quantos avisos já saíram sobre esta mensagem dele (pelo portão). Só no modo acompanhar.
+    const referencia = referenciaDoAcompanhamento(a.id, conversa.ultimaRecebida?.em ?? null);
+    const jaAvisados = a.modo === "acompanhar" && (portao.freio || portao.modo) ? await avisosDestaMensagem(admin, referencia) : null;
+    if (portao.freio) {
+      d = aplicarFreio(d, a, jaAvisados, portao.regras.freio_avisos);
+      if (d.acao === "esperar" && d.motivo === MOTIVO_FREIO) {
+        resultado.parados_pelo_freio++;
+        continue;
+      }
+    }
 
     // Quem recebe o aviso: quem pediu, se tem o assistente no WhatsApp ligado.
     if (!a.criado_por) continue;
@@ -142,6 +174,14 @@ async function avisar(admin: Db, agora: Date, conversaLigada: boolean) {
     if (!res.ok) {
       console.error("[acompanhar-conversas] ai-agent recusou o aviso", a.id, res.status, await res.text().catch(() => ""));
       continue;
+    }
+    // O aviso SAIU: registra no portão (a conta do freio e a sombra da voz única). Nunca lança.
+    const modoRegistro = modoDoRegistroDoAcompanhamento(portao, a.modo);
+    if (modoRegistro) {
+      const ordem = jaAvisados === null ? agora.getTime() : jaAvisados + 1;
+      const r = await registrarNoPortao(admin, modoRegistro, dono.phone,
+        avisoDoAcompanhamento(a, conversa.ultimaRecebida?.em ?? null, ordem, portao.regras, texto), agora);
+      if (r) resultado.no_portao++;
     }
     const hoje = diaEmBrasilia(agora);
     const unico = a.modo !== "acompanhar";
@@ -178,7 +218,7 @@ servirComCors(async (req) => {
     const dono = ((usuarios ?? []) as any[]).find((u) => u.role === "admin" && u.ai_whatsapp_enabled && u.active && u.phone_normalized);
 
     const promessas = dono ? await detectarPromessas(admin, dono, internos, settings, agora) : { lidas: 0, criadas: 0, sem_dono: true };
-    const avisos = await avisar(admin, agora, conversaDosComprovantesLigada(settings));
+    const avisos = await avisar(admin, agora, conversaDosComprovantesLigada(settings), portaoDasConfiguracoes(settings));
     return jr({ ok: true, promessas, avisos });
   } catch (e) {
     console.error("[acompanhar-conversas] erro", e);

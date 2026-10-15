@@ -2,6 +2,7 @@
 // plans/marineflow-acompanhar-conversa.md
 import { dentroDaJanela } from "./promessa.ts";
 import { MOTIVO_CONTATO_ENCERROU } from "../whatsapp/contato-encerrou.ts";
+import { depoisDaJanelaDaManha } from "../uma-voz/janela.ts";
 
 const BRASILIA_MS = 3 * 60 * 60 * 1000;
 export const AVISOS_POR_DIA = 3;
@@ -54,13 +55,47 @@ export function horaDeAvisar(agora: Date): boolean {
   return dentroDaJanela(agora.getTime()) === agora.getTime();
 }
 
+/**
+ * Janela da manhã (secretário, Passo 4, 15/10/2026): das 07:30 às 09:30 só a manhã pergunta. O aviso de
+ * acompanhamento e o lembrete de promessa saem a partir das 09:30 (o que ficar devido espera a rodada
+ * das 09:30; nada se perde: a decisão é pelo estado da conversa). O lembrete que o dono pediu com hora
+ * ("me lembra às 8h", modo lembrar_em) é o alarme dele: continua das 8h às 20h.
+ * Medido (02–15/10): 4 avisos às 08:00 e 1 às 09:30, todos em cima da manhã.
+ */
+export function podeAvisarNoModo(modo: Acompanhamento["modo"], agora: Date): boolean {
+  if (!horaDeAvisar(agora)) return false;
+  return modo === "lembrar_em" || depoisDaJanelaDaManha(agora);
+}
+
+/** Avisos sobre a MESMA mensagem do contato antes do freio parar (P4.3). */
+export const AVISOS_POR_MENSAGEM = 2;
+export const MOTIVO_FREIO = "freio";
+
+/**
+ * O freio do acompanhamento (secretário, Passo 4, P4.3, 15/10/2026): no máximo `limite` avisos sobre a
+ * mesma mensagem do contato. Depois disso o acompanhamento ESPERA (não encerra): quando o contato
+ * escrever de novo, a mensagem é outra, a conta zera e o aviso volta. Vale só para o modo acompanhar
+ * (lembrete pedido e promessa avisam uma vez). `avisosDestaMensagem` null = não deu para contar: avisa
+ * (melhor um aviso a mais que calar por erro de leitura).
+ * Caso Miguel (07–10/10): 7 dos 11 avisos repetiam a mesma última mensagem dele.
+ */
+export function aplicarFreio(
+  d: Decisao,
+  a: Pick<Acompanhamento, "modo">,
+  avisosDestaMensagem: number | null,
+  limite = AVISOS_POR_MENSAGEM,
+): Decisao {
+  if (d.acao !== "avisar" || a.modo !== "acompanhar" || avisosDestaMensagem === null) return d;
+  return avisosDestaMensagem >= limite ? { acao: "esperar", motivo: MOTIVO_FREIO } : d;
+}
+
 /** A conversa está esperando resposta da HBR: a última mensagem é do contato. */
 export function esperandoResposta(c: EstadoDaConversa): boolean {
   if (!c.ultimaRecebida) return false;
   return !c.ultimaEnviadaEm || Date.parse(c.ultimaRecebida.em) > Date.parse(c.ultimaEnviadaEm);
 }
 
-export type Decisao = { acao: "avisar" } | { acao: "encerrar"; motivo: string } | { acao: "esperar" };
+export type Decisao = { acao: "avisar" } | { acao: "encerrar"; motivo: string } | { acao: "esperar"; motivo?: string };
 
 /** O que fazer com um acompanhamento agora. */
 export function decidir(a: Acompanhamento, c: EstadoDaConversa, agora: Date): Decisao {
