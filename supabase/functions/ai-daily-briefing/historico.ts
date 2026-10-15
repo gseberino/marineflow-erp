@@ -24,7 +24,11 @@ export interface LinhaDoHistoricoDoResumo {
   created_at: string;
 }
 
-export function linhasDoHistorico(sessionId: string, texto: string, agora: Date): LinhaDoHistoricoDoResumo[] {
+/**
+ * `oQue` (secretário, Passo 3, 15/10/2026): o nome da mensagem — a tarde passa "o fechamento das 17:30" ou "a
+ * revisão da semana". O padrão é o da manhã, letra por letra (o resumo de sempre não muda).
+ */
+export function linhasDoHistorico(sessionId: string, texto: string, agora: Date, oQue = "o resumo da manhã"): LinhaDoHistoricoDoResumo[] {
   const t0 = agora.getTime();
   return [
     {
@@ -34,7 +38,7 @@ export function linhasDoHistorico(sessionId: string, texto: string, agora: Date)
       created_at: new Date(t0).toISOString(),
       // Gravado quando o resumo ENTRA na fila, não quando chega: em 09 e 13/10/2026 a fila desistiu.
       // A marca não afirma a entrega, para o assistente não teimar que o dono recebeu.
-      content: `[Mensagem automática do sistema, não é do dono] Às ${horaBR(agora)} o sistema mandou para o WhatsApp do dono o resumo da manhã abaixo (a entrega não é confirmada aqui: se ele disser que não chegou, é possível). Se ele citar um item ("cobra esse", "o 2"), é deste resumo.`,
+      content: `[Mensagem automática do sistema, não é do dono] Às ${horaBR(agora)} o sistema mandou para o WhatsApp do dono ${oQue} abaixo (a entrega não é confirmada aqui: se ele disser que não chegou, é possível). Se ele citar um item ("cobra esse", "o 2"), é deste resumo.`,
     },
     {
       session_id: sessionId,

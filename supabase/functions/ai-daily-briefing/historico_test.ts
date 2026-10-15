@@ -31,3 +31,11 @@ Deno.test("linhasDoHistorico: a janela do assistente mantém as duas linhas (com
   }));
   assertEquals(aparaJanela(linhas).length, 2);
 });
+
+Deno.test("linhasDoHistorico (Passo 3): sem o 4º parâmetro, a marca da manhã é a de sempre; a tarde diz o nome dela", () => {
+  const [manha] = linhasDoHistorico("s", RESUMO, AGORA);
+  assertEquals(manha.content,
+    "[Mensagem automática do sistema, não é do dono] Às 07:30 o sistema mandou para o WhatsApp do dono o resumo da manhã abaixo (a entrega não é confirmada aqui: se ele disser que não chegou, é possível). Se ele citar um item (\"cobra esse\", \"o 2\"), é deste resumo.");
+  const [tarde] = linhasDoHistorico("s", "Fechamento de quinta…", new Date("2026-10-15T20:30:00Z"), "o fechamento das 17:30");
+  assertStringIncludes(tarde.content, "Às 17:30 o sistema mandou para o WhatsApp do dono o fechamento das 17:30 abaixo");
+});

@@ -32,6 +32,7 @@ import { lerFormatoDoResumo } from "../_shared/secretario/formato.ts";
 import { type Dono, donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
 import { contarPropostas, type ManhaNova, montarManhaNova, registrarManha } from "./secretario.ts";
 import type { DadosDoEscritorio } from "./secretario-texto.ts";
+import { rodarTurnoDaTarde } from "./secretario-tarde.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -73,6 +74,15 @@ servirComCors(async (req) => {
 
   try {
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+    // ── O turno da tarde (secretário, Passo 3, 15/10/2026 — ./secretario-tarde.ts) ──
+    // SÓ com ?turno= na URL: o cron das 17:30 chama ?turno=tarde e ?dry=1&turno=… pré-visualiza. Sem o
+    // parâmetro (o cron das 07:30) este bloco não roda e o resumo da manhã abaixo segue igual, byte a byte.
+    const turnoDaUrl = new URL(req.url).searchParams.get("turno");
+    if (turnoDaUrl !== null) {
+      const tarde = await rodarTurnoDaTarde(admin, { agora: new Date(), pedido: turnoDaUrl, dry: new URL(req.url).searchParams.get("dry") === "1" });
+      return jr(tarde.corpo, tarde.status);
+    }
 
     const { data: cfgRows } = await admin
       .from("app_settings")

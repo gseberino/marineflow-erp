@@ -2,7 +2,7 @@
 // (importar index.ts subiria o servidor da função). O que se protege (secretário, Passo 2, 15/10/2026):
 // nada do secretário roda com 'antigo'; o texto enviado e o do histórico só trocam com 'novo' e com o dia
 // GRAVADO; a sombra grava depois do envio e nunca muda o que sai.
-import { assert, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 
 const fonte = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
 
@@ -53,4 +53,21 @@ Deno.test("dry-run: com 'antigo' a resposta é a de antes (os campos novos só c
 Deno.test("a montagem antiga não mudou de lugar: o resumo de sempre é montado antes do ramo novo", () => {
   assert(fonte.indexOf('const message = linhas.join("\\n");') < fonte.indexOf('if (formato !== "antigo") {'));
   assert(fonte.indexOf("const messageFor = (rec: any) => {") < fonte.indexOf('if (formato !== "antigo") {'));
+});
+
+// Passo 3 (15/10/2026): o turno da tarde é um ramo que SÓ existe com ?turno= na URL. O cron das 07:30 chama sem
+// o parâmetro: o ramo não roda e nada do resumo da manhã muda (o git diff do index.ts só tem linhas novas).
+Deno.test("a tarde só roda com ?turno=, logo depois do createClient e antes de qualquer leitura da manhã", () => {
+  const ramo = bloco('const turnoDaUrl = new URL(req.url).searchParams.get("turno");', 'const { data: cfgRows } = await admin');
+  assertStringIncludes(ramo, "if (turnoDaUrl !== null) {");
+  assertStringIncludes(ramo, "rodarTurnoDaTarde(admin, { agora: new Date(), pedido: turnoDaUrl,");
+  assertStringIncludes(ramo, "return jr(tarde.corpo, tarde.status);");
+  // o ramo vem logo depois do createClient (nenhuma leitura antes dele)
+  const criar = fonte.indexOf("const admin = createClient(");
+  const entre = fonte.slice(criar, fonte.indexOf('const turnoDaUrl = new URL(req.url).searchParams.get("turno");'));
+  assert(!entre.includes("await "), "nada é lido antes do ramo da tarde");
+  // a tarde não é chamada em nenhum outro lugar
+  assertEquals((fonte.match(/rodarTurnoDaTarde\(/g) ?? []).length, 1);
+  // e a manhã segue igual depois do ramo: o mesmo SELECT de app_settings
+  assert(fonte.indexOf("if (turnoDaUrl !== null) {") < fonte.indexOf('.in("key", ["company_name", "digest_show_low_stock", "quote_validity_days", "resumo_formato"])'));
 });
