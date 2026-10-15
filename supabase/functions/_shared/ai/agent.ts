@@ -134,7 +134,7 @@ const AUTO_DISAMBIG: Record<string, AutoDisambigConfig> = {
   // Quando realmente for preciso escolher, o modelo chama present_options.
 };
 
-function humanizeToolName(name: string): string {
+export function humanizeToolName(name: string): string {
   return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -194,6 +194,36 @@ const TOOL_LABELS_PT: Record<string, string> = {
   // fiscal e compras (07/10/2026)
   send_fiscal_pdf_to_client: "Enviar nota fiscal ao cliente (WhatsApp)",
   delete_purchase_order: "Excluir ordem de compra",
+  // 15/10/2026: as que pedem confirmação e ainda caíam no nome técnico. Em produção desde 15/09
+  // saíram "Duplicate Service Order", "Create Purchase Order" e "Cadastrar Favorecido" — o teste
+  // agent-titulos_test.ts cobra título em português de toda tool que pede confirmação.
+  adjust_inventory: "Ajustar estoque",
+  ajustar_lancamento_ao_valor_do_banco: "Ajustar lançamento ao valor do banco",
+  analisar_extrato_e_propor_lancamentos: "Analisar o extrato e propor lançamentos",
+  aplicar_pix_em_contas: "Aplicar Pix em contas a receber",
+  apply_service_material_kit: "Lançar o kit de materiais na OS",
+  approve_quote_full: "Aprovar orçamento com sinal pago",
+  aprovar_propostas_de_lancamento: "Aprovar propostas de lançamento",
+  cadastrar_favorecido: "Cadastrar favorecido",
+  conciliar_transacao: "Conciliar transação do extrato",
+  create_purchase_order: "Criar ordem de compra",
+  criar_regra_financeira: "Criar regra financeira",
+  delete_task: "Excluir tarefa",
+  desfazer_aplicacao_de_pix: "Desfazer aplicação de Pix",
+  desfazer_propostas_ignoradas: "Voltar propostas ignoradas para a fila",
+  dividir_pagamento_freelancer: "Dividir pagamento a freelancer",
+  duplicate_service_order: "Duplicar orçamento/OS",
+  emit_fiscal_note: "Emitir NF-e",
+  emit_fiscal_service_note: "Emitir NFS-e",
+  enviar_resposta_email: "Enviar resposta de e-mail",
+  link_whatsapp_lead_to_client: "Ligar conversa do WhatsApp a cliente",
+  mudar_situacao_da_regra: "Mudar situação da regra financeira",
+  remove_service_order_hours: "Remover horas da OS",
+  schedule_status_post: "Agendar status do WhatsApp",
+  send_bulk_collection_reminders: "Enviar lembretes de cobrança em lote",
+  send_supplier_quote_request: "Enviar pedido de cotação a fornecedores",
+  set_tool_autonomy: "Mudar a autonomia do assistente",
+  silenciar_remetente_email: "Silenciar remetente de e-mail",
 };
 // financeiro (07/10/2026): anotação de Pix, estorno, cobrança formal e favorecido.
 Object.assign(TOOL_LABELS_PT, TITULOS_DO_FINANCEIRO);
@@ -203,6 +233,9 @@ Object.assign(TOOL_LABELS_PT, TITULOS_DOS_PLANOS);
 function humanizeToolNamePt(name: string): string {
   return TOOL_LABELS_PT[name] || humanizeToolName(name);
 }
+
+/** O título do cartão de confirmação de uma ação (o mesmo da pendência gravada). */
+export const tituloDaAcao = humanizeToolNamePt;
 
 // Nomes técnicos de parâmetro -> rótulo pt-BR. Cobre os campos usados pelas tools gated
 // (financial.ts, purchasing.ts, service-orders.ts, whatsapp.ts).
