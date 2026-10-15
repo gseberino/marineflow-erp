@@ -1,7 +1,11 @@
 // Edge lembretes-de-revisao (07/10/2026) — planos de manutenção com lembretes ao cliente.
 //
-// Chamada pelo pg_cron (x-cron-secret) às 09:05 de Brasília, terça a quinta. O cron NÃO está na
-// migration (o dono autoriza e ele é aplicado à parte):
+// Chamada pelo pg_cron (x-cron-secret) às 09:35 de Brasília, terça a quinta (era 09:05 até o Passo 4 do
+// secretário, 15/10/2026: das 07:30 às 09:30 é a janela da manhã e só a manhã pergunta; a mudança do
+// horário é a migration 20261016100100, CRON — OK NOMEADO). Antes das 09:30 a rodada não propõe nada
+// (fora_da_janela): os toques são por faixa de dias e voltam na rodada seguinte, nada se perde.
+// Com a voz única em sombra (app_settings.voz_unica), a rodada que perguntou é registrada no portão como
+// "fica como está" (avisos_do_dono), sem mudar o que sai. O cron foi criado assim (à parte):
 //   select cron.schedule('lembretes-de-revisao', '5 12 * * 2-4', $cron$
 //     select net.http_post(
 //       url := 'https://okurngvcodmljjicopdp.supabase.co/functions/v1/lembretes-de-revisao',
@@ -51,6 +55,9 @@ import {
   proporToques,
   registrarPulados,
 } from "../_shared/revisao/rodada.ts";
+import { depoisDaJanelaDaManha } from "../_shared/uma-voz/janela.ts";
+import { avisoDosLembretesDeRevisao } from "../_shared/uma-voz/fontes.ts";
+import { portaoDasConfiguracoes, registrarNoPortao } from "../_shared/uma-voz/registrar.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -140,6 +147,8 @@ servirComCors(async (req) => {
   const agora = new Date();
   const hoje = hojeEmBrasilia(agora);
   if (!dry && !ehTerAQui(hoje)) return jr({ ok: true, fora_do_dia: true });
+  // Janela da manhã (07:30–09:30): só a manhã pergunta. O ?dry=1 roda a qualquer hora.
+  if (!dry && !depoisDaJanelaDaManha(agora)) return jr({ ok: true, fora_da_janela: true });
 
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -192,6 +201,9 @@ servirComCors(async (req) => {
     }
 
     const ids = await proporAoDono(admin, dono, sessao, metadata, propostas, teste, conversaLigada);
+    // Voz única em sombra: a rodada que perguntou fica registrada como "fica como está". Nunca lança.
+    await registrarNoPortao(admin, portaoDasConfiguracoes(settings).modo, dono.phone,
+      avisoDosLembretesDeRevisao(hoje, ids.length, `Lembretes de revisão para aprovar hoje: ${ids.length}.`), agora);
     return jr({ ok: true, propostas: ids.length, pulados: pulados.length });
   } catch (e) {
     console.error("[lembretes-de-revisao] erro", e);
