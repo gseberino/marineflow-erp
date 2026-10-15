@@ -1,6 +1,6 @@
 import { assertEquals, assert } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  montarSecaoEmail, selecionarUrgentes, taxaDeRuido, MAX_URGENTES_PADRAO,
+  chaveDoAviso, montarSecaoEmail, selecionarUrgentes, taxaDeRuido, MAX_URGENTES_PADRAO,
   type EmailDigestItem,
 } from "./digest.ts";
 import type { TriageClass } from "./triage.ts";
@@ -66,7 +66,62 @@ Deno.test("montarSecaoEmail: suspeita de fraude vem com instrução explícita",
     item("urgent", { remetente: "Fornecedor Y", assunto: "mudança de conta", alertaFraude: true }),
   ])!;
   assert(s.includes("⚠️"));
-  assert(s.includes("confirme por telefone"));
+  assert(s.includes("confirmar por telefone"));
+});
+
+// 15/10/2026: a triagem marca fraude para QUALQUER golpe; o golpe real de 13 e 14/10 pedia fotos e
+// documentos do veículo, não mudança de dados bancários. O texto não pode afirmar o que não sabe.
+Deno.test("montarSecaoEmail: o aviso de golpe não inventa o que o e-mail pede", () => {
+  const s = montarSecaoEmail([
+    item("urgent", { remetente: "atendimento@envios.advantoniosamuel.com.br", assunto: "CONTRATO 20037247643", alertaFraude: true }),
+  ])!;
+  assert(s.includes("⚠️ *possível golpe — não pague nem responda antes de confirmar por telefone*"));
+  assertEquals(s.includes("dados bancários"), false);
+});
+
+// Caso real: o mesmo golpe (mesmo remetente e assunto) avisado na hora em 13/10 18:10 e 14/10 15:30
+// voltou como "Urgente" nos resumos de 14 e 15/10. Já avisado sai do bloco e vira número no rodapé.
+Deno.test("montarSecaoEmail: urgente já avisado sai do 'Urgente' e entra no rodapé", () => {
+  const golpe = item("urgent", {
+    remetente: "atendimento@envios.advantoniosamuel.com.br",
+    assunto: "CONTRATO 20037247643 - Advocacia Antonio Samuel da Silveira",
+    alertaFraude: true, jaAvisado: true,
+  });
+  const s = montarSecaoEmail([golpe, item("respond", { remetente: "Marina Itajaí" }), ...Array.from({ length: 6 }, () => item("ignore"))])!;
+  assertEquals(s.includes("Urgente"), false);
+  assertEquals(s.includes("advantoniosamuel"), false);
+  assert(s.includes("Esperando resposta"));
+  assert(s.includes("_1 urgente já avisado · 6 filtrados_"), s);
+});
+
+Deno.test("montarSecaoEmail: urgente novo continua; o já avisado não conta como 'outro urgente'", () => {
+  const s = montarSecaoEmail([
+    item("urgent", { remetente: "Novo", recebidoEm: "2026-10-15T08:00:00Z" }),
+    item("urgent", { remetente: "Velho", jaAvisado: true }),
+    item("urgent", { remetente: "Velho 2", jaAvisado: true }),
+  ])!;
+  assert(s.includes("🔴 *Urgente* (1):"));
+  assert(s.includes("· Novo:"));
+  assertEquals(s.includes("outro urgente"), false);
+  assert(s.includes("_2 urgentes já avisados_"));
+});
+
+Deno.test("montarSecaoEmail: só urgente já avisado e ruído não vira 'tudo ruído'", () => {
+  const s = montarSecaoEmail([item("urgent", { jaAvisado: true }), item("ignore"), item("ignore")]);
+  assertEquals(s, "📧 E-mail: 1 urgente já avisado · 2 filtrados.");
+});
+
+Deno.test("selecionarUrgentes: ignora o já avisado; o teto padrão não muda", () => {
+  assertEquals(selecionarUrgentes([item("urgent", { jaAvisado: true }), item("urgent", { remetente: "B" })]).map((i) => i.remetente), ["B"]);
+  assertEquals(MAX_URGENTES_PADRAO, 3);
+});
+
+Deno.test("chaveDoAviso: mesmo remetente e assunto, sem 're:'/'fwd:', caixa e espaços", () => {
+  const a = chaveDoAviso("Atendimento@Envios.AdvAntonioSamuel.com.br", "CONTRATO 20037247643 - Advocacia  Antonio Samuel da Silveira");
+  const b = chaveDoAviso("atendimento@envios.advantoniosamuel.com.br ", "RE: Fwd:  contrato 20037247643 - advocacia antonio samuel da silveira");
+  assertEquals(a, b);
+  assertEquals(chaveDoAviso("a@x.com", "Boleto") === chaveDoAviso("b@x.com", "Boleto"), false);
+  assertEquals(chaveDoAviso(null, null), "|");
 });
 
 Deno.test("montarSecaoEmail: anexo reconhecido aparece na linha", () => {

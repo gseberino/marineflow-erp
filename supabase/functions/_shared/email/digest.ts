@@ -20,6 +20,10 @@ export interface EmailDigestItem {
   /** Linha pronta de anexo reconhecido (NF-e/boleto), quando houver. */
   resumoAnexo?: string | null;
   alertaFraude?: boolean;
+  /** O mesmo remetente e assunto já foi avisado na hora (email-imap, alerted_at) antes de hoje.
+   *  Sai do bloco "Urgente" e vira número no rodapé: aviso repetido ensina a ignorar (15/10/2026:
+   *  o mesmo golpe avisado em 13 e 14/10 voltou como "Urgente" nos resumos de 14 e 15/10). */
+  jaAvisado?: boolean;
 }
 
 export interface DigestOpts {
@@ -40,16 +44,34 @@ function linha(item: EmailDigestItem): string {
 }
 
 /**
+ * A chave "mesmo e-mail" para saber se um urgente já foi avisado: endereço em minúsculas + assunto
+ * normalizado (minúsculas, sem "re:"/"fwd:" na frente, espaços colapsados).
+ */
+export function chaveDoAviso(endereco: string | null | undefined, assunto: string | null | undefined): string {
+  const de = String(endereco ?? "").trim().toLowerCase();
+  let a = String(assunto ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  for (;;) {
+    const sem = a.replace(/^(?:re|res|fw|fwd|enc|encaminhad[ao])\s*:\s*/, "");
+    if (sem === a) break;
+    a = sem;
+  }
+  return `${de}|${a}`;
+}
+
+/** O texto do golpe não afirma o que o e-mail pede: a triagem marca fraude para qualquer golpe. */
+const AVISO_DE_GOLPE = "  ⚠️ *possível golpe — não pague nem responda antes de confirmar por telefone*";
+
+/**
  * Urgentes que podem furar o silêncio fora de hora.
  * Ordena colocando suspeita de fraude na frente — é o item de maior dano possível —
- * e depois pelo mais recente. Corta no teto sem dó.
+ * e depois pelo mais recente. Corta no teto sem dó. O já avisado na hora não volta.
  */
 export function selecionarUrgentes(
   itens: EmailDigestItem[],
   teto: number = MAX_URGENTES_PADRAO,
 ): EmailDigestItem[] {
   return itens
-    .filter((i) => i.classe === "urgent")
+    .filter((i) => i.classe === "urgent" && !i.jaAvisado)
     .sort((a, b) => {
       const fa = a.alertaFraude ? 1 : 0;
       const fb = b.alertaFraude ? 1 : 0;
@@ -73,6 +95,7 @@ export function montarSecaoEmail(itens: EmailDigestItem[], opts: DigestOpts = {}
 
   const por = (c: TriageClass) => lista.filter((i) => i.classe === c);
   const urgentes = selecionarUrgentes(lista, maxUrg);
+  const jaAvisados = lista.filter((i) => i.classe === "urgent" && i.jaAvisado).length;
   const respond = por("respond");
   const document = por("document");
   const notify = por("notify");
@@ -80,6 +103,11 @@ export function montarSecaoEmail(itens: EmailDigestItem[], opts: DigestOpts = {}
 
   // Nada além de ruído: uma linha só, para o filtro ficar auditável sem virar relatório.
   if (urgentes.length === 0 && respond.length === 0 && document.length === 0 && notify.length === 0) {
+    if (jaAvisados > 0) {
+      const r = [`${jaAvisados} ${plural(jaAvisados, "urgente já avisado", "urgentes já avisados")}`];
+      if (ignorados > 0) r.push(`${ignorados} filtrado${ignorados > 1 ? "s" : ""}`);
+      return `📧 E-mail: ${r.join(" · ")}.`;
+    }
     return ignorados > 0 ? `📧 E-mail: ${ignorados} ${plural(ignorados, "mensagem", "mensagens")}, tudo ruído.` : null;
   }
 
@@ -89,9 +117,9 @@ export function montarSecaoEmail(itens: EmailDigestItem[], opts: DigestOpts = {}
     partes.push("");
     partes.push(`🔴 *Urgente* (${urgentes.length}):`);
     for (const u of urgentes) {
-      partes.push(linha(u) + (u.alertaFraude ? "  ⚠️ *pede mudança de dados bancários — confirme por telefone*" : ""));
+      partes.push(linha(u) + (u.alertaFraude ? AVISO_DE_GOLPE : ""));
     }
-    const sobra = por("urgent").length - urgentes.length;
+    const sobra = por("urgent").length - jaAvisados - urgentes.length;
     if (sobra > 0) partes.push(`  (+${sobra} ${plural(sobra, "outro urgente", "outros urgentes")} no sistema)`);
   }
 
@@ -112,6 +140,7 @@ export function montarSecaoEmail(itens: EmailDigestItem[], opts: DigestOpts = {}
   // "notify" não vira lista: vira número. É a categoria mais volumosa e a menos acionável.
   const rodape: string[] = [];
   if (notify.length > 0) rodape.push(`${notify.length} informativo${notify.length > 1 ? "s" : ""}`);
+  if (jaAvisados > 0) rodape.push(`${jaAvisados} ${plural(jaAvisados, "urgente já avisado", "urgentes já avisados")}`);
   if (ignorados > 0) rodape.push(`${ignorados} filtrado${ignorados > 1 ? "s" : ""}`);
   if (rodape.length > 0) {
     partes.push("");
