@@ -212,6 +212,7 @@ export function pareceRespostaCurta(texto: string): boolean {
  *   2. comando explícito → comando (pendentes → pendentes: a lista e depois o assistente);
  *   3. citação de pergunta de comprovante → comprovante (aberta) / comprovante_reabrir (fechada);
  *      citação da FOTO de um CMP → foto_do_cmp; de outra origem, ou fora do registro → assistente;
+ *  3b. comando do resumo da manhã (secretário, só com o formato novo) → assistente;
  *   4. corrigir/pular/sair → comprovante com pergunta de CMP aberta (corrigir, cancelar esse e
  *      "obs: …": também com CMP em contexto); senão assistente;
  *   5. pergunta de CMP aberta e resposta válida: interrompida (o dono falou com o assistente depois
@@ -236,6 +237,8 @@ export function quemResponde(p: {
   ehRespostaAUltima?: boolean;
   ehDica?: boolean;
   ehNaoEntendida?: boolean;
+  /** É um comando do resumo da manhã (secretário, Passo 2) com o formato novo ligado. */
+  ehComandoDoSecretario?: boolean;
 }): { destino: Destino; motivo: string } {
   const e = p.estado;
   if (!e?.conversa || !e.dono) return { destino: "assistente", motivo: "desligada" };
@@ -252,6 +255,11 @@ export function quemResponde(p: {
     if (!e.citada && e.citado_cmp) return { destino: "foto_do_cmp", motivo: "citou_a_foto" };
     return { destino: "assistente", motivo: e.citada ? "citou_outra_origem" : "citou_fora_do_registro" };
   }
+
+  // Secretário (Passo 2, 15/10/2026): "lista", "A", "B feito"… vão ao assistente, que os lê antes da IA.
+  // Depois da citação (citar a pergunta do CMP decide) e antes de ler resposta ao CMP: com a pergunta no
+  // passo "confirmar", "A" ou "lista" virariam "ok" do CMP (interpretarResposta) e o comando se perderia.
+  if (p.ehComandoDoSecretario) return { destino: "assistente", motivo: "comando_do_secretario" };
 
   const ativaDoCmp = e.ativa?.origem === "comprovante" ? e.ativa : null;
 
