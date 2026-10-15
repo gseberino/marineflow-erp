@@ -312,6 +312,17 @@ Deno.test("pagamento: a confirmação diz quanto, como, o saldo antes e depois, 
   assertStringIncludes(txt, "Se você já lançou este mesmo Pix, responda não");
 });
 
+// 15/10/2026: o cartão saía "*R$ 500,00* em do bolso do sócio" — o rótulo já começava com "do".
+Deno.test("pagamento: a forma sai inteira na confirmação (bolso do sócio e dinheiro do Caixa)", async () => {
+  const bolso = String(await resumirPagamento(ctx({ simulacao: { data: { saldo_final: 1090 } } }).c as never,
+    { freelancer: "roberto", valor: 500, forma: "bolso_do_socio" })).replace(/ /g, " ");
+  assertStringIncludes(bolso, "*R$ 500,00* pago do bolso do sócio ·");
+  assertEquals(bolso.includes("em do bolso"), false);
+  const dinheiro = String(await resumirPagamento(ctx({ simulacao: { data: { saldo_final: 1090 } } }).c as never,
+    { freelancer: "roberto", valor: 50, forma: "dinheiro" })).replace(/ /g, " ");
+  assertStringIncludes(dinheiro, "*R$ 50,00* em dinheiro do Caixa ·");
+});
+
 // ── Extrato em PDF pelo WhatsApp (06/10/2026) ──
 
 Deno.test("extrato em PDF: período ruim e falta de WhatsApp viram resposta antes de gerar qualquer coisa", async () => {

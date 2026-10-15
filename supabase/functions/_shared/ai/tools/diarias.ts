@@ -474,7 +474,8 @@ async function registrarIntervalo(ctx: ToolCtx, p: PedidoDeDiaria) {
 
 const FORMAS = ["pix", "dinheiro", "bolso_do_socio"] as const;
 type Forma = typeof FORMAS[number];
-const ROTULO_DA_FORMA: Record<Forma, string> = { pix: "Pix", dinheiro: "dinheiro do Caixa", bolso_do_socio: "do bolso do sócio" };
+// O rótulo inteiro de como foi pago (15/10/2026): montar "em ${rótulo}" deu "em do bolso do sócio".
+const ROTULO_DA_FORMA: Record<Forma, string> = { pix: "por Pix", dinheiro: "em dinheiro do Caixa", bolso_do_socio: "pago do bolso do sócio" };
 const CATEGORIA_DIARIAS = "Diárias de freelancers";
 
 /**
@@ -633,7 +634,7 @@ export async function resumirPagamento(ctx: ToolCtx, args: Record<string, unknow
   const p = await resolverPagamento(ctx, args);
   if ("error" in p) return null;
   const quando = diaCurto(p.data ?? dataDita("hoje")!);
-  const linhas = [`Pagamento a *${p.freelancer.nome}*: *${brl.format(p.valor)}* ${p.forma === "pix" ? "por Pix" : `em ${ROTULO_DA_FORMA[p.forma]}`} · ${quando}` +
+  const linhas = [`Pagamento a *${p.freelancer.nome}*: *${brl.format(p.valor)}* ${ROTULO_DA_FORMA[p.forma]} · ${quando}` +
     (p.socio ? ` · pago por ${p.socio.nome} (fica como reembolso a ele)` : "")];
   linhas.push(`Descrição: ${descricaoDoPagamento(p)} · ${CATEGORIA_DIARIAS}`);
   // resposta 4 do dono: a divisão proposta entre diárias e reembolso (o dono confirma ou diz outra)
