@@ -3,7 +3,7 @@ import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, entityIdFromKey, keyOf, fmtBRL, fmtDate, dueAt,
   isManualDismissal, dismissCooldownDays, businessDaysBetween, vencimentoDoOrcamento, notaDoVencimento,
-  cobrancaMinima,
+  cobrancaMinima, dispensaSemFatoNovo,
 } from "./rules.ts";
 
 Deno.test("isManualDismissal: conclusão MANUAL recente bloqueia recriação", () => {
@@ -107,81 +107,60 @@ Deno.test("isResolved r1: OS agendada ou status mudado resolve", async () => {
 // R16 é a rede do aviso de compra da aprovação: se estes testes falharem, a tarefa
 // pode ficar viva para item que já chegou (ruído) ou morrer com item ainda faltando
 // (a OS para sem ninguém saber).
-Deno.test("isResolved r16: reserva e OC aberta contam; falta real mantém a tarefa", async () => {
+//
+// Até 15/10/2026 o find contava pela RPC (que enxerga material de texto livre) e o isResolved
+// recalculava só pelas peças do catálogo. A OS-00104 (aguardando peças, 0 peças, 1 material de
+// texto livre: a conversão da geladeira para 12V) nascia e morria a cada 15 min: 1.142 tarefas
+// fechadas sozinhas, "OS não tem mais peças lançadas". Agora as duas pontas usam a mesma conta.
+// (Reserva e OC aberta já são descontadas pela RPC; a paridade com a tela está em
+// supabase/tests/purchase_needs_parity.sql.)
+Deno.test("isResolved r16: a mesma conta do find (RPC); material de texto livre mantém a tarefa", async () => {
   const r16 = ruleById("r16")!;
+  const OS_00104 = "63f93bbe-4bc7-46d0-b85e-dd434d4038c0";
 
-  // O mock distingue as tabelas porque a regra consulta quatro em sequência.
-  const mkDb = (opts: {
-    so?: unknown;
-    parts?: unknown[];
-    avail?: unknown[];
-    poItems?: unknown[];
-  }) => ({
+  const chamadas: unknown[] = [];
+  // Qualquer tabela além de service_orders quebra o teste: a conta é toda da RPC.
+  const mkDb = (opts: { so?: unknown; faltas?: unknown; erro?: unknown }) => ({
     from: (table: string) => {
-      if (table === "service_orders") {
-        return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: opts.so }) }) }) };
-      }
-      if (table === "service_order_parts") {
-        return { select: () => ({ eq: async () => ({ data: opts.parts ?? [] }) }) };
-      }
-      if (table === "product_availability") {
-        return { select: () => ({ in: async () => ({ data: opts.avail ?? [] }) }) };
-      }
-      // purchase_order_items: dois .in() encadeados (produto e status da OC)
-      return {
-        select: () => ({ in: () => ({ in: async () => ({ data: opts.poItems ?? [] }) }) }),
-      };
+      if (table !== "service_orders") throw new Error(`não devia ler ${table}`);
+      return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: opts.so }) }) }) };
+    },
+    rpc: async (nome: string, args: unknown) => {
+      chamadas.push({ nome, args });
+      return { data: opts.erro ? null : opts.faltas, error: opts.erro ?? null };
     },
   });
 
-  const so = { status: "approved" };
-  const parts = [{ product_id: "p1", quantity: 6 }];
-
-  // físico cobre e nada está reservado → resolvida
+  // O caso real: OS-00104 aguardando peças, nenhuma peça do catálogo, a RPC diz 1 falta.
   assertEquals(
     await r16.isResolved(
-      mkDb({ so, parts, avail: [{ id: "p1", stock_quantity: 10, reserved_quantity: 0 }] }),
-      { automation_key: "r16:so:x" },
-    ),
-    "Compra resolvida (em estoque ou já pedida)",
-  );
-
-  // físico existe mas está TODO reservado para outras OS → segue faltando
-  assertEquals(
-    await r16.isResolved(
-      mkDb({ so, parts, avail: [{ id: "p1", stock_quantity: 10, reserved_quantity: 10 }] }),
-      { automation_key: "r16:so:x" },
+      mkDb({ so: { status: "awaiting_parts" }, faltas: { [OS_00104]: 1 } }),
+      { automation_key: `r16:so:${OS_00104}` },
     ),
     null,
   );
+  assertEquals(chamadas.at(-1), { nome: "count_purchase_shortages", args: { p_so_ids: [OS_00104] } });
 
-  // sem estoque, mas já pedido em OC aberta → resolvida (está a caminho)
+  // A RPC não traz a OS (em estoque, reservado para ela ou já pedido em OC) → resolvida.
   assertEquals(
-    await r16.isResolved(
-      mkDb({
-        so, parts,
-        avail: [{ id: "p1", stock_quantity: 0, reserved_quantity: 0 }],
-        poItems: [{ product_id: "p1", quantity: 6, received_qty: 0 }],
-      }),
-      { automation_key: "r16:so:x" },
-    ),
+    await r16.isResolved(mkDb({ so: { status: "approved" }, faltas: {} }), { automation_key: "r16:so:x" }),
+    "Compra resolvida (em estoque ou já pedida)",
+  );
+  assertEquals(
+    await r16.isResolved(mkDb({ so: { status: "approved" }, faltas: null }), { automation_key: "r16:so:x" }),
+    "Compra resolvida (em estoque ou já pedida)",
+  );
+  assertEquals(
+    await r16.isResolved(mkDb({ so: { status: "approved" }, faltas: { outra: 2 } }), { automation_key: "r16:so:x" }),
     "Compra resolvida (em estoque ou já pedida)",
   );
 
-  // OC parcialmente recebida não cobre o resto → segue faltando
+  // OS saiu do ciclo de execução → não faz sentido comprar (e nem pergunta à RPC)
+  const antes = chamadas.length;
   assertEquals(
-    await r16.isResolved(
-      mkDb({
-        so, parts,
-        avail: [{ id: "p1", stock_quantity: 0, reserved_quantity: 0 }],
-        poItems: [{ product_id: "p1", quantity: 6, received_qty: 4 }],
-      }),
-      { automation_key: "r16:so:x" },
-    ),
-    null,
+    await r16.isResolved(mkDb({ so: { status: "completed" } }), { automation_key: "r16:so:x" }),
+    "OS mudou para completed",
   );
-
-  // OS saiu do ciclo de execução → não faz sentido comprar
   assertEquals(
     await r16.isResolved(mkDb({ so: { status: "cancelled" } }), { automation_key: "r16:so:x" }),
     "OS mudou para cancelled",
@@ -190,12 +169,91 @@ Deno.test("isResolved r16: reserva e OC aberta contam; falta real mantém a tare
     await r16.isResolved(mkDb({ so: undefined }), { automation_key: "r16:so:x" }),
     "OS não existe mais",
   );
+  assertEquals(chamadas.length, antes);
 
-  // peças removidas da OS
-  assertEquals(
-    await r16.isResolved(mkDb({ so, parts: [] }), { automation_key: "r16:so:x" }),
-    "OS não tem mais peças lançadas",
-  );
+  // Erro na RPC não vira "resolvida": lança, e o motor mantém a tarefa viva.
+  let lancou = false;
+  try {
+    await r16.isResolved(mkDb({ so: { status: "approved" }, erro: { code: "57014", message: "timeout" } }), { automation_key: "r16:so:x" });
+  } catch {
+    lancou = true;
+  }
+  assertEquals(lancou, true);
+});
+
+Deno.test("dispensaSemFatoNovo: concluída à mão não volta enquanto falta a mesma coisa", () => {
+  const titulo = "Comprar 4 itens — OS-00112 (Nelson)";
+  // O dono concluiu à mão (há qualquer tempo): mesma falta = mesma tarefa → não recria.
+  assertEquals(dispensaSemFatoNovo({ status: "done", completed_by: "user-1", title: titulo }, titulo), true);
+  assertEquals(dispensaSemFatoNovo({ status: "cancelled", completed_by: null, title: titulo }, titulo), true);
+  // Mudou o número de itens (ou o cliente): é fato novo → recria.
+  assertEquals(dispensaSemFatoNovo({ status: "done", completed_by: "user-1", title: titulo }, "Comprar 5 itens — OS-00112 (Nelson)"), false);
+  // Fechada sozinha (completed_by nulo): a condição tinha sumido; se voltou, é nova.
+  assertEquals(dispensaSemFatoNovo({ status: "done", completed_by: null, title: titulo }, titulo), false);
+  assertEquals(dispensaSemFatoNovo({ status: "pending", completed_by: null, title: titulo }, titulo), false);
+  // Só a R16 volta só com fato novo.
+  assertEquals(ruleById("r16")!.voltaSoComFatoNovo, true);
+  assertEquals(RULES.filter((r) => r.voltaSoComFatoNovo).map((r) => r.id), ["r16"]);
+});
+
+// O motor (index.ts sobe o servidor ao ser importado): pelo texto da fonte.
+Deno.test("motor: lê só as fechadas À MÃO, com o título, e dispensa sem fato novo", async () => {
+  const fonte = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
+  const bloco = fonte.slice(fonte.indexOf("let candidates = await rule.find(db);"), fonte.indexOf("for (const c of candidates) {"));
+  // As 1.142 fechadas sozinhas da OS-00104 passavam do teto de 1.000 linhas do PostgREST.
+  assertEquals(bloco.includes('.or("status.eq.cancelled,completed_by.not.is.null")'), true);
+  assertEquals(bloco.includes('.select("automation_key, title, status, completed_by, completed_at, updated_at")'), true);
+  assertEquals(bloco.includes("if (rule.voltaSoComFatoNovo) {"), true);
+  assertEquals(bloco.includes("dispensaSemFatoNovo(r, titulo, mudou)"), true);
+  assertEquals(bloco.includes("await rule.mudouDesde(db, r.automation_key, new Date(desde).toISOString())"), true);
+  assertEquals(bloco.includes("if (closedErr) throw closedErr;"), true);
+});
+
+// Revisão de 15/10/2026: o título da R16 só traz a contagem. Concluída à mão com "Comprar 1 item" e,
+// depois, um item NOVO entra na OS com a mesma contagem: a tarefa tem de voltar.
+Deno.test("dispensaSemFatoNovo: título igual com item novo na OS depois do fechamento recria", () => {
+  const titulo = "Comprar 1 item — OS-00104 (Cliente)";
+  const aMao = { status: "done", completed_by: "user-1", title: titulo };
+  assertEquals(dispensaSemFatoNovo(aMao, titulo, false), true);
+  assertEquals(dispensaSemFatoNovo(aMao, titulo, true), false);
+});
+
+Deno.test("r16.mudouDesde: peça ou material lançado/mudado depois do fechamento é fato novo", async () => {
+  const r16 = ruleById("r16")!;
+  const OS = "96c4af97-44e5-4b4c-89df-8de5caf2ef7f";
+  const desde = "2026-08-16T02:22:29.877Z";
+  const pedidos: Array<{ tabela: string; eq: unknown[]; or: string }> = [];
+  const mkDb = (linhas: Record<string, unknown[]>, erro?: unknown) => ({
+    from: (tabela: string) => ({
+      select: () => ({
+        eq: (...eq: unknown[]) => ({
+          or: (or: string) => ({
+            limit: async () => {
+              pedidos.push({ tabela, eq, or });
+              return { data: erro ? null : (linhas[tabela] ?? []), error: erro ?? null };
+            },
+          }),
+        }),
+      }),
+    }),
+  });
+  // OS-00051 depois de 16/08/2026 (SELECT de 15/10): nenhuma peça nem material mudou → sem fato
+  // novo, a dispensa vale (as recriações de 23/08 e 12/09 com o mesmo título não voltariam).
+  assertEquals(await r16.mudouDesde!(mkDb({}), `r16:so:${OS}`, desde), false);
+  assertEquals(pedidos.map((p) => p.tabela).sort(), ["service_order_parts", "service_order_services"]);
+  assertEquals(pedidos[0].eq, ["service_order_id", OS]);
+  assertEquals(pedidos[0].or, `created_at.gt.${desde},updated_at.gt.${desde}`);
+  // Material de texto livre novo (a falta da OS-00104 era um) ou peça nova → fato novo.
+  assertEquals(await r16.mudouDesde!(mkDb({ service_order_services: [{ id: "m1" }] }), `r16:so:${OS}`, desde), true);
+  assertEquals(await r16.mudouDesde!(mkDb({ service_order_parts: [{ id: "p1" }] }), `r16:so:${OS}`, desde), true);
+  // Erro na leitura não decide sozinho: lança (o motor falha a regra na rodada).
+  let lancou = false;
+  try {
+    await r16.mudouDesde!(mkDb({}, { code: "57014", message: "timeout" }), `r16:so:${OS}`, desde);
+  } catch {
+    lancou = true;
+  }
+  assertEquals(lancou, true);
 });
 
 Deno.test("businessDaysBetween: ignora fim de semana (espelha a tela)", () => {

@@ -27,6 +27,16 @@ export interface Rule {
   find(db: any): Promise<RuleCandidate[]>;
   /** motivo da resolução se a condição sumiu; null se ainda vale */
   isResolved(db: any, task: { automation_key: string }): Promise<string | null>;
+  /**
+   * Tarefa que o dono concluiu ou cancelou não volta, sem prazo, enquanto o candidato tiver o
+   * MESMO título (ver dispensaSemFatoNovo). Para regra cujo título descreve a condição inteira.
+   */
+  voltaSoComFatoNovo?: boolean;
+  /**
+   * Para regra com `voltaSoComFatoNovo`: houve fato novo na entidade da tarefa desde `desdeISO`
+   * (quando o dono a fechou), mesmo com o título igual? true = a dispensa não vale e a tarefa volta.
+   */
+  mudouDesde?(db: any, automationKey: string, desdeISO: string): Promise<boolean>;
 }
 
 export const fmtBRL = (v: number) =>
@@ -635,6 +645,9 @@ const r16: Rule = {
   id: 'r16',
   label: 'OS comprometida com item a comprar',
   defaultEnabled: true,
+  // O título traz o número de itens e o cliente: mudou o que falta, é fato novo. Concluída à mão
+  // com a mesma falta (ex.: comprou e não registrou), não volta a cada 15 min.
+  voltaSoComFatoNovo: true,
   async find(db) {
     const { data: orders } = await db
       .from('service_orders')
@@ -697,41 +710,32 @@ const r16: Rule = {
       return `OS mudou para ${so.status}`;
     }
 
-    const { data: parts } = await db
-      .from('service_order_parts')
-      .select('product_id, quantity')
-      .eq('service_order_id', id);
-    if (!parts?.length) return 'OS não tem mais peças lançadas';
-
-    const productIds = parts.map((p: any) => p.product_id);
-    const [{ data: avail }, { data: poItems }] = await Promise.all([
-      db.from('product_availability')
-        .select('id, stock_quantity, reserved_quantity')
-        .in('id', productIds),
-      db.from('purchase_order_items')
-        .select('product_id, quantity, received_qty, purchase_orders!inner(status)')
-        .in('product_id', productIds)
-        .in('purchase_orders.status', ['draft', 'sent', 'partial']),
+    // A MESMA conta do find (15/10/2026). Antes daqui saía um recálculo só pelas peças do
+    // catálogo: a OS-00104, com 0 peças e 1 material de texto livre faltando, era criada pelo
+    // find e fechada aqui na mesma rodada ("OS não tem mais peças lançadas") — 1.142 vezes desde
+    // 03/10. A RPC já desconta reserva e OC aberta: gerar a OC resolve (o item está a caminho).
+    const { data: faltas, error } = await db.rpc('count_purchase_shortages', { p_so_ids: [id] });
+    // Erro não pode virar "resolvida": a tarefa sumiria com a falta de pé. Lançar faz o motor
+    // logar e manter a tarefa viva.
+    if (error) throw error;
+    const aindaFalta = Object.prototype.hasOwnProperty.call((faltas ?? {}) as Record<string, number>, id);
+    return aindaFalta ? null : 'Compra resolvida (em estoque ou já pedida)';
+  },
+  // Fato novo com o título igual (revisão de 15/10/2026): o título só traz a CONTAGEM — "Comprar 1
+  // item" de hoje pode ser outro item que o de quando o dono concluiu à mão. Peça ou material da OS
+  // lançado ou mudado depois do "já tratei" = a tarefa volta. As mesmas duas tabelas que a conta do
+  // banco lê (get_os_purchase_needs: service_order_parts e service_order_services). Erro = lança: o
+  // motor falha a regra na rodada (não recria às cegas nem esconde para sempre).
+  async mudouDesde(db, automationKey, desdeISO) {
+    const id = entityIdFromKey(automationKey);
+    const depois = `created_at.gt.${desdeISO},updated_at.gt.${desdeISO}`;
+    const [pecas, materiais] = await Promise.all([
+      db.from('service_order_parts').select('id').eq('service_order_id', id).or(depois).limit(1),
+      db.from('service_order_services').select('id').eq('service_order_id', id).or(depois).limit(1),
     ]);
-
-    const availById = new Map<string, number>();
-    for (const a of avail || []) {
-      availById.set(a.id, Number(a.stock_quantity || 0) - Number(a.reserved_quantity || 0));
-    }
-    const onOrderById = new Map<string, number>();
-    for (const i of poItems || []) {
-      const pending = Math.max(0, Number(i.quantity || 0) - Number(i.received_qty || 0));
-      onOrderById.set(i.product_id, (onOrderById.get(i.product_id) || 0) + pending);
-    }
-
-    const stillShort = parts.some((p: any) => {
-      const available = Math.max(0, availById.get(p.product_id) || 0);
-      const onOrder = onOrderById.get(p.product_id) || 0;
-      return Math.max(0, Number(p.quantity || 0) - available - onOrder) > 0;
-    });
-
-    // Gerar a OC já resolve: o item passa a contar como "a caminho".
-    return stillShort ? null : 'Compra resolvida (em estoque ou já pedida)';
+    if (pecas.error) throw pecas.error;
+    if (materiais.error) throw materiais.error;
+    return (pecas.data?.length ?? 0) > 0 || (materiais.data?.length ?? 0) > 0;
   },
 };
 
@@ -1075,6 +1079,22 @@ export function isManualDismissal(
   if (!when || when < cutoffISO) return false;
   if (row.status === 'cancelled') return true;
   return row.status === 'done' && row.completed_by !== null;
+}
+
+/**
+ * Dispensa sem prazo, para regra com `voltaSoComFatoNovo`: o dono concluiu (completed_by
+ * preenchido) ou cancelou, e o candidato de agora tem o MESMO título — nada mudou desde que ele
+ * disse "já tratei". Título diferente (outro número de itens, outro cliente) é fato novo e
+ * recria. Fechada sozinha não conta (a condição tinha sumido; se voltou, é ocorrência nova).
+ * `mudouDepois` = a regra viu fato novo desde o fechamento (Rule.mudouDesde): título igual não basta.
+ */
+export function dispensaSemFatoNovo(
+  row: { status: string; completed_by: string | null; title: string | null },
+  tituloDoCandidato: string,
+  mudouDepois = false,
+): boolean {
+  const aMao = row.status === 'cancelled' || (row.status === 'done' && row.completed_by !== null);
+  return aMao && row.title === tituloDoCandidato && !mudouDepois;
 }
 
 export function dismissCooldownDays(settings: Record<string, string>): number {

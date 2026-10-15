@@ -11,7 +11,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, isManualDismissal, dismissCooldownDays,
-  textoDoLembreteDaOs, type RuleCandidate,
+  dispensaSemFatoNovo, textoDoLembreteDaOs, type RuleCandidate,
 } from "./rules.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
@@ -95,17 +95,37 @@ async function runRules(db: Db, settings: Record<string, string>) {
 
       // Dispensa manual: não recriar o que um humano concluiu/cancelou há pouco
       // com a condição ainda de pé (senão a tarefa "volta do nada" a cada 15min).
-      if (candidates.length > 0 && cooldownDays > 0) {
+      // Regra com voltaSoComFatoNovo (R16): a dispensa não tem prazo enquanto o título for o
+      // mesmo (15/10/2026).
+      if (candidates.length > 0 && (cooldownDays > 0 || rule.voltaSoComFatoNovo)) {
         const keys = candidates.map((c) => c.automation_key);
-        const { data: closed } = await db.from("agenda_tasks")
-          .select("automation_key, status, completed_by, completed_at, updated_at")
+        // Só as fechadas À MÃO: as fechadas sozinhas não dispensam nada, e a OS-00104 tinha 1.142
+        // delas — passava do teto de 1.000 linhas do PostgREST, que corta calado.
+        const { data: closed, error: closedErr } = await db.from("agenda_tasks")
+          .select("automation_key, title, status, completed_by, completed_at, updated_at")
           .in("automation_key", keys)
-          .in("status", ["done", "cancelled"]);
+          .in("status", ["done", "cancelled"])
+          .or("status.eq.cancelled,completed_by.not.is.null");
+        // Sem a leitura, recriar seria desfazer a dispensa do dono: a regra falha nesta rodada.
+        if (closedErr) throw closedErr;
+        const tituloPorChave = new Map(candidates.map((c) => [c.automation_key, c.title]));
+        const fechadas = (closed as any[]) || [];
         const dismissed = new Set(
-          ((closed as any[]) || [])
-            .filter((r) => isManualDismissal(r, cutoffISO))
-            .map((r) => r.automation_key),
+          fechadas.filter((r) => cooldownDays > 0 && isManualDismissal(r, cutoffISO)).map((r) => r.automation_key),
         );
+        if (rule.voltaSoComFatoNovo) {
+          for (const r of fechadas) {
+            const titulo = tituloPorChave.get(r.automation_key) ?? "";
+            if (dismissed.has(r.automation_key) || !dispensaSemFatoNovo(r, titulo)) continue;
+            // Título igual não basta (revisão de 15/10/2026): o título da R16 só traz a contagem, e
+            // um item NOVO com a mesma contagem ficaria sem tarefa para sempre. A regra diz se a
+            // entidade mudou desde que o dono fechou (rule.mudouDesde); sem data, vale a dispensa.
+            const desde = r.completed_at || r.updated_at;
+            const mudou = !!desde && !!rule.mudouDesde &&
+              await rule.mudouDesde(db, r.automation_key, new Date(desde).toISOString());
+            if (dispensaSemFatoNovo(r, titulo, mudou)) dismissed.add(r.automation_key);
+          }
+        }
         candidates = candidates.filter((c) => !dismissed.has(c.automation_key));
       }
 
