@@ -13,11 +13,27 @@
 //   · registro de pergunta ativa (whatsapp/pergunta-ativa.ts): número, "um", "opção 2", "a 2", sim/não/ok
 //     e emoji não são lidos aqui.
 // O que não é comando devolve null e segue o caminho de sempre.
+//
+// Passo 3 (15/10/2026, a tarde — spec-secretario-fechamento.md §6):
+//   · a revisão respondida de uma vez: "C semana, B tira, G 15 dias" (também "C semana e B tira", sem
+//     separador "C semana B tira", ou um par só com semana/15 dias). Ações do lote: semana (faço esta
+//     semana), 15 dias, tira, feito, não, amanhã, segunda. "15" sozinho NÃO vale ("a 15" é a opção 15 de um
+//     menu): é "15 dias" ou "15d";
+//   · a cobrança antiga da revisão do mês, uma por vez: "F cobrar", "F negociar", "F baixa";
+//   · a pergunta da sexta: "ajudou", "pouco", "ajudou pouco", "atrapalhou" (com "a semana"/"semana" na frente).
+//     Palavras e não a/b/c: a tarde reusa as letras do dia, e "b" sozinho abre o item B.
 
 import { letraValida, paraBusca } from "./base.ts";
 import type { Secao } from "./tipos.ts";
 
 export type Adiamento = "amanha" | "segunda" | "espera" | { dia: number; mes: number | null };
+
+/** Uma resposta dentro do lote da revisão. */
+export type AcaoDoLote =
+  | { letra: string; acao: "feito" | "nao" | "tirado" }
+  | { letra: string; acao: "adiar"; quando: "amanha" | "segunda" | "semana" | "15dias" };
+
+export type RespostaDaSemana = "ajudou" | "pouco" | "atrapalhou";
 
 export type ComandoDoSecretario =
   | { comando: "lista"; filtro: Secao | null }
@@ -28,7 +44,10 @@ export type ComandoDoSecretario =
   | { comando: "acao"; letra: string; acao: "feito" | "nao" | "tirado" }
   | { comando: "adiar"; letra: string; quando: Adiamento }
   | { comando: "volta"; letra: string | null; nome: string | null }
-  | { comando: "abrir"; letra: string };
+  | { comando: "abrir"; letra: string }
+  | { comando: "lote"; itens: AcaoDoLote[] }
+  | { comando: "antiga"; letra: string; acao: "cobrar" | "negociar" | "baixa" }
+  | { comando: "semana"; resposta: RespostaDaSemana };
 
 /** trim; tira 🎤 e aspas da ponta, negrito/itálico do WhatsApp; minúsculo sem acento; sem pontuação final. */
 export function normalizarComando(texto: string): string {
@@ -60,7 +79,8 @@ function letra(m: RegExpExecArray | null, i = 1): string | null {
 /** O comando, ou null (não é comando: segue para o assistente como sempre). */
 export function lerComandoDoSecretario(texto: string): ComandoDoSecretario | null {
   const t = normalizarComando(texto);
-  if (!t || t.length > 60) return null;
+  // 160 (era 60 no Passo 2): a revisão de 5 assuntos respondida de uma vez passa de 60
+  if (!t || t.length > 160) return null;
 
   if (t === "lista") return { comando: "lista", filtro: null };
   let m = /^lista (?:de |dos |das |do |da )?([a-z]+)$/.exec(t);
@@ -96,7 +116,78 @@ export function lerComandoDoSecretario(texto: string): ComandoDoSecretario | nul
     // "volta a" sozinho já foi a letra A acima; aqui só nome de verdade (2+ letras)
     if (nome.replace(/ /g, "").length >= 2) return { comando: "volta", letra: null, nome };
   }
-  return null;
+
+  // ── Passo 3: a tarde ──
+  m = /^(?:(?:a |essa |esta )?semana |o resumo )?(ajudou pouco|ajudou|pouco|atrapalhou)$/.exec(t);
+  if (m) return { comando: "semana", resposta: m[1] === "ajudou" ? "ajudou" : m[1] === "atrapalhou" ? "atrapalhou" : "pouco" };
+  m = new RegExp(`^${L} (cobrar|cobra|negociar|negocia|baixa|dar baixa|da baixa|de baixa)$`).exec(t);
+  if ((l = letra(m)) && m) {
+    return { comando: "antiga", letra: l, acao: m[2].startsWith("cobra") ? "cobrar" : m[2].startsWith("negoci") ? "negociar" : "baixa" };
+  }
+  return lerLote(t);
+}
+
+// ─── O lote da revisão ("C semana, B tira, G 15 dias") ─────────────────────────────────────────
+
+type FazerAcao = (letra: string) => AcaoDoLote;
+const semana: FazerAcao = (letra) => ({ letra, acao: "adiar", quando: "semana" });
+const quinzeDias: FazerAcao = (letra) => ({ letra, acao: "adiar", quando: "15dias" });
+const tira: FazerAcao = (letra) => ({ letra, acao: "tirado" });
+const feito: FazerAcao = (letra) => ({ letra, acao: "feito" });
+
+const ACOES_DO_LOTE: Array<[string, FazerAcao]> = [
+  ...["faco esta semana", "faco essa semana", "faco na semana", "esta semana", "essa semana", "nesta semana", "nessa semana", "semana", "faco"]
+    .map((w): [string, FazerAcao] => [w, semana]),
+  ...["me lembra em 15 dias", "lembra em 15 dias", "daqui a 15 dias", "daqui 15 dias", "em 15 dias", "15 dias", "15d", "em quinze dias", "quinze dias"]
+    .map((w): [string, FazerAcao] => [w, quinzeDias]),
+  ...["tirar", "tira", "tire"].map((w): [string, FazerAcao] => [w, tira]),
+  ...["feito", "feita", "ja fiz", "resolvido", "resolvida", "pronto"].map((w): [string, FazerAcao] => [w, feito]),
+  ["nao", (letra) => ({ letra, acao: "nao" })],
+  ["amanha", (letra) => ({ letra, acao: "adiar", quando: "amanha" })],
+  ...["na segunda feira", "segunda feira", "na segunda", "segunda"]
+    .map((w): [string, FazerAcao] => [w, (letra) => ({ letra, acao: "adiar", quando: "segunda" })]),
+];
+// a mais longa primeiro ("faco esta semana" antes de "faco"; "segunda feira" antes de "segunda")
+const PALAVRAS_DO_LOTE = [...ACOES_DO_LOTE].sort((a, b) => b[0].length - a[0].length);
+const PAR_LETRA_ACAO = new RegExp(`^${L} (${PALAVRAS_DO_LOTE.map(([w]) => w).join("|")})(?=$|[ ,;])`);
+const PAR_TIRA_LETRA = new RegExp(`^(?:tira|tirar|tire) (?:(?:o|a) )?${L}(?=$|[ ,;])`);
+const SEPARADOR = /^(?:\s*[,;]\s*|\s+e\s+|\s+)/;
+
+/**
+ * O lote: pares "letra ação" (ou "tira letra") separados por vírgula, ponto e vírgula, " e " ou nada. Tudo ou
+ * nada: um pedaço que não é par = null (segue para o assistente). Um par só com ação de antes ("C tira") vira o
+ * comando de antes; com semana/15 dias, um lote de um.
+ */
+function lerLote(t: string): ComandoDoSecretario | null {
+  let s = t;
+  const itens: AcaoDoLote[] = [];
+  while (s.length) {
+    const la = PAR_LETRA_ACAO.exec(s);
+    const tl = la ? null : PAR_TIRA_LETRA.exec(s);
+    const m = la ?? tl;
+    if (!m) return null;
+    const l = letraValida(m[1]);
+    if (!l) return null;
+    if (la) {
+      const fazer = PALAVRAS_DO_LOTE.find(([w]) => w === la[2])?.[1];
+      if (!fazer) return null;
+      itens.push(fazer(l));
+    } else {
+      itens.push(tira(l));
+    }
+    s = s.slice(m[0].length);
+    if (!s.length) break;
+    const sep = SEPARADOR.exec(s);
+    if (!sep) return null;
+    s = s.slice(sep[0].length);
+  }
+  if (!itens.length || itens.length > 21) return null;
+  if (itens.length === 1) {
+    const [i] = itens;
+    if (i.acao !== "adiar") return { comando: "acao", letra: i.letra, acao: i.acao };
+    if (i.quando === "amanha" || i.quando === "segunda") return { comando: "adiar", letra: i.letra, quando: i.quando };
+  }
+  return { comando: "lote", itens };
 }
 
 /**

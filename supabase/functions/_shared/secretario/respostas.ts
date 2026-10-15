@@ -22,6 +22,8 @@ export interface ItemGravado {
   detalhe: DetalheDoItem | null;
   acao: string | null;
   adiado_ate: string | null;
+  /** a impressão digital do fato (cobrança: "saldo|vencimento|fase") — a revisão do mês lê o vencimento daqui */
+  fato?: string;
 }
 
 /** O detalhe gravado: os fatos em ordem (jsonb não guarda a ordem das chaves) e a resposta. */
@@ -235,4 +237,88 @@ export function textoDaVolta(
   const nome = r.item?.nome ?? alvo.nome ?? "";
   const desfeito = rotuloDaAcao(r.desfeita ?? null, null, hoje);
   return `Desfeito${desfeito ? ` (${desfeito})` : ""}: ${nome} volta a poder subir de manhã.`;
+}
+
+// ─── Passo 3 (15/10/2026): as respostas da tarde ───────────────────────────────────────────────
+
+function emLista(xs: string[]): string {
+  return xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} e ${xs[xs.length - 1]}`;
+}
+
+/** A confirmação do lote da revisão (resposta da RPC resumo_itens_acoes). */
+export function textoDoLote(
+  r: {
+    resultado?: string;
+    erro?: string;
+    letra?: string;
+    letras?: string[];
+    itens?: Array<{ letra: string; acao: string; ate?: string | null; resposta?: string | null }>;
+  } | null,
+  hoje: string,
+): string {
+  if (!r) return "Não consegui anotar agora. Tente de novo em instantes.";
+  if (r.resultado === "nao_achei") {
+    const ls = r.letras ?? [];
+    return `Não achei ${emLista(ls)} de hoje; nada foi anotado. *lista* mostra os de hoje.`;
+  }
+  if (r.resultado === "invalido") {
+    return r.erro === "letra_repetida"
+      ? `A letra ${r.letra ?? ""} veio duas vezes; nada foi anotado. Mande uma resposta por letra.`
+      : "Não entendi uma das respostas; nada foi anotado. Exemplo: *C semana, B tira, G 15 dias*.";
+  }
+  if (r.resultado !== "feito" || !r.itens?.length) return "Não consegui anotar agora. Tente de novo em instantes.";
+  const partes = r.itens.map((i) => {
+    if (i.acao === "feito") return `${i.letra} feito`;
+    if (i.acao === "nao") return `${i.letra} não`;
+    if (i.acao === "tirado") return `${i.letra} tirado`;
+    if (i.resposta === "semana") return `${i.letra} fica com você esta semana`;
+    if (i.resposta === "15dias") return `${i.letra} volta em 15 dias (${ddmm(i.ate)})`;
+    return `${i.letra} até ${i.ate ? quandoEmPalavras(i.ate, hoje) : "depois"}`;
+  });
+  const temSemana = r.itens.some((i) => i.resposta === "semana");
+  return `Anotei: ${partes.join(" · ")}.` +
+    (temSemana ? " O que ficou com você não volta de manhã esta semana; se ainda estiver aberto, entra na próxima revisão." : "") +
+    ` *volta ${r.itens[0].letra}* desfaz.`;
+}
+
+/** A resposta da pergunta da sexta (RPC resumo_semana_responder). */
+export function textoDaRespostaDaSemana(r: { resultado?: string } | null, resposta: "ajudou" | "pouco" | "atrapalhou"): string {
+  if (!r || (r.resultado !== "gravado" && r.resultado !== "trocado")) return "Não consegui anotar agora. Tente de novo em instantes.";
+  const frase = resposta === "ajudou" ? "a semana ajudou" : resposta === "pouco" ? "ajudou pouco" : "atrapalhou";
+  const troca = r.resultado === "trocado" ? " (troquei a resposta anterior)" : "";
+  return resposta === "ajudou"
+    ? `Anotei: ${frase}${troca}.`
+    : `Anotei: ${frase}${troca}. Se quiser, me diga numa frase o que mais atrapalhou que eu ajusto.`;
+}
+
+/** O vencimento gravado no fato da cobrança ("saldo|aaaa-mm-dd|fase"), ou null. */
+export function vencimentoDoFato(fato: string | null | undefined): string | null {
+  const v = String(fato ?? "").split("|")[1] ?? "";
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
+}
+
+function fatoDe(i: ItemGravado, rotulo: string): string | null {
+  return i.detalhe?.fatos?.find(([r]) => r === rotulo)?.[1] ?? null;
+}
+
+/**
+ * O turno do assistente para "F cobrar / F negociar / F baixa" (a revisão do mês). Nada sai nem é gravado
+ * sem o sim: o pedido termina sempre pedindo o cartão. `antigas` = as cobranças de 30+ dias da letra.
+ */
+export function pedidoDaCobrancaAntiga(acao: "cobrar" | "negociar" | "baixa", antigas: ItemGravado[]): string {
+  if (acao === "cobrar" && antigas.length === 1 && antigas[0].pedido) return antigas[0].pedido;
+  const cliente = umaLinha(fatoDe(antigas[0], "Cliente") ?? antigas[0].nome, 60);
+  const lista = antigas.map((i) => {
+    const desc = fatoDe(i, "Cobrança");
+    const saldo = fatoDe(i, "Saldo");
+    const venc = fatoDe(i, "Venceu em")?.replace(/\s*\(.*\)$/, "");
+    return `${desc ? `"${umaLinha(desc, 60)}"` : "a cobrança"}${saldo || venc ? ` (${[saldo ? `saldo de ${saldo}` : "", venc ? `venceu em ${venc}` : ""].filter(Boolean).join(", ")})` : ""}`;
+  }).join("; ");
+  if (acao === "cobrar") {
+    return `Prepare um lembrete de pagamento para o cliente ${cliente} sobre estas cobranças vencidas: ${lista}. Mostre o texto pronto e peça o meu sim antes de enviar.`;
+  }
+  if (acao === "negociar") {
+    return `Prepare uma proposta de acordo para o cliente ${cliente} sobre ${lista}: ofereça parcelar o saldo ou um desconto para pagar à vista, em tom cordial. Mostre o texto pronto e peça o meu sim antes de enviar.`;
+  }
+  return `Quero dar baixa em ${lista}, do cliente ${cliente}: não vou mais cobrar. Cancele o lançamento como perda, com o motivo "dado como perda na revisão do mês". Mostre o que muda e peça o meu sim antes de gravar.`;
 }

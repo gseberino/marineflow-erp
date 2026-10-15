@@ -9,20 +9,24 @@
 // sempre, e nada sai para cliente sem o "sim".
 
 import { diaBR } from "../pdf/datas.ts";
-import { proximaSegunda, somarDias } from "./base.ts";
-import { type ComandoDoSecretario, diaDoAdiamento } from "./comandos.ts";
+import { diasEntre, proximaSegunda, somarDias } from "./base.ts";
+import { type AcaoDoLote, type ComandoDoSecretario, diaDoAdiamento } from "./comandos.ts";
 import {
   ehPacote,
   type ItemGravado,
   type PassagemAnterior,
+  pedidoDaCobrancaAntiga,
   TEXTO_SEM_RESUMO,
   textoDaAcao,
-  textoDoPacote,
   textoDaLista,
+  textoDaRespostaDaSemana,
   textoDaVolta,
   textoDoDetalhe,
+  textoDoLote,
+  textoDoPacote,
   textoDoPorque,
   textoNaoAchei,
+  vencimentoDoFato,
 } from "./respostas.ts";
 import { esperaDoTipo } from "./tipos.ts";
 
@@ -33,11 +37,40 @@ export type ResultadoDoComando =
   /** responder ao dono sem o modelo */
   | { tipo: "resposta"; texto: string }
   /** o texto vira o turno do assistente (o cartão pronto do item) */
-  | { tipo: "pedido"; texto: string; letra: string };
+  | { tipo: "pedido"; texto: string; letra: string }
+  /** não era comando meu (ex.: "pouco" sem a pergunta da sexta aberta): segue como conversa, sem mudar nada */
+  | { tipo: "seguir" };
 
 const MODO = "novo";
 const COLUNAS_DO_ITEM =
-  "letra, principal, posicao, ordem, familia, tipo, secao, referencia, nome, titulo, recomendacao, motivo, pedido, detalhe, acao, adiado_ate";
+  "letra, principal, posicao, ordem, familia, tipo, secao, referencia, nome, titulo, recomendacao, motivo, pedido, detalhe, acao, adiado_ate, fato";
+
+/** A cobrança vencida há 30 dias ou mais (a régua da revisão do mês, a mesma de REGRAS.cobrancaAntigaDias). */
+const COBRANCA_ANTIGA_DIAS = 30;
+
+/** Uma resposta do lote no formato da RPC resumo_itens_acoes (o "até" já calculado). */
+export function acaoParaRpc(i: AcaoDoLote, hoje: string): { letra: string; acao: string; ate?: string; resposta?: string } {
+  if (i.acao !== "adiar") return { letra: i.letra, acao: i.acao };
+  const ate = i.quando === "amanha" ? somarDias(hoje, 1)
+    : i.quando === "15dias" ? somarDias(hoje, 15)
+    : proximaSegunda(hoje); // "segunda" e "semana": a próxima segunda (a da revisão seguinte)
+  return {
+    letra: i.letra, acao: "adiado", ate,
+    ...(i.quando === "semana" ? { resposta: "semana" } : i.quando === "15dias" ? { resposta: "15dias" } : {}),
+  };
+}
+
+/** A contagem de *escritório* da tarde de hoje, se houver (erro ou sem a tabela = null: vale a da manhã). */
+async function escritorioDaTarde(admin: Admin, phone: string, hoje: string): Promise<string | null> {
+  try {
+    const { data, error } = await admin.from("resumo_tarde").select("escritorio")
+      .eq("phone_normalized", phone).eq("dia", hoje).eq("modo", MODO).maybeSingle();
+    if (error) return null;
+    return typeof data?.escritorio === "string" && data.escritorio ? data.escritorio : null;
+  } catch {
+    return null;
+  }
+}
 
 const ERRO_DE_LEITURA = "Não consegui ler o resumo de hoje agora. Tente de novo em instantes.";
 
@@ -104,7 +137,8 @@ export async function executarComandoDoSecretario(
       case "escritorio": {
         const resumo = await resumoDoDia(admin, phone, hoje);
         if (!resumo) return resposta(TEXTO_SEM_RESUMO);
-        return resposta(resumo.escritorio || "Nada de papelada contado hoje cedo.");
+        // Passo 3: depois das 17:30 vale a contagem da tarde (a que o fechamento citou)
+        return resposta((await escritorioDaTarde(admin, phone, hoje)) || resumo.escritorio || "Nada de papelada contado hoje cedo.");
       }
       case "tudo": {
         const resumo = await resumoDoDia(admin, phone, hoje);
@@ -148,6 +182,32 @@ export async function executarComandoDoSecretario(
       case "volta": {
         const r = await rpc(admin, "resumo_item_voltar", { phone, modo: MODO, letra: cmd.letra ?? "", nome: cmd.nome ?? "" });
         return resposta(textoDaVolta(r as Parameters<typeof textoDaVolta>[0], { letra: cmd.letra, nome: cmd.nome }, hoje));
+      }
+      // ── Passo 3: a tarde ──
+      case "lote": {
+        // tudo ou nada na RPC: letra que não existe hoje, repetida ou data inválida → nada é gravado
+        const r = await rpc(admin, "resumo_itens_acoes", { phone, modo: MODO, acoes: cmd.itens.map((i) => acaoParaRpc(i, hoje)) });
+        return resposta(textoDoLote(r as Parameters<typeof textoDoLote>[0], hoje));
+      }
+      case "antiga": {
+        const itens = await itensDoDia(admin, phone, hoje, cmd.letra);
+        if (!itens.length) return resposta(textoNaoAchei(cmd.letra));
+        const antigas = itens.filter((i) => {
+          const venc = i.familia === "cobranca" ? vencimentoDoFato(i.fato) : null;
+          return !!venc && diasEntre(venc, hoje) >= COBRANCA_ANTIGA_DIAS;
+        });
+        if (!antigas.length) {
+          return resposta(`O item ${cmd.letra} não tem cobrança vencida há 30 dias ou mais. *detalhe ${cmd.letra}* mostra os fatos.`);
+        }
+        await rpc(admin, "resumo_item_acao", { phone, modo: MODO, letra: cmd.letra, acao: "abriu" });
+        return { tipo: "pedido", texto: pedidoDaCobrancaAntiga(cmd.acao, antigas), letra: cmd.letra };
+      }
+      case "semana": {
+        const r = await rpc(admin, "resumo_semana_responder", { phone, resposta: cmd.resposta });
+        // sem a pergunta da sexta aberta, "pouco"/"ajudou" é conversa: segue ao assistente como se nada fosse.
+        // Erro na RPC também segue (melhor perder uma medição do que responder "não anotei" a uma conversa).
+        if (!r || r.resultado === "sem_pergunta") return { tipo: "seguir" };
+        return resposta(textoDaRespostaDaSemana(r as Parameters<typeof textoDaRespostaDaSemana>[0], cmd.resposta));
       }
     }
   } catch (e) {
