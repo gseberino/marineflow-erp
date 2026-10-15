@@ -8,6 +8,7 @@ import {
   candidatosDoDia,
   type ConversaCrua,
   ehClienteGenerico,
+  manhaAnterior,
   type CobrancaCrua,
   type OrcamentoCru,
   type OsCrua,
@@ -230,4 +231,58 @@ Deno.test("15/10: todos os candidatos do dia (o rascunho de agosto e as OS andan
   ]);
   // a OS-00104 sem tarefa aberta às 07:30 é "parada" (lista), não "esperando compra"
   assertEquals(cs.find((c) => c.referencia === "os:o-104")!.tipo, "os_parada");
+});
+
+Deno.test("pedido de orçamento depois da última manhã, sem resposta: se perde hoje, mesmo antes das 12 h (decisão do dono, 15/10)", () => {
+  const pede = "Pode me passar o orçamento por favor";
+  // contato sem cadastro que pediu às 06:50 de hoje
+  const cedo = candidatoDeConversa(conv({
+    categoria: "contato", client_id: null, contato: "Cesar", last_body: pede, last_inbound_at: "2026-10-15T09:50:00Z",
+    recebidas: [{ body: pede, em: "2026-10-15T09:50:00Z" }],
+  }), AGORA_1510, 0);
+  assertEquals([cedo.tipo, cedo.elegivel, cedo.perdeHoje, cedo.soPeloPedido, cedo.porqueNaoSobe], ["contato_pedindo_preco", true, true, true, null]);
+  assertStringIncludes(cedo.motivo, "Pode se perder hoje: o pedido chegou depois da última manhã e ninguém respondeu.");
+  // cliente que pediu há 5 h: sobe (a regra comum espera 12 h) e o texto diz "parece"
+  const cli = candidatoDeConversa(conv({
+    last_body: "Quanto fica pra trocar a bomba?", last_inbound_at: "2026-10-15T05:30:00Z",
+    recebidas: [{ body: "Quanto fica pra trocar a bomba?", em: "2026-10-15T05:30:00Z" }],
+  }), AGORA_1510, 0);
+  assertEquals([cli.tipo, cli.elegivel, cli.perdeHoje, cli.porqueNaoSobe], ["cliente_sem_resposta", true, true, null]);
+  assertStringIncludes(cli.titulo, "e está há 5 h sem resposta. A mensagem parece pedir preço ou orçamento.");
+  assertStringIncludes(cli.motivo, "Subiu porque é cliente, a mensagem parece pedir preço ou orçamento e está há 5 h sem resposta.");
+  // pressa e pedido: a pressa explica (e não é "só pelo pedido")
+  const comPressa = candidatoDeConversa(conv({ recebidas: [{ body: "Qual o valor? Preciso pra hoje", em: "2026-10-15T05:30:00Z" }], last_inbound_at: "2026-10-15T05:30:00Z" }), AGORA_1510, 0);
+  assertEquals([comPressa.perdeHoje, comPressa.soPeloPedido], [true, false]);
+  assert(!comPressa.motivo.includes("o pedido chegou depois da última manhã"));
+});
+
+Deno.test("pedido de antes da última manhã, fornecedor ou conversa de todo dia: a regra comum", () => {
+  // 13/10: antes da manhã de 14/10 — passou de 12 h e sobe, mas não se perde hoje
+  const velho = candidatoDeConversa(conv({
+    categoria: "contato", client_id: null, contato: "x", last_inbound_at: "2026-10-13T15:00:00Z", recebidas: [{ body: "Qual o valor?", em: "2026-10-13T15:00:00Z" }],
+  }), AGORA_1510, 0);
+  assertEquals([velho.tipo, velho.perdeHoje, velho.soPeloPedido], ["contato_pedindo_preco", false, false]);
+  // 14/10 às 07:00 de Brasília (antes da manhã de 14/10, que já o mostrou): não é do dia
+  const antesDaManha = candidatoDeConversa(conv({
+    categoria: "contato", client_id: null, contato: "x", last_inbound_at: "2026-10-14T10:00:00Z", recebidas: [{ body: "Qual o valor?", em: "2026-10-14T10:00:00Z" }],
+  }), AGORA_1510, 0);
+  assertEquals(antesDaManha.perdeHoje, false);
+  const forn = candidatoDeConversa(conv({ categoria: "fornecedor", last_inbound_at: "2026-10-15T05:30:00Z", recebidas: [{ body: "Qual o valor?", em: "2026-10-15T05:30:00Z" }] }), AGORA_1510, 0);
+  assertEquals([forn.tipo, forn.elegivel, forn.perdeHoje], ["fornecedor", false, false]);
+  const todoDia = candidatoDeConversa(conv({ diasComMensagemSua: 5, last_inbound_at: "2026-10-15T05:30:00Z", recebidas: [{ body: "Qual o valor?", em: "2026-10-15T05:30:00Z" }] }), AGORA_1510, 0);
+  assertEquals([todoDia.tipo, todoDia.elegivel, todoDia.perdeHoje], ["cliente_recente", false, false]);
+});
+
+Deno.test("a última manhã: o dia útil anterior (domingo e feriado só têm uma linha)", () => {
+  assertEquals(manhaAnterior("2026-10-16"), "2026-10-15");
+  // segunda: o sábado
+  assertEquals(manhaAnterior("2026-10-19"), "2026-10-17");
+  // terça depois de Finados (segunda, 02/11): o sábado 31/10
+  assertEquals(manhaAnterior("2026-11-03"), "2026-10-31");
+  // na segunda, o pedido de sábado à tarde ainda é do dia
+  const segunda = new Date("2026-10-19T10:30:00Z");
+  const sab = candidatoDeConversa(conv({
+    categoria: "contato", client_id: null, contato: "x", last_inbound_at: "2026-10-17T18:00:00Z", recebidas: [{ body: "Qual o valor?", em: "2026-10-17T18:00:00Z" }],
+  }), segunda, 0);
+  assertEquals(sab.perdeHoje, true);
 });

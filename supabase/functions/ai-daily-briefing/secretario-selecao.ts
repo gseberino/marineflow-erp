@@ -8,7 +8,7 @@
 //        cobrança grande volta no dia seguinte: fica até entrar); não → lista;
 //      · já apareceu DE MANHÃ com o mesmo fato → lista (2º dia só com fato novo) — exceto cobrança grande.
 // 2. Ordem: o que se perde hoje → maior valor → mais antigo (entre grupos; o pacote dos orçamentos não
-//    enviados vale a soma deles).
+//    enviados vale a soma deles). O pedido de orçamento do dia se perde hoje, mas só um vai na frente.
 // 3. Um assunto (o cliente; sem cliente, a OS ou o telefone) aparece uma vez: o grupo sobe pelo melhor
 //    item que pode subir e leva os outros junto ("Também: …"), com a mesma letra. Os orçamentos montados
 //    e não enviados (R$ 5 mil+) são UM assunto só: viram um item ("3 orçamentos … não enviados").
@@ -20,7 +20,7 @@
 
 import { brl, brlCurto, ddmm, letraDoIndice, quandoEmPalavras } from "../_shared/secretario/base.ts";
 import { SECOES } from "../_shared/secretario/tipos.ts";
-import { ASSUNTO_NAO_ENVIADOS, type Candidato, REGRAS } from "./secretario-candidatos.ts";
+import { ASSUNTO_NAO_ENVIADOS, type Candidato, FRASE_DO_PEDIDO, REGRAS } from "./secretario-candidatos.ts";
 
 /** Uma passagem anterior da mesma referência (resumo_itens, sem o dia de hoje). */
 export interface PassagemDoHistorico {
@@ -196,8 +196,15 @@ export function selecionar(
 ): Selecao {
   const vivos: MembroDoGrupo[] = candidatos
     .map((c) => ({ c, estado: estadoPeloHistorico(c, historico, hoje) }))
-    .filter((m) => m.estado.lugar !== "fora")
-    .sort((a, b) => ordemDosCandidatos(a.c, b.c));
+    .filter((m) => m.estado.lugar !== "fora");
+  // pedido de orçamento do dia: "se perde hoje" para UM só, o mais antigo que pode subir (no pior caso ele
+  // ocupa 1 dos 3 lugares); os outros seguem a ordem comum, sem a frase do "se perde hoje"
+  const pedidos = vivos.filter((m) => m.c.soPeloPedido && m.c.perdeHoje && m.estado.lugar === "manha")
+    .sort((a, b) => ms(a.c.desde) - ms(b.c.desde) || a.c.referencia.localeCompare(b.c.referencia));
+  for (const m of pedidos.slice(1)) {
+    m.c = { ...m.c, perdeHoje: false, soPeloPedido: false, motivo: m.c.motivo.replace(FRASE_DO_PEDIDO, "") };
+  }
+  vivos.sort((a, b) => ordemDosCandidatos(a.c, b.c));
 
   // um assunto, um grupo; o principal é o melhor que pode subir (senão o melhor de todos)
   const porAssunto = new Map<string, MembroDoGrupo[]>();

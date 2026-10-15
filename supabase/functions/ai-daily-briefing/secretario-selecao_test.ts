@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { ASSUNTO_NAO_ENVIADOS, type Candidato, candidatosDoDia } from "./secretario-candidatos.ts";
+import { ASSUNTO_NAO_ENVIADOS, type Candidato, candidatoDeConversa, candidatosDoDia } from "./secretario-candidatos.ts";
 import { estadoPeloHistorico, type PassagemDoHistorico, selecionar } from "./secretario-selecao.ts";
 import { AGORA_1510, coleta1510, HOJE_1510 } from "./secretario-fixture.ts";
 
@@ -23,35 +23,41 @@ function passou(ref: string, extra: Partial<PassagemDoHistorico> = {}): Passagem
 
 Deno.test("15/10: o que se perde hoje primeiro; os rascunhos viram UM item; a cobrança grande é item; letras sem E", () => {
   const sel = selecionar(candidatosDoDia(coleta1510(), AGORA_1510, HOJE), [], HOJE);
+  // o pedido de orçamento do Cesar (14/10, 12:23) se perde hoje e é o mais antigo dos dois que se perdem
+  // (decisão do dono, 15/10/2026); o pacote dos não enviados, que não se perde hoje, fica logo abaixo
   assertEquals(sel.manha.map((g) => [g.letra, g.pacote, g.membros[0].c.nome]), [
-    ["A", false, "Jorge Girardon"],
-    ["B", true, "ORÇ-00117 EVERTON CARLOS PINHEIRO"],
+    ["A", false, "Cesar"],
+    ["B", false, "Jorge Girardon"],
     ["C", false, "Marcelo Marco Bertoldi"],
   ]);
+  assertStringIncludes(sel.manha[0].motivo, "Pode se perder hoje: o pedido chegou depois da última manhã e ninguém respondeu.");
   // um assunto só: os orçamentos montados e não enviados (de clientes diferentes) vão juntos, com a mesma letra;
   // o ORÇ-00116, já mandado ao cliente, não é "não enviado"
-  assertEquals(sel.manha[1].membros.map((m) => m.c.nome), ["ORÇ-00117 EVERTON CARLOS PINHEIRO", "ORÇ-00118 Cliente Final"]);
-  assertStringIncludes(sel.manha[1].motivo, "são 2 orçamentos de R$ 5 mil ou mais montados e ainda não enviados");
-  assertStringIncludes(sel.manha[1].motivo, "R$ 141.353,70 no total; o mais antigo montado em 13/10");
+  const pacote = sel.lista.find((g) => g.pacote)!;
+  assertEquals(pacote.membros.map((m) => m.c.nome), ["ORÇ-00117 EVERTON CARLOS PINHEIRO", "ORÇ-00118 Cliente Final"]);
+  assertStringIncludes(pacote.motivo, "são 2 orçamentos de R$ 5 mil ou mais montados e ainda não enviados");
+  assertStringIncludes(pacote.motivo, "R$ 141.353,70 no total; o mais antigo montado em 13/10");
+  assert(pacote.quaseEntrou);
   // o rascunho pequeno (ORÇ-00115, R$ 453) fica com o cliente, fora do pacote
-  assert(!sel.manha[1].membros.some((m) => m.c.nome.startsWith("ORÇ-00115")));
+  assert(!pacote.membros.some((m) => m.c.nome.startsWith("ORÇ-00115")));
   const letras = sel.lista.map((g) => g.letra);
   assert(!letras.includes("E") && !letras.includes("I") && !letras.includes("N") && !letras.includes("O") && !letras.includes("S"));
   assertEquals(sel.lista[0].letra, "D");
   assertEquals(sel.lista[1].letra, "F");
   assertEquals(sel.lista.map((g) => g.membros[0].c.secao), [
-    "dinheiro", "dinheiro", "clientes", "clientes", "clientes", "clientes", "clientes", "clientes", "obras", "obras",
-    "contatos", "contatos", "contatos", "contatos",
+    "dinheiro", "dinheiro", "clientes", "clientes", "clientes", "clientes", "clientes", "clientes", "clientes", "obras", "obras",
+    "contatos", "contatos", "contatos",
   ]);
-  // dentro da seção, quem podia subir pega letra primeiro: o contato que pediu orçamento vem antes dos parados
+  // dentro da seção, quem podia subir pega letra primeiro: o pacote (quase entrou) antes dos outros clientes
+  assertEquals(sel.lista.filter((g) => g.membros[0].c.secao === "clientes")[0].pacote, true);
   assertEquals(sel.lista.filter((g) => g.membros[0].c.secao === "contatos").map((g) => [g.letra, g.membros[0].c.tipo]), [
-    ["R", "contato_pedindo_preco"], ["T", "fornecedor"], ["U", "contato_sem_cadastro"], ["V", "contato_sem_cadastro"],
+    ["T", "fornecedor"], ["U", "contato_sem_cadastro"], ["V", "contato_sem_cadastro"],
   ]);
   // MP: o orçamento puxa as cobranças antigas (um assunto, uma letra); Flávio: a conversa puxa a OS-00104
   assertEquals(sel.lista.find((g) => g.membros[0].c.nome.startsWith("ORÇ-00095"))!.membros.length, 3);
   assertEquals(sel.lista.find((g) => g.membros[0].c.nome === "Flávio da Igreja")!.membros.map((m) => m.c.tipo), ["cliente_sem_resposta", "os_parada"]);
   // logo abaixo: os que quase entraram, na ordem da manhã
-  assertEquals(sel.logoAbaixo.map((g) => g.membros[0].c.nome), ["ORÇ-00095 MP MOTOR HOMES", "OS-00112 Nelson", "Giancarlo Ribeiro dos Santos"]);
+  assertEquals(sel.logoAbaixo.map((g) => g.membros[0].c.nome), ["ORÇ-00117 EVERTON CARLOS PINHEIRO", "ORÇ-00095 MP MOTOR HOMES", "OS-00112 Nelson"]);
   assertEquals(sel.semLetra, 0);
   // o {L} do motivo vira a letra
   assertStringIncludes(sel.manha[2].motivo, "*C espera*");
@@ -194,4 +200,28 @@ Deno.test("passou das 21 letras: o resto fica sem letra e é contado", () => {
   assertEquals(sel.manha.length, 3);
   assertEquals(sel.lista.filter((g) => g.letra).length, 18);
   assertEquals(sel.semLetra, 4);
+});
+
+Deno.test("dois pedidos de orçamento do dia: só o mais antigo vai na frente; o outro segue a ordem comum, sem a frase", () => {
+  const pedido = (fone: string, em: string) => candidatoDeConversa({
+    phone: fone, contato: fone, categoria: "contato", client_id: null, last_inbound_at: em, last_body: "Qual o valor?",
+    recebidas: [{ body: "Qual o valor?", em }], diasComMensagemSua: 0,
+  }, AGORA_1510, 0);
+  const sel = selecionar([
+    pedido("5547900000011", "2026-10-15T09:00:00Z"), pedido("5547900000012", "2026-10-14T20:00:00Z"),
+    cand("g1", { valor: 9000 }), cand("g2", { valor: 8000 }),
+  ], [], HOJE);
+  // no pior caso, o pedido do dia ocupa 1 dos 3 lugares
+  assertEquals(sel.manha.map((g) => g.membros[0].c.nome), ["5547900000012", "g1", "g2"]);
+  assertStringIncludes(sel.manha[0].motivo, "Pode se perder hoje: o pedido chegou depois da última manhã");
+  const outro = sel.lista.find((g) => g.membros[0].c.nome === "5547900000011")!;
+  assertEquals([outro.quaseEntrou, outro.membros[0].c.perdeHoje], [true, false]);
+  assert(!outro.motivo.includes("o pedido chegou depois da última manhã"), outro.motivo);
+  // o pedido que já apareceu de manhã com a mesma mensagem não ocupa o lugar: vai para a lista (repetição)
+  const ontem = [passou("fone:5547900000012", { fato: "2026-10-14T20:00:00.000Z" })];
+  const sel2 = selecionar([
+    pedido("5547900000011", "2026-10-15T09:00:00Z"), pedido("5547900000012", "2026-10-14T20:00:00Z"),
+    cand("g1", { valor: 9000 }), cand("g2", { valor: 8000 }),
+  ], ontem, HOJE);
+  assertEquals(sel2.manha.map((g) => g.membros[0].c.nome), ["5547900000011", "g1", "g2"]);
 });

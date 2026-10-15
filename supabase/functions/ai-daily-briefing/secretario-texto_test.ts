@@ -18,17 +18,19 @@ Deno.test("15/10 com os dados do banco: o texto inteiro, abaixo de 1.000 caracte
   const selecao = selecionar(candidatosDoDia(coleta1510(), AGORA_1510, HOJE_1510), [], HOJE_1510);
   const t = textoDaManha({ hoje: HOJE_1510, tipoDoDia: "util", feriado: null, selecao, naRua: { total: 21026, n: 5 }, deHoje: deHoje1510() });
   // Decisão do dono (15/10): os rascunhos viram UM item; a cobrança grande é item da manhã (não só o "Na rua").
-  // Ensaio (15/10): o Jorge escreveu ontem "amanhã" (= hoje) e vem primeiro; o ORÇ-00116 já tinha sido mandado.
+  // Ensaio (15/10): o Cesar pediu orçamento ontem e ninguém respondeu, e o Jorge escreveu ontem "amanhã" (= hoje):
+  // os dois se perdem hoje e vêm primeiro (o mais antigo antes); o pacote dos não enviados fica logo abaixo.
+  // O ORÇ-00116 já tinha sido mandado. Com 3 itens longos, a promessa sai sem a frase (cabe em 1.000).
   assertEquals(t, [
     "Bom dia! Quinta, 15/10. Hoje 3 coisas pedem você.",
     "Na rua: R$ 21.026,00 vencidos (5).",
     "",
-    "*A.* *Jorge Girardon* mandou áudio ontem às 14:53 e está há 17 h sem resposta. Parece ter pressa (escreveu ontem \"amanhã\", que é hoje). Recomendo responder ainda de manhã. *A* = resumo o áudio e preparo a resposta · *A espera* = lembro amanhã",
-    "*B.* *2 orçamentos montados e ainda não enviados*, R$ 141 mil: ORÇ-00117, ORÇ-00118. Recomendo revisar e enviar, começando pelo maior. *B* = te mostro os 2 · *B espera* = até segunda",
+    "*A.* *Cesar* (sem cadastro) escreveu ontem às 12:23 e está há 19 h sem resposta; a mensagem parece pedir preço ou orçamento. Recomendo responder ainda de manhã. *A* = preparo a resposta · *A espera* = lembro amanhã",
+    "*B.* *Jorge Girardon* mandou áudio ontem às 14:53 e está há 17 h sem resposta. Parece ter pressa (escreveu ontem \"amanhã\", que é hoje). Recomendo responder ainda de manhã. *B* = resumo o áudio e preparo a resposta · *B espera* = lembro amanhã",
     "*C.* *Marcelo Marco Bertoldi* (Aria, OS-00038): R$ 16.890,00 venceu terça (13/10) e não entrou. Recomendo um lembrete educado hoje. *C* = te mostro o lembrete pronto · *C espera* = até segunda",
     "",
-    "Hoje: nada na agenda. Promessa sua: Eng.⁰ Rafael Borges DOMETIC (Claro, te passo agora!). Amanhã vence: R$ 5.237,99 a receber (APOLO INDUSTRIA E COMER…).",
-    "Logo abaixo ficaram ORÇ-00095 (MP MOTOR HOMES, R$ 14.461,00) e OS-00112 (Nelson, parece esperar compra), mais 12 assuntos. *lista*",
+    "Hoje: nada na agenda. Promessa sua: Eng.⁰ Rafael Borges DOMETIC. Amanhã vence: R$ 5.237,99 a receber (APOLO INDUSTRIA…).",
+    "Logo abaixo ficaram 2 orçamentos não enviados (R$ 141 mil) e ORÇ-00095 (MP MOTOR HOMES, R$ 14.461,00), mais 12 assuntos. *lista*",
   ].join("\n"));
   assert(t.length <= META_DE_CARACTERES, `${t.length} caracteres`);
   // nada de jargão nem de emoji de painel

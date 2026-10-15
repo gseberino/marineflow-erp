@@ -42,8 +42,9 @@ Deno.test("os itens a gravar passam nos CHECKs do banco (letra, tipo, tamanhos, 
   assertEquals([m.itensManha, m.itensLista, m.semLetra], [3, 14, 0]);
   assert(m.itensLista <= 21);
   // o item de manhã grava a linha que o dono viu
-  assertStringIncludes(m.itens.find((i) => i.letra === "A" && i.principal)!.titulo, "*A.* *Jorge Girardon*");
-  assertStringIncludes(m.itens.find((i) => i.letra === "B" && i.principal)!.titulo, "*B.* *2 orçamentos montados e ainda não enviados*");
+  // o pedido de orçamento do Cesar (14/10, 12:23, sem resposta) se perde hoje e vem primeiro (decisão do dono, 15/10)
+  assertStringIncludes(m.itens.find((i) => i.letra === "A" && i.principal)!.titulo, "*A.* *Cesar* (sem cadastro)");
+  assertStringIncludes(m.itens.find((i) => i.letra === "B" && i.principal)!.titulo, "*B.* *Jorge Girardon*");
   assertStringIncludes(m.itens.find((i) => i.letra === "C" && i.principal)!.titulo, "*C.* *Marcelo Marco Bertoldi*");
 });
 
@@ -103,8 +104,9 @@ Deno.test("registrarManha: erro, ok=false ou o dia gravado em outro modo = não 
 Deno.test("itensParaGravar: o grupo grava todos os membros com a mesma letra (o primeiro é o principal)", () => {
   const sel = selecionar(candidatosDoDia(coleta1510(), AGORA_1510, HOJE_1510), [], HOJE_1510);
   const itens = itensParaGravar(sel);
-  // G = o ORÇ-00095 da MP, com as duas cobranças antigas da MP
-  const doG = itens.filter((i) => i.letra === "G");
+  // o ORÇ-00095 da MP, com as duas cobranças antigas da MP
+  const letraDaMP = itens.find((i) => i.principal && i.nome.startsWith("ORÇ-00095"))!.letra;
+  const doG = itens.filter((i) => i.letra === letraDaMP);
   assertEquals(doG.map((i) => [i.principal, i.tipo]), [[true, "orcamento_parado"], [false, "cobranca_antiga"], [false, "cobranca_antiga"]]);
   assertEquals(doG[1].motivo, "Ficou na lista: vencida há 85 dias (30 ou mais vão para a revisão do mês).");
   // o nome curto vai junto (o "também" da *lista*)
@@ -113,7 +115,9 @@ Deno.test("itensParaGravar: o grupo grava todos os membros com a mesma letra (o 
 
 Deno.test("itensParaGravar: o pacote grava cada orçamento com o seu fato; o principal leva o nome e a linha curta do pacote", () => {
   const sel = selecionar(candidatosDoDia(coleta1510(), AGORA_1510, HOJE_1510), [], HOJE_1510);
-  const doB = itensParaGravar(sel).filter((i) => i.letra === "B");
+  const itens = itensParaGravar(sel);
+  const letraDoPacote = itens.find((i) => i.principal && i.tipo === "orcamento_nao_enviado")!.letra;
+  const doB = itens.filter((i) => i.letra === letraDoPacote);
   assertEquals(doB.map((i) => [i.principal, i.referencia, i.tipo]), [
     [true, "os:q-117", "orcamento_nao_enviado"], [false, "os:q-118", "orcamento_nao_enviado"],
   ]);

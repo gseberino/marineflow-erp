@@ -11,6 +11,7 @@
 // Números, datas e nomes são do banco. O `{L}` nos textos vira a letra do item quando a seleção a define.
 
 import { brl, ddmm, diasEntre, nomeDoDia, paraBusca, somarDias, umaLinha } from "../_shared/secretario/base.ts";
+import { tipoDoDia } from "../_shared/secretario/feriados.ts";
 import type { Familia, Secao, TipoDoItem } from "../_shared/secretario/tipos.ts";
 import { dataBR, diaBR, horaBR } from "../_shared/pdf/datas.ts";
 
@@ -78,6 +79,11 @@ export interface Candidato {
   elegivel: boolean;
   /** cobrança grande: fica toda manhã (fora da regra de repetição) */
   todoDia: boolean;
+  /**
+   * o "se perde hoje" vem SÓ do pedido de preço ou orçamento do dia (sem pressa): a seleção deixa um só
+   * desses na frente (o mais antigo); os outros seguem a ordem comum
+   */
+  soPeloPedido?: boolean;
   /** por que ficou na lista (quando não é elegível) */
   porqueNaoSobe: string | null;
   /** a linha da manhã, sem a letra, a recomendação e a resposta */
@@ -234,6 +240,16 @@ const PEDE_PRECO = new RegExp(String.raw`\b(?:` + [
 ].join("|") + String.raw`)\b`);
 const COM_PRESSA = /\b(hoje|urgente|urgencia|ainda hoje|o quanto antes|o mais rapido)\b/;
 
+/** A frase do "por que" do pedido de orçamento do dia (a seleção a tira de quem não ficou na frente). */
+export const FRASE_DO_PEDIDO = " Pode se perder hoje: o pedido chegou depois da última manhã e ninguém respondeu.";
+
+/** O dia da última manhã com itens: o dia útil anterior (domingo e feriado só têm uma linha). */
+export function manhaAnterior(hoje: string): string {
+  let d = somarDias(hoje, -1);
+  for (let i = 0; i < 7 && tipoDoDia(d) !== "util"; i++) d = somarDias(d, -1);
+  return d;
+}
+
 // ─── Famílias ──────────────────────────────────────────────────────────────────────────────────
 
 export function candidatoDeCobranca(c: CobrancaCrua, hoje: string): Candidato {
@@ -304,26 +320,37 @@ export function candidatoDeConversa(w: ConversaCrua, agora: Date, valorDoCliente
   const todoDia = w.diasComMensagemSua >= REGRAS.conversaTodoDiaDias;
   const passou = horas > REGRAS.clienteSemRespostaHoras;
   const cliente = w.categoria === "cliente";
+  // Pedido de preço ou orçamento que chegou depois da última manhã e ninguém respondeu (decisão do dono,
+  // 15/10/2026): no 1º dia é "o que se perde hoje" e sobe mesmo antes das 12 h. Do 2º dia em diante vale a
+  // regra comum (e a da repetição: o que já apareceu de manhã sem mensagem nova fica na lista). Fornecedor
+  // nunca; conversa de todo dia, não. Ensaio de 15/10: o Cesar pediu às 12:23 de 14/10 e ficava sem lugar.
+  const inicioDaJanela = Date.parse(`${manhaAnterior(diaBR(agora))}T07:30:00-03:00`);
+  const pedidoDoDia = w.categoria !== "fornecedor" && !todoDia &&
+    w.recebidas.some((r) => Date.parse(r.em) >= inicioDaJanela && PEDE_PRECO.test(paraBusca(r.body)));
   const tipo: TipoDoItem = w.categoria === "fornecedor" ? "fornecedor"
-    : cliente ? (passou && !todoDia ? "cliente_sem_resposta" : "cliente_recente")
-    : (pedePreco && passou && !todoDia ? "contato_pedindo_preco" : "contato_sem_cadastro");
+    : cliente ? ((passou || pedidoDoDia) && !todoDia ? "cliente_sem_resposta" : "cliente_recente")
+    : ((pedePreco && passou && !todoDia) || pedidoDoDia ? "contato_pedindo_preco" : "contato_sem_cadastro");
   const elegivel = tipo === "cliente_sem_resposta" || tipo === "contato_pedindo_preco";
   const nome = umaLinha(w.contato || w.phone, 30);
   const { verbo, audio } = verboDaMensagem(w.last_body);
   const tempo = haQuanto(horas);
-  const porqueNaoSobe = tipo === "fornecedor" ? "Ficou na lista: fornecedor (nunca de manhã)."
+  const porqueNaoSobe = elegivel ? null
+    : tipo === "fornecedor" ? "Ficou na lista: fornecedor (nunca de manhã)."
     : todoDia ? "Ficou na lista: vocês conversam quase todo dia."
     : !passou ? `Ficou na lista: escreveu há ${tempo} (a manhã espera 12 h).`
     : tipo === "contato_sem_cadastro" ? "Ficou na lista: contato sem cadastro que não fala de preço, orçamento ou fechar."
     : null;
   const pressa = comPressa ? ` Parece ter pressa (${sobrePressa}).` : "";
   const titulo = cliente
-    ? `*${nome}* ${verbo} ${quandoChegou(w.last_inbound_at, agora)} e está há ${tempo} sem resposta.${pressa}`
+    ? `*${nome}* ${verbo} ${quandoChegou(w.last_inbound_at, agora)} e está há ${tempo} sem resposta.` +
+      `${pedidoDoDia ? " A mensagem parece pedir preço ou orçamento." : ""}${pressa}`
     : `*${nome}* (sem cadastro) ${verbo} ${quandoChegou(w.last_inbound_at, agora)} e está há ${tempo} sem resposta; a mensagem parece pedir preço ou orçamento.${pressa}`;
   const motivo = (cliente
-    ? `Subiu porque é cliente e está há ${tempo} sem resposta (a manhã mostra cliente sem resposta há mais de 12 h).`
+    ? (passou
+      ? `Subiu porque é cliente e está há ${tempo} sem resposta (a manhã mostra cliente sem resposta há mais de 12 h).`
+      : `Subiu porque é cliente, a mensagem parece pedir preço ou orçamento e está há ${tempo} sem resposta.`)
     : `Subiu porque, mesmo sem cadastro, a mensagem parece pedir preço, orçamento ou fechar, e está há ${tempo} sem resposta.`) +
-    (comPressa ? ` Pode se perder hoje: ${sobrePressa}.` : "");
+    (comPressa ? ` Pode se perder hoje: ${sobrePressa}.` : pedidoDoDia ? FRASE_DO_PEDIDO : "");
   return {
     familia: cliente ? "cliente" : "contato",
     tipo,
@@ -334,9 +361,10 @@ export function candidatoDeConversa(w: ConversaCrua, agora: Date, valorDoCliente
     fato: new Date(w.last_inbound_at).toISOString(),
     valor: valorDoCliente,
     desde: new Date(w.last_inbound_at).toISOString(),
-    perdeHoje: elegivel && comPressa,
+    perdeHoje: elegivel && (comPressa || pedidoDoDia),
     elegivel,
     todoDia: false,
+    soPeloPedido: elegivel && pedidoDoDia && !comPressa,
     porqueNaoSobe,
     titulo,
     curto: `${nome}${cliente ? "" : w.categoria === "fornecedor" ? " (fornecedor)" : " (sem cadastro)"}: ${verbo} há ${tempo}, sem resposta`,
