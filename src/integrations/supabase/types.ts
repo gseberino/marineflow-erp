@@ -6200,6 +6200,92 @@ export type Database = {
         }
         Relationships: []
       }
+      orcamento_agrupamento_origens: {
+        Row: {
+          agrupamento_id: string
+          cancellation_reason_antes: string | null
+          cancelled_at_antes: string | null
+          grand_total_antes: number | null
+          numero: string
+          ordem: number
+          origem_id: string
+          quote_status_antes: string | null
+          share_token_antes: string | null
+        }
+        Insert: {
+          agrupamento_id: string
+          cancellation_reason_antes?: string | null
+          cancelled_at_antes?: string | null
+          grand_total_antes?: number | null
+          numero: string
+          ordem: number
+          origem_id: string
+          quote_status_antes?: string | null
+          share_token_antes?: string | null
+        }
+        Update: {
+          agrupamento_id?: string
+          cancellation_reason_antes?: string | null
+          cancelled_at_antes?: string | null
+          grand_total_antes?: number | null
+          numero?: string
+          ordem?: number
+          origem_id?: string
+          quote_status_antes?: string | null
+          share_token_antes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orcamento_agrupamento_origens_agrupamento_id_fkey"
+            columns: ["agrupamento_id"]
+            isOneToOne: false
+            referencedRelation: "orcamento_agrupamentos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "orcamento_agrupamento_origens_origem_id_fkey"
+            columns: ["origem_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      orcamento_agrupamentos: {
+        Row: {
+          agrupado_id: string
+          criado_em: string
+          criado_por: string | null
+          desfeito_em: string | null
+          desfeito_por: string | null
+          id: string
+        }
+        Insert: {
+          agrupado_id: string
+          criado_em?: string
+          criado_por?: string | null
+          desfeito_em?: string | null
+          desfeito_por?: string | null
+          id?: string
+        }
+        Update: {
+          agrupado_id?: string
+          criado_em?: string
+          criado_por?: string | null
+          desfeito_em?: string | null
+          desfeito_por?: string | null
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "orcamento_agrupamentos_agrupado_id_fkey"
+            columns: ["agrupado_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payables: {
         Row: {
           amount: number
@@ -9515,6 +9601,7 @@ export type Database = {
           labor_cost_total: number | null
           labor_hours_total: number | null
           marina_id: string | null
+          merged_into_id: string | null
           operational_cost_total: number | null
           original_quote_amount: number | null
           parts_cost_total: number | null
@@ -9605,6 +9692,7 @@ export type Database = {
           labor_cost_total?: number | null
           labor_hours_total?: number | null
           marina_id?: string | null
+          merged_into_id?: string | null
           operational_cost_total?: number | null
           original_quote_amount?: number | null
           parts_cost_total?: number | null
@@ -9695,6 +9783,7 @@ export type Database = {
           labor_cost_total?: number | null
           labor_hours_total?: number | null
           marina_id?: string | null
+          merged_into_id?: string | null
           operational_cost_total?: number | null
           original_quote_amount?: number | null
           parts_cost_total?: number | null
@@ -9767,6 +9856,13 @@ export type Database = {
             columns: ["marina_id"]
             isOneToOne: false
             referencedRelation: "marinas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_orders_merged_into_id_fkey"
+            columns: ["merged_into_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
             referencedColumns: ["id"]
           },
           {
@@ -13739,6 +13835,15 @@ export type Database = {
         }
         Returns: Json
       }
+      agrupar_orcamentos: {
+        Args: {
+          p_autor?: string
+          p_base?: string
+          p_orcamentos: string[]
+          p_total_esperado?: number
+        }
+        Returns: Json
+      }
       ai_claude_max_disponivel: { Args: never; Returns: boolean }
       ai_gateway_claim_job: {
         Args: {
@@ -14239,6 +14344,10 @@ export type Database = {
           p_one_way_meters: number
           p_volts?: number
         }
+        Returns: Json
+      }
+      desagrupar_orcamentos: {
+        Args: { p_agrupado: string; p_autor?: string }
         Returns: Json
       }
       desfazer_aplicacao: {

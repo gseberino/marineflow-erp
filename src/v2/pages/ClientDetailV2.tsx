@@ -30,7 +30,11 @@ import '@/v2/tokens.css';
    breadcrumb, DataTable (as tabelas v1 tinham min-w-[600px] + scroll
    lateral) e totais preservados. */
 
-type SORow = { id: string; service_order_number: string; service_type?: string | null; status: string; grand_total?: number | null };
+type SORow = {
+  id: string; service_order_number: string; service_type?: string | null; status: string; grand_total?: number | null;
+  /** Origem de um agrupamento (agrupar_orcamentos): o valor dela já está no orçamento que a reúne. */
+  merged_into_id?: string | null;
+};
 type RecRow = { id: string; description: string; due_date: string; status?: string | null; amount: number };
 
 export default function ClientDetailV2() {
@@ -54,6 +58,9 @@ export default function ClientDetailV2() {
     },
     enabled: !!id,
   });
+  // Contagem e total sem as origens agrupadas: o valor delas já está no agrupado (senão conta em dobro).
+  // A tabela segue mostrando todas, como histórico.
+  const ordensQueContam = (orders ?? []).filter((o) => !o.merged_into_id);
 
   const { data: clientReceivables } = useQuery({
     queryKey: ['receivables', 'client', id],
@@ -166,7 +173,7 @@ export default function ClientDetailV2() {
             {!client.email && !client.phone && !client.address_line_1 && !client.cpf_cnpj && <p className="text-muted-foreground">Sem dados de contato.</p>}
           </div>
           <KPIStat label={t.clients.vessels} value={String(vessels?.length ?? 0)} />
-          <KPIStat label={t.clients.serviceOrders} value={String(orders?.length ?? 0)} />
+          <KPIStat label={t.clients.serviceOrders} value={String(ordensQueContam.length)} />
         </div>
 
         {/* Acima das abas, igual ao V1: o que está pendente com o cliente aparece ao abrir a
@@ -215,9 +222,9 @@ export default function ClientDetailV2() {
               onRowClick={(o) => navigate(`/v2/service-orders/${o.id}`)}
               emptyMessage={t.common.noResults}
             />
-            {orders && orders.length > 0 && (
+            {ordensQueContam.length > 0 && (
               <p className="rounded-lg border bg-muted/40 px-4 py-2 text-sm">
-                Total ({orders.length} OS): <b className="tabular-nums">{formatCurrency(orders.reduce((s, o) => s + (o.grand_total ?? 0), 0))}</b>
+                Total ({ordensQueContam.length} OS): <b className="tabular-nums">{formatCurrency(ordensQueContam.reduce((s, o) => s + (o.grand_total ?? 0), 0))}</b>
               </p>
             )}
           </TabsContent>

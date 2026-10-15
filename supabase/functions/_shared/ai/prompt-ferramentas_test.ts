@@ -91,6 +91,10 @@ NAO_SAO_TOOLS.add("gerar_oc");
 NAO_SAO_TOOLS.add("receber_tudo");
 // planos de manutenção (07/10/2026): valor do filtro situação de list_maintenance_plans
 NAO_SAO_TOOLS.add("vencendo_30");
+// agrupar orçamentos (15/10/2026): argumento de agrupar_orcamentos e campos de listar_orcamentos_para_agrupar
+NAO_SAO_TOOLS.add("voltar_para_em_elaboracao");
+NAO_SAO_TOOLS.add("fora_da_lista");
+NAO_SAO_TOOLS.add("impedimento_se_voltar");
 
 /** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
 const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };

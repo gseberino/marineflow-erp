@@ -44,6 +44,13 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
   "update_service_order_notes",
   "update_quote_status",
   "duplicate_service_order",
+  // 15/10/2026 (pedido do dono): agrupar orçamentos conversando — listar os candidatos (leitura), agrupar e
+  // desagrupar (pedem o "sim"). No perfil enxuto do admin ficam FORA de PERFIL_ADMIN (teto de 113, que não
+  // sobe sem o dono): o admin alcança as três pela ferramenta_extra — a leitura roda direto (listar_, pelo
+  // nome) e as duas de escrita viram pendência, como já seriam à vista.
+  "listar_orcamentos_para_agrupar",
+  "agrupar_orcamentos",
+  "desagrupar_orcamento",
   "get_service_order_margin",
   "get_os_profitability",
   "present_options",
@@ -527,6 +534,10 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   //   list_maintenance_plans roda direto (leitura pelo nome); escrita pede o "sim" — e também
   //   suggest_maintenance_plans e maintenance_reminder_metrics, que leem mas não têm nome de leitura.
   //   O "sim" dos lembretes diários não depende disto (o ai-agent executa por toolsByName).
+  // agrupar orçamentos (15/10/2026): NENHUMA à vista (teto de 113). listar_orcamentos_para_agrupar roda direto
+  //   pela ferramenta_extra (leitura pelo nome, RPC conferida em perfil-operacao_test.ts); agrupar_orcamentos e
+  //   desagrupar_orcamento viram pendência; o "sim" (sino ou WhatsApp) executa por toolsByName, com o perfil
+  //   que for.
 ]);
 
 /**

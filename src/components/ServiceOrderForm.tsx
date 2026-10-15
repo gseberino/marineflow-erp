@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   computeOsFinancials, normalizeInstallmentRows,
@@ -107,6 +107,11 @@ import {
 import { DescriptionAnalysisDialog } from '@/components/service-orders/DescriptionAnalysisDialog';
 import { RelatedMaterialsPanel } from '@/components/service-orders/RelatedMaterialsPanel';
 import { useRoteiroVisivel } from '@/hooks/use-roteiro-visivel';
+import { useAgrupamentoDoOrcamento } from '@/hooks/use-agrupar-orcamentos';
+import { ehRecusaDeAgrupamento } from '@/lib/agrupar-orcamentos';
+import { AgruparOrcamentosDialog } from '@/components/service-order/AgruparOrcamentosDialog';
+import { DesagruparOrcamentoDialog } from '@/components/service-order/DesagruparOrcamentoDialog';
+import { Combine, Ungroup } from 'lucide-react';
 
 interface Props {
   orderId?: string;
@@ -441,6 +446,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Assistente "Faturar OS" (NFS-e + NF-e): abre ao concluir, ANTES do aviso de saldo —
   // documento fiscal primeiro, cobrança depois. Só admin (a emissão é admin-only).
   const authUser = useOptionalAuth()?.user ?? null;
+  // Agrupar / desagrupar orçamentos (agrupar_orcamentos / desagrupar_orcamentos). Quem decide é o
+  // banco; a tela só esconde o que ele recusaria. Só admin ou financeiro.
+  const agrupamento = useAgrupamentoDoOrcamento(orderId);
+  const [agruparAberto, setAgruparAberto] = useState(false);
+  const [desagruparAberto, setDesagruparAberto] = useState(false);
   const [faturarOsOpen, setFaturarOsOpen] = useState(false);
   const [completionPendente, setCompletionPendente] = useState<typeof completionSend | null>(null);
   // [NOVO-nfse-03] Navegação pedida pelo assistente, adiada até o aviso de saldo fechar.
@@ -942,6 +952,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         navigate(`/service-orders/${result.id}`);
       } else {
         await updateSO.mutateAsync({ id: orderId!, ...payloadParaCargo(authUser?.role, payload) });
+        // O Salvar também conta como "último salvo": o Agrupar confere isso antes de abrir.
+        ultimoSalvoRef.current = JSON.stringify(montarPayload());
         const { supabase } = await import('@/integrations/supabase/client');
         const { data: existingTechs, error: erroLeitura } = await supabase
           .from('service_order_technicians')
@@ -1044,6 +1056,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         }
       }
     } catch (e: any) {
+      if (tratarRecusaDeAgrupamento(e)) return;
       toast.error(e.message || 'Erro ao salvar');
     }
   };
@@ -1200,6 +1213,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         }
       }
     } catch (e: any) {
+      if (tratarRecusaDeAgrupamento(e)) return;
       toast.error(e.message || 'Erro ao alterar status');
     }
   };
@@ -1208,8 +1222,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     if (!orderId) return;
     try {
       // In the form context, replicate the same type as the source:
-      // draft → quote (ORÇ), anything else → order (OS)
-      const mode = orderData?.status === 'draft' ? 'quote' : 'order';
+      // draft → quote (ORÇ), anything else → order (OS). A origem de um agrupamento fica `cancelled`
+      // como histórico, mas é orçamento: duplica como orçamento.
+      const mode = orderData?.status === 'draft' || orderData?.merged_into_id ? 'quote' : 'order';
       const newSO = await duplicate.mutateAsync({ sourceId: orderId, mode });
       toast.success(mode === 'quote' ? 'Orçamento duplicado!' : 'OS duplicada com sucesso!');
       navigate(`/service-orders/${(newSO as any).id}`);
@@ -1757,6 +1772,57 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const marina = marinas?.find((m) => m.id === form.marina_id);
   const isLocked = currentStatus === 'invoiced' || currentStatus === 'cancelled';
 
+  /* Agrupar / desagrupar. As condições olham o registro SALVO (orderData), não a tela: é ele que
+     o banco vai ler. A origem de um agrupamento fica cancelada (isLocked acima trava a edição). */
+  const cargoAgrupa = authUser?.role === 'admin' || authUser?.role === 'financial';
+  // Em aberto = o que o banco aceita agrupar/desagrupar: rascunho, não convertido, não assinado.
+  const orcamentoAbertoSalvo = !isNew && orderData?.status === 'draft' && !orderData?.converted_to_os_at
+    && !orderData?.signed_at;
+  const podeAgrupar = cargoAgrupa && orcamentoAbertoSalvo && !orderData?.merged_into_id
+    && orderData?.quote_status !== 'rejected';
+  const comoAgrupado = agrupamento.comoAgrupado;
+  const comoOrigem = agrupamento.comoOrigem;
+  const agrupadoDestinoId: string | null = comoOrigem?.agrupadoId ?? orderData?.merged_into_id ?? null;
+  const podeDesagrupar = cargoAgrupa && orcamentoAbertoSalvo && !!comoAgrupado;
+  // Agrupado que ainda dá para desfazer: o banco recusa cancelá-lo (os originais ficariam presos). Em vez
+  // de deixar digitar o motivo e só então recusar, a tela tira o "Cancelar" e a faixa explica.
+  const cancelarPedeDesagrupar = orcamentoAbertoSalvo && !!comoAgrupado;
+  const transicoesDeStatus = cancelarPedeDesagrupar
+    ? validTransitions.filter((s) => s !== 'cancelled')
+    : validTransitions;
+
+  /* Gravação recusada porque, noutra aba ou por outra pessoa, este orçamento foi agrupado em outro ou
+     (sendo um agrupado) já foi desagrupado. A tela está velha: relê do banco — ela volta cancelada e
+     travada (isLocked), com a faixa que explica — e avisa UMA vez (id fixo: o autosave não empilha). */
+  const tratarRecusaDeAgrupamento = (e: unknown): boolean => {
+    if (!orderId || !ehRecusaDeAgrupamento(e)) return false;
+    queryClient.invalidateQueries({ queryKey: ['service-orders', orderId] });
+    queryClient.invalidateQueries({ queryKey: ['agrupamento', orderId] });
+    toast.info(`${(e as { message: string }).message} A tela foi atualizada.`, { id: `agrupamento-${orderId}` });
+    return true;
+  };
+
+  const abrirAgrupar = () => {
+    // O banco agrupa o que está gravado: alteração ainda na tela ficaria de fora.
+    const assinatura = JSON.stringify(montarPayload());
+    const pendente = salvandoAuto || (ultimoSalvoRef.current !== null
+      ? assinatura !== ultimoSalvoRef.current
+      // Nada gravado nesta visita: pendente se o salvamento automático ainda for gravar algo.
+      : decideAutosave({
+          isNew, isLocked, orderId,
+          clientId: form.client_id,
+          vesselId: form.vessel_id,
+          problemDescription: form.problem_description,
+          assinaturaAtual: assinatura,
+          assinaturaSalva: null,
+        }).salvar);
+    if (pendente) {
+      toast.info('Salve as alterações antes de agrupar.');
+      return;
+    }
+    setAgruparAberto(true);
+  };
+
   /**
    * Salva sozinho, sem atrapalhar.
    *
@@ -1797,6 +1863,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       ultimoSalvoRef.current = assinatura;
       setSalvoEm(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     } catch (e: any) {
+      // Agrupado/desagrupado noutra aba: relê e avisa uma vez (senão toda edição se perderia calada).
+      if (tratarRecusaDeAgrupamento(e)) {
+        setSalvoEm(null);
+        return;
+      }
       // Sem toast repetido a cada tentativa: o rótulo do cabeçalho já avisa, e
       // um erro de rede numa tela aberta há horas viraria uma chuva de avisos.
       console.error('[autosave] falhou:', e);
@@ -1842,8 +1913,83 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
   return (
     <div className="space-y-6 animate-fade-in max-w-5xl">
+      {/* Origem de um agrupamento: fica cancelada como histórico (travada pelo isLocked).
+          A faixa genérica de bloqueio dá lugar a esta, que diz para onde ele foi. */}
+      {!isNew && agrupadoDestinoId && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div className="flex items-center gap-2">
+            <Combine className="h-5 w-5 shrink-0 text-slate-600" />
+            <div>
+              <p className="text-sm font-medium text-slate-800">
+                Este orçamento foi agrupado em {comoOrigem?.agrupadoNumero ?? 'outro orçamento'}.
+              </p>
+              <p className="mt-0.5 text-xs text-slate-600">
+                {comoOrigem && !comoOrigem.agrupadoEmAberto
+                  ? `O ${comoOrigem.agrupadoNumero} não é mais um orçamento em aberto, então não dá mais para desagrupar: este fica só como histórico.`
+                  : `Para mexer nele, desagrupe ${comoOrigem?.agrupadoNumero ? `o ${comoOrigem.agrupadoNumero}` : 'o orçamento agrupado'}.`}
+              </p>
+            </div>
+          </div>
+          <Button asChild variant="outline" size="sm" className="shrink-0">
+            <Link to={`/v2/service-orders/${agrupadoDestinoId}`}>
+              Abrir {comoOrigem?.agrupadoNumero ?? 'o orçamento agrupado'}
+            </Link>
+          </Button>
+        </div>
+      )}
+
+      {/* Orçamento que reúne outros: dá para desfazer enquanto ele estiver em aberto. */}
+      {!isNew && comoAgrupado && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 p-4">
+          <div className="flex items-center gap-2">
+            <Combine className="h-5 w-5 shrink-0 text-sky-600" />
+            <div>
+              <p className="text-sm font-medium text-sky-800">
+                Este orçamento reúne {comoAgrupado.origens.map((o) => o.numero).join(', ')}.
+              </p>
+              {cancelarPedeDesagrupar && (
+                <p className="mt-0.5 text-xs text-sky-700">
+                  Para cancelá-lo, desagrupe primeiro: os originais voltam a valer e depois você decide o que fazer com eles.
+                </p>
+              )}
+            </div>
+          </div>
+          {podeDesagrupar && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 gap-1 border-sky-300 text-sky-800 hover:bg-sky-100"
+              onClick={() => setDesagruparAberto(true)}
+            >
+              <Ungroup className="h-4 w-4" /> Desagrupar
+            </Button>
+          )}
+        </div>
+      )}
+
+      {agruparAberto && orderId && podeAgrupar && orderData?.client_id && orderData?.vessel_id && (
+        <AgruparOrcamentosDialog
+          aberto={agruparAberto}
+          onFechar={() => setAgruparAberto(false)}
+          clientId={orderData.client_id}
+          vesselId={orderData.vessel_id}
+          preSelecionados={[orderId]}
+          principalSugerido={orderId}
+        />
+      )}
+
+      {desagruparAberto && orderId && comoAgrupado && (
+        <DesagruparOrcamentoDialog
+          aberto={desagruparAberto}
+          onFechar={() => setDesagruparAberto(false)}
+          agrupadoId={orderId}
+          agrupadoNumero={orderData?.service_order_number || ''}
+          origens={comoAgrupado.origens}
+        />
+      )}
+
       {/* Invoiced lock banner */}
-      {isLocked && !isNew && (
+      {isLocked && !isNew && !agrupadoDestinoId && (
         <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-center gap-2">
             <Lock className="h-5 w-5 text-amber-600" />
@@ -2070,8 +2216,19 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   <DropdownMenuItem onClick={handleDuplicate} disabled={duplicate.isPending} className="gap-2">
                     <Copy className="h-4 w-4" /> Duplicar
                   </DropdownMenuItem>
+                  {podeAgrupar && (
+                    <DropdownMenuItem onClick={abrirAgrupar} className="gap-2">
+                      <Combine className="h-4 w-4" /> Agrupar com outros orçamentos…
+                    </DropdownMenuItem>
+                  )}
+                  {podeDesagrupar && (
+                    <DropdownMenuItem onClick={() => setDesagruparAberto(true)} className="gap-2">
+                      <Ungroup className="h-4 w-4" /> Desagrupar…
+                    </DropdownMenuItem>
+                  )}
 
-                  {!isLocked && currentStatus !== 'cancelled' && (
+                  {/* Agrupado ainda desfazível: o banco recusa cancelar (desagrupe primeiro; a faixa diz). */}
+                  {!isLocked && currentStatus !== 'cancelled' && !cancelarPedeDesagrupar && (
                     <>
                       <DropdownMenuSeparator />
                       {/* Cancelar por último e separado: é a única daqui sem
@@ -2090,7 +2247,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
             {/* O seletor de status é largo demais para o celular; lá ele vira
                 um ícone e o status por extenso aparece sob o título. */}
-            {!isNew && !isLocked && validTransitions.length > 0 && (
+            {!isNew && !isLocked && transicoesDeStatus.length > 0 && (
               <Select value={currentStatus} onValueChange={handleStatusChange}>
                 <SelectTrigger className="h-11 w-11 justify-center px-0 sm:h-9 sm:w-[190px] sm:justify-between sm:px-3">
                   <span className="sm:hidden"><RotateCcw className="h-4 w-4" /></span>
@@ -2103,7 +2260,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                   <SelectItem value={currentStatus} disabled className="opacity-60">
                     {(t.status as Record<string, string>)[currentStatus]} (atual)
                   </SelectItem>
-                  {validTransitions.map((s) => (
+                  {transicoesDeStatus.map((s) => (
                     <SelectItem key={s} value={s}>
                       → {(t.status as Record<string, string>)[s]}
                     </SelectItem>

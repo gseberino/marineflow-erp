@@ -80,6 +80,8 @@ ACRESCENTADAS.push(
   "snooze_maintenance_plan", "suggest_maintenance_plans", "send_maintenance_reminder_now",
   "enviar_lembrete_de_revisao", "maintenance_reminder_metrics",
 );
+// agrupar orçamentos (15/10/2026, pedido do dono): listar os candidatos, agrupar e desagrupar conversando.
+ACRESCENTADAS.push("listar_orcamentos_para_agrupar", "agrupar_orcamentos", "desagrupar_orcamento");
 // 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
 // roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento",
@@ -247,7 +249,41 @@ const RPC_SO_LEITURA_CONFERIDAS = new Set([
   "whatsapp_pending_inbox", "bi_top_clients", "get_promo_candidates", "linhas_do_checklist", "checklist_do_mes",
   // Comprovantes (F2, 11/10/2026): conferida no texto da migration (teste abaixo).
   "comprovantes_consultar",
+  // Agrupar orçamentos (15/10/2026): a leitura de listar_orcamentos_para_agrupar, conferida no texto da
+  // migration 20261015181000 (teste abaixo).
+  "orcamentos_para_agrupar",
 ]);
+
+/** O corpo ($$ … $$) da função `nome` no texto da migration, sem comentários, em minúsculas. */
+function corpoDaFuncao(sql: string, nome: string): { cabecalho: string; corpo: string } {
+  const limpo = sql.replace(/--[^\n]*/g, "");
+  const inicio = limpo.search(new RegExp(`create\\s+or\\s+replace\\s+function\\s+public\\.${nome}\\s*\\(`, "i"));
+  assertEquals(inicio >= 0, true, `a migration não cria public.${nome}`);
+  const resto = limpo.slice(inicio);
+  const abre = resto.match(/\$([a-z_]*)\$/i);
+  assertEquals(!!abre, true, "corpo da função sem delimitador $$");
+  const corpoIni = resto.indexOf(abre![0]) + abre![0].length;
+  return {
+    cabecalho: resto.slice(0, corpoIni).toLowerCase(),
+    corpo: resto.slice(corpoIni, resto.indexOf(abre![0], corpoIni)).toLowerCase(),
+  };
+}
+
+Deno.test("orcamentos_para_agrupar só lê: stable, sem insert/update/delete e só chama funções de leitura", () => {
+  const dir = new URL("../../../migrations/", import.meta.url);
+  const { cabecalho, corpo } = corpoDaFuncao(Deno.readTextFileSync(new URL("20261015181000_agrupar_orcamentos_assistente.sql", dir)), "orcamentos_para_agrupar");
+  assertEquals(corpo.length > 200, true, "corpo da função vazio — o recorte quebrou?");
+  assertEquals(/\bstable\b/.test(cabecalho) && /security\s+definer/.test(cabecalho), true, "a leitura tem de ser stable e security definer");
+  assertEquals(/\b(insert\s+into|update\s+public\.|delete\s+from|perform\s+)/.test(corpo), false, "orcamentos_para_agrupar grava");
+  const chamadas = new Set([...corpo.matchAll(/public\.([a-z_0-9]+)\s*\(/g)].map((m) => m[1]));
+  // Só leitura: o cargo, os vínculos (stable, migration 20261015180000) e o total calculado (calc_so_totals, stable).
+  assertEquals([...chamadas].sort(), ["_orcamento_vinculos_que_prendem", "calc_so_totals", "is_admin_or_financial"]);
+  // _orcamento_vinculos_que_prendem é sql stable e só faz exists/select.
+  const vinculos = corpoDaFuncao(
+    Deno.readTextFileSync(new URL("20261015180000_agrupar_orcamentos.sql", dir)), "_orcamento_vinculos_que_prendem");
+  assertEquals(/\bstable\b/.test(vinculos.cabecalho), true, "_orcamento_vinculos_que_prendem deixou de ser stable");
+  assertEquals(/\b(insert\s+into|update\s+public\.|delete\s+from|perform\s+)/.test(vinculos.corpo), false, "_orcamento_vinculos_que_prendem grava");
+});
 
 /**
  * comprovantes_consultar (migration 20261011202000, LOTE BANCO da F2): a função que a

@@ -64,6 +64,8 @@ import { planosManutencaoTools } from "./planos-manutencao.ts";
 import { dropboxTools } from "./dropbox.ts";
 // Comprovantes (F2, 11/10/2026): consultar o que o fluxo de comprovantes fez (só leitura).
 import { comprovanteTools } from "./comprovantes.ts";
+// Agrupar orçamentos (15/10/2026): listar os candidatos, agrupar e desagrupar (paridade com a tela).
+import { agruparOrcamentosTools } from "./agrupar-orcamentos.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -133,6 +135,8 @@ export const allTools: ToolDef[] = [
   ...planosManutencaoTools,
   // comprovantes (11/10/2026)
   ...comprovanteTools,
+  // agrupar orçamentos (15/10/2026)
+  ...agruparOrcamentosTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 export const toolsByName: Record<string, ToolDef> = Object.fromEntries(allTools.map((t) => [t.name, t]));

@@ -50,6 +50,11 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   // decisão do dono: sempre com o "sim" dele antes.
   "enviar_lembrete_de_revisao",
   "send_maintenance_reminder_now",
+  // agrupar orçamentos (15/10/2026): cancela os originais e desliga o link do cliente (agrupar), ou cancela o
+  // agrupado e perde o que foi editado nele (desagrupar). E a autonomia pularia o resumo — que é onde o
+  // reprovado vira a PERGUNTA ao dono. Sempre com o "sim".
+  "agrupar_orcamentos",
+  "desagrupar_orcamento",
 ]);
 
 /**

@@ -239,6 +239,12 @@ const SITUACAO_LABELS: Record<string, string> = {
   approved: "Aprovado", awaiting_deposit: "Aguardando sinal", rejected: "Recusado",
 };
 
+/** Origem de agrupamento (agrupar_orcamentos grava "Agrupado em ORÇ-00125 (reúne …)"): o número do agrupado. */
+export function agrupadoEm(so: { status?: unknown; cancellation_reason?: unknown }): string | undefined {
+  if (so?.status !== "cancelled" || typeof so.cancellation_reason !== "string") return undefined;
+  return so.cancellation_reason.match(/^Agrupado em (\S+)/)?.[1];
+}
+
 export interface FiltroDaListagem {
   limite: number;
   ordem: "recentes" | "maior_valor";
@@ -372,7 +378,7 @@ export const serviceOrderTools: ToolDef[] = [
       let query = sb
         .from("service_orders")
         .select(
-          "id, service_order_number, status, quote_status, grand_total, payment_status, scheduled_start_at, created_at, clients(name), vessels(name)",
+          "id, service_order_number, status, quote_status, grand_total, payment_status, scheduled_start_at, created_at, cancellation_reason, clients(name), vessels(name)",
           { count: "exact" },
         )
         .order(f.ordem === "maior_valor" ? "grand_total" : "created_at", { ascending: false, nullsFirst: false })
@@ -391,7 +397,10 @@ export const serviceOrderTools: ToolDef[] = [
       const mapped = (data || []).map((so: any) => ({
         id: so.id,
         numero: so.service_order_number,
-        tipo: so.status === "draft" ? "Orçamento" : "OS",
+        // Origem de um agrupamento (15/10/2026) fica cancelada com o motivo "Agrupado em ORÇ-…": não é OS.
+        // Lido do motivo (coluna antiga), não de merged_into_id: a listagem não depende da migration nova.
+        tipo: so.status === "draft" ? "Orçamento" : agrupadoEm(so) ? "Orçamento agrupado" : "OS",
+        ...(agrupadoEm(so) ? { agrupado_em: agrupadoEm(so) } : {}),
         status: STATUS_LABELS[so.status] || so.status,
         status_raw: so.status,
         ...(so.status === "draft"

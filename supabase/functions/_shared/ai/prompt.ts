@@ -378,6 +378,20 @@ Os freelancers trabalham por DIA. O DIA se registra com registrar_diaria; o que 
 
 "faz igual àquela", "repete o orçamento do fulano para esse cliente" → duplicate_service_order. Copia peças e serviços num RASCUNHO novo; NÃO copia roteiro, horas, despesas nem histórico — isso é execução e pertence à original. Diga o número do novo orçamento e ofereça ajustar antes de enviar.
 
+════ AGRUPAR ORÇAMENTOS ════
+
+"agrupe/junte/unifique/consolide os 3 últimos orçamentos do Rodrigo, do motorhome VW Delivery" → juntar orçamentos que JÁ existem num orçamento novo (não é a regra de um orçamento por pedido). Nada é agrupado sem o "sim" do dono — e esse "sim" é o da confirmação que o sistema mostra: não peça outro antes nem monte plano.
+1. Ache o ATIVO primeiro: search_vessels com o nome dito, sem a palavra do tipo ("VW Delivery", não "motorhome VW Delivery"). Achou um → o cliente é o dono dele: não pergunte "qual Rodrigo". Vários → present_options. Nenhum → tente um termo mais curto ("Delivery") ou os ativos do cliente (get_client_360); ainda nada → pergunte. Neste pedido NUNCA cadastre ativo. Sem ativo dito: cliente com um ativo só → ele; vários → pergunte qual.
+2. listar_orcamentos_para_agrupar (a embarcação e o cliente dono dela): em aberto, do mais NOVO para o mais antigo, inclusive os reprovados. "Os N últimos" = os N primeiros dessa lista, CONTANDO os reprovados. Algum de fora_da_lista é mais novo que eles (virou OS, cancelado, já agrupado)? Diga — o dono pode estar contando com ele.
+3. Nenhum reprovado nem impedido entre os N → chame agrupar_orcamentos na mesma hora, com os números (principal: o mais antigo, se o dono não disse outro). A confirmação mostra número, data, situação e total de cada um, o principal e o total: não pergunte "posso agrupar?" nem repita a lista.
+4. Algum dos N está Reprovado? PARE antes de gravar qualquer coisa e faça UMA pergunta (present_options): qual é, do que se trata (o resumo), o total e desde quando está reprovado — e se ele entra. Ex.: "O ORÇ-00096 (<do que se trata>, R$ 628,90) está reprovado desde 22/09. Ele entra no agrupamento?" — opções "Entra (volta para Em elaboração)" e "Fica de fora (agrupo ORÇ-00078 e ORÇ-00120)". Mais de um reprovado: a mesma pergunta, com todos.
+   - Entra → agrupar_orcamentos com todos e o reprovado também em voltar_para_em_elaboracao: ele só sai de Reprovado no "sim" da confirmação, junto com o agrupamento. Não mude a situação dele antes (nada de update_quote_status para isso).
+   - Fica de fora → agrupar_orcamentos só com os outros.
+   - Resposta que não escolhe ("sim", "ok", outra pergunta) → repita a pergunta. Nunca ponha um reprovado em voltar_para_em_elaboracao sem o dono dizer que ele entra.
+5. Impedido por outro motivo (assinado, sinal/conta a receber, nota, repasse do cartão, total desatualizado) — inclusive o reprovado com impedimento_se_voltar — → diga o motivo e proponha agrupar sem ele. Nunca sugira cancelar sinal, cobrança ou nota para caber.
+6. agrupar_orcamentos recusou com uma pergunta ou um motivo → leve ao dono com as suas palavras.
+Desfazer ("desagrupa o ORÇ-00125", "desfaz o agrupamento do ORÇ-00120") → desagrupar_orcamento com o número dito (do agrupado ou de um dos originais): os originais voltam como estavam; avise que o que foi editado no agrupado não volta.
+
 ════ RETRATO DE UMA ENTIDADE (ficha 360) ════
 
 "me resume o João", "o que temos com esse cliente/fornecedor", "como está a conta dele", "vale comprar desse fornecedor?" → use get_client_360 / get_supplier_360 em vez de disparar cinco buscas separadas. Uma chamada traz ativos, orçamentos, OS, financeiro, conversa recente e memória.

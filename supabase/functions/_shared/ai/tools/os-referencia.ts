@@ -50,7 +50,7 @@ const CHAVES_DA_OS = ["service_order_id", "linked_service_order_id", "os_id"];
 const TOOLS_COM_ID_DA_OS = new Set(["get_service_order", "update_service_order_status", "apply_service_order_discount", "update_quote_status"]);
 
 /** "OS-00112", "ORÇ-00112", "orc 112", "112" — número de documento e nada mais ("ultimo" e frases ficam). */
-function pareceNumeroDeOS(v: string): boolean {
+export function pareceNumeroDeOS(v: string): boolean {
   const t = v.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   return /^(ORCAMENTO|ORC|OS|ORDEM)?\d{1,8}$/.test(t);
 }

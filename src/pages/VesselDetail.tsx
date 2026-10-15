@@ -151,11 +151,12 @@ export default function VesselDetail() {
             <div className="flex gap-4 mb-4 text-sm">
               <div className="rounded-lg border bg-card px-4 py-2">
                 <span className="text-muted-foreground">OS: </span>
-                <strong>{orders.length}</strong>
+                {/* Sem as origens agrupadas (agrupar_orcamentos): o valor delas já está no agrupado. */}
+                <strong>{orders.filter((o: any) => !o.merged_into_id).length}</strong>
               </div>
               <div className="rounded-lg border bg-card px-4 py-2">
                 <span className="text-muted-foreground">Total gasto: </span>
-                <strong>{formatCurrency(orders.reduce((s, o: any) => s + (o.grand_total ?? 0), 0))}</strong>
+                <strong>{formatCurrency(orders.filter((o: any) => !o.merged_into_id).reduce((s, o: any) => s + (o.grand_total ?? 0), 0))}</strong>
               </div>
               <div className="rounded-lg border bg-card px-4 py-2">
                 <span className="text-muted-foreground">Concluídas: </span>

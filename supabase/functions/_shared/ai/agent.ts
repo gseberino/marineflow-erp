@@ -10,6 +10,8 @@ import { resumirEnvioDaNota } from "./tools/nota-fiscal-pdf.ts";
 import { resumirExclusaoDeOC, resumirRecebimento } from "./tools/compras-ciclo.ts";
 // planos de manutenção (07/10/2026): título e resumo do lembrete de revisão ao cliente.
 import { resumirLembreteDeRevisao, TITULOS_DOS_PLANOS } from "./tools/planos-manutencao.ts";
+// agrupar orçamentos (15/10/2026): o resumo lê o banco e vira PERGUNTA (recusa) quando há reprovado/inelegível.
+import { resumirAgrupamento, resumirDesagrupamento } from "./tools/agrupar-orcamentos.ts";
 import {
   callClaude,
   ClaudeApiError,
@@ -224,6 +226,10 @@ const TOOL_LABELS_PT: Record<string, string> = {
   send_supplier_quote_request: "Enviar pedido de cotação a fornecedores",
   set_tool_autonomy: "Mudar a autonomia do assistente",
   silenciar_remetente_email: "Silenciar remetente de e-mail",
+  // agrupar orçamentos (15/10/2026): paridade com o Agrupar/Desagrupar da tela.
+  agrupar_orcamentos: "Agrupar orçamentos em um só",
+  desagrupar_orcamento: "Desagrupar orçamento",
+  listar_orcamentos_para_agrupar: "Listar orçamentos para agrupar",
 };
 // financeiro (07/10/2026): anotação de Pix, estorno, cobrança formal e favorecido.
 Object.assign(TOOL_LABELS_PT, TITULOS_DO_FINANCEIRO);
@@ -383,6 +389,10 @@ RESUMO_QUE_RESOLVE.add("delete_purchase_order");
 // planos de manutenção (07/10/2026): lembrete que não dá para montar (opt-out, sem telefone, os 3
 // toques já foram) é recusa — o resumo diz por quê numa linha "⚠️".
 RESUMO_QUE_RESOLVE.add("send_maintenance_reminder_now");
+// agrupar orçamentos (15/10/2026): reprovado (vira a PERGUNTA ao dono), inelegível, já agrupado, já virou
+// OS, outro cliente/embarcação — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
+RESUMO_QUE_RESOLVE.add("agrupar_orcamentos");
+RESUMO_QUE_RESOLVE.add("desagrupar_orcamento");
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();
@@ -527,6 +537,19 @@ export async function buildPendingSummary(
     try {
       return await resumirExclusaoDeOC(admin, args);
     } catch { /* cai no resumo genérico */ }
+  }
+  // Agrupar/desagrupar orçamentos (15/10/2026): o "sim" é sobre a lista resolvida (número, data, situação,
+  // total), o principal e a soma. Reprovado ou inelegível vira uma linha "⚠️" — a pergunta a fazer ao dono —
+  // e não pendência. Leitura que falha também recusa: o resumo genérico mostraria uuid e pediria um "sim" às cegas.
+  if (toolName === "agrupar_orcamentos" || toolName === "desagrupar_orcamento") {
+    try {
+      return toolName === "agrupar_orcamentos"
+        ? await resumirAgrupamento(admin, args, quem.userId || null)
+        : await resumirDesagrupamento(admin, args, quem.userId || null);
+    } catch (e) {
+      const motivo = String((e as { message?: string })?.message ?? e).replace(/\s*\n+\s*/g, " ");
+      return `⚠️ Não consegui conferir os orçamentos agora (${motivo}). Nada foi registrado; tente de novo.`;
+    }
   }
   // Macros de fluxo: a confirmação PRECISA mostrar o que vai acontecer de verdade (a lista
   // do lote, os passos da aprovação) — os args crus não bastam. Resolve o conteúdo real.
@@ -991,6 +1014,9 @@ export async function executarChamadaDeTool(
       let resumo = await buildPendingSummary(amb.toolCtx.admin, tc.name, limpa ? entrada : tc.input as Record<string, unknown>, {
         userId: amb.toolCtx.userId, userRole: amb.toolCtx.userRole, settings: amb.toolCtx.settings,
       });
+      // A recusa é decidida pelo resumo DA TOOL, antes da linha "Pedido por" (15/10/2026): com ela, a linha
+      // "⚠️ …" ganhava uma segunda linha e virava pendência — o caso das tools com gravarSolicitante.
+      const recusaDoResumo = resumoQueRecusa(tc.name, resumo);
       if (solicitante) {
         resumo += `\nPedido por: *${solicitante.nome || "—"}* (${ROTULO_DO_CARGO[solicitante.cargo] ?? solicitante.cargo})`;
       }
@@ -1001,7 +1027,6 @@ export async function executarChamadaDeTool(
           ...(retrato ? { [CHAVE_DO_RETRATO]: retrato } : {}),
         }
         : tc.input;
-      const recusaDoResumo = resumoQueRecusa(tc.name, resumo);
       if (recusaDoResumo) {
         toolResult = recusaDoResumo;
         await writeAudit(amb.toolCtx, amb.sessionId, amb.channel, { eventType: `pre_validacao_recusada:${tc.name}`, risk: effectiveRisk, args: tc.input, result: toolResult });
