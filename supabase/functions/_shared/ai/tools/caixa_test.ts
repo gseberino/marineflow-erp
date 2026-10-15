@@ -1,5 +1,5 @@
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { caixaTools, dataDita, escolherPorNome, formasDoDocumento, resolverPedidoDeCaixa, resumirPedido } from "./caixa.ts";
+import { caixaTools, dataDita, docFormatado, escolherPorNome, formasDoDocumento, resolverPedidoDeCaixa, resumirPedido } from "./caixa.ts";
 import { resumoQueRecusa } from "../agent.ts";
 
 /* O assessor pelo WhatsApp: "gastei 50 em dinheiro com almoço", "paguei 100 pro Roberto".
@@ -202,7 +202,8 @@ Deno.test("nome de um e documento de outro: pergunta qual vale, sem gravar (regr
   const c = ctx(() => { gravou = true; return Promise.resolve({ data: {}, error: null }); });
   const args = { valor: 100, quem: "roberto", documento: "12345678000190", categoria: "peças" };
   const txt = String(await resumirPedido(c as never, "anotar_transacao_do_banco", args));
-  assertStringIncludes(txt, "O documento 12.345.678/0001-90 não é o de Roberto Carlos da Silva (no cadastro: 123.456.789-01)");
+  // CPF mascarado desde 15/10/2026 (o CNPJ continua inteiro).
+  assertStringIncludes(txt, "O documento 12.345.678/0001-90 não é o de Roberto Carlos da Silva (no cadastro: ***.456.789-**)");
   const r = await caixaTools.find((x) => x.name === "anotar_transacao_do_banco")!.execute(args, c as never) as { error?: string };
   // O caminho sugerido tem de levar a algum lugar: outra pessoa pagando em nome dele é caso de tela.
   assertStringIncludes(String(r.error), "classifique pela tela do Extrato quando a transação chegar");
@@ -217,7 +218,19 @@ Deno.test("nome e documento da mesma pessoa passam; cadastro sem documento avisa
   assertEquals([chamada.a.p_favorecido_id, chamada.a.p_documento], ["p-rob", "123.456.789-01"]);
   // O sócio não tem CPF no cadastro: não dá para conferir — a confirmação diz, e o "sim" decide.
   const txt = String(await resumirPedido(c as never, "anotar_transacao_do_banco", { valor: 100, quem: "gustavo", documento: "11122233344", categoria: "peças" }));
-  assertStringIncludes(txt, "Gustavo Seberino da Silva não tem CPF/CNPJ no cadastro: não dá para conferir que 111.222.333-44 é dele");
+  assertStringIncludes(txt, "Gustavo Seberino da Silva não tem CPF/CNPJ no cadastro: não dá para conferir que ***.222.333-** é dele");
+});
+
+// 15/10/2026: o cartão de anotar_transacao_do_banco de 07/10 trouxe "- Para o documento" com os 11
+// dígitos do CPF — o cartão fica gravado na pendência e vai pelo WhatsApp.
+Deno.test("CPF mascarado no cartão (com ou sem pontuação); CNPJ formatado inteiro", async () => {
+  const cpf = String(await resumirPedido(ctx() as never, "anotar_transacao_do_banco", { valor: 200, documento: "12345678901", categoria: "peças" }));
+  assertStringIncludes(cpf, "- Para o documento ***.456.789-**");
+  assertEquals(cpf.includes("12345678901") || cpf.includes("123.456.789-01"), false);
+  const pontuado = String(await resumirPedido(ctx() as never, "anotar_transacao_do_banco", { valor: 200, documento: "123.456.789-01", categoria: "peças" }));
+  assertEquals(pontuado.includes("123.456.789-01"), false);
+  assertEquals(docFormatado("12345678000190"), "12.345.678/0001-90");
+  assertEquals(docFormatado("1234567890"), "***.345.678-**", "zero comido pela planilha volta antes de mascarar");
 });
 
 Deno.test("documentoContradiz: CPF diferente ou CNPJ de outra raiz; filial é a mesma empresa; faltando um, não contradiz", async () => {

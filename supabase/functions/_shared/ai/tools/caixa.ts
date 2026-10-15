@@ -100,10 +100,15 @@ export function documentoContradiz(a: unknown, b: unknown): boolean {
   return x !== y;
 }
 
-const docFormatado = (d: unknown) => {
+/**
+ * O documento como aparece no cartão e nas mensagens. CNPJ formatado inteiro; CPF MASCARADO
+ * (***.456.789-**, 15/10/2026): o cartão fica gravado na pendência e vai pelo WhatsApp — o cartão
+ * de 07/10 trouxe o CPF inteiro de uma pessoa. Os 6 do meio bastam para o dono conferir.
+ */
+export const docFormatado = (d: unknown) => {
   const x = docNormalizado(d);
   return x.length === 14 ? x.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5")
-    : x.length === 11 ? x.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4") : String(d ?? "");
+    : x.length === 11 ? x.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "***.$2.$3-**") : String(d ?? "");
 };
 
 /**
@@ -409,7 +414,7 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
     } else if (args.documento) {
       const r = await pessoaPeloDocumento(ctx, args.documento, args.sentido === "entrada" ? "entrada" : "saida");
       if (ehErro(r)) return `⚠️ ${r.error}`;
-      if (r && "ambiguo" in r) return `⚠️ Mais de um cadastro com o documento ${String(args.documento)}: ${listaDeCadastros(r.ambiguo)}. Diga qual.`;
+      if (r && "ambiguo" in r) return `⚠️ Mais de um cadastro com o documento ${docFormatado(args.documento)}: ${listaDeCadastros(r.ambiguo)}. Diga qual.`;
       if (r && "achado" in r) {
         pessoa = r.achado;
         quem = `${r.achado.nome} (${r.achado.tipo}), pelo CPF/CNPJ`;
@@ -433,7 +438,7 @@ export async function resumirPedido(ctx: ToolCtx, nome: string, args: Record<str
     if (cmp?.jaLancado) return cmp.jaLancado;
     return [
       `- Quando chegar do banco: ${args.sentido === "entrada" ? "entrada" : "saída"} de *${brl.format(Number(args.valor) || 0)}* (${quando})`,
-      args.documento ? `- Para o documento ${String(args.documento)}` : null,
+      args.documento ? `- Para o documento ${docFormatado(args.documento)}` : null,
       quem ? `- Classificar como: *${quem}*` : null,
       nomeLivre ? `- Para: *${nomeLivre}* (sem cadastro — entra classificada quando chegar do banco com esse mesmo nome)` : null,
       cadastroSemDocumento
@@ -583,7 +588,7 @@ export const caixaTools: ToolDef[] = [
         // Sem nome dito, o CPF/CNPJ acha o cadastro (a confirmação mostrou qual).
         const r = await pessoaPeloDocumento(ctx, args.documento, sentido);
         if (ehErro(r)) return r;
-        if (r && "ambiguo" in r) return { error: `Mais de um cadastro com o documento ${String(args.documento)}: ${listaDeCadastros(r.ambiguo)}. Diga qual.` };
+        if (r && "ambiguo" in r) return { error: `Mais de um cadastro com o documento ${docFormatado(args.documento)}: ${listaDeCadastros(r.ambiguo)}. Diga qual.` };
         if (r && "achado" in r) pessoa = r.achado;
       }
       const cat = await categoriaValida(ctx, args.categoria, sentido === "entrada" ? "receivable" : "payable");
