@@ -12,6 +12,7 @@
 //  · CONTATO NOVO: não havia como dar nome a quem não está cadastrado.
 import { normalizePhoneNumber } from "../../whatsapp/normalize.ts";
 import { comFusoDeBrasilia } from "../fuso.ts";
+import { chaveTelefone, mesmoTelefone } from "../phone.ts";
 
 /** Janela em que se manda mensagem a terceiro (a mesma do portão de comunicação). */
 export const JANELA_DE_ENVIO = { de: 8, ate: 20 } as const;
@@ -63,7 +64,33 @@ export function telefoneLegivel(digitos: string): string {
 
 type Destino = { nome: string | null; origem: "cliente" | "conversa" | "novo"; telefone: string | null };
 
-/** Para quem vai: o cliente do cadastro, uma conversa que já existe, ou um contato novo. */
+/**
+ * O cliente do cadastro dono deste telefone, pelos últimos 8 dígitos (a régua do "esperando
+ * resposta" e de phone.ts). O cadastro guarda o número como foi digitado ("+351 966…", "47 99915-9654"):
+ * o filtro do banco usa os 4 últimos dígitos, que vêm juntos em qualquer formato (conferido nos 409
+ * telefones de clientes em 15/10/2026), e a comparação certa é feita aqui.
+ */
+// deno-lint-ignore no-explicit-any
+async function clientePeloTelefone(admin: any, telefone: string): Promise<{ name?: string | null; display_name?: string | null } | null> {
+  const chave = chaveTelefone(telefone);
+  if (!chave) return null;
+  const fim = chave.slice(-4);
+  const { data } = await admin
+    .from("clients")
+    .select("name, display_name, whatsapp, phone")
+    .or(`whatsapp.ilike.%${fim}%,phone.ilike.%${fim}%`)
+    .limit(50);
+  // deno-lint-ignore no-explicit-any
+  return ((data ?? []) as any[]).find((c) => mesmoTelefone(c.whatsapp, telefone) || mesmoTelefone(c.phone, telefone)) ?? null;
+}
+
+/**
+ * Para quem vai: o cliente do cadastro, uma conversa que já existe, ou um contato novo.
+ *
+ * 15/10/2026: sem conversa em whatsapp_leads, procura o cliente pelo telefone e as mensagens do
+ * número antes de dizer "novo". O Miguel (cliente do cadastro, 96 mensagens, nenhum lead) aparecia
+ * na confirmação como "número que ainda não conversou com a HBR".
+ */
 // deno-lint-ignore no-explicit-any
 export async function destinoDoAgendamento(admin: any, args: Record<string, unknown>): Promise<Destino> {
   if (args?.client_id) {
@@ -74,7 +101,12 @@ export async function destinoDoAgendamento(admin: any, args: Record<string, unkn
   if (!telefone) return { nome: null, origem: "novo", telefone: null };
   const { data: lead } = await admin.from("whatsapp_leads").select("name").eq("phone_normalized", telefone).maybeSingle();
   if (lead) return { nome: lead.name || (args?.contact_name as string) || null, origem: "conversa", telefone };
-  return { nome: String(args?.contact_name ?? "").trim() || null, origem: "novo", telefone };
+  const dito = String(args?.contact_name ?? "").trim() || null;
+  const cliente = await clientePeloTelefone(admin, telefone);
+  if (cliente) return { nome: cliente.display_name || cliente.name || dito, origem: "cliente", telefone };
+  const { data: mensagens } = await admin.from("whatsapp_messages").select("id").eq("phone_normalized", telefone).limit(1);
+  if (Array.isArray(mensagens) && mensagens.length > 0) return { nome: dito, origem: "conversa", telefone };
+  return { nome: dito, origem: "novo", telefone };
 }
 
 /** O resumo da confirmação: para quem, o número inteiro, quando por extenso e a mensagem inteira. */

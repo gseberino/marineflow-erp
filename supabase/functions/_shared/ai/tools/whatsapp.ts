@@ -20,6 +20,7 @@ import { normalizePhoneNumber } from "../../whatsapp/normalize.ts";
 import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
 import {
   cadastrarContatoDoAgendamento,
+  destinoDoAgendamento,
   horarioDoAgendamento,
   quandoPorExtenso,
   telefoneLegivel,
@@ -62,17 +63,24 @@ function prettyPreview(body?: string | null): string | null {
  * 401 (sem corpo) por conflito de papel — foi o "HTTP 401" que o envio do agente dava.
  * O whatsapp-send roda com verify_jwt=true (não está no config.toml, vale o padrão): o
  * gateway exige um JWT válido, e o Bearer já é um — o apikey não acrescenta nada.
+ *
+ * 15/10/2026: todo envio daqui vai com `origem: "assistente"` — o whatsapp-send passa a gravar a
+ * mensagem na conversa (whatsapp_messages) com a origem e, quando quem chama passa `sent_by`, com
+ * quem mandou (registro-do-envio.ts). `sent_by` que não é id de usuário não vai (o ctx dos testes
+ * tem "u1"); no painel quem manda é o usuário do JWT, e o whatsapp-send ignora o do corpo.
  */
 async function postarWhatsappSend(corpo: Record<string, unknown>, jwt: string, signal?: AbortSignal): Promise<Response> {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const authToken = jwt || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const { sent_by, ...resto } = corpo;
+  const quem = typeof sent_by === "string" && UUID_RE.test(sent_by) ? { sent_by } : {};
   return await fetch(`${supabaseUrl}/functions/v1/whatsapp-send`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${authToken}`,
     },
-    body: JSON.stringify(corpo),
+    body: JSON.stringify({ ...resto, ...quem, origem: "assistente" }),
     signal,
   });
 }
@@ -152,6 +160,8 @@ export async function enviarOrdemAoCliente(p: {
   conteudo: { kind: "text"; message: string } | { kind: "document"; url: string; filename: string; caption: string };
   /** Documento: 25 s (a Evolution baixa o arquivo dentro da chamada). Texto: sem corte, como sempre foi. */
   limiteMs?: number;
+  /** Quem confirmou o envio (ctx.userId): fica na conversa como quem mandou (15/10/2026). */
+  sentBy?: string;
 }): Promise<
   | { ok: true; deduplicated?: boolean; messageId?: string | null }
   | { ok: false; error: string; semResposta?: boolean }
@@ -174,6 +184,7 @@ export async function enviarOrdemAoCliente(p: {
       context: p.context,
       service_order_id: p.serviceOrderId,
       dedupe_key: p.dedupeKey,
+      ...(p.sentBy ? { sent_by: p.sentBy } : {}),
     }, p.jwt, controle.signal);
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
@@ -472,8 +483,10 @@ function anexoFalhou(motivo: string) {
  * Usa a edge function whatsapp-send (não whatsapp-send-text) para respeitar
  * wa_test_mode/wa_test_number do app_settings.
  */
-export async function sendWhatsapp(phone: string, message: string, jwt: string, dedupeKey?: string) {
-  const r = await postarWhatsappSend({ phone, message, kind: "text", ...(dedupeKey ? { dedupe_key: dedupeKey } : {}) }, jwt);
+export async function sendWhatsapp(phone: string, message: string, jwt: string, dedupeKey?: string, sentBy?: string) {
+  const r = await postarWhatsappSend({
+    phone, message, kind: "text", ...(dedupeKey ? { dedupe_key: dedupeKey } : {}), ...(sentBy ? { sent_by: sentBy } : {}),
+  }, jwt);
   const data = await r.json().catch(() => ({}));
   if (!r.ok) return { error: (data as any).error || `HTTP ${r.status}` };
   if ((data as any).deduplicated) {
@@ -520,7 +533,7 @@ export const whatsappTools: ToolDef[] = [
       // Idempotência: mesmo texto, mesmo número, mesmo dia = um envio (protege contra o
       // laço do agente repetir a tool após um timeout).
       const chave = chaveDeEnvio("agente-msg", String(phone).replace(/\D/g, ""), diaLocal(), hashCurto(String(args.message)));
-      return await sendWhatsapp(phone, args.message, jwt, chave);
+      return await sendWhatsapp(phone, args.message, jwt, chave, ctx.userId);
     },
   },
   {
@@ -737,7 +750,7 @@ export const whatsappTools: ToolDef[] = [
         await registrarEnvio(admin, { tipo: "cobranca", audiencia: "cliente", entityKind: "client", entityId: col.client_id, phone, preview: msg, status: "blocked", blockCode: g.codigoBloqueio });
         return { error: g.motivo };
       }
-      const r = await sendWhatsapp(phone, msg, jwt, chaveDeEnvio("cobranca", col.id, diaLocal()));
+      const r = await sendWhatsapp(phone, msg, jwt, chaveDeEnvio("cobranca", col.id, diaLocal()), ctx.userId);
       // Enviado: o contato 'whatsapp_sent' no histórico e a situação 'enviada', como a tela faz
       // (useSendCollectionWhatsApp) — antes só o last_auto_sent_at mudava (07/10/2026).
       const avisoDoRegistro = r.ok && !r.deduplicated
@@ -845,6 +858,7 @@ export const whatsappTools: ToolDef[] = [
           context: contexto,
           jwt,
           dedupeKey: chaveDeEnvio("os-link", so.id, digitos, diaLocal(), marcaDeTeste),
+          sentBy: ctx.userId,
           conteudo: { kind: "text", message: msg },
         });
         // Mesmo formato de resposta de antes (sendWhatsapp), para o modelo ler igual.
@@ -878,6 +892,7 @@ export const whatsappTools: ToolDef[] = [
           jwt,
           // Mesmo texto para o mesmo número no mesmo dia sai uma vez só; mudou um valor, a chave muda.
           dedupeKey: chaveDeEnvio("os-resumo", so.id, digitos, diaLocal(), hashCurto(texto), marcaDeTeste),
+          sentBy: ctx.userId,
           conteudo: { kind: "text", message: texto },
         });
         await registrarEnvio(admin, { tipo: "os_link", audiencia: "cliente", entityKind: "service_order", entityId: so.id, phone, preview: `[resumo] ${texto}`, status: envio.ok ? "sent" : "failed" });
@@ -940,6 +955,7 @@ export const whatsappTools: ToolDef[] = [
             context: contexto,
             jwt,
             dedupeKey: chave,
+            sentBy: ctx.userId,
             conteudo: { kind: "document", url, filename: doc.nomeDoArquivo, caption: legenda },
           }),
       });
@@ -1071,7 +1087,10 @@ export const whatsappTools: ToolDef[] = [
 
       if (insErr) return { error: insErr.message };
       // Contato novo: o nome vai para a conversa do WhatsApp no MarineFlow (não cria cliente).
-      const contato = !clientId && typeof args.contact_name === "string"
+      // Número que já é de um cliente do cadastro (a confirmação disse "cliente do cadastro",
+      // 15/10/2026): não ganha uma conversa com outro nome.
+      const contato = !clientId && typeof args.contact_name === "string" &&
+          (await destinoDoAgendamento(admin, { phone })).origem !== "cliente"
         ? await cadastrarContatoDoAgendamento(admin, phone, args.contact_name)
         : null;
       return {

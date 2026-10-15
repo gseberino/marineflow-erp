@@ -4,9 +4,10 @@
 // a mensagem; contato novo vira o nome da conversa; e agendar nunca roda sem confirmação.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  cadastrarContatoDoAgendamento, horarioDoAgendamento, quandoPorExtenso, resumirAgendamento,
+  cadastrarContatoDoAgendamento, destinoDoAgendamento, horarioDoAgendamento, quandoPorExtenso, resumirAgendamento,
   telefoneLegivel, telefoneParaEnvio, validarAgendamento,
 } from "./agendamento.ts";
+import { resumirMensagem } from "./resposta.ts";
 import { whatsappTools } from "./whatsapp.ts";
 import { isAutonomyGranted, autonomyKey, NEVER_AUTONOMOUS } from "../autonomy-policy.ts";
 
@@ -37,13 +38,30 @@ Deno.test("número: completa o 55 e o nono dígito; inválido não passa", () =>
   assertEquals(telefoneLegivel("5547999159654"), "+55 (47) 99915-9654");
 });
 
-function banco(opcoes: { cliente?: Record<string, unknown>; lead?: Record<string, unknown> | null } = {}) {
-  const gravado = { inserts: [] as Array<[string, Record<string, unknown>]>, updates: [] as Array<[string, Record<string, unknown>]> };
+function banco(opcoes: {
+  cliente?: Record<string, unknown>;
+  lead?: Record<string, unknown> | null;
+  /** O que a busca de cliente pelo telefone devolve (o banco filtra pelos 4 últimos dígitos). */
+  clientesDoTelefone?: Record<string, unknown>[];
+  /** Mensagens do número em whatsapp_messages. */
+  mensagens?: Record<string, unknown>[];
+} = {}) {
+  const gravado = {
+    inserts: [] as Array<[string, Record<string, unknown>]>,
+    updates: [] as Array<[string, Record<string, unknown>]>,
+    filtrosOr: [] as string[],
+  };
   const admin = {
     from(t: string) {
       const q: any = {
         select: () => q,
         eq: () => q,
+        or: (f: string) => { gravado.filtrosOr.push(f); return q; },
+        order: () => q,
+        limit: () => Promise.resolve({
+          data: t === "clients" ? (opcoes.clientesDoTelefone ?? []) : t === "whatsapp_messages" ? (opcoes.mensagens ?? []) : [],
+          error: null,
+        }),
         maybeSingle: () => Promise.resolve({ data: t === "clients" ? (opcoes.cliente ?? null) : t === "whatsapp_leads" ? (opcoes.lead ?? null) : null, error: null }),
         update: (v: Record<string, unknown>) => { gravado.updates.push([t, v]); return { eq: () => Promise.resolve({ error: null }) }; },
         insert: (v: Record<string, unknown>) => {
@@ -74,6 +92,37 @@ Deno.test("confirmação de cliente e de conversa existente; horário ruim apare
   const conversa = await resumirAgendamento(banco({ lead: { name: "Miguel" } }).admin, { phone: "351966776422", scheduled_at: "2026-10-06T06:00", message: "Oi" }, AGORA);
   assertStringIncludes(conversa, "*Miguel* (conversa que já existe no WhatsApp)");
   assertStringIncludes(conversa, "⚠️");
+});
+
+// 15/10/2026, caso real: o Miguel é cliente do cadastro (+351966776422), tem 96 mensagens e nenhum
+// lead — o cartão de send_whatsapp_message dizia "número que ainda não conversou com a HBR".
+Deno.test("sem lead: cliente do cadastro pelo telefone, depois conversa que já existe, só então novo", async () => {
+  const miguel = banco({ clientesDoTelefone: [
+    { name: "Outro com 6422 no meio", whatsapp: "+55 47 96422-1111", phone: null },
+    { name: "Miguel", display_name: null, whatsapp: "+351966776422", phone: "+351966776422" },
+  ] });
+  const cliente = await destinoDoAgendamento(miguel.admin, { phone: "+351 966 776 422" });
+  assertEquals(cliente, { nome: "Miguel", origem: "cliente", telefone: "351966776422" });
+  // O banco filtra pelos 4 últimos dígitos; quem decide é a comparação pelos 8 últimos.
+  assertEquals(miguel.gravado.filtrosOr, ["whatsapp.ilike.%6422%,phone.ilike.%6422%"]);
+  const cartao = await resumirMensagem(miguel.admin, { to_phone: "+351966776422", message: "Oi Miguel" });
+  assertStringIncludes(cartao, "Para: *Miguel* (cliente do cadastro)");
+  assertEquals(cartao.includes("ainda não conversou"), false);
+
+  const conversa = await destinoDoAgendamento(banco({ mensagens: [{ id: "m1" }] }).admin, { phone: "47 99915-9654", contact_name: "Carlos" });
+  assertEquals(conversa, { nome: "Carlos", origem: "conversa", telefone: "5547999159654" });
+  const novo = await destinoDoAgendamento(banco().admin, { phone: "47 99915-9654" });
+  assertEquals(novo.origem, "novo");
+});
+
+Deno.test("agendar para o número de um cliente do cadastro não cria conversa com outro nome", async () => {
+  const { admin, gravado } = banco({ clientesDoTelefone: [{ name: "Miguel", whatsapp: "+351966776422", phone: null }] });
+  const tool = whatsappTools.find((t) => t.name === "schedule_whatsapp_message")!;
+  const ctx = { sb: admin, admin, userId: "u1", userRole: "admin", jwt: "", appOrigin: "", settings: {} } as never;
+  const r = await tool.execute({ phone: "+351966776422", contact_name: "Miguel Portugal", scheduled_at: "2030-10-08T09:00", message: "Bom dia!" }, ctx) as any;
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(gravado.inserts.filter(([t]) => t === "whatsapp_leads").length, 0);
+  assertEquals("contato" in r, false);
 });
 
 Deno.test("validação antes da pendência: mensagem vazia, número inválido, horário fora", () => {
