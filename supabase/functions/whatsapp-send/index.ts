@@ -16,6 +16,12 @@ import {
   urlDeDocumentoPermitida,
 } from "../_shared/whatsapp/marcar-enviado.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import {
+  deveRegistrarEnvio,
+  linhaDaMensagemEnviada,
+  origemDoEnvio,
+  quemEnviou,
+} from "../_shared/whatsapp/registro-do-envio.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -45,6 +51,11 @@ const BodySchema = z.object({
   // destinatário, nesta ocasião". Chave já usada e concluída = já enviada = responde sem
   // reenviar; usada e sem desfecho = 409 em_andamento.
   dedupe_key: z.string().min(4).max(200).optional(),
+  // Registro na conversa (15/10/2026): quem mandou e de onde saiu. Só valem em chamada de sistema
+  // (service-role); com o JWT de um usuário, quem mandou é ele. Campo de registro não barra o
+  // envio: valor estranho vira null/padrão em registro-do-envio.ts, nunca 400.
+  sent_by: z.string().max(64).optional(),
+  origem: z.string().max(20).optional(),
 });
 
 function jr(body: unknown, status = 200) {
@@ -73,6 +84,7 @@ servirComCors(async (req) => {
     const token = authHeader.replace(/^Bearer\s+/i, "");
     const isServiceRoleCall = token === SERVICE_ROLE;
     let callerIdentity = "system";
+    let usuarioDoJwt: string | null = null;
 
     if (!isServiceRoleCall) {
       const supabaseAuth = createClient(SUPABASE_URL, Deno.env.get("SUPABASE_ANON_KEY")!, {
@@ -81,6 +93,7 @@ servirComCors(async (req) => {
       const { data: userData, error: userErr } = await supabaseAuth.auth.getUser();
       if (userErr || !userData.user) return jr({ error: "Invalid session" }, 401);
       callerIdentity = userData.user.email || userData.user.id;
+      usuarioDoJwt = userData.user.id;
     }
 
     // Load app settings for test mode
@@ -216,6 +229,50 @@ servirComCors(async (req) => {
         { error: !sendResult.ok ? sendResult.error : "send failed" },
         502,
       );
+    }
+
+    // A mensagem entra na conversa (whatsapp_messages), como a do Inbox (whatsapp-send-text) —
+    // antes só ficava no audit_log, e o histórico do assistente e o "esperando resposta" não a
+    // viam (15/10/2026; regra em _shared/whatsapp/registro-do-envio.ts). Fora: o desviado pelo
+    // modo de teste e a conversa com o assistente. O envio já saiu: falha aqui só vai ao log, e o
+    // 23505 (wa_message_id repetido) é o webhook que gravou primeiro.
+    try {
+      const { data: doAssistente } = await supabaseAdmin
+        .from("app_users")
+        .select("phone_normalized")
+        .eq("ai_whatsapp_enabled", true)
+        .not("phone_normalized", "is", null);
+      const telefonesDoAssistente = ((doAssistente ?? []) as Array<{ phone_normalized: string | null }>).map((u) => u.phone_normalized);
+      if (deveRegistrarEnvio({ desviadoPorTeste: foiDesviado, telefone: phoneClean, telefonesDoAssistente })) {
+        const { data: anterior } = await supabaseAdmin
+          .from("whatsapp_messages")
+          .select("client_id, lead_id, supplier_id")
+          .eq("phone_normalized", phoneClean)
+          .or("client_id.not.is.null,lead_id.not.is.null,supplier_id.not.is.null")
+          .order("occurred_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const linha = linhaDaMensagemEnviada(
+          body,
+          phoneClean,
+          sendResult.providerMessageId || null,
+          quemEnviou(body.sent_by, isServiceRoleCall, usuarioDoJwt),
+          origemDoEnvio(body.origem, isServiceRoleCall),
+          body.context || null,
+          anterior,
+        );
+        const { error: regErr } = await supabaseAdmin.from("whatsapp_messages").insert(linha);
+        if (regErr && regErr.code !== "23505") {
+          console.warn(`[whatsapp-send] envio saiu, mas não entrou na conversa: ${regErr.code ?? ""} ${regErr.message}`);
+        } else if (!regErr) {
+          await supabaseAdmin
+            .from("whatsapp_leads")
+            .update({ last_outbound_at: new Date().toISOString() })
+            .eq("phone_normalized", phoneClean);
+        }
+      }
+    } catch (e) {
+      console.warn("[whatsapp-send] registro na conversa falhou:", e instanceof Error ? e.message : e);
     }
 
     // Marca o orçamento como ENVIADO AO CLIENTE só quando ele foi mesmo ao cliente
