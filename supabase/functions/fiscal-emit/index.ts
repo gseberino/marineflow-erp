@@ -472,7 +472,7 @@ async function prepareNfePayload(
   const addr = body.recipient?.address ?? {};
   let cityCode: string | null = addr.city_code || null;
   if (!cityCode && addr.state_code && addr.city_name) {
-    cityCode = await resolveIbgeCityCode(addr.state_code, addr.city_name);
+    cityCode = await resolveIbgeCityCode(addr.state_code, addr.city_name, addr.postal_code);
   }
 
   // Natureza de operação define o CFOP-base e se a nota é de saída (venda,
@@ -1357,7 +1357,7 @@ async function prepareNfsePayload(admin: any, body: any): Promise<
   // prefeitura não sabe de onde é o tomador, e o campo não existe no formulário de endereço.
   let cityCode = t.address?.city_code ?? null;
   if (!cityCode && t.address?.state_code && t.address?.city_name) {
-    cityCode = await resolveIbgeCityCode(t.address.state_code, t.address.city_name);
+    cityCode = await resolveIbgeCityCode(t.address.state_code, t.address.city_name, t.address.postal_code);
   }
 
   const input: BuildNfsePayloadInput = {
