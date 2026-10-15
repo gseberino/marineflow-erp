@@ -11,11 +11,19 @@
 // *** ESTÁ NO AR: *** pg_cron `ai-business-monitor` de hora em hora, ATIVO (conferido no snapshot
 // de produção em 14/09/2026 — supabase/schemas/producao/10-cron-e-storage.sql). O cabeçalho
 // antigo dizia "DESATIVADO até validação" e estava errado desde a Fase 5.
+//
+// Horário (15/10/2026): só avisa das 8h às 20h de Brasília, e o "dia" das chaves é o de Brasília
+// (horario.ts). Antes o dia era o UTC e o aviso de orçamentos parados saía às 21:10, todo dia.
+// Também avisa quando o resumo da manhã desistiu de chegar (WhatsApp fora do ar).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider } from "../_shared/fiscal/factory.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import {
+  diaDoAviso, inicioDoDiaBR, inicioDoMesBR, podeAvisarAgora, type ResumoNaFila, resumoDeHojeCobre,
+  telefonesSemResumo, tentativasAteAs20h, TEXTO_RESUMO_NAO_CHEGOU,
+} from "./horario.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -33,6 +41,11 @@ servirComCors(async (req) => {
   if (recusa) return recusa;
 
   try {
+    const now = new Date();
+    // Fora das 8h–20h de Brasília não lê nem reivindica nada: a chave do dia fica livre e o que
+    // aparecer sai na primeira rodada da manhã (08:05). Nada de mensagem às 21h nem às 6h.
+    if (!podeAvisarAgora(now)) return jr({ ok: true, fora_do_horario: true });
+
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     const { data: cn } = await admin.from("app_settings").select("value").eq("key", "company_name").maybeSingle();
@@ -47,8 +60,8 @@ servirComCors(async (req) => {
       .in("role", ["admin", "financial"]);
     if (!recipients || recipients.length === 0) return jr({ ok: true, sent: 0, reason: "no_recipients" });
 
-    const now = new Date();
-    const todayISO = now.toISOString().slice(0, 10);
+    // O dia de Brasília: entre 21h e meia-noite o dia UTC já é o seguinte.
+    const todayISO = diaDoAviso(now);
     const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
     async function claim(alert_key: string, meta: any): Promise<boolean> {
@@ -56,6 +69,14 @@ servirComCors(async (req) => {
         .upsert({ alert_key, meta }, { onConflict: "alert_key", ignoreDuplicates: true }).select("id");
       return (data?.length ?? 0) > 0;
     }
+
+    // O resumo da manhã de hoje na fila (uma linha por destinatário). Serve a dois sinais: o aviso
+    // de orçamentos parados fica de fora quando o resumo já os listou, e quem ficou sem resumo é
+    // avisado. Erro na leitura = como se não houvesse resumo (o aviso sai; melhor repetir que calar).
+    const { data: resumosLidos, error: resumosErr } = await admin.from("whatsapp_send_queue")
+      .select("phone_normalized, status").eq("source", "ai_briefing").gte("created_at", inicioDoDiaBR(now));
+    if (resumosErr) console.warn("[ai-business-monitor] não li o resumo de hoje na fila:", resumosErr.message);
+    const resumosDeHoje = (resumosErr ? [] : resumosLidos ?? []) as ResumoNaFila[];
 
     const alerts: string[] = [];
 
@@ -74,7 +95,10 @@ servirComCors(async (req) => {
       .from("service_orders").select("id", { count: "exact", head: true })
       .eq("status", "draft").in("quote_status", ["sent", "awaiting_approval", "awaiting_deposit"])
       .lt("created_at", d7);
-    if ((staleQuotes ?? 0) > 0 && await claim(`stale_quotes:${todayISO}`, { n: staleQuotes })) {
+    // Com o dia certo este aviso sairia às 08:05, meia hora depois do resumo que já lista os
+    // orçamentos parados. Só sai quando o resumo de hoje não chegou (nem está a caminho); a chave
+    // não é gasta antes disso, então a rodada seguinte ainda pode avisar.
+    if ((staleQuotes ?? 0) > 0 && !resumoDeHojeCobre(resumosDeHoje) && await claim(`stale_quotes:${todayISO}`, { n: staleQuotes })) {
       alerts.push(`📄 *${staleQuotes}* orçamento(s) parado(s) há mais de 7 dias sem resposta. Talvez valha um follow-up.`);
     }
 
@@ -162,7 +186,7 @@ servirComCors(async (req) => {
     }
 
     // (4) Cota Contora do mês (plano Gratuito = 500 eventos/mês). Alerta em 80%.
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const monthStart = inicioDoMesBR(now);
     const { count: fiscalEvents } = await admin
       .from("issued_fiscal_documents").select("id", { count: "exact", head: true })
       .in("status", ["authorized", "rejected", "cancelled"]).gte("created_at", monthStart);
@@ -179,14 +203,33 @@ servirComCors(async (req) => {
       alerts.push(`❌ *${rejectedNfe}* NF-e rejeitada(s) nas últimas 24h. Confira o motivo no histórico e reemita.`);
     }
 
-    if (alerts.length === 0) return jr({ ok: true, queued: 0, note: "sem sinais novos hoje" });
+    // (6) O resumo das 07:30 que desistiu de chegar (09 e 13/10: WhatsApp fora do ar, a fila
+    // desistiu e ninguém soube). Um aviso por telefone e por dia; a fila entrega quando o WhatsApp
+    // voltar e para de tentar antes das 20h. Vai para quem ficou sem o resumo, não para a lista
+    // do alerta. Falha aqui não derruba os outros sinais.
+    let resumoNaoChegou = 0;
+    try {
+      for (const phone of telefonesSemResumo(resumosDeHoje)) {
+        if (!await claim(`resumo_nao_chegou:${phone}:${todayISO}`, { phone })) continue;
+        const { error: nErr } = await admin.from("whatsapp_send_queue").insert({
+          phone_normalized: phone, message: TEXTO_RESUMO_NAO_CHEGOU, source: "resumo_nao_chegou", priority: 2,
+          max_attempts: tentativasAteAs20h(now),
+        });
+        if (nErr) throw nErr;
+        resumoNaoChegou++;
+      }
+    } catch (e) {
+      console.warn("[ai-business-monitor] aviso de resumo que não chegou falhou:", (e as Error)?.message ?? e);
+    }
+
+    if (alerts.length === 0) return jr({ ok: true, queued: 0, resumo_nao_chegou: resumoNaoChegou, note: "sem sinais novos hoje" });
 
     const message = [`🔔 *Alerta ${companyName}*`, "", ...alerts, "", "_Me chame aqui se quiser que eu ajude com qualquer um desses._"].join("\n");
     const rows = recipients.map((r: any) => ({ phone_normalized: String(r.phone_normalized), message, source: "ai_monitor", priority: 5 }));
     const { data: inserted, error: qErr } = await admin.from("whatsapp_send_queue").insert(rows).select("id");
     if (qErr) throw qErr;
 
-    return jr({ ok: true, queued: inserted?.length ?? 0, signals: alerts.length });
+    return jr({ ok: true, queued: inserted?.length ?? 0, signals: alerts.length, resumo_nao_chegou: resumoNaoChegou });
   } catch (e: any) {
     console.error("[ai-business-monitor] fatal", e);
     return jr({ error: e?.message || "internal error" }, 500);
