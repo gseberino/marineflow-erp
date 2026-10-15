@@ -175,6 +175,12 @@ export type DependenciasDoTexto = {
    * "sim"/número sem citar não vale para o CMP sem reapresentar a pergunta. Opcional (nunca lança).
    */
   interromper?(): Promise<void>;
+  /**
+   * Secretário (Passo 2, 15/10/2026): o texto é um comando do resumo da manhã ("lista", "A", "B feito"…)
+   * com resumo_formato = 'novo'? Vai ao assistente antes de qualquer leitura de resposta ao CMP. Opcional
+   * (sem ela, nada muda); quem implementa só lê a chave quando o texto É um comando. Erro = não é.
+   */
+  comandoDoSecretario?(texto: string): Promise<boolean>;
 };
 
 /**
@@ -254,6 +260,14 @@ export async function rotearTextoDoDono(
     }
     const agora = new Date();
     const comando = lerComando(texto, agora);
+    let doSecretario = false;
+    if (deps.comandoDoSecretario) {
+      try {
+        doSecretario = await deps.comandoDoSecretario(texto);
+      } catch {
+        doSecretario = false;
+      }
+    }
     const ativa = ativaDoCmp ? estado.ativa : null;
     const interp = ativa ? interpretarResposta(ativa.passo, ativa.opcoes, texto, agora) : null;
     const ultima = !estado.ativa ? estado.ultima_do_cmp ?? null : null;
@@ -263,6 +277,7 @@ export async function rotearTextoDoDono(
       ehRespostaAUltima: iUltima !== null && iUltima.tipo !== "sim" && iUltima.tipo !== "nao" && iUltima.tipo !== "ok",
       ehDica: pareceDica(texto),
       ehNaoEntendida: ativa !== null && interp === null && respostaNaoEntendida(texto),
+      ehComandoDoSecretario: doSecretario,
     }).destino;
   } catch {
     await despachar(p.tipo === "audio" && texto !== p.texto ? texto : undefined);

@@ -28,6 +28,10 @@ import { linhaDasPropostas, linhaDoOrcamento, linhaSeHouver, nomeDeContato, tent
 import { linhasDoHistorico } from "./historico.ts";
 import { conversaEncerradaPeloContato } from "../_shared/whatsapp/contato-encerrou.ts";
 import { resolveOrCreateWhatsAppSession } from "../_shared/ai/whatsapp-channel.ts";
+import { lerFormatoDoResumo } from "../_shared/secretario/formato.ts";
+import { type Dono, donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
+import { contarPropostas, type ManhaNova, montarManhaNova, registrarManha } from "./secretario.ts";
+import type { DadosDoEscritorio } from "./secretario-texto.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -73,7 +77,8 @@ servirComCors(async (req) => {
     const { data: cfgRows } = await admin
       .from("app_settings")
       .select("key, value")
-      .in("key", ["company_name", "digest_show_low_stock", "quote_validity_days"]);
+      // resumo_formato (15/10/2026): a manhã nova do secretário. Ausente/'antigo' = este resumo, igual.
+      .in("key", ["company_name", "digest_show_low_stock", "quote_validity_days", "resumo_formato"]);
     const cfg: Record<string, string> = {};
     for (const r of (cfgRows as any[]) || []) if (r?.key) cfg[String(r.key)] = String(r.value ?? "");
     const companyName = cfg["company_name"] || "MarineFlow";
@@ -286,6 +291,8 @@ servirComCors(async (req) => {
     // já fechei" do Miguel (07/10) sozinho é ambíguo — a regra olha as 5 últimas recebidas em 7 dias.
     // Erro na leitura = a lista como antes (nada some por engano).
     let desistiram = 0;
+    // As mesmas recebidas servem à manhã nova (o "parece pedir preço" e o "hoje/urgente"). null = não lidas.
+    let recebidasDaSemana: Array<{ phone_normalized: string; body: string | null; occurred_at: string }> | null = null;
     try {
       const fones = waiting.map((w: any) => String(w.phone ?? "")).filter(Boolean);
       if (fones.length > 0) {
@@ -294,6 +301,7 @@ servirComCors(async (req) => {
           .eq("direction", "inbound").in("phone_normalized", fones).gte("occurred_at", since7d)
           .order("occurred_at", { ascending: false }).limit(1000);
         if (rErr) throw rErr;
+        recebidasDaSemana = (recebidas as any[]) || [];
         const porFone = new Map<string, string[]>();
         for (const m of (recebidas as any[]) || []) {
           const l = porFone.get(m.phone_normalized) ?? [];
@@ -362,6 +370,9 @@ servirComCors(async (req) => {
     // quando há algo, com o valor somado para dar noção do tamanho.
     const filaFinanceiraLines: string[] = [];
     let filaFinanceiraCount = 0;
+    // A papelada contada aqui vira a resposta do *escritório* da manhã nova (só atribuições: o texto
+    // deste resumo não muda). null = não deu para contar.
+    const paraOEscritorio: DadosDoEscritorio = { propostas: null, alertas: null, regras: null, debitosSemLoja: null, entradas: null };
     try {
       const { data: propostas } = await admin
         .from("finance_review_queue")
@@ -372,6 +383,8 @@ servirComCors(async (req) => {
       const rows = todas.filter((p) => p.kind !== "anomaly");
       const alertas = todas.filter((p) => p.kind === "anomaly");
       filaFinanceiraCount = rows.length;
+      paraOEscritorio.propostas = contarPropostas(rows);
+      paraOEscritorio.alertas = alertas.length;
       // 15/10/2026: saída, entrada e transferência separadas — somar tudo em valor absoluto dava um
       // número que não era nada (51 = 46 saídas + 4 entradas + 1 transferência).
       const linhaPropostas = linhaDasPropostas(rows, (v) => fmt.format(v));
@@ -387,6 +400,7 @@ servirComCors(async (req) => {
       const { count: regrasEsperando } = await admin
         .from("finance_rules").select("id", { count: "exact", head: true })
         .eq("origin", "ai").eq("status", "proposed");
+      paraOEscritorio.regras = regrasEsperando ?? null;
       if ((regrasEsperando ?? 0) > 0) {
         filaFinanceiraLines.push(`🧠 Regras que aprendi esperando você conferir: *${regrasEsperando}* (Extrato › Regras)`);
       }
@@ -435,6 +449,7 @@ servirComCors(async (req) => {
         ? await linhasDosComprovantes(admin)
         : { linhas: new Set<string>(), anotacoes: new Set<string>() };
       const { debitos, anotadosEsperando } = debitosSemComprovante(semLoja, doCmp);
+      paraOEscritorio.debitosSemLoja = debitos.length;
       const fmtExtrato = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
       const naoAplicadas = canceladasSemComprovante(listaCanceladas, doCmp)
         .filter((a) => new Date(a.cancelada_em).getTime() - new Date(a.criada_em).getTime() > 60_000)
@@ -949,10 +964,68 @@ servirComCors(async (req) => {
       return [...linhas.slice(0, idx), bloco, ...linhas.slice(idx)].join("\n");
     };
 
-    // Dry-run (?dry=1): monta a mensagem mas NÃO enfileira — para pré-visualizar com segurança.
-    if (new URL(req.url).searchParams.get("dry") === "1") {
-      return jr({ ok: true, dry: true, recipients: recipients.length, preview: messageFor(recipients[0] || {}) });
+    // ── A manhã nova (secretário, Passo 2, 15/10/2026 — ./secretario.ts) ──
+    // app_settings.resumo_formato: 'antigo' (padrão) = NADA daqui roda e o resumo acima sai byte a byte;
+    // 'sombra' = o de sempre vai para todos e o novo do dono é só GUARDADO; 'novo' = o dono recebe o novo
+    // (os outros destinatários seguem com o de sempre). Qualquer erro na montagem = o de sempre.
+    // No dry-run, ?formato=novo|sombra pré-visualiza sem mudar a chave e sem gravar nada.
+    const ehDry = new URL(req.url).searchParams.get("dry") === "1";
+    const formato = lerFormatoDoResumo((ehDry ? new URL(req.url).searchParams.get("formato") : null) ?? cfg["resumo_formato"]);
+    let manhaNova: ManhaNova | null = null;
+    let donoDaManha: Dono | null = null;
+    if (formato !== "antigo") {
+      try {
+        donoDaManha = await donoDoWhatsApp(admin);
+        const recDoDono = donoDaManha
+          ? (recipients as any[]).find((r) => r.id === donoDaManha!.id && String(r.phone_normalized) === donoDaManha!.phone)
+          : null;
+        if (donoDaManha && recDoDono) {
+          manhaNova = await montarManhaNova(admin, {
+            agora: now,
+            hoje: hojeBR,
+            dono: donoDaManha,
+            modo: formato,
+            doResumo: { esperando: waiting, recebidas: recebidasDaSemana, cfg },
+            escritorio: {
+              ...paraOEscritorio,
+              entradas: entradasSeparadas
+                ? { doMes: entradasSeparadas.doMes.length, sinais: entradasSeparadas.sinais.length, antigas: entradasSeparadas.antigas.length }
+                : null,
+            },
+          });
+        }
+      } catch (e) {
+        console.warn("[ai-daily-briefing] manhã nova não montada (segue o resumo de sempre):", (e as Error).message);
+        manhaNova = null;
+      }
     }
+
+    // Dry-run (?dry=1): monta a mensagem mas NÃO enfileira — para pré-visualizar com segurança.
+    if (ehDry) {
+      return jr({
+        ok: true, dry: true, recipients: recipients.length, preview: messageFor(recipients[0] || {}),
+        ...(manhaNova
+          ? {
+            formato,
+            preview_novo: manhaNova.texto,
+            itens_novo: manhaNova.itens.filter((i) => i.principal)
+              .map((i) => ({ letra: i.letra, posicao: i.posicao, tipo: i.tipo, nome: i.nome, motivo: i.motivo })),
+          }
+          : {}),
+      });
+    }
+
+    // 'novo': grava ANTES de enviar — as letras do texto precisam existir quando o dono responder. O texto
+    // enviado é o GRAVADO (num segundo disparo do mesmo dia, o da primeira vez). Sem gravar, o de sempre.
+    let textoNovoDoDono: string | null = null;
+    if (manhaNova && donoDaManha && formato === "novo") {
+      const recDoDono = (recipients as any[]).find((r) => r.id === donoDaManha!.id);
+      const r = await registrarManha(admin, { hoje: hojeBR, dono: donoDaManha, modo: "novo", manha: manhaNova, textoAntigo: messageFor(recDoDono || {}) });
+      textoNovoDoDono = r.ok ? r.texto : null;
+      if (!textoNovoDoDono) console.warn("[ai-daily-briefing] manhã nova não gravada: o dono recebe o resumo de sempre");
+    }
+    const textoPara = (rec: any): string =>
+      textoNovoDoDono && donoDaManha && rec?.id === donoDaManha.id ? textoNovoDoDono : messageFor(rec);
 
     // Enfileira uma mensagem por destinatário. O whatsapp-queue-worker entrega e, se falhar, tenta de
     // novo ~10 min depois (reagenda +5 min, mas roda de 5 em 5). Até 15/10/2026 eram 3 tentativas
@@ -961,13 +1034,21 @@ servirComCors(async (req) => {
     const maxTentativas = tentativasAte("09:00", now);
     const rows = recipients.map((rec: any) => ({
       phone_normalized: String(rec.phone_normalized),
-      message: messageFor(rec),
+      message: textoPara(rec),
       source: "ai_briefing",
       priority: 4,
       max_attempts: maxTentativas,
     }));
     const { data: inserted, error: qErr } = await admin.from("whatsapp_send_queue").insert(rows).select("id");
     if (qErr) throw qErr;
+
+    // 'sombra': o de sempre já está na fila; o novo é só guardado (para a comparação lado a lado).
+    // Falha aqui só loga.
+    let sombraGravada = false;
+    if (manhaNova && donoDaManha && formato === "sombra") {
+      const recDoDono = (recipients as any[]).find((r) => r.id === donoDaManha!.id);
+      sombraGravada = (await registrarManha(admin, { hoje: hojeBR, dono: donoDaManha, modo: "sombra", manha: manhaNova, textoAntigo: messageFor(recDoDono || {}) })).ok;
+    }
 
     // O resumo entra no histórico da conversa do assistente (15/10/2026): sem isso, "cobra esse" ou
     // "o 2" não tinha a que se referir. Duas linhas (./historico.ts) e a conversa marcada como ativa.
@@ -978,7 +1059,7 @@ servirComCors(async (req) => {
       try {
         const agoraHist = new Date();
         const sessao = await resolveOrCreateWhatsAppSession(admin, String(rec.phone_normalized), String(rec.id));
-        const { error: hErr } = await admin.from("ai_operator_messages").insert(linhasDoHistorico(sessao, messageFor(rec), agoraHist));
+        const { error: hErr } = await admin.from("ai_operator_messages").insert(linhasDoHistorico(sessao, textoPara(rec), agoraHist));
         if (hErr) throw hErr;
         const { error: sErr } = await admin.from("ai_operator_sessions").update({ last_activity_at: agoraHist.toISOString() }).eq("id", sessao);
         if (sErr) console.warn("[ai-daily-briefing] conversa não marcada como ativa:", sErr.message);
@@ -1003,6 +1084,9 @@ servirComCors(async (req) => {
       queued: inserted?.length ?? 0,
       historico: historicoGravado,
       metrics: { scheduled: scheduledCount ?? 0, quotes: quotesCount ?? 0, overdue: overdueCount, overdue_sum: overdueSum, pending: pendingCount ?? 0 },
+      ...(formato !== "antigo"
+        ? { secretario: { formato, montada: !!manhaNova, enviada_ao_dono: !!textoNovoDoDono, sombra_gravada: sombraGravada } }
+        : {}),
     });
   } catch (e: any) {
     console.error("[ai-daily-briefing] fatal", e);
