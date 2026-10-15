@@ -1,0 +1,233 @@
+import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import {
+  ASSUNTO_NAO_ENVIADOS,
+  candidatoDeCobranca,
+  candidatoDeConversa,
+  candidatoDeOrcamento,
+  candidatoDeOs,
+  candidatosDoDia,
+  type ConversaCrua,
+  ehClienteGenerico,
+  type CobrancaCrua,
+  type OrcamentoCru,
+  type OsCrua,
+  valorAbertoPorCliente,
+} from "./secretario-candidatos.ts";
+import { AGORA_1510, coleta1510, HOJE_1510 } from "./secretario-fixture.ts";
+
+const HOJE = HOJE_1510;
+
+function cob(extra: Partial<CobrancaCrua>): CobrancaCrua {
+  return { id: "r1", client_id: "c1", cliente: "Marcelo Marco Bertoldi", descricao: "À vista — OS-00038", vencimento: "2026-10-13", saldo: 16890, os_numero: "OS-00038", barco: "Aria", ...extra };
+}
+
+Deno.test("cobrança grande: sobe todo dia (fora da repetição), com o lembrete pronto", () => {
+  const c = candidatoDeCobranca(cob({}), HOJE);
+  assertEquals([c.tipo, c.elegivel, c.todoDia, c.secao], ["cobranca_grande", true, true, "dinheiro"]);
+  assertEquals(c.titulo, "*Marcelo Marco Bertoldi* (Aria, OS-00038): R$ 16.890,00 venceu terça (13/10) e não entrou.");
+  assertEquals(c.assunto, "cliente:c1");
+  assertEquals(c.referencia, "recv:r1");
+  assertEquals(c.fato, "16890.00|2026-10-13|grande");
+  assertStringIncludes(c.pedido!, "peça o meu sim antes de enviar");
+  assertStringIncludes(c.motivo, "*{L} espera*");
+});
+
+Deno.test("cobrança de R$ 1 mil+: só nos marcos 1º–3º e 7º–9º dia; o marco entra no fato", () => {
+  const d2 = candidatoDeCobranca(cob({ saldo: 1710, vencimento: "2026-10-13" }), HOJE);
+  assertEquals([d2.tipo, d2.elegivel, d2.todoDia], ["cobranca_marco", true, false]);
+  assertEquals(d2.recomendacao, "Recomendo um lembrete educado hoje.");
+  const d5 = candidatoDeCobranca(cob({ saldo: 1710, vencimento: "2026-10-10" }), HOJE);
+  assertEquals([d5.tipo, d5.elegivel], ["cobranca_fora_do_marco", false]);
+  assertStringIncludes(d5.porqueNaoSobe!, "5º dia de atraso");
+  const d8 = candidatoDeCobranca(cob({ saldo: 1710, vencimento: "2026-10-07" }), HOJE);
+  assertEquals([d8.tipo, d8.elegivel], ["cobranca_marco", true]);
+  assertEquals(d8.recomendacao, "Recomendo ligar hoje.");
+  assert(d2.fato.endsWith("|m1") && d8.fato.endsWith("|m7"), "o 7º dia é fato novo");
+  const pequena = candidatoDeCobranca(cob({ saldo: 756, vencimento: "2026-10-13" }), HOJE);
+  assertEquals([pequena.tipo, pequena.porqueNaoSobe], ["cobranca_fora_do_marco", "Ficou na lista: abaixo de R$ 1 mil."]);
+  const antiga = candidatoDeCobranca(cob({ saldo: 1650, vencimento: "2026-07-22" }), HOJE);
+  assertEquals(antiga.tipo, "cobranca_antiga");
+  assertStringIncludes(antiga.porqueNaoSobe!, "revisão do mês");
+  assertEquals(candidatoDeCobranca(cob({ vencimento: "2026-10-14" }), HOJE).titulo.includes("venceu ontem"), true);
+});
+
+function conv(extra: Partial<ConversaCrua>): ConversaCrua {
+  return {
+    phone: "5547900000001", contato: "Jorge Girardon", categoria: "cliente", client_id: "c-jorge",
+    last_inbound_at: "2026-10-14T20:10:00Z", last_body: "🎤 Oi Gustavo", recebidas: [{ body: "🎤 Oi Gustavo", em: "2026-10-14T20:10:00Z" }],
+    diasComMensagemSua: 1, ...extra,
+  };
+}
+
+Deno.test("cliente sem resposta há mais de 12 h sobe; áudio vira 'resumo o áudio'; o fato é a última mensagem", () => {
+  const c = candidatoDeConversa(conv({}), AGORA_1510, 0);
+  assertEquals([c.tipo, c.elegivel, c.familia, c.secao], ["cliente_sem_resposta", true, "cliente", "clientes"]);
+  assertEquals(c.titulo, "*Jorge Girardon* mandou áudio ontem às 17:10 e está há 14 h sem resposta.");
+  assertEquals(c.faco, "resumo o áudio e preparo a resposta");
+  assertEquals(c.fato, "2026-10-14T20:10:00.000Z");
+  assertEquals(c.assunto, "cliente:c-jorge");
+});
+
+Deno.test("cliente com menos de 12 h, conversa de todo dia, fornecedor e contato sem pedir preço ficam na lista", () => {
+  const recente = candidatoDeConversa(conv({ last_inbound_at: "2026-10-15T06:00:00Z" }), AGORA_1510, 0);
+  assertEquals([recente.tipo, recente.elegivel], ["cliente_recente", false]);
+  assertStringIncludes(recente.porqueNaoSobe!, "a manhã espera 12 h");
+  const todoDia = candidatoDeConversa(conv({ diasComMensagemSua: 5 }), AGORA_1510, 0);
+  assertEquals([todoDia.tipo, todoDia.porqueNaoSobe], ["cliente_recente", "Ficou na lista: vocês conversam quase todo dia."]);
+  const forn = candidatoDeConversa(conv({ categoria: "fornecedor", contato: "SR Contabilidade" }), AGORA_1510, 0);
+  assertEquals([forn.tipo, forn.elegivel, forn.secao], ["fornecedor", false, "contatos"]);
+  assertStringIncludes(forn.curto, "(fornecedor)");
+  const contato = candidatoDeConversa(conv({ categoria: "contato", client_id: null, last_body: "Pois é, tá feinho" }), AGORA_1510, 0);
+  assertEquals([contato.tipo, contato.elegivel, contato.assunto], ["contato_sem_cadastro", false, "fone:5547900000001"]);
+});
+
+Deno.test("contato sem cadastro que PARECE pedir preço sobe (o texto diz 'parece'); pressa = se perde hoje", () => {
+  const msg = "Quanto fica o orçamento das baterias? Preciso fechar hoje";
+  const c = candidatoDeConversa(conv({
+    categoria: "contato", client_id: null, contato: "5547900000006", last_body: msg,
+    last_inbound_at: "2026-10-14T13:00:00Z", recebidas: [{ body: msg, em: "2026-10-14T13:00:00Z" }],
+  }), AGORA_1510, 0);
+  assertEquals([c.tipo, c.elegivel, c.perdeHoje], ["contato_pedindo_preco", true, true]);
+  assertStringIncludes(c.titulo, "parece pedir preço ou orçamento");
+  assertStringIncludes(c.titulo, "Parece ter pressa");
+  assertStringIncludes(c.motivo, "Pode se perder hoje: fala em \"hoje\" ou \"urgente\".");
+});
+
+function orc(extra: Partial<OrcamentoCru>): OrcamentoCru {
+  return {
+    id: "q1", numero: "ORÇ-00117", quote_status: "draft", valor: 120020, client_id: "c-everton", cliente: "EVERTON CARLOS PINHEIRO",
+    barco: "Sprinter", criado_em: "2026-10-13T12:00:00Z", mexido_em: "2026-10-14T12:00:00Z", fim_validade: null, ...extra,
+  };
+}
+
+Deno.test("orçamento montado e não enviado (R$ 5 mil+, parado desde ontem) sobe e abre pelo PDF", () => {
+  const c = candidatoDeOrcamento(orc({}), HOJE)!;
+  assertEquals([c.tipo, c.elegivel], ["orcamento_nao_enviado", true]);
+  assertEquals(c.titulo, "*ORÇ-00117* (EVERTON CARLOS PINHEIRO, Sprinter), R$ 120.020,00: montado em 13/10 e não enviado.");
+  assertEquals(c.pedido, "me manda o pdf do ORÇ-00117");
+  // os não enviados são UM assunto só (o pacote da manhã), não o do cliente
+  assertEquals(c.assunto, ASSUNTO_NAO_ENVIADOS);
+  const hoje = candidatoDeOrcamento(orc({ mexido_em: "2026-10-15T09:00:00Z" }), HOJE)!;
+  assertEquals([hoje.tipo, hoje.porqueNaoSobe], ["orcamento_na_lista", "Ficou na lista: mexido hoje (ainda em montagem)."]);
+  assertEquals(hoje.assunto, "cliente:c-everton");
+  assertEquals(candidatoDeOrcamento(orc({ criado_em: "2026-08-13T12:00:00Z" }), HOJE), null, "rascunho de agosto é abandonado");
+  const pequeno = candidatoDeOrcamento(orc({ valor: 453.4 }), HOJE)!;
+  assertEquals([pequeno.tipo, pequeno.porqueNaoSobe, pequeno.assunto], ["orcamento_na_lista", "Ficou na lista: abaixo de R$ 5 mil.", "cliente:c-everton"]);
+});
+
+Deno.test("orçamento enviado: parado 7+ dias ou validade em até 3 dias; vence hoje = se perde hoje", () => {
+  const sinal = candidatoDeOrcamento(orc({ quote_status: "awaiting_deposit", valor: 14461, mexido_em: "2026-10-06T12:00:00Z" }), HOJE)!;
+  assertEquals([sinal.tipo, sinal.elegivel], ["orcamento_parado", true]);
+  assertStringIncludes(sinal.titulo, "aprovado, e o sinal não veio desde 06/10 (9 dias)");
+  assertEquals(sinal.recomendacao, "Recomendo lembrar o sinal hoje.");
+  const vence = candidatoDeOrcamento(orc({ quote_status: "sent", valor: 6000, mexido_em: "2026-10-14T12:00:00Z", fim_validade: "2026-10-17" }), HOJE)!;
+  assertEquals([vence.tipo, vence.perdeHoje], ["orcamento_vencendo", false]);
+  const hoje = candidatoDeOrcamento(orc({ quote_status: "sent", valor: 6000, mexido_em: "2026-10-14T12:00:00Z", fim_validade: HOJE }), HOJE)!;
+  assertEquals([hoje.tipo, hoje.perdeHoje], ["orcamento_vencendo", true]);
+  assertStringIncludes(hoje.titulo, "a validade termina hoje");
+  const novo = candidatoDeOrcamento(orc({ quote_status: "sent", valor: 6000, mexido_em: "2026-10-12T12:00:00Z", fim_validade: "2026-10-25" }), HOJE)!;
+  assertEquals([novo.tipo, novo.porqueNaoSobe], ["orcamento_na_lista", "Ficou na lista: parado há 3 dias (a manhã mostra a partir de 7)."]);
+  const vencido = candidatoDeOrcamento(orc({ quote_status: "awaiting_approval", valor: 4254.69, mexido_em: "2026-10-13T12:00:00Z", fim_validade: "2026-10-03" }), HOJE)!;
+  assertStringIncludes(vencido.curto, "validade vencida em 03/10");
+  // "sem aprovação" (o que o banco sabe), não "sem resposta" (a conversa pode estar andando)
+  const parado = candidatoDeOrcamento(orc({ quote_status: "sent", valor: 6000, mexido_em: "2026-10-05T12:00:00Z", fim_validade: "2026-10-30" }), HOJE)!;
+  assertEquals(parado.titulo, "*ORÇ-00117* (EVERTON CARLOS PINHEIRO, Sprinter), R$ 6.000,00: enviado e sem aprovação há 10 dias.");
+});
+
+Deno.test("orçamento de cliente que disse que fechou com outra: fica na lista, com o porquê; rascunho mandado mostra a data", () => {
+  const miguel = candidatoDeOrcamento(orc({
+    numero: "ORÇ-00113", quote_status: "sent", valor: 105603.9, cliente: "Miguel", mexido_em: "2026-10-05T18:46:00Z", fim_validade: "2026-10-30",
+    cliente_encerrou_em: "2026-10-07T17:15:54Z",
+  }), "2026-10-13")!;
+  assertEquals([miguel.tipo, miguel.elegivel, miguel.assunto], ["orcamento_na_lista", false, "cliente:c-everton"]);
+  assertEquals(miguel.porqueNaoSobe, "Ficou na lista: o cliente escreveu em 07/10 que fechou com outra empresa ou desistiu. Se foi isso, marque o orçamento como recusado.");
+  assertStringIncludes(miguel.curto, "o cliente disse em 07/10 que fechou com outra ou desistiu");
+  const mandado = candidatoDeOrcamento(orc({ quote_status: "sent", enviado_em: "2026-10-09T20:48:19Z", mexido_em: "2026-10-09T20:48:19Z", fim_validade: "2026-10-12" }), HOJE)!;
+  assertEquals(mandado.tipo, "orcamento_na_lista");
+  assertEquals(mandado.fatos.find(([r]) => r === "Mandado pelo WhatsApp em")?.[1], "09/10/2026 (no sistema ainda está como rascunho)");
+  assertEquals(mandado.porqueNaoSobe, "Ficou na lista: validade vencida em 12/10 e parado há 6 dias (a manhã mostra a partir de 7).");
+});
+
+function os(extra: Partial<OsCrua>): OsCrua {
+  return {
+    id: "o1", numero: "OS-00104", status: "awaiting_parts", valor: 2760, client_id: "c-flavio", cliente: "Flávio da Igreja", barco: "Itapoã",
+    mexido_em: "2026-10-03T12:00:00Z", agendada_em: null, sinal_pago: 2070,
+    tarefa_compra: { titulo: "Comprar 1 item — OS-00104 (Flávio da Igreja)", criada_em: "2026-10-03T12:00:00Z" }, cobrancas_vivas: 1, ...extra,
+  };
+}
+
+Deno.test("OS esperando compra (sinal pago ou serviço marcado): 'parece', e a alternativa é o *feito*", () => {
+  const c = candidatoDeOs(os({}), HOJE)!;
+  assertEquals([c.tipo, c.elegivel, c.comandoAlternativo, c.alternativa], ["os_esperando_compra", true, "feito", "já comprei"]);
+  assertEquals(c.titulo, "*OS-00104* (Flávio da Igreja, Itapoã): parece esperar a compra de 1 item (sinal de R$ 2.070,00 já pago). Sem a peça o serviço não anda.");
+  assertStringIncludes(c.motivo, "É dedução pela tarefa");
+  assertEquals(c.fato, "Comprar 1 item — OS-00104 (Flávio da Igreja)|awaiting_parts");
+  // dedução diz "parece" em todo lugar, inclusive no "logo abaixo" e na lista
+  assertEquals(c.rotulo, "OS-00104 (Flávio da Igreja, parece esperar compra)");
+  assertStringIncludes(c.curto, "parece esperar compra");
+  const hoje = candidatoDeOs(os({ sinal_pago: 0, agendada_em: "2026-10-15T12:00:00Z" }), HOJE)!;
+  assertEquals([hoje.tipo, hoje.perdeHoje], ["os_esperando_compra", true]);
+  // sem sinal e sem serviço marcado: não é "esperando o dono"; parada há 12 dias = lista
+  const semSinal = candidatoDeOs(os({ sinal_pago: 0 }), HOJE)!;
+  assertEquals([semSinal.tipo, semSinal.elegivel], ["os_parada", false]);
+});
+
+Deno.test("OS concluída sem cobrança sobe; com cobrança, de valor zero ou ativa e andando, nada", () => {
+  const c = candidatoDeOs(os({ status: "completed", tarefa_compra: null, cobrancas_vivas: 0, valor: 3000 }), HOJE)!;
+  assertEquals([c.tipo, c.elegivel], ["os_sem_cobranca", true]);
+  assertStringIncludes(c.titulo, "concluída e sem cobrança lançada (R$ 3.000,00)");
+  assertEquals(candidatoDeOs(os({ status: "completed", tarefa_compra: null, cobrancas_vivas: 1 }), HOJE), null);
+  assertEquals(candidatoDeOs(os({ status: "completed", tarefa_compra: null, cobrancas_vivas: 0, valor: 0 }), HOJE), null);
+  assertEquals(candidatoDeOs(os({ tarefa_compra: null, mexido_em: "2026-10-12T12:00:00Z" }), HOJE), null);
+});
+
+Deno.test("valor aberto do cliente (orçamento ou OS ativa) entra na ordem do cliente sem resposta", () => {
+  const v = valorAbertoPorCliente(coleta1510());
+  assertEquals(v.get("c-giancarlo"), 5739);
+  assertEquals(v.get("c-flavio"), 2760);
+  assertEquals(v.get("c-marcelo"), undefined, "OS concluída não conta");
+  assertEquals(v.get("c-final"), undefined, "cadastro genérico não empresta valor a uma conversa");
+});
+
+Deno.test("cadastro genérico ('Cliente Final', 'Consumidor Final') não é assunto: cada item vale por si", () => {
+  assert(ehClienteGenerico("Cliente Final") && ehClienteGenerico("CONSUMIDOR FINAL") && !ehClienteGenerico("Cliente Fiel"));
+  const q = candidatoDeOrcamento(orc({ id: "q-103", numero: "ORÇ-00103", quote_status: "awaiting_approval", client_id: "c-final", cliente: "Cliente Final", valor: 58310.05, mexido_em: "2026-09-23T12:00:00Z", fim_validade: "2026-10-18" }), HOJE)!;
+  assertEquals(q.assunto, "os:q-103");
+  assertEquals(candidatoDeOs(os({ id: "o-110", client_id: "c-final", cliente: "Cliente Final", tarefa_compra: null }), HOJE)!.assunto, "os:o-110");
+  assertEquals(candidatoDeCobranca(cob({ client_id: "c-final", cliente: "Cliente Final" }), HOJE).assunto, "recv:r1");
+  assertEquals(candidatoDeConversa(conv({ client_id: "c-final", contato: "Cliente Final" }), AGORA_1510, 0).assunto, "fone:5547900000001");
+});
+
+Deno.test("pressa: 'amanhã' escrito ontem é hoje; 'hoje'/'urgente' nas últimas 24 h também", () => {
+  const amanha = candidatoDeConversa(conv({ recebidas: [{ body: "Tu quer que eu leve o motorhome amanhã?", em: "2026-10-14T17:53:05Z" }] }), AGORA_1510, 0);
+  assertEquals(amanha.perdeHoje, true);
+  assertStringIncludes(amanha.titulo, 'Parece ter pressa (escreveu ontem "amanhã", que é hoje).');
+  // "amanhã" escrito hoje cedo é amanhã mesmo
+  const deHoje = candidatoDeConversa(conv({ last_inbound_at: "2026-10-14T20:10:00Z", recebidas: [{ body: "passo aí amanhã", em: "2026-10-15T09:00:00Z" }] }), AGORA_1510, 0);
+  assertEquals(deHoje.perdeHoje, false);
+});
+
+Deno.test("pedir preço é pedido de verdade, não vendedor falando de preço", () => {
+  const contato = (body: string) => candidatoDeConversa(conv({
+    categoria: "contato", client_id: null, contato: "x", last_inbound_at: "2026-10-14T13:00:00Z", recebidas: [{ body, em: "2026-10-14T13:00:00Z" }],
+  }), AGORA_1510, 0).tipo;
+  for (const pede of ["Pode me passar o orçamento por favor", "Favor orçar a instalação de 2 baterias", "Quanto fica pra trocar?", "Qual o valor?", "Preciso de um orçamento", "quero fechar"]) {
+    assertEquals(contato(pede), "contato_pedindo_preco", pede);
+  }
+  for (const fala of ["Pode mas ai será o preço de tabela, já consigo buscar uma proposta diferenciada", "tem muita diferença de preços entre a 288 e 628 ?", "Vi teu pix no orçamento"]) {
+    assertEquals(contato(fala), "contato_sem_cadastro", fala);
+  }
+});
+
+Deno.test("15/10: todos os candidatos do dia (o rascunho de agosto e as OS andando ou concluídas com cobrança ficam de fora)", () => {
+  const cs = candidatosDoDia(coleta1510(), AGORA_1510, HOJE);
+  // 5 cobranças + 7 conversas + 7 orçamentos (sem o de agosto) + 3 OS (OS-00104 e OS-00069 paradas, OS-00112 esperando compra)
+  assertEquals(cs.length, 5 + 7 + 7 + 3);
+  assert(!cs.some((c) => c.nome.startsWith("ORÇ-00078")));
+  assertEquals(cs.filter((c) => c.elegivel).map((c) => c.referencia).sort(), [
+    "fone:5511900000002", "fone:5547900000001", "fone:5547900000003", "fone:5547900000004",
+    "os:o-112", "os:q-117", "os:q-118", "os:q-95", "recv:r-joao", "recv:r-marcelo",
+  ]);
+  // a OS-00104 sem tarefa aberta às 07:30 é "parada" (lista), não "esperando compra"
+  assertEquals(cs.find((c) => c.referencia === "os:o-104")!.tipo, "os_parada");
+});
