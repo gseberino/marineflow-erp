@@ -1,9 +1,12 @@
 // Regras do vigia acompanhar-conversas (06/10/2026) — puras, para testar sem banco.
 // plans/marineflow-acompanhar-conversa.md
 import { dentroDaJanela } from "./promessa.ts";
+import { MOTIVO_CONTATO_ENCERROU } from "../whatsapp/contato-encerrou.ts";
 
 const BRASILIA_MS = 3 * 60 * 60 * 1000;
 export const AVISOS_POR_DIA = 3;
+/** Até quantos dias para trás uma mensagem do contato pode encerrar o acompanhamento. */
+export const DIAS_DO_ENCERRAMENTO = 7;
 
 export interface Acompanhamento {
   id: string;
@@ -23,6 +26,22 @@ export interface Acompanhamento {
 export interface EstadoDaConversa {
   ultimaRecebida: { em: string; texto: string } | null;
   ultimaEnviadaEm: string | null;
+  /**
+   * O contato disse, nas últimas recebidas desde janelaDoEncerramento, que fechou com outra empresa
+   * ou desistiu (conversaEncerradaPeloContato, regra de palavras sem IA).
+   */
+  encerrouPeloContato?: boolean;
+}
+
+/**
+ * Desde quando (ISO) as recebidas contam para "o contato encerrou": os últimos 7 dias, mas nunca
+ * antes do acompanhamento nascer — se o dono pediu para acompanhar DEPOIS de o contato dizer que
+ * fechou com outra, o pedido dele vale.
+ */
+export function janelaDoEncerramento(a: Pick<Acompanhamento, "created_at">, agora: Date): string {
+  const seteDias = agora.getTime() - DIAS_DO_ENCERRAMENTO * 86_400_000;
+  const criado = Date.parse(a.created_at);
+  return new Date(Number.isNaN(criado) ? seteDias : Math.max(seteDias, criado)).toISOString();
 }
 
 /** O dia em Brasília (AAAA-MM-DD) — o teto de avisos é por dia local. */
@@ -46,6 +65,9 @@ export type Decisao = { acao: "avisar" } | { acao: "encerrar"; motivo: string } 
 /** O que fazer com um acompanhamento agora. */
 export function decidir(a: Acompanhamento, c: EstadoDaConversa, agora: Date): Decisao {
   const t = agora.getTime();
+  // Primeiro de tudo, em qualquer modo: quem fechou com outra empresa ou desistiu não espera
+  // resposta nem promessa. Caso Miguel (07/10/2026): 7 avisos depois de ele dizer que fechou.
+  if (c.encerrouPeloContato) return { acao: "encerrar", motivo: MOTIVO_CONTATO_ENCERROU };
   if (a.modo === "lembrar_em" || a.modo === "promessa") {
     return a.lembrar_em && Date.parse(a.lembrar_em) <= t ? { acao: "avisar" } : { acao: "esperar" };
   }

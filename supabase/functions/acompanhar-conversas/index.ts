@@ -10,11 +10,16 @@
 // conversa dos comprovantes ligada (F2, 11/10/2026), "aberta" é o registro único de pergunta ativa:
 // a pergunta de um comprovante ou um "posso mandar?" dos lembretes também faz esperar. A pendência
 // que o assistente criar com o aviso entra no registro pelo próprio ai-agent.
+// Contato que disse que fechou com outra empresa ou desistiu (15/10/2026): o acompanhamento se
+// encerra sozinho, sem aviso (regra de palavras, _shared/whatsapp/contato-encerrou.ts).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { detectarPromessa } from "../_shared/ai/promessa.ts";
-import { type Acompanhamento, decidir, diaEmBrasilia, type EstadoDaConversa, horaDeAvisar, textoDoAviso } from "../_shared/ai/acompanhar.ts";
+import {
+  type Acompanhamento, decidir, diaEmBrasilia, type EstadoDaConversa, horaDeAvisar, janelaDoEncerramento, textoDoAviso,
+} from "../_shared/ai/acompanhar.ts";
+import { conversaEncerradaPeloContato, ULTIMAS_RECEBIDAS } from "../_shared/whatsapp/contato-encerrou.ts";
 import {
   conversaDosComprovantesLigada,
   donoOcupadoParaPerguntar,
@@ -34,17 +39,26 @@ const AVISOS_POR_RODADA = 2;
 // deno-lint-ignore no-explicit-any
 type Db = any;
 
-async function estadoDaConversa(admin: Db, phone: string): Promise<EstadoDaConversa> {
+async function estadoDaConversa(admin: Db, a: Pick<Acompanhamento, "phone_normalized" | "created_at">, agora: Date): Promise<EstadoDaConversa> {
+  const phone = a.phone_normalized;
   const [{ data: rec }, { data: env }] = await Promise.all([
+    // As 5 últimas recebidas: a 1ª é a "última recebida"; as que caem na janela (7 dias, e só
+    // depois de o acompanhamento nascer) dizem se o contato fechou com outra empresa ou desistiu.
+    // A última sozinha não basta: o Miguel disse "fechando com outra empresa" e depois "Sim, já fechei".
     admin.from("whatsapp_messages").select("body, occurred_at").eq("phone_normalized", phone).eq("direction", "inbound")
-      .order("occurred_at", { ascending: false }).limit(1),
+      .order("occurred_at", { ascending: false }).limit(ULTIMAS_RECEBIDAS),
     admin.from("whatsapp_messages").select("occurred_at").eq("phone_normalized", phone).eq("direction", "outbound")
       .order("occurred_at", { ascending: false }).limit(1),
   ]);
-  const r = rec?.[0];
+  const recebidas = (rec ?? []) as Array<{ body: string | null; occurred_at: string }>;
+  const r = recebidas[0];
+  const desde = Date.parse(janelaDoEncerramento(a, agora));
   return {
     ultimaRecebida: r ? { em: r.occurred_at, texto: String(r.body ?? "") } : null,
     ultimaEnviadaEm: env?.[0]?.occurred_at ?? null,
+    encerrouPeloContato: conversaEncerradaPeloContato(
+      recebidas.filter((m) => Date.parse(m.occurred_at) >= desde).map((m) => m.body),
+    ),
   };
 }
 
@@ -88,7 +102,7 @@ async function avisar(admin: Db, agora: Date, conversaLigada: boolean) {
 
   for (const a of (ativos ?? []) as Array<Acompanhamento & { criado_por: string | null }>) {
     resultado.avaliados++;
-    const conversa = await estadoDaConversa(admin, a.phone_normalized);
+    const conversa = await estadoDaConversa(admin, a, agora);
     const d = decidir(a, conversa, agora);
     if (d.acao === "encerrar") {
       await admin.from("whatsapp_acompanhamentos").update({ status: "encerrado", encerrado_motivo: d.motivo, updated_at: agora.toISOString() }).eq("id", a.id);

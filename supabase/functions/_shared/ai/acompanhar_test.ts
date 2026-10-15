@@ -3,7 +3,8 @@
 // prazo vencido encerra; lembrete e promessa avisam uma vez na hora; só no horário comercial; o
 // texto pede ao assistente para ler, sugerir e chamar send_whatsapp_message.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { type Acompanhamento, decidir, horaDeAvisar, tempoEsperando, textoDoAviso } from "./acompanhar.ts";
+import { type Acompanhamento, decidir, horaDeAvisar, janelaDoEncerramento, tempoEsperando, textoDoAviso } from "./acompanhar.ts";
+import { conversaEncerradaPeloContato, MOTIVO_CONTATO_ENCERROU } from "../whatsapp/contato-encerrou.ts";
 
 // Terça 06/10/2026, 14:00 em Brasília.
 const AGORA = new Date("2026-10-06T17:00:00.000Z");
@@ -57,4 +58,42 @@ Deno.test("o texto do aviso pede para ler, sugerir e chamar send_whatsapp_messag
   assertStringIncludes(p, 'você escreveu a Miguel (+55 (47) 99999-0000): "Amanhã te mando o orçamento"');
   assertEquals(tempoEsperando(horasAtras(0.5), AGORA), "30 min");
   assertEquals(tempoEsperando(horasAtras(72), AGORA), "3 dias");
+});
+
+// "Fechou com outra" encerra o acompanhamento (15/10/2026). Caso real do Miguel: o acompanhamento
+// nasceu em 06/10 13:47; em 07/10 às 14:15 ele escreveu que fechou com outra empresa, às 14:58
+// "Sim, já fechei" — e o vigia avisou o dono mais 7 vezes (08 a 10/10) até o dono encerrar à mão.
+Deno.test("contato que fechou com outra empresa: encerra, em qualquer modo, com o motivo", () => {
+  const miguel: Acompanhamento = {
+    ...base, id: "8830f06c-8972-44f9-9d08-bf4adfcc1527", phone_normalized: "351966776422",
+    ate: "2026-10-13T16:47:20.319Z", created_at: "2026-10-06T16:47:20.375Z",
+  };
+  const AS_1430 = new Date("2026-10-07T17:30:00.000Z"); // 07/10 14:30 em Brasília, a rodada seguinte
+  // As recebidas, da mais recente para a mais antiga (como o vigia lê).
+  const recebidas = ["[conteúdo vazio]", "André você demora muito pra responder e por isso acabei fechando com outra empresa. Obrigado"];
+  const estado = {
+    ultimaRecebida: { em: "2026-10-07T17:23:03.261Z", texto: "[conteúdo vazio]" },
+    ultimaEnviadaEm: "2026-10-07T16:45:00.000Z",
+    encerrouPeloContato: conversaEncerradaPeloContato(recebidas),
+  };
+  assertEquals(decidir(miguel, estado, AS_1430), { acao: "encerrar", motivo: MOTIVO_CONTATO_ENCERROU });
+  // Antes da regra, o mesmo estado esperava e, passado o intervalo, avisava.
+  const semMarca = { ...estado, encerrouPeloContato: undefined };
+  assertEquals(decidir(miguel, semMarca, AS_1430), { acao: "esperar" });
+  assertEquals(decidir(miguel, semMarca, new Date("2026-10-08T12:00:00.000Z")), { acao: "avisar" });
+  // Promessa e lembrete também: não há o que cumprir para quem já fechou com outra.
+  const promessa: Acompanhamento = { ...miguel, modo: "promessa", lembrar_em: horasAtras(1), promessa: "Amanhã te mando o orçamento" };
+  assertEquals(decidir(promessa, estado, AGORA), { acao: "encerrar", motivo: MOTIVO_CONTATO_ENCERROU });
+  // "Sim, já fechei" sozinho é ambíguo: não encerra.
+  assertEquals(conversaEncerradaPeloContato(["Sim, já fechei"]), false);
+});
+
+Deno.test("janela do encerramento: 7 dias, mas nunca antes do acompanhamento nascer", () => {
+  const agora = new Date("2026-10-07T17:30:00.000Z");
+  // Criado há 1 dia: só vale o que ele disse depois disso.
+  assertEquals(janelaDoEncerramento({ created_at: "2026-10-06T16:47:20.375Z" }, agora), "2026-10-06T16:47:20.375Z");
+  // Criado há 20 dias: só os últimos 7.
+  assertEquals(janelaDoEncerramento({ created_at: "2026-09-17T12:00:00.000Z" }, agora), "2026-09-30T17:30:00.000Z");
+  // Data ilegível: os últimos 7 dias.
+  assertEquals(janelaDoEncerramento({ created_at: "" }, agora), "2026-09-30T17:30:00.000Z");
 });
