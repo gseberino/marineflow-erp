@@ -4,6 +4,25 @@
 import type { FluxoQueFalou, OptionsData, Proposal } from "./agent.ts";
 import { formatOptionsAsNumberedText, notaDeConfirmacao } from "./whatsapp-channel.ts";
 
+/**
+ * O erro como o dono deve ler (15/10/2026): erro técnico cru ("Falha ao chamar a Anthropic API",
+ * "HTTP 530", "violates check constraint", um uuid) vira uma frase em português; erro de negócio
+ * ("A cotação COT-00012 está fechada") passa como veio. O texto cru continua no log e na pendência
+ * (ai_operator_pending_actions.result) — quem chama registra antes de trocar.
+ */
+const MARCAS_TECNICAS = [
+  /\bHTTP\s*\d{3}\b/i, /\bPGRST\d*/i, /\bviolates\b/i, /\bconstraint\b/i, /\brelation\s+"/i, /\bcolumn\s+"/i,
+  /\bsyntax error\b/i, /\bTypeError\b/, /\bJWT\b/i, /\bfetch failed\b/i, /\bAnthropic\b/i, /\bOpenRouter\b/i,
+  /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i,
+];
+export const ERRO_DO_SISTEMA_PARA_O_DONO = "não consegui concluir agora (erro do sistema, já anotado). Tente de novo em instantes.";
+
+export function erroParaODono(erro: unknown): string {
+  // Erro que não é texto (objeto do banco, do provedor) é técnico por natureza.
+  if (typeof erro !== "string" || !erro.trim()) return ERRO_DO_SISTEMA_PARA_O_DONO;
+  return MARCAS_TECNICAS.some((m) => m.test(erro)) ? ERRO_DO_SISTEMA_PARA_O_DONO : erro;
+}
+
 export interface DesfechoDoTurno {
   error?: string;
   options?: OptionsData;
@@ -25,14 +44,19 @@ export function respostaDoTurnoNoWhatsApp(
   let replyText: string;
 
   if (d.error) {
-    replyText = `⚠️ ${d.error}`;
+    // ⚠️ fica para erro e risco; o erro técnico cru não chega ao dono (erroParaODono).
+    const paraODono = erroParaODono(d.error);
+    if (paraODono !== d.error) console.warn("[whatsapp] erro do turno (cru):", d.error);
+    replyText = `⚠️ ${paraODono}`;
     novo.pending_confirm_action_id = null;
   } else if (d.options) {
     replyText = formatOptionsAsNumberedText(d.options.question, d.options.options);
     novo.pending_options = d.options.options;
     novo.pending_confirm_action_id = null;
   } else if (d.proposal) {
-    replyText = `⚠️ ${d.proposal.title}\n${d.proposal.summary_markdown}${notaDeConfirmacao(d.proposal.risk_level)}`;
+    // Cartão de confirmação sem ⚠️ (15/10/2026): o ícone dos erros em toda confirmação (67 em 30
+    // dias) tirava o peso do aviso de verdade. O título em negrito é a pergunta.
+    replyText = `*${d.proposal.title}*\n${d.proposal.summary_markdown}${notaDeConfirmacao(d.proposal.risk_level)}`;
     novo.pending_confirm_action_id = d.proposal.pending_action_id;
     novo.pin_attempts = 0;
     novo.pending_options = null;

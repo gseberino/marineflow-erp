@@ -7,7 +7,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { prepararFerramentasDoTurno, ressalvaDoResultado, runAgentLoop, type Proposal } from "../_shared/ai/agent.ts";
-import { respostaDoTurnoNoWhatsApp } from "../_shared/ai/whatsapp-resposta.ts";
+import { erroParaODono, respostaDoTurnoNoWhatsApp } from "../_shared/ai/whatsapp-resposta.ts";
 import {
   desfechoDoPainel,
   enfileirarTurnoNoMax,
@@ -430,7 +430,9 @@ async function resolveWhatsAppConfirmation(
     event_category: "data",
     payload: { channel: "whatsapp", args: pending.payload, risk: pending.risk_level, result_summary: JSON.stringify(execResult ?? null).slice(0, 500) },
   });
-  const message = execError ? `⚠️ ${pending.title} — falhou: ${execError}` : `✅ ${pending.title} — executado.${ressalvaDoResultado(execResult)}`;
+  // Erro técnico cru não vai ao dono (15/10/2026): fica no log e em ai_operator_pending_actions.result.
+  if (execError && erroParaODono(execError) !== execError) console.warn(`[ai-agent][whatsapp] ${pending.action_name} falhou (cru):`, execError);
+  const message = execError ? `⚠️ ${pending.title} — falhou: ${erroParaODono(execError)}` : `✅ ${pending.title} — executado.${ressalvaDoResultado(execResult)}`;
   return await comAProximaPendencia(admin, pending, message, clearedMetadata);
 }
 
@@ -1153,8 +1155,10 @@ servirComCors(async (req) => {
       const sufixoFila = restantes > 0
         ? ` ${restantes === 1 ? "Falta 1 ação" : `Faltam ${restantes} ações`} deste mesmo pedido — segue a próxima.`
         : "";
+      // Erro técnico cru não vai ao dono (15/10/2026): fica no log e em ai_operator_pending_actions.result.
+      if (execError && erroParaODono(execError) !== execError) console.warn(`[ai-agent][painel] ${pending.action_name} falhou (cru):`, execError);
       const execMsg = execError
-        ? `⚠️ ${pending.title} — falhou: ${execError}${sufixoFila}`
+        ? `⚠️ ${pending.title} — falhou: ${erroParaODono(execError)}${sufixoFila}`
         : `✅ ${pending.title} — executado.${ressalvaDoResultado(execResult)}${sufixoFila}`;
       // Continuidade: injeta uma mensagem assistant simples no histórico (não um tool_result
       // sintético — o tool_result do momento da interceptação já foi persistido no turno

@@ -131,6 +131,9 @@ Deno.test("reapresentação diz de quando é o pedido, o que é e como responder
   assertStringIncludes(t, "Cliente Final");
   assertStringIncludes(t, "sim <SEU PIN>");
   assert(!textoDaPendenciaReapresentada({ title: "X", risk_level: "low" }).includes("PIN"));
+  // 15/10/2026: a confirmação não leva o ícone dos erros; o título vai em negrito.
+  assertStringIncludes(t, "\n*Enviar orçamento/OS ao cliente (WhatsApp)*\n");
+  assert(!t.includes("⚠️"));
 });
 
 Deno.test("nota de confirmação: PIN só no risco alto", () => {
@@ -605,7 +608,7 @@ Deno.test("enviarComRegistro: registra ANTES do envio e guarda o id do WhatsApp 
     pergunta_registrar_externa: { id: "perg-9", substituiu: { origem: "comprovante", referencia_codigo: "CMP-00124" } },
   });
   const wa = await comEnvio(ordem, "WA-9", () =>
-    enviarComRegistro(admin, TELEFONE_DO_DONO, "⚠️ Lançar no Caixa", {
+    enviarComRegistro(admin, TELEFONE_DO_DONO, "*Lançar no Caixa*", {
       acao: "registrar", tipo: "confirmacao", referencia_id: "pend-9", titulo: "Lançar no Caixa",
     }, { ligada: true }));
   assertEquals(wa, "WA-9");
@@ -725,13 +728,13 @@ Deno.test("enviarComRegistro: substituiu a pergunta de um CMP → a mensagem diz
     return Promise.resolve(new Response(JSON.stringify({ success: true, kind: "text", messageId: "WA-9" }), { status: 200 }));
   }) as typeof globalThis.fetch;
   try {
-    await enviarComRegistro(admin, TELEFONE_DO_DONO, "⚠️ Lançar no Caixa", {
+    await enviarComRegistro(admin, TELEFONE_DO_DONO, "*Lançar no Caixa*", {
       acao: "registrar", tipo: "confirmacao", referencia_id: "pend-9", titulo: "Lançar no Caixa",
     }, { ligada: true });
   } finally {
     globalThis.fetch = original;
   }
-  assertEquals(enviados, ["⚠️ Lançar no Caixa\n\n(O CMP-00124 ficou para depois: *cmp 124* retoma.)"]);
+  assertEquals(enviados, ["*Lançar no Caixa*\n\n(O CMP-00124 ficou para depois: *cmp 124* retoma.)"]);
 });
 
 // ─── 11/10/2026: o fluxo de comprovantes já falou (texto vazio) e o "sim + número + texto" ──────

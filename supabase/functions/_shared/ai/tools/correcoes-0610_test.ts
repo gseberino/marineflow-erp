@@ -138,7 +138,8 @@ Deno.test("duplicar: número do contador, peças com o preço de venda e, se alg
 Deno.test("WhatsApp: depois de decidir, o próximo pedido da leva aparece com quantos faltam", () => {
   const t = textoDaProximaPendencia({ title: "Registrar diária", summary: "- Roberto, dia inteiro", risk_level: "medium" }, 3);
   assertStringIncludes(t, "Próximo pedido (faltam 3):");
-  assertStringIncludes(t, "⚠️ Registrar diária");
+  // 15/10/2026: confirmação sem o ícone dos erros — o título em negrito.
+  assertStringIncludes(t, "*Registrar diária*");
   assertStringIncludes(t, "Responda *sim*");
   const ultimo = textoDaProximaPendencia({ title: "Dar baixa", summary: "", risk_level: "high" }, 1);
   assertStringIncludes(ultimo, "Último pedido que falta:");

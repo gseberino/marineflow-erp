@@ -193,7 +193,8 @@ export function textoDaPendenciaReapresentada(pendencia: {
     })
     : null;
   const cabecalho = quando ? `Este pedido de ${quando} ainda espera a sua resposta:` : "Este pedido ainda espera a sua resposta:";
-  return `${cabecalho}\n⚠️ ${pendencia.title}\n${pendencia.summary ?? ""}${notaDeConfirmacao(pendencia.risk_level)}`;
+  // Sem ⚠️ (15/10/2026): o ícone fica para erro e risco, não para toda confirmação.
+  return `${cabecalho}\n*${pendencia.title}*\n${pendencia.summary ?? ""}${notaDeConfirmacao(pendencia.risk_level)}`;
 }
 
 /**
@@ -208,7 +209,7 @@ export function textoDaProximaPendencia(
   restantes: number,
 ): string {
   const cabecalho = restantes > 1 ? `Próximo pedido (faltam ${restantes}):` : "Último pedido que falta:";
-  return `${cabecalho}\n⚠️ ${pendencia.title}\n${pendencia.summary ?? ""}${notaDeConfirmacao(pendencia.risk_level)}`;
+  return `${cabecalho}\n*${pendencia.title}*\n${pendencia.summary ?? ""}${notaDeConfirmacao(pendencia.risk_level)}`;
 }
 
 /** Sessão de WhatsApp: reusa se ativa há menos de 4h, senão cria uma nova (levando a pendência viva). */
