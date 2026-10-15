@@ -259,7 +259,7 @@ declare
   v_detalhe text;
 begin
   perform pg_temp._livrar();
-  v_dentro := extract(isodow from v_agora) <> 7 and v_agora::time >= time '08:00' and v_agora::time < time '20:00';
+  v_dentro := extract(isodow from v_agora) <> 7 and v_agora::time >= time '09:30' and v_agora::time < time '20:00'; -- 09:30: janela da manhã (20261016100000)
   perform public.comprovante_conversa_entrar(array[v_cmp]);
   -- pausa do "sair": o vigia não pergunta e a lista do vigia não traz o telefone; um comprovante
   -- NOVO (abertura) é ação do dono: acaba a pausa e pergunta

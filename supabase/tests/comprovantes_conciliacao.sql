@@ -753,7 +753,7 @@ declare
   v_detalhe text;
 begin
   perform pg_temp._livrar();
-  v_dentro := extract(isodow from v_agora) <> 7 and v_agora::time >= time '08:00' and v_agora::time < time '20:00';
+  v_dentro := extract(isodow from v_agora) <> 7 and v_agora::time >= time '09:30' and v_agora::time < time '20:00'; -- 09:30: janela da manhã (20261016100000)
   v_cmp := (pg_temp._cmp(jsonb_build_object('valor', v_val, 'forma', 'debito', 'cnpj', pg_temp._cnpj()))->>'id')::uuid;
   perform pg_temp._linha(jsonb_build_object('valor', v_val));
   perform public.comprovantes_reavaliar_banco('teste', null);
