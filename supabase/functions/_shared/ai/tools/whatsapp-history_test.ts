@@ -1,5 +1,5 @@
 import { assertEquals, assert, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { whatsappHistoryTools, textoDaMensagem } from "./whatsapp-history.ts";
+import { quandoBR, whatsappHistoryTools, textoDaMensagem } from "./whatsapp-history.ts";
 
 // O que estes testes protegem, em ordem de gravidade:
 //
@@ -210,6 +210,26 @@ Deno.test("a tool não é oferecida a técnico nem a vendedor externo", () => {
   assertEquals(tool.roles?.includes("technician" as never), false);
   assertEquals(tool.roles?.includes("external_seller" as never), false);
   assertEquals(tool.risk, "low");
+});
+
+// 15/10/2026, caso real: a mensagem do Miguel de 07/10 ("…acabei fechando com outra empresa") foi
+// gravada às 17:15:54 UTC. O histórico entregava o instante cru e o modelo leu "17h15" — era 14:15.
+Deno.test("hora de Brasília no histórico: 17:15 UTC vira '07/10 14:15'; saída pelo MarineFlow é dita", async () => {
+  const r: any = await tool.execute({ phone: "+351 966 776 422" }, ctxAdmin({
+    whatsapp_messages: [
+      { ...msg("outbound", "2026-10-07T17:58:11.047+00:00", "Miguel, você tem razão, demorei e peço desculpa.", "text", "351966776422"), sent_by: "6f1c1f0e-1111-4c4c-9a9a-0a0a0a0a0a0a" },
+      msg("inbound", "2026-10-07T17:15:54.400578+00:00", "André você demora muito pra responder e por isso acabei fechando com outra empresa. Obrigado", "text", "351966776422"),
+      msg("outbound", "2026-10-07T11:00:00+00:00", "digitado no celular", "text", "351966776422"),
+    ],
+    clients: [{ id: "c1", name: "Miguel", whatsapp: "+351966776422", phone: "+351966776422" }], suppliers: [], app_users: [],
+  }) as any);
+  assertEquals(r.mensagens.map((m: any) => [m.quando, m.quem]), [
+    ["07/10 08:00", "nós"],
+    ["07/10 14:15", "Miguel"],
+    ["07/10 14:58", "nós (pelo MarineFlow)"],
+  ]);
+  assertEquals(quandoBR("2026-10-01T02:30:00Z"), "30/09 23:30", "virada do dia em Brasília");
+  assertEquals(quandoBR(null), null);
 });
 
 Deno.test("textoDaMensagem diz a verdade sobre cada tipo", () => {

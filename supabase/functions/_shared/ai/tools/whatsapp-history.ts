@@ -137,10 +137,28 @@ function audioMudo(m: { body?: string | null; message_type?: string | null }): b
   return m.message_type === "audio" && (!b || /^\[[a-z]+\]$/i.test(b));
 }
 
+const BRASILIA_MS = 3 * 60 * 60 * 1000;
+
+/**
+ * "07/10 14:15" — dia/mês e hora de Brasília (sem horário de verão desde 2019).
+ *
+ * 15/10/2026: o histórico ia ao modelo com o instante cru ("2026-10-07T17:15:54.400578+00:00") e
+ * ele leu "17h15" — a mensagem do Miguel foi às 14:15. Sem data válida, devolve o que veio.
+ */
+export function quandoBR(iso: unknown): string | null {
+  if (iso == null || iso === "") return null;
+  const t = new Date(String(iso)).getTime();
+  if (!Number.isFinite(t)) return String(iso);
+  const d = new Date(t - BRASILIA_MS);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+
 function linha(m: any, dono: Dono | undefined) {
   return {
-    quem: m.direction === "inbound" ? (dono?.nome ?? "contato") : "nós",
-    quando: m.occurred_at ?? m.created_at,
+    // Saída com sent_by saiu pelo MarineFlow (tela ou assistente); sem, foi digitada no celular.
+    quem: m.direction === "inbound" ? (dono?.nome ?? "contato") : m.sent_by ? "nós (pelo MarineFlow)" : "nós",
+    quando: quandoBR(m.occurred_at ?? m.created_at),
     texto: textoDaMensagem(m),
   };
 }
@@ -227,7 +245,7 @@ export const whatsappHistoryTools: ToolDef[] = [
         };
       }
 
-      const colunas = "direction, body, message_type, occurred_at, created_at, phone_normalized";
+      const colunas = "direction, body, message_type, occurred_at, created_at, phone_normalized, sent_by";
 
       // ── Conversa de um contato ────────────────────────────────────────────
       if (telefone) {

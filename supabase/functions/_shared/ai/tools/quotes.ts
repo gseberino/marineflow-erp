@@ -1,6 +1,7 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
 import { gerarOCDaCotacao, localizarCotacao } from "./compras-base.ts";
 import { chaveTelefone } from "../phone.ts";
+import { quandoBR } from "./whatsapp-history.ts";
 import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 
 // Módulo de COTAÇÃO a fornecedores (Fase 2 · Etapa 1).
@@ -391,7 +392,8 @@ export const quoteTools: ToolDef[] = [
         // Já convertida em texto: 🎤 áudio transcrito, 📄 PDF lido, 📷 imagem lida.
         const origem = b.startsWith("🎤") ? "audio" : b.startsWith("📄") ? "pdf" : b.startsWith("📷") ? "image" : "text";
         return {
-          quando: m.occurred_at || m.created_at,
+          // Dia/hora de Brasília ("07/10 14:15"), não o instante UTC cru (15/10/2026).
+          quando: quandoBR(m.occurred_at || m.created_at),
           message_id: m.id, // use este id em read_supplier_media
           origem, // use como `source` no record_quote_response
           texto: naoLida ? null : b,
