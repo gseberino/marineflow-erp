@@ -482,6 +482,18 @@ export default function FiscalEmission() {
       return next;
     });
   };
+  // O "Atualizar" só invalidava a consulta: recarregava em silêncio e, sem nada mudar
+  // na lista, parecia um botão morto (15/10/2026). Agora gira e confirma.
+  const [atualizandoLista, setAtualizandoLista] = useState(false);
+  const atualizarLista = async () => {
+    setAtualizandoLista(true);
+    try {
+      await qc.refetchQueries({ queryKey: ['issued_fiscal_documents'] });
+      toast.success('Lista de notas atualizada.');
+    } finally {
+      setAtualizandoLista(false);
+    }
+  };
 
 
   // Config da empresa emitente: componente próprio (D33); abrir é só mostrar.
@@ -1382,7 +1394,22 @@ export default function FiscalEmission() {
       });
       if (error) throw new Error(await extractInvokeErrorMessage(error));
       if (data?.error) throw new Error(data.error);
-      qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] });
+      // Diz o que achou: em nota já autorizada nada muda na lista, e o silêncio parecia
+      // falha. O caso que mais confunde é o PDF que o provedor ainda não entregou.
+      const { data: fresh } = await supabase.from('issued_fiscal_documents')
+        .select('status, pdf_storage_path')
+        .eq('id', docId)
+        .maybeSingle();
+      await qc.refetchQueries({ queryKey: ['issued_fiscal_documents'] });
+      if (fresh?.status === 'authorized' && !fresh.pdf_storage_path) {
+        toast.warning(
+          'Nota autorizada e XML guardado, mas o provedor ainda não entregou o PDF. '
+          + 'O sistema tenta de novo sozinho a cada 15 minutos.',
+          { duration: 12_000 },
+        );
+      } else {
+        toast.success('Situação conferida no provedor.');
+      }
     } catch (err: any) {
       toast.error('Erro ao atualizar status: ' + err.message);
     } finally {
@@ -1430,7 +1457,17 @@ export default function FiscalEmission() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (err: any) {
-      toast.error('Erro ao baixar o documento: ' + err.message);
+      // "HTTP 500 ao baixar o artefato" é o provedor falhando ao gerar/entregar o arquivo,
+      // não a nota com problema — dizer isso em vez do código cru.
+      if (/HTTP 5\d\d/.test(String(err?.message))) {
+        toast.error(
+          `O provedor não entregou o ${kind === 'pdf_danfe' ? 'PDF' : 'XML'} agora (falha do lado dele). `
+          + 'A nota continua autorizada — tente de novo em alguns minutos.',
+          { duration: 12_000 },
+        );
+      } else {
+        toast.error('Erro ao baixar o documento: ' + err.message);
+      }
     } finally {
       markBusy(doc.id, false);
     }
@@ -1688,8 +1725,8 @@ export default function FiscalEmission() {
               </span>
             ) : null}
           </h2>
-          <Button variant="ghost" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ['issued_fiscal_documents'] })}>
-            <RefreshCw className="h-4 w-4 mr-1" />Atualizar
+          <Button variant="ghost" size="sm" onClick={atualizarLista} disabled={atualizandoLista}>
+            <RefreshCw className={`h-4 w-4 mr-1${atualizandoLista ? ' animate-spin' : ''}`} />Atualizar
           </Button>
         </div>
 
@@ -1906,7 +1943,7 @@ export default function FiscalEmission() {
                               texto: 'Carta de correção (CC-e)', icone: Pencil,
                               onClick: () => setCorrectionTarget({ id: doc.id, number: doc.number, series: doc.series }),
                             }] : []),
-                            { texto: 'Atualizar situação na SEFAZ', icone: RefreshCw, onClick: () => handleRefreshStatus(doc.id) },
+                            { texto: ehNfe ? 'Atualizar situação na SEFAZ' : 'Atualizar situação', icone: RefreshCw, onClick: () => handleRefreshStatus(doc.id) },
                             {
                               texto: 'Cancelar nota', icone: Ban, perigo: true,
                               onClick: () => setCancelTarget({ id: doc.id, authorized_at: doc.authorized_at }),
