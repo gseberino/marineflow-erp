@@ -22,7 +22,7 @@ import { applySenderRules, persistInboundEmail, storagePathFor } from "../_share
 import { matchSender, type MatchCandidate } from "../_shared/email/sender-match.ts";
 import { triageEmail, type Triage } from "../_shared/email/triage.ts";
 import { MAX_URGENTES_PADRAO } from "../_shared/email/digest.ts";
-import { displaySender } from "../_shared/email/normalize.ts";
+import { displaySender, normalizeAddress } from "../_shared/email/normalize.ts";
 import { extrairDados, fornecedorPelaNota } from "../_shared/email/dados.ts";
 import type { InboundEmail } from "../_shared/email/types.ts";
 import { extractText, getDocumentProxy } from "npm:unpdf@0.12.1";
@@ -96,6 +96,28 @@ async function avisadosHoje(admin: Db): Promise<number> {
   const desde = new Date(inicio.getTime() + 3 * 3600_000).toISOString();
   const { count } = await admin.from("email_messages").select("id", { count: "exact", head: true }).gte("alerted_at", desde);
   return count ?? 0;
+}
+
+/**
+ * O mesmo remetente e assunto já virou aviso nos últimos 30 dias (15/10/2026). O golpe "CONTRATO
+ * 20037247643 - Advocacia Antonio Samuel da Silveira" chegou em 13 e 14/10, do mesmo endereço, e
+ * foi avisado na hora duas vezes. Compara como store.ts grava (endereço em minúsculas; assunto
+ * aparado e cortado em 500). Erro na leitura = não achou: um urgente repetido é melhor que um
+ * golpe novo calado.
+ */
+async function jaAvisadoAntes(admin: Db, endereco: string | null | undefined, assunto: string | null | undefined): Promise<boolean> {
+  if (!normalizeAddress(endereco)) return false;
+  const gravado = assunto?.trim().slice(0, 500) || null;
+  let q = admin.from("email_messages").select("id")
+    .eq("from_address", normalizeAddress(endereco))
+    .gte("alerted_at", new Date(Date.now() - 30 * 86400_000).toISOString());
+  q = gravado === null ? q.is("subject", null) : q.eq("subject", gravado);
+  const { data, error } = await q.limit(1);
+  if (error) {
+    console.warn("[email-imap] não conferi aviso anterior do mesmo e-mail:", error.message);
+    return false;
+  }
+  return (data ?? []).length > 0;
 }
 
 async function avisarUrgente(admin: Db, conta: string, remetente: string, assunto: string | null, motivo: string | null, fraude: boolean) {
@@ -273,11 +295,17 @@ servirComCors(async (req) => {
           }).eq("id", id);
           r.triados = Number(r.triados) + 1;
           if (recente && t.classe === "urgent" && jaAvisados < MAX_URGENTES_PADRAO) {
-            const remetente = match?.name ?? displaySender(email.from);
-            await avisarUrgente(admin, conta.address, remetente, email.subject, t.motivo, t.alertaFraude);
-            await admin.from("email_messages").update({ alerted_at: new Date().toISOString() }).eq("id", id);
-            jaAvisados++;
-            r.avisados = Number(r.avisados) + 1;
+            // Mesmo remetente e assunto já avisado: a triagem fica gravada, o aviso não se repete.
+            const repetido = await jaAvisadoAntes(admin, email.from.address, email.subject);
+            if (!repetido) {
+              const remetente = match?.name ?? displaySender(email.from);
+              await avisarUrgente(admin, conta.address, remetente, email.subject, t.motivo, t.alertaFraude);
+              await admin.from("email_messages").update({ alerted_at: new Date().toISOString() }).eq("id", id);
+              jaAvisados++;
+              r.avisados = Number(r.avisados) + 1;
+            } else {
+              r.urgentes_ja_avisados = Number(r.urgentes_ja_avisados ?? 0) + 1;
+            }
           }
         }
         cursor = uid;
