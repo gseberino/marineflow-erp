@@ -19,9 +19,15 @@ import { normalizeText } from "../_shared/banking/matching.ts";
 import { linhasDoExtratoNoResumo } from "./extrato.ts";
 import { canceladasSemComprovante, debitosSemComprovante, linhasDosComprovantes } from "./comprovantes.ts";
 import { lerAnalise } from "../_shared/financeiro/vigia-do-negocio.ts";
-import { montarSecaoEmail, type EmailDigestItem } from "../_shared/email/digest.ts";
+import { chaveDoAviso, montarSecaoEmail, type EmailDigestItem } from "../_shared/email/digest.ts";
 import { resumoDosDados } from "../_shared/email/dados.ts";
 import { embarcacoesComPlano, secaoDeRevisoes, type PlanoDoResumo, type SecaoDeRevisoes } from "./revisoes.ts";
+import { linhasDasEntradas, separarEntradas, type EntradaDoBanco, type EntradasSeparadas, type PagamentoSemExtrato } from "./entradas.ts";
+import { despesasPendentesDoMes, faturamentoPorCliente, notaDoMes } from "./mes.ts";
+import { linhaDasPropostas, linhaDoOrcamento, linhaSeHouver, nomeDeContato, tentativasAte } from "./linhas.ts";
+import { linhasDoHistorico } from "./historico.ts";
+import { conversaEncerradaPeloContato } from "../_shared/whatsapp/contato-encerrou.ts";
+import { resolveOrCreateWhatsAppSession } from "../_shared/ai/whatsapp-channel.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -90,10 +96,14 @@ servirComCors(async (req) => {
     if (!recipients || recipients.length === 0) return jr({ ok: true, sent: 0, reason: "no_recipients" });
 
     const now = new Date();
-    const todayISO = now.toISOString().slice(0, 10);
-    const dayStart = `${todayISO}T00:00:00`;
-    const tomorrow = new Date(now.getTime() + 86400000).toISOString().slice(0, 10);
-    const dayEnd = `${tomorrow}T00:00:00`;
+    // O dia de Brasília: a edge roda em UTC, e depois das 21h o dia UTC já é o seguinte. Até
+    // 15/10/2026 os agendamentos de "hoje" iam de 00:00 a 00:00 sem fuso (o banco lia como UTC:
+    // das 21h de ontem às 21h de hoje em Brasília). Brasília não tem horário de verão desde 2019.
+    const hojeBR = diaBR(now);
+    const todayISO = hojeBR;
+    const dayStart = new Date(`${hojeBR}T00:00:00-03:00`).toISOString();
+    const dayEnd = new Date(new Date(dayStart).getTime() + 86400000).toISOString();
+    const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 
     // ── Métricas do dia ──
     const { data: overdueRows } = await admin
@@ -270,7 +280,33 @@ servirComCors(async (req) => {
     const { data: waitingRows } = await admin.rpc("whatsapp_esperando_resposta", { _since: since7d, _limit: 60 });
     const todasEsperando = ((waitingRows as any[]) || []);
     const encerradas = todasEsperando.filter((w: any) => w.encerrada);
-    const waiting = todasEsperando.filter((w: any) => !w.encerrada);
+    let waiting = todasEsperando.filter((w: any) => !w.encerrada);
+    // Quem disse que fechou com outra empresa ou desistiu (15/10/2026, regra de palavras sem IA, em
+    // _shared/whatsapp/contato-encerrou.ts) sai da lista: a RPC só olha a ÚLTIMA mensagem, e o "Sim,
+    // já fechei" do Miguel (07/10) sozinho é ambíguo — a regra olha as 5 últimas recebidas em 7 dias.
+    // Erro na leitura = a lista como antes (nada some por engano).
+    let desistiram = 0;
+    try {
+      const fones = waiting.map((w: any) => String(w.phone ?? "")).filter(Boolean);
+      if (fones.length > 0) {
+        const { data: recebidas, error: rErr } = await admin.from("whatsapp_messages")
+          .select("phone_normalized, body, occurred_at")
+          .eq("direction", "inbound").in("phone_normalized", fones).gte("occurred_at", since7d)
+          .order("occurred_at", { ascending: false }).limit(1000);
+        if (rErr) throw rErr;
+        const porFone = new Map<string, string[]>();
+        for (const m of (recebidas as any[]) || []) {
+          const l = porFone.get(m.phone_normalized) ?? [];
+          l.push(m.body);
+          porFone.set(m.phone_normalized, l);
+        }
+        const antes = waiting.length;
+        waiting = waiting.filter((w: any) => !conversaEncerradaPeloContato(porFone.get(String(w.phone)) ?? []));
+        desistiram = antes - waiting.length;
+      }
+    } catch (e) {
+      console.warn("[ai-daily-briefing] leitura de quem desistiu falhou:", (e as Error).message);
+    }
     const porCategoria = (c: string) => waiting.filter((w: any) => w.categoria === c);
     const clientesEsperando = porCategoria("cliente");
     const fornecedoresEsperando = porCategoria("fornecedor");
@@ -288,19 +324,24 @@ servirComCors(async (req) => {
       ].filter(Boolean).join(" · ");
       waitingLines.push(`💬 Esperando resposta: *${waiting.length}* (${partes})`);
       for (const w of clientesEsperando.slice(0, 5)) {
-        waitingLines.push(`   • *${w.contato}* (cliente) — há ${haQuanto(w.last_inbound_at)}${mediaHint(w.last_body)}`);
+        waitingLines.push(`   • *${nomeDeContato(w.contato)}* (cliente) — há ${haQuanto(w.last_inbound_at)}${mediaHint(w.last_body)}`);
       }
       for (const w of outrosEsperando.slice(0, Math.max(0, 6 - Math.min(5, clientesEsperando.length)))) {
-        waitingLines.push(`   • ${w.contato} — há ${haQuanto(w.last_inbound_at)}${mediaHint(w.last_body)}`);
+        waitingLines.push(`   • ${nomeDeContato(w.contato)} — há ${haQuanto(w.last_inbound_at)}${mediaHint(w.last_body)}`);
       }
       const mostrados = Math.min(5, clientesEsperando.length) + Math.min(Math.max(0, 6 - Math.min(5, clientesEsperando.length)), outrosEsperando.length);
       const resto = clientesEsperando.length + outrosEsperando.length - mostrados;
       if (resto > 0) waitingLines.push(`   …e mais ${resto}`);
-      if (fornecedoresEsperando.length) waitingLines.push(`   🏭 Fornecedores: ${fornecedoresEsperando.map((w: any) => w.contato).slice(0, 4).join(", ")}${fornecedoresEsperando.length > 4 ? "…" : ""}`);
+      if (fornecedoresEsperando.length) waitingLines.push(`   🏭 Fornecedores: ${fornecedoresEsperando.map((w: any) => nomeDeContato(w.contato)).slice(0, 4).join(", ")}${fornecedoresEsperando.length > 4 ? "…" : ""}`);
     } else {
       waitingLines.push(`💬 Esperando resposta: *0* ✅`);
     }
     if (encerradas.length) waitingLines.push(`   (+${encerradas.length} só disseram "ok/obrigado" — não precisam de resposta)`);
+    if (desistiram) {
+      waitingLines.push(desistiram === 1
+        ? `   (+1 disse que fechou com outra empresa ou desistiu — saiu da lista)`
+        : `   (+${desistiram} disseram que fecharam com outra empresa ou desistiram — saíram da lista)`);
+    }
 
     // Conversas que o dono pediu para acompanhar e promessas dele para hoje (06/10/2026).
     try {
@@ -310,8 +351,8 @@ servirComCors(async (req) => {
       const lista = (acomp as any[]) || [];
       const acompanhando = lista.filter((a) => a.modo === "acompanhar");
       const promessasHoje = lista.filter((a) => a.modo === "promessa" && a.lembrar_em && a.lembrar_em <= fimDoDia);
-      if (acompanhando.length) waitingLines.push(`👁️ Acompanhando: ${acompanhando.map((a) => a.contato || a.phone_normalized).slice(0, 5).join(", ")}`);
-      if (promessasHoje.length) waitingLines.push(`🤝 Promessas suas para hoje: *${promessasHoje.length}* (${promessasHoje.map((a) => a.contato || a.phone_normalized).slice(0, 4).join(", ")})`);
+      if (acompanhando.length) waitingLines.push(`👁️ Acompanhando: ${acompanhando.map((a) => nomeDeContato(a.contato || a.phone_normalized)).slice(0, 5).join(", ")}`);
+      if (promessasHoje.length) waitingLines.push(`🤝 Promessas suas para hoje: *${promessasHoje.length}* (${promessasHoje.map((a) => nomeDeContato(a.contato || a.phone_normalized)).slice(0, 4).join(", ")})`);
     } catch (_e) {
       // Enriquecimento: nunca derruba o resumo.
     }
@@ -331,11 +372,10 @@ servirComCors(async (req) => {
       const rows = todas.filter((p) => p.kind !== "anomaly");
       const alertas = todas.filter((p) => p.kind === "anomaly");
       filaFinanceiraCount = rows.length;
-      const fmtBRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-      if (rows.length > 0) {
-        const soma = rows.reduce((s, p) => s + Math.abs(Number(p.suggested_amount ?? 0)), 0);
-        filaFinanceiraLines.push(`🧾 Propostas de lançamento esperando você: *${rows.length}* (${fmtBRL.format(soma)})`);
-      }
+      // 15/10/2026: saída, entrada e transferência separadas — somar tudo em valor absoluto dava um
+      // número que não era nada (51 = 46 saídas + 4 entradas + 1 transferência).
+      const linhaPropostas = linhaDasPropostas(rows, (v) => fmt.format(v));
+      if (linhaPropostas) filaFinanceiraLines.push(linhaPropostas);
       // Vigilante de despesas (módulo IV, decisão do dono de 14/09): só avisa, e avisa aqui.
       if (alertas.length > 0) {
         filaFinanceiraLines.push(`⚠️ Vigilante de despesas: *${alertas.length}* alerta(s)`);
@@ -409,6 +449,100 @@ servirComCors(async (req) => {
       console.warn("[ai-daily-briefing] bloco do extrato falhou:", (e as Error).message);
     }
 
+    // ── Extrato por identificar (varredura de conciliação) ─────────────────────
+    // Só reporta: dinheiro que entrou na conta e ainda não foi ligado a nada. Não concilia
+    // nada sozinho aqui — a conciliação automática só acontece na camada de certeza, e
+    // por ação explícita na tela ou no agente.
+    // 15/10/2026: era `.limit(4)` e a linha contava o que voltava — travada em 4 (eram 10). Agora
+    // conta todas e separa (./entradas.ts): as do mês; os Pix que já são um sinal lançado à mão
+    // (pagamento confirmado sem linha do extrato, mesmo valor e data — nunca pelo nome de quem
+    // pagou); e as antigas/centavos. As duas últimas viram UMA linha de escritório. Fica antes do
+    // conselheiro: o "Mês até aqui" usa as entradas do mês.
+    const conciliaLines: string[] = [];
+    let entradasSeparadas: EntradasSeparadas | null = null;
+    try {
+      const { data: pendentesBanco, error: bErr } = await admin
+        .from("bank_transactions")
+        .select("id, transaction_date, description, amount")
+        .eq("reconciled", false)
+        .eq("transaction_type", "credit")
+        .eq("source_type", "bank")
+        .is("dismissed_at", null)
+        .order("amount", { ascending: false })
+        .limit(1000);
+      if (bErr) throw bErr;
+
+      // Pagamentos já lançados sem linha do extrato (a mesma leitura dos candidatos do motor,
+      // _shared/banking/candidatos.ts). Erro aqui = sem reconhecer sinais (a linha de antes), não silêncio.
+      let pagamentos: PagamentoSemExtrato[] = [];
+      try {
+        const { data: pags, error: pErr } = await admin
+          .from("payments")
+          .select("id, amount, payment_date, payment_method, receivables(description, bank_transaction_id, clients(name))")
+          .eq("status", "confirmed")
+          .is("bank_transaction_id", null)
+          .not("receivable_id", "is", null)
+          .gte("payment_date", somarDiasAoDia(hojeBR, -60))
+          .limit(1000);
+        if (pErr) throw pErr;
+        const lidos = ((pags as any[]) || []).filter((p) => !p.receivables?.bank_transaction_id);
+        const ids = lidos.map((p) => String(p.id));
+        const ligados = new Set<string>();
+        if (ids.length > 0) {
+          const { data: lig, error: lErr } = await admin
+            .from("bank_transactions").select("reconciled_payment_id").in("reconciled_payment_id", ids);
+          if (lErr) throw lErr;
+          for (const r of (lig as any[]) || []) ligados.add(String(r.reconciled_payment_id));
+        }
+        pagamentos = lidos.filter((p) => !ligados.has(String(p.id))).map((p) => {
+          const desc = p.receivables?.description ?? "Pagamento já lançado";
+          const cliente = p.receivables?.clients?.name;
+          return {
+            id: String(p.id), amount: p.amount, payment_date: String(p.payment_date),
+            rotulo: cliente ? `${desc} (${cliente})` : desc, forma: p.payment_method ?? null,
+          };
+        });
+      } catch (e) {
+        console.warn("[ai-daily-briefing] leitura dos pagamentos sem extrato falhou:", (e as Error).message);
+      }
+
+      const separadas = separarEntradas(((pendentesBanco as any[]) || []) as EntradaDoBanco[], pagamentos, hojeBR);
+      entradasSeparadas = separadas;
+
+      // Roda o motor para dizer o que as entradas do mês provavelmente são, em vez de só
+      // apontar que existem. Só sugere — conciliar continua sendo ação explícita.
+      const sugestoesPorTx = new Map<string, string>();
+      if (separadas.doMes.length > 0) {
+        try {
+          const resp = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/banking-reconcile`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-cron-secret": Deno.env.get("CRON_SECRET") ?? "",
+            },
+            body: JSON.stringify({ action: "suggest", limit: 20 }),
+          });
+          if (resp.ok) {
+            const dados = await resp.json();
+            for (const item of dados.transactions || []) {
+              const melhor = (item.suggestions || [])[0];
+              if (melhor) {
+                sugestoesPorTx.set(
+                  item.transaction.id,
+                  `${melhor.candidate.label}${melhor.candidate.clientName ? ` (${melhor.candidate.clientName})` : ""} · ${melhor.score}%`,
+                );
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[ai-daily-briefing] motor de conciliação indisponível:", e);
+        }
+      }
+      conciliaLines.push(...linhasDasEntradas(separadas, (v) => fmt.format(v), sugestoesPorTx, hojeBR));
+    } catch (e) {
+      console.warn("[ai-daily-briefing] varredura de conciliação falhou:", e);
+    }
+
     // ── Conselheiro (Executivo Financeiro, módulo V — decisão do dono de 14/09/2026) ──
     // No máximo três CONSTATAÇÕES: resultado do mês até aqui, concentração do faturamento e
     // a próxima semana no vermelho. A SUGESTÃO fica separada, no bloco "Sugestão de hoje".
@@ -417,15 +551,17 @@ servirComCors(async (req) => {
     let semanaNoVermelho: { inicio: string; saldo: number } | null = null;
     try {
       const fmtBRL0 = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
-      const deMes = `${todayISO.slice(0, 7)}-01`;
-      const [cats, pays, recs, entradas] = await Promise.all([
+      const deMes = `${hojeBR.slice(0, 7)}-01`;
+      const [cats, pays, recs, filaDoMes] = await Promise.all([
         admin.from("financial_categories").select("name, type, dre_group"),
         // Despesa cancelada não entra no resultado (a receita cancelada já era filtrada).
-        admin.from("payables").select("amount, expense_category").neq("status", "cancelled").gte("issue_date", deMes).lte("issue_date", todayISO),
-        admin.from("receivables").select("amount, status").gte("issue_date", deMes).lte("issue_date", todayISO),
-        admin.from("bank_transactions").select("id", { count: "exact", head: true })
-          .eq("transaction_type", "credit").eq("reconciled", false).eq("source_type", "bank")
-          .gte("transaction_date", deMes).lte("transaction_date", todayISO),
+        admin.from("payables").select("amount, expense_category").neq("status", "cancelled").gte("issue_date", deMes).lte("issue_date", hojeBR),
+        admin.from("receivables").select("amount, status, client_id, clients(name)").gte("issue_date", deMes).lte("issue_date", hojeBR),
+        // 15/10/2026: as despesas do mês que ainda estão na fila de propostas (27, R$ 11.143,82
+        // naquele dia) ficavam fora do resultado — que saía otimista com a nota de "pessimista".
+        admin.from("finance_review_queue").select("suggested_amount, dre_group, suggested_category")
+          .eq("status", "pending").eq("kind", "create_payable")
+          .gte("suggested_date", deMes).lte("suggested_date", hojeBR).limit(1000),
       ]);
       const grupoDe = new Map<string, string>();
       for (const c of (cats.data as any[]) || []) if (c.dre_group) grupoDe.set(`payable:${c.name}`, c.dre_group);
@@ -434,21 +570,31 @@ servirComCors(async (req) => {
         .reduce((s, p) => s + Number(p.amount || 0), 0);
       const receita = ((recs.data as any[]) || []).filter((r) => r.status !== "cancelled").reduce((s, r) => s + Number(r.amount || 0), 0);
       const saidas = somaGrupo("custo_direto") + somaGrupo("despesa_operacional") + somaGrupo("financeiro");
-      const semReceita = entradas.count ?? 0;
       if (receita > 0 || saidas > 0) {
+        const grupoDaCategoria = new Map<string, string>();
+        for (const c of (cats.data as any[]) || []) if (c.dre_group && c.type === "payable") grupoDaCategoria.set(String(c.name), c.dre_group);
+        // Fila ilegível = sem a parte das despesas na nota (nunca "faltam 0").
+        const despesasPendentes = filaDoMes.error
+          ? { n: 0, soma: 0 }
+          : despesasPendentesDoMes((filaDoMes.data as any[]) || [], grupoDaCategoria);
+        if (filaDoMes.error) console.warn("[ai-daily-briefing] fila do mês ilegível:", filaDoMes.error.message);
+        const doMes = entradasSeparadas?.doMes ?? [];
+        const entradasSemReceita = { n: doMes.length, soma: doMes.reduce((s, e) => s + Number(e.amount || 0), 0) };
         conselheiroLines.push(
           `📊 Mês até aqui: receita ${fmtBRL0.format(receita)} · custos e despesas ${fmtBRL0.format(saidas)} · resultado *${fmtBRL0.format(receita - saidas)}*`
-          + (semReceita > 0 ? ` (${semReceita} entrada(s) do banco ainda sem receita lançada — o número está pessimista)` : ""),
+          + notaDoMes({ despesasPendentes, entradasSemReceita }, (v) => fmtBRL0.format(v)),
         );
       }
 
-      const { data: topRows } = await admin.rpc("bi_top_clients", { _since: deMes, _limit: 500 });
-      const top = ((topRows as any[]) || []).filter((c) => Number(c.revenue) > 0);
-      const totalFat = top.reduce((s, c) => s + Number(c.revenue), 0);
-      if (totalFat > 0 && top.length > 0) {
-        const tres = top.slice(0, 3).map((c) => `${String(c.name || "sem cliente").split(" ")[0]} ${Math.round(100 * Number(c.revenue) / totalFat)}%`);
-        const concentrado = Number(top[0].revenue) / totalFat >= 0.5;
-        conselheiroLines.push(`🏆 Faturamento do mês por cliente: ${tres.join(" · ")}${concentrado ? " — concentrado" : ""}`);
+      // O faturado do mês por cliente (os mesmos recebíveis da receita acima). Até 15/10/2026 vinha
+      // da rpc bi_top_clients, que soma as OS CRIADAS no mês ("Nelson 100%" com o faturado real em
+      // Marcelo 44% · Nelson 27% · Giancarlo 15%). Um cliente só não vira linha.
+      if (!recs.error) {
+        const linhaFat = faturamentoPorCliente(((recs.data as any[]) || []).map((r) => ({
+          amount: r.amount, status: r.status, client_id: r.client_id ?? null,
+          nome: (Array.isArray(r.clients) ? r.clients[0]?.name : r.clients?.name) ?? null,
+        })));
+        if (linhaFat) conselheiroLines.push(linhaFat);
       }
 
       // Quatro semanas à frente: a receber (pendente) menos a pagar (pendente), por semana.
@@ -501,7 +647,6 @@ servirComCors(async (req) => {
       console.warn("[ai-daily-briefing] bloco IA acompanhando falhou:", (e as Error).message);
     }
 
-    const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
     const dateBR = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
 
     // ── Orçamentos parados / expirando (Fase 2 do piloto) ──
@@ -509,14 +654,12 @@ servirComCors(async (req) => {
     // Orçamento recém-mexido não polui o digest. Ordena pelos mais parados primeiro.
     const { data: openQuotes } = await admin
       .from("service_orders")
-      .select("service_order_number, grand_total, updated_at, quote_status, created_at, quote_validity_days, quote_validity_date, clients(name)")
+      .select("service_order_number, grand_total, updated_at, quote_status, created_at, quote_validity_days, quote_validity_date, clients(name), vessels(name)")
       .eq("status", "draft")
       .in("quote_status", ["sent", "awaiting_approval", "awaiting_deposit"])
       .order("updated_at", { ascending: true })
       .limit(20);
     const todayMid = new Date(`${todayISO}T00:00:00`).getTime();
-    // O dia de Brasília: a edge roda em UTC, e depois das 21h o dia UTC já é o seguinte.
-    const hojeBR = diaBR(now);
     const daqui3Dias = somarDiasAoDia(hojeBR, 3);
     const quoteLines: string[] = [];
     const flaggedQuotes = ((openQuotes as any[]) || [])
@@ -529,14 +672,20 @@ servirComCors(async (req) => {
         const expired = !!fim && hojeBR > fim;
         const expiringSoon = !!fim && !expired && fim <= daqui3Dias;
         const nome = Array.isArray(q.clients) ? q.clients[0]?.name : q.clients?.name;
-        return { nome: nome || "(sem cliente)", valor: Number(q.grand_total || 0), dias, expired, expiringSoon };
+        const barco = Array.isArray(q.vessels) ? q.vessels[0]?.name : q.vessels?.name;
+        // 15/10/2026: sempre com o número (ORÇ-xxxxx) e o barco — "Cliente Final" sozinho não diz qual é.
+        return {
+          numero: String(q.service_order_number || "Orçamento"),
+          nome: nomeDeContato(nome) || "(sem cliente)",
+          barco: barco ? nomeDeContato(barco) : null,
+          valor: Number(q.grand_total || 0), dias, expired, expiringSoon,
+        };
       })
       .filter((q: any) => q.dias >= 2 || q.expired || q.expiringSoon)
       .slice(0, 5);
     if (flaggedQuotes.length > 0) {
       for (const q of flaggedQuotes) {
-        const tag = q.expired ? " · ⚠️ expirado" : q.expiringSoon ? " · ⏳ expira em breve" : "";
-        quoteLines.push(`   • ${q.nome} — ${fmt.format(q.valor)} · parado ${q.dias}d${tag}`);
+        quoteLines.push(linhaDoOrcamento({ ...q, cliente: q.nome }, (v) => fmt.format(v)));
       }
     }
 
@@ -550,68 +699,7 @@ servirComCors(async (req) => {
     for (const r of overdueSorted) {
       const nome = Array.isArray(r.clients) ? r.clients[0]?.name : r.clients?.name;
       const dias = r.due_date ? Math.floor((todayMid - new Date(`${r.due_date}T00:00:00`).getTime()) / 86400000) : 0;
-      recebLines.push(`   • ${nome || "(sem cliente)"} — ${fmt.format(Number(r.balance_amount ?? r.amount ?? 0))} · vencido ${dias}d`);
-    }
-
-    // ── Extrato por identificar (varredura de conciliação) ─────────────────────
-    // Só reporta: dinheiro que entrou na conta e ainda não foi ligado a nada. Não concilia
-    // nada sozinho aqui — a conciliação automática só acontece na camada de certeza, e
-    // por ação explícita na tela ou no agente.
-    const conciliaLines: string[] = [];
-    try {
-      const { data: pendentesBanco } = await admin
-        .from("bank_transactions")
-        .select("id, transaction_date, description, amount, transaction_type")
-        .eq("reconciled", false)
-        .eq("transaction_type", "credit")
-        .order("amount", { ascending: false })
-        .limit(4);
-
-      const pend = (pendentesBanco as any[]) || [];
-      if (pend.length > 0) {
-        const total = pend.reduce((s, t) => s + Number(t.amount || 0), 0);
-        conciliaLines.push(`🏦 Entradas sem identificação: *${pend.length}* (${fmt.format(total)})`);
-
-        // Roda o motor para dizer o que essas entradas provavelmente são, em vez de só
-        // apontar que existem. Só sugere — conciliar continua sendo ação explícita.
-        let sugestoesPorTx = new Map<string, string>();
-        try {
-          const resp = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/banking-reconcile`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-cron-secret": Deno.env.get("CRON_SECRET") ?? "",
-            },
-            body: JSON.stringify({ action: "suggest", limit: 20 }),
-          });
-          if (resp.ok) {
-            const dados = await resp.json();
-            for (const item of dados.transactions || []) {
-              const melhor = (item.suggestions || [])[0];
-              if (melhor) {
-                sugestoesPorTx.set(
-                  item.transaction.id,
-                  `${melhor.candidate.label}${melhor.candidate.clientName ? ` (${melhor.candidate.clientName})` : ""} · ${melhor.score}%`,
-                );
-              }
-            }
-          }
-        } catch (e) {
-          console.warn("[ai-daily-briefing] motor de conciliação indisponível:", e);
-        }
-
-        for (const t of pend.slice(0, 3)) {
-          const desc = String(t.description || "").slice(0, 40);
-          const palpite = sugestoesPorTx.get(t.id);
-          conciliaLines.push(
-            palpite
-              ? `   • ${fmt.format(Number(t.amount))} — parece ser ${palpite}`
-              : `   • ${fmt.format(Number(t.amount))} — ${desc}`,
-          );
-        }
-      }
-    } catch (e) {
-      console.warn("[ai-daily-briefing] varredura de conciliação falhou:", e);
+      recebLines.push(`   • ${nomeDeContato(nome) || "(sem cliente)"} — ${fmt.format(Number(r.balance_amount ?? r.amount ?? 0))} · vencido ${dias}d`);
     }
 
     // ── E-mail (08/10/2026): o que chegou nas caixas financeiro@ e gustavo@ nas últimas 24 h, já
@@ -621,9 +709,22 @@ servirComCors(async (req) => {
     try {
       const desde = new Date(now.getTime() - 24 * 3600_000).toISOString();
       const { data: emails, error: eErr } = await admin.from("email_messages")
-        .select("id, from_name, from_address, subject, received_at, triage_class, triage_fraud_alert, muted, dados_extraidos, clients(name), suppliers(name), email_attachments(kind)")
+        .select("id, from_name, from_address, subject, received_at, triage_class, triage_fraud_alert, alerted_at, muted, dados_extraidos, clients(name), suppliers(name), email_attachments(kind)")
         .gte("received_at", desde).not("triage_class", "is", null).order("received_at", { ascending: false }).limit(200);
       if (eErr) throw eErr;
+      // Urgente já avisado na hora (email-imap grava alerted_at) ANTES de hoje não volta como
+      // "Urgente": vira número no rodapé (15/10/2026 — o mesmo golpe avisado em 13 e 14/10 voltou
+      // nos resumos de 14 e 15/10). Aviso de hoje de madrugada continua aparecendo. Erro = como antes.
+      const avisadosAntes = new Set<string>();
+      if (((emails ?? []) as any[]).some((m) => m.triage_class === "urgent")) {
+        const { data: avisos, error: avErr } = await admin.from("email_messages")
+          .select("from_address, subject")
+          .gte("alerted_at", new Date(now.getTime() - 30 * 86400000).toISOString())
+          .lt("alerted_at", dayStart)
+          .limit(1000);
+        if (avErr) console.warn("[ai-daily-briefing] avisos de e-mail anteriores ilegíveis:", avErr.message);
+        for (const a of (avisos as any[]) || []) avisadosAntes.add(chaveDoAviso(a.from_address, a.subject));
+      }
       const itens: EmailDigestItem[] = ((emails ?? []) as any[]).filter((m) => !m.muted).map((m) => {
         const kinds = ((m.email_attachments ?? []) as { kind: string }[]).map((a) => a.kind);
         // NF-e e boleto conferidos por DV (etapa 4); sem dado extraído, só o tipo do anexo.
@@ -636,6 +737,7 @@ servirComCors(async (req) => {
           recebidoEm: m.received_at,
           resumoAnexo,
           alertaFraude: !!m.triage_fraud_alert,
+          jaAvisado: m.triage_class === "urgent" && avisadosAntes.has(chaveDoAviso(m.from_address, m.subject)),
         };
       });
       const secao = montarSecaoEmail(itens);
@@ -722,13 +824,14 @@ servirComCors(async (req) => {
     const linhas = [
       `☀️ *Bom dia! Resumo de ${dateBR}*`,
       "",
-      `📅 Agendamentos hoje: *${scheduledCount ?? 0}*`,
+      // Contador zerado não ocupa linha (15/10/2026); o `metrics` do retorno segue com os números.
+      ...[linhaSeHouver("📅 Agendamentos hoje", scheduledCount)].filter((l): l is string => !!l),
       `📄 Orçamentos aguardando resposta: *${quotesCount ?? 0}*`,
       ...quoteLines,
       `💸 Recebíveis vencidos: *${overdueCount}*${overdueCount > 0 ? ` (${fmt.format(overdueSum)})` : ""}`,
       ...recebLines,
       ...(upcomingCount > 0 ? [`🔜 A vencer (próx. 3 dias): *${upcomingCount}* (${fmt.format(upcomingSum)})`] : []),
-      `✅ Aprovações da IA pendentes: *${pendingCount ?? 0}*`,
+      ...[linhaSeHouver("✅ Aprovações da IA pendentes", pendingCount)].filter((l): l is string => !!l),
       ...filaFinanceiraLines,
       ...extratoNoResumo.linhas,
       ...conselheiroLines,
@@ -851,15 +954,39 @@ servirComCors(async (req) => {
       return jr({ ok: true, dry: true, recipients: recipients.length, preview: messageFor(recipients[0] || {}) });
     }
 
-    // Enfileira uma mensagem por destinatário. O whatsapp-queue-worker (cron de 1min) entrega.
+    // Enfileira uma mensagem por destinatário. O whatsapp-queue-worker entrega e, se falhar, tenta de
+    // novo ~10 min depois (reagenda +5 min, mas roda de 5 em 5). Até 15/10/2026 eram 3 tentativas
+    // (07:35, 07:45, 07:55): em 09 e 13/10 a fila desistiu e o WhatsApp voltou às 08:28 e às 08:56 —
+    // a manhã não chegou. Agora tenta até ~09:05 (10 tentativas às 07:30).
+    const maxTentativas = tentativasAte("09:00", now);
     const rows = recipients.map((rec: any) => ({
       phone_normalized: String(rec.phone_normalized),
       message: messageFor(rec),
       source: "ai_briefing",
       priority: 4,
+      max_attempts: maxTentativas,
     }));
     const { data: inserted, error: qErr } = await admin.from("whatsapp_send_queue").insert(rows).select("id");
     if (qErr) throw qErr;
+
+    // O resumo entra no histórico da conversa do assistente (15/10/2026): sem isso, "cobra esse" ou
+    // "o 2" não tinha a que se referir. Duas linhas (./historico.ts) e a conversa marcada como ativa.
+    // Falha aqui só loga: o resumo já está na fila.
+    let historicoGravado = 0;
+    for (const rec of recipients as any[]) {
+      if (!rec.id || !rec.phone_normalized) continue;
+      try {
+        const agoraHist = new Date();
+        const sessao = await resolveOrCreateWhatsAppSession(admin, String(rec.phone_normalized), String(rec.id));
+        const { error: hErr } = await admin.from("ai_operator_messages").insert(linhasDoHistorico(sessao, messageFor(rec), agoraHist));
+        if (hErr) throw hErr;
+        const { error: sErr } = await admin.from("ai_operator_sessions").update({ last_activity_at: agoraHist.toISOString() }).eq("id", sessao);
+        if (sErr) console.warn("[ai-daily-briefing] conversa não marcada como ativa:", sErr.message);
+        historicoGravado++;
+      } catch (e) {
+        console.warn("[ai-daily-briefing] resumo fora do histórico do assistente:", rec.id, (e as Error).message);
+      }
+    }
 
     // O vigia também fica no sino de quem decide (admin e financeiro), para consultar depois.
     if (vigiaLines.length) {
@@ -874,6 +1001,7 @@ servirComCors(async (req) => {
     return jr({
       ok: true,
       queued: inserted?.length ?? 0,
+      historico: historicoGravado,
       metrics: { scheduled: scheduledCount ?? 0, quotes: quotesCount ?? 0, overdue: overdueCount, overdue_sum: overdueSum, pending: pendingCount ?? 0 },
     });
   } catch (e: any) {
