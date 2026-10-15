@@ -15,6 +15,12 @@
 // Horário (15/10/2026): só avisa das 8h às 20h de Brasília, e o "dia" das chaves é o de Brasília
 // (horario.ts). Antes o dia era o UTC e o aviso de orçamentos parados saía às 21:10, todo dia.
 // Também avisa quando o resumo da manhã desistiu de chegar (WhatsApp fora do ar).
+//
+// Voz única (secretário, Passo 4, 15/10/2026): com app_settings.voz_unica em sombra, cada sinal que SAIU
+// é registrado no portão (avisos_do_dono) com o destino que a spec dá a ele (_shared/uma-voz/fontes.ts:
+// vence hoje e orçamentos parados acabam — a manhã já mostra; saldo, estoque e cota vão ao escritório;
+// certificado e consentimento pela faixa de dias; NF-e rejeitada e a manhã que não chegou acordam). O
+// que sai para a equipe não muda. Desligado (o padrão): nada é registrado.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider } from "../_shared/fiscal/factory.ts";
@@ -24,6 +30,9 @@ import {
   diaDoAviso, inicioDoDiaBR, inicioDoMesBR, podeAvisarAgora, type ResumoNaFila, resumoDeHojeCobre,
   telefonesSemResumo, tentativasAteAs20h, TEXTO_RESUMO_NAO_CHEGOU,
 } from "./horario.ts";
+import type { AvisoDaFonte } from "../_shared/uma-voz/portao.ts";
+import { avisoDoCertificado, avisoDoConsentimento, avisoDoVigia, avisoResumoNaoChegou } from "../_shared/uma-voz/fontes.ts";
+import { lerPortao, registrarNoPortao, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -79,6 +88,13 @@ servirComCors(async (req) => {
     const resumosDeHoje = (resumosErr ? [] : resumosLidos ?? []) as ResumoNaFila[];
 
     const alerts: string[] = [];
+    // Voz única: o que cada sinal pediria ao portão (registrado só depois que o alerta entrar na fila).
+    const portao = await lerPortao(admin);
+    const paraOPortao: AvisoDaFonte[] = [];
+    const alertar = (texto: string, aviso: AvisoDaFonte) => {
+      alerts.push(texto);
+      paraOPortao.push(aviso);
+    };
 
     // (1) Recebíveis vencidos HOJE
     const { data: dueToday } = await admin
@@ -86,7 +102,8 @@ servirComCors(async (req) => {
       .in("status", ["pending", "partially_paid"]).eq("is_deposit", false).eq("due_date", todayISO);
     if ((dueToday?.length ?? 0) > 0 && await claim(`overdue_today:${todayISO}`, { n: dueToday!.length })) {
       const sum = dueToday!.reduce((a: number, r: any) => a + Number(r.balance_amount ?? r.amount ?? 0), 0);
-      alerts.push(`💸 *${dueToday!.length}* recebível(is) vence(m) hoje — total ${fmt.format(sum)}. Vale acionar a cobrança.`);
+      const t = `💸 *${dueToday!.length}* recebível(is) vence(m) hoje — total ${fmt.format(sum)}. Vale acionar a cobrança.`;
+      alertar(t, avisoDoVigia("vence_hoje", todayISO, t));
     }
 
     // (2) Orçamentos parados há mais de 7 dias
@@ -99,7 +116,8 @@ servirComCors(async (req) => {
     // orçamentos parados. Só sai quando o resumo de hoje não chegou (nem está a caminho); a chave
     // não é gasta antes disso, então a rodada seguinte ainda pode avisar.
     if ((staleQuotes ?? 0) > 0 && !resumoDeHojeCobre(resumosDeHoje) && await claim(`stale_quotes:${todayISO}`, { n: staleQuotes })) {
-      alerts.push(`📄 *${staleQuotes}* orçamento(s) parado(s) há mais de 7 dias sem resposta. Talvez valha um follow-up.`);
+      const t = `📄 *${staleQuotes}* orçamento(s) parado(s) há mais de 7 dias sem resposta. Talvez valha um follow-up.`;
+      alertar(t, avisoDoVigia("orcamentos_parados", todayISO, t));
     }
 
     // ── Sinais FISCAIS (NF-e) — reaproveitam o mesmo canal/dedup ──
@@ -113,7 +131,8 @@ servirComCors(async (req) => {
         if (days <= 30 && await claim(`fiscal_cert_expiry:${todayISO}`, { days, vu })) {
           const urg = days <= 7 ? " *URGENTE*" : "";
           const quando = days < 0 ? "está VENCIDO" : `vence em ${days} dia(s)`;
-          alerts.push(`🔐 Certificado A1${urg}: ${quando} (${vu}). Renove na Contora para não parar a emissão de NF-e.`);
+          const t = `🔐 Certificado A1${urg}: ${quando} (${vu}). Renove na Contora para não parar a emissão de NF-e.`;
+          alertar(t, avisoDoCertificado(String(vu), days, todayISO, t));
         }
       }
     } catch (_e) {
@@ -134,7 +153,8 @@ servirComCors(async (req) => {
         const dias = Math.floor((new Date(c.consent_expires_at).getTime() - now.getTime()) / 864e5);
         if (dias <= 30 && await claim(`consent_expiry:${c.id}:${todayISO}`, { dias })) {
           const quando = dias < 0 ? "VENCEU" : `vence em ${dias} dia(s)`;
-          alerts.push(`🏦 Consentimento do extrato bancário ${quando} (${String(c.consent_expires_at).slice(0, 10)}). Renove a conexão no Pluggy antes que o extrato pare de chegar.`);
+          const t = `🏦 Consentimento do extrato bancário ${quando} (${String(c.consent_expires_at).slice(0, 10)}). Renove a conexão no Pluggy antes que o extrato pare de chegar.`;
+          alertar(t, avisoDoConsentimento(c.id, dias, todayISO, t));
         }
       }
     } catch (_e) {
@@ -164,7 +184,8 @@ servirComCors(async (req) => {
         if (Math.abs(Number(ult.diferenca) - Number(anterior.diferenca)) >= 1) continue;
         if (await claim(`saldo_divergente:${c.id}:${todayISO}`, { diferenca: ult.diferenca })) {
           const brl = (v: unknown) => Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-          alerts.push(`🏦 Extrato de ${c.label}: o saldo do banco (${brl(ult.saldo_do_provedor)}) não bate com a soma das transações importadas (${brl(ult.saldo_calculado)}), diferença ${brl(ult.diferenca)}. A diferença se repetiu nas duas últimas conferências: confira no app do banco se falta alguma transação no sistema (Financeiro › Conciliação › Fechar o mês).`);
+          const t = `🏦 Extrato de ${c.label}: o saldo do banco (${brl(ult.saldo_do_provedor)}) não bate com a soma das transações importadas (${brl(ult.saldo_calculado)}), diferença ${brl(ult.diferenca)}. A diferença se repetiu nas duas últimas conferências: confira no app do banco se falta alguma transação no sistema (Financeiro › Conciliação › Fechar o mês).`;
+          alertar(t, avisoDoVigia("saldo_divergente", todayISO, t, c.id));
         }
       }
     } catch (_e) {
@@ -179,7 +200,8 @@ servirComCors(async (req) => {
       const lista = (div ?? []) as Array<{ name: string; diferenca: number }>;
       if (lista.length > 0 && await claim(`estoque_divergente:${todayISO}`, { n: lista.length })) {
         const ex = lista.slice(0, 3).map((d) => `${d.name} (${Number(d.diferenca) > 0 ? "+" : ""}${Number(d.diferenca)})`).join(", ");
-        alerts.push(`📦 ${lista.length} produto(s) com saldo diferente da soma dos movimentos: ${ex}${lista.length > 3 ? "…" : ""}. Algum caminho gravou estoque sem registrar movimento; confira em Estoque › Variância.`);
+        const t = `📦 ${lista.length} produto(s) com saldo diferente da soma dos movimentos: ${ex}${lista.length > 3 ? "…" : ""}. Algum caminho gravou estoque sem registrar movimento; confira em Estoque › Variância.`;
+        alertar(t, avisoDoVigia("estoque_divergente", todayISO, t));
       }
     } catch (_e) {
       console.warn("[ai-business-monitor] checagem de saldo de estoque falhou (ignorada)");
@@ -191,7 +213,8 @@ servirComCors(async (req) => {
       .from("issued_fiscal_documents").select("id", { count: "exact", head: true })
       .in("status", ["authorized", "rejected", "cancelled"]).gte("created_at", monthStart);
     if ((fiscalEvents ?? 0) > 400 && await claim(`fiscal_quota_high:${todayISO}`, { n: fiscalEvents })) {
-      alerts.push(`📊 Cota fiscal do mês: ~*${fiscalEvents}*/500 eventos usados. Fique de olho para não estourar o plano.`);
+      const t = `📊 Cota fiscal do mês: ~*${fiscalEvents}*/500 eventos usados. Fique de olho para não estourar o plano.`;
+      alertar(t, avisoDoVigia("cota_fiscal", todayISO, t));
     }
 
     // (5) NF-e rejeitadas nas últimas 24h (não deixar uma rejeição passar batida).
@@ -200,7 +223,8 @@ servirComCors(async (req) => {
       .from("issued_fiscal_documents").select("id", { count: "exact", head: true })
       .eq("status", "rejected").gte("updated_at", d1);
     if ((rejectedNfe ?? 0) > 0 && await claim(`fiscal_rejected:${todayISO}`, { n: rejectedNfe })) {
-      alerts.push(`❌ *${rejectedNfe}* NF-e rejeitada(s) nas últimas 24h. Confira o motivo no histórico e reemita.`);
+      const t = `❌ *${rejectedNfe}* NF-e rejeitada(s) nas últimas 24h. Confira o motivo no histórico e reemita.`;
+      alertar(t, avisoDoVigia("nfe_rejeitada", todayISO, t));
     }
 
     // (6) O resumo das 07:30 que desistiu de chegar (09 e 13/10: WhatsApp fora do ar, a fila
@@ -217,6 +241,7 @@ servirComCors(async (req) => {
         });
         if (nErr) throw nErr;
         resumoNaoChegou++;
+        await registrarNoPortao(admin, portao.modo, phone, avisoResumoNaoChegou(todayISO, TEXTO_RESUMO_NAO_CHEGOU), now);
       }
     } catch (e) {
       console.warn("[ai-business-monitor] aviso de resumo que não chegou falhou:", (e as Error)?.message ?? e);
@@ -228,8 +253,10 @@ servirComCors(async (req) => {
     const rows = recipients.map((r: any) => ({ phone_normalized: String(r.phone_normalized), message, source: "ai_monitor", priority: 5 }));
     const { data: inserted, error: qErr } = await admin.from("whatsapp_send_queue").insert(rows).select("id");
     if (qErr) throw qErr;
+    // Voz única em sombra: o alerta já está na fila; registra o que o portão faria com cada sinal.
+    const noPortao = await registrarParaTodos(admin, portao.modo, recipients.map((r: any) => r.phone_normalized), paraOPortao, now);
 
-    return jr({ ok: true, queued: inserted?.length ?? 0, signals: alerts.length, resumo_nao_chegou: resumoNaoChegou });
+    return jr({ ok: true, queued: inserted?.length ?? 0, signals: alerts.length, resumo_nao_chegou: resumoNaoChegou, no_portao: noPortao });
   } catch (e: any) {
     console.error("[ai-business-monitor] fatal", e);
     return jr({ error: e?.message || "internal error" }, 500);

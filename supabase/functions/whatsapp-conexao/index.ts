@@ -22,6 +22,8 @@ import {
   confirmaTravada, decidirVigia, type EstadoConexao, hhmm, lerEstado, lerRespostaDoConnect, lerSaidas,
   motivoDaQueda, numeroParaPareamento, suspeitaDeTravada, textoDoAviso,
 } from "./conexao.ts";
+import { avisoDaVoltaDoWhatsApp } from "../_shared/uma-voz/fontes.ts";
+import { lerPortao, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -167,6 +169,23 @@ async function vigiar(db: Db, evo: Evolution): Promise<Response> {
     if (linhas.length) {
       const { error } = await db.from("app_notifications").insert(linhas);
       if (error) throw new Error(`aviso no sino: ${error.message}`);
+    }
+    // Voz única em sombra (secretário, Passo 4, 15/10/2026): a volta do WhatsApp é registrada no portão
+    // (avisos_do_dono) com o que ele faria — a queda de 30 min ou mais acorda o dono (assunto "sistema",
+    // um por dia); a curta fica só no sino. Hoje nada vai ao WhatsApp do dono: só o registro. Nunca
+    // derruba o vigia.
+    if (aviso === "voltou" && anterior?.desde) {
+      try {
+        const portao = await lerPortao(db);
+        if (portao.modo) {
+          const { data: donos } = await db.from("app_users").select("phone_normalized")
+            .eq("role", "admin").eq("active", true).eq("ai_whatsapp_enabled", true).not("phone_normalized", "is", null);
+          await registrarParaTodos(db, portao.modo, ((donos ?? []) as Array<{ phone_normalized: string | null }>).map((d) => d.phone_normalized),
+            [avisoDaVoltaDoWhatsApp({ desde: anterior.desde, ate: agora.toISOString() }, `${texto.title}. ${texto.body}`)], agora);
+        }
+      } catch (e) {
+        console.warn("[whatsapp-conexao] registro no portão falhou (ignorado):", (e as Error)?.message ?? e);
+      }
     }
   }
 

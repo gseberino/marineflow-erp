@@ -12,6 +12,11 @@
 // _shared/email/imap.ts. A senha vem do segredo cujo NOME está em email_accounts.secret_name.
 //
 // Chamadores: pg_cron (x-cron-secret). `?diagnostico=1` só conecta e conta, sem gravar nada.
+//
+// Voz única (secretário, Passo 4, 15/10/2026): com app_settings.voz_unica em sombra, o aviso de urgente
+// que entrou na fila é registrado no portão (avisos_do_dono): golpe acorda (um por remetente, para
+// sempre); urgente sem golpe vai na próxima mensagem fixa (D1, voz_unica_regras.email_sem_golpe). O que
+// sai não muda. Desligado (o padrão): nada é registrado.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
@@ -25,6 +30,8 @@ import { MAX_URGENTES_PADRAO } from "../_shared/email/digest.ts";
 import { displaySender, normalizeAddress } from "../_shared/email/normalize.ts";
 import { extrairDados, fornecedorPelaNota } from "../_shared/email/dados.ts";
 import type { InboundEmail } from "../_shared/email/types.ts";
+import { avisoDoEmail } from "../_shared/uma-voz/fontes.ts";
+import { lerPortao, PORTAO_DESLIGADO, type PortaoDaRodada, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
 import { extractText, getDocumentProxy } from "npm:unpdf@0.12.1";
 
 const corsHeaders = {
@@ -120,7 +127,11 @@ async function jaAvisadoAntes(admin: Db, endereco: string | null | undefined, as
   return (data ?? []).length > 0;
 }
 
-async function avisarUrgente(admin: Db, conta: string, remetente: string, assunto: string | null, motivo: string | null, fraude: boolean) {
+async function avisarUrgente(
+  admin: Db, conta: string, remetente: string, assunto: string | null, motivo: string | null, fraude: boolean,
+  /** Voz única: o e-mail (id e endereço) e as chaves do portão lidas na rodada. */
+  voz: { emailId: string; endereco: string | null; portao: PortaoDaRodada },
+) {
   const { data: quem } = await admin.from("app_users").select("phone_normalized")
     .eq("active", true).eq("ai_whatsapp_enabled", true).in("role", ["admin"]).not("phone_normalized", "is", null);
   const texto = [
@@ -133,6 +144,11 @@ async function avisarUrgente(admin: Db, conta: string, remetente: string, assunt
   ].filter(Boolean).join("\n");
   const rows = ((quem ?? []) as { phone_normalized: string }[]).map((u) => ({ phone_normalized: u.phone_normalized, message: texto, source: "email_urgente", priority: 2 }));
   if (rows.length) await admin.from("whatsapp_send_queue").insert(rows);
+  // Voz única em sombra: o aviso já está na fila; registra o que o portão faria. Nunca lança.
+  if (rows.length && voz.portao.modo) {
+    await registrarParaTodos(admin, voz.portao.modo, rows.map((r) => r.phone_normalized),
+      [avisoDoEmail({ emailId: voz.emailId, endereco: voz.endereco ?? "", fraude }, voz.portao.regras, texto)]);
+  }
 }
 
 /**
@@ -204,6 +220,7 @@ servirComCors(async (req) => {
   let cands: MatchCandidate[] | null = null;
   let porCnpj: Map<string, string> | null = null;
   let jaAvisados = diagnostico ? 0 : await avisadosHoje(admin);
+  const portao = diagnostico ? PORTAO_DESLIGADO : await lerPortao(admin);
   const resultados: Record<string, unknown>[] = [];
 
   for (const conta of (contas ?? []) as any[]) {
@@ -299,7 +316,8 @@ servirComCors(async (req) => {
             const repetido = await jaAvisadoAntes(admin, email.from.address, email.subject);
             if (!repetido) {
               const remetente = match?.name ?? displaySender(email.from);
-              await avisarUrgente(admin, conta.address, remetente, email.subject, t.motivo, t.alertaFraude);
+              await avisarUrgente(admin, conta.address, remetente, email.subject, t.motivo, t.alertaFraude,
+                { emailId: id, endereco: normalizeAddress(email.from.address), portao });
               await admin.from("email_messages").update({ alerted_at: new Date().toISOString() }).eq("id", id);
               jaAvisados++;
               r.avisados = Number(r.avisados) + 1;

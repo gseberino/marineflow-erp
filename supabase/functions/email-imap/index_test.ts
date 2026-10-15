@@ -26,3 +26,17 @@ Deno.test("a consulta compara remetente e assunto como foram gravados e olha ale
   // Erro na leitura não cala um urgente: avisa (repetir é melhor que perder um golpe novo).
   assertStringIncludes(fn, "return false;");
 });
+
+// Voz única (secretário, Passo 4, 15/10/2026). O que se protege: o registro no portão vem DEPOIS do
+// aviso entrar na fila e só com o modo ligado; o diagnóstico não lê as chaves. Desligado: nada é
+// registrado (registrar_test.ts) — o aviso é o mesmo de antes.
+Deno.test("voz única: o urgente vai ao portão depois da fila, só com o modo ligado; diagnóstico não lê as chaves", () => {
+  const ini = fonte.indexOf("async function avisarUrgente(");
+  const fn = fonte.slice(ini, fonte.indexOf("\n}\n", ini));
+  const fila = fn.indexOf('await admin.from("whatsapp_send_queue").insert(rows)');
+  const registro = fn.indexOf("await registrarParaTodos(");
+  assert(fila > 0 && registro > fila, "fila → registro");
+  assertStringIncludes(fn, "if (rows.length && voz.portao.modo)");
+  assertStringIncludes(fonte, "const portao = diagnostico ? PORTAO_DESLIGADO : await lerPortao(admin);");
+  assertStringIncludes(fonte, "{ emailId: id, endereco: normalizeAddress(email.from.address), portao }");
+});

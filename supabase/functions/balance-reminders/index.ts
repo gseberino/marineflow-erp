@@ -7,10 +7,16 @@
 //       uma agenda_suggestion "Cobrar {cliente}" (detector='followup'), que o dono aceita ("quer que
 //       eu cobre?") ou descarta. Idempotente por (recebível × usuário). Aceitar segue o fluxo padrão
 //       (vira tarefa) — não dispara WhatsApp ao cliente. Cobrança ao cliente segue manual/opt-in.
+// Voz única (secretário, Passo 4, 15/10/2026): com app_settings.voz_unica em sombra, o resumo (A) que
+// entrou na fila é registrado no portão (avisos_do_dono) como "acaba" — a manhã já cobra (cobrança
+// grande, marcos). O que sai não muda. Desligado (o padrão): nada é registrado.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { emBrasilia } from "../_shared/uma-voz/janela.ts";
+import { avisoDosSaldos } from "../_shared/uma-voz/fontes.ts";
+import { lerPortao, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -98,6 +104,12 @@ servirComCors(async (req) => {
       }));
       const { data: ins } = await admin.from("whatsapp_send_queue").insert(rows).select("id");
       queued = ins?.length ?? 0;
+      // Voz única em sombra: registra o que o portão faria (acaba: a manhã cobre). Nunca lança.
+      if (queued > 0) {
+        const portao = await lerPortao(admin);
+        await registrarParaTodos(admin, portao.modo, users.map((u: any) => u.phone_normalized),
+          [avisoDosSaldos(emBrasilia(now).dia, milestoneItems, message)], now);
+      }
     }
 
     // ── (B) Sugestões no Caixa de Entrada (uma por saldo vencido sem sugestão pendente) ──
