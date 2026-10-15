@@ -63,6 +63,10 @@ import { podarHistoricoParaLLM } from "../_shared/ai/context-pruning.ts";
 import { filtrarPorCanal } from "../_shared/ai/channel-scope.ts";
 import { carregarJanela, marcarResultadosAnteriores } from "../_shared/ai/history-window.ts";
 import { lerPedidoDePdf, textoDoAtalhoPdf } from "../_shared/ai/atalho-pdf.ts";
+import { lerComandoDoSecretario } from "../_shared/secretario/comandos.ts";
+import { executarComandoDoSecretario } from "../_shared/secretario/executar.ts";
+import { lerFormatoDoResumo } from "../_shared/secretario/formato.ts";
+import { type Dono, donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -608,6 +612,45 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     if (idx !== null) {
       effectiveText = resolveOptionAsUserText(pendingOptions[idx - 1]);
       metadata.pending_options = null;
+    }
+  }
+
+  // ---- Camada determinística (custo $0): comandos do resumo da manhã (secretário, Passo 2, 15/10/2026) ----
+  // Só com app_settings.resumo_formato = 'novo' e só do dono (o mesmo do resumo, donoDoWhatsApp). Nenhum
+  // comando é confirmação nem número de lista (_shared/secretario/comandos.ts): "sim"/"1"/"não"/"2" já
+  // foram tratados acima e nunca chegam aqui como comando. "lista", "escritório", "tudo", "detalhe A",
+  // "por que o A?", "A feito/amanhã/segunda/não/espera", "tira A", "volta A" respondem sem o modelo. A
+  // letra sozinha vira o texto do turno (o cartão pronto do item, pelo caminho de sempre: nada sai para
+  // cliente sem o "sim") — o rascunho de orçamento passa pelo atalho do PDF logo abaixo.
+  const comandoDoResumo = effectiveText === text && lerFormatoDoResumo(settings.resumo_formato) === "novo"
+    ? lerComandoDoSecretario(text)
+    : null;
+  if (comandoDoResumo) {
+    let dono: Dono | null = null;
+    try {
+      dono = await donoDoWhatsApp(admin);
+    } catch {
+      dono = null; // sem saber quem é o dono, o texto segue como sempre
+    }
+    if (dono && dono.id === appUser.id && dono.phone === phoneNormalized) {
+      const r = await executarComandoDoSecretario(admin, comandoDoResumo, { phone: phoneNormalized });
+      if (r.tipo === "resposta") {
+        // No histórico como um turno comum: "e o B?" depois de uma lista tem a que se referir.
+        try {
+          await admin.from("ai_operator_messages").insert([
+            { session_id: sessionId, role: "user", content: text, source: "whatsapp" },
+            { session_id: sessionId, role: "assistant", content: r.texto, source: "whatsapp" },
+          ]);
+        } catch (persistErr) {
+          console.error("[ai-agent][whatsapp] comando do resumo: falha ao gravar o histórico:", persistErr);
+        }
+        await admin.from("ai_operator_sessions")
+          .update({ metadata, last_activity_at: new Date().toISOString() })
+          .eq("id", sessionId);
+        await queueWhatsAppReply(admin, phoneNormalized, r.texto);
+        return jr({ ok: true, secretario: comandoDoResumo.comando });
+      }
+      effectiveText = r.texto;
     }
   }
 
