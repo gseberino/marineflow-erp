@@ -85,3 +85,18 @@ export function avisoDoLeadDoSite(d: DadosDoSite, telefone: string, jaCadastrado
   ].filter((l): l is string => typeof l === "string");
   return linhas.join("\n");
 }
+
+/**
+ * Os telefones que recebem o aviso do lead (app_settings.whatsapp_reminder_recipients: "5547…, 5547…"
+ * ou um por linha), só dígitos, com 10 ou mais, sem o próprio lead e sem repetir.
+ * Até 15/10/2026 o webhook fazia `.split(/[,s]+/)` e `.replace(/D/g, "")` (sem a barra invertida):
+ * cortava na letra "s" e apagava só a letra "D". Com um número só, sem espaço, funcionava por acaso.
+ */
+export function destinatariosDoAviso(lista: unknown, telefoneDoLead?: string | null): string[] {
+  const vistos = new Set<string>();
+  for (const parte of String(lista ?? "").split(/[,;\s]+/)) {
+    const p = parte.replace(/\D/g, "");
+    if (p.length >= 10 && p !== telefoneDoLead) vistos.add(p);
+  }
+  return [...vistos];
+}

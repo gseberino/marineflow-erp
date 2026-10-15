@@ -1,5 +1,5 @@
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { avisoDoLeadDoSite, faltaPedir, lerMensagemDoSite } from "./lead-do-site.ts";
+import { avisoDoLeadDoSite, destinatariosDoAviso, faltaPedir, lerMensagemDoSite } from "./lead-do-site.ts";
 
 // Mensagem exatamente como o formulário do site monta (hbr-site/src/pages/orcamento.astro).
 const COMPLETA = [
@@ -56,4 +56,23 @@ Deno.test("aviso ao dono traz os dados e o que falta, sem campos vazios", () => 
   assertStringIncludes(t, "Falta pedir: fotos do painel");
   assertEquals(t.includes("undefined") || t.includes("null"), false);
   assertStringIncludes(avisoDoLeadDoSite(d, "5547999990000", true), "já é cliente cadastrado");
+});
+
+// 15/10/2026: o webhook lia a lista com `.split(/[,s]+/)` e `.replace(/D/g, "")` — sem a barra
+// invertida. "+55 (47) 99999-0001, 5547999990002" virava lixo; só um número cru funcionava.
+Deno.test("destinatários do aviso: vírgula, espaço, ponto e vírgula e linha; só dígitos; sem o lead; sem repetir", () => {
+  assertEquals(destinatariosDoAviso("5547999990001"), ["5547999990001"]);
+  // Número com espaço NO MEIO não vale (o espaço separa números, como no aviso genérico de lead): cada
+  // pedaço é lido sozinho e só os de 10 ou mais dígitos ficam. A configuração usa só dígitos.
+  assertEquals(destinatariosDoAviso("+55 (47) 99999-0001, 5547999990002"), ["5547999990002"]);
+  assertEquals(destinatariosDoAviso("+55(47)99999-0001, 5547999990002"), ["5547999990001", "5547999990002"]);
+  assertEquals(destinatariosDoAviso("5547999990001,5547999990002;5547999990003\n5547999990001"),
+    ["5547999990001", "5547999990002", "5547999990003"]);
+  assertEquals(destinatariosDoAviso("+5547999990001 , +5547999990002"), ["5547999990001", "5547999990002"]);
+  assertEquals(destinatariosDoAviso("5547999990001, 5547999990002", "5547999990002"), ["5547999990001"], "o próprio lead fica fora");
+  assertEquals(destinatariosDoAviso("dono s 5547999990001"), ["5547999990001"], "a letra s não corta o número");
+  assertEquals(destinatariosDoAviso("D5547999990001"), ["5547999990001"], "toda não-cifra sai, não só a letra D");
+  assertEquals(destinatariosDoAviso("123, abc"), []);
+  assertEquals(destinatariosDoAviso(null), []);
+  assertEquals(destinatariosDoAviso(undefined), []);
 });

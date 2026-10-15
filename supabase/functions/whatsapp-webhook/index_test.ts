@@ -307,3 +307,21 @@ Deno.test("F2: texto livre com pergunta de CMP aberta → pergunta_interromper e
   const ordem = falso.chamadas.map((c) => c.caminho).filter((c) => c === "/rest/v1/rpc/pergunta_interromper" || c === "/functions/v1/ai-agent");
   assertEquals(ordem, ["/rest/v1/rpc/pergunta_interromper", "/functions/v1/ai-agent"]);
 });
+
+// Lead do site (15/10/2026): a lista de destinatários tinha perdido a barra invertida (`/[,s]+/` cortava na
+// letra "s", `/D/g` apagava só a letra "D"). Agora é destinatariosDoAviso (testada em
+// _shared/whatsapp/lead-do-site_test.ts). E, com a voz única em sombra, o aviso que saiu é registrado no
+// portão DEPOIS do envio (desligado: nada é registrado — as chaves vêm no mesmo SELECT de antes).
+Deno.test("lead do site: sem a regex quebrada; destinatários por destinatariosDoAviso; portão só depois do envio", async () => {
+  const fonte = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
+  assertEquals(fonte.includes(".split(/[,s]+/)"), false, "a regex sem a barra voltou");
+  assertEquals(fonte.includes('.replace(/D/g, "")'), false, "a regex sem a barra voltou");
+  const ini = fonte.indexOf("async function avisarLeadDoSite(");
+  const fn = fonte.slice(ini, fonte.indexOf("\n}\n", ini));
+  assertStringIncludes(fn, "destinatariosDoAviso(sMap.whatsapp_reminder_recipients, phone)");
+  const envio = fn.indexOf("provider.sendText(to, texto)");
+  const registro = fn.indexOf("registrarParaTodos(");
+  assertEquals(envio > 0 && registro > envio, true, "o registro vem depois do envio");
+  assertStringIncludes(fn, "if (portao.modo)");
+  assertStringIncludes(fn, "CHAVE_VOZ_UNICA, CHAVE_REGRAS, CHAVE_FREIO");
+});

@@ -6,7 +6,11 @@ import { EVOLUTION_STATUS_MAP } from "../_shared/whatsapp/evolution-provider.ts"
 import { classificarResposta } from "../_shared/ai/comms/reply-router.ts";
 import { lerDataDaResposta } from "../_shared/revisao/data-da-resposta.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
-import { avisoDoLeadDoSite, lerMensagemDoSite, type DadosDoSite } from "../_shared/whatsapp/lead-do-site.ts";
+import { avisoDoLeadDoSite, destinatariosDoAviso, lerMensagemDoSite, type DadosDoSite } from "../_shared/whatsapp/lead-do-site.ts";
+import { avisoDoLeadDoSite as avisoDoLeadNoPortao } from "../_shared/uma-voz/fontes.ts";
+import { emBrasilia } from "../_shared/uma-voz/janela.ts";
+import { CHAVE_FREIO, CHAVE_REGRAS, CHAVE_VOZ_UNICA } from "../_shared/uma-voz/portao.ts";
+import { portaoDasConfiguracoes, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
 import {
   avisarFalhaPorHttp,
   chamarComprovantesPorHttp,
@@ -137,22 +141,29 @@ async function notifyAssignedReminder(
 // Contato que veio pelo formulário do site (08/10/2026): avisa o dono com os dados lidos e o que
 // falta pedir. Vale mesmo com o aviso genérico de lead desligado (whatsapp_reminder_enabled);
 // desliga com app_settings.whatsapp_aviso_lead_site = 'false'. Nada vai para o cliente.
+// 15/10/2026: a lista de destinatários é lida por destinatariosDoAviso (a regex tinha perdido a barra
+// invertida). Voz única em sombra (app_settings.voz_unica): o aviso que saiu é registrado no portão
+// (avisos_do_dono) — próxima mensagem fixa, ou acorde se o lead pede para hoje/urgente (D6).
 async function avisarLeadDoSite(admin: any, phone: string, dados: DadosDoSite, jaCadastrado: boolean) {
   try {
     const { data: settings } = await admin
       .from("app_settings")
       .select("key, value")
-      .in("key", ["whatsapp_aviso_lead_site", "whatsapp_reminder_recipients"]);
+      .in("key", ["whatsapp_aviso_lead_site", "whatsapp_reminder_recipients", CHAVE_VOZ_UNICA, CHAVE_REGRAS, CHAVE_FREIO]);
     const sMap = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
     if (String(sMap.whatsapp_aviso_lead_site ?? "true").toLowerCase() === "false") return;
-    const recipients: string[] = String(sMap.whatsapp_reminder_recipients || "")
-      .split(/[,s]+/)
-      .map((p: string) => p.replace(/D/g, ""))
-      .filter((p: string) => p.length >= 10 && p !== phone);
+    const recipients = destinatariosDoAviso(sMap.whatsapp_reminder_recipients, phone);
     if (recipients.length === 0) return;
     const provider = createWhatsAppProvider();
     const texto = avisoDoLeadDoSite(dados, phone, jaCadastrado);
     await Promise.all(recipients.map((to) => provider.sendText(to, texto).catch(() => null)));
+    const portao = portaoDasConfiguracoes(sMap);
+    if (portao.modo) {
+      const agora = new Date();
+      const pedido = [dados.servico, dados.detalhes].filter(Boolean).join(" ");
+      await registrarParaTodos(admin, portao.modo, recipients,
+        [avisoDoLeadNoPortao({ phone, dia: emBrasilia(agora).dia, mensagem: pedido }, portao.regras, texto)], agora);
+    }
   } catch (e) {
     console.error("avisarLeadDoSite failed", e);
   }
