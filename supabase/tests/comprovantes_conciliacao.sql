@@ -534,7 +534,10 @@ begin
     || ' vazio=' || coalesce(v_cat8b, 'null') || '→' || coalesce((select expense_category from public.payables where id = v_pay8b), 'null'));
 
   -- T9: conta a pagar em aberto do fornecedor (mesmo CNPJ): o CMP Pix a anexa e espera o banco;
-  -- a linha chega, o "sim" casa (conciliar_lancamento) e a proposta sai da fila
+  -- a linha chega, o "sim" casa (conciliar_lancamento) e a proposta sai da fila. A nota da proposta: a
+  -- conciliar_lancamento REAL (20260926090000/20261002140000) já a tira da fila como "Casada com um lançamento
+  -- que já existia" antes da F3 escrever a dela (o update da F3 só pega 'pending'); só o dublê da bancada,
+  -- que não mexe na fila, deixa ficar "Casada com a conta do CMP-N" (correção de 15/10/2026)
   perform pg_temp._livrar();
   v_val := pg_temp._val();
   insert into public.suppliers (name, cnpj_cpf) values ('Fornecedor Teste F3 ' || pg_temp._letras(5), v_cnpj) returning id into v_sup;
@@ -560,11 +563,12 @@ begin
     p->'banco'->>'nivel' = 'verde' and p->'banco'->'linhas'->0->>'acao' = 'casar'
     and r->>'resultado' = 'ligado' and r->'ligacao'->>'como' = 'casou'
     and pay.bank_transaction_id = v_tx and pay.status = 'paid' and q.status = 'superseded'
-    and q.decision_note like 'Casada com a conta do CMP-%' and c.situacao = 'conciliado'
+    and q.decision_note in ('Casada com um lançamento que já existia', 'Casada com a conta do ' || c.codigo)
+    and c.situacao = 'conciliado'
     and not ('classificar_no_extrato' = any (c.pendencias))
     and exists (select 1 from jsonb_array_elements(c.efeitos) e where e->>'tipo' = 'pendencia_resolvida'),
     'nivel=' || coalesce(p->'banco'->>'nivel', p->>'motivo', '-') || ' r=' || coalesce(r->>'resultado', '-') || '/' || coalesce(r->>'motivo', '-')
-    || ' pay=' || coalesce(pay.status, '-') || ' fila=' || coalesce(q.status, '-'));
+    || ' pay=' || coalesce(pay.status, '-') || ' fila=' || coalesce(q.status, '-') || ' nota=' || coalesce(q.decision_note, '-'));
 exception when others then
   insert into _resultado values ('T8/T9 lançamento e conta em aberto', false, 'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
@@ -1353,10 +1357,12 @@ begin
   values (v_d6 - 2, 'LINHA ANTIGA', pg_temp._val(), 'debit', 'bank', v_atrasada);
   insert into public.payees (name, kind, active, app_user_id) values ('Sócio Teste F3', 'socio', true, pg_temp._dono())
   returning id into v_socio;
-  -- técnico com diária (o nome começa por "Aaa": entra nos 6 primeiros do menu)
+  -- técnico com diária (o nome começa por "Aaa": entra nos 6 primeiros do menu). tipo_vinculo é NOT NULL e
+  -- SEM default em produção (20260818160000); 'diarista', como o cadastrar_freelancer grava (correção de 15/10/2026)
   insert into public.payees (name, kind, active, conta_corrente_desde) values ('Aaa Técnico Teste F3 ' || pg_temp._letras(4), 'diarista', true, v_d6 - 30)
   returning id into v_tec;
-  insert into public.work_profiles (payee_id, modo_pagamento, valor_diaria, vigencia_inicio) values (v_tec, 'diaria', 300, v_d6 - 30)
+  insert into public.work_profiles (payee_id, tipo_vinculo, modo_pagamento, valor_diaria, vigencia_inicio)
+  values (v_tec, 'diarista', 'diaria', 300, v_d6 - 30)
   returning id into v_perfil;
   insert into public.clients (type, name) values ('individual', 'Cliente Teste F3 ' || pg_temp._letras(5)) returning id into v_cli;
   insert into public.vessels (client_id, name) values (v_cli, 'Barco Teste F3 ' || pg_temp._letras(5)) returning id into v_ves;
