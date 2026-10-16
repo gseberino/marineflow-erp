@@ -13,13 +13,16 @@
 --   A10 entrega: antes da hora não sai; na hora sai; fila que falhou devolve; fila 'sent' entrega; fila
 --       'pending' segura
 --   A11 'hoje' só pela manhã, 'escritorio' só pelo fechamento
---   A12 sombra inclui sem fila (= entregue na sombra); ligado sem fila é recusado
+--   A12 sombra inclui sem fila = 'incluido' (16/10/2026, 20261016120000: a mensagem-sombra não sai, nunca 'entregue');
+--       a próxima mensagem não o devolve; ligado sem fila é recusado
 --   A13 aviso_resolver: o guardado resolvido some
 --   A14 só o admin lê os avisos (financeiro e técnico veem 0)
 --   A15 as três chaves existem com os padrões; o financeiro não muda nenhuma (42501); o admin muda
 --   A16 as regras do dono valem sem publicar código: acordes_por_dia = 1; sábado → segunda
 --   A17 sombra e ligado não se misturam (limite e chave por modo)
 --   A18 entrada ruim volta ok=false, sem gravar
+--   A19 (16/10/2026) a sombra mostrada fica 'incluido' para sempre: avisos_para_a_mensagem não a devolve a guardado nem a
+--       entrega (sem fila); o resolvido (aviso_resolver) não é incluído depois
 --
 -- ═══ COMO RODAR ═══ (só com o OK nomeado; também roda no ensaio PGlite da bancada,
 --   D:/IA-HBR/comprovantes-bancada/pglite-ensaio/rodar-uma-voz.mjs)
@@ -310,10 +313,36 @@ begin
   i1 := public.avisos_incluir_na_mensagem(jsonb_build_object('phone', v_p, 'modo', 'sombra', 'ids', jsonb_build_array(s->>'id')));
   i2 := public.avisos_incluir_na_mensagem(jsonb_build_object('phone', v_p, 'modo', 'ligado', 'ids', jsonb_build_array(l->>'id')));
   select situacao into v_sit from public.avisos_do_dono where id = (s->>'id')::uuid;
-  insert into _resultado values ('A12 sombra inclui sem fila (entregue na sombra); ligado sem fila é recusado',
-    (i1->>'incluidos')::int = 1 and v_sit = 'entregue' and (i2->>'ok')::boolean = false
+  insert into _resultado values ('A12 sombra inclui sem fila (incluido, nunca entregue: a mensagem-sombra não sai); ligado sem fila é recusado',
+    (i1->>'incluidos')::int = 1 and v_sit = 'incluido' and (i2->>'ok')::boolean = false
+      and (select fila_id is null and incluido_em is not null and entregue_em is null from public.avisos_do_dono where id = (s->>'id')::uuid)
       and (select situacao from public.avisos_do_dono where id = (l->>'id')::uuid) = 'guardado',
     'sombra=' || v_sit || ' ligado ok=' || (i2->>'ok'));
+end $$;
+
+-- ═══ A19 (16/10/2026) ═════════════════════════════════════════════════════════════════════════
+do $$
+declare
+  v_p text := pg_temp._fone();
+  a jsonb; b jsonb; c jsonb; i jsonb; r jsonb; depois jsonb; v_sit_a text; v_sit_c text;
+begin
+  a := pg_temp._reg(v_p, '2026-10-21 10:00:00-03', 'a19:a', 'proxima_fixa');
+  b := pg_temp._reg(v_p, '2026-10-21 10:05:00-03', 'a19:b', 'proxima_fixa');
+  c := pg_temp._reg(v_p, '2026-10-21 10:10:00-03', 'a19:c', 'proxima_fixa');
+  -- o fechamento-sombra das 17:30 resolve o b (o cliente foi respondido) e mostra o a e o c
+  r := public.aviso_resolver(jsonb_build_object('phone', v_p, 'modo', 'sombra', 'ids', jsonb_build_array(b->>'id'), 'motivo', 'ja_resolvido'));
+  i := public.avisos_incluir_na_mensagem(jsonb_build_object('phone', v_p, 'modo', 'sombra', 'ids', jsonb_build_array(a->>'id', b->>'id', c->>'id'),
+                                                            'agora', '2026-10-21 17:30:00-03'));
+  -- a manhã seguinte (e qualquer outra) não devolve nenhum deles, e nada vira entregue nem volta a guardado
+  depois := pg_temp._para(v_p, 'manha', '2026-10-22 07:30:00-03');
+  select situacao into v_sit_a from public.avisos_do_dono where id = (a->>'id')::uuid;
+  select situacao into v_sit_c from public.avisos_do_dono where id = (c->>'id')::uuid;
+  insert into _resultado values ('A19 a sombra mostrada fica incluido (não volta, não entrega); o resolvido não é incluído',
+    (r->>'resolvidos')::int = 1 and (i->>'incluidos')::int = 2 and v_sit_a = 'incluido' and v_sit_c = 'incluido'
+      and jsonb_array_length(depois->'avisos') = 0 and (depois->>'entregues')::int = 0 and (depois->>'voltaram')::int = 0
+      and (select situacao from public.avisos_do_dono where id = (b->>'id')::uuid) = 'resolvido',
+    'incluidos=' || (i->>'incluidos') || ' a=' || v_sit_a || ' c=' || v_sit_c || ' depois=' || jsonb_array_length(depois->'avisos')
+      || ' entregues=' || (depois->>'entregues') || ' voltaram=' || (depois->>'voltaram'));
 end $$;
 
 -- ═══ A13 ══════════════════════════════════════════════════════════════════════════════════════
