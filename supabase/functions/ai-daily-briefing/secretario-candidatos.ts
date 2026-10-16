@@ -14,6 +14,7 @@ import { brl, ddmm, diasEntre, nomeDoDia, paraBusca, somarDias, umaLinha } from 
 import { tipoDoDia } from "../_shared/secretario/feriados.ts";
 import type { Familia, Secao, TipoDoItem } from "../_shared/secretario/tipos.ts";
 import { dataBR, diaBR, horaBR } from "../_shared/pdf/datas.ts";
+import { COM_PRESSA, ehClienteGenerico, PEDE_PRECO, pareceSoAgradecimento } from "../_shared/secretario/palavras.ts";
 
 /** Os cortes do desenho aprovado, num lugar só. */
 export const REGRAS = {
@@ -50,9 +51,8 @@ export const ASSUNTO_NAO_ENVIADOS = "pacote:orcamentos_nao_enviados";
  * item só o ORÇ-00103 (a lancha do Miguel), o caminhão da OS-00110 e três motorhomes — e um "B feito" valeria
  * para os cinco. Com ele, cada orçamento, OS ou cobrança vale por si (e não empresta valor a uma conversa).
  */
-export function ehClienteGenerico(nome: string | null | undefined): boolean {
-  return /^(?:cliente|consumidor) final$/.test(paraBusca(nome));
-}
+// (16/10/2026) a regra mora em _shared/secretario/palavras.ts (o "me acorde se" usa a mesma); reexportada aqui.
+export { ehClienteGenerico };
 
 /** O assunto de um item de cliente: o cliente; sem cliente (ou genérico), o próprio item. */
 function assuntoDe(clientId: string | null, cliente: string | null, proprio: string): string {
@@ -129,6 +129,8 @@ export interface ConversaCrua {
   recebidas: Array<{ body: string | null; em: string }>;
   /** em quantos dos últimos 7 o dono mandou mensagem para ele */
   diasComMensagemSua: number;
+  /** (16/10/2026) a última mensagem da HBR para ele nos 7 dias (whatsapp_esperando_resposta); null/ausente = nenhuma */
+  last_outbound_at?: string | null;
 }
 
 export interface OrcamentoCru {
@@ -227,18 +229,8 @@ function trecho(body: string | null): string {
   return `"${umaLinha(b.replace(/^🎤\s*/u, ""), 60)}"`;
 }
 
-// PEDIR preço, não falar de preço (ensaio de 15/10: "preço de tabela… proposta diferenciada" era um vendedor
-// oferecendo, e "diferença de preços entre a 288 e 628" era conversa de fornecedor). Vale: "quanto fica/custa…",
-// "qual o valor", "me passa o orçamento", "preciso de um orçamento", "orçar", "quero fechar".
-const PEDE_PRECO = new RegExp(String.raw`\b(?:` + [
-  String.raw`quanto (?:custa|custaria|fica|ficaria|sai|sairia|cobra|cobram|cobraria|seria|e|vai ficar|vale)`,
-  String.raw`(?:qual|quais) (?:e |seria |sera |o |a |os |as )*(?:valor|valores|preco|precos)`,
-  String.raw`(?:passa|passar|passe|manda|mandar|mande|envia|enviar|envie|faz|fazer|faca|ve|ver) (?:me |pra mim |para mim )?(?:o |um |uma |a |os )?(?:orcamento|orcamentos|preco|valor|proposta|cotacao)`,
-  String.raw`(?:preciso|precisava|precisamos|gostaria|queria|quero) (?:de )?(?:um |uma |o |a )?(?:orcamento|preco|valor|cotacao|proposta)`,
-  String.raw`orcar|orcamento pra|orcamento para`,
-  String.raw`(?:quero|vamos|podemos|queremos|quer) fechar`,
-].join("|") + String.raw`)\b`);
-const COM_PRESSA = /\b(hoje|urgente|urgencia|ainda hoje|o quanto antes|o mais rapido)\b/;
+// PEDE_PRECO (pedir preço, não falar de preço) e COM_PRESSA moraram aqui até 16/10/2026: agora estão em
+// _shared/secretario/palavras.ts, a MESMA regra para a manhã e para o "me acorde se" (_shared/uma-voz/acorde.ts).
 
 /** A frase do "por que" do pedido de orçamento do dia (a seleção a tira de quem não ficou na frente). */
 export const FRASE_DO_PEDIDO = " Pode se perder hoje: o pedido chegou depois da última manhã e ninguém respondeu.";
@@ -305,6 +297,18 @@ export function candidatoDeCobranca(c: CobrancaCrua, hoje: string): Candidato {
   };
 }
 
+/**
+ * (16/10/2026) Tudo o que ele mandou desde a última resposta da HBR é só cumprimento/agradecimento/confirmação
+ * (pareceSoAgradecimento). Sem a hora da resposta: tudo o que ele mandou na semana (um pedido de dias atrás seguido de
+ * "Bom dia" não some); sem nenhuma recebida lida: a última.
+ */
+export function soAgradecimentoDesdeAResposta(w: Pick<ConversaCrua, "last_body" | "recebidas" | "last_outbound_at">): boolean {
+  const desde = w.last_outbound_at ? Date.parse(w.last_outbound_at) : NaN;
+  const pendentes = Number.isNaN(desde) ? w.recebidas : w.recebidas.filter((r) => Date.parse(r.em) > desde);
+  const olhar = pendentes.length ? pendentes.map((r) => r.body) : [w.last_body];
+  return olhar.every((b) => pareceSoAgradecimento(b));
+}
+
 export function candidatoDeConversa(w: ConversaCrua, agora: Date, valorDoCliente: number): Candidato {
   const horas = (agora.getTime() - new Date(w.last_inbound_at).getTime()) / 3_600_000;
   const recentes = w.recebidas.map((r) => paraBusca(r.body)).join(" ");
@@ -330,11 +334,16 @@ export function candidatoDeConversa(w: ConversaCrua, agora: Date, valorDoCliente
   const tipo: TipoDoItem = w.categoria === "fornecedor" ? "fornecedor"
     : cliente ? ((passou || pedidoDoDia) && !todoDia ? "cliente_sem_resposta" : "cliente_recente")
     : ((pedePreco && passou && !todoDia) || pedidoDoDia ? "contato_pedindo_preco" : "contato_sem_cadastro");
-  const elegivel = tipo === "cliente_sem_resposta" || tipo === "contato_pedindo_preco";
+  // (16/10/2026) o que ele mandou desde a última resposta é só cumprimento/agradecimento ("Bom dia Gustavo! Ótimo 👍"):
+  // a conversa acabou de um jeito educado, não espera resposta — fica na lista
+  const soAgradeceu = soAgradecimentoDesdeAResposta(w);
+  const elegivel = !soAgradeceu && (tipo === "cliente_sem_resposta" || tipo === "contato_pedindo_preco");
   const nome = umaLinha(w.contato || w.phone, 30);
   const { verbo, audio } = verboDaMensagem(w.last_body);
   const tempo = haQuanto(horas);
   const porqueNaoSobe = elegivel ? null
+    : soAgradeceu && (tipo === "cliente_sem_resposta" || tipo === "contato_pedindo_preco")
+    ? "Ficou na lista: a última mensagem parece só um agradecimento."
     : tipo === "fornecedor" ? "Ficou na lista: fornecedor (nunca de manhã)."
     : todoDia ? "Ficou na lista: vocês conversam quase todo dia."
     : !passou ? `Ficou na lista: escreveu há ${tempo} (a manhã espera 12 h).`

@@ -13,9 +13,10 @@
 
 import { brl, brlCurto, ddmm, diasEntre, somarDias, umaLinha } from "../_shared/secretario/base.ts";
 import type { ItemGravado } from "../_shared/secretario/respostas.ts";
-import { diaBR } from "../_shared/pdf/datas.ts";
+import { diaBR, horaBR } from "../_shared/pdf/datas.ts";
+import { ehClienteGenerico, pareceSoAgradecimento } from "../_shared/secretario/palavras.ts";
 import { type Candidato, type CobrancaCrua, REGRAS } from "./secretario-candidatos.ts";
-import { estadoPeloHistorico, type PassagemDoHistorico } from "./secretario-selecao.ts";
+import { estadoPeloHistorico, type OpcoesDoHistorico, OPCOES_PADRAO, type PassagemDoHistorico } from "./secretario-selecao.ts";
 
 /** Um item gravado pela manhã de hoje (resumo_itens), com o fato e o valor. */
 export interface ItemDaManha extends ItemGravado {
@@ -167,8 +168,8 @@ function nomeCurto(i: ItemDaManha): string {
 }
 
 /** O dono decidiu o assunto e a decisão ainda vale (tirado/feito sem fato novo, adiado, "não"). */
-function decididoPeloDono(c: Candidato, historico: PassagemDoHistorico[], hoje: string): boolean {
-  const e = estadoPeloHistorico(c, historico, hoje);
+function decididoPeloDono(c: Candidato, historico: PassagemDoHistorico[], hoje: string, opcoes: OpcoesDoHistorico = OPCOES_PADRAO): boolean {
+  const e = estadoPeloHistorico(c, historico, hoje, opcoes);
   if (e.lugar === "fora" || e.adiadoAte) return true;
   return e.lugar === "lista" && /você respondeu "não"/.test(e.motivo ?? "");
 }
@@ -185,6 +186,8 @@ export function paradosDaSemana(
   candidatos: Map<string, Candidato>,
   historico: PassagemDoHistorico[],
   hoje: string,
+  /** (16/10/2026) as regras do histórico do dono (F7): as mesmas da manhã */
+  opcoes: OpcoesDoHistorico = OPCOES_PADRAO,
 ): LinhaComLetra[] {
   const letras = porLetra(itens);
   const corte = somarDias(hoje, -7);
@@ -196,7 +199,7 @@ export function paradosDaSemana(
     if (ehPacoteDaManha(daLetra)) {
       const pac = linhaDoPacote(daLetra, candidatos);
       if (!pac) continue;
-      const vivos = pac.vivos.filter((c) => !decididoPeloDono(c, historico, hoje));
+      const vivos = pac.vivos.filter((c) => !decididoPeloDono(c, historico, hoje, opcoes));
       if (!vivos.length) continue;
       const parado = vivos.some((c) => manhaSemResposta(c.referencia, historico, hoje)) || pac.desde <= corte;
       if (!parado) continue;
@@ -208,7 +211,7 @@ export function paradosDaSemana(
     }
     const c = candidatos.get(p.referencia);
     if (!c || c.tipo === "cobranca_antiga" || c.tipo === "fornecedor" || c.secao === "contatos") continue;
-    if (decididoPeloDono(c, historico, hoje)) continue;
+    if (decididoPeloDono(c, historico, hoje, opcoes)) continue;
     const desde = diaDoDesde(c.desde);
     if (!manhaSemResposta(c.referencia, historico, hoje) && desde > corte) continue;
     // o que veio junto, só pelo nome curto (ensaio de 13/10: o rótulo inteiro cortava a linha no meio da palavra)
@@ -244,6 +247,7 @@ export function cobrancasAntigas(
   historico: PassagemDoHistorico[],
   hoje: string,
   max = 5,
+  opcoes: OpcoesDoHistorico = OPCOES_PADRAO,
 ): CobrancasAntigas {
   const letraDe = new Map<string, ItemDaManha>();
   for (const i of itens) letraDe.set(i.referencia, i);
@@ -256,7 +260,7 @@ export function cobrancasAntigas(
   for (const cr of cobrancas) {
     if (diasEntre(cr.vencimento, hoje) < REGRAS.cobrancaAntigaDias || !(cr.saldo > 0)) continue;
     const c = candidatos.get(`recv:${cr.id}`);
-    if (!c || decididoPeloDono(c, historico, hoje)) continue;
+    if (!c || decididoPeloDono(c, historico, hoje, opcoes)) continue;
     const item = letraDe.get(c.referencia);
     if (item && acaoDaLetra.get(item.letra)) continue; // o dono já respondeu a letra hoje
     n++;
@@ -291,4 +295,77 @@ export function cobrancasAntigas(
   }
   fora.total = Math.round(fora.total * 100) / 100;
   return { linhas, n, total: Math.round(total * 100) / 100, fora };
+}
+
+// ─── (16/10/2026) F1: quem escreveu hoje e está sem resposta ────────────────────────────────────
+
+/** Uma linha de whatsapp_esperando_resposta (a lista do resumo, já sem "ok/obrigado" e sem quem desistiu). */
+export interface QuemEspera {
+  phone: string;
+  contato: string | null;
+  categoria: string | null;
+  last_inbound_at: string;
+  last_outbound_at?: string | null;
+  /** a última recebida (quando as recebidas da semana não foram lidas) */
+  last_body?: string | null;
+}
+
+export interface SemRespostaDeHoje {
+  phone: string;
+  nome: string;
+  /** hh:mm da primeira mensagem de hoje sem resposta */
+  desde: string;
+  /** hh:mm do acorde de hoje sobre ele (o portão), ou null */
+  acordei: string | null;
+}
+
+/** O nome curto da linha sem letra: "Giancarlo Ribeiro dos Santos" → "Giancarlo S." (até 18 caracteres fica como está). */
+export function nomeSemLetra(nome: string): string {
+  const n = nome.replace(/\s+/g, " ").trim();
+  if (n.length <= 18) return n;
+  const p = n.split(" ");
+  return p.length > 1 ? `${p[0]} ${p[p.length - 1][0].toUpperCase()}.` : umaLinha(n, 18);
+}
+
+/**
+ * F1 (16/10/2026, padrão recomendado, aguarda o dono): o fechamento cita, numa linha SEM letra, o cliente cadastrado
+ * (não genérico) que escreveu HOJE e está sem resposta há `horas` horas ou mais — caso real: 13/10, o Giancarlo S.
+ * perguntou às 10:31 e só foi respondido em 15/10; o fechamento não o citou. E também quem o portão acordou hoje e
+ * continua sem resposta (spec uma voz §6.3-2), de qualquer tipo. Fica de fora quem já está na mensagem com letra.
+ * `horas` = 0 desliga a parte dos clientes. Ordem: os acordados primeiro, depois o que espera há mais tempo.
+ */
+export function semRespostaDesdeHoje(p: {
+  esperando: QuemEspera[];
+  recebidas: Array<{ phone_normalized: string; occurred_at: string; body?: string | null }> | null;
+  agora: Date;
+  horas: number;
+  comLetra: Set<string>;
+  /** telefone → instante (ISO) do acorde de hoje */
+  acordados: Map<string, string>;
+}): SemRespostaDeHoje[] {
+  const hoje = diaBR(p.agora);
+  const achados: Array<SemRespostaDeHoje & { ms: number }> = [];
+  for (const w of p.esperando) {
+    const phone = String(w.phone);
+    if (!phone || p.comLetra.has(phone)) continue;
+    const saida = w.last_outbound_at ? Date.parse(String(w.last_outbound_at)) : NaN;
+    const deHoje = (iso: string) => diaBR(new Date(iso)) === hoje && (Number.isNaN(saida) || Date.parse(iso) > saida);
+    const deHojeSemResposta = p.recebidas
+      ? p.recebidas.filter((m) => m.phone_normalized === phone && deHoje(m.occurred_at)).map((m) => ({ em: Date.parse(m.occurred_at), body: m.body }))
+      : (deHoje(String(w.last_inbound_at)) ? [{ em: Date.parse(String(w.last_inbound_at)), body: w.last_body }] : []);
+    if (!deHojeSemResposta.length) continue;
+    // (16/10/2026) agradecimento não é "sem resposta": o que ele mandou hoje é só "Bom dia Gustavo! Ótimo 👍", "ok", "👍"
+    if (deHojeSemResposta.every((m) => pareceSoAgradecimento(m.body))) continue;
+    const primeiras = deHojeSemResposta.map((m) => m.em);
+    const primeira = Math.min(...primeiras);
+    const acordei = p.acordados.get(phone) ?? null;
+    const cliente = w.categoria === "cliente" && !ehClienteGenerico(w.contato);
+    const esperou = p.agora.getTime() - primeira >= p.horas * 3_600_000;
+    if (!acordei && !(cliente && p.horas > 0 && esperou)) continue;
+    achados.push({
+      phone, nome: nomeSemLetra(w.contato || phone), desde: horaBR(new Date(primeira)),
+      acordei: acordei ? horaBR(new Date(acordei)) : null, ms: primeira,
+    });
+  }
+  return achados.sort((a, b) => Number(!!b.acordei) - Number(!!a.acordei) || a.ms - b.ms).map(({ ms: _ms, ...x }) => x);
 }

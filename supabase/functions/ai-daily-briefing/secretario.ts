@@ -10,7 +10,14 @@ import { paraBusca } from "../_shared/secretario/base.ts";
 import { feriadoDoDia, type TipoDoDia, tipoDoDia } from "../_shared/secretario/feriados.ts";
 import { candidatosDoDia, type ColetaDoSecretario } from "./secretario-candidatos.ts";
 import { coletar, type DoResumoDeHoje } from "./secretario-coleta.ts";
-import { comLetra, type GrupoDoDia, type PassagemDoHistorico, selecionar, type Selecao, textosDoPacote } from "./secretario-selecao.ts";
+import {
+  comLetra, type GrupoDoDia, type OpcoesDoHistorico, OPCOES_PADRAO, type PassagemDoHistorico, selecionar, type Selecao, textosDoPacote,
+} from "./secretario-selecao.ts";
+import {
+  type AvisoGuardado, lerGuardado, marcarNaMensagem, planoDoGuardado, type PlanoDoGuardado, quaisSeResolveram,
+} from "../_shared/uma-voz/guardado.ts";
+import type { ModoDoPortao, RegrasDaVozUnica } from "../_shared/uma-voz/portao.ts";
+import { lerPortao, type PortaoDaRodada } from "../_shared/uma-voz/registrar.ts";
 import { type DadosDeHoje, type DadosDoEscritorio, linhaDoItem, type NaRua, textoDaManha, textoDoEscritorio } from "./secretario-texto.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -46,6 +53,31 @@ export interface ManhaNova {
   itensManha: number;
   itensLista: number;
   semLetra: number;
+  /**
+   * (16/10/2026) O que o portão guardou e o texto mostrou (só na sombra: a manhã não sai). Quem grava a manhã marca
+   * depois (marcarNaMensagem: os resolvidos somem, os mostrados ficam "incluido" — não "entregue"). null = sem guardado.
+   */
+  guardado?: { modo: ModoDoPortao; plano: PlanoDoGuardado } | null;
+}
+
+/** (16/10/2026) O guardado lido para a manhã (avisos_para_a_mensagem) e o que deixou de ser verdade (D8). */
+export interface GuardadoLido {
+  modo: ModoDoPortao;
+  avisos: AvisoGuardado[];
+  resolvidos: Set<string>;
+  regras: Pick<RegrasDaVozUnica, "guardado_resolvido">;
+}
+
+/** Os telefones que já são item da manhã com letra (o aviso do mesmo contato vai junto, sem linha própria). */
+export function fonesDaManha(sel: Selecao): Set<string> {
+  const fones = new Set<string>();
+  for (const g of sel.manha) {
+    for (const m of g.membros) {
+      const f = /^fone:(\d+)$/.exec(m.c.referencia)?.[1];
+      if (f) fones.add(f);
+    }
+  }
+  return fones;
 }
 
 function corta(s: string | null, max: number): string | null {
@@ -107,15 +139,26 @@ export function montarDosDados(p: {
   naRua: NaRua;
   deHoje: DadosDeHoje;
   escritorio: DadosDoEscritorio;
+  /** (16/10/2026) F7 e afins (voz_unica_regras); ausente = os padrões */
+  opcoes?: OpcoesDoHistorico;
+  /** (16/10/2026) o guardado para a manhã (só na sombra); ausente = o texto de antes */
+  guardado?: GuardadoLido | null;
 }): ManhaNova {
   const tipo = tipoDoDia(p.hoje);
+  const opcoes = p.opcoes ?? OPCOES_PADRAO;
   // domingo e feriado: nada sobe; os itens do dia ficam todos na lista (a *lista* funciona)
   const selecao = tipo === "util"
-    ? selecionar(candidatosDoDia(p.coleta, p.agora, p.hoje), p.historico, p.hoje)
+    ? selecionar(candidatosDoDia(p.coleta, p.agora, p.hoje), p.historico, p.hoje, undefined, undefined, opcoes)
     : selecionar(candidatosDoDia(p.coleta, p.agora, p.hoje), p.historico, p.hoje, 0,
-      `Ficou na lista: ${tipo === "domingo" ? "domingo" : "feriado"}, nada sobe de manhã.`);
+      `Ficou na lista: ${tipo === "domingo" ? "domingo" : "feriado"}, nada sobe de manhã.`, opcoes);
+  const plano = p.guardado && p.guardado.avisos.length
+    ? planoDoGuardado({
+      avisos: p.guardado.avisos, mensagem: "manha", hoje: p.hoje, resolvidosAgora: p.guardado.resolvidos,
+      regras: p.guardado.regras, cobertos: fonesDaManha(selecao),
+    })
+    : null;
   const texto = textoDaManha({
-    hoje: p.hoje, tipoDoDia: tipo, feriado: feriadoDoDia(p.hoje), selecao, naRua: p.naRua, deHoje: p.deHoje,
+    hoje: p.hoje, tipoDoDia: tipo, feriado: feriadoDoDia(p.hoje), selecao, naRua: p.naRua, deHoje: p.deHoje, guardado: plano,
   });
   return {
     texto,
@@ -125,7 +168,38 @@ export function montarDosDados(p: {
     itensManha: selecao.manha.length,
     itensLista: selecao.lista.filter((g) => g.letra).length,
     semLetra: selecao.semLetra,
+    guardado: plano && p.guardado ? { modo: p.guardado.modo, plano } : null,
   };
+}
+
+/**
+ * (16/10/2026) O guardado para a manhã: só quando o texto novo NÃO sai (sombra) e a voz única registra. Nunca lança
+ * (erro = null: a manhã sai sem o bloco e o guardado espera a próxima).
+ */
+export async function lerGuardadoDaManha(admin: Admin, p: {
+  agora: Date;
+  dono: { phone: string };
+  modo: "sombra" | "novo";
+  portao: PortaoDaRodada;
+}): Promise<GuardadoLido | null> {
+  // com a manhã 'novo' o texto vai ao dono: com a voz única em sombra as fontes JÁ avisaram (repetiria); o bloco na
+  // manhã enviada é do P4.5 (voz única ligada de verdade)
+  if (p.modo !== "sombra" || !p.portao.modo) return null;
+  const avisos = await lerGuardado(admin, { phone: p.dono.phone, modo: p.portao.modo, mensagem: "manha", agora: p.agora });
+  if (!avisos) return null;
+  const resolvidos = avisos.length ? await quaisSeResolveram(admin, avisos) : new Set<string>();
+  return { modo: p.portao.modo, avisos, resolvidos, regras: p.portao.regras };
+}
+
+/**
+ * (16/10/2026) Depois de GRAVAR a manhã-sombra (só na 1ª gravação do dia): os resolvidos somem e os mostrados ficam
+ * "incluido" sem fila (a migration 20261016120000: nunca "entregue", porque nada saiu). Nunca lança.
+ */
+export async function marcarGuardadoDaManha(admin: Admin, p: { dono: { phone: string }; manha: ManhaNova; novo: boolean }): Promise<number> {
+  const g = p.manha.guardado;
+  if (!p.novo || !g) return 0;
+  const r = await marcarNaMensagem(admin, { phone: p.dono.phone, modo: g.modo, mostrados: g.plano.mostrados, resolvidos: g.plano.resolvidos });
+  return r.incluidos;
 }
 
 /** Lê o banco e monta. Lança se uma leitura essencial falhar (quem chama volta ao resumo de sempre). */
@@ -138,7 +212,13 @@ export async function montarManhaNova(admin: Admin, p: {
   escritorio: DadosDoEscritorio;
 }): Promise<ManhaNova> {
   const lido = await coletar(admin, { agora: p.agora, hoje: p.hoje, dono: p.dono, modo: p.modo, doResumo: p.doResumo });
-  return montarDosDados({ hoje: p.hoje, agora: p.agora, ...lido, escritorio: p.escritorio });
+  // (16/10/2026) as regras do dono (F7) e o guardado da manhã-sombra; lerPortao nunca lança (erro = padrões, sem guardado)
+  const portao = await lerPortao(admin);
+  const guardado = await lerGuardadoDaManha(admin, { agora: p.agora, dono: p.dono, modo: p.modo, portao });
+  return montarDosDados({
+    hoje: p.hoje, agora: p.agora, ...lido, escritorio: p.escritorio,
+    opcoes: { semanaVoltaComFatoNovo: portao.regras.semana_volta_com_fato_novo }, guardado,
+  });
 }
 
 /**

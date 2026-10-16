@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { ASSUNTO_NAO_ENVIADOS, type Candidato, candidatoDeConversa, candidatosDoDia } from "./secretario-candidatos.ts";
-import { estadoPeloHistorico, type PassagemDoHistorico, selecionar } from "./secretario-selecao.ts";
+import { adiadoPor, estadoPeloHistorico, type PassagemDoHistorico, selecionar } from "./secretario-selecao.ts";
 import { AGORA_1510, coleta1510, HOJE_1510 } from "./secretario-fixture.ts";
 
 const HOJE = HOJE_1510;
@@ -224,4 +224,38 @@ Deno.test("dois pedidos de orçamento do dia: só o mais antigo vai na frente; o
     cand("g1", { valor: 9000 }), cand("g2", { valor: 8000 }),
   ], ontem, HOJE);
   assertEquals(sel2.manha.map((g) => g.membros[0].c.nome), ["5547900000011", "g1", "g2"]);
+});
+
+// ─── F7 (16/10/2026, padrão recomendado, aguarda o dono) ────────────────────────────────────────
+// "X semana" (adiado até segunda, a revisão respondida de uma vez) volta ANTES se o fato mudou — mensagem nova do
+// cliente, pagamento, vencimento novo. Só esse adiamento: "X espera"/"X até dd/mm"/"X 15 dias" seguram até a data.
+// Com a regra desligada (voz_unica_regras.semana_volta_com_fato_novo = false), o de antes.
+Deno.test("F7: 'X semana' com fato novo volta antes da segunda; sem fato novo, ou outro adiamento, segura", () => {
+  const adiado = (por: string | null, fato = "f1") => passou("recv:1", {
+    fato, acao: "adiado", acao_em: "2026-10-13T20:40:00Z", adiado_ate: "2026-10-19", adiado_por: por,
+  });
+  // sem fato novo: segue adiado
+  assertEquals(estadoPeloHistorico(cand("recv:1"), [adiado("semana")], HOJE).lugar, "lista");
+  // pagamento parcial (o saldo é parte do fato): volta, marcado como fato novo
+  const e = estadoPeloHistorico(cand("recv:1", { fato: "f2" }), [adiado("semana")], HOJE);
+  assertEquals([e.lugar, e.fatoNovo, e.adiadoAte], ["manha", true, null]);
+  // "X espera" / "X 15 dias" / histórico antigo sem o "como": segura até a data, mesmo com fato novo
+  for (const por of [null, "15dias"]) {
+    const x = estadoPeloHistorico(cand("recv:1", { fato: "f2" }), [adiado(por)], HOJE);
+    assertEquals([x.lugar, x.adiadoAte], ["lista", "2026-10-19"], String(por));
+  }
+  // a regra desligada pelo dono: o de antes
+  assertEquals(estadoPeloHistorico(cand("recv:1", { fato: "f2" }), [adiado("semana")], HOJE, { semanaVoltaComFatoNovo: false }).lugar, "lista");
+  // na seleção: sobe de manhã com "Voltou com fato novo."
+  const sel = selecionar([cand("recv:1", { fato: "f2" })], [adiado("semana")], HOJE);
+  assertEquals(sel.manha.length, 1);
+  assertStringIncludes(sel.manha[0].motivo, "Voltou com fato novo.");
+  assertEquals(selecionar([cand("recv:1", { fato: "f2" })], [adiado("semana")], HOJE, undefined, undefined, { semanaVoltaComFatoNovo: false }).manha.length, 0);
+});
+
+Deno.test("F7: o 'como' do adiamento sai do histórico do item (o último 'adiado')", () => {
+  assertEquals(adiadoPor([{ acao: "abriu" }, { acao: "adiado", ate: "2026-10-19", via: "lote", resposta: "semana" }, { acao: "abriu" }]), "semana");
+  assertEquals(adiadoPor([{ acao: "adiado", resposta: "semana" }, { acao: "adiado", ate: "2026-10-30" }]), null, "o último adiamento manda");
+  assertEquals(adiadoPor([]), null);
+  assertEquals(adiadoPor(null), null);
 });

@@ -205,7 +205,11 @@ const ATIVAS = new Set(["approved", "scheduled", "in_progress", "awaiting_parts"
  * `amanha`, e a compra que precisa sair (OS ativa com a tarefa de compra aberta e serviço marcado até o dia
  * seguinte a `amanha`). Erro = null (a linha some).
  */
-export async function lerAmanha(admin: Admin, dono: { id: string }, hoje: string, amanha: string, oss: OsCrua[]): Promise<DiaDeAmanha | null> {
+export async function lerAmanha(
+  admin: Admin, dono: { id: string }, hoje: string, amanha: string, oss: OsCrua[],
+  /** (16/10/2026, F3) traz as contas a pagar que vencem depois de hoje até `amanha` (voz_unica_regras.amanha_a_pagar) */
+  comPagar = false,
+): Promise<DiaDeAmanha | null> {
   try {
     const inicio = new Date(`${amanha}T00:00:00${FUSO_BR}`).toISOString();
     const fim = new Date(new Date(inicio).getTime() + 86_400_000).toISOString();
@@ -249,7 +253,21 @@ export async function lerAmanha(admin: Admin, dono: { id: string }, hoje: string
         const dia = diaBR(new Date(o.agendada_em!));
         return { hora: null, texto: `comprar ${n ? `${n[1]} ${n[2]}` : "os itens"} da ${o.numero} (marcada para ${dia.slice(8, 10)}/${dia.slice(5, 7)})` };
       });
-    return { dia: amanha, itens: [...itens.map(({ hora, texto }) => ({ hora, texto })), ...compras] };
+    // F3 (16/10/2026): a conta a pagar que vence até a próxima manhã (o "Amanhã vence" da manhã chega tarde para pagar).
+    // Erro aqui = sem a parte do pagar (o resto do "Amanhã" continua).
+    let pagar: DiaDeAmanha["pagar"] = null;
+    if (comPagar) {
+      try {
+        const contas = ou(await admin.from("payables").select("balance_amount, amount, due_date")
+          .in("status", ["pending", "partially_paid", "overdue"]).gt("due_date", hoje).lte("due_date", amanha).limit(200),
+          "a pagar de amanhã") as Array<{ balance_amount: unknown; amount: unknown }>;
+        const valores = contas.map((c) => Number(c.balance_amount ?? c.amount ?? 0)).filter((v) => v > 0);
+        pagar = { n: valores.length, total: Math.round(valores.reduce((s, v) => s + v, 0) * 100) / 100 };
+      } catch (e) {
+        falhou("amanha_a_pagar", e);
+      }
+    }
+    return { dia: amanha, itens: [...itens.map(({ hora, texto }) => ({ hora, texto })), ...compras], ...(comPagar ? { pagar } : {}) };
   } catch (e) {
     falhou("amanha", e);
     return null;
@@ -290,8 +308,34 @@ export async function contaDoPeriodo(admin: Admin, de: string, ate: string): Pro
   };
 }
 
+/** 'aaaa-mm' do último mês "pronto" (fechado) da analise_do_negocio, ou null. */
+export function ultimoMesPronto(analise: { meses?: Array<{ mes: string; pronto: boolean }> } | null | undefined): string | null {
+  const prontos = (analise?.meses ?? []).filter((m) => m.pronto).map((m) => String(m.mes).slice(0, 7)).sort();
+  return prontos.length ? prontos[prontos.length - 1] : null;
+}
+
+/** 'aaaa-mm' do mês anterior ao de `hoje`. */
+export function mesPassado(hoje: string): string {
+  return somarDias(`${hoje.slice(0, 7)}-01`, -1).slice(0, 7);
+}
+
+/**
+ * F5 (16/10/2026, padrão recomendado, aguarda o dono): a linha do vigia da revisão de segunda só sai quando o último mês
+ * "pronto" da analise_do_negocio é o mês passado ou mais novo — em 19/10 ela falaria de julho (agosto e setembro não
+ * estão fechados), o que confunde mais do que ajuda.
+ */
+export function vigiaValeNaRevisao(analise: { meses?: Array<{ mes: string; pronto: boolean }> } | null | undefined, hoje: string): boolean {
+  const ultimo = ultimoMesPronto(analise);
+  return !!ultimo && ultimo >= mesPassado(hoje);
+}
+
 /** Mês até aqui (corrigido), a 1ª constatação do vigia e o dinheiro da semana (de hoje a domingo). */
-export async function lerPanorama(admin: Admin, hoje: string): Promise<Panorama> {
+export async function lerPanorama(
+  admin: Admin,
+  hoje: string,
+  /** (16/10/2026, F5) a linha do vigia só com o último mês pronto recente (voz_unica_regras.vigia_so_mes_recente) */
+  vigiaSoMesRecente = false,
+): Promise<Panorama> {
   const p: Panorama = { mes: null, vigia: null, semana: null };
   try {
     p.mes = (await contaDoPeriodo(admin, `${hoje.slice(0, 7)}-01`, hoje)).conta;
@@ -302,7 +346,9 @@ export async function lerPanorama(admin: Admin, hoje: string): Promise<Panorama>
     const { data, error } = await admin.rpc("analise_do_negocio", { p_meses: 6 });
     if (error) throw error;
     const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
-    p.vigia = lerAnalise(data ?? {}, (v) => fmt.format(v).replace(/\u00a0/g, " ")).constatacoes[0] ?? null;
+    p.vigia = vigiaSoMesRecente && !vigiaValeNaRevisao(data, hoje)
+      ? null
+      : lerAnalise(data ?? {}, (v) => fmt.format(v).replace(/\u00a0/g, " ")).constatacoes[0] ?? null;
   } catch (e) {
     falhou("vigia", e);
   }

@@ -30,7 +30,7 @@ import { conversaEncerradaPeloContato } from "../_shared/whatsapp/contato-encerr
 import { resolveOrCreateWhatsAppSession } from "../_shared/ai/whatsapp-channel.ts";
 import { lerFormatoDoResumo } from "../_shared/secretario/formato.ts";
 import { type Dono, donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
-import { contarPropostas, type ManhaNova, montarManhaNova, registrarManha } from "./secretario.ts";
+import { contarPropostas, type ManhaNova, marcarGuardadoDaManha, montarManhaNova, registrarManha } from "./secretario.ts";
 import type { DadosDoEscritorio } from "./secretario-texto.ts";
 import { rodarTurnoDaTarde } from "./secretario-tarde.ts";
 
@@ -1055,9 +1055,14 @@ servirComCors(async (req) => {
     // 'sombra': o de sempre já está na fila; o novo é só guardado (para a comparação lado a lado).
     // Falha aqui só loga.
     let sombraGravada = false;
+    let guardadoNaSombra = 0;
     if (manhaNova && donoDaManha && formato === "sombra") {
       const recDoDono = (recipients as any[]).find((r) => r.id === donoDaManha!.id);
-      sombraGravada = (await registrarManha(admin, { hoje: hojeBR, dono: donoDaManha, modo: "sombra", manha: manhaNova, textoAntigo: messageFor(recDoDono || {}) })).ok;
+      const gravada = await registrarManha(admin, { hoje: hojeBR, dono: donoDaManha, modo: "sombra", manha: manhaNova, textoAntigo: messageFor(recDoDono || {}) });
+      sombraGravada = gravada.ok;
+      // (16/10/2026) o que o portão guardou e a manhã-sombra mostrou: "incluido" (nunca "entregue": nada saiu). Só na
+      // 1ª gravação do dia; sem guardado (ou voz única desligada) não chama nada.
+      if (gravada.ok) guardadoNaSombra = await marcarGuardadoDaManha(admin, { dono: donoDaManha, manha: manhaNova, novo: gravada.novo });
     }
 
     // O resumo entra no histórico da conversa do assistente (15/10/2026): sem isso, "cobra esse" ou
@@ -1095,7 +1100,7 @@ servirComCors(async (req) => {
       historico: historicoGravado,
       metrics: { scheduled: scheduledCount ?? 0, quotes: quotesCount ?? 0, overdue: overdueCount, overdue_sum: overdueSum, pending: pendingCount ?? 0 },
       ...(formato !== "antigo"
-        ? { secretario: { formato, montada: !!manhaNova, enviada_ao_dono: !!textoNovoDoDono, sombra_gravada: sombraGravada } }
+        ? { secretario: { formato, montada: !!manhaNova, enviada_ao_dono: !!textoNovoDoDono, sombra_gravada: sombraGravada, guardado_na_sombra: guardadoNaSombra } }
         : {}),
     });
   } catch (e: any) {

@@ -33,6 +33,32 @@ export interface PassagemDoHistorico {
   adiado_ate: string | null;
   voltou_em: string | null;
   criado_em: string;
+  /**
+   * (16/10/2026) Como o adiamento foi pedido: 'semana' / '15dias' (a revisão respondida de uma vez, resumo_itens_acoes
+   * grava a resposta no histórico do item). null/ausente = o adiamento comum ("X espera", "X até dd/mm").
+   */
+  adiado_por?: string | null;
+}
+
+/**
+ * (16/10/2026) Regras do histórico que o dono pode mudar sem publicar (voz_unica_regras):
+ *   semanaVoltaComFatoNovo (F7, padrão recomendado, aguarda o dono) — "X semana" (adiado até segunda) volta ANTES se
+ *   o fato mudou (mensagem nova do cliente, pagamento, vencimento novo). Só esse adiamento: "X espera", "X até dd/mm" e
+ *   "X 15 dias" seguram até a data, como antes.
+ */
+export interface OpcoesDoHistorico {
+  semanaVoltaComFatoNovo: boolean;
+}
+export const OPCOES_PADRAO: Readonly<OpcoesDoHistorico> = Object.freeze({ semanaVoltaComFatoNovo: true });
+
+/** O "como" do último adiamento no histórico jsonb de resumo_itens ({acao:'adiado', resposta:'semana'|'15dias'}). */
+export function adiadoPor(historico: unknown): string | null {
+  if (!Array.isArray(historico)) return null;
+  for (let i = historico.length - 1; i >= 0; i--) {
+    const h = historico[i] as { acao?: unknown; resposta?: unknown } | null;
+    if (h && h.acao === "adiado") return typeof h.resposta === "string" ? h.resposta : null;
+  }
+  return null;
 }
 
 export type Lugar = "manha" | "lista" | "fora";
@@ -54,7 +80,12 @@ function ms(iso: string | null | undefined): number {
 }
 
 /** O que o histórico diz deste candidato hoje. */
-export function estadoPeloHistorico(c: Candidato, historico: PassagemDoHistorico[], hoje: string): Estado {
+export function estadoPeloHistorico(
+  c: Candidato,
+  historico: PassagemDoHistorico[],
+  hoje: string,
+  opcoes: OpcoesDoHistorico = OPCOES_PADRAO,
+): Estado {
   let passagens = historico.filter((h) => h.referencia === c.referencia && h.dia < hoje);
   // o marco: o último "volta" e o último adiamento que já venceu
   let marco = -Infinity;
@@ -66,7 +97,10 @@ export function estadoPeloHistorico(c: Candidato, historico: PassagemDoHistorico
 
   const ultima = passagens.filter((h) => h.acao && ACOES_DO_DONO.has(h.acao))
     .sort((a, b) => ms(a.acao_em) - ms(b.acao_em)).pop();
-  if (ultima?.acao === "adiado" && ultima.adiado_ate && ultima.adiado_ate > hoje) {
+  // F7 (16/10/2026): o "X semana" volta antes da segunda quando o fato mudou (o "X espera"/"até dd/mm" segura até a data)
+  const voltouDoAdiamento = !!ultima && ultima.acao === "adiado" && !!ultima.adiado_ate && ultima.adiado_ate > hoje &&
+    opcoes.semanaVoltaComFatoNovo && ultima.adiado_por === "semana" && ultima.fato !== c.fato;
+  if (ultima?.acao === "adiado" && ultima.adiado_ate && ultima.adiado_ate > hoje && !voltouDoAdiamento) {
     return { lugar: "lista", motivo: `Ficou na lista: adiado até ${quandoEmPalavras(ultima.adiado_ate, hoje)}.`, fatoNovo: false, adiadoAte: ultima.adiado_ate };
   }
   if (ultima && ultima.fato === c.fato) {
@@ -88,7 +122,7 @@ export function estadoPeloHistorico(c: Candidato, historico: PassagemDoHistorico
       adiadoAte: null,
     };
   }
-  return { lugar: "manha", motivo: null, fatoNovo: deManha.length > 0 && mesmoFato.length === 0, adiadoAte: null };
+  return { lugar: "manha", motivo: null, fatoNovo: (deManha.length > 0 && mesmoFato.length === 0) || voltouDoAdiamento, adiadoAte: null };
 }
 
 /** O que se perde hoje → maior valor → mais antigo (e a referência, para empate nunca virar sorteio). */
@@ -193,9 +227,10 @@ export function selecionar(
   hoje: string,
   max: number = REGRAS.maxManha,
   motivoDoLimite = "Ficou na lista: podia subir, mas passou do limite de 3 da manhã.",
+  opcoes: OpcoesDoHistorico = OPCOES_PADRAO,
 ): Selecao {
   const vivos: MembroDoGrupo[] = candidatos
-    .map((c) => ({ c, estado: estadoPeloHistorico(c, historico, hoje) }))
+    .map((c) => ({ c, estado: estadoPeloHistorico(c, historico, hoje, opcoes) }))
     .filter((m) => m.estado.lugar !== "fora");
   // pedido de orçamento do dia: "se perde hoje" para UM só, o mais antigo que pode subir (no pior caso ele
   // ocupa 1 dos 3 lugares); os outros seguem a ordem comum, sem a frase do "se perde hoje"

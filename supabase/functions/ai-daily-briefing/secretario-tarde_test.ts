@@ -35,6 +35,7 @@ function falsoAdmin(tabelas: Record<string, Linha[]>, rpcs: Record<string, unkno
         lt: (c: string, v: string) => ((linhas = linhas.filter((l) => valor(l, c) != null && String(valor(l, c)) < v)), q),
         lte: (c: string, v: string) => ((linhas = linhas.filter((l) => valor(l, c) != null && String(valor(l, c)) <= v)), q),
         gte: (c: string, v: string) => ((linhas = linhas.filter((l) => valor(l, c) != null && String(valor(l, c)) >= v)), q),
+        gt: (c: string, v: string) => ((linhas = linhas.filter((l) => valor(l, c) != null && String(valor(l, c)) > v)), q),
         like: () => q,
         or: () => q,
         order: () => q,
@@ -173,4 +174,97 @@ Deno.test("dry-run: com a chave desligada, pré-visualiza qualquer turno sem gra
   assertEquals(registrar(f.chamadas), null);
   assertEquals(f.inseridas.length, 0);
   assert(!f.lidas.includes("resumo_tarde"), "o dry não consulta o 'já decidi'");
+});
+
+// ─── (16/10/2026) O guardado na tarde-sombra, F1 e "com a voz única desligada nada muda" ─────────
+// O que se protege: só a tarde que NÃO sai lê o guardado (com a voz única em sombra as fontes já avisaram o dono); o
+// texto guardado mostra as linhas; depois de gravar, os mostrados vão para avisos_incluir_na_mensagem SEM fila (a
+// migration 20261016120000 os deixa "incluido", nunca "entregue") e o que se resolveu some (aviso_resolver); com a voz
+// única desligada ou a tarde enviada, nada disso é lido.
+const PROMESSA = '🤖 Lembrete de promessa (detectado numa mensagem sua): você escreveu a Eng. Rafael B. (Dometic) (+55 (47) 90000-0000): "Claro, te passo agora!". Leia a conversa…';
+const SALDO = "🏦 Extrato de C6: o saldo do banco (R$ 1.234,56) não bate com a soma das transações importadas (R$ 1.222,26), diferença R$ 12,30. A diferença se repetiu…";
+const GUARDADO = {
+  ok: true, entregues: 0, voltaram: 0,
+  avisos: [
+    { id: "g-prom", fonte: "promessa", assunto: "contato:5547900000123", destino: "proxima_fixa", motivo: "destino", texto: PROMESSA, dados: {}, registrado_em: "2026-10-15T12:45:00Z", dia: HOJE, mensagem: "fechamento", reaberto: 0 },
+    { id: "g-saldo", fonte: "vigia_negocio", assunto: "saldo_divergente:c6", destino: "escritorio", motivo: "destino", texto: SALDO, dados: { sinal: "saldo_divergente" }, registrado_em: "2026-10-15T09:10:00Z", dia: HOJE, mensagem: "fechamento", reaberto: 0 },
+  ],
+};
+
+function comVoz(base: Record<string, Linha[]>, voz = "sombra"): Record<string, Linha[]> {
+  return { ...base, app_settings: [...base.app_settings, { key: "voz_unica", value: voz }] };
+}
+
+Deno.test("guardado na tarde-sombra: 'Não te interrompi com', o escritório na linha dele e a marcação sem fila", async () => {
+  const f = falsoAdmin(comVoz(banco()), { ...RPCS, avisos_para_a_mensagem: GUARDADO, avisos_incluir_na_mensagem: { ok: true, incluidos: 2 } });
+  const r = await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  const texto = String(registrar(f.chamadas)!.texto);
+  assert(texto.includes('Não te interrompi com: promessa sua a Eng. Rafael B. (Dometic): "Claro, te passo agora!".'), texto);
+  assert(texto.includes("Escritório: o saldo do banco C6 não bate com o sistema (R$ 12,30 de diferença). *escritório*"), texto);
+  const incluir = f.chamadas.find((c) => c.nome === "avisos_incluir_na_mensagem");
+  const pi = (incluir!.args as { p: Record<string, unknown> }).p;
+  assertEquals([pi.modo, pi.ids, "fila_id" in pi], ["sombra", ["g-prom", "g-saldo"], false]);
+  assert(f.chamadas.findIndex((c) => c.nome === "resumo_tarde_registrar") < f.chamadas.findIndex((c) => c.nome === "avisos_incluir_na_mensagem"), "marca DEPOIS de gravar");
+  assertEquals(r.corpo.guardado_na_sombra, 2);
+});
+
+Deno.test("guardado: o contato que já foi respondido some (D8, aviso_resolver) e não aparece", async () => {
+  const b = comVoz(banco());
+  b.whatsapp_messages = [{ id: "o1", phone_normalized: "5547900000123", direction: "outbound", occurred_at: "2026-10-15T13:00:00.000Z" }];
+  const f = falsoAdmin(b, { ...RPCS, avisos_para_a_mensagem: GUARDADO, aviso_resolver: { ok: true, resolvidos: 1 }, avisos_incluir_na_mensagem: { ok: true, incluidos: 1 } });
+  await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  const texto = String(registrar(f.chamadas)!.texto);
+  assert(!texto.includes("Não te interrompi"), texto);
+  const res = f.chamadas.find((c) => c.nome === "aviso_resolver");
+  assertEquals((res!.args as { p: { ids: string[] } }).p.ids, ["g-prom"]);
+});
+
+Deno.test("só o escritório guardado não tira o dia do calado (e não marca nada como mostrado)", async () => {
+  const soSaldo = { ...GUARDADO, avisos: [GUARDADO.avisos[1]] };
+  const f = falsoAdmin(comVoz(banco()), { ...RPCS, whatsapp_esperando_resposta: [], avisos_para_a_mensagem: soSaldo });
+  await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  assertEquals(registrar(f.chamadas)!.calado, true);
+  assertEquals(f.chamadas.filter((c) => c.nome === "avisos_incluir_na_mensagem").length, 0);
+});
+
+Deno.test("voz única desligada ou tarde enviada: o guardado nem é lido; o texto é o de antes", async () => {
+  const desl = falsoAdmin(banco(), { ...RPCS, avisos_para_a_mensagem: GUARDADO });
+  await rodarTurnoDaTarde(desl.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  assert(!desl.chamadas.some((c) => c.nome === "avisos_para_a_mensagem"));
+  assert(!desl.lidas.includes("avisos_do_dono"));
+  const enviada = falsoAdmin(comVoz(banco({ formato: "ligado", modo: "novo" })), { ...RPCS, avisos_para_a_mensagem: GUARDADO, resumo_tarde_registrar: { ok: true, novo: true, enviado: true } });
+  await rodarTurnoDaTarde(enviada.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  assert(!enviada.chamadas.some((c) => c.nome === "avisos_para_a_mensagem"), "a tarde enviada não repete o que as fontes já avisaram");
+  assert(!String(registrar(enviada.chamadas)!.texto).includes("Não te interrompi"));
+  // o texto da sombra com a voz desligada = o da voz em sombra sem guardado
+  const semGuardado = falsoAdmin(comVoz(banco()), { ...RPCS, avisos_para_a_mensagem: { ok: true, avisos: [] } });
+  await rodarTurnoDaTarde(semGuardado.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  assertEquals(registrar(semGuardado.chamadas)!.texto, registrar(desl.chamadas)!.texto);
+});
+
+Deno.test("F1 no fechamento: o cliente que escreveu hoje e está há 4 h sem resposta (e o acordado de hoje)", async () => {
+  const b = comVoz(banco());
+  b.whatsapp_messages = [
+    { phone_normalized: "5547900000555", direction: "inbound", occurred_at: "2026-10-15T13:31:00.000Z", body: "A entrega vc consegue p qdo?" },
+    { phone_normalized: "5547900000555", direction: "inbound", occurred_at: "2026-10-15T13:33:00.000Z", body: "quanto vc precisa no pix?" },
+    { phone_normalized: "351900000422", direction: "inbound", occurred_at: "2026-10-15T12:02:00.000Z", body: "preciso fechar hoje" },
+  ];
+  b.avisos_do_dono = [{ phone_normalized: DONO.phone, modo: "sombra", dia: HOJE, situacao: "acordou", assunto: "contato:351900000422", registrado_em: "2026-10-15T12:45:00.000Z" }];
+  const esperando = [
+    ...RPCS.whatsapp_esperando_resposta,
+    { phone: "5547900000555", contato: "Giancarlo S.", categoria: "cliente", last_inbound_at: "2026-10-15T13:33:00Z", last_outbound_at: "2026-10-14T20:00:00Z", encerrada: false },
+    { phone: "351900000422", contato: "Miguel", categoria: "cliente", last_inbound_at: "2026-10-15T12:02:00Z", last_outbound_at: null, encerrada: false },
+  ];
+  const f = falsoAdmin(b, { ...RPCS, whatsapp_esperando_resposta: esperando, avisos_para_a_mensagem: { ok: true, avisos: [] } });
+  await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  const texto = String(registrar(f.chamadas)!.texto);
+  assert(texto.includes("Sem resposta desde hoje: Miguel (09:02, acordei às 09:45); Giancarlo S. (10:31)."), texto);
+  // com a voz única desligada, sem o "acordei" (o F1 dos clientes continua: é regra do fechamento)
+  const d = falsoAdmin({ ...b, app_settings: banco().app_settings }, { ...RPCS, whatsapp_esperando_resposta: esperando });
+  await rodarTurnoDaTarde(d.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  assert(String(registrar(d.chamadas)!.texto).includes("Sem resposta desde hoje: Miguel (09:02); Giancarlo S. (10:31)."), String(registrar(d.chamadas)!.texto));
+  // F1 desligado pelo dono (voz_unica_regras.sem_resposta_hoje_horas = 0): a linha some
+  const off = falsoAdmin({ ...b, app_settings: [...banco().app_settings, { key: "voz_unica_regras", value: '{"sem_resposta_hoje_horas":0}' }] }, { ...RPCS, whatsapp_esperando_resposta: esperando });
+  await rodarTurnoDaTarde(off.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  assert(!String(registrar(off.chamadas)!.texto).includes("Sem resposta desde hoje"));
 });

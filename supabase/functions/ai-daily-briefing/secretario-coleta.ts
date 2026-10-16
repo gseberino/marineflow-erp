@@ -15,7 +15,7 @@ import { diaBR, horaBR } from "../_shared/pdf/datas.ts";
 import { somarDias } from "../_shared/secretario/base.ts";
 import { contatoEncerrou, conversaEncerradaPeloContato, ULTIMAS_RECEBIDAS } from "../_shared/whatsapp/contato-encerrou.ts";
 import type { ColetaDoSecretario, ConversaCrua, OrcamentoCru, OsCrua } from "./secretario-candidatos.ts";
-import type { PassagemDoHistorico } from "./secretario-selecao.ts";
+import { adiadoPor, type PassagemDoHistorico } from "./secretario-selecao.ts";
 import type { DadosDeHoje, NaRua } from "./secretario-texto.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -300,6 +300,7 @@ export async function coletar(admin: Admin, p: {
       categoria,
       last_inbound_at: String(w.last_inbound_at),
       last_body: (w.last_body as string | null) ?? null,
+      last_outbound_at: (w.last_outbound_at as string | null) ?? null,
       client_id: fin ? clientePorFinal.get(fin) ?? null : null,
       recebidas: recebidasPorFone.get(phone) ?? (w.last_body ? [{ body: w.last_body, em: String(w.last_inbound_at) }] : []),
       diasComMensagemSua: diasSeus.get(phone)?.size ?? 0,
@@ -307,10 +308,12 @@ export async function coletar(admin: Admin, p: {
   });
 
   // ── o histórico do mesmo modo (30 dias, sem hoje) ──
-  const historico = ou(await admin.from("resumo_itens")
-    .select("referencia, dia, posicao, fato, acao, acao_em, adiado_ate, voltou_em, criado_em")
+  // (16/10/2026) + o histórico do item: o "como" do adiamento ('semana' da revisão volta antes com fato novo — F7)
+  const historico = (ou(await admin.from("resumo_itens")
+    .select("referencia, dia, posicao, fato, acao, acao_em, adiado_ate, voltou_em, criado_em, historico")
     .eq("phone_normalized", dono.phone).eq("modo", p.modo)
-    .gte("dia", somarDias(hoje, -30)).lt("dia", hoje).limit(5000), "histórico do resumo") as PassagemDoHistorico[];
+    .gte("dia", somarDias(hoje, -30)).lt("dia", hoje).limit(5000), "histórico do resumo") as Array<PassagemDoHistorico & { historico?: unknown }>)
+    .map(({ historico: h, ...passagem }) => ({ ...passagem, adiado_por: passagem.acao === "adiado" ? adiadoPor(h) : null }));
 
   // ── a linha "Hoje" (enriquecimento: erro = vazio) ──
   const deHoje: DadosDeHoje = { agenda: [], promessas: [], vencimentos: [], falhasDeEnvio: 0, errosDaNoite: 0 };

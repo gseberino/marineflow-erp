@@ -18,7 +18,8 @@
 
 import { brl, ddmm, nomeDoDia, somarDias, umaLinha } from "../_shared/secretario/base.ts";
 import { type TurnoDaTarde, turnoDaTarde } from "../_shared/secretario/turno.ts";
-import type { CobrancasAntigas, LinhaComLetra } from "./secretario-tarde-regras.ts";
+import type { CobrancasAntigas, LinhaComLetra, SemRespostaDeHoje } from "./secretario-tarde-regras.ts";
+import { blocoDoFechamento, type PlanoDoGuardado } from "../_shared/uma-voz/guardado.ts";
 import type { DadosDoEscritorio } from "./secretario-texto.ts";
 
 export const META_DA_TARDE = 900;
@@ -69,6 +70,8 @@ export interface DiaDeAmanha {
   dia: string;
   /** compromissos (OS marcada, tarefa com hora) e compras que precisam sair, na ordem */
   itens: Array<{ hora: string | null; texto: string }>;
+  /** (16/10/2026, F3) contas a pagar que vencem até `dia` (depois de hoje): quantas e o total. Ausente = não leu */
+  pagar?: { n: number; total: number } | null;
 }
 
 /** "Amanhã (sexta, 16/10): 08:00 OS-00112 (Santo Inácio 7.8); comprar 4 itens da OS-00112." */
@@ -76,9 +79,11 @@ export function linhaDeAmanha(hoje: string, a: DiaDeAmanha): string {
   const rotulo = a.dia === somarDias(hoje, 1)
     ? `Amanhã (${nomeDoDia(a.dia).toLowerCase()}, ${ddmm(a.dia)})`
     : `${nomeDoDia(a.dia)} (${ddmm(a.dia)})`;
-  if (!a.itens.length) return `${rotulo}: agenda livre.`;
+  // F3 (16/10/2026): a conta a pagar que vence até a próxima manhã
+  const pagar = a.pagar && a.pagar.n > 0 ? `; a pagar: ${plural(a.pagar.n, "conta", "contas")}, ${brl(a.pagar.total)}` : "";
+  if (!a.itens.length) return `${rotulo}: agenda livre${pagar}.`;
   const itens = a.itens.slice(0, 3).map((i) => `${i.hora ? `${i.hora} ` : ""}${umaLinha(i.texto, 50)}`);
-  return `${rotulo}: ${itens.join("; ")}${a.itens.length > 3 ? ` (e mais ${a.itens.length - 3})` : ""}.`;
+  return `${rotulo}: ${itens.join("; ")}${a.itens.length > 3 ? ` (e mais ${a.itens.length - 3})` : ""}${pagar}.`;
 }
 
 /** Quanto tempo a papelada leva: 20 s por lançamento ou alerta, 1 min por débito sem loja (arredonda em 5). */
@@ -90,9 +95,14 @@ export function minutosDoEscritorio(d: DadosDoEscritorio): number {
   return Math.max(5, Math.round(segundos / 300) * 5);
 }
 
-/** "Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja; uns 25 min. *escritório*" */
-export function linhaDoEscritorio(d: DadosDoEscritorio | null): string | null {
-  if (!d) return null;
+/**
+ * "Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja; uns 25 min. *escritório*".
+ * (16/10/2026) `guardado` = o que o portão mandou para o escritório (saldo do banco que não bate…): entra na mesma
+ * linha ("…, e o saldo do banco C6 não bate…"), sem mudar os minutos.
+ */
+export function linhaDoEscritorio(d: DadosDoEscritorio | null, guardado: string[] = []): string | null {
+  const extra = guardado.length ? guardado.slice(0, 2).join("; ") + (guardado.length > 2 ? ` e mais ${guardado.length - 2}` : "") : "";
+  if (!d) return extra ? `Escritório: ${extra}. *escritório*` : null;
   const p = d.propostas;
   const lanc = p
     ? [
@@ -107,8 +117,8 @@ export function linhaDoEscritorio(d: DadosDoEscritorio | null): string | null {
     d.alertas ? plural(d.alertas, "alerta", "alertas") : "",
     d.debitosSemLoja ? plural(d.debitosSemLoja, "débito sem loja", "débitos sem loja") : "",
   ].filter(Boolean);
-  if (!partes.length) return null;
-  return `Escritório: ${partes.join(", ")}; uns ${minutosDoEscritorio(d)} min. *escritório*`;
+  if (!partes.length) return extra ? `Escritório: ${extra}. *escritório*` : null;
+  return `Escritório: ${partes.join(", ")}${extra ? `, e ${extra}` : ""}; uns ${minutosDoEscritorio(d)} min. *escritório*`;
 }
 
 /** O nome da próxima revisão da semana depois de `hoje` ("segunda"; "quarta (04/11)" quando não é segunda). */
@@ -203,6 +213,15 @@ export interface DadosDaTarde {
   faturamento: string | null;
   /** a pergunta da sexta vai junto */
   pergunta: boolean;
+  /**
+   * (16/10/2026) O que o portão guardou para esta tarde (só quando a tarde NÃO sai: sombra). Linhas no topo ("Não te
+   * interrompi com: …") e as do escritório na linha dele. Guardado conta como "há algo" (fora o do escritório).
+   */
+  guardado?: PlanoDoGuardado | null;
+  /** (16/10/2026, F1) quem escreveu hoje e está sem resposta (e quem o portão acordou hoje), sem letra */
+  semResposta?: SemRespostaDeHoje[];
+  /** quantos nomes a linha do F1 cita (o resto vira "e mais N") */
+  semRespostaMax?: number;
 }
 
 export interface TextoDaTarde {
@@ -212,12 +231,32 @@ export interface TextoDaTarde {
   letras: LinhaComLetra[];
 }
 
+/** F1: "Sem resposta desde hoje: Giancarlo S. (10:31); Miguel (09:02, acordei às 09:45) e mais 1." */
+export function linhaSemResposta(lista: SemRespostaDeHoje[] | undefined, max = 2): string | null {
+  if (!lista?.length) return null;
+  const nomes = lista.slice(0, max).map((s) => `${s.nome} (${s.desde}${s.acordei ? `, acordei às ${s.acordei}` : ""})`);
+  const resto = lista.length - nomes.length;
+  return `Sem resposta desde hoje: ${nomes.join("; ")}${resto > 0 ? ` e mais ${resto}` : ""}.`;
+}
+
+/** As linhas do topo da tarde (o guardado e o F1), na ordem. */
+function topoDaTarde(d: DadosDaTarde, curto: boolean): string[] {
+  return [
+    d.guardado ? blocoDoFechamento(d.guardado, curto) : null,
+    linhaSemResposta(d.semResposta, curto ? 1 : d.semRespostaMax ?? 2),
+  ].filter((l): l is string => !!l);
+}
+
 function cabecaDoDia(hoje: string): string {
   return `${nomeDoDia(hoje).toLowerCase()}, ${ddmm(hoje)}`;
 }
 
 function textoDoFechamento(d: DadosDaTarde, curto: boolean): TextoDaTarde {
-  const temAlgo = d.ficaram.length > 0 || (d.amanha?.itens.length ?? 0) > 0 || d.fornecedores.length > 0 || d.pergunta;
+  const topo = topoDaTarde(d, curto);
+  // (16/10/2026) guardado (fora o do escritório), quem está sem resposta desde hoje e a conta a pagar de amanhã contam
+  // como "há algo": sem isso, "só se houver algo" viraria descarte do guardado (spec uma voz §6.3-1)
+  const temAlgo = d.ficaram.length > 0 || (d.amanha?.itens.length ?? 0) > 0 || (d.amanha?.pagar?.n ?? 0) > 0 ||
+    d.fornecedores.length > 0 || d.pergunta || topo.length > 0;
   if (!temAlgo) return { texto: null, letras: [] };
   const proxima = proximaRevisaoDaSemana(d.hoje);
   const abertura = d.ficaram.length
@@ -228,10 +267,10 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean): TextoDaTarde {
   const fim = [
     d.amanha ? linhaDeAmanha(d.hoje, d.amanha) : null,
     d.fornecedores.length ? `Fornecedores esperando há mais de 1 dia: ${lista(d.fornecedores.map((n) => umaLinha(n, curto ? 18 : 28)))}.` : null,
-    linhaDoEscritorio(d.escritorio),
+    linhaDoEscritorio(d.escritorio, d.guardado?.escritorio ?? []),
     d.pergunta ? PERGUNTA_DA_SEMANA : null,
   ].filter((l): l is string => !!l);
-  return { texto: [abertura, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n"), letras: d.ficaram };
+  return { texto: [abertura, ...topo, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n"), letras: d.ficaram };
 }
 
 function exemploDeResposta(ls: LinhaComLetra[]): string {
@@ -254,11 +293,13 @@ function textoDaRevisaoDaSemana(d: DadosDaTarde, curto: boolean): TextoDaTarde {
     : [];
   const p = d.panorama;
   const panorama = [
+    // (16/10/2026) o "Amanhã" do fechamento também na revisão de segunda (a terça: OS marcada, tarefa, compra, a pagar)
+    d.amanha ? linhaDeAmanha(d.hoje, d.amanha) : null,
     p?.mes ? linhaDoMesAteAqui(p.mes) : null,
     curto ? null : linhaDoVigia(p?.vigia ?? null),
     p?.semana ? linhaDaSemana(p.semana) : null,
   ].filter((l): l is string => !!l);
-  const blocos = [abertura, ...(itens.length ? ["", ...itens, ...comoResponder] : []), ...(panorama.length ? ["", ...panorama] : [])];
+  const blocos = [abertura, ...topoDaTarde(d, curto), ...(itens.length ? ["", ...itens, ...comoResponder] : []), ...(panorama.length ? ["", ...panorama] : [])];
   if (d.pergunta) blocos.push("", PERGUNTA_DA_SEMANA);
   return { texto: blocos.join("\n"), letras: ps };
 }
@@ -270,7 +311,7 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean): TextoDaTarde {
     d.faturamento && !curto ? d.faturamento : null,
   ].filter((l): l is string => !!l);
   const abertura = `Revisão do mês, ${cabecaDoDia(d.hoje)}.${linhasDoMes.length ? ` ${linhasDoMes[0]}` : ""}`;
-  const blocos = [abertura, ...linhasDoMes.slice(1)];
+  const blocos = [abertura, ...linhasDoMes.slice(1), ...topoDaTarde(d, curto)];
   if (a && a.n > 0) {
     blocos.push("", `${a.n === 1 ? "1 cobrança vencida" : `${a.n} cobranças vencidas`} há 30 dias ou mais, ${brl(a.total)}. Cobrar, negociar ou dar baixa?`);
     blocos.push(...a.linhas.map((l) => linhaDaRevisao(l, curto ? 85 : 140)));

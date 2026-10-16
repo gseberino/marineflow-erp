@@ -25,7 +25,15 @@ import {
 import { type Candidato, candidatosDoDia, type ColetaDoSecretario } from "./secretario-candidatos.ts";
 import { coletar } from "./secretario-coleta.ts";
 import type { PassagemDoHistorico } from "./secretario-selecao.ts";
-import { cobrancasAntigas, ficaramDeHoje, type ItemDaManha, type LinhaComLetra, paradosDaSemana } from "./secretario-tarde-regras.ts";
+import {
+  cobrancasAntigas, ficaramDeHoje, type ItemDaManha, type LinhaComLetra, paradosDaSemana, type QuemEspera, semRespostaDesdeHoje,
+} from "./secretario-tarde-regras.ts";
+import type { OpcoesDoHistorico } from "./secretario-selecao.ts";
+import {
+  acordadosDeHoje, type AvisoGuardado, lerGuardado, marcarNaMensagem, planoDoGuardado, type PlanoDoGuardado, quaisSeResolveram,
+} from "../_shared/uma-voz/guardado.ts";
+import { type ModoDoPortao, REGRAS_PADRAO, type RegrasDaVozUnica } from "../_shared/uma-voz/portao.ts";
+import { lerPortao } from "../_shared/uma-voz/registrar.ts";
 import {
   type ContaDoMes,
   type DiaDeAmanha,
@@ -81,6 +89,8 @@ export interface LidoDaTarde {
   historico: PassagemDoHistorico[];
   // deno-lint-ignore no-explicit-any
   esperando: any[];
+  /** (16/10/2026) as recebidas da semana de quem espera (o F1 acha a 1ª mensagem de hoje sem resposta); null = falhou */
+  recebidas?: Array<{ phone_normalized: string; occurred_at: string }> | null;
   amanha: DiaDeAmanha | null;
   escritorio: DadosDoEscritorio | null;
   panorama: Panorama | null;
@@ -92,6 +102,33 @@ export interface TardeMontada {
   letras: LinhaComLetra[];
   detalhe: Record<string, unknown>;
   escritorio: string | null;
+  /**
+   * (16/10/2026) o guardado que o texto mostrou (só na sombra) e os ids a marcar depois de gravar: os mostrados (+ os
+   * do escritório quando a linha do escritório saiu) e os resolvidos (D8). null = sem guardado.
+   */
+  guardado?: { modo: ModoDoPortao; mostrados: string[]; resolvidos: string[] } | null;
+}
+
+/** (16/10/2026) O que a tarde-sombra recebe do portão: o guardado, os acordes de hoje e as regras do dono. */
+export interface DoPortaoNaTarde {
+  modo: ModoDoPortao | null;
+  regras: RegrasDaVozUnica;
+  /** null = sem guardado (voz única desligada, tarde que sai de verdade, ou erro de leitura) */
+  guardado: { avisos: AvisoGuardado[]; resolvidos: Set<string> } | null;
+  /** telefone → hora do acorde de hoje (só na sombra) */
+  acordados: Map<string, string>;
+}
+
+const SEM_PORTAO: DoPortaoNaTarde = { modo: null, regras: { ...REGRAS_PADRAO }, guardado: null, acordados: new Map() };
+
+/** Os telefones que a tarde já mostra com letra (o F1 e o guardado do mesmo contato não repetem). */
+function fonesComLetra(...listas: LinhaComLetra[][]): Set<string> {
+  const s = new Set<string>();
+  for (const l of listas.flat()) {
+    const f = /^fone:(d+)$/.exec(l.referencia)?.[1];
+    if (f) s.add(f);
+  }
+  return s;
 }
 
 /** A parte pura: dos dados lidos ao texto, às letras e ao detalhe gravado. */
@@ -102,21 +139,48 @@ export function montarTardeDosDados(p: {
   itens: ItemDaManha[];
   lido: LidoDaTarde;
   pergunta: boolean;
+  /** (16/10/2026) o portão (guardado, acordes de hoje, regras do dono); ausente = sem nada disso, as regras-padrão */
+  portao?: DoPortaoNaTarde;
 }): TardeMontada {
   const { hoje, agora, turno, lido } = p;
+  const portao = p.portao ?? SEM_PORTAO;
+  const opcoes: OpcoesDoHistorico = { semanaVoltaComFatoNovo: portao.regras.semana_volta_com_fato_novo };
   const candidatos = new Map<string, Candidato>(candidatosDoDia(lido.coleta, agora, hoje).map((c) => [c.referencia, c]));
   const ficaram = turno === "fechamento" ? ficaramDeHoje(p.itens, candidatos) : [];
-  const parados = turno === "revisao_semana" ? paradosDaSemana(p.itens, candidatos, lido.historico, hoje) : [];
-  const antigas = turno === "revisao_mes" ? cobrancasAntigas(p.itens, lido.coleta.cobrancas, candidatos, lido.historico, hoje) : null;
+  const parados = turno === "revisao_semana" ? paradosDaSemana(p.itens, candidatos, lido.historico, hoje, opcoes) : [];
+  const antigas = turno === "revisao_mes" ? cobrancasAntigas(p.itens, lido.coleta.cobrancas, candidatos, lido.historico, hoje, 5, opcoes) : null;
   const fornecedores = turno === "fechamento" ? fornecedoresEsperando(lido.esperando, agora) : [];
+  // F1 (16/10/2026): quem escreveu hoje e está sem resposta (e quem o portão acordou hoje), fora quem já tem letra
+  const comLetra = fonesComLetra(ficaram, parados.slice(0, 5), antigas?.linhas ?? []);
+  const semResposta = semRespostaDesdeHoje({
+    esperando: lido.esperando as QuemEspera[], recebidas: lido.recebidas ?? null, agora,
+    horas: portao.regras.sem_resposta_hoje_horas, comLetra, acordados: portao.acordados,
+  });
+  // o guardado (só na sombra): o do escritório só no fechamento (a linha do escritório é dele)
+  const plano: PlanoDoGuardado | null = portao.guardado && portao.guardado.avisos.length
+    ? planoDoGuardado({
+      avisos: portao.guardado.avisos, mensagem: "fechamento", hoje, resolvidosAgora: portao.guardado.resolvidos,
+      regras: portao.regras, cobertos: comLetra,
+    })
+    : null;
+  const planoDaTarde = plano && turno !== "fechamento" ? { ...plano, escritorio: [], doEscritorio: [] } : plano;
   const t = textoDaTarde({
     hoje, turno, ficaram, amanha: lido.amanha, fornecedores, escritorio: lido.escritorio,
     parados, panorama: lido.panorama, antigas,
     mesQueFechou: lido.mesQueFechou?.conta ?? null, faturamento: lido.mesQueFechou?.faturamento ?? null,
     pergunta: p.pergunta,
+    guardado: planoDaTarde, semResposta, semRespostaMax: portao.regras.sem_resposta_hoje_max,
   });
   const e = lido.escritorio;
   return {
+    guardado: planoDaTarde && portao.modo
+      ? {
+        modo: portao.modo,
+        // calado = nada foi mostrado (fica guardado para a próxima); o resolvido some de qualquer jeito
+        mostrados: t.texto ? [...planoDaTarde.mostrados, ...planoDaTarde.doEscritorio] : [],
+        resolvidos: planoDaTarde.resolvidos,
+      }
+      : null,
     texto: t.texto,
     letras: t.letras,
     detalhe: {
@@ -130,6 +194,10 @@ export function montarTardeDosDados(p: {
       ...(lido.panorama ? { panorama: { mes: lido.panorama.mes, semana: lido.panorama.semana, vigia: !!lido.panorama.vigia } } : {}),
       ...(lido.mesQueFechou ? { mes_que_fechou: lido.mesQueFechou.conta } : {}),
       caracteres: t.texto?.length ?? 0,
+      ...(semResposta.length ? { sem_resposta: semResposta.length } : {}),
+      ...(planoDaTarde
+        ? { guardado: { linhas: planoDaTarde.linhas.length, escritorio: planoDaTarde.escritorio.length, resolvidos: planoDaTarde.resolvidos.length, restantes: planoDaTarde.restantes } }
+        : {}),
     },
     escritorio: e ? textoDoEscritorio(e, horaBR(agora)).slice(0, 2000) : null,
   };
@@ -143,16 +211,23 @@ export async function lerTudoDaTarde(admin: Admin, p: {
   dono: { id: string; phone: string };
   modo: "sombra" | "novo";
   cfg: Record<string, string>;
+  /** (16/10/2026) as regras do dono (F3, F5); ausente = os padrões */
+  regras?: RegrasDaVozUnica;
 }): Promise<LidoDaTarde> {
+  const regras = p.regras ?? REGRAS_PADRAO;
   const { esperando, recebidas } = await lerEsperando(admin, p.agora);
   const lido = await coletar(admin, { agora: p.agora, hoje: p.hoje, dono: p.dono, modo: p.modo, doResumo: { esperando, recebidas, cfg: p.cfg } });
   return {
     coleta: lido.coleta,
     historico: lido.historico,
     esperando,
-    amanha: p.turno === "fechamento" ? await lerAmanha(admin, p.dono, p.hoje, proximoDiaComManha(p.hoje), lido.coleta.oss) : null,
+    recebidas,
+    // (16/10/2026) a revisão de segunda também traz o "Amanhã" (com o a pagar do F3), como o fechamento
+    amanha: p.turno === "fechamento" || p.turno === "revisao_semana"
+      ? await lerAmanha(admin, p.dono, p.hoje, proximoDiaComManha(p.hoje), lido.coleta.oss, regras.amanha_a_pagar)
+      : null,
     escritorio: p.turno === "fechamento" ? await contarEscritorio(admin, p.hoje) : null,
-    panorama: p.turno === "revisao_semana" ? await lerPanorama(admin, p.hoje) : null,
+    panorama: p.turno === "revisao_semana" ? await lerPanorama(admin, p.hoje, regras.vigia_so_mes_recente) : null,
     mesQueFechou: p.turno === "revisao_mes" ? await lerMesQueFechou(admin, p.hoje) : null,
   };
 }
@@ -201,9 +276,18 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
   // "Se o dono estiver no meio de uma conversa, espera até 20 min": só faz sentido quando vai enviar
   if (!p.dry && enviar && conversa && tentativa < 3) return ok({ motivo: "esperando_conversa", turno, tentativa });
 
-  const lido = await lerTudoDaTarde(admin, { agora: p.agora, hoje, turno, dono, modo: manha.modo, cfg });
+  // (16/10/2026) o portão: as regras do dono (F1, F3, F5, F7) e, só quando a tarde NÃO sai (sombra), o guardado e os
+  // acordes de hoje — com a voz única em sombra as fontes já avisaram o dono; a tarde enviada não os repete (P4.5)
+  const voz = await lerPortao(admin);
+  const lido = await lerTudoDaTarde(admin, { agora: p.agora, hoje, turno, dono, modo: manha.modo, cfg, regras: voz.regras });
   const pergunta = ehDiaDaPerguntaDaSemana(hoje);
-  const m = montarTardeDosDados({ hoje, agora: p.agora, turno, itens: manha.itens, lido, pergunta });
+  const doPortao: DoPortaoNaTarde = { modo: voz.modo, regras: voz.regras, guardado: null, acordados: new Map() };
+  if (!enviar && voz.modo) {
+    const avisos = await lerGuardado(admin, { phone: dono.phone, modo: voz.modo, mensagem: "fechamento", agora: p.agora });
+    if (avisos) doPortao.guardado = { avisos, resolvidos: avisos.length ? await quaisSeResolveram(admin, avisos) : new Set() };
+    doPortao.acordados = await acordadosDeHoje(admin, { phone: dono.phone, modo: voz.modo, dia: hoje });
+  }
+  const m = montarTardeDosDados({ hoje, agora: p.agora, turno, itens: manha.itens, lido, pergunta, portao: doPortao });
   const letras = m.letras.map((l) => ({ letra: l.letra, referencia: l.referencia, tipo: l.tipo, parte: l.parte }));
 
   if (p.dry) {
@@ -241,6 +325,13 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
   const r = (data ?? {}) as { ok?: boolean; novo?: boolean; enviado?: boolean; calado?: boolean; erro?: string };
   if (!r.ok) return { status: 500, corpo: { ok: false, erro: r.erro ?? "registrar" } };
 
+  // (16/10/2026) o guardado mostrado na tarde-sombra fica "incluido" (nunca "entregue": nada saiu); o resolvido some.
+  // Só na 1ª gravação do dia. Nunca lança.
+  let guardadoMarcado = 0;
+  if (r.novo && !r.enviado && m.guardado && (m.guardado.mostrados.length || m.guardado.resolvidos.length)) {
+    guardadoMarcado = (await marcarNaMensagem(admin, { phone: dono.phone, modo: m.guardado.modo, mostrados: m.guardado.mostrados, resolvidos: m.guardado.resolvidos })).incluidos;
+  }
+
   // o que foi enviado entra no histórico da conversa do assistente ("e o B?" tem a que se referir); falha só loga
   let historico = false;
   if (r.novo && r.enviado && m.texto) {
@@ -258,5 +349,6 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
   return ok({
     turno, formato, modo_da_manha: manha.modo, gravado: r.novo === true, enviado: r.enviado === true, calado: r.calado === true,
     rebaixado, conversa_ativa: conversa, tentativa, letras: letras.length, historico,
+    ...(m.guardado ? { guardado_na_sombra: guardadoMarcado } : {}),
   });
 }

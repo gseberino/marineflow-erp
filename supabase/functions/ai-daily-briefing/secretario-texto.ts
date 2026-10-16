@@ -16,6 +16,7 @@
 import { brl, ddmm, nomeDoDia, umaLinha } from "../_shared/secretario/base.ts";
 import type { TipoDoDia } from "../_shared/secretario/feriados.ts";
 import { type GrupoDoDia, type Selecao, textosDoPacote } from "./secretario-selecao.ts";
+import { blocoDaFolga, blocoDaManha, type PlanoDoGuardado } from "../_shared/uma-voz/guardado.ts";
 
 export const META_DE_CARACTERES = 1000;
 
@@ -157,22 +158,43 @@ export function textoDaManha(p: {
   selecao: Selecao;
   naRua: NaRua;
   deHoje: DadosDeHoje;
+  /**
+   * (16/10/2026) O que o portão guardou para a manhã (uma voz só). Só vem quando o texto novo NÃO é enviado (sombra):
+   * com a voz única em sombra as fontes ainda avisam o dono por conta própria. Ausente/vazio = o texto de antes.
+   */
+  guardado?: PlanoDoGuardado | null;
 }): string {
-  if (p.tipoDoDia !== "util") return linhaDeFolga(p.tipoDoDia, p.feriado);
+  if (p.tipoDoDia !== "util") return linhaDeFolgaComGuardado(p.tipoDoDia, p.feriado, p.guardado);
   const cabeca = [abertura(p.hoje, p.selecao.manha.length)];
   const naRua = linhaNaRua(p.naRua, p.selecao);
   if (naRua) cabeca.push(naRua);
   const itens = p.selecao.manha.map(linhaDoItem);
-  const montar = (hojeCurta: boolean, comNomes: boolean) => {
+  const montar = (hojeCurta: boolean, comNomes: boolean, guardadoCurto = false) => {
     const fim = [linhaDeHoje(p.deHoje, hojeCurta), linhaDeLogoAbaixo(p.selecao, comNomes)].filter((l): l is string => !!l);
-    return [...cabeca, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n");
+    // o guardado entra logo depois da abertura (e do "Na rua"): é o que o portão segurou para não interromper
+    const guardado = p.guardado ? blocoDaManha(p.guardado, guardadoCurto) : null;
+    return [...cabeca, ...(guardado ? [guardado] : []), ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n");
   };
-  // o "logo abaixo" com nomes (o filtro à vista) vale mais que o detalhe da agenda e da promessa
-  for (const [curta, nomes] of [[false, true], [true, true], [false, false], [true, false]] as const) {
-    const t = montar(curta, nomes);
+  // o "logo abaixo" com nomes (o filtro à vista) vale mais que o detalhe da agenda e da promessa; o guardado encurta
+  // por último (uma linha e "e mais N")
+  for (const [curta, nomes, gCurto] of [
+    [false, true, false], [true, true, false], [false, false, false], [true, false, false], [true, false, true],
+  ] as const) {
+    const t = montar(curta, nomes, gCurto);
     if (t.length <= META_DE_CARACTERES) return t;
   }
-  return montar(true, false);
+  return montar(true, false, true);
+}
+
+/**
+ * (16/10/2026) Domingo e feriado com o que o portão guardou: "Bom dia! Domingo. 1 coisa ficou de ontem: X. *lista* se
+ * quiser ver." Sem guardado, a linha de sempre.
+ */
+export function linhaDeFolgaComGuardado(tipo: TipoDoDia, feriado: string | null, guardado: PlanoDoGuardado | null | undefined): string {
+  const bloco = guardado ? blocoDaFolga(guardado) : null;
+  if (!bloco) return linhaDeFolga(tipo, feriado);
+  const dia = tipo === "domingo" ? "Domingo" : `Feriado${feriado ? ` (${feriado})` : ""}`;
+  return `Bom dia! ${dia}. ${bloco} *lista* se quiser ver.`;
 }
 
 // ─── Escritório (o comando *escritório*: a papelada contada na montagem) ───────────────────────

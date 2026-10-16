@@ -71,3 +71,13 @@ Deno.test("a tarde só roda com ?turno=, logo depois do createClient e antes de 
   // e a manhã segue igual depois do ramo: o mesmo SELECT de app_settings
   assert(fonte.indexOf("if (turnoDaUrl !== null) {") < fonte.indexOf('.in("key", ["company_name", "digest_show_low_stock", "quote_validity_days", "resumo_formato"])'));
 });
+
+// (16/10/2026) O guardado do portão na manhã: só a manhã-SOMBRA o marca (ela não sai: "incluido", nunca "entregue"), e
+// só depois de gravada. O ramo 'novo' e o 'antigo' não o chamam (com a voz única em sombra as fontes já avisaram o dono).
+Deno.test("guardado na manhã: só no ramo sombra, depois de registrarManha; nenhum outro lugar", () => {
+  const sombra = bloco('if (manhaNova && donoDaManha && formato === "sombra") {', "// O resumo entra no histórico");
+  assertStringIncludes(sombra, "const gravada = await registrarManha(admin");
+  assertStringIncludes(sombra, "if (gravada.ok) guardadoNaSombra = await marcarGuardadoDaManha(admin, { dono: donoDaManha, manha: manhaNova, novo: gravada.novo });");
+  assert(sombra.indexOf("registrarManha(") < sombra.indexOf("marcarGuardadoDaManha("));
+  assertEquals((fonte.match(/marcarGuardadoDaManha\(admin/g) ?? []).length, 1);
+});

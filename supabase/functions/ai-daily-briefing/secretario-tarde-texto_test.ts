@@ -6,6 +6,8 @@ import {
   type DadosDaTarde,
   LIMITE_DA_TARDE,
   linhaDaSemana,
+  linhaDeAmanha,
+  linhaSemResposta,
   linhaDoEscritorio,
   linhaDoMesAteAqui,
   linhaDoMesQueFechou,
@@ -165,4 +167,77 @@ Deno.test("o corte duro de 1.000 caracteres: as linhas encurtam primeiro", () =>
   })).texto!;
   assert(t.length <= LIMITE_DA_TARDE, `${t.length}`);
   assertStringIncludes(t, "As letras valem até meia-noite.");
+});
+
+// ─── (16/10/2026) F1, F3, o guardado e o escritório do portão ───────────────────────────────────
+Deno.test("F3: o 'Amanhã' traz a conta a pagar (quantas e o total) e ela sozinha já é 'algo'", () => {
+  assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [], pagar: { n: 1, total: 785.07 } }),
+    "Amanhã (sexta, 16/10): agenda livre; a pagar: 1 conta, R$ 785,07.");
+  assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [{ hora: "08:00", texto: "OS-00112 (Santo Inácio 7.8)" }], pagar: { n: 2, total: 1234 } }),
+    "Amanhã (sexta, 16/10): 08:00 OS-00112 (Santo Inácio 7.8); a pagar: 2 contas, R$ 1.234,00.");
+  assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [], pagar: { n: 0, total: 0 } }), "Amanhã (sexta, 16/10): agenda livre.");
+  assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [] }), "Amanhã (sexta, 16/10): agenda livre.", "sem ler = como antes");
+  const t = textoDaTarde(dados({ amanha: { dia: "2026-10-16", itens: [], pagar: { n: 1, total: 785.07 } } }));
+  assert(t.texto, "a conta de amanhã tira o dia do calado");
+  assertEquals(textoDaTarde(dados()).texto, null, "sem nada, calado como antes");
+});
+
+Deno.test("F1: 'Sem resposta desde hoje' com até N nomes, o acorde do portão e 'e mais N'; conta como algo", () => {
+  const lista = [
+    { phone: "1", nome: "Miguel", desde: "09:02", acordei: "09:45" },
+    { phone: "2", nome: "Giancarlo S.", desde: "10:31", acordei: null },
+    { phone: "3", nome: "Jorge G.", desde: "11:00", acordei: null },
+  ];
+  assertEquals(linhaSemResposta(lista), "Sem resposta desde hoje: Miguel (09:02, acordei às 09:45); Giancarlo S. (10:31) e mais 1.");
+  assertEquals(linhaSemResposta(lista, 3), "Sem resposta desde hoje: Miguel (09:02, acordei às 09:45); Giancarlo S. (10:31); Jorge G. (11:00).");
+  assertEquals(linhaSemResposta([]), null);
+  const t = textoDaTarde(dados({ semResposta: [lista[1]] }))!;
+  assertEquals(t.texto, [
+    "Fechamento de quinta, 15/10: nada ficou de hoje.",
+    "Sem resposta desde hoje: Giancarlo S. (10:31).",
+    "",
+    "Amanhã (sexta, 16/10): agenda livre.",
+    "Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja; uns 30 min. *escritório*",
+  ].join("\n"));
+  assert(!PROIBIDAS.test(t.texto!) && !EMOJI.test(t.texto!));
+});
+
+Deno.test("guardado: 'Não te interrompi com' no topo; o do escritório na linha dele (sem mudar os minutos)", () => {
+  const plano = {
+    linhas: ['promessa sua a Eng. Rafael B. (Dometic): "Claro, te passo agora!"'], escritorio: ["o saldo do banco C6 não bate com o sistema (R$ 12,30 de diferença)"],
+    mostrados: ["a"], doEscritorio: ["b"], resolvidos: [], restantes: 0,
+  };
+  const t = textoDaTarde(dados({ guardado: plano }));
+  assertEquals(t.texto, [
+    "Fechamento de quinta, 15/10: nada ficou de hoje.",
+    'Não te interrompi com: promessa sua a Eng. Rafael B. (Dometic): "Claro, te passo agora!".',
+    "",
+    "Amanhã (sexta, 16/10): agenda livre.",
+    "Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja, e o saldo do banco C6 não bate com o sistema (R$ 12,30 de diferença); uns 30 min. *escritório*",
+  ].join("\n"));
+  // só o escritório guardado: continua calado (a papelada sozinha não dispara a mensagem)
+  assertEquals(textoDaTarde(dados({ guardado: { ...plano, linhas: [], mostrados: [] } })).texto, null);
+  assertEquals(linhaDoEscritorio(null, ["o saldo do banco C6 não bate"]), "Escritório: o saldo do banco C6 não bate. *escritório*");
+  assertEquals(linhaDoEscritorio(ESCRITORIO), "Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja; uns 30 min. *escritório*", "sem guardado = como antes");
+  // revisão da semana e do mês também levam o topo
+  const rs = textoDaTarde(dados({ turno: "revisao_semana", guardado: plano, semResposta: [{ phone: "2", nome: "Giancarlo S.", desde: "10:31", acordei: null }] }));
+  assert(rs.texto!.startsWith('Revisão da semana, quinta, 15/10. Nada parado.\nNão te interrompi com: promessa sua'), rs.texto!);
+  assertStringIncludes(rs.texto!, "Sem resposta desde hoje: Giancarlo S. (10:31).");
+});
+
+// (16/10/2026, correção do coordenador) A revisão de segunda também traz o "Amanhã" (com o a pagar do F3).
+Deno.test("revisão da semana: a linha 'Amanhã' (a terça) com o a pagar, antes do panorama", () => {
+  const t = textoDaTarde(dados({
+    hoje: "2026-10-19", turno: "revisao_semana", amanha: { dia: "2026-10-20", itens: [], pagar: { n: 1, total: 785.07 } },
+    panorama: { mes: null, vigia: null, semana: { entra: 0, nEntra: 0, sai: 785.07, nSai: 1, ate: "2026-10-25" } },
+  }));
+  assertEquals(t.texto, [
+    "Revisão da semana, segunda, 19/10. Nada parado.",
+    "",
+    "Amanhã (terça, 20/10): agenda livre; a pagar: 1 conta, R$ 785,07.",
+    "Semana até domingo (25/10): a receber nada; a pagar R$ 785 (1 conta) — sai mais do que entra.",
+  ].join("\n"));
+  // sem a leitura do "Amanhã" (null), a revisão é a de antes
+  const sem = textoDaTarde(dados({ hoje: "2026-10-19", turno: "revisao_semana", amanha: null, panorama: null }));
+  assertEquals(sem.texto, "Revisão da semana, segunda, 19/10. Nada parado.");
 });
