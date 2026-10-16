@@ -163,22 +163,52 @@ export function referenciaDoAcompanhamento(id: string, ultimaRecebidaEm: string 
  * `n` = o número deste aviso sobre a mesma mensagem do contato (1, 2…): entra na chave.
  */
 export function avisoDoAcompanhamento(
-  a: Pick<Acompanhamento, "id" | "phone_normalized" | "modo">,
+  a: Pick<Acompanhamento, "id" | "phone_normalized" | "modo"> & Partial<Pick<Acompanhamento, "contato" | "promessa" | "created_at">>,
   ultimaRecebidaEm: string | null,
   n: number,
   regras: Pick<RegrasDaVozUnica, "acompanhar_conta_no_limite" | "promessa">,
   texto: string,
+  /**
+   * (16/10/2026) D11: o 1º aviso sobre uma mensagem NOVA do contato conta como fato novo (quem chama decide com
+   * mensagemNovaEFatoNovo, _shared/uma-voz/acorde.ts). Ausente = false (como antes).
+   */
+  novoFato = false,
 ): AvisoDaFonte {
   const assunto = `contato:${a.phone_normalized}`;
+  // (16/10/2026) o nome e a mensagem vão nos dados: a manhã e o fechamento escrevem a linha do guardado com eles
+  const quem = a.contato ? { contato: a.contato } : {};
   if (a.modo === "promessa") {
-    return { fonte: "promessa", chave: `promessa:${a.id}`, assunto, destino: regras.promessa, texto, referencia: `acomp:${a.id}` };
+    return {
+      fonte: "promessa", chave: `promessa:${a.id}`, assunto, destino: regras.promessa, texto, referencia: `acomp:${a.id}`,
+      // mensagem_em = quando a promessa foi detectada (até 15 min depois da mensagem do dono): a manhã/o fechamento dão a
+      // promessa por cumprida ("parece", D8) se houve mensagem dele para o contato depois disso
+      dados: {
+        ...quem, ...(a.promessa ? { promessa: a.promessa.slice(0, 300) } : {}),
+        ...(a.created_at && !Number.isNaN(Date.parse(a.created_at)) ? { mensagem_em: new Date(a.created_at).toISOString() } : {}),
+      },
+    };
   }
   if (a.modo === "lembrar_em") {
-    return { fonte: "lembrete_pedido", chave: `lembrete:${a.id}`, assunto, destino: "deixar", texto, referencia: `acomp:${a.id}` };
+    return { fonte: "lembrete_pedido", chave: `lembrete:${a.id}`, assunto, destino: "deixar", texto, referencia: `acomp:${a.id}`, dados: quem };
   }
   const referencia = referenciaDoAcompanhamento(a.id, ultimaRecebidaEm);
+  const mensagemEm = ultimaRecebidaEm && !Number.isNaN(Date.parse(ultimaRecebidaEm)) ? new Date(ultimaRecebidaEm).toISOString() : null;
   return {
     fonte: "acompanhar", chave: `${referencia}:${n}`, assunto,
-    destino: regras.acompanhar_conta_no_limite ? "acorde" : "deixar", texto, referencia, dados: { n },
+    destino: regras.acompanhar_conta_no_limite ? "acorde" : "deixar", texto, referencia,
+    dados: { n, ...quem, ...(mensagemEm ? { mensagem_em: mensagemEm } : {}) },
+    novo_fato: novoFato,
+  };
+}
+
+/**
+ * (16/10/2026, P4.2) NF-e rejeitada: um aviso POR NOTA (chave nfe:<id>), que acorda uma vez. Em sombra o vigia
+ * continua mandando a contagem do dia como sempre; o portão registra uma linha por nota com o texto do acorde.
+ */
+export function avisoDaNfe(n: { id: string; numero: string | number | null; cliente: string | null }, texto: string): AvisoDaFonte {
+  return {
+    fonte: "vigia_negocio", chave: `nfe:${n.id}`, assunto: "fiscal:nfe_rejeitada", destino: "acorde", texto,
+    referencia: `nfe:${n.id}`,
+    dados: { sinal: "nfe_rejeitada", nota_id: n.id, ...(n.numero != null ? { numero: String(n.numero) } : {}), ...(n.cliente ? { cliente: n.cliente } : {}) },
   };
 }

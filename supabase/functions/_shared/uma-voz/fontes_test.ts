@@ -5,7 +5,7 @@
 // leva a referência do freio (acomp:<id>:<última recebida>).
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  avisoDaVoltaDoWhatsApp, avisoDoAcompanhamento, avisoDoCertificado, avisoDoConsentimento, avisoDoEmail, avisoDoLeadDoSite,
+  avisoDaNfe, avisoDaVoltaDoWhatsApp, avisoDoAcompanhamento, avisoDoCertificado, avisoDoConsentimento, avisoDoEmail, avisoDoLeadDoSite,
   avisoDosLembretesDeRevisao, avisoDosSaldos, avisoDoVigia, avisoResumoNaoChegou, DESTINO_DO_VIGIA, pedeHojeOuUrgente,
   referenciaDoAcompanhamento,
 } from "./fontes.ts";
@@ -93,4 +93,23 @@ Deno.test("acompanhamento: acorde com a referência do freio; promessa D5; lembr
   const l = avisoDoAcompanhamento({ ...a, modo: "lembrar_em" }, null, 1, REGRAS_PADRAO, "t");
   assertEquals([l.fonte, l.chave, l.destino], ["lembrete_pedido", "lembrete:a1", "deixar"]);
   assertEquals(referenciaDoAcompanhamento("a1", null), "acomp:a1:sem_mensagem");
+});
+
+// (16/10/2026) D11 e os dados que a manhã/o fechamento usam para escrever a linha do guardado.
+Deno.test("acompanhamento (16/10): novo_fato só quando quem chama diz (D11); nome e mensagem nos dados", () => {
+  const a = { id: "a1", phone_normalized: "351966776422", modo: "acompanhar" as const, contato: "Miguel" };
+  const ultima = "2026-10-07T12:02:00Z";
+  const velho = avisoDoAcompanhamento(a, ultima, 1, REGRAS_PADRAO, "t");
+  assertEquals(velho.novo_fato, false, "sem o 6º argumento = como antes");
+  assertEquals(velho.dados, { n: 1, contato: "Miguel", mensagem_em: "2026-10-07T12:02:00.000Z" });
+  assertEquals(avisoDoAcompanhamento(a, ultima, 1, REGRAS_PADRAO, "t", true).novo_fato, true);
+  const p = avisoDoAcompanhamento({ ...a, modo: "promessa", promessa: "Claro, te passo agora!", created_at: "2026-10-14T12:45:10Z" }, null, 1, REGRAS_PADRAO, "t");
+  assertEquals(p.dados, { contato: "Miguel", promessa: "Claro, te passo agora!", mensagem_em: "2026-10-14T12:45:10.000Z" });
+  assertEquals(p.novo_fato, undefined, "promessa não usa novo_fato");
+});
+
+Deno.test("NF-e rejeitada (16/10): um aviso por nota, acorda uma vez (chave nfe:<id>)", () => {
+  const n = avisoDaNfe({ id: "nota-1", numero: 123, cliente: "MP MOTOR HOMES" }, "t");
+  assertEquals([n.chave, n.assunto, n.destino, n.referencia], ["nfe:nota-1", "fiscal:nfe_rejeitada", "acorde", "nfe:nota-1"]);
+  assertEquals(n.dados, { sinal: "nfe_rejeitada", nota_id: "nota-1", numero: "123", cliente: "MP MOTOR HOMES" });
 });

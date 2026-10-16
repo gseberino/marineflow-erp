@@ -99,6 +99,25 @@ export async function registrarParaTodos(
 }
 
 /**
+ * (16/10/2026, D11) Os acordes de HOJE (dia de Brasília) do mesmo assunto, com os dados (a mensagem que cada um
+ * cobriu). null = não deu para ler: quem chama NÃO marca fato novo (como antes — um acorde a menos é melhor que
+ * dois sobre a mesma mensagem).
+ */
+export async function acordesDeHojeDoAssunto(
+  admin: Db, p: { phone: string; modo: ModoDoPortao; dia: string; assunto: string },
+): Promise<Array<{ dados: Record<string, unknown> | null }> | null> {
+  try {
+    const { data, error } = await admin.from("avisos_do_dono").select("dados")
+      .eq("phone_normalized", p.phone).eq("modo", p.modo).eq("dia", p.dia).eq("assunto", p.assunto).eq("situacao", "acordou")
+      .limit(20);
+    if (error) return null;
+    return (data ?? []) as Array<{ dados: Record<string, unknown> | null }>;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Quantos avisos de acompanhamento já saíram sobre esta mensagem do contato (a referência
  * acomp:<id>:<última recebida>), em qualquer modo. null = não deu para contar (o freio não age: avisar
  * a mais é melhor que calar por um erro de leitura).

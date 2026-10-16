@@ -46,6 +46,22 @@ Deno.test("regras: ausente, JSON ruim ou array = padrão; campo ruim cai sozinho
   assertEquals(lerRegras({ acordes_por_dia: "x" }).acordes_por_dia, 2);
 });
 
+// (16/10/2026) Os ajustes recomendados ao dono (F1, F3, F5, F7, D11) e a espera do acorde de cliente (P4.2):
+// nascem ligados pelo padrão SEM mudar o JSON gravado em produção (campo ausente = padrão) e desligam por campo.
+Deno.test("regras (16/10): F1, F3, F5, F7, D11 e a espera do acorde — padrão recomendado, desligáveis por campo", () => {
+  const p = lerRegras('{"acordes_por_dia":2,"freio_avisos":2}');
+  assertEquals([p.acorde_espera_min, p.sem_resposta_hoje_horas, p.sem_resposta_hoje_max], [30, 4, 2]);
+  assertEquals([p.amanha_a_pagar, p.vigia_so_mes_recente, p.semana_volta_com_fato_novo, p.mensagem_nova_e_fato_novo], [true, true, true, true]);
+  const d = lerRegras({
+    sem_resposta_hoje_horas: 0, amanha_a_pagar: false, vigia_so_mes_recente: "false", semana_volta_com_fato_novo: false,
+    mensagem_nova_e_fato_novo: false, acorde_espera_min: 5, sem_resposta_hoje_max: 9,
+  });
+  assertEquals(d.sem_resposta_hoje_horas, 0, "0 = o fechamento não cita");
+  assertEquals([d.amanha_a_pagar, d.vigia_so_mes_recente, d.semana_volta_com_fato_novo, d.mensagem_nova_e_fato_novo], [false, false, false, false]);
+  assertEquals(d.acorde_espera_min, 10, "piso de 10 min");
+  assertEquals(d.sem_resposta_hoje_max, 5, "teto de 5 nomes");
+});
+
 Deno.test("pedido ao portão: corta chave/assunto em 200 e texto em 4000; agora só quando vem", () => {
   const p = pedidoAoPortao("5547999990001", "sombra", {
     fonte: "email", chave: "k".repeat(300), assunto: "a".repeat(300), destino: "acorde", texto: "t".repeat(5000),

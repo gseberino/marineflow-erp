@@ -73,6 +73,21 @@ export interface RegrasDaVozUnica {
   verificacao_min: number;
   /** P4.3: avisos de acompanhamento sobre a mesma mensagem do contato antes do freio. */
   freio_avisos: number;
+  // ── (16/10/2026) padrões recomendados, aguardam o dono. Ausente no JSON = este padrão ──
+  /** P4.2: minutos sem resposta para a pressa/o "quero fechar" de um cliente acordar o dono (10–240). */
+  acorde_espera_min: number;
+  /** F1: o fechamento cita o cliente que escreveu hoje e está sem resposta há N horas ou mais (0 = não cita). */
+  sem_resposta_hoje_horas: number;
+  /** F1: quantos nomes a linha "Sem resposta desde hoje" cita (o resto vira "e mais N"). */
+  sem_resposta_hoje_max: number;
+  /** F3: o "Amanhã" do fechamento traz as contas a pagar que vencem até a próxima manhã. */
+  amanha_a_pagar: boolean;
+  /** F5: a linha do vigia na revisão de segunda só sai se o último mês "pronto" for o mês passado (ou mais novo). */
+  vigia_so_mes_recente: boolean;
+  /** F7: "X semana" (adiado até segunda) volta antes se houver fato novo (mensagem nova, pagamento, vencimento). */
+  semana_volta_com_fato_novo: boolean;
+  /** D11: o primeiro aviso sobre uma mensagem NOVA do contato conta como fato novo (pode acordar de novo no dia). */
+  mensagem_nova_e_fato_novo: boolean;
 }
 
 export const REGRAS_PADRAO: Readonly<RegrasDaVozUnica> = Object.freeze({
@@ -87,6 +102,13 @@ export const REGRAS_PADRAO: Readonly<RegrasDaVozUnica> = Object.freeze({
   telefone_no_aviso: true,
   verificacao_min: 15,
   freio_avisos: 2,
+  acorde_espera_min: 30,
+  sem_resposta_hoje_horas: 4,
+  sem_resposta_hoje_max: 2,
+  amanha_a_pagar: true,
+  vigia_so_mes_recente: true,
+  semana_volta_com_fato_novo: true,
+  mensagem_nova_e_fato_novo: true,
 });
 
 function inteiro(v: unknown, min: number, max: number): number | null {
@@ -125,6 +147,13 @@ export function lerRegras(v: unknown): RegrasDaVozUnica {
     telefone_no_aviso: booleano(o.telefone_no_aviso) ?? p.telefone_no_aviso,
     verificacao_min: inteiro(o.verificacao_min, 5, 60) ?? p.verificacao_min,
     freio_avisos: inteiro(o.freio_avisos, 1, 10) ?? p.freio_avisos,
+    acorde_espera_min: inteiro(o.acorde_espera_min, 10, 240) ?? p.acorde_espera_min,
+    sem_resposta_hoje_horas: inteiro(o.sem_resposta_hoje_horas, 0, 24) ?? p.sem_resposta_hoje_horas,
+    sem_resposta_hoje_max: inteiro(o.sem_resposta_hoje_max, 1, 5) ?? p.sem_resposta_hoje_max,
+    amanha_a_pagar: booleano(o.amanha_a_pagar) ?? p.amanha_a_pagar,
+    vigia_so_mes_recente: booleano(o.vigia_so_mes_recente) ?? p.vigia_so_mes_recente,
+    semana_volta_com_fato_novo: booleano(o.semana_volta_com_fato_novo) ?? p.semana_volta_com_fato_novo,
+    mensagem_nova_e_fato_novo: booleano(o.mensagem_nova_e_fato_novo) ?? p.mensagem_nova_e_fato_novo,
   };
 }
 

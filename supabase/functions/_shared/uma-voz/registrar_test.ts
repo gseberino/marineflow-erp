@@ -4,7 +4,7 @@
 // vezes; o freio só conta quando a leitura dá certo; quem registra o acompanhamento em cada combinação.
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  avisosDestaMensagem, lerPortao, modoDoRegistroDoAcompanhamento, portaoDasConfiguracoes, registrarNoPortao, registrarParaTodos,
+  acordesDeHojeDoAssunto, avisosDestaMensagem, lerPortao, modoDoRegistroDoAcompanhamento, portaoDasConfiguracoes, registrarNoPortao, registrarParaTodos,
 } from "./registrar.ts";
 import type { AvisoDaFonte } from "./portao.ts";
 
@@ -100,4 +100,27 @@ Deno.test("acompanhamento: quem registra em cada combinação de voz única e fr
   // voz única em sombra: todos registram
   assertEquals(modoDoRegistroDoAcompanhamento(voz("sombra", "desligado"), "promessa"), "sombra");
   assertEquals(modoDoRegistroDoAcompanhamento(voz("ligado", "ligado"), "lembrar_em"), "sombra");
+});
+
+// (16/10/2026) D11: os acordes de hoje do mesmo assunto (a mensagem que cada um cobriu). Erro = null (quem chama não
+// marca fato novo — um acorde a menos é melhor que dois sobre a mesma mensagem).
+Deno.test("acordes de hoje do assunto: filtra telefone, modo, dia, assunto e 'acordou'; erro = null", async () => {
+  const filtros: Array<[string, unknown]> = [];
+  // deno-lint-ignore no-explicit-any
+  const admin = (resposta: any) => ({
+    from(t: string) {
+      const q = {
+        select() { return q; },
+        eq(c: string, v: unknown) { filtros.push([c, v]); return q; },
+        limit() { return Promise.resolve(resposta); },
+        t,
+      };
+      return q;
+    },
+  });
+  const ok = await acordesDeHojeDoAssunto(admin({ data: [{ dados: { mensagem_em: "x" } }], error: null }),
+    { phone: "5547900000001", modo: "sombra", dia: "2026-10-07", assunto: "contato:5547900000001" });
+  assertEquals(ok, [{ dados: { mensagem_em: "x" } }]);
+  assertEquals(filtros, [["phone_normalized", "5547900000001"], ["modo", "sombra"], ["dia", "2026-10-07"], ["assunto", "contato:5547900000001"], ["situacao", "acordou"]]);
+  assertEquals(await acordesDeHojeDoAssunto(admin({ data: null, error: { message: "x" } }), { phone: "1", modo: "sombra", dia: "d", assunto: "a" }), null);
 });
