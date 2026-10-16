@@ -14,6 +14,8 @@ Deno.test("a volta do WhatsApp vai ao portão depois do sino, protegida, só com
   const resto = fn.slice(bloco);
   assert(resto.indexOf("try {") < resto.indexOf("await lerPortao(db)"), "dentro do try");
   assertStringIncludes(resto, "if (portao.modo)");
-  assertStringIncludes(resto, "avisoDaVoltaDoWhatsApp({ desde: anterior.desde, ate: agora.toISOString() }");
+  // (16/10/2026) com o texto do acorde de sistema
+  assertStringIncludes(resto, "const doPortao = textoDoSistema({ desde: anterior.desde, ate, manhaNaoChegou: quedaDerrubouAManha(anterior.desde, ate) });");
+  assertStringIncludes(resto, "avisoDaVoltaDoWhatsApp({ desde: anterior.desde, ate }, doPortao)");
   assert(fn.indexOf("await lerPortao(db)") > bloco, "a leitura das chaves só acontece na volta");
 });

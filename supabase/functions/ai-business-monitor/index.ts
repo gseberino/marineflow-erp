@@ -21,6 +21,9 @@
 // vence hoje e orçamentos parados acabam — a manhã já mostra; saldo, estoque e cota vão ao escritório;
 // certificado e consentimento pela faixa de dias; NF-e rejeitada e a manhã que não chegou acordam). O
 // que sai para a equipe não muda. Desligado (o padrão): nada é registrado.
+// (16/10/2026, P4.2) O registro leva o texto do ACORDE (o que sairia com a voz única ligada, sem emoji): o
+// certificado de 7 dias ou menos e uma NF-e rejeitada POR NOTA (chave nfe:<id>), no lugar da contagem do dia.
+// A mensagem que sai hoje para a equipe continua a mesma (a contagem por dia).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider } from "../_shared/fiscal/factory.ts";
@@ -31,7 +34,8 @@ import {
   telefonesSemResumo, tentativasAteAs20h, TEXTO_RESUMO_NAO_CHEGOU,
 } from "./horario.ts";
 import type { AvisoDaFonte } from "../_shared/uma-voz/portao.ts";
-import { avisoDoCertificado, avisoDoConsentimento, avisoDoVigia, avisoResumoNaoChegou } from "../_shared/uma-voz/fontes.ts";
+import { avisoDaNfe, avisoDoCertificado, avisoDoConsentimento, avisoDoVigia, avisoResumoNaoChegou } from "../_shared/uma-voz/fontes.ts";
+import { textoDaNfe, textoDoCertificado } from "../_shared/uma-voz/acorde.ts";
 import { lerPortao, registrarNoPortao, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
 
 const corsHeaders = {
@@ -41,6 +45,39 @@ const corsHeaders = {
 };
 function jr(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+/**
+ * (16/10/2026, P4.2) As NF-e rejeitadas desde `desde`, uma por nota, com o texto do acorde (número, cliente, motivo
+ * e a OS para reemitir). null = não deu para ler (quem chama registra o aviso do dia, como antes). Só leitura.
+ */
+// deno-lint-ignore no-explicit-any
+async function avisosDasNotasRejeitadas(admin: any, desde: string): Promise<AvisoDaFonte[] | null> {
+  try {
+    const { data, error } = await admin.from("issued_fiscal_documents")
+      .select("id, number, status_message, origin_type, origin_id, clients(name, display_name)")
+      .eq("status", "rejected").gte("updated_at", desde).limit(20);
+    if (error) return null;
+    const notas = (data ?? []) as Array<Record<string, unknown>>;
+    const daOs = notas.filter((n) => n.origin_type === "service_order" && n.origin_id).map((n) => String(n.origin_id));
+    const numeroDaOs = new Map<string, string>();
+    if (daOs.length) {
+      const { data: oss } = await admin.from("service_orders").select("id, service_order_number").in("id", daOs);
+      for (const o of (oss ?? []) as Array<{ id: string; service_order_number: string }>) numeroDaOs.set(String(o.id), o.service_order_number);
+    }
+    return notas.map((n) => {
+      // deno-lint-ignore no-explicit-any
+      const c = (Array.isArray(n.clients) ? n.clients[0] : n.clients) as any;
+      const cliente = (c?.display_name || c?.name || null) as string | null;
+      const texto = textoDaNfe({
+        numero: (n.number as number | null) ?? null, cliente, valor: null, motivo: (n.status_message as string | null) ?? null,
+        os: n.origin_id ? numeroDaOs.get(String(n.origin_id)) ?? null : null,
+      });
+      return avisoDaNfe({ id: String(n.id), numero: (n.number as number | null) ?? null, cliente }, texto);
+    });
+  } catch {
+    return null;
+  }
 }
 
 servirComCors(async (req) => {
@@ -91,9 +128,9 @@ servirComCors(async (req) => {
     // Voz única: o que cada sinal pediria ao portão (registrado só depois que o alerta entrar na fila).
     const portao = await lerPortao(admin);
     const paraOPortao: AvisoDaFonte[] = [];
-    const alertar = (texto: string, aviso: AvisoDaFonte) => {
+    const alertar = (texto: string, ...avisos: AvisoDaFonte[]) => {
       alerts.push(texto);
-      paraOPortao.push(aviso);
+      paraOPortao.push(...avisos);
     };
 
     // (1) Recebíveis vencidos HOJE
@@ -132,7 +169,8 @@ servirComCors(async (req) => {
           const urg = days <= 7 ? " *URGENTE*" : "";
           const quando = days < 0 ? "está VENCIDO" : `vence em ${days} dia(s)`;
           const t = `🔐 Certificado A1${urg}: ${quando} (${vu}). Renove na Contora para não parar a emissão de NF-e.`;
-          alertar(t, avisoDoCertificado(String(vu), days, todayISO, t));
+          // (16/10) ≤ 7 dias acorda: o portão guarda o texto do acorde; 8–30 dias (linha "Hoje") guarda o de sempre
+          alertar(t, avisoDoCertificado(String(vu), days, todayISO, days <= 7 ? textoDoCertificado(days, String(vu)) : t));
         }
       }
     } catch (_e) {
@@ -224,7 +262,10 @@ servirComCors(async (req) => {
       .eq("status", "rejected").gte("updated_at", d1);
     if ((rejectedNfe ?? 0) > 0 && await claim(`fiscal_rejected:${todayISO}`, { n: rejectedNfe })) {
       const t = `❌ *${rejectedNfe}* NF-e rejeitada(s) nas últimas 24h. Confira o motivo no histórico e reemita.`;
-      alertar(t, avisoDoVigia("nfe_rejeitada", todayISO, t));
+      // (16/10) Com a voz única em sombra, o portão recebe UM aviso por nota (o acorde de cada uma); sem ela, nada é
+      // lido a mais. Erro na leitura das notas = o aviso do dia, como antes.
+      const porNota = portao.modo ? await avisosDasNotasRejeitadas(admin, d1) : null;
+      alertar(t, ...(porNota && porNota.length ? porNota : [avisoDoVigia("nfe_rejeitada", todayISO, t)]));
     }
 
     // (6) O resumo das 07:30 que desistiu de chegar (09 e 13/10: WhatsApp fora do ar, a fila

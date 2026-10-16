@@ -31,6 +31,7 @@ import { displaySender, normalizeAddress } from "../_shared/email/normalize.ts";
 import { extrairDados, fornecedorPelaNota } from "../_shared/email/dados.ts";
 import type { InboundEmail } from "../_shared/email/types.ts";
 import { avisoDoEmail } from "../_shared/uma-voz/fontes.ts";
+import { textoDoGolpe } from "../_shared/uma-voz/acorde.ts";
 import { lerPortao, PORTAO_DESLIGADO, type PortaoDaRodada, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
 import { extractText, getDocumentProxy } from "npm:unpdf@0.12.1";
 
@@ -145,9 +146,11 @@ async function avisarUrgente(
   const rows = ((quem ?? []) as { phone_normalized: string }[]).map((u) => ({ phone_normalized: u.phone_normalized, message: texto, source: "email_urgente", priority: 2 }));
   if (rows.length) await admin.from("whatsapp_send_queue").insert(rows);
   // Voz única em sombra: o aviso já está na fila; registra o que o portão faria. Nunca lança.
+  // (16/10/2026, P4.2) O golpe vai com o texto do ACORDE (o que sairia com a voz única ligada); o resto, o de sempre.
   if (rows.length && voz.portao.modo) {
+    const doPortao = fraude ? textoDoGolpe({ conta, remetente, assunto }) : texto;
     await registrarParaTodos(admin, voz.portao.modo, rows.map((r) => r.phone_normalized),
-      [avisoDoEmail({ emailId: voz.emailId, endereco: voz.endereco ?? "", fraude }, voz.portao.regras, texto)]);
+      [avisoDoEmail({ emailId: voz.emailId, endereco: voz.endereco ?? "", fraude }, voz.portao.regras, doPortao)]);
   }
 }
 

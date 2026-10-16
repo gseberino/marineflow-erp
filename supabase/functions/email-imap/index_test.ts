@@ -40,3 +40,12 @@ Deno.test("voz única: o urgente vai ao portão depois da fila, só com o modo l
   assertStringIncludes(fonte, "const portao = diagnostico ? PORTAO_DESLIGADO : await lerPortao(admin);");
   assertStringIncludes(fonte, "{ emailId: id, endereco: normalizeAddress(email.from.address), portao }");
 });
+
+// (16/10/2026, P4.2) O golpe vai ao portão com o texto do acorde; o que entra na fila (o aviso de sempre) não muda.
+Deno.test("P4.2: o golpe registra o texto do acorde; a fila continua com o texto de sempre", () => {
+  const ini = fonte.indexOf("async function avisarUrgente(");
+  const fn = fonte.slice(ini, fonte.indexOf("\n}\n", ini));
+  assertStringIncludes(fn, "const doPortao = fraude ? textoDoGolpe({ conta, remetente, assunto }) : texto;");
+  assertStringIncludes(fn, "message: texto, source: \"email_urgente\"");
+  assertStringIncludes(fn, "voz.portao.regras, doPortao)]");
+});

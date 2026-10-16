@@ -52,3 +52,16 @@ Deno.test("voz única: o registro dos sinais vem depois da fila; o do resumo que
   assert(resumo > 0 && registroResumo > resumo, "o resumo que não chegou registra depois do insert");
   assert(fonte.indexOf("const portao = await lerPortao(admin)") > fonte.indexOf("if (!podeAvisarAgora(now))"), "as chaves só são lidas dentro do horário");
 });
+
+// (16/10/2026, P4.2) O que se protege: a mensagem que sai para a equipe NÃO muda (a contagem de NF-e do dia e o texto
+// do certificado continuam os de sempre); só o registro no portão muda — o acorde do certificado de 7 dias ou menos e
+// uma NF-e por nota. Com a voz única desligada nada a mais é lido (a leitura das notas fica atrás de portao.modo).
+Deno.test("P4.2: NF-e por nota só com portao.modo; o texto da fila não muda; certificado ≤ 7 dias com o texto do acorde", () => {
+  assertStringIncludes(fonte, "const porNota = portao.modo ? await avisosDasNotasRejeitadas(admin, d1) : null;");
+  assertStringIncludes(fonte, 'alertar(t, ...(porNota && porNota.length ? porNota : [avisoDoVigia("nfe_rejeitada", todayISO, t)]));');
+  assertStringIncludes(fonte, "const t = `❌ *${rejectedNfe}* NF-e rejeitada(s) nas últimas 24h. Confira o motivo no histórico e reemita.`;");
+  assertStringIncludes(fonte, "alertar(t, avisoDoCertificado(String(vu), days, todayISO, days <= 7 ? textoDoCertificado(days, String(vu)) : t));");
+  const ini = fonte.indexOf("async function avisosDasNotasRejeitadas(");
+  const fn = fonte.slice(ini, fonte.indexOf("servirComCors(", ini));
+  assert(!/\.(insert|update|upsert|delete)\(/.test(fn), "a leitura das notas só lê");
+});
