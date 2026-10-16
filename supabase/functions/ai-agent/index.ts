@@ -65,6 +65,7 @@ import { carregarJanela, marcarResultadosAnteriores } from "../_shared/ai/histor
 import { lerPedidoDePdf, textoDoAtalhoPdf } from "../_shared/ai/atalho-pdf.ts";
 import { lerComandoDoSecretario } from "../_shared/secretario/comandos.ts";
 import { executarComandoDoSecretario } from "../_shared/secretario/executar.ts";
+import { abrirConfirmacaoDoSecretario } from "../_shared/secretario/confirmar.ts";
 import { lerFormatoDoResumo } from "../_shared/secretario/formato.ts";
 import { type Dono, donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
 
@@ -634,6 +635,15 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
     }
     if (dono && dono.id === appUser.id && dono.phone === phoneNormalized) {
       const r = await executarComandoDoSecretario(admin, comandoDoResumo, { phone: phoneNormalized });
+      // Passo 5 (16/10/2026): o *lote* da papelada abre a confirmação de sempre ("sim <PIN>"): pendência, sessão,
+      // pergunta ativa — e o "sim" volta pela camada de confirmação acima, que roda antes de qualquer comando
+      if (r.tipo === "confirmar") {
+        await abrirConfirmacaoDoSecretario(admin, {
+          sessionId, metadata, userId: appUser.id, phone: phoneNormalized, pedido: text, texto: r.texto,
+          pendencia: r.pendencia, ligada: conversaLigada,
+        });
+        return jr({ ok: true, secretario: comandoDoResumo.comando });
+      }
       if (r.tipo === "resposta") {
         // No histórico como um turno comum: "e o B?" depois de uma lista tem a que se referir.
         try {

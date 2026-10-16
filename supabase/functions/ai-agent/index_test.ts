@@ -39,3 +39,18 @@ Deno.test("Passo 3: 'seguir' (não era comando) deixa o texto do turno como veio
   // só o pedido troca o texto; nenhuma outra atribuição a effectiveText na camada
   assert((bloco.match(/effectiveText = /g) ?? []).length === 1, "uma única troca do texto do turno");
 });
+
+Deno.test("Passo 5: o *lote* abre a confirmação de sempre (pendência + sessão + pergunta ativa) e volta sem o modelo; o 'sim' é da camada de confirmação", () => {
+  const bloco = turno.slice(turno.indexOf("comandos do resumo da manhã (secretário"), turno.indexOf("lerPedidoDePdf(effectiveText)"));
+  const confirmar = bloco.indexOf('if (r.tipo === "confirmar") {');
+  assert(confirmar > 0, "ramo confirmar ausente");
+  // dentro da porta do dono e antes da resposta comum
+  assert(bloco.indexOf("dono && dono.id === appUser.id && dono.phone === phoneNormalized") < confirmar, "só do dono");
+  assert(confirmar < bloco.indexOf('if (r.tipo === "resposta") {'), "antes da resposta comum");
+  const ramo = bloco.slice(confirmar, bloco.indexOf('if (r.tipo === "resposta") {'));
+  assertStringIncludes(ramo, "abrirConfirmacaoDoSecretario(admin, {");
+  assertStringIncludes(ramo, "ligada: conversaLigada");
+  assertStringIncludes(ramo, "return jr({ ok: true, secretario: comandoDoResumo.comando });");
+  // a camada abre, nunca executa: quem executa é o "sim" lá em cima
+  assert(!ramo.includes("approveAndExecutePendingAction") && !ramo.includes("resolveWhatsAppConfirmation"), "o ramo não executa nada");
+});

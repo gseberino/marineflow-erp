@@ -66,6 +66,8 @@ import { dropboxTools } from "./dropbox.ts";
 import { comprovanteTools } from "./comprovantes.ts";
 // Agrupar orçamentos (15/10/2026): listar os candidatos, agrupar e desagrupar (paridade com a tela).
 import { agruparOrcamentosTools } from "./agrupar-orcamentos.ts";
+// O lote semanal da papelada (16/10/2026, secretário Passo 5): só pela pendência do comando *lote*.
+import { papeladaTools } from "./papelada.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -139,4 +141,13 @@ export const allTools: ToolDef[] = [
   ...agruparOrcamentosTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
-export const toolsByName: Record<string, ToolDef> = Object.fromEntries(allTools.map((t) => [t.name, t]));
+/**
+ * (16/10/2026, secretário Passo 5) Tools que só rodam por uma pendência aberta por um comando determinístico — nunca
+ * pelo modelo: ficam FORA de allTools (a lista que vai ao modelo, e o prefixo cacheado não muda) e entram só no mapa
+ * de execução das pendências (approveAndExecutePendingAction).
+ */
+export const toolsSoPelaPendencia: ToolDef[] = [...papeladaTools];
+
+export const toolsByName: Record<string, ToolDef> = Object.fromEntries(
+  [...allTools, ...toolsSoPelaPendencia].map((t) => [t.name, t]),
+);
