@@ -1,6 +1,7 @@
 // Vigia acompanhar-conversas (06/10/2026) — plans/marineflow-acompanhar-conversa.md
 //
-// Chamado pelo pg_cron a cada 15 min (x-cron-secret). Só age entre 8h e 20h de Brasília, seg–sáb:
+// Chamado pelo pg_cron a cada 15 min (x-cron-secret). Só age entre 8h e 20h de Brasília, seg–sáb (o "me acorde se",
+// 16/10/2026, também no domingo — rodadaDeAgora em ./acordes.ts):
 //  1. PROMESSAS: lê o que o dono mandou desde a última rodada e, achando "te mando amanhã" e afins,
 //     cria um lembrete (whatsapp_acompanhamentos, modo 'promessa'). Sem IA.
 //  2. AVISOS: para cada acompanhamento devido, pede ao assistente — pelo MESMO caminho de uma
@@ -20,18 +21,26 @@
 //    acomp:<id>:<última recebida>): com o freio ligado, cada aviso que SAIU é registrado lá;
 //  * voz única em sombra (app_settings.voz_unica): os avisos que saíram são registrados no portão com o
 //    que ele faria (acordar, guardar, deixar). O que sai para o dono não muda.
+// Secretário, Passo 4, P4.2 (16/10/2026):
+//  * D11: o 1º aviso sobre uma mensagem NOVA do contato vai ao portão como fato novo (voz_unica_regras.
+//    mensagem_nova_e_fato_novo), salvo se um acorde de hoje já cobriu a mesma mensagem;
+//  * "me acorde se" (./acordes.ts): com a voz única em sombra, o cliente/lead que pede para hoje, quer fechar ou
+//    desistiu e está sem resposta é REGISTRADO no portão com o texto exato do acorde. Nada é enviado.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { detectarPromessa } from "../_shared/ai/promessa.ts";
 import {
-  type Acompanhamento, aplicarFreio, decidir, diaEmBrasilia, type EstadoDaConversa, horaDeAvisar, janelaDoEncerramento,
+  type Acompanhamento, aplicarFreio, decidir, diaEmBrasilia, type EstadoDaConversa, janelaDoEncerramento,
   MOTIVO_FREIO, podeAvisarNoModo, textoDoAviso,
 } from "../_shared/ai/acompanhar.ts";
 import { avisoDoAcompanhamento, referenciaDoAcompanhamento } from "../_shared/uma-voz/fontes.ts";
 import {
-  avisosDestaMensagem, modoDoRegistroDoAcompanhamento, type PortaoDaRodada, portaoDasConfiguracoes, registrarNoPortao,
+  acordesDeHojeDoAssunto, avisosDestaMensagem, modoDoRegistroDoAcompanhamento, type PortaoDaRodada, portaoDasConfiguracoes,
+  registrarNoPortao,
 } from "../_shared/uma-voz/registrar.ts";
+import { mensagemNovaEFatoNovo } from "../_shared/uma-voz/acorde.ts";
+import { rodadaDeAgora, vigiarAcordes } from "./acordes.ts";
 import { conversaEncerradaPeloContato, ULTIMAS_RECEBIDAS } from "../_shared/whatsapp/contato-encerrou.ts";
 import {
   conversaDosComprovantesLigada,
@@ -179,8 +188,16 @@ async function avisar(admin: Db, agora: Date, conversaLigada: boolean, portao: P
     const modoRegistro = modoDoRegistroDoAcompanhamento(portao, a.modo);
     if (modoRegistro) {
       const ordem = jaAvisados === null ? agora.getTime() : jaAvisados + 1;
+      // D11 (16/10/2026, padrão recomendado): o 1º aviso sobre uma mensagem NOVA do contato é fato novo (pode acordar
+      // de novo no dia), salvo se um acorde de hoje já cobriu essa mesma mensagem (o detector do "me acorde se").
+      const ultimaEm = conversa.ultimaRecebida?.em ?? null;
+      let novoFato = false;
+      if (a.modo === "acompanhar" && ordem === 1 && portao.regras.mensagem_nova_e_fato_novo) {
+        const acordes = await acordesDeHojeDoAssunto(admin, { phone: dono.phone, modo: modoRegistro, dia: diaEmBrasilia(agora), assunto: `contato:${a.phone_normalized}` });
+        novoFato = acordes !== null && mensagemNovaEFatoNovo(portao.regras, ultimaEm, acordes);
+      }
       const r = await registrarNoPortao(admin, modoRegistro, dono.phone,
-        avisoDoAcompanhamento(a, conversa.ultimaRecebida?.em ?? null, ordem, portao.regras, texto), agora);
+        avisoDoAcompanhamento(a, ultimaEm, ordem, portao.regras, texto, novoFato), agora);
       if (r) resultado.no_portao++;
     }
     const hoje = diaEmBrasilia(agora);
@@ -202,7 +219,10 @@ servirComCors(async (req) => {
   const negado = verificarCronSecret(req, corsHeaders, "acompanhar-conversas");
   if (negado) return negado;
   const agora = new Date();
-  if (!horaDeAvisar(agora)) return jr({ ok: true, fora_do_horario: true });
+  // (16/10/2026) avisos e promessas seg–sáb 08–20h (como sempre); o "me acorde se" todos os dias 08–20h (decisão do
+  // dono). Fora das duas janelas não lê nada.
+  const rodada = rodadaDeAgora(agora);
+  if (!rodada.avisos && !rodada.acordes) return jr({ ok: true, fora_do_horario: true });
 
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -217,9 +237,21 @@ servirComCors(async (req) => {
     const internos = new Set<string>(((usuarios ?? []) as any[]).map((u) => u.phone_normalized).filter(Boolean));
     const dono = ((usuarios ?? []) as any[]).find((u) => u.role === "admin" && u.ai_whatsapp_enabled && u.active && u.phone_normalized);
 
-    const promessas = dono ? await detectarPromessas(admin, dono, internos, settings, agora) : { lidas: 0, criadas: 0, sem_dono: true };
-    const avisos = await avisar(admin, agora, conversaDosComprovantesLigada(settings), portaoDasConfiguracoes(settings));
-    return jr({ ok: true, promessas, avisos });
+    const portao = portaoDasConfiguracoes(settings);
+    // Domingo (só a janela do acorde): com a voz única desligada a resposta é a de antes, sem escrever nada.
+    if (!rodada.avisos && !portao.modo) return jr({ ok: true, fora_do_horario: true });
+    const promessas = !rodada.avisos ? null
+      : dono ? await detectarPromessas(admin, dono, internos, settings, agora) : { lidas: 0, criadas: 0, sem_dono: true };
+    const avisos = rodada.avisos ? await avisar(admin, agora, conversaDosComprovantesLigada(settings), portao) : null;
+    // "Me acorde se" (P4.2, 16/10/2026): só com a voz única em sombra/ligado (desligado = nada lido); em sombra só
+    // REGISTRA no portão o texto que sairia — nada é enviado. Todos os dias 08–20h. Nunca derruba a rodada.
+    const acordes = rodada.acordes && dono && portao.modo
+      ? await vigiarAcordes(admin, { agora, dono: { id: dono.id, phone: dono.phone_normalized }, portao, settings, internos, conversaLigada: conversaDosComprovantesLigada(settings) })
+      : null;
+    return jr({
+      ok: true, ...(promessas ? { promessas } : {}), ...(avisos ? { avisos } : {}), ...(acordes ? { acordes } : {}),
+      ...(!rodada.avisos ? { so_acordes: true } : {}),
+    });
   } catch (e) {
     console.error("[acompanhar-conversas] erro", e);
     return jr({ error: String((e as Error)?.message ?? e) }, 500);
