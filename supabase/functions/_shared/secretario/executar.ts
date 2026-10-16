@@ -29,6 +29,7 @@ import {
   vencimentoDoFato,
 } from "./respostas.ts";
 import { esperaDoTipo } from "./tipos.ts";
+import { executarPapelada, type PendenciaDoSecretario } from "./papelada.ts";
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
@@ -39,7 +40,12 @@ export type ResultadoDoComando =
   /** o texto vira o turno do assistente (o cartão pronto do item) */
   | { tipo: "pedido"; texto: string; letra: string }
   /** não era comando meu (ex.: "pouco" sem a pergunta da sexta aberta): segue como conversa, sem mudar nada */
-  | { tipo: "seguir" };
+  | { tipo: "seguir" }
+  /**
+   * (Passo 5) responder E abrir a confirmação do assistente ("sim <PIN>"): o ai-agent grava a pendência, o
+   * pending_confirm_action_id da sessão e a pergunta ativa — o mesmo mecanismo dos lembretes de revisão
+   */
+  | { tipo: "confirmar"; texto: string; pendencia: PendenciaDoSecretario };
 
 const MODO = "novo";
 const COLUNAS_DO_ITEM =
@@ -209,6 +215,9 @@ export async function executarComandoDoSecretario(
         if (!r || r.resultado === "sem_pergunta") return { tipo: "seguir" };
         return resposta(textoDaRespostaDaSemana(r as Parameters<typeof textoDaRespostaDaSemana>[0], cmd.resposta));
       }
+      // ── Passo 5: o lote semanal da papelada (chave desligada = "seguir": o texto vai ao assistente como antes) ──
+      case "papelada":
+        return await executarPapelada(admin, cmd, { phone, agora: ctx.agora });
     }
   } catch (e) {
     console.warn(JSON.stringify({ fn: "secretario", evento: "leitura_falhou", codigo: (e as Error)?.message ?? "erro" }));

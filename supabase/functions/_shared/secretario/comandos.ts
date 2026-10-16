@@ -25,6 +25,7 @@
 
 import { letraValida, paraBusca } from "./base.ts";
 import type { Secao } from "./tipos.ts";
+import type { GrupoDoLote } from "../papelada/lote.ts";
 
 export type Adiamento = "amanha" | "segunda" | "espera" | { dia: number; mes: number | null };
 
@@ -47,7 +48,9 @@ export type ComandoDoSecretario =
   | { comando: "abrir"; letra: string }
   | { comando: "lote"; itens: AcaoDoLote[] }
   | { comando: "antiga"; letra: string; acao: "cobrar" | "negociar" | "baixa" }
-  | { comando: "semana"; resposta: RespostaDaSemana };
+  | { comando: "semana"; resposta: RespostaDaSemana }
+  // Passo 5 (16/10/2026): o lote semanal da papelada — "lote", "lote sem 3, 7", "lote sem avisos", "lote só despesas"
+  | { comando: "papelada"; sem: number[]; semGrupos: GrupoDoLote[]; soGrupos: GrupoDoLote[] | null };
 
 /** trim; tira 🎤 e aspas da ponta, negrito/itálico do WhatsApp; minúsculo sem acento; sem pontuação final. */
 export function normalizarComando(texto: string): string {
@@ -87,6 +90,8 @@ export function lerComandoDoSecretario(texto: string): ComandoDoSecretario | nul
   if (m) return FILTROS[m[1]] ? { comando: "lista", filtro: FILTROS[m[1]] } : null;
   if (t === "escritorio") return { comando: "escritorio" };
   if (t === "tudo" || t === "resumo completo" || t === "resumo antigo") return { comando: "tudo" };
+  // Passo 5: o lote da papelada ("lote antigo" continua dos comprovantes: null aqui)
+  if (/^(?:ver |mostra |mostre |mostrar )?(?:o )?lote\b/.test(t)) return lerPapelada(t);
 
   let l: string | null;
   if ((l = letra(new RegExp(`^(?:letra )?${L}$`).exec(t)))) return { comando: "abrir", letra: l };
@@ -125,6 +130,59 @@ export function lerComandoDoSecretario(texto: string): ComandoDoSecretario | nul
     return { comando: "antiga", letra: l, acao: m[2].startsWith("cobra") ? "cobrar" : m[2].startsWith("negoci") ? "negociar" : "baixa" };
   }
   return lerLote(t);
+}
+
+// ─── O lote da papelada (Passo 5, spec-secretario-papelada.md §3.7) ─────────────────────────────
+
+const GRUPOS_DO_LOTE: Record<string, GrupoDoLote> = {
+  despesa: "despesa", despesas: "despesa", gasto: "despesa", gastos: "despesa",
+  aviso: "aviso", avisos: "aviso", alerta: "aviso", alertas: "aviso",
+  transferencia: "transferencia", transferencias: "transferencia",
+};
+
+/** "3, 7 e 18" / "avisos e transferências" → os números e os grupos (null = algum pedaço não é nem um nem outro). */
+function lerListaDoLote(s: string): { numeros: number[]; grupos: GrupoDoLote[] } | null {
+  const partes = s.split(/\s*[,;]\s*|\s+e\s+|\s+/).map((p) => p.replace(/^(?:o|a|os|as|item|itens|numero|n)$/, "")).filter(Boolean);
+  if (!partes.length || partes.length > 30) return null;
+  const numeros: number[] = [];
+  const grupos: GrupoDoLote[] = [];
+  for (const p of partes) {
+    if (/^\d{1,2}$/.test(p)) {
+      const n = Number(p);
+      if (n < 1) return null;
+      if (!numeros.includes(n)) numeros.push(n);
+    } else if (GRUPOS_DO_LOTE[p]) {
+      if (!grupos.includes(GRUPOS_DO_LOTE[p])) grupos.push(GRUPOS_DO_LOTE[p]);
+    } else {
+      return null;
+    }
+  }
+  return { numeros, grupos };
+}
+
+/**
+ * "lote" (ver e aprovar), "lote sem 3, 7" / "lote tira 3 e 7" (tira itens pelo número), "lote sem avisos",
+ * "lote só despesas". Números só depois de "lote" (sozinhos são opção de menu). "lote antigo" é dos comprovantes.
+ */
+function lerPapelada(t: string): ComandoDoSecretario | null {
+  if (/^lotes? antigos?$/.test(t)) return null;
+  const m = /^(?:ver |mostra |mostre |mostrar )?(?:o )?lote(?: da semana| da papelada| do escritorio)?(?: (.+))?$/.exec(t);
+  if (!m) return null;
+  const resto = (m[1] ?? "").trim();
+  if (!resto) return { comando: "papelada", sem: [], semGrupos: [], soGrupos: null };
+  let r = /^(?:sem|tira|tirar|tire|tirando|menos|exceto|fora) (.+)$/.exec(resto);
+  if (r) {
+    const lista = lerListaDoLote(r[1]);
+    return lista ? { comando: "papelada", sem: lista.numeros, semGrupos: lista.grupos, soGrupos: null } : null;
+  }
+  r = /^(?:so|somente|apenas) (.+)$/.exec(resto);
+  if (r) {
+    const lista = lerListaDoLote(r[1]);
+    return lista && !lista.numeros.length && lista.grupos.length
+      ? { comando: "papelada", sem: [], semGrupos: [], soGrupos: lista.grupos }
+      : null;
+  }
+  return null;
 }
 
 // ─── O lote da revisão ("C semana, B tira, G 15 dias") ─────────────────────────────────────────
