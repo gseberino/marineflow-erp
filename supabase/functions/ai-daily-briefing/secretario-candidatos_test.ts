@@ -286,3 +286,21 @@ Deno.test("a última manhã: o dia útil anterior (domingo e feriado só têm um
   }), segunda, 0);
   assertEquals(sab.perdeHoje, true);
 });
+
+Deno.test("16/10 (manhã-sombra real): o fornecedor Jaison, que fechou com 'Perfeito, vou dar sequencia', não sobe", () => {
+  // as mensagens dele depois da manhã de 15/10 (o dono respondeu às 14:32 "pode seguir")
+  const recebidas = [
+    { body: "Perfeito, vou dar sequencia", em: "2026-10-15T17:33:00Z" },
+    { body: "Ainda vai entrar na produção e leva em torno de 3 a 5 dias uteis, você me dando o OK já envio para produção", em: "2026-10-15T17:05:00Z" },
+    { body: "O PIX pode ser feito após a expedição finalizar e passar o valor do frete", em: "2026-10-15T17:03:00Z" },
+    { body: "Chegasse a analisar a proposta?", em: "2026-10-15T16:54:00Z" },
+  ];
+  const c = candidatoDeConversa(conv({
+    categoria: "contato", client_id: null, contato: "Jaison Consultor de Vendas Zendel", phone: "5547900000099",
+    last_inbound_at: "2026-10-15T17:33:00Z", last_body: "Perfeito, vou dar sequencia", last_outbound_at: "2026-10-15T17:32:00Z",
+    recebidas, diasComMensagemSua: 2,
+  }), new Date("2026-10-16T10:30:00Z"), 0);
+  // sem o "passar o valor do frete" como pedido, ele volta a ser o contato que não pede preço (o "vou dar sequencia"
+  // também o tiraria: soAgradecimentoDesdeAResposta)
+  assertEquals([c.tipo, c.elegivel, c.perdeHoje], ["contato_sem_cadastro", false, false]);
+});

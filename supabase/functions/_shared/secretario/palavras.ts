@@ -11,7 +11,10 @@ import { paraBusca } from "./base.ts";
 export const PEDE_PRECO = new RegExp(String.raw`\b(?:` + [
   String.raw`quanto (?:custa|custaria|fica|ficaria|sai|sairia|cobra|cobram|cobraria|seria|e|vai ficar|vale)`,
   String.raw`(?:qual|quais) (?:e |seria |sera |o |a |os |as )*(?:valor|valores|preco|precos)`,
-  String.raw`(?:passa|passar|passe|manda|mandar|mande|envia|enviar|envie|faz|fazer|faca|ve|ver) (?:me |pra mim |para mim )?(?:o |um |uma |a |os )?(?:orcamento|orcamentos|preco|valor|proposta|cotacao)`,
+  String.raw`(?:passa|passe|manda|mande|envia|envie|faz|faca|ve) (?:me |pra mim |para mim )?(?:o |um |uma |a |os )?(?:orcamento|orcamentos|preco|valor|proposta|cotacao)`,
+  // o infinitivo só é pedido com quem pede na frente (16/10/2026: "o PIX pode ser feito após a expedição finalizar
+  // e passar o valor do frete" era o fornecedor Jaison avisando, e virou o B da manhã-sombra)
+  String.raw`(?:pode|podes|poderia|consegue|conseguiria|tem como|teria como|da pra|da para|favor|por favor) (?:me )?(?:passar|mandar|enviar|fazer|ver) (?:pra mim |para mim )?(?:o |um |uma |a |os )?(?:orcamento|orcamentos|preco|valor|proposta|cotacao)`,
   String.raw`(?:preciso|precisava|precisamos|gostaria|queria|quero) (?:de )?(?:um |uma |o |a )?(?:orcamento|preco|valor|cotacao|proposta)`,
   String.raw`orcar|orcamento pra|orcamento para`,
   String.raw`(?:quero|vamos|podemos|queremos|quer) fechar`,
@@ -51,6 +54,17 @@ const SO_AGRADECIMENTO = new Set([
   "gustavo", "e", "muito", "demais", "entao", "ah", "kkk", "kkkk", "rs",
 ]);
 
+/** Confirmação opcional + "vou dar sequência", "pode deixar (comigo)", "vou providenciar", "(assim que sair) te aviso". */
+const ENCERRA_AGINDO = new RegExp(
+  String.raw`^(?:(?:` + [...SO_AGRADECIMENTO].join("|") + String.raw`) )*(?:` + [
+    String.raw`(?:ja )?vou dar (?:sequencia|seguimento|andamento)(?: (?:aqui|no pedido|nisso))?`,
+    String.raw`(?:ja )?(?:estou|to|tou) dando (?:sequencia|seguimento|andamento)`,
+    String.raw`pode deixar(?: comigo)?`,
+    String.raw`(?:ja )?(?:vou providenciar|providencio|estou providenciando)`,
+    String.raw`(?:assim que (?:sair|tiver|chegar|ficar pronto) )?(?:eu )?(?:te|lhe) (?:aviso|retorno|confirmo)`,
+  ].join("|") + String.raw`)(?: (?:` + [...SO_AGRADECIMENTO].join("|") + String.raw`))*$`,
+);
+
 /**
  * (16/10/2026) A mensagem é SÓ cumprimento, agradecimento, confirmação ou emoji ("Bom dia Gustavo! Ótimo 👍", "Obrigado!",
  * "ok", "👍") — sem pergunta e sem pedido. Quem mandou isso não está "sem resposta": a conversa acabou de um jeito
@@ -68,7 +82,11 @@ export function pareceSoAgradecimento(texto: string | null | undefined): boolean
   const palavras = semEmoji.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
     .replace(/[^a-z]+/g, " ").trim().split(" ").filter(Boolean);
   if (!palavras.length) return semEmoji.trim() !== bruto; // só emoji (👍, 🙏): agradecimento; só pontuação: não
-  return palavras.every((p) => SO_AGRADECIMENTO.has(p));
+  if (palavras.every((p) => SO_AGRADECIMENTO.has(p))) return true;
+  // (16/10/2026) o contato encerra dizendo que ELE vai agir ("Perfeito, vou dar sequencia" do fornecedor Jaison, que
+  // virou o B da manhã-sombra): também não pede resposta. "Fico no aguardo"/"aguardo seu retorno" NÃO entram — aí
+  // quem deve a resposta é o dono.
+  return ENCERRA_AGINDO.test(palavras.join(" "));
 }
 
 /**
