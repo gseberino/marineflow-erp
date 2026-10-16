@@ -55,7 +55,8 @@ function jr(body: unknown, status = 200) {
 async function avisosDasNotasRejeitadas(admin: any, desde: string): Promise<AvisoDaFonte[] | null> {
   try {
     const { data, error } = await admin.from("issued_fiscal_documents")
-      .select("id, number, status_message, origin_type, origin_id, clients(name, display_name)")
+      // client_id sem chave estrangeira para clients: o embed clients(…) dá PGRST200 — o nome vem numa 2ª leitura
+      .select("id, number, status_message, origin_type, origin_id, client_id")
       .eq("status", "rejected").gte("updated_at", desde).limit(20);
     if (error) return null;
     const notas = (data ?? []) as Array<Record<string, unknown>>;
@@ -65,10 +66,17 @@ async function avisosDasNotasRejeitadas(admin: any, desde: string): Promise<Avis
       const { data: oss } = await admin.from("service_orders").select("id, service_order_number").in("id", daOs);
       for (const o of (oss ?? []) as Array<{ id: string; service_order_number: string }>) numeroDaOs.set(String(o.id), o.service_order_number);
     }
+    const idsDosClientes = [...new Set(notas.map((n) => n.client_id).filter(Boolean).map(String))];
+    const nomeDoCliente = new Map<string, string>();
+    if (idsDosClientes.length) {
+      const { data: cls } = await admin.from("clients").select("id, name, display_name").in("id", idsDosClientes);
+      for (const c of (cls ?? []) as Array<{ id: string; name: string | null; display_name: string | null }>) {
+        const nome = c.display_name || c.name;
+        if (nome) nomeDoCliente.set(String(c.id), nome);
+      }
+    }
     return notas.map((n) => {
-      // deno-lint-ignore no-explicit-any
-      const c = (Array.isArray(n.clients) ? n.clients[0] : n.clients) as any;
-      const cliente = (c?.display_name || c?.name || null) as string | null;
+      const cliente = n.client_id ? nomeDoCliente.get(String(n.client_id)) ?? null : null;
       const texto = textoDaNfe({
         numero: (n.number as number | null) ?? null, cliente, valor: null, motivo: (n.status_message as string | null) ?? null,
         os: n.origin_id ? numeroDaOs.get(String(n.origin_id)) ?? null : null,
