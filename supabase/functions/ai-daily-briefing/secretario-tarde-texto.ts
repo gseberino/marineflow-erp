@@ -21,6 +21,7 @@ import { type TurnoDaTarde, turnoDaTarde } from "../_shared/secretario/turno.ts"
 import type { CobrancasAntigas, LinhaComLetra, SemRespostaDeHoje } from "./secretario-tarde-regras.ts";
 import { blocoDoFechamento, type PlanoDoGuardado } from "../_shared/uma-voz/guardado.ts";
 import type { DadosDoEscritorio } from "./secretario-texto.ts";
+import { linhaDoLote, type LoteParaTexto } from "../_shared/papelada/texto.ts";
 
 export const META_DA_TARDE = 900;
 export const LIMITE_DA_TARDE = 1000;
@@ -222,6 +223,19 @@ export interface DadosDaTarde {
   semResposta?: SemRespostaDeHoje[];
   /** quantos nomes a linha do F1 cita (o resto vira "e mais N") */
   semRespostaMax?: number;
+  /**
+   * (16/10/2026, Passo 5) O lote semanal da papelada, no último dia útil da semana: no fechamento a linha do lote fica no
+   * lugar da do escritório; nas revisões, uma linha antes da pergunta. Ausente = a tarde de antes, byte a byte.
+   */
+  lote?: LoteParaTexto | null;
+}
+
+/** A linha do escritório da tarde: a do lote (no dia dele) ou a de sempre; o guardado do escritório vai à parte. */
+function linhasDoEscritorioDaTarde(d: DadosDaTarde): string[] {
+  const guardado = d.guardado?.escritorio ?? [];
+  if (!d.lote) return [linhaDoEscritorio(d.escritorio, guardado)].filter((l): l is string => !!l);
+  return [linhaDoLote(d.lote) ?? linhaDoEscritorio(d.escritorio), guardado.length ? linhaDoEscritorio(null, guardado) : null]
+    .filter((l): l is string => !!l);
 }
 
 export interface TextoDaTarde {
@@ -267,7 +281,7 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean): TextoDaTarde {
   const fim = [
     d.amanha ? linhaDeAmanha(d.hoje, d.amanha) : null,
     d.fornecedores.length ? `Fornecedores esperando há mais de 1 dia: ${lista(d.fornecedores.map((n) => umaLinha(n, curto ? 18 : 28)))}.` : null,
-    linhaDoEscritorio(d.escritorio, d.guardado?.escritorio ?? []),
+    ...linhasDoEscritorioDaTarde(d),
     d.pergunta ? PERGUNTA_DA_SEMANA : null,
   ].filter((l): l is string => !!l);
   return { texto: [abertura, ...topo, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n"), letras: d.ficaram };
@@ -300,6 +314,9 @@ function textoDaRevisaoDaSemana(d: DadosDaTarde, curto: boolean): TextoDaTarde {
     p?.semana ? linhaDaSemana(p.semana) : null,
   ].filter((l): l is string => !!l);
   const blocos = [abertura, ...topoDaTarde(d, curto), ...(itens.length ? ["", ...itens, ...comoResponder] : []), ...(panorama.length ? ["", ...panorama] : [])];
+  // (Passo 5) a linha do lote, no último dia útil da semana que caiu numa revisão
+  const lote = d.lote ? linhaDoLote(d.lote) : null;
+  if (lote) blocos.push("", lote);
   if (d.pergunta) blocos.push("", PERGUNTA_DA_SEMANA);
   return { texto: blocos.join("\n"), letras: ps };
 }
@@ -323,6 +340,8 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean): TextoDaTarde {
   } else {
     blocos.push("", "Nenhuma cobrança vencida há 30 dias ou mais.");
   }
+  const lote = d.lote ? linhaDoLote(d.lote) : null;
+  if (lote) blocos.push("", lote);
   if (d.pergunta) blocos.push("", PERGUNTA_DA_SEMANA);
   return { texto: blocos.join("\n"), letras: a?.linhas ?? [] };
 }

@@ -54,9 +54,15 @@ import {
 import { type DadosDoEscritorio, textoDoEscritorio } from "./secretario-texto.ts";
 import { tentativasAte } from "./linhas.ts";
 import { linhasDoHistorico } from "./historico.ts";
+import type { LoteMontado } from "../_shared/papelada/lote.ts";
+import { CHAVE_DA_PAPELADA, lerFormatoDaPapelada, linhaDoLote } from "../_shared/papelada/texto.ts";
+import { contarRegrasGuardadas, montarLoteDaSemana, registrarLote } from "./secretario-papelada.ts";
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
+
+/** (Passo 5) Quanto tempo o lote da semana vale: até o próximo (7 dias). */
+const VALIDADE_DO_LOTE_MS = 7 * 86_400_000;
 
 export interface RespostaDaTarde {
   status: number;
@@ -141,6 +147,8 @@ export function montarTardeDosDados(p: {
   pergunta: boolean;
   /** (16/10/2026) o portão (guardado, acordes de hoje, regras do dono); ausente = sem nada disso, as regras-padrão */
   portao?: DoPortaoNaTarde;
+  /** (16/10/2026, Passo 5) o lote da semana a mostrar; ausente = a tarde de antes, byte a byte */
+  lote?: LoteMontado | null;
 }): TardeMontada {
   const { hoje, agora, turno, lido } = p;
   const portao = p.portao ?? SEM_PORTAO;
@@ -170,8 +178,10 @@ export function montarTardeDosDados(p: {
     mesQueFechou: lido.mesQueFechou?.conta ?? null, faturamento: lido.mesQueFechou?.faturamento ?? null,
     pergunta: p.pergunta,
     guardado: planoDaTarde, semResposta, semRespostaMax: portao.regras.sem_resposta_hoje_max,
+    ...(p.lote ? { lote: p.lote } : {}),
   });
   const e = lido.escritorio;
+  const linhaLote = p.lote ? linhaDoLote(p.lote) : null;
   return {
     guardado: planoDaTarde && portao.modo
       ? {
@@ -198,8 +208,10 @@ export function montarTardeDosDados(p: {
       ...(planoDaTarde
         ? { guardado: { linhas: planoDaTarde.linhas.length, escritorio: planoDaTarde.escritorio.length, resolvidos: planoDaTarde.resolvidos.length, restantes: planoDaTarde.restantes } }
         : {}),
+      ...(p.lote ? { lote: { itens: p.lote.itens.length, fora: p.lote.fora.length, total: p.lote.total, minutos: p.lote.minutos } } : {}),
     },
-    escritorio: e ? textoDoEscritorio(e, horaBR(agora)).slice(0, 2000) : null,
+    // (Passo 5) no dia do lote, o *escritório* da tarde termina com a linha do lote
+    escritorio: e ? `${textoDoEscritorio(e, horaBR(agora))}${linhaLote ? `\n\n${linhaLote}` : ""}`.slice(0, 2000) : null,
   };
 }
 
@@ -247,7 +259,7 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
   const hoje = diaBR(p.agora);
 
   const { data: cfgRows, error: cfgErr } = await admin.from("app_settings").select("key, value")
-    .in("key", ["fechamento_formato", "quote_validity_days"]);
+    .in("key", ["fechamento_formato", "quote_validity_days", CHAVE_DA_PAPELADA, "finance_review_batch_limit"]);
   const cfg: Record<string, string> = {};
   for (const r of (cfgRows as Array<{ key: string; value: unknown }>) || []) if (r?.key) cfg[String(r.key)] = String(r.value ?? "");
   // sem conseguir ler a chave = desligado (nada sai por engano)
@@ -287,7 +299,21 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
     if (avisos) doPortao.guardado = { avisos, resolvidos: avisos.length ? await quaisSeResolveram(admin, avisos) : new Set() };
     doPortao.acordados = await acordadosDeHoje(admin, { phone: dono.phone, modo: voz.modo, dia: hoje });
   }
-  const m = montarTardeDosDados({ hoje, agora: p.agora, turno, itens: manha.itens, lido, pergunta, portao: doPortao });
+  // (16/10/2026, Passo 5) o lote semanal da papelada: só com a chave ≠ desligado e no último dia útil da semana (o dia
+  // da pergunta). Falhar a leitura = a tarde de sempre, sem lote. A linha só vai no texto que o dono RECEBE com a chave
+  // ligada; na tarde que não sai (sombra) ela entra para comparar.
+  const papelada = cfgErr ? "desligado" : lerFormatoDaPapelada(cfg[CHAVE_DA_PAPELADA]);
+  let lote: LoteMontado | null = null;
+  if (papelada !== "desligado" && pergunta) {
+    try {
+      lote = await montarLoteDaSemana(admin, { cfg });
+    } catch (e) {
+      console.warn(JSON.stringify({ fn: "ai-daily-briefing", tarde: "lote_falhou", codigo: String((e as { code?: unknown })?.code ?? (e as Error)?.name ?? "erro") }));
+    }
+  }
+  const loteNoTexto = lote && (!enviar || papelada === "ligado") ? lote : null;
+  const dados = { hoje, agora: p.agora, turno, itens: manha.itens, lido, pergunta, portao: doPortao };
+  let m = montarTardeDosDados(loteNoTexto ? { ...dados, lote: loteNoTexto } : dados);
   const letras = m.letras.map((l) => ({ letra: l.letra, referencia: l.referencia, tipo: l.tipo, parte: l.parte }));
 
   if (p.dry) {
@@ -295,7 +321,22 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
       dry: true, turno, formato, modo_da_manha: manha.modo, enviaria: enviar && !!m.texto, rebaixado,
       conversa_ativa: conversa, pergunta_semana: pergunta, texto: m.texto, caracteres: m.texto?.length ?? 0, letras,
       detalhe: m.detalhe,
+      ...(lote ? { lote: { formato: papelada, linha: linhaDoLote(lote), itens: lote.itens, fora: lote.fora, total: lote.total, minutos: lote.minutos } } : {}),
     });
+  }
+
+  // (Passo 5) o lote é guardado ANTES da tarde: a linha só sai se o lote estiver no banco (senão *lote* não o acharia).
+  // 'ligado' só com a chave ligada e a tarde saindo de verdade; senão 'sombra' (nunca aplicado: CHECK no banco).
+  let loteGravado: string | null = null;
+  if (lote) {
+    const g = await registrarLote(admin, {
+      dia: hoje, phone: dono.phone, appUserId: dono.id,
+      formato: papelada === "ligado" && enviar && !!m.texto ? "ligado" : "sombra",
+      lote, validoAte: new Date(p.agora.getTime() + VALIDADE_DO_LOTE_MS).toISOString(),
+      regrasGuardadas: await contarRegrasGuardadas(admin),
+    });
+    loteGravado = g.ok ? (g.novo ? "novo" : "ja_existia") : `erro:${g.erro ?? "?"}`;
+    if (!g.ok && loteNoTexto) m = montarTardeDosDados(dados);
   }
 
   const vaiEnviar = enviar && !!m.texto;
@@ -350,5 +391,6 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
     turno, formato, modo_da_manha: manha.modo, gravado: r.novo === true, enviado: r.enviado === true, calado: r.calado === true,
     rebaixado, conversa_ativa: conversa, tentativa, letras: letras.length, historico,
     ...(m.guardado ? { guardado_na_sombra: guardadoMarcado } : {}),
+    ...(loteGravado ? { lote: loteGravado } : {}),
   });
 }
