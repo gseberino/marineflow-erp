@@ -128,6 +128,41 @@ describe('PDF enviado pela tela', () => {
   });
 });
 
+// O resumo de valores e a cobrança com a caixa do link desmarcada vão como TEXTO (20/10/2026).
+// Antes o resumo viajava como 'link' e a Evolution colava a URL /view/… no fim — o dono
+// desmarcava o link e ele ia mesmo assim.
+describe('mensagem de texto (sem link)', () => {
+  async function enviarTexto(mensagem: string) {
+    chamadas.resposta = { data: { success: true }, error: null };
+    const hook = montar();
+    let ok = false;
+    await act(async () => {
+      ok = await hook.current.send(
+        { phone: '5547999159654', message: mensagem, mode: 'text', context: 'quote', service_order_id: payload.service_order_id, publicUrl: 'https://app.example/view/tok-123' },
+        { autoRetry: false, maxAttempts: 1 },
+      );
+    });
+    return ok;
+  }
+
+  it("vai como kind 'text', sem link_url, sem PDF — mesmo com a URL pública à mão", async () => {
+    expect(await enviarTexto('*Orçamento ORÇ-00123* — HBR\n*Total: R$ 1.500,00*')).toBe(true);
+    expect(chamadas.invocacoes).toHaveLength(1);
+    const corpo = chamadas.invocacoes[0];
+    expect(corpo.kind).toBe('text');
+    expect(corpo).not.toHaveProperty('link_url');
+    expect(corpo).not.toHaveProperty('document_url');
+    expect(String(corpo.message)).not.toContain('/view/');
+    expect(chamadas.upload).toEqual([]);
+  });
+
+  it('texto vazio não chega à função (ela recusaria): avisa e não tenta três vezes', async () => {
+    expect(await enviarTexto('   ')).toBe(false);
+    expect(chamadas.invocacoes).toEqual([]);
+    expect(chamadas.avisos.erro).toEqual(['Escreva a mensagem antes de enviar.']);
+  });
+});
+
 // O defeito de 29/09/2026 (Diário de Bordo): depois de um erro de rede, a repetição automática
 // ouvia "já enviado" da função enquanto a primeira tentativa ainda esperava a Evolution — e a
 // tela dizia "Enviado" mesmo quando a primeira falhava. A função agora só diz "já enviado"

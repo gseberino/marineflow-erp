@@ -9,7 +9,12 @@ import { generatePDFBlob, DEFAULT_PDF_OPTIONS, type PDFDocumentType, type PDFOpt
 export interface WhatsAppSendPayload {
   phone: string;
   message: string;
-  mode: 'link' | 'document';
+  /**
+   * 'text' = só a mensagem, sem URL nenhuma (o resumo de valores e a cobrança com a caixa do
+   * link desmarcada, 20/10/2026). 'link' = a mensagem e o link público — a Evolution cola a URL
+   * no fim do texto. 'document' = o PDF anexado, com a legenda.
+   */
+  mode: 'text' | 'link' | 'document';
   // common
   context: 'service_order' | 'quote' | 'billing' | string;
   service_order_id?: string;
@@ -105,7 +110,9 @@ export function useWhatsAppSend() {
     if (payload.receivable_id) invokeBody.receivable_id = payload.receivable_id;
 
     let arquivo: string | null = null;
-    if (payload.mode === 'link') {
+    if (payload.mode === 'text') {
+      invokeBody.kind = 'text';
+    } else if (payload.mode === 'link') {
       if (!payload.publicUrl) throw new Error('Sem link público disponível.');
       invokeBody.kind = 'link';
       invokeBody.link_url = payload.publicUrl;
@@ -158,6 +165,12 @@ export function useWhatsAppSend() {
   async function send(payload: WhatsAppSendPayload, retry: RetryConfig): Promise<boolean> {
     if (!payload.phone || payload.phone.replace(/\D/g, '').length < 10) {
       toast.error('Telefone inválido. Inclua DDI+DDD.');
+      return false;
+    }
+    // Texto sem texto a função recusa (message é obrigatório para kind=text): avisar aqui
+    // evita três tentativas iguais e o "Falha após 3 tentativas".
+    if (payload.mode === 'text' && !payload.message.trim()) {
+      toast.error('Escreva a mensagem antes de enviar.');
       return false;
     }
     setSending(true);

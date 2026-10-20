@@ -12,7 +12,7 @@ export interface ScheduledSendRow {
   client_id: string | null;
   phone: string;
   message: string;
-  send_mode: 'link' | 'document';
+  send_mode: 'link' | 'document' | 'text';
   context: string | null;
   link_title: string | null;
   link_description: string | null;
@@ -38,7 +38,7 @@ export interface CreateScheduledSendInput {
   client_id?: string | null;
   phone: string;
   message: string;
-  send_mode: 'link' | 'document';
+  send_mode: 'link' | 'document' | 'text';
   context?: string;
   link_title?: string;
   link_description?: string;
