@@ -326,6 +326,26 @@ export function mensagemComLink(mensagem: string, link: string, shareToken: stri
 }
 
 /**
+ * A legenda do PDF no formato 'pdf' (decisão do dono, 20/10/2026): a frase dele (custom_message); sem ela, a
+ * frase padrão — a MESMA da tela de envio (src/lib/whatsapp-mensagem-ao-cliente.ts, corpoPadrao), sem
+ * saudação, porque quase sempre ele já está conversando com o cliente; com sem_legenda ("só o arquivo"),
+ * nenhuma. O resumo da confirmação e o envio usam esta função: o "sim" é sobre o texto que sai.
+ */
+export function legendaDoPdf(
+  args: Record<string, unknown> | null | undefined,
+  so: { service_order_number?: string | null; status?: string | null },
+): string {
+  const frase = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
+  if (frase) return frase;
+  if (args?.sem_legenda === true || args?.sem_legenda === "true") return "";
+  const numero = String(so.service_order_number ?? "").trim();
+  if (!numero) return "";
+  return documentTypeFor(String(so.status ?? "")) === "quote"
+    ? `Segue o ${numero}, conforme solicitado. Qualquer dúvida, estamos à disposição.`
+    : `Segue a ${numero}. Qualquer dúvida, estamos à disposição.`;
+}
+
+/**
  * O retrato do envio que o dono aprova: o telefone do cadastro (em hash — o payload da pendência
  * não precisa do número) e o total. Tirado quando a pendência nasce (ToolDef.retratoDaPendencia);
  * o execute compara com o de agora. Sem isto, trocar o WhatsApp do cliente ou o valor do
@@ -420,8 +440,12 @@ export async function resumirEnvioAoCliente(
   // A mensagem INTEIRA: o "sim" é sobre o texto que o cliente vai ler. Acima do limite o envio é
   // recusado (validarPedidoDeEnvio), e o resumo diz isso em vez de mostrar um pedaço.
   const mensagem = typeof args?.custom_message === "string" ? args.custom_message.trim() : "";
-  // Só o PDF e sem frase: o dono tem de ver que vai o arquivo sozinho, sem texto nenhum.
-  if (!mensagem && formato === "pdf") linhas.push("Legenda: nenhuma (só o arquivo)");
+  // Só o PDF sem frase dele (20/10/2026): vai a frase padrão — ou nada, se ele pediu "só o arquivo". O dono
+  // tem de ver no "sim" exatamente a legenda que o cliente vai ler.
+  if (!mensagem && formato === "pdf") {
+    const legenda = legendaDoPdf(args, so);
+    linhas.push(legenda ? `Legenda: "${legenda}"` : "Legenda: nenhuma (só o arquivo)");
+  }
   // Resumo: o "sim" é sobre o TEXTO que o cliente vai ler — ele vai inteiro na confirmação, com a
   // frase do dono já no lugar (05/10/2026).
   if (formato === "resumo") {
@@ -763,7 +787,7 @@ export const whatsappTools: ToolDef[] = [
   {
     name: "send_service_order_link",
     description:
-      "Envia um orçamento/OS AO CLIENTE pelo WhatsApp, sempre para o WhatsApp/telefone do cadastro do cliente (não existe campo de telefone). Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. PADRÃO (formato='pdf', ou sem formato): SÓ o ARQUIVO PDF, igual ao botão Baixar — com custom_message, a frase do usuário é a legenda inteira; sem ela, vai sem texto. formato='pdf_e_link' acrescenta na legenda o número, o total e o link para ver online e aprovar — use SÓ quando o usuário pedir o link ou o total junto ('com o link', 'para ele aprovar online'). formato='resumo' manda os VALORES EM TEXTO, sem PDF nem link: total, sinal para iniciar, chave PIX/banco e o saldo na conclusão, pela condição de pagamento do orçamento (o mesmo texto do botão 'Resumo' da tela) — use quando o usuário pedir 'manda os valores', 'o resumo', 'quanto ele paga de sinal'; com custom_message, a frase dele entra logo depois do cumprimento. formato='link' manda só o link, em texto — use apenas quando o usuário pedir 'só o link' ou quando o PDF falhar e ele aceitar. Vendedor externo só pode formato='link'. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número do documento (ex: 'ORÇ-00001' para orçamentos, 'OS-00042' para OS, ou o formato antigo 'OS-2026-XXXXX'). Prefira sempre o UUID.",
+      "Envia um orçamento/OS AO CLIENTE pelo WhatsApp, sempre para o WhatsApp/telefone do cadastro do cliente (não existe campo de telefone). Use sempre que o usuário pedir 'enviar orçamento', 'mandar OS', 'enviar para o cliente' etc. PADRÃO (formato='pdf', ou sem formato): SÓ o ARQUIVO PDF, igual ao botão Baixar — com custom_message, a frase do usuário é a legenda inteira; sem ela, vai a legenda padrão 'Segue o ORÇ-00123, conforme solicitado. Qualquer dúvida, estamos à disposição.'; com sem_legenda=true (o usuário pediu 'só o arquivo', 'sem legenda', 'sem texto'), vai sem texto. formato='pdf_e_link' acrescenta na legenda o número, o total e o link para ver online e aprovar — use SÓ quando o usuário pedir o link ou o total junto ('com o link', 'para ele aprovar online'). formato='resumo' manda os VALORES EM TEXTO, sem PDF nem link: total, sinal para iniciar, chave PIX/banco e o saldo na conclusão, pela condição de pagamento do orçamento (o mesmo texto do botão 'Resumo' da tela) — use quando o usuário pedir 'manda os valores', 'o resumo', 'quanto ele paga de sinal'; com custom_message, a frase dele entra logo depois do cumprimento. formato='link' manda só o link, em texto — use apenas quando o usuário pedir 'só o link' ou quando o PDF falhar e ele aceitar. Vendedor externo só pode formato='link'. O campo service_order_id aceita TANTO o UUID (campo 'id' do list_service_orders) QUANTO o número do documento (ex: 'ORÇ-00001' para orçamentos, 'OS-00042' para OS, ou o formato antigo 'OS-2026-XXXXX'). Prefira sempre o UUID.",
     input_schema: {
       type: "object",
       properties: {
@@ -771,9 +795,10 @@ export const whatsappTools: ToolDef[] = [
         formato: {
           type: "string",
           enum: ["pdf_e_link", "pdf", "resumo", "link"],
-          description: "pdf (padrão) = só o arquivo (legenda = custom_message, ou nenhuma); pdf_e_link = arquivo com número, total e link na legenda, quando o usuário pedir o link; resumo = valores em texto (total, sinal, PIX, saldo), sem PDF nem link; link = só o link em texto, quando o usuário pedir.",
+          description: "pdf (padrão) = só o arquivo (legenda = custom_message; sem ela, a frase padrão; com sem_legenda=true, nenhuma); pdf_e_link = arquivo com número, total e link na legenda, quando o usuário pedir o link; resumo = valores em texto (total, sinal, PIX, saldo), sem PDF nem link; link = só o link em texto, quando o usuário pedir.",
         },
-        custom_message: { type: "string", description: "Mensagem personalizada. No formato link substitui o texto padrão (se não trouxer o link, ele vai no fim; até 4000 caracteres); no pdf_e_link vira a primeira linha da legenda (número, total e link vêm sempre; até 800 caracteres); no pdf é a legenda inteira — a frase que o dono quer junto do arquivo (até 1000 caracteres; sem ela, o PDF vai sem texto); no resumo entra logo depois do cumprimento (até 800)." },
+        custom_message: { type: "string", description: "Mensagem personalizada. No formato link substitui o texto padrão (se não trouxer o link, ele vai no fim; até 4000 caracteres); no pdf_e_link vira a primeira linha da legenda (número, total e link vêm sempre; até 800 caracteres); no pdf é a legenda inteira — a frase que o dono quer junto do arquivo (até 1000 caracteres; sem ela, vai a frase padrão, ou nada com sem_legenda=true); no resumo entra logo depois do cumprimento (até 800)." },
+        sem_legenda: { type: "boolean", description: "Só no formato pdf: true quando o usuário pedir o arquivo SEM texto ('só o arquivo', 'sem legenda', 'sem mensagem'). Sem isso e sem custom_message, vai a legenda padrão." },
       },
       required: ["service_order_id"],
     },
@@ -924,7 +949,7 @@ export const whatsappTools: ToolDef[] = [
       // aprovou o envio vendo esses três no resumo. pdf: a legenda é só a frase dele (ou nada), e
       // o resumo da confirmação mostrou exatamente isso.
       const legenda = formato === "pdf"
-        ? personalizada
+        ? legendaDoPdf(args, so)
         : `${abertura}\n\n${doc.rotulo} ${doc.numero} — Total ${doc.total}\nPara ver online e aprovar: ${link}`;
       const marca = formato === "pdf" ? "[pdf]" : "[pdf+link]";
       // O whatsapp-send recusa legenda acima de 1024 caracteres (zod). Melhor dizer agora do
@@ -1002,7 +1027,11 @@ export const whatsappTools: ToolDef[] = [
         observacao: modoTeste
           ? "O modo de teste do WhatsApp está ligado: o PDF foi para o número de teste, NÃO para o cliente. Diga isso."
           : formato === "pdf"
-          ? (personalizada ? "O cliente recebeu o PDF com a sua frase na legenda (sem link)." : "O cliente recebeu só o PDF, sem texto nem link.")
+          ? (personalizada
+            ? "O cliente recebeu o PDF com a sua frase na legenda (sem link)."
+            : legenda
+            ? `O cliente recebeu o PDF com a legenda padrão ("${legenda}"), sem link.`
+            : "O cliente recebeu só o PDF, sem texto nem link.")
           : "O cliente recebeu o PDF com o link para ver online e aprovar.",
         ...(g.avisos.length ? { avisos_estilo: g.avisos } : {}),
       };

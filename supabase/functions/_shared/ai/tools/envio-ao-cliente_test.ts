@@ -189,13 +189,13 @@ async function executar(amb: ReturnType<typeof montarAmbiente>, args: Record<str
 }
 
 // ─── Formato padrão ──────────────────────────────────────────────────────────────────────
-Deno.test("sem formato, o padrão (decisão do dono, 05/10/2026) é SÓ o arquivo, sem total nem link", async () => {
+Deno.test("sem formato, o padrão (decisão do dono, 05/10/2026) é SÓ o arquivo, sem total nem link — com a legenda padrão (20/10)", async () => {
   const amb = montarAmbiente();
   const r = await executar(amb, { service_order_id: ORC.id });
   assertEquals(r.ok, true, JSON.stringify(r));
   assertEquals(r.formato, "pdf");
   assertEquals(amb.chamadas.envio[0].kind, "document");
-  assertEquals(amb.chamadas.envio[0].document_caption, "");
+  assertEquals(amb.chamadas.envio[0].document_caption, "Segue o ORÇ-00086, conforme solicitado. Qualquer dúvida, estamos à disposição.");
   const comFrase = montarAmbiente();
   await executar(comFrase, { service_order_id: ORC.id, custom_message: "Bom dia, Nelson! Atualizei o orçamento." });
   assertEquals(comFrase.chamadas.envio[0].document_caption, "Bom dia, Nelson! Atualizei o orçamento.");
@@ -244,15 +244,27 @@ Deno.test("formato desconhecido é recusado — não adivinha", async () => {
 });
 
 // ─── Só o PDF (05/10/2026): sem número, total e link; a frase do dono é a legenda ─────────
-Deno.test("formato 'pdf' sem frase: vai só o arquivo, sem legenda nenhuma", async () => {
+Deno.test("formato 'pdf' sem frase: vai o arquivo com a legenda padrão, sem saudação nem link (decisão do dono, 20/10/2026)", async () => {
   const amb = montarAmbiente();
   const r = await executar(amb, { service_order_id: ORC.id, formato: "pdf" });
   assertEquals(r.ok, true, JSON.stringify(r));
   assertEquals(r.formato, "pdf");
   assertEquals(amb.chamadas.envio.length, 1);
   assertEquals(amb.chamadas.envio[0].kind, "document");
-  assertEquals(amb.chamadas.envio[0].document_caption, "");
+  assertEquals(amb.chamadas.envio[0].document_caption, "Segue o ORÇ-00086, conforme solicitado. Qualquer dúvida, estamos à disposição.");
+  assert(!amb.chamadas.envio[0].document_caption.includes("/view/"), "sem link");
   assertEquals(amb.chamadas.envio[0].context, "quote", "continua marcando o orçamento como enviado");
+});
+
+Deno.test("formato 'pdf' com sem_legenda ('só o arquivo'): vai o arquivo sem texto nenhum; a frase dele ainda vence", async () => {
+  const amb = montarAmbiente();
+  const r = await executar(amb, { service_order_id: ORC.id, formato: "pdf", sem_legenda: true });
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(amb.chamadas.envio[0].document_caption, "");
+  assertStringIncludes(r.observacao, "só o PDF, sem texto nem link");
+  const comFrase = montarAmbiente();
+  await executar(comFrase, { service_order_id: ORC.id, formato: "pdf", sem_legenda: true, custom_message: "Atualizei." });
+  assertEquals(comFrase.chamadas.envio[0].document_caption, "Atualizei.");
 });
 
 Deno.test("formato 'pdf' com frase: a legenda é EXATAMENTE a frase, sem total nem link", async () => {
@@ -284,7 +296,9 @@ Deno.test("resumo do 'pdf' diz que vai só o arquivo — e se vai legenda", asyn
   const amb = montarAmbiente();
   const semFrase = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "pdf" });
   assertStringIncludes(semFrase!, "só o PDF");
-  assertStringIncludes(semFrase!, "Legenda: nenhuma");
+  assertStringIncludes(semFrase!, 'Legenda: "Segue o ORÇ-00086, conforme solicitado. Qualquer dúvida, estamos à disposição."');
+  const soArquivo = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "pdf", sem_legenda: true });
+  assertStringIncludes(soArquivo!, "Legenda: nenhuma");
   const comFrase = await resumirEnvioAoCliente(amb.admin, { service_order_id: ORC.id, formato: "pdf", custom_message: "Segue o orçamento." });
   assertStringIncludes(comFrase!, 'Legenda: "Segue o orçamento."');
 });
@@ -788,7 +802,7 @@ Deno.test("no agente, com autonomia 'auto' gravada: o PDF vira pendência com re
   assert(pendencia, "a pendência foi gravada");
   assertEquals(pendencia.title, "Enviar orçamento/OS ao cliente (WhatsApp)");
   const resumo = String(pendencia.summary);
-  for (const trecho of ["Cliente Exemplo Silva", "••••0000", "ORÇ-00086", "18.450,50", "só o PDF", "Legenda: nenhuma"]) {
+  for (const trecho of ["Cliente Exemplo Silva", "••••0000", "ORÇ-00086", "18.450,50", "só o PDF", 'Legenda: "Segue o ORÇ-00086, conforme solicitado. Qualquer dúvida, estamos à disposição."']) {
     assertStringIncludes(resumo, trecho);
   }
   // Quem pediu vai no resumo (o admin que aprova no painel vê de quem é o pedido) e no
