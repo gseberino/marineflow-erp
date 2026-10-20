@@ -241,7 +241,9 @@ export function BulkBillingReminderDialog({
           client_id: r.client_id,
           phone: r.phone_normalized,
           message: renderForReceivable(r),
-          send_mode: 'link',
+          // Texto puro, como o envio na hora (20/10/2026, decisão do dono: o link só vai quando pedido).
+          // Antes era 'link': mandava o link da OS e falhava ("share_token indisponível") na cobrança sem OS.
+          send_mode: 'text',
           context: 'billing',
           scheduled_at: scheduledIso,
           recurrence_type: schedule.recurrenceType,
