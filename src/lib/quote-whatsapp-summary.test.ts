@@ -146,6 +146,32 @@ describe('resumo do orçamento para WhatsApp', () => {
     expect(texto(buildQuoteWhatsAppSummary(FLAVIO))).toContain('Olá, Flávio!');
   });
 
+  // A saudação é escolha do dono na tela (20/10/2026): quase sempre ele já está conversando com
+  // o cliente. Quem não passa a opção (o espelho do assistente, a paridade) segue com o "Olá".
+  describe('saudação escolhida na tela', () => {
+    const linhas = (t: string) => t.split('\n');
+
+    it('sem a opção: "Olá, <primeiro nome>!" na segunda linha, como sempre', () => {
+      expect(linhas(buildQuoteWhatsAppSummary(FLAVIO))[1]).toBe('Olá, Flávio!');
+    });
+
+    it('"Sem saudação" (\'\' ou null): a linha não existe, o resto fica igual', () => {
+      const padrao = buildQuoteWhatsAppSummary(FLAVIO);
+      for (const saudacao of ['', null]) {
+        const sem = buildQuoteWhatsAppSummary({ ...FLAVIO, saudacao });
+        expect(sem).not.toContain('Olá');
+        expect(linhas(sem)[1]).toBe('Referente a: Itapoã');
+        expect(sem).toBe(padrao.replace('Olá, Flávio!\n', ''));
+      }
+    });
+
+    it('com a saudação escolhida: ela no lugar do "Olá"', () => {
+      const t = buildQuoteWhatsAppSummary({ ...FLAVIO, saudacao: 'Boa tarde, Flávio!' });
+      expect(linhas(t).slice(0, 3)).toEqual(['*Orçamento OS-00104* — HBR Marine Solutions', 'Boa tarde, Flávio!', 'Referente a: Itapoã']);
+      expect(t).not.toContain('Olá');
+    });
+  });
+
   it('orçamento sem condição de pagamento ainda informa o total', () => {
     const t = buildQuoteWhatsAppSummary({ ...ROBSON, parcelas: null, condicaoLabel: null });
     expect(texto(t)).toContain('Total: R$ 2.446,45');

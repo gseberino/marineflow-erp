@@ -72,6 +72,13 @@ export interface ResumoDeOrcamentoInput {
   validadeAte?: string | null;
   empresa?: DadosDaEmpresa;
   opcoes?: OpcoesDeExibicao;
+  /**
+   * A linha de saudação, já pronta ("Boa tarde, Sandro!"). '' ou null = sem a linha — o dono
+   * quase sempre já está conversando com o cliente (20/10/2026). Ausente = "Olá, <primeiro
+   * nome>!", como sempre foi: é o que o espelho do assistente (_shared/pdf/resumo-whatsapp.ts)
+   * escreve, e a paridade tela × assistente é sobre o padrão.
+   */
+  saudacao?: string | null;
 }
 
 /**
@@ -112,7 +119,7 @@ function quandoVence(row: { dueBasis: 'delivery' | 'days'; days: number }): stri
 export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string {
   const {
     numero, clienteNome, ativoNome, orcamento, parcelas, condicaoLabel,
-    validadeDias, validadeAte, empresa = {}, opcoes = {},
+    validadeDias, validadeAte, empresa = {}, opcoes = {}, saudacao,
   } = input;
 
   const mostrar = {
@@ -128,7 +135,8 @@ export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string
   const linhas: string[] = [];
 
   linhas.push(`*Orçamento ${numero}* — ${empresaNome}`);
-  linhas.push(`Olá, ${primeiroNome(clienteNome)}!`);
+  if (saudacao === undefined) linhas.push(`Olá, ${primeiroNome(clienteNome)}!`);
+  else if (saudacao && saudacao.trim()) linhas.push(saudacao.trim());
   if (ativoNome) linhas.push(`Referente a: ${ativoNome}`);
 
   // ── Sem valores não há resumo ────────────────────────────────────────────
