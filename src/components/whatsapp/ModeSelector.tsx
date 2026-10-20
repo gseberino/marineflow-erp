@@ -1,13 +1,17 @@
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { LinkIcon, FileText, ReceiptText } from 'lucide-react';
+import type { ModoDaTela } from '@/lib/whatsapp-mensagem-ao-cliente';
 
 /**
  * 'resumo' existe porque link e PDF exigem que o cliente ABRA alguma coisa para descobrir
  * quanto custa — e quem está no celular, no meio do dia, muitas vezes não abre. No resumo
  * os números vão no corpo da mensagem: total, sinal, saldo e como pagar.
+ *
+ * 'texto' é só a mensagem (a cobrança, que não tem PDF nem resumo neste envio): não tem item
+ * aqui — quando é o único modo, o diálogo nem mostra o seletor.
  */
-export type SendMode = 'link' | 'document' | 'resumo';
+export type SendMode = ModoDaTela;
 
 interface Props {
   mode: SendMode;
@@ -76,7 +80,7 @@ export function ModeSelector({ mode, onChange, canSendLink, canSendDocument, can
       </RadioGroup>
       {!canSendLink && (
         <p className="text-xs text-muted-foreground">
-          ⚠ OS sem link público — apenas envio por PDF disponível.
+          ⚠ Sem link público — o modo Link não está disponível.
         </p>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -25,6 +25,20 @@ import { useWhatsAppSend } from '@/hooks/use-whatsapp-send';
 import { useCreateScheduledSend } from '@/hooks/use-scheduled-sends';
 import { supabase } from '@/integrations/supabase/client';
 import { buildQuoteWhatsAppSummary } from '@/lib/quote-whatsapp-summary';
+import {
+  CHAVE_DA_SAUDACAO,
+  SAUDACAO_PADRAO,
+  ehSaudacao,
+  mensagemPadrao,
+  modoInicial,
+  opcoesDeSaudacao,
+  prepararEnvio,
+  temLinkNoTexto,
+  textoDaSaudacao,
+  tirarLinkDoTexto,
+  trocarSaudacao,
+  type Saudacao,
+} from '@/lib/whatsapp-mensagem-ao-cliente';
 import { mesmoTelefone } from '../../supabase/functions/_shared/ai/phone';
 import { dataBR } from '../../supabase/functions/_shared/pdf/datas';
 
@@ -59,10 +73,22 @@ interface Props {
 }
 
 export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
-  const [mode, setMode] = useState<SendMode>('link');
+  // O padrão é o PDF, sem link (pedido do dono, 20/10/2026 — a mesma decisão de 05/10 do
+  // assistente). Até aqui o diálogo abria no modo Link: o link ia mesmo sem ele pedir.
+  const [mode, setMode] = useState<SendMode>('document');
   const [phone, setPhone] = useState('');
   const [message, setMessage] = useState('');
-  const [includeLinkInCaption, setIncludeLinkInCaption] = useState(true);
+  // UMA caixa para o link, que vale no PDF (linha "Link online: …" na legenda), no Resumo e na
+  // cobrança (desmarcada = texto puro, sem URL). Nasce desmarcada a cada abertura.
+  const [enviarLink, setEnviarLink] = useState(false);
+  // "Sem saudação" é o padrão: quase sempre ele já está conversando com o cliente. A tela
+  // lembra a última escolha de quem usa (sem storage, volta ao padrão).
+  const [saudacao, setSaudacao] = useState<Saudacao>(() => {
+    try {
+      const salva = localStorage.getItem(CHAVE_DA_SAUDACAO);
+      return ehSaudacao(salva) ? salva : SAUDACAO_PADRAO;
+    } catch { return SAUDACAO_PADRAO; }
+  });
   const [templateId, setTemplateId] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -152,8 +178,9 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       : undefined;
   // O resumo usa os MESMOS dados do PDF de propósito: se a mensagem escrita e o anexo
   // discordassem em algum valor, o cliente encontraria a diferença antes de nós.
+  // Só orçamento/OS têm PDF e resumo neste envio; a cobrança vai como mensagem.
   const { data: pdfData } = usePDFData(
-    open && (mode === 'document' || mode === 'resumo') ? pdfSourceId : undefined,
+    open && target?.kind === 'service_order' && (mode === 'document' || mode === 'resumo') ? pdfSourceId : undefined,
   );
 
   const documentType: PDFDocumentType = useMemo(() => {
@@ -216,26 +243,86 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
     return base;
   }, [target, publicUrl]);
 
+  /**
+   * A abertura da mensagem pela saudação escolhida. "Bom dia/Boa tarde/Boa noite" segue a hora
+   * em que a mensagem SAI: no envio agendado, a hora marcada — "Boa noite" escrito às 22h para
+   * sair às 8h chegaria errado.
+   */
+  const horaDoEnvio = (): Date => {
+    if (schedule.enabled && schedule.scheduledAt) {
+      const marcada = new Date(schedule.scheduledAt);
+      if (!Number.isNaN(marcada.getTime())) return marcada;
+    }
+    return new Date();
+  };
+  const abertura = textoDaSaudacao(saudacao, target?.clientName, horaDoEnvio());
+  const opcoesSaudacao = opcoesDeSaudacao(target?.clientName, horaDoEnvio());
+
+  // Os efeitos que MONTAM a mensagem (abertura do diálogo, resumo) leem a saudação daqui: com
+  // ela nas dependências, trocar a saudação remontaria tudo e apagaria o que ele já editou.
+  const saudacaoAtual = useRef(saudacao);
+  const aberturaAtual = useRef(abertura);
+  useEffect(() => {
+    saudacaoAtual.current = saudacao;
+    aberturaAtual.current = abertura;
+  });
+  /** A abertura que está na mensagem agora; mudou → troca só a abertura (efeito abaixo). */
+  const aberturaAplicada = useRef<string | null>(null);
+
+  // O link vai? Modo Link (mandar o link é a escolha) ou a caixa marcada.
+  const linkVai = mode === 'link' || (enviarLink && !!publicUrl);
+
   useEffect(() => {
     if (!open || !target) return;
     setPhone(normalizePhoneE164(target.clientPhone || ''));
-    setMode('link');
-    setIncludeLinkInCaption(false);
+    // PDF quando dá para gerar; senão o Resumo; Link só se for o único; senão só a mensagem
+    // (a cobrança). O resumo depende das opções do PDF (financeiros ocultos), mas o PDF vem
+    // antes dele e é sempre possível num orçamento/OS.
+    const podePdf = target.kind === 'service_order' && !!pdfSourceId;
+    setMode(modoInicial({
+      podePdf,
+      podeResumo: podePdf,
+      podeLink: target.kind === 'service_order' && !!publicUrl,
+    }));
+    setEnviarLink(false);
     setTemplateId('');
     setSchedule(defaultScheduleConfig());
 
+    const agora = new Date();
+    aberturaAplicada.current = textoDaSaudacao(saudacaoAtual.current, target.clientName, agora);
     if (clientSetting?.message_body) {
-      setMessage(applyTemplateVariables(clientSetting.message_body, templateVars));
+      // A mensagem padrão do cliente vale como ele a escreveu — só o link segue a caixa, que
+      // nasce desmarcada: {link} fica sem valor e a frase que o apresenta sai junto.
+      setMessage(tirarLinkDoTexto(applyTemplateVariables(clientSetting.message_body, { ...templateVars, link: '' }), publicUrl));
       return;
     }
-    const name = target.clientName ? ` ${target.clientName}` : '';
-    if (target.kind === 'service_order') {
-      const label = documentType === 'quote' ? 'Orçamento' : 'Ordem de Serviço';
-      setMessage(`Olá${name}, segue o ${label} ${target.serviceOrderNumber}.`);
-    } else {
-      setMessage(`Olá${name}, segue cobrança referente a: ${target.description}.`);
+    setMessage(mensagemPadrao({
+      tipo: target.kind === 'service_order' ? (documentType === 'quote' ? 'quote' : 'service_order') : 'billing',
+      numero: target.kind === 'service_order' ? target.serviceOrderNumber : null,
+      descricao: target.kind === 'receivable' ? target.description : null,
+      saudacao: saudacaoAtual.current,
+      nomeDoCliente: target.clientName,
+      agora,
+    }));
+  }, [open, target, pdfSourceId, publicUrl, documentType, clientSetting?.id, templateVars]);
+
+  // Trocou a saudação (ou a hora do agendamento mudou o período): troca SÓ a abertura da
+  // mensagem — o corpo que ele editou fica.
+  useEffect(() => {
+    if (!open || !target) return;
+    if (aberturaAplicada.current === null || aberturaAplicada.current === abertura) {
+      aberturaAplicada.current = abertura;
+      return;
     }
-  }, [open, target, publicUrl, documentType, clientSetting?.id, templateVars]);
+    aberturaAplicada.current = abertura;
+    setMessage((m) => trocarSaudacao(m, abertura, target.clientName));
+  }, [open, target, abertura]);
+
+  const escolherSaudacao = (valor: string) => {
+    if (!ehSaudacao(valor)) return;
+    setSaudacao(valor);
+    try { localStorage.setItem(CHAVE_DA_SAUDACAO, valor); } catch { /* sem localStorage (modo privado, cota): segue sem lembrar a escolha */ }
+  };
 
   const handleGenerateAI = async () => {
     if (!target || target.kind !== 'service_order') return;
@@ -271,7 +358,17 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
     setTemplateId(id);
     const tpl = templates?.find(t => t.id === id);
     if (!tpl || !target) return;
-    setMessage(applyTemplateVariables(tpl.body, templateVars));
+    // {valor} do orçamento/OS: o total do documento (o mesmo do PDF), quando já carregou. Sem
+    // isso o modelo "Orçamento enviado" ia ao cliente com "no valor de {valor}" escrito.
+    const total = target.kind === 'service_order' ? Number(pdfData?.serviceOrder?.grand_total) : NaN;
+    const vars = {
+      ...templateVars,
+      ...(Number.isFinite(total) ? { valor: total } : {}),
+      // Caixa desmarcada: {link} fica sem valor e a frase que o apresenta ("Acesso: ") sai junto.
+      link: linkVai ? publicUrl : '',
+    };
+    const texto = applyTemplateVariables(tpl.body, vars);
+    setMessage(linkVai ? texto : tirarLinkDoTexto(texto, publicUrl));
   };
 
   const canSendLink = !!publicUrl && target?.kind === 'service_order';
@@ -281,14 +378,27 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
   // Com os financeiros ocultos o resumo não teria o que dizer -- é um modo de valores.
   const canSendResumo = target?.kind === 'service_order' && !!pdfSourceId && !pdfOptions.hideFinancials;
 
+  // Nenhum modo para escolher (a cobrança): o seletor não aparece, vai a mensagem.
+  const temModoParaEscolher = canSendLink || canSendDocument || canSendResumo;
+
   /**
-   * Como a mensagem VIAJA, que não é a mesma coisa que o modo escolhido na tela.
+   * O que SAI, com o texto de agora: como viaja ('text', 'link' ou 'document'), o texto, a
+   * legenda do PDF e se um link do texto vai sair por a caixa estar desmarcada.
    *
-   * 'resumo' e 'link' são os dois uma mensagem de texto — o card de preview quem monta é o
-   * próprio WhatsApp, a partir da URL que estiver no corpo. O que muda entre eles é só o
-   * que vai escrito. Só 'document' tem transporte próprio, porque anexa arquivo.
+   * Até 20/10/2026 o Resumo viajava como 'link' — a Evolution colava a URL no fim — e não
+   * havia como tirar. Agora Resumo e cobrança com a caixa desmarcada vão como TEXTO.
    */
-  const modoDeEnvio: 'link' | 'document' = mode === 'document' ? 'document' : 'link';
+  const envio = prepararEnvio({ modo: mode, mensagem: message, enviarLink, urlPublica: publicUrl });
+  const modoDeEnvio = envio.transporte;
+  // A caixa desmarcada tira o link do texto ao enviar — a tela avisa antes.
+  const linkSaiDoTexto = !linkVai && temLinkNoTexto(message, publicUrl);
+  /**
+   * O agendamento ainda não anexa PDF: na hora marcada o servidor (whatsapp-process-scheduled)
+   * manda o LINK no lugar. Com a caixa desmarcada isso seria o link que ele não pediu — então
+   * o PDF agendado só sai com a caixa marcada (aí vai a mensagem com o link, e a tela diz).
+   */
+  const agendamentoSemPdf = schedule.enabled && mode === 'document';
+  const agendarBloqueado = agendamentoSemPdf && !linkVai;
 
   /**
    * O texto do resumo, montado a partir do orçamento real.
@@ -300,7 +410,10 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
   useEffect(() => {
     if (!open || mode !== 'resumo' || !pdfData || target?.kind !== 'service_order') return;
     const so = pdfData.serviceOrder as Record<string, any>;
+    // A linha "Olá, Fulano!" segue a saudação escolhida — "Sem saudação" = sem a linha.
+    aberturaAplicada.current = aberturaAtual.current;
     setMessage(buildQuoteWhatsAppSummary({
+      saudacao: aberturaAtual.current,
       numero: target.serviceOrderNumber,
       clienteNome: target.clientName,
       ativoNome: (pdfData as any)?.vessel?.name ?? null,
@@ -325,7 +438,9 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
 
   useEffect(() => {
     if (!canSendLink && mode === 'link' && canSendDocument) setMode('document');
-  }, [canSendLink, canSendDocument, mode]);
+    // As opções do PDF chegam depois: com os financeiros ocultos o resumo deixa de existir.
+    if (mode === 'resumo' && !canSendResumo) setMode(canSendDocument ? 'document' : 'texto');
+  }, [canSendLink, canSendDocument, canSendResumo, mode]);
 
   if (!target) return null;
 
@@ -360,11 +475,15 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
           ? 'Toque para visualizar o documento completo.'
           : 'Toque para visualizar a cobrança.');
 
-    const caption = includeLinkInCaption && publicUrl
-      ? `${message}\n\nLink online: ${publicUrl}`
-      : message;
+    // Caixa desmarcada: o texto sai sem link nenhum (envio.mensagem já vem sem ele) e a
+    // legenda do PDF não ganha a linha "Link online".
+    const caption = envio.legenda;
 
     if (schedule.enabled) {
+      if (agendarBloqueado) {
+        toast.error('O envio agendado ainda não anexa o PDF. Use o Resumo escrito, marque o link ou envie agora.');
+        return;
+      }
       const scheduledIso = new Date(schedule.scheduledAt).toISOString();
       if (new Date(scheduledIso).getTime() <= Date.now()) {
         toast.error('Escolha uma data/hora futura para o agendamento.');
@@ -378,14 +497,14 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
           receivable_id: target.kind === 'receivable' ? target.receivableId : null,
           client_id: target.clientId || null,
           phone,
-          message,
+          message: envio.mensagem,
           send_mode: modoDeEnvio,
           context: target.kind === 'service_order' ? documentType : 'billing',
           link_title,
           link_description,
           pdf_filename: filename,
           caption,
-          include_link_in_caption: includeLinkInCaption,
+          include_link_in_caption: envio.linkVai,
           scheduled_at: scheduledIso,
           recurrence_type: schedule.recurrenceType,
           recurrence_days_of_week:
@@ -408,7 +527,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
     const ok = await send(
       {
         phone,
-        message,
+        message: envio.mensagem,
         mode: modoDeEnvio,
         context: target.kind === 'service_order' ? documentType : 'billing',
         service_order_id:
@@ -441,13 +560,15 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
         </DialogHeader>
 
         <div className="space-y-4">
-          <ModeSelector
-            mode={mode}
-            onChange={setMode}
-            canSendLink={canSendLink}
-            canSendDocument={canSendDocument}
-            canSendResumo={canSendResumo}
-          />
+          {temModoParaEscolher && (
+            <ModeSelector
+              mode={mode}
+              onChange={setMode}
+              canSendLink={canSendLink}
+              canSendDocument={canSendDocument}
+              canSendResumo={canSendResumo}
+            />
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="phone-whatsapp">Telefone (com DDI)</Label>
@@ -467,6 +588,22 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
                 {' '}enviar para ele não marca o orçamento como enviado ao cliente.
               </p>
             )}
+          </div>
+
+          {/* Trocar a saudação troca só a abertura da mensagem; o corpo editado fica. */}
+          <div className="space-y-2">
+            <Label htmlFor="saudacao-whatsapp">Saudação</Label>
+            <select
+              id="saudacao-whatsapp"
+              className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+              value={saudacao}
+              onChange={(e) => escolherSaudacao(e.target.value)}
+              disabled={sending}
+            >
+              {opcoesSaudacao.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
           </div>
 
           <div className="space-y-2">
@@ -498,15 +635,27 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
               onTemplateChange={applyTemplate}
               usingClientDefault={!!clientSetting?.message_body}
             />
+            {linkSaiDoTexto && (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                O link não vai: ele sai da mensagem ao enviar, porque a opção “Enviar também o link online” está desmarcada.
+              </p>
+            )}
           </div>
 
-          {mode === 'document' && publicUrl && (
-            <label className="flex items-center gap-2 text-sm">
+          {/* No modo Link o link É o envio; nos outros, só vai com esta caixa marcada. */}
+          {mode !== 'link' && publicUrl && (
+            <label className="flex items-start gap-2 text-sm cursor-pointer">
               <Checkbox
-                checked={includeLinkInCaption}
-                onCheckedChange={(v) => setIncludeLinkInCaption(!!v)}
+                checked={enviarLink}
+                onCheckedChange={(v) => setEnviarLink(!!v)}
+                className="mt-0.5"
               />
-              Incluir também o link online na legenda
+              <span>
+                Enviar também o link online
+                <span className="block text-xs text-muted-foreground">
+                  {mode === 'document' ? 'Vai uma linha “Link online” na legenda do PDF.' : 'O link vai no fim da mensagem.'}
+                </span>
+              </span>
             </label>
           )}
 
@@ -524,6 +673,14 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
             onChange={setSchedule}
             disabled={sending || createScheduled.isPending}
           />
+
+          {agendamentoSemPdf && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              {agendarBloqueado
+                ? 'O envio agendado ainda não anexa o PDF: na hora marcada sairia o link online, e a opção do link está desmarcada. Para agendar, use o Resumo escrito ou marque “Enviar também o link online”; para mandar o PDF, envie agora.'
+                : 'O envio agendado ainda não anexa o PDF: na hora marcada sai a mensagem com o link online.'}
+            </p>
+          )}
         </div>
 
         <DialogFooter>
@@ -536,7 +693,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
           </Button>
           <Button
             onClick={handleSend}
-            disabled={sending || createScheduled.isPending}
+            disabled={sending || createScheduled.isPending || agendarBloqueado}
             className="gap-2"
           >
             {sending || createScheduled.isPending ? (

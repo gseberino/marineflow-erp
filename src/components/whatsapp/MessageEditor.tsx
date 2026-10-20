@@ -5,7 +5,7 @@ import type { WhatsAppTemplate } from '@/hooks/use-whatsapp-templates';
 interface Props {
   message: string;
   onMessageChange: (v: string) => void;
-  mode: 'link' | 'document';
+  mode: 'text' | 'link' | 'document';
   templates?: WhatsAppTemplate[];
   templateId: string;
   onTemplateChange: (id: string) => void;
