@@ -2,7 +2,7 @@
 // do cliente na OS — este último espelha os validadores do servidor fiscal.
 import { describe, it, expect } from 'vitest';
 import { filtrarClientes } from './busca-cliente';
-import { enderecoEmUmaLinha, faltasParaNota } from './ficha-cliente';
+import { enderecoEmUmaLinha, faltasParaNota, hrefTelefone, resumirEmAberto } from './ficha-cliente';
 
 const base = { email: null, phone: null, whatsapp: null, cpf_cnpj: null, active: true };
 const clientes = [
@@ -61,6 +61,37 @@ describe('faltasParaNota', () => {
   it('contribuinte do ICMS sem IE', () => {
     expect(faltasParaNota({ ...completo, ie_indicator: 1 })).toEqual(['inscrição estadual']);
     expect(faltasParaNota({ ...completo, ie_indicator: 1, state_registration: '123.456.789' })).toEqual([]);
+  });
+});
+
+describe('resumirEmAberto', () => {
+  const t = (p: Partial<Parameters<typeof resumirEmAberto>[0][number]>) => ({
+    amount: 100, paid_amount: 0, balance_amount: 100, due_date: '2026-11-01', status: 'pending', ...p,
+  });
+
+  it('soma o saldo e conta os vencidos pela data', () => {
+    const r = resumirEmAberto([
+      t({ due_date: '2026-10-13' }),                                   // vencido
+      t({ amount: 520, paid_amount: 500, balance_amount: 20, status: 'partially_paid', due_date: '2026-07-22' }),
+      t({ due_date: '2026-11-04' }),                                   // a vencer
+    ], '2026-10-20');
+    expect(r).toEqual({ emAberto: 220, vencidos: 2, valorVencido: 120 });
+  });
+
+  it('pago e cancelado não contam; sem balance_amount usa valor − pago', () => {
+    const r = resumirEmAberto([
+      t({ status: 'paid' }),
+      t({ status: 'cancelled', due_date: '2026-01-01' }),
+      t({ balance_amount: null, amount: 300, paid_amount: 100, due_date: '2026-10-20' }), // vence hoje: não venceu
+    ], '2026-10-20');
+    expect(r).toEqual({ emAberto: 200, vencidos: 0, valorVencido: 0 });
+  });
+});
+
+describe('hrefTelefone', () => {
+  it('número completo leva o DDI; curto vai como está', () => {
+    expect(hrefTelefone('(47) 99999-1234')).toBe('tel:+5547999991234');
+    expect(hrefTelefone('3344-5566')).toBe('tel:33445566');
   });
 });
 
