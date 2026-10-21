@@ -25,19 +25,35 @@ function embarcacao(p: Partial<DaLista>): DaLista {
   };
 }
 
+/** O valor que está logo abaixo do rótulo (dt → dd). */
+const valorDe = (ficha: HTMLElement, rotulo: string) =>
+  within(ficha).getByText(rotulo, { selector: 'dt' }).nextElementSibling as HTMLElement;
+
 describe('FichaDaEmbarcacao', () => {
-  it('mostra tipo, modelo, ano, tamanho, inscrição, motores e onde está', () => {
+  it('cada dado com o rótulo em cima: tipo, modelo, ano, tamanho, inscrição, motores e onde fica', () => {
     render(<FichaDaEmbarcacao embarcacao={embarcacao({
       asset_type: 'Lancha', manufacturer: 'Schaefer', model: '400', year: 2019, length_feet: 40,
       hull_id_or_registration: '441-123', engine_quantity: 2, engine_brand: 'Volvo', engine_model: 'D6',
       marinas: { name: 'Marina Itajaí' }, current_dock_position: 'B12',
     })} />);
     const ficha = screen.getByLabelText('Dados da embarcação');
-    expect(within(ficha).getByText('Lancha · Schaefer 400')).toBeInTheDocument();
-    expect(within(ficha).getByText('2019 · 40 pés')).toBeInTheDocument();
-    expect(within(ficha).getByText('441-123')).toBeInTheDocument();
-    expect(within(ficha).getByText('2× Volvo D6')).toBeInTheDocument();
-    expect(within(ficha).getByText('Marina Itajaí · vaga B12')).toBeInTheDocument();
+    expect(valorDe(ficha, 'Tipo')).toHaveTextContent('Lancha');
+    expect(valorDe(ficha, 'Fabricante e modelo')).toHaveTextContent('Schaefer 400');
+    expect(valorDe(ficha, 'Ano')).toHaveTextContent('2019');
+    expect(valorDe(ficha, 'Comprimento')).toHaveTextContent('40 pés');
+    expect(valorDe(ficha, 'Inscrição / placa')).toHaveTextContent('441-123');
+    expect(valorDe(ficha, 'Motores')).toHaveTextContent('2× Volvo D6');
+    expect(valorDe(ficha, 'Onde fica')).toHaveTextContent('Marina Itajaí · vaga B12');
+  });
+
+  it('só aparece o que está preenchido (sem colunas de "Não informado")', () => {
+    render(<FichaDaEmbarcacao embarcacao={embarcacao({ manufacturer: 'Schaefer', model: '400', year: 2019 })} />);
+    const ficha = screen.getByLabelText('Dados da embarcação');
+    expect(valorDe(ficha, 'Fabricante e modelo')).toHaveTextContent('Schaefer 400');
+    for (const ausente of ['Tipo', 'Comprimento', 'Inscrição / placa', 'Motores', 'Onde fica']) {
+      expect(within(ficha).queryByText(ausente)).not.toBeInTheDocument();
+    }
+    expect(within(ficha).queryByText('Não informado')).not.toBeInTheDocument();
   });
 
   it('cadastro vazio diz o que falta, e o editar abre o cadastro dela', async () => {

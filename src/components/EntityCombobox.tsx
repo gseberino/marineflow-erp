@@ -47,6 +47,11 @@ interface EntityComboboxProps {
   fallbackLabel?: string;
   /** When true, the trigger has `w-full` */
   fullWidth?: boolean;
+  /** id do gatilho: com ele o <Label htmlFor> dá nome ao campo para o leitor de tela. */
+  id?: string;
+  /** id de um texto que descreve o campo (dica ou aviso). */
+  ariaDescribedBy?: string;
+  ariaRequired?: boolean;
 }
 
 /**
@@ -73,6 +78,9 @@ export function EntityCombobox({
   maxRows = 200,
   fallbackLabel,
   fullWidth = true,
+  id,
+  ariaDescribedBy,
+  ariaRequired,
 }: EntityComboboxProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -102,10 +110,13 @@ export function EntityCombobox({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
+            id={id}
             type="button"
             variant="outline"
             role="combobox"
             aria-expanded={open}
+            aria-describedby={ariaDescribedBy}
+            aria-required={ariaRequired}
             disabled={disabled}
             className={cn(
               fullWidth && 'w-full',

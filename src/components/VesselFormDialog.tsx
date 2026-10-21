@@ -25,7 +25,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   vessel?: Vessel | null;
   initialClientId?: string;
-  onCreated?: (vessel: { id: string; name: string; marina_id?: string | null }) => void;
+  onCreated?: (vessel: { id: string; name: string; marina_id?: string | null; access_notes?: string | null }) => void;
 }
 
 const empty: TablesInsert<'vessels'> = {
@@ -118,7 +118,8 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
         const result = await create.mutateAsync(payload);
         toast.success(t.vessels.createSuccess);
         if (onCreated && result) {
-          onCreated({ id: result.id, name: result.name, marina_id: result.marina_id });
+          // O local e acesso vai junto: a OS o sugere no campo dela, como faz ao escolher o barco.
+          onCreated({ id: result.id, name: result.name, marina_id: result.marina_id, access_notes: result.access_notes });
         }
       }
       onOpenChange(false);

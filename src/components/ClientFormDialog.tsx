@@ -33,6 +33,8 @@ interface Props {
   // Disparado após salvar (criação OU edição) — recebe o id do cliente salvo.
   // Usado, ex., pela emissão de NF-e para repreencher o destinatário na hora.
   onSaved?: (clientId: string) => void;
+  /** Ao terminar de fechar (repassado ao DialogContent): quem abriu decide para onde vai o foco. */
+  onCloseAutoFocus?: (e: Event) => void;
 }
 
 const empty = {
@@ -63,7 +65,7 @@ const IE_INDICATOR_OPTIONS = [
   { value: 2, label: '2 — Contribuinte isento de IE' },
 ];
 
-export function ClientFormDialog({ open, onOpenChange, client, initialName, onCreated, onSaved }: Props) {
+export function ClientFormDialog({ open, onOpenChange, client, initialName, onCreated, onSaved, onCloseAutoFocus }: Props) {
   const { t } = useI18n();
   const create = useCreateClient();
   const update = useUpdateClient();
@@ -186,7 +188,7 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>{isEdit ? t.clients.editClient : t.clients.newClient}</DialogTitle>
         </DialogHeader>

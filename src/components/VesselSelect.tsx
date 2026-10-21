@@ -18,10 +18,16 @@ interface Props {
   vessels: VesselOption[];
   clientId: string;
   disabled?: boolean;
-  onVesselCreated?: (vessel: { id: string; name: string; marina_id?: string | null }) => void;
+  onVesselCreated?: (vessel: { id: string; name: string; marina_id?: string | null; access_notes?: string | null }) => void;
+  /** Repassados ao gatilho (nome e descrição para o leitor de tela). */
+  id?: string;
+  ariaDescribedBy?: string;
+  ariaRequired?: boolean;
 }
 
-export function VesselSelect({ value, onChange, vessels, clientId, disabled, onVesselCreated }: Props) {
+export function VesselSelect({
+  value, onChange, vessels, clientId, disabled, onVesselCreated, id, ariaDescribedBy, ariaRequired,
+}: Props) {
   const [showCreate, setShowCreate] = useState(false);
 
   const options = vessels
@@ -49,6 +55,9 @@ export function VesselSelect({ value, onChange, vessels, clientId, disabled, onV
         emptyText="Nenhuma embarcação encontrada"
         onCreate={() => setShowCreate(true)}
         createLabel="Nova embarcação para este cliente"
+        id={id}
+        ariaDescribedBy={ariaDescribedBy}
+        ariaRequired={ariaRequired}
       />
 
       <VesselFormDialog

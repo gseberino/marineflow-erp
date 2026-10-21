@@ -83,6 +83,7 @@ import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
 import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles } from 'lucide-react';
 import { decideAutosave } from '@/lib/autosave-guard';
 import { manterSeMexeu, mesclarReleitura, mesmoValor } from '@/lib/releitura-da-os';
+import { trocarEmbarcacaoNoForm } from '@/lib/troca-de-cliente';
 import { documentTypeFor, documentLabelFor, isQuoteStatus } from '@/lib/document-type';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AcoesDropboxDaOrdem } from '@/components/dropbox/PastaNoDropbox';
@@ -776,11 +777,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Filter vessels by client
   const clientVessels = allVessels?.filter((v) => v.client_id === form.client_id) || [];
 
-  // Auto-select single vessel
+  // Auto-select single vessel — pela mesma regra da escolha à mão (troca-de-cliente.ts): marina e
+  // local de acesso do barco entram como sugestão; o que já foi escolhido ou escrito, fica.
   useEffect(() => {
     if (form.client_id && clientVessels.length === 1 && !form.vessel_id) {
-      set('vessel_id', clientVessels[0].id);
-      if (clientVessels[0].marina_id) set('marina_id', clientVessels[0].marina_id);
+      const unico = clientVessels[0];
+      setForm((f) => trocarEmbarcacaoNoForm(f, unico.id, undefined, unico));
     }
   }, [form.client_id, clientVessels.length]);
 
@@ -2390,6 +2392,17 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         // "Analisar" grava um levantamento e manda abrir a aba Levantamento: some junto com ela.
         onAnalisarDescricao={roteiroVisivel ? analisarDescricao : undefined}
         analisandoDescricao={analisando}
+        // O agrupamento exige o mesmo cliente nas origens; trocar o do agrupado quebraria isso. O
+        // "desagrupe antes" só para quem pode (orçamento ainda aberto, cargo que agrupa). Enquanto
+        // a consulta não responde, o "Trocar" fica escondido (sem ela, não dá para saber); se ela
+        // falhar, diz o que fazer — o banco não protege o agrupado.
+        semTrocaDeCliente={
+          orderId && agrupamento.isLoading ? true
+          : orderId && agrupamento.isError ? 'Não deu para conferir se este orçamento reúne outros: recarregue a página para trocar o cliente.'
+          : !comoAgrupado ? undefined
+          : podeDesagrupar ? 'Este orçamento reúne outros do mesmo cliente: para trocar o cliente, desagrupe antes.'
+          : 'O cliente não muda: este documento reúne orçamentos do mesmo cliente.'
+        }
       />
 
       <DescriptionAnalysisDialog
