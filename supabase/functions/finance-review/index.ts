@@ -48,6 +48,10 @@ import {
   aprovarOsDaVarredura, type AprovarUma, foraDasReservadas, linhasDeComprovante, mensagemDosComprovantes, reavaliarComprovantes,
   recusaDaLinhaDoCmp, reservadasDaRodada, responderApproveCmp,
 } from "./comprovantes.ts";
+import {
+  lerRecusas, propostasAReabrir, reabrirPropostas, recusaQueVale, recusarPropostas, tipoDaProposta, type Recusa,
+} from "./recusa.ts";
+import { conferirCargo } from "./acesso.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
 
@@ -96,7 +100,7 @@ const LOTE_HISTORICO = 200;
 interface Body {
   action?:
     | "generate" | "approve" | "reject" | "suggest_rules" | "reclassify" | "classify_ai" | "undismiss" | "vigiar" | "consult_document"
-    | "approve_cmp";
+    | "approve_cmp" | "reopen";
   /** consult_document: CNPJ (ou CPF) a consultar. */
   documento?: string;
   /** approve_cmp (só interna): o comprovante cujo sim aprova a linha no Extrato. */
@@ -174,11 +178,17 @@ servirComCors(async (req) => {
     const { data, error } = await admin.auth.getUser(token);
     if (error || !data?.user) return jr({ error: "unauthorized" }, 401);
     userId = data.user.id;
+    // Além do login, o cargo (20/10/2026, acesso.ts): só admin e financeiro mexem na fila.
+    const cargo = await conferirCargo(admin, userId);
+    if (!cargo.ok) return jr({ error: cargo.erro }, cargo.status);
   } else if (body.acting_user_id) {
     // Chamada interna autenticada pelo segredo (agente pelo WhatsApp, onde não há JWT de
     // usuário). A identidade vem no corpo para que a decisão continue tendo dono: sem
     // isso, toda aprovação feita por voz ficaria registrada como "ninguém".
     userId = String(body.acting_user_id);
+    // Quem decide pela chamada interna também precisa do cargo (acesso.ts).
+    const cargo = await conferirCargo(admin, userId);
+    if (!cargo.ok) return jr({ error: cargo.erro }, cargo.status);
   }
   const action = body.action ?? "generate";
 
@@ -189,7 +199,20 @@ servirComCors(async (req) => {
     if (action === "classify_ai") return await classificarComIA(admin);
     if (action === "undismiss") return await desfazerIgnorada(admin, body.ids ?? [], userId);
     if (action === "approve") return await aprovar(admin, body.ids ?? [], userId, body.overrides ?? {});
-    if (action === "reject") return await recusar(admin, body.ids ?? [], userId, body.note ?? null);
+    if (action === "reject") {
+      // A recusa fica; a entrada recusada sai da fila do banco (recusa.ts, itens A1 e A2).
+      const r = await recusarPropostas(admin, body.ids ?? [], userId, body.note ?? null, (reg) => anotar(admin, reg));
+      return jr(r.corpo, r.status);
+    }
+    if (action === "reopen") {
+      // Desfazer a recusa (ou a saída da fila) com ids de PROPOSTA — o que o assistente tem (recusa.ts, A4).
+      const r = await reabrirPropostas(admin, body.ids ?? [], userId, {
+        anotar: (reg) => anotar(admin, reg),
+        lancamentoDaTransacao: (txId) => lancamentoDaTransacao(admin, txId),
+        desfazerIgnorada: async (txIds, autor) => await (await desfazerIgnorada(admin, txIds, autor)).json(),
+      });
+      return jr(r.corpo, r.status);
+    }
     if (action === "suggest_rules") return await proporRegras(admin);
     if (action === "consult_document") return await consultarDocumento(admin, String(body.documento ?? ""), userId);
     // Ajustes do dono (11/10/2026): o sim no WhatsApp aprova a linha que o comprovante ligou. Só a
@@ -620,6 +643,22 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
   const compraPorChave = new Map(compras.map((c) => [c.chave, c]));
   const ancoras = new Set(compras.map((c) => c.ancora.id));
 
+  // A RECUSA FICA (20/10/2026, recusa.ts): a mesma linha + o mesmo tipo de proposta que o dono recusou
+  // não nasce de novo enquanto a linha não mudar — nem na varredura do dia, nem no mutirão do histórico.
+  // Antes, `naFila` só via as pendentes, e a recusada voltava (5 linhas recusadas voltaram no mutirão de
+  // 26/09 e foram recusadas de novo). Leitura que falha = como antes (propõe), com o aviso na resposta.
+  let recusas = new Map<string, Recusa[]>();
+  let recusasIndisponiveis = false;
+  try {
+    recusas = await lerRecusas(admin, transacoes
+      .filter((tx) => !naFila.has(tx.id) && !lancadas.has(tx.id) && !jaCoberta.has(tx.id))
+      .map((tx) => String(tx.id)));
+  } catch (e) {
+    recusasIndisponiveis = true;
+    console.error("[finance-review] ler as recusas falhou — seguindo como antes", (e as Error)?.message ?? e);
+  }
+  let recusadasMantidas = 0;
+
   // Quem ainda não tem proposta nem lançamento. A entrada de um par entra pela saída e
   // parcela que não é a âncora entra pela compra — as duas somem daqui.
   //
@@ -639,7 +678,13 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     if (pernaDe.has(tx.id) && !ancoras.has(tx.id)) return false;
     // Parcela de compra que já tem lançamento acabou de sair da fila acima.
     if (chavesJaLancadas.has(pernaDe.get(tx.id) ?? "")) return false;
-    return tx.transaction_type === "debit" || tx.transaction_type === "credit";
+    if (tx.transaction_type !== "debit" && tx.transaction_type !== "credit") return false;
+    // Recusada pelo dono e a linha não mudou: fica fora (antes do corte do mutirão, para ele andar).
+    if (recusaQueVale(recusas.get(String(tx.id)), tipoDaProposta(tx, parPor.has(tx.id), cnpjEmpresa), tx)) {
+      recusadasMantidas += 1;
+      return false;
+    }
+    return true;
   });
 
   // O corte é sobre os ELEGÍVEIS, não sobre o que veio do banco: as propostas criadas neste
@@ -881,6 +926,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     lancadasSozinhas > 0 ? `${lancadasSozinhas} lançada(s) sozinha(s) — veja em "Lançados sozinhos"` : "",
     pares.length ? `${pares.length} transferência(s) entre contas` : "",
     parcelasDeCompraJaLancada > 0 ? `${parcelasDeCompraJaLancada} parcela(s) de compra já lançada saíram da fila` : "",
+    recusadasMantidas > 0 ? `${recusadasMantidas} que você recusou continuam fora (a linha não mudou)` : "",
+    recusasIndisponiveis ? "não consegui ler as suas recusas: a rodada seguiu como antes" : "",
     restantes > 0 ? `faltam ${restantes} do histórico` : "",
   ].filter(Boolean);
 
@@ -894,6 +941,8 @@ async function gerar(admin: DbClient, incluirHistorico: boolean) {
     limite_lote: limiteLote,
     comprovantes_ligados: cmp.ligados,
     comprovantes_aprovados: aprovadasDoSim,
+    recusadas_mantidas: recusadasMantidas,
+    recusas_indisponiveis: recusasIndisponiveis,
     // Quantas transações antigas sobraram para a próxima chamada. Zero = mutirão terminado.
     restantes,
     message: partes.join(" · "),
@@ -1184,11 +1233,14 @@ async function desfazerIgnorada(admin: DbClient, ids: string[], userId: string |
     }
   }
 
-  // Transferência entre contas tem duas pernas, e a proposta guarda a segunda.
+  // Transferência entre contas tem duas pernas, e a proposta guarda a segunda. O aviso do vigia
+  // (anomaly) aponta a linha pelo mesmo related_transaction_id, mas não é decisão sobre ela: o "ciente"
+  // ou "descartar" dele não volta junto (20/10/2026).
   const { data: propostas, error: erroProp } = await admin
     .from("finance_review_queue")
-    .select("id, bank_transaction_id, related_transaction_id, created_payable_id, created_receivable_id, status")
-    .or(`bank_transaction_id.in.(${[...afetadas].join(",")}),related_transaction_id.in.(${[...afetadas].join(",")})`);
+    .select("id, kind, created_at, bank_transaction_id, related_transaction_id, created_payable_id, created_receivable_id, status")
+    .or(`bank_transaction_id.in.(${[...afetadas].join(",")}),related_transaction_id.in.(${[...afetadas].join(",")})`)
+    .neq("kind", "anomaly");
   if (erroProp) throw erroProp;
   for (const p of (propostas ?? []) as any[]) {
     if (p.bank_transaction_id) afetadas.add(p.bank_transaction_id);
@@ -1229,8 +1281,9 @@ async function desfazerIgnorada(admin: DbClient, ids: string[], userId: string |
 
   // As propostas voltam a PENDENTES: a decisão foi desfeita, então ela precisa ser tomada
   // de novo — deixá-las aprovadas apontando para um lançamento apagado seria mentir na
-  // trilha de auditoria.
-  const idsPropostas = (propostas ?? []).map((p: any) => p.id);
+  // trilha de auditoria. Só a ÚLTIMA de cada linha + tipo (20/10/2026, recusa.ts): a linha recusada
+  // duas vezes tem duas propostas, e reabrir as duas estourava o índice "uma pendente por linha".
+  const idsPropostas = propostasAReabrir((propostas ?? []) as any[]);
   if (idsPropostas.length > 0) {
     const { error: e3 } = await admin.from("finance_review_queue").update({
       status: "pending",
@@ -2336,13 +2389,4 @@ async function consultarDocumento(admin: DbClient, documento: string, userId: st
     }
   }
   return jr({ ok: true, tipo: "cnpj", documento: doc, dados: lerRespostaDaReceita(doc, bruto as Record<string, unknown>) });
-}
-
-async function recusar(admin: DbClient, ids: string[], userId: string | null, note: string | null) {
-  if (ids.length === 0) return jr({ error: "nenhuma proposta informada" }, 400);
-  const { error } = await admin.from("finance_review_queue").update({
-    status: "rejected", decided_by: userId, decided_at: new Date().toISOString(), decision_note: note,
-  }).in("id", ids).eq("status", "pending");
-  if (error) throw error;
-  return jr({ ok: true, recusadas: ids.length, message: `${ids.length} proposta(s) recusada(s)` });
 }

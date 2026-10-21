@@ -19,6 +19,65 @@ export interface ContextoDeIdentificacao {
   candidatos: Candidate[];
   categoriaDoFavorecido: Map<string, string>;
   drePorCategoria: Map<string, string>;
+  /**
+   * Favorecido SÓCIO → a última categoria que o dono escolheu ao aprovar uma despesa dele (20/10/2026,
+   * spec-papelada-fix.md B2). Ausente = como antes.
+   */
+  ultimaEscolhaDoSocio?: Map<string, EscolhaDoSocio>;
+}
+
+/** A última escolha do dono para um sócio: a categoria e quando ele decidiu. */
+export interface EscolhaDoSocio {
+  categoria: string;
+  em: string;
+}
+
+/** As categorias que a separação pelo salário mínimo (separar_pro_labore) reparte mês a mês. */
+const CATEGORIAS_DA_SEPARACAO = new Set(["Pró-labore", "Retirada de sócio"]);
+
+/**
+ * Da trilha de aprovações (reconciliation_log 'aprovou_proposta'), a ÚLTIMA categoria escolhida pelo dono
+ * para cada favorecido. "Outras despesas" não é escolha (é a falta dela, como na memória do motor) e
+ * categoria que não existe mais no plano ("Pró-labore e retirada", até 25/09) não volta como sugestão.
+ */
+export function ultimaEscolhaPorFavorecido(
+  logs: Array<{ payable_id: string | null; ocorrido_em: string; depois: { categoria?: string | null } | null }>,
+  favorecidoDaDespesa: Map<string, string>,
+  categoriasAtivas: Set<string>,
+): Map<string, EscolhaDoSocio> {
+  const m = new Map<string, EscolhaDoSocio>();
+  for (const l of logs) {
+    const favorecido = l.payable_id ? favorecidoDaDespesa.get(String(l.payable_id)) : undefined;
+    const categoria = String(l.depois?.categoria ?? "").trim();
+    if (!favorecido || !categoria || categoria === "Outras despesas" || !categoriasAtivas.has(categoria)) continue;
+    const atual = m.get(favorecido);
+    if (!atual || String(l.ocorrido_em) > atual.em) m.set(favorecido, { categoria, em: String(l.ocorrido_em) });
+  }
+  return m;
+}
+
+/** Lê a última escolha do dono para cada sócio. Lança se a leitura falhar (quem chama segue sem ela). */
+async function lerUltimaEscolhaDoSocio(
+  admin: DbClient,
+  socios: string[],
+  categoriasAtivas: Set<string>,
+): Promise<Map<string, EscolhaDoSocio>> {
+  if (socios.length === 0) return new Map();
+  // A despesa principal (divisao_id nulo): a parte que a separação criou não é decisão do dono.
+  const despesas = await lerPaginas<{ id: string; payee_id: string }>((de, ate) => admin.from("payables")
+    .select("id, payee_id").in("payee_id", socios).not("bank_transaction_id", "is", null).is("divisao_id", null)
+    .order("id").range(de, ate));
+  const favorecidoDaDespesa = new Map(despesas.map((d) => [String(d.id), String(d.payee_id)]));
+  const ids = [...favorecidoDaDespesa.keys()];
+  const logs: Array<{ payable_id: string | null; ocorrido_em: string; depois: { categoria?: string | null } | null }> = [];
+  for (let i = 0; i < ids.length; i += 150) {
+    const { data, error } = await admin.from("reconciliation_log")
+      .select("payable_id, ocorrido_em, depois")
+      .eq("acao", "aprovou_proposta").not("autor", "is", null).in("payable_id", ids.slice(i, i + 150));
+    if (error) throw error;
+    logs.push(...((data ?? []) as typeof logs));
+  }
+  return ultimaEscolhaPorFavorecido(logs, favorecidoDaDespesa, categoriasAtivas);
 }
 
 /** Leitura paginada: o PostgREST corta em 1000 linhas sem avisar. */
@@ -51,9 +110,9 @@ export async function carregarContextoSeguro(admin: DbClient): Promise<ContextoD
 export async function carregarContexto(admin: DbClient): Promise<ContextoDeIdentificacao> {
   const [fornecedores, favorecidos, clientes, categorias] = await Promise.all([
     lerPaginas<any>((de, ate) => admin.from("suppliers").select("id, name, trade_name, cnpj_cpf").order("id").range(de, ate)),
-    lerPaginas<any>((de, ate) => admin.from("payees").select("id, name, document, bank_branch, bank_account, default_category").eq("active", true).order("id").range(de, ate)),
+    lerPaginas<any>((de, ate) => admin.from("payees").select("id, name, kind, document, bank_branch, bank_account, default_category").eq("active", true).order("id").range(de, ate)),
     lerPaginas<any>((de, ate) => admin.from("clients").select("id, name, cpf_cnpj").order("id").range(de, ate)),
-    lerPaginas<any>((de, ate) => admin.from("financial_categories").select("name, type, dre_group").order("name").range(de, ate)),
+    lerPaginas<any>((de, ate) => admin.from("financial_categories").select("name, type, dre_group, active").order("name").range(de, ate)),
   ]);
 
   // O que já se lançou a partir do extrato, por documento — "quem já pagou por quem".
@@ -80,11 +139,23 @@ export async function carregarContexto(admin: DbClient): Promise<ContextoDeIdent
   const indice = indexarContrapartes({ fornecedores, favorecidos, clientes, historico });
   const candidatos = await carregarCandidatos(admin);
 
+  // Pix para o sócio segue a última escolha do dono (B2). Falhar aqui NÃO derruba a identificação das
+  // linhas (carregarContextoSeguro devolveria nulo para tudo): segue sem esta parte, como antes.
+  let ultimaEscolhaDoSocio = new Map<string, EscolhaDoSocio>();
+  try {
+    const ativas = new Set(categorias.filter((c) => c.type === "payable" && c.active !== false).map((c) => String(c.name)));
+    ultimaEscolhaDoSocio = await lerUltimaEscolhaDoSocio(
+      admin, favorecidos.filter((f) => f.kind === "socio").map((f) => String(f.id)), ativas);
+  } catch (e) {
+    console.error("[finance-review] última escolha do sócio indisponível — seguindo sem ela", (e as Error)?.message ?? e);
+  }
+
   return {
     indice,
     candidatos,
     categoriaDoFavorecido: new Map(favorecidos.filter((f) => f.default_category).map((f) => [f.id, f.default_category])),
     drePorCategoria: new Map(categorias.filter((c) => c.type === "payable" && c.dre_group).map((c) => [c.name, c.dre_group])),
+    ultimaEscolhaDoSocio,
   };
 }
 
@@ -213,6 +284,23 @@ export function identificarLinha(tx: TxDaFila, p: PropostaBase, ctx: ContextoDeI
     categoria = padrao;
     dreGroup = ctx.drePorCategoria.get(padrao) ?? dreGroup;
     frases.push(`Categoria padrão de ${ident.favorecido?.nome}: ${padrao}`);
+  }
+
+  // Pix para o SÓCIO (o próprio dono) — 20/10/2026, spec-papelada-fix.md B2. O histórico por nome se divide
+  // (Pró-labore 5 de 9) e a sugestão saía pela maioria, enquanto a última escolha dele foi Retirada de sócio
+  // (28/09): a fila sugeria o que ele acabara de trocar. Agora a sugestão segue a ÚLTIMA escolha dele para
+  // esse favorecido; regra sua continua vencendo. Para Pró-labore × Retirada de sócio o erro é barato: a
+  // separação pelo salário mínimo (separar_pro_labore) reparte as duas mês a mês. Só sugestão: a confiança
+  // é a do motor (abaixo de 90, e Retirada fica fora do resultado — nada disso vai sozinho).
+  const escolha = payeeId && p.kind === "create_payable" && !p.appliedRuleId
+    ? ctx.ultimaEscolhaDoSocio?.get(payeeId) : undefined;
+  if (escolha && escolha.categoria !== categoria) {
+    const dia = `${escolha.em.slice(8, 10)}/${escolha.em.slice(5, 7)}`;
+    frases.push(`Da última vez (${dia}) você lançou Pix para ${ident.favorecido?.nome ?? "o sócio"} como ${escolha.categoria}: a sugestão segue a sua última escolha`
+      + (CATEGORIAS_DA_SEPARACAO.has(escolha.categoria) && CATEGORIAS_DA_SEPARACAO.has(categoria)
+        ? " (a separação pelo salário mínimo acerta o pró-labore do mês)" : ""));
+    categoria = escolha.categoria;
+    dreGroup = ctx.drePorCategoria.get(escolha.categoria) ?? dreGroup;
   }
 
   const vinculo = sugerirVinculo(
