@@ -63,3 +63,7 @@ create trigger os_tecnico_nao_troca_cliente
 revoke all on function public._os_tecnico_nao_troca_cliente() from public;
 revoke all on function public._os_tecnico_nao_troca_cliente() from anon;
 revoke all on function public._os_tecnico_nao_troca_cliente() from authenticated;
+
+insert into supabase_migrations.schema_migrations (version, name)
+values ('20261021160000', 'tecnico_nao_troca_cliente_da_os')
+on conflict do nothing;
