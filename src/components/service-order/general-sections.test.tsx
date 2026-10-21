@@ -13,6 +13,11 @@ vi.mock('@/hooks/use-ficha-cliente', () => ({
   useSaldoEmAberto: () => ({ data: undefined }),
   useClientesRecentes: () => ({ data: [] }),
 }));
+// Levantamento da OS: o teste decide se há um.
+const lev = vi.hoisted(() => ({ tem: false }));
+vi.mock('@/hooks/use-service-survey', () => ({
+  useServiceOrderSurvey: () => ({ data: lev.tem ? { id: 's1' } : null, isError: false, isLoading: false }),
+}));
 
 import { GeneralSections } from './general-sections';
 
@@ -34,7 +39,10 @@ const barcosDaMaria = [
   { id: 'v3', client_id: 'c2', name: 'Brisa', active: true, asset_type: 'Lancha', manufacturer: null, model: null,
     year: null, length_feet: null, marina_id: 'm3', marinas: null, access_notes: null },
 ];
-const todosOsBarcos = [barco, ...barcosDaMaria];
+// O João tem um segundo barco (para trocar dentro do mesmo cliente).
+const ventoSul = { id: 'v4', client_id: 'c1', name: 'Vento Sul', active: true, asset_type: 'Veleiro', manufacturer: null,
+  model: null, year: null, length_feet: null, marina_id: null, marinas: null, access_notes: null };
+const todosOsBarcos = [barco, ...barcosDaMaria, ventoSul];
 const marinheiro = { id: 'k1', vessel_id: 'v1', full_name: 'Pedro Marinheiro', role: 'captain', phone: '(47) 98888-7777', email: null, active: true };
 
 /** A seção com o formulário em estado de verdade: o que a tela muda, a tela mostra. */
@@ -163,11 +171,59 @@ describe('GeneralSections — cliente, embarcação e solicitante', () => {
       inicial={{ client_id: 'c1', vessel_id: 'v1', requested_by_contact_id: 'k1', requested_by_name: 'Pedro Marinheiro' }}
       aoMudar={(f) => { form = f; }}
     />);
-    // o seletor de embarcação tem nome (o rótulo) e mostra o barco escolhido
-    const seletor = screen.getByRole('combobox', { name: /Embarcação/ });
-    expect(seletor).toHaveTextContent('Netuno II');
-    await user.click(seletor);
+    // escolhida, é ficha; o "Trocar" abre a lista já aberta
+    await user.click(screen.getByRole('button', { name: /^Trocar embarcação/ }));
     await user.click(await screen.findByRole('option', { name: /Netuno II/ }));
     expect(form).toMatchObject({ vessel_id: 'v1', requested_by_contact_id: 'k1', requested_by_name: 'Pedro Marinheiro' });
+  });
+
+  it('trocar a embarcação de OS salva com solicitante e levantamento: confirma dizendo o que acontece', async () => {
+    lev.tem = true;
+    const user = userEvent.setup();
+    let form: Record<string, any> = {};
+    render(<Tela
+      orderData={{ id: 'os1' }}
+      inicial={{ status: 'open', client_id: 'c1', vessel_id: 'v1', requested_by_contact_id: 'k1', requested_by_name: 'Pedro Marinheiro' }}
+      aoMudar={(f) => { form = f; }}
+    />);
+    await user.click(screen.getByRole('button', { name: /^Trocar embarcação/ }));
+    await user.click(await screen.findByRole('option', { name: /Vento Sul/ }));
+    expect(await screen.findByText(
+      'De Lancha Netuno II para Veleiro Vento Sul. Sai o solicitante Pedro Marinheiro, que é contato da antiga. '
+      + 'O levantamento feito na antiga fica com ela: esta OS vai precisar de outro.',
+    )).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Trocar' }));
+    expect(form).toMatchObject({ vessel_id: 'v4', requested_by_contact_id: '', requested_by_name: '' });
+    lev.tem = false;
+  });
+
+  it('OS nova: trocar a embarcação passa direto, mesmo com solicitante', async () => {
+    const user = userEvent.setup();
+    let form: Record<string, any> = {};
+    render(<Tela
+      inicial={{ client_id: 'c1', vessel_id: 'v1', requested_by_contact_id: 'k1', requested_by_name: 'Pedro Marinheiro' }}
+      aoMudar={(f) => { form = f; }}
+    />);
+    await user.click(screen.getByRole('button', { name: /^Trocar embarcação/ }));
+    await user.click(await screen.findByRole('option', { name: /Vento Sul/ }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(form).toMatchObject({ vessel_id: 'v4' });
+  });
+
+  it('solicitante que não está entre os contatos ativos (desativado depois) também pede confirmação', async () => {
+    const user = userEvent.setup();
+    let form: Record<string, any> = {};
+    render(<Tela
+      orderData={{ id: 'os1' }}
+      inicial={{ status: 'open', client_id: 'c1', vessel_id: 'v1', requested_by_contact_id: 'k9', requested_by_name: 'Ana Antiga' }}
+      aoMudar={(f) => { form = f; }}
+    />);
+    await user.click(screen.getByRole('button', { name: /^Trocar embarcação/ }));
+    await user.click(await screen.findByRole('option', { name: /Vento Sul/ }));
+    expect(await screen.findByText(
+      'De Lancha Netuno II para Veleiro Vento Sul. Sai o solicitante Ana Antiga, que é contato da antiga.',
+    )).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Manter a atual' }));
+    expect(form).toMatchObject({ vessel_id: 'v1', requested_by_contact_id: 'k9', requested_by_name: 'Ana Antiga' });
   });
 });

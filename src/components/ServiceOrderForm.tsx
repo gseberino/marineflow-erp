@@ -56,7 +56,7 @@ import { useServiceOrderExpenses, useAddServiceOrderExpense, useUpdateServiceOrd
 import { useUpdateServiceOrderService } from '@/hooks/use-service-order-services';
 import { useUpdateServiceOrderPart } from '@/hooks/use-service-order-parts';
 // NOVO-020b: o técnico lê da view sem valores; o que ele não leu não pode voltar no Salvar.
-import { payloadParaCargo } from '@/lib/service-orders-source';
+import { payloadDeAtualizacaoParaCargo, payloadParaCargo, podeTrocarClienteDaOS } from '@/lib/service-orders-source';
 import { levantamentosPendentesParaConcluir } from '@/lib/levantamento-gate';
 import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { supabase } from '@/integrations/supabase/client';
@@ -993,7 +993,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         toast.success('Ordem de serviço criada com sucesso');
         navigate(`/service-orders/${result.id}`);
       } else {
-        await updateSO.mutateAsync({ id: orderId!, ...payloadParaCargo(authUser?.role, payload) });
+        await updateSO.mutateAsync({ id: orderId!, ...payloadDeAtualizacaoParaCargo(authUser?.role, payload) });
         // O Salvar também conta como "último salvo": o Agrupar confere isso antes de abrir.
         ultimoSalvoRef.current = JSON.stringify(montarPayload());
         const { supabase } = await import('@/integrations/supabase/client');
@@ -1901,7 +1901,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
     setSalvandoAuto(true);
     try {
-      await updateSO.mutateAsync({ id: orderId!, ...payloadParaCargo(authUser?.role, payload) });
+      await updateSO.mutateAsync({ id: orderId!, ...payloadDeAtualizacaoParaCargo(authUser?.role, payload) });
       ultimoSalvoRef.current = assinatura;
       setSalvoEm(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     } catch (e: any) {
@@ -1909,6 +1909,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       if (tratarRecusaDeAgrupamento(e)) {
         setSalvoEm(null);
         return;
+      }
+      // Recusa de permissão do banco (ex.: só o escritório troca o cliente) é motivo, não falha
+      // de rede: aparece uma vez (id fixo), senão toda edição seguinte falharia calada.
+      if (e?.code === '42501') {
+        toast.error(e.message || 'Sem permissão para esta alteração.', { id: `autosave-recusado-${orderId}` });
       }
       // Sem toast repetido a cada tentativa: o rótulo do cabeçalho já avisa, e
       // um erro de rede numa tela aberta há horas viraria uma chuva de avisos.
@@ -2396,12 +2401,29 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         // "desagrupe antes" só para quem pode (orçamento ainda aberto, cargo que agrupa). Enquanto
         // a consulta não responde, o "Trocar" fica escondido (sem ela, não dá para saber); se ela
         // falhar, diz o que fazer — o banco não protege o agrupado.
+        // Técnico não troca o cliente de OS que já existe (decisão do dono, 21/10/2026). Cargo ainda
+        // não carregado: só esconde o "Trocar" (falha fechada, sem mensagem que confunda o escritório).
         semTrocaDeCliente={
-          orderId && agrupamento.isLoading ? true
+          orderId && !authUser?.role ? true
+          : orderId && !podeTrocarClienteDaOS(authUser?.role) ? 'Só o escritório troca o cliente.'
+          // Concluída: trocar o cliente tiraria a embarcação, que nesta fase não troca (mesma saída).
+          : orderId && currentStatus === 'completed' ? 'OS concluída: para trocar o cliente, volte a OS para Em andamento.'
+          : orderId && agrupamento.isLoading ? true
           : orderId && agrupamento.isError ? 'Não deu para conferir se este orçamento reúne outros: recarregue a página para trocar o cliente.'
           : !comoAgrupado ? undefined
           : podeDesagrupar ? 'Este orçamento reúne outros do mesmo cliente: para trocar o cliente, desagrupe antes.'
           : 'O cliente não muda: este documento reúne orçamentos do mesmo cliente.'
+        }
+        // A embarcação/veículo: OS concluída não troca (plano e histórico já registrados nela — a
+        // saída é voltar a OS para Em andamento); o agrupamento exige a mesma unidade nas origens.
+        semTrocaDeEmbarcacao={
+          !orderId ? undefined
+          : currentStatus === 'completed' ? 'OS concluída: para trocar a embarcação ou veículo, volte a OS para Em andamento.'
+          : agrupamento.isLoading ? true
+          : agrupamento.isError ? 'Não deu para conferir se este orçamento reúne outros: recarregue a página para trocar.'
+          : !comoAgrupado ? undefined
+          : podeDesagrupar ? 'Este orçamento reúne outros da mesma embarcação ou veículo: para trocar, desagrupe antes.'
+          : 'A embarcação ou veículo não muda: este documento reúne orçamentos dela.'
         }
       />
 

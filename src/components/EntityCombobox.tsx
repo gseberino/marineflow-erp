@@ -52,6 +52,10 @@ interface EntityComboboxProps {
   /** id de um texto que descreve o campo (dica ou aviso). */
   ariaDescribedBy?: string;
   ariaRequired?: boolean;
+  /** Já nasce com a lista aberta (ex.: depois de um "Trocar", para não exigir outro clique). */
+  defaultOpen?: boolean;
+  /** A lista fechou SEM escolha (Esc, clique fora, clique no gatilho). Escolher não chama. */
+  onDispensar?: () => void;
 }
 
 /**
@@ -81,8 +85,10 @@ export function EntityCombobox({
   id,
   ariaDescribedBy,
   ariaRequired,
+  defaultOpen = false,
+  onDispensar,
 }: EntityComboboxProps) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [search, setSearch] = useState('');
 
   const selected = useMemo(
@@ -107,7 +113,8 @@ export function EntityCombobox({
 
   return (
     <div className={className}>
-      <Popover open={open} onOpenChange={setOpen}>
+      {/* Só o Radix chama onOpenChange (Esc, fora, gatilho); a escolha fecha por setOpen direto. */}
+      <Popover open={open} onOpenChange={(aberto) => { setOpen(aberto); if (!aberto) onDispensar?.(); }}>
         <PopoverTrigger asChild>
           <Button
             id={id}

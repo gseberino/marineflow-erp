@@ -23,10 +23,17 @@ interface Props {
   id?: string;
   ariaDescribedBy?: string;
   ariaRequired?: boolean;
+  /** Lista já aberta (depois de um "Trocar"). */
+  defaultOpen?: boolean;
+  /** Antes de abrir o cadastro novo: quem usa pode perguntar primeiro e só então chamar `abrir`. */
+  antesDeCadastrar?: (abrir: () => void) => void;
+  /** A lista fechou sem escolha (Esc, clique fora). */
+  onDispensar?: () => void;
 }
 
 export function VesselSelect({
   value, onChange, vessels, clientId, disabled, onVesselCreated, id, ariaDescribedBy, ariaRequired,
+  defaultOpen, antesDeCadastrar, onDispensar,
 }: Props) {
   const [showCreate, setShowCreate] = useState(false);
 
@@ -53,11 +60,13 @@ export function VesselSelect({
         placeholder="Selecionar embarcação"
         searchPlaceholder="Buscar embarcação... (digite 3+ letras)"
         emptyText="Nenhuma embarcação encontrada"
-        onCreate={() => setShowCreate(true)}
+        onCreate={() => (antesDeCadastrar ? antesDeCadastrar(() => setShowCreate(true)) : setShowCreate(true))}
         createLabel="Nova embarcação para este cliente"
         id={id}
         ariaDescribedBy={ariaDescribedBy}
         ariaRequired={ariaRequired}
+        defaultOpen={defaultOpen}
+        onDispensar={onDispensar}
       />
 
       <VesselFormDialog

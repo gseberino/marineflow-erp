@@ -12,12 +12,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { Campo } from '@/components/Campo';
 import { ClienteDaOrdem } from './ClienteDaOrdem';
-import { FichaDaEmbarcacao } from './FichaDaEmbarcacao';
-import { VesselSelect } from '@/components/VesselSelect';
+import { EmbarcacaoDaOrdem } from './EmbarcacaoDaOrdem';
 import { hrefTelefone } from '@/lib/ficha-cliente';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { isQuoteStatus } from '@/lib/document-type';
 import { perdasDaTrocaDeCliente, trocarClienteNoForm, trocarEmbarcacaoNoForm } from '@/lib/troca-de-cliente';
+import { motivosDaTrocaDeEmbarcacao, type UnidadeResumo } from '@/lib/troca-de-embarcacao';
+import { useServiceOrderSurvey } from '@/hooks/use-service-survey';
 import { EntityCombobox } from '@/components/EntityCombobox';
 import { ServiceOrderPhotos } from '@/components/ServiceOrderPhotos';
 import { VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
@@ -60,6 +61,8 @@ interface GeneralSectionsProps {
   /** Por que o cliente não pode ser trocado (orçamento que reúne outros, do mesmo cliente);
       `true` só esconde o "Trocar" enquanto isso é conferido. */
   semTrocaDeCliente?: string | true;
+  /** Por que a embarcação/veículo não pode ser trocada (OS concluída, agrupamento). */
+  semTrocaDeEmbarcacao?: string | true;
 }
 
 export function GeneralSections(props: GeneralSectionsProps) {
@@ -69,8 +72,12 @@ export function GeneralSections(props: GeneralSectionsProps) {
     selectedTechnicians, setSelectedTechnicians,
     setQuickMarinaOpen, setQuickMarinaName,
     isOptimizing, optimizeText, onAnalisarDescricao, analisandoDescricao, semTrocaDeCliente,
+    semTrocaDeEmbarcacao,
   } = props;
   const { t } = useI18n();
+  // Levantamento da OS: trocar a unidade o deixa na antiga. Erro na consulta = "não deu para
+  // conferir" (pede confirmação), nunca "não tem".
+  const levantamento = useServiceOrderSurvey(orderData?.id);
   // Trocou de um cliente para outro nesta tela: até escolher a embarcação nova, a OS salva não
   // grava (o salvamento automático exige embarcação) — o aviso abaixo do campo diz isso.
   const [clienteTrocado, setClienteTrocado] = useState(false);
@@ -86,6 +93,22 @@ export function GeneralSections(props: GeneralSectionsProps) {
   });
   const temContatos = !!vesselContacts && vesselContacts.length > 0;
   const faltaEmbarcacao = clienteTrocado && !!form.client_id && !form.vessel_id;
+  const documento: 'OS' | 'orçamento' = isQuoteStatus(form.status) ? 'orçamento' : 'OS';
+  const motivosDaTrocaDeUnidade = (novo: UnidadeResumo | null) => motivosDaTrocaDeEmbarcacao({
+    salva: !!orderData?.id,
+    documento,
+    quoteStatus: orderData?.quote_status,
+    convertidaEmOS: !!orderData?.converted_to_os_at,
+    confirmacaoDoAgendamentoPedida: !!orderData?.client_confirmation_requested_at,
+    assinadaPeloCliente: !!orderData?.signed_at && !orderData?.requires_resignature,
+    checkInFeito: !!orderData?.check_in_at,
+    temLevantamento: levantamento.isError ? null : !!levantamento.data,
+    // Mesmo critério da troca (trocarEmbarcacaoNoForm): o id preenchido é o que sai, esteja o
+    // contato na lista de ativos ou não (desativado, lista carregando ou com erro).
+    contatoSolicitante: form.requested_by_contact_id
+      ? (contatoEscolhido?.full_name || form.requested_by_name || '')
+      : null,
+  }, embarcacao, novo);
 
   return (
     <>
@@ -153,50 +176,50 @@ export function GeneralSections(props: GeneralSectionsProps) {
             semTroca={semTrocaDeCliente}
             ordemSalva={!!orderData?.id}
             perdas={perdasDaTroca}
-            documento={isQuoteStatus(form.status) ? 'orçamento' : 'OS'}
+            documento={documento}
           />
 
           <div className="flex min-w-0 flex-col gap-6">
-            <Campo rotulo={`${t.serviceOrders.vessel} *`} htmlFor="os-embarcacao">
-              {/* Seletor e aviso num bloco só: a região viva vazia não pode ganhar o gap do Campo. */}
-              <div>
-              <VesselSelect
-                id="os-embarcacao"
-                ariaRequired
-                ariaDescribedBy={faltaEmbarcacao ? 'os-aviso-embarcacao' : undefined}
-                value={form.vessel_id}
-                clientId={form.client_id}
-                vessels={clientVessels}
-                disabled={!form.client_id || isLocked}
-                onChange={(vesselId) => {
-                  const antigo = allVessels?.find((v) => v.id === form.vessel_id);
-                  const novo = allVessels?.find((v) => v.id === vesselId);
-                  // Mesma embarcação de novo devolve o mesmo form: nada muda (antes apagava o
-                  // solicitante em silêncio). Marina e local sugeridos acompanham; escolhidos à mão, ficam.
-                  setForm((f) => trocarEmbarcacaoNoForm(f, vesselId, antigo, novo));
-                }}
-                onVesselCreated={(vessel) => {
-                  // Mesma regra da escolha: o contato do barco anterior sai; marina e local sugeridos acompanham.
-                  const antigo = allVessels?.find((v) => v.id === form.vessel_id);
-                  setForm((f) => trocarEmbarcacaoNoForm(f, vessel.id, antigo, {
-                    marina_id: vessel.marina_id ?? null, access_notes: vessel.access_notes ?? null,
-                  }));
-                }}
-              />
-              {/* Sempre montado: o aviso entra como anúncio quando a troca fica pendente. */}
-              <div role="status" aria-live="polite">
-                {faltaEmbarcacao && (
-                  <p id="os-aviso-embarcacao" className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
-                    {nomeDoCliente ? `Escolha a embarcação de ${nomeDoCliente}.` : 'Escolha a embarcação do cliente novo.'}
-                    {/* O salvamento automático não grava a OS sem embarcação (peças e serviços, sim:
-                        esses gravam na hora). O que fica parado é a troca. */}
-                    {orderData?.id && ' Até lá, a troca do cliente não fica salva.'}
-                  </p>
-                )}
-              </div>
-              </div>
-              {embarcacao && <FichaDaEmbarcacao embarcacao={embarcacao} />}
-            </Campo>
+            <EmbarcacaoDaOrdem
+              rotulo={`${t.serviceOrders.vessel} *`}
+              value={form.vessel_id}
+              clientId={form.client_id}
+              vessels={clientVessels ?? []}
+              embarcacao={embarcacao}
+              disabled={!form.client_id || isLocked}
+              // Enquanto o levantamento carrega, o "Trocar" espera (sem ele não dá para saber o que sai).
+              semTroca={semTrocaDeEmbarcacao ?? (orderData?.id && levantamento.isLoading ? true : undefined)}
+              motivosDaTroca={motivosDaTrocaDeUnidade}
+              documento={documento}
+              ariaDescribedBy={faltaEmbarcacao ? 'os-aviso-embarcacao' : undefined}
+              onChange={(vesselId) => {
+                const antigo = allVessels?.find((v) => v.id === form.vessel_id);
+                const novo = allVessels?.find((v) => v.id === vesselId);
+                // Mesma embarcação de novo devolve o mesmo form: nada muda (antes apagava o
+                // solicitante em silêncio). Marina e local sugeridos acompanham; escolhidos à mão, ficam.
+                setForm((f) => trocarEmbarcacaoNoForm(f, vesselId, antigo, novo));
+              }}
+              onVesselCreated={(vessel) => {
+                // Mesma regra da escolha: o contato do barco anterior sai; marina e local sugeridos acompanham.
+                const antigo = allVessels?.find((v) => v.id === form.vessel_id);
+                setForm((f) => trocarEmbarcacaoNoForm(f, vessel.id, antigo, {
+                  marina_id: vessel.marina_id ?? null, access_notes: vessel.access_notes ?? null,
+                }));
+              }}
+              aviso={
+                // Sempre montado: o aviso entra como anúncio quando a troca fica pendente.
+                <div role="status" aria-live="polite">
+                  {faltaEmbarcacao && (
+                    <p id="os-aviso-embarcacao" className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
+                      {nomeDoCliente ? `Escolha a embarcação de ${nomeDoCliente}.` : 'Escolha a embarcação do cliente novo.'}
+                      {/* O salvamento automático não grava a OS sem embarcação (peças e serviços, sim:
+                          esses gravam na hora). O que fica parado é a troca. */}
+                      {orderData?.id && ' Até lá, a troca do cliente não fica salva.'}
+                    </p>
+                  )}
+                </div>
+              }
+            />
 
             <Campo
               rotulo={t.serviceOrders.requestedBy}

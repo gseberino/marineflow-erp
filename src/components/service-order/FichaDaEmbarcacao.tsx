@@ -20,12 +20,17 @@ export function FichaDaEmbarcacao({ embarcacao: v }: { embarcacao: VesselDaLista
   const marina = v.marinas?.name || v.current_marina_name_snapshot;
   // "Onde fica", não "Marina": não confundir com o campo Marina da OS, que pode ser outro lugar.
   const onde = [marina, v.current_dock_position ? `vaga ${v.current_dock_position}` : null].filter(Boolean).join(' · ');
-  const vazio = !v.asset_type && !modelo && !v.year && !v.length_feet && !v.hull_id_or_registration && !motor && !onde;
+  const vazio = !modelo && !v.year && !v.length_feet && !v.hull_id_or_registration && !motor && !onde;
 
   return (
     <div role="group" aria-label="Dados da embarcação" className="space-y-2.5 rounded-lg border bg-muted/30 p-3 text-sm">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Dados da embarcação</p>
+      {/* O nome em destaque, como na ficha do cliente: escolhida a unidade, a lista some e é aqui
+          que se confere "é esta?". O tipo vai embaixo, no lugar de "Pessoa física". */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="break-words font-semibold leading-tight">{v.name}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{v.asset_type || 'Embarcação ou veículo'}</p>
+        </div>
         <Button
           type="button" variant="outline" size="sm" className="h-11 shrink-0 gap-1 px-2.5 sm:h-8"
           onClick={() => setEditando(true)} aria-label="Editar cadastro da embarcação"
@@ -33,15 +38,14 @@ export function FichaDaEmbarcacao({ embarcacao: v }: { embarcacao: VesselDaLista
           <Pencil className="h-3.5 w-3.5" aria-hidden /> Editar
         </Button>
       </div>
-      {/* O nome não se repete: já está no campo logo acima. Só aparece o que está preenchido —
-          nenhum processo exige estes dados, e uma coluna de "Não informado" seria só ruído. */}
+      {/* Só aparece o que está preenchido — nenhum processo exige estes dados, e uma coluna de
+          "Não informado" seria só ruído. O tipo já está no cabeçalho. */}
       {vazio ? (
         <p className="text-xs text-muted-foreground">Cadastro sem detalhes (modelo, ano, motores). Use “Editar” para completar.</p>
       ) : (
         // Duas colunas já no celular: os valores daqui são curtos ("2019", "40 pés"), e numa
         // coluna só a ficha ficava com meia tela de altura.
         <DadosDaFicha className="grid-cols-2">
-          {v.asset_type && <Dado rotulo="Tipo">{v.asset_type}</Dado>}
           {modelo && <Dado rotulo="Fabricante e modelo">{modelo}</Dado>}
           {v.year ? <Dado rotulo="Ano">{String(v.year)}</Dado> : null}
           {v.length_feet ? <Dado rotulo="Comprimento">{`${v.length_feet} pés`}</Dado> : null}

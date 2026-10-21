@@ -30,14 +30,28 @@ const valorDe = (ficha: HTMLElement, rotulo: string) =>
   within(ficha).getByText(rotulo, { selector: 'dt' }).nextElementSibling as HTMLElement;
 
 describe('FichaDaEmbarcacao', () => {
-  it('cada dado com o rótulo em cima: tipo, modelo, ano, tamanho, inscrição, motores e onde fica', () => {
+  it('nome em destaque e o tipo embaixo dele, como na ficha do cliente', () => {
+    render(<FichaDaEmbarcacao embarcacao={embarcacao({ asset_type: 'Motorhome', name: 'Iveco Daily' })} />);
+    const ficha = screen.getByLabelText('Dados da embarcação');
+    expect(within(ficha).getByText('Iveco Daily')).toHaveClass('font-semibold');
+    expect(within(ficha).getByText('Motorhome')).toBeInTheDocument();
+    // O tipo está no cabeçalho: não se repete como dado, e não conta como "detalhe" do cadastro.
+    expect(within(ficha).queryByText('Tipo', { selector: 'dt' })).not.toBeInTheDocument();
+    expect(within(ficha).getByText(/Cadastro sem detalhes/)).toBeInTheDocument();
+  });
+
+  it('sem tipo cadastrado, o cabeçalho diz "Embarcação ou veículo"', () => {
+    render(<FichaDaEmbarcacao embarcacao={embarcacao({})} />);
+    expect(within(screen.getByLabelText('Dados da embarcação')).getByText('Embarcação ou veículo')).toBeInTheDocument();
+  });
+
+  it('cada dado com o rótulo em cima: modelo, ano, tamanho, inscrição, motores e onde fica', () => {
     render(<FichaDaEmbarcacao embarcacao={embarcacao({
       asset_type: 'Lancha', manufacturer: 'Schaefer', model: '400', year: 2019, length_feet: 40,
       hull_id_or_registration: '441-123', engine_quantity: 2, engine_brand: 'Volvo', engine_model: 'D6',
       marinas: { name: 'Marina Itajaí' }, current_dock_position: 'B12',
     })} />);
     const ficha = screen.getByLabelText('Dados da embarcação');
-    expect(valorDe(ficha, 'Tipo')).toHaveTextContent('Lancha');
     expect(valorDe(ficha, 'Fabricante e modelo')).toHaveTextContent('Schaefer 400');
     expect(valorDe(ficha, 'Ano')).toHaveTextContent('2019');
     expect(valorDe(ficha, 'Comprimento')).toHaveTextContent('40 pés');

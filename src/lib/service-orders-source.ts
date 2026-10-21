@@ -141,3 +141,36 @@ export function payloadParaCargo<T extends Record<string, unknown>>(
   }
   return limpo as Partial<T>;
 }
+
+/** Quem é "o escritório" — uma definição só, para a tela e para as regras de troca. */
+export const CARGOS_DO_ESCRITORIO = ['admin', 'financial', 'seller'] as const;
+
+export function ehDoEscritorio(cargo: string | null | undefined): boolean {
+  return (CARGOS_DO_ESCRITORIO as readonly string[]).includes(cargo ?? '');
+}
+
+/**
+ * O cargo pode trocar o cliente de uma OS que já existe? Só o escritório (decisão do dono,
+ * 21/10/2026: técnico não troca). Cargo ainda não carregado também NÃO — a regra falha fechada:
+ * esconder o "Trocar" por um instante é melhor que deixá-lo aberto ao técnico. Criar a OS e
+ * escolher o primeiro cliente, pode qualquer um.
+ */
+export function podeTrocarClienteDaOS(cargo: string | null | undefined): boolean {
+  return ehDoEscritorio(cargo);
+}
+
+/**
+ * O payload de ATUALIZAÇÃO de uma OS que já existe: o de payloadParaCargo e, para quem não troca
+ * o cliente, sem client_id. É a defesa do lado do app; quem garante é o gatilho no banco
+ * (os_tecnico_nao_troca_cliente).
+ */
+export function payloadDeAtualizacaoParaCargo<T extends Record<string, unknown>>(
+  cargo: string | null | undefined,
+  payload: T,
+  viewDisponivel: boolean = VIEW_TECNICO_DISPONIVEL,
+): Partial<T> {
+  const porCargo = payloadParaCargo(cargo, payload, viewDisponivel);
+  if (podeTrocarClienteDaOS(cargo)) return porCargo;
+  const { client_id: _naoTroca, ...semCliente } = porCargo as Record<string, unknown>;
+  return semCliente as Partial<T>;
+}

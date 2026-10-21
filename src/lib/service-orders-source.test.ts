@@ -23,7 +23,9 @@ import {
   VIEW_TECNICO_DISPONIVEL,
   fonteDeLeituraDaOS,
   leDaViewDoTecnico,
+  payloadDeAtualizacaoParaCargo,
   payloadParaCargo,
+  podeTrocarClienteDaOS,
 } from './service-orders-source';
 
 const PASTA_MIGRATIONS = join(process.cwd(), 'supabase', 'migrations');
@@ -76,6 +78,23 @@ describe('fonteDeLeituraDaOS — quem lê de onde', () => {
     expect(fonteDeLeituraDaOS('technician')).toBe(
       VIEW_TECNICO_DISPONIVEL ? OS_VIEW_TECNICO : OS_TABELA,
     );
+  });
+});
+
+describe('técnico não troca o cliente de uma OS (decisão do dono, 21/10/2026)', () => {
+  it('só o escritório troca; técnico e cargo ainda não carregado, não (falha fechada)', () => {
+    for (const cargo of ['admin', 'financial', 'seller']) {
+      expect(podeTrocarClienteDaOS(cargo), `cargo ${cargo}`).toBe(true);
+    }
+    for (const cargo of ['technician', 'external_seller', 'other', undefined, null, '']) {
+      expect(podeTrocarClienteDaOS(cargo), `cargo ${cargo}`).toBe(false);
+    }
+  });
+
+  it('na atualização, o payload do técnico sai sem client_id (e sem as colunas de valor)', () => {
+    const p = { client_id: 'c2', problem_description: 'x', grand_total: 100 };
+    expect(payloadDeAtualizacaoParaCargo('technician', p, true)).toEqual({ problem_description: 'x' });
+    expect(payloadDeAtualizacaoParaCargo('admin', p, true)).toEqual(p);
   });
 });
 

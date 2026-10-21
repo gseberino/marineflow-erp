@@ -44,7 +44,7 @@ interface Props {
    sublinhado (o dourado do tema dá 2,4:1, abaixo do mínimo); 44 px de toque onde o ponteiro é
    grosso, sem engordar a linha (margem negativa); relative/z-10 para o alvo ficar por cima da
    ficha logo abaixo. */
-const BOTAO_DO_ROTULO =
+export const BOTAO_DO_ROTULO =
   'relative z-10 -my-3 h-11 px-1 text-foreground underline underline-offset-2 hover:text-foreground ' +
   '[@media(pointer:fine)]:my-0 [@media(pointer:fine)]:h-auto';
 
