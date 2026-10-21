@@ -28,6 +28,7 @@ import {
   validarAgendamento,
 } from "./agendamento.ts";
 import { validarMensagem } from "./resposta.ts";
+import { agrupadoEm } from "./service-orders.ts";
 // Frente financeiro (07/10/2026): o lembrete enviado entra no histórico da cobrança, como na tela.
 import { registrarEnvioDaCobranca } from "./cobrancas.ts";
 
@@ -314,7 +315,21 @@ export function mascararTelefone(telefone: unknown): string {
 }
 
 const CAMPOS_DA_ORDEM_PARA_ENVIO =
-  "id, service_order_number, share_token, client_id, status, grand_total, quote_status, created_at, quote_validity_days, quote_validity_date";
+  "id, service_order_number, share_token, client_id, status, grand_total, quote_status, created_at, quote_validity_days, quote_validity_date, cancellation_reason";
+
+/** Ordem cancelada: se ela é a origem de um agrupamento, a frase aponta o orçamento que vale agora. */
+export function frasesDaOrdemCancelada(so: { service_order_number?: string; status?: unknown; cancellation_reason?: unknown }) {
+  const agrupado = agrupadoEm(so);
+  return agrupado
+    ? {
+      aviso: `⚠️ ${so.service_order_number} foi agrupado em ${agrupado} — o envio será recusado; mande o ${agrupado}.`,
+      erro: `${so.service_order_number} foi agrupado em ${agrupado} e não vale mais sozinho: mande o ${agrupado} ao cliente.`,
+    }
+    : {
+      aviso: "⚠️ A ordem está CANCELADA — o envio será recusado.",
+      erro: `A ordem ${so.service_order_number} está CANCELADA: não se manda ao cliente. Se ela voltou a valer, mude o status dela na tela antes de mandar.`,
+    };
+}
 
 /**
  * No formato 'link' a mensagem personalizada SUBSTITUI o texto padrão. Se ela não traz o link,
@@ -463,7 +478,7 @@ export async function resumirEnvioAoCliente(
       linhas.push("(a mensagem não traz o link: ele vai no fim dela)");
     }
   }
-  if (so.status === "cancelled") linhas.push("⚠️ A ordem está CANCELADA — o envio será recusado.");
+  if (so.status === "cancelled") linhas.push(frasesDaOrdemCancelada(so).aviso);
   // A validade que o PDF vai imprimir, pela MESMA conta do documento e do aviso de vencimento
   // (vencimentoDoOrcamento). Não bloqueia: reenviar um orçamento vencido para reabrir a conversa é
   // legítimo — mas o dono tem de saber, antes do "sim", que o cliente vai ler uma data passada.
@@ -829,7 +844,7 @@ export const whatsappTools: ToolDef[] = [
       if (so.status === "cancelled") {
         // Sem sugerir a tool de reabrir OS: ela reabre OS CONCLUÍDA/FATURADA e, no caminho,
         // cancela pagamentos e zera recebíveis — não é o caminho de uma ordem cancelada.
-        return { error: `A ordem ${so.service_order_number} está CANCELADA: não se manda ao cliente. Se ela voltou a valer, mude o status dela na tela antes de mandar.` };
+        return { error: frasesDaOrdemCancelada(so).erro };
       }
       // O número já traz o prefixo ("OS-00060", "ORÇ-00112"): vai como vem, sem "OS " na frente.
       if (!so.share_token) return { error: `A ${so.service_order_number} não possui link público ainda. Abra a OS no app, clique em "Compartilhar" para gerar o link, e tente novamente.` };

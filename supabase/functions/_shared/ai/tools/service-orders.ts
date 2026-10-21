@@ -228,15 +228,18 @@ const ehStatusDaOS = (s: string) => (STATUS_OS as readonly string[]).includes(s)
 const SITUACOES = new Set(["draft", "sent", "awaiting_approval", "approved", "awaiting_deposit", "rejected"]);
 const SITUACAO_PT: Record<string, string> = {
   rascunho: "draft", "em rascunho": "draft", "não enviado": "draft", "nao enviado": "draft",
+  "em elaboração": "draft", "em elaboracao": "draft",
   enviado: "sent", enviada: "sent",
   "aguardando aprovação": "awaiting_approval", "aguardando aprovacao": "awaiting_approval",
   aprovado: "approved", aprovada: "approved",
   "aguardando sinal": "awaiting_deposit",
   recusado: "rejected", recusada: "rejected", rejeitado: "rejected", rejeitada: "rejected",
+  reprovado: "rejected", reprovada: "rejected", "desistência": "rejected", desistencia: "rejected",
 };
+// Os mesmos rótulos da tela (src/lib/constants.ts, quoteStatusConfig): o dono lê "Reprovado" no app.
 const SITUACAO_LABELS: Record<string, string> = {
-  draft: "Rascunho (não enviado)", sent: "Enviado", awaiting_approval: "Aguardando aprovação",
-  approved: "Aprovado", awaiting_deposit: "Aguardando sinal", rejected: "Recusado",
+  draft: "Em elaboração (não enviado)", sent: "Enviado", awaiting_approval: "Aguardando aprovação",
+  approved: "Aprovado", awaiting_deposit: "Aguardando sinal", rejected: "Reprovado",
 };
 
 /** Origem de agrupamento (agrupar_orcamentos grava "Agrupado em ORÇ-00125 (reúne …)"): o número do agrupado. */

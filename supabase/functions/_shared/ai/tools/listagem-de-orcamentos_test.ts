@@ -54,7 +54,7 @@ Deno.test("execução: rascunho filtra a fase E a situação, pede a contagem ex
   assertEquals(r.total, 2);
   assertEquals(r.aviso, undefined);
   assertEquals(r.results[0].numero, "ORÇ-00106");
-  assertEquals(r.results[0].situacao, "Rascunho (não enviado)");
+  assertEquals(r.results[0].situacao, "Em elaboração (não enviado)");
 });
 
 Deno.test("execução: lista cortada avisa o total real e marca os recusados", async () => {
@@ -63,5 +63,5 @@ Deno.test("execução: lista cortada avisa o total real e marca os recusados", a
   assertEquals(r.total, 51);
   assertEquals(r.mostrando, 1);
   assertEquals(r.aviso, "Lista cortada: mostrando 1 de 51. O total real é 51.");
-  assertEquals(r.results[0].situacao, "Recusado");
+  assertEquals(r.results[0].situacao, "Reprovado");
 });
