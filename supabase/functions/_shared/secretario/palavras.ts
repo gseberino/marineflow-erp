@@ -89,6 +89,47 @@ export function pareceSoAgradecimento(texto: string | null | undefined): boolean
   return ENCERRA_AGINDO.test(palavras.join(" "));
 }
 
+/** Sem acento, minúsculo, só letras e números (SEM cortar o tamanho, ao contrário do paraBusca). */
+function semAcentoInteiro(t: string | null | undefined): string {
+  return String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** O nome do contato diz que ele vende ("Ketelyn Consultora empresarial", "Jaison Consultor de Vendas Zendel"). */
+const VENDEDOR_NO_NOME =
+  /\b(?:consultor|consultora|consultores|consultoras|vendedor|vendedora|vendas|representante|representantes|representacoes|corretor|corretora|corretagem|consorcio|consorcios|seguros|seguradora|telecom|operadora|televendas|telemarketing|promotor|promotora)\b/;
+
+/**
+ * O texto se apresenta vendendo: "sou a Allana, Consultora Empresarial da Vivo", "identifiquei que o seu contrato com a
+ * TIM", "ofertas para você pagar menos", plano empresarial, portabilidade, consórcio, crédito pré-aprovado. De
+ * propósito NÃO entram palavras soltas que um cliente usa ("proposta", "plano de manutenção", "comercial", "gerente",
+ * "sem compromisso"): só a apresentação e a oferta.
+ */
+const VENDEDOR_NO_TEXTO = new RegExp([
+  // a apresentação: "sou (a/o) X, consultora…", "me chamo X e sou representante…"
+  String.raw`\b(?:sou|me chamo|meu nome e|aqui e|aqui quem fala e|falo em nome)\b[a-z0-9 ]{0,60}?\b(?:consultor|consultora|vendedor|vendedora|representante|corretor|corretora|promotor|promotora|executivo de (?:contas|vendas|negocios)|executiva de (?:contas|vendas|negocios)|gerente de (?:contas|relacionamento|negocios))\b`,
+  String.raw`\bconsultor[a]? (?:empresarial|comercial|de vendas|de negocios|de credito|de seguros|de beneficios|de investimentos|financeir[oa])\b`,
+  String.raw`\b(?:time|setor|equipe|departamento) comercial d[aeo]\b`,
+  // a oferta: operadora, plano, consórcio, crédito
+  String.raw`\b(?:seu|o seu|teu|sua) (?:contrato|plano|linha|fatura) (?:com|da|de|na|no) (?:a |o )?(?:tim|vivo|claro|oi|nextel|algar|operadora)\b`,
+  String.raw`\b(?:portabilidade|consorcio|consorcios|carta de credito|credito pre ?aprovado|maquininha|reajuste automatico|plano (?:empresarial|corporativo|pos pago|de telefonia|de internet|de saude|odontologico))\b`,
+  String.raw`\bofertas? (?:para (?:voce|vc|o senhor|a senhora) )?(?:pagar menos|exclusivas?|especia(?:l|is)|imperdive(?:l|is))\b`,
+  String.raw`\b(?:para|pra) (?:voce|vc|o senhor|a senhora) pagar menos\b`,
+].join("|"));
+
+/**
+ * (20/10/2026) Quem escreve se apresenta como vendedor, consultor, representante, corretor ou oferecendo plano de
+ * operadora, consórcio, crédito… — pelo NOME do contato e/ou pelo TEXTO. Falso positivo medido: em 20/10 "Ketelyn
+ * Consultora empresarial … identifiquei que o seu contrato com a Tim…" acordaria o dono como cliente com pressa (e em
+ * 02/10 "Allana, Consultora Empresarial da Vivo"). Quem chama aplica SÓ a contato sem cadastro de cliente (lead ou
+ * "Cliente Final"): cliente cadastrado nunca é vendedor aqui. Usada pelo "me acorde se" (_shared/uma-voz/acorde.ts):
+ * vendedor não acorda — fica na lista.
+ */
+export function pareceVendedor(nome: string | null | undefined, textos: Array<string | null | undefined>): boolean {
+  if (VENDEDOR_NO_NOME.test(semAcentoInteiro(nome))) return true;
+  return textos.some((t) => VENDEDOR_NO_TEXTO.test(semAcentoInteiro(String(t ?? "").replace(/^\s*🎤\s*/u, ""))));
+}
+
 /**
  * Cadastro genérico ("Cliente Final", "Consumidor Final") não é um assunto: no ensaio de 13/10 ele juntou num
  * item só o ORÇ-00103 (a lancha do Miguel), o caminhão da OS-00110 e três motorhomes — e um "B feito" valeria
