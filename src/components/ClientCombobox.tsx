@@ -5,6 +5,7 @@ import { ClientFormDialog } from '@/components/ClientFormDialog';
 import { Button } from '@/components/ui/button';
 import { ChevronsUpDown, Plus, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { filtrarClientes } from '@/lib/busca-cliente';
 import type { Client } from '@/hooks/use-clients';
 
 interface Props {
@@ -19,23 +20,9 @@ export function ClientCombobox({ value, onChange, clients, disabled }: Props) {
   const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
 
-  const filtered = useMemo(() => {
-    if (!clients) return [];
-    const active = clients.filter(c => c.active);
-    const trimmed = search.trim().toLowerCase();
-    // Padrão consistente: lista completa (cap 200) até 3 caracteres; depois filtra por nome/CPF/email/telefone
-    if (trimmed.length < 3) return active.slice(0, 200);
-    return active.filter(c => {
-      const haystack = [
-        c.name,
-        c.cpf_cnpj || '',
-        c.email || '',
-        c.phone || '',
-        c.whatsapp || '',
-      ].join(' ').toLowerCase();
-      return haystack.includes(trimmed);
-    }).slice(0, 200);
-  }, [clients, search]);
+  // Mesmo filtro da ficha do cliente na OS: lista (cap 200) até 3 caracteres, depois nome/CPF/
+  // e-mail/telefone, sem acento e também pelos dígitos.
+  const filtered = useMemo(() => filtrarClientes(clients, search), [clients, search]);
 
   const selectedClient = clients?.find(c => c.id === value);
 

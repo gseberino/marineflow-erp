@@ -82,6 +82,7 @@ import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/
 import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
 import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles } from 'lucide-react';
 import { decideAutosave } from '@/lib/autosave-guard';
+import { manterSeMexeu, mesclarReleitura, mesmoValor } from '@/lib/releitura-da-os';
 import { documentTypeFor, documentLabelFor, isQuoteStatus } from '@/lib/document-type';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AcoesDropboxDaOrdem } from '@/components/dropbox/PastaNoDropbox';
@@ -133,6 +134,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const roteiroVisivel = useRoteiroVisivel();
 
   const { data: clients } = useClients();
+  // Nome e telefone do cliente da OS vêm da LISTA de clientes, não do embed da OS: o "Editar
+  // cadastro" da ficha recarrega a lista, e recarregar a OS apagaria o que ainda não foi salvo
+  // no formulário (o efeito de orderData reescreve o form inteiro). O embed é a reserva
+  // enquanto a lista carrega.
+  const clienteDaOs = (clients?.find((c) => c.id === orderData?.client_id)
+    ?? (orderData?.clients as any) ?? null) as { name?: string | null; phone?: string | null; whatsapp?: string | null } | null;
   const { data: allVessels } = useVessels();
   const { data: marinas } = useMarinas();
   const { data: products } = useProducts();
@@ -206,9 +213,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const abrirPreviewLinkWhatsApp = () => {
     if (!orderData?.share_token) return;
     const url = `${window.location.origin}/view/${orderData.share_token}`;
-    const phoneRaw = (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || '';
+    const phoneRaw = clienteDaOs?.whatsapp || clienteDaOs?.phone || '';
     const phone = normalizePhoneE164(phoneRaw);
-    const clientName = (orderData?.clients as any)?.name || '';
+    const clientName = clienteDaOs?.name || '';
     const rotulo = isQuoteStatus(currentStatus) ? 'do Orçamento' : 'da Ordem de Serviço';
     const msg = `Olá${clientName ? ' ' + clientName : ''}, segue o link ${rotulo} ${orderData.service_order_number}: ${url}`;
     setWaEditPhone(phone);
@@ -246,8 +253,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       serviceOrderNumber: orderData.service_order_number,
       shareToken: orderData.share_token,
       clientId: (orderData?.clients as any)?.id || (orderData as any)?.client_id || null,
-      clientName: (orderData?.clients as any)?.name || null,
-      clientPhone: (orderData?.clients as any)?.whatsapp || (orderData?.clients as any)?.phone || null,
+      clientName: clienteDaOs?.name || null,
+      clientPhone: clienteDaOs?.whatsapp || clienteDaOs?.phone || null,
       // Mesmo critério do botão de imprimir: rascunho é orçamento, o resto é OS.
       // Antes havia duas opções, e a errada mandava ao cliente o documento que
       // aquela tela não era.
@@ -667,10 +674,22 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     handleGenerateCollections();
   }, [form.signed_at, orderId, handleGenerateCollections]);
 
+  // A releitura não reescreve o que está sendo digitado: o que a tela recebeu da leitura anterior
+  // é a base da mesclagem campo a campo (src/lib/releitura-da-os.ts). Outra OS = sem base.
+  const leituraAnteriorRef = useRef<{
+    id: string;
+    form: Record<string, any>;
+    tecnicos: string[] | null;
+    descServicos: number;
+    descPecas: number;
+    parcelas: number | null;
+  } | null>(null);
+
   useEffect(() => {
     if (orderData) {
       const d = orderData;
-      setForm({
+      const anterior = leituraAnteriorRef.current?.id === d.id ? leituraAnteriorRef.current : null;
+      const remoto: Record<string, any> = {
         status: d.status || 'draft',
         priority: d.priority || 'normal',
         service_type: d.service_type || 'repair',
@@ -717,13 +736,34 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         card_installments: (d as any).card_installments || 1,
         card_fee_passthrough_enabled: (d as any).card_fee_passthrough_enabled || false,
         signed_at: d.signed_at || '',
-      });
-      if ((d as any).card_installments) setSelectedInstallments((d as any).card_installments);
-      if (d.service_order_technicians) {
-        setSelectedTechnicians(d.service_order_technicians.map((t: any) => t.user_id));
+      };
+      setForm((local) => mesclarReleitura(anterior?.form ?? null, local, remoto));
+
+      const parcelas: number | null = (d as any).card_installments || null;
+      if (parcelas) {
+        setSelectedInstallments((local) => manterSeMexeu(anterior?.parcelas ?? undefined, local, parcelas, anterior?.parcelas != null));
       }
-      setDiscountServicesPct(Number(d.discount_services_pct) || 0);
-      setDiscountPartsPct(Number(d.discount_parts_pct) || 0);
+      const tecnicos: string[] | null = d.service_order_technicians
+        ? d.service_order_technicians.map((t: any) => t.user_id)
+        : null;
+      if (tecnicos) {
+        // A ordem dos marcados não importa: comparar como conjunto.
+        setSelectedTechnicians((local) =>
+          anterior?.tecnicos && !mesmoValor([...local].sort(), [...anterior.tecnicos].sort()) ? local : tecnicos);
+      }
+      const descServicos = Number(d.discount_services_pct) || 0;
+      const descPecas = Number(d.discount_parts_pct) || 0;
+      setDiscountServicesPct((local) => manterSeMexeu(anterior?.descServicos, local, descServicos, !!anterior));
+      setDiscountPartsPct((local) => manterSeMexeu(anterior?.descPecas, local, descPecas, !!anterior));
+
+      leituraAnteriorRef.current = {
+        id: d.id,
+        form: remoto,
+        tecnicos: tecnicos ?? anterior?.tecnicos ?? null,
+        descServicos,
+        descPecas,
+        parcelas: parcelas ?? anterior?.parcelas ?? null,
+      };
       // Open extra fields if any has content
       if (d.initial_findings || d.diagnosis || d.solution_applied || d.internal_notes || d.customer_visible_report || d.extra_notes) {
         setExtraFieldsOpen(true);
@@ -2140,8 +2180,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
                 contraparte={orderData?.client_id ? {
                   tipo: 'client',
                   id: orderData.client_id,
-                  label: (orderData as any)?.clients?.name ?? null,
-                  phone: (orderData as any)?.clients?.whatsapp || (orderData as any)?.clients?.phone || null,
+                  label: clienteDaOs?.name ?? null,
+                  phone: clienteDaOs?.whatsapp || clienteDaOs?.phone || null,
                 } : null}
                 sugestaoObjetivo={`saber se o cliente aprova o orçamento ${orderData?.service_order_number || ''}`.trim()}
                 sugestaoPrazo={orderData?.quote_validity_date ?? null}

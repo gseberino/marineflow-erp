@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { ClientCombobox } from '@/components/ClientCombobox';
+import { ClienteDaOrdem } from './ClienteDaOrdem';
 import { VesselSelect } from '@/components/VesselSelect';
 import { EntityCombobox } from '@/components/EntityCombobox';
 import { ServiceOrderPhotos } from '@/components/ServiceOrderPhotos';
@@ -107,9 +107,11 @@ export function GeneralSections(props: GeneralSectionsProps) {
       <section className="rounded-xl border bg-card p-5 shadow-sm space-y-4">
         <h2 className="font-semibold text-sm">{t.serviceOrders.clientAndVessel}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Cliente à esquerda (busca + ficha); embarcação, marina e solicitante empilhados à
+              direita — a ficha é alta, e lado a lado as duas colunas fecham sem buraco. */}
           <div>
             <Label>{t.serviceOrders.client} *</Label>
-            <ClientCombobox
+            <ClienteDaOrdem
               value={form.client_id}
               onChange={(clientId) => {
                 set('client_id', clientId);
@@ -121,95 +123,97 @@ export function GeneralSections(props: GeneralSectionsProps) {
               disabled={isLocked}
             />
           </div>
-          <div>
-            <Label>{t.serviceOrders.vessel} *</Label>
-            <VesselSelect
-              value={form.vessel_id}
-              clientId={form.client_id}
-              vessels={clientVessels}
-              disabled={!form.client_id || isLocked}
-              onChange={(vesselId) => {
-                set('vessel_id', vesselId);
-                set('requested_by_contact_id', '');
-                const vessel = allVessels?.find(v => v.id === vesselId);
-                if (vessel?.marina_id) set('marina_id', vessel.marina_id);
-                // O local e acesso padrão do veículo vira sugestão; o que já foi
-                // escrito nesta OS não é sobrescrito.
-                if (vessel?.access_notes) {
-                  setForm((f) => (f.site_access ? f : { ...f, site_access: vessel.access_notes }));
-                }
-              }}
-              onVesselCreated={(vessel) => {
-                set('vessel_id', vessel.id);
-                if (vessel.marina_id) set('marina_id', vessel.marina_id);
-              }}
-            />
-          </div>
-          <div>
-            <Label>{t.serviceOrders.marina}</Label>
-            <EntityCombobox
-              value={form.marina_id}
-              onChange={(v) => set('marina_id', v)}
-              options={(marinas || []).filter((m) => m.active).map((m) => ({
-                value: m.id,
-                label: m.name,
-                description: m.city || undefined,
-              }))}
-              placeholder="—"
-              onCreate={(typed) => {
-                setQuickMarinaName(typed);
-                setQuickMarinaOpen(true);
-              }}
-              createLabel="+ Cadastrar nova marina"
-            />
-          </div>
-          <div>
-            <Label>{t.serviceOrders.requestedBy}</Label>
-            {vesselContacts && vesselContacts.length > 0 ? (
-              <Select
-                value={form.requested_by_contact_id || 'none'}
-                onValueChange={(v) => {
-                  const contact = vesselContacts.find(c => c.id === v);
-                  setForm(f => ({
-                    ...f,
-                    requested_by_contact_id: v === 'none' ? '' : v,
-                    requested_by_name: contact?.full_name || '',
-                  }));
+          <div className="space-y-4">
+            <div>
+              <Label>{t.serviceOrders.vessel} *</Label>
+              <VesselSelect
+                value={form.vessel_id}
+                clientId={form.client_id}
+                vessels={clientVessels}
+                disabled={!form.client_id || isLocked}
+                onChange={(vesselId) => {
+                  set('vessel_id', vesselId);
+                  set('requested_by_contact_id', '');
+                  const vessel = allVessels?.find(v => v.id === vesselId);
+                  if (vessel?.marina_id) set('marina_id', vessel.marina_id);
+                  // O local e acesso padrão do veículo vira sugestão; o que já foi
+                  // escrito nesta OS não é sobrescrito.
+                  if (vessel?.access_notes) {
+                    setForm((f) => (f.site_access ? f : { ...f, site_access: vessel.access_notes }));
+                  }
                 }}
-                disabled={isLocked}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecionar contato" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">—</SelectItem>
-                  {vesselContacts.map(c => (
-                    <SelectItem key={c.id} value={c.id}>
-                      <span className="flex items-center gap-1">
-                        {c.full_name}
-                        <span className="text-xs text-muted-foreground">
-                          ({VESSEL_CONTACT_ROLES.find(r => r.value === c.role)?.label || c.role})
-                        </span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <div>
-                <Input
-                  value={form.requested_by_name}
-                  onChange={e => set('requested_by_name', e.target.value)}
-                  placeholder="Nome do solicitante"
+                onVesselCreated={(vessel) => {
+                  set('vessel_id', vessel.id);
+                  if (vessel.marina_id) set('marina_id', vessel.marina_id);
+                }}
+              />
+            </div>
+            <div>
+              <Label>{t.serviceOrders.marina}</Label>
+              <EntityCombobox
+                value={form.marina_id}
+                onChange={(v) => set('marina_id', v)}
+                options={(marinas || []).filter((m) => m.active).map((m) => ({
+                  value: m.id,
+                  label: m.name,
+                  description: m.city || undefined,
+                }))}
+                placeholder="—"
+                onCreate={(typed) => {
+                  setQuickMarinaName(typed);
+                  setQuickMarinaOpen(true);
+                }}
+                createLabel="+ Cadastrar nova marina"
+              />
+            </div>
+            <div>
+              <Label>{t.serviceOrders.requestedBy}</Label>
+              {vesselContacts && vesselContacts.length > 0 ? (
+                <Select
+                  value={form.requested_by_contact_id || 'none'}
+                  onValueChange={(v) => {
+                    const contact = vesselContacts.find(c => c.id === v);
+                    setForm(f => ({
+                      ...f,
+                      requested_by_contact_id: v === 'none' ? '' : v,
+                      requested_by_name: contact?.full_name || '',
+                    }));
+                  }}
                   disabled={isLocked}
-                />
-                {form.vessel_id && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Cadastre contatos na embarcação para aparecerem aqui
-                  </p>
-                )}
-              </div>
-            )}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecionar contato" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">—</SelectItem>
+                    {vesselContacts.map(c => (
+                      <SelectItem key={c.id} value={c.id}>
+                        <span className="flex items-center gap-1">
+                          {c.full_name}
+                          <span className="text-xs text-muted-foreground">
+                            ({VESSEL_CONTACT_ROLES.find(r => r.value === c.role)?.label || c.role})
+                          </span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <div>
+                  <Input
+                    value={form.requested_by_name}
+                    onChange={e => set('requested_by_name', e.target.value)}
+                    placeholder="Nome do solicitante"
+                    disabled={isLocked}
+                  />
+                  {form.vessel_id && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Cadastre contatos na embarcação para aparecerem aqui
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Onde o serviço acontece: motorhome muda de lugar a cada serviço, barco
