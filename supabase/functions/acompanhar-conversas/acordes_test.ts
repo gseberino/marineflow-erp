@@ -117,7 +117,7 @@ Deno.test("desistência 14:15 com orçamento de R$ 5 mil+: registra na hora, com
   assert(des, "registrou a desistência");
   assertEquals([des.destino, des.novo_fato], ["acorde", true]);
   assertStringIncludes(des.texto, "*Miguel disse que fechou com outra empresa ou desistiu.*");
-  assert(!des.texto.includes("*sim*"), "desistência sem cartão");
+  assert(!des.texto.includes("*sim"), "desistência sem cartão");
 });
 
 Deno.test("fica de fora: equipe, fornecedor, respondido e quem escreveu ontem; erro na lista não derruba", async () => {
@@ -142,13 +142,13 @@ Deno.test("cartão: depois das 09:30, com o dono livre (só LÊ a conversa abert
   }, { esperando: ESPERANDO_MIGUEL });
   await vigiarAcordes(b.admin, { agora: new Date(br("07", "09:45")), dono: DONO, portao: SOMBRA, settings: {}, internos: new Set(), conversaLigada: false });
   const p = b.rpcs.find((x) => x.nome === "aviso_registrar")!.args.p;
-  assertStringIncludes(p.texto, '*sim* = mando o PDF do ORÇ-00113 com: "Miguel, segue a proposta completa (ORÇ-00113). Se estiver de acordo, confirmo o início com o sinal." · *não* = deixo com você');
+  assertStringIncludes(p.texto, '*sim <seu PIN>* = mando o PDF do ORÇ-00113 com: "Miguel, segue a proposta completa (ORÇ-00113). Se estiver de acordo, confirmo o início com o sinal." · *não* = deixo com você');
   assertEquals(p.dados.cartao, { acao: "send_service_order_link", formato: "pdf", service_order_id: "orc-113", numero: "ORÇ-00113", legenda: "Miguel, segue a proposta completa (ORÇ-00113). Se estiver de acordo, confirmo o início com o sinal." });
   // antes das 09:30 (janela da manhã) o mesmo caso sai sem cartão e nem confere a conversa
   const cedo = banco({ whatsapp_messages: MENSAGENS, service_orders: ORCS, payment_condition_presets: [], avisos_do_dono: [] }, { esperando: ESPERANDO_MIGUEL });
   await vigiarAcordes(cedo.admin, { agora: new Date(br("07", "09:29")), dono: DONO, portao: { ...SOMBRA, regras: { ...REGRAS_PADRAO, acorde_espera_min: 10 } }, settings: {}, internos: new Set(), conversaLigada: false });
   const pc = cedo.rpcs.find((x) => x.nome === "aviso_registrar")!.args.p;
-  assert(!pc.texto.includes("*sim*"));
+  assert(!pc.texto.includes("*sim"));
   assert(!cedo.lidas.includes("ai_operator_sessions"));
 });
 

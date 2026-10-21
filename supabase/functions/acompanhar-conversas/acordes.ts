@@ -9,27 +9,159 @@
 // 'cliente', assunto contato:<telefone>) com o texto exato que sairia e, nos dados, o cartão pronto (a pendência
 // send_service_order_link em PDF que o *sim* executaria).
 //
-// EM SOMBRA NADA É ENVIADO, nada vira pendência, nada vai ao histórico do assistente. Com a voz única ligada de
-// verdade (P4.5) — hoje modoDoRegistro devolve 'sombra' mesmo com 'ligado' — quem recebe 'acordar' envia (com a
-// pendência como os lembretes de revisão: lembretes-de-revisao/index.ts) e, se o envio falhar, chama aviso_reabrir.
+// EM SOMBRA NADA É ENVIADO, nada vira pendência, nada vai ao histórico do assistente.
+// (20/10/2026, P4.5) Com a voz única LIGADA de verdade (a manhã nova e o fechamento ligado no ar), quem recebe
+// 'acordar' ENVIA ao dono (enviarAcordeDeCliente): com o cartão — orçamento para mandar, o dono livre e depois das
+// 09:30 — a mensagem é a própria confirmação (pendência send_service_order_link em PDF, alto risco: *sim <PIN>*,
+// criada como a dos lembretes de revisão: pendência + pending_confirm_action_id + par 🤖 no histórico +
+// enviarComRegistro); sem cartão, o texto vai pela fila (chave aviso:<id>) com o par 🤖 no histórico (o texto livre
+// "manda a proposta pro X" funciona). O que não acordou (guardado, repetido) não sai. Envio que falhou = reabre.
 // Nunca lança: erro = a contagem com o motivo, e a rodada do acompanhamento segue.
 
 import { ultimoDiaDaValidade } from "../_shared/pdf/documento.ts";
 import { diaBR } from "../_shared/pdf/datas.ts";
+import { brl } from "../_shared/secretario/base.ts";
 import { ehClienteGenerico } from "../_shared/secretario/palavras.ts";
 import { expectedDepositAmount } from "../_shared/banking/quote-deposit.ts";
-import { donoOcupadoParaPerguntar } from "../_shared/ai/whatsapp-channel.ts";
+import { donoOcupadoParaPerguntar, enviarComRegistro, resolveOrCreateWhatsAppSession } from "../_shared/ai/whatsapp-channel.ts";
 import { telefoneLegivel } from "../_shared/ai/tools/agendamento.ts";
+import { hashCurto } from "../_shared/whatsapp/idempotencia.ts";
 import {
-  avisoDoCliente, type ConversaDoAcorde, disparosDaConversa, mensagemNovaEFatoNovo, type OrcamentoAberto, textoDoAcordeDeCliente,
+  type AcordeDeCliente, avisoDoCliente, type ConversaDoAcorde, disparosDaConversa, mensagemNovaEFatoNovo, type OrcamentoAberto,
+  textoDoAcordeDeCliente,
 } from "../_shared/uma-voz/acorde.ts";
 import { acordeComCartao, podeAcordar } from "../_shared/uma-voz/janela.ts";
 import { horaDeAvisar } from "../_shared/ai/acompanhar.ts";
 import type { PortaoDaRodada } from "../_shared/uma-voz/registrar.ts";
-import { acordesDeHojeDoAssunto, registrarNoPortao } from "../_shared/uma-voz/registrar.ts";
+import { acordesDeHojeDoAssunto, enfileirarAcorde, reabrirNoPortao, registrarNoPortao } from "../_shared/uma-voz/registrar.ts";
+import type { Dono } from "../_shared/whatsapp/dono.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
+
+/** O título da pendência do cartão: o mesmo que o assistente dá a send_service_order_link (agent.ts, tituloDaAcao). */
+export const TITULO_DO_CARTAO = "Enviar orçamento/OS ao cliente (WhatsApp)";
+
+/**
+ * O payload da pendência do cartão (puro): o pedido de send_service_order_link em PDF com a legenda pronta, quem pediu
+ * (o dono, admin — a tool revalida o cargo de quem pediu) e o retrato do que o dono aprova (o telefone do cadastro em
+ * hash e o total: mudou até o *sim*, não envia). As mesmas chaves que o runAgentLoop grava (_solicitante, _retrato) e
+ * o mesmo retrato de retratoDoEnvio (_shared/ai/tools/whatsapp.ts — o teste compara os dois).
+ */
+export function payloadDoCartao(p: {
+  cartao: NonNullable<AcordeDeCliente["cartao"]>;
+  dono: Dono;
+  telefoneDoCadastro: string | null;
+  total: number;
+}): Record<string, unknown> {
+  return {
+    service_order_id: p.cartao.service_order_id,
+    formato: "pdf",
+    custom_message: p.cartao.legenda,
+    _solicitante: { user_id: p.dono.id, nome: null, cargo: "admin" },
+    _retrato: { telefone: hashCurto(String(p.telefoneDoCadastro ?? "").replace(/\D/g, "")), total: Number(p.total) || 0 },
+  };
+}
+
+/** O resumo da pendência do cartão (o painel e a reapresentação mostram): para quem, qual número, quanto e a legenda. */
+export function resumoDoCartao(p: { cliente: string | null; telefoneDoCadastro: string | null; numero: string; total: number; legenda: string }): string {
+  const d = String(p.telefoneDoCadastro ?? "").replace(/\D/g, "");
+  return [
+    `Cliente: *${p.cliente || "—"}*`,
+    d ? `WhatsApp: ${d.length >= 4 ? `••••${d.slice(-4)}` : "••••"} (do cadastro)` : "WhatsApp: ⚠️ cliente sem WhatsApp/telefone no cadastro — o envio vai falhar",
+    `Orçamento: *${p.numero}* — Total *${brl(p.total)}*`,
+    "Formato: *só o PDF*, sem link (o arquivo com preço e PIX vai na conversa)",
+    `Legenda: "${p.legenda}"`,
+    "Pedido por: *aviso automático* (me acorde se)",
+  ].join("\n");
+}
+
+/** Cria a pendência do cartão na conversa do dono. null = não deu (o acorde vai sem cartão). Nunca lança. */
+async function criarPendenciaDoCartao(admin: Db, p: {
+  sessao: string;
+  dono: Dono;
+  cartao: NonNullable<AcordeDeCliente["cartao"]>;
+}): Promise<string | null> {
+  try {
+    const { data: so, error } = await admin.from("service_orders").select("id, service_order_number, client_id, grand_total, status")
+      .eq("id", p.cartao.service_order_id).maybeSingle();
+    if (error || !so || so.status === "cancelled") return null;
+    const { data: c } = so.client_id
+      ? await admin.from("clients").select("name, whatsapp, phone").eq("id", so.client_id).maybeSingle()
+      : { data: null };
+    const telefone = c?.whatsapp || c?.phone || null;
+    if (!telefone) return null; // a tool recusaria: melhor sem cartão
+    const { data: pend, error: pErr } = await admin.from("ai_operator_pending_actions").insert({
+      session_id: p.sessao,
+      requested_by_user_id: p.dono.id,
+      action_name: "send_service_order_link",
+      risk_level: "high",
+      title: TITULO_DO_CARTAO,
+      summary: resumoDoCartao({ cliente: c?.name ?? null, telefoneDoCadastro: telefone, numero: so.service_order_number, total: Number(so.grand_total) || 0, legenda: p.cartao.legenda }),
+      payload: payloadDoCartao({ cartao: p.cartao, dono: p.dono, telefoneDoCadastro: telefone, total: Number(so.grand_total) || 0 }),
+      status: "pending",
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    }).select("id").single();
+    if (pErr || !pend?.id) return null;
+    return String(pend.id);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * (20/10/2026, P4.5) Envia o acorde que o portão liberou. Com cartão (o texto tem a linha do *sim <PIN>*): a pendência,
+ * a conversa apontando para ela, o par 🤖 no histórico e o envio com registro (a pergunta entra no registro único). Sem
+ * cartão (ou a pendência não nasceu): o texto sem a linha do sim, pela fila (chave aviso:<id>; se a fila desistir, a
+ * próxima mensagem fixa leva), e o par 🤖 no histórico. ok=false = não saiu (quem chama reabre). Nunca lança.
+ */
+export async function enviarAcordeDeCliente(admin: Db, p: {
+  dono: Dono;
+  nome: string;
+  gatilho: string;
+  acorde: AcordeDeCliente;
+  /** o mesmo acorde sem a linha do sim (quando a pendência não nasce) */
+  semCartao: AcordeDeCliente;
+  avisoId: string;
+  agora: Date;
+  conversaLigada: boolean;
+}): Promise<{ ok: boolean; cartao: boolean; pendencia: string | null }> {
+  try {
+    const sessao = await resolveOrCreateWhatsAppSession(admin, p.dono.phone, p.dono.id);
+    const t0 = Date.now();
+    const historico = (texto: string, nota = "") =>
+      admin.from("ai_operator_messages").insert([
+        { session_id: sessao, role: "user", source: "whatsapp", created_at: new Date(t0).toISOString(), content: `🤖 Me acorde se (aviso automático do acompanhar-conversas): ${p.nome} — ${p.gatilho}.` },
+        { session_id: sessao, role: "assistant", source: "whatsapp", created_at: new Date(t0 + 1).toISOString(), content: `${texto}${nota}` },
+      ]);
+    if (p.acorde.cartao) {
+      const pend = await criarPendenciaDoCartao(admin, { sessao, dono: p.dono, cartao: p.acorde.cartao });
+      if (pend) {
+        const { data: s } = await admin.from("ai_operator_sessions").select("metadata").eq("id", sessao).maybeSingle();
+        await admin.from("ai_operator_sessions").update({
+          metadata: { ...((s?.metadata ?? {}) as Record<string, unknown>), pending_confirm_action_id: pend, pin_attempts: 0, pendencia_herdada: false },
+          last_activity_at: new Date().toISOString(),
+        }).eq("id", sessao);
+        const { error: hErr } = await historico(p.acorde.texto, `\n\n(pendência ${pend}: send_service_order_link do ${p.acorde.cartao.numero}, formato pdf)`);
+        if (hErr) console.warn("[acompanhar-conversas] acorde fora do histórico:", hErr.message);
+        await enviarComRegistro(admin, p.dono.phone, p.acorde.texto,
+          { acao: "registrar", tipo: "confirmacao", referencia_id: pend, titulo: TITULO_DO_CARTAO },
+          { ligada: p.conversaLigada, origem: "acompanhar_conversa" });
+        return { ok: true, cartao: true, pendencia: pend };
+      }
+    }
+    const texto = p.acorde.cartao ? p.semCartao.texto : p.acorde.texto;
+    if (!await enfileirarAcorde(admin, { phone: p.dono.phone, texto, avisoId: p.avisoId, agora: p.agora, source: "me_acorde" })) {
+      return { ok: false, cartao: false, pendencia: null };
+    }
+    const { error: hErr } = await historico(texto);
+    if (hErr) console.warn("[acompanhar-conversas] acorde fora do histórico:", hErr.message);
+    return { ok: true, cartao: false, pendencia: null };
+  } catch (e) {
+    console.warn("[acompanhar-conversas] acorde não enviado:", (e as Error)?.message ?? e);
+    return { ok: false, cartao: false, pendencia: null };
+  }
+}
 
 /**
  * (16/10/2026, decisão do dono) O que a rodada de 15 min faz agora: os avisos de acompanhamento e a detecção de promessas
@@ -100,13 +232,17 @@ export interface ResultadoDosAcordes {
   guardados: number;
   repetidos: number;
   outros: number;
+  /** (20/10/2026) voz ligada: os acordes que saíram (com cartão entre eles) e os que voltaram a guardado */
+  enviados?: number;
+  com_cartao?: number;
+  reabertos?: number;
   erro?: string;
 }
 
 /** A rodada do detector. Nunca lança. */
 export async function vigiarAcordes(admin: Db, p: {
   agora: Date;
-  dono: { id: string; phone: string };
+  dono: Dono;
   portao: PortaoDaRodada;
   settings: Record<string, string>;
   internos: Set<string>;
@@ -207,23 +343,42 @@ export async function vigiarAcordes(admin: Db, p: {
       }
     }
 
-    // 6. registra cada disparo no portão, com o texto que sairia
+    // 6. registra cada disparo no portão, com o texto que sairia; (20/10/2026) ligada, o que acordou SAI
     for (const { c, ds } of comDisparo) {
       const orcs = c.client_id ? orcamentos.get(c.client_id) ?? [] : [];
       for (const d of ds) {
         const acordes = await acordesDeHojeDoAssunto(admin, { phone: p.dono.phone, modo, dia: hoje, assunto: `contato:${c.phone}` });
         const novoFato = acordes !== null && mensagemNovaEFatoNovo(p.portao.regras, d.mensagem.em, acordes);
-        const acorde = textoDoAcordeDeCliente({
+        const montar = (podeCartao: boolean) => textoDoAcordeDeCliente({
           nome: c.nome, disparo: d, orcamentos: orcs,
           telefone: p.portao.regras.telefone_no_aviso ? telefoneLegivel(c.phone) : null,
-          podeCartao: donoLivre === true, agora,
+          podeCartao, agora,
         });
+        const acorde = montar(donoLivre === true);
         const resp = await registrarNoPortao(admin, modo, p.dono.phone,
           avisoDoCliente({ conversa: c, disparo: d, orcamentos: orcs, acorde, regras: p.portao.regras, novoFato }), agora);
         if (resp?.decisao === "acordar") r.acordaria++;
         else if (resp?.decisao === "guardar") r.guardados++;
         else if (resp?.decisao === "repetido") r.repetidos++;
         else r.outros++;
+        // Ligada: só o 'acordar' sai (sem resposta do portão o detector não manda nada — como antes dele existir). O
+        // cartão vai só se o portão também o liberou (depois das 09:30).
+        if (modo === "ligado" && resp?.decisao === "acordar" && typeof resp.id === "string") {
+          const semCartao = montar(false);
+          const envio = await enviarAcordeDeCliente(admin, {
+            dono: p.dono, nome: c.nome, gatilho: d.gatilho, acorde: resp.cartao === true ? acorde : semCartao, semCartao,
+            avisoId: resp.id, agora, conversaLigada: p.conversaLigada,
+          });
+          if (envio.ok) {
+            r.enviados = (r.enviados ?? 0) + 1;
+            if (envio.cartao) {
+              r.com_cartao = (r.com_cartao ?? 0) + 1;
+              donoLivre = false; // um cartão por vez: o próximo acorde da rodada vai só com a informação
+            }
+          } else if (await reabrirNoPortao(admin, resp.id, agora)) {
+            r.reabertos = (r.reabertos ?? 0) + 1;
+          }
+        }
       }
     }
     return r;

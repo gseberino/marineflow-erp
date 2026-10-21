@@ -36,10 +36,37 @@ Deno.test("laço de avisos: janela da manhã → freio → dono → ai-agent →
     `ordem: janela ${janela}, conta ${conta}, freio ${freio}, dono ${dono}, agente ${agente}, recusou ${recusou}, registro ${registro}`);
   assertStringIncludes(fn, "if (portao.freio) {");
   assertStringIncludes(fn, 'a.modo === "acompanhar" && (portao.freio || portao.modo) ? await avisosDestaMensagem');
-  assertStringIncludes(fn, "const modoRegistro = modoDoRegistroDoAcompanhamento(portao, a.modo);");
+  assertStringIncludes(fn, "const modoRegistro = modoDoRegistroDoAcompanhamento(portao, a.modo, peloPortao);");
   // (16/10/2026) o portão é lido uma vez (portaoDasConfiguracoes) e vale para os avisos e para o "me acorde se"
   assertStringIncludes(fonte, "const portao = portaoDasConfiguracoes(settings);");
-  assertStringIncludes(fonte, "await avisar(admin, agora, conversaDosComprovantesLigada(settings), portao)");
+  assertStringIncludes(fonte, "await avisar(admin, agora, conversaDosComprovantesLigada(settings), portao, donoDaVoz)");
+});
+
+// (20/10/2026, P4.5) Voz única LIGADA de verdade. O que se protege, no laço de avisos:
+//   1. só o aviso ao DONO da manhã (donoDaVoz, lido só com portao.modo === 'ligado') pergunta ao portão, e ANTES do
+//      assistente; o de outro telefone segue como se a voz estivesse desligada;
+//   2. guardado/acabou/repetido (fala.manda = false) não chama o assistente, mas conta como dado (o intervalo e o "um só"
+//      valem) — a rodada seguinte não pede de novo;
+//   3. o assistente que recusou reabre o acorde (volta a guardado; a vaga do dia fica livre);
+//   4. o registro DEPOIS (sombra/freio) não acontece quando já registrou antes (sem registro duplo).
+Deno.test("P4.5: com a voz ligada o dono pergunta ao portão antes do ai-agent; guardado não chama; recusa reabre", () => {
+  const ini = fonte.indexOf("async function avisar(");
+  const fn = fonte.slice(ini, fonte.indexOf("\n}\n", ini));
+  assertStringIncludes(fn, 'const peloPortao = portao.modo === "ligado" && !!donoDaVoz && dono.phone === donoDaVoz.phone;');
+  const pergunta = fn.indexOf("fala = await perguntarAoPortao(admin, dono.phone, avisoDoPortao, agora);");
+  const naoManda = fn.indexOf("if (!fala.manda) {");
+  const agente = fn.indexOf("/functions/v1/ai-agent");
+  const reabre = fn.indexOf("if (fala?.acordou && await reabrirNoPortao(admin, fala.acordou, agora)) resultado.reabertos++;");
+  const depois = fn.indexOf("if (modoRegistro && !peloPortao) {");
+  assert(pergunta > 0 && naoManda > pergunta && agente > naoManda && reabre > agente && depois > reabre,
+    `ordem: pergunta ${pergunta}, não manda ${naoManda}, agente ${agente}, reabre ${reabre}, depois ${depois}`);
+  // o guardado conta como dado: o mesmo update do aviso que saiu (marcarAvisado) e o laço segue
+  const bloco = fn.slice(naoManda, fn.indexOf("}", fn.indexOf("continue;", naoManda)) + 1);
+  assertStringIncludes(bloco, "await marcarAvisado();");
+  assertStringIncludes(bloco, "resultado.guardados_pelo_portao++;");
+  assertStringIncludes(bloco, "continue;");
+  // o dono da voz só é lido com a voz ligada (desligada/sombra: nada a mais)
+  assertStringIncludes(fonte, 'const donoDaVoz = portao.modo === "ligado" ? await lerDonoDaVoz(admin) : null;');
 });
 
 Deno.test("a detecção de promessas e o encerramento seguem das 8h (só o aviso espera as 09:30)", () => {
@@ -57,14 +84,16 @@ Deno.test("a detecção de promessas e o encerramento seguem das 8h (só o aviso
 //   3. D11: o fato novo só é pedido no 1º aviso do modo acompanhar, com a regra ligada, e depois de ler os acordes de
 //      hoje do mesmo contato (erro de leitura = sem fato novo).
 Deno.test("me acorde se: só com portao.modo e dono, depois dos avisos; D11 lê os acordes de hoje antes de registrar", () => {
-  const avisos = fonte.indexOf("const avisos = rodada.avisos ? await avisar(admin, agora, conversaDosComprovantesLigada(settings), portao) : null;");
-  const acordes = fonte.indexOf("const acordes = rodada.acordes && dono && portao.modo");
+  const avisos = fonte.indexOf("const avisos = rodada.avisos ? await avisar(admin, agora, conversaDosComprovantesLigada(settings), portao, donoDaVoz) : null;");
+  const acordes = fonte.indexOf("const acordes = rodada.acordes && doAcorde && portao.modo");
   assert(avisos > 0 && acordes > avisos, `ordem avisos ${avisos} → acordes ${acordes}`);
-  assertStringIncludes(fonte, "? await vigiarAcordes(admin, { agora, dono: { id: dono.id, phone: dono.phone_normalized }, portao, settings, internos,");
+  assertStringIncludes(fonte, "? await vigiarAcordes(admin, { agora, dono: doAcorde, portao, settings, internos,");
+  // (20/10/2026) ligada, o acorde vai ao dono da manhã (donoDoWhatsApp); sombra, ao de sempre
+  assertStringIncludes(fonte, 'const doAcorde = portao.modo === "ligado" ? donoDaVoz : dono ? { id: dono.id, phone: dono.phone_normalized } : null;');
   assertStringIncludes(fonte, "...(acordes ? { acordes } : {})");
   const ini = fonte.indexOf("async function avisar(");
   const fn = fonte.slice(ini, fonte.indexOf("\n}\n", ini));
-  assertStringIncludes(fn, 'if (a.modo === "acompanhar" && ordem === 1 && portao.regras.mensagem_nova_e_fato_novo) {');
+  assertStringIncludes(fn, 'if (modoRegistro && a.modo === "acompanhar" && ordem === 1 && portao.regras.mensagem_nova_e_fato_novo) {');
   assertStringIncludes(fn, "novoFato = acordes !== null && mensagemNovaEFatoNovo(portao.regras, ultimaEm, acordes);");
   assert(fn.indexOf("await acordesDeHojeDoAssunto(") < fn.indexOf("await registrarNoPortao(admin, modoRegistro, dono.phone"));
 });
@@ -86,5 +115,5 @@ Deno.test("domingo: só o detector; promessas e avisos seguem seg–sáb; voz de
   assert(desligada > 0 && promessas > desligada && avisos > desligada, "domingo com a voz desligada sai antes de escrever");
   assertStringIncludes(h, "const promessas = !rodada.avisos ? null");
   assertStringIncludes(h, "const avisos = rodada.avisos ? await avisar(");
-  assertStringIncludes(h, "const acordes = rodada.acordes && dono && portao.modo");
+  assertStringIncludes(h, "const acordes = rodada.acordes && doAcorde && portao.modo");
 });

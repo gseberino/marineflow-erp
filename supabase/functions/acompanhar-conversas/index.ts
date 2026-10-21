@@ -26,6 +26,13 @@
 //    mensagem_nova_e_fato_novo), salvo se um acorde de hoje já cobriu a mesma mensagem;
 //  * "me acorde se" (./acordes.ts): com a voz única em sombra, o cliente/lead que pede para hoje, quer fechar ou
 //    desistiu e está sem resposta é REGISTRADO no portão com o texto exato do acorde. Nada é enviado.
+// Secretário, Passo 4, P4.5 (20/10/2026) — voz única LIGADA de verdade (a manhã nova e o fechamento ligado no ar):
+//  * o aviso ao DONO pergunta ao portão ANTES de chamar o assistente: 'acordar' (acompanhamento) e 'deixar' (o lembrete
+//    pedido com hora) seguem como sempre; 'guardar' (o 3º acorde do dia, a promessa — D5) não chama o assistente e o
+//    aviso vai com a próxima mensagem fixa; o assistente que recusou = reabre (volta a guardado). Portão ilegível =
+//    como sempre;
+//  * o "me acorde se" passa a ENVIAR o acorde liberado (./acordes.ts), com o cartão (sim <PIN> = o PDF) só com o dono
+//    livre e depois das 09:30.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
@@ -36,9 +43,10 @@ import {
 } from "../_shared/ai/acompanhar.ts";
 import { avisoDoAcompanhamento, referenciaDoAcompanhamento } from "../_shared/uma-voz/fontes.ts";
 import {
-  acordesDeHojeDoAssunto, avisosDestaMensagem, modoDoRegistroDoAcompanhamento, type PortaoDaRodada, portaoDasConfiguracoes,
-  registrarNoPortao,
+  acordesDeHojeDoAssunto, avisosDestaMensagem, type Fala, lerDonoDaVoz, modoDoRegistroDoAcompanhamento, perguntarAoPortao,
+  type PortaoDaRodada, portaoDasConfiguracoes, reabrirNoPortao, registrarNoPortao,
 } from "../_shared/uma-voz/registrar.ts";
+import type { Dono } from "../_shared/whatsapp/dono.ts";
 import { mensagemNovaEFatoNovo } from "../_shared/uma-voz/acorde.ts";
 import { rodadaDeAgora, vigiarAcordes } from "./acordes.ts";
 import { conversaEncerradaPeloContato, ULTIMAS_RECEBIDAS } from "../_shared/whatsapp/contato-encerrou.ts";
@@ -113,14 +121,18 @@ async function detectarPromessas(admin: Db, dono: { id: string }, internos: Set<
   return { lidas: (msgs ?? []).length, criadas };
 }
 
-/** 2. Avisos devidos. `conversaLigada` = conversa dos comprovantes ligada (conversaDosComprovantesLigada). */
-async function avisar(admin: Db, agora: Date, conversaLigada: boolean, portao: PortaoDaRodada) {
+/**
+ * 2. Avisos devidos. `conversaLigada` = conversa dos comprovantes ligada (conversaDosComprovantesLigada). `donoDaVoz` =
+ * (20/10/2026) o telefone que só ouve pelo portão com a voz ligada (null = ninguém).
+ */
+async function avisar(admin: Db, agora: Date, conversaLigada: boolean, portao: PortaoDaRodada, donoDaVoz: Dono | null = null) {
   const { data: ativos, error } = await admin.from("whatsapp_acompanhamentos")
     .select("id, phone_normalized, contato, modo, intervalo_min, ate, lembrar_em, promessa, ultimo_aviso_em, avisos_dia, avisos_no_dia, created_at, criado_por")
     .eq("status", "ativo").order("created_at", { ascending: true }).limit(100);
   if (error) throw error;
   const resultado = {
     avaliados: 0, avisados: 0, encerrados: 0, adiados_por_pendencia: 0, na_janela_da_manha: 0, parados_pelo_freio: 0, no_portao: 0,
+    guardados_pelo_portao: 0, reabertos: 0,
   };
   const donos = new Map<string, { id: string; phone: string } | null>();
 
@@ -174,6 +186,45 @@ async function avisar(admin: Db, agora: Date, conversaLigada: boolean, portao: P
     }
 
     const texto = textoDoAviso(a, conversa, agora, telefoneLegivel(a.phone_normalized));
+    // O aviso para o portão: registrado DEPOIS de sair (sombra / a conta do freio) ou, com a voz ligada e o dono,
+    // ANTES (o portão decide). Nunca lança.
+    const peloPortao = portao.modo === "ligado" && !!donoDaVoz && dono.phone === donoDaVoz.phone;
+    const modoRegistro = modoDoRegistroDoAcompanhamento(portao, a.modo, peloPortao);
+    const ordem = jaAvisados === null ? agora.getTime() : jaAvisados + 1;
+    const ultimaEm = conversa.ultimaRecebida?.em ?? null;
+    // D11 (16/10/2026, padrão recomendado): o 1º aviso sobre uma mensagem NOVA do contato é fato novo (pode acordar
+    // de novo no dia), salvo se um acorde de hoje já cobriu essa mesma mensagem (o detector do "me acorde se").
+    let novoFato = false;
+    if (modoRegistro && a.modo === "acompanhar" && ordem === 1 && portao.regras.mensagem_nova_e_fato_novo) {
+      const acordes = await acordesDeHojeDoAssunto(admin, { phone: dono.phone, modo: modoRegistro, dia: diaEmBrasilia(agora), assunto: `contato:${a.phone_normalized}` });
+      novoFato = acordes !== null && mensagemNovaEFatoNovo(portao.regras, ultimaEm, acordes);
+    }
+    const avisoDoPortao = avisoDoAcompanhamento(a, ultimaEm, ordem, portao.regras, texto, novoFato);
+    const hoje = diaEmBrasilia(agora);
+    const unico = a.modo !== "acompanhar";
+    const marcarAvisado = () =>
+      admin.from("whatsapp_acompanhamentos").update({
+        ultimo_aviso_em: agora.toISOString(),
+        avisos_dia: hoje,
+        avisos_no_dia: a.avisos_dia === hoje ? a.avisos_no_dia + 1 : 1,
+        ...(unico ? { status: "encerrado", encerrado_motivo: "avisado" } : {}),
+        updated_at: agora.toISOString(),
+      }).eq("id", a.id);
+
+    // (20/10/2026, P4.5) voz ligada: o portão decide ANTES. Guardado (o 3º acorde do dia, a promessa — D5), acabou ou
+    // repetido = o assistente não é chamado e o aviso conta como dado (o intervalo e o "um só" valem: senão a rodada
+    // seguinte pediria de novo). Portão ilegível = como sempre.
+    let fala: Fala | null = null;
+    if (peloPortao) {
+      fala = await perguntarAoPortao(admin, dono.phone, avisoDoPortao, agora);
+      if (fala.decisao !== "erro") resultado.no_portao++;
+      if (!fala.manda) {
+        await marcarAvisado();
+        resultado.guardados_pelo_portao++;
+        continue;
+      }
+    }
+
     const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/ai-agent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-internal-secret": Deno.env.get("AI_INTERNAL_SECRET") ?? "" },
@@ -182,33 +233,16 @@ async function avisar(admin: Db, agora: Date, conversaLigada: boolean, portao: P
     }).catch((e) => ({ ok: false, status: 0, text: () => Promise.resolve(String(e)) }) as unknown as Response);
     if (!res.ok) {
       console.error("[acompanhar-conversas] ai-agent recusou o aviso", a.id, res.status, await res.text().catch(() => ""));
+      // o acorde não saiu: volta a guardado (a próxima mensagem fixa leva) e a vaga do dia fica livre
+      if (fala?.acordou && await reabrirNoPortao(admin, fala.acordou, agora)) resultado.reabertos++;
       continue;
     }
-    // O aviso SAIU: registra no portão (a conta do freio e a sombra da voz única). Nunca lança.
-    const modoRegistro = modoDoRegistroDoAcompanhamento(portao, a.modo);
-    if (modoRegistro) {
-      const ordem = jaAvisados === null ? agora.getTime() : jaAvisados + 1;
-      // D11 (16/10/2026, padrão recomendado): o 1º aviso sobre uma mensagem NOVA do contato é fato novo (pode acordar
-      // de novo no dia), salvo se um acorde de hoje já cobriu essa mesma mensagem (o detector do "me acorde se").
-      const ultimaEm = conversa.ultimaRecebida?.em ?? null;
-      let novoFato = false;
-      if (a.modo === "acompanhar" && ordem === 1 && portao.regras.mensagem_nova_e_fato_novo) {
-        const acordes = await acordesDeHojeDoAssunto(admin, { phone: dono.phone, modo: modoRegistro, dia: diaEmBrasilia(agora), assunto: `contato:${a.phone_normalized}` });
-        novoFato = acordes !== null && mensagemNovaEFatoNovo(portao.regras, ultimaEm, acordes);
-      }
-      const r = await registrarNoPortao(admin, modoRegistro, dono.phone,
-        avisoDoAcompanhamento(a, ultimaEm, ordem, portao.regras, texto, novoFato), agora);
+    // O aviso SAIU: registra no portão (a conta do freio e a sombra da voz única). Ligada: já registrou antes.
+    if (modoRegistro && !peloPortao) {
+      const r = await registrarNoPortao(admin, modoRegistro, dono.phone, avisoDoPortao, agora);
       if (r) resultado.no_portao++;
     }
-    const hoje = diaEmBrasilia(agora);
-    const unico = a.modo !== "acompanhar";
-    await admin.from("whatsapp_acompanhamentos").update({
-      ultimo_aviso_em: agora.toISOString(),
-      avisos_dia: hoje,
-      avisos_no_dia: a.avisos_dia === hoje ? a.avisos_no_dia + 1 : 1,
-      ...(unico ? { status: "encerrado", encerrado_motivo: "avisado" } : {}),
-      updated_at: agora.toISOString(),
-    }).eq("id", a.id);
+    await marcarAvisado();
     resultado.avisados++;
   }
   return resultado;
@@ -240,13 +274,17 @@ servirComCors(async (req) => {
     const portao = portaoDasConfiguracoes(settings);
     // Domingo (só a janela do acorde): com a voz única desligada a resposta é a de antes, sem escrever nada.
     if (!rodada.avisos && !portao.modo) return jr({ ok: true, fora_do_horario: true });
+    // (20/10/2026, P4.5) com a voz ligada de verdade, o dono da manhã (donoDoWhatsApp) só ouve pelo portão
+    const donoDaVoz = portao.modo === "ligado" ? await lerDonoDaVoz(admin) : null;
     const promessas = !rodada.avisos ? null
       : dono ? await detectarPromessas(admin, dono, internos, settings, agora) : { lidas: 0, criadas: 0, sem_dono: true };
-    const avisos = rodada.avisos ? await avisar(admin, agora, conversaDosComprovantesLigada(settings), portao) : null;
+    const avisos = rodada.avisos ? await avisar(admin, agora, conversaDosComprovantesLigada(settings), portao, donoDaVoz) : null;
     // "Me acorde se" (P4.2, 16/10/2026): só com a voz única em sombra/ligado (desligado = nada lido); em sombra só
-    // REGISTRA no portão o texto que sairia — nada é enviado. Todos os dias 08–20h. Nunca derruba a rodada.
-    const acordes = rodada.acordes && dono && portao.modo
-      ? await vigiarAcordes(admin, { agora, dono: { id: dono.id, phone: dono.phone_normalized }, portao, settings, internos, conversaLigada: conversaDosComprovantesLigada(settings) })
+    // REGISTRA no portão o texto que sairia — nada é enviado; (20/10/2026) ligada, ENVIA o acorde liberado, ao dono da
+    // manhã. Todos os dias 08–20h. Nunca derruba a rodada.
+    const doAcorde = portao.modo === "ligado" ? donoDaVoz : dono ? { id: dono.id, phone: dono.phone_normalized } : null;
+    const acordes = rodada.acordes && doAcorde && portao.modo
+      ? await vigiarAcordes(admin, { agora, dono: doAcorde, portao, settings, internos, conversaLigada: conversaDosComprovantesLigada(settings) })
       : null;
     return jr({
       ok: true, ...(promessas ? { promessas } : {}), ...(avisos ? { avisos } : {}), ...(acordes ? { acordes } : {}),
