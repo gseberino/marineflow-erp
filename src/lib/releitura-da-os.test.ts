@@ -49,8 +49,8 @@ describe('mesmoValor / manterSeMexeu', () => {
   });
 
   it('valor solto: sem base vale o remoto; mexido fica o local', () => {
-    expect(manterSeMexeu(undefined, 5, 10, false)).toBe(10);
-    expect(manterSeMexeu(0, 5, 10, true)).toBe(5);
-    expect(manterSeMexeu(0, 0, 10, true)).toBe(10);
+    expect(manterSeMexeu<number>(undefined, 5, 10, false)).toBe(10);
+    expect(manterSeMexeu<number>(0, 5, 10, true)).toBe(5);
+    expect(manterSeMexeu<number>(0, 0, 10, true)).toBe(10);
   });
 });
