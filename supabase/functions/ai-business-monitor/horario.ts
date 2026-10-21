@@ -14,12 +14,9 @@ const FUSO = "America/Sao_Paulo";
 export const PRIMEIRA_HORA = 8;
 export const ULTIMA_HORA = 20;
 
-/**
- * Minutos entre duas tentativas da fila, medidos na produção. O worker reagenda +5 min, mas roda
- * de 5 em 5 min (cron) e a nova hora cai segundos DEPOIS da volta seguinte: na prática a tentativa
- * sai 10 min depois (resumo de 09/10 e 13/10: 07:35, 07:45, 07:55, e desistiu).
- */
-export const INTERVALO_DA_FILA_MIN = 10;
+// Minutos entre tentativas da fila e quantas cabem até as 20h: moram em _shared/uma-voz/janela.ts desde 20/10/2026
+// (todo acorde da voz única que vai pela fila usa a mesma conta). Reexportados aqui para quem já os importava.
+export { INTERVALO_DA_FILA_MIN, tentativasAteAs20h } from "../_shared/uma-voz/janela.ts";
 
 /** Hora cheia (0–23) de Brasília no instante `agora`, em qualquer máquina. */
 export function horaBrasilia(agora: Date): number {
@@ -48,19 +45,19 @@ export function inicioDoMesBR(agora: Date): string {
   return new Date(`${diaBR(agora).slice(0, 7)}-01T00:00:00-03:00`).toISOString();
 }
 
-/**
- * Quantas tentativas cabem até as 20h de Brasília, para a fila parar de tentar antes da noite.
- * A 1ª sai na próxima volta do worker (até 5 min); as outras, de 10 em 10 min. Mínimo 1.
- */
-export function tentativasAteAs20h(agora: Date): number {
-  const fim = new Date(`${diaBR(agora)}T${ULTIMA_HORA}:00:00-03:00`).getTime();
-  const minutos = (fim - agora.getTime()) / 60_000;
-  return Math.max(1, Math.floor((minutos - 5) / INTERVALO_DA_FILA_MIN) + 1);
-}
-
 /** O aviso de que o resumo da manhã não chegou. "como estão as coisas?" cai no panorama do assistente. */
 export const TEXTO_RESUMO_NAO_CHEGOU =
   "☀️ O resumo das 07:30 de hoje não chegou: o WhatsApp ficou fora do ar. Escreva *como estão as coisas?* que eu mostro o principal agora.";
+
+/**
+ * (20/10/2026) A manhã que quebrou ANTES de entrar na fila (spec uma voz §1.7-1): o ai-daily-briefing caiu antes do
+ * insert e não há linha nenhuma — o WhatsApp não tem culpa.
+ */
+export const TEXTO_MANHA_QUEBROU =
+  "☀️ O resumo das 07:30 de hoje não chegou: deu um erro ao montá-lo. Escreva *como estão as coisas?* que eu mostro o principal agora.";
+
+/** A partir de quando "nenhuma linha da manhã na fila" conta como "a manhã não chegou" (a 1ª rodada do vigia é 08:05). */
+export const MANHA_SEM_LINHA_DESDE_MIN = 8 * 60;
 
 /** Linha do resumo de hoje na fila (whatsapp_send_queue, source ai_briefing). */
 export interface ResumoNaFila {
@@ -84,6 +81,19 @@ export function telefonesSemResumo(linhas: ResumoNaFila[]): string[] {
     out.push(p);
   }
   return out;
+}
+
+/**
+ * (20/10/2026) A manhã do dono quebrou antes de entrar na fila: já passou das 08:00 de Brasília e não existe NENHUMA
+ * linha ai_briefing de hoje para o telefone dele (nem enviada, nem na fila, nem falhada — a falhada é o caso de
+ * telefonesSemResumo, com o texto do WhatsApp fora). Sem telefone (dono não lido) = false.
+ */
+export function manhaSemLinha(linhas: ResumoNaFila[], phone: string | null | undefined, agora: Date): boolean {
+  if (!phone) return false;
+  const [h, m] = new Intl.DateTimeFormat("en-GB", { timeZone: FUSO, hour: "2-digit", minute: "2-digit", hour12: false })
+    .format(agora).split(":").map((x) => parseInt(x, 10) % 24);
+  if (h * 60 + m < MANHA_SEM_LINHA_DESDE_MIN) return false;
+  return !linhas.some((l) => l.phone_normalized === phone);
 }
 
 /**

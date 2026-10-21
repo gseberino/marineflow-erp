@@ -24,19 +24,26 @@
 // (16/10/2026, P4.2) O registro leva o texto do ACORDE (o que sairia com a voz única ligada, sem emoji): o
 // certificado de 7 dias ou menos e uma NF-e rejeitada POR NOTA (chave nfe:<id>), no lugar da contagem do dia.
 // A mensagem que sai hoje para a equipe continua a mesma (a contagem por dia).
+// (20/10/2026, P4.5) Voz única LIGADA de verdade (a manhã nova e o fechamento ligado no ar): o DONO não recebe mais o
+// "🔔 Alerta…" — cada sinal pergunta ao portão antes (./voz.ts) e só o acorde sai; o resto vai com as mensagens fixas.
+// A equipe recebe o de sempre. O "resumo não chegou" também pergunta antes. E a manhã que quebrou ANTES de entrar na
+// fila (nenhuma linha ai_briefing do dono depois das 08:00) passa a ser avisada (manhaSemLinha), com qualquer voz.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createFiscalProvider } from "../_shared/fiscal/factory.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import {
-  diaDoAviso, inicioDoDiaBR, inicioDoMesBR, podeAvisarAgora, type ResumoNaFila, resumoDeHojeCobre,
-  telefonesSemResumo, tentativasAteAs20h, TEXTO_RESUMO_NAO_CHEGOU,
+  diaDoAviso, inicioDoDiaBR, inicioDoMesBR, manhaSemLinha, podeAvisarAgora, type ResumoNaFila, resumoDeHojeCobre,
+  telefonesSemResumo, tentativasAteAs20h, TEXTO_MANHA_QUEBROU, TEXTO_RESUMO_NAO_CHEGOU,
 } from "./horario.ts";
 import type { AvisoDaFonte } from "../_shared/uma-voz/portao.ts";
 import { avisoDaNfe, avisoDoCertificado, avisoDoConsentimento, avisoDoVigia, avisoResumoNaoChegou } from "../_shared/uma-voz/fontes.ts";
 import { textoDaNfe, textoDoCertificado } from "../_shared/uma-voz/acorde.ts";
-import { lerPortao, registrarNoPortao, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
+import {
+  enfileirarAcorde, falaPeloPortao, lerDonoDaVoz, lerPortao, perguntarAoPortao, registrarNoPortao, registrarParaTodos,
+} from "../_shared/uma-voz/registrar.ts";
+import { falarAoDono, type SinalDoVigia } from "./voz.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -133,12 +140,18 @@ servirComCors(async (req) => {
     const resumosDeHoje = (resumosErr ? [] : resumosLidos ?? []) as ResumoNaFila[];
 
     const alerts: string[] = [];
-    // Voz única: o que cada sinal pediria ao portão (registrado só depois que o alerta entrar na fila).
+    // Voz única: o que cada sinal pediria ao portão (na sombra, registrado só depois que o alerta entrar na fila; ligada,
+    // o dono pergunta antes, sinal a sinal — ./voz.ts).
     const portao = await lerPortao(admin);
+    // (20/10/2026) o dono da manhã (o mesmo de ai-daily-briefing): a voz ligada fala com ele pelo portão, e a manhã que
+    // quebrou antes da fila é a dele. Erro de leitura = null (ninguém passa pelo portão; nada de "manhã sem linha").
+    const dono = await lerDonoDaVoz(admin);
     const paraOPortao: AvisoDaFonte[] = [];
+    const sinais: SinalDoVigia[] = [];
     const alertar = (texto: string, ...avisos: AvisoDaFonte[]) => {
       alerts.push(texto);
       paraOPortao.push(...avisos);
+      sinais.push({ texto, avisos });
     };
 
     // (1) Recebíveis vencidos HOJE
@@ -281,31 +294,72 @@ servirComCors(async (req) => {
     // voltar e para de tentar antes das 20h. Vai para quem ficou sem o resumo, não para a lista
     // do alerta. Falha aqui não derruba os outros sinais.
     let resumoNaoChegou = 0;
+    let resumoGuardado = 0;
     try {
-      for (const phone of telefonesSemResumo(resumosDeHoje)) {
-        if (!await claim(`resumo_nao_chegou:${phone}:${todayISO}`, { phone })) continue;
+      const semResumo = [
+        ...telefonesSemResumo(resumosDeHoje).map((phone) => ({ phone, texto: TEXTO_RESUMO_NAO_CHEGOU, motivo: "whatsapp_fora" as const })),
+        // (20/10/2026) a manhã que quebrou ANTES de entrar na fila: nenhuma linha do dono depois das 08:00 (antes, ninguém
+        // sabia). Com a leitura da fila falhando não se conclui nada (não é "sem linha").
+        ...(!resumosErr && dono && !telefonesSemResumo(resumosDeHoje).includes(dono.phone) && manhaSemLinha(resumosDeHoje, dono.phone, now)
+          ? [{ phone: dono.phone, texto: TEXTO_MANHA_QUEBROU, motivo: "erro_na_montagem" as const }]
+          : []),
+      ];
+      for (const s of semResumo) {
+        const phone = s.phone;
+        if (!await claim(`resumo_nao_chegou:${phone}:${todayISO}`, { phone, motivo: s.motivo })) continue;
+        const aviso = avisoResumoNaoChegou(todayISO, s.texto, s.motivo);
+        // (20/10/2026, P4.5) voz ligada: o dono só recebe se o portão acordar (a volta do WhatsApp pode ter acordado
+        // antes: aí vai com o fechamento); portão ilegível = como sempre.
+        if (falaPeloPortao(portao, dono, phone)) {
+          const fala = await perguntarAoPortao(admin, phone, aviso, now);
+          if (!fala.manda) {
+            resumoGuardado++;
+            continue;
+          }
+          if (fala.acordou) {
+            if (await enfileirarAcorde(admin, { phone, texto: s.texto, avisoId: fala.acordou, agora: now, source: "resumo_nao_chegou" })) resumoNaoChegou++;
+            continue;
+          }
+        }
         const { error: nErr } = await admin.from("whatsapp_send_queue").insert({
-          phone_normalized: phone, message: TEXTO_RESUMO_NAO_CHEGOU, source: "resumo_nao_chegou", priority: 2,
+          phone_normalized: phone, message: s.texto, source: "resumo_nao_chegou", priority: 2,
           max_attempts: tentativasAteAs20h(now),
         });
         if (nErr) throw nErr;
         resumoNaoChegou++;
-        await registrarNoPortao(admin, portao.modo, phone, avisoResumoNaoChegou(todayISO, TEXTO_RESUMO_NAO_CHEGOU), now);
+        await registrarNoPortao(admin, portao.modo === "sombra" ? "sombra" : null, phone, aviso, now);
       }
     } catch (e) {
       console.warn("[ai-business-monitor] aviso de resumo que não chegou falhou:", (e as Error)?.message ?? e);
     }
 
-    if (alerts.length === 0) return jr({ ok: true, queued: 0, resumo_nao_chegou: resumoNaoChegou, note: "sem sinais novos hoje" });
+    if (alerts.length === 0) {
+      return jr({ ok: true, queued: 0, resumo_nao_chegou: resumoNaoChegou, ...(resumoGuardado ? { resumo_guardado: resumoGuardado } : {}), note: "sem sinais novos hoje" });
+    }
 
-    const message = [`🔔 *Alerta ${companyName}*`, "", ...alerts, "", "_Me chame aqui se quiser que eu ajude com qualquer um desses._"].join("\n");
-    const rows = recipients.map((r: any) => ({ phone_normalized: String(r.phone_normalized), message, source: "ai_monitor", priority: 5 }));
-    const { data: inserted, error: qErr } = await admin.from("whatsapp_send_queue").insert(rows).select("id");
-    if (qErr) throw qErr;
-    // Voz única em sombra: o alerta já está na fila; registra o que o portão faria com cada sinal.
+    const mensagemCom = (linhas: string[]) =>
+      [`🔔 *Alerta ${companyName}*`, "", ...linhas, "", "_Me chame aqui se quiser que eu ajude com qualquer um desses._"].join("\n");
+    const message = mensagemCom(alerts);
+    // (20/10/2026, P4.5) com a voz ligada, o dono não entra nesta mensagem: ele ouve sinal a sinal pelo portão (abaixo)
+    const peloPortao = (recipients as any[]).filter((r) => falaPeloPortao(portao, dono, String(r.phone_normalized)));
+    const rows = (recipients as any[]).filter((r) => !peloPortao.includes(r))
+      .map((r: any) => ({ phone_normalized: String(r.phone_normalized), message, source: "ai_monitor", priority: 5 }));
+    let enfileirados = 0;
+    if (rows.length) {
+      const { data: inserted, error: qErr } = await admin.from("whatsapp_send_queue").insert(rows).select("id");
+      if (qErr) throw qErr;
+      enfileirados = inserted?.length ?? 0;
+    }
+    // Voz única em sombra: o alerta já está na fila; registra o que o portão faria com cada sinal (ligada: não registra).
     const noPortao = await registrarParaTodos(admin, portao.modo, recipients.map((r: any) => r.phone_normalized), paraOPortao, now);
+    const doDono = peloPortao.length && dono
+      ? await falarAoDono(admin, { phone: dono.phone, sinais, mensagem: mensagemCom, agora: now })
+      : null;
 
-    return jr({ ok: true, queued: inserted?.length ?? 0, signals: alerts.length, resumo_nao_chegou: resumoNaoChegou, no_portao: noPortao });
+    return jr({
+      ok: true, queued: enfileirados, signals: alerts.length, resumo_nao_chegou: resumoNaoChegou, no_portao: noPortao,
+      ...(resumoGuardado ? { resumo_guardado: resumoGuardado } : {}), ...(doDono ? { dono_pelo_portao: doDono } : {}),
+    });
   } catch (e: any) {
     console.error("[ai-business-monitor] fatal", e);
     return jr({ error: e?.message || "internal error" }, 500);

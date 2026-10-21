@@ -48,9 +48,45 @@ Deno.test("voz única: o registro dos sinais vem depois da fila; o do resumo que
   const registro = fonte.indexOf("await registrarParaTodos(admin, portao.modo");
   assert(fila > 0 && erro > fila && registro > erro, "fila → erro → registro");
   const resumo = fonte.indexOf("if (nErr) throw nErr;");
-  const registroResumo = fonte.indexOf("await registrarNoPortao(admin, portao.modo, phone, avisoResumoNaoChegou(");
-  assert(resumo > 0 && registroResumo > resumo, "o resumo que não chegou registra depois do insert");
+  const registroResumo = fonte.indexOf('await registrarNoPortao(admin, portao.modo === "sombra" ? "sombra" : null, phone, aviso, now);');
+  assert(resumo > 0 && registroResumo > resumo, "o resumo que não chegou registra depois do insert (só na sombra)");
   assert(fonte.indexOf("const portao = await lerPortao(admin)") > fonte.indexOf("if (!podeAvisarAgora(now))"), "as chaves só são lidas dentro do horário");
+});
+
+// (20/10/2026, P4.5) Voz única LIGADA de verdade. O que se protege:
+//   1. o dono sai do "🔔 Alerta…" da equipe (filtro falaPeloPortao ANTES da fila) e ouve sinal a sinal pelo portão
+//      (falarAoDono, ./voz.ts) DEPOIS do insert da equipe; a sombra continua registrando depois da fila;
+//   2. o "resumo não chegou" do dono pergunta ao portão ANTES do insert: guardado = não manda; acordou = vai pela fila
+//      com a chave aviso:<id> (enfileirarAcorde); portão ilegível = o insert de sempre;
+//   3. a manhã que quebrou ANTES da fila (nenhuma linha do dono depois das 08:00) vira "a manhã não chegou" — com
+//      qualquer voz, só com a leitura da fila em dia e o dono lido, e uma vez por dia (a mesma chave resumo_nao_chegou).
+Deno.test("P4.5: o dono fora do alerta da equipe e pelo portão depois da fila; o resumo pergunta antes do insert", () => {
+  const filtro = fonte.indexOf("const peloPortao = (recipients as any[]).filter((r) => falaPeloPortao(portao, dono, String(r.phone_normalized)));");
+  const rows = fonte.indexOf("const rows = (recipients as any[]).filter((r) => !peloPortao.includes(r))");
+  const fila = fonte.indexOf('await admin.from("whatsapp_send_queue").insert(rows).select("id")');
+  const sombra = fonte.indexOf("await registrarParaTodos(admin, portao.modo");
+  const dono = fonte.indexOf("await falarAoDono(admin, { phone: dono.phone, sinais, mensagem: mensagemCom, agora: now })");
+  assert(filtro > 0 && rows > filtro && fila > rows && sombra > fila && dono > sombra, `ordem: ${filtro} ${rows} ${fila} ${sombra} ${dono}`);
+  // todo sinal guarda o texto de sempre e os avisos (o dono ouve cada um)
+  assertStringIncludes(fonte, "sinais.push({ texto, avisos });");
+  // o resumo: perguntar → não manda (continue) → acordou (fila com chave) → o insert de sempre
+  const ini = fonte.indexOf("for (const s of semResumo) {");
+  const laco = fonte.slice(ini, fonte.indexOf("} catch (e) {", ini));
+  const pergunta = laco.indexOf("const fala = await perguntarAoPortao(admin, phone, aviso, now);");
+  const guarda = laco.indexOf("if (!fala.manda) {");
+  const acorde = laco.indexOf('await enfileirarAcorde(admin, { phone, texto: s.texto, avisoId: fala.acordou, agora: now, source: "resumo_nao_chegou" })');
+  const insert = laco.indexOf('await admin.from("whatsapp_send_queue").insert({');
+  assert(laco.indexOf("await claim(") < pergunta && pergunta > 0 && guarda > pergunta && acorde > guarda && insert > acorde, `ordem do resumo: ${pergunta} ${guarda} ${acorde} ${insert}`);
+  assertStringIncludes(laco, "if (falaPeloPortao(portao, dono, phone)) {");
+});
+
+Deno.test("manhã que quebrou antes da fila: só com a fila lida, o dono lido e sem a linha falhada dele; texto próprio", () => {
+  assertStringIncludes(fonte, "...(!resumosErr && dono && !telefonesSemResumo(resumosDeHoje).includes(dono.phone) && manhaSemLinha(resumosDeHoje, dono.phone, now)");
+  assertStringIncludes(fonte, '? [{ phone: dono.phone, texto: TEXTO_MANHA_QUEBROU, motivo: "erro_na_montagem" as const }]');
+  assertStringIncludes(fonte, "claim(`resumo_nao_chegou:${phone}:${todayISO}`, { phone, motivo: s.motivo })");
+  assertStringIncludes(fonte, "const aviso = avisoResumoNaoChegou(todayISO, s.texto, s.motivo);");
+  // o dono é lido uma vez, depois do corte de horário (lerDonoDaVoz nunca lança)
+  assert(fonte.indexOf("const dono = await lerDonoDaVoz(admin);") > fonte.indexOf("if (!podeAvisarAgora(now))"));
 });
 
 // (16/10/2026, P4.2) O que se protege: a mensagem que sai para a equipe NÃO muda (a contagem de NF-e do dia e o texto
