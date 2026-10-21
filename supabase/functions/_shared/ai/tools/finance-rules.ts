@@ -1161,7 +1161,12 @@ export const financeRulesTools: ToolDef[] = [
     async execute(args, ctx) {
       const bloqueio = bloqueiaSemAcesso(ctx);
       if (bloqueio) return bloqueio;
-      return await chamarFinanceReview(ctx, { action: "undismiss", ids: args.ids });
+      // Ids de PROPOSTA vão para a ação que espera ids de proposta ('reopen', 20/10/2026). Antes iam para
+      // o 'undismiss', que espera ids de LINHA do banco: nada casava e a resposta era sempre "estas
+      // transações não estão ignoradas". O 'reopen' devolve pelo undismiss a linha que está em Fora da
+      // fila e reabre a recusa de saída ou de aviso (finance-review/recusa.ts). Descrição e esquema
+      // iguais de propósito: o prefixo das tools (cacheado) não muda.
+      return await chamarFinanceReview(ctx, { action: "reopen", ids: args.ids });
     },
   },
 

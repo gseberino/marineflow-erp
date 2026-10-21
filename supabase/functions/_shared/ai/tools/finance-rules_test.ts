@@ -369,3 +369,40 @@ Deno.test("cadastrar_favorecido grava a categoria padrão validada; categoria in
   assertEquals(typeof ruim.error, "string");
   assertEquals(inseridos.length, 1);
 });
+
+// ─── desfazer_propostas_ignoradas (20/10/2026, spec-papelada-fix.md A4): ids de PROPOSTA vão para a ação que
+// espera ids de proposta ('reopen'). Antes iam para o 'undismiss', que espera ids de LINHA do banco — nada casava.
+Deno.test("desfazer_propostas_ignoradas manda os ids de proposta para 'reopen' (pelo painel e pelo WhatsApp)", async () => {
+  const antes = { url: Deno.env.get("SUPABASE_URL"), segredo: Deno.env.get("CRON_SECRET") };
+  Deno.env.set("SUPABASE_URL", "https://exemplo.supabase.co");
+  Deno.env.set("CRON_SECRET", "segredo-de-teste");
+  const original = globalThis.fetch;
+  const corpos: any[] = [];
+  globalThis.fetch = ((_url: string, init?: RequestInit) => {
+    corpos.push(JSON.parse(String(init?.body ?? "{}")));
+    return Promise.resolve(new Response(JSON.stringify({ ok: true, reabertas: 1 }), { status: 200 }));
+  }) as typeof fetch;
+  try {
+    const t = tool("desfazer_propostas_ignoradas");
+    const painel = { sb: {}, admin: {}, userId: "u", userRole: "financial" as const, jwt: "jwt", appOrigin: "", settings: {} };
+    const whatsapp = { ...painel, userRole: "admin" as const, jwt: "" };
+    await t.execute({ ids: ["8b6b3195-a4dd-4319-a115-ab65deb6e528"] }, painel as never);
+    await t.execute({ ids: ["8b6b3195-a4dd-4319-a115-ab65deb6e528"] }, whatsapp as never);
+    const tecnico = await t.execute({ ids: ["x"] }, { ...painel, userRole: "technician" } as never) as any;
+    assertEquals(typeof tecnico.error, "string");
+  } finally {
+    globalThis.fetch = original;
+    if (antes.url) Deno.env.set("SUPABASE_URL", antes.url); else Deno.env.delete("SUPABASE_URL");
+    if (antes.segredo) Deno.env.set("CRON_SECRET", antes.segredo); else Deno.env.delete("CRON_SECRET");
+  }
+  assertEquals(corpos, [
+    { action: "reopen", ids: ["8b6b3195-a4dd-4319-a115-ab65deb6e528"] },
+    { action: "reopen", ids: ["8b6b3195-a4dd-4319-a115-ab65deb6e528"], acting_user_id: "u" },
+  ]);
+  // descrição e esquema iguais: o prefixo cacheado das tools não muda
+  assertEquals(tool("desfazer_propostas_ignoradas").input_schema, {
+    type: "object",
+    properties: { ids: { type: "array", items: { type: "string" }, description: "Ids das propostas." } },
+    required: ["ids"],
+  });
+});
