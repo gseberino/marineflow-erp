@@ -1,7 +1,7 @@
 // "Me acorde se" (secretário, Passo 4, P4.2, 16/10/2026) — o detector e o texto, com as mensagens REAIS de 02–15/10
 // (SELECT em whatsapp_messages; telefones de mentira). O que se protege (spec §3.2): Miguel 07/10 09:02 acorda às
-// 09:45 com a proposta pronta e o cartão; 05/10 08:28 acorda sem cartão (janela da manhã); a vendedora da Vivo acorda
-// (falso aceito, documentado); respondido em 25 min não; fornecedor não; "se aprovado" não; mensagem de ontem não;
+// 09:45 com a proposta pronta e o cartão; 05/10 08:28 acorda sem cartão (janela da manhã); a vendedora da Vivo (20/10/2026:
+// não acorda mais — pareceVendedor); respondido em 25 min não; fornecedor não; "se aprovado" não; mensagem de ontem não;
 // o mesmo contato com duas mensagens = um disparo de pressa; a desistência dispara na hora (D2 decide o destino);
 // D11 não acorda duas vezes sobre a mesma mensagem.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
@@ -43,7 +43,7 @@ Deno.test("palavras: normalizar não corta e guarda o '?'; gatilho por tipo de c
   assertEquals(gatilhoDaMensagem("Transdutor 10 pinos para furuno fish finder (fcv-228)\nSe aprovado,  serviço vai ser feito aqui na oficina", false), null, "condicional");
   assertEquals(gatilhoDaMensagem("[audio]", true), null);
   assertEquals(gatilhoDaMensagem("Fechar o pedido somente do cerbo?", false), null, "falar de fechar não é querer fechar");
-  // a vendedora da Vivo: "hoje" + "?" num lead — acorda (falso aceito pela spec, 1 em 7)
+  // a vendedora da Vivo: "hoje" + "?" num lead — a palavra está lá (o disparo não sai: pareceVendedor, 20/10/2026)
   assertEquals(gatilhoDaMensagem("Oii Sou a Allana, Consultora Empresarial da Vivo. Eu to entrando em contato com voce hoje, por que eu identifiquei que o seu contrato com a TIM, esta chegando ao fim, e nesse período *vai haver reajuste automático de valor*. Eu tenho aqui ofertas para voce pag?", false), "pressa");
 });
 
@@ -87,6 +87,25 @@ Deno.test("fica de fora: respondido, fornecedor, conversa de todo dia, mensagem 
   assertEquals(disparosDaConversa(conversa({ recebidas: [{ em: br("07", "09:30"), body: MIGUEL_0902 }] }), new Date(br("07", "09:45")), 10).length, 1);
 });
 
+// (20/10/2026) O falso positivo de 20/10 (e o de 02/10): contato SEM cadastro de cliente que se apresenta vendendo não
+// acorda — pelo nome do contato ou pelo texto de hoje. O cliente cadastrado não passa pela regra; os leads reais do período
+// (Josemar 20/10 09:58, o filtro de 09/10) continuam acordando.
+Deno.test("vendedor sem cadastro não acorda (Ketelyn 20/10, Allana 02/10); cliente cadastrado e leads reais acordam", () => {
+  const ketelyn = "Oii Sou a Ketelyn, Consultora Empresarial da Vivo. Eu to entrando em contato com voce hoje, por que eu identifiquei que o seu contrato com a Tim, esta chegando ao fim, e *nesse período tem um reajuste automático no valor*. Eu tenho aqui ofertas para voce pagar menos com mais benefícios. Posso te enviar um orçamento pra voce analisar sem compromisso?";
+  const agora = new Date(br("20", "12:00"));
+  const lead = { cliente: false, client_id: null, ultimaSaidaEm: null };
+  assertEquals(gatilhoDaMensagem(ketelyn, false), "pressa", "a palavra continua lá");
+  assertEquals(disparosDaConversa(conversa({ ...lead, nome: "Ketelyn Consultora empresarial", recebidas: [{ em: br("20", "11:17"), body: ketelyn }] }), agora, 30), []);
+  assertEquals(disparosDaConversa(conversa({ ...lead, nome: "Ketelyn", recebidas: [{ em: br("20", "11:17"), body: ketelyn }] }), agora, 30), [], "só o texto já diz");
+  assertEquals(disparosDaConversa(conversa({ ...lead, nome: "Allana Marques", recebidas: [{ em: br("20", "11:17"), body: ketelyn.replace("Ketelyn", "Allana") }] }), agora, 30), []);
+  // o lead de verdade
+  const josemar = disparosDaConversa(conversa({ ...lead, nome: "Josemar Santos", recebidas: [{ em: br("20", "09:58"), body: "Você teria disponibilidade de falarmos hoje?" }] }), new Date(br("20", "10:30")), 30);
+  assertEquals(josemar.map((d) => [d.tipo, d.gatilho, d.esperaMin]), [["pressa", "pressa", 32]]);
+  assertEquals(disparosDaConversa(conversa({ ...lead, nome: "Paulo  Chave Digital", recebidas: [{ em: br("09", "08:28"), body: "Tem disponibilidade hoje pela manhã ou início da tarde pra trocar o filtro?" }] }), new Date(br("09", "09:00")), 30).length, 1);
+  // cliente cadastrado com "consultor" no nome do contato: a regra não vale para ele
+  assertEquals(disparosDaConversa(conversa({ nome: "Miguel Consultor", recebidas: [{ em: br("07", "09:02"), body: MIGUEL_0902 }] }), new Date(br("07", "09:45")), 30).length, 1);
+});
+
 Deno.test("o mesmo contato com duas mensagens com a palavra = um disparo (a primeira desde a última resposta)", () => {
   const c = conversa({ ultimaSaidaEm: br("01", "18:00"), recebidas: [{ em: br("02", "12:10"), body: "🎤 Gustavo, você consegue me enviar um orçamento hoje ainda?" }, { em: br("02", "15:00"), body: "Consegue hoje?" }] });
   const d = disparosDaConversa(c, new Date(br("02", "16:00")), 30);
@@ -103,7 +122,7 @@ Deno.test("texto do acorde: Miguel 07/10 às 09:45 com a proposta pronta, o sina
     '*Miguel quer fechar hoje.* Áudio às 09:02: "Vamos deixar isto da câmera para depois, porque eu preciso de fechar a solução completa hoje, ou consigo, ou com outras hipóteses que eu tenho." Está há 43 min sem resposta.',
     "Proposta pronta: *ORÇ-00113*, R$ 105.603,90 (sinal de R$ 103.301,32 na aprovação; validade até 07/10). Também aberto: ORÇ-00103, R$ 58.310,05.",
     "Ligue agora: +351900000422",
-    '*sim* = mando o PDF do ORÇ-00113 com: "Miguel, segue a proposta completa (ORÇ-00113). Se estiver de acordo, confirmo o início com o sinal." · *não* = deixo com você',
+    '*sim <seu PIN>* = mando o PDF do ORÇ-00113 com: "Miguel, segue a proposta completa (ORÇ-00113). Se estiver de acordo, confirmo o início com o sinal." · *não* = deixo com você',
   ].join("\n"));
   assertEquals(a.cartao, { service_order_id: "orc-113", numero: "ORÇ-00113", legenda: legendaDoPdf("Miguel", "ORÇ-00113") });
   // sem "pedido de sim/não" no texto: letras e palavras, nunca 1/2
@@ -116,7 +135,7 @@ Deno.test("cartão só com o dono livre, depois das 09:30 e com orçamento; desi
   const [d] = disparosDaConversa(c, cedo, 30);
   const semCartao = textoDoAcordeDeCliente({ nome: "Miguel", disparo: d, orcamentos: ORCS, telefone: "+351900000422", podeCartao: true, agora: cedo });
   assertEquals(semCartao.cartao, null, "08:58 = janela da manhã");
-  assert(!semCartao.texto.includes("*sim*"));
+  assert(!semCartao.texto.includes("*sim"));
   assertStringIncludes(semCartao.texto, "*Miguel pede para hoje.* Mensagem às 08:28");
   const tarde = new Date(br("05", "10:00"));
   assertEquals(textoDoAcordeDeCliente({ nome: "Miguel", disparo: d, orcamentos: ORCS, telefone: null, podeCartao: false, agora: tarde }).cartao, null, "dono ocupado");

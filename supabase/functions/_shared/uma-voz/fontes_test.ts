@@ -44,6 +44,10 @@ Deno.test("consentimento do banco: ≤ 7 dias na linha Hoje (todo dia); 8–30 n
 Deno.test("sistema: a manhã que não chegou e a volta longa do WhatsApp são o MESMO assunto (um acorde por dia)", () => {
   const manha = avisoResumoNaoChegou(DIA, "t");
   const volta = avisoDaVoltaDoWhatsApp({ desde: "2026-10-21T05:45:00.000Z", ate: "2026-10-21T11:45:00.000Z" }, "t");
+  // (20/10/2026) o motivo vai nos dados (a linha do guardado diz qual); a chave é a mesma (um aviso por dia, qualquer motivo)
+  assertEquals(manha.dados, { motivo: "whatsapp_fora" });
+  const quebrou = avisoResumoNaoChegou(DIA, "t", "erro_na_montagem");
+  assertEquals([quebrou.chave, quebrou.assunto, quebrou.dados], [manha.chave, "sistema", { motivo: "erro_na_montagem" }]);
   assertEquals(manha.assunto, "sistema");
   assertEquals(volta.assunto, "sistema");
   assertEquals([manha.destino, volta.destino], ["acorde", "acorde"]);

@@ -30,6 +30,24 @@ export function emBrasilia(agora: Date): { dia: string; dow: number; min: number
   return { dia: d.toISOString().slice(0, 10), dow: d.getUTCDay(), min: d.getUTCHours() * 60 + d.getUTCMinutes() };
 }
 
+/**
+ * Minutos entre duas tentativas da fila, medidos na produção. O worker reagenda +5 min, mas roda de 5 em 5 min
+ * (cron) e a nova hora cai segundos DEPOIS da volta seguinte: na prática a tentativa sai 10 min depois (resumo de
+ * 09/10 e 13/10: 07:35, 07:45, 07:55, e desistiu). Morava em ai-business-monitor/horario.ts (lá é reexportado).
+ */
+export const INTERVALO_DA_FILA_MIN = 10;
+
+/**
+ * Quantas tentativas cabem até as 20h de Brasília, para a fila parar de tentar antes da noite (o vigia e, desde o
+ * P4.5, todo acorde que vai pela fila). A 1ª sai na próxima volta do worker (até 5 min); as outras, de 10 em 10 min.
+ * Mínimo 1.
+ */
+export function tentativasAteAs20h(agora: Date): number {
+  const fim = new Date(`${emBrasilia(agora).dia}T20:00:00-03:00`).getTime();
+  const minutos = (fim - agora.getTime()) / 60_000;
+  return Math.max(1, Math.floor((minutos - 5) / INTERVALO_DA_FILA_MIN) + 1);
+}
+
 /** Das 07:30 às 09:29 de Brasília, qualquer dia: só a manhã pergunta. */
 export function naJanelaDaManha(agora: Date): boolean {
   const { min } = emBrasilia(agora);

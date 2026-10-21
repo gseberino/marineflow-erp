@@ -8,8 +8,10 @@
 //
 // EM SOMBRA (a manhã/o fechamento só GUARDAM o texto novo; o dono recebe o de sempre): o texto guardado mostra as
 // linhas, e nada vira "entregue" — a migration 20261016120000 faz a sombra sem fila marcar "incluido" (mostrado na
-// mensagem-sombra), que não volta a aparecer e não conta como entregue. Com a voz única ligada de verdade (P4.5),
-// só a mensagem que vai para a fila marca, com o id dela.
+// mensagem-sombra), que não volta a aparecer e não conta como entregue. Com a voz única ligada de verdade (P4.5,
+// 20/10/2026), a manhã nova e o fechamento enviados leem o guardado do modo 'ligado' e marcam com o id da FILA
+// (a manhã pelo insert dela; a tarde pela chave secretario_tarde:<dia>:<telefone> — idDaFilaPelaChave): 'entregue'
+// só quando a fila disser 'sent'; mensagem que não saiu = o guardado volta e vai na próxima.
 // Nada aqui derruba a mensagem: erro de leitura = sem o bloco (o guardado continua guardado para a próxima).
 
 import { ddmm, umaLinha } from "../secretario/base.ts";
@@ -91,9 +93,8 @@ export function linhaDoGuardado(a: AvisoGuardado, hoje: string): string {
       return `promessa sua${nome ? ` a ${umaLinha(nome, 30)}` : ""}${promessa ? `: "${umaLinha(promessa, 40)}"` : ""}`;
     }
     case "conexao": {
-      const de = typeof d.desde === "string" ? d.desde : null;
-      const ate = typeof d.ate === "string" ? d.ate : null;
-      return de && ate ? `o WhatsApp ficou fora das ${horaBR(new Date(de))} às ${horaBR(new Date(ate))}` : "o WhatsApp ficou fora do ar";
+      const q = trechoDaQueda(d, hoje);
+      return q ? `o WhatsApp ficou fora ${q}` : "o WhatsApp ficou fora do ar";
     }
     case "email": {
       const quem = a.assunto.replace(/^(golpe|email):/, "");
@@ -129,12 +130,57 @@ export function linhaDoGuardado(a: AvisoGuardado, hoje: string): string {
         const n = /\*?(\d+)\*? NF-e/.exec(texto)?.[1];
         return `${n ?? "uma"} NF-e ${n && n !== "1" ? "rejeitadas" : "rejeitada"} nas últimas 24 h`;
       }
-      if (a.assunto === "sistema") return `a manhã de ${ddmm(a.dia)} não chegou (WhatsApp fora do ar)`;
+      if (a.assunto === "sistema") {
+        return `a manhã de ${ddmm(a.dia)} não chegou (${d.motivo === "erro_na_montagem" ? "erro ao montar" : "WhatsApp fora do ar"})`;
+      }
       return limpar(texto) || "um aviso do vigia";
     }
     default:
       return limpar(texto) || `um aviso (${a.fonte})`;
   }
+}
+
+/**
+ * "das 12:45 às 14:05" (hoje; de ontem, "… de ontem"; antes, "… de dd/mm") ou "de 16/10 08:45 a 20/10 10:00" (a queda
+ * que atravessou dias: em 20/10/2026 o fechamento disse "das 08:45 às 10:00" de uma queda que começou em 16/10).
+ * null sem as horas.
+ */
+function trechoDaQueda(d: Record<string, unknown>, hoje: string): string | null {
+  const de = typeof d.desde === "string" && !Number.isNaN(Date.parse(d.desde)) ? new Date(d.desde) : null;
+  const ate = typeof d.ate === "string" && !Number.isNaN(Date.parse(d.ate)) ? new Date(d.ate) : null;
+  if (!de || !ate) return null;
+  const [dDe, dAte] = [diaBR(de), diaBR(ate)];
+  if (dDe !== dAte) return `de ${ddmm(dDe)} ${horaBR(de)} a ${ddmm(dAte)} ${horaBR(ate)}`;
+  const ontem = new Date(Date.parse(`${hoje}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+  return `das ${horaBR(de)} às ${horaBR(ate)}${dAte === hoje ? "" : dAte === ontem ? " de ontem" : ` de ${ddmm(dAte)}`}`;
+}
+
+/** "17/10", "17/10 e 18/10", "17/10, 18/10 e 19/10". */
+function listaDeDias(dias: string[]): string {
+  const d = dias.map(ddmm);
+  return d.length <= 1 ? (d[0] ?? "") : `${d.slice(0, -1).join(", ")} e ${d[d.length - 1]}`;
+}
+
+/**
+ * (20/10/2026) Os avisos de sistema (as quedas do WhatsApp e as manhãs que não chegaram) numa linha só. Na queda de 16 a
+ * 20/10 a voz ligada guardaria "a manhã de 17/10 não chegou", "…de 18/10…", "…de 19/10…" e a volta do WhatsApp — quatro
+ * linhas do mesmo fato, que tomariam o lugar dos outros avisos. Um aviso só = a linha de sempre (linhaDoGuardado).
+ */
+export function linhaDoSistema(avisos: AvisoGuardado[], hoje: string): string {
+  if (avisos.length === 1) return linhaDoGuardado(avisos[0], hoje);
+  const quedas = avisos.filter((a) => a.fonte === "conexao")
+    .sort((a, b) => String(a.dados?.desde ?? "").localeCompare(String(b.dados?.desde ?? "")))
+    .map((a) => trechoDaQueda(a.dados ?? {}, hoje)).filter((q): q is string => !!q);
+  const manhas = avisos.filter((a) => a.fonte !== "conexao");
+  const dias = [...new Set(manhas.map((a) => a.dia))].sort();
+  const partes: string[] = [];
+  if (quedas.length) partes.push(`o WhatsApp ficou fora do ar ${quedas.join(" e ")}`);
+  else if (avisos.some((a) => a.fonte === "conexao")) partes.push("o WhatsApp ficou fora do ar");
+  if (dias.length) {
+    const erro = manhas.every((a) => a.dados?.motivo === "erro_na_montagem");
+    partes.push(`${dias.length === 1 ? `a manhã de ${listaDeDias(dias)} não chegou` : `as manhãs de ${listaDeDias(dias)} não chegaram`}${erro ? " (erro ao montar)" : ""}`);
+  }
+  return partes.join("; ") || "o sistema ficou fora do ar";
 }
 
 /** O telefone de um assunto "contato:<telefone>" (null para os outros). */
@@ -175,6 +221,12 @@ export function planoDoGuardado(p: {
   const max = p.max ?? 3;
   const plano: PlanoDoGuardado = { linhas: [], escritorio: [], mostrados: [], doEscritorio: [], resolvidos: [], restantes: 0 };
   const vistos = new Set<string>();
+  const adiados = new Set<string>();
+  // (20/10/2026) os avisos de sistema que vão aparecer: uma linha só, no lugar do primeiro (linhaDoSistema)
+  const doSistema = p.avisos.filter((a) =>
+    a.assunto === "sistema" && a.destino !== "escritorio" && !(p.resolvidosAgora.has(a.id) && p.regras.guardado_resolvido === "some")
+  );
+  const linhaSistema = doSistema.length ? linhaDoSistema(doSistema, p.hoje) : null;
   for (const a of p.avisos) {
     const resolvido = p.resolvidosAgora.has(a.id);
     if (resolvido && p.regras.guardado_resolvido === "some") {
@@ -193,15 +245,20 @@ export function planoDoGuardado(p: {
       plano.mostrados.push(a.id);
       continue;
     }
-    const linha = linhaDoGuardado(a, p.hoje) + sufixo;
-    // o mesmo assunto duas vezes (dois avisos do mesmo contato no dia): uma linha só
-    const chave = fone ? `fone:${fone}` : linha;
+    const sistema = a.assunto === "sistema" && linhaSistema !== null;
+    const linha = sistema ? linhaSistema! : linhaDoGuardado(a, p.hoje) + sufixo;
+    // o mesmo assunto duas vezes (dois avisos do mesmo contato no dia; as quedas e as manhãs perdidas): uma linha só
+    const chave = fone ? `fone:${fone}` : sistema ? "sistema" : linha;
     if (vistos.has(chave)) {
       plano.mostrados.push(a.id);
       continue;
     }
     if (plano.linhas.length >= max) {
-      plano.restantes++;
+      // (20/10/2026) a linha que ficou para a próxima conta uma vez (o 2º aviso do mesmo contato ou do sistema não soma)
+      if (!adiados.has(chave)) {
+        adiados.add(chave);
+        plano.restantes++;
+      }
       continue;
     }
     vistos.add(chave);
@@ -312,7 +369,8 @@ export async function quaisSeResolveram(admin: Db, avisos: AvisoGuardado[]): Pro
 /**
  * Depois que a mensagem fixa foi gravada (sombra) ou enfileirada (ligado): os resolvidos somem (aviso_resolver) e
  * os mostrados ficam marcados (avisos_incluir_na_mensagem; sem fila = a sombra: "incluido", nunca "entregue").
- * Nunca lança.
+ * (20/10/2026) Ligado SEM o id da fila não marca os mostrados (ficam guardados e voltam na próxima mensagem fixa: a
+ * mais, nunca a menos) — o portão também recusaria. Nunca lança.
  */
 export async function marcarNaMensagem(admin: Db, p: {
   phone: string;
@@ -329,7 +387,7 @@ export async function marcarNaMensagem(admin: Db, p: {
       if (error) throw error;
       r.resolvidos = Number(data?.resolvidos ?? 0);
     }
-    if (p.mostrados.length) {
+    if (p.mostrados.length && (p.modo === "sombra" || p.filaId)) {
       const { data, error } = await admin.rpc("avisos_incluir_na_mensagem", {
         p: {
           phone: p.phone, modo: p.modo, ids: p.mostrados,
@@ -346,6 +404,27 @@ export async function marcarNaMensagem(admin: Db, p: {
   return r;
 }
 
+
+/**
+ * (20/10/2026, P4.5) O id da linha da fila pela chave de idempotência (única: whatsapp_send_queue_dedupe_key_uq). A
+ * tarde entra na fila DENTRO da resumo_tarde_registrar, que devolve o id da tarde e não o da fila; a linha tem a chave
+ * secretario_tarde:<dia>:<telefone> — é por ela que o guardado mostrado fica preso à mensagem que o levou. null = não
+ * achou ou erro (o guardado não é marcado: volta na próxima mensagem). Nunca lança.
+ */
+export async function idDaFilaPelaChave(admin: Db, chave: string): Promise<string | null> {
+  try {
+    const { data, error } = await admin.from("whatsapp_send_queue").select("id").eq("dedupe_key", chave).maybeSingle();
+    if (error || !data?.id) return null;
+    return String(data.id);
+  } catch {
+    return null;
+  }
+}
+
+/** A chave da fila da tarde (a mesma que resumo_tarde_registrar grava — migration 20261015210000). */
+export function chaveDaFilaDaTarde(dia: string, phone: string): string {
+  return `secretario_tarde:${dia}:${phone}`;
+}
 
 /**
  * (16/10/2026) Os contatos que o portão acordou HOJE (assunto contato:<telefone>, situação 'acordou'): telefone → a hora

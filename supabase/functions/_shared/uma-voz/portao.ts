@@ -4,8 +4,12 @@
 // app_settings.voz_unica:
 //   desligado → as fontes avisam o dono como sempre e NÃO registram nada (é o valor com que nasce);
 //   sombra    → avisam como sempre E registram em avisos_do_dono o que o portão faria;
-//   ligado    → o portão decide quem fala. ATÉ O P4.5 'ligado' AGE COMO 'sombra': a manhã e o fechamento
-//               ainda não leem o guardado, e um guardado que ninguém lê seria um aviso descartado.
+//   ligado    → (P4.5, 20/10/2026) o portão decide quem fala: a fonte pergunta ANTES de mandar ao DONO
+//               ('acordar' manda, 'guardar' fica para a próxima mensagem fixa, 'acabar' não manda; portão
+//               ilegível = manda como sempre). A equipe continua recebendo o de sempre.
+//               TRAVA: 'ligado' só vale com quem ENTREGA o guardado no ar — resumo_formato = 'novo' E
+//               fechamento_formato = 'ligado' (vozEfetiva). Sem os dois, 'ligado' age como 'sombra': um
+//               guardado que nenhuma mensagem fixa lê seria um aviso descartado.
 // Valor desconhecido, chave ausente ou erro de leitura = desligado. Três fontes do mesmo padrão: este
 // "desligado", a linha da migration 20261016101000 e a ausência da chave.
 //
@@ -15,9 +19,14 @@
 // app_settings.acompanhar_freio: ligado | desligado (P4.3). AUSENTE = desligado — o código publicado
 // antes da migration não muda nada; a migration cria a chave 'ligado'.
 
+import { CHAVE_DO_FORMATO, lerFormatoDoResumo } from "../secretario/formato.ts";
+import { CHAVE_DO_FECHAMENTO, lerFormatoDoFechamento } from "../secretario/turno.ts";
+
 export const CHAVE_VOZ_UNICA = "voz_unica";
 export const CHAVE_REGRAS = "voz_unica_regras";
 export const CHAVE_FREIO = "acompanhar_freio";
+/** (20/10/2026, P4.5) As chaves de quem entrega o guardado: a trava do 'ligado' (vozEfetiva). */
+export const CHAVES_DOS_CONSUMIDORES = [CHAVE_DO_FORMATO, CHAVE_DO_FECHAMENTO] as const;
 
 export type VozUnica = "desligado" | "sombra" | "ligado";
 /** O modo gravado nas linhas do portão. */
@@ -37,11 +46,23 @@ export function lerVozUnica(v: unknown): VozUnica {
 }
 
 /**
- * O modo em que as fontes registram nesta publicação: null = não registram. 'ligado' registra como
- * 'sombra' até o P4.5 (ver o cabeçalho).
+ * (20/10/2026, P4.5) A voz que vale de verdade: 'ligado' só com a manhã nova (resumo_formato = 'novo') E o fechamento
+ * ligado (fechamento_formato = 'ligado') — são eles que entregam o guardado. Sem os dois, 'ligado' age como 'sombra'
+ * (as fontes mandam como sempre e registram). 'sombra' e 'desligado' passam como estão.
+ */
+export function vozEfetiva(voz: VozUnica, consumidores: { manha: unknown; fechamento: unknown }): VozUnica {
+  if (voz !== "ligado") return voz;
+  return lerFormatoDoResumo(consumidores.manha) === "novo" && lerFormatoDoFechamento(consumidores.fechamento) === "ligado"
+    ? "ligado"
+    : "sombra";
+}
+
+/**
+ * O modo em que as fontes registram: null = não registram (desligado); 'sombra' = registram DEPOIS de mandar (o
+ * que sai não muda); 'ligado' = perguntam ANTES de mandar ao dono. Recebe a voz JÁ efetiva (vozEfetiva).
  */
 export function modoDoRegistro(v: VozUnica): ModoDoPortao | null {
-  return v === "desligado" ? null : "sombra";
+  return v === "desligado" ? null : v;
 }
 
 /** "ligado"/"on"/"true" → true; ausente ou qualquer outra coisa → false. */
@@ -197,5 +218,7 @@ export interface RespostaDoPortao {
   id?: string;
   mensagem?: string | null;
   entregar_a_partir_de?: string | null;
+  /** no 'repetido': a decisão da primeira vez */
+  antes?: string | null;
   erro?: string;
 }

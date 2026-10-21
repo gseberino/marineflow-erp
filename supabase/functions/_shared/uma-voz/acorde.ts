@@ -10,7 +10,9 @@
 //     "orçamento"…) ou "quero fechar" → idem;
 //   · qualquer um que escreveu que fechou com outra empresa ou desistiu → na hora (D2: acorda só com orçamento
 //     aberto de R$ 5 mil ou mais; sem ele, vai na próxima mensagem fixa).
-// Fica de fora: fornecedor, a equipe, condicional ("se aprovado…"), mensagem de ontem (a manhã das 07:30 já a mostra)
+// Fica de fora: fornecedor, a equipe, condicional ("se aprovado…"), mensagem de ontem (a manhã das 07:30 já a mostra),
+// (20/10/2026) o contato SEM cadastro de cliente que se apresenta vendendo (pareceVendedor, pelo nome e/ou pelo texto
+// de hoje: "Ketelyn Consultora empresarial … o seu contrato com a Tim") — fica na lista,
 // e, SÓ para a pressa sem "fechar", a conversa de todo dia (o dono escreveu em 4+ dos últimos 7 dias): "hoje" numa
 // conversa diária é rotina, mas "quero fechar hoje" e "fechei com outra" numa negociação ativa são justamente o caso
 // (ensaio de 16/10: em 07/10 o dono tinha escrito ao Miguel em 4 dos 7 dias; com a exclusão geral, o caso que motivou o
@@ -23,7 +25,7 @@
 // Também aqui: os textos dos acordes de golpe, certificado, NF-e rejeitada e sistema fora do ar.
 
 import { brl, ddmm, umaLinha } from "../secretario/base.ts";
-import { COM_PRESSA, CONDICIONAL, PEDE_PRECO, PEDIDO_DE_LEAD, QUER_FECHAR } from "../secretario/palavras.ts";
+import { COM_PRESSA, CONDICIONAL, PEDE_PRECO, PEDIDO_DE_LEAD, pareceVendedor, QUER_FECHAR } from "../secretario/palavras.ts";
 import { diaBR, horaBR } from "../pdf/datas.ts";
 import { contatoEncerrou } from "../whatsapp/contato-encerrou.ts";
 import { acordeComCartao } from "./janela.ts";
@@ -124,6 +126,8 @@ export function disparosDaConversa(c: ConversaDoAcorde, agora: Date, esperaMin: 
     .filter((r) => !Number.isNaN(ms(r.em)) && ms(r.em) <= agora.getTime() && diaBR(new Date(r.em)) === hoje)
     .filter((r) => Number.isNaN(saida) || ms(r.em) > saida)
     .sort((a, b) => ms(a.em) - ms(b.em));
+  // (20/10/2026) contato sem cadastro de cliente que se apresenta vendendo (nome ou texto de hoje): não acorda
+  if (!c.cliente && pareceVendedor(c.nome, pendentes.map((r) => r.body))) return [];
   const disparos: Disparo[] = [];
   const espera = (r: Recebida) => Math.max(0, Math.floor((agora.getTime() - ms(r.em)) / 60_000));
   const audio = (r: Recebida) => /^\s*(🎤|\[audio\])/u.test(String(r.body ?? ""));
@@ -240,7 +244,9 @@ export function textoDoAcordeDeCliente(p: {
   const comCartao = !!pronta && p.podeCartao && acordeComCartao(p.agora) && d.tipo !== "desistencia";
   if (comCartao) {
     const legenda = legendaDoPdf(p.nome, pronta!.numero);
-    linhas.push(`*sim* = mando o PDF do ${pronta!.numero} com: "${legenda}" · *não* = deixo com você`);
+    // (20/10/2026) o PDF ao cliente é de alto risco: a aprovação pelo WhatsApp é "sim <PIN>" (ai-agent,
+    // resolveWhatsAppConfirmation) — o cartão diz isso, senão o "sim" sozinho voltaria pedindo o PIN
+    linhas.push(`*sim <seu PIN>* = mando o PDF do ${pronta!.numero} com: "${legenda}" · *não* = deixo com você`);
     return { texto: linhas.join("\n"), cartao: { service_order_id: pronta!.id, numero: pronta!.numero, legenda } };
   }
   return { texto: linhas.join("\n"), cartao: null };

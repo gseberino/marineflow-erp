@@ -1,9 +1,10 @@
 // As chaves do portão e as regras do dono (secretário, Passo 4, 15/10/2026). O que se protege: ausente
-// ou estranho = desligado (nada muda); 'ligado' ainda registra como sombra até o P4.5 (senão um guardado
-// que ninguém lê seria descartado); o freio ausente = desligado (código antes da migration não muda
-// nada); cada regra do dono cai no padrão sozinha quando vem ruim; o pedido ao portão corta os tamanhos.
+// ou estranho = desligado (nada muda); (20/10/2026, P4.5) 'ligado' só vale com a manhã nova E o fechamento
+// ligado (vozEfetiva) — sem os dois age como sombra (senão um guardado que ninguém lê seria descartado); o
+// freio ausente = desligado (código antes da migration não muda nada); cada regra do dono cai no padrão
+// sozinha quando vem ruim; o pedido ao portão corta os tamanhos.
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { lerFreio, lerRegras, lerVozUnica, modoDoRegistro, pedidoAoPortao, REGRAS_PADRAO } from "./portao.ts";
+import { lerFreio, lerRegras, lerVozUnica, modoDoRegistro, pedidoAoPortao, REGRAS_PADRAO, vozEfetiva } from "./portao.ts";
 
 Deno.test("voz_unica: valores aceitos, aspas e caixa; o resto é desligado", () => {
   assertEquals(lerVozUnica("sombra"), "sombra");
@@ -12,10 +13,23 @@ Deno.test("voz_unica: valores aceitos, aspas e caixa; o resto é desligado", () 
   for (const v of [undefined, null, "", "on", "off", "true", 1, {}]) assertEquals(lerVozUnica(v), "desligado", String(v));
 });
 
-Deno.test("modo do registro: desligado não registra; sombra e ligado registram como sombra (até o P4.5)", () => {
+Deno.test("modo do registro (20/10/2026): desligado não registra; sombra registra depois; ligado (já efetivo) pergunta antes", () => {
   assertEquals(modoDoRegistro("desligado"), null);
   assertEquals(modoDoRegistro("sombra"), "sombra");
-  assertEquals(modoDoRegistro("ligado"), "sombra");
+  assertEquals(modoDoRegistro("ligado"), "ligado");
+});
+
+Deno.test("vozEfetiva (P4.5): 'ligado' só com resumo_formato='novo' E fechamento_formato='ligado'; senão age como sombra", () => {
+  assertEquals(vozEfetiva("ligado", { manha: "novo", fechamento: "ligado" }), "ligado");
+  assertEquals(vozEfetiva("ligado", { manha: ' "Novo" ', fechamento: " LIGADO " }), "ligado", "aspas e caixa como os leitores das chaves");
+  assertEquals(vozEfetiva("ligado", { manha: "sombra", fechamento: "ligado" }), "sombra", "manhã-sombra não entrega");
+  assertEquals(vozEfetiva("ligado", { manha: "antigo", fechamento: "ligado" }), "sombra", "manhã antiga não entrega");
+  assertEquals(vozEfetiva("ligado", { manha: "novo", fechamento: "sombra" }), "sombra", "fechamento-sombra não entrega");
+  assertEquals(vozEfetiva("ligado", { manha: "novo", fechamento: undefined }), "sombra", "chave ausente = desligado = não entrega");
+  assertEquals(vozEfetiva("ligado", { manha: undefined, fechamento: undefined }), "sombra");
+  // sombra e desligado passam como estão, com qualquer consumidor
+  assertEquals(vozEfetiva("sombra", { manha: "novo", fechamento: "ligado" }), "sombra");
+  assertEquals(vozEfetiva("desligado", { manha: "novo", fechamento: "ligado" }), "desligado");
 });
 
 Deno.test("freio: ligado/on/true liga; ausente ou qualquer outra coisa desliga", () => {

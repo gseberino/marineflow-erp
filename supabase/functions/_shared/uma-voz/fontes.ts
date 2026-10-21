@@ -71,9 +71,12 @@ export function avisoDoConsentimento(conexao: string, dias: number, dia: string,
   };
 }
 
-/** A manhã que não chegou (WhatsApp fora do ar): acorde de sistema, um por dia. */
-export function avisoResumoNaoChegou(dia: string, texto: string): AvisoDaFonte {
-  return { fonte: "vigia_negocio", chave: `sistema:resumo_nao_chegou:${dia}`, assunto: "sistema", destino: "acorde", texto };
+/**
+ * A manhã que não chegou: acorde de sistema, um por dia. `motivo` (20/10/2026): o WhatsApp fora do ar (a fila
+ * desistiu) ou a manhã que quebrou antes de entrar na fila (nenhuma linha) — a linha do guardado diz qual.
+ */
+export function avisoResumoNaoChegou(dia: string, texto: string, motivo: "whatsapp_fora" | "erro_na_montagem" = "whatsapp_fora"): AvisoDaFonte {
+  return { fonte: "vigia_negocio", chave: `sistema:resumo_nao_chegou:${dia}`, assunto: "sistema", destino: "acorde", texto, dados: { motivo } };
 }
 
 // ── saldos a cobrar (balance-reminders) ─────────────────────────────────────────────────────────
