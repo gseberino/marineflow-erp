@@ -24,7 +24,7 @@ import {
 } from "./conexao.ts";
 import { avisoDaVoltaDoWhatsApp } from "../_shared/uma-voz/fontes.ts";
 import { quedaDerrubouAManha, textoDoSistema } from "../_shared/uma-voz/acorde.ts";
-import { lerPortao, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
+import { enfileirarAcorde, lerDonoDaVoz, lerPortao, perguntarAoPortao, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -173,19 +173,29 @@ async function vigiar(db: Db, evo: Evolution): Promise<Response> {
     }
     // Voz única em sombra (secretário, Passo 4, 15/10/2026): a volta do WhatsApp é registrada no portão
     // (avisos_do_dono) com o que ele faria — a queda de 30 min ou mais acorda o dono (assunto "sistema",
-    // um por dia); a curta fica só no sino. Hoje nada vai ao WhatsApp do dono: só o registro. Nunca
+    // um por dia); a curta fica só no sino. Na sombra nada vai ao WhatsApp do dono: só o registro. Nunca
     // derruba o vigia.
+    // (20/10/2026, P4.5) Ligada de verdade: o dono pergunta ao portão e, se acordar, recebe o texto do acorde de
+    // sistema pela fila (chave aviso:<id>; o WhatsApp acabou de voltar). Guardado = vai com a próxima mensagem fixa.
+    // Portão ilegível = como sempre (só o sino).
     if (aviso === "voltou" && anterior?.desde) {
       try {
         const portao = await lerPortao(db);
-        if (portao.modo) {
+        // (16/10/2026, P4.2) com o texto do ACORDE de sistema
+        const ate = agora.toISOString();
+        const doPortao = textoDoSistema({ desde: anterior.desde, ate, manhaNaoChegou: quedaDerrubouAManha(anterior.desde, ate) });
+        const avisoDaVolta = avisoDaVoltaDoWhatsApp({ desde: anterior.desde, ate }, doPortao);
+        if (portao.modo === "ligado") {
+          const dono = await lerDonoDaVoz(db);
+          const fala = dono ? await perguntarAoPortao(db, dono.phone, avisoDaVolta, agora) : null;
+          if (dono && fala?.acordou) {
+            await enfileirarAcorde(db, { phone: dono.phone, texto: doPortao, avisoId: fala.acordou, agora, source: "whatsapp_voltou" });
+          }
+        } else if (portao.modo) {
           const { data: donos } = await db.from("app_users").select("phone_normalized")
             .eq("role", "admin").eq("active", true).eq("ai_whatsapp_enabled", true).not("phone_normalized", "is", null);
-          // (16/10/2026, P4.2) com o texto do ACORDE de sistema (o que sairia com a voz única ligada)
-          const ate = agora.toISOString();
-          const doPortao = textoDoSistema({ desde: anterior.desde, ate, manhaNaoChegou: quedaDerrubouAManha(anterior.desde, ate) });
           await registrarParaTodos(db, portao.modo, ((donos ?? []) as Array<{ phone_normalized: string | null }>).map((d) => d.phone_normalized),
-            [avisoDaVoltaDoWhatsApp({ desde: anterior.desde, ate }, doPortao)], agora);
+            [avisoDaVolta], agora);
         }
       } catch (e) {
         console.warn("[whatsapp-conexao] registro no portão falhou (ignorado):", (e as Error)?.message ?? e);

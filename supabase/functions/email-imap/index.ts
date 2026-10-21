@@ -17,6 +17,10 @@
 // que entrou na fila é registrado no portão (avisos_do_dono): golpe acorda (um por remetente, para
 // sempre); urgente sem golpe vai na próxima mensagem fixa (D1, voz_unica_regras.email_sem_golpe). O que
 // sai não muda. Desligado (o padrão): nada é registrado.
+// (20/10/2026, P4.5) Ligada de verdade (a manhã nova e o fechamento ligado no ar): o DONO pergunta ao portão antes;
+// o golpe que acorda sai com o texto do acorde (pela fila, chave aviso:<id>); o urgente sem golpe fica para a próxima
+// mensagem fixa; o mesmo remetente de golpe não volta a avisar. Portão ilegível = o aviso de sempre. Outros admins com
+// o canal ligado recebem o de sempre.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
@@ -32,7 +36,10 @@ import { extrairDados, fornecedorPelaNota } from "../_shared/email/dados.ts";
 import type { InboundEmail } from "../_shared/email/types.ts";
 import { avisoDoEmail } from "../_shared/uma-voz/fontes.ts";
 import { textoDoGolpe } from "../_shared/uma-voz/acorde.ts";
-import { lerPortao, PORTAO_DESLIGADO, type PortaoDaRodada, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
+import {
+  enfileirarAcorde, falaPeloPortao, lerDonoDaVoz, lerPortao, perguntarAoPortao, PORTAO_DESLIGADO, type PortaoDaRodada, registrarParaTodos,
+} from "../_shared/uma-voz/registrar.ts";
+import type { Dono } from "../_shared/whatsapp/dono.ts";
 import { extractText, getDocumentProxy } from "npm:unpdf@0.12.1";
 
 const corsHeaders = {
@@ -130,8 +137,8 @@ async function jaAvisadoAntes(admin: Db, endereco: string | null | undefined, as
 
 async function avisarUrgente(
   admin: Db, conta: string, remetente: string, assunto: string | null, motivo: string | null, fraude: boolean,
-  /** Voz única: o e-mail (id e endereço) e as chaves do portão lidas na rodada. */
-  voz: { emailId: string; endereco: string | null; portao: PortaoDaRodada },
+  /** Voz única: o e-mail (id e endereço), as chaves do portão lidas na rodada e (ligada) o dono. */
+  voz: { emailId: string; endereco: string | null; portao: PortaoDaRodada; dono?: Dono | null },
 ) {
   const { data: quem } = await admin.from("app_users").select("phone_normalized")
     .eq("active", true).eq("ai_whatsapp_enabled", true).in("role", ["admin"]).not("phone_normalized", "is", null);
@@ -143,14 +150,26 @@ async function avisarUrgente(
     fraude ? "Não pague nem altere dados bancários antes de confirmar por telefone." : null,
     "Me peça \"lê o último e-mail urgente\" para ver o texto.",
   ].filter(Boolean).join("\n");
-  const rows = ((quem ?? []) as { phone_normalized: string }[]).map((u) => ({ phone_normalized: u.phone_normalized, message: texto, source: "email_urgente", priority: 2 }));
+  // (16/10/2026, P4.2) O golpe vai ao portão com o texto do ACORDE; o resto, o de sempre.
+  const doPortao = fraude ? textoDoGolpe({ conta, remetente, assunto }) : texto;
+  const aviso = avisoDoEmail({ emailId: voz.emailId, endereco: voz.endereco ?? "", fraude }, voz.portao.regras, doPortao);
+  const telefones = ((quem ?? []) as { phone_normalized: string }[]).map((u) => u.phone_normalized);
+  // (20/10/2026, P4.5) voz ligada: o dono pergunta antes; só o acorde sai (pela fila, chave aviso:<id>); erro = como sempre
+  const comoSempre: string[] = [];
+  for (const phone of telefones) {
+    if (!falaPeloPortao(voz.portao, voz.dono, phone)) {
+      comoSempre.push(phone);
+      continue;
+    }
+    const fala = await perguntarAoPortao(admin, phone, aviso);
+    if (fala.acordou) await enfileirarAcorde(admin, { phone, texto: doPortao, avisoId: fala.acordou, agora: new Date(), source: "email_urgente" });
+    else if (fala.manda) comoSempre.push(phone);
+  }
+  const rows = comoSempre.map((phone) => ({ phone_normalized: phone, message: texto, source: "email_urgente", priority: 2 }));
   if (rows.length) await admin.from("whatsapp_send_queue").insert(rows);
-  // Voz única em sombra: o aviso já está na fila; registra o que o portão faria. Nunca lança.
-  // (16/10/2026, P4.2) O golpe vai com o texto do ACORDE (o que sairia com a voz única ligada); o resto, o de sempre.
-  if (rows.length && voz.portao.modo) {
-    const doPortao = fraude ? textoDoGolpe({ conta, remetente, assunto }) : texto;
-    await registrarParaTodos(admin, voz.portao.modo, rows.map((r) => r.phone_normalized),
-      [avisoDoEmail({ emailId: voz.emailId, endereco: voz.endereco ?? "", fraude }, voz.portao.regras, doPortao)]);
+  // Voz única em sombra: o aviso já está na fila; registra o que o portão faria. Nunca lança. (Ligada: não registra.)
+  if (rows.length && voz.portao.modo === "sombra") {
+    await registrarParaTodos(admin, voz.portao.modo, rows.map((r) => r.phone_normalized), [aviso]);
   }
 }
 
@@ -224,6 +243,8 @@ servirComCors(async (req) => {
   let porCnpj: Map<string, string> | null = null;
   let jaAvisados = diagnostico ? 0 : await avisadosHoje(admin);
   const portao = diagnostico ? PORTAO_DESLIGADO : await lerPortao(admin);
+  // (20/10/2026, P4.5) o dono só é lido com a voz ligada de verdade (sombra/desligada: nada a mais)
+  const dono = portao.modo === "ligado" ? await lerDonoDaVoz(admin) : null;
   const resultados: Record<string, unknown>[] = [];
 
   for (const conta of (contas ?? []) as any[]) {
@@ -320,7 +341,7 @@ servirComCors(async (req) => {
             if (!repetido) {
               const remetente = match?.name ?? displaySender(email.from);
               await avisarUrgente(admin, conta.address, remetente, email.subject, t.motivo, t.alertaFraude,
-                { emailId: id, endereco: normalizeAddress(email.from.address), portao });
+                { emailId: id, endereco: normalizeAddress(email.from.address), portao, dono });
               await admin.from("email_messages").update({ alerted_at: new Date().toISOString() }).eq("id", id);
               jaAvisados++;
               r.avisados = Number(r.avisados) + 1;

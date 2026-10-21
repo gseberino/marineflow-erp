@@ -19,3 +19,19 @@ Deno.test("a volta do WhatsApp vai ao portão depois do sino, protegida, só com
   assertStringIncludes(resto, "avisoDaVoltaDoWhatsApp({ desde: anterior.desde, ate }, doPortao)");
   assert(fn.indexOf("await lerPortao(db)") > bloco, "a leitura das chaves só acontece na volta");
 });
+
+// (20/10/2026, P4.5) Voz única LIGADA de verdade: só o dono pergunta ao portão; se acordar, o texto do acorde de sistema
+// vai pela fila (chave aviso:<id>, até as 20h); guardado/acabou não saem; portão ilegível = como sempre (só o sino). A
+// sombra continua registrando todos os admins com o canal (e só ela).
+Deno.test("P4.5: a volta acorda o dono pela fila só se o portão acordar; a sombra registra como antes", () => {
+  const ini = fonte.indexOf("async function vigiar(");
+  const fn = fonte.slice(ini, fonte.indexOf("\n}\n", ini));
+  const resto = fn.slice(fn.indexOf('if (aviso === "voltou" && anterior?.desde)'));
+  const ligado = resto.indexOf('if (portao.modo === "ligado") {');
+  const pergunta = resto.indexOf("const fala = dono ? await perguntarAoPortao(db, dono.phone, avisoDaVolta, agora) : null;");
+  const fila = resto.indexOf('await enfileirarAcorde(db, { phone: dono.phone, texto: doPortao, avisoId: fala.acordou, agora, source: "whatsapp_voltou" });');
+  const sombra = resto.indexOf("} else if (portao.modo) {");
+  assert(ligado > 0 && pergunta > ligado && fila > pergunta && sombra > fila, `ordem: ${ligado} ${pergunta} ${fila} ${sombra}`);
+  assertStringIncludes(resto, "if (dono && fala?.acordou) {");
+  assertStringIncludes(resto.slice(sombra), "await registrarParaTodos(db, portao.modo,");
+});

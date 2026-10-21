@@ -322,6 +322,23 @@ Deno.test("lead do site: sem a regex quebrada; destinatários por destinatariosD
   const envio = fn.indexOf("provider.sendText(to, texto)");
   const registro = fn.indexOf("registrarParaTodos(");
   assertEquals(envio > 0 && registro > envio, true, "o registro vem depois do envio");
-  assertStringIncludes(fn, "if (portao.modo)");
-  assertStringIncludes(fn, "CHAVE_VOZ_UNICA, CHAVE_REGRAS, CHAVE_FREIO");
+  assertStringIncludes(fn, 'if (portao.modo === "sombra")');
+  // (20/10/2026) as chaves dos consumidores vêm no MESMO SELECT (a trava do 'ligado')
+  assertStringIncludes(fn, "CHAVE_VOZ_UNICA, CHAVE_REGRAS, CHAVE_FREIO, ...CHAVES_DOS_CONSUMIDORES");
+});
+
+// (20/10/2026, P4.5) Voz única LIGADA de verdade: o dono (se estiver na lista) pergunta ao portão ANTES de receber; só
+// recebe se acordar (ou com o portão ilegível); o envio que falhou reabre; os outros da lista recebem como sempre e
+// ANTES (não esperam o portão). O dono só é lido com a voz ligada.
+Deno.test("lead do site P4.5: o dono pergunta antes; os outros como sempre; envio que falhou reabre", async () => {
+  const fonte = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
+  const ini = fonte.indexOf("async function avisarLeadDoSite(");
+  const fn = fonte.slice(ini, fonte.indexOf("\n}\n", ini));
+  assertStringIncludes(fn, 'const dono = portao.modo === "ligado" ? await lerDonoDaVoz(admin) : null;');
+  const outros = fn.indexOf("await Promise.all(outros.map((to) => provider.sendText(to, texto).catch(() => null)));");
+  const pergunta = fn.indexOf("const fala = await perguntarAoPortao(admin, doDono, aviso, agora);");
+  const manda = fn.indexOf("if (fala.manda) {");
+  const reabre = fn.indexOf("if (!r?.ok && fala.acordou) await reabrirNoPortao(admin, fala.acordou, agora);");
+  assertEquals(outros > 0 && pergunta > outros && manda > pergunta && reabre > manda, true, `ordem: ${outros} ${pergunta} ${manda} ${reabre}`);
+  assertStringIncludes(fn, "const doDono = recipients.find((to) => falaPeloPortao(portao, dono, to)) ?? null;");
 });

@@ -30,15 +30,15 @@ Deno.test("a consulta compara remetente e assunto como foram gravados e olha ale
 // Voz única (secretário, Passo 4, 15/10/2026). O que se protege: o registro no portão vem DEPOIS do
 // aviso entrar na fila e só com o modo ligado; o diagnóstico não lê as chaves. Desligado: nada é
 // registrado (registrar_test.ts) — o aviso é o mesmo de antes.
-Deno.test("voz única: o urgente vai ao portão depois da fila, só com o modo ligado; diagnóstico não lê as chaves", () => {
+Deno.test("voz única: o urgente vai ao portão (sombra) depois da fila; diagnóstico não lê as chaves", () => {
   const ini = fonte.indexOf("async function avisarUrgente(");
   const fn = fonte.slice(ini, fonte.indexOf("\n}\n", ini));
   const fila = fn.indexOf('await admin.from("whatsapp_send_queue").insert(rows)');
   const registro = fn.indexOf("await registrarParaTodos(");
   assert(fila > 0 && registro > fila, "fila → registro");
-  assertStringIncludes(fn, "if (rows.length && voz.portao.modo)");
+  assertStringIncludes(fn, 'if (rows.length && voz.portao.modo === "sombra")');
   assertStringIncludes(fonte, "const portao = diagnostico ? PORTAO_DESLIGADO : await lerPortao(admin);");
-  assertStringIncludes(fonte, "{ emailId: id, endereco: normalizeAddress(email.from.address), portao }");
+  assertStringIncludes(fonte, "{ emailId: id, endereco: normalizeAddress(email.from.address), portao, dono }");
 });
 
 // (16/10/2026, P4.2) O golpe vai ao portão com o texto do acorde; o que entra na fila (o aviso de sempre) não muda.
@@ -47,5 +47,22 @@ Deno.test("P4.2: o golpe registra o texto do acorde; a fila continua com o texto
   const fn = fonte.slice(ini, fonte.indexOf("\n}\n", ini));
   assertStringIncludes(fn, "const doPortao = fraude ? textoDoGolpe({ conta, remetente, assunto }) : texto;");
   assertStringIncludes(fn, "message: texto, source: \"email_urgente\"");
-  assertStringIncludes(fn, "voz.portao.regras, doPortao)]");
+  assertStringIncludes(fn, "voz.portao.regras, doPortao);");
+});
+
+// (20/10/2026, P4.5) Voz única LIGADA de verdade. O que se protege: só o dono (lido só com a voz ligada) pergunta ao
+// portão, ANTES da fila; o golpe que acorda vai pela fila com a chave aviso:<id> e o texto do ACORDE; guardado (o
+// urgente sem golpe, D1) e repetido (o mesmo remetente de golpe) não saem; portão ilegível = o aviso de sempre; os
+// outros admins recebem o de sempre.
+Deno.test("P4.5: o dono pergunta antes da fila; só o acorde sai (chave aviso:<id>); erro = como sempre", () => {
+  const ini = fonte.indexOf("async function avisarUrgente(");
+  const fn = fonte.slice(ini, fonte.indexOf("\n}\n", ini));
+  const pergunta = fn.indexOf("const fala = await perguntarAoPortao(admin, phone, aviso);");
+  const acorde = fn.indexOf('if (fala.acordou) await enfileirarAcorde(admin, { phone, texto: doPortao, avisoId: fala.acordou, agora: new Date(), source: "email_urgente" });');
+  const erro = fn.indexOf("else if (fala.manda) comoSempre.push(phone);");
+  const fila = fn.indexOf('await admin.from("whatsapp_send_queue").insert(rows)');
+  assert(pergunta > 0 && acorde > pergunta && erro > acorde && fila > erro, `ordem: ${pergunta} ${acorde} ${erro} ${fila}`);
+  assertStringIncludes(fn, "if (!falaPeloPortao(voz.portao, voz.dono, phone)) {");
+  assertStringIncludes(fn, "const rows = comoSempre.map((phone) => ({ phone_normalized: phone, message: texto, source: \"email_urgente\", priority: 2 }));");
+  assertStringIncludes(fonte, 'const dono = portao.modo === "ligado" ? await lerDonoDaVoz(admin) : null;');
 });

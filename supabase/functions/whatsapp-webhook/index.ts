@@ -9,8 +9,10 @@ import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { avisoDoLeadDoSite, destinatariosDoAviso, lerMensagemDoSite, type DadosDoSite } from "../_shared/whatsapp/lead-do-site.ts";
 import { avisoDoLeadDoSite as avisoDoLeadNoPortao } from "../_shared/uma-voz/fontes.ts";
 import { emBrasilia } from "../_shared/uma-voz/janela.ts";
-import { CHAVE_FREIO, CHAVE_REGRAS, CHAVE_VOZ_UNICA } from "../_shared/uma-voz/portao.ts";
-import { portaoDasConfiguracoes, registrarParaTodos } from "../_shared/uma-voz/registrar.ts";
+import { CHAVE_FREIO, CHAVE_REGRAS, CHAVE_VOZ_UNICA, CHAVES_DOS_CONSUMIDORES } from "../_shared/uma-voz/portao.ts";
+import {
+  falaPeloPortao, lerDonoDaVoz, perguntarAoPortao, portaoDasConfiguracoes, reabrirNoPortao, registrarParaTodos,
+} from "../_shared/uma-voz/registrar.ts";
 import {
   avisarFalhaPorHttp,
   chamarComprovantesPorHttp,
@@ -144,25 +146,38 @@ async function notifyAssignedReminder(
 // 15/10/2026: a lista de destinatários é lida por destinatariosDoAviso (a regex tinha perdido a barra
 // invertida). Voz única em sombra (app_settings.voz_unica): o aviso que saiu é registrado no portão
 // (avisos_do_dono) — próxima mensagem fixa, ou acorde se o lead pede para hoje/urgente (D6).
+// (20/10/2026, P4.5) Ligada de verdade (a manhã nova e o fechamento ligado no ar): o DONO, se estiver na lista, pergunta
+// ao portão ANTES — só recebe se acordar (envio que falhou = reabre); guardado vai com a próxima mensagem fixa; portão
+// ilegível = como sempre. Os outros da lista recebem como sempre.
 async function avisarLeadDoSite(admin: any, phone: string, dados: DadosDoSite, jaCadastrado: boolean) {
   try {
     const { data: settings } = await admin
       .from("app_settings")
       .select("key, value")
-      .in("key", ["whatsapp_aviso_lead_site", "whatsapp_reminder_recipients", CHAVE_VOZ_UNICA, CHAVE_REGRAS, CHAVE_FREIO]);
+      .in("key", ["whatsapp_aviso_lead_site", "whatsapp_reminder_recipients", CHAVE_VOZ_UNICA, CHAVE_REGRAS, CHAVE_FREIO, ...CHAVES_DOS_CONSUMIDORES]);
     const sMap = Object.fromEntries((settings || []).map((s: any) => [s.key, s.value]));
     if (String(sMap.whatsapp_aviso_lead_site ?? "true").toLowerCase() === "false") return;
     const recipients = destinatariosDoAviso(sMap.whatsapp_reminder_recipients, phone);
     if (recipients.length === 0) return;
     const provider = createWhatsAppProvider();
     const texto = avisoDoLeadDoSite(dados, phone, jaCadastrado);
-    await Promise.all(recipients.map((to) => provider.sendText(to, texto).catch(() => null)));
     const portao = portaoDasConfiguracoes(sMap);
-    if (portao.modo) {
-      const agora = new Date();
-      const pedido = [dados.servico, dados.detalhes].filter(Boolean).join(" ");
-      await registrarParaTodos(admin, portao.modo, recipients,
-        [avisoDoLeadNoPortao({ phone, dia: emBrasilia(agora).dia, mensagem: pedido }, portao.regras, texto)], agora);
+    const agora = new Date();
+    const pedido = [dados.servico, dados.detalhes].filter(Boolean).join(" ");
+    const aviso = avisoDoLeadNoPortao({ phone, dia: emBrasilia(agora).dia, mensagem: pedido }, portao.regras, texto);
+    const dono = portao.modo === "ligado" ? await lerDonoDaVoz(admin) : null;
+    const doDono = recipients.find((to) => falaPeloPortao(portao, dono, to)) ?? null;
+    const outros = recipients.filter((to) => to !== doDono);
+    await Promise.all(outros.map((to) => provider.sendText(to, texto).catch(() => null)));
+    if (doDono) {
+      const fala = await perguntarAoPortao(admin, doDono, aviso, agora);
+      if (fala.manda) {
+        const r = await provider.sendText(doDono, texto).catch(() => null);
+        if (!r?.ok && fala.acordou) await reabrirNoPortao(admin, fala.acordou, agora);
+      }
+    }
+    if (portao.modo === "sombra") {
+      await registrarParaTodos(admin, portao.modo, recipients, [aviso], agora);
     }
   } catch (e) {
     console.error("avisarLeadDoSite failed", e);
