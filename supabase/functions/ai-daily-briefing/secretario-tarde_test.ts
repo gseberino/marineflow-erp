@@ -49,7 +49,9 @@ function falsoAdmin(tabelas: Record<string, Linha[]>, rpcs: Record<string, unkno
     },
     rpc(nome: string, args: unknown) {
       chamadas.push({ nome, args });
-      return Promise.resolve({ data: rpcs[nome] ?? null, error: null });
+      // (20/10/2026) a resposta pode depender do pedido (o guardado da sombra × o do ligado)
+      const r = rpcs[nome];
+      return Promise.resolve({ data: typeof r === "function" ? (r as (a: unknown) => unknown)(args) : r ?? null, error: null });
     },
   };
   return { admin, lidas, chamadas, inseridas };
@@ -227,15 +229,19 @@ Deno.test("só o escritório guardado não tira o dia do calado (e não marca na
   assertEquals(f.chamadas.filter((c) => c.nome === "avisos_incluir_na_mensagem").length, 0);
 });
 
-Deno.test("voz única desligada ou tarde enviada: o guardado nem é lido; o texto é o de antes", async () => {
+Deno.test("voz única desligada ou tarde enviada: o guardado da sombra nem é lido; o texto é o de antes", async () => {
   const desl = falsoAdmin(banco(), { ...RPCS, avisos_para_a_mensagem: GUARDADO });
   await rodarTurnoDaTarde(desl.admin, { agora: AS_1730, pedido: "tarde", dry: false });
   assert(!desl.chamadas.some((c) => c.nome === "avisos_para_a_mensagem"));
   assert(!desl.lidas.includes("avisos_do_dono"));
-  const enviada = falsoAdmin(comVoz(banco({ formato: "ligado", modo: "novo" })), { ...RPCS, avisos_para_a_mensagem: GUARDADO, resumo_tarde_registrar: { ok: true, novo: true, enviado: true } });
+  // (20/10/2026) a tarde enviada lê o guardado do modo LIGADO (vazio com a voz em sombra), nunca o da sombra
+  const soDaSombra = (a: unknown) => ((a as { p: { modo: string } }).p.modo === "sombra" ? GUARDADO : { ok: true, avisos: [] });
+  const enviada = falsoAdmin(comVoz(banco({ formato: "ligado", modo: "novo" })), { ...RPCS, avisos_para_a_mensagem: soDaSombra, resumo_tarde_registrar: { ok: true, novo: true, enviado: true } });
   await rodarTurnoDaTarde(enviada.admin, { agora: AS_1730, pedido: "tarde", dry: false });
-  assert(!enviada.chamadas.some((c) => c.nome === "avisos_para_a_mensagem"), "a tarde enviada não repete o que as fontes já avisaram");
+  assert(!enviada.chamadas.some((c) => c.nome === "avisos_para_a_mensagem" && (c.args as { p: { modo: string } }).p.modo === "sombra"),
+    "a tarde enviada não repete o que as fontes já avisaram (a sombra)");
   assert(!String(registrar(enviada.chamadas)!.texto).includes("Não te interrompi"));
+  assert(!enviada.chamadas.some((c) => c.nome === "avisos_incluir_na_mensagem" || c.nome === "aviso_resolver"), "nada a marcar");
   // o texto da sombra com a voz desligada = o da voz em sombra sem guardado
   const semGuardado = falsoAdmin(comVoz(banco()), { ...RPCS, avisos_para_a_mensagem: { ok: true, avisos: [] } });
   await rodarTurnoDaTarde(semGuardado.admin, { agora: AS_1730, pedido: "tarde", dry: false });
@@ -267,4 +273,50 @@ Deno.test("F1 no fechamento: o cliente que escreveu hoje e está há 4 h sem res
   const off = falsoAdmin({ ...b, app_settings: [...banco().app_settings, { key: "voz_unica_regras", value: '{"sem_resposta_hoje_horas":0}' }] }, { ...RPCS, whatsapp_esperando_resposta: esperando });
   await rodarTurnoDaTarde(off.admin, { agora: AS_1730, pedido: "tarde", dry: false });
   assert(!String(registrar(off.chamadas)!.texto).includes("Sem resposta desde hoje"));
+});
+
+// ─── (20/10/2026, P4.5) A tarde ENVIADA com a voz única ligada ────────────────────────────────────
+// O que se protege: a tarde que sai lê o guardado do modo LIGADO (as fontes seguraram para ela), mostra "Não te
+// interrompi com" e, DEPOIS de gravar e enfileirar (resumo_tarde_registrar), marca os mostrados com o id da linha da
+// FILA (achada pela chave secretario_tarde:<dia>:<telefone>, a mesma que a RPC grava). Sem o id: o resolvido some, os
+// mostrados NÃO são marcados (voltam na próxima mensagem). O guardado que se resolveu some (aviso_resolver) do mesmo jeito.
+Deno.test("P4.5: tarde enviada leva o guardado do ligado e o marca com o id da fila (pela chave da tarde)", async () => {
+  const b = comVoz(banco({ formato: "ligado", modo: "novo" }), "ligado");
+  b.app_settings = [...b.app_settings, { key: "resumo_formato", value: "novo" }];
+  b.whatsapp_send_queue = [{ id: "fila-tarde", dedupe_key: `secretario_tarde:${HOJE}:${DONO.phone}` }];
+  const soDoLigado = (a: unknown) => ((a as { p: { modo: string } }).p.modo === "ligado" ? GUARDADO : { ok: true, avisos: [] });
+  const f = falsoAdmin(b, {
+    ...RPCS, avisos_para_a_mensagem: soDoLigado, resumo_tarde_registrar: { ok: true, novo: true, enviado: true },
+    avisos_incluir_na_mensagem: { ok: true, incluidos: 2 },
+  });
+  const r = await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  const texto = String(registrar(f.chamadas)!.texto);
+  assert(texto.includes('Não te interrompi com: promessa sua a Eng. Rafael B. (Dometic): "Claro, te passo agora!".'), texto);
+  assert(texto.includes("Escritório: o saldo do banco C6 não bate com o sistema (R$ 12,30 de diferença). *escritório*"), texto);
+  const leu = f.chamadas.filter((c) => c.nome === "avisos_para_a_mensagem").map((c) => (c.args as { p: { modo: string } }).p.modo);
+  assertEquals(leu, ["ligado"]);
+  const incluir = f.chamadas.find((c) => c.nome === "avisos_incluir_na_mensagem");
+  const pi = (incluir!.args as { p: Record<string, unknown> }).p;
+  assertEquals([pi.modo, pi.ids, pi.fila_id], ["ligado", ["g-prom", "g-saldo"], "fila-tarde"]);
+  assert(f.chamadas.findIndex((c) => c.nome === "resumo_tarde_registrar") < f.chamadas.findIndex((c) => c.nome === "avisos_incluir_na_mensagem"), "marca DEPOIS de gravar e enfileirar");
+  assertEquals(r.corpo.guardado_na_tarde, 2);
+  // sem a linha da fila (não achada): nada é incluído — o guardado volta na próxima mensagem
+  const sem = falsoAdmin({ ...b, whatsapp_send_queue: [] }, {
+    ...RPCS, avisos_para_a_mensagem: soDoLigado, resumo_tarde_registrar: { ok: true, novo: true, enviado: true },
+  });
+  await rodarTurnoDaTarde(sem.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  assert(!sem.chamadas.some((c) => c.nome === "avisos_incluir_na_mensagem"), "ligado sem o id da fila não marca");
+  // a 2ª corrida do dia (novo = false) não marca nada
+  const segunda = falsoAdmin(b, { ...RPCS, avisos_para_a_mensagem: soDoLigado, resumo_tarde_registrar: { ok: true, novo: false, enviado: true } });
+  await rodarTurnoDaTarde(segunda.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  assert(!segunda.chamadas.some((c) => c.nome === "avisos_incluir_na_mensagem" || c.nome === "aviso_resolver"));
+});
+
+Deno.test("P4.5: tarde rebaixada (a manhã não foi a nova) com a voz ligada não lê nem marca o guardado do ligado", async () => {
+  const b = comVoz(banco({ formato: "ligado", modo: "sombra" }), "ligado");
+  b.app_settings = [...b.app_settings, { key: "resumo_formato", value: "novo" }];
+  const f = falsoAdmin(b, { ...RPCS, avisos_para_a_mensagem: GUARDADO });
+  await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  assert(!f.chamadas.some((c) => c.nome === "avisos_para_a_mensagem"), "a tarde que não sai não consome o guardado do ligado");
+  assert(!String(registrar(f.chamadas)!.texto).includes("Não te interrompi"));
 });

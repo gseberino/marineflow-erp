@@ -72,12 +72,20 @@ Deno.test("a tarde só roda com ?turno=, logo depois do createClient e antes de 
   assert(fonte.indexOf("if (turnoDaUrl !== null) {") < fonte.indexOf('.in("key", ["company_name", "digest_show_low_stock", "quote_validity_days", "resumo_formato"])'));
 });
 
-// (16/10/2026) O guardado do portão na manhã: só a manhã-SOMBRA o marca (ela não sai: "incluido", nunca "entregue"), e
-// só depois de gravada. O ramo 'novo' e o 'antigo' não o chamam (com a voz única em sombra as fontes já avisaram o dono).
-Deno.test("guardado na manhã: só no ramo sombra, depois de registrarManha; nenhum outro lugar", () => {
+// (16/10/2026) O guardado do portão na manhã-SOMBRA: marcado depois de gravada (ela não sai: "incluido", nunca
+// "entregue"). (20/10/2026, P4.5) A manhã nova ENVIADA marca o guardado da voz LIGADA com o id da linha da fila do
+// dono — só DEPOIS do insert, só na 1ª gravação do dia (manhaGravadaAgora), só se o dono recebeu o texto novo e só com
+// guardado do modo ligado. O ramo 'antigo' não chama nenhum dos dois.
+Deno.test("guardado na manhã: sombra depois de registrarManha; ligado depois da fila, com o id da linha do dono", () => {
   const sombra = bloco('if (manhaNova && donoDaManha && formato === "sombra") {', "// O resumo entra no histórico");
   assertStringIncludes(sombra, "const gravada = await registrarManha(admin");
   assertStringIncludes(sombra, "if (gravada.ok) guardadoNaSombra = await marcarGuardadoDaManha(admin, { dono: donoDaManha, manha: manhaNova, novo: gravada.novo });");
   assert(sombra.indexOf("registrarManha(") < sombra.indexOf("marcarGuardadoDaManha("));
-  assertEquals((fonte.match(/marcarGuardadoDaManha\(admin/g) ?? []).length, 1);
+  assertEquals((fonte.match(/marcarGuardadoDaManha\(admin/g) ?? []).length, 2);
+  // o ligado: depois do insert (que agora devolve o telefone de cada linha), com as quatro condições
+  const fila = fonte.indexOf('await admin.from("whatsapp_send_queue").insert(rows).select("id, phone_normalized");');
+  const ligado = fonte.indexOf('if (manhaNova?.guardado?.modo === "ligado" && donoDaManha && formato === "novo" && textoNovoDoDono && manhaGravadaAgora) {');
+  assert(fila > 0 && ligado > fila, "o guardado ligado só é marcado depois de enfileirar");
+  assertStringIncludes(fonte, "guardadoNaManha = await marcarGuardadoDaManha(admin, { dono: donoDaManha, manha: manhaNova, novo: true, filaId: filaDoDono });");
+  assertStringIncludes(fonte, "manhaGravadaAgora = r.ok && r.novo;");
 });

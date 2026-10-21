@@ -52,7 +52,8 @@ Deno.test("manhã com guardado: o bloco depois do 'Na rua', abaixo de 1.000 cara
   const linhas = m.texto.split("\n");
   assertEquals(linhas[0], "Bom dia! Quinta, 15/10. Hoje 3 coisas pedem você.");
   assertEquals(linhas[1], "Na rua: R$ 21.026,00 vencidos (5).");
-  assertEquals(linhas[2], "Guardei 1 aviso para não te interromper: o WhatsApp ficou fora das 20:10 às 21:30.");
+  // (20/10/2026) a queda de ontem diz "de ontem"
+  assertEquals(linhas[2], "Guardei 1 aviso para não te interromper: o WhatsApp ficou fora das 20:10 às 21:30 de ontem.");
   assert(m.texto.length <= META_DE_CARACTERES, `${m.texto.length}`);
   assertEquals(m.guardado?.plano.mostrados, ["a1", "a2"]);
   assertEquals(m.guardado?.plano.resolvidos, ["a3"], "D8: a promessa já cumprida some");

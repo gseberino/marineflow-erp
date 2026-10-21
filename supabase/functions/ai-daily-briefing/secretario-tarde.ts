@@ -30,7 +30,8 @@ import {
 } from "./secretario-tarde-regras.ts";
 import type { OpcoesDoHistorico } from "./secretario-selecao.ts";
 import {
-  acordadosDeHoje, type AvisoGuardado, lerGuardado, marcarNaMensagem, planoDoGuardado, type PlanoDoGuardado, quaisSeResolveram,
+  acordadosDeHoje, type AvisoGuardado, chaveDaFilaDaTarde, idDaFilaPelaChave, lerGuardado, marcarNaMensagem, planoDoGuardado,
+  type PlanoDoGuardado, quaisSeResolveram,
 } from "../_shared/uma-voz/guardado.ts";
 import { type ModoDoPortao, REGRAS_PADRAO, type RegrasDaVozUnica } from "../_shared/uma-voz/portao.ts";
 import { lerPortao } from "../_shared/uma-voz/registrar.ts";
@@ -131,7 +132,8 @@ const SEM_PORTAO: DoPortaoNaTarde = { modo: null, regras: { ...REGRAS_PADRAO }, 
 function fonesComLetra(...listas: LinhaComLetra[][]): Set<string> {
   const s = new Set<string>();
   for (const l of listas.flat()) {
-    const f = /^fone:(d+)$/.exec(l.referencia)?.[1];
+    // (20/10/2026) a regex tinha perdido a barra (`(d+)` casava "fone:ddd"): nenhum telefone com letra era reconhecido
+    const f = /^fone:(\d+)$/.exec(l.referencia)?.[1];
     if (f) s.add(f);
   }
   return s;
@@ -288,16 +290,21 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
   // "Se o dono estiver no meio de uma conversa, espera até 20 min": só faz sentido quando vai enviar
   if (!p.dry && enviar && conversa && tentativa < 3) return ok({ motivo: "esperando_conversa", turno, tentativa });
 
-  // (16/10/2026) o portão: as regras do dono (F1, F3, F5, F7) e, só quando a tarde NÃO sai (sombra), o guardado e os
-  // acordes de hoje — com a voz única em sombra as fontes já avisaram o dono; a tarde enviada não os repete (P4.5)
+  // (16/10/2026) o portão: as regras do dono (F1, F3, F5, F7) e o guardado + os acordes de hoje:
+  //   · tarde que NÃO sai (sombra/rebaixada): os da SOMBRA, só com a voz única em sombra;
+  //   · (20/10/2026, P4.5) tarde ENVIADA: os do modo LIGADO — com a voz ligada as fontes seguraram para ela. Lidos com a
+  //     chave em 'ligado' ou 'sombra' (voltar atrás é 'sombra': o que ficou guardado enquanto ela estava ligada não se
+  //     perde); 'desligado' = nada lido, como antes; sem linha 'ligado' = nada muda. O guardado da sombra nunca vai na
+  //     tarde enviada (as fontes já tinham avisado).
   const voz = await lerPortao(admin);
   const lido = await lerTudoDaTarde(admin, { agora: p.agora, hoje, turno, dono, modo: manha.modo, cfg, regras: voz.regras });
   const pergunta = ehDiaDaPerguntaDaSemana(hoje);
-  const doPortao: DoPortaoNaTarde = { modo: voz.modo, regras: voz.regras, guardado: null, acordados: new Map() };
-  if (!enviar && voz.modo) {
-    const avisos = await lerGuardado(admin, { phone: dono.phone, modo: voz.modo, mensagem: "fechamento", agora: p.agora });
+  const modoDoGuardado = enviar ? (voz.voz !== "desligado" ? "ligado" : null) : voz.modo === "sombra" ? "sombra" : null;
+  const doPortao: DoPortaoNaTarde = { modo: modoDoGuardado, regras: voz.regras, guardado: null, acordados: new Map() };
+  if (modoDoGuardado) {
+    const avisos = await lerGuardado(admin, { phone: dono.phone, modo: modoDoGuardado, mensagem: "fechamento", agora: p.agora });
     if (avisos) doPortao.guardado = { avisos, resolvidos: avisos.length ? await quaisSeResolveram(admin, avisos) : new Set() };
-    doPortao.acordados = await acordadosDeHoje(admin, { phone: dono.phone, modo: voz.modo, dia: hoje });
+    doPortao.acordados = await acordadosDeHoje(admin, { phone: dono.phone, modo: modoDoGuardado, dia: hoje });
   }
   // (16/10/2026, Passo 5) o lote semanal da papelada: só com a chave ≠ desligado e no último dia útil da semana (o dia
   // da pergunta). Falhar a leitura = a tarde de sempre, sem lote. A linha só vai no texto que o dono RECEBE com a chave
@@ -369,8 +376,18 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
   // (16/10/2026) o guardado mostrado na tarde-sombra fica "incluido" (nunca "entregue": nada saiu); o resolvido some.
   // Só na 1ª gravação do dia. Nunca lança.
   let guardadoMarcado = 0;
-  if (r.novo && !r.enviado && m.guardado && (m.guardado.mostrados.length || m.guardado.resolvidos.length)) {
+  if (r.novo && !r.enviado && m.guardado?.modo === "sombra" && (m.guardado.mostrados.length || m.guardado.resolvidos.length)) {
     guardadoMarcado = (await marcarNaMensagem(admin, { phone: dono.phone, modo: m.guardado.modo, mostrados: m.guardado.mostrados, resolvidos: m.guardado.resolvidos })).incluidos;
+  }
+  // (20/10/2026, P4.5) a tarde ENVIADA levou o guardado da voz ligada: "incluido" com o id da linha da FILA (a RPC
+  // enfileira na mesma transação e devolve o id da tarde; a linha da fila tem a chave secretario_tarde:<dia>:<telefone>).
+  // "entregue" só quando a fila disser 'sent'; sem o id, os mostrados não são marcados e voltam na próxima mensagem.
+  let guardadoNaTarde = 0;
+  if (r.novo && r.enviado && m.guardado?.modo === "ligado" && (m.guardado.mostrados.length || m.guardado.resolvidos.length)) {
+    const filaId = m.guardado.mostrados.length ? await idDaFilaPelaChave(admin, chaveDaFilaDaTarde(hoje, dono.phone)) : null;
+    guardadoNaTarde = (await marcarNaMensagem(admin, {
+      phone: dono.phone, modo: "ligado", mostrados: m.guardado.mostrados, resolvidos: m.guardado.resolvidos, filaId,
+    })).incluidos;
   }
 
   // o que foi enviado entra no histórico da conversa do assistente ("e o B?" tem a que se referir); falha só loga
@@ -390,7 +407,8 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
   return ok({
     turno, formato, modo_da_manha: manha.modo, gravado: r.novo === true, enviado: r.enviado === true, calado: r.calado === true,
     rebaixado, conversa_ativa: conversa, tentativa, letras: letras.length, historico,
-    ...(m.guardado ? { guardado_na_sombra: guardadoMarcado } : {}),
+    ...(m.guardado?.modo === "sombra" ? { guardado_na_sombra: guardadoMarcado } : {}),
+    ...(m.guardado?.modo === "ligado" ? { guardado_na_tarde: guardadoNaTarde } : {}),
     ...(loteGravado ? { lote: loteGravado } : {}),
   });
 }

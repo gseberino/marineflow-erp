@@ -173,8 +173,12 @@ export function montarDosDados(p: {
 }
 
 /**
- * (16/10/2026) O guardado para a manhã: só quando o texto novo NÃO sai (sombra) e a voz única registra. Nunca lança
- * (erro = null: a manhã sai sem o bloco e o guardado espera a próxima).
+ * O guardado para a manhã. Nunca lança (erro = null: a manhã sai sem o bloco e o guardado espera a próxima).
+ *   · manhã-sombra (o texto novo NÃO sai): o guardado da SOMBRA, só com a voz única em sombra (16/10/2026);
+ *   · (20/10/2026, P4.5) manhã nova ENVIADA: o guardado do modo LIGADO — com a voz ligada, as fontes seguraram para ela.
+ *     Lido com a chave em 'ligado' OU 'sombra' (voltar atrás é 'sombra': o que ficou guardado enquanto ela estava ligada
+ *     ainda sai — nada se perde); com 'desligado' nada é lido (como antes). Sem linha 'ligado' = lista vazia = o texto
+ *     de sempre. O guardado da sombra nunca vai na manhã enviada (as fontes já tinham avisado: repetiria).
  */
 export async function lerGuardadoDaManha(admin: Admin, p: {
   agora: Date;
@@ -182,23 +186,34 @@ export async function lerGuardadoDaManha(admin: Admin, p: {
   modo: "sombra" | "novo";
   portao: PortaoDaRodada;
 }): Promise<GuardadoLido | null> {
-  // com a manhã 'novo' o texto vai ao dono: com a voz única em sombra as fontes JÁ avisaram (repetiria); o bloco na
-  // manhã enviada é do P4.5 (voz única ligada de verdade)
-  if (p.modo !== "sombra" || !p.portao.modo) return null;
-  const avisos = await lerGuardado(admin, { phone: p.dono.phone, modo: p.portao.modo, mensagem: "manha", agora: p.agora });
+  const modo = p.modo === "novo"
+    ? (p.portao.voz !== "desligado" ? "ligado" : null)
+    : p.portao.modo === "sombra" ? "sombra" : null;
+  if (!modo) return null;
+  const avisos = await lerGuardado(admin, { phone: p.dono.phone, modo, mensagem: "manha", agora: p.agora });
   if (!avisos) return null;
   const resolvidos = avisos.length ? await quaisSeResolveram(admin, avisos) : new Set<string>();
-  return { modo: p.portao.modo, avisos, resolvidos, regras: p.portao.regras };
+  return { modo, avisos, resolvidos, regras: p.portao.regras };
 }
 
 /**
- * (16/10/2026) Depois de GRAVAR a manhã-sombra (só na 1ª gravação do dia): os resolvidos somem e os mostrados ficam
- * "incluido" sem fila (a migration 20261016120000: nunca "entregue", porque nada saiu). Nunca lança.
+ * Depois de gravar a manhã (só na 1ª gravação do dia): os resolvidos somem e os mostrados ficam "incluido". Na sombra
+ * (16/10/2026) sem fila — nunca "entregue", porque nada saiu (migration 20261016120000); (20/10/2026) na manhã enviada,
+ * com o id da linha da FILA do dono (entregue só quando ela disser 'sent'; sem o id, nada é marcado e o guardado volta
+ * na próxima mensagem). Nunca lança.
  */
-export async function marcarGuardadoDaManha(admin: Admin, p: { dono: { phone: string }; manha: ManhaNova; novo: boolean }): Promise<number> {
+export async function marcarGuardadoDaManha(admin: Admin, p: {
+  dono: { phone: string };
+  manha: ManhaNova;
+  novo: boolean;
+  filaId?: string | null;
+}): Promise<number> {
   const g = p.manha.guardado;
   if (!p.novo || !g) return 0;
-  const r = await marcarNaMensagem(admin, { phone: p.dono.phone, modo: g.modo, mostrados: g.plano.mostrados, resolvidos: g.plano.resolvidos });
+  const r = await marcarNaMensagem(admin, {
+    phone: p.dono.phone, modo: g.modo, mostrados: g.plano.mostrados, resolvidos: g.plano.resolvidos,
+    ...(g.modo === "ligado" ? { filaId: p.filaId ?? null } : {}),
+  });
   return r.incluidos;
 }
 

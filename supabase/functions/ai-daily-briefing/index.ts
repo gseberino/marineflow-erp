@@ -1028,10 +1028,13 @@ servirComCors(async (req) => {
     // 'novo': grava ANTES de enviar — as letras do texto precisam existir quando o dono responder. O texto
     // enviado é o GRAVADO (num segundo disparo do mesmo dia, o da primeira vez). Sem gravar, o de sempre.
     let textoNovoDoDono: string | null = null;
+    // (20/10/2026) gravada AGORA (a 1ª do dia): só então o guardado do texto é o que vai na fila
+    let manhaGravadaAgora = false;
     if (manhaNova && donoDaManha && formato === "novo") {
       const recDoDono = (recipients as any[]).find((r) => r.id === donoDaManha!.id);
       const r = await registrarManha(admin, { hoje: hojeBR, dono: donoDaManha, modo: "novo", manha: manhaNova, textoAntigo: messageFor(recDoDono || {}) });
       textoNovoDoDono = r.ok ? r.texto : null;
+      manhaGravadaAgora = r.ok && r.novo;
       if (!textoNovoDoDono) console.warn("[ai-daily-briefing] manhã nova não gravada: o dono recebe o resumo de sempre");
     }
     const textoPara = (rec: any): string =>
@@ -1049,8 +1052,19 @@ servirComCors(async (req) => {
       priority: 4,
       max_attempts: maxTentativas,
     }));
-    const { data: inserted, error: qErr } = await admin.from("whatsapp_send_queue").insert(rows).select("id");
+    const { data: inserted, error: qErr } = await admin.from("whatsapp_send_queue").insert(rows).select("id, phone_normalized");
     if (qErr) throw qErr;
+
+    // (20/10/2026, P4.5) a manhã nova ENVIADA leva o guardado da voz única ligada (secretario.ts, lerGuardadoDaManha):
+    // depois de enfileirar, os mostrados ficam "incluido" com o id da linha da fila do DONO — "entregue" só quando ela
+    // disser 'sent'; se a manhã não sair, a próxima mensagem fixa os leva de novo. Só na 1ª gravação do dia (num 2º
+    // disparo o texto enviado é o da 1ª vez) e só se o dono recebeu o texto novo. Sem guardado: não chama nada.
+    let guardadoNaManha = 0;
+    if (manhaNova?.guardado?.modo === "ligado" && donoDaManha && formato === "novo" && textoNovoDoDono && manhaGravadaAgora) {
+      const filaDoDono = ((inserted ?? []) as Array<{ id: string; phone_normalized: string }>)
+        .find((l) => String(l.phone_normalized) === donoDaManha!.phone)?.id ?? null;
+      guardadoNaManha = await marcarGuardadoDaManha(admin, { dono: donoDaManha, manha: manhaNova, novo: true, filaId: filaDoDono });
+    }
 
     // 'sombra': o de sempre já está na fila; o novo é só guardado (para a comparação lado a lado).
     // Falha aqui só loga.
@@ -1100,7 +1114,12 @@ servirComCors(async (req) => {
       historico: historicoGravado,
       metrics: { scheduled: scheduledCount ?? 0, quotes: quotesCount ?? 0, overdue: overdueCount, overdue_sum: overdueSum, pending: pendingCount ?? 0 },
       ...(formato !== "antigo"
-        ? { secretario: { formato, montada: !!manhaNova, enviada_ao_dono: !!textoNovoDoDono, sombra_gravada: sombraGravada, guardado_na_sombra: guardadoNaSombra } }
+        ? {
+          secretario: {
+            formato, montada: !!manhaNova, enviada_ao_dono: !!textoNovoDoDono, sombra_gravada: sombraGravada, guardado_na_sombra: guardadoNaSombra,
+            ...(guardadoNaManha ? { guardado_na_manha: guardadoNaManha } : {}),
+          },
+        }
         : {}),
     });
   } catch (e: any) {
