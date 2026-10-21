@@ -11,6 +11,16 @@ vi.mock('@/components/ClientFormDialog', () => ({
     open ? <div role="dialog">{client ? `editando ${client.name}` : `novo ${initialName ?? ''}`}</div> : null,
 }));
 
+// Saldo e recentes vêm do banco; aqui o teste decide o que eles devolvem.
+const extras = vi.hoisted(() => ({
+  saldo: undefined as undefined | { emAberto: number; vencidos: number; valorVencido: number },
+  recentes: [] as string[],
+}));
+vi.mock('@/hooks/use-ficha-cliente', () => ({
+  useSaldoEmAberto: () => ({ data: extras.saldo }),
+  useClientesRecentes: () => ({ data: extras.recentes }),
+}));
+
 import { ClienteDaOrdem } from './ClienteDaOrdem';
 
 function cliente(p: Partial<Client> & Pick<Client, 'id' | 'name'>): Client {
@@ -110,6 +120,35 @@ describe('ClienteDaOrdem', () => {
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Dados do cliente')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Editar cadastro/ })).toBeInTheDocument();
+  });
+
+  it('saldo em aberto aparece na ficha, com os vencidos destacados', () => {
+    extras.saldo = { emAberto: 2406, vencidos: 1, valorVencido: 1650 };
+    renderiza({ value: 'c1' });
+    const ficha = screen.getByLabelText('Dados do cliente');
+    expect(within(ficha).getByText(/Em aberto: R\$\s?2\.406,00 · 1 vencido \(R\$\s?1\.650,00\)/)).toBeInTheDocument();
+    extras.saldo = undefined;
+  });
+
+  it('sem saldo (ou cargo que não vê o financeiro): nenhuma linha de valores', () => {
+    extras.saldo = undefined;
+    renderiza({ value: 'c1' });
+    expect(screen.queryByText(/Em aberto/)).not.toBeInTheDocument();
+  });
+
+  it('antes de digitar, os últimos clientes vêm no topo e escolhem normalmente', async () => {
+    extras.recentes = ['c2'];
+    const user = userEvent.setup();
+    const { onChange } = renderiza();
+    await user.click(screen.getByRole('combobox'));
+    expect(screen.getByText('Últimos clientes')).toBeInTheDocument();
+    const opcoes = screen.getAllByRole('option');
+    expect(opcoes[0]).toHaveTextContent('Pedro Sem Cadastro');
+    // não repete o recente na lista de todos
+    expect(screen.getAllByRole('option', { name: /Pedro Sem Cadastro/ })).toHaveLength(1);
+    await user.click(opcoes[0]);
+    expect(onChange).toHaveBeenCalledWith('c2', 'Pedro Sem Cadastro');
+    extras.recentes = [];
   });
 
   it('lista ainda carregando → carregada: a tela continua de pé e a ficha aparece', () => {

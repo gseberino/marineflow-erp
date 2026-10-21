@@ -1,6 +1,6 @@
 /* Seções A-D da OS — Identificação, Cliente & Embarcação, Agendamento+Técnicos,
    Problema & Técnico — extraídas 1:1 do ServiceOrderForm (Fase 3, passo 6). */
-import { Camera, ChevronDown, Sparkles } from 'lucide-react';
+import { Camera, ChevronDown, MessageCircle, Phone, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Input } from '@/components/ui/input';
@@ -8,7 +8,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { ClienteDaOrdem } from './ClienteDaOrdem';
+import { FichaDaEmbarcacao } from './FichaDaEmbarcacao';
 import { VesselSelect } from '@/components/VesselSelect';
+import { hrefTelefone } from '@/lib/ficha-cliente';
+import { normalizePhoneE164 } from '@/lib/masks';
 import { EntityCombobox } from '@/components/EntityCombobox';
 import { ServiceOrderPhotos } from '@/components/ServiceOrderPhotos';
 import { VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
@@ -60,6 +63,7 @@ export function GeneralSections(props: GeneralSectionsProps) {
     isOptimizing, optimizeText, onAnalisarDescricao, analisandoDescricao,
   } = props;
   const { t, formatCurrency } = useI18n();
+  const embarcacao = form.vessel_id ? allVessels?.find((v) => v.id === form.vessel_id) : undefined;
 
   return (
     <>
@@ -147,6 +151,7 @@ export function GeneralSections(props: GeneralSectionsProps) {
                   if (vessel.marina_id) set('marina_id', vessel.marina_id);
                 }}
               />
+              {embarcacao && <FichaDaEmbarcacao embarcacao={embarcacao} />}
             </div>
             <div>
               <Label>{t.serviceOrders.marina}</Label>
@@ -169,6 +174,7 @@ export function GeneralSections(props: GeneralSectionsProps) {
             <div>
               <Label>{t.serviceOrders.requestedBy}</Label>
               {vesselContacts && vesselContacts.length > 0 ? (
+                <>
                 <Select
                   value={form.requested_by_contact_id || 'none'}
                   onValueChange={(v) => {
@@ -198,6 +204,8 @@ export function GeneralSections(props: GeneralSectionsProps) {
                     ))}
                   </SelectContent>
                 </Select>
+                <ContatoDoSolicitante contato={vesselContacts.find(c => c.id === form.requested_by_contact_id)} />
+                </>
               ) : (
                 <div>
                   <Input
@@ -399,5 +407,36 @@ export function GeneralSections(props: GeneralSectionsProps) {
         )}
       </section>
     </>
+  );
+}
+
+/** Telefone e e-mail do contato escolhido como solicitante. No náutico quem atende no dia
+    costuma ser o marinheiro ou o capitão, não o dono — e o número dele só estava no cadastro
+    do barco. */
+function ContatoDoSolicitante({ contato }: { contato?: { phone?: string | null; email?: string | null } }) {
+  if (!contato || (!contato.phone && !contato.email)) return null;
+  const e164 = normalizePhoneE164(contato.phone);
+  return (
+    <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+      {contato.phone && (
+        <a href={hrefTelefone(contato.phone)} className="inline-flex items-center gap-1 hover:text-foreground hover:underline">
+          <Phone className="h-3 w-3" aria-hidden /> {contato.phone}
+        </a>
+      )}
+      {e164.length >= 12 && (
+        <a
+          href={`https://wa.me/${e164}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-primary hover:underline"
+          aria-label="Abrir conversa com o solicitante no WhatsApp"
+        >
+          <MessageCircle className="h-3 w-3" aria-hidden /> WhatsApp
+        </a>
+      )}
+      {contato.email && (
+        <a href={`mailto:${contato.email}`} className="break-all hover:text-foreground hover:underline">{contato.email}</a>
+      )}
+    </p>
   );
 }

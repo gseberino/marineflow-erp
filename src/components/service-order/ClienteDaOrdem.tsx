@@ -5,15 +5,16 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, BellOff, ExternalLink, IdCard, Mail, MapPin, MessageCircle, Pencil, Phone, Plus, StickyNote,
+  AlertTriangle, BellOff, ExternalLink, IdCard, Mail, MapPin, MessageCircle, Pencil, Phone, Plus, StickyNote, Wallet,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Command, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ClientFormDialog } from '@/components/ClientFormDialog';
 import { filtrarClientes } from '@/lib/busca-cliente';
-import { enderecoEmUmaLinha, faltasParaNota } from '@/lib/ficha-cliente';
+import { enderecoEmUmaLinha, faltasParaNota, hrefTelefone } from '@/lib/ficha-cliente';
 import { normalizePhoneE164 } from '@/lib/masks';
+import { useClientesRecentes, useSaldoEmAberto } from '@/hooks/use-ficha-cliente';
 import type { Client } from '@/hooks/use-clients';
 
 interface Props {
@@ -83,8 +84,18 @@ function BuscaCliente({
   const [aberta, setAberta] = useState(false);
   const resultados = useMemo(() => filtrarClientes(clients, termo), [clients, termo]);
   const curto = termo.trim().length < 3;
+  // Antes de digitar: os clientes das últimas OS no topo (quase sempre é um deles), depois o resto.
+  const { data: idsRecentes } = useClientesRecentes();
+  const recentes = useMemo(() => {
+    const porId = new Map((clients ?? []).filter((c) => c.active).map((c) => [c.id, c]));
+    return (idsRecentes ?? []).map((id) => porId.get(id)).filter((c): c is Client => !!c);
+  }, [clients, idsRecentes]);
+  const lista = curto && recentes.length
+    ? resultados.filter((c) => !recentes.some((r) => r.id === c.id))
+    : resultados;
 
   const fechar = () => { setAberta(false); setTermo(''); };
+  const escolher = (c: Client) => { onEscolher(c); fechar(); };
 
   return (
     <Command
@@ -127,23 +138,15 @@ function BuscaCliente({
               {clients ? 'Nenhum cliente encontrado.' : 'Carregando clientes…'}
             </p>
           )}
-          {resultados.map((c) => {
-            const detalhe = [c.cpf_cnpj, c.whatsapp || c.phone, [c.city, c.state].filter(Boolean).join('/')]
-              .filter(Boolean).join(' · ');
-            return (
-              <CommandItem
-                key={c.id}
-                value={c.id}
-                onSelect={() => { onEscolher(c); fechar(); }}
-                className="cursor-pointer"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm">{c.name}</p>
-                  {detalhe && <p className="truncate text-xs text-muted-foreground">{detalhe}</p>}
-                </div>
-              </CommandItem>
-            );
-          })}
+          {curto && recentes.length > 0 && (
+            <>
+              <p className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">Últimos clientes</p>
+              {/* value com prefixo: o mesmo cliente não pode ter dois itens com o mesmo value no cmdk. */}
+              {recentes.map((c) => <ItemCliente key={`r-${c.id}`} valor={`recente-${c.id}`} cliente={c} onEscolher={escolher} />)}
+              {lista.length > 0 && <p className="px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground">Todos</p>}
+            </>
+          )}
+          {lista.map((c) => <ItemCliente key={c.id} valor={c.id} cliente={c} onEscolher={escolher} />)}
           <CommandItem
             value="__novo_cliente__"
             onSelect={() => { const t = termo.trim(); fechar(); onNovo(t); }}
@@ -158,7 +161,22 @@ function BuscaCliente({
   );
 }
 
+function ItemCliente({ cliente: c, valor, onEscolher }: { cliente: Client; valor: string; onEscolher: (c: Client) => void }) {
+  const detalhe = [c.cpf_cnpj, c.whatsapp || c.phone, [c.city, c.state].filter(Boolean).join('/')]
+    .filter(Boolean).join(' · ');
+  return (
+    <CommandItem value={valor} onSelect={() => onEscolher(c)} className="cursor-pointer">
+      <div className="min-w-0">
+        <p className="truncate text-sm">{c.name}</p>
+        {detalhe && <p className="truncate text-xs text-muted-foreground">{detalhe}</p>}
+      </div>
+    </CommandItem>
+  );
+}
+
 /* ------------------------------------------------------------------ ficha */
+
+const brl = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
 function FichaDoCliente({ cliente: c, onEditar }: { cliente: Client; onEditar: () => void }) {
   const zap = c.whatsapp || c.phone;
@@ -167,6 +185,8 @@ function FichaDoCliente({ cliente: c, onEditar }: { cliente: Client; onEditar: (
   const foneSeparado = c.phone && normalizePhoneE164(c.phone) !== zapE164 ? c.phone : null;
   const endereco = enderecoEmUmaLinha(c);
   const faltas = faltasParaNota(c);
+  // Só admin/financeiro (o hook nem consulta para os outros cargos); erro = a linha não aparece.
+  const { data: saldo } = useSaldoEmAberto(c.id);
 
   return (
     <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-sm" aria-label="Dados do cliente">
@@ -189,7 +209,7 @@ function FichaDoCliente({ cliente: c, onEditar }: { cliente: Client; onEditar: (
         )}
         {zap && (
           <Linha icone={Phone}>
-            <a href={hrefTel(zap)} className="hover:underline">{zap}</a>
+            <a href={hrefTelefone(zap)} className="hover:underline">{zap}</a>
             {zapE164.length >= 12 && (
               <a
                 href={`https://wa.me/${zapE164}`}
@@ -205,7 +225,7 @@ function FichaDoCliente({ cliente: c, onEditar }: { cliente: Client; onEditar: (
         )}
         {foneSeparado && (
           <Linha icone={Phone}>
-            <a href={hrefTel(foneSeparado)} className="hover:underline">{foneSeparado}</a>
+            <a href={hrefTelefone(foneSeparado)} className="hover:underline">{foneSeparado}</a>
             <span className="ml-1 text-xs text-muted-foreground">(fixo)</span>
           </Linha>
         )}
@@ -223,6 +243,14 @@ function FichaDoCliente({ cliente: c, onEditar }: { cliente: Client; onEditar: (
         {c.notes && (
           <Linha icone={StickyNote}>
             <span className="line-clamp-3 whitespace-pre-line italic text-muted-foreground" title={c.notes}>{c.notes}</span>
+          </Linha>
+        )}
+        {saldo && saldo.emAberto > 0.009 && (
+          <Linha icone={Wallet}>
+            <span className={saldo.vencidos ? 'font-medium text-amber-700 dark:text-amber-400' : undefined}>
+              Em aberto: {brl(saldo.emAberto)}
+              {saldo.vencidos > 0 && ` · ${saldo.vencidos} vencido${saldo.vencidos > 1 ? 's' : ''} (${brl(saldo.valorVencido)})`}
+            </span>
           </Linha>
         )}
       </ul>
@@ -254,12 +282,6 @@ function FichaDoCliente({ cliente: c, onEditar }: { cliente: Client; onEditar: (
       </Link>
     </div>
   );
-}
-
-/** Com DDI só quando o número está completo; número curto (sem DDD) vai como está. */
-function hrefTel(fone: string): string {
-  const e164 = normalizePhoneE164(fone);
-  return e164.length >= 12 ? `tel:+${e164}` : `tel:${e164}`;
 }
 
 function Linha({ icone: Icone, children }: { icone: typeof Phone; children: ReactNode }) {
