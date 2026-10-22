@@ -23,6 +23,7 @@ import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
 import { DataTable, type DataColumn } from '@/v2/components/DataTable';
 import { V2Shell } from '@/v2/components/V2Shell';
 import { serviceOrderStatusTone } from '@/v2/status-map';
+import { nomeDaUnidade } from '@/lib/unidade';
 import '@/v2/tokens.css';
 
 /* Onda A/C · Detalhe do Cliente v2 — paridade com ClientDetail v1
@@ -198,7 +199,7 @@ export default function ClientDetailV2() {
                   <Link key={v.id} to={`/v2/vessels/${v.id}`} className="rounded-lg border bg-card p-4 transition-colors hover:border-primary/50">
                     <div className="mb-1 flex items-start justify-between gap-2">
                       <span className="min-w-0">
-                        <span className="flex items-center gap-2 truncate font-semibold"><Ship className="h-4 w-4 shrink-0 text-accent" />{v.name}</span>
+                        <span className="flex items-center gap-2 truncate font-semibold"><Ship className="h-4 w-4 shrink-0 text-accent" />{nomeDaUnidade(v)}</span>
                         <span className="block truncate text-sm text-muted-foreground">{v.manufacturer} {v.model} {v.year ? `(${v.year})` : ''}</span>
                       </span>
                       {v.length_feet && <span className="shrink-0 text-sm font-medium tabular-nums">{v.length_feet} ft</span>}

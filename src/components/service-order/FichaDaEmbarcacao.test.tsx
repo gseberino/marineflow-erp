@@ -32,7 +32,7 @@ const valorDe = (ficha: HTMLElement, rotulo: string) =>
 describe('FichaDaEmbarcacao', () => {
   it('nome em destaque e o tipo embaixo dele, como na ficha do cliente', () => {
     render(<FichaDaEmbarcacao embarcacao={embarcacao({ asset_type: 'Motorhome', name: 'Iveco Daily' })} />);
-    const ficha = screen.getByLabelText('Dados da embarcação');
+    const ficha = screen.getByLabelText('Dados da embarcação ou veículo');
     expect(within(ficha).getByText('Iveco Daily')).toHaveClass('font-semibold');
     expect(within(ficha).getByText('Motorhome')).toBeInTheDocument();
     // O tipo está no cabeçalho: não se repete como dado, e não conta como "detalhe" do cadastro.
@@ -40,9 +40,12 @@ describe('FichaDaEmbarcacao', () => {
     expect(within(ficha).getByText(/Cadastro sem detalhes/)).toBeInTheDocument();
   });
 
-  it('sem tipo cadastrado, o cabeçalho diz "Embarcação ou veículo"', () => {
-    render(<FichaDaEmbarcacao embarcacao={embarcacao({})} />);
-    expect(within(screen.getByLabelText('Dados da embarcação')).getByText('Embarcação ou veículo')).toBeInTheDocument();
+  it('sem tipo cadastrado (ou "Outro"), o cabeçalho diz "Embarcação ou veículo"', () => {
+    const { unmount } = render(<FichaDaEmbarcacao embarcacao={embarcacao({})} />);
+    expect(within(screen.getByLabelText('Dados da embarcação ou veículo')).getByText('Embarcação ou veículo')).toBeInTheDocument();
+    unmount();
+    render(<FichaDaEmbarcacao embarcacao={embarcacao({ asset_type: 'Outro', name: 'HOMEBUS' })} />);
+    expect(within(screen.getByLabelText('Dados da embarcação ou veículo')).getByText('Embarcação ou veículo')).toBeInTheDocument();
   });
 
   it('cada dado com o rótulo em cima: modelo, ano, tamanho, inscrição, motores e onde fica', () => {
@@ -51,18 +54,37 @@ describe('FichaDaEmbarcacao', () => {
       hull_id_or_registration: '441-123', engine_quantity: 2, engine_brand: 'Volvo', engine_model: 'D6',
       marinas: { name: 'Marina Itajaí' }, current_dock_position: 'B12',
     })} />);
-    const ficha = screen.getByLabelText('Dados da embarcação');
+    const ficha = screen.getByLabelText('Dados da embarcação ou veículo');
     expect(valorDe(ficha, 'Fabricante e modelo')).toHaveTextContent('Schaefer 400');
     expect(valorDe(ficha, 'Ano')).toHaveTextContent('2019');
     expect(valorDe(ficha, 'Comprimento')).toHaveTextContent('40 pés');
-    expect(valorDe(ficha, 'Inscrição / placa')).toHaveTextContent('441-123');
+    expect(valorDe(ficha, 'Inscrição')).toHaveTextContent('441-123');
     expect(valorDe(ficha, 'Motores')).toHaveTextContent('2× Volvo D6');
     expect(valorDe(ficha, 'Onde fica')).toHaveTextContent('Marina Itajaí · vaga B12');
   });
 
+  it('a identificação pelo tipo (decisão 9): placa no motorhome, nº de série no equipamento', () => {
+    const { unmount } = render(<FichaDaEmbarcacao embarcacao={embarcacao({
+      asset_type: 'Motorhome', name: 'Iveco Daily', hull_id_or_registration: 'ABC1D23',
+    })} />);
+    let ficha = screen.getByLabelText('Dados da embarcação ou veículo');
+    expect(valorDe(ficha, 'Placa')).toHaveTextContent('ABC1D23');
+    expect(within(ficha).queryByText('Inscrição / placa')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar cadastro do motorhome' })).toBeInTheDocument();
+    unmount();
+    render(<FichaDaEmbarcacao embarcacao={embarcacao({ asset_type: 'Equipamento', name: 'Bancada', hull_id_or_registration: 'SN-77' })} />);
+    ficha = screen.getByLabelText('Dados da embarcação ou veículo');
+    expect(valorDe(ficha, 'Nº de série')).toHaveTextContent('SN-77');
+  });
+
+  it('sem tipo, a identificação fica "Inscrição / placa"', () => {
+    render(<FichaDaEmbarcacao embarcacao={embarcacao({ hull_id_or_registration: '441-123' })} />);
+    expect(valorDe(screen.getByLabelText('Dados da embarcação ou veículo'), 'Inscrição / placa')).toHaveTextContent('441-123');
+  });
+
   it('só aparece o que está preenchido (sem colunas de "Não informado")', () => {
     render(<FichaDaEmbarcacao embarcacao={embarcacao({ manufacturer: 'Schaefer', model: '400', year: 2019 })} />);
-    const ficha = screen.getByLabelText('Dados da embarcação');
+    const ficha = screen.getByLabelText('Dados da embarcação ou veículo');
     expect(valorDe(ficha, 'Fabricante e modelo')).toHaveTextContent('Schaefer 400');
     for (const ausente of ['Tipo', 'Comprimento', 'Inscrição / placa', 'Motores', 'Onde fica']) {
       expect(within(ficha).queryByText(ausente)).not.toBeInTheDocument();
@@ -75,7 +97,7 @@ describe('FichaDaEmbarcacao', () => {
     render(<FichaDaEmbarcacao embarcacao={embarcacao({})} />);
     expect(screen.getByText(/Cadastro sem detalhes/)).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Editar cadastro da embarcação' }));
+    await user.click(screen.getByRole('button', { name: 'Editar cadastro da embarcação ou veículo' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('editando Netuno II');
   });
 });

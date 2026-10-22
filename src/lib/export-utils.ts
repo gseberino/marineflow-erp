@@ -80,11 +80,12 @@ export const VESSELS_COLUMNS: ExportColumn[] = [
   { header: 'Modelo', key: 'model' },
   { header: 'Fabricante', key: 'manufacturer' },
   { header: 'Ano', key: 'year' },
-  { header: 'Tipo', key: 'boat_type' },
-  { header: 'Material', key: 'hull_material' },
-  { header: 'Comprimento (m)', key: 'length_meters' },
+  // 21/10/2026: 'Tipo', 'Material', 'Comprimento (m)' e 'Registro' liam colunas que não existem
+  // (boat_type, hull_material, length_meters, registration_number) e saíam sempre vazias.
+  { header: 'Tipo', key: 'asset_type' },
+  { header: 'Comprimento (pés)', key: 'length_feet' },
   { header: 'Motorização', key: 'engine_type' },
-  { header: 'Registro', key: 'registration_number' },
+  { header: 'Inscrição / placa', key: 'hull_id_or_registration' },
   // NOVO-019: era key 'name' — repetia o nome da EMBARCAÇÃO na coluna da marina.
   // A lista embeda marinas(name); a célula agora lê o nome da marina de verdade.
   { header: 'Marina', key: 'marinas', transform: (v: any) => v?.name ?? '' },

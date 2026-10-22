@@ -28,6 +28,7 @@
  *     no PDF, não podem vazar pela mensagem.
  */
 import { computeSchedule, type DepositInstallment, type DepositOrderLike } from "../banking/quote-deposit.ts";
+import { nomeDaUnidade } from "../unidade.ts";
 
 const brl = (v: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
@@ -63,6 +64,11 @@ export interface ResumoDeOrcamentoInput {
   clienteNome?: string | null;
   /** Embarcação, motorhome ou equipamento — ajuda o cliente a saber de qual orçamento se trata. */
   ativoNome?: string | null;
+  /**
+   * O tipo do cadastro (asset_type: Lancha, Motorhome, Trailer…). Com ele a linha diz
+   * "Referente a: Motorhome Iveco Daily" (decisão 9, 21/10/2026); sem ele, só o nome.
+   */
+  ativoTipo?: string | null;
   /** O orçamento, com os totais por categoria (mesma forma que o resto do sistema usa). */
   orcamento: DepositOrderLike & { grand_total?: number | null };
   /** As parcelas da condição de pagamento escolhida. */
@@ -116,7 +122,7 @@ function quandoVence(row: { dueBasis: 'delivery' | 'days'; days: number }): stri
  */
 export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string {
   const {
-    numero, clienteNome, ativoNome, orcamento, parcelas, condicaoLabel,
+    numero, clienteNome, ativoNome, ativoTipo, orcamento, parcelas, condicaoLabel,
     validadeDias, validadeAte, empresa = {}, opcoes = {},
   } = input;
 
@@ -134,7 +140,7 @@ export function buildQuoteWhatsAppSummary(input: ResumoDeOrcamentoInput): string
 
   linhas.push(`*Orçamento ${numero}* — ${empresaNome}`);
   linhas.push(`Olá, ${primeiroNome(clienteNome)}!`);
-  if (ativoNome) linhas.push(`Referente a: ${ativoNome}`);
+  if (ativoNome) linhas.push(`Referente a: ${nomeDaUnidade({ name: ativoNome, asset_type: ativoTipo })}`);
 
   // ── Sem valores não há resumo ────────────────────────────────────────────
   // Com os financeiros ocultos sobra um cumprimento, e mandar isso é pior que não

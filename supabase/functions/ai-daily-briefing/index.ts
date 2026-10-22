@@ -21,7 +21,14 @@ import { canceladasSemComprovante, debitosSemComprovante, linhasDosComprovantes 
 import { lerAnalise } from "../_shared/financeiro/vigia-do-negocio.ts";
 import { chaveDoAviso, montarSecaoEmail, type EmailDigestItem } from "../_shared/email/digest.ts";
 import { resumoDosDados } from "../_shared/email/dados.ts";
-import { embarcacoesComPlano, secaoDeRevisoes, type PlanoDoResumo, type SecaoDeRevisoes } from "./revisoes.ts";
+import {
+  embarcacoesComPlano,
+  type PlanoDoResumo,
+  secaoDeRevisoes,
+  type SecaoDeRevisoes,
+  unidadeEmNegrito,
+  unidadeNaLinha,
+} from "./revisoes.ts";
 import { linhasDasEntradas, separarEntradas, type EntradaDoBanco, type EntradasSeparadas, type PagamentoSemExtrato } from "./entradas.ts";
 import { despesasPendentesDoMes, faturamentoPorCliente, notaDoMes } from "./mes.ts";
 import { linhaDasPropostas, linhaDoOrcamento, linhaSeHouver, nomeDeContato, tentativasAte } from "./linhas.ts";
@@ -208,6 +215,15 @@ servirComCors(async (req) => {
         .eq("action_name", "enviar_lembrete_de_revisao");
       if (aErr) throw aErr;
       const planosLidos = ((planosDue as any[]) || []) as PlanoDoResumo[];
+      // O tipo da unidade (21/10/2026, decisão 9): a view não traz; "Lancha Mar Azul", "Motorhome
+      // Iveco Daily". Sem ele a linha sai só com o nome, como antes — não derruba a seção.
+      const idsDasUnidades = [...new Set(planosLidos.map((p) => p.vessel_id).filter(Boolean))];
+      if (idsDasUnidades.length > 0) {
+        const { data: tipos, error: tErr } = await admin.from("vessels").select("id, asset_type").in("id", idsDasUnidades);
+        if (tErr) console.warn("[ai-daily-briefing] tipo das unidades não lido:", tErr.message);
+        const tipoPorId = new Map(((tipos as any[]) || []).map((v) => [String(v.id), v.asset_type ?? null]));
+        for (const p of planosLidos) p.asset_type = tipoPorId.get(String(p.vessel_id)) ?? null;
+      }
       comPlano = embarcacoesComPlano(planosLidos);
       const fmtRev = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
       revisoes = secaoDeRevisoes(
@@ -227,7 +243,7 @@ servirComCors(async (req) => {
     // orçamento novo cai no loop de cotação. Best-effort: nunca derruba o digest.
     // 07/10/2026: só para embarcações SEM plano — as com plano estão na seção Revisões acima.
     const manutLines: string[] = [];
-    const manutCandidatos: Array<{ ativo: string; cliente: string; meses: number }> = [];
+    const manutCandidatos: Array<{ ativo: string; tipo: string | null; cliente: string; meses: number }> = [];
     try {
       const { data: doneOs } = await admin
         .from("service_orders")
@@ -248,7 +264,7 @@ servirComCors(async (req) => {
       if (vesselIds.length > 0) {
         const { data: vs } = await admin
           .from("vessels")
-          .select("id, name, clients(name)")
+          .select("id, name, asset_type, clients(name)")
           .eq("active", true)
           .in("id", vesselIds)
           .limit(500);
@@ -257,14 +273,14 @@ servirComCors(async (req) => {
           const m = Math.floor((now.getTime() - new Date(when).getTime()) / (30.44 * 86400000));
           if (m >= 12) {
             const nome = Array.isArray(v.clients) ? v.clients[0]?.name : v.clients?.name;
-            manutCandidatos.push({ ativo: v.name, cliente: nome || "(sem cliente)", meses: m });
+            manutCandidatos.push({ ativo: v.name, tipo: v.asset_type ?? null, cliente: nome || "(sem cliente)", meses: m });
           }
         }
         manutCandidatos.sort((a, b) => b.meses - a.meses);
         if (manutCandidatos.length > 0) {
           manutLines.push(`🔧 Sem plano, último serviço há 12+ meses: *${manutCandidatos.length}*`);
           for (const c of manutCandidatos.slice(0, 3)) {
-            manutLines.push(`   • ${c.ativo} — ${c.cliente} · ${c.meses} meses`);
+            manutLines.push(`   • ${unidadeNaLinha({ name: c.ativo, asset_type: c.tipo })} — ${c.cliente} · ${c.meses} meses`);
           }
         }
       }
@@ -679,7 +695,7 @@ servirComCors(async (req) => {
     // Orçamento recém-mexido não polui o digest. Ordena pelos mais parados primeiro.
     const { data: openQuotes } = await admin
       .from("service_orders")
-      .select("service_order_number, grand_total, updated_at, quote_status, created_at, quote_validity_days, quote_validity_date, clients(name), vessels(name)")
+      .select("service_order_number, grand_total, updated_at, quote_status, created_at, quote_validity_days, quote_validity_date, clients(name), vessels(name, asset_type)")
       .eq("status", "draft")
       .in("quote_status", ["sent", "awaiting_approval", "awaiting_deposit"])
       .order("updated_at", { ascending: true })
@@ -697,12 +713,14 @@ servirComCors(async (req) => {
         const expired = !!fim && hojeBR > fim;
         const expiringSoon = !!fim && !expired && fim <= daqui3Dias;
         const nome = Array.isArray(q.clients) ? q.clients[0]?.name : q.clients?.name;
-        const barco = Array.isArray(q.vessels) ? q.vessels[0]?.name : q.vessels?.name;
+        const unidade = Array.isArray(q.vessels) ? q.vessels[0] : q.vessels;
+        const barco = unidade?.name;
         // 15/10/2026: sempre com o número (ORÇ-xxxxx) e o barco — "Cliente Final" sozinho não diz qual é.
+        // 21/10/2026 (decisão 9): com o tipo — "(Motorhome Iveco Daily)", "(Lancha Netuno II)".
         return {
           numero: String(q.service_order_number || "Orçamento"),
           nome: nomeDeContato(nome) || "(sem cliente)",
-          barco: barco ? nomeDeContato(barco) : null,
+          barco: barco ? nomeDeContato(unidadeNaLinha({ name: barco, asset_type: unidade?.asset_type })) : null,
           valor: Number(q.grand_total || 0), dias, expired, expiringSoon,
         };
       })
@@ -812,7 +830,7 @@ servirComCors(async (req) => {
     }
     if (revisoes.sugestao) sugestoes.push(revisoes.sugestao); // planos de manutenção (07/10/2026)
     for (const c of manutCandidatos.slice(0, 3)) {
-      sugestoes.push(`oferecer revisão do *${c.ativo}* (${c.cliente}) — ${c.meses} meses sem serviço. Me peça que eu preparo o orçamento.`);
+      sugestoes.push(`oferecer revisão ${unidadeEmNegrito({ name: c.ativo, asset_type: c.tipo })} (${c.cliente}) — ${c.meses} meses sem serviço. Me peça que eu preparo o orçamento.`);
     }
     if (semanaNoVermelho) {
       const d = semanaNoVermelho.inicio;

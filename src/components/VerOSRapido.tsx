@@ -20,6 +20,7 @@ import { StatusChip } from '@/v2/components/StatusChip';
 import { serviceOrderStatusTone } from '@/v2/status-map';
 import { useI18n } from '@/i18n';
 import { useServiceOrder } from '@/hooks/use-service-orders';
+import { campoDaUnidade } from '@/lib/unidade';
 
 /** Só o que a janela lê da OS (vem do mesmo select da tela da OS). */
 interface OsParaConferir {
@@ -31,7 +32,10 @@ interface OsParaConferir {
   problem_description?: string | null;
   grand_total?: number | string | null;
   clients?: { name?: string | null } | null;
-  vessels?: { name?: string | null; manufacturer?: string | null; model?: string | null } | null;
+  vessels?: {
+    name?: string | null; manufacturer?: string | null; model?: string | null;
+    asset_type?: string | null; hull_id_or_registration?: string | null;
+  } | null;
   marinas?: { name?: string | null } | null;
   service_order_services?: Array<{
     id: string; quantity?: number | null; name_snapshot?: string | null; services?: { name?: string | null } | null;
@@ -66,9 +70,8 @@ export function JanelaDaOS({ osId, onFechar }: { osId: string; onFechar: () => v
   const statusLabels = (t.status ?? {}) as Record<string, string>;
   const os = data as unknown as OsParaConferir | null | undefined;
 
-  const barco = os?.vessels
-    ? [os.vessels.name, os.vessels.manufacturer, os.vessels.model].filter(Boolean).join(' · ')
-    : '';
+  // O tipo é o rótulo ("Motorhome: Iveco Daily · placa ABC1D23") — decisão 9, 21/10/2026.
+  const unidade = os?.vessels ? campoDaUnidade(os.vessels) : null;
   const tecnicos = (os?.service_order_technicians ?? [])
     .map((x) => x.app_users?.full_name).filter(Boolean).join(', ');
   const servicos = os?.service_order_services ?? [];
@@ -77,7 +80,7 @@ export function JanelaDaOS({ osId, onFechar }: { osId: string; onFechar: () => v
 
   const linhas: Array<[string, string]> = os ? [
     ['Cliente', os.clients?.name ?? '—'],
-    ...(barco ? [['Barco / motorhome', barco] as [string, string]] : []),
+    ...(unidade?.valor ? [[unidade.rotulo, unidade.valor] as [string, string]] : []),
     ...(os.marinas?.name ? [['Local', os.marinas.name] as [string, string]] : []),
     ...(os.created_at ? [['Aberta em', formatDate(os.created_at)] as [string, string]] : []),
     ...(os.scheduled_start_at ? [['Agendada para', formatDate(os.scheduled_start_at)] as [string, string]] : []),

@@ -21,7 +21,7 @@ export async function isStockModelV2(): Promise<boolean> {
 const SO_SELECT = `
   *,
   clients(name, phone, whatsapp),
-  vessels(name, manufacturer, model),
+  vessels(name, manufacturer, model, asset_type),
   marinas(name, latitude, longitude),
   service_order_technicians(user_id)
 `;
@@ -29,7 +29,7 @@ const SO_SELECT = `
 const SO_DETAIL_SELECT = `
   *,
   clients(name, phone, whatsapp, email),
-  vessels(name, manufacturer, model, current_dock_position, asset_type, access_notes,
+  vessels(name, manufacturer, model, current_dock_position, asset_type, hull_id_or_registration, access_notes,
     battery_bank_summary, inverter_charger_summary, shore_power_type, electrical_system_notes),
   requested_by_contact:vessel_contacts!service_orders_requested_by_contact_id_fkey(full_name, role, phone),
   marinas(name, latitude, longitude),
@@ -52,7 +52,7 @@ const SO_SELECT_TECNICO = `
   service_type, problem_description, scheduled_start_at, scheduled_end_at, check_in_at,
   check_out_at, created_at, updated_at,
   clients(name, phone, whatsapp),
-  vessels(name, manufacturer, model),
+  vessels(name, manufacturer, model, asset_type),
   marinas(name, latitude, longitude),
   service_order_technicians(user_id)
 `;
@@ -70,7 +70,7 @@ const SO_DETAIL_SELECT_TECNICO = `
   cancelled_at, cancellation_reason, reopened_at, reopen_reason, reminder_sent_at,
   created_by, created_at, updated_at, technician_instructions, site_access,
   clients(name, phone, whatsapp, email),
-  vessels(name, manufacturer, model, current_dock_position, asset_type, access_notes,
+  vessels(name, manufacturer, model, current_dock_position, asset_type, hull_id_or_registration, access_notes,
     battery_bank_summary, inverter_charger_summary, shore_power_type, electrical_system_notes),
   marinas(name, latitude, longitude),
   service_order_parts_tecnico(*, products(id, name, sku, image_url, unit)),

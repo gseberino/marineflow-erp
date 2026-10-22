@@ -70,7 +70,7 @@ export function useDashboardData() {
           .lt('due_date', today),
 
         supabase.from('service_orders')
-          .select('id, service_order_number, status, grand_total, scheduled_start_at, clients(name), vessels(name)')
+          .select('id, service_order_number, status, grand_total, scheduled_start_at, clients(name), vessels(name, asset_type)')
           .not('status', 'in', '("completed","invoiced","cancelled")')
           .order('created_at', { ascending: false })
           .limit(8),
@@ -85,7 +85,7 @@ export function useDashboardData() {
           .gte('updated_at', firstOfMonth),
 
         supabase.from('service_orders')
-          .select('id, service_order_number, scheduled_start_at, clients(name), vessels(name), status')
+          .select('id, service_order_number, scheduled_start_at, clients(name), vessels(name, asset_type), status')
           .in('status', ['scheduled', 'open'])
           .gte('scheduled_start_at', today)
           .lte('scheduled_start_at', in7days)

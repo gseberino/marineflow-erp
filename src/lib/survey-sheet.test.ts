@@ -42,7 +42,22 @@ describe('a folha de levantamento', () => {
   it('identifica a ordem, o cliente e o ativo', () => {
     expect(html).toContain('ORÇ-00074');
     expect(html).toContain('Cliente Teste');
-    expect(html).toContain('Motorhome Overlander');
+    expect(html).toContain('Overlander');
+  });
+
+  // Decisão 9 (21/10/2026): o rótulo é o próprio tipo, nunca "Ativo"; sem tipo, o termo geral.
+  it('a unidade sai com o tipo como rótulo, com modelo e placa', () => {
+    // Nome que já começa pelo tipo não repete: 'Motorhome: Overlander', nunca 'Motorhome: Motorhome Overlander'.
+    expect(html).toContain('Motorhome: <b>Overlander</b>');
+    expect(html).not.toContain('Ativo');
+    const comPlaca = buildSurveySheetHtml(
+      { ...header, assetName: 'Iveco Daily', assetMaker: 'Iveco', assetModel: 'Daily', assetRegistration: 'ABC1D23' },
+      perguntas,
+    );
+    expect(comPlaca).toContain('Motorhome: <b>Iveco Daily · placa ABC1D23</b>');
+    const semTipo = buildSurveySheetHtml({ ...header, assetType: null }, perguntas);
+    expect(semTipo).toContain('Embarcação ou veículo: <b>Motorhome Overlander</b>');
+    expect(semTipo).not.toContain('Ativo');
   });
 
   // Quem vai a campo precisa do telefone de quem está lá — voltar por não

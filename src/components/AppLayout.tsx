@@ -208,7 +208,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
       roles: ['admin', 'financial', 'technician', 'seller'],
       items: [
         { label: 'Clientes', icon: Users, path: '/v2/clients' },
-        { label: 'Embarcações', icon: Ship, path: '/v2/vessels' },
+        // Decisão 9 (21/10/2026): o cadastro tem barcos e motorhomes. Texto literal (= TERMO_GERAL_PLURAL de
+        // @/lib/unidade) porque AppLayout.menu.test.tsx lê os rótulos do menu direto do código.
+        { label: 'Embarcações e veículos', icon: Ship, path: '/v2/vessels' },
         { label: 'Marinas', icon: Anchor, path: '/v2/marinas' },
         { label: 'Produtos', icon: Package, path: '/v2/products' },
         { label: 'Serviços', icon: Wrench, path: '/v2/services' },

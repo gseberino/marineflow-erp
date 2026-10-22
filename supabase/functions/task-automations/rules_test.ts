@@ -727,4 +727,13 @@ Deno.test("textoDoLembreteDaOs (r10): 'você tem a OS-00060', com e sem barco", 
     textoDoLembreteDaOs({ quando: "hoje", hora: "07:30", numero: "OS-00061", cliente: null, barco: null }),
     "🔧 Lembrete: hoje às 07:30 você tem a OS-00061 — cliente.",
   );
+  // Com o tipo (decisão 9, 21/10/2026): o técnico sabe se vai a um barco ou a um motorhome.
+  assertEquals(
+    textoDoLembreteDaOs({ quando: "amanhã", hora: "09:00", numero: "OS-00062", cliente: "Rodrigo", barco: "Iveco Daily", tipo: "Motorhome" }),
+    "🔧 Lembrete: amanhã às 09:00 você tem a OS-00062 — Rodrigo (Motorhome Iveco Daily).",
+  );
+  assertEquals(
+    textoDoLembreteDaOs({ quando: "hoje", hora: "07:30", numero: "OS-00063", cliente: "Ana", barco: "Motorhome", tipo: "Motorhome" }),
+    "🔧 Lembrete: hoje às 07:30 você tem a OS-00063 — Ana (Motorhome).",
+  );
 });

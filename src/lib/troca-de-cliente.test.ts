@@ -11,26 +11,43 @@ describe('textos da troca de cliente', () => {
   });
 
   it('plural, singular e nomes que faltam', () => {
-    expect(descricaoDaTroca('João', 'Maria', { embarcacao: 'Netuno II', solicitante: 'Pedro' }))
-      .toBe('De João para Maria. Saem: a embarcação Netuno II e o solicitante Pedro.');
-    expect(descricaoDaTroca('João', 'Maria', { embarcacao: 'Netuno II' }))
-      .toBe('De João para Maria. Sai: a embarcação Netuno II.');
+    expect(descricaoDaTroca('João', 'Maria', { embarcacao: 'Netuno II', tipoDaEmbarcacao: 'Lancha', solicitante: 'Pedro' }))
+      .toBe('De João para Maria. Saem: a lancha Netuno II e o solicitante Pedro.');
+    expect(descricaoDaTroca('João', 'Maria', { embarcacao: 'Netuno II', tipoDaEmbarcacao: 'Lancha' }))
+      .toBe('De João para Maria. Sai: a lancha Netuno II.');
     expect(descricaoDaTroca('João', 'Maria', { solicitante: '' }))
       .toBe('De João para Maria. Sai: o solicitante escolhido.');
     expect(descricaoDaTroca('João', null, { embarcacao: '' }))
-      .toBe('De João para um cliente novo. Sai: a embarcação escolhida.');
-    expect(descricaoDaTroca(null, 'Maria', { embarcacao: 'Netuno II' }))
-      .toBe('Do cliente atual para Maria. Sai: a embarcação Netuno II.');
-    expect(descricaoDaTroca('João', 'Maria', { embarcacao: 'Netuno II', solicitante: 'Pedro', marina: 'Itajaí', local: true }))
-      .toBe('De João para Maria. Saem: a embarcação Netuno II, o solicitante Pedro, a marina sugerida (Itajaí) e o local e acesso da embarcação.');
+      .toBe('De João para um cliente novo. Sai: a embarcação ou veículo escolhido.');
+    expect(descricaoDaTroca(null, 'Maria', { embarcacao: 'Netuno II', tipoDaEmbarcacao: 'Lancha' }))
+      .toBe('Do cliente atual para Maria. Sai: a lancha Netuno II.');
+    expect(descricaoDaTroca('João', 'Maria', { embarcacao: 'Netuno II', tipoDaEmbarcacao: 'Lancha', solicitante: 'Pedro', marina: 'Itajaí', local: true }))
+      .toBe('De João para Maria. Saem: a lancha Netuno II, o solicitante Pedro, a marina sugerida (Itajaí) e o local e acesso da lancha.');
+  });
+
+  it('a unidade que sai pelo tipo dela (decisão 9): "o motorhome", nunca "a embarcação Iveco Daily"', () => {
+    expect(descricaoDaTroca('João', 'Maria', { embarcacao: 'Iveco Daily', tipoDaEmbarcacao: 'Motorhome', local: true }))
+      .toBe('De João para Maria. Saem: o motorhome Iveco Daily e o local e acesso do motorhome.');
+    // nome igual ao tipo não repete; sem nome, só o tipo
+    expect(descricaoDaTroca('João', 'Maria', { embarcacao: 'Motorhome', tipoDaEmbarcacao: 'Motorhome' }))
+      .toBe('De João para Maria. Sai: o motorhome.');
+    expect(descricaoDaTroca('João', 'Maria', { embarcacao: '', tipoDaEmbarcacao: 'Trailer' }))
+      .toBe('De João para Maria. Sai: o trailer.');
+    // sem tipo (ou "Outro"): o termo geral
+    expect(descricaoDaTroca('João', 'Maria', { embarcacao: 'Netuno II', local: true }))
+      .toBe('De João para Maria. Saem: a embarcação ou veículo Netuno II e o local e acesso da embarcação ou veículo.');
+    expect(descricaoDaTroca('João', 'Maria', { embarcacao: 'HOMEBUS', tipoDaEmbarcacao: 'Outro' }))
+      .toBe('De João para Maria. Sai: a embarcação ou veículo HOMEBUS.');
   });
 
   it('a confirmação lista exatamente o que a troca tira (mesmos critérios)', () => {
     const barco = { marina_id: 'm1', access_notes: 'Vaga B12' };
     const f = { client_id: 'c1', vessel_id: 'v1', marina_id: 'm1', requested_by_contact_id: 'k1', requested_by_name: 'Pedro', site_access: 'Vaga B12' };
-    const nomes = { embarcacao: 'Netuno II', solicitante: 'Pedro Marinheiro', marina: 'Itajaí' };
+    const nomes = { embarcacao: 'Netuno II', tipoDaEmbarcacao: 'Lancha', solicitante: 'Pedro Marinheiro', marina: 'Itajaí' };
     expect(perdasDaTrocaDeCliente(f, barco, nomes))
-      .toEqual({ embarcacao: 'Netuno II', solicitante: 'Pedro Marinheiro', marina: 'Itajaí', local: true });
+      .toEqual({ embarcacao: 'Netuno II', tipoDaEmbarcacao: 'Lancha', solicitante: 'Pedro Marinheiro', marina: 'Itajaí', local: true });
+    // sem unidade na OS, o tipo não vai junto (nada sai)
+    expect(perdasDaTrocaDeCliente({ ...f, vessel_id: '' }, barco, nomes)).toMatchObject({ embarcacao: null, tipoDaEmbarcacao: undefined });
     // marina e local escolhidos à mão não saem — e não aparecem
     const mexido = { ...f, marina_id: 'm9', site_access: 'Rampa do clube' };
     expect(perdasDaTrocaDeCliente(mexido, barco, nomes)).toMatchObject({ marina: null, local: false });

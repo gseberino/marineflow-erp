@@ -16,6 +16,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useSnoozeTask, type RelatedEntityType } from '@/hooks/use-agenda';
 import { PedirConfirmacaoButton } from '@/components/agenda/PedirConfirmacaoButton';
 import { AcoesDaTarefaDeRevisao, planoDaChaveR14 } from '@/components/agenda/PlanoDialogs';
+import { TERMO_GERAL } from '@/lib/unidade';
 
 const ENTITY_CONFIG: Record<RelatedEntityType, { label: string; Icon: typeof Briefcase; route: (id: string) => string }> = {
   // Rotas da v2 (20/09/2026): as telas legadas saem em 15/10 e a OC ganhou detalhe próprio em
@@ -25,7 +26,8 @@ const ENTITY_CONFIG: Record<RelatedEntityType, { label: string; Icon: typeof Bri
   quote:          { label: 'Orçamento',  Icon: FileText,     route: (id) => `/v2/service-orders/${id}` },
   external_quote: { label: 'Orçamento',  Icon: FileText,     route: (id) => `/v2/external-quotes/${id}` },
   client:         { label: 'Cliente',    Icon: User,         route: (id) => `/v2/clients/${id}` },
-  vessel:         { label: 'Embarcação', Icon: Anchor,       route: (id) => `/v2/vessels/${id}` },
+  // A tarefa guarda só o id da unidade (sem o tipo): o selo usa o termo geral (decisão 9).
+  vessel:         { label: TERMO_GERAL,  Icon: Anchor,       route: (id) => `/v2/vessels/${id}` },
   receivable:     { label: 'Recebível',  Icon: DollarSign,   route: () => '/v2/receivables' },
   payable:        { label: 'Pagável',    Icon: DollarSign,   route: () => '/v2/financial/payables' },
   purchase_order: { label: 'OC',         Icon: ShoppingCart, route: (id) => `/v2/purchase-orders/${id}` },

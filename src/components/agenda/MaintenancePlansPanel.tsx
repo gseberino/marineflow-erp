@@ -27,8 +27,17 @@ import {
 import {
   AdiarPlanoDialog, PedirLembreteDialog, RegistrarServicoDialog, type AlvoDoLembrete, type AlvoDoPlano,
 } from '@/components/agenda/PlanoDialogs';
+import { useVessel } from '@/hooks/use-vessels';
+import { unidadeNaFrase } from '@/lib/unidade';
 
 const QUALQUER = '__qualquer__';
+
+/**
+ * A unidade aberta numa frase, pelo tipo (decisão 9, 21/10/2026): "no motorhome", "da lancha",
+ * "o trailer". Sem tipo (ou ainda carregando): "na embarcação ou veículo".
+ */
+const naFrase = (tipo: string | null, preposicao: '' | 'em' | 'de' = '') => unidadeNaFrase({ asset_type: tipo }, preposicao);
+
 const moeda = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
 interface Formulario {
@@ -103,6 +112,9 @@ function criterioPorExtenso(p: PlanoDeManutencao): string {
  */
 export function MaintenancePlansPanel({ vesselId }: { vesselId: string | undefined }) {
   const { data, isLoading, error } = usePlanosDaEmbarcacao(vesselId);
+  // Mesma consulta (e cache) da ficha que abre este painel: só o tipo, para as frases.
+  const { data: unidade } = useVessel(vesselId);
+  const tipo = unidade?.asset_type ?? null;
   const salvar = useSalvarPlano(vesselId);
   const ligar = useLigarPlano();
   const apagar = useApagarPlano();
@@ -158,7 +170,7 @@ export function MaintenancePlansPanel({ vesselId }: { vesselId: string | undefin
       ) : planos.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           Nenhum plano. Crie um (ex.: "Revisão de motor · a cada 12 meses") ou peça uma sugestão a partir das OS
-          já feitas nesta embarcação — o sistema lembra de propor o serviço na hora certa.
+          já feitas {naFrase(tipo, 'em')} — o sistema lembra de propor o serviço na hora certa.
         </p>
       ) : null}
       {data?.erroDaView && planos.length > 0 && (
@@ -301,7 +313,7 @@ export function MaintenancePlansPanel({ vesselId }: { vesselId: string | undefin
                 </div>
                 <Input aria-label="Palavras do serviço ou da peça" value={form.palavras} onChange={(e) => set('palavras', e.target.value)}
                   placeholder="palavras do serviço/peça: bateria, inversor" />
-                <p className="text-[11px] text-muted-foreground">Sem nada aqui, qualquer OS concluída da embarcação reinicia o ciclo.</p>
+                <p className="text-[11px] text-muted-foreground">Sem nada aqui, qualquer OS concluída {naFrase(tipo, 'de')} reinicia o ciclo.</p>
               </div>
               <label className="flex items-start justify-between gap-3 text-sm">
                 <span>
@@ -326,6 +338,7 @@ export function MaintenancePlansPanel({ vesselId }: { vesselId: string | undefin
       <SugerirPlanosDialog
         aberto={sugerindo}
         vesselId={vesselId}
+        tipo={tipo}
         existentes={planos}
         onOpenChange={setSugerindo}
         onUsar={(s) => { setSugerindo(false); abrirNovo(daSugestao(s)); }}
@@ -388,10 +401,12 @@ function HistoricoDoPlanoDialog({ plano, onOpenChange }: { plano: PlanoDeManuten
  * formulário preenchido para o dono conferir — nada é criado sem ele.
  */
 function SugerirPlanosDialog({
-  aberto, vesselId, existentes, onOpenChange, onUsar,
+  aberto, vesselId, tipo, existentes, onOpenChange, onUsar,
 }: {
   aberto: boolean;
   vesselId: string;
+  /** asset_type da unidade, para as frases ("do motorhome"). */
+  tipo: string | null;
   existentes: PlanoDeManutencao[];
   onOpenChange: (v: boolean) => void;
   onUsar: (s: SugestaoDePlano) => void;
@@ -403,7 +418,7 @@ function SugerirPlanosDialog({
       <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Planos sugeridos</DialogTitle>
-          <DialogDescription>A partir dos serviços e peças das OS concluídas desta embarcação.</DialogDescription>
+          <DialogDescription>A partir dos serviços e peças das OS concluídas {naFrase(tipo, 'de')}.</DialogDescription>
         </DialogHeader>
         {error ? (
           <p className="text-sm text-destructive">Não deu para ler o histórico de OS: {(error as Error).message}</p>
@@ -411,7 +426,7 @@ function SugerirPlanosDialog({
           <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin" /></div>
         ) : sugestoes.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Nada a sugerir: {historico.length === 0 ? 'esta embarcação ainda não tem OS concluída.' : 'o histórico não tem serviço recorrente sem plano.'}
+            Nada a sugerir: {historico.length === 0 ? `${naFrase(tipo)} ainda não tem OS concluída.` : 'o histórico não tem serviço recorrente sem plano.'}
           </p>
         ) : (
           <ul className="space-y-2">

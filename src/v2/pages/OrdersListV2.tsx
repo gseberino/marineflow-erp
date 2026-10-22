@@ -46,6 +46,7 @@ import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn, type SortState } from '@/v2/components/DataTable';
 import { V2Shell } from '@/v2/components/V2Shell';
 import { priorityTone, serviceOrderStatusTone, quoteStatusTone, paymentTone } from '@/v2/status-map';
+import { TERMO_GERAL, nomeDaUnidade, type UnidadeResumo } from '@/lib/unidade';
 import '@/v2/tokens.css';
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -84,9 +85,12 @@ type SORow = {
   customer_buyer_name?: string | null;
   requested_by_name?: string | null;
   clients?: { id?: string; name?: string; phone?: string | null; whatsapp?: string | null } | null;
-  vessels?: { name?: string } | null;
+  vessels?: { name?: string; asset_type?: string | null } | null;
   service_order_technicians?: { user_id: string }[] | null;
 };
+
+/** Nome da unidade na linha, com o tipo à frente quando a consulta traz asset_type (decisão 9). */
+const unidadeDaLinha = (so: SORow) => (so.vessels?.name ? nomeDaUnidade(so.vessels) : null);
 
 const QUOTE_STATUS_LABELS: Record<string, string> = {
   draft: 'Em elaboração',
@@ -140,7 +144,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
   // Agrupar orçamentos: só admin ou financeiro (o banco confere de novo).
   const podeAgrupar = !isOrders && (auth?.user?.role === 'admin' || auth?.user?.role === 'financial');
   const [agruparAlvo, setAgruparAlvo] = useState<{
-    clientId: string; vesselId: string; ids: string[]; principal: string;
+    clientId: string; vesselId: string; unidade: UnidadeResumo | null; ids: string[]; principal: string;
   } | null>(null);
   const pdfGenCountRef = useRef(0);
   const { data: pdfData, error: pdfError } = usePDFData(pdfTarget?.id);
@@ -420,12 +424,14 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
       ),
     },
     {
-      key: 'client', header: 'Cliente · Embarcação', minWidth: 215, priority: 1, sortable: true, detailLabel: 'Cliente',
+      // Só 'Cliente': a 2ª linha já diz o tipo ('Motorhome Iveco Daily'); 'Cliente · Embarcação ou veículo'
+      // não cabia nos 215 px e cortava a seta de ordenação (decisão 9, 21/10/2026).
+      key: 'client', header: 'Cliente', minWidth: 215, priority: 1, sortable: true, detailLabel: 'Cliente',
       render: (so) => (
         <span className="block leading-tight">
           <span className="block truncate font-semibold">{so.clients?.name || '—'}</span>
           <span className="block truncate text-xs text-muted-foreground">
-            {[so.vessels?.name, so.service_type ? (t.serviceType as Record<string, string>)[so.service_type] : null].filter(Boolean).join(' · ') || '—'}
+            {[unidadeDaLinha(so), so.service_type ? (t.serviceType as Record<string, string>)[so.service_type] : null].filter(Boolean).join(' · ') || '—'}
           </span>
         </span>
       ),
@@ -589,12 +595,13 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
     const mesmoAlvo = !!primeira?.client_id && !!primeira?.vessel_id && linhas.length === ids.length
       && linhas.every((o) => o.client_id === primeira.client_id && o.vessel_id === primeira.vessel_id);
     if (!mesmoAlvo) {
-      toast.error('Para agrupar, escolha orçamentos do mesmo cliente e da mesma embarcação.');
+      toast.error('Para agrupar, escolha orçamentos do mesmo cliente e da mesma embarcação ou veículo.');
       return;
     }
     const maisAntiga = [...linhas].sort((a, b) =>
       (a.created_at ?? '').localeCompare(b.created_at ?? '') || a.id.localeCompare(b.id))[0];
-    setAgruparAlvo({ clientId: primeira.client_id!, vesselId: primeira.vessel_id!, ids, principal: maisAntiga.id });
+    // A unidade vai junto para o diálogo dizer "do mesmo motorhome", como pela tela da OS.
+    setAgruparAlvo({ clientId: primeira.client_id!, vesselId: primeira.vessel_id!, unidade: primeira.vessels ?? null, ids, principal: maisAntiga.id });
   };
 
   // Origem agrupada sai com a situação dita ("Agrupado em ORÇ-X"), não com o quote_status 'draft' que o
@@ -605,7 +612,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
       { key: 'service_order_number', label: 'Número' },
       { key: isOrders ? 'status' : 'quote_status', label: 'Status' },
       { key: 'clients', label: 'Cliente', format: (v: { name?: string } | null) => v?.name || '' },
-      { key: 'vessels', label: 'Embarcação', format: (v: { name?: string } | null) => v?.name || '' },
+      { key: 'vessels', label: TERMO_GERAL, format: (v: { name?: string; asset_type?: string | null } | null) => (v?.name ? nomeDaUnidade(v) : '') },
       { key: 'grand_total', label: 'Valor Total', format: (v: number | null) => Number(v || 0).toFixed(2).replace('.', ',') },
       { key: 'created_at', label: 'Data Criação', format: (v: string | null) => (v ? new Date(v).toLocaleDateString('pt-BR') : '') },
     ] as never);
@@ -704,7 +711,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
         <MultiFilterBar
           search={String((filters as Record<string, unknown>).search || '')}
           onSearchChange={(v) => { setField('search', v); setPage(1); }}
-          searchPlaceholder="Buscar por número, cliente ou embarcação…"
+          searchPlaceholder="Buscar por número, cliente, embarcação ou veículo…"
           filters={filters}
           activeCount={activeCount}
           onToggle={(f, v) => { toggle(f, v); setPage(1); }}
@@ -808,7 +815,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
                   }
                   title={so.clients?.name || '—'}
                   lines={[
-                    [so.vessels?.name, so.service_type ? (t.serviceType as Record<string, string>)[so.service_type] : null].filter(Boolean).join(' · ') || '—',
+                    [unidadeDaLinha(so), so.service_type ? (t.serviceType as Record<string, string>)[so.service_type] : null].filter(Boolean).join(' · ') || '—',
                     `${isOrders && so.scheduled_start_at ? formatDate(so.scheduled_start_at) + ' · ' : ''}${so.grand_total == null ? '—' : formatCurrency(so.grand_total)}`,
                   ]}
                   onClick={() => navigate(`/v2/service-orders/${so.id}`)}
@@ -935,6 +942,7 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
           onFechar={() => setAgruparAlvo(null)}
           clientId={agruparAlvo.clientId}
           vesselId={agruparAlvo.vesselId}
+          unidade={agruparAlvo.unidade}
           preSelecionados={agruparAlvo.ids}
           principalSugerido={agruparAlvo.principal}
         />

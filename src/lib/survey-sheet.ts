@@ -47,6 +47,7 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { SYSTEM_LABEL, VERB_LABEL } from '@/hooks/use-step-blocks';
+import { campoDaUnidade } from '@/lib/unidade';
 
 const BRAND = '#002B5B';
 
@@ -56,6 +57,10 @@ export interface SurveySheetHeader {
   clientPhone?: string | null;
   assetName?: string | null;
   assetType?: string | null;
+  assetMaker?: string | null;
+  assetModel?: string | null;
+  /** Placa (motorhome, trailer) ou inscrição (barco): ajuda a achar a unidade no local. */
+  assetRegistration?: string | null;
   marinaName?: string | null;
   serviceName?: string | null;
   technicianName?: string | null;
@@ -179,6 +184,14 @@ export function buildSurveySheetHtml(
 ): string {
   const altas = questions.filter((q) => q.price_impact === 'alto');
   const demais = questions.filter((q) => q.price_impact !== 'alto');
+  // "Motorhome: Iveco Daily · placa ABC1D23" — o tipo é o rótulo (decisão 9, 21/10/2026).
+  const unidade = campoDaUnidade({
+    name: header.assetName,
+    asset_type: header.assetType,
+    manufacturer: header.assetMaker,
+    model: header.assetModel,
+    hull_id_or_registration: header.assetRegistration,
+  });
 
   const questionBlock = (q: SurveySheetQuestion, destaque: boolean) => `
     <div class="q ${destaque ? 'alta' : ''}">
@@ -349,7 +362,7 @@ export function buildSurveySheetHtml(
   <div class="row">
     ${header.clientName ? `Cliente: <b>${esc(header.clientName)}</b>` : ''}
     ${header.clientPhone ? ` &nbsp;·&nbsp; Contato: <b>${esc(header.clientPhone)}</b>` : ''}
-    ${header.assetName ? ` &nbsp;·&nbsp; ${esc(header.assetType || 'Ativo')}: <b>${esc(header.assetName)}</b>` : ''}
+    ${header.assetName && unidade.valor ? ` &nbsp;·&nbsp; ${esc(unidade.rotulo)}: <b>${esc(unidade.valor)}</b>` : ''}
   </div>
   <div class="row">
     ${header.serviceName ? `Serviço: <b>${esc(header.serviceName)}</b>` : ''}
@@ -491,7 +504,7 @@ export async function fetchSurveySheetData(
     serviceOrderId
       ? supabase
           .from('service_orders')
-          .select('service_order_number, clients(name, phone, whatsapp), vessels(name, asset_type), marinas(name)')
+          .select('service_order_number, clients(name, phone, whatsapp), vessels(name, asset_type, manufacturer, model, hull_id_or_registration), marinas(name)')
           .eq('id', serviceOrderId)
           .maybeSingle()
       : Promise.resolve({ data: null as any }),
@@ -516,7 +529,7 @@ export async function fetchSurveySheetData(
   const consultas: Array<[string, { error?: { message?: string } | null }]> = [
     ['as perguntas do levantamento', qRes as any],
     ['o histórico de execuções', histRes as any],
-    ['as respostas anteriores do ativo', prevRes as any],
+    ['as respostas anteriores da embarcação ou veículo', prevRes as any],
     ['o cabeçalho da ordem', osRes as any],
     ['as configurações da empresa', cfgRes as any],
     ['a linha do serviço na ordem', linhaRes as any],
@@ -546,6 +559,9 @@ export async function fetchSurveySheetData(
       clientPhone: os?.clients?.whatsapp || os?.clients?.phone || null,
       assetName: os?.vessels?.name ?? null,
       assetType: os?.vessels?.asset_type ?? null,
+      assetMaker: os?.vessels?.manufacturer ?? null,
+      assetModel: os?.vessels?.model ?? null,
+      assetRegistration: os?.vessels?.hull_id_or_registration ?? null,
       marinaName: os?.marinas?.name ?? null,
       serviceName,
       companyName: cfg?.value || null,

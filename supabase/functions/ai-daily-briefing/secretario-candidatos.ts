@@ -12,6 +12,8 @@
 
 import { brl, ddmm, diasEntre, nomeDoDia, paraBusca, somarDias, umaLinha } from "../_shared/secretario/base.ts";
 import { tipoDoDia } from "../_shared/secretario/feriados.ts";
+// "Barco: Overland Vegini" saía para motorhome; sem o tipo na leitura, o termo geral (decisão 9, 21/10/2026).
+import { TERMO_GERAL } from "../_shared/unidade.ts";
 import type { Familia, Secao, TipoDoItem } from "../_shared/secretario/tipos.ts";
 import { dataBR, diaBR, horaBR } from "../_shared/pdf/datas.ts";
 import { COM_PRESSA, ehClienteGenerico, PEDE_PRECO, pareceSoAgradecimento, pareceVendedor } from "../_shared/secretario/palavras.ts";
@@ -288,7 +290,7 @@ export function candidatoDeCobranca(c: CobrancaCrua, hoje: string): Candidato {
       ` (saldo de ${brl(c.saldo)}, venceu em ${dataBR(c.vencimento)}). Mostre o texto pronto e peça o meu sim antes de enviar.`,
     fatos: ([
       ["Cliente", c.cliente ? umaLinha(c.cliente, 60) : null],
-      ["Barco", c.barco ? umaLinha(c.barco, 60) : null],
+      [TERMO_GERAL, c.barco ? umaLinha(c.barco, 60) : null],
       ["OS", c.os_numero],
       ["Cobrança", c.descricao ? umaLinha(c.descricao, 80) : null],
       ["Saldo", brl(c.saldo)],
@@ -513,7 +515,7 @@ export function candidatoDeOrcamento(q: OrcamentoCru, hoje: string): Candidato |
     fatos: ([
       ["Orçamento", q.numero],
       ["Cliente", q.cliente ? umaLinha(q.cliente, 60) : null],
-      ["Barco", q.barco ? umaLinha(q.barco, 60) : null],
+      [TERMO_GERAL, q.barco ? umaLinha(q.barco, 60) : null],
       ["Valor", brl(q.valor)],
       ["Situação", rotuloDoStatus(q.quote_status)],
       ["Mandado pelo WhatsApp em", q.enviado_em ? `${dataBR(diaBR(new Date(q.enviado_em)))} (no sistema ainda está como rascunho)` : null],
@@ -545,7 +547,7 @@ export function candidatoDeOs(o: OsCrua, hoje: string): Candidato | null {
   const fatosBase: Array<[string, string]> = ([
     ["OS", o.numero],
     ["Cliente", o.cliente ? umaLinha(o.cliente, 60) : null],
-    ["Barco", o.barco ? umaLinha(o.barco, 60) : null],
+    [TERMO_GERAL, o.barco ? umaLinha(o.barco, 60) : null],
     ["Valor", brl(o.valor)],
   ] as Array<[string, string | null]>).filter((f): f is [string, string] => !!f[1]);
 

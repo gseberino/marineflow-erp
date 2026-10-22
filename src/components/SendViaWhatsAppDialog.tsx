@@ -417,6 +417,7 @@ export function SendViaWhatsAppDialog({ open, onOpenChange, target }: Props) {
       numero: target.serviceOrderNumber,
       clienteNome: target.clientName,
       ativoNome: (pdfData as any)?.vessel?.name ?? null,
+      ativoTipo: (pdfData as any)?.vessel?.type ?? null,
       orcamento: so,
       parcelas: so.payment_condition_installments ?? null,
       condicaoLabel: so.payment_condition_label ?? so.payment_conditions ?? null,

@@ -14,6 +14,7 @@ import { exportToCSV, CLIENTS_COLUMNS } from '@/lib/export-utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { FilterPresets } from '@/components/FilterPresets';
+import { TERMO_GERAL_PLURAL } from '@/lib/unidade';
 
 type SortDir = 'asc' | 'desc';
 
@@ -132,7 +133,7 @@ export default function ClientList() {
                     </button>
                   </th>
                   <th className="px-4 py-3 text-center font-medium text-muted-foreground hidden sm:table-cell w-20">
-                    {t.clients.vessels || 'Embarcações'}
+                    {t.clients.vessels || TERMO_GERAL_PLURAL}
                   </th>
                   <th className="px-4 py-3 text-center font-medium text-muted-foreground w-20">
                     <button onClick={() => handleSort('active')} className="flex items-center justify-center w-full hover:text-foreground transition-colors">

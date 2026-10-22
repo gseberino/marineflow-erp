@@ -17,6 +17,7 @@ import { ArquivosDoBarco } from '@/components/dropbox/ArquivosDoBarco';
 import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
+import { grupoDoTipo, rotuloDaIdentificacao, rotuloDaUnidade, unidadeNaFrase } from '@/lib/unidade';
 
 export default function VesselDetail() {
   const { id } = useParams<{ id: string }>();
@@ -58,6 +59,9 @@ export default function VesselDetail() {
 
   const clientName = (vessel as any).clients?.name ?? '—';
   const marinaName = (vessel as any).marinas?.name;
+  // Os rótulos pelo tipo da unidade aberta (decisão 9, 21/10/2026): "Placa" no motorhome,
+  // "Inscrição" no barco; "Casco" só em barco.
+  const tipo = vessel.asset_type;
 
   const InfoRow = ({ label, value }: { label: string; value?: string | number | null }) => (
     <div className="flex justify-between py-2 border-b border-border/50 last:border-0">
@@ -73,7 +77,7 @@ export default function VesselDetail() {
         <div className="flex-1">
           <h1 className="text-2xl font-bold flex items-center gap-2"><Ship className="h-6 w-6 text-accent" />{vessel.name}</h1>
           <p className="text-sm text-muted-foreground">
-            {vessel.manufacturer} {vessel.model} {vessel.year ? `(${vessel.year})` : ''} • {vessel.length_feet ? `${vessel.length_feet} ft` : ''} • {t.vessels.owner}: {clientName}
+            {rotuloDaUnidade(tipo)} • {vessel.manufacturer} {vessel.model} {vessel.year ? `(${vessel.year})` : ''} • {vessel.length_feet ? `${vessel.length_feet} ft` : ''} • {t.vessels.owner}: {clientName}
           </p>
         </div>
         {id && <PastaDoBarcoBotao vesselId={id} />}
@@ -102,8 +106,8 @@ export default function VesselDetail() {
 
         <TabsContent value="overview" className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="rounded-xl border bg-card p-5 shadow-sm">
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Ship className="h-4 w-4" /> {t.vessels.hullAndSpecs}</h3>
-            <InfoRow label={t.vessels.hullId} value={vessel.hull_id_or_registration} />
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Ship className="h-4 w-4" /> {grupoDoTipo(tipo) === 'embarcacao' ? t.vessels.hullAndSpecs : t.vessels.specs}</h3>
+            <InfoRow label={rotuloDaIdentificacao(tipo)} value={vessel.hull_id_or_registration} />
             <InfoRow label={t.vessels.length} value={vessel.length_feet ? `${vessel.length_feet} ft` : undefined} />
             <InfoRow label={t.vessels.beam} value={vessel.beam_feet ? `${vessel.beam_feet} ft` : undefined} />
             <InfoRow label={t.vessels.draft} value={vessel.draft_feet ? `${vessel.draft_feet} ft` : undefined} />
@@ -268,7 +272,7 @@ export default function VesselDetail() {
         {/* Vizinha de Manutenção de propósito: a R14 nasce de um plano e grava 'vessel' */}
         <TabsContent value="tasks" className="mt-4">
           <div className="max-w-2xl">
-            <EntityTasksPanel entityType="vessel" entityId={id} title="Tarefas desta embarcação" />
+            <EntityTasksPanel entityType="vessel" entityId={id} title={`Tarefas ${unidadeNaFrase({ asset_type: tipo }, 'de')}`} />
           </div>
         </TabsContent>
         <TabsContent value="audit" className="mt-4">

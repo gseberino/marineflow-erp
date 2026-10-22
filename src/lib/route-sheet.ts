@@ -2,6 +2,7 @@ import {
   groupStepsByBlock, isAiDraft,
   type ServiceOrderStep, type RouteMaterial,
 } from '@/hooks/use-service-steps';
+import { campoDaUnidade, ehFeminino, rotuloDaUnidade } from '@/lib/unidade';
 
 export interface RouteSheetHeader {
   orderNumber: string;
@@ -15,6 +16,8 @@ export interface RouteSheetHeader {
   assetType?: string | null;
   assetMaker?: string | null;
   assetModel?: string | null;
+  /** Placa (motorhome, trailer) ou inscrição (barco), do cadastro: ajuda a achar a unidade no pátio. */
+  assetRegistration?: string | null;
   marinaName?: string | null;
   /** Vaga ou píer do barco, do cadastro do ativo. */
   dockPosition?: string | null;
@@ -253,13 +256,19 @@ function stepStatusNote(step: ServiceOrderStep): string {
   return '';
 }
 
-/** "Motorhome · Itapoã Sprinter · "Itapoã"" sem repetir o que o nome já diz. */
-function vehicleLine(h: RouteSheetHeader): string {
-  const marcaModelo = [h.assetMaker, h.assetModel].map((v) => (v || '').trim()).filter(Boolean).join(' ');
-  const partes = [h.assetType, marcaModelo].map((v) => (v || '').trim()).filter(Boolean);
-  const nome = (h.assetName || '').trim();
-  if (nome && !partes.some((p) => p.toLowerCase() === nome.toLowerCase())) partes.push(`"${nome}"`);
-  return partes.map(escapeHtml).join(' · ');
+/**
+ * A unidade da OS como rótulo e valor, pela regra única (src/lib/unidade.ts, decisão 9 de
+ * 21/10/2026): o rótulo é o próprio tipo — "Motorhome" / "Itapoã · Itapoã Sprinter · placa
+ * ABC1D23" —, e sem unidade nenhuma, o termo geral "Embarcação ou veículo".
+ */
+function vehicleLine(h: RouteSheetHeader): { rotulo: string; valor: string } {
+  return campoDaUnidade({
+    name: h.assetName,
+    asset_type: h.assetType,
+    manufacturer: h.assetMaker,
+    model: h.assetModel,
+    hull_id_or_registration: h.assetRegistration,
+  });
 }
 
 /** O fim só sai quando é depois do início — um término anterior ao começo só confunde. */
@@ -361,14 +370,16 @@ export function buildRouteSheetHtml(
     eletrico?.notes && semValores(eletrico.notes) && `Observações: ${escapeHtml(semValores(eletrico.notes))}`,
   ].filter(Boolean);
   // O que já se sabe do sistema elétrico chega ao técnico antes de ele abrir o quadro.
+  // "deste motorhome" / "desta lancha"; sem tipo, "desta embarcação ou veículo".
+  const desteTipo = `${ehFeminino(header.assetType) ? 'desta' : 'deste'} ${rotuloDaUnidade(header.assetType).toLowerCase()}`;
   const eletricoHtml = linhasEletricas.length ? `
     <div class="secao">
-      <div class="sectitle">O que já sabemos do sistema elétrico deste veículo</div>
+      <div class="sectitle">O que já sabemos do sistema elétrico ${escapeHtml(desteTipo)}</div>
       <div class="pedido">${linhasEletricas.map((l) => `<p>${l}</p>`).join('')}</div>
     </div>` : '';
   const rostoHtml = `
     <div class="rosto">
-      <div class="campo"><span class="lab">Veículo</span>${veiculo || '<span class="vazio">não informado</span>'}</div>
+      <div class="campo"><span class="lab">${escapeHtml(veiculo.rotulo)}</span>${veiculo.valor ? escapeHtml(veiculo.valor) : '<span class="vazio">não informado</span>'}</div>
       <div class="campo"><span class="lab">Quando</span>${whenLine(header)}</div>
       <div class="campo"><span class="lab">Onde</span>${whereLine(header)}</div>
       <div class="campo"><span class="lab">Com quem falar</span>${contatos || '<span class="vazio">sem contato no cadastro</span>'}</div>

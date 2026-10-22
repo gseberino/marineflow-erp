@@ -11,7 +11,16 @@ import {
   type ToqueDevido,
   toqueDevido,
 } from "./texto.ts";
-import { clientesPorId, lerEventos, lerPlanosDue, prepararMensagem, type Proposta, tituloDoLembrete } from "./lembretes.ts";
+import {
+  clientesPorId,
+  lerEventos,
+  lerPlanosDue,
+  prepararMensagem,
+  type Proposta,
+  tituloDoLembrete,
+  type UnidadeDoLembrete,
+  unidadeParaODono,
+} from "./lembretes.ts";
 import { telefoneParaEnvio } from "../ai/tools/agendamento.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -101,13 +110,13 @@ export async function proporCampanha(db: Db, hoje: string, planos: PlanoDue[]): 
 
   const candidatas = [...atendidas].filter((v) => !barradas.has(v));
   if (!candidatas.length) return [];
-  const { data: barcos, error: eV } = await db.from("vessels").select("id, name, client_id, active").in("id", candidatas);
+  const { data: barcos, error: eV } = await db.from("vessels").select("id, name, client_id, active, asset_type").in("id", candidatas);
   if (eV) throw new Error(`Falha ao ler as embarcações: ${eV.message}`);
-  const porCliente = new Map<string, Array<{ id: string; name: string }>>();
-  for (const b of (barcos ?? []) as Array<{ id: string; name: string; client_id: string | null; active: boolean }>) {
+  const porCliente = new Map<string, UnidadeDoLembrete[]>();
+  for (const b of (barcos ?? []) as Array<{ id: string; name: string; client_id: string | null; active: boolean; asset_type?: string | null }>) {
     if (!b.active || !b.client_id || comPlanoNaTemporada.has(b.client_id) || jaTocados.has(b.client_id)) continue;
     const lista = porCliente.get(b.client_id) ?? [];
-    lista.push({ id: b.id, name: b.name });
+    lista.push({ id: b.id, name: b.name, asset_type: b.asset_type ?? null });
     porCliente.set(b.client_id, lista);
   }
   if (!porCliente.size) return [];
@@ -126,7 +135,7 @@ export async function proporCampanha(db: Db, hoje: string, planos: PlanoDue[]): 
     const vs = (porCliente.get(String(c.id)) ?? []).slice(0, 3);
     if (!vs.length) continue;
     const nome = String(c.display_name || c.name || "cliente");
-    const embarcacoes = vs.map((v) => v.name);
+    const embarcacoes = vs.map(unidadeParaODono);
     propostas.push({
       toque: 0,
       client_id: String(c.id),
@@ -135,6 +144,7 @@ export async function proporCampanha(db: Db, hoje: string, planos: PlanoDue[]): 
       vessel_id: vs[0].id,
       vessel_ids: vs.map((v) => v.id),
       embarcacoes,
+      unidades: vs,
       telefone,
       vence: null,
       texto: montarTexto({
@@ -142,7 +152,7 @@ export async function proporCampanha(db: Db, hoje: string, planos: PlanoDue[]): 
         nome: primeiroNome(c as { name: string; display_name: string; type: string }),
         hoje,
         itens: [],
-        embarcacoes,
+        embarcacoes: vs,
       }),
       titulo: tituloDoLembrete(nome, embarcacoes, 0),
     });

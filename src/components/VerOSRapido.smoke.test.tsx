@@ -14,7 +14,7 @@ const { osPorId } = vi.hoisted(() => ({
       service_order_number: 'OS-00060', status: 'in_progress', created_at: '2026-09-10T12:00:00Z',
       problem_description: 'Trocar o carregador de baterias', grand_total: 4800,
       clients: { name: 'João da Silva' },
-      vessels: { name: 'Mar Azul', manufacturer: 'Schaefer', model: '400' },
+      vessels: { name: 'Mar Azul', manufacturer: 'Schaefer', model: '400', asset_type: 'Lancha' },
       marinas: { name: 'Marina Itajaí' },
       service_order_services: [{ id: 's1', quantity: 1, name_snapshot: 'Instalação elétrica', services: null }],
       service_order_parts: [{ id: 'pc1', quantity: 2, notes: null, products: { name: 'Carregador 40A' } }],
@@ -60,7 +60,10 @@ describe('Ver OS sem sair da fila', () => {
     const janela = await abrir('os60');
     expect(within(janela).getByText('OS-00060')).toBeInTheDocument();
     expect(within(janela).getByText('João da Silva')).toBeInTheDocument();
-    expect(within(janela).getByText('Mar Azul · Schaefer · 400')).toBeInTheDocument();
+    // O tipo é o rótulo (decisão 9, 21/10/2026): 'Lancha', não 'Barco / motorhome'.
+    expect(within(janela).getByText('Lancha')).toBeInTheDocument();
+    expect(within(janela).getByText('Mar Azul · Schaefer 400')).toBeInTheDocument();
+    expect(within(janela).queryByText('Barco / motorhome')).not.toBeInTheDocument();
     expect(within(janela).getByText('Marina Itajaí')).toBeInTheDocument();
     expect(within(janela).getByText('Trocar o carregador de baterias')).toBeInTheDocument();
     expect(within(janela).getByText('Instalação elétrica')).toBeInTheDocument();

@@ -16,6 +16,7 @@ import {
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
+import { nomeDaUnidade, unidadeNaFrase } from "../_shared/unidade.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
@@ -224,7 +225,7 @@ async function runTechnicianReminders(db: Db, settings: Record<string, string>) 
   const to = new Date(from.getTime() + 86400000);
 
   const { data: orders } = await db.from("service_orders")
-    .select("id, service_order_number, scheduled_start_at, clients(name), vessels(name), service_order_technicians(user_id, app_users(id, full_name, phone_normalized, ai_whatsapp_enabled))")
+    .select("id, service_order_number, scheduled_start_at, clients(name), vessels(name, asset_type), service_order_technicians(user_id, app_users(id, full_name, phone_normalized, ai_whatsapp_enabled))")
     .eq("status", "scheduled")
     .gte("scheduled_start_at", from.toISOString())
     .lt("scheduled_start_at", to.toISOString());
@@ -247,7 +248,7 @@ async function runTechnicianReminders(db: Db, settings: Record<string, string>) 
         phone_normalized: u.phone_normalized,
         // o número já traz o prefixo ("OS-00060"): o texto mora em rules.ts para ter teste
         message: textoDoLembreteDaOs({
-          quando, hora, numero: o.service_order_number, cliente: o.clients?.name, barco: o.vessels?.name,
+          quando, hora, numero: o.service_order_number, cliente: o.clients?.name, barco: o.vessels?.name, tipo: o.vessels?.asset_type,
         }),
         source: "agenda-r10",
         source_ref_id: o.id,
@@ -270,7 +271,7 @@ async function runClientReminders(db: Db, settings: Record<string, string>) {
   const now = new Date();
   const tomorrow = new Date(now.getTime() + 86400000);
   const { data: orders } = await db.from("service_orders")
-    .select("id, service_order_number, scheduled_start_at, clients(name, phone, whatsapp, opt_out_whatsapp), vessels(name)")
+    .select("id, service_order_number, scheduled_start_at, clients(name, phone, whatsapp, opt_out_whatsapp), vessels(name, asset_type)")
     .eq("status", "scheduled")
     .is("reminder_sent_at", null)
     .gte("scheduled_start_at", now.toISOString())
@@ -291,7 +292,7 @@ async function runClientReminders(db: Db, settings: Record<string, string>) {
     await db.from("whatsapp_send_queue").insert({
       phone_normalized: target,
       message: `Olá${o.clients?.name ? `, ${o.clients.name}` : ""}! Lembrete do seu atendimento agendado para ${dia} às ${hora}` +
-        `${o.vessels?.name ? ` (${o.vessels.name})` : ""}. Qualquer imprevisto, é só responder por aqui. — HBR Marine`,
+        `${o.vessels?.name ? ` (${nomeDaUnidade(o.vessels)})` : ""}. Qualquer imprevisto, é só responder por aqui. — HBR Marine`,
       source: "agenda-r9",
       source_ref_id: o.id,
       priority: 4,
@@ -314,7 +315,7 @@ async function runPostServiceSurvey(db: Db, settings: Record<string, string>) {
   const from = new Date(Date.now() - 2 * 86400000).toISOString();
   const to = new Date(Date.now() - 1 * 86400000).toISOString();
   const { data: orders } = await db.from("service_orders")
-    .select("id, service_order_number, updated_at, clients(name, phone, whatsapp, opt_out_whatsapp), vessels(name)")
+    .select("id, service_order_number, updated_at, clients(name, phone, whatsapp, opt_out_whatsapp), vessels(name, asset_type)")
     .eq("status", "completed")
     .gte("updated_at", from)
     .lte("updated_at", to);
@@ -329,7 +330,7 @@ async function runPostServiceSurvey(db: Db, settings: Record<string, string>) {
     if (dup && dup.length > 0) continue;
     await db.from("whatsapp_send_queue").insert({
       phone_normalized: testMode ? testNumber : phone,
-      message: `Olá${o.clients?.name ? `, ${o.clients.name}` : ""}! O serviço${o.vessels?.name ? ` na ${o.vessels.name}` : ""} foi concluído. ` +
+      message: `Olá${o.clients?.name ? `, ${o.clients.name}` : ""}! O serviço${o.vessels?.name ? ` ${unidadeNaFrase(o.vessels, "em")}` : ""} foi concluído. ` +
         `Como foi sua experiência, de 0 a 10? Sua resposta nos ajuda muito — e qualquer ajuste, é só falar por aqui. — HBR Marine`,
       source: "agenda-r13",
       source_ref_id: o.id,

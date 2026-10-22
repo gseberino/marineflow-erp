@@ -12,6 +12,7 @@ import { DashboardTasksWidget } from '@/components/agenda/DashboardTasksWidget';
 import { statusConfig } from '@/lib/constants';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { TERMO_GERAL, nomeDaUnidade } from '@/lib/unidade';
 
 const STATUS_ORDER = ['draft', 'scheduled', 'open', 'in_progress', 'awaiting_parts', 'awaiting_client', 'completed', 'invoiced'];
 
@@ -267,7 +268,7 @@ export default function Dashboard() {
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {so.clients?.name} · {so.vessels?.name}
+                    {so.clients?.name} · {so.vessels?.name ? nomeDaUnidade(so.vessels) : '—'}
                   </p>
                   {so.scheduled_start_at && (
                     <p className="text-xs text-muted-foreground">
@@ -299,7 +300,7 @@ export default function Dashboard() {
                   <tr className="border-b">
                     <th className="px-4 py-2 text-left font-medium text-muted-foreground">OS</th>
                     <th className="px-4 py-2 text-left font-medium text-muted-foreground">Cliente</th>
-                    <th className="px-4 py-2 text-left font-medium text-muted-foreground hidden md:table-cell">Embarcação</th>
+                    <th className="px-4 py-2 text-left font-medium text-muted-foreground hidden md:table-cell">{TERMO_GERAL}</th>
                     <th className="px-4 py-2 text-left font-medium text-muted-foreground">Status</th>
                     <th className="px-4 py-2 text-right font-medium text-muted-foreground">Valor</th>
                   </tr>
@@ -313,7 +314,7 @@ export default function Dashboard() {
                     >
                       <td className="px-4 py-2.5 font-medium text-accent">{so.service_order_number}</td>
                       <td className="px-4 py-2.5 text-muted-foreground">{so.clients?.name || '—'}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{so.vessels?.name || '—'}</td>
+                      <td className="px-4 py-2.5 text-muted-foreground hidden md:table-cell">{so.vessels?.name ? nomeDaUnidade(so.vessels) : '—'}</td>
                       <td className="px-4 py-2.5">
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusConfig[so.status as keyof typeof statusConfig]?.className || 'bg-muted text-muted-foreground'}`}>
                           {statusLabels[so.status] || so.status}
@@ -502,7 +503,7 @@ function ExternalSellerDashboard({ greeting, dateStr }: { greeting: string, date
         <Card className="p-6 bg-primary text-primary-foreground">
           <h3 className="font-bold text-lg mb-2">Dica de Venda</h3>
           <p className="text-sm opacity-90">
-            Mantenha seus prospectos sempre atualizados. Leads com informações completas de embarcação têm 40% mais chance de aprovação.
+            Mantenha seus prospectos sempre atualizados. Leads com informações completas da embarcação ou veículo têm 40% mais chance de aprovação.
           </p>
           <div className="mt-4 pt-4 border-t border-primary-foreground/20">
             <Button variant="secondary" size="sm" onClick={() => navigate('/external-quotes/catalog')} className="w-full">

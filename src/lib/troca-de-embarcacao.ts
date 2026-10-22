@@ -12,38 +12,12 @@
  * "a antiga"/"o antigo", com o gênero do tipo — "contato da Motorhome" estava errado.
  */
 
-export type GrupoDoTipo = 'embarcacao' | 'veiculo' | 'outro';
+import { ehFeminino as feminino, grupoDoTipo, nomeDaUnidade, unidadeNaFrase, type UnidadeResumo } from './unidade';
 
-const EMBARCACOES = ['lancha', 'veleiro', 'catamarã', 'catamara', 'jet ski', 'moto aquática', 'moto aquatica', 'barco', 'embarcação'];
-const VEICULOS = ['motorhome', 'trailer', 'camper', 'automóvel', 'automovel', 'van', 'picape', 'veículo', 'veiculo'];
-/** Tipos femininos ("a lancha"); o resto é masculino ("o motorhome"). Sem tipo: "a unidade". */
-const FEMININOS = ['lancha', 'moto aquática', 'moto aquatica', 'embarcação', 'van', 'picape'];
+// Tipo, gênero e nome moram na regra única de nomes (lib/unidade.ts); daqui saem reexportados.
+export { grupoDoTipo, nomeDaUnidade, type GrupoDoTipo, type UnidadeResumo } from './unidade';
 
 const norm = (tipo: string | null | undefined) => (tipo ?? '').trim().toLowerCase();
-
-export function grupoDoTipo(tipo: string | null | undefined): GrupoDoTipo {
-  const t = norm(tipo);
-  if (EMBARCACOES.includes(t)) return 'embarcacao';
-  if (VEICULOS.includes(t)) return 'veiculo';
-  return 'outro';
-}
-
-function feminino(tipo: string | null | undefined): boolean {
-  const t = norm(tipo);
-  return !t || t === 'outro' || FEMININOS.includes(t);
-}
-
-export interface UnidadeResumo { name?: string | null; asset_type?: string | null }
-
-/** "Lancha Netuno II"; sem tipo (ou "Outro"), só o nome; nome igual ao tipo não se repete. */
-export function nomeDaUnidade(u: UnidadeResumo | null | undefined): string {
-  if (!u) return 'a unidade escolhida';
-  const tipo = (u.asset_type ?? '').trim();
-  const nome = (u.name ?? '').trim();
-  if (!tipo || norm(tipo) === 'outro') return nome || 'a unidade escolhida';
-  if (!nome || nome.toLowerCase() === tipo.toLowerCase()) return tipo;
-  return `${tipo} ${nome}`;
-}
 
 export interface SituacaoDaOS {
   /** A OS/orçamento já existe no banco. Nova: nada pede confirmação. */
@@ -97,14 +71,17 @@ export function motivosDaTrocaDeEmbarcacao(
   return motivos;
 }
 
-export function tituloDaTrocaDeEmbarcacao(documento: 'OS' | 'orçamento'): string {
-  return documento === 'orçamento'
-    ? 'Trocar a embarcação ou veículo deste orçamento?'
-    : 'Trocar a embarcação ou veículo desta OS?';
+/** "Trocar a lancha desta OS?", com o tipo da unidade atual; sem tipo (ou sem a atual), o termo
+    geral: "Trocar a embarcação ou veículo desta OS?" (decisão 9, 21/10/2026). */
+export function tituloDaTrocaDeEmbarcacao(documento: 'OS' | 'orçamento', antigo?: UnidadeResumo | null): string {
+  const doc = documento === 'orçamento' ? 'deste orçamento' : 'desta OS';
+  return `Trocar ${unidadeNaFrase({ asset_type: antigo?.asset_type })} ${doc}?`;
 }
 
-/** "De Lancha Netuno II para Motorhome Iveco Daily." + os motivos. */
+/** "De Lancha Netuno II para Motorhome Iveco Daily." + os motivos. Atual desconhecida: "Da
+    embarcação ou veículo atual para…" (antes saía "De a unidade escolhida para…"). */
 export function descricaoDaTrocaDeEmbarcacao(antigo: UnidadeResumo | null | undefined, novo: UnidadeResumo | null, motivos: string[]): string {
+  const de = antigo ? `De ${nomeDaUnidade(antigo)}` : 'Da embarcação ou veículo atual';
   const para = novo ? nomeDaUnidade(novo) : 'um cadastro novo';
-  return [`De ${nomeDaUnidade(antigo)} para ${para}.`, ...motivos].join(' ');
+  return [`${de} para ${para}.`, ...motivos].join(' ');
 }

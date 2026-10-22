@@ -24,6 +24,15 @@ describe('traduz o que o Postgres escreve', () => {
     )).toBe('Já existe um(a) cliente com este CPF/CNPJ.');
   });
 
+  it('a unidade (vessels) pelo termo geral: o erro não diz se é barco ou motorhome (decisão 9)', () => {
+    expect(traduzErroDoBanco(
+      'duplicate key value violates unique constraint "vessels_name_key"',
+    )).toBe('Já existe um(a) embarcação ou veículo com este nome.');
+    expect(traduzErroDoBanco(
+      'update or delete on table "clients" violates foreign key constraint "vessels_client_id_fkey" on table "vessels", key is still referenced from table "vessels"',
+    )).toBe('Não dá para excluir: existe embarcação ou veículo usando este registro.');
+  });
+
   it('índice desconhecido ainda vira frase útil, sem inventar o campo', () => {
     const frase = traduzErroDoBanco(
       'duplicate key value violates unique constraint "tabela_exotica_xyz_key"',
@@ -86,7 +95,7 @@ describe('traduz o que o Postgres escreve', () => {
 
 describe('não traduz o que não deve', () => {
   it.each([
-    'Preencha cliente, embarcação e descrição do problema',
+    'Preencha cliente, embarcação ou veículo e descrição do problema',
     'Escolha o cliente antes de confirmar',
     'Estoque insuficiente. Disponível: -1, solicitado adicional: 1',
     'Espelho: Código IBGE do município não foi resolvido — confira UF e cidade.',

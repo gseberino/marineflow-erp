@@ -66,4 +66,21 @@ describe('folha de comissionamento — montada a partir da OS', () => {
     expect(html).not.toMatch(/\b\d+\s?N·m\b/);
     expect(html).toContain('Fora do esperado? Não entregue.');
   });
+
+  // Decisão 9 (21/10/2026): com o cadastro, o rótulo é o próprio tipo; com o texto pronto,
+  // o termo geral. "barco ou motorhome" deixava trailer e camper de fora.
+  it('a unidade sai com o tipo como rótulo; sem cadastro, o termo geral', () => {
+    const comCadastro = buildCommissioningSheetHtml(
+      {
+        orderNumber: 'OS-00034',
+        unidade: { name: 'Iveco Daily', asset_type: 'Motorhome', manufacturer: 'Iveco', model: 'Daily', hull_id_or_registration: 'ABC1D23' },
+      },
+      os34,
+    );
+    expect(comCadastro).toContain('<small>Motorhome</small>Iveco Daily · placa ABC1D23');
+    expect(comCadastro).not.toContain('<small>Veículo</small>');
+    expect(comCadastro).toContain('Sistema de energia · embarcação ou veículo');
+    const semCadastro = buildCommissioningSheetHtml({ orderNumber: 'OS-00034', vehicle: 'Camper' }, os34);
+    expect(semCadastro).toContain('<small>Embarcação ou veículo</small>Camper');
+  });
 });

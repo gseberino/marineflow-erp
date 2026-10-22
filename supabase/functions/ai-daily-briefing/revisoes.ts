@@ -7,11 +7,14 @@
 //
 // Puro de propósito, como extrato.ts: o index.ts lê o banco, isto só escreve — testado sem rede
 // (revisoes_test.ts).
+import { nomeDaUnidade, TERMO_GERAL, type UnidadeResumo, unidadeNaFrase } from "../_shared/unidade.ts";
 
 export interface PlanoDoResumo {
   plan_id: string;
   vessel_id: string;
   vessel_name: string | null;
+  /** O tipo da unidade (vessels.asset_type; a view não traz): "Lancha Mar Azul", "Motorhome Iveco Daily". */
+  asset_type?: string | null;
   client_name: string | null;
   name: string;
   estimated_value: number | string | null;
@@ -45,6 +48,23 @@ function num(v: number | string | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * A unidade pelo tipo (decisão 9, 21/10/2026): "Lancha Mar Azul", "Motorhome Iveco Daily"; sem
+ * nome nem tipo, o termo geral.
+ */
+export function unidadeNaLinha(u: UnidadeResumo): string {
+  return u.name || u.asset_type ? nomeDaUnidade(u) : TERMO_GERAL;
+}
+
+/**
+ * A unidade dentro da sugestão, com o artigo fora do negrito: "da *lancha Mar Azul*", "do
+ * *motorhome Iveco Daily*". Sem tipo: "da *embarcação ou veículo Mar Azul*".
+ */
+export function unidadeEmNegrito(u: UnidadeResumo): string {
+  const [artigo, ...resto] = unidadeNaFrase(u, "de").split(" ");
+  return `${artigo} *${resto.join(" ")}*`;
+}
+
 /** Embarcações com plano ATIVO: a heurística dos 12 meses não fala delas. */
 export function embarcacoesComPlano(planos: PlanoDoResumo[]): Set<string> {
   return new Set(planos.map((p) => String(p.vessel_id)));
@@ -74,7 +94,8 @@ export function secaoDeRevisoes(
     return { linhas: [], sugestao: null, acao: null };
   }
 
-  const nome = (p: PlanoDoResumo) => `${p.vessel_name ?? "Embarcação"} — ${p.name}`;
+  const unidade = (p: PlanoDoResumo): UnidadeResumo => ({ name: p.vessel_name, asset_type: p.asset_type });
+  const nome = (p: PlanoDoResumo) => `${unidadeNaLinha(unidade(p))} — ${p.name}`;
   const valor = (p: PlanoDoResumo) => (num(p.estimated_value) > 0 ? ` · ${moeda(num(p.estimated_value))}` : "");
 
   const linhas: string[] = ["", "🛠️ *Revisões*"];
@@ -93,7 +114,7 @@ export function secaoDeRevisoes(
     for (const r of responderam.slice(0, MOSTRAR)) {
       const p = porId.get(r.plan_id)!;
       const texto = (r.texto ?? "").trim();
-      linhas.push(`   • ${p.client_name ?? p.vessel_name ?? "Cliente"} (${p.vessel_name ?? p.name})${texto ? `: "${texto.slice(0, 50)}${texto.length > 50 ? "…" : ""}"` : ""}`);
+      linhas.push(`   • ${p.client_name ?? p.vessel_name ?? "Cliente"} (${p.vessel_name ? unidadeNaLinha(unidade(p)) : p.name})${texto ? `: "${texto.slice(0, 50)}${texto.length > 50 ? "…" : ""}"` : ""}`);
     }
   }
   if (aguardandoSim > 0) {
@@ -105,8 +126,8 @@ export function secaoDeRevisoes(
   const alvo = vencidas[0] ?? vencendo[0] ?? null;
   const sugestao = alvo
     ? alvo.situacao === "vencida"
-      ? `agendar a revisão vencida do *${alvo.vessel_name ?? "barco"}* (${alvo.name}, venceu em ${ddmm(alvo.next_due_on)}). Me peça *revisões do mês* que eu listo e preparo o lembrete.`
-      : `oferecer a *${alvo.name}* do *${alvo.vessel_name ?? "barco"}* (vence ${ddmm(alvo.next_due_on)}). Me peça *revisões do mês* que eu preparo o lembrete — só sai com o seu sim.`
+      ? `agendar a revisão vencida ${unidadeEmNegrito(unidade(alvo))} (${alvo.name}, venceu em ${ddmm(alvo.next_due_on)}). Me peça *revisões do mês* que eu listo e preparo o lembrete.`
+      : `oferecer a *${alvo.name}* ${unidadeEmNegrito(unidade(alvo))} (vence ${ddmm(alvo.next_due_on)}). Me peça *revisões do mês* que eu preparo o lembrete — só sai com o seu sim.`
     : null;
   const acao = vencendo.length + vencidas.length > 0 ? "   • *Revisões do mês*" : null;
   return { linhas, sugestao, acao };

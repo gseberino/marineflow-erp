@@ -318,6 +318,7 @@ export const en: DeepPartialStrings<TranslationKeys> = {
     length: 'Length',
     year: 'Year',
     hullAndSpecs: 'Hull & Specs',
+    specs: 'Specs',
     hullId: 'Hull ID / Registration',
     beam: 'Beam',
     draft: 'Draft',

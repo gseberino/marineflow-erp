@@ -96,21 +96,22 @@ Deno.test("detalhe: fatos, também, quantas manhãs, a última resposta e o *X* 
   assertStringIncludes(textoDoDetalhe([p], [], HOJE), "É a primeira vez de manhã");
 });
 
-function rascunho(numero: string, cliente: string, barco: string, valor: string, montado: string, principal: boolean, ordem = 0): ItemGravado {
+// rotulo: "Embarcação ou veículo" desde 21/10/2026; "Barco" nos itens gravados antes (os dois valem).
+function rascunho(numero: string, cliente: string, barco: string, valor: string, montado: string, principal: boolean, ordem = 0, rotulo = "Embarcação ou veículo"): ItemGravado {
   return item("A", {
     principal, posicao: "manha", ordem, familia: "orcamento", tipo: "orcamento_nao_enviado", secao: "clientes",
     referencia: `os:${numero}`, nome: principal ? "3 orçamentos não enviados: ORÇ-00117, ORÇ-00116, ORÇ-00118" : `${numero} ${cliente}`,
     recomendacao: principal ? "Recomendo revisar e enviar, começando pelo maior." : "Recomendo revisar e enviar.",
     pedido: `me manda o pdf do ${numero}`,
     detalhe: {
-      fatos: [["Orçamento", numero], ["Cliente", cliente], ["Barco", barco], ["Valor", valor], ["Montado em", montado]],
+      fatos: [["Orçamento", numero], ["Cliente", cliente], [rotulo, barco], ["Valor", valor], ["Montado em", montado]],
       faco: principal ? "te mostro os 3" : "te mando o PDF", curto: "x",
     },
   });
 }
 
 const PACOTE: ItemGravado[] = [
-  rascunho("ORÇ-00116", "Santo Inacio", "S.I. 7.8 AUTO", "R$ 70.050,00", "09/10/2026", false),
+  rascunho("ORÇ-00116", "Santo Inacio", "S.I. 7.8 AUTO", "R$ 70.050,00", "09/10/2026", false, 0, "Barco"),
   rascunho("ORÇ-00117", "EVERTON CARLOS PINHEIRO", "Sprinter", "R$ 120.020,00", "13/10/2026", true),
   rascunho("ORÇ-00118", "Cliente Final", "Trailer Darlan", "R$ 21.333,70", "13/10/2026", false),
 ];

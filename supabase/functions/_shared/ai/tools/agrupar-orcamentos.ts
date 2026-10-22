@@ -26,6 +26,7 @@
 import { cargosQueContam, lerRetrato, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
 import { acharOS, pareceNumeroDeOS } from "./os-referencia.ts";
 import { mensagemDoBanco } from "./lancamentos.ts";
+import { TERMO_GERAL } from "../../unidade.ts";
 
 /** O banco aceita só administrador ou financeiro (is_admin_or_financial). */
 export const CARGOS_DO_AGRUPAMENTO: Role[] = ["admin", "financial"];
@@ -451,7 +452,8 @@ export function oQueMudouNoAgrupamento(retrato: Record<string, unknown>, pedido:
     if (a.status !== o.status || (a.quote_status ?? null) !== (o.quote_status ?? null)) mudancas.push(`${n} mudou de situação`);
     else if (Math.abs((Number(a.grand_total) || 0) - (Number(o.grand_total) || 0)) > 0.005) {
       mudancas.push(`o total de ${n} mudou (era ${emReais(a.grand_total)}, agora ${emReais(o.grand_total)})`);
-    } else if (a.client_id !== o.client_id || a.vessel_id !== o.vessel_id) mudancas.push(`${n} mudou de cliente ou embarcação`);
+    } else if (a.client_id !== o.client_id) mudancas.push(`${n} mudou de cliente`);
+    else if (a.vessel_id !== o.vessel_id) mudancas.push(`${n} mudou de ${TERMO_GERAL.toLowerCase()}`);
     else if (new Date(String(a.updated_at)).getTime() !== new Date(String(o.updated_at)).getTime()) mudancas.push(`${n} foi alterado`);
   }
   return mudancas.length ? mudancas.join("; ") : null;

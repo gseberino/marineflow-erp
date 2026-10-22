@@ -17,6 +17,7 @@ import { telefoneParaEnvio } from "./agendamento.ts";
 import { lerDataDaResposta } from "../../revisao/data-da-resposta.ts";
 import { hojeEmBrasilia, type PlanoDue, rotuloDoToque, type Toque } from "../../revisao/texto.ts";
 import { clientesPorId, lerPlanosDue, prepararMensagem, resumoDaProposta } from "../../revisao/lembretes.ts";
+import { campoDaUnidade } from "../../unidade.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -225,6 +226,8 @@ export interface LembretePronto {
   telefone: string | null;
   vence: string | null;
   embarcacao: string;
+  /** O tipo da unidade (asset_type): o resumo diz "Lancha: *Mar Azul*", "Motorhome: *Iveco Daily*". */
+  tipo?: string | null;
 }
 
 /** Monta o lembrete de UM plano, como a edge montaria (mesmo texto), para virar a pendência. */
@@ -248,11 +251,13 @@ export async function prepararLembreteAgora(db: Db, args: Record<string, unknown
   const hoje = hojeEmBrasilia(agora);
   let texto: string;
   let cliente: string;
+  let tipo: string | null;
   try {
     const clientes = await clientesPorId(db, [p.client_id]);
     const proposta = await prepararMensagem(db, { toque: t.toque, planos: [p] }, hoje, clientes[p.client_id]);
     texto = proposta.texto;
     cliente = proposta.cliente;
+    tipo = proposta.unidades[0]?.asset_type ?? null;
   } catch (e) {
     return erroDe(e);
   }
@@ -265,6 +270,7 @@ export async function prepararLembreteAgora(db: Db, args: Record<string, unknown
     telefone: telefoneParaEnvio(p.client_phone),
     vence: p.next_due_on,
     embarcacao: p.vessel_name ?? "",
+    tipo,
   };
 }
 
@@ -291,7 +297,9 @@ export async function resumirLembreteDeRevisao(admin: Db, toolName: string, args
   if (toolName === "send_maintenance_reminder_now") {
     const r = await prepararLembreteAgora(admin, args);
     if ("error" in r) return `⚠️ ${r.error}`;
-    return `${r.embarcacao ? `Embarcação: *${r.embarcacao}*\n` : ""}${resumoDaProposta(r, false)}`;
+    // A unidade pelo tipo (decisão 9, 21/10/2026): "Lancha: *Mar Azul*", "Motorhome: *Iveco Daily*".
+    const unidade = campoDaUnidade({ name: r.embarcacao, asset_type: r.tipo }, { comIdentificacao: false, comModelo: false });
+    return `${r.embarcacao ? `${unidade.rotulo}: *${unidade.valor}*\n` : ""}${resumoDaProposta(r, false)}`;
   }
   if (toolName === "enviar_lembrete_de_revisao") {
     const planos = Array.isArray(args.planos) ? (args.planos as string[]).filter((x) => UUID_RE.test(String(x))) : [];

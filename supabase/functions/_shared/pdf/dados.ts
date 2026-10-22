@@ -356,6 +356,9 @@ export async function carregarPDFData(
     },
     vessel: so.vessels ? {
       name: (so.vessels as any).name,
+      // O tipo vira o rótulo no documento ("Motorhome: …"). Os dois leitores pedem a coluna (o público
+      // pela VEICULO_PUBLICO); cadastro sem tipo cai no termo geral "Embarcação ou veículo".
+      type: (so.vessels as any).asset_type ?? undefined,
       manufacturer: (so.vessels as any).manufacturer ?? undefined,
       model: (so.vessels as any).model ?? undefined,
       year: (so.vessels as any).year ?? undefined,

@@ -26,6 +26,7 @@ import { FollowupMissionButton } from '@/components/followups/FollowupMissionDia
 import {
   descreverRepeticao, lerRepeticao, LETRA_DO_DIA, montarRrule, NOME_DO_DIA,
 } from '@/lib/regra-de-repeticao';
+import { TERMO_GERAL, nomeDaUnidade } from '@/lib/unidade';
 
 /** Modelos de checklist (app_settings.task_checklist_templates) — padrão ServiceM8/FieldPulse. */
 export function useChecklistTemplates() {
@@ -94,7 +95,7 @@ const LINKABLE: { value: RelatedEntityType | ''; label: string }[] = [
   // A R14 grava 'vessel' e a aba Tarefas da embarcação abre este dialog já vinculado.
   // Sem esta linha o Select fica com um value fora da lista: aparece vazio e, se a
   // pessoa tocar nele, o vínculo com a embarcação some sem aviso.
-  { value: 'vessel', label: 'Embarcação' },
+  { value: 'vessel', label: TERMO_GERAL },
 ];
 
 function useEntityOptions(type: RelatedEntityType | '') {
@@ -136,15 +137,16 @@ function useEntityOptions(type: RelatedEntityType | '') {
       } else if (type === 'vessel') {
         const { data } = await supabase
           .from('vessels')
-          .select('id, name, clients(name)')
+          .select('id, name, asset_type, clients(name)')
           .order('name')
           .limit(500);
         // O nome do barco se repete entre clientes ("Fibrafort 230"), então o dono
         // desambigua — mesma razão pela qual a OS mostra o cliente ao lado do número.
-        rows = (data || []).map((v: any) => ({
-          value: v.id,
-          label: v.clients?.name ? `${v.name} — ${v.clients.name}` : v.name,
-        }));
+        // O tipo vai à frente do nome (decisão 9, 21/10/2026): "Motorhome Iveco Daily — Carlos".
+        rows = (data || []).map((v: any) => {
+          const nome = v.name ? nomeDaUnidade(v) : '—';
+          return { value: v.id, label: v.clients?.name ? `${nome} — ${v.clients.name}` : nome };
+        }).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR')); // em ordem do que se lê
       }
       if (!cancelled) setOptions(rows);
     }

@@ -302,3 +302,50 @@ describe('paridade entre Baixar e Imprimir', () => {
     expect(buildPDFFilename(makeData())).toBe(`${tituloParaImpressao(makeData())}.pdf`);
   });
 });
+
+/**
+ * Decisão 9 (21/10/2026), pedido do dono: "Embarcação: Iveco Daily" não faz sentido, e 61% das
+ * OS são de motorhome. Com a unidade à vista, o rótulo é o próprio tipo; sem o tipo (o link
+ * público não lê asset_type), o termo geral "Embarcação ou veículo". Conferido no HTML final.
+ */
+describe('a unidade no documento leva o tipo como rótulo', () => {
+  const motorhome = {
+    name: 'Iveco Daily', type: 'Motorhome', manufacturer: 'Iveco', model: 'Daily', year: 2019, registration: 'ABC1D23',
+  };
+
+  it('OS e orçamento: "Motorhome: Iveco Daily" e a placa com o nome certo', () => {
+    for (const documentType of ['service_order', 'quote'] as const) {
+      const html = buildHTMLDocument(documentoCompleto({ documentType, vessel: motorhome }), DEFAULT_PDF_OPTIONS);
+      expect(html).toContain('Embarcação ou veículo e local');
+      expect(html).toContain('Motorhome: Iveco Daily</div>');
+      expect(html).toContain('Placa: ABC1D23');
+      expect(html).not.toMatch(/Ativo|Embarcação: |Registro:/);
+    }
+  });
+
+  it('lancha: o rótulo é "Lancha" e a identificação é a inscrição', () => {
+    const html = buildHTMLDocument(
+      documentoCompleto({ vessel: { name: 'Netuno II', type: 'Lancha', registration: '4410123456' } }),
+      DEFAULT_PDF_OPTIONS,
+    );
+    expect(html).toContain('Lancha: Netuno II</div>');
+    expect(html).toContain('Inscrição: 4410123456');
+  });
+
+  it('cadastro sem tipo: o termo geral', () => {
+    const html = buildHTMLDocument(
+      documentoCompleto({ vessel: { name: 'Iveco Daily', registration: 'ABC1D23' } }),
+      DEFAULT_PDF_OPTIONS,
+    );
+    expect(html).toContain('Embarcação ou veículo: Iveco Daily</div>');
+    expect(html).toContain('Inscrição / placa: ABC1D23');
+  });
+
+  it('recibo: "(Motorhome: Iveco Daily · placa ABC1D23)", nunca "(Ativo: …)"', () => {
+    const html = buildHTMLDocument(documentoCompleto({ documentType: 'receipt', vessel: motorhome }), DEFAULT_PDF_OPTIONS);
+    expect(html).toContain('(Motorhome: Iveco Daily · placa ABC1D23)');
+    expect(html).not.toContain('Ativo');
+    const semUnidade = buildHTMLDocument(documentoCompleto({ documentType: 'receipt' }), DEFAULT_PDF_OPTIONS);
+    expect(semUnidade).not.toMatch(/Embarcação ou veículo|Ativo/);
+  });
+});

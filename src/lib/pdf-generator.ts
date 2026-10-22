@@ -13,9 +13,11 @@ import {
   PAYMENT_METHOD_LABELS,
   PDF_ROOT_CLASS,
   tituloParaImpressao,
+  unidadeDoDocumento,
   type PDFData,
   type PDFOptions,
 } from '../../supabase/functions/_shared/pdf/documento';
+import { linhaDaUnidade } from './unidade';
 
 // O documento da ordem (tipos, opções, nome do arquivo e desenho) mora em
 // supabase/functions/_shared/pdf/documento.ts, para o assistente do WhatsApp gerar o
@@ -670,6 +672,8 @@ function buildReceiptHTML(data: PDFData, options: PDFOptions): string {
   const docNumber = `REC-${esc(r.reference || data.serviceOrder.service_order_number)}`;
   const methodLabel = PAYMENT_METHOD_LABELS[r.payment_method] || r.payment_method;
   const amountWords = numberToWordsBRL(r.amount);
+  // "(Motorhome: Iveco Daily · placa ABC1D23)" — o tipo é o rótulo (decisão 9, 21/10/2026).
+  const unidade = linhaDaUnidade(unidadeDoDocumento(data.vessel));
 
   const body = `
 ${companyHeaderHTML(data.company, 'Recibo de Quitação', docNumber)}
@@ -687,7 +691,7 @@ ${companyHeaderHTML(data.company, 'Recibo de Quitação', docNumber)}
     a importância líquida e certa de <strong>${fmtCurrency(r.amount)}</strong> 
     <span style="font-size:11px;color:var(--pdf-text-muted);">(${esc(amountWords)})</span>, 
     referente ao pagamento de <strong>${esc(r.reference || data.serviceOrder.service_order_number)}</strong>
-    ${data.vessel ? ` (Ativo: ${esc(data.vessel.name)})` : ''}.
+    ${unidade ? ` (${esc(unidade)})` : ''}.
   </div>
   
   <div style="margin-top:20px;font-size:12px;color:var(--pdf-text-muted);">

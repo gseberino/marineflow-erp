@@ -18,6 +18,7 @@
  * preenchida e um bloco por equipamento reconhecido entre as peças da OS. O registro dos
  * valores no sistema (5c) espera o teste em campo.
  */
+import { campoDaUnidade, TERMO_GERAL, type UnidadeResumo } from './unidade';
 
 export type TipoDeEquipamento = 'dcdc' | 'carregador' | 'inversor' | 'mppt' | 'bateria_litio';
 
@@ -38,7 +39,13 @@ export function tipoDeEquipamento(nome: string | null | undefined): TipoDeEquipa
 
 export interface ComissionamentoHeader {
   orderNumber?: string | null;
+  /** Texto pronto da unidade, quando quem chama não tem o cadastro. Sai com o termo geral. */
   vehicle?: string | null;
+  /**
+   * A unidade do cadastro: com ela o rótulo é o próprio tipo ("Motorhome", "Lancha") e o
+   * valor sai pela regra única (src/lib/unidade.ts, decisão 9 de 21/10/2026). Vence `vehicle`.
+   */
+  unidade?: UnidadeResumo | null;
   clientName?: string | null;
   technicianName?: string | null;
   companyName?: string | null;
@@ -189,6 +196,10 @@ export function buildCommissioningSheetHtml(header: ComissionamentoHeader, pecas
   const blocos = blocosDaFolha(pecas);
   const reconhecidos = blocos.some((b) => b.modelos.length);
   const numero = esc(header.orderNumber) || '________';
+  // "Motorhome" / "Iveco Daily · placa ABC1D23"; sem cadastro, o termo geral com o texto pronto.
+  const unidade = header.unidade
+    ? campoDaUnidade(header.unidade)
+    : { rotulo: TERMO_GERAL, valor: header.vehicle || '' };
 
   const blocosHtml = blocos.map((b, i) => {
     const def = BLOCOS[b.tipo];
@@ -266,12 +277,12 @@ export function buildCommissioningSheetHtml(header: ComissionamentoHeader, pecas
 <body>
 <div class="top">
   <div><div class="k">${esc(header.companyName) || 'HBR'} · versão de teste</div><h1>Folha de comissionamento</h1></div>
-  <div class="k">Sistema de energia · barco ou motorhome</div>
+  <div class="k">Sistema de energia · embarcação ou veículo</div>
 </div>
 
 <div class="id">
   <div><small>OS</small>${numero}</div>
-  <div><small>Veículo</small>${esc(header.vehicle)}</div>
+  <div><small>${esc(unidade.rotulo)}</small>${esc(unidade.valor)}</div>
   <div><small>Data</small></div>
   <div><small>Técnico</small>${esc(header.technicianName)}</div>
   <div><small>Cliente</small>${esc(header.clientName)}</div>

@@ -226,7 +226,9 @@ describe('via do técnico — folha de rosto e volta (avaliação 01/10)', () =>
 
   it('traz veículo, local, vaga e com quem falar — tudo que já está no cadastro', () => {
     const html = buildRouteSheetHtml(rosto, []);
-    expect(html).toContain('Motorhome · Itapoã Sprinter');
+    // O rótulo é o próprio tipo (decisão 9, 21/10/2026); nome e modelo no valor.
+    expect(html).toContain('<span class="lab">Motorhome</span>Itapoã · Itapoã Sprinter');
+    expect(html).not.toContain('<span class="lab">Veículo</span>');
     expect(html).toContain('Marina Itajaí · vaga B-12');
     // Mesmo número no telefone e no WhatsApp sai uma vez só.
     expect(html).toContain('tel./WhatsApp (47) 99999-0000');
@@ -386,11 +388,34 @@ describe('via do técnico — fase 2: instrução, local, contato no local e sit
 
   it('o que já se sabe do sistema elétrico do veículo vai junto', () => {
     const html = buildRouteSheetHtml({
-      ...base, vehicleElectrical: { batteryBank: '2× lítio 12V 200Ah', inverterCharger: 'MultiPlus 12/3000' },
+      ...base, assetType: 'Motorhome',
+      vehicleElectrical: { batteryBank: '2× lítio 12V 200Ah', inverterCharger: 'MultiPlus 12/3000' },
     }, []);
-    expect(html).toContain('O que já sabemos do sistema elétrico deste veículo');
+    expect(html).toContain('O que já sabemos do sistema elétrico deste motorhome');
     expect(html).toContain('Banco de baterias: 2× lítio 12V 200Ah');
     expect(html).toContain('Inversor/carregador: MultiPlus 12/3000');
+  });
+
+  it('o título do sistema elétrico concorda com o tipo; sem tipo, o termo geral', () => {
+    const eletrico = { batteryBank: '4× AGM 105Ah' };
+    expect(buildRouteSheetHtml({ ...base, assetType: 'Lancha', vehicleElectrical: eletrico }, []))
+      .toContain('O que já sabemos do sistema elétrico desta lancha');
+    expect(buildRouteSheetHtml({ ...base, vehicleElectrical: eletrico }, []))
+      .toContain('O que já sabemos do sistema elétrico desta embarcação ou veículo');
+  });
+
+  it('a unidade sai com o tipo como rótulo e a placa; sem unidade, o termo geral', () => {
+    const motorhome = buildRouteSheetHtml({
+      ...base, assetName: 'Iveco Daily', assetType: 'Motorhome', assetMaker: 'Iveco', assetModel: 'Daily',
+      assetRegistration: 'ABC1D23',
+    }, []);
+    // Modelo igual ao nome não se repete; a placa entra com o nome certo para veículo.
+    expect(motorhome).toContain('<span class="lab">Motorhome</span>Iveco Daily · placa ABC1D23');
+    expect(motorhome).not.toMatch(/Embarcação:|Ativo/);
+    const lancha = buildRouteSheetHtml({ ...base, assetName: 'Netuno II', assetType: 'Lancha', assetRegistration: '4410123456' }, []);
+    expect(lancha).toContain('<span class="lab">Lancha</span>Netuno II · inscrição 4410123456');
+    const vazio = buildRouteSheetHtml(base, []);
+    expect(vazio).toContain('<span class="lab">Embarcação ou veículo</span><span class="vazio">não informado</span>');
   });
 
   it('serviço "só levantar" diz para não executar; "já feito" não pede volta', () => {

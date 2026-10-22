@@ -10,6 +10,7 @@ import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
 import { serviceOrderStatusTone, priorityTone } from '@/v2/status-map';
 import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn, type Density } from '@/v2/components/DataTable';
+import { nomeDaUnidade } from '@/lib/unidade';
 import '@/v2/tokens.css';
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -27,8 +28,11 @@ type PreviewSO = {
   grand_total: number | null;
   scheduled_start_at: string | null;
   clients: { name: string } | null;
-  vessels: { name: string } | null;
+  vessels: { name: string; asset_type: string | null } | null;
 };
+
+/** Nome da unidade com o tipo à frente ("Motorhome Iveco Daily"), decisão 9 de 21/10/2026. */
+const unidadeDaOS = (so: PreviewSO) => (so.vessels?.name ? nomeDaUnidade(so.vessels) : null);
 
 export default function DesignPreviewV2() {
   const [mode, setMode] = useState<'light' | 'dark'>('light');
@@ -41,7 +45,7 @@ export default function DesignPreviewV2() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('service_orders')
-        .select('id, service_order_number, status, priority, service_type, grand_total, scheduled_start_at, clients(name), vessels(name)')
+        .select('id, service_order_number, status, priority, service_type, grand_total, scheduled_start_at, clients(name), vessels(name, asset_type)')
         .neq('status', 'draft')
         .order('created_at', { ascending: false })
         .limit(8);
@@ -61,7 +65,8 @@ export default function DesignPreviewV2() {
     },
     {
       key: 'client',
-      header: 'Cliente · Embarcação',
+      // Só 'Cliente': a 2ª linha já diz o tipo (como em OrdersListV2).
+      header: 'Cliente',
       minWidth: 220,
       priority: 1,
       detailLabel: 'Cliente',
@@ -69,7 +74,7 @@ export default function DesignPreviewV2() {
         <span className="block leading-tight">
           <span className="block truncate font-semibold">{so.clients?.name || '—'}</span>
           <span className="block truncate text-xs text-muted-foreground">
-            {[so.vessels?.name, so.service_type].filter(Boolean).join(' · ') || '—'}
+            {[unidadeDaOS(so), so.service_type].filter(Boolean).join(' · ') || '—'}
           </span>
         </span>
       ),
@@ -227,7 +232,7 @@ export default function DesignPreviewV2() {
                 }
                 title={so.clients?.name || '—'}
                 lines={[
-                  [so.vessels?.name, so.service_type].filter(Boolean).join(' · ') || '—',
+                  [unidadeDaOS(so), so.service_type].filter(Boolean).join(' · ') || '—',
                   so.scheduled_start_at ? formatDate(so.scheduled_start_at) : 'Sem agendamento',
                 ]}
                 actions={

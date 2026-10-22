@@ -24,7 +24,8 @@ const COISAS: Record<string, string> = {
   products: 'produto',
   services: 'serviço',
   clients: 'cliente',
-  vessels: 'embarcação',
+  // Erro não diz qual unidade: o termo geral (decisão 9, 21/10/2026).
+  vessels: 'embarcação ou veículo',
   marinas: 'marina',
   suppliers: 'fornecedor',
   service_orders: 'ordem de serviço',

@@ -10,9 +10,14 @@
  *    mão fica.
  */
 
+import { unidadeNaFrase } from './unidade';
+
 export interface Perdas {
-  /** Nome da embarcação que sai da OS ("" quando ela não tem nome). */
+  /** Nome da embarcação ou veículo que sai da OS ("" quando ela não tem nome). */
   embarcacao?: string | null;
+  /** O tipo dela (Lancha, Motorhome): o texto diz "a lancha Netuno II", "o motorhome Iveco Daily".
+      Sem tipo, o termo geral: "a embarcação ou veículo Netuno II" (decisão 9, 21/10/2026). */
+  tipoDaEmbarcacao?: string | null;
   /** Nome do solicitante que sai da OS. */
   solicitante?: string | null;
   /** Nome da marina que sai junto (era a do barco antigo). */
@@ -29,15 +34,19 @@ export function tituloDaTroca(documento: 'OS' | 'orçamento'): string {
   return documento === 'orçamento' ? 'Trocar o cliente deste orçamento?' : 'Trocar o cliente desta OS?';
 }
 
-/** "De João para Maria. Saem: a embarcação Netuno II e o solicitante Pedro." Sem nome de
+/** "De João para Maria. Saem: a lancha Netuno II e o solicitante Pedro." Sem nome de
     origem (cliente fora da lista): "Do cliente atual para…". */
 export function descricaoDaTroca(de: string | null, para: string | null, p: Perdas): string {
   const itens: string[] = [];
-  if (p.embarcacao != null) itens.push(p.embarcacao ? `a embarcação ${p.embarcacao}` : 'a embarcação escolhida');
+  if (p.embarcacao != null) {
+    itens.push(p.embarcacao || p.tipoDaEmbarcacao
+      ? unidadeNaFrase({ name: p.embarcacao, asset_type: p.tipoDaEmbarcacao })
+      : 'a embarcação ou veículo escolhido');
+  }
   if (p.solicitante != null) itens.push(p.solicitante ? `o solicitante ${p.solicitante}` : 'o solicitante escolhido');
   // O nome da marina quase sempre já começa por "Marina": entre parênteses, não "a marina Marina X".
   if (p.marina != null) itens.push(p.marina ? `a marina sugerida (${p.marina})` : 'a marina sugerida');
-  if (p.local) itens.push('o local e acesso da embarcação');
+  if (p.local) itens.push(`o local e acesso ${unidadeNaFrase({ asset_type: p.tipoDaEmbarcacao }, 'de')}`);
   const inicio = `${de ? `De ${de}` : 'Do cliente atual'} para ${para ?? 'um cliente novo'}.`;
   if (!itens.length) return inicio;
   const lista = itens.length === 1 ? itens[0] : `${itens.slice(0, -1).join(', ')} e ${itens[itens.length - 1]}`;
@@ -77,11 +86,12 @@ export function trocarClienteNoForm(f: Form, clienteId: string, barcoAntigo: Bar
 export function perdasDaTrocaDeCliente(
   f: Form,
   barcoAntigo: Barco,
-  nomes: { embarcacao?: string | null; solicitante?: string | null; marina?: string | null },
+  nomes: { embarcacao?: string | null; tipoDaEmbarcacao?: string | null; solicitante?: string | null; marina?: string | null },
 ): Perdas {
   const temSolicitante = !!(f.requested_by_contact_id || f.requested_by_name);
   return {
     embarcacao: f.vessel_id ? (nomes.embarcacao ?? '') : null,
+    tipoDaEmbarcacao: f.vessel_id ? (nomes.tipoDaEmbarcacao ?? undefined) : undefined,
     solicitante: temSolicitante ? (nomes.solicitante || f.requested_by_name || '') : null,
     marina: eMarinaDo(f.marina_id, barcoAntigo) ? (nomes.marina ?? '') : null,
     local: eSugestaoDe(f.site_access, barcoAntigo),

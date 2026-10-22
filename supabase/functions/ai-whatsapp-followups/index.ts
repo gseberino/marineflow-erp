@@ -20,6 +20,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { TERMO_GERAL, unidadeNaFrase } from "../_shared/unidade.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -106,17 +107,22 @@ servirComCors(async (req) => {
     const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
     const { data: allOS } = await admin
       .from("service_orders")
-      .select("client_id, created_at")
+      .select("client_id, created_at, vessel_id")
       .not("client_id", "is", null)
       .neq("status", "cancelled")
       .order("created_at", { ascending: false })
       .limit(5000);
 
     const lastByClient = new Map<string, number>();
+    // A unidade da última OS do cliente: a mensagem diz "do motorhome Iveco Daily", "da lancha Netuno II".
+    const lastVesselByClient = new Map<string, string | null>();
     for (const o of allOS || []) {
       const cid = (o as any).client_id as string;
       const t = new Date((o as any).created_at).getTime();
-      if (!lastByClient.has(cid) || t > (lastByClient.get(cid) as number)) lastByClient.set(cid, t);
+      if (!lastByClient.has(cid) || t > (lastByClient.get(cid) as number)) {
+        lastByClient.set(cid, t);
+        lastVesselByClient.set(cid, (o as any).vessel_id ?? null);
+      }
     }
     const inactiveIds = [...lastByClient.entries()].filter(([, t]) => t < sixMonths.getTime()).map(([cid]) => cid);
 
@@ -131,7 +137,15 @@ servirComCors(async (req) => {
       if (phone.length < 10) continue;
       if (!(await claim(`reactivate:${cid}:${monthKey}`, { client: cid }))) continue;
       const nome = (c.name || "").split(" ")[0] || "tudo bem";
-      const msg = `Olá ${nome}! Aqui é o assistente da ${companyName} ⚓. Faz um tempo que não cuidamos da sua embarcação por aqui. Que tal agendar uma revisão ou manutenção? É só me chamar que eu te ajudo. 🙂`;
+      // 21/10/2026 (decisão 9): a unidade pelo tipo — "da sua embarcação" ia também para dono de
+      // motorhome. Sem a unidade (OS sem embarcação/veículo ou leitura que falhou), o termo geral.
+      let daUnidade = `da sua ${TERMO_GERAL.toLowerCase()}`;
+      const vid = lastVesselByClient.get(cid);
+      if (vid) {
+        const { data: v } = await admin.from("vessels").select("name, asset_type").eq("id", vid).maybeSingle();
+        if (v) daUnidade = unidadeNaFrase(v, "de");
+      }
+      const msg = `Olá ${nome}! Aqui é o assistente da ${companyName} ⚓. Faz um tempo que não cuidamos ${daUnidade} por aqui. Que tal agendar uma revisão ou manutenção? É só me chamar que eu te ajudo. 🙂`;
       rows.push({ phone_normalized: phone, message: msg, source: "ai_followup", priority: 7 });
       reactivation++;
     }

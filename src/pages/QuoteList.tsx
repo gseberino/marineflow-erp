@@ -28,6 +28,7 @@ import { printPDF } from '@/lib/pdf-print';
 import type { PDFAction } from '@/components/PDFOptionsDialog';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { useAppSettings } from '@/hooks/use-app-settings';
+import { TERMO_GERAL } from '@/lib/unidade';
 import { toast } from 'sonner';
 
 type SortDir = 'asc' | 'desc';
@@ -238,7 +239,7 @@ export default function QuoteList() {
       <MultiFilterBar
         search={filters.search as string}
         onSearchChange={v => { setField('search', v); setPage(1); }}
-        searchPlaceholder="Buscar por número, cliente ou embarcação…"
+        searchPlaceholder="Buscar por número, cliente, embarcação ou veículo…"
         filters={filters}
         activeCount={activeCount}
         onToggle={(f, v) => { toggle(f, v); setPage(1); }}
@@ -281,7 +282,7 @@ export default function QuoteList() {
                 { key: 'service_order_number', label: 'Número' },
                 { key: 'quote_status', label: 'Status' },
                 { key: 'clients', label: 'Cliente', format: (v: any) => v?.name || '' },
-                { key: 'vessels', label: 'Embarcação', format: (v: any) => v?.name || '' },
+                { key: 'vessels', label: TERMO_GERAL, format: (v: any) => v?.name || '' },
                 { key: 'grand_total', label: 'Valor Total', format: (v: any) => Number(v || 0).toFixed(2).replace('.', ',') },
                 { key: 'created_at', label: 'Data Criação', format: (v: any) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
               ])

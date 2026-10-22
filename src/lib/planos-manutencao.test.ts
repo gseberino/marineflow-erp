@@ -118,4 +118,13 @@ describe('alvosSemPlano (Prospecção › Revisões preventivas)', () => {
     ], new Set(), agora);
     expect(r).toHaveLength(1);
   });
+
+  it('o cartão leva o tipo à frente do nome; sem tipo, só o nome; sem nome, o tipo ou o termo geral', () => {
+    // Decisão 9 (21/10/2026): "Iveco Daily" sozinho não diz que é motorhome.
+    expect(alvosSemPlano([os({ vessel_name: 'Iveco Daily', vessel_asset_type: 'Motorhome' })], new Set(), agora)[0].embarcacao)
+      .toBe('Motorhome Iveco Daily');
+    expect(alvosSemPlano([os({})], new Set(), agora)[0].embarcacao).toBe('Mar Azul');
+    expect(alvosSemPlano([os({ vessel_name: null, vessel_asset_type: 'Lancha' })], new Set(), agora)[0].embarcacao).toBe('Lancha');
+    expect(alvosSemPlano([os({ vessel_name: null })], new Set(), agora)[0].embarcacao).toBe('Embarcação ou veículo');
+  });
 });

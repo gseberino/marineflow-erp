@@ -30,7 +30,7 @@ const FIELD_LABELS: Record<string, string> = {
   due_date:         'Prazo',
   assigned_technician: 'Técnico',
   client_id:        'Cliente',
-  vessel_id:        'Embarcação',
+  vessel_id:        'Embarcação ou veículo',
   marina_id:        'Marina',
   type:             'Tipo',
   internal_notes:   'Notas internas',

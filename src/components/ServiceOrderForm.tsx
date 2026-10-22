@@ -84,6 +84,7 @@ import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles } from 'l
 import { decideAutosave } from '@/lib/autosave-guard';
 import { manterSeMexeu, mesclarReleitura, mesmoValor } from '@/lib/releitura-da-os';
 import { trocarEmbarcacaoNoForm } from '@/lib/troca-de-cliente';
+import { ehFeminino, rotuloDaUnidade, unidadeNaFrase } from '@/lib/unidade';
 import { documentTypeFor, documentLabelFor, isQuoteStatus } from '@/lib/document-type';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AcoesDropboxDaOrdem } from '@/components/dropbox/PastaNoDropbox';
@@ -162,11 +163,14 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // peças da OS, identificação já preenchida, valores sempre do manual do modelo.
   const imprimirComissionamento = () => {
     const via = viaHeaderFromOrder(orderData);
-    const veiculo = [via.assetType, [via.assetMaker, via.assetModel].filter(Boolean).join(' '), via.assetName]
-      .filter(Boolean).join(' · ');
     const ok = printCommissioningSheet(
       {
-        orderNumber: via.orderNumber, vehicle: veiculo, clientName: via.clientName,
+        orderNumber: via.orderNumber, clientName: via.clientName,
+        // O tipo vira o rótulo ("Motorhome: Iveco Daily · placa ABC1D23") — decisão 9, 21/10/2026.
+        unidade: {
+          name: via.assetName, asset_type: via.assetType, manufacturer: via.assetMaker,
+          model: via.assetModel, hull_id_or_registration: via.assetRegistration,
+        },
         technicianName: via.technicianName, companyName: appSettings?.company_name || null,
       },
       ((parts || []) as any[]).map((p) => ({ name: p.products?.name || 'Item sem cadastro', quantity: p.quantity })),
@@ -776,6 +780,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
   // Filter vessels by client
   const clientVessels = allVessels?.filter((v) => v.client_id === form.client_id) || [];
+  // A unidade da OS, para os avisos dizerem "o motorhome", "a lancha" (decisão 9, 21/10/2026);
+  // sem tipo, o termo geral ("a embarcação ou veículo").
+  const unidadeDaOS = allVessels?.find((v) => v.id === form.vessel_id);
+  const aUnidadeDaOS = unidadeNaFrase({ asset_type: unidadeDaOS?.asset_type });
+  const unidadeDaOSFeminina = ehFeminino(unidadeDaOS?.asset_type);
 
   // Auto-select single vessel — pela mesma regra da escolha à mão (troca-de-cliente.ts): marina e
   // local de acesso do barco entram como sugestão; o que já foi escolhido ou escrito, fica.
@@ -901,7 +910,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
   const handleSave = async () => {
     if (!form.client_id || !form.vessel_id || !form.problem_description) {
-      toast.error('Preencha cliente, embarcação e descrição do problema');
+      toast.error('Preencha cliente, embarcação ou veículo e descrição do problema');
       return;
     }
     try {
@@ -2020,6 +2029,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           onFechar={() => setAgruparAberto(false)}
           clientId={orderData.client_id}
           vesselId={orderData.vessel_id}
+          unidade={allVessels?.find((v) => v.id === orderData.vessel_id)}
           preSelecionados={[orderId]}
           principalSugerido={orderId}
         />
@@ -2418,12 +2428,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         // saída é voltar a OS para Em andamento); o agrupamento exige a mesma unidade nas origens.
         semTrocaDeEmbarcacao={
           !orderId ? undefined
-          : currentStatus === 'completed' ? 'OS concluída: para trocar a embarcação ou veículo, volte a OS para Em andamento.'
+          : currentStatus === 'completed' ? `OS concluída: para trocar ${aUnidadeDaOS}, volte a OS para Em andamento.`
           : agrupamento.isLoading ? true
           : agrupamento.isError ? 'Não deu para conferir se este orçamento reúne outros: recarregue a página para trocar.'
           : !comoAgrupado ? undefined
-          : podeDesagrupar ? 'Este orçamento reúne outros da mesma embarcação ou veículo: para trocar, desagrupe antes.'
-          : 'A embarcação ou veículo não muda: este documento reúne orçamentos dela.'
+          : podeDesagrupar ? `Este orçamento reúne outros ${unidadeDaOSFeminina ? 'da mesma' : 'do mesmo'} ${rotuloDaUnidade(unidadeDaOS?.asset_type).toLowerCase()}: para trocar, desagrupe antes.`
+          : `${aUnidadeDaOS.charAt(0).toUpperCase()}${aUnidadeDaOS.slice(1)} não muda: este documento reúne orçamentos ${unidadeDaOSFeminina ? 'dela' : 'dele'}.`
         }
       />
 

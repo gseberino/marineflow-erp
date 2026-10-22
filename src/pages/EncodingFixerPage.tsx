@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Loader2, Save, RefreshCw } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { PageHeader } from "@/components/PageHeader";
+import { TERMO_GERAL_PLURAL } from "@/lib/unidade";
 
 type TableKey = "clients" | "vessels" | "whatsapp_leads" | "service_orders";
 
@@ -17,7 +18,7 @@ const TABLES: Record<TableKey, { label: string; fields: string[]; labelField: st
     fields: ["name", "address_line_1", "address_line_2", "city", "state", "notes"],
   },
   vessels: {
-    label: "Embarcações",
+    label: TERMO_GERAL_PLURAL,
     labelField: "name",
     fields: ["name", "manufacturer", "model", "current_marina_name_snapshot"],
   },

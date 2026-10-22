@@ -12,6 +12,8 @@ import { AIConfirmCard } from './AIConfirmCard';
 import { AIOptionsCard } from './AIOptionsCard';
 import { toast } from 'sonner';
 import { downloadText } from '@/lib/download';
+import { useVessel } from '@/hooks/use-vessels';
+import { grupoDoTipo, rotuloDaUnidade, unidadeNaFrase } from '@/lib/unidade';
 
 function DraggableAIButton({ onOpen }: { onOpen: () => void }) {
   const [pos, setPos] = React.useState({ bottom: 24, right: 24 });
@@ -95,6 +97,10 @@ export function AIAgentWidget() {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const context = useAIContext();
+  // Unidade em contexto: o tipo dá o rótulo e as sugestões (decisão 9, 21/10/2026). Mesma
+  // consulta (e cache) da ficha aberta; fora da ficha, não consulta nada.
+  const { data: unidadeEmContexto } = useVessel(context.entityType === 'vessel' ? context.entityId : undefined);
+  const tipoEmContexto = unidadeEmContexto?.asset_type ?? null;
   const { display, loading, loadingMsg, sendMessage, confirmProposal, cancelProposal, selectOption, reset, loadSession, activeProposal, activeOptions } =
     useAIAgent(context);
   const [sessoes, setSessoes] = useState<Array<{ id: string; last_activity_at: string | null }>>([]);
@@ -190,7 +196,8 @@ export function AIAgentWidget() {
   const entityLabel =
     context.entityType === 'service_order' ? '📋 OS em contexto' :
     context.entityType === 'client' ? '👤 Cliente em contexto' :
-    context.entityType === 'vessel' ? '⛵ Embarcação em contexto' :
+    context.entityType === 'vessel'
+      ? `${grupoDoTipo(tipoEmContexto) === 'veiculo' ? '🚐' : '⛵'} ${rotuloDaUnidade(tipoEmContexto)} em contexto` :
     context.entityType === 'agenda' ? '📅 Agenda em contexto' :
     context.entityType === 'products' ? '📦 Produtos em contexto' :
     context.entityType === 'financial' ? '💰 Financeiro em contexto' : null;
@@ -206,8 +213,8 @@ export function AIAgentWidget() {
       'Crie uma nova OS para este cliente',
       'Cobranças pendentes deste cliente',
     ] : context.entityType === 'vessel' ? [
-      'Histórico de serviços desta embarcação',
-      'Crie uma OS para esta embarcação',
+      `Histórico de serviços ${unidadeNaFrase({ asset_type: tipoEmContexto }, 'de')}`,
+      `Crie uma OS ${unidadeNaFrase({ asset_type: tipoEmContexto }, 'para')}`,
     ] : [
       'Crie uma OS para o barco do João',
       'Tarefas de hoje na agenda',

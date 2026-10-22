@@ -10,6 +10,7 @@
  */
 // As datas são as do PDF e do resumo (calendário de Brasília em qualquer máquina): uma regra só.
 import { dataBR as dataBRCompartilhada, diaBR, somarDiasAoDia } from '../../supabase/functions/_shared/pdf/datas';
+import { nomeDaUnidade, rotuloDaUnidade } from './unidade';
 
 export type SituacaoPlano = 'em_dia' | 'na_janela' | 'vencida' | 'adiada';
 
@@ -18,6 +19,8 @@ export interface PlanoNaView {
   plan_id: string;
   vessel_id: string;
   vessel_name: string | null;
+  /** NÃO vem da view: useRevisoes completa a partir de vessels ("Motorhome Iveco Daily"). */
+  vessel_asset_type?: string | null;
   client_id: string | null;
   client_name: string | null;
   client_phone: string | null;
@@ -280,12 +283,15 @@ export interface OrdemDaEmbarcacao {
   scheduled_end_at: string | null;
   updated_at: string | null;
   vessel_name: string | null;
+  /** asset_type da unidade (Lancha, Motorhome…): dá o tipo no nome do cartão (decisão 9, 21/10/2026). */
+  vessel_asset_type?: string | null;
   client_name: string | null;
   opt_out: boolean | null;
 }
 
 export interface AlvoSemPlano {
   vesselId: string;
+  /** Nome com o tipo à frente ("Motorhome Iveco Daily"); sem tipo, só o nome. */
   embarcacao: string;
   cliente: string | null;
   ultimoServico: string;   // AAAA-MM-DD (Brasília)
@@ -328,7 +334,11 @@ export function alvosSemPlano(
     const meses = (a2 - a1) * 12 + (m2 - m1) - (d2 < Number(dia.slice(8, 10)) ? 1 : 0);
     if (meses < mesesMinimos) continue;
     saida.push({
-      vesselId, embarcacao: ultima.vessel_name ?? 'Embarcação', cliente: ultima.client_name, ultimoServico: dia, meses,
+      vesselId,
+      embarcacao: ultima.vessel_name
+        ? nomeDaUnidade({ name: ultima.vessel_name, asset_type: ultima.vessel_asset_type })
+        : rotuloDaUnidade(ultima.vessel_asset_type),
+      cliente: ultima.client_name, ultimoServico: dia, meses,
     });
   }
   return saida.sort((a, b) => b.meses - a.meses);

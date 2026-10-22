@@ -172,6 +172,14 @@ describe('resumo do orçamento para WhatsApp', () => {
     });
   });
 
+  // Decisão 9 (21/10/2026): com o tipo do cadastro, a linha diz qual é a unidade.
+  it('"Referente a:" leva o tipo quando ele vem; sem tipo, só o nome', () => {
+    expect(buildQuoteWhatsAppSummary({ ...FLAVIO, ativoTipo: 'Motorhome' })).toContain('\nReferente a: Motorhome Itapoã\n');
+    expect(buildQuoteWhatsAppSummary({ ...FLAVIO, ativoNome: 'Motorhome', ativoTipo: 'Motorhome' }))
+      .toContain('\nReferente a: Motorhome\n');
+    expect(buildQuoteWhatsAppSummary(FLAVIO)).toContain('\nReferente a: Itapoã\n');
+  });
+
   it('orçamento sem condição de pagamento ainda informa o total', () => {
     const t = buildQuoteWhatsAppSummary({ ...ROBSON, parcelas: null, condicaoLabel: null });
     expect(texto(t)).toContain('Total: R$ 2.446,45');

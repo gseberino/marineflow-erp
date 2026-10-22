@@ -17,6 +17,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Tables, TablesInsert } from '@/integrations/supabase/types';
 import { maskPhone } from '@/lib/masks';
+import { rotuloDaIdentificacao, unidadeNaFrase } from '@/lib/unidade';
 
 type Vessel = Tables<'vessels'>;
 
@@ -125,7 +126,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
       onOpenChange(false);
     } catch (err: any) {
       const msg = err?.message || err?.details
-        || 'Erro ao salvar embarcação.';
+        || 'Erro ao salvar o cadastro.';
       toast.error(msg);
       console.error('VesselFormDialog error:', err);
     }
@@ -139,7 +140,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Editar Veículo/Embarcação" : "Novo Veículo/Embarcação"}</DialogTitle>
+          <DialogTitle>{isEdit ? t.vessels.editVessel : t.vessels.newVessel}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -164,7 +165,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
               </Select>
             </div>
             <div className="col-span-2 sm:col-span-1">
-              <Label>Nome / Placa / ID *</Label>
+              <Label>Nome ou identificação *</Label>
               <Input required value={form.name ?? ''} onChange={e => set('name', e.target.value)} />
             </div>
             <div className="col-span-2">
@@ -194,7 +195,8 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
               <Input type="number" value={form.year ?? ''} onChange={e => set('year', e.target.value ? Number(e.target.value) : undefined)} />
             </div>
             <div>
-              <Label>{t.vessels.hullId}</Label>
+              {/* Pelo tipo escolhido: placa (motorhome, trailer, camper), inscrição (barco), nº de série. */}
+              <Label>{rotuloDaIdentificacao(form.asset_type)}</Label>
               <Input value={form.hull_id_or_registration ?? ''} onChange={e => set('hull_id_or_registration', e.target.value)} />
             </div>
             <div>
@@ -287,7 +289,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
           </div>
 
           {/* Vessel Contacts - only when editing */}
-          {isEdit && vessel && <VesselContactsSection vesselId={vessel.id} />}
+          {isEdit && vessel && <VesselContactsSection vesselId={vessel.id} tipo={form.asset_type} />}
 
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{t.common.cancel}</Button>
@@ -299,7 +301,7 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
   );
 }
 
-function VesselContactsSection({ vesselId }: { vesselId: string }) {
+function VesselContactsSection({ vesselId, tipo }: { vesselId: string; tipo?: string | null }) {
   const { data: contacts, isLoading } = useVesselContacts(vesselId);
   const createContact = useCreateVesselContact();
   const [showForm, setShowForm] = useState(false);
@@ -331,7 +333,8 @@ function VesselContactsSection({ vesselId }: { vesselId: string }) {
   return (
     <div className="col-span-2 border-t pt-4 space-y-3">
       <div className="flex items-center justify-between">
-        <Label className="text-sm font-semibold">Contatos da Embarcação</Label>
+        {/* "Contatos do motorhome", "Contatos da lancha"; sem tipo, o termo geral. */}
+        <Label className="text-sm font-semibold">Contatos {unidadeNaFrase({ asset_type: tipo }, 'de')}</Label>
         <Button type="button" variant="outline" size="sm" onClick={() => setShowForm(!showForm)} className="gap-1">
           <Plus className="h-3 w-3" /> Contato
         </Button>

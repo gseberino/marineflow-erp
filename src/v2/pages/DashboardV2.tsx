@@ -16,6 +16,7 @@ import { DataTable, type DataColumn } from '@/v2/components/DataTable';
 import { serviceOrderStatusTone } from '@/v2/status-map';
 import { V2Shell } from '@/v2/components/V2Shell';
 import { DashboardTasksWidget } from '@/components/agenda/DashboardTasksWidget';
+import { nomeDaUnidade } from '@/lib/unidade';
 import '@/v2/tokens.css';
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -44,9 +45,12 @@ type UpcomingSO = {
   scheduled_start_at?: string | null;
   grand_total?: number | null;
   clients?: { name?: string } | null;
-  vessels?: { name?: string } | null;
+  vessels?: { name?: string; asset_type?: string | null } | null;
   service_order_technicians?: { user_id: string }[] | null;
 };
+
+/** Nome da unidade na linha, com o tipo à frente quando a consulta traz asset_type (decisão 9). */
+const unidadeDaOS = (so: UpcomingSO) => (so.vessels?.name ? nomeDaUnidade(so.vessels) : '—');
 
 export default function DashboardV2() {
   const { t, formatCurrency, locale } = useI18n();
@@ -202,11 +206,12 @@ function AdminHome({
       render: (so) => <span className="font-bold text-accent">{so.service_order_number}</span>,
     },
     {
-      key: 'client', header: 'Cliente · Embarcação', minWidth: 200, priority: 1,
+      // Só 'Cliente': a 2ª linha já diz o tipo da unidade (decisão 9, 21/10/2026).
+      key: 'client', header: 'Cliente', minWidth: 200, priority: 1,
       render: (so) => (
         <span className="block leading-tight">
           <span className="block truncate font-semibold">{so.clients?.name || '—'}</span>
-          <span className="block truncate text-xs text-muted-foreground">{so.vessels?.name || '—'}</span>
+          <span className="block truncate text-xs text-muted-foreground">{unidadeDaOS(so)}</span>
         </span>
       ),
     },
@@ -373,7 +378,7 @@ function AdminHome({
               severity={serviceOrderStatusTone[so.status] ?? 'neutral'}
               badge={<StatusChip tone={serviceOrderStatusTone[so.status] ?? 'neutral'}>{statusLabels[so.status] ?? so.status}</StatusChip>}
               title={so.clients?.name || '—'}
-              lines={[so.vessels?.name || '—', formatCurrency(so.grand_total || 0)]}
+              lines={[unidadeDaOS(so), formatCurrency(so.grand_total || 0)]}
               onClick={() => navigate(`/v2/service-orders/${so.id}`)}
             />
           ))}
@@ -422,7 +427,7 @@ function TechnicianHome() {
       }
       title={so.clients?.name || '—'}
       lines={[
-        so.vessels?.name || '—',
+        unidadeDaOS(so),
         so.scheduled_start_at
           ? new Date(so.scheduled_start_at).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
           : `Sem agendamento · ${formatCurrency(so.grand_total || 0)}`,

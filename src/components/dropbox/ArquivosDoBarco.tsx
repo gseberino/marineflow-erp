@@ -5,6 +5,8 @@ import { useMemo, useState } from 'react';
 import { ExternalLink, FileText, Image as ImageIcon, Loader2, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { linkDoArquivo, useArquivosDoBarco, type ArquivoDoBarco } from '@/hooks/use-dropbox';
+import { useVessel } from '@/hooks/use-vessels';
+import { unidadeNaFrase } from '@/lib/unidade';
 
 const IMAGENS = new Set(['jpg', 'jpeg', 'png', 'heic', 'gif', 'webp', 'mov', 'mp4']);
 
@@ -18,6 +20,8 @@ const dia = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('pt-
 
 export function ArquivosDoBarco({ vesselId }: { vesselId: string }) {
   const { data: arquivos, isLoading, error } = useArquivosDoBarco(vesselId);
+  // Mesma consulta (e cache) da ficha que abre esta aba: só o tipo, para a frase (decisão 9).
+  const { data: unidade } = useVessel(vesselId);
   const [busca, setBusca] = useState('');
 
   const visiveis = useMemo(() => {
@@ -37,7 +41,7 @@ export function ArquivosDoBarco({ vesselId }: { vesselId: string }) {
   if (!arquivos?.length) {
     return (
       <p className="text-sm text-muted-foreground">
-        Nenhum arquivo deste barco no índice ainda. O sistema lê as pastas a cada 10 minutos; na primeira vez,
+        Nenhum arquivo {unidadeNaFrase({ asset_type: unidade?.asset_type }, 'de')} no índice ainda. O sistema lê as pastas a cada 10 minutos; na primeira vez,
         o histórico inteiro pode levar algumas horas.
       </p>
     );

@@ -20,6 +20,7 @@ import {
 import {
   AdiarPlanoDialog, PedirLembreteDialog, RegistrarServicoDialog, type AlvoDoLembrete, type AlvoDoPlano,
 } from '@/components/agenda/PlanoDialogs';
+import { TERMO_GERAL, nomeDaUnidade } from '@/lib/unidade';
 
 type Recorte = 'vencendo' | 'vencidas' | 'adiadas' | 'responderam';
 
@@ -41,7 +42,8 @@ function CartaoDaRevisao({
   onLembrete: (a: AlvoDoLembrete) => void;
 }) {
   const navigate = useNavigate();
-  const embarcacao = r.vessel_name ?? 'Embarcação';
+  // Com o tipo lido à parte (useRevisoes): "Motorhome Iveco Daily"; sem nome, o termo geral.
+  const embarcacao = r.vessel_name ? nomeDaUnidade({ name: r.vessel_name, asset_type: r.vessel_asset_type }) : TERMO_GERAL;
   const alvo: AlvoDoPlano = { planId: r.plan_id, rotulo: `${r.name} — ${embarcacao}` };
   const valor = r.estimated_value != null ? Number(r.estimated_value) : null;
   return (
@@ -79,7 +81,7 @@ function CartaoDaRevisao({
         rapidas={[{ texto: 'Serviço feito', icone: CheckCircle2, onClick: () => onServico(alvo) }]}
         menu={[
           { texto: 'Adiar', icone: CalendarClock, onClick: () => onAdiar(alvo) },
-          { texto: 'Abrir embarcação', icone: Anchor, onClick: () => navigate(`/v2/vessels/${r.vessel_id}?tab=maintenance`) },
+          { texto: 'Abrir embarcação ou veículo', icone: Anchor, onClick: () => navigate(`/v2/vessels/${r.vessel_id}?tab=maintenance`) },
           {
             texto: 'Pedir lembrete agora', icone: MessageCircle,
             onClick: () => onLembrete({
@@ -149,7 +151,7 @@ export function RevisoesPanel() {
 
       {linhas.length === 0 ? (
         <p className="py-6 text-center text-sm text-muted-foreground">
-          Nenhum plano de manutenção ativo. Crie na aba Manutenção de cada embarcação (ou peça ao assistente
+          Nenhum plano de manutenção ativo. Crie na aba Manutenção de cada embarcação ou veículo (ou peça ao assistente
           "sugira planos de manutenção").
         </p>
       ) : lista.length === 0 ? (

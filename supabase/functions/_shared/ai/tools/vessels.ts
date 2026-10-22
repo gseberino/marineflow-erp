@@ -124,7 +124,8 @@ export const vesselTools: ToolDef[] = [
       const q = String(args.query || "").trim();
       let query = sb
         .from("vessels")
-        .select("id, name, manufacturer, model, year, client_id, marina_id")
+        // asset_type: a escolha que o painel/WhatsApp mostra diz o tipo ("Motorhome Iveco Daily").
+        .select("id, name, asset_type, manufacturer, model, year, client_id, marina_id")
         .eq("active", true)
         .or(orContem(["name", "model", "manufacturer"], q))
         .limit(15);

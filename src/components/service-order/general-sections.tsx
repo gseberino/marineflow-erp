@@ -18,6 +18,7 @@ import { normalizePhoneE164 } from '@/lib/masks';
 import { isQuoteStatus } from '@/lib/document-type';
 import { perdasDaTrocaDeCliente, trocarClienteNoForm, trocarEmbarcacaoNoForm } from '@/lib/troca-de-cliente';
 import { motivosDaTrocaDeEmbarcacao, type UnidadeResumo } from '@/lib/troca-de-embarcacao';
+import { unidadeNaFrase } from '@/lib/unidade';
 import { useServiceOrderSurvey } from '@/hooks/use-service-survey';
 import { EntityCombobox } from '@/components/EntityCombobox';
 import { ServiceOrderPhotos } from '@/components/ServiceOrderPhotos';
@@ -88,6 +89,7 @@ export function GeneralSections(props: GeneralSectionsProps) {
   // O que sai da OS se o cliente mudar (pelos mesmos critérios da troca): vai no texto da confirmação.
   const perdasDaTroca = perdasDaTrocaDeCliente(form, embarcacao, {
     embarcacao: embarcacao?.name,
+    tipoDaEmbarcacao: embarcacao?.asset_type,
     solicitante: contatoEscolhido?.full_name,
     marina: marinas?.find((m) => m.id === form.marina_id)?.name,
   });
@@ -211,7 +213,8 @@ export function GeneralSections(props: GeneralSectionsProps) {
                 <div role="status" aria-live="polite">
                   {faltaEmbarcacao && (
                     <p id="os-aviso-embarcacao" className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
-                      {nomeDoCliente ? `Escolha a embarcação de ${nomeDoCliente}.` : 'Escolha a embarcação do cliente novo.'}
+                      {/* Nenhuma escolhida ainda: o termo geral (decisão 9, 21/10/2026). */}
+                      {nomeDoCliente ? `Escolha a embarcação ou veículo de ${nomeDoCliente}.` : 'Escolha a embarcação ou veículo do cliente novo.'}
                       {/* O salvamento automático não grava a OS sem embarcação (peças e serviços, sim:
                           esses gravam na hora). O que fica parado é a troca. */}
                       {orderData?.id && ' Até lá, a troca do cliente não fica salva.'}
@@ -224,7 +227,8 @@ export function GeneralSections(props: GeneralSectionsProps) {
             <Campo
               rotulo={t.serviceOrders.requestedBy}
               htmlFor="os-solicitante"
-              ajuda={!temContatos && form.vessel_id ? 'Cadastre contatos na embarcação para aparecerem aqui.' : undefined}
+              // Com a unidade escolhida, pelo tipo dela: "Cadastre os contatos do motorhome Iveco Daily…".
+              ajuda={!temContatos && form.vessel_id ? `Cadastre os contatos ${unidadeNaFrase(embarcacao, 'de')} para aparecerem aqui.` : undefined}
               idAjuda="os-solicitante-ajuda"
             >
               {temContatos ? (

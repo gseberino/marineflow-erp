@@ -37,5 +37,30 @@ Deno.test("R14: resolve quando o serviço é registrado, o plano é adiado, ganh
   assertEquals(resolucaoDaR14("2025-10-28", { active: true }, { ...vivo, last_service_at: "2026-10-05" }, "2026-10-07"), "Serviço registrado no plano");
   assertEquals(resolucaoDaR14("first", { active: true }, { ...vivo, last_service_at: null }, "2026-10-07"), null);
   assertEquals(resolucaoDaR14("2025-10-28", { active: true }, { ...vivo, snoozed_until: "2026-12-01" }, "2026-10-07"), "Adiado até 01/12/2026");
-  assertEquals(resolucaoDaR14("2025-10-28", { active: true }, { ...vivo, tem_os_agendada: true, os_agendada_numero: "OS-00140" }, "2026-10-07"), "OS-00140 aberta para a embarcação");
+  assertEquals(resolucaoDaR14("2025-10-28", { active: true }, { ...vivo, tem_os_agendada: true, os_agendada_numero: "OS-00140" }, "2026-10-07"), "OS-00140 aberta");
+});
+
+Deno.test("R14: o título diz o tipo da unidade (decisão 9, 21/10/2026); sem nome nem tipo, o termo geral", () => {
+  assertEquals(candidatoDaR14(p({ asset_type: "Motorhome", vessel_name: "Iveco Daily" }), "2026-10-07")!.title, "Propor revisão: Revisão das baterias — Motorhome Iveco Daily");
+  assertEquals(candidatoDaR14(p({ asset_type: "Lancha" }), "2026-10-07")!.title, "Propor revisão: Revisão das baterias — Lancha Mar Azul");
+  assertEquals(candidatoDaR14(p({ vessel_name: null, asset_type: null }), "2026-10-07")!.title, "Propor revisão: Revisão das baterias — embarcação ou veículo");
+});
+
+Deno.test("R14: find lê o tipo em vessels (a view não traz) e, se a leitura falhar, o título sai só com o nome", async () => {
+  const { ruleById } = await import("./rules.ts");
+  // deno-lint-ignore no-explicit-any
+  const banco = (falhaVessels: boolean): any => ({
+    from: (tabela: string) => {
+      const resultado = tabela === "vessels"
+        ? (falhaVessels ? { data: null, error: { message: "timeout" } } : { data: [{ id: "barco-1", asset_type: "Motorhome" }], error: null })
+        : { data: [p({ window_opens_on: "2000-01-01" })], error: null };
+      // deno-lint-ignore no-explicit-any
+      const q: any = { select: () => q, lte: () => q, limit: () => q, in: () => q, then: (ok: any, ko: any) => Promise.resolve(resultado).then(ok, ko) };
+      return q;
+    },
+  });
+  const [ok] = await ruleById("r14")!.find(banco(false));
+  assertEquals(ok.title, "Propor revisão: Revisão das baterias — Motorhome Mar Azul");
+  const [semTipo] = await ruleById("r14")!.find(banco(true));
+  assertEquals(semTipo.title, "Propor revisão: Revisão das baterias — Mar Azul");
 });

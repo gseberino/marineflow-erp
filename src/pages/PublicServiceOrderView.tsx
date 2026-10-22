@@ -5,7 +5,7 @@ import { createShareClient } from '@/integrations/supabase/share-client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Loader2, Ship, User, MapPin, FileText, Wrench, Package, Download, CheckCircle2, AlertTriangle, PenLine, CreditCard, ExternalLink } from 'lucide-react';
+import { Loader2, Ship, Caravan, User, FileText, Wrench, Package, Download, CheckCircle2, AlertTriangle, PenLine, CreditCard, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,6 +15,7 @@ import { carregarPDFData } from '@/hooks/use-pdf';
 import { documentTypeFor } from '@/lib/document-type';
 import { SignaturePad } from '@/components/SignaturePad';
 import { computeDocumentHash } from '@/lib/document-hash';
+import { campoDaUnidade, grupoDoTipo, rotuloDaIdentificacao } from '@/lib/unidade';
 import {
   OS_PUBLICA, CLIENTE_PUBLICO, VEICULO_PUBLICO, LINHA_SERVICO_PUBLICA, PECA_PUBLICA, PRODUTO_PUBLICO,
 } from '../../supabase/functions/_shared/pdf/colunas-publicas';
@@ -210,6 +211,10 @@ export default function PublicServiceOrderView() {
   }
 
   const { order, client, vessel, parts, services, company, signature } = data;
+  // O cartão da unidade: título pelo tipo ("Motorhome", "Lancha"), decisão 9 de 21/10/2026.
+  // O link público lê `asset_type` (VEICULO_PUBLICO); sem tipo cadastrado, o termo geral
+  // "Embarcação ou veículo". Modelo e placa/inscrição têm linha própria no cartão.
+  const campoUnidade = campoDaUnidade(vessel, { comIdentificacao: false, comModelo: false });
 
   // Toggles de exibição (settings)
   const show = {
@@ -510,12 +515,14 @@ export default function PublicServiceOrderView() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg">
-                  <Ship className="h-5 w-5" />
-                  Embarcação
+                  {grupoDoTipo(vessel.asset_type) === 'veiculo'
+                    ? <Caravan className="h-5 w-5" />
+                    : <Ship className="h-5 w-5" />}
+                  {campoUnidade.rotulo}
                 </CardTitle>
               </CardHeader>
               <CardContent className="text-sm space-y-1">
-                <p className="font-medium">{vessel.name}</p>
+                {campoUnidade.valor && <p className="font-medium">{campoUnidade.valor}</p>}
                 {(vessel.manufacturer || vessel.model) && (
                   <p className="text-muted-foreground">
                     {[vessel.manufacturer, vessel.model].filter(Boolean).join(' ')}
@@ -523,8 +530,8 @@ export default function PublicServiceOrderView() {
                   </p>
                 )}
                 {vessel.hull_id_or_registration && (
-                  <p className="text-muted-foreground flex items-center gap-1">
-                    <MapPin className="h-3 w-3" /> {vessel.hull_id_or_registration}
+                  <p className="text-muted-foreground">
+                    {rotuloDaIdentificacao(vessel.asset_type)}: {vessel.hull_id_or_registration}
                   </p>
                 )}
               </CardContent>

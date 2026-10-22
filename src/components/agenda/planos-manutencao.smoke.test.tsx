@@ -28,7 +28,8 @@ const banco = vi.hoisted(() => {
     for (const op of ['update', 'insert', 'delete', 'upsert']) {
       o[op] = (valor?: unknown) => { estado.escritas.push({ tabela, op, valor }); return o; };
     }
-    o.maybeSingle = async () => ({ data: null, error: null });
+    // A ficha da unidade (useVessel) lê uma linha só: a primeira da tabela, ou nada.
+    o.maybeSingle = async () => ({ data: (estado.tabelas[tabela] ?? [])[0] ?? null, error: null });
     o.single = async () => ({ data: null, error: null });
     o.then = (res: any) => Promise.resolve(
       estado.erros[tabela] ? { data: null, error: estado.erros[tabela] } : { data: estado.tabelas[tabela] ?? [], error: null },
@@ -127,6 +128,25 @@ describe('MaintenancePlansPanel (aba Manutenção da embarcação)', () => {
     expect(banco.estado.escritas.some((e) => e.op === 'delete')).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Apagar' }));
     await waitFor(() => expect(banco.estado.escritas).toContainEqual({ tabela: 'maintenance_plans', op: 'delete', valor: undefined }));
+  });
+
+  it('as frases falam do tipo da unidade aberta (decisão 9): motorhome não é "embarcação"', async () => {
+    const user = userEvent.setup();
+    banco.estado.tabelas = {
+      maintenance_plans: [],
+      vessels: [{ id: 'v1', name: 'Iveco Daily', asset_type: 'Motorhome' }],
+    };
+    wrap(<MaintenancePlansPanel vesselId="v1" />);
+    expect(await screen.findByText(/a partir das OS\s+já feitas no motorhome/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: /Sugerir planos/ }));
+    expect(await screen.findByText('A partir dos serviços e peças das OS concluídas do motorhome.')).toBeTruthy();
+    expect(await screen.findByText(/o motorhome ainda não tem OS concluída/)).toBeTruthy();
+  });
+
+  it('sem tipo cadastrado, as frases usam o termo geral', async () => {
+    banco.estado.tabelas = { maintenance_plans: [], vessels: [{ id: 'v1', name: 'Netuno II', asset_type: null }] };
+    wrap(<MaintenancePlansPanel vesselId="v1" />);
+    expect(await screen.findByText(/já feitas na embarcação ou veículo/)).toBeTruthy();
   });
 
   it('falha da view não some com os planos: avisa que o vencimento não pôde ser lido', async () => {
@@ -254,13 +274,14 @@ describe('Prospecção › Revisões preventivas', () => {
       v_maintenance_plans_due: [DUE()],
       service_orders: [{
         vessel_id: 'v9', status: 'completed', created_at: '2025-01-01T12:00:00Z', check_out_at: '2025-12-01T12:00:00Z',
-        scheduled_end_at: null, updated_at: '2025-12-02T12:00:00Z', vessels: { name: 'Sem Plano I' }, clients: { name: 'Ana', opt_out_whatsapp: false },
+        scheduled_end_at: null, updated_at: '2025-12-02T12:00:00Z', vessels: { name: 'Sem Plano I', asset_type: 'Motorhome' }, clients: { name: 'Ana', opt_out_whatsapp: false },
       }],
     };
     wrap(<RevisoesPreventivas />);
     expect(await screen.findByText('Mar Azul')).toBeTruthy();
     expect(screen.getByRole('button', { name: /Preparar lembrete \(com seu sim\)/ })).toBeTruthy();
-    expect(screen.getByText('Sem Plano I')).toBeTruthy();
+    // Decisão 9 (21/10/2026): o cartão da unidade sem plano leva o tipo à frente do nome.
+    expect(screen.getByText('Motorhome Sem Plano I')).toBeTruthy();
     expect(screen.getByRole('button', { name: /Criar plano/ })).toBeTruthy();
     expect(banco.estado.invokes).toEqual([]);
   });

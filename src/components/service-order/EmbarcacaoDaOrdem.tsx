@@ -14,6 +14,7 @@ import { BOTAO_DO_ROTULO } from './ClienteDaOrdem';
 import {
   descricaoDaTrocaDeEmbarcacao, nomeDaUnidade, tituloDaTrocaDeEmbarcacao, type UnidadeResumo,
 } from '@/lib/troca-de-embarcacao';
+import { unidadeNaFrase } from '@/lib/unidade';
 import type { Vessel } from '@/hooks/use-vessels';
 
 type VesselDaLista = Vessel & { marinas?: { name?: string | null } | null };
@@ -68,7 +69,7 @@ export function EmbarcacaoDaOrdem({
 
   const perguntar = (novo: UnidadeResumo | null, motivos: string[], seguir: () => void) => {
     pedir({
-      titulo: tituloDaTrocaDeEmbarcacao(documento),
+      titulo: tituloDaTrocaDeEmbarcacao(documento, atual),
       descricao: descricaoDaTrocaDeEmbarcacao(atual, novo, motivos),
       confirmar: 'Trocar',
       voltar: 'Manter a atual',
@@ -106,7 +107,8 @@ export function EmbarcacaoDaOrdem({
           <Button
             ref={trocarRef} type="button" variant="link" size="sm" className={BOTAO_DO_ROTULO}
             onClick={() => setTrocando(true)}
-            aria-label={`Trocar embarcação ou veículo (atual: ${nomeDaUnidade(atual)})`}
+            // Pelo tipo da atual: "Trocar o motorhome Iveco Daily"; sem tipo, "a embarcação ou veículo".
+            aria-label={`Trocar ${unidadeNaFrase(atual)}`}
           >
             Trocar
           </Button>
@@ -115,7 +117,7 @@ export function EmbarcacaoDaOrdem({
           <Button
             type="button" variant="link" size="sm" className={BOTAO_DO_ROTULO}
             onClick={voltar}
-            aria-label={`Cancelar a troca e manter ${nomeDaUnidade(atual)}`}
+            aria-label={`Cancelar a troca e manter ${unidadeNaFrase(atual)}`}
           >
             Cancelar
           </Button>
@@ -126,7 +128,7 @@ export function EmbarcacaoDaOrdem({
 
       {emTroca && (
         <p className="text-xs text-muted-foreground">
-          Trocar <span className="font-medium text-foreground">{nomeDaUnidade(atual)}</span> por:
+          Trocar <span className="font-medium text-foreground">{atual ? nomeDaUnidade(atual) : 'a embarcação ou veículo atual'}</span> por:
         </p>
       )}
 

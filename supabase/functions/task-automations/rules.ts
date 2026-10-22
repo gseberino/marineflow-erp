@@ -4,6 +4,7 @@
 // parcial agenda_tasks_automation_key_live). Plano: plans/marineflow-agenda-tarefas.md §6.
 import { ultimoDiaDaValidade, validadeDoOrcamento, vencimentoDoOrcamento } from '../_shared/pdf/documento.ts';
 import { diaBR, somarDiasAoDia } from '../_shared/pdf/datas.ts';
+import { nomeDaUnidade, TERMO_GERAL } from '../_shared/unidade.ts';
 
 export interface RuleCandidate {
   automation_key: string;
@@ -59,6 +60,7 @@ export const entityIdFromKey = (key: string) => key.split(':')[2] || '';
 /**
  * R10: o lembrete ao técnico pelo WhatsApp da equipe. O número da OS já traz o prefixo
  * ("OS-00060", "ORÇ-00112"), então vai como vem: "você tem a OS-00060", nunca "a OS OS-00060".
+ * Com o tipo (21/10/2026, decisão 9): "(Motorhome Iveco Daily)", "(Lancha Netuno)".
  */
 export function textoDoLembreteDaOs(p: {
   quando: string;
@@ -66,10 +68,17 @@ export function textoDoLembreteDaOs(p: {
   numero: string;
   cliente?: string | null;
   barco?: string | null;
+  /** O tipo da unidade (vessels.asset_type). */
+  tipo?: string | null;
 }): string {
+  const unidade = p.barco ? nomeDaUnidade({ name: p.barco, asset_type: p.tipo }) : '';
   return `🔧 Lembrete: ${p.quando} às ${p.hora} você tem a ${p.numero}` +
-    ` — ${p.cliente || 'cliente'}${p.barco ? ` (${p.barco})` : ''}.`;
+    ` — ${p.cliente || 'cliente'}${unidade ? ` (${unidade})` : ''}.`;
 }
+
+/** A unidade no título de uma tarefa: "Lancha Mar Azul", "Motorhome Iveco Daily"; sem nome nem tipo, o termo geral. */
+const unidadeNoTitulo = (name: string | null | undefined, tipo: string | null | undefined) =>
+  name || tipo ? nomeDaUnidade({ name, asset_type: tipo }) : TERMO_GERAL.toLowerCase();
 
 const daysAgoISO = (days: number) => new Date(Date.now() - days * 86400000).toISOString();
 
@@ -474,6 +483,8 @@ export interface PlanoDaR14 {
   plan_name: string;
   vessel_id: string;
   vessel_name: string | null;
+  /** O tipo da unidade (vessels.asset_type; a view não traz): "Lancha Mar Azul", "Motorhome Iveco Daily". */
+  asset_type?: string | null;
   client_id: string | null;
   client_name: string | null;
   scope: string | null;
@@ -498,7 +509,7 @@ export function candidatoDaR14(p: PlanoDaR14, hoje: string): RuleCandidate | nul
   ].filter(Boolean).join('\n');
   return {
     automation_key: keyOf('r14', 'plan', p.plan_id, p.last_service_at || 'first'),
-    title: `Propor revisão: ${p.plan_name} — ${p.vessel_name || 'embarcação'}`,
+    title: `Propor revisão: ${p.plan_name} — ${unidadeNoTitulo(p.vessel_name, p.asset_type)}`,
     priority: p.situacao === 'vencida' ? 'high' : 'normal',
     assignee: 'admin',
     due_at: dueAt(p.window_opens_on),
@@ -520,7 +531,8 @@ export function resolucaoDaR14(
   if (!plano.active || !daView) return 'Plano desativado';
   if ((daView.last_service_at || 'first') !== bucket) return 'Serviço registrado no plano';
   if (daView.snoozed_until && daView.snoozed_until > hoje) return `Adiado até ${fmtDate(daView.snoozed_until)}`;
-  if (daView.tem_os_agendada) return `${daView.os_agendada_numero || 'OS'} aberta para a embarcação`;
+  // O título da tarefa já diz qual unidade ("— Motorhome Iveco Daily"): a nota não repete.
+  if (daView.tem_os_agendada) return `${daView.os_agendada_numero || 'OS'} aberta`;
   return null;
 }
 
@@ -536,7 +548,17 @@ const r14: Rule = {
       .lte('window_opens_on', hoje)
       .limit(500);
     if (error) throw error;
-    return ((data as PlanoDaR14[]) || [])
+    const planos = (data as PlanoDaR14[]) || [];
+    // O tipo da unidade para o título (21/10/2026, decisão 9): a view não traz. Se a leitura falhar,
+    // o título sai só com o nome, como antes — a tarefa não pode deixar de nascer por causa do rótulo.
+    const ids = [...new Set(planos.map((p) => p.vessel_id).filter(Boolean))];
+    if (ids.length) {
+      const { data: tipos, error: eT } = await db.from('vessels').select('id, asset_type').in('id', ids);
+      if (eT) console.warn('[task-automations] r14: tipo das unidades não lido:', eT.message);
+      const tipoPorId = new Map(((tipos as Array<{ id: string; asset_type: string | null }>) || []).map((v) => [v.id, v.asset_type]));
+      for (const p of planos) p.asset_type = tipoPorId.get(p.vessel_id) ?? null;
+    }
+    return planos
       .map((p) => candidatoDaR14(p, hoje))
       .filter((c): c is RuleCandidate => c !== null);
   },

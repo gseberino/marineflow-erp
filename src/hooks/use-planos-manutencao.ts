@@ -37,7 +37,18 @@ export function useRevisoes() {
         .limit(500);
       // Leitura que falha não vira "nenhuma revisão" (regra de 02/10/2026): a tela mostra o erro.
       if (error) throw error;
-      return (data ?? []) as unknown as PlanoNaView[];
+      const linhas = (data ?? []) as unknown as PlanoNaView[];
+      // A view não traz o tipo: lido à parte para o cartão dizer "Motorhome Iveco Daily" (decisão 9,
+      // 21/10/2026). Se esta leitura falhar, os cartões ficam só com o nome — o rótulo não derruba a lista.
+      const ids = [...new Set(linhas.map((l) => l.vessel_id).filter(Boolean))];
+      if (ids.length) {
+        const tipos = await supabase.from('vessels').select('id, asset_type').in('id', ids);
+        if (!tipos.error) {
+          const tipoDe = new Map((tipos.data ?? []).map((v) => [v.id, v.asset_type]));
+          for (const l of linhas) l.vessel_asset_type = tipoDe.get(l.vessel_id) ?? null;
+        }
+      }
+      return linhas;
     },
   });
 }
@@ -278,7 +289,7 @@ export function useAlvosDeRevisao() {
     queryFn: async (): Promise<OrdemDaEmbarcacao[]> => {
       const { data, error } = await supabase
         .from('service_orders')
-        .select('vessel_id, status, created_at, check_out_at, scheduled_end_at, updated_at, vessels(name), clients(name, opt_out_whatsapp)')
+        .select('vessel_id, status, created_at, check_out_at, scheduled_end_at, updated_at, vessels(name, asset_type), clients(name, opt_out_whatsapp)')
         .not('vessel_id', 'is', null)
         .order('created_at', { ascending: false })
         .limit(1000);
@@ -286,6 +297,7 @@ export function useAlvosDeRevisao() {
       return ((data ?? []) as any[]).map((o) => ({
         vessel_id: o.vessel_id, status: o.status, created_at: o.created_at, check_out_at: o.check_out_at,
         scheduled_end_at: o.scheduled_end_at, updated_at: o.updated_at, vessel_name: o.vessels?.name ?? null,
+        vessel_asset_type: o.vessels?.asset_type ?? null,
         client_name: o.clients?.name ?? null, opt_out: o.clients?.opt_out_whatsapp ?? null,
       }));
     },

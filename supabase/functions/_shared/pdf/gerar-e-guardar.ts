@@ -30,6 +30,7 @@ import { renderizarPdf } from "./renderizar.ts";
 import { buildQuoteWhatsAppSummary } from "./resumo-whatsapp.ts";
 import { dataBR } from "./datas.ts";
 import { hashCurto } from "../whatsapp/idempotencia.ts";
+import { nomeDaUnidade } from "../unidade.ts";
 
 /** Bucket privado, sem policy nenhuma: só a chave de serviço lê e escreve. */
 export const BUCKET_DO_PDF = "pdf-agente";
@@ -101,7 +102,8 @@ export async function montarDocumentoDaOrdem(
       rotulo: tipoDoc === "quote" ? "Orçamento" : "Ordem de Serviço",
       numero: dados.serviceOrder.service_order_number,
       cliente: dados.client?.name || "—",
-      embarcacao: dados.vessel?.name || null,
+      // A legenda leva o tipo ("· Motorhome Iveco Daily"), como o documento — decisão 9, 21/10/2026.
+      embarcacao: dados.vessel?.name ? nomeDaUnidade({ name: dados.vessel.name, asset_type: dados.vessel.type }) : null,
       total: fmtCurrency(Number(dados.serviceOrder.grand_total) || 0),
     },
   };
@@ -134,6 +136,7 @@ export async function montarResumoDeValores(
     numero: so.service_order_number,
     clienteNome: dados.client?.name ?? null,
     ativoNome: dados.vessel?.name ?? null,
+    ativoTipo: dados.vessel?.type ?? null,
     orcamento: so,
     parcelas: so.payment_condition_installments ?? null,
     condicaoLabel: so.payment_condition_label ?? so.payment_conditions ?? null,

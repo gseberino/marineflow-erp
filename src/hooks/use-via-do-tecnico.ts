@@ -47,6 +47,8 @@ export function viaHeaderFromOrder(order: any): ViaDoTecnicoHeader {
     assetType: order.vessels?.asset_type ?? null,
     assetMaker: order.vessels?.manufacturer ?? null,
     assetModel: order.vessels?.model ?? null,
+    // Placa ou inscrição: só aparece quando o detalhe da OS a traz (SO_DETAIL_SELECT*).
+    assetRegistration: order.vessels?.hull_id_or_registration ?? null,
     marinaName: order.marinas?.name ?? null,
     dockPosition: order.vessels?.current_dock_position ?? null,
     technicianName: order.service_order_technicians?.[0]?.app_users?.full_name ?? null,

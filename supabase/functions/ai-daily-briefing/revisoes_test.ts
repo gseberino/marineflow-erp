@@ -1,11 +1,11 @@
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { embarcacoesComPlano, secaoDeRevisoes, type PlanoDoResumo } from "./revisoes.ts";
+import { embarcacoesComPlano, secaoDeRevisoes, type PlanoDoResumo, unidadeEmNegrito, unidadeNaLinha } from "./revisoes.ts";
 
 const moeda = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`;
 const HOJE = "2026-10-07";
 
 const plano = (over: Partial<PlanoDoResumo>): PlanoDoResumo => ({
-  plan_id: "p1", vessel_id: "v1", vessel_name: "Mar Azul", client_name: "Carlos", name: "Revisão de motor",
+  plan_id: "p1", vessel_id: "v1", vessel_name: "Mar Azul", asset_type: "Lancha", client_name: "Carlos", name: "Revisão de motor",
   estimated_value: 1200, next_due_on: "2026-10-20", dias_para_vencer: 13, situacao: "na_janela", ...over,
 });
 
@@ -31,7 +31,7 @@ Deno.test("vencendo em 30 dias: até 3 linhas com embarcação, plano, data e va
   const r = secaoDeRevisoes(planos, [], 0, moeda, HOJE);
   assertStringIncludes(r.linhas.join("\n"), "Vencendo em 30 dias: *4*");
   // ordem por vencimento: Vento Sul (10/10) primeiro
-  assertStringIncludes(r.linhas[3], "Vento Sul — Baterias · 10/10 · R$ 800,00");
+  assertStringIncludes(r.linhas[3], "• Lancha Vento Sul — Baterias · 10/10 · R$ 800,00");
   assert(!r.linhas.some((l) => l.includes("05/11")), "só os 3 primeiros");
   assert(r.linhas.some((l) => l.includes("e mais 1")));
   // previsto do mês: só outubro (1200 + 800 + 0); novembro fica de fora
@@ -50,7 +50,20 @@ Deno.test("vencida vira a sugestão do dia, e adiada não entra em nada", () => 
   assertStringIncludes(texto, "Vencidas: *1*");
   assertStringIncludes(texto, "venceu 01/09");
   assert(!texto.includes("Adiado"), "adiada não aparece");
-  assertStringIncludes(r.sugestao!, "revisão vencida do *Mar Azul*");
+  assertStringIncludes(r.sugestao!, "revisão vencida da *lancha Mar Azul*");
+});
+
+Deno.test("a unidade pelo tipo (decisão 9, 21/10/2026): motorhome não vira 'Embarcação' nem 'do barco'", () => {
+  const daily = plano({ vessel_name: "Iveco Daily", asset_type: "Motorhome" });
+  const r = secaoDeRevisoes([daily], [], 0, moeda, HOJE);
+  assertStringIncludes(r.linhas.join("\n"), "• Motorhome Iveco Daily — Revisão de motor · 20/10");
+  assertEquals(r.sugestao!.startsWith("oferecer a *Revisão de motor* do *motorhome Iveco Daily* (vence 20/10)."), true, r.sugestao!);
+  // Sem nome nem tipo: o termo geral (antes: "Embarcação" e "do *barco*").
+  const vazio = secaoDeRevisoes([plano({ vessel_name: null, asset_type: null, situacao: "vencida", dias_para_vencer: -5 })], [], 0, moeda, HOJE);
+  assertStringIncludes(vazio.linhas.join("\n"), "• Embarcação ou veículo — Revisão de motor");
+  assertStringIncludes(vazio.sugestao!, "agendar a revisão vencida da *embarcação ou veículo* (Revisão de motor");
+  assertEquals(unidadeNaLinha({ name: "Motorhome", asset_type: "Motorhome" }), "Motorhome");
+  assertEquals(unidadeEmNegrito({ name: "Turiscar", asset_type: "Trailer" }), "do *trailer Turiscar*");
 });
 
 Deno.test("quem respondeu nas últimas 24h aparece com o texto; resposta de plano fora da lista é ignorada", () => {
@@ -58,7 +71,7 @@ Deno.test("quem respondeu nas últimas 24h aparece com o texto; resposta de plan
     [{ plan_id: "p1", texto: "pode ser dia 15" }, { plan_id: "outro", texto: "x" }], 0, moeda, HOJE);
   const texto = r.linhas.join("\n");
   assertStringIncludes(texto, "Responderam ao lembrete (24h): *1*");
-  assertStringIncludes(texto, 'Carlos (Mar Azul): "pode ser dia 15"');
+  assertStringIncludes(texto, 'Carlos (Lancha Mar Azul): "pode ser dia 15"');
 });
 
 Deno.test("lembretes esperando o sim aparecem mesmo sem nada vencendo", () => {

@@ -21,6 +21,7 @@
  * mais recente que define cada um dos dois CHECKs e falha se esta lista divergir de
  * qualquer um deles. Ao mudar um CHECK, mude aqui — e mude os DOIS. O teste cobra.
  */
+import { TERMO_GERAL } from "./unidade.ts";
 
 /** Todos os valores aceitos por `related_entity_type` (espelha o CHECK das duas tabelas). */
 export const RELATED_ENTITY_TYPES = [
@@ -46,7 +47,8 @@ export const ROTULOS_ENTIDADE: Record<RelatedEntityType, string> = {
   quote: "Orçamento",
   external_quote: "Orçamento",
   client: "Cliente",
-  vessel: "Embarcação",
+  // O tipo de vínculo, sem unidade escolhida: o termo geral (decisão 9, 21/10/2026).
+  vessel: TERMO_GERAL,
   receivable: "Recebível",
   payable: "Pagável",
   purchase_order: "OC",

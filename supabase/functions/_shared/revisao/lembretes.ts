@@ -12,9 +12,31 @@ import {
   rotuloDoToque,
   type Toque,
 } from "./texto.ts";
+import { nomeDaUnidade, TERMO_GERAL } from "../unidade.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
+
+/** A unidade da mensagem, com o tipo (a view dos planos traz só o nome; o tipo vem de vessels). */
+export interface UnidadeDoLembrete {
+  id: string;
+  name: string | null;
+  asset_type: string | null;
+}
+
+/** "Lancha Mar Azul", "Motorhome Iveco Daily" — como a unidade aparece para o dono (título e pergunta). */
+export function unidadeParaODono(u: Pick<UnidadeDoLembrete, "name" | "asset_type">): string {
+  return u.name || u.asset_type ? nomeDaUnidade(u) : TERMO_GERAL;
+}
+
+/** O tipo (asset_type) de cada unidade, por id — o texto diz "da lancha Mar Azul", "do motorhome Iveco Daily". */
+export async function tiposDasUnidades(db: Db, vesselIds: string[]): Promise<Record<string, string | null>> {
+  const unicos = [...new Set(vesselIds.filter(Boolean))];
+  if (!unicos.length) return {};
+  const { data, error } = await db.from("vessels").select("id, asset_type").in("id", unicos);
+  if (error) throw new Error(`Falha ao ler o tipo das embarcações e veículos: ${error.message}`);
+  return Object.fromEntries(((data ?? []) as Array<{ id: string; asset_type: string | null }>).map((v) => [v.id, v.asset_type ?? null]));
+}
 
 export const VIEW_DOS_PLANOS = "v_maintenance_plans_due";
 export const ACAO_DE_ENVIO = "enviar_lembrete_de_revisao";
@@ -85,7 +107,10 @@ export interface Proposta {
   planos: PlanoDue[];
   /** Embarcação de referência (a 1ª) — a campanha sem plano vai por ela. */
   vessel_id: string;
+  /** Como as unidades aparecem para o dono: "Lancha Mar Azul", "Motorhome Iveco Daily". */
   embarcacoes: string[];
+  /** As unidades da mensagem, com o tipo. */
+  unidades: UnidadeDoLembrete[];
   /** Todas as embarcações da campanha (ids), para o evento campaign_proposed. */
   vessel_ids: string[];
   /** Telefone para envio (com 55) ou null. */
@@ -106,7 +131,7 @@ export function payloadDaProposta(p: Proposta): Record<string, unknown> {
 }
 
 export function tituloDoLembrete(cliente: string, embarcacoes: string[], toque: Toque): string {
-  const barcos = embarcacoes.filter(Boolean).join(", ") || "embarcação";
+  const barcos = embarcacoes.filter(Boolean).join(", ") || TERMO_GERAL.toLowerCase();
   return toque === 0 ? `Campanha de temporada para ${cliente} (${barcos})` : `Lembrete de revisão para ${cliente} (${barcos})`;
 }
 
@@ -120,6 +145,7 @@ export async function prepararMensagem(
   const planos = [...grupo.planos].sort((a, b) => a.next_due_on.localeCompare(b.next_due_on));
   const p0 = planos[0];
   const resumos = await resumosDoUltimoServico(db, planos.map((p) => p.last_service_order_id).filter(Boolean) as string[]);
+  const tipos = await tiposDasUnidades(db, planos.map((p) => p.vessel_id));
   const nomeCliente = cliente?.display_name || cliente?.name || p0.client_name || "cliente";
   const texto = montarTexto({
     toque: grupo.toque,
@@ -127,14 +153,22 @@ export async function prepararMensagem(
     hoje,
     itens: planos.map((p) => ({
       plano: p.plan_name,
-      embarcacao: p.vessel_name || "embarcação",
+      embarcacao: p.vessel_name || "",
+      tipo: tipos[p.vessel_id] ?? null,
       vence: p.next_due_on,
       ultimoServicoEm: p.last_service_at,
       resumoUltimo: p.last_service_order_id ? resumos[p.last_service_order_id] ?? null : null,
       valor: p.estimated_value,
     })),
   });
-  const embarcacoes = [...new Set(planos.map((p) => p.vessel_name || "embarcação"))];
+  const vistos = new Set<string>();
+  const unidades: UnidadeDoLembrete[] = [];
+  for (const p of planos) {
+    if (vistos.has(p.vessel_id)) continue;
+    vistos.add(p.vessel_id);
+    unidades.push({ id: p.vessel_id, name: p.vessel_name, asset_type: tipos[p.vessel_id] ?? null });
+  }
+  const embarcacoes = [...new Set(unidades.map(unidadeParaODono))];
   return {
     toque: grupo.toque,
     client_id: p0.client_id!,
@@ -143,6 +177,7 @@ export async function prepararMensagem(
     vessel_id: p0.vessel_id,
     vessel_ids: [...new Set(planos.map((p) => p.vessel_id))],
     embarcacoes,
+    unidades,
     telefone: telefoneParaEnvio(p0.client_phone),
     vence: p0.next_due_on,
     texto,

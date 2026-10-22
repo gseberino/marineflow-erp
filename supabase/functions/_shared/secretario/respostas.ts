@@ -3,6 +3,7 @@
 
 import { ddmm, quandoEmPalavras, umaLinha } from "./base.ts";
 import { ficaTodoDia, SECOES, type Secao, TITULO_DA_SECAO } from "./tipos.ts";
+import { TERMO_GERAL } from "../unidade.ts";
 
 /** Um item como está gravado em resumo_itens (o que os comandos leem). */
 export interface ItemGravado {
@@ -156,7 +157,8 @@ export function textoDoPacote(itensDaLetra: ItemGravado[]): string {
   const linhas = [`${l}. ${ordenados.length} orçamentos montados e ainda não enviados:`];
   for (const i of ordenados) {
     const numero = fato(i, "Orçamento") ?? i.nome.split(" ")[0];
-    const quem = [fato(i, "Cliente"), fato(i, "Barco")].filter(Boolean).join(", ");
+    // O fato da unidade se chamava "Barco" até 21/10/2026; itens gravados antes ainda o trazem.
+    const quem = [fato(i, "Cliente"), fato(i, TERMO_GERAL) ?? fato(i, "Barco")].filter(Boolean).join(", ");
     const montado = fato(i, "Montado em");
     linhas.push(`• ${numero}${quem ? ` (${quem})` : ""}, ${fato(i, "Valor") ?? ""}${montado ? `, montado em ${montado.slice(0, 5)}` : ""}`);
   }

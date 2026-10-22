@@ -55,7 +55,7 @@ export const COLUNAS_INTERNAS: Record<string, readonly string[]> = {
 export const OS_PUBLICA = 'id, service_order_number, client_id, vessel_id, marina_id, status, quote_status, priority, service_type, currency, created_at, scheduled_start_at, problem_description, diagnosis, solution_applied, customer_visible_report, technician_notes, financial_notes, extra_notes, payment_conditions, payment_method_preferred, payment_condition_preset_id, payment_method, card_installments, custom_payment_installments, grand_total, labor_cost_total, parts_cost_total, travel_cost_total, travel_hours, ferry_cost, travel_type, is_travel_billable, discount_amount, discount_services_pct, discount_parts_pct, tax_amount, operational_cost_total, subcontract_cost_total, card_fee_passthrough_enabled, card_fee_amount, quote_validity_days, quote_validity_date, signed_at, signed_by_name, requires_resignature';
 
 export const CLIENTE_PUBLICO = 'id, name, cpf_cnpj, phone, email, address_line_1, city, state';
-export const VEICULO_PUBLICO = 'id, name, manufacturer, model, year, hull_id_or_registration';
+export const VEICULO_PUBLICO = 'id, name, asset_type, manufacturer, model, year, hull_id_or_registration';
 export const MARINA_PUBLICA = 'id, name, city';
 export const LINHA_SERVICO_PUBLICA =
   'id, name_snapshot, description_snapshot, billing_unit_snapshot, quantity, unit_price_snapshot, line_total, discount_pct, discount_amount';

@@ -21,20 +21,26 @@ import {
   principalPadrao,
   somaDosTotais,
 } from '@/lib/agrupar-orcamentos';
+import { ehFeminino, rotuloDaUnidade, type UnidadeResumo } from '@/lib/unidade';
 
 interface Props {
   aberto: boolean;
   onFechar: () => void;
   clientId: string;
   vesselId: string;
+  /** A unidade (vesselId), para o texto dizer "do mesmo motorhome"; sem ela, o termo geral. */
+  unidade?: UnidadeResumo | null;
   preSelecionados: string[];
   principalSugerido?: string;
 }
 
 const dataCurta = (iso: string) => new Date(iso).toLocaleDateString('pt-BR');
 
-export function AgruparOrcamentosDialog({ aberto, onFechar, clientId, vesselId, preSelecionados, principalSugerido }: Props) {
+export function AgruparOrcamentosDialog({ aberto, onFechar, clientId, vesselId, unidade, preSelecionados, principalSugerido }: Props) {
   const navigate = useNavigate();
+  // "do mesmo motorhome", "da mesma lancha"; sem tipo, "da mesma embarcação ou veículo" (decisão 9).
+  const tipo = rotuloDaUnidade(unidade?.asset_type).toLowerCase();
+  const feminino = ehFeminino(unidade?.asset_type);
   const candidatos = useCandidatosParaAgrupar({ clientId, vesselId, enabled: aberto });
   const agrupar = useAgruparOrcamentos();
 
@@ -108,7 +114,7 @@ export function AgruparOrcamentosDialog({ aberto, onFechar, clientId, vesselId, 
             <Layers className="h-5 w-5 text-primary" /> Agrupar orçamentos
           </DialogTitle>
           <DialogDescription>
-            Os orçamentos escolhidos viram um orçamento novo, do mesmo cliente e da mesma embarcação.
+            Os orçamentos escolhidos viram um orçamento novo, do mesmo cliente e {feminino ? 'da mesma' : 'do mesmo'} {tipo}.
           </DialogDescription>
         </DialogHeader>
 
@@ -125,7 +131,9 @@ export function AgruparOrcamentosDialog({ aberto, onFechar, clientId, vesselId, 
         )}
 
         {candidatos.data && lista.length === 0 && (
-          <p className="py-4 text-sm text-muted-foreground">Nenhum orçamento em aberto deste cliente e desta embarcação.</p>
+          <p className="py-4 text-sm text-muted-foreground">
+            Nenhum orçamento em aberto deste cliente e {feminino ? 'desta' : 'deste'} {tipo}.
+          </p>
         )}
 
         {lista.length > 0 && (

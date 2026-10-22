@@ -7,6 +7,7 @@
 // Pesquisa: mensagem com o nome da embarcação, o último serviço com data, DUAS datas concretas e a
 // FAIXA de valor; terça a quinta; um cliente com dois planos vencendo perto (≤ 30 dias) recebe UMA
 // mensagem; termina com a saída fácil ("responda PARAR", LGPD).
+import { type UnidadeResumo, unidadeNaFrase } from "../unidade.ts";
 
 const DIA_MS = 86_400_000;
 const BRASILIA_MS = 3 * 60 * 60 * 1000;
@@ -145,6 +146,14 @@ function juntar(itens: string[]): string {
   return `${itens.slice(0, -1).join(", ")} e ${itens[itens.length - 1]}`;
 }
 
+/**
+ * A unidade na frase, pelo tipo (decisão 9, 21/10/2026): "da lancha Mar Azul", "do motorhome Iveco
+ * Daily" — até então ia "da Iveco Daily" para dono de motorhome. Sem o tipo: "da embarcação ou
+ * veículo Mar Azul".
+ */
+const daUnidade = (u: string | UnidadeResumo) => unidadeNaFrase(typeof u === "string" ? { name: u } : u, "de");
+const daUnidadeDoItem = (i: ItemDoTexto) => daUnidade({ name: i.embarcacao, asset_type: i.tipo });
+
 // ─── Qual toque cabe ────────────────────────────────────────────────────────────────────────
 
 /**
@@ -247,7 +256,10 @@ export function mesDaCampanha(hoje: string): string {
 
 export interface ItemDoTexto {
   plano: string;
+  /** O nome da unidade (vessels.name). */
   embarcacao: string;
+  /** O tipo da unidade (vessels.asset_type: "Lancha", "Motorhome"…): o texto diz "da lancha", "do motorhome". */
+  tipo?: string | null;
   vence: string;
   ultimoServicoEm?: string | null;
   resumoUltimo?: string | null;
@@ -261,15 +273,15 @@ export interface PedidoDeTexto {
   itens: ItemDoTexto[];
   /** AAAA-MM-DD em Brasília. */
   hoje: string;
-  /** Campanha: as embarcações (sem plano, quase sempre). */
-  embarcacoes?: string[];
+  /** Campanha: as unidades (sem plano, quase sempre), com o tipo; só o nome também serve. */
+  embarcacoes?: Array<string | UnidadeResumo>;
 }
 
 /** O texto da mensagem ao cliente, pelo modelo de cada toque. Sem emoji, assinado pela empresa. */
 export function montarTexto(p: PedidoDeTexto): string {
   const oi = p.nome ? `Oi, ${p.nome}!` : "Oi!";
   if (p.toque === 0) {
-    const barcos = juntar((p.embarcacoes?.length ? p.embarcacoes : p.itens.map((i) => i.embarcacao)).map((b) => `da ${b}`));
+    const barcos = juntar((p.embarcacoes?.length ? p.embarcacoes : p.itens.map((i) => ({ name: i.embarcacao, asset_type: i.tipo }))).map(daUnidade));
     return `${oi} Aqui é da HBR Marine. Antes do verão a agenda lota. Quer deixar a parte elétrica ${barcos} conferida ainda em ${mesDaCampanha(p.hoje)} (baterias, carregador e inversor)? Me diz uma semana que eu encaixo. ${SAIDA_FACIL}`;
   }
   const itens = [...p.itens].sort((a, b) => a.vence.localeCompare(b.vence));
@@ -286,9 +298,9 @@ export function montarTexto(p: PedidoDeTexto): string {
       const ultima = primeiro.ultimoServicoEm
         ? ` (a última foi em ${diaMes(primeiro.ultimoServicoEm, p.hoje)}${primeiro.resumoUltimo ? `: ${primeiro.resumoUltimo}` : ""})`
         : "";
-      return `${oi} Aqui é da HBR Marine. A ${planoNaFrase(primeiro.plano)} da ${primeiro.embarcacao} vence dia ${diaMes(primeiro.vence)}${ultima}. ${datas}${emTorno}. Qual fica melhor? ${SAIDA_FACIL}`;
+      return `${oi} Aqui é da HBR Marine. A ${planoNaFrase(primeiro.plano)} ${daUnidadeDoItem(primeiro)} vence dia ${diaMes(primeiro.vence)}${ultima}. ${datas}${emTorno}. Qual fica melhor? ${SAIDA_FACIL}`;
     }
-    const lista = juntar(itens.map((i) => `a ${planoNaFrase(i.plano)} da ${i.embarcacao} (vence ${diaMes(i.vence)})`));
+    const lista = juntar(itens.map((i) => `a ${planoNaFrase(i.plano)} ${daUnidadeDoItem(i)} (vence ${diaMes(i.vence)})`));
     const quantas = itens.length === 2 ? "duas revisões" : `${itens.length} revisões`;
     const todas = itens.length === 2 ? "as duas" : "todas";
     return `${oi} Aqui é da HBR Marine. Estão chegando ${quantas}: ${lista}. ${datas} para fazer ${todas} juntas${emTorno}. Qual fica melhor? ${SAIDA_FACIL}`;
@@ -296,14 +308,14 @@ export function montarTexto(p: PedidoDeTexto): string {
 
   const abre = (resto: string) => (p.nome ? `${p.nome}, ${resto}` : maiuscula(resto));
   if (p.toque === 2) {
-    const lista = juntar(itens.map((i) => `da ${planoNaFrase(i.plano)} da ${i.embarcacao} (vence ${diaMes(i.vence)})`));
+    const lista = juntar(itens.map((i) => `da ${planoNaFrase(i.plano)} ${daUnidadeDoItem(i)} (vence ${diaMes(i.vence)})`));
     return `${abre(`só lembrando ${lista}.`)} Quer que eu reserve ${diaOferecido(d1, "manhã")}? Responda SIM ou sugira outro dia.`;
   }
   // toque 3
   if (um) {
-    return `${abre(`a ${planoNaFrase(primeiro.plano)} da ${primeiro.embarcacao} venceu em ${diaMes(primeiro.vence)}.`)} Ainda faz sentido agendar ou prefere que eu tire do calendário?`;
+    return `${abre(`a ${planoNaFrase(primeiro.plano)} ${daUnidadeDoItem(primeiro)} venceu em ${diaMes(primeiro.vence)}.`)} Ainda faz sentido agendar ou prefere que eu tire do calendário?`;
   }
-  const lista = juntar(itens.map((i) => `a ${planoNaFrase(i.plano)} da ${i.embarcacao} (venceu em ${diaMes(i.vence)})`));
+  const lista = juntar(itens.map((i) => `a ${planoNaFrase(i.plano)} ${daUnidadeDoItem(i)} (venceu em ${diaMes(i.vence)})`));
   return `${abre(`estas revisões venceram: ${lista}.`)} Ainda faz sentido agendar ou prefere que eu tire do calendário?`;
 }
 

@@ -32,6 +32,7 @@ import { PERFIL_ADMIN, PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from 
 import { construirFerramentaExtra, NOME_DA_FERRAMENTA_EXTRA } from "./ferramenta-extra.ts";
 // financeiro (07/10/2026): títulos e resumos das ferramentas novas (anotação, estorno, cobrança, favorecido).
 import { RESUMO_QUE_RESOLVE_DO_FINANCEIRO, resumirDoFinanceiro, TITULOS_DO_FINANCEIRO } from "./tools/resumos-do-financeiro.ts";
+import { nomeDaUnidade, TERMO_GERAL, TERMO_GERAL_PLURAL } from "../unidade.ts";
 
 export interface Proposal {
   pending_action_id: string;
@@ -120,9 +121,10 @@ const AUTO_DISAMBIG: Record<string, AutoDisambigConfig> = {
     },
     value: (c) => c.id,
   },
+  // Sem unidade escolhida, o termo geral; cada opção com o tipo ("Motorhome Iveco Daily") — decisão 9, 21/10/2026.
   search_vessels: {
-    question: (q, n) => (n > 5 ? `Encontrei ${n} embarcações para "${q}". Escolha ou refine:` : `Qual embarcação chamada "${q}"?`),
-    label: (v) => [v.name, v.model, v.year].filter(Boolean).join(" · "),
+    question: (q, n) => (n > 5 ? `Encontrei ${n} ${TERMO_GERAL_PLURAL.toLowerCase()} para "${q}". Escolha ou refine:` : `Qual ${TERMO_GERAL.toLowerCase()} chamado "${q}"?`),
+    label: (v) => [v.name || v.asset_type ? nomeDaUnidade(v) : null, v.model, v.year].filter(Boolean).join(" · "),
     value: (v) => v.id,
   },
   search_products: {

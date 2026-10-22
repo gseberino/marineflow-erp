@@ -23,6 +23,7 @@ import { scopeCss } from './css-scope.ts';
 import { itemColumnWidths, valueVisibility } from './pdf-visibility.ts';
 import { dataBR, dataHoraBR, diaBR, diaDeCalendario, horaBR, somarDiasAoDia, somarDiasBR } from './datas.ts';
 import { primeiraValidade } from '../dias-de-validade.ts';
+import { campoDaUnidade, grupoDoTipo, rotuloDaIdentificacao, type UnidadeResumo } from '../unidade.ts';
 
 export type PDFDocumentType = 'quote' | 'service_order' | 'invoice' | 'receipt';
 
@@ -383,6 +384,23 @@ export type PDFData = {
   terms?: string;
   photos?: string[];
 };
+
+/**
+ * A unidade do documento (barco, motorhome, trailer…) no formato da regra única de
+ * _shared/unidade.ts — decisão 9, 21/10/2026: o rótulo é o próprio tipo ("Motorhome: Iveco
+ * Daily"), nunca "Ativo" nem "Embarcação" para um motorhome. Sem tipo cadastrado, o rótulo cai
+ * no termo geral "Embarcação ou veículo".
+ */
+export function unidadeDoDocumento(v: PDFData['vessel']): UnidadeResumo | null {
+  if (!v) return null;
+  return {
+    name: v.name,
+    asset_type: v.type,
+    manufacturer: v.manufacturer,
+    model: v.model,
+    hull_id_or_registration: v.registration,
+  };
+}
 
 /** Remove acentos, troca espaços por hífen e tira caracteres inválidos para nome de arquivo. */
 function slugifyForFilename(value: string): string {
@@ -1011,6 +1029,10 @@ export function buildOrderHTML(data: PDFData, options: PDFOptions): string {
       : '',
   ].filter(Boolean).join('');
 
+  // "Motorhome: Iveco Daily" / "Lancha: Netuno II". Modelo e placa/inscrição têm linha
+  // própria logo abaixo, por isso ficam fora daqui.
+  const unidade = campoDaUnidade(unidadeDoDocumento(data.vessel), { comIdentificacao: false, comModelo: false });
+
   const body = `
 ${companyHeaderHTML(data.company, docTypeLabel, docNumber, {
   // D13: a emissão é a data em que o documento nasceu, não a de cada reimpressão.
@@ -1034,12 +1056,12 @@ ${semValores ? `
     ${data.client.address ? `<div style="font-size:10px;margin-top:4px;color:var(--pdf-text-muted);">${esc(data.client.address)}</div>` : ''}
   </div>
   <div class="card">
-    <div class="section-title">Dados do Ativo / Localização</div>
-    ${data.vessel ? `<div style="font-size:12px;font-weight:700;color:var(--pdf-primary);">${esc(data.vessel.name)}</div>` : ''}
+    <div class="section-title">Embarcação ou veículo e local</div>
+    ${unidade.valor ? `<div style="font-size:12px;font-weight:700;color:var(--pdf-primary);">${esc(unidade.rotulo)}: ${esc(unidade.valor)}</div>` : ''}
     <div style="font-size:10px;">
       ${data.vessel?.manufacturer ? `${esc(data.vessel.manufacturer)} ${esc(data.vessel.model || '')} (${data.vessel.year || '—'})<br/>` : ''}
-      ${data.vessel?.registration ? `Registro: ${esc(data.vessel.registration)}<br/>` : ''}
-      ${data.marina ? `<strong>Marina:</strong> ${esc(data.marina.name)}${data.marina.city ? ` (${esc(data.marina.city)})` : ''}` : ''}
+      ${data.vessel?.registration ? `${esc(rotuloDaIdentificacao(data.vessel.type))}: ${esc(data.vessel.registration)}<br/>` : ''}
+      ${data.marina ? `<strong>${grupoDoTipo(data.vessel?.type) === 'veiculo' ? 'Local' : 'Marina'}:</strong> ${esc(data.marina.name)}${data.marina.city ? ` (${esc(data.marina.city)})` : ''}` : ''}
     </div>
   </div>
 </div>

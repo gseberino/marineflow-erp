@@ -191,13 +191,14 @@ describe('ClienteDaOrdem — escolher e trocar', () => {
     const user = userEvent.setup();
     const { onChange } = renderiza({
       value: 'c1', ordemSalva: true, documento: 'orçamento',
-      perdas: { embarcacao: 'Netuno II', solicitante: 'Pedro Marinheiro' },
+      perdas: { embarcacao: 'Iveco Daily', tipoDaEmbarcacao: 'Motorhome', solicitante: 'Pedro Marinheiro' },
     });
     await trocarPara(user, 'pedro', /Pedro Sem Cadastro/);
     const dialogo = await screen.findByRole('alertdialog');
     expect(within(dialogo).getByText('Trocar o cliente deste orçamento?')).toBeInTheDocument();
+    // A unidade que sai pelo tipo dela (decisão 9): nunca "a embarcação Iveco Daily".
     expect(within(dialogo).getByText(
-      'De João da Silva para Pedro Sem Cadastro. Saem: a embarcação Netuno II e o solicitante Pedro Marinheiro.',
+      'De João da Silva para Pedro Sem Cadastro. Saem: o motorhome Iveco Daily e o solicitante Pedro Marinheiro.',
     )).toBeInTheDocument();
     await user.click(within(dialogo).getByRole('button', { name: 'Manter o cliente atual' }));
     expect(onChange).not.toHaveBeenCalled();

@@ -84,8 +84,8 @@ async function processar(admin: Admin, dbx: Dropbox, e: Envio, settings: Record<
   const vesselId = ordem?.vessel_id ?? e.vessel_id;
   const { data: barco, error: eBarco } = await admin.from("vessels")
     .select("id, name, client_id, clients(name)").eq("id", vesselId).maybeSingle();
-  if (eBarco) throw new Repetir(`não consegui ler a embarcação (${eBarco.message})`);
-  if (!barco) return { status: "ignorado", resultado: "a embarcação não existe mais" };
+  if (eBarco) throw new Repetir(`não consegui ler a embarcação ou veículo (${eBarco.message})`);
+  if (!barco) return { status: "ignorado", resultado: "a embarcação ou veículo não existe mais" };
   const nomeCliente: string | null = barco.clients?.name ?? null;
   if (clienteGenerico(nomeCliente)) return { status: "ignorado", resultado: "cliente genérico não ganha pasta" };
 

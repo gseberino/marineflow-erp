@@ -14,6 +14,7 @@ import { PageShell } from '@/v2/components/PageShell';
 import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn, type SortState } from '@/v2/components/DataTable';
 import { V2Shell } from '@/v2/components/V2Shell';
+import { TERMO_GERAL, TERMO_GERAL_PLURAL } from '@/lib/unidade';
 import '@/v2/tokens.css';
 
 /* Onda A · Embarcações v2 — paridade com VesselList v1 (busca, filtro por tipo,
@@ -87,7 +88,7 @@ export default function VesselsListV2() {
 
   const columns: DataColumn<VesselRow>[] = [
     {
-      key: 'name', header: 'Unidade / Tipo', minWidth: 210, priority: 0, sortable: true,
+      key: 'name', header: TERMO_GERAL, minWidth: 210, priority: 0, sortable: true,
       render: (v) => (
         <span className="flex items-center gap-2">
           <Ship className="h-4 w-4 shrink-0 text-accent" />
@@ -151,12 +152,12 @@ export default function VesselsListV2() {
           <>
             <Button
               variant="outline" size="sm" className="hidden gap-1.5 sm:inline-flex"
-              onClick={() => vessels.length && exportToCSV(vessels as never[], 'embarcacoes.csv', VESSELS_COLUMNS as never)}
+              onClick={() => vessels.length && exportToCSV(vessels as never[], 'embarcacoes-e-veiculos.csv', VESSELS_COLUMNS as never)}
             >
               <Download className="h-4 w-4" /> Exportar CSV
             </Button>
             <Button className="gap-1.5" onClick={() => setFormOpen(true)}>
-              <Plus className="h-4 w-4" /> Nova Unidade
+              <Plus className="h-4 w-4" /> {t.vessels.newVessel}
             </Button>
           </>
         }
@@ -234,7 +235,7 @@ export default function VesselsListV2() {
               ))}
               <button
                 type="button"
-                aria-label="Nova Unidade"
+                aria-label={t.vessels.newVessel}
                 onClick={() => setFormOpen(true)}
                 className="fixed bottom-24 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform active:scale-95"
               >
@@ -244,7 +245,7 @@ export default function VesselsListV2() {
 
             {totalPages > 1 && (
               <div className="flex flex-wrap items-center justify-between gap-2 pb-16 text-sm md:pb-0">
-                <span className="text-muted-foreground">{filtered.length} unidades · Página {page} de {totalPages}</span>
+                <span className="text-muted-foreground">{filtered.length} {TERMO_GERAL_PLURAL.toLowerCase()} · Página {page} de {totalPages}</span>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>Anterior</Button>
                   <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Próxima</Button>

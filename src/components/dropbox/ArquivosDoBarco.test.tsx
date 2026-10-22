@@ -6,12 +6,14 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const db = vi.hoisted(() => ({ pastas: [] as unknown[], arquivos: [] as unknown[] }));
+const db = vi.hoisted(() => ({ pastas: [] as unknown[], arquivos: [] as unknown[], unidade: null as unknown }));
 
 function encadeia(final: () => unknown) {
   const q: Record<string, unknown> = {};
   for (const m of ['select', 'eq', 'in', 'order']) q[m] = () => q;
   q.limit = async () => ({ data: final(), error: null });
+  // A ficha da unidade (useVessel) termina no .maybeSingle(): dá o tipo para a frase.
+  q.maybeSingle = async () => ({ data: final(), error: null });
   // pastas_dropbox termina no .eq() (sem limit): o await do próprio objeto resolve.
   q.then = (ok: (v: unknown) => void) => ok({ data: final(), error: null });
   return q;
@@ -19,7 +21,7 @@ function encadeia(final: () => unknown) {
 
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
-    from: (t: string) => encadeia(() => (t === 'pastas_dropbox' ? db.pastas : db.arquivos)),
+    from: (t: string) => encadeia(() => (t === 'vessels' ? db.unidade : t === 'pastas_dropbox' ? db.pastas : db.arquivos)),
   },
 }));
 
@@ -31,6 +33,7 @@ function montar() {
 }
 
 beforeEach(() => {
+  db.unidade = { id: 'v1', name: 'Iveco Daily', asset_type: 'Motorhome' };
   db.pastas = [{ id: 'p1', caminho: '/MANAGEMENT/COMMERCIAL/B2C/0016.013.25_Dona V' }];
   db.arquivos = [
     {
@@ -65,9 +68,17 @@ describe('ArquivosDoBarco', () => {
     expect(screen.getByText(/1 de 2 arquivo/)).toBeInTheDocument();
   });
 
-  it('sem pasta registrada, avisa que o índice ainda não tem nada', async () => {
+  it('sem pasta registrada, avisa que o índice ainda não tem nada — pelo tipo da unidade', async () => {
     db.pastas = [];
     montar();
-    expect(await screen.findByText(/Nenhum arquivo deste barco no índice ainda/)).toBeInTheDocument();
+    // Decisão 9 (21/10/2026): motorhome não é "barco".
+    expect(await screen.findByText(/Nenhum arquivo do motorhome no índice ainda/)).toBeInTheDocument();
+  });
+
+  it('sem tipo cadastrado, o aviso usa o termo geral', async () => {
+    db.pastas = [];
+    db.unidade = { id: 'v1', name: 'Netuno II', asset_type: null };
+    montar();
+    expect(await screen.findByText(/Nenhum arquivo da embarcação ou veículo no índice ainda/)).toBeInTheDocument();
   });
 });

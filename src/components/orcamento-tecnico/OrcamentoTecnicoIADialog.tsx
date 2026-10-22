@@ -359,7 +359,7 @@ export function OrcamentoTecnicoIADialog({ aberto, onFechar }: Props) {
                       />
                     </div>
                     <div className="min-w-0 space-y-1.5">
-                      <Label>Embarcação / ativo</Label>
+                      <Label>Embarcação ou veículo</Label>
                       <VesselSelect
                         value={ativoId}
                         clientId={clienteId}

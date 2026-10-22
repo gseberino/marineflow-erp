@@ -31,6 +31,7 @@ import { toast } from 'sonner';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTechnicians } from '@/hooks/use-agenda';
+import { TERMO_GERAL } from '@/lib/unidade';
 
 type SortDir = 'asc' | 'desc';
 const PAGE_SIZE = 20;
@@ -411,7 +412,7 @@ export default function ServiceOrderList() {
                 { key: 'service_order_number', label: 'Número' },
                 { key: 'status', label: 'Status' },
                 { key: 'clients', label: 'Cliente', format: (v) => v?.name || '' },
-                { key: 'vessels', label: 'Embarcação', format: (v) => v?.name || '' },
+                { key: 'vessels', label: TERMO_GERAL, format: (v) => v?.name || '' },
                 { key: 'grand_total', label: 'Valor Total', format: (v) => Number(v || 0).toFixed(2).replace('.', ',') },
                 { key: 'created_at', label: 'Data Criação', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },
                 { key: 'scheduled_start_at', label: 'Agendado Para', format: (v) => v ? new Date(v).toLocaleDateString('pt-BR') : '' },

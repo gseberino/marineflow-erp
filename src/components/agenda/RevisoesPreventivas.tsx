@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { useAlvosDeRevisao } from '@/hooks/use-planos-manutencao';
 import { CLASSE_DA_SITUACAO, ROTULO_DA_SITUACAO, dataBR, prazoPorExtenso } from '@/lib/planos-manutencao';
 import { PedirLembreteDialog, type AlvoDoLembrete } from '@/components/agenda/PlanoDialogs';
+import { TERMO_GERAL, nomeDaUnidade } from '@/lib/unidade';
 
 const moeda = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
@@ -40,7 +41,8 @@ export function RevisoesPreventivas() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {planos.map((r) => {
-              const embarcacao = r.vessel_name ?? 'Embarcação';
+              // Com o tipo lido à parte (useRevisoes): "Motorhome Iveco Daily"; sem nome, o termo geral.
+              const embarcacao = r.vessel_name ? nomeDaUnidade({ name: r.vessel_name, asset_type: r.vessel_asset_type }) : TERMO_GERAL;
               const bloqueado = !!r.opt_out || !r.client_phone;
               return (
                 <Card key={r.plan_id} className="hover:border-primary/50 transition-colors">
@@ -79,7 +81,7 @@ export function RevisoesPreventivas() {
           <p className="text-sm text-destructive">Não deu para ler o histórico de OS: {erroOrdens.message}</p>
         ) : semPlano.length === 0 ? (
           <div className="py-8 text-center bg-card rounded-xl border border-dashed">
-            <p className="text-muted-foreground">Nenhuma embarcação parada sem plano.</p>
+            <p className="text-muted-foreground">Nenhuma embarcação ou veículo parado sem plano.</p>
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

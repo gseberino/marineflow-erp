@@ -80,7 +80,9 @@ export const ORCAMENTO: PDFData = {
     email: 'cliente@example.com',
     address: 'Av. Beira Mar, 50, Balneário Camboriú, SC',
   },
-  vessel: { name: 'Lancha Azul', manufacturer: 'Schaefer', model: 'V33', year: 2021, registration: 'SC-1234' },
+  // Com tipo (a montagem da tela e do assistente lê asset_type): o rótulo é "Lancha" e a
+  // inscrição sai como "Inscrição". A OS abaixo vem sem tipo (cadastro sem tipo).
+  vessel: { name: 'Lancha Azul', type: 'Lancha', manufacturer: 'Schaefer', model: 'V33', year: 2021, registration: 'SC-1234' },
   marina: { name: 'Marina Exemplo', city: 'Itajaí' },
   services: [
     { name: 'Instalação elétrica', description: 'Passagem de cabos e montagem do quadro', billing_unit: 'hour', quantity: 20, unit_price: 200, line_total: 4_000 },

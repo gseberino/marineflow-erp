@@ -6,6 +6,7 @@ import {
   Anchor, ArrowLeftRight, BarChart3, Boxes, Building2, CalendarDays, ClipboardList, CornerDownRight,
   DollarSign, FileText, Landmark, LayoutDashboard, MessageCircle, Package, Receipt, Settings, Ship,
   Sparkles, Target, TrendingDown, TrendingUp, Truck, Users, Wrench, Camera } from 'lucide-react';
+import { TERMO_GERAL_PLURAL } from '@/lib/unidade';
 
 export type ItemDaPaleta = {
   label: string;
@@ -33,7 +34,8 @@ export const NAV: { group: string; items: ItemDaPaleta[] }[] = [
     group: 'Cadastros',
     items: [
       { label: 'Clientes', to: '/v2/clients', icon: Users },
-      { label: 'Embarcações', to: '/v2/vessels', icon: Ship },
+      // Decisão 9 (21/10/2026): o cadastro tem barcos e motorhomes; quem digita o tipo também chega aqui.
+      { label: TERMO_GERAL_PLURAL, to: '/v2/vessels', icon: Ship, keywords: ['barco', 'lancha', 'motorhome', 'trailer', 'camper'] },
       { label: 'Marinas', to: '/v2/marinas', icon: Anchor },
       { label: 'Produtos', to: '/v2/products', icon: Package },
       { label: 'Serviços', to: '/v2/services', icon: Wrench },

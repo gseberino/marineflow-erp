@@ -17,6 +17,7 @@ import { StatusChip } from '@/v2/components/StatusChip';
 import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn, type SortState } from '@/v2/components/DataTable';
 import { V2Shell } from '@/v2/components/V2Shell';
+import { TERMO_GERAL_PLURAL } from '@/lib/unidade';
 import '@/v2/tokens.css';
 
 /* Onda A · Clientes v2 — paridade com ClientList v1 (busca, presets, import,
@@ -118,7 +119,8 @@ export default function ClientsListV2() {
       ),
     },
     {
-      key: 'vessels', header: 'Embarcações', minWidth: 110, priority: 3, detailLabel: 'Embarcações',
+      // 200 px: 'Embarcações e veículos' precisa de ~197 px e cortava em 110 (medido em 21/10/2026).
+      key: 'vessels', header: TERMO_GERAL_PLURAL, minWidth: 200, priority: 3, detailLabel: TERMO_GERAL_PLURAL,
       render: (c) => (
         <span className="inline-flex items-center gap-1 text-muted-foreground tabular-nums">
           <Ship className="h-3.5 w-3.5" /> {vesselCounts?.[c.id] ?? 0}
@@ -201,7 +203,7 @@ export default function ClientsListV2() {
                   title={c.name}
                   lines={[
                     [c.email, c.phone].filter(Boolean).join(' · ') || '—',
-                    `${c.type === 'company' ? t.common.company : t.common.individual}${c.city ? ` · ${c.city}` : ''} · ${vesselCounts?.[c.id] ?? 0} emb.`,
+                    `${c.type === 'company' ? t.common.company : t.common.individual}${c.city ? ` · ${c.city}` : ''} · ${vesselCounts?.[c.id] ?? 0} emb./veíc.`,
                   ]}
                   onClick={() => navigate(`/v2/clients/${c.id}`)}
                 />

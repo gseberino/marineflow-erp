@@ -55,7 +55,7 @@ export function RegistrarServicoDialog({
           <Label htmlFor="dia-servico-plano">Data do serviço</Label>
           <Input id="dia-servico-plano" type="date" value={dia} max={hoje} onChange={(e) => setDia(e.target.value)} />
           <p className="text-xs text-muted-foreground">
-            OS concluída da embarcação já registra sozinha; use isto para serviço feito fora do sistema.
+            OS concluída da embarcação ou veículo já registra sozinha; use isto para serviço feito fora do sistema.
           </p>
         </div>
         <DialogFooter>

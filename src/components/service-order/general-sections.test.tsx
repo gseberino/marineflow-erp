@@ -79,7 +79,7 @@ describe('GeneralSections — cliente, embarcação e solicitante', () => {
   it('com cliente, embarcação e solicitante escolhidos, as fichas e o contato aparecem', () => {
     render(<Tela inicial={{ client_id: 'c1', vessel_id: 'v1', requested_by_contact_id: 'k1', requested_by_name: 'Pedro Marinheiro' }} />);
     expect(screen.getByLabelText('Dados do cliente')).toHaveTextContent('João da Silva');
-    expect(screen.getByLabelText('Dados da embarcação')).toHaveTextContent('Schaefer 400');
+    expect(screen.getByLabelText('Dados da embarcação ou veículo')).toHaveTextContent('Schaefer 400');
     expect(screen.getByRole('link', { name: /\(47\) 98888-7777/ })).toHaveAttribute('href', 'tel:+5547988887777');
     expect(screen.getByRole('link', { name: 'Abrir conversa com o solicitante no WhatsApp' }))
       .toHaveAttribute('href', 'https://wa.me/5547988887777');
@@ -87,8 +87,14 @@ describe('GeneralSections — cliente, embarcação e solicitante', () => {
 
   it('sem embarcação e sem solicitante, nenhuma ficha a mais', () => {
     render(<Tela inicial={{ client_id: 'c1', vessel_id: '', requested_by_contact_id: '' }} />);
-    expect(screen.queryByLabelText('Dados da embarcação')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Dados da embarcação ou veículo')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /98888-7777/ })).not.toBeInTheDocument();
+  });
+
+  it('unidade sem contatos: a dica do solicitante diz o tipo dela (decisão 9)', () => {
+    render(<Tela inicial={{ client_id: 'c1', vessel_id: 'v4' }} />);
+    expect(screen.getByText('Cadastre os contatos do veleiro Vento Sul para aparecerem aqui.')).toBeInTheDocument();
+    expect(screen.queryByText(/contatos na embarcação/)).not.toBeInTheDocument();
   });
 
   it('a dica fica ENTRE o rótulo e o campo, e o campo aponta para ela', () => {
@@ -115,8 +121,8 @@ describe('GeneralSections — cliente, embarcação e solicitante', () => {
     await user.click(await screen.findByRole('option', { name: /Maria Souza/ }));
     // diz tudo o que sai — inclusive marina e local, que vieram do barco do João
     expect(await screen.findByText(
-      'De João da Silva para Maria Souza. Saem: a embarcação Netuno II, o solicitante Pedro Marinheiro, '
-      + 'a marina sugerida (Marina Itajaí) e o local e acesso da embarcação.',
+      'De João da Silva para Maria Souza. Saem: a lancha Netuno II, o solicitante Pedro Marinheiro, '
+      + 'a marina sugerida (Marina Itajaí) e o local e acesso da lancha.',
     )).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Trocar cliente' }));
 
@@ -124,7 +130,7 @@ describe('GeneralSections — cliente, embarcação e solicitante', () => {
       client_id: 'c2', vessel_id: '', requested_by_contact_id: '', requested_by_name: '',
       marina_id: '', site_access: '',
     });
-    expect(screen.getByText('Escolha a embarcação de Maria Souza. Até lá, a troca do cliente não fica salva.'))
+    expect(screen.getByText('Escolha a embarcação ou veículo de Maria Souza. Até lá, a troca do cliente não fica salva.'))
       .toBeInTheDocument();
     // o seletor de embarcação aponta para o aviso
     const seletor = screen.getByRole('combobox', { name: /Embarcação/ });
@@ -134,7 +140,7 @@ describe('GeneralSections — cliente, embarcação e solicitante', () => {
     await user.click(seletor);
     await user.click(await screen.findByRole('option', { name: /Atlântico/ }));
     expect(form).toMatchObject({ vessel_id: 'v2', marina_id: 'm2', site_access: 'Seco, galpão 3' });
-    expect(screen.queryByText(/Escolha a embarcação/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Escolha a embarcação ou veículo/)).not.toBeInTheDocument();
   });
 
   it('cliente com um barco só já entra com ele, no mesmo passo (sem o aviso de escolher)', async () => {
@@ -161,7 +167,7 @@ describe('GeneralSections — cliente, embarcação e solicitante', () => {
     await user.type(screen.getByRole('combobox', { name: 'Buscar cliente' }), 'maria');
     await user.click(await screen.findByRole('option', { name: /Maria Souza/ }));
     expect(form).toMatchObject({ client_id: 'c2', vessel_id: 'v2', marina_id: 'm2', site_access: 'Seco, galpão 3' });
-    expect(screen.queryByText(/Escolha a embarcação/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Escolha a embarcação ou veículo/)).not.toBeInTheDocument();
   });
 
   it('escolher de novo a mesma embarcação não apaga o solicitante', async () => {
@@ -172,7 +178,7 @@ describe('GeneralSections — cliente, embarcação e solicitante', () => {
       aoMudar={(f) => { form = f; }}
     />);
     // escolhida, é ficha; o "Trocar" abre a lista já aberta
-    await user.click(screen.getByRole('button', { name: /^Trocar embarcação/ }));
+    await user.click(screen.getByRole('button', { name: 'Trocar a lancha Netuno II' }));
     await user.click(await screen.findByRole('option', { name: /Netuno II/ }));
     expect(form).toMatchObject({ vessel_id: 'v1', requested_by_contact_id: 'k1', requested_by_name: 'Pedro Marinheiro' });
   });
@@ -186,7 +192,7 @@ describe('GeneralSections — cliente, embarcação e solicitante', () => {
       inicial={{ status: 'open', client_id: 'c1', vessel_id: 'v1', requested_by_contact_id: 'k1', requested_by_name: 'Pedro Marinheiro' }}
       aoMudar={(f) => { form = f; }}
     />);
-    await user.click(screen.getByRole('button', { name: /^Trocar embarcação/ }));
+    await user.click(screen.getByRole('button', { name: 'Trocar a lancha Netuno II' }));
     await user.click(await screen.findByRole('option', { name: /Vento Sul/ }));
     expect(await screen.findByText(
       'De Lancha Netuno II para Veleiro Vento Sul. Sai o solicitante Pedro Marinheiro, que é contato da antiga. '
@@ -204,7 +210,7 @@ describe('GeneralSections — cliente, embarcação e solicitante', () => {
       inicial={{ client_id: 'c1', vessel_id: 'v1', requested_by_contact_id: 'k1', requested_by_name: 'Pedro Marinheiro' }}
       aoMudar={(f) => { form = f; }}
     />);
-    await user.click(screen.getByRole('button', { name: /^Trocar embarcação/ }));
+    await user.click(screen.getByRole('button', { name: 'Trocar a lancha Netuno II' }));
     await user.click(await screen.findByRole('option', { name: /Vento Sul/ }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(form).toMatchObject({ vessel_id: 'v4' });
@@ -218,7 +224,7 @@ describe('GeneralSections — cliente, embarcação e solicitante', () => {
       inicial={{ status: 'open', client_id: 'c1', vessel_id: 'v1', requested_by_contact_id: 'k9', requested_by_name: 'Ana Antiga' }}
       aoMudar={(f) => { form = f; }}
     />);
-    await user.click(screen.getByRole('button', { name: /^Trocar embarcação/ }));
+    await user.click(screen.getByRole('button', { name: 'Trocar a lancha Netuno II' }));
     await user.click(await screen.findByRole('option', { name: /Vento Sul/ }));
     expect(await screen.findByText(
       'De Lancha Netuno II para Veleiro Vento Sul. Sai o solicitante Ana Antiga, que é contato da antiga.',

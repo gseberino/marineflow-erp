@@ -40,6 +40,8 @@ const casos: ResumoDeOrcamentoInput[] = [
   { ...nelson, opcoes: { hideFinancials: true } },
   // Sem sinal: tudo na entrega; sem PIX cadastrado.
   { ...nelson, parcelas: [{ label: 'Na entrega', tipo: 'entrega', services_pct: 100, parts_pct: 100 }], empresa: { nome: 'HBR Marine' } },
+  // Com o tipo do cadastro (decisão 9, 21/10/2026): "Referente a: Lancha Santo Inácio 7.8".
+  { ...nelson, ativoTipo: 'Lancha' },
 ];
 
 describe('resumo de valores: tela × assistente', () => {
@@ -55,5 +57,9 @@ describe('resumo de valores: tela × assistente', () => {
     expect(texto).toContain('Sinal para iniciar: R$ 7.610,32');
     expect(texto).toContain('Serviços: R$ 2.889,68 — na entrega');
     expect(texto).toContain('Chave PIX: *12.345.678/0001-90*');
+  });
+
+  it('o tipo da unidade sai igual nos dois caminhos', () => {
+    expect(doAssistente({ ...nelson, ativoTipo: 'Lancha' } as never)).toContain('Referente a: Lancha Santo Inácio 7.8');
   });
 });

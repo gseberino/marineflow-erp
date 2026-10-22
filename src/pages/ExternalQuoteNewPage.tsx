@@ -15,6 +15,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQuery } from '@tanstack/react-query';
 import { orContem } from '../../supabase/functions/_shared/ai/filtro-or';
+import { TERMO_GERAL } from '@/lib/unidade';
 
 export default function ExternalQuoteNewPage() {
   const navigate = useNavigate();
@@ -266,7 +267,7 @@ export default function ExternalQuoteNewPage() {
           </div>
 
           <div className="space-y-2">
-            <Label>Embarcação (Opcional)</Label>
+            <Label>{TERMO_GERAL} (Opcional)</Label>
             <div className="relative">
               <Anchor className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
               <Input 

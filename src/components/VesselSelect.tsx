@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
 import { EntityCombobox } from '@/components/EntityCombobox';
+import { TERMO_GERAL, rotuloDaUnidade } from '@/lib/unidade';
 
 interface VesselOption {
   id: string;
   name: string;
+  /** Lancha, Motorhome…: vai na descrição da opção (cliente com barco e motorhome). */
+  asset_type?: string | null;
   manufacturer?: string | null;
   model?: string | null;
   hull_id_or_registration?: string | null;
@@ -39,16 +42,22 @@ export function VesselSelect({
 
   const options = vessels
     .filter(v => v.active)
-    .map(v => ({
-      value: v.id,
-      label: v.name,
-      description: [v.manufacturer, v.model].filter(Boolean).join(' ') || undefined,
-      searchTerms: [
-        v.manufacturer || '',
-        v.model || '',
-        v.hull_id_or_registration || '',
-      ],
-    }));
+    .map(v => {
+      // O tipo de cada opção ("Motorhome · Iveco Daily 55C17"); sem tipo (ou "Outro"), só o modelo.
+      // A busca já olha a descrição: digitar "motorhome" acha.
+      const tipo = rotuloDaUnidade(v.asset_type);
+      return {
+        value: v.id,
+        label: v.name,
+        description: [tipo === TERMO_GERAL ? '' : tipo, [v.manufacturer, v.model].filter(Boolean).join(' ')]
+          .filter(Boolean).join(' · ') || undefined,
+        searchTerms: [
+          v.manufacturer || '',
+          v.model || '',
+          v.hull_id_or_registration || '',
+        ],
+      };
+    });
 
   return (
     <>
@@ -57,11 +66,12 @@ export function VesselSelect({
         onChange={onChange}
         options={options}
         disabled={disabled}
-        placeholder="Selecionar embarcação"
-        searchPlaceholder="Buscar embarcação... (digite 3+ letras)"
-        emptyText="Nenhuma embarcação encontrada"
+        // Nada escolhido ainda: o termo geral (decisão 9, 21/10/2026).
+        placeholder="Selecionar embarcação ou veículo"
+        searchPlaceholder="Buscar embarcação ou veículo... (digite 3+ letras)"
+        emptyText="Nenhuma embarcação ou veículo encontrado"
         onCreate={() => (antesDeCadastrar ? antesDeCadastrar(() => setShowCreate(true)) : setShowCreate(true))}
-        createLabel="Nova embarcação para este cliente"
+        createLabel="Nova embarcação ou veículo para este cliente"
         id={id}
         ariaDescribedBy={ariaDescribedBy}
         ariaRequired={ariaRequired}

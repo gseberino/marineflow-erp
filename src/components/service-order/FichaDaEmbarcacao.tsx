@@ -7,6 +7,7 @@ import { Pencil } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
 import { Dado, DadosDaFicha } from '@/components/DadosDaFicha';
+import { rotuloDaIdentificacao, rotuloDaUnidade, unidadeNaFrase } from '@/lib/unidade';
 import type { Vessel } from '@/hooks/use-vessels';
 
 type VesselDaLista = Vessel & { marinas?: { name?: string | null } | null };
@@ -23,17 +24,18 @@ export function FichaDaEmbarcacao({ embarcacao: v }: { embarcacao: VesselDaLista
   const vazio = !modelo && !v.year && !v.length_feet && !v.hull_id_or_registration && !motor && !onde;
 
   return (
-    <div role="group" aria-label="Dados da embarcação" className="space-y-2.5 rounded-lg border bg-muted/30 p-3 text-sm">
+    <div role="group" aria-label="Dados da embarcação ou veículo" className="space-y-2.5 rounded-lg border bg-muted/30 p-3 text-sm">
       {/* O nome em destaque, como na ficha do cliente: escolhida a unidade, a lista some e é aqui
-          que se confere "é esta?". O tipo vai embaixo, no lugar de "Pessoa física". */}
+          que se confere "é esta?". O tipo vai embaixo, no lugar de "Pessoa física"; sem tipo (ou
+          "Outro"), o termo geral (decisão 9, 21/10/2026). */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="break-words font-semibold leading-tight">{v.name}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{v.asset_type || 'Embarcação ou veículo'}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{rotuloDaUnidade(v.asset_type)}</p>
         </div>
         <Button
           type="button" variant="outline" size="sm" className="h-11 shrink-0 gap-1 px-2.5 sm:h-8"
-          onClick={() => setEditando(true)} aria-label="Editar cadastro da embarcação"
+          onClick={() => setEditando(true)} aria-label={`Editar cadastro ${unidadeNaFrase({ asset_type: v.asset_type }, 'de')}`}
         >
           <Pencil className="h-3.5 w-3.5" aria-hidden /> Editar
         </Button>
@@ -49,7 +51,8 @@ export function FichaDaEmbarcacao({ embarcacao: v }: { embarcacao: VesselDaLista
           {modelo && <Dado rotulo="Fabricante e modelo">{modelo}</Dado>}
           {v.year ? <Dado rotulo="Ano">{String(v.year)}</Dado> : null}
           {v.length_feet ? <Dado rotulo="Comprimento">{`${v.length_feet} pés`}</Dado> : null}
-          {v.hull_id_or_registration && <Dado rotulo="Inscrição / placa">{v.hull_id_or_registration}</Dado>}
+          {/* Placa (motorhome, trailer, camper), inscrição (barco) ou nº de série (equipamento). */}
+          {v.hull_id_or_registration && <Dado rotulo={rotuloDaIdentificacao(v.asset_type)}>{v.hull_id_or_registration}</Dado>}
           {motor && <Dado rotulo="Motores">{motor}</Dado>}
           {onde && <Dado rotulo="Onde fica" largo>{onde}</Dado>}
         </DadosDaFicha>

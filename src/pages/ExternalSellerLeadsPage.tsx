@@ -13,6 +13,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { TERMO_GERAL } from '@/lib/unidade';
 
 export default function ExternalSellerLeadsPage() {
   const { user } = useAuth();
@@ -111,7 +112,7 @@ export default function ExternalSellerLeadsPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Embarcação (Opcional)</Label>
+                <Label>{TERMO_GERAL} (Opcional)</Label>
                 <Input 
                   value={newLead.vessel} 
                   onChange={e => setNewLead({...newLead, vessel: e.target.value})}
@@ -136,7 +137,7 @@ export default function ExternalSellerLeadsPage() {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input 
-            placeholder="Buscar por nome, telefone ou embarcação..." 
+            placeholder="Buscar por nome, telefone, embarcação ou veículo..."
             className="pl-9"
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}

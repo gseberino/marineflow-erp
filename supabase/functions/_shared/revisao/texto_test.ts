@@ -134,21 +134,35 @@ Deno.test("campanha: só de 15/09 a 31/10; o mês oferecido vira o próximo depo
 });
 
 // ─── Texto de cada toque ────────────────────────────────────────────────────────────────────
-const item = { plano: "Revisão das baterias", embarcacao: "Mar Azul", vence: "2026-10-28", ultimoServicoEm: "2025-10-28", resumoUltimo: "troca de 4 baterias AGM", valor: 1500 };
+const item = { plano: "Revisão das baterias", embarcacao: "Mar Azul", tipo: "Lancha", vence: "2026-10-28", ultimoServicoEm: "2025-10-28", resumoUltimo: "troca de 4 baterias AGM", valor: 1500 };
 
 Deno.test("texto: D-21 com último serviço, duas datas, faixa de valor e a saída PARAR", () => {
   assertEquals(
     montarTexto({ toque: 1, nome: "Carlos", hoje: "2026-10-07", itens: [item] }),
-    "Oi, Carlos! Aqui é da HBR Marine. A revisão das baterias da Mar Azul vence dia 28/10 (a última foi em 28/10/2025: troca de 4 baterias AGM). " +
+    "Oi, Carlos! Aqui é da HBR Marine. A revisão das baterias da lancha Mar Azul vence dia 28/10 (a última foi em 28/10/2025: troca de 4 baterias AGM). " +
       "Tenho ter 27/10 de manhã ou qua 28/10 à tarde, em torno de R$ 1.280 a R$ 1.730. Qual fica melhor? " +
       "Se preferir não receber esses lembretes, responda PARAR.",
   );
   // Sem valor: a frase do valor some. Sem nome (empresa): "Oi!". Sem último serviço: sem parênteses.
   assertEquals(
     montarTexto({ toque: 1, nome: null, hoje: "2026-10-07", itens: [{ ...item, valor: null, ultimoServicoEm: null }] }),
-    "Oi! Aqui é da HBR Marine. A revisão das baterias da Mar Azul vence dia 28/10. Tenho ter 27/10 de manhã ou qua 28/10 à tarde. Qual fica melhor? " +
+    "Oi! Aqui é da HBR Marine. A revisão das baterias da lancha Mar Azul vence dia 28/10. Tenho ter 27/10 de manhã ou qua 28/10 à tarde. Qual fica melhor? " +
       "Se preferir não receber esses lembretes, responda PARAR.",
   );
+});
+
+Deno.test("texto: a unidade pelo tipo — dono de motorhome não lê 'da Iveco Daily' (decisão 9, 21/10/2026)", () => {
+  const daily = { ...item, embarcacao: "Iveco Daily", tipo: "Motorhome", valor: null, ultimoServicoEm: null };
+  assertEquals(
+    montarTexto({ toque: 1, nome: "Rodrigo", hoje: "2026-10-07", itens: [daily] }),
+    "Oi, Rodrigo! Aqui é da HBR Marine. A revisão das baterias do motorhome Iveco Daily vence dia 28/10. Tenho ter 27/10 de manhã ou qua 28/10 à tarde. Qual fica melhor? " +
+      "Se preferir não receber esses lembretes, responda PARAR.",
+  );
+  assertStringIncludes(montarTexto({ toque: 3, nome: null, hoje: "2026-11-11", itens: [daily] }), "A revisão das baterias do motorhome Iveco Daily venceu em 28/10.");
+  // Nome igual ao tipo não se repete ("do motorhome", nunca "do motorhome Motorhome").
+  assertStringIncludes(montarTexto({ toque: 2, nome: null, hoje: "2026-10-21", itens: [{ ...daily, embarcacao: "Motorhome" }] }), "Só lembrando da revisão das baterias do motorhome (vence 28/10).");
+  // Sem o tipo: o termo geral, nunca um artigo chutado pelo nome.
+  assertStringIncludes(montarTexto({ toque: 3, nome: null, hoje: "2026-11-11", itens: [{ ...item, tipo: null }] }), "da embarcação ou veículo Mar Azul venceu");
 });
 
 Deno.test("texto: dois planos do mesmo cliente numa mensagem, valor somado", () => {
@@ -158,7 +172,7 @@ Deno.test("texto: dois planos do mesmo cliente numa mensagem, valor somado", () 
   });
   assertEquals(
     t,
-    "Oi, Carlos! Aqui é da HBR Marine. Estão chegando duas revisões: a revisão das baterias da Mar Azul (vence 28/10) e a revisão do motor da Mar Azul (vence 20/11). " +
+    "Oi, Carlos! Aqui é da HBR Marine. Estão chegando duas revisões: a revisão das baterias da lancha Mar Azul (vence 28/10) e a revisão do motor da lancha Mar Azul (vence 20/11). " +
       "Tenho ter 27/10 de manhã ou qua 28/10 à tarde para fazer as duas juntas, em torno de R$ 2.130 a R$ 2.880. Qual fica melhor? " +
       "Se preferir não receber esses lembretes, responda PARAR.",
   );
@@ -170,19 +184,22 @@ Deno.test("texto: dois planos do mesmo cliente numa mensagem, valor somado", () 
 Deno.test("texto: D-7, D+14 e campanha seguem os modelos", () => {
   assertEquals(
     montarTexto({ toque: 2, nome: "Carlos", hoje: "2026-10-21", itens: [item] }),
-    "Carlos, só lembrando da revisão das baterias da Mar Azul (vence 28/10). Quer que eu reserve ter 27/10 de manhã? Responda SIM ou sugira outro dia.",
+    "Carlos, só lembrando da revisão das baterias da lancha Mar Azul (vence 28/10). Quer que eu reserve ter 27/10 de manhã? Responda SIM ou sugira outro dia.",
   );
   assertEquals(
     montarTexto({ toque: 3, nome: "Carlos", hoje: "2026-11-11", itens: [item] }),
-    "Carlos, a revisão das baterias da Mar Azul venceu em 28/10. Ainda faz sentido agendar ou prefere que eu tire do calendário?",
+    "Carlos, a revisão das baterias da lancha Mar Azul venceu em 28/10. Ainda faz sentido agendar ou prefere que eu tire do calendário?",
   );
   assertEquals(
     montarTexto({ toque: 3, nome: null, hoje: "2026-11-11", itens: [item] }),
-    "A revisão das baterias da Mar Azul venceu em 28/10. Ainda faz sentido agendar ou prefere que eu tire do calendário?",
+    "A revisão das baterias da lancha Mar Azul venceu em 28/10. Ainda faz sentido agendar ou prefere que eu tire do calendário?",
   );
   assertEquals(
-    montarTexto({ toque: 0, nome: "Carlos", hoje: "2026-10-07", itens: [], embarcacoes: ["Mar Azul", "Brisa"] }),
-    "Oi, Carlos! Aqui é da HBR Marine. Antes do verão a agenda lota. Quer deixar a parte elétrica da Mar Azul e da Brisa conferida ainda em outubro " +
+    montarTexto({
+      toque: 0, nome: "Carlos", hoje: "2026-10-07", itens: [],
+      embarcacoes: [{ name: "Mar Azul", asset_type: "Lancha" }, { name: "Brisa", asset_type: "Motorhome" }],
+    }),
+    "Oi, Carlos! Aqui é da HBR Marine. Antes do verão a agenda lota. Quer deixar a parte elétrica da lancha Mar Azul e do motorhome Brisa conferida ainda em outubro " +
       "(baterias, carregador e inversor)? Me diz uma semana que eu encaixo. Se preferir não receber esses lembretes, responda PARAR.",
   );
   assertStringIncludes(montarTexto({ toque: 0, nome: null, hoje: "2026-10-25", itens: [], embarcacoes: ["Lua"] }), "ainda em novembro");

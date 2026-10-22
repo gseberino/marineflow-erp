@@ -88,7 +88,7 @@ const ctxCom = (db: unknown, userRole = "admin", userId = "dono-1") =>
 const tool = (nome: string) => planosManutencaoTools.find((t) => t.name === nome)!;
 
 // ─── Dados ───────────────────────────────────────────────────────────────────────────────────
-const MAR_AZUL = { id: "11111111-1111-4111-8111-111111111111", name: "Mar Azul", client_id: "c-carlos", active: true, battery_bank_summary: "4x AGM 105Ah", inverter_charger_summary: null, engine_brand: null, engine_model: null, engine_type: null, clients: { name: "Carlos Souza" } };
+const MAR_AZUL = { id: "11111111-1111-4111-8111-111111111111", name: "Mar Azul", asset_type: "Lancha", client_id: "c-carlos", active: true, battery_bank_summary: "4x AGM 105Ah", inverter_charger_summary: null, engine_brand: null, engine_model: null, engine_type: null, clients: { name: "Carlos Souza" } };
 const MAR_BRAVO = { id: "22222222-2222-4222-8222-222222222222", name: "Mar Bravo", client_id: "c-ana", active: true, clients: { name: "Ana" } };
 const PLANO_ID = "33333333-3333-4333-8333-333333333333";
 const OS_ID = "44444444-4444-4444-8444-444444444444";
@@ -262,9 +262,11 @@ Deno.test("lembrete agora: o retrato guarda o texto que o dono viu, e é ELE que
   const retrato = await t.retratoDaPendencia!({ embarcacao: "Mar Azul" }, ctxCom(db)) as Linha;
   assertEquals(retrato.planos, [PLANO_ID]);
   assertEquals(retrato.toque, 1);
-  assertStringIncludes(retrato.texto, "Oi, Carlos! Aqui é da HBR Marine. A revisão das baterias da Mar Azul vence dia");
+  assertStringIncludes(retrato.texto, "Oi, Carlos! Aqui é da HBR Marine. A revisão das baterias da lancha Mar Azul vence dia");
   assertStringIncludes(retrato.texto, "responda PARAR.");
   const resumo = await resumirLembreteDeRevisao(db, "send_maintenance_reminder_now", { embarcacao: "Mar Azul" });
+  // A unidade pelo tipo (decisão 9, 21/10/2026), não "Embarcação:" para tudo.
+  assert(resumo!.startsWith("Lancha: *Mar Azul*\n"), resumo!);
   assertStringIncludes(resumo!, retrato.texto);
   assertStringIncludes(resumo!, "+55 (47) 99915-9654");
   assertStringIncludes(resumo!, "1º lembrete");
@@ -387,17 +389,20 @@ Deno.test("rodada: o toque devido vira proposta com o texto pronto; opt-out vira
     maintenance_plan_events: [],
     clients: [{ id: "c-carlos", name: "Carlos Souza", display_name: null, type: "individual" }],
     service_order_services: [],
+    vessels: [MAR_AZUL],
   });
   const r = await proporToques(db, hoje);
   assertEquals(r.propostas.length, 1);
-  assertEquals(r.propostas[0].titulo, "Lembrete de revisão para Carlos Souza (Mar Azul)");
+  // A unidade pelo tipo (decisão 9, 21/10/2026): a view não traz o tipo; vem de vessels.
+  assertEquals(r.propostas[0].titulo, "Lembrete de revisão para Carlos Souza (Lancha Mar Azul)");
   assertEquals(r.propostas[0].telefone, "5547999159654");
   assertStringIncludes(r.propostas[0].texto, "Oi, Carlos!");
+  assertStringIncludes(r.propostas[0].texto, "A revisão das baterias da lancha Mar Azul vence dia");
   assertEquals(r.pulados.map((p) => [p.plano.plan_id, p.motivo]), [["p-opt", "opt_out"]]);
   // A pergunta ao dono: para quem, o número inteiro, o texto exato, e como responder.
   const pergunta = perguntaAoDono(r.propostas[0], false, 2);
   assertStringIncludes(pergunta, "Lembretes de revisão para aprovar hoje: 2.");
-  assertStringIncludes(pergunta, "Posso mandar este lembrete para Carlos Souza (Mar Azul)?");
+  assertStringIncludes(pergunta, "Posso mandar este lembrete para Carlos Souza (Lancha Mar Azul)?");
   assertStringIncludes(pergunta, "+55 (47) 99915-9654");
   assertStringIncludes(pergunta, `Mensagem: "${r.propostas[0].texto}"`);
   assertStringIncludes(perguntaAoDono(r.propostas[0], true, 1), "Modo de teste ligado");
@@ -425,7 +430,7 @@ Deno.test("campanha: atendido, sem plano na temporada, sem OS aberta, não tocad
       { vessel_id: "v-opt", client_id: "c-opt", status: "completed", check_out_at: "2025-12-01T15:00:00Z" },
     ],
     maintenance_plan_events: [{ client_id: "c-ja", tipo: "campaign_proposed", created_at: "2026-09-16T12:00:00Z" }],
-    vessels: ["ok", "aberta", "recente", "plano", "ja", "opt"].map((k) => ({ id: `v-${k}`, name: `Barco ${k}`, client_id: `c-${k}`, active: true })),
+    vessels: ["ok", "aberta", "recente", "plano", "ja", "opt"].map((k) => ({ id: `v-${k}`, name: `Unidade ${k}`, asset_type: "Motorhome", client_id: `c-${k}`, active: true })),
     clients: ["ok", "plano", "ja", "opt"].map((k) => ({
       id: `c-${k}`, name: `Cliente ${k}`, display_name: null, type: "individual", opt_out_whatsapp: k === "opt", whatsapp: "47999159654", phone: null, active: true,
     })),
@@ -436,7 +441,9 @@ Deno.test("campanha: atendido, sem plano na temporada, sem OS aberta, não tocad
   assertEquals(r[0].toque, 0);
   assertEquals(r[0].planos, []);
   assertEquals(r[0].vessel_id, "v-ok");
-  assertStringIncludes(r[0].texto, "parte elétrica da Barco ok conferida ainda em outubro");
+  // A unidade pelo tipo (decisão 9, 21/10/2026): "do motorhome …", não "da …" para tudo.
+  assertStringIncludes(r[0].texto, "parte elétrica do motorhome Unidade ok conferida ainda em outubro");
+  assertEquals(r[0].titulo, "Campanha de temporada para Cliente ok (Motorhome Unidade ok)");
   assertEquals(eventosDaProposta(r[0], "pend-9")[0].tipo, "campaign_proposed");
   assertEquals(await proporCampanha(bancoFalso(tabelas()), "2026-11-03", planos), []);
 });

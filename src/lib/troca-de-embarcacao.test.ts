@@ -87,10 +87,17 @@ describe('textos e tipos', () => {
     expect(nomeDaUnidade({ name: 'HOMEBUS', asset_type: 'Outro' })).toBe('HOMEBUS');
   });
 
-  it('título e descrição', () => {
+  it('título com o tipo da unidade atual (decisão 9); sem tipo ou sem a atual, o termo geral', () => {
+    expect(tituloDaTrocaDeEmbarcacao('OS', lancha)).toBe('Trocar a lancha desta OS?');
+    expect(tituloDaTrocaDeEmbarcacao('orçamento', motorhome)).toBe('Trocar o motorhome deste orçamento?');
+    expect(tituloDaTrocaDeEmbarcacao('OS', { name: 'HOMEBUS', asset_type: 'Outro' })).toBe('Trocar a embarcação ou veículo desta OS?');
     expect(tituloDaTrocaDeEmbarcacao('OS')).toBe('Trocar a embarcação ou veículo desta OS?');
-    expect(tituloDaTrocaDeEmbarcacao('orçamento')).toBe('Trocar a embarcação ou veículo deste orçamento?');
+    expect(tituloDaTrocaDeEmbarcacao('orçamento', null)).toBe('Trocar a embarcação ou veículo deste orçamento?');
+  });
+
+  it('descrição: de qual para qual, com o tipo; atual desconhecida não vira "De a unidade escolhida"', () => {
     expect(descricaoDaTrocaDeEmbarcacao(lancha, motorhome, ['Frase.'])).toBe('De Lancha Netuno II para Motorhome Iveco Daily. Frase.');
     expect(descricaoDaTrocaDeEmbarcacao(lancha, null, [])).toBe('De Lancha Netuno II para um cadastro novo.');
+    expect(descricaoDaTrocaDeEmbarcacao(undefined, veleiro, [])).toBe('Da embarcação ou veículo atual para Veleiro Brisa.');
   });
 });

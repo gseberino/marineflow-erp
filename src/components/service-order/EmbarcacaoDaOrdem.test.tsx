@@ -19,19 +19,21 @@ function renderiza(p: Partial<Props> = {}) {
   const motivosDaTroca = p.motivosDaTroca ?? vi.fn(() => [] as string[]);
   const utils = render(
     <EmbarcacaoDaOrdem
-      rotulo="Embarcação *" value="v1" clientId="c1" vessels={barcos} embarcacao={netuno as never}
+      rotulo="Embarcação ou veículo *" value="v1" clientId="c1" vessels={barcos} embarcacao={netuno as never}
       motivosDaTroca={motivosDaTroca} onChange={onChange} onVesselCreated={vi.fn()} {...p}
     />,
   );
   return { ...utils, onChange, motivosDaTroca };
 }
 
-const trocar = () => screen.getByRole('button', { name: /^Trocar embarcação ou veículo/ });
+// O "Trocar" diz o tipo da atual (decisão 9): "Trocar a lancha Netuno II".
+const trocar = () => screen.getByRole('button', { name: 'Trocar a lancha Netuno II' });
+const QUALQUER_TROCAR = /^Trocar (a|o) /;
 
 describe('EmbarcacaoDaOrdem', () => {
   it('escolhida: só a ficha e o "Trocar" (sem lista aberta à toa)', () => {
     renderiza();
-    expect(screen.getByLabelText('Dados da embarcação')).toBeInTheDocument();
+    expect(screen.getByLabelText('Dados da embarcação ou veículo')).toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     expect(trocar()).toBeInTheDocument();
   });
@@ -39,7 +41,7 @@ describe('EmbarcacaoDaOrdem', () => {
   it('sem nenhuma escolhida: a lista, sem "Trocar"', () => {
     renderiza({ value: '', embarcacao: undefined });
     expect(screen.getByRole('combobox', { name: /Embarcação/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Trocar embarcação/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: QUALQUER_TROCAR })).not.toBeInTheDocument();
   });
 
   it('"Trocar" abre a lista já aberta; sem motivos, troca direto', async () => {
@@ -58,7 +60,7 @@ describe('EmbarcacaoDaOrdem', () => {
     await user.click(trocar());
     await user.click(await screen.findByRole('option', { name: /Brisa/ }));
     const dialogo = await screen.findByRole('alertdialog');
-    expect(within(dialogo).getByText('Trocar a embarcação ou veículo deste orçamento?')).toBeInTheDocument();
+    expect(within(dialogo).getByText('Trocar a lancha deste orçamento?')).toBeInTheDocument();
     expect(within(dialogo).getByText(
       'De Lancha Netuno II para Veleiro Brisa. Sai o solicitante Carlos, que é contato da antiga.',
     )).toBeInTheDocument();
@@ -90,7 +92,7 @@ describe('EmbarcacaoDaOrdem', () => {
     const user = userEvent.setup();
     renderiza({ motivosDaTroca: () => ['Motivo.'] });
     await user.click(trocar());
-    await user.click(await screen.findByRole('option', { name: /Nova embarcação para este cliente/ }));
+    await user.click(await screen.findByRole('option', { name: /Nova embarcação ou veículo para este cliente/ }));
     const dialogo = await screen.findByRole('alertdialog');
     expect(within(dialogo).getByText(/para um cadastro novo/)).toBeInTheDocument();
     expect(screen.queryByText('cadastro de embarcação')).not.toBeInTheDocument();
@@ -99,38 +101,38 @@ describe('EmbarcacaoDaOrdem', () => {
   });
 
   it('bloqueio com motivo (OS concluída, agrupamento): sem "Trocar", com o motivo', () => {
-    renderiza({ semTroca: 'OS concluída: para trocar a embarcação ou veículo, volte a OS para Em andamento.' });
-    expect(screen.queryByRole('button', { name: /^Trocar embarcação/ })).not.toBeInTheDocument();
+    renderiza({ semTroca: 'OS concluída: para trocar a lancha, volte a OS para Em andamento.' });
+    expect(screen.queryByRole('button', { name: QUALQUER_TROCAR })).not.toBeInTheDocument();
     expect(screen.getByText(/OS concluída/)).toBeInTheDocument();
   });
 
   it('ainda conferindo (semTroca = true): sem "Trocar" e sem mensagem', () => {
     renderiza({ semTroca: true });
-    expect(screen.queryByRole('button', { name: /^Trocar embarcação/ })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Dados da embarcação')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: QUALQUER_TROCAR })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Dados da embarcação ou veículo')).toBeInTheDocument();
   });
 
   it('OS travada: ficha sem "Trocar"; o "Editar" do cadastro continua', () => {
     renderiza({ disabled: true });
-    expect(screen.queryByRole('button', { name: /^Trocar embarcação/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Editar cadastro da embarcação' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: QUALQUER_TROCAR })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Editar cadastro da lancha' })).toBeInTheDocument();
   });
 
   it('a ficha mostra o nome: é nela que se confere "é esta?"', () => {
     renderiza();
-    expect(within(screen.getByLabelText('Dados da embarcação')).getByText('Netuno II')).toBeInTheDocument();
+    expect(within(screen.getByLabelText('Dados da embarcação ou veículo')).getByText('Netuno II')).toBeInTheDocument();
   });
 
   it('trava que chega com a troca aberta fecha a troca (e não volta aberta quando a trava sai)', async () => {
     const user = userEvent.setup();
     const props = {
-      rotulo: 'Embarcação *', value: 'v1', clientId: 'c1', vessels: barcos, embarcacao: netuno as never,
+      rotulo: 'Embarcação ou veículo *', value: 'v1', clientId: 'c1', vessels: barcos, embarcacao: netuno as never,
       motivosDaTroca: () => [] as string[], onChange: vi.fn(), onVesselCreated: vi.fn(),
     };
     const { rerender } = render(<EmbarcacaoDaOrdem {...props} />);
     await user.click(trocar());
     expect(document.getElementById('os-embarcacao')).not.toBeNull();
-    rerender(<EmbarcacaoDaOrdem {...props} semTroca="OS concluída: para trocar a embarcação ou veículo, volte a OS para Em andamento." />);
+    rerender(<EmbarcacaoDaOrdem {...props} semTroca="OS concluída: para trocar a lancha, volte a OS para Em andamento." />);
     expect(document.getElementById('os-embarcacao')).toBeNull();
     rerender(<EmbarcacaoDaOrdem {...props} />);
     expect(document.getElementById('os-embarcacao')).toBeNull();
@@ -141,14 +143,14 @@ describe('EmbarcacaoDaOrdem', () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const props = {
-      rotulo: 'Embarcação *', value: 'v1', clientId: 'c1', vessels: barcos, embarcacao: netuno as never,
+      rotulo: 'Embarcação ou veículo *', value: 'v1', clientId: 'c1', vessels: barcos, embarcacao: netuno as never,
       motivosDaTroca: () => ['Motivo.'], onChange, onVesselCreated: vi.fn(),
     };
     const { rerender } = render(<EmbarcacaoDaOrdem {...props} />);
     await user.click(trocar());
     await user.click(await screen.findByRole('option', { name: /Brisa/ }));
     const dialogo = await screen.findByRole('alertdialog');
-    rerender(<EmbarcacaoDaOrdem {...props} semTroca="OS concluída: para trocar a embarcação ou veículo, volte a OS para Em andamento." />);
+    rerender(<EmbarcacaoDaOrdem {...props} semTroca="OS concluída: para trocar a lancha, volte a OS para Em andamento." />);
     await user.click(within(dialogo).getByRole('button', { name: 'Trocar' }));
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -160,7 +162,7 @@ describe('EmbarcacaoDaOrdem', () => {
     expect(await screen.findByRole('option', { name: /Brisa/ })).toBeInTheDocument();
     await user.keyboard('{Escape}');
     expect(document.getElementById('os-embarcacao')).toBeNull();
-    expect(screen.getByLabelText('Dados da embarcação')).toBeInTheDocument();
+    expect(screen.getByLabelText('Dados da embarcação ou veículo')).toBeInTheDocument();
     await waitFor(() => expect(trocar()).toHaveFocus());
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -172,7 +174,7 @@ describe('EmbarcacaoDaOrdem', () => {
     expect(await screen.findByRole('option', { name: /Brisa/ })).toBeInTheDocument();
     await user.click(document.body);
     await waitFor(() => expect(document.getElementById('os-embarcacao')).toBeNull());
-    expect(screen.getByLabelText('Dados da embarcação')).toBeInTheDocument();
+    expect(screen.getByLabelText('Dados da embarcação ou veículo')).toBeInTheDocument();
   });
 
   it('escolher com motivos NÃO conta como desistir: a confirmação fica, e "Trocar" troca', async () => {
@@ -188,10 +190,31 @@ describe('EmbarcacaoDaOrdem', () => {
 
   it('o rótulo só aponta para a lista quando ela existe', () => {
     const { unmount } = renderiza();
-    expect(screen.getByText('Embarcação *')).not.toHaveAttribute('for');
+    expect(screen.getByText('Embarcação ou veículo *')).not.toHaveAttribute('for');
     unmount();
     renderiza({ value: '', embarcacao: undefined });
-    expect(screen.getByText('Embarcação *')).toHaveAttribute('for', 'os-embarcacao');
+    expect(screen.getByText('Embarcação ou veículo *')).toHaveAttribute('for', 'os-embarcacao');
+  });
+
+  it('"Trocar", "Cancelar" e a confirmação dizem o tipo da atual; sem tipo, o termo geral (decisão 9)', async () => {
+    const user = userEvent.setup();
+    const daily = { id: 'v3', client_id: 'c1', name: 'Iveco Daily', active: true, asset_type: 'Motorhome', manufacturer: 'Iveco', model: 'Daily' };
+    const { unmount } = renderiza({ value: 'v3', vessels: [...barcos, daily], embarcacao: daily as never, motivosDaTroca: () => ['Motivo.'] });
+    await user.click(screen.getByRole('button', { name: 'Trocar o motorhome Iveco Daily' }));
+    expect(screen.getByRole('button', { name: 'Cancelar a troca e manter o motorhome Iveco Daily' })).toBeInTheDocument();
+    await user.click(await screen.findByRole('option', { name: /Brisa/ }));
+    expect(within(await screen.findByRole('alertdialog')).getByText('Trocar o motorhome desta OS?')).toBeInTheDocument();
+    unmount();
+    renderiza({ embarcacao: { ...netuno, asset_type: null } as never });
+    expect(screen.getByRole('button', { name: 'Trocar a embarcação ou veículo Netuno II' })).toBeInTheDocument();
+  });
+
+  it('a lista mostra o tipo de cada opção (cliente com barco e motorhome)', async () => {
+    const user = userEvent.setup();
+    renderiza();
+    await user.click(trocar());
+    expect(await screen.findByRole('option', { name: /Netuno II.*Lancha · Schaefer 400/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /Brisa.*Veleiro/ })).toBeInTheDocument();
   });
 
   it('fora da lista do cliente: diz "deste orçamento" no orçamento', () => {

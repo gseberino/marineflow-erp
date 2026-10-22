@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
+import { campoDaUnidade } from '@/lib/unidade';
 
 export default function ExternalQuoteDetailPage() {
   const { id } = useParams();
@@ -51,6 +52,9 @@ export default function ExternalQuoteDetailPage() {
 
   if (isLoading) return <div className="p-8 text-center">Carregando detalhes...</div>;
   if (!quote) return <div className="p-8 text-center text-red-500">Orçamento não encontrado.</div>;
+
+  // Uma unidade à vista: o rótulo é o tipo ("Motorhome", "Lancha"), decisão 9 de 21/10/2026.
+  const unidade = quote.vessel?.name ? campoDaUnidade(quote.vessel) : null;
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -175,14 +179,14 @@ export default function ExternalQuoteDetailPage() {
                   <p className="text-xs text-muted-foreground">{quote.client?.phone || quote.lead?.phone || '—'}</p>
                 </div>
               </div>
-              {quote.vessel?.name && (
+              {unidade && (
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-blue-100 rounded-full">
                     <Anchor className="h-4 w-4 text-blue-600" />
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">Embarcação/Unidade</p>
-                    <p className="text-sm font-medium">{quote.vessel.name}</p>
+                    <p className="text-xs text-muted-foreground">{unidade.rotulo}</p>
+                    <p className="text-sm font-medium">{unidade.valor}</p>
                   </div>
                 </div>
               )}
