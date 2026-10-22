@@ -14,7 +14,7 @@ import { brl, ddmm, diasEntre, nomeDoDia, paraBusca, somarDias, umaLinha } from 
 import { tipoDoDia } from "../_shared/secretario/feriados.ts";
 import type { Familia, Secao, TipoDoItem } from "../_shared/secretario/tipos.ts";
 import { dataBR, diaBR, horaBR } from "../_shared/pdf/datas.ts";
-import { COM_PRESSA, ehClienteGenerico, PEDE_PRECO, pareceSoAgradecimento } from "../_shared/secretario/palavras.ts";
+import { COM_PRESSA, ehClienteGenerico, PEDE_PRECO, pareceSoAgradecimento, pareceVendedor } from "../_shared/secretario/palavras.ts";
 
 /** Os cortes do desenho aprovado, num lugar só. */
 export const REGRAS = {
@@ -309,6 +309,30 @@ export function soAgradecimentoDesdeAResposta(w: Pick<ConversaCrua, "last_body" 
   return olhar.every((b) => pareceSoAgradecimento(b));
 }
 
+/** A frase da lista para o contato que parece vendedor (a manhã e o "por que o X?"). */
+export const FRASE_DO_VENDEDOR = "Ficou na lista: parece vendedor ou consultor oferecendo algo.";
+
+/**
+ * (21/10/2026) Contato SEM cadastro de cliente (lead, ou "Cliente Final") que se apresenta vendendo — pelo nome ou pelo
+ * que mandou na semana (pareceVendedor: a mesma regra do "me acorde se", _shared/uma-voz/acorde.ts). Cliente cadastrado
+ * nunca é vendedor aqui; fornecedor já tem a regra dele (nunca de manhã). Caso real: em 16/10 o "Jaison Consultor de
+ * Vendas Zendel" foi o B da manhã-sombra; em 20/10 a "Ketelyn Consultora empresarial" ofereceu plano da Vivo. Medido nas
+ * conversas reais de 01/09 a 21/10: nenhum cliente ou lead de verdade marcado.
+ */
+export function pareceContatoVendedor(
+  w: Pick<ConversaCrua, "contato" | "categoria" | "recebidas" | "last_body" | "last_outbound_at">,
+): boolean {
+  if (w.categoria === "fornecedor") return false;
+  if (w.categoria === "cliente" && !ehClienteGenerico(w.contato)) return false;
+  // (22/10/2026) Só o que ele mandou DEPOIS da última resposta da HBR, como o acorde (_shared/uma-voz/acorde.ts): a semana
+  // inteira tirava da manhã o lead que falou "consórcio" antes da resposta e hoje pede orçamento com pressa (o mesmo erro
+  // que a 1ª rodada tirou do fechamento). O nome que diz que vende continua bastando sozinho (8 de 8 nomes reais assim
+  // são vendedores — medido em 22/10).
+  const desde = w.last_outbound_at ? Date.parse(w.last_outbound_at) : NaN;
+  const pendentes = Number.isNaN(desde) ? w.recebidas : w.recebidas.filter((r) => Date.parse(r.em) > desde);
+  return pareceVendedor(w.contato, pendentes.length ? pendentes.map((r) => r.body) : [w.last_body]);
+}
+
 export function candidatoDeConversa(w: ConversaCrua, agora: Date, valorDoCliente: number): Candidato {
   const horas = (agora.getTime() - new Date(w.last_inbound_at).getTime()) / 3_600_000;
   const recentes = w.recebidas.map((r) => paraBusca(r.body)).join(" ");
@@ -331,17 +355,23 @@ export function candidatoDeConversa(w: ConversaCrua, agora: Date, valorDoCliente
   const inicioDaJanela = Date.parse(`${manhaAnterior(diaBR(agora))}T07:30:00-03:00`);
   const pedidoDoDia = w.categoria !== "fornecedor" && !todoDia &&
     w.recebidas.some((r) => Date.parse(r.em) >= inicioDaJanela && PEDE_PRECO.test(paraBusca(r.body)));
+  // (21/10/2026) o contato sem cadastro de cliente que se apresenta vendendo também fica na lista (a regra do acorde)
+  const vendedor = pareceContatoVendedor(w);
+  // (22/10/2026) e o vendedor sem cadastro nunca é "contato_pedindo_preco": a *lista* nomeia esse tipo como possível
+  // cliente novo que "parece pedir preço ou orçamento" (_shared/secretario/respostas.ts, textoDaLista) — o "orçamento pra
+  // você" da Ketelyn virava isso
   const tipo: TipoDoItem = w.categoria === "fornecedor" ? "fornecedor"
     : cliente ? ((passou || pedidoDoDia) && !todoDia ? "cliente_sem_resposta" : "cliente_recente")
-    : ((pedePreco && passou && !todoDia) || pedidoDoDia ? "contato_pedindo_preco" : "contato_sem_cadastro");
+    : !vendedor && ((pedePreco && passou && !todoDia) || pedidoDoDia) ? "contato_pedindo_preco" : "contato_sem_cadastro";
   // (16/10/2026) o que ele mandou desde a última resposta é só cumprimento/agradecimento ("Bom dia Gustavo! Ótimo 👍"):
   // a conversa acabou de um jeito educado, não espera resposta — fica na lista
   const soAgradeceu = soAgradecimentoDesdeAResposta(w);
-  const elegivel = !soAgradeceu && (tipo === "cliente_sem_resposta" || tipo === "contato_pedindo_preco");
+  const elegivel = !soAgradeceu && !vendedor && (tipo === "cliente_sem_resposta" || tipo === "contato_pedindo_preco");
   const nome = umaLinha(w.contato || w.phone, 30);
   const { verbo, audio } = verboDaMensagem(w.last_body);
   const tempo = haQuanto(horas);
   const porqueNaoSobe = elegivel ? null
+    : vendedor ? FRASE_DO_VENDEDOR
     : soAgradeceu && (tipo === "cliente_sem_resposta" || tipo === "contato_pedindo_preco")
     ? "Ficou na lista: a última mensagem parece só um agradecimento."
     : tipo === "fornecedor" ? "Ficou na lista: fornecedor (nunca de manhã)."

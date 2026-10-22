@@ -96,8 +96,11 @@ export interface LidoDaTarde {
   historico: PassagemDoHistorico[];
   // deno-lint-ignore no-explicit-any
   esperando: any[];
-  /** (16/10/2026) as recebidas da semana de quem espera (o F1 acha a 1ª mensagem de hoje sem resposta); null = falhou */
-  recebidas?: Array<{ phone_normalized: string; occurred_at: string }> | null;
+  /**
+   * (16/10/2026) as recebidas da semana de quem espera (o F1 acha a 1ª mensagem de hoje sem resposta; o texto tira quem
+   * só agradeceu); null = falhou
+   */
+  recebidas?: Array<{ phone_normalized: string; occurred_at: string; body?: string | null }> | null;
   amanha: DiaDeAmanha | null;
   escritorio: DadosDoEscritorio | null;
   panorama: Panorama | null;

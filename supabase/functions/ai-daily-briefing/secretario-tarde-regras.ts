@@ -331,7 +331,10 @@ export function nomeSemLetra(nome: string): string {
  * F1 (16/10/2026, padrão recomendado, aguarda o dono): o fechamento cita, numa linha SEM letra, o cliente cadastrado
  * (não genérico) que escreveu HOJE e está sem resposta há `horas` horas ou mais — caso real: 13/10, o Giancarlo S.
  * perguntou às 10:31 e só foi respondido em 15/10; o fechamento não o citou. E também quem o portão acordou hoje e
- * continua sem resposta (spec uma voz §6.3-2), de qualquer tipo. Fica de fora quem já está na mensagem com letra.
+ * continua sem resposta (spec uma voz §6.3-2), de qualquer tipo. Fica de fora quem já está na mensagem com letra e quem
+ * só agradeceu. (21/10/2026) A regra do vendedor (pareceVendedor) NÃO se repete aqui: o contato sem cadastro só entra se
+ * o "me acorde se" o acordou, e o acorde já a aplica antes de acordar (_shared/uma-voz/acorde.ts, sobre o de hoje sem
+ * resposta); refazê-la sobre a semana tirava da linha o lead acordado que falou "consórcio" antes da resposta da HBR.
  * `horas` = 0 desliga a parte dos clientes. Ordem: os acordados primeiro, depois o que espera há mais tempo.
  */
 export function semRespostaDesdeHoje(p: {
