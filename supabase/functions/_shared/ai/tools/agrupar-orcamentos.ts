@@ -281,7 +281,7 @@ export function problemasDoPedido(
     if (o.merged_into_id) fora(`${n} já foi agrupado em ${destinos[o.merged_into_id] ?? "outro orçamento"}: não pode entrar de novo.`);
     else if (o.status !== "draft" || o.converted_to_os_at) fora(`${n} não é mais um orçamento em aberto (já virou OS ou foi cancelado).`);
     else if (o.client_id !== principal.client_id || o.vessel_id !== principal.vessel_id) {
-      fora(`${n} é de outro cliente ou de outra embarcação: só dá para agrupar orçamentos do mesmo cliente e da mesma embarcação.`);
+      fora(`${n} é de outro cliente ou de outra embarcação ou veículo: só dá para agrupar orçamentos do mesmo cliente e da mesma unidade.`);
     } else if (!item) fora(`Não consegui conferir ${n} na leitura do banco: liste os orçamentos de novo.`);
     else if (o.quote_status === "rejected") {
       if (item.impedimento_se_voltar) {
@@ -597,16 +597,16 @@ export const agruparOrcamentosTools: ToolDef[] = [
   {
     name: "listar_orcamentos_para_agrupar",
     description:
-      "Lista os orçamentos EM ABERTO de uma embarcação (e do cliente, se passar) para AGRUPAR: do mais NOVO para o mais antigo, " +
+      "Lista os orçamentos EM ABERTO de uma embarcação ou veículo (e do cliente, se passar) para AGRUPAR: do mais NOVO para o mais antigo, " +
       "INCLUSIVE os reprovados, com número, data, situação, total, resumo, se pode entrar no agrupamento (elegivel) e, se não " +
       "pode, o motivo; os documentos recentes que ficaram fora da lista (virou OS, cancelado, já agrupado); e os agrupados ativos " +
-      "(para desagrupar). Use ANTES de agrupar_orcamentos. Resolva antes a embarcação com search_vessels (o cliente é o dono " +
+      "(para desagrupar). Use ANTES de agrupar_orcamentos. Resolva antes a unidade com search_vessels (o cliente é o dono " +
       "dela). 'Os N últimos' = os N primeiros desta lista (os mais novos), contando os reprovados. Só leitura.",
     input_schema: {
       type: "object",
       properties: {
-        embarcacao_id: { type: "string", description: "Id (UUID) da embarcação/ativo — ache com search_vessels." },
-        cliente_id: { type: "string", description: "Id (UUID) do cliente (o dono da embarcação), se souber." },
+        embarcacao_id: { type: "string", description: "Id (UUID) da embarcação ou veículo — ache com search_vessels." },
+        cliente_id: { type: "string", description: "Id (UUID) do cliente (o dono da unidade), se souber." },
       },
       required: ["embarcacao_id"],
     },
@@ -616,7 +616,7 @@ export const agruparOrcamentosTools: ToolDef[] = [
       if (!CARGOS_DO_AGRUPAMENTO.includes(ctx.userRole as Role)) return { error: SEM_CARGO };
       const barco = String(args?.embarcacao_id ?? "").trim();
       const cliente = String(args?.cliente_id ?? "").trim();
-      if (!UUID_RE.test(barco)) return { error: "Passe o id da embarcação (ache com search_vessels)." };
+      if (!UUID_RE.test(barco)) return { error: "Passe o id da embarcação ou veículo (ache com search_vessels)." };
       if (cliente && !UUID_RE.test(cliente)) return { error: "Passe o id do cliente (ache com search_clients) ou deixe vazio." };
       const { data, error } = await ctx.sb.rpc("orcamentos_para_agrupar", {
         p_vessel_id: barco,
@@ -639,7 +639,7 @@ export const agruparOrcamentosTools: ToolDef[] = [
   {
     name: "agrupar_orcamentos",
     description:
-      "Junta 2 a 10 orçamentos em aberto do MESMO cliente e da MESMA embarcação num orçamento NOVO (Em elaboração), com a soma " +
+      "Junta 2 a 10 orçamentos em aberto do MESMO cliente e da MESMA embarcação ou veículo num orçamento NOVO (Em elaboração), com a soma " +
       "dos originais e os preços como estão. Condição de pagamento, contato e comissão vêm do PRINCIPAL (padrão: o mais antigo); a " +
       "comissão é recalculada. Os originais ficam cancelados como histórico, com o link do cliente desligado. Use depois de " +
       "listar_orcamentos_para_agrupar. A chamada já pede o 'sim' ao dono, com a lista, o principal e o total: não pergunte antes. " +

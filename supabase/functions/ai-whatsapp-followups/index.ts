@@ -20,7 +20,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
-import { TERMO_GERAL, unidadeNaFrase } from "../_shared/unidade.ts";
+import { emojiDaUnidade, suaUnidade } from "../_shared/unidade.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -41,6 +41,9 @@ function normalizePhone(raw: string, cc = "55"): string {
   if (d.length === 12 && d.startsWith("55")) { const n = d.slice(4); if (/^[6-9]/.test(n)) d = d.slice(0, 4) + "9" + n; }
   return d;
 }
+
+/** " 🛥️" para pôr depois do nome da empresa; vazio fica vazio (sem espaço sobrando). */
+const comEspaco = (emoji: string) => (emoji ? ` ${emoji}` : "");
 
 const REACT_CAP = 10; // teto de reativações por execução (evita rajada no 1º run)
 
@@ -67,6 +70,17 @@ servirComCors(async (req) => {
     const toPhone = (raw: string) => (testMode ? testNumber : normalizePhone(raw));
     const rows: any[] = [];
 
+    // A unidade (nome e tipo) de uma OS; null sem vessel_id ou se a leitura falhar.
+    // clienteId: na reativação a mensagem diz "da SUA lancha"; se a unidade passou a outro dono (vendida), não é
+    // mais dele — sai o termo geral, sem emoji. No pós-serviço (só o emoji) não precisa.
+    async function unidadeDaOs(vesselId: string | null, clienteId?: string): Promise<{ name: string | null; asset_type: string | null } | null> {
+      if (!vesselId) return null;
+      const { data: v, error } = await admin.from("vessels").select("name, asset_type, client_id").eq("id", vesselId).maybeSingle();
+      if (error) console.warn("[ai-whatsapp-followups] tipo da unidade não lido", error.message);
+      if (!v || (clienteId && v.client_id !== clienteId)) return null;
+      return { name: v.name, asset_type: v.asset_type };
+    }
+
     // grava o dedupe; retorna true se é novo (deve agir)
     async function claim(alert_key: string, meta: any): Promise<boolean> {
       const { data } = await admin
@@ -81,7 +95,7 @@ servirComCors(async (req) => {
     const d7 = new Date(now.getTime() - 7 * 864e5).toISOString();
     const { data: doneOS } = await admin
       .from("service_orders")
-      .select("id, service_order_number, client_id, check_out_at")
+      .select("id, service_order_number, client_id, check_out_at, vessel_id")
       .in("status", ["completed", "invoiced"])
       .gte("check_out_at", d7)
       .lte("check_out_at", d2)
@@ -97,7 +111,11 @@ servirComCors(async (req) => {
       if (phone.length < 10) continue;
       if (!(await claim(`postservice:${(so as any).id}`, { so: (so as any).id }))) continue;
       const nome = (c.name || "").split(" ")[0] || "tudo bem";
-      const msg = `Olá ${nome}! Aqui é o assistente da ${companyName} 🛥️. Há alguns dias concluímos o serviço (${(so as any).service_order_number}). Como foi sua experiência? Ficou tudo certo? Sua opinião ajuda muito a gente. 😊`;
+      // 22/10/2026 (dono): o emoji pelo tipo da unidade da OS — barquinho só para embarcação, 🚐 para
+      // veículo; sem a unidade (ou leitura que falhou), nenhum.
+      const unidade = await unidadeDaOs((so as any).vessel_id ?? null);
+      const emoji = comEspaco(emojiDaUnidade(unidade?.asset_type));
+      const msg = `Olá ${nome}! Aqui é o assistente da ${companyName}${emoji}. Há alguns dias concluímos o serviço (${(so as any).service_order_number}). Como foi sua experiência? Ficou tudo certo? Sua opinião ajuda muito a gente. 😊`;
       rows.push({ phone_normalized: phone, message: msg, source: "ai_followup", priority: 6 });
       postservice++;
     }
@@ -114,7 +132,7 @@ servirComCors(async (req) => {
       .limit(5000);
 
     const lastByClient = new Map<string, number>();
-    // A unidade da última OS do cliente: a mensagem diz "do motorhome Iveco Daily", "da lancha Netuno II".
+    // A unidade da última OS do cliente: a mensagem diz "do seu motorhome Iveco Daily", "da sua lancha Netuno II".
     const lastVesselByClient = new Map<string, string | null>();
     for (const o of allOS || []) {
       const cid = (o as any).client_id as string;
@@ -137,15 +155,14 @@ servirComCors(async (req) => {
       if (phone.length < 10) continue;
       if (!(await claim(`reactivate:${cid}:${monthKey}`, { client: cid }))) continue;
       const nome = (c.name || "").split(" ")[0] || "tudo bem";
-      // 21/10/2026 (decisão 9): a unidade pelo tipo — "da sua embarcação" ia também para dono de
-      // motorhome. Sem a unidade (OS sem embarcação/veículo ou leitura que falhou), o termo geral.
-      let daUnidade = `da sua ${TERMO_GERAL.toLowerCase()}`;
-      const vid = lastVesselByClient.get(cid);
-      if (vid) {
-        const { data: v } = await admin.from("vessels").select("name, asset_type").eq("id", vid).maybeSingle();
-        if (v) daUnidade = unidadeNaFrase(v, "de");
-      }
-      const msg = `Olá ${nome}! Aqui é o assistente da ${companyName} ⚓. Faz um tempo que não cuidamos ${daUnidade} por aqui. Que tal agendar uma revisão ou manutenção? É só me chamar que eu te ajudo. 🙂`;
+      // 22/10/2026 (dono): falando com o cliente, "do seu motorhome", "da sua lancha", "do seu
+      // trailer" — e o emoji pelo tipo. Sem a unidade (OS sem embarcação/veículo ou leitura que
+      // falhou): "da sua embarcação ou veículo" e sem emoji.
+      const v = await unidadeDaOs(lastVesselByClient.get(cid) ?? null, cid);
+      // Com o nome: cliente com duas lanchas precisa saber qual ("da sua lancha Netuno II").
+      const daUnidade = suaUnidade(v, "de", { comNome: true });
+      const emoji = comEspaco(emojiDaUnidade(v?.asset_type));
+      const msg = `Olá ${nome}! Aqui é o assistente da ${companyName}${emoji}. Faz um tempo que não cuidamos ${daUnidade} por aqui. Que tal agendar uma revisão ou manutenção? É só me chamar que eu te ajudo. 🙂`;
       rows.push({ phone_normalized: phone, message: msg, source: "ai_followup", priority: 7 });
       reactivation++;
     }

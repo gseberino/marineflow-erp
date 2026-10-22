@@ -7,7 +7,7 @@
 // Pesquisa: mensagem com o nome da embarcação, o último serviço com data, DUAS datas concretas e a
 // FAIXA de valor; terça a quinta; um cliente com dois planos vencendo perto (≤ 30 dias) recebe UMA
 // mensagem; termina com a saída fácil ("responda PARAR", LGPD).
-import { type UnidadeResumo, unidadeNaFrase } from "../unidade.ts";
+import { suaUnidade, type UnidadeResumo } from "../unidade.ts";
 
 const DIA_MS = 86_400_000;
 const BRASILIA_MS = 3 * 60 * 60 * 1000;
@@ -147,11 +147,15 @@ function juntar(itens: string[]): string {
 }
 
 /**
- * A unidade na frase, pelo tipo (decisão 9, 21/10/2026): "da lancha Mar Azul", "do motorhome Iveco
- * Daily" — até então ia "da Iveco Daily" para dono de motorhome. Sem o tipo: "da embarcação ou
- * veículo Mar Azul".
+ * A unidade na frase, pelo tipo e falando com o dono dela: "da sua lancha Mar Azul", "do seu motorhome
+ * Iveco Daily", "do seu trailer" (nome igual ao tipo não se repete). Decisão 9 (21/10/2026): o tipo —
+ * até então ia "da Iveco Daily" para dono de motorhome; dono, 22/10/2026: ao cliente, "seu motorhome",
+ * "sua lancha", "seu trailer". Sem o tipo: "da sua embarcação ou veículo Mar Azul".
  */
-const daUnidade = (u: string | UnidadeResumo) => unidadeNaFrase(typeof u === "string" ? { name: u } : u, "de");
+export function daUnidade(u: string | UnidadeResumo): string {
+  const un = typeof u === "string" ? { name: u } : u;
+  return suaUnidade(un, "de", { comNome: true });
+}
 const daUnidadeDoItem = (i: ItemDoTexto) => daUnidade({ name: i.embarcacao, asset_type: i.tipo });
 
 // ─── Qual toque cabe ────────────────────────────────────────────────────────────────────────

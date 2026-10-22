@@ -229,7 +229,10 @@ describe('via do técnico — folha de rosto e volta (avaliação 01/10)', () =>
     // O rótulo é o próprio tipo (decisão 9, 21/10/2026); nome e modelo no valor.
     expect(html).toContain('<span class="lab">Motorhome</span>Itapoã · Itapoã Sprinter');
     expect(html).not.toContain('<span class="lab">Veículo</span>');
-    expect(html).toContain('Marina Itajaí · vaga B-12');
+    // Vaga é de barco (22/10/2026): no motorhome o campo nem aparece no cadastro, então não vai ao papel.
+    expect(html).toContain('Marina Itajaí');
+    expect(html).not.toContain('vaga B-12');
+    expect(buildRouteSheetHtml({ ...rosto, assetType: 'Lancha' }, [])).toContain('Marina Itajaí · vaga B-12');
     // Mesmo número no telefone e no WhatsApp sai uma vez só.
     expect(html).toContain('tel./WhatsApp (47) 99999-0000');
     expect(html).toContain('Pedido por: <b>Marinheiro João</b>');

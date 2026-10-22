@@ -12,8 +12,9 @@
 
 import { brl, ddmm, diasEntre, nomeDoDia, paraBusca, somarDias, umaLinha } from "../_shared/secretario/base.ts";
 import { tipoDoDia } from "../_shared/secretario/feriados.ts";
-// "Barco: Overland Vegini" saía para motorhome; sem o tipo na leitura, o termo geral (decisão 9, 21/10/2026).
-import { TERMO_GERAL } from "../_shared/unidade.ts";
+// "Barco: Overland Vegini" saía para motorhome. O fato da unidade tem o tipo como rótulo ("Motorhome: Overland
+// Vegini"; decisão 6 do dono, 22/10/2026); sem tipo, o termo geral (decisão 9, 21/10/2026).
+import { campoDaUnidade, nomeDaUnidade, TERMO_GERAL } from "../_shared/unidade.ts";
 import type { Familia, Secao, TipoDoItem } from "../_shared/secretario/tipos.ts";
 import { dataBR, diaBR, horaBR } from "../_shared/pdf/datas.ts";
 import { COM_PRESSA, ehClienteGenerico, PEDE_PRECO, pareceSoAgradecimento, pareceVendedor } from "../_shared/secretario/palavras.ts";
@@ -105,6 +106,11 @@ export interface Candidato {
   /** o texto do turno do assistente quando o dono manda só a letra */
   pedido: string | null;
   fatos: Array<[string, string]>;
+  /**
+   * (22/10/2026) a unidade numa linha, com o tipo ("Motorhome Overland Vegini"); null = sem unidade. O fato da
+   * unidade tem o tipo como rótulo, então quem lê o item gravado acha a unidade por aqui, não pelo rótulo.
+   */
+  unidade?: string | null;
 }
 
 // ─── O que a coleta entrega (as linhas do banco já com nomes) ─────────────────────────────────
@@ -118,6 +124,8 @@ export interface CobrancaCrua {
   saldo: number;
   os_numero: string | null;
   barco: string | null;
+  /** vessels.asset_type da unidade da OS ("Motorhome", "Lancha"); null/ausente = sem tipo */
+  tipo_unidade?: string | null;
 }
 
 export interface ConversaCrua {
@@ -143,6 +151,8 @@ export interface OrcamentoCru {
   client_id: string | null;
   cliente: string | null;
   barco: string | null;
+  /** vessels.asset_type ("Motorhome", "Lancha"); null/ausente = sem tipo */
+  tipo_unidade?: string | null;
   criado_em: string;
   mexido_em: string;
   /** o último dia da validade (ultimoDiaDaValidade); null = não vence (aguardando sinal) ou sem data */
@@ -164,6 +174,8 @@ export interface OsCrua {
   client_id: string | null;
   cliente: string | null;
   barco: string | null;
+  /** vessels.asset_type ("Motorhome", "Lancha"); null/ausente = sem tipo */
+  tipo_unidade?: string | null;
   mexido_em: string;
   agendada_em: string | null;
   /** soma dos sinais pagos */
@@ -188,6 +200,22 @@ const ATIVAS = new Set(["approved", "scheduled", "in_progress", "awaiting_parts"
 function onde(...partes: Array<string | null | undefined>): string {
   const p = partes.map((x) => umaLinha(x, 24)).filter(Boolean);
   return p.length ? ` (${p.join(", ")})` : "";
+}
+
+/**
+ * O fato da unidade no *detalhe*: o tipo como rótulo ("Motorhome: Overland Vegini", "Trailer: Darlan"); sem
+ * tipo, ou com o nome igual ao tipo, o termo geral ("Embarcação ou veículo: Motorhome"). Sem unidade, o valor
+ * vem null e o fato some.
+ */
+function fatoDaUnidade(nome: string | null, tipo: string | null | undefined): [string, string | null] {
+  if (!nome) return [TERMO_GERAL, null];
+  const { rotulo, valor } = campoDaUnidade({ name: nome, asset_type: tipo }, { comIdentificacao: false, comModelo: false });
+  return [rotulo, valor ? umaLinha(valor, 60) : null];
+}
+
+/** A unidade numa linha, com o tipo ("Motorhome Overland Vegini"); null = sem unidade. */
+function unidadeEmUmaLinha(nome: string | null, tipo: string | null | undefined): string | null {
+  return nome ? umaLinha(nomeDaUnidade({ name: nome, asset_type: tipo }), 60) : null;
 }
 
 function diasTexto(n: number): string {
@@ -290,12 +318,13 @@ export function candidatoDeCobranca(c: CobrancaCrua, hoje: string): Candidato {
       ` (saldo de ${brl(c.saldo)}, venceu em ${dataBR(c.vencimento)}). Mostre o texto pronto e peça o meu sim antes de enviar.`,
     fatos: ([
       ["Cliente", c.cliente ? umaLinha(c.cliente, 60) : null],
-      [TERMO_GERAL, c.barco ? umaLinha(c.barco, 60) : null],
+      fatoDaUnidade(c.barco, c.tipo_unidade),
       ["OS", c.os_numero],
       ["Cobrança", c.descricao ? umaLinha(c.descricao, 80) : null],
       ["Saldo", brl(c.saldo)],
       ["Venceu em", `${dataBR(c.vencimento)} (${diasTexto(dias)})`],
     ] as Array<[string, string | null]>).filter((f): f is [string, string] => !!f[1]),
+    unidade: unidadeEmUmaLinha(c.barco, c.tipo_unidade),
   };
 }
 
@@ -515,7 +544,7 @@ export function candidatoDeOrcamento(q: OrcamentoCru, hoje: string): Candidato |
     fatos: ([
       ["Orçamento", q.numero],
       ["Cliente", q.cliente ? umaLinha(q.cliente, 60) : null],
-      [TERMO_GERAL, q.barco ? umaLinha(q.barco, 60) : null],
+      fatoDaUnidade(q.barco, q.tipo_unidade),
       ["Valor", brl(q.valor)],
       ["Situação", rotuloDoStatus(q.quote_status)],
       ["Mandado pelo WhatsApp em", q.enviado_em ? `${dataBR(diaBR(new Date(q.enviado_em)))} (no sistema ainda está como rascunho)` : null],
@@ -524,6 +553,7 @@ export function candidatoDeOrcamento(q: OrcamentoCru, hoje: string): Candidato |
       ["Última mudança", `${dataBR(mexido)} (${diasTexto(parado)})`],
       ["Validade", fim ? dataBR(fim) : null],
     ] as Array<[string, string | null]>).filter((f): f is [string, string] => !!f[1]),
+    unidade: unidadeEmUmaLinha(q.barco, q.tipo_unidade),
   };
 }
 
@@ -543,11 +573,12 @@ export function candidatoDeOs(o: OsCrua, hoje: string): Candidato | null {
     valor: o.valor,
     todoDia: false,
     comandoAlternativo: "espera" as "espera" | "feito",
+    unidade: unidadeEmUmaLinha(o.barco, o.tipo_unidade),
   };
   const fatosBase: Array<[string, string]> = ([
     ["OS", o.numero],
     ["Cliente", o.cliente ? umaLinha(o.cliente, 60) : null],
-    [TERMO_GERAL, o.barco ? umaLinha(o.barco, 60) : null],
+    fatoDaUnidade(o.barco, o.tipo_unidade),
     ["Valor", brl(o.valor)],
   ] as Array<[string, string | null]>).filter((f): f is [string, string] => !!f[1]);
 

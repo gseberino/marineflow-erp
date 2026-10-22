@@ -304,3 +304,39 @@ Deno.test("16/10 (manhã-sombra real): o fornecedor Jaison, que fechou com 'Perf
   // também o tiraria: soAgradecimentoDesdeAResposta)
   assertEquals([c.tipo, c.elegivel, c.perdeHoje], ["contato_sem_cadastro", false, false]);
 });
+
+// Decisão 6 do dono (22/10/2026): o *detalhe* mostra o tipo ("Motorhome: Overland Vegini"), não "Embarcação ou
+// veículo". Título, curto e ordem dos fatos não mudam.
+Deno.test("fato da unidade: o tipo como rótulo; sem tipo (ou nome igual ao tipo), o termo geral", () => {
+  const unidade = (fatos: Array<[string, string]>) => fatos.find(([r]) => !["Cliente", "OS", "Orçamento", "Valor", "Cobrança", "Saldo", "Venceu em"].includes(r));
+
+  const joao = candidatoDeCobranca(cob({ cliente: "João Luiz Hang", os_numero: "OS-00051", barco: "Overland Vegini", tipo_unidade: "Motorhome" }), HOJE);
+  assertEquals(joao.fatos.slice(0, 3), [["Cliente", "João Luiz Hang"], ["Motorhome", "Overland Vegini"], ["OS", "OS-00051"]]);
+  assertEquals(joao.unidade, "Motorhome Overland Vegini");
+  // o título continua só com o nome (sem mudar a manhã)
+  assertStringIncludes(joao.titulo, "*João Luiz Hang* (Overland Vegini, OS-00051)");
+
+  const semTipo = candidatoDeCobranca(cob({}), HOJE);
+  assertEquals(unidade(semTipo.fatos), ["Embarcação ou veículo", "Aria"]);
+  assertEquals(semTipo.unidade, "Aria");
+
+  // 11 cadastros chamados só "Motorhome": nunca "Motorhome: Motorhome"
+  const soTipo = candidatoDeOrcamento(orc({ barco: "Motorhome", tipo_unidade: "Motorhome" }), HOJE)!;
+  assertEquals(unidade(soTipo.fatos), ["Embarcação ou veículo", "Motorhome"]);
+  assertEquals(soTipo.unidade, "Motorhome");
+
+  // "Trailer Darlan" do tipo Trailer: o tipo não sai duas vezes
+  const darlan = candidatoDeOrcamento(orc({ numero: "ORÇ-00118", barco: "Trailer Darlan", tipo_unidade: "Trailer" }), HOJE)!;
+  assertEquals(darlan.fatos.slice(0, 4), [["Orçamento", "ORÇ-00118"], ["Cliente", "EVERTON CARLOS PINHEIRO"], ["Trailer", "Darlan"], ["Valor", "R$ 120.020,00"]]);
+  assertEquals(darlan.unidade, "Trailer Darlan");
+  assertEquals(darlan.titulo, "*ORÇ-00118* (EVERTON CARLOS PINHEIRO, Trailer Darlan), R$ 120.020,00: montado em 13/10 e não enviado.");
+
+  const lancha = candidatoDeOs(os({ barco: "Itapoã", tipo_unidade: "Lancha" }), HOJE)!;
+  assertEquals(lancha.fatos.slice(0, 4), [["OS", "OS-00104"], ["Cliente", "Flávio da Igreja"], ["Lancha", "Itapoã"], ["Valor", "R$ 2.760,00"]]);
+  assertEquals(lancha.unidade, "Lancha Itapoã");
+
+  // sem unidade: nenhum fato da unidade, e a unidade fica null
+  const sem = candidatoDeOs(os({ barco: null, tipo_unidade: "Lancha" }), HOJE)!;
+  assertEquals(sem.fatos.slice(0, 3), [["OS", "OS-00104"], ["Cliente", "Flávio da Igreja"], ["Valor", "R$ 2.760,00"]]);
+  assertEquals(sem.unidade, null);
+});

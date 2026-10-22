@@ -16,7 +16,7 @@ import {
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
-import { nomeDaUnidade, unidadeNaFrase } from "../_shared/unidade.ts";
+import { nomeDaUnidade, suaUnidade } from "../_shared/unidade.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
@@ -330,7 +330,7 @@ async function runPostServiceSurvey(db: Db, settings: Record<string, string>) {
     if (dup && dup.length > 0) continue;
     await db.from("whatsapp_send_queue").insert({
       phone_normalized: testMode ? testNumber : phone,
-      message: `Olá${o.clients?.name ? `, ${o.clients.name}` : ""}! O serviço${o.vessels?.name ? ` ${unidadeNaFrase(o.vessels, "em")}` : ""} foi concluído. ` +
+      message: `Olá${o.clients?.name ? `, ${o.clients.name}` : ""}! O serviço${o.vessels?.name ? ` ${suaUnidade(o.vessels, "em", { comNome: true })}` : ""} foi concluído. ` +
         `Como foi sua experiência, de 0 a 10? Sua resposta nos ajuda muito — e qualquer ajuste, é só falar por aqui. — HBR Marine`,
       source: "agenda-r13",
       source_ref_id: o.id,

@@ -1,4 +1,5 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
+import { TIPOS_DE_UNIDADE } from "../../unidade.ts";
 
 /**
  * Quem edita o catálogo de serviços (preço e campos fiscais da NFS-e) e o cadastro de fornecedor
@@ -95,7 +96,7 @@ export const registryCrudTools: ToolDef[] = [
   {
     name: "update_vessel",
     description:
-      "Atualiza um ativo (embarcação/motorhome): nome, fabricante, modelo, ano, marina, e principalmente os EQUIPAMENTOS (motor, banco de baterias, inversor/carregador, eletrônica) — que é o que permite sugerir manutenção concreta depois. Use para corrigir dados ou registrar o que foi identificado no ativo.",
+      "Atualiza um ativo (embarcação, veículo ou equipamento): nome, fabricante, modelo, ano, marina, e principalmente os EQUIPAMENTOS (motor, banco de baterias, inversor/carregador, eletrônica) — que é o que permite sugerir manutenção concreta depois. Use para corrigir dados ou registrar o que foi identificado no ativo.",
     input_schema: {
       type: "object",
       properties: {
@@ -104,7 +105,11 @@ export const registryCrudTools: ToolDef[] = [
         manufacturer: { type: "string" },
         model: { type: "string" },
         year: { type: "number" },
-        asset_type: { type: "string", description: "Tipo (embarcação, motorhome...)." },
+        asset_type: {
+          type: "string",
+          // A lista do cadastro (dono, 22/10/2026): "Jet Ski" saiu (é marca), entrou "Moto aquática".
+          description: `Tipo, um destes: ${TIPOS_DE_UNIDADE.flatMap((g) => g.tipos.map((t) => t.valor)).join(", ")}.`,
+        },
         marina_id: { type: "string" },
         hull_id_or_registration: { type: "string", description: "Chassi/registro/placa." },
         engine_brand: { type: "string" },

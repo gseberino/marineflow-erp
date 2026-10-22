@@ -2,6 +2,7 @@
 // pendente, quando houver. É o momento recomendado para avisar/cobrar (job completion notification).
 // O usuário revisa e decide enviar (opt-in) no CompletionSendDialog.
 import { format, parseISO, isValid } from 'date-fns';
+import { emojiDaUnidade } from '@/lib/unidade';
 
 const brl = (v: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
@@ -29,23 +30,28 @@ export interface CompletionMessageInput {
    * copia-e-cola / link dinâmico daquele saldo (mesmo ponto de injeção, sem mudar o resto).
    */
   pixKey?: string | null;
+  /** vessels.asset_type: o emoji vem do tipo (🛥️ barco, 🚐 veículo; nada no resto) — nunca lancha para motorhome. */
+  assetType?: string | null;
 }
 
 /** Monta a mensagem padrão de conclusão. Com saldo em aberto, inclui valor, vencimento e (se houver) Pix. */
-export function buildCompletionMessage({ clientName, osNumber, balance, dueDate, pixKey }: CompletionMessageInput): string {
+export function buildCompletionMessage({ clientName, osNumber, balance, dueDate, pixKey, assetType }: CompletionMessageInput): string {
   const nome = firstName(clientName);
+  // Era 🚤 fixo para todos (22/10/2026: motorhome recebia lancha).
+  const emoji = emojiDaUnidade(assetType);
+  const ola = `Olá ${nome}!${emoji ? ` ${emoji}` : ''}\n\n`;
   const saldo = Number(balance || 0);
   if (saldo > 0.009) {
     const pixLine = pixKey && pixKey.trim() ? `\n\n💠 Para pagar por Pix, use a chave: *${pixKey.trim()}*` : '';
     return (
-      `Olá ${nome}! 🚤\n\n` +
+      ola +
       `Concluímos o serviço da ${osNumber}. Ficou um saldo de *${brl(saldo)}*${duePhrase(dueDate)}.` +
       pixLine +
       `\n\nQualquer dúvida sobre o pagamento ou o serviço, estamos à disposição. Obrigado pela confiança!`
     );
   }
   return (
-    `Olá ${nome}! 🚤\n\n` +
+    ola +
     `Concluímos o serviço da ${osNumber} e está tudo certo/quitado.\n\n` +
     `Obrigado pela confiança — qualquer coisa, é só chamar!`
   );

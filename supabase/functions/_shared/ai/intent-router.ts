@@ -21,7 +21,8 @@ const SINAIS: Record<Dominio, RegExp> = {
   fiscal: /nota fiscal|nf-?e|nfs-?e|sefaz|danfe|emitir nota|espelho|fiscal|imposto/,
   comunicacao: /whatsapp|mensagem|enviar|mandar|responder|follow-?up|lembrete|avisar|inbox|caixa de entrada/,
   crm: /manuten|revis|plano|reativ|cliente sumido|parado h|oportunidade|prospec/,
-  campo: /cheguei|comecei|terminei|check-?in|check-?out|estou no|no barco|foto do servi/,
+  // "no motorhome", "no trailer"… (22/10/2026): o técnico também atende veículo, não só barco.
+  campo: /cheguei|comecei|terminei|check-?in|check-?out|estou n[oa]\b|\bn[oa] (barco|lancha|veleiro|motorhome|trailer|camper|veiculo|embarcacao)\b|foto do servi/,
 };
 
 /** Domínios detectados na mensagem (pode ser vazio). */

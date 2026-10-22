@@ -1,7 +1,8 @@
 // Ferramentas do assistente sobre o Dropbox (Fase 5, 08/10/2026 — plans/marineflow-dropbox-fase2.md).
 //
-//   buscar_arquivos_do_barco   — lista o que está nas pastas do barco (índice arquivos_dropbox);
-//   consultar_pasta_do_barco   — a pasta do barco: número, link e o que tem em cada subpasta;
+//   buscar_arquivos_do_barco   — lista o que está nas pastas da unidade (índice arquivos_dropbox);
+//   consultar_pasta_do_barco   — a pasta da unidade: número, link e o que tem em cada subpasta;
+// (Os nomes "_do_barco" ficaram de 08/10/2026; a pasta existe para motorhome, trailer etc. também.)
 //   enviar_arquivo_do_dropbox  — manda um PDF do Dropbox para o WhatsApp de QUEM PEDIU.
 //
 // As duas consultas leem só o índice no banco (nada de chamar o Dropbox): rápidas, e o nome
@@ -19,6 +20,7 @@ import { BUCKET_DO_PDF, VALIDADE_DA_URL_S } from "../../pdf/gerar-e-guardar.ts";
 import { abrirDropbox, ErroDropbox } from "../../dropbox/cliente.ts";
 import { linkNoSite } from "../../dropbox/nucleo.ts";
 import { type Candidato, chaveDeNome, escolherBarco } from "../dropbox-busca.ts";
+import { unidadeNaFrase } from "../../unidade.ts";
 
 const SO_ADMIN = ["admin"] as const;
 const CONTEXTO = "agente_arquivo_dropbox";
@@ -34,20 +36,21 @@ function soAdmin(ctx: ToolCtx) {
   return null;
 }
 
-/** O barco a partir do texto (nome do barco ou do dono) ou do id. */
+/** A unidade (barco, motorhome…) a partir do texto (o nome dela ou do dono) ou do id. */
 async function acharBarco(admin: Admin, termo: string): Promise<{ ok: true; barco: Candidato } | { error: string; opcoes?: unknown }> {
   const t = (termo ?? "").trim();
-  if (!t) return { error: "Diga de qual barco (nome do barco ou do dono)." };
-  const { data, error } = await admin.from("vessels").select("id, name, clients(name)").eq("active", true);
-  if (error) return { error: `Falha ao ler os barcos: ${error.message}` };
-  const candidatos: Candidato[] = (data ?? []).map((v: { id: string; name: string; clients: { name: string } | null }) => ({
+  if (!t) return { error: "Diga qual embarcação ou veículo (o nome dele ou do dono)." };
+  const { data, error } = await admin.from("vessels").select("id, name, asset_type, clients(name)").eq("active", true);
+  if (error) return { error: `Falha ao ler as embarcações e veículos: ${error.message}` };
+  const candidatos: Candidato[] = (data ?? []).map((v: { id: string; name: string; asset_type?: string | null; clients: { name: string } | null }) => ({
     id: v.id,
     nome: v.name,
     cliente: v.clients?.name ?? null,
+    tipo: v.asset_type ?? null,
   }));
   if (/^[0-9a-f-]{36}$/i.test(t)) {
     const c = candidatos.find((x) => x.id === t);
-    return c ? { ok: true, barco: c } : { error: "Esse barco não existe (ou está inativo)." };
+    return c ? { ok: true, barco: c } : { error: "Não há embarcação ou veículo ativo com esse id." };
   }
   const e = escolherBarco(t, candidatos);
   if (e.ok) return { ok: true, barco: e.barco };
@@ -55,6 +58,12 @@ async function acharBarco(admin: Admin, termo: string): Promise<{ ok: true; barc
 }
 
 type Pasta = { id: string; caminho: string; codigo_projeto: string | null; situacao: string };
+
+/** "A lancha Donna V ainda não tem pasta…", "O motorhome Iveco Daily ainda não tem pasta…". */
+function semPasta(c: Candidato): string {
+  const quem = unidadeNaFrase({ name: c.nome, asset_type: c.tipo });
+  return `${quem.charAt(0).toUpperCase()}${quem.slice(1)} ainda não tem pasta no Dropbox (ela nasce no primeiro orçamento ou OS).`;
+}
 
 async function pastasDoBarco(admin: Admin, vesselId: string): Promise<Pasta[]> {
   const { data, error } = await admin.from("pastas_dropbox")
@@ -79,11 +88,11 @@ export const dropboxTools: ToolDef[] = [
   {
     name: "buscar_arquivos_do_barco",
     description:
-      "Lista os arquivos que estão nas pastas do Dropbox de um barco (orçamentos, propostas, desenhos DWG, diagramas, fotos, planilhas). Use para 'tem desenho do painel do Madu I?', 'quais arquivos do Donna V', 'o último orçamento do barco do Acrisio no Dropbox'. Aceita o nome do barco ou do dono. Filtra por texto no nome/subpasta e por extensão. Devolve o id de cada arquivo para enviar_arquivo_do_dropbox.",
+      "Lista os arquivos que estão nas pastas do Dropbox de uma embarcação ou veículo (lancha, motorhome, trailer…): orçamentos, propostas, desenhos DWG, diagramas, fotos, planilhas. Use para 'tem desenho do painel do Madu I?', 'quais arquivos do Donna V', 'o último orçamento do barco do Acrisio no Dropbox', 'a proposta do motorhome do Rodrigo'. Aceita o nome da unidade ou do dono. Filtra por texto no nome/subpasta e por extensão. Devolve o id de cada arquivo para enviar_arquivo_do_dropbox.",
     input_schema: {
       type: "object",
       properties: {
-        barco: { type: "string", description: "Nome do barco ou do dono (ou o id do barco)." },
+        barco: { type: "string", description: "Nome da embarcação ou veículo, ou do dono (ou o id dele)." },
         busca: { type: "string", description: "Texto no nome do arquivo ou da subpasta (ex.: 'painel', 'orçamento', 'DWG')." },
         extensao: { type: "string", description: "Só esta extensão (pdf, dwg, jpg, xlsx...)." },
         limite: { type: "number", description: "Máximo de arquivos (padrão 15, máximo 50)." },
@@ -100,7 +109,7 @@ export const dropboxTools: ToolDef[] = [
       const { barco } = achado;
       const pastas = await pastasDoBarco(ctx.admin, barco.id);
       if (!pastas.length) {
-        return { barco: barco.nome, dono: barco.cliente, arquivos: [], aviso: "Esse barco ainda não tem pasta no Dropbox (ela nasce no primeiro orçamento ou OS)." };
+        return { barco: barco.nome, tipo: barco.tipo ?? null, dono: barco.cliente, arquivos: [], aviso: semPasta(barco) };
       }
       const base = new Map(pastas.map((p) => [p.id, p.caminho]));
       const limite = Math.min(Math.max(Number(args.limite) || 15, 1), 50);
@@ -127,6 +136,7 @@ export const dropboxTools: ToolDef[] = [
       const achados = busca ? todos.filter((a: Linha) => chaveDeNome(`${a.nome} ${a.subpasta}`).includes(busca)) : todos;
       return {
         barco: barco.nome,
+        tipo: barco.tipo ?? null,
         dono: barco.cliente,
         total: achados.length,
         arquivos: achados.slice(0, limite),
@@ -138,10 +148,10 @@ export const dropboxTools: ToolDef[] = [
   {
     name: "consultar_pasta_do_barco",
     description:
-      "A pasta do barco no Dropbox: o número do projeto (0016.013.25), o link para abrir (só abre logado na conta da HBR) e quantos arquivos há em cada subpasta, com os mais recentes. Use para 'qual a pasta do Donna V', 'me manda o link da pasta do Madu I', 'o que tem na pasta do barco do Ribas'.",
+      "A pasta da embarcação ou veículo no Dropbox: o número do projeto (0016.013.25), o link para abrir (só abre logado na conta da HBR) e quantos arquivos há em cada subpasta, com os mais recentes. Use para 'qual a pasta do Donna V', 'me manda o link da pasta do Madu I', 'o que tem na pasta do barco do Ribas', 'a pasta do motorhome do Rodrigo'.",
     input_schema: {
       type: "object",
-      properties: { barco: { type: "string", description: "Nome do barco ou do dono (ou o id do barco)." } },
+      properties: { barco: { type: "string", description: "Nome da embarcação ou veículo, ou do dono (ou o id dele)." } },
       required: ["barco"],
     },
     risk: "low",
@@ -154,7 +164,7 @@ export const dropboxTools: ToolDef[] = [
       const { barco } = achado;
       const pastas = await pastasDoBarco(ctx.admin, barco.id);
       if (!pastas.length) {
-        return { barco: barco.nome, dono: barco.cliente, pasta: null, aviso: "Esse barco ainda não tem pasta no Dropbox (ela nasce no primeiro orçamento ou OS)." };
+        return { barco: barco.nome, tipo: barco.tipo ?? null, dono: barco.cliente, pasta: null, aviso: semPasta(barco) };
       }
       const principal = pastas.filter((p) => p.situacao === "vinculada")
         .sort((a, b) => (b.codigo_projeto ?? "").localeCompare(a.codigo_projeto ?? ""))[0] ?? pastas[0];
@@ -172,6 +182,7 @@ export const dropboxTools: ToolDef[] = [
       }
       return {
         barco: barco.nome,
+        tipo: barco.tipo ?? null,
         dono: barco.cliente,
         numero_do_projeto: principal.codigo_projeto,
         caminho: principal.caminho,

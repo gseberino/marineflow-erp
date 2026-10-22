@@ -3,25 +3,38 @@
    onde está) e o "Editar" do cadastro, sem sair da OS (20/10/2026). Desde 21/10 cada dado tem o
    rótulo em cima (pedido do dono): "2019 · 40 pés" sozinho não dizia o que era cada número. */
 import { useState } from 'react';
-import { Pencil } from 'lucide-react';
+import { Caravan, Pencil, Ship, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
 import { Dado, DadosDaFicha } from '@/components/DadosDaFicha';
-import { rotuloDaIdentificacao, rotuloDaUnidade, unidadeNaFrase } from '@/lib/unidade';
+import { camposDoTipo, comprimentoDoTipo, grupoDoTipo, rotuloDaIdentificacao, rotuloDaUnidade, unidadeNaFrase } from '@/lib/unidade';
 import type { Vessel } from '@/hooks/use-vessels';
 
 type VesselDaLista = Vessel & { marinas?: { name?: string | null } | null };
 
+/** Ícone pelo grupo do tipo: barco (ou sem tipo) é o navio; veículo, o motorhome; equipamento de
+    bancada, a chave. Usado também no cadastro, na lista e na ficha do cliente (22/10/2026). */
+export function IconeDaUnidade({ tipo, className }: { tipo?: string | null; className?: string }) {
+  const Icone = (tipo ?? '').trim().toLowerCase() === 'equipamento' ? Wrench
+    : grupoDoTipo(tipo) === 'veiculo' ? Caravan : Ship;
+  return <Icone className={className} aria-hidden />;
+}
+
 export function FichaDaEmbarcacao({ embarcacao: v }: { embarcacao: VesselDaLista }) {
   const [editando, setEditando] = useState(false);
 
+  // Só os campos do tipo (dono, 22/10/2026): motorhome sem vaga de píer e com metros; equipamento
+  // sem comprimento nem motores. O que está gravado continua no cadastro, só não aparece aqui.
+  const campos = camposDoTipo(v.asset_type);
   const modelo = [v.manufacturer, v.model].filter(Boolean).join(' ');
-  const motores = [v.engine_brand, v.engine_model].filter(Boolean).join(' ');
+  const comprimento = comprimentoDoTipo(v.length_feet, v.asset_type);
+  const motores = campos.motores ? [v.engine_brand, v.engine_model].filter(Boolean).join(' ') : '';
   const motor = motores ? `${v.engine_quantity && v.engine_quantity > 1 ? `${v.engine_quantity}× ` : ''}${motores}` : null;
   const marina = v.marinas?.name || v.current_marina_name_snapshot;
   // "Onde fica", não "Marina": não confundir com o campo Marina da OS, que pode ser outro lugar.
-  const onde = [marina, v.current_dock_position ? `vaga ${v.current_dock_position}` : null].filter(Boolean).join(' · ');
-  const vazio = !modelo && !v.year && !v.length_feet && !v.hull_id_or_registration && !motor && !onde;
+  const vaga = campos.nauticos && v.current_dock_position ? `vaga ${v.current_dock_position}` : null;
+  const onde = [marina, vaga].filter(Boolean).join(' · ');
+  const vazio = !modelo && !v.year && !comprimento && !v.hull_id_or_registration && !motor && !onde;
 
   return (
     <div role="group" aria-label="Dados da embarcação ou veículo" className="space-y-2.5 rounded-lg border bg-muted/30 p-3 text-sm">
@@ -31,7 +44,10 @@ export function FichaDaEmbarcacao({ embarcacao: v }: { embarcacao: VesselDaLista
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="break-words font-semibold leading-tight">{v.name}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{rotuloDaUnidade(v.asset_type)}</p>
+          <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+            <IconeDaUnidade tipo={v.asset_type} className="h-3.5 w-3.5 shrink-0" />
+            {rotuloDaUnidade(v.asset_type)}
+          </p>
         </div>
         <Button
           type="button" variant="outline" size="sm" className="h-11 shrink-0 gap-1 px-2.5 sm:h-8"
@@ -50,7 +66,8 @@ export function FichaDaEmbarcacao({ embarcacao: v }: { embarcacao: VesselDaLista
         <DadosDaFicha className="grid-cols-2">
           {modelo && <Dado rotulo="Fabricante e modelo">{modelo}</Dado>}
           {v.year ? <Dado rotulo="Ano">{String(v.year)}</Dado> : null}
-          {v.length_feet ? <Dado rotulo="Comprimento">{`${v.length_feet} pés`}</Dado> : null}
+          {/* "40 pés" no barco, "12,2 m" no veículo (o banco guarda pés). */}
+          {comprimento ? <Dado rotulo="Comprimento">{comprimento}</Dado> : null}
           {/* Placa (motorhome, trailer, camper), inscrição (barco) ou nº de série (equipamento). */}
           {v.hull_id_or_registration && <Dado rotulo={rotuloDaIdentificacao(v.asset_type)}>{v.hull_id_or_registration}</Dado>}
           {motor && <Dado rotulo="Motores">{motor}</Dado>}

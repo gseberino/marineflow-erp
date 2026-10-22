@@ -62,7 +62,7 @@ export function RevisoesPreventivas() {
                     {!r.opt_out && !r.client_phone && <p className="text-xs text-destructive">Cliente sem telefone no cadastro.</p>}
                     <Button className="w-full" disabled={bloqueado}
                       onClick={() => setLembrete({
-                        planId: r.plan_id, rotulo: `${r.name} — ${embarcacao}`, plano: r.name, embarcacao,
+                        planId: r.plan_id, rotulo: `${r.name} — ${embarcacao}`, plano: r.name, embarcacao, tipo: r.vessel_asset_type,
                         cliente: r.client_name, vesselId: r.vessel_id, optOut: r.opt_out, semTelefone: !r.client_phone,
                       })}>
                       <MessageCircle className="h-4 w-4 mr-2" /> Preparar lembrete (com seu sim)

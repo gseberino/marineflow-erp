@@ -191,6 +191,8 @@ Deno.test("criar: embarcação pelo nome, critério pelo nome do plano e último
   assertEquals(criado.created_by, "dono-1");
   assertEquals(criado.client_reminder_enabled, true);
   assertStringIncludes(r.message, "OS-00112");
+  // A unidade pelo tipo (22/10/2026): "para a lancha Mar Azul", não "para a Mar Azul" (motorhome saía "a Iveco Daily").
+  assertStringIncludes(r.message, 'Plano "Revisão das baterias" criado para a lancha Mar Azul, a cada 12 meses.');
 });
 
 Deno.test("criar: nome parecido pergunta, plano repetido recusa, leitura que falha diz que falhou", async () => {
@@ -200,7 +202,15 @@ Deno.test("criar: nome parecido pergunta, plano repetido recusa, leitura que fal
   assertEquals(ambiguo.opcoes.sort(), ["Mar Azul", "Mar Bravo"]);
   const repetido = await tool("create_maintenance_plan").execute({ embarcacao: "Mar Azul", nome: "revisão das baterias", intervalo_meses: 12 }, ctxCom(db)) as Linha;
   assertStringIncludes(repetido.error, "já tem o plano");
+  assertStringIncludes(repetido.error, "A lancha Mar Azul já tem o plano");
   assertEquals(db.gravacoes.length, 0);
+  // Motorhome: o artigo e o tipo certos; nada encontrado diz "embarcação ou veículo".
+  const daily = { ...MAR_AZUL, id: "22222222-2222-4222-8222-222222222222", name: "Iveco Daily", asset_type: "Motorhome" };
+  const db2 = bancoFalso({ vessels: [daily], maintenance_plans: [plano({ vessel_id: daily.id })] });
+  const mh = await tool("create_maintenance_plan").execute({ embarcacao: "Iveco Daily", nome: "revisão das baterias", intervalo_meses: 12 }, ctxCom(db2)) as Linha;
+  assertStringIncludes(mh.error, "O motorhome Iveco Daily já tem o plano");
+  const nada = await tool("create_maintenance_plan").execute({ embarcacao: "Titanic", nome: "X", intervalo_meses: 12 }, ctxCom(db2)) as Linha;
+  assertEquals(nada.error, 'Não achei embarcação ou veículo chamado "Titanic".');
   const quebrado = bancoFalso({ vessels: [MAR_AZUL] }, { falhas: { "select:vessels": "conexão perdida" } });
   const e = await tool("create_maintenance_plan").execute({ embarcacao: "Mar Azul", nome: "X", intervalo_meses: 12 }, ctxCom(quebrado)) as Linha;
   assertStringIncludes(e.error, "conexão perdida");
@@ -262,7 +272,7 @@ Deno.test("lembrete agora: o retrato guarda o texto que o dono viu, e é ELE que
   const retrato = await t.retratoDaPendencia!({ embarcacao: "Mar Azul" }, ctxCom(db)) as Linha;
   assertEquals(retrato.planos, [PLANO_ID]);
   assertEquals(retrato.toque, 1);
-  assertStringIncludes(retrato.texto, "Oi, Carlos! Aqui é da HBR Marine. A revisão das baterias da lancha Mar Azul vence dia");
+  assertStringIncludes(retrato.texto, "Oi, Carlos! Aqui é da HBR Marine. A revisão das baterias da sua lancha Mar Azul vence dia");
   assertStringIncludes(retrato.texto, "responda PARAR.");
   const resumo = await resumirLembreteDeRevisao(db, "send_maintenance_reminder_now", { embarcacao: "Mar Azul" });
   // A unidade pelo tipo (decisão 9, 21/10/2026), não "Embarcação:" para tudo.
@@ -397,7 +407,7 @@ Deno.test("rodada: o toque devido vira proposta com o texto pronto; opt-out vira
   assertEquals(r.propostas[0].titulo, "Lembrete de revisão para Carlos Souza (Lancha Mar Azul)");
   assertEquals(r.propostas[0].telefone, "5547999159654");
   assertStringIncludes(r.propostas[0].texto, "Oi, Carlos!");
-  assertStringIncludes(r.propostas[0].texto, "A revisão das baterias da lancha Mar Azul vence dia");
+  assertStringIncludes(r.propostas[0].texto, "A revisão das baterias da sua lancha Mar Azul vence dia");
   assertEquals(r.pulados.map((p) => [p.plano.plan_id, p.motivo]), [["p-opt", "opt_out"]]);
   // A pergunta ao dono: para quem, o número inteiro, o texto exato, e como responder.
   const pergunta = perguntaAoDono(r.propostas[0], false, 2);
@@ -442,7 +452,7 @@ Deno.test("campanha: atendido, sem plano na temporada, sem OS aberta, não tocad
   assertEquals(r[0].planos, []);
   assertEquals(r[0].vessel_id, "v-ok");
   // A unidade pelo tipo (decisão 9, 21/10/2026): "do motorhome …", não "da …" para tudo.
-  assertStringIncludes(r[0].texto, "parte elétrica do motorhome Unidade ok conferida ainda em outubro");
+  assertStringIncludes(r[0].texto, "parte elétrica do seu motorhome Unidade ok conferida ainda em outubro");
   assertEquals(r[0].titulo, "Campanha de temporada para Cliente ok (Motorhome Unidade ok)");
   assertEquals(eventosDaProposta(r[0], "pend-9")[0].tipo, "campaign_proposed");
   assertEquals(await proporCampanha(bancoFalso(tabelas()), "2026-11-03", planos), []);

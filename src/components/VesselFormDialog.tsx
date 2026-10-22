@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EntityCombobox } from '@/components/EntityCombobox';
 import { useCreateVessel, useUpdateVessel } from '@/hooks/use-vessels';
 import { useClients } from '@/hooks/use-clients';
@@ -17,7 +17,9 @@ import { Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Tables, TablesInsert } from '@/integrations/supabase/types';
 import { maskPhone } from '@/lib/masks';
-import { rotuloDaIdentificacao, unidadeNaFrase } from '@/lib/unidade';
+import {
+  TIPOS_DE_UNIDADE, camposDoTipo, metrosParaPes, pesParaMetros, rotuloDaIdentificacao, tipoDoSeletor, unidadeNaFrase,
+} from '@/lib/unidade';
 
 type Vessel = Tables<'vessels'>;
 
@@ -63,6 +65,9 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
   const { data: clients } = useClients();
   const { data: marinas } = useMarinas();
   const [form, setForm] = useState<TablesInsert<'vessels'>>(empty);
+  // Comprimento em metros (veículo) como foi digitado. null = ninguém mexeu: mostra o que está
+  // gravado em pés, convertido, e o length_feet segue o mesmo — abrir e salvar não regrava a medida.
+  const [metrosDigitados, setMetrosDigitados] = useState<string | null>(null);
   const isEdit = !!vessel;
 
   useEffect(() => {
@@ -90,20 +95,40 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
         current_dock_position: vessel.current_dock_position ?? '',
         marina_id: vessel.marina_id ?? undefined,
         active: vessel.active,
-        asset_type: vessel.asset_type ?? '',
+        // O valor do seletor: "Jet Ski" antigo aparece como "Moto aquática" (e grava assim se salvar);
+        // "Outro" sem grupo fica vazio, para escolher (decisão do dono, 22/10/2026).
+        asset_type: tipoDoSeletor(vessel.asset_type),
         access_notes: vessel.access_notes ?? '',
       });
     } else {
       setForm({ ...empty, client_id: initialClientId || '' });
     }
+    setMetrosDigitados(null);
   }, [vessel, open, initialClientId]);
 
   const set = (key: string, value: any) => setForm(prev => ({ ...prev, [key]: value }));
 
+  // Os campos pelo tipo escolhido (dono, 22/10/2026: "ajustar conforme cada tipo"). Os que somem
+  // só deixam de aparecer: o que já está gravado neles volta igual ao salvar.
+  const campos = camposDoTipo(form.asset_type);
+  // Tipo gravado que a lista não tem: vira opção, senão o campo aparece vazio. Sai do cadastro (e
+  // não do formulário) para a opção já existir quando o valor chega — o select escondido do Radix
+  // devolve '' para valor sem opção, e isso apagava o tipo ao abrir.
+  const tipoGravado = tipoDoSeletor(vessel?.asset_type);
+  const tipoForaDaLista = tipoGravado && !TIPOS_DE_UNIDADE.some(g => g.tipos.some(x => x.valor === tipoGravado)) ? tipoGravado : null;
+  const pesGravados = form.length_feet == null ? NaN : Number(form.length_feet);
+  const comprimentoEmMetros = metrosDigitados ?? (Number.isFinite(pesGravados) ? String(pesParaMetros(pesGravados)) : '');
+  const mudarMetros = (texto: string) => {
+    setMetrosDigitados(texto);
+    const n = Number(texto.replace(',', '.'));
+    // null, não undefined: undefined some do PATCH e a medida antiga ficava no banco.
+    set('length_feet', texto.trim() && Number.isFinite(n) ? metrosParaPes(n) : null);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.asset_type) {
-      toast.error('Escolha o tipo da unidade (lancha, motorhome, camper…).');
+      toast.error('Escolha o tipo (lancha, motorhome, trailer…).');
       return;
     }
     try {
@@ -145,22 +170,37 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="col-span-2 sm:col-span-1">
-              <Label>Tipo de Unidade *</Label>
+              <Label htmlFor="cadastro-tipo">Tipo *</Label>
               {/* Sem tipo pré-escolhido: o padrão "Lancha" transformava van e picape em
-                  lancha (HOMEBUS, Iveco e Hilux, achados em 01/10/2026). */}
-              <Select value={form.asset_type || undefined} onValueChange={v => set('asset_type', v)}>
-                <SelectTrigger aria-label="Tipo de unidade">
-                  <SelectValue placeholder="Escolha o tipo" />
+                  lancha (HOMEBUS, Iveco e Hilux, achados em 01/10/2026). A lista vem da regra única,
+                  por grupo (decisão do dono, 22/10/2026); a dica ("inclui van convertida") só aparece
+                  dentro da lista — o campo fechado mostra o tipo sozinho. */}
+              <Select
+                value={form.asset_type || undefined}
+                // '' nunca é escolha de quem usa (é o select escondido do Radix sem a opção): ignora.
+                onValueChange={v => { if (!v) return; set('asset_type', v); setMetrosDigitados(null); }}
+              >
+                <SelectTrigger id="cadastro-tipo" aria-label="Tipo">
+                  <SelectValue placeholder="Escolha o tipo">{form.asset_type}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Lancha">Lancha</SelectItem>
-                  <SelectItem value="Veleiro">Veleiro</SelectItem>
-                  <SelectItem value="Catamarã">Catamarã</SelectItem>
-                  <SelectItem value="Motorhome">Motorhome</SelectItem>
-                  <SelectItem value="Trailer">Trailer</SelectItem>
-                  <SelectItem value="Camper">Camper</SelectItem>
-                  <SelectItem value="Jet Ski">Jet Ski</SelectItem>
-                  <SelectItem value="Outro">Outro</SelectItem>
+                  {tipoForaDaLista && (
+                    <SelectGroup>
+                      <SelectLabel>Cadastrado como</SelectLabel>
+                      <SelectItem value={tipoForaDaLista}>{tipoForaDaLista}</SelectItem>
+                    </SelectGroup>
+                  )}
+                  {TIPOS_DE_UNIDADE.map(g => (
+                    <SelectGroup key={g.grupo}>
+                      <SelectLabel>{g.grupo}</SelectLabel>
+                      {g.tipos.map(x => (
+                        <SelectItem key={x.valor} value={x.valor} textValue={x.valor}>
+                          {x.valor}
+                          {x.dica && <span className="text-muted-foreground"> — {x.dica}</span>}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -192,55 +232,77 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
             </div>
             <div>
               <Label>{t.vessels.year}</Label>
-              <Input type="number" value={form.year ?? ''} onChange={e => set('year', e.target.value ? Number(e.target.value) : undefined)} />
+              <Input type="number" value={form.year ?? ''} onChange={e => set('year', e.target.value ? Number(e.target.value) : null)} />
             </div>
             <div>
               {/* Pelo tipo escolhido: placa (motorhome, trailer, camper), inscrição (barco), nº de série. */}
               <Label>{rotuloDaIdentificacao(form.asset_type)}</Label>
               <Input value={form.hull_id_or_registration ?? ''} onChange={e => set('hull_id_or_registration', e.target.value)} />
             </div>
+            {/* O banco guarda em pés (length_feet). Barco digita em pés; veículo em metros, convertido
+                ao salvar; equipamento não tem comprimento. */}
+            {campos.comprimento === 'pes' && (
+              <div>
+                <Label htmlFor="cadastro-comprimento">{t.vessels.length} (pés)</Label>
+                <Input id="cadastro-comprimento" type="number" step="0.01" value={form.length_feet ?? ''} onChange={e => set('length_feet', e.target.value ? Number(e.target.value) : null)} />
+              </div>
+            )}
+            {campos.comprimento === 'metros' && (
+              <div>
+                <Label htmlFor="cadastro-comprimento">{t.vessels.length} (m)</Label>
+                <Input id="cadastro-comprimento" type="number" step="0.01" min={0} value={comprimentoEmMetros} onChange={e => mudarMetros(e.target.value)} />
+              </div>
+            )}
+            {campos.nauticos && (
+              <>
+                <div>
+                  <Label htmlFor="cadastro-boca">{t.vessels.beam} (pés)</Label>
+                  <Input id="cadastro-boca" type="number" step="0.01" value={form.beam_feet ?? ''} onChange={e => set('beam_feet', e.target.value ? Number(e.target.value) : null)} />
+                </div>
+                <div>
+                  <Label htmlFor="cadastro-calado">{t.vessels.draft} (pés)</Label>
+                  <Input id="cadastro-calado" type="number" step="0.01" value={form.draft_feet ?? ''} onChange={e => set('draft_feet', e.target.value ? Number(e.target.value) : null)} />
+                </div>
+              </>
+            )}
+            {campos.motores && (
+              <>
+                <div>
+                  <Label>{t.vessels.engineType}</Label>
+                  <Input value={form.engine_type ?? ''} onChange={e => set('engine_type', e.target.value)} />
+                </div>
+                <div>
+                  <Label>{t.vessels.engineBrand}</Label>
+                  <Input value={form.engine_brand ?? ''} onChange={e => set('engine_brand', e.target.value)} />
+                </div>
+                <div>
+                  <Label>{t.vessels.engineModel}</Label>
+                  <Input value={form.engine_model ?? ''} onChange={e => set('engine_model', e.target.value)} />
+                </div>
+                <div>
+                  <Label>{t.vessels.engineQuantity}</Label>
+                  <Input type="number" min={1} value={form.engine_quantity ?? 1} onChange={e => set('engine_quantity', Number(e.target.value))} />
+                </div>
+              </>
+            )}
+            {campos.nauticos && (
+              <div>
+                <Label htmlFor="cadastro-propulsao">{t.vessels.propulsionType}</Label>
+                <Input id="cadastro-propulsao" value={form.propulsion_type ?? ''} onChange={e => set('propulsion_type', e.target.value)} />
+              </div>
+            )}
             <div>
-              <Label>{t.vessels.length} (ft)</Label>
-              <Input type="number" step="0.01" value={form.length_feet ?? ''} onChange={e => set('length_feet', e.target.value ? Number(e.target.value) : undefined)} />
-            </div>
-            <div>
-              <Label>{t.vessels.beam} (ft)</Label>
-              <Input type="number" step="0.01" value={form.beam_feet ?? ''} onChange={e => set('beam_feet', e.target.value ? Number(e.target.value) : undefined)} />
-            </div>
-            <div>
-              <Label>{t.vessels.draft} (ft)</Label>
-              <Input type="number" step="0.01" value={form.draft_feet ?? ''} onChange={e => set('draft_feet', e.target.value ? Number(e.target.value) : undefined)} />
-            </div>
-            <div>
-              <Label>{t.vessels.engineType}</Label>
-              <Input value={form.engine_type ?? ''} onChange={e => set('engine_type', e.target.value)} />
-            </div>
-            <div>
-              <Label>{t.vessels.engineBrand}</Label>
-              <Input value={form.engine_brand ?? ''} onChange={e => set('engine_brand', e.target.value)} />
-            </div>
-            <div>
-              <Label>{t.vessels.engineModel}</Label>
-              <Input value={form.engine_model ?? ''} onChange={e => set('engine_model', e.target.value)} />
-            </div>
-            <div>
-              <Label>{t.vessels.engineQuantity}</Label>
-              <Input type="number" min={1} value={form.engine_quantity ?? 1} onChange={e => set('engine_quantity', Number(e.target.value))} />
-            </div>
-            <div>
-              <Label>{t.vessels.propulsionType}</Label>
-              <Input value={form.propulsion_type ?? ''} onChange={e => set('propulsion_type', e.target.value)} />
-            </div>
-            <div>
-              <Label>{t.vessels.shorePower}</Label>
-              <Input value={form.shore_power_type ?? ''} onChange={e => set('shore_power_type', e.target.value)} />
+              {/* "Energia de cais" no barco; "Energia externa (tomada ou camping)" no veículo. */}
+              <Label htmlFor="cadastro-energia">{campos.rotuloEnergiaExterna}</Label>
+              <Input id="cadastro-energia" value={form.shore_power_type ?? ''} onChange={e => set('shore_power_type', e.target.value)} />
             </div>
             <div className="col-span-2">
-              <Label>{t.vessels.selectMarina}</Label>
+              {/* "Marina" no barco; "Onde fica" no veículo e no equipamento. */}
+              <Label>{campos.rotuloOndeFica}</Label>
               <EntityCombobox
                 value={form.marina_id ?? ''}
                 onChange={v => set('marina_id', v || null)}
-                placeholder={t.vessels.selectMarina}
+                placeholder={campos.nauticos ? t.vessels.selectMarina : 'Selecionar local'}
                 options={[
                   { value: '', label: '—' },
                   ...activeMarinas.map(m => ({
@@ -251,10 +313,12 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
                 ]}
               />
             </div>
-            <div>
-              <Label>{t.vessels.dockPosition}</Label>
-              <Input value={form.current_dock_position ?? ''} onChange={e => set('current_dock_position', e.target.value)} />
-            </div>
+            {campos.nauticos && (
+              <div>
+                <Label htmlFor="cadastro-pier">{t.vessels.dockPosition}</Label>
+                <Input id="cadastro-pier" value={form.current_dock_position ?? ''} onChange={e => set('current_dock_position', e.target.value)} />
+              </div>
+            )}
             {/* Sugerido em cada OS nova deste veículo e impresso na via do técnico. */}
             <div className="col-span-2">
               <Label htmlFor="veiculo-acesso">Local e acesso</Label>
@@ -274,10 +338,12 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
               <Label>{t.vessels.inverterCharger}</Label>
               <Textarea value={form.inverter_charger_summary ?? ''} onChange={e => set('inverter_charger_summary', e.target.value)} />
             </div>
-            <div className="col-span-2">
-              <Label>{t.vessels.navigationElectronics}</Label>
-              <Textarea value={form.navigation_electronics_summary ?? ''} onChange={e => set('navigation_electronics_summary', e.target.value)} />
-            </div>
+            {campos.nauticos && (
+              <div className="col-span-2">
+                <Label htmlFor="cadastro-eletronica">{t.vessels.navigationElectronics}</Label>
+                <Textarea id="cadastro-eletronica" value={form.navigation_electronics_summary ?? ''} onChange={e => set('navigation_electronics_summary', e.target.value)} />
+              </div>
+            )}
             <div className="col-span-2">
               <Label>{t.vessels.electricalSystemNotes}</Label>
               <Textarea value={form.electrical_system_notes ?? ''} onChange={e => set('electrical_system_notes', e.target.value)} />

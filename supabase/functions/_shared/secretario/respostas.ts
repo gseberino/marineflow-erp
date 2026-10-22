@@ -3,7 +3,7 @@
 
 import { ddmm, quandoEmPalavras, umaLinha } from "./base.ts";
 import { ficaTodoDia, SECOES, type Secao, TITULO_DA_SECAO } from "./tipos.ts";
-import { TERMO_GERAL } from "../unidade.ts";
+import { grupoDoTipo, TERMO_GERAL, TIPOS_DE_UNIDADE } from "../unidade.ts";
 
 /** Um item como está gravado em resumo_itens (o que os comandos leem). */
 export interface ItemGravado {
@@ -36,6 +36,11 @@ export interface DetalheDoItem {
   curto?: string;
   /** o nome com o essencial (até ~50 caracteres): o "também" da *lista*. */
   rotulo?: string;
+  /**
+   * (22/10/2026) a unidade numa linha, com o tipo ("Motorhome Overland Vegini"). Opcional: os itens gravados
+   * antes não a têm, e unidadeDoItem acha a unidade pelo fato.
+   */
+  unidade?: string | null;
 }
 
 /** Uma linha do histórico da mesma referência (30 dias, sem hoje). */
@@ -147,6 +152,31 @@ function fato(i: ItemGravado, rotulo: string): string | null {
   return i.detalhe?.fatos?.find(([r]) => r === rotulo)?.[1] ?? null;
 }
 
+/** Os rótulos que o fato da unidade já teve: "Barco" até 21/10/2026; o termo geral desde então (sem tipo). */
+const ROTULOS_ANTIGOS_DA_UNIDADE = new Set(["Barco", TERMO_GERAL]);
+
+/** O rótulo é um tipo de unidade ("Motorhome", "Lancha", "Equipamento", o "Embarcação" de "Outra embarcação")? */
+function ehTipoDeUnidade(rotulo: string): boolean {
+  const r = rotulo.trim().toLowerCase();
+  return grupoDoTipo(r) !== "outro" || TIPOS_DE_UNIDADE.some((g) => g.tipos.some((t) => t.valor.toLowerCase() === r));
+}
+
+/**
+ * A unidade de um item gravado, numa linha: "Motorhome Overland Vegini" (ou só o nome, nos itens gravados antes de
+ * 22/10/2026). Desde então o fato da unidade tem o TIPO como rótulo ("Motorhome: Overland Vegini"), e procurar pelo
+ * rótulo não basta. Nesta ordem: o campo próprio do detalhe; o fato com o rótulo "Barco" (até 21/10) ou o termo
+ * geral (sem tipo); o fato cujo rótulo é um tipo de unidade. null = sem unidade.
+ */
+export function unidadeDoItem(i: ItemGravado): string | null {
+  const gravada = i.detalhe?.unidade;
+  if (typeof gravada === "string" && gravada.trim()) return gravada.trim();
+  const fatos = i.detalhe?.fatos ?? [];
+  const antigo = fatos.find(([r]) => ROTULOS_ANTIGOS_DA_UNIDADE.has(r));
+  if (antigo) return antigo[1] || null;
+  const peloTipo = fatos.find(([r]) => ehTipoDeUnidade(r));
+  return peloTipo?.[1] ? `${peloTipo[0]} ${peloTipo[1]}` : null;
+}
+
 /**
  * A letra sozinha (e o *detalhe*) do pacote: cada orçamento numa linha, e como pedir o PDF de um deles (o
  * atalho do PDF manda para o dono, nunca ao cliente). Sem modelo e sem nada enviado.
@@ -157,8 +187,8 @@ export function textoDoPacote(itensDaLetra: ItemGravado[]): string {
   const linhas = [`${l}. ${ordenados.length} orçamentos montados e ainda não enviados:`];
   for (const i of ordenados) {
     const numero = fato(i, "Orçamento") ?? i.nome.split(" ")[0];
-    // O fato da unidade se chamava "Barco" até 21/10/2026; itens gravados antes ainda o trazem.
-    const quem = [fato(i, "Cliente"), fato(i, TERMO_GERAL) ?? fato(i, "Barco")].filter(Boolean).join(", ");
+    // A unidade com o tipo ("Motorhome Overland Vegini"); os itens gravados antes trazem só o nome.
+    const quem = [fato(i, "Cliente"), unidadeDoItem(i)].filter(Boolean).join(", ");
     const montado = fato(i, "Montado em");
     linhas.push(`• ${numero}${quem ? ` (${quem})` : ""}, ${fato(i, "Valor") ?? ""}${montado ? `, montado em ${montado.slice(0, 5)}` : ""}`);
   }

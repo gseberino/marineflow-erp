@@ -923,7 +923,7 @@ export const diariasTools: ToolDef[] = [
           description: "inteiro, meio, faltou (não veio), apagar (lançado por engano; um dia só) ou manter (o dia já lançado fica como está; só muda extras, descontos, OS ou observação).",
         },
         os: { type: "string", description: "Número da OS em que trabalhou; duas OS separadas por vírgula (o dia se divide igual)." },
-        observacao: { type: "string", description: "Serviço feito, obra, barco — se a pessoa disser." },
+        observacao: { type: "string", description: "Serviço feito, obra, embarcação ou veículo — se a pessoa disser." },
         valor_diaria: { type: "number", description: "Só se a pessoa DISSER o valor do dia, diferente do cadastro (em reais). Sem isso vale a diária do cadastro." },
         extras: { type: "number", description: "Extras do dia em reais (o almoço quando ele traz o próprio, condução, hora a mais) — o total do dia. Só se a pessoa disser." },
         descontos: { type: "number", description: "Descontos do dia em reais (atraso, vale) — o total do dia. Só se a pessoa disser." },

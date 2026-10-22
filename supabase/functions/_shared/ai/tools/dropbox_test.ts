@@ -32,7 +32,8 @@ const banco = () =>
   bancoFalso({
     vessels: [
       { id: "v1", name: "Donna V", active: true, clients: { name: "Acrisio Lopes Cançado Filho" } },
-      { id: "v2", name: "Madu I", active: true, clients: { name: "Edson Luiz Rudek Junior" } },
+      { id: "v2", name: "Madu I", asset_type: "Lancha", active: true, clients: { name: "Edson Luiz Rudek Junior" } },
+      { id: "v3", name: "Iveco Daily", asset_type: "Motorhome", active: true, clients: { name: "Rodrigo Mendes" } },
     ],
     pastas_dropbox: [{ id: "p1", vessel_id: "v1", caminho: BASE, codigo_projeto: "0016.013.25", situacao: "vinculada" }],
     arquivos_dropbox: [
@@ -68,6 +69,21 @@ Deno.test("buscar: barco sem pasta avisa, sem inventar", async () => {
   const r = await tool("buscar_arquivos_do_barco").execute({ barco: "Madu I" }, ctx(banco())) as any;
   assertEquals(r.arquivos, []);
   assertStringIncludes(r.aviso, "ainda não tem pasta");
+});
+
+Deno.test("o aviso e o retorno dizem o tipo da unidade, nunca 'barco' para motorhome (22/10/2026)", async () => {
+  // deno-lint-ignore no-explicit-any
+  const lancha = await tool("buscar_arquivos_do_barco").execute({ barco: "Madu I" }, ctx(banco())) as any;
+  assertEquals(lancha.aviso, "A lancha Madu I ainda não tem pasta no Dropbox (ela nasce no primeiro orçamento ou OS).");
+  assertEquals(lancha.tipo, "Lancha");
+  // deno-lint-ignore no-explicit-any
+  const mh = await tool("consultar_pasta_do_barco").execute({ barco: "o motorhome do Rodrigo" }, ctx(banco())) as any;
+  assertEquals(mh.barco, "Iveco Daily");
+  assertEquals(mh.tipo, "Motorhome");
+  assertEquals(mh.aviso, "O motorhome Iveco Daily ainda não tem pasta no Dropbox (ela nasce no primeiro orçamento ou OS).");
+  // deno-lint-ignore no-explicit-any
+  const nada = await tool("buscar_arquivos_do_barco").execute({ barco: "Titanic" }, ctx(banco())) as any;
+  assertEquals(/barco/i.test(nada.error), false);
 });
 
 Deno.test("pasta: número, link e contagem por subpasta", async () => {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { FileText, Mail, MapPin, Pencil, Phone, Ship } from 'lucide-react';
+import { FileText, Mail, MapPin, Pencil, Phone } from 'lucide-react';
 import { useI18n } from '@/i18n';
 import { useClient } from '@/hooks/use-clients';
 import { useVesselsForClient } from '@/hooks/use-vessels';
@@ -23,7 +23,8 @@ import { StatusChip, type StatusTone } from '@/v2/components/StatusChip';
 import { DataTable, type DataColumn } from '@/v2/components/DataTable';
 import { V2Shell } from '@/v2/components/V2Shell';
 import { serviceOrderStatusTone } from '@/v2/status-map';
-import { nomeDaUnidade } from '@/lib/unidade';
+import { IconeDaUnidade } from '@/components/service-order/FichaDaEmbarcacao';
+import { camposDoTipo, comprimentoDoTipo, nomeDaUnidade } from '@/lib/unidade';
 import '@/v2/tokens.css';
 
 /* Onda A/C · Detalhe do Cliente v2 — paridade com ClientDetail v1
@@ -195,21 +196,29 @@ export default function ClientDetailV2() {
               <p className="rounded-lg border bg-card py-8 text-center text-muted-foreground">{t.vessels.noVessels}</p>
             ) : (
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                {vessels.map((v) => (
-                  <Link key={v.id} to={`/v2/vessels/${v.id}`} className="rounded-lg border bg-card p-4 transition-colors hover:border-primary/50">
-                    <div className="mb-1 flex items-start justify-between gap-2">
-                      <span className="min-w-0">
-                        <span className="flex items-center gap-2 truncate font-semibold"><Ship className="h-4 w-4 shrink-0 text-accent" />{nomeDaUnidade(v)}</span>
-                        <span className="block truncate text-sm text-muted-foreground">{v.manufacturer} {v.model} {v.year ? `(${v.year})` : ''}</span>
-                      </span>
-                      {v.length_feet && <span className="shrink-0 text-sm font-medium tabular-nums">{v.length_feet} ft</span>}
-                    </div>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {(v as { marinas?: { name?: string } }).marinas?.name || t.vessels.noMarina}
-                      {(v as { current_dock_position?: string }).current_dock_position ? ` · ${(v as { current_dock_position?: string }).current_dock_position}` : ''}
-                    </p>
-                  </Link>
-                ))}
+                {vessels.map((v) => {
+                  // Só os campos do tipo (dono, 22/10/2026): motorhome em metros, sem vaga de píer e
+                  // sem "Sem marina"; equipamento sem comprimento.
+                  const campos = camposDoTipo(v.asset_type);
+                  const comprimento = comprimentoDoTipo(v.length_feet, v.asset_type);
+                  const local = (v as { marinas?: { name?: string } }).marinas?.name;
+                  const vaga = campos.nauticos ? (v as { current_dock_position?: string | null }).current_dock_position : null;
+                  return (
+                    <Link key={v.id} to={`/v2/vessels/${v.id}`} className="rounded-lg border bg-card p-4 transition-colors hover:border-primary/50">
+                      <div className="mb-1 flex items-start justify-between gap-2">
+                        <span className="min-w-0">
+                          <span className="flex items-center gap-2 truncate font-semibold"><IconeDaUnidade tipo={v.asset_type} className="h-4 w-4 shrink-0 text-accent" />{nomeDaUnidade(v)}</span>
+                          <span className="block truncate text-sm text-muted-foreground">{v.manufacturer} {v.model} {v.year ? `(${v.year})` : ''}</span>
+                        </span>
+                        {comprimento && <span className="shrink-0 text-sm font-medium tabular-nums">{comprimento}</span>}
+                      </div>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {local || (campos.nauticos ? t.vessels.noMarina : 'Local não informado')}
+                        {vaga ? ` · ${vaga}` : ''}
+                      </p>
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </TabsContent>

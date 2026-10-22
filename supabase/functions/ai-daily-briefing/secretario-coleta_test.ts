@@ -13,13 +13,13 @@ function valor(l: Linha, c: string): unknown {
 }
 
 /** filtros do supabase-js sobre linhas em memória; `falhar` = tabelas que devolvem erro */
-function falsoAdmin(tabelas: Record<string, Linha[]>, falhar: string[] = []) {
+function falsoAdmin(tabelas: Record<string, Linha[]>, falhar: string[] = [], selects: string[] = []) {
   return {
     from(tabela: string) {
       let linhas = [...(tabelas[tabela] ?? [])];
       let soContagem = false;
       const q = {
-        select: (_c?: string, o?: { head?: boolean }) => ((soContagem = !!o?.head), q),
+        select: (c?: string, o?: { head?: boolean }) => (selects.push(`${tabela}: ${c ?? ""}`), (soContagem = !!o?.head), q),
         eq: (c: string, v: unknown) => ((linhas = linhas.filter((l) => valor(l, c) === v)), q),
         neq: (c: string, v: unknown) => ((linhas = linhas.filter((l) => valor(l, c) !== v)), q),
         in: (c: string, vs: unknown[]) => ((linhas = linhas.filter((l) => vs.includes(valor(l, c)))), q),
@@ -65,7 +65,7 @@ function banco(): Record<string, Linha[]> {
   return {
     receivables: [
       { id: "r-marcelo", client_id: "c-marcelo", description: "À vista — OS-00038", due_date: "2026-10-13", amount: 16890, balance_amount: 16890, status: "pending", is_deposit: false,
-        service_order_id: "o-38", clients: { name: "Marcelo Marco Bertoldi", display_name: null }, service_orders: { service_order_number: "OS-00038", vessels: { name: "Aria" } } },
+        service_order_id: "o-38", clients: { name: "Marcelo Marco Bertoldi", display_name: null }, service_orders: { service_order_number: "OS-00038", vessels: { name: "Aria", asset_type: "Lancha" } } },
       { id: "r-pago", client_id: "c-x", description: "pago", due_date: "2026-10-01", amount: 500, balance_amount: 0, status: "paid", is_deposit: false, service_order_id: null, clients: { name: "X" } },
       { id: "r-sinal", client_id: "c-flavio", description: "Sinal — OS-00104", due_date: "2026-10-01", amount: 2070, balance_amount: 0, status: "paid", is_deposit: true, service_order_id: "o-104" },
       { id: "r-apolo", client_id: "c-apolo", description: "NF-e 2/25", due_date: "2026-10-16", amount: 5237.99, balance_amount: 5237.99, status: "pending", is_deposit: false,
@@ -74,11 +74,11 @@ function banco(): Record<string, Linha[]> {
     ],
     service_orders: [
       { id: "q-117", service_order_number: "ORÇ-00117", status: "draft", quote_status: "draft", grand_total: 120020, client_id: "c-everton", created_at: "2026-10-13T12:00:00Z",
-        updated_at: "2026-10-14T12:00:00Z", quote_validity_days: 3, quote_validity_date: null, clients: { name: "EVERTON" }, vessels: { name: "Sprinter" } },
+        updated_at: "2026-10-14T12:00:00Z", quote_validity_days: 3, quote_validity_date: null, clients: { name: "EVERTON" }, vessels: { name: "Sprinter", asset_type: "Motorhome" } },
       { id: "q-111", service_order_number: "ORÇ-00111", status: "draft", quote_status: "awaiting_approval", grand_total: 4254.69, client_id: "c-final", created_at: "2026-09-30T12:00:00Z",
         updated_at: "2026-10-13T12:00:00Z", quote_validity_days: 3, quote_validity_date: null, clients: { name: "Cliente Final" }, vessels: { name: "Motorhome" } },
       { id: "o-104", service_order_number: "OS-00104", status: "awaiting_parts", grand_total: 2760, client_id: "c-flavio", updated_at: "2026-10-03T12:00:00Z",
-        scheduled_start_at: "2026-10-06T09:00:00Z", clients: { name: "Flávio da Igreja" }, vessels: { name: "Itapoã" } },
+        scheduled_start_at: "2026-10-06T09:00:00Z", clients: { name: "Flávio da Igreja" }, vessels: [{ name: "Itapoã", asset_type: "Lancha" }] },
       { id: "o-38", service_order_number: "OS-00038", status: "completed", grand_total: 16890, client_id: "c-marcelo", updated_at: "2026-10-13T12:00:00Z", clients: { name: "Marcelo" } },
       { id: "o-velha", service_order_number: "OS-00010", status: "completed", grand_total: 900, client_id: "c-y", updated_at: "2026-06-01T12:00:00Z", clients: { name: "Y" } },
       { id: "o-hoje", service_order_number: "OS-00120", status: "scheduled", grand_total: 1000, client_id: "c-z", updated_at: "2026-10-14T12:00:00Z",
@@ -135,8 +135,8 @@ const ESPERANDO = [
 ];
 const RECEBIDAS = [{ phone_normalized: "5547900000001", body: "🎤 Oi", occurred_at: "2026-10-14T20:10:00Z" }];
 
-function rodar(tabelas = banco(), falhar: string[] = []) {
-  return coletar(falsoAdmin(tabelas, falhar), {
+function rodar(tabelas = banco(), falhar: string[] = [], selects: string[] = []) {
+  return coletar(falsoAdmin(tabelas, falhar, selects), {
     agora: AGORA, hoje: HOJE, dono: DONO, modo: "novo",
     doResumo: { esperando: ESPERANDO, recebidas: RECEBIDAS, cfg: { quote_validity_days: "3" } },
   });
@@ -147,9 +147,31 @@ Deno.test("cobranças: só as vencidas pendentes que não são sinal, com client
   assertEquals(coleta.cobrancas.map((c) => c.id), ["r-marcelo", "r-38"]);
   assertEquals(coleta.cobrancas[0], {
     id: "r-marcelo", client_id: "c-marcelo", cliente: "Marcelo Marco Bertoldi", descricao: "À vista — OS-00038",
-    vencimento: "2026-10-13", saldo: 16890, os_numero: "OS-00038", barco: "Aria",
+    vencimento: "2026-10-13", saldo: 16890, os_numero: "OS-00038", barco: "Aria", tipo_unidade: "Lancha",
   });
+  // sem OS, sem unidade: nem nome nem tipo
+  assertEquals([coleta.cobrancas[1].barco, coleta.cobrancas[1].tipo_unidade], [null, null]);
   assertEquals(naRua, { total: 33780, n: 2 });
+});
+
+// Decisão 6 do dono (22/10/2026): o *detalhe* mostra o tipo ("Motorhome: Overland Vegini"); a coleta traz o
+// vessels.asset_type junto do nome nas leituras que viram cobrança, orçamento e OS.
+Deno.test("o tipo da unidade vem junto do nome (cobrança, orçamento e OS); sem tipo, null", async () => {
+  const selects: string[] = [];
+  const { coleta } = await rodar(banco(), [], selects);
+  const porNumero = Object.fromEntries(coleta.orcamentos.map((q) => [q.numero, q]));
+  assertEquals([porNumero["ORÇ-00117"].barco, porNumero["ORÇ-00117"].tipo_unidade], ["Sprinter", "Motorhome"]);
+  assertEquals([porNumero["ORÇ-00111"].barco, porNumero["ORÇ-00111"].tipo_unidade], ["Motorhome", null]);
+  const os = Object.fromEntries(coleta.oss.map((o) => [o.numero, o]));
+  assertEquals([os["OS-00104"].barco, os["OS-00104"].tipo_unidade], ["Itapoã", "Lancha"], "o embed em lista também vale");
+  assertEquals([os["OS-00120"].barco, os["OS-00120"].tipo_unidade], ["Brisa", null]);
+  assertEquals([os["OS-00038"].barco, os["OS-00038"].tipo_unidade], [null, null]);
+  // o PostgREST de mentira devolve tudo: confere que a leitura de verdade PEDE o tipo
+  const pedemUnidade = selects.filter((s) => s.includes("vessels("));
+  const pedemTipo = pedemUnidade.filter((s) => s.includes("vessels(name, asset_type)"));
+  assert(pedemTipo.some((s) => s.startsWith("receivables:")), "cobranças pedem o tipo");
+  assertEquals(pedemTipo.filter((s) => s.startsWith("service_orders:") && s.includes("quote_status")).length, 1, "orçamentos pedem o tipo");
+  assertEquals(pedemTipo.filter((s) => s.startsWith("service_orders:") && s.includes("scheduled_start_at, clients")).length, 2, "OS ativas e concluídas pedem o tipo");
 });
 
 Deno.test("orçamentos: rascunho sem validade; enviado com o 'até' do PDF (criado + dias)", async () => {

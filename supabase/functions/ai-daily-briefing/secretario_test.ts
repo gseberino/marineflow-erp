@@ -134,3 +134,11 @@ Deno.test("contarPropostas: por tipo, sem o alerta do vigilante", () => {
   assertEquals(contarPropostas([{ kind: "create_payable" }, { kind: "create_payable" }, { kind: "create_receivable" }, { kind: "internal_transfer" }, { kind: "anomaly" }, { kind: "x" }]),
     { saidas: 2, entradas: 1, transferencias: 1, outras: 1 });
 });
+
+Deno.test("itensParaGravar: grava a unidade no detalhe (o pacote acha a unidade sem depender do rótulo do fato)", () => {
+  const sel = selecionar(candidatosDoDia(coleta1510(), AGORA_1510, HOJE_1510), [], HOJE_1510);
+  const comUnidade = itensParaGravar(sel).filter((i) => i.detalhe.unidade);
+  assert(comUnidade.length > 0, "algum item do dia tem unidade");
+  // O fato da unidade traz o nome (rótulo = tipo, texto livre); detalhe.unidade traz o mesmo nome, numa linha.
+  for (const i of comUnidade) assert(i.detalhe.fatos.some(([, v]) => !!v && i.detalhe.unidade!.includes(v)), i.nome);
+});

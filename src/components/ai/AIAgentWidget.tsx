@@ -13,7 +13,7 @@ import { AIOptionsCard } from './AIOptionsCard';
 import { toast } from 'sonner';
 import { downloadText } from '@/lib/download';
 import { useVessel } from '@/hooks/use-vessels';
-import { grupoDoTipo, rotuloDaUnidade, unidadeNaFrase } from '@/lib/unidade';
+import { emojiDaUnidade, rotuloDaUnidade, unidadeNaFrase } from '@/lib/unidade';
 
 function DraggableAIButton({ onOpen }: { onOpen: () => void }) {
   const [pos, setPos] = React.useState({ bottom: 24, right: 24 });
@@ -197,7 +197,8 @@ export function AIAgentWidget() {
     context.entityType === 'service_order' ? '📋 OS em contexto' :
     context.entityType === 'client' ? '👤 Cliente em contexto' :
     context.entityType === 'vessel'
-      ? `${grupoDoTipo(tipoEmContexto) === 'veiculo' ? '🚐' : '⛵'} ${rotuloDaUnidade(tipoEmContexto)} em contexto` :
+      // Emoji pelo tipo (dono, 22/10/2026): 🛥️ barco, 🚐 veículo; sem tipo ou equipamento, a chave.
+      ? `${emojiDaUnidade(tipoEmContexto) || '🔧'} ${rotuloDaUnidade(tipoEmContexto)} em contexto` :
     context.entityType === 'agenda' ? '📅 Agenda em contexto' :
     context.entityType === 'products' ? '📦 Produtos em contexto' :
     context.entityType === 'financial' ? '💰 Financeiro em contexto' : null;
@@ -216,7 +217,7 @@ export function AIAgentWidget() {
       `Histórico de serviços ${unidadeNaFrase({ asset_type: tipoEmContexto }, 'de')}`,
       `Crie uma OS ${unidadeNaFrase({ asset_type: tipoEmContexto }, 'para')}`,
     ] : [
-      'Crie uma OS para o barco do João',
+      'Crie uma OS para o motorhome do João',
       'Tarefas de hoje na agenda',
       'OSs em andamento',
       'Cadastre o cliente Carlos, tel 47 99999-0000',

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
 import { EntityCombobox } from '@/components/EntityCombobox';
-import { TERMO_GERAL, rotuloDaUnidade } from '@/lib/unidade';
+import { TERMO_GERAL, rotuloDaUnidade, sinonimosDoTipo } from '@/lib/unidade';
 
 interface VesselOption {
   id: string;
@@ -44,7 +44,8 @@ export function VesselSelect({
     .filter(v => v.active)
     .map(v => {
       // O tipo de cada opção ("Motorhome · Iveco Daily 55C17"); sem tipo (ou "Outro"), só o modelo.
-      // A busca já olha a descrição: digitar "motorhome" acha.
+      // A busca olha a descrição, o tipo como gravado e os sinônimos dele (decisão do dono,
+      // 22/10/2026): "motorhome", "van", "jet ski" ou "outra embarcação" acham.
       const tipo = rotuloDaUnidade(v.asset_type);
       return {
         value: v.id,
@@ -55,6 +56,8 @@ export function VesselSelect({
           v.manufacturer || '',
           v.model || '',
           v.hull_id_or_registration || '',
+          v.asset_type || '',
+          ...sinonimosDoTipo(v.asset_type),
         ],
       };
     });

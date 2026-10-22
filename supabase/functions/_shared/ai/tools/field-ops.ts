@@ -141,7 +141,7 @@ export const fieldOpsTools: ToolDef[] = [
   {
     name: "check_in_service_order",
     description:
-      "Registra a CHEGADA do técnico no serviço (check-in): marca a hora e move a OS para 'em andamento'. Use quando o técnico disser 'cheguei', 'comecei o serviço', 'estou no barco'. " +
+      "Registra a CHEGADA do técnico no serviço (check-in): marca a hora e move a OS para 'em andamento'. Use quando o técnico disser 'cheguei', 'comecei o serviço', 'estou no barco', 'estou no motorhome'. " +
       "Se ele disser a HORA ('cheguei às 8h', 'ontem cheguei 7h30'), passe em `horario` — sem horário vale agora. Com horário, corrige uma chegada já registrada. Não mexe em preço nem conclui a OS.",
     input_schema: {
       type: "object",
@@ -194,7 +194,7 @@ export const fieldOpsTools: ToolDef[] = [
   {
     name: "check_out_service_order",
     description:
-      "Registra a SAÍDA do técnico (check-out): marca a hora de término e grava o relato do que foi feito. Use quando o técnico disser 'terminei', 'saí do barco', 'finalizei o serviço'. " +
+      "Registra a SAÍDA do técnico (check-out): marca a hora de término e grava o relato do que foi feito. Use quando o técnico disser 'terminei', 'saí do barco', 'saí do motorhome', 'finalizei o serviço'. " +
       "Se ele disser a HORA ('saí às 17h'), passe em `horario` — sem horário vale agora. NÃO conclui a OS nem fatura — concluir é update_service_order_status, decisão de quem administra.",
     input_schema: {
       type: "object",

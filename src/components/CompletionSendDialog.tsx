@@ -1,7 +1,8 @@
 // Prompt OPT-IN de conclusão: ao concluir a OS, pergunta se deseja enviar ao cliente a mensagem
 // de "serviço concluído" (com o saldo pendente, quando houver). Nada é enviado sem o usuário
 // confirmar. Usa a edge whatsapp-send (kind:'text'), que respeita wa_test_mode.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -22,25 +23,41 @@ interface Props {
   clientPhone?: string | null;
   balance?: number | null;
   dueDate?: string | null;
+  /** Tipo da unidade da OS (para o emoji). Ausente: o diálogo lê pela OS. */
+  assetType?: string | null;
 }
 
 const fmtBRL = (v: number) =>
   new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 
 export function CompletionSendDialog({
-  open, onOpenChange, serviceOrderId, osNumber, clientName, clientPhone, balance, dueDate,
+  open, onOpenChange, serviceOrderId, osNumber, clientName, clientPhone, balance, dueDate, assetType,
 }: Props) {
   const [phone, setPhone] = useState('');
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const { data: settingsMap } = useAppSettings();
   const pixKey = settingsMap?.['pix_key'] ?? null;
+  // O tipo da unidade só decide o emoji (🛥️/🚐): leitura leve; se falhar, a mensagem sai sem emoji.
+  const { data: tipoLido } = useQuery({
+    queryKey: ['tipo-da-unidade-da-os', serviceOrderId],
+    enabled: open && assetType === undefined && !!serviceOrderId,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('service_orders').select('vessels(asset_type)').eq('id', serviceOrderId).maybeSingle();
+      if (error) return null;
+      return ((data as { vessels?: { asset_type?: string | null } | null } | null)?.vessels?.asset_type) ?? null;
+    },
+  });
+  const tipo = assetType !== undefined ? assetType : tipoLido;
+  // O texto escrito pelo usuário não é refeito quando o tipo chega depois.
+  const editouRef = useRef(false);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) { editouRef.current = false; return; }
     setPhone(clientPhone || '');
-    setMessage(buildCompletionMessage({ clientName, osNumber, balance, dueDate, pixKey }));
-  }, [open, clientPhone, clientName, osNumber, balance, dueDate, pixKey]);
+    if (!editouRef.current) setMessage(buildCompletionMessage({ clientName, osNumber, balance, dueDate, pixKey, assetType: tipo }));
+  }, [open, clientPhone, clientName, osNumber, balance, dueDate, pixKey, tipo]);
 
   const digits = phone.replace(/\D/g, '');
   const canSend = digits.length >= 10 && message.trim().length > 0;
@@ -86,7 +103,7 @@ export function CompletionSendDialog({
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Mensagem</Label>
-            <Textarea value={message} onChange={e => setMessage(e.target.value)} rows={7} className="resize-none text-sm" />
+            <Textarea value={message} onChange={e => { editouRef.current = true; setMessage(e.target.value); }} rows={7} className="resize-none text-sm" />
           </div>
           {!digits && (
             <p className="text-xs text-amber-600">Este cliente não tem WhatsApp cadastrado — informe o número para enviar.</p>

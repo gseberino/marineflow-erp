@@ -1,4 +1,4 @@
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { chaveDeNome, escolherBarco, notaDoBarco, type Candidato } from "./dropbox-busca.ts";
 
 const BARCOS: Candidato[] = [
@@ -28,6 +28,23 @@ Deno.test("'o barco do Ribas' acha pelo dono", () => {
   assertEquals(r.ok && r.barco.id, "7");
 });
 
+Deno.test("o tipo na frente sai do termo, para todos os tipos (a pasta existe para motorhome também)", () => {
+  for (const termo of ["o trailer do Ribas", "o motorhome do Ribas", "o camper do Ribas", "a lancha do Ribas", "a embarcação do Ribas", "a moto aquática do Ribas", "o jet ski do Ribas", "o veículo do Ribas"]) {
+    const r = escolherBarco(termo, BARCOS);
+    assertEquals(r.ok && r.barco.id, "7", termo);
+  }
+  // "motorhome" sozinho continua sendo o termo: há unidades chamadas assim (pergunta qual).
+  assertEquals(escolherBarco("motorhome", BARCOS).ok, false);
+  assertEquals(notaDoBarco("o motorhome do Sandro", BARCOS[4]), 60);
+});
+
+Deno.test("as recusas não dizem 'barco' (o assistente repassa ao dono)", () => {
+  const nada = escolherBarco("Titanic", BARCOS);
+  assertEquals(!nada.ok && nada.erro, 'Não achei embarcação ou veículo com "Titanic".');
+  const dois = escolherBarco("motorhome", BARCOS);
+  assertEquals(!dois.ok && dois.erro, 'Há 2 embarcações ou veículos que batem com "motorhome". Pergunte qual.');
+});
+
 Deno.test("dono com dois barcos: pergunta", () => {
   const r = escolherBarco("Edson Luiz Rudek Junior", BARCOS);
   assertEquals(r.ok, false);
@@ -50,4 +67,14 @@ Deno.test("nada parecido: erro claro, sem chute", () => {
   const r = escolherBarco("Titanic", BARCOS);
   assertEquals(r.ok, false);
   assertEquals(notaDoBarco("Titanic", BARCOS[0]), 0);
+});
+
+Deno.test("nome que começa pelo tipo: o nome exato ganha de um parecido (22/10/2026)", () => {
+  const darlan: Candidato = { id: "t1", nome: "Trailer Darlan", cliente: "João Silva" };
+  const darlanII: Candidato = { id: "t2", nome: "Darlan II", cliente: "Pedro Souza" };
+  assertEquals(notaDoBarco("Trailer Darlan", darlan), 100);
+  const e = escolherBarco("Trailer Darlan", [darlan, darlanII]);
+  assertEquals(e.ok && e.barco.id, "t1");
+  // E "o trailer do Darlan" ainda acha pelo nome sem o tipo.
+  assert(notaDoBarco("o trailer do Darlan", darlan) >= 70);
 });

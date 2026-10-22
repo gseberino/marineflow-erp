@@ -41,6 +41,14 @@ function nomeDe(c: unknown): string | null {
   return typeof n === "string" && n.trim() ? n : null;
 }
 
+/** O tipo da unidade (vessels.asset_type): vira o rótulo no *detalhe* ("Motorhome: Overland Vegini"; decisão 6, 22/10/2026). */
+function tipoDe(v: unknown): string | null {
+  // deno-lint-ignore no-explicit-any
+  const x = (Array.isArray(v) ? v[0] : v) as any;
+  const t = x?.asset_type;
+  return typeof t === "string" && t.trim() ? t : null;
+}
+
 function falhou(evento: string, e: unknown): void {
   console.warn(JSON.stringify({ fn: "ai-daily-briefing", secretario: evento, codigo: String((e as { code?: unknown })?.code ?? (e as Error)?.name ?? "erro") }));
 }
@@ -84,7 +92,7 @@ export async function coletar(admin: Admin, p: {
 
   // ── cobranças vencidas (as de index.ts:109-116, com cliente, OS e barco) ──
   const cobrancasLidas = ou(await admin.from("receivables")
-    .select("id, client_id, description, due_date, amount, balance_amount, clients(name, display_name), service_orders!receivables_service_order_id_fkey(service_order_number, vessels(name))")
+    .select("id, client_id, description, due_date, amount, balance_amount, clients(name, display_name), service_orders!receivables_service_order_id_fkey(service_order_number, vessels(name, asset_type))")
     .in("status", ["pending", "partially_paid"]).eq("is_deposit", false).lt("due_date", hoje)
     .order("due_date", { ascending: true }).limit(500), "cobranças") as Array<Record<string, unknown>>;
   const cobrancas = cobrancasLidas.map((r) => {
@@ -99,13 +107,14 @@ export async function coletar(admin: Admin, p: {
       saldo: Number(r.balance_amount ?? r.amount ?? 0),
       os_numero: so?.service_order_number ?? null,
       barco: nomeDe(so?.vessels),
+      tipo_unidade: tipoDe(so?.vessels),
     };
   }).filter((c) => c.saldo > 0);
   const naRua: NaRua = { total: cobrancas.reduce((s, c) => s + c.saldo, 0), n: cobrancas.length };
 
   // ── orçamentos enviados/aguardando (index.ts:655-661) e rascunhos (novo: o "montado e não enviado") ──
   const orcs = ou(await admin.from("service_orders")
-    .select("id, service_order_number, quote_status, grand_total, client_id, created_at, updated_at, quote_validity_days, quote_validity_date, clients(name, display_name), vessels(name)")
+    .select("id, service_order_number, quote_status, grand_total, client_id, created_at, updated_at, quote_validity_days, quote_validity_date, clients(name, display_name), vessels(name, asset_type)")
     .eq("status", "draft").in("quote_status", ["sent", "awaiting_approval", "awaiting_deposit", "draft"])
     // do mais novo para o mais velho: se um dia passar do limite, o corte leva os rascunhos abandonados
     .order("updated_at", { ascending: false }).limit(300), "orçamentos") as Array<Record<string, unknown>>;
@@ -119,6 +128,7 @@ export async function coletar(admin: Admin, p: {
     client_id: (q.client_id as string | null) ?? null,
     cliente: nomeDe(q.clients),
     barco: nomeDe(q.vessels),
+    tipo_unidade: tipoDe(q.vessels),
     criado_em: String(q.created_at),
     mexido_em: String(q.updated_at),
     // o mesmo "até" do PDF, da R19 e do resumo de hoje (index.ts:671); aguardando sinal e rascunho não vencem
@@ -213,7 +223,7 @@ export async function coletar(admin: Admin, p: {
 
   // ── OS: ativas (index.ts:133-139, sem o corte de 10 dias) e concluídas nos últimos 60 dias (a "concluída
   //    sem cobrança" é coisa recente; sem o corte, a lista de ids do .in() abaixo cresceria sem fim) ──
-  const colunasDaOs = "id, service_order_number, status, grand_total, client_id, updated_at, scheduled_start_at, clients(name, display_name), vessels(name)";
+  const colunasDaOs = "id, service_order_number, status, grand_total, client_id, updated_at, scheduled_start_at, clients(name, display_name), vessels(name, asset_type)";
   const [ativasLidas, concluidasLidas] = await Promise.all([
     admin.from("service_orders").select(colunasDaOs)
       .in("status", ["approved", "scheduled", "in_progress", "awaiting_parts", "open"])
@@ -248,6 +258,7 @@ export async function coletar(admin: Admin, p: {
       client_id: (o.client_id as string | null) ?? null,
       cliente: nomeDe(o.clients),
       barco: nomeDe(o.vessels),
+      tipo_unidade: tipoDe(o.vessels),
       mexido_em: String(o.updated_at),
       agendada_em: (o.scheduled_start_at as string | null) ?? null,
       sinal_pago: recs.filter((r) => r.is_deposit === true && r.status === "paid").reduce((s, r) => s + Number(r.amount || 0), 0),

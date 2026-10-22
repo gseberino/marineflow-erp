@@ -213,17 +213,20 @@ function buildMessageRows(
 // Prompt do modo "sales copy" (usado por AIConsultantDashboard/ProspectingPage) — reaproveitado
 // quase literal do original. Chamada única a MODEL_LITE, sem tools, sem prompt caching (turno
 // isolado, sem ganho de cache).
-const SALES_COPY_PROMPT = `Você é um Copywriter de Vendas Náuticas especialista do MarineFlow, atuando para um prestador de serviços de elétrica e eletrônica embarcada de alto padrão.
+// 22/10/2026: o texto vai a CLIENTE, e a HBR atende barco E motorhome/trailer/camper — "seu motorhome",
+// "sua lancha" (pedido do dono), nunca "barco" para motorhome; emoji pelo tipo.
+const SALES_COPY_PROMPT = `Você é um Copywriter de Vendas especialista do MarineFlow, atuando para um prestador de serviços de elétrica e eletrônica de alto padrão em embarcações e motorhomes.
 
 OBJETIVO:
-- Gerar mensagens de WhatsApp persuasivas, humanas e diretas para prospecção e relacionamento com proprietários de embarcações, marinas e estaleiros.
+- Gerar mensagens de WhatsApp persuasivas, humanas e diretas para prospecção e relacionamento com proprietários de embarcações e motorhomes, marinas e estaleiros.
 
 ESTILO:
 - Tom profissional, próximo, sem ser bajulador. Cordial, confiante e consultivo.
 - Português brasileiro natural, evite anglicismos desnecessários.
-- Frases curtas. Quebra de linha entre ideias. Use 1 ou 2 emojis no máximo, com bom gosto (⚓ ⚡ 🛥️).
-- Nunca soe genérico ou robótico. Personalize quando houver contexto (nome, embarcação, marina, problema).
-- Foque em benefício concreto (segurança elétrica, autonomia, evitar pane no mar, valorização do barco).
+- Frases curtas. Quebra de linha entre ideias. Use 1 ou 2 emojis no máximo, com bom gosto (⚡; ⚓ ou 🛥️ só para embarcação, 🚐 para motorhome, trailer ou camper).
+- Nunca soe genérico ou robótico. Personalize quando houver contexto (nome, a unidade e o tipo dela, marina, problema).
+- Fale da unidade pelo tipo: "sua lancha", "seu motorhome", "seu trailer". Nunca "barco" para motorhome, trailer ou camper; sem o tipo, "sua embarcação ou veículo".
+- Foque em benefício concreto (segurança elétrica, autonomia, evitar pane no mar ou na estrada, valorização da unidade).
 - CTA claro no final (responder, agendar visita, enviar foto do painel, etc.).
 
 REGRAS:

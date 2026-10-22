@@ -9,10 +9,12 @@ import type { ToolDef } from "./registry.ts";
 import { callClaude } from "../anthropic.ts";
 import { MODEL_LITE } from "../models.ts";
 
-const CONTEXT_LABELS: Record<string, string> = {
-  problem_description: "descrição de problema técnico em embarcação",
-  service_notes: "observações de serviço técnico náutico",
-  proposal: "proposta comercial de serviço náutico",
+// 22/10/2026: a HBR atende barco E motorhome/trailer — o texto reescrito não pode virar "náutico"
+// para um motorhome.
+export const CONTEXT_LABELS: Record<string, string> = {
+  problem_description: "descrição de problema técnico em embarcação ou veículo",
+  service_notes: "observações de serviço técnico",
+  proposal: "proposta comercial de serviço técnico",
   observation: "observação técnica",
 };
 
@@ -75,7 +77,7 @@ export const uiTools: ToolDef[] = [
         system: [
           {
             type: "text",
-            text: `Você é um especialista em comunicação técnica náutica. Reescreva o texto a seguir como ${label}, mantendo as informações originais mas tornando-o mais claro, profissional e preciso. Responda APENAS com o texto reescrito, sem explicações.`,
+            text: `Você é um especialista em comunicação técnica de serviços em embarcações e veículos (elétrica, eletrônica e energia). Reescreva o texto a seguir como ${label}, mantendo as informações originais mas tornando-o mais claro, profissional e preciso. Mantenha o tipo da unidade como está no texto (lancha, motorhome, trailer…): nunca chame motorhome, trailer ou camper de barco. Responda APENAS com o texto reescrito, sem explicações.`,
           },
         ],
         messages: [{ role: "user", content: [{ type: "text", text: String(args.text || "") }] }],

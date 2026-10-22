@@ -85,7 +85,7 @@ function CartaoDaRevisao({
           {
             texto: 'Pedir lembrete agora', icone: MessageCircle,
             onClick: () => onLembrete({
-              ...alvo, plano: r.name, embarcacao, cliente: r.client_name, vesselId: r.vessel_id,
+              ...alvo, plano: r.name, embarcacao, tipo: r.vessel_asset_type, cliente: r.client_name, vesselId: r.vessel_id,
               optOut: r.opt_out, semTelefone: !r.client_phone,
             }),
           },

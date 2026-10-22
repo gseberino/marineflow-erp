@@ -2143,6 +2143,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           clientPhone={completionSend.clientPhone}
           balance={completionSend.balance}
           dueDate={completionSend.dueDate}
+          assetType={(orderData as { vessels?: { asset_type?: string | null } | null } | undefined)?.vessels?.asset_type ?? null}
         />
       )}
 

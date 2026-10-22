@@ -9,6 +9,7 @@ import {
   textoDoPacote,
   textoDoPorque,
   textoNaoAchei,
+  unidadeDoItem,
 } from "./respostas.ts";
 
 const HOJE = "2026-10-15";
@@ -134,6 +135,50 @@ Deno.test("pacote dos não enviados: a letra lista cada um e ensina a pedir o PD
   assertStringIncludes(d, "É a primeira vez de manhã");
   assertStringIncludes(d, "Recomendo revisar e enviar, começando pelo maior.");
   assert(!d.includes("Também:"), "o pacote não vira 'Também'");
+});
+
+// Decisão 6 do dono (22/10/2026): o fato da unidade tem o TIPO como rótulo ("Motorhome: Overland Vegini"). O pacote
+// acha a unidade sem depender do rótulo, e os itens já gravados ("Barco", "Embarcação ou veículo") continuam valendo.
+Deno.test("unidade do item gravado: campo próprio, rótulo antigo, termo geral ou o tipo", () => {
+  const comFatos = (fatos: Array<[string, string]>, unidade?: string | null) =>
+    item("A", { detalhe: { fatos, curto: "x", faco: null, ...(unidade !== undefined ? { unidade } : {}) } });
+  // item novo (o tipo como rótulo, sem o campo próprio)
+  assertEquals(unidadeDoItem(comFatos([["Cliente", "João"], ["Motorhome", "Overland Vegini"], ["Valor", "R$ 1,00"]])), "Motorhome Overland Vegini");
+  assertEquals(unidadeDoItem(comFatos([["Cliente", "César"], ["Equipamento", "Inversor Victron"]])), "Equipamento Inversor Victron");
+  assertEquals(unidadeDoItem(comFatos([["Cliente", "Zé"], ["Embarcação", "Netuno"]])), "Embarcação Netuno", "'Outra embarcação' vira 'Embarcação'");
+  // item antigo (até 21/10) e de ontem (21-22/10)
+  assertEquals(unidadeDoItem(comFatos([["Cliente", "Santo Inacio"], ["Barco", "S.I. 7.8 AUTO"]])), "S.I. 7.8 AUTO");
+  assertEquals(unidadeDoItem(comFatos([["Cliente", "Cliente Final"], ["Embarcação ou veículo", "Trailer Darlan"]])), "Trailer Darlan");
+  // o campo próprio vale mais que o rótulo (tipo livre que a lista não conhece)
+  assertEquals(unidadeDoItem(comFatos([["Cliente", "Ana"], ["Iate", "Netuno"]], "Iate Netuno")), "Iate Netuno");
+  assertEquals(unidadeDoItem(comFatos([["Cliente", "Ana"], ["Iate", "Netuno"]])), null, "sem o campo, rótulo desconhecido não vira unidade");
+  // sem unidade: nada (os outros rótulos nunca são tomados por tipo)
+  assertEquals(unidadeDoItem(comFatos([["Orçamento", "ORÇ-1"], ["Cliente", "Ana"], ["Valor", "R$ 1,00"], ["Situação", "enviado"], ["Montado em", "01/10/2026"]])), null);
+  assertEquals(unidadeDoItem(item("A", { detalhe: null })), null);
+});
+
+Deno.test("pacote com itens de três épocas: 'Barco' (antigo), termo geral (ontem) e o tipo (novo)", () => {
+  const novo = rascunho("ORÇ-00119", "João Luiz Hang", "Overland Vegini", "R$ 9.000,00", "14/10/2026", false, 2, "Motorhome");
+  const novoComCampo = rascunho("ORÇ-00120", "Cliente Final", "Darlan", "R$ 8.000,00", "14/10/2026", false, 3, "Trailer");
+  novoComCampo.detalhe!.unidade = "Trailer Darlan";
+  const linhas = textoDoPacote([...PACOTE, novo, novoComCampo]).split("\n");
+  assertEquals(linhas.slice(1, 6), [
+    "• ORÇ-00117 (EVERTON CARLOS PINHEIRO, Sprinter), R$ 120.020,00, montado em 13/10",
+    "• ORÇ-00116 (Santo Inacio, S.I. 7.8 AUTO), R$ 70.050,00, montado em 09/10",
+    "• ORÇ-00118 (Cliente Final, Trailer Darlan), R$ 21.333,70, montado em 13/10",
+    "• ORÇ-00119 (João Luiz Hang, Motorhome Overland Vegini), R$ 9.000,00, montado em 14/10",
+    "• ORÇ-00120 (Cliente Final, Trailer Darlan), R$ 8.000,00, montado em 14/10",
+  ]);
+});
+
+Deno.test("*detalhe* de item novo: o tipo no lugar de 'Embarcação ou veículo'", () => {
+  const os = item("C", {
+    familia: "os", tipo: "os_parada", secao: "obras", nome: "OS-00051 João Luiz Hang",
+    detalhe: { fatos: [["OS", "OS-00051"], ["Cliente", "João Luiz Hang"], ["Motorhome", "Overland Vegini"], ["Valor", "R$ 1.710,00"]], curto: "x", faco: null },
+  });
+  const t = textoDoDetalhe([os], [], HOJE);
+  assertStringIncludes(t, "Cliente: João Luiz Hang\nMotorhome: Overland Vegini\nValor: R$ 1.710,00");
+  assert(!t.includes("Embarcação ou veículo"));
 });
 
 Deno.test("por que o X: o motivo gravado", () => {

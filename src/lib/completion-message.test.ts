@@ -44,3 +44,16 @@ describe('buildCompletionMessage', () => {
     expect(msg).not.toContain('hbr@marine.com.br');
   });
 });
+
+describe('emoji pelo tipo da unidade (22/10/2026: motorhome recebia 🚤)', () => {
+  it('veículo 🚐, barco 🛥️, equipamento ou sem tipo: nenhum — nas duas variantes', () => {
+    for (const balance of [0, 250]) {
+      const motorhome = buildCompletionMessage({ clientName: 'Rodrigo', osNumber: 'OS-00100', balance, assetType: 'Motorhome' });
+      expect(motorhome.startsWith('Olá Rodrigo! 🚐\n\n')).toBe(true);
+      expect(motorhome).not.toContain('🚤');
+      expect(buildCompletionMessage({ clientName: 'Ana', osNumber: 'OS-1', balance, assetType: 'Lancha' }).startsWith('Olá Ana! 🛥️\n\n')).toBe(true);
+      expect(buildCompletionMessage({ clientName: 'Ana', osNumber: 'OS-1', balance, assetType: 'Equipamento' }).startsWith('Olá Ana!\n\n')).toBe(true);
+      expect(buildCompletionMessage({ clientName: 'Ana', osNumber: 'OS-1', balance }).startsWith('Olá Ana!\n\n')).toBe(true);
+    }
+  });
+});

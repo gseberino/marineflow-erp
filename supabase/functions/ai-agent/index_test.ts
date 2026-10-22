@@ -54,3 +54,15 @@ Deno.test("Passo 5: o *lote* abre a confirmação de sempre (pendência + sessã
   // a camada abre, nunca executa: quem executa é o "sim" lá em cima
   assert(!ramo.includes("approveAndExecutePendingAction") && !ramo.includes("resolveWhatsAppConfirmation"), "o ramo não executa nada");
 });
+
+// Prospecção (SALES_COPY_PROMPT): o texto vai a CLIENTE, e a HBR atende barco E motorhome (dono,
+// 22/10/2026: "seu motorhome", "sua lancha", "seu trailer"; nada de barquinho para motorhome).
+Deno.test("prospecção: público inclui motorhome e a unidade vai pelo tipo", () => {
+  const ini = fonte.indexOf("const SALES_COPY_PROMPT = `");
+  const prompt = fonte.slice(ini, fonte.indexOf("`;", ini));
+  assert(ini > 0, "SALES_COPY_PROMPT ausente");
+  assertStringIncludes(prompt, "proprietários de embarcações e motorhomes, marinas e estaleiros");
+  assertStringIncludes(prompt, '"sua lancha", "seu motorhome", "seu trailer"');
+  assertStringIncludes(prompt, "🚐 para motorhome, trailer ou camper");
+  assert(!prompt.includes("Vendas Náuticas") && !prompt.includes("valorização do barco"), "texto só náutico voltou");
+});

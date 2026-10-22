@@ -95,7 +95,7 @@ export const entity360Tools: ToolDef[] = [
   {
     name: "get_client_360",
     description:
-      "RETRATO COMPLETO de um cliente numa única consulta: dados, ativos e seus equipamentos (com a marina e os CONTATOS de cada embarcação — marinheiro, comandante, com contact_id), orçamentos e OS (abertos e últimos), situação financeira, últimas mensagens de WhatsApp e notas fiscais. Use quando pedirem 'me resume o João', 'o que temos com esse cliente', 'como está a conta dele' — em vez de disparar várias buscas. Responda com a SÍNTESE antes do detalhe. Técnico não recebe as seções de dinheiro.",
+      "RETRATO COMPLETO de um cliente numa única consulta: dados, ativos e seus equipamentos (com a marina e os CONTATOS de cada embarcação ou veículo — marinheiro, comandante, com contact_id), orçamentos e OS (abertos e últimos), situação financeira, últimas mensagens de WhatsApp e notas fiscais. Use quando pedirem 'me resume o João', 'o que temos com esse cliente', 'como está a conta dele' — em vez de disparar várias buscas. Responda com a SÍNTESE antes do detalhe. Técnico não recebe as seções de dinheiro.",
     input_schema: {
       type: "object",
       properties: { client_id: { type: "string", description: "UUID do cliente (use search_clients para achar)." } },

@@ -92,6 +92,40 @@ describe('FichaDaEmbarcacao', () => {
     expect(within(ficha).queryByText('Não informado')).not.toBeInTheDocument();
   });
 
+  it('veículo (dono, 22/10/2026): comprimento em metros, sem vaga de píer, ícone de motorhome', () => {
+    render(<FichaDaEmbarcacao embarcacao={embarcacao({
+      asset_type: 'Motorhome', name: 'Vitória Star', length_feet: 40, engine_brand: 'Iveco', engine_model: 'F1C',
+      marinas: { name: 'Pátio HBR' }, current_dock_position: 'Rua A, 01',
+    })} />);
+    const ficha = screen.getByLabelText('Dados da embarcação ou veículo');
+    expect(valorDe(ficha, 'Comprimento')).toHaveTextContent('12,2 m');
+    expect(within(ficha).queryByText(/pés/)).not.toBeInTheDocument();
+    expect(valorDe(ficha, 'Motores')).toHaveTextContent('Iveco F1C');
+    // A posição no píer é campo de barco: fica gravada, mas não aparece no motorhome.
+    expect(valorDe(ficha, 'Onde fica')).toHaveTextContent(/^Pátio HBR$/);
+    expect(ficha.querySelector('.lucide-caravan')).toBeTruthy();
+    expect(ficha.querySelector('.lucide-ship')).toBeNull();
+  });
+
+  it('equipamento: sem comprimento e sem motores, com o ícone da bancada', () => {
+    render(<FichaDaEmbarcacao embarcacao={embarcacao({
+      asset_type: 'Equipamento', name: 'Inversor', length_feet: 3, engine_brand: 'Volvo', engine_model: 'D6',
+    })} />);
+    const ficha = screen.getByLabelText('Dados da embarcação ou veículo');
+    expect(within(ficha).queryByText('Comprimento')).not.toBeInTheDocument();
+    expect(within(ficha).queryByText('Motores')).not.toBeInTheDocument();
+    // Nada do tipo dele preenchido: é cadastro sem detalhes.
+    expect(within(ficha).getByText(/Cadastro sem detalhes/)).toBeInTheDocument();
+    expect(ficha.querySelector('.lucide-wrench')).toBeTruthy();
+  });
+
+  it('barco (ou sem tipo) segue com o navio e a vaga', () => {
+    render(<FichaDaEmbarcacao embarcacao={embarcacao({ asset_type: 'Lancha', current_dock_position: 'B12' })} />);
+    const ficha = screen.getByLabelText('Dados da embarcação ou veículo');
+    expect(valorDe(ficha, 'Onde fica')).toHaveTextContent('vaga B12');
+    expect(ficha.querySelector('.lucide-ship')).toBeTruthy();
+  });
+
   it('cadastro vazio diz o que falta, e o editar abre o cadastro dela', async () => {
     const user = userEvent.setup();
     render(<FichaDaEmbarcacao embarcacao={embarcacao({})} />);

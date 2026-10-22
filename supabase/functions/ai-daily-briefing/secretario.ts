@@ -42,7 +42,9 @@ export interface ItemParaGravar {
   recomendacao: string | null;
   motivo: string;
   pedido: string | null;
-  detalhe: { fatos: Array<[string, string]>; faco: string | null; curto: string; rotulo: string };
+  // unidade (22/10/2026): "Motorhome Overland Vegini" — quem lê o item acha a unidade por aqui, não pelo
+  // rótulo do fato (que agora é o tipo, texto livre). Itens gravados antes não têm: respostas.ts tem reserva.
+  detalhe: { fatos: Array<[string, string]>; faco: string | null; curto: string; rotulo: string; unidade?: string | null };
 }
 
 export interface ManhaNova {
@@ -123,6 +125,7 @@ export function itensParaGravar(sel: Selecao): ItemParaGravar[] {
           curto: principal && pacote ? pacote.curto : c.curto,
           // o nome curto (o "também" da *lista*)
           rotulo: principal && pacote ? pacote.rotulo : c.rotulo,
+          ...(c.unidade ? { unidade: c.unidade } : {}),
         },
       });
     });

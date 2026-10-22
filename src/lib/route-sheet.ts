@@ -2,7 +2,7 @@ import {
   groupStepsByBlock, isAiDraft,
   type ServiceOrderStep, type RouteMaterial,
 } from '@/hooks/use-service-steps';
-import { campoDaUnidade, ehFeminino, rotuloDaUnidade } from '@/lib/unidade';
+import { camposDoTipo, campoDaUnidade, ehFeminino, rotuloDaUnidade } from '@/lib/unidade';
 
 export interface RouteSheetHeader {
   orderNumber: string;
@@ -205,7 +205,9 @@ export function faltasDaVia(
 ): string[] {
   const faltas: string[] = [];
   if (semSeguranca && quantidadeDeServicos > 0) faltas.push('segurança (nenhum sistema identificado nos serviços)');
-  if (!h.marinaName && !h.dockPosition && !(h.siteAccess || '').trim()) faltas.push('local e acesso');
+  // Vaga é de barco: no veículo o campo nem aparece no cadastro (22/10/2026).
+  const vaga = camposDoTipo(h.assetType).nauticos ? h.dockPosition : null;
+  if (!h.marinaName && !vaga && !(h.siteAccess || '').trim()) faltas.push('local e acesso');
   const temTelefone = (h.clientPhone || h.clientWhatsapp || h.onSiteContact?.phone || '').trim();
   if (!temTelefone) faltas.push('telefone de contato');
   if (!h.scheduledAt) faltas.push('data e hora');
@@ -283,7 +285,7 @@ function whenLine(h: RouteSheetHeader): string {
 function whereLine(h: RouteSheetHeader): string {
   const partes = [
     h.marinaName && escapeHtml(h.marinaName),
-    h.dockPosition && `vaga ${escapeHtml(h.dockPosition)}`,
+    camposDoTipo(h.assetType).nauticos && h.dockPosition && `vaga ${escapeHtml(h.dockPosition)}`,
   ].filter(Boolean);
   const acesso = semValores(h.siteAccess);
   if (!partes.length && !acesso) {

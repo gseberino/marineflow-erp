@@ -1,6 +1,6 @@
 /**
  * Diálogos das ações de um plano de manutenção (07/10/2026): "Serviço feito", "Adiar" e "Pedir
- * lembrete agora". Ficam num arquivo só porque três telas usam os mesmos: o painel da embarcação,
+ * lembrete agora". Ficam num arquivo só porque três telas usam os mesmos: o painel da unidade,
  * a aba Revisões da Agenda e o cartão da tarefa R14 ("Propor revisão").
  */
 import { useEffect, useState } from 'react';
@@ -120,7 +120,7 @@ export function AdiarPlanoDialog({
           <div className="space-y-1.5">
             <Label htmlFor="adiar-plano-motivo">Motivo (opcional)</Label>
             <Input id="adiar-plano-motivo" value={motivo} onChange={(e) => setMotivo(e.target.value)}
-              placeholder="cliente viajando, barco fora d'água…" />
+              placeholder="cliente viajando, sem uso na temporada…" />
           </div>
         </div>
         <DialogFooter>
@@ -173,6 +173,8 @@ export function AcoesDaTarefaDeRevisao({ planId, rotulo }: { planId: string; rot
 export interface AlvoDoLembrete extends AlvoDoPlano {
   plano: string;
   embarcacao: string;
+  /** vessels.asset_type: o pedido ao assistente diz "do motorhome …", "da lancha …" (22/10/2026). */
+  tipo?: string | null;
   cliente: string | null;
   vesselId: string;
   optOut?: boolean | null;
@@ -204,7 +206,7 @@ export function PedirLembreteDialog({
   const preparar = () => {
     if (!alvo) return;
     pedir.mutate(
-      { planId: alvo.planId, plano: alvo.plano, embarcacao: alvo.embarcacao, cliente: alvo.cliente, vesselId: alvo.vesselId },
+      { planId: alvo.planId, plano: alvo.plano, embarcacao: alvo.embarcacao, tipo: alvo.tipo, cliente: alvo.cliente, vesselId: alvo.vesselId },
       {
         onSuccess: (r) => { setProposta(r.proposta); setResposta(r.texto); },
         onError: (e) => toast.error(msg(e, 'O assistente não conseguiu preparar o lembrete.')),

@@ -8,6 +8,13 @@ Deno.test("detecta domínios por palavra-chave", () => {
   assertEquals(detectarDominios("bom dia").length, 0);
 });
 
+Deno.test("campo: barco ou veículo (motorhome, trailer, camper) — 22/10/2026", () => {
+  for (const t of ["saí do serviço no barco", "terminei o serviço no motorhome", "foto no trailer do Darlan", "já estou na lancha", "problema no camper", "a bateria no veículo"]) {
+    assertEquals(detectarDominios(t).includes("campo"), true, t);
+  }
+  assertEquals(detectarDominios("quanto custa o motorhome").includes("campo"), false);
+});
+
 Deno.test("ehCore: leitura e essenciais são sempre core", () => {
   assertEquals(ehCore("search_products"), true);
   assertEquals(ehCore("list_service_orders"), true);

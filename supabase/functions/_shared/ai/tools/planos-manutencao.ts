@@ -17,7 +17,7 @@ import { telefoneParaEnvio } from "./agendamento.ts";
 import { lerDataDaResposta } from "../../revisao/data-da-resposta.ts";
 import { hojeEmBrasilia, type PlanoDue, rotuloDoToque, type Toque } from "../../revisao/texto.ts";
 import { clientesPorId, lerPlanosDue, prepararMensagem, resumoDaProposta } from "../../revisao/lembretes.ts";
-import { campoDaUnidade } from "../../unidade.ts";
+import { campoDaUnidade, type UnidadeResumo, unidadeNaFrase } from "../../unidade.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -32,6 +32,11 @@ const norm = (s: unknown) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g
 const brl = (v: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v || 0);
 const dataBR = (iso: string | null | undefined) => (iso ? iso.slice(0, 10).split("-").reverse().join("/") : null);
 const erroDe = (e: unknown) => ({ error: e instanceof Error ? e.message : String(e) });
+/** "A lancha Mar Azul", "O motorhome Iveco Daily" no começo da frase (22/10/2026: nunca "A Iveco Daily"). */
+const UnidadeNaFrase = (u: UnidadeResumo) => {
+  const s = unidadeNaFrase(u);
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
 
 // ─── Critério do "serviço feito" ────────────────────────────────────────────────────────────
 
@@ -107,41 +112,43 @@ export function dataFuturaDita(bruto: unknown, agora: Date = new Date()): { iso:
 // ─── Achar embarcação e plano pelo nome ─────────────────────────────────────────────────────
 
 type Achado<T> = { ok: T } | { error: string; opcoes?: string[] };
+/** A unidade achada; asset_type para o texto ("a lancha Mar Azul", "o motorhome Iveco Daily"). */
+type UnidadeAchada = { id: string; name: string; client_id: string | null; asset_type?: string | null };
 
-/** Embarcação pelo id ou pelo nome IGUAL ou CORTADO (começo do nome). Parecido não serve: pergunta. */
-export async function acharEmbarcacao(db: Db, bruto: unknown): Promise<Achado<{ id: string; name: string; client_id: string | null }>> {
+/** Embarcação ou veículo pelo id ou pelo nome IGUAL ou CORTADO (começo do nome). Parecido não serve: pergunta. */
+export async function acharEmbarcacao(db: Db, bruto: unknown): Promise<Achado<UnidadeAchada>> {
   const termo = String(bruto ?? "").trim();
-  if (!termo) return { error: "Diga qual embarcação." };
+  if (!termo) return { error: "Diga qual embarcação ou veículo." };
   if (UUID_RE.test(termo)) {
-    const { data, error } = await db.from("vessels").select("id, name, client_id").eq("id", termo).maybeSingle();
-    if (error) return { error: `Falha ao buscar a embarcação: ${error.message}` };
-    return data ? { ok: data } : { error: "Embarcação não encontrada." };
+    const { data, error } = await db.from("vessels").select("id, name, client_id, asset_type").eq("id", termo).maybeSingle();
+    if (error) return { error: `Falha ao buscar a embarcação ou veículo: ${error.message}` };
+    return data ? { ok: data } : { error: "Embarcação ou veículo não encontrado." };
   }
-  const { data, error } = await db.from("vessels").select("id, name, client_id, active")
+  const { data, error } = await db.from("vessels").select("id, name, client_id, asset_type, active")
     .ilike("name", `%${termo.replace(/[%_]/g, " ")}%`).limit(20);
-  if (error) return { error: `Falha ao buscar a embarcação: ${error.message}` };
-  const lista = ((data ?? []) as Array<{ id: string; name: string; client_id: string | null; active: boolean }>).filter((v) => v.active !== false);
+  if (error) return { error: `Falha ao buscar a embarcação ou veículo: ${error.message}` };
+  const lista = ((data ?? []) as Array<UnidadeAchada & { active: boolean }>).filter((v) => v.active !== false);
   const t = norm(termo);
   const iguais = lista.filter((v) => norm(v.name) === t);
   if (iguais.length === 1) return { ok: iguais[0] };
   const cortados = lista.filter((v) => norm(v.name).startsWith(t));
   if (iguais.length === 0 && cortados.length === 1) return { ok: cortados[0] };
-  if (!lista.length) return { error: `Não achei embarcação chamada "${termo}".` };
-  return { error: `Há mais de uma embarcação para "${termo}" (ou só nomes parecidos). Qual delas?`, opcoes: lista.map((v) => v.name) };
+  if (!lista.length) return { error: `Não achei embarcação ou veículo chamado "${termo}".` };
+  return { error: `Há mais de uma embarcação ou veículo para "${termo}" (ou só nomes parecidos). Qual?`, opcoes: lista.map((v) => v.name) };
 }
 
-/** O plano: pelo id, ou pela embarcação (+ o nome do plano, se ela tiver mais de um ativo). */
+/** O plano: pelo id, ou pela embarcação/veículo (+ o nome do plano, se tiver mais de um ativo). */
 export async function acharPlano(
   db: Db,
   args: { plano?: unknown; embarcacao?: unknown; plano_nome?: unknown },
   soAtivos = true,
-): Promise<Achado<{ id: string; name: string; vessel_id: string; vessel_name: string; active: boolean }>> {
+): Promise<Achado<{ id: string; name: string; vessel_id: string; vessel_name: string; vessel_asset_type?: string | null; active: boolean }>> {
   const id = String(args.plano ?? "").trim();
   if (UUID_RE.test(id)) {
-    const { data, error } = await db.from("maintenance_plans").select("id, name, vessel_id, active, vessels(name)").eq("id", id).maybeSingle();
+    const { data, error } = await db.from("maintenance_plans").select("id, name, vessel_id, active, vessels(name, asset_type)").eq("id", id).maybeSingle();
     if (error) return { error: `Falha ao buscar o plano: ${error.message}` };
     if (!data) return { error: "Plano de manutenção não encontrado." };
-    return { ok: { id: data.id, name: data.name, vessel_id: data.vessel_id, vessel_name: data.vessels?.name ?? "", active: data.active } };
+    return { ok: { id: data.id, name: data.name, vessel_id: data.vessel_id, vessel_name: data.vessels?.name ?? "", vessel_asset_type: data.vessels?.asset_type ?? null, active: data.active } };
   }
   const barco = await acharEmbarcacao(db, args.embarcacao);
   if ("error" in barco) return barco;
@@ -155,9 +162,9 @@ export async function acharPlano(
     const iguais = planos.filter((p) => norm(p.name) === nome);
     planos = iguais.length ? iguais : planos.filter((p) => norm(p.name).includes(nome));
   }
-  if (planos.length === 1) return { ok: { ...planos[0], vessel_name: barco.ok.name } };
-  if (!planos.length) return { error: `A ${barco.ok.name} não tem plano${nome ? ` "${String(args.plano_nome ?? id)}"` : ""}${soAtivos ? " ativo" : ""}.` };
-  return { error: `A ${barco.ok.name} tem ${planos.length} planos. Qual?`, opcoes: planos.map((p) => p.name) };
+  if (planos.length === 1) return { ok: { ...planos[0], vessel_name: barco.ok.name, vessel_asset_type: barco.ok.asset_type ?? null } };
+  if (!planos.length) return { error: `${UnidadeNaFrase(barco.ok)} não tem plano${nome ? ` "${String(args.plano_nome ?? id)}"` : ""}${soAtivos ? " ativo" : ""}.` };
+  return { error: `${UnidadeNaFrase(barco.ok)} tem ${planos.length} planos. Qual?`, opcoes: planos.map((p) => p.name) };
 }
 
 /** Os serviços e peças das OS (para achar o último serviço que casa com o critério). */
@@ -242,7 +249,7 @@ export async function prepararLembreteAgora(db: Db, args: Record<string, unknown
   }
   const p = linhas[0] as (PlanoDue & { ultimo_toque?: number | null }) | undefined;
   if (!p) return { error: `O plano ${plano.ok.name} está desligado.` };
-  if (!p.client_id) return { error: `A ${p.vessel_name} não tem cliente cadastrado.` };
+  if (!p.client_id) return { error: `${UnidadeNaFrase({ name: p.vessel_name, asset_type: plano.ok.vessel_asset_type })} não tem cliente cadastrado.` };
   if (p.opt_out) return { error: `${p.client_name} pediu para não receber WhatsApp.` };
   if (!telefoneParaEnvio(p.client_phone)) return { error: `${p.client_name} está sem telefone válido no cadastro.` };
   if (p.client_reminder_enabled === false) return { error: `O lembrete ao cliente está desligado no plano ${p.plan_name}. Ligue antes (update_maintenance_plan).` };
@@ -341,8 +348,8 @@ export const TITULOS_DOS_PLANOS: Record<string, string> = {
 
 const PLANO_PROPS = {
   plano: { type: "string", description: "Id do plano (de list_maintenance_plans). Ou use embarcacao (+ plano_nome)." },
-  embarcacao: { type: "string", description: "Nome da embarcação (igual ou o começo do nome) ou id." },
-  plano_nome: { type: "string", description: "Nome do plano, quando a embarcação tem mais de um (ex.: 'baterias')." },
+  embarcacao: { type: "string", description: "Nome da embarcação ou veículo (igual ou o começo do nome) ou id." },
+  plano_nome: { type: "string", description: "Nome do plano, quando a unidade tem mais de um (ex.: 'baterias')." },
 };
 
 const SITUACOES = ["vencendo_30", "na_janela", "vencida", "adiada", "em_dia", "respondeu", "todas"];
@@ -371,11 +378,11 @@ export const planosManutencaoTools: ToolDef[] = [
   {
     name: "list_maintenance_plans",
     description:
-      "Lista os PLANOS DE MANUTENÇÃO (revisões recorrentes por embarcação) com vencimento, situação (em dia, na janela de 21 dias, vencida, adiada), último serviço, valor estimado, último lembrete ao cliente e se ele respondeu. Filtros: embarcação, cliente, situação ('vencendo_30' = vence nos próximos 30 dias). Traz a receita prevista (soma dos valores). Só leitura.",
+      "Lista os PLANOS DE MANUTENÇÃO (revisões recorrentes por embarcação ou veículo) com vencimento, situação (em dia, na janela de 21 dias, vencida, adiada), último serviço, valor estimado, último lembrete ao cliente e se ele respondeu. Filtros: embarcação, cliente, situação ('vencendo_30' = vence nos próximos 30 dias). Traz a receita prevista (soma dos valores). Só leitura.",
     input_schema: {
       type: "object",
       properties: {
-        embarcacao: { type: "string", description: "Parte do nome da embarcação." },
+        embarcacao: { type: "string", description: "Parte do nome da embarcação ou veículo." },
         cliente: { type: "string", description: "Parte do nome do cliente." },
         situacao: { type: "string", enum: SITUACOES, description: "Padrão: todas." },
         limit: { type: "number", description: "Máximo de planos (padrão 30, teto 100)." },
@@ -413,11 +420,11 @@ export const planosManutencaoTools: ToolDef[] = [
   {
     name: "create_maintenance_plan",
     description:
-      "Cria um PLANO DE MANUTENÇÃO recorrente para uma embarcação (ex.: 'revisão das baterias da Mar Azul a cada 12 meses, uns R$ 1.500'). O critério do 'serviço feito' (sistema/palavras) é sugerido pelo nome do plano; a data do último serviço, se não for dita, é a da última OS concluída que casa com o critério. Use as propostas de suggest_maintenance_plans (origem 'sugerido'). Pede confirmação.",
+      "Cria um PLANO DE MANUTENÇÃO recorrente para uma embarcação ou veículo (ex.: 'revisão das baterias da Mar Azul a cada 12 meses, uns R$ 1.500'). O critério do 'serviço feito' (sistema/palavras) é sugerido pelo nome do plano; a data do último serviço, se não for dita, é a da última OS concluída que casa com o critério. Use as propostas de suggest_maintenance_plans (origem 'sugerido'). Pede confirmação.",
     input_schema: {
       type: "object",
       properties: {
-        embarcacao: { type: "string", description: "Nome da embarcação (igual ou o começo do nome) ou id." },
+        embarcacao: { type: "string", description: "Nome da embarcação ou veículo (igual ou o começo do nome) ou id." },
         nome: { type: "string", description: "Nome do plano (ex.: 'Revisão das baterias')." },
         intervalo_meses: { type: "number", description: "A cada quantos meses (1 a 60)." },
         escopo: { type: "string", description: "O que a revisão inclui." },
@@ -452,9 +459,9 @@ export const planosManutencaoTools: ToolDef[] = [
       if ("error" in barco) return barco;
 
       const { data: existentes, error: eP } = await ctx.sb.from("maintenance_plans").select("id, name").eq("vessel_id", barco.ok.id).eq("active", true);
-      if (eP) return { error: `Falha ao conferir os planos da embarcação: ${eP.message}` };
+      if (eP) return { error: `Falha ao conferir os planos ${unidadeNaFrase(barco.ok, "de")}: ${eP.message}` };
       if (((existentes ?? []) as Array<{ name: string }>).some((p) => norm(p.name) === norm(nome))) {
-        return { error: `A ${barco.ok.name} já tem o plano "${nome}" ativo. Para mudar, use update_maintenance_plan.` };
+        return { error: `${UnidadeNaFrase(barco.ok)} já tem o plano "${nome}" ativo. Para mudar, use update_maintenance_plan.` };
       }
 
       const sugerido = criterioPeloNome(nome);
@@ -506,14 +513,14 @@ export const planosManutencaoTools: ToolDef[] = [
       return {
         ok: true,
         plano_id: criado.id,
-        message: `Plano "${nome}" criado para a ${barco.ok.name}, a cada ${intervalo} meses.` +
+        message: `Plano "${nome}" criado ${unidadeNaFrase(barco.ok, "para")}, a cada ${intervalo} meses.` +
           (ultimo ? ` Último serviço: ${dataBR(ultimo)}${ultimaOs ? ` (${ultimaOs.service_order_number})` : ""}.` : " Sem serviço anterior: conta a partir de hoje.") +
           (vence ? ` Próximo vencimento: ${dataBR(vence)}.` : ""),
         criterio: {
           sistema: criterio.service_system,
           palavras: criterio.match_keywords,
           explicacao: !criterio.service_system && !criterio.match_keywords.length
-            ? "Sem critério: qualquer OS concluída da embarcação conta como serviço feito."
+            ? `Sem critério: qualquer OS concluída ${unidadeNaFrase(barco.ok, "de")} conta como serviço feito.`
             : "OS concluída que casa com isto atualiza o plano sozinha.",
         },
       };
@@ -574,7 +581,7 @@ export const planosManutencaoTools: ToolDef[] = [
       const { error } = await ctx.sb.from("maintenance_plans").update(patch).eq("id", plano.ok.id);
       if (error) return { error: `Falha ao alterar o plano: ${error.message}` };
       const mudou = Object.fromEntries(Object.keys(patch).map((k) => [k, { antes: antes?.[k] ?? null, depois: patch[k] }]));
-      return { ok: true, plano: plano.ok.name, embarcacao: plano.ok.vessel_name, mudou, message: `Plano "${plano.ok.name}" da ${plano.ok.vessel_name} alterado.` };
+      return { ok: true, plano: plano.ok.name, embarcacao: plano.ok.vessel_name, mudou, message: `Plano "${plano.ok.name}" ${unidadeNaFrase({ name: plano.ok.vessel_name, asset_type: plano.ok.vessel_asset_type }, "de")} alterado.` };
     },
   },
   {
@@ -645,11 +652,11 @@ export const planosManutencaoTools: ToolDef[] = [
   {
     name: "suggest_maintenance_plans",
     description:
-      "PROPÕE planos de manutenção a partir do que já foi feito: para cada embarcação, a última troca/manutenção de BATERIAS, MOTOR e INVERSOR/CARREGADOR nas OS concluídas (e os equipamentos cadastrados), com intervalo, valor e critério prontos para create_maintenance_plan (origem 'sugerido'). Ignora o que já tem plano. Só leitura — não cria nada.",
+      "PROPÕE planos de manutenção a partir do que já foi feito: para cada embarcação ou veículo, a última troca/manutenção de BATERIAS, MOTOR e INVERSOR/CARREGADOR nas OS concluídas (e os equipamentos cadastrados), com intervalo, valor e critério prontos para create_maintenance_plan (origem 'sugerido'). Ignora o que já tem plano. Só leitura — não cria nada.",
     input_schema: {
       type: "object",
       properties: {
-        embarcacao: { type: "string", description: "Só esta embarcação (nome igual/começo do nome). Vazio = todas." },
+        embarcacao: { type: "string", description: "Só esta embarcação ou veículo (nome igual/começo do nome). Vazio = todas." },
         limit: { type: "number", description: "Máximo de propostas (padrão 15, teto 40)." },
       },
     },
@@ -666,7 +673,7 @@ export const planosManutencaoTools: ToolDef[] = [
       if ("error" in oss) return oss;
       const comServico = [...new Set(oss.map((o) => o.vessel_id))];
       if (vesselIds === null) vesselIds = comServico;
-      if (!vesselIds.length) return { count: 0, propostas: [], nota: "Nenhuma embarcação com OS concluída." };
+      if (!vesselIds.length) return { count: 0, propostas: [], nota: "Nenhuma embarcação ou veículo com OS concluída." };
 
       let qv = ctx.sb.from("vessels").select("id, name, client_id, active, engine_brand, engine_model, engine_type, battery_bank_summary, inverter_charger_summary, clients(name)").in("id", vesselIds);
       qv = qv.eq("active", true);
@@ -674,7 +681,7 @@ export const planosManutencaoTools: ToolDef[] = [
         qv,
         ctx.sb.from("maintenance_plans").select("vessel_id, name, service_system, match_keywords").eq("active", true).in("vessel_id", vesselIds),
       ]);
-      if (eV) return { error: `Falha ao ler as embarcações: ${eV.message}` };
+      if (eV) return { error: `Falha ao ler as embarcações e veículos: ${eV.message}` };
       if (eP) return { error: `Falha ao ler os planos: ${eP.message}` };
       const linhas = await linhasDasOs(ctx.sb, oss.map((o) => o.id));
       if ("error" in linhas) return linhas;
@@ -762,7 +769,7 @@ export const planosManutencaoTools: ToolDef[] = [
     roles: CARGOS_DO_ENVIO,
     preValidar(args, ctx) {
       if (!CARGOS_DO_ENVIO.includes(ctx.userRole as Role)) return { error: "Só administrador ou financeiro manda lembrete ao cliente." };
-      if (!args?.plano && !args?.embarcacao) return { error: "Diga de qual embarcação (ou plano) é o lembrete." };
+      if (!args?.plano && !args?.embarcacao) return { error: "Diga de qual embarcação ou veículo (ou plano) é o lembrete." };
       return null;
     },
     async retratoDaPendencia(args, ctx) {
@@ -791,7 +798,7 @@ export const planosManutencaoTools: ToolDef[] = [
         planos: { type: "array", items: { type: "string" }, description: "Ids dos planos (da referência do pedido)." },
         toque: { type: "number", enum: [0, 1, 2, 3], description: "1 = D-21, 2 = D-7, 3 = D+14, 0 = campanha de temporada." },
         texto: { type: "string", description: "O texto exato que vai ao cliente." },
-        embarcacao: { type: "string", description: "Campanha sem plano: a embarcação (id ou nome)." },
+        embarcacao: { type: "string", description: "Campanha sem plano: a embarcação ou veículo (id ou nome)." },
       },
       required: ["toque", "texto"],
     },
@@ -802,7 +809,7 @@ export const planosManutencaoTools: ToolDef[] = [
       if (!String(args?.texto ?? "").trim()) return { error: "O texto do lembrete está vazio." };
       if (![0, 1, 2, 3].includes(Number(args?.toque))) return { error: "Toque inválido (0 a 3)." };
       const planos = Array.isArray(args?.planos) ? args.planos.filter((x: unknown) => UUID_RE.test(String(x))) : [];
-      if (!planos.length && !args?.embarcacao) return { error: "Diga os planos (ou a embarcação, na campanha)." };
+      if (!planos.length && !args?.embarcacao) return { error: "Diga os planos (ou a embarcação ou veículo, na campanha)." };
       return null;
     },
     async execute(args, ctx) {
@@ -820,7 +827,7 @@ export const planosManutencaoTools: ToolDef[] = [
   {
     name: "maintenance_reminder_metrics",
     description:
-      "Como estão os LEMBRETES DE REVISÃO num período: propostos, aprovados/recusados por você, enviados, respostas, PARAR, agendamentos (OS da embarcação aberta até 30 dias depois do envio), receita dessas OS e o atraso médio entre o vencimento e o serviço feito. Só leitura.",
+      "Como estão os LEMBRETES DE REVISÃO num período: propostos, aprovados/recusados por você, enviados, respostas, PARAR, agendamentos (OS da mesma unidade aberta até 30 dias depois do envio), receita dessas OS e o atraso médio entre o vencimento e o serviço feito. Só leitura.",
     input_schema: {
       type: "object",
       properties: {

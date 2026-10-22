@@ -270,7 +270,7 @@ export const soOpsTools: ToolDef[] = [
   {
     name: "skip_service_order_step",
     description:
-      "Marca um passo como NÃO SE APLICA, com o motivo ('esse passo não vale aqui porque o barco não tem esse sistema'). " +
+      "Marca um passo como NÃO SE APLICA, com o motivo ('esse passo não vale aqui porque a unidade não tem esse sistema'). " +
       "Diferente de concluir: não foi feito, e não precisava ser. O motivo é obrigatório — é o que explica a lacuna depois.",
     input_schema: {
       type: "object",

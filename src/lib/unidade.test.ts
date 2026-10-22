@@ -2,8 +2,9 @@
 // unidade à vista; "Embarcação ou veículo" quando não há.
 import { describe, it, expect } from 'vitest';
 import {
-  TERMO_GERAL, campoDaUnidade, linhaDaUnidade, nomeDaUnidade, rotuloDaIdentificacao, rotuloDaUnidade,
-  unidadeNaFrase,
+  TERMO_GERAL, TIPOS_DE_UNIDADE, camposDoTipo, campoDaUnidade, comprimentoDoTipo, emojiDaUnidade, grupoDoTipo,
+  linhaDaUnidade, metrosParaPes, nomeDaUnidade, pesParaMetros, rotuloDaIdentificacao, rotuloDaUnidade,
+  sinonimosDoTipo, suaUnidade, tipoDoSeletor, unidadeNaFrase,
 } from './unidade';
 
 const daily = { name: 'Iveco Daily', asset_type: 'Motorhome', manufacturer: 'Iveco', model: 'Daily 55C17', hull_id_or_registration: 'ABC1D23' };
@@ -78,6 +79,70 @@ describe('nome que já começa pelo tipo ("Trailer Darlan", 6 cadastros em 21/10
   it('sem nada, o termo geral', () => {
     expect(nomeDaUnidade(null)).toBe(TERMO_GERAL);
     expect(nomeDaUnidade({ name: '', asset_type: null })).toBe(TERMO_GERAL);
+  });
+});
+
+describe('tipos novos (decisão 10, 22/10/2026)', () => {
+  it('"Outra embarcação" e "Outro veículo" viram o rótulo do grupo', () => {
+    expect(linhaDaUnidade({ name: 'Netuno', asset_type: 'Outra embarcação' })).toBe('Embarcação: Netuno');
+    expect(linhaDaUnidade({ name: 'Kombi', asset_type: 'Outro veículo' })).toBe('Veículo: Kombi');
+    expect(unidadeNaFrase({ name: 'Netuno', asset_type: 'Outra embarcação' }, 'em')).toBe('na embarcação Netuno');
+    expect(unidadeNaFrase({ name: 'Kombi', asset_type: 'Outro veículo' }, 'de')).toBe('do veículo Kombi');
+    expect(rotuloDaIdentificacao('Outro veículo')).toBe('Placa');
+  });
+  it('"Jet Ski" antigo vale como moto aquática; o seletor mostra o valor novo', () => {
+    expect(linhaDaUnidade({ name: 'Azul', asset_type: 'Jet Ski' })).toBe('Moto aquática: Azul');
+    expect(unidadeNaFrase({ name: 'Azul', asset_type: 'Jet Ski' }, 'em')).toBe('na moto aquática Azul');
+    expect(tipoDoSeletor('Jet Ski')).toBe('Moto aquática');
+    expect(tipoDoSeletor('Outro')).toBe('');
+    expect(tipoDoSeletor('motorhome')).toBe('Motorhome');
+    expect(sinonimosDoTipo('Moto aquática')).toContain('jet ski');
+    expect(sinonimosDoTipo('Motorhome')).toContain('van');
+  });
+  it('todo tipo da lista tem grupo (nenhum cai em "outro" sem querer), salvo Equipamento', () => {
+    for (const g of TIPOS_DE_UNIDADE) for (const t of g.tipos) {
+      if (t.valor === 'Equipamento') continue;
+      expect(grupoDoTipo(t.valor), t.valor).toBe(g.grupo === 'Embarcações' ? 'embarcacao' : 'veiculo');
+    }
+  });
+});
+
+describe('falando com o cliente: "seu motorhome", "sua lancha" (dono, 22/10/2026)', () => {
+  it('possessivo pelo gênero do tipo, com preposição', () => {
+    expect(suaUnidade(daily)).toBe('seu motorhome');
+    expect(suaUnidade(netuno)).toBe('sua lancha');
+    expect(suaUnidade({ asset_type: 'Trailer' }, 'de')).toBe('do seu trailer');
+    expect(suaUnidade(daily, 'em')).toBe('no seu motorhome');
+    expect(suaUnidade(netuno, 'em')).toBe('na sua lancha');
+    expect(suaUnidade({ asset_type: 'Moto aquática' }, 'para')).toBe('para a sua moto aquática');
+    expect(suaUnidade(null)).toBe('sua embarcação ou veículo');
+  });
+  it('com o nome (cliente com duas unidades precisa saber qual), sem repetir o tipo', () => {
+    expect(suaUnidade(daily, 'em', { comNome: true })).toBe('no seu motorhome Iveco Daily');
+    expect(suaUnidade(netuno, 'de', { comNome: true })).toBe('da sua lancha Netuno II');
+    expect(suaUnidade({ name: 'Trailer Darlan', asset_type: 'Trailer' }, 'de', { comNome: true })).toBe('do seu trailer Darlan');
+    expect(suaUnidade({ name: 'Motorhome', asset_type: 'Motorhome' }, 'de', { comNome: true })).toBe('do seu motorhome');
+  });
+  it('emoji pelo grupo: nada de barquinho para motorhome', () => {
+    expect(emojiDaUnidade('Lancha')).toBe('🛥️');
+    expect(emojiDaUnidade('Motorhome')).toBe('🚐');
+    expect(emojiDaUnidade('Equipamento')).toBe('');
+  });
+});
+
+describe('campos por tipo (dono, 22/10/2026: "ajustar conforme cada tipo")', () => {
+  it('barco: tudo, em pés; veículo: sem campos náuticos, em metros; equipamento: sem comprimento e motores', () => {
+    expect(camposDoTipo('Lancha')).toMatchObject({ nauticos: true, comprimento: 'pes', motores: true, rotuloOndeFica: 'Marina' });
+    expect(camposDoTipo('Motorhome')).toMatchObject({ nauticos: false, comprimento: 'metros', motores: true, rotuloOndeFica: 'Onde fica' });
+    expect(camposDoTipo('Equipamento')).toMatchObject({ nauticos: false, comprimento: null, motores: false });
+    expect(camposDoTipo(null)).toMatchObject({ nauticos: true, comprimento: 'pes' });
+  });
+  it('comprimento: pés para barco, metros para veículo (o banco guarda pés)', () => {
+    expect(comprimentoDoTipo(40, 'Lancha')).toBe('40 pés');
+    expect(comprimentoDoTipo(40, 'Motorhome')).toBe('12,2 m');
+    expect(comprimentoDoTipo(40, 'Equipamento')).toBe('');
+    expect(comprimentoDoTipo(null, 'Lancha')).toBe('');
+    expect(metrosParaPes(pesParaMetros(40))).toBeCloseTo(40, 1);
   });
 });
 

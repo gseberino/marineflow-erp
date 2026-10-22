@@ -3,6 +3,10 @@ import { orContem } from "../filtro-or.ts";
 import { formatarCep, formatarTelefone, lerTodosOsCadastros, notaDoCadastro, semAcento } from "../busca-cadastro.ts";
 import { mesmoTelefone } from "../phone.ts";
 import { ehErro } from "./caixa.ts";
+import { TIPOS_DE_UNIDADE, unidadeNaFrase } from "../../unidade.ts";
+
+/** Os tipos da lista do cadastro (decisão do dono, 22/10/2026), para o modelo gravar o valor certo. */
+const LISTA_DE_TIPOS = TIPOS_DE_UNIDADE.flatMap((g) => g.tipos.map((t) => t.valor)).join(", ");
 
 // ── Marina (07/10/2026) ─────────────────────────────────────────────────────────────────────────
 // Campos que a tela grava (src/components/MarinaFormDialog.tsx). create_marina só aceitava nome,
@@ -113,7 +117,7 @@ export async function contatosDasEmbarcacoes(sb: any, vesselIds: string[]): Prom
 export const vesselTools: ToolDef[] = [
   {
     name: "search_vessels",
-    description: "Busca embarcações por nome/modelo. Pode filtrar por client_id.",
+    description: "Busca embarcações e veículos (lancha, motorhome, trailer…) por nome/modelo. Pode filtrar por client_id.",
     input_schema: {
       type: "object",
       properties: { query: { type: "string" }, client_id: { type: "string" } },
@@ -138,7 +142,7 @@ export const vesselTools: ToolDef[] = [
   {
     name: "get_vessel_history",
     description:
-      "Retorna o histórico completo de serviços realizados em uma embarcação, os CONTATOS da embarcação (marinheiro, comandante... com o contact_id) e a marina onde ela fica (com o contato da marina). Use para 'quem é o marinheiro da Netuno?'.",
+      "Retorna o histórico completo de serviços realizados em uma embarcação ou veículo, os CONTATOS dela (marinheiro, comandante... com o contact_id) e a marina onde fica (com o contato da marina). Use para 'quem é o marinheiro da Netuno?'.",
     input_schema: {
       type: "object",
       properties: { vessel_id: { type: "string" } },
@@ -167,7 +171,7 @@ export const vesselTools: ToolDef[] = [
       // daqui. Leitura que falha lança — "sem contato" por erro levaria a cadastrar de novo.
       const { data: barco, error: barcoErr } = await sb
         .from("vessels")
-        .select("id, name, marina_id, marinas(name, contact_name, phone)")
+        .select("id, name, asset_type, marina_id, marinas(name, contact_name, phone)")
         .eq("id", args.vessel_id)
         .maybeSingle();
       if (barcoErr) throw barcoErr;
@@ -175,7 +179,8 @@ export const vesselTools: ToolDef[] = [
       const marina = barco?.marinas
         ? { nome: barco.marinas.name, contato: barco.marinas.contact_name || null, telefone: barco.marinas.phone || null }
         : null;
-      return { history: mapped, contatos, marina };
+      // O tipo, para falar com o cliente "do seu motorhome", "da sua lancha" (dono, 22/10/2026).
+      return { history: mapped, contatos, marina, tipo_unidade: barco?.asset_type ?? null };
     },
   },
   {
@@ -208,16 +213,16 @@ export const vesselTools: ToolDef[] = [
   },
   {
     name: "create_vessel",
-    description: "Cadastra uma nova unidade/ativo (embarcação ou motorhome) para um cliente.",
+    description: "Cadastra uma nova unidade (embarcação, veículo ou equipamento de bancada) para um cliente.",
     input_schema: {
       type: "object",
       properties: {
         client_id: { type: "string" },
-        name: { type: "string", description: "Nome da embarcação ou identificação do motorhome" },
+        name: { type: "string", description: "Nome da embarcação, ou modelo/placa do veículo" },
         manufacturer: { type: "string" },
         model: { type: "string" },
         year: { type: "number" },
-        asset_type: { type: "string", description: "Exemplo: Lancha, Veleiro, Motorhome, Camper, Jet Ski" },
+        asset_type: { type: "string", description: `Tipo, um destes: ${LISTA_DE_TIPOS}. Jet ski é Moto aquática; van convertida é Motorhome.` },
         marina_id: { type: "string" },
       },
       required: ["client_id", "name", "asset_type"],
@@ -315,11 +320,11 @@ export const vesselTools: ToolDef[] = [
   {
     name: "add_vessel_contact",
     description:
-      "Adiciona um contato à embarcação (marinheiro, comandante, proprietário, administrador, mecânico) — o mesmo 'Contatos da Embarcação' da tela. Ex.: 'adiciona o marinheiro Carlos como contato da lancha Netuno, 47 9…'. Ache o vessel_id com search_vessels. Se a pessoa já é contato dessa embarcação (mesmo nome ou telefone), não duplica.",
+      "Adiciona um contato à embarcação ou veículo (marinheiro, comandante, proprietário, administrador, mecânico) — os mesmos contatos da tela da unidade. Ex.: 'adiciona o marinheiro Carlos como contato da lancha Netuno, 47 9…'. Ache o vessel_id com search_vessels. Se a pessoa já é contato dessa unidade (mesmo nome ou telefone), não duplica.",
     input_schema: {
       type: "object",
       properties: {
-        vessel_id: { type: "string", description: "UUID da embarcação (search_vessels)." },
+        vessel_id: { type: "string", description: "UUID da embarcação ou veículo (search_vessels)." },
         full_name: { type: "string", description: "Nome do contato." },
         role: { type: "string", description: FUNCAO_DESC },
         phone: { type: "string" },
@@ -335,9 +340,9 @@ export const vesselTools: ToolDef[] = [
       const funcao = traduzirFuncao(args.role);
       if (typeof funcao === "object") return funcao;
 
-      const { data: barco, error: barcoErr } = await sb.from("vessels").select("id, name").eq("id", args.vessel_id).maybeSingle();
+      const { data: barco, error: barcoErr } = await sb.from("vessels").select("id, name, asset_type").eq("id", args.vessel_id).maybeSingle();
       if (barcoErr) throw barcoErr;
-      if (!barco) return { error: "Embarcação não encontrada (use search_vessels)." };
+      if (!barco) return { error: "Embarcação ou veículo não encontrado (use search_vessels)." };
 
       const telefone = formatarTelefone(args.phone);
       const atuais = (await contatosDasEmbarcacoes(sb, [barco.id]))[barco.id] ?? [];
@@ -346,7 +351,7 @@ export const vesselTools: ToolDef[] = [
         return {
           ok: false,
           ja_e_contato: mesmo,
-          aviso: `${mesmo.nome} já é contato da ${barco.name}. Para mudar telefone/função use update_vessel_contact.`,
+          aviso: `${mesmo.nome} já é contato ${unidadeNaFrase(barco, "de")}. Para mudar telefone/função use update_vessel_contact.`,
         };
       }
 
@@ -362,7 +367,7 @@ export const vesselTools: ToolDef[] = [
   {
     name: "update_vessel_contact",
     description:
-      "Corrige um contato da embarcação (nome, função, telefone, e-mail, observação) ou o REMOVE da lista (ativo=false; ativo=true devolve). O contact_id vem de get_vessel_history ou get_client_360.",
+      "Corrige um contato da embarcação ou veículo (nome, função, telefone, e-mail, observação) ou o REMOVE da lista (ativo=false; ativo=true devolve). O contact_id vem de get_vessel_history ou get_client_360.",
     input_schema: {
       type: "object",
       properties: {
@@ -372,7 +377,7 @@ export const vesselTools: ToolDef[] = [
         phone: { type: "string" },
         email: { type: "string" },
         notes: { type: "string" },
-        ativo: { type: "boolean", description: "false = remover da lista de contatos da embarcação; true = devolver." },
+        ativo: { type: "boolean", description: "false = remover da lista de contatos da unidade; true = devolver." },
       },
       required: ["contact_id"],
     },
@@ -401,7 +406,7 @@ export const vesselTools: ToolDef[] = [
       return {
         ok: true,
         contato: contatoResumo(data),
-        ...(patch.active === false ? { removido: true, nota: "Saiu da lista de contatos da embarcação (o histórico das OS continua)." } : {}),
+        ...(patch.active === false ? { removido: true, nota: "Saiu da lista de contatos da unidade (o histórico das OS continua)." } : {}),
         alterado: Object.keys(patch),
       };
     },

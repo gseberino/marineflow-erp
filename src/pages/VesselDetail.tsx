@@ -9,15 +9,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MaintenancePlansPanel } from '@/components/agenda/MaintenancePlansPanel';
 import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Ship, Anchor, Battery, Radio, Zap, Edit } from 'lucide-react';
+import { ArrowLeft, Anchor, Battery, MapPin, Radio, Zap, Edit } from 'lucide-react';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
+import { IconeDaUnidade } from '@/components/service-order/FichaDaEmbarcacao';
 import { RecordHistory } from '@/components/RecordHistory';
 import { PastaDoBarcoBotao } from '@/components/dropbox/PastaNoDropbox';
 import { ArquivosDoBarco } from '@/components/dropbox/ArquivosDoBarco';
 import { useAuth } from '@/hooks/use-auth';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
-import { grupoDoTipo, rotuloDaIdentificacao, rotuloDaUnidade, unidadeNaFrase } from '@/lib/unidade';
+import { camposDoTipo, comprimentoDoTipo, grupoDoTipo, rotuloDaIdentificacao, rotuloDaUnidade, unidadeNaFrase } from '@/lib/unidade';
 
 export default function VesselDetail() {
   const { id } = useParams<{ id: string }>();
@@ -62,6 +63,11 @@ export default function VesselDetail() {
   // Os rótulos pelo tipo da unidade aberta (decisão 9, 21/10/2026): "Placa" no motorhome,
   // "Inscrição" no barco; "Casco" só em barco.
   const tipo = vessel.asset_type;
+  // Só os campos do tipo (dono, 22/10/2026): veículo sem boca, calado, píer, propulsão e eletrônica
+  // de navegação, e em metros; equipamento sem comprimento nem motores. O gravado não se perde.
+  const campos = camposDoTipo(tipo);
+  const comprimento = comprimentoDoTipo(vessel.length_feet, tipo);
+  const pes = (n: number | null | undefined) => (n ? `${n.toLocaleString('pt-BR')} pés` : undefined);
 
   const InfoRow = ({ label, value }: { label: string; value?: string | number | null }) => (
     <div className="flex justify-between py-2 border-b border-border/50 last:border-0">
@@ -75,9 +81,14 @@ export default function VesselDetail() {
       <div className="flex items-center gap-3">
         <Link to="/vessels" className="rounded-lg p-1.5 hover:bg-muted transition-colors"><ArrowLeft className="h-5 w-5" /></Link>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Ship className="h-6 w-6 text-accent" />{vessel.name}</h1>
+          <h1 className="text-2xl font-bold flex items-center gap-2"><IconeDaUnidade tipo={tipo} className="h-6 w-6 shrink-0 text-accent" />{vessel.name}</h1>
           <p className="text-sm text-muted-foreground">
-            {rotuloDaUnidade(tipo)} • {vessel.manufacturer} {vessel.model} {vessel.year ? `(${vessel.year})` : ''} • {vessel.length_feet ? `${vessel.length_feet} ft` : ''} • {t.vessels.owner}: {clientName}
+            {[
+              rotuloDaUnidade(tipo),
+              [vessel.manufacturer, vessel.model, vessel.year ? `(${vessel.year})` : ''].filter(Boolean).join(' '),
+              comprimento,
+              `${t.vessels.owner}: ${clientName}`,
+            ].filter(Boolean).join(' • ')}
           </p>
         </div>
         {id && <PastaDoBarcoBotao vesselId={id} />}
@@ -106,42 +117,53 @@ export default function VesselDetail() {
 
         <TabsContent value="overview" className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="rounded-xl border bg-card p-5 shadow-sm">
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Ship className="h-4 w-4" /> {grupoDoTipo(tipo) === 'embarcacao' ? t.vessels.hullAndSpecs : t.vessels.specs}</h3>
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><IconeDaUnidade tipo={tipo} className="h-4 w-4" /> {grupoDoTipo(tipo) === 'embarcacao' ? t.vessels.hullAndSpecs : t.vessels.specs}</h3>
             <InfoRow label={rotuloDaIdentificacao(tipo)} value={vessel.hull_id_or_registration} />
-            <InfoRow label={t.vessels.length} value={vessel.length_feet ? `${vessel.length_feet} ft` : undefined} />
-            <InfoRow label={t.vessels.beam} value={vessel.beam_feet ? `${vessel.beam_feet} ft` : undefined} />
-            <InfoRow label={t.vessels.draft} value={vessel.draft_feet ? `${vessel.draft_feet} ft` : undefined} />
-            <InfoRow label={t.vessels.propulsion} value={vessel.propulsion_type} />
+            {campos.comprimento && <InfoRow label={t.vessels.length} value={comprimento} />}
+            {campos.nauticos && (
+              <>
+                <InfoRow label={t.vessels.beam} value={pes(vessel.beam_feet)} />
+                <InfoRow label={t.vessels.draft} value={pes(vessel.draft_feet)} />
+                <InfoRow label={t.vessels.propulsion} value={vessel.propulsion_type} />
+              </>
+            )}
           </div>
           <div className="rounded-xl border bg-card p-5 shadow-sm">
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Anchor className="h-4 w-4" /> {t.vessels.location}</h3>
-            <InfoRow label={t.serviceOrders.marina} value={marinaName} />
-            <InfoRow label={t.serviceOrders.dockPosition} value={vessel.current_dock_position} />
+            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              {campos.nauticos ? <Anchor className="h-4 w-4" /> : <MapPin className="h-4 w-4" />} {t.vessels.location}
+            </h3>
+            {/* "Marina" no barco; "Onde fica" no veículo e no equipamento. */}
+            <InfoRow label={campos.rotuloOndeFica} value={marinaName} />
+            {campos.nauticos && <InfoRow label={t.serviceOrders.dockPosition} value={vessel.current_dock_position} />}
             <InfoRow label={t.vessels.owner} value={clientName} />
-            <InfoRow label={t.vessels.shorePower} value={vessel.shore_power_type} />
+            <InfoRow label={campos.rotuloEnergiaExterna} value={vessel.shore_power_type} />
           </div>
         </TabsContent>
 
         <TabsContent value="technical" className="mt-4 space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-xl border bg-card p-5 shadow-sm">
-              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Zap className="h-4 w-4" /> {t.vessels.engines}</h3>
-              <InfoRow label={t.common.type} value={vessel.engine_type} />
-              <InfoRow label={t.products.brand} value={vessel.engine_brand} />
-              <InfoRow label={t.vessels.model} value={vessel.engine_model} />
-              <InfoRow label={t.serviceOrders.qty} value={vessel.engine_quantity} />
-            </div>
+            {campos.motores && (
+              <div className="rounded-xl border bg-card p-5 shadow-sm">
+                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Zap className="h-4 w-4" /> {t.vessels.engines}</h3>
+                <InfoRow label={t.common.type} value={vessel.engine_type} />
+                <InfoRow label={t.products.brand} value={vessel.engine_brand} />
+                <InfoRow label={t.vessels.model} value={vessel.engine_model} />
+                <InfoRow label={t.serviceOrders.qty} value={vessel.engine_quantity} />
+              </div>
+            )}
             <div className="rounded-xl border bg-card p-5 shadow-sm">
               <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Battery className="h-4 w-4" /> {t.vessels.powerSystems}</h3>
               <InfoRow label={t.vessels.batteryBank} value={vessel.battery_bank_summary} />
               <InfoRow label={t.vessels.inverterCharger} value={vessel.inverter_charger_summary} />
-              <InfoRow label={t.vessels.shorePower} value={vessel.shore_power_type} />
+              <InfoRow label={campos.rotuloEnergiaExterna} value={vessel.shore_power_type} />
             </div>
           </div>
-          <div className="rounded-xl border bg-card p-5 shadow-sm">
-            <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Radio className="h-4 w-4" /> {t.vessels.navigationElectronics}</h3>
-            <p className="text-sm leading-relaxed">{vessel.navigation_electronics_summary || t.vessels.noNavElectronics}</p>
-          </div>
+          {campos.nauticos && (
+            <div className="rounded-xl border bg-card p-5 shadow-sm">
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2"><Radio className="h-4 w-4" /> {t.vessels.navigationElectronics}</h3>
+              <p className="text-sm leading-relaxed">{vessel.navigation_electronics_summary || t.vessels.noNavElectronics}</p>
+            </div>
+          )}
           {vessel.electrical_system_notes && (
             <div className="rounded-xl border bg-card p-5 shadow-sm">
               <h3 className="text-sm font-semibold mb-3">{t.vessels.electricalSystemNotes}</h3>

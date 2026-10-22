@@ -7,6 +7,7 @@
 // vem das interfaces de src/lib/planos-manutencao.ts.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { unidadeNaFrase } from '@/lib/unidade';
 import {
   agruparRevisoes, alvosSemPlano, hojeEmBrasilia,
   type EventoDoPlano, type ItemDoHistorico, type OrdemDaEmbarcacao, type PlanoDeManutencao, type PlanoNaView,
@@ -237,13 +238,32 @@ export interface PropostaDeLembrete {
  * ai-agent nomeando a ferramenta. A resposta traz `proposal` quando a pendência nasceu; o envio só
  * acontece no "Confirmar" (confirm_action), igual ao card do assistente.
  */
+export interface PedidoDeLembrete {
+  planId: string;
+  plano: string;
+  /** O nome da unidade (pode já vir com o tipo na frente: "Motorhome Iveco Daily"). */
+  embarcacao: string;
+  /** vessels.asset_type, quando a tela tem: o pedido diz "do motorhome Iveco Daily", não "da embarcação". */
+  tipo?: string | null;
+  cliente: string | null;
+  vesselId: string;
+}
+
+/**
+ * O texto do pedido ao assistente. Com o tipo, a unidade vai pelo tipo ("do motorhome Iveco Daily",
+ * "da lancha Mar Azul" — 22/10/2026); sem o tipo, só o nome, sem chutar "embarcação".
+ */
+export function pedidoDoLembrete(p: PedidoDeLembrete): string {
+  const unidade = p.tipo ? unidadeNaFrase({ name: p.embarcacao, asset_type: p.tipo }, 'de') : `— ${p.embarcacao}`;
+  return `Pedido da tela Revisões: prepare AGORA o lembrete de revisão do plano ${p.planId} ` +
+    `("${p.plano}" ${unidade}${p.cliente ? `, cliente ${p.cliente}` : ''}). ` +
+    `Use send_maintenance_reminder_now com plan_id ${p.planId}. Não envie nada sem a minha confirmação.`;
+}
+
 export function usePedirLembreteAgora() {
   return useMutation({
-    mutationFn: async (p: { planId: string; plano: string; embarcacao: string; cliente: string | null; vesselId: string }) => {
-      const pedido =
-        `Pedido da tela Revisões: prepare AGORA o lembrete de revisão do plano ${p.planId} ` +
-        `("${p.plano}" da embarcação ${p.embarcacao}${p.cliente ? `, cliente ${p.cliente}` : ''}). ` +
-        `Use send_maintenance_reminder_now com plan_id ${p.planId}. Não envie nada sem a minha confirmação.`;
+    mutationFn: async (p: PedidoDeLembrete) => {
+      const pedido = pedidoDoLembrete(p);
       const { data, error } = await supabase.functions.invoke('ai-agent', {
         body: {
           messages: [{ role: 'user', content: pedido }],

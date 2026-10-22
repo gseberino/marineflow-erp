@@ -321,7 +321,7 @@ Deno.test("list_marinas: sem acento e com inativas a pedido", async () => {
 // ── contatos da embarcação ────────────────────────────────────────────────────────────────────
 
 const BASE_BARCOS = () => ({
-  vessels: [{ id: "v1", name: "Netuno", client_id: "c3", active: true, marina_id: "m1", marinas: { name: "Marina Porto Belo", contact_name: "Rita", phone: "(47) 3369-0000" } }],
+  vessels: [{ id: "v1", name: "Netuno", asset_type: "Lancha", client_id: "c3", active: true, marina_id: "m1", marinas: { name: "Marina Porto Belo", contact_name: "Rita", phone: "(47) 3369-0000" } }],
   vessel_contacts: [{ id: "vc1", vessel_id: "v1", full_name: "Seu Zé", role: "owner", phone: "(47) 98888-1111", email: null, notes: null, active: true }],
   service_orders: [],
 });
@@ -340,10 +340,12 @@ Deno.test("add_vessel_contact: não duplica (mesmo telefone), recusa função de
   const dup = await tool("add_vessel_contact").execute({ vessel_id: "v1", full_name: "José", phone: "5547988881111" }, ctxCom(db)) as any;
   assertEquals(dup.ok, false);
   assertEquals(dup.ja_e_contato.contact_id, "vc1");
+  // A unidade pelo tipo (22/10/2026), não "da Netuno" com o artigo chutado.
+  assertStringIncludes(dup.aviso, "Seu Zé já é contato da lancha Netuno.");
   const funcao = await tool("add_vessel_contact").execute({ vessel_id: "v1", full_name: "Ana", role: "cozinheira" }, ctxCom(db)) as any;
   assertStringIncludes(funcao.error, "Função");
   const sem = await tool("add_vessel_contact").execute({ vessel_id: "v9", full_name: "Ana" }, ctxCom(db)) as any;
-  assertStringIncludes(sem.error, "Embarcação não encontrada");
+  assertStringIncludes(sem.error, "Embarcação ou veículo não encontrado");
   assertEquals(db.chamadas.insert, []);
   const falha = bancoFalso(BASE_BARCOS(), { vessel_contacts: "boom" });
   await assertRejects(() => tool("add_vessel_contact").execute({ vessel_id: "v1", full_name: "Ana" }, ctxCom(falha)));

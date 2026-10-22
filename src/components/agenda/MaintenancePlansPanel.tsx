@@ -28,7 +28,7 @@ import {
   AdiarPlanoDialog, PedirLembreteDialog, RegistrarServicoDialog, type AlvoDoLembrete, type AlvoDoPlano,
 } from '@/components/agenda/PlanoDialogs';
 import { useVessel } from '@/hooks/use-vessels';
-import { unidadeNaFrase } from '@/lib/unidade';
+import { TERMO_GERAL, unidadeNaFrase } from '@/lib/unidade';
 
 const QUALQUER = '__qualquer__';
 
@@ -219,7 +219,7 @@ export function MaintenancePlansPanel({ vesselId }: { vesselId: string | undefin
                       desabilitada: p.client_reminder_enabled === false,
                       titulo: p.client_reminder_enabled === false ? 'O lembrete ao cliente está desligado neste plano' : undefined,
                       onClick: () => setLembrete({
-                        ...alvo, plano: p.name, embarcacao: v?.vessel_name ?? 'a embarcação', cliente: v?.client_name ?? null,
+                        ...alvo, plano: p.name, embarcacao: v?.vessel_name ?? unidade?.name ?? TERMO_GERAL.toLowerCase(), tipo, cliente: v?.client_name ?? null,
                         vesselId: p.vessel_id, optOut: v?.opt_out, semTelefone: !!v && !v.client_phone,
                       }),
                     },

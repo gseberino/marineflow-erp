@@ -37,7 +37,7 @@ Deno.test("cobrança fria/ameaça a cliente reprova", () => {
 });
 
 Deno.test("cobrança empática a cliente passa", () => {
-  const boa = "Oi, João, tudo certo? Passando pra lembrar da OS do seu barco: R$ 1.480,00, que venceu dia 03/07. Consigo te mandar o Pix ou a gente parcela — o que fica melhor?";
+  const boa = "Oi, João, tudo certo? Passando pra lembrar da OS do seu motorhome: R$ 1.480,00, que venceu dia 03/07. Consigo te mandar o Pix ou a gente parcela — o que fica melhor?";
   // 'preco' não é proibido para cliente; ameaça não há. Passa.
   const r = revisarMensagem(boa, cli);
   assertEquals(r.problemas.some((p) => p.codigo === "ameaca"), false);

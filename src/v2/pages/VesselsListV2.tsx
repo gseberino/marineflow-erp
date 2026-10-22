@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Anchor, Download, Plus, Ship } from 'lucide-react';
+import { Anchor, Download, MapPin, Plus, Ship } from 'lucide-react';
 import { useI18n } from '@/i18n';
 import { useVessels } from '@/hooks/use-vessels';
 import { exportToCSV, VESSELS_COLUMNS } from '@/lib/export-utils';
@@ -9,18 +9,22 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VesselFormDialog } from '@/components/VesselFormDialog';
+import { IconeDaUnidade } from '@/components/service-order/FichaDaEmbarcacao';
 import { FilterPresets } from '@/components/FilterPresets';
 import { PageShell } from '@/v2/components/PageShell';
 import { EntityCard } from '@/v2/components/EntityCard';
 import { DataTable, type DataColumn, type SortState } from '@/v2/components/DataTable';
 import { V2Shell } from '@/v2/components/V2Shell';
-import { TERMO_GERAL, TERMO_GERAL_PLURAL } from '@/lib/unidade';
+import { TERMO_GERAL, TERMO_GERAL_PLURAL, camposDoTipo, comprimentoDoTipo, sinonimosDoTipo, tipoDoSeletor } from '@/lib/unidade';
 import '@/v2/tokens.css';
 
 /* Onda A · Embarcações v2 — paridade com VesselList v1 (busca, filtro por tipo,
    presets, CSV, dialog de cadastro) em DataTable + EntityCard. */
 
 const PAGE_SIZE = 20;
+
+/** O tipo como o seletor o chama ("Jet Ski" antigo → "Moto aquática"); sem tipo, avisa. */
+const tipoDaLinha = (tipo?: string | null) => tipoDoSeletor(tipo) || 'Tipo não informado';
 
 type VesselRow = {
   id: string;
@@ -51,18 +55,22 @@ export default function VesselsListV2() {
   const [sort, setSort] = useState<SortState>({ key: 'name', dir: 'asc' });
 
   const types = useMemo(
-    () => [...new Set(vessels.map((v) => v.asset_type).filter(Boolean))].sort() as string[],
+    // Pelo mesmo valor que a linha mostra ("Jet Ski" antigo = "Moto aquática"; "Outro" não vira opção).
+    () => [...new Set(vessels.map((v) => tipoDoSeletor(v.asset_type)).filter(Boolean))].sort() as string[],
     [vessels],
   );
 
   const filtered = useMemo(() => {
+    const busca = search.toLowerCase();
     const list = vessels.filter((v) =>
       (!search ||
-        v.name.toLowerCase().includes(search.toLowerCase()) ||
-        (v.manufacturer ?? '').toLowerCase().includes(search.toLowerCase()) ||
-        (v.model ?? '').toLowerCase().includes(search.toLowerCase()) ||
-        (v.clients?.name ?? '').toLowerCase().includes(search.toLowerCase())) &&
-      (typeFilter === 'all' || v.asset_type === typeFilter),
+        v.name.toLowerCase().includes(busca) ||
+        (v.manufacturer ?? '').toLowerCase().includes(busca) ||
+        (v.model ?? '').toLowerCase().includes(busca) ||
+        (v.clients?.name ?? '').toLowerCase().includes(busca) ||
+        // O tipo e os sinônimos dele: "motorhome", "jet ski" ou "van" acham (22/10/2026).
+        [v.asset_type ?? '', tipoDoSeletor(v.asset_type), ...sinonimosDoTipo(v.asset_type)].some((s) => s.toLowerCase().includes(busca))) &&
+      (typeFilter === 'all' || tipoDoSeletor(v.asset_type) === tipoDoSeletor(typeFilter)),
     );
     return [...list].sort((a, b) => {
       const val = (v: VesselRow) => {
@@ -91,13 +99,13 @@ export default function VesselsListV2() {
       key: 'name', header: TERMO_GERAL, minWidth: 210, priority: 0, sortable: true,
       render: (v) => (
         <span className="flex items-center gap-2">
-          <Ship className="h-4 w-4 shrink-0 text-accent" />
+          <IconeDaUnidade tipo={v.asset_type} className="h-4 w-4 shrink-0 text-accent" />
           <span className="min-w-0 leading-tight">
             <Link to={`/v2/vessels/${v.id}`} className="block truncate font-semibold text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
               {v.name}
             </Link>
             <span className="block truncate text-xs text-muted-foreground">
-              {v.asset_type || 'Tipo não informado'} · {[v.manufacturer, v.model].filter(Boolean).join(' ') || '—'}
+              {tipoDaLinha(v.asset_type)} · {[v.manufacturer, v.model].filter(Boolean).join(' ') || '—'}
             </span>
           </span>
         </span>
@@ -116,10 +124,15 @@ export default function VesselsListV2() {
       ),
     },
     {
-      key: 'marina', header: t.serviceOrders.marina, minWidth: 140, priority: 3, detailLabel: 'Marina',
+      // A lista mistura barco e motorhome: "Onde fica" serve aos dois (a marina do barco, o pátio do
+      // motorhome). O ícone é o do tipo de cada linha.
+      key: 'marina', header: 'Onde fica', minWidth: 140, priority: 3, detailLabel: 'Onde fica',
       render: (v) =>
         v.marinas?.name ? (
-          <span className="flex items-center gap-1 truncate text-muted-foreground"><Anchor className="h-3 w-3 shrink-0" />{v.marinas.name}</span>
+          <span className="flex items-center gap-1 truncate text-muted-foreground">
+            {camposDoTipo(v.asset_type).nauticos ? <Anchor className="h-3 w-3 shrink-0" /> : <MapPin className="h-3 w-3 shrink-0" />}
+            {v.marinas.name}
+          </span>
         ) : (
           <span className="text-muted-foreground">—</span>
         ),
@@ -133,8 +146,9 @@ export default function VesselsListV2() {
       ),
     },
     {
-      key: 'length_feet', header: t.vessels.length, minWidth: 84, priority: 2, sortable: true, detailLabel: 'Pés',
-      render: (v) => <span className="font-medium tabular-nums">{v.length_feet ? `${v.length_feet} ft` : '—'}</span>,
+      // "40 pés" no barco, "12,2 m" no veículo; a ordem segue a medida gravada (pés), a mesma para todos.
+      key: 'length_feet', header: t.vessels.length, minWidth: 84, priority: 2, sortable: true, detailLabel: 'Comprimento',
+      render: (v) => <span className="font-medium tabular-nums">{comprimentoDoTipo(v.length_feet, v.asset_type) || '—'}</span>,
     },
     {
       key: 'year', header: t.vessels.year, minWidth: 78, priority: 5, sortable: true, detailLabel: 'Ano',
@@ -227,8 +241,8 @@ export default function VesselsListV2() {
                   key={v.id}
                   title={v.name}
                   lines={[
-                    `${v.asset_type || 'Tipo não informado'} · ${[v.manufacturer, v.model].filter(Boolean).join(' ') || '—'}`,
-                    [v.clients?.name, v.marinas?.name, v.length_feet ? `${v.length_feet} ft` : null, v.year].filter(Boolean).join(' · ') || '—',
+                    `${tipoDaLinha(v.asset_type)} · ${[v.manufacturer, v.model].filter(Boolean).join(' ') || '—'}`,
+                    [v.clients?.name, v.marinas?.name, comprimentoDoTipo(v.length_feet, v.asset_type), v.year].filter(Boolean).join(' · ') || '—',
                   ]}
                   onClick={() => navigate(`/v2/vessels/${v.id}`)}
                 />

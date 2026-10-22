@@ -381,7 +381,7 @@ export const serviceOrderTools: ToolDef[] = [
       let query = sb
         .from("service_orders")
         .select(
-          "id, service_order_number, status, quote_status, grand_total, payment_status, scheduled_start_at, created_at, cancellation_reason, clients(name), vessels(name)",
+          "id, service_order_number, status, quote_status, grand_total, payment_status, scheduled_start_at, created_at, cancellation_reason, clients(name), vessels(name, asset_type)",
           { count: "exact" },
         )
         .order(f.ordem === "maior_valor" ? "grand_total" : "created_at", { ascending: false, nullsFirst: false })
@@ -412,6 +412,8 @@ export const serviceOrderTools: ToolDef[] = [
         status_pagamento: so.payment_status || null,
         cliente: so.clients?.name || "—",
         ativo: so.vessels?.name || "—",
+        // O tipo, para falar com o cliente "do seu motorhome", "da sua lancha" (dono, 22/10/2026).
+        tipo_unidade: so.vessels?.asset_type ?? null,
         valor_total: so.grand_total || 0,
         agendado_para: so.scheduled_start_at || null,
         criado_em: so.created_at,
@@ -439,7 +441,7 @@ export const serviceOrderTools: ToolDef[] = [
     async execute(args, { sb }) {
       const { data: so, error } = await sb
         .from("service_orders")
-        .select("*, clients(name), vessels(name)")
+        .select("*, clients(name), vessels(name, asset_type)")
         .eq("id", args.id)
         .maybeSingle();
       if (error) throw error;
@@ -481,6 +483,7 @@ export const serviceOrderTools: ToolDef[] = [
           ...so,
           cliente: so.clients?.name || "—",
           embarcacao: so.vessels?.name || "—",
+          tipo_unidade: so.vessels?.asset_type ?? null,
         },
         roteiro,
         parts: (parts || []).map((p: any) => ({
@@ -520,7 +523,7 @@ export const serviceOrderTools: ToolDef[] = [
     async execute(args, { sb }) {
       const { data, error } = await sb
         .from("service_orders")
-        .select("id, service_order_number, status, scheduled_start_at, grand_total, created_at, vessels(name)")
+        .select("id, service_order_number, status, scheduled_start_at, grand_total, created_at, vessels(name, asset_type)")
         .eq("client_id", args.client_id)
         .order("created_at", { ascending: false })
         .limit(20);
@@ -529,6 +532,7 @@ export const serviceOrderTools: ToolDef[] = [
         numero: so.service_order_number,
         status: so.status,
         embarcacao: so.vessels?.name || "—",
+        tipo_unidade: so.vessels?.asset_type ?? null,
         valor_total: so.grand_total || 0,
         agendado_para: so.scheduled_start_at || null,
         criado_em: so.created_at,
