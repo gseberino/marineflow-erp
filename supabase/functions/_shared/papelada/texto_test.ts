@@ -86,4 +86,12 @@ Deno.test("pedaços: título da confirmação, motivos e erros em palavras", () 
   assertEquals(linhaDoItem(ITENS[3]), "4. Unifique Telecomunicacoes parou de aparecer (último em 09/09)");
   assertStringIncludes(resumoDeFora(FORA)!, "Ficaram de fora 9, com você no *escritório*:");
   assertEquals(resumoDeFora([]), null);
+  // (21/10/2026) quem troca a categoria não está "sem histórico": o resumo diz cada um
+  assertEquals(resumoDeFora([fora("sem_historico"), fora("troca_categoria"), fora("troca_categoria", 20)]),
+    "Ficaram de fora 3, com você no *escritório*: 2 em que você já trocou a categoria; 1 ainda sem histórico.");
+  // (22/10/2026) categoria com 1 a 4 decisões, todas mantidas ("Aplicação financeira" 3 de 3, "Retirada de sócio" 1 de 1):
+  // tem histórico, só é pouco — o resumo não pode dizer "ainda sem histórico" (achado do revisor, 2ª rodada)
+  assertEquals(resumoDeFora([fora("pouco_historico"), fora("pouco_historico", 20), fora("sem_historico"), fora("troca_categoria")]),
+    "Ficaram de fora 4, com você no *escritório*: 1 em que você já trocou a categoria; 2 com pouco histórico; 1 ainda sem histórico.");
+  assertEquals(resumoDeFora([fora("pouco_historico")]), "Ficaram de fora 1, com você no *escritório*: 1 com pouco histórico.");
 });

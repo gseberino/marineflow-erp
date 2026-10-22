@@ -91,6 +91,10 @@ export function resumoDeFora(fora: ItemDeFora[]): string | null {
     n("contradiz") ? `${n("contradiz")} em que você costuma lançar outra categoria` : "",
     n("acima_do_limite") ? `${n("acima_do_limite")} de R$ 500 ou mais` : "",
     n("vinculo", "os_oc", "terceiro") ? `${n("vinculo", "os_oc", "terceiro")} com vínculo, OS ou serviço de terceiro` : "",
+    // (21/10/2026) quem troca a categoria tem histórico: não é "ainda sem histórico"
+    n("troca_categoria") ? `${n("troca_categoria")} em que você já trocou a categoria` : "",
+    // (22/10/2026) 1 a 4 decisões, todas mantidas: tem histórico, só é pouco (o lote pede 5)
+    n("pouco_historico") ? `${n("pouco_historico")} com pouco histórico` : "",
     n("sem_historico") ? `${n("sem_historico")} ainda sem histórico` : "",
     n("ja_lancado") ? `${n("ja_lancado")} já lançados` : "",
     n("comprovante") ? `${n("comprovante")} com comprovante a caminho` : "",

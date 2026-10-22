@@ -14,7 +14,8 @@
 //   aviso_parou   — aviso "parou de aparecer" (só para saber).
 // Fica fora (a primeira razão que vale): já lançado, toda entrada, vínculo sugerido, OS/OC, aviso junto, débito sem
 // loja, sem categoria, serviço de terceiro, contradiz a última escolha do dono para o mesmo recebedor, acima do limite
-// de lote, sem histórico; avisos de duplicidade, sobre um Pix ainda na fila, ou soltos.
+// de lote, ele troca a categoria, pouco histórico (1 a 4 decisões, todas mantidas), sem histórico; avisos de
+// duplicidade, sobre um Pix ainda na fila, ou soltos.
 
 import { normalizeText } from "../banking/matching.ts";
 import { ehIntermediario, historicoSemIdentidade } from "../banking/proposals.ts";
@@ -28,8 +29,8 @@ export type GrupoDeFora = GrupoDoLote | "entrada";
 export type MotivoDeEntrada = "anotacao" | "regra" | "categoria" | "transferencia" | "aviso_lancado" | "aviso_parou";
 export type MotivoDeFora =
   | "ja_lancado" | "sinal_ja_lancado" | "sem_cliente" | "entrada" | "vinculo" | "os_oc" | "com_aviso" | "sem_loja"
-  | "sem_categoria" | "terceiro" | "contradiz" | "acima_do_limite" | "sem_historico" | "duplicidade" | "aviso_da_fila"
-  | "aviso_solto" | "comprovante" | "tipo";
+  | "sem_categoria" | "terceiro" | "contradiz" | "acima_do_limite" | "sem_historico" | "pouco_historico" | "troca_categoria"
+  | "duplicidade" | "aviso_da_fila" | "aviso_solto" | "comprovante" | "tipo";
 
 /** A linha pendente da fila como a coleta a entrega (finance_review_queue + a linha do banco + o que a cerca). */
 export interface LinhaDaFila {
@@ -397,7 +398,17 @@ export function decidir(
   if (a && a.n >= CATEGORIA_CONFIAVEL.minimo && a.igual / a.n >= CATEGORIA_CONFIAVEL.taxa) {
     return entra("categoria", `${a.igual} de ${a.n} sem troca`);
   }
-  return fora("sem_historico", a ? `você troca esta categoria às vezes (${a.igual} de ${a.n})` : "ainda sem histórico para decidir");
+  if (!a) return fora("sem_historico", "ainda sem histórico para decidir");
+  // (21/10/2026) o motivo diz a verdade: antes era "você troca esta categoria às vezes (1 de 1)" quando a única decisão
+  // foi MANTIDA (a "Retirada de sócio" de 28/09), e o número era o das mantidas lido como trocas ("2 de 10" no
+  // Combustível, que ele trocou 8 vezes)
+  const trocas = a.n - a.igual;
+  // (22/10/2026) código próprio: o resumo do *lote* conta por código, e "sem_historico" virava "ainda sem histórico"
+  // para quem tem 1 a 4 decisões (resumoDeFora, texto.ts)
+  if (trocas === 0) {
+    return fora("pouco_historico", `só ${a.n} ${a.n === 1 ? "vez" : "vezes"} nesta categoria, sem troca (o lote pede ${CATEGORIA_CONFIAVEL.minimo})`);
+  }
+  return fora("troca_categoria", a.n === 1 ? "você trocou esta categoria na única vez" : `você trocou esta categoria em ${trocas} de ${a.n} vezes`);
 }
 
 export function impressaoDa(l: LinhaDaFila): Impressao {

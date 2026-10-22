@@ -73,7 +73,8 @@ Deno.test("fora: conflitos e o que só o dono sabe, cada um com o seu motivo", (
     [{ quem: "DEBITO DE CARTAO", desc: "DEBITO DE CARTAO", suggested_category: "Outras despesas" }, "sem_loja"],
     [{ quem: "ADRIAN BENJAMIN", doc: "12472109954", suggested_category: "Outras despesas" }, "sem_categoria"],
     [{ quem: "JOSE CARLOS ABEL", doc: "00000000272", suggested_category: "Serviços de terceiros" }, "terceiro"],
-    [{ quem: "Pix enviado para Gustavo", doc: "00000000353", suggested_category: "Pró-labore", suggested_amount: 50 }, "sem_historico"],
+    // Pró-labore: 2 de 5 mantidas no HISTORICO — ele trocou 3 vezes (até 21/10 o código era "sem_historico")
+    [{ quem: "Pix enviado para Gustavo", doc: "00000000353", suggested_category: "Pró-labore", suggested_amount: 50 }, "troca_categoria"],
   ];
   for (const [p, codigo] of casos) assertEquals(decidir(linha(p), CTX, m).codigo, codigo, JSON.stringify(p));
 });
@@ -137,9 +138,48 @@ Deno.test("categoria confiável: precisa de 5 decisões e 90% sem troca", () => 
   const h = (n: number, iguais: number) => Array.from({ length: n }, (_, i) => decisao("Tarifas bancárias", i < iguais ? "Tarifas bancárias" : "Juros e encargos", `T${i}`));
   const tarifa = linha({ suggested_category: "Tarifas bancárias", quem: "TARIFA" });
   const com = (hist: DecisaoPassada[]) => decidir(tarifa, { limite: 500, historico: hist }, { aceitacao: aceitacaoPorCategoria(hist), escolhas: escolhasPorRecebedor(hist) });
-  assertEquals(com(h(4, 4)).codigo, "sem_historico");
+  // (22/10/2026) 4 de 4 mantidas: tem histórico, só é pouco — código próprio, para o resumo não dizer "sem histórico"
+  assertEquals(com(h(4, 4)).codigo, "pouco_historico");
+  assertEquals(com([]).codigo, "sem_historico");
   assertEquals(com(h(10, 9)).codigo, "categoria");
-  assertEquals(com(h(10, 8)).codigo, "sem_historico");
+  // (21/10/2026) 8 de 10 mantidas: ele trocou 2 — não é "sem histórico", é "você troca"
+  assertEquals(com(h(10, 8)).codigo, "troca_categoria");
+});
+
+// (21/10/2026) O motivo de fora diz a verdade (spec-papelada-fix §10.7: 'o lote diz "você troca esta categoria às vezes
+// (1 de 1)" quando a única decisão foi mantida'). E o número era o das MANTIDAS lido como trocas: "Combustível e
+// deslocamento" 2 de 10 queria dizer que ele trocou 8 de 10. Números do reconciliation_log de produção (SELECT de 21/10).
+Deno.test("fora: poucas decisões sem troca dizem isso; com troca, quantas vezes ele trocou", () => {
+  const socio = "Pix enviado para Gustavo Seberino da Silva";
+  const caso = (hist: DecisaoPassada[], l: LinhaDaFila) =>
+    decidir(l, { limite: 500, historico: hist }, { aceitacao: aceitacaoPorCategoria(hist), escolhas: escolhasPorRecebedor(hist) });
+  // o caso real: "Retirada de sócio" foi sugerida 1 vez (28/09 11:56) e ele MANTEVE; o Pix de R$ 50 que o B2 passa a
+  // sugerir assim caía em "você troca esta categoria às vezes (1 de 1)"
+  const uma = [decisao("Retirada de sócio", "Retirada de sócio", socio, "2026-09-28T14:56:00Z", "00000000353")];
+  const pix = linha({ quem: socio, doc: "00000000353", suggested_category: "Retirada de sócio", suggested_amount: 50 });
+  // (22/10/2026) código "pouco_historico" (era "sem_historico"): o resumo do *lote* conta por código e dizia "1 ainda
+  // sem histórico" para quem tem 1 decisão (achado do revisor, 2ª rodada)
+  assertEquals(caso(uma, pix), { entra: false, codigo: "pouco_historico", motivo: "só 1 vez nesta categoria, sem troca (o lote pede 5)" });
+  // "Aplicação financeira": 3 de 3 mantidas
+  const tres = Array.from({ length: 3 }, (_, i) => decisao("Aplicação financeira", "Aplicação financeira", `CDB ${i}`));
+  const cdb = linha({ quem: "CDB C6 LIM.GARANT.", suggested_category: "Aplicação financeira", suggested_amount: 300 });
+  assertEquals(caso(tres, cdb), { entra: false, codigo: "pouco_historico", motivo: "só 3 vezes nesta categoria, sem troca (o lote pede 5)" });
+  // "Combustível e deslocamento": 2 de 10 mantidas → trocou 8
+  const comb = Array.from({ length: 10 }, (_, i) => decisao("Combustível e deslocamento", i < 2 ? "Combustível e deslocamento" : "Alimentação de campo", `POSTO ${i}`));
+  const posto = linha({ quem: "POSTO NOVO", suggested_category: "Combustível e deslocamento", suggested_amount: 150 });
+  assertEquals(caso(comb, posto), { entra: false, codigo: "troca_categoria", motivo: "você trocou esta categoria em 8 de 10 vezes" });
+  // "Peças e materiais": 15 de 25 mantidas → trocou 10
+  const pecas = Array.from({ length: 25 }, (_, i) => decisao("Peças e materiais", i < 15 ? "Peças e materiais" : "Serviços de terceiros", `LOJA ${i}`));
+  const loja = linha({ quem: "LOJA NOVA", suggested_category: "Peças e materiais", suggested_amount: 125.8 });
+  assertEquals(caso(pecas, loja).motivo, "você trocou esta categoria em 10 de 25 vezes");
+  // a única decisão foi trocada
+  const trocada = [decisao("Tarifas bancárias", "Juros e encargos", "TARIFA 0")];
+  const tarifa = linha({ quem: "TARIFA NOVA", suggested_category: "Tarifas bancárias", suggested_amount: 10 });
+  assertEquals(caso(trocada, tarifa).motivo, "você trocou esta categoria na única vez");
+  // nenhum texto antigo sobra
+  for (const d of [caso(uma, pix), caso(tres, cdb), caso(comb, posto), caso(pecas, loja), caso(trocada, tarifa)]) {
+    assert(!d.motivo.includes("às vezes ("), d.motivo);
+  }
 });
 
 Deno.test("nomes: pessoa abreviada pelo CPF, empresa sem sufixo, Mercado Livre com a parcela, aviso curto", () => {
