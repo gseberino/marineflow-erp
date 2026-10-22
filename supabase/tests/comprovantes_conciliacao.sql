@@ -1,4 +1,5 @@
--- Prova: conciliação dos comprovantes com o extrato (migrations 20261011300000-304000 e 400000; usa a F1 e a F2).
+-- Prova: conciliação dos comprovantes com o extrato (migrations 20261011300000-304000, 400000 e 20261021170000; usa a
+-- F1 e a F2).
 --
 --   T1  grants: R1-R10 só service_role; helpers para ninguém; tabelas novas fechadas ao anon
 --   T2  débito único sem nome → verde → "sim" liga: proposta classificada (anotação criada e aplicada,
@@ -10,7 +11,10 @@
 --   T7  crédito: à vista com nome igual em D+0 verde; nome diferente azul; parcela 1/3 azul com o total
 --   T8  a linha já virou lançamento → anexa; só preenche o vazio (resposta 8 do dono): categoria diferente
 --       fica (aviso); a vazia é preenchida e o cancelar a devolve vazia; nada a aprovar
---   T9  CMP com conta a pagar em aberto → o "sim" casa (conciliar_lancamento) e a proposta sai da fila
+--   T9  CMP com conta a pagar em aberto → o "sim" casa (conciliar_lancamento) e a proposta sai da fila com
+--       "Casada com a conta do CMP-N", decided_at e decided_by = o dono (20261021170000)
+--   T9b o casar recusa → nada fica: a proposta segue pendente sem a nota, sem hora e sem autor; a conta em
+--       aberto, o CMP esperando
 --   T10 a anotação da F2 aplicada pelo aplicar_anotacoes_pendentes → R1 liga sem pergunta
 --   T11 linha forte de dois CMPs → azul nos dois (disputada)
 --   T12 abandono em 30 dias (45 no crédito) + pendência "classificar no Extrato"
@@ -534,10 +538,12 @@ begin
     || ' vazio=' || coalesce(v_cat8b, 'null') || '→' || coalesce((select expense_category from public.payables where id = v_pay8b), 'null'));
 
   -- T9: conta a pagar em aberto do fornecedor (mesmo CNPJ): o CMP Pix a anexa e espera o banco;
-  -- a linha chega, o "sim" casa (conciliar_lancamento) e a proposta sai da fila. A nota da proposta: a
-  -- conciliar_lancamento REAL (20260926090000/20261002140000) já a tira da fila como "Casada com um lançamento
-  -- que já existia" antes da F3 escrever a dela (o update da F3 só pega 'pending'); só o dublê da bancada,
-  -- que não mexe na fila, deixa ficar "Casada com a conta do CMP-N" (correção de 15/10/2026)
+  -- a linha chega, o "sim" casa (conciliar_lancamento) e a proposta sai da fila COM a referência do CMP, a
+  -- hora e quem decidiu (o dono, como nos outros caminhos que gravam decided_at). A conciliar_lancamento REAL
+  -- (20261002140000:817-819) já a tira da fila como "Casada com um lançamento que já existia", sem decided_at;
+  -- até 20261021170000 o update da F3 só procurava 'pending' e não achava nada (achado de 15/10/2026, commit
+  -- e593bdc5). Agora a F3 guarda os ids das pendentes antes de casar e escreve a nota dela neles depois: vale
+  -- com a rota real (que mexe na fila) e com o dublê da bancada (que não mexe)
   perform pg_temp._livrar();
   v_val := pg_temp._val();
   insert into public.suppliers (name, cnpj_cpf) values ('Fornecedor Teste F3 ' || pg_temp._letras(5), v_cnpj) returning id into v_sup;
@@ -559,18 +565,93 @@ begin
   select * into c from public.comprovantes where id = v_cmp;
   select * into pay from public.payables where id = v_pay;
   select * into q from public.finance_review_queue where id = v_q;
-  insert into _resultado values ('T9 conta a pagar em aberto: o "sim" casa a conta com a linha e a proposta sai da fila',
+  insert into _resultado values ('T9 conta a pagar em aberto: o "sim" casa a conta com a linha e a proposta sai da fila com o CMP, a hora e quem decidiu',
     p->'banco'->>'nivel' = 'verde' and p->'banco'->'linhas'->0->>'acao' = 'casar'
     and r->>'resultado' = 'ligado' and r->'ligacao'->>'como' = 'casou'
     and pay.bank_transaction_id = v_tx and pay.status = 'paid' and q.status = 'superseded'
-    and q.decision_note in ('Casada com um lançamento que já existia', 'Casada com a conta do ' || c.codigo)
+    and q.decision_note = 'Casada com a conta do ' || c.codigo and q.decided_at is not null
+    and q.decided_by is not distinct from pg_temp._dono()
     and c.situacao = 'conciliado'
     and not ('classificar_no_extrato' = any (c.pendencias))
     and exists (select 1 from jsonb_array_elements(c.efeitos) e where e->>'tipo' = 'pendencia_resolvida'),
     'nivel=' || coalesce(p->'banco'->>'nivel', p->>'motivo', '-') || ' r=' || coalesce(r->>'resultado', '-') || '/' || coalesce(r->>'motivo', '-')
-    || ' pay=' || coalesce(pay.status, '-') || ' fila=' || coalesce(q.status, '-') || ' nota=' || coalesce(q.decision_note, '-'));
+    || ' pay=' || coalesce(pay.status, '-') || ' fila=' || coalesce(q.status, '-') || ' nota=' || coalesce(q.decision_note, '-')
+    || ' decidida_em=' || case when q.decided_at is null then 'null' else 'preenchida' end
+    || ' decidida_por=' || case when q.decided_by is null then 'null' when q.decided_by = pg_temp._dono() then 'o dono' else 'outro' end);
 exception when others then
   insert into _resultado values ('T8/T9 lançamento e conta em aberto', false, 'erro: ' || sqlstate || ' ' || sqlerrm);
+end $$;
+
+-- ═══ T9b ═════════════════════════════════════════════════════════════════════════════════════
+do $$
+declare
+  v_val numeric := pg_temp._val();
+  v_cnpj text := pg_temp._cnpj();
+  v_dubla boolean := to_regclass('public.ensaio_respostas') is not null;
+  v_sup uuid;
+  v_pay uuid;
+  v_outra uuid;
+  v_cmp uuid;
+  v_tx uuid;
+  v_q uuid;
+  g jsonb;
+  p jsonb;
+  r jsonb;
+  c record;
+  pay record;
+  q record;
+begin
+  -- T9b (21/10/2026): o casar recusa — nada fica. A proposta segue pendente, sem a nota do CMP, sem hora e sem autor; a
+  -- conta segue em aberto e o CMP segue esperando o banco. No PGlite o dublê da conciliar_lancamento responde
+  -- erro (public.ensaio_respostas); em produção a linha já paga outra conta (um pagamento confirmado aponta
+  -- para ela) e a conciliar_lancamento REAL recusa ("já paga outra(s) conta(s)")
+  perform pg_temp._livrar();
+  insert into public.suppliers (name, cnpj_cpf) values ('Fornecedor Teste F3 ' || pg_temp._letras(5), v_cnpj) returning id into v_sup;
+  insert into public.payables (description, issue_date, due_date, amount, paid_amount, balance_amount, status, expense_category,
+                               supplier_id, origin)
+  values ('Conta aberta de teste F3 (T9b)', pg_temp._hoje(), pg_temp._hoje() + 5, v_val, 0, v_val, 'pending', 'Peças e materiais', v_sup, 'manual')
+  returning id into v_pay;
+  g := pg_temp._cmp(jsonb_build_object('valor', v_val, 'forma', 'pix', 'tipo', 'pix', 'favorecido', v_cnpj, 'fornecedor', v_sup));
+  v_cmp := (g->>'id')::uuid;
+  select * into c from public.comprovantes where id = v_cmp;
+  if c.situacao <> 'aguardando_banco' or c.payable_id is distinct from v_pay then
+    raise exception 'conta em aberto (T9b): gravação inesperada % %', c.situacao, pg_temp._tipos(c.efeitos);
+  end if;
+  v_tx := pg_temp._linha(jsonb_build_object('valor', v_val, 'descricao', 'PIX ENVIADO', 'metodo', 'PIX', 'doc', v_cnpj, 'nome', 'FORNECEDOR'));
+  v_q := pg_temp._proposta(v_tx);
+  perform public.comprovantes_reavaliar_banco('teste', null);
+  p := pg_temp._banco(v_cmp);
+  if v_dubla then
+    execute 'insert into public.ensaio_respostas (rota, resposta) values ($1, $2)'
+      using 'conciliar_lancamento', '{"modo":"erro","message":"recusa de teste do T9b"}'::jsonb;
+  else
+    insert into public.payables (description, issue_date, due_date, amount, paid_amount, balance_amount, status, expense_category, origin)
+    values ('Outra conta de teste F3 (T9b)', pg_temp._hoje(), pg_temp._hoje(), 1, 1, 0, 'paid', 'Peças e materiais', 'manual')
+    returning id into v_outra;
+    insert into public.payments (payable_id, amount, payment_date, payment_method, net_amount, notes, status, bank_transaction_id)
+    values (v_outra, 1, pg_temp._hoje(), 'pix', 1, 'teste T9b', 'confirmed', v_tx);
+  end if;
+  r := pg_temp._resp(p, '{"tipo":"sim"}'::jsonb);
+  if v_dubla then
+    -- a resposta de erro que sobrou (se o casar nem foi tentado) não pode valer para os testes seguintes
+    execute 'delete from public.ensaio_respostas where rota = $1' using 'conciliar_lancamento';
+  end if;
+  select * into c from public.comprovantes where id = v_cmp;
+  select * into pay from public.payables where id = v_pay;
+  select * into q from public.finance_review_queue where id = v_q;
+  insert into _resultado values ('T9b o casar recusa: nada fica (a proposta segue pendente sem a nota do CMP, a conta em aberto, o CMP esperando)',
+    p->'banco'->>'nivel' = 'verde' and p->'banco'->'linhas'->0->>'acao' = 'casar'
+    and r->>'resultado' = 'nao_ligado' and coalesce(r->>'motivo', '') like 'Não dei baixa na conta a pagar:%'
+    and q.status = 'pending' and q.decision_note is null and q.decided_at is null and q.decided_by is null
+    and pay.status = 'pending' and pay.bank_transaction_id is null
+    and c.situacao = 'aguardando_banco' and c.bank_transaction_id is null,
+    'nivel=' || coalesce(p->'banco'->>'nivel', p->>'motivo', '-') || ' r=' || coalesce(r->>'resultado', '-') || '/' || coalesce(left(r->>'motivo', 60), '-')
+    || ' fila=' || coalesce(q.status, '-') || ' nota=' || coalesce(q.decision_note, 'null')
+    || ' decidida_em=' || case when q.decided_at is null then 'null' else 'preenchida' end
+    || ' decidida_por=' || case when q.decided_by is null then 'null' else 'preenchida' end
+    || ' pay=' || coalesce(pay.status, '-') || ' cmp=' || coalesce(c.situacao, '-'));
+exception when others then
+  insert into _resultado values ('T9b o casar recusa: nada fica', false, 'erro: ' || sqlstate || ' ' || sqlerrm);
 end $$;
 
 -- ═══ T10 ═════════════════════════════════════════════════════════════════════════════════════
