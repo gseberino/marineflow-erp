@@ -23,7 +23,7 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
-  chaveDoRecebedor, historicoSemIdentidade, indexarFornecedores, montarProposta, sugerirRegras,
+  chaveDoRecebedor, indexarFornecedores, montarProposta, sugerirRegras,
   type FornecedorConhecido, type HistoricoFornecedor, type RegraFinanceira, type TransacaoOrfa,
 } from "../_shared/banking/proposals.ts";
 import { findInternalTransfers } from "../_shared/banking/matching.ts";
@@ -52,6 +52,7 @@ import {
   lerRecusas, propostasAReabrir, reabrirPropostas, recusaQueVale, recusarPropostas, tipoDaProposta, type Recusa,
 } from "./recusa.ts";
 import { conferirCargo } from "./acesso.ts";
+import { alertasDoVigia, type LinhaDoVigia } from "./vigia.ts";
 
 type DbClient = SupabaseClient<any, "public", any>;
 
@@ -245,8 +246,6 @@ servirComCors(async (req) => {
 async function vigiar(admin: DbClient) {
   const hoje = new Date();
   const iso = (d: Date) => d.toISOString().slice(0, 10);
-  const d30 = iso(new Date(hoje.getTime() - 30 * 86400000));
-  const d35 = iso(new Date(hoje.getTime() - 35 * 86400000));
   const d45 = new Date(hoje.getTime() - 45 * 86400000).toISOString();
   const d365 = iso(new Date(hoje.getTime() - 365 * 86400000));
 
@@ -259,7 +258,7 @@ async function vigiar(admin: DbClient) {
   const txs = await lerTudo<Record<string, unknown>>((de, ate) =>
     admin
       .from("bank_transactions")
-      .select("id, transaction_date, amount, description, counterparty_name, counterparty_document, merchant_name, merchant_document, dismissed_kind")
+      .select("id, transaction_date, amount, description, counterparty_name, counterparty_document, merchant_name, merchant_document, dismissed_kind, installment_label, source_type")
       .eq("transaction_type", "debit")
       .gte("transaction_date", d365)
       .lte("transaction_date", hojeIso)
@@ -267,113 +266,8 @@ async function vigiar(admin: DbClient) {
       .order("id")
       .range(de, ate), 8000);
 
-  const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
-    .replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
-  type Tx = { id: string; transaction_date: string; amount: number; rotulo: string };
-  const grupos = new Map<string, Tx[]>();
-  // O mesmo favorecido aparece ora com CNPJ, ora só pelo nome (extrato do cartão não
-  // traz documento). Sem isto viram dois grupos e o mesmo aviso sai em dobro.
-  const docPorNome = new Map<string, string>();
-  for (const t of (txs ?? []) as any[]) {
-    const doc = String(t.counterparty_document ?? t.merchant_document ?? "").replace(/\D/g, "");
-    const nome = norm(String(t.merchant_name || t.counterparty_name || "").trim()).slice(0, 40);
-    if (doc.length >= 11 && nome && !docPorNome.has(nome)) docPorNome.set(nome, `doc:${doc}`);
-  }
-  for (const t of (txs ?? []) as any[]) {
-    // Transferência entre contas e parcela já explicada não são despesa nova.
-    if (t.dismissed_kind === "transferencia" || t.dismissed_kind === "parcela") continue;
-    const doc = String(t.counterparty_document ?? t.merchant_document ?? "").replace(/\D/g, "");
-    const nome = String(t.merchant_name || t.counterparty_name || t.description || "").trim();
-    const chave = doc.length >= 11 ? `doc:${doc}` : (docPorNome.get(norm(nome).slice(0, 40)) ?? `nome:${norm(nome).slice(0, 40)}`);
-    if (chave === "nome:") continue;
-    // Sem favorecido e com descrição genérica ("TRANSF ENVIADA PIX", "DEBITO DE CARTAO")
-    // o grupo mistura dezenas de destinos: mediana, "novo" e "parou" não dizem nada. A lista
-    // é a mesma da memória do motor (historicoSemIdentidade).
-    if (doc.length < 11 && historicoSemIdentidade(nome)) continue;
-    const tx: Tx = {
-      id: t.id, transaction_date: String(t.transaction_date).slice(0, 10),
-      amount: Math.abs(Number(t.amount || 0)), rotulo: nome.slice(0, 60) || chave,
-    };
-    const lista = grupos.get(chave);
-    if (lista) lista.push(tx); else grupos.set(chave, [tx]);
-  }
-
-  type Alerta = { tipo: string; chave: string; titulo: string; motivo: string; valor: number; data: string; txId: string | null };
-  const alertas: Alerta[] = [];
-  const fmt = (n: number) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-  const ddmm = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
-  const mediana = (v: number[]) => {
-    const s = [...v].sort((a, b) => a - b); const m = Math.floor(s.length / 2);
-    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-  };
-  const mesDe = (d: string) => d.slice(0, 7);
-  const mesesAnteriores = [1, 2, 3, 4].map((n) => {
-    const d = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth() - n, 1));
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-  });
-
-  for (const [chave, lista] of grupos) {
-    const rotulo = lista[lista.length - 1].rotulo;
-    const recentes = lista.filter((t) => t.transaction_date >= d30);
-    const historico = lista.filter((t) => t.transaction_date < d30);
-
-    if (historico.length >= 3) {
-      const med = mediana(historico.map((t) => t.amount));
-      for (const t of recentes) {
-        if (med > 0 && t.amount >= 2 * med && t.amount - med >= 200) {
-          alertas.push({
-            tipo: "valor", chave: `vigia:valor:${t.id}`, txId: t.id, valor: t.amount, data: t.transaction_date,
-            titulo: `Valor acima do padrão: ${rotulo} — ${fmt(t.amount)} (costuma ser ~${fmt(med)})`,
-            motivo: `${historico.length} pagamentos anteriores a ${rotulo} nos últimos 12 meses, mediana ${fmt(med)}. Este é ${(t.amount / med).toFixed(1)}× o normal. Confira o valor antes de lançar.`,
-          });
-        }
-      }
-    }
-
-    if (historico.length === 0 && recentes.length > 0) {
-      const maior = recentes.reduce((m, t) => (t.amount > m.amount ? t : m), recentes[0]);
-      const soma = recentes.reduce((s, t) => s + t.amount, 0);
-      if (maior.amount >= 500) {
-        alertas.push({
-          tipo: "novo", chave: `vigia:novo:${chave}:${mesDe(maior.transaction_date)}`, txId: maior.id, valor: maior.amount, data: maior.transaction_date,
-          titulo: `Primeira vez no extrato: ${rotulo} — ${fmt(maior.amount)}`,
-          motivo: `Nenhum pagamento a ${rotulo} nos 12 meses anteriores; ${recentes.length} nos últimos 30 dias, somando ${fmt(soma)}. Vale confirmar que é um recebedor legítimo.`,
-        });
-      }
-    }
-
-    const meses = new Set(lista.map((t) => mesDe(t.transaction_date)));
-    const presentes = mesesAnteriores.filter((m) => meses.has(m));
-    const ultimo = lista[lista.length - 1];
-    if (presentes.length >= 3 && ultimo.transaction_date < d35) {
-      alertas.push({
-        tipo: "parou", chave: `vigia:parou:${chave}:${mesDe(iso(hoje))}`, txId: ultimo.id, valor: ultimo.amount, data: ultimo.transaction_date,
-        titulo: `${rotulo} aparecia todo mês e parou (último em ${ddmm(ultimo.transaction_date)})`,
-        motivo: `Pagamentos em ${presentes.slice().reverse().join(", ")}; nenhum nos últimos 35 dias. Pode ser cancelamento, atraso ou outra forma de pagamento — só vale saber.`,
-      });
-    }
-
-    for (let i = 0; i < recentes.length; i++) {
-      for (let j = i + 1; j < recentes.length; j++) {
-        const a = recentes[i], b = recentes[j];
-        const dias = Math.abs(new Date(a.transaction_date).getTime() - new Date(b.transaction_date).getTime()) / 86400000;
-        if (a.amount > 0 && Math.abs(a.amount - b.amount) < 0.01 && dias <= 3) {
-          alertas.push({
-            tipo: "duplicidade", chave: `vigia:dup:${a.id}:${b.id}`, txId: b.id, valor: b.amount, data: b.transaction_date,
-            titulo: `Possível duplicidade: ${rotulo} — ${fmt(a.amount)} em ${ddmm(a.transaction_date)} e ${ddmm(b.transaction_date)}`,
-            motivo: `Dois débitos iguais para o mesmo recebedor com ${Math.round(dias)} dia(s) de diferença. Se for cobrança em dobro, marque a segunda como duplicata na fila.`,
-          });
-        }
-      }
-    }
-  }
-
-  // Cinto e suspensório: dois grupos que ainda assim descrevam o mesmo fato não avisam duas vezes.
-  const vistos = new Set<string>();
-  for (let i = alertas.length - 1; i >= 0; i--) {
-    const t = alertas[i].titulo;
-    if (vistos.has(t)) alertas.splice(i, 1); else vistos.add(t);
-  }
+  // O agrupamento por quem recebeu e os quatro olhares moram em vigia.ts (puro, testado sem banco).
+  const alertas = alertasDoVigia(txs as unknown as LinhaDoVigia[], hoje);
   if (alertas.length === 0) return jr({ ok: true, alertas: 0, message: "Nada fora do padrão." });
   const { data: existentes } = await admin
     .from("finance_review_queue")
@@ -1502,10 +1396,16 @@ async function proporRegras(admin: DbClient) {
 async function proporRegrasNoBanco(admin: DbClient): Promise<number> {
   const lancamentos = await lerTudo<{
     supplier_id: string | null; supplier_name: string | null; expense_category: string;
+    bank_transactions: TransacaoOrfa | null;
   }>((de, ate) =>
     admin
       .from("payables")
-      .select("id, supplier_id, supplier_name, expense_category")
+      // A linha do extrato de cada decisão: é nela que a regra proposta tem de casar (o motor lê o extrato,
+      // não o que a despesa guardou).
+      .select(`id, supplier_id, supplier_name, expense_category,
+               bank_transactions!payables_bank_transaction_id_fkey (
+                 id, transaction_date, description, amount, transaction_type,
+                 counterparty_name, counterparty_document, source_type, payee_mcc )`)
       .not("expense_category", "is", null)
       // `id` como desempate: ordem instável faz uma linha cair em duas páginas e outra em
       // nenhuma, e aí a contagem de repetições que vira regra sai errada.
@@ -1514,12 +1414,18 @@ async function proporRegrasNoBanco(admin: DbClient): Promise<number> {
       .range(de, ate)
   , 3000);
 
-  const { data: cats } = await admin
+  // Com erro, o mapa ficaria vazio e toda regra proposta iria gravada como despesa_operacional (segunda revisão
+  // de 22/10/2026): como fornecedores e regras, leitura que falha derruba o aprendizado do dia.
+  const { data: cats, error: eCats } = await admin
     .from("financial_categories").select("name, dre_group").eq("active", true);
+  if (eCats) throw eCats;
   const grupoDa = new Map<string, string>();
   for (const c of (cats ?? []) as any[]) if (c.dre_group) grupoDa.set(String(c.name), String(c.dre_group));
 
-  const { data: fornecedores } = await admin.from("suppliers").select("id, name, cnpj_cpf, trade_name").limit(2000);
+  // Ler com erro e seguir com lista vazia seria propor de novo tudo o que já foi recusado ou arquivado (as
+  // recusadas não estão no índice único): leitura que falha derruba o aprendizado do dia, não o refaz.
+  const { data: fornecedores, error: eForn } = await admin.from("suppliers").select("id, name, cnpj_cpf, trade_name, active").limit(2000);
+  if (eForn) throw eForn;
   const nomeDo = new Map<string, string>();
   for (const f of (fornecedores ?? []) as any[]) nomeDo.set(f.id, f.name);
 
@@ -1529,11 +1435,34 @@ async function proporRegrasNoBanco(admin: DbClient): Promise<number> {
     counterpartyName: p.supplier_name ?? null,
     categoria: String(p.expense_category),
     dreGroup: grupoDa.get(String(p.expense_category)) ?? "despesa_operacional",
+    // A linha como a fila a entrega ao motor (generate lê as mesmas colunas e não mexe no valor).
+    tx: (p.bank_transactions ?? null) as TransacaoOrfa | null,
   }));
 
-  const { data: existentes } = await admin.from("finance_rules").select("*").limit(1000);
-  const padroes = sugerirRegras(decisoes, (existentes ?? []) as unknown as RegraFinanceira[], 3,
-    (fornecedores ?? []) as FornecedorConhecido[]);
+  const { data: existentes, error: eRegras } = await admin.from("finance_rules").select("*").limit(1000);
+  if (eRegras) throw eRegras;
+  const regras = (existentes ?? []) as unknown as Array<RegraFinanceira & { created_at?: string }>;
+  // As saídas dos últimos 90 dias (a janela da fila): a regra proposta tem de resolver ao menos uma delas.
+  const desde90 = new Date(Date.now() - JANELA_DIAS * 86400000).toISOString().slice(0, 10);
+  const recentes = await lerTudo<TransacaoOrfa>((de, ate) =>
+    admin
+      .from("bank_transactions")
+      .select("id, transaction_date, description, amount, transaction_type, counterparty_name, counterparty_document, source_type, payee_mcc")
+      .eq("transaction_type", "debit")
+      .gte("transaction_date", desde90)
+      .order("transaction_date", { ascending: false })
+      .order("id")
+      .range(de, ate)
+  , 3000);
+  // O motor como a fila o roda (generate): regras ATIVAS da mais nova para a mais antiga e só os fornecedores
+  // ativos. A regra proposta precisa casar nele, em linhas que hoje nenhuma regra cobre.
+  const motor = {
+    regrasAtivas: regras.filter((r) => r.status === "active")
+      .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""))),
+    fornecedores: indexarFornecedores(((fornecedores ?? []) as any[]).filter((f) => f.active !== false) as FornecedorConhecido[]),
+    recentes,
+  };
+  const padroes = sugerirRegras(decisoes, regras, 3, (fornecedores ?? []) as FornecedorConhecido[], motor);
 
   if (padroes.length === 0) return 0;
 
