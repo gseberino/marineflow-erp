@@ -160,17 +160,74 @@ export function podeTrocarClienteDaOS(cargo: string | null | undefined): boolean
 }
 
 /**
- * O payload de ATUALIZAÇÃO de uma OS que já existe: o de payloadParaCargo e, para quem não troca
- * o cliente, sem client_id. É a defesa do lado do app; quem garante é o gatilho no banco
- * (os_tecnico_nao_troca_cliente).
+ * O cargo pode trocar a embarcação/veículo de uma OS que JÁ TEM uma? Só o escritório (decisão do
+ * dono, 22/10/2026). Escolher a primeira unidade de uma OS sem unidade continua livre (do mesmo
+ * cliente). Cargo ainda não carregado também não: falha fechada, como no cliente.
+ */
+export function podeTrocarEmbarcacaoDaOS(cargo: string | null | undefined): boolean {
+  return ehDoEscritorio(cargo);
+}
+
+/**
+ * O payload de ATUALIZAÇÃO de uma OS que já existe: o de payloadParaCargo e, para quem não troca,
+ * sem client_id e — se a OS já tinha embarcação/veículo — sem vessel_id. Sem o vessel_id, a tela
+ * do técnico aberta antes de o escritório trocar a unidade não a devolve para a antiga ao salvar.
+ * É a defesa do lado do app; quem garante é o gatilho no banco (os_tecnico_nao_troca_cliente).
+ *
+ * `unidadeGravada`: o vessel_id da OS como a tela a leu. `null`/'' = a OS não tinha unidade (a
+ * primeira escolha vai). `undefined` = não se sabe: sai também (falha fechada).
  */
 export function payloadDeAtualizacaoParaCargo<T extends Record<string, unknown>>(
   cargo: string | null | undefined,
   payload: T,
-  viewDisponivel: boolean = VIEW_TECNICO_DISPONIVEL,
+  opcoes: { unidadeGravada?: string | null; viewDisponivel?: boolean } = {},
 ): Partial<T> {
-  const porCargo = payloadParaCargo(cargo, payload, viewDisponivel);
+  const porCargo = payloadParaCargo(cargo, payload, opcoes.viewDisponivel ?? VIEW_TECNICO_DISPONIVEL);
   if (podeTrocarClienteDaOS(cargo)) return porCargo;
   const { client_id: _naoTroca, ...semCliente } = porCargo as Record<string, unknown>;
-  return semCliente as Partial<T>;
+  const osSemUnidade = opcoes.unidadeGravada === null || opcoes.unidadeGravada === '';
+  if (osSemUnidade || podeTrocarEmbarcacaoDaOS(cargo)) return semCliente as Partial<T>;
+  const { vessel_id: _naoTrocaUnidade, ...semUnidade } = semCliente;
+  return semUnidade as Partial<T>;
+}
+
+/**
+ * Cadastros que já existem (decisão do dono, 22/10/2026): só o escritório troca o DONO de uma
+ * embarcação/veículo e muda o nome, o CPF/CNPJ ou o tipo (PF/PJ) de um cliente. Telefone, e-mail,
+ * endereço e o resto, o técnico continua podendo. Criar o cadastro continua livre. Cargo ainda não
+ * carregado: travado (falha fechada). Quem garante é o banco (gatilhos da migration 20261022180000).
+ */
+export function podeMudarDonoEIdentidadeDoCadastro(cargo: string | null | undefined): boolean {
+  return ehDoEscritorio(cargo);
+}
+
+/** As colunas que identificam o cliente — as que só o escritório muda. */
+export const COLUNAS_DE_IDENTIDADE_DO_CLIENTE = ['name', 'cpf_cnpj', 'type'] as const;
+
+/**
+ * O payload de EDIÇÃO de um cliente: para quem não muda a identidade, sem nome, CPF/CNPJ e tipo.
+ * Sem isso, o diálogo aberto antes de o escritório corrigir o nome o desfaria ao salvar o telefone
+ * (e o gatilho do banco recusaria a gravação inteira).
+ */
+export function payloadDeEdicaoDoClienteParaCargo<T extends Record<string, unknown>>(
+  cargo: string | null | undefined,
+  payload: T,
+): Partial<T> {
+  if (podeMudarDonoEIdentidadeDoCadastro(cargo)) return payload;
+  const travadas = new Set<string>(COLUNAS_DE_IDENTIDADE_DO_CLIENTE);
+  const limpo: Record<string, unknown> = {};
+  for (const [chave, valor] of Object.entries(payload)) {
+    if (!travadas.has(chave)) limpo[chave] = valor;
+  }
+  return limpo as Partial<T>;
+}
+
+/** O payload de EDIÇÃO de uma embarcação/veículo: para quem não troca o dono, sem client_id. */
+export function payloadDeEdicaoDaUnidadeParaCargo<T extends Record<string, unknown>>(
+  cargo: string | null | undefined,
+  payload: T,
+): Partial<T> {
+  if (podeMudarDonoEIdentidadeDoCadastro(cargo)) return payload;
+  const { client_id: _naoTrocaDono, ...semDono } = payload as Record<string, unknown>;
+  return semDono as Partial<T>;
 }

@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { EntityCombobox } from '@/components/EntityCombobox';
 import { useCreateVessel, useUpdateVessel } from '@/hooks/use-vessels';
 import { useClients } from '@/hooks/use-clients';
+import { useOptionalAuth } from '@/hooks/use-auth';
+import { payloadDeEdicaoDaUnidadeParaCargo, podeMudarDonoEIdentidadeDoCadastro } from '@/lib/service-orders-source';
 import { useMarinas } from '@/hooks/use-marinas';
 import { useVesselContacts, useCreateVesselContact, VESSEL_CONTACT_ROLES } from '@/hooks/use-vessel-contacts';
 import { Badge } from '@/components/ui/badge';
@@ -69,6 +71,10 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
   // gravado em pés, convertido, e o length_feet segue o mesmo — abrir e salvar não regrava a medida.
   const [metrosDigitados, setMetrosDigitados] = useState<string | null>(null);
   const isEdit = !!vessel;
+  // Só o escritório troca o DONO de um cadastro que já existe (decisão do dono, 22/10/2026); criar
+  // continua livre. Cargo ainda não carregado: travado, sem motivo (falha fechada).
+  const cargo = useOptionalAuth()?.user?.role;
+  const donoTravado = isEdit && !podeMudarDonoEIdentidadeDoCadastro(cargo);
 
   useEffect(() => {
     if (vessel) {
@@ -138,7 +144,9 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
         current_marina_name_snapshot: selectedMarina?.name ?? null,
       };
       if (isEdit && vessel) {
-        await update.mutateAsync({ id: vessel.id, ...payload });
+        // Para quem não troca o dono, o client_id não vai: o diálogo aberto antes de o escritório
+        // trocar o dono não o desfaz ao salvar (e o banco recusaria a gravação inteira).
+        await update.mutateAsync({ id: vessel.id, ...payloadDeEdicaoDaUnidadeParaCargo(cargo, payload) });
         toast.success(t.vessels.updateSuccess);
       } else {
         const result = await create.mutateAsync(payload);
@@ -209,10 +217,13 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
               <Input required value={form.name ?? ''} onChange={e => set('name', e.target.value)} />
             </div>
             <div className="col-span-2">
-              <Label>{t.vessels.selectClient} *</Label>
+              <Label htmlFor="cadastro-dono">{t.vessels.selectClient} *</Label>
               <EntityCombobox
+                id="cadastro-dono"
                 value={form.client_id}
                 onChange={v => set('client_id', v)}
+                disabled={donoTravado}
+                ariaDescribedBy={donoTravado && cargo ? 'cadastro-dono-motivo' : undefined}
                 placeholder={t.vessels.selectClient}
                 options={activeClients.map(c => ({
                   value: c.id,
@@ -221,6 +232,12 @@ export function VesselFormDialog({ open, onOpenChange, vessel, initialClientId, 
                   searchTerms: [c.cpf_cnpj || '', c.email || ''],
                 }))}
               />
+              {/* Com o cargo já carregado, diz o porquê; carregando, só trava (sem mensagem que confunda o escritório). */}
+              {donoTravado && cargo && (
+                <p id="cadastro-dono-motivo" className="mt-1 text-xs text-muted-foreground">
+                  Só o escritório troca o dono {unidadeNaFrase({ asset_type: form.asset_type }, 'de')}.
+                </p>
+              )}
             </div>
             <div>
               <Label>{t.vessels.manufacturer}</Label>

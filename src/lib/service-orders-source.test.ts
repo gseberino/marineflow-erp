@@ -23,9 +23,14 @@ import {
   VIEW_TECNICO_DISPONIVEL,
   fonteDeLeituraDaOS,
   leDaViewDoTecnico,
+  COLUNAS_DE_IDENTIDADE_DO_CLIENTE,
   payloadDeAtualizacaoParaCargo,
+  payloadDeEdicaoDaUnidadeParaCargo,
+  payloadDeEdicaoDoClienteParaCargo,
   payloadParaCargo,
+  podeMudarDonoEIdentidadeDoCadastro,
   podeTrocarClienteDaOS,
+  podeTrocarEmbarcacaoDaOS,
 } from './service-orders-source';
 
 const PASTA_MIGRATIONS = join(process.cwd(), 'supabase', 'migrations');
@@ -93,8 +98,66 @@ describe('técnico não troca o cliente de uma OS (decisão do dono, 21/10/2026)
 
   it('na atualização, o payload do técnico sai sem client_id (e sem as colunas de valor)', () => {
     const p = { client_id: 'c2', problem_description: 'x', grand_total: 100 };
-    expect(payloadDeAtualizacaoParaCargo('technician', p, true)).toEqual({ problem_description: 'x' });
-    expect(payloadDeAtualizacaoParaCargo('admin', p, true)).toEqual(p);
+    expect(payloadDeAtualizacaoParaCargo('technician', p, { viewDisponivel: true })).toEqual({ problem_description: 'x' });
+    expect(payloadDeAtualizacaoParaCargo('admin', p, { viewDisponivel: true })).toEqual(p);
+  });
+});
+
+describe('técnico não troca a embarcação/veículo de uma OS que já tem uma (decisão do dono, 22/10/2026)', () => {
+  it('só o escritório troca; técnico e cargo ainda não carregado, não (falha fechada)', () => {
+    for (const cargo of ['admin', 'financial', 'seller']) {
+      expect(podeTrocarEmbarcacaoDaOS(cargo), `cargo ${cargo}`).toBe(true);
+    }
+    for (const cargo of ['technician', 'external_seller', 'other', undefined, null, '']) {
+      expect(podeTrocarEmbarcacaoDaOS(cargo), `cargo ${cargo}`).toBe(false);
+    }
+  });
+
+  const p = { client_id: 'c1', vessel_id: 'v2', problem_description: 'x' };
+
+  it('OS que já tinha unidade: o payload do técnico sai sem vessel_id (a tela velha não desfaz a troca do escritório)', () => {
+    expect(payloadDeAtualizacaoParaCargo('technician', p, { unidadeGravada: 'v1' })).toEqual({ problem_description: 'x' });
+  });
+
+  it('OS sem unidade: a primeira escolha do técnico vai', () => {
+    expect(payloadDeAtualizacaoParaCargo('technician', p, { unidadeGravada: null })).toEqual({ vessel_id: 'v2', problem_description: 'x' });
+    expect(payloadDeAtualizacaoParaCargo('technician', p, { unidadeGravada: '' })).toEqual({ vessel_id: 'v2', problem_description: 'x' });
+  });
+
+  it('sem saber se a OS tinha unidade, sai também (falha fechada); cargo não carregado idem', () => {
+    expect(payloadDeAtualizacaoParaCargo('technician', p)).toEqual({ problem_description: 'x' });
+    expect(payloadDeAtualizacaoParaCargo(undefined, p, { unidadeGravada: 'v1' })).toEqual({ problem_description: 'x' });
+  });
+
+  it('o escritório troca a unidade normalmente', () => {
+    expect(payloadDeAtualizacaoParaCargo('admin', p, { unidadeGravada: 'v1' })).toEqual(p);
+    expect(payloadDeAtualizacaoParaCargo('financial', p)).toEqual(p);
+  });
+});
+
+describe('cadastros: técnico não troca o dono da unidade nem a identidade do cliente (22/10/2026)', () => {
+  it('só o escritório; técnico e cargo ainda não carregado, não (falha fechada)', () => {
+    for (const cargo of ['admin', 'financial', 'seller']) {
+      expect(podeMudarDonoEIdentidadeDoCadastro(cargo), `cargo ${cargo}`).toBe(true);
+    }
+    for (const cargo of ['technician', 'external_seller', 'other', undefined, null, '']) {
+      expect(podeMudarDonoEIdentidadeDoCadastro(cargo), `cargo ${cargo}`).toBe(false);
+    }
+  });
+
+  it('cliente: o técnico manda telefone, e-mail e endereço, sem nome, CPF/CNPJ e tipo', () => {
+    const c = { type: 'company', name: 'Novo nome', cpf_cnpj: '1', phone: '47', email: 'a@b.c', city: 'Itajaí' };
+    expect(payloadDeEdicaoDoClienteParaCargo('technician', c)).toEqual({ phone: '47', email: 'a@b.c', city: 'Itajaí' });
+    expect(payloadDeEdicaoDoClienteParaCargo(undefined, c)).toEqual({ phone: '47', email: 'a@b.c', city: 'Itajaí' });
+    expect(payloadDeEdicaoDoClienteParaCargo('admin', c)).toEqual(c);
+    expect([...COLUNAS_DE_IDENTIDADE_DO_CLIENTE]).toEqual(['name', 'cpf_cnpj', 'type']);
+  });
+
+  it('embarcação/veículo: o técnico manda o resto, sem client_id', () => {
+    const v = { client_id: 'c2', name: 'Vitória Star', access_notes: 'portaria' };
+    expect(payloadDeEdicaoDaUnidadeParaCargo('technician', v)).toEqual({ name: 'Vitória Star', access_notes: 'portaria' });
+    expect(payloadDeEdicaoDaUnidadeParaCargo(null, v)).toEqual({ name: 'Vitória Star', access_notes: 'portaria' });
+    expect(payloadDeEdicaoDaUnidadeParaCargo('seller', v)).toEqual(v);
   });
 });
 
@@ -203,5 +266,32 @@ describe('a migration das views cumpre o que as listas em código prometem', () 
     for (const coluna of ['id', 'service_order_id', 'service_id', 'name_snapshot', 'quantity', 'technician_user_id']) {
       expect(temColuna(servicos, coluna), `${coluna} sumiu da view de serviços`).toBe(true);
     }
+  });
+});
+
+// "Três fontes para o mesmo padrão": a tela (COLUNAS_DE_IDENTIDADE_DO_CLIENTE), o assistente
+// (SO_DO_ESCRITORIO em clients.ts) e o gatilho do banco têm de proteger as MESMAS colunas. Se uma
+// coluna entrar só no gatilho, a tela do técnico mandaria a coluna e o banco recusaria a gravação
+// inteira (até o telefone deixaria de salvar) — sem nenhum teste ficar vermelho.
+describe('as três fontes das colunas de identidade do cliente batem', () => {
+  const esperadas = [...COLUNAS_DE_IDENTIDADE_DO_CLIENTE].sort();
+
+  it('o gatilho do banco (a última migration que o cria)', () => {
+    const arquivos = readdirSync(PASTA_MIGRATIONS).sort().filter((f) =>
+      readFileSync(join(PASTA_MIGRATIONS, f), 'utf8').includes('cliente_tecnico_nao_muda_identidade'));
+    expect(arquivos.length).toBeGreaterThan(0);
+    const sql = readFileSync(join(PASTA_MIGRATIONS, arquivos[arquivos.length - 1]), 'utf8');
+    const m = sql.match(/before\s+update\s+of\s+([\w\s,]+?)\s+on\s+public\.clients/i);
+    expect(m, 'gatilho before update of … on public.clients').toBeTruthy();
+    expect(m![1].split(',').map((c) => c.trim()).sort()).toEqual(esperadas);
+    for (const c of esperadas) expect(sql).toMatch(new RegExp(String.raw`new\.${c}\s+is\s+distinct\s+from\s+old\.${c}`, 'i'));
+  });
+
+  it('o assistente (update_client)', () => {
+    const ts = readFileSync(join(process.cwd(), 'supabase', 'functions', '_shared', 'ai', 'tools', 'clients.ts'), 'utf8');
+    const bloco = ts.match(/const SO_DO_ESCRITORIO[^=]*=\s*\{([\s\S]*?)\};/);
+    expect(bloco, 'SO_DO_ESCRITORIO em clients.ts').toBeTruthy();
+    const chaves = [...bloco![1].matchAll(/^\s*(\w+)\s*:/gm)].map((x) => x[1]).sort();
+    expect(chaves).toEqual(esperadas);
   });
 });

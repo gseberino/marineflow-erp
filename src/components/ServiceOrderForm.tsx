@@ -56,7 +56,9 @@ import { useServiceOrderExpenses, useAddServiceOrderExpense, useUpdateServiceOrd
 import { useUpdateServiceOrderService } from '@/hooks/use-service-order-services';
 import { useUpdateServiceOrderPart } from '@/hooks/use-service-order-parts';
 // NOVO-020b: o técnico lê da view sem valores; o que ele não leu não pode voltar no Salvar.
-import { payloadDeAtualizacaoParaCargo, payloadParaCargo, podeTrocarClienteDaOS } from '@/lib/service-orders-source';
+import {
+  payloadDeAtualizacaoParaCargo, payloadParaCargo, podeTrocarClienteDaOS, podeTrocarEmbarcacaoDaOS,
+} from '@/lib/service-orders-source';
 import { levantamentosPendentesParaConcluir } from '@/lib/levantamento-gate';
 import { PriceCalculatorDialog } from '@/components/PriceCalculatorDialog';
 import { supabase } from '@/integrations/supabase/client';
@@ -458,6 +460,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Assistente "Faturar OS" (NFS-e + NF-e): abre ao concluir, ANTES do aviso de saldo —
   // documento fiscal primeiro, cobrança depois. Só admin (a emissão é admin-only).
   const authUser = useOptionalAuth()?.user ?? null;
+  // A embarcação/veículo da OS como foi LIDA (não a do formulário): técnico escolhe a primeira, mas
+  // não troca a que já está gravada (decisão do dono, 22/10/2026). Sem a OS lida: não se sabe.
+  const unidadeGravada: string | null | undefined = orderData ? (orderData.vessel_id ?? null) : undefined;
   // Agrupar / desagrupar orçamentos (agrupar_orcamentos / desagrupar_orcamentos). Quem decide é o
   // banco; a tela só esconde o que ele recusaria. Só admin ou financeiro.
   const agrupamento = useAgrupamentoDoOrcamento(orderId);
@@ -1002,7 +1007,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         toast.success('Ordem de serviço criada com sucesso');
         navigate(`/service-orders/${result.id}`);
       } else {
-        await updateSO.mutateAsync({ id: orderId!, ...payloadDeAtualizacaoParaCargo(authUser?.role, payload) });
+        await updateSO.mutateAsync({ id: orderId!, ...payloadDeAtualizacaoParaCargo(authUser?.role, payload, { unidadeGravada }) });
         // O Salvar também conta como "último salvo": o Agrupar confere isso antes de abrir.
         ultimoSalvoRef.current = JSON.stringify(montarPayload());
         const { supabase } = await import('@/integrations/supabase/client');
@@ -1910,7 +1915,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
     setSalvandoAuto(true);
     try {
-      await updateSO.mutateAsync({ id: orderId!, ...payloadDeAtualizacaoParaCargo(authUser?.role, payload) });
+      await updateSO.mutateAsync({ id: orderId!, ...payloadDeAtualizacaoParaCargo(authUser?.role, payload, { unidadeGravada }) });
       ultimoSalvoRef.current = assinatura;
       setSalvoEm(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     } catch (e: any) {
@@ -1933,7 +1938,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNew, orderId, isLocked, form, grandTotal, passthroughCardFeeAmount,
-      discountServicesPct, discountPartsPct, defaultQuoteValidityDays]);
+      discountServicesPct, discountPartsPct, defaultQuoteValidityDays, unidadeGravada]);
 
   /* Dispara 1,5 s depois da última tecla.
      A referência é a prática corrente: salvar no blur do campo e também alguns
@@ -2427,8 +2432,12 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
         }
         // A embarcação/veículo: OS concluída não troca (plano e histórico já registrados nela — a
         // saída é voltar a OS para Em andamento); o agrupamento exige a mesma unidade nas origens.
+        // Técnico não troca a unidade de OS que já tem uma (decisão do dono, 22/10/2026); a primeira,
+        // escolhe. Cargo ainda não carregado: só esconde o "Trocar" (falha fechada, como no cliente).
         semTrocaDeEmbarcacao={
           !orderId ? undefined
+          : unidadeGravada && !authUser?.role ? true
+          : unidadeGravada && !podeTrocarEmbarcacaoDaOS(authUser?.role) ? 'Só o escritório troca a embarcação ou veículo.'
           : currentStatus === 'completed' ? `OS concluída: para trocar ${aUnidadeDaOS}, volte a OS para Em andamento.`
           : agrupamento.isLoading ? true
           : agrupamento.isError ? 'Não deu para conferir se este orçamento reúne outros: recarregue a página para trocar.'

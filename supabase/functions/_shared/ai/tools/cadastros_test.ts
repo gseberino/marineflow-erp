@@ -5,6 +5,7 @@ import { clientTools } from "./clients.ts";
 import { vesselTools } from "./vessels.ts";
 import { purchasingTools } from "./purchasing.ts";
 import { entity360Tools } from "./entity-360.ts";
+import { registryCrudTools } from "./registry-crud.ts";
 import { formatarDocumento, formatarTelefone, notaDoCadastro, traduzirIndicadorIE } from "../busca-cadastro.ts";
 
 // Banco falso: tabelas por nome; eq/in filtram; range pagina; insert/update gravam e ficam anotados.
@@ -19,16 +20,24 @@ function bancoFalso(tabelas: Record<string, any[]>, falhaLeitura: Record<string,
     from(tabela: string) {
       const filtros: ((l: Record<string, unknown>) => boolean)[] = [];
       let faixa: [number, number] | null = null;
+      // Como o banco de verdade, devolve SÓ as colunas pedidas (lista simples): um select que
+      // esquecer cpf_cnpj ou type faz o teste do técnico falhar. Com embed ou "*", a linha inteira.
+      let colunas: string[] | null = null;
       const erro = () => (falhaLeitura[tabela] ? { message: falhaLeitura[tabela] } : null);
       const linhas = () => {
         const todas = (tabelas[tabela] ?? []).filter((l) => filtros.every((f) => f(l)));
         // Cópias, como o banco de verdade: o "antes" lido não pode mudar com o update.
-        return (faixa ? todas.slice(faixa[0], faixa[1] + 1) : todas).map((l) => ({ ...l }));
+        return (faixa ? todas.slice(faixa[0], faixa[1] + 1) : todas).map((l) =>
+          colunas ? Object.fromEntries(colunas.filter((c) => c in l).map((c) => [c, l[c]])) : { ...l });
       };
       const ler = () => (erro() ? { data: null, error: erro() } : { data: linhas(), error: null });
       // deno-lint-ignore no-explicit-any
       const q: any = {
-        select: () => q,
+        select: (s?: string) => {
+          const lista = (s ?? "").split(",").map((c) => c.trim()).filter(Boolean);
+          colunas = lista.length && !lista.some((c) => c === "*" || /[(:]/.test(c)) ? lista : null;
+          return q;
+        },
         order: () => q,
         limit: () => q,
         or: () => q, like: () => q, ilike: () => q, gte: () => q, lte: () => q, is: () => q, not: () => q,
@@ -64,7 +73,7 @@ function bancoFalso(tabelas: Record<string, any[]>, falhaLeitura: Record<string,
   return db;
 }
 const ctxCom = (db: unknown, userRole = "admin") => ({ sb: db, admin: db, userId: "dono-1", userRole, jwt: "", appOrigin: "", settings: {} }) as never;
-const tool = (nome: string) => [...clientTools, ...vesselTools, ...purchasingTools, ...entity360Tools].find((t) => t.name === nome)!;
+const tool = (nome: string) => [...clientTools, ...vesselTools, ...purchasingTools, ...entity360Tools, ...registryCrudTools].find((t) => t.name === nome)!;
 
 const CLIENTES = () => [
   { id: "c1", name: "João da Silva", type: "individual", cpf_cnpj: "508.421.889-91", phone: "(47) 99165-3158", whatsapp: "(47) 99165-3158", email: null, city: "Itajaí", active: true, notes: null },
@@ -236,6 +245,94 @@ Deno.test("update_client: cliente que não existe e leitura que falha", async ()
   const falha = bancoFalso({ clients: CLIENTES() }, { clients: "boom" });
   await assertRejects(() => tool("update_client").execute({ client_id: "c1", active: false }, ctxCom(falha)));
   assertEquals(falha.chamadas.update, []);
+});
+
+// ── técnico: nome, CPF/CNPJ, tipo e dono do ativo só pelo escritório (dono, 22/10/2026) ───────
+
+Deno.test("update_client (técnico): mudar nome, CPF/CNPJ ou tipo é recusado e nada é gravado", async () => {
+  const db = bancoFalso({ clients: CLIENTES() });
+  const nome = await tool("update_client").execute({ client_id: "c1", name: "João Silva Jr" }, ctxCom(db, "technician")) as any;
+  assertEquals(nome.error, "Só o escritório muda o nome de um cliente — peça ao escritório.");
+  assertEquals(nome.nada_gravado, true);
+
+  const cpf = await tool("update_client").execute({ client_id: "c1", cpf_cnpj: "02837819980" }, ctxCom(db, "technician")) as any;
+  assertEquals(cpf.error, "Só o escritório muda o CPF/CNPJ de um cliente — peça ao escritório.");
+
+  // Preencher o CPF que estava vazio também é do escritório (o gatilho do banco recusa igual).
+  const vazio = await tool("update_client").execute({ client_id: "c3", cpf_cnpj: "111.444.777-35" }, ctxCom(db, "technician")) as any;
+  assertStringIncludes(vazio.error, "Só o escritório muda o CPF/CNPJ");
+
+  const tipo = await tool("update_client").execute({ client_id: "c1", type: "company" }, ctxCom(db, "technician")) as any;
+  assertEquals(tipo.error, "Só o escritório muda o tipo (pessoa física/jurídica) de um cliente — peça ao escritório.");
+
+  // Junto com um campo que ele pode mudar: recusa o pedido inteiro, o telefone não vai pela metade.
+  const tudo = await tool("update_client").execute(
+    { client_id: "c1", name: "Outro", cpf_cnpj: "02837819980", type: "company", phone: "47999990000" },
+    ctxCom(db, "technician"),
+  ) as any;
+  assertEquals(tudo.error, "Só o escritório muda o nome, o CPF/CNPJ e o tipo (pessoa física/jurídica) de um cliente — peça ao escritório.");
+  assertStringIncludes(tudo.tecnico_pode_mudar, "telefone");
+
+  assertEquals(db.chamadas.update, []);
+  assertEquals(db.tabelas.clients.find((c: any) => c.id === "c1").name, "João da Silva");
+});
+
+Deno.test("update_client (técnico): telefone, e-mail e endereço continuam; nome/CPF iguais ao gravado não contam como troca", async () => {
+  const db = bancoFalso({ clients: CLIENTES() });
+  // O modelo repete o nome e o CPF (sem máscara) ao mudar o telefone: não é troca, sai do patch.
+  const r = await tool("update_client").execute(
+    { client_id: "c1", name: " João da Silva ", cpf_cnpj: "50842188991", type: "individual", phone: "47999990000", email: "joao@ex.com", city: "Navegantes" },
+    ctxCom(db, "technician"),
+  ) as any;
+  assert(r.ok, JSON.stringify(r));
+  assertEquals(db.chamadas.update, [["clients", { phone: "(47) 99999-0000", email: "joao@ex.com", city: "Navegantes" }]]);
+
+  // CPF gravado sem máscara (dado antigo) e pedido com máscara: mesmo documento, nada a regravar.
+  const igual = await tool("update_client").execute({ client_id: "c2", cpf_cnpj: "028.378.199-80", name: "Flávio da Igreja" }, ctxCom(db, "technician")) as any;
+  assertEquals(igual.ok, true);
+  assertEquals(igual.atualizado, []);
+  assertEquals(db.chamadas.update.length, 1);
+  assertEquals(db.tabelas.clients.find((c: any) => c.id === "c2").cpf_cnpj, "02837819980");
+});
+
+Deno.test("update_client (admin): nome, CPF/CNPJ e tipo continuam livres para o escritório", async () => {
+  const db = bancoFalso({ clients: CLIENTES() });
+  const r = await tool("update_client").execute(
+    { client_id: "c3", name: "Nelson Prates Filho", cpf_cnpj: "11144477735", type: "company" },
+    ctxCom(db, "admin"),
+  ) as any;
+  assert(r.ok, JSON.stringify(r));
+  assertEquals(db.chamadas.update, [["clients", { name: "Nelson Prates Filho", cpf_cnpj: "111.444.777-35", type: "company" }]]);
+  for (const cargo of ["financial", "seller"]) {
+    const db2 = bancoFalso({ clients: CLIENTES() });
+    const r2 = await tool("update_client").execute({ client_id: "c1", name: "João S." }, ctxCom(db2, cargo)) as any;
+    assert(r2.ok, `${cargo}: ${JSON.stringify(r2)}`);
+    assertEquals(db2.chamadas.update, [["clients", { name: "João S." }]]);
+  }
+});
+
+const ATIVOS = () => [
+  { id: "v1", name: "Netuno", client_id: "c1", asset_type: "lancha", model: "Focker 240" },
+];
+
+Deno.test("update_vessel (técnico): trocar o dono é recusado com o motivo; o resto do ativo segue recusado como antes", async () => {
+  const db = bancoFalso({ vessels: ATIVOS() });
+  const dono = await tool("update_vessel").execute({ vessel_id: "v1", client_id: "c2" }, ctxCom(db, "technician")) as any;
+  assertEquals(dono.error, "Só o escritório troca o dono da embarcação ou veículo — peça ao escritório.");
+  const junto = await tool("update_vessel").execute({ vessel_id: "v1", client_id: "c2", model: "Focker 242" }, ctxCom(db, "technician")) as any;
+  assertStringIncludes(junto.error, "Só o escritório troca o dono");
+  const outro = await tool("update_vessel").execute({ vessel_id: "v1", model: "Focker 242" }, ctxCom(db, "technician")) as any;
+  assertEquals(outro.error, "Cargo não autorizado para esta ação.");
+  assertEquals(db.chamadas.update, []);
+  assertEquals(db.tabelas.vessels[0].client_id, "c1");
+});
+
+Deno.test("update_vessel (admin): o escritório troca o dono e edita o ativo como antes", async () => {
+  const db = bancoFalso({ vessels: ATIVOS() });
+  const r = await tool("update_vessel").execute({ vessel_id: "v1", client_id: "c2", model: "Focker 242" }, ctxCom(db, "admin")) as any;
+  assert(r.ok, JSON.stringify(r));
+  assertEquals(db.chamadas.update, [["vessels", { client_id: "c2", model: "Focker 242" }]]);
+  assertEquals(r.alterado.client_id, { de: "c1", para: "c2" });
 });
 
 // ── marina ────────────────────────────────────────────────────────────────────────────────────

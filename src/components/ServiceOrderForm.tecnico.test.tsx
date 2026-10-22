@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 
-const estado = vi.hoisted(() => ({ cargo: 'technician' as string }));
+const estado = vi.hoisted(() => ({ cargo: 'technician' as string | undefined }));
 
 vi.mock('@/hooks/use-auth', () => {
   const auth = () => ({ user: { id: 'u1', role: estado.cargo }, loading: false });
@@ -46,13 +46,13 @@ const os = {
   service_order_parts: [], service_order_technicians: [], updated_at: '2026-10-21T10:00:00Z',
 };
 
-function renderiza() {
+function renderiza(dados: Record<string, unknown> = os) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider>
         <MemoryRouter>
-          <ServiceOrderForm orderId="os1" orderData={os as never} isLoading={false} />
+          <ServiceOrderForm orderId="os1" orderData={dados as never} isLoading={false} />
         </MemoryRouter>
       </I18nProvider>
     </QueryClientProvider>,
@@ -88,5 +88,43 @@ describe('ServiceOrderForm — quem troca o cliente da OS', () => {
     );
     expect(await screen.findByText('OS concluída: para trocar o cliente, volte a OS para Em andamento.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Trocar cliente/ })).not.toBeInTheDocument();
+  });
+});
+
+// Técnico também não troca a embarcação/veículo de uma OS que já tem uma (decisão do dono,
+// 22/10/2026); a primeira unidade de uma OS sem unidade ele escolhe.
+describe('ServiceOrderForm — quem troca a embarcação ou veículo da OS', () => {
+  const MOTIVO = 'Só o escritório troca a embarcação ou veículo.';
+  const TROCAR_UNIDADE = /^Trocar a embarcação ou veículo/;
+
+  it('técnico, OS com unidade: sem "Trocar", com o motivo', async () => {
+    estado.cargo = 'technician';
+    renderiza();
+    expect(await screen.findByText(MOTIVO)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: TROCAR_UNIDADE })).not.toBeInTheDocument();
+  });
+
+  it('escritório (admin): o "Trocar" da unidade aparece, sem o motivo', async () => {
+    estado.cargo = 'admin';
+    renderiza();
+    expect(await screen.findByRole('button', { name: TROCAR_UNIDADE })).toBeInTheDocument();
+    expect(screen.queryByText(MOTIVO)).not.toBeInTheDocument();
+  });
+
+  it('técnico, OS sem unidade: a lista para escolher a primeira aparece, sem o motivo', async () => {
+    estado.cargo = 'technician';
+    renderiza({ ...os, vessel_id: null });
+    expect(await screen.findByRole('combobox', { name: /Embarcação ou veículo/ })).toBeInTheDocument();
+    expect(screen.queryByText(MOTIVO)).not.toBeInTheDocument();
+  });
+
+  it('cargo ainda não carregado: sem "Trocar" e sem motivo (falha fechada)', async () => {
+    estado.cargo = undefined;
+    renderiza();
+    expect(await screen.findByText('Embarcação ou veículo *')).toBeInTheDocument();
+    // Dá tempo às consultas (agrupamento, levantamento) que também seguram o "Trocar".
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole('button', { name: TROCAR_UNIDADE })).not.toBeInTheDocument();
+    expect(screen.queryByText(MOTIVO)).not.toBeInTheDocument();
   });
 });

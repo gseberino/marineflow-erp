@@ -126,6 +126,12 @@ export const registryCrudTools: ToolDef[] = [
     },
     risk: "low",
     async execute(args, ctx) {
+      // Técnico (dono, 22/10/2026): o DONO da embarcação/veículo só o escritório troca. O client_id
+      // não está no schema, mas o patch leva qualquer argumento — por isso a checagem é pela chave.
+      // O resto do cadastro do ativo já era recusado ao técnico (blockTechnician em atualizar).
+      if (ctx.userRole === "technician" && "client_id" in (args ?? {})) {
+        return { error: "Só o escritório troca o dono da embarcação ou veículo — peça ao escritório." };
+      }
       return await atualizar(ctx, "vessels", "vessel_id", args, "Ativo");
     },
   },

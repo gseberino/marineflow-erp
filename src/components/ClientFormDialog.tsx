@@ -11,6 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AddressFields } from '@/components/AddressFields';
 import { useCreateClient, useUpdateClient, type Client } from '@/hooks/use-clients';
 import { useCnpj } from '@/hooks/use-cnpj';
+import { useOptionalAuth } from '@/hooks/use-auth';
+import { payloadDeEdicaoDoClienteParaCargo, podeMudarDonoEIdentidadeDoCadastro } from '@/lib/service-orders-source';
 import { toast } from 'sonner';
 import type { TablesInsert } from '@/integrations/supabase/types';
 import { maskCPF, maskCNPJ, maskPhone } from '@/lib/masks';
@@ -72,6 +74,12 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
   const { cnpjLoading, fetchByCnpj } = useCnpj();
   const [form, setForm] = useState(empty);
   const isEdit = !!client;
+  // Nome, CPF/CNPJ e tipo de um cliente que já existe, só o escritório muda (decisão do dono,
+  // 22/10/2026); telefone, e-mail e endereço, o técnico continua podendo. Criar continua livre.
+  // Cargo ainda não carregado: travado, sem motivo (falha fechada).
+  const cargo = useOptionalAuth()?.user?.role;
+  const identidadeTravada = isEdit && !podeMudarDonoEIdentidadeDoCadastro(cargo);
+  const motivoDaTrava = identidadeTravada && cargo ? 'cliente-identidade-motivo' : undefined;
 
   useEffect(() => {
     if (client) {
@@ -143,7 +151,9 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
       };
 
       if (isEdit && client) {
-        await update.mutateAsync({ id: client.id, ...payload });
+        // Para quem não muda a identidade, nome, CPF/CNPJ e tipo não vão: o diálogo aberto antes de
+        // o escritório corrigi-los não os desfaz ao salvar o telefone (e o banco recusaria tudo).
+        await update.mutateAsync({ id: client.id, ...payloadDeEdicaoDoClienteParaCargo(cargo, payload) });
         toast.success(t.clients.updateSuccess);
         onSaved?.(client.id);
       } else {
@@ -204,9 +214,9 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="col-span-2">
-              <Label>{t.common.type}</Label>
-              <Select value={form.type} onValueChange={v => set('type', v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Label htmlFor="cliente-tipo">{t.common.type}</Label>
+              <Select value={form.type} onValueChange={v => set('type', v)} disabled={identidadeTravada}>
+                <SelectTrigger id="cliente-tipo" aria-describedby={motivoDaTrava}><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="individual">{t.common.individual}</SelectItem>
                   <SelectItem value="company">{t.common.company}</SelectItem>
@@ -214,19 +224,26 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
               </Select>
             </div>
             <div className="col-span-2">
-              <Label>{t.clients.fullName} *</Label>
-              <Input required value={form.name} onChange={e => set('name', e.target.value)} />
+              <Label htmlFor="cliente-nome">{t.clients.fullName} *</Label>
+              <Input
+                id="cliente-nome" required value={form.name} onChange={e => set('name', e.target.value)}
+                disabled={identidadeTravada} aria-describedby={motivoDaTrava}
+              />
             </div>
             <div className="col-span-2">
-              <Label>{form.type === 'company' ? t.clients.cnpj : t.clients.cpf}</Label>
+              <Label htmlFor="cliente-documento">{form.type === 'company' ? t.clients.cnpj : t.clients.cpf}</Label>
               <div className="flex gap-2">
                 <Input
+                  id="cliente-documento"
                   value={form.cpf_cnpj}
                   onChange={e => set('cpf_cnpj', form.type === 'company' ? maskCNPJ(e.target.value) : maskCPF(e.target.value))}
                   placeholder={form.type === 'company' ? '00.000.000/0001-00' : '000.000.000-00'}
                   maxLength={form.type === 'company' ? 18 : 14}
+                  disabled={identidadeTravada}
+                  aria-describedby={motivoDaTrava}
                 />
-                {form.type === 'company' && (
+                {/* A busca na Receita reescreve o nome: travada junto com ele. */}
+                {form.type === 'company' && !identidadeTravada && (
                   <Button type="button" variant="outline" onClick={handleCnpjSearch}
                     disabled={cnpjLoading || form.cpf_cnpj.length < 14}
                     aria-label="Buscar dados da empresa pelo CNPJ">
@@ -234,6 +251,11 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
                   </Button>
                 )}
               </div>
+              {motivoDaTrava && (
+                <p id={motivoDaTrava} className="mt-1 text-xs text-muted-foreground">
+                  Só o escritório muda o nome, o CPF/CNPJ e o tipo do cliente. Telefone, e-mail e endereço você pode mudar.
+                </p>
+              )}
             </div>
             {/* Dados fiscais — usados na emissão de NF-e para este cliente. */}
             <div>
@@ -264,8 +286,8 @@ export function ClientFormDialog({ open, onOpenChange, client, initialName, onCr
               <Input type="email" value={form.email} onChange={e => set('email', e.target.value)} />
             </div>
             <div>
-              <Label>{t.clients.phone}</Label>
-              <Input value={form.phone} onChange={e => set('phone', maskPhone(e.target.value))} placeholder="(47) 99999-9999" maxLength={15} />
+              <Label htmlFor="cliente-telefone">{t.clients.phone}</Label>
+              <Input id="cliente-telefone" value={form.phone} onChange={e => set('phone', maskPhone(e.target.value))} placeholder="(47) 99999-9999" maxLength={15} />
             </div>
             <div>
               <Label>{t.clients.whatsapp}</Label>

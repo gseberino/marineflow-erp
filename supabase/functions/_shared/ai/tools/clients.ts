@@ -59,6 +59,34 @@ function normalizarCampos(patch: Record<string, unknown>): { error: string } | n
   return null;
 }
 
+/**
+ * O que o técnico não muda num cliente já cadastrado (dono, 22/10/2026): o nome, o CPF/CNPJ e o
+ * tipo (pessoa física/jurídica) — é quem o cliente é e em nome de quem sai a nota. Telefone,
+ * e-mail e endereço ele continua podendo. A tela trava os mesmos campos e o banco recusa (gatilho
+ * em clients), mas o assistente no WhatsApp grava com service_role, onde o gatilho não pega: a
+ * porta, aqui, é a ferramenta.
+ */
+const SO_DO_ESCRITORIO: Record<"name" | "cpf_cnpj" | "type", string> = {
+  name: "o nome",
+  cpf_cnpj: "o CPF/CNPJ",
+  type: "o tipo (pessoa física/jurídica)",
+};
+
+/** O valor pedido é o que já está gravado? CPF/CNPJ por dígitos, nome sem espaço nas pontas. */
+function mesmoValorGravado(campo: string, pedido: unknown, gravado: unknown): boolean {
+  if (campo === "cpf_cnpj") {
+    const d = digitosDoDocumento(pedido);
+    return d.length > 0 && d === digitosDoDocumento(gravado);
+  }
+  if (campo === "name") return String(pedido ?? "").trim() === String(gravado ?? "").trim();
+  return pedido === gravado;
+}
+
+/** "o nome", "o nome e o CPF/CNPJ", "o nome, o CPF/CNPJ e o tipo (…)". */
+function emLista(itens: string[]): string {
+  return itens.length <= 1 ? (itens[0] ?? "") : `${itens.slice(0, -1).join(", ")} e ${itens[itens.length - 1]}`;
+}
+
 const COLUNAS_DUPLICADO = "id, name, cpf_cnpj, phone, whatsapp, city, active";
 
 /** Resumo de um cliente para o dono reconhecer quem é. */
@@ -218,7 +246,7 @@ export const clientTools: ToolDef[] = [
       required: ["client_id"],
     },
     risk: "low",
-    async execute(args, { sb }) {
+    async execute(args, { sb, userRole }) {
       const { client_id, motivo, ...campos } = args as Record<string, unknown>;
       const patch = Object.fromEntries(Object.entries(campos).filter(([, v]) => v !== undefined && v !== null && v !== ""));
       if (Object.keys(patch).length === 0) return { error: "Nada para atualizar — informe ao menos um campo." };
@@ -226,9 +254,29 @@ export const clientTools: ToolDef[] = [
       if (recusa) return recusa;
 
       const { data: antes, error: lerErr } = await sb
-        .from("clients").select("id, name, active, notes").eq("id", client_id).maybeSingle();
+        .from("clients").select("id, name, cpf_cnpj, type, active, notes").eq("id", client_id).maybeSingle();
       if (lerErr) throw lerErr;
       if (!antes) return { error: "Cliente não encontrado." };
+
+      // Técnico (22/10/2026): nome, CPF/CNPJ e tipo só pelo escritório — inclusive preencher o que
+      // estava vazio, como o gatilho do banco. Recusa o pedido inteiro (nada gravado pela metade).
+      // O que veio IGUAL ao gravado não é troca: o modelo costuma repetir o nome ao mudar o
+      // telefone; sai do patch para não regravar (o CPF sem máscara viraria "outro" valor).
+      if (userRole === "technician") {
+        const protegidos = Object.keys(SO_DO_ESCRITORIO) as (keyof typeof SO_DO_ESCRITORIO)[];
+        const mudaria = protegidos.filter((c) => c in patch && !mesmoValorGravado(c, patch[c], antes[c]));
+        if (mudaria.length) {
+          return {
+            error: `Só o escritório muda ${emLista(mudaria.map((c) => SO_DO_ESCRITORIO[c]))} de um cliente — peça ao escritório.`,
+            nada_gravado: true,
+            tecnico_pode_mudar: "telefone, WhatsApp, e-mail e endereço (mande de novo só com esses campos)",
+          };
+        }
+        for (const c of protegidos) delete patch[c];
+        if (Object.keys(patch).length === 0) {
+          return { ok: true, cliente: antes.name, atualizado: [], aviso: "Nada mudou: o que veio já era o que está no cadastro." };
+        }
+      }
 
       // CPF/CNPJ que já é de OUTRO cliente: gravar criaria a duplicata por outro caminho.
       if (patch.cpf_cnpj) {

@@ -12,6 +12,17 @@ import type { Tables } from '@/integrations/supabase/types';
 
 const atualizar = vi.fn(async (..._: unknown[]) => ({}));
 const criar = vi.fn(async (..._: unknown[]) => ({ id: 'novo', name: 'Novo' }));
+// Cargo de quem usa: escritório por padrão; os testes do técnico trocam.
+const sessao = vi.hoisted(() => ({ cargo: 'admin' as string | undefined }));
+
+vi.mock('@/hooks/use-auth', () => {
+  const porCargo = new Map<string | undefined, unknown>();
+  const auth = () => {
+    if (!porCargo.has(sessao.cargo)) porCargo.set(sessao.cargo, { user: { id: 'u1', role: sessao.cargo }, loading: false });
+    return porCargo.get(sessao.cargo);
+  };
+  return { useOptionalAuth: auth, useAuth: auth };
+});
 
 vi.mock('@/hooks/use-vessels', () => {
   const upd = { mutateAsync: (...a: unknown[]) => atualizar(...a), isPending: false };
@@ -60,6 +71,50 @@ const seletorDeTipo = () => screen.getByRole('combobox', { name: 'Tipo' });
 beforeEach(() => {
   atualizar.mockClear();
   criar.mockClear();
+  sessao.cargo = 'admin';
+});
+
+// Só o escritório troca o DONO de um cadastro que já existe (decisão do dono, 22/10/2026).
+describe('VesselFormDialog — quem troca o dono', () => {
+  const campoDoDono = () => screen.getByRole('combobox', { name: /Selecionar Cliente/ });
+
+  it('técnico editando: dono travado, com o motivo pelo tipo; o salvar não manda client_id', async () => {
+    sessao.cargo = 'technician';
+    const user = userEvent.setup();
+    abrir(cadastro({ asset_type: 'Motorhome', access_notes: 'portaria' }));
+    expect(campoDoDono()).toBeDisabled();
+    expect(screen.getByText('Só o escritório troca o dono do motorhome.')).toBeInTheDocument();
+    expect(campoDoDono()).toHaveAccessibleDescription('Só o escritório troca o dono do motorhome.');
+    await user.click(screen.getByRole('button', { name: 'Salvar' }));
+    expect(atualizar).toHaveBeenCalledWith(expect.objectContaining({ id: 'v1', access_notes: 'portaria' }));
+    expect(atualizar.mock.calls[0][0]).not.toHaveProperty('client_id');
+  });
+
+  it('técnico criando: o dono é escolhido livremente', () => {
+    sessao.cargo = 'technician';
+    abrir();
+    expect(campoDoDono()).toBeEnabled();
+    expect(screen.queryByText(/Só o escritório troca o dono/)).not.toBeInTheDocument();
+  });
+
+  it('escritório editando: dono livre e o client_id vai no salvar', async () => {
+    const user = userEvent.setup();
+    abrir(cadastro({ asset_type: 'Lancha' }));
+    expect(campoDoDono()).toBeEnabled();
+    expect(screen.queryByText(/Só o escritório troca o dono/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Salvar' }));
+    expect(atualizar).toHaveBeenCalledWith(expect.objectContaining({ id: 'v1', client_id: 'c1' }));
+  });
+
+  it('cargo ainda não carregado: travado, sem motivo (falha fechada), e o client_id não vai', async () => {
+    sessao.cargo = undefined;
+    const user = userEvent.setup();
+    abrir(cadastro({ asset_type: 'Lancha' }));
+    expect(campoDoDono()).toBeDisabled();
+    expect(screen.queryByText(/Só o escritório troca o dono/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Salvar' }));
+    expect(atualizar.mock.calls[0][0]).not.toHaveProperty('client_id');
+  });
 });
 
 describe('VesselFormDialog — lista de tipos (decisão 1, 22/10/2026)', () => {

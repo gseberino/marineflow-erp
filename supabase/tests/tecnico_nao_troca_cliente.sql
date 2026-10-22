@@ -8,8 +8,13 @@
 --   T6  técnico CRIANDO OS com cliente: passa (escolher o primeiro cliente não é trocar)
 --   T7  privilégios: ninguém executa a função de gatilho direto (anon e authenticated sem EXECUTE)
 --   T8  técnico pondo embarcação de OUTRO cliente (tela velha depois da troca de cliente): recusado
---   T9  técnico trocando para outra embarcação do MESMO cliente: passa
+--   T9  técnico trocando para outra embarcação do MESMO cliente: RECUSADO desde 22/10/2026 (migration
+--       20261022180000_tecnico_cadastro_e_embarcacao: só o escritório troca a embarcação; antes passava)
 --   T10 OS de barco vendido (dono mudou), técnico mexe em outro campo sem trocar a embarcação: passa
+--       (quem põe o segundo barco na OS e o vende é o escritório, sem sessão)
+--
+-- Vale com as DUAS migrations aplicadas (20261021160000 e 20261022180000); a prova das regras de
+-- 22/10 (embarcação da OS, dono do barco, identidade do cliente) é tecnico_cadastro_e_embarcacao.sql.
 --
 -- ═══ COMO RODAR ═══ (só com OK nomeado; DEPOIS da migration aplicada)
 --   npx supabase@2.111.0 db query --linked -f supabase/tests/tecnico_nao_troca_cliente.sql --output json
@@ -62,7 +67,7 @@ begin
     v_msg := sqlerrm;
   end;
   select client_id into v_cli_agora from public.service_orders where id = v_os;
-  insert into _resultado values ('T1 técnico não troca', v_msg = 'Só o escritório troca o cliente de uma OS.' and v_cli_agora = v_c1, coalesce(v_msg, 'passou sem erro'));
+  insert into _resultado values ('T1 técnico não troca', v_msg is not distinct from 'Só o escritório troca o cliente de uma OS.' and v_cli_agora = v_c1, coalesce(v_msg, 'passou sem erro'));
 
   -- T2
   begin
@@ -119,19 +124,22 @@ begin
     v_msg := sqlerrm;
   end;
   select vessel_id into v_barco_agora from public.service_orders where id = v_os2;
-  insert into _resultado values ('T8 técnico não põe barco de outro cliente', v_msg = 'A embarcação ou veículo escolhido não é do cliente desta OS.' and v_barco_agora = v_barco, coalesce(v_msg, 'passou sem erro'));
+  insert into _resultado values ('T8 técnico não põe barco de outro cliente', v_msg is not distinct from 'A embarcação ou veículo escolhido não é do cliente desta OS.' and v_barco_agora = v_barco, coalesce(v_msg, 'passou sem erro'));
 
-  -- T9
+  -- T9 (desde 22/10/2026: recusado — só o escritório troca a embarcação de uma OS que já tem uma)
   begin
     update public.service_orders set vessel_id = v_barco_a2 where id = v_os2;
-    select vessel_id into v_barco_agora from public.service_orders where id = v_os2;
-    insert into _resultado values ('T9 técnico troca para barco do mesmo cliente', v_barco_agora = v_barco_a2, null);
-  exception when others then
-    insert into _resultado values ('T9 técnico troca para barco do mesmo cliente', false, sqlerrm);
+    v_msg := null;
+  exception when insufficient_privilege then
+    v_msg := sqlerrm;
   end;
+  select vessel_id into v_barco_agora from public.service_orders where id = v_os2;
+  insert into _resultado values ('T9 técnico não troca para barco do mesmo cliente', v_msg is not distinct from 'Só o escritório troca a embarcação ou veículo de uma OS.' and v_barco_agora = v_barco, coalesce(v_msg, 'passou sem erro'));
 
-  -- T10 (o barco v_barco_a2 é vendido ao cliente B; a OS antiga continua com ele e com o cliente A)
+  -- T10 (o escritório põe o v_barco_a2 na OS e depois ele é vendido ao cliente B; a OS antiga
+  -- continua com ele e com o cliente A)
   perform pg_temp._entrar(null);
+  update public.service_orders set vessel_id = v_barco_a2 where id = v_os2;
   update public.vessels set client_id = v_c2 where id = v_barco_a2;
   perform pg_temp._entrar(v_tec);
   begin
