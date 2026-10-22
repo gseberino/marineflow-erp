@@ -10,7 +10,7 @@
 
 import { normalizeText } from "./matching.ts";
 import { categoriaPorMcc } from "./mcc.ts";
-import { documentoContradiz, documentoNormalizado, nomeDaDescricao } from "./contraparte.ts";
+import { documentoContradiz, documentoNormalizado, nomeDaDescricao, nomeDentroDaDescricao } from "./contraparte.ts";
 
 export interface TransacaoOrfa {
   id: string;
@@ -332,6 +332,19 @@ function mesmoNome(cadastro: string, extrato: string, corte?: CorteDoBanco): "no
   if (corte.tamanhoBruto >= CORTE_DO_PIX && extrato.length >= MINIMO_DO_NOME_CORTADO) return "nome_cortado";
   if (corte.cartao && cortadoNoMeioDaPalavra(cadastro, extrato)) return "nome_cortado";
   return null;
+}
+
+/**
+ * Duas grafias do EXTRATO são o mesmo nome? As mesmas provas do motor (mesmoNome): igual sem acento, caixa,
+ * sufixo societário e anotação, ou a da linha é a outra cortada pelo banco com o corte provado. Para quem
+ * compara linhas do extrato entre si, sem cadastro — o vigilante de despesas (finance-review/vigia.ts).
+ */
+export function mesmoNomeNoExtrato(
+  completo: string,
+  linha: Pick<TransacaoOrfa, "counterparty_name" | "description" | "source_type">,
+): "nome_identico" | "nome_cortado" | null {
+  const tx = linha as TransacaoOrfa;
+  return mesmoNome(limparNome(completo), limparNome(nomeNoExtrato(tx)), corteDo(tx));
 }
 
 /**
@@ -949,6 +962,16 @@ export interface PadraoDetectado {
  * Exige UNANIMIDADE, não maioria: se o mesmo fornecedor já recebeu duas categorias
  * diferentes, a decisão depende de algo que o histórico não mostra, e propor uma delas
  * seria escolher no lugar de quem sabe.
+ *
+ * SÓ PROPÕE O QUE O MOTOR CASA (21/10/2026). O alvo sai da LINHA DO EXTRATO de cada decisão (`tx`), do
+ * jeito que o motor (acharRegra) a lê: com o nome da contraparte, regra por nome; sem ele, regra de TEXTO
+ * pela descrição — o motor só compara a descrição na regra de texto. Antes o alvo era o `supplier_name` da
+ * despesa, que nessas linhas é a descrição: "PGTO FAT CARTAO C6" virava regra por NOME, e o motor, que
+ * compara o nome da contraparte (vazio ali), nunca a aplicaria — 18 das 103 regras de 08/10/2026.
+ * Com `motor`, cada regra ainda é PROVADA: o próprio montarProposta, com as regras ativas, tem de aplicá-la
+ * em ao menos `minimo` linhas que hoje nenhuma regra cobre. Sem `motor` não há prova (só os testes antigos).
+ * E não pode tomar linha nenhuma que o dono decidiu com outra categoria, nem disputar uma linha com outra
+ * sugestão do mesmo lote (revisão de 22/10/2026). Cada linha do extrato conta uma vez, mesmo com várias despesas.
  */
 export function sugerirRegras(
   decisoes: Array<{
@@ -957,6 +980,8 @@ export function sugerirRegras(
     counterpartyName?: string | null;
     categoria: string;
     dreGroup: string;
+    /** A linha do extrato que a decisão lançou (payables.bank_transaction_id), quando há. */
+    tx?: TransacaoOrfa | null;
   }>,
   regrasExistentes: RegraFinanceira[],
   minimo = 3,
@@ -966,6 +991,17 @@ export function sugerirRegras(
    * filial criaria duas regras brigando (revisão de 26/09/2026).
    */
   fornecedores?: FornecedorConhecido[] | IndiceFornecedores,
+  /**
+   * O motor como a fila o roda: as regras ATIVAS (da mais nova para a mais antiga) e o cadastro de
+   * fornecedores ATIVOS. Com ele, só sai a regra que o motor aplicaria de fato. `recentes` são as saídas dos
+   * últimos 90 dias: a regra também tem de resolver ao menos uma delas — regra de quem sumiu do extrato é a
+   * "parada" que o dono mandou guardar em 20/10/2026 (70 das 103).
+   */
+  motor?: {
+    regrasAtivas: RegraFinanceira[];
+    fornecedores: FornecedorConhecido[] | IndiceFornecedores;
+    recentes?: TransacaoOrfa[];
+  },
 ): PadraoDetectado[] {
   const indice = fornecedores ? obterIndice(fornecedores) : null;
   const cadastroDe = (id: string) => indice?.porNome.find((e) => e.fornecedor.id === id)?.fornecedor ?? null;
@@ -979,68 +1015,253 @@ export function sugerirRegras(
     matchValue: string;
     rotulo: string;
     supplierId: string | null;
-    categorias: Map<string, { dreGroup: string; vezes: number }>;
+    /**
+     * Por categoria, QUEM a escolheu: a linha do extrato (uma vez, mesmo com várias despesas — o Pix dividido)
+     * ou, sem linha, a própria decisão. `vezes` é o tamanho disto (revisão de 22/10/2026).
+     */
+    categorias: Map<string, { dreGroup: string; quem: Set<string> }>;
+    /** As linhas do extrato das decisões deste alvo, uma vez cada (pelo id): onde a regra tem de casar. */
+    linhas: Map<string, TransacaoOrfa>;
+    /** Todos os textos pelos quais este alvo já foi chamado (nome, descrição, o que a despesa guardou). */
+    nomes: Set<string>;
   }>();
+  /**
+   * TODAS as linhas que o dono já decidiu, com as categorias que deu a cada uma — de qualquer alvo, até das
+   * decisões que não viram alvo. A regra proposta não pode tomar nenhuma delas para pôr outra categoria
+   * (revisão de 22/10/2026). "Outras despesas" fica de fora: não é escolha, é a falta dela.
+   */
+  const decididas = new Map<string, { tx: TransacaoOrfa; categorias: Set<string> }>();
 
-  for (const d of decisoes) {
+  // Nome que não identifica ninguém ("DEBITO DE CARTAO") não vira regra: seria "toda compra no débito é X".
+  // Nem empresa de pagamento: seria "todo QR do Mercado Pago é X".
+  const identifica = (nome: string | null | undefined) => !!nome && !historicoSemIdentidade(nome) && !ehIntermediario(nome);
+
+  for (const [i, d] of decisoes.entries()) {
     if (!d.categoria || d.categoria === "Outras despesas") continue;
+    if (d.tx?.id) {
+      const decidida = decididas.get(d.tx.id) ?? { tx: d.tx, categorias: new Set<string>() };
+      decidida.categorias.add(d.categoria);
+      decididas.set(d.tx.id, decidida);
+    }
 
-    // Fornecedor cadastrado é alvo melhor que nome solto: sobrevive a mudança de razão
-    // social e a variações de escrita no extrato. Nome que não identifica ninguém
-    // ("DEBITO DE CARTAO") não vira regra: seria "toda compra no débito é X".
-    const nomeServe = !!d.counterpartyName && !historicoSemIdentidade(d.counterpartyName) && !ehIntermediario(d.counterpartyName);
-    // Empresa de pagamento cadastrada como fornecedor também não vira regra: seria "todo QR do
-    // Mercado Pago é X".
+    // Empresa de pagamento cadastrada como fornecedor também não vira regra.
     if (d.supplierId && ehIntermediario(d.supplierName)) continue;
-    const chave = d.supplierId
-      ? `supplier:${d.supplierId}`
-      : nomeServe
-        ? `counterparty:${normalizeText(String(d.counterpartyName))}`
-        : null;
-    if (!chave) continue;
+    // Fornecedor cadastrado é alvo melhor que nome solto: sobrevive a mudança de razão social e a
+    // variações de escrita no extrato.
+    let alvo: { matchType: RegraFinanceira["match_type"]; matchValue: string } | null = null;
+    if (d.supplierId) {
+      alvo = { matchType: "supplier", matchValue: d.supplierId };
+    } else if (d.tx) {
+      const nome = String(d.tx.counterparty_name ?? "").trim();
+      const descricao = String(d.tx.description ?? "").replace(/\s+/g, " ").trim();
+      if (nome) {
+        // O motor compara o NOME da contraparte, inteiro (acharRegra): é ele o alvo, não o que a despesa guardou.
+        if (identifica(nome)) alvo = { matchType: "counterparty", matchValue: nome };
+      } else if (identifica(descricao) && !nomeDentroDaDescricao(descricao)) {
+        // Sem nome da contraparte, a única coisa que o motor compara é a descrição — na regra de TEXTO.
+        // Descrição que carrega o nome de alguém ("Pix enviado para JOSE") fica de fora: a regra de texto casa
+        // por "contém", e "JOSE" pegaria o "JOSE CARLOS" — nome diferente nunca identifica.
+        alvo = { matchType: "text", matchValue: descricao };
+      }
+    } else if (identifica(d.counterpartyName)) {
+      // Sem a linha do extrato (lançamento à mão): o nome que a despesa guardou. Sem linha não há prova —
+      // com `motor`, este alvo só vale como voto na unanimidade.
+      alvo = { matchType: "counterparty", matchValue: String(d.counterpartyName) };
+    }
+    if (!alvo) continue;
+    const chave = `${alvo.matchType}:${alvo.matchType === "supplier" ? alvo.matchValue : normalizeText(alvo.matchValue)}`;
 
     const entrada = porAlvo.get(chave) ?? {
-      matchType: (d.supplierId ? "supplier" : "counterparty") as RegraFinanceira["match_type"],
-      matchValue: d.supplierId ?? String(d.counterpartyName),
-      rotulo: d.supplierName || d.counterpartyName || "este fornecedor",
+      ...alvo,
+      // O texto ao dono nomeia o que a regra COMPARA: o fornecedor, ou o nome/descrição do extrato — não o que a
+      // despesa guardou ("Lanche da equipe" na linha da LMGCONFEITARIA; segunda revisão de 22/10/2026).
+      rotulo: alvo.matchType === "supplier" ? (d.supplierName || d.counterpartyName || "este fornecedor") : alvo.matchValue,
       supplierId: d.supplierId,
-      categorias: new Map<string, { dreGroup: string; vezes: number }>(),
+      categorias: new Map<string, { dreGroup: string; quem: Set<string> }>(),
+      linhas: new Map<string, TransacaoOrfa>(),
+      nomes: new Set<string>(),
     };
-    const atual = entrada.categorias.get(d.categoria) ?? { dreGroup: d.dreGroup, vezes: 0 };
-    atual.vezes += 1;
+    const atual = entrada.categorias.get(d.categoria) ?? { dreGroup: d.dreGroup, quem: new Set<string>() };
+    atual.quem.add(d.tx?.id ? `linha:${d.tx.id}` : `decisao:${i}`);
     entrada.categorias.set(d.categoria, atual);
+    if (d.tx?.id) entrada.linhas.set(d.tx.id, d.tx);
+    if (alvo.matchType !== "supplier") {
+      for (const n of [alvo.matchValue, d.counterpartyName, d.tx?.description, d.tx?.counterparty_name]) {
+        const k = normalizeText(String(n ?? ""));
+        if (k) entrada.nomes.add(k);
+      }
+    }
     porAlvo.set(chave, entrada);
   }
 
+  // A pausada também conta: foi o dono que a parou, e o índice único (finance_rules_uma_por_alvo) só cobre ativa e
+  // sugerida — sem isto, o alvo dela voltaria como sugestão no dia seguinte (segunda revisão de 22/10/2026).
+  const valendo = regrasExistentes.filter((r) =>
+    r.status === "active" || r.status === "proposed" || r.status === "rejected" || r.status === "paused");
   const jaTemRegra = new Set(
-    regrasExistentes
-      .filter((r) => r.status === "active" || r.status === "proposed" || r.status === "rejected")
-      .flatMap((r) => r.match_type === "supplier"
-        ? [`${r.match_type}:${normalizeText(r.match_value)}`, chaveDoFornecedor(r.match_value)]
-        : [`${r.match_type}:${normalizeText(r.match_value)}`]),
+    valendo.flatMap((r) => r.match_type === "supplier"
+      ? [`${r.match_type}:${normalizeText(r.match_value)}`, chaveDoFornecedor(r.match_value)]
+      : [`${r.match_type}:${normalizeText(r.match_value)}`]),
+  );
+  /**
+   * Os textos que já têm regra por nome ou por texto (ativa, sugerida, pausada ou recusada/arquivada). O alvo que já foi
+   * chamado por um deles — no nome, na descrição da linha ou no que a despesa guardou — já teve a sua regra: a
+   * arquivada em 20/10/2026 "LMSDISTRIBUICAO BRASILIA BRA" (a descrição) não volta como "LMSDISTRIBUICAO" (o
+   * nome), nem "PGTO FAT CARTAO C6" por nome volta como regra de texto. Trazer de volta é decisão do dono.
+   *
+   * O QUE ISTO CUSTA HOJE (revisão final da frente B, 22/10/2026): entram aqui também as 18 regras por nome que o
+   * sistema arquivou em 20/10/2026 porque nunca casariam (migration 20261020120000, bloco 1: guardavam a DESCRIÇÃO do
+   * extrato, e o motor compara o nome da contraparte) — não foram recusa do dono. Com elas aqui, o aprendiz não sugere
+   * a versão que casa de nenhuma: no extrato de 21/10/2026 saem 0; sem elas sairiam 9 ("Pagamento de fatura", "IOF
+   * LIMITE CONTA", "JUROS LIMITE CONTA", "Aplicação RDB", "Saldo em atraso", "Multa de atraso", "IOF de atraso" e "CDB
+   * C6 LIM.GARANT." como texto; "LMSDISTRIBUICAO" pelo nome). O "desfazer" da migration (status = 'proposed') não leva
+   * a elas: traz de volta a regra por nome que não casa, que continua aqui barrando a de texto. Deixar o aprendiz
+   * sugerir as 9 é pergunta ao dono, ainda sem resposta — até lá fica como está (teste "as 18 arquivadas por nunca
+   * casarem…" em src/test/banking-regras-aprendidas.test.ts).
+   */
+  const textosComRegra = new Set(
+    valendo.filter((r) => r.match_type === "counterparty" || r.match_type === "text").map((r) => normalizeText(r.match_value)),
   );
 
-  const padroes: PadraoDetectado[] = [];
+  /**
+   * O que a regra faria nestas linhas, pelo próprio motor (montarProposta, com as regras ativas): `resolve` =
+   * linhas que ela passaria a classificar e que hoje nenhuma regra cobre; `briga` = linhas em que ela tomaria o
+   * lugar de uma regra sua com OUTRA categoria. Regra sem `resolve` seria impossível de casar (ou repetida); com
+   * `briga`, mudaria calada o que o dono já decidiu.
+   */
+  const categoriaDaAtiva = new Map((motor?.regrasAtivas ?? []).map((r) => [r.id, r.set_category ?? null]));
+  // Custo: montarProposta é o motor inteiro. A regra de hoje de cada linha é uma só para todas as candidatas
+  // (guardada), e a regra por nome/texto só pode casar onde a condição dela (a mesma de acharRegra) vale — as
+  // outras linhas nem passam pelo motor. Sem isto, 70 alvos novos de uma vez custavam ~6 s de CPU.
+  const regraDeHoje = new Map<TransacaoOrfa, string | null>();
+  const textosDaLinha = new Map<TransacaoOrfa, { nome: string; texto: string }>();
+  const cadastroDoMotor = motor ? obterIndice(motor.fornecedores) : null;
+  const fornecedorDaLinha = new Map<TransacaoOrfa, string | null>();
+  /** O valor da regra como o motor o compara (normalizado uma vez por regra, não uma vez por linha). */
+  const valorDaRegra = new Map<RegraFinanceira, string>();
+  const podeCasar =(regra: RegraFinanceira, tx: TransacaoOrfa): boolean => {
+    if (regra.match_type === "supplier") {
+      // A condição do motor para regra de fornecedor (acharRegra → comoARegraDeFornecedorCasa), com o fornecedor
+      // que ele reconheceria na linha (o mesmo critério de montarProposta), guardado por linha.
+      if (!cadastroDoMotor) return true;
+      if (!fornecedorDaLinha.has(tx)) {
+        const temDoc = (tx.counterparty_document || "").replace(/\D/g, "").length >= 11;
+        const semIdentidade = !temDoc && historicoSemIdentidade(tx.counterparty_name || tx.description);
+        fornecedorDaLinha.set(tx, semIdentidade ? null : acharFornecedor(tx, cadastroDoMotor)?.fornecedor.id ?? null);
+      }
+      return comoARegraDeFornecedorCasa(tx, regra, fornecedorDaLinha.get(tx) ?? null, cadastroDoMotor) !== null;
+    }
+    if (regra.match_type !== "counterparty" && regra.match_type !== "text") return true;
+    let t = textosDaLinha.get(tx);
+    if (!t) {
+      t = { nome: normalizeText(tx.counterparty_name || ""), texto: normalizeText(`${tx.description} ${tx.counterparty_name || ""}`) };
+      textosDaLinha.set(tx, t);
+    }
+    let valor = valorDaRegra.get(regra);
+    if (valor === undefined) valorDaRegra.set(regra, valor = normalizeText(regra.match_value).trim());
+    return regra.match_type === "counterparty" ? !!t.nome && t.nome === valor : t.texto.includes(valor);
+  };
+  const efeitoNoMotor = (regra: RegraFinanceira, linhas: TransacaoOrfa[]): { resolve: number; briga: number } => {
+    if (!motor) return { resolve: linhas.length, briga: 0 };
+    let resolve = 0, briga = 0;
+    for (const tx of linhas) {
+      if (tx.transaction_type !== "debit" || !podeCasar(regra, tx)) continue;
+      if (montarProposta(tx, motor.fornecedores, undefined, [regra, ...motor.regrasAtivas]).appliedRuleId !== regra.id) continue;
+      if (!regraDeHoje.has(tx)) regraDeHoje.set(tx, montarProposta(tx, motor.fornecedores, undefined, motor.regrasAtivas).appliedRuleId);
+      const hoje = regraDeHoje.get(tx) ?? null;
+      if (hoje === null) resolve++;
+      else if ((categoriaDaAtiva.get(hoje) ?? null) !== (regra.set_category ?? null)) briga++;
+    }
+    return { resolve, briga };
+  };
+  /** A regra vence nesta linha, com `antes` entre ela e as ativas? (o motor inteiro, como a fila o roda) */
+  const vence = (regra: RegraFinanceira, tx: TransacaoOrfa, antes: RegraFinanceira[] = []): boolean =>
+    !!motor && montarProposta(tx, motor.fornecedores, undefined, [regra, ...antes, ...motor.regrasAtivas]).appliedRuleId === regra.id;
+  /**
+   * Linhas que o dono já decidiu com OUTRA categoria e que a regra tomaria. A guarda de `briga` só olha as regras
+   * ativas; a regra de texto casa por "contém", e "Juros de atraso" tomaria as linhas "Juros de atraso cartao PJ"
+   * lançadas como Tarifas mesmo sem regra nenhuma nelas (revisão de 22/10/2026). É isto que faz o "sem exceção"
+   * do texto ao dono ser verdade.
+   */
+  const contraAsDecisoes = (regra: RegraFinanceira): number => {
+    if (!motor) return 0;
+    let n = 0;
+    for (const { tx, categorias } of decididas.values()) {
+      if (tx.transaction_type !== "debit" || [...categorias].every((c) => c === regra.set_category)) continue;
+      if (podeCasar(regra, tx) && vence(regra, tx)) n++;
+    }
+    return n;
+  };
+
+  const aprovadas: Array<{ padrao: PadraoDetectado; regra: RegraFinanceira }> = [];
   for (const alvo of porAlvo.values()) {
     if (alvo.categorias.size !== 1) continue;                     // sem unanimidade, não opina
-    const [categoria, dados] = [...alvo.categorias.entries()][0];
-    if (dados.vezes < minimo) continue;
+    const [categoria, { dreGroup, quem }] = [...alvo.categorias.entries()][0];
+    const vezes = quem.size;
+    if (vezes < minimo) continue;
     if (jaTemRegra.has(`${alvo.matchType}:${normalizeText(alvo.matchValue)}`)) continue;
     if (alvo.matchType === "supplier" && jaTemRegra.has(chaveDoFornecedor(alvo.matchValue))) continue;
+    if ([...alvo.nomes].some((n) => textosComRegra.has(n))) continue;
+    const candidata: RegraFinanceira = {
+      id: `regra-candidata-${aprovadas.length}`, match_type: alvo.matchType, match_value: alvo.matchValue, direction: "debit",
+      set_category: categoria, set_dre_group: dreGroup, set_supplier_id: alvo.supplierId,
+      autonomy: "suggest", status: "active",
+    };
+    if (motor) {
+      const nasDecisoes = efeitoNoMotor(candidata, [...alvo.linhas.values()]);
+      if (nasDecisoes.resolve < minimo || nasDecisoes.briga > 0) continue;
+      if (contraAsDecisoes(candidata) > 0) continue;
+      if (motor.recentes) {
+        const noExtrato = efeitoNoMotor(candidata, motor.recentes);
+        if (noExtrato.resolve < 1 || noExtrato.briga > 0) continue;
+      }
+    }
 
-    padroes.push({
-      matchType: alvo.matchType,
-      matchValue: alvo.matchValue,
-      direction: "debit",
-      setCategory: categoria,
-      setDreGroup: dados.dreGroup,
-      setSupplierId: alvo.supplierId,
-      vezes: dados.vezes,
-      reasoning: `As últimas ${dados.vezes} despesas de ${alvo.rotulo} foram lançadas como ${categoria}, sem exceção. Criar a regra evita repetir essa escolha toda vez.`,
+    aprovadas.push({
+      regra: candidata,
+      padrao: {
+        matchType: alvo.matchType,
+        matchValue: alvo.matchValue,
+        direction: "debit",
+        setCategory: categoria,
+        setDreGroup: dreGroup,
+        setSupplierId: alvo.supplierId,
+        vezes,
+        reasoning: `As últimas ${vezes} despesas de ${alvo.rotulo} foram lançadas como ${categoria}, sem exceção. Criar a regra evita repetir essa escolha toda vez.`,
+      },
     });
   }
+  aprovadas.sort((a, b) => b.padrao.vezes - a.padrao.vezes);
 
-  return padroes.sort((a, b) => b.vezes - a.vezes);
+  /**
+   * As sugestões do mesmo lote nascem no mesmo insert, com a mesma hora: onde duas de categorias diferentes casam
+   * na mesma linha e quem vence depende da ordem, "a mais nova vence" não decide nada (revisão de 22/10/2026).
+   * Fica a de mais decisões; a outra espera — aceita a primeira, ela é medida contra a regra ativa na próxima vez.
+   * (A que tomaria as linhas decididas da outra já caiu em contraAsDecisoes; aqui sobram as linhas do extrato.)
+   */
+  if (!motor || aprovadas.length < 2) return aprovadas.map((a) => a.padrao);
+  const linhasDoLote = new Map<string, TransacaoOrfa>();
+  for (const { tx } of decididas.values()) linhasDoLote.set(tx.id, tx);
+  for (const tx of motor.recentes ?? []) if (!linhasDoLote.has(tx.id)) linhasDoLote.set(tx.id, tx);
+  // Custo: as linhas onde cada sugestão pode casar saem numa passada só por sugestão; o par só compara o que as
+  // duas têm em comum (quase sempre nada).
+  const ondeCasa = new Map<RegraFinanceira, Set<TransacaoOrfa>>();
+  for (const { regra } of aprovadas) {
+    ondeCasa.set(regra, new Set([...linhasDoLote.values()].filter((tx) => tx.transaction_type === "debit" && podeCasar(regra, tx))));
+  }
+  /** Há linha em que a primeira da lista vence, seja qual for das duas? Então a ordem decide. */
+  const disputam = (a: RegraFinanceira, b: RegraFinanceira): boolean => {
+    const [menor, maior] = [ondeCasa.get(a)!, ondeCasa.get(b)!].sort((x, y) => x.size - y.size);
+    for (const tx of menor) {
+      if (maior.has(tx) && vence(a, tx, [b]) && vence(b, tx, [a])) return true;
+    }
+    return false;
+  };
+  const ficam: typeof aprovadas = [];
+  for (const c of aprovadas) {
+    if (!ficam.some((f) => f.regra.set_category !== c.regra.set_category && disputam(f.regra, c.regra))) ficam.push(c);
+  }
+  return ficam.map((a) => a.padrao);
 }
 
 /** Frase curta que explica a regra para quem a lê na fila — e para quem vai revisá-la. */

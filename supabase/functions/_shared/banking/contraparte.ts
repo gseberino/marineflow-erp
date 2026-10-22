@@ -154,6 +154,23 @@ export function nomeDaDescricao(descricao: string | null | undefined): string | 
   return m ? m[1].trim() : null;
 }
 
+/**
+ * O nome dentro da descrição em qualquer dos dois formatos: "Pix enviado para NOME" (nomeDaDescricao) ou
+ * "MEIO|NOME" — o Nubank, pela Pluggy, põe o nome de quem recebeu depois da barra: "Transferência enviada|NOME"
+ * e "Compra no débito|LOJA" (esta sem o nome da contraparte à parte; 4 linhas em 18–19/08/2026, revisão de
+ * 22/10/2026). Antes da barra, só o meio de pagamento: "Valor adicionado na conta por cartão de crédito | Valor
+ * adicionado para PIX no Crédito" não tem nome nenhum depois dela.
+ * Usado por quem compara o extrato com ele mesmo (vigilante, aprendiz de regras); a identificação continua
+ * com nomeDaDescricao.
+ */
+const MEIO_ANTES_DA_BARRA =
+  /^(?:(?:pix|ted|doc|transf(?:er[eê]ncia)?)\s+(?:enviad[oa]|recebid[oa]|realizad[oa])|compra\s+(?:no\s+)?(?:d[eé]bito|cr[eé]dito))\s*\|\s*(.{3,})$/i;
+
+export function nomeDentroDaDescricao(descricao: string | null | undefined): string | null {
+  const d = String(descricao ?? "").trim();
+  return nomeDaDescricao(d) ?? (d.match(MEIO_ANTES_DA_BARRA)?.[1]?.trim() || null);
+}
+
 function palavras(limpo: string): string[] {
   return limpo.split(" ").filter((p) => p.length >= 3 && !VAZIAS.has(p));
 }
