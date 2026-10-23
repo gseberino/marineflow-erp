@@ -8,7 +8,8 @@
 -- POR QUE: dado zumbi faz a primeira resposta de agenda sair errada. A única pergunta de agenda feita ao
 -- assistente até hoje ("Algum serviço agendado para hoje?", 05/10) listou tarefas de OS já concluídas.
 --
--- O QUE MUDA (conferido por SELECT em 23/10/2026; reconferir no dia com a prova abaixo):
+-- O QUE MUDA (conferido por SELECT em 23/10/2026 e reconferido id a id no mesmo dia, pacote P6;
+-- reconferir no dia do OK com a prova abaixo):
 --   1. COT-00001 a COT-00005 (abertas desde 23/07 e 17/08, 0 envios, 0 respostas) → status 'cancelled'
 --      (o CHECK chk_qr_status só aceita open/closed/cancelled; "arquivar" = cancelled com a nota). Os itens
 --      ficam como estão. As 5 tarefas R18 "Enviar a cotação COT-0000x" → 'done' com a nota.
@@ -17,6 +18,13 @@
 --      (incidente corrigido em 29/08). A tarefa R7 "Cobrar entrega da OC OC-00001" → 'done'.
 --   3. As 22 tarefas manuais (source 'ai') criadas de 28/07 a 16/08, nenhuma mexida desde → 'cancelled'
 --      com a nota de arquivamento. Arquivar não apaga: continuam consultáveis (Concluídas não as lista).
+--      'cancelled' nunca foi usado em agenda_tasks (status é texto sem CHECK; hoje só há done e
+--      pending), mas é valor previsto: a tela o filtra (use-agenda.ts) e o motor o lê como dispensa.
+--      Uma delas, "Gerar orçamento para Rodrigo (Starlink)" (e7abccf7), tem updated_at de 20/09: um
+--      UPDATE sem mudança visível tocou ela e duas vizinhas já concluídas pelo dono em 16/08, no mesmo
+--      microssegundo, sem rastro em audit_log nem em migration. Status, prazo e conclusão são os de
+--      12/08. Por isso o corte de "não mexida" é a reconferência (23/10), e não 01/09, que a deixaria
+--      viva.
 --   4. As 13 tarefas do motor (cobranças R3/R4 e contas R5) presas no usuário "Usuário Demo (UI v2)"
 --      (cargo financial, que o dono não usa) → passam para o admin (Gustavo). São títulos de dinheiro
 --      vivos: fechar esconderia cobrança real. Os lembretes delas já foram todos enviados (sent_at
@@ -32,15 +40,23 @@
 -- IDEMPOTENTE: cada UPDATE confere o id E o estado de antes; rodar de novo não muda nada. O que o dono já
 -- tiver mexido na tela neste meio-tempo fica como ele deixou.
 --
--- PROVA (só leitura): scratchpad agenda-pesquisa/sql/f20_faxina_prova.sql
---   antes (23/10): cot_abertas 5 · r18_vivas 5 · oc1_aberta 1 · r7_oc1_viva 1 · manuais_vivas 22 ·
---                  demo_vivas 13 · admin_vivas 35 · socio_sem_login 1 · vivas_total 48
---   depois:        0 · 0 · 0 · 0 · 0 · 0 · 20 · 0 · 20
+-- PROVA (só leitura), em scratchpad agenda-pesquisa/sql/:
+--   f20_faxina_prova.sql (contagens) e f20b_faxina_alvos.sql (cada id com o MESMO predicado do UPDATE;
+--   antes do OK, todas as 48 linhas têm de dar casa = true).
+--   antes (23/10, 2ª rodada): cot_abertas 5 · r18_vivas 5 · oc1_aberta 1 · r7_oc1_viva 1 · manuais_vivas 22 ·
+--                  demo_vivas 13 · admin_vivas 37 · socio_sem_login 1 · vivas_total 50
+--   depois:        0 · 0 · 0 · 0 · 0 · 0 · 22 · 0 · 22
+--   admin_vivas e vivas_total andam com o motor (as duas a mais da 2ª rodada são as R6 dos ORÇ-00125 e
+--   00126, de 23/10 17:45). O que a faxina fixa é a diferença: vivas_total cai 28 (5 + 1 + 22) e
+--   admin_vivas cai 15 (28 fechadas, 13 trazidas). Se o task-automations do P3 for publicado antes, a R7
+--   da OC-00001 fecha sozinha ("A OS da OC foi faturada") e o r7_oc1_viva já chega 0: o UPDATE dela
+--   não pega nada; vivas_total cai 27 e admin_vivas, 14.
 --
--- APLICAR (CLAUDE.md, regra 1 — só com o OK):
---   npx supabase db query --linked -f supabase/migrations/20261024153000_faxina_agenda_fase0.sql
---   npx supabase db query --linked -e "insert into supabase_migrations.schema_migrations (version, name)
+-- APLICAR (CLAUDE.md, regra 1 — só com o OK; do repositório principal):
+--   npx supabase@2.111.0 db query --linked -f supabase/migrations/20261024153000_faxina_agenda_fase0.sql
+--   npx supabase@2.111.0 db query --linked -e "insert into supabase_migrations.schema_migrations (version, name)
 --     values ('20261024153000', 'faxina_agenda_fase0');"
+--   (sem "on conflict": se a versão já estiver registrada, o erro avisa que ela já foi aplicada.)
 --
 -- DESFAZER (um item ou todos):
 --   update public.quote_requests set status = 'open', closed_at = null
@@ -149,7 +165,9 @@ update public.agenda_tasks
    and automation_key is null
    and status in ('pending', 'in_progress')
    and created_at < '2026-08-17'
-   and updated_at < '2026-09-01';
+   -- Nada mexido desde a reconferência de 23/10 (meia-noite de Brasília). O que o dono mexer na tela
+   -- depois disso fica como ele deixou. Ver o item 3 do cabeçalho sobre o corte antigo (01/09).
+   and updated_at < '2026-10-23 00:00-03';
 
 -- ---------------------------------------------------------------------------------------------
 -- 4. As 13 tarefas de dinheiro presas no usuário que o dono não usa → admin
