@@ -387,29 +387,34 @@ export const agendaTools: ToolDef[] = [
       const targetId = args.user_id || userId;
       const { from, to, day } = dayRangeBRT(args.date);
 
-      const { data: liveTasks } = await sb.from("agenda_tasks")
+      // Leitura que falha sobe (revisão de 23/10/2026), como em check_technician_availability:
+      // engolida, a resposta dizia "nada no dia" sem ter lido nada.
+      const { data: liveTasks, error: erroTarefas } = await sb.from("agenda_tasks")
         .select(TASK_COLS)
         .eq("assignee_user_id", targetId)
         .in("status", ["pending", "in_progress"])
         .limit(200);
+      if (erroTarefas) throw erroTarefas;
       const visible = (liveTasks || []).filter((t: any) => visibleTo(t, userId, userRole));
       const anchor = (t: any) => t.due_at || t.scheduled_start_at;
       const atrasadas = visible.filter((t: any) => anchor(t) && anchor(t) < from);
       const doDia = visible.filter((t: any) => anchor(t) && anchor(t) >= from && anchor(t) < to);
       const semData = visible.filter((t: any) => !anchor(t));
 
-      const { data: soLinks } = await sb.from("service_order_technicians")
+      const { data: soLinks, error: erroVinc } = await sb.from("service_order_technicians")
         .select("service_order_id").eq("user_id", targetId);
+      if (erroVinc) throw erroVinc;
       const soIds = (soLinks || []).map((l: any) => l.service_order_id);
       let osDia: any[] = [];
       if (soIds.length > 0) {
         // A OS que atravessa o dia entra (começou antes e ainda não acabou), não só a que começa nele.
-        const { data: oss } = await sb.from("service_orders")
+        const { data: oss, error: erroOss } = await sb.from("service_orders")
           .select("id, service_order_number, status, scheduled_start_at, scheduled_end_at, clients(name), vessels(name)")
           .in("id", soIds)
           .lt("scheduled_start_at", to).or(filtroQueCruza(from))
           .neq("status", "cancelled")
           .order("scheduled_start_at");
+        if (erroOss) throw erroOss;
         osDia = oss || [];
       }
 
@@ -780,7 +785,7 @@ export const agendaTools: ToolDef[] = [
   {
     name: "list_team_agenda",
     description:
-      "Visão da agenda da EQUIPE inteira num dia: por pessoa, os compromissos, tarefas com prazo e OS do dia (inclusive a OS de vários dias em curso). Use para 'como está a agenda da equipe amanhã?'.",
+      "Visão da agenda da EQUIPE inteira num dia: por pessoa, os compromissos, tarefas com prazo e OS do dia (inclusive a OS de vários dias em curso). O técnico da OS entra mesmo com o login inativo. OS do dia sem técnico vinculado volta em os_sem_responsavel; tarefa sem responsável, em sem_responsavel. Use para 'como está a agenda da equipe amanhã?'.",
     input_schema: {
       type: "object",
       properties: {
@@ -790,36 +795,60 @@ export const agendaTools: ToolDef[] = [
     risk: "low",
     async execute(args, { sb, userId, userRole }) {
       const { from, to, day } = dayRangeBRT(args.date);
-      const { data: users } = await sb.from("app_users")
+      // Leitura que falha sobe (revisão de 23/10/2026): engolida, a equipe saía "sem nada no dia".
+      const { data: users, error: erroUsers } = await sb.from("app_users")
         .select("id, full_name, role").eq("active", true).order("full_name");
+      if (erroUsers) throw erroUsers;
 
-      const { data: tasks } = await sb.from("agenda_tasks")
+      const { data: tasks, error: erroTarefas } = await sb.from("agenda_tasks")
         .select(TASK_COLS)
         .in("status", ["pending", "in_progress"])
         .limit(300);
+      if (erroTarefas) throw erroTarefas;
       const dayTasks = (tasks || []).filter((t: any) => {
         const a = t.due_at || t.scheduled_start_at;
         return a && a >= from && a < to && visibleTo(t, userId, userRole);
       });
 
       // A OS que atravessa o dia entra (começou antes e ainda não acabou), não só a que começa nele.
-      const { data: orders } = await sb.from("service_orders")
-        .select("id, service_order_number, scheduled_start_at, scheduled_end_at, clients(name), service_order_technicians(user_id)")
+      // O nome do técnico vem do embed: o técnico com login inativo não está em `users`.
+      const { data: orders, error: erroOss } = await sb.from("service_orders")
+        .select("id, service_order_number, scheduled_start_at, scheduled_end_at, clients(name), service_order_technicians(user_id, app_users(full_name, role))")
         .lt("scheduled_start_at", to).or(filtroQueCruza(from))
         .neq("status", "cancelled");
+      if (erroOss) throw erroOss;
+      const resumoDaOs = (o: any) => ({ numero: o.service_order_number, cliente: o.clients?.name, inicio: o.scheduled_start_at, fim: o.scheduled_end_at });
+      const tecnicosDa = (o: any): any[] => (o.service_order_technicians || []).filter((l: any) => l.user_id);
 
-      const porPessoa = (users || []).map((u: any) => ({
-        pessoa: u.full_name,
-        user_id: u.id,
-        cargo: u.role,
-        tarefas: dayTasks.filter((t: any) => t.assignee_user_id === u.id).map(mapTask),
+      // Revisão de 23/10/2026 (o D3 da grade, aqui no assistente): só havia entrada para app_users
+      // ATIVO, e os técnicos que trabalham (Roberto, Mickael) estão com o login inativo — a OS deles
+      // sumia da agenda da equipe. Agora o técnico de OS do dia ganha entrada mesmo inativo, com o
+      // nome do embed; sem o nome (a RLS de app_users só mostra outro usuário ao admin), vem genérico.
+      const pessoas: Array<{ id: string; nome: string; cargo: string | null }> =
+        (users || []).map((u: any) => ({ id: u.id, nome: u.full_name, cargo: u.role }));
+      const ativos = new Set(pessoas.map((p) => p.id));
+      for (const o of orders || []) {
+        for (const l of tecnicosDa(o)) {
+          if (ativos.has(l.user_id)) continue;
+          ativos.add(l.user_id);
+          pessoas.push({ id: l.user_id, nome: l.app_users?.full_name || "Técnico sem nome", cargo: l.app_users?.role ?? null });
+        }
+      }
+
+      const porPessoa = pessoas.map((p) => ({
+        pessoa: p.nome,
+        user_id: p.id,
+        cargo: p.cargo,
+        tarefas: dayTasks.filter((t: any) => t.assignee_user_id === p.id).map(mapTask),
         os: (orders || [])
-          .filter((o: any) => (o.service_order_technicians || []).some((l: any) => l.user_id === u.id))
-          .map((o: any) => ({ numero: o.service_order_number, cliente: o.clients?.name, inicio: o.scheduled_start_at, fim: o.scheduled_end_at })),
+          .filter((o: any) => tecnicosDa(o).some((l: any) => l.user_id === p.id))
+          .map(resumoDaOs),
       })).filter((p: any) => p.tarefas.length > 0 || p.os.length > 0);
 
       const semDono = dayTasks.filter((t: any) => !t.assignee_user_id).map(mapTask);
-      return { dia: day, por_pessoa: porPessoa, sem_responsavel: semDono };
+      // A OS agendada sem técnico (D2: a tela e schedule_service_order agendam sem responsável).
+      const osSemDono = (orders || []).filter((o: any) => tecnicosDa(o).length === 0).map(resumoDaOs);
+      return { dia: day, por_pessoa: porPessoa, sem_responsavel: semDono, os_sem_responsavel: osSemDono };
     },
   },
 ];

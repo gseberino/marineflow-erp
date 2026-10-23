@@ -98,6 +98,10 @@ NAO_SAO_TOOLS.add("impedimento_se_voltar");
 // compras (24/10/2026, Agenda de Produção P5): campo do retorno de get_purchase_needs (pedido em OC de
 // texto livre da OS, ainda não chegou)
 NAO_SAO_TOOLS.add("a_caminho");
+// agenda (revisão de 23/10/2026): campos do retorno de list_team_agenda (OS do dia sem técnico) e de
+// check_technician_availability (OS de vários dias que cobre o horário proposto)
+NAO_SAO_TOOLS.add("os_sem_responsavel");
+NAO_SAO_TOOLS.add("os_de_varios_dias_no_horario");
 
 /** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
 const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };

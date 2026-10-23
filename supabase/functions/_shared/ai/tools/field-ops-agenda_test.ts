@@ -302,6 +302,90 @@ Deno.test("list_team_agenda lê a OS por interseção com o dia e devolve o fim"
   assertEquals(r.por_pessoa[0].os[0].fim, "2026-10-08T21:00:00.000Z");
 });
 
+// ───────── list_team_agenda: nenhuma OS some (revisão de 23/10/2026) ─────────
+// Só havia entrada para app_users ATIVO e nenhum balde para OS sem técnico: a OS-00104 (Roberto, login
+// inativo) e a OS agendada sem responsável (D2) sumiam da "agenda da equipe" pelo assistente.
+
+Deno.test("list_team_agenda: o técnico de login inativo ganha entrada com o nome do embed, e a OS sem técnico vai para os_sem_responsavel", async () => {
+  const { sb, porTabela } = bancoFalso({
+    // Só o admin está ativo; o Roberto (t-roberto) está com o login inativo.
+    app_users: () => ({ data: [{ id: "u-gustavo", full_name: "Gustavo", role: "admin" }], error: null }),
+    service_orders: () => ({
+      data: [
+        {
+          id: "so104", service_order_number: "OS-00104", scheduled_start_at: "2026-10-06T09:00:00.000Z", scheduled_end_at: "2026-10-08T21:00:00.000Z",
+          clients: { name: "Nelson" },
+          service_order_technicians: [{ user_id: "t-roberto", app_users: { full_name: "Roberto", role: "technician" } }],
+        },
+        {
+          id: "so120", service_order_number: "OS-00120", scheduled_start_at: "2026-10-07T11:00:00.000Z", scheduled_end_at: "2026-10-07T14:00:00.000Z",
+          clients: { name: "César" }, service_order_technicians: [],
+        },
+        {
+          // sem o nome (RLS de app_users para quem não é admin): entra genérico, mas entra
+          id: "so121", service_order_number: "OS-00121", scheduled_start_at: "2026-10-07T12:00:00.000Z", scheduled_end_at: "2026-10-07T15:00:00.000Z",
+          clients: { name: "Marcelo" }, service_order_technicians: [{ user_id: "t-mickael", app_users: null }],
+        },
+      ],
+      error: null,
+    }),
+  });
+  const r = await agendaDaEquipe.execute({ date: "2026-10-07" }, { sb, userId: "u-gustavo", userRole: "admin" } as never) as Record<string, any>;
+  assertEquals(
+    r.por_pessoa.map((p: any) => [p.pessoa, p.user_id, p.cargo, p.os.map((o: any) => o.numero)]),
+    [
+      ["Roberto", "t-roberto", "technician", ["OS-00104"]],
+      ["Técnico sem nome", "t-mickael", null, ["OS-00121"]],
+    ],
+  );
+  assertEquals(r.os_sem_responsavel, [{ numero: "OS-00120", cliente: "César", inicio: "2026-10-07T11:00:00.000Z", fim: "2026-10-07T14:00:00.000Z" }]);
+  // O nome vem do embed: a leitura pede app_users dentro de service_order_technicians.
+  assertStringIncludes(String(args(porTabela.service_orders[0], "select")[0][0]), "service_order_technicians(user_id, app_users(full_name, role))");
+});
+
+Deno.test("list_team_agenda: OS do técnico ATIVO não ganha entrada repetida", async () => {
+  const { sb } = bancoFalso({
+    app_users: () => ({ data: [{ id: "t1", full_name: "Roberto", role: "technician" }], error: null }),
+    service_orders: () => ({
+      data: [{
+        id: "so1", service_order_number: "OS-00104", scheduled_start_at: "2026-10-06T09:00:00.000Z", scheduled_end_at: "2026-10-08T21:00:00.000Z",
+        clients: { name: "Nelson" }, service_order_technicians: [{ user_id: "t1", app_users: { full_name: "Roberto", role: "technician" } }],
+      }],
+      error: null,
+    }),
+  });
+  const r = await agendaDaEquipe.execute({ date: "2026-10-07" }, { sb, userId: "t1", userRole: "admin" } as never) as Record<string, any>;
+  assertEquals(r.por_pessoa.length, 1);
+  assertEquals(r.os_sem_responsavel, []);
+});
+
+// ───────── my_agenda e list_team_agenda: leitura que falha sobe (revisão de 23/10/2026) ─────────
+// Engolido, o erro do PostgREST virava "nenhuma OS no dia" — o mesmo defeito que check_technician_availability
+// já não tem.
+
+const falha = (msg: string): Responder => () => ({ data: null, error: { message: msg } });
+
+for (const tabela of ["agenda_tasks", "service_order_technicians", "service_orders"]) {
+  Deno.test(`my_agenda: erro em ${tabela} lança (não vira "dia livre")`, async () => {
+    const { sb } = bancoFalso({
+      service_order_technicians: () => ({ data: [{ service_order_id: "so1" }], error: null }),
+      [tabela]: falha(`falha em ${tabela}`),
+    });
+    await assertRejects(
+      () => minhaAgenda.execute({ date: "2026-10-07" }, { sb, userId: "u1", userRole: "technician" } as never),
+    );
+  });
+}
+
+for (const tabela of ["app_users", "agenda_tasks", "service_orders"]) {
+  Deno.test(`list_team_agenda: erro em ${tabela} lança (não vira "equipe sem nada")`, async () => {
+    const { sb } = bancoFalso({ [tabela]: falha(`falha em ${tabela}`) });
+    await assertRejects(
+      () => agendaDaEquipe.execute({ date: "2026-10-07" }, { sb, userId: "u1", userRole: "admin" } as never),
+    );
+  });
+}
+
 // ───────── dayOverloadNotice (D5 / D6) ─────────
 
 Deno.test("dayOverloadNotice: agendar uma OS de 72 h num dia vazio não avisa (conta no máximo a jornada)", async () => {
