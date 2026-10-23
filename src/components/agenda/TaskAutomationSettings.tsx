@@ -1,14 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Cog, AlertTriangle, ListChecks, X, Wrench } from 'lucide-react';
+import { Cog, ListChecks, X, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { CHAVE_CAMPANHA_TEMPORADA, CHAVE_LEMBRETES_REVISAO } from '@/hooks/use-planos-manutencao';
@@ -16,9 +12,9 @@ import { interruptorLigado } from '@/lib/planos-manutencao';
 
 /**
  * Lembretes de revisão (07/10/2026). Decisão do dono: mensagem ao cliente sai SEMPRE com o "sim"
- * dele — o sistema prepara e pergunta no WhatsApp do dono. Por isso ligar não pede a palavra
- * LIGAR como as regras de envio automático acima: nada sai sozinho. Padrão 'on' (sem a chave =
- * ligado), igual à função lembretes-de-revisao que lê estas chaves.
+ * dele — o sistema prepara e pergunta no WhatsApp do dono. Por isso ligar não pede confirmação:
+ * nada sai sozinho. Padrão 'on' (sem a chave = ligado), igual à função lembretes-de-revisao que lê
+ * estas chaves.
  */
 const INTERRUPTORES_DE_REVISAO = [
   {
@@ -147,126 +143,31 @@ function ChecklistTemplatesEditor() {
   );
 }
 
-// Espelha RULES de supabase/functions/task-automations/rules.ts (+ R9/R10 do motor)
-const RULE_DEFS: { id: string; label: string; description: string; defaultEnabled: boolean; clientFacing?: boolean }[] = [
-  { id: 'r1', label: 'OS aprovada sem agendamento', description: 'Cria tarefa "Agendar OS" quando uma OS aprovada fica 24h sem data.', defaultEnabled: true },
+// Espelha RULES de supabase/functions/task-automations/rules.ts (+ R10 do motor). Nenhuma regra daqui
+// manda mensagem a cliente: R9 (lembrete automático de agendamento) e R13 (pesquisa pós-serviço)
+// foram aposentadas em 23/10/2026 (decisão d13), e com elas o diálogo "digite LIGAR" que as guardava.
+const RULE_DEFS: { id: string; label: string; description: string; defaultEnabled: boolean }[] = [
+  { id: 'r1', label: 'OS aprovada sem agendamento', description: 'Cria tarefa "Agendar OS" quando uma OS aprovada ou aberta fica 24h sem data. Orçamento aprovado ainda sem sinal vira "receber o sinal e converter para agendar", com o botão "Abrir orçamento".', defaultEnabled: true },
   { id: 'r2', label: 'OS parada', description: 'Cria tarefa quando uma OS em andamento fica 3 dias sem atualização.', defaultEnabled: true },
   { id: 'r3', label: 'Recebível vencendo (D-3)', description: 'Cria tarefa de cobrança para o financeiro; some sozinha quando o pagamento é registrado.', defaultEnabled: true },
   { id: 'r4', label: 'Recebível vencido', description: 'Tarefa urgente de cobrança para recebíveis em atraso.', defaultEnabled: true },
   { id: 'r5', label: 'Pagável vencendo (D-1)', description: 'Tarefa "Pagar fornecedor" na véspera do vencimento.', defaultEnabled: true },
   { id: 'r6', label: 'Orçamento sem resposta', description: 'Follow-up interno quando um orçamento enviado fica 3 dias sem resposta.', defaultEnabled: true },
   { id: 'r19', label: 'Orçamento vencido: renovar ou rejeitar?', description: 'Tarefa quando um orçamento enviado ou aguardando aprovação passa da validade — a mesma data "até" impressa no PDF, no calendário de Brasília. Nada é rejeitado sozinho: você renova a validade no orçamento (a tarefa fecha sozinha) ou marca como rejeitado. Orçamento aprovado aguardando sinal nunca entra. Substitui a rejeição automática, que em setembro/2026 rejeitou R$ 133 mil em orçamentos sem avisar.', defaultEnabled: true },
-  { id: 'r7', label: 'OC não recebida', description: 'Tarefa "Cobrar entrega" quando a ordem de compra passa do prazo.', defaultEnabled: true },
+  { id: 'r7', label: 'OC não recebida', description: 'Tarefa "Cobrar entrega" quando a ordem de compra passa do prazo. OC de OS concluída, faturada ou cancelada não é cobrada (e a tarefa dela fecha sozinha).', defaultEnabled: true },
   { id: 'r8', label: 'Estoque abaixo do mínimo', description: 'Tarefa "Repor produto" enquanto o estoque estiver abaixo do mínimo.', defaultEnabled: true },
   { id: 'r11', label: 'Nota fiscal com pendência', description: 'Tarefa para o financeiro quando uma NF fica com erro/rejeitada.', defaultEnabled: true },
   { id: 'r12', label: 'Orçamento externo aguardando análise', description: 'Tarefa quando um orçamento submetido fica 2 dias sem análise.', defaultEnabled: true },
   { id: 'r14', label: 'Plano de manutenção vencendo', description: 'Tarefa "Propor revisão: plano — embarcação ou veículo" quando o plano entra na janela (21 dias antes do vencimento), com escopo, valor estimado e último serviço nas notas. Fecha sozinha quando o serviço é registrado (OS concluída que casa com o plano, ou "Serviço feito"), quando o plano é adiado ou desligado. Os lembretes ao cliente são outra coisa: ficam logo abaixo, em Revisões.', defaultEnabled: true },
   { id: 'r18', label: 'Cotação criada e não enviada', description: 'Tarefa "Enviar a cotação" quando ela tem fornecedor escolhido mas o pedido nunca saiu. Existe por um caso real: três cotações ficaram 11 dias exibindo "enviada" sem que nenhuma mensagem tivesse sido despachada. Fecha sozinha assim que o envio acontece.', defaultEnabled: true },
   { id: 'r17', label: 'Cotação sem resposta do fornecedor', description: 'Tarefa "Cobrar resposta" quando uma cotação passa de 3 dias úteis do ENVIO sem nenhum preço registrado (a janela normal de resposta é de 3 a 5 dias úteis). Só vale para cotação de fato enviada — sem envio, quem tem pendência é você, e isso vira a tarefa acima. Some sozinha quando alguém responde ou a cotação é fechada. Nada é enviado ao fornecedor sem você mandar.', defaultEnabled: true },
-  { id: 'r16', label: 'OS comprometida com item a comprar', description: 'Uma tarefa por OS quando falta material para executar — conta o disponível (físico menos reservado) e desconta o que já está em ordem de compra aberta. É a rede do aviso que aparece na aprovação do orçamento: se você clicar em "Depois", a pendência volta aqui. Fecha sozinha quando a peça entra ou o pedido é feito.', defaultEnabled: true },
+  { id: 'r16', label: 'OS comprometida com item a comprar', description: 'Uma tarefa por OS (aprovada, aberta, agendada, em andamento ou aguardando peças, e também o orçamento aprovado ainda sem sinal) quando falta material para executar — conta o disponível (físico menos reservado) e desconta o que já está em ordem de compra aberta. É a rede do aviso que aparece na aprovação do orçamento: se você clicar em "Depois", a pendência volta aqui. Fecha sozinha quando a peça entra ou o pedido é feito.', defaultEnabled: true },
   { id: 'r10', label: 'Lembrete interno de OS (equipe)', description: 'WhatsApp interno ao técnico na véspera da OS agendada (só usuários com canal IA habilitado).', defaultEnabled: true },
-  { id: 'r15', label: 'Confirmar agendamento com o cliente', description: 'Cria uma TAREFA sua na véspera ("confirmar com fulano o atendimento de amanhã"). Não envia nada sozinho: você dispara pelo botão "Pedir confirmação" no cartão da tarefa, um a um. Quando o cliente responde SIM, a OS fica confirmada e a tarefa se fecha sozinha. É a alternativa recomendada ao envio automático abaixo.', defaultEnabled: true },
-  { id: 'r9', label: 'Lembrete de agendamento ao CLIENTE (envio automático)', description: 'Manda o WhatsApp sozinho na véspera. Disparo automático para quem não escreveu primeiro é o principal motivo de bloqueio do número — e o número da HBR carrega todo o histórico. Prefira a regra acima; deixe esta desligada.', defaultEnabled: false, clientFacing: true },
-  { id: 'r13', label: 'Pesquisa pós-serviço ao CLIENTE (envio automático)', description: 'No dia seguinte à conclusão da OS, pergunta ao cliente como foi (nota 0-10). Sem pedido do cliente, isso pesa como marketing: exige consentimento e saída fácil pela LGPD, e é disparo proativo com o risco de bloqueio que vem junto. Decidido manter desligada.', defaultEnabled: false, clientFacing: true },
+  { id: 'r15', label: 'Confirmar agendamento com o cliente', description: 'Cria uma TAREFA sua na véspera ("confirmar com fulano o atendimento de amanhã"). Não envia nada sozinho: você dispara pelo botão "Pedir confirmação" no cartão da tarefa, um a um. Quando o cliente responde SIM, a OS fica confirmada e a tarefa se fecha sozinha. Substitui o envio automático ao cliente na véspera, que foi aposentado.', defaultEnabled: true },
 ];
-
-/**
- * Confirmação para ligar uma automação que MANDA MENSAGEM AO CLIENTE.
- *
- * Parâmetros vindos da pesquisa de padrões (NN/g, Adobe Journey Optimizer, Omnisend):
- * - Confirmação só se justifica quando NÃO existe desfazer. Mensagem enviada a cliente é
- *   irreversível — por isso aqui tem diálogo, e no resto das regras não tem.
- * - Diálogo genérico ("tem certeza?") vira reflexo e perde o efeito. Este diz o que vai
- *   acontecer, para quem e a partir de quando.
- * - Ação não-padrão (digitar a palavra) só quando o envio atinge cliente de verdade. Com o
- *   modo de teste ligado, tudo cai no seu número — aí basta confirmar.
- */
-function ClientFacingConfirm({
-  open, onOpenChange, def, testMode, testNumber, onConfirm,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  def: { id: string; label: string; description: string } | null;
-  testMode: boolean;
-  testNumber: string;
-  onConfirm: () => void;
-}) {
-  const [texto, setTexto] = useState('');
-  useEffect(() => { if (open) setTexto(''); }, [open]);
-  if (!def) return null;
-
-  const PALAVRA = 'LIGAR';
-  const precisaDigitar = !testMode;
-  const podeConfirmar = !precisaDigitar || texto.trim().toUpperCase() === PALAVRA;
-
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className="max-w-lg">
-        <AlertDialogHeader>
-          <AlertDialogTitle className="flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
-            Ligar “{def.label}”?
-          </AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="space-y-3 text-sm">
-              <p>{def.description}</p>
-
-              {testMode ? (
-                <p className="rounded-md border border-emerald-500/40 bg-emerald-500/10 p-2.5 text-emerald-800 dark:text-emerald-300">
-                  <strong>Modo de teste está LIGADO.</strong> Nenhum cliente recebe nada: todas
-                  as mensagens vão para {testNumber ? <span className="font-mono">{testNumber}</span> : 'o seu número de teste'}.
-                  É o jeito seguro de ver o texto que sairia antes de valer para valer.
-                </p>
-              ) : (
-                <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/10 p-2.5 text-destructive">
-                  <p><strong>Isto vai enviar WhatsApp a clientes de verdade, sozinho.</strong> Mensagem enviada não tem desfazer.</p>
-                  <p className="text-xs">
-                    Dois riscos que valem saber: (1) o número da HBR envia por uma integração
-                    não-oficial, e disparo automático para contato que não escreveu primeiro é o
-                    principal motivo de bloqueio de número — perder o número é perder o histórico
-                    junto; (2) a LGPD exige saída fácil, então quem pedir para parar precisa ser
-                    respeitado em até 48h.
-                  </p>
-                </div>
-              )}
-
-              {precisaDigitar && (
-                <div className="space-y-1.5">
-                  <label htmlFor="confirma-envio" className="text-xs font-medium text-foreground">
-                    Para confirmar, digite <span className="font-mono font-semibold">{PALAVRA}</span>:
-                  </label>
-                  <Input
-                    id="confirma-envio"
-                    value={texto}
-                    onChange={(e) => setTexto(e.target.value)}
-                    placeholder={PALAVRA}
-                    autoComplete="off"
-                  />
-                </div>
-              )}
-            </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Não ligar</AlertDialogCancel>
-          <AlertDialogAction
-            disabled={!podeConfirmar}
-            onClick={(e) => {
-              if (!podeConfirmar) { e.preventDefault(); return; }
-              onConfirm();
-            }}
-          >
-            {testMode ? 'Ligar em modo de teste' : 'Ligar e enviar a clientes'}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
 
 export function TaskAutomationSettings() {
   const qc = useQueryClient();
-  const [confirmando, setConfirmando] = useState<(typeof RULE_DEFS)[number] | null>(null);
 
   const { data: settings = {} } = useQuery({
     queryKey: ['task-automation-settings'],
@@ -276,20 +177,6 @@ export function TaskAutomationSettings() {
         .select('key, value')
         .like('key', 'task_rule_%');
       return Object.fromEntries((data || []).map((s: any) => [s.key, s.value]));
-    },
-  });
-
-  // Modo de teste vive fora do prefixo task_rule_, mas decide o destino real das mensagens.
-  const { data: envio = { testMode: false, testNumber: '' } } = useQuery({
-    queryKey: ['wa-test-mode'],
-    queryFn: async () => {
-      const { data } = await supabase.from('app_settings').select('key, value')
-        .in('key', ['wa_test_mode', 'wa_test_number', 'zapi_test_mode', 'zapi_test_number']);
-      const map = Object.fromEntries((data || []).map((s: any) => [s.key, s.value]));
-      return {
-        testMode: (map['wa_test_mode'] ?? map['zapi_test_mode']) === 'true',
-        testNumber: String(map['wa_test_number'] ?? map['zapi_test_number'] ?? ''),
-      };
     },
   });
 
@@ -327,46 +214,19 @@ export function TaskAutomationSettings() {
         {RULE_DEFS.map((def) => (
           <div key={def.id} className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <p className="text-sm font-medium flex items-center gap-1.5">
-                {def.label}
-                {def.clientFacing && <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />}
-              </p>
+              <p className="text-sm font-medium">{def.label}</p>
               <p className="text-xs text-muted-foreground">{def.description}</p>
             </div>
             <Switch
               checked={isEnabled(def)}
-              onCheckedChange={(v) => {
-                // Só LIGAR mensagem a cliente pede confirmação. Desligar é o lado seguro:
-                // exigir diálogo para parar de enviar seria atrito no sentido errado.
-                if (v && def.clientFacing) { setConfirmando(def); return; }
-                toggle.mutate({ id: def.id, enabled: v });
-              }}
+              aria-label={def.label}
+              onCheckedChange={(v) => toggle.mutate({ id: def.id, enabled: v })}
             />
           </div>
         ))}
       </div>
 
       <RevisoesSettings />
-
-      <ClientFacingConfirm
-        open={!!confirmando}
-        onOpenChange={(v) => { if (!v) setConfirmando(null); }}
-        def={confirmando}
-        testMode={envio.testMode}
-        testNumber={envio.testNumber}
-        onConfirm={() => {
-          if (!confirmando) return;
-          const id = confirmando.id;
-          setConfirmando(null);
-          toggle.mutate({ id, enabled: true }, {
-            onSuccess: () => toast.success(
-              envio.testMode
-                ? 'Ligado em modo de teste — as mensagens vão para o seu número.'
-                : 'Ligado. As próximas mensagens vão para os clientes.',
-            ),
-          });
-        }}
-      />
     </Card>
   );
 }

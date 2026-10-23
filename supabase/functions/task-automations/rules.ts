@@ -5,13 +5,14 @@
 import { ultimoDiaDaValidade, validadeDoOrcamento, vencimentoDoOrcamento } from '../_shared/pdf/documento.ts';
 import { diaBR, somarDiasAoDia } from '../_shared/pdf/datas.ts';
 import { nomeDaUnidade, TERMO_GERAL } from '../_shared/unidade.ts';
+import { ROTULOS_STATUS_OS, type StatusOS } from '../_shared/service-order-status.ts';
 
 export interface RuleCandidate {
   automation_key: string;
   title: string;
   priority: 'low' | 'normal' | 'high' | 'urgent';
-  /** 'admin' | 'financial' → resolvido para o primeiro app_user ativo do cargo;
-   *  um uuid → usa direto; null → tarefa sem responsável */
+  /** 'admin' | 'financial' → resolvido para o primeiro app_user ativo do cargo (sem financeiro
+   *  ativo, cai no admin: responsavel.ts); um uuid → usa direto; null → tarefa sem responsável */
   assignee: 'admin' | 'financial' | string | null;
   due_at: string | null;
   related_entity_type: string | null;
@@ -106,38 +107,130 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 const inDaysISO = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
 
 // ---------------------------------------------------------------------------
+// OS comprometida com o cliente (Agenda de Produção, Fase 0, 23/10/2026; D10).
+//
+// A R1 só olhava 'approved', e a R16 deixava 'open' de fora. Mas 'open' é o caminho normal da
+// conversão (13 de 19 em 90 dias): OS-00069, 74 e 100, com sinal pago, ficavam sem tarefa de
+// agendar e sem tarefa de comprar. O orçamento aprovado e ainda sem sinal (ORÇ-00083) não aparecia
+// em nenhuma das duas.
+//
+// Um predicado por regra, e o MESMO no find e no isResolved. Quando as duas pontas divergem, a
+// tarefa nasce numa rodada e morre na seguinte: a OS-00104 gerou 1.142 tarefas assim até 15/10.
+// O find pede ao banco o mesmo recorte (FILTRO_PARA_AGENDAR/FILTRO_PARA_COMPRAR, com teste de
+// equivalência em rules_test.ts) e, por garantia, passa o predicado sobre as linhas que voltaram.
+
+/** O que os predicados leem de uma linha de service_orders. */
+export interface LinhaComprometida {
+  status: string;
+  quote_status?: string | null;
+  merged_into_id?: string | null;
+  scheduled_start_at?: string | null;
+}
+
+/** OS que a R1 manda agendar. */
+export const STATUS_PARA_AGENDAR = ['approved', 'open'] as const;
+
+/** OS que a R16 manda comprar: comprometida e ainda não encerrada. 'awaiting_client' fica fora, como antes. */
+export const STATUS_PARA_COMPRAR = ['approved', 'open', 'scheduled', 'in_progress', 'awaiting_parts'] as const;
+
+/**
+ * Orçamento que o cliente aprovou e que ainda não virou OS, porque falta o sinal (d08: sinal pago
+ * para agendar), e que não foi agrupado em outro. 'awaiting_deposit' fica fora: já tem a R6 e a
+ * R19, e o próximo passo dele é o sinal, não a compra nem a data.
+ */
+export const orcamentoAprovado = (o: LinhaComprometida): boolean =>
+  o.status === 'draft' && o.quote_status === 'approved' && !o.merged_into_id;
+
+/**
+ * R1: 'os' = OS comprometida e sem data; 'orc' = orçamento aprovado sem sinal; null = nada a agendar.
+ * No orçamento a data não decide: com ou sem data, o que falta é o sinal.
+ */
+export function paraAgendar(o: LinhaComprometida): 'os' | 'orc' | null {
+  if (o.merged_into_id) return null;
+  if ((STATUS_PARA_AGENDAR as readonly string[]).includes(o.status)) return o.scheduled_start_at ? null : 'os';
+  return orcamentoAprovado(o) ? 'orc' : null;
+}
+
+/** R16: 'os' = OS comprometida e não encerrada; 'orc' = orçamento aprovado sem sinal; null = nada a comprar. */
+export function paraComprar(o: LinhaComprometida): 'os' | 'orc' | null {
+  if (o.merged_into_id) return null;
+  if ((STATUS_PARA_COMPRAR as readonly string[]).includes(o.status)) return 'os';
+  return orcamentoAprovado(o) ? 'orc' : null;
+}
+
+/** O `.or()` do PostgREST com o recorte de paraAgendar (junto com `.is('merged_into_id', null)`). */
+export const FILTRO_PARA_AGENDAR =
+  `and(status.in.(${STATUS_PARA_AGENDAR.join(',')}),scheduled_start_at.is.null),and(status.eq.draft,quote_status.eq.approved)`;
+
+/** O `.or()` do PostgREST com o recorte de paraComprar (junto com `.is('merged_into_id', null)`). */
+export const FILTRO_PARA_COMPRAR =
+  `status.in.(${STATUS_PARA_COMPRAR.join(',')}),and(status.eq.draft,quote_status.eq.approved)`;
+
+/** Por que um orçamento deixou de ser "aprovado sem sinal" (R1 orc e R16). */
+function motivoDoOrcamento(o: LinhaComprometida): string {
+  if (o.merged_into_id) return 'Orçamento agrupado em outro';
+  if (o.status === 'cancelled') return 'Orçamento cancelado';
+  if (o.status !== 'draft') return `Orçamento virou OS (${ROTULOS_STATUS_OS[o.status as StatusOS] ?? o.status})`;
+  return `Orçamento mudou para ${o.quote_status ?? 'sem estado'}`;
+}
 
 const r1: Rule = {
   id: 'r1',
-  label: 'OS aprovada sem agendamento (24h)',
+  label: 'OS aprovada ou aberta sem agendamento (24h)',
   defaultEnabled: true,
   async find(db) {
-    const { data } = await db
+    const { data, error } = await db
       .from('service_orders')
-      .select('id, service_order_number, client_id, clients(name)')
-      .eq('status', 'approved')
-      .is('scheduled_start_at', null)
+      .select('id, service_order_number, status, quote_status, merged_into_id, scheduled_start_at, client_id, clients(name)')
+      .or(FILTRO_PARA_AGENDAR)
+      .is('merged_into_id', null)
       .lt('updated_at', daysAgoISO(1))
       .limit(50);
-    return (data || []).map((o: any) => ({
-      automation_key: keyOf('r1', 'so', o.id),
-      title: `Agendar ${o.service_order_number} — ${o.clients?.name || 'sem cliente'}`,
-      priority: 'high' as const,
-      assignee: 'admin' as const,
-      due_at: dueAt(inDaysISO(1)),
-      related_entity_type: 'service_order',
-      related_entity_id: o.id,
-      client_id: o.client_id,
-    }));
+    // Erro não pode virar "nenhuma OS para agendar" (era engolido até 23/10/2026).
+    if (error) throw error;
+    return (data || []).flatMap((o: any) => {
+      const tipo = paraAgendar(o);
+      if (!tipo) return [];
+      const base = {
+        priority: 'high' as const,
+        assignee: 'admin' as const,
+        due_at: dueAt(inDaysISO(1)),
+        related_entity_type: 'service_order',
+        related_entity_id: o.id,
+        client_id: o.client_id,
+      };
+      // Orçamento: chave própria. Quando ele converte, esta se resolve e nasce a r1:so (24 h depois).
+      if (tipo === 'orc') {
+        return [{
+          ...base,
+          automation_key: keyOf('r1', 'orc', o.id),
+          title: `${o.service_order_number} aprovado sem sinal — receber o sinal e converter para agendar` +
+            (o.clients?.name ? ` (${o.clients.name})` : ''),
+        }];
+      }
+      return [{
+        ...base,
+        automation_key: keyOf('r1', 'so', o.id),
+        title: `Agendar ${o.service_order_number} — ${o.clients?.name || 'sem cliente'}`,
+      }];
+    });
   },
   async isResolved(db, task) {
     const id = entityIdFromKey(task.automation_key);
-    const { data } = await db.from('service_orders')
-      .select('status, scheduled_start_at').eq('id', id).maybeSingle();
+    // O 2º segmento da chave diz o que a tarefa pedia: 'so' (agendar a OS) ou 'orc' (receber o sinal).
+    const ehOrcamento = task.automation_key.split(':')[1] === 'orc';
+    const { data, error } = await db.from('service_orders')
+      .select('status, quote_status, merged_into_id, scheduled_start_at').eq('id', id).maybeSingle();
+    // Erro não pode virar "não existe mais": a tarefa sumiria com a condição de pé.
+    if (error) throw error;
+    if (ehOrcamento) {
+      if (!data) return 'Orçamento não existe mais';
+      return paraAgendar(data) === 'orc' ? null : motivoDoOrcamento(data);
+    }
     if (!data) return 'OS não existe mais';
+    if (paraAgendar(data) === 'os') return null;
     if (data.scheduled_start_at) return 'OS foi agendada';
-    if (data.status !== 'approved') return `OS mudou para ${data.status}`;
-    return null;
+    return `OS mudou para ${data.status}`;
   },
 };
 
@@ -342,18 +435,34 @@ const r6: Rule = {
   },
 };
 
+// R7 (23/10/2026, item 15 da revisão): OC de OS encerrada não se cobra. A OC-00001 (Mercado Pago)
+// ficou cobrada desde 23/08 com a OS-00073 já faturada — a peça tinha chegado e a OC nunca foi
+// fechada. A OS da OC vem pelo embed com a FK explícita (purchase_orders tem uma só para
+// service_orders, mas o nome evita o PGRST201 se aparecer outra).
+const OS_ENCERRADAS: readonly string[] = ['completed', 'invoiced', 'cancelled'];
+const SELECT_OS_DA_OC = 'service_orders!purchase_orders_service_order_id_fkey(status)';
+
+/** O status da OS ligada à OC, se ela estiver encerrada; null se a OC não tem OS ou a OS segue viva. */
+const osDaOcEncerrada = (p: { service_orders?: { status?: string | null } | null }): string | null => {
+  const st = p.service_orders?.status ?? null;
+  return st && OS_ENCERRADAS.includes(st) ? st : null;
+};
+
 const r7: Rule = {
   id: 'r7',
   label: 'OC não recebida no prazo',
   defaultEnabled: true,
   async find(db) {
-    const { data } = await db
+    const { data, error } = await db
       .from('purchase_orders')
-      .select('id, po_number, expected_date, created_at, suppliers(name)')
+      .select(`id, po_number, expected_date, created_at, suppliers(name), ${SELECT_OS_DA_OC}`)
       .in('status', ['sent', 'partial'])
       .limit(100);
+    // Com o embed novo, um erro de consulta viraria "nenhuma OC atrasada" calado: lança.
+    if (error) throw error;
     const now = Date.now();
     return (data || [])
+      .filter((p: any) => !osDaOcEncerrada(p))
       .filter((p: any) => p.expected_date
         ? p.expected_date < todayISO()
         : new Date(p.created_at).getTime() < now - 7 * 86400000)
@@ -369,9 +478,14 @@ const r7: Rule = {
   },
   async isResolved(db, task) {
     const id = entityIdFromKey(task.automation_key);
-    const { data } = await db.from('purchase_orders').select('status').eq('id', id).maybeSingle();
+    const { data, error } = await db.from('purchase_orders')
+      .select(`status, ${SELECT_OS_DA_OC}`).eq('id', id).maybeSingle();
+    // Erro não pode virar "OC não existe mais".
+    if (error) throw error;
     if (!data) return 'OC não existe mais';
     if (['received', 'cancelled'].includes(data.status)) return `OC ${data.status === 'received' ? 'recebida' : 'cancelada'}`;
+    const encerrada = osDaOcEncerrada(data);
+    if (encerrada) return `A OS da OC foi ${ROTULOS_STATUS_OS[encerrada as StatusOS].toLowerCase()}`;
     return null;
   },
 };
@@ -583,7 +697,7 @@ export function confirmadoParaAData(confirmadoPara: string | null | undefined, a
   return new Date(confirmadoPara).getTime() === new Date(agendadoPara).getTime();
 }
 
-// R15: a alternativa ESCOLHIDA no lugar do envio automático ao cliente (R9).
+// R15: a alternativa ESCOLHIDA no lugar do envio automático ao cliente (R9, aposentada em 23/10/2026).
 // Em vez de o sistema mandar WhatsApp sozinho na véspera, ele cria uma TAREFA sua:
 // "confirmar com fulano o atendimento de amanhã". Você abre a agenda, vê a lista do dia e
 // dispara pelo botão, um a um. Nada sai daqui — esta regra não envia nada a ninguém.
@@ -662,7 +776,9 @@ const r15: Rule = {
 // reserva, duas OS enxergariam a mesma peça; sem descontar a OC, a tarefa reapareceria
 // para algo que já está a caminho.
 //
-// Rascunho fica fora de propósito: orçamento não aprovado não gera compra.
+// Rascunho fica fora de propósito: orçamento não aprovado não gera compra. O orçamento APROVADO
+// ainda sem sinal entra (23/10/2026, paraComprar): o cliente já disse sim, e a peça que demora é o
+// que segura a data. 'open' também entra: é o caminho normal da conversão.
 const r16: Rule = {
   id: 'r16',
   label: 'OS comprometida com item a comprar',
@@ -671,12 +787,16 @@ const r16: Rule = {
   // com a mesma falta (ex.: comprou e não registrou), não volta a cada 15 min.
   voltaSoComFatoNovo: true,
   async find(db) {
-    const { data: orders } = await db
+    const { data: orders, error } = await db
       .from('service_orders')
-      .select('id, service_order_number, status, client_id, clients(name)')
-      .in('status', ['approved', 'scheduled', 'in_progress', 'awaiting_parts'])
+      .select('id, service_order_number, status, quote_status, merged_into_id, client_id, clients(name)')
+      .or(FILTRO_PARA_COMPRAR)
+      .is('merged_into_id', null)
       .limit(80);
-    const list = orders || [];
+    // Erro não pode virar "nenhuma OS precisa comprar" (era engolido até 23/10/2026).
+    if (error) throw error;
+    // O mesmo predicado do isResolved, sobre o que o banco devolveu.
+    const list = ((orders as LinhaComprometida[] | null) || []).filter((o) => paraComprar(o) !== null) as any[];
     if (!list.length) return [];
 
     const ids = list.map((o: any) => o.id);
@@ -726,10 +846,14 @@ const r16: Rule = {
   },
   async isResolved(db, task) {
     const id = entityIdFromKey(task.automation_key);
-    const { data: so } = await db.from('service_orders').select('status').eq('id', id).maybeSingle();
+    const { data: so, error: soErr } = await db.from('service_orders')
+      .select('status, quote_status, merged_into_id').eq('id', id).maybeSingle();
+    if (soErr) throw soErr;
     if (!so) return 'OS não existe mais';
-    if (['completed', 'invoiced', 'cancelled', 'draft'].includes(so.status)) {
-      return `OS mudou para ${so.status}`;
+    // O MESMO predicado do find (23/10/2026). Antes daqui saía "resolvida" para todo 'draft': com o
+    // orçamento aprovado no find, a tarefa dele nasceria e morreria a cada rodada.
+    if (!paraComprar(so)) {
+      return so.status === 'draft' || so.merged_into_id ? motivoDoOrcamento(so) : `OS mudou para ${so.status}`;
     }
 
     // A MESMA conta do find (15/10/2026). Antes daqui saía um recálculo só pelas peças do

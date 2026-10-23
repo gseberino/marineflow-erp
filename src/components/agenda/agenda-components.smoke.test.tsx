@@ -2,9 +2,9 @@
 // (Dashboard, OS, cliente, embarcação, Settings). Mesma motivação do
 // AgendaPage.smoke.test.tsx: erro de inicialização não aparece em tsc/build.
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { DashboardTasksWidget } from './DashboardTasksWidget';
 import { EntityTasksPanel } from './EntityTasksPanel';
@@ -13,10 +13,10 @@ import { TaskAutomationSettings } from './TaskAutomationSettings';
 import { FocusMode } from './FocusMode';
 import { OpenLoopsPanel } from './OpenLoopsPanel';
 import { InstallAgendaCard } from './InstallAgendaCard';
+import { TaskCard } from './TaskCard';
 
 const { queryBuilder, q, mut, liveTasks, openLoops, loopsRef, roleRef, upsertSpy } = vi.hoisted(() => {
-  // Espião de gravação: é o que prova que a confirmação BLOQUEIA o salvamento, e não
-  // apenas aparece por cima de uma alteração que já aconteceu.
+  // Espião de gravação: prova que o interruptor salva direto (sem diálogo de envio ao cliente).
   const upsertSpy = vi.fn();
   const queryBuilder = (): any => {
     const o: any = {};
@@ -146,7 +146,7 @@ describe('componentes da Agenda 2.0 — smoke de render', () => {
     wrap(<TaskAutomationSettings />);
     expect(screen.getByText('Automações de tarefas')).toBeTruthy();
     expect(screen.getByText('Modelos de checklist')).toBeTruthy();
-    expect(screen.getByText(/Pesquisa pós-serviço/)).toBeTruthy();
+    expect(screen.getByText('OS aprovada sem agendamento')).toBeTruthy();
   });
 
   it('OpenLoopsPanel mostra fio do ERP e da conversa, com atraso e recobrança', () => {
@@ -172,24 +172,19 @@ describe('componentes da Agenda 2.0 — smoke de render', () => {
     expect(screen.queryByText('OS OS-1042')).toBeNull();
   });
 
-  it('ligar mensagem ao CLIENTE pede confirmação antes de salvar', async () => {
+  // R9 (lembrete automático de agendamento) e R13 (pesquisa pós-serviço) aposentadas em 23/10/2026
+  // (decisão d13): nenhuma regra da tela manda mensagem a cliente, então nenhum interruptor pede o
+  // "digite LIGAR" — e o que ele guardava sumiu junto.
+  it('R9 e R13 saíram da tela; os interruptores salvam direto', async () => {
     const user = userEvent.setup();
+    upsertSpy.mockClear();
     wrap(<TaskAutomationSettings />);
-
-    // O interruptor da regra que envia ao cliente é o que fica ao lado do rótulo dela.
-    // Regex, não texto exato: o rótulo já mudou uma vez e quebrou este teste à toa.
-    const linha = screen.getByText(/Lembrete de agendamento ao CLIENTE/).closest('div')!.parentElement!;
-    await user.click(within(linha).getByRole('switch'));
-
-    // Não pode ter salvo nada ainda: primeiro o aviso.
-    expect(await screen.findByText(/^Ligar “Lembrete de agendamento ao CLIENTE/)).toBeTruthy();
-    expect(upsertSpy).not.toHaveBeenCalled();
-
-    // Sem modo de teste, o botão só libera depois de digitar a palavra.
-    const confirmar = screen.getByRole('button', { name: /Ligar e enviar a clientes/ });
-    expect(confirmar).toBeDisabled();
-    await user.type(screen.getByLabelText(/digite/i), 'LIGAR');
-    expect(confirmar).not.toBeDisabled();
+    expect(screen.queryByText(/Lembrete de agendamento ao CLIENTE/)).toBeNull();
+    expect(screen.queryByText(/Pesquisa pós-serviço/)).toBeNull();
+    expect(screen.queryByText(/\(envio automático\)/)).toBeNull();
+    await user.click(screen.getByRole('switch', { name: 'OS aprovada sem agendamento' }));
+    expect(screen.queryByText(/digite/i)).toBeNull();
+    expect(upsertSpy).toHaveBeenCalledWith({ key: 'task_rule_r1_enabled', value: 'false' }, { onConflict: 'key' });
   });
 
   it('InstallAgendaCard aparece mesmo sem o evento do navegador', () => {
@@ -233,5 +228,45 @@ describe('componentes da Agenda 2.0 — smoke de render', () => {
     expect(screen.getByText('Modo foco')).toBeTruthy();
     expect(screen.getByText('Concluir')).toBeTruthy();
     expect(screen.getByText('Adiar 1h')).toBeTruthy();
+  });
+});
+
+// O botão do cartão da R1 depende da chave (23/10/2026): a OS ganha "Agendar OS"; o orçamento
+// aprovado sem sinal (r1:orc) ganha "Abrir orçamento", porque o passo dele é o sinal, não a data.
+describe('TaskCard da R1 — botão por chave', () => {
+  const tarefaR1 = (automation_key: string, title: string, osId: string) => ({
+    ...liveTasks[0], id: automation_key, title, source: 'automation', automation_key,
+    related_entity_type: 'service_order', related_entity_id: osId,
+  });
+
+  it('r1:so mostra "Agendar OS" e entrega a tarefa ao agendamento', async () => {
+    const user = userEvent.setup();
+    const onScheduleOs = vi.fn();
+    const t = tarefaR1('r1:so:so-69', 'Agendar OS-00069 — Vanderlei Andrade', 'so-69');
+    wrap(<TaskCard task={t} onScheduleOs={onScheduleOs} />);
+    expect(screen.queryByRole('button', { name: 'Abrir orçamento' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Agendar OS' }));
+    expect(onScheduleOs).toHaveBeenCalledWith(t);
+  });
+
+  it('r1:orc mostra "Abrir orçamento" (nunca "Agendar OS") e leva à tela do orçamento', async () => {
+    const user = userEvent.setup();
+    const onScheduleOs = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const t = tarefaR1('r1:orc:so-83', 'ORÇ-00083 aprovado sem sinal — receber o sinal e converter para agendar (ROBSON)', 'so-83');
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/agenda']}>
+          <Routes>
+            <Route path="/agenda" element={<TaskCard task={t} onScheduleOs={onScheduleOs} />} />
+            <Route path="/v2/service-orders/so-83" element={<p>tela do ORÇ-00083</p>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByRole('button', { name: 'Agendar OS' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Abrir orçamento' }));
+    expect(screen.getByText('tela do ORÇ-00083')).toBeTruthy();
+    expect(onScheduleOs).not.toHaveBeenCalled();
   });
 });

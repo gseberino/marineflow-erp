@@ -29,4 +29,10 @@ describe('regras do motor × tela de configurações', () => {
     const faltando = idsDoMotor.filter((id) => !idsDaTela.includes(id));
     expect(faltando).toEqual([]);
   });
+
+  // O inverso (23/10/2026, d13): R9 e R13 eram interruptores da tela que ligavam envio ao cliente
+  // no index.ts. Aposentadas, não podem voltar só na tela, ligando nada. Só a R10 mora fora de RULES.
+  it('a tela não tem interruptor de regra que o motor não roda (só a R10, do index.ts)', () => {
+    expect(idsDaTela.filter((id) => !idsDoMotor.includes(id))).toEqual(['r10']);
+  });
 });

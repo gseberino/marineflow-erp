@@ -130,9 +130,19 @@ function TaskActionButton({ task, onScheduleOs }: { task: any; onScheduleOs?: (t
             if (task.related_entity_id) navigate(`/v2/service-orders/${task.related_entity_id}`);
           },
         }
-      : task.automation_key?.startsWith('r1:') && onScheduleOs
-        ? { label: 'Agendar OS', onClick: (e) => { e.stopPropagation(); onScheduleOs(task); } }
-        : undefined,
+      // R1 do orçamento aprovado sem sinal (23/10/2026): o passo é receber o sinal e converter, não
+      // agendar (d08). O botão abre o orçamento, onde ficam o sinal e a conversão.
+      : task.automation_key?.startsWith('r1:orc:')
+        ? {
+            label: 'Abrir orçamento',
+            onClick: (e) => {
+              e.stopPropagation();
+              if (task.related_entity_id) navigate(`/v2/service-orders/${task.related_entity_id}`);
+            },
+          }
+        : task.automation_key?.startsWith('r1:so:') && onScheduleOs
+          ? { label: 'Agendar OS', onClick: (e) => { e.stopPropagation(); onScheduleOs(task); } }
+          : undefined,
   };
   const action = actions[et];
   if (!action) return null;

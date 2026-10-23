@@ -3,8 +3,9 @@ import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, entityIdFromKey, keyOf, fmtBRL, fmtDate, dueAt,
   isManualDismissal, dismissCooldownDays, businessDaysBetween, vencimentoDoOrcamento, notaDoVencimento,
-  cobrancaMinima, dispensaSemFatoNovo,
+  cobrancaMinima, dispensaSemFatoNovo, paraAgendar, paraComprar, FILTRO_PARA_AGENDAR, FILTRO_PARA_COMPRAR,
 } from "./rules.ts";
+import { STATUS_OS } from "../_shared/service-order-status.ts";
 
 Deno.test("isManualDismissal: conclusão MANUAL recente bloqueia recriação", () => {
   const cutoff = "2026-07-17T00:00:00Z";
@@ -691,7 +692,7 @@ function bancoDeOs(linhas: any[]) {
     from() {
       // deno-lint-ignore no-explicit-any
       const q: any = {};
-      for (const m of ["select", "eq", "is", "lt", "lte", "gt", "gte", "in", "order"]) q[m] = () => q;
+      for (const m of ["select", "eq", "is", "lt", "lte", "gt", "gte", "in", "order", "or"]) q[m] = () => q;
       q.limit = async () => ({ data: linhas, error: null });
       return q;
     },
@@ -701,11 +702,12 @@ function bancoDeOs(linhas: any[]) {
 Deno.test("find r1, r2 e r15: o título leva o número da OS como vem, sem 'OS OS-'", async () => {
   const daqui = new Date(Date.now() + 24 * 3600000).toISOString();
   const os = {
-    id: "so-60", service_order_number: "OS-00060", client_id: "c-1",
+    id: "so-60", service_order_number: "OS-00060", client_id: "c-1", status: "approved",
     updated_at: "2026-10-01T12:00:00Z", scheduled_start_at: daqui, client_confirmed_for: null,
     clients: { name: "Marina Azul", phone: "5547999990000", whatsapp: null, opt_out_whatsapp: false },
   };
-  const [t1] = await ruleById("r1")!.find(bancoDeOs([os]));
+  // A R1 aplica o predicado (paraAgendar) sobre o que o banco devolveu: aqui, a OS sem data.
+  const [t1] = await ruleById("r1")!.find(bancoDeOs([{ ...os, scheduled_start_at: null }]));
   const [t2] = await ruleById("r2")!.find(bancoDeOs([os]));
   const [t15] = await ruleById("r15")!.find(bancoDeOs([os]));
   assertEquals(t1.title, "Agendar OS-00060 — Marina Azul");
@@ -713,7 +715,7 @@ Deno.test("find r1, r2 e r15: o título leva o número da OS como vem, sem 'OS O
   assertEquals(t15.title.startsWith("Confirmar com Marina Azul a OS-00060 ("), true, t15.title);
   for (const t of [t1, t2, t15]) assertEquals(t.title.includes("OS OS-"), false, t.title);
   // o orçamento segue com o prefixo dele
-  const [orc] = await ruleById("r1")!.find(bancoDeOs([{ ...os, service_order_number: "ORÇ-00112" }]));
+  const [orc] = await ruleById("r1")!.find(bancoDeOs([{ ...os, scheduled_start_at: null, service_order_number: "ORÇ-00112" }]));
   assertEquals(orc.title, "Agendar ORÇ-00112 — Marina Azul");
 });
 
@@ -736,4 +738,335 @@ Deno.test("textoDoLembreteDaOs (r10): 'você tem a OS-00060', com e sem barco", 
     textoDoLembreteDaOs({ quando: "hoje", hora: "07:30", numero: "OS-00063", cliente: "Ana", barco: "Motorhome", tipo: "Motorhome" }),
     "🔧 Lembrete: hoje às 07:30 você tem a OS-00063 — Ana (Motorhome).",
   );
+});
+
+// ── Agenda de Produção, Fase 0 (23/10/2026): R1 e R16 veem 'open' e o ORÇ aprovado; R7 respeita a
+// OS encerrada; R9 e R13 aposentadas. A carteira abaixo é a real de 23/10 (SELECT f05), só com as
+// colunas que as regras leem.
+// deno-lint-ignore no-explicit-any
+const linhaDaCarteira = (id: string, numero: string, status: string, quote_status: string | null, cliente: string, extra: Record<string, unknown> = {}): any => ({
+  id, service_order_number: numero, status, quote_status, client_id: `cli-${numero}`, merged_into_id: null,
+  scheduled_start_at: null, updated_at: "2026-10-13T12:00:00Z", clients: { name: cliente }, ...extra,
+});
+const ID = {
+  os69: "dd0bff69-0578-4b06-95fe-5bb460e1d8ac", os74: "10926157-c872-4ab8-9767-dcd96d4cd7ae",
+  os100: "0e46d117-ed74-4de1-9334-446da509637b", os96: "4c54607f-84ea-4a9e-b7ea-c53dc905eb87",
+  orc83: "8cb61f00-c85d-489d-9ab8-1cfb7a54db4f", orc95: "92165492-234f-4f16-802e-0ecb13f752b6",
+  os104: "63f93bbe-4bc7-46d0-b85e-dd434d4038c0", os112: "232c453b-3bc9-4eab-a84c-b0d1209d16eb",
+  os32: "dc2b2ae3-1ef7-48fd-b4ff-a5391e2b4ea6", os76: "120c289e-b22e-4006-a772-adb760632c6c",
+};
+const CARTEIRA = [
+  linhaDaCarteira(ID.os69, "OS-00069", "open", "approved", "Vanderlei Andrade"),
+  linhaDaCarteira(ID.os74, "OS-00074", "open", "approved", "LENINE LORI BROCCA"),
+  linhaDaCarteira(ID.os100, "OS-00100", "open", "approved", "Giancarlo Ribeiro dos Santos"),
+  // aprovada com o quote_status 'rejected' (assim está no banco): a R1 olha o status da OS
+  linhaDaCarteira(ID.os96, "OS-00096", "approved", "rejected", "Rodrigo"),
+  linhaDaCarteira(ID.orc83, "ORÇ-00083", "draft", "approved", "ROBSON"),
+  // aguardando sinal: fica fora das duas (já tem R6/R19)
+  linhaDaCarteira(ID.orc95, "ORÇ-00095", "draft", "awaiting_deposit", "MP MOTOR HOMES"),
+  linhaDaCarteira(ID.os104, "OS-00104", "awaiting_parts", "approved", "Flávio da Igreja", { scheduled_start_at: "2026-10-06T09:00:00Z" }),
+  linhaDaCarteira(ID.os112, "OS-00112", "awaiting_parts", "sent", "Nelson"),
+  linhaDaCarteira(ID.os32, "OS-00032", "awaiting_client", "approved", "KALMAR PERSONAL BOATS"),
+  linhaDaCarteira(ID.os76, "OS-00076", "awaiting_client", "draft", "Rodrigo"),
+  // agrupado em outro (não existe hoje; o predicado recusa mesmo assim)
+  linhaDaCarteira("orc-agrupado", "ORÇ-00999", "draft", "approved", "Fulano", { merged_into_id: "orc-destino" }),
+];
+// count_purchase_shortages na carteira de 23/10 (f06/f14). A OS-00076 e o ORÇ-00095 têm falta, mas
+// estão fora do recorte da R16 (aguardando cliente / aguardando sinal).
+const FALTAS: Record<string, number> = { [ID.os69]: 4, [ID.orc83]: 2, [ID.os112]: 4, [ID.os104]: 1, [ID.os76]: 1, [ID.orc95]: 3 };
+
+/**
+ * Banco de mentira da carteira: `.eq('id', x)` filtra (para o isResolved), `.or()`/`.is()`/`.lt()` são
+ * só anotados (o predicado da regra é que filtra). A prova de que o filtro do banco diz o mesmo que o
+ * predicado é o teste da matriz, logo abaixo.
+ */
+function bancoDaCarteira(linhas: unknown[], faltas: Record<string, number> = {}, erro?: unknown) {
+  const pedidos: string[] = [];
+  const rpcs: Array<{ nome: string; ids: string[] }> = [];
+  return {
+    pedidos, rpcs,
+    from(tabela: string) {
+      if (tabela !== "service_orders") throw new Error(`não devia ler ${tabela}`);
+      // deno-lint-ignore no-explicit-any
+      let rows = [...linhas] as any[];
+      // deno-lint-ignore no-explicit-any
+      const q: any = {
+        select: (s: string) => { pedidos.push(`select:${s}`); return q; },
+        or: (f: string) => { pedidos.push(`or:${f}`); return q; },
+        is: (c: string, v: unknown) => { pedidos.push(`is:${c}:${v}`); return q; },
+        lt: (c: string) => { pedidos.push(`lt:${c}`); return q; },
+        eq: (c: string, v: unknown) => { rows = rows.filter((r) => r[c] === v); return q; },
+        limit: async () => ({ data: erro ? null : rows, error: erro ?? null }),
+        maybeSingle: async () => ({ data: erro ? null : rows[0] ?? null, error: erro ?? null }),
+      };
+      return q;
+    },
+    rpc: async (nome: string, args: { p_so_ids: string[] }) => {
+      rpcs.push({ nome, ids: args.p_so_ids });
+      return { data: Object.fromEntries(args.p_so_ids.filter((id) => faltas[id]).map((id) => [id, faltas[id]])), error: null };
+    },
+  };
+}
+
+/** Divide por vírgula fora de parênteses (a gramática do `.or()` do PostgREST). */
+function partesDoFiltro(s: string): string[] {
+  const out: string[] = [];
+  let nivel = 0, ini = 0;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "(") nivel++;
+    else if (s[i] === ")") nivel--;
+    else if (s[i] === "," && nivel === 0) { out.push(s.slice(ini, i)); ini = i + 1; }
+  }
+  out.push(s.slice(ini));
+  return out;
+}
+
+/** Avalia uma condição do PostgREST sobre a linha (só o que as regras usam: eq, in, is.null, and()). */
+function avaliaCondicao(c: string, l: Record<string, unknown>): boolean {
+  if (c.startsWith("and(")) return partesDoFiltro(c.slice(4, -1)).every((p) => avaliaCondicao(p, l));
+  const [col, op, ...resto] = c.split(".");
+  const val = resto.join(".");
+  const v = l[col] ?? null;
+  if (op === "eq") return v === val;
+  if (op === "is" && val === "null") return v === null;
+  if (op === "in") return val.slice(1, -1).split(",").includes(String(v));
+  throw new Error(`operador não previsto no teste: ${c}`);
+}
+
+Deno.test("R1/R16: o filtro do banco e o predicado dizem a mesma coisa em todas as combinações", () => {
+  // O find pede ao banco o recorte (.or + .is merged_into_id null) e o isResolved relê pelo predicado.
+  // Se os dois divergirem em alguma linha, a tarefa dela oscila (nasce e morre a cada 15 min).
+  const quotes = [null, "draft", "sent", "awaiting_approval", "awaiting_deposit", "approved", "rejected"];
+  let combinacoes = 0;
+  for (const status of STATUS_OS) {
+    for (const quote_status of quotes) {
+      for (const merged_into_id of [null, "outro"]) {
+        for (const scheduled_start_at of [null, "2026-10-30T12:00:00Z"]) {
+          const l = { status, quote_status, merged_into_id, scheduled_start_at };
+          const noBanco = (filtro: string) => l.merged_into_id === null && partesDoFiltro(filtro).some((p) => avaliaCondicao(p, l));
+          assertEquals(noBanco(FILTRO_PARA_AGENDAR), paraAgendar(l) !== null, `agendar ${JSON.stringify(l)}`);
+          assertEquals(noBanco(FILTRO_PARA_COMPRAR), paraComprar(l) !== null, `comprar ${JSON.stringify(l)}`);
+          combinacoes++;
+        }
+      }
+    }
+  }
+  assertEquals(combinacoes, STATUS_OS.length * quotes.length * 4);
+  // O texto que vai ao PostgREST, fixado (sem vírgula em valor: não precisa de orContem).
+  assertEquals(FILTRO_PARA_AGENDAR, "and(status.in.(approved,open),scheduled_start_at.is.null),and(status.eq.draft,quote_status.eq.approved)");
+  assertEquals(FILTRO_PARA_COMPRAR, "status.in.(approved,open,scheduled,in_progress,awaiting_parts),and(status.eq.draft,quote_status.eq.approved)");
+});
+
+Deno.test("paraAgendar/paraComprar: 'os', 'orc' ou nada", () => {
+  assertEquals(paraAgendar({ status: "open" }), "os");
+  assertEquals(paraAgendar({ status: "approved", scheduled_start_at: "2026-10-30T12:00:00Z" }), null);
+  assertEquals(paraAgendar({ status: "scheduled" }), null);
+  assertEquals(paraAgendar({ status: "draft", quote_status: "approved" }), "orc");
+  // No orçamento a data não decide: o que falta é o sinal.
+  assertEquals(paraAgendar({ status: "draft", quote_status: "approved", scheduled_start_at: "2026-10-30T12:00:00Z" }), "orc");
+  assertEquals(paraAgendar({ status: "draft", quote_status: "awaiting_deposit" }), null);
+  assertEquals(paraAgendar({ status: "draft", quote_status: "approved", merged_into_id: "x" }), null);
+  assertEquals(paraComprar({ status: "open" }), "os");
+  assertEquals(paraComprar({ status: "awaiting_parts" }), "os");
+  assertEquals(paraComprar({ status: "awaiting_client" }), null);
+  assertEquals(paraComprar({ status: "completed" }), null);
+  assertEquals(paraComprar({ status: "draft", quote_status: "approved" }), "orc");
+  assertEquals(paraComprar({ status: "draft", quote_status: "sent" }), null);
+});
+
+Deno.test("find r1: carteira real de 23/10 → 4 r1:so e 1 r1:orc, com os títulos", async () => {
+  const db = bancoDaCarteira(CARTEIRA);
+  const tarefas = await ruleById("r1")!.find(db);
+  assertEquals(tarefas.map((t) => [t.automation_key, t.title]).sort(), [
+    [`r1:orc:${ID.orc83}`, "ORÇ-00083 aprovado sem sinal — receber o sinal e converter para agendar (ROBSON)"],
+    [`r1:so:${ID.os100}`, "Agendar OS-00100 — Giancarlo Ribeiro dos Santos"],
+    [`r1:so:${ID.os74}`, "Agendar OS-00074 — LENINE LORI BROCCA"],
+    [`r1:so:${ID.os96}`, "Agendar OS-00096 — Rodrigo"],
+    [`r1:so:${ID.os69}`, "Agendar OS-00069 — Vanderlei Andrade"],
+  ].sort());
+  for (const t of tarefas) {
+    assertEquals(t.related_entity_type, "service_order"); // o CHECK de agenda_tasks já aceita; nada de tipo novo
+    assertEquals(entityIdFromKey(t.automation_key), t.related_entity_id);
+    assertEquals([t.priority, t.assignee], ["high", "admin"]);
+  }
+  // O que vai ao banco: o recorte, sem agrupado, com a carência de 24 h.
+  assertEquals(db.pedidos.includes(`or:${FILTRO_PARA_AGENDAR}`), true, db.pedidos.join(" | "));
+  assertEquals(db.pedidos.includes("is:merged_into_id:null"), true, db.pedidos.join(" | "));
+  assertEquals(db.pedidos.includes("lt:updated_at"), true, db.pedidos.join(" | "));
+  // O .select() do PostgREST não é validado: sem estas colunas o predicado leria undefined e a regra
+  // não criaria nada, calada.
+  const select = db.pedidos.find((p) => p.startsWith("select:"))!;
+  for (const c of ["status", "quote_status", "merged_into_id", "scheduled_start_at", "clients(name)"]) {
+    assertEquals(select.includes(c), true, `${c} fora do select: ${select}`);
+  }
+  // Erro de leitura não vira "nada a agendar".
+  let lancou = false;
+  try { await ruleById("r1")!.find(bancoDaCarteira(CARTEIRA, {}, { code: "57014", message: "timeout" })); } catch { lancou = true; }
+  assertEquals(lancou, true);
+});
+
+Deno.test("anti-oscilação r1: cada candidato do find, relido pelo isResolved, continua vivo", async () => {
+  const r1 = ruleById("r1")!;
+  const tarefas = await r1.find(bancoDaCarteira(CARTEIRA));
+  assertEquals(tarefas.length, 5);
+  for (const t of tarefas) assertEquals(await r1.isResolved(bancoDaCarteira(CARTEIRA), t), null, t.automation_key);
+});
+
+Deno.test("isResolved r1 orc: converteu, rejeitou, cancelou ou agrupou resolve; ganhar data não", async () => {
+  const r1 = ruleById("r1")!;
+  const k = { automation_key: `r1:orc:${ID.orc83}` };
+  const res = (extra: Record<string, unknown>) =>
+    r1.isResolved(bancoDaCarteira([linhaDaCarteira(ID.orc83, "ORÇ-00083", "draft", "approved", "ROBSON", extra)]), k);
+  assertEquals(await res({}), null);
+  assertEquals(await res({ scheduled_start_at: "2026-10-30T12:00:00Z" }), null);
+  // Converteu (sinal pago): esta fecha e a r1:so nasce na rodada seguinte à carência.
+  assertEquals(await res({ status: "open" }), "Orçamento virou OS (Aberta)");
+  assertEquals(await res({ status: "approved" }), "Orçamento virou OS (Aprovada)");
+  assertEquals(await res({ quote_status: "rejected" }), "Orçamento mudou para rejected");
+  assertEquals(await res({ status: "cancelled" }), "Orçamento cancelado");
+  assertEquals(await res({ status: "cancelled", merged_into_id: "orc-destino" }), "Orçamento agrupado em outro");
+  assertEquals(await r1.isResolved(bancoDaCarteira([]), k), "Orçamento não existe mais");
+});
+
+Deno.test("isResolved r1 so: 'open' sem data continua; agendou ou mudou resolve; erro lança", async () => {
+  const r1 = ruleById("r1")!;
+  const k = { automation_key: `r1:so:${ID.os69}` };
+  const res = (extra: Record<string, unknown>) =>
+    r1.isResolved(bancoDaCarteira([linhaDaCarteira(ID.os69, "OS-00069", "open", "approved", "Vanderlei Andrade", extra)]), k);
+  assertEquals(await res({}), null);
+  assertEquals(await res({ scheduled_start_at: "2026-10-30T12:00:00Z" }), "OS foi agendada");
+  assertEquals(await res({ status: "scheduled", scheduled_start_at: "2026-10-30T12:00:00Z" }), "OS foi agendada");
+  assertEquals(await res({ status: "in_progress" }), "OS mudou para in_progress");
+  assertEquals(await r1.isResolved(bancoDaCarteira([]), k), "OS não existe mais");
+  // Erro de leitura não pode virar "não existe mais" (a tarefa sumiria com a OS parada).
+  let lancou = false;
+  try { await r1.isResolved(bancoDaCarteira([], {}, { code: "57014", message: "timeout" }), k); } catch { lancou = true; }
+  assertEquals(lancou, true);
+});
+
+Deno.test("find r16: inclui 'open' e o ORÇ aprovado; aguardando cliente e aguardando sinal ficam fora", async () => {
+  const db = bancoDaCarteira(CARTEIRA, FALTAS);
+  const tarefas = await ruleById("r16")!.find(db);
+  assertEquals(tarefas.map((t) => [t.automation_key, t.title, t.priority]).sort(), [
+    [`r16:so:${ID.os104}`, "Comprar 1 item — OS-00104 (Flávio da Igreja)", "urgent"],
+    [`r16:so:${ID.os112}`, "Comprar 4 itens — OS-00112 (Nelson)", "urgent"],
+    [`r16:so:${ID.orc83}`, "Comprar 2 itens — ORÇ-00083 (ROBSON)", "high"],
+    [`r16:so:${ID.os69}`, "Comprar 4 itens — OS-00069 (Vanderlei Andrade)", "high"],
+  ].sort());
+  // A RPC só recebe o recorte: nem o aguardando sinal, nem o aguardando cliente, nem o agrupado.
+  assertEquals(db.rpcs.length, 1);
+  assertEquals(db.rpcs[0].nome, "count_purchase_shortages");
+  assertEquals([...db.rpcs[0].ids].sort(), [ID.os69, ID.os74, ID.os100, ID.os96, ID.orc83, ID.os104, ID.os112].sort());
+  assertEquals(db.pedidos.includes(`or:${FILTRO_PARA_COMPRAR}`), true, db.pedidos.join(" | "));
+  assertEquals(db.pedidos.includes("is:merged_into_id:null"), true, db.pedidos.join(" | "));
+  const select = db.pedidos.find((p) => p.startsWith("select:"))!;
+  for (const c of ["status", "quote_status", "merged_into_id"]) assertEquals(select.includes(c), true, `${c} fora do select: ${select}`);
+  let lancou = false;
+  try { await ruleById("r16")!.find(bancoDaCarteira(CARTEIRA, FALTAS, { code: "57014", message: "timeout" })); } catch { lancou = true; }
+  assertEquals(lancou, true);
+});
+
+Deno.test("anti-oscilação r16: cada candidato do find, relido pelo isResolved, continua vivo", async () => {
+  const r16 = ruleById("r16")!;
+  const tarefas = await r16.find(bancoDaCarteira(CARTEIRA, FALTAS));
+  assertEquals(tarefas.length, 4);
+  for (const t of tarefas) assertEquals(await r16.isResolved(bancoDaCarteira(CARTEIRA, FALTAS), t), null, t.automation_key);
+});
+
+Deno.test("isResolved r16: orçamento aprovado com falta não resolve; se deixar de ser aprovado, resolve", async () => {
+  const r16 = ruleById("r16")!;
+  const k = { automation_key: `r16:so:${ID.orc83}` };
+  const banco = (extra: Record<string, unknown>) =>
+    bancoDaCarteira([linhaDaCarteira(ID.orc83, "ORÇ-00083", "draft", "approved", "ROBSON", extra)], FALTAS);
+  // Antes, todo 'draft' resolvia: com o ORÇ aprovado no find, a tarefa oscilaria.
+  assertEquals(await r16.isResolved(banco({}), k), null);
+  // Converteu e a falta segue: a mesma tarefa (mesma chave) continua.
+  assertEquals(await r16.isResolved(banco({ status: "open" }), k), null);
+  const semRpc = banco({ quote_status: "sent" });
+  assertEquals(await r16.isResolved(semRpc, k), "Orçamento mudou para sent");
+  assertEquals(semRpc.rpcs.length, 0);
+  assertEquals(await r16.isResolved(banco({ status: "cancelled", merged_into_id: "orc-destino" }), k), "Orçamento agrupado em outro");
+  // Comprou (ou pediu em OC): a RPC deixa de trazer o orçamento.
+  assertEquals(await r16.isResolved(bancoDaCarteira([linhaDaCarteira(ID.orc83, "ORÇ-00083", "draft", "approved", "ROBSON")], {}), k),
+    "Compra resolvida (em estoque ou já pedida)");
+});
+
+/** Banco de mentira das OCs: `.eq('id', x)` e `.in('status', ...)` filtram; o embed da OS vem pronto em cada linha. */
+function bancoDeOcs(linhas: unknown[], erro?: unknown) {
+  const selects: string[] = [];
+  return {
+    selects,
+    from(tabela: string) {
+      if (tabela !== "purchase_orders") throw new Error(`não devia ler ${tabela}`);
+      // deno-lint-ignore no-explicit-any
+      let rows = [...linhas] as any[];
+      // deno-lint-ignore no-explicit-any
+      const q: any = {
+        select: (s: string) => { selects.push(s); return q; },
+        in: (c: string, v: unknown[]) => { rows = rows.filter((r) => v.includes(r[c])); return q; },
+        eq: (c: string, v: unknown) => { rows = rows.filter((r) => r[c] === v); return q; },
+        limit: async () => ({ data: erro ? null : rows, error: erro ?? null }),
+        maybeSingle: async () => ({ data: erro ? null : rows[0] ?? null, error: erro ?? null }),
+      };
+      return q;
+    },
+  };
+}
+
+// OC-00001 (Mercado Pago): 'sent', prevista para 04/08, OS-00073 faturada — cobrada pela R7 desde 23/08.
+const OC_00001 = "121e9ddc-859a-491e-a855-7360ba4b7717";
+const oc = (id: string, os: string | null, extra: Record<string, unknown> = {}) => ({
+  id, po_number: `OC-${id}`, status: "sent", expected_date: "2026-08-04", created_at: "2026-07-31T12:00:00Z",
+  suppliers: { name: "MERCADO PAGO INSTITUICAO DE PAGAMENTO LTDA" },
+  service_orders: os ? { status: os } : null, ...extra,
+});
+
+Deno.test("find r7: OC de OS concluída, faturada ou cancelada não é cobrada", async () => {
+  const db = bancoDeOcs([
+    oc(OC_00001, "invoiced"),
+    oc("oc-concluida", "completed"),
+    oc("oc-cancelada", "cancelled"),
+    oc("oc-os-viva", "awaiting_parts"),
+    oc("oc-sem-os", null),
+    oc("oc-no-prazo", "awaiting_parts", { expected_date: "2999-01-01" }),
+    oc("oc-recebida", "awaiting_parts", { status: "received" }),
+  ]);
+  const tarefas = await ruleById("r7")!.find(db);
+  assertEquals(tarefas.map((t) => t.automation_key).sort(), ["r7:po:oc-os-viva", "r7:po:oc-sem-os"]);
+  // A FK com nome (a única de purchase_orders para service_orders).
+  assertEquals(db.selects[0].includes("service_orders!purchase_orders_service_order_id_fkey(status)"), true, db.selects[0]);
+  let lancou = false;
+  try { await ruleById("r7")!.find(bancoDeOcs([], { code: "PGRST201", message: "ambíguo" })); } catch { lancou = true; }
+  assertEquals(lancou, true);
+});
+
+Deno.test("isResolved r7: a OS da OC encerrou → resolve; OS viva segue; erro lança", async () => {
+  const r7 = ruleById("r7")!;
+  const k = (id: string) => ({ automation_key: `r7:po:${id}` });
+  // A tarefa viva da OC-00001 (de 23/08) fecha sozinha no 1º ciclo.
+  assertEquals(await r7.isResolved(bancoDeOcs([oc(OC_00001, "invoiced")]), k(OC_00001)), "A OS da OC foi faturada");
+  assertEquals(await r7.isResolved(bancoDeOcs([oc("x", "completed")]), k("x")), "A OS da OC foi concluída");
+  assertEquals(await r7.isResolved(bancoDeOcs([oc("x", "cancelled")]), k("x")), "A OS da OC foi cancelada");
+  assertEquals(await r7.isResolved(bancoDeOcs([oc("x", "awaiting_parts")]), k("x")), null);
+  assertEquals(await r7.isResolved(bancoDeOcs([oc("x", null)]), k("x")), null);
+  assertEquals(await r7.isResolved(bancoDeOcs([oc("x", "invoiced", { status: "received" })]), k("x")), "OC recebida");
+  assertEquals(await r7.isResolved(bancoDeOcs([]), k("x")), "OC não existe mais");
+  let lancou = false;
+  try { await r7.isResolved(bancoDeOcs([], { code: "57014", message: "timeout" }), k("x")); } catch { lancou = true; }
+  assertEquals(lancou, true);
+});
+
+// d13 (23/10/2026): o motor não manda nada a cliente. O index.ts sobe o servidor ao ser importado:
+// pelo texto da fonte, como o teste do motor acima.
+Deno.test("motor: R9 e R13 aposentadas; o responsável vem de responsavel.ts", async () => {
+  const fonte = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
+  for (const proibido of [
+    "task_rule_r9_enabled", "task_rule_r13_enabled", "runClientReminders", "runPostServiceSurvey",
+    "agenda-r9", "agenda-r13", "reminder_sent_at",
+  ]) {
+    assertEquals(fonte.includes(proibido), false, `index.ts ainda tem ${proibido}`);
+  }
+  assertEquals(fonte.includes("const summary = { identidade, fios, rules, r10, reminders, recurrence };"), true);
+  assertEquals(fonte.includes('import { resolveAssignee } from "./responsavel.ts";'), true);
+  assertEquals(/async function resolveAssignee/.test(fonte), false);
 });

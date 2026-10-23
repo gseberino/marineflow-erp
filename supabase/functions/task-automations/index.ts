@@ -1,22 +1,23 @@
 // Edge Function: task-automations — o motor da Agenda & Tarefas 2.0.
 // Cron */15min. Faz, nesta ordem:
-//   1. Regras R1..R12: criam tarefas (dedupe por automation_key) e auto-resolvem
+//   1. Regras de rules.ts (RULES): criam tarefas (dedupe por automation_key) e auto-resolvem
 //      as que a condição sumiu ("Resolvido automaticamente: ...").
 //   2. R10: lembrete interno (WhatsApp equipe) de OS agendada para amanhã.
-//   3. R9 (nasce OFF): lembrete de agendamento ao CLIENTE — substitui a antiga
-//      scheduling-automations (que estava quebrada com colunas pré-rename).
-//   4. Processa task_reminders vencidos → app_notifications + WhatsApp interno.
-//   5. Materializa recorrências (rrule) para os próximos 30 dias.
+//   3. Processa task_reminders vencidos → app_notifications + WhatsApp interno.
+//   4. Materializa recorrências (rrule) para os próximos 30 dias.
+// O motor não manda nada a cliente. O lembrete automático de agendamento (R9) e a pesquisa
+// pós-serviço (R13), que nasciam desligados, foram aposentados em 23/10/2026 (decisão d13): a
+// confirmação com o cliente é a R15, uma tarefa que só envia com o clique do dono.
 // Plano: plans/marineflow-agenda-tarefas.md §6-§7.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, isManualDismissal, dismissCooldownDays,
   dispensaSemFatoNovo, textoDoLembreteDaOs, type RuleCandidate,
 } from "./rules.ts";
+import { resolveAssignee } from "./responsavel.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
-import { nomeDaUnidade, suaUnidade } from "../_shared/unidade.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 
 const corsHeaders = {
@@ -39,19 +40,6 @@ async function audit(db: Db, event_type: string, payload: unknown) {
       actor_kind: "system", event_type, event_category: "data", payload,
     });
   } catch (_) { /* auditoria nunca derruba o motor */ }
-}
-
-/** Resolve 'admin'/'financial' para um app_user ativo; uuid passa direto. */
-async function resolveAssignee(db: Db, who: string | null, cache: Map<string, string | null>): Promise<string | null> {
-  if (!who) return null;
-  if (who !== "admin" && who !== "financial") return who;
-  if (cache.has(who)) return cache.get(who)!;
-  const { data } = await db.from("app_users")
-    .select("id").eq("active", true).eq("role", who)
-    .order("created_at", { ascending: true }).limit(1).maybeSingle();
-  const id = (data as any)?.id ?? null;
-  cache.set(who, id);
-  return id;
 }
 
 async function createTaskFromCandidate(db: Db, c: RuleCandidate, assigneeId: string | null): Promise<boolean> {
@@ -260,87 +248,6 @@ async function runTechnicianReminders(db: Db, settings: Record<string, string>) 
   return { sent, janela: quando };
 }
 
-/** R9 — lembrete de agendamento ao CLIENTE (OFF por padrão; test-mode preservado). */
-async function runClientReminders(db: Db, settings: Record<string, string>) {
-  if ((settings["task_rule_r9_enabled"] ?? "false") !== "true") return { sent: 0, skipped: "disabled" };
-
-  const testMode = (settings["wa_test_mode"] ?? settings["zapi_test_mode"]) === "true";
-  const testNumber = ((settings["wa_test_number"] ?? settings["zapi_test_number"]) || "").replace(/\D/g, "");
-  if (testMode && !testNumber) return { sent: 0, skipped: "test_mode_without_number" };
-
-  const now = new Date();
-  const tomorrow = new Date(now.getTime() + 86400000);
-  const { data: orders } = await db.from("service_orders")
-    .select("id, service_order_number, scheduled_start_at, clients(name, phone, whatsapp, opt_out_whatsapp), vessels(name, asset_type)")
-    .eq("status", "scheduled")
-    .is("reminder_sent_at", null)
-    .gte("scheduled_start_at", now.toISOString())
-    .lte("scheduled_start_at", tomorrow.toISOString());
-
-  let sent = 0;
-  for (const o of (orders as any[]) || []) {
-    // Quem pediu para parar não recebe, e ponto. Vale mesmo em modo de teste: se um dia o
-    // modo de teste for desligado sem revisar, o pedido do cliente continua valendo.
-    if (o.clients?.opt_out_whatsapp) continue;
-    const phone = ((o.clients?.whatsapp || o.clients?.phone || "") as string).replace(/\D/g, "");
-    if (!phone || phone.length < 10) continue;
-    const target = testMode ? testNumber : phone;
-    const dia = new Date(o.scheduled_start_at).toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
-    const hora = new Date(o.scheduled_start_at).toLocaleTimeString("pt-BR", {
-      hour: "2-digit", minute: "2-digit", timeZone: "America/Sao_Paulo",
-    });
-    await db.from("whatsapp_send_queue").insert({
-      phone_normalized: target,
-      message: `Olá${o.clients?.name ? `, ${o.clients.name}` : ""}! Lembrete do seu atendimento agendado para ${dia} às ${hora}` +
-        `${o.vessels?.name ? ` (${nomeDaUnidade(o.vessels)})` : ""}. Qualquer imprevisto, é só responder por aqui. — HBR Marine`,
-      source: "agenda-r9",
-      source_ref_id: o.id,
-      priority: 4,
-    });
-    await db.from("service_orders").update({ reminder_sent_at: new Date().toISOString() }).eq("id", o.id);
-    sent++;
-  }
-  return { sent };
-}
-
-/** R13 — pesquisa de satisfação D+1 após concluir OS (nasce OFF; test-mode aware). */
-async function runPostServiceSurvey(db: Db, settings: Record<string, string>) {
-  if ((settings["task_rule_r13_enabled"] ?? "false") !== "true") return { sent: 0, skipped: "disabled" };
-
-  const testMode = (settings["wa_test_mode"] ?? settings["zapi_test_mode"]) === "true";
-  const testNumber = ((settings["wa_test_number"] ?? settings["zapi_test_number"]) || "").replace(/\D/g, "");
-  if (testMode && !testNumber) return { sent: 0, skipped: "test_mode_without_number" };
-
-  // OS concluídas entre D-2 e D-1 (janela de 1 dia, com margem p/ o cron não perder)
-  const from = new Date(Date.now() - 2 * 86400000).toISOString();
-  const to = new Date(Date.now() - 1 * 86400000).toISOString();
-  const { data: orders } = await db.from("service_orders")
-    .select("id, service_order_number, updated_at, clients(name, phone, whatsapp, opt_out_whatsapp), vessels(name, asset_type)")
-    .eq("status", "completed")
-    .gte("updated_at", from)
-    .lte("updated_at", to);
-
-  let sent = 0;
-  for (const o of (orders as any[]) || []) {
-    if (o.clients?.opt_out_whatsapp) continue;
-    const phone = ((o.clients?.whatsapp || o.clients?.phone || "") as string).replace(/\D/g, "");
-    if (!phone || phone.length < 10) continue;
-    const { data: dup } = await db.from("whatsapp_send_queue")
-      .select("id").eq("source", "agenda-r13").eq("source_ref_id", o.id).limit(1);
-    if (dup && dup.length > 0) continue;
-    await db.from("whatsapp_send_queue").insert({
-      phone_normalized: testMode ? testNumber : phone,
-      message: `Olá${o.clients?.name ? `, ${o.clients.name}` : ""}! O serviço${o.vessels?.name ? ` ${suaUnidade(o.vessels, "em", { comNome: true })}` : ""} foi concluído. ` +
-        `Como foi sua experiência, de 0 a 10? Sua resposta nos ajuda muito — e qualquer ajuste, é só falar por aqui. — HBR Marine`,
-      source: "agenda-r13",
-      source_ref_id: o.id,
-      priority: 5,
-    });
-    sent++;
-  }
-  return { sent };
-}
-
 /** Processa task_reminders vencidos → sino in-app + WhatsApp interno. */
 async function processReminders(db: Db) {
   const { data: due } = await db.from("task_reminders")
@@ -483,12 +390,10 @@ servirComCors(async (req) => {
 
     const rules = await runRules(db, settings);
     const r10 = await runTechnicianReminders(db, settings);
-    const r9 = await runClientReminders(db, settings);
-    const r13 = await runPostServiceSurvey(db, settings);
     const reminders = await processReminders(db);
     const recurrence = await materializeRecurrences(db);
 
-    const summary = { identidade, fios, rules, r10, r9, r13, reminders, recurrence };
+    const summary = { identidade, fios, rules, r10, reminders, recurrence };
     // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as
     // regras quebraram não deixaria registro nenhum (created e resolved vazios).
     if (rules.created.length || rules.resolved.length || recurrence.created || rules.falhas.length) {
