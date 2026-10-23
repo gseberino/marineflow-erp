@@ -2,6 +2,8 @@ import type { ToolDef } from "./registry.ts";
 import { comFusoDeBrasilia } from "../fuso.ts";
 import { acharOS } from "./os-referencia.ts";
 import { ehErro } from "./caixa.ts";
+import { dayRangeBRT } from "./agenda.ts";
+import { filtroQueCruza } from "../../agenda-dia.ts";
 
 // Operação de campo + agenda inteligente (Fase 2) — SEM schema novo.
 // O schema já tinha o necessário: service_orders.check_in_at / check_out_at / technician_notes,
@@ -195,7 +197,7 @@ export const fieldOpsTools: ToolDef[] = [
     name: "check_out_service_order",
     description:
       "Registra a SAÍDA do técnico (check-out): marca a hora de término e grava o relato do que foi feito. Use quando o técnico disser 'terminei', 'saí do barco', 'saí do motorhome', 'finalizei o serviço'. " +
-      "Se ele disser a HORA ('saí às 17h'), passe em `horario` — sem horário vale agora. NÃO conclui a OS nem fatura — concluir é update_service_order_status, decisão de quem administra.",
+      "Se ele disser a HORA ('saí às 17h'), passe em `horario` — sem horário vale agora. NÃO conclui a OS nem fatura — concluir é decisão de quem administra, feita pela tela (botão Concluir da OS).",
     input_schema: {
       type: "object",
       properties: {
@@ -398,7 +400,7 @@ export const fieldOpsTools: ToolDef[] = [
         ...(saida ? { saida: horaBR(saida.iso) } : {}),
         ...(relato ? { relato_gravado_nas_notas_do_tecnico: true } : {}),
         ...(material ? { material_gravado_nas_notas_internas: true } : {}),
-        lembrete: "A via não conclui nem fatura a OS — concluir é update_service_order_status.",
+        lembrete: "A via não conclui nem fatura a OS — concluir é pela tela (botão Concluir da OS).",
       };
     },
   },
@@ -459,12 +461,13 @@ export const fieldOpsTools: ToolDef[] = [
   {
     name: "check_technician_availability",
     description:
-      "Mostra a AGENDA de um técnico num dia: tarefas da agenda e OS agendadas, em ordem de horário — e avisa se um horário proposto conflita. Use antes de agendar ('dá pra encaixar o João amanhã 14h?').",
+      "Mostra a AGENDA de um técnico num dia de Brasília: tarefas da agenda e OS do dia (inclusive a OS de vários dias em curso), em ordem de horário — e avisa se um horário proposto conflita. Use antes de agendar ('dá pra encaixar o João amanhã 14h?'). " +
+      "OS de vários dias que cobre o horário proposto volta em os_de_varios_dias_no_horario, com aviso e livre = null: a agenda ainda não sabe os turnos dele nela — pergunte antes de encaixar.",
     input_schema: {
       type: "object",
       properties: {
         technician_user_id: { type: "string", description: "UUID do técnico (use list_technicians)." },
-        date: { type: "string", description: "Dia a consultar (YYYY-MM-DD). Padrão: hoje." },
+        date: { type: "string", description: "Dia a consultar (YYYY-MM-DD). Padrão: o dia do horário proposto, ou hoje." },
         proposed_start: { type: "string", description: "Horário proposto (ISO) para checar conflito, opcional." },
         proposed_end: { type: "string", description: "Fim do horário proposto (ISO), opcional." },
       },
@@ -472,55 +475,75 @@ export const fieldOpsTools: ToolDef[] = [
     },
     risk: "low",
     async execute(args, { sb }) {
-      const dia = String(args.date || new Date().toISOString().slice(0, 10));
-      const ini = `${dia}T00:00:00`;
-      const fim = `${dia}T23:59:59`;
+      // O dia de Brasília (23/10/2026, D6): o dia padrão era o de UTC — depois das 21 h, "hoje" já
+      // era amanhã — e a janela T00:00:00/T23:59:59 sem fuso era lida em UTC (21 h de ontem às 21 h
+      // de hoje). Sem date vale o dia do horário proposto: "amanhã 14h" é amanhã, não hoje.
+      const { from, to, day: dia } = dayRangeBRT(args.date || args.proposed_start);
+      // Hora proposta sem fuso é hora de Brasília (fuso.ts), como nas tools que gravam.
+      const propostoIni = args.proposed_start ? String(comFusoDeBrasilia(args.proposed_start)) : null;
+      const propostoFim = args.proposed_end ? String(comFusoDeBrasilia(args.proposed_end)) : null;
 
-      const { data: tarefas } = await sb
+      // Tarefas e OS por INTERSEÇÃO com o dia (D4): a OS que começou ontem e termina amanhã também
+      // ocupa hoje. Leitura que falha sobe — engolida, a resposta dizia "livre" sem ter lido nada.
+      const { data: tarefas, error: erroTarefas } = await sb
         .from("agenda_tasks")
         .select("id, title, scheduled_start_at, scheduled_end_at, status, location")
         .eq("assignee_user_id", args.technician_user_id)
-        .gte("scheduled_start_at", ini)
-        .lte("scheduled_start_at", fim);
+        .lt("scheduled_start_at", to)
+        .or(filtroQueCruza(from));
+      if (erroTarefas) throw erroTarefas;
 
       // OS agendadas para este técnico (vínculo em service_order_technicians).
-      const { data: vinc } = await sb
+      const { data: vinc, error: erroVinc } = await sb
         .from("service_order_technicians")
         .select("service_order_id")
         .eq("user_id", args.technician_user_id);
+      if (erroVinc) throw erroVinc;
       const soIds = ((vinc as any[]) || []).map((v) => v.service_order_id).filter(Boolean);
       let oss: any[] = [];
       if (soIds.length) {
-        const { data } = await sb
+        const { data, error: erroOss } = await sb
           .from("service_orders")
           .select("id, service_order_number, scheduled_start_at, scheduled_end_at, status, clients(name)")
           .in("id", soIds)
-          .gte("scheduled_start_at", ini)
-          .lte("scheduled_start_at", fim)
+          .lt("scheduled_start_at", to)
+          .or(filtroQueCruza(from))
           .neq("status", "cancelled");
+        if (erroOss) throw erroOss;
         oss = (data as any[]) || [];
       }
 
+      const deMs = Date.parse(from), ateMs = Date.parse(to);
       const compromissos = [
         ...((tarefas as any[]) || []).map((t) => ({
           tipo: "tarefa", titulo: t.title, inicio: t.scheduled_start_at, fim: t.scheduled_end_at, status: t.status, local: t.location || null,
         })),
-        ...oss.map((o) => ({
-          tipo: "OS", titulo: `${o.service_order_number}${o.clients?.name ? ` — ${o.clients.name}` : ""}`,
-          inicio: o.scheduled_start_at, fim: o.scheduled_end_at, status: o.status, local: null,
-        })),
+        ...oss.map((o) => {
+          // A OS que passa da meia-noite (começou antes deste dia ou termina depois) é de vários dias.
+          const variosDias = Date.parse(o.scheduled_start_at) < deMs || (!!o.scheduled_end_at && Date.parse(o.scheduled_end_at) > ateMs);
+          return {
+            tipo: "OS", titulo: `${o.service_order_number}${o.clients?.name ? ` — ${o.clients.name}` : ""}`,
+            inicio: o.scheduled_start_at, fim: o.scheduled_end_at, status: o.status, local: null,
+            ...(variosDias ? { varios_dias: true } : {}),
+          };
+        }),
       ].sort((a, b) => new Date(a.inicio || 0).getTime() - new Date(b.inicio || 0).getTime());
 
-      // Conflito = sobreposição real de intervalos.
+      // Conflito = sobreposição real de intervalos. Com a OS de vários dias ele é só INFORMATIVO: a
+      // OS guarda uma janela corrida (06:00 de segunda às 18:00 de quarta), não os turnos em que o
+      // técnico está nela — dizer "ocupado às 20 h" seria inventar. Os turnos são da Fase 2.
       let conflito: any = null;
-      if (args.proposed_start) {
-        const pIni = new Date(args.proposed_start).getTime();
-        const pFim = args.proposed_end ? new Date(args.proposed_end).getTime() : pIni + 60 * 60000;
+      const variosDiasNoHorario: any[] = [];
+      if (propostoIni) {
+        const pIni = new Date(propostoIni).getTime();
+        const pFim = propostoFim ? new Date(propostoFim).getTime() : pIni + 60 * 60000;
         for (const c of compromissos) {
           const cIni = c.inicio ? new Date(c.inicio).getTime() : null;
           if (cIni === null) continue;
           const cFim = c.fim ? new Date(c.fim).getTime() : cIni + 60 * 60000;
-          if (pIni < cFim && cIni < pFim) { conflito = c; break; }
+          if (!(pIni < cFim && cIni < pFim)) continue;
+          if ((c as { varios_dias?: boolean }).varios_dias) variosDiasNoHorario.push(c);
+          else if (!conflito) conflito = c;
         }
       }
 
@@ -530,7 +553,13 @@ export const fieldOpsTools: ToolDef[] = [
         total: compromissos.length,
         horario_proposto: args.proposed_start || null,
         conflito,
-        livre: args.proposed_start ? !conflito : null,
+        livre: propostoIni ? (conflito ? false : variosDiasNoHorario.length ? null : true) : null,
+        ...(variosDiasNoHorario.length
+          ? {
+            os_de_varios_dias_no_horario: variosDiasNoHorario.map((c) => c.titulo),
+            aviso: `O técnico está numa OS de vários dias que cobre este horário (${variosDiasNoHorario.map((c) => c.titulo).join("; ")}). A agenda guarda só o início e o fim dela, sem os turnos: pergunte a quem administra se ele estará nela neste horário antes de encaixar.`,
+          }
+          : {}),
       };
     },
   },

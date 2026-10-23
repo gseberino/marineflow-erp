@@ -2,6 +2,9 @@ import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.
 import { pixEsperandoNoExtrato } from "./pix-esperando.ts";
 import { STATUS_OS_ATIVAS } from "../../service-order-status.ts";
 import { vencimentoDoOrcamento } from "../../pdf/documento.ts";
+import { diaBR, somarDiasAoDia } from "../../pdf/datas.ts";
+import { dayRangeBRT } from "./agenda.ts";
+import { filtroQueCruza } from "../../agenda-dia.ts";
 
 // Macro de LEITURA — "como estão as coisas?" numa chamada só.
 //
@@ -14,7 +17,9 @@ import { vencimentoDoOrcamento } from "../../pdf/documento.ts";
 // leitura, o catch nunca disparava e a falha virava "0" ou "nada" (02/10/2026).
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
-const isoDate = (d: Date) => d.toISOString().slice(0, 10);
+/** Dias entre dois dias de calendário ('aaaa-mm-dd'): dia não tem hora nem fuso. */
+const diasEntre = (de: string, ate: string) =>
+  Math.round((Date.parse(`${ate}T00:00:00Z`) - Date.parse(`${String(de).slice(0, 10)}T00:00:00Z`)) / 86400000);
 
 export const overviewTools: ToolDef[] = [
   {
@@ -35,7 +40,10 @@ export const overviewTools: ToolDef[] = [
       const { admin } = ctx;
 
       const now = new Date();
-      const hojeIso = isoDate(now);
+      // O dia de BRASÍLIA (23/10/2026): a função roda em UTC, e entre 21 h e meia-noite
+      // toISOString() já dava amanhã — a cobrança que vence hoje aparecia "vencida" e o "a pagar
+      // em 7 dias" andava um dia.
+      const hojeIso = diaBR(now);
       const diasParado = Number(args.stuck_days) > 0 ? Number(args.stuck_days) : 2;
 
       // ── 1. Cobranças vencidas (mesma lógica do get_delinquency_plan) ──
@@ -56,7 +64,7 @@ export const overviewTools: ToolDef[] = [
             cliente: r.clients?.name || "(sem cliente)",
             talvez_ja_pago: !!(r.client_id && esperando.has(String(r.client_id))),
             saldo: r2(Number(r.balance_amount ?? r.amount) || 0),
-            dias_atraso: Math.floor((now.getTime() - new Date(`${r.due_date}T00:00:00`).getTime()) / 86400000),
+            dias_atraso: diasEntre(r.due_date, hojeIso),
           }))
           .filter((c) => c.saldo > 0)
           .sort((a, b) => b.saldo - a.saldo);
@@ -125,16 +133,18 @@ export const overviewTools: ToolDef[] = [
         };
       } catch (e) { mensagens = { erro: (e as Error).message }; }
 
-      // ── 4. Agenda de hoje (OS com scheduled_start_at dentro do dia) ──
+      // ── 4. Agenda de hoje: OS cuja janela cruza o dia de Brasília ──
+      // Por interseção (23/10/2026, D4/D6): a OS que começou ontem e termina amanhã está em curso
+      // hoje. Antes só entrava a que COMEÇAVA hoje, e o dia era lido em UTC (T00:00:00 sem fuso).
       let agenda: Record<string, unknown> = { erro: "não consultado" };
       try {
-        const dayStart = `${hojeIso}T00:00:00`;
-        const dayEnd = `${hojeIso}T23:59:59`;
+        const { from, to } = dayRangeBRT();
         const { data: hoje, error: erro_hoje } = await admin
           .from("service_orders")
-          .select("service_order_number, scheduled_start_at, status, clients(name)")
-          .gte("scheduled_start_at", dayStart)
-          .lte("scheduled_start_at", dayEnd)
+          .select("service_order_number, scheduled_start_at, scheduled_end_at, status, clients(name)")
+          .lt("scheduled_start_at", to)
+          .or(filtroQueCruza(from))
+          .neq("status", "cancelled")
           .order("scheduled_start_at", { ascending: true })
           .limit(30);
         if (erro_hoje) throw erro_hoje;
@@ -144,6 +154,8 @@ export const overviewTools: ToolDef[] = [
             numero: o.service_order_number,
             cliente: o.clients?.name || null,
             inicio: o.scheduled_start_at,
+            fim: o.scheduled_end_at ?? null,
+            ...(Date.parse(o.scheduled_start_at) < Date.parse(from) ? { em_curso_desde_antes_de_hoje: true } : {}),
             status: o.status,
           })),
         };
@@ -152,7 +164,7 @@ export const overviewTools: ToolDef[] = [
       // ── 5. Contas a pagar dos próximos 7 dias (total) ──
       let contas_a_pagar: Record<string, unknown> = { erro: "não consultado" };
       try {
-        const em7 = isoDate(new Date(now.getTime() + 7 * 86400000));
+        const em7 = somarDiasAoDia(hojeIso, 7);
         const { data: pag, error: erro_pag } = await admin
           .from("payables")
           .select("amount, balance_amount, due_date")

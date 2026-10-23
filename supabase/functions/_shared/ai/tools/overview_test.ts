@@ -1,4 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import { overviewTools } from "./overview.ts";
 
 // Mock leve do client Supabase: um query-builder encadeável que ignora os filtros
@@ -121,4 +122,79 @@ Deno.test("best-effort: um bloco que falha não derruba os outros", async () => 
   const out: any = await tool.execute({}, ctx(admin));
   assertEquals(typeof out.cobrancas_vencidas.erro, "string"); // falhou, mas capturado
   assertEquals(out.contas_a_pagar_7d.total, 300); // os outros seguem
+});
+
+// ───────── O dia de Brasília e a OS em curso (Agenda de Produção, Fase 0, 23/10/2026: D4/D6) ─────────
+// A função roda em UTC: entre 21 h e meia-noite de Brasília, toISOString() já dava amanhã. A cobrança
+// que vence HOJE aparecia "vencida", o "a pagar em 7 dias" andava um dia e a "agenda de hoje" lia o
+// dia em UTC e só pela data de início — a OS que começou ontem e termina amanhã não aparecia.
+
+/** Builder que GRAVA cada chamada (para conferir o filtro montado) e responde pela função dada. */
+function adminQueGrava(responder: (tabela: string, chamadas: Array<[string, unknown[]]>) => unknown[]) {
+  const porTabela: Record<string, Array<Array<[string, unknown[]]>>> = {};
+  return {
+    porTabela,
+    admin: {
+      from(tabela: string) {
+        const chamadas: Array<[string, unknown[]]> = [];
+        (porTabela[tabela] ??= []).push(chamadas);
+        const b: Record<string, unknown> = {};
+        for (const m of ["select", "eq", "neq", "in", "not", "lt", "lte", "gt", "gte", "or", "order", "limit", "range"]) {
+          b[m] = (...a: unknown[]) => { chamadas.push([m, a]); return b; };
+        }
+        b.then = (ok: (v: unknown) => unknown) => Promise.resolve({ data: responder(tabela, chamadas), error: null }).then(ok);
+        return b;
+      },
+      rpc: () => Promise.resolve({ data: [], error: null }),
+    },
+  };
+}
+
+const usou = (chamadas: Array<[string, unknown[]]>, metodo: string) => chamadas.filter(([m]) => m === metodo).map(([, a]) => a);
+
+Deno.test("às 22:00 de Brasília, 'vencidas' e 'a pagar 7 d' usam o dia de HOJE em Brasília", async () => {
+  // 23/10/2026 22:00 em Brasília = 24/10 01:00 UTC.
+  const relogio = new FakeTime(new Date("2026-10-24T01:00:00Z"));
+  try {
+    const { admin, porTabela } = adminQueGrava((tabela) =>
+      tabela === "receivables"
+        ? [{ amount: 100, balance_amount: 100, due_date: "2026-10-22", client_id: null, clients: { name: "A" } }]
+        : []
+    );
+    const out: any = await tool.execute({}, ctx(admin));
+    assertEquals(out.data, "2026-10-23");
+    assertEquals(usou(porTabela.receivables[0], "lt"), [["due_date", "2026-10-23"]]);
+    // Venceu ontem (22/10): 1 dia de atraso, não 2.
+    assertEquals(out.cobrancas_vencidas.topo[0].dias_atraso, 1);
+    assertEquals(usou(porTabela.payables[0], "lte"), [["due_date", "2026-10-30"]]);
+  } finally {
+    relogio.restore();
+  }
+});
+
+Deno.test("a agenda de hoje inclui a OS em curso (começou ontem, termina amanhã), pelo dia de Brasília", async () => {
+  const relogio = new FakeTime(new Date("2026-10-24T01:00:00Z"));
+  try {
+    const emCurso = {
+      service_order_number: "OS-00104", status: "in_progress", clients: { name: "Nelson" },
+      scheduled_start_at: "2026-10-22T11:00:00.000Z", scheduled_end_at: "2026-10-24T21:00:00.000Z",
+    };
+    // Só a leitura da agenda (a que usa o .or da interseção) devolve a OS.
+    const { admin, porTabela } = adminQueGrava((tabela, chamadas) =>
+      tabela === "service_orders" && usou(chamadas, "or").length ? [emCurso] : []
+    );
+    const out: any = await tool.execute({}, ctx(admin));
+    const leituraDaAgenda = porTabela.service_orders.find((c) => usou(c, "or").length)!;
+    assertEquals(usou(leituraDaAgenda, "lt"), [["scheduled_start_at", "2026-10-24T03:00:00.000Z"]]);
+    assertEquals(usou(leituraDaAgenda, "or"), [[
+      "scheduled_end_at.gte.2026-10-23T03:00:00.000Z,and(scheduled_end_at.is.null,scheduled_start_at.gte.2026-10-23T03:00:00.000Z)",
+    ]]);
+    assertEquals(usou(leituraDaAgenda, "gte"), []);
+    assertEquals(out.agenda_hoje.quantidade, 1);
+    assertEquals(out.agenda_hoje.itens[0].numero, "OS-00104");
+    assertEquals(out.agenda_hoje.itens[0].fim, "2026-10-24T21:00:00.000Z");
+    assertEquals(out.agenda_hoje.itens[0].em_curso_desde_antes_de_hoje, true);
+  } finally {
+    relogio.restore();
+  }
 });

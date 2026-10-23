@@ -5,7 +5,7 @@ import { recalcularOSComCascata } from "../../receivables/cascata.ts";
 import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
 import { acharOS } from "./os-referencia.ts";
 import { ehErro } from "./caixa.ts";
-import { ROTULOS_STATUS_OS, STATUS_OS } from "../../service-order-status.ts";
+import { ROTULOS_STATUS_OS, STATUS_OS, statusAoAgendar, type StatusOS } from "../../service-order-status.ts";
 
 /**
  * Recalcula os totais da OS após inserir/alterar item — best-effort, não deve derrubar a
@@ -346,6 +346,49 @@ export async function adicionarPecaNaOS(
   return { ok: true, part: data, preco_unitario: precoUnit, preco_origem: precoOrigem, preco_data: precoData };
 }
 
+/**
+ * O que update_service_order_status recusa, com o caminho certo (D7, Agenda de Produção, Fase 0,
+ * 23/10/2026). null = pode seguir.
+ *
+ * A tool fazia um UPDATE cru do status. Concluir por ela pulava o que a tela faz junto
+ * (use-service-orders.ts: grava a saída em check_out_at e lança as cobranças da conclusão, uma por
+ * parcela) — a OS ficava "Concluída" sem nada a receber. Cancelar pulava o estorno de estoque,
+ * cobranças e pagamentos que cancel_service_order faz (a tela também recusa: "Use o botão
+ * Cancelar OS"). Concluir pelo assistente volta com a porta única de status (Fase 3).
+ */
+export function recusaDoStatusPeloAssistente(status: unknown): { error: string; caminho: string } | null {
+  if (status === "completed") {
+    return {
+      error: "Concluir a OS é pela tela (abra a OS e use Concluir): é a tela que grava a saída e lança as cobranças da conclusão. Pelo assistente isso volta quando a porta única de status existir.",
+      caminho: "tela: botão Concluir da OS",
+    };
+  }
+  if (status === "cancelled") {
+    return {
+      error: "Cancelar é com cancel_service_order: ele estorna estoque, cobranças e pagamentos.",
+      caminho: "cancel_service_order",
+    };
+  }
+  return null;
+}
+
+/**
+ * Vincula o técnico à OS (service_order_technicians). Devolve o aviso para a resposta, ou null.
+ *
+ * D8b (23/10/2026): schedule_service_order e approve_quote_full faziam
+ * `.upsert(...).catch(() => null)`. O builder do PostgREST não tem `.catch` (só `.then`), então a
+ * linha lançava TypeError depois de a data e o status já estarem gravados, e o técnico nunca era
+ * vinculado. Aqui o erro vem em { error } e vira aviso: a data já está gravada, não se desfaz.
+ */
+export async function vincularTecnico(sb: any, serviceOrderId: string, technicianUserId: string): Promise<string | null> {
+  const { error } = await sb
+    .from("service_order_technicians")
+    .upsert({ service_order_id: serviceOrderId, user_id: technicianUserId }, { onConflict: "service_order_id,user_id" });
+  return error
+    ? `A data foi gravada, mas o técnico não ficou vinculado à OS (${error.message ?? "erro ao gravar"}). Vincule pela tela da OS ou tente de novo.`
+    : null;
+}
+
 export const serviceOrderTools: ToolDef[] = [
   {
     name: "list_service_orders",
@@ -631,62 +674,59 @@ export const serviceOrderTools: ToolDef[] = [
   {
     name: "update_service_order_status",
     description:
-      "Altera o status de uma OS/orçamento. IMPORTANTE: ao aprovar um orçamento (draft → outro status), o sistema automaticamente renomeia o número de ORÇ-XXXXX para OS-XXXXX.",
+      "Altera o status de uma OS/orçamento. IMPORTANTE: ao aprovar um orçamento (draft → outro status), o sistema automaticamente renomeia o número de ORÇ-XXXXX para OS-XXXXX. " +
+      "O que ela NÃO faz: NÃO conclui (concluir é pela tela, no botão Concluir da OS, que grava a saída e lança as cobranças da conclusão), NÃO cancela (cancelar é cancel_service_order, que estorna estoque, cobranças e pagamentos) e NÃO fatura OS que ainda não foi concluída. Pedir completed ou cancelled aqui é recusado.",
     input_schema: {
       type: "object",
       properties: {
         id: { type: "string", description: "UUID da OS/orçamento" },
         // Mesma fonte do prompt e do CHECK do banco: pending/waiting_parts/waiting_approval/reopened
         // eram recusados com 23514, e awaiting_parts/awaiting_client faltavam (11/10/2026).
+        // completed e cancelled continuam na lista (é a lista do banco) e o execute os recusa com o
+        // caminho certo — fora do enum, o modelo receberia só "aceita só: …", sem saber para onde ir.
         status: {
           type: "string",
           enum: [...STATUS_OS],
           description:
             "Novo status. " + STATUS_OS.map((s) => `'${s}'=${ROTULOS_STATUS_OS[s]}`).join(", ") +
-            ". Aguardando aprovação/sinal é situação do orçamento (quote_status) → use update_quote_status.",
+            ". Aguardando aprovação/sinal é situação do orçamento (quote_status) → use update_quote_status. completed e cancelled são recusados (ver a descrição da ferramenta).",
         },
-        cancellation_reason: { type: "string", description: "Motivo do cancelamento (quando status=cancelled)" },
+        // Fica no esquema para o pedido de cancelar chegar à recusa que aponta cancel_service_order
+        // (sem ele, a rede recusaria por "campo que não existe"). Não é gravado.
+        cancellation_reason: { type: "string", description: "Não usado: cancelar é cancel_service_order (o motivo vai no reason dela)." },
       },
       required: ["id", "status"],
     },
     risk: "low",
-    async execute(args, { sb, admin, settings }) {
-      const { data: current } = await sb
+    // Recusa antes de a pendência nascer (quando a tool chega pela rede e pede o "sim"): o dono não
+    // aprova uma conclusão que a execução vai recusar.
+    preValidar: (args) => recusaDoStatusPeloAssistente(args?.status),
+    async execute(args, { sb, admin }) {
+      // D7 (Agenda de Produção, Fase 0, 23/10/2026): a mesma recusa do preValidar (defesa dupla —
+      // no perfil a tool é low e roda direto, sem passar pelo preValidar).
+      const recusa = recusaDoStatusPeloAssistente(args.status);
+      if (recusa) return recusa;
+
+      const { data: current, error: erroAtual } = await sb
         .from("service_orders")
         .select("status, service_order_number")
         .eq("id", args.id)
         .maybeSingle();
+      if (erroAtual) throw erroAtual;
 
-      // D11 (dono, 17/09/2026): concluir exige levantamento respondido nos serviços marcados
-      // "exige levantamento" — a mesma trava do botão da tela, para o agente não passar por
-      // fora dela.
-      // O portão do levantamento só vale com o levantamento à vista (chave roteiro_execucao_visivel,
-      // 05/10/2026): escondido, ele travaria a conclusão sem ter como responder.
-      if (args.status === "completed" && String(settings?.roteiro_execucao_visivel ?? "").trim().toLowerCase() === "true") {
-        const { data: linhas } = await sb
-          .from("service_order_services")
-          .select("service_id, name_snapshot, services!inner(requires_survey)")
-          .eq("service_order_id", args.id);
-        const exigem = ((linhas ?? []) as any[]).filter((l) => l.services?.requires_survey);
-        if (exigem.length > 0) {
-          const { data: fechados } = await sb
-            .from("service_surveys")
-            .select("service_id")
-            .eq("service_order_id", args.id)
-            .eq("status", "closed");
-          const ok = new Set(((fechados ?? []) as any[]).map((s) => String(s.service_id)));
-          const pendentes = exigem.filter((l) => !ok.has(String(l.service_id))).map((l) => l.name_snapshot);
-          if (pendentes.length > 0) {
-            return {
-              error: `Não dá para concluir: falta responder o levantamento de ${pendentes.join(", ")} (marcados como "exige levantamento"). Responda o levantamento na aba Levantamento da OS antes de concluir.`,
-              levantamentos_pendentes: pendentes,
-            };
-          }
-        }
+      // Faturar é o passo DEPOIS de concluir: faturada sem conclusão pularia a saída e as cobranças
+      // da conclusão do mesmo jeito.
+      if (args.status === "invoiced" && current && current.status !== "completed") {
+        return {
+          error: `Faturar vem depois de concluir, e a ${current.service_order_number ?? "OS"} está ${ROTULOS_STATUS_OS[current.status as keyof typeof ROTULOS_STATUS_OS] ?? current.status}. Conclua pela tela (abra a OS e use Concluir) e fature depois.`,
+        };
       }
 
+      // A trava do levantamento (D11, dono, 17/09/2026: concluir exige o levantamento respondido)
+      // morava aqui e ficou só na tela, que agora é o único caminho de concluir. A porta única de
+      // status (Fase 3) a traz de volta junto com a conclusão.
+
       const updatePayload: Record<string, any> = { status: args.status };
-      if (args.cancellation_reason) updatePayload.cancellation_reason = args.cancellation_reason;
 
       if (current?.status === "draft" && args.status !== "draft") {
         try {
@@ -963,14 +1003,15 @@ export const serviceOrderTools: ToolDef[] = [
   },
   {
     name: "schedule_service_order",
-    description: "Agenda uma OS definindo data/hora de início, fim e técnico responsável.",
+    description:
+      "Agenda uma OS definindo data/hora de início, fim e técnico responsável (opcional). Só põe Agendada a OS aprovada ou aberta: não muda o status de OS em andamento, aguardando peça ou cliente, nem de orçamento — grava a data e o status fica como está. OS concluída, faturada ou cancelada não se agenda.",
     input_schema: {
       type: "object",
       properties: {
         service_order_id: { type: "string" },
         scheduled_start_at: { type: "string", description: "ISO datetime" },
         scheduled_end_at: { type: "string", description: "ISO datetime" },
-        technician_user_id: { type: "string" },
+        technician_user_id: { type: "string", description: "Opcional. Sem técnico a OS também é agendada." },
       },
       required: ["service_order_id", "scheduled_start_at"],
     },
@@ -978,6 +1019,24 @@ export const serviceOrderTools: ToolDef[] = [
     async execute(argsCrus, { sb }) {
       // Hora sem fuso vira hora de Brasília (fuso.ts): 09:00 não pode virar 06:00.
       const args = horariosDeBrasilia(argsCrus);
+
+      // D8 (Agenda de Produção, Fase 0, 23/10/2026): o status ao agendar é a regra única dos três
+      // caminhos (statusAoAgendar). Até aqui, com técnico, a tool forçava 'scheduled' por cima de
+      // qualquer status — uma OS aguardando peça ou já em andamento voltava a "Agendada".
+      const { data: atual, error: erroAtual } = await sb
+        .from("service_orders")
+        .select("status, service_order_number")
+        .eq("id", args.service_order_id)
+        .maybeSingle();
+      if (erroAtual) throw erroAtual;
+      if (!atual) return { error: "OS não encontrada." };
+      let novoStatus: string | null;
+      try {
+        novoStatus = statusAoAgendar(String(atual.status));
+      } catch (e) {
+        return { error: `${(e as Error).message} A ${atual.service_order_number ?? "OS"} não foi agendada.` };
+      }
+
       // Conflito de agenda (tarefas + OS) via RPC única — mesma checagem da UI
       if (args.technician_user_id && args.scheduled_end_at) {
         const { data: confl } = await sb.rpc("get_agenda_conflicts", {
@@ -996,20 +1055,29 @@ export const serviceOrderTools: ToolDef[] = [
       }
       const update: any = { scheduled_start_at: args.scheduled_start_at };
       if (args.scheduled_end_at) update.scheduled_end_at = args.scheduled_end_at;
-      if (args.technician_user_id) update.status = "scheduled";
+      // O status independe do técnico: só muda se a regra mandar (aprovada/aberta → agendada).
+      if (novoStatus) update.status = novoStatus;
       const { data, error } = await sb.from("service_orders").update(update).eq("id", args.service_order_id).select().single();
       if (error) throw error;
-      if (args.technician_user_id) {
-        await sb
-          .from("service_order_technicians")
-          .upsert({ service_order_id: args.service_order_id, user_id: args.technician_user_id }, { onConflict: "service_order_id,user_id" })
-          .catch(() => null);
-      }
+      // D8b: o builder do PostgREST não tem .catch() — o `.upsert(...).catch(() => null)` de antes
+      // lançava TypeError DEPOIS de gravar a data e o status, e o técnico nunca era vinculado. O erro
+      // vem em { error }; aqui ele vira aviso, porque a data já está gravada.
+      const aviso_tecnico = args.technician_user_id ? await vincularTecnico(sb, args.service_order_id, args.technician_user_id) : null;
       let aviso_carga: string | null = null;
       if (args.technician_user_id && args.scheduled_end_at) {
         aviso_carga = await dayOverloadNotice(sb, args.technician_user_id, args.scheduled_start_at, args.scheduled_end_at, { excludeSo: args.service_order_id });
       }
-      return { ok: true, service_order: data, ...(aviso_carga ? { aviso_carga } : {}) };
+      const ficou = String(data?.status ?? novoStatus ?? atual.status);
+      return {
+        ok: true,
+        service_order: data,
+        status_da_os: ROTULOS_STATUS_OS[ficou as StatusOS] ?? ficou,
+        ...(!novoStatus && atual.status !== "scheduled"
+          ? { nota_status: `A data foi gravada e a OS continua ${ROTULOS_STATUS_OS[atual.status as StatusOS] ?? atual.status}: agendar não muda o status de OS em andamento, aguardando peça ou cliente, nem de orçamento.` }
+          : {}),
+        ...(aviso_tecnico ? { aviso_tecnico } : {}),
+        ...(aviso_carga ? { aviso_carga } : {}),
+      };
     },
   },
   {

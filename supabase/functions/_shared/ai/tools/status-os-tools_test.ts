@@ -95,3 +95,81 @@ Deno.test("ficha 360: OS aguardando cliente conta como em andamento", async () =
   const r = await ficha.execute({ client_id: "c1" }, { sb, admin: sb, userRole: "admin", userId: "u1" } as never) as Record<string, any>;
   assertEquals(r.os_em_andamento.map((o: any) => o.numero), ["OS-1", "OS-2"]);
 });
+
+// ───────── D7 (Agenda de Produção, Fase 0, 23/10/2026): o assistente não conclui nem cancela por fora ─────────
+// update_service_order_status fazia um UPDATE cru: concluir por ela deixava a OS "Concluída" sem a
+// saída (check_out_at) e sem as cobranças da conclusão que a tela lança; cancelar pulava o estorno
+// de estoque, cobranças e pagamentos do cancel_service_order. Agora recusa e indica o caminho.
+
+const mudarStatus = serviceOrderTools.find((t) => t.name === "update_service_order_status")!;
+
+/** service_orders falso: a leitura do status atual e o update, gravados. Sem .catch, como o real. */
+function osFalsa(statusAtual: string) {
+  const updates: Record<string, unknown>[] = [];
+  let leituras = 0;
+  const from = () => {
+    let upd: Record<string, unknown> | null = null;
+    const b: Record<string, unknown> = {};
+    for (const m of ["select", "eq", "maybeSingle", "single"]) b[m] = () => b;
+    b.update = (p: Record<string, unknown>) => { upd = p; updates.push(p); return b; };
+    b.then = (ok: (v: unknown) => unknown) => {
+      if (!upd) leituras++;
+      const data = upd ? { id: "so1", ...upd } : { status: statusAtual, service_order_number: "OS-00104" };
+      return Promise.resolve({ data, error: null }).then(ok);
+    };
+    return b;
+  };
+  const sb = { from };
+  const admin = { rpc: () => Promise.resolve({ data: 120, error: null }) };
+  return { ctx: { sb, admin, settings: {} } as never, updates, leituras: () => leituras };
+}
+
+Deno.test("D7: preValidar recusa concluir (manda para a tela) e cancelar (manda para cancel_service_order)", () => {
+  const concluir = mudarStatus.preValidar!({ id: "so1", status: "completed" }, {} as never)!;
+  assertMatch(concluir.error, /Concluir a OS é pela tela \(abra a OS e use Concluir\)/);
+  assertMatch(concluir.error, /grava a saída e lança as cobranças da conclusão/);
+  const cancelar = mudarStatus.preValidar!({ id: "so1", status: "cancelled", cancellation_reason: "desistiu" }, {} as never)!;
+  assertMatch(cancelar.error, /cancel_service_order/);
+  assertMatch(cancelar.error, /estorna estoque, cobranças e pagamentos/);
+  assertEquals(mudarStatus.preValidar!({ id: "so1", status: "awaiting_parts" }, {} as never), null);
+  assertEquals(mudarStatus.preValidar!({ id: "so1", status: "in_progress" }, {} as never), null);
+});
+
+Deno.test("D7: execute repete a recusa (no perfil a tool é low e roda sem o preValidar) e não toca no banco", async () => {
+  for (const status of ["completed", "cancelled"]) {
+    const os = osFalsa("in_progress");
+    const r = await mudarStatus.execute({ id: "so1", status }, os.ctx) as Record<string, any>;
+    assertMatch(String(r.error), status === "completed" ? /pela tela/ : /cancel_service_order/);
+    assertEquals(os.updates, [], status);
+    assertEquals(os.leituras(), 0, `${status}: recusa antes de ler`);
+  }
+});
+
+Deno.test("D7: faturar OS que não foi concluída é recusado; concluída pode faturar", async () => {
+  const emAndamento = osFalsa("in_progress");
+  const r = await mudarStatus.execute({ id: "so1", status: "invoiced" }, emAndamento.ctx) as Record<string, any>;
+  assertMatch(String(r.error), /Faturar vem depois de concluir/);
+  assertMatch(String(r.error), /Em andamento/);
+  assertEquals(emAndamento.updates, []);
+
+  const concluida = osFalsa("completed");
+  const ok = await mudarStatus.execute({ id: "so1", status: "invoiced" }, concluida.ctx) as Record<string, any>;
+  assertEquals(ok.ok, true);
+  assertEquals(concluida.updates, [{ status: "invoiced" }]);
+});
+
+Deno.test("D7: os status de trabalho seguem passando (aguardando peça, cliente, em andamento)", async () => {
+  for (const status of ["awaiting_parts", "awaiting_client", "in_progress"]) {
+    const os = osFalsa("scheduled");
+    const r = await mudarStatus.execute({ id: "so1", status }, os.ctx) as Record<string, any>;
+    assertEquals(r.ok, true, status);
+    assertEquals(os.updates, [{ status }], status);
+  }
+});
+
+Deno.test("D7: a descrição diz o que a tool NÃO faz, e o enum continua sendo a lista do banco", () => {
+  assertMatch(mudarStatus.description, /NÃO conclui/);
+  assertMatch(mudarStatus.description, /NÃO cancela/);
+  assertMatch(mudarStatus.description, /cancel_service_order/);
+  assertEquals(ordenado((mudarStatus.input_schema as any).properties.status.enum), ordenado(STATUS_OS));
+});

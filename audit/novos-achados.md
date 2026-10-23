@@ -2540,3 +2540,31 @@ porque só o dono pode preenchê-las.
 - **Consertar seria:** acrescentar `open` (e tirar `reopened`) à lista, recalcular as reservas de
   todos os produtos numa migration e conferir com `f16`/`f06` que nenhuma falta nova aparece sem
   motivo.
+
+### [NOVO-agenda-02] `.upsert(...).catch(() => null)`: o técnico nunca era vinculado ao agendar pelo assistente (D8b)
+
+- **Encontrado em:** Agenda de Produção, Fase 0 (conferência de 23/10/2026, base 5455f7e5).
+- **Onde:** `schedule_service_order` (`supabase/functions/_shared/ai/tools/service-orders.ts`, antigo
+  `:1003-1006`) e `approve_quote_full`, passo 3 (`flow-macros.ts`, antigo `:202-204`).
+- **O quê:** o builder do PostgREST só implementa `.then` (é PromiseLike): não tem `.catch`. Provado
+  com `deno eval` no `supabase-js@2.45.0` da edge e no postgrest-js do node_modules, os dois com
+  `typeof b.catch === 'undefined'`. Com técnico, a tool gravava a data e o status e depois lançava
+  `TypeError: ... .catch is not a function`: o vínculo em `service_order_technicians` nunca era
+  gravado, o assistente recebia "falhou" de algo que já estava meio feito, e no `approve_quote_full`
+  o passo saía "agendamento ✖" com o status já forçado.
+- **Corrigido no P2 da Fase 0:** `vincularTecnico` (`service-orders.ts`) lê o `{ error }` do upsert e
+  devolve um aviso (`aviso_tecnico` na tool, `aviso` no passo, que fica ✔). Testes com banco falso
+  sem `.catch`, como o real: `field-ops-agenda_test.ts` e `flow-macros_test.ts`.
+
+### [NOVO-agenda-03] "Hoje" do `get_situation_overview` em UTC: depois das 21 h, a cobrança de hoje já era "vencida"
+
+- **Encontrado em:** Agenda de Produção, Fase 0 (conferência de 23/10/2026, base 5455f7e5).
+- **Onde:** `supabase/functions/_shared/ai/tools/overview.ts` (antigo `:17,38,155`): `hojeIso` e `em7`
+  saíam de `toISOString().slice(0, 10)`.
+- **O quê:** a Edge Function roda em UTC. Entre 21 h e meia-noite de Brasília o "hoje" já era
+  amanhã: a cobrança que vence hoje entrava em "cobranças vencidas" (com um dia de atraso a mais),
+  e o "a pagar em 7 dias" andava um dia. Junto com o D6: a "agenda de hoje" do mesmo panorama lia o
+  dia em UTC (`T00:00:00` sem fuso) e só pela data de início.
+- **Corrigido no P2 da Fase 0:** `hojeIso` vem de `diaBR` (`pdf/datas.ts`), `em7` de `somarDiasAoDia`,
+  `dias_atraso` é a diferença entre dias de calendário, e a agenda de hoje usa `dayRangeBRT()` com
+  interseção (`filtroQueCruza`). Testes com `FakeTime` às 22:00 de Brasília em `overview_test.ts`.

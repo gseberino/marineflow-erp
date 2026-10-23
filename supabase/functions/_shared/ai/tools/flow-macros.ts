@@ -4,6 +4,8 @@ import { horariosDeBrasilia } from "../fuso.ts";
 import { sendWhatsapp } from "./whatsapp.ts";
 import { descreverSaldo, parcelasDoSaldo } from "./saldo-do-sinal.ts";
 import { registrarEnvioDaCobranca } from "./cobrancas.ts";
+import { vincularTecnico } from "./service-orders.ts";
+import { statusAoAgendar } from "../../service-order-status.ts";
 
 // Macros de FLUXO (Onda 2b) — "o LLM orquestra, o código executa".
 // Cada uma colapsa um procedimento de vários passos numa única tool de risco alto:
@@ -116,7 +118,7 @@ export const flowMacroTools: ToolDef[] = [
         follow_up_in_days: { type: "number", description: "Opcional: agenda um lembrete de follow-up PARA VOCÊ em N dias (às 08:00)." },
         scheduled_start_at: { type: "string", description: "Opcional: agenda a OS para esta data/hora (ISO)." },
         scheduled_end_at: { type: "string", description: "Opcional: fim do agendamento (ISO)." },
-        technician_user_id: { type: "string", description: "Opcional: técnico responsável (define status 'scheduled')." },
+        technician_user_id: { type: "string", description: "Opcional: técnico responsável. O status não depende dele: com data, a OS aprovada ou aberta passa a Agendada." },
         notes: { type: "string" },
       },
       required: ["service_order_id", "deposit_amount", "payment_date", "payment_method"],
@@ -157,7 +159,8 @@ export const flowMacroTools: ToolDef[] = [
       passos.push({ passo: "sinal+conversão", status: "✔", saldo: descreverSaldo(saldo.parcelas) });
 
       // nº atual da OS (mesma linha; ganha novo número ao converter)
-      const { data: so } = await sb.from("service_orders").select("service_order_number, client_id").eq("id", args.service_order_id).maybeSingle();
+      // O status vem junto, lido DEPOIS da conversão: é dele que o passo 3 decide se a OS vira agendada.
+      const { data: so } = await sb.from("service_orders").select("service_order_number, client_id, status").eq("id", args.service_order_id).maybeSingle();
 
       // 2) Follow-up para o próprio dono (opcional) — espelha schedule_self_reminder.
       if (Number(args.follow_up_in_days) > 0) {
@@ -192,18 +195,26 @@ export const flowMacroTools: ToolDef[] = [
       }
 
       // 3) Agendamento da OS (opcional) — espelha schedule_service_order.
+      // D8/D8b (Agenda de Produção, Fase 0, 23/10/2026): o status sai da regra única
+      // (statusAoAgendar), sobre o status lido depois da conversão, e não depende do técnico — a
+      // conversão costuma deixar a OS 'open', que agora vira 'scheduled' com ou sem técnico. O
+      // vínculo do técnico não tem mais .catch() (o builder não tem: lançava TypeError com o status
+      // já gravado e o passo saía ✖); erro nele vira aviso no passo, que fica ✔.
       if (args.scheduled_start_at) {
         try {
+          const novoStatus = statusAoAgendar(String(so?.status ?? ""));
           const update: Record<string, unknown> = { scheduled_start_at: args.scheduled_start_at };
           if (args.scheduled_end_at) update.scheduled_end_at = args.scheduled_end_at;
-          if (args.technician_user_id) update.status = "scheduled";
+          if (novoStatus) update.status = novoStatus;
           const { error: schErr } = await sb.from("service_orders").update(update).eq("id", args.service_order_id);
-          if (!schErr && args.technician_user_id) {
-            await sb.from("service_order_technicians")
-              .upsert({ service_order_id: args.service_order_id, user_id: args.technician_user_id }, { onConflict: "service_order_id,user_id" })
-              .catch(() => null);
+          if (schErr) {
+            passos.push({ passo: "agendamento", status: "✖", erro: schErr.message });
+          } else {
+            const aviso = args.technician_user_id
+              ? await vincularTecnico(sb, String(args.service_order_id), String(args.technician_user_id))
+              : null;
+            passos.push({ passo: "agendamento", status: "✔", ...(novoStatus ? { status_da_os: novoStatus } : {}), ...(aviso ? { aviso } : {}) });
           }
-          passos.push(schErr ? { passo: "agendamento", status: "✖", erro: schErr.message } : { passo: "agendamento", status: "✔" });
         } catch (e) {
           passos.push({ passo: "agendamento", status: "✖", erro: (e as Error).message });
         }

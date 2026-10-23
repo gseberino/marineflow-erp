@@ -5,7 +5,10 @@ import { supabase } from '@/integrations/supabase/client';
  * serviços marcados "exige levantamento" (services.requires_survey). Devolve os nomes dos
  * serviços que ainda não têm um levantamento fechado nesta OS — vazio = pode concluir.
  *
- * A mesma regra vive na tool update_service_order_status do agente; se mudar aqui, mude lá.
+ * Desde 23/10/2026 (D7 da Agenda de Produção) o assistente não conclui OS: a tool
+ * update_service_order_status recusa e manda concluir pela tela, então esta é a única cópia da
+ * regra. A porta única de status (Fase 3), quando trouxer a conclusão pelo assistente, traz esta
+ * regra junto.
  */
 export async function levantamentosPendentesParaConcluir(serviceOrderId: string): Promise<string[]> {
   const { data: linhas, error } = await supabase

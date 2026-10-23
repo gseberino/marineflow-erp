@@ -1,25 +1,37 @@
 import type { ToolDef } from "./registry.ts";
-import { horariosDeBrasilia } from "../fuso.ts";
+import { comFusoDeBrasilia, horariosDeBrasilia } from "../fuso.ts";
 import { parseRRule } from "../../recurrence.ts";
 import { ehTipoDeEntidadeValido, RELATED_ENTITY_TYPES } from "../../agenda-entity-types.ts";
 // LGPD (leva 8): o nome livre da conta a pagar pode trazer o CPF que o banco escreve nele — sai mascarado.
 import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
+import { diaBR, filtroQueCruza, horasNoDia, JORNADA_PADRAO_HORAS, limitesDoDiaBR } from "../../agenda-dia.ts";
 
 // Agenda & Tarefas 2.0 — tool set completo (Fase 3 do plano
 // plans/marineflow-agenda-tarefas.md §8). O agente é operador da agenda:
 // consulta, cria com vínculo/lembrete, conclui, reagenda e enxerga conflitos.
 // Fuso: America/Sao_Paulo (-03, sem DST desde 2019).
+//
+// O dia de Brasília e a OS que atravessa o dia (Agenda de Produção, Fase 0, 23/10/2026): as
+// leituras de um dia vêm de _shared/agenda-dia.ts, o mesmo módulo da tela. Uma OS de vários dias
+// aparece em todos os dias que a janela cruza (.lt do início + filtroQueCruza), e não só no dia
+// em que começa.
 
-const BRT_OFFSET = "-03:00";
-
-/** Janela [00:00, 24:00) de um dia local BRT em ISO UTC. */
+/**
+ * Janela [00:00, 24:00) de um dia de Brasília, em ISO UTC. Delega para limitesDoDiaBR.
+ *
+ * Aceita o dia ('AAAA-MM-DD') ou um horário (hora sem fuso é hora de Brasília); sem argumento,
+ * ou com um texto que não é data, é hoje em Brasília — como sempre foi.
+ */
 export function dayRangeBRT(date?: string): { from: string; to: string; day: string } {
-  const day = date && /^\d{4}-\d{2}-\d{2}$/.test(date)
-    ? date
-    : new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
-  const from = new Date(`${day}T00:00:00${BRT_OFFSET}`).toISOString();
-  const to = new Date(new Date(from).getTime() + 86400000).toISOString();
-  return { from, to, day };
+  const s = typeof date === "string" ? date.trim() : "";
+  let alvo: string | number = Date.now();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) alvo = s;
+  else if (s) {
+    const comFuso = String(comFusoDeBrasilia(s));
+    if (Number.isFinite(Date.parse(comFuso))) alvo = comFuso;
+  }
+  const { de, ate, dia } = limitesDoDiaBR(alvo);
+  return { from: de, to: ate, day: dia };
 }
 
 // ─── Valores aceitos (07/10/2026, frente operacional) ──────────────────────────────────────
@@ -290,23 +302,25 @@ async function getConflicts(sb: any, userId: string, startISO: string, endISO: s
 
 export { getConflicts };
 
-/** Sobrecarga do dia (não bloqueia — informa): horas ocupadas + novo item > 8h. */
+/**
+ * Sobrecarga do dia (não bloqueia — informa): horas ocupadas + novo item > jornada.
+ *
+ * O dia é o de BRASÍLIA em que o item começa (até 23/10/2026 era o dia UTC, e um compromisso das
+ * 22 h caía no dia seguinte). Cada item conta só a parte da janela que cai no dia, com teto na
+ * jornada (horasNoDia): uma OS de 72 h ocupa 8 h, e não 72 — o aviso disparava em toda OS longa.
+ */
 export async function dayOverloadNotice(
   sb: any, userId: string, startISO: string, endISO: string,
   excl?: { excludeTask?: string; excludeSo?: string },
 ): Promise<string | null> {
-  const day = new Date(startISO).toISOString().slice(0, 10);
-  const from = `${day}T00:00:00Z`;
-  const to = new Date(new Date(from).getTime() + 86400000).toISOString();
+  const { de, ate, dia } = limitesDoDiaBR(diaBR(new Date(startISO)));
   const { data } = await sb.rpc("get_agenda_conflicts", {
-    p_user_id: userId, p_start: from, p_end: to,
+    p_user_id: userId, p_start: de, p_end: ate,
     p_exclude_task: excl?.excludeTask ?? null, p_exclude_so: excl?.excludeSo ?? null,
   });
-  const busyMs = ((data as any[]) || []).reduce((s, c) => {
-    return s + Math.max(0, new Date(c.ends_at).getTime() - new Date(c.starts_at).getTime());
-  }, 0);
-  const totalH = (busyMs + (new Date(endISO).getTime() - new Date(startISO).getTime())) / 3600000;
-  return totalH > 8
+  const ocupadas = ((data as any[]) || []).reduce((s, c) => s + horasNoDia(c.starts_at, c.ends_at, dia), 0);
+  const totalH = ocupadas + horasNoDia(startISO, endISO, dia);
+  return totalH > JORNADA_PADRAO_HORAS
     ? `Aviso: com este item o dia do responsável fica com ${totalH.toFixed(1)}h ocupadas — considere outro dia ou avise o usuário.`
     : null;
 }
@@ -360,7 +374,7 @@ export const agendaTools: ToolDef[] = [
   {
     name: "my_agenda",
     description:
-      "Agenda consolidada de UM DIA para uma pessoa (default: quem está falando, hoje): tarefas atrasadas, tarefas com prazo no dia, compromissos e OS agendadas. Para admin/financeiro inclui também os vencimentos financeiros do dia. É a tool certa para 'minha agenda', 'o que tenho hoje/amanhã?'.",
+      "Agenda consolidada de UM DIA para uma pessoa (default: quem está falando, hoje): tarefas atrasadas, tarefas com prazo no dia, compromissos e OS do dia (inclusive a OS de vários dias que está em curso: veja inicio e fim). Para admin/financeiro inclui também os vencimentos financeiros do dia. É a tool certa para 'minha agenda', 'o que tenho hoje/amanhã?'.",
     input_schema: {
       type: "object",
       properties: {
@@ -389,10 +403,11 @@ export const agendaTools: ToolDef[] = [
       const soIds = (soLinks || []).map((l: any) => l.service_order_id);
       let osDia: any[] = [];
       if (soIds.length > 0) {
+        // A OS que atravessa o dia entra (começou antes e ainda não acabou), não só a que começa nele.
         const { data: oss } = await sb.from("service_orders")
           .select("id, service_order_number, status, scheduled_start_at, scheduled_end_at, clients(name), vessels(name)")
           .in("id", soIds)
-          .gte("scheduled_start_at", from).lt("scheduled_start_at", to)
+          .lt("scheduled_start_at", to).or(filtroQueCruza(from))
           .neq("status", "cancelled")
           .order("scheduled_start_at");
         osDia = oss || [];
@@ -765,7 +780,7 @@ export const agendaTools: ToolDef[] = [
   {
     name: "list_team_agenda",
     description:
-      "Visão da agenda da EQUIPE inteira num dia: por pessoa, os compromissos, tarefas com prazo e OS agendadas. Use para 'como está a agenda da equipe amanhã?'.",
+      "Visão da agenda da EQUIPE inteira num dia: por pessoa, os compromissos, tarefas com prazo e OS do dia (inclusive a OS de vários dias em curso). Use para 'como está a agenda da equipe amanhã?'.",
     input_schema: {
       type: "object",
       properties: {
@@ -787,9 +802,10 @@ export const agendaTools: ToolDef[] = [
         return a && a >= from && a < to && visibleTo(t, userId, userRole);
       });
 
+      // A OS que atravessa o dia entra (começou antes e ainda não acabou), não só a que começa nele.
       const { data: orders } = await sb.from("service_orders")
-        .select("id, service_order_number, scheduled_start_at, clients(name), service_order_technicians(user_id)")
-        .gte("scheduled_start_at", from).lt("scheduled_start_at", to)
+        .select("id, service_order_number, scheduled_start_at, scheduled_end_at, clients(name), service_order_technicians(user_id)")
+        .lt("scheduled_start_at", to).or(filtroQueCruza(from))
         .neq("status", "cancelled");
 
       const porPessoa = (users || []).map((u: any) => ({
@@ -799,7 +815,7 @@ export const agendaTools: ToolDef[] = [
         tarefas: dayTasks.filter((t: any) => t.assignee_user_id === u.id).map(mapTask),
         os: (orders || [])
           .filter((o: any) => (o.service_order_technicians || []).some((l: any) => l.user_id === u.id))
-          .map((o: any) => ({ numero: o.service_order_number, cliente: o.clients?.name, inicio: o.scheduled_start_at })),
+          .map((o: any) => ({ numero: o.service_order_number, cliente: o.clients?.name, inicio: o.scheduled_start_at, fim: o.scheduled_end_at })),
       })).filter((p: any) => p.tarefas.length > 0 || p.os.length > 0);
 
       const semDono = dayTasks.filter((t: any) => !t.assignee_user_id).map(mapTask);

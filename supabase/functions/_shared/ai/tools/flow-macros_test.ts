@@ -157,3 +157,71 @@ Deno.test("approve: técnico é bloqueado", async () => {
   );
   assertEquals(typeof out.error, "string");
 });
+
+// ───────── approve_quote_full, passo 3 (Agenda de Produção, Fase 0, 23/10/2026: D8/D8b) ─────────
+// O passo forçava 'scheduled' só com técnico (sem técnico, a OS convertida 'open' ficava sem
+// status de agendada) e vinculava o técnico com `.upsert(...).catch(() => null)` — o builder do
+// PostgREST não tem .catch: a linha lançava TypeError com o status já gravado e o passo saía ✖.
+// O banco falso daqui grava as chamadas e, como o real, NÃO tem .catch.
+
+function bancoQueGrava(statusDepoisDaConversao: string, erroNoVinculo: string | null = null) {
+  const updates: Record<string, unknown>[] = [];
+  const upserts: Record<string, unknown>[] = [];
+  const builders: Record<string, unknown>[] = [];
+  const from = (tabela: string) => {
+    let upd: Record<string, unknown> | null = null;
+    let ups: Record<string, unknown> | null = null;
+    const b: Record<string, unknown> = {};
+    for (const m of ["select", "eq", "in", "neq", "order", "limit", "maybeSingle", "single", "insert"]) b[m] = () => b;
+    b.update = (p: Record<string, unknown>) => { upd = p; updates.push(p); return b; };
+    b.upsert = (p: Record<string, unknown>) => { ups = p; upserts.push(p); return b; };
+    b.then = (ok: (v: unknown) => unknown) => {
+      if (ups && erroNoVinculo) return Promise.resolve({ data: null, error: { message: erroNoVinculo } }).then(ok);
+      if (tabela === "service_orders" && !upd) {
+        return Promise.resolve({ data: { service_order_number: "OS-00120", client_id: "c1", status: statusDepoisDaConversao }, error: null }).then(ok);
+      }
+      return Promise.resolve({ data: tabela === "service_orders" ? null : [], error: null }).then(ok);
+    };
+    builders.push(b);
+    return b;
+  };
+  const client = { from, rpc: () => Promise.resolve({ data: { converted: true }, error: null }) };
+  return { client, updates, upserts, builders };
+}
+
+const pedido = (extra: Record<string, unknown>) => ({
+  service_order_id: "so1", deposit_amount: 1000, payment_date: "2026-10-23", payment_method: "pix",
+  scheduled_start_at: "2026-10-27T08:00:00", ...extra,
+});
+
+const agendamento = (out: any) => out.passos.find((p: any) => p.passo === "agendamento");
+
+Deno.test("approve: OS convertida 'open' vira Agendada no passo 3, mesmo sem técnico", async () => {
+  const b = bancoQueGrava("open");
+  const out: any = await approve.execute(pedido({}), ctx(b.client));
+  assertEquals(agendamento(out).status, "✔");
+  const upd = b.updates.find((u) => "scheduled_start_at" in u)!;
+  assertEquals(upd.status, "scheduled");
+  assertEquals(upd.scheduled_start_at, "2026-10-27T08:00:00-03:00");
+  assertEquals(b.upserts, []);
+});
+
+Deno.test("approve: o status relido depois da conversão manda — OS aguardando peça não regride", async () => {
+  const b = bancoQueGrava("awaiting_parts");
+  const out: any = await approve.execute(pedido({ technician_user_id: "t1" }), ctx(b.client));
+  assertEquals(agendamento(out).status, "✔");
+  const upd = b.updates.find((u) => "scheduled_start_at" in u)!;
+  assertEquals("status" in upd, false);
+});
+
+Deno.test("approve: erro ao vincular o técnico → passo ✔ com aviso (sem TypeError; builder sem .catch)", async () => {
+  const b = bancoQueGrava("open", "duplicate key value violates unique constraint");
+  const out: any = await approve.execute(pedido({ technician_user_id: "t1" }), ctx(b.client));
+  assertEquals(b.builders.every((x) => typeof x.catch === "undefined"), true);
+  assertEquals(b.upserts, [{ service_order_id: "so1", user_id: "t1" }]);
+  const passo = agendamento(out);
+  assertEquals(passo.status, "✔");
+  assertEquals(passo.status_da_os, "scheduled");
+  assertEquals(String(passo.aviso).includes("técnico não ficou vinculado"), true);
+  assertEquals(out.ok, true);
+});
