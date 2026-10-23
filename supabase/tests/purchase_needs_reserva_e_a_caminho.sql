@@ -11,6 +11,8 @@
 --   F  OC de texto livre da própria OS aparece em items como 'on_order' (origin purchase_order, com o
 --      número da OC), sem mudar shortageCount, estimatedCost nem needsPurchase; linha toda recebida e
 --      OC cancelada não aparecem
+--   F2 a mesma linha de texto livre da própria OS em OC de 61 dias CONTINUA a caminho: o corte de idade é só
+--      do "já pedido" de catálogo (coluna conta_como_ja_pedido da view), não do que a OS espera chegar
 --   G  o caso da OS-00104 em miniatura: "Conversão…" é serviço, a falta é 0 e o compressor fica a caminho;
 --      count_purchase_shortages não acusa a OS
 --   H  free_text_is_material: Conversão… = false; Conversor DC-DC… = true; Kit de conversão… = true
@@ -175,6 +177,34 @@ begin
   insert into _resultado values ('F count_purchase_shortages segue a mesma contagem',
     public.count_purchase_shortages(array[v_e]) = jsonb_build_object(v_e::text, 1),
     public.count_purchase_shortages(array[v_e])::text);
+
+  -- F2: o "a caminho" de texto livre da própria OS não tem idade (revisão de 23/10). O corte de 60 dias
+  -- é do "já pedido" de catálogo (E2); aqui ele só esconderia o item, como a OC-00004 da OS-00104 em 12/12.
+  antes := r;
+  insert into public.purchase_orders (po_number, status, service_order_id, created_at)
+  values ('OC-TESTE-P5-7', 'draft', v_e, now() - interval '61 days') returning id into v_oc;
+  insert into public.purchase_order_items (purchase_order_id, product_id, description, quantity, received_qty, unit_cost)
+  values (v_oc, null, 'Bomba TESTE P5 (OC de 61 dias)', 1, 0, 50);
+  r := public.get_os_purchase_needs(v_e);
+  select jsonb_agg(i) into itens from jsonb_array_elements(r->'items') i
+   where i->>'origin' = 'purchase_order' and i->>'purchaseOrderNumber' = 'OC-TESTE-P5-7';
+  insert into _resultado values ('F2 texto livre de OC da OS com 61 dias continua a caminho',
+    jsonb_array_length(coalesce(itens, '[]')) = 1
+    and itens->0->>'description' = 'Bomba TESTE P5 (OC de 61 dias)'
+    and itens->0->>'status' = 'on_order'
+    and (itens->0->>'shortage')::numeric = 0
+    and (itens->0->>'onOrder')::numeric = 1,
+    coalesce(itens::text, '(nenhum)'));
+  insert into _resultado values ('F2 a OC velha da própria OS não muda falta, contagem nem custo',
+    r->'shortages' = antes->'shortages'
+    and r->'shortageCount' = antes->'shortageCount'
+    and (r->>'estimatedCost')::numeric = (antes->>'estimatedCost')::numeric
+    and jsonb_array_length(r->'items') = jsonb_array_length(antes->'items') + 1,
+    r::text);
+  insert into _resultado values ('F2 a view marca a OC de 61 dias fora do já pedido e a recente dentro',
+    (select bool_and(not v.conta_como_ja_pedido) from public.v_oc_itens_a_caminho v where v.purchase_order_id = v_oc)
+    and (select bool_and(v.conta_como_ja_pedido) from public.v_oc_itens_a_caminho v where v.po_number = 'OC-TESTE-P5-3'),
+    null);
 
   -- G: a OS-00104 em miniatura
   insert into public.purchase_orders (po_number, status, service_order_id)

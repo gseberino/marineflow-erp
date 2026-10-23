@@ -56,7 +56,12 @@ export function PurchaseNeedsDialog({
   open, onOpenChange, serviceOrderId, serviceOrderNumber, clientName,
 }: Props) {
   const navigate = useNavigate();
-  const { data: needs, isLoading } = usePurchaseNeeds(serviceOrderId, open);
+  const { data: needs, isLoading, isError, isFetching, refetch } = usePurchaseNeeds(serviceOrderId, open);
+  /* A conta não carregou (revisão de 23/10/2026). O hook lança em toda leitura com erro, mas
+     o diálogo só lia `data`: sem ela, o título caía em "Tudo disponível para executar" e a OS
+     parecia pronta porque a conta falhou (ex.: front publicado antes da view
+     v_oc_itens_a_caminho). Com um resultado anterior na mão, ele continua valendo. */
+  const falhou = isError && !needs;
   const { data: linkedQuotes } = useSOLinkedQuotes(open ? serviceOrderId : undefined);
   const createPOs = useCreatePOsFromShortages();
   const [quoteOpen, setQuoteOpen] = useState(false);
@@ -108,27 +113,47 @@ export function PurchaseNeedsDialog({
               <ShoppingCart className="h-5 w-5 text-primary" />
               {isLoading
                 ? 'Verificando o estoque…'
-                : needs?.shortageCount
-                  ? `${needs.shortageCount} ${needs.shortageCount === 1 ? 'item precisa' : 'itens precisam'} de compra`
-                  : aCaminho
-                    ? `Nada a comprar — ${aCaminho === 1 ? '1 item a caminho' : `${aCaminho} itens a caminho`}`
-                    : 'Tudo disponível para executar'}
+                : falhou
+                  ? 'Não consegui conferir o estoque'
+                  : needs?.shortageCount
+                    ? `${needs.shortageCount} ${needs.shortageCount === 1 ? 'item precisa' : 'itens precisam'} de compra`
+                    : aCaminho
+                      ? `Nada a comprar — ${aCaminho === 1 ? '1 item a caminho' : `${aCaminho} itens a caminho`}`
+                      : 'Tudo disponível para executar'}
             </DialogTitle>
             <DialogDescription>
               {serviceOrderNumber ? `${serviceOrderNumber} aprovada.` : 'Orçamento aprovado.'}{' '}
               {isLoading
                 ? 'Conferindo disponível (físico menos reservado) e o que já está pedido.'
-                : needs?.shortageCount
-                  ? 'Você pode resolver agora ou deixar para depois — a pendência não se perde.'
-                  : aCaminho
-                    ? 'O que foi pedido ainda não chegou: confira a entrega antes de agendar.'
-                    : 'Nenhuma peça em falta, nada a comprar.'}
+                : falhou
+                  ? 'A conta do que falta comprar não carregou: não dá para dizer se está tudo disponível.'
+                  : needs?.shortageCount
+                    ? 'Você pode resolver agora ou deixar para depois — a pendência não se perde.'
+                    : aCaminho
+                      ? 'O que foi pedido ainda não chegou: confira a entrega antes de agendar.'
+                      : 'Nenhuma peça em falta, nada a comprar.'}
             </DialogDescription>
           </DialogHeader>
 
           {isLoading ? (
             <div className="space-y-2">
               {[0, 1, 2].map(i => <Skeleton key={i} className="h-12 w-full" />)}
+            </div>
+          ) : falhou ? (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+              <p className="flex items-center gap-2 text-sm font-medium">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+                Confira antes de agendar ou de comprar.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2 h-7 text-xs"
+                disabled={isFetching}
+                onClick={() => refetch()}
+              >
+                {isFetching ? 'Conferindo…' : 'Tentar de novo'}
+              </Button>
             </div>
           ) : (
             <div className="space-y-4">

@@ -35,7 +35,7 @@ export function PurchaseNeedsBanner({
   serviceOrderId, serviceOrderNumber, clientName, status, isNew,
 }: Props) {
   const active = !!serviceOrderId && !isNew && !SILENT_STATUSES.has(status ?? '');
-  const { data: needs } = usePurchaseNeeds(serviceOrderId, active);
+  const { data: needs, isError, isFetching, refetch } = usePurchaseNeeds(serviceOrderId, active);
   const { data: linkedQuotes } = useSOLinkedQuotes(active ? serviceOrderId : undefined);
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -59,6 +59,21 @@ export function PurchaseNeedsBanner({
   const aCaminho = (needs?.items ?? []).filter(i => i.status === 'on_order');
 
   if (!active) return null;
+  /* A conta não carregou (revisão de 23/10/2026): sumir aqui diria "nada a comprar" sem ter lido
+     nada. Uma linha discreta, sem o vermelho da falta, e o caminho para tentar de novo. */
+  if (isError && !needs) {
+    return (
+      <section className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-dashed p-3 text-xs text-muted-foreground">
+        <span className="flex items-center gap-2">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          Não consegui conferir as compras desta OS.
+        </span>
+        <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={isFetching} onClick={() => refetch()}>
+          {isFetching ? 'Conferindo…' : 'Tentar de novo'}
+        </Button>
+      </section>
+    );
+  }
   // Sem falta, sem cotação aberta e nada a caminho: não há nada a dizer.
   if (!needs?.shortageCount && !openQuote && !aCaminho.length) return null;
 

@@ -22,7 +22,8 @@
  *
  * O que vem a caminho por OC de TEXTO LIVRE da própria OS (o compressor da OS-00104
  * na OC-00004) entra em `items` como 'on_order', com origem 'purchase_order' e falta 0
- * (`comItensACaminho`): não pede compra, mas não deixa a OS parecer pronta.
+ * (`comItensACaminho`): não pede compra, mas não deixa a OS parecer pronta. Esse não
+ * tem corte de idade: a linha não abate nada, então cortá-la só a esconderia.
  *
  * O que entra na conta (decisão do dono, 29/07/2026):
  *   • PEÇAS (service_order_parts) — product_id é NOT NULL, então sempre há catálogo;
@@ -143,7 +144,7 @@ export interface ComputeInput {
   parts: PartInput[];
   freeTextItems: FreeTextInput[];
   availability: AvailabilityInput[];
-  /** itens de OC viva (view v_oc_itens_a_caminho: draft/sent/partial, < 60 dias, OS não encerrada) */
+  /** itens de OC viva (view v_oc_itens_a_caminho com conta_como_ja_pedido: draft/sent/partial, < 60 dias, OS não encerrada) */
   onOrder: OnOrderInput[];
 }
 
@@ -303,7 +304,7 @@ export function descontarReservaDaPropriaOs(
   }));
 }
 
-/** Linha de texto livre de OC da própria OS (view v_oc_itens_a_caminho, product_id nulo). */
+/** Linha de texto livre de OC da própria OS (view v_oc_itens_a_caminho, product_id nulo, de qualquer idade). */
 export interface ItemACaminhoInput {
   purchase_order_item_id: string;
   po_number: string;

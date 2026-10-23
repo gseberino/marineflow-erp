@@ -13532,6 +13532,7 @@ export type Database = {
       }
       v_oc_itens_a_caminho: {
         Row: {
+          conta_como_ja_pedido: boolean | null
           description: string | null
           expected_date: string | null
           pendente: number | null

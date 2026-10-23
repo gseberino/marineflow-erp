@@ -1,17 +1,31 @@
 // Smoke de render da faixa e do diálogo de compras com o que vem a caminho (Agenda de Produção, Fase 0,
 // P5 — 24/10/2026). O caso é a OS-00104 depois das migrations: nada falta comprar, mas o compressor ainda
 // está na OC-00004. A faixa não pode sumir e o diálogo não pode dizer "Tudo disponível para executar".
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+//
+// Revisão de 23/10/2026: com a leitura em erro (ex.: o front publicado antes da view v_oc_itens_a_caminho),
+// o diálogo dizia "Tudo disponível para executar" e a faixa sumia. Agora os dois dizem que não conferiram.
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import type { PurchaseNeeds } from '@/lib/purchase-needs';
 
-const estado = vi.hoisted(() => ({ needs: undefined as PurchaseNeeds | undefined }));
+const estado = vi.hoisted(() => ({
+  needs: undefined as PurchaseNeeds | undefined,
+  erro: false,
+  refetch: (() => {}) as () => void,
+}));
 
 vi.mock('@/hooks/use-purchase-needs', () => ({
-  usePurchaseNeeds: () => ({ data: estado.needs, isLoading: false }),
+  usePurchaseNeeds: () => ({
+    data: estado.needs, isLoading: false, isError: estado.erro, isFetching: false, refetch: estado.refetch,
+  }),
 }));
+
+beforeEach(() => {
+  estado.erro = false;
+  estado.refetch = () => {};
+});
 vi.mock('@/hooks/use-quote-requests', () => ({ useSOLinkedQuotes: () => ({ data: [] }) }));
 vi.mock('@/hooks/use-purchase-orders', () => ({
   useCreatePOsFromShortages: () => ({ mutateAsync: async () => {}, isPending: false }),
@@ -52,6 +66,17 @@ describe('faixa de compras da OS', () => {
     );
     expect(container.textContent).toBe('');
   });
+
+  it('a conta não carregou: a faixa não some, diz que não conferiu e deixa tentar de novo', () => {
+    estado.needs = undefined;
+    estado.erro = true;
+    const refetch = vi.fn();
+    estado.refetch = refetch;
+    comRota(<PurchaseNeedsBanner serviceOrderId="os-104" serviceOrderNumber="OS-00104" status="awaiting_parts" />);
+    expect(screen.getByText('Não consegui conferir as compras desta OS.')).toBeTruthy();
+    fireEvent.click(screen.getByText('Tentar de novo'));
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('diálogo de compras', () => {
@@ -68,5 +93,19 @@ describe('diálogo de compras', () => {
     estado.needs = { ...OS104, items: [] };
     comRota(<PurchaseNeedsDialog open onOpenChange={() => {}} serviceOrderId="os-104" serviceOrderNumber="OS-00104" />);
     expect(screen.getByText('Tudo disponível para executar')).toBeTruthy();
+  });
+
+  it('a conta não carregou: NÃO diz "Tudo disponível"; diz que não conferiu e deixa tentar de novo', () => {
+    estado.needs = undefined;
+    estado.erro = true;
+    const refetch = vi.fn();
+    estado.refetch = refetch;
+    comRota(<PurchaseNeedsDialog open onOpenChange={() => {}} serviceOrderId="os-104" serviceOrderNumber="OS-00104" />);
+    expect(screen.getByText('Não consegui conferir o estoque')).toBeTruthy();
+    expect(screen.queryByText('Tudo disponível para executar')).toBeNull();
+    expect(screen.queryByText(/Nenhuma peça em falta/)).toBeNull();
+    expect(screen.queryByText(/não tem peça nem material/)).toBeNull();
+    fireEvent.click(screen.getByText('Tentar de novo'));
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });

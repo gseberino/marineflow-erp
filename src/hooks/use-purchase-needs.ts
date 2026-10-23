@@ -16,9 +16,12 @@ import {
  * sem a reserva da PRÓPRIA OS (24/10/2026), que é por isso que se lê o status dela.
  *
  * O "já pedido" e o que vem a caminho por OC de texto livre saem da view
- * `v_oc_itens_a_caminho`, a mesma que a RPC lê: OC aberta há menos de 60 dias e sem
- * OS encerrada. A regra de "OC viva" fica num lugar só (antes, aqui, toda OC
- * draft/sent/partial contava, de qualquer idade e de OS já faturada).
+ * `v_oc_itens_a_caminho`, a mesma que a RPC lê. O "já pedido" de catálogo só conta a
+ * linha com `conta_como_ja_pedido` (OC aberta há menos de 60 dias e sem OS encerrada):
+ * a regra de "OC viva" fica num lugar só (antes, aqui, toda OC draft/sent/partial
+ * contava, de qualquer idade e de OS já faturada). O que vem a caminho para a própria
+ * OS não tem idade: a linha não abate falta, e cortá-la só a esconderia (revisão de
+ * 23/10: a OC-00004 da OS-00104 sairia da conta em 12/12 com o compressor no fornecedor).
  *
  * Toda leitura com erro LANÇA: falha que vira lista vazia diria "nada a comprar".
  * A única exceção é a classificação do texto livre (ver abaixo), cuja falha mantém
@@ -49,7 +52,8 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
       .order('created_at', { ascending: true })
       .order('id', { ascending: true }),
     // O que foi pedido em OC de TEXTO LIVRE desta OS e ainda não chegou. Mesmo filtro e
-    // mesma ordem da CTE a_caminho de get_os_purchase_needs.
+    // mesma ordem da CTE a_caminho de get_os_purchase_needs — sem conta_como_ja_pedido:
+    // o rascunho de 61 dias continua sendo o que a OS espera chegar.
     supabase
       .from('v_oc_itens_a_caminho')
       .select('purchase_order_item_id, po_number, description, quantity, pendente, unit_cost')
@@ -84,10 +88,12 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
         .from('product_availability')
         .select('id, stock_quantity, reserved_quantity')
         .in('id', productIds),
-      // "Já pedido" só de OC viva: a view já filtra status, idade e OS encerrada.
+      // "Já pedido" só de OC viva: a view filtra o status, e conta_como_ja_pedido, a idade
+      // e a OS encerrada.
       supabase
         .from('v_oc_itens_a_caminho')
         .select('product_id, quantity, received_qty')
+        .eq('conta_como_ja_pedido', true)
         .in('product_id', productIds),
     ]);
     if (availRes.error) throw availRes.error;

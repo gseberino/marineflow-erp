@@ -6,7 +6,9 @@
 //  2. o status da OS é lido e a reserva da PRÓPRIA OS sai do reservado;
 //  3. leitura com erro LANÇA (lista vazia diria "nada a comprar"); só a classificação do texto livre
 //     mantém o material na conta quando falha;
-//  4. os MESMOS números de supabase/tests/purchase_needs_reserva_e_a_caminho.sql (casos A, B, D, E, G).
+//  4. os MESMOS números de supabase/tests/purchase_needs_reserva_e_a_caminho.sql (casos A, B, D, E, F2, G);
+//  5. a idade (conta_como_ja_pedido) corta só o "já pedido" de catálogo, nunca o que a própria OS espera
+//     chegar (revisão de 23/10).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Linha = Record<string, any>;
@@ -98,27 +100,38 @@ function montarBanco() {
       { id: P2, stock_quantity: 2, reserved_quantity: 2 },
       { id: P3, stock_quantity: 0, reserved_quantity: 0 },
     ],
-    // O que a VIEW devolve: a OC da OS faturada e a de 61 dias já ficaram de fora no banco.
+    // O que a VIEW devolve: toda OC draft/sent/partial. A da OS faturada (E1) e a de 61 dias (E2) vêm
+    // com conta_como_ja_pedido = false — não abatem a falta, e o hook tem de filtrar isso.
     v_oc_itens_a_caminho: [
+      {
+        purchase_order_item_id: 'poi-1', po_number: 'OC-TESTE-P5-1', service_order_id: 'F', product_id: P3,
+        description: 'TESTE P5 — Cabo 16mm', quantity: 2, received_qty: 0, pendente: 2, unit_cost: 12,
+        po_criada_em: '2026-10-24T08:58:00Z', conta_como_ja_pedido: false,
+      },
+      {
+        purchase_order_item_id: 'poi-2', po_number: 'OC-TESTE-P5-2', service_order_id: null, product_id: P3,
+        description: 'TESTE P5 — Cabo 16mm', quantity: 2, received_qty: 0, pendente: 2, unit_cost: 12,
+        po_criada_em: '2026-08-24T08:59:00Z', conta_como_ja_pedido: false,
+      },
       {
         purchase_order_item_id: 'poi-3', po_number: 'OC-TESTE-P5-3', service_order_id: null, product_id: P3,
         description: 'TESTE P5 — Cabo 16mm', quantity: 1, received_qty: 0, pendente: 1, unit_cost: 12,
-        po_criada_em: '2026-10-24T09:00:00Z',
+        po_criada_em: '2026-10-24T09:00:00Z', conta_como_ja_pedido: true,
       },
       {
         purchase_order_item_id: 'poi-4b', po_number: 'OC-TESTE-P5-4', service_order_id: 'E', product_id: null,
         description: 'Suporte TESTE P5 (já chegou)', quantity: 1, received_qty: 1, pendente: 0, unit_cost: 5,
-        po_criada_em: '2026-10-24T09:01:00Z',
+        po_criada_em: '2026-10-24T09:01:00Z', conta_como_ja_pedido: true,
       },
       {
         purchase_order_item_id: 'poi-4a', po_number: 'OC-TESTE-P5-4', service_order_id: 'E', product_id: null,
         description: 'Compressor TESTE P5', quantity: 1, received_qty: 0, pendente: 1, unit_cost: 900,
-        po_criada_em: '2026-10-24T09:01:00Z',
+        po_criada_em: '2026-10-24T09:01:00Z', conta_como_ja_pedido: true,
       },
       {
         purchase_order_item_id: 'poi-6', po_number: 'OC-TESTE-P5-6', service_order_id: 'G', product_id: null,
         description: 'Compressor 12V TESTE', quantity: 1, received_qty: 0, pendente: 1, unit_cost: 0,
-        po_criada_em: '2026-10-24T09:02:00Z',
+        po_criada_em: '2026-10-24T09:02:00Z', conta_como_ja_pedido: true,
       },
     ],
     // Se o hook voltar a ler a tabela crua, o teste acusa (ver "nunca lê purchase_order_items").
@@ -176,6 +189,30 @@ describe('fetchPurchaseNeeds — já pedido e a caminho pela view', () => {
     }]);
     // O compressor não entra em shortages nem no custo.
     expect(r.shortages.map((s) => s.sourceId)).toEqual(['e1']);
+  });
+
+  it('E1/E2: a OC de OS faturada e a de 61 dias estão na view, mas não abatem a falta da peça', async () => {
+    const r = await fetchPurchaseNeeds('E');
+    // Sem o filtro de conta_como_ja_pedido o já pedido seria 1 + 2 + 2 e a falta, 0.
+    expect(r.items.find((i) => i.origin === 'part')).toMatchObject({ onOrder: 1, shortage: 1 });
+  });
+
+  it('F2: texto livre de OC da própria OS com 61 dias continua a caminho (o corte de idade é só do já pedido)', async () => {
+    banco.tabelas.v_oc_itens_a_caminho.push({
+      purchase_order_item_id: 'poi-7', po_number: 'OC-TESTE-P5-7', service_order_id: 'E', product_id: null,
+      description: 'Bomba TESTE P5 (OC de 61 dias)', quantity: 1, received_qty: 0, pendente: 1, unit_cost: 50,
+      po_criada_em: '2026-08-24T09:03:00Z', conta_como_ja_pedido: false,
+    });
+    const r = await fetchPurchaseNeeds('E');
+    const aCaminho = r.items.filter((i) => i.origin === 'purchase_order');
+    // A ordem é a da CTE: OC mais antiga primeiro.
+    expect(aCaminho.map((i) => [i.purchaseOrderNumber, i.description, i.status, i.shortage])).toEqual([
+      ['OC-TESTE-P5-7', 'Bomba TESTE P5 (OC de 61 dias)', 'on_order', 0],
+      ['OC-TESTE-P5-4', 'Compressor TESTE P5', 'on_order', 0],
+    ]);
+    // E nada da conta de compra muda.
+    expect(r.shortageCount).toBe(1);
+    expect(r.estimatedCost).toBe(30);
   });
 
   it('G (o caso da OS-00104): conversão é serviço, falta 0, e o compressor continua a caminho', async () => {

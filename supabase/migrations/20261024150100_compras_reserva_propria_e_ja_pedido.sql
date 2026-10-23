@@ -7,12 +7,19 @@
 -- NÃO APLICADA. Este arquivo existe para revisão e espera o OK do dono.
 --
 -- O QUE MUDA:
---   1. View v_oc_itens_a_caminho: é o "já pedido" em UM lugar só. OC em draft/sent/partial, criada há
---      menos de 60 dias corridos, sem OS ou com a OS ainda viva (fora de completed/invoiced/cancelled).
+--   1. View v_oc_itens_a_caminho: o que ainda vai entregar, em UM lugar só. Traz toda linha de OC em
+--      draft/sent/partial, e a coluna conta_como_ja_pedido diz se ela abate a falta de catálogo: OC criada
+--      há menos de 60 dias corridos, sem OS ou com a OS ainda viva (fora de completed/invoiced/cancelled).
 --      Antes, toda OC aberta contava, de qualquer idade e de OS faturada: a OC-00001 (84 dias, OS-00073
 --      faturada) abateria a falta de outra OS se tivesse produto. O 60 é o dobro da maior espera aberta
 --      medida (19 d), dentro dos prazos ditos de 2 a 60 d; a Fase 1 pode levá-lo para agenda_config.
 --      A tela (src/hooks/use-purchase-needs.ts) lê a MESMA view: o número existe uma vez.
+--      POR QUE A IDADE É COLUNA E NÃO FILTRO (revisão de 23/10): o corte só é seguro no "já pedido" de
+--      catálogo, onde tirar a OC velha faz a falta voltar a aparecer. Na linha de texto livre da própria
+--      OS (item 3) ele faria o contrário: a linha tem falta 0 e não abate nada, então o corte só a
+--      esconderia. A OC-00004 (rascunho de 13/10) sairia da view em 12/12, a OS-00104 ficaria sem linha
+--      nenhuma e pareceria pronta com o compressor ainda no fornecedor. O "a caminho" da própria OS não
+--      tem idade.
 --   2. get_os_purchase_needs desconta a reserva DA PRÓPRIA OS do reservado (C1). O estoque v2 reserva a
 --      peça quando a OS é comprometida, e a conta tirava essa reserva do disponível da própria OS: com
 --      1 no físico reservado para ela mesma, a OS dizia que faltava. Agora o reservado é
@@ -35,8 +42,11 @@
 --   OS-00104 faltas 1 → 0 e 1 item a caminho; nenhuma outra OS muda (OS-00069 4, OS-00076 1, OS-00112 4,
 --   ORÇ-00083 2; as demais 0).
 --
--- ORDEM DE LIGAR: aplicar ANTES do deploy do front. O hook lê a view; sem ela o PostgREST responde 404 e a
--- faixa de compras da OS mostra erro. O agente funciona com ou sem.
+-- ORDEM DE LIGAR: aplicar ANTES de o front ir para a main e ser publicado. O hook lê a view;
+-- sem ela o PostgREST responde 404 (PGRST205) e o hook lança. Até a revisão de 23/10 esse erro era engolido
+-- pela tela: o diálogo dizia "Tudo disponível para executar" e a faixa da OS sumia. Agora o diálogo diz
+-- "Não consegui conferir o estoque" e a faixa mostra uma linha de erro; o NewQuoteRequestDialog continua
+-- abrindo com a linha em branco, sem o preenchimento automático. O agente funciona com ou sem.
 --
 -- PROVA (depois de aplicar): supabase/tests/purchase_needs_reserva_e_a_caminho.sql (begin/rollback) e
 -- supabase/tests/purchase_needs_parity.sql (regressão da fórmula pura).
@@ -61,16 +71,19 @@ select poi.id as purchase_order_item_id,
        poi.quantity,
        poi.received_qty,
        poi.unit_cost,
-       greatest(poi.quantity - coalesce(poi.received_qty, 0), 0) as pendente
+       greatest(poi.quantity - coalesce(poi.received_qty, 0), 0) as pendente,
+       -- Abate a falta de catálogo (o "já pedido")? Só OC viva: recente e sem OS encerrada. NÃO filtra a
+       -- view: o "a caminho" de texto livre da própria OS vale com qualquer idade (item 1 do cabeçalho).
+       (po.created_at >= now() - interval '60 days'          -- o único "60" do sistema (spec §2.6)
+        and (po.service_order_id is null
+             or coalesce(so.status not in ('completed', 'invoiced', 'cancelled'), false))) as conta_como_ja_pedido
   from public.purchase_order_items poi
   join public.purchase_orders po on po.id = poi.purchase_order_id
   left join public.service_orders so on so.id = po.service_order_id
- where po.status in ('draft', 'sent', 'partial')
-   and po.created_at >= now() - interval '60 days'          -- o único "60" do sistema (spec §2.6)
-   and (po.service_order_id is null or so.status not in ('completed', 'invoiced', 'cancelled'));
+ where po.status in ('draft', 'sent', 'partial');
 
 comment on view public.v_oc_itens_a_caminho is
-  'Itens de OC que ainda vao entregar: OC draft/sent/partial, criada ha menos de 60 dias, sem OS ou com a OS viva (fora de completed/invoiced/cancelled). Fonte unica do "ja pedido" de get_os_purchase_needs e de src/hooks/use-purchase-needs.ts. pendente = quantidade - recebido. security_invoker: a RLS de compras (admin/financeiro) vale para quem le.';
+  'Itens de OC que ainda vao entregar: OC draft/sent/partial, de qualquer idade. conta_como_ja_pedido = OC criada ha menos de 60 dias, sem OS ou com a OS viva (fora de completed/invoiced/cancelled): so essas abatem a falta de catalogo (o "ja pedido"). O "a caminho" de texto livre da propria OS nao corta idade. Fonte unica de get_os_purchase_needs e de src/hooks/use-purchase-needs.ts. pendente = quantidade - recebido. security_invoker: a RLS de compras (admin/financeiro) vale para quem le.';
 
 -- authenticated sai junto e volta só com select: o privilégio padrão do Supabase daria ALL a ele.
 revoke all on public.v_oc_itens_a_caminho from public, anon, authenticated;
@@ -129,16 +142,19 @@ as $function$
         left join propria pr on pr.product_id = pa.id
         where pa.id in (select sop.product_id from service_order_parts sop
                         where sop.service_order_id = p_so_id)), '[]'::jsonb),
-      -- "Já pedido" só de OC viva (v_oc_itens_a_caminho: < 60 dias e OS não encerrada).
+      -- "Já pedido" só de OC viva (conta_como_ja_pedido: < 60 dias e OS não encerrada).
       coalesce((select jsonb_agg(jsonb_build_object(
           'product_id', v.product_id, 'quantity', v.quantity, 'received_qty', v.received_qty))
         from v_oc_itens_a_caminho v
-        where v.product_id in (select sop.product_id from service_order_parts sop
+        where v.conta_como_ja_pedido
+          and v.product_id in (select sop.product_id from service_order_parts sop
                                where sop.service_order_id = p_so_id)), '[]'::jsonb)
     ) as r
   ),
   -- Linhas de texto livre de OC DESTA OS que ainda não chegaram. Entram em items como
   -- "a caminho" (shortage 0): não pedem compra, mas não deixam a OS parecer pronta.
+  -- Sem corte de idade (conta_como_ja_pedido não entra aqui): o rascunho de 61 dias
+  -- continua sendo o compressor que ainda não chegou.
   a_caminho as (
     select coalesce(jsonb_agg(jsonb_build_object(
         'sourceId', v.purchase_order_item_id, 'origin', 'purchase_order', 'productId', null,
@@ -156,7 +172,7 @@ as $function$
 $function$;
 
 comment on function public.get_os_purchase_needs(uuid) is
-  'Necessidade LIQUIDA de compra de uma OS (falta = necessario - disponivel - ja pedido). Espelha src/lib/purchase-needs.ts + src/hooks/use-purchase-needs.ts; e a via do agente de IA. Ordem deterministica por (created_at, id). Desde 24/10/2026: (1) o reservado e o de OUTRAS OS (a reserva desta sai, se o status dela reserva); (2) o ja pedido vem de v_oc_itens_a_caminho (OC viva, < 60 dias); (3) as linhas de texto livre de OC desta OS ainda nao recebidas entram em items como on_order (origin purchase_order, shortage 0), sem mudar shortages, shortageCount, estimatedCost nem needsPurchase.';
+  'Necessidade LIQUIDA de compra de uma OS (falta = necessario - disponivel - ja pedido). Espelha src/lib/purchase-needs.ts + src/hooks/use-purchase-needs.ts; e a via do agente de IA. Ordem deterministica por (created_at, id). Desde 24/10/2026: (1) o reservado e o de OUTRAS OS (a reserva desta sai, se o status dela reserva); (2) o ja pedido vem de v_oc_itens_a_caminho com conta_como_ja_pedido (OC viva, < 60 dias); (3) as linhas de texto livre de OC desta OS ainda nao recebidas, de qualquer idade, entram em items como on_order (origin purchase_order, shortage 0), sem mudar shortages, shortageCount, estimatedCost nem needsPurchase.';
 
 revoke all on function public.get_os_purchase_needs(uuid) from public, anon;
 grant execute on function public.get_os_purchase_needs(uuid) to authenticated, service_role;
