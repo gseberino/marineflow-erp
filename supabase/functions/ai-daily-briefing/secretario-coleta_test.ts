@@ -36,7 +36,7 @@ function falsoAdmin(tabelas: Record<string, Linha[]>, falhar: string[] = [], sel
         },
         // só o que a coleta usa: "col.ilike.*x*,col.ilike.*y*"
         // "col.ilike.*x*", "col.like.*x" e "col.in.(a,b)", separados por vírgula (o que a coleta usa)
-        // (23/10/2026) + "col.gte.x", "col.is.null" e "and(a,b)": o filtroQueCruza da agenda do dia
+        // (23/10/2026) + "col.gt.x", "col.gte.x", "col.is.null" e "and(a,b)": o filtroQueCruza da agenda do dia
         or: (expr: string) => {
           const regra = (s: string): (l: Linha) => boolean => {
             const e = /^and\((.*)\)$/.exec(s);
@@ -50,6 +50,8 @@ function falsoAdmin(tabelas: Record<string, Linha[]>, falhar: string[] = [], sel
             if (nulo) return (l) => (valor(l, nulo[1]) ?? null) === null;
             const ge = /^(\w+)\.gte\.(.*)$/.exec(s);
             if (ge) return (l) => valor(l, ge[1]) != null && Date.parse(String(valor(l, ge[1]))) >= Date.parse(ge[2]);
+            const gt = /^(\w+)\.gt\.(.*)$/.exec(s);
+            if (gt) return (l) => valor(l, gt[1]) != null && Date.parse(String(valor(l, gt[1]))) > Date.parse(gt[2]);
             const m = /^(\w+)\.(i?like)\.(.*)$/.exec(s)!;
             // o % do LIKE casa quebra de linha também
             const re = new RegExp(`^${m[3].replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[\\s\\S]*")}$`, m[2] === "ilike" ? "iu" : "u");

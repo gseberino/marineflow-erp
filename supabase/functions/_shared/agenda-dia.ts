@@ -128,11 +128,18 @@ export function diasDaJanela(
 
 /**
  * O texto do `.or()` do PostgREST que traz toda OS cuja janela ainda não acabou em `de`: termina
- * em `de` ou depois, ou não tem fim e começa em `de` ou depois. É SEMPRE usado junto com
+ * DEPOIS de `de`, ou não tem fim e começa em `de` ou depois. É SEMPRE usado junto com
  * `.lt('scheduled_start_at', ate)` — os dois juntos são a interseção com [de, ate).
+ *
+ * O fim é EXCLUSIVO (`gt`), como em cruzaODia, diasDaJanela e horasNoDia: a OS que termina à
+ * 00:00 exata não toca o dia que começa ali. Até a revisão de 23/10/2026 era `gte`, e essa OS
+ * entrava no dia seguinte nas leituras que não refiltram em JS (my_agenda, list_team_agenda,
+ * get_situation_overview e check_technician_availability, que ainda a marcava de vários dias),
+ * enquanto a grade e o Secretário, que refiltram, a deixavam de fora: o mesmo dia saía diferente
+ * na tela e no assistente.
  *
  * `de` é ISO (toISOString), que não tem vírgula: não precisa de aspas nem do orContem.
  */
 export function filtroQueCruza(de: string): string {
-  return `scheduled_end_at.gte.${de},and(scheduled_end_at.is.null,scheduled_start_at.gte.${de})`;
+  return `scheduled_end_at.gt.${de},and(scheduled_end_at.is.null,scheduled_start_at.gte.${de})`;
 }

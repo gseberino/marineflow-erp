@@ -65,9 +65,10 @@ function bancoFalso(tabelas: Record<string, Responder>, rpcs: Record<string, (p:
 const tem = (chamadas: Chamada[], metodo: string) => chamadas.some((c) => c.metodo === metodo);
 const args = (chamadas: Chamada[], metodo: string) => chamadas.filter((c) => c.metodo === metodo).map((c) => c.args);
 
-/** O .or() esperado para "a janela ainda não acabou em `de`", escrito à mão: confere as colunas. */
+/** O .or() esperado para "a janela ainda não acabou em `de`", escrito à mão: confere as colunas.
+ *  O fim é exclusivo (gt): a OS que termina à 00:00 não toca o dia seguinte (revisão de 23/10). */
 const orEsperado = (de: string) =>
-  `scheduled_end_at.gte.${de},and(scheduled_end_at.is.null,scheduled_start_at.gte.${de})`;
+  `scheduled_end_at.gt.${de},and(scheduled_end_at.is.null,scheduled_start_at.gte.${de})`;
 
 const agendar = serviceOrderTools.find((t) => t.name === "schedule_service_order")!;
 const disponibilidade = fieldOpsTools.find((t) => t.name === "check_technician_availability")!;

@@ -122,8 +122,44 @@ Deno.test("filtroQueCruza: o .or() do PostgREST, para usar com .lt('scheduled_st
   const de = "2026-10-05T03:00:00.000Z";
   assertEquals(
     filtroQueCruza(de),
-    "scheduled_end_at.gte.2026-10-05T03:00:00.000Z,and(scheduled_end_at.is.null,scheduled_start_at.gte.2026-10-05T03:00:00.000Z)",
+    "scheduled_end_at.gt.2026-10-05T03:00:00.000Z,and(scheduled_end_at.is.null,scheduled_start_at.gte.2026-10-05T03:00:00.000Z)",
   );
   // ISO não tem vírgula: o texto não precisa de aspas.
   assertEquals(de.includes(","), false);
+});
+
+// Revisão de 23/10/2026: o filtro tratava o fim como inclusivo (gte) e o resto do módulo, como
+// exclusivo. Aqui o .or() é avaliado como o PostgREST avaliaria, junto do .lt do início, e tem de
+// concordar com cruzaODia em cada caso — inclusive a OS que termina à 00:00 exata.
+function casaNoBanco(filtro: string, ate: string, ini: string, fim: string | null): boolean {
+  const termos = filtro.match(/and\([^)]*\)|[^,]+/g) ?? [];
+  const valor = (col: string) => (col === "scheduled_start_at" ? ini : fim);
+  const termo = (t: string): boolean => {
+    const e = /^and\((.*)\)$/.exec(t);
+    if (e) return e[1].split(",").every(termo);
+    const [, col, op, v] = /^(\w+)\.(\w+)\.(.*)$/.exec(t)!;
+    const x = valor(col);
+    if (op === "is" && v === "null") return x === null;
+    if (x === null) return false;
+    if (op === "gt") return Date.parse(x) > Date.parse(v);
+    if (op === "gte") return Date.parse(x) >= Date.parse(v);
+    throw new Error(`operador inesperado no filtro: ${op}`);
+  };
+  return Date.parse(ini) < Date.parse(ate) && termos.some(termo);
+}
+
+Deno.test("filtroQueCruza concorda com cruzaODia: a OS que termina à 00:00 não entra no dia seguinte", () => {
+  const { de, ate } = limitesDoDiaBR("2026-10-07");
+  const casos: Array<[string, string | null]> = [
+    ["2026-10-06T08:00:00-03:00", "2026-10-07T00:00:00-03:00"], // termina à meia-noite exata: fora
+    ["2026-10-06T08:00:00-03:00", "2026-10-07T00:00:01-03:00"], // um segundo depois: dentro
+    ["2026-10-06T08:00:00-03:00", "2026-10-09T10:00:00-03:00"], // atravessa o dia: dentro
+    ["2026-10-07T09:00:00-03:00", null],                         // sem fim, começa no dia: dentro
+    ["2026-10-06T09:00:00-03:00", null],                         // sem fim, começou ontem: fora
+    ["2026-10-08T00:00:00-03:00", "2026-10-08T10:00:00-03:00"], // começa à meia-noite seguinte: fora
+  ];
+  for (const [ini, fim] of casos) {
+    assertEquals(casaNoBanco(filtroQueCruza(de), ate, ini, fim), cruzaODia(ini, fim, de, ate), `${ini} → ${fim}`);
+  }
+  assertEquals(casaNoBanco(filtroQueCruza(de), ate, casos[0][0], casos[0][1]), false);
 });

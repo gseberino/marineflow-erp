@@ -187,7 +187,7 @@ Deno.test("a agenda de hoje inclui a OS em curso (comeÃ§ou ontem, termina amanhÃ
     const leituraDaAgenda = porTabela.service_orders.find((c) => usou(c, "or").length)!;
     assertEquals(usou(leituraDaAgenda, "lt"), [["scheduled_start_at", "2026-10-24T03:00:00.000Z"]]);
     assertEquals(usou(leituraDaAgenda, "or"), [[
-      "scheduled_end_at.gte.2026-10-23T03:00:00.000Z,and(scheduled_end_at.is.null,scheduled_start_at.gte.2026-10-23T03:00:00.000Z)",
+      "scheduled_end_at.gt.2026-10-23T03:00:00.000Z,and(scheduled_end_at.is.null,scheduled_start_at.gte.2026-10-23T03:00:00.000Z)",
     ]]);
     assertEquals(usou(leituraDaAgenda, "gte"), []);
     assertEquals(out.agenda_hoje.quantidade, 1);
