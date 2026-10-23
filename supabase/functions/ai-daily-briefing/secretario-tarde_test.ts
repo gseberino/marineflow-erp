@@ -149,12 +149,12 @@ Deno.test("aceite (P4): o fechamento de amostra com a carteira real não diz 'ag
   const texto = String(registrar(f.chamadas)!.texto);
   assert(!texto.includes("agenda livre"), texto);
   // 9 ativas − 3 esperando o cliente = 6 (a OS-00104, de 06–08/10, tem a data no passado)
-  assert(texto.includes("Amanhã (sexta, 16/10): nada marcado; 6 OS aprovadas sem data."), texto);
+  assert(texto.includes("Amanhã (sexta, 16/10): nada marcado; 6 OS ativas sem data (ou com a data vencida)."), texto);
   assert(texto.length <= 1000, `${texto.length}`);
   // a revisão de segunda também
   const seg = falsoAdmin(b, RPCS);
   const r = await rodarTurnoDaTarde(seg.admin, { agora: new Date("2026-10-15T14:00:00Z"), pedido: "revisao_semana", dry: true });
-  assert(String(r.corpo.texto).includes("nada marcado; 6 OS aprovadas sem data"), String(r.corpo.texto));
+  assert(String(r.corpo.texto).includes("nada marcado; 6 OS ativas sem data (ou com a data vencida)"), String(r.corpo.texto));
 });
 
 Deno.test("ligado com a manhã-sombra: rebaixa (grava sem enviar)", async () => {

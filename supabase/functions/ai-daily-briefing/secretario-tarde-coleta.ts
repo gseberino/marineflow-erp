@@ -222,7 +222,7 @@ export function osSemData(oss: OsCrua[], hoje: string): number {
  * O "Amanhã" do fechamento: OS e tarefa do dono com hora (ou com prazo, fora as da automação) no dia `amanha`, e a
  * compra que precisa sair (OS ativa com a tarefa de compra aberta e serviço marcado até o dia seguinte a `amanha`).
  * A OS entra se a janela CRUZA o dia (23/10/2026, D4): a que começou antes sai "em curso desde dd/mm". Com nada
- * marcado, a carteira (as OS sem data) decide entre "agenda livre" e "nada marcado; N OS aprovadas sem data".
+ * marcado, a carteira (as OS sem data) decide entre "agenda livre" e "nada marcado; N OS ativas sem data (ou com a data vencida)".
  * Erro = null (a linha some).
  */
 export async function lerAmanha(

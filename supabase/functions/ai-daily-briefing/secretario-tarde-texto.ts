@@ -6,7 +6,7 @@
 //   *B.* <a linha curta de agora>. *B* = <faço> · *B espera* = <alternativa>
 //   …
 //
-//   Amanhã (sexta, 16/10): <agenda e compra que precisa sair> | nada marcado; 6 OS aprovadas sem data | agenda livre.
+//   Amanhã (sexta, 16/10): <agenda e compra que precisa sair> | nada marcado; 6 OS ativas sem data (ou com a data vencida) | agenda livre.
 //   Fornecedores esperando há mais de 1 dia: <nomes>.
 //   Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja; uns 25 min. *escritório*
 //   (sexta) Esta semana o resumo ajudou? Responda *ajudou*, *pouco* ou *atrapalhou*.
@@ -85,11 +85,17 @@ export const CORTE_DO_ITEM_DE_AMANHA = 50;
 
 /**
  * O "Amanhã" sem nada marcado. "agenda livre" SÓ quando a carteira foi lida e não há OS sem data: até 23/10/2026 a
- * frase saía sempre, e era falsa — o trabalho de verdade estava nas OS aprovadas sem data (6 delas nesse dia).
+ * frase saía sempre, e era falsa — o trabalho de verdade estava nas OS sem data (6 delas nesse dia).
+ *
+ * O texto diz o que osSemData conta (revisão de 23/10/2026): OS ATIVA (aberta, aprovada, agendada, em andamento,
+ * aguardando peças) sem data OU com a janela já vencida. Até então dizia "aprovadas sem data", e não era nem uma
+ * coisa nem outra: a OS-00104 aguarda peças e tem data (06–08/10, vencida); as OS-00069/74/100 estão abertas.
  */
 function semNadaMarcado(c: DiaDeAmanha["carteira"]): string {
   if (!c) return "nada marcado";
-  return c.semData > 0 ? `nada marcado; ${plural(c.semData, "OS aprovada sem data", "OS aprovadas sem data")}` : "agenda livre";
+  return c.semData > 0
+    ? `nada marcado; ${plural(c.semData, "OS ativa sem data (ou com a data vencida)", "OS ativas sem data (ou com a data vencida)")}`
+    : "agenda livre";
 }
 
 /** "Amanhã (sexta, 16/10): 08:00 OS-00112 (Santo Inácio 7.8); comprar 4 itens da OS-00112." */

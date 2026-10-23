@@ -176,7 +176,7 @@ Deno.test("F3: o 'Amanhã' traz a conta a pagar (quantas e o total) e ela sozinh
   assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [], pagar: { n: 1, total: 785.07 }, carteira: { semData: 0 } }),
     "Amanhã (sexta, 16/10): agenda livre; a pagar: 1 conta, R$ 785,07.");
   assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [], pagar: { n: 1, total: 785.07 }, carteira: { semData: 6 } }),
-    "Amanhã (sexta, 16/10): nada marcado; 6 OS aprovadas sem data; a pagar: 1 conta, R$ 785,07.");
+    "Amanhã (sexta, 16/10): nada marcado; 6 OS ativas sem data (ou com a data vencida); a pagar: 1 conta, R$ 785,07.");
   assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [{ hora: "08:00", texto: "OS-00112 (Santo Inácio 7.8)" }], pagar: { n: 2, total: 1234 } }),
     "Amanhã (sexta, 16/10): 08:00 OS-00112 (Santo Inácio 7.8); a pagar: 2 contas, R$ 1.234,00.");
   assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [], pagar: { n: 0, total: 0 }, carteira: { semData: 0 } }), "Amanhã (sexta, 16/10): agenda livre.");
@@ -233,14 +233,14 @@ Deno.test("guardado: 'Não te interrompi com' no topo; o do escritório na linha
 // (16/10/2026, correção do coordenador) A revisão de segunda também traz o "Amanhã" (com o a pagar do F3).
 Deno.test("revisão da semana: a linha 'Amanhã' (a terça) com o a pagar, antes do panorama", () => {
   const t = textoDaTarde(dados({
-    // (23/10/2026) com a carteira de 23/10: 6 OS aprovadas sem data
+    // (23/10/2026) com a carteira de 23/10: 6 OS ativas sem data (ou com a data vencida)
     hoje: "2026-10-19", turno: "revisao_semana", amanha: { dia: "2026-10-20", itens: [], pagar: { n: 1, total: 785.07 }, carteira: { semData: 6 } },
     panorama: { mes: null, vigia: null, semana: { entra: 0, nEntra: 0, sai: 785.07, nSai: 1, ate: "2026-10-25" } },
   }));
   assertEquals(t.texto, [
     "Revisão da semana, segunda, 19/10. Nada parado.",
     "",
-    "Amanhã (terça, 20/10): nada marcado; 6 OS aprovadas sem data; a pagar: 1 conta, R$ 785,07.",
+    "Amanhã (terça, 20/10): nada marcado; 6 OS ativas sem data (ou com a data vencida); a pagar: 1 conta, R$ 785,07.",
     "Semana até domingo (25/10): a receber nada; a pagar R$ 785 (1 conta) — sai mais do que entra.",
   ].join("\n"));
   // sem a leitura do "Amanhã" (null), a revisão é a de antes
@@ -249,11 +249,14 @@ Deno.test("revisão da semana: a linha 'Amanhã' (a terça) com o a pagar, antes
 });
 
 // ─── (23/10/2026) D11b: "agenda livre" só com a carteira lida e sem OS sem data ─────────────────────
-// Até 23/10 o "Amanhã" dizia "agenda livre" sempre que nada estava marcado — e havia 6 OS aprovadas sem data.
+// Até 23/10 o "Amanhã" dizia "agenda livre" sempre que nada estava marcado — e havia 6 OS ativas sem data (ou com a data vencida).
 Deno.test("D11b: nada marcado amanhã — 'agenda livre' só com a carteira lida e vazia; com OS sem data, quantas", () => {
   const amanha = (carteira: { semData: number } | null | undefined) => linhaDeAmanha("2026-10-22", { dia: "2026-10-23", itens: [], carteira });
-  assertEquals(amanha({ semData: 6 }), "Amanhã (sexta, 23/10): nada marcado; 6 OS aprovadas sem data.");
-  assertEquals(amanha({ semData: 1 }), "Amanhã (sexta, 23/10): nada marcado; 1 OS aprovada sem data.");
+  assertEquals(amanha({ semData: 6 }), "Amanhã (sexta, 23/10): nada marcado; 6 OS ativas sem data (ou com a data vencida).");
+  assertEquals(amanha({ semData: 1 }), "Amanhã (sexta, 23/10): nada marcado; 1 OS ativa sem data (ou com a data vencida).");
+  // (revisão de 23/10/2026) osSemData conta OS ativa de qualquer status, com data vencida inclusive: "aprovada" não é
+  // o que ela conta (a OS-00104 aguarda peças e tem data; as OS-00069/74/100 estão abertas).
+  assert(!amanha({ semData: 6 }).includes("aprovad"), amanha({ semData: 6 }));
   assertEquals(amanha({ semData: 0 }), "Amanhã (sexta, 23/10): agenda livre.");
   assertEquals(amanha(null), "Amanhã (sexta, 23/10): nada marcado.");
   assertEquals(amanha(undefined), "Amanhã (sexta, 23/10): nada marcado.");
@@ -272,6 +275,6 @@ Deno.test("D11b: a carteira sem data sozinha não tira o fechamento do calado; n
     pergunta: true,
   })).texto!;
   assert(t.length <= LIMITE_DA_TARDE, `${t.length}`);
-  assertStringIncludes(t, "Amanhã (sexta, 16/10): nada marcado; 6 OS aprovadas sem data; a pagar: 2 contas, R$ 1.234,00.");
+  assertStringIncludes(t, "Amanhã (sexta, 16/10): nada marcado; 6 OS ativas sem data (ou com a data vencida); a pagar: 2 contas, R$ 1.234,00.");
   assert(!t.includes("agenda livre"));
 });
