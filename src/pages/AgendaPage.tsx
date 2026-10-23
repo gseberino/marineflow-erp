@@ -1503,6 +1503,18 @@ function MonthView({
 // Opção "Sem responsável" da lista de técnico: o combobox não tem limpar, e o técnico é opcional.
 const SEM_RESPONSAVEL = '__sem_responsavel__';
 
+/**
+ * O técnico que a OS já tem (revisão de 23/10/2026): o primeiro vínculo de
+ * service_order_technicians, com o nome do embed. Reagendar a OS-00104 abria o diálogo com
+ * "Sem responsável", a agenda do Roberto não era conferida e o toast dizia "(sem responsável)"
+ * com ele ainda vinculado.
+ */
+function tecnicoDaOs(orders: any[], id: string): { id: string; full_name: string } | null {
+  const v = (orders.find((o) => o.id === id)?.service_order_technicians || [])
+    .find((l: any) => l?.user_id);
+  return v ? { id: v.user_id, full_name: v.app_users?.full_name || 'Técnico da OS' } : null;
+}
+
 function QuickScheduleDialog({
   open, onOpenChange, prefillTechnicianId, prefillDate, prefillOrderId,
 }: {
@@ -1528,6 +1540,9 @@ function QuickScheduleDialog({
   // Local submitting flag prevents double-submit during the brief async window
   // before quickSchedule.isPending becomes true after mutateAsync is called
   const [submitting, setSubmitting] = useState(false);
+  // O técnico do campo veio da OS (e não de quem preenche): trocar de OS troca ele junto.
+  const tecnicoVeioDaOs = useRef(false);
+  const prefillDaOsAplicado = useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -1537,8 +1552,38 @@ function QuickScheduleDialog({
       setStartTime('09:00');
       setEndTime('11:00');
       setSubmitting(false);
+      tecnicoVeioDaOs.current = false;
+      prefillDaOsAplicado.current = false;
     }
   }, [open, prefillTechnicianId, prefillDate, prefillOrderId]);
+
+  /** Escolhida a OS, o técnico dela vem junto — salvo se quem preenche já escolheu outro. */
+  const trazerTecnicoDaOs = (id: string, atual: string) => {
+    if (atual && !tecnicoVeioDaOs.current) return;
+    const t = tecnicoDaOs(schedulable, id);
+    setTechnicianId(t?.id ?? '');
+    tecnicoVeioDaOs.current = !!t;
+  };
+
+  // OS que já vem escolhida (prefillOrderId): o técnico dela entra quando a lista chegar.
+  useEffect(() => {
+    if (!open || !prefillOrderId || prefillDaOsAplicado.current || !schedulable.length) return;
+    prefillDaOsAplicado.current = true;
+    trazerTecnicoDaOs(prefillOrderId, prefillTechnicianId || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, prefillOrderId, schedulable]);
+
+  // O técnico vinculado à OS pode não estar na lista de responsáveis (login inativo sem
+  // favorecido ativo): ele entra como opção, com o nome do embed, para o campo não mentir
+  // "Sem responsável".
+  const opcoesDeTecnico = useMemo(() => {
+    const lista = responsaveis.map((t) => ({ value: t.id, label: t.full_name, description: undefined as string | undefined }));
+    const daOs = orderId ? tecnicoDaOs(schedulable, orderId) : null;
+    if (daOs && !lista.some((o) => o.value === daOs.id)) {
+      lista.push({ value: daOs.id, label: daOs.full_name, description: 'vinculado à OS' });
+    }
+    return [{ value: SEM_RESPONSAVEL, label: 'Sem responsável', description: undefined }, ...lista];
+  }, [responsaveis, schedulable, orderId]);
 
   const handleSave = async () => {
     if (submitting || quickSchedule.isPending) return;
@@ -1563,7 +1608,9 @@ function QuickScheduleDialog({
       });
       // Success: only reached if mutateAsync resolves without throwing.
       // O toast diz o status RESULTANTE: a OS que aguarda peça ganha data e continua aguardando.
-      toast.success(`${res?.mensagem || 'OS agendada'}${technicianId ? '' : ' (sem responsável)'}`);
+      // "(sem responsável)" só quando a OS de fato ficou sem técnico: campo vazio com o técnico
+      // ainda vinculado à OS não é "sem responsável" (revisão de 23/10/2026).
+      toast.success(`${res?.mensagem || 'OS agendada'}${res?.semResponsavel ? ' (sem responsável)' : ''}`);
       if (res?.warning) toast.warning(res.warning);
       onOpenChange(false);
     } catch (err: any) {
@@ -1586,7 +1633,7 @@ function QuickScheduleDialog({
             <Label>Ordem de Serviço *</Label>
             <EntityCombobox
               value={orderId}
-              onChange={setOrderId}
+              onChange={(v) => { setOrderId(v); trazerTecnicoDaOs(v, technicianId); }}
               placeholder="Selecione uma OS"
               options={schedulable.map((o: any) => ({
                 value: o.id,
@@ -1605,16 +1652,12 @@ function QuickScheduleDialog({
             <Label>Técnico (opcional)</Label>
             <EntityCombobox
               value={technicianId}
-              onChange={(v) => setTechnicianId(v === SEM_RESPONSAVEL ? '' : v)}
+              onChange={(v) => {
+                setTechnicianId(v === SEM_RESPONSAVEL ? '' : v);
+                tecnicoVeioDaOs.current = false;
+              }}
               placeholder="Sem responsável"
-              options={[
-                { value: SEM_RESPONSAVEL, label: 'Sem responsável' },
-                ...responsaveis.map((t) => ({
-                  value: t.id,
-                  label: t.full_name,
-                  description: undefined,
-                })),
-              ]}
+              options={opcoesDeTecnico}
             />
           </div>
 

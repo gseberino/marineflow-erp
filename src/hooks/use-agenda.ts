@@ -213,8 +213,11 @@ export function useSchedulableOrders() {
         .select(`
           id, service_order_number, status,
           clients(name),
-          vessels(name)
+          vessels(name),
+          service_order_technicians(user_id, app_users(id, full_name))
         `)
+        // O técnico já vinculado vem junto (revisão de 23/10/2026): reagendar a OS do Roberto abria
+        // o diálogo com "Sem responsável", e a agenda dele não era conferida.
         // MF-AUD-005: a lista era escrita à mão e continha quatro status que o banco
         // rejeita (`pending`, `waiting_parts`, `waiting_approval`, `reopened`) e — o que
         // de fato quebrava — NÃO tinha `open`, o status normal de uma OS aberta. Como a
@@ -315,20 +318,39 @@ export function useQuickSchedule() {
       const novoStatus = statusAoAgendar(statusAnterior);
 
       const tecnico = input.technician_user_id || null;
+      // Sem técnico escolhido, a OS pode já ter técnico vinculado (revisão de 23/10/2026): o vínculo
+      // fica como está, então é a agenda DELE que se confere. Até então, reagendar a OS-00104
+      // (Roberto) com o campo vazio não checava conflito nem sobrecarga de ninguém, e o toast
+      // dizia "(sem responsável)" com o Roberto ainda na OS.
+      let pessoas: string[] = tecnico ? [tecnico] : [];
+      if (!tecnico) {
+        const { data: vinculos, error: vincErr } = await supabase
+          .from('service_order_technicians')
+          .select('user_id')
+          .eq('service_order_id', input.service_order_id);
+        if (vincErr) throw vincErr;
+        pessoas = [...new Set((vinculos || []).map((v: any) => v.user_id).filter(Boolean))] as string[];
+      }
+
       let warning: string | null = null;
-      // Conflito e sobrecarga são da agenda de uma PESSOA: sem responsável, não há o que checar.
-      if (tecnico && input.scheduled_end_at) {
-        const conflicts = await fetchConflicts({
-          userId: tecnico,
-          startISO: input.scheduled_start_at,
-          endISO: input.scheduled_end_at,
-          excludeSo: input.service_order_id,
-        });
-        if (conflicts.length > 0) throw new Error(conflictMessage(conflicts));
-        warning = await overloadWarning(
-          tecnico, input.scheduled_start_at, input.scheduled_end_at,
-          { excludeSo: input.service_order_id },
-        );
+      // Conflito e sobrecarga são da agenda de uma PESSOA: sem ninguém na OS, não há o que checar.
+      if (pessoas.length && input.scheduled_end_at) {
+        const avisos: string[] = [];
+        for (const pessoa of pessoas) {
+          const conflicts = await fetchConflicts({
+            userId: pessoa,
+            startISO: input.scheduled_start_at,
+            endISO: input.scheduled_end_at,
+            excludeSo: input.service_order_id,
+          });
+          if (conflicts.length > 0) throw new Error(conflictMessage(conflicts));
+          const aviso = await overloadWarning(
+            pessoa, input.scheduled_start_at, input.scheduled_end_at,
+            { excludeSo: input.service_order_id },
+          );
+          if (aviso && !avisos.includes(aviso)) avisos.push(aviso);
+        }
+        warning = avisos.length ? avisos.join(' ') : null;
       }
 
       const updatePayload: { scheduled_start_at: string; scheduled_end_at: string | null; status?: StatusOS } = {
@@ -363,6 +385,8 @@ export function useQuickSchedule() {
         statusAnterior,
         status: novoStatus ?? statusAnterior,
         mensagem: mensagemAoAgendar(statusAnterior, novoStatus),
+        /** A OS terminou sem técnico nenhum vinculado: só aí o toast diz "(sem responsável)". */
+        semResponsavel: pessoas.length === 0,
       };
     },
     onSuccess: () => {

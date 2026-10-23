@@ -14,6 +14,9 @@ const h = vi.hoisted(() => {
     status: 'open' as string,
     conflitos: [] as any[],
     usuarios: [] as any[],
+    /** os técnicos já vinculados à OS (service_order_technicians) e se a leitura deles falha */
+    vinculos: [] as any[],
+    erroVinculos: null as { message: string } | null,
     chamadas: [] as { tabela: string; ops: any[][] }[],
   };
   const builder = (tabela: string): any => {
@@ -25,8 +28,11 @@ const h = vi.hoisted(() => {
       o[k] = (...args: any[]) => { reg.ops.push([k, ...args]); return o; };
     }
     o.single = async () => ({ data: { status: estado.status }, error: null });
-    o.then = (ok: any, erro: any) =>
-      Promise.resolve({ data: tabela === 'app_users' ? estado.usuarios : [], error: null }).then(ok, erro);
+    o.then = (ok: any, erro: any) => {
+      const leVinculos = tabela === 'service_order_technicians' && reg.ops.some((op) => op[0] === 'select');
+      if (leVinculos) return Promise.resolve({ data: estado.erroVinculos ? null : estado.vinculos, error: estado.erroVinculos }).then(ok, erro);
+      return Promise.resolve({ data: tabela === 'app_users' ? estado.usuarios : [], error: null }).then(ok, erro);
+    };
     return o;
   };
   const rpc = vi.fn(async (_nome: string, _args: any) => ({ data: estado.conflitos, error: null }));
@@ -75,6 +81,8 @@ beforeEach(() => {
   h.estado.chamadas.length = 0;
   h.estado.conflitos = [];
   h.estado.usuarios = [];
+  h.estado.vinculos = [];
+  h.estado.erroVinculos = null;
   h.rpc.mockClear();
 });
 
@@ -130,12 +138,13 @@ describe('useQuickSchedule — o status vem de statusAoAgendar', () => {
 });
 
 describe('useQuickSchedule — técnico opcional (D2)', () => {
-  it('sem técnico: não checa conflito, não faz upsert, e mesmo assim agenda', async () => {
+  it('sem técnico e sem vínculo na OS: não checa conflito, não faz upsert, e mesmo assim agenda', async () => {
     const r = await agendar('open', null);
     expect(chamouConflito()).toBe(false);
     expect(upserts()).toHaveLength(0);
     expect(updates()[0].status).toBe('scheduled');
     expect(r.warning).toBeNull();
+    expect(r.semResponsavel).toBe(true);
   });
 
   it('com técnico: checa conflito e vincula o técnico', async () => {
@@ -150,6 +159,53 @@ describe('useQuickSchedule — técnico opcional (D2)', () => {
       starts_at: '2026-10-27T08:00:00-03:00', ends_at: '2026-10-27T12:00:00-03:00' }];
     await expect(agendar('open', 'tec-1')).rejects.toThrow(/Conflito de agenda/);
     expect(updates()).toHaveLength(0);
+  });
+
+  it('com técnico escolhido: diz que tem responsável', async () => {
+    const r = await agendar('open', 'tec-1');
+    expect(r.semResponsavel).toBe(false);
+  });
+});
+
+// Revisão de 23/10/2026: reagendar a OS-00104 (técnico Roberto) com o campo vazio pulava o conflito e a
+// sobrecarga do técnico que CONTINUA vinculado, e o toast dizia "(sem responsável)".
+describe('useQuickSchedule — campo vazio com técnico já vinculado à OS', () => {
+  it('confere a agenda de cada técnico vinculado, não faz upsert e não diz "sem responsável"', async () => {
+    h.estado.vinculos = [{ user_id: 'roberto' }, { user_id: 'mickael' }, { user_id: 'roberto' }];
+    const r = await agendar('awaiting_parts', null);
+    const leitura = h.estado.chamadas.find((c) => c.tabela === 'service_order_technicians')!.ops;
+    expect(leitura).toContainEqual(['eq', 'service_order_id', 'os-1']);
+    const pessoas = h.rpc.mock.calls
+      .filter((c) => c[0] === 'get_agenda_conflicts')
+      .map((c) => c[1].p_user_id);
+    // conflito (janela pedida) + sobrecarga (o dia) para cada um, sem repetir o Roberto
+    expect([...new Set(pessoas)]).toEqual(['roberto', 'mickael']);
+    expect(pessoas.filter((p) => p === 'roberto')).toHaveLength(2);
+    expect(upserts()).toHaveLength(0);
+    expect(r.semResponsavel).toBe(false);
+  });
+
+  it('conflito do técnico vinculado recusa antes de gravar', async () => {
+    h.estado.vinculos = [{ user_id: 'roberto' }];
+    h.estado.conflitos = [{ source: 'service_order', label: 'OS-00112',
+      starts_at: '2026-10-27T08:00:00-03:00', ends_at: '2026-10-27T12:00:00-03:00' }];
+    await expect(agendar('awaiting_parts', null)).rejects.toThrow(/Conflito de agenda: o responsável já tem OS-00112/);
+    expect(updates()).toHaveLength(0);
+  });
+
+  it('erro ao ler os vínculos lança (não agenda sem conferir)', async () => {
+    h.estado.erroVinculos = { message: 'falha nos vínculos' };
+    await expect(agendar('open', null)).rejects.toMatchObject({ message: 'falha nos vínculos' });
+    expect(updates()).toHaveLength(0);
+  });
+
+  it('com técnico escolhido, os vínculos nem são lidos (o escolhido é o conferido)', async () => {
+    h.estado.vinculos = [{ user_id: 'roberto' }];
+    await agendar('open', 'tec-1');
+    const leuVinculos = h.estado.chamadas.some((c) => c.tabela === 'service_order_technicians'
+      && c.ops.some((op) => op[0] === 'select'));
+    expect(leuVinculos).toBe(false);
+    expect(h.rpc.mock.calls.every((c) => c[1].p_user_id === 'tec-1')).toBe(true);
   });
 });
 

@@ -163,6 +163,16 @@ vi.mock('@/hooks/use-agenda', () => ({
   useSchedulableOrders: () => q([{
     id: 'so-agendar', service_order_number: 'OS-00105', status: 'open',
     clients: { name: 'Cliente Sem Técnico' }, vessels: null,
+  }, {
+    // Revisão de 23/10/2026: a OS que já tem técnico (o Roberto, da OS-00104) abre com ele no campo.
+    id: 'so-104', service_order_number: 'OS-00104', status: 'awaiting_parts',
+    clients: { name: 'Nelson' }, vessels: null,
+    service_order_technicians: [{ user_id: 'u9', app_users: { id: 'u9', full_name: 'Roberto Inativo' } }],
+  }, {
+    // técnico vinculado que não está na lista de responsáveis (login e favorecido inativos)
+    id: 'so-110', service_order_number: 'OS-00110', status: 'scheduled',
+    clients: { name: 'Marcelo' }, vessels: null,
+    service_order_technicians: [{ user_id: 'u7', app_users: { id: 'u7', full_name: 'Mickael' } }],
   }]),
   useResponsaveisDaOs: () => q([{ id: 'u1', full_name: 'Gustavo' }, { id: 'u9', full_name: 'Roberto Inativo' }]),
   useEntityTasks: () => q([]),
@@ -334,6 +344,29 @@ describe('AgendaPage — smoke de render (todas as visões)', () => {
       service_order_id: 'so-agendar',
       technician_user_id: null,
     });
+  });
+
+  // Revisão de 23/10/2026: o diálogo abria com "Sem responsável" mesmo quando a OS já tinha técnico.
+  it.each([
+    ['OS-00104', 'so-104', 'Roberto Inativo', 'u9'],
+    // fora da lista de responsáveis: entra como opção, com o nome do embed, em vez de o campo mentir
+    ['OS-00110', 'so-110', 'Mickael', 'u7'],
+  ])('o diálogo "Agendar OS" traz o técnico já vinculado à %s', async (numero, id, nome, userId) => {
+    agendarOs.mockClear();
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole('button', { name: 'Agendar' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Ordem de serviço/ }));
+    const dialogo = await screen.findByRole('dialog');
+    const [campoOs] = within(dialogo).getAllByRole('combobox');
+    await user.click(campoOs);
+    await user.click(await screen.findByRole('option', { name: new RegExp(numero) }));
+    const campoTecnico = within(dialogo).getAllByRole('combobox')[1];
+    expect(campoTecnico.textContent).toContain(nome);
+    expect(campoTecnico.textContent).not.toContain('Sem responsável');
+    await user.click(within(dialogo).getByRole('button', { name: 'Agendar' }));
+    expect(agendarOs).toHaveBeenCalledTimes(1);
+    expect(agendarOs.mock.calls[0][0]).toMatchObject({ service_order_id: id, technician_user_id: userId });
   });
 
   it('a rota /v2/agenda renderiza a MESMA agenda dentro da casca de tema', async () => {
