@@ -95,6 +95,10 @@ export function PurchaseNeedsDialog({
     ? `${serviceOrderNumber}${clientName ? ` · ${clientName}` : ''}`
     : 'esta OS';
 
+  /* Pedido e ainda não chegou (24/10/2026). Nada a comprar não quer dizer "tudo
+     disponível": a OS-00104 zera a falta com o compressor ainda na OC-00004. */
+  const aCaminho = (needs?.items ?? []).filter(i => i.status === 'on_order').length;
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -106,7 +110,9 @@ export function PurchaseNeedsDialog({
                 ? 'Verificando o estoque…'
                 : needs?.shortageCount
                   ? `${needs.shortageCount} ${needs.shortageCount === 1 ? 'item precisa' : 'itens precisam'} de compra`
-                  : 'Tudo disponível para executar'}
+                  : aCaminho
+                    ? `Nada a comprar — ${aCaminho === 1 ? '1 item a caminho' : `${aCaminho} itens a caminho`}`
+                    : 'Tudo disponível para executar'}
             </DialogTitle>
             <DialogDescription>
               {serviceOrderNumber ? `${serviceOrderNumber} aprovada.` : 'Orçamento aprovado.'}{' '}
@@ -114,7 +120,9 @@ export function PurchaseNeedsDialog({
                 ? 'Conferindo disponível (físico menos reservado) e o que já está pedido.'
                 : needs?.shortageCount
                   ? 'Você pode resolver agora ou deixar para depois — a pendência não se perde.'
-                  : 'Nenhuma peça em falta, nada a comprar.'}
+                  : aCaminho
+                    ? 'O que foi pedido ainda não chegou: confira a entrega antes de agendar.'
+                    : 'Nenhuma peça em falta, nada a comprar.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -243,11 +251,19 @@ function NeedRow({ item }: { item: PurchaseNeedItem }) {
         <p className={cn('truncate text-sm', covered ? 'text-muted-foreground' : 'font-medium')}>
           {item.description}
         </p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          precisa {fmtQty(item.required)}
-          {item.status !== 'uncatalogued' && ` · disponível ${fmtQty(item.available)}`}
-          {item.onOrder > 0 && ` · pedido ${fmtQty(item.onOrder)}`}
-        </p>
+        {/* Item de texto livre pedido em OC da própria OS: não há estoque a mostrar
+            ("disponível 0" diria que falta), só a OC e a pergunta que importa. */}
+        {item.origin === 'purchase_order' ? (
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            precisa {fmtQty(item.required)} · pedido na {item.purchaseOrderNumber ?? 'OC'} — chegou?
+          </p>
+        ) : (
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            precisa {fmtQty(item.required)}
+            {item.status !== 'uncatalogued' && ` · disponível ${fmtQty(item.available)}`}
+            {item.onOrder > 0 && ` · pedido ${fmtQty(item.onOrder)}`}
+          </p>
+        )}
       </div>
       <span className={cn('shrink-0 text-xs font-medium', style.text)}>
         {covered

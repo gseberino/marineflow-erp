@@ -1,20 +1,37 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { computePurchaseNeeds, type PurchaseNeeds } from '@/lib/purchase-needs';
+import {
+  comItensACaminho, computePurchaseNeeds, descontarReservaDaPropriaOs,
+  type ItemACaminhoInput, type PurchaseNeeds,
+} from '@/lib/purchase-needs';
 
 /**
- * Necessidade de compra de uma OS. Busca os quatro insumos e delega o cálculo
- * para a lib pura (src/lib/purchase-needs.ts), que é onde a regra vive e é testada.
+ * Necessidade de compra de uma OS. Busca os insumos e delega o cálculo para a lib
+ * pura (src/lib/purchase-needs.ts), que é onde a regra vive e é testada. É o espelho
+ * da RPC get_os_purchase_needs (a via do agente e do motor R16): a mesma montagem,
+ * com o mesmo cenário provado nos dois lados.
  *
  * A disponibilidade sai de `product_availability` (físico − reservado) e não da
- * tabela products crua, para não ignorar as reservas do modelo de estoque v2.
+ * tabela products crua, para não ignorar as reservas do modelo de estoque v2 — mas
+ * sem a reserva da PRÓPRIA OS (24/10/2026), que é por isso que se lê o status dela.
+ *
+ * O "já pedido" e o que vem a caminho por OC de texto livre saem da view
+ * `v_oc_itens_a_caminho`, a mesma que a RPC lê: OC aberta há menos de 60 dias e sem
+ * OS encerrada. A regra de "OC viva" fica num lugar só (antes, aqui, toda OC
+ * draft/sent/partial contava, de qualquer idade e de OS já faturada).
+ *
+ * Toda leitura com erro LANÇA: falha que vira lista vazia diria "nada a comprar".
+ * A única exceção é a classificação do texto livre (ver abaixo), cuja falha mantém
+ * o material na conta.
  */
-
-/** Status de OC que ainda vão entregar mercadoria. */
-const OPEN_PO_STATUSES = ['draft', 'sent', 'partial'];
-
 export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<PurchaseNeeds> {
-  const [partsRes, servicesRes] = await Promise.all([
+  const [osRes, partsRes, servicesRes, aCaminhoRes] = await Promise.all([
+    // Só o status: decide se a OS reserva estoque (STATUS_QUE_RESERVAM).
+    supabase
+      .from('service_orders')
+      .select('status')
+      .eq('id', serviceOrderId)
+      .maybeSingle(),
     supabase
       .from('service_order_parts')
       .select('id, product_id, quantity, unit_cost_snapshot, products(name, unit)')
@@ -31,9 +48,21 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
       .eq('service_order_id', serviceOrderId)
       .order('created_at', { ascending: true })
       .order('id', { ascending: true }),
+    // O que foi pedido em OC de TEXTO LIVRE desta OS e ainda não chegou. Mesmo filtro e
+    // mesma ordem da CTE a_caminho de get_os_purchase_needs.
+    supabase
+      .from('v_oc_itens_a_caminho')
+      .select('purchase_order_item_id, po_number, description, quantity, pendente, unit_cost')
+      .eq('service_order_id', serviceOrderId)
+      .is('product_id', null)
+      .gt('pendente', 0)
+      .order('po_criada_em', { ascending: true })
+      .order('purchase_order_item_id', { ascending: true }),
   ]);
+  if (osRes.error) throw osRes.error;
   if (partsRes.error) throw partsRes.error;
   if (servicesRes.error) throw servicesRes.error;
+  if (aCaminhoRes.error) throw aCaminhoRes.error;
 
   const parts = (partsRes.data ?? []).map((p: any) => ({
     id: p.id,
@@ -55,15 +84,20 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
         .from('product_availability')
         .select('id, stock_quantity, reserved_quantity')
         .in('id', productIds),
+      // "Já pedido" só de OC viva: a view já filtra status, idade e OS encerrada.
       supabase
-        .from('purchase_order_items')
-        .select('product_id, quantity, received_qty, purchase_orders!inner(status)')
-        .in('product_id', productIds)
-        .in('purchase_orders.status', OPEN_PO_STATUSES),
+        .from('v_oc_itens_a_caminho')
+        .select('product_id, quantity, received_qty')
+        .in('product_id', productIds),
     ]);
     if (availRes.error) throw availRes.error;
     if (poRes.error) throw poRes.error;
-    availability = availRes.data ?? [];
+    // O reservado que entra na conta é o de OUTRAS OS (a mesma CTE `propria` da RPC).
+    // A view tipa o id como anulável; o filtro .in('id', …) só devolve linha com id.
+    const lidas = (availRes.data ?? []).flatMap((a) => (a.id
+      ? [{ id: a.id, stock_quantity: a.stock_quantity, reserved_quantity: a.reserved_quantity }]
+      : []));
+    availability = descontarReservaDaPropriaOs(lidas, parts, osRes.data?.status);
     onOrder = (poRes.data ?? []).map((i: any) => ({
       product_id: i.product_id,
       quantity: i.quantity,
@@ -92,7 +126,7 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
     if (!error) ehMaterial = (data ?? {}) as Record<string, boolean>;
   }
 
-  return computePurchaseNeeds({
+  const needs = computePurchaseNeeds({
     serviceOrderId,
     parts,
     freeTextItems: livres.map((s) => ({
@@ -102,6 +136,17 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
     availability,
     onOrder,
   });
+  // A view tipa toda coluna como anulável; na origem (purchase_order_items/purchase_orders)
+  // nenhuma destas é nula.
+  const aCaminho: ItemACaminhoInput[] = (aCaminhoRes.data ?? []).map((l) => ({
+    purchase_order_item_id: l.purchase_order_item_id ?? '',
+    po_number: l.po_number ?? '',
+    description: l.description ?? '',
+    quantity: l.quantity ?? 0,
+    pendente: l.pendente ?? 0,
+    unit_cost: l.unit_cost,
+  }));
+  return comItensACaminho(needs, aCaminho);
 }
 
 export function usePurchaseNeeds(serviceOrderId: string | undefined, enabled = true) {

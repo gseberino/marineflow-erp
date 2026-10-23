@@ -70,7 +70,10 @@ export const purchasingTools: ToolDef[] = [
       "Use ANTES de criar cotação ou ordem de compra para uma OS — é isto que diz o que cotar, em vez de " +
       "supor pela lista de peças. Cada item vem com status: 'missing' (nada disponível), 'partial' (parte " +
       "em estoque), 'on_order' (já pedido, só esperar), 'uncatalogued' (material sem cadastro) e 'ok' " +
-      "(estoque cobre). Mão de obra digitada à mão NÃO entra: não se compra instalação de fornecedor de peça.",
+      "(estoque cobre). Mão de obra digitada à mão NÃO entra: não se compra instalação de fornecedor de peça. " +
+      "'a_caminho' é o que já foi pedido em ordem de compra de texto livre DESTA OS e ainda não chegou " +
+      "(com o número da OC): não entra em 'faltando' nem pede compra, mas NÃO quer dizer que está na mão. " +
+      "Diga 'pedido na OC-x' e pergunte se chegou; nunca diga que a OS está pronta por causa dele.",
     input_schema: {
       type: "object",
       properties: {
@@ -107,6 +110,16 @@ export const purchasingTools: ToolDef[] = [
           product_id: i.productId,
           custo_unitario_conhecido: i.unitCost,
         })),
+        // Pedido em OC de texto livre desta OS e ainda não recebido (24/10/2026). Fica fora de
+        // `faltando` (a RPC dá shortage 0), mas sem isto o assistente diria "não falta nada" com o
+        // compressor da OS-00104 ainda na OC-00004.
+        a_caminho: ((r.items ?? []) as any[])
+          .filter((i) => i.origin === "purchase_order")
+          .map((i) => ({
+            descricao: i.description,
+            quantidade: i.onOrder,
+            ordem_de_compra: i.purchaseOrderNumber ?? null,
+          })),
         todos_os_itens: (r.items ?? []).length,
       };
     },

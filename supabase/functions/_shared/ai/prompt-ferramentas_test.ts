@@ -95,6 +95,9 @@ NAO_SAO_TOOLS.add("vencendo_30");
 NAO_SAO_TOOLS.add("voltar_para_em_elaboracao");
 NAO_SAO_TOOLS.add("fora_da_lista");
 NAO_SAO_TOOLS.add("impedimento_se_voltar");
+// compras (24/10/2026, Agenda de Produção P5): campo do retorno de get_purchase_needs (pedido em OC de
+// texto livre da OS, ainda não chegou)
+NAO_SAO_TOOLS.add("a_caminho");
 
 /** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
 const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };

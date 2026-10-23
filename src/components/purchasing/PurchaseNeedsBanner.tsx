@@ -53,9 +53,14 @@ export function PurchaseNeedsBanner({
     return { days, level: agingLevel(days), hasAnswer: priced.length > 0 };
   }, [openQuote]);
 
+  /* Pedido e ainda não chegou (24/10/2026). Sem isto a faixa sumia quando a falta zerava
+     pela OC aberta, e a OS parecia pronta com a peça no fornecedor: a OS-00104 tem o
+     compressor só na OC-00004. "Nada a comprar" não é "tudo na mão". */
+  const aCaminho = (needs?.items ?? []).filter(i => i.status === 'on_order');
+
   if (!active) return null;
-  // Sem falta e sem cotação aberta: não há nada a dizer.
-  if (!needs?.shortageCount && !openQuote) return null;
+  // Sem falta, sem cotação aberta e nada a caminho: não há nada a dizer.
+  if (!needs?.shortageCount && !openQuote && !aCaminho.length) return null;
 
   const shortageCount = needs?.shortageCount ?? 0;
   const critical = shortageCount > 0 && !openQuote;
@@ -75,7 +80,10 @@ export function PurchaseNeedsBanner({
               {shortageCount > 0
                 ? <><AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
                     {shortageCount === 1 ? '1 item precisa de compra' : `${shortageCount} itens precisam de compra`}</>
-                : <><ClipboardList className="h-4 w-4 shrink-0" /> Cotação em andamento</>}
+                : openQuote
+                  ? <><ClipboardList className="h-4 w-4 shrink-0" /> Cotação em andamento</>
+                  : <><Clock className="h-4 w-4 shrink-0" />
+                      {aCaminho.length === 1 ? '1 item a caminho' : `${aCaminho.length} itens a caminho`}</>}
             </h2>
 
             {shortageCount > 0 && needs && (
@@ -91,6 +99,22 @@ export function PurchaseNeedsBanner({
                 ))}
                 {needs.shortages.length > 4 && (
                   <li className="italic">e mais {needs.shortages.length - 4}…</li>
+                )}
+              </ul>
+            )}
+
+            {aCaminho.length > 0 && (
+              <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+                {aCaminho.slice(0, 4).map(item => (
+                  <li key={`${item.origin}-${item.sourceId}`} className="truncate">
+                    <span className="text-foreground">{item.description}</span>
+                    {item.purchaseOrderNumber
+                      ? ` — pedido na ${item.purchaseOrderNumber}, chegou?`
+                      : ' — já pedido, chegou?'}
+                  </li>
+                ))}
+                {aCaminho.length > 4 && (
+                  <li className="italic">e mais {aCaminho.length - 4}…</li>
                 )}
               </ul>
             )}

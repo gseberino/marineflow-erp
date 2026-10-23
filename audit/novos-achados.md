@@ -2568,3 +2568,16 @@ porque só o dono pode preenchê-las.
 - **Corrigido no P2 da Fase 0:** `hojeIso` vem de `diaBR` (`pdf/datas.ts`), `em7` de `somarDiasAoDia`,
   `dias_atraso` é a diferença entre dias de calendário, e a agenda de hoje usa `dayRangeBRT()` com
   interseção (`filtroQueCruza`). Testes com `FakeTime` às 22:00 de Brasília em `overview_test.ts`.
+
+### [NOVO-agenda-04] `condicao-pagamento_test.ts` não passa na checagem de tipos do Deno
+
+- **Encontrado em:** Agenda de Produção, Fase 0, P5 (24/10/2026), rodando `deno test` na pasta
+  `supabase/functions/_shared/ai/` COM a checagem de tipos.
+- **Onde:** `supabase/functions/_shared/ai/tools/condicao-pagamento_test.ts:70-72`: o `PRESETS` do teste
+  tem `tipo: string` e `acharPreset` pede `DepositInstallment[]` (`tipo: "prazo" | "aprovacao" | "entrega"`).
+- **O quê:** TS2345 três vezes. O CI não pega porque o `test:edge` roda com `--no-check` e o `check:edge`
+  só checa os `index.ts`, e a execução passa (970 testes da pasta, 0 falha). O efeito é que quem roda
+  `deno test` sem `--no-check` na pasta, como manda o cabeçalho de vários testes, recebe "Type checking
+  failed" e não vê o resultado de nenhum teste.
+- **Não corrigido** (regra 3): fora do escopo do P5. O conserto é tipar o `PRESETS` do teste (`as const`
+  nos `tipo` ou anotar `Preset[]`).

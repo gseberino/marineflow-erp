@@ -13530,6 +13530,24 @@ export type Database = {
           },
         ]
       }
+      v_oc_itens_a_caminho: {
+        Row: {
+          description: string | null
+          expected_date: string | null
+          pendente: number | null
+          po_criada_em: string | null
+          po_number: string | null
+          po_status: string | null
+          product_id: string | null
+          purchase_order_id: string | null
+          purchase_order_item_id: string | null
+          quantity: number | null
+          received_qty: number | null
+          service_order_id: string | null
+          unit_cost: number | null
+        }
+        Relationships: []
+      }
       v_service_order_labor_variance: {
         Row: {
           client_id: string | null
