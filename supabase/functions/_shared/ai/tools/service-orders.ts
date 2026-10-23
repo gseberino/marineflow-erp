@@ -359,7 +359,7 @@ export async function adicionarPecaNaOS(
 export function recusaDoStatusPeloAssistente(status: unknown): { error: string; caminho: string } | null {
   if (status === "completed") {
     return {
-      error: "Concluir a OS é pela tela (abra a OS e use Concluir): é a tela que grava a saída e lança as cobranças da conclusão. Pelo assistente isso volta quando a porta única de status existir.",
+      error: "Concluir a OS é pela tela (abra a OS e use Concluir): é a tela que grava a saída e lança as cobranças da conclusão. Concluir por aqui volta numa das próximas etapas da agenda.",
       caminho: "tela: botão Concluir da OS",
     };
   }
