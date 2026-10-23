@@ -181,59 +181,80 @@ function sbParaRegraDeEntrada(
 
 const ctxDe = (sb: unknown) => ({ sb, admin: {}, userId: "u", userRole: "admin" as const, jwt: "jwt", appOrigin: "", settings: {} });
 
-Deno.test("regra de entrada: documento + cliente pelo nome exato + categoria de receita, e só sugere", async () => {
+// Leva 8 (22/10/2026, decisão do dono): "o Pix do CPF X é do cliente Y" deixou de ser regra — vira pagador conhecido
+// (guardar_pagador_do_cliente, com o SIM do dono e só sugerindo). A regra de entrada fica só para aporte e transferência.
+Deno.test("regra de entrada com cliente é recusada e aponta guardar_pagador_do_cliente; nada é gravado", async () => {
   Deno.env.set("SUPABASE_URL", "https://exemplo.supabase.co");
   const original = globalThis.fetch;
-  globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({ ok: true, atualizadas: 1 }), { status: 200 }))) as typeof fetch;
+  let chamou = false;
+  globalThis.fetch = (() => { chamou = true; return Promise.resolve(new Response("{}")); }) as typeof fetch;
   const banco = sbParaRegraDeEntrada([{ id: "c-joao", name: "João da Silva" }]);
   try {
     const t = tool("criar_regra_financeira");
-    const ok = await t.execute({
+    const comCliente = await t.execute({
       sentido: "entrada", reconhecer_por: "documento", valor_de_busca: "123.456.789-01",
       cliente: "joao da silva", categoria: "Serviços prestados",
     }, ctxDe(banco.sb) as never) as any;
-    assertEquals(ok.ok, true);
-    assertEquals(ok.cliente, "João da Silva");
-    assertEquals(ok.entradas_deste_documento_no_extrato, 3);
-    assertEquals(banco.inseridas[0], {
-      match_type: "document", match_value: "12345678901", direction: "credit", origin: "user",
-      reasoning: "Criada pelo assistente a pedido do usuário.",
-      set_category: "Serviços prestados", set_dre_group: "receita", set_client_id: "c-joao", set_supplier_id: null,
-      autonomy: "suggest", min_amount: null, max_amount: null, status: "active",
-    });
-
-    // Por nome não existe regra de entrada; lançar sozinha também não; documento curto, também não.
-    const base = { sentido: "entrada", cliente: "João da Silva", categoria: "Serviços prestados" };
-    const porNome = await t.execute({ ...base, reconhecer_por: "texto", valor_de_busca: "MARIA" }, ctxDe(banco.sb) as never) as any;
-    assertEquals(typeof porNome.error, "string");
-    const sozinha = await t.execute({ ...base, reconhecer_por: "documento", valor_de_busca: "12345678901", lancar_sozinha: true }, ctxDe(banco.sb) as never) as any;
-    assertEquals(typeof sozinha.error, "string");
-    const docCurto = await t.execute({ ...base, reconhecer_por: "documento", valor_de_busca: "1234567890" }, ctxDe(banco.sb) as never) as any;
-    assertEquals(typeof docCurto.error, "string");
-    assertEquals(banco.inseridas.length, 1);
+    assertEquals(typeof comCliente.error, "string");
+    assertEquals(comCliente.error.includes("guardar_pagador_do_cliente"), true, comCliente.error);
+    // Receita de cliente sem o cliente também não vira regra (o cliente vem do documento dele ou do pagador guardado).
+    const semCliente = await t.execute({
+      sentido: "entrada", reconhecer_por: "documento", valor_de_busca: "12345678901", categoria: "Serviços prestados",
+    }, ctxDe(banco.sb) as never) as any;
+    assertEquals(semCliente.error, comCliente.error);
+    // Com cliente, a recusa vem mesmo com categoria de aporte (o cliente não cabe na regra).
+    const aporteComCliente = await t.execute({
+      sentido: "entrada", reconhecer_por: "documento", valor_de_busca: "12345678901", categoria: "Aporte de sócio", cliente: "João da Silva",
+    }, ctxDe(banco.sb) as never) as any;
+    assertEquals(aporteComCliente.error, comCliente.error);
+    assertEquals(banco.inseridas.length, 0);
+    assertEquals(banco.atualizadas.length, 0);
+    assertEquals(chamou, false);
   } finally {
     globalThis.fetch = original;
   }
 });
 
-Deno.test("regra de entrada que já existe com outro cliente só troca com o usuário dizendo", async () => {
+Deno.test("regra de entrada: as travas de sempre (nome, lançar sozinha, documento curto)", async () => {
+  const banco = sbParaRegraDeEntrada([], [], [{ name: "Aporte de sócio", dre_group: "nao_operacional" }]);
+  const t = tool("criar_regra_financeira");
+  const base = { sentido: "entrada", categoria: "Aporte de sócio" };
+  const porNome = await t.execute({ ...base, reconhecer_por: "texto", valor_de_busca: "MARIA" }, ctxDe(banco.sb) as never) as any;
+  assertEquals(typeof porNome.error, "string");
+  const sozinha = await t.execute({ ...base, reconhecer_por: "documento", valor_de_busca: "12345678901", lancar_sozinha: true }, ctxDe(banco.sb) as never) as any;
+  assertEquals(typeof sozinha.error, "string");
+  const docCurto = await t.execute({ ...base, reconhecer_por: "documento", valor_de_busca: "1234567890" }, ctxDe(banco.sb) as never) as any;
+  assertEquals(typeof docCurto.error, "string");
+  assertEquals(banco.inseridas.length, 0);
+});
+
+Deno.test("regra de entrada que já existe (com cliente, das antigas) só troca com o usuário dizendo — e a troca tira o cliente", async () => {
   Deno.env.set("SUPABASE_URL", "https://exemplo.supabase.co");
   const original = globalThis.fetch;
   globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }))) as typeof fetch;
-  const banco = sbParaRegraDeEntrada([{ id: "c-joao", name: "João da Silva" }],
-    [{ id: "r-velha", set_client_id: "c-outro", set_category: "Serviços prestados", status: "active" }]);
+  const banco = sbParaRegraDeEntrada([],
+    [{ id: "r-velha", set_client_id: "c-outro", set_category: "Serviços prestados", status: "active" }],
+    [{ name: "Aporte de sócio", dre_group: "nao_operacional" }]);
   try {
-    const args = { sentido: "entrada", reconhecer_por: "documento", valor_de_busca: "12345678901", cliente: "João da Silva", categoria: "Serviços prestados" };
+    const args = { sentido: "entrada", reconhecer_por: "documento", valor_de_busca: "12345678901", categoria: "Aporte de sócio" };
     const pergunta = await tool("criar_regra_financeira").execute(args, ctxDe(banco.sb) as never) as any;
     assertEquals(typeof pergunta.error, "string");
     assertEquals(banco.atualizadas.length, 0);
     const trocada = await tool("criar_regra_financeira").execute({ ...args, substituir_regra_existente: true }, ctxDe(banco.sb) as never) as any;
     assertEquals(trocada.ok, true);
-    assertEquals(banco.atualizadas[0].set_client_id, "c-joao");
+    assertEquals(banco.atualizadas[0].set_client_id, null);
+    assertEquals(banco.atualizadas[0].set_category, "Aporte de sócio");
     assertEquals(banco.inseridas.length, 0);
   } finally {
     globalThis.fetch = original;
   }
+});
+
+Deno.test("a descrição e o esquema de criar_regra_financeira não ensinam mais cliente na regra de entrada", () => {
+  const t = tool("criar_regra_financeira");
+  assertEquals("cliente" in ((t.input_schema as any).properties), false);
+  assertEquals(t.description.includes("guardar_pagador_do_cliente"), true);
+  assertEquals(/'o Pix do CPF X é do cliente Y' \(sentido='entrada'/.test(t.description), false);
 });
 
 Deno.test("cliente dito parecido vira pergunta, nunca escolha", async () => {
@@ -256,15 +277,18 @@ Deno.test("regra de entrada de aporte do sócio: sem cliente, sem perguntar clie
       sentido: "entrada", reconhecer_por: "documento", valor_de_busca: "123.456.789-01", categoria: "aporte de sócio",
     }, ctxDe(banco.sb) as never) as any;
     assertEquals(ok.ok, true);
-    assertEquals(ok.cliente, null);
-    assertEquals(banco.inseridas[0].set_client_id, null);
-    assertEquals(banco.inseridas[0].set_category, "Aporte de sócio");
-    assertEquals(banco.inseridas[0].autonomy, "suggest");
-    // Receita comum continua exigindo o cliente.
+    assertEquals(ok.entradas_deste_documento_no_extrato, 3);
+    assertEquals(banco.inseridas[0], {
+      match_type: "document", match_value: "12345678901", direction: "credit", origin: "user",
+      reasoning: "Criada pelo assistente a pedido do usuário.",
+      set_category: "Aporte de sócio", set_dre_group: "nao_operacional", set_client_id: null, set_supplier_id: null,
+      autonomy: "suggest", min_amount: null, max_amount: null, status: "active",
+    });
+    // Receita de cliente não vira regra (leva 8): a recusa aponta o pagador conhecido.
     const semCliente = await tool("criar_regra_financeira").execute({
       sentido: "entrada", reconhecer_por: "documento", valor_de_busca: "98765432100", categoria: "Serviços prestados",
     }, ctxDe(banco.sb) as never) as any;
-    assertEquals(typeof semCliente.error, "string");
+    assertEquals(semCliente.error.includes("guardar_pagador_do_cliente"), true);
     assertEquals(banco.inseridas.length, 1);
   } finally {
     globalThis.fetch = original;

@@ -2,6 +2,8 @@ import type { ToolCtx, ToolDef } from "./registry.ts";
 import { chaveTelefone } from "../phone.ts";
 import { contatosDasEmbarcacoes } from "./vessels.ts";
 import { STATUS_OS_ATIVAS } from "../../service-order-status.ts";
+// LGPD (leva 8): a descrição da conta a pagar pode ser o nome que o banco escreve com o CPF — sai mascarada.
+import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
 
 // Ficha 360 — visão unificada por entidade (Fase 3 · Etapa 1).
 // Ver plans/marineflow-contexto-unificado-escopo.md
@@ -350,7 +352,7 @@ export const entity360Tools: ToolDef[] = [
         total_devido_a_ele: totalDevido,
         quantidade_de_contas_em_aberto: ((contasTodas as any[]) || []).length,
         contas_a_pagar_em_aberto: contas.map((c) => ({
-          descricao: c.description, saldo: r2(Number(c.balance_amount ?? c.amount) || 0), vencimento: c.due_date, status: c.status,
+          descricao: mascararCpfNoTexto(c.description ?? null), saldo: r2(Number(c.balance_amount ?? c.amount) || 0), vencimento: c.due_date, status: c.status,
         })),
         conversa_recente: mensagens,
         memoria: ((notasMem as any[]) || []).map((n) => ({ titulo: n.title, nota: n.body })),

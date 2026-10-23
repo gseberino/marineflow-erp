@@ -104,3 +104,19 @@ describe("serviço de terceiro pergunta para onde foi (decisão do dono, 26/09/2
     expect(selecionarParaLancarSozinho([servico], criterio)).toEqual([]);
   });
 });
+
+// Leva 8 (22/10/2026): Pix de pagador conhecido, valor exato, um título só em aberto — continua SÓ sugestão.
+describe("pagador conhecido nunca dá baixa sozinho (decisão 4 do dono, 22/10/2026)", () => {
+  it("entrada com vínculo de valor exato e título único não vai sozinha, nem com confiança 99", () => {
+    const entradaDoPagador = {
+      ...base, kind: 'create_receivable', confidence: 99, suggested_amount: 120, suggested_category: 'Serviços prestados',
+      vinculo_sugerido: { principal: {
+        tipo: 'receivable', id: 'r1', rotulo: 'Saldo — OS-00060', valor: 120, confianca: 70, nivel: 'probable',
+        motivos: ['Valor exato', 'Pago pela empresa de Acrisio (pagador conhecido)'], diferenca: 0, lancamentoId: 'r1',
+        lado: 'receivable', ordemDeServicoId: null, clienteId: 'c-acrisio', clienteNome: 'Acrisio', converteOrcamento: false, jaLancado: false,
+      }, alternativas: [] },
+    } as never;
+    expect(motivoParaNaoLancarSozinho(entradaDoPagador, criterio)).toMatch(/só saída/);
+    expect(selecionarParaLancarSozinho([entradaDoPagador], criterio)).toEqual([]);
+  });
+});

@@ -25,6 +25,7 @@ import {
 import { allTools, type ToolCtx, type ToolDef } from "./tools/index.ts";
 import { CHAVE_DO_RETRATO, CHAVE_DO_SOLICITANTE, type Solicitante } from "./tools/registry.ts";
 import { trocarNumeroDaOsPeloId } from "./tools/os-referencia.ts";
+import { nomeSemCpf } from "../banking/contraparte.ts";
 import { fluxoQueFalou } from "./tools/comprovantes.ts";
 import { isAutonomyGranted } from "./autonomy-policy.ts";
 import { DEFAULT_MAX_TOKENS, MAX_ITERATIONS as DEFAULT_MAX_ITERATIONS, MODEL_AGENT } from "./models.ts";
@@ -32,6 +33,7 @@ import { PERFIL_ADMIN, PERFIL_OPERACAO, rodaDiretoPelaRede, SO_PELA_REDE } from 
 import { construirFerramentaExtra, NOME_DA_FERRAMENTA_EXTRA } from "./ferramenta-extra.ts";
 // financeiro (07/10/2026): títulos e resumos das ferramentas novas (anotação, estorno, cobrança, favorecido).
 import { RESUMO_QUE_RESOLVE_DO_FINANCEIRO, resumirDoFinanceiro, TITULOS_DO_FINANCEIRO } from "./tools/resumos-do-financeiro.ts";
+import { resumirClienteConfirmado } from "./tools/finance-rules.ts";
 import { nomeDaUnidade, TERMO_GERAL, TERMO_GERAL_PLURAL } from "../unidade.ts";
 
 export interface Proposal {
@@ -395,6 +397,9 @@ RESUMO_QUE_RESOLVE.add("send_maintenance_reminder_now");
 // OS, outro cliente/embarcação — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
 RESUMO_QUE_RESOLVE.add("agrupar_orcamentos");
 RESUMO_QUE_RESOLVE.add("desagrupar_orcamento");
+// "Sim, é do X" (leva 8, revisão de 23/10/2026): entrada confirmada sem cliente sugerido, cliente fora do cadastro ou
+// leitura que falha — o resumo diz por quê numa linha "⚠️": é recusa, não pendência.
+RESUMO_QUE_RESOLVE.add("aprovar_propostas_de_lancamento");
 
 export function resumoQueRecusa(toolName: string, resumo: string): { error: string; nada_registrado: true } | null {
   const t = resumo.trim();
@@ -412,11 +417,30 @@ export async function buildPendingSummary(
   args: Record<string, unknown>,
   quem: Partial<Pick<ToolCtx, "userId" | "userRole" | "settings">> = {},
 ): Promise<string> {
+  // "Sim, é do X" (leva 8, revisão de 23/10/2026): com cliente_confirmado, o cartão mostra cada proposta (título, data,
+  // valor) e, nas confirmadas, "cliente: <nome> (<motivo>)" — nunca uuid. Os outros argumentos (vínculo, categoria, OS…)
+  // seguem no formato de sempre, abaixo. Id sem sugestão ou leitura que falha: uma linha "⚠️" (recusa). Sem
+  // cliente_confirmado, o resumo genérico de sempre.
+  if (toolName === "aprovar_propostas_de_lancamento") {
+    let r: string | null;
+    try {
+      r = await resumirClienteConfirmado(admin, args);
+    } catch (e) {
+      const motivo = String((e as { message?: string })?.message ?? e).replace(/\s+/g, " ").trim();
+      r = `⚠️ Não consegui conferir o cliente das entradas agora (${motivo}). Nada foi registrado; tente de novo.`;
+    }
+    if (r !== null) {
+      if (r.trim().startsWith("⚠️")) return r;
+      const { ids: _ids, cliente_confirmado: _confirmados, ...resto } = args ?? {};
+      return [r, ...await linhasDosArgumentos(admin, resto)].join("\n");
+    }
+  }
   // financeiro (07/10/2026): anotação de Pix, estorno, cobrança e favorecido — o "sim" é sobre o
   // alvo resolvido (qual anotação, qual pagamento, qual cobrança, qual favorecido) e o antes/depois.
   if (toolName in TITULOS_DO_FINANCEIRO) {
     try {
-      const r = await resumirDoFinanceiro(admin, toolName, args);
+      // quem pede: guardar_pagador_do_cliente diz se fica confirmado (administrador) ou proposto (leva 8).
+      const r = await resumirDoFinanceiro(admin, toolName, args, quem);
       if (r) return r;
     } catch { /* cai no resumo genérico */ }
   }
@@ -613,14 +637,23 @@ export async function buildPendingSummary(
     return partes.length ? partes.join("\n") : "Enviar pedido de cotação.";
   }
 
+  return (await linhasDosArgumentos(admin, args)).join("\n");
+}
+
+/** O resumo genérico: um "- Rótulo: valor" por argumento, com o uuid solto trocado pelo nome quando dá. */
+// deno-lint-ignore no-explicit-any
+async function linhasDosArgumentos(admin: any, args: Record<string, unknown>): Promise<string[]> {
   const lines: string[] = [];
   for (const [k, v] of Object.entries(args || {})) {
     const label = FIELD_LABELS_PT[k] || humanizeToolName(k);
     let value = formatFieldValue(k, v);
-    if (typeof v === "string" && UUID_RE.test(v)) value = await resolveIdLabel(admin, k, v);
+    // O id vira o texto do registro (linha do extrato, título da fila, descrição da conta), que pode trazer o CPF que o
+    // banco escreve no nome ("12345678901-MARIA"): mascarado (leva 8, LGPD). Só esse texto — telefone de 11 dígitos dito
+    // pelo usuário (ex.: o número de um envio) tem de aparecer inteiro para ser conferido.
+    if (typeof v === "string" && UUID_RE.test(v)) value = nomeSemCpf(await resolveIdLabel(admin, k, v));
     lines.push(`- ${label}: ${value}`);
   }
-  return lines.join("\n");
+  return lines;
 }
 
 const ROTULO_DO_CARGO: Record<string, string> = {

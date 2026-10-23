@@ -29,6 +29,7 @@ import { CategoriaDespesaSelect } from '@/components/CategoriaDespesaSelect';
 import { PayeeFormDialog } from '@/components/PayeeFormDialog';
 import { BuscaFinanceira } from '@/components/BuscaFinanceira';
 import { EvidenciaDaLinha, VinculoDaLinha } from '@/components/ExtratoIdentificacao';
+import { GuardarPagadorDialog, usePodeGuardarPagador, type PedidoDeGuardarPagador } from '@/components/GuardarPagadorDialog';
 import { ParaOndeFoi, ObservacaoECentro } from '@/components/ParaOndeFoi';
 import { BotaoVerOS } from '@/components/VerOSRapido';
 import { AcoesDaLinha } from '@/components/AcoesDaLinha';
@@ -38,6 +39,7 @@ import { origemDoDinheiro } from '@/lib/origem-do-dinheiro';
 import {
   precisaDecidir, podeJaEstarLancado, osAnotada, temPerguntaDaOS, temPerguntaDaOC,
   faltaNoDestinoDaLinha, precisaDeDestino, fraseDaFalta, faltaNoDestino, SERVICO_DE_CLIENTE, vinculoEfetivo,
+  clienteEscolhido, clienteFaltaEscolher, clientePedeSim, clienteDoParecePagar,
 } from '@/lib/extrato-vinculo';
 import { buscaAtiva, casaComBusca, type CriterioDeBusca } from '@/lib/busca-financeira';
 import {
@@ -516,11 +518,29 @@ function LinhaProposta({
   // contaria o dinheiro duas vezes. Responde-se aplicando ou marcando "É receita nova".
   const parece = p.kind === 'create_receivable' && !entradaSemLancamento ? p.parece_pagar ?? null : null;
   const pareceAberto = !!parece && pareceSemResposta(p, correcao);
+  // Leva 8 (22/10/2026): o cliente sugerido por um pagador conhecido ou pelo histórico de terceiro pede o SIM — sem
+  // "Sim, é do X" (ou outro cliente escolhido) o servidor recusaria com "Confirme o cliente". Casar com o que já
+  // existe ou ligar a uma OS já dizem de quem é a receita: aí não trava. A anotação do dono que trocou (ou disse) o
+  // cliente é o SIM dele: clientePedeSim/clienteEscolhido usam a conta do servidor (situacaoDoClienteSugerido).
+  // Revisão de 23/10/2026, 4ª rodada: o sugerido que não é o da prova, sem anotação em vigor que o diga (a anotação foi
+  // desfeita), não vale — "De qual cliente veio?" fica em branco e a linha pede a escolha (o servidor recusaria com
+  // "Escolha o cliente…"), nunca "Sim, é do <prova antiga>".
+  const clienteDaLinha = clienteEscolhido(p, correcao);
+  const osDaLinha = correcao?.serviceOrderId !== undefined ? correcao.serviceOrderId : osAnotada(p);
+  const clienteVemDeOutroLugar = !!vinculoEfetivo(p.vinculo_sugerido, correcao?.vinculo) || !!osDaLinha;
+  const confirmarCliente = p.kind === 'create_receivable' && !entradaSemLancamento && clientePedeSim(p, correcao)
+    && !clienteVemDeOutroLugar
+    ? `Confirme o cliente: responda "Sim, é do ${p.evidencia?.cliente?.nome ?? 'cliente sugerido'}" ou escolha outro`
+    : null;
+  const escolherCliente = p.kind === 'create_receivable' && !entradaSemLancamento && clienteFaltaEscolher(p, correcao)
+    && !clienteVemDeOutroLugar
+    ? 'Escolha o cliente em "De qual cliente veio?"'
+    : null;
   const bloqueio = decidir
     ? (podeJaEstarLancado(p.vinculo_sugerido) ? 'Pode já estar lançado: escolha casar ou lançar novo' : 'O sistema sugeriu um vínculo: diga se é isso antes de aprovar')
     : pareceAberto ? 'Este Pix parece pagar contas que já existem: confira e aplique, ou marque "É receita nova"'
     : faltaDestino.length > 0 ? fraseDaFalta(faltaDestino)
-    : contradicao;
+    : contradicao ?? confirmarCliente ?? escolherCliente;
 
   return (
     <Card className="p-3">
@@ -594,7 +614,11 @@ function LinhaProposta({
                     ? 'Tem vínculo sugerido — responda aqui'
                     : foraDoLote === 'responder_destino'
                       ? 'Diga para onde foi — aqui'
-                      : 'Responda a OS/OC aqui'}
+                      : foraDoLote === 'responder_cliente'
+                        ? 'Confirme o cliente — aqui'
+                        : foraDoLote === 'escolher_cliente'
+                          ? 'Escolha o cliente — aqui'
+                          : 'Responda a OS/OC aqui'}
               </Badge>
             )}
           </div>
@@ -622,7 +646,7 @@ function LinhaProposta({
               categoria={categoria}
               favorecidoId={correcao?.payeeId ?? p.suggested_payee_id ?? null}
               osId={correcao?.serviceOrderId ?? null}
-              clienteId={correcao?.clientId ?? p.suggested_client_id ?? null}
+              clienteId={clienteDaLinha}
               ehReceita={p.kind === 'create_receivable'}
               onMudar={(v) => onCorrigir({ ...correcao, ...v })}
               ocupado={ocupado}
@@ -664,6 +688,14 @@ function LinhaProposta({
                 ehReceita={p.kind === 'create_receivable'}
                 categoria={categoria}
                 ocupado={ocupado}
+                clienteId={clienteDaLinha}
+                clienteSugeridoId={p.suggested_client_id ?? null}
+                onMudar={(v) => onCorrigir({ ...correcao, ...v })}
+                transacao={p.bank_transaction_id ? {
+                  id: p.bank_transaction_id,
+                  documento: tx?.counterparty_document ?? null,
+                  nome: tx?.counterparty_name ?? null,
+                } : null}
               />
               <VinculoDaLinha
                 vinculo={p.vinculo_sugerido}
@@ -680,7 +712,10 @@ function LinhaProposta({
                   <ParecePagarDaLinha
                     parece={parece}
                     entradaId={p.bank_transaction_id}
-                    clienteId={correcao?.clientId ?? p.suggested_client_id ?? null}
+                    // O cliente com que o "Parece pagar" foi calculado (useParecePagarDaFila: a escolha ou o
+                    // SUGERIDO, inclusive o de pagador conhecido). O "Este Pix paga…" abre com as contas dele
+                    // marcadas e o cliente à vista para trocar: aplicar ali já é o SIM (leva 8).
+                    clienteId={clienteDoParecePagar(p, correcao)}
                     receitaNova={correcao?.vinculo === 'nenhum'}
                     onReceitaNova={(sim) => onCorrigir({ ...correcao, vinculo: sim ? 'nenhum' : undefined })}
                     ocupado={ocupado}
@@ -689,7 +724,7 @@ function LinhaProposta({
                   <div className="mt-1">
                     <BotaoEstePixPaga
                       entradaId={p.bank_transaction_id}
-                      clienteInicial={correcao?.clientId ?? p.suggested_client_id ?? null}
+                      clienteInicial={clienteDaLinha}
                       disabled={ocupado}
                     />
                   </div>
@@ -847,7 +882,7 @@ function CartaoDoFavorecido({
         ? `Todas passam de ${formatCurrency(limiteLote)} — aprove uma a uma.`
         : perguntaDestino && faltaDestino.length > 0
           ? 'Diga acima para onde foi e o que foi feito para poder aprovar.'
-          : 'Nenhuma cabe no lote (valor, vínculo, OS ou "para onde foi" para responder, transferência ou aporte) — aprove uma a uma.'
+          : 'Nenhuma cabe no lote (valor, vínculo, OS, cliente ou "para onde foi" para responder, transferência ou aporte) — aprove uma a uma.'
       : null;
 
   return (
@@ -971,8 +1006,12 @@ export interface SementeDeRegra {
   match_type: 'counterparty' | 'supplier' | 'document';
   match_value: string;
   set_category: string | null;
-  /** Entrada: a regra é "o Pix deste CPF/CNPJ é do cliente…" (resposta 18 do dono). */
+  /** Entrada: a regra é "o Pix deste CPF/CNPJ entra como <categoria>" (resposta 18 do dono). */
   direction?: 'debit' | 'credit';
+  /**
+   * Sempre null desde a leva 8 (22/10/2026): quem paga por um cliente se guarda em pagadores_do_cliente
+   * (GuardarPagadorDialog), não numa regra. As regras antigas com cliente continuam lidas.
+   */
   set_client_id?: string | null;
 }
 
@@ -1151,13 +1190,15 @@ export function FinanceReviewInbox({
     const semResposta = [...selecionadas].filter((id) => {
       const p = porId.get(id);
       const m = p ? motivoForaDoLote(p, limiteLote, correcoes[id]) : null;
-      return m === 'responder_os' || m === 'responder_vinculo' || m === 'responder_destino' || m === 'sem_receita';
+      return m === 'responder_os' || m === 'responder_vinculo' || m === 'responder_destino' || m === 'sem_receita'
+        || m === 'responder_cliente' || m === 'escolher_cliente';
     });
     const ids = [...selecionadas].filter((id) => !semResposta.includes(id));
     if (semResposta.length > 0) {
       // Entrada que virou transferência ou aporte depois de marcada também fica: sai sem receita,
-      // é decisão de cada linha (revisão de 28/09/2026).
-      toast.info(`${semResposta.length} linha(s) ficaram de fora: têm vínculo, OS/OC ou "para onde foi" para responder, ou saem sem receita (transferência, aporte) — aprove na própria linha.`);
+      // é decisão de cada linha (revisão de 28/09/2026). E a entrada cujo cliente sugerido pede o
+      // SIM (leva 8), ou que ninguém disse de quem é (4ª rodada): o servidor não usaria o cliente sem a resposta.
+      toast.info(`${semResposta.length} linha(s) ficaram de fora: têm vínculo, OS/OC, cliente ou "para onde foi" para responder, ou saem sem receita (transferência, aporte) — aprove na própria linha.`);
     }
     if (ids.length === 0) return;
     const overrides: Record<string, Correcao> = {};
@@ -1206,7 +1247,9 @@ export function FinanceReviewInbox({
       // OS só a respondida, e só quando TODAS as linhas do grupo responderam a mesma: a
       // sugestão é pergunta de cada linha, e o cabeçalho não pode mostrar a OS de uma só.
       serviceOrderId: osComumDoGrupo(g, correcoes),
-      clientId: g.propostas.map((p) => correcoes[p.id]?.clientId ?? p.suggested_client_id).find(Boolean) ?? null,
+      // O cliente que a aprovação usaria (clienteEscolhido): o cabeçalho não assume o cliente que veio de um
+      // pagador conhecido, do histórico de terceiro ou do vínculo — esses pedem o SIM em cada linha (leva 8).
+      clientId: g.propostas.map((p) => clienteEscolhido(p, correcoes[p.id])).find(Boolean) ?? null,
     };
   };
 
@@ -1282,26 +1325,55 @@ export function FinanceReviewInbox({
     aprovar.mutate({ ids, overrides });
   };
 
+  /** "Virar regra" de uma entrada com cliente escolhido e documento de outra pessoa: guardar o pagador. */
+  const [guardando, setGuardando] = useState<{ pedido: PedidoDeGuardarPagador; semente: SementeDeRegra } | null>(null);
+  const podeGuardar = usePodeGuardarPagador();
+
   /**
-   * Regra a partir de uma ENTRADA: "o Pix deste CPF/CNPJ é do cliente…" (resposta 18 do dono,
-   * 26/09/2026). Só pelo documento — nome não identifica ninguém (decisão de 26/09/2026) —,
-   * então entrada que veio sem CPF/CNPJ não vira regra.
+   * Regra a partir de uma ENTRADA. Só pelo documento — nome não identifica ninguém (decisão de 26/09/2026) —, então
+   * entrada que veio sem CPF/CNPJ não vira regra.
+   *
+   * Leva 8 (22/10/2026): a regra de entrada NÃO diz mais o cliente. "O Pix deste CPF é do cliente Y" fazia a fila
+   * tratar quem pagou como o próprio cliente. Com um cliente escolhido e o documento de outra pessoa, abre o "Guardar
+   * quem paga por…" (a relação, o SIM do administrador); a regra que sobra é só a da categoria. Documento do próprio
+   * cliente a fila já reconhece: só a categoria.
    */
-  const sementeDeEntrada = (documento: string | null | undefined, clienteId: string | null, categoria: string | null): SementeDeRegra | null => {
+  const regraOuPagadorDaEntrada = (
+    linhas: PropostaFinanceira[], documento: string | null | undefined, clienteId: string | null, categoria: string | null,
+  ) => {
     const doc = documentoDaEntrada(documento);
     if (!doc) {
       toast.info('Esta entrada veio sem CPF/CNPJ. A regra de entrada reconhece só pelo documento — escolha o cliente na própria linha.');
-      return null;
+      return;
     }
-    return { match_type: 'document', match_value: doc, direction: 'credit', set_client_id: clienteId, set_category: categoria };
+    const semente: SementeDeRegra = {
+      match_type: 'document', match_value: doc, direction: 'credit', set_client_id: null, set_category: categoria,
+    };
+    const linha = linhas.find((p) => !!p.bank_transaction_id
+      && documentoDaEntrada(p.bank_transactions?.counterparty_document) === doc);
+    const doProprioCliente = linhas.some((p) => p.evidencia?.cliente?.por === 'documento' && p.evidencia?.cliente?.id === clienteId);
+    if (clienteId && linha?.bank_transaction_id && !doProprioCliente && podeGuardar) {
+      setGuardando({
+        pedido: {
+          clientId: clienteId,
+          clienteNome: linha.evidencia?.cliente?.id === clienteId ? linha.evidencia?.cliente?.nome ?? null : null,
+          bankTransactionId: linha.bank_transaction_id,
+          pagadorNome: linha.bank_transactions?.counterparty_name ?? null,
+          pagadorDocumento: doc,
+          origem: 'fila',
+        },
+        semente,
+      });
+      return;
+    }
+    onCriarRegra?.(semente);
   };
 
   const criarRegraDoGrupo = (g: GrupoDeFavorecido) => {
     const estado = estadoDoGrupo(g);
     if (g.propostas.length > 0 && g.propostas.every((p) => p.kind === 'create_receivable')) {
-      const semente = sementeDeEntrada(g.documento ?? g.propostas[0]?.bank_transactions?.counterparty_document,
+      regraOuPagadorDaEntrada(g.propostas, g.documento ?? g.propostas[0]?.bank_transactions?.counterparty_document,
         estado.clientId ?? null, estado.category || null);
-      if (semente) onCriarRegra?.(semente);
       return;
     }
     onCriarRegra?.({
@@ -1313,10 +1385,9 @@ export function FinanceReviewInbox({
 
   const criarRegraDaLinha = (p: PropostaFinanceira) => {
     if (p.kind === 'create_receivable') {
-      const semente = sementeDeEntrada(p.bank_transactions?.counterparty_document,
-        correcoes[p.id]?.clientId ?? p.suggested_client_id ?? null,
+      regraOuPagadorDaEntrada([p], p.bank_transactions?.counterparty_document,
+        clienteEscolhido(p, correcoes[p.id]),
         correcoes[p.id]?.category ?? p.suggested_category ?? null);
-      if (semente) onCriarRegra?.(semente);
       return;
     }
     onCriarRegra?.({
@@ -1725,6 +1796,14 @@ export function FinanceReviewInbox({
             />
           ))}
         </div>
+      )}
+
+      {guardando && (
+        <GuardarPagadorDialog
+          pedido={guardando.pedido}
+          onFechar={() => setGuardando(null)}
+          onSoCategoria={onCriarRegra ? () => { const s = guardando.semente; setGuardando(null); onCriarRegra(s); } : undefined}
+        />
       )}
     </div>
   );

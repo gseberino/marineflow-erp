@@ -2,6 +2,8 @@ import type { ToolDef } from "./registry.ts";
 import { horariosDeBrasilia } from "../fuso.ts";
 import { parseRRule } from "../../recurrence.ts";
 import { ehTipoDeEntidadeValido, RELATED_ENTITY_TYPES } from "../../agenda-entity-types.ts";
+// LGPD (leva 8): o nome livre da conta a pagar pode trazer o CPF que o banco escreve nele — sai mascarado.
+import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
 
 // Agenda & Tarefas 2.0 — tool set completo (Fase 3 do plano
 // plans/marineflow-agenda-tarefas.md §8). O agente é operador da agenda:
@@ -417,7 +419,7 @@ export const agendaTools: ToolDef[] = [
           .in("status", ["pending", "partially_paid"]).eq("due_date", day).limit(20);
         result.vencimentos_do_dia = {
           a_receber: (recv || []).map((r: any) => ({ cliente: r.clients?.name, valor: r.balance_amount ?? r.amount })),
-          a_pagar: (pay || []).map((p: any) => ({ fornecedor: p.supplier_name, valor: p.balance_amount ?? p.amount })),
+          a_pagar: (pay || []).map((p: any) => ({ fornecedor: mascararCpfNoTexto(p.supplier_name ?? null), valor: p.balance_amount ?? p.amount })),
         };
       }
       return result;

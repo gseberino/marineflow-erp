@@ -197,3 +197,26 @@ Deno.test("minutos: 2 para o lote + 20 s por item de fora + 1 min por débito se
   const fora = Array.from({ length: 44 }, (_, i) => ({ id: String(i), grupo: "despesa" as const, titulo: "x", valor: 1, codigo: i < 6 ? "sem_loja" as const : "sem_categoria" as const, motivo: "" }));
   assertEquals(minutosDoLote(24, fora), 25);
 });
+
+// Leva 8 (22/10/2026): o Pix de pagador conhecido (sugestão com motivo) fica FORA do lote, com ou sem vínculo exato.
+Deno.test("entradas: pagador conhecido fica fora — com vínculo exato é 'só você liga'; sem vínculo, 'entrada'", () => {
+  const m = medidas();
+  const evidencia = { cliente: { id: "c-acrisio", nome: "Acrisio", por: "pagador_conhecido", relacao: "empresa_do_cliente", detalhe: "Pago pela empresa de Acrisio, guardado por você em 22/10 — confira" } };
+  const comVinculo = linha({
+    kind: "create_receivable", quem: "EQUIT ADMINISTRACAO DE BENS LTDA", doc: "04754513000149", suggested_amount: 120,
+    suggested_category: "Serviços prestados", suggested_client_id: "c-acrisio", evidencia,
+    vinculo_sugerido: { principal: { tipo: "receivable", rotulo: "Saldo — OS-00060", jaLancado: false, confianca: 70, diferenca: 0 } as never, alternativas: [] },
+  });
+  assertEquals(decidir(comVinculo, CTX, m).entra, false);
+  assertEquals(decidir(comVinculo, CTX, m).codigo, "vinculo");
+  const semVinculo = linha({ kind: "create_receivable", suggested_amount: 120, suggested_category: "Serviços prestados", suggested_client_id: "c-acrisio", evidencia });
+  assertEquals(decidir(semVinculo, CTX, m), { entra: false, codigo: "entrada", motivo: "entrada: pode pagar uma cobrança em aberto; só você liga" });
+});
+
+Deno.test("nomeCurto: o CPF que o banco escreve no nome sai do título (vai ao WhatsApp) — leva 8, LGPD", () => {
+  assertEquals(nomeCurto("12345678901-JOAO SOUZA", "12345678901"), "Joao S.");
+  assertEquals(nomeCurto("JOAO DA SILVA 123.456.789-01", "12345678901"), "Joao S.");
+  // CNPJ (14 dígitos) e números curtos não são tocados.
+  assertEquals(nomeCurto("ACME 12345678000199"), "Acme 12345678000199");
+  assertEquals(nomeCurto("MERCADO*MERCADOLIVRE 1/2"), "Mercado Livre (2x)");
+});

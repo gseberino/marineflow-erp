@@ -9,6 +9,9 @@ import {
   COLUNAS_DO_FLUXO, FUNCAO_DA_RAIZ_DA_EMPRESA, ROTULO_DO_DESTINO, hojeEmBrasilia, mesesInteirosDoPeriodo, somarDias,
   somarFluxoDoPeriodo, type DestinoDeFora, type LinhaDoFluxo, type OpcoesDoFluxo,
 } from "../../banking/fluxo-de-caixa.ts";
+// LGPD (leva 8): a conta que veio do Extrato nasce com o nome do banco ("12345678901-MARIA…"), e a observação do
+// pagamento conciliado leva o histórico da linha — o CPF de terceiro sai mascarado ao modelo.
+import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
 
 /** O recorte de dias do fechamento, em datas de Brasília ('AAAA-MM-DD'). */
 export function periodoDoFechamento(periodo: string, hoje: string): { de: string; ate: string } {
@@ -207,7 +210,7 @@ export const financialTools: ToolDef[] = [
         saldo_aberto: totalCharged - totalPaid,
         "recebíveis": (recs || []).map((r: any) => ({
           id: r.id,
-          descricao: r.description,
+          descricao: mascararCpfNoTexto(r.description ?? null),
           valor: r.amount,
           vencimento: r.due_date,
           status: statusMap[r.status] || r.status,
@@ -220,7 +223,7 @@ export const financialTools: ToolDef[] = [
           valor: p.amount,
           data: p.payment_date,
           forma: p.payment_method,
-          obs: p.notes,
+          obs: mascararCpfNoTexto(p.notes ?? null),
         })),
       };
     },
@@ -275,7 +278,7 @@ export const financialTools: ToolDef[] = [
         .order("due_date", { ascending: true })
         .limit(50);
       if (error) throw error;
-      return { results: data };
+      return { results: ((data ?? []) as any[]).map((r) => ({ ...r, description: mascararCpfNoTexto(r.description ?? null) })) };
     },
   },
   {
@@ -301,7 +304,11 @@ export const financialTools: ToolDef[] = [
         .order("due_date", { ascending: true })
         .limit(50);
       if (error) throw error;
-      return { results: data };
+      return {
+        results: ((data ?? []) as any[]).map((p) => ({
+          ...p, description: mascararCpfNoTexto(p.description ?? null), supplier_name: mascararCpfNoTexto(p.supplier_name ?? null),
+        })),
+      };
     },
   },
   {
@@ -731,7 +738,7 @@ export const financialTools: ToolDef[] = [
             receivable_id: r.id,
             cliente: r.clients?.name || "(sem cliente)",
             client_id: r.client_id,
-            descricao: r.description || null,
+            descricao: mascararCpfNoTexto(r.description || null),
             saldo: Math.round(saldo * 100) / 100,
             dias_atraso: dias,
             ultima_cobranca: ult,

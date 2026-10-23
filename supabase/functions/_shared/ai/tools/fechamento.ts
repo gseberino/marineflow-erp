@@ -4,6 +4,8 @@
 // essa semana?", "para de lançar sozinho". A IA escolhe a função e os argumentos de negócio
 // (mês, conta pelo nome); o banco faz a conta — saldo, verificação, trava.
 import { blockTechnician, type Role, type ToolCtx, type ToolDef } from "./registry.ts";
+// LGPD (leva 8): o título da proposta nasce do nome do banco ("Despesa: 12345678901-JOAO…") — CPF mascarado ao modelo.
+import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
 
 const CARGOS_FINANCEIRO: Role[] = ["admin", "financial"];
 
@@ -203,7 +205,7 @@ export const fechamentoTools: ToolDef[] = [
       if (error) throw new Error(`Não consegui ler o que foi lançado sozinho: ${error.message}`);
       if (erroCfg) throw new Error(`Não consegui ler se o lançar sozinho está ligado: ${erroCfg.message}`);
       const lista = ((data ?? []) as any[]).map((l) => ({
-        o_que: l.title, valor: Number(l.suggested_amount), categoria: l.suggested_category, data: l.suggested_date,
+        o_que: mascararCpfNoTexto(l.title ?? null), valor: Number(l.suggested_amount), categoria: l.suggested_category, data: l.suggested_date,
         por: l.automatica === "regra" ? "regra sua" : "confiança alta", payable_id: l.created_payable_id,
       }));
       return {

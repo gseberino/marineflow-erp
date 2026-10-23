@@ -380,6 +380,16 @@ export type PDFData = {
     payment_method: string;
     reference?: string;
     notes?: string;
+    /**
+     * Quem pagou, quando NÃO foi o próprio cliente (leva 8, 22/10/2026): "Recebemos de <payer>, por conta de
+     * <client>". Só para pagamento de terceiro pela linha do banco (view pagamentos_com_pagador, situação
+     * 'terceiro'); sem payer, o recibo sai como sempre saiu. CPF de terceiro é dado pessoal: o recibo imprime
+     * mascarado (***.456.789-**) mesmo que chegue inteiro; CNPJ sai inteiro.
+     */
+    payer?: {
+      name: string;
+      cpf_cnpj?: string;
+    };
   };
   terms?: string;
   photos?: string[];

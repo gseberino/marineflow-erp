@@ -9,6 +9,7 @@ import {
 } from '../../supabase/functions/_shared/banking/parece-pagar';
 import { toast } from 'sonner';
 import { useAppSetting } from '@/hooks/use-app-settings';
+import { clienteDoParecePagar } from '@/lib/extrato-vinculo';
 
 /**
  * Acima deste valor a proposta sai do lote e exige olhar individual (decisão do usuário,
@@ -203,7 +204,8 @@ export function useParecePagarDaFila(
 ): Map<string, ParecePagar> {
   const entradas = useMemo(() => propostas.flatMap((p) => {
     if (p.kind !== 'create_receivable' || !p.bank_transaction_id) return [];
-    const cliente = correcoes[p.id]?.clientId ?? p.suggested_client_id;
+    // Nunca com o sugerido que ninguém disse ser o da linha (situação "escolher").
+    const cliente = clienteDoParecePagar(p, correcoes[p.id]);
     if (!cliente || !p.suggested_date) return [];
     return [{ id: p.id, cliente, valor: Math.abs(Number(p.suggested_amount ?? 0)), data: p.suggested_date }];
   }), [propostas, correcoes]);

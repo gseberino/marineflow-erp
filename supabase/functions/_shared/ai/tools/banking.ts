@@ -9,10 +9,18 @@
 // gatilho de conversão), então `conciliar_transacao` é risk alto: o loop do agente grava
 // uma ação pendente e só executa depois da confirmação humana.
 
-import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolDef } from "./registry.ts";
+import { type ToolDef } from "./registry.ts";
 import { suggestMatches } from "../../banking/matching.ts";
 import type { BankTx } from "../../banking/types.ts";
 import { montarSugestoes } from "../../banking/sugestoes.ts";
+import { documentoMascarado } from "../../banking/contraparte.ts";
+import { CARGOS_DO_FINANCEIRO, mascararCpfNoTexto, semAcessoDoFinanceiro } from "./financeiro-comum.ts";
+
+// Ler o extrato pelo assistente (leva 8, 23/10/2026 — LGPD): CPF de terceiro só para administrador e financeiro, e
+// mascarado (***.456.789-**; CNPJ inteiro). O cargo é conferido DENTRO do execute: no WhatsApp e no Claude Max o
+// cliente do banco é a chave de serviço, que passa por cima da RLS de bank_transactions (só admin/financeiro na tela).
+// Quem precisa do documento inteiro (regra por CPF/CNPJ) passa o id da linha e a tool lê do banco
+// (criar_regra_financeira com bank_transaction_id) — nunca do texto que o modelo viu.
 
 export const bankingTools: ToolDef[] = [
   {
@@ -27,9 +35,9 @@ export const bankingTools: ToolDef[] = [
       },
     },
     risk: "low",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_DO_FINANCEIRO,
     async execute(args, ctx) {
-      const bloqueio = blockTechnician(ctx);
+      const bloqueio = semAcessoDoFinanceiro(ctx);
       if (bloqueio) return bloqueio;
 
       let q = ctx.sb
@@ -42,10 +50,19 @@ export const bankingTools: ToolDef[] = [
 
       const { data, error } = await q;
       if (error) throw error;
+      // CPF de terceiro mascarado — no campo e no texto que o banco escreve com ele (nome e histórico).
+      // deno-lint-ignore no-explicit-any
+      const transacoes = ((data || []) as any[]).map((t) => ({
+        ...t,
+        description: mascararCpfNoTexto(t.description),
+        counterparty_name: mascararCpfNoTexto(t.counterparty_name),
+        counterparty_document: documentoMascarado(t.counterparty_document),
+      }));
       return {
-        total: (data || []).length,
-        transacoes: data,
-        dica: "Use sugerir_conciliacao com o id de uma transação para ver as correspondências pontuadas.",
+        total: transacoes.length,
+        transacoes,
+        dica: "Use sugerir_conciliacao com o id de uma transação para ver as correspondências pontuadas. "
+          + "O CPF aparece mascarado: regra por documento é criar_regra_financeira com o id da linha em bank_transaction_id.",
       };
     },
   },
@@ -61,9 +78,9 @@ export const bankingTools: ToolDef[] = [
       },
     },
     risk: "low",
-    roles: NON_TECHNICIAN_ROLES,
+    roles: CARGOS_DO_FINANCEIRO,
     async execute(args, ctx) {
-      const bloqueio = blockTechnician(ctx);
+      const bloqueio = semAcessoDoFinanceiro(ctx);
       if (bloqueio) return bloqueio;
 
       // O mesmo cálculo da tela de Conciliação, direto (03/10/2026). Antes ia por HTTP à
@@ -87,7 +104,7 @@ export const bankingTools: ToolDef[] = [
         transacao: {
           id: t.transaction.id,
           data: t.transaction.transaction_date,
-          descricao: t.transaction.description,
+          descricao: mascararCpfNoTexto(t.transaction.description),
           valor: t.transaction.amount,
           tipo: t.transaction.transaction_type,
         },
@@ -100,7 +117,8 @@ export const bankingTools: ToolDef[] = [
           confianca: s.score,
           nivel: s.tier,
           diferenca: s.difference,
-          motivos: s.reasons.map((r: any) => r.detail),
+          // O motivo de terceiro sem nome traz o CPF de quem enviou (matching.ts): mascarado aqui, sem mexer no motor.
+          motivos: s.reasons.map((r: any) => mascararCpfNoTexto(r.detail)),
           aprova_orcamento: !!s.candidate.convertsQuote,
         })),
       }));
@@ -130,9 +148,11 @@ export const bankingTools: ToolDef[] = [
       required: ["transaction_id", "tipo", "alvo_id"],
     },
     risk: "high",
-    roles: NON_TECHNICIAN_ROLES,
+    // Só administrador e financeiro (decisão do dono, 23/10/2026): pelo WhatsApp/Max a chave de serviço ignora a RLS de
+    // bank_transactions, e a tela de Conciliação já nega o vendedor.
+    roles: CARGOS_DO_FINANCEIRO,
     async execute(args, ctx) {
-      const bloqueio = blockTechnician(ctx);
+      const bloqueio = semAcessoDoFinanceiro(ctx);
       if (bloqueio) return bloqueio;
 
       const { data: tx, error: txErr } = await ctx.sb

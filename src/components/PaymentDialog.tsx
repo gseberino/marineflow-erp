@@ -11,7 +11,10 @@ import { useCardFees } from '@/hooks/use-card-fees';
 import { toast } from 'sonner';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Receipt as ReceiptIcon } from 'lucide-react';
+// O "Pago por" de cada pagamento recebido (leva 8): a frase mora com o hook da view (uma fonte só).
+import { fraseDoPagoPor, usePagamentosComPagador } from '@/hooks/use-pagadores-do-cliente';
+import { generateReceivableReceipt, type ReceivableRow } from '@/v2/lib/receipt';
 
 interface PaymentDialogProps {
   open: boolean;
@@ -42,6 +45,9 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
   const { data: cardFees } = useCardFees();
   const registerPayment = useRegisterPayment();
   const cancelPayment = useCancelPayment();
+  const { data: pagoPor } = usePagamentosComPagador(isReceivable ? parentId : undefined);
+  const pagoPorDoPagamento = new Map((pagoPor ?? []).map((x) => [x.payment_id, x]));
+  const [gerandoRecibo, setGerandoRecibo] = useState<string | null>(null);
 
   const [showDetailed, setShowDetailed] = useState(false);
   const [method, setMethod] = useState('pix');
@@ -135,7 +141,9 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
             <div>
               <p className="text-sm font-medium text-muted-foreground mb-2">{t.financial.paymentHistory}</p>
               <div className="space-y-2">
-                {payments.map((p: any) => (
+                {payments.map((p: any) => {
+                  const pagoPorDeste = isReceivable ? fraseDoPagoPor(pagoPorDoPagamento.get(p.id)) : null;
+                  return (
                   <div key={p.id} className={`border rounded-lg p-2 text-sm ${p.status === 'cancelled' ? 'opacity-50' : ''}`}>
                     <div className="flex justify-between items-center">
                       <span>{new Date(p.payment_date).toLocaleDateString('pt-BR')}</span>
@@ -145,10 +153,31 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
                         {p.status === 'cancelled' ? t.financial.paymentCancelled : t.financial.paymentConfirmed}
                       </Badge>
                     </div>
+                    {pagoPorDeste && (
+                      <p className={`mt-1 flex items-start gap-1 text-xs ${pagoPorDeste.confira ? 'text-warning' : 'text-muted-foreground'}`}>
+                        {pagoPorDeste.confira && <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden />}
+                        <span className="min-w-0 break-words">{pagoPorDeste.texto}</span>
+                      </p>
+                    )}
                     {p.status === 'confirmed' && cancellingId !== p.id && (
-                      <Button variant="ghost" size="sm" className="text-destructive text-xs mt-1" onClick={() => setCancellingId(p.id)}>
-                        {t.financial.cancelPayment}
-                      </Button>
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        {isReceivable && (
+                          <Button
+                            variant="ghost" size="sm" className="h-8 gap-1 text-xs"
+                            disabled={gerandoRecibo === p.id}
+                            onClick={async () => {
+                              setGerandoRecibo(p.id);
+                              try { await generateReceivableReceipt(record as ReceivableRow, p.id); }
+                              finally { setGerandoRecibo(null); }
+                            }}
+                          >
+                            <ReceiptIcon className="h-3.5 w-3.5" /> Recibo deste pagamento
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="sm" className="text-destructive text-xs" onClick={() => setCancellingId(p.id)}>
+                          {t.financial.cancelPayment}
+                        </Button>
+                      </div>
                     )}
                     {cancellingId === p.id && (
                       <div className="mt-2 space-y-2 border-t pt-2">
@@ -176,7 +205,8 @@ export function PaymentDialog({ open, onOpenChange, receivable, payable }: Payme
                       <p className="text-xs text-muted-foreground mt-1 italic">{p.cancellation_reason}</p>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

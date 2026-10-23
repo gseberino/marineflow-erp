@@ -16,7 +16,9 @@
 // abaixo do limite de lote. As grandes continuam pedindo olho individual, como sempre —
 // elas só chegam lá já classificadas.
 
-import { faltaNoDestinoDaLinha, perguntaDaOSAberta, precisaDecidir } from '@/lib/extrato-vinculo';
+import {
+  clienteFaltaEscolher, clientePedeSim, faltaNoDestinoDaLinha, perguntaDaOSAberta, precisaDecidir,
+} from '@/lib/extrato-vinculo';
 import type { Correcao, PropostaFinanceira } from '@/hooks/use-finance-review';
 import { saiSemReceita } from '../../supabase/functions/_shared/banking/entrada-sem-cliente';
 
@@ -32,7 +34,8 @@ export function pareceSemResposta(p: PropostaFinanceira, correcao?: Correcao): b
 }
 
 export type MotivoForaDoLote =
-  'transferencia' | 'sem_receita' | 'acima_do_limite' | 'responder_vinculo' | 'responder_os' | 'responder_destino';
+  'transferencia' | 'sem_receita' | 'acima_do_limite' | 'responder_vinculo' | 'responder_os' | 'responder_destino'
+  | 'responder_cliente' | 'escolher_cliente';
 
 /**
  * A linha cabe no lote? null = cabe. A mesma regra na lista e no agrupado.
@@ -47,6 +50,12 @@ export type MotivoForaDoLote =
  *   a pergunta sumir sem ninguém ter respondido.
  * - Serviço de terceiro sem "para onde foi" e "o que foi feito" (decisão do dono, 26/09/2026):
  *   a resposta é de cada linha — até ser dada, a linha não vai no bloco.
+ * - Entrada cujo cliente sugerido pede o SIM (pagador conhecido, histórico de terceiro — leva 8,
+ *   22/10/2026): o servidor não usa esse cliente sem a resposta, e o lote só colheria "Confirme o
+ *   cliente". "Sim, é do X" ou outro cliente escolhido devolve a linha ao lote.
+ * - Entrada cujo cliente sugerido ninguém disse ser o dela (situação "escolher" — revisão de 23/10/2026, 4ª rodada: o
+ *   sugerido não é o da prova do motor e a anotação que o pôs foi desfeita): o servidor recusaria com "Escolha o
+ *   cliente…". Escolher o cliente em "De qual cliente veio?" devolve a linha ao lote.
  */
 export function motivoForaDoLote(
   p: PropostaFinanceira,
@@ -60,6 +69,8 @@ export function motivoForaDoLote(
   if (pareceSemResposta(p, correcao)) return 'responder_vinculo';
   if (perguntaDaOSAberta(p, correcao)) return 'responder_os';
   if (faltaNoDestinoDaLinha(p, correcao).length > 0) return 'responder_destino';
+  if (p.kind === 'create_receivable' && clientePedeSim(p, correcao)) return 'responder_cliente';
+  if (p.kind === 'create_receivable' && clienteFaltaEscolher(p, correcao)) return 'escolher_cliente';
   return null;
 }
 

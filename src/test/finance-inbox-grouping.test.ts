@@ -7,6 +7,10 @@ import {
   agruparPorFavorecido, ordenarGrupos, resumoDoAgrupamento, normalizarFavorecido, SEM_CATEGORIA, motivoForaDoLote,
 } from '@/lib/finance-inbox-grouping';
 import type { PropostaFinanceira } from '@/hooks/use-finance-review';
+import { clienteEscolhido, clienteFaltaEscolher, clientePedeSim } from '@/lib/extrato-vinculo';
+// A fonte única do servidor (clienteQueAprovacaoUsa e pedidoDeConfirmacaoDoCliente a usam). O identificacao.ts em si
+// não entra aqui: ele importa tipos de https://esm.sh, que o tsc da tela não resolve.
+import { situacaoDoClienteSugerido } from '../../supabase/functions/_shared/banking/contraparte';
 
 const LIMITE = 500;
 
@@ -317,5 +321,178 @@ describe('entrada que sai sem receita não entra no lote (revisão de 28/09/2026
     expect(g.emLote).toHaveLength(1);
     expect(g.individuais).toHaveLength(1);
     expect(Object.values(g.motivos)).toEqual(['sem_receita']);
+  });
+});
+
+/**
+ * Leva 8 (22/10/2026): o cliente sugerido por quem pagou — pagador conhecido, histórico de
+ * terceiro, vínculo antigo — pede o SIM. A tela mostra e manda o MESMO cliente que o servidor
+ * usaria (clienteEscolhido = clienteQueAprovacaoUsa), e a linha sem resposta não vai no lote.
+ */
+describe('cliente que pede o SIM (leva 8)', () => {
+  const entrada = (por: string | null, cliente: string | null = 'c-ana') => proposta({
+    kind: 'create_receivable', suggested_category: 'Serviços prestados', nome: 'MARIA DA SILVA',
+    suggested_client_id: cliente,
+    evidencia: por ? { cliente: { id: cliente ?? 'x', nome: 'Ana Souza', por: por as never, detalhe: 'x' } } : null,
+  });
+
+  it('clienteEscolhido: o sugerido só vale sem SIM; a escolha da pessoa vale sempre', () => {
+    expect(clienteEscolhido(entrada('documento'))).toBe('c-ana');
+    expect(clienteEscolhido(entrada('regra'))).toBe('c-ana');
+    expect(clienteEscolhido(entrada('nome_identico'))).toBe('c-ana');
+    // Sugerido SEM prova nenhuma (e sem anotação): ninguém disse de quem é — o servidor recusaria (4ª rodada).
+    expect(clienteEscolhido(entrada(null))).toBeNull();
+    expect(clienteEscolhido(entrada(null), { clientId: 'c-ana' })).toBe('c-ana');
+    for (const por of ['pagador_conhecido', 'historico', 'vinculo']) {
+      expect(clienteEscolhido(entrada(por))).toBeNull();
+      expect(clienteEscolhido(entrada(por), { clientId: 'c-ana' })).toBe('c-ana');
+      expect(clienteEscolhido(entrada(por), { clientId: 'c-rui' })).toBe('c-rui');
+    }
+  });
+
+  it('clientePedeSim: só com sugerido que pede SIM e ninguém respondeu', () => {
+    expect(clientePedeSim(entrada('pagador_conhecido'))).toBe(true);
+    expect(clientePedeSim(entrada('historico'))).toBe(true);
+    expect(clientePedeSim(entrada('pagador_conhecido'), { clientId: 'c-ana' })).toBe(false);
+    expect(clientePedeSim(entrada('documento'))).toBe(false);
+    expect(clientePedeSim(entrada('pagador_conhecido', null))).toBe(false);
+  });
+
+  it('a linha que pede o SIM fica fora do lote; respondida, volta', () => {
+    expect(motivoForaDoLote(entrada('pagador_conhecido'), LIMITE)).toBe('responder_cliente');
+    expect(motivoForaDoLote(entrada('historico'), LIMITE)).toBe('responder_cliente');
+    expect(motivoForaDoLote(entrada('pagador_conhecido'), LIMITE, { clientId: 'c-ana' })).toBeNull();
+    expect(motivoForaDoLote(entrada('documento'), LIMITE)).toBeNull();
+    // Transferência ou aporte sai sem receita: o motivo é esse, não o cliente.
+    expect(motivoForaDoLote(entrada('pagador_conhecido'), LIMITE, { category: 'Aporte de sócio' })).toBe('sem_receita');
+  });
+
+  it('no agrupado, o botão do grupo não alcança quem pede o SIM', () => {
+    const grupos = agruparPorFavorecido([entrada('pagador_conhecido'), entrada('documento')], LIMITE, {});
+    const g = grupos.find((x) => x.propostas.length === 2)!;
+    expect(g.emLote).toHaveLength(1);
+    expect(Object.values(g.motivos)).toEqual(['responder_cliente']);
+  });
+});
+
+/**
+ * Revisão de 23/10/2026: a ANOTAÇÃO do dono ("o Pix de 1.500 é da TSD") é instrução dele — vale como o SIM. O
+ * _aplicar_anotacao troca o cliente sugerido e deixa a prova antiga do motor (de outro cliente) na evidência; a tela
+ * usa a mesma conta do servidor (clienteDaPropostaExigeSim) e não pede "Sim, é do <outro>".
+ */
+describe('a anotação do dono vence a prova antiga (revisão de 23/10/2026)', () => {
+  const comAnotacao = (sugerido: string | null, por: string, anotacao: { id?: string; os_id?: string | null } | null) => proposta({
+    kind: 'create_receivable', suggested_category: 'Serviços prestados', nome: 'MARIA DA SILVA',
+    suggested_client_id: sugerido,
+    evidencia: {
+      cliente: { id: 'c-ana', nome: 'Ana Souza', por: por as never, detalhe: 'x' },
+      ...(anotacao ? { anotacao } : {}),
+    },
+  });
+
+  it('anotação que trocou o cliente: o anotado vale, sem SIM, e a linha volta ao lote', () => {
+    for (const por of ['pagador_conhecido', 'historico', 'vinculo']) {
+      const p = comAnotacao('c-tsd', por, { id: 'an-1', os_id: null });
+      expect(clienteEscolhido(p)).toBe('c-tsd');
+      expect(clientePedeSim(p)).toBe(false);
+      expect(motivoForaDoLote(p, LIMITE)).toBeNull();
+      // A escolha da pessoa continua valendo mais que tudo.
+      expect(clienteEscolhido(p, { clientId: 'c-rui' })).toBe('c-rui');
+    }
+  });
+
+  it('anotação DESFEITA (a marca saiu, o sugerido ficou): falta escolher — nem o sugerido, nem "Sim, é do <prova>", fora do lote', () => {
+    // 4ª rodada: desligar o comprovante tira a marca da anotação da evidência e mantém o sugerido que ela pôs. Ninguém
+    // disse mais de quem é: o servidor recusa com "Escolha o cliente…" (PEDIDO_DE_ESCOLHA_DO_CLIENTE).
+    for (const por of ['pagador_conhecido', 'historico', 'vinculo', 'documento']) {
+      const p = comAnotacao('c-tsd', por, null);
+      expect(clienteEscolhido(p)).toBeNull();
+      expect(clientePedeSim(p)).toBe(false);
+      expect(clienteFaltaEscolher(p)).toBe(true);
+      expect(motivoForaDoLote(p, LIMITE)).toBe('escolher_cliente');
+      // Escolhido um cliente (qualquer um, inclusive o da prova antiga), a linha volta ao lote com ele.
+      for (const escolhido of ['c-tsd', 'c-ana']) {
+        expect(clienteEscolhido(p, { clientId: escolhido })).toBe(escolhido);
+        expect(clienteFaltaEscolher(p, { clientId: escolhido })).toBe(false);
+        expect(motivoForaDoLote(p, LIMITE, { clientId: escolhido })).toBeNull();
+      }
+    }
+  });
+
+  it('marca da anotação SEM id não é anotação em vigor: falta escolher', () => {
+    const p = comAnotacao('c-tsd', 'pagador_conhecido', { os_id: null });
+    expect(clienteEscolhido(p)).toBeNull();
+    expect(clienteFaltaEscolher(p)).toBe(true);
+  });
+
+  it('transferência ou aporte: sai sem receita — o motivo é esse, não o cliente', () => {
+    const p = comAnotacao('c-tsd', 'pagador_conhecido', null);
+    expect(motivoForaDoLote(p, LIMITE, { category: 'Aporte de sócio' })).toBe('sem_receita');
+  });
+
+  it('anotação com a OS do mesmo cliente da prova é o SIM; só com categoria, não', () => {
+    const comOS = comAnotacao('c-ana', 'pagador_conhecido', { id: 'an-2', os_id: 'os-60' });
+    expect(clienteEscolhido(comOS)).toBe('c-ana');
+    expect(clientePedeSim(comOS)).toBe(false);
+
+    const soCategoria = comAnotacao('c-ana', 'historico', { id: 'an-3', os_id: null });
+    expect(clienteEscolhido(soCategoria)).toBeNull();
+    expect(clientePedeSim(soCategoria)).toBe(true);
+    expect(motivoForaDoLote(soCategoria, LIMITE)).toBe('responder_cliente');
+  });
+
+  it('sem ler a anotação, a tela erra para o lado da pergunta: o mesmo cliente da prova, sem OS, ainda pede o "sim"', () => {
+    // A anotação aplicada só guarda {id, os_id} na evidência; que o dono anotou o MESMO cliente da prova só se sabe
+    // lendo a anotação — o servidor e o assistente leem e dispensam o SIM; a tela, não (divergência conhecida, baixa:
+    // um "sim" a mais, nunca uma baixa sem ele).
+    const p = comAnotacao('c-ana', 'pagador_conhecido', { id: 'an-4', os_id: null });
+    expect(clientePedeSim(p)).toBe(true);
+    // O servidor, com a anotação LIDA, dispensa o SIM.
+    expect(situacaoDoClienteSugerido('c-ana', p.evidencia?.cliente, { cliente_id: 'c-ana', os_id: null })).toBe('vale');
+  });
+});
+
+/**
+ * A tela e o servidor não podem discordar sobre o que acontece quando se clica em aprovar (extrato-vinculo.ts). O
+ * servidor sem ler a anotação (a marca que a evidência guarda) decide por situacaoDoClienteSugerido: usa o sugerido só
+ * em "vale" (clienteQueAprovacaoUsa), pede "Sim, é do X" em "pede_sim" e recusa com "Escolha o cliente…" em "escolher"
+ * (pedidoDeConfirmacaoDoCliente). A tela mostra o mesmo cliente e pede a mesma resposta — caso a caso.
+ */
+describe('paridade tela × servidor no cliente da entrada (4ª rodada)', () => {
+  type Situacao = 'vale' | 'pede_sim' | 'escolher' | 'sem_sugestao';
+  const casos: Array<[string, string | null, { id: string; por: string } | null, { id?: string; os_id?: string | null } | null, Situacao]> = [
+    ['documento do sugerido', 'c-ana', { id: 'c-ana', por: 'documento' }, null, 'vale'],
+    ['regra do sugerido', 'c-ana', { id: 'c-ana', por: 'regra' }, null, 'vale'],
+    ['pagador conhecido do sugerido', 'c-ana', { id: 'c-ana', por: 'pagador_conhecido' }, null, 'pede_sim'],
+    ['histórico do sugerido', 'c-ana', { id: 'c-ana', por: 'historico' }, null, 'pede_sim'],
+    ['vínculo do sugerido', 'c-ana', { id: 'c-ana', por: 'vinculo' }, null, 'pede_sim'],
+    ['anotação em vigor trocou o cliente', 'c-tsd', { id: 'c-ana', por: 'pagador_conhecido' }, { id: 'an-1', os_id: null }, 'vale'],
+    ['anotação com OS', 'c-ana', { id: 'c-ana', por: 'historico' }, { id: 'an-2', os_id: 'os-60' }, 'vale'],
+    ['anotação só com categoria', 'c-ana', { id: 'c-ana', por: 'historico' }, { id: 'an-3', os_id: null }, 'pede_sim'],
+    ['anotação desfeita, prova de outro', 'c-tsd', { id: 'c-ana', por: 'pagador_conhecido' }, null, 'escolher'],
+    ['anotação desfeita, prova forte de outro', 'c-tsd', { id: 'c-ana', por: 'documento' }, null, 'escolher'],
+    ['sugerido sem prova nenhuma', 'c-tsd', null, null, 'escolher'],
+    ['anotação em vigor sem prova', 'c-tsd', null, { id: 'an-5', os_id: null }, 'vale'],
+    ['sem sugerido', null, { id: 'c-ana', por: 'pagador_conhecido' }, null, 'sem_sugestao'],
+  ];
+
+  it.each(casos)('%s → %s', (_nome, sugerido, prova, anotacao, esperado) => {
+    const p = proposta({
+      kind: 'create_receivable', suggested_category: 'Serviços prestados', nome: 'MARIA DA SILVA',
+      suggested_client_id: sugerido,
+      evidencia: {
+        ...(prova ? { cliente: { id: prova.id, nome: 'Ana Souza', por: prova.por as never, detalhe: 'x' } } : {}),
+        ...(anotacao ? { anotacao } : {}),
+      },
+    });
+    // O servidor (sem ler a anotação: a marca da evidência).
+    expect(situacaoDoClienteSugerido(sugerido, p.evidencia?.cliente, p.evidencia?.anotacao ?? null)).toBe(esperado);
+    // A tela.
+    expect(clienteEscolhido(p)).toBe(esperado === 'vale' ? sugerido : null);
+    expect(clientePedeSim(p)).toBe(esperado === 'pede_sim');
+    expect(clienteFaltaEscolher(p)).toBe(esperado === 'escolher');
+    expect(motivoForaDoLote(p, LIMITE)).toBe(
+      esperado === 'pede_sim' ? 'responder_cliente' : esperado === 'escolher' ? 'escolher_cliente' : null,
+    );
   });
 });

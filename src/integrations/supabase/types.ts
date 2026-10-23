@@ -6286,6 +6286,86 @@ export type Database = {
           },
         ]
       }
+      pagadores_do_cliente: {
+        Row: {
+          bank_transaction_id: string | null
+          client_id: string
+          confirmado_em: string | null
+          confirmado_por: string | null
+          decidido_motivo: string | null
+          documento: string
+          id: string
+          nome: string
+          observacao: string | null
+          origem: string | null
+          proposto_em: string
+          proposto_por: string | null
+          relacao: string
+          situacao: string
+        }
+        Insert: {
+          bank_transaction_id?: string | null
+          client_id: string
+          confirmado_em?: string | null
+          confirmado_por?: string | null
+          decidido_motivo?: string | null
+          documento: string
+          id?: string
+          nome: string
+          observacao?: string | null
+          origem?: string | null
+          proposto_em?: string
+          proposto_por?: string | null
+          relacao: string
+          situacao?: string
+        }
+        Update: {
+          bank_transaction_id?: string | null
+          client_id?: string
+          confirmado_em?: string | null
+          confirmado_por?: string | null
+          decidido_motivo?: string | null
+          documento?: string
+          id?: string
+          nome?: string
+          observacao?: string | null
+          origem?: string | null
+          proposto_em?: string
+          proposto_por?: string | null
+          relacao?: string
+          situacao?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pagadores_do_cliente_bank_transaction_id_fkey"
+            columns: ["bank_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "bank_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pagadores_do_cliente_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pagadores_do_cliente_confirmado_por_fkey"
+            columns: ["confirmado_por"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pagadores_do_cliente_proposto_por_fkey"
+            columns: ["proposto_por"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payables: {
         Row: {
           amount: number
@@ -12654,6 +12734,19 @@ export type Database = {
         }
         Relationships: []
       }
+      pagamentos_com_pagador: {
+        Row: {
+          bank_transaction_id: string | null
+          client_id: string | null
+          pagador_documento: string | null
+          pagador_nome: string | null
+          payment_id: string | null
+          receivable_id: string | null
+          relacao: string | null
+          situacao: string | null
+        }
+        Relationships: []
+      }
       product_availability: {
         Row: {
           available_quantity: number | null
@@ -13768,6 +13861,14 @@ export type Database = {
         Args: { p_descricao: string; p_nome: string }
         Returns: string
       }
+      _pagador_consolidar_regras: {
+        Args: { p_client_id: string; p_documento: string }
+        Returns: string[]
+      }
+      _pagador_regra_de_outro_cliente: {
+        Args: { p_client_id: string; p_documento: string }
+        Returns: Json
+      }
       _pagamentos_que_podem_ser_a_parcela: {
         Args: {
           p_emissao: string
@@ -13806,6 +13907,7 @@ export type Database = {
           q_nomes: string[]
         }[]
       }
+      _raizes_do_cnpj_da_hbr: { Args: never; Returns: string[] }
       _reacomodar_entrada: { Args: { p_tx: string }; Returns: boolean }
       _recusa_se_mes_fechado: {
         Args: { p_data: string; p_o_que: string }
@@ -14346,6 +14448,16 @@ export type Database = {
         }
         Returns: Json
       }
+      decidir_pagador_do_cliente: {
+        Args: {
+          p_autor?: string
+          p_decisao: string
+          p_id: string
+          p_motivo?: string
+          p_relacao?: string
+        }
+        Returns: Json
+      }
       desagrupar_orcamentos: {
         Args: { p_agrupado: string; p_autor?: string }
         Returns: Json
@@ -14557,6 +14669,10 @@ export type Database = {
         }
         Returns: Json
       }
+      guardar_pagadores_do_cliente: {
+        Args: { p_autor?: string; p_itens: Json }
+        Returns: Json
+      }
       increment_finance_rule_usage: {
         Args: { rule_id: string }
         Returns: undefined
@@ -14648,6 +14764,29 @@ export type Database = {
       }
       normalize_alias: { Args: { _s: string }; Returns: string }
       normalize_product_text: { Args: { t: string }; Returns: string }
+      pagadores_para_conferir: {
+        Args: never
+        Returns: {
+          aviso: string
+          bank_transaction_ids: string[]
+          client_id: string
+          cliente_nome: string
+          cliente_tem_documento: boolean
+          grupo: string
+          pagador_documento: string
+          pagador_id: string
+          pagador_nome: string
+          primeira: string
+          proposto_em: string
+          proposto_por_nome: string
+          relacao_proposta: string
+          situacao: string
+          tipo_documento: string
+          total: number
+          ultima: string
+          vezes: number
+        }[]
+      }
       parse_answer_number: { Args: { p_answer: string }; Returns: number }
       parse_valor_ptbr: { Args: { p_texto: string }; Returns: number }
       pedir_confirmacao_do_agendamento: {
@@ -14742,6 +14881,10 @@ export type Database = {
               loop_id: string
             }[]
           }
+      recusar_pagadores_do_cliente: {
+        Args: { p_autor?: string; p_itens: Json; p_motivo?: string }
+        Returns: Json
+      }
       refresh_entity_open_loops: {
         Args: never
         Returns: {

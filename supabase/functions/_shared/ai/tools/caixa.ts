@@ -18,6 +18,9 @@ import {
   type LancamentoLido, type LinhaSemLancamento,
 } from "../gastos.ts";
 import { conferirComprovantes as conferirCmps, type QuemConfere, textoDoAberto, textoDoJaLancado } from "./comprovantes.ts";
+// LGPD (leva 8): o CPF que o banco escreve no nome (e que a despesa do Extrato herda) sai mascarado ao modelo e ao PDF.
+// Direto do contraparte (financeiro-comum.ts, que reexporta a mesma função, importa este arquivo).
+import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
 
 const CARGOS_FINANCEIRO: Role[] = ["admin", "financial"];
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -823,7 +826,7 @@ export const caixaTools: ToolDef[] = [
             itens: [...semLancamento].sort((a, b) => b.valor - a.valor).slice(0, completo ? undefined : 15).map((l) => {
               const c = categoriaDaLinha(l, regras);
               return {
-                data: l.data, quem: l.quem, valor: l.valor,
+                data: l.data, quem: mascararCpfNoTexto(l.quem), valor: l.valor,
                 situacao: l.pendente ? "compra pendente no cartão (o banco ainda não fechou)"
                   : sugestao.has(l.id) ? "na fila do Extrato" : "no extrato, sem lançamento",
                 categoria_indicada: c ? `${c.categoria} (${c.por})` : null,
@@ -836,7 +839,9 @@ export const caixaTools: ToolDef[] = [
           if (outros.length) {
             emOutraCategoria = {
               total: somar(outros, (l) => l.valor),
-              itens: outros.slice(0, completo ? undefined : 10).map((l) => ({ data: l.data, quem: l.quem ?? l.descricao, valor: l.valor, lancado_como: l.categoria })),
+              itens: outros.slice(0, completo ? undefined : 10).map((l) => ({
+                data: l.data, quem: mascararCpfNoTexto(l.quem ?? l.descricao), valor: l.valor, lancado_como: l.categoria,
+              })),
               observacao: "Mesmo tipo de estabelecimento (pelo ramo do cartão), mas lançado em outra categoria: não entra no total. Pode ser certo (ex.: lanche no posto) ou um lançamento a corrigir.",
             };
           }
@@ -855,7 +860,7 @@ export const caixaTools: ToolDef[] = [
           por_categoria: [...porCategoria.entries()].sort((a, b) => b[1] - a[1]).slice(0, completo ? undefined : 12)
             .map(([categoria, valor]) => ({ categoria, valor: centavos(valor) })),
           itens: [...doPedido].sort((a, b) => b.valor - a.valor).slice(0, completo ? undefined : 12)
-            .map((l) => ({ data: l.data, quem: l.quem ?? l.descricao, valor: l.valor, categoria: l.categoria })),
+            .map((l) => ({ data: l.data, quem: mascararCpfNoTexto(l.quem ?? l.descricao), valor: l.valor, categoria: l.categoria })),
         },
         ...(naoLancado ? { nao_lancado: naoLancado, total_com_nao_lancado: centavos(total + totalNaoLancado) } : {}),
         ...(emOutraCategoria ? { em_outra_categoria: emOutraCategoria } : {}),
@@ -863,7 +868,8 @@ export const caixaTools: ToolDef[] = [
           mes_anterior_lancado: totalAnterior,
           variacao_pct: totalAnterior > 0 ? Math.round(((total - totalAnterior) / totalAnterior) * 100) : null,
         } : {}),
-        quem_mais_recebeu: [...quemMais.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([nome, valor]) => ({ nome, valor: centavos(valor) })),
+        quem_mais_recebeu: [...quemMais.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+          .map(([nome, valor]) => ({ nome: mascararCpfNoTexto(nome), valor: centavos(valor) })),
         ...(fora > 0 ? {
           fora_do_resultado: fora,
           observacao: "O total não inclui o que fica fora do resultado (pagamento de fatura, empréstimo, aplicação, transferência entre contas): a compra no cartão já foi contada quando aconteceu.",

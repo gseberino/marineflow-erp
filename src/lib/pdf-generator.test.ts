@@ -349,3 +349,115 @@ describe('a unidade no documento leva o tipo como rótulo', () => {
     expect(semUnidade).not.toMatch(/Embarcação ou veículo|Ativo/);
   });
 });
+
+/**
+ * Leva 8 (22/10/2026), decisão do dono: quando um terceiro pagou (cônjuge, empresa do cliente, marina…), o recibo diz
+ * "Recebemos de X, CPF ***.456.789-**, por conta de Y". CPF de terceiro sai MASCARADO mesmo que chegue inteiro;
+ * CNPJ sai inteiro. Sem payer, o texto de sempre.
+ */
+describe('recibo: quem pagou por conta do cliente', () => {
+  const recibo = (receipt: DeepPartial<NonNullable<PDFData['receipt']>>, client: DeepPartial<PDFData['client']> = { name: 'Cliente Teste', cpf_cnpj: '98.765.432/0001-10' }) =>
+    buildHTMLDocument(
+      documentoCompleto({
+        documentType: 'receipt',
+        client,
+        receipt: { amount: 1500, payment_date: '2026-10-20', payment_method: 'pix', reference: 'OS-00900', ...receipt },
+      }),
+      DEFAULT_PDF_OPTIONS,
+    ).replace(/\s+/g, ' ');
+
+  it('com payer de CPF: "Recebemos de X, CPF mascarado, por conta de Y, inscrito(a) no …"', () => {
+    const html = recibo({ payer: { name: 'Maria Souza', cpf_cnpj: '12345678901' } });
+    expect(html).toContain(
+      'Recebemos de <strong>MARIA SOUZA</strong>, CPF <strong>***.456.789-**</strong>, por conta de <strong>CLIENTE TESTE</strong>, '
+      + 'inscrito(a) no CPF/CNPJ sob o nº <strong>98.765.432/0001-10</strong>, a importância líquida e certa de',
+    );
+    expect(html).not.toMatch(/12345678901|123\.456\.789-01/);
+  });
+
+  it('CPF formatado que chega inteiro também sai mascarado; o que já chega mascarado passa como veio', () => {
+    expect(recibo({ payer: { name: 'Maria', cpf_cnpj: '123.456.789-01' } })).toContain('CPF <strong>***.456.789-**</strong>');
+    expect(recibo({ payer: { name: 'Maria', cpf_cnpj: '***.456.789-**' } })).toContain('CPF <strong>***.456.789-**</strong>');
+    expect(recibo({ payer: { name: 'Maria', cpf_cnpj: '123.456.789-01' } })).not.toContain('123.456.789-01');
+  });
+
+  it('o NOME que o banco escreveu com o CPF dentro também sai mascarado no HTML final', () => {
+    const html = recibo({ payer: { name: '12345678901-Maria Souza', cpf_cnpj: '12345678901' } });
+    expect(html).toContain('Recebemos de <strong>***.456.789-**-MARIA SOUZA</strong>, CPF <strong>***.456.789-**</strong>, por conta de');
+    expect(html).not.toMatch(/12345678901|123\.456\.789-01/);
+    const doMei = recibo({ payer: { name: 'JOAO SILVA 123.456.789-01' } });
+    expect(doMei).toContain('Recebemos de <strong>JOAO SILVA ***.456.789-**</strong>, por conta de');
+    expect(doMei).not.toContain('123.456.789-01');
+    // CNPJ no nome (a razão social com o CNPJ) fica inteiro, como o documento.
+    expect(recibo({ payer: { name: 'ACME 04754513000149' } })).toContain('Recebemos de <strong>ACME 04754513000149</strong>');
+  });
+
+  it('com payer de CNPJ: o CNPJ sai inteiro e formatado', () => {
+    const html = recibo({ payer: { name: 'Acme Náutica Ltda', cpf_cnpj: '04754513000149' } });
+    expect(html).toContain('Recebemos de <strong>ACME NÁUTICA LTDA</strong>, CNPJ <strong>04.754.513/0001-49</strong>, por conta de <strong>CLIENTE TESTE</strong>');
+  });
+
+  it('payer sem documento, ou com um número que não é CPF nem CNPJ: só o nome', () => {
+    expect(recibo({ payer: { name: 'Maria' } })).toContain('Recebemos de <strong>MARIA</strong>, por conta de <strong>CLIENTE TESTE</strong>');
+    const lixo = recibo({ payer: { name: 'Maria', cpf_cnpj: '1234' } });
+    expect(lixo).toContain('Recebemos de <strong>MARIA</strong>, por conta de');
+    expect(lixo).not.toContain('1234');
+  });
+
+  it('cliente sem documento: "por conta de Y," sem o "inscrito(a)"', () => {
+    const html = recibo({ payer: { name: 'Maria', cpf_cnpj: '12345678901' } }, { name: 'Cliente Teste' });
+    expect(html).toContain('por conta de <strong>CLIENTE TESTE</strong>, a importância líquida e certa de');
+    expect(html).not.toContain('inscrito(a)');
+  });
+
+  it('sem payer (ou com nome vazio): o texto de sempre, sem "por conta de"', () => {
+    for (const receipt of [{}, { payer: { name: '  ' } }]) {
+      const html = recibo(receipt);
+      expect(html).toContain(
+        'Recebemos de <strong>CLIENTE TESTE</strong>, inscrito(a) no CPF/CNPJ sob o nº <strong>98.765.432/0001-10</strong>, a importância líquida e certa de',
+      );
+      expect(html).not.toContain('por conta de');
+    }
+  });
+});
+
+/**
+ * Revisão de 23/10/2026, 4ª rodada: a REFERÊNCIA do recibo (o número REC-…, o título e o "referente ao pagamento de")
+ * é, sem OS, a descrição da conta — na receita que nasce da fila do Extrato, o nome que o banco escreveu, às vezes com o
+ * CPF de quem pagou dentro. O HTML final nunca leva o CPF inteiro, com ou sem payer; o CNPJ e o número da OS ficam.
+ */
+describe('recibo: a referência sem o CPF inteiro', () => {
+  const recibo = (reference: string, numero = reference, payer?: { name: string; cpf_cnpj?: string }) => buildHTMLDocument(
+    documentoCompleto({
+      documentType: 'receipt',
+      serviceOrder: { service_order_number: numero },
+      client: { name: 'Cliente Teste' },
+      receipt: { amount: 1500, payment_date: '2026-10-20', payment_method: 'pix', reference, ...(payer ? { payer } : {}) },
+    }),
+    DEFAULT_PDF_OPTIONS,
+  ).replace(/\s+/g, ' ');
+
+  it.each([
+    ['12345678901-MARIA SOUZA', '***.456.789-**-MARIA SOUZA'],
+    ['MARIA SOUZA 123.456.789-01', 'MARIA SOUZA ***.456.789-**'],
+    ['PIX RECEBIDO 12345678901', 'PIX RECEBIDO ***.456.789-**'],
+  ])('referência "%s": REC-…, título e "referente ao pagamento de" mascarados', (bruto, mascarado) => {
+    for (const html of [recibo(bruto), recibo(bruto, bruto, { name: 'Maria Souza', cpf_cnpj: '12345678901' })]) {
+      expect(html).not.toMatch(/12345678901|123\.456\.789-01/);
+      expect(html).toContain(`REC-${mascarado}`);
+      expect(html).toContain(`<title>RECIBO REC-${mascarado}</title>`);
+      expect(html).toContain(`referente ao pagamento de <strong>${mascarado}</strong>`);
+    }
+  });
+
+  it('sem referência, o número do documento também passa pela máscara', () => {
+    const html = recibo('', '12345678901-MARIA SOUZA');
+    expect(html).not.toMatch(/12345678901/);
+    expect(html).toContain('referente ao pagamento de <strong>***.456.789-**-MARIA SOUZA</strong>');
+  });
+
+  it('número da OS e CNPJ na referência ficam como vieram', () => {
+    expect(recibo('OS-00900')).toContain('referente ao pagamento de <strong>OS-00900</strong>');
+    expect(recibo('ACME LTDA 04754513000149')).toContain('referente ao pagamento de <strong>ACME LTDA 04754513000149</strong>');
+  });
+});

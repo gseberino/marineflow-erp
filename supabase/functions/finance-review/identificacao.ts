@@ -5,8 +5,10 @@
 // cadastrado depois nunca alcançava as entradas que já estavam esperando.
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
-  identificarContraparte, indexarContrapartes, frasesDaIdentificacao,
-  type Identificacao, type IndiceDeContrapartes, type Reconhecimento,
+  documentoNormalizado, identificarContraparte, indexarContrapartes, situacaoDoClienteSugerido,
+  frasesDaIdentificacao, nomeDaDescricao, pagadoresDoDocumento, vetoDoPagador,
+  type AnotacaoDoDono, type CadastroParaIdentificar, type CandidatoDoPagamento, type ClienteDaEvidencia, type Identificacao,
+  type IndiceDeContrapartes, type Reconhecimento,
 } from "../_shared/banking/contraparte.ts";
 import { carregarCandidatos } from "../_shared/banking/candidatos.ts";
 import { sugerirVinculo, type VinculoSugerido } from "../_shared/banking/vinculo.ts";
@@ -24,6 +26,12 @@ export interface ContextoDeIdentificacao {
    * spec-papelada-fix.md B2). Ausente = como antes.
    */
   ultimaEscolhaDoSocio?: Map<string, EscolhaDoSocio>;
+  /**
+   * A leitura de pagadores_do_cliente falhou (revisão de 23/10/2026): não se sabe o que o dono guardou nem o que vetou.
+   * A regra de cliente não decide sozinha (a linha pergunta, com o cliente da regra como candidato), o histórico sempre
+   * pede o SIM, e a ENTRADA sai sem a marca do motor — a varredura diária a refaz quando a leitura voltar.
+   */
+  pagadoresIndisponiveis?: boolean;
 }
 
 /** A última escolha do dono para um sócio: a categoria e quando ele decidiu. */
@@ -107,13 +115,59 @@ export async function carregarContextoSeguro(admin: DbClient): Promise<ContextoD
   }
 }
 
+/**
+ * O que o motor da fila lê de pagadores_do_cliente:
+ *   - confirmados: os pagadores CONFIRMADOS pelo dono, só de cliente ativo — cliente desativado para de ser sugerido
+ *     sem mudar dado (reativar o cliente reativa a sugestão);
+ *   - vetados: os RECUSADOS e PAUSADOS (revisão de 23/10/2026) — o "não" do dono para aquele documento × cliente, que
+ *     tira o cliente da sugestão (histórico, nome idêntico, pagador conhecido). Vale para qualquer cliente: só tira.
+ * O proposto (sem o SIM) não entra. Lança se a leitura falhar — quem chama marca pagadoresIndisponiveis.
+ */
+export async function lerPagadoresDoMotor(
+  admin: DbClient,
+  clientesAtivos: Set<string>,
+): Promise<{
+  confirmados: NonNullable<CadastroParaIdentificar["pagadores"]>;
+  vetados: NonNullable<CadastroParaIdentificar["vetados"]>;
+}> {
+  const linhas = await lerPaginas<{
+    documento: string; client_id: string; relacao: string; situacao: string; confirmado_em: string | null;
+  }>((de, ate) => admin.from("pagadores_do_cliente")
+    .select("documento, client_id, relacao, situacao, confirmado_em")
+    .in("situacao", ["confirmado", "recusado", "pausado"]).order("id").range(de, ate));
+  return {
+    confirmados: linhas
+      .filter((p) => p.situacao === "confirmado" && clientesAtivos.has(String(p.client_id)))
+      .map(({ documento, client_id, relacao, confirmado_em }) => ({ documento, client_id, relacao, confirmado_em })),
+    vetados: linhas
+      .filter((p) => p.situacao === "recusado" || p.situacao === "pausado")
+      .map(({ documento, client_id, situacao }) => ({ documento, client_id, situacao })),
+  };
+}
+
 export async function carregarContexto(admin: DbClient): Promise<ContextoDeIdentificacao> {
   const [fornecedores, favorecidos, clientes, categorias] = await Promise.all([
     lerPaginas<any>((de, ate) => admin.from("suppliers").select("id, name, trade_name, cnpj_cpf").order("id").range(de, ate)),
     lerPaginas<any>((de, ate) => admin.from("payees").select("id, name, kind, document, bank_branch, bank_account, default_category").eq("active", true).order("id").range(de, ate)),
-    lerPaginas<any>((de, ate) => admin.from("clients").select("id, name, cpf_cnpj").order("id").range(de, ate)),
+    lerPaginas<any>((de, ate) => admin.from("clients").select("id, name, cpf_cnpj, active").order("id").range(de, ate)),
     lerPaginas<any>((de, ate) => admin.from("financial_categories").select("name, type, dre_group, active").order("name").range(de, ate)),
   ]);
+
+  // Pagadores conhecidos e os vetos do dono (leva 8). Falhar aqui NÃO derruba a identificação (carregarContextoSeguro
+  // devolveria nulo para tudo), mas também não vira "ninguém guardou nada" em silêncio: marca pagadoresIndisponiveis —
+  // a regra de cliente não decide sozinha, o histórico pede o SIM e a entrada sai sem a marca do motor (a varredura a
+  // refaz). Inclui a tabela ainda não existir (função publicada antes da migration).
+  let pagadores: NonNullable<CadastroParaIdentificar["pagadores"]> = [];
+  let vetados: NonNullable<CadastroParaIdentificar["vetados"]> = [];
+  let pagadoresIndisponiveis = false;
+  try {
+    ({ confirmados: pagadores, vetados } = await lerPagadoresDoMotor(
+      admin, new Set(clientes.filter((c) => c.active !== false).map((c) => String(c.id)))));
+  } catch (e) {
+    pagadoresIndisponiveis = true;
+    console.error("[finance-review] pagadores do cliente indisponíveis — as entradas perguntam de quem é (também as de regra de cliente) e a varredura diária as refaz",
+      (e as Error)?.message ?? e);
+  }
 
   // O que já se lançou a partir do extrato, por documento — "quem já pagou por quem".
   const [saidas, entradas] = await Promise.all([
@@ -136,7 +190,9 @@ export async function carregarContexto(admin: DbClient): Promise<ContextoDeIdent
     })),
   ];
 
-  const indice = indexarContrapartes({ fornecedores, favorecidos, clientes, historico });
+  const indice = indexarContrapartes({
+    fornecedores, favorecidos, clientes, historico, pagadores, vetados, pagadoresIndisponiveis,
+  });
   const candidatos = await carregarCandidatos(admin);
 
   // Pix para o sócio segue a última escolha do dono (B2). Falhar aqui NÃO derruba a identificação das
@@ -156,6 +212,7 @@ export async function carregarContexto(admin: DbClient): Promise<ContextoDeIdent
     categoriaDoFavorecido: new Map(favorecidos.filter((f) => f.default_category).map((f) => [f.id, f.default_category])),
     drePorCategoria: new Map(categorias.filter((c) => c.type === "payable" && c.dre_group).map((c) => [c.name, c.dre_group])),
     ultimaEscolhaDoSocio,
+    pagadoresIndisponiveis,
   };
 }
 
@@ -194,8 +251,65 @@ export interface PropostaBase {
  * A varredura diária refaz toda linha pendente de versão anterior: foi o que faltou em
  * 26/09/2026, quando a regra "nome diferente nunca identifica" entrou e as linhas já na fila
  * continuavam com o fornecedor do critério antigo, rotulado como "nome idêntico".
+ *
+ * 3 (leva 8, 22/10/2026): a entrada deixou de propor "cadastrar cliente" com os dados de quem pagou (pergunta "de
+ * quem é?"), ganhou o pagador conhecido e o histórico de terceiro passou a pedir o SIM. Subir a versão faz a
+ * varredura diária refazer as entradas pendentes que ainda carregam o `cadastrar` antigo.
  */
-export const MOTOR_DA_FILA = 2;
+export const MOTOR_DA_FILA = 3;
+
+/** O que a aprovação precisa ler de uma proposta para saber de quem é a receita. */
+export interface PropostaComCliente {
+  suggested_client_id?: string | null;
+  evidencia?: {
+    cliente?: ClienteDaEvidencia | null;
+    /** A anotação do dono aplicada à linha (_aplicar_anotacao grava {id, os_id}). */
+    anotacao?: { id?: string | null; os_id?: string | null } | null;
+  } | null;
+}
+
+/**
+ * O cliente que a aprovação pode usar SEM a pessoa escolher: o sugerido, só na situação "vale"
+ * (situacaoDoClienteSugerido): prova do motor deste cliente que não pede o SIM, ou anotação do dono que disse este
+ * cliente. Na situação "pede_sim" (prova deste cliente que é vínculo, pagador conhecido ou histórico de terceiro) e na
+ * "escolher" (sugerido que não é o da prova, sem anotação em vigor que o diga) só vale o cliente escolhido.
+ *
+ * `anotacao`: o que a anotação do dono disse, LIDO da anotação aplicada (cliente_id, os_id); null = lida e não há
+ * (cancelada, trocada, leitura que falhou): nada dela vale. Ausente (undefined) = não lida: vale a marca que a evidência
+ * guarda (evidencia.anotacao: {id, os_id}). Revisão de 23/10/2026: o "o Pix de 1.500 é da TSD" troca o cliente sugerido
+ * e mantém a prova antiga do motor; a prova antiga não pode pedir o SIM sobre o cliente que o dono disse — e, sem a
+ * anotação (desfeita, leitura que falhou), o sugerido que não é o da prova não vale sozinho (4ª rodada).
+ */
+export function clienteQueAprovacaoUsa(p: PropostaComCliente, anotacao?: AnotacaoDoDono | null): string | null {
+  return situacaoDoClienteSugerido(p.suggested_client_id, p.evidencia?.cliente, anotacaoQueVale(p, anotacao)) === "vale"
+    ? (p.suggested_client_id ?? null)
+    : null;
+}
+
+/** A anotação lida (mesmo nula) vence; sem leitura, a marca que a evidência guarda. */
+function anotacaoQueVale(p: PropostaComCliente, lida: AnotacaoDoDono | null | undefined): AnotacaoDoDono | null {
+  return lida !== undefined ? lida : (p.evidencia?.anotacao ?? null);
+}
+
+/** A recusa da situação "escolher": nenhum cliente — nem o sugerido, nem o da prova antiga (nunca "Sim, é do <prova>"). */
+export const PEDIDO_DE_ESCOLHA_DO_CLIENTE = "Escolha o cliente antes de aprovar esta receita: o cliente sugerido não veio da "
+  + "prova do motor nem de uma anotação sua em vigor (a anotação foi desfeita, ou não deu para conferi-la agora)";
+
+/**
+ * A recusa legível quando a receita ficou sem cliente porque o sugerido não vale sozinho:
+ *   - "pede_sim": "Confirme o cliente: este pagador já pagou por X — responda 'Sim, é do X' ou escolha outro";
+ *   - "escolher": PEDIDO_DE_ESCOLHA_DO_CLIENTE ("Escolha o cliente…") — nunca o "Sim, é do <prova antiga>".
+ * Null = a recusa de sempre ("Escolha o cliente"). O vínculo antigo não entra: lá o cliente veio do que a linha paga,
+ * não de quem pagou.
+ */
+export function pedidoDeConfirmacaoDoCliente(p: PropostaComCliente, anotacao?: AnotacaoDoDono | null): string | null {
+  const c = p.evidencia?.cliente;
+  const situacao = situacaoDoClienteSugerido(p.suggested_client_id, c, anotacaoQueVale(p, anotacao));
+  if (situacao === "escolher") return PEDIDO_DE_ESCOLHA_DO_CLIENTE;
+  if (situacao !== "pede_sim" || !c?.id || c.por === "vinculo") return null;
+  const nome = String(c.nome ?? "").trim() || "o cliente sugerido";
+  return `Confirme o cliente: este pagador já pagou por ${nome} — responda "Sim, é do ${nome}" ou escolha outro`;
+}
 
 export interface LinhaIdentificada {
   supplierId: string | null;
@@ -215,13 +329,24 @@ function semNulos(i: Identificacao): Record<string, unknown> | null {
   return Object.keys(o).length ? o : null;
 }
 
+/**
+ * Sem o contexto (carregarContextoSeguro falhou), a regra de cliente da ENTRADA não preenche o cliente (revisão de
+ * 23/10/2026, 4ª rodada): não deu para conferir os pagadores que o dono guardou nem os que ele recusou ou pausou — e o
+ * "não" dele vence a regra antiga. A linha fica sem cliente e com esta pergunta no motivo; sem a marca do motor
+ * (evidência nula), a varredura diária a refaz quando o contexto voltar.
+ */
+export const FRASE_DA_REGRA_SEM_CONTEXTO = "De quem é este pagamento? Uma regra antiga aponta um cliente para este "
+  + "CPF/CNPJ, mas não deu para conferir os pagadores que você guardou nem os que recusou — escolha o cliente";
+
 export function identificarLinha(tx: TxDaFila, p: PropostaBase, ctx: ContextoDeIdentificacao | null): LinhaIdentificada {
-  // Sem contexto (leitura falhou): o que o motor de propostas já sabia, e nada mais.
+  // Sem contexto (leitura falhou): o que o motor de propostas já sabia, e nada mais — menos o cliente da regra da
+  // entrada, que sem conferir pagadores e vetos não decide sozinho (fica a pergunta).
   if (!ctx) {
+    const regraDeCliente = p.kind === "create_receivable" && !!p.suggestedClientId;
     return {
-      supplierId: p.suggestedSupplierId, payeeId: null,
-      clientId: p.kind === "create_receivable" ? (p.suggestedClientId ?? null) : null, serviceOrderId: null,
-      categoria: p.suggestedCategory, dreGroup: p.dreGroup, evidencia: null, vinculo: null, frases: [],
+      supplierId: p.suggestedSupplierId, payeeId: null, clientId: null, serviceOrderId: null,
+      categoria: p.suggestedCategory, dreGroup: p.dreGroup, evidencia: null, vinculo: null,
+      frases: regraDeCliente ? [FRASE_DA_REGRA_SEM_CONTEXTO] : [],
     };
   }
   const ident = identificarContraparte(tx, ctx.indice);
@@ -253,27 +378,91 @@ export function identificarLinha(tx: TxDaFila, p: PropostaBase, ctx: ContextoDeI
     supplierId = ident.fornecedor.id;
     frases.push(ident.fornecedor.detalhe);
   }
-  if (supplierId) ident.cadastrar = null;
+  // Com fornecedor, a linha já tem dono: nem "cadastrar", nem a pergunta "de quem é este pagamento?" (simulação de
+  // 22/10/2026, P4 — hoje não há regra de entrada com fornecedor, mas a pergunta não pode sobrar se houver).
+  if (supplierId) {
+    ident.cadastrar = null;
+    ident.deQuemE = null;
+  }
 
   // Cliente dito por regra sua ("o Pix do CPF X é do cliente Y" — resposta 18 do dono,
   // 26/09/2026): é instrução, vence o reconhecimento automático, e continua só sugestão (a
   // receita espera o OK dele). Cliente que não existe mais não entra.
+  //
+  // Leva 8 (revisão de 22/10/2026): regra ANTIGA de outro cliente não vence o pagador que o dono confirmou. Se este
+  // documento foi guardado como pagador de um cliente diferente do da regra, a regra não decide o cliente — a linha
+  // pergunta "de quem é?", com o cliente da regra e os dos pagadores como candidatos (a categoria da regra continua).
+  // Sem isto, a regra preenchia o cliente como prova "regra" (que a aprovação usa sem o SIM) e o que o dono acabou
+  // de ensinar não tinha efeito nenhum. Sem pagador de OUTRO cliente (nenhum, ou só o da própria regra ainda não
+  // consolidada), a regra decide como sempre.
+  //
+  // Revisão de 23/10/2026: o "não" do dono vence a regra antiga — se ele recusou ou pausou este documento como pagador
+  // do cliente da regra, a regra não escolhe o cliente (fica o que o reconhecimento achou, que já respeita o veto). E
+  // se a leitura dos pagadores falhou, não dá para saber se há pagador de outro cliente nem veto: a regra não decide
+  // sozinha — a linha pergunta, com o cliente da regra como candidato ("regra antiga").
+  let fraseDoConflito: string | null = null;
+  let fraseDaRegraVetada: string | null = null;
   if (p.kind === "create_receivable" && p.suggestedClientId) {
     const e = ctx.indice.porId.cliente.get(p.suggestedClientId);
-    if (e) {
+    const veto = e ? vetoDoPagador(ctx.indice, tx.counterparty_document, e.id) : null;
+    const pagadores = e ? pagadoresDoDocumento(ctx.indice, tx.counterparty_document) : [];
+    const deOutroCliente = pagadores.filter((x) => x.cliente.id !== e?.id);
+    if (e && veto) {
+      fraseDaRegraVetada = `Uma regra antiga diz que este CPF/CNPJ é do cliente ${e.nome}, mas você `
+        + `${veto === "pausado" ? "pausou" : "recusou"} quem pagou como pagador de ${e.nome}: a regra não escolhe o cliente`;
+    } else if (e && (deOutroCliente.length > 0 || ctx.pagadoresIndisponiveis)) {
+      // O cliente da regra primeiro ("regra antiga", ou a relação dele se também foi guardado como pagador), depois
+      // os clientes dos pagadores, e o dono do documento quando o documento é o de um cliente (cadastro feito depois).
+      const comoPagador = pagadores.find((x) => x.cliente.id === e.id);
+      const candidatos: CandidatoDoPagamento[] = [{ id: e.id, nome: e.nome, relacao: comoPagador?.relacao ?? "regra antiga" }];
+      for (const x of pagadores) {
+        if (!candidatos.some((c) => c.id === x.cliente.id)) {
+          candidatos.push({ id: x.cliente.id, nome: x.cliente.nome, relacao: x.relacao });
+        }
+      }
+      if (ident.cliente?.por === "documento" && !candidatos.some((c) => c.id === ident.cliente!.id)) {
+        candidatos.push({ id: ident.cliente.id, nome: ident.cliente.nome, relacao: "documento do cliente" });
+      }
+      // O que a própria pergunta do reconhecimento já tinha (ex.: o cliente de nome idêntico quando a leitura dos
+      // pagadores falhou) continua candidato.
+      for (const x of ident.deQuemE?.candidatos ?? []) {
+        if (!candidatos.some((c) => c.id === x.id)) candidatos.push(x);
+      }
+      ident.cliente = null;
+      ident.cadastrar = null;
+      ident.deQuemE = {
+        documento: documentoNormalizado(tx.counterparty_document) || null,
+        nome: ident.deQuemE?.nome
+          ?? ((tx.counterparty_name ?? "").trim() || nomeDaDescricao(tx.description) || ident.nomeConhecido || null),
+        candidatos,
+      };
+      const guardados = deOutroCliente.map((x) => x.cliente.nome).join(", ");
+      fraseDoConflito = deOutroCliente.length > 0
+        ? `De quem é este pagamento? Uma regra antiga diz que este CPF/CNPJ é do cliente ${e.nome}, `
+          + `mas você guardou quem pagou como pagador de ${guardados} — escolha o cliente`
+        : `De quem é este pagamento? Uma regra antiga diz que este CPF/CNPJ é do cliente ${e.nome}, `
+          + `mas não deu para conferir os pagadores que você guardou agora — escolha o cliente`;
+    } else if (e) {
       ident.cliente = {
         id: e.id, nome: e.nome, por: "regra",
         detalhe: `Regra sua: este CPF/CNPJ é do cliente ${e.nome}`,
       };
       ident.cadastrar = null;
       ident.outroCadastro = null;
+      ident.deQuemE = null;
     }
   }
 
   const payeeId = ident.favorecido?.id ?? null;
   const clientId = ident.cliente?.id ?? null;
   for (const r of [ident.favorecido, ident.cliente]) if (r) frases.push(r.detalhe);
-  for (const f of frasesDaIdentificacao({ ...ident, fornecedor: null, favorecido: null, cliente: null })) frases.push(f);
+  if (fraseDoConflito) frases.push(fraseDoConflito);
+  if (fraseDaRegraVetada) frases.push(fraseDaRegraVetada);
+  for (const f of frasesDaIdentificacao({
+    ...ident, fornecedor: null, favorecido: null, cliente: null,
+    // No conflito, a frase acima já explica a pergunta (a genérica diria "paga por mais de um cliente").
+    deQuemE: fraseDoConflito ? null : ident.deQuemE,
+  })) frases.push(f);
 
   // Categoria padrão do favorecido: "paguei o Roberto" é diária de campo, sempre. Só entra
   // onde nada melhor decidiu — regra sua vence, e confiança alta do motor também.
@@ -310,7 +499,9 @@ export function identificarLinha(tx: TxDaFila, p: PropostaBase, ctx: ContextoDeI
       counterparty_document: tx.counterparty_document, pix_end_to_end_id: tx.pix_end_to_end_id,
     },
     ctx.candidatos,
-    ident.cliente ? { id: ident.cliente.id, nome: ident.cliente.nome } : null,
+    ident.cliente
+      ? { id: ident.cliente.id, nome: ident.cliente.nome, por: ident.cliente.por, relacao: ident.cliente.relacao ?? null }
+      : null,
   );
 
   let serviceOrderId: string | null = null;
@@ -326,8 +517,13 @@ export function identificarLinha(tx: TxDaFila, p: PropostaBase, ctx: ContextoDeI
     if (v.confianca >= 70 && !v.converteOrcamento) serviceOrderId = v.ordemDeServicoId;
   }
 
+  // A marca do motor diz à varredura diária que a linha já foi feita por esta versão (index.ts reclassificar). Com a
+  // leitura dos pagadores falhando, a ENTRADA sai sem ela: a varredura a refaz quando a leitura voltar — sem isto a
+  // pergunta (ou um cliente sem conferir o veto) ficaria gravada como definitiva.
+  const semMarca = ctx.pagadoresIndisponiveis === true && tx.transaction_type === "credit";
+  const evidencia = { ...(semNulos(ident) ?? {}), ...(semMarca ? {} : { motor: MOTOR_DA_FILA }) };
   return {
     supplierId, payeeId, clientId, serviceOrderId, categoria, dreGroup,
-    evidencia: { ...(semNulos(ident) ?? {}), motor: MOTOR_DA_FILA }, vinculo, frases,
+    evidencia: Object.keys(evidencia).length > 0 ? evidencia : null, vinculo, frases,
   };
 }

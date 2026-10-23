@@ -8,7 +8,8 @@
 // Aqui a linha ganha o vínculo mais provável (com alternativas) usando o mesmo motor de
 // pontuação da Conciliação, e uma POLÍTICA escrita de quando esse vínculo vale sozinho.
 import { suggestMatches } from "./matching.ts";
-import type { BankTx, Candidate, MatchTier } from "./types.ts";
+import { frasePagoPor } from "./contraparte.ts";
+import type { BankTx, Candidate, MatchTier, Suggestion } from "./types.ts";
 
 export type TipoDeVinculo = "receivable" | "payable" | "existing_payment" | "quote_deposit" | "service_order_balance";
 
@@ -89,10 +90,39 @@ function dias(a: string, b: string): number {
  */
 const JANELA_DO_JA_LANCADO = 45;
 
+/** Quem o identificador de contraparte apontou, com a prova (e, no pagador conhecido, quem ele é para o cliente). */
+export interface ClienteReconhecido {
+  id: string;
+  nome: string;
+  por?: string | null;
+  relacao?: string | null;
+}
+
+/**
+ * Pagador conhecido (leva 8, 22/10/2026): nos candidatos DAQUELE cliente, o documento de quem pagou não é mais
+ * evidência contra ("não é <cliente> — confira se foi um terceiro pagando", -20): o dono já disse que essa pessoa paga
+ * por ele. O candidato é pontuado sem o documento de quem pagou (é o mesmo cálculo, sem a penalidade — e o candidato
+ * que a penalidade tirava de vista volta) e ganha o motivo escrito. Nível no máximo "provável" e nunca sozinho.
+ *
+ * TRAVA: o documento de quem pagou nunca vai para `clientDocument`. Na camada de certeza do matching.ts, documento
+ * igual + valor exato dá `autoApply` — um terceiro pagando viraria baixa automática.
+ */
+function comoPagadorConhecido(s: Suggestion, cliente: ClienteReconhecido): Suggestion {
+  return {
+    ...s,
+    tier: s.score >= 70 ? "probable" : "weak",
+    autoApply: false,
+    reasons: [
+      ...s.reasons,
+      { signal: "pagador_conhecido", points: 0, detail: `${frasePagoPor(cliente.relacao, cliente.nome)} (pagador conhecido)` },
+    ],
+  };
+}
+
 export function sugerirVinculo(
   tx: BankTx,
   candidatos: Candidate[],
-  clienteReconhecido?: { id: string; nome: string } | null,
+  clienteReconhecido?: ClienteReconhecido | null,
 ): VinculoSugerido | null {
   const uteis = candidatos.filter((c) =>
     TIPOS_ACIONAVEIS.has(c.kind) && c.direction === tx.transaction_type
@@ -101,7 +131,19 @@ export function sugerirVinculo(
     // o mesmo resultado sem pontuar centenas de candidatos por linha — foi pontuação demais que
     // derrubou a varredura pelo limite de CPU (erro 546) em agosto.
     && Math.abs(Number(c.amount) - Number(tx.amount)) <= Math.max(1, Math.abs(Number(c.amount)) * 0.25));
-  const sugestoes = suggestMatches(tx, uteis, {}, 6).map(opcao);
+  const pagador = clienteReconhecido?.por === "pagador_conhecido" ? clienteReconhecido : null;
+  let pontuadas: Suggestion[];
+  if (pagador) {
+    const doCliente = uteis.filter((c) => c.clientId === pagador.id);
+    const outros = uteis.filter((c) => c.clientId !== pagador.id);
+    pontuadas = [
+      ...suggestMatches(tx, outros, {}, 6),
+      ...suggestMatches({ ...tx, counterparty_document: null }, doCliente, {}, 6).map((s) => comoPagadorConhecido(s, pagador)),
+    ].sort((a, b) => b.score - a.score || Math.abs(a.difference) - Math.abs(b.difference)).slice(0, 6);
+  } else {
+    pontuadas = suggestMatches(tx, uteis, {}, 6);
+  }
+  const sugestoes = pontuadas.map(opcao);
 
   /**
    * Possível duplicata que o motor não "reconhece": o sinal do ORÇ-00077 foi lançado à mão

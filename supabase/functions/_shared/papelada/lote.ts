@@ -182,7 +182,11 @@ function capitalizar(s: string): string {
  * O nome curto da linha: pessoa (CPF) = primeiro nome + inicial do último ("Eliane U."); empresa = sem o sufixo
  * societário, com maiúscula só no começo das palavras, até 26 caracteres.
  */
-export function nomeCurto(nome: string, documento?: string | null): string {
+export function nomeCurto(nomeDoBanco: string, documento?: string | null): string {
+  // O banco às vezes escreve o CPF no nome ("12345678901-JOAO SOUZA", MEI "JOAO DA SILVA 12345678901"). O título vai ao
+  // WhatsApp (lote da papelada): o CPF sai do texto — num título curto, nem mascarado ajuda (leva 8, LGPD).
+  const nome = nomeDoBanco.replace(/(^|\D)\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?!\d)/g, "$1 ").replace(/^[\s\-–]+|[\s\-–]+$/g, "").trim()
+    || nomeDoBanco.replace(/\d/g, "").trim();
   // a parcela no nome ("MERCADO*MERCADOLIVRE 1/2") vira "(2x)" no fim
   const parcela = /\b\d{1,2}\/(\d{1,2})\b/.exec(nome);
   const semParcela = parcela ? nome.replace(parcela[0], " ") : nome;

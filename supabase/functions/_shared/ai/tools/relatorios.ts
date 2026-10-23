@@ -22,6 +22,8 @@ import { BUCKET_DO_PDF, guardarEEntregar } from "../../pdf/gerar-e-guardar.ts";
 import { renderizarPdf } from "../../pdf/renderizar.ts";
 import { montarRelatorioHtml, nomeDoRelatorio, reais, type Relatorio } from "../../pdf/relatorio.ts";
 import { lerAnalise, nomeDoSistema } from "../../financeiro/vigia-do-negocio.ts";
+// LGPD (leva 8): o CPF que o banco escreve no nome/histórico sai mascarado no PDF que o assistente manda.
+import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
 
 const CARGOS: Role[] = ["admin", "financial"];
 export const CONTEXTO_DO_RELATORIO = "agente_relatorio_pdf";
@@ -205,7 +207,8 @@ async function relatorioDeExtrato(args: Record<string, unknown>, ctx: ToolCtx, e
       linhas: doPedido.map((t) => [
         t.transaction_date,
         nomeDaConta.get(t.bank_connection_id) ?? null,
-        t.merchant_name ?? t.counterparty_name ?? t.description,
+        // "12345678901-MARIA…": o CPF de quem pagou ou recebeu sai mascarado no PDF (***.456.789-**).
+        mascararCpfNoTexto(t.merchant_name ?? t.counterparty_name ?? t.description ?? null),
         situacao(t),
         (t.transaction_type === "debit" ? -1 : 1) * Math.abs(Number(t.amount) || 0),
       ]),

@@ -13,6 +13,13 @@
 // Aqui fica UM identificador para os dois lados, com a evidência escrita. A ordem é a da
 // força da prova, e a trava do caso Coremma continua valendo: nome "parecido" nunca decide
 // em silêncio — vira sugestão marcada para conferir.
+//
+// Leva 8 (22/10/2026, "siga pelo recomendado"): a ENTRADA nunca mais propõe "cadastrar cliente"
+// com os dados de quem pagou — das 21 entradas que carregaram essa proposta, 9 foram aprovadas e
+// quase todas eram de um cliente com OUTRO documento (cônjuge, empresa dele, marina). No lugar, a
+// pergunta "de quem é este pagamento?" (deQuemE). Quem costuma pagar por um cliente fica guardado
+// em pagadores_do_cliente com o SIM do dono e volta como SUGESTÃO com motivo (pagador_conhecido) —
+// nunca como identificação que a aprovação usa sozinha (clienteExigeSim).
 import { normalizeText } from "./matching.ts";
 
 export type TipoDeEvidencia =
@@ -23,7 +30,8 @@ export type TipoDeEvidencia =
   | "nome_cortado"     // o nome do extrato é o do cadastro cortado pelo banco (~30 letras)
   | "nome_parecido"    // NÃO É MAIS PRODUZIDO (decisão do dono, 26/09/2026); fica para ler linhas antigas
   | "regra"            // uma regra sua aponta o cadastro
-  | "vinculo";         // é o dono da conta/OS que a linha paga
+  | "vinculo"          // é o dono da conta/OS que a linha paga
+  | "pagador_conhecido"; // quem pagou já foi guardado pelo dono como pagador DESTE cliente (só dele)
 
 export const ROTULO_DA_EVIDENCIA: Record<TipoDeEvidencia, string> = {
   documento: "CPF/CNPJ",
@@ -34,7 +42,160 @@ export const ROTULO_DA_EVIDENCIA: Record<TipoDeEvidencia, string> = {
   nome_parecido: "nome parecido — confira",
   regra: "regra sua",
   vinculo: "o que ela paga",
+  pagador_conhecido: "pagador conhecido — confira",
 };
+
+/**
+ * O cliente sugerido por esta prova só vale com o SIM de alguém ("Sim, é do X" na tela, ou o cliente escolhido):
+ * a aprovação nunca o usa sozinha. Fonte única para o servidor (finance-review aprovar), a tela e o assistente.
+ *   - vinculo: o motor antigo tirava o cliente do que a linha paga (decisão do dono, 26/09/2026);
+ *   - pagador_conhecido: quem pagou é um terceiro guardado para este cliente — sugere, não decide;
+ *   - historico: todo histórico de ENTRADA que chega aqui é de terceiro (o documento do próprio cliente é pego antes,
+ *     no passo 1; o cliente sem documento que paga com o próprio CPF e o mesmo nome sai como nome_identico) — um
+ *     pagamento de terceiro uma vez não decide o próximo.
+ */
+export function clienteExigeSim(por: string | null | undefined): boolean {
+  return por === "vinculo" || por === "pagador_conhecido" || por === "historico";
+}
+
+/**
+ * O que a ANOTAÇÃO do dono disse sobre a linha ("o Pix de 1.500 é da TSD", "é da OS-60") — a anotação aplicada
+ * (anotacoes_do_extrato, pelo id em evidencia.anotacao.id). Chega de dois jeitos:
+ *   - LIDA da anotação aplicada (servidor ao aprovar, assistente ao listar): {cliente_id, os_id}, com cliente_id sempre
+ *     presente (string ou null). null no lugar do objeto = lida e não vale (cancelada, trocada) ou leitura que falhou;
+ *   - só a MARCA da evidência (a tela, que não lê a anotação): evidencia.anotacao = {id, os_id} — o _aplicar_anotacao
+ *     não grava o cliente; cliente_id fica AUSENTE (undefined). Quando a anotação é desfeita (comprovante desligado,
+ *     migrations 20261011302000/20261011303000), a marca sai da evidência e o sugerido fica.
+ */
+export interface AnotacaoDoDono {
+  /** O id da anotação aplicada — só na marca da evidência. */
+  id?: string | null;
+  /** O cliente que a anotação disse. undefined = não lida (só a marca); null = lida, sem cliente. */
+  cliente_id?: string | null;
+  os_id?: string | null;
+}
+
+/** O cliente que a prova do motor (evidencia.cliente) aponta, como fica gravado na proposta. */
+export interface ClienteDaEvidencia {
+  id?: string | null;
+  nome?: string | null;
+  por?: string | null;
+}
+
+/**
+ * A anotação do dono DISSE o cliente sugerido? É instrução dele — vale como o SIM (revisão de 23/10/2026).
+ *   - com cliente_id: só se for o próprio sugerido (o _aplicar_anotacao põe o cliente anotado no sugerido);
+ *   - sem cliente_id e com OS: numa entrada, o cliente é o da OS anotada (service_orders.client_id é obrigatório; o
+ *     _aplicar_anotacao o põe no sugerido e a aprovação usa o cliente da OS);
+ *   - só a MARCA da evidência (não lida: cliente_id ausente) e o sugerido NÃO é o da prova do motor: só o
+ *     _aplicar_anotacao põe na fila um cliente que não é o da prova, e a marca sai quando a anotação é desfeita — é a
+ *     anotação em vigor que disse o sugerido (a tela não lê a anotação; o servidor sempre lê);
+ *   - só categoria/descrição (lida, sem cliente nem OS), ou a marca sobre o MESMO cliente da prova: não disse quem é.
+ */
+function anotacaoDizOCliente(sugeridoId: string, anotacao: AnotacaoDoDono | null | undefined, provaDeOutro: boolean): boolean {
+  if (!anotacao) return false;
+  if (anotacao.cliente_id) return String(anotacao.cliente_id) === sugeridoId;
+  if (anotacao.os_id) return true;
+  return anotacao.cliente_id === undefined && !!anotacao.id && provaDeOutro;
+}
+
+/**
+ * Como fica o cliente SUGERIDO de uma ENTRADA da fila na aprovação (revisão de 23/10/2026, 4ª rodada). Fonte única para
+ * o servidor (aprovar), o assistente e a tela:
+ *   - "sem_sugestao": não há cliente sugerido;
+ *   - "vale": a aprovação usa o sugerido sem perguntar — a prova do motor é DESTE cliente e não pede o SIM (documento,
+ *     nome idêntico, regra), ou a anotação do dono disse este cliente (ela É o SIM);
+ *   - "pede_sim": a prova do motor é DESTE cliente e pede o SIM (clienteExigeSim: vínculo, pagador conhecido, histórico
+ *     de terceiro) e a anotação não o disse — "Sim, é do X" sobre o cliente da prova;
+ *   - "escolher": o sugerido NÃO é o da prova (prova de outro cliente, ou nenhuma) e nenhuma anotação em vigor o disse.
+ *     Fora do motor, só a anotação põe na fila um cliente que não é o da prova; se ela foi desfeita (comprovante
+ *     desligado: a marca sai, o sugerido fica) ou não deu para lê-la, ninguém resolveu de quem é: a aprovação não usa
+ *     NENHUM cliente sem a escolha do dono — nem o sugerido, nem o da prova antiga ("Escolha o cliente…", nunca
+ *     "Sim, é do <prova>").
+ * `anotacao`: a LIDA (servidor, assistente) ou a marca da evidência (tela) — ver AnotacaoDoDono.
+ */
+export type SituacaoDoClienteSugerido = "sem_sugestao" | "vale" | "pede_sim" | "escolher";
+
+export function situacaoDoClienteSugerido(
+  sugeridoId: string | null | undefined,
+  evidenciaCliente: ClienteDaEvidencia | null | undefined,
+  anotacao?: AnotacaoDoDono | null,
+): SituacaoDoClienteSugerido {
+  if (!sugeridoId) return "sem_sugestao";
+  const sugerido = String(sugeridoId);
+  const daProva = !!evidenciaCliente?.id && String(evidenciaCliente.id) === sugerido;
+  if (anotacaoDizOCliente(sugerido, anotacao, !daProva)) return "vale";
+  if (!daProva) return "escolher";
+  return clienteExigeSim(evidenciaCliente?.por) ? "pede_sim" : "vale";
+}
+
+/**
+ * O cliente SUGERIDO pede o SIM ao cliente da PROVA ("Sim, é do X")? true só na situação "pede_sim"
+ * (situacaoDoClienteSugerido): a prova do motor é deste cliente, pede o SIM, e a anotação do dono não o disse.
+ * ATENÇÃO: false NÃO quer dizer que a aprovação usa o sugerido — na situação "escolher" (sugerido que não é o da prova,
+ * sem anotação em vigor que o diga) ela não usa nenhum; quem decide se o sugerido vale é situacaoDoClienteSugerido.
+ * Sem a anotação lida (só a marca da evidência), a OS anotada já conta; o cliente anotado igual ao da prova continua
+ * pedindo o SIM — errar para o lado da pergunta custa um "sim".
+ */
+export function clienteDaPropostaExigeSim(
+  sugeridoId: string | null | undefined,
+  evidenciaCliente: ClienteDaEvidencia | null | undefined,
+  anotacao?: AnotacaoDoDono | null,
+): boolean {
+  return situacaoDoClienteSugerido(sugeridoId, evidenciaCliente, anotacao) === "pede_sim";
+}
+
+/** Quem é o pagador para o cliente (pagadores_do_cliente.relacao). */
+export type RelacaoDoPagador = "empresa_do_cliente" | "conjuge" | "parente" | "marina" | "seguradora" | "outro";
+
+export const RELACOES_DO_PAGADOR: RelacaoDoPagador[] = ["empresa_do_cliente", "conjuge", "parente", "marina", "seguradora", "outro"];
+
+/** Rótulo curto para seletor e lista ("Cônjuge"). */
+export const ROTULO_DA_RELACAO: Record<RelacaoDoPagador, string> = {
+  empresa_do_cliente: "Empresa do cliente",
+  conjuge: "Cônjuge",
+  parente: "Parente",
+  marina: "Marina",
+  seguradora: "Seguradora",
+  outro: "Outro",
+};
+
+/** "Pago pela empresa de Acrisio", "Pago pelo cônjuge de Maria" — o começo do motivo da sugestão. */
+export function frasePagoPor(relacao: string | null | undefined, cliente: string): string {
+  switch (relacao) {
+    case "empresa_do_cliente": return `Pago pela empresa de ${cliente}`;
+    case "conjuge": return `Pago pelo cônjuge de ${cliente}`;
+    case "parente": return `Pago por um parente de ${cliente}`;
+    case "marina": return `Pago pela marina de ${cliente}`;
+    case "seguradora": return `Pago pela seguradora de ${cliente}`;
+    default: return `Pago por quem costuma pagar por ${cliente}`;
+  }
+}
+
+/**
+ * O documento como aparece fora do financeiro (recibo, assistente, lista): CNPJ inteiro e formatado; CPF MASCARADO
+ * (***.456.789-**) — CPF de terceiro é dado pessoal (decisão do dono, 22/10/2026; o mesmo formato do cartão do caixa).
+ */
+export function documentoMascarado(doc: string | null | undefined): string | null {
+  const d = documentoNormalizado(doc);
+  if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+  if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "***.$2.$3-**");
+  return null;
+}
+
+/**
+ * CPF dentro de um NOME ou texto (leva 8, LGPD: CPF de terceiro só mascarado no recibo e no assistente) — o nome que o
+ * banco escreve com o CPF ("12345678901-MARIA…"), o MEI ("JOAO SILVA 12345678901"), o motivo da conciliação ("Quem
+ * enviou (CPF/CNPJ 123.456.789-01)"): sai como documentoMascarado, ***.456.789-**. Só 11 dígitos SOLTOS (ou no formato
+ * do CPF): o CNPJ (14 dígitos, com ou sem pontuação) fica inteiro, como em documentoMascarado.
+ * Sem lookbehind de propósito: este arquivo também roda na tela, e Safari antigo (iOS < 16.4) recusa o módulo inteiro
+ * com ele. O caractere antes do CPF é capturado e devolvido (extrato-lgpd_test confere).
+ * O assistente usa pelo nome antigo, mascararCpfNoTexto (financeiro-comum.ts reexporta esta).
+ */
+export function nomeSemCpf<T extends string | null | undefined>(nome: T): T {
+  if (typeof nome !== "string") return nome;
+  return nome.replace(/(^|\D)(\d{3})\.?(\d{3})\.?(\d{3})-?(\d{2})(?!\d)/g, "$1***.$3.$4-**") as T;
+}
 
 export type TipoDeCadastro = "fornecedor" | "favorecido" | "cliente";
 
@@ -44,6 +205,25 @@ export interface Reconhecimento {
   por: TipoDeEvidencia;
   /** Frase para a linha: "CNPJ confere com MP MOTOR HOMES". */
   detalhe: string;
+  /** Só em `pagador_conhecido`: quem o pagador é para o cliente. */
+  relacao?: RelacaoDoPagador | string;
+}
+
+/** Um cliente para quem este pagador já foi guardado — candidato da pergunta "de quem é?". */
+export interface CandidatoDoPagamento {
+  id: string;
+  nome: string;
+  relacao: RelacaoDoPagador | string;
+}
+
+/** O "não" do dono para este documento × cliente (pagadores_do_cliente recusado ou pausado). */
+export type SituacaoDoVeto = "recusado" | "pausado";
+
+/** Um cliente que o motor sugeriria, mas para quem o dono recusou ou pausou este documento como pagador. */
+export interface ClienteVetado {
+  id: string;
+  nome: string;
+  situacao: SituacaoDoVeto;
 }
 
 export interface Identificacao {
@@ -52,10 +232,68 @@ export interface Identificacao {
   cliente: Reconhecimento | null;
   /** O documento pertence a um cadastro de OUTRO tipo (ex.: CPF de cliente numa saída). */
   outroCadastro: { tipo: TipoDeCadastro; id: string; nome: string } | null;
-  /** Nada reconheceu e há o que cadastrar — já com o que o extrato traz. */
+  /**
+   * Nada reconheceu e há o que cadastrar — já com o que o extrato traz. Só nas SAÍDAS: a entrada nunca propõe
+   * cadastrar cliente com os dados de quem pagou (leva 8, 22/10/2026); ela pergunta (deQuemE). Linhas antigas da
+   * fila ainda podem trazer `cadastrar` de cliente até a varredura refazê-las (MOTOR_DA_FILA 3).
+   */
   cadastrar: { tipo: TipoDeCadastro; documento: string | null; nome: string | null } | null;
+  /**
+   * ENTRADA sem cliente reconhecido: "de quem é este pagamento?". `candidatos` são os clientes para quem este
+   * documento já foi guardado como pagador (marina, seguradora: dois ou mais); vazio = ninguém ainda. O documento e
+   * o nome são os do extrato. `vetados` (só quando há): os clientes que o histórico ou o nome sugeririam, mas para quem
+   * o dono recusou ou pausou este documento como pagador — ficam de fora da sugestão e dos candidatos.
+   */
+  deQuemE: {
+    documento: string | null;
+    nome: string | null;
+    candidatos: CandidatoDoPagamento[];
+    vetados?: ClienteVetado[];
+  } | null;
   /** Nome para mostrar quando o banco não mandou nome (sai do cadastro do documento). */
   nomeConhecido: string | null;
+}
+
+/** A pergunta "de quem é este pagamento?" como o motor a grava (evidencia.deQuemE). */
+export type PerguntaDeQuemE = NonNullable<Identificacao["deQuemE"]>;
+
+/**
+ * Relação do candidato que só o NOME IDÊNTICO aponta quando a leitura dos pagadores falhou (pagadoresIndisponiveis):
+ * sem saber o que o dono vetou, o nome idêntico não identifica sozinho — vira candidato da pergunta.
+ */
+export const RELACAO_DO_NOME_IDENTICO = "nome idêntico";
+
+/** O que perguntaDeQuemEValida lê de uma proposta da fila. */
+export interface PropostaComPergunta {
+  suggested_client_id?: string | null;
+  evidencia?: {
+    deQuemE?: Partial<PerguntaDeQuemE> | null;
+    cadastrar?: { tipo?: string | null; documento?: string | null; nome?: string | null } | null;
+    cliente?: ClienteDaEvidencia | null;
+  } | null;
+}
+
+/**
+ * A pergunta "de quem é este pagamento?" que AINDA vale nesta proposta da fila — ou null (revisão de 23/10/2026).
+ * As funções do banco que resolvem o cliente fora do motor — a anotação do dono (_aplicar_anotacao), o "É cliente novo"
+ * (cadastro pela linha) — só tiram o `cadastrar` da evidência: o deQuemE sobra. O motor nunca grava cliente E pergunta
+ * juntos (com pergunta, suggested_client_id é nulo e evidencia.cliente não existe); então, se a proposta já tem cliente
+ * sugerido ou cliente na prova, a pergunta é sobra e não vale.
+ * A linha antiga (motor 2) com `cadastrar` de CLIENTE vira a mesma pergunta, sem candidatos — nunca a proposta de
+ * cadastrar cliente com os dados de quem pagou. Fonte única para a tela, o assistente e o servidor.
+ */
+export function perguntaDeQuemEValida(p: PropostaComPergunta | null | undefined): PerguntaDeQuemE | null {
+  const ev = p?.evidencia;
+  const q = ev?.deQuemE ?? (ev?.cadastrar?.tipo === "cliente" ? ev.cadastrar : null);
+  if (!q) return null;
+  if (p?.suggested_client_id || ev?.cliente?.id) return null;
+  const vetados = (q as Partial<PerguntaDeQuemE>).vetados;
+  return {
+    documento: q.documento ?? null,
+    nome: q.nome ?? null,
+    candidatos: Array.isArray((q as Partial<PerguntaDeQuemE>).candidatos) ? (q as PerguntaDeQuemE).candidatos : [],
+    ...(Array.isArray(vetados) && vetados.length > 0 ? { vetados } : {}),
+  };
 }
 
 export interface TxParaIdentificar {
@@ -77,6 +315,22 @@ export interface CadastroParaIdentificar {
     lado: "saida" | "entrada";
     supplier_id?: string | null; payee_id?: string | null; client_id?: string | null;
   }>;
+  /**
+   * Pagadores CONFIRMADOS pelo dono (pagadores_do_cliente, situacao 'confirmado'), só de cliente ativo — quem
+   * chama filtra. Pagador de cliente que não está em `clientes` é ignorado. Ausente = nenhum.
+   */
+  pagadores?: Array<{ documento: string; client_id: string; relacao: RelacaoDoPagador | string; confirmado_em?: string | null }>;
+  /**
+   * O "não" do dono (pagadores_do_cliente recusado ou pausado): este documento NUNCA sugere este cliente — nem como
+   * pagador conhecido, nem pelo histórico, nem pelo nome idêntico. CPF inteiro; CNPJ pela raiz. Ausente = nenhum.
+   */
+  vetados?: Array<{ documento: string; client_id: string; situacao: SituacaoDoVeto | string }>;
+  /**
+   * A leitura de pagadores_do_cliente falhou: não se sabe o que o dono guardou nem o que vetou. O histórico continua
+   * sugerindo, sempre pedindo o SIM (o atalho "é o próprio cliente sem documento" fica desligado), e o nome idêntico
+   * vira a pergunta "de quem é?", com o cliente como candidato (RELACAO_DO_NOME_IDENTICO).
+   */
+  pagadoresIndisponiveis?: boolean;
 }
 
 interface Entrada { id: string; nome: string; limpo: string; tokens: string[]; documento?: string }
@@ -84,6 +338,14 @@ interface Entrada { id: string; nome: string; limpo: string; tokens: string[]; d
 interface HistoricoDoDocumento {
   saida: { total: number; fornecedor: Map<string, number>; favorecido: Map<string, number> };
   entrada: { total: number; cliente: Map<string, number> };
+}
+
+/** Um pagador guardado para um cliente, já com o cadastro do cliente. */
+export interface PagadorIndexado {
+  cliente: { id: string; nome: string };
+  relacao: RelacaoDoPagador | string;
+  /** Quando o dono confirmou (ISO), para "guardado por você em dd/mm". */
+  em: string | null;
 }
 
 export interface IndiceDeContrapartes {
@@ -96,7 +358,53 @@ export interface IndiceDeContrapartes {
   clientes: Entrada[];
   /** documento → quem ele já foi, por sentido, com contagem e total de lançamentos. */
   historico: Map<string, HistoricoDoDocumento>;
+  /**
+   * Pagadores confirmados: pelo documento exato (CPF) e pela raiz do CNPJ (`raiz:12345678` — matriz e filiais são a
+   * mesma empresa), um por cliente.
+   */
+  pagadorPorDoc: Map<string, PagadorIndexado[]>;
+  /** O "não" do dono: chave do documento (CPF; CNPJ pela raiz) → cliente → recusado ou pausado. */
+  vetoPorDoc: Map<string, Map<string, SituacaoDoVeto>>;
+  /** A leitura dos pagadores falhou (CadastroParaIdentificar.pagadoresIndisponiveis). */
+  pagadoresIndisponiveis: boolean;
   porId: { fornecedor: Map<string, Entrada>; favorecido: Map<string, Entrada>; cliente: Map<string, Entrada> };
+}
+
+/** Chave do pagador no índice: CPF inteiro; CNPJ pela raiz. */
+function chaveDoPagador(doc: string): string {
+  return doc.length === 14 ? `raiz:${doc.slice(0, 8)}` : doc;
+}
+
+/**
+ * O dono recusou ou pausou este documento como pagador deste cliente? Devolve a situação (o veto) ou null. CNPJ pela
+ * raiz, como o pagador confirmado.
+ */
+export function vetoDoPagador(
+  idx: IndiceDeContrapartes, documento: string | null | undefined, clienteId: string | null | undefined,
+): SituacaoDoVeto | null {
+  const d = documentoNormalizado(documento);
+  if (!clienteId || (d.length !== 11 && d.length !== 14)) return null;
+  return idx.vetoPorDoc.get(chaveDoPagador(d))?.get(clienteId) ?? null;
+}
+
+/**
+ * Os clientes (um por cliente) para quem este documento foi guardado como pagador CONFIRMADO — menos os vetados (o
+ * "não" do dono vence: recusado ou pausado não sugere, nem como candidato).
+ */
+export function pagadoresDoDocumento(idx: IndiceDeContrapartes, documento: string | null | undefined): PagadorIndexado[] {
+  const d = documentoNormalizado(documento);
+  if (d.length !== 11 && d.length !== 14) return [];
+  const vetados = idx.vetoPorDoc.get(chaveDoPagador(d));
+  const lista = idx.pagadorPorDoc.get(chaveDoPagador(d)) ?? [];
+  return vetados ? lista.filter((p) => !vetados.has(p.cliente.id)) : lista;
+}
+
+/** dd/mm de um carimbo ISO, no fuso de Brasília. */
+function ddmm(iso: string | null | undefined): string | null {
+  const t = Date.parse(String(iso ?? ""));
+  if (!Number.isFinite(t)) return null;
+  const br = new Date(t - 3 * 3600_000).toISOString();
+  return `${br.slice(8, 10)}/${br.slice(5, 7)}`;
 }
 
 const digitos = (s: string | null | undefined) => String(s ?? "").replace(/\D/g, "");
@@ -195,6 +503,9 @@ export function indexarContrapartes(c: CadastroParaIdentificar): IndiceDeContrap
     favorecidoPorConta: new Map(),
     fornecedores: [], favorecidos: [], clientes: [],
     historico: new Map(),
+    pagadorPorDoc: new Map(),
+    vetoPorDoc: new Map(),
+    pagadoresIndisponiveis: c.pagadoresIndisponiveis === true,
     porId: { fornecedor: new Map(), favorecido: new Map(), cliente: new Map() },
   };
   for (const f of c.fornecedores) {
@@ -240,6 +551,29 @@ export function indexarContrapartes(c: CadastroParaIdentificar): IndiceDeContrap
       if (h.client_id) soma(reg.entrada.cliente, h.client_id);
     }
     idx.historico.set(d, reg);
+  }
+  for (const p of c.pagadores ?? []) {
+    const d = documentoNormalizado(p.documento);
+    const cliente = idx.porId.cliente.get(p.client_id);
+    // Cliente fora do cadastro lido (inativo, apagado) não é sugerido; documento torto não entra.
+    if (!cliente || (d.length !== 11 && d.length !== 14)) continue;
+    const k = chaveDoPagador(d);
+    const lista = idx.pagadorPorDoc.get(k) ?? [];
+    // Matriz e filial guardadas para o mesmo cliente contam uma vez só.
+    if (!lista.some((x) => x.cliente.id === cliente.id)) {
+      lista.push({ cliente: { id: cliente.id, nome: cliente.nome }, relacao: p.relacao, em: p.confirmado_em ?? null });
+    }
+    idx.pagadorPorDoc.set(k, lista);
+  }
+  // O "não" do dono vale para qualquer cliente lido (o veto só tira sugestão). Recusado vence pausado na mesma chave.
+  for (const v of c.vetados ?? []) {
+    const d = documentoNormalizado(v.documento);
+    if (!v.client_id || (d.length !== 11 && d.length !== 14)) continue;
+    if (v.situacao !== "recusado" && v.situacao !== "pausado") continue;
+    const k = chaveDoPagador(d);
+    const m = idx.vetoPorDoc.get(k) ?? new Map<string, SituacaoDoVeto>();
+    if (m.get(String(v.client_id)) !== "recusado") m.set(String(v.client_id), v.situacao as SituacaoDoVeto);
+    idx.vetoPorDoc.set(k, m);
   }
   return idx;
 }
@@ -292,7 +626,7 @@ export function identificarContraparte(tx: TxParaIdentificar, idx: IndiceDeContr
 
   const r: Identificacao = {
     fornecedor: null, favorecido: null, cliente: null,
-    outroCadastro: null, cadastrar: null, nomeConhecido: null,
+    outroCadastro: null, cadastrar: null, deQuemE: null, nomeConhecido: null,
   };
 
   // O nome que o banco não mandou, pelo cadastro do documento (qualquer tipo).
@@ -357,22 +691,68 @@ export function identificarContraparte(tx: TxParaIdentificar, idx: IndiceDeContr
   }
 
   // ── Entrada: de qual cliente veio ──
+  // O "não" do dono (pagador recusado ou pausado para um cliente, revisão de 23/10/2026): aquele cliente nunca é
+  // sugerido para este documento — nem como pagador conhecido, nem pelo histórico, nem pelo nome idêntico. A linha
+  // pergunta "de quem é?" com os candidatos que sobram. Só o documento do PRÓPRIO cliente (passo 1) passa por cima.
+  const vetados: ClienteVetado[] = [];
+  const vetado = (e: Entrada): boolean => {
+    const s = temDoc ? vetoDoPagador(idx, doc, e.id) : null;
+    if (s && !vetados.some((x) => x.id === e.id)) vetados.push({ id: e.id, nome: e.nome, situacao: s });
+    return !!s;
+  };
+  // 1. Documento do próprio cliente (verde).
   if (temDoc) {
     const cli = idx.clientePorDoc.get(doc);
     if (cli) r.cliente = reconhecer(cli, "documento", `${tipoDoc} confere com o cliente ${cli.nome}`);
   }
-  if (!r.cliente && historico) {
+  // 2. Pagador guardado pelo dono. De UM cliente: sugestão com o motivo, que pede o SIM (clienteExigeSim). De dois
+  //    ou mais (marina, seguradora): não identifica ninguém — a pergunta, com eles como candidatos. O documento do
+  //    próprio cliente (passo 1) vence sempre. Vetado não entra (pagadoresDoDocumento já tira).
+  const pagadores = !r.cliente && temDoc ? pagadoresDoDocumento(idx, doc) : [];
+  if (pagadores.length === 1) {
+    const [p] = pagadores;
+    const quando = ddmm(p.em);
+    r.cliente = {
+      id: p.cliente.id, nome: p.cliente.nome, por: "pagador_conhecido", relacao: p.relacao,
+      detalhe: `${frasePagoPor(p.relacao, p.cliente.nome)}, guardado por você${quando ? ` em ${quando}` : ""} — confira`,
+    };
+  }
+  const variosClientes = pagadores.length > 1;
+  // 3. Histórico unânime — continua sugerindo, mas pede o SIM: o histórico de entrada que chega aqui é de terceiro
+  //    (o documento do próprio cliente foi pego no passo 1)… menos quando o cliente NÃO TEM documento no cadastro e o
+  //    nome de quem pagou é idêntico ao dele: aí é o próprio cliente pagando com o CPF que falta na ficha. Se o nome
+  //    idêntico (passo 4) acharia o MESMO cliente do histórico, a prova é o nome idêntico, sem SIM — como era antes
+  //    da leva 8 (simulação de 22/10/2026: 3 linhas de 2 clientes sem CPF passavam a pedir o SIM à toa).
+  //    Sem a leitura dos pagadores (pagadoresIndisponiveis) não se sabe o que o dono vetou: o atalho fica desligado e o
+  //    histórico sempre pede o SIM. Histórico de um cliente VETADO não sugere nada — nem o nome idêntico depois dele: o
+  //    dono disse que este documento não é daquele cliente, e a linha pergunta.
+  let historicoVetado = false;
+  if (!r.cliente && !variosClientes && historico) {
     const u = unanime(historico.entrada.cliente, historico.entrada.total);
     const cli = u ? idx.porId.cliente.get(u.id) : undefined;
-    if (cli && u) {
-      r.cliente = reconhecer(cli, "historico",
-        `Este ${tipoDoc} já pagou ${u.vezes}× em nome de ${cli.nome}`);
+    if (cli && u && vetado(cli)) {
+      historicoVetado = true;
+    } else if (cli && u) {
+      const peloNome = limpo && !idx.pagadoresIndisponiveis ? porNomeIdentico(idx.clientes, limpo, doc) : null;
+      r.cliente = peloNome?.id === cli.id
+        ? reconhecer(cli, "nome_identico", `Nome idêntico ao do cliente ${cli.nome} (este ${tipoDoc} já pagou ${u.vezes}× em nome dele)`)
+        : reconhecer(cli, "historico", `Este ${tipoDoc} já pagou ${u.vezes}× em nome de ${cli.nome} — confira`);
     }
   }
-  if (!r.cliente && limpo) {
+  // 4. Nome idêntico — menos o cliente para quem o dono vetou este documento. Sem a leitura dos pagadores
+  //    (pagadoresIndisponiveis) não se sabe se o dono vetou este documento para este cliente: o nome idêntico não
+  //    identifica sozinho (a prova nome_identico a aprovação usa sem o SIM) — vira a pergunta, com o cliente como
+  //    candidato (revisão de 23/10/2026). Nunca cliente sem SIM. Sem documento no extrato não há veto a conferir (o
+  //    veto é por documento): o nome idêntico decide como sempre.
+  let candidatoPeloNome: CandidatoDoPagamento | null = null;
+  if (!r.cliente && !variosClientes && !historicoVetado && limpo) {
     const cli = porNomeIdentico(idx.clientes, limpo, doc);
-    if (cli) r.cliente = reconhecer(cli, "nome_identico", `Nome idêntico ao do cliente ${cli.nome}`);
+    if (cli && !vetado(cli)) {
+      if (idx.pagadoresIndisponiveis && temDoc) candidatoPeloNome = { id: cli.id, nome: cli.nome, relacao: RELACAO_DO_NOME_IDENTICO };
+      else r.cliente = reconhecer(cli, "nome_identico", `Nome idêntico ao do cliente ${cli.nome}`);
+    }
   }
+  // 5. Nada: "de quem é este pagamento?". Nunca "cadastrar cliente" com os dados de quem pagou (leva 8).
   if (!r.cliente) {
     const outro = temDoc ? (idx.favorecidoPorDoc.get(doc) ?? idx.fornecedorPorDoc.get(doc)) : undefined;
     if (outro) {
@@ -381,8 +761,18 @@ export function identificarContraparte(tx: TxParaIdentificar, idx: IndiceDeContr
         id: outro.id, nome: outro.nome,
       };
     }
-    if (temDoc || nomeDoExtrato) {
-      r.cadastrar = { tipo: "cliente", documento: temDoc ? doc : null, nome: nomeDoExtrato ?? outro?.nome ?? null };
+    // Sem documento e sem nome (maquininha, boleto) a linha fica como antes: sem evidência, e a varredura diária
+    // continua tentando identificá-la.
+    if (temDoc || nomeDoExtrato || variosClientes) {
+      r.deQuemE = {
+        documento: temDoc ? doc : null,
+        nome: nomeDoExtrato ?? outro?.nome ?? null,
+        candidatos: [
+          ...pagadores.map((p) => ({ id: p.cliente.id, nome: p.cliente.nome, relacao: p.relacao })),
+          ...(candidatoPeloNome ? [candidatoPeloNome] : []),
+        ],
+        ...(vetados.length > 0 ? { vetados } : {}),
+      };
     }
   }
   return r;
@@ -396,6 +786,28 @@ export function frasesDaIdentificacao(i: Identificacao): string[] {
     const tipo = { fornecedor: "fornecedor", favorecido: "favorecido", cliente: "cliente" }[i.outroCadastro.tipo];
     f.push(`O documento é do ${tipo} ${i.outroCadastro.nome}`);
   }
+  if (i.deQuemE) {
+    const c = i.deQuemE.candidatos ?? [];
+    const peloNome = c.length === 1 && c[0].relacao === RELACAO_DO_NOME_IDENTICO ? c[0] : null;
+    f.push(peloNome
+      ? `De quem é este pagamento? O nome é idêntico ao do cliente ${peloNome.nome}, mas não deu para conferir os pagadores `
+        + "que você guardou agora — confirme o cliente"
+      : c.length > 1
+      ? `De quem é este pagamento? Este ${tipoDoDocumento(i.deQuemE.documento)} paga por mais de um cliente: ${c.map((x) => x.nome).join(", ")}`
+      : "De quem é este pagamento? Nenhum cliente reconhecido pelo CPF/CNPJ nem pelo nome");
+    for (const v of i.deQuemE.vetados ?? []) f.push(fraseDoVeto(v.situacao, tipoDoDocumento(i.deQuemE.documento), v.nome));
+  }
   if (i.nomeConhecido) f.push(`O banco não mandou o nome; pelo documento é ${i.nomeConhecido}`);
   return f;
+}
+
+function tipoDoDocumento(doc: string | null | undefined): string {
+  return documentoNormalizado(doc).length === 14 ? "CNPJ" : "CPF";
+}
+
+/** "Você recusou este CPF como pagador de X: X não é sugerido" — o porquê de o cliente não aparecer. */
+export function fraseDoVeto(situacao: SituacaoDoVeto | string, tipoDoc: string, cliente: string): string {
+  return situacao === "pausado"
+    ? `Você pausou este ${tipoDoc} como pagador de ${cliente}: ${cliente} não é sugerido até o administrador reativar`
+    : `Você recusou este ${tipoDoc} como pagador de ${cliente}: ${cliente} não é sugerido`;
 }

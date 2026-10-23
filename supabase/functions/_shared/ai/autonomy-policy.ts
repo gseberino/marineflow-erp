@@ -42,6 +42,13 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   "followup_send_touch",
   // financeiro (07/10/2026): estorno mexe em dinheiro (a conta volta a dever) — sempre com o "sim".
   "estornar_pagamento",
+  // Aprovar propostas de lançamento cria receita/despesa e liga cliente (leva 8, decisão do dono de 23/10/2026,
+  // "pelo recomendado"): mexe em dinheiro, então SEMPRE com o "sim" — com ou sem cliente confirmado.
+  "aprovar_propostas_de_lancamento",
+  // "Este Pix paga…" (revisão da leva 8, 23/10/2026, decisão do dono "pelo recomendado"): dá baixa em contas a receber
+  // com o dinheiro do extrato — e o "parece pagar" que o propõe usa o cliente SUGERIDO da entrada, que pode ser só o
+  // pagador conhecido (que pede o SIM). Mexe em dinheiro: SEMPRE com o "sim", sobre as contas e os valores.
+  "aplicar_pix_em_contas",
   // fiscal e compras (07/10/2026): o PDF da nota ao cliente é arquivo com valores e dados fiscais
   // a terceiro, que não se desfaz; excluir OC é destrutivo. Sempre com o "sim".
   "send_fiscal_pdf_to_client",
@@ -55,6 +62,9 @@ export const NEVER_AUTONOMOUS = new Set<string>([
   // reprovado vira a PERGUNTA ao dono. Sempre com o "sim".
   "agrupar_orcamentos",
   "desagrupar_orcamento",
+  // quem paga por um cliente (leva 8, 22/10/2026): é o SIM do dono que faz o pagador valer — decisão dele: sempre com
+  // o "sim", sobre o resumo resolvido (quem pagou, o cliente, a relação).
+  "guardar_pagador_do_cliente",
 ]);
 
 /**

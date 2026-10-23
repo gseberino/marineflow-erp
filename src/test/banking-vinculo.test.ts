@@ -1,5 +1,7 @@
 // Vínculo de uma linha do extrato com o que ela paga — casos de 25/09/2026.
 import { describe, it, expect } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   sugerirVinculo, vinculoAutomatico, exigeDecisao, perguntaDaOSAberta, temPerguntaDaOS,
 } from '../../supabase/functions/_shared/banking/vinculo';
@@ -92,6 +94,85 @@ describe('sugerirVinculo', () => {
     const v = sugerirVinculo(entrada(500, '2026-08-16', { counterparty_name: 'MP MOTORHOMES', counterparty_document: '44051448000100' }), cands);
     expect(v?.principal.jaLancado).toBe(true);
     expect(exigeDecisao(v)).toBe(true);
+  });
+});
+
+// ─── Pagador conhecido (leva 8, 22/10/2026): sugere, nunca dá baixa ─────────────────────────────
+describe('pagador conhecido no vínculo', () => {
+  // A EQUIT (empresa do Acrisio) paga o saldo exato da única conta em aberto dele.
+  const contaDoAcrisio: Candidate = {
+    kind: 'receivable', id: 'r-acrisio', label: 'Saldo — OS-00060', amount: 3947.48, direction: 'credit',
+    dueDate: '2026-02-06', clientId: 'c-acrisio', clientName: 'Acrisio Cançado Lopes', clientDocument: '000.000.000-01',
+  };
+  const contaDeOutro: Candidate = {
+    kind: 'receivable', id: 'r-outro', label: 'Saldo — OS-00061', amount: 3947.48, direction: 'credit',
+    dueDate: '2026-02-06', clientId: 'c-outro', clientName: 'Outro Cliente', clientDocument: '111.111.111-11',
+  };
+  const pixDaEquit = entrada(3947.48, '2026-02-06', { counterparty_name: 'EQUIT ADMINISTRACAO DE BENS LTDA', counterparty_document: '04754513000149' });
+  const acrisio = { id: 'c-acrisio', nome: 'Acrisio Cançado Lopes', por: 'pagador_conhecido', relacao: 'empresa_do_cliente' };
+
+  it('valor exato e título único: no máximo "provável", sem baixa sozinha, e pergunta', () => {
+    const v = sugerirVinculo(pixDaEquit, [contaDoAcrisio], acrisio);
+    // 45 (valor exato) + 15 (data) + 10 (cliente reconhecido) = 70: provável, nunca certo
+    expect(v?.principal).toMatchObject({ id: 'r-acrisio', nivel: 'probable', confianca: 70 });
+    expect(vinculoAutomatico(v)).toBeNull();
+    expect(exigeDecisao(v)).toBe(true);
+  });
+
+  it('o terceiro guardado não é mais evidência contra AQUELE cliente — e o motivo diz quem pagou', () => {
+    const v = sugerirVinculo(pixDaEquit, [contaDoAcrisio], acrisio);
+    const motivos = v!.principal.motivos.join(' | ');
+    expect(motivos).not.toMatch(/confira se foi um terceiro pagando/);
+    expect(motivos).toMatch(/Pago pela empresa de Acrisio Cançado Lopes \(pagador conhecido\)/);
+    // sem o pagador conhecido, o mesmo candidato leva a penalidade de 20 e o aviso
+    const sem = sugerirVinculo(pixDaEquit, [contaDoAcrisio], null);
+    expect(sem!.principal.motivos.join(' | ')).toMatch(/confira se foi um terceiro pagando/);
+    expect(v!.principal.confianca).toBeGreaterThanOrEqual(sem!.principal.confianca + 20);
+  });
+
+  it('a penalidade continua para os candidatos de OUTRO cliente', () => {
+    const v = sugerirVinculo(pixDaEquit, [contaDoAcrisio, contaDeOutro], acrisio);
+    const outro = [v!.principal, ...v!.alternativas].find((o) => o.id === 'r-outro');
+    expect(v!.principal.id).toBe('r-acrisio');
+    expect(outro?.motivos.join(' | ')).toMatch(/confira se foi um terceiro pagando/);
+    expect(outro?.motivos.join(' | ')).not.toMatch(/pagador conhecido/);
+  });
+
+  it('o candidato que a penalidade escondia (data longe, só o valor) volta a aparecer — para perguntar', () => {
+    // Saldo de OS sem vencimento e a 60 dias: o valor exato (45) menos a penalidade (20) ficava abaixo do corte (35).
+    const saldo: Candidate = {
+      kind: 'service_order_balance', id: 'os-acrisio', label: 'Saldo da OS-00060', amount: 3947.48, direction: 'credit',
+      referenceDate: '2025-12-08', clientId: 'c-acrisio', clientName: 'Acrisio Cançado Lopes', clientDocument: '000.000.000-01',
+    };
+    expect(sugerirVinculo(pixDaEquit, [saldo], null)).toBeNull();
+    const com = sugerirVinculo(pixDaEquit, [saldo], acrisio);
+    expect(com?.principal).toMatchObject({ id: 'os-acrisio', nivel: 'weak' });
+    expect(exigeDecisao(com)).toBe(true);
+    expect(vinculoAutomatico(com)).toBeNull();
+  });
+
+  it('TRAVA: nem com o documento do pagador igual ao do cadastro a camada de certeza vale para pagador conhecido', () => {
+    // Se o documento de quem pagou fosse parar no clientDocument, documento + valor exato daria certeza e baixa.
+    const comODocDoPagador: Candidate = { ...contaDoAcrisio, clientDocument: '04754513000149' };
+    const v = sugerirVinculo(pixDaEquit, [comODocDoPagador], acrisio);
+    expect(v?.principal.nivel).not.toBe('certain');
+    expect(vinculoAutomatico(v)).toBeNull();
+  });
+
+  it('histórico e documento continuam como antes (só o pagador conhecido muda a pontuação)', () => {
+    const porHistorico = sugerirVinculo(pixDaEquit, [contaDoAcrisio], { id: 'c-acrisio', nome: 'Acrisio Cançado Lopes', por: 'historico' });
+    expect(porHistorico!.principal.motivos.join(' | ')).toMatch(/confira se foi um terceiro pagando/);
+    expect(porHistorico!.principal.motivos.join(' | ')).toMatch(/cliente reconhecido \(Acrisio Cançado Lopes\)/);
+  });
+
+  it('portão da Conciliação: o banking-reconcile continua sem aplicar sugestão sozinho', () => {
+    // Os outros portões têm teste próprio: lançar sozinho (finance-lancar-sozinho.test.ts), lote da papelada
+    // (papelada/lote_test.ts) e vinculoAutomatico (acima). Este é texto: a função não exporta a decisão.
+    const fonte = fs.readFileSync(path.join(__dirname, '../../supabase/functions/banking-reconcile/index.ts'), 'utf8');
+    expect(fonte).toMatch(/const aplicarSozinha = false;/);
+    // e o matching.ts não recebe o documento de quem pagou: o motor do vínculo não escreve clientDocument
+    const vinculo = fs.readFileSync(path.join(__dirname, '../../supabase/functions/_shared/banking/vinculo.ts'), 'utf8');
+    expect(vinculo).not.toMatch(/clientDocument\s*[:=]/);
   });
 });
 

@@ -14,7 +14,7 @@ import { lerRetrato, type ToolCtx, type ToolDef } from "./registry.ts";
 import { dataDita, ehErro } from "./caixa.ts";
 import { mensagemDoBanco } from "./lancamentos.ts";
 import {
-  alvoDoRetrato, brl, CARGOS_DO_FINANCEIRO, ehUuid, mesmoValor, ordemDita, semAcessoDoFinanceiro, valorDito,
+  alvoDoRetrato, brl, CARGOS_DO_FINANCEIRO, ehUuid, mascararCpfNoTexto, mesmoValor, ordemDita, semAcessoDoFinanceiro, valorDito,
 } from "./financeiro-comum.ts";
 
 const CAMPOS = "id, amount, payment_date, payment_method, status, notes, bank_transaction_id, receivable_id, payable_id, " +
@@ -34,15 +34,18 @@ export interface PagamentoLido {
 
 const dataBr = (iso: string | null | undefined) => (iso ? iso.slice(0, 10).split("-").reverse().join("/") : "—");
 
-/** "R$ 800,00 de 05/10/2026 (pix) · a receber «Sinal — OS-00095» · MP Motor Homes" — numa linha. */
+/**
+ * "R$ 800,00 de 05/10/2026 (pix) · a receber «Sinal — OS-00095» · MP Motor Homes" — numa linha. A conta que veio do
+ * Extrato nasce com o nome do banco ("12345678901-MARIA…"): o CPF sai mascarado (LGPD, leva 8).
+ */
 export function rotuloDoPagamento(p: PagamentoLido): string {
   const conta = p.receivables ?? p.payables;
   const quem = p.receivables?.clients?.name ?? p.payables?.payees?.name ?? p.payables?.suppliers?.name ?? p.payables?.supplier_name ?? null;
   return [
     `${brl.format(Number(p.amount))} de ${dataBr(p.payment_date)}${p.payment_method ? ` (${p.payment_method})` : ""}`,
-    conta ? `${p.receivable_id ? "a receber" : "a pagar"} «${conta.description ?? "sem descrição"}»` : null,
+    conta ? `${p.receivable_id ? "a receber" : "a pagar"} «${mascararCpfNoTexto(conta.description ?? "sem descrição")}»` : null,
     conta?.service_orders?.service_order_number ?? null,
-    quem,
+    mascararCpfNoTexto(quem),
   ].filter(Boolean).join(" · ");
 }
 

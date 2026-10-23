@@ -5,6 +5,8 @@
 // pago. Só olha entradas com cliente identificado pela fila (documento, histórico, nome idêntico ou
 // regra do dono): nunca casa pelo valor.
 import type { ToolCtx } from "./registry.ts";
+// LGPD (leva 8): o título da entrada nasce do nome do banco ("Receita: 12345678901-MARIA…") — CPF mascarado ao modelo.
+import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
 
 export interface PixEsperando {
   valor: number;
@@ -26,7 +28,7 @@ export async function pixEsperandoNoExtrato(ctx: ToolCtx, clientIds: string[]): 
   if (error) throw new Error(`Não consegui ler os Pix que esperam no Extrato: ${error.message}`);
   for (const l of (data ?? []) as Array<{ suggested_client_id: string; suggested_amount: number | null; suggested_date: string | null; title: string }>) {
     const lista = mapa.get(l.suggested_client_id) ?? [];
-    lista.push({ valor: Math.abs(Number(l.suggested_amount ?? 0)), data: l.suggested_date, titulo: l.title });
+    lista.push({ valor: Math.abs(Number(l.suggested_amount ?? 0)), data: l.suggested_date, titulo: mascararCpfNoTexto(l.title) });
     mapa.set(l.suggested_client_id, lista);
   }
   return mapa;

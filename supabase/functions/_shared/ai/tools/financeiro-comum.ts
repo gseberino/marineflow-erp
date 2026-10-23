@@ -121,3 +121,12 @@ export function alvoDoRetrato(retrato: Record<string, unknown> | null, chave: st
   const v = retrato?.[chave];
   return typeof v === "string" && v ? v : null;
 }
+
+/**
+ * CPF dentro de um TEXTO que vai ao modelo (leva 8, LGPD: CPF de terceiro só mascarado no assistente) — o nome que o
+ * banco escreve com o CPF ("12345678901-MARIA…"), o MEI ("JOAO SILVA 12345678901"), o motivo da conciliação ("Quem
+ * enviou (CPF/CNPJ 123.456.789-01)"): sai como documentoMascarado, ***.456.789-**. Só 11 dígitos SOLTOS (ou no formato
+ * do CPF): o CNPJ (14 dígitos, com ou sem pontuação) fica inteiro, como em documentoMascarado.
+ * É a MESMA função que a tela usa no recibo (nomeSemCpf, _shared/banking/contraparte.ts): uma fonte só para a máscara.
+ */
+export { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";

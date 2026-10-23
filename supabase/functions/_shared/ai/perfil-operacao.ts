@@ -360,6 +360,14 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   //   alcance, o modelo obedecia e recebia "Tool desconhecida". É risco medium: pela rede vira
   //   pendência, como já era à vista. Cargos: admin e financeiro (CARGOS_FINANCEIRO) —
   "criar_categoria_de_despesa",
+
+  // — Quem paga por um cliente (leva 8, 22/10/2026): a lista de propostas, a regra de entrada e o cadastro a partir do
+  //   extrato mandam usar guardar_pagador_do_cliente quando o dono diz de quem é a entrada. Uso raro (o grosso se
+  //   confirma na tela, em lote) e o perfil enxuto do admin está no teto (113): só pela rede. A lista é leitura pelo
+  //   nome e roda direto; guardar é medium e vira pendência com o resumo resolvido (CPF mascarado) — nunca sozinha
+  //   (NEVER_AUTONOMOUS). Cargos: admin e financeiro (CARGOS_FINANCEIRO) —
+  "listar_pagadores_do_cliente",
+  "guardar_pagador_do_cliente",
 ]);
 
 /**

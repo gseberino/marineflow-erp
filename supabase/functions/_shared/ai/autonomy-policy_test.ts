@@ -50,6 +50,27 @@ Deno.test("TETO RÍGIDO: ações de dinheiro/destrutivas nunca ficam autônomas,
   }
 });
 
+Deno.test("aprovar propostas de lançamento NUNCA roda sozinho, com ou sem cliente confirmado (dono, 23/10/2026)", () => {
+  const nome = "aprovar_propostas_de_lancamento";
+  const s = { [autonomyKey(nome)]: "auto" };
+  assertEquals(NEVER_AUTONOMOUS.has(nome), true);
+  assertEquals(isAutonomyGranted(nome, "high", s, { ids: ["a"], cliente_confirmado: ["a"] }), false);
+  assertEquals(isAutonomyGranted(nome, "high", s, { ids: ["a"] }), false);
+  assertEquals(isAutonomyGranted(nome, "high", s), false);
+});
+
+Deno.test("aplicar Pix em contas NUNCA roda sozinho — dá baixa com dinheiro do extrato (dono, 23/10/2026, 'pelo recomendado')", () => {
+  const nome = "aplicar_pix_em_contas";
+  const s = { [autonomyKey(nome)]: "auto" };
+  assertEquals(NEVER_AUTONOMOUS.has(nome), true);
+  // A tool é de risco médio: sem a trava, "auto" a liberaria.
+  assertEquals(isAutonomyGranted(nome, "medium", s, { bank_transaction_id: "t", aplicacoes: [{ receivable_id: "r", valor: 10 }] }), false);
+  assertEquals(isAutonomyGranted(nome, "medium", s), false);
+  assertEquals(isAutonomyGranted(nome, "high", s), false);
+  // Ação de risco médio fora do teto, com a mesma chave, continua liberável (o teste prova a trava, não o "auto").
+  assertEquals(isAutonomyGranted("send_whatsapp_message", "medium", { [autonomyKey("send_whatsapp_message")]: "auto" }), true);
+});
+
 Deno.test("a lista de bloqueio cobre dinheiro e ações destrutivas", () => {
   for (const esperado of [
     "register_payment",

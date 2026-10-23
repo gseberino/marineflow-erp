@@ -4,7 +4,7 @@
 // achou: uma regra proposta pela IA NÃO pode aparecer como se estivesse valendo. Build e
 // tsc passariam com as duas listas trocadas, e o efeito seria o sistema classificando
 // despesas por um palpite que ninguém aprovou.
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -71,6 +71,27 @@ vi.mock('@/hooks/use-financial-categories', () => ({
   }),
 }));
 
+// Quem está logado (leva 8): por padrão ninguém — o bloco "Quem paga pelos clientes" não aparece.
+const { sessao } = vi.hoisted(() => ({ sessao: { cargo: null as string | null } }));
+vi.mock('@/hooks/use-auth', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-auth')>()),
+  useOptionalAuth: () => (sessao.cargo ? { user: { role: sessao.cargo } } : null),
+}));
+vi.mock('@/hooks/use-pagadores-do-cliente', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@/hooks/use-pagadores-do-cliente')>();
+  return {
+    ...real,
+    usePagadoresParaConferir: () => ({
+      data: real.podeVerPagadores(sessao.cargo) ? [{
+        client_id: 'c-ana', cliente_nome: 'Ana Souza', cliente_tem_documento: true, pagador_documento: '12345678901',
+        pagador_nome: 'MARIA DA SILVA', tipo_documento: 'CPF', vezes: 2, total: 900, primeira: '2026-08-01',
+        ultima: '2026-09-01', bank_transaction_ids: ['bt-1'], grupo: 'documento_diferente', aviso: null,
+      }] : undefined,
+      isLoading: false, error: null,
+    }),
+  };
+});
+
 function renderPainel() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -79,6 +100,28 @@ function renderPainel() {
     </QueryClientProvider>,
   );
 }
+
+describe('quem paga pelos clientes, dentro das regras (leva 8)', () => {
+  afterEach(() => { sessao.cargo = null; });
+
+  it('administrador confere a lista ali, antes das sugestões de regra', async () => {
+    sessao.cargo = 'admin';
+    renderPainel();
+    const bloco = await screen.findByTestId('quem-paga-pelos-clientes');
+    expect(bloco).toHaveTextContent(/MARIA DA SILVA pagou 2×/);
+    expect(bloco).toHaveTextContent('CPF ***.456.789-**');
+    // Vem antes de "O sistema notou um padrão": é a conferência que o dono tem a fazer.
+    const sugestoes = screen.getByText(/O sistema notou um padrão e sugere/);
+    expect(bloco.compareDocumentPosition(sugestoes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('técnico não vê o bloco (CPF de terceiro)', async () => {
+    sessao.cargo = 'technician';
+    renderPainel();
+    await screen.findByText(/Valendo agora/);
+    expect(screen.queryByTestId('quem-paga-pelos-clientes')).not.toBeInTheDocument();
+  });
+});
 
 describe('FinanceRulesPanel', () => {
   it('não mistura o que vale agora com o que o sistema apenas sugeriu', async () => {

@@ -69,6 +69,13 @@ vi.mock('@/hooks/use-finance-review', async (importOriginal) => {
   };
 });
 
+// Quem está logado: por padrão ninguém (como antes); os testes da leva 8 põem um cargo.
+const { sessao } = vi.hoisted(() => ({ sessao: { cargo: null as string | null } }));
+vi.mock('@/hooks/use-auth', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-auth')>()),
+  useOptionalAuth: () => (sessao.cargo ? { user: { role: sessao.cargo } } : null),
+}));
+
 // O mock HONRA o `type`, como o hook real (`.eq('type', type)`). Um mock que devolve a
 // mesma lista para tudo esconderia exatamente o defeito que o gestor encontrou: entrada
 // oferecendo plano de contas de despesa.
@@ -193,6 +200,8 @@ describe('Pix que parece pagar contas que já existem', () => {
     title: 'Receita: MP MOTORHOMES', reasoning: 'x', confidence: 80, suggested_amount: 470, suggested_date: '2026-10-10',
     suggested_category: 'Serviços prestados', suggested_description: 'MP MOTORHOMES', suggested_supplier_id: null,
     suggested_client_id: 'cMP', dre_group: 'receita', created_at: '2026-10-10T10:00:00Z',
+    // Cliente IDENTIFICADO: o sugerido vem com a prova do motor (sem prova, o sugerido não vale sozinho — 4ª rodada).
+    evidencia: { cliente: { id: 'cMP', nome: 'MP MOTORHOMES', por: 'documento', detalhe: 'CNPJ confere com o cliente MP MOTORHOMES' } },
   };
   const soma = {
     itens: [
@@ -793,7 +802,7 @@ describe('entrada e saída convivendo na fila', () => {
  * centro de custo.
  */
 describe('serviço de terceiro pergunta para onde foi', () => {
-  afterEach(() => { estadoDaFila.dados = null; aprovarMock.mockClear(); regraMock.mockClear(); });
+  afterEach(() => { estadoDaFila.dados = null; aprovarMock.mockClear(); regraMock.mockClear(); sessao.cargo = null; });
 
   const servico = {
     id: 'p7', kind: 'create_payable', status: 'pending', bank_transaction_id: 't7', related_transaction_id: null,
@@ -876,22 +885,64 @@ describe('serviço de terceiro pergunta para onde foi', () => {
     expect(screen.getByRole('button', { name: 'Aprovar e lançar' })).toBeEnabled();
   });
 
-  it('regra a partir de uma ENTRADA é pelo CPF/CNPJ e já leva o cliente', async () => {
-    estadoDaFila.dados = [{
-      id: 'e9', kind: 'create_receivable', status: 'pending', bank_transaction_id: 'te9', related_transaction_id: null,
-      title: 'Receita: MARIA SILVA', reasoning: 'x', confidence: 30, suggested_amount: 800, suggested_date: '2026-09-24',
-      suggested_category: 'Serviços prestados', suggested_description: 'MARIA SILVA', suggested_supplier_id: null,
-      suggested_client_id: 'c-joao', dre_group: 'receita', created_at: '2026-09-24T10:00:00Z',
-      bank_transactions: { counterparty_name: 'MARIA SILVA', counterparty_document: '123.456.789-01', source_type: 'bank' },
-    }];
+  // Leva 8 (22/10/2026): a regra de entrada não diz mais o cliente. Com cliente escolhido e o
+  // documento de outra pessoa, "virar regra" abre o "Guardar quem paga por…"; a regra que sobra
+  // é só a da categoria.
+  const entradaDaMaria = {
+    id: 'e9', kind: 'create_receivable', status: 'pending', bank_transaction_id: 'te9', related_transaction_id: null,
+    title: 'Receita: MARIA SILVA', reasoning: 'x', confidence: 30, suggested_amount: 800, suggested_date: '2026-09-24',
+    suggested_category: 'Serviços prestados', suggested_description: 'MARIA SILVA', suggested_supplier_id: null,
+    suggested_client_id: 'c-joao', dre_group: 'receita', created_at: '2026-09-24T10:00:00Z',
+    bank_transactions: { counterparty_name: 'MARIA SILVA', counterparty_document: '123.456.789-01', source_type: 'bank' },
+    // O João veio da anotação do dono em vigor (a marca do _aplicar_anotacao): é o SIM dele. Sem ela, o sugerido sem
+    // prova não vale sozinho (4ª rodada) e não haveria cliente escolhido.
+    evidencia: { anotacao: { id: 'an-9' } },
+  };
+
+  it('regra a partir de uma ENTRADA é pelo CPF/CNPJ — e não leva mais o cliente', async () => {
+    // Sem cargo que guarde pagador (aqui: ninguém logado), sobra a regra da categoria.
+    estadoDaFila.dados = [entradaDaMaria];
     const user = userEvent.setup();
     renderInbox();
     await user.click(await screen.findByRole('button', { name: /Mais ações para Receita: MARIA SILVA/i }));
     await user.click(await screen.findByRole('menuitem', { name: /regra a partir desta linha/i }));
     expect(regraMock).toHaveBeenCalledWith({
       match_type: 'document', match_value: '12345678901', direction: 'credit',
-      set_client_id: 'c-joao', set_category: 'Serviços prestados',
+      set_client_id: null, set_category: 'Serviços prestados',
     });
+  });
+
+  it('entrada com cliente e documento de outra pessoa: "virar regra" guarda o pagador; "só a categoria" segue sem cliente', async () => {
+    sessao.cargo = 'admin';
+    estadoDaFila.dados = [entradaDaMaria];
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderInbox();
+    await user.click(await screen.findByRole('button', { name: /Mais ações para Receita: MARIA SILVA/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /regra a partir desta linha/i }));
+    expect(regraMock).not.toHaveBeenCalled();
+    const dialogo = await screen.findByRole('dialog');
+    // O nome do cliente vem do cadastro (aqui não carregado): o título não inventa um.
+    expect(within(dialogo).getByText('Guardar quem paga pelo cliente')).toBeInTheDocument();
+    expect(within(dialogo).getByText(/CPF \*\*\*\.456\.789-\*\*/)).toBeInTheDocument();
+    await user.click(within(dialogo).getByRole('button', { name: 'Só a categoria (regra sem cliente)' }));
+    expect(regraMock).toHaveBeenCalledWith({
+      match_type: 'document', match_value: '12345678901', direction: 'credit',
+      set_client_id: null, set_category: 'Serviços prestados',
+    });
+  });
+
+  it('documento do PRÓPRIO cliente: não há pagador a guardar, vira a regra da categoria', async () => {
+    sessao.cargo = 'admin';
+    estadoDaFila.dados = [{
+      ...entradaDaMaria,
+      evidencia: { cliente: { id: 'c-joao', nome: 'João Silva', por: 'documento', detalhe: 'CPF confere com o cliente João Silva' } },
+    }];
+    const user = userEvent.setup();
+    renderInbox();
+    await user.click(await screen.findByRole('button', { name: /Mais ações para Receita: MARIA SILVA/i }));
+    await user.click(await screen.findByRole('menuitem', { name: /regra a partir desta linha/i }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(regraMock).toHaveBeenCalledWith(expect.objectContaining({ set_client_id: null, match_value: '12345678901' }));
   });
 
   it('entrada sem CPF/CNPJ não vira regra (nome não identifica ninguém)', async () => {
@@ -1126,5 +1177,117 @@ describe('observações de 28/09: banco de origem, entrada sem cliente, ver a OS
     renderInbox();
     const pergunta = (await screen.findByText(/É desta OS\?/)).parentElement as HTMLElement;
     expect(within(pergunta).getByRole('button', { name: 'Ver OS (só leitura)' })).toBeInTheDocument();
+  });
+});
+
+/**
+ * Leva 8 (22/10/2026): o cliente que vem de quem pagou — pagador conhecido, histórico de terceiro —
+ * é sugestão que pede o SIM. Fica fora do lote, não aprova no escuro (o servidor recusaria com
+ * "Confirme o cliente"), e o cabeçalho do grupo não o assume. Documento do próprio cliente segue
+ * como antes.
+ */
+describe('leva 8: cliente sugerido por quem pagou pede o SIM', () => {
+  afterEach(() => { estadoDaFila.dados = null; aprovarMock.mockClear(); sessao.cargo = null; });
+
+  const doConjuge = (id: string, extra: Record<string, unknown> = {}) => ({
+    id, kind: 'create_receivable', status: 'pending', bank_transaction_id: `t-${id}`, related_transaction_id: null,
+    title: 'Receita: MARIA DA SILVA', reasoning: 'x', confidence: 70, suggested_amount: 300, suggested_date: '2026-10-20',
+    suggested_category: 'Serviços prestados', suggested_description: 'MARIA DA SILVA', suggested_supplier_id: null,
+    suggested_client_id: 'c-ana', dre_group: 'receita', created_at: '2026-10-20T10:00:00Z',
+    bank_transactions: {
+      counterparty_name: 'MARIA DA SILVA', counterparty_document: '12345678901', source_type: 'bank', transaction_type: 'credit',
+    },
+    evidencia: { cliente: {
+      id: 'c-ana', nome: 'Ana Souza', por: 'pagador_conhecido', relacao: 'conjuge',
+      detalhe: 'Pago pelo cônjuge de Ana Souza, guardado por você em 12/10 — confira',
+    } },
+    ...extra,
+  });
+
+  it('não vai no lote, não aprova no escuro, e "Sim, é do X" manda o cliente', async () => {
+    estadoDaFila.dados = [doConjuge('k1')];
+    const user = userEvent.setup();
+    renderInbox();
+    expect(await screen.findByText(/Revisar uma a uma .*\(1\)/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Confirme o cliente: responda "Sim, é do Ana Souza" ou escolha outro/ })).toBeDisabled();
+    // O seletor não mostra o sugerido como se já fosse a escolha.
+    expect(screen.getByText('De qual cliente veio?')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Sim, é do Ana Souza' }));
+    const liberado = screen.getByRole('button', { name: 'Aprovar e lançar' });
+    expect(liberado).toBeEnabled();
+    await user.click(liberado);
+    expect(aprovarMock.mock.calls[0][0]).toMatchObject({ ids: ['k1'], overrides: { k1: { clientId: 'c-ana' } } });
+  });
+
+  it('histórico de terceiro também pede o SIM', async () => {
+    estadoDaFila.dados = [doConjuge('h1', { evidencia: { cliente: {
+      id: 'c-ana', nome: 'Ana Souza', por: 'historico', detalhe: 'Este CPF já pagou 2× em nome de Ana Souza — confira',
+    } } })];
+    renderInbox();
+    expect(await screen.findByText(/Revisar uma a uma .*\(1\)/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Confirme o cliente/ })).toBeDisabled();
+  });
+
+  it('cliente pelo documento dele continua no lote, como antes', async () => {
+    estadoDaFila.dados = [doConjuge('d1', { evidencia: { cliente: {
+      id: 'c-ana', nome: 'Ana Souza', por: 'documento', detalhe: 'CPF confere com o cliente Ana Souza',
+    } } })];
+    renderInbox();
+    expect(await screen.findByText(/Aprovação em lote/)).toBeInTheDocument();
+    expect(screen.queryByText('Sim, é do Ana Souza')).not.toBeInTheDocument();
+  });
+
+  it('em grupo: nenhuma vai no botão do grupo e o cabeçalho não assume o cliente', async () => {
+    estadoDaFila.dados = Array.from({ length: 20 }, (_, i) => doConjuge(`g${i}`));
+    renderInbox();
+    expect(await screen.findByRole('button', { name: /Aprovar 0/ })).toBeDisabled();
+    expect(screen.getByText(/Nenhuma cabe no lote \(valor, vínculo, OS, cliente/)).toBeInTheDocument();
+    // O cabeçalho pergunta o cliente em vez de mostrar o sugerido de quem pagou.
+    expect(screen.getByText('De qual cliente veio?')).toBeInTheDocument();
+  });
+
+  it('a anotação do dono que trocou o cliente vence a prova antiga: sem "Sim, é do <outro>", e vai no lote', async () => {
+    // "O Pix de 300 é do Rui": o _aplicar_anotacao põe o Rui no sugerido e a prova antiga (Ana) fica na evidência.
+    estadoDaFila.dados = [doConjuge('an1', {
+      suggested_client_id: 'c-rui',
+      evidencia: {
+        cliente: {
+          id: 'c-ana', nome: 'Ana Souza', por: 'pagador_conhecido', relacao: 'conjuge',
+          detalhe: 'Pago pelo cônjuge de Ana Souza, guardado por você em 12/10 — confira',
+        },
+        anotacao: { id: 'anot-1', os_id: null },
+      },
+    })];
+    renderInbox();
+    expect(await screen.findByText(/Aprovação em lote/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sim, é do Ana Souza' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Confirme o cliente/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('cliente-de-fora-do-motor')).toHaveTextContent(/Você anotou: é do .*vale a sua anotação\./);
+  });
+
+  // 4ª rodada: a anotação foi DESFEITA (comprovante desligado) — a marca saiu da evidência e o Rui que ela pôs ficou no
+  // sugerido; a prova antiga continua sendo da Ana. Ninguém disse de quem é: o servidor recusa com "Escolha o cliente…".
+  const anotacaoDesfeita = (id: string) => doConjuge(id, { suggested_client_id: 'c-rui' });
+
+  it('anotação desfeita: "De qual cliente veio?" em branco, sem "Sim, é do <prova>", fora do lote e sem aprovar no escuro', async () => {
+    estadoDaFila.dados = [anotacaoDesfeita('ad1')];
+    renderInbox();
+    expect(await screen.findByText(/Revisar uma a uma .*\(1\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/Aprovação em lote/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Escolha o cliente em "De qual cliente veio?"' })).toBeDisabled();
+    // O seletor não mostra o sugerido nem a prova antiga como escolha.
+    expect(screen.getByText('De qual cliente veio?')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Sim, é do/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Confirme o cliente/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('cliente-de-fora-do-motor')).not.toBeInTheDocument();
+    expect(screen.getByTestId('cliente-falta-escolher')).toHaveTextContent('Escolha o cliente em "De qual cliente veio?"');
+    expect(aprovarMock).not.toHaveBeenCalled();
+  });
+
+  it('anotação desfeita em grupo: nenhuma vai no botão do grupo e o cabeçalho não assume o sugerido', async () => {
+    estadoDaFila.dados = Array.from({ length: 20 }, (_, i) => anotacaoDesfeita(`ad-g${i}`));
+    renderInbox();
+    expect(await screen.findByRole('button', { name: /Aprovar 0/ })).toBeDisabled();
+    expect(screen.getByText('De qual cliente veio?')).toBeInTheDocument();
   });
 });

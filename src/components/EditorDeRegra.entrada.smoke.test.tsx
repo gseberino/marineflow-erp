@@ -1,7 +1,10 @@
-// Regra de ENTRADA — "o Pix do CPF/CNPJ X é do cliente Y" (resposta 18 do dono, 26/09/2026).
+// Regra de ENTRADA — "o Pix do CPF/CNPJ X entra como <categoria>" (resposta 18 do dono, 26/09/2026).
 //
-// O que precisa ficar provado: só por documento (11 ou 14 dígitos), com o cliente, com categoria
-// de RECEITA, e sempre "só sugere" — a receita espera o OK do dono.
+// O que precisa ficar provado: só por documento (11 ou 14 dígitos), com categoria de RECEITA, e
+// sempre "só sugere" — a receita espera o OK do dono. Desde a leva 8 (22/10/2026) a regra NOVA
+// não diz o cliente (quem paga por um cliente se guarda em pagadores_do_cliente, com o SIM do
+// administrador); a regra ANTIGA que já diz continua lida e não perde o cliente ao ser editada — menos se o
+// CPF/CNPJ for trocado (o cliente era daquele documento: levá-lo junto seria um vínculo novo sem o SIM).
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -51,57 +54,110 @@ function abrir(regra: Partial<RegraFinanceira> | null) {
 describe('regra de entrada no editor', () => {
   afterEach(() => salvarMock.mockClear());
 
-  it('"Dinheiro que entra": documento, cliente e categoria de receita — e só sugere', async () => {
+  it('"Dinheiro que entra": documento e categoria de receita, SEM cliente — e só sugere', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
     abrir(null);
     await user.click(screen.getByRole('button', { name: 'Dinheiro que entra' }));
     await user.type(screen.getByLabelText('CPF ou CNPJ de quem paga'), '123.456.789-01');
 
-    const [cliente, categoria] = screen.getAllByRole('combobox');
-    await user.click(cliente);
-    await user.click(await screen.findByText('João Silva'));
-    await user.click(categoria);
+    // Um seletor só: a categoria. O campo "É do cliente" saiu (leva 8).
+    const combos = screen.getAllByRole('combobox');
+    expect(combos).toHaveLength(1);
+    expect(screen.queryByText('É do cliente')).not.toBeInTheDocument();
+    await user.click(combos[0]);
     // Plano de receita, não de despesa.
     expect(screen.queryByText('Peças e materiais')).not.toBeInTheDocument();
     await user.click(await screen.findByText('Serviços prestados'));
+    // E diz onde se guarda quem paga por um cliente.
+    expect(screen.getByText(/se guarda em "Quem paga pelos clientes"/)).toBeInTheDocument();
 
     // Não há como pedir "lançar sozinha" numa regra de entrada.
     expect(screen.queryByText(/Lançar sozinha/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Salvar regra' }));
     expect(salvarMock.mock.calls[0][0]).toMatchObject({
       match_type: 'document', match_value: '12345678901', direction: 'credit',
-      set_client_id: 'c-joao', set_category: 'Serviços prestados', set_dre_group: 'receita',
+      set_client_id: null, set_category: 'Serviços prestados', set_dre_group: 'receita',
       set_supplier_id: null, autonomy: 'suggest',
     });
   });
 
   it('CPF/CNPJ com dígitos a menos não salva e diz por quê', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
-    abrir({ match_type: 'document', match_value: '', direction: 'credit', set_client_id: 'c-joao', set_category: 'Serviços prestados' });
+    abrir({ match_type: 'document', match_value: '', direction: 'credit', set_client_id: null, set_category: 'Serviços prestados' });
     await user.type(screen.getByLabelText('CPF ou CNPJ de quem paga'), '1234567890');
     expect(screen.getByText(/CPF tem 11 dígitos e CNPJ, 14/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Salvar regra' })).toBeDisabled();
   });
 
-  it('a semente vinda de uma entrada da fila abre pronta', async () => {
+  it('a semente vinda de uma entrada da fila abre pronta — e nunca nasce com cliente', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
+    // Mesmo que alguém mande cliente numa semente (regra nova, sem id), ela não sai com ele.
     abrir({ match_type: 'document', match_value: '12345678901', direction: 'credit', set_client_id: 'c-joao', set_category: 'Serviços prestados' });
     // Já é de entrada: o seletor de sentido é da regra nova, e ela já tem sentido.
     expect(screen.getByLabelText('CPF ou CNPJ de quem paga')).toHaveValue('12345678901');
+    expect(screen.queryByTestId('regra-antiga-com-cliente')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Salvar regra' }));
-    expect(salvarMock.mock.calls[0][0]).toMatchObject({ direction: 'credit', set_client_id: 'c-joao', autonomy: 'suggest' });
+    expect(salvarMock.mock.calls[0][0]).toMatchObject({ direction: 'credit', set_client_id: null, autonomy: 'suggest' });
   });
 
-  it('aporte de sócio não tem cliente: salva sem ele, e continua só sugerindo', async () => {
+  it('regra ANTIGA que já diz o cliente: mostra quem é, sem seletor, e editar não apaga o cliente', async () => {
     const user = userEvent.setup({ pointerEventsCheck: 0 });
-    abrir({ match_type: 'document', match_value: '12345678901', direction: 'credit', set_client_id: null, set_category: 'Serviços prestados' });
-    // Receita comum sem cliente não salva.
-    expect(screen.getByRole('button', { name: 'Salvar regra' })).toBeDisabled();
-    const [, categoria] = screen.getAllByRole('combobox');
-    await user.click(categoria);
+    abrir({
+      id: 'r-antiga', match_type: 'document', match_value: '12345678901', direction: 'credit', set_client_id: 'c-joao',
+      set_category: 'Serviços prestados', origin: 'user',
+    });
+    const aviso = screen.getByTestId('regra-antiga-com-cliente');
+    expect(aviso).toHaveTextContent(/é do cliente João Silva, e continua valendo como está/);
+    expect(screen.getAllByRole('combobox')).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Salvar regra' }));
+    expect(salvarMock.mock.calls[0][0]).toMatchObject({
+      id: 'r-antiga', direction: 'credit', set_client_id: 'c-joao', set_category: 'Serviços prestados', autonomy: 'suggest',
+    });
+  });
+
+  it('regra ANTIGA com cliente e CPF/CNPJ trocado: o cliente sai da regra, com aviso para guardar o pagador', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    abrir({
+      id: 'r-equit', match_type: 'document', match_value: '04754513000149', direction: 'credit', set_client_id: 'c-joao',
+      set_category: 'Serviços prestados', origin: 'user',
+    });
+    const campo = screen.getByLabelText('CPF ou CNPJ de quem paga');
+    await user.clear(campo);
+    await user.type(campo, '11.222.333/0001-81');
+    const aviso = screen.getByTestId('regra-antiga-com-cliente');
+    expect(aviso).toHaveTextContent(/dizia que o dinheiro do CPF\/CNPJ 04\.754\.513\/0001-49 é do cliente João Silva/);
+    expect(aviso).toHaveTextContent(/Com outro CPF\/CNPJ, ela deixa de dizer o cliente/);
+    expect(aviso).toHaveTextContent(/guarde o pagador em "Quem paga pelos clientes"/);
+    await user.click(screen.getByRole('button', { name: 'Salvar regra' }));
+    expect(salvarMock.mock.calls[0][0]).toMatchObject({
+      id: 'r-equit', match_value: '11222333000181', direction: 'credit', set_client_id: null,
+      set_category: 'Serviços prestados', autonomy: 'suggest',
+    });
+  });
+
+  it('regra ANTIGA: voltar ao mesmo CPF/CNPJ (digitado com pontuação) mantém o cliente', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    abrir({
+      id: 'r-equit', match_type: 'document', match_value: '04754513000149', direction: 'credit', set_client_id: 'c-joao',
+      set_category: 'Serviços prestados',
+    });
+    const campo = screen.getByLabelText('CPF ou CNPJ de quem paga');
+    await user.clear(campo);
+    await user.type(campo, '04.754.513/0001-49');
+    expect(screen.getByTestId('regra-antiga-com-cliente')).toHaveTextContent(/continua valendo como está/);
+    await user.click(screen.getByRole('button', { name: 'Salvar regra' }));
+    expect(salvarMock.mock.calls[0][0]).toMatchObject({ match_value: '04754513000149', set_client_id: 'c-joao' });
+  });
+
+  it('aporte de sócio não tem cliente: salva sem ele — e a regra antiga que virou aporte perde o cliente', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    abrir({
+      id: 'r-velha', match_type: 'document', match_value: '12345678901', direction: 'credit', set_client_id: 'c-joao',
+      set_category: 'Serviços prestados',
+    });
+    await user.click(screen.getAllByRole('combobox')[0]);
     await user.click(await screen.findByText('Aporte de sócio'));
-    // O seletor de cliente dá lugar ao aviso, e a regra salva sem cliente.
-    expect(screen.getByText(/Sem cliente: Aporte de sócio não é receita/)).toBeInTheDocument();
+    expect(screen.getByTestId('regra-antiga-com-cliente')).toHaveTextContent(/Como Aporte de sócio não é receita, ela deixa de dizer/);
     await user.click(screen.getByRole('button', { name: 'Salvar regra' }));
     expect(salvarMock.mock.calls[0][0]).toMatchObject({
       direction: 'credit', set_client_id: null, set_category: 'Aporte de sócio', autonomy: 'suggest',

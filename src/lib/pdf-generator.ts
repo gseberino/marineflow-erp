@@ -18,6 +18,7 @@ import {
   type PDFOptions,
 } from '../../supabase/functions/_shared/pdf/documento';
 import { linhaDaUnidade } from './unidade';
+import { documentoMascarado, nomeSemCpf } from '../../supabase/functions/_shared/banking/contraparte';
 
 // O documento da ordem (tipos, opções, nome do arquivo e desenho) mora em
 // supabase/functions/_shared/pdf/documento.ts, para o assistente do WhatsApp gerar o
@@ -662,6 +663,22 @@ ${(mostraDadosBancarios || mostraInstrucoes) && hasBank ? `
 
 
 // ============= RECEIPT (RECIBO) =============
+
+/**
+ * O documento de quem pagou como o recibo imprime (leva 8, decisão do dono de 22/10/2026): CPF de terceiro
+ * MASCARADO (***.456.789-**), CNPJ inteiro e formatado — a mesma regra (documentoMascarado) da ficha do cliente e
+ * do assistente. Mascara aqui mesmo que o CPF chegue inteiro; o que já chega mascarado passa como veio; um número
+ * que não é CPF nem CNPJ não sai.
+ */
+function documentoDoPagador(doc: string | null | undefined): { tipo: 'CPF' | 'CNPJ'; texto: string } | null {
+  const bruto = (doc ?? '').trim();
+  if (!bruto) return null;
+  const pronto = documentoMascarado(bruto);
+  if (pronto) return { tipo: pronto.includes('/') ? 'CNPJ' : 'CPF', texto: pronto };
+  if (/^\*{3}\.\d{3}\.\d{3}-\*{2}$/.test(bruto)) return { tipo: 'CPF', texto: bruto };
+  return null;
+}
+
 function buildReceiptHTML(data: PDFData, options: PDFOptions): string {
   const r = data.receipt || {
     amount: data.serviceOrder.grand_total,
@@ -669,11 +686,28 @@ function buildReceiptHTML(data: PDFData, options: PDFOptions): string {
     payment_method: 'pix',
     reference: data.serviceOrder.service_order_number,
   };
-  const docNumber = `REC-${esc(r.reference || data.serviceOrder.service_order_number)}`;
+  // A referência (o número REC-…, o título e o "referente ao pagamento de"): sem OS, é a descrição da conta — às vezes
+  // o nome que o banco escreveu com o CPF de quem pagou dentro. Segunda proteção (montarDadosDoRecibo já mascara): o
+  // HTML final nunca leva o CPF inteiro (revisão de 23/10/2026, 4ª rodada).
+  const referencia = nomeSemCpf(r.reference || data.serviceOrder.service_order_number || '');
+  const docNumber = `REC-${esc(referencia)}`;
   const methodLabel = PAYMENT_METHOD_LABELS[r.payment_method] || r.payment_method;
   const amountWords = numberToWordsBRL(r.amount);
   // "(Motorhome: Iveco Daily · placa ABC1D23)" — o tipo é o rótulo (decisão 9, 21/10/2026).
   const unidade = linhaDaUnidade(unidadeDoDocumento(data.vessel));
+
+  // Quem pagou por conta do cliente (leva 8): "Recebemos de X, CPF ***.456.789-**, por conta de Y, …".
+  // Sem payer (o próprio cliente pagou, ou não se sabe), o texto de sempre. O NOME também sai sem o CPF que o banco
+  // escreve nele ("12345678901-MARIA" → "***.456.789-**-MARIA"), mesmo que chegue inteiro (nomeSemCpf).
+  const payer = r.payer?.name?.trim() ? r.payer : null;
+  const docDoPagador = payer ? documentoDoPagador(payer.cpf_cnpj) : null;
+  const deQuem = payer
+    ? `Recebemos de <strong>${esc(nomeSemCpf(payer.name.trim()).toUpperCase())}</strong>,
+    ${docDoPagador ? `${docDoPagador.tipo} <strong>${esc(docDoPagador.texto)}</strong>, ` : ''}
+    por conta de <strong>${esc(data.client.name.toUpperCase())}</strong>,
+    ${data.client.cpf_cnpj ? `inscrito(a) no CPF/CNPJ sob o nº <strong>${esc(data.client.cpf_cnpj)}</strong>, ` : ''}`
+    : `Recebemos de <strong>${esc(data.client.name).toUpperCase()}</strong>,
+    ${data.client.cpf_cnpj ? `inscrito(a) no CPF/CNPJ sob o nº <strong>${esc(data.client.cpf_cnpj)}</strong>, ` : ''}`;
 
   const body = `
 ${companyHeaderHTML(data.company, 'Recibo de Quitação', docNumber)}
@@ -684,13 +718,12 @@ ${companyHeaderHTML(data.company, 'Recibo de Quitação', docNumber)}
     <div style="font-size:10px;color:var(--pdf-text-muted);text-transform:uppercase;">Valor Recebido</div>
     <div style="font-size:24px;font-weight:800;color:var(--pdf-primary);">${fmtCurrency(r.amount)}</div>
   </div>
-  
+
   <div style="font-size:14px;line-height:2;text-align:justify;color:var(--pdf-text-main);">
-    Recebemos de <strong>${esc(data.client.name).toUpperCase()}</strong>, 
-    ${data.client.cpf_cnpj ? `inscrito(a) no CPF/CNPJ sob o nº <strong>${esc(data.client.cpf_cnpj)}</strong>, ` : ''}
+    ${deQuem}
     a importância líquida e certa de <strong>${fmtCurrency(r.amount)}</strong> 
     <span style="font-size:11px;color:var(--pdf-text-muted);">(${esc(amountWords)})</span>, 
-    referente ao pagamento de <strong>${esc(r.reference || data.serviceOrder.service_order_number)}</strong>
+    referente ao pagamento de <strong>${esc(referencia)}</strong>
     ${unidade ? ` (${esc(unidade)})` : ''}.
   </div>
   

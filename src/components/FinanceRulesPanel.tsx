@@ -25,6 +25,7 @@ import {
 import { useFinancialCategories } from '@/hooks/use-financial-categories';
 import { useClientesParaReceita } from '@/hooks/use-payees';
 import { entradaSemCliente } from '../../supabase/functions/_shared/banking/entrada-sem-cliente';
+import { QuemPagaPelosClientes } from '@/components/QuemPagaPelosClientes';
 import { Sparkles, Plus, Pause, Play, Check, X, Pencil, Wand2, Receipt, ChevronDown } from 'lucide-react';
 
 const ROTULO_ALVO: Record<RegraFinanceira['match_type'], string> = {
@@ -148,19 +149,26 @@ export function EditorDeRegra({ aberto, onFechar, regra }: EditorProps) {
   const { data: fornecedores = [] } = useSuppliers();
 
   /**
-   * Regra de ENTRADA ("o Pix deste CPF/CNPJ é do cliente Y" — resposta 18 do dono, 26/09/2026):
-   * outro formulário — documento, cliente e categoria de receita — e só sugere: a receita espera
-   * o OK dele na fila. Uma regra que já existe não troca de sentido.
+   * Regra de ENTRADA ("o Pix deste CPF/CNPJ entra como <categoria>" — resposta 18 do dono, 26/09/2026):
+   * outro formulário — documento e categoria de receita — e só sugere: a receita espera o OK dele
+   * na fila. Uma regra que já existe não troca de sentido.
+   *
+   * Leva 8 (22/10/2026): o campo CLIENTE saiu. "O Pix deste CPF é do cliente Y" fazia a fila tratar
+   * quem pagou (o cônjuge, a empresa, a marina) como o próprio cliente; quem paga por um cliente se
+   * guarda em "Quem paga pelos clientes" ou na linha da fila, com a relação e o SIM do
+   * administrador. A regra antiga que já diz o cliente continua lida e valendo como está — até alguém trocar o
+   * CPF/CNPJ dela: aí o cliente sai (era daquele documento), com aviso para guardar o pagador.
    */
   const [sentido, setSentido] = useState<'saida' | 'entrada'>(regra?.direction === 'credit' ? 'entrada' : 'saida');
   const entrada = sentido === 'entrada';
   const { data: categorias = [] } = useFinancialCategories(entrada ? 'receivable' : 'payable');
-  const { data: clientes = [] } = useClientesParaReceita(entrada);
+  // Só a regra ANTIGA que já aponta um cliente precisa do nome dele (para mostrar, não para trocar).
+  const clienteAntigo = regra?.id && regra.direction === 'credit' ? regra.set_client_id ?? null : null;
+  const { data: clientes = [] } = useClientesParaReceita(entrada && !!clienteAntigo);
 
   const [tipo, setTipo] = useState<RegraFinanceira['match_type']>(regra?.match_type ?? 'counterparty');
   const [valor, setValor] = useState(regra?.match_value ?? '');
   const [categoria, setCategoria] = useState(regra?.set_category ?? '');
-  const [cliente, setCliente] = useState(regra?.set_client_id ?? '');
   const [autonomia, setAutonomia] = useState<RegraFinanceira['autonomy']>(regra?.autonomy ?? 'suggest');
   const [minimo, setMinimo] = useState(regra?.min_amount != null ? String(regra.min_amount) : '');
   const [maximo, setMaximo] = useState(regra?.max_amount != null ? String(regra.max_amount) : '');
@@ -169,11 +177,17 @@ export function EditorDeRegra({ aberto, onFechar, regra }: EditorProps) {
 
   const documento = valor.replace(/\D/g, '');
   const documentoValido = documento.length === 11 || documento.length === 14;
-  // "O Pix do CPF do sócio é aporte": transferência e aporte não têm cliente (28/09/2026) — o
-  // banco aceita regra de entrada sem cliente, e ela continua só sugerindo.
+  // "O Pix do CPF do sócio é aporte": transferência e aporte não têm cliente (28/09/2026) — a
+  // regra antiga que dizia o cliente o perde se virar uma delas.
   const semCliente = entrada ? entradaSemCliente(categoria) : null;
+  // A regra antiga diz "ESTE documento é do cliente Y". Com outro CPF/CNPJ, levar o cliente junto criaria um vínculo
+  // documento → cliente novo, sem o SIM e sem a relação (leva 8): o cliente sai, e quem paga se guarda como pagador.
+  const documentoOriginal = (regra?.match_value ?? '').replace(/\D/g, '');
+  const trocouDocumento = !!clienteAntigo && documento !== documentoOriginal;
+  const perdeCliente = !!semCliente || trocouDocumento;
+  const nomeDoClienteAntigo = clienteAntigo ? clientes.find((c) => c.id === clienteAntigo)?.name ?? null : null;
   const podeSalvar = entrada
-    ? documentoValido && (!!cliente || !!semCliente) && categoria.length > 0
+    ? documentoValido && categoria.length > 0
     : valor.trim().length > 0 && categoria.length > 0;
 
   const trocarSentido = (novo: 'saida' | 'entrada') => {
@@ -195,7 +209,10 @@ export function EditorDeRegra({ aberto, onFechar, regra }: EditorProps) {
         set_category: categoria,
         set_dre_group: grupoDa(categoria),
         set_supplier_id: null,
-        set_client_id: semCliente ? null : cliente,
+        // Regra nova de entrada nunca diz o cliente (leva 8). A antiga que já dizia fica como estava — editar a
+        // categoria ou a faixa não apaga o cliente dela sem ninguém pedir —, menos se virar transferência/aporte ou
+        // se o CPF/CNPJ for trocado (o cliente era daquele documento, não deste).
+        set_client_id: perdeCliente ? null : clienteAntigo,
         // O banco também garante (CHECK): regra que diz o cliente só sugere.
         autonomy: 'suggest',
         ...faixa,
@@ -244,33 +261,27 @@ export function EditorDeRegra({ aberto, onFechar, regra }: EditorProps) {
 
           {entrada ? (
             <>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <Label className="text-xs" htmlFor="regra-doc">CPF ou CNPJ de quem paga</Label>
-                  <Input id="regra-doc" inputMode="numeric" value={valor} onChange={(e) => setValor(e.target.value)}
-                    placeholder="ex.: 123.456.789-01" />
-                  {valor.trim() && !documentoValido && (
-                    <p className="mt-1 text-xs text-amber-600">CPF tem 11 dígitos e CNPJ, 14.</p>
-                  )}
-                </div>
-                <div>
-                  <Label className="text-xs">É do cliente</Label>
-                  {semCliente ? (
-                    <p className="mt-2 text-xs text-muted-foreground">Sem cliente: {categoria} não é receita.</p>
-                  ) : (
-                    <Select value={cliente} onValueChange={setCliente}>
-                      <SelectTrigger><SelectValue placeholder="Escolher o cliente" /></SelectTrigger>
-                      <SelectContent>
-                        {clientes.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
+              <div>
+                <Label className="text-xs" htmlFor="regra-doc">CPF ou CNPJ de quem paga</Label>
+                <Input id="regra-doc" inputMode="numeric" value={valor} onChange={(e) => setValor(e.target.value)}
+                  placeholder="ex.: 123.456.789-01" />
+                {valor.trim() && !documentoValido && (
+                  <p className="mt-1 text-xs text-amber-600">CPF tem 11 dígitos e CNPJ, 14.</p>
+                )}
               </div>
+              {clienteAntigo && (
+                <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs" data-testid="regra-antiga-com-cliente">
+                  {semCliente
+                    ? <>Esta regra antiga dizia o cliente <b>{nomeDoClienteAntigo ?? '(cadastro removido)'}</b>. Como {categoria} não é receita, ela deixa de dizer.</>
+                    : trocouDocumento
+                      ? <>Esta regra antiga dizia que o dinheiro do CPF/CNPJ {formatarDoc(documentoOriginal) || '(vazio)'} é do cliente <b>{nomeDoClienteAntigo ?? '(cadastro removido)'}</b>. Com outro CPF/CNPJ, ela deixa de dizer o cliente (fica só a categoria). Se este documento paga por ele, guarde o pagador em "Quem paga pelos clientes" — é o seu SIM, com a relação.</>
+                      : <>Regra antiga: ela diz que o dinheiro deste CPF/CNPJ é do cliente <b>{nomeDoClienteAntigo ?? '(cadastro removido)'}</b>, e continua valendo como está. Para dizer quem paga por um cliente, guarde o pagador em "Quem paga pelos clientes" — é o seu SIM, com a relação.</>}
+                </p>
+              )}
               <p className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
                 {semCliente
                   ? `A entrada deste CPF/CNPJ chega na fila já como "${categoria}" e só sai com o seu OK, na própria linha — regra de entrada nunca lança sozinha.`
-                  : 'Serve para quem paga com o CPF de outra pessoa (o marido pelo barco da esposa, a empresa pelo sócio). A entrada chega na fila já com este cliente, e só vira receita com o seu OK — regra de entrada nunca lança sozinha.'}
+                  : 'A entrada deste CPF/CNPJ chega na fila já com esta categoria, e só vira receita com o seu OK — regra de entrada nunca lança sozinha. A regra não diz de qual cliente é: quem paga por um cliente (o cônjuge, a empresa dele, a marina) se guarda em "Quem paga pelos clientes" ou na própria linha da fila.'}
               </p>
             </>
           ) : (
@@ -480,6 +491,10 @@ export function FinanceRulesPanel() {
           </div>
         </div>
       </Card>
+
+      {/* Quem paga pelos clientes (leva 8, 22/10/2026): a lista histórica para o dono conferir — guardar é o SIM
+          dele. Só para administrador e financeiro (CPF de terceiro); para os outros cargos não aparece. */}
+      <QuemPagaPelosClientes />
 
       {propostas.length > 0 && (
         <div className="space-y-2">

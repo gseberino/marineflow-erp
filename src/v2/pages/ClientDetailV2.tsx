@@ -15,6 +15,7 @@ import { ClientFormDialog } from '@/components/ClientFormDialog';
 // faltava a casa na V2.
 import { ClientStatementDialog } from '@/components/ClientStatementDialog';
 import { RecordHistory } from '@/components/RecordHistory';
+import { PagadoresDoCliente } from '@/components/PagadoresDoCliente';
 import { EntityTasksPanel } from '@/components/agenda/EntityTasksPanel';
 import { OpenLoopsPanel } from '@/components/agenda/OpenLoopsPanel';
 import { PageShell } from '@/v2/components/PageShell';
@@ -259,6 +260,8 @@ export default function ClientDetailV2() {
                 </span>
               </div>
             )}
+            {/* Quem paga por este cliente (leva 8): só administrador e financeiro — CPF de terceiro é dado pessoal. */}
+            <PagadoresDoCliente clientId={id} clientName={client.name} />
           </TabsContent>
 
           <TabsContent value="tasks" className="mt-4">

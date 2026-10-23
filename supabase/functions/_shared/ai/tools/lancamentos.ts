@@ -10,6 +10,10 @@
 // Corrigir campos continua em update_payable / update_receivable (financial.ts), que agora
 // também passam pela função do banco.
 import { blockTechnician, NON_TECHNICIAN_ROLES, type ToolCtx, type ToolDef } from "./registry.ts";
+// LGPD (leva 8): o CPF que o banco escreve no nome/descrição sai mascarado ao modelo. Direto do contraparte (a mesma
+// função que financeiro-comum.ts reexporta como mascararCpfNoTexto): financeiro-comum importa caixa.ts, e este arquivo
+// é importado por quase todas as tools do financeiro — sem ciclo de import.
+import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
 
 export type TipoDeLancamento = "payable" | "receivable";
 
@@ -206,9 +210,10 @@ export const lancamentoTools: ToolDef[] = [
           resultado.push({
             tipo: "pagar", payable_id: p.id, data: p.issue_date, vencimento: p.due_date,
             valor: Number(p.amount), pago: Number(p.paid_amount ?? 0), situacao: p.status,
-            descricao: p.description,
-            contraparte: p.suppliers?.name ?? p.payees?.name ?? p.supplier_name ?? null,
-            favorecido: p.payees?.name ?? null,
+            // A despesa que veio do Extrato nasce com o nome do banco ("12345678901-JOAO…"): CPF mascarado.
+            descricao: mascararCpfNoTexto(p.description ?? null),
+            contraparte: mascararCpfNoTexto(p.suppliers?.name ?? p.payees?.name ?? p.supplier_name ?? null),
+            favorecido: mascararCpfNoTexto(p.payees?.name ?? null),
             categoria: p.expense_category, os: p.service_orders?.service_order_number ?? null,
             veio_do_banco: !!p.bank_transaction_id,
             ...(pix ? {
@@ -240,7 +245,7 @@ export const lancamentoTools: ToolDef[] = [
           resultado.push({
             tipo: "receber", receivable_id: r.id, data: r.issue_date, vencimento: r.due_date,
             valor: Number(r.amount), pago: Number(r.paid_amount ?? 0), situacao: r.status,
-            descricao: r.description, contraparte: r.clients?.name ?? null,
+            descricao: mascararCpfNoTexto(r.description ?? null), contraparte: mascararCpfNoTexto(r.clients?.name ?? null),
             categoria: r.category, os: r.service_orders?.service_order_number ?? null,
             veio_do_banco: !!r.bank_transaction_id,
           });

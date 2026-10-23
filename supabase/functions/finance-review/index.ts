@@ -34,7 +34,9 @@ import {
   type CompraParcelada, type PernaDeParcelamento,
 } from "../_shared/banking/installments.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
-import { carregarContextoSeguro, identificarLinha, MOTOR_DA_FILA, type TxDaFila } from "./identificacao.ts";
+import {
+  carregarContextoSeguro, clienteQueAprovacaoUsa, identificarLinha, MOTOR_DA_FILA, pedidoDeConfirmacaoDoCliente, type TxDaFila,
+} from "./identificacao.ts";
 import {
   exigeDecisao, osAnotada, perguntaDaOSAberta, podeJaEstarLancado, vinculoAutomatico, type OpcaoDeVinculo, type VinculoSugerido,
 } from "../_shared/banking/vinculo.ts";
@@ -1748,22 +1750,33 @@ async function montarMemoria(admin: DbClient) {
 }
 
 /**
- * A OS que o dono disse numa anotação aplicada a esta linha ("o Pix de 800 é da OS-60").
+ * O que o dono disse numa anotação aplicada a esta linha: a OS ("o Pix de 800 é da OS-60") e o
+ * cliente ("o Pix de 1.500 é da TSD" — revisão de 23/10/2026: a anotação vale como o SIM ao cliente).
  *
  * Lida da própria anotação, e não da sugestão da fila: a sugestão pode ter sido trocada por
- * uma reavaliação, a anotação não. undefined = não há anotação com OS.
+ * uma reavaliação, a anotação não. null = não há anotação aplicada (cancelada, trocada, desfeita
+ * — a marca já saiu da evidência) ou a leitura falhou — aí não vale nada dela, nem a OS que a
+ * evidência ainda guarda: a aprovação segue pela prova do motor, que pede o SIM quando pede, e o
+ * cliente sugerido que não é o da prova não vale sozinho (situacaoDoClienteSugerido "escolher":
+ * "Escolha o cliente…" — revisão de 23/10/2026, 4ª rodada).
  */
-async function osDaAnotacao(admin: DbClient, p: any): Promise<string | undefined> {
+async function anotacaoDaLinha(admin: DbClient, p: any): Promise<{ os_id: string | null; cliente_id: string | null } | null> {
   const id = p?.evidencia?.anotacao?.id;
-  if (!id) return undefined;
+  if (!id) return null;
   // A anotação que a linha APONTA (evidencia.anotacao.id) — não "a mais recente com OS da
   // mesma transação", que podia ser outra anotação, trocada depois.
-  const { data } = await admin.from("anotacoes_do_extrato")
-    .select("os_id")
+  const { data, error } = await admin.from("anotacoes_do_extrato")
+    .select("os_id, cliente_id")
     .eq("id", id)
     .eq("status", "aplicada")
     .maybeSingle();
-  return (data as any)?.os_id ?? undefined;
+  // Leitura que falha = nada da anotação vale (null), dito no log — nunca "a evidência basta".
+  if (error) {
+    console.error("[finance-review] anotação da linha ilegível — o cliente que ela disse não vale nesta aprovação", id, error.message);
+    return null;
+  }
+  if (!data) return null;
+  return { os_id: (data as any).os_id ?? null, cliente_id: (data as any).cliente_id ?? null };
 }
 
 /**
@@ -1976,9 +1989,10 @@ async function aprovar(
        * Pix de 800 de hoje é da OS-60"). Sem nada disso, nenhuma: a OS sugerida pela fila é
        * pergunta (decisão do dono, 26/09/2026). undefined = ninguém respondeu.
        */
+      const anotacao = await anotacaoDaLinha(admin, p);
       const osRespondida: string | null | undefined = ov.serviceOrderId !== undefined
         ? ov.serviceOrderId
-        : await osDaAnotacao(admin, p);
+        : (anotacao?.os_id ?? undefined);
 
       const valor = Number(ov.amount ?? p.suggested_amount);
       const data = String(ov.date ?? p.suggested_date);
@@ -2164,8 +2178,12 @@ async function aprovar(
           throw new Error("Você escolheu o saldo de uma OS e respondeu outra OS na pergunta — escolha uma só");
         }
         const osDaReceita = osDoVinculo ?? osRespondida ?? null;
-        // Cliente que o motor antigo tirou do VÍNCULO não vale sem a pessoa escolher o vínculo.
-        const clienteSugerido = (p.evidencia as any)?.cliente?.por === "vinculo" ? null : p.suggested_client_id;
+        // Cliente que o motor antigo tirou do VÍNCULO não vale sem a pessoa escolher o vínculo. Nem o de quem pagou
+        // por outro (pagador conhecido, histórico de terceiro — leva 8, 22/10/2026): é sugestão, e o SIM é o
+        // ov.clientId ("Sim, é do X" na tela, cliente_confirmado no assistente). situacaoDoClienteSugerido é a fonte
+        // única — a ANOTAÇÃO do dono que disse o cliente vale como o SIM (revisão de 23/10/2026), e o sugerido que não é
+        // o da prova, sem anotação em vigor que o diga (desfeita, leitura que falhou), não vale: "Escolha o cliente…".
+        const clienteSugerido = clienteQueAprovacaoUsa(p, anotacao);
         let clienteId = ov.clientId ?? clienteSugerido
           ?? (vinculo?.tipo === "service_order_balance" ? vinculo.clienteId : null) ?? null;
         // A receita de uma OS é do CLIENTE DA OS — é a dívida dele que o dinheiro quita, quem
@@ -2182,7 +2200,7 @@ async function aprovar(
           }
         }
         if (!clienteId) {
-          throw new Error("Escolha o cliente antes de aprovar esta receita");
+          throw new Error(pedidoDeConfirmacaoDoCliente(p, anotacao) ?? "Escolha o cliente antes de aprovar esta receita");
         }
         const { data: criado, error: e2 } = await admin.from("receivables").insert({
           description: descricao,

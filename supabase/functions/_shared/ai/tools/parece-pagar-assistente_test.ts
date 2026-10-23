@@ -7,7 +7,11 @@ import { financeRulesTools } from "./finance-rules.ts";
 const ENTRADA = {
   id: "pMP", kind: "create_receivable", title: "Receita: MP MOTORHOMES", bank_transaction_id: "tMP",
   suggested_client_id: "cMP", suggested_amount: 1670, suggested_date: "2026-10-10",
-  suggested_category: "Serviços prestados", confidence: 80, evidencia: null, vinculo_sugerido: null,
+  suggested_category: "Serviços prestados", confidence: 80,
+  // O cliente veio da prova do motor (o documento dele). Sem prova nenhuma, o sugerido é "escolher" (leva 8): ninguém
+  // disse que é dele, e o "Parece pagar" não é calculado com ele (teste abaixo).
+  evidencia: { cliente: { id: "cMP", nome: "MP MOTORHOMES", por: "documento", detalhe: "CNPJ do cliente" } },
+  vinculo_sugerido: null,
   suggested_service_order_id: null, suggested_purchase_order_id: null,
 };
 
@@ -51,6 +55,13 @@ Deno.test("listar_propostas: a entrada traz o que parece pagar, pronto para apli
     { receivable_id: "r46", valor: 20 },
   ]);
   assert(/OS-00045/.test(p.parece_pagar.frase) && /OS-00046/.test(p.parece_pagar.frase));
+});
+
+Deno.test("listar_propostas: cliente sugerido que ninguém disse ser o da linha (sem prova, sem anotação) — sem 'Parece pagar'", async () => {
+  const sb = bancoFalso({ finance_review_queue: [{ ...ENTRADA, evidencia: null }], receivables: contasDaMP, payments: [] });
+  const r = await ferramenta("listar_propostas_de_lancamento").execute({}, ctx(sb));
+  assertEquals(r.propostas[0].parece_pagar, null);
+  assertEquals(r.propostas[0].falta_escolher_o_cliente, true);
 });
 
 Deno.test("listar_propostas: sem conseguir ler as contas, falha — não diz que não paga nada", async () => {

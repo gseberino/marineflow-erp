@@ -6,6 +6,7 @@ import { resumirAnotacao } from "./anotacoes.ts";
 import { resumirEstorno } from "./estorno.ts";
 import { resumirCobranca } from "./cobrancas.ts";
 import { resumirFavorecido } from "./favorecidos.ts";
+import { resumirCadastroDoExtrato, resumirGuardarPagador } from "./finance-rules.ts";
 
 export const TITULOS_DO_FINANCEIRO: Record<string, string> = {
   alterar_anotacao_do_extrato: "Cancelar ou corrigir anotação de Pix",
@@ -14,6 +15,11 @@ export const TITULOS_DO_FINANCEIRO: Record<string, string> = {
   registrar_contato_de_cobranca: "Registrar contato de cobrança",
   alterar_cobranca: "Alterar cobrança",
   alterar_favorecido: "Alterar favorecido",
+  // Leva 8 (22/10/2026): quem paga por um cliente, com o pedido resolvido (quem pagou, com o CPF mascarado, o cliente
+  // e a relação). E a entrada que o assistente tentaria cadastrar como cliente vira recusa ANTES do "sim" (o título é o
+  // mesmo de antes, em agent.ts).
+  guardar_pagador_do_cliente: "Guardar quem paga pelo cliente",
+  cadastrar_contraparte_do_extrato: "Cadastrar a partir do extrato",
 };
 
 /**
@@ -22,8 +28,14 @@ export const TITULOS_DO_FINANCEIRO: Record<string, string> = {
  */
 export const RESUMO_QUE_RESOLVE_DO_FINANCEIRO = Object.keys(TITULOS_DO_FINANCEIRO);
 
-// deno-lint-ignore no-explicit-any
-export async function resumirDoFinanceiro(admin: any, nome: string, args: Record<string, unknown>): Promise<string | null> {
+/** `quem` é quem pede o "sim" (o cargo diz se o pagador guardado nasce confirmado ou proposto). */
+export async function resumirDoFinanceiro(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  nome: string,
+  args: Record<string, unknown>,
+  quem: { userRole?: string } = {},
+): Promise<string | null> {
   const ctx = { admin } as unknown as ToolCtx;
   if (nome === "alterar_anotacao_do_extrato") return await resumirAnotacao(ctx, args);
   if (nome === "estornar_pagamento") return await resumirEstorno(ctx, args);
@@ -31,5 +43,7 @@ export async function resumirDoFinanceiro(admin: any, nome: string, args: Record
     return await resumirCobranca(ctx, nome, args);
   }
   if (nome === "alterar_favorecido") return await resumirFavorecido(ctx, args);
+  if (nome === "guardar_pagador_do_cliente") return await resumirGuardarPagador(admin, args, quem);
+  if (nome === "cadastrar_contraparte_do_extrato") return await resumirCadastroDoExtrato(admin, args);
   return null;
 }
