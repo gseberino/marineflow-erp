@@ -63,8 +63,13 @@
 --    where status = 'cancelled' and notes like '%[faxina Fase 0 da Agenda]%';
 --   update public.purchase_orders set status = 'sent'
 --    where po_number = 'OC-00001' and status = 'cancelled' and notes like '%[faxina Fase 0 da Agenda]%';
+--   -- só as 28 que a faxina FECHOU (5 R18 e 1 R7 "Resolvido", 22 manuais "Arquivada"). As 13 do item 4 levam a
+--   -- marca "Trazida" e a faxina nunca as fechou: se uma for concluída depois (pagamento ou dispensa do dono), ela
+--   -- fica concluída. Até a revisão de 23/10 a linha pegava qualquer marca e as reabriria.
 --   update public.agenda_tasks set status = 'pending', completed_at = null
---    where notes like '%[faxina Fase 0 da Agenda]%' and status in ('done', 'cancelled');
+--    where (notes like '%[faxina Fase 0 da Agenda] Arquivada%' or notes like '%[faxina Fase 0 da Agenda] Resolvido%')
+--      and status in ('done', 'cancelled');
+--   -- as 13 voltam ao "Usuário Demo (UI v2)" por esta linha, e só por ela
 --   update public.agenda_tasks set assignee_user_id = '05684333-44d3-4cac-b361-4c1067b5b7a4'
 --    where notes like '%[faxina Fase 0 da Agenda] Trazida%';
 --   update public.payees set app_user_id = null where id = 'ea2cdf81-15d1-4054-84d2-ca2944531fc8';
