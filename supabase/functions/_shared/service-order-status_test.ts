@@ -4,9 +4,15 @@
 // status inexistentes e sem `open`. Corrigir os quatro pontos resolve hoje; este teste
 // é o que resolve amanhã — ele lê o CHECK direto da migration e cobra a igualdade.
 
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assertEquals, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { dirname, fromFileUrl, join } from "https://deno.land/std@0.224.0/path/mod.ts";
-import { ROTULOS_STATUS_OS, STATUS_OS, STATUS_OS_AGENDAVEIS, STATUS_OS_ATIVAS } from "./service-order-status.ts";
+import {
+  ROTULOS_STATUS_OS,
+  STATUS_OS,
+  STATUS_OS_AGENDAVEIS,
+  STATUS_OS_ATIVAS,
+  statusAoAgendar,
+} from "./service-order-status.ts";
 
 const RAIZ = join(dirname(fromFileUrl(import.meta.url)), "..", "..", "..");
 const DIR_MIGRATIONS = join(RAIZ, "supabase", "migrations");
@@ -57,4 +63,53 @@ Deno.test("agendáveis incluem 'open' — foi a omissão que esvaziou o dropdown
 
 Deno.test("todo status tem rótulo, e todo rótulo tem status", () => {
   assertEquals(Object.keys(ROTULOS_STATUS_OS).sort(), [...STATUS_OS].sort());
+});
+
+// ─── statusAoAgendar: a regra única de "ganhar data" (Agenda de Produção, Fase 0) ────────────
+// Até 23/10/2026 a tela só passava a 'scheduled' a partir de 'pending' (inexistente: nunca) e o
+// assistente forçava 'scheduled' por cima de trabalho em andamento. A tabela abaixo é a decisão
+// para CADA status do CHECK: se entrar um status novo sem linha aqui, o primeiro teste falha.
+const ESPERADO_AO_AGENDAR: Record<string, "scheduled" | null | "lança"> = {
+  approved: "scheduled",
+  open: "scheduled",
+  scheduled: null,
+  draft: null,
+  in_progress: null,
+  awaiting_parts: null,
+  awaiting_client: null,
+  completed: "lança",
+  invoiced: "lança",
+  cancelled: "lança",
+};
+
+Deno.test("statusAoAgendar: todo status do CHECK tem decisão nesta tabela", () => {
+  assertEquals(
+    Object.keys(ESPERADO_AO_AGENDAR).sort(),
+    [...STATUS_OS].sort(),
+    "Entrou (ou saiu) status em STATUS_OS: decida o que agendar faz com ele, aqui e em statusAoAgendar.",
+  );
+});
+
+Deno.test("statusAoAgendar: aberta e aprovada viram agendada; o resto não regride; encerrada lança", () => {
+  for (const status of STATUS_OS) {
+    const esperado = ESPERADO_AO_AGENDAR[status];
+    if (esperado === "lança") {
+      assertThrows(() => statusAoAgendar(status), Error, "OS encerrada não se agenda");
+    } else {
+      assertEquals(statusAoAgendar(status), esperado, `status '${status}'`);
+    }
+  }
+});
+
+Deno.test("statusAoAgendar: só devolve 'scheduled' ou null — nunca outro status", () => {
+  for (const status of STATUS_OS) {
+    if (ESPERADO_AO_AGENDAR[status] === "lança") continue;
+    const novo = statusAoAgendar(status);
+    assertEquals(novo === null || novo === "scheduled", true, `'${status}' virou '${novo}'`);
+  }
+});
+
+Deno.test("statusAoAgendar: status fora do CHECK (o antigo 'pending') não inventa transição", () => {
+  assertEquals(statusAoAgendar("pending"), null);
+  assertEquals(statusAoAgendar(""), null);
 });

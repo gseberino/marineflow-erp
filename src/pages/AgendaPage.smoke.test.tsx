@@ -3,7 +3,7 @@
 // declarado acima da definição) derrubou a página inteira em produção em
 // 24/07/2026 e passou por tsc + vite build. Compilar não basta: renderizar pega.
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -12,7 +12,7 @@ import AgendaPage from './AgendaPage';
 import { AgendaV2 } from '@/v2/pages/wrapped';
 
 // vi.mock é içado para o topo do módulo — helpers/fixtures precisam de vi.hoisted
-const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem } = vi.hoisted(() => {
+const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem, semana, ordensDaSemana, agendarOs } = vi.hoisted(() => {
   const queryBuilder = (): any => {
     const o: any = {};
     for (const k of ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'lt', 'gt', 'order',
@@ -85,7 +85,45 @@ const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, cont
   ];
   // Contagem do banco das sugestões pendentes (0 = igual ao tamanho da lista).
   const contagem = { total: 0 };
-  return { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem };
+
+  // Dias da semana que a tela mostra (segunda = 0), no mesmo cálculo do startOfWeek da página.
+  // As OS de teste ficam no meio do dia de Brasília (-03:00): o dia é o mesmo em qualquer fuso
+  // em que o teste rodar (CI em UTC, máquina em Brasília).
+  const inicio = new Date();
+  inicio.setHours(0, 0, 0, 0);
+  inicio.setDate(inicio.getDate() + (inicio.getDay() === 0 ? -6 : 1 - inicio.getDay()));
+  const semana = (i: number) => {
+    const d = new Date(inicio);
+    d.setDate(d.getDate() + i);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const br = (i: number, hora: string) => `${semana(i)}T${hora}:00-03:00`;
+  // Agenda de Produção, Fase 0 (D3/D4/D5): o que a grade deixava sumir ou somava errado.
+  const ordensDaSemana = [
+    {
+      // D3: técnico com login INATIVO (fora de useTechnicians) — a OS sumia da grade.
+      id: 'so-inativo', service_order_number: 'OS-00104', status: 'awaiting_parts',
+      scheduled_start_at: br(1, '09:00'), scheduled_end_at: br(1, '11:00'),
+      clients: { name: 'Cliente Nelson' }, vessels: null,
+      service_order_technicians: [{ user_id: 'u9', app_users: { id: 'u9', full_name: 'Roberto Inativo' } }],
+    },
+    {
+      // D4: três dias de serviço — aparecia só no primeiro.
+      id: 'so-3dias', service_order_number: 'OS-00200', status: 'scheduled',
+      scheduled_start_at: br(2, '08:00'), scheduled_end_at: br(4, '17:00'),
+      clients: { name: 'Cliente Três Dias' }, vessels: null,
+      service_order_technicians: [{ user_id: 'u7', app_users: { id: 'u7', full_name: 'Técnico Três Dias' } }],
+    },
+    {
+      // D5: janela corrida de 72 h (sexta 08:00 → segunda 08:00) — virava "72h ⚠" num dia.
+      id: 'so-72h', service_order_number: 'OS-00300', status: 'scheduled',
+      scheduled_start_at: br(4, '08:00'), scheduled_end_at: br(7, '08:00'),
+      clients: { name: 'Cliente Janela Longa' }, vessels: null,
+      service_order_technicians: [{ user_id: 'u8', app_users: { id: 'u8', full_name: 'Técnico Janela' } }],
+    },
+  ];
+  const agendarOs = vi.fn(async (_input: any) => ({ warning: null, mensagem: 'OS agendada', status: 'scheduled' }));
+  return { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem, semana, ordensDaSemana, agendarOs };
 });
 
 vi.mock('@/integrations/supabase/client', () => ({
@@ -116,16 +154,20 @@ vi.mock('@/hooks/use-agenda', () => ({
     scheduled_start_at: new Date().toISOString(), scheduled_end_at: new Date(Date.now() + 3600000).toISOString(),
     clients: { name: 'Cliente Alpha' }, vessels: { name: 'Barco Alpha' },
     service_order_technicians: [{ user_id: 'u2', app_users: { id: 'u2', full_name: 'Felipe' } }],
-  }]),
+  }, ...ordensDaSemana]),
   useAgendaTasks: () => q(liveTasks),
   useLiveTasks: () => q(liveTasks),
   useCompletedTasks: () => q(doneTasks),
   useTechnicians: () => q([{ id: 'u2', full_name: 'Felipe' }]),
   useActiveUsers: () => q([{ id: 'u1', full_name: 'Gustavo', role: 'admin' }, { id: 'u2', full_name: 'Felipe', role: 'technician' }]),
-  useSchedulableOrders: () => q([]),
+  useSchedulableOrders: () => q([{
+    id: 'so-agendar', service_order_number: 'OS-00105', status: 'open',
+    clients: { name: 'Cliente Sem Técnico' }, vessels: null,
+  }]),
+  useResponsaveisDaOs: () => q([{ id: 'u1', full_name: 'Gustavo' }, { id: 'u9', full_name: 'Roberto Inativo' }]),
   useEntityTasks: () => q([]),
   useTaskReminders: () => q([]),
-  useQuickSchedule: mut,
+  useQuickSchedule: () => ({ mutate: () => {}, mutateAsync: agendarOs, isPending: false }),
   useSaveAgendaTask: mut,
   useCompleteTask: mut,
   useRescheduleTask: mut,
@@ -223,6 +265,75 @@ describe('AgendaPage — smoke de render (todas as visões)', () => {
     await user.click(screen.getByRole('button', { name: 'Revisões' }));
     // Banco falso sem planos: a tela explica onde criar, em vez de ficar em branco.
     expect(await screen.findByText(/Nenhum plano de manutenção ativo/)).toBeTruthy();
+  });
+
+  // ─── Agenda de Produção, Fase 0 (23/10/2026): nenhuma OS some, carga por dia, agendar sem técnico ───
+
+  it('OS de técnico com login inativo aparece, numa linha com o nome dele (desktop e celular)', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole('button', { name: 'Semana' }));
+    // A linha do técnico existe na grade, com o nome vindo do embed da própria OS.
+    expect(screen.getByText('Roberto Inativo')).toBeTruthy();
+    // E a OS aparece duas vezes: na grade (desktop) e nos dias empilhados (celular).
+    // Antes: zero — sem linha para ele, a OS sumia das duas.
+    expect(screen.getAllByText('OS-00104')).toHaveLength(2);
+  });
+
+  it('OS de 3 dias aparece nos 3 dias, com "desde dd/mm" fora do primeiro', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole('button', { name: 'Semana' }));
+    // 3 dias × (desktop + celular).
+    expect(screen.getAllByText('OS-00200')).toHaveLength(6);
+    const [, mes, dia] = semana(2).split('-');
+    // Nos dias 2 e 3 da janela, a hora do cartão dá lugar a "desde": 2 dias × 2 layouts.
+    expect(screen.getAllByText(`desde ${dia}/${mes}`)).toHaveLength(4);
+    // A carga do técnico nos três dias: 8h em cada um (09 h nas pontas e 24 h no meio, tudo
+    // recortado à jornada).
+    for (const i of [2, 3, 4]) {
+      expect(screen.getByTestId(`carga-u7-${semana(i)}`).textContent).toBe('8h');
+    }
+
+    // No mês, o pino de OS aparece nos três dias também.
+    await user.click(screen.getByRole('button', { name: 'Mês' }));
+    for (const i of [2, 3, 4]) expect(screen.getByTestId(`mes-os-${semana(i)}`)).toBeTruthy();
+  });
+
+  it('OS de janela longa (72 h) mostra 8h por dia, sem "72h" e sem ⚠', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole('button', { name: 'Semana' }));
+    // Sexta, sábado e domingo da semana; a segunda seguinte fica fora da grade.
+    for (const i of [4, 5, 6]) {
+      const carga = screen.getByTestId(`carga-u8-${semana(i)}`);
+      expect(carga.textContent).toBe('8h');
+      expect(carga.textContent).not.toContain('⚠');
+    }
+    expect(screen.queryByText(/72h/)).toBeNull();
+  });
+
+  it('o diálogo "Agendar OS" agenda sem técnico', async () => {
+    agendarOs.mockClear();
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole('button', { name: 'Agendar' }));
+    await user.click(await screen.findByRole('menuitem', { name: /Ordem de serviço/ }));
+    const dialogo = await screen.findByRole('dialog');
+    expect(within(dialogo).getByText('Técnico (opcional)')).toBeTruthy();
+    // Escolhe só a OS; o técnico fica "Sem responsável".
+    // O combobox não tira o nome do conteúdo (ARIA): o 1º do diálogo é o da OS.
+    const [campoOs, campoTecnico] = within(dialogo).getAllByRole('combobox');
+    expect(campoOs.textContent).toContain('Selecione uma OS');
+    expect(campoTecnico.textContent).toContain('Sem responsável');
+    await user.click(campoOs);
+    await user.click(await screen.findByRole('option', { name: /OS-00105/ }));
+    await user.click(within(dialogo).getByRole('button', { name: 'Agendar' }));
+    expect(agendarOs).toHaveBeenCalledTimes(1);
+    expect(agendarOs.mock.calls[0][0]).toMatchObject({
+      service_order_id: 'so-agendar',
+      technician_user_id: null,
+    });
   });
 
   it('a rota /v2/agenda renderiza a MESMA agenda dentro da casca de tema', async () => {

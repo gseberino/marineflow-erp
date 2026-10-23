@@ -29,8 +29,16 @@ import {
   useAutoCreated,
   useUndoAutoCreated,
   useOpenLoops,
+  useResponsaveisDaOs,
   type OpenLoop,
 } from '@/hooks/use-agenda';
+// O dia de Brasília e a carga por dia: a mesma regra das ferramentas do assistente (D4/D5).
+import {
+  diaBR,
+  diasDaJanela,
+  horasNoDia,
+  JORNADA_PADRAO_HORAS,
+} from '../../supabase/functions/_shared/agenda-dia';
 import { TaskCard } from '@/components/agenda/TaskCard';
 import { AgendaTaskDialog, type ExistingTask } from '@/components/AgendaTaskDialog';
 import { FocusMode } from '@/components/agenda/FocusMode';
@@ -90,6 +98,18 @@ function toLocalDateInput(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+/**
+ * A hora do cartão da OS no dia `dayKey`. A OS de vários dias aparece em todos eles (D4): no dia
+ * do início vai a hora; nos seguintes, "desde dd/mm", para ninguém ler a hora de começo de
+ * anteontem como se fosse a de hoje.
+ */
+function horaOuDesde(o: { scheduled_start_at?: string | null }, dayKey: string): string {
+  if (!o.scheduled_start_at) return '';
+  const inicio = diaBR(o.scheduled_start_at);
+  if (inicio === dayKey) return fmtTime(o.scheduled_start_at);
+  const [, m, d] = inicio.split('-');
+  return `desde ${d}/${m}`;
 }
 
 const TASK_PRIORITY_CLASSES: Record<string, string> = {
@@ -551,7 +571,6 @@ export default function AgendaPage() {
       <QuickScheduleDialog
         open={osDialogOpen}
         onOpenChange={(v) => { setOsDialogOpen(v); if (!v) setScheduleOsId(undefined); }}
-        technicians={technicians}
         prefillTechnicianId={prefill.technicianId}
         prefillDate={prefill.date}
         prefillOrderId={scheduleOsId}
@@ -944,7 +963,7 @@ function TodayView({
               <span className="font-mono text-xs opacity-70">{o.service_order_number}</span>
               <span className="font-medium truncate flex-1">{o.clients?.name || '—'}</span>
               <OnMyWayButton order={o} />
-              {o.scheduled_start_at && <span className="text-xs font-semibold">{fmtTime(o.scheduled_start_at)}</span>}
+              {o.scheduled_start_at && <span className="text-xs font-semibold">{horaOuDesde(o, toLocalDateInput(startToday))}</span>}
             </div>
           ))}
         </Section>
@@ -1010,26 +1029,30 @@ function WeekView({
   );
   const today = new Date();
 
+  // A OS entra em TODO dia de Brasília que a janela cruza, recortado à semana (D4, 23/10/2026).
+  // Antes entrava só no dia do início: numa OS de 06/10 a 08/10, a pessoa aparecia "Livre" em 07
+  // e 08, justamente os dias em que estava no barco.
   const ordersByTechAndDay = useMemo(() => {
     const map = new Map<string, any[]>();
+    const deDia = toLocalDateInput(days[0]);
+    const ateDia = toLocalDateInput(days[days.length - 1]);
     for (const o of orders) {
-      if (!o.scheduled_start_at) continue;
-      const dayKey = toLocalDateInput(new Date(o.scheduled_start_at));
+      const dias = diasDaJanela(o.scheduled_start_at, o.scheduled_end_at, deDia, ateDia);
+      if (dias.length === 0) continue;
       const techs = o.service_order_technicians || [];
-      if (techs.length === 0) {
-        const k = `__unassigned__|${dayKey}`;
-        if (!map.has(k)) map.set(k, []);
-        map.get(k)!.push(o);
-      } else {
-        for (const t of techs) {
-          const k = `${t.user_id}|${dayKey}`;
+      const pessoas: string[] = techs.length === 0
+        ? ['__unassigned__']
+        : techs.map((t: any) => t.user_id);
+      for (const dayKey of dias) {
+        for (const pessoa of pessoas) {
+          const k = `${pessoa}|${dayKey}`;
           if (!map.has(k)) map.set(k, []);
           map.get(k)!.push(o);
         }
       }
     }
     return map;
-  }, [orders]);
+  }, [orders, days]);
 
   const tasksByTechAndDay = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -1043,9 +1066,29 @@ function WeekView({
     return map;
   }, [tasks]);
 
-  // Linhas = técnicos + qualquer pessoa com tarefa na semana (admin/financeiro/vendas)
+  // Linhas = técnicos + todo técnico de OS visível na semana + qualquer pessoa com tarefa na
+  // semana (admin/financeiro/vendas) + "Sem responsável".
+  //
+  // D3 (23/10/2026): a OS entrava na célula "técnico|dia" do técnico dela, mas a linha só existia
+  // para técnico ATIVO. Com o login do técnico inativo (o Roberto, da OS-00104), a OS não tinha
+  // linha e sumia da grade — no desktop e no celular, que percorre as mesmas linhas. Agora o
+  // técnico de OS visível ganha linha mesmo inativo, com o nome do próprio embed da OS. Linhas =
+  // equipe (payees) é da Fase 1; aqui só se garante que nenhuma OS some.
   const rows = useMemo(() => {
     const extra = new Map<string, string>();
+    const deDia = toLocalDateInput(days[0]);
+    const ateDia = toLocalDateInput(days[days.length - 1]);
+    for (const o of orders) {
+      if (diasDaJanela(o.scheduled_start_at, o.scheduled_end_at, deDia, ateDia).length === 0) continue;
+      for (const st of o.service_order_technicians || []) {
+        if (st.user_id && !extra.has(st.user_id)
+            && !technicians.some((x) => x.id === st.user_id)) {
+          // Sem o nome (a RLS de app_users só mostra outro usuário ao admin), a linha vem
+          // genérica — mas vem: a OS não pode sumir por falta de nome.
+          extra.set(st.user_id, st.app_users?.full_name || 'Técnico sem nome');
+        }
+      }
+    }
     for (const t of tasks) {
       if (t.assignee_user_id && t.app_users?.full_name
           && !technicians.some((x) => x.id === t.assignee_user_id)) {
@@ -1057,7 +1100,7 @@ function WeekView({
       ...Array.from(extra.entries()).map(([id, full_name]) => ({ id, full_name })),
       { id: '__unassigned__', full_name: 'Sem responsável' },
     ];
-  }, [technicians, tasks]);
+  }, [technicians, tasks, orders, days]);
 
   // Mobile (< lg): dias empilhados — zero scroll horizontal (Princípio 0)
   const mobileDays = days.map((d) => {
@@ -1065,16 +1108,19 @@ function WeekView({
     const dayOrders: any[] = [];
     const dayTasks: any[] = [];
     for (const r of rows) {
-      dayOrders.push(...(ordersByTechAndDay.get(`${r.id}|${dayKey}`) || []));
+      // Sem a coluna do técnico, a OS de dois técnicos apareceria duas vezes no mesmo dia.
+      for (const o of ordersByTechAndDay.get(`${r.id}|${dayKey}`) || []) {
+        if (!dayOrders.some((x) => x.id === o.id)) dayOrders.push(o);
+      }
       dayTasks.push(...(tasksByTechAndDay.get(`${r.id}|${dayKey}`) || []));
     }
-    return { date: d, orders: dayOrders, tasks: dayTasks };
+    return { date: d, dayKey, orders: dayOrders, tasks: dayTasks };
   });
 
   return (
     <>
     <div className="lg:hidden space-y-3">
-      {mobileDays.map(({ date, orders: dOrders, tasks: dTasks }, i) => (
+      {mobileDays.map(({ date, dayKey, orders: dOrders, tasks: dTasks }, i) => (
         <div key={i} className={cn('rounded-md border p-2.5 space-y-1.5', sameDay(date, today) && 'ring-1 ring-primary')}>
           <div className="flex items-center justify-between text-xs font-semibold">
             <span className={sameDay(date, today) ? 'text-primary' : 'text-muted-foreground'}>
@@ -1098,7 +1144,7 @@ function WeekView({
             >
               <span className="font-mono text-[10px] opacity-70 mr-1.5">{o.service_order_number}</span>
               <span className="font-medium">{o.clients?.name || '—'}</span>
-              {o.scheduled_start_at && <span className="float-right font-semibold text-[10px]">{fmtTime(o.scheduled_start_at)}</span>}
+              {o.scheduled_start_at && <span className="float-right font-semibold text-[10px]">{horaOuDesde(o, dayKey)}</span>}
             </div>
           ))}
           {dTasks.map((t) => (
@@ -1148,12 +1194,12 @@ function WeekView({
                 const dayKey = toLocalDateInput(d);
                 const cellOrders = ordersByTechAndDay.get(`${tech.id}|${dayKey}`) || [];
                 const cellTasks = tasksByTechAndDay.get(`${tech.id}|${dayKey}`) || [];
-                // Workload (padrão Asana/Sunsama): horas ocupadas no dia da pessoa
-                const loadH = [...cellOrders, ...cellTasks].reduce((s: number, it: any) => {
-                  const st = it.scheduled_start_at ? new Date(it.scheduled_start_at).getTime() : 0;
-                  const en = it.scheduled_end_at ? new Date(it.scheduled_end_at).getTime() : 0;
-                  return s + (st && en && en > st ? (en - st) / 3600000 : 0);
-                }, 0);
+                // Workload (padrão Asana/Sunsama): horas ocupadas no dia da pessoa. Cada item conta
+                // só a parte da janela que cai neste dia, com teto na jornada (D5): uma OS antiga
+                // de 72 h dá 8h aqui, e não "72h ⚠" num dia só.
+                const loadH = [...cellOrders, ...cellTasks].reduce((s: number, it: any) =>
+                  s + horasNoDia(it.scheduled_start_at, it.scheduled_end_at, dayKey), 0);
+                const sobrecarga = loadH > JORNADA_PADRAO_HORAS;
                 return (
                   <div
                     key={`${tech.id}-${i}`}
@@ -1176,11 +1222,17 @@ function WeekView({
                     }}
                   >
                     {loadH > 0 && (
-                      <div className={cn(
-                        'text-[10px] font-semibold text-right pr-1 tabular-nums',
-                        loadH >= 8 ? 'text-destructive' : loadH >= 6 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground',
-                      )}>
-                        {Number.isInteger(loadH) ? loadH : loadH.toFixed(1)}h{loadH >= 8 ? ' ⚠' : ''}
+                      <div
+                        data-testid={`carga-${tech.id}-${dayKey}`}
+                        className={cn(
+                          'text-[10px] font-semibold text-right pr-1 tabular-nums',
+                          // Dia cheio (= jornada) é âmbar; vermelho só quando passa dela.
+                          sobrecarga ? 'text-destructive'
+                            : loadH >= 0.75 * JORNADA_PADRAO_HORAS ? 'text-amber-600 dark:text-amber-400'
+                            : 'text-muted-foreground',
+                        )}
+                      >
+                        {Number.isInteger(loadH) ? loadH : loadH.toFixed(1)}h{sobrecarga ? ' ⚠' : ''}
                       </div>
                     )}
                     {cellOrders.map((o) => (
@@ -1199,7 +1251,7 @@ function WeekView({
                           </span>
                           {o.scheduled_start_at && (
                             <span className="text-[10px] font-semibold">
-                              {fmtTime(o.scheduled_start_at)}
+                              {horaOuDesde(o, dayKey)}
                             </span>
                           )}
                         </div>
@@ -1284,16 +1336,19 @@ function MonthView({
     [gridStart],
   );
 
+  // Como na semana (D4): a OS conta em todo dia de Brasília que a janela cruza, dentro da grade.
   const ordersByDay = useMemo(() => {
     const map = new Map<string, any[]>();
+    const deDia = toLocalDateInput(days[0]);
+    const ateDia = toLocalDateInput(days[days.length - 1]);
     for (const o of orders) {
-      if (!o.scheduled_start_at) continue;
-      const k = toLocalDateInput(new Date(o.scheduled_start_at));
-      if (!map.has(k)) map.set(k, []);
-      map.get(k)!.push(o);
+      for (const k of diasDaJanela(o.scheduled_start_at, o.scheduled_end_at, deDia, ateDia)) {
+        if (!map.has(k)) map.set(k, []);
+        map.get(k)!.push(o);
+      }
     }
     return map;
-  }, [orders]);
+  }, [orders, days]);
 
   const tasksByDay = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -1347,7 +1402,10 @@ function MonthView({
                       vazava para fora do dia. Abaixo de sm fica só o número; a partir de sm
                       volta a palavra inteira. */}
                   {dayOrders.length > 0 && (
-                    <span className="inline-flex items-center rounded-full bg-primary/15 text-primary px-1 sm:px-2 py-0.5 text-[10px] font-medium">
+                    <span
+                      data-testid={`mes-os-${dayKey}`}
+                      className="inline-flex items-center rounded-full bg-primary/15 text-primary px-1 sm:px-2 py-0.5 text-[10px] font-medium"
+                    >
                       {dayOrders.length}<span className="hidden sm:inline">&nbsp;OS</span>
                     </span>
                   )}
@@ -1392,8 +1450,8 @@ function MonthView({
           >
             <div className="flex items-center justify-between">
               <span className="font-mono opacity-70">{o.service_order_number}</span>
-              {o.scheduled_start_at && (
-                <span className="font-semibold">{fmtTime(o.scheduled_start_at)}</span>
+              {o.scheduled_start_at && selectedKey && (
+                <span className="font-semibold">{horaOuDesde(o, selectedKey)}</span>
               )}
             </div>
             <div className="font-medium mt-0.5">
@@ -1442,17 +1500,24 @@ function MonthView({
 // ============================================================
 // QUICK SCHEDULE DIALOG (OS)
 // ============================================================
+// Opção "Sem responsável" da lista de técnico: o combobox não tem limpar, e o técnico é opcional.
+const SEM_RESPONSAVEL = '__sem_responsavel__';
+
 function QuickScheduleDialog({
-  open, onOpenChange, technicians, prefillTechnicianId, prefillDate, prefillOrderId,
+  open, onOpenChange, prefillTechnicianId, prefillDate, prefillOrderId,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  technicians: { id: string; full_name: string }[];
   prefillTechnicianId?: string;
   prefillDate?: string;
   prefillOrderId?: string;
 }) {
   const { data: schedulable = [] } = useSchedulableOrders();
+  // D2 (23/10/2026): a lista era useTechnicians (técnico com login ativo), que hoje dá zero
+  // pessoas — e o técnico era obrigatório, então não se agendava OS nenhuma por aqui. Agora a
+  // lista é de quem pode responder pela OS (admin/técnico ativo ou com favorecido ativo) e o
+  // técnico é opcional.
+  const { data: responsaveis = [] } = useResponsaveisDaOs();
   const quickSchedule = useQuickSchedule();
 
   const [orderId, setOrderId] = useState('');
@@ -1477,23 +1542,28 @@ function QuickScheduleDialog({
 
   const handleSave = async () => {
     if (submitting || quickSchedule.isPending) return;
-    if (!orderId || !technicianId || !date || !startTime) {
-      toast.error('Preencha OS, técnico, data e hora de início');
+    if (!orderId || !date || !startTime) {
+      toast.error('Preencha OS, data e hora de início');
       return;
     }
     const startISO = new Date(`${date}T${startTime}:00`).toISOString();
     const endISO = endTime ? new Date(`${date}T${endTime}:00`).toISOString() : null;
+    if (endISO && endISO <= startISO) {
+      toast.error('O fim precisa ser depois do início');
+      return;
+    }
 
     setSubmitting(true);
     try {
       const res: any = await quickSchedule.mutateAsync({
         service_order_id: orderId,
-        technician_user_id: technicianId,
+        technician_user_id: technicianId || null,
         scheduled_start_at: startISO,
         scheduled_end_at: endISO,
       });
-      // Success: only reached if mutateAsync resolves without throwing
-      toast.success('OS agendada com sucesso');
+      // Success: only reached if mutateAsync resolves without throwing.
+      // O toast diz o status RESULTANTE: a OS que aguarda peça ganha data e continua aguardando.
+      toast.success(`${res?.mensagem || 'OS agendada'}${technicianId ? '' : ' (sem responsável)'}`);
       if (res?.warning) toast.warning(res.warning);
       onOpenChange(false);
     } catch (err: any) {
@@ -1532,16 +1602,19 @@ function QuickScheduleDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Técnico *</Label>
+            <Label>Técnico (opcional)</Label>
             <EntityCombobox
               value={technicianId}
-              onChange={setTechnicianId}
-              placeholder="Selecione um técnico"
-              options={technicians.map((t) => ({
-                value: t.id,
-                label: t.full_name,
-                description: undefined,
-              }))}
+              onChange={(v) => setTechnicianId(v === SEM_RESPONSAVEL ? '' : v)}
+              placeholder="Sem responsável"
+              options={[
+                { value: SEM_RESPONSAVEL, label: 'Sem responsável' },
+                ...responsaveis.map((t) => ({
+                  value: t.id,
+                  label: t.full_name,
+                  description: undefined,
+                })),
+              ]}
             />
           </div>
 

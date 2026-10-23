@@ -2,7 +2,20 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 // Fonte única dos status de service_orders, espelhando o CHECK da tabela (MF-AUD-005).
 // Mesmo padrão de import cruzado já usado com _shared/banking/mcc.
-import { STATUS_OS_AGENDAVEIS } from '../../supabase/functions/_shared/service-order-status';
+import {
+  ROTULOS_STATUS_OS,
+  STATUS_OS_AGENDAVEIS,
+  statusAoAgendar,
+  type StatusOS,
+} from '../../supabase/functions/_shared/service-order-status';
+// O dia de Brasília e a carga por dia (Agenda de Produção, Fase 0): a mesma regra que as
+// ferramentas do assistente e o Secretário usam. A OS guarda uma janela corrida, não horas.
+import {
+  filtroQueCruza,
+  horasNoDia,
+  JORNADA_PADRAO_HORAS,
+  limitesDoDiaBR,
+} from '../../supabase/functions/_shared/agenda-dia';
 
 // Tipos de entidade vinculável a uma tarefa. A lista vivia copiada aqui e as duas tabelas
 // já divergiram uma vez — agora vem do mesmo arquivo que as Edge Functions usam, com teste
@@ -32,8 +45,11 @@ export function useAgendaOrders(dateFrom: string, dateTo: string) {
           vessels(name),
           service_order_technicians(user_id, app_users(id, full_name))
         `)
-        .gte('scheduled_start_at', dateFrom)
-        .lte('scheduled_start_at', dateTo)
+        // Interseção com o período, não "começa no período" (D4, 23/10/2026): a OS que começou
+        // na semana passada e termina nesta também ocupa esta semana. Antes ela sumia daqui e a
+        // pessoa aparecia "Livre" nos dias em que estava no barco.
+        .lt('scheduled_start_at', dateTo)
+        .or(filtroQueCruza(dateFrom))
         .neq('status', 'cancelled')
         .order('scheduled_start_at', { ascending: true });
       if (error) throw error;
@@ -149,6 +165,45 @@ export function useActiveUsers() {
   });
 }
 
+/**
+ * Quem pode ser responsável por uma OS no diálogo "Agendar OS": admin ou técnico que esteja
+ * ativo OU ligado a um favorecido (payees) ativo. Exportada para o teste.
+ *
+ * POR QUE NÃO useTechnicians (D2, 23/10/2026): ela pede `role='technician' AND active`, e hoje
+ * isso dá ZERO pessoas — os técnicos que trabalham (Roberto, Mickael) estão com o login inativo,
+ * mas seguem na equipe como favorecido ativo (recebem diária). Com a lista vazia e o técnico
+ * obrigatório, não dava para agendar OS nenhuma pela Agenda. useTechnicians fica como está
+ * porque é filtro em ServiceOrderList e OrdersListV2.
+ *
+ * A RLS de payees é de admin/financeiro: para o técnico o embed vem vazio e ele vê só os
+ * ativos — aceitável, ele não monta a agenda da equipe.
+ */
+export function responsaveisDaOs(
+  usuarios: Array<{ id: string; full_name: string | null; role?: string | null; active?: boolean | null; payees?: Array<{ id: string; active: boolean | null }> | null }>,
+): { id: string; full_name: string }[] {
+  return usuarios
+    .filter((u) => (u.role === 'admin' || u.role === 'technician')
+      && (u.active === true || (u.payees || []).some((p) => p.active === true)))
+    .map((u) => ({ id: u.id, full_name: u.full_name || 'Sem nome' }));
+}
+
+export function useResponsaveisDaOs() {
+  return useQuery({
+    queryKey: ['agenda-responsaveis-os'],
+    queryFn: async () => {
+      // A dica do FK escolhe o caminho app_users ← payees.app_user_id: sem ela, um segundo
+      // caminho entre as tabelas faria o PostgREST recusar o embed (PGRST201) e a lista vir vazia.
+      const { data, error } = await supabase
+        .from('app_users')
+        .select('id, full_name, role, active, payees!payees_app_user_id_fkey(id, active)')
+        .in('role', ['admin', 'technician'])
+        .order('full_name');
+      if (error) throw error;
+      return responsaveisDaOs((data || []) as any[]);
+    },
+  });
+}
+
 export function useSchedulableOrders() {
   return useQuery({
     queryKey: ['agenda-schedulable'],
@@ -200,26 +255,40 @@ export function conflictMessage(conflicts: any[]): string {
   return `Conflito de agenda: o responsável já tem ${labels} nesse horário.`;
 }
 
-/** Sobrecarga (não bloqueia — avisa): total de horas do dia após o novo item > 8h. */
-async function overloadWarning(
+/**
+ * Sobrecarga (não bloqueia — avisa): as horas do dia de Brasília, com o novo item, passam da
+ * jornada. Exportada para o teste.
+ *
+ * Cada item conta a parte da janela que cai no dia, com teto na jornada (horasNoDia). Até
+ * 23/10/2026 somava a janela corrida inteira: agendar uma OS de 06/10 a 09/10 avisava "o dia
+ * fica com 72h ocupadas" (D5). O dia também era o do navegador, não o de Brasília.
+ */
+export async function overloadWarning(
   userId: string, startISO: string, endISO: string,
   excl?: { excludeTask?: string; excludeSo?: string },
 ): Promise<string | null> {
-  const d = new Date(startISO);
-  const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const dayEnd = new Date(dayStart.getTime() + 86400000);
-  const items = await fetchConflicts({
-    userId, startISO: dayStart.toISOString(), endISO: dayEnd.toISOString(), ...excl,
-  });
-  const busyMs = items.reduce((s: number, c: any) => {
-    const st = new Date(c.starts_at).getTime();
-    const en = new Date(c.ends_at).getTime();
-    return s + Math.max(0, en - st);
-  }, 0);
-  const totalH = (busyMs + (new Date(endISO).getTime() - new Date(startISO).getTime())) / 3600000;
-  return totalH > 8
+  const { de, ate, dia } = limitesDoDiaBR(startISO);
+  const items = await fetchConflicts({ userId, startISO: de, endISO: ate, ...excl });
+  const ocupadas = items.reduce(
+    (s: number, c: any) => s + horasNoDia(c.starts_at, c.ends_at, dia), 0);
+  const totalH = ocupadas + horasNoDia(startISO, endISO, dia);
+  return totalH > JORNADA_PADRAO_HORAS
     ? `Atenção: com este agendamento o dia fica com ${totalH.toFixed(1).replace('.0', '')}h ocupadas.`
     : null;
+}
+
+/**
+ * O que o toast diz depois de agendar: o status RESULTANTE, para ninguém achar que a OS que
+ * aguarda peça "foi agendada" e virou outra coisa. Exportada para o teste.
+ */
+export function mensagemAoAgendar(anterior: string, novo: StatusOS | null): string {
+  if (novo === 'scheduled') return 'OS agendada';
+  if (anterior === 'scheduled') return 'Agendamento atualizado';
+  if (anterior === 'draft') return 'Data gravada; continua como orçamento (ainda não é OS)';
+  const rotulo = ROTULOS_STATUS_OS[anterior as StatusOS];
+  return rotulo
+    ? `Data gravada; a OS continua ${rotulo.toLowerCase()}`
+    : 'Data gravada';
 }
 
 export function useQuickSchedule() {
@@ -227,38 +296,46 @@ export function useQuickSchedule() {
   return useMutation({
     mutationFn: async (input: {
       service_order_id: string;
-      technician_user_id: string;
+      /** Opcional (D2, 23/10/2026): agendar sem responsável também vale. */
+      technician_user_id?: string | null;
       scheduled_start_at: string;
       scheduled_end_at: string | null;
     }) => {
-      let warning: string | null = null;
-      if (input.scheduled_end_at) {
-        const conflicts = await fetchConflicts({
-          userId: input.technician_user_id,
-          startISO: input.scheduled_start_at,
-          endISO: input.scheduled_end_at,
-          excludeSo: input.service_order_id,
-        });
-        if (conflicts.length > 0) throw new Error(conflictMessage(conflicts));
-        warning = await overloadWarning(
-          input.technician_user_id, input.scheduled_start_at, input.scheduled_end_at,
-          { excludeSo: input.service_order_id },
-        );
-      }
-
+      // O status vem antes de tudo: OS encerrada recusa sem checar agenda de ninguém.
       const { data: current, error: getErr } = await supabase
         .from('service_orders')
         .select('status')
         .eq('id', input.service_order_id)
         .single();
       if (getErr) throw getErr;
+      const statusAnterior = String(current?.status ?? '');
+      // Regra única dos três caminhos que agendam (tela, schedule_service_order e
+      // approve_quote_full): open/approved → scheduled; trabalho andando não regride; encerrada
+      // lança. Até 23/10/2026 a tela comparava com 'pending', que não existe: nunca agendava (D1).
+      const novoStatus = statusAoAgendar(statusAnterior);
 
-      const updatePayload: { scheduled_start_at: string; scheduled_end_at: string | null; status?: string } = {
+      const tecnico = input.technician_user_id || null;
+      let warning: string | null = null;
+      // Conflito e sobrecarga são da agenda de uma PESSOA: sem responsável, não há o que checar.
+      if (tecnico && input.scheduled_end_at) {
+        const conflicts = await fetchConflicts({
+          userId: tecnico,
+          startISO: input.scheduled_start_at,
+          endISO: input.scheduled_end_at,
+          excludeSo: input.service_order_id,
+        });
+        if (conflicts.length > 0) throw new Error(conflictMessage(conflicts));
+        warning = await overloadWarning(
+          tecnico, input.scheduled_start_at, input.scheduled_end_at,
+          { excludeSo: input.service_order_id },
+        );
+      }
+
+      const updatePayload: { scheduled_start_at: string; scheduled_end_at: string | null; status?: StatusOS } = {
         scheduled_start_at: input.scheduled_start_at,
         scheduled_end_at: input.scheduled_end_at,
       };
-      // Transition to 'scheduled' only from statuses that precede it
-      if (current?.status === 'pending') updatePayload.status = 'scheduled';
+      if (novoStatus) updatePayload.status = novoStatus;
 
       const { error: updateErr } = await supabase
         .from('service_orders')
@@ -268,18 +345,25 @@ export function useQuickSchedule() {
 
       // Use upsert to safely assign the technician — avoids unique-constraint
       // errors when the technician is already linked to this OS
-      const { error: techErr } = await supabase
-        .from('service_order_technicians')
-        .upsert(
-          {
-            service_order_id: input.service_order_id,
-            user_id: input.technician_user_id,
-            role_in_order: 'technician',
-          },
-          { onConflict: 'service_order_id,user_id', ignoreDuplicates: true }
-        );
-      if (techErr) throw techErr;
-      return { warning };
+      if (tecnico) {
+        const { error: techErr } = await supabase
+          .from('service_order_technicians')
+          .upsert(
+            {
+              service_order_id: input.service_order_id,
+              user_id: tecnico,
+              role_in_order: 'technician',
+            },
+            { onConflict: 'service_order_id,user_id', ignoreDuplicates: true }
+          );
+        if (techErr) throw techErr;
+      }
+      return {
+        warning,
+        statusAnterior,
+        status: novoStatus ?? statusAnterior,
+        mensagem: mensagemAoAgendar(statusAnterior, novoStatus),
+      };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agenda-orders'] });

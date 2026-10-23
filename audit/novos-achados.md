@@ -2519,3 +2519,24 @@ porque só o dono pode preenchê-las.
 - **Consertar seria:** enviar pelo mesmo fluxo de pendência (ex.: `send_whatsapp_message` do
   assistente, que pede confirmação) ou pela fila com as guardas, como a R15.
 - **Não corrigido:** fora do escopo da frente TELAS dos planos (regra 3).
+
+### [NOVO-agenda-01] OS `open` não reserva estoque — duas OS abertas "enxergam" a mesma peça
+
+- **Encontrado em:** Agenda de Produção, Fase 0 (conferência de 23/10/2026, base 5455f7e5).
+- **Onde:** `recompute_product_reservations(_product)` (`supabase/schemas/producao/05-funcoes.sql:8897-8915`).
+  O `reserved_quantity` de cada produto soma as peças das OS com status em
+  `('approved','scheduled','in_progress','awaiting_parts','awaiting_client','reopened')`.
+- **O quê:** `open` não está na lista. Hoje `open` é o caminho normal de uma OS nova (13 de 19
+  conversões ORÇ→OS caíram em `open`), então a peça de uma OS aberta não fica reservada: duas OS
+  `open` com a mesma peça veem o mesmo saldo livre, e a necessidade de compra de cada uma não
+  conta a outra. A lista também traz `reopened`, que não existe no CHECK de `service_orders.status`
+  (entrada morta, sem efeito).
+- **Por que não foi corrigido agora:** pôr `open` na lista muda `reserved_quantity` de todo o
+  estoque de uma vez (e, com ele, o "disponível" de toda tela, do assistente e do motor de compras).
+  É decisão própria, com medição antes/depois, não conserto da Fase 0 (regra 3 do repo).
+- **Coerência mantida de propósito:** a correção da "reserva própria" do P5 da Fase 0 (descontar a
+  reserva da própria OS) usa exatamente a MESMA lista de status, para o desconto nunca tirar o que a
+  reserva não pôs.
+- **Consertar seria:** acrescentar `open` (e tirar `reopened`) à lista, recalcular as reservas de
+  todos os produtos numa migration e conferir com `f16`/`f06` que nenhuma falta nova aparece sem
+  motivo.
