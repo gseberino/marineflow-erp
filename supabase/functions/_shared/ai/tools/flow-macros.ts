@@ -160,7 +160,9 @@ export const flowMacroTools: ToolDef[] = [
 
       // nº atual da OS (mesma linha; ganha novo número ao converter)
       // O status vem junto, lido DEPOIS da conversão: é dele que o passo 3 decide se a OS vira agendada.
-      const { data: so } = await sb.from("service_orders").select("service_order_number, client_id, status").eq("id", args.service_order_id).maybeSingle();
+      // O erro não é engolido (revisão de 23/10/2026): sem o status, statusAoAgendar('') dava null, a
+      // data era gravada com a OS 'open' e o passo saía ✔ calado. O follow-up segue sem o número.
+      const { data: so, error: soErr } = await sb.from("service_orders").select("service_order_number, client_id, status").eq("id", args.service_order_id).maybeSingle();
 
       // 2) Follow-up para o próprio dono (opcional) — espelha schedule_self_reminder.
       if (Number(args.follow_up_in_days) > 0) {
@@ -200,7 +202,10 @@ export const flowMacroTools: ToolDef[] = [
       // conversão costuma deixar a OS 'open', que agora vira 'scheduled' com ou sem técnico. O
       // vínculo do técnico não tem mais .catch() (o builder não tem: lançava TypeError com o status
       // já gravado e o passo saía ✖); erro nele vira aviso no passo, que fica ✔.
-      if (args.scheduled_start_at) {
+      if (args.scheduled_start_at && (soErr || !so?.status)) {
+        // Sem o status relido não há como decidir o status da OS: nada é gravado e o passo diz por quê.
+        passos.push({ passo: "agendamento", status: "✖", erro: "não consegui ler o status da OS depois da conversão; a data não foi gravada" });
+      } else if (args.scheduled_start_at) {
         try {
           const novoStatus = statusAoAgendar(String(so?.status ?? ""));
           const update: Record<string, unknown> = { scheduled_start_at: args.scheduled_start_at };

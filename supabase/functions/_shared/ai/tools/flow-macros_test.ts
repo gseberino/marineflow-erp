@@ -103,7 +103,7 @@ Deno.test("batch: lista vazia retorna erro claro", async () => {
 Deno.test("approve: fluxo completo (sinal+conversão, follow-up, agendamento) todos ✔", async () => {
   const client = fakeClient(
     {
-      service_orders: [{ service_order_number: "OS-1", client_id: "c1" }],
+      service_orders: [{ service_order_number: "OS-1", client_id: "c1", status: "open" }],
       app_users: [{ phone_normalized: "5547999", full_name: "Guga Seb" }],
       whatsapp_scheduled_sends: [],
       service_order_technicians: [],
@@ -164,20 +164,31 @@ Deno.test("approve: técnico é bloqueado", async () => {
 // PostgREST não tem .catch: a linha lançava TypeError com o status já gravado e o passo saía ✖.
 // O banco falso daqui grava as chamadas e, como o real, NÃO tem .catch.
 
-function bancoQueGrava(statusDepoisDaConversao: string, erroNoVinculo: string | null = null) {
+function bancoQueGrava(
+  statusDepoisDaConversao: string,
+  erroNoVinculo: string | null = null,
+  /** a releitura da OS depois da conversão falha (erro) ou não acha a linha (null) */
+  releitura: "ok" | "erro" | "vazia" = "ok",
+) {
   const updates: Record<string, unknown>[] = [];
   const upserts: Record<string, unknown>[] = [];
   const builders: Record<string, unknown>[] = [];
   const from = (tabela: string) => {
     let upd: Record<string, unknown> | null = null;
     let ups: Record<string, unknown> | null = null;
+    let colunas = "";
     const b: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "in", "neq", "order", "limit", "maybeSingle", "single", "insert"]) b[m] = () => b;
+    for (const m of ["eq", "in", "neq", "order", "limit", "maybeSingle", "single", "insert"]) b[m] = () => b;
+    b.select = (c?: string) => { colunas = c ?? ""; return b; };
     b.update = (p: Record<string, unknown>) => { upd = p; updates.push(p); return b; };
     b.upsert = (p: Record<string, unknown>) => { ups = p; upserts.push(p); return b; };
     b.then = (ok: (v: unknown) => unknown) => {
       if (ups && erroNoVinculo) return Promise.resolve({ data: null, error: { message: erroNoVinculo } }).then(ok);
       if (tabela === "service_orders" && !upd) {
+        // Só a releitura de depois da conversão (a que traz o status) falha; a leitura do saldo, antes, não.
+        const ehAReleitura = colunas.includes("status");
+        if (ehAReleitura && releitura === "erro") return Promise.resolve({ data: null, error: { message: "canceling statement due to statement timeout" } }).then(ok);
+        if (ehAReleitura && releitura === "vazia") return Promise.resolve({ data: null, error: null }).then(ok);
         return Promise.resolve({ data: { service_order_number: "OS-00120", client_id: "c1", status: statusDepoisDaConversao }, error: null }).then(ok);
       }
       return Promise.resolve({ data: tabela === "service_orders" ? null : [], error: null }).then(ok);
@@ -224,4 +235,28 @@ Deno.test("approve: erro ao vincular o técnico → passo ✔ com aviso (sem Typ
   assertEquals(passo.status_da_os, "scheduled");
   assertEquals(String(passo.aviso).includes("técnico não ficou vinculado"), true);
   assertEquals(out.ok, true);
+});
+
+// Revisão de 23/10/2026: a releitura da OS depois da conversão engolia o erro. Sem o status,
+// statusAoAgendar('') dava null: a data era gravada, a OS ficava 'open' e o passo saía ✔ calado — e
+// na rodada seguinte a R1 fechava a tarefa com "OS foi agendada" com a OS ainda Aberta.
+for (const releitura of ["erro", "vazia"] as const) {
+  Deno.test(`approve: releitura da OS ${releitura === "erro" ? "com erro" : "sem linha"} → agendamento ✖, nada gravado, conversão ✔`, async () => {
+    const b = bancoQueGrava("open", null, releitura);
+    const out: any = await approve.execute(pedido({ technician_user_id: "t1" }), ctx(b.client));
+    const passo = agendamento(out);
+    assertEquals(passo.status, "✖");
+    assertEquals(String(passo.erro).includes("não consegui ler o status da OS depois da conversão"), true);
+    assertEquals(b.updates.filter((u) => "scheduled_start_at" in u), []);
+    assertEquals(b.upserts, []);
+    assertEquals(out.passos[0].status, "✔"); // a conversão ficou (report-only)
+    assertEquals(out.ok, true);
+  });
+}
+
+Deno.test("approve: sem data pedida, a releitura com erro não inventa passo de agendamento", async () => {
+  const b = bancoQueGrava("open", null, "erro");
+  const out: any = await approve.execute(pedido({ scheduled_start_at: undefined }), ctx(b.client));
+  assertEquals(agendamento(out), undefined);
+  assertEquals(out.passos.map((p: any) => p.status), ["✔"]);
 });
