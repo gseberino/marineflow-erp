@@ -18,6 +18,7 @@ import { campoDaUnidade, nomeDaUnidade, TERMO_GERAL } from "../_shared/unidade.t
 import type { Familia, Secao, TipoDoItem } from "../_shared/secretario/tipos.ts";
 import { dataBR, diaBR, horaBR } from "../_shared/pdf/datas.ts";
 import { COM_PRESSA, ehClienteGenerico, PEDE_PRECO, pareceSoAgradecimento, pareceVendedor } from "../_shared/secretario/palavras.ts";
+import { STATUS_OS_ATIVAS } from "../_shared/service-order-status.ts";
 
 /** Os cortes do desenho aprovado, num lugar só. */
 export const REGRAS = {
@@ -178,6 +179,8 @@ export interface OsCrua {
   tipo_unidade?: string | null;
   mexido_em: string;
   agendada_em: string | null;
+  /** (23/10/2026) o fim da janela (scheduled_end_at); null/ausente = sem fim */
+  termina_em?: string | null;
   /** soma dos sinais pagos */
   sinal_pago: number;
   /** a tarefa de compra da R16 aberta (task-automations/rules.ts:632) */
@@ -195,7 +198,8 @@ export interface ColetaDoSecretario {
 
 // ─── Pedaços de texto ──────────────────────────────────────────────────────────────────────────
 
-const ATIVAS = new Set(["approved", "scheduled", "in_progress", "awaiting_parts", "open"]);
+// (23/10/2026, D11a) a mesma lista do resto do sistema, com o awaiting_client (a daqui o deixava de fora)
+const ATIVAS = new Set<string>(STATUS_OS_ATIVAS);
 
 function onde(...partes: Array<string | null | undefined>): string {
   const p = partes.map((x) => umaLinha(x, 24)).filter(Boolean);
@@ -581,8 +585,10 @@ export function candidatoDeOs(o: OsCrua, hoje: string): Candidato | null {
     fatoDaUnidade(o.barco, o.tipo_unidade),
     ["Valor", brl(o.valor)],
   ] as Array<[string, string | null]>).filter((f): f is [string, string] => !!f[1]);
+  // (23/10/2026, D11a) a OS que espera o cliente: quem trava é ele, não a compra (a R16 também não cobra compra dela)
+  const esperaCliente = o.status === "awaiting_client";
 
-  if (ativa && o.tarefa_compra && (o.sinal_pago > 0 || agendadaDia)) {
+  if (ativa && !esperaCliente && o.tarefa_compra && (o.sinal_pago > 0 || agendadaDia)) {
     const n = /Comprar (\d+) (item|itens)/.exec(o.tarefa_compra.titulo);
     const oQue = n ? `${n[1]} ${n[2]}` : "itens";
     const desde = diaBR(new Date(o.tarefa_compra.criada_em));
@@ -637,6 +643,10 @@ export function candidatoDeOs(o: OsCrua, hoje: string): Candidato | null {
     };
   }
   if (ativa && parada >= REGRAS.osParadaDias) {
+    // (23/10/2026, D11a) a OS em awaiting_client entra aqui, com o texto de quem trava: "esperando o cliente desde".
+    // O tipo continua os_parada (o CHECK resumo_itens_tipo_chk é lista fechada) e ela fica só na lista, como a parada.
+    // O "desde" é a última mudança da OS, a mesma régua da parada.
+    const estado = esperaCliente ? `esperando o cliente desde ${ddmm(mexido)}` : `parada desde ${ddmm(mexido)}`;
     return {
       ...base,
       tipo: "os_parada",
@@ -644,16 +654,21 @@ export function candidatoDeOs(o: OsCrua, hoje: string): Candidato | null {
       desde: new Date(o.mexido_em).toISOString(),
       perdeHoje: false,
       elegivel: false,
-      porqueNaoSobe: `Ficou na lista: parada há ${diasTexto(parada)} sem tarefa sua aberta.`,
-      titulo: `*${o.numero}*${onde(o.cliente, o.barco)}: parada desde ${ddmm(mexido)}.`,
-      curto: `${o.numero} ${quem}${onde(o.barco)}: parada desde ${ddmm(mexido)}`,
-      rotulo: `${o.numero} (${umaLinha(quem, 18)}, parada desde ${ddmm(mexido)})`,
+      porqueNaoSobe: esperaCliente
+        ? `Ficou na lista: esperando o cliente há ${diasTexto(parada)}.`
+        : `Ficou na lista: parada há ${diasTexto(parada)} sem tarefa sua aberta.`,
+      titulo: `*${o.numero}*${onde(o.cliente, o.barco)}: ${estado}.`,
+      curto: `${o.numero} ${quem}${onde(o.barco)}: ${estado}`,
+      // o "também" da lista corta em 60: com o texto mais longo, o nome encurta
+      rotulo: `${o.numero} (${umaLinha(quem, esperaCliente ? 14 : 18)}, ${estado})`,
       recomendacao: null,
       faco: "te mostro como ela está",
       alternativa: "até segunda",
-      motivo: `Parada há ${diasTexto(parada)}.`,
-      pedido: `Me mostre como está a ${o.numero} (${umaLinha(o.cliente || "sem cliente", 60)}): o que falta e o próximo passo.`,
-      fatos: [...fatosBase, ["Parada desde", dataBR(mexido)]],
+      motivo: esperaCliente ? `Esperando o cliente há ${diasTexto(parada)}.` : `Parada há ${diasTexto(parada)}.`,
+      pedido: esperaCliente
+        ? `Me mostre como está a ${o.numero} (${umaLinha(o.cliente || "sem cliente", 60)}): o que estamos esperando do cliente e o próximo passo.`
+        : `Me mostre como está a ${o.numero} (${umaLinha(o.cliente || "sem cliente", 60)}): o que falta e o próximo passo.`,
+      fatos: [...fatosBase, [esperaCliente ? "Esperando o cliente desde" : "Parada desde", dataBR(mexido)]],
     };
   }
   return null;

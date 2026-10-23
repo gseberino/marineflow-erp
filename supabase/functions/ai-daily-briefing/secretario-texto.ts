@@ -72,13 +72,16 @@ export function rotuloDoGrupo(g: GrupoDoDia): string {
   return g.pacote ? textosDoPacote(g.membros).rotulo : g.membros[0].c.rotulo;
 }
 
+/** Até quantos caracteres cada compromisso vai na linha "Hoje" (a coleta monta o da OS para caber nisso). */
+export const CORTE_DA_AGENDA_DE_HOJE = 40;
+
 /** "Hoje: …" — não passa pelo corte de itens. `curta` = sem a agenda detalhada nem a promessa por extenso. */
 export function linhaDeHoje(d: DadosDeHoje, curta = false): string {
   const partes: string[] = [];
   if (!d.agenda.length) partes.push("nada na agenda.");
   else if (curta) partes.push(`${plural(d.agenda.length, "compromisso", "compromissos")} na agenda.`);
   else {
-    const itens = d.agenda.slice(0, 3).map((a) => `${a.hora ? `${a.hora} ` : ""}${umaLinha(a.titulo, 40)}`);
+    const itens = d.agenda.slice(0, 3).map((a) => `${a.hora ? `${a.hora} ` : ""}${umaLinha(a.titulo, CORTE_DA_AGENDA_DE_HOJE)}`);
     partes.push(`${itens.join("; ")}${d.agenda.length > 3 ? ` (e mais ${d.agenda.length - 3})` : ""}.`);
   }
   if (d.promessas.length) {

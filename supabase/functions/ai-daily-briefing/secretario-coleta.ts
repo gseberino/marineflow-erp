@@ -12,16 +12,60 @@
 
 import { ultimoDiaDaValidade } from "../_shared/pdf/documento.ts";
 import { diaBR, horaBR } from "../_shared/pdf/datas.ts";
-import { somarDias } from "../_shared/secretario/base.ts";
+import { cruzaODia, filtroQueCruza, limitesDoDiaBR } from "../_shared/agenda-dia.ts";
+import { ddmm, somarDias, umaLinha } from "../_shared/secretario/base.ts";
+import { STATUS_OS_ATIVAS } from "../_shared/service-order-status.ts";
 import { contatoEncerrou, conversaEncerradaPeloContato, ULTIMAS_RECEBIDAS } from "../_shared/whatsapp/contato-encerrou.ts";
 import type { ColetaDoSecretario, ConversaCrua, OrcamentoCru, OsCrua } from "./secretario-candidatos.ts";
 import { adiadoPor, type PassagemDoHistorico } from "./secretario-selecao.ts";
-import type { DadosDeHoje, NaRua } from "./secretario-texto.ts";
+import { CORTE_DA_AGENDA_DE_HOJE, type DadosDeHoje, type NaRua } from "./secretario-texto.ts";
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
 
-const FUSO_BR = "-03:00";
+const ATIVAS = new Set<string>(STATUS_OS_ATIVAS);
+
+/** Uma OS lida para a agenda de um dia (o "Hoje" da manhã, o "Amanhã" da tarde). */
+export interface OsDaAgenda {
+  hora: string | null;
+  texto: string;
+  /** para ordenar junto das tarefas: o início da janela (a OS em curso vem antes de tudo do dia) */
+  ord: string;
+}
+
+/**
+ * As OS da agenda do dia [de, ate) — D4 da Agenda de Produção (23/10/2026): a OS de vários dias aparece em todo
+ * dia que a janela cruza, e não só no do início. Até aqui o "Hoje" e o "Amanhã" liam `scheduled_start_at` dentro
+ * do dia, e o 2º dia de uma obra de três saía "nada na agenda" / "agenda livre".
+ *
+ *   · começa no dia: com a hora ("09:00 OS-00120 (Brisa)");
+ *   · começou antes e ainda não acabou: sem hora, "OS-00104 (Itapoã), em curso desde 06/10" — só se ainda está
+ *     em andamento (status ativo): a concluída, a faturada ou o orçamento com data não estão "em curso".
+ *
+ * `linhas` vem do `.lt('scheduled_start_at', ate).or(filtroQueCruza(de))`; a interseção é conferida de novo aqui com
+ * a mesma regra (cruzaODia), que também decide o "começou antes". `max` = o corte do item na linha onde ele vai:
+ * o nome do barco encurta primeiro, o "em curso desde" nunca.
+ */
+export function osDaAgenda(linhas: Array<Record<string, unknown>>, de: string, ate: string, max: number): OsDaAgenda[] {
+  const r: OsDaAgenda[] = [];
+  for (const o of linhas) {
+    const ini = o.scheduled_start_at as string | null;
+    if (!cruzaODia(ini, o.scheduled_end_at as string | null, de, ate)) continue;
+    const antes = Date.parse(String(ini)) < Date.parse(de);
+    if (antes && !ATIVAS.has(String(o.status))) continue;
+    const numero = String(o.service_order_number);
+    const fim = antes ? `, em curso desde ${ddmm(diaBR(new Date(String(ini))))}` : "";
+    // " (" + ")" = 3; com menos de 4 letras para o barco, ele sai
+    const espaco = max - numero.length - fim.length - 3;
+    const barco = nomeDe(o.vessels);
+    r.push({
+      hora: antes ? null : horaBR(new Date(String(ini))),
+      texto: `${numero}${barco && espaco >= 4 ? ` (${umaLinha(barco, espaco)})` : ""}${fim}`,
+      ord: String(ini),
+    });
+  }
+  return r;
+}
 
 /** O que o resumo de hoje já leu e a coleta reaproveita. */
 export interface DoResumoDeHoje {
@@ -85,8 +129,7 @@ export async function coletar(admin: Admin, p: {
 }): Promise<{ coleta: ColetaDoSecretario; naRua: NaRua; deHoje: DadosDeHoje; historico: PassagemDoHistorico[] }> {
   const { agora, hoje, dono } = p;
   const amanha = somarDias(hoje, 1);
-  const inicioDoDia = new Date(`${hoje}T00:00:00${FUSO_BR}`).toISOString();
-  const fimDoDia = new Date(new Date(inicioDoDia).getTime() + 86_400_000).toISOString();
+  const { de: inicioDoDia, ate: fimDoDia } = limitesDoDiaBR(hoje);
   const desdeAs20 = new Date(new Date(inicioDoDia).getTime() - 4 * 3_600_000).toISOString();
   const seteDias = new Date(agora.getTime() - 7 * 86_400_000).toISOString();
 
@@ -223,10 +266,14 @@ export async function coletar(admin: Admin, p: {
 
   // ── OS: ativas (index.ts:133-139, sem o corte de 10 dias) e concluídas nos últimos 60 dias (a "concluída
   //    sem cobrança" é coisa recente; sem o corte, a lista de ids do .in() abaixo cresceria sem fim) ──
-  const colunasDaOs = "id, service_order_number, status, grand_total, client_id, updated_at, scheduled_start_at, clients(name, display_name), vessels(name, asset_type)";
+  // (23/10/2026, D11a) "ativas" = STATUS_OS_ATIVAS, a mesma lista do resto do sistema: a daqui deixava de fora o
+  // awaiting_client, e as OS paradas no cliente (OS-00032, 33 e 76, de 24 a 76 dias) sumiam da manhã.
+  // O fim da janela vem junto: o "Amanhã" separa a OS com data passada da que ainda está em curso.
+  const colunasDaOs =
+    "id, service_order_number, status, grand_total, client_id, updated_at, scheduled_start_at, scheduled_end_at, clients(name, display_name), vessels(name, asset_type)";
   const [ativasLidas, concluidasLidas] = await Promise.all([
     admin.from("service_orders").select(colunasDaOs)
-      .in("status", ["approved", "scheduled", "in_progress", "awaiting_parts", "open"])
+      .in("status", [...STATUS_OS_ATIVAS])
       .order("updated_at", { ascending: false }).limit(200),
     admin.from("service_orders").select(colunasDaOs)
       .eq("status", "completed").gte("updated_at", new Date(agora.getTime() - 60 * 86_400_000).toISOString())
@@ -261,6 +308,7 @@ export async function coletar(admin: Admin, p: {
       tipo_unidade: tipoDe(o.vessels),
       mexido_em: String(o.updated_at),
       agendada_em: (o.scheduled_start_at as string | null) ?? null,
+      termina_em: (o.scheduled_end_at as string | null) ?? null,
       sinal_pago: recs.filter((r) => r.is_deposit === true && r.status === "paid").reduce((s, r) => s + Number(r.amount || 0), 0),
       tarefa_compra: compraPorOs.get(String(o.id)) ?? null,
       cobrancas_vivas: recs.filter((r) => r.status !== "cancelled").length,
@@ -337,8 +385,10 @@ export async function coletar(admin: Admin, p: {
       admin.from("agenda_tasks").select("id, title, scheduled_start_at, due_at, source")
         .eq("assignee_user_id", dono.id).in("status", ["pending", "in_progress"])
         .gte("due_at", inicioDoDia).lt("due_at", fimDoDia).limit(50),
-      admin.from("service_orders").select("service_order_number, scheduled_start_at, vessels(name)")
-        .gte("scheduled_start_at", inicioDoDia).lt("scheduled_start_at", fimDoDia).neq("status", "cancelled").limit(20),
+      // (23/10/2026, D4) a OS que CRUZA o dia, não só a que começa nele: a de ontem a amanhã também é de hoje
+      admin.from("service_orders").select("service_order_number, status, scheduled_start_at, scheduled_end_at, vessels(name)")
+        .lt("scheduled_start_at", fimDoDia).or(filtroQueCruza(inicioDoDia)).neq("status", "cancelled")
+        .order("scheduled_start_at", { ascending: true }).limit(20),
     ]);
     const tarefas = new Map<string, Record<string, unknown>>();
     for (const t of [...ou(comHoraHoje, "agenda") as Array<Record<string, unknown>>, ...ou(comPrazoHoje, "agenda") as Array<Record<string, unknown>>]) {
@@ -355,9 +405,8 @@ export async function coletar(admin: Admin, p: {
       if (!comHora && t.source === "automation") continue;
       itens.push({ hora: comHora ? horaBR(new Date(comHora)) : null, titulo: String(t.title), ord: comHora ?? String(t.due_at ?? "") });
     }
-    for (const o of ou(agendadas, "OS agendadas") as Array<Record<string, unknown>>) {
-      const barco = nomeDe(o.vessels);
-      itens.push({ hora: horaBR(new Date(String(o.scheduled_start_at))), titulo: `${o.service_order_number}${barco ? ` (${barco})` : ""}`, ord: String(o.scheduled_start_at) });
+    for (const o of osDaAgenda(ou(agendadas, "OS agendadas") as Array<Record<string, unknown>>, inicioDoDia, fimDoDia, CORTE_DA_AGENDA_DE_HOJE)) {
+      itens.push({ hora: o.hora, titulo: o.texto, ord: o.ord });
     }
     deHoje.agenda = itens.sort((a, b) => a.ord.localeCompare(b.ord)).map(({ hora, titulo }) => ({ hora, titulo }));
   } catch (e) {

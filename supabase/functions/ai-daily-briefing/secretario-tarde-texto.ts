@@ -6,7 +6,7 @@
 //   *B.* <a linha curta de agora>. *B* = <faço> · *B espera* = <alternativa>
 //   …
 //
-//   Amanhã (sexta, 16/10): <agenda e compra que precisa sair> | agenda livre.
+//   Amanhã (sexta, 16/10): <agenda e compra que precisa sair> | nada marcado; 6 OS aprovadas sem data | agenda livre.
 //   Fornecedores esperando há mais de 1 dia: <nomes>.
 //   Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja; uns 25 min. *escritório*
 //   (sexta) Esta semana o resumo ajudou? Responda *ajudou*, *pouco* ou *atrapalhou*.
@@ -73,6 +73,23 @@ export interface DiaDeAmanha {
   itens: Array<{ hora: string | null; texto: string }>;
   /** (16/10/2026, F3) contas a pagar que vencem até `dia` (depois de hoje): quantas e o total. Ausente = não leu */
   pagar?: { n: number; total: number } | null;
+  /**
+   * (23/10/2026, D11b) A carteira: quantas OS ativas (fora as que esperam o cliente) não têm data, ou têm data que já
+   * passou. É o trabalho que existe e não está em dia nenhum. Ausente ou null = não leu.
+   */
+  carteira?: { semData: number } | null;
+}
+
+/** Até quantos caracteres cada item vai na linha "Amanhã" (a coleta monta o da OS para caber nisso). */
+export const CORTE_DO_ITEM_DE_AMANHA = 50;
+
+/**
+ * O "Amanhã" sem nada marcado. "agenda livre" SÓ quando a carteira foi lida e não há OS sem data: até 23/10/2026 a
+ * frase saía sempre, e era falsa — o trabalho de verdade estava nas OS aprovadas sem data (6 delas nesse dia).
+ */
+function semNadaMarcado(c: DiaDeAmanha["carteira"]): string {
+  if (!c) return "nada marcado";
+  return c.semData > 0 ? `nada marcado; ${plural(c.semData, "OS aprovada sem data", "OS aprovadas sem data")}` : "agenda livre";
 }
 
 /** "Amanhã (sexta, 16/10): 08:00 OS-00112 (Santo Inácio 7.8); comprar 4 itens da OS-00112." */
@@ -82,8 +99,8 @@ export function linhaDeAmanha(hoje: string, a: DiaDeAmanha): string {
     : `${nomeDoDia(a.dia)} (${ddmm(a.dia)})`;
   // F3 (16/10/2026): a conta a pagar que vence até a próxima manhã
   const pagar = a.pagar && a.pagar.n > 0 ? `; a pagar: ${plural(a.pagar.n, "conta", "contas")}, ${brl(a.pagar.total)}` : "";
-  if (!a.itens.length) return `${rotulo}: agenda livre${pagar}.`;
-  const itens = a.itens.slice(0, 3).map((i) => `${i.hora ? `${i.hora} ` : ""}${umaLinha(i.texto, 50)}`);
+  if (!a.itens.length) return `${rotulo}: ${semNadaMarcado(a.carteira)}${pagar}.`;
+  const itens = a.itens.slice(0, 3).map((i) => `${i.hora ? `${i.hora} ` : ""}${umaLinha(i.texto, CORTE_DO_ITEM_DE_AMANHA)}`);
   return `${rotulo}: ${itens.join("; ")}${a.itens.length > 3 ? ` (e mais ${a.itens.length - 3})` : ""}${pagar}.`;
 }
 
@@ -269,6 +286,7 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean): TextoDaTarde {
   const topo = topoDaTarde(d, curto);
   // (16/10/2026) guardado (fora o do escritório), quem está sem resposta desde hoje e a conta a pagar de amanhã contam
   // como "há algo": sem isso, "só se houver algo" viraria descarte do guardado (spec uma voz §6.3-1)
+  // (23/10/2026) a carteira sem data NÃO conta: ela existe quase todo dia, e o fechamento passaria a sair sempre
   const temAlgo = d.ficaram.length > 0 || (d.amanha?.itens.length ?? 0) > 0 || (d.amanha?.pagar?.n ?? 0) > 0 ||
     d.fornecedores.length > 0 || d.pergunta || topo.length > 0;
   if (!temAlgo) return { texto: null, letras: [] };

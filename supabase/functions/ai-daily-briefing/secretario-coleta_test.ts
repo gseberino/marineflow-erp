@@ -1,7 +1,9 @@
 // A coleta da manhã nova com um PostgREST de mentira (os filtros rodam de verdade sobre linhas em memória):
 // o que cada leitura traz, como vira candidato cru, e o que acontece quando uma leitura falha.
 import { assert, assertEquals, assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { candidatosDoDia } from "./secretario-candidatos.ts";
 import { coletar } from "./secretario-coleta.ts";
+import { CORTE_DA_AGENDA_DE_HOJE } from "./secretario-texto.ts";
 
 type Linha = Record<string, unknown>;
 const AGORA = new Date("2026-10-15T10:30:00Z"); // 07:30 de Brasília
@@ -34,17 +36,28 @@ function falsoAdmin(tabelas: Record<string, Linha[]>, falhar: string[] = [], sel
         },
         // só o que a coleta usa: "col.ilike.*x*,col.ilike.*y*"
         // "col.ilike.*x*", "col.like.*x" e "col.in.(a,b)", separados por vírgula (o que a coleta usa)
+        // (23/10/2026) + "col.gte.x", "col.is.null" e "and(a,b)": o filtroQueCruza da agenda do dia
         or: (expr: string) => {
-          const partes = expr.match(/\w+\.in\.\([^)]*\)|[^,]+/g) ?? [];
-          const regras = partes.map((s) => {
+          const regra = (s: string): (l: Linha) => boolean => {
+            const e = /^and\((.*)\)$/.exec(s);
+            if (e) {
+              const todas = e[1].split(",").map(regra);
+              return (l) => todas.every((r) => r(l));
+            }
             const em = /^(\w+)\.in\.\((.*)\)$/.exec(s);
-            if (em) return { c: em[1], ok: (v: unknown) => em[2].split(",").includes(String(v)) };
+            if (em) return (l) => em[2].split(",").includes(String(valor(l, em[1])));
+            const nulo = /^(\w+)\.is\.null$/.exec(s);
+            if (nulo) return (l) => (valor(l, nulo[1]) ?? null) === null;
+            const ge = /^(\w+)\.gte\.(.*)$/.exec(s);
+            if (ge) return (l) => valor(l, ge[1]) != null && Date.parse(String(valor(l, ge[1]))) >= Date.parse(ge[2]);
             const m = /^(\w+)\.(i?like)\.(.*)$/.exec(s)!;
             // o % do LIKE casa quebra de linha também
             const re = new RegExp(`^${m[3].replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[\\s\\S]*")}$`, m[2] === "ilike" ? "iu" : "u");
-            return { c: m[1], ok: (v: unknown) => re.test(String(v ?? "")) };
-          });
-          linhas = linhas.filter((l) => regras.some((r) => r.ok(valor(l, r.c))));
+            return (l) => re.test(String(valor(l, m[1]) ?? ""));
+          };
+          const partes = expr.match(/and\([^)]*\)|\w+\.in\.\([^)]*\)|[^,]+/g) ?? [];
+          const regras = partes.map(regra);
+          linhas = linhas.filter((l) => regras.some((r) => r(l)));
           return q;
         },
         not: (c: string, op: string, v: unknown) => ((linhas = linhas.filter((l) => !(op === "is" && (valor(l, c) ?? null) === v))), q),
@@ -171,7 +184,7 @@ Deno.test("o tipo da unidade vem junto do nome (cobrança, orçamento e OS); sem
   const pedemTipo = pedemUnidade.filter((s) => s.includes("vessels(name, asset_type)"));
   assert(pedemTipo.some((s) => s.startsWith("receivables:")), "cobranças pedem o tipo");
   assertEquals(pedemTipo.filter((s) => s.startsWith("service_orders:") && s.includes("quote_status")).length, 1, "orçamentos pedem o tipo");
-  assertEquals(pedemTipo.filter((s) => s.startsWith("service_orders:") && s.includes("scheduled_start_at, clients")).length, 2, "OS ativas e concluídas pedem o tipo");
+  assertEquals(pedemTipo.filter((s) => s.startsWith("service_orders:") && s.includes("scheduled_end_at, clients")).length, 2, "OS ativas e concluídas pedem o tipo");
 });
 
 Deno.test("orçamentos: rascunho sem validade; enviado com o 'até' do PDF (criado + dias)", async () => {
@@ -274,6 +287,57 @@ Deno.test("linha Hoje: agenda de Brasília (sem a tarefa da automação nem a de
     { lado: "pagar", quando: "hoje", valor: 785.07, nome: "TSD" },
   ]);
   assertEquals([deHoje.falhasDeEnvio, deHoje.errosDaNoite], [1, 1]);
+});
+
+// ─── (23/10/2026) Agenda de Produção, Fase 0: D11a e D4 no "Hoje" ──────────────────────────────────
+Deno.test("D11a: a OS esperando o cliente entra nas ativas (STATUS_OS_ATIVAS) e vira 'esperando o cliente desde' na lista", async () => {
+  const t = banco();
+  t.service_orders.push(
+    { id: "o-76", service_order_number: "OS-00076", status: "awaiting_client", grand_total: 740, client_id: "c-rodrigo", updated_at: "2026-08-08T21:31:38Z",
+      scheduled_start_at: null, scheduled_end_at: null, clients: { name: "Rodrigo" }, vessels: { name: "MH Overlander - VW Delivery", asset_type: "Motorhome" } },
+  );
+  const { coleta } = await rodar(t);
+  const o76 = coleta.oss.find((o) => o.numero === "OS-00076");
+  assert(o76, "a leitura das ativas traz o awaiting_client");
+  assertEquals([o76.status, o76.agendada_em, o76.termina_em], ["awaiting_client", null, null]);
+  const c = candidatosDoDia(coleta, AGORA, HOJE).find((x) => x.referencia === "os:o-76")!;
+  assertEquals([c.tipo, c.elegivel], ["os_parada", false]);
+  assertEquals(c.titulo, "*OS-00076* (Rodrigo, MH Overlander - VW Deli…): esperando o cliente desde 08/08.");
+});
+
+Deno.test("D4: o 'Hoje' traz a OS que começou ontem e termina amanhã (sem hora, 'em curso desde'), não a encerrada nem a que acabou", async () => {
+  const t = banco();
+  const os = (id: string, numero: string, status: string, ini: string | null, fim: string | null, barco: string) => ({
+    id, service_order_number: numero, status, grand_total: 1000, client_id: "c-w", updated_at: "2026-10-14T12:00:00Z",
+    scheduled_start_at: ini, scheduled_end_at: fim, clients: { name: "W" }, vessels: { name: barco },
+  });
+  t.service_orders.push(
+    // de ontem 08:00 a amanhã 18:00: é de hoje também
+    os("o-121", "OS-00121", "in_progress", "2026-10-14T11:00:00Z", "2026-10-16T21:00:00Z", "Maré"),
+    // o barco de nome longo encurta; o "em curso desde" nunca
+    os("o-126", "OS-00126", "awaiting_parts", "2026-10-13T12:00:00Z", "2026-10-20T21:00:00Z", "Santo Inácio 7.8"),
+    // concluída antes do fim da janela: não está "em curso"
+    os("o-122", "OS-00122", "completed", "2026-10-13T11:00:00Z", "2026-10-16T21:00:00Z", "Vento"),
+    // orçamento com data: não está "em curso"
+    os("q-124", "ORÇ-00124", "draft", "2026-10-14T11:00:00Z", "2026-10-16T21:00:00Z", "Onda"),
+    // acabou ontem às 18:00: não é de hoje
+    os("o-123", "OS-00123", "scheduled", "2026-10-13T11:00:00Z", "2026-10-14T21:00:00Z", "Rio"),
+    // começou antes e não tem fim: vale só o início (ontem), não é de hoje
+    os("o-127", "OS-00127", "open", "2026-10-14T11:00:00Z", null, "Lago"),
+    // termina à meia-noite exata de hoje: não toca hoje
+    os("o-128", "OS-00128", "scheduled", "2026-10-14T11:00:00Z", "2026-10-15T03:00:00Z", "Mar"),
+  );
+  const selects: string[] = [];
+  const { deHoje } = await rodar(t, [], selects);
+  assertEquals(deHoje.agenda, [
+    { hora: null, titulo: "OS-00126 (Santo…), em curso desde 13/10" },
+    { hora: null, titulo: "OS-00121 (Maré), em curso desde 14/10" },
+    { hora: "09:00", titulo: "OS-00120 (Brisa)" },
+    { hora: "14:00", titulo: "Ligar para o Rafael" },
+    { hora: null, titulo: "Mandar a NF da Charline" },
+  ]);
+  assert(deHoje.agenda.every((a) => a.titulo.length <= CORTE_DA_AGENDA_DE_HOJE), "cabe no corte da linha Hoje");
+  assert(selects.some((s) => s.startsWith("service_orders: service_order_number, status, scheduled_start_at, scheduled_end_at")), "a leitura do dia pede o fim da janela");
 });
 
 Deno.test("histórico: só o mesmo modo e sem o dia de hoje", async () => {

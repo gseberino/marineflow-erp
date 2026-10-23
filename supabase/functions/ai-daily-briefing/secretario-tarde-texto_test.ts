@@ -51,7 +51,8 @@ Deno.test("fechamento: abertura, itens com a letra da manhã e a resposta, amanh
     "*B.* 2 orçamentos montados, não enviados (R$ 141 mil): ORÇ-00117, ORÇ-00118. *B* = te mostro a lista · *B espera* = até segunda",
     "*C.* Marcelo B. (OS-00038): R$ 16.890,00, venceu 13/10 (2 dias); ainda não entrou. *C* = te mostro o lembrete pronto · *C espera* = até segunda",
     "",
-    "Amanhã (sexta, 16/10): agenda livre.",
+    // (23/10/2026) o dados() padrão não traz a carteira: sem ela lida, não se afirma "livre"
+    "Amanhã (sexta, 16/10): nada marcado.",
     "Fornecedores esperando há mais de 1 dia: SR Contabilidade.",
     "Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja; uns 30 min. *escritório*",
   ]);
@@ -61,7 +62,8 @@ Deno.test("fechamento: abertura, itens com a letra da manhã e a resposta, amanh
 
 Deno.test("fechamento: só se houver algo — o escritório sozinho não manda mensagem; a pergunta da sexta manda", () => {
   assertEquals(textoDaTarde(dados()).texto, null);
-  const sexta = textoDaTarde(dados({ hoje: "2026-10-16", amanha: { dia: "2026-10-17", itens: [] }, pergunta: true })).texto!;
+  // a carteira lida e sem OS sem data: aí sim "agenda livre"
+  const sexta = textoDaTarde(dados({ hoje: "2026-10-16", amanha: { dia: "2026-10-17", itens: [], carteira: { semData: 0 } }, pergunta: true })).texto!;
   assertStringIncludes(sexta, "Fechamento de sexta, 16/10: nada ficou de hoje.");
   assertStringIncludes(sexta, "Amanhã (sábado, 17/10): agenda livre.");
   assert(sexta.endsWith(PERGUNTA_DA_SEMANA));
@@ -171,12 +173,15 @@ Deno.test("o corte duro de 1.000 caracteres: as linhas encurtam primeiro", () =>
 
 // ─── (16/10/2026) F1, F3, o guardado e o escritório do portão ───────────────────────────────────
 Deno.test("F3: o 'Amanhã' traz a conta a pagar (quantas e o total) e ela sozinha já é 'algo'", () => {
-  assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [], pagar: { n: 1, total: 785.07 } }),
+  assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [], pagar: { n: 1, total: 785.07 }, carteira: { semData: 0 } }),
     "Amanhã (sexta, 16/10): agenda livre; a pagar: 1 conta, R$ 785,07.");
+  assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [], pagar: { n: 1, total: 785.07 }, carteira: { semData: 6 } }),
+    "Amanhã (sexta, 16/10): nada marcado; 6 OS aprovadas sem data; a pagar: 1 conta, R$ 785,07.");
   assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [{ hora: "08:00", texto: "OS-00112 (Santo Inácio 7.8)" }], pagar: { n: 2, total: 1234 } }),
     "Amanhã (sexta, 16/10): 08:00 OS-00112 (Santo Inácio 7.8); a pagar: 2 contas, R$ 1.234,00.");
-  assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [], pagar: { n: 0, total: 0 } }), "Amanhã (sexta, 16/10): agenda livre.");
-  assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [] }), "Amanhã (sexta, 16/10): agenda livre.", "sem ler = como antes");
+  assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [], pagar: { n: 0, total: 0 }, carteira: { semData: 0 } }), "Amanhã (sexta, 16/10): agenda livre.");
+  // (23/10/2026) sem a carteira lida não se afirma "livre"
+  assertEquals(linhaDeAmanha("2026-10-15", { dia: "2026-10-16", itens: [] }), "Amanhã (sexta, 16/10): nada marcado.", "sem ler a carteira = nada marcado");
   const t = textoDaTarde(dados({ amanha: { dia: "2026-10-16", itens: [], pagar: { n: 1, total: 785.07 } } }));
   assert(t.texto, "a conta de amanhã tira o dia do calado");
   assertEquals(textoDaTarde(dados()).texto, null, "sem nada, calado como antes");
@@ -196,7 +201,7 @@ Deno.test("F1: 'Sem resposta desde hoje' com até N nomes, o acorde do portão e
     "Fechamento de quinta, 15/10: nada ficou de hoje.",
     "Sem resposta desde hoje: Giancarlo S. (10:31).",
     "",
-    "Amanhã (sexta, 16/10): agenda livre.",
+    "Amanhã (sexta, 16/10): nada marcado.",
     "Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja; uns 30 min. *escritório*",
   ].join("\n"));
   assert(!PROIBIDAS.test(t.texto!) && !EMOJI.test(t.texto!));
@@ -212,7 +217,7 @@ Deno.test("guardado: 'Não te interrompi com' no topo; o do escritório na linha
     "Fechamento de quinta, 15/10: nada ficou de hoje.",
     'Não te interrompi com: promessa sua a Eng. Rafael B. (Dometic): "Claro, te passo agora!".',
     "",
-    "Amanhã (sexta, 16/10): agenda livre.",
+    "Amanhã (sexta, 16/10): nada marcado.",
     "Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja, e o saldo do banco C6 não bate com o sistema (R$ 12,30 de diferença); uns 30 min. *escritório*",
   ].join("\n"));
   // só o escritório guardado: continua calado (a papelada sozinha não dispara a mensagem)
@@ -228,16 +233,45 @@ Deno.test("guardado: 'Não te interrompi com' no topo; o do escritório na linha
 // (16/10/2026, correção do coordenador) A revisão de segunda também traz o "Amanhã" (com o a pagar do F3).
 Deno.test("revisão da semana: a linha 'Amanhã' (a terça) com o a pagar, antes do panorama", () => {
   const t = textoDaTarde(dados({
-    hoje: "2026-10-19", turno: "revisao_semana", amanha: { dia: "2026-10-20", itens: [], pagar: { n: 1, total: 785.07 } },
+    // (23/10/2026) com a carteira de 23/10: 6 OS aprovadas sem data
+    hoje: "2026-10-19", turno: "revisao_semana", amanha: { dia: "2026-10-20", itens: [], pagar: { n: 1, total: 785.07 }, carteira: { semData: 6 } },
     panorama: { mes: null, vigia: null, semana: { entra: 0, nEntra: 0, sai: 785.07, nSai: 1, ate: "2026-10-25" } },
   }));
   assertEquals(t.texto, [
     "Revisão da semana, segunda, 19/10. Nada parado.",
     "",
-    "Amanhã (terça, 20/10): agenda livre; a pagar: 1 conta, R$ 785,07.",
+    "Amanhã (terça, 20/10): nada marcado; 6 OS aprovadas sem data; a pagar: 1 conta, R$ 785,07.",
     "Semana até domingo (25/10): a receber nada; a pagar R$ 785 (1 conta) — sai mais do que entra.",
   ].join("\n"));
   // sem a leitura do "Amanhã" (null), a revisão é a de antes
   const sem = textoDaTarde(dados({ hoje: "2026-10-19", turno: "revisao_semana", amanha: null, panorama: null }));
   assertEquals(sem.texto, "Revisão da semana, segunda, 19/10. Nada parado.");
+});
+
+// ─── (23/10/2026) D11b: "agenda livre" só com a carteira lida e sem OS sem data ─────────────────────
+// Até 23/10 o "Amanhã" dizia "agenda livre" sempre que nada estava marcado — e havia 6 OS aprovadas sem data.
+Deno.test("D11b: nada marcado amanhã — 'agenda livre' só com a carteira lida e vazia; com OS sem data, quantas", () => {
+  const amanha = (carteira: { semData: number } | null | undefined) => linhaDeAmanha("2026-10-22", { dia: "2026-10-23", itens: [], carteira });
+  assertEquals(amanha({ semData: 6 }), "Amanhã (sexta, 23/10): nada marcado; 6 OS aprovadas sem data.");
+  assertEquals(amanha({ semData: 1 }), "Amanhã (sexta, 23/10): nada marcado; 1 OS aprovada sem data.");
+  assertEquals(amanha({ semData: 0 }), "Amanhã (sexta, 23/10): agenda livre.");
+  assertEquals(amanha(null), "Amanhã (sexta, 23/10): nada marcado.");
+  assertEquals(amanha(undefined), "Amanhã (sexta, 23/10): nada marcado.");
+  // com algo marcado, a carteira não entra na linha
+  assertEquals(linhaDeAmanha("2026-10-22", { dia: "2026-10-23", itens: [{ hora: null, texto: "OS-00112 (Santo Inácio 7.8), em curso desde 13/10" }], carteira: { semData: 6 } }),
+    "Amanhã (sexta, 23/10): OS-00112 (Santo Inácio 7.8), em curso desde 13/10.");
+});
+
+Deno.test("D11b: a carteira sem data sozinha não tira o fechamento do calado; na mensagem longa, cabe no corte de 1.000", () => {
+  assertEquals(textoDaTarde(dados({ amanha: { dia: "2026-10-16", itens: [], carteira: { semData: 6 } } })).texto, null);
+  const longo = "y".repeat(300);
+  const t = textoDaTarde(dados({
+    ficaram: ["B", "C", "D"].map((l) => linha(l, `${l} ${longo}`)),
+    amanha: { dia: "2026-10-16", itens: [], pagar: { n: 2, total: 1234 }, carteira: { semData: 6 } },
+    fornecedores: ["SR Contabilidade", "Kamell", "Dometic"],
+    pergunta: true,
+  })).texto!;
+  assert(t.length <= LIMITE_DA_TARDE, `${t.length}`);
+  assertStringIncludes(t, "Amanhã (sexta, 16/10): nada marcado; 6 OS aprovadas sem data; a pagar: 2 contas, R$ 1.234,00.");
+  assert(!t.includes("agenda livre"));
 });

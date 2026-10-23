@@ -117,8 +117,44 @@ Deno.test("sombra: grava com enviado=false e formato sombra (nunca envia), com a
   assertEquals([p.turno, p.formato, p.modo, p.enviado, p.calado, p.dia, p.phone, p.tentativa], ["fechamento", "sombra", "sombra", false, false, HOJE, DONO.phone, 1]);
   assert(String(p.texto).startsWith("Fechamento de quinta, 15/10: nada ficou de hoje."), String(p.texto));
   assert(String(p.texto).includes("Fornecedores esperando há mais de 1 dia: SR Contabilidade."));
+  // (23/10/2026) a carteira foi lida e não tem OS: aí "agenda livre" é verdade
+  assert(String(p.texto).includes("Amanhã (sexta, 16/10): agenda livre."), String(p.texto));
   // nada vai para a fila nem para o histórico do assistente
   assertEquals(f.inseridas.length, 0);
+});
+
+// ─── (23/10/2026) Aceite da Fase 0 da Agenda de Produção (P4, D11b) ──────────────────────────────
+// A carteira ativa de 23/10/2026 como estava no banco (SELECT; ids de mentira): 9 OS, 3 delas esperando o cliente
+// (OS-00032/33/76, fora da conta), 5 sem data e a OS-00104 com a janela de 06–08/10, que já passou. Antes, o fechamento
+// dizia "agenda livre" com isso tudo parado.
+const CARTEIRA_2310: Linha[] = [
+  ["OS-00096", "approved", 628.9, "Rodrigo", "MH Overlander - VW Delivery", "2026-10-16T18:57:04Z", null, null],
+  ["OS-00032", "awaiting_client", 12500, "KALMAR PERSONAL BOATS", "CAT-33-PAMPLONA", "2026-09-23T12:18:49Z", null, null],
+  ["OS-00033", "awaiting_client", 10500, "KALMAR PERSONAL BOATS", "CAT-33-PAMPLONA", "2026-09-29T22:12:54Z", "2026-05-25T08:30:00Z", "2026-05-29T17:00:00Z"],
+  ["OS-00076", "awaiting_client", 740, "Rodrigo", "MH Overlander - VW Delivery", "2026-08-08T21:31:38Z", null, null],
+  ["OS-00104", "awaiting_parts", 2760, "Flávio da Igreja", "Itapoã", "2026-10-03T23:25:20Z", "2026-10-06T09:00:00Z", "2026-10-08T21:00:00Z"],
+  ["OS-00112", "awaiting_parts", 10500, "Nelson", "Santo Inácio 7.8", "2026-10-13T13:10:15Z", null, null],
+  ["OS-00069", "open", 9008.99, "Vanderlei Andrade", "Santo Inácio 6.9", "2026-10-03T23:25:20Z", null, null],
+  ["OS-00074", "open", 4560, "LENINE LORI BROCCA", "MARCO POLO - VOLVO", "2026-10-13T13:11:38Z", null, null],
+  ["OS-00100", "open", 5739, "Giancarlo Ribeiro dos Santos", "Vitória Star", "2026-10-13T13:57:07Z", null, null],
+].map(([numero, status, total, cliente, barco, mexido, ini, fim]) => ({
+  id: `o-${String(numero).slice(-3)}`, service_order_number: numero, status, grand_total: total, client_id: `c-${String(numero).slice(-3)}`,
+  updated_at: mexido, scheduled_start_at: ini, scheduled_end_at: fim, clients: { name: cliente }, vessels: { name: barco, asset_type: "Motorhome" },
+}));
+
+Deno.test("aceite (P4): o fechamento de amostra com a carteira real não diz 'agenda livre' — diz quantas OS estão sem data", async () => {
+  const b: Record<string, Linha[]> = { ...banco(), service_orders: CARTEIRA_2310 };
+  const f = falsoAdmin(b, RPCS);
+  await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  const texto = String(registrar(f.chamadas)!.texto);
+  assert(!texto.includes("agenda livre"), texto);
+  // 9 ativas − 3 esperando o cliente = 6 (a OS-00104, de 06–08/10, tem a data no passado)
+  assert(texto.includes("Amanhã (sexta, 16/10): nada marcado; 6 OS aprovadas sem data."), texto);
+  assert(texto.length <= 1000, `${texto.length}`);
+  // a revisão de segunda também
+  const seg = falsoAdmin(b, RPCS);
+  const r = await rodarTurnoDaTarde(seg.admin, { agora: new Date("2026-10-15T14:00:00Z"), pedido: "revisao_semana", dry: true });
+  assert(String(r.corpo.texto).includes("nada marcado; 6 OS aprovadas sem data"), String(r.corpo.texto));
 });
 
 Deno.test("ligado com a manhã-sombra: rebaixa (grava sem enviar)", async () => {

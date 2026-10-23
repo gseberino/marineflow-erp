@@ -190,6 +190,52 @@ Deno.test("valor aberto do cliente (orçamento ou OS ativa) entra na ordem do cl
   assertEquals(v.get("c-final"), undefined, "cadastro genérico não empresta valor a uma conversa");
 });
 
+// ─── (23/10/2026) D11a: a OS que espera o cliente ─────────────────────────────────────────────────
+// A carteira de 23/10/2026: OS-00032 e OS-00033 (Kalmar, 30 e 24 dias) e OS-00076 (Rodrigo, 76 dias) estão em
+// awaiting_client e a manhã não as via (a lista de "ativas" do Secretário não tinha o status).
+Deno.test("D11a: awaiting_client vira os_parada com 'esperando o cliente desde', só na lista", () => {
+  const c = candidatoDeOs(os({
+    id: "o-32", numero: "OS-00032", status: "awaiting_client", valor: 12500, client_id: "c-kalmar", cliente: "KALMAR PERSONAL BOATS",
+    barco: "CAT-33-PAMPLONA", tipo_unidade: "Lancha", mexido_em: "2026-09-23T12:18:49Z", sinal_pago: 0, tarefa_compra: null,
+  }), "2026-10-23")!;
+  // o tipo continua os_parada: o CHECK resumo_itens_tipo_chk é lista fechada
+  assertEquals([c.tipo, c.familia, c.secao, c.elegivel, c.perdeHoje], ["os_parada", "os", "obras", false, false]);
+  assertEquals(c.titulo, "*OS-00032* (KALMAR PERSONAL BOATS, CAT-33-PAMPLONA): esperando o cliente desde 23/09.");
+  assertEquals(c.curto, "OS-00032 KALMAR PERSONAL BOATS (CAT-33-PAMPLONA): esperando o cliente desde 23/09");
+  assertEquals(c.rotulo, "OS-00032 (KALMAR PERSON…, esperando o cliente desde 23/09)");
+  // o "também" da lista corta em 60: o rótulo cabe inteiro, com a data
+  assert(c.rotulo.length <= 60, `${c.rotulo.length}`);
+  assertEquals(c.motivo, "Esperando o cliente há 30 dias.");
+  assertEquals(c.porqueNaoSobe, "Ficou na lista: esperando o cliente há 30 dias.");
+  assertStringIncludes(c.pedido!, "o que estamos esperando do cliente");
+  assertEquals(c.fatos.at(-1), ["Esperando o cliente desde", "23/09/2026"]);
+  assertEquals(c.fato, "awaiting_client|2026-09-23");
+  assert(!/parada/.test(c.titulo + c.curto + c.rotulo), "nada de 'parada' para quem espera o cliente");
+});
+
+Deno.test("D11a: esperando o cliente não é 'esperando compra'; com menos de 10 dias, nada (como a parada)", () => {
+  // tarefa de compra viva e sinal pago: quem trava é o cliente (a R16 também não cobra compra de awaiting_client)
+  const comCompra = candidatoDeOs(os({ status: "awaiting_client", mexido_em: "2026-09-29T22:12:54Z" }), HOJE)!;
+  assertEquals([comCompra.tipo, comCompra.elegivel], ["os_parada", false]);
+  assertStringIncludes(comCompra.titulo, "esperando o cliente desde 29/09");
+  assertEquals(candidatoDeOs(os({ status: "awaiting_client", tarefa_compra: null, mexido_em: "2026-10-10T12:00:00Z" }), HOJE), null);
+  // a parada de sempre não muda
+  const parada = candidatoDeOs(os({ status: "open", tarefa_compra: null, sinal_pago: 0 }), HOJE)!;
+  assertEquals([parada.titulo, parada.rotulo], ["*OS-00104* (Flávio da Igreja, Itapoã): parada desde 03/10.", "OS-00104 (Flávio da Igreja, parada desde 03/10)"]);
+});
+
+Deno.test("D11a: o valor aberto do cliente conta a OS que espera o cliente", () => {
+  const c = coleta1510();
+  c.oss.push({
+    id: "o-32", numero: "OS-00032", status: "awaiting_client", valor: 12500, client_id: "c-kalmar", cliente: "KALMAR PERSONAL BOATS", barco: "CAT-33-PAMPLONA",
+    mexido_em: "2026-09-23T12:18:49Z", agendada_em: null, sinal_pago: 0, tarefa_compra: null, cobrancas_vivas: 0,
+  });
+  assertEquals(valorAbertoPorCliente(c).get("c-kalmar"), 12500);
+  // e ela entra na lista do dia (a manhã a enxerga), sem subir
+  const x = candidatosDoDia(c, AGORA_1510, HOJE).find((k) => k.referencia === "os:o-32")!;
+  assertEquals([x.tipo, x.elegivel], ["os_parada", false]);
+});
+
 Deno.test("cadastro genérico ('Cliente Final', 'Consumidor Final') não é assunto: cada item vale por si", () => {
   assert(ehClienteGenerico("Cliente Final") && ehClienteGenerico("CONSUMIDOR FINAL") && !ehClienteGenerico("Cliente Fiel"));
   const q = candidatoDeOrcamento(orc({ id: "q-103", numero: "ORÇ-00103", quote_status: "awaiting_approval", client_id: "c-final", cliente: "Cliente Final", valor: 58310.05, mexido_em: "2026-09-23T12:00:00Z", fim_validade: "2026-10-18" }), HOJE)!;

@@ -12,7 +12,9 @@
 // com aviso no log (só o código).
 
 import { diaBR, horaBR } from "../_shared/pdf/datas.ts";
+import { filtroQueCruza, limitesDoDiaBR } from "../_shared/agenda-dia.ts";
 import { diaDaSemana, somarDias } from "../_shared/secretario/base.ts";
+import { STATUS_OS_ATIVAS } from "../_shared/service-order-status.ts";
 import { conversaEncerradaPeloContato } from "../_shared/whatsapp/contato-encerrou.ts";
 import { historicoSemIdentidade } from "../_shared/banking/proposals.ts";
 import { normalizeText } from "../_shared/banking/matching.ts";
@@ -22,14 +24,13 @@ import { type EntradaDoBanco, type PagamentoSemExtrato, separarEntradas } from "
 import { despesasPendentesDoMes, faturamentoPorCliente, GRUPOS_DO_RESULTADO } from "./mes.ts";
 import { contarPropostas } from "./secretario.ts";
 import type { OsCrua } from "./secretario-candidatos.ts";
+import { osDaAgenda } from "./secretario-coleta.ts";
 import type { ItemDaManha } from "./secretario-tarde-regras.ts";
-import type { ContaDoMes, DiaDeAmanha, Panorama } from "./secretario-tarde-texto.ts";
+import { type ContaDoMes, CORTE_DO_ITEM_DE_AMANHA, type DiaDeAmanha, type Panorama } from "./secretario-tarde-texto.ts";
 import type { DadosDoEscritorio } from "./secretario-texto.ts";
 
 // deno-lint-ignore no-explicit-any
 type Admin = any;
-
-const FUSO_BR = "-03:00";
 
 function falhou(evento: string, e: unknown): void {
   console.warn(JSON.stringify({ fn: "ai-daily-briefing", tarde: evento, codigo: String((e as { code?: unknown })?.code ?? (e as Error)?.name ?? "erro") }));
@@ -198,12 +199,31 @@ export async function contarEscritorio(admin: Admin, hoje: string): Promise<Dado
 
 // ─── Amanhã ───────────────────────────────────────────────────────────────────────────────────
 
-const ATIVAS = new Set(["approved", "scheduled", "in_progress", "awaiting_parts", "open"]);
+// (23/10/2026, D11a) a mesma lista do resto do sistema, com o awaiting_client (a daqui o deixava de fora)
+const ATIVAS = new Set<string>(STATUS_OS_ATIVAS);
 
 /**
- * O "Amanhã" do fechamento: OS marcada e tarefa do dono com hora (ou com prazo, fora as da automação) no dia
- * `amanha`, e a compra que precisa sair (OS ativa com a tarefa de compra aberta e serviço marcado até o dia
- * seguinte a `amanha`). Erro = null (a linha some).
+ * (23/10/2026, D11b) Quantas OS da carteira não estão em dia nenhum: ativas, fora as que esperam o cliente (quem
+ * marca é ele), sem data ou com a janela já acabada antes de hoje (sem fim, vale o início). A que está em curso
+ * (começou antes e acaba hoje ou depois) tem data. Na carteira de 23/10/2026 dá 6: OS-00069, 74, 100, 96 e 112 sem
+ * data e a OS-00104, marcada para 06–08/10.
+ */
+export function osSemData(oss: OsCrua[], hoje: string): number {
+  const { de } = limitesDoDiaBR(hoje);
+  return oss.filter((o) => {
+    if (!ATIVAS.has(o.status) || o.status === "awaiting_client") return false;
+    if (!o.agendada_em) return true;
+    const ultimo = Date.parse(o.termina_em ?? o.agendada_em);
+    return Number.isFinite(ultimo) && ultimo < Date.parse(de);
+  }).length;
+}
+
+/**
+ * O "Amanhã" do fechamento: OS e tarefa do dono com hora (ou com prazo, fora as da automação) no dia `amanha`, e a
+ * compra que precisa sair (OS ativa com a tarefa de compra aberta e serviço marcado até o dia seguinte a `amanha`).
+ * A OS entra se a janela CRUZA o dia (23/10/2026, D4): a que começou antes sai "em curso desde dd/mm". Com nada
+ * marcado, a carteira (as OS sem data) decide entre "agenda livre" e "nada marcado; N OS aprovadas sem data".
+ * Erro = null (a linha some).
  */
 export async function lerAmanha(
   admin: Admin, dono: { id: string }, hoje: string, amanha: string, oss: OsCrua[],
@@ -211,8 +231,7 @@ export async function lerAmanha(
   comPagar = false,
 ): Promise<DiaDeAmanha | null> {
   try {
-    const inicio = new Date(`${amanha}T00:00:00${FUSO_BR}`).toISOString();
-    const fim = new Date(new Date(inicio).getTime() + 86_400_000).toISOString();
+    const { de: inicio, ate: fim } = limitesDoDiaBR(amanha);
     const [comHora, comPrazo, agendadas] = await Promise.all([
       admin.from("agenda_tasks").select("id, title, scheduled_start_at, due_at, source")
         .eq("assignee_user_id", dono.id).in("status", ["pending", "in_progress"])
@@ -220,8 +239,10 @@ export async function lerAmanha(
       admin.from("agenda_tasks").select("id, title, scheduled_start_at, due_at, source")
         .eq("assignee_user_id", dono.id).in("status", ["pending", "in_progress"])
         .gte("due_at", inicio).lt("due_at", fim).limit(50),
-      admin.from("service_orders").select("service_order_number, scheduled_start_at, vessels(name)")
-        .gte("scheduled_start_at", inicio).lt("scheduled_start_at", fim).neq("status", "cancelled").limit(20),
+      // (23/10/2026, D4) a OS que CRUZA o dia, não só a que começa nele
+      admin.from("service_orders").select("service_order_number, status, scheduled_start_at, scheduled_end_at, vessels(name)")
+        .lt("scheduled_start_at", fim).or(filtroQueCruza(inicio)).neq("status", "cancelled")
+        .order("scheduled_start_at", { ascending: true }).limit(20),
     ]);
     const tarefas = new Map<string, Record<string, unknown>>();
     for (const t of [...ou(comHora, "agenda") as Array<Record<string, unknown>>, ...ou(comPrazo, "agenda") as Array<Record<string, unknown>>]) {
@@ -237,9 +258,8 @@ export async function lerAmanha(
       if (!comHoraNoDia && t.source === "automation") continue; // a R16 recriada não é compromisso
       itens.push({ hora: comHoraNoDia ? horaBR(new Date(comHoraNoDia)) : null, texto: String(t.title), ord: comHoraNoDia ?? String(t.due_at ?? "") });
     }
-    for (const o of ou(agendadas, "OS de amanhã") as Array<Record<string, unknown>>) {
-      const barco = nomeDe(o.vessels);
-      itens.push({ hora: horaBR(new Date(String(o.scheduled_start_at))), texto: `${o.service_order_number}${barco ? ` (${barco})` : ""}`, ord: String(o.scheduled_start_at) });
+    for (const o of osDaAgenda(ou(agendadas, "OS de amanhã") as Array<Record<string, unknown>>, inicio, fim, CORTE_DO_ITEM_DE_AMANHA)) {
+      itens.push({ hora: o.hora, texto: o.texto, ord: o.ord });
     }
     itens.sort((a, b) => a.ord.localeCompare(b.ord));
     const ate = somarDias(amanha, 1);
@@ -267,7 +287,13 @@ export async function lerAmanha(
         falhou("amanha_a_pagar", e);
       }
     }
-    return { dia: amanha, itens: [...itens.map(({ hora, texto }) => ({ hora, texto })), ...compras], ...(comPagar ? { pagar } : {}) };
+    return {
+      dia: amanha,
+      itens: [...itens.map(({ hora, texto }) => ({ hora, texto })), ...compras],
+      ...(comPagar ? { pagar } : {}),
+      // as OS vêm da coleta da manhã, cuja leitura é essencial (lança): chegando aqui, a carteira foi lida
+      carteira: { semData: osSemData(oss, hoje) },
+    };
   } catch (e) {
     falhou("amanha", e);
     return null;
