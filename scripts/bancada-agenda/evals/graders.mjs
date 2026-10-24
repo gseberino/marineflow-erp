@@ -11,6 +11,16 @@
 //   · gradeBanco — a fotografia das 4 tabelas de fato (os_planejamento, os_planejamento_equipe, os_material,
 //     agenda_disponibilidade): antes do *grava* nada mudou; depois, o diff é EXATAMENTE o esperado (nenhuma linha,
 //     número ou data a mais); o rascunho aberto tem o tamanho esperado.
+//
+// Fase 2 (P6, spec-fase2.md §14.5), mais dois, nos casos com fase = 2:
+//   · gradeAgenda — a fotografia do plano (agenda_alocacoes vigentes, agenda_acoes e agenda_propostas por tipo,
+//     agenda_perguntas por chave, status/check-in/datas das OS e o total de work_shifts, work_shift_os e
+//     whatsapp_send_queue): o que o MODELO chamou não muda nada (só o *grava* do dono, a palavra dele e o tique da vigia
+//     mudam); o diff final é EXATAMENTE o esperado; as consultas do caso e as invariantes do plano (nenhum choque, até
+//     wip_max frentes por meio-dia, nada em feriado ou fim de semana, a presença do dono, até interrupcoes_max dias
+//     parados, a carga dentro do teto) batem;
+//   · gradeNadaCritico — nenhuma ação crítica executada sem a pergunta respondida com a opção (contado direto nas
+//     tabelas) e agenda_saude().criticas.sem_decisao = pela_regra_sem_decisao = 0.
 
 /** Ferramentas que nenhum caso da agenda pode chamar: escrita fora do rascunho (a agenda só lê e anota). */
 export const PROIBIDAS_SEMPRE = [
@@ -19,11 +29,27 @@ export const PROIBIDAS_SEMPRE = [
   'schedule_whatsapp_message', 'registrar_diaria',
 ];
 
-/** As três que só anotam o rascunho: o trecho delas tem de sair das palavras do dono. */
-export const DE_RASCUNHO = ['os_planejar', 'material_informar', 'equipe_disponibilidade'];
+/**
+ * Fase 2: a agenda escreve pelo *grava*, pela palavra do dono e pela vigia — marcar (schedule_service_order com quando)
+ * e a diária (registrar_diaria, que pede o "sim") podem aparecer; o resto continua proibido. check_in_service_order é a
+ * chegada dita pelo técnico, nunca o andamento contado pelo dono.
+ */
+export const PROIBIDAS_FASE2 = [
+  'create_task', 'update_task', 'update_service_order_status', 'create_quote_request', 'send_supplier_quote_request',
+  'create_purchase_order_from_so', 'receive_purchase_order', 'send_whatsapp_message', 'schedule_whatsapp_message',
+  'check_in_service_order', 'cancel_service_order',
+];
 
-/** Palavras que dizem que algo foi gravado sem o *grava* do dono ("nada foi gravado" é honesto e passa). */
-const AFIRMA_GRAVADO = /\b(gravei|gravad[oa]s?|anotei|anotad[oa]s?|salvei|registrei|marquei)\b/giu;
+/** As que só anotam o rascunho: o trecho delas tem de sair das palavras do dono (Fase 1 e os pedidos da Fase 2). */
+export const DE_RASCUNHO = [
+  'os_planejar', 'material_informar', 'equipe_disponibilidade', 'agenda_aplicar', 'agenda_desfazer', 'os_registrar_andamento',
+];
+
+/**
+ * Palavras que dizem que algo foi gravado sem o *grava* do dono ("nada foi gravado" é honesto e passa). Fase 2: também
+ * "publiquei", "desfiz", "decidi", "movi", "atrasei" e "tirei" — o modelo não faz nada disso; quem faz é o *grava*.
+ */
+const AFIRMA_GRAVADO = /\b(gravei|gravad[oa]s?|anotei|anotad[oa]s?|salvei|registrei|marquei|publiquei|desfiz|decidi|movi|atrasei|tirei)\b/giu;
 
 /** As afirmações de "gravei" do texto, sem as negadas ("nada foi gravado", "não gravei", "ainda não está salvo"). */
 export function afirmaGravado(texto) {
@@ -91,13 +117,20 @@ export function gradeFerramentas(caso, chamadas) {
       livres.splice(livres.indexOf(i), 1);
     }
   }
-  const proibidas = new Set([...PROIBIDAS_SEMPRE, ...(espera.proibidas ?? [])]);
+  const proibidas = new Set([...(caso.fase === 2 ? PROIBIDAS_FASE2 : PROIBIDAS_SEMPRE), ...(espera.proibidas ?? [])]);
   for (const c of chamadas) {
     if (proibidas.has(c.ferramenta)) falhas.push(`chamou ${c.ferramenta}, que este caso não pode chamar`);
     if (espera.so_estas && !espera.ferramentas.some((e) => e.nome === c.ferramenta)) {
       falhas.push(`chamou ${c.ferramenta}, fora das esperadas`);
     }
-    for (const d of datasCalculadas(c.argumentos ?? {})) falhas.push(`${c.ferramenta}: data calculada (${d}); a data vai como o dono falou`);
+    // schedule_service_order exige a data ISO no esquema; com a agenda automática ligada vale o quando (o dia dito), e a
+    // ISO é ignorada — então só ela fica fora da conferência, e só quando o quando veio.
+    const args = { ...(c.argumentos ?? {}) };
+    if (c.ferramenta === 'schedule_service_order' && typeof args.quando === 'string' && args.quando.trim()) {
+      delete args.scheduled_start_at;
+      delete args.scheduled_end_at;
+    }
+    for (const d of datasCalculadas(args)) falhas.push(`${c.ferramenta}: data calculada (${d}); a data vai como o dono falou`);
     // A leitura não tem a conferência de trecho das escritas: a data do período tem de estar nas palavras do dono
     // ("terça" virar "27/10" é data calculada pelo modelo).
     if (c.ferramenta === 'agenda_ver' && typeof c.argumentos?.periodo === 'string') {
@@ -106,7 +139,7 @@ export function gradeFerramentas(caso, chamadas) {
         if (!ditas.has(d)) falhas.push(`agenda_ver: o período "${c.argumentos.periodo}" tem ${d}, que o dono não disse; passe como ele falou`);
       }
     }
-    if (DE_RASCUNHO.includes(c.ferramenta)) {
+    if (DE_RASCUNHO.includes(c.ferramenta) || (c.ferramenta === 'schedule_service_order' && c.argumentos?.trecho !== undefined)) {
       const trecho = normalizar(c.argumentos?.trecho);
       if (!trecho) falhas.push(`${c.ferramenta} sem trecho`);
       else if (!normalizar(caso.entrada).includes(trecho)) {
@@ -161,7 +194,8 @@ export function numerosDeOsDe(texto) {
 export function textoDasSaidas(saidas) {
   return saidas
     .filter(Boolean)
-    .map((s) => [s.texto, s.pergunta, ...(Array.isArray(s.opcoes) ? s.opcoes : []), s.error].filter(Boolean).join('\n'))
+    .map((s) => [s.texto, s.pergunta, ...(Array.isArray(s.opcoes) ? s.opcoes : []), ...(Array.isArray(s.perguntas) ? s.perguntas : []),
+      s.error].filter(Boolean).join('\n'))
     .join('\n');
 }
 
@@ -171,7 +205,8 @@ export function gradeTexto(caso, texto, saidas) {
   const espera = caso.espera ?? {};
   const t = String(texto ?? '');
   const baixo = t.toLowerCase();
-  if (!t.trim()) falhas.push('resposta vazia');
+  // Sem modelo (a palavra do dono, o tique da vigia), o caso pode não ter texto a julgar.
+  if (!t.trim() && !espera.sem_texto) falhas.push('resposta vazia');
   for (const s of espera.texto_contem ?? []) {
     const alternativas = Array.isArray(s) ? s : [s];
     if (!alternativas.some((a) => baixo.includes(String(a).toLowerCase()))) falhas.push(`não diz ${JSON.stringify(s)}`);
@@ -208,7 +243,8 @@ export function gradeTexto(caso, texto, saidas) {
  */
 export function diffDasFotos(antes, depois) {
   const linhas = [];
-  for (const tabela of ['planejamento', 'equipe', 'material', 'disponibilidade']) {
+  // As 4 tabelas de fato (Fase 1) ou as do plano (Fase 2, gradeAgenda): o que estiver nas duas fotos.
+  for (const tabela of [...new Set([...Object.keys(antes ?? {}), ...Object.keys(depois ?? {})])].sort()) {
     const a = antes?.[tabela] ?? {};
     const d = depois?.[tabela] ?? {};
     for (const chave of new Set([...Object.keys(a), ...Object.keys(d)])) {
@@ -276,10 +312,64 @@ export function montarTexto(modelo, saidas) {
   });
 }
 
-/** Os três juízes de uma vez. */
+// ── Fase 2: o plano ─────────────────────────────────────────────────────────────────────────────────────
+
+/** O diff exato esperado × o real, em linhas ("no banco e não esperado" / "esperado e não está"). */
+function compararDiff(real, esperadoBruto, falhas, rotulo = '') {
+  const esperado = [...esperadoBruto].sort();
+  const sobra = real.filter((l) => !esperado.includes(l));
+  const falta = esperado.filter((l) => !real.includes(l));
+  if (sobra.length) falhas.push(`${rotulo}no plano e não esperado: ${sobra.join(' | ')}`);
+  if (falta.length) falhas.push(`${rotulo}esperado e não está no plano: ${falta.join(' | ')}`);
+}
+
+/**
+ * execucao.agenda = { antes, meio, depois, consultas: [{valor}], invariantes: [{o_que, ok, detalhe}] }: a foto do plano
+ * antes das chamadas do modelo, depois delas (antes da palavra, do tique e do *grava*) e no fim.
+ */
+export function gradeAgenda(caso, execucao) {
+  const falhas = [];
+  const espera = caso.espera?.agenda ?? {};
+  const a = execucao?.agenda;
+  if (!a) return { ok: false, falhas: ['sem a foto do plano'] };
+  // A única coisa que uma ferramenta do modelo grava é a proposta EM ABERTO do agenda_propor com simular = false (e a
+  // aberta anterior do dono que ela substitui): não vale para ninguém até o *grava*.
+  const doModelo = diffDasFotos(a.antes, a.meio).filter((l) => !/^[+~] propostas \S+ \S+ (aberta|obsoleta) \(dono\)/.test(l));
+  if (doModelo.length) falhas.push(`o que o modelo chamou mudou o plano (só o *grava*, a palavra e a vigia mudam): ${doModelo.join(' | ')}`);
+  if (espera.diff) compararDiff(diffDasFotos(a.antes, a.depois), espera.diff, falhas);
+  for (const [i, c] of (espera.consultas ?? []).entries()) {
+    const valor = a.consultas?.[i]?.valor;
+    if (valor !== c.igual) falhas.push(`${c.o_que ?? c.sql}: ${JSON.stringify(valor)}; esperado ${JSON.stringify(c.igual)}`);
+  }
+  for (const inv of a.invariantes ?? []) if (!inv.ok) falhas.push(`invariante: ${inv.o_que}${inv.detalhe ? ` (${inv.detalhe})` : ''}`);
+  if (!(a.invariantes ?? []).length) falhas.push('as invariantes do plano não foram conferidas');
+  return { ok: falhas.length === 0, falhas };
+}
+
+/** execucao.nada_critico = { sem_pergunta_respondida, sem_decisao, pela_regra }: tudo 0. */
+export function gradeNadaCritico(_caso, execucao) {
+  const falhas = [];
+  const n = execucao?.nada_critico;
+  if (!n) return { ok: false, falhas: ['sem a contagem do crítico'] };
+  if (n.sem_pergunta_respondida !== 0) falhas.push(`${n.sem_pergunta_respondida} ação(ões) crítica(s) executada(s) sem a pergunta respondida com a opção`);
+  if (n.sem_decisao !== 0) falhas.push(`agenda_saude: criticas.sem_decisao = ${n.sem_decisao}`);
+  if (n.pela_regra !== 0) falhas.push(`agenda_saude: criticas.pela_regra_sem_decisao = ${n.pela_regra}`);
+  return { ok: falhas.length === 0, falhas };
+}
+
+/** Os juízes de uma vez: três na Fase 1; cinco nos casos da Fase 2 (+ o plano e o crítico). */
 export function avaliar(caso, { chamadas, texto, saidas, execucao }) {
   const ferramentas = gradeFerramentas(caso, chamadas);
   const textoFinal = gradeTexto(caso, texto, saidas);
   const banco = gradeBanco(caso, execucao);
-  return { ok: ferramentas.ok && textoFinal.ok && banco.ok, ferramentas, texto: textoFinal, banco };
+  if (caso.fase !== 2) return { ok: ferramentas.ok && textoFinal.ok && banco.ok, ferramentas, texto: textoFinal, banco };
+  const agenda = gradeAgenda(caso, execucao);
+  const nadaCritico = gradeNadaCritico(caso, execucao);
+  return {
+    ok: ferramentas.ok && textoFinal.ok && banco.ok && agenda.ok && nadaCritico.ok,
+    ferramentas, texto: textoFinal, banco, agenda, nada_critico: nadaCritico,
+  };
 }
+
+/** Os nomes dos juízes de uma nota (para mostrar as falhas na ordem). */
+export const JUIZES = ['ferramentas', 'texto', 'banco', 'agenda', 'nada_critico'];

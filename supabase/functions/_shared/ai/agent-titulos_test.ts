@@ -20,3 +20,12 @@ Deno.test("os títulos que saíram em inglês em produção", () => {
   assertEquals(tituloDaAcao("cadastrar_favorecido"), "Cadastrar favorecido");
   assertEquals(tituloDaAcao("emit_fiscal_note"), "Emitir NF-e");
 });
+
+Deno.test("agenda de produção (Fase 2): os títulos das quatro ferramentas novas em português", () => {
+  assertEquals(tituloDaAcao("agenda_propor"), "Montar a agenda");
+  assertEquals(tituloDaAcao("agenda_aplicar"), "Publicar na agenda");
+  assertEquals(tituloDaAcao("agenda_desfazer"), "Desfazer na agenda");
+  assertEquals(tituloDaAcao("os_registrar_andamento"), "Andamento da OS");
+  // fora do perfil enxuto do admin, "marca o Lenine pra quinta" chega pela rede como cartão de "sim"
+  assertEquals(tituloDaAcao("schedule_service_order"), "Agendar OS");
+});

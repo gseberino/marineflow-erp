@@ -5,16 +5,27 @@
 import { assert, assertEquals, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   canalDaRpc,
+  ESCOPOS_DA_PROPOSTA,
+  EVENTOS_DO_ANDAMENTO,
   INSTRUCAO_AGENDA_DESLIGADA,
   INSTRUCAO_LEITURA,
+  INSTRUCAO_PROPOSTA_ABERTA,
   INSTRUCAO_RASCUNHO,
   INSTRUCAO_RASCUNHO_RECUSA,
+  INSTRUCAO_SIMULACAO,
+  MOTIVOS_DO_ANDAMENTO,
   paraAgendaVer,
+  paraAndamento,
+  paraAplicar,
+  paraDesfazer,
   paraDisponibilidade,
   paraMaterial,
   paraPlanejar,
+  paraPropor,
   resultadoDaLeitura,
+  resultadoDaProposta,
   resultadoDoRascunho,
+  TEXTO_CONCLUIR_PELA_TELA,
 } from "./rpc-das-ferramentas.ts";
 
 const CTX = { autor: "aa000000-0000-4000-8000-000000000001", canal: "whatsapp" as const };
@@ -246,4 +257,114 @@ Deno.test("o módulo é puro: nada de Deno, nada de import (o runner dos evals r
       .test(fonte),
     false,
   );
+});
+
+// ───────── Fase 2 (P6): agenda_propor, agenda_aplicar, agenda_desfazer, os_registrar_andamento ─────────
+
+Deno.test("paraPropor: todos os parâmetros, simular true por padrão, nulos no que não veio (sem p_hoje em produção)", () => {
+  const r = params(paraPropor({ escopo: "semana" }, CTX));
+  assertEquals(r.rpc, "agenda_propor_dito");
+  assertEquals(r.params, {
+    p_autor: CTX.autor, p_canal: "whatsapp", p_escopo: "semana", p_os: null, p_fixar: null, p_tirar: null, p_so_depois_de: null,
+    p_acima_da_carga: false, p_simular: true,
+  });
+  assertEquals(params(paraPropor({ escopo: "semana" }, { ...CTX, hoje: "2026-10-29" })).params.p_hoje, "2026-10-29");
+  assertEquals(params(paraPropor({ escopo: "semana", simular: false }, CTX)).params.p_simular, false);
+});
+
+Deno.test("paraPropor: fixar/tirar/só depois de como o dono disse; OS repetida conta uma vez", () => {
+  const r = params(paraPropor({
+    escopo: "replano", os: ["Lenine", "Lenine"], fixar: [{ os: "Lenine", quando: "quinta", ate: "sexta", pessoa: "Roberto" }],
+    tirar: "Rodrigo", so_depois_de: [{ os: "Nelson", quando: "dia 10" }],
+  }, CTX));
+  assertEquals(r.params.p_os, ["Lenine"]);
+  assertEquals(r.params.p_fixar, [{ os: "Lenine", quando: "quinta", ate: "sexta", pessoa: "Roberto" }]);
+  assertEquals(r.params.p_tirar, ["Rodrigo"]);
+  assertEquals(r.params.p_so_depois_de, [{ os: "Nelson", quando: "dia 10" }]);
+});
+
+Deno.test("paraPropor: recusa escopo fora da lista, OS/replano sem OS, data calculada, id e simular que não é booleano", () => {
+  assertEquals(erro(paraPropor({}, CTX)).startsWith("falta 'escopo'"), true);
+  assertEquals(erro(paraPropor({ escopo: "mes" }, CTX)).includes("'escopo' aceita só: semana, proxima_semana, os, replano"), true);
+  assertEquals(erro(paraPropor({ escopo: "os" }, CTX)).includes("diga de qual serviço"), true);
+  assertEquals(erro(paraPropor({ escopo: "replano", fixar: [{ os: "Lenine", quando: "2026-11-05" }] }, CTX)).includes("sem calcular"), true);
+  assertEquals(erro(paraPropor({ escopo: "semana", tirar: [UUID_QUALQUER] }, CTX)).includes("não o id"), true);
+  assertEquals(erro(paraPropor({ escopo: "semana", fixar: [{ os: UUID_QUALQUER, quando: "quinta" }] }, CTX)).includes("não o id"), true);
+  assertEquals(erro(paraPropor({ escopo: "semana", simular: "não" }, CTX)).includes("true ou false"), true);
+});
+
+Deno.test("paraAplicar: publicar (proposta, os) ou decidir (decisao, opcao), nunca os dois; trecho obrigatório", () => {
+  assertEquals(params(paraAplicar({ proposta: "a última", os: ["Lenine", "Flávio"], trecho: "publica só o Lenine e o Flávio" }, CTX)).params, {
+    p_autor: CTX.autor, p_canal: "whatsapp", p_proposta: "a última", p_os: ["Lenine", "Flávio"], p_decisao: null, p_opcao: null,
+    p_trecho: "publica só o Lenine e o Flávio",
+  });
+  assertEquals(params(paraAplicar({ decisao: "1", opcao: "Nelson", trecho: "pode atrasar o Nelson" }, CTX)).params.p_opcao, "Nelson");
+  // O número que a agenda mostrou chega como texto ("1"), do jeito que o dono disse.
+  assertEquals(params(paraAplicar({ decisao: 1, opcao: 2, trecho: "na decisão 1, a opção 2" }, CTX)).params.p_decisao, "1");
+  // Sem opção dita: vai nulo (o banco devolve a pergunta; ninguém escolhe aqui).
+  assertEquals(params(paraAplicar({ decisao: "1", trecho: "resolve aí" }, CTX)).params.p_opcao, null);
+  assertEquals(erro(paraAplicar({ decisao: "1", opcao: "1" }, CTX)).startsWith("falta 'trecho'"), true);
+  assertEquals(erro(paraAplicar({ proposta: "1", decisao: "1", trecho: "x" }, CTX)).includes("a proposta OU a decisão"), true);
+  assertEquals(erro(paraAplicar({ os: ["Lenine"], decisao: "1", opcao: "1", trecho: "x" }, CTX)).includes("'os' é só para publicar"), true);
+  assertEquals(erro(paraAplicar({ decisao: UUID_QUALQUER, opcao: "1", trecho: "x" }, CTX)).includes("não o id"), true);
+});
+
+Deno.test("paraDesfazer: o alvo como o dono disse; sem alvo vai nulo (o banco pergunta qual)", () => {
+  assertEquals(params(paraDesfazer({ alvo: "semana", trecho: "desfaz a semana" }, CTX)).params, {
+    p_autor: CTX.autor, p_canal: "whatsapp", p_alvo: "semana", p_trecho: "desfaz a semana",
+  });
+  assertEquals(params(paraDesfazer({ trecho: "volta como estava" }, CTX)).params.p_alvo, null);
+  assertEquals(erro(paraDesfazer({ alvo: "Nelson" }, CTX)).startsWith("falta 'trecho'"), true);
+  assertEquals(erro(paraDesfazer({ alvo: UUID_QUALQUER, trecho: "x" }, CTX)).includes("não o id"), true);
+});
+
+Deno.test("paraAndamento: os, evento, dia como dito, quem e motivo da lista; concluir é pela tela", () => {
+  assertEquals(params(paraAndamento({ os: "Vanderlei", evento: "nao_foi", quem: "João", motivo: "equipe", dia: "hoje", trecho: "hoje o João não foi" }, CTX)).params, {
+    p_autor: CTX.autor, p_canal: "whatsapp", p_os: "Vanderlei", p_evento: "nao_foi", p_dia: "hoje", p_quem: ["João"], p_motivo: "equipe",
+    p_trecho: "hoje o João não foi",
+  });
+  assertEquals(params(paraAndamento({ os: "Vanderlei", evento: "comecou", trecho: "o Vanderlei começou" }, CTX)).params.p_quem, null);
+  for (const concluir of ["concluiu", "terminou", "entregou", "pronto"]) {
+    assertEquals(erro(paraAndamento({ os: "Vanderlei", evento: concluir, trecho: "terminou" }, CTX)).startsWith(TEXTO_CONCLUIR_PELA_TELA.slice(0, 30)),
+      true, concluir);
+  }
+  assertEquals(erro(paraAndamento({ os: "Vanderlei", evento: "faltou", trecho: "x" }, CTX)).includes("'evento' aceita só"), true);
+  assertEquals(erro(paraAndamento({ os: "Vanderlei", evento: "parou", motivo: "chuva", trecho: "x" }, CTX)).includes("'motivo' aceita só"), true);
+  assertEquals(erro(paraAndamento({ os: "Vanderlei", evento: "trabalhou", dia: "2026-11-03", trecho: "x" }, CTX)).includes("sem calcular"), true);
+  assertEquals(erro(paraAndamento({ os: "Vanderlei", evento: "trabalhou", quem: [UUID_QUALQUER], trecho: "x" }, CTX)).includes("não o id"), true);
+  assertEquals(erro(paraAndamento({ os: "Vanderlei", evento: "trabalhou" }, CTX)).startsWith("falta 'trecho'"), true);
+});
+
+Deno.test("os enums das ferramentas são os que o banco aceita (spec §8: eventos e motivos do andamento)", () => {
+  assertEquals([...EVENTOS_DO_ANDAMENTO], ["trabalhou", "parcial", "nao_foi", "comecou", "parou"]);
+  assertEquals([...ESCOPOS_DA_PROPOSTA], ["semana", "proxima_semana", "os", "replano"]);
+  assertEquals([...MOTIVOS_DO_ANDAMENTO].sort(), [
+    "anterior", "cliente", "clima", "equipe", "esqueci", "estimativa", "imprevisto", "informacao", "material", "urgencia",
+  ]);
+});
+
+Deno.test("resultadoDaProposta: o texto e as perguntas em texto; simulação × proposta em aberto; recusa = a pergunta", () => {
+  const sim = resultadoDaProposta({
+    ok: true, simulacao: true, texto: "Semana de 03 a 06/11\n• Vanderlei.\nÉ simulação: não muda nada.", proposta_id: null,
+    itens: [{ os: UUID_QUALQUER }], perguntas: [{ texto: "Não cabe tudo até qui 05/11.", opcoes: [{ os: UUID_QUALQUER }] }],
+  });
+  assertEquals(sim, {
+    ok: true, texto: "Semana de 03 a 06/11\n• Vanderlei.\nÉ simulação: não muda nada.", simulacao: true,
+    perguntas: ["Não cabe tudo até qui 05/11."], instrucao: INSTRUCAO_SIMULACAO,
+  });
+  assertEquals(JSON.stringify(sim).includes(UUID_QUALQUER), false);
+  assertEquals(resultadoDaProposta({ ok: true, simulacao: false, texto: "x" }).instrucao, INSTRUCAO_PROPOSTA_ABERTA);
+  const recusa = resultadoDaProposta({ ok: false, motivo: "os_ambiguo", texto: "Qual Rodrigo?", pergunta: "Qual Rodrigo?", opcoes: ["OS-00076", "OS-00096"] });
+  assertEquals(recusa, { ok: false, texto: "Qual Rodrigo?", pergunta: "Qual Rodrigo?", opcoes: ["OS-00076", "OS-00096"], instrucao: INSTRUCAO_RASCUNHO_RECUSA });
+  assertThrows(() => resultadoDaProposta({ ok: true }));
+  assertThrows(() => resultadoDaProposta(null));
+});
+
+Deno.test("paraPlanejar (Fase 2): adiantavel_patio como o dono disse e limpar patio; fora do intervalo volta", () => {
+  const r = params(paraPlanejar({ os: "Giancarlo", adiantavel_patio: "1", trecho: "dá para adiantar um dia no pátio" }, CTX));
+  assertEquals(r.params.p_dados, { adiantavel_patio: 1 });
+  assertEquals(params(paraPlanejar({ os: "Giancarlo", limpar: ["patio"], trecho: "no pátio não dá" }, CTX)).params.p_dados,
+    { limpar: ["patio"] });
+  assertEquals(erro(paraPlanejar({ os: "Giancarlo", adiantavel_patio: 0, trecho: "x" }, CTX)).includes("'adiantavel_patio'"), true);
+  assertEquals(erro(paraPlanejar({ os: "Giancarlo", adiantavel_patio: "dois", trecho: "x" }, CTX)).includes("tem de ser número"), true);
 });

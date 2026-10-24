@@ -1,22 +1,29 @@
-// Evals da Agenda de Produção, Fase 1 (P7), na bancada local: as respostas-modelo contra os graders, pelo MESMO caminho
-// das ferramentas de verdade. Spec §8.5. Nada vai para produção; não lê .env nem credencial; não chama modelo nenhum.
+// Evals da Agenda de Produção (Fase 1, P7; Fase 2, P6), na bancada local: as respostas-modelo contra os graders, pelo
+// MESMO caminho das ferramentas de verdade. Spec Fase 1 §8.5 e Fase 2 §14.5. Nada vai para produção; não lê .env nem
+// credencial; não chama modelo nenhum.
 //
 //   node scripts/bancada-agenda/evals/rodar-evals.mjs                 # todos os casos, boa e ruim
 //   node scripts/bancada-agenda/evals/rodar-evals.mjs --caso R01      # um caso só
+//   node scripts/bancada-agenda/evals/rodar-evals.mjs --fase 2        # só os da Fase 2 (ou --fase 1)
 //   node scripts/bancada-agenda/evals/rodar-evals.mjs --ponte 8787    # serve a bancada para o ao-vivo.ts (Deno)
 //
 // O que roda, para cada caso de casos.json e cada resposta de respostas-modelo.json (a boa e a ruim):
 //   1. a bancada (bancada.mjs: snapshot + todas as migrations + fixture-2310.sql) com o material da carteira já
 //      sincronizado (os_material_sincronizar_carteira de 23/10: o motor de 15 min já passou, como em produção);
-//   2. numa transação desfeita no fim: o estado do caso (inicial, ou fixture-2310-pos-rodada.sql por cima);
-//   3. a fotografia das 4 tabelas de fato; as chamadas da resposta pelo execute DE VERDADE de
-//      _shared/ai/tools/agenda-producao.ts (que usa _shared/agenda/rpc-das-ferramentas.ts) com o banco no lugar do
-//      supabase-js — pelo WhatsApp (service_role), com o relógio no dia do caso; ferramenta que não é da agenda não
-//      roda (fica só a chamada, para o juiz das ferramentas);
-//   4. a fotografia de novo (nada pode ter mudado antes do *grava*) e o rascunho aberto; se o caso manda "grava", o
-//      *grava* pela RPC (o comando sem IA do P6) e a fotografia final;
-//   5. os três juízes de graders.mjs. A boa tem de passar nos três; a ruim tem de reprovar no juiz que ela diz
-//      (reprova_em). Sai com 1 se uma boa reprovar ou uma ruim passar.
+//   2. numa transação desfeita no fim: o estado do caso — Fase 1: inicial, ou fixture-2310-pos-rodada.sql por cima;
+//      Fase 2: fixture-fase2.sql (a carteira de qui 29/10) com os modos do estado, a vigia das 16:30 quando o estado
+//      pede, o replay da OS-00104 — e os tiques da vigia que o caso pede antes (tiques);
+//   3. as fotografias de antes (as 4 tabelas de fato e, na Fase 2, o plano); as chamadas da resposta pelo execute DE
+//      VERDADE (_shared/ai/tools/agenda-producao.ts, pelo mesmo _shared/agenda/rpc-das-ferramentas.ts, e o
+//      schedule_service_order de service-orders.ts) com o banco no lugar do supabase-js — pelo WhatsApp (service_role),
+//      com o relógio do caso (dia e, na Fase 2, hora); registrar_diaria pede o "sim" e não roda: a saída é o resumo que
+//      o dono leria (resumirDiaria, com o relógio do caso); outra ferramenta não roda (fica só a chamada, para o juiz);
+//   4. as fotografias de novo (o que o modelo chamou não pode ter mudado nada) e o rascunho aberto; os passos da
+//      resposta que não são do modelo — a palavra do dono (lerComandoDaAgenda + chamadaDoComando, o caminho do
+//      ai-agent), o tique da vigia (agenda_vigiar) —; o *grava* pela RPC, se o caso manda; as fotografias finais, as
+//      consultas do caso, as invariantes do plano e a contagem do crítico;
+//   5. os juízes de graders.mjs (três na Fase 1; cinco na Fase 2). A boa tem de passar em todos; a ruim tem de
+//      reprovar no juiz que ela diz (reprova_em). Sai com 1 se uma boa reprovar ou uma ruim passar.
 // Sem modelo, isto prova os juízes e o caminho das RPCs, não o modelo: o ao-vivo.ts faz a parte do modelo.
 
 import { readFileSync } from 'node:fs';
@@ -24,21 +31,79 @@ import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { criarBancada, ler, RAIZ } from '../bancada.mjs';
-import { avaliar, datasDe, gradeBanco, gradeFerramentas, gradeTexto, montarTexto, numerosDeOsDe } from './graders.mjs';
+import {
+  avaliar, datasDe, diffDasFotos, gradeAgenda, gradeBanco, gradeFerramentas, gradeNadaCritico, gradeTexto, JUIZES, montarTexto,
+  numerosDeOsDe,
+} from './graders.mjs';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
-const { agendaProducaoTools } = await import(
-  pathToFileURL(join(RAIZ, 'supabase', 'functions', '_shared', 'ai', 'tools', 'agenda-producao.ts')).href
+const importar = (rel) => import(pathToFileURL(join(RAIZ, 'supabase', 'functions', ...rel.split('/'))).href);
+const { agendaProducaoTools } = await importar('_shared/ai/tools/agenda-producao.ts');
+const { serviceOrderTools } = await importar('_shared/ai/tools/service-orders.ts');
+const { resolverDiaria, resumirDiaria } = await importar('_shared/ai/tools/diarias.ts');
+const { lerComandoDaAgenda } = await importar('_shared/agenda/comandos.ts');
+const { chamadaDoComando } = await importar('_shared/agenda/executar.ts');
+/** As que rodam de verdade: as 8 da agenda e o marcar (com a agenda automática ligada, ele só deixa o rascunho). */
+const FERRAMENTAS = new Map(
+  [...agendaProducaoTools, ...serviceOrderTools.filter((t) => t.name === 'schedule_service_order')].map((t) => [t.name, t]),
 );
-const FERRAMENTAS = new Map(agendaProducaoTools.map((t) => [t.name, t]));
 
 export const CASOS = JSON.parse(readFileSync(join(AQUI, 'casos.json'), 'utf8'));
 export const RESPOSTAS = JSON.parse(readFileSync(join(AQUI, 'respostas-modelo.json'), 'utf8'));
-const POS_RODADA = ler(join(RAIZ, 'scripts', 'bancada-agenda', 'fixture-2310-pos-rodada.sql'));
+const FIXTURES = join(RAIZ, 'scripts', 'bancada-agenda');
+const POS_RODADA = ler(join(FIXTURES, 'fixture-2310-pos-rodada.sql'));
+const FASE2 = ler(join(FIXTURES, 'fixture-fase2.sql'));
+const REPLAY_0104 = ler(join(FIXTURES, 'fixture-replay-0104.sql'));
+const MIGRATION_DOS_MODOS = ler(join(RAIZ, 'supabase', 'migrations', '20261025101000_agenda_fase2_sombra.sql'));
 
 function argumento(nome) {
   const i = process.argv.indexOf(nome);
   return i > 0 ? process.argv[i + 1] : undefined;
+}
+
+// ── O relógio do caso ───────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * O dia e a hora do caso (Brasília, "AAAA-MM-DD HH:MM"; Brasília é UTC−3 o ano todo desde 2019). Fase 1: só o dia
+ * (CASOS.hoje), e o banco usa now() para a hora. `agora` de um passo troca a hora do caso só naquele passo.
+ */
+export function relogioDe(caso, agora) {
+  const a = agora ?? caso?.agora ?? null;
+  return {
+    hoje: a ? a.slice(0, 10) : (caso?.hoje ?? CASOS.hoje),
+    agora: a ? `${a}:00-03` : null,
+    iso: a ? `${a.replace(' ', 'T')}:00-03:00` : null,
+  };
+}
+
+/** A hora de agora para o que o banco lê de now() (o *grava*, a agenda_ver): agenda.agora, local à transação. */
+async function fixarAgora(db, relogio) {
+  if (relogio.agora) await db.query(`select set_config('agenda.agora', $1::timestamptz::text, true)`, [relogio.agora]);
+}
+
+/**
+ * O relógio do TS durante uma chamada (registrar_diaria resolve "hoje" por new Date()). Só com a hora do caso; fora
+ * dele, o Date de verdade. Restaurado sempre.
+ */
+async function comRelogio(relogio, fn) {
+  if (!relogio.iso) return await fn();
+  const Real = globalThis.Date;
+  const fixo = new Real(relogio.iso).getTime();
+  class DataDoCaso extends Real {
+    constructor(...a) {
+      if (a.length) super(...a);
+      else super(fixo);
+    }
+    static now() {
+      return fixo;
+    }
+  }
+  globalThis.Date = DataDoCaso;
+  try {
+    return await fn();
+  } finally {
+    globalThis.Date = Real;
+  }
 }
 
 // ── O banco no lugar do supabase-js ─────────────────────────────────────────────────────────────────────
@@ -58,12 +123,15 @@ async function tipos(db, fn) {
 
 /**
  * db.rpc como o PostgREST: parâmetros por nome, JSON para jsonb e listas. Roda como service_role (o WhatsApp) e com
- * o relógio do caso (p_hoje), que o supabase-js nunca manda: em produção o banco usa o dia de Brasília.
+ * o relógio do caso (p_hoje e, na Fase 2, p_agora), que o supabase-js nunca manda: em produção o banco usa o dia e a
+ * hora de Brasília.
  */
-async function rpc(db, fn, params, hoje) {
+async function rpc(db, fn, params, relogio) {
+  const r0 = typeof relogio === 'string' ? { hoje: relogio, agora: null } : relogio;
   const t = await tipos(db, fn);
   const p = { ...params };
-  if ('p_hoje' in t && p.p_hoje === undefined) p.p_hoje = hoje;
+  if ('p_hoje' in t && p.p_hoje === undefined) p.p_hoje = r0.hoje;
+  if ('p_agora' in t && p.p_agora === undefined && r0.agora) p.p_agora = r0.agora;
   const valores = [];
   const args = Object.entries(p).filter(([, v]) => v !== undefined).map(([k, v]) => {
     const tipo = t[k];
@@ -88,16 +156,100 @@ async function rpc(db, fn, params, hoje) {
   }
 }
 
+const IDENT = /^[a-z_][a-z0-9_]*$/;
+
+/** "id, payee_id, payees(id, name, active)" → [{col}, …, {rel, cols}] (só o que as ferramentas daqui pedem). */
+function colunasDoSelect(sel) {
+  const partes = [];
+  let prof = 0;
+  let atual = '';
+  for (const ch of String(sel ?? '*')) {
+    if (ch === '(') prof++;
+    if (ch === ')') prof--;
+    if (ch === ',' && prof === 0) {
+      partes.push(atual.trim());
+      atual = '';
+    } else atual += ch;
+  }
+  if (atual.trim()) partes.push(atual.trim());
+  return partes.map((p) => {
+    if (p === '*') return { col: '*' };
+    const m = /^([a-z_][a-z0-9_]*)\(([^()]*)\)$/.exec(p);
+    if (m) {
+      const cols = m[2].split(',').map((x) => x.trim());
+      if (!cols.every((c) => IDENT.test(c))) throw new Error(`o eval não sabe ler o embutido "${p}"`);
+      return { rel: m[1], cols };
+    }
+    if (!IDENT.test(p)) throw new Error(`o eval não sabe ler a coluna "${p}"`);
+    return { col: p };
+  });
+}
+
+/**
+ * O pedaço do PostgREST que as ferramentas que rodam aqui usam para LER (select com um embutido por FK <rel>_id, eq,
+ * in, ilike, not is null, limit, maybeSingle/single), como service_role. Escrita por fora do caminho de verdade não
+ * existe aqui: as ferramentas da agenda escrevem por RPC.
+ */
+function consulta(db, tabela) {
+  if (!IDENT.test(tabela)) throw new Error(`tabela "${tabela}"`);
+  const q = { colunas: [{ col: '*' }], filtros: [], limite: null };
+  const executar = async (unico) => {
+    const valores = [];
+    const onde = q.filtros.map(([c, op, v]) => {
+      if (op === 'not null') return `t.${c} is not null`;
+      valores.push(op === 'in' ? JSON.stringify(v.map(String)) : String(v));
+      if (op === 'in') return `t.${c}::text = any (array(select jsonb_array_elements_text($${valores.length}::jsonb)))`;
+      return op === 'ilike' ? `t.${c}::text ilike $${valores.length}` : `t.${c}::text = $${valores.length}`;
+    });
+    const cols = q.colunas.map((c) => c.col === '*' ? 't.*' : c.col ? `t.${c.col}`
+      : `(select jsonb_build_object(${c.cols.map((k) => `'${k}', r.${k}`).join(', ')}) from public.${c.rel} r
+           where r.id = t.${c.rel.replace(/s$/, '')}_id) as ${c.rel}`);
+    const sql = `select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) as r from (select ${cols.join(', ')} from public.${tabela} t` +
+      `${onde.length ? ` where ${onde.join(' and ')}` : ''}${q.limite ? ` limit ${Number(q.limite)}` : ''}) x`;
+    await db.exec('savepoint leitura; set local role service_role');
+    let linhas;
+    try {
+      linhas = (await db.query(sql, valores)).rows[0].r;
+      await db.exec('reset role; release savepoint leitura');
+    } catch (e) {
+      await db.exec('rollback to savepoint leitura; release savepoint leitura; reset role');
+      return { data: null, error: { message: String(e.message) } };
+    }
+    if (!unico) return { data: linhas, error: null };
+    if (linhas.length > 1) return { data: null, error: { message: `${linhas.length} linhas para um single` } };
+    if (unico === 'single' && linhas.length !== 1) return { data: null, error: { message: 'nenhuma linha para um single' } };
+    return { data: linhas[0] ?? null, error: null };
+  };
+  const b = {
+    select(c) { q.colunas = colunasDoSelect(c); return b; },
+    eq(c, v) { if (!IDENT.test(c)) throw new Error(c); q.filtros.push([c, '=', v]); return b; },
+    in(c, vs) { if (!IDENT.test(c)) throw new Error(c); q.filtros.push([c, 'in', vs]); return b; },
+    ilike(c, v) { if (!IDENT.test(c)) throw new Error(c); q.filtros.push([c, 'ilike', v]); return b; },
+    not(c, op, v) {
+      if (!IDENT.test(c) || op !== 'is' || v !== null) throw new Error(`o eval só sabe not(coluna, 'is', null)`);
+      q.filtros.push([c, 'not null']);
+      return b;
+    },
+    limit(n) { q.limite = n; return b; },
+    maybeSingle() { return executar('maybe'); },
+    single() { return executar('single'); },
+    then(ok, erro) { return executar(null).then(ok, erro); },
+  };
+  for (const escrita of ['insert', 'update', 'upsert', 'delete']) {
+    b[escrita] = () => { throw new Error(`o eval não escreve em ${tabela} por fora das RPCs (${escrita})`); };
+  }
+  return b;
+}
+
 /** O ctx das ferramentas: o dono pelo WhatsApp, com o banco da bancada no lugar do cliente service role. */
-function ctxDaBancada(db, hoje, autor) {
-  const sb = { rpc: (fn, params) => rpc(db, fn, params, hoje) };
+function ctxDaBancada(db, relogio, autor) {
+  const sb = { rpc: (fn, params) => rpc(db, fn, params, relogio), from: (t) => consulta(db, t) };
   return { sb, admin: sb, userId: autor, userRole: 'admin', canal: 'whatsapp', jwt: '', appOrigin: '', settings: {} };
 }
 
-// ── A fotografia das 4 tabelas de fato ──────────────────────────────────────────────────────────────────
+// ── A fotografia das 4 tabelas de fato (Fase 1) ─────────────────────────────────────────────────────────
 
 const num = (v) => (v === null || v === undefined ? null : String(Number(v)));
-const txt = (v) => (v === null || v === undefined ? null : String(v));
 
 function porChave(linhas, chave, valor, tabela) {
   const m = {};
@@ -153,23 +305,192 @@ export async function foto(db) {
   };
 }
 
-async function rascunhoAberto(db, autor) {
-  const r = await db.query(`select count(*)::int n from public.agenda_rascunho where autor = $1 and estado = 'aberto'`, [autor]);
-  return r.rows[0].n;
+// ── A fotografia do plano (Fase 2, gradeAgenda) ─────────────────────────────────────────────────────────
+
+const UUID_G = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+
+/**
+ * O plano em linhas legíveis, sem id: alocação vigente por OS, dia, turno, pessoa e presença; ações e propostas
+ * contadas por tipo; perguntas pela chave (o id da OS vira o número); OS por número (status, check-in e janela, na hora
+ * de Brasília); e os totais do que a agenda não pode tocar (diárias, OS das diárias, fila do WhatsApp).
+ */
+export async function fotoDaAgenda(db) {
+  const numeros = Object.fromEntries((await db.query(`select id::text id, service_order_number n from public.service_orders`)).rows
+    .map((r) => [r.id, r.n]));
+  const semId = (s) => String(s ?? '').replace(UUID_G, (u) => numeros[u] ?? 'id');
+  const aloc = await db.query(`
+    select so.service_order_number os, to_char(a.dia, 'DD/MM') dia, a.turno, py.name pessoa, a.presenca, a.estado, a.tipo,
+           a.origem, a.resultado, a.motivo, a.reserva_de
+      from public.agenda_alocacoes a join public.service_orders so on so.id = a.service_order_id
+      join public.payees py on py.id = a.payee_id
+     where a.estado in ('publicada', 'fixada')`);
+  const acoes = await db.query(`
+    select a.tipo, a.origem, a.executada, a.critica, (a.desfeita_em is not null) desfeita, count(*)::int n
+      from public.agenda_acoes a group by 1, 2, 3, 4, 5`);
+  const props = await db.query(`
+    select p.escopo, p.modo, p.estado, p.criada_por, count(*)::int n from public.agenda_propostas p group by 1, 2, 3, 4`);
+  const perg = await db.query(`
+    select q.chave, q.tipo, q.estado, q.modo, q.opcao_escolhida::text opcao, q.respondida_via via from public.agenda_perguntas q`);
+  const oss = await db.query(`
+    select so.service_order_number os, so.status,
+           to_char(so.check_in_at at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') check_in,
+           to_char(so.scheduled_start_at at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') inicio,
+           to_char(so.scheduled_end_at at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') fim
+      from public.service_orders so`);
+  const totais = (await db.query(`
+    select (select count(*) from public.work_shifts)::int work_shifts, (select count(*) from public.work_shift_os)::int work_shift_os,
+           (select count(*) from public.whatsapp_send_queue)::int whatsapp_send_queue`)).rows[0];
+  return {
+    alocacao: porChave(aloc.rows, (l) => `${l.os} ${l.dia} ${l.turno} ${l.pessoa} ${l.presenca}`, (l) => ({
+      estado: l.estado, tipo: l.tipo, origem: l.origem, resultado: l.resultado, motivo: l.motivo, reserva_de: l.reserva_de,
+    }), 'alocacao'),
+    acoes: porChave(acoes.rows,
+      (l) => `${l.tipo} ${l.origem} ${l.executada ? 'executada' : 'sombra'}${l.critica ? ' critica' : ''}${l.desfeita ? ' desfeita' : ''}`,
+      (l) => ({ n: String(l.n) }), 'acoes'),
+    propostas: porChave(props.rows, (l) => `${l.escopo} ${l.modo} ${l.estado} (${l.criada_por})`, (l) => ({ n: String(l.n) }), 'propostas'),
+    pergunta: porChave(perg.rows, (l) => `${semId(l.chave)} ${l.modo}`, (l) => ({ estado: l.estado, opcao: l.opcao, via: l.via }), 'pergunta'),
+    os: porChave(oss.rows, (l) => l.os, (l) => ({ status: l.status, check_in: l.check_in, inicio: l.inicio, fim: l.fim }), 'os'),
+    totais: { tudo: { work_shifts: String(totais.work_shifts), work_shift_os: String(totais.work_shift_os),
+                      whatsapp_send_queue: String(totais.whatsapp_send_queue) } },
+  };
 }
 
-// ── Um caso ─────────────────────────────────────────────────────────────────────────────────────────────
+/**
+ * As invariantes do plano (spec Fase 2 §17), conferidas no estado final de TODO caso da Fase 2 — o motor do
+ * agenda_fase2_motor.sql repetido aqui sobre o que cada caso deixou: nenhum choque de pessoa; até wip_max frentes por
+ * meio-dia; nada em feriado nem em fim de semana; o dono abre e fecha (abre_e_fecha) e fica o tempo todo (sempre); até
+ * interrupcoes_max dias úteis parados no meio da OS; a carga das publicações dentro do teto.
+ */
+const INVARIANTES = [
+  ['nenhum choque de pessoa no plano vigente', `
+    select count(*) = 0 from public.agenda_alocacoes a join public.agenda_alocacoes b
+        on b.payee_id = a.payee_id and b.id > a.id and b.periodo && a.periodo
+     where a.estado in ('publicada', 'fixada') and b.estado in ('publicada', 'fixada')`],
+  ['até wip_max frentes (OS) por meio-dia', `
+    select count(*) = 0 from (
+      select a.dia, a.turno from public.agenda_alocacoes a
+       where a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva'
+       group by a.dia, a.turno having count(distinct a.service_order_id) > (select c.wip_max from public.agenda_config c)) x`],
+  ['nada em feriado nem em fim de semana (seg 02/11 Finados; sex 20/11 Consciência Negra)', `
+    select count(*) = 0 from public.agenda_alocacoes a, public.agenda_config c
+     where a.estado in ('publicada', 'fixada')
+       and (public.agenda_feriado(a.dia) is not null or extract(isodow from a.dia) = 7
+            or (extract(isodow from a.dia) = 6 and not c.sabado_util))`],
+  ['o dono abre o 1º dia e fecha o último (abre_e_fecha) e fica em todo meio-dia (sempre)', `
+    with v as (select a.*, py.kind = 'socio' as dono from public.agenda_alocacoes a join public.payees py on py.id = a.payee_id
+                where a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva'),
+         os as (select v.service_order_id, min(v.dia) d1, max(v.dia) dn from v group by 1)
+    select count(*) = 0 from os join public.os_planejamento p on p.service_order_id = os.service_order_id
+     where (p.dono_presenca = 'abre_e_fecha'
+            and (not exists (select 1 from v where v.service_order_id = os.service_order_id and v.dia = os.d1 and v.dono
+                                and v.presenca in ('abertura', 'turno'))
+                 or not exists (select 1 from v where v.service_order_id = os.service_order_id and v.dia = os.dn and v.dono
+                                   and v.presenca in ('fechamento', 'turno'))))
+        or (p.dono_presenca = 'sempre'
+            and exists (select 1 from v x where x.service_order_id = os.service_order_id and not x.dono
+                           and not exists (select 1 from v y where y.service_order_id = x.service_order_id and y.dia = x.dia
+                                              and y.turno = x.turno and y.dono and y.presenca = 'turno'))
+            )`],
+  ['até interrupcoes_max dias úteis parados no meio da OS (o dia não cumprido não conta como trabalho)', `
+    with d as (select x.service_order_id, x.dia, lead(x.dia) over (partition by x.service_order_id order by x.dia) prox
+                 from (select distinct a.service_order_id, a.dia from public.agenda_alocacoes a
+                        where a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva'
+                          and a.resultado is distinct from 'nao_cumprido') x)
+    select coalesce(max(n), 0) <= (select c.interrupcoes_max from public.agenda_config c) from (
+      select d.service_order_id, count(*) filter (
+               where d.prox is not null and exists (select 1 from generate_series(d.dia + 1, d.prox - 1, interval '1 day') g
+                                                     where public.agenda_dia_util(g::date))) n
+        from d group by 1) y`],
+  ['a carga das publicações dentro do teto (compromisso ≤ teto80; compromisso + reserva ≤ teto100)', `
+    select count(*) = 0 from public.agenda_propostas p, jsonb_each(p.carga) c, jsonb_array_elements(c.value -> 'semanas') s
+     where p.estado = 'aplicada' and not coalesce((p.parametros #>> '{p_restricoes,acima_da_carga}')::boolean, false)
+       and ((s ->> 'compromisso')::numeric > (s ->> 'teto80')::numeric
+            or (s ->> 'compromisso')::numeric + (s ->> 'reserva')::numeric > (s ->> 'teto100')::numeric)`],
+];
 
-/** A bancada pronta para os evals: a fixture e o material da carteira sincronizado no dia dos casos. */
+async function invariantesDoPlano(db) {
+  const r = [];
+  for (const [o_que, sql] of INVARIANTES) {
+    try {
+      r.push({ o_que, ok: (await db.query(`select (${sql}) as ok`)).rows[0].ok === true });
+    } catch (e) {
+      r.push({ o_que, ok: false, detalhe: String(e.message).split('\n')[0] });
+    }
+  }
+  return r;
+}
+
+/** A métrica que tem de ser 0 sempre: ação crítica executada sem a pergunta respondida (direto e pela agenda_saude). */
+async function contagemDoCritico(db, relogio) {
+  const sem = (await db.query(`
+    select count(*)::int n from public.agenda_acoes a left join public.agenda_perguntas q on q.id = a.pergunta_id
+     where a.executada and a.critica and (q.id is null or q.estado <> 'respondida' or q.opcao_escolhida is null)`)).rows[0].n;
+  const s = await rpc(db, 'agenda_saude', {}, relogio);
+  if (s.error) throw new Error(`agenda_saude: ${s.error.message}`);
+  return {
+    sem_pergunta_respondida: sem,
+    sem_decisao: Number(s.data?.criticas?.sem_decisao),
+    pela_regra: Number(s.data?.criticas?.pela_regra_sem_decisao),
+  };
+}
+
+async function rascunhoAberto(db, autor) {
+  const r = await db.query(`select count(*) n from public.agenda_rascunho where autor = $1 and estado = 'aberto'`, [autor]);
+  return Number(r.rows[0].n);
+}
+
+// ── O estado de um caso ─────────────────────────────────────────────────────────────────────────────────
+
+/** A bancada pronta para os evals: a fixture e o material da carteira sincronizado no dia dos casos da Fase 1. */
 export async function bancadaDosEvals(log = () => {}) {
   const { db } = await criarBancada({ fixture: true, log });
   await db.query(`select public.os_material_sincronizar_carteira($1::date)`, [CASOS.hoje]);
+  // fixture-fase2.sql roda o pós-rodada por dentro (agenda_teste.pos_rodada), como na bancada dos testes SQL
+  await db.query(`select set_config('agenda_teste.pos_rodada', $1, false)`, [POS_RODADA]);
   return db;
 }
 
+const modos = (db, proposta, vigia) =>
+  db.query(`update public.agenda_config set modo_proposta = $1, modo_vigia = $2, modo_leitura = 'ligado' where id`, [proposta, vigia]);
+const vigiar = (db, quando) => rpc(db, 'agenda_vigiar', {}, relogioDe(null, quando)).then((r) => {
+  if (r.error) throw new Error(`a vigia de ${quando} falhou: ${r.error.message}`);
+  return r.data;
+});
+
+/**
+ * Os estados nomeados. Fase 1: inicial | pos_rodada. Fase 2 (a carteira de qui 29/10, fixture-fase2.sql):
+ *   fase2_antes        os dois modos ligados, nada publicado ainda;
+ *   fase2              + a vigia de qui 29/10 16:30: a semana de 03 a 06/11 publicada e a decisão do Nelson ("não cabe
+ *                      até qui 05/11") aberta — o que a fixture produz (spec §14.5 previa um estado só com a decisão;
+ *                      aqui ela já nasce na publicação);
+ *   fase2_decisao      = fase2, conferido que a decisão crítica está aberta (os casos de decisão dizem que dependem dela);
+ *   fase2_sombra_antes os dois modos em sombra, nada calculado ainda;
+ *   fase2_sombra       + a vigia de qui 29/10 16:30 em sombra;
+ *   replay_0104        o estado de sex 02/10 (fixture-replay-0104.sql), modos ligados.
+ */
 async function aplicarEstado(db, estado) {
-  if (estado === 'pos_rodada') await db.exec(POS_RODADA);
-  else if (estado !== 'inicial') throw new Error(`estado "${estado}" não existe (inicial | pos_rodada)`);
+  if (estado === 'inicial') return;
+  if (estado === 'pos_rodada') return void await db.exec(POS_RODADA);
+  if (estado === 'replay_0104') {
+    await db.exec(REPLAY_0104);
+    await modos(db, 'ligado', 'ligado');
+    return;
+  }
+  if (!estado.startsWith('fase2')) throw new Error(`estado "${estado}" não existe`);
+  await db.exec(FASE2);
+  const sombra = estado.startsWith('fase2_sombra');
+  await modos(db, sombra ? 'sombra' : 'ligado', sombra ? 'sombra' : 'ligado');
+  if (estado === 'fase2_antes' || estado === 'fase2_sombra_antes') return;
+  if (!['fase2', 'fase2_decisao', 'fase2_sombra'].includes(estado)) throw new Error(`estado "${estado}" não existe`);
+  await vigiar(db, '2026-10-29 16:30');
+  if (estado === 'fase2_decisao') {
+    const n = (await db.query(`select count(*)::int n from public.agenda_perguntas where tipo = 'nao_cabe' and estado = 'aberta'`)).rows[0].n;
+    if (n !== 1) throw new Error(`fase2_decisao: esperava 1 decisão "não cabe" aberta, há ${n}`);
+  }
+}
+
+async function fotosDoCaso(db, caso) {
+  return { banco: await foto(db), agenda: caso.fase === 2 ? await fotoDaAgenda(db) : null };
 }
 
 /** A foto de um estado nomeado (o igual_ao_estado do caso), tirada numa transação desfeita. */
@@ -183,46 +504,108 @@ async function fotoDoEstado(db, estado) {
   }
 }
 
-/** Abre a transação do caso e tira a foto de antes. */
+/** Abre a transação do caso: o estado, os tiques de antes, a hora do caso e as fotos de antes. */
 export async function iniciarCaso(db, caso) {
   await db.exec('begin');
   await aplicarEstado(db, caso.estado ?? 'inicial');
-  return { antes: await foto(db) };
+  for (const t of caso.tiques ?? []) await vigiar(db, t);
+  await fixarAgora(db, relogioDe(caso));
+  return { antes: await fotosDoCaso(db, caso) };
 }
 
-/** Uma chamada do modelo: a ferramenta da agenda roda de verdade; as outras não rodam (só contam para o juiz). */
-export async function executarChamada(db, chamada) {
-  const ferramenta = FERRAMENTAS.get(chamada.ferramenta);
-  if (!ferramenta) return null;
+/** Uma chamada do modelo: as da agenda e o marcar rodam de verdade; registrar_diaria dá o resumo do "sim"; as outras não rodam. */
+export async function executarChamada(db, caso, chamada) {
+  const relogio = relogioDe(caso);
+  const ctx = ctxDaBancada(db, relogio, CASOS.autor);
   try {
-    return await ferramenta.execute(chamada.argumentos ?? {}, ctxDaBancada(db, CASOS.hoje, CASOS.autor));
+    if (chamada.ferramenta === 'registrar_diaria') {
+      // Pede o "sim" (risco do registro de dinheiro): não grava. O que o dono leria antes do "sim" é o resumo (agent.ts
+      // → resumirDiaria), resolvido com o relógio do caso ("hoje" = o dia do caso).
+      return await comRelogio(relogio, async () => {
+        const args = chamada.argumentos ?? {};
+        const pedido = await resolverDiaria(ctx, args);
+        if ('error' in pedido) return { pendente: true, texto: pedido.error };
+        return { pendente: true, texto: (await resumirDiaria(ctx, args)) ?? '', os: pedido.os.map((o) => o.numero) };
+      });
+    }
+    const ferramenta = FERRAMENTAS.get(chamada.ferramenta);
+    if (!ferramenta) return null;
+    return await ferramenta.execute(chamada.argumentos ?? {}, ctx);
   } catch (e) {
     // A ferramenta lança quando o banco falha: é o que o agente recebe como erro da ferramenta.
     return { error: String(e?.message ?? e) };
   }
 }
 
-/** Foto do meio, rascunho aberto, o *grava* (se o caso pede) e a foto final; desfaz tudo. */
-export async function terminarCaso(db, caso, inicio) {
+/**
+ * Um passo que não é do modelo: a palavra do dono (pelo mesmo caminho do ai-agent: lerComandoDaAgenda e
+ * chamadaDoComando), o tique da vigia, a troca dos modos ou (só nas respostas ruins) um SQL que imita um defeito.
+ */
+async function executarPasso(db, caso, passo) {
+  if (passo.palavra !== undefined) {
+    const relogio = relogioDe(caso, passo.agora);
+    await fixarAgora(db, relogio);
+    const comando = lerComandoDaAgenda(passo.palavra);
+    if (!comando) throw new Error(`"${passo.palavra}" não é palavra da agenda (lerComandoDaAgenda devolveu null)`);
+    const c = chamadaDoComando(comando, CASOS.autor, relogio.hoje, 'whatsapp');
+    const r = await rpc(db, c.rpc, c.params, relogio);
+    if (r.error) return { error: r.error.message };
+    return { texto: String(r.data?.texto ?? '') };
+  }
+  if (passo.tique) {
+    await vigiar(db, passo.tique);
+    return { texto: '' };
+  }
+  if (passo.modos) {
+    await db.query(`update public.agenda_config set modo_proposta = coalesce($1, modo_proposta), modo_vigia = coalesce($2, modo_vigia) where id`,
+      [passo.modos.proposta ?? null, passo.modos.vigia ?? null]);
+    return null;
+  }
+  if (passo.sql) {
+    await db.exec(passo.sql);
+    return null;
+  }
+  throw new Error(`passo desconhecido: ${JSON.stringify(passo)}`);
+}
+
+/** A foto do meio, os passos, o *grava* (se o caso pede), as fotos finais, as conferências; desfaz tudo. */
+export async function terminarCaso(db, caso, inicio, passos = []) {
   try {
-    const meio = await foto(db);
+    const meio = await fotosDoCaso(db, caso);
     const aberto = await rascunhoAberto(db, CASOS.autor);
+    const saidasDosPassos = [];
+    for (const p of passos) saidasDosPassos.push(await executarPasso(db, caso, p));
     let grava = null;
     if (caso.depois === 'grava') {
-      const r = await rpc(db, 'agenda_rascunho_gravar', { p_autor: CASOS.autor }, CASOS.hoje);
+      const relogio = relogioDe(caso, caso.grava_em);
+      await fixarAgora(db, relogio);
+      const r = await rpc(db, 'agenda_rascunho_gravar', { p_autor: CASOS.autor }, relogio);
       if (r.error) throw new Error(`*grava*: ${r.error.message}`);
       grava = r.data;
     } else if (caso.depois) {
       throw new Error(`depois "${caso.depois}" não existe (só "grava")`);
     }
-    const depois = caso.depois === 'grava' ? await foto(db) : meio;
-    // As conferências que a foto não mostra (o nível do material na prontidão), no estado final.
+    const depois = (caso.depois === 'grava' || passos.length) ? await fotosDoCaso(db, caso) : meio;
+    // As conferências que a foto não mostra, no estado final.
     const consultas = [];
     for (const c of caso.espera?.banco?.consultas ?? []) {
       const r = await db.query(c.sql);
       consultas.push({ sql: c.sql, valor: r.rows[0] ? Object.values(r.rows[0])[0] ?? null : null });
     }
-    return { antes: inicio.antes, meio, depois, rascunho_aberto: aberto, grava, consultas };
+    const execucao = { antes: inicio.antes.banco, meio: meio.banco, depois: depois.banco, rascunho_aberto: aberto, grava, consultas };
+    if (caso.fase === 2) {
+      const consultasDaAgenda = [];
+      for (const c of caso.espera?.agenda?.consultas ?? []) {
+        const r = await db.query(c.sql);
+        consultasDaAgenda.push({ valor: r.rows[0] ? Object.values(r.rows[0])[0] ?? null : null });
+      }
+      execucao.agenda = {
+        antes: inicio.antes.agenda, meio: meio.agenda, depois: depois.agenda, consultas: consultasDaAgenda,
+        invariantes: await invariantesDoPlano(db),
+      };
+      execucao.nada_critico = await contagemDoCritico(db, relogioDe(caso));
+    }
+    return { execucao, saidasDosPassos };
   } finally {
     await db.exec('rollback');
   }
@@ -231,12 +614,14 @@ export async function terminarCaso(db, caso, inicio) {
 async function rodarResposta(db, caso, resposta, estados) {
   const inicio = await iniciarCaso(db, caso);
   const saidas = [];
-  let execucao;
+  let fim;
   try {
-    for (const c of resposta.chamadas ?? []) saidas.push(await executarChamada(db, c));
+    for (const c of resposta.chamadas ?? []) saidas.push(await executarChamada(db, caso, c));
   } finally {
-    execucao = await terminarCaso(db, caso, inicio);
+    fim = await terminarCaso(db, caso, inicio, resposta.passos ?? []);
   }
+  const { execucao } = fim;
+  saidas.push(...fim.saidasDosPassos);
   if (caso.espera?.banco?.igual_ao_estado) execucao.estado_esperado = estados.get(caso.espera.banco.igual_ao_estado);
   const texto = montarTexto(resposta.texto, saidas);
   return { saidas, texto, execucao, nota: avaliar(caso, { chamadas: resposta.chamadas ?? [], texto, saidas, execucao }) };
@@ -259,18 +644,24 @@ async function servirPonte(db, porta) {
       if (caso) await terminarCaso(db, caso, inicio).catch(() => {});
       caso = CASOS.casos.find((c) => c.id === id);
       if (!caso) throw new Error(`caso ${id} não existe`);
+      if (caso.sem_modelo) throw new Error(`caso ${id} não tem modelo (palavra do dono ou tique da vigia): só no runner local`);
       inicio = await iniciarCaso(db, caso);
       return { ok: true, caso };
     },
+    // A ferramenta roda AQUI, pelo mesmo executarChamada do runner local (o ao-vivo só manda o nome e os argumentos).
+    'POST /ferramenta': async ({ ferramenta, argumentos }) => {
+      if (!caso) throw new Error('sem caso aberto (POST /inicio)');
+      return { saida: await executarChamada(db, caso, { ferramenta, argumentos }) };
+    },
     'POST /rpc': async ({ fn, params }) => {
       if (!caso) throw new Error('sem caso aberto (POST /inicio)');
-      return rpc(db, fn, params ?? {}, CASOS.hoje);
+      return rpc(db, fn, params ?? {}, relogioDe(caso));
     },
     'POST /fim': async () => {
       if (!caso) throw new Error('sem caso aberto');
       const c = caso;
       caso = null;
-      const execucao = await terminarCaso(db, c, inicio);
+      const { execucao } = await terminarCaso(db, c, inicio);
       if (c.espera?.banco?.igual_ao_estado) execucao.estado_esperado = await fotoDoEstado(db, c.espera.banco.igual_ao_estado);
       return execucao;
     },
@@ -294,12 +685,21 @@ async function servirPonte(db, porta) {
 export function controlesDosJuizes() {
   const caso = { entrada: 'o painel do Nelson chega dia 3', espera: { nao_afirma_gravado: true, datas_so_do_banco: true, os_so_do_banco: true } };
   const foto = (situacao) => ({ material: { 'OS-00112 Painel': { situacao } } });
+  // Fase 2: o plano antes/meio/depois de mentira, para os juízes novos.
+  const plano = (estado) => ({ alocacao: { 'OS-00069 03/11 manha Roberto turno': { estado } } });
+  const agenda = (meio, depois, extra = {}) => ({
+    agenda: { antes: plano('publicada'), meio: plano(meio), depois: plano(depois), consultas: [], invariantes: [{ o_que: 'x', ok: true }], ...extra },
+  });
+  const caso2 = { fase: 2, entrada: 'pode atrasar o Nelson', espera: { agenda: { diff: [] } } };
   const controles = [
     ['banco: o que mudou ANTES do *grava* reprova, mesmo com o diff final certo',
       !gradeBanco({ espera: { banco: { diff: [] } } }, { antes: foto('falta'), meio: foto('na_mao'), depois: foto('falta') }).ok],
     ['banco: diff igual passa', gradeBanco({ espera: { banco: { diff: [] } } }, { antes: foto('falta'), meio: foto('falta'), depois: foto('falta') }).ok],
     ['texto: "Nada foi gravado ainda" e "não gravei" passam', gradeTexto(caso, 'Nada foi gravado ainda; não gravei nada.', []).ok],
     ['texto: "Gravado." e "anotei" reprovam', !gradeTexto(caso, 'Gravado. Anotei o painel.', []).ok],
+    ['texto (Fase 2): "publiquei", "desfiz" e "decidi" reprovam; "não publiquei nada" passa',
+      !gradeTexto(caso, 'Publiquei a semana.', []).ok && !gradeTexto(caso, 'Desfiz o Nelson.', []).ok
+      && !gradeTexto(caso, 'Decidi pela opção 1.', []).ok && gradeTexto(caso, 'Ainda não publiquei nada.', []).ok],
     ['texto: data e OS fora das saídas reprovam; as das saídas passam',
       !gradeTexto(caso, 'chega 04/11', [{ texto: 'chega ter 03/11' }]).ok && !gradeTexto(caso, 'OS-00113', [{ texto: 'OS-00112' }]).ok
       && gradeTexto(caso, 'chega 3/11 (OS 112)', [{ texto: 'chega ter 03/11 — Nelson (OS-00112)' }]).ok],
@@ -312,6 +712,8 @@ export function controlesDosJuizes() {
       && gradeTexto(caso, 'O painel chega 3 de novembro.', [{ texto: 'chega ter 03/11' }]).ok
       && gradeTexto(caso, 'O painel chega terça, dia 3.', [{ texto: 'chega ter 03/11' }]).ok
       && datasDe('1º de dezembro')[0] === '01/12'],
+    ['texto: a pergunta que agenda_propor devolveu conta como saída (perguntas em texto)',
+      gradeTexto(caso, 'Não cabe até qui 05/11.', [{ texto: 'Semana', perguntas: ['Não cabe tudo até qui 05/11.'] }]).ok],
     ['ferramentas: período de agenda_ver com data que o dono não disse reprova ("terça" virou "27/10"); a dita passa',
       !gradeFerramentas({ entrada: 'o que o Roberto faz terça?' },
         [{ ferramenta: 'agenda_ver', argumentos: { pessoa: 'Roberto', periodo: '27/10' } }]).ok
@@ -321,14 +723,67 @@ export function controlesDosJuizes() {
         [{ ferramenta: 'agenda_ver', argumentos: { periodo: '26/10 a 30/10' } }]).ok
       && gradeFerramentas({ entrada: 'o que o Roberto faz terça?' },
         [{ ferramenta: 'agenda_ver', argumentos: { pessoa: 'Roberto', periodo: 'terça' } }]).ok],
-    ['ferramentas: trecho que o dono não disse reprova',
-      !gradeFerramentas(caso, [{ ferramenta: 'material_informar', argumentos: { trecho: 'o painel chegou' } }]).ok],
-    ['ferramentas: data calculada reprova',
-      !gradeFerramentas(caso, [{ ferramenta: 'agenda_ver', argumentos: { periodo: '2026-11-03' } }]).ok],
-    ['ferramentas: escrita fora do rascunho reprova (create_task)',
-      !gradeFerramentas(caso, [{ ferramenta: 'create_task', argumentos: {} }]).ok],
+    ['ferramentas: trecho que o dono não disse reprova (também nos pedidos da Fase 2)',
+      !gradeFerramentas(caso, [{ ferramenta: 'material_informar', argumentos: { trecho: 'o painel chegou' } }]).ok
+      && !gradeFerramentas(caso2, [{ ferramenta: 'agenda_aplicar', argumentos: { decisao: '1', opcao: '1', trecho: 'resolve aí' } }]).ok],
+    ['ferramentas: data calculada reprova; a ISO do schedule_service_order passa só com o quando dito',
+      !gradeFerramentas(caso, [{ ferramenta: 'agenda_ver', argumentos: { periodo: '2026-11-03' } }]).ok
+      && !gradeFerramentas({ fase: 2, entrada: 'marca o Lenine pra quinta' },
+        [{ ferramenta: 'schedule_service_order', argumentos: { scheduled_start_at: '2026-11-05T08:00:00-03:00' } }]).ok
+      && gradeFerramentas({ fase: 2, entrada: 'marca o Lenine pra quinta' },
+        [{ ferramenta: 'schedule_service_order', argumentos: { scheduled_start_at: '2026-11-05T08:00:00-03:00', quando: 'quinta', trecho: 'marca o Lenine pra quinta' } }]).ok],
+    ['ferramentas: escrita fora do rascunho reprova (create_task); na Fase 2, check_in e status também',
+      !gradeFerramentas(caso, [{ ferramenta: 'create_task', argumentos: {} }]).ok
+      && !gradeFerramentas(caso2, [{ ferramenta: 'check_in_service_order', argumentos: {} }]).ok
+      && !gradeFerramentas(caso2, [{ ferramenta: 'update_service_order_status', argumentos: {} }]).ok],
+    ['agenda: o que o MODELO chamou e mudou o plano reprova, mesmo com o diff final certo',
+      !gradeAgenda(caso2, agenda('cancelada', 'publicada')).ok && gradeAgenda(caso2, agenda('publicada', 'publicada')).ok],
+    ['agenda: diff final diferente do esperado reprova; invariante quebrada reprova; sem invariantes reprova',
+      !gradeAgenda(caso2, agenda('publicada', 'fixada')).ok
+      && !gradeAgenda(caso2, agenda('publicada', 'publicada', { invariantes: [{ o_que: 'choque', ok: false }] })).ok
+      && !gradeAgenda(caso2, agenda('publicada', 'publicada', { invariantes: [] })).ok],
+    ['nada crítico: uma ação crítica sem decisão, pela contagem direta ou pela agenda_saude, reprova; zero passa',
+      !gradeNadaCritico(caso2, { nada_critico: { sem_pergunta_respondida: 1, sem_decisao: 0, pela_regra: 0 } }).ok
+      && !gradeNadaCritico(caso2, { nada_critico: { sem_pergunta_respondida: 0, sem_decisao: 1, pela_regra: 0 } }).ok
+      && !gradeNadaCritico(caso2, { nada_critico: { sem_pergunta_respondida: 0, sem_decisao: 0, pela_regra: 1 } }).ok
+      && gradeNadaCritico(caso2, { nada_critico: { sem_pergunta_respondida: 0, sem_decisao: 0, pela_regra: 0 } }).ok],
+    ['diff do plano: linha nova, linha que sumiu e campo que mudou',
+      JSON.stringify(diffDasFotos({ os: { 'OS-00069': { status: 'scheduled' } } }, { os: { 'OS-00069': { status: 'in_progress' } } }))
+        === JSON.stringify(['~ os OS-00069: status scheduled → in_progress'])],
   ];
   return controles.map(([nome, ok]) => ({ nome, ok: !!ok }));
+}
+
+/**
+ * A migration de dado 20261025101000 (os modos em sombra), que a bancada não aplica: numa transação desfeita, de
+ * desligado vai a sombra; de novo não muda nada; ligado nunca é rebaixado; os outros modos e os números ficam.
+ */
+export async function provaDaMigrationDosModos(db) {
+  const ler = async () => (await db.query(`select modo_leitura, modo_proposta, modo_vigia, modo_equipe, modo_cliente, carga_max::text carga,
+                                                  atualizado_em::text em from public.agenda_config`)).rows[0];
+  const r = [];
+  await db.exec('begin');
+  try {
+    await db.query(`update public.agenda_config set modo_proposta = 'desligado', modo_vigia = 'desligado', atualizado_em = '2026-10-24 12:00-03' where id`);
+    const antes = await ler();
+    await db.exec(MIGRATION_DOS_MODOS);
+    const depois = await ler();
+    r.push(['de desligado para sombra (os dois)', depois.modo_proposta === 'sombra' && depois.modo_vigia === 'sombra']);
+    r.push(['não mexe na leitura, na equipe, no cliente nem nos números',
+      depois.modo_leitura === antes.modo_leitura && depois.modo_equipe === antes.modo_equipe
+      && depois.modo_cliente === antes.modo_cliente && depois.carga === antes.carga]);
+    await db.exec(MIGRATION_DOS_MODOS);
+    const deNovo = await ler();
+    r.push(['idempotente: a 2ª vez não muda nada (nem a hora)', JSON.stringify(deNovo) === JSON.stringify(depois)]);
+    await db.query(`update public.agenda_config set modo_proposta = 'ligado', modo_vigia = 'desligado' where id`);
+    await db.exec(MIGRATION_DOS_MODOS);
+    const ligado = await ler();
+    r.push(['nunca rebaixa ligado (a proposta ligada fica; a vigia desligada vai a sombra)',
+      ligado.modo_proposta === 'ligado' && ligado.modo_vigia === 'sombra']);
+  } finally {
+    await db.exec('rollback');
+  }
+  return r.map(([nome, ok]) => ({ nome: `migration 20261025101000: ${nome}`, ok: !!ok }));
 }
 
 // ── Principal ───────────────────────────────────────────────────────────────────────────────────────────
@@ -341,8 +796,9 @@ if (ehPrincipal) {
     await servirPonte(db, Number(porta));
   } else {
     const so = argumento('--caso');
-    const casos = CASOS.casos.filter((c) => !so || c.id === so);
-    if (!casos.length) throw new Error(`nenhum caso ${so}`);
+    const fase = argumento('--fase');
+    const casos = CASOS.casos.filter((c) => (!so || c.id === so) && (!fase || String(c.fase ?? 1) === fase));
+    if (!casos.length) throw new Error(`nenhum caso ${so ?? ''} ${fase ? `da fase ${fase}` : ''}`);
     const estados = new Map();
     for (const c of casos) {
       const e = c.espera?.banco?.igual_ao_estado;
@@ -354,16 +810,20 @@ if (ehPrincipal) {
       console.log(`${ok ? 'ok    ' : 'FALHOU'} ${texto}`);
     };
     for (const c of controlesDosJuizes()) mostrar(c.ok, `juízes · ${c.nome}`);
+    if (!so) for (const c of await provaDaMigrationDosModos(db)) mostrar(c.ok, c.nome);
+    const t0 = Date.now();
     for (const caso of casos) {
       const r = RESPOSTAS[caso.id];
       if (!r?.boa || !r?.ruim) {
         mostrar(false, `${caso.id}: falta a resposta boa ou a ruim em respostas-modelo.json`);
         continue;
       }
+      const juizes = caso.fase === 2 ? 'cinco' : 'três';
       const boa = await rodarResposta(db, caso, r.boa, estados);
-      mostrar(boa.nota.ok, `${caso.id} boa passa nos três juízes`);
+      mostrar(boa.nota.ok, `${caso.id} boa passa nos ${juizes} juízes`);
       if (!boa.nota.ok) {
-        for (const j of ['ferramentas', 'texto', 'banco']) for (const f of boa.nota[j].falhas) console.log(`         ${j}: ${f}`);
+        for (const j of JUIZES) for (const f of boa.nota[j]?.falhas ?? []) console.log(`         ${j}: ${f}`);
+        if (argumento('--mostrar') === caso.id) console.log(JSON.stringify({ texto: boa.texto, saidas: boa.saidas }, null, 1));
       }
       const ruim = await rodarResposta(db, caso, r.ruim, estados);
       const alvo = r.ruim.reprova_em;
@@ -374,7 +834,10 @@ if (ehPrincipal) {
     const sobra = Object.keys(RESPOSTAS).filter((k) => !k.startsWith('_') && !CASOS.casos.some((c) => c.id === k));
     if (sobra.length) mostrar(false, `respostas sem caso: ${sobra.join(', ')}`);
     await db.close();
-    console.log(falhas ? `\n${falhas} falha(s)` : `\ntudo ok (${casos.length} casos × boa e ruim)`);
+    const porFase = (n) => casos.filter((c) => (c.fase ?? 1) === n).length;
+    console.log(falhas
+      ? `\n${falhas} falha(s)`
+      : `\ntudo ok (${casos.length} casos × boa e ruim: ${porFase(1)} da Fase 1, ${porFase(2)} da Fase 2; ${Math.round((Date.now() - t0) / 1000)} s)`);
     process.exit(falhas ? 1 : 0);
   }
 }

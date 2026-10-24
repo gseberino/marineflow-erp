@@ -273,10 +273,11 @@ function secaoDaAgenda(): string {
   return estavel.slice(i, fim < 0 ? undefined : fim).trim();
 }
 
-Deno.test("agenda de produção: a seção é curta (≤ 12 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
+// Fase 1: 7 linhas (o título + 6). Fase 2 (P6): no máximo 10 a mais (spec-fase2.md §12.2) — entraram 6. Teto 17.
+Deno.test("agenda de produção: a seção é curta (≤ 17 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
-  assertEquals(linhas.length <= 12, true, `a seção tem ${linhas.length} linhas`);
+  assertEquals(linhas.length <= 17, true, `a seção tem ${linhas.length} linhas`);
   // Estável = em cache. O volátil muda a cada turno e não pode carregar a seção.
   const volatil = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[1].text;
   assertEquals(volatil.includes(SECAO_AGENDA), false);
@@ -341,4 +342,51 @@ Deno.test("agenda de produção: o que a seção ensina existe na ferramenta e n
   assertEquals(lerComandoDaAgenda(frase![1])?.comando, "gravar");
   // E o "sim"/"ok" que ela responde NÃO é o comando (é por isso que a frase existe).
   for (const s of ["sim", "ok", "grava aí"]) assertEquals(lerComandoDaAgenda(s), null, s);
+});
+
+// Agenda de Produção (24/10/2026, Fase 2, P6): a agenda se monta sozinha e o dono pede pela conversa. As 4 ferramentas
+// novas chegam pela ferramenta_extra (d14: só agenda_ver à vista), então é o prompt que as ensina — sem estas linhas o
+// modelo marca por conta própria, escolhe a opção da decisão pelo dono ou confunde andamento, diária e check-in.
+Deno.test("agenda de produção (Fase 2): autonomia, pedidos viram releitura, decisão sem escolher pelo dono, andamento × diária × check-in", () => {
+  const secao = secaoDaAgenda();
+  // 1. a autonomia e o que mudou: os focos citados existem no enum de agenda_ver
+  assertStringIncludes(secao, "A agenda se monta e se ajusta sozinha");
+  assertStringIncludes(secao, "você não marca, não move e não publica por conta própria");
+  const agendaVer = porNome.get("agenda_ver")!;
+  const focos = (agendaVer.input_schema as { properties: Record<string, { enum?: string[] }> }).properties.foco.enum ?? [];
+  for (const foco of ["mudancas", "decisoes", "plano"]) {
+    assertStringIncludes(secao, `foco ${foco}`);
+    assertEquals(focos.includes(foco), true, `${foco} não é foco de agenda_ver`);
+  }
+  // 2. pedido vira releitura: simular (agenda_propor), marcar num dia (schedule_service_order com quando e trecho, que
+  //    existem no esquema dela), montar/tirar de verdade (simular false + agenda_aplicar), publicar (agenda_aplicar)
+  assertStringIncludes(secao, "Pedido do dono à agenda vira releitura, nunca fato");
+  assertStringIncludes(secao, "é agenda_propor, que só simula");
+  assertStringIncludes(secao, "é schedule_service_order com quando = o dia como ele disse e trecho");
+  const marcar = porNome.get("schedule_service_order")!.input_schema as { properties: Record<string, unknown> };
+  for (const campo of ["quando", "trecho"]) assertEquals(campo in marcar.properties, true, `schedule_service_order sem ${campo}`);
+  assertStringIncludes(secao, "agenda_propor com simular false e, em seguida, agenda_aplicar com proposta \"a última\"");
+  const propor = porNome.get("agenda_propor")!.input_schema as { properties: Record<string, unknown> };
+  assertEquals("simular" in propor.properties, true);
+  // 3. decisão: agenda_ver foco decisoes → agenda_aplicar com decisao e opcao; nunca escolher pelo dono
+  assertStringIncludes(secao, "agenda_ver foco decisoes para achar o nº e as opções, depois agenda_aplicar com decisao e opcao");
+  assertStringIncludes(secao, "Nunca escolha a opção por ele");
+  const aplicar = porNome.get("agenda_aplicar")!.input_schema as { properties: Record<string, unknown> };
+  for (const campo of ["decisao", "opcao", "proposta"]) assertEquals(campo in aplicar.properties, true, `agenda_aplicar sem ${campo}`);
+  // 4. andamento × diária × check-in × concluir: cada vizinha citada por nome (e é ferramenta de verdade)
+  assertStringIncludes(secao, "os_registrar_andamento, uma chamada por fato, com trecho e motivo da lista");
+  assertStringIncludes(secao, "concluir continua pela tela (botão Concluir da OS)");
+  assertStringIncludes(secao, "é registrar_diaria, que já usa a OS do plano");
+  assertStringIncludes(secao, "a chegada que o técnico diz é check_in_service_order");
+  for (const t of ["agenda_propor", "agenda_aplicar", "agenda_desfazer", "os_registrar_andamento", "check_in_service_order"]) {
+    assertEquals(porNome.has(t), true, `${t} não é ferramenta`);
+  }
+  // 5. desfazer pela ferramenta e as palavras que o dono manda direto: o comando sem IA LÊ cada uma
+  assertStringIncludes(secao, "agenda_desfazer com o alvo");
+  for (const [palavra, comando] of [["dia feito", "dia"], ["dia nao cliente", "dia"], ["choveu", "choveu"], ["desfaz Nelson", "desfazer"]]) {
+    assertEquals(lerComandoDaAgenda(palavra)?.comando, comando, palavra);
+  }
+  // 6. nunca data fora das ferramentas, e nada de "marquei/publiquei/desfiz" sem o *grava*
+  assertStringIncludes(secao, "Nunca diga data, dia livre ou pessoa que não veio de uma ferramenta da agenda");
+  assertStringIncludes(secao, "\"marquei\", \"publiquei\" nem \"desfiz\"");
 });

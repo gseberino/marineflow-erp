@@ -324,6 +324,17 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   "os_planejar",
   "material_informar",
   "equipe_disponibilidade",
+  // — Agenda de Produção, Fase 2 (24/10/2026, P6; decisões do dono de 23/10, Autonomia): a agenda se monta sozinha e o
+  //   dono pede pela conversa. agenda_propor simula (padrão: nada gravado; simular = false deixa só a proposta em aberto,
+  //   que não vale para ninguém); agenda_aplicar, agenda_desfazer e os_registrar_andamento só deixam o rascunho com a
+  //   releitura, e quem executa é o *grava* do dono. Mesmo teto (113, d14: só agenda_ver à vista): ficam na rede e rodam
+  //   direto (ESCRITAS_VERIFICADAS_DA_REDE). Fora do PERFIL_OPERACAO de propósito: as duas listas não se cruzam
+  //   (perfil-operacao_test.ts), e os roles (só admin) já as escondem dos outros cargos. O prompt as ensina (AGENDA DE
+  //   PRODUÇÃO). —
+  "agenda_propor",
+  "agenda_aplicar",
+  "agenda_desfazer",
+  "os_registrar_andamento",
   // — E-mail (08/10/2026): silenciar um remetente é gesto raro e pede confirmação. —
   "silenciar_remetente_email",
   // — Memória por entidade: as notas APROVADAS já chegam prontas no contexto (ai-agent), então
@@ -605,6 +616,24 @@ export const ESCRITAS_VERIFICADAS_DA_REDE: Readonly<Record<string, string>> = {
     "só grava o rascunho da releitura (agenda_rascunho, pela RPC agenda_rascunho_disponibilidade); o fato em " +
     "agenda_disponibilidade só é gravado pelo *grava* do dono, comando lido antes do modelo (agenda_rascunho_gravar), " +
     "que o modelo não alcança; não avisa ninguém",
+  // 24/10/2026 (Agenda de Produção, Fase 2, P6): pela rede, cada pedido viraria uma pendência e o dono daria um "sim" e
+  // depois o *grava* (dois portões para a mesma coisa). Lidos os quatro execute: uma RPC cada, nenhuma tabela.
+  agenda_propor:
+    "grava no máximo a proposta EM ABERTO (agenda_propostas, alocações em estado proposta e, quando não cabe tudo, a " +
+    "pergunta crítica refeita para a mesma OS — a resposta continua só do dono), pela RPC agenda_propor_dito, que confere o " +
+    "cargo; com simular (o padrão) não grava nada. A proposta aberta não vale para ninguém: publicar só pelo *grava* do " +
+    "dono depois da releitura de agenda_aplicar; não muda alocação vigente, status nem data de OS e não manda mensagem",
+  agenda_aplicar:
+    "só grava o rascunho da releitura (agenda_rascunho, pela RPC agenda_rascunho_aplicar, que confere o cargo e recalcula o " +
+    "efeito); publicar a proposta ou responder a decisão crítica só acontece pelo *grava* do dono, comando lido antes do " +
+    "modelo (agenda_rascunho_gravar), que o modelo não alcança; sem a opção dita o banco devolve a pergunta",
+  agenda_desfazer:
+    "só grava o rascunho da releitura (agenda_rascunho, pela RPC agenda_rascunho_desfazer); o desfazer só acontece pelo " +
+    "*grava* do dono, comando lido antes do modelo (agenda_rascunho_gravar), que o modelo não alcança",
+  os_registrar_andamento:
+    "só grava o rascunho da releitura (agenda_rascunho, pela RPC agenda_rascunho_andamento, que confere o cargo e confere " +
+    "no trecho do dono o dia); o resultado do dia e o status da OS só são gravados pelo *grava* do dono (agenda_rascunho_gravar), " +
+    "que o modelo não alcança; não conclui OS nem lança diária",
 };
 
 /**

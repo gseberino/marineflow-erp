@@ -10,6 +10,11 @@
 //   · as três de escrita exigem o trecho (as palavras do dono): é contra ele que o banco confere número e data;
 //   · enum fora da lista e tipo errado voltam como erro para o modelo corrigir (nada é chamado).
 // O banco é quem decide o resto (qual OS, qual peça, se é ambíguo) e devolve o texto pronto.
+//
+// Fase 2 (P6, 24/10/2026; spec-fase2.md §12.1): paraPropor (agenda_propor_dito: a simulação, padrão simular = true),
+// paraAplicar (publicar a proposta aberta OU responder a decisão da agenda), paraDesfazer e paraAndamento. As três
+// últimas também exigem o trecho e só deixam rascunho; nenhuma escolhe dia, pessoa ou opção pelo dono (a opção da
+// decisão só vai se o modelo a mandou, e o banco devolve a pergunta quando falta).
 
 export type CanalDaRpc = "whatsapp" | "painel";
 
@@ -29,6 +34,11 @@ export const RPC_AGENDA_VER = "agenda_ver";
 export const RPC_PLANEJAR = "agenda_rascunho_planejar";
 export const RPC_MATERIAL = "agenda_rascunho_material";
 export const RPC_DISPONIBILIDADE = "agenda_rascunho_disponibilidade";
+// Fase 2 (P6): a simulação da agenda e os três pedidos do dono que viram rascunho (migration 20261025100400).
+export const RPC_PROPOR = "agenda_propor_dito";
+export const RPC_APLICAR = "agenda_rascunho_aplicar";
+export const RPC_DESFAZER = "agenda_rascunho_desfazer";
+export const RPC_ANDAMENTO = "agenda_rascunho_andamento";
 
 // (Fase 2, P5) decisoes (o que a agenda precisa do dono), mudancas (o que ela mudou sozinha) e plano (o publicado): a
 // agenda_ver do banco (20261025100500) aceita, e as palavras *agenda pendências*, *o que mudou* e *agenda plano* vêm por
@@ -40,8 +50,22 @@ export const SITUACOES_DO_MATERIAL = [
 export const SITUACOES_DA_EQUIPE = ["vem", "nao_vem", "so_manha", "so_tarde"] as const;
 export const TURNOS = ["dia", "manha", "tarde"] as const;
 export const PRESENCAS_DO_DONO = ["abre_e_fecha", "sempre", "nunca"] as const;
-/** O que o dono desfaz no serviço: espera, "não antes de", prazo do cliente, escopo em aberto. */
-export const LIMPAVEIS = ["espera", "nao_antes", "prazo", "escopo"] as const;
+/** O que o dono desfaz no serviço: espera, "não antes de", prazo do cliente, escopo em aberto e (Fase 2) o pátio. */
+export const LIMPAVEIS = ["espera", "nao_antes", "prazo", "escopo", "patio"] as const;
+/** (Fase 2) O que o motor monta: a semana (= a que ele publica, a seguinte), uma OS ou o replano de algumas. */
+export const ESCOPOS_DA_PROPOSTA = ["semana", "proxima_semana", "os", "replano"] as const;
+/** (Fase 2) O que aconteceu na OS num dia do plano. Concluir e entregar não estão aqui: é pela tela. */
+export const EVENTOS_DO_ANDAMENTO = ["trabalhou", "parcial", "nao_foi", "comecou", "parou"] as const;
+/** (Fase 2) O motivo, na palavra do dono (o banco traduz para o código: _agenda_motivo_dito). */
+export const MOTIVOS_DO_ANDAMENTO = [
+  "material", "cliente", "equipe", "anterior", "informacao", "clima", "estimativa", "imprevisto", "urgencia", "esqueci",
+] as const;
+/** As palavras de concluir: o andamento não conclui (a conclusão grava a saída e as cobranças, e é pela tela). */
+const EVENTOS_DE_CONCLUIR = new Set([
+  "concluiu", "concluida", "concluido", "terminou", "acabou", "finalizou", "entregou", "entregue", "pronto", "pronta",
+]);
+/** A mesma frase do banco (agenda_rascunho_andamento) para quando o modelo tenta concluir pelo andamento. */
+export const TEXTO_CONCLUIR_PELA_TELA = "Concluir ainda é pela tela (botão Concluir da OS): é lá que saem a saída e as cobranças.";
 
 /** O que vai junto do resultado ao modelo. */
 export const INSTRUCAO_LEITURA = "Repita o texto; pode encurtar o fim, nunca mude número, data ou nome.";
@@ -50,6 +74,14 @@ export const INSTRUCAO_LEITURA_SEM_RESPOSTA =
 export const INSTRUCAO_RASCUNHO = "Nada foi gravado: mostre a releitura ao dono. Só o *grava* dele grava.";
 export const INSTRUCAO_RASCUNHO_RECUSA =
   "Nada entrou no rascunho. Faça esta pergunta ao dono como está e, com a resposta, chame a ferramenta de novo.";
+/** (Fase 2) A simulação do motor: nada mudou, e o modelo não pode dizer que marcou. */
+export const INSTRUCAO_SIMULACAO =
+  "É simulação: nada mudou. Repita o texto (pode encurtar o fim, nunca mude número, data ou nome) e não diga que marcou, " +
+  "moveu ou publicou. Para valer, o dono pede e a releitura sai pelo agenda_aplicar.";
+/** (Fase 2) A proposta em aberto (simular = false): existe, mas não vale para ninguém até o *grava* do dono. */
+export const INSTRUCAO_PROPOSTA_ABERTA =
+  "A proposta ficou em aberto e não vale para ninguém: repita o texto. Para publicar, o dono pede, agenda_aplicar deixa a " +
+  "releitura e só o *grava* dele publica.";
 /** agenda_config.modo_leitura desligado: a agenda de produção sai do caminho e volta a agenda de antes. */
 export const INSTRUCAO_AGENDA_DESLIGADA =
   "A agenda de produção está desligada. Para a agenda do dono (tarefas e compromissos), chame my_agenda pela ferramenta_extra e responda com ela; não fale da agenda de produção.";
@@ -85,13 +117,13 @@ function texto(v: unknown, campo: string, max: number): string | null {
 }
 
 /** A OS como o dono falou: número ou nome. Id não. */
-function referenciaDaOs(v: unknown, obrigatoria: boolean): string | null {
-  const t = texto(v, "os", 80);
+function referenciaDaOs(v: unknown, obrigatoria: boolean, campo = "os"): string | null {
+  const t = texto(v, campo, 80);
   if (!t) {
-    if (obrigatoria) recusar("falta 'os': o número (OS-00112) ou o nome do cliente, como o dono falou");
+    if (obrigatoria) recusar(`falta '${campo}': o número (OS-00112) ou o nome do cliente, como o dono falou`);
     return null;
   }
-  if (UUID.test(t)) recusar("'os' é o número (OS-00112) ou o nome do cliente, não o id");
+  if (UUID.test(t)) recusar(`'${campo}' é o número (OS-00112) ou o nome do cliente, não o id`);
   return t;
 }
 
@@ -200,6 +232,13 @@ export function paraPlanejar(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
     const dados: Record<string, unknown> = {};
     const dias = numero(a.dias, "dias");
     if (dias !== null) dados.dias = dias;
+    // Fase 2 (P4 no banco, P6 aqui): "dá para adiantar um dia no pátio" (sem o barco/motorhome). O banco confere o número
+    // no trecho, como os dias.
+    const patio = numero(a.adiantavel_patio, "adiantavel_patio");
+    if (patio !== null) {
+      if (patio <= 0 || patio > 30) recusar("'adiantavel_patio' tem de ser os dias que o dono disse (de meio dia a 30)");
+      dados.adiantavel_patio = patio;
+    }
     if (a.com_quem !== undefined && a.com_quem !== null) {
       if (!Array.isArray(a.com_quem) || a.com_quem.length > 8) recusar("'com_quem' tem de ser uma lista [{pessoa, turnos}]");
       dados.com_quem = (a.com_quem as unknown[]).map((p, i) => {
@@ -238,7 +277,7 @@ export function paraPlanejar(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
     }
     if (Object.keys(dados).length === 0) {
       recusar("diga o que mudou no serviço (dias, com_quem, dono, precisa_ate, bem_fora, bem_livre_em, nao_antes_de, " +
-        "escopo_em_aberto, escopo_decidido, congelar_ate, prioridade, sem_material, aceitar_sugestao ou limpar)");
+        "escopo_em_aberto, escopo_decidido, congelar_ate, prioridade, sem_material, aceitar_sugestao, adiantavel_patio ou limpar)");
     }
     return comHoje({ p_autor: ctx.autor, p_canal: ctx.canal, p_os: os, p_dados: dados, p_trecho: t }, ctx);
   });
@@ -290,6 +329,137 @@ export function paraDisponibilidade(args: unknown, ctx: ContextoDaRpc): ChamadaD
       p_situacao: situacao,
       p_dias: dias,
       p_padrao: booleano(a.padrao, "padrao") ?? false,
+      p_trecho: t,
+    }, ctx);
+  });
+}
+
+// ── Fase 2 (P6): a simulação e os pedidos do dono ───────────────────────────────────────────────────────
+
+/** Uma lista de referências de OS como o dono falou (texto solto vira lista de um); vazia = null. */
+function listaDeOs(v: unknown, campo: string, max = 12): string[] | null {
+  if (v === undefined || v === null) return null;
+  const bruto = typeof v === "string" || typeof v === "number" ? [v] : v;
+  if (!Array.isArray(bruto) || bruto.length > max) recusar(`'${campo}' tem de ser a lista das OS que o dono citou (número ou nome)`);
+  const lista = (bruto as unknown[]).map((x, i) => referenciaDaOs(x, true, `${campo}[${i}]`)).filter((x): x is string => !!x);
+  return lista.length ? [...new Set(lista)] : null;
+}
+
+/** agenda_propor → agenda_propor_dito: escopo, os, fixar [{os, quando, ate, pessoa}], tirar, so_depois_de, simular. */
+export function paraPropor(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
+  return mapear(RPC_PROPOR, () => {
+    const a = objeto(args);
+    const escopo = umDe(a.escopo, "escopo", ESCOPOS_DA_PROPOSTA, true);
+    const os = listaDeOs(a.os, "os");
+    let fixar: Array<Record<string, unknown>> | null = null;
+    if (a.fixar !== undefined && a.fixar !== null) {
+      if (!Array.isArray(a.fixar) || a.fixar.length > 8) recusar("'fixar' tem de ser a lista [{os, quando, ate, pessoa}] do que o dono pediu");
+      fixar = (a.fixar as unknown[]).map((x, i) => {
+        const f = objeto(x);
+        const item: Record<string, unknown> = { os: referenciaDaOs(f.os, true, `fixar[${i}].os`) };
+        const quando = dataDita(f.quando, `fixar[${i}].quando`);
+        if (!quando) recusar(`falta 'fixar[${i}].quando': o dia como o dono disse ("quinta", "dia 5")`);
+        item.quando = quando;
+        const ate = dataDita(f.ate, `fixar[${i}].ate`);
+        if (ate) item.ate = ate;
+        const pessoa = referenciaDaPessoa(f.pessoa, `fixar[${i}].pessoa`, false);
+        if (pessoa) item.pessoa = pessoa;
+        return item;
+      });
+      if (!fixar.length) fixar = null;
+    }
+    let depois: Array<Record<string, unknown>> | null = null;
+    if (a.so_depois_de !== undefined && a.so_depois_de !== null) {
+      if (!Array.isArray(a.so_depois_de) || a.so_depois_de.length > 8) recusar("'so_depois_de' tem de ser a lista [{os, quando}]");
+      depois = (a.so_depois_de as unknown[]).map((x, i) => {
+        const f = objeto(x);
+        const quando = dataDita(f.quando, `so_depois_de[${i}].quando`);
+        if (!quando) recusar(`falta 'so_depois_de[${i}].quando': a partir de quando, como o dono disse`);
+        return { os: referenciaDaOs(f.os, true, `so_depois_de[${i}].os`), quando };
+      });
+      if (!depois.length) depois = null;
+    }
+    const tirar = listaDeOs(a.tirar, "tirar");
+    if ((escopo === "os" || escopo === "replano") && !os && !fixar && !depois) {
+      recusar("com escopo os ou replano, diga de qual serviço (os, fixar ou so_depois_de)");
+    }
+    return comHoje({
+      p_autor: ctx.autor,
+      p_canal: ctx.canal,
+      p_escopo: escopo,
+      p_os: os,
+      p_fixar: fixar,
+      p_tirar: tirar,
+      p_so_depois_de: depois,
+      p_acima_da_carga: booleano(a.acima_da_carga, "acima_da_carga") ?? false,
+      // Padrão: simular. Só um false explícito grava a proposta (em aberto: não vale para ninguém).
+      p_simular: booleano(a.simular, "simular") ?? true,
+    }, ctx);
+  });
+}
+
+/** agenda_aplicar → agenda_rascunho_aplicar: publicar (proposta, os) OU responder a decisão (decisao, opcao). */
+export function paraAplicar(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
+  return mapear(RPC_APLICAR, () => {
+    const a = objeto(args);
+    const proposta = texto(a.proposta, "proposta", 40);
+    const decisao = texto(a.decisao, "decisao", 80);
+    const opcao = texto(a.opcao, "opcao", 80);
+    for (const [campo, v] of [["decisao", decisao], ["opcao", opcao], ["proposta", proposta]] as const) {
+      if (v && UUID.test(v)) recusar(`'${campo}' é o número que a agenda mostrou ou o nome, não o id`);
+    }
+    const os = listaDeOs(a.os, "os");
+    if (proposta && (decisao || opcao)) recusar("diga a proposta OU a decisão, não as duas");
+    if (os && (decisao || opcao)) recusar("'os' é só para publicar parte da proposta; numa decisão, diga decisao e opcao");
+    const t = trecho(a.trecho);
+    return comHoje({
+      p_autor: ctx.autor,
+      p_canal: ctx.canal,
+      p_proposta: proposta,
+      p_os: os,
+      p_decisao: decisao,
+      p_opcao: opcao,
+      p_trecho: t,
+    }, ctx);
+  });
+}
+
+/** agenda_desfazer → agenda_rascunho_desfazer: o alvo como o dono disse (nome, número, "semana", "a última"). */
+export function paraDesfazer(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
+  return mapear(RPC_DESFAZER, () => {
+    const a = objeto(args);
+    const alvo = texto(a.alvo, "alvo", 40);
+    if (alvo && UUID.test(alvo)) recusar("'alvo' é o nome do cliente, o número, \"semana\" ou \"a última\", não o id");
+    const t = trecho(a.trecho);
+    return comHoje({ p_autor: ctx.autor, p_canal: ctx.canal, p_alvo: alvo, p_trecho: t }, ctx);
+  });
+}
+
+/** os_registrar_andamento → agenda_rascunho_andamento: os, evento, dia, quem, motivo. Concluir não é andamento. */
+export function paraAndamento(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
+  return mapear(RPC_ANDAMENTO, () => {
+    const a = objeto(args);
+    const bruto = texto(a.evento, "evento", 40);
+    if (bruto && EVENTOS_DE_CONCLUIR.has(bruto.toLowerCase())) recusar(TEXTO_CONCLUIR_PELA_TELA.replace(/\.$/, ""));
+    const evento = umDe(bruto, "evento", EVENTOS_DO_ANDAMENTO, true);
+    const os = referenciaDaOs(a.os, true);
+    let quem: string[] | null = null;
+    if (a.quem !== undefined && a.quem !== null) {
+      const lista = typeof a.quem === "string" ? [a.quem] : a.quem;
+      if (!Array.isArray(lista) || lista.length > 6) recusar("'quem' tem de ser a lista dos nomes (ou \"eu\")");
+      quem = (lista as unknown[]).map((p, i) => referenciaDaPessoa(p, `quem[${i}]`, true) as string);
+      if (!quem.length) quem = null;
+    }
+    const motivo = umDe(a.motivo, "motivo", MOTIVOS_DO_ANDAMENTO, false);
+    const t = trecho(a.trecho);
+    return comHoje({
+      p_autor: ctx.autor,
+      p_canal: ctx.canal,
+      p_os: os,
+      p_evento: evento,
+      p_dia: dataDita(a.dia, "dia"),
+      p_quem: quem,
+      p_motivo: motivo,
       p_trecho: t,
     }, ctx);
   });
@@ -368,5 +538,35 @@ export function resultadoDoRascunho(data: unknown, rpc = "rascunho"): ResultadoP
     texto: String(r.releitura ?? r.texto ?? ""),
     ...(typeof r.item === "string" ? { item: r.item } : {}),
     instrucao: INSTRUCAO_RASCUNHO,
+  };
+}
+
+/**
+ * (Fase 2) A resposta de agenda_propor_dito → o modelo: o texto do motor (o título, uma linha por OS, o "Fora:" e, na
+ * simulação, "É simulação: não muda nada.") e as perguntas que ele faria, só em texto. Nada de itens, alocações nem
+ * ids: o modelo repete, sem montar agenda nenhuma. Recusa (OS ambígua, data que não entendeu) = a pergunta.
+ */
+export function resultadoDaProposta(data: unknown): ResultadoParaOModelo & { simulacao?: boolean; perguntas?: string[] } {
+  const r = respostaDoBanco(data, RPC_PROPOR);
+  if (r.ok === false) {
+    const pergunta = String(r.pergunta ?? r.texto ?? "");
+    return {
+      ok: false,
+      texto: pergunta,
+      pergunta,
+      ...(opcoesEmTexto(r.opcoes).length ? { opcoes: opcoesEmTexto(r.opcoes) } : {}),
+      instrucao: r.desligada === true || r.motivo === "desligada" ? INSTRUCAO_LEITURA_SEM_RESPOSTA : INSTRUCAO_RASCUNHO_RECUSA,
+    };
+  }
+  const simulacao = r.simulacao !== false;
+  const perguntas = (Array.isArray(r.perguntas) ? r.perguntas : [])
+    .map((q) => (typeof q === "object" && q !== null ? String((q as Record<string, unknown>).texto ?? "") : ""))
+    .filter((s) => s !== "");
+  return {
+    ok: true,
+    texto: String(r.texto ?? ""),
+    simulacao,
+    ...(perguntas.length ? { perguntas } : {}),
+    instrucao: simulacao ? INSTRUCAO_SIMULACAO : INSTRUCAO_PROPOSTA_ABERTA,
   };
 }

@@ -12,6 +12,11 @@
 //   · o TS da agenda (_shared/agenda/*.ts, a ferramenta agenda-producao.ts, o passo material-da-agenda.ts do motor) e
 //     as partes do Secretário que leem a agenda (agendaDoFechamento, lerAgendaDoFechamento, semNadaMarcado,
 //     amanhaComAAgenda, semanaCabe), sem os comentários.
+//   · (Fase 2, P6) também as funções das migrations 2026102510* (o motor, a porta, a conferência, a vigia, o rascunho
+//     dos pedidos e as leituras do plano — os DEFAULTs novos de agenda_config ficam em 20261025100000, fora de função),
+//     o TS novo (_shared/agenda-modo.ts, task-automations/agenda-modos.ts e agenda-vigia.ts) e as partes do Secretário
+//     que leem o plano (linhasDaAgendaQueCabem, comprasDoPlano, linhasDaAgenda, osDoPlano, planosDasOs). Os pesos da
+//     pontuação do motor são inteiros (estrutura de ordem, não parâmetro do dono) e ficam nas constantes c_peso_*.
 // E cobra:
 //   1. nenhum valor de parâmetro de agenda_config (carga 0,8, R$ 1.600 e R$ 764 por diária, fator 1,5, frequência
 //      mínima 0,25, 1.000 de texto e de peça embutida, validade de 24/72 horas, horário dos turnos, municípios
@@ -63,12 +68,28 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 1,
     porque: 'o nome do feriado municipal de 15/06 (aniversário de Itajaí), o mesmo de _shared/secretario/feriados.ts; não é municipios_locais',
   },
+  // Fase 2 (P6): as migrations 2026102510* entraram na varredura.
+  {
+    onde: 'agenda_vigiar',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas); não é texto_max nem peca_embutida_acima',
+  },
+  {
+    onde: 'agenda_saude',
+    casou: '24h',
+    vezes: 2,
+    porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h: a janela de um dia da conferência); não é rascunho_validade',
+  },
 ];
 
 /** As partes do Secretário que leem a agenda (o resto do arquivo é do Secretário e tem os números dele). */
 const PARTES_DO_SECRETARIO: Array<{ arquivo: string; funcoes: string[] }> = [
   { arquivo: 'ai-daily-briefing/secretario-tarde-coleta.ts', funcoes: ['agendaDoFechamento', 'lerAgendaDoFechamento'] },
-  { arquivo: 'ai-daily-briefing/secretario-tarde-texto.ts', funcoes: ['semNadaMarcado', 'amanhaComAAgenda', 'semanaCabe'] },
+  { arquivo: 'ai-daily-briefing/secretario-tarde-texto.ts', funcoes: ['semNadaMarcado', 'amanhaComAAgenda', 'semanaCabe', 'linhasDaAgendaQueCabem'] },
+  // Fase 2 (P5): o plano no fechamento e na manhã (as linhas e as compras do plano, as OS do dia pelo plano).
+  { arquivo: 'ai-daily-briefing/secretario-tarde-coleta.ts', funcoes: ['comprasDoPlano', 'linhasDaAgenda'] },
+  { arquivo: 'ai-daily-briefing/secretario-coleta.ts', funcoes: ['osDoPlano', 'planosDasOs'] },
 ];
 
 interface Trecho {
@@ -130,7 +151,7 @@ export function corposDasFuncoes(sql: string, arquivo: string): Trecho[] {
 
 function funcoesDasMigrations(): Trecho[] {
   return fs.readdirSync(MIGRATIONS)
-    .filter((f) => /^2026102416\d{4}_.+\.sql$/.test(f))
+    .filter((f) => /^(2026102416|2026102510)\d{4}_.+\.sql$/.test(f))
     .sort()
     .flatMap((f) => corposDasFuncoes(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8').replace(/\r\n/g, '\n'), f));
 }
@@ -162,6 +183,10 @@ function tsDaAgenda(): Trecho[] {
     ...fs.readdirSync(pasta).filter((f) => f.endsWith('.ts') && !f.endsWith('_test.ts')).map((f) => path.join(pasta, f)),
     path.join(FUNCOES, '_shared', 'ai', 'tools', 'agenda-producao.ts'),
     path.join(FUNCOES, 'task-automations', 'material-da-agenda.ts'),
+    // Fase 2: o modo da proposta, os modos da vigia e o passo da vigia no motor de 15 min.
+    path.join(FUNCOES, '_shared', 'agenda-modo.ts'),
+    path.join(FUNCOES, 'task-automations', 'agenda-modos.ts'),
+    path.join(FUNCOES, 'task-automations', 'agenda-vigia.ts'),
   ];
   const trechos = inteiros.map((a) => trechoDoTs(fonte(a), path.relative(RAIZ, a)));
   for (const { arquivo, funcoes } of PARTES_DO_SECRETARIO) {
@@ -229,6 +254,13 @@ describe('agenda: parâmetro só em agenda_config', () => {
     expect(sql.map((t) => t.onde)).toEqual(expect.arrayContaining([
       'agenda_ver', 'agenda_semana', 'os_prontidao', 'os_duracao_sugerida', 'agenda_capacidade_semanal',
       'agenda_rascunho_planejar', 'agenda_disponibilidade_semear', 'aplicar_os_material', '_autor_da_agenda',
+      // Fase 2 (P6): o motor, a porta, a vigia, a saúde, o rascunho dos pedidos e as leituras do plano
+      'agenda_propor', 'os_transicionar_status', 'agenda_vigiar', 'agenda_saude', 'agenda_rascunho_andamento',
+      'agenda_propor_dito', 'agenda_linhas_do_dia',
+    ]));
+    expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
+      path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),
+      'ai-daily-briefing/secretario-tarde-texto.ts#linhasDaAgendaQueCabem',
     ]));
     expect(tsAgenda.length).toBeGreaterThanOrEqual(10);
     // A varredura vê o literal estrutural que existe (prova de que lê números e texto).

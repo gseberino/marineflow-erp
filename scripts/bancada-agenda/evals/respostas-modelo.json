@@ -1,7 +1,8 @@
 {
   "_leia": [
     "Para cada caso de casos.json, uma resposta BOA (o que o modelo deve fazer) e uma RUIM (um erro plausível) que tem de reprovar no juiz de reprova_em (ferramentas | texto | banco). É isto que prova os juízes: um juiz que deixa a ruim passar está quebrado.",
-    "chamadas = as ferramentas na ordem, com os argumentos como o modelo mandaria. texto = a resposta final ao dono; {{saida:N}} = o texto que a ferramenta N devolveu ('repita o texto'), {{saida:N|linhas:a-b}} = só essas linhas ('pode encurtar o fim'), {{saida:ultima}} = a última."
+    "chamadas = as ferramentas na ordem, com os argumentos como o modelo mandaria. texto = a resposta final ao dono; {{saida:N}} = o texto que a ferramenta N devolveu ('repita o texto'), {{saida:N|linhas:a-b}} = só essas linhas ('pode encurtar o fim'), {{saida:ultima}} = a última.",
+    "Fase 2: passos = o que não é do modelo (a palavra do dono, o tique da vigia, a troca de modo; SQL só nas ruins), executados depois das chamadas; as saídas deles entram depois das das chamadas ({{saida:0}} num caso sem modelo = a resposta da palavra). registrar_diaria não roda: a saída é o resumo do \"sim\"."
   ],
   "L01a": {
     "boa": {
@@ -264,6 +265,286 @@
       "por_que": "escolhe um dos dois Rodrigo sozinho (spec §8.5: grava na OS-00096)",
       "reprova_em": "banco",
       "chamadas": [{ "ferramenta": "os_planejar", "argumentos": { "os": "OS-00096", "dias": 0.5, "com_quem": [{ "pessoa": "eu" }], "trecho": "o do Rodrigo é meio dia, só eu" } }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "S01": {
+    "boa": {
+      "chamadas": [
+        { "ferramenta": "agenda_ver", "argumentos": { "foco": "decisoes" } },
+        { "ferramenta": "agenda_aplicar", "argumentos": { "decisao": "1", "opcao": "1", "trecho": "pode atrasar o Nelson" } }
+      ],
+      "texto": "{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "escolhe a outra opção (tirar o Nelson do plano) em vez da que o dono disse (atrasar): o grader do plano vê a decisão errada depois do *grava*",
+      "reprova_em": "agenda",
+      "chamadas": [
+        { "ferramenta": "agenda_ver", "argumentos": { "foco": "decisoes" } },
+        { "ferramenta": "agenda_aplicar", "argumentos": { "decisao": "1", "opcao": "2", "trecho": "pode atrasar o Nelson" } }
+      ],
+      "texto": "{{saida:1}}"
+    }
+  },
+  "S02": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "decisoes" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o dono não escolheu e o modelo escolhe por ele a opção recomendada; o *grava* que vem depois executa a decisão",
+      "reprova_em": "agenda",
+      "chamadas": [
+        { "ferramenta": "agenda_ver", "argumentos": { "foco": "decisoes" } },
+        { "ferramenta": "agenda_aplicar", "argumentos": { "decisao": "1", "opcao": "1", "trecho": "resolve aí do jeito que achar melhor" } }
+      ],
+      "texto": "{{saida:1}}"
+    }
+  },
+  "S03": {
+    "boa": { "passos": [{ "tique": "2026-10-29 16:30" }], "texto": "" },
+    "ruim": {
+      "por_que": "a vigia roda com os modos em sombra (o modo errado): nada é publicado e o diff do plano não bate",
+      "reprova_em": "agenda",
+      "passos": [{ "modos": { "proposta": "sombra", "vigia": "sombra" } }, { "tique": "2026-10-29 16:30" }],
+      "texto": ""
+    }
+  },
+  "S04": {
+    "boa": { "passos": [{ "tique": "2026-10-29 16:30" }], "texto": "" },
+    "ruim": {
+      "por_que": "a proposta ligada no meio da sombra: a semana é publicada (alocações vigentes, status e datas mudam)",
+      "reprova_em": "agenda",
+      "passos": [{ "modos": { "proposta": "ligado", "vigia": "ligado" } }, { "tique": "2026-10-29 16:30" }],
+      "texto": ""
+    }
+  },
+  "S05": {
+    "boa": {
+      "chamadas": [
+        { "ferramenta": "list_service_orders", "argumentos": { "search": "Lenine" } },
+        { "ferramenta": "schedule_service_order", "argumentos": {
+          "service_order_id": "05000000-0000-4000-8000-000000000074", "scheduled_start_at": "2026-11-05T08:00:00-03:00",
+          "quando": "quinta que vem", "trecho": "marca o Lenine pra quinta que vem" } }
+      ],
+      "texto": "{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "diz que marcou sem o *grava* do dono e põe uma data que a releitura não deu",
+      "reprova_em": "texto",
+      "chamadas": [
+        { "ferramenta": "list_service_orders", "argumentos": { "search": "Lenine" } },
+        { "ferramenta": "schedule_service_order", "argumentos": {
+          "service_order_id": "05000000-0000-4000-8000-000000000074", "scheduled_start_at": "2026-11-05T08:00:00-03:00",
+          "quando": "quinta que vem", "trecho": "marca o Lenine pra quinta que vem" } }
+      ],
+      "texto": "Marquei o Lenine para quinta que vem, 05/11 a 06/11."
+    }
+  },
+  "S06": {
+    "boa": { "passos": [{ "palavra": "desfaz semana" }], "texto": "{{saida:0}}" },
+    "ruim": {
+      "por_que": "o mesmo *desfaz semana* dentro do prazo (qui 29/10 17:40, antes de 24 h): a publicação é desfeita e o plano muda",
+      "reprova_em": "agenda",
+      "passos": [{ "palavra": "desfaz semana", "agora": "2026-10-29 17:40" }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "S07": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_aplicar", "argumentos": { "proposta": "a última", "trecho": "publica a semana que vem" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "com a agenda automática em teste, diz que publicou (sem ferramenta e sem *grava*)",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "texto": "Pronto, publiquei a semana que vem."
+    }
+  },
+  "A01": {
+    "boa": { "passos": [{ "palavra": "dia feito" }], "texto": "{{saida:0}}" },
+    "ruim": {
+      "por_que": "o resultado errado do dia (em parte, imprevisto): o plano e o replano não batem com o dia feito",
+      "reprova_em": "agenda",
+      "passos": [{ "palavra": "dia parcial imprevisto" }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "A02": {
+    "boa": { "passos": [{ "palavra": "dia nao cliente" }], "texto": "{{saida:0}}" },
+    "ruim": {
+      "por_que": "sem o motivo, nada muda: o replano do dia não cumprido não acontece",
+      "reprova_em": "agenda",
+      "passos": [{ "palavra": "dia nao" }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "A03": {
+    "boa": { "passos": [{ "palavra": "choveu" }], "texto": "{{saida:0}}" },
+    "ruim": {
+      "por_que": "o dia dado como feito quando choveu: nenhum meio-dia vira clima e nada é replanejado",
+      "reprova_em": "agenda",
+      "passos": [{ "palavra": "dia feito" }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "A04": {
+    "boa": { "passos": [{ "palavra": "dia parcial" }], "texto": "{{saida:0}}" },
+    "ruim": {
+      "por_que": "o motivo inventado (imprevisto) quando o dono não disse: o dia é marcado em parte e replanejado",
+      "reprova_em": "agenda",
+      "passos": [{ "palavra": "dia parcial imprevisto" }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "A05": {
+    "boa": {
+      "chamadas": [
+        { "ferramenta": "os_registrar_andamento", "argumentos": {
+          "os": "Lenine", "evento": "nao_foi", "quem": ["João"], "motivo": "equipe", "dia": "hoje", "trecho": "hoje o João não foi no Lenine" } },
+        { "ferramenta": "os_registrar_andamento", "argumentos": {
+          "os": "Vanderlei", "evento": "trabalhou", "quem": ["Roberto"], "trecho": "o Roberto fez o dia todo no Vanderlei" } }
+      ],
+      "texto": "{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "o motivo errado (imprevisto em vez de equipe): o banco grava a falta do João com outro motivo",
+      "reprova_em": "agenda",
+      "chamadas": [
+        { "ferramenta": "os_registrar_andamento", "argumentos": {
+          "os": "Lenine", "evento": "nao_foi", "quem": ["João"], "motivo": "imprevisto", "dia": "hoje", "trecho": "hoje o João não foi no Lenine" } },
+        { "ferramenta": "os_registrar_andamento", "argumentos": {
+          "os": "Vanderlei", "evento": "trabalhou", "quem": ["Roberto"], "trecho": "o Roberto fez o dia todo no Vanderlei" } }
+      ],
+      "texto": "{{saida:1}}"
+    }
+  },
+  "A06": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "registrar_diaria", "argumentos": { "freelancer": "Roberto", "jornada": "inteiro", "data": "hoje" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "confunde a diária (quanto pagar) com o andamento da OS",
+      "reprova_em": "ferramentas",
+      "chamadas": [{ "ferramenta": "os_registrar_andamento", "argumentos": {
+        "os": "Vanderlei", "evento": "trabalhou", "quem": ["Roberto"], "dia": "hoje", "trecho": "o Roberto trabalhou hoje" } }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "A07": {
+    "boa": {
+      "chamadas": [
+        { "ferramenta": "list_service_orders", "argumentos": { "search": "Lenine" } },
+        { "ferramenta": "registrar_diaria", "argumentos": { "freelancer": "Roberto", "jornada": "inteiro", "data": "hoje", "os": "OS-00074" } }
+      ],
+      "texto": "{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "esquece a OS que o dono disse: a diária iria na do plano (Vanderlei) e o \"sim\" não mostra a divergência",
+      "reprova_em": "texto",
+      "chamadas": [{ "ferramenta": "registrar_diaria", "argumentos": { "freelancer": "Roberto", "jornada": "inteiro", "data": "hoje" } }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "A08": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Concluir ainda é pela tela (botão Concluir da OS): é lá que saem a saída e as cobranças do Vanderlei."
+    },
+    "ruim": {
+      "por_que": "tenta concluir pelo status (a conclusão é pela tela) e diz que concluiu",
+      "reprova_em": "ferramentas",
+      "chamadas": [{ "ferramenta": "update_service_order_status", "argumentos": {
+        "service_order_id": "05000000-0000-4000-8000-000000000069", "status": "completed" } }],
+      "texto": "Pronto, concluí o Vanderlei."
+    }
+  },
+  "L11": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "plano", "periodo": "proxima_semana" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "acrescenta uma data que a agenda não deu (o fim do Lenine calculado de cabeça)",
+      "reprova_em": "texto",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "plano", "periodo": "proxima_semana" } }],
+      "texto": "{{saida:0}}\nO Lenine termina sex 13/11."
+    }
+  },
+  "L12": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "mudancas" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o dia do dono em vez do que a agenda mudou sozinha",
+      "reprova_em": "ferramentas",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "o_que_fazer" } }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "L13": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_propor", "argumentos": { "escopo": "semana", "tirar": ["Rodrigo"] } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o \"e se\" vira proposta gravada (simular false), escolhendo sozinho qual Rodrigo, e diz que tirou",
+      "reprova_em": "agenda",
+      "chamadas": [{ "ferramenta": "agenda_propor", "argumentos": { "escopo": "semana", "tirar": ["OS-00096"], "simular": false } }],
+      "texto": "Tirei o Rodrigo da semana."
+    }
+  },
+  "L14": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "decisoes" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "resume a decisão com uma data que a agenda não deu",
+      "reprova_em": "texto",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "decisoes" } }],
+      "texto": "Preciso que você decida o Nelson (OS-00112): recomendo atrasar até sex 20/11."
+    }
+  },
+  "L15": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_propor", "argumentos": { "escopo": "semana", "tirar": ["OS-00096"] } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o \"e se\" vira proposta gravada (simular false): agenda_propostas muda",
+      "reprova_em": "agenda",
+      "chamadas": [{ "ferramenta": "agenda_propor", "argumentos": { "escopo": "semana", "tirar": ["OS-00096"], "simular": false } }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "M01": {
+    "boa": {
+      "passos": [{ "tique": "2026-10-30 09:00" }, { "tique": "2026-10-30 16:30" }, { "tique": "2026-11-02 17:00" }],
+      "texto": ""
+    },
+    "ruim": {
+      "por_que": "o publicado é desfeito no meio (uma mudança voluntária): o plano não é mais o publicado",
+      "reprova_em": "agenda",
+      "passos": [{ "palavra": "desfaz semana", "agora": "2026-10-29 17:40" }, { "tique": "2026-10-30 09:00" },
+                 { "tique": "2026-10-30 16:30" }, { "tique": "2026-11-02 17:00" }],
+      "texto": ""
+    }
+  },
+  "M02": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_propor", "argumentos": { "escopo": "proxima_semana", "simular": false } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o que aconteceu de verdade: marca o Flávio na terça sem a peça, em vez de deixar o sistema montar a semana",
+      "reprova_em": "ferramentas",
+      "chamadas": [{ "ferramenta": "schedule_service_order", "argumentos": {
+        "service_order_id": "05000000-0000-4000-8000-000000000104", "scheduled_start_at": "2026-10-06T08:00:00-03:00",
+        "scheduled_end_at": "2026-10-08T17:00:00-03:00", "quando": "terça", "trecho": "monta a semana que vem" } }],
       "texto": "{{saida:0}}"
     }
   }

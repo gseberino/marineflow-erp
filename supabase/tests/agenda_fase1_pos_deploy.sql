@@ -51,17 +51,24 @@ select 'C2 modo_leitura é um dos três (nasce sombra; ligado só com o OK depoi
        string_agg(c.modo_leitura, ', ')
   from public.agenda_config c;
 
+-- Fase 2 (P6): depois da migration de dado 20261025101000 (os modos em sombra; passos 4–8 de fila-do-dono/fase2-oks.md)
+-- a proposta e a vigia saem de desligado e o plano pode ter versão: C3 e C4 passam a valer só antes dela, e quem
+-- confere os modos e o plano depois é supabase/tests/agenda_fase2_pos_deploy.sql (C2, N1–N3). Sem isto, este SQL
+-- acusaria defeito no que é o caminho combinado.
 insert into _resultado
-select 'C3 o que é das Fases 2–5 continua desligado (proposta, vigia, equipe, cliente)',
-       coalesce(bool_and(c.modo_proposta = 'desligado' and c.modo_vigia = 'desligado' and c.modo_equipe = 'desligado'
-                         and c.modo_cliente = 'desligado'), false),
+select 'C3 o que é das Fases 2–5 continua desligado (proposta e vigia: até a Fase 2 ligar a sombra; equipe e cliente)',
+       coalesce(bool_and(c.modo_equipe = 'desligado' and c.modo_cliente = 'desligado'
+                         and ((c.modo_proposta = 'desligado' and c.modo_vigia = 'desligado')
+                              or exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261025101000'))), false),
        string_agg(format('proposta %s, vigia %s, equipe %s, cliente %s', c.modo_proposta, c.modo_vigia, c.modo_equipe,
                          c.modo_cliente), '; ')
   from public.agenda_config c;
 
 insert into _resultado
-select 'C4 nenhum plano publicado (versao_plano 0: o motor de proposta é da Fase 2)',
-       coalesce(bool_and(c.versao_plano = 0), false), string_agg(c.versao_plano::text, ', ')
+select 'C4 nenhum plano publicado (versao_plano 0) enquanto a Fase 2 não ligou a sombra',
+       coalesce(bool_and(c.versao_plano = 0
+                         or exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261025101000')), false),
+       string_agg(c.versao_plano::text, ', ')
   from public.agenda_config c;
 
 -- ── T. As 6 tabelas ─────────────────────────────────────────────────────────────────────────────────────

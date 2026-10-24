@@ -9,6 +9,17 @@
 //     grava. Por isso rodam direto pela rede (ESCRITAS_VERIFICADAS_DA_REDE, perfil-operacao.ts): a escrita é só do
 //     rascunho, como a do completar_comprovante.
 //
+// Fase 2 (P6, 24/10/2026; spec-fase2.md §12.1; decisões do dono de 23/10, Autonomia): a agenda se monta e se ajusta
+// sozinha; o dono pede pela conversa, e nada do que ele pede é executado pelo modelo:
+//   · agenda_propor — a simulação do motor ("e se…"; simular = true por padrão: nada é gravado). Com simular = false
+//     grava só a proposta EM ABERTO (agenda_propostas e alocações em estado proposta), que não vale para ninguém;
+//   · agenda_aplicar, agenda_desfazer, os_registrar_andamento — o pedido vira RASCUNHO com a releitura do efeito
+//     calculado agora pelo banco (agenda_rascunho_aplicar/_desfazer/_andamento, migration 20261025100400); só o *grava*
+//     do dono executa (publica, decide, desfaz, anota o dia). Rodam direto pela rede como as da Fase 1.
+//   As quatro: só o admin, risco low, nenhuma recebe id nem data calculada, e ficam fora da vista (d14: só agenda_ver
+//   à vista; o resto pela ferramenta_extra). Marcar uma OS num dia continua sendo schedule_service_order (com a agenda
+//   automática ligada, ela também só deixa o rascunho).
+//
 // Cada execute chama UMA RPC com ctx.sb (painel: o JWT do dono; WhatsApp: service role), p_autor = ctx.userId e
 // p_canal pelo ctx.canal. O mapeamento argumento → parâmetro é o de _shared/agenda/rpc-das-ferramentas.ts (puro), o
 // mesmo dos evals. `if (error) throw`: leitura que falha nunca vira "nada marcado".
@@ -16,14 +27,22 @@ import type { Role, ToolCtx, ToolDef } from "./registry.ts";
 import {
   canalDaRpc,
   type ChamadaDaRpc,
+  ESCOPOS_DA_PROPOSTA,
+  EVENTOS_DO_ANDAMENTO,
   FOCOS,
   LIMPAVEIS,
+  MOTIVOS_DO_ANDAMENTO,
   paraAgendaVer,
+  paraAndamento,
+  paraAplicar,
+  paraDesfazer,
   paraDisponibilidade,
   paraMaterial,
   paraPlanejar,
+  paraPropor,
   PRESENCAS_DO_DONO,
   resultadoDaLeitura,
+  resultadoDaProposta,
   resultadoDoRascunho,
   SITUACOES_DA_EQUIPE,
   SITUACOES_DO_MATERIAL,
@@ -53,6 +72,8 @@ const OS_DITA = {
   type: "string",
   description: "Número (OS-00112, ORÇ-00119) ou o nome do cliente, como o dono falou. Nunca o id.",
 };
+const LISTA_DE_OS = { type: "array", items: OS_DITA, description: "As OS como o dono falou (número ou nome). Nunca o id." };
+const DIA_DITO = { type: "string", description: "O dia como o dono disse (\"quinta\", \"dia 5\", \"semana que vem\"). Nunca calcule." };
 
 export const agendaProducaoTools: ToolDef[] = [
   {
@@ -60,7 +81,9 @@ export const agendaProducaoTools: ToolDef[] = [
     description:
       "Agenda de produção do dono, lida do banco com o texto pronto: o que ele tem que fazer (foco o_que_fazer), a " +
       "semana (periodo), quando fica livre (foco livre), o que está atrasado (foco atrasos), o material (foco material), " +
-      "as perguntas para montar a semana (foco aprontar), o dia de alguém da equipe (pessoa + periodo), uma OS (os), " +
+      "as perguntas para montar a semana (foco aprontar), o que a agenda mudou sozinha (foco mudancas), o que ela precisa " +
+      "do dono (foco decisoes: as decisões numeradas, com as opções e a recomendação), o publicado dia a dia (foco plano), " +
+      "o dia de alguém da equipe (pessoa + periodo), uma OS (os), " +
       "\"se o cliente aprovar hoje, quando dá\" (os + simular_aprovacao) ou um serviço que ainda não existe (simular). " +
       "Datas, dias livres, capacidade e duração vêm SÓ daqui: repita o texto, sem calcular nem mudar número, data ou nome. " +
       "Só lê: não marca nada, não cria tarefa (create_task) nem agenda OS (schedule_service_order). O que o dono contar " +
@@ -133,12 +156,16 @@ export const agendaProducaoTools: ToolDef[] = [
         prioridade: { type: "integer", enum: [1, 2, 3], description: "1 = passa na frente." },
         sem_material: { type: "boolean", description: "true = \"não tem peça a comprar\"." },
         aceitar_sugestao: { type: "boolean", description: "true = o dono aceitou a duração estimada pelo sistema." },
+        adiantavel_patio: {
+          type: "number",
+          description: "Dias que dá para adiantar no pátio, sem o barco/motorhome (\"dá para adiantar um dia no pátio\"). Só o dito.",
+        },
         limpar: {
           type: "array",
           items: { type: "string", enum: [...LIMPAVEIS] },
           description:
             "O que o dono desfez: espera (\"pode voltar\", \"tira da espera\"), nao_antes (\"não tem mais data mínima\"), " +
-            "prazo (\"o cliente não tem mais prazo\"), escopo (\"o escopo está resolvido\").",
+            "prazo (\"o cliente não tem mais prazo\"), escopo (\"o escopo está resolvido\"), patio (\"no pátio não dá para adiantar nada\").",
         },
         trecho: TRECHO,
       },
@@ -208,6 +235,132 @@ export const agendaProducaoTools: ToolDef[] = [
     async execute(args, ctx) {
       if (ctx.userRole !== "admin") return SO_O_ADMINISTRADOR;
       const chamada = paraDisponibilidade(args, contexto(ctx));
+      if (!chamada.ok) return { error: chamada.error };
+      return resultadoDoRascunho(await chamar(ctx, chamada), chamada.rpc);
+    },
+  },
+  // ── Fase 2 (P6): a simulação e os pedidos do dono à agenda ──
+  {
+    name: "agenda_propor",
+    description:
+      "Simula a agenda que o sistema montaria: a semana que ele publica (escopo semana ou proxima_semana), uma OS (os) ou " +
+      "o replano de algumas (replano), com o que o dono quer testar: \"e se eu tirar o Rodrigo da semana?\" (tirar), \"e se " +
+      "o Lenine for na quinta?\" (fixar com quando), \"o Nelson só depois do dia 10\" (so_depois_de), \"mesmo acima da " +
+      "carga\" (acima_da_carga). simular = true (o padrão) não grava nada; simular = false, só quando o dono pede para " +
+      "montar de verdade (\"monta a semana que vem\"), deixa a proposta em aberto, que não vale para ninguém. NÃO publica, " +
+      "NÃO marca, não escolhe dia nem pessoa (quem escolhe é o sistema) e não decide qual OS atrasa: se não couber, a " +
+      "pergunta volta no texto. Publicar é agenda_aplicar e o *grava* do dono; marcar uma OS num dia é " +
+      "schedule_service_order. Datas e nomes como o dono disse.",
+    input_schema: {
+      type: "object",
+      properties: {
+        escopo: { type: "string", enum: [...ESCOPOS_DA_PROPOSTA], description: "semana = proxima_semana (a que o sistema publica)." },
+        os: LISTA_DE_OS,
+        fixar: {
+          type: "array",
+          description: "O que o dono quer num dia: [{os, quando, ate, pessoa}], com o dia como ele disse.",
+          items: {
+            type: "object",
+            properties: { os: OS_DITA, quando: DIA_DITO, ate: DIA_DITO, pessoa: { type: "string", description: "\"eu\" ou o nome." } },
+          },
+        },
+        tirar: { ...LISTA_DE_OS, description: "As OS que saem da conta (\"e se eu tirar o Rodrigo?\"), como o dono falou." },
+        so_depois_de: {
+          type: "array",
+          description: "\"Só depois do dia 10\": [{os, quando}].",
+          items: { type: "object", properties: { os: OS_DITA, quando: DIA_DITO } },
+        },
+        acima_da_carga: { type: "boolean", description: "true = o dono aceita passar da carga da equipe." },
+        simular: { type: "boolean", description: "Padrão true (não grava nada). false só com \"monta\"/\"prepara\" dito pelo dono." },
+      },
+      required: ["escopo"],
+    },
+    risk: "low",
+    roles: SO_ADMIN,
+    async execute(args, ctx) {
+      if (ctx.userRole !== "admin") return SO_O_ADMINISTRADOR;
+      const chamada = paraPropor(args, contexto(ctx));
+      if (!chamada.ok) return { error: chamada.error };
+      return resultadoDaProposta(await chamar(ctx, chamada));
+    },
+  },
+  {
+    name: "agenda_aplicar",
+    description:
+      "Anota num RASCUNHO um pedido do dono à agenda: publicar a proposta em aberto (\"pode publicar\", \"publica só o " +
+      "Lenine e o Flávio\": proposta = \"a última\" ou o nº, os = as OS ditas) OU responder uma decisão que a agenda pediu " +
+      "(decisao = o nº que agenda_ver foco decisoes mostrou, ou o nome da OS; opcao = o nº ou o nome da OS que o dono " +
+      "escolheu). NÃO grava: devolve a releitura do efeito, e só o *grava* do dono publica ou decide. Nunca escolha a " +
+      "opção pelo dono: sem opcao dita, a pergunta volta como está. Marcar uma OS num dia (\"marca o Lenine pra quinta\") " +
+      "é schedule_service_order com quando.",
+    input_schema: {
+      type: "object",
+      properties: {
+        proposta: { type: "string", description: "\"a última\" ou o nº da proposta. Só para publicar." },
+        os: { ...LISTA_DE_OS, description: "Publicar só estas OS da proposta (como o dono disse)." },
+        decisao: { type: "string", description: "O nº da decisão (agenda_ver foco decisoes) ou o nome da OS." },
+        opcao: { type: "string", description: "O nº da opção ou o nome da OS que o dono escolheu. Só o que ele disse." },
+        trecho: TRECHO,
+      },
+      required: ["trecho"],
+    },
+    risk: "low",
+    roles: SO_ADMIN,
+    async execute(args, ctx) {
+      if (ctx.userRole !== "admin") return SO_O_ADMINISTRADOR;
+      const chamada = paraAplicar(args, contexto(ctx));
+      if (!chamada.ok) return { error: chamada.error };
+      return resultadoDoRascunho(await chamar(ctx, chamada), chamada.rpc);
+    },
+  },
+  {
+    name: "agenda_desfazer",
+    description:
+      "Anota num RASCUNHO o \"desfaz\" de uma mudança que a agenda fez sozinha (alvo = o nome do cliente, o número, " +
+      "\"semana\" ou \"a última\"). NÃO desfaz: devolve a releitura (o que volta como estava), e só o *grava* do dono " +
+      "desfaz. A palavra *desfaz* + nome o dono manda direto, sem você.",
+    input_schema: {
+      type: "object",
+      properties: {
+        alvo: { type: "string", description: "O nome do cliente, o número, \"semana\" ou \"a última\", como o dono disse." },
+        trecho: TRECHO,
+      },
+      required: ["trecho"],
+    },
+    risk: "low",
+    roles: SO_ADMIN,
+    async execute(args, ctx) {
+      if (ctx.userRole !== "admin") return SO_O_ADMINISTRADOR;
+      const chamada = paraDesfazer(args, contexto(ctx));
+      if (!chamada.ok) return { error: chamada.error };
+      return resultadoDoRascunho(await chamar(ctx, chamada), chamada.rpc);
+    },
+  },
+  {
+    name: "os_registrar_andamento",
+    description:
+      "Anota num RASCUNHO o que aconteceu numa OS num dia do plano: trabalhou (quem trabalhou), parcial (andou em parte, " +
+      "com motivo), nao_foi (quem não foi, ou a OS não andou, com motivo), comecou (a OS começou) ou parou (parou por " +
+      "material ou cliente). Uma chamada por fato, com o trecho do dono. NÃO conclui nem entrega (concluir é pela tela, " +
+      "botão Concluir da OS), não lança nem aprova diária (quanto pagar ao diarista é registrar_diaria) e não é a chegada " +
+      "dita pelo técnico (check_in_service_order). Só o *grava* do dono grava.",
+    input_schema: {
+      type: "object",
+      properties: {
+        os: OS_DITA,
+        evento: { type: "string", enum: [...EVENTOS_DO_ANDAMENTO] },
+        dia: { type: "string", description: "\"hoje\", \"ontem\", \"segunda\", como o dono disse. Sem = hoje." },
+        quem: { type: "array", items: { type: "string" }, description: "Os nomes (ou \"eu\") de quem o fato fala." },
+        motivo: { type: "string", enum: [...MOTIVOS_DO_ANDAMENTO], description: "Obrigatório em parcial, nao_foi e parou." },
+        trecho: TRECHO,
+      },
+      required: ["os", "evento", "trecho"],
+    },
+    risk: "low",
+    roles: SO_ADMIN,
+    async execute(args, ctx) {
+      if (ctx.userRole !== "admin") return SO_O_ADMINISTRADOR;
+      const chamada = paraAndamento(args, contexto(ctx));
       if (!chamada.ok) return { error: chamada.error };
       return resultadoDoRascunho(await chamar(ctx, chamada), chamada.rpc);
     },

@@ -195,3 +195,50 @@ Deno.test("ferramenta_extra com nome fora do alcance recusa", async () => {
   const r = await executarChamadaDeTool({ name: NOME_DA_FERRAMENTA_EXTRA, input: { nome: "nao_existe" } }, amb);
   assert(String((r.toolResult as any).error).includes("não está ao seu alcance"));
 });
+
+// ───────── Agenda de Produção, Fase 2 (P6, 24/10/2026; decisão d14 do dono) ─────────
+
+const DA_FASE_2: Record<string, Record<string, unknown>> = {
+  agenda_propor: { escopo: "semana", tirar: ["Rodrigo"] },
+  agenda_aplicar: { decisao: "1", opcao: "1", trecho: "pode atrasar o Nelson" },
+  agenda_desfazer: { alvo: "semana", trecho: "desfaz a semana" },
+  os_registrar_andamento: { os: "Vanderlei", evento: "trabalhou", quem: ["Roberto"], trecho: "o Roberto fez o dia todo no Vanderlei" },
+};
+
+Deno.test("agenda de produção (Fase 2): as quatro novas fora da vista, ao alcance da ferramenta_extra, e o teto de 113 continua", async () => {
+  for (const n of Object.keys(DA_FASE_2)) {
+    assertEquals(PERFIL_ADMIN.has(n), false, `${n} à vista: só agenda_ver fica no perfil (d14)`);
+    assertEquals(PERFIL_OPERACAO.has(n), false, `${n} no perfil de operação: as listas não se cruzam (fica na rede)`);
+  }
+  zerarCacheDoPerfilDeTools();
+  const { p } = params("admin_enxuto", "admin", porCargo("admin"));
+  const r = await prepararFerramentasDoTurno(p as any);
+  const visiveis = r.tools.map((t) => t.name);
+  assert(visiveis.length <= 113, `admin vê ${visiveis.length}`);
+  assert(visiveis.includes("agenda_ver"));
+  for (const n of Object.keys(DA_FASE_2)) {
+    assertEquals(visiveis.includes(n), false, `${n} está à vista`);
+    assert(r.alcancaveisPelaRede[n], `${n} devia estar ao alcance da ferramenta_extra`);
+  }
+  const enumDaExtra = (r.toolsByName[NOME_DA_FERRAMENTA_EXTRA].input_schema as any).properties.nome.enum as string[];
+  for (const n of Object.keys(DA_FASE_2)) assert(enumDaExtra.includes(n), `${n} fora do enum da ferramenta_extra`);
+});
+
+Deno.test("agenda de produção (Fase 2): as quatro rodam DIRETO pela ferramenta_extra (sem pendência: quem executa é o *grava*)", async () => {
+  for (const [n, argumentos] of Object.entries(DA_FASE_2)) {
+    execucoes.length = 0;
+    const { amb, pendingRows, auditRows } = await ambienteDoAdmin({ [n]: comExecuteFalso });
+    const r = await executarChamadaDeTool({ name: NOME_DA_FERRAMENTA_EXTRA, input: { nome: n, argumentos } }, amb);
+    assertEquals(execucoes, [n], `${n} não rodou direto`);
+    assertEquals(r.toolResult, { ok: true });
+    assertEquals(pendingRows.length, 0, `${n} virou pendência`);
+    assert(auditRows.some((a) => a.event_type === `fora_do_perfil:${n}`));
+  }
+});
+
+Deno.test("agenda de produção (Fase 2): técnico e financeiro não alcançam as quatro (só admin, pelos roles)", async () => {
+  for (const cargo of ["technician", "financial"] as Role[]) {
+    const nomes = porCargo(cargo).map((t) => t.name);
+    for (const n of Object.keys(DA_FASE_2)) assertEquals(nomes.includes(n), false, `${n} ao alcance de ${cargo}`);
+  }
+});

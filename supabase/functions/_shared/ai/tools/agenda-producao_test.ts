@@ -36,8 +36,11 @@ function sbFalso(resposta: (c: Chamada) => { data: unknown; error: unknown }) {
 const ctx = (sb: unknown, extra: Record<string, unknown> = {}) =>
   ({ sb, admin: sb, userId: ADMIN, userRole: "admin", jwt: "", appOrigin: "", settings: {}, ...extra }) as never;
 
-Deno.test("as 4 estão em allTools, risco low, só admin", () => {
-  for (const nome of ["agenda_ver", "os_planejar", "material_informar", "equipe_disponibilidade"]) {
+Deno.test("as 8 estão em allTools, risco low, só admin", () => {
+  for (const nome of [
+    "agenda_ver", "os_planejar", "material_informar", "equipe_disponibilidade",
+    "agenda_propor", "agenda_aplicar", "agenda_desfazer", "os_registrar_andamento",
+  ]) {
     const t = allTools.find((x) => x.name === nome);
     assert(t, `${nome} fora de allTools`);
     assertEquals(t!.risk, "low", nome);
@@ -86,12 +89,16 @@ Deno.test("as três de escrita: a RPC do rascunho, p_canal = painel no painel e 
   }
 });
 
-Deno.test("erro do banco LANÇA nas quatro (nunca vira agenda vazia nem 'anotado')", async () => {
+Deno.test("erro do banco LANÇA nas oito (nunca vira agenda vazia nem 'anotado')", async () => {
   const args: Record<string, Record<string, unknown>> = {
     agenda_ver: { foco: "atrasos" },
     os_planejar: { os: "Lenine", dias: 2, trecho: "dois dias" },
     material_informar: { os: "Nelson", itens: ["painel"], situacao: "na_mao", trecho: "chegou" },
     equipe_disponibilidade: { pessoa: "eu", situacao: "vem", dias: "segunda a sexta", padrao: true, trecho: "segunda a sexta" },
+    agenda_propor: { escopo: "semana", tirar: ["Rodrigo"] },
+    agenda_aplicar: { decisao: "1", opcao: "1", trecho: "pode atrasar o Nelson" },
+    agenda_desfazer: { alvo: "Nelson", trecho: "desfaz o Nelson" },
+    os_registrar_andamento: { os: "Vanderlei", evento: "trabalhou", quem: ["Roberto"], dia: "hoje", trecho: "hoje o Roberto trabalhou" },
   };
   for (const t of agendaProducaoTools) {
     const { sb } = sbFalso(() => ({ data: null, error: { message: "permission denied", code: "42501" } }));
@@ -195,11 +202,12 @@ Deno.test("nenhuma recebe id nem data/hora calculada: sem campo *_id/id, sem for
   }
 });
 
-Deno.test("as três de escrita exigem o trecho; a leitura não exige nada", () => {
-  for (const nome of ["os_planejar", "material_informar", "equipe_disponibilidade"]) {
+Deno.test("as seis de rascunho exigem o trecho; a leitura não exige nada; a simulação só o escopo", () => {
+  for (const nome of ["os_planejar", "material_informar", "equipe_disponibilidade", "agenda_aplicar", "agenda_desfazer", "os_registrar_andamento"]) {
     assert((porNome(nome).input_schema.required as string[]).includes("trecho"), nome);
   }
   assertEquals(porNome("agenda_ver").input_schema.required, undefined);
+  assertEquals(porNome("agenda_propor").input_schema.required, ["escopo"]);
 });
 
 Deno.test("as descrições dizem o que NÃO fazem e ensinam a fronteira com as vizinhas", () => {
@@ -228,5 +236,167 @@ Deno.test("cada execute chama UMA RPC e não lê tabela (o texto é do banco)", 
   for (const t of agendaProducaoTools as ToolDef[]) {
     const corpo = String(t.execute);
     assertEquals(/\.from\(/.test(corpo), false, `${t.name} lê tabela direto`);
+  }
+});
+
+// ───────── Fase 2 (P6): agenda_propor, agenda_aplicar, agenda_desfazer, os_registrar_andamento ─────────
+
+const RELEITURA = { ok: true, item: "x", releitura: "Entendi assim, confere?\n• x.\nResponda *grava* ou corrija o que estiver errado." };
+
+Deno.test("Fase 2: cada uma chama a RPC certa, com p_autor e p_canal (painel × WhatsApp)", async () => {
+  const casos: Array<[string, Record<string, unknown>, string, unknown]> = [
+    ["agenda_propor", { escopo: "semana", tirar: ["Rodrigo"] }, "agenda_propor_dito",
+      { ok: true, texto: "Semana de 03 a 06/11\nNada a mudar.\nÉ simulação: não muda nada.", simulacao: true, itens: [], perguntas: [] }],
+    ["agenda_aplicar", { decisao: "1", opcao: "1", trecho: "pode atrasar o Nelson" }, "agenda_rascunho_aplicar", RELEITURA],
+    ["agenda_desfazer", { alvo: "Nelson", trecho: "desfaz o Nelson" }, "agenda_rascunho_desfazer", RELEITURA],
+    ["os_registrar_andamento", { os: "Vanderlei", evento: "trabalhou", quem: ["Roberto"], trecho: "o Roberto fez o dia todo" },
+      "agenda_rascunho_andamento", RELEITURA],
+  ];
+  for (const [nome, args, rpc, resposta] of casos) {
+    for (const [canal, esperado] of [["panel", "painel"], ["whatsapp", "whatsapp"], [undefined, "whatsapp"]] as const) {
+      const { sb, chamadas } = sbFalso(() => ({ data: resposta, error: null }));
+      const r = await porNome(nome).execute(args, ctx(sb, canal ? { canal } : {})) as Record<string, unknown>;
+      assertEquals(chamadas.map((c) => c.nome), [rpc], nome);
+      assertEquals(chamadas[0].params.p_autor, ADMIN, nome);
+      assertEquals(chamadas[0].params.p_canal, esperado, `${nome} ${canal}`);
+      assertEquals("p_hoje" in chamadas[0].params, false, `${nome}: em produção o dia é o do banco`);
+      assertEquals("p_agora" in chamadas[0].params, false, `${nome}: a hora é a do banco (o modelo nunca manda timestamptz)`);
+      assertEquals(r.ok, true, nome);
+    }
+  }
+});
+
+Deno.test("agenda_propor: simular é true por padrão; só o false explícito grava a proposta em aberto", async () => {
+  const { sb, chamadas } = sbFalso(() => ({
+    data: { ok: true, texto: "Semana de 03 a 06/11\n• Vanderlei (OS-00069): ter 03 a qui 05/11.\nÉ simulação: não muda nada.", simulacao: true },
+    error: null,
+  }));
+  const r = await porNome("agenda_propor").execute({ escopo: "proxima_semana" }, ctx(sb)) as Record<string, unknown>;
+  assertEquals(chamadas[0].params.p_simular, true);
+  assertEquals(chamadas[0].params.p_escopo, "proxima_semana");
+  assertEquals(chamadas[0].params.p_acima_da_carga, false);
+  assertEquals(r.simulacao, true);
+  assertStringIncludes(String(r.texto), "É simulação: não muda nada.");
+  assertStringIncludes(String(r.instrucao), "É simulação: nada mudou");
+  assertStringIncludes(String(r.instrucao), "não diga que marcou");
+
+  const aberta = sbFalso(() => ({ data: { ok: true, texto: "Semana de 03 a 06/11\n• x.", simulacao: false }, error: null }));
+  const r2 = await porNome("agenda_propor").execute({ escopo: "semana", simular: false }, ctx(aberta.sb)) as Record<string, unknown>;
+  assertEquals(aberta.chamadas[0].params.p_simular, false);
+  assertEquals(r2.simulacao, false);
+  assertStringIncludes(String(r2.instrucao), "não vale para ninguém");
+  assertStringIncludes(String(r2.instrucao), "*grava*");
+});
+
+Deno.test("agenda_propor: ao modelo vai só o texto e as perguntas em texto — nada de itens, alocações nem ids", async () => {
+  const { sb } = sbFalso(() => ({
+    data: {
+      ok: true, simulacao: true, proposta_id: null, texto: "Semana de 03 a 06/11\n• Vanderlei.\nÉ simulação: não muda nada.",
+      itens: [{ os: "05000000-0000-4000-8000-000000000069", alocacoes: [{ payee_id: "bb000000-0000-4000-8000-000000000002" }] }],
+      perguntas: [{ tipo: "nao_cabe", texto: "Não cabe tudo até qui 05/11. Qual aceita atrasar?", opcoes: [{ n: 1, os: "05000000-0000-4000-8000-000000000112" }] }],
+    },
+    error: null,
+  }));
+  const r = await porNome("agenda_propor").execute({ escopo: "semana" }, ctx(sb)) as Record<string, unknown>;
+  assertEquals(r.perguntas, ["Não cabe tudo até qui 05/11. Qual aceita atrasar?"]);
+  for (const campo of ["itens", "proposta_id", "alocacoes", "carga", "pontuacao"]) assertEquals(campo in r, false, campo);
+  assertEquals(/[0-9a-f]{8}-[0-9a-f]{4}-/.test(JSON.stringify(r)), false, "id vazou para o modelo");
+});
+
+Deno.test("agenda_propor: o que o dono testa vira o parâmetro como ele disse (fixar, tirar, só depois de)", async () => {
+  const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, texto: "x", simulacao: true }, error: null }));
+  await porNome("agenda_propor").execute({
+    escopo: "os", os: ["Lenine"], fixar: [{ os: "Lenine", quando: "quinta que vem" }], tirar: "Rodrigo",
+    so_depois_de: [{ os: "Nelson", quando: "dia 10" }], acima_da_carga: true,
+  }, ctx(sb));
+  const p = chamadas[0].params;
+  assertEquals(p.p_os, ["Lenine"]);
+  assertEquals(p.p_fixar, [{ os: "Lenine", quando: "quinta que vem" }]);
+  assertEquals(p.p_tirar, ["Rodrigo"]);
+  assertEquals(p.p_so_depois_de, [{ os: "Nelson", quando: "dia 10" }]);
+  assertEquals(p.p_acima_da_carga, true);
+});
+
+Deno.test("agenda_aplicar: sem opção dita, NADA é escolhido aqui — vai nulo e a pergunta do banco volta", async () => {
+  const pergunta = "Não cabe tudo até qui 05/11. Qual aceita atrasar? 1) Nelson (OS-00112) atrasa…; 2) Deixo o Nelson fora…";
+  const { sb, chamadas } = sbFalso(() => ({
+    data: { ok: false, motivo: "sem_opcao", texto: pergunta, pergunta, opcoes: ["1) Nelson (OS-00112) atrasa…", "2) Deixo o Nelson fora…"] },
+    error: null,
+  }));
+  const r = await porNome("agenda_aplicar").execute({ decisao: "1", trecho: "resolve aí do jeito que achar melhor" }, ctx(sb)) as
+    Record<string, unknown>;
+  assertEquals(chamadas[0].params.p_opcao, null);
+  assertEquals(chamadas[0].params.p_decisao, "1");
+  assertEquals(r.ok, false);
+  assertEquals(r.pergunta, pergunta);
+  assertEquals(r.opcoes, ["1) Nelson (OS-00112) atrasa…", "2) Deixo o Nelson fora…"]);
+  assertStringIncludes(String(r.instrucao), "Faça esta pergunta ao dono como está");
+});
+
+Deno.test("Fase 2: argumento errado volta como { error } e NADA é chamado", async () => {
+  const casos: Array<[string, Record<string, unknown>, string]> = [
+    ["agenda_propor", { escopo: "mes" }, "'escopo' aceita só"],
+    ["agenda_propor", {}, "falta 'escopo'"],
+    ["agenda_propor", { escopo: "os" }, "diga de qual serviço"],
+    ["agenda_propor", { escopo: "os", fixar: [{ os: "Lenine", quando: "2026-11-05" }] }, "sem calcular"],
+    ["agenda_propor", { escopo: "os", fixar: [{ os: "Lenine" }] }, "falta 'fixar[0].quando'"],
+    ["agenda_propor", { escopo: "semana", tirar: ["05000000-0000-4000-8000-000000000096"] }, "não o id"],
+    ["agenda_propor", { escopo: "semana", simular: "sim" }, "'simular' tem de ser true ou false"],
+    ["agenda_aplicar", { decisao: "1", opcao: "1" }, "falta 'trecho'"],
+    ["agenda_aplicar", { proposta: "a última", decisao: "1", trecho: "x" }, "a proposta OU a decisão"],
+    ["agenda_aplicar", { decisao: "df23fd81-0d86-4a86-ae86-5ad982b07ef9", opcao: "1", trecho: "x" }, "não o id"],
+    ["agenda_desfazer", { alvo: "Nelson" }, "falta 'trecho'"],
+    ["os_registrar_andamento", { os: "Vanderlei", evento: "concluiu", trecho: "terminou hoje" }, "Concluir ainda é pela tela"],
+    ["os_registrar_andamento", { os: "Vanderlei", evento: "faltou", trecho: "x" }, "'evento' aceita só"],
+    ["os_registrar_andamento", { os: "Vanderlei", evento: "nao_foi", motivo: "doença", trecho: "x" }, "'motivo' aceita só"],
+    ["os_registrar_andamento", { os: "Vanderlei", evento: "trabalhou", dia: "2026-11-03", trecho: "x" }, "sem calcular"],
+    ["os_registrar_andamento", { evento: "trabalhou", trecho: "x" }, "falta 'os'"],
+  ];
+  for (const [nome, args, trecho] of casos) {
+    const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, texto: "x" }, error: null }));
+    const r = await porNome(nome).execute(args, ctx(sb)) as Record<string, unknown>;
+    assertEquals(chamadas.length, 0, `${nome} chamou o banco com argumento errado (${JSON.stringify(args)})`);
+    assertStringIncludes(String(r.error), trecho, `${nome} ${JSON.stringify(args)}`);
+  }
+});
+
+Deno.test("Fase 2: em teste (modo_proposta fora de ligado) a recusa do banco passa adiante, sem *grava*", async () => {
+  const recusa = "A agenda automática ainda está em teste: mostro como ficaria, mas não marco nada.";
+  const casos: Array<[string, Record<string, unknown>]> = [
+    ["agenda_aplicar", { proposta: "a última", trecho: "pode publicar" }],
+    ["agenda_desfazer", { alvo: "semana", trecho: "desfaz a semana" }],
+    ["os_registrar_andamento", { os: "Vanderlei", evento: "trabalhou", trecho: "o Vanderlei andou hoje" }],
+  ];
+  for (const [nome, args] of casos) {
+    const { sb } = sbFalso(() => ({ data: { ok: false, motivo: "em_teste", texto: recusa, pergunta: recusa, opcoes: [] }, error: null }));
+    const r = await porNome(nome).execute(args, ctx(sb)) as Record<string, unknown>;
+    assertEquals([r.ok, r.texto], [false, recusa], nome);
+    assertEquals(String(r.texto).includes("*grava*"), false, nome);
+  }
+});
+
+Deno.test("Fase 2: as descrições dizem o que NÃO fazem e a fronteira com as vizinhas", () => {
+  const d = (n: string) => porNome(n).description;
+  assertStringIncludes(d("agenda_propor"), "NÃO publica");
+  assertStringIncludes(d("agenda_propor"), "simular = true (o padrão) não grava nada");
+  assertStringIncludes(d("agenda_propor"), "não decide qual OS atrasa");
+  for (const nome of ["agenda_aplicar", "agenda_desfazer", "os_registrar_andamento"]) {
+    assertStringIncludes(d(nome), "RASCUNHO", nome);
+    assertStringIncludes(d(nome), "*grava*", nome);
+  }
+  assertStringIncludes(d("agenda_aplicar"), "NÃO grava");
+  assertStringIncludes(d("agenda_aplicar"), "Nunca escolha a opção pelo dono");
+  assertStringIncludes(d("agenda_desfazer"), "NÃO desfaz");
+  assertStringIncludes(d("os_registrar_andamento"), "NÃO conclui");
+  // As vizinhas que parecem a mesma coisa (spec §12, riscos): marcar num dia, a diária e a chegada do técnico.
+  const fronteiras: Array<[string, string]> = [
+    ["agenda_propor", "schedule_service_order"], ["agenda_propor", "agenda_aplicar"], ["agenda_aplicar", "schedule_service_order"],
+    ["agenda_aplicar", "agenda_ver foco decisoes"], ["os_registrar_andamento", "registrar_diaria"],
+    ["os_registrar_andamento", "check_in_service_order"], ["os_registrar_andamento", "Concluir"],
+  ];
+  for (const [nome, vizinha] of fronteiras) assertStringIncludes(d(nome), vizinha, `${nome} → ${vizinha}`);
+  // E as vizinhas citadas existem de verdade.
+  for (const t of ["schedule_service_order", "registrar_diaria", "check_in_service_order"]) {
+    assert(allTools.some((x) => x.name === t), `${t} não é ferramenta`);
   }
 });

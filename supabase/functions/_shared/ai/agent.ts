@@ -234,6 +234,15 @@ const TOOL_LABELS_PT: Record<string, string> = {
   agrupar_orcamentos: "Agrupar orçamentos em um só",
   desagrupar_orcamento: "Desagrupar orçamento",
   listar_orcamentos_para_agrupar: "Listar orçamentos para agrupar",
+  // Agenda de Produção, Fase 2 (24/10/2026, P6): rodam direto pela rede (só deixam rascunho ou simulam), mas o título
+  // aparece na auditoria e em qualquer cartão que um dia as pegue (spec-fase2.md §12.1).
+  agenda_propor: "Montar a agenda",
+  agenda_aplicar: "Publicar na agenda",
+  agenda_desfazer: "Desfazer na agenda",
+  os_registrar_andamento: "Andamento da OS",
+  // "Marca o Lenine pra quinta" (o prompt manda o dono a schedule_service_order): fora do perfil enxuto do admin, pela
+  // rede vira cartão de "sim" — sem esta linha o título saía "Schedule Service Order".
+  schedule_service_order: "Agendar OS",
 };
 // financeiro (07/10/2026): anotação de Pix, estorno, cobrança formal e favorecido.
 Object.assign(TOOL_LABELS_PT, TITULOS_DO_FINANCEIRO);
