@@ -3,7 +3,7 @@
 // comprovante e da confirmação (o "sim"/"1"/"não"/"2" nunca chega a ela como comando) e ANTES do atalho do
 // PDF e do modelo; só com o formato novo; só do dono; a resposta sem modelo volta antes do turno do modelo.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { camadaDaAgenda, executarComandoDaAgenda, modoDaLeituraNoBanco } from "../_shared/agenda/executar.ts";
+import { camadaDaAgenda, executarComandoDaAgenda, modoDaLeituraNoBanco, modosDaAgendaNoBanco } from "../_shared/agenda/executar.ts";
 
 const fonte = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
 const inicio = fonte.indexOf("async function handleWhatsAppTurn(");
@@ -129,14 +129,17 @@ Deno.test("agenda (painel): lê só o texto NOVO do turno, grava no histórico e
 // O comportamento da camada como o index.ts a monta (WhatsApp): um banco de mentira com o dono, a chave e as RPCs.
 const DONO = { id: "u-dono", phone: "5547999990000" };
 
-function bancoDoTurno(p: { modo: string; donoId?: string }) {
+function bancoDoTurno(p: { modo: string; donoId?: string; fase2?: string }) {
   const rpcs: string[] = [];
   const admin = {
     from(tabela: string) {
       const q: Record<string, unknown> = {
         select: () => q, eq: () => q, not: () => q, order: () => q,
         limit: () => Promise.resolve({ data: tabela === "app_users" ? [{ id: p.donoId ?? DONO.id, phone_normalized: DONO.phone }] : [], error: null }),
-        maybeSingle: () => Promise.resolve({ data: tabela === "agenda_config" ? { modo_leitura: p.modo } : null, error: null }),
+        maybeSingle: () => Promise.resolve({
+          data: tabela === "agenda_config" ? { modo_leitura: p.modo, modo_proposta: p.fase2 ?? "desligado", modo_vigia: "desligado" } : null,
+          error: null,
+        }),
       };
       return q;
     },
@@ -148,7 +151,7 @@ function bancoDoTurno(p: { modo: string; donoId?: string }) {
   return { admin, rpcs };
 }
 
-async function turnoDaAgenda(texto: string, p: { modo: string; donoId?: string; appUserId?: string; phone?: string }) {
+async function turnoDaAgenda(texto: string, p: { modo: string; donoId?: string; appUserId?: string; phone?: string; fase2?: string }) {
   const { admin, rpcs } = bancoDoTurno(p);
   const appUser = { id: p.appUserId ?? DONO.id };
   const phoneNormalized = p.phone ?? DONO.phone;
@@ -159,6 +162,7 @@ async function turnoDaAgenda(texto: string, p: { modo: string; donoId?: string; 
       return !!dono && dono.id === appUser.id && dono.phone === phoneNormalized;
     },
     modo: () => modoDaLeituraNoBanco(admin),
+    modosDaFase2: () => modosDaAgendaNoBanco(admin),
     executar: (cmd) => executarComandoDaAgenda(admin, cmd, { autor: appUser.id, log: admin, canal: "whatsapp" }),
   });
   return { r, rpcs };
@@ -190,19 +194,34 @@ Deno.test("agenda Fase 2 (WhatsApp): *dia feito*, *dia não cliente*, *choveu* e
     ["o que mudou?", "agenda_ver"], ["agenda pendências", "agenda_ver"], ["agenda plano", "agenda_ver"],
   ];
   for (const [texto, rpc] of casos) {
-    const r = await turnoDaAgenda(texto, { modo: "ligado" });
+    const r = await turnoDaAgenda(texto, { modo: "ligado", fase2: "ligado" });
     assert(r.r?.ok, texto);
     assertEquals(r.rpcs, [rpc], texto);
+    // (revisão da Fase 2) com a leitura ligada e a agenda automática desligada, as palavras da Fase 2 vão ao modelo
+    const semFase2 = await turnoDaAgenda(texto, { modo: "ligado", fase2: "desligado" });
+    assertEquals([semFase2.r, semFase2.rpcs], [null, []], `sem a agenda automática: ${texto}`);
   }
   // de outro número (ou outro login): segue ao modelo, nada é chamado
   for (const outro of [{ appUserId: "u-outro" }, { phone: "5547900000001" }]) {
-    const r = await turnoDaAgenda("dia feito", { modo: "ligado", ...outro });
+    const r = await turnoDaAgenda("dia feito", { modo: "ligado", fase2: "ligado", ...outro });
     assertEquals([r.r, r.rpcs], [null, []], JSON.stringify(outro));
   }
   // agenda desligada: o *dia feito* vai ao modelo como conversa
   const desligado = await turnoDaAgenda("dia feito", { modo: "desligado" });
   assertEquals([desligado.r, desligado.rpcs], [null, []]);
   // "desfaz B" é do secretário (a letra do dia), não da agenda
-  const letra = await turnoDaAgenda("desfaz B", { modo: "ligado" });
+  const letra = await turnoDaAgenda("desfaz B", { modo: "ligado", fase2: "ligado" });
   assertEquals([letra.r, letra.rpcs], [null, []]);
+});
+
+Deno.test("agenda Fase 2 (revisão): os dois canais passam o modo da agenda automática à camada", () => {
+  assertEquals(fonte.split("modosDaFase2: () => modosDaAgendaNoBanco(admin)").length - 1, 2);
+});
+
+// Revisão da Fase 2: o "sim" de uma pendência que só deixou o rascunho da agenda (schedule_service_order com a agenda
+// automática ligada, so_rascunho) nunca diz "executado". Os dois caminhos (WhatsApp e painel) montam a mensagem por
+// textoDoSim, que mostra a releitura e o *grava*; o "✅ … executado." solto não volta.
+Deno.test("aprovação (WhatsApp e painel): a mensagem do sim sai de textoDoSim, nunca do '— executado.' montado à mão", () => {
+  assertEquals((fonte.match(/textoDoSim\(pending\.title, execResult\)/g) ?? []).length, 2);
+  assertEquals(fonte.includes("— executado.${"), false, "a mensagem de executado montada à mão voltou");
 });
