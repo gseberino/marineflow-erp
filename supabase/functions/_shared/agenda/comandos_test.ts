@@ -251,8 +251,11 @@ Deno.test("quemResponde: com o CMP no 'confirmar', 'grava' e 'livre' com a marca
 
 const FONE = "5547999990000";
 
-/** Um admin de mentira: agenda_config.modo_leitura (ou erro) e quantas vezes a chave foi lida. */
-function adminDaAgenda(modo: string | "erro" | "sem_tabela") {
+/**
+ * Um admin de mentira: agenda_config.modo_leitura (ou erro) e quantas vezes a chave foi lida. fase2 = modo_proposta (a
+ * agenda automática; as palavras da Fase 2 só valem fora de 'desligado').
+ */
+function adminDaAgenda(modo: string | "erro" | "sem_tabela", fase2 = "desligado") {
   const lidas: string[] = [];
   return {
     lidas,
@@ -264,7 +267,7 @@ function adminDaAgenda(modo: string | "erro" | "sem_tabela") {
           Promise.resolve(
             modo === "erro" ? { data: null, error: { code: "XX000" } }
             : modo === "sem_tabela" ? { data: null, error: { code: "42P01", message: "relation \"agenda_config\" does not exist" } }
-            : { data: { modo_leitura: modo }, error: null },
+            : { data: { modo_leitura: modo, modo_proposta: fase2, modo_vigia: "desligado" }, error: null },
           ),
       };
       return q;
@@ -272,8 +275,8 @@ function adminDaAgenda(modo: string | "erro" | "sem_tabela") {
   };
 }
 
-function depsDoWebhook(modo: string, transcricao?: string) {
-  const admin = adminDaAgenda(modo);
+function depsDoWebhook(modo: string, transcricao?: string, fase2 = "desligado") {
+  const admin = adminDaAgenda(modo, fase2);
   const c = { chamar: [] as Array<Record<string, unknown>>, despachos: [] as Array<string | undefined>, admin };
   const estado: EstadoDoTelefone = { ...estadoComCmpNoConfirmar(), pendencia: null, ativa: { ...estadoComCmpNoConfirmar().ativa!, aberta_em: new Date(Date.now() - 60_000).toISOString() } };
   const d: DependenciasDoTexto = {
@@ -394,6 +397,11 @@ const CONVERSA_FASE2 = [
   "desfaz b", "desfaz B", "desfaz a", "desfaz o c", "desfaz item c", "desfaz letra d", "desfaz x", "desfaz o",
   "desfaz " + "x".repeat(45), "o que mudou no Lenine", "o que você mudou ontem?", "agenda plano do Lenine", "plano",
   "pendências", "pendencias", "mudou",
+  // revisão da Fase 2: o que o prompt ensina para outras ferramentas (prompt.ts: estornar_pagamento e desagrupar_orcamento)
+  // e o "desfaz isso" sem dizer de quê vão ao modelo
+  "desfaz o agrupamento do ORÇ-00120", "desfaz a baixa da conta de luz", "desfaz a baixa da conta de luz, ainda não paguei",
+  "desfaz isso", "desfaz o último lançamento", "desfaz o pix do Roberto", "desfaz tudo", "desfazer o agrupamento",
+  "desfaz a diária do João", "desfaz o pagamento",
 ];
 
 Deno.test("Fase 2 — conversa (palavra a mais, motivo ou dia desconhecido, letra do secretário) não é comando", () => {
@@ -446,7 +454,7 @@ Deno.test("Fase 2 — as frases fixas novas também não começam pela confirma�
 Deno.test("Fase 2 — webhook: com a agenda em sombra ou ligada, 'dia feito' e 'desfaz Nelson' vão ao assistente (o CMP não os lê)", async () => {
   for (const modo of ["sombra", "ligado"]) {
     for (const t of ["dia feito", "desfaz Nelson", "choveu", "dia não cliente", "o que mudou?"]) {
-      const { d, c } = depsDoWebhook(modo);
+      const { d, c } = depsDoWebhook(modo, undefined, "sombra");
       assertEquals(await rotearTextoDoDono(TEXTO(t), d), "assistente", `${modo}: ${t}`);
       assertEquals(c.chamar.length, 0, t);
     }

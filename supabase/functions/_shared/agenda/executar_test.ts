@@ -228,8 +228,11 @@ function deps(p: {
   modo?: "desligado" | "sombra" | "ligado" | "lanca";
   texto?: string;
   rascunho?: boolean | "lanca";
+  /** (Fase 2) modo_proposta; ausente = sombra (a agenda automática em teste); "sem" = a dependência não existe */
+  fase2?: "desligado" | "sombra" | "ligado" | "lanca" | "sem";
+  resposta?: { ok: boolean; texto: string; seguirAoModelo?: boolean };
 }) {
-  const c = { dono: 0, modo: 0, executar: [] as string[], rascunho: 0 };
+  const c = { dono: 0, modo: 0, executar: [] as string[], rascunho: 0, fase2: 0 };
   const d: DependenciasDaCamada = {
     ehDoDono: () => {
       c.dono++;
@@ -243,8 +246,15 @@ function deps(p: {
     },
     executar: (cmd) => {
       c.executar.push(cmd.comando);
-      return Promise.resolve({ ok: true, texto: p.texto ?? "texto do banco" });
+      return Promise.resolve(p.resposta ?? { ok: true, texto: p.texto ?? "texto do banco" });
     },
+    ...(p.fase2 === "sem" ? {} : {
+      modosDaFase2: () => {
+        c.fase2++;
+        if (p.fase2 === "lanca") return Promise.reject(new Error("rede"));
+        return Promise.resolve({ proposta: (p.fase2 ?? "sombra") as "desligado" | "sombra" | "ligado", vigia: "desligado" as const });
+      },
+    }),
     ...(p.rascunho === undefined ? {} : {
       rascunhoAberto: () => {
         c.rascunho++;
@@ -409,4 +419,66 @@ Deno.test("Fase 2 — modosDaAgendaNoBanco: proposta e vigia num SELECT; erro, c
   }
   assertEquals(await modoDaPropostaNoBanco(adminDoModo({ data: { modo_proposta: "ligado" } })), "ligado");
   assertEquals(await modoDaPropostaNoBanco(adminDoModo({ error: { code: "42P01" } })), "desligado");
+});
+
+// ─── Revisão da Fase 2: as palavras novas só com a agenda automática, e o *desfaz <nome>* que não é dela ──────────
+
+Deno.test("Fase 2 (revisão) — camada: com a leitura ligada e a agenda automática desligada, as palavras da Fase 2 seguem ao modelo", async () => {
+  for (const fase2 of ["desligado", "lanca", "sem"] as const) {
+    for (const t of ["dia feito", "choveu", "dia não cliente", "desfaz Nelson", "desfaz", "o que mudou", "agenda pendências", "agenda plano"]) {
+      const { d, c } = deps({ modo: "ligado", fase2 });
+      assertEquals(await camadaDaAgenda(t, d), null, `${fase2}: ${t}`);
+      assertEquals(c.executar.length, 0, `${fase2}: ${t}`);
+    }
+    // as palavras da Fase 1 continuam (e nem leem o modo da Fase 2)
+    const { d, c } = deps({ modo: "ligado", fase2 });
+    assertEquals((await camadaDaAgenda("agenda", d))?.ok, true, fase2);
+    assertEquals(c.fase2, 0, fase2);
+  }
+  // com a agenda automática em sombra (ou ligada), respondem
+  const { d, c } = deps({ modo: "sombra", fase2: "ligado", texto: "Anotado." });
+  assertEquals((await camadaDaAgenda("choveu", d))?.texto, "Anotado.");
+  assertEquals([c.fase2, c.executar], [1, ["choveu"]]);
+});
+
+Deno.test("Fase 2 (revisão) — camada: *desfaz <nome>* que o banco não liga a mudança da agenda segue ao modelo; ambíguo e semana ficam", async () => {
+  const naoAchei = { ok: true, texto: "Não encontrei Fulano.", seguirAoModelo: true };
+  const { d, c } = deps({ modo: "ligado", resposta: naoAchei });
+  assertEquals(await camadaDaAgenda("desfaz Fulano", d), null);
+  assertEquals(c.executar, ["desfazer"]);
+  const amb = deps({ modo: "ligado", resposta: { ok: true, texto: "Qual? Nelson (…) ou Vanderlei (…)?" } });
+  assertEquals((await camadaDaAgenda("desfaz Nelson", amb.d))?.texto, "Qual? Nelson (…) ou Vanderlei (…)?");
+});
+
+Deno.test("Fase 2 (revisão) — executar: status nao_achei/nenhuma do *desfaz <nome>* marca seguirAoModelo; semana, sem nome e ambíguo não", async () => {
+  const resp = (status: string, texto: string) => ({ data: { ok: false, mudou: false, status, texto } });
+  const casos: Array<[string, Resposta, boolean]> = [
+    ["desfaz Fulano", resp("nao_achei", "Não encontrei Fulano."), true],
+    ["desfaz Nelson", resp("nenhuma", "Não tenho mudança minha no Nelson para desfazer agora."), true],
+    ["desfaz Vanderlei", resp("fora_da_carteira", "A OS-00069 está concluída."), true],
+    ["desfaz Nelson", resp("ambiguo", "Qual Nelson?"), false],
+    ["desfaz semana", resp("nenhuma", "Não tenho publicação da semana para desfazer agora."), false],
+    ["desfaz", resp("nenhuma", "Não tenho mudança minha para desfazer agora."), false],
+    ["desfaz Nelson", { data: { ok: true, mudou: true, texto: "Desfeito." } }, false],
+  ];
+  for (const [t, r, segue] of casos) {
+    const c = cliente({ [RPC_DESFAZER_DITO]: r });
+    const res = await executarComandoDaAgenda(c, lerComandoDaAgenda(t)!, { autor: AUTOR });
+    assertEquals(res.ok, true, t);
+    assertEquals(res.seguirAoModelo === true, segue, `${t}: ${JSON.stringify(r)}`);
+  }
+});
+
+Deno.test("Fase 2 (revisão) — ehComandoDaAgendaLigada: as palavras da Fase 2 só com modo_proposta ou modo_vigia fora de 'desligado'", async () => {
+  const leitura = (fase2: Record<string, unknown>) => adminDoModo({ data: { modo_leitura: "ligado", ...fase2 } });
+  for (const t of ["dia feito", "choveu", "desfaz Nelson", "o que mudou?"]) {
+    assertEquals(await ehComandoDaAgendaLigada(leitura({ modo_proposta: "desligado", modo_vigia: "desligado" }), t), false, t);
+    assertEquals(await ehComandoDaAgendaLigada(leitura({}), t), false, `sem as colunas: ${t}`);
+    assertEquals(await ehComandoDaAgendaLigada(leitura({ modo_proposta: "sombra", modo_vigia: "desligado" }), t), true, t);
+    assertEquals(await ehComandoDaAgendaLigada(leitura({ modo_proposta: "desligado", modo_vigia: "ligado" }), t), true, t);
+  }
+  // as da Fase 1 continuam pela leitura, com uma leitura só
+  const a = leitura({ modo_proposta: "desligado" });
+  assertEquals(await ehComandoDaAgendaLigada(a, "grava"), true);
+  assertEquals(a.lidas, ["agenda_config"]);
 });

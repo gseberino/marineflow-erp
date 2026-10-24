@@ -24,7 +24,7 @@
 
 import { logEdgeError } from "../log-error.ts";
 import { lerModoDaProposta, type ModoDaProposta, modoDaPropostaNoBanco } from "../agenda-modo.ts";
-import { type ComandoDaAgenda, lerComandoDaAgenda } from "./comandos.ts";
+import { type ComandoDaAgenda, ehPalavraDaFase2, lerComandoDaAgenda } from "./comandos.ts";
 import { paraAgendaVer, RPC_AGENDA_VER } from "./rpc-das-ferramentas.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -104,15 +104,24 @@ function passaDesligada(cmd: ComandoDaAgenda): boolean {
   return cmd.comando === "gravar" || cmd.comando === "descartar";
 }
 
+/** (Fase 2) A agenda automática está fora de 'desligado' (o motor ou a vigia)? Só então as palavras da Fase 2 valem. */
+export function fase2Ligada(m: ModosDaAgenda): boolean {
+  return m.proposta !== "desligado" || m.vigia !== "desligado";
+}
+
 /**
  * Para o webhook (roteamento do texto do dono): o texto é uma palavra da agenda E a agenda está ligada (sombra ou
- * ligado)? Desligada, só o *grava* ou *descarta* com rascunho aberto. A chave só é lida quando o texto é comando. Nunca
- * lança (erro = false: o caminho de hoje).
+ * ligado)? As palavras da Fase 2 (dia feito, choveu, desfaz, o que mudou…) só com a agenda automática fora de
+ * 'desligado' (modo_proposta ou modo_vigia): antes disso "desfaz …" é de outras ferramentas e segue o caminho de sempre.
+ * Desligada, só o *grava* ou *descarta* com rascunho aberto. A chave só é lida quando o texto é comando. Nunca lança
+ * (erro = false: o caminho de hoje).
  */
 export async function ehComandoDaAgendaLigada(admin: Cliente, texto: string): Promise<boolean> {
   const cmd = lerComandoDaAgenda(texto);
   if (cmd === null) return false;
-  if ((await modoDaLeituraNoBanco(admin)) !== "desligado") return true;
+  if ((await modoDaLeituraNoBanco(admin)) !== "desligado") {
+    return !ehPalavraDaFase2(cmd) || fase2Ligada(await modosDaAgendaNoBanco(admin));
+  }
   return passaDesligada(cmd) && (await rascunhoAbertoNoBanco(admin));
 }
 
@@ -199,6 +208,18 @@ function rpcDoComando(cmd: ComandoDaAgenda): string {
   }
 }
 
+/**
+ * (Fase 2) O *desfaz <nome>* que o banco não ligou a nenhuma mudança da agenda (o nome não é de OS, a OS já saiu da
+ * carteira ou não tem mudança dela): não mudou nada, e o pedido pode ser de outra ferramenta. O turno segue ao modelo.
+ * "desfaz semana" e o *desfaz* sozinho são só da agenda: a frase do banco vale. Ambíguo também fica: a pergunta é dela.
+ */
+const NAO_E_DA_AGENDA = new Set(["nao_achei", "nenhuma", "fora_da_carteira"]);
+function seguirAoModelo(cmd: ComandoDaAgenda, data: unknown): boolean {
+  if (cmd.comando !== "desfazer" || cmd.alvo === null || cmd.alvo === "semana") return false;
+  const r = data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : null;
+  return !!r && r.ok !== true && NAO_E_DA_AGENDA.has(String(r.status));
+}
+
 /** O texto pronto da resposta do banco (ok ou não: "Não encontrei…", "Não gravei nada: …" também são respostas). */
 function textoDaResposta(data: unknown): string | null {
   const r = data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : null;
@@ -214,6 +235,8 @@ export interface RespostaDoComando {
   /** false = o banco falhou (a frase de erro foi para o dono e o erro para app_error_logs) */
   ok: boolean;
   texto: string;
+  /** (Fase 2) nada mudou e o pedido não é da agenda: o turno segue ao modelo (camadaDaAgenda devolve null) */
+  seguirAoModelo?: boolean;
 }
 
 /**
@@ -234,7 +257,7 @@ export async function executarComandoDaAgenda(
     const texto = textoDaResposta(data);
     // leitura que falha nunca vira "nada marcado": sem texto é erro
     if (texto === null) throw new Error(`${chamada.rpc} respondeu sem texto`);
-    return { ok: true, texto };
+    return seguirAoModelo(cmd, data) ? { ok: true, texto, seguirAoModelo: true } : { ok: true, texto };
   } catch (e) {
     const err = e as { message?: unknown; code?: unknown };
     await logEdgeError(ctx.log ?? cliente, {
@@ -253,6 +276,11 @@ export interface DependenciasDaCamada {
   ehDoDono(): boolean | Promise<boolean>;
   /** agenda_config.modo_leitura (modoDaLeituraNoBanco). */
   modo(): Promise<ModoDaLeitura>;
+  /**
+   * (Fase 2) agenda_config.modo_proposta e modo_vigia (modosDaAgendaNoBanco). Só é chamado com uma palavra da Fase 2.
+   * Ausente ou erro = os dois 'desligado' (as palavras da Fase 2 seguem ao modelo).
+   */
+  modosDaFase2?(): Promise<ModosDaAgenda>;
   /** executarComandoDaAgenda com o cliente do canal. */
   executar(cmd: ComandoDaAgenda): Promise<RespostaDoComando>;
   /**
@@ -271,8 +299,9 @@ export interface RespostaDaCamada {
 
 /**
  * A camada inteira. null = não é comando da agenda, não é o dono ou a agenda está desligada (salvo o *grava* ou *descarta*
- * com rascunho aberto): o turno segue (secretário já passou; vem o atalho do PDF e o modelo). Nada é lido no banco
- * quando o texto não é comando, e o modo só é lido quando é o dono. Nunca lança.
+ * com rascunho aberto): o turno segue (secretário já passou; vem o atalho do PDF e o modelo). As palavras da Fase 2 só
+ * com a agenda automática fora de 'desligado'; o *desfaz <nome>* que o banco não liga a mudança nenhuma também segue ao
+ * modelo. Nada é lido no banco quando o texto não é comando, e o modo só é lido quando é o dono. Nunca lança.
  */
 export async function camadaDaAgenda(texto: string, deps: DependenciasDaCamada): Promise<RespostaDaCamada | null> {
   const comando = lerComandoDaAgenda(texto);
@@ -300,6 +329,15 @@ export async function camadaDaAgenda(texto: string, deps: DependenciasDaCamada):
     }
     if (!aberto) return null;
   }
+  if (ehPalavraDaFase2(comando)) {
+    let modos: ModosDaAgenda = { proposta: "desligado", vigia: "desligado" };
+    try {
+      modos = (await deps.modosDaFase2?.()) ?? modos;
+    } catch {
+      modos = { proposta: "desligado", vigia: "desligado" };
+    }
+    if (!fase2Ligada(modos)) return null;
+  }
   let r: RespostaDoComando;
   try {
     r = await deps.executar(comando);
@@ -307,5 +345,6 @@ export async function camadaDaAgenda(texto: string, deps: DependenciasDaCamada):
     // executarComandoDaAgenda não lança; um executar de outro jeito que lance ainda assim não derruba o turno
     r = { ok: false, texto: textoDoErro(comando, null) };
   }
+  if (r.seguirAoModelo) return null;
   return { comando, texto: r.texto, ok: r.ok };
 }

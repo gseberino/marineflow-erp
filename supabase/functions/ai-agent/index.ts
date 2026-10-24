@@ -72,6 +72,7 @@ import {
   camadaDaAgenda,
   executarComandoDaAgenda,
   modoDaLeituraNoBanco,
+  modosDaAgendaNoBanco,
   rascunhoAbertoNoBanco,
 } from "../_shared/agenda/executar.ts";
 
@@ -687,6 +688,8 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
         return !!dono && dono.id === appUser.id && dono.phone === phoneNormalized;
       },
       modo: () => modoDaLeituraNoBanco(admin),
+      // as palavras da Fase 2 (dia feito, choveu, desfaz…) só com a agenda automática fora de 'desligado'
+      modosDaFase2: () => modosDaAgendaNoBanco(admin),
       executar: (cmd) => executarComandoDaAgenda(admin, cmd, { autor: appUser.id, log: admin, canal: "whatsapp" }),
       // agenda desligada: o *grava*/*descarta* do rascunho que ficou aberto ainda responde
       rascunhoAberto: () => rascunhoAbertoNoBanco(admin, appUser.id),
@@ -1348,6 +1351,7 @@ servirComCors(async (req) => {
       ? await camadaDaAgenda(textoNovoDoTurno, {
         ehDoDono: () => userRole === "admin",
         modo: () => modoDaLeituraNoBanco(admin),
+        modosDaFase2: () => modosDaAgendaNoBanco(admin),
         executar: (cmd) => executarComandoDaAgenda(sb, cmd, { autor: userId, log: admin, canal: "painel" }),
         rascunhoAberto: () => rascunhoAbertoNoBanco(admin, userId),
       })

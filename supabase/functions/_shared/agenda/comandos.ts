@@ -23,8 +23,11 @@
 //   agenda pendencias · o que voce precisa de mim          → agenda_ver foco decisoes
 //   agenda plano · plano da semana                         → agenda_ver foco plano
 //   <motivo> (uma palavra): material, cliente, equipe, anterior, informacao, clima, estimativa, imprevisto, urgencia,
-//   esqueci → o código LCI. <quando>: hoje, ontem, anteontem, segunda…sábado, dd/mm. <alvo>: o nome do cliente, o
-//   número da OS ou "semana", até 40 caracteres, resolvido no banco (a mesma resolução da Fase 1; ambíguo = pergunta).
+//   esqueci → o código LCI. <quando>: hoje, ontem, anteontem, segunda…sábado, dd/mm. <alvo>: o nome do cliente (até 3
+//   palavras, sem "do/da/de" nem as palavras de outras ferramentas: "desfaz o agrupamento do ORÇ-00120", "desfaz a baixa
+//   da conta de luz", "desfaz isso" vão ao modelo), o número da OS ou "semana", até 40 caracteres, resolvido no banco (a
+//   mesma resolução da Fase 1; ambíguo = pergunta; o nome que não acha nada vai ao modelo).
+//   Estas palavras da Fase 2 só valem com a agenda automática fora de 'desligado' (ehPalavraDaFase2).
 //
 // Só a frase inteira vale (normalizada pelo MESMO normalizarComando do secretário: sem acento, sem negrito, sem
 // pontuação no fim, sem o 🎤 do áudio). Qualquer palavra a mais é conversa e vai ao modelo como sempre.
@@ -130,6 +133,27 @@ const QUANDO = /^(?:hoje|ontem|anteontem|(?:segunda|terca|quarta|quinta|sexta)(?
 /** O alvo do *desfaz*: até 40 caracteres, nunca uma letra (com ou sem "o/a", "item", "letra"): "desfaz B" é do secretário. */
 const ALVO_MAX = 40;
 const ALVO_DE_LETRA = /^(?:(?:o|a) )?(?:(?:item|letra) )?[a-z]$/;
+/**
+ * O alvo é uma OS (o nome do cliente, até 3 palavras, ou o número): o que o prompt ensina para outras ferramentas
+ * ("desfaz o agrupamento do ORÇ-00120" é desagrupar_orcamento; "desfaz a baixa da conta de luz" é estornar_pagamento;
+ * "desfaz o último lançamento", "desfaz o pix do Roberto") e o "desfaz isso" sem dizer de quê vão ao modelo. Por isso o
+ * alvo não tem conectivo ("do", "da", "de"…) nem estas palavras.
+ */
+const ALVO_MAX_PALAVRAS = 3;
+const CONECTIVOS_DO_ALVO = new Set(["de", "do", "da", "dos", "das", "no", "na", "nos", "nas", "em", "pra", "para", "com", "por", "que"]);
+const NAO_E_ALVO = new Set([
+  "isso", "isto", "aquilo", "tudo", "ai", "agrupamento", "agrupar", "baixa", "pix", "pagamento", "pagamentos", "lancamento",
+  "lancamentos", "estorno", "envio", "conta", "contas", "cobranca", "nota", "compra", "pedido", "orcamento", "item", "tarefa",
+  "lembrete", "despesa", "recebimento", "transferencia", "mensagem", "diaria",
+]);
+
+/** O nome do alvo (já sem "o/a/do/da") serve? Até 3 palavras, sem conectivo e sem as palavras de outras ferramentas. */
+function alvoDeOs(nome: string): boolean {
+  const palavras = nome.split(" ").filter(Boolean);
+  if (palavras.length === 0 || palavras.length > ALVO_MAX_PALAVRAS) return false;
+  if (palavras.some((p) => CONECTIVOS_DO_ALVO.has(p) || NAO_E_ALVO.has(p))) return false;
+  return nome.replace(/ /g, "").length >= 2;
+}
 
 function quandoDito(s: string | undefined): string | null | undefined {
   if (s === undefined || s === "") return null;
@@ -174,9 +198,19 @@ function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
     // "desfaz a semana", "desfaz semana" → "semana"; "desfaz o Nelson" → "nelson" (o banco resolve o nome)
     if (/^(?:a |da )?semana$/.test(alvo)) return { comando: "desfazer", alvo: "semana" };
     const nome = alvo.replace(/^(?:o|a|do|da) /, "");
-    return nome.replace(/ /g, "").length >= 2 ? { comando: "desfazer", alvo: nome } : null;
+    return alvoDeOs(nome) ? { comando: "desfazer", alvo: nome } : null;
   }
   return null;
+}
+
+/**
+ * (Fase 2) As palavras da agenda que se monta sozinha: a conferência do dia, o *choveu*, o *desfaz* e os focos novos
+ * ("o que mudou", "agenda pendências", "agenda plano"). Só valem com a agenda automática (modo_proposta ou modo_vigia)
+ * fora de 'desligado': antes disso não há plano nem mudança dela, e "desfaz …" é de outras ferramentas.
+ */
+export function ehPalavraDaFase2(cmd: ComandoDaAgenda): boolean {
+  if (cmd.comando === "dia" || cmd.comando === "choveu" || cmd.comando === "desfazer") return true;
+  return cmd.comando === "ver" && (cmd.foco === "mudancas" || cmd.foco === "decisoes" || cmd.foco === "plano");
 }
 
 /** O comando, ou null (não é comando: segue para o assistente como sempre). */
