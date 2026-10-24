@@ -872,16 +872,21 @@ const r16: Rule = {
   // lançado ou mudado depois do "já tratei" = a tarefa volta. As mesmas tabelas que a conta do banco
   // lê (get_os_purchase_needs: service_order_parts, service_order_services e, desde a Agenda de Produção
   // Fase 1 (P2), os_material — o que o dono disse da linha: "não chegou, preciso comprar de novo" ou a
-  // quantidade que subiu derrubando o "na mão"). A sincronização de 15 min só toca atualizado_em quando
-  // a linha muda de verdade, então a passada sem novidade não ressuscita tarefa. Erro = lança: o motor
-  // falha a regra na rodada (não recria às cegas nem esconde para sempre).
+  // quantidade que subiu derrubando o "na mão"). Da os_material conta só a linha INFORMADA (fonte dono,
+  // fornecedor, nfe ou pix — a mesma lista de aplicar_os_material e de FONTES_INFORMADAS em
+  // src/lib/purchase-needs.ts): a que a sincronização cria ou refaz sozinha (fonte nula, estoque ou oc,
+  // inclusive a previsão da OC que mudou) é espelho da conta bruta e não é fato novo — sem o filtro, a 1ª
+  // passada depois do deploy (todas as linhas nascem com atualizado_em = agora) ressuscitaria toda R16
+  // dispensada à mão. Erro = lança: o motor falha a regra na rodada (não recria às cegas nem esconde para
+  // sempre).
   async mudouDesde(db, automationKey, desdeISO) {
     const id = entityIdFromKey(automationKey);
     const depois = `created_at.gt.${desdeISO},updated_at.gt.${desdeISO}`;
     const [pecas, materiais, informado] = await Promise.all([
       db.from('service_order_parts').select('id').eq('service_order_id', id).or(depois).limit(1),
       db.from('service_order_services').select('id').eq('service_order_id', id).or(depois).limit(1),
-      db.from('os_material').select('id').eq('service_order_id', id).gt('atualizado_em', desdeISO).limit(1),
+      db.from('os_material').select('id').eq('service_order_id', id).gt('atualizado_em', desdeISO)
+        .in('fonte', [...FONTES_INFORMADAS_DO_MATERIAL]).limit(1),
     ]);
     if (pecas.error) throw pecas.error;
     if (materiais.error) throw materiais.error;
@@ -889,6 +894,9 @@ const r16: Rule = {
     return (pecas.data?.length ?? 0) > 0 || (materiais.data?.length ?? 0) > 0 || (informado.data?.length ?? 0) > 0;
   },
 };
+
+/** De onde vem o fato de os_material que conta (o mesmo where de aplicar_os_material, 20261024160300). */
+export const FONTES_INFORMADAS_DO_MATERIAL = ['dono', 'fornecedor', 'nfe', 'pix'] as const;
 
 /** Data do primeiro envio da cotação — é dela que corre o prazo do fornecedor. */
 function primeiroEnvio(q: any): string {

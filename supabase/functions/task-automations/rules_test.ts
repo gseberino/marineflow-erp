@@ -4,6 +4,7 @@ import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, entityIdFromKey, keyOf, fmtBRL, fmtDate, dueAt,
   isManualDismissal, dismissCooldownDays, businessDaysBetween, vencimentoDoOrcamento, notaDoVencimento,
   cobrancaMinima, dispensaSemFatoNovo, paraAgendar, paraComprar, FILTRO_PARA_AGENDAR, FILTRO_PARA_COMPRAR,
+  FONTES_INFORMADAS_DO_MATERIAL,
 } from "./rules.ts";
 import { STATUS_OS } from "../_shared/service-order-status.ts";
 
@@ -219,21 +220,38 @@ Deno.test("dispensaSemFatoNovo: título igual com item novo na OS depois do fech
   assertEquals(dispensaSemFatoNovo(aMao, titulo, true), false);
 });
 
+Deno.test("FONTES_INFORMADAS_DO_MATERIAL: a mesma lista do app (src/lib/purchase-needs.ts) e de aplicar_os_material", async () => {
+  assertEquals([...FONTES_INFORMADAS_DO_MATERIAL], ["dono", "fornecedor", "nfe", "pix"]);
+  const app = await Deno.readTextFile(new URL("../../../src/lib/purchase-needs.ts", import.meta.url));
+  assertEquals(app.includes("export const FONTES_INFORMADAS = ['dono', 'fornecedor', 'nfe', 'pix'] as const;"), true);
+  const sql = await Deno.readTextFile(new URL("../../migrations/20261024160300_agenda_fase1_material.sql", import.meta.url));
+  assertEquals(sql.includes("where x.l ->> 'fonte' in ('dono', 'fornecedor', 'nfe', 'pix')"), true);
+});
+
 Deno.test("r16.mudouDesde: peça ou material lançado/mudado depois do fechamento é fato novo", async () => {
   const r16 = ruleById("r16")!;
   const OS = "96c4af97-44e5-4b4c-89df-8de5caf2ef7f";
   const desde = "2026-08-16T02:22:29.877Z";
-  const pedidos: Array<{ tabela: string; eq: unknown[]; or?: string; gt?: unknown[] }> = [];
-  // `erro` em todas as tabelas, ou só nas de `errosPorTabela`.
-  const mkDb = (linhas: Record<string, unknown[]>, erro?: unknown, errosPorTabela: Record<string, unknown> = {}) => ({
+  const pedidos: Array<{ tabela: string; eq: unknown[]; or?: string; gt?: unknown[]; in?: unknown[] }> = [];
+  // `erro` em todas as tabelas, ou só nas de `errosPorTabela`. O filtro .in() FILTRA de verdade as linhas
+  // (é ele que separa o que o dono disse do que a sincronização refez).
+  type Filtro = { or?: string; gt?: unknown[]; in?: unknown[] };
+  const mkDb = (linhas: Record<string, Array<Record<string, unknown>>>, erro?: unknown,
+    errosPorTabela: Record<string, unknown> = {}) => ({
     from: (tabela: string) => ({
       select: () => ({
         eq: (...eq: unknown[]) => {
-          const fim = (filtro: { or?: string; gt?: unknown[] }) => ({
+          const fim = (filtro: Filtro) => ({
+            in: (coluna: string, valores: unknown[]) => fim({ ...filtro, in: [coluna, valores] }),
             limit: async () => {
               pedidos.push({ tabela, eq, ...filtro });
               const e = erro ?? errosPorTabela[tabela];
-              return { data: e ? null : (linhas[tabela] ?? []), error: e ?? null };
+              let rows = linhas[tabela] ?? [];
+              if (filtro.in) {
+                const [coluna, valores] = filtro.in as [string, unknown[]];
+                rows = rows.filter((r) => valores.includes(r[coluna]));
+              }
+              return { data: e ? null : rows, error: e ?? null };
             },
           });
           return { or: (or: string) => fim({ or }), gt: (...gt: unknown[]) => fim({ gt }) };
@@ -251,12 +269,21 @@ Deno.test("r16.mudouDesde: peça ou material lançado/mudado depois do fechament
   const material = pedidos.find((p) => p.tabela === "os_material")!;
   assertEquals(material.eq, ["service_order_id", OS]);
   assertEquals(material.gt, ["atualizado_em", desde]);
+  assertEquals(material.in, ["fonte", ["dono", "fornecedor", "nfe", "pix"]]);
   // Material de texto livre novo (a falta da OS-00104 era um) ou peça nova → fato novo.
   assertEquals(await r16.mudouDesde!(mkDb({ service_order_services: [{ id: "m1" }] }), `r16:so:${OS}`, desde), true);
   assertEquals(await r16.mudouDesde!(mkDb({ service_order_parts: [{ id: "p1" }] }), `r16:so:${OS}`, desde), true);
   // O que o dono disse da linha mudou depois do fechamento ("não chegou, compro de novo"; a quantidade
   // subiu e derrubou o "na mão") → fato novo.
-  assertEquals(await r16.mudouDesde!(mkDb({ os_material: [{ id: "om1" }] }), `r16:so:${OS}`, desde), true);
+  assertEquals(await r16.mudouDesde!(mkDb({ os_material: [{ id: "om1", fonte: "dono" }] }), `r16:so:${OS}`, desde), true);
+  // A linha que a sincronização criou ou refez depois do fechamento (fonte nula, estoque ou oc — a 1ª passada
+  // depois do deploy, a previsão da OC que mudou) NÃO é fato novo: a dispensa à mão vale.
+  for (const fonte of [null, "estoque", "oc"]) {
+    assertEquals(await r16.mudouDesde!(mkDb({ os_material: [{ id: "om2", fonte }] }), `r16:so:${OS}`, desde), false, String(fonte));
+  }
+  for (const fonte of ["fornecedor", "nfe", "pix"]) {
+    assertEquals(await r16.mudouDesde!(mkDb({ os_material: [{ id: "om3", fonte }] }), `r16:so:${OS}`, desde), true, fonte);
+  }
   // Sem a tabela (migration 160300 não aplicada) ou com erro só nela: lança, não decide às cegas.
   let lancouMaterial = false;
   try {
