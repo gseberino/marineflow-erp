@@ -26,10 +26,15 @@
 // (agenda_concluir_dito, agenda_entregar_dito): a conclusão e a entrega pela porta, com a saída e as cobranças da
 // condição na mesma transação, e o texto do banco ("Concluí o Lenine (OS-00074) hoje … *desfaz OS-00074* volta como
 // estava."). O alvo que o banco não acha (nao_achei: "concluiu a instalação") segue ao modelo, como o *desfaz <nome>*.
+//
+// Fase 3 (P4, 24/10/2026): *diária <nome> inteira|meia|não [quando]* executa direto (agenda_diaria_dita): responde a
+// pergunta da diária aberta ou corrige/apaga a que a agenda lançou. Só com agenda_config.modo_diaria fora de 'desligado'
+// (modoDaDiariaNoBanco, lido num SELECT à parte: a coluna é da Fase 3 e a falta dela não pode calar as palavras da Fase 2).
+// Sem nada da agenda (nao_achei) o turno segue ao modelo e ao registrar_diaria de sempre.
 
 import { logEdgeError } from "../log-error.ts";
 import { lerModoDaProposta, type ModoDaProposta, modoDaPropostaNoBanco } from "../agenda-modo.ts";
-import { type ComandoDaAgenda, ehPalavraDaFase2, lerComandoDaAgenda } from "./comandos.ts";
+import { type ComandoDaAgenda, ehPalavraDaDiaria, ehPalavraDaFase2, lerComandoDaAgenda } from "./comandos.ts";
 import { paraAgendaVer, RPC_AGENDA_VER } from "./rpc-das-ferramentas.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -44,6 +49,8 @@ export const RPC_DESFAZER_DITO = "agenda_desfazer_dito";
 /** Fase 3: as palavras de concluir e de entregar. */
 export const RPC_CONCLUIR_DITO = "agenda_concluir_dito";
 export const RPC_ENTREGAR_DITO = "agenda_entregar_dito";
+/** Fase 3 (P4): a palavra da diária. */
+export const RPC_DIARIA_DITA = "agenda_diaria_dita";
 
 export { modoDaPropostaNoBanco };
 export type { ModoDaProposta };
@@ -92,6 +99,20 @@ export async function modoDaLeituraNoBanco(admin: Cliente): Promise<ModoDaLeitur
 }
 
 /**
+ * (Fase 3, P4) agenda_config.modo_diaria (um SELECT só dela). Nunca lança: erro, coluna ausente (a migration
+ * 20261026100000 não aplicada) ou linha ausente = "desligado" — a palavra *diária* segue ao modelo como antes.
+ */
+export async function modoDaDiariaNoBanco(admin: Cliente): Promise<ModoDaLeitura> {
+  try {
+    const { data, error } = await admin.from("agenda_config").select("modo_diaria").maybeSingle();
+    if (error) return "desligado";
+    return lerModoDaLeitura(data?.modo_diaria);
+  } catch {
+    return "desligado";
+  }
+}
+
+/**
  * Há rascunho da agenda aberto e dentro da validade (do autor, se vier)? Só para o *grava* ou *descarta* com a agenda
  * desligada. Nunca lança: erro, tabela ausente ou exceção = false (o caminho de hoje).
  */
@@ -128,6 +149,8 @@ export async function ehComandoDaAgendaLigada(admin: Cliente, texto: string): Pr
   const cmd = lerComandoDaAgenda(texto);
   if (cmd === null) return false;
   if ((await modoDaLeituraNoBanco(admin)) !== "desligado") {
+    // (Fase 3, P4) a palavra *diária* só com a diária automática fora de 'desligado'
+    if (ehPalavraDaDiaria(cmd)) return (await modoDaDiariaNoBanco(admin)) !== "desligado";
     return !ehPalavraDaFase2(cmd) || fase2Ligada(await modosDaAgendaNoBanco(admin));
   }
   return passaDesligada(cmd) && (await rascunhoAbertoNoBanco(admin));
@@ -167,6 +190,13 @@ export function chamadaDoComando(
   if (cmd.comando === "entregar") {
     return { rpc: RPC_ENTREGAR_DITO, params: comHoje({ p_autor: autor, p_alvo: cmd.alvo, p_canal: canal }) };
   }
+  // Fase 3 (P4): a pessoa, a jornada e o dia como o dono disse (o banco resolve a pessoa e o dia)
+  if (cmd.comando === "diaria") {
+    return {
+      rpc: RPC_DIARIA_DITA,
+      params: comHoje({ p_autor: autor, p_nome: cmd.nome, p_jornada: cmd.jornada, p_quando: cmd.quando, p_canal: canal }),
+    };
+  }
   const args: Record<string, unknown> = { foco: cmd.foco };
   if (cmd.periodo) args.periodo = cmd.periodo;
   if (cmd.pessoa) args.pessoa = cmd.pessoa;
@@ -192,6 +222,9 @@ export const TEXTO_SEM_CONCLUIR =
   "Não consegui concluir agora. Mande *concluiu* de novo em alguns minutos: se já tiver concluído, eu digo que está concluída.";
 export const TEXTO_SEM_ENTREGAR =
   "Não consegui marcar a entrega agora. Mande *entreguei* de novo em alguns minutos: se já tiver marcado, eu digo que já foi entregue.";
+/** Fase 3 (P4): quando o banco falha na palavra *diária* (mandar de novo não lança em dobro: a agenda diz que já está assim). */
+export const TEXTO_SEM_DIARIA =
+  "Não consegui mexer na diária agora. Mande de novo em alguns minutos: se já tiver feito, eu digo que já está assim.";
 
 function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
   if ((e as { code?: unknown })?.code === "42501") return TEXTO_SO_ADMIN;
@@ -209,6 +242,8 @@ function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
       return TEXTO_SEM_CONCLUIR;
     case "entregar":
       return TEXTO_SEM_ENTREGAR;
+    case "diaria":
+      return TEXTO_SEM_DIARIA;
     default:
       return TEXTO_SEM_AGENDA;
   }
@@ -231,6 +266,8 @@ function rpcDoComando(cmd: ComandoDaAgenda): string {
       return RPC_CONCLUIR_DITO;
     case "entregar":
       return RPC_ENTREGAR_DITO;
+    case "diaria":
+      return RPC_DIARIA_DITA;
     default:
       return RPC_AGENDA_VER;
   }
@@ -249,6 +286,9 @@ function seguirAoModelo(cmd: ComandoDaAgenda, data: unknown): boolean {
   if ((cmd.comando === "concluir" || cmd.comando === "entregar") && cmd.alvo !== null) {
     return !!r && r.ok !== true && String(r.status) === "nao_achei";
   }
+  // (Fase 3, P4) *diária <nome> …* sem pergunta nem diária da agenda (ou a pessoa que não é da equipe): o registrar_diaria
+  // de sempre, pelo modelo. Ambíguo, a opção que não existe e o acerto fechado ficam: são a resposta do banco.
+  if (cmd.comando === "diaria") return !!r && r.ok !== true && String(r.status) === "nao_achei";
   if (cmd.comando !== "desfazer" || cmd.alvo === null || cmd.alvo === "semana") return false;
   return !!r && r.ok !== true && NAO_E_DA_AGENDA.has(String(r.status));
 }
@@ -314,6 +354,11 @@ export interface DependenciasDaCamada {
    * Ausente ou erro = os dois 'desligado' (as palavras da Fase 2 seguem ao modelo).
    */
   modosDaFase2?(): Promise<ModosDaAgenda>;
+  /**
+   * (Fase 3, P4) agenda_config.modo_diaria (modoDaDiariaNoBanco). Só é chamado com a palavra *diária*. Ausente ou erro =
+   * 'desligado' (a palavra segue ao modelo).
+   */
+  modoDaDiaria?(): Promise<ModoDaLeitura>;
   /** executarComandoDaAgenda com o cliente do canal. */
   executar(cmd: ComandoDaAgenda): Promise<RespostaDoComando>;
   /**
@@ -370,6 +415,15 @@ export async function camadaDaAgenda(texto: string, deps: DependenciasDaCamada):
       modos = { proposta: "desligado", vigia: "desligado" };
     }
     if (!fase2Ligada(modos)) return null;
+  }
+  if (ehPalavraDaDiaria(comando)) {
+    let md: ModoDaLeitura = "desligado";
+    try {
+      md = (await deps.modoDaDiaria?.()) ?? "desligado";
+    } catch {
+      md = "desligado";
+    }
+    if (md === "desligado") return null;
   }
   let r: RespostaDoComando;
   try {

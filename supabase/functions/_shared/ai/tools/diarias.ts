@@ -169,8 +169,33 @@ async function osDoPlanoNoDia(ctx: ToolCtx, payeeId: string, dia: string): Promi
   }
 }
 
+/**
+ * Agenda de Produção, Fase 3 (P4): a agenda já lançou essa diária (a resposta do técnico ou o *dia feito* bateram com o
+ * plano)? O banco devolve a frase pronta (agenda_diaria_da_agenda): "A agenda já lançou essa diária às 17:12 (corrige com
+ * *diária Roberto meia*)." A função que ainda não existe (a migration não aplicada) = nada, sem registro; outro erro =
+ * nada e um aviso em app_error_logs: a linha nunca é inventada.
+ */
+async function diariaDaAgenda(ctx: ToolCtx, payeeId: string, dia: string): Promise<string | null> {
+  try {
+    const { data, error } = await ctx.admin.rpc("agenda_diaria_da_agenda", { p_payee: payeeId, p_dia: dia });
+    if (error) {
+      const code = String((error as { code?: unknown }).code ?? "");
+      if (code === "PGRST202" || code === "42883") return null;
+      throw error;
+    }
+    const r = (data ?? {}) as { lancada?: unknown; texto?: unknown };
+    return r.lancada === true && typeof r.texto === "string" && r.texto.trim() ? r.texto : null;
+  } catch (e) {
+    await logEdgeError(ctx.admin, {
+      context: "agenda", action: "diaria:da_agenda", level: "warn", error: e,
+      message: `agenda_diaria_da_agenda falhou; o resumo da diária segue sem a linha da agenda: ${(e as { message?: string })?.message ?? e}`,
+    });
+    return null;
+  }
+}
+
 /** "OS-00069 (Vanderlei)". */
-const osComCliente = (o: OsDoPlano) => `${o.numero}${o.cliente ? ` (${o.cliente})` : ""}`;
+const osComCliente =(o: OsDoPlano) => `${o.numero}${o.cliente ? ` (${o.cliente})` : ""}`;
 
 /** "de manhã", "à tarde", "o dia todo" (os turnos da pessoa numa OS do plano). */
 function turnosEmTexto(turnos: string[]): string {
@@ -371,6 +396,9 @@ export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>)
   if (p.observacao) linhas.push(`Observação: ${p.observacao}`);
   if (atual) linhas.push(`Hoje está lançado: ${rotuloDaFracao(atual.fracao)} (${brl.format(atual.valorDia)}) — vai ser corrigido, não duplicado.`);
   else if (!perfil) linhas.push("⚠️ Sem diária cadastrada nessa data: o sistema vai recusar.");
+  // Agenda de Produção (Fase 3, P4): quando foi a agenda que lançou, o "sim" diz (e a palavra que corrige).
+  const daAgenda = await diariaDaAgenda(ctx, p.freelancer.id, p.data);
+  if (daAgenda) linhas.push(daAgenda);
   return linhas.join("\n");
 }
 

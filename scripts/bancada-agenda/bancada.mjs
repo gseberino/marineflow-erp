@@ -141,6 +141,9 @@ export const FUNCOES = [
   '_e_concordancia', 'wa_normalize_phone', 'registrar_diaria', 'periodo_esta_fechado', 'bloqueia_lancamento_em_periodo_fechado',
   'valida_recebivel_coerente', 'sync_service_order_payment_status', 'sync_balance_due_on_completion',
   'sync_commission_on_so_complete', 'handle_quote_deposit_payment',
+  // Fase 3 (P4): o que o registrar_diaria chama por dentro (a decisão do dono numa diária que já existe e a palavra
+  // *diária <nome> meia* depois do automático passam por ele): o cargo do financeiro e o rótulo da jornada.
+  '_autor_do_financeiro', '_rotulo_jornada',
 ];
 
 let snapshot;

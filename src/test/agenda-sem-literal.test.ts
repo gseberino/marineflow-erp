@@ -82,8 +82,17 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
   {
     onde: 'agenda_saude',
     casou: '24h',
-    vezes: 2,
+    // Fase 3 (P4): 2 na versão da Fase 2 (20261025100300) + 3 na recriada (20261026100300: as mesmas 2 e o erros_24h da
+    // rotina da equipe).
+    vezes: 5,
     porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h: a janela de um dia da conferência); não é rascunho_validade',
+  },
+  // Fase 3 (P4): a rotina da equipe grava a rodada como a vigia.
+  {
+    onde: 'agenda_rotina_rodar',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_vigiar); não é texto_max nem peca_embutida_acima',
   },
 ];
 

@@ -18,6 +18,8 @@ type Opcoes = {
   simulacao?: { data?: unknown; error?: { message: string } };
   /** Agenda de Produção, Fase 2 (P4): o que agenda_os_do_dia devolve (o plano da pessoa no dia), ou o erro dela. */
   plano?: unknown[]; erroDoPlano?: string;
+  /** Fase 3 (P4): o que agenda_diaria_da_agenda devolve (a diária que a agenda lançou), ou o erro dela. */
+  daAgenda?: { data?: unknown; error?: { code?: string; message: string } };
 };
 function admin(opcoes: Opcoes = {}) {
   const tabelas: Record<string, any[]> = {
@@ -69,6 +71,9 @@ function admin(opcoes: Opcoes = {}) {
         : { data: opcoes.plano ?? [], error: null });
     }
     if (n === "log_app_error") return Promise.resolve({ data: null, error: null });
+    if (n === "agenda_diaria_da_agenda") {
+      return Promise.resolve({ data: opcoes.daAgenda?.data ?? { lancada: false }, error: opcoes.daAgenda?.error ?? null });
+    }
     return Promise.resolve({ data: opcoes.simulacao?.data ?? null, error: opcoes.simulacao?.error ?? null });
   };
   return { from: consulta, rpc, simuladas };
@@ -807,4 +812,29 @@ Deno.test("plano: a leitura do plano que falha não inventa OS — segue como an
   assertEquals(chamadas.find((x) => x.n === "registrar_diaria")!.a.p_os_ids, null);
   const log = (c.admin as any).simuladas.find((s: any) => s.n === "log_app_error");
   assertEquals([log.p_context, log.p_action, log.p_level], ["agenda", "diaria:plano", "warn"]);
+});
+
+// ── Agenda de Produção, Fase 3 (P4, 24/10/2026): o "sim" diz quando foi a agenda que lançou a diária ──────────
+Deno.test("agenda P4: a diária que a agenda lançou aparece no resumo do sim, com a palavra que corrige", async () => {
+  const texto = "A agenda já lançou essa diária às 17:12 (corrige com *diária Roberto meia*).";
+  const { c } = ctx({ daAgenda: { data: { lancada: true, texto } } });
+  const r = await resumirDiaria(c as never, { freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro" });
+  assertStringIncludes(r!, texto);
+  const pedido = (c.admin as any).simuladas.find((s: any) => s.n === "agenda_diaria_da_agenda");
+  assertEquals([pedido.p_payee, pedido.p_dia], ["p-rob", "2026-09-24"]);
+  // sem diária da agenda, nada muda no resumo
+  const semNada = await resumirDiaria(ctx().c as never, { freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro" });
+  assertEquals(semNada!.includes("A agenda já lançou"), false);
+});
+
+Deno.test("agenda P4: a função ainda não aplicada não muda o resumo nem registra erro; outro erro registra (warn) e não inventa linha", async () => {
+  const ausente = ctx({ daAgenda: { error: { code: "PGRST202", message: "Could not find the function agenda_diaria_da_agenda" } } });
+  const r1 = await resumirDiaria(ausente.c as never, { freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro" });
+  assertEquals(r1!.includes("A agenda já lançou"), false);
+  assertEquals((ausente.c.admin as any).simuladas.some((s: any) => s.n === "log_app_error"), false);
+  const quebrou = ctx({ daAgenda: { error: { code: "57014", message: "statement timeout" } } });
+  const r2 = await resumirDiaria(quebrou.c as never, { freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro" });
+  assertEquals(r2!.includes("A agenda já lançou"), false);
+  const log = (quebrou.c.admin as any).simuladas.find((s: any) => s.n === "log_app_error");
+  assertEquals([log.p_context, log.p_action, log.p_level], ["agenda", "diaria:da_agenda", "warn"]);
 });

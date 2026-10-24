@@ -26,6 +26,7 @@ import { interromperPergunta, lerEstadoDoTelefone } from "../_shared/whatsapp/pe
 import { lerComandoDoSecretario } from "../_shared/secretario/comandos.ts";
 import { formatoDoResumoNoBanco } from "../_shared/secretario/formato.ts";
 import { ehComandoDaAgendaLigada } from "../_shared/agenda/executar.ts";
+import { respostaDaEquipe } from "../_shared/agenda/resposta-da-equipe.ts";
 
 // Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
 // fecha o loop no ai_comms_log (marca respondido + intenção) e HONRA OPT-OUT sozinho.
@@ -588,10 +589,15 @@ export async function handler(req: Request): Promise<Response> {
       // e vai para o dono (waiting_reply). A resposta é DADO, não comando — a RPC só registra.
       admin.rpc("followup_registrar_resposta", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
         .then(() => {}, () => {});
+      // Agenda de Produção (Fase 3, P4, 24/10/2026): a resposta do técnico à ficha, à confirmação da manhã ou ao "como
+      // foi hoje?" (só com agenda_config.modo_equipe fora de desligado e o telefone de alguém da equipe; o banco lê, decide
+      // e enfileira a resposta dele). Consumida = a confirmação do cliente e a conferência do recibo abaixo não leem o
+      // mesmo texto (o "ok" tem um dono só, NOVO-agenda-17). Até 500 caracteres; erro = segue como hoje (nunca lança).
+      const daEquipe = await respostaDaEquipe(admin, { phone, body, messageId: event.messageId || msg?.id || null });
       // Confirmação do agendamento (30/09/2026): o "SIM" de quem recebeu o pedido da Agenda. A RPC
       // só confirma concordância curta ("sim", "confirmo", 👍) de cliente com pedido nas últimas
       // 72 h; "sim, mas preciso remarcar" não confirma. Frase longa nem chega a ela.
-      if (body.trim().length <= 60) {
+      if (body.trim().length <= 60 && !daEquipe) {
         admin.rpc("registrar_confirmacao_do_cliente", { p_phone: phone, p_body: body, p_message_id: msg?.id ?? null })
           .then(() => {}, () => {});
         // Conferência do acerto de diárias (06/10/2026): o "ok"/"confere" do freelancer a quem o

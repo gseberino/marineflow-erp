@@ -37,6 +37,14 @@
 //   "concluiu o pagamento" vai ao modelo) ou o número, nunca uma letra ("concluiu b" não é palavra). "entregue" e
 //   "entreguei" sozinhos não são palavra (precisa do alvo). Também só com a agenda automática fora de 'desligado'.
 //
+// Fase 3 (P4, 24/10/2026; spec-fase3.md §11) — a diária que a agenda lançou ou perguntou (agenda_diaria_dita):
+//   diaria <nome> inteira|meia|nao [quando] · diaria <nome> dia inteiro [quando] · diaria do/da <nome> …
+//   → responde a pergunta da diária aberta, ou corrige (meia/inteira) / apaga (não) a que a agenda lançou; sem nada da
+//   agenda, o banco diz nao_achei e o turno segue ao modelo (o registrar_diaria de sempre). O nome é de 1 ou 2 palavras
+//   (sem conectivo nem letra solta). Só com a diária automática (agenda_config.modo_diaria) fora de 'desligado'
+//   (ehPalavraDaDiaria). "lança a diária do João", "registra a diária do Roberto" e "o João trabalhou meio dia" NÃO são
+//   palavra (vão ao modelo e ao registrar_diaria); a agenda não usa "corrige" ("corrigir …" é dos comprovantes).
+//
 // Só a frase inteira vale (normalizada pelo MESMO normalizarComando do secretário: sem acento, sem negrito, sem
 // pontuação no fim, sem o 🎤 do áudio). Qualquer palavra a mais é conversa e vai ao modelo como sempre.
 //
@@ -73,7 +81,12 @@ export type ComandoDaAgenda =
   /** (Fase 3) agenda_concluir_dito: o alvo como o dono disse (null = a OS do plano de hoje, se for uma só) */
   | { comando: "concluir"; alvo: string | null }
   /** (Fase 3) agenda_entregar_dito: o alvo como o dono disse */
-  | { comando: "entregar"; alvo: string };
+  | { comando: "entregar"; alvo: string }
+  /** (Fase 3, P4) agenda_diaria_dita: a pessoa como o dono disse, a jornada e o dia (null = o da pergunta ou hoje) */
+  | { comando: "diaria"; nome: string; jornada: JornadaDita; quando: string | null };
+
+/** A jornada da palavra *diária*: inteira (também "dia inteiro"), meia ou não (não lançar / apagar). */
+export type JornadaDita = "inteira" | "meia" | "nao";
 
 const ver = (periodo: PeriodoDoComando | null, foco: FocoDoComando = "tudo", pessoa: "eu" | null = null): ComandoDaAgenda =>
   ({ comando: "ver", periodo, foco, pessoa });
@@ -235,7 +248,36 @@ function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
     const nome = alvoDito(m[1].trim());
     return nome === undefined ? null : { comando: "entregar", alvo: nome };
   }
+  // Fase 3 (P4): *diária <nome> inteira|meia|não [quando]* (também "dia inteiro" e "diária do/da <nome> …")
+  m = /^diaria (.+?) (inteira|meia|nao|dia inteiro)(?: (.+))?$/.exec(t);
+  if (m) {
+    const nome = pessoaDita(m[1]);
+    const quando = quandoDito(m[3]);
+    if (nome === undefined || quando === undefined) return null;
+    const jornada: JornadaDita = m[2] === "meia" ? "meia" : m[2] === "nao" ? "nao" : "inteira";
+    return { comando: "diaria", nome, jornada, quando };
+  }
   return null;
+}
+
+/**
+ * A pessoa da palavra *diária*: "do/da/de" na frente sai; 1 ou 2 palavras de letras, cada uma com 2+ letras, sem conectivo
+ * nem palavra de outra ferramenta ("diária do pix meia" vai ao modelo). undefined = não serve.
+ */
+function pessoaDita(dito: string): string | undefined {
+  const nome = dito.trim().replace(/^(?:do|da|de) /, "");
+  const palavras = nome.split(" ").filter(Boolean);
+  if (palavras.length === 0 || palavras.length > 2) return undefined;
+  if (palavras.some((p) => p.length < 2 || !/^[a-z]+$/.test(p) || CONECTIVOS_DO_ALVO.has(p) || NAO_E_ALVO.has(p))) return undefined;
+  return palavras.join(" ");
+}
+
+/**
+ * (Fase 3, P4) A palavra da diária automática: só vale com agenda_config.modo_diaria fora de 'desligado' (antes disso não
+ * há diária da agenda para responder nem corrigir, e "diária …" é do registrar_diaria pelo modelo).
+ */
+export function ehPalavraDaDiaria(cmd: ComandoDaAgenda): boolean {
+  return cmd.comando === "diaria";
 }
 
 /**

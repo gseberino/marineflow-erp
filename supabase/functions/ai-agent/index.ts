@@ -71,6 +71,7 @@ import { type Dono, donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
 import {
   camadaDaAgenda,
   executarComandoDaAgenda,
+  modoDaDiariaNoBanco,
   modoDaLeituraNoBanco,
   modosDaAgendaNoBanco,
   rascunhoAbertoNoBanco,
@@ -691,6 +692,8 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
       modo: () => modoDaLeituraNoBanco(admin),
       // as palavras da Fase 2 (dia feito, choveu, desfaz…) só com a agenda automática fora de 'desligado'
       modosDaFase2: () => modosDaAgendaNoBanco(admin),
+      // a palavra *diária <nome> …* (Fase 3) só com a diária automática fora de 'desligado'
+      modoDaDiaria: () => modoDaDiariaNoBanco(admin),
       executar: (cmd) => executarComandoDaAgenda(admin, cmd, { autor: appUser.id, log: admin, canal: "whatsapp" }),
       // agenda desligada: o *grava*/*descarta* do rascunho que ficou aberto ainda responde
       rascunhoAberto: () => rascunhoAbertoNoBanco(admin, appUser.id),
@@ -1353,6 +1356,7 @@ servirComCors(async (req) => {
         ehDoDono: () => userRole === "admin",
         modo: () => modoDaLeituraNoBanco(admin),
         modosDaFase2: () => modosDaAgendaNoBanco(admin),
+        modoDaDiaria: () => modoDaDiariaNoBanco(admin),
         executar: (cmd) => executarComandoDaAgenda(sb, cmd, { autor: userId, log: admin, canal: "painel" }),
         rascunhoAberto: () => rascunhoAbertoNoBanco(admin, userId),
       })

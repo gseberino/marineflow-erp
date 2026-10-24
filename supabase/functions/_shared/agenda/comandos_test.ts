@@ -543,3 +543,47 @@ Deno.test("Fase 3 — webhook: com a agenda em sombra ou ligada, *concluiu Lenin
     }
   }
 });
+
+// ─── Fase 3 (P4): *diária <nome> inteira|meia|não [quando]* ────────────────────────────────────────────────────────
+
+const TABELA_DIARIA: Array<[string, ComandoDaAgenda]> = [
+  ["diária Roberto meia", { comando: "diaria", nome: "roberto", jornada: "meia", quando: null }],
+  ["diaria roberto inteira", { comando: "diaria", nome: "roberto", jornada: "inteira", quando: null }],
+  ["Diária João não", { comando: "diaria", nome: "joao", jornada: "nao", quando: null }],
+  ["diária Roberto dia inteiro", { comando: "diaria", nome: "roberto", jornada: "inteira", quando: null }],
+  ["diária do João meia ontem", { comando: "diaria", nome: "joao", jornada: "meia", quando: "ontem" }],
+  ["*diária Roberto meia terça*", { comando: "diaria", nome: "roberto", jornada: "meia", quando: "terca" }],
+  ["diária João Marcelo inteira 03/11", { comando: "diaria", nome: "joao marcelo", jornada: "inteira", quando: "03/11" }],
+  ["diária Roberto meia.", { comando: "diaria", nome: "roberto", jornada: "meia", quando: null }],
+];
+
+Deno.test("Fase 3 (P4) — lerComandoDaAgenda: *diária <nome> inteira|meia|não [quando]*", () => {
+  for (const [texto, esperado] of TABELA_DIARIA) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+});
+
+// Conversa: o registrar_diaria falado vai ao modelo; nome que não é nome; o quando que não é dia; sem a jornada.
+const CONVERSA_DIARIA = [
+  "lança a diária do João", "registra a diária do Roberto", "o João trabalhou meio dia", "diária", "diária do João",
+  "diária Roberto", "diaria roberto meia amanha cedo", "diária do pix meia", "diária b meia", "diária a meia",
+  "diária Roberto João Marcelo meia", "diária Roberto meia por favor", "corrigir diária Roberto meia", "corrige diária Roberto meia",
+  "diária 2 meia", "a diária do Roberto é meia", "diária Roberto meio", "diaria roberto inteiro",
+];
+
+Deno.test("Fase 3 (P4) — conversa (registrar_diaria falado, nome ou dia que não servem) não é a palavra da diária", () => {
+  for (const t of CONVERSA_DIARIA) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 3 (P4) — *diária …* não é do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  const formas = TABELA_DIARIA.map(([t]) => t);
+  for (const t of [...formas, ...formas.map((x) => `*${x}*`)]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+  }
+});

@@ -3,14 +3,19 @@
 //   0. Conferência do material da Agenda de Produção (material-da-agenda.ts, Fase 1 P2): guarda em
 //      os_material o que o estoque e as OCs dizem de cada item de compra da carteira, antes de a R16 ler
 //      a conta. Passo à parte: erro vai para app_error_logs (agenda:material) e não derruba o resto.
-//   0b. A vigia da Agenda de Produção (agenda-vigia.ts, Fase 2 P3): agenda_vigiar publica a semana na quinta,
+//   0b. A rotina da equipe e da diária (agenda-rotina.ts, Fase 3 P4): agenda_rotina_rodar manda a ficha da véspera,
+//      a confirmação da manhã e o "como foi hoje?" (só com agenda_config.modo_equipe ligado, na janela e no teto que o
+//      banco confere), remaneja pelo silêncio, lança a diária (modo_diaria) e devolve os acordes. Antes da vigia: a
+//      vigia lê o que ela mudou. Passo à parte: nunca lança (agenda:rotina).
+//   0c. A vigia da Agenda de Produção (agenda-vigia.ts, Fase 2 P3): agenda_vigiar publica a semana na quinta,
 //      replaneja quando algo muda, promove e solta reservas, pergunta o que só o dono sabe e devolve os acordes
 //      (a perda de hoje ou amanhã), que vão ao dono pelo portão. Passo à parte: nunca lança (agenda:vigia).
 //   1. Regras de rules.ts (RULES): criam tarefas (dedupe por automation_key) e auto-resolvem
 //      as que a condição sumiu ("Resolvido automaticamente: ..."). A R1 e a R16 saem com a agenda automática
 //      ligada (agenda_config.modo_proposta) e a R2 com a vigia ligada (modo_vigia) — o mesmo interruptor da
 //      substituta (agenda-modos.ts); as tarefas vivas delas se resolvem com o motivo da agenda.
-//   2. R10: lembrete interno (WhatsApp equipe) de OS agendada para amanhã.
+//   2. R10: lembrete interno (WhatsApp equipe) de OS agendada para amanhã. Sai com a ficha da agenda ligada
+//      (modo_equipe = 'ligado', decisão d13): o resumo diz "desligada: a ficha da agenda substitui".
 //   3. Processa task_reminders vencidos → app_notifications + WhatsApp interno.
 //   4. Materializa recorrências (rrule) para os próximos 30 dias.
 // O motor não manda nada a cliente. O lembrete automático de agendamento (R9) e a pesquisa
@@ -24,8 +29,9 @@ import {
 } from "./rules.ts";
 import { resolveAssignee } from "./responsavel.ts";
 import { sincronizarMaterialDaAgenda } from "./material-da-agenda.ts";
-import { lerModosDaAgenda } from "./agenda-modos.ts";
+import { lerModosDaAgenda, lerModosDaEquipe, r10DesligadaPelaAgenda } from "./agenda-modos.ts";
 import { vigiarAgenda } from "./agenda-vigia.ts";
+import { rodarRotinaDaAgenda } from "./agenda-rotina.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
@@ -209,9 +215,13 @@ async function runRules(db: Db, settings: Record<string, string>) {
 
 /** R10 — lembrete interno de OS (equipe, nunca cliente) em DUAS janelas BRT:
  *  véspera 17:00-18:59 ("amanhã às X") e manhã do dia 07:00-08:59 ("hoje às X").
- *  Fora das janelas não envia — sem mensagem interna de madrugada. */
+ *  Fora das janelas não envia — sem mensagem interna de madrugada.
+ *  Agenda de Produção (Fase 3, P4): com a ficha da agenda ligada (modo_equipe = 'ligado') a R10 não roda — o técnico
+ *  receberia as duas. O resumo diz "desligada: a ficha da agenda substitui" (agenda-modos.ts, R10_DESLIGADA). */
 async function runTechnicianReminders(db: Db, settings: Record<string, string>) {
   if ((settings["task_rule_r10_enabled"] ?? "true") !== "true") return { sent: 0 };
+  const desligada = r10DesligadaPelaAgenda(await lerModosDaEquipe(db));
+  if (desligada) return desligada;
 
   const nowBRT = new Date(Date.now() - 3 * 3600000); // relógio deslocado p/ ler hora BRT em UTC
   const brtHour = nowBRT.getUTCHours();
@@ -413,6 +423,17 @@ servirComCors(async (req) => {
       agendaMaterial = { erro: String((e as any)?.message ?? e) };
     }
 
+    // A rotina da equipe e da diária (Fase 3, P4): logo antes da vigia (o "não vou" e o silêncio replanejam, e a vigia
+    // lê o plano já mudado). Tem o próprio try/catch (rodarRotinaDaAgenda nunca lança: devolve { erro } e grava em
+    // app_error_logs); o de fora é a segunda trava, para nada daqui parar a vigia e as regras.
+    let agendaRotina: unknown = null;
+    try {
+      agendaRotina = await rodarRotinaDaAgenda(db, new Date());
+    } catch (e) {
+      console.error("agenda:rotina:", e);
+      agendaRotina = { erro: String((e as any)?.message ?? e) };
+    }
+
     // A vigia da Agenda de Produção (Fase 2, P3): depois do material (lê a conta em dia) e antes das regras (a R1, a
     // R2 e a R16 leem o que ela fez). Tem o próprio try/catch (vigiarAgenda nunca lança: devolve { erro } e grava em
     // app_error_logs); o de fora é a segunda trava, para nada daqui parar as regras.
@@ -429,7 +450,7 @@ servirComCors(async (req) => {
     const reminders = await processReminders(db);
     const recurrence = await materializeRecurrences(db);
 
-    const summary = { identidade, fios, agenda_material: agendaMaterial, agenda_vigia: agendaVigia, rules, r10, reminders, recurrence };
+    const summary = { identidade, fios, agenda_material: agendaMaterial, agenda_rotina: agendaRotina, agenda_vigia: agendaVigia, rules, r10, reminders, recurrence };
     // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as
     // regras quebraram não deixaria registro nenhum (created e resolved vazios).
     if (rules.created.length || rules.resolved.length || recurrence.created || rules.falhas.length) {

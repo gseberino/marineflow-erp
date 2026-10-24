@@ -10,6 +10,7 @@ import {
   ehComandoDaAgendaLigada,
   executarComandoDaAgenda,
   lerModoDaLeitura,
+  modoDaDiariaNoBanco,
   modoDaLeituraNoBanco,
   rascunhoAbertoNoBanco,
   modoDaPropostaNoBanco,
@@ -19,6 +20,7 @@ import {
   RPC_CONFERIR_DIA,
   RPC_DESCARTAR,
   RPC_DESFAZER_DITO,
+  RPC_DIARIA_DITA,
   RPC_ENTREGAR_DITO,
   RPC_GRAVAR,
   TEXTO_SEM_AGENDA,
@@ -26,6 +28,7 @@ import {
   TEXTO_SEM_CONCLUIR,
   TEXTO_SEM_DESCARTAR,
   TEXTO_SEM_DESFAZER,
+  TEXTO_SEM_DIARIA,
   TEXTO_SEM_ENTREGAR,
   TEXTO_SEM_GRAVAR,
   TEXTO_SO_ADMIN,
@@ -548,4 +551,70 @@ Deno.test("Fase 3 — camada: *concluiu Lenine* só com a agenda automática for
   assertEquals((await camadaDaAgenda("concluiu Lenine", deps("sombra", ok)))?.texto, "Concluí o Lenine (OS-00074) hoje.");
   assertEquals(await camadaDaAgenda("concluiu Lenine", deps("desligado", ok)), null);
   assertEquals(await camadaDaAgenda("concluiu instalação", deps("sombra", { ok: false, status: "nao_achei", texto: "Não encontrei." })), null);
+});
+
+// ─── Fase 3 (P4): *diária <nome> inteira|meia|não [quando]* ─────────────────────────────────────────────────────
+
+Deno.test("Fase 3 (P4) — chamadaDoComando: *diária* vai a agenda_diaria_dita com a pessoa, a jornada e o dia como o dono disse", () => {
+  assertEquals(chamadaDoComando({ comando: "diaria", nome: "roberto", jornada: "meia", quando: null }, AUTOR, "2026-11-03", "painel"), {
+    rpc: RPC_DIARIA_DITA,
+    params: { p_autor: AUTOR, p_nome: "roberto", p_jornada: "meia", p_quando: null, p_canal: "painel", p_hoje: "2026-11-03" },
+  });
+  assertEquals(chamadaDoComando({ comando: "diaria", nome: "joao", jornada: "nao", quando: "ontem" }, AUTOR).params,
+               { p_autor: AUTOR, p_nome: "joao", p_jornada: "nao", p_quando: "ontem", p_canal: "whatsapp" });
+});
+
+Deno.test("Fase 3 (P4) — executar: o texto do banco volta; nao_achei (nada da agenda) segue ao modelo e ao registrar_diaria", async () => {
+  const meia: ComandoDaAgenda = { comando: "diaria", nome: "roberto", jornada: "meia", quando: null };
+  const corrigido = "Corrigido: Roberto, ter 03/11, meia diária (era dia inteiro).";
+  const c1 = cliente({ [RPC_DIARIA_DITA]: { data: { ok: true, mudou: true, texto: corrigido } } });
+  assertEquals(await executarComandoDaAgenda(c1, meia, { autor: AUTOR }), { ok: true, texto: corrigido });
+  const c2 = cliente({ [RPC_DIARIA_DITA]: { data: { ok: false, status: "nao_achei", texto: "Não tenho diária da agenda do Roberto para ter 03/11." } } });
+  assertEquals((await executarComandoDaAgenda(c2, meia, { autor: AUTOR })).seguirAoModelo, true);
+  // ambíguo, a opção que não existe e o dia que não serve são a resposta: ficam com a agenda
+  for (const status of ["ambiguo", "opcao", "data"]) {
+    const c = cliente({ [RPC_DIARIA_DITA]: { data: { ok: false, status, texto: `texto ${status}` } } });
+    const r = await executarComandoDaAgenda(c, meia, { autor: AUTOR });
+    assertEquals([r.texto, r.seguirAoModelo], [`texto ${status}`, undefined], status);
+  }
+  // nunca lança: o erro vira a frase da diária e o log
+  const c3 = cliente({ [RPC_DIARIA_DITA]: { error: { message: "rede", code: "XX000" } } });
+  const r3 = await executarComandoDaAgenda(c3, meia, { autor: AUTOR });
+  assertEquals([r3.ok, r3.texto, c3.logs().length], [false, TEXTO_SEM_DIARIA, 1]);
+});
+
+Deno.test("Fase 3 (P4) — camada: *diária Roberto meia* só com modo_diaria fora de desligado (ausente ou erro = desligado)", async () => {
+  type Modo = "desligado" | "sombra" | "ligado";
+  const deps = (diaria: (() => Promise<Modo>) | undefined, data: unknown): DependenciasDaCamada => ({
+    ehDoDono: () => true,
+    modo: () => Promise.resolve("sombra"),
+    modosDaFase2: () => Promise.resolve({ proposta: "desligado", vigia: "desligado" }),
+    ...(diaria ? { modoDaDiaria: diaria } : {}),
+    executar: (cmd) => executarComandoDaAgenda(cliente({ [RPC_DIARIA_DITA]: { data } }), cmd, { autor: AUTOR }),
+  });
+  const ok = { ok: true, mudou: true, texto: "Corrigido: Roberto, ter 03/11, meia diária (era dia inteiro)." };
+  assertEquals((await camadaDaAgenda("diária Roberto meia", deps(() => Promise.resolve("sombra"), ok)))?.texto, ok.texto);
+  assertEquals((await camadaDaAgenda("diária Roberto meia", deps(() => Promise.resolve("ligado"), ok)))?.texto, ok.texto);
+  assertEquals(await camadaDaAgenda("diária Roberto meia", deps(() => Promise.resolve("desligado"), ok)), null);
+  assertEquals(await camadaDaAgenda("diária Roberto meia", deps(undefined, ok)), null);
+  assertEquals(await camadaDaAgenda("diária Roberto meia", deps(() => Promise.reject(new Error("rede")), ok)), null);
+  assertEquals(await camadaDaAgenda("diária Roberto meia",
+                                    deps(() => Promise.resolve("sombra"), { ok: false, status: "nao_achei", texto: "x" })), null);
+});
+
+Deno.test("Fase 3 (P4) — modoDaDiariaNoBanco: um SELECT só da coluna; erro, coluna ausente ou exceção = desligado", async () => {
+  assertEquals(await modoDaDiariaNoBanco(adminDoModo({ data: { modo_diaria: " Ligado " } })), "ligado");
+  assertEquals(await modoDaDiariaNoBanco(adminDoModo({ data: { modo_diaria: "sombra" } })), "sombra");
+  assertEquals(await modoDaDiariaNoBanco(adminDoModo({ error: { code: "42703", message: "column modo_diaria does not exist" } })), "desligado");
+  assertEquals(await modoDaDiariaNoBanco(adminDoModo({ data: null })), "desligado");
+  assertEquals(await modoDaDiariaNoBanco(adminDoModo({ lanca: true })), "desligado");
+});
+
+Deno.test("Fase 3 (P4) — ehComandoDaAgendaLigada: *diária* só com modo_diaria fora de desligado (e a leitura ligada)", async () => {
+  const leitura = (extra: Record<string, unknown>) => adminDoModo({ data: { modo_leitura: "ligado", ...extra } });
+  assertEquals(await ehComandoDaAgendaLigada(leitura({ modo_diaria: "sombra" }), "diária Roberto meia"), true);
+  assertEquals(await ehComandoDaAgendaLigada(leitura({ modo_diaria: "desligado" }), "diária Roberto meia"), false);
+  assertEquals(await ehComandoDaAgendaLigada(leitura({}), "diária Roberto meia"), false);
+  assertEquals(await ehComandoDaAgendaLigada(adminDoModo({ data: { modo_leitura: "desligado", modo_diaria: "ligado" } }), "diária Roberto meia"),
+               false);
 });

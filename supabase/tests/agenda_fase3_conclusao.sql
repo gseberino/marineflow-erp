@@ -716,13 +716,16 @@ begin
   v_corpo := substr(v_corpo, position(E'as $function$\n' in v_corpo) + length(E'as $function$'));
   v_corpo := left(v_corpo, position(E'\n$function$;' in v_corpo));
   v_novo := replace(v_novo, E'\r\n', E'\n');
-  v_ini := position('  -- FASE 3: ' in v_novo);
-  if v_ini > 0 and position(E'  -- FASE 3: fim\n' in v_novo) > v_ini then
+  -- FASE 3 (P4): agenda_desfazer foi recriada de novo em 20261026100300 (a diária da agenda e a ausência da equipe), com
+  -- dois blocos "-- FASE 3: … -- FASE 3: fim": tira todos (cada um é só acréscimo ao corpo de 20261025100200).
+  loop
+    v_ini := position('  -- FASE 3: ' in v_novo);
+    exit when v_ini = 0 or position(E'  -- FASE 3: fim\n' in v_novo) < v_ini;
     v_novo := left(v_novo, v_ini - 1)
               || substr(v_novo, position(E'  -- FASE 3: fim\n' in v_novo) + length(E'  -- FASE 3: fim\n'));
-  end if;
-  insert into _resultado values ('J5 a cópia de agenda_desfazer só muda no bloco "-- FASE 3:" (o resto é o corpo de 20261025100200)',
-    v_novo = v_corpo and position('_agenda_desfazer_marco' in v_novo) = 0,
+  end loop;
+  insert into _resultado values ('J5 a cópia de agenda_desfazer só muda nos blocos "-- FASE 3:" (o resto é o corpo de 20261025100200)',
+    v_novo = v_corpo and position('_agenda_desfazer_marco' in v_novo) = 0 and position('_agenda_desfazer_diaria' in v_novo) = 0,
     case when v_novo = v_corpo then null else format('%s × %s caracteres', length(v_novo), length(v_corpo)) end);
 end
 $copia$;

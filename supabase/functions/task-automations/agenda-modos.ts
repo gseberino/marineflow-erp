@@ -42,3 +42,42 @@ export async function lerModosDaAgenda(db: Db): Promise<ModosDaAgenda> {
     return { ...MODOS_DESLIGADOS, erro: String((e as Error)?.message ?? e) };
   }
 }
+
+// ── Fase 3 (P4, 24/10/2026): os modos da equipe e da diária ─────────────────────────────────────────────
+// Lidos num SELECT à parte: a coluna modo_diaria só existe com a migration 20261026100000, e um SELECT que falhasse por
+// ela não pode derrubar os modos da Fase 2 (a R1, a R2 e a R16 voltariam com a agenda ligada). Ilegível = desligado: a
+// R10 continua como hoje (o lado seguro: no máximo o técnico recebe o lembrete antigo) e a rotina não roda.
+
+export interface ModosDaEquipe {
+  /** agenda_config.modo_equipe: a ficha, a confirmação e o "como foi hoje?" (em ligado a R10 para). */
+  equipe: ModoDaAgenda;
+  /** agenda_config.modo_diaria: a diária automática. */
+  diaria: ModoDaAgenda;
+  /** A leitura falhou (a R10 fica como hoje). */
+  erro?: string;
+}
+
+export const EQUIPE_DESLIGADA: Readonly<ModosDaEquipe> = Object.freeze({ equipe: "desligado", diaria: "desligado" });
+
+/** Um SELECT em agenda_config (modo_equipe, modo_diaria). Nunca lança: erro = desligado (com o motivo em `erro`). */
+export async function lerModosDaEquipe(db: Db): Promise<ModosDaEquipe> {
+  try {
+    const { data, error } = await db.from("agenda_config").select("modo_equipe, modo_diaria").maybeSingle();
+    if (error) return { ...EQUIPE_DESLIGADA, erro: String(error.message ?? error.code ?? "erro na leitura") };
+    if (!data) return { ...EQUIPE_DESLIGADA, erro: "agenda_config sem a linha de parâmetros" };
+    return { equipe: lerModo(data.modo_equipe), diaria: lerModo(data.modo_diaria) };
+  } catch (e) {
+    return { ...EQUIPE_DESLIGADA, erro: String((e as Error)?.message ?? e) };
+  }
+}
+
+/** O texto do resumo quando a R10 sai (spec-fase3 §7.6, d15): a ficha das 19:30 a substitui no instante em que liga. */
+export const R10_DESLIGADA = "desligada: a ficha da agenda substitui";
+
+/**
+ * A R10 (o lembrete interno de OS agendada) sai no mesmo instante em que a ficha da agenda liga (modo_equipe = 'ligado';
+ * decisão d13 do dono: a regra antiga sai no dia em que a substituta entra). Sombra e desligado = a R10 continua.
+ */
+export function r10DesligadaPelaAgenda(m: Pick<ModosDaEquipe, "equipe">): string | null {
+  return m.equipe === "ligado" ? R10_DESLIGADA : null;
+}

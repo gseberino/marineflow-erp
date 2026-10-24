@@ -751,6 +751,11 @@ insert into _resultado values
 --                    desfazer da conclusão e da entrega). A leitura dos marcos (agenda_marcos_da_os) não.
 --   20261026100200 — as palavras *concluiu* e *entreguei*: agenda_concluir_dito e agenda_entregar_dito (conferem o
 --                    administrador dentro). A releitura (_agenda_rascunho_marco), a OS da entrega e os textos não.
+--   20261026100300 — a rotina da equipe e a diária: agenda_equipe_ficha (lê as alocações para o webhook), a resposta
+--                    da equipe, a rotina, a palavra *diária* (confere o administrador dentro), o envio à equipe
+--                    (_agenda_equipe_registrar, _agenda_equipe_enfileirar), a trava da fila (_agenda_fila_da_equipe,
+--                    gatilho) e a diária (_agenda_diaria_do_dia, _agenda_lancar_diaria, _agenda_decidir_diaria,
+--                    _agenda_desfazer_diaria). Os textos, a leitura da resposta, a confirmação do dia e os passos não.
 create temp table _definer_da_agenda (nome text primary key) on commit drop;
 insert into _definer_da_agenda values
   ('agenda_disponibilidade_semear'), ('agenda_rascunho_planejar'), ('agenda_rascunho_material'),
@@ -767,7 +772,10 @@ insert into _definer_da_agenda values
   ('_agenda_pessoa'), ('_agenda_payees_do_usuario'),
   -- FASE 3
   ('_agenda_escrever_conclusao'), ('_agenda_desfazer_marco'),
-  ('agenda_concluir_dito'), ('agenda_entregar_dito');
+  ('agenda_concluir_dito'), ('agenda_entregar_dito'),
+  ('agenda_equipe_ficha'), ('agenda_resposta_da_equipe'), ('agenda_rotina_rodar'), ('agenda_diaria_dita'),
+  ('_agenda_equipe_registrar'), ('_agenda_equipe_enfileirar'), ('_agenda_fila_da_equipe'),
+  ('_agenda_diaria_do_dia'), ('_agenda_lancar_diaria'), ('_agenda_decidir_diaria'), ('_agenda_desfazer_diaria');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

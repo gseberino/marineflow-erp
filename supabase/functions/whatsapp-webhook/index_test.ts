@@ -122,6 +122,10 @@ function bancoEFuncoesFalsos(op: {
   /** F2: a resposta do comprovantes-whatsapp. */
   comprovantes?: { status: number; corpo: unknown };
   transcricao?: string | null;
+  /** Fase 3 (P4): o número não é login (o técnico): app_users vazio, sem cliente, com o lead que já existe. */
+  semLogin?: boolean;
+  /** Fase 3 (P4): a resposta do agenda_resposta_da_equipe ("erro" = a RPC responde erro). */
+  equipe?: unknown;
 } = {}) {
   const chamadas: Array<{ metodo: string; caminho: string; corpo?: unknown }> = [];
   const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
@@ -135,7 +139,12 @@ function bancoEFuncoesFalsos(op: {
     } catch { /* não é JSON */ }
     chamadas.push({ metodo: req.method, caminho: u.pathname, corpo });
     if (u.pathname === "/rest/v1/whatsapp_messages" && req.method === "GET") return json([]); // dedup: nova
-    if (u.pathname === "/rest/v1/app_users") return json([{ id: ADMIN_ID, role: op.role ?? "admin" }]);
+    if (u.pathname === "/rest/v1/app_users") return json(op.semLogin ? [] : [{ id: ADMIN_ID, role: op.role ?? "admin" }]);
+    if (op.semLogin && u.pathname === "/rest/v1/clients") return json([]);
+    if (op.semLogin && u.pathname === "/rest/v1/whatsapp_leads") return json(req.method === "GET" ? [{ id: "lead-1" }] : []);
+    if (u.pathname === "/rest/v1/rpc/agenda_resposta_da_equipe") {
+      return op.equipe === "erro" ? json({ code: "57014", message: "statement timeout" }, 500) : json(op.equipe ?? { consumiu: false });
+    }
     if (u.pathname === "/rest/v1/whatsapp_messages" && req.method === "POST") {
       return op.insertFalha ? json({ code: "23505", message: "falhou" }, 409) : json({ id: MSG_GRAVADA }, 201);
     }
@@ -341,4 +350,67 @@ Deno.test("lead do site P4.5: o dono pergunta antes; os outros como sempre; envi
   const reabre = fn.indexOf("if (!r?.ok && fala.acordou) await reabrirNoPortao(admin, fala.acordou, agora);");
   assertEquals(outros > 0 && pergunta > outros && manda > pergunta && reabre > manda, true, `ordem: ${outros} ${pergunta} ${manda} ${reabre}`);
   assertStringIncludes(fn, "const doDono = recipients.find((to) => falaPeloPortao(portao, dono, to)) ?? null;");
+});
+
+// ─── Agenda de Produção, Fase 3 (P4, 24/10/2026): a resposta da equipe antes do "SIM" do cliente e do "ok" do recibo ──
+// O número do técnico não é login (o Roberto tem login inativo): a mensagem dele cai no caminho de cliente/lead. A resposta
+// à ficha ("ok") é da agenda quando o banco diz (consumiu): aí a confirmação do cliente e a conferência do recibo não leem
+// o mesmo texto. Não consumida (ou a RPC com erro) = tudo igual a hoje.
+
+function payloadDoTecnico(texto: string, waId: string) {
+  return {
+    event: "messages.upsert",
+    data: {
+      key: { id: waId, remoteJid: "5547900000001@s.whatsapp.net", fromMe: false },
+      pushName: "Roberto",
+      message: { conversation: texto },
+      messageTimestamp: 1762210800,
+    },
+  };
+}
+
+async function rodarTecnico(op: { equipe?: unknown }, texto: string, waId: string) {
+  const falso = bancoEFuncoesFalsos({ semLogin: true, ...op });
+  await comHandlerFalso(falso, payloadDoTecnico(texto, waId), async (res) => {
+    assertEquals(res.status, 200);
+  });
+  // as RPCs de "fire-and-forget" saem antes de o handler responder; o corpo delas chega no microtick seguinte
+  await new Promise((ok) => setTimeout(ok, 30));
+  return falso;
+}
+
+Deno.test("equipe P4: a resposta consumida pela agenda pula a confirmação do cliente e a conferência do recibo", async () => {
+  const falso = await rodarTecnico({ equipe: { consumiu: true, tipo: "ok" } }, "ok", "WAID-EQUIPE-1");
+  assertEquals(falso.conta("/rest/v1/rpc/agenda_resposta_da_equipe", "POST"), 1);
+  const corpo = falso.corpos("/rest/v1/rpc/agenda_resposta_da_equipe")[0];
+  assertEquals([corpo.p_phone, corpo.p_body, corpo.p_message_id], ["5547900000001", "ok", "WAID-EQUIPE-1"]);
+  assertEquals(falso.conta("/rest/v1/rpc/registrar_confirmacao_do_cliente"), 0);
+  assertEquals(falso.conta("/rest/v1/rpc/registrar_conferencia_do_freelancer"), 0);
+});
+
+Deno.test("equipe P4: não consumida (sombra, recibo, ninguém da equipe) = as duas RPCs de hoje, como sempre", async () => {
+  const falso = await rodarTecnico({ equipe: { consumiu: false } }, "ok", "WAID-EQUIPE-2");
+  assertEquals(falso.conta("/rest/v1/rpc/agenda_resposta_da_equipe", "POST"), 1);
+  assertEquals(falso.conta("/rest/v1/rpc/registrar_confirmacao_do_cliente"), 1);
+  assertEquals(falso.conta("/rest/v1/rpc/registrar_conferencia_do_freelancer"), 1);
+});
+
+Deno.test("equipe P4: a RPC com erro não derruba nada — segue como hoje e registra o erro", async () => {
+  const falso = await rodarTecnico({ equipe: "erro" }, "ok", "WAID-EQUIPE-3");
+  assertEquals(falso.conta("/rest/v1/rpc/registrar_confirmacao_do_cliente"), 1);
+  assertEquals(falso.conta("/rest/v1/rpc/registrar_conferencia_do_freelancer"), 1);
+  const logs = falso.corpos("/rest/v1/rpc/log_app_error");
+  assertEquals(logs.length, 1);
+  assertEquals([logs[0].p_context, logs[0].p_action], ["whatsapp-webhook", "agenda:equipe"]);
+});
+
+Deno.test("equipe P4: no código, a resposta da equipe vem antes do bloco de 60 caracteres e o condiciona", async () => {
+  const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
+  const bloco = fonte.slice(fonte.indexOf("if (!event.fromMe && body) {"), fonte.indexOf("if (leadId) {"));
+  const equipe = bloco.indexOf("const daEquipe = await respostaDaEquipe(admin,");
+  const curto = bloco.indexOf("if (body.trim().length <= 60 && !daEquipe) {");
+  assertEquals(equipe > 0 && curto > equipe, true);
+  assertEquals(bloco.indexOf("registrar_confirmacao_do_cliente") > curto, true);
+  // o resto do fluxo (o lead, a revisão, o acompanhamento) não depende da agenda
+  assertEquals(bloco.indexOf("registrar_resposta_da_revisao") > curto, true);
 });

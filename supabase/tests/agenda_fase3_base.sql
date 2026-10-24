@@ -264,8 +264,11 @@ begin
      '[{"n":1,"texto":"meia"},{"n":2,"texto":"inteira"}]', 1,
      'e3000000-0000-4000-8000-000000000101', 'e3000000-0000-4000-8000-000000000202');
 
+  -- FASE 3 (P4): a diária executada pela agenda sem a confirmação do dia é recusada pelo gatilho agenda_acoes_diaria_confirmada
+  -- (20261026100300); esta linha só prova o ON DELETE SET NULL da pessoa e da diária, então é a do dono (que não passa
+  -- pela confirmação: é a ordem dele).
   insert into public.agenda_acoes (id, dia, executada, origem, tipo, texto, payee_id, work_shift_id, service_order_id) values
-    ('e3000000-0000-4000-8000-000000000601', '2026-11-04', true, 'equipe', 'diaria', 'TESTE AG3: lancei a diária do Roberto.',
+    ('e3000000-0000-4000-8000-000000000601', '2026-11-04', true, 'dono', 'diaria', 'TESTE AG3: lancei a diária do Roberto.',
      'e3000000-0000-4000-8000-000000000101', 'e3000000-0000-4000-8000-000000000402', 'e3000000-0000-4000-8000-000000000202'),
     ('e3000000-0000-4000-8000-000000000602', '2026-11-04', false, 'equipe', 'equipe', 'TESTE AG3: o descartável respondeu.',
      'e3000000-0000-4000-8000-000000000103', null, 'e3000000-0000-4000-8000-000000000202');

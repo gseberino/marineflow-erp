@@ -2855,3 +2855,39 @@ porque só o dono pode preenchê-las.
 - **Corrigido (P3, migration `20261026100200`, NÃO APLICADA):** `agenda_acao_desfazivel` recriada aceita a OS fora da carteira
   quando ela tem mudança da agenda ainda desfazível; sem isso, a resposta é a de antes. A dica das palavras usa o número
   (*desfaz OS-00074*): com outra OS do mesmo cliente na carteira, o nome acharia aquela.
+
+### [NOVO-agenda-16] A mensagem de um diarista vira lead novo (e pode avisar "Novo lead WhatsApp")
+
+- **Encontrado em:** Agenda de Produção, Fase 3 (conferência de 24/10/2026; registrado no pacote P4).
+- **Onde:** `supabase/functions/whatsapp-webhook/index.ts` — o número que não é login de administrador cai no caminho de
+  cliente/lead: sem cliente com o telefone, cria `whatsapp_leads` e chama `notifyAssignedReminder` ("🆕 Novo lead").
+- **O quê:** o Roberto (login inativo) e o João (sem login) são equipe, não lead. Com a rotina da equipe ligada, a resposta
+  dele à ficha passaria pelo mesmo caminho.
+- **Não muda nesta fase (só registro):** o P4 só acrescenta a leitura da equipe (`agenda_resposta_da_equipe`) antes da
+  confirmação do cliente e da conferência do recibo. Deixar o número da equipe fora do funil de leads mexe no WhatsApp inteiro
+  e fica para uma decisão própria (spec-fase3 §18).
+
+### [NOVO-agenda-17] O "ok" do diarista tinha dois donos: a conferência do recibo e a ficha da agenda
+
+- **Encontrado em:** Agenda de Produção, Fase 3 (conferência de 24/10/2026; corrigido no pacote P4).
+- **Onde:** `registrar_conferencia_do_freelancer` (`20261006220000_diarias_acerto_e_recibo.sql:210-239`) lê todo "ok" curto
+  como conferência do recibo mandado nos últimos 7 dias; com a ficha da agenda, o mesmo "ok" responderia às duas.
+- **Corrigido (P4, migration `20261026100300` + `whatsapp-webhook`, NÃO APLICADOS):** decide a ÚLTIMA mensagem mandada a ele.
+  `agenda_resposta_da_equipe` só consome o "ok" quando a mensagem da agenda (ficha, confirmação, "como foi hoje?") é mais nova
+  que o recibo; senão devolve `consumiu: false` e o webhook segue para a conferência do recibo como hoje. Consumida, o webhook
+  pula a confirmação do cliente e a conferência do recibo. Testes: B9 de `supabase/tests/agenda_fase3_equipe_diarias.sql` e
+  `supabase/functions/whatsapp-webhook/index_test.ts` ("equipe P4").
+
+### [NOVO-agenda-26] O worker da fila não confere a janela: a mensagem das 19:30 que ficou presa sai quando ele voltar
+
+- **Encontrado em:** Agenda de Produção, Fase 3, pacote P4 (24/10/2026, lendo `whatsapp-queue-worker/index.ts:91-142`).
+- **O quê:** o worker manda toda linha `pending` com `scheduled_for <= agora`, sem olhar a hora, e manda o lote que leu mesmo
+  quando o UPDATE para 'sending' falha. Se ele (ou a plataforma) parar às 19:25 e voltar às 22:00, a ficha das 19:30 sai às
+  22:00 — o mesmo tipo de mensagem fora de hora que fez o dono mandar desligar os alertas em setembro.
+- **Contido no banco (P4, NÃO APLICADO):** (1) a fila só aceita linha `agenda-equipe` dentro da janela, com a última tentativa
+  antes do fim e abaixo do teto (gatilho `trg_agenda_fila_da_equipe`); (2) a nova tentativa que cairia fora da janela vira
+  falha (`trg_agenda_fila_da_equipe_tentativa`); (3) a rotina, a cada 15 min e em qualquer modo, faz falhar o que não saiu
+  dentro da janela e o que ficou na fila quando a equipe saiu de ligado (passo "fila"); (4) `agenda_saude.equipe.fora_da_janela` conta também o que SAIU fora da janela (o worker atrasado).
+- **Sobra:** se o worker e a rotina voltarem juntos depois das 20:00 e o worker ler a linha antes da rotina, ela sai. A
+  correção de verdade é o worker não mandar `source = 'agenda-equipe'` fora de 07:30–20:00 (5 linhas, mexe no envio de todo o
+  WhatsApp): **pendência para decidir antes de ligar modo_equipe**.
