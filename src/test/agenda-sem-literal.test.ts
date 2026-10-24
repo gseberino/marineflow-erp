@@ -21,6 +21,8 @@
 //     os da Fase 2 recriados; os pacotes seguintes da fase entram aqui sozinhos pelo prefixo). Os DEFAULTs novos de
 //     agenda_config (a janela e as horas da equipe, a validade do "ok", a meta do PPC…) ficam em 20261026100000, fora de
 //     função.
+//   · (Fase 3, P5) a comissão: o pct (20%) só existe no DEFAULT de comissao_config (20261026100000); o corpo de
+//     comissao_tecnicos_do_mes e comissao_resumo_do_mes lê a linha (o "20%" do texto sai de comissao_config.pct).
 // E cobra:
 //   1. nenhum valor de parâmetro de agenda_config (carga 0,8, R$ 1.600 e R$ 764 por diária, fator 1,5, frequência
 //      mínima 0,25, 1.000 de texto e de peça embutida, validade de 24/72 horas, horário dos turnos, municípios
@@ -51,6 +53,8 @@ const PROIBIDOS: Array<{ nome: string; re: RegExp }> = [
   { nome: 'horário dos turnos (08:00–12:00, 13:00–17:00)', re: /(?<!\d)(?:0?8|12|13|17):00(?!\d)/ },
   { nome: 'municipios_locais', re: /Itaja[ií]|Balne[aá]rio|Navegantes|Cambori[uú]|Tijucas|Blumenau|\bPenha\b/ },
   { nome: 'capacidade medida na carteira (6,77 / 5,41 / ~5,4 / 4,43 / 2,33)', re: /(?<![\d.,(])(?:6[.,]77|5[.,]41?|4[.,]43|2[.,]33)(?!\d)/ },
+  // Fase 3 (P5): o pct da comissão "o maior dos dois" mora em comissao_config (DEFAULT 0.200 de 20261026100000).
+  { nome: 'comissao_config.pct (20% / 0,2)', re: /(?<![\d.,])(?:20\s*%|0[.,]20?(?!\d))/ },
 ];
 
 /** Números com casa decimal que são estrutura, não parâmetro. */
@@ -272,6 +276,8 @@ describe('agenda: parâmetro só em agenda_config', () => {
       'agenda_propor_dito', 'agenda_linhas_do_dia',
       // Fase 3 (P1): a base (o gatilho da entrega e o das mensagens à equipe)
       '_so_entrega_pela_porta', '_agenda_equipe_mensagens_so_responde',
+      // Fase 3 (P5): a comissão (só a conta)
+      'comissao_tecnicos_do_mes', 'comissao_resumo_do_mes',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),
@@ -298,7 +304,7 @@ describe('agenda: parâmetro só em agenda_config', () => {
     const sqlRuim = corposDasFuncoes([
       "create or replace function public.agenda_x(p numeric) returns numeric language sql as $function$",
       "  -- 0.8 no comentário não conta; c.carga_max sim é o certo",
-      "  select p * 0.8 + 1600 + 764 + 0.25 + 1.5 + 0.6 + 1000, '~5,4 diárias', interval '24 hours', '13:00'::time, 'Itajaí'",
+      "  select p * 0.8 + 1600 + 764 + 0.25 + 1.5 + 0.6 + 1000, '~5,4 diárias', interval '24 hours', '13:00'::time, 'Itajaí', '20% do lucro'",
       "$function$;",
       "create or replace function public.agenda_y(p numeric) returns numeric language sql as $function$",
       "  select greatest(0.5, round(p * 2) / 2) * c.carga_max from agenda_config c where 'meio dia' <> '1 dia'",

@@ -51,6 +51,10 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 3 (P2): a migration do motor da Fase 2, para o teste da conclusão conferir que a cópia de agenda_desfazer só muda
   // no bloco "-- FASE 3:".
   ['agenda_teste.mig_motor_fase2', '../../supabase/migrations/20261025100200_agenda_fase2_motor.sql'],
+  // Fase 3 (P5): a comissão — o cenário sintético de novembro (números à mão) e o espelho de produção (as 21 OS de i04 e
+  // as 56 diárias de i09, só números).
+  ['agenda_teste.cenario_comissao', 'cenario-comissao.sql'],
+  ['agenda_teste.cenario_comissao_2410', 'cenario-comissao-2410.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

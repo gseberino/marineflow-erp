@@ -2891,3 +2891,16 @@ porque só o dono pode preenchê-las.
 - **Sobra:** se o worker e a rotina voltarem juntos depois das 20:00 e o worker ler a linha antes da rotina, ela sai. A
   correção de verdade é o worker não mandar `source = 'agenda-equipe'` fora de 07:30–20:00 (5 linhas, mexe no envio de todo o
   WhatsApp): **pendência para decidir antes de ligar modo_equipe**.
+
+### [NOVO-agenda-18] A conta de mão de obra por OS não separa as pessoas, e nenhuma diária está ligada a uma OS
+
+- **Encontrado em:** Agenda de Produção, Fase 3 (conferência de 24/10/2026; registrado no pacote P5).
+- **Onde:** `v_custo_real_mao_de_obra_por_os` (`supabase/schemas/producao/06-views.sql:821-846`): rateia o turno entre as
+  OS dele (`n_os`), mas agrupa só por OS e não filtra status. Em produção, `work_shift_os` está vazia e
+  `work_shifts.service_order_id` é nulo nas 56 diárias (SELECT de 24/10, `sql/i09_comissao_diarias`).
+- **O quê:** a comissão "o maior dos dois" divide o lucro de cada OS pelos dias de cada técnico nela. Com a view antiga não
+  dá para saber de quem foi cada dia; com 0 de 56 diárias ligadas, não há com quem dividir nada do passado.
+- **Não muda nesta fase (só registro):** a view antiga fica como está. O P5 (migration `20261026100400`, NÃO APLICADA) cria
+  `v_dias_por_os_e_pessoa` (mesma divisão por `n_os`, agrupada por OS e pessoa, só perfil de diária, sem o sócio), e a conta
+  manda a comissão das OS sem dia ligado para "sem dia lançado na OS para dividir" e diz quantas diárias do mês estão sem OS.
+  As diárias passam a nascer ligadas à OS quando a diária automática da agenda (P4) ligar; o passado só se liga à mão.

@@ -573,6 +573,26 @@ begin
       case when v = r.esperado then r.esperado else format('esperava %s, veio %s', r.esperado, v) end);
   end loop;
 
+  -- FASE 3 (P5, 20261026100400): comissao_config ganhou competencia (premissa b do dono) e imposto_fonte aceita
+  -- 'aliquota_simples_sempre'. Só quando a coluna existe (este teste roda também no corte de 20261026100000); o resto da
+  -- prova está em agenda_fase3_comissao.sql (J7).
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'comissao_config' and column_name = 'competencia') then
+    for r in
+      select * from (values
+        ('comissao_config_competencia_check', 'competência pelo pagamento', $q$update public.comissao_config set competencia = 'pagamento'$q$),
+        ('aceitou', 'competência pela saída, imposto em toda OS', $q$update public.comissao_config set competencia = 'saida', imposto_fonte = 'aliquota_simples_sempre'$q$)
+      ) as c(esperado, caso, comando)
+    loop
+      v := pg_temp.recusa(r.comando);
+      v_testados := v_testados || r.esperado;
+      insert into _resultado values (
+        format('B %s: %s', case when r.esperado = 'aceitou' then 'entra' else 'recusa' end, r.caso),
+        v = r.esperado,
+        case when v = r.esperado then r.esperado else format('esperava %s, veio %s', r.esperado, v) end);
+    end loop;
+  end if;
+
   -- Nenhum CHECK das 4 tabelas novas nem dos que a Fase 3 pôs ou ampliou nas outras ficou sem caso (um CHECK novo sem
   -- teste reprova aqui).
   select string_agg(c.conname, ', ' order by c.conname) into v_sem_caso
