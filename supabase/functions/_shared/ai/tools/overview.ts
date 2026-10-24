@@ -40,7 +40,8 @@ export async function agendaDeHojePeloPlano(admin: any, hojeIso: string): Promis
       cliente: v.cliente_curto ?? null,
       inicio: v.primeiro_inicio,
       fim: v.ultimo_fim ?? null,
-      ...(v.dias_total > 1 ? { dia: `${v.dia_n} de ${v.dias_total}` } : {}),
+      // o dia que não aconteceu (choveu, o cliente desmarcou) vem sem dia_n: não vira "null de 4"
+      ...(v.dias_total > 1 && v.dia_n != null ? { dia: `${v.dia_n} de ${v.dias_total}` } : {}),
       ...(v.reserva ? { reserva: true, condicao: v.condicao ?? null } : {}),
       quem: ((v.pessoas as any[]) || []).map((p) => ({
         nome: p.eh_dono ? "você" : p.nome, turnos: p.turnos, ...(p.presenca !== "turno" ? { presenca: p.presenca } : {}),

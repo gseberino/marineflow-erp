@@ -766,6 +766,25 @@ Deno.test("plano: a OS dita que É a do plano não vira divergência; duas OS no
   assertEquals(chamadas.find((x) => x.n === "registrar_diaria")!.a.p_os_ids, ["os69", "os60"]);
 });
 
+Deno.test("plano (revisão da Fase 2): meia diária com duas OS no plano não vai nas duas — fica sem OS e o \"sim\" pergunta qual", async () => {
+  const duas = [{ ...PLANO_DO_DIA[0], turnos: ["manha"] }, { os: "os60", numero: "OS-00060", cliente_curto: "Lenine", turnos: ["tarde"], tipo: "execucao", reserva: false }];
+  const { c, chamadas } = ctx({ plano: duas });
+  await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "meio" }, c as never);
+  assertEquals(chamadas.find((x) => x.n === "registrar_diaria")!.a.p_os_ids, null, "nunca as duas: o valor se dividiria");
+  const txt = String(await resumirDiaria(ctx({ plano: duas }).c as never, { freelancer: "roberto", data: "24/09/2026", jornada: "meio" }))
+    .replace(/ /g, " ");
+  assertStringIncludes(txt, "Pelo plano, Roberto Daniel Rodrigues Correa estava na OS-00069 (Vanderlei) de manhã e na OS-00060 (Lenine) à tarde: a meia diária é de qual? Diga a OS; sem ela, a diária fica sem OS.");
+  assertEquals(txt.includes("se divide em partes iguais"), false);
+  assertEquals(txt.includes(", pelo plano"), false);
+  // com a OS dita, vale ela (e não há pergunta)
+  const dita = String(await resumirDiaria(ctx({ plano: duas }).c as never, { freelancer: "roberto", data: "24/09/2026", jornada: "meio", os: "60" }));
+  assertEquals(dita.includes("a meia diária é de qual?"), false);
+  // meia diária com UMA OS no plano continua indo nela
+  const uma = ctx({ plano: [{ ...PLANO_DO_DIA[0], turnos: ["manha"] }] });
+  await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "meio" }, uma.c as never);
+  assertEquals(uma.chamadas.find((x) => x.n === "registrar_diaria")!.a.p_os_ids, ["os69"]);
+});
+
 Deno.test("plano: sem plano (agenda fora de ligado), falta, intervalo e reserva ficam como antes", async () => {
   const semPlano = ctx();
   await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro" }, semPlano.c as never);

@@ -36,27 +36,30 @@ export function dayRangeBRT(date?: string): { from: string; to: string; day: str
 }
 
 /**
- * (24/10/2026, Agenda de Produção Fase 2, P5) As OS de um dia pelo plano (v_agenda_dia, com a RLS de quem pergunta: o
- * administrador e o financeiro veem tudo; o técnico, só o próprio payee), filtradas pela pessoa: os payees ligados ao
- * login `targetId`. O técnico só vê o próprio dia (pedir o de outro login dá lista vazia, como a RLS diria). Cada OS com
- * os turnos e a presença da pessoa, o dia n de N e se é reserva. Leitura que falha LANÇA (nunca "nada no dia").
+ * (24/10/2026, Agenda de Produção Fase 2, P5) As OS de um dia pelo plano (v_agenda_dia), filtradas pela pessoa: os
+ * payees ativos ligados ao login `targetId`, para TODO cargo. O técnico só vê o próprio dia (pedir o de outro login dá
+ * lista vazia). Cada OS com os turnos e a presença da pessoa, o dia n de N e se é reserva. Leitura que falha LANÇA (nunca
+ * "nada no dia").
+ *
+ * Revisão da Fase 2: o filtro pela pessoa nunca fica com a RLS. No WhatsApp `sb` é o service role (sem RLS): a view vinha
+ * inteira e o técnico recebia todas as OS do plano do dia, com os clientes da equipe, como se fossem dele. Os payees são
+ * lidos por `admin` (payees é fechada para o técnico) e a lista é sempre filtrada por eles.
  */
 export async function osDoDiaPeloPlano(
   // deno-lint-ignore no-explicit-any
   sb: any,
-  p: { targetId: string; userId: string; userRole?: string | null; day: string },
+  // deno-lint-ignore no-explicit-any
+  p: { targetId: string; userId: string; userRole?: string | null; day: string; admin?: any },
   // deno-lint-ignore no-explicit-any
 ): Promise<any[]> {
   const veTodos = p.userRole === "admin" || p.userRole === "financial";
   if (!veTodos && p.targetId !== p.userId) return [];
-  let payees: string[] | null = null;
-  if (veTodos) {
-    const { data, error } = await sb.from("payees").select("id").eq("app_user_id", p.targetId).eq("active", true);
-    if (error) throw error;
-    // deno-lint-ignore no-explicit-any
-    payees = ((data as any[]) || []).map((x) => String(x.id));
-    if (!payees.length) return [];
-  }
+  const { data: favorecidos, error: erroPayees } = await (p.admin ?? sb).from("payees").select("id")
+    .eq("app_user_id", p.targetId).eq("active", true);
+  if (erroPayees) throw erroPayees;
+  // deno-lint-ignore no-explicit-any
+  const payees = ((favorecidos as any[]) || []).map((x) => String(x.id));
+  if (!payees.length) return [];
   const { data: linhas, error } = await sb.from("v_agenda_dia")
     .select("service_order_id, numero, cliente_curto, unidade, tipo, reserva, condicao, primeiro_inicio, ultimo_fim, pessoas, dia_n, dias_total")
     .eq("dia", p.day)
@@ -65,7 +68,7 @@ export async function osDoDiaPeloPlano(
   // deno-lint-ignore no-explicit-any
   const minhas = ((linhas as any[]) || []).flatMap((v) => {
     // deno-lint-ignore no-explicit-any
-    const eu = ((v.pessoas as any[]) || []).find((x) => (payees ? payees.includes(String(x.payee_id)) : true));
+    const eu = ((v.pessoas as any[]) || []).find((x) => payees.includes(String(x.payee_id)));
     return eu ? [{ v, eu }] : [];
   });
   if (!minhas.length) return [];
@@ -79,7 +82,8 @@ export async function osDoDiaPeloPlano(
     cliente: v.cliente_curto ?? null, embarcacao: v.unidade ?? null,
     fonte: "plano",
     turnos: eu.turnos ?? [], ...(eu.presenca && eu.presenca !== "turno" ? { presenca: eu.presenca } : {}),
-    ...(v.dias_total > 1 ? { dia: `${v.dia_n} de ${v.dias_total}` } : {}),
+    // o dia que não aconteceu (choveu, o cliente desmarcou) vem sem dia_n: não vira "null de 4"
+    ...(v.dias_total > 1 && v.dia_n != null ? { dia: `${v.dia_n} de ${v.dias_total}` } : {}),
     ...(v.reserva ? { reserva: true, condicao: v.condicao ?? null } : {}),
   }));
 }
@@ -456,7 +460,7 @@ export const agendaTools: ToolDef[] = [
       // 'ligado' (ou se o modo não puder ser lido), a janela antiga, como antes.
       let osDoDia: any[];
       if ((await modoDaPropostaNoBanco(admin ?? sb)) === "ligado") {
-        osDoDia = await osDoDiaPeloPlano(sb, { targetId, userId, userRole, day });
+        osDoDia = await osDoDiaPeloPlano(sb, { targetId, userId, userRole, day, admin });
       } else {
         const { data: soLinks, error: erroVinc } = await sb.from("service_order_technicians")
           .select("service_order_id").eq("user_id", targetId);

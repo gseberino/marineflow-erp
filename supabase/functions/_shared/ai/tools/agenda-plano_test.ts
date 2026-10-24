@@ -87,13 +87,38 @@ Deno.test("osDoDiaPeloPlano: o Roberto pelo plano (não pelo vínculo de técnic
   assertEquals(r.map((o) => [o.numero, o.turnos, o.dia]), [["OS-00069", ["manha", "tarde"], "2 de 3"]]);
 });
 
-Deno.test("osDoDiaPeloPlano: o técnico vê o próprio dia (a RLS da view filtra) e nunca o de outro login", async () => {
-  // o banco do técnico: a view já vem só com as linhas dele (RLS), e payees é fechada
+Deno.test("osDoDiaPeloPlano: o técnico pelo painel (a view com a RLS dele, payees fechada) lê o payee pelo admin e vê o próprio dia", async () => {
+  // o banco do técnico: a view já vem só com as linhas dele (RLS), e payees é fechada; o admin lê os favorecidos
   const doTecnico = banco({ ...TABELAS("ligado"), v_agenda_dia: [V_AGENDA_DIA[0]], payees: [] });
-  const r = await osDoDiaPeloPlano(doTecnico, { targetId: ROBERTO, userId: ROBERTO, userRole: "technician", day: DIA });
+  const admin = banco(TABELAS("ligado"));
+  const r = await osDoDiaPeloPlano(doTecnico, { targetId: ROBERTO, userId: ROBERTO, userRole: "technician", day: DIA, admin });
   assertEquals(r.map((o) => o.numero), ["OS-00069"]);
-  assertEquals(doTecnico.lidas.includes("payees"), false, "o técnico não lê payees");
-  assertEquals(await osDoDiaPeloPlano(doTecnico, { targetId: DONO, userId: ROBERTO, userRole: "technician", day: DIA }), []);
+  assertEquals(doTecnico.lidas.includes("payees"), false, "o técnico não lê payees com o login dele");
+  assertEquals(admin.lidas.includes("payees"), true);
+  assertEquals(await osDoDiaPeloPlano(doTecnico, { targetId: DONO, userId: ROBERTO, userRole: "technician", day: DIA, admin }), []);
+});
+
+Deno.test("osDoDiaPeloPlano (revisão da Fase 2): o técnico pelo WhatsApp (sb = admin, sem RLS, a view inteira) vê só as OS dele", async () => {
+  // no WhatsApp não há JWT do técnico: sb e admin são o service role e a view vem com a equipe toda
+  const servico = banco(TABELAS("ligado"));
+  const r = await osDoDiaPeloPlano(servico, { targetId: ROBERTO, userId: ROBERTO, userRole: "technician", day: DIA, admin: servico });
+  assertEquals(r.map((o) => o.numero), ["OS-00069"], "nunca o Lenine nem o Flávio, que são da equipe");
+  // técnico sem favorecido ligado: nada (nunca a view inteira)
+  const semPayee = banco({ ...TABELAS("ligado"), payees: [] });
+  assertEquals(await osDoDiaPeloPlano(semPayee, { targetId: ROBERTO, userId: ROBERTO, userRole: "technician", day: DIA, admin: semPayee }), []);
+  assertEquals(semPayee.lidas.includes("v_agenda_dia"), false);
+  // pela my_agenda do técnico no WhatsApp, o mesmo
+  const r2 = await myAgenda.execute({ date: DIA }, ctx(servico, ROBERTO, "technician")) as Record<string, unknown>;
+  assertEquals((r2.os_do_dia as Array<Record<string, unknown>>).map((o) => o.numero), ["OS-00069"]);
+});
+
+Deno.test("osDoDiaPeloPlano (revisão da Fase 2): o dia que não aconteceu vem sem dia_n e não vira \"null de 4\"", async () => {
+  const semDiaN = banco({ ...TABELAS("ligado"), v_agenda_dia: [{ ...V_AGENDA_DIA[0], dia_n: null, dias_total: 4 }] });
+  const [o] = await osDoDiaPeloPlano(semDiaN, { targetId: ROBERTO, userId: DONO, userRole: "admin", day: DIA });
+  assertEquals(o.numero, "OS-00069");
+  assertEquals("dia" in o, false);
+  const hoje = await agendaDeHojePeloPlano(semDiaN, DIA);
+  assertEquals("dia" in (hoje.itens as Array<Record<string, unknown>>)[0], false);
 });
 
 Deno.test("osDoDiaPeloPlano: login sem payee ligado = nada no plano; reserva diz que é reserva; leitura que falha sobe", async () => {

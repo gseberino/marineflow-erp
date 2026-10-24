@@ -134,10 +134,15 @@ export interface PedidoDeDiaria {
   plano?: OsDoPlano[];
   /** Sem OS dita, a OS veio do plano. */
   osDoPlano?: boolean;
+  /**
+   * (revisão da Fase 2) Meia diária sem OS dita num dia em que o plano tem a pessoa em mais de uma OS: o plano não diz em
+   * qual foi o meio-dia, então a diária fica sem OS e o "sim" pergunta qual.
+   */
+  perguntaDoPlano?: string;
 }
 
-/** Uma OS do plano da agenda de uma pessoa num dia. */
-export interface OsDoPlano { id: string; numero: string; cliente: string | null }
+/** Uma OS do plano da agenda de uma pessoa num dia, com os turnos dela ali. */
+export interface OsDoPlano { id: string; numero: string; cliente: string | null; turnos: string[] }
 
 /**
  * As OS do plano da agenda daquela pessoa no dia (agenda_os_do_dia — Agenda de Produção, Fase 2, P4). Só com a agenda
@@ -151,7 +156,10 @@ async function osDoPlanoNoDia(ctx: ToolCtx, payeeId: string, dia: string): Promi
     if (error) throw error;
     return ((Array.isArray(data) ? data : []) as any[])
       .filter((o) => o && o.os && !o.reserva)
-      .map((o) => ({ id: String(o.os), numero: String(o.numero ?? ""), cliente: o.cliente_curto ? String(o.cliente_curto) : null }));
+      .map((o) => ({
+        id: String(o.os), numero: String(o.numero ?? ""), cliente: o.cliente_curto ? String(o.cliente_curto) : null,
+        turnos: Array.isArray(o.turnos) ? o.turnos.map(String) : [],
+      }));
   } catch (e) {
     await logEdgeError(ctx.admin, {
       context: "agenda", action: "diaria:plano", level: "warn", error: e,
@@ -163,6 +171,23 @@ async function osDoPlanoNoDia(ctx: ToolCtx, payeeId: string, dia: string): Promi
 
 /** "OS-00069 (Vanderlei)". */
 const osComCliente = (o: OsDoPlano) => `${o.numero}${o.cliente ? ` (${o.cliente})` : ""}`;
+
+/** "de manhã", "à tarde", "o dia todo" (os turnos da pessoa numa OS do plano). */
+function turnosEmTexto(turnos: string[]): string {
+  const m = turnos.includes("manha");
+  const t = turnos.includes("tarde");
+  return m && t ? "o dia todo" : m ? "de manhã" : t ? "à tarde" : "nesse dia";
+}
+
+/**
+ * Meia diária sem OS dita e o plano com a pessoa em mais de uma OS no dia: a pergunta do "sim". Ir nas duas dividiria o
+ * valor entre elas, e ela trabalhou só um dos turnos.
+ */
+function perguntaDaMeiaDiaria(nome: string, plano: OsDoPlano[]): string {
+  const onde = plano.map((o) => `na ${osComCliente(o)} ${turnosEmTexto(o.turnos)}`);
+  const lista = onde.length > 1 ? `${onde.slice(0, -1).join(", ")} e ${onde[onde.length - 1]}` : onde[0];
+  return `Pelo plano, ${nome} estava ${lista}: a meia diária é de qual? Diga a OS; sem ela, a diária fica sem OS.`;
+}
 
 /** "130", "130,00", "R$ 1.300,50", 130 → número; o resto, nulo. */
 export function numeroDito(v: unknown): number | null {
@@ -209,13 +234,20 @@ export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>
   }
   // Agenda de Produção, Fase 2 (P4): num dia de trabalho (inteiro ou meio, um dia só), sem OS dita a diária vai na OS
   // do plano daquela pessoa no dia; com OS dita diferente do plano, o "sim" mostra a divergência.
+  // Revisão da Fase 2: meia diária com mais de uma OS no plano do dia não vai nas duas (o valor se dividiria e ela
+  // trabalhou só um turno): fica sem OS e o "sim" pergunta qual.
   let plano: OsDoPlano[] = [];
   let osDoPlano = false;
+  let perguntaDoPlano: string | undefined;
   if (!intervalo && (jornada === "inteiro" || jornada === "meio")) {
     plano = await osDoPlanoNoDia(ctx, f.id, data);
     if (!os.length && plano.length) {
-      os.push(...plano.map((o) => ({ id: o.id, numero: o.numero })));
-      osDoPlano = true;
+      if (jornada === "meio" && plano.length > 1) {
+        perguntaDoPlano = perguntaDaMeiaDiaria(f.nome, plano);
+      } else {
+        os.push(...plano.map((o) => ({ id: o.id, numero: o.numero })));
+        osDoPlano = true;
+      }
     }
   }
   const observacao = typeof args.observacao === "string" && args.observacao.trim() ? args.observacao.trim() : null;
@@ -241,7 +273,7 @@ export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>
   const resolvida: Jornada = atual ? (atual.fracao === 1 ? "inteiro" : atual.fracao === 0.5 ? "meio" : "faltou") : jornada;
   return {
     freelancer: f, data, datas, intervalo, fimDeSemana, jornada: resolvida, os, observacao, valorDiaria, extras, descontos, atual,
-    plano, osDoPlano,
+    plano, osDoPlano, ...(perguntaDoPlano ? { perguntaDoPlano } : {}),
   };
 }
 
@@ -332,6 +364,7 @@ export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>)
   // A OS dita não é a do plano da agenda: a divergência vai no "sim" (Agenda de Produção, Fase 2).
   const divergencia = divergenciaDoPlano(p);
   if (divergencia) linhas.push(divergencia);
+  if (p.perguntaDoPlano) linhas.push(p.perguntaDoPlano);
   linhas.push(...linhaDoValorDito(p, perfil));
   linhas.push(...linhasDosExtras(p, atual));
   if (p.os.length > 1) linhas.push("O valor do dia se divide em partes iguais entre as OS.");
