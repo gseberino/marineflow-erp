@@ -49,6 +49,8 @@
 --   7. agenda_rascunho_descartar(p_autor): "Descartei. Nada foi gravado."
 --   Com agenda_config.modo_leitura desligado, as três escritas não anotam nada ("A agenda de produção está desligada
 --   agora: não anotei nada."); o *grava* e o *descarta* continuam respondendo o rascunho que ficou aberto de antes.
+--   "Tá a caminho" sem data e sem previsão grava comprado_em = o dia do *grava* (ou a compra já sabida): a chegada
+--   estimada conta dali e vence.
 --   Auxiliares (só service_role): _agenda_trecho_tem, _agenda_trecho_tem_numero, _agenda_data_conferida, _agenda_recusa,
 --   _agenda_recusa_da_os, _agenda_os_do_rascunho, _agenda_dias_citados, _agenda_dias_semana_texto, _agenda_quando_texto,
 --   _agenda_resolver_fornecedor, _agenda_rotulo_do_item, _agenda_rascunho_frase, _agenda_rascunho_salvar.
@@ -1389,7 +1391,13 @@ begin
         v_new.situacao := 'a_caminho';
         v_new.chegou_em := null;
         v_new.compra_prevista_em := null;
-        if d ->> 'comprado_em' is not null then v_new.comprado_em := (d ->> 'comprado_em')::date; end if;
+        -- "Tá a caminho" sem data: o pedido conta do dia em que o dono contou (ou da compra já sabida). Sem isso a
+        -- chegada estimada anda para a frente todo dia e nunca vence ("chegou?" não sai).
+        if d ->> 'comprado_em' is not null then
+          v_new.comprado_em := (d ->> 'comprado_em')::date;
+        elsif d ->> 'previsao_ate' is null then
+          v_new.comprado_em := coalesce(v_old.comprado_em, p_hoje);
+        end if;
         if d ->> 'previsao_ate' is not null then
           v_new.previsao_de := (d ->> 'previsao_de')::date;
           v_new.previsao_ate := (d ->> 'previsao_ate')::date;

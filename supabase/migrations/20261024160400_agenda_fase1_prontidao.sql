@@ -60,6 +60,12 @@
 -- REVISÃO DA FASE 1 (24/10, provadas nos mesmos testes):
 --   · meios-dias de quem vai só de manhã ou só à tarde = 1 turno em cada dia que o serviço ocupa (ceil(dias)), não
 --     dias × 1: "meio dia, o João à tarde" é 1 meio-dia (0,5 diária), não 0,25.
+--   · comprado/a caminho informado sem data de compra conta do dia em que o dono contou (conferido_em): a chegada
+--     estimada não anda para a frente todo dia e a previsão vence ("chegou?").
+--   · compra combinada (vou comprar, dia que não passou) sem prazo de entrega conhecido não entra no "N itens a
+--     comprar: de quem e quando?": vira a restrição compra_sem_prazo, que pergunta só o que falta ("quando chega a
+--     compra de ter 27/10?" com fornecedor; "de quem é a compra de ter 27/10?" sem).
+--   · item parcial: o texto começa por "3 de 8 na mão, faltam 5: ".
 --
 -- O QUE NÃO MUDA: nenhuma tabela, nenhum dado, get_os_purchase_needs, count_purchase_shortages, as leituras do
 -- Secretário e da tela.
@@ -764,6 +770,7 @@ declare
   v_txt        text;
   v_cond       text;
   v_dono_padrao boolean;
+  v_cc         record;
 begin
   if p_hoje is null then
     raise exception 'os_prontidao: sem o dia de hoje' using errcode = '22004';
@@ -926,8 +933,11 @@ begin
            case when q.sit in ('comprado', 'a_caminho') then
                   case when q.informado then (q.l).previsao_fonte
                        when q.grupo = 1 and q.oc_prev is not null then 'oc' end end as prev_fonte,
+           -- O informado sem data de compra conta do dia em que o dono contou (conferido_em): a estimativa não anda.
            case when q.sit in ('comprado', 'a_caminho') then
-                  case when q.informado then (q.l).comprado_em when q.grupo = 1 then q.oc_criada end end as comprado_em,
+                  case when q.informado
+                       then coalesce((q.l).comprado_em, ((q.l).conferido_em at time zone 'America/Sao_Paulo')::date)
+                       when q.grupo = 1 then q.oc_criada end end as comprado_em,
            case when q.sit = 'falta' and q.informado then (q.l).compra_prevista_em end as compra_prevista_em,
            case when q.sit = 'na_mao' then
                   case when q.informado or q.grupo = 4 then (q.l).chegou_em
@@ -975,7 +985,14 @@ begin
            'id', (q.l).id, 'linha', q.vinculo, 'origem', q.origem,
            'descricao', coalesce((q.l).descricao, q.descr), 'curto', public._agenda_linha_curta(coalesce((q.l).descricao, q.descr)),
            'nivel', q.nivel, 'situacao', q.sit, 'data', q.data,
-           'data_texto', case
+           -- Parcial (parte já na mão, informada ou do estoque): quantas estão na mão e quantas faltam, antes do resto.
+           'data_texto', case when q.sit <> 'na_mao' and q.disp_ef > 0 and q.disp_ef < q.req
+                              then format('%s de %s na mão, %s %s: ', replace(trim_scale(q.disp_ef)::text, '.', ','),
+                                          replace(trim_scale(q.req)::text, '.', ','),
+                                          case when q.req - q.disp_ef = 1 then 'falta' else 'faltam' end,
+                                          replace(trim_scale(q.req - q.disp_ef)::text, '.', ','))
+                              else '' end
+           || case
               when q.nivel = 'A' then case when q.data is not null then 'na mão desde ' || public._dia_curto(q.data) else 'na mão' end
               when q.nivel = 'B' then 'chega ' || public._dia_curto(q.data) || case q.prev_fonte
                    when 'oc' then ' (pela OC)' when 'fornecedor' then ' (o fornecedor disse)'
@@ -1176,10 +1193,13 @@ begin
   end if;
 
   -- O que falta comprar: sem fornecedor/classe (E) pergunta "de quem e quando?"; com classe e sem compra combinada,
-  -- "compre até" (programação para trás; se já passou, "comprando hoje, chega por volta de …").
+  -- "compre até" (programação para trás; se já passou, "comprando hoje, chega por volta de …"). A compra que o dono já
+  -- combinou (dia que ainda não passou) sem prazo conhecido NÃO volta a perguntar "de quem e quando": vai à parte.
   select count(*) filter (where e ->> 'situacao' = 'falta'
-                          and ((e ->> 'sem_data')::boolean or e ->> 'compre_ate' is not null)),
-         count(*) filter (where e ->> 'situacao' = 'falta' and (e ->> 'sem_data')::boolean)
+                          and (((e ->> 'sem_data')::boolean and coalesce((e ->> 'compra_prevista_em')::date < p_hoje, true))
+                               or e ->> 'compre_ate' is not null)),
+         count(*) filter (where e ->> 'situacao' = 'falta' and (e ->> 'sem_data')::boolean
+                          and coalesce((e ->> 'compra_prevista_em')::date < p_hoje, true))
     into v_n_falta, v_n_sem
     from jsonb_array_elements(v_crit) e;
   if v_n_falta > 0 then
@@ -1205,6 +1225,28 @@ begin
         'compre_ate', v_compra ->> 'compre_ate', 'pergunta', 'compra quando?',
         'texto', public._agenda_itens(v_n_falta) || ' a comprar: ' || v_cond);
     end if;
+  end if;
+
+  -- Compra combinada ("compro terça na Casa do Eletricista") sem prazo de entrega conhecido: o que o dono já disse fica
+  -- dito; a pergunta é só o que falta — quando chega (com fornecedor) ou de quem (sem).
+  select count(*) as n, min((e ->> 'compra_prevista_em')::date) as de, max((e ->> 'compra_prevista_em')::date) as ate,
+         bool_and(e ->> 'fornecedor' is not null) as com_forn, count(distinct e ->> 'fornecedor') as n_forn,
+         min(e ->> 'fornecedor') as forn, min(e ->> 'curto') as curto
+    into v_cc
+    from jsonb_array_elements(v_crit) e
+   where e ->> 'situacao' = 'falta' and (e ->> 'sem_data')::boolean and (e ->> 'compra_prevista_em')::date >= p_hoje;
+  if v_cc.n > 0 then
+    v_txt := case when v_cc.de = v_cc.ate then public._dia_curto(v_cc.de)
+                  else format('de %s a %s', public._dia_curto(v_cc.de), public._dia_curto(v_cc.ate)) end;
+    v_r := v_r || jsonb_build_object('tipo', 'compra_sem_prazo', 'quem', 'dono', 'bloqueia', true, 'desde', null,
+      'compre_ate', null,
+      'pergunta', case when v_cc.com_forn then format('quando chega a compra de %s?', v_txt)
+                       else format('de quem é a compra de %s?', v_txt) end,
+      'texto', case when v_cc.n = 1 then format('"%s"', v_cc.curto) else public._agenda_itens(v_cc.n::int) end
+               || ': você compra ' || v_txt
+               || case when v_cc.com_forn and v_cc.n_forn = 1 then ', fornecedor ' || v_cc.forn else '' end
+               || case when v_cc.com_forn then '; sem prazo de entrega conhecido: quando chega?'
+                       else '; de quem? (sem o fornecedor não sei quando chega)' end);
   end if;
 
   -- Comprado sem previsão e sem classe: "chegou?"; previsão vencida: "venceu em dd/mm: chegou?".
@@ -1246,7 +1288,7 @@ begin
 
   -- A mais forte primeiro: o que trava antes do que só informa, e na ordem do bloco "travado" (spec §5.4).
   select coalesce(jsonb_agg(e order by (e ->> 'bloqueia')::boolean desc,
-           array_position(array['parada', 'atrasado', 'sem_previsao', 'comprado_sem_previsao', 'compre_ate',
+           array_position(array['parada', 'atrasado', 'sem_previsao', 'compra_sem_prazo', 'comprado_sem_previsao', 'compre_ate',
                                 'peca_embutida', 'material_nao_conferido', 'orcamento', 'escopo', 'sinal', 'cliente',
                                 'duracao', 'bem', 'nao_antes'], e ->> 'tipo'), o), '[]'::jsonb)
     into v_r
@@ -1309,6 +1351,7 @@ begin
                                                 public._agenda_itens(v_n_falta))
                                     else 'falta você dizer de quem e quando comprar ' || public._agenda_itens(v_n_falta) end
       when 'comprado_sem_previsao' then 'falta você dizer se ' || replace(v_principal ->> 'texto', ' chegou?', '') || ' chegou'
+      when 'compra_sem_prazo' then 'falta você dizer ' || rtrim(v_principal ->> 'pergunta', '?')
       when 'peca_embutida' then 'falta você dizer se tem peça embutida em '
                                 || array_to_string(array(select format('"%s"', e ->> 'curto')
                                      from jsonb_array_elements(v_embut) with ordinality t(e, o) where o <= 2 order by o), ' e ')

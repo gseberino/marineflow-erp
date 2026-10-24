@@ -80,6 +80,9 @@
 --   · agenda_simular: só de manhã ou só à tarde = 1 meio-dia por dia ocupado (a mesma conta de os_prontidao).
 --   · agenda_ver com modo_leitura desligado devolve {ok:false, desligada:true}: a ferramenta manda o modelo voltar à
 --     my_agenda (desligar devolve a agenda de antes).
+--   · "você disse em DD/MM" do material sai de os_material.conferido_em (quando o dono informou), não de
+--     atualizado_em (que a sincronização também regrava). A compra combinada sem prazo (compra_sem_prazo) entra no
+--     resumo do material e na restrição curta.
 --
 -- O QUE NÃO MUDA: nenhuma tabela, nenhum dado, nenhuma função de P1–P3, my_agenda, o Secretário, as telas.
 --
@@ -296,6 +299,7 @@ as $function$
     when 'sem_previsao' then regexp_replace(p_r ->> 'texto', '(: | \().*$', '')
     when 'compre_ate' then coalesce((regexp_match(p_r ->> 'texto', '(compre até .*|comprando hoje.*)$'))[1], p_r ->> 'texto')
     when 'comprado_sem_previsao' then coalesce(w.palavra || ' chegou?', p_r ->> 'pergunta')
+    when 'compra_sem_prazo' then p_r ->> 'pergunta'
     when 'atrasado' then coalesce(w.palavra || ' chegou? (a previsão venceu)', p_r ->> 'pergunta')
     when 'peca_embutida' then 'tem peça embutida?'
     when 'material_nao_conferido' then 'tem peça a comprar?'
@@ -1246,8 +1250,8 @@ create or replace function public._agenda_material_resumo(p_p jsonb)
 as $function$
   select coalesce(
     (select e ->> 'texto' from jsonb_array_elements(p_p -> 'restricoes') with ordinality t(e, o)
-      where e ->> 'tipo' in ('atrasado', 'sem_previsao', 'comprado_sem_previsao', 'compre_ate', 'peca_embutida',
-                             'material_nao_conferido')
+      where e ->> 'tipo' in ('atrasado', 'sem_previsao', 'compra_sem_prazo', 'comprado_sem_previsao', 'compre_ate',
+                             'peca_embutida', 'material_nao_conferido')
       order by o limit 1),
     case p_p #>> '{material,estado}'
       when 'completo' then 'tudo na mão'
@@ -1308,6 +1312,7 @@ begin
     end if;
     v_o := jsonb_build_object('curto', v_p ->> 'cliente_curto', 'numero', v_p ->> 'numero');
     v_cab := public._agenda_rotulo(v_o, 'num') || ' — material:';
+    -- "você disse em DD/MM": o dia em que o dono informou (conferido_em), não o da sincronização (atualizado_em).
     v_itens := array(
       select '• ' || public._agenda_corta(
                case when coalesce(m.descricao, i ->> 'descricao') !~ '[a-zà-ÿ]' and coalesce(m.descricao, i ->> 'descricao') ~ '[A-ZÀ-Þ]{4}'
@@ -1317,11 +1322,11 @@ begin
              || ' — '
              || case when i ->> 'nivel' = 'C' and nullif(i ->> 'trecho', '') is not null then
                        'chega ' || public._dia_curto((i ->> 'data')::date)
-                       || format(' — você disse em %s: "%s"', to_char((m.atualizado_em at time zone 'America/Sao_Paulo')::date, 'DD/MM'),
+                       || format(' — você disse em %s: "%s"', to_char((coalesce(m.conferido_em, m.atualizado_em) at time zone 'America/Sao_Paulo')::date, 'DD/MM'),
                                  public._agenda_corta(i ->> 'trecho', 80))
                      when i ->> 'fonte' = 'dono' and nullif(i ->> 'trecho', '') is not null then
                        (i ->> 'data_texto')
-                       || format(' — você disse em %s: "%s"', to_char((m.atualizado_em at time zone 'America/Sao_Paulo')::date, 'DD/MM'),
+                       || format(' — você disse em %s: "%s"', to_char((coalesce(m.conferido_em, m.atualizado_em) at time zone 'America/Sao_Paulo')::date, 'DD/MM'),
                                  public._agenda_corta(i ->> 'trecho', 80))
                      else i ->> 'data_texto' end
              || case when i ->> 'situacao' in ('comprado', 'a_caminho') and (i ->> 'data')::date <= p_hoje

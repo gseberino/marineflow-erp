@@ -20,7 +20,8 @@
 --   I  o padrão "vem" novo substitui UMA vez só os dias que ele cobre; "só de manhã"/"não vem" sozinhos não apagam o
 --      resto (capacidade antes e depois); a restrição dita de novo troca a anterior; sábado só por data; exceção por data
 --   J  descartar
---   K  material: parcial, novo (fora do orçamento), fornecedor não cadastrado, dispensar, "pode começar sem"
+--   K  material: parcial (e o texto "3 de 8 na mão"), novo (fora do orçamento), fornecedor não cadastrado, dispensar,
+--      "pode começar sem", "tá a caminho" sem data que vence, compra combinada que não volta a perguntar
 --   L  planejar: "não tem peça a comprar", "não antes de", espera, escopo, campo que não existe, estimativa aceita
 --   M  agenda desligada (modo_leitura): as três escritas recusam e nada entra; o *grava* do rascunho de antes grava
 --
@@ -757,6 +758,66 @@ begin
                    where e ->> 'linha' = md5('servico:100:1')::uuid::text)
       and exists (select 1 from jsonb_array_elements(public.os_prontidao(pg_temp.os('100'), date '2026-10-23') #> '{material,embutidas}') e),
       null);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- ── K (cont.). "Tá a caminho" sem data vence; a compra combinada não volta a perguntar; o parcial aparece ──
+  begin
+    perform pg_temp.mat('Nelson', array['Cerbo'], 'a_caminho', null, 'o Cerbo do Nelson tá a caminho');
+    r := pg_temp.grava();
+    v_a := (select e from jsonb_array_elements(public.os_prontidao(pg_temp.os('112'), date '2026-10-23') #> '{material,itens}') e
+             where e ->> 'linha' = md5('peca:112:2')::uuid::text);
+    v_b := (select e from jsonb_array_elements(public.os_prontidao(pg_temp.os('112'), date '2026-11-06') #> '{material,itens}') e
+             where e ->> 'linha' = md5('peca:112:2')::uuid::text);
+    v_res := pg_temp.ok(v_res, 'K8 "tá a caminho" sem data: o pedido conta de hoje (23/10); lido 10 dias úteis depois, a previsão venceu e pergunta "chegou?"',
+      (r ->> 'ok')::boolean
+      and (select m.comprado_em = '2026-10-23' from public.os_material m where m.service_order_part_id = md5('peca:112:2')::uuid)
+      and v_a ->> 'data' = '2026-10-29' and not (v_a ->> 'atrasado')::boolean
+      and v_b ->> 'data' = '2026-10-29' and (v_b ->> 'atrasado')::boolean
+      and exists (select 1 from jsonb_array_elements(public.os_prontidao(pg_temp.os('112'), date '2026-11-06') -> 'restricoes') e
+                   where e ->> 'tipo' = 'atrasado'
+                     and e ->> 'texto' = 'a previsão de "Central de controle…" venceu em 29/10: chegou?'),
+      v_a::text || ' | ' || v_b::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    perform pg_temp.mat('Vanderlei', array['tudo'], 'vou_comprar', 'terça', 'Vanderlei eu compro tudo na Casa do Eletricista terça',
+                        'Casa do Eletricista');
+    r := pg_temp.grava();
+    v_res := pg_temp.ok(v_res, 'K9 "compro terça na Casa do Eletricista" (fora do cadastro): o *grava* não pergunta de novo "de quem e quando"; só quando chega',
+      r ->> 'texto' = E'Gravado. Agora:\n• Vanderlei: falta você dizer quando chega a compra de ter 27/10.'
+      and not exists (select 1 from jsonb_array_elements(public.os_prontidao(pg_temp.os('69'), date '2026-10-23') -> 'restricoes') e
+                       where e ->> 'tipo' = 'sem_previsao')
+      and exists (select 1 from jsonb_array_elements(public.os_prontidao(pg_temp.os('69'), date '2026-10-23') -> 'restricoes') e
+                   where e ->> 'tipo' = 'compra_sem_prazo' and (e ->> 'bloqueia')::boolean
+                     and e ->> 'pergunta' = 'quando chega a compra de ter 27/10?'
+                     and e ->> 'texto' = '4 itens: você compra ter 27/10, fornecedor Casa do Eletricista; sem prazo de entrega conhecido: quando chega?'),
+      r ->> 'texto');
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    perform pg_temp.mat('Vanderlei', array['tudo'], 'vou_comprar', 'terça', 'Vanderlei eu compro tudo terça');
+    r := pg_temp.grava();
+    v_res := pg_temp.ok(v_res, 'K10 "compro tudo terça" sem fornecedor: pergunta só de quem (o quando já foi dito)',
+      r ->> 'texto' = E'Gravado. Agora:\n• Vanderlei: falta você dizer de quem é a compra de ter 27/10.'
+      and exists (select 1 from jsonb_array_elements(public.os_prontidao(pg_temp.os('69'), date '2026-10-23') -> 'restricoes') e
+                   where e ->> 'tipo' = 'compra_sem_prazo'
+                     and e ->> 'texto' = '4 itens: você compra ter 27/10; de quem? (sem o fornecedor não sei quando chega)'),
+      r ->> 'texto');
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    perform pg_temp.mat('Vanderlei', array['porta fusível'], 'na_mao', null, 'chegaram 3 porta fusível', null, 3);
+    r := pg_temp.grava();
+    v_txt := public.agenda_ver('aa000000-0000-4000-8000-000000000001', null, null, 'material', 'Vanderlei', null, false,
+                               date '2026-10-23') ->> 'texto';
+    v_res := pg_temp.ok(v_res, 'K11 "chegaram 3 dos 8": a lista do material diz quantas estão na mão e quantas faltam',
+      split_part(v_txt, E'\n', 3) like '• Porta Fusível MIDI c/ Capa Proteção — 3 de 8 na mão, faltam 5: a comprar, sem fornecedor — você disse em %: "chegaram 3 porta fusível"',
+      v_txt);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;

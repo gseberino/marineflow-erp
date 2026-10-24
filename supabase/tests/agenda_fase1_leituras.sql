@@ -479,6 +479,12 @@ Pelo material, começa a partir de qua 04/11 (1 dia útil depois de o último ch
       and strpos(v_t, 'Pode passar do prazo, no ritmo que eu estimo: Nelson (prazo qui 05/11).') > 0, v_t);
     v_res := pg_temp.ok(v_res, 'C1e até a data prevista, nada de cobrar: em 23/10 o painel não tem "ainda não me disse"',
       strpos(public.agenda_ver_material(pg_temp.os('112'), c_hoje) ->> 'texto', 'ainda não me disse') = 0, null);
+    -- A sincronização regrava atualizado_em (descrição, quantidade); o "você disse em" é o dia em que o dono informou.
+    update public.os_material set conferido_em = '2026-10-21 10:00-03', atualizado_em = '2026-10-23 18:00-03'
+     where service_order_part_id = md5('peca:112:4')::uuid;
+    v_res := pg_temp.igual(v_res, 'C1f "você disse em" sai de conferido_em (21/10), não da sincronização que mexeu depois (23/10)',
+      split_part(public.agenda_ver_material(pg_temp.os('112'), c_hoje) ->> 'texto', E'\n', 5),
+      $e$• Painel Touch de Monitoramento e Controle de… — chega ter 03/11 — você disse em 21/10: "o painel chega dia 3"$e$);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'C1 (o cenário quebrou)', false, sqlerrm);

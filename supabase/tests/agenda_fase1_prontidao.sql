@@ -408,8 +408,9 @@ begin
     values (pg_temp.os('69'), md5('peca:69:2')::uuid, 'peca', 'Porta Fusível MIDI', 8, 3, 'falta', 'dono', 'chegaram 3')
     returning id into v_id;
     x := pg_temp.item(pg_temp.pr('69'), md5('peca:69:2')::uuid);
-    v_res := pg_temp.ok(v_res, 'F1a 3 de 8 na mão: continua faltando (não é A)',
-      x ->> 'nivel' <> 'A' and x ->> 'situacao' = 'falta' and (x ->> 'na_mao')::numeric = 3, x::text);
+    v_res := pg_temp.ok(v_res, 'F1a 3 de 8 na mão: continua faltando (não é A) e o texto diz quantas estão na mão',
+      x ->> 'nivel' <> 'A' and x ->> 'situacao' = 'falta' and (x ->> 'na_mao')::numeric = 3
+      and x ->> 'data_texto' = '3 de 8 na mão, faltam 5: a comprar, sem fornecedor', x::text);
     update public.os_material set quantidade_na_mao = 8, situacao = 'na_mao', chegou_em = '2026-10-22' where id = v_id;
     x := pg_temp.item(pg_temp.pr('69'), md5('peca:69:2')::uuid);
     v_res := pg_temp.ok(v_res, 'F1b os 8 na mão: A, "na mão desde qui 22/10", fonte dono',
