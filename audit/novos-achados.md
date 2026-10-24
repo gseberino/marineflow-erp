@@ -2582,6 +2582,23 @@ porque só o dono pode preenchê-las.
 - **Não corrigido** (regra 3): fora do escopo do P5. O conserto é tipar o `PRESETS` do teste (`as const`
   nos `tipo` ou anotar `Preset[]`).
 
+### [NOVO-agenda-05] OS-00104: duas linhas de texto livre escondem peça — a OS não fica "pronta" só porque o compressor chegou
+
+- **Encontrado em:** Agenda de Produção, Fase 1 (conferência de 23/10/2026, SELECT `g05_textolivre`; produção = 5455f7e5).
+  Reconferido no P3 (24/10/2026, `p3b_embutidas`): a regra pergunta em 2 linhas da OS-00104, 3 da OS-00100 e 7 da OS-00032.
+- **Onde:** OS-00104 (Flávio), linhas de serviço sem catálogo: "Conversão do sistema de refrigeração para 12V — Refrigerador
+  Consul CRC28FB" (unidade `unit`, R$ 2.500; o compressor está dentro) e "Substituição da tampa da boia (valor a definir —
+  pendente análise de tempo e cotação da peça)" (R$ 0).
+- **O quê:** depois da Fase 0 (`20261024150200`, "conversão" é serviço) a primeira linha deixou de ser material de compra, e a
+  segunda nunca foi. Nenhuma das duas entra na conta de compra, mas as duas têm peça. Sem cuidado, o compressor chegando (OC-00004)
+  deixaria a OS "pronta" com a tampa da boia e o que mais o refrigerador pedir ainda por comprar.
+- **Tratado no P3** (regra "tem peça embutida?", `os_prontidao`, migration `20261024160400`): linha de texto livre que não entra na
+  compra e vale >= `agenda_config.peca_embutida_acima` (R$ 1.000), ou que o classificador lê como material com unidade que não é
+  `unit`, ou que cita peça/material, vira a pergunta 'tem peça embutida em "Conversão do sistema…" ou "Substituição da tampa…"?'
+  (dono, trava). Some quando o dono responde pela linha ou diz "não tem (mais) peça a comprar". Prova:
+  `supabase/tests/agenda_fase1_prontidao.sql` (E4, F6, F7). Risco aceito: a OS-00032 (Kalmar) gera 7 perguntas, mas está esperando
+  o cliente e não entra no bloco do dono.
+
 ### [NOVO-agenda-06] OC-00004 com fornecedor sem cidade nem UF: a previsão do compressor da OS-00104 é desconhecida
 
 - **Encontrado em:** Agenda de Produção, Fase 1 (conferência de 23/10/2026, SELECT `g15_oc4`; produção = 5455f7e5).
@@ -2593,3 +2610,15 @@ porque só o dono pode preenchê-las.
   pergunta certa ao dono é "o compressor (pedido em 13/10) chegou?", nunca uma data inventada.
 - **Não corrigido** (só registro, como pede a spec): é dado de cadastro. Completar a cidade/UF do fornecedor
   ou a previsão na OC dá a data; o dono dizer "chegou" ou "chega dia X" (P5) também resolve.
+
+### [NOVO-agenda-07] Dois cadastros "Kamell": o Cerbo GX da OS-00112 aponta para o de Vila Velha/ES (prazo de outro estado)
+
+- **Encontrado em:** Agenda de Produção, Fase 1 (conferência de 23/10/2026, SELECTs `g06_parts`, `g09_parts_forn` e
+  `g08_suppliers`; produção = 5455f7e5).
+- **Onde:** `suppliers` tem "KAMELL COMERCIO GLOBAL LTDA" (Vila Velha/ES) e "Kamell Comercio Global" (Itajaí/SC). O produto
+  "CENTRAL DE CONTROLE CERBO GX VICTRON ENERGY…" (peça da OS-00112) tem `products.supplier_id` = o de ES.
+- **O quê:** pela classe do fornecedor (`_agenda_classe_do_fornecedor`, P3) o de ES é "outro estado" (4 dias úteis) e o de Itajaí é
+  "entrega local" (1). A prontidão do Nelson diz "comprando hoje, o Cerbo chega por volta de qui 29/10" — se a compra for no de
+  Itajaí, chega antes. Com dois cadastros da mesma empresa, a data depende de qual dos dois está no produto.
+- **Não corrigido** (só registro, como pede a spec): é dado de cadastro e decisão do dono (juntar os dois, ou trocar o fornecedor do
+  produto). Quando o dono disser "compro na Kamell daqui" (P5, `material_informar` com fornecedor), o fato dele vence o do produto.
