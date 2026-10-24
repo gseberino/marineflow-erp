@@ -27,7 +27,9 @@
 --      compra combinada + fornecedor) · falta · sem_previsao · pode_comecar_sem (critico = false) · dispensar. p_novo =
 --      material fora do orçamento (origem dono; aponta a linha de serviço da peça embutida quando o nome casa com uma).
 --   4. agenda_rascunho_disponibilidade(p_autor, p_canal, p_pessoa, p_situacao, p_dias, p_padrao, p_trecho, p_hoje):
---      vem · nao_vem · so_manha · so_tarde, por padrão ("segunda a sexta") ou por data ("terça").
+--      vem · nao_vem · so_manha · so_tarde, por padrão ("segunda a sexta") ou por data ("terça"). Sábado só por data
+--      (salvo agenda_config.sabado_util): padrão só de sábado vira pergunta ("qual sábado?"); com outros dias, fica o
+--      resto e a releitura diz "(sábado eu só conto por data)".
 --      As três resolvem tudo no banco; o que é ambíguo ou não existe volta como PERGUNTA ({ok:false, pergunta,
 --      opcoes}) e NÃO entra no rascunho. Guarda contra número e data que o dono não disse: os dias, a quantidade e
 --      cada data têm de estar no trecho (normalizado: "dois" = 2, "um e meio", "meio dia", "terça-feira" = "terça");
@@ -38,7 +40,9 @@
 --      que o dono falou; as peças com a mesma situação vão juntas ("Cerbo…, Orion… e KIT Cabos… na mão (desde hoje)").
 --   6. agenda_rascunho_gravar(p_autor, p_hoje): numa transação, tudo ou nada. Marca expirado o que passou de
 --      expira_em; aplica cada item por _agenda_aplicar_planejar/_material/_disponibilidade (só service_role); o padrão
---      novo de uma pessoa substitui os padrões dela (histórico e dono) UMA vez antes de entrar o lote; sincroniza o
+--      "vem" novo de uma pessoa substitui UMA vez, antes de entrar o lote, só os padrões dela (histórico e dono) que
+--      caem nos dias ditos; "só de manhã/à tarde" e "não vem" não apagam o "vem" (só trocam a restrição que o dono já
+--      tinha dito para os mesmos dias); sincroniza o
 --      material das OS afetadas (antes, para as linhas existirem, e depois); acrescenta ao histórico de cada linha
 --      {em, autor, trecho, antes, depois}. Devolve "Gravado. Agora:" com uma linha por OS (o estado da prontidão) e
 --      por pessoa. Item que não passa desfaz o lote inteiro e diz qual ("Não gravei nada: …").
@@ -498,7 +502,8 @@ begin
       when 'vem' then case when (p_d ->> 'eh_dono')::boolean then 'em campo ' else 'vem ' end || v_quando
       when 'nao_vem' then case when (p_d ->> 'eh_dono')::boolean then 'fora de campo ' else 'não vem ' end || v_quando
       when 'so_manha' then v_quando || ' à tarde, não'
-      else v_quando || ' de manhã, não' end;
+      else v_quando || ' de manhã, não' end
+      || case when coalesce((p_d ->> 'sabado_por_data')::boolean, false) then ' (sábado eu só conto por data)' else '' end;
   end if;
 
   raise exception '_agenda_rascunho_frase: tipo "%" não existe', p_tipo using errcode = '22023';
@@ -1108,6 +1113,7 @@ declare
   v_chave  text;
   v_dados  jsonb;
   v_txt    text;
+  v_sab    boolean := false;
 begin
   if p_canal is null or p_canal not in ('whatsapp', 'painel') then
     raise exception 'agenda_rascunho_disponibilidade: canal "%" inválido (whatsapp ou painel)', p_canal using errcode = '22023';
@@ -1149,8 +1155,21 @@ begin
     if not (v_dias::int[] <@ public._agenda_dias_citados(p_trecho)) then
       return public._agenda_recusa(format('Não achei "%s" no que você disse; me diga de novo quais dias.', btrim(p_dias)), 'fora_do_trecho');
     end if;
+    -- Sábado só por data (agenda_config.sabado_util): a capacidade e a grade não leem padrão de sábado. Só sábado =
+    -- pergunta qual; com outros dias ("segunda a sábado"), fica o resto e a releitura diz que o sábado é por data.
+    v_sab := 6 = any (v_dias) and not (public._agenda_cfg()).sabado_util;
+    if v_sab then
+      if cardinality(v_dias) = 1 then
+        return public._agenda_recusa(case when v_sit = 'disponivel'
+                                          then 'Sábado eu só conto por data: qual sábado? (por exemplo, "sábado dia 31")'
+                                          else 'Sábado já fica fora da conta: só conto sábado quando você diz a data.' end,
+                                     'sabado_padrao');
+      end if;
+      v_dias := array_remove(v_dias, 6::smallint);
+    end if;
     v_chave := format('disp:%s:p%s:%s', v_rp ->> 'payee_id', array_to_string(v_dias, ''), coalesce(v_turno, 'dia'));
-    v_dados := v_dados || jsonb_build_object('dias_semana', to_jsonb(v_dias));
+    -- sabado_por_data sempre escrito: a correção da mesma chave não herda o aviso de um sábado que não foi dito de novo.
+    v_dados := v_dados || jsonb_build_object('dias_semana', to_jsonb(v_dias), 'sabado_por_data', v_sab);
   else
     v_dt := public._agenda_data_conferida(p_dias, p_trecho, p_hoje, 'futuro');
     if not (v_dt ->> 'ok')::boolean then return v_dt; end if;
@@ -1169,7 +1188,7 @@ end;
 $function$;
 
 comment on function public.agenda_rascunho_disponibilidade(uuid, text, text, text, text, boolean, text, date) is
-  'Agenda de Produção (Fase 1, P5): quem vem quando vira RASCUNHO (nada em agenda_disponibilidade). p_situacao vem (disponível), nao_vem (indisponível), so_manha (a tarde indisponível), so_tarde (a manhã indisponível); p_padrao = toda semana (agenda_dias_da_semana_ditos: "segunda a sexta"), senão a data dita (agenda_data_dita, futuro). Pessoa resolvida no banco ("eu" = o sócio do login); os dias têm de estar no trecho. Devolve {ok, item, releitura} ou {ok:false, pergunta}.';
+  'Agenda de Produção (Fase 1, P5): quem vem quando vira RASCUNHO (nada em agenda_disponibilidade). p_situacao vem (disponível), nao_vem (indisponível), so_manha (a tarde indisponível), so_tarde (a manhã indisponível); p_padrao = toda semana (agenda_dias_da_semana_ditos: "segunda a sexta"; sábado só por data, salvo sabado_util: só sábado = pergunta, com outros dias sai do padrão e a releitura avisa), senão a data dita (agenda_data_dita, futuro). Pessoa resolvida no banco ("eu" = o sócio do login); os dias têm de estar no trecho. Devolve {ok, item, releitura} ou {ok:false, pergunta}.';
 
 -- ── 7. Aplicar (só pelo *grava*) ────────────────────────────────────────────────────────────────────────
 
@@ -1457,7 +1476,7 @@ end;
 $function$;
 
 comment on function public._agenda_aplicar_disponibilidade(uuid, jsonb, text, date) is
-  'Agenda de Produção (Fase 1, P5): grava em agenda_disponibilidade uma linha de rascunho disponibilidade (origem dono): padrão por dia da semana (a troca dos padrões vigentes é feita uma vez pelo agenda_rascunho_gravar) ou exceção por data (a mesma data e turno ditos antes ganham substituida_em). Só pelo agenda_rascunho_gravar; só service_role.';
+  'Agenda de Produção (Fase 1, P5): grava em agenda_disponibilidade uma linha de rascunho disponibilidade (origem dono): padrão por dia da semana (a troca dos padrões vigentes que o novo cobre é feita uma vez pelo agenda_rascunho_gravar) ou exceção por data (a mesma data e turno ditos antes ganham substituida_em). Só pelo agenda_rascunho_gravar; só service_role.';
 
 -- ── 8. O *grava* e o *descarta* ─────────────────────────────────────────────────────────────────────────
 
@@ -1512,12 +1531,22 @@ begin
       perform public.os_material_sincronizar(v_x, p_hoje);   -- as linhas espelho existem antes do fato
     end loop;
 
-    -- O padrão novo de uma pessoa troca os padrões dela (do histórico e do dono) UMA vez, antes de entrar o lote.
+    -- O padrão novo de uma pessoa troca, UMA vez antes de entrar o lote, só o que ele realmente troca:
+    --   · "vem" (seg a qui): as linhas de padrão dela (do histórico e do dono) que caem em algum desses dias; os
+    --     outros dias da semana continuam como estavam;
+    --   · "só de manhã", "só à tarde", "não vem" (terça): o "vem" fica; a linha indisponível do turno entra por cima
+    --     (a capacidade põe o "não vem neste turno" acima do padrão "vem"). Só sai a restrição que o dono já tinha
+    --     dito para os mesmos dias ("só à tarde às terças" e depois "só de manhã às terças").
     update public.agenda_disponibilidade a
        set substituida_em = now()
-     where a.substituida_em is null and a.dias_semana is not null and a.origem in ('historico', 'dono')
-       and a.payee_id in (select (r.dados ->> 'payee_id')::uuid from public.agenda_rascunho r
-                           where r.id = any (v_ids) and r.tipo = 'disponibilidade' and (r.dados ->> 'padrao')::boolean);
+      from (select (r.dados ->> 'payee_id')::uuid as payee, r.dados ->> 'situacao' as situacao,
+                   array(select jsonb_array_elements_text(r.dados -> 'dias_semana')::smallint) as dias
+              from public.agenda_rascunho r
+             where r.id = any (v_ids) and r.tipo = 'disponibilidade' and (r.dados ->> 'padrao')::boolean) n
+     where a.substituida_em is null and a.dias_semana is not null and a.payee_id = n.payee
+       and ((n.situacao = 'disponivel' and a.origem in ('historico', 'dono') and a.dias_semana && n.dias)
+            or (n.situacao = 'indisponivel' and a.origem = 'dono' and a.situacao = 'indisponivel'
+                and a.dias_semana <@ n.dias));
 
     foreach v_x in array v_ids loop
       select * into v_r from public.agenda_rascunho where id = v_x for update;
@@ -1576,7 +1605,7 @@ end;
 $function$;
 
 comment on function public.agenda_rascunho_gravar(uuid, date) is
-  'Agenda de Produção (Fase 1, P5): o *grava* do dono — numa transação, tudo ou nada: marca expirado o que passou da validade; sincroniza o material das OS do lote; troca UMA vez os padrões de disponibilidade das pessoas com padrão novo; aplica cada linha aberta (_agenda_aplicar_planejar/_material/_disponibilidade) e marca gravado; sincroniza de novo. Devolve {ok, gravados, expirados, texto "Gravado. Agora:" + uma linha por OS (estado da prontidão) e por pessoa}; item que não passa: {ok:false, texto "Não gravei nada: …", erro} e nada muda. Chamada só pelo comando sem IA "grava" (P6), nunca por ferramenta do modelo.';
+  'Agenda de Produção (Fase 1, P5): o *grava* do dono — numa transação, tudo ou nada: marca expirado o que passou da validade; sincroniza o material das OS do lote; troca UMA vez, das pessoas com padrão novo, só os padrões que o "vem" cobre (dias que se cruzam) e a restrição já dita para os mesmos dias ("só de manhã" e "não vem" não apagam o "vem"); aplica cada linha aberta (_agenda_aplicar_planejar/_material/_disponibilidade) e marca gravado; sincroniza de novo. Devolve {ok, gravados, expirados, texto "Gravado. Agora:" + uma linha por OS (estado da prontidão) e por pessoa}; item que não passa: {ok:false, texto "Não gravei nada: …", erro} e nada muda. Chamada só pelo comando sem IA "grava" (P6), nunca por ferramenta do modelo.';
 
 create or replace function public.agenda_rascunho_descartar(p_autor uuid)
  returns jsonb

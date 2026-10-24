@@ -178,6 +178,10 @@ Pode ser um áudio só, citando o nome do cliente. (Robson ORÇ-00083 e Rodrigo 
   r := public.agenda_dia_da_pessoa('bb000000-0000-4000-8000-000000000003', date '2026-10-27', c_hoje);
   v_res := pg_temp.igual(v_res, 'A5c João na terça (1,5 de 3; de ter a sex)', r ->> 'texto',
     $e$Ter 27/10, João não tem nada marcado. Costuma vir de ter a sex (pelas diárias das últimas 8 semanas: 1,5 de 3 terças).$e$);
+  r := public.agenda_dia_da_pessoa('bb000000-0000-4000-8000-000000000003', date '2026-10-26', c_hoje);
+  v_res := pg_temp.igual(v_res, 'A5d João na segunda (tem padrão, mas não às segundas): "às segundas não costuma vir", sem o "não sei"',
+    r ->> 'texto',
+    $e$Seg 26/10, João não tem nada marcado — às segundas não costuma vir. Costuma vir de ter a sex (pelas diárias das últimas 8 semanas).$e$);
 
   v_sim := $e$Um serviço de 2 dias com você e Roberto (são 2 diárias de equipe; você não entra nessa conta): no fim da fila, começa entre qua 18/11 e qua 09/12. Passando na frente de tudo, dá para começar ter 27/10, e o resto atrasa uns 2 dias úteis. É projeção: não reserva nada.$e$;
   r := public.agenda_simular(2, '["eu", "Roberto"]'::jsonb, null, c_admin, c_hoje);

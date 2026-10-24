@@ -1411,6 +1411,13 @@ begin
     into v_t
     from public.agenda_capacidade(p_dia, p_dia, p_hoje) g
    where g.payee_id = py.id;
+
+  -- O padrão: os dias da semana em que a pessoa costuma vir (o que está em vigor em agenda_disponibilidade).
+  v_dias := array(select distinct x from public.agenda_disponibilidade d, unnest(d.dias_semana) x
+                   where d.payee_id = py.id and d.substituida_em is null and d.periodo is null
+                     and d.situacao in ('disponivel', 'confirmada') and d.turno is null
+                   order by x);
+
   v_sit := case
     when coalesce(v_t.n, 0) = 0 then
       case when extract(isodow from p_dia) = 7 then 'domingo'
@@ -1422,6 +1429,10 @@ begin
     when v_t.indisp then case when v_dono then 'você não fica em campo' else 'não vem' end
                          || coalesce(' (' || nullif(v_t.motivo_ind, 'não vem') || ')', '')
     when v_t.meio_indisp then case when v_t.manha_ind then 'só à tarde' else 'só de manhã' end
+    -- Tem padrão em outros dias e não neste: "às segundas não costuma vir" (o "não sei" fica para quem não tem padrão).
+    when v_t.sem and not v_dono and cardinality(v_dias) > 0
+         and not (extract(isodow from p_dia)::int = any (v_dias)) and extract(isodow from p_dia) between 1 and 6
+      then v_plu[extract(isodow from p_dia)::int] || ' não costuma vir'
     when v_t.sem and not v_dono then 'não sei se vem: não há padrão de dias'
     else null end;
 
@@ -1434,11 +1445,6 @@ begin
   end if;
   l1 := l1 || coalesce(' — ' || v_sit, '') || '.';
 
-  -- O padrão: os dias da semana em que a pessoa costuma vir (o que está em vigor em agenda_disponibilidade).
-  v_dias := array(select distinct x from public.agenda_disponibilidade d, unnest(d.dias_semana) x
-                   where d.payee_id = py.id and d.substituida_em is null and d.periodo is null
-                     and d.situacao in ('disponivel', 'confirmada') and d.turno is null
-                   order by x);
   select case when bool_and(d.origem = 'historico') then format('pelas diárias das últimas %s semanas', c.medicao_semanas)
               when bool_or(d.origem = 'dono') then 'você disse'
               else 'combinado' end

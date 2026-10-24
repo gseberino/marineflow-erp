@@ -17,7 +17,8 @@
 --      Nelson, "cabos" do Vanderlei, peça que não existe, Kamell, pessoa que não existe, OS concluída, datas)
 --   G  expirado não grava (e o resto do lote grava)
 --   H  gravar é tudo ou nada: um item que não passa desfaz o lote inteiro e diz qual
---   I  o padrão novo substitui o velho UMA vez; exceção por data
+--   I  o padrão "vem" novo substitui UMA vez só os dias que ele cobre; "só de manhã"/"não vem" sozinhos não apagam o
+--      resto (capacidade antes e depois); a restrição dita de novo troca a anterior; sábado só por data; exceção por data
 --   J  descartar
 --   K  material: parcial, novo (fora do orçamento), fornecedor não cadastrado, dispensar, "pode começar sem"
 --   L  planejar: "não tem peça a comprar", "não antes de", espera, escopo, campo que não existe, estimativa aceita
@@ -606,24 +607,26 @@ begin
     perform pg_temp.disp('Roberto', 'so_manha', 'quarta', true, 'o Roberto vem de segunda a quinta, quarta só de manhã');
     v_txt := pg_temp.ler() ->> 'texto';
     r := pg_temp.grava();
-    v_res := pg_temp.ok(v_res, 'I1 o padrão do Roberto troca os 5 da semente UMA vez: 2 vigentes (os do lote), 5 com rastro',
+    v_res := pg_temp.ok(v_res, 'I1 o "vem de seg a qui" troca UMA vez só os 4 dias da semente que ele cobre: a sexta da semente fica',
       (r ->> 'ok')::boolean
-      and (select count(*) from public.agenda_disponibilidade where payee_id = c_rob and substituida_em is null) = 2
+      and (select count(*) from public.agenda_disponibilidade where payee_id = c_rob and substituida_em is null) = 3
       and (select count(*) from public.agenda_disponibilidade where payee_id = c_rob and substituida_em is null and origem = 'dono') = 2
-      and (select count(*) from public.agenda_disponibilidade where payee_id = c_rob and substituida_em is not null and origem = 'historico') = 5
+      and (select count(*) from public.agenda_disponibilidade where payee_id = c_rob and substituida_em is not null and origem = 'historico') = 4
+      and (select dias_semana::text from public.agenda_disponibilidade
+            where payee_id = c_rob and substituida_em is null and origem = 'historico') = '{5}'
       and (select count(*) from public.agenda_disponibilidade where payee_id = c_joao and substituida_em is null) = 4
       and v_txt = E'Entendi assim, confere?\n• Roberto: vem de seg a qui; toda quarta à tarde, não.\nResponda *grava* ou corrija o que estiver errado.'
       and r ->> 'texto' = E'Gravado. Agora:\n• Roberto: vem de seg a qui; toda quarta à tarde, não.',
       v_txt || ' | ' || (r ->> 'texto'));
-    v_res := pg_temp.ok(v_res, 'I2 a capacidade passa a ler o padrão dito: quarta de manhã livre (1), à tarde indisponível; sexta sem padrão',
-      (select string_agg(format('%s %s %s', to_char(g.dia, 'DD/MM'), g.turno, g.situacao), ' | ' order by g.dia, g.turno)
+    v_res := pg_temp.ok(v_res, 'I2 a capacidade passa a ler o padrão dito: quarta de manhã livre (1), à tarde indisponível; sexta pela semente',
+      (select string_agg(format('%s %s %s %s', to_char(g.dia, 'DD/MM'), g.turno, g.situacao, trim_scale(g.meios_esperados)), ' | ' order by g.dia, g.turno)
          from public.agenda_capacidade('2026-10-28', '2026-10-30', date '2026-10-23') g where g.payee_id = c_rob)
-      = '28/10 manha livre | 28/10 tarde indisponivel | 29/10 manha livre | 29/10 tarde livre | 30/10 manha sem_padrao | 30/10 tarde sem_padrao',
-      (select string_agg(format('%s %s %s', to_char(g.dia, 'DD/MM'), g.turno, g.situacao), ' | ' order by g.dia, g.turno)
+      = '28/10 manha livre 1 | 28/10 tarde indisponivel 0 | 29/10 manha livre 1 | 29/10 tarde livre 1 | 30/10 manha livre 1 | 30/10 tarde livre 1',
+      (select string_agg(format('%s %s %s %s', to_char(g.dia, 'DD/MM'), g.turno, g.situacao, trim_scale(g.meios_esperados)), ' | ' order by g.dia, g.turno)
          from public.agenda_capacidade('2026-10-28', '2026-10-30', date '2026-10-23') g where g.payee_id = c_rob));
     perform pg_temp.disp('Roberto', 'vem', 'segunda a sexta', true, 'o Roberto agora vem de segunda a sexta');
     r := pg_temp.grava();
-    v_res := pg_temp.ok(v_res, 'I3 um 2º padrão troca os 2 do dono e fica 1 vigente',
+    v_res := pg_temp.ok(v_res, 'I3 um 2º padrão (seg a sex) troca os 2 do dono e a sexta da semente: fica 1 vigente',
       (select count(*) from public.agenda_disponibilidade where payee_id = c_rob and substituida_em is null) = 1
       and (select dias_semana::text from public.agenda_disponibilidade where payee_id = c_rob and substituida_em is null) = '{1,2,3,4,5}',
       r::text);
@@ -642,6 +645,64 @@ begin
       (select count(*) from public.agenda_disponibilidade where payee_id = c_rob and substituida_em is null and periodo is not null) = 1
       and (select situacao from public.agenda_disponibilidade where payee_id = c_rob and substituida_em is null and periodo is not null) = 'disponivel',
       r::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- ── I (cont.). O padrão restritivo não apaga o resto; sábado só por data ──
+  begin
+    v_a := public.agenda_capacidade_semanal(date '2026-10-23');
+    perform pg_temp.disp('João', 'so_manha', 'terça', true, 'o João só vem de manhã às terças');
+    v_txt := pg_temp.ler() ->> 'texto';
+    r := pg_temp.grava();
+    v_b := public.agenda_capacidade_semanal(date '2026-10-23');
+    v_res := pg_temp.ok(v_res, 'I6 "só de manhã às terças" sozinho: os 4 dias da semente do João ficam; só a terça à tarde sai (6,77 → 6,52)',
+      v_txt = E'Entendi assim, confere?\n• João: toda terça à tarde, não.\nResponda *grava* ou corrija o que estiver errado.'
+      and r ->> 'texto' = E'Gravado. Agora:\n• João: toda terça à tarde, não.'
+      and v_a ->> 'diarias_semana' = '6.77' and v_b ->> 'diarias_semana' = '6.52'
+      and (select count(*) from public.agenda_disponibilidade where payee_id = c_joao and substituida_em is null and origem = 'historico') = 4
+      and exists (select 1 from jsonb_array_elements(v_b -> 'pessoas') e where e ->> 'nome' = 'João' and e ->> 'diarias_semana' = '2.08')
+      and (select string_agg(format('%s %s %s', to_char(g.dia, 'DD/MM'), g.turno, g.situacao), ' | ' order by g.dia, g.turno)
+             from public.agenda_capacidade('2026-10-27', '2026-10-28', date '2026-10-23') g where g.payee_id = c_joao)
+          = '27/10 manha livre | 27/10 tarde indisponivel | 28/10 manha livre | 28/10 tarde livre',
+      v_txt || ' | ' || (r ->> 'texto') || ' | ' || (v_b ->> 'diarias_semana'));
+    perform pg_temp.disp('João', 'so_tarde', 'terça', true, 'não, o João só vem à tarde às terças');
+    r := pg_temp.grava();
+    v_res := pg_temp.ok(v_res, 'I7 a restrição dita de novo para o mesmo dia troca a anterior (não somam: terça de manhã fora, à tarde livre)',
+      (select count(*) from public.agenda_disponibilidade where payee_id = c_joao and substituida_em is null and origem = 'dono') = 1
+      and (select string_agg(format('%s %s %s', to_char(g.dia, 'DD/MM'), g.turno, g.situacao), ' | ' order by g.dia, g.turno)
+             from public.agenda_capacidade('2026-10-27', '2026-10-27', date '2026-10-23') g where g.payee_id = c_joao)
+          = '27/10 manha indisponivel | 27/10 tarde livre',
+      r::text);
+    perform pg_temp.disp('João', 'nao_vem', 'segundas', true, 'o João não vem mais às segundas');
+    r := pg_temp.grava();
+    v_res := pg_temp.ok(v_res, 'I8 "não vem mais às segundas" (ele nem tinha segunda): nada da semente sai; a capacidade não muda',
+      (r ->> 'ok')::boolean
+      and (select count(*) from public.agenda_disponibilidade where payee_id = c_joao and substituida_em is null and origem = 'historico') = 4
+      and public.agenda_capacidade_semanal(date '2026-10-23') ->> 'diarias_semana' = '6.52',
+      r::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    r := pg_temp.disp('Roberto', 'vem', 'sábado', true, 'o Roberto vem todo sábado');
+    r2 := pg_temp.disp('Roberto', 'nao_vem', 'sábado', true, 'o Roberto não vem sábado');
+    v_res := pg_temp.ok(v_res, 'I9 padrão só de sábado: pergunta qual sábado (é por data) e nada entra no rascunho',
+      not (r ->> 'ok')::boolean and r ->> 'motivo' = 'sabado_padrao'
+      and r ->> 'pergunta' = 'Sábado eu só conto por data: qual sábado? (por exemplo, "sábado dia 31")'
+      and not (r2 ->> 'ok')::boolean and r2 ->> 'motivo' = 'sabado_padrao'
+      and r2 ->> 'pergunta' = 'Sábado já fica fora da conta: só conto sábado quando você diz a data.'
+      and pg_temp.abertos() = 0,
+      r::text || ' | ' || r2::text);
+    perform pg_temp.disp('Roberto', 'vem', 'segunda a sábado', true, 'o Roberto vem de segunda a sábado');
+    v_txt := pg_temp.ler() ->> 'texto';
+    r := pg_temp.grava();
+    v_res := pg_temp.ok(v_res, 'I10 "segunda a sábado": grava seg a sex e a releitura diz que o sábado é por data',
+      v_txt = E'Entendi assim, confere?\n• Roberto: vem de seg a sex (sábado eu só conto por data).\nResponda *grava* ou corrija o que estiver errado.'
+      and r ->> 'texto' = E'Gravado. Agora:\n• Roberto: vem de seg a sex (sábado eu só conto por data).'
+      and (select string_agg(dias_semana::text, ' ') from public.agenda_disponibilidade
+            where payee_id = c_rob and substituida_em is null) = '{1,2,3,4,5}',
+      v_txt || ' | ' || (r ->> 'texto'));
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
