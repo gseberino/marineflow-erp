@@ -18,6 +18,8 @@ type Linha = Record<string, any>;
 const banco = vi.hoisted(() => ({
   tabelas: {} as Record<string, Linha[]>,
   falham: new Set<string>(),
+  /** erro com código por tabela (o que o PostgREST devolve de verdade: PGRST205 = a tabela não existe) */
+  erros: {} as Record<string, { code: string; message: string }>,
   lidas: [] as string[],
   classificacao: {} as Record<string, boolean>,
   classificacaoFalha: false,
@@ -31,6 +33,7 @@ vi.mock('@/integrations/supabase/client', () => {
     let unico = false;
     const resultado = () => {
       if (banco.falham.has(tabela)) return { data: null, error: { message: `falha em ${tabela}` } };
+      if (banco.erros[tabela]) return { data: null, error: banco.erros[tabela] };
       let r = (banco.tabelas[tabela] ?? []).filter((l) => filtros.every((f) => f(l)));
       for (const [col, asc] of [...ordens].reverse()) {
         r = [...r].sort((a, b) => String(a[col] ?? '').localeCompare(String(b[col] ?? '')) * (asc ? 1 : -1));
@@ -175,6 +178,7 @@ function montarBanco() {
 beforeEach(() => {
   montarBanco();
   banco.falham = new Set();
+  banco.erros = {};
   banco.lidas = [];
   banco.classificacaoFalha = false;
 });
@@ -309,6 +313,23 @@ describe('fetchPurchaseNeeds — o que o dono disse (os_material, Fase 1)', () =
     expect(r.items.find((i) => i.origin === 'purchase_order')).toMatchObject({
       status: 'ok', available: 1, onOrder: 0, shortage: 0, informado: 'na_mao', purchaseOrderNumber: 'OC-TESTE-P5-6',
     });
+  });
+
+  it('os_material ainda não existe (front publicado antes da migration): a conta bruta, como a RPC no ar', async () => {
+    for (const code of ['PGRST205', '42P01']) {
+      banco.erros = { os_material: { code, message: "Could not find the table 'public.os_material' in the schema cache" } };
+      const r = await fetchPurchaseNeeds('M');
+      expect(r.shortageCount, code).toBe(5);
+      expect(r.estimatedCost, code).toBe(3800);
+      expect(r.items.some((i) => i.informado), code).toBe(false);
+    }
+  });
+
+  it('os_material com outro erro (permissão, rede, timeout) continua lançando', async () => {
+    for (const code of ['42501', '57014', 'PGRST301']) {
+      banco.erros = { os_material: { code, message: `falha ${code}` } };
+      await expect(fetchPurchaseNeeds('M'), code).rejects.toMatchObject({ code });
+    }
   });
 
   it('sem linha de material (ou técnico, que não lê os_material): a conta bruta, igual à de antes', async () => {

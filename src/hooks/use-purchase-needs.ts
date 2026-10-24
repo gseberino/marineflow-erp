@@ -5,6 +5,9 @@ import {
   type ItemACaminhoInput, type LinhaDeMaterialInput, type PurchaseNeeds,
 } from '@/lib/purchase-needs';
 
+/** Os códigos de "a tabela não existe": PGRST205 (cache do PostgREST) e 42P01 (Postgres). */
+const TABELA_AUSENTE = new Set(['PGRST205', '42P01']);
+
 /**
  * Necessidade de compra de uma OS. Busca os insumos e delega o cálculo para a lib
  * pura (src/lib/purchase-needs.ts), que é onde a regra vive e é testada. É o espelho
@@ -26,7 +29,9 @@ import {
  * Por último, o que o dono disse de cada linha (os_material, Agenda de Produção, 24/10/2026):
  * comprado ou a caminho conta como já pedido, na mão como disponível, dispensado sai — a
  * mesma camada final da RPC (aplicar_os_material). O técnico não lê os_material (RLS): a
- * leitura volta vazia, sem erro, e ele vê a conta bruta, como na RPC.
+ * leitura volta vazia, sem erro, e ele vê a conta bruta, como na RPC. Enquanto a tabela não
+ * existe (o front sai pela Vercel no push; a migration 20261024160000 espera o OK do dono), a
+ * leitura conta como sem linhas: a conta bruta, a mesma da RPC que está no ar.
  *
  * Toda leitura com erro LANÇA: falha que vira lista vazia diria "nada a comprar".
  * A única exceção é a classificação do texto livre (ver abaixo), cuja falha mantém
@@ -79,9 +84,11 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
   if (partsRes.error) throw partsRes.error;
   if (servicesRes.error) throw servicesRes.error;
   if (aCaminhoRes.error) throw aCaminhoRes.error;
-  // Sem a tabela (migration 20261024160300 não aplicada) o PostgREST dá 404 e isto lança: a faixa de
-  // compras mostra o erro em vez de uma conta que ignoraria o que o dono informou.
-  if (materialRes.error) throw materialRes.error;
+  // os_material: só a tabela que ainda não existe (PGRST205 do PostgREST, 42P01 do Postgres) vira "sem
+  // linhas" — a conta bruta, igual à RPC em produção antes da migration. Qualquer outro erro lança.
+  if (materialRes.error && !TABELA_AUSENTE.has(String((materialRes.error as { code?: unknown }).code ?? ''))) {
+    throw materialRes.error;
+  }
 
   const parts = (partsRes.data ?? []).map((p: any) => ({
     id: p.id,
