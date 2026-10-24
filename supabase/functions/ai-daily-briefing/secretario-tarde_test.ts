@@ -356,3 +356,88 @@ Deno.test("P4.5: tarde rebaixada (a manhã não foi a nova) com a voz ligada nã
   assert(!f.chamadas.some((c) => c.nome === "avisos_para_a_mensagem"), "a tarde que não sai não consome o guardado do ligado");
   assert(!String(registrar(f.chamadas)!.texto).includes("Não te interrompi"));
 });
+
+// ─── (24/10/2026) Agenda de Produção, Fase 1 (P6): a agenda no fechamento, com o turno inteiro ────────────────────
+// A RPC agenda_textos_do_fechamento(p_hoje, p_dia do "Amanhã") devolve o que a agenda diria (os textos do banco de
+// verdade, supabase/tests/agenda_fase1_leituras.sql A8/A8b). Em sombra (como nasce) o texto gravado é byte a byte o de
+// antes e o que ela diria vai para detalhe.agenda; ligada, ela fala; erro, desligada ou sem a função = a Fase 0.
+const CAUDA_DO_BANCO = "nada marcado; nenhum serviço pronto, 7 esperando você (*agenda*)";
+const SEMANA_DO_BANCO = [
+  "Semana que vem (projeção): nada marcado; 7 serviços na fila, uns 17 a 32 dias de equipe (~5,4 por semana, sem contar você).",
+  "Nenhum pronto para começar; o que falta de você está em *agenda*.",
+  "Livre de verdade: no melhor caso a partir de ter 17/11; no realista, só a partir de ter 08/12.",
+];
+const daAgenda = (modo: string) => ({
+  modo, cauda_amanha: CAUDA_DO_BANCO, semana_que_vem: SEMANA_DO_BANCO, dia_do_plano: true, dia: "2026-10-16",
+  dados: { prontos: 0, esperando_voce: 7 },
+});
+
+async function tardeComAgenda(rpcDaAgenda: unknown | "erro", formato = "sombra") {
+  const f = falsoAdmin(banco({ formato }), { ...RPCS, ...(rpcDaAgenda === "erro" ? {} : { agenda_textos_do_fechamento: rpcDaAgenda }) });
+  // "erro": a função ainda não existe no banco (42883) — o resto das RPCs responde como sempre
+  const admin = rpcDaAgenda === "erro"
+    ? {
+      from: f.admin.from,
+      rpc: (nome: string, args: unknown): Promise<{ data: unknown; error: unknown }> =>
+        nome === "agenda_textos_do_fechamento"
+          ? (f.chamadas.push({ nome, args }), Promise.resolve({ data: null, error: { code: "42883", message: "function does not exist" } }))
+          : f.admin.rpc(nome, args),
+    }
+    : f.admin;
+  await rodarTurnoDaTarde(admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  return { p: registrar(f.chamadas)!, chamadas: f.chamadas };
+}
+
+Deno.test("agenda em sombra: o fechamento gravado é byte a byte o de antes; o que ela diria vai para detalhe.agenda", async () => {
+  const antes = await tardeComAgenda(null);
+  const sombra = await tardeComAgenda(daAgenda("sombra"));
+  assertEquals(sombra.p.texto, antes.p.texto);
+  assertEquals(sombra.p.letras, antes.p.letras);
+  assertEquals((sombra.p.detalhe as Record<string, unknown>).agenda, {
+    modo: "sombra",
+    cauda_diria: `Amanhã (sexta, 16/10): ${CAUDA_DO_BANCO}.`,
+    semana_diria: SEMANA_DO_BANCO,
+    semana_cabia: true,
+    mostrou: false,
+  });
+  // o resto do detalhe é o de antes (só a chave agenda a mais)
+  const { agenda: _a, caracteres: _c1, ...resto } = sombra.p.detalhe as Record<string, unknown>;
+  const { caracteres: _c2, ...restoAntes } = antes.p.detalhe as Record<string, unknown>;
+  assertEquals(resto, restoAntes);
+  // a RPC recebe o dia de hoje e o dia do "Amanhã"
+  const c = sombra.chamadas.find((x) => x.nome === "agenda_textos_do_fechamento");
+  assertEquals(c?.args, { p_hoje: HOJE, p_dia: "2026-10-16" });
+});
+
+Deno.test("agenda ligada: a cauda e, na quinta, a semana que vem saem no texto; o detalhe diz que mostrou", async () => {
+  const { p } = await tardeComAgenda(daAgenda("ligado"));
+  const linhas = String(p.texto).split("\n");
+  const i = linhas.indexOf(`Amanhã (sexta, 16/10): ${CAUDA_DO_BANCO}.`);
+  assert(i > 0, String(p.texto));
+  assertEquals(linhas.slice(i + 1, i + 4), SEMANA_DO_BANCO);
+  assert(String(p.texto).length <= 1000);
+  assertEquals((p.detalhe as { agenda: { mostrou: boolean; modo: string } }).agenda.mostrou, true);
+  assertEquals((p.detalhe as { agenda: { mostrou: boolean; modo: string } }).agenda.modo, "ligado");
+});
+
+Deno.test("agenda com erro, desligada, sem resposta ou sem a função: o fechamento da Fase 0 e nenhum detalhe.agenda", async () => {
+  const antes = await tardeComAgenda(null);
+  for (const r of ["erro", { modo: "desligado", cauda_amanha: null, semana_que_vem: [], dia_do_plano: false }, { ok: true }, "texto"] as const) {
+    const { p } = await tardeComAgenda(r);
+    assertEquals(p.texto, antes.p.texto, JSON.stringify(r));
+    assert(!("agenda" in (p.detalhe as Record<string, unknown>)), JSON.stringify(r));
+  }
+});
+
+Deno.test("agenda: só o fechamento e a revisão da semana leem a agenda (o 'Amanhã'); a revisão do mês não", async () => {
+  const f = falsoAdmin(banco(), { ...RPCS, agenda_textos_do_fechamento: daAgenda("ligado") });
+  await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "revisao_mes", dry: true });
+  assert(!f.chamadas.some((c) => c.nome === "agenda_textos_do_fechamento"), "a revisão do mês não tem 'Amanhã'");
+  const rs = falsoAdmin(banco(), { ...RPCS, agenda_textos_do_fechamento: daAgenda("ligado") });
+  const r = await rodarTurnoDaTarde(rs.admin, { agora: AS_1730, pedido: "revisao_semana", dry: true });
+  assert(rs.chamadas.some((c) => c.nome === "agenda_textos_do_fechamento"));
+  // na revisão da semana a cauda entra (ligada), a semana que vem não (é do fechamento de quinta)
+  assert(String(r.corpo.texto).includes(CAUDA_DO_BANCO), String(r.corpo.texto));
+  assert(!String(r.corpo.texto).includes("Semana que vem"), String(r.corpo.texto));
+  assertEquals((r.corpo.detalhe as { agenda: { semana_cabia: boolean } }).agenda.semana_cabia, false);
+});

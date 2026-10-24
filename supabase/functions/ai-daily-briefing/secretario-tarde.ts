@@ -36,16 +36,19 @@ import {
 import { type ModoDoPortao, REGRAS_PADRAO, type RegrasDaVozUnica } from "../_shared/uma-voz/portao.ts";
 import { lerPortao } from "../_shared/uma-voz/registrar.ts";
 import {
+  amanhaComAAgenda,
   type ContaDoMes,
   type DiaDeAmanha,
   minutosDoEscritorio,
   type Panorama,
+  semanaCabe,
   textoDaTarde,
 } from "./secretario-tarde-texto.ts";
 import {
   contarEscritorio,
   conversaAtiva,
   fornecedoresEsperando,
+  lerAgendaDoFechamento,
   lerAmanha,
   lerEsperando,
   lerManhaDeHoje,
@@ -187,6 +190,19 @@ export function montarTardeDosDados(p: {
   });
   const e = lido.escritorio;
   const linhaLote = p.lote ? linhaDoLote(p.lote) : null;
+  // (24/10/2026, Agenda de Produção Fase 1, P6) o que a agenda diria e o que dela saiu no texto. Na sombra (como nasce),
+  // cauda_diria é a linha "Amanhã" que sairia com 'ligado' (null = a agenda não mudaria o "Amanhã") e semana_diria as
+  // linhas da semana que vem (só na quinta); semana_cabia = havia vaga (menos de REGRAS.maxManha que ficaram).
+  const ag = lido.amanha?.agenda ?? null;
+  const agenda = ag
+    ? {
+      modo: ag.modo,
+      cauda_diria: amanhaComAAgenda(hoje, lido.amanha),
+      semana_diria: ag.semana,
+      semana_cabia: turno === "fechamento" && semanaCabe(ficaram.length, ag),
+      mostrou: !!t.agenda && (t.agenda.cauda || t.agenda.semana > 0),
+    }
+    : null;
   return {
     guardado: planoDaTarde && portao.modo
       ? {
@@ -214,6 +230,7 @@ export function montarTardeDosDados(p: {
         ? { guardado: { linhas: planoDaTarde.linhas.length, escritorio: planoDaTarde.escritorio.length, resolvidos: planoDaTarde.resolvidos.length, restantes: planoDaTarde.restantes } }
         : {}),
       ...(p.lote ? { lote: { itens: p.lote.itens.length, fora: p.lote.fora.length, total: p.lote.total, minutos: p.lote.minutos } } : {}),
+      ...(agenda ? { agenda } : {}),
     },
     // (Passo 5) no dia do lote, o *escritório* da tarde termina com a linha do lote
     escritorio: e ? `${textoDoEscritorio(e, horaBR(agora))}${linhaLote ? `\n\n${linhaLote}` : ""}`.slice(0, 2000) : null,
@@ -234,15 +251,22 @@ export async function lerTudoDaTarde(admin: Admin, p: {
   const regras = p.regras ?? REGRAS_PADRAO;
   const { esperando, recebidas } = await lerEsperando(admin, p.agora);
   const lido = await coletar(admin, { agora: p.agora, hoje: p.hoje, dono: p.dono, modo: p.modo, doResumo: { esperando, recebidas, cfg: p.cfg } });
+  // (16/10/2026) a revisão de segunda também traz o "Amanhã" (com o a pagar do F3), como o fechamento
+  const amanha = p.turno === "fechamento" || p.turno === "revisao_semana"
+    ? await lerAmanha(admin, p.dono, p.hoje, proximoDiaComManha(p.hoje), lido.coleta.oss, regras.amanha_a_pagar)
+    : null;
+  // (24/10/2026, Agenda de Produção Fase 1, P6) o que a agenda diria do mesmo dia; sem ela (desligada, erro, ainda não
+  // aplicada), o "Amanhã" é o da Fase 0
+  if (amanha) {
+    const agenda = await lerAgendaDoFechamento(admin, p.hoje, amanha.dia);
+    if (agenda) amanha.agenda = agenda;
+  }
   return {
     coleta: lido.coleta,
     historico: lido.historico,
     esperando,
     recebidas,
-    // (16/10/2026) a revisão de segunda também traz o "Amanhã" (com o a pagar do F3), como o fechamento
-    amanha: p.turno === "fechamento" || p.turno === "revisao_semana"
-      ? await lerAmanha(admin, p.dono, p.hoje, proximoDiaComManha(p.hoje), lido.coleta.oss, regras.amanha_a_pagar)
-      : null,
+    amanha,
     escritorio: p.turno === "fechamento" ? await contarEscritorio(admin, p.hoje) : null,
     panorama: p.turno === "revisao_semana" ? await lerPanorama(admin, p.hoje, regras.vigia_so_mes_recente) : null,
     mesQueFechou: p.turno === "revisao_mes" ? await lerMesQueFechou(admin, p.hoje) : null,

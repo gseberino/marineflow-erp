@@ -358,3 +358,25 @@ Deno.test("leitura essencial que falha LANÇA (quem chama volta ao resumo de sem
   assertEquals(semExtras.deHoje.errosDaNoite, 0);
   assert(semExtras.coleta.conversas.every((c) => c.client_id === null));
 });
+
+// ─── (24/10/2026) Agenda de Produção, Fase 1 (P6): a manhã 07:30 não muda ──────────────────────────────────────────
+// A agenda só entra no fechamento das 17:30 (lerTudoDaTarde). A coleta da manhã (a mesma que a tarde roda de novo) não
+// lê agenda_config nem chama RPC da agenda — este admin de mentira nem tem rpc — e dá o mesmo resultado em qualquer
+// modo da agenda; os arquivos da manhã não citam a agenda de produção.
+Deno.test("P6: a manhã é idêntica com a agenda desligada, em sombra ou ligada (e nunca lê a agenda)", async () => {
+  const resultados: string[] = [];
+  for (const modo of [null, "desligado", "sombra", "ligado"]) {
+    const selects: string[] = [];
+    const tabelas = { ...banco(), ...(modo ? { agenda_config: [{ id: true, modo_leitura: modo, dia_do_plano: 4 }] } : {}) };
+    const lido = await rodar(tabelas, [], selects);
+    assert(!selects.some((s) => s.startsWith("agenda_config")), `a manhã leu agenda_config (${modo})`);
+    resultados.push(JSON.stringify({ lido, candidatos: candidatosDoDia(lido.coleta, AGORA, HOJE) }));
+  }
+  assert(resultados.every((r) => r === resultados[0]), "a manhã mudou com o modo da agenda");
+  for (const arq of ["secretario.ts", "secretario-coleta.ts", "secretario-texto.ts", "secretario-candidatos.ts", "secretario-selecao.ts"]) {
+    const fonte = await Deno.readTextFile(new URL(`./${arq}`, import.meta.url));
+    for (const proibido of ["agenda_textos_do_fechamento", "agenda_config", "_shared/agenda/", "lerAgendaDoFechamento"]) {
+      assert(!fonte.includes(proibido), `${arq} cita ${proibido}`);
+    }
+  }
+});

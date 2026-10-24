@@ -2,9 +2,13 @@
 // a pergunta da sexta, o tamanho e as palavras proibidas.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import type { LinhaComLetra } from "./secretario-tarde-regras.ts";
+import { REGRAS } from "./secretario-candidatos.ts";
 import {
+  type AgendaDoFechamento,
+  amanhaComAAgenda,
   type DadosDaTarde,
   LIMITE_DA_TARDE,
+  semanaCabe,
   linhaDaSemana,
   linhaDeAmanha,
   linhaSemResposta,
@@ -277,4 +281,127 @@ Deno.test("D11b: a carteira sem data sozinha não tira o fechamento do calado; n
   assert(t.length <= LIMITE_DA_TARDE, `${t.length}`);
   assertStringIncludes(t, "Amanhã (sexta, 16/10): nada marcado; 6 OS ativas sem data (ou com a data vencida); a pagar: 2 contas, R$ 1.234,00.");
   assert(!t.includes("agenda livre"));
+});
+
+// ─── (24/10/2026) Agenda de Produção, Fase 1 (P6): a agenda no fechamento ──────────────────────────────────────────
+// O que se protege: sem a agenda, ou com ela em sombra (como nasce), o texto é o de antes BYTE A BYTE; ligada, a cauda
+// do "Amanhã" vem dela e, na quinta, até 3 linhas da semana que vem logo depois, só com vaga (menos de REGRAS.maxManha
+// que ficaram) — ela é a primeira a ceder no corte de 1.000; a cauda sozinha não tira o dia do calado, a semana sim.
+// Os textos são os do banco de verdade (supabase/tests/agenda_fase1_leituras.sql, A8/A8b, fechamento de qui 22/10).
+const CAUDA = "nada marcado; nenhum serviço pronto, 7 esperando você (*agenda*)";
+const SEMANA = [
+  "Semana que vem (projeção): nada marcado; 7 serviços na fila, uns 17 a 32 dias de equipe (~5,4 por semana, sem contar você).",
+  "Nenhum pronto para começar; o que falta de você está em *agenda*.",
+  "Livre de verdade: no melhor caso a partir de ter 17/11; no realista, só a partir de ter 08/12.",
+];
+const agenda = (modo: "sombra" | "ligado", extra: Partial<AgendaDoFechamento> = {}): AgendaDoFechamento => ({ modo, cauda: CAUDA, semana: SEMANA, ...extra });
+/** O fechamento de qui 22/10 (dia do plano), com a carteira de 23/10 e um fornecedor esperando (a tarde tem o que dizer). */
+function quinta(extra: Partial<DadosDaTarde> = {}, ag?: AgendaDoFechamento | null): DadosDaTarde {
+  const d = dados({ hoje: "2026-10-22", fornecedores: ["SR Contabilidade"], amanha: { dia: "2026-10-23", itens: [], carteira: { semData: 6 } }, ...extra });
+  if (ag !== undefined && d.amanha) d.amanha = { ...d.amanha, agenda: ag };
+  return d;
+}
+
+Deno.test("agenda: sem ela ou em sombra, o fechamento é o de antes byte a byte (com e sem letra, na quinta e fora dela)", () => {
+  const cenarios: Array<Partial<DadosDaTarde>> = [
+    {},
+    { ficaram: [linha("B", "2 orçamentos montados, não enviados (R$ 141 mil)")] },
+    { ficaram: ["B", "C", "D"].map((l) => linha(l, `${l} cobrança`)) },
+    { hoje: "2026-10-23", amanha: { dia: "2026-10-24", itens: [], carteira: { semData: 6 } } },
+    { fornecedores: [] }, // calado
+    { pergunta: true, amanha: { dia: "2026-10-23", itens: [], pagar: { n: 1, total: 312.4 }, carteira: { semData: 6 } } },
+  ];
+  for (const c of cenarios) {
+    const antes = textoDaTarde(quinta(c));
+    for (const ag of [null, agenda("sombra"), agenda("sombra", { cauda: null }), agenda("sombra", { semana: [] })]) {
+      const t = textoDaTarde(quinta(c, ag));
+      assertEquals(t.texto, antes.texto, JSON.stringify(c));
+      assertEquals(t.letras, antes.letras);
+      if (ag) assertEquals(t.agenda, { cauda: false, semana: 0 }, "na sombra nada da agenda é publicado");
+    }
+  }
+  // a revisão da semana (segunda) e a do mês também, byte a byte
+  const rs = (ag: AgendaDoFechamento | null) =>
+    textoDaTarde(dados({ hoje: "2026-10-19", turno: "revisao_semana", amanha: { dia: "2026-10-20", itens: [], carteira: { semData: 6 }, agenda: ag } })).texto;
+  assertEquals(rs(agenda("sombra")), rs(null));
+  assertEquals(textoDaTarde(dados({ hoje: "2026-11-03", turno: "revisao_mes", amanha: null })).agenda, undefined);
+});
+
+Deno.test("agenda ligada: a cauda substitui o 'nada marcado; N OS…' do Amanhã; com compromisso no dia ou cauda null, o de antes", () => {
+  assertEquals(linhaDeAmanha("2026-10-22", { dia: "2026-10-23", itens: [], carteira: { semData: 6 }, agenda: agenda("ligado") }),
+    `Amanhã (sexta, 23/10): ${CAUDA}.`);
+  assertEquals(linhaDeAmanha("2026-10-22", { dia: "2026-10-23", itens: [], pagar: { n: 1, total: 312.4 }, carteira: { semData: 6 }, agenda: agenda("ligado") }),
+    `Amanhã (sexta, 23/10): ${CAUDA}; a pagar: 1 conta, R$ 312,40.`);
+  // a agenda vê algo marcado (cauda null): a frase de antes
+  assertEquals(linhaDeAmanha("2026-10-22", { dia: "2026-10-23", itens: [], carteira: { semData: 6 }, agenda: agenda("ligado", { cauda: null }) }),
+    "Amanhã (sexta, 23/10): nada marcado; 6 OS ativas sem data (ou com a data vencida).");
+  // o Secretário tem compromisso no dia: a linha dos compromissos, a agenda não entra
+  assertEquals(linhaDeAmanha("2026-10-22", { dia: "2026-10-23", itens: [{ hora: "08:00", texto: "OS-00074 (Marco Polo)" }], agenda: agenda("ligado") }),
+    "Amanhã (sexta, 23/10): 08:00 OS-00074 (Marco Polo).");
+  // o que a ligada mandaria (o detalhe da sombra)
+  assertEquals(amanhaComAAgenda("2026-10-22", { dia: "2026-10-23", itens: [], carteira: { semData: 6 }, agenda: agenda("sombra") }), `Amanhã (sexta, 23/10): ${CAUDA}.`);
+  assertEquals(amanhaComAAgenda("2026-10-22", { dia: "2026-10-23", itens: [{ hora: null, texto: "x" }], agenda: agenda("sombra") }), null);
+  assertEquals(amanhaComAAgenda("2026-10-22", { dia: "2026-10-23", itens: [], agenda: agenda("sombra", { cauda: null }) }), null);
+  assertEquals(amanhaComAAgenda("2026-10-22", null), null);
+});
+
+Deno.test("agenda ligada na quinta: as 3 linhas da semana logo depois do Amanhã; a cauda sozinha não tira o dia do calado, a semana sim", () => {
+  const t = textoDaTarde(quinta({}, agenda("ligado")));
+  assertEquals(t.texto!.split("\n"), [
+    "Fechamento de quinta, 22/10: nada ficou de hoje.",
+    "",
+    `Amanhã (sexta, 23/10): ${CAUDA}.`,
+    ...SEMANA,
+    "Fornecedores esperando há mais de 1 dia: SR Contabilidade.",
+    "Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja; uns 30 min. *escritório*",
+  ]);
+  assertEquals(t.agenda, { cauda: true, semana: 3 });
+  assert(t.texto!.length <= LIMITE_DA_TARDE && !PROIBIDAS.test(t.texto!) && !EMOJI.test(t.texto!), t.texto!);
+  // nada mais a dizer: a semana sozinha é "algo" (é o plano da quinta)…
+  const so = textoDaTarde(quinta({ fornecedores: [] }, agenda("ligado")));
+  assert(so.texto?.includes(SEMANA[0]), String(so.texto));
+  // …a cauda sozinha não (existe todo dia, como a carteira sem data), nem a semana na sombra
+  assertEquals(textoDaTarde(quinta({ fornecedores: [] }, agenda("ligado", { semana: [] }))).texto, null);
+  assertEquals(textoDaTarde(quinta({ fornecedores: [] }, agenda("sombra"))).texto, null);
+});
+
+Deno.test("agenda ligada: a semana conta como 1 das REGRAS.maxManha — com 3 que ficaram de hoje não há vaga (a cauda continua)", () => {
+  assertEquals(REGRAS.maxManha, 3);
+  const dois = textoDaTarde(quinta({ ficaram: ["B", "C"].map((l) => linha(l, `${l} cobrança`)) }, agenda("ligado")));
+  assertEquals(dois.agenda, { cauda: true, semana: 3 });
+  const tres = textoDaTarde(quinta({ ficaram: ["B", "C", "D"].map((l) => linha(l, `${l} cobrança`)) }, agenda("ligado")));
+  assertEquals(tres.agenda, { cauda: true, semana: 0 });
+  assert(!tres.texto!.includes("Semana que vem"), tres.texto!);
+  assertStringIncludes(tres.texto!, `Amanhã (sexta, 23/10): ${CAUDA}.`);
+  assertEquals(semanaCabe(2, agenda("ligado")), true);
+  assertEquals(semanaCabe(3, agenda("ligado")), false);
+  assertEquals(semanaCabe(0, agenda("ligado", { semana: [] })), false);
+  assertEquals(semanaCabe(0, null), false);
+  // fora do fechamento (a revisão da semana de segunda) a semana nunca entra; a cauda sim
+  const rs = textoDaTarde(dados({ hoje: "2026-10-19", turno: "revisao_semana", amanha: { dia: "2026-10-20", itens: [], carteira: { semData: 6 }, agenda: agenda("ligado") } }));
+  assertEquals(rs.texto, ["Revisão da semana, segunda, 19/10. Nada parado.", "", `Amanhã (terça, 20/10): ${CAUDA}.`].join("\n"));
+  assertEquals(rs.agenda, { cauda: true, semana: 0 });
+});
+
+Deno.test("agenda ligada no corte de 1.000: a semana cede primeiro (3 → 1 → nenhuma) e o resto fica como sem a agenda", () => {
+  const longo = "y".repeat(230);
+  const base = {
+    ficaram: ["B", "C"].map((l) => linha(l, `${l} ${longo}`)),
+    fornecedores: ["SR Contabilidade", "Kamell", "Dometic"],
+    pergunta: true,
+  };
+  const semAgenda = textoDaTarde(quinta(base)).texto!;
+  const t = textoDaTarde(quinta(base, agenda("ligado")));
+  assert(t.texto!.length <= LIMITE_DA_TARDE, `${t.texto!.length}`);
+  assert(t.agenda!.semana < 3, `a semana tinha de ceder: ${t.agenda!.semana}`);
+  // o que não é da agenda é o mesmo texto de quem não tem a agenda (só a cauda trocou e a semana entrou no que coube)
+  const semAAgenda = t.texto!.split("\n").filter((l) => !SEMANA.includes(l)).join("\n")
+    .replace(CAUDA, "nada marcado; 6 OS ativas sem data (ou com a data vencida)");
+  assertEquals(semAAgenda, semAgenda);
+  // texto que já não cabia sem a agenda: nenhuma linha da semana, e o corte de sempre
+  const enorme = { ...base, ficaram: ["B", "C"].map((l) => linha(l, `${l} ${"z".repeat(400)}`)) };
+  const e = textoDaTarde(quinta(enorme, agenda("ligado")));
+  assert(e.texto!.length <= LIMITE_DA_TARDE, `${e.texto!.length}`);
+  assertEquals(e.agenda!.semana, 0);
+  assert(!e.texto!.includes("Semana que vem"));
 });

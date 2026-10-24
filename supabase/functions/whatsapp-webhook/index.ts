@@ -25,6 +25,7 @@ import { donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
 import { interromperPergunta, lerEstadoDoTelefone } from "../_shared/whatsapp/pergunta-ativa.ts";
 import { lerComandoDoSecretario } from "../_shared/secretario/comandos.ts";
 import { formatoDoResumoNoBanco } from "../_shared/secretario/formato.ts";
+import { ehComandoDaAgendaLigada } from "../_shared/agenda/executar.ts";
 
 // Manejo automático da resposta (Camada de Inteligência de Comunicação, módulo G):
 // fecha o loop no ai_comms_log (marca respondido + intenção) e HONRA OPT-OUT sozinho.
@@ -433,9 +434,13 @@ export async function handler(req: Request): Promise<Response> {
                   avisarFalha: () => avisarFalhaPorHttp({ phone, msgId: msg.id }, { url, chave }),
                   interromper: () => interromperPergunta(admin, phone),
                   // secretário (15/10/2026): comando do resumo da manhã vai ao assistente; a chave só é
-                  // lida quando o texto É um comando
+                  // lida quando o texto É um comando. Agenda de Produção (Fase 1, P6, 24/10/2026): a palavra da
+                  // agenda ("grava", "livre", "agenda"…) também, com agenda_config.modo_leitura ligada — senão o
+                  // "grava" viraria o "sim" do CMP no passo "confirmar"; a chave dela também só é lida quando o
+                  // texto é uma palavra da agenda
                   comandoDoSecretario: async (t) =>
-                    lerComandoDoSecretario(t) !== null && (await formatoDoResumoNoBanco(admin)) === "novo",
+                    (lerComandoDoSecretario(t) !== null && (await formatoDoResumoNoBanco(admin)) === "novo") ||
+                    (await ehComandoDaAgendaLigada(admin, t)),
                 },
               );
             } catch (e) {

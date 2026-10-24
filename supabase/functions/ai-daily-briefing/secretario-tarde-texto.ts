@@ -7,6 +7,9 @@
 //   …
 //
 //   Amanhã (sexta, 16/10): <agenda e compra que precisa sair> | nada marcado; 6 OS ativas sem data (ou com a data vencida) | agenda livre.
+//   (24/10/2026, agenda de produção LIGADA) a cauda sem nada marcado vem dela: "nada marcado; nenhum serviço pronto, 7
+//   esperando você (*agenda*)"; na quinta, logo abaixo, até 3 linhas "Semana que vem (projeção): …" se sobrou vaga
+//   (contam como 1 dos REGRAS.maxManha). Na sombra (como nasce), nada disso: o texto é o de antes e vai para o detalhe.
 //   Fornecedores esperando há mais de 1 dia: <nomes>.
 //   Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja; uns 25 min. *escritório*
 //   (sexta) Esta semana o resumo ajudou? Responda *ajudou*, *pouco* ou *atrapalhou*.
@@ -22,6 +25,7 @@ import type { CobrancasAntigas, LinhaComLetra, SemRespostaDeHoje } from "./secre
 import { blocoDoFechamento, type PlanoDoGuardado } from "../_shared/uma-voz/guardado.ts";
 import type { DadosDoEscritorio } from "./secretario-texto.ts";
 import { linhaDoLote, type LoteParaTexto } from "../_shared/papelada/texto.ts";
+import { REGRAS } from "./secretario-candidatos.ts";
 
 export const META_DA_TARDE = 900;
 export const LIMITE_DA_TARDE = 1000;
@@ -78,6 +82,21 @@ export interface DiaDeAmanha {
    * passou. É o trabalho que existe e não está em dia nenhum. Ausente ou null = não leu.
    */
   carteira?: { semData: number } | null;
+  /**
+   * (24/10/2026, Agenda de Produção Fase 1, P6) O que a agenda diria no fechamento (agenda_textos_do_fechamento). Só
+   * com modo 'ligado' alguma coisa muda no texto; com 'sombra' (como nasce) ou ausente, o texto é o de antes, byte a
+   * byte, e o que ela diria vai para o detalhe.
+   */
+  agenda?: AgendaDoFechamento | null;
+}
+
+/** As linhas da agenda para o fechamento (agenda_textos_do_fechamento, migration 20261024160500), já conferidas. */
+export interface AgendaDoFechamento {
+  modo: "sombra" | "ligado";
+  /** a cauda do "Amanhã" sem nada marcado ("nada marcado; nenhum serviço pronto, 7 esperando você (*agenda*)"); null = a agenda vê algo marcado */
+  cauda: string | null;
+  /** só no dia do plano (quinta): até 3 linhas "Semana que vem (projeção)", cada uma com até 160 caracteres */
+  semana: string[];
 }
 
 /** Até quantos caracteres cada item vai na linha "Amanhã" (a coleta monta o da OS para caber nisso). */
@@ -90,8 +109,13 @@ export const CORTE_DO_ITEM_DE_AMANHA = 50;
  * O texto diz o que osSemData conta (revisão de 23/10/2026): OS ATIVA (aberta, aprovada, agendada, em andamento,
  * aguardando peças) sem data OU com a janela já vencida. Até então dizia "aprovadas sem data", e não era nem uma
  * coisa nem outra: a OS-00104 aguarda peças e tem data (06–08/10, vencida); as OS-00069/74/100 estão abertas.
+ *
+ * (24/10/2026, P6) Com a agenda de produção LIGADA, a cauda vem dela ("nada marcado; prontos para começar: Lenine e
+ * Flávio (*agenda*)" ou "…, 7 esperando você (*agenda*)"): diz o que está pronto e quem espera o dono, em vez de só
+ * contar as OS. Na sombra, ou se a agenda vê algo marcado no dia (cauda null), fica a frase de antes.
  */
-function semNadaMarcado(c: DiaDeAmanha["carteira"]): string {
+function semNadaMarcado(c: DiaDeAmanha["carteira"], agenda?: AgendaDoFechamento | null): string {
+  if (agenda?.modo === "ligado" && agenda.cauda) return agenda.cauda;
   if (!c) return "nada marcado";
   return c.semData > 0
     ? `nada marcado; ${plural(c.semData, "OS ativa sem data (ou com a data vencida)", "OS ativas sem data (ou com a data vencida)")}`
@@ -105,9 +129,27 @@ export function linhaDeAmanha(hoje: string, a: DiaDeAmanha): string {
     : `${nomeDoDia(a.dia)} (${ddmm(a.dia)})`;
   // F3 (16/10/2026): a conta a pagar que vence até a próxima manhã
   const pagar = a.pagar && a.pagar.n > 0 ? `; a pagar: ${plural(a.pagar.n, "conta", "contas")}, ${brl(a.pagar.total)}` : "";
-  if (!a.itens.length) return `${rotulo}: ${semNadaMarcado(a.carteira)}${pagar}.`;
+  if (!a.itens.length) return `${rotulo}: ${semNadaMarcado(a.carteira, a.agenda)}${pagar}.`;
   const itens = a.itens.slice(0, 3).map((i) => `${i.hora ? `${i.hora} ` : ""}${umaLinha(i.texto, CORTE_DO_ITEM_DE_AMANHA)}`);
   return `${rotulo}: ${itens.join("; ")}${a.itens.length > 3 ? ` (e mais ${a.itens.length - 3})` : ""}${pagar}.`;
+}
+
+/**
+ * (24/10/2026, P6) A linha "Amanhã" que a agenda LIGADA mandaria, ou null quando ela não muda nada (o dia tem
+ * compromisso, a agenda vê algo marcado, ou não leu). Na sombra é o que vai para o detalhe, para comparar.
+ */
+export function amanhaComAAgenda(hoje: string, a: DiaDeAmanha | null): string | null {
+  if (!a?.agenda?.cauda || a.itens.length) return null;
+  return linhaDeAmanha(hoje, { ...a, agenda: { ...a.agenda, modo: "ligado" } });
+}
+
+/**
+ * (24/10/2026, P6) As linhas "Semana que vem (projeção)" cabem no fechamento? A agenda só as manda no dia do plano
+ * (quinta), e elas contam como 1 dos REGRAS.maxManha itens do Secretário: com 3 que ficaram de hoje não há vaga, e
+ * elas ficam no detalhe e em *agenda semana que vem* (não passam para a sexta).
+ */
+export function semanaCabe(ficaram: number, agenda: AgendaDoFechamento | null | undefined): boolean {
+  return !!agenda && agenda.semana.length > 0 && ficaram < REGRAS.maxManha;
 }
 
 /** Quanto tempo a papelada leva: 20 s por lançamento ou alerta, 1 min por débito sem loja (arredonda em 5). */
@@ -266,6 +308,26 @@ export interface TextoDaTarde {
   texto: string | null;
   /** as linhas com letra mostradas */
   letras: LinhaComLetra[];
+  /**
+   * (24/10/2026, P6) O que da agenda de produção foi PUBLICADO: a cauda dela no "Amanhã" e quantas linhas da semana que
+   * vem. Só existe quando a agenda foi lida (DiaDeAmanha.agenda); na sombra é sempre {cauda: false, semana: 0}.
+   */
+  agenda?: { cauda: boolean; semana: number };
+}
+
+/** As linhas da semana que vem que podem ir no fechamento (agenda ligada, dia do plano, com vaga); senão nenhuma. */
+function semanaDoFechamento(d: DadosDaTarde): string[] {
+  const ag = d.amanha?.agenda;
+  if (d.turno !== "fechamento" || ag?.modo !== "ligado" || !semanaCabe(d.ficaram.length, ag)) return [];
+  return ag.semana;
+}
+
+/** Acrescenta ao texto montado o que da agenda saiu nele (só quando a agenda foi lida). */
+function comAAgenda(t: TextoDaTarde, d: DadosDaTarde, semana: number): TextoDaTarde {
+  const a = d.amanha;
+  if (!a?.agenda) return t;
+  const cauda = !!t.texto && a.agenda.modo === "ligado" && !!a.agenda.cauda && a.itens.length === 0;
+  return { ...t, agenda: { cauda, semana: t.texto ? semana : 0 } };
 }
 
 /** F1: "Sem resposta desde hoje: Giancarlo S. (10:31); Miguel (09:02, acordei às 09:45) e mais 1." */
@@ -288,14 +350,18 @@ function cabecaDoDia(hoje: string): string {
   return `${nomeDoDia(hoje).toLowerCase()}, ${ddmm(hoje)}`;
 }
 
-function textoDoFechamento(d: DadosDaTarde, curto: boolean): TextoDaTarde {
+function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number): TextoDaTarde {
   const topo = topoDaTarde(d, curto);
+  // (24/10/2026, P6) a semana que vem da agenda ligada, na quinta e com vaga (uma das REGRAS.maxManha): conta como "há
+  // algo" — é o plano da semana. A cauda do "Amanhã" NÃO conta (existe todo dia, como a carteira sem data)
+  const semanaToda = semanaDoFechamento(d);
+  const semana = semanaToda.slice(0, semanaMax);
   // (16/10/2026) guardado (fora o do escritório), quem está sem resposta desde hoje e a conta a pagar de amanhã contam
   // como "há algo": sem isso, "só se houver algo" viraria descarte do guardado (spec uma voz §6.3-1)
   // (23/10/2026) a carteira sem data NÃO conta: ela existe quase todo dia, e o fechamento passaria a sair sempre
   const temAlgo = d.ficaram.length > 0 || (d.amanha?.itens.length ?? 0) > 0 || (d.amanha?.pagar?.n ?? 0) > 0 ||
-    d.fornecedores.length > 0 || d.pergunta || topo.length > 0;
-  if (!temAlgo) return { texto: null, letras: [] };
+    d.fornecedores.length > 0 || d.pergunta || topo.length > 0 || semanaToda.length > 0;
+  if (!temAlgo) return comAAgenda({ texto: null, letras: [] }, d, 0);
   const proxima = proximaRevisaoDaSemana(d.hoje);
   const abertura = d.ficaram.length
     ? `Fechamento de ${cabecaDoDia(d.hoje)}. ${d.ficaram.length === 1 ? "Ficou 1" : `Ficaram ${d.ficaram.length}`} de hoje` +
@@ -304,11 +370,17 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean): TextoDaTarde {
   const itens = d.ficaram.map((l) => linhaQueFicou(l, curto ? 90 : 150));
   const fim = [
     d.amanha ? linhaDeAmanha(d.hoje, d.amanha) : null,
+    // (24/10/2026, P6) logo depois do "Amanhã": a semana que vem (projeção), só na quinta, ligada e com vaga
+    ...semana,
     d.fornecedores.length ? `Fornecedores esperando há mais de 1 dia: ${lista(d.fornecedores.map((n) => umaLinha(n, curto ? 18 : 28)))}.` : null,
     ...linhasDoEscritorioDaTarde(d),
     d.pergunta ? PERGUNTA_DA_SEMANA : null,
   ].filter((l): l is string => !!l);
-  return { texto: [abertura, ...topo, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n"), letras: d.ficaram };
+  return comAAgenda(
+    { texto: [abertura, ...topo, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n"), letras: d.ficaram },
+    d,
+    semana.length,
+  );
 }
 
 function exemploDeResposta(ls: LinhaComLetra[]): string {
@@ -342,7 +414,9 @@ function textoDaRevisaoDaSemana(d: DadosDaTarde, curto: boolean): TextoDaTarde {
   const lote = d.lote ? linhaDoLote(d.lote) : null;
   if (lote) blocos.push("", lote);
   if (d.pergunta) blocos.push("", PERGUNTA_DA_SEMANA);
-  return { texto: blocos.join("\n"), letras: ps };
+  // (24/10/2026, P6) a revisão de segunda também traz o "Amanhã": com a agenda ligada, a cauda dela (a semana que vem,
+  // nunca: ela é do fechamento de quinta)
+  return comAAgenda({ texto: blocos.join("\n"), letras: ps }, d, 0);
 }
 
 function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean): TextoDaTarde {
@@ -370,15 +444,23 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean): TextoDaTarde {
   return { texto: blocos.join("\n"), letras: a?.linhas ?? [] };
 }
 
-/** A mensagem da tarde. Passou de 1.000 caracteres: as linhas encurtam (e o vigia/faturamento saem). */
+/**
+ * A mensagem da tarde. Passou de 1.000 caracteres: as linhas encurtam (e o vigia/faturamento saem).
+ * (24/10/2026, P6) Com a semana que vem da agenda no fechamento, ela é a primeira a ceder: 3 linhas → 1 → nenhuma,
+ * antes de qualquer outra linha encurtar (ela é a última das REGRAS.maxManha e está inteira em *agenda semana que
+ * vem*). Sem ela, o caminho é o de antes, byte a byte.
+ */
 export function textoDaTarde(d: DadosDaTarde): TextoDaTarde {
-  const montar = (curto: boolean) =>
-    d.turno === "fechamento" ? textoDoFechamento(d, curto)
+  const montar = (curto: boolean, semanaMax: number) =>
+    d.turno === "fechamento" ? textoDoFechamento(d, curto, semanaMax)
     : d.turno === "revisao_semana" ? textoDaRevisaoDaSemana(d, curto)
     : textoDaRevisaoDoMes(d, curto);
-  const longo = montar(false);
-  if (!longo.texto || longo.texto.length <= LIMITE_DA_TARDE) return longo;
-  const curto = montar(true);
+  const n = semanaDoFechamento(d).length;
+  for (const k of [...new Set([n, Math.min(n, 1), 0])]) {
+    const longo = montar(false, k);
+    if (!longo.texto || longo.texto.length <= LIMITE_DA_TARDE) return longo;
+  }
+  const curto = montar(true, 0);
   if (curto.texto && curto.texto.length > LIMITE_DA_TARDE) {
     return { ...curto, texto: `${curto.texto.slice(0, LIMITE_DA_TARDE - 1).trimEnd()}…` };
   }

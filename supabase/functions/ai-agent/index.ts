@@ -68,6 +68,7 @@ import { executarComandoDoSecretario } from "../_shared/secretario/executar.ts";
 import { abrirConfirmacaoDoSecretario } from "../_shared/secretario/confirmar.ts";
 import { lerFormatoDoResumo } from "../_shared/secretario/formato.ts";
 import { type Dono, donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
+import { camadaDaAgenda, executarComandoDaAgenda, modoDaLeituraNoBanco } from "../_shared/agenda/executar.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -666,6 +667,40 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
       // "seguir" (Passo 3): não era comando (ex.: "pouco" sem a pergunta da sexta) — o texto segue como veio
       if (r.tipo === "pedido") effectiveText = r.texto;
     }
+  }
+
+  // ---- Camada determinística (custo $0): palavras da agenda de produção (Fase 1, P6, 24/10/2026) ----
+  // "agenda", "agenda amanhã", "livre", "atrasado", "o que eu tenho que fazer", "grava", "descarta" (a tabela de
+  // _shared/agenda/comandos.ts: palavras, nunca letra nem número — o "sim"/"1"/"não"/"2" e as letras do secretário já
+  // foram tratados acima e nunca chegam aqui). Só do dono (o mesmo do resumo), só com agenda_config.modo_leitura
+  // ligada (sombra ou ligado; a chave só é lida quando o texto É comando), e só se nada acima trocou o texto. O texto
+  // sai pronto do banco; o *grava* do rascunho só existe aqui (o modelo não tem ferramenta para gravar).
+  const doAgenda = effectiveText === text
+    ? await camadaDaAgenda(text, {
+      ehDoDono: async () => {
+        const dono = await donoDoWhatsApp(admin);
+        return !!dono && dono.id === appUser.id && dono.phone === phoneNormalized;
+      },
+      modo: () => modoDaLeituraNoBanco(admin),
+      executar: (cmd) => executarComandoDaAgenda(admin, cmd, { autor: appUser.id, log: admin, canal: "whatsapp" }),
+    })
+    : null;
+  if (doAgenda) {
+    // No histórico como um turno comum: o "sim" à oferta da rodada no fim da agenda tem a que se referir.
+    try {
+      const { error: histErr } = await admin.from("ai_operator_messages").insert([
+        { session_id: sessionId, role: "user", content: text, source: "whatsapp" },
+        { session_id: sessionId, role: "assistant", content: doAgenda.texto, source: "whatsapp" },
+      ]);
+      if (histErr) throw histErr;
+    } catch (persistErr) {
+      console.error("[ai-agent][whatsapp] comando da agenda: falha ao gravar o histórico:", persistErr);
+    }
+    await admin.from("ai_operator_sessions")
+      .update({ metadata, last_activity_at: new Date().toISOString() })
+      .eq("id", sessionId);
+    await queueWhatsAppReply(admin, phoneNormalized, doAgenda.texto);
+    return jr({ ok: true, agenda: doAgenda.comando.comando });
   }
 
   // ---- Camada determinística (custo $0): "me manda o PDF do orçamento N" ----
@@ -1292,6 +1327,38 @@ servirComCors(async (req) => {
     // persistidas ainda) -> usa o array inteiro que o frontend mandou, como na Fase 1.
     const newUserMsg = alreadyPersistedCount > 0 ? [...incoming].reverse().find((m) => m.role === "user") : undefined;
     const historyMessages: ChatMessage[] = alreadyPersistedCount > 0 ? (newUserMsg ? [...seedMessages, newUserMsg] : seedMessages) : incoming;
+
+    // ---- Camada determinística (custo $0): palavras da agenda de produção no painel (Fase 1, P6, 24/10/2026) ----
+    // A mesma camada do WhatsApp (_shared/agenda/executar.ts), só para o administrador e só com
+    // agenda_config.modo_leitura ligada. É por aqui que o *grava* do painel grava o rascunho que as ferramentas
+    // montaram (o modelo não tem ferramenta para gravar). Lê só o texto NOVO deste turno (a mensagem do dono que
+    // acabou de chegar), nunca uma do histórico. Pelo JWT do dono: o banco confere o login.
+    const textoNovoDoTurno = ((): string | null => {
+      const m = alreadyPersistedCount > 0 ? newUserMsg : incoming[incoming.length - 1];
+      return m && m.role === "user" && typeof m.content === "string" ? m.content : null;
+    })();
+    const doAgendaNoPainel = textoNovoDoTurno !== null
+      ? await camadaDaAgenda(textoNovoDoTurno, {
+        ehDoDono: () => userRole === "admin",
+        modo: () => modoDaLeituraNoBanco(admin),
+        executar: (cmd) => executarComandoDaAgenda(sb, cmd, { autor: userId, log: admin, canal: "painel" }),
+      })
+      : null;
+    if (doAgendaNoPainel) {
+      // No histórico como um turno comum (o mesmo que o turno do modelo gravaria: as mensagens novas + a resposta).
+      try {
+        const novas = alreadyPersistedCount > 0 ? (newUserMsg ? [newUserMsg] : []) : historyMessages;
+        const { error: histErr } = await admin.from("ai_operator_messages").insert([
+          ...buildMessageRows(resolvedSessionId, novas, [], MODEL_AGENT),
+          { session_id: resolvedSessionId, role: "assistant", content: doAgendaNoPainel.texto, source: "web" },
+        ]);
+        if (histErr) throw histErr;
+        await admin.from("ai_operator_sessions").update({ last_activity_at: new Date().toISOString() }).eq("id", resolvedSessionId);
+      } catch (persistErr) {
+        console.error("[ai-agent] comando da agenda: falha ao gravar o histórico:", persistErr);
+      }
+      return jr({ message: { role: "assistant", content: doAgendaNoPainel.texto }, tool_events: [], session_id: resolvedSessionId });
+    }
 
     // ---- Notas de memória ativas ----
     // Globais (Fase 2) + as da ENTIDADE em contexto (Fase 3). Só notas 'verified' entram:

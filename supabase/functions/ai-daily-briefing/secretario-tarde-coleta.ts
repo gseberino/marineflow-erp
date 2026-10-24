@@ -5,7 +5,8 @@
 // (secretario-coleta.ts), rodada de novo às 17:30. Aqui ficam: a lista de quem espera resposta montada como
 // no resumo (index.ts:284-317), a papelada do escritório contada como no resumo (index.ts:373-525), o
 // "Amanhã", o panorama (mês corrigido, vigia, semana), o mês que fechou, a conversa em andamento e a manhã
-// gravada de hoje. Tudo só leitura.
+// gravada de hoje. Tudo só leitura. (24/10/2026) E o que a agenda de produção diria no fechamento
+// (lerAgendaDoFechamento, a RPC agenda_textos_do_fechamento).
 //
 // Essencial (lança — quem chama não monta a tarde): a manhã de hoje e quem espera resposta (sem ela, todo
 // cliente pareceria respondido e sumiria do fechamento). O resto é enriquecimento: erro = a linha some,
@@ -26,7 +27,13 @@ import { contarPropostas } from "./secretario.ts";
 import type { OsCrua } from "./secretario-candidatos.ts";
 import { osDaAgenda } from "./secretario-coleta.ts";
 import type { ItemDaManha } from "./secretario-tarde-regras.ts";
-import { type ContaDoMes, CORTE_DO_ITEM_DE_AMANHA, type DiaDeAmanha, type Panorama } from "./secretario-tarde-texto.ts";
+import {
+  type AgendaDoFechamento,
+  type ContaDoMes,
+  CORTE_DO_ITEM_DE_AMANHA,
+  type DiaDeAmanha,
+  type Panorama,
+} from "./secretario-tarde-texto.ts";
 import type { DadosDoEscritorio } from "./secretario-texto.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -296,6 +303,45 @@ export async function lerAmanha(
     };
   } catch (e) {
     falhou("amanha", e);
+    return null;
+  }
+}
+
+// ─── A agenda de produção no fechamento (Fase 1, P6, 24/10/2026) ──────────────────────────────
+
+const LINHA_DA_SEMANA_MAX = 160;
+const LINHAS_DA_SEMANA_MAX = 3;
+
+/**
+ * A resposta de agenda_textos_do_fechamento → o que o texto da tarde usa. null = a agenda não fala hoje: modo
+ * 'desligado' (ou desconhecido) ou resposta sem a forma esperada. O banco já corta (≤ 3 linhas de ≤ 160 caracteres);
+ * aqui só se confere, e o que passar do combinado fica de fora em vez de alongar o fechamento.
+ */
+export function agendaDoFechamento(data: unknown): AgendaDoFechamento | null {
+  const r = data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : null;
+  if (!r || (r.modo !== "sombra" && r.modo !== "ligado")) return null;
+  const cauda = typeof r.cauda_amanha === "string" && r.cauda_amanha.trim() ? r.cauda_amanha.replace(/\s+/g, " ").trim() : null;
+  const semana = Array.isArray(r.semana_que_vem)
+    ? r.semana_que_vem
+      .filter((l): l is string => typeof l === "string" && !!l.trim() && l.length <= LINHA_DA_SEMANA_MAX)
+      .map((l) => l.replace(/\s+/g, " ").trim())
+      .slice(0, LINHAS_DA_SEMANA_MAX)
+    : [];
+  return { modo: r.modo, cauda, semana };
+}
+
+/**
+ * O que a agenda diria no fechamento das 17:30 (agenda_textos_do_fechamento(p_hoje, p_dia), migration 20261024160500):
+ * a cauda do "Amanhã" e, na quinta, a semana que vem. Enriquecimento: erro (a função ainda não existe, o banco falhou)
+ * = null, e o fechamento sai como na Fase 0. Quem chama decide o que publica (sombra × ligado).
+ */
+export async function lerAgendaDoFechamento(admin: Admin, hoje: string, dia: string): Promise<AgendaDoFechamento | null> {
+  try {
+    const { data, error } = await admin.rpc("agenda_textos_do_fechamento", { p_hoje: hoje, p_dia: dia });
+    if (error) throw error;
+    return agendaDoFechamento(data);
+  } catch (e) {
+    falhou("agenda", e);
     return null;
   }
 }
