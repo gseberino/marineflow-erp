@@ -301,8 +301,11 @@ begin
     r ->> 'status' = 'ok' and r ->> 'numero' = 'ORÇ-00119' and (r ->> 'eh_orcamento')::boolean, r::text);
   r := public.agenda_resolver_os('César', c_hoje);
   v_res := pg_temp.ok(v_res, 'I7 "César" sem aprovar → não está na carteira; diz os números de fora, nunca escolhe',
-    r ->> 'status' = 'nao_achei' and r ->> 'texto' like 'Não encontrei serviço do César na carteira (fora dela: %ORÇ-00119%).'
+    r ->> 'status' = 'nao_achei' and r ->> 'texto' like 'Não encontrei "César" entre os serviços da carteira (fora dela: %ORÇ-00119%).'
     and r ->> 'id' is null, r ->> 'texto');
+  r := public.agenda_resolver_os('a OS da Maria', c_hoje);
+  v_res := pg_temp.ok(v_res, 'I7b nome que não está na carteira: as palavras que buscam, como o dono falou, sem artigo antes',
+    r = '{"status": "nao_achei", "opcoes": [], "texto": "Não encontrei \"Maria\" entre os serviços da carteira."}'::jsonb, r::text);
   r := public.agenda_resolver_os('ORÇ-00119', c_hoje);
   v_res := pg_temp.ok(v_res, 'I8 número fora da carteira diz o status: "O ORÇ-00119 foi enviado e espera a aprovação do cliente."',
     r ->> 'status' = 'fora_da_carteira' and r ->> 'texto' = 'O ORÇ-00119 foi enviado e espera a aprovação do cliente.',
@@ -609,8 +612,12 @@ begin
   begin
     insert into public.os_planejamento (service_order_id, congelada_ate, revisar_em) values (pg_temp.os('74'), '2026-10-30', '2026-10-30');
     r := pg_temp.pr('74');
-    v_res := pg_temp.ok(v_res, 'G1 congelada até sex 30/10: o 1º estado que vale',
-      r ->> 'estado' = 'congelada' and r ->> 'estado_texto' = 'em espera até sex 30/10 (rever sex 30/10)', r ->> 'estado_texto');
+    v_res := pg_temp.ok(v_res, 'G1 congelada até sex 30/10 (rever no mesmo dia): o 1º estado que vale, sem repetir a data',
+      r ->> 'estado' = 'congelada' and r ->> 'estado_texto' = 'em espera até sex 30/10', r ->> 'estado_texto');
+    update public.os_planejamento set revisar_em = '2026-10-28' where service_order_id = pg_temp.os('74');
+    r := pg_temp.pr('74');
+    v_res := pg_temp.ok(v_res, 'G1b rever antes do fim da espera: "(rever qua 28/10)"',
+      r ->> 'estado_texto' = 'em espera até sex 30/10 (rever qua 28/10)', r ->> 'estado_texto');
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'G1 (o cenário quebrou)', false, sqlerrm);

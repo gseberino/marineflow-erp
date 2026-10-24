@@ -68,6 +68,8 @@
 --   · item parcial: o texto começa por "3 de 8 na mão, faltam 5: ".
 --   · orçamento aprovado e nunca convertido (ou sinal pendente): as restrições de material deixam de travar (bloqueia
 --     false) até a conversão e o sinal; a principal do dono passa a ser "converter ou arquivar?".
+--   · textos: "em espera até sex 30/10" sem o "(rever sex 30/10)" repetido; o "não encontrei" por nome sem artigo
+--     ('Não encontrei "Maria" entre os serviços da carteira.', com as palavras que buscam, como o dono falou).
 --
 -- O QUE NÃO MUDA: nenhuma tabela, nenhum dado, get_os_purchase_needs, count_purchase_shortages, as leituras do
 -- Secretário e da tela.
@@ -293,6 +295,7 @@ declare
   v_um      jsonb;
   v_nomes   text[];
   v_opcoes  text[];
+  v_dito    text;
   -- Palavras que não identificam ninguém: "o barco do Lenine", "a lancha do César", "o serviço do Rodrigo".
   c_vazias  constant text[] := array['barco', 'lancha', 'veleiro', 'iate', 'motorhome', 'embarcacao', 'servico',
                                      'orcamento', 'cliente', 'ordem', 'dos', 'das', 'pro', 'pra', 'para'];
@@ -425,9 +428,17 @@ begin
     into v_achados, v_n
     from melhor m;
 
+  -- O nome como o dono falou, só com as palavras que buscam ("a OS da Maria" → "Maria"), sem artigo antes: o banco
+  -- não sabe se é "do" ou "da".
+  v_dito := coalesce(nullif(array_to_string(array(
+              select w from unnest(regexp_split_to_array(v_ref, '\s+')) with ordinality u(w, o)
+               where public._agenda_normal(w) = any (v_tokens) order by o), ' '), ''), v_ref);
+  -- 1ª letra maiúscula sem depender do locale (a mesma regra de _agenda_maiuscula, que vem no pacote seguinte)
+  v_dito := translate(upper(left(v_dito, 1)), 'áàâãäéèêëíìîïóòôõöúùûüçñ', 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇÑ') || substr(v_dito, 2);
+
   if v_n = 0 then
     return jsonb_build_object('status', 'nao_achei', 'opcoes', '[]'::jsonb,
-      'texto', format('Não encontrei serviço do %s na carteira.', v_ref));
+      'texto', format('Não encontrei "%s" entre os serviços da carteira.', v_dito));
   end if;
 
   if (v_achados -> 0 ->> 'passo')::int = 4 then
@@ -437,14 +448,14 @@ begin
       return jsonb_build_object('status', 'fora_da_carteira', 'id', v_um ->> 'id', 'numero', v_um ->> 'numero',
         'cliente_curto', v_um ->> 'cliente_curto', 'eh_orcamento', (v_um ->> 'eh_orcamento')::boolean,
         'situacao', v_um ->> 'situacao', 'opcoes', '[]'::jsonb,
-        'texto', format('Não encontrei serviço do %s na carteira: %s %s %s.', v_ref,
+        'texto', format('Não encontrei "%s" entre os serviços da carteira: %s %s %s.', v_dito,
                         case when (v_um ->> 'eh_orcamento')::boolean then 'o' else 'a' end,
                         v_um ->> 'numero', v_um ->> 'frase'));
     end if;
     return jsonb_build_object('status', 'nao_achei',
       'opcoes', (select jsonb_agg(jsonb_build_object('numero', e ->> 'numero', 'id', e ->> 'id', 'texto', e ->> 'texto'))
                    from jsonb_array_elements(v_achados) e),
-      'texto', format('Não encontrei serviço do %s na carteira (fora dela: %s).', v_ref,
+      'texto', format('Não encontrei "%s" entre os serviços da carteira (fora dela: %s).', v_dito,
                       public._agenda_lista(array(select e ->> 'texto' from jsonb_array_elements(v_achados) e), 4)));
   end if;
 
@@ -1336,8 +1347,10 @@ begin
 
   -- O texto do estado, para vir depois do nome do cliente ("Lenine: falta você dizer se tem peça a comprar").
   v_estado_txt := case v_estado
+    -- "(rever …)" só quando o dia de rever não é o mesmo do fim da espera (é o padrão do rascunho).
     when 'congelada' then 'em espera até ' || public._dia_curto(p.congelada_ate)
-                          || coalesce(' (rever ' || public._dia_curto(p.revisar_em) || ')', '')
+                          || case when p.revisar_em is distinct from p.congelada_ate
+                                  then coalesce(' (rever ' || public._dia_curto(p.revisar_em) || ')', '') else '' end
     when 'concluida' then case so.status when 'invoiced' then 'faturado' else 'concluído' end
     when 'fora_da_carteira' then public._agenda_rotulo_os(so.status, so.quote_status, so.signed_at is not null, so.juntado_em, false)
     when 'em_execucao' then 'em andamento'

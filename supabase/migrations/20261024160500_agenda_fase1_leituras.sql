@@ -87,6 +87,7 @@
 --     itens a comprar)" (a lista de material e a visão da OS), em vez de mandar comprar.
 --   · a prioridade que o dono deu (os_planejamento.prioridade_manual: 1 = passa na frente) é a 1ª chave da ordem de
 --     trabalho do painel (bloco 2, rodada, listas); sem prioridade, depois de todas.
+--   · a visão da OS: "Duração: sem base para estimar: quantos dias?" sem o ponto depois do "?".
 --
 -- O QUE NÃO MUDA: nenhuma tabela, nenhum dado, nenhuma função de P1–P3, my_agenda, o Secretário, as telas.
 --
@@ -1992,7 +1993,7 @@ begin
   if cardinality(v_trav) > 1 then
     l2 := 'O que trava: ' || array_to_string(v_trav, '; ') || case when right(array_to_string(v_trav, '; '), 1) = '?' then '' else '.' end;
   end if;
-  l3 := 'Duração: ' || (v_p #>> '{duracao,texto}') || '.';
+  l3 := 'Duração: ' || (v_p #>> '{duracao,texto}') || case when right(v_p #>> '{duracao,texto}', 1) = '?' then '' else '.' end;
   v_pres := case v_p #>> '{presenca_dono,presenca}'
     when 'abre_e_fecha' then 'você abre e fecha (não fica o dia todo)'
     when 'sempre' then 'você fica o tempo todo'

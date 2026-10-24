@@ -296,6 +296,9 @@ Prazo: passou em seg 21/09 (o meu padrão: 20 dias úteis desde a aprovação).$
     and (select e #>> '{principal,tipo}' from jsonb_array_elements(public._agenda_painel(c_hoje) -> 'oss') e
           where e ->> 'numero' = 'ORÇ-00083') = 'orcamento',
     (public.os_prontidao(pg_temp.os('83'), c_hoje) -> 'restricoes')::text);
+  v_res := pg_temp.igual(v_res, 'A13f agenda_ver(os "ORÇ-00095"): a duração que termina em pergunta não leva ponto depois do "?"',
+    split_part(public.agenda_ver(c_admin, null, null, null, 'ORÇ-00095', null, false, c_hoje) ->> 'texto', E'\n', 2),
+    $e$Duração: sem base para estimar: quantos dias?$e$);
   v_res := pg_temp.igual(v_res, 'A13e agenda_ver(os "Flávio"): o que trava, quando há mais de uma coisa',
     public.agenda_ver(c_admin, null, null, null, 'Flávio', null, false, c_hoje) ->> 'texto',
     $e$Flávio (OS-00104): falta você dizer se "Compressor 12V de…" (pedido em 13/10) chegou.
