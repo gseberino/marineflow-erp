@@ -10,6 +10,9 @@
 //   (24/10/2026, agenda de produção LIGADA) a cauda sem nada marcado vem dela: "nada marcado; nenhum serviço pronto, 7
 //   esperando você (*agenda*)"; na quinta, logo abaixo, até 3 linhas "Semana que vem (projeção): …" se sobrou vaga
 //   (contam como 1 dos REGRAS.maxManha). Na sombra (como nasce), nada disso: o texto é o de antes e vai para o detalhe.
+//   (24/10/2026, Fase 2, P5, agenda automática LIGADA) logo depois do "Amanhã", as linhas do plano — a decisão que espera
+//   o dono, o dia de hoje (conferência + o que mudou sozinho), a semana publicada na quinta, o que mudou, uma pergunta —
+//   nas vagas que sobram de REGRAS.maxManha, da maior perda para a menor. Na sombra, só no detalhe.
 //   Fornecedores esperando há mais de 1 dia: <nomes>.
 //   Escritório: 46 despesas e 4 entradas para conferir, 15 alertas, 6 débitos sem loja; uns 25 min. *escritório*
 //   (sexta) Esta semana o resumo ajudou? Responda *ajudou*, *pouco* ou *atrapalhou*.
@@ -97,6 +100,42 @@ export interface AgendaDoFechamento {
   cauda: string | null;
   /** só no dia do plano (quinta): até 3 linhas "Semana que vem (projeção)", cada uma com até 160 caracteres */
   semana: string[];
+  /**
+   * (24/10/2026, Agenda de Produção Fase 2, P5) As linhas do plano (migration 20261025100500), da maior perda para a
+   * menor. Só as de modo 'ligado' entram no texto (nas vagas que sobram de REGRAS.maxManha); as de 'sombra' são o que a
+   * agenda diria e vão para o detalhe. Ausente = nenhuma (a Fase 2 não aplicada, ou nada a dizer).
+   */
+  linhas?: LinhaDaAgenda[];
+}
+
+export const TIPOS_DE_LINHA_DA_AGENDA = ["decisao", "dia", "semana", "mudancas", "pergunta"] as const;
+
+/** Uma linha da agenda no fechamento (decisão crítica, o dia de hoje, a semana publicada, o que mudou sozinho, uma pergunta). */
+export interface LinhaDaAgenda {
+  tipo: (typeof TIPOS_DE_LINHA_DA_AGENDA)[number];
+  /** o texto pronto do banco ("Agenda, preciso de você. …", "Agenda de hoje: …", "Agenda: publiquei a semana …") */
+  texto: string;
+  /** 0–100: o que se perde sem a linha (decisão 100/80/50, dia 70, semana 60, mudanças 40, pergunta 30) */
+  perda: number;
+  /** a pergunta que a linha mostra (a mostrada_vezes sobe quando o fechamento sai) */
+  pergunta_id: string | null;
+  /** as ações que a linha conta (ficam contadas quando o fechamento sai) */
+  acao_ids: string[];
+  modo: "sombra" | "ligado";
+}
+
+/**
+ * (24/10/2026, Fase 2, P5) As linhas da agenda que cabem no fechamento: as de modo 'ligado', da maior perda para a menor
+ * (desempate pelo tipo e pelo texto), até as vagas que sobram dos itens do Secretário (REGRAS.maxManha − os que ficaram de
+ * hoje; nunca negativo). Na sombra, nenhuma.
+ */
+export function linhasDaAgendaQueCabem(ficaram: number, agenda: AgendaDoFechamento | null | undefined): LinhaDaAgenda[] {
+  const vagas = Math.max(0, REGRAS.maxManha - ficaram);
+  if (!agenda?.linhas?.length || vagas === 0) return [];
+  return agenda.linhas
+    .filter((l) => l.modo === "ligado")
+    .sort((a, b) => b.perda - a.perda || a.tipo.localeCompare(b.tipo) || a.texto.localeCompare(b.texto))
+    .slice(0, vagas);
 }
 
 /** Até quantos caracteres cada item vai na linha "Amanhã" (a coleta monta o da OS para caber nisso). */
@@ -311,23 +350,36 @@ export interface TextoDaTarde {
   /**
    * (24/10/2026, P6) O que da agenda de produção foi PUBLICADO: a cauda dela no "Amanhã" e quantas linhas da semana que
    * vem. Só existe quando a agenda foi lida (DiaDeAmanha.agenda); na sombra é sempre {cauda: false, semana: 0}.
+   * (Fase 2, P5) `linhas` = as linhas do plano que saíram no texto (o que o fechamento registra depois de enviado).
    */
-  agenda?: { cauda: boolean; semana: number };
+  agenda?: { cauda: boolean; semana: number; linhas?: LinhaDaAgenda[] };
 }
 
-/** As linhas da semana que vem que podem ir no fechamento (agenda ligada, dia do plano, com vaga); senão nenhuma. */
+/** (Fase 2, P5) As linhas do plano que vão no fechamento (só o turno do fechamento, só as ligadas, nas vagas). */
+function linhasDoFechamento(d: DadosDaTarde): LinhaDaAgenda[] {
+  if (d.turno !== "fechamento") return [];
+  return linhasDaAgendaQueCabem(d.ficaram.length, d.amanha?.agenda);
+}
+
+/**
+ * As linhas da semana que vem que podem ir no fechamento (agenda ligada, dia do plano, com vaga); senão nenhuma.
+ * (Fase 2, P5) As linhas do plano ocupam as vagas primeiro.
+ */
 function semanaDoFechamento(d: DadosDaTarde): string[] {
   const ag = d.amanha?.agenda;
-  if (d.turno !== "fechamento" || ag?.modo !== "ligado" || !semanaCabe(d.ficaram.length, ag)) return [];
+  if (d.turno !== "fechamento" || ag?.modo !== "ligado" || !semanaCabe(d.ficaram.length + linhasDoFechamento(d).length, ag)) return [];
   return ag.semana;
 }
 
 /** Acrescenta ao texto montado o que da agenda saiu nele (só quando a agenda foi lida). */
-function comAAgenda(t: TextoDaTarde, d: DadosDaTarde, semana: number): TextoDaTarde {
+function comAAgenda(t: TextoDaTarde, d: DadosDaTarde, semana: number, linhas: LinhaDaAgenda[] = []): TextoDaTarde {
   const a = d.amanha;
   if (!a?.agenda) return t;
   const cauda = !!t.texto && a.agenda.modo === "ligado" && !!a.agenda.cauda && a.itens.length === 0;
-  return { ...t, agenda: { cauda, semana: t.texto ? semana : 0 } };
+  return {
+    ...t,
+    agenda: { cauda, semana: t.texto ? semana : 0, ...(a.agenda.linhas ? { linhas: t.texto ? linhas : [] } : {}) },
+  };
 }
 
 /** F1: "Sem resposta desde hoje: Giancarlo S. (10:31); Miguel (09:02, acordei às 09:45) e mais 1." */
@@ -350,8 +402,12 @@ function cabecaDoDia(hoje: string): string {
   return `${nomeDoDia(hoje).toLowerCase()}, ${ddmm(hoje)}`;
 }
 
-function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number): TextoDaTarde {
+function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number, linhasMax = Infinity): TextoDaTarde {
   const topo = topoDaTarde(d, curto);
+  // (24/10/2026, Fase 2, P5) as linhas do plano (decisão, o dia, a semana publicada, o que mudou, uma pergunta), nas vagas
+  // de REGRAS.maxManha, da maior perda para a menor: contam como "há algo" (é a agenda falando com o dono)
+  const linhasTodas = linhasDoFechamento(d);
+  const linhas = linhasTodas.slice(0, linhasMax);
   // (24/10/2026, P6) a semana que vem da agenda ligada, na quinta e com vaga (uma das REGRAS.maxManha): conta como "há
   // algo" — é o plano da semana. A cauda do "Amanhã" NÃO conta (existe todo dia, como a carteira sem data)
   const semanaToda = semanaDoFechamento(d);
@@ -360,7 +416,7 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number): 
   // como "há algo": sem isso, "só se houver algo" viraria descarte do guardado (spec uma voz §6.3-1)
   // (23/10/2026) a carteira sem data NÃO conta: ela existe quase todo dia, e o fechamento passaria a sair sempre
   const temAlgo = d.ficaram.length > 0 || (d.amanha?.itens.length ?? 0) > 0 || (d.amanha?.pagar?.n ?? 0) > 0 ||
-    d.fornecedores.length > 0 || d.pergunta || topo.length > 0 || semanaToda.length > 0;
+    d.fornecedores.length > 0 || d.pergunta || topo.length > 0 || semanaToda.length > 0 || linhasTodas.length > 0;
   if (!temAlgo) return comAAgenda({ texto: null, letras: [] }, d, 0);
   const proxima = proximaRevisaoDaSemana(d.hoje);
   const abertura = d.ficaram.length
@@ -370,6 +426,8 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number): 
   const itens = d.ficaram.map((l) => linhaQueFicou(l, curto ? 90 : 150));
   const fim = [
     d.amanha ? linhaDeAmanha(d.hoje, d.amanha) : null,
+    // (24/10/2026, Fase 2, P5) logo depois do "Amanhã": as linhas do plano (inteiras: o corte tira linha, nunca o meio)
+    ...linhas.map((l) => l.texto),
     // (24/10/2026, P6) logo depois do "Amanhã": a semana que vem (projeção), só na quinta, ligada e com vaga
     ...semana,
     d.fornecedores.length ? `Fornecedores esperando há mais de 1 dia: ${lista(d.fornecedores.map((n) => umaLinha(n, curto ? 18 : 28)))}.` : null,
@@ -380,6 +438,7 @@ function textoDoFechamento(d: DadosDaTarde, curto: boolean, semanaMax: number): 
     { texto: [abertura, ...topo, ...(itens.length ? ["", ...itens] : []), "", ...fim].join("\n"), letras: d.ficaram },
     d,
     semana.length,
+    linhas,
   );
 }
 
@@ -451,16 +510,26 @@ function textoDaRevisaoDoMes(d: DadosDaTarde, curto: boolean): TextoDaTarde {
  * vem*). Sem ela, o caminho é o de antes, byte a byte.
  */
 export function textoDaTarde(d: DadosDaTarde): TextoDaTarde {
-  const montar = (curto: boolean, semanaMax: number) =>
-    d.turno === "fechamento" ? textoDoFechamento(d, curto, semanaMax)
+  const montar = (curto: boolean, semanaMax: number, linhasMax = Infinity) =>
+    d.turno === "fechamento" ? textoDoFechamento(d, curto, semanaMax, linhasMax)
     : d.turno === "revisao_semana" ? textoDaRevisaoDaSemana(d, curto)
     : textoDaRevisaoDoMes(d, curto);
+  // (24/10/2026, Fase 2, P5) com as linhas do plano no fechamento: primeiro cede a semana que vem (projeção), depois as
+  // outras linhas encurtam (curto), e só então sai a linha do plano de menor perda — uma inteira por vez, nunca o meio.
+  // Sem linhas do plano (sombra, desligado, Fase 2 não aplicada), o caminho é o de antes, byte a byte.
+  const L = linhasDoFechamento(d).length;
   const n = semanaDoFechamento(d).length;
-  for (const k of [...new Set([n, Math.min(n, 1), 0])]) {
-    const longo = montar(false, k);
-    if (!longo.texto || longo.texto.length <= LIMITE_DA_TARDE) return longo;
+  for (let l = L; l >= 0; l--) {
+    for (const k of l === L ? [...new Set([n, Math.min(n, 1), 0])] : [0]) {
+      const longo = montar(false, k, l);
+      if (!longo.texto || longo.texto.length <= LIMITE_DA_TARDE) return longo;
+    }
+    if (l > 0) {
+      const curto = montar(true, 0, l);
+      if (curto.texto && curto.texto.length <= LIMITE_DA_TARDE) return curto;
+    }
   }
-  const curto = montar(true, 0);
+  const curto = montar(true, 0, 0);
   if (curto.texto && curto.texto.length > LIMITE_DA_TARDE) {
     return { ...curto, texto: `${curto.texto.slice(0, LIMITE_DA_TARDE - 1).trimEnd()}…` };
   }

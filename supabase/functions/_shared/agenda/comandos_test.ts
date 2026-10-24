@@ -331,3 +331,124 @@ Deno.test("webhook: áudio — a palavra da agenda vale pela transcrição", asy
   assertEquals(await rotearTextoDoDono(TEXTO("[audio]", "audio"), d), "assistente");
   assertEquals(c.despachos, ["Grava."]);
 });
+
+// ─── Fase 2 (P5, spec-fase2.md §11): a conferência do dia, o desfazer e os focos novos ───────────────────────
+
+const dia = (resultado: "cumprido" | "parcial" | "nao_cumprido", motivo: string | null = null, quando: string | null = null): ComandoDaAgenda =>
+  ({ comando: "dia", resultado, motivo, quando });
+const mudancas: ComandoDaAgenda = { comando: "ver", periodo: null, foco: "mudancas", pessoa: null };
+const decisoes: ComandoDaAgenda = { comando: "ver", periodo: null, foco: "decisoes", pessoa: null };
+const plano: ComandoDaAgenda = { comando: "ver", periodo: null, foco: "plano", pessoa: null };
+
+const TABELA_FASE2: Array<[string, ComandoDaAgenda]> = [
+  ["dia feito", dia("cumprido")],
+  ["*Dia feito*", dia("cumprido")],
+  ["Dia feito.", dia("cumprido")],
+  ["🎤 Dia feito.", dia("cumprido")],
+  ["dia feito ontem", dia("cumprido", null, "ontem")],
+  ["dia feito segunda", dia("cumprido", null, "segunda")],
+  ["dia feito segunda-feira", dia("cumprido", null, "segunda feira")],
+  ["dia feito 03/11", dia("cumprido", null, "03/11")],
+  ["dia não cliente", dia("nao_cumprido", "cliente_ou_bem")],
+  ["Dia nao material", dia("nao_cumprido", "material")],
+  ["dia não equipe ontem", dia("nao_cumprido", "equipe_faltou", "ontem")],
+  ["dia não clima", dia("nao_cumprido", "clima")],
+  ["dia não", dia("nao_cumprido")],
+  ["dia não ontem", dia("nao_cumprido", null, "ontem")],
+  ["dia parcial imprevisto", dia("parcial", "imprevisto_tecnico")],
+  ["dia parcial anterior", dia("parcial", "trabalho_anterior")],
+  ["dia parcial informação", dia("parcial", "informacao")],
+  ["dia parcial estimativa 02/11", dia("parcial", "estimativa", "02/11")],
+  ["dia parcial urgência", dia("parcial", "urgencia_outra_os")],
+  ["dia parcial esqueci", dia("parcial", "esqueci")],
+  ["dia parcial", dia("parcial")],
+  ["dia parcial sexta feira", dia("parcial", null, "sexta feira")],
+  ["choveu", { comando: "choveu", quando: null }],
+  ["Choveu hoje!", { comando: "choveu", quando: "hoje" }],
+  ["choveu ontem", { comando: "choveu", quando: "ontem" }],
+  ["desfaz", { comando: "desfazer", alvo: null }],
+  ["Desfazer", { comando: "desfazer", alvo: null }],
+  ["desfaça", { comando: "desfazer", alvo: null }],
+  ["desfaz Nelson", { comando: "desfazer", alvo: "nelson" }],
+  ["desfaz o Vanderlei", { comando: "desfazer", alvo: "vanderlei" }],
+  ["desfaz a semana", { comando: "desfazer", alvo: "semana" }],
+  ["desfaz semana", { comando: "desfazer", alvo: "semana" }],
+  ["desfaz OS-00112", { comando: "desfazer", alvo: "os-00112" }],
+  ["o que mudou?", mudancas],
+  ["O que você mudou", mudancas],
+  ["agenda mudanças", mudancas],
+  ["agenda pendências", decisoes],
+  ["o que você precisa de mim?", decisoes],
+  ["agenda plano", plano],
+  ["Plano da semana", plano],
+];
+
+Deno.test("Fase 2 — lerComandoDaAgenda: cada linha da tabela da spec §11 (motivo → código LCI; o dia como o dono disse)", () => {
+  for (const [texto, esperado] of TABELA_FASE2) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+});
+
+// Uma palavra a mais, o motivo que não existe, o dia que não é dia, a letra do secretário: conversa (vai ao modelo).
+const CONVERSA_FASE2 = [
+  "dia", "feito", "dia feito com o Roberto", "dia feito mas faltou o João", "dia não foi bom", "dia nao chuva forte",
+  "dia parcial porque choveu", "dia feito amanhã", "dia feito semana que vem", "choveu muito", "choveu no Lenine",
+  "desfaz b", "desfaz B", "desfaz a", "desfaz o c", "desfaz item c", "desfaz letra d", "desfaz x", "desfaz o",
+  "desfaz " + "x".repeat(45), "o que mudou no Lenine", "o que você mudou ontem?", "agenda plano do Lenine", "plano",
+  "pendências", "pendencias", "mudou",
+];
+
+Deno.test("Fase 2 — conversa (palavra a mais, motivo ou dia desconhecido, letra do secretário) não é comando", () => {
+  for (const t of CONVERSA_FASE2) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+/** As formas da Fase 2 como chegam (a tabela, com negrito e com ponto). */
+function formasFase2(): string[] {
+  const base = TABELA_FASE2.map(([t]) => t);
+  return [...base, ...base.map((t) => `*${t}*`), ...base.map((t) => `${t}.`)];
+}
+
+Deno.test("Fase 2 — nenhuma palavra nova é lida pelo secretário, pela confirmação, pelo menu, pelo PDF ou pelos comprovantes", () => {
+  for (const t of formasFase2()) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+  }
+});
+
+Deno.test("Fase 2 — nenhuma palavra nova é sim/não/ok, número de menu ou resposta curta para a pergunta ativa", () => {
+  for (const t of formasFase2()) {
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+});
+
+Deno.test("Fase 2 — o secretário continua dono do '<letra> feito', do 'volta X' e do 'desfaz <letra>'; a agenda não lê nenhum", () => {
+  for (const t of ["b feito", "B feito", "volta Flávio", "volta b", "desfaz b", "desfazer c", "desfaz o c", "desfaz item c", "tudo"]) {
+    assert(lerComandoDoSecretario(t) !== null, `deixou de ser do secretário: ${t}`);
+    assertEquals(lerComandoDaAgenda(t), null, t);
+  }
+});
+
+Deno.test("Fase 2 — as frases fixas novas também não começam pela confirmação, não são letra nem número", () => {
+  const primeiras = new Set([...APROVA, ...RECUSA]);
+  for (const f of ["o que mudou", "o que voce mudou", "agenda mudancas", "agenda pendencias", "o que voce precisa de mim", "agenda plano", "plano da semana"]) {
+    assert(frasesDaAgenda().includes(f), `fora da tabela: ${f}`);
+    assert(!primeiras.has(f.split(" ")[0]), f);
+    assert(!/\d/.test(f), f);
+  }
+});
+
+Deno.test("Fase 2 — webhook: com a agenda em sombra ou ligada, 'dia feito' e 'desfaz Nelson' vão ao assistente (o CMP não os lê)", async () => {
+  for (const modo of ["sombra", "ligado"]) {
+    for (const t of ["dia feito", "desfaz Nelson", "choveu", "dia não cliente", "o que mudou?"]) {
+      const { d, c } = depsDoWebhook(modo);
+      assertEquals(await rotearTextoDoDono(TEXTO(t), d), "assistente", `${modo}: ${t}`);
+      assertEquals(c.chamar.length, 0, t);
+    }
+  }
+});

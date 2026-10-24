@@ -25,14 +25,16 @@ import { type EntradaDoBanco, type PagamentoSemExtrato, separarEntradas } from "
 import { despesasPendentesDoMes, faturamentoPorCliente, GRUPOS_DO_RESULTADO } from "./mes.ts";
 import { contarPropostas } from "./secretario.ts";
 import type { OsCrua } from "./secretario-candidatos.ts";
-import { osDaAgenda } from "./secretario-coleta.ts";
+import { osDaAgenda, type OsDaAgenda, osDoPlano } from "./secretario-coleta.ts";
 import type { ItemDaManha } from "./secretario-tarde-regras.ts";
 import {
   type AgendaDoFechamento,
   type ContaDoMes,
   CORTE_DO_ITEM_DE_AMANHA,
   type DiaDeAmanha,
+  type LinhaDaAgenda,
   type Panorama,
+  TIPOS_DE_LINHA_DA_AGENDA,
 } from "./secretario-tarde-texto.ts";
 import type { DadosDoEscritorio } from "./secretario-texto.ts";
 
@@ -226,6 +228,26 @@ export function osSemData(oss: OsCrua[], hoje: string): number {
 }
 
 /**
+ * (24/10/2026, Agenda de Produção Fase 2, P5) As compras que precisam sair, pelo plano de cada OS (agenda_estado_das_os):
+ * a OS ativa (fora a que espera o cliente) com algo a comprar para um dia do plano entre hoje e `ate`.
+ * "comprar 1 item da OS-00203 (reserva para 05/11)".
+ */
+export function comprasDoPlano(oss: OsCrua[], hoje: string, ate: string): Array<{ hora: null; texto: string }> {
+  return oss
+    .filter((o) => ATIVAS.has(o.status) && o.status !== "awaiting_client" && o.plano?.compraPeloPlano && o.plano.compra?.para_dia)
+    .filter((o) => o.plano!.compra!.para_dia! >= hoje && o.plano!.compra!.para_dia! <= ate)
+    .sort((a, b) => a.plano!.compra!.para_dia!.localeCompare(b.plano!.compra!.para_dia!) || a.numero.localeCompare(b.numero))
+    .map((o) => {
+      const c = o.plano!.compra!;
+      const d = c.para_dia!;
+      return {
+        hora: null,
+        texto: `comprar ${c.itens === 1 ? "1 item" : `${c.itens} itens`} da ${o.numero} (${c.reserva ? "reserva" : "marcada"} para ${d.slice(8, 10)}/${d.slice(5, 7)})`,
+      };
+    });
+}
+
+/**
  * O "Amanhã" do fechamento: OS e tarefa do dono com hora (ou com prazo, fora as da automação) no dia `amanha`, e a
  * compra que precisa sair (OS ativa com a tarefa de compra aberta e serviço marcado até o dia seguinte a `amanha`).
  * A OS entra se a janela CRUZA o dia (23/10/2026, D4): a que começou antes sai "em curso desde dd/mm". Com nada
@@ -236,6 +258,12 @@ export async function lerAmanha(
   admin: Admin, dono: { id: string }, hoje: string, amanha: string, oss: OsCrua[],
   /** (16/10/2026, F3) traz as contas a pagar que vencem depois de hoje até `amanha` (voz_unica_regras.amanha_a_pagar) */
   comPagar = false,
+  /**
+   * (24/10/2026, Agenda de Produção Fase 2, P5) a agenda automática está ligada (modo_proposta): as OS de amanhã vêm do
+   * plano (agenda_linhas_do_dia; erro = a janela antiga) e as compras que precisam sair, do plano de cada OS (a R16 está
+   * desligada). Ausente/false = como antes, byte a byte.
+   */
+  planoLigado = false,
 ): Promise<DiaDeAmanha | null> {
   try {
     const { de: inicio, ate: fim } = limitesDoDiaBR(amanha);
@@ -265,21 +293,37 @@ export async function lerAmanha(
       if (!comHoraNoDia && t.source === "automation") continue; // a R16 recriada não é compromisso
       itens.push({ hora: comHoraNoDia ? horaBR(new Date(comHoraNoDia)) : null, texto: String(t.title), ord: comHoraNoDia ?? String(t.due_at ?? "") });
     }
-    for (const o of osDaAgenda(ou(agendadas, "OS de amanhã") as Array<Record<string, unknown>>, inicio, fim, CORTE_DO_ITEM_DE_AMANHA)) {
+    // (24/10/2026, Fase 2, P5) com a agenda automática ligada, as OS do dia saem do plano; a leitura que falha volta à
+    // janela antiga (o "Amanhã" nunca vira "nada marcado" calado)
+    let doPlano: OsDaAgenda[] | null = null;
+    if (planoLigado) {
+      try {
+        const { data, error } = await admin.rpc("agenda_linhas_do_dia", { p_dia: amanha, p_max: CORTE_DO_ITEM_DE_AMANHA, p_hoje: hoje });
+        if (error) throw error;
+        doPlano = osDoPlano(data);
+      } catch (e) {
+        falhou("amanha_plano", e);
+      }
+    }
+    for (const o of doPlano ?? osDaAgenda(ou(agendadas, "OS de amanhã") as Array<Record<string, unknown>>, inicio, fim, CORTE_DO_ITEM_DE_AMANHA)) {
       itens.push({ hora: o.hora, texto: o.texto, ord: o.ord });
     }
     itens.sort((a, b) => a.ord.localeCompare(b.ord));
     const ate = somarDias(amanha, 1);
-    const compras = oss.filter((o) => ATIVAS.has(o.status) && o.tarefa_compra && o.agendada_em)
-      .filter((o) => {
-        const d = diaBR(new Date(o.agendada_em!));
-        return d >= hoje && d <= ate;
-      })
-      .map((o) => {
-        const n = /Comprar (\d+) (item|itens)/.exec(o.tarefa_compra!.titulo);
-        const dia = diaBR(new Date(o.agendada_em!));
-        return { hora: null, texto: `comprar ${n ? `${n[1]} ${n[2]}` : "os itens"} da ${o.numero} (marcada para ${dia.slice(8, 10)}/${dia.slice(5, 7)})` };
-      });
+    // (24/10/2026, Fase 2, P5) com a R16 desligada (a compra pelo plano), a compra que precisa sair é a do plano: o dia
+    // da reserva ou do serviço até o dia seguinte a `amanha`
+    const compras = planoLigado && oss.some((o) => o.plano?.compraPeloPlano)
+      ? comprasDoPlano(oss, hoje, ate)
+      : oss.filter((o) => ATIVAS.has(o.status) && o.tarefa_compra && o.agendada_em)
+        .filter((o) => {
+          const d = diaBR(new Date(o.agendada_em!));
+          return d >= hoje && d <= ate;
+        })
+        .map((o) => {
+          const n = /Comprar (\d+) (item|itens)/.exec(o.tarefa_compra!.titulo);
+          const dia = diaBR(new Date(o.agendada_em!));
+          return { hora: null, texto: `comprar ${n ? `${n[1]} ${n[2]}` : "os itens"} da ${o.numero} (marcada para ${dia.slice(8, 10)}/${dia.slice(5, 7)})` };
+        });
     // F3 (16/10/2026): a conta a pagar que vence até a próxima manhã (o "Amanhã vence" da manhã chega tarde para pagar).
     // Erro aqui = sem a parte do pagar (o resto do "Amanhã" continua).
     let pagar: DiaDeAmanha["pagar"] = null;
@@ -327,7 +371,35 @@ export function agendaDoFechamento(data: unknown): AgendaDoFechamento | null {
       .map((l) => l.replace(/\s+/g, " ").trim())
       .slice(0, LINHAS_DA_SEMANA_MAX)
     : [];
-  return { modo: r.modo, cauda, semana };
+  // (24/10/2026, Fase 2, P5) as linhas da agenda (decisão, dia, semana, mudanças, pergunta), cada uma com o seu modo; a
+  // que vier fora da forma fica de fora (nunca uma linha pela metade). Sem o campo (a migration da Fase 2 não aplicada) = [].
+  const linhas = linhasDaAgenda(r.linhas);
+  return { modo: r.modo, cauda, semana, ...(linhas.length ? { linhas } : {}) };
+}
+
+/** Até quantos caracteres uma linha da agenda pode ter no fechamento (o banco corta em 480; o resto não entra). */
+const LINHA_DA_AGENDA_MAX = 640;
+
+/** (24/10/2026, Fase 2, P5) agenda_textos_do_fechamento(...).linhas → as linhas conferidas, na ordem do banco. */
+export function linhasDaAgenda(v: unknown): LinhaDaAgenda[] {
+  if (!Array.isArray(v)) return [];
+  const r: LinhaDaAgenda[] = [];
+  for (const l of v) {
+    const x = (l ?? {}) as Record<string, unknown>;
+    if (!(TIPOS_DE_LINHA_DA_AGENDA as readonly unknown[]).includes(x.tipo)) continue;
+    if (typeof x.texto !== "string" || !x.texto.trim() || x.texto.length > LINHA_DA_AGENDA_MAX) continue;
+    if (x.modo !== "ligado" && x.modo !== "sombra") continue;
+    const perda = Number(x.perda);
+    r.push({
+      tipo: x.tipo as LinhaDaAgenda["tipo"],
+      texto: x.texto.replace(/\s+/g, " ").trim(),
+      perda: Number.isFinite(perda) ? perda : 0,
+      pergunta_id: typeof x.pergunta_id === "string" ? x.pergunta_id : null,
+      acao_ids: Array.isArray(x.acao_ids) ? x.acao_ids.filter((a): a is string => typeof a === "string") : [],
+      modo: x.modo,
+    });
+  }
+  return r;
 }
 
 /**

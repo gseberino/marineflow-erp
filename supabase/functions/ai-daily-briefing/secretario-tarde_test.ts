@@ -1,7 +1,7 @@
 // O turno da tarde inteiro com um banco de mentira (secretário, Passo 3): o que a chave liga, quando espera a
 // conversa, o "já decidi hoje", a sombra que nunca envia, o rebaixamento sem a manhã nova e o dry-run.
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { dentroDoHorario, rodarTurnoDaTarde, tentativaDoRelogio } from "./secretario-tarde.ts";
+import { dentroDoHorario, registrarAgendaDoFechamento, rodarTurnoDaTarde, tentativaDoRelogio } from "./secretario-tarde.ts";
 
 type Linha = Record<string, unknown>;
 const DONO = { id: "u-dono", phone: "5547999990000" };
@@ -440,4 +440,100 @@ Deno.test("agenda: só o fechamento e a revisão da semana leem a agenda (o 'Ama
   assert(String(r.corpo.texto).includes(CAUDA_DO_BANCO), String(r.corpo.texto));
   assert(!String(r.corpo.texto).includes("Semana que vem"), String(r.corpo.texto));
   assertEquals((r.corpo.detalhe as { agenda: { semana_cabia: boolean } }).agenda.semana_cabia, false);
+});
+
+// ─── (24/10/2026) Agenda de Produção, Fase 2 (P5): as linhas do plano no fechamento e o registro do que saiu ────────
+// O que se protege: o registro (agenda_fechamento_registrar) só depois da tarde gravada E ENVIADA, só com as linhas
+// ligadas que saíram no texto; na sombra (formato sombra, rebaixada ou as linhas em sombra) nada é registrado e o que a
+// agenda diria vai para detalhe.agenda.linhas_diria. Os textos são os do banco de verdade (agenda_fase2_leituras.sql).
+const DECISAO_DO_BANCO = "Agenda, preciso de você. Não cabe tudo até qui 05/11. Qual aceita atrasar? 1) Nelson (OS-00112) atrasa: " +
+  "termina ter 17/11 em vez de qui 05/11; 2) Deixo o Nelson fora do plano por enquanto. Recomendo a 1: é o menor atraso (8 dias úteis). Me responda aqui.";
+const MUDANCA_DO_BANCO = "Agenda, mudei sozinho. Beatriz (OS-00202): de qui 05/11 para qui 05/11 — quem ia não está mais livre. " +
+  "*desfaz Beatriz* volta como estava.";
+const comLinhasDoPlano = (modo: "ligado" | "sombra") => ({
+  ...daAgenda("ligado"), cauda_amanha: null, semana_que_vem: [],
+  linhas: [
+    { tipo: "decisao", texto: DECISAO_DO_BANCO, perda: 50, pergunta_id: "q-nelson", acao_ids: [], modo },
+    { tipo: "mudancas", texto: MUDANCA_DO_BANCO, perda: 40, pergunta_id: null, acao_ids: ["a-beatriz"], modo },
+  ],
+});
+
+async function tardeComPlano(agenda: unknown, p: { formato: string; modo: "sombra" | "novo"; enviado: boolean }) {
+  const f = falsoAdmin(banco({ formato: p.formato, modo: p.modo }), {
+    ...RPCS,
+    agenda_textos_do_fechamento: agenda,
+    resumo_tarde_registrar: { ok: true, novo: true, enviado: p.enviado, calado: false },
+    agenda_fechamento_registrar: { ok: true, perguntas: 1, acoes: 1 },
+  });
+  const r = await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  return { r, p: registrar(f.chamadas)!, chamadas: f.chamadas };
+}
+
+Deno.test("Fase 2: tarde ENVIADA com as linhas do plano — saem depois do 'Amanhã' e o que saiu é registrado (pergunta e ação)", async () => {
+  const { r, p, chamadas } = await tardeComPlano(comLinhasDoPlano("ligado"), { formato: "ligado", modo: "novo", enviado: true });
+  const linhas = String(p.texto).split("\n");
+  const i = linhas.findIndex((l) => l.startsWith("Amanhã (sexta, 16/10)"));
+  assertEquals(linhas.slice(i + 1, i + 3), [DECISAO_DO_BANCO, MUDANCA_DO_BANCO]);
+  const reg = chamadas.find((c) => c.nome === "agenda_fechamento_registrar");
+  assertEquals(reg?.args, {
+    p_hoje: HOJE, p_via: "fechamento",
+    p_linhas: [{ pergunta_id: "q-nelson", acao_ids: [] }, { pergunta_id: null, acao_ids: ["a-beatriz"] }],
+  });
+  // o registro vem DEPOIS de gravar e enfileirar a tarde
+  assert(chamadas.findIndex((c) => c.nome === "resumo_tarde_registrar") < chamadas.findIndex((c) => c.nome === "agenda_fechamento_registrar"));
+  assertEquals(r.corpo.agenda_registrada, { perguntas: 1, acoes: 1 });
+  const ag = (p.detalhe as { agenda: Record<string, unknown> }).agenda;
+  assertEquals(ag.mostrou, true);
+  assertEquals((ag.linhas_mostrou as unknown[]).length, 2);
+});
+
+Deno.test("Fase 2: tarde que NÃO sai (sombra ou rebaixada): o texto leva as linhas ligadas, mas nada é registrado", async () => {
+  for (const p of [{ formato: "sombra", modo: "sombra" as const, enviado: false }, { formato: "ligado", modo: "sombra" as const, enviado: false }]) {
+    const { r, chamadas } = await tardeComPlano(comLinhasDoPlano("ligado"), p);
+    assert(!chamadas.some((c) => c.nome === "agenda_fechamento_registrar"), JSON.stringify(p));
+    assert(!("agenda_registrada" in r.corpo), JSON.stringify(p));
+  }
+});
+
+Deno.test("Fase 2: as linhas em sombra: o texto é o de antes byte a byte, o que diria vai ao detalhe, nada é registrado", async () => {
+  const antes = await tardeComPlano({ ...daAgenda("ligado"), cauda_amanha: null, semana_que_vem: [] }, { formato: "ligado", modo: "novo", enviado: true });
+  const sombra = await tardeComPlano(comLinhasDoPlano("sombra"), { formato: "ligado", modo: "novo", enviado: true });
+  assertEquals(sombra.p.texto, antes.p.texto);
+  assert(!sombra.chamadas.some((c) => c.nome === "agenda_fechamento_registrar"));
+  const ag = (sombra.p.detalhe as { agenda: Record<string, unknown> }).agenda;
+  assertEquals(ag.linhas_diria, [
+    { tipo: "decisao", perda: 50, modo: "sombra", texto: DECISAO_DO_BANCO },
+    { tipo: "mudancas", perda: 40, modo: "sombra", texto: MUDANCA_DO_BANCO },
+  ]);
+  assertEquals(ag.linhas_mostrou, []);
+  assertEquals(ag.mostrou, false);
+});
+
+Deno.test("Fase 2: o registro que falha não derruba o fechamento (só o aviso; a linha volta no próximo)", async () => {
+  const comErro = {
+    rpc: (_n: string, _a: unknown) => Promise.resolve({ data: null, error: { code: "XX000" } }),
+  };
+  const linhas = [{ tipo: "decisao" as const, texto: DECISAO_DO_BANCO, perda: 50, pergunta_id: "q", acao_ids: [], modo: "ligado" as const }];
+  assertEquals(await registrarAgendaDoFechamento(comErro, HOJE, linhas), "erro");
+  const lanca = { rpc: () => { throw new Error("rede"); } };
+  assertEquals(await registrarAgendaDoFechamento(lanca, HOJE, linhas), "erro");
+  const ok = { rpc: () => Promise.resolve({ data: { ok: true, perguntas: 1, acoes: 0 }, error: null }) };
+  assertEquals(await registrarAgendaDoFechamento(ok, HOJE, linhas), { perguntas: 1, acoes: 0 });
+});
+
+Deno.test("Fase 2: com a agenda automática ligada, o 'Amanhã' pede as OS do plano (agenda_linhas_do_dia) e o estado das OS", async () => {
+  const t = { ...banco({ formato: "ligado", modo: "novo" }), agenda_config: [{ id: true, modo_leitura: "ligado", modo_proposta: "ligado", modo_vigia: "ligado" }] };
+  const f = falsoAdmin(t, {
+    ...RPCS,
+    resumo_tarde_registrar: { ok: true, novo: true, enviado: true, calado: false },
+    agenda_linhas_do_dia: [{ hora: "08:00", texto: "Vanderlei (OS-00069), dia 1 de 3: você abre…", ord: "2026-10-16T11:00:00+00:00", os: "o-69" }],
+    agenda_estado_das_os: [],
+  });
+  await rodarTurnoDaTarde(f.admin, { agora: AS_1730, pedido: "tarde", dry: false });
+  const p = registrar(f.chamadas)!;
+  assert(String(p.texto).includes("Amanhã (sexta, 16/10): 08:00 Vanderlei (OS-00069), dia 1 de 3: você abre…."), String(p.texto));
+  const pedidos = f.chamadas.filter((c) => c.nome === "agenda_linhas_do_dia").map((c) => c.args);
+  // a manhã (hoje, corte 40) e o "Amanhã" (corte 50)
+  assertEquals(pedidos, [{ p_dia: HOJE, p_max: 40, p_hoje: HOJE }, { p_dia: "2026-10-16", p_max: 50, p_hoje: HOJE }]);
+  assert(f.chamadas.some((c) => c.nome === "agenda_estado_das_os"));
 });

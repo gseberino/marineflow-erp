@@ -179,3 +179,30 @@ Deno.test("agenda (WhatsApp): o comando do dono responde sem o modelo; quem não
   const conversa = await turnoDaAgenda("como tá a semana?", { modo: "ligado" });
   assertEquals([conversa.r, conversa.rpcs], [null, []]);
 });
+
+// ─── Agenda de Produção, Fase 2 (P5, 24/10/2026): as palavras da conferência e do desfazer, sem o modelo ──────────────
+// A camada é a mesma (index.ts não muda): *dia feito*, *dia não* + motivo, *choveu* e *desfaz* do dono respondem sem o
+// modelo pela RPC deles; de outro número (ou outro login) seguem ao modelo; com a agenda desligada, não interceptam.
+Deno.test("agenda Fase 2 (WhatsApp): *dia feito*, *dia não cliente*, *choveu* e *desfaz Nelson* do dono respondem sem o modelo", async () => {
+  const casos: Array<[string, string]> = [
+    ["dia feito", "agenda_conferir_dia"], ["Dia não cliente", "agenda_conferir_dia"], ["dia parcial imprevisto ontem", "agenda_conferir_dia"],
+    ["choveu", "agenda_choveu"], ["desfaz Nelson", "agenda_desfazer_dito"], ["desfaz a semana", "agenda_desfazer_dito"],
+    ["o que mudou?", "agenda_ver"], ["agenda pendências", "agenda_ver"], ["agenda plano", "agenda_ver"],
+  ];
+  for (const [texto, rpc] of casos) {
+    const r = await turnoDaAgenda(texto, { modo: "ligado" });
+    assert(r.r?.ok, texto);
+    assertEquals(r.rpcs, [rpc], texto);
+  }
+  // de outro número (ou outro login): segue ao modelo, nada é chamado
+  for (const outro of [{ appUserId: "u-outro" }, { phone: "5547900000001" }]) {
+    const r = await turnoDaAgenda("dia feito", { modo: "ligado", ...outro });
+    assertEquals([r.r, r.rpcs], [null, []], JSON.stringify(outro));
+  }
+  // agenda desligada: o *dia feito* vai ao modelo como conversa
+  const desligado = await turnoDaAgenda("dia feito", { modo: "desligado" });
+  assertEquals([desligado.r, desligado.rpcs], [null, []]);
+  // "desfaz B" é do secretário (a letra do dia), não da agenda
+  const letra = await turnoDaAgenda("desfaz B", { modo: "ligado" });
+  assertEquals([letra.r, letra.rpcs], [null, []]);
+});

@@ -10,6 +10,7 @@ import {
   LIMITE_DA_TARDE,
   semanaCabe,
   linhaDaSemana,
+  linhasDaAgendaQueCabem,
   linhaDeAmanha,
   linhaSemResposta,
   linhaDoEscritorio,
@@ -404,4 +405,114 @@ Deno.test("agenda ligada no corte de 1.000: a semana cede primeiro (3 → 1 → 
   assert(e.texto!.length <= LIMITE_DA_TARDE, `${e.texto!.length}`);
   assertEquals(e.agenda!.semana, 0);
   assert(!e.texto!.includes("Semana que vem"));
+});
+
+// ─── (24/10/2026) Agenda de Produção, Fase 2 (P5): as linhas do plano no fechamento ──────────────────────────────
+// Os textos são os do banco de verdade (supabase/tests/agenda_fase2_leituras.sql, F1/F10/F12, a carteira de 29/10
+// publicada pela vigia e o cenário do motor). O que se protege: só as ligadas entram, nas vagas que sobram de
+// REGRAS.maxManha, da maior perda para a menor, logo depois do "Amanhã"; na sombra o texto é o de antes byte a byte; o
+// corte de 1.000 tira linha inteira.
+const SEMANA_F2 = "Agenda: publiquei a semana de 03 a 06/11 (seg 02 é Finados): Vanderlei (ter 03 a qui 05/11), Rodrigo OS-00096 " +
+  "(ter 03/11), Lenine (qua 04 a seg 09/11) e reserva para Flávio (qua 04 e sex 06/11). Fora: Nelson (preciso de você) e Giancarlo " +
+  "(começa qui 26/11). Depois desta semana, só tem 6,5 dias de serviço pronto na fila. *agenda plano* mostra tudo; *desfaz semana* volta.";
+const DECISAO_F2 = "Agenda, preciso de você. Não cabe tudo até qui 05/11. Qual aceita atrasar? 1) Nelson (OS-00112) atrasa: termina ter " +
+  "17/11 em vez de qui 05/11; 2) Deixo o Nelson fora do plano por enquanto. Recomendo a 1: é o menor atraso (8 dias úteis). Me responda aqui.";
+const DIA_F2 = "Agenda de hoje: Antônio (OS-00201) — você abre, Roberto o dia todo, João à tarde. Foi isso? Responda *dia feito* ou conte o que mudou.";
+const PERGUNTA_F2 = "Agenda: O cabo do Caio tinha previsão para ter 03/11. Chegou? (e mais 1 em *agenda pendências*)";
+
+type Linha2 = NonNullable<AgendaDoFechamento["linhas"]>[number];
+const l2 = (tipo: Linha2["tipo"], texto: string, perda: number, modo: "ligado" | "sombra" = "ligado", extra: Partial<Linha2> = {}): Linha2 => ({
+  tipo, texto, perda, pergunta_id: tipo === "decisao" || tipo === "dia" || tipo === "pergunta" ? `q-${tipo}` : null, acao_ids: [], modo, ...extra,
+});
+const comLinhas = (linhas: Linha2[], modo: "sombra" | "ligado" = "ligado"): AgendaDoFechamento => ({ modo, cauda: null, semana: [], linhas });
+const QUATRO = [
+  l2("pergunta", PERGUNTA_F2, 30), l2("semana", SEMANA_F2, 60, "ligado", { acao_ids: ["a1", "a2"] }), l2("decisao", DECISAO_F2, 50),
+  l2("dia", DIA_F2, 70),
+];
+const emSombra = (ls: Linha2[]) => ls.map((l) => ({ ...l, modo: "sombra" as const }));
+
+Deno.test("Fase 2: vagas = REGRAS.maxManha − as que ficaram (0, 1, 2, 3), da maior perda para a menor", () => {
+  assertEquals(REGRAS.maxManha, 3);
+  const tipos = (ficaram: number) => linhasDaAgendaQueCabem(ficaram, comLinhas(QUATRO)).map((l) => l.tipo);
+  assertEquals(tipos(0), ["dia", "semana", "decisao"]);
+  assertEquals(tipos(1), ["dia", "semana"]);
+  assertEquals(tipos(2), ["dia"]);
+  assertEquals(tipos(3), []);
+  assertEquals(tipos(5), [], "nunca negativo");
+  // a decisão que perde amanhã (100) passa na frente de tudo
+  const urgente = l2("decisao", "Agenda, preciso de você. Outra. Me responda aqui.", 100);
+  assertEquals(linhasDaAgendaQueCabem(2, comLinhas([...QUATRO, urgente])).map((l) => l.perda), [100]);
+  // as da sombra nunca entram
+  assertEquals(linhasDaAgendaQueCabem(0, comLinhas(emSombra(QUATRO))), []);
+  assertEquals(linhasDaAgendaQueCabem(0, null), []);
+});
+
+Deno.test("Fase 2: as linhas saem logo depois do 'Amanhã', inteiras, e o que saiu vai em agenda.linhas", () => {
+  const t = textoDaTarde(quinta({ fornecedores: [], escritorio: null }, comLinhas(QUATRO)));
+  const linhas = t.texto!.split("\n");
+  const i = linhas.findIndex((l) => l.startsWith("Amanhã (sexta, 23/10)"));
+  assertEquals(linhas.slice(i + 1), [DIA_F2, SEMANA_F2, DECISAO_F2]);
+  assertEquals(t.agenda?.linhas?.map((l) => l.tipo), ["dia", "semana", "decisao"]);
+  assert(t.texto!.length <= LIMITE_DA_TARDE, `${t.texto!.length}`);
+  assert(!PROIBIDAS.test(t.texto!.replace("agenda pendências", "")), "sem jargão no que a agenda manda");
+  // com o fornecedor (e o escritório) junto, a quinta passaria de 1.000: sai a de menor perda das três (a decisão), inteira
+  const cheio = textoDaTarde(quinta({ fornecedores: ["SR Contabilidade"] }, comLinhas(QUATRO)));
+  assert(cheio.texto!.length <= LIMITE_DA_TARDE, `${cheio.texto!.length}`);
+  assertEquals(cheio.agenda?.linhas?.map((l) => l.tipo), ["dia", "semana"]);
+  const lc = cheio.texto!.split("\n");
+  const j = lc.findIndex((l) => l.startsWith("Amanhã (sexta, 23/10)"));
+  assertEquals(lc.slice(j + 1, j + 4), [DIA_F2, SEMANA_F2, "Fornecedores esperando há mais de 1 dia: SR Contabilidade."]);
+});
+
+Deno.test("Fase 2: com 2 que ficaram de hoje, só 1 linha do plano (a de maior perda); as letras do Secretário vêm antes", () => {
+  const t = textoDaTarde(quinta({ ficaram: ["B", "C"].map((l) => linha(l, `${l} cobrança`)) }, comLinhas(QUATRO)));
+  assertEquals(t.agenda?.linhas?.map((l) => l.tipo), ["dia"]);
+  assertStringIncludes(t.texto!, DIA_F2);
+  assert(!t.texto!.includes(SEMANA_F2) && !t.texto!.includes(DECISAO_F2));
+});
+
+Deno.test("Fase 2: a linha do plano conta como 'há algo' (sem ela, o dia calado; com ela, a mensagem)", () => {
+  assertEquals(textoDaTarde(quinta({ fornecedores: [] }, comLinhas([]))).texto, null);
+  const comDecisao = textoDaTarde(quinta({ fornecedores: [] }, comLinhas([l2("decisao", DECISAO_F2, 50)])));
+  assertStringIncludes(comDecisao.texto!, DECISAO_F2);
+  // só da sombra: continua calado
+  assertEquals(textoDaTarde(quinta({ fornecedores: [] }, comLinhas([l2("decisao", DECISAO_F2, 50, "sombra")]))).texto, null);
+});
+
+Deno.test("Fase 2: na sombra (as linhas com modo 'sombra', ou a agenda em sombra) o fechamento é o de antes, byte a byte", () => {
+  for (const extra of [{}, { ficaram: ["B"].map((l) => linha(l, `${l} cobrança`)) }, { fornecedores: [] as string[] }]) {
+    const antes = textoDaTarde(quinta(extra)).texto;
+    assertEquals(textoDaTarde(quinta(extra, comLinhas(emSombra(QUATRO)))).texto, antes, JSON.stringify(extra));
+    assertEquals(textoDaTarde(quinta(extra, comLinhas(emSombra(QUATRO), "sombra"))).texto, antes, JSON.stringify(extra));
+  }
+  // a revisão da semana e a do mês não levam as linhas do plano
+  const rs = (ag: AgendaDoFechamento | null) =>
+    textoDaTarde(dados({ hoje: "2026-10-19", turno: "revisao_semana", amanha: { dia: "2026-10-20", itens: [], carteira: { semData: 6 }, agenda: ag } })).texto;
+  assertEquals(rs(comLinhas(QUATRO)), rs(null));
+});
+
+Deno.test("Fase 2: no corte de 1.000 a linha do plano de menor perda sai inteira (nunca no meio); as outras encurtam antes", () => {
+  const base = { fornecedores: ["SR Contabilidade", "Kamell", "Dometic"], pergunta: true };
+  const t = textoDaTarde(quinta({ ...base, ficaram: [linha("B", `B ${"y".repeat(110)}`)] }, comLinhas(QUATRO)));
+  assert(t.texto!.length <= LIMITE_DA_TARDE, `${t.texto!.length}`);
+  for (const l of t.agenda!.linhas!) assertStringIncludes(t.texto!, l.texto);
+  for (const l of QUATRO) {
+    if (t.texto!.includes(l.texto.slice(0, 40))) assertStringIncludes(t.texto!, l.texto, `cortou no meio: ${l.tipo}`);
+  }
+  // muito longo: as linhas do plano saem (da menor perda para a maior) até caber
+  const enorme = textoDaTarde(quinta({ ...base, ficaram: ["B", "C"].map((l) => linha(l, `${l} ${"z".repeat(400)}`)) }, comLinhas(QUATRO)));
+  assert(enorme.texto!.length <= LIMITE_DA_TARDE, `${enorme.texto!.length}`);
+  assert((enorme.agenda!.linhas ?? []).length <= 1);
+  for (const l of QUATRO) {
+    if (enorme.texto!.includes(l.texto.slice(0, 40))) assertStringIncludes(enorme.texto!, l.texto, `cortou no meio: ${l.tipo}`);
+  }
+});
+
+Deno.test("Fase 2: com as linhas do plano a projeção da semana (Fase 1) só entra se ainda sobrar vaga", () => {
+  const ag: AgendaDoFechamento = { modo: "ligado", cauda: CAUDA, semana: SEMANA, linhas: [l2("decisao", DECISAO_F2, 50), l2("dia", DIA_F2, 70)] };
+  const t = textoDaTarde(quinta({ ficaram: [linha("B", "B cobrança")] }, ag));
+  assertEquals(t.agenda?.linhas?.length, 2);
+  assertEquals(t.agenda?.semana, 0, "1 que ficou + 2 linhas do plano = as 3 vagas");
+  const so1 = textoDaTarde(quinta({}, { ...ag, linhas: [l2("dia", DIA_F2, 70)] }));
+  assertEquals([so1.agenda?.linhas?.length, so1.agenda?.semana], [1, 3]);
 });

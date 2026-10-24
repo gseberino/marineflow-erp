@@ -12,10 +12,17 @@ import {
   lerModoDaLeitura,
   modoDaLeituraNoBanco,
   rascunhoAbertoNoBanco,
+  modoDaPropostaNoBanco,
+  modosDaAgendaNoBanco,
+  RPC_CHOVEU,
+  RPC_CONFERIR_DIA,
   RPC_DESCARTAR,
+  RPC_DESFAZER_DITO,
   RPC_GRAVAR,
   TEXTO_SEM_AGENDA,
+  TEXTO_SEM_ANOTAR,
   TEXTO_SEM_DESCARTAR,
+  TEXTO_SEM_DESFAZER,
   TEXTO_SEM_GRAVAR,
   TEXTO_SO_ADMIN,
 } from "./executar.ts";
@@ -304,4 +311,102 @@ Deno.test("camada: um executar que lance ainda vira a frase ao dono (o turno nã
   };
   assertEquals(await camadaDaAgenda("grava", d), { comando: { comando: "gravar" }, texto: TEXTO_SEM_GRAVAR, ok: false });
   assertEquals((await camadaDaAgenda("agenda", d))?.texto, TEXTO_SEM_AGENDA);
+});
+
+// ─── Fase 2 (P5): dia feito, dia não/parcial + motivo, choveu, desfaz e os focos novos ──────────────────────────
+
+Deno.test("Fase 2 — chamadaDoComando: cada palavra vai à RPC dela, como o dono disse (o banco resolve o dia e o alvo)", () => {
+  const c = (t: string, canal?: "whatsapp" | "painel") => chamadaDoComando(lerComandoDaAgenda(t)!, AUTOR, undefined, canal);
+  assertEquals(c("dia feito"), {
+    rpc: RPC_CONFERIR_DIA,
+    params: { p_autor: AUTOR, p_resultado: "cumprido", p_motivo: null, p_quando: null, p_canal: "whatsapp" },
+  });
+  assertEquals(c("Dia não cliente ontem", "painel"), {
+    rpc: RPC_CONFERIR_DIA,
+    params: { p_autor: AUTOR, p_resultado: "nao_cumprido", p_motivo: "cliente_ou_bem", p_quando: "ontem", p_canal: "painel" },
+  });
+  assertEquals(c("dia parcial"), {
+    rpc: RPC_CONFERIR_DIA,
+    params: { p_autor: AUTOR, p_resultado: "parcial", p_motivo: null, p_quando: null, p_canal: "whatsapp" },
+  });
+  assertEquals(c("choveu ontem"), { rpc: RPC_CHOVEU, params: { p_autor: AUTOR, p_quando: "ontem", p_canal: "whatsapp" } });
+  assertEquals(c("desfaz Nelson"), { rpc: RPC_DESFAZER_DITO, params: { p_autor: AUTOR, p_alvo: "nelson", p_canal: "whatsapp" } });
+  assertEquals(c("desfaz a semana").params.p_alvo, "semana");
+  assertEquals(c("desfaz").params.p_alvo, null);
+  const base = { p_autor: AUTOR, p_periodo: null, p_pessoa: null, p_os: null, p_simular: null, p_simular_aprovacao: false };
+  assertEquals(c("o que mudou?"), { rpc: RPC_AGENDA_VER, params: { ...base, p_foco: "mudancas" } });
+  assertEquals(c("agenda pendências"), { rpc: RPC_AGENDA_VER, params: { ...base, p_foco: "decisoes" } });
+  assertEquals(c("plano da semana"), { rpc: RPC_AGENDA_VER, params: { ...base, p_foco: "plano" } });
+  // o dia fixo só em teste/eval
+  assertEquals(chamadaDoComando(lerComandoDaAgenda("dia feito")!, AUTOR, "2026-11-03").params.p_hoje, "2026-11-03");
+});
+
+Deno.test("Fase 2 — executar: o texto do banco volta como veio, o canal vai junto; o modo fora de 'ligado' é resposta, não erro", async () => {
+  const anotado = "Anotado, hoje (ter 03/11): Vanderlei (OS-00069) feito, com você e Roberto. Vanderlei agora está em andamento.";
+  const emTeste = "Ainda não tenho plano publicado: a agenda automática está em teste.";
+  const pede = "Me diga o motivo junto: *dia parcial imprevisto* (ou material, cliente, equipe, clima, anterior, informação, estimativa, urgência, esqueci).";
+  const c = cliente({
+    agenda_conferir_dia: { data: { ok: true, mudou: true, texto: anotado } },
+    agenda_choveu: { data: { ok: false, mudou: false, texto: emTeste } },
+    agenda_desfazer_dito: { data: { ok: false, status: "ambiguo", texto: "Qual? Nelson (…) ou Vanderlei (…)? Diga *desfaz* e o nome." } },
+  });
+  assertEquals(await executarComandoDaAgenda(c, lerComandoDaAgenda("dia feito")!, { autor: AUTOR, canal: "painel" }), { ok: true, texto: anotado });
+  assertEquals(await executarComandoDaAgenda(c, lerComandoDaAgenda("choveu")!, { autor: AUTOR }), { ok: true, texto: emTeste });
+  assertEquals((await executarComandoDaAgenda(c, lerComandoDaAgenda("desfaz")!, { autor: AUTOR })).texto,
+    "Qual? Nelson (…) ou Vanderlei (…)? Diga *desfaz* e o nome.");
+  assertEquals(c.chamadas.map((x) => [x.nome, x.args.p_canal]), [
+    ["agenda_conferir_dia", "painel"], ["agenda_choveu", "whatsapp"], ["agenda_desfazer_dito", "whatsapp"],
+  ]);
+  const p = cliente({ agenda_conferir_dia: { data: { ok: false, mudou: false, pede: "motivo", texto: pede } } });
+  assertEquals((await executarComandoDaAgenda(p, lerComandoDaAgenda("dia parcial")!, { autor: AUTOR })).texto, pede);
+  assertEquals([c.logs(), p.logs()], [[], []]);
+});
+
+Deno.test("Fase 2 — executar nunca lança: o erro do *dia feito*, do *choveu* e do *desfaz* vira a frase certa e o log", async () => {
+  const casos: Array<[string, string, Resposta, string]> = [
+    ["dia feito", RPC_CONFERIR_DIA, { error: { code: "XX000", message: "deu ruim" } }, TEXTO_SEM_ANOTAR],
+    ["dia nao cliente", RPC_CONFERIR_DIA, { lanca: true }, TEXTO_SEM_ANOTAR],
+    ["choveu", RPC_CHOVEU, { data: { ok: true } }, TEXTO_SEM_ANOTAR],
+    ["desfaz nelson", RPC_DESFAZER_DITO, { error: { code: "40001" } }, TEXTO_SEM_DESFAZER],
+    ["desfaz", RPC_DESFAZER_DITO, { error: { code: "42501", message: "Só o administrador mexe na agenda." } }, TEXTO_SO_ADMIN],
+    ["o que mudou", RPC_AGENDA_VER, { lanca: true }, TEXTO_SEM_AGENDA],
+  ];
+  for (const [t, rpc, r, frase] of casos) {
+    const cmd = lerComandoDaAgenda(t)!;
+    const c = cliente({ [rpc]: r });
+    const log = cliente();
+    assertEquals(await executarComandoDaAgenda(c, cmd, { autor: AUTOR, log, canal: "whatsapp" }), { ok: false, texto: frase }, t);
+    const [l] = log.logs();
+    assertEquals([l.p_context, l.p_action, (l.p_details as Record<string, unknown>).rpc], ["agenda", `comando:${cmd.comando}`, rpc], t);
+  }
+  for (const f of [TEXTO_SEM_ANOTAR, TEXTO_SEM_DESFAZER]) assert(!/erro|error|rpc|ferramenta|pend[eê]ncia|registro/i.test(f), f);
+});
+
+Deno.test("Fase 2 — camada: *dia feito* do dono com a agenda em sombra ou ligada responde sem o modelo; desligada não intercepta", async () => {
+  for (const modo of ["sombra", "ligado"] as const) {
+    const { d, c } = deps({ modo, texto: "Anotado." });
+    assertEquals((await camadaDaAgenda("dia feito", d))?.comando, { comando: "dia", resultado: "cumprido", motivo: null, quando: null });
+    assertEquals(c.executar, ["dia"]);
+  }
+  for (const t of ["dia feito", "choveu", "desfaz Nelson", "o que mudou"]) {
+    const { d, c } = deps({ modo: "desligado", rascunho: true });
+    assertEquals(await camadaDaAgenda(t, d), null, t);
+    assertEquals([c.rascunho, c.executar.length], [0, 0], t);
+  }
+  // quem não é o dono segue ao modelo
+  const { d, c } = deps({ dono: false });
+  assertEquals(await camadaDaAgenda("desfaz semana", d), null);
+  assertEquals(c.executar.length, 0);
+});
+
+Deno.test("Fase 2 — modosDaAgendaNoBanco: proposta e vigia num SELECT; erro, coluna ausente, sem linha ou exceção = desligado", async () => {
+  assertEquals(await modosDaAgendaNoBanco(adminDoModo({ data: { modo_proposta: "ligado", modo_vigia: "sombra" } })),
+    { proposta: "ligado", vigia: "sombra" });
+  assertEquals(await modosDaAgendaNoBanco(adminDoModo({ data: { modo_proposta: " Sombra ", modo_vigia: "xis" } })),
+    { proposta: "sombra", vigia: "desligado" });
+  for (const r of [{ error: { code: "42703" } }, { data: null }, { lanca: true }]) {
+    assertEquals(await modosDaAgendaNoBanco(adminDoModo(r)), { proposta: "desligado", vigia: "desligado" }, JSON.stringify(r));
+  }
+  assertEquals(await modoDaPropostaNoBanco(adminDoModo({ data: { modo_proposta: "ligado" } })), "ligado");
+  assertEquals(await modoDaPropostaNoBanco(adminDoModo({ error: { code: "42P01" } })), "desligado");
 });

@@ -733,7 +733,9 @@ insert into _resultado values
 --                    agenda_fechamento_registrar e agenda_acorde_registrado. Os passos da vigia e a agenda_saude não;
 --   20261025100400 — os pedidos da conversa: agenda_rascunho_marcar, agenda_rascunho_aplicar, agenda_rascunho_desfazer,
 --                    agenda_rascunho_andamento e agenda_propor_dito (conferem o administrador dentro). A numeração
---                    (agenda_decisoes_abertas, agenda_propostas_abertas) e o _agenda_aplicar_pedido não.
+--                    (agenda_decisoes_abertas, agenda_propostas_abertas) e o _agenda_aplicar_pedido não;
+--   20261025100500 — as leituras: _agenda_pessoa e _agenda_payees_do_usuario (só devolvem o nome e os payees que quem
+--                    lê pode ver: payees é fechada para o técnico). As leituras e os textos não.
 create temp table _definer_da_agenda (nome text primary key) on commit drop;
 insert into _definer_da_agenda values
   ('agenda_disponibilidade_semear'), ('agenda_rascunho_planejar'), ('agenda_rascunho_material'),
@@ -746,7 +748,8 @@ insert into _definer_da_agenda values
   ('agenda_registrar_dia'), ('agenda_conferir_dia'), ('agenda_choveu'), ('agenda_desfazer_dito'), ('agenda_replanejar'),
   ('agenda_vigiar'), ('agenda_fechamento_registrar'), ('agenda_acorde_registrado'),
   ('agenda_rascunho_marcar'), ('agenda_rascunho_aplicar'), ('agenda_rascunho_desfazer'), ('agenda_rascunho_andamento'),
-  ('agenda_propor_dito');
+  ('agenda_propor_dito'),
+  ('_agenda_pessoa'), ('_agenda_payees_do_usuario');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

@@ -259,10 +259,13 @@ async function fetchConflicts(params: {
  * traz o prefixo ("OS-00060", "ORÇ-00112"): vai como vem — também o da alocação da agenda de
  * produção (source 'alocacao', Fase 2), que é o número da OS em que a pessoa está. Exportada para o
  * teste.
+ *
+ * (24/10/2026, Fase 2, P5) Com a agenda automática, a OS com alocação ocupa um período por turno
+ * (get_agenda_conflicts devolve uma linha por meio-dia): a mesma OS aparece uma vez só no aviso.
  */
 export function conflictMessage(conflicts: any[]): string {
-  const labels = conflicts.map((c: any) =>
-    c.source === 'service_order' || c.source === 'alocacao' ? c.label : `"${c.label}"`).join(', ');
+  const labels = [...new Set(conflicts.map((c: any) =>
+    c.source === 'service_order' || c.source === 'alocacao' ? c.label : `"${c.label}"`))].join(', ');
   return `Conflito de agenda: o responsável já tem ${labels} nesse horário.`;
 }
 

@@ -9,6 +9,11 @@
 // Erro na leitura de cobranças, orçamentos, OS ou do histórico LANÇA: sem eles a manhã nova sairia
 // errada, e quem chama volta ao resumo de sempre. Agenda, promessas, vencimentos, falhas da noite e os
 // dias de conversa são enriquecimento: erro = vazio, com aviso no log (só o código).
+//
+// (24/10/2026, Agenda de Produção Fase 2, P5) Com a agenda automática LIGADA (agenda_config.modo_proposta / modo_vigia):
+// o "Hoje" lê as OS do plano (agenda_linhas_do_dia), e cada OS leva o que o plano diz dela (agenda_estado_das_os) para
+// os_parada e os_esperando_compra. Erro em qualquer dos dois = o comportamento de antes. Em sombra ou desligado nada
+// disso é lido: a manhã sai byte a byte como antes.
 
 import { ultimoDiaDaValidade } from "../_shared/pdf/documento.ts";
 import { diaBR, horaBR } from "../_shared/pdf/datas.ts";
@@ -16,7 +21,8 @@ import { cruzaODia, filtroQueCruza, limitesDoDiaBR } from "../_shared/agenda-dia
 import { ddmm, somarDias, umaLinha } from "../_shared/secretario/base.ts";
 import { STATUS_OS_ATIVAS } from "../_shared/service-order-status.ts";
 import { contatoEncerrou, conversaEncerradaPeloContato, ULTIMAS_RECEBIDAS } from "../_shared/whatsapp/contato-encerrou.ts";
-import type { ColetaDoSecretario, ConversaCrua, OrcamentoCru, OsCrua } from "./secretario-candidatos.ts";
+import { type ModosDaAgenda, modosDaAgendaNoBanco } from "../_shared/agenda/executar.ts";
+import type { ColetaDoSecretario, ConversaCrua, OrcamentoCru, OsCrua, PlanoDaOsCrua } from "./secretario-candidatos.ts";
 import { adiadoPor, type PassagemDoHistorico } from "./secretario-selecao.ts";
 import { CORTE_DA_AGENDA_DE_HOJE, type DadosDeHoje, type NaRua } from "./secretario-texto.ts";
 
@@ -65,6 +71,57 @@ export function osDaAgenda(linhas: Array<Record<string, unknown>>, de: string, a
     });
   }
   return r;
+}
+
+/**
+ * (24/10/2026, Agenda de Produção Fase 2, P5) As OS do plano num dia (agenda_linhas_do_dia: o texto pronto do banco,
+ * "Lenine (OS-00074), dia 1 de 2: você abre, Roberto o dia todo", já cortado em p_max) → os itens do "Hoje"/"Amanhã".
+ * Resposta fora da forma LANÇA: quem chama volta à janela antiga (osDaAgenda), nunca a "nada na agenda" calado.
+ */
+export function osDoPlano(data: unknown): OsDaAgenda[] {
+  if (!Array.isArray(data)) throw new Error("agenda_linhas_do_dia respondeu sem a lista");
+  return data.map((l) => {
+    const x = (l ?? {}) as Record<string, unknown>;
+    if (typeof x.texto !== "string" || !x.texto.trim() || typeof x.ord !== "string") {
+      throw new Error("agenda_linhas_do_dia respondeu uma linha sem texto");
+    }
+    return { hora: typeof x.hora === "string" && x.hora ? x.hora : null, texto: x.texto, ord: x.ord };
+  });
+}
+
+/**
+ * (24/10/2026, P5) agenda_estado_das_os → o plano de cada OS (por id), com o que cada modo liga: a "parada" pelo plano
+ * só com a vigia ligada (a R2 desligada), a compra pelo plano só com a proposta ligada (a R16 desligada).
+ */
+export function planosDasOs(linhas: unknown, modos: ModosDaAgenda): Map<string, PlanoDaOsCrua> {
+  if (!Array.isArray(linhas)) throw new Error("agenda_estado_das_os respondeu sem a lista");
+  const m = new Map<string, PlanoDaOsCrua>();
+  for (const l of linhas) {
+    // setof jsonb vem como [{agenda_estado_das_os: {...}}] ou [{...}], conforme o cliente
+    const raw = (l ?? {}) as Record<string, unknown>;
+    const x = (raw.agenda_estado_das_os && typeof raw.agenda_estado_das_os === "object" ? raw.agenda_estado_das_os : raw) as Record<string, unknown>;
+    if (typeof x.os !== "string") continue;
+    const c = x.compra && typeof x.compra === "object" ? x.compra as Record<string, unknown> : null;
+    m.set(x.os, {
+      programada: x.programada === true,
+      fixada: x.fixada === true,
+      proximo_dia: typeof x.proximo_dia === "string" ? x.proximo_dia : null,
+      parada: x.parada === true,
+      desde: typeof x.desde === "string" ? x.desde.slice(0, 10) : null,
+      compra: c && typeof c.texto === "string"
+        ? {
+          itens: Number(c.itens ?? 0),
+          compre_ate: typeof c.compre_ate === "string" ? c.compre_ate : null,
+          para_dia: typeof c.para_dia === "string" ? c.para_dia : null,
+          reserva: c.reserva === true,
+          texto: c.texto,
+        }
+        : null,
+      paradaPeloPlano: modos.vigia === "ligado",
+      compraPeloPlano: modos.proposta === "ligado",
+    });
+  }
+  return m;
 }
 
 /** O que o resumo de hoje já leu e a coleta reaproveita. */
@@ -126,7 +183,14 @@ export async function coletar(admin: Admin, p: {
   dono: { id: string; phone: string };
   modo: "sombra" | "novo";
   doResumo: DoResumoDeHoje;
-}): Promise<{ coleta: ColetaDoSecretario; naRua: NaRua; deHoje: DadosDeHoje; historico: PassagemDoHistorico[] }> {
+}): Promise<{
+  coleta: ColetaDoSecretario;
+  naRua: NaRua;
+  deHoje: DadosDeHoje;
+  historico: PassagemDoHistorico[];
+  /** (24/10/2026, Fase 2, P5) os modos da agenda de produção lidos agora (erro = desligado) */
+  modos: ModosDaAgenda;
+}> {
   const { agora, hoje, dono } = p;
   const amanha = somarDias(hoje, 1);
   const { de: inicioDoDia, ate: fimDoDia } = limitesDoDiaBR(hoje);
@@ -315,6 +379,21 @@ export async function coletar(admin: Admin, p: {
     };
   });
 
+  // ── (24/10/2026, Agenda de Produção Fase 2, P5) o plano das OS, só com a agenda automática ligada ──
+  // Com a proposta ligada a R16 para (a compra vem do plano); com a vigia ligada a R2 para (a "parada" vem do plano).
+  // Em sombra ou desligado nada é lido e a manhã é a de antes, byte a byte. Erro = o comportamento de antes (sem plano).
+  const modos = await modosDaAgendaNoBanco(admin);
+  if (modos.proposta === "ligado" || modos.vigia === "ligado") {
+    try {
+      const { data, error } = await admin.rpc("agenda_estado_das_os", { p_hoje: hoje });
+      if (error) throw error;
+      const planos = planosDasOs(data, modos);
+      for (const o of oss) o.plano = planos.get(o.id) ?? null;
+    } catch (e) {
+      falhou("agenda_estado_das_os", e);
+    }
+  }
+
   // ── quem espera resposta (a lista do resumo de hoje) + cliente pelo telefone + dias de conversa ──
   const esperando = p.doResumo.esperando;
   const fones = esperando.map((w) => String(w.phone ?? "")).filter(Boolean);
@@ -405,7 +484,19 @@ export async function coletar(admin: Admin, p: {
       if (!comHora && t.source === "automation") continue;
       itens.push({ hora: comHora ? horaBR(new Date(comHora)) : null, titulo: String(t.title), ord: comHora ?? String(t.due_at ?? "") });
     }
-    for (const o of osDaAgenda(ou(agendadas, "OS agendadas") as Array<Record<string, unknown>>, inicioDoDia, fimDoDia, CORTE_DA_AGENDA_DE_HOJE)) {
+    // (24/10/2026, Fase 2, P5) com a agenda automática ligada as OS do dia saem do plano (quem vai, o dia n de N); se a
+    // leitura do plano falhar, a janela antiga (nunca "nada na agenda" calado)
+    let doDia: OsDaAgenda[] | null = null;
+    if (modos.proposta === "ligado") {
+      try {
+        const { data, error } = await admin.rpc("agenda_linhas_do_dia", { p_dia: hoje, p_max: CORTE_DA_AGENDA_DE_HOJE, p_hoje: hoje });
+        if (error) throw error;
+        doDia = osDoPlano(data);
+      } catch (e) {
+        falhou("agenda_plano", e);
+      }
+    }
+    for (const o of doDia ?? osDaAgenda(ou(agendadas, "OS agendadas") as Array<Record<string, unknown>>, inicioDoDia, fimDoDia, CORTE_DA_AGENDA_DE_HOJE)) {
       itens.push({ hora: o.hora, titulo: o.texto, ord: o.ord });
     }
     deHoje.agenda = itens.sort((a, b) => a.ord.localeCompare(b.ord)).map(({ hora, titulo }) => ({ hora, titulo }));
@@ -452,5 +543,5 @@ export async function coletar(admin: Admin, p: {
     falhou("falhas_da_noite", e);
   }
 
-  return { coleta: { cobrancas, conversas, orcamentos, oss }, naRua, deHoje, historico };
+  return { coleta: { cobrancas, conversas, orcamentos, oss }, naRua, deHoje, historico, modos };
 }

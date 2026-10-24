@@ -2708,3 +2708,10 @@ porque só o dono pode preenchê-las.
   Roberto passa a ver os dele quando o dono reativar o login.
 - **Não corrigido no P1** (só registro): `get_agenda_conflicts` ganha o ramo das alocações e do dono (`payees.app_user_id`) no
   P5 (migration `20261025100500`, mesma assinatura). Reativar o login do Roberto é decisão do dono.
+- **P5 (24/10/2026, migration `20261025100500`, NÃO APLICADA):** `get_agenda_conflicts` recriada com a mesma assinatura e a
+  mesma ACL (authenticated, service_role; sem anon): a OS com alocação vigente ocupa só os períodos das alocações dela (o turno,
+  não a janela corrida — a OS-00104 com janela de 06 a 08/10 e alocação só na manhã de 07/10 dá conflito só das 08 às 12 de
+  07/10); o ramo novo `alocacao` traz os meios-dias do payee ligado ao login em OS em que ele não é técnico (é por aí que o dono
+  aparece, pelo payee sócio). O "o que o Roberto faz amanhã?" (`agenda_dia_da_pessoa`) e a `my_agenda` leem o plano pelo payee,
+  com ou sem login. Provado em `supabase/tests/agenda_fase2_leituras.sql` (C1–C4). O aviso da tela (`conflictMessage`) cita a
+  OS uma vez só quando ela ocupa dois turnos.

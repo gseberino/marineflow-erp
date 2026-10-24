@@ -5,6 +5,7 @@ import { ehTipoDeEntidadeValido, RELATED_ENTITY_TYPES } from "../../agenda-entit
 // LGPD (leva 8): o nome livre da conta a pagar pode trazer o CPF que o banco escreve nele — sai mascarado.
 import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
 import { diaBR, filtroQueCruza, horasNoDia, JORNADA_PADRAO_HORAS, limitesDoDiaBR } from "../../agenda-dia.ts";
+import { modoDaPropostaNoBanco } from "../../agenda-modo.ts";
 
 // Agenda & Tarefas 2.0 — tool set completo (Fase 3 do plano
 // plans/marineflow-agenda-tarefas.md §8). O agente é operador da agenda:
@@ -32,6 +33,55 @@ export function dayRangeBRT(date?: string): { from: string; to: string; day: str
   }
   const { de, ate, dia } = limitesDoDiaBR(alvo);
   return { from: de, to: ate, day: dia };
+}
+
+/**
+ * (24/10/2026, Agenda de Produção Fase 2, P5) As OS de um dia pelo plano (v_agenda_dia, com a RLS de quem pergunta: o
+ * administrador e o financeiro veem tudo; o técnico, só o próprio payee), filtradas pela pessoa: os payees ligados ao
+ * login `targetId`. O técnico só vê o próprio dia (pedir o de outro login dá lista vazia, como a RLS diria). Cada OS com
+ * os turnos e a presença da pessoa, o dia n de N e se é reserva. Leitura que falha LANÇA (nunca "nada no dia").
+ */
+export async function osDoDiaPeloPlano(
+  // deno-lint-ignore no-explicit-any
+  sb: any,
+  p: { targetId: string; userId: string; userRole?: string | null; day: string },
+  // deno-lint-ignore no-explicit-any
+): Promise<any[]> {
+  const veTodos = p.userRole === "admin" || p.userRole === "financial";
+  if (!veTodos && p.targetId !== p.userId) return [];
+  let payees: string[] | null = null;
+  if (veTodos) {
+    const { data, error } = await sb.from("payees").select("id").eq("app_user_id", p.targetId).eq("active", true);
+    if (error) throw error;
+    // deno-lint-ignore no-explicit-any
+    payees = ((data as any[]) || []).map((x) => String(x.id));
+    if (!payees.length) return [];
+  }
+  const { data: linhas, error } = await sb.from("v_agenda_dia")
+    .select("service_order_id, numero, cliente_curto, unidade, tipo, reserva, condicao, primeiro_inicio, ultimo_fim, pessoas, dia_n, dias_total")
+    .eq("dia", p.day)
+    .order("primeiro_inicio", { ascending: true });
+  if (error) throw error;
+  // deno-lint-ignore no-explicit-any
+  const minhas = ((linhas as any[]) || []).flatMap((v) => {
+    // deno-lint-ignore no-explicit-any
+    const eu = ((v.pessoas as any[]) || []).find((x) => (payees ? payees.includes(String(x.payee_id)) : true));
+    return eu ? [{ v, eu }] : [];
+  });
+  if (!minhas.length) return [];
+  const { data: oss, error: erroOss } = await sb.from("service_orders").select("id, status").in("id", minhas.map((m) => m.v.service_order_id));
+  if (erroOss) throw erroOss;
+  // deno-lint-ignore no-explicit-any
+  const status = new Map(((oss as any[]) || []).map((o) => [String(o.id), o.status]));
+  return minhas.map(({ v, eu }) => ({
+    id: v.service_order_id, numero: v.numero, status: status.get(String(v.service_order_id)) ?? null,
+    inicio: v.primeiro_inicio, fim: v.ultimo_fim ?? null,
+    cliente: v.cliente_curto ?? null, embarcacao: v.unidade ?? null,
+    fonte: "plano",
+    turnos: eu.turnos ?? [], ...(eu.presenca && eu.presenca !== "turno" ? { presenca: eu.presenca } : {}),
+    ...(v.dias_total > 1 ? { dia: `${v.dia_n} de ${v.dias_total}` } : {}),
+    ...(v.reserva ? { reserva: true, condicao: v.condicao ?? null } : {}),
+  }));
 }
 
 // ─── Valores aceitos (07/10/2026, frente operacional) ──────────────────────────────────────
@@ -383,7 +433,7 @@ export const agendaTools: ToolDef[] = [
       },
     },
     risk: "low",
-    async execute(args, { sb, userId, userRole }) {
+    async execute(args, { sb, admin, userId, userRole }) {
       const targetId = args.user_id || userId;
       const { from, to, day } = dayRangeBRT(args.date);
 
@@ -401,21 +451,34 @@ export const agendaTools: ToolDef[] = [
       const doDia = visible.filter((t: any) => anchor(t) && anchor(t) >= from && anchor(t) < to);
       const semData = visible.filter((t: any) => !anchor(t));
 
-      const { data: soLinks, error: erroVinc } = await sb.from("service_order_technicians")
-        .select("service_order_id").eq("user_id", targetId);
-      if (erroVinc) throw erroVinc;
-      const soIds = (soLinks || []).map((l: any) => l.service_order_id);
-      let osDia: any[] = [];
-      if (soIds.length > 0) {
-        // A OS que atravessa o dia entra (começou antes e ainda não acabou), não só a que começa nele.
-        const { data: oss, error: erroOss } = await sb.from("service_orders")
-          .select("id, service_order_number, status, scheduled_start_at, scheduled_end_at, clients(name), vessels(name)")
-          .in("id", soIds)
-          .lt("scheduled_start_at", to).or(filtroQueCruza(from))
-          .neq("status", "cancelled")
-          .order("scheduled_start_at");
-        if (erroOss) throw erroOss;
-        osDia = oss || [];
+      // (24/10/2026, Agenda de Produção Fase 2, P5) com a agenda automática ligada, as OS do dia saem do plano
+      // (v_agenda_dia) pelo payee da pessoa — com ou sem ser técnico da OS —, com os turnos e o dia n de N. Fora de
+      // 'ligado' (ou se o modo não puder ser lido), a janela antiga, como antes.
+      let osDoDia: any[];
+      if ((await modoDaPropostaNoBanco(admin ?? sb)) === "ligado") {
+        osDoDia = await osDoDiaPeloPlano(sb, { targetId, userId, userRole, day });
+      } else {
+        const { data: soLinks, error: erroVinc } = await sb.from("service_order_technicians")
+          .select("service_order_id").eq("user_id", targetId);
+        if (erroVinc) throw erroVinc;
+        const soIds = (soLinks || []).map((l: any) => l.service_order_id);
+        let osDia: any[] = [];
+        if (soIds.length > 0) {
+          // A OS que atravessa o dia entra (começou antes e ainda não acabou), não só a que começa nele.
+          const { data: oss, error: erroOss } = await sb.from("service_orders")
+            .select("id, service_order_number, status, scheduled_start_at, scheduled_end_at, clients(name), vessels(name)")
+            .in("id", soIds)
+            .lt("scheduled_start_at", to).or(filtroQueCruza(from))
+            .neq("status", "cancelled")
+            .order("scheduled_start_at");
+          if (erroOss) throw erroOss;
+          osDia = oss || [];
+        }
+        osDoDia = osDia.map((o: any) => ({
+          id: o.id, numero: o.service_order_number, status: o.status,
+          inicio: o.scheduled_start_at, fim: o.scheduled_end_at,
+          cliente: o.clients?.name || null, embarcacao: o.vessels?.name || null,
+        }));
       }
 
       const result: any = {
@@ -423,11 +486,7 @@ export const agendaTools: ToolDef[] = [
         atrasadas: atrasadas.map(mapTask),
         tarefas_do_dia: doDia.map(mapTask),
         sem_data: semData.slice(0, 10).map(mapTask),
-        os_do_dia: osDia.map((o: any) => ({
-          id: o.id, numero: o.service_order_number, status: o.status,
-          inicio: o.scheduled_start_at, fim: o.scheduled_end_at,
-          cliente: o.clients?.name || null, embarcacao: o.vessels?.name || null,
-        })),
+        os_do_dia: osDoDia,
       };
 
       if (userRole === "admin" || userRole === "financial") {

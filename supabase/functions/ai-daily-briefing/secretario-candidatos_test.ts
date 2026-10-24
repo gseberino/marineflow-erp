@@ -386,3 +386,71 @@ Deno.test("fato da unidade: o tipo como rótulo; sem tipo (ou nome igual ao tipo
   assertEquals(sem.fatos.slice(0, 3), [["OS", "OS-00104"], ["Cliente", "Flávio da Igreja"], ["Valor", "R$ 2.760,00"]]);
   assertEquals(sem.unidade, null);
 });
+
+// ─── (24/10/2026) Agenda de Produção, Fase 2 (P5): os_parada e os_esperando_compra lendo o plano ────────────────────
+// Com a vigia ligada (a R2 desligada), "parada" é a regra do plano; com a proposta ligada (a R16 desligada), a compra vem
+// do plano. Sem plano (os modos em sombra ou desligados), tudo como antes — os testes acima continuam valendo.
+
+type Plano = NonNullable<OsCrua["plano"]>;
+function plano(extra: Partial<Plano>): Plano {
+  return {
+    programada: false, fixada: false, proximo_dia: null, parada: false, desde: null, compra: null,
+    paradaPeloPlano: true, compraPeloPlano: true, ...extra,
+  };
+}
+
+Deno.test("Fase 2: a OS programada (ou fixada, ou com dia no plano) nunca vira parada, mesmo sem mexer há dias", () => {
+  // a OS em andamento sem mexer há 12 dias: antes, "parada desde"
+  const antiga = os({ status: "in_progress", tarefa_compra: null, sinal_pago: 0 });
+  assertEquals(candidatoDeOs(antiga, HOJE)!.tipo, "os_parada");
+  for (const p of [plano({ programada: true, proximo_dia: "2026-10-20" }), plano({ fixada: true }), plano({ proximo_dia: "2026-10-16" }),
+    plano({ parada: true, programada: true })]) {
+    assertEquals(candidatoDeOs({ ...antiga, plano: p }, HOJE), null, JSON.stringify(p));
+  }
+  // sem dia no plano e sem a "parada" da regra do plano: também não
+  assertEquals(candidatoDeOs({ ...antiga, plano: plano({}) }, HOJE), null);
+});
+
+Deno.test("Fase 2: parada pelo plano (em andamento sem evidência e sem dia futuro): 'parada desde' a última evidência, só na lista", () => {
+  const c = candidatoDeOs(os({ status: "in_progress", tarefa_compra: null, sinal_pago: 0, plano: plano({ parada: true, desde: "2026-10-05" }) }), HOJE)!;
+  assertEquals([c.tipo, c.elegivel, c.perdeHoje], ["os_parada", false, false]);
+  assertEquals(c.titulo, "*OS-00104* (Flávio da Igreja, Itapoã): parada desde 05/10.");
+  assertEquals(c.fato, "in_progress|2026-10-05");
+  assertStringIncludes(c.porqueNaoSobe!, "sem dia na agenda");
+  // sem a vigia ligada (paradaPeloPlano false), a régua antiga vale de novo
+  const semVigia = candidatoDeOs(os({ status: "in_progress", tarefa_compra: null, sinal_pago: 0,
+    plano: plano({ parada: false, paradaPeloPlano: false, compraPeloPlano: false }) }), HOJE)!;
+  assertEquals([semVigia.tipo, semVigia.titulo], ["os_parada", "*OS-00104* (Flávio da Igreja, Itapoã): parada desde 03/10."]);
+});
+
+Deno.test("Fase 2: esperando o cliente continua como antes, com plano ou sem", () => {
+  const c = candidatoDeOs(os({ status: "awaiting_client", tarefa_compra: null, mexido_em: "2026-09-01T12:00:00Z", plano: plano({}) }), HOJE)!;
+  assertEquals([c.tipo, c.titulo], ["os_parada", "*OS-00104* (Flávio da Igreja, Itapoã): esperando o cliente desde 01/09."]);
+});
+
+Deno.test("Fase 2: com a R16 desligada a compra vem do plano (é fato, não 'parece'); a tarefa antiga não conta mais", () => {
+  const compra = { itens: 1, compre_ate: "2026-10-16", para_dia: "2026-10-19", reserva: true,
+    texto: "Flávio (OS-00104): 1 item a comprar até sex 16/10 para a reserva de seg 19/10" };
+  const c = candidatoDeOs(os({ plano: plano({ compra }) }), HOJE)!;
+  assertEquals([c.tipo, c.elegivel, c.perdeHoje, c.comandoAlternativo, c.alternativa], ["os_esperando_compra", true, false, "feito", "já comprei"]);
+  assertEquals(c.titulo, "*OS-00104* (Flávio da Igreja, Itapoã): 1 item a comprar até sex 16/10 para a reserva de seg 19/10. Sem a peça o serviço não anda.");
+  assertEquals(c.fato, `${compra.texto}|awaiting_parts`);
+  assertEquals(c.rotulo, "OS-00104 (Flávio da Igreja, comprar até 16/10)");
+  assertEquals(c.recomendacao, "Recomendo comprar até 16/10.");
+  assert(!c.titulo.includes("parece") && !c.rotulo.includes("parece") && !c.motivo.includes("dedução"), "o plano é fato");
+  assertStringIncludes(c.motivo, "a reserva de 19/10");
+  // o prazo é hoje: perde hoje, "comprar hoje"
+  const hoje = candidatoDeOs(os({ plano: plano({ compra: { ...compra, compre_ate: HOJE } }) }), HOJE)!;
+  assertEquals([hoje.perdeHoje, hoje.recomendacao], [true, "Recomendo comprar hoje."]);
+  // a tarefa da R16 ainda aberta (vai se resolver sozinha) não vira item quando o plano não tem compra
+  const semCompra = candidatoDeOs(os({ status: "approved", plano: plano({ programada: true, proximo_dia: "2026-10-19" }) }), HOJE);
+  assertEquals(semCompra, null);
+  // esperando o cliente: nem pelo plano
+  assertEquals(candidatoDeOs(os({ status: "awaiting_client", mexido_em: "2026-10-14T12:00:00Z", plano: plano({ compra }) }), HOJE), null);
+});
+
+Deno.test("Fase 2: com a proposta fora de 'ligado' (compraPeloPlano false) a tarefa da R16 continua valendo, byte a byte", () => {
+  const antes = candidatoDeOs(os({}), HOJE)!;
+  const comPlanoSemR16Desligada = candidatoDeOs(os({ plano: plano({ compraPeloPlano: false, paradaPeloPlano: false }) }), HOJE)!;
+  assertEquals(comPlanoSemR16Desligada, antes);
+});

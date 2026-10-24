@@ -14,9 +14,25 @@ function valor(l: Linha, c: string): unknown {
   return l[c];
 }
 
-/** filtros do supabase-js sobre linhas em memória; `falhar` = tabelas que devolvem erro */
-function falsoAdmin(tabelas: Record<string, Linha[]>, falhar: string[] = [], selects: string[] = []) {
+/**
+ * filtros do supabase-js sobre linhas em memória; `falhar` = tabelas que devolvem erro. (24/10/2026, Fase 2, P5) `rpcs` =
+ * as RPCs que existem (nome → resposta; ausente = o admin não tem rpc, como antes) e maybeSingle para agenda_config.
+ */
+type RespostaDaRpc = { data?: unknown; error?: unknown };
+function falsoAdmin(
+  tabelas: Record<string, Linha[]>, falhar: string[] = [], selects: string[] = [], rpcs?: Record<string, RespostaDaRpc>,
+  chamadas: Array<[string, unknown]> = [],
+) {
   return {
+    ...(rpcs
+      ? {
+        rpc(nome: string, args: unknown) {
+          chamadas.push([nome, args]);
+          const r = rpcs[nome] ?? { data: null, error: { code: "PGRST202" } };
+          return Promise.resolve({ data: r.data ?? null, error: r.error ?? null });
+        },
+      }
+      : {}),
     from(tabela: string) {
       let linhas = [...(tabelas[tabela] ?? [])];
       let soContagem = false;
@@ -65,6 +81,8 @@ function falsoAdmin(tabelas: Record<string, Linha[]>, falhar: string[] = [], sel
         not: (c: string, op: string, v: unknown) => ((linhas = linhas.filter((l) => !(op === "is" && (valor(l, c) ?? null) === v))), q),
         order: () => q,
         limit: () => q,
+        maybeSingle: () =>
+          Promise.resolve(falhar.includes(tabela) ? { data: null, error: { code: "XX000" } } : { data: linhas[0] ?? null, error: null }),
         then: (ok: (r: unknown) => unknown, erro?: (e: unknown) => unknown) =>
           Promise.resolve(
             falhar.includes(tabela) ? { data: null, error: { code: "XX000" }, count: null }
@@ -150,8 +168,11 @@ const ESPERANDO = [
 ];
 const RECEBIDAS = [{ phone_normalized: "5547900000001", body: "🎤 Oi", occurred_at: "2026-10-14T20:10:00Z" }];
 
-function rodar(tabelas = banco(), falhar: string[] = [], selects: string[] = []) {
-  return coletar(falsoAdmin(tabelas, falhar, selects), {
+function rodar(
+  tabelas = banco(), falhar: string[] = [], selects: string[] = [], rpcs?: Record<string, RespostaDaRpc>,
+  chamadas?: Array<[string, unknown]>,
+) {
+  return coletar(falsoAdmin(tabelas, falhar, selects, rpcs, chamadas), {
     agora: AGORA, hoje: HOJE, dono: DONO, modo: "novo",
     doResumo: { esperando: ESPERANDO, recebidas: RECEBIDAS, cfg: { quote_validity_days: "3" } },
   });
@@ -360,23 +381,91 @@ Deno.test("leitura essencial que falha LANÇA (quem chama volta ao resumo de sem
 });
 
 // ─── (24/10/2026) Agenda de Produção, Fase 1 (P6): a manhã 07:30 não muda ──────────────────────────────────────────
-// A agenda só entra no fechamento das 17:30 (lerTudoDaTarde). A coleta da manhã (a mesma que a tarde roda de novo) não
-// lê agenda_config nem chama RPC da agenda — este admin de mentira nem tem rpc — e dá o mesmo resultado em qualquer
-// modo da agenda; os arquivos da manhã não citam a agenda de produção.
-Deno.test("P6: a manhã é idêntica com a agenda desligada, em sombra ou ligada (e nunca lê a agenda)", async () => {
+// A agenda (Fase 1) só entra no fechamento das 17:30 (lerTudoDaTarde). (Fase 2, P5) A coleta passa a ler os DOIS modos da
+// Fase 2 (modo_proposta e modo_vigia, um SELECT) — e só com eles em 'ligado' o plano entra (abaixo). Com a leitura da Fase
+// 1 em qualquer modo e a Fase 2 desligada ou em sombra, a manhã é a mesma, byte a byte, e nenhuma RPC é chamada.
+Deno.test("P6: a manhã é idêntica com a leitura desligada, em sombra ou ligada e a Fase 2 fora de 'ligado' (só lê os modos)", async () => {
   const resultados: string[] = [];
-  for (const modo of [null, "desligado", "sombra", "ligado"]) {
+  for (const cfg of [null, { modo_leitura: "desligado" }, { modo_leitura: "sombra" }, { modo_leitura: "ligado" },
+    { modo_leitura: "ligado", modo_proposta: "sombra", modo_vigia: "sombra" },
+    { modo_leitura: "ligado", modo_proposta: "desligado", modo_vigia: "desligado" }]) {
     const selects: string[] = [];
-    const tabelas = { ...banco(), ...(modo ? { agenda_config: [{ id: true, modo_leitura: modo, dia_do_plano: 4 }] } : {}) };
-    const lido = await rodar(tabelas, [], selects);
-    assert(!selects.some((s) => s.startsWith("agenda_config")), `a manhã leu agenda_config (${modo})`);
-    resultados.push(JSON.stringify({ lido, candidatos: candidatosDoDia(lido.coleta, AGORA, HOJE) }));
+    const chamadas: Array<[string, unknown]> = [];
+    const tabelas = { ...banco(), ...(cfg ? { agenda_config: [{ id: true, dia_do_plano: 4, ...cfg }] } : {}) };
+    const lido = await rodar(tabelas, [], selects, {}, chamadas);
+    assertEquals(selects.filter((s) => s.startsWith("agenda_config")), ["agenda_config: modo_proposta, modo_vigia"], JSON.stringify(cfg));
+    assertEquals(chamadas, [], `nenhuma RPC da agenda (${JSON.stringify(cfg)})`);
+    // (os modos lidos vão junto, para a tarde; o resto tem de ser igual)
+    const { modos: _modos, ...resto } = lido;
+    resultados.push(JSON.stringify({ resto, candidatos: candidatosDoDia(lido.coleta, AGORA, HOJE) }));
   }
   assert(resultados.every((r) => r === resultados[0]), "a manhã mudou com o modo da agenda");
-  for (const arq of ["secretario.ts", "secretario-coleta.ts", "secretario-texto.ts", "secretario-candidatos.ts", "secretario-selecao.ts"]) {
+  for (const arq of ["secretario.ts", "secretario-texto.ts", "secretario-selecao.ts"]) {
     const fonte = await Deno.readTextFile(new URL(`./${arq}`, import.meta.url));
     for (const proibido of ["agenda_textos_do_fechamento", "agenda_config", "_shared/agenda/", "lerAgendaDoFechamento"]) {
       assert(!fonte.includes(proibido), `${arq} cita ${proibido}`);
     }
   }
+  // a coleta e os candidatos leem o plano (Fase 2), nunca o fechamento
+  for (const arq of ["secretario-coleta.ts", "secretario-candidatos.ts"]) {
+    const fonte = await Deno.readTextFile(new URL(`./${arq}`, import.meta.url));
+    for (const proibido of ["agenda_textos_do_fechamento", "lerAgendaDoFechamento"]) assert(!fonte.includes(proibido), `${arq} cita ${proibido}`);
+  }
+});
+
+// ─── (24/10/2026) Agenda de Produção, Fase 2 (P5): com a agenda automática ligada, a manhã lê o plano ─────────────────
+
+const LIGADO = { agenda_config: [{ id: true, modo_leitura: "ligado", modo_proposta: "ligado", modo_vigia: "ligado" }] };
+const LINHAS_DE_HOJE = [
+  { hora: "08:00", texto: "Lenine (OS-00074), dia 1 de 2", ord: "2026-10-15T11:00:00+00:00", os: "o-74" },
+  { hora: "13:00", texto: "Rodrigo (OS-00096): você", ord: "2026-10-15T16:00:00+00:00", os: "o-96" },
+];
+
+Deno.test("Fase 2: em 'ligado' o 'Hoje' vem do plano (agenda_linhas_do_dia com o corte da linha), na ordem com as tarefas", async () => {
+  const chamadas: Array<[string, unknown]> = [];
+  const { deHoje } = await rodar({ ...banco(), ...LIGADO }, [], [], {
+    agenda_linhas_do_dia: { data: LINHAS_DE_HOJE },
+    agenda_estado_das_os: { data: [] },
+  }, chamadas);
+  assertEquals(deHoje.agenda, [
+    { hora: "08:00", titulo: "Lenine (OS-00074), dia 1 de 2" },
+    { hora: "13:00", titulo: "Rodrigo (OS-00096): você" },
+    { hora: "14:00", titulo: "Ligar para o Rafael" },
+    { hora: null, titulo: "Mandar a NF da Charline" },
+  ]);
+  assertEquals(chamadas.find(([n]) => n === "agenda_linhas_do_dia"),
+    ["agenda_linhas_do_dia", { p_dia: HOJE, p_max: CORTE_DA_AGENDA_DE_HOJE, p_hoje: HOJE }]);
+});
+
+Deno.test("Fase 2: a leitura do plano que falha (ou vem fora da forma) volta à janela antiga — nunca 'nada na agenda'", async () => {
+  for (const r of [{ error: { code: "XX000" } }, { data: { ok: true } }, { data: [{ hora: "08:00" }] }]) {
+    const { deHoje } = await rodar({ ...banco(), ...LIGADO }, [], [], { agenda_linhas_do_dia: r, agenda_estado_das_os: { data: [] } });
+    assertEquals(deHoje.agenda[0], { hora: "09:00", titulo: "OS-00120 (Brisa)" }, JSON.stringify(r));
+  }
+});
+
+Deno.test("Fase 2: o plano de cada OS vem junto (agenda_estado_das_os); a OS programada nunca vira 'parada'", async () => {
+  const t = { ...banco(), ...LIGADO };
+  // a OS-00104 parada há 12 dias pela régua antiga (updated_at), mas programada no plano
+  const chamadas: Array<[string, unknown]> = [];
+  const lido = await rodar(t, [], [], {
+    agenda_linhas_do_dia: { data: [] },
+    agenda_estado_das_os: { data: [{ os: "o-104", estado: "programada", programada: true, fixada: false, proximo_dia: "2026-10-20", parada: false, desde: null, compra: null }] },
+  }, chamadas);
+  const o = lido.coleta.oss.find((x) => x.id === "o-104")!;
+  assertEquals(o.plano, {
+    programada: true, fixada: false, proximo_dia: "2026-10-20", parada: false, desde: null, compra: null,
+    paradaPeloPlano: true, compraPeloPlano: true,
+  });
+  assertEquals(chamadas.find(([n]) => n === "agenda_estado_das_os"), ["agenda_estado_das_os", { p_hoje: HOJE }]);
+  const tipos = candidatosDoDia(lido.coleta, AGORA, HOJE).filter((c) => c.referencia === "os:o-104").map((c) => c.tipo);
+  assertEquals(tipos, [], "programada: nem parada nem compra pela tarefa R16 (a R16 está desligada)");
+  // a que não está no plano (concluída) fica sem plano
+  assertEquals(lido.coleta.oss.find((x) => x.id === "o-38")?.plano, null);
+});
+
+Deno.test("Fase 2: o estado das OS que falha = a regra de antes (sem plano em nenhuma OS)", async () => {
+  const lido = await rodar({ ...banco(), ...LIGADO }, [], [], { agenda_linhas_do_dia: { data: [] }, agenda_estado_das_os: { error: { code: "XX000" } } });
+  assert(lido.coleta.oss.every((o) => o.plano === undefined), "nenhuma OS com plano");
+  assertEquals(lido.modos, { proposta: "ligado", vigia: "ligado" });
 });

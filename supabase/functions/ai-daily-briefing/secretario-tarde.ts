@@ -39,6 +39,7 @@ import {
   amanhaComAAgenda,
   type ContaDoMes,
   type DiaDeAmanha,
+  type LinhaDaAgenda,
   minutosDoEscritorio,
   type Panorama,
   semanaCabe,
@@ -120,6 +121,11 @@ export interface TardeMontada {
    * do escritório quando a linha do escritório saiu) e os resolvidos (D8). null = sem guardado.
    */
   guardado?: { modo: ModoDoPortao; mostrados: string[]; resolvidos: string[] } | null;
+  /**
+   * (24/10/2026, Agenda de Produção Fase 2, P5) As linhas do plano que saíram no texto (só as ligadas). Depois de gravada e
+   * ENVIADA a tarde, vão para agenda_fechamento_registrar (a pergunta conta uma vez mostrada; a ação fica contada).
+   */
+  agendaMostrou?: LinhaDaAgenda[];
 }
 
 /** (16/10/2026) O que a tarde-sombra recebe do portão: o guardado, os acordes de hoje e as regras do dono. */
@@ -194,13 +200,22 @@ export function montarTardeDosDados(p: {
   // cauda_diria é a linha "Amanhã" que sairia com 'ligado' (null = a agenda não mudaria o "Amanhã") e semana_diria as
   // linhas da semana que vem (só na quinta); semana_cabia = havia vaga (menos de REGRAS.maxManha que ficaram).
   const ag = lido.amanha?.agenda ?? null;
+  // (24/10/2026, Fase 2, P5) as linhas do plano: todas as que a agenda diria, com o modo (a sombra compara por aqui), e as
+  // que saíram no texto
+  const linhasMostradas = t.agenda?.linhas ?? [];
   const agenda = ag
     ? {
       modo: ag.modo,
       cauda_diria: amanhaComAAgenda(hoje, lido.amanha),
       semana_diria: ag.semana,
       semana_cabia: turno === "fechamento" && semanaCabe(ficaram.length, ag),
-      mostrou: !!t.agenda && (t.agenda.cauda || t.agenda.semana > 0),
+      mostrou: !!t.agenda && (t.agenda.cauda || t.agenda.semana > 0 || linhasMostradas.length > 0),
+      ...(ag.linhas
+        ? {
+          linhas_diria: ag.linhas.map((l) => ({ tipo: l.tipo, perda: l.perda, modo: l.modo, texto: l.texto })),
+          linhas_mostrou: linhasMostradas.map((l) => ({ tipo: l.tipo, perda: l.perda, texto: l.texto })),
+        }
+        : {}),
     }
     : null;
   return {
@@ -214,6 +229,7 @@ export function montarTardeDosDados(p: {
       : null,
     texto: t.texto,
     letras: t.letras,
+    ...(linhasMostradas.length ? { agendaMostrou: linhasMostradas } : {}),
     detalhe: {
       ficaram: ficaram.length,
       // todos os parados (o texto mostra até 5)
@@ -252,8 +268,10 @@ export async function lerTudoDaTarde(admin: Admin, p: {
   const { esperando, recebidas } = await lerEsperando(admin, p.agora);
   const lido = await coletar(admin, { agora: p.agora, hoje: p.hoje, dono: p.dono, modo: p.modo, doResumo: { esperando, recebidas, cfg: p.cfg } });
   // (16/10/2026) a revisão de segunda também traz o "Amanhã" (com o a pagar do F3), como o fechamento
+  // (24/10/2026, Fase 2, P5) com a agenda automática ligada, o "Amanhã" lê o plano (as OS e as compras)
   const amanha = p.turno === "fechamento" || p.turno === "revisao_semana"
-    ? await lerAmanha(admin, p.dono, p.hoje, proximoDiaComManha(p.hoje), lido.coleta.oss, regras.amanha_a_pagar)
+    ? await lerAmanha(admin, p.dono, p.hoje, proximoDiaComManha(p.hoje), lido.coleta.oss, regras.amanha_a_pagar,
+      lido.modos?.proposta === "ligado")
     : null;
   // (24/10/2026, Agenda de Produção Fase 1, P6) o que a agenda diria do mesmo dia; sem ela (desligada, erro, ainda não
   // aplicada), o "Amanhã" é o da Fase 0
@@ -417,6 +435,12 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
     })).incluidos;
   }
 
+  // (24/10/2026, Fase 2, P5) as linhas do plano que SAÍRAM (tarde enviada, 1ª gravação do dia): a pergunta conta uma vez
+  // mostrada e a mudança fica contada (não volta amanhã). Na sombra ou rebaixada, nada (o dono não viu). Nunca lança.
+  const agendaRegistrada = r.novo && r.enviado && m.agendaMostrou?.length
+    ? await registrarAgendaDoFechamento(admin, hoje, m.agendaMostrou)
+    : null;
+
   // o que foi enviado entra no histórico da conversa do assistente ("e o B?" tem a que se referir); falha só loga
   let historico = false;
   if (r.novo && r.enviado && m.texto) {
@@ -437,5 +461,29 @@ export async function rodarTurnoDaTarde(admin: Admin, p: { agora: Date; pedido: 
     ...(m.guardado?.modo === "sombra" ? { guardado_na_sombra: guardadoMarcado } : {}),
     ...(m.guardado?.modo === "ligado" ? { guardado_na_tarde: guardadoNaTarde } : {}),
     ...(loteGravado ? { lote: loteGravado } : {}),
+    ...(agendaRegistrada ? { agenda_registrada: agendaRegistrada } : {}),
   });
+}
+
+/**
+ * (24/10/2026, Agenda de Produção Fase 2, P5) agenda_fechamento_registrar com as linhas do plano que saíram no fechamento
+ * enviado ({pergunta_id, acao_ids} de cada uma). Erro = só o aviso no log: o fechamento já saiu, e a linha não registrada
+ * volta no próximo (melhor repetir que calar). Nunca lança.
+ */
+export async function registrarAgendaDoFechamento(
+  admin: Admin, hoje: string, linhas: LinhaDaAgenda[],
+): Promise<{ perguntas: number; acoes: number } | "erro"> {
+  try {
+    const { data, error } = await admin.rpc("agenda_fechamento_registrar", {
+      p_hoje: hoje,
+      p_linhas: linhas.map((l) => ({ pergunta_id: l.pergunta_id, acao_ids: l.acao_ids })),
+      p_via: "fechamento",
+    });
+    if (error) throw error;
+    const r = (data ?? {}) as { perguntas?: unknown; acoes?: unknown };
+    return { perguntas: Number(r.perguntas ?? 0), acoes: Number(r.acoes ?? 0) };
+  } catch (e) {
+    console.warn(JSON.stringify({ fn: "ai-daily-briefing", tarde: "agenda_registro_falhou", codigo: String((e as { code?: unknown })?.code ?? (e as Error)?.name ?? "erro") }));
+    return "erro";
+  }
 }

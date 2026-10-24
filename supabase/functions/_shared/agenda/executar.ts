@@ -14,8 +14,16 @@
 //
 // O *grava* só existe aqui (e no painel, pela mesma camada): o modelo não tem ferramenta para gravar. Por isso as
 // ferramentas de rascunho (os_planejar, material_informar, equipe_disponibilidade) podem rodar direto pela rede.
+//
+// Fase 2 (P5, 24/10/2026; spec-fase2.md §11): *dia feito*, *dia não* + motivo, *dia parcial* + motivo, *choveu* e
+// *desfaz* executam direto (agenda_conferir_dia, agenda_choveu, agenda_desfazer_dito): são a ordem exata do dono, e o
+// banco confere o administrador, o modo da agenda (fora de 'ligado': "a agenda automática está em teste", nada muda) e
+// o motivo (sem ele, a frase que pede). *o que mudou*, *agenda pendências* e *agenda plano* são agenda_ver. E os modos da
+// Fase 2 para quem lê o plano (o secretário, a my_agenda, o panorama): modoDaPropostaNoBanco e modosDaAgendaNoBanco
+// (erro = 'desligado', o caminho de hoje).
 
 import { logEdgeError } from "../log-error.ts";
+import { lerModoDaProposta, type ModoDaProposta, modoDaPropostaNoBanco } from "../agenda-modo.ts";
 import { type ComandoDaAgenda, lerComandoDaAgenda } from "./comandos.ts";
 import { paraAgendaVer, RPC_AGENDA_VER } from "./rpc-das-ferramentas.ts";
 
@@ -24,6 +32,33 @@ type Cliente = any;
 
 export const RPC_GRAVAR = "agenda_rascunho_gravar";
 export const RPC_DESCARTAR = "agenda_rascunho_descartar";
+/** Fase 2: as palavras da conferência do dia e do desfazer. */
+export const RPC_CONFERIR_DIA = "agenda_conferir_dia";
+export const RPC_CHOVEU = "agenda_choveu";
+export const RPC_DESFAZER_DITO = "agenda_desfazer_dito";
+
+export { modoDaPropostaNoBanco };
+export type { ModoDaProposta };
+
+/** Os dois modos da Fase 2: o que o motor faz (proposta) e o que o sistema diz sozinho (vigia). */
+export interface ModosDaAgenda {
+  proposta: ModoDaProposta;
+  vigia: ModoDaProposta;
+}
+
+/**
+ * agenda_config.modo_proposta e modo_vigia (um SELECT). Nunca lança: erro, tabela ou coluna ausente (as migrations da
+ * Fase 2 ainda não aplicadas) ou linha ausente = os dois 'desligado' — quem lê continua lendo como antes.
+ */
+export async function modosDaAgendaNoBanco(admin: Cliente): Promise<ModosDaAgenda> {
+  try {
+    const { data, error } = await admin.from("agenda_config").select("modo_proposta, modo_vigia").maybeSingle();
+    if (error) return { proposta: "desligado", vigia: "desligado" };
+    return { proposta: lerModoDaProposta(data?.modo_proposta), vigia: lerModoDaProposta(data?.modo_vigia) };
+  } catch {
+    return { proposta: "desligado", vigia: "desligado" };
+  }
+}
 
 export type ModoDaLeitura = "desligado" | "sombra" | "ligado";
 
@@ -86,11 +121,28 @@ export type ChamadaDoComando = { rpc: string; params: Record<string, unknown> };
 /**
  * O comando → a RPC e os parâmetros. O "ver" passa pelo MESMO mapeamento da ferramenta agenda_ver
  * (rpc-das-ferramentas.ts): o comando e a ferramenta pedem a mesma coisa do mesmo jeito. `hoje` só em teste.
+ * (Fase 2) `canal`: por onde o dono respondeu (a pergunta da conferência fica respondida por ele).
  */
-export function chamadaDoComando(cmd: ComandoDaAgenda, autor: string, hoje?: string): ChamadaDoComando {
+export function chamadaDoComando(
+  cmd: ComandoDaAgenda,
+  autor: string,
+  hoje?: string,
+  canal: "whatsapp" | "painel" = "whatsapp",
+): ChamadaDoComando {
   const comHoje = (p: Record<string, unknown>) => (hoje ? { ...p, p_hoje: hoje } : p);
   if (cmd.comando === "gravar") return { rpc: RPC_GRAVAR, params: comHoje({ p_autor: autor }) };
   if (cmd.comando === "descartar") return { rpc: RPC_DESCARTAR, params: { p_autor: autor } };
+  // Fase 2: a palavra vai como o dono disse (o dia e o alvo são resolvidos no banco; aqui nada é calculado)
+  if (cmd.comando === "dia") {
+    return {
+      rpc: RPC_CONFERIR_DIA,
+      params: comHoje({ p_autor: autor, p_resultado: cmd.resultado, p_motivo: cmd.motivo, p_quando: cmd.quando, p_canal: canal }),
+    };
+  }
+  if (cmd.comando === "choveu") return { rpc: RPC_CHOVEU, params: comHoje({ p_autor: autor, p_quando: cmd.quando, p_canal: canal }) };
+  if (cmd.comando === "desfazer") {
+    return { rpc: RPC_DESFAZER_DITO, params: comHoje({ p_autor: autor, p_alvo: cmd.alvo, p_canal: canal }) };
+  }
   const args: Record<string, unknown> = { foco: cmd.foco };
   if (cmd.periodo) args.periodo = cmd.periodo;
   if (cmd.pessoa) args.pessoa = cmd.pessoa;
@@ -107,10 +159,44 @@ export const TEXTO_SEM_GRAVAR =
   "Não consegui confirmar a gravação agora. Mande *grava* de novo em alguns minutos: se já tiver gravado, eu respondo que não há nada esperando.";
 export const TEXTO_SEM_DESCARTAR = "Não consegui descartar agora. Mande *descarta* de novo em alguns minutos.";
 export const TEXTO_SO_ADMIN = "Só o administrador mexe na agenda.";
+/** Fase 2: quando o banco falha no *dia feito* / *choveu* (o dono manda de novo; anotar duas vezes não muda nada). */
+export const TEXTO_SEM_ANOTAR =
+  "Não consegui anotar o dia agora. Mande de novo em alguns minutos: se já tiver anotado, eu digo que está anotado.";
+export const TEXTO_SEM_DESFAZER = "Não consegui desfazer agora. Mande *desfaz* de novo em alguns minutos.";
 
 function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
   if ((e as { code?: unknown })?.code === "42501") return TEXTO_SO_ADMIN;
-  return cmd.comando === "gravar" ? TEXTO_SEM_GRAVAR : cmd.comando === "descartar" ? TEXTO_SEM_DESCARTAR : TEXTO_SEM_AGENDA;
+  switch (cmd.comando) {
+    case "gravar":
+      return TEXTO_SEM_GRAVAR;
+    case "descartar":
+      return TEXTO_SEM_DESCARTAR;
+    case "dia":
+    case "choveu":
+      return TEXTO_SEM_ANOTAR;
+    case "desfazer":
+      return TEXTO_SEM_DESFAZER;
+    default:
+      return TEXTO_SEM_AGENDA;
+  }
+}
+
+/** A RPC de cada comando (para o registro do erro, antes de montar os parâmetros). */
+function rpcDoComando(cmd: ComandoDaAgenda): string {
+  switch (cmd.comando) {
+    case "gravar":
+      return RPC_GRAVAR;
+    case "descartar":
+      return RPC_DESCARTAR;
+    case "dia":
+      return RPC_CONFERIR_DIA;
+    case "choveu":
+      return RPC_CHOVEU;
+    case "desfazer":
+      return RPC_DESFAZER_DITO;
+    default:
+      return RPC_AGENDA_VER;
+  }
 }
 
 /** O texto pronto da resposta do banco (ok ou não: "Não encontrei…", "Não gravei nada: …" também são respostas). */
@@ -139,9 +225,9 @@ export async function executarComandoDaAgenda(
   cmd: ComandoDaAgenda,
   ctx: { autor: string; log?: Cliente; canal?: "whatsapp" | "painel" },
 ): Promise<RespostaDoComando> {
-  let rpc = cmd.comando === "gravar" ? RPC_GRAVAR : cmd.comando === "descartar" ? RPC_DESCARTAR : RPC_AGENDA_VER;
+  let rpc = rpcDoComando(cmd);
   try {
-    const chamada = chamadaDoComando(cmd, ctx.autor);
+    const chamada = chamadaDoComando(cmd, ctx.autor, undefined, ctx.canal ?? "whatsapp");
     rpc = chamada.rpc;
     const { data, error } = await cliente.rpc(chamada.rpc, chamada.params);
     if (error) throw error;

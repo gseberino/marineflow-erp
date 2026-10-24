@@ -5,6 +5,7 @@ import { vencimentoDoOrcamento } from "../../pdf/documento.ts";
 import { diaBR, somarDiasAoDia } from "../../pdf/datas.ts";
 import { dayRangeBRT } from "./agenda.ts";
 import { filtroQueCruza } from "../../agenda-dia.ts";
+import { modoDaPropostaNoBanco } from "../../agenda-modo.ts";
 
 // Macro de LEITURA — "como estão as coisas?" numa chamada só.
 //
@@ -17,6 +18,36 @@ import { filtroQueCruza } from "../../agenda-dia.ts";
 // leitura, o catch nunca disparava e a falha virava "0" ou "nada" (02/10/2026).
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * (24/10/2026, Agenda de Produção Fase 2, P5) A agenda de hoje pelo plano (v_agenda_dia): uma linha por OS do dia, com
+ * quem vai e em que turno, o dia n de N e se é reserva. Leitura que falha LANÇA (o bloco vira { erro }, nunca "nada hoje").
+ */
+// deno-lint-ignore no-explicit-any
+export async function agendaDeHojePeloPlano(admin: any, hojeIso: string): Promise<Record<string, unknown>> {
+  const { data, error } = await admin.from("v_agenda_dia")
+    .select("service_order_id, numero, cliente_curto, unidade, tipo, reserva, condicao, primeiro_inicio, ultimo_fim, pessoas, dia_n, dias_total")
+    .eq("dia", hojeIso)
+    .order("primeiro_inicio", { ascending: true })
+    .limit(30);
+  if (error) throw error;
+  const linhas = (data as any[]) || [];
+  return {
+    fonte: "plano",
+    quantidade: linhas.length,
+    itens: linhas.slice(0, 8).map((v) => ({
+      numero: v.numero,
+      cliente: v.cliente_curto ?? null,
+      inicio: v.primeiro_inicio,
+      fim: v.ultimo_fim ?? null,
+      ...(v.dias_total > 1 ? { dia: `${v.dia_n} de ${v.dias_total}` } : {}),
+      ...(v.reserva ? { reserva: true, condicao: v.condicao ?? null } : {}),
+      quem: ((v.pessoas as any[]) || []).map((p) => ({
+        nome: p.eh_dono ? "você" : p.nome, turnos: p.turnos, ...(p.presenca !== "turno" ? { presenca: p.presenca } : {}),
+      })),
+    })),
+  };
+}
 /** Dias entre dois dias de calendário ('aaaa-mm-dd'): dia não tem hora nem fuso. */
 const diasEntre = (de: string, ate: string) =>
   Math.round((Date.parse(`${ate}T00:00:00Z`) - Date.parse(`${String(de).slice(0, 10)}T00:00:00Z`)) / 86400000);
@@ -138,27 +169,33 @@ export const overviewTools: ToolDef[] = [
       // hoje. Antes só entrava a que COMEÇAVA hoje, e o dia era lido em UTC (T00:00:00 sem fuso).
       let agenda: Record<string, unknown> = { erro: "não consultado" };
       try {
-        const { from, to } = dayRangeBRT();
-        const { data: hoje, error: erro_hoje } = await admin
-          .from("service_orders")
-          .select("service_order_number, scheduled_start_at, scheduled_end_at, status, clients(name)")
-          .lt("scheduled_start_at", to)
-          .or(filtroQueCruza(from))
-          .neq("status", "cancelled")
-          .order("scheduled_start_at", { ascending: true })
-          .limit(30);
-        if (erro_hoje) throw erro_hoje;
-        agenda = {
-          quantidade: (hoje as any[])?.length || 0,
-          itens: ((hoje as any[]) || []).slice(0, 8).map((o) => ({
-            numero: o.service_order_number,
-            cliente: o.clients?.name || null,
-            inicio: o.scheduled_start_at,
-            fim: o.scheduled_end_at ?? null,
-            ...(Date.parse(o.scheduled_start_at) < Date.parse(from) ? { em_curso_desde_antes_de_hoje: true } : {}),
-            status: o.status,
-          })),
-        };
+        // (24/10/2026, Agenda de Produção Fase 2, P5) com a agenda automática ligada, a agenda de hoje é o plano (quem vai,
+        // em que turno, o dia n de N), não a janela antiga. Fora de 'ligado' (ou se o modo não puder ser lido), como antes.
+        if ((await modoDaPropostaNoBanco(admin)) === "ligado") {
+          agenda = await agendaDeHojePeloPlano(admin, hojeIso);
+        } else {
+          const { from, to } = dayRangeBRT();
+          const { data: hoje, error: erro_hoje } = await admin
+            .from("service_orders")
+            .select("service_order_number, scheduled_start_at, scheduled_end_at, status, clients(name)")
+            .lt("scheduled_start_at", to)
+            .or(filtroQueCruza(from))
+            .neq("status", "cancelled")
+            .order("scheduled_start_at", { ascending: true })
+            .limit(30);
+          if (erro_hoje) throw erro_hoje;
+          agenda = {
+            quantidade: (hoje as any[])?.length || 0,
+            itens: ((hoje as any[]) || []).slice(0, 8).map((o) => ({
+              numero: o.service_order_number,
+              cliente: o.clients?.name || null,
+              inicio: o.scheduled_start_at,
+              fim: o.scheduled_end_at ?? null,
+              ...(Date.parse(o.scheduled_start_at) < Date.parse(from) ? { em_curso_desde_antes_de_hoje: true } : {}),
+              status: o.status,
+            })),
+          };
+        }
       } catch (e) { agenda = { erro: (e as Error).message }; }
 
       // ── 5. Contas a pagar dos próximos 7 dias (total) ──

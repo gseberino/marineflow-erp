@@ -187,6 +187,30 @@ export interface OsCrua {
   tarefa_compra: { titulo: string; criada_em: string } | null;
   /** recebíveis não cancelados */
   cobrancas_vivas: number;
+  /**
+   * (24/10/2026, Agenda de Produção Fase 2, P5) O que o plano diz da OS (agenda_estado_das_os), só quando a agenda
+   * automática está ligada (proposta ou vigia). Ausente ou null = a regra de antes, byte a byte.
+   */
+  plano?: PlanoDaOsCrua | null;
+}
+
+/** O plano de uma OS para o secretário (agenda_estado_das_os, migration 20261025100500). */
+export interface PlanoDaOsCrua {
+  /** tem dia no plano de hoje em diante (sem contar reserva) */
+  programada: boolean;
+  fixada: boolean;
+  /** 'aaaa-mm-dd' ou null */
+  proximo_dia: string | null;
+  /** em andamento sem evidência há parada_du dias úteis e sem dia futuro (a regra da vigia) */
+  parada: boolean;
+  /** a última evidência de que andou ('aaaa-mm-dd'), ou null */
+  desde: string | null;
+  /** o que falta comprar até quando (null = nada) */
+  compra: { itens: number; compre_ate: string | null; para_dia: string | null; reserva: boolean; texto: string } | null;
+  /** modo_vigia 'ligado': a "parada" vem do plano (a R2 está desligada) */
+  paradaPeloPlano: boolean;
+  /** modo_proposta 'ligado': a compra vem do plano (a R16 está desligada) */
+  compraPeloPlano: boolean;
 }
 
 export interface ColetaDoSecretario {
@@ -588,7 +612,41 @@ export function candidatoDeOs(o: OsCrua, hoje: string): Candidato | null {
   // (23/10/2026, D11a) a OS que espera o cliente: quem trava é ele, não a compra (a R16 também não cobra compra dela)
   const esperaCliente = o.status === "awaiting_client";
 
-  if (ativa && !esperaCliente && o.tarefa_compra && (o.sinal_pago > 0 || agendadaDia)) {
+  // (24/10/2026, Agenda de Produção Fase 2, P5) com a agenda automática ligada a R16 está desligada: o que falta comprar
+  // e até quando vem do plano (agenda_estado_das_os) — é fato, não dedução pela tarefa. O tipo continua
+  // os_esperando_compra (o CHECK resumo_itens_tipo_chk é lista fechada).
+  const compra = o.plano?.compraPeloPlano ? o.plano.compra : null;
+  if (ativa && !esperaCliente && compra && (o.sinal_pago > 0 || o.plano!.programada || compra.para_dia || agendadaDia)) {
+    const oQue = compra.texto.replace(/^[^:]*: /, "");
+    const ate = compra.compre_ate;
+    return {
+      ...base,
+      tipo: "os_esperando_compra",
+      fato: `${compra.texto}|${o.status}`,
+      // o mais antigo primeiro = o prazo de compra mais cedo
+      desde: ate ? `${ate}T12:00:00.000Z` : `${hoje}T12:00:00.000Z`,
+      perdeHoje: !!ate && ate <= hoje,
+      elegivel: true,
+      porqueNaoSobe: null,
+      titulo: `*${o.numero}*${onde(o.cliente, o.barco)}: ${oQue}. Sem a peça o serviço não anda.`,
+      curto: `${o.numero} ${quem}${onde(o.barco)}: ${umaLinha(oQue, 60)}`,
+      rotulo: `${o.numero} (${umaLinha(quem, 18)}, ${ate ? `comprar até ${ddmm(ate)}` : "falta comprar"})`,
+      recomendacao: !ate || ate <= hoje ? "Recomendo comprar hoje." : `Recomendo comprar até ${ddmm(ate)}.`,
+      faco: "te mando a lista do que falta",
+      alternativa: "já comprei",
+      comandoAlternativo: "feito",
+      motivo: `Subiu porque a agenda conta com ${compra.para_dia ? `${compra.reserva ? "a reserva" : "o serviço"} de ${ddmm(compra.para_dia)}` : "esta OS"}` +
+        ` e ${compra.itens === 1 ? "1 item ainda não foi comprado" : `${compra.itens} itens ainda não foram comprados`}.` +
+        " Se já comprou, responda *{L} feito*.",
+      pedido: `Me mostre o que falta comprar para a ${o.numero} (${umaLinha(o.cliente || "sem cliente", 60)}): os itens, as quantidades e de quem costumo comprar.` +
+        " Se der, prepare o pedido de compra; nada é enviado nem gravado sem o meu sim.",
+      fatos: [...fatosBase, ["Falta comprar", compra.itens === 1 ? "1 item" : `${compra.itens} itens`],
+        ...(ate ? [["Comprar até", dataBR(ate)] as [string, string]] : []),
+        ...(compra.para_dia ? [[compra.reserva ? "Reserva para" : "Marcada para", dataBR(compra.para_dia)] as [string, string]] : []),
+        ...(o.sinal_pago > 0 ? [["Sinal pago", brl(o.sinal_pago)] as [string, string]] : [])],
+    };
+  }
+  if (ativa && !esperaCliente && !o.plano?.compraPeloPlano && o.tarefa_compra && (o.sinal_pago > 0 || agendadaDia)) {
     const n = /Comprar (\d+) (item|itens)/.exec(o.tarefa_compra.titulo);
     const oQue = n ? `${n[1]} ${n[2]}` : "itens";
     const desde = diaBR(new Date(o.tarefa_compra.criada_em));
@@ -640,6 +698,34 @@ export function candidatoDeOs(o: OsCrua, hoje: string): Candidato | null {
       pedido: `A ${o.numero} (${umaLinha(o.cliente || "sem cliente", 60)}) foi concluída e não tem nenhuma cobrança lançada.` +
         ` Prepare a cobrança de ${brl(o.valor)} para o cliente; peça o meu sim antes de gravar.`,
       fatos: [...fatosBase, ["Situação", "concluída, sem cobrança"], ["Última mudança", dataBR(mexido)]],
+    };
+  }
+  // (24/10/2026, Agenda de Produção Fase 2, P5) com a vigia da agenda ligada (a R2 desligada), "parada" é a regra do
+  // plano — em andamento sem evidência há parada_du dias úteis e sem dia futuro —, e a OS programada ou fixada nunca é
+  // parada. Esperando o cliente continua como antes (abaixo).
+  if (ativa && !esperaCliente && o.plano?.paradaPeloPlano) {
+    const p = o.plano;
+    if (!p.parada || p.programada || p.fixada || p.proximo_dia) return null;
+    const desdeDia = p.desde ?? mexido;
+    const dias = Math.max(0, diasEntre(desdeDia, hoje));
+    const estado = `parada desde ${ddmm(desdeDia)}`;
+    return {
+      ...base,
+      tipo: "os_parada",
+      fato: `${o.status}|${desdeDia}`,
+      desde: `${desdeDia}T12:00:00.000Z`,
+      perdeHoje: false,
+      elegivel: false,
+      porqueNaoSobe: `Ficou na lista: parada há ${diasTexto(dias)}, sem dia na agenda.`,
+      titulo: `*${o.numero}*${onde(o.cliente, o.barco)}: ${estado}.`,
+      curto: `${o.numero} ${quem}${onde(o.barco)}: ${estado}`,
+      rotulo: `${o.numero} (${umaLinha(quem, 18)}, ${estado})`,
+      recomendacao: null,
+      faco: "te mostro como ela está",
+      alternativa: "até segunda",
+      motivo: `Parada há ${diasTexto(dias)}: em andamento, sem dia trabalhado desde ${ddmm(desdeDia)} e sem dia na agenda.`,
+      pedido: `Me mostre como está a ${o.numero} (${umaLinha(o.cliente || "sem cliente", 60)}): o que falta e o próximo passo.`,
+      fatos: [...fatosBase, ["Parada desde", dataBR(desdeDia)]],
     };
   }
   if (ativa && parada >= REGRAS.osParadaDias) {

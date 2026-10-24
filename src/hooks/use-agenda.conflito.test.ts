@@ -17,6 +17,18 @@ describe('conflictMessage — número da OS sem "OS " repetido', () => {
     ).toBe('Conflito de agenda: o responsável já tem OS-00060, "Revisão" nesse horário.');
   });
 
+  it('(Fase 2) a alocação da agenda vai como a OS, e a OS que ocupa dois turnos aparece uma vez só', () => {
+    expect(
+      conflictMessage([
+        { source: 'service_order', label: 'OS-00069' },
+        { source: 'service_order', label: 'OS-00069' },
+        { source: 'alocacao', label: 'OS-00074' },
+        { source: 'alocacao', label: 'OS-00074' },
+        { source: 'task', label: 'Revisão' },
+      ]),
+    ).toBe('Conflito de agenda: o responsável já tem OS-00069, OS-00074, "Revisão" nesse horário.');
+  });
+
   it('o orçamento agendado diz o próprio número, sem "OS ORÇ-"', () => {
     const texto = conflictMessage([{ source: 'service_order', label: 'ORÇ-00112' }]);
     expect(texto).toBe('Conflito de agenda: o responsável já tem ORÇ-00112 nesse horário.');
