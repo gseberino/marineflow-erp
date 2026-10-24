@@ -1,5 +1,8 @@
 // Edge Function: task-automations — o motor da Agenda & Tarefas 2.0.
 // Cron */15min. Faz, nesta ordem:
+//   0. Conferência do material da Agenda de Produção (material-da-agenda.ts, Fase 1 P2): guarda em
+//      os_material o que o estoque e as OCs dizem de cada item de compra da carteira, antes de a R16 ler
+//      a conta. Passo à parte: erro vai para app_error_logs (agenda:material) e não derruba o resto.
 //   1. Regras de rules.ts (RULES): criam tarefas (dedupe por automation_key) e auto-resolvem
 //      as que a condição sumiu ("Resolvido automaticamente: ...").
 //   2. R10: lembrete interno (WhatsApp equipe) de OS agendada para amanhã.
@@ -15,6 +18,7 @@ import {
   dispensaSemFatoNovo, textoDoLembreteDaOs, type RuleCandidate,
 } from "./rules.ts";
 import { resolveAssignee } from "./responsavel.ts";
+import { sincronizarMaterialDaAgenda } from "./material-da-agenda.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
@@ -388,12 +392,23 @@ servirComCors(async (req) => {
       fios = ((data as any[]) || [])[0] ?? null;
     } catch (e) { console.error("refresh open loops:", e); }
 
+    // Material da Agenda de Produção (Fase 1, P2): antes das regras, para a R16 ler a conta com o
+    // material em dia. Tem o próprio try/catch (sincronizarMaterialDaAgenda nunca lança: devolve
+    // { erro } e grava em app_error_logs); o de fora é a segunda trava, para nada daqui parar as regras.
+    let agendaMaterial: unknown = null;
+    try {
+      agendaMaterial = await sincronizarMaterialDaAgenda(db);
+    } catch (e) {
+      console.error("agenda:material:", e);
+      agendaMaterial = { erro: String((e as any)?.message ?? e) };
+    }
+
     const rules = await runRules(db, settings);
     const r10 = await runTechnicianReminders(db, settings);
     const reminders = await processReminders(db);
     const recurrence = await materializeRecurrences(db);
 
-    const summary = { identidade, fios, rules, r10, reminders, recurrence };
+    const summary = { identidade, fios, agenda_material: agendaMaterial, rules, r10, reminders, recurrence };
     // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as
     // regras quebraram não deixaria registro nenhum (created e resolved vazios).
     if (rules.created.length || rules.resolved.length || recurrence.created || rules.falhas.length) {

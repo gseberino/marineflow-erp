@@ -8,7 +8,9 @@
 //     mantém o material na conta quando falha;
 //  4. os MESMOS números de supabase/tests/purchase_needs_reserva_e_a_caminho.sql (casos A, B, D, E, F2, G);
 //  5. a idade (conta_como_ja_pedido) corta só o "já pedido" de catálogo, nunca o que a própria OS espera
-//     chegar (revisão de 23/10).
+//     chegar (revisão de 23/10);
+//  6. (Fase 1, P2) a 5ª leitura, os_material: o que o dono disse entra na conta DEPOIS de comItensACaminho,
+//     com os MESMOS números de supabase/tests/agenda_fase1_material.sql (OS M, casos B); erro lança.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Linha = Record<string, any>;
@@ -73,6 +75,14 @@ function peca(id: string, so: string, produto: string, qtd: number, nome: string
   };
 }
 
+function material(id: string, so: string, over: Linha): Linha {
+  return {
+    id, service_order_id: so, service_order_part_id: null, service_order_service_id: null, purchase_order_item_id: null,
+    origem: 'peca', situacao: 'falta', fonte: 'dono', quantidade_necessaria: '1.000', quantidade_na_mao: '0.000',
+    ...over,
+  };
+}
+
 function montarBanco() {
   banco.tabelas = {
     service_orders: [
@@ -81,6 +91,7 @@ function montarBanco() {
       { id: 'D', status: 'approved' },
       { id: 'E', status: 'open' },
       { id: 'G', status: 'awaiting_parts' },
+      { id: 'M', status: 'open' },
     ],
     service_order_parts: [
       peca('a1', 'A', P1, 1, 'TESTE P5 — Cerbo GX', '2026-10-24T10:00:00Z'),
@@ -88,17 +99,27 @@ function montarBanco() {
       peca('d1', 'D', P2, 1, 'TESTE P5 — Fusível MIDI', '2026-10-24T10:00:02Z'),
       peca('d2', 'D', P2, 1, 'TESTE P5 — Fusível MIDI', '2026-10-24T10:00:03Z'),
       peca('e1', 'E', P3, 2, 'TESTE P5 — Cabo 16mm', '2026-10-24T10:00:04Z'),
+      // OS M: o cenário de agenda_fase1_material.sql.
+      { ...peca('m1', 'M', 'pm1', 1, 'TESTE AG2 — Cerbo', '2026-10-24T11:00:00Z'), unit_cost_snapshot: 1900 },
+      { ...peca('m2', 'M', 'pm2', 8, 'TESTE AG2 — Fusível', '2026-10-24T11:00:01Z'), unit_cost_snapshot: 25 },
+      { ...peca('m3', 'M', 'pm3', 1, 'TESTE AG2 — Cabo', '2026-10-24T11:00:02Z'), unit_cost_snapshot: 210 },
+      { ...peca('m4', 'M', 'pm4', 1, 'TESTE AG2 — Painel', '2026-10-24T11:00:03Z'), unit_cost_snapshot: 1250 },
     ],
     service_order_services: [
       {
         id: 'g1', service_order_id: 'G', service_id: null, name_snapshot: CONVERSAO,
         billing_unit_snapshot: 'unit', quantity: 1, unit_price_snapshot: 2500, created_at: '2026-10-24T10:00:05Z',
       },
+      {
+        id: 'm5', service_order_id: 'M', service_id: null, name_snapshot: 'Conector de cabo de dados AG2',
+        billing_unit_snapshot: 'unit', quantity: 2, unit_price_snapshot: 120, created_at: '2026-10-24T11:00:04Z',
+      },
     ],
     product_availability: [
       { id: P1, stock_quantity: 1, reserved_quantity: 1 },
       { id: P2, stock_quantity: 2, reserved_quantity: 2 },
       { id: P3, stock_quantity: 0, reserved_quantity: 0 },
+      ...['pm1', 'pm2', 'pm3', 'pm4'].map((id) => ({ id, stock_quantity: 0, reserved_quantity: 0 })),
     ],
     // O que a VIEW devolve: toda OC draft/sent/partial. A da OS faturada (E1) e a de 61 dias (E2) vêm
     // com conta_como_ja_pedido = false — não abatem a falta, e o hook tem de filtrar isso.
@@ -136,6 +157,17 @@ function montarBanco() {
     ],
     // Se o hook voltar a ler a tabela crua, o teste acusa (ver "nunca lê purchase_order_items").
     purchase_order_items: [{ product_id: P3, quantity: 50, received_qty: 0, purchase_orders: { status: 'sent' } }],
+    // O que o PostgREST devolve de os_material (numeric como string). As linhas da OS M são as do dono;
+    // a da OS A foi copiada pela sincronização (fonte estoque) e não muda nada.
+    os_material: [
+      material('om1', 'M', { service_order_part_id: 'm1', situacao: 'na_mao', quantidade_necessaria: '1.000', quantidade_na_mao: '1.000' }),
+      material('om2', 'M', { service_order_part_id: 'm2', quantidade_necessaria: '8.000', quantidade_na_mao: '3.000' }),
+      material('om3', 'M', { service_order_part_id: 'm3', situacao: 'dispensado' }),
+      material('om4', 'M', { service_order_part_id: 'm4', situacao: 'a_caminho' }),
+      material('om5', 'M', { service_order_service_id: 'm5', origem: 'texto_livre', situacao: 'comprado', quantidade_necessaria: '2.000' }),
+      material('om6', 'M', { service_order_service_id: 'm5', origem: 'dono', situacao: 'dispensado', quantidade_necessaria: '4.000' }),
+      material('oa1', 'A', { service_order_part_id: 'a1', situacao: 'na_mao', fonte: 'estoque', quantidade_na_mao: '1.000' }),
+    ],
   };
   banco.classificacao = { [CONVERSAO]: false };
 }
@@ -232,7 +264,7 @@ describe('fetchPurchaseNeeds — já pedido e a caminho pela view', () => {
 });
 
 describe('fetchPurchaseNeeds — leitura com erro lança', () => {
-  for (const tabela of ['service_orders', 'service_order_parts', 'service_order_services', 'product_availability', 'v_oc_itens_a_caminho']) {
+  for (const tabela of ['service_orders', 'service_order_parts', 'service_order_services', 'product_availability', 'v_oc_itens_a_caminho', 'os_material']) {
     it(`erro em ${tabela} lança (não vira "nada a comprar")`, async () => {
       banco.falham.add(tabela);
       await expect(fetchPurchaseNeeds('E')).rejects.toMatchObject({ message: `falha em ${tabela}` });
@@ -244,5 +276,46 @@ describe('fetchPurchaseNeeds — leitura com erro lança', () => {
     const r = await fetchPurchaseNeeds('G');
     expect(r.shortageCount).toBe(1);
     expect(r.items.map((i) => i.origin)).toEqual(['free_text', 'purchase_order']);
+  });
+});
+
+describe('fetchPurchaseNeeds — o que o dono disse (os_material, Fase 1)', () => {
+  it('OS M: os MESMOS números de agenda_fase1_material.sql (B1–B6)', async () => {
+    const r = await fetchPurchaseNeeds('M');
+    expect(r.items.map((i) => [i.sourceId, i.status, i.available, i.onOrder, i.shortage, i.informado])).toEqual([
+      ['m1', 'ok', 1, 0, 0, 'na_mao'],
+      ['m2', 'partial', 3, 0, 5, 'parcial'],
+      ['m4', 'on_order', 0, 1, 0, 'a_caminho'],
+      ['m5', 'on_order', 0, 2, 0, 'comprado'],
+    ]);
+    expect(r.shortages.map((s) => s.sourceId)).toEqual(['m2']);
+    expect(r.shortageCount).toBe(1);
+    expect(r.estimatedCost).toBe(125);
+    expect(r.needsPurchase).toBe(true);
+  });
+
+  it('lê os_material da própria OS e a linha copiada pelo sistema não muda a conta (OS A)', async () => {
+    const r = await fetchPurchaseNeeds('A');
+    expect(banco.lidas).toContain('os_material');
+    expect(r.items[0]).toMatchObject({ status: 'ok', available: 1, shortage: 0 });
+    expect(r.items[0].informado).toBeUndefined();
+  });
+
+  it('aplica DEPOIS do que vem a caminho: o dono diz que o compressor chegou (OS G)', async () => {
+    banco.tabelas.os_material.push(material('og1', 'G', {
+      purchase_order_item_id: 'poi-6', origem: 'oc', situacao: 'na_mao', quantidade_na_mao: '1.000',
+    }));
+    const r = await fetchPurchaseNeeds('G');
+    expect(r.items.find((i) => i.origin === 'purchase_order')).toMatchObject({
+      status: 'ok', available: 1, onOrder: 0, shortage: 0, informado: 'na_mao', purchaseOrderNumber: 'OC-TESTE-P5-6',
+    });
+  });
+
+  it('sem linha de material (ou técnico, que não lê os_material): a conta bruta, igual à de antes', async () => {
+    banco.tabelas.os_material = [];
+    const r = await fetchPurchaseNeeds('M');
+    expect(r.shortageCount).toBe(5);
+    expect(r.estimatedCost).toBe(3800);
+    expect(r.items.some((i) => i.informado)).toBe(false);
   });
 });

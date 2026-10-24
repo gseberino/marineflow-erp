@@ -223,30 +223,48 @@ Deno.test("r16.mudouDesde: peça ou material lançado/mudado depois do fechament
   const r16 = ruleById("r16")!;
   const OS = "96c4af97-44e5-4b4c-89df-8de5caf2ef7f";
   const desde = "2026-08-16T02:22:29.877Z";
-  const pedidos: Array<{ tabela: string; eq: unknown[]; or: string }> = [];
-  const mkDb = (linhas: Record<string, unknown[]>, erro?: unknown) => ({
+  const pedidos: Array<{ tabela: string; eq: unknown[]; or?: string; gt?: unknown[] }> = [];
+  // `erro` em todas as tabelas, ou só nas de `errosPorTabela`.
+  const mkDb = (linhas: Record<string, unknown[]>, erro?: unknown, errosPorTabela: Record<string, unknown> = {}) => ({
     from: (tabela: string) => ({
       select: () => ({
-        eq: (...eq: unknown[]) => ({
-          or: (or: string) => ({
+        eq: (...eq: unknown[]) => {
+          const fim = (filtro: { or?: string; gt?: unknown[] }) => ({
             limit: async () => {
-              pedidos.push({ tabela, eq, or });
-              return { data: erro ? null : (linhas[tabela] ?? []), error: erro ?? null };
+              pedidos.push({ tabela, eq, ...filtro });
+              const e = erro ?? errosPorTabela[tabela];
+              return { data: e ? null : (linhas[tabela] ?? []), error: e ?? null };
             },
-          }),
-        }),
+          });
+          return { or: (or: string) => fim({ or }), gt: (...gt: unknown[]) => fim({ gt }) };
+        },
       }),
     }),
   });
   // OS-00051 depois de 16/08/2026 (SELECT de 15/10): nenhuma peça nem material mudou → sem fato
   // novo, a dispensa vale (as recriações de 23/08 e 12/09 com o mesmo título não voltariam).
   assertEquals(await r16.mudouDesde!(mkDb({}), `r16:so:${OS}`, desde), false);
-  assertEquals(pedidos.map((p) => p.tabela).sort(), ["service_order_parts", "service_order_services"]);
+  assertEquals(pedidos.map((p) => p.tabela).sort(), ["os_material", "service_order_parts", "service_order_services"]);
   assertEquals(pedidos[0].eq, ["service_order_id", OS]);
   assertEquals(pedidos[0].or, `created_at.gt.${desde},updated_at.gt.${desde}`);
+  // os_material (Agenda de Produção, Fase 1, P2): só a linha mudada DEPOIS do fechamento.
+  const material = pedidos.find((p) => p.tabela === "os_material")!;
+  assertEquals(material.eq, ["service_order_id", OS]);
+  assertEquals(material.gt, ["atualizado_em", desde]);
   // Material de texto livre novo (a falta da OS-00104 era um) ou peça nova → fato novo.
   assertEquals(await r16.mudouDesde!(mkDb({ service_order_services: [{ id: "m1" }] }), `r16:so:${OS}`, desde), true);
   assertEquals(await r16.mudouDesde!(mkDb({ service_order_parts: [{ id: "p1" }] }), `r16:so:${OS}`, desde), true);
+  // O que o dono disse da linha mudou depois do fechamento ("não chegou, compro de novo"; a quantidade
+  // subiu e derrubou o "na mão") → fato novo.
+  assertEquals(await r16.mudouDesde!(mkDb({ os_material: [{ id: "om1" }] }), `r16:so:${OS}`, desde), true);
+  // Sem a tabela (migration 160300 não aplicada) ou com erro só nela: lança, não decide às cegas.
+  let lancouMaterial = false;
+  try {
+    await r16.mudouDesde!(mkDb({}, undefined, { os_material: { code: "PGRST205", message: "sem os_material" } }), `r16:so:${OS}`, desde);
+  } catch {
+    lancouMaterial = true;
+  }
+  assertEquals(lancouMaterial, true);
   // Erro na leitura não decide sozinho: lança (o motor falha a regra na rodada).
   let lancou = false;
   try {
@@ -1066,7 +1084,8 @@ Deno.test("motor: R9 e R13 aposentadas; o responsável vem de responsavel.ts", a
   ]) {
     assertEquals(fonte.includes(proibido), false, `index.ts ainda tem ${proibido}`);
   }
-  assertEquals(fonte.includes("const summary = { identidade, fios, rules, r10, reminders, recurrence };"), true);
+  // Agenda de Produção, Fase 1 (P2): o passo do material entra no resumo, e nada que fale com cliente.
+  assertEquals(fonte.includes("const summary = { identidade, fios, agenda_material: agendaMaterial, rules, r10, reminders, recurrence };"), true);
   assertEquals(fonte.includes('import { resolveAssignee } from "./responsavel.ts";'), true);
   assertEquals(/async function resolveAssignee/.test(fonte), false);
 });

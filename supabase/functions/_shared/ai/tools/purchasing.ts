@@ -73,7 +73,11 @@ export const purchasingTools: ToolDef[] = [
       "(estoque cobre). Mão de obra digitada à mão NÃO entra: não se compra instalação de fornecedor de peça. " +
       "'a_caminho' é o que já foi pedido em ordem de compra de texto livre DESTA OS e ainda não chegou " +
       "(com o número da OC): não entra em 'faltando' nem pede compra, mas NÃO quer dizer que está na mão. " +
-      "Diga 'pedido na OC-x' e pergunte se chegou; nunca diga que a OS está pronta por causa dele.",
+      "Diga 'pedido na OC-x' e pergunte se chegou; nunca diga que a OS está pronta por causa dele. " +
+      "'informado' (no item e na lista 'informados') é o que o dono disse daquela linha, e já está na conta: " +
+      "'comprado' ou 'a_caminho' conta como já pedido, 'na_mao' como disponível, 'parcial' = parte na mão e o " +
+      "resto ainda falta; o item que ele dispensou não aparece. Repita como ele disse ('você disse que comprou'), " +
+      "sem inventar data de chegada.",
     input_schema: {
       type: "object",
       properties: {
@@ -109,16 +113,29 @@ export const purchasingTools: ToolDef[] = [
           situacao: i.status,
           product_id: i.productId,
           custo_unitario_conhecido: i.unitCost,
+          informado: i.informado ?? null,
         })),
         // Pedido em OC de texto livre desta OS e ainda não recebido (24/10/2026). Fica fora de
         // `faltando` (a RPC dá shortage 0), mas sem isto o assistente diria "não falta nada" com o
-        // compressor da OS-00104 ainda na OC-00004.
+        // compressor da OS-00104 ainda na OC-00004. Só o que ainda está a caminho: se o dono disse
+        // que chegou (Fase 1, P2), o item vira 'ok' e sai daqui (fica em `informados`).
         a_caminho: ((r.items ?? []) as any[])
-          .filter((i) => i.origin === "purchase_order")
+          .filter((i) => i.origin === "purchase_order" && i.status === "on_order")
           .map((i) => ({
             descricao: i.description,
             quantidade: i.onOrder,
             ordem_de_compra: i.purchaseOrderNumber ?? null,
+            informado: i.informado ?? null,
+          })),
+        // O que o dono disse e mudou a conta (os_material, Fase 1, P2): sem isto, a peça que ele
+        // comprou sumiria de `faltando` sem o assistente saber por quê.
+        informados: ((r.items ?? []) as any[])
+          .filter((i) => i.informado)
+          .map((i) => ({
+            descricao: i.description,
+            informado: i.informado,
+            situacao: i.status,
+            quantidade_faltando: i.shortage,
           })),
         todos_os_itens: (r.items ?? []).length,
       };

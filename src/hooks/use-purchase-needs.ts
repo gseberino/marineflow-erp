@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import {
-  comItensACaminho, computePurchaseNeeds, descontarReservaDaPropriaOs,
-  type ItemACaminhoInput, type PurchaseNeeds,
+  aplicarSituacaoDoMaterial, comItensACaminho, computePurchaseNeeds, descontarReservaDaPropriaOs,
+  type ItemACaminhoInput, type LinhaDeMaterialInput, type PurchaseNeeds,
 } from '@/lib/purchase-needs';
 
 /**
@@ -23,12 +23,17 @@ import {
  * OS não tem idade: a linha não abate falta, e cortá-la só a esconderia (revisão de
  * 23/10: a OC-00004 da OS-00104 sairia da conta em 12/12 com o compressor no fornecedor).
  *
+ * Por último, o que o dono disse de cada linha (os_material, Agenda de Produção, 24/10/2026):
+ * comprado ou a caminho conta como já pedido, na mão como disponível, dispensado sai — a
+ * mesma camada final da RPC (aplicar_os_material). O técnico não lê os_material (RLS): a
+ * leitura volta vazia, sem erro, e ele vê a conta bruta, como na RPC.
+ *
  * Toda leitura com erro LANÇA: falha que vira lista vazia diria "nada a comprar".
  * A única exceção é a classificação do texto livre (ver abaixo), cuja falha mantém
  * o material na conta.
  */
 export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<PurchaseNeeds> {
-  const [osRes, partsRes, servicesRes, aCaminhoRes] = await Promise.all([
+  const [osRes, partsRes, servicesRes, aCaminhoRes, materialRes] = await Promise.all([
     // Só o status: decide se a OS reserva estoque (STATUS_QUE_RESERVAM).
     supabase
       .from('service_orders')
@@ -62,11 +67,21 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
       .gt('pendente', 0)
       .order('po_criada_em', { ascending: true })
       .order('purchase_order_item_id', { ascending: true }),
+    // O que o dono disse de cada linha. A mesma ordem da RPC (por id): ela decide quem casa
+    // primeiro se duas linhas apontarem para o mesmo item.
+    supabase
+      .from('os_material')
+      .select('service_order_part_id, service_order_service_id, purchase_order_item_id, origem, situacao, fonte, quantidade_necessaria, quantidade_na_mao')
+      .eq('service_order_id', serviceOrderId)
+      .order('id', { ascending: true }),
   ]);
   if (osRes.error) throw osRes.error;
   if (partsRes.error) throw partsRes.error;
   if (servicesRes.error) throw servicesRes.error;
   if (aCaminhoRes.error) throw aCaminhoRes.error;
+  // Sem a tabela (migration 20261024160300 não aplicada) o PostgREST dá 404 e isto lança: a faixa de
+  // compras mostra o erro em vez de uma conta que ignoraria o que o dono informou.
+  if (materialRes.error) throw materialRes.error;
 
   const parts = (partsRes.data ?? []).map((p: any) => ({
     id: p.id,
@@ -152,7 +167,8 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
     pendente: l.pendente ?? 0,
     unit_cost: l.unit_cost,
   }));
-  return comItensACaminho(needs, aCaminho);
+  const linhas: LinhaDeMaterialInput[] = materialRes.data ?? [];
+  return aplicarSituacaoDoMaterial(comItensACaminho(needs, aCaminho), linhas);
 }
 
 export function usePurchaseNeeds(serviceOrderId: string | undefined, enabled = true) {

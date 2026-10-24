@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  comItensACaminho, computePurchaseNeeds, descontarReservaDaPropriaOs, isPurchasableFreeText,
-  osReservaEstoque, STATUS_QUE_RESERVAM,
-  type ComputeInput, type FreeTextInput, type PartInput,
+  aplicarSituacaoDoMaterial, comItensACaminho, computePurchaseNeeds, descontarReservaDaPropriaOs,
+  isPurchasableFreeText, osReservaEstoque, STATUS_QUE_RESERVAM,
+  type ComputeInput, type FreeTextInput, type LinhaDeMaterialInput, type PartInput, type PurchaseNeeds,
 } from './purchase-needs';
 
 /* Pina a regra de necessidade LÍQUIDA. Se alguém voltar a comparar
@@ -328,5 +328,131 @@ describe('comItensACaminho — pedido em OC de texto livre da própria OS', () =
   it('sem linhas, devolve o mesmo objeto', () => {
     const base = computePurchaseNeeds(input());
     expect(comItensACaminho(base, [])).toBe(base);
+  });
+});
+
+// ── O que o dono informou (Agenda de Produção, Fase 1, P2) ─────────────────────────────────────────
+// O MESMO cenário numérico de supabase/tests/agenda_fase1_material.sql (casos B) e de
+// src/hooks/use-purchase-needs.test.ts (OS M): Cerbo na mão, 3 de 8 fusíveis na mão, cabo dispensado,
+// painel a caminho e o conector (texto livre, 2) comprado.
+describe('aplicarSituacaoDoMaterial — o que o dono disse entra na conta', () => {
+  const M = {
+    cerbo: 'm1', fusivel: 'm2', cabo: 'm3', painel: 'm4', conector: 'm5',
+  };
+  const bruto = (): PurchaseNeeds => computePurchaseNeeds(input({
+    serviceOrderId: 'os-m',
+    parts: [
+      { id: M.cerbo, product_id: 'p1', quantity: 1, unit_cost_snapshot: 1900, product_name: 'Cerbo' },
+      { id: M.fusivel, product_id: 'p2', quantity: 8, unit_cost_snapshot: 25, product_name: 'Fusível' },
+      { id: M.cabo, product_id: 'p3', quantity: 1, unit_cost_snapshot: 210, product_name: 'Cabo' },
+      { id: M.painel, product_id: 'p4', quantity: 1, unit_cost_snapshot: 1250, product_name: 'Painel' },
+    ],
+    freeTextItems: [{
+      id: M.conector, service_id: null, name_snapshot: 'Conector de cabo de dados AG2',
+      billing_unit_snapshot: 'unit', quantity: 2, unit_price_snapshot: 120, is_material: true,
+    }],
+  }));
+  const linha = (over: Partial<LinhaDeMaterialInput>): LinhaDeMaterialInput => ({
+    service_order_part_id: null, service_order_service_id: null, purchase_order_item_id: null,
+    origem: 'peca', situacao: 'falta', fonte: 'dono', quantidade_necessaria: 1, quantidade_na_mao: 0,
+    ...over,
+  });
+  const DO_DONO: LinhaDeMaterialInput[] = [
+    linha({ service_order_part_id: M.cerbo, situacao: 'na_mao', quantidade_na_mao: '1.000' }),
+    linha({ service_order_part_id: M.fusivel, quantidade_necessaria: '8.000', quantidade_na_mao: '3.000' }),
+    linha({ service_order_part_id: M.cabo, situacao: 'dispensado' }),
+    linha({ service_order_part_id: M.painel, situacao: 'a_caminho' }),
+    linha({ service_order_service_id: M.conector, origem: 'texto_livre', situacao: 'comprado', quantidade_necessaria: 2 }),
+    // A linha que o dono citou (peça embutida) aponta para a mesma linha de serviço e não entra na compra.
+    linha({ service_order_service_id: M.conector, origem: 'dono', situacao: 'dispensado', quantidade_necessaria: 4 }),
+  ];
+  const item = (r: PurchaseNeeds, id: string) => r.items.find((i) => i.sourceId === id);
+
+  it('o bruto do cenário: 5 itens, 5 faltas, custo 3800 (o caso A0 do SQL)', () => {
+    const b = bruto();
+    expect(b.items).toHaveLength(5);
+    expect(b.shortageCount).toBe(5);
+    expect(b.estimatedCost).toBe(3800);
+  });
+
+  it('sem linhas, ou só com linha que o sistema copiou, devolve o MESMO objeto', () => {
+    const b = bruto();
+    expect(aplicarSituacaoDoMaterial(b, [])).toBe(b);
+    const copiadas = [
+      linha({ service_order_part_id: M.cerbo, situacao: 'na_mao', fonte: 'estoque', quantidade_na_mao: 1 }),
+      linha({ service_order_part_id: M.painel, situacao: 'a_caminho', fonte: 'oc' }),
+      linha({ service_order_part_id: M.fusivel, situacao: 'comprado', fonte: null, quantidade_necessaria: 8 }),
+    ];
+    expect(aplicarSituacaoDoMaterial(b, copiadas)).toBe(b);
+    // Fato que não muda nada (falta sem quantidade na mão) também.
+    expect(aplicarSituacaoDoMaterial(b, [linha({ service_order_part_id: M.cerbo })])).toBe(b);
+  });
+
+  it('na_mao → ok; parcial 3 de 8 → partial com falta 5; a_caminho e comprado → on_order', () => {
+    const r = aplicarSituacaoDoMaterial(bruto(), DO_DONO);
+    expect(item(r, M.cerbo)).toMatchObject({ status: 'ok', available: 1, onOrder: 0, shortage: 0, informado: 'na_mao' });
+    expect(item(r, M.fusivel)).toMatchObject({ status: 'partial', available: 3, onOrder: 0, shortage: 5, informado: 'parcial' });
+    expect(item(r, M.painel)).toMatchObject({ status: 'on_order', available: 0, onOrder: 1, shortage: 0, informado: 'a_caminho' });
+    expect(item(r, M.conector)).toMatchObject({ status: 'on_order', available: 0, onOrder: 2, shortage: 0, informado: 'comprado' });
+  });
+
+  it('dispensado some de items e de shortages; o cenário fecha com 1 falta e R$ 125 (o caso B6 do SQL)', () => {
+    const r = aplicarSituacaoDoMaterial(bruto(), DO_DONO);
+    expect(item(r, M.cabo)).toBeUndefined();
+    expect(r.items.map((i) => i.sourceId)).toEqual([M.cerbo, M.fusivel, M.painel, M.conector]);
+    expect(r.shortages.map((i) => i.sourceId)).toEqual([M.fusivel]);
+    expect(r.shortageCount).toBe(1);
+    expect(r.estimatedCost).toBe(125);
+    expect(r.needsPurchase).toBe(true);
+    expect(r.serviceOrderId).toBe('os-m');
+  });
+
+  it('parcial 1 de 2 no texto livre: falta 1, continua sem cadastro (o caso B8 do SQL)', () => {
+    const linhas = DO_DONO.map((l) => (l.origem === 'texto_livre'
+      ? { ...l, situacao: 'falta', quantidade_na_mao: 1 } : l));
+    const r = aplicarSituacaoDoMaterial(bruto(), linhas);
+    expect(item(r, M.conector)).toMatchObject({ status: 'uncatalogued', available: 1, shortage: 1, informado: 'parcial' });
+    expect(r.shortageCount).toBe(2);
+    expect(r.estimatedCost).toBe(245);
+  });
+
+  it('a quantidade da OS que passou do que o dono disse continua faltando (na mão 1 de 2; comprou 1 de 2)', () => {
+    const b = computePurchaseNeeds(input({
+      parts: [{ id: 'a', product_id: 'p1', quantity: 2, unit_cost_snapshot: 10, product_name: 'X' }],
+    }));
+    const naMao = aplicarSituacaoDoMaterial(b, [linha({ service_order_part_id: 'a', situacao: 'na_mao', quantidade_na_mao: 1 })]);
+    expect(naMao.items[0]).toMatchObject({ available: 1, shortage: 1, status: 'partial', informado: 'na_mao' });
+    const comprou = aplicarSituacaoDoMaterial(b, [linha({ service_order_part_id: 'a', situacao: 'comprado', quantidade_necessaria: 1 })]);
+    expect(comprou.items[0]).toMatchObject({ onOrder: 1, shortage: 1, status: 'missing', informado: 'comprado' });
+  });
+
+  it('item a caminho por OC de texto livre: na mão → ok, nunca pede compra', () => {
+    const b = comItensACaminho(computePurchaseNeeds(input()), [{
+      purchase_order_item_id: 'poi-1', po_number: 'OC-00004', description: 'Compressor', quantity: 1, pendente: 1, unit_cost: 0,
+    }]);
+    const r = aplicarSituacaoDoMaterial(b, [linha({ purchase_order_item_id: 'poi-1', origem: 'oc', situacao: 'na_mao', quantidade_na_mao: 1 })]);
+    expect(r.items[0]).toMatchObject({ status: 'ok', available: 1, onOrder: 0, shortage: 0, informado: 'na_mao' });
+    expect(r.shortageCount).toBe(0);
+    // Dispensado sai até da lista "a caminho".
+    expect(aplicarSituacaoDoMaterial(b, [linha({ purchase_order_item_id: 'poi-1', origem: 'oc', situacao: 'dispensado' })]).items).toEqual([]);
+  });
+
+  it('shortages em ordem determinística: rank, falta desc, posição original (o caso B9 do SQL)', () => {
+    const it_ = (sourceId: string, origin: 'part' | 'free_text', required: number, status: 'missing' | 'uncatalogued', unitCost: number) => ({
+      sourceId, origin, productId: origin === 'part' ? `p-${sourceId}` : null, description: sourceId, unit: null,
+      required, available: 0, onOrder: 0, shortage: required, status, unitCost,
+    });
+    const puro: PurchaseNeeds = {
+      serviceOrderId: 'os-t',
+      items: [it_('x1', 'part', 1, 'missing', 10), it_('x2', 'part', 1, 'missing', 10), it_('x3', 'part', 2, 'missing', 5),
+        it_('x4', 'free_text', 3, 'uncatalogued', 1), it_('x5', 'part', 4, 'missing', 2)],
+      shortages: [], shortageCount: 5, estimatedCost: 0, needsPurchase: true,
+    };
+    const r = aplicarSituacaoDoMaterial(puro, [linha({ service_order_part_id: 'x5', quantidade_necessaria: 4, quantidade_na_mao: 1 })]);
+    expect(r.shortages.map((s) => s.sourceId)).toEqual(['x3', 'x1', 'x2', 'x5', 'x4']);
+    expect(r.estimatedCost).toBe(39);
+    expect(r.shortageCount).toBe(5);
+    // Mesma entrada, mesma saída.
+    expect(aplicarSituacaoDoMaterial(puro, [linha({ service_order_part_id: 'x5', quantidade_necessaria: 4, quantidade_na_mao: 1 })])).toEqual(r);
   });
 });

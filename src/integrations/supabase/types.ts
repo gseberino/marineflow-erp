@@ -6286,6 +6286,132 @@ export type Database = {
           },
         ]
       }
+      os_material: {
+        Row: {
+          atualizado_em: string
+          atualizado_por: string | null
+          chegou_em: string | null
+          compra_prevista_em: string | null
+          comprado_em: string | null
+          conferido_em: string | null
+          critico: boolean
+          descricao: string
+          evidencia: Json
+          fonte: string | null
+          fornecedor_id: string | null
+          fornecedor_nome: string | null
+          historico: Json
+          id: string
+          origem: string
+          previsao_ate: string | null
+          previsao_de: string | null
+          previsao_fonte: string | null
+          previsao_original: string | null
+          purchase_order_item_id: string | null
+          quantidade_na_mao: number
+          quantidade_necessaria: number
+          service_order_id: string
+          service_order_part_id: string | null
+          service_order_service_id: string | null
+          situacao: string
+          trecho: string | null
+        }
+        Insert: {
+          atualizado_em?: string
+          atualizado_por?: string | null
+          chegou_em?: string | null
+          compra_prevista_em?: string | null
+          comprado_em?: string | null
+          conferido_em?: string | null
+          critico?: boolean
+          descricao: string
+          evidencia?: Json
+          fonte?: string | null
+          fornecedor_id?: string | null
+          fornecedor_nome?: string | null
+          historico?: Json
+          id?: string
+          origem: string
+          previsao_ate?: string | null
+          previsao_de?: string | null
+          previsao_fonte?: string | null
+          previsao_original?: string | null
+          purchase_order_item_id?: string | null
+          quantidade_na_mao?: number
+          quantidade_necessaria: number
+          service_order_id: string
+          service_order_part_id?: string | null
+          service_order_service_id?: string | null
+          situacao?: string
+          trecho?: string | null
+        }
+        Update: {
+          atualizado_em?: string
+          atualizado_por?: string | null
+          chegou_em?: string | null
+          compra_prevista_em?: string | null
+          comprado_em?: string | null
+          conferido_em?: string | null
+          critico?: boolean
+          descricao?: string
+          evidencia?: Json
+          fonte?: string | null
+          fornecedor_id?: string | null
+          fornecedor_nome?: string | null
+          historico?: Json
+          id?: string
+          origem?: string
+          previsao_ate?: string | null
+          previsao_de?: string | null
+          previsao_fonte?: string | null
+          previsao_original?: string | null
+          purchase_order_item_id?: string | null
+          quantidade_na_mao?: number
+          quantidade_necessaria?: number
+          service_order_id?: string
+          service_order_part_id?: string | null
+          service_order_service_id?: string | null
+          situacao?: string
+          trecho?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "os_material_fornecedor_id_fkey"
+            columns: ["fornecedor_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "os_material_purchase_order_item_id_fkey"
+            columns: ["purchase_order_item_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_order_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "os_material_service_order_id_fkey"
+            columns: ["service_order_id"]
+            isOneToOne: false
+            referencedRelation: "service_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "os_material_service_order_part_id_fkey"
+            columns: ["service_order_part_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "os_material_service_order_service_id_fkey"
+            columns: ["service_order_service_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pagadores_do_cliente: {
         Row: {
           bank_transaction_id: string | null

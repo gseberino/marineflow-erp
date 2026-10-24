@@ -2581,3 +2581,15 @@ porque só o dono pode preenchê-las.
   failed" e não vê o resultado de nenhum teste.
 - **Não corrigido** (regra 3): fora do escopo do P5. O conserto é tipar o `PRESETS` do teste (`as const`
   nos `tipo` ou anotar `Preset[]`).
+
+### [NOVO-agenda-06] OC-00004 com fornecedor sem cidade nem UF: a previsão do compressor da OS-00104 é desconhecida
+
+- **Encontrado em:** Agenda de Produção, Fase 1 (conferência de 23/10/2026, SELECT `g15_oc4`; produção = 5455f7e5).
+- **Onde:** a OC-00004 (rascunho de 13/10/2026, da OS-00104, "Compressor 12V de geladeira SS65", 0 de 1
+  recebido, sem `expected_date`) aponta para o fornecedor "Mateus Honório", cadastrado sem cidade e sem UF.
+- **O quê:** sem cidade nem UF não há classe de fornecedor (local, SC/PR, outro estado, marketplace), e sem
+  classe não há prazo típico. Com a sincronização do material (P2) a linha do compressor nasce `a_caminho`,
+  fonte `oc`, SEM previsão (a OC não tem `expected_date`). Na prontidão (P3) isso é nível D sem data: a
+  pergunta certa ao dono é "o compressor (pedido em 13/10) chegou?", nunca uma data inventada.
+- **Não corrigido** (só registro, como pede a spec): é dado de cadastro. Completar a cidade/UF do fornecedor
+  ou a previsão na OC dá a data; o dono dizer "chegou" ou "chega dia X" (P5) também resolve.

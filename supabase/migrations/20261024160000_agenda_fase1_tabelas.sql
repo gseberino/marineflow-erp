@@ -197,7 +197,9 @@ create table if not exists public.os_material (
   service_order_id         uuid not null references public.service_orders(id) on delete cascade,
   service_order_part_id    uuid references public.service_order_parts(id) on delete cascade,
   service_order_service_id uuid references public.service_order_services(id) on delete cascade,
-  purchase_order_item_id   uuid references public.purchase_order_items(id) on delete set null,
+  -- CASCADE, não SET NULL (P2): a linha de origem 'oc' exige o item (CHECK origem_coerente), e com SET NULL
+  -- o "remover item" da OC seria recusado pelo CHECK. Item apagado = linha apagada, como peça e serviço.
+  purchase_order_item_id   uuid references public.purchase_order_items(id) on delete cascade,
   origem                   text not null check (origem in ('peca','texto_livre','oc','dono')),
   descricao                text not null check (char_length(descricao) <= 200),
   quantidade_necessaria    numeric(10,3) not null check (quantidade_necessaria > 0),

@@ -55,6 +55,28 @@ describe('status que reservam estoque', () => {
     expect(lista(m![1])).toEqual([...STATUS_QUE_RESERVAM].sort());
   });
 
+  // Desde a Fase 1 (P2) get_os_purchase_needs = aplicar_os_material(os_necessidade_bruta(…), os_material):
+  // a CTE `os` vive na conta bruta, que é o corpo de 150100 copiado sem mudar uma linha.
+  const corpo = (arquivo: string, funcao: string): string => {
+    const sql = ler(arquivo);
+    const i = sql.indexOf(`create or replace function public.${funcao}(p_so_id uuid)`);
+    expect(i, `${funcao} não está em ${arquivo}`).toBeGreaterThanOrEqual(0);
+    const a = sql.indexOf('as $function$', i) + 'as $function$'.length;
+    return sql.slice(a, sql.indexOf('$function$;', a));
+  };
+
+  it('o TS = a CTE `os` de os_necessidade_bruta (20261024160300), a conta bruta da RPC', () => {
+    const m = /so\.status\s+in\s*\(([^)]*)\)\s+as\s+reserva/i.exec(
+      corpo('20261024160300_agenda_fase1_material.sql', 'os_necessidade_bruta'));
+    expect(m, 'a lista da reserva própria não foi encontrada na conta bruta').not.toBeNull();
+    expect(lista(m![1])).toEqual([...STATUS_QUE_RESERVAM].sort());
+  });
+
+  it('os_necessidade_bruta é o corpo de get_os_purchase_needs de 150100, sem mudar uma linha', () => {
+    expect(corpo('20261024160300_agenda_fase1_material.sql', 'os_necessidade_bruta'))
+      .toBe(corpo('20261024150100_compras_reserva_propria_e_ja_pedido.sql', 'get_os_purchase_needs'));
+  });
+
   it("'open' não reserva (NOVO-agenda-01) e nenhum status encerrado reserva", () => {
     for (const s of ['open', 'draft', 'completed', 'invoiced', 'cancelled']) {
       expect(STATUS_QUE_RESERVAM as readonly string[]).not.toContain(s);

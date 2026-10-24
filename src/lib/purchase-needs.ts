@@ -25,6 +25,11 @@
  * (`comItensACaminho`): não pede compra, mas não deixa a OS parecer pronta. Esse não
  * tem corte de idade: a linha não abate nada, então cortá-la só a esconderia.
  *
+ * Por último entra o que o DONO disse de cada linha (os_material, Agenda de Produção,
+ * 24/10/2026 — `aplicarSituacaoDoMaterial`): comprado ou a caminho conta como já pedido, na
+ * mão como disponível, dispensado sai. É o espelho de aplicar_os_material, a última camada
+ * de get_os_purchase_needs.
+ *
  * O que entra na conta (decisão do dono, 29/07/2026):
  *   • PEÇAS (service_order_parts) — product_id é NOT NULL, então sempre há catálogo;
  *     entram quando o disponível não cobre a quantidade.
@@ -78,7 +83,16 @@ export interface PurchaseNeedItem {
   unitCost: number;
   /** só em origin 'purchase_order': a OC em que o item foi pedido ("OC-00004") */
   purchaseOrderNumber?: string;
+  /**
+   * O que o dono (ou o fornecedor, a nota, o Pix) disse da linha em os_material, quando isso mudou
+   * a conta do item (`aplicarSituacaoDoMaterial`): 'comprado' e 'a_caminho' contam como já pedido,
+   * 'na_mao' como disponível, 'parcial' = parte na mão e o resto ainda falta.
+   */
+  informado?: SituacaoInformada;
 }
+
+/** O que o dono informou e mudou a conta do item. */
+export type SituacaoInformada = 'comprado' | 'a_caminho' | 'na_mao' | 'parcial';
 
 export interface PurchaseNeeds {
   serviceOrderId: string;
@@ -341,6 +355,115 @@ export function comItensACaminho(needs: PurchaseNeeds, linhas: ItemACaminhoInput
     }));
   if (!aCaminho.length) return needs;
   return { ...needs, items: [...needs.items, ...aCaminho] };
+}
+
+// ── O que o dono informou (Agenda de Produção, Fase 1, P2 — 24/10/2026) ──────────────────────────────
+
+/**
+ * Uma linha de os_material, como a tela lê (numeric chega como string). O vínculo diz de qual item
+ * da conta ela fala: peça → service_order_part_id; texto livre → service_order_service_id (só a de
+ * origem 'texto_livre'); item a caminho → purchase_order_item_id.
+ */
+export interface LinhaDeMaterialInput {
+  service_order_part_id: string | null;
+  service_order_service_id: string | null;
+  purchase_order_item_id: string | null;
+  origem: string;
+  situacao: string;
+  fonte: string | null;
+  quantidade_necessaria: number | string;
+  quantidade_na_mao: number | string;
+}
+
+/**
+ * De onde vem o fato que entra na conta. A linha que a sincronização copiou (fonte nula, 'estoque'
+ * ou 'oc') é espelho da conta bruta: aplicá-la não muda nada quando está em dia, e esconderia uma
+ * falta se ficasse velha. A MESMA lista do `where` de aplicar_os_material (20261024160300).
+ */
+export const FONTES_INFORMADAS = ['dono', 'fornecedor', 'nfe', 'pix'] as const;
+
+const RANK_DA_FALTA: Record<NeedStatus, number> = {
+  missing: 0, partial: 1, uncatalogued: 2, on_order: 3, ok: 4,
+};
+
+function linhaDoItem(item: PurchaseNeedItem, linhas: LinhaDeMaterialInput[]): LinhaDeMaterialInput | undefined {
+  return linhas.find((l) => {
+    if (item.origin === 'part') return l.origem === 'peca' && l.service_order_part_id === item.sourceId;
+    if (item.origin === 'free_text') return l.origem === 'texto_livre' && l.service_order_service_id === item.sourceId;
+    return l.origem === 'oc' && l.purchase_order_item_id === item.sourceId;
+  });
+}
+
+/**
+ * Espelho de aplicar_os_material: a conta de compra com o que o dono informou em os_material.
+ * Por item, nesta ordem:
+ *   • dispensado → o item sai (de items e de shortages);
+ *   • quantidade na mão soma ao disponível (na_mao tem a quantidade completa; se a OS pedir mais do
+ *     que o dito, a diferença continua faltando);
+ *   • comprado / a caminho → o que faltava conta como já pedido (até o que o dono comprou);
+ *   • falta e status pela régua de computePurchaseNeeds (texto livre com falta segue 'uncatalogued';
+ *     o item a caminho por OC nunca pede compra) e `informado` no item que o fato mudou.
+ * Depois refaz shortages (rank, falta desc, posição original), shortageCount, estimatedCost e
+ * needsPurchase. Sem fato que mude algum item, devolve o MESMO objeto. A linha que o dono citou
+ * (origem 'dono') não entra na compra nesta fase.
+ */
+export function aplicarSituacaoDoMaterial(needs: PurchaseNeeds, linhas: LinhaDeMaterialInput[]): PurchaseNeeds {
+  const informadas = linhas.filter((l) => (FONTES_INFORMADAS as readonly string[]).includes(l.fonte ?? ''));
+  if (!informadas.length) return needs;
+
+  let mudouAlgo = false;
+  const itens: Array<{ item: PurchaseNeedItem; idx: number }> = [];
+  needs.items.forEach((item, idx) => {
+    const l = linhaDoItem(item, informadas);
+    if (!l) {
+      itens.push({ item, idx });
+      return;
+    }
+    if (l.situacao === 'dispensado') {
+      mudouAlgo = true;
+      return;
+    }
+    const r = item.required;
+    const qn = Math.max(num(l.quantidade_necessaria), 0);
+    const qna = Math.max(num(l.quantidade_na_mao), 0);
+    const available = Math.max(item.available, Math.min(r, qna));
+    const onOrder = l.situacao === 'comprado' || l.situacao === 'a_caminho'
+      ? Math.max(Math.min(item.onOrder, r - available), Math.min(r - available, Math.max(qn - qna, 0)))
+      : Math.min(item.onOrder, r - available);
+    const shortage = item.origin === 'purchase_order' ? 0 : Math.max(r - available - onOrder, 0);
+    let status: NeedStatus;
+    if (item.origin === 'purchase_order') status = r - available === 0 ? 'ok' : 'on_order';
+    else if (shortage === 0 && r - available === 0) status = 'ok';
+    else if (shortage === 0) status = 'on_order';
+    else if (item.origin === 'free_text') status = 'uncatalogued';
+    else if (available > 0) status = 'partial';
+    else status = 'missing';
+
+    const mudou = available !== item.available || onOrder !== item.onOrder
+      || shortage !== item.shortage || status !== item.status;
+    if (!mudou) {
+      itens.push({ item, idx });
+      return;
+    }
+    mudouAlgo = true;
+    const informado = (l.situacao === 'falta' ? 'parcial' : l.situacao) as SituacaoInformada;
+    itens.push({ item: { ...item, available, onOrder, shortage, status, informado }, idx });
+  });
+  if (!mudouAlgo) return needs;
+
+  const shortages = itens
+    .filter(({ item }) => item.shortage > 0)
+    .sort((a, b) => RANK_DA_FALTA[a.item.status] - RANK_DA_FALTA[b.item.status]
+      || b.item.shortage - a.item.shortage || a.idx - b.idx)
+    .map(({ item }) => item);
+  return {
+    ...needs,
+    items: itens.map(({ item }) => item),
+    shortages,
+    shortageCount: shortages.length,
+    estimatedCost: shortages.reduce((s, i) => s + i.shortage * i.unitCost, 0),
+    needsPurchase: shortages.length > 0,
+  };
 }
 
 /** Rótulo curto para chip/selo na UI. */
