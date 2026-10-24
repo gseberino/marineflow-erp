@@ -1,0 +1,452 @@
+{
+  "_leia": [
+    "Evals da Agenda de Produção, Fase 1 (spec §8.5): 15 de leitura (7 perguntas × 2 jeitos de perguntar + a OS que não existe) e 5 áudios da rodada de aprontar com o juiz no banco.",
+    "hoje = sex 23/10/2026, a carteira sintética de scripts/bancada-agenda/fixture-2310.sql, com o material da carteira já sincronizado (o motor de 15 min já passou). estado 'pos_rodada' = fixture-2310-pos-rodada.sql por cima (o *grava* do áudio R01).",
+    "O dono fala pelo WhatsApp (autor = o admin da fixture). depois = 'grava': o dono manda *grava* (o comando sem IA) depois da resposta.",
+    "espera.ferramentas: cada uma tem de aparecer (nome + só os argumentos que importam; {um_de: [...]} aceita qualquer um; null = sem o argumento). Nas três de rascunho o trecho tem de sair da entrada. proibidas: além das de PROIBIDAS_SEMPRE (graders.mjs).",
+    "espera.texto_*: sobre a resposta final do modelo ao dono. datas_so_do_banco / os_so_do_banco: toda data dd/mm e toda OS/ORÇ do texto veio de alguma saída de ferramenta do caso.",
+    "espera.banco: antes do *grava* nada muda (sempre); rascunho_aberto = linhas abertas antes do *grava*; diff = EXATAMENTE as linhas que mudaram nas 4 tabelas de fato (vazio = nada); igual_ao_estado = o estado final é o desse arquivo; consultas = o que a foto não mostra.",
+    "As linhas do diff: '+ tabela chave: campo=valor …' (linha nova, só os campos com valor), '~ tabela chave: campo de → para', '- tabela chave'. Chaves: planejamento = OS; equipe = OS + pessoa; material = OS + descrição; disponibilidade = pessoa, origem, dias, turno e situação."
+  ],
+  "hoje": "2026-10-23",
+  "autor": "aa000000-0000-4000-8000-000000000001",
+  "canal": "whatsapp",
+  "casos": [
+    {
+      "id": "L01a",
+      "grupo": "leitura",
+      "entrada": "o que eu tenho que fazer hoje?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": { "foco": "o_que_fazer", "pessoa": { "um_de": [null, "eu"] } } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["Hoje (sex 23/10): nada marcado", "Travado esperando você", "Prontos sem data", "Em risco", "Outras pendências"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L01b",
+      "grupo": "leitura",
+      "entrada": "o que tem pra mim hoje?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": { "foco": "o_que_fazer", "pessoa": { "um_de": [null, "eu"] } } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["nada marcado", "Travado esperando você", "Prontos sem data", "Em risco", "Outras pendências"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L02a",
+      "grupo": "leitura",
+      "entrada": "como tá a semana?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": {
+          "foco": { "um_de": [null, "tudo", "livre"] },
+          "periodo": { "um_de": [null, "semana", "esta semana", "essa semana"] },
+          "os": null, "simular": null } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["sem contar você", "5,4"],
+        "texto_nao_contem": ["6,77", "6,8", "5,41", "6,5 "],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L02b",
+      "grupo": "leitura",
+      "entrada": "quando a gente vai ter tempo livre?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": {
+          "foco": { "um_de": [null, "tudo", "livre"] },
+          "periodo": { "um_de": [null, "semana", "esta semana", "essa semana"] },
+          "os": null, "simular": null } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["sem contar você", "5,4"],
+        "texto_nao_contem": ["6,77", "6,8", "5,41", "6,5 "],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L03a",
+      "grupo": "leitura",
+      "entrada": "se o César aprovar hoje quando dá?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": {
+          "os": { "um_de": ["César", "ORÇ-00119", "César Palazzo", "Palazzo"] }, "simular_aprovacao": true } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["ORÇ-00119", "projeção"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L03b",
+      "grupo": "leitura",
+      "entrada": "e se o César fechar o do Palazzo, quando a gente faz?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": {
+          "os": { "um_de": ["César", "ORÇ-00119", "César Palazzo", "Palazzo"] }, "simular_aprovacao": true } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["ORÇ-00119", "projeção"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L04a",
+      "grupo": "leitura",
+      "entrada": "um serviço de 2 dias eu e o Roberto, quando dá?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": {
+          "simular": { "dias": 2, "com_quem": { "um_de": [["eu", "Roberto"], ["Roberto", "eu"]] } } } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["não reserva nada"],
+        "texto_nao_contem": ["reservei", "marquei", "agendei"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L04b",
+      "grupo": "leitura",
+      "entrada": "se entrar um serviço de dois dias, eu e o Roberto, encaixa quando?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": {
+          "simular": { "dias": 2, "com_quem": { "um_de": [["eu", "Roberto"], ["Roberto", "eu"]] } } } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["não reserva nada"],
+        "texto_nao_contem": ["reservei", "marquei", "agendei"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L05a",
+      "grupo": "leitura",
+      "entrada": "a peça do Nelson chegou",
+      "estado": "pos_rodada",
+      "depois": "grava",
+      "espera": {
+        "ferramentas": [{ "nome": "material_informar", "argumentos": {
+          "os": { "um_de": ["Nelson", "OS-00112"] }, "situacao": "na_mao" } }],
+        "texto_contem": ["Entendi assim, confere?", "Painel Touch", "*grava*"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": [
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": situacao a_caminho → na_mao",
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": na_mao 0 → 1",
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": chegou nulo → 2026-10-23"
+          ]
+        }
+      }
+    },
+    {
+      "id": "L05b",
+      "grupo": "leitura",
+      "entrada": "chegou a peça do Nelson",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "material_informar", "argumentos": {
+          "os": { "um_de": ["Nelson", "OS-00112"] }, "situacao": "na_mao" } }],
+        "texto_contem": ["Qual peça", "KIT Cabos", "Central de controle", "Orion", "Painel Touch"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L06a",
+      "grupo": "leitura",
+      "entrada": "o que está atrasado?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": { "foco": { "um_de": ["atrasos", "riscos"] } } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["Vanderlei", "Lenine", "Robson", "Flávio"],
+        "texto_nao_contem": ["Nelson", "Giancarlo", "Kalmar", "Rodrigo", "César"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L06b",
+      "grupo": "leitura",
+      "entrada": "tem coisa atrasada?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": { "foco": { "um_de": ["atrasos", "riscos"] } } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["Vanderlei", "Lenine", "Robson", "Flávio"],
+        "texto_nao_contem": ["Nelson", "Giancarlo", "Kalmar", "Rodrigo", "César"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L07a",
+      "grupo": "leitura",
+      "entrada": "o que o Roberto faz amanhã?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": {
+          "pessoa": "Roberto", "periodo": { "um_de": ["amanha", "amanhã"] } } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["sábado só quando vocês combinam"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L07b",
+      "grupo": "leitura",
+      "entrada": "e o Roberto, faz o que segunda?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": {
+          "pessoa": "Roberto", "periodo": { "um_de": ["segunda", "segunda-feira", "seg"] } } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["26/10", "nada marcado"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "L08",
+      "grupo": "leitura",
+      "entrada": "como está a OS-00999?",
+      "estado": "inicial",
+      "depois": null,
+      "espera": {
+        "ferramentas": [{ "nome": "agenda_ver", "argumentos": { "os": { "um_de": ["OS-00999", "OS-999", "00999", "999"] } } }],
+        "proibidas": ["os_planejar", "material_informar", "equipe_disponibilidade"],
+        "texto_contem": ["Não encontrei"],
+        "texto_nao_contem": ["aguardando", "em andamento", "marcada", "previsão"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    },
+    {
+      "id": "R01",
+      "grupo": "rodada",
+      "entrada": "Lenine dois dias com o Roberto, eu abro e fecho, o João ajuda à tarde. O compressor do Flávio chegou dia 14, tá aqui, é um dia, eu e o Roberto. Do Nelson, Cerbo, Orion e os cabos tão aqui, o painel chega dia 3, são dois dias. Vanderlei eu compro na Premel terça, são três dias com o Roberto. Giancarlo é só a primeira parte, baterias e barramento, três dias, mas o motorhome só fica livre dia 3. Eu fico em campo de segunda a sexta; sexta à tarde, escritório.",
+      "estado": "inicial",
+      "depois": "grava",
+      "espera": {
+        "ferramentas": [
+          { "nome": "os_planejar", "argumentos": { "os": { "um_de": ["Lenine", "OS-00074"] }, "dias": 2 } },
+          { "nome": "material_informar", "argumentos": { "os": { "um_de": ["Flávio", "OS-00104"] }, "situacao": "na_mao" } },
+          { "nome": "os_planejar", "argumentos": { "os": { "um_de": ["Flávio", "OS-00104"] }, "dias": 1 } },
+          { "nome": "material_informar", "argumentos": { "os": { "um_de": ["Nelson", "OS-00112"] }, "situacao": "na_mao" } },
+          { "nome": "material_informar", "argumentos": { "os": { "um_de": ["Nelson", "OS-00112"] }, "situacao": "a_caminho", "quando": { "um_de": ["dia 3", "3"] } } },
+          { "nome": "os_planejar", "argumentos": { "os": { "um_de": ["Nelson", "OS-00112"] }, "dias": 2 } },
+          { "nome": "material_informar", "argumentos": { "os": { "um_de": ["Vanderlei", "OS-00069"] }, "situacao": "vou_comprar", "fornecedor": "Premel" } },
+          { "nome": "os_planejar", "argumentos": { "os": { "um_de": ["Vanderlei", "OS-00069"] }, "dias": 3 } },
+          { "nome": "os_planejar", "argumentos": { "os": { "um_de": ["Giancarlo", "OS-00100"] }, "dias": 3 } },
+          { "nome": "equipe_disponibilidade", "argumentos": { "pessoa": "eu", "situacao": "vem", "padrao": true } },
+          { "nome": "equipe_disponibilidade", "argumentos": { "pessoa": "eu", "situacao": "so_manha", "padrao": true } }
+        ],
+        "texto_contem": ["Entendi assim, confere?", "*grava*"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 16,
+          "igual_ao_estado": "pos_rodada",
+          "diff": [
+            "+ planejamento OS-00074: dias=2 fonte=dono presenca=abre_e_fecha",
+            "+ planejamento OS-00104: dias=1 fonte=dono",
+            "+ planejamento OS-00112: dias=2 fonte=dono",
+            "+ planejamento OS-00069: dias=3 fonte=dono",
+            "+ planejamento OS-00100: dias=3 fonte=dono bem={[2026-10-23,2026-11-03)} decidido=só a primeira parte, baterias e barramento",
+            "+ equipe OS-00074 Roberto: turnos=dia",
+            "+ equipe OS-00074 João: turnos=tarde",
+            "+ equipe OS-00104 Gustavo: turnos=dia",
+            "+ equipe OS-00104 Roberto: turnos=dia",
+            "+ equipe OS-00069 Roberto: turnos=dia",
+            "~ material OS-00104 Compressor 12V de geladeira SS65: situacao a_caminho → na_mao",
+            "~ material OS-00104 Compressor 12V de geladeira SS65: na_mao 0 → 1",
+            "~ material OS-00104 Compressor 12V de geladeira SS65: chegou nulo → 2026-10-14",
+            "~ material OS-00104 Compressor 12V de geladeira SS65: fonte oc → dono",
+            "~ material OS-00112 CENTRAL DE CONTROLE CERBO GX VICTRON ENERGY. - UTILIZADO PARA MONITORAMENTO DE: situacao falta → na_mao",
+            "~ material OS-00112 CENTRAL DE CONTROLE CERBO GX VICTRON ENERGY. - UTILIZADO PARA MONITORAMENTO DE: na_mao 0 → 1",
+            "~ material OS-00112 CENTRAL DE CONTROLE CERBO GX VICTRON ENERGY. - UTILIZADO PARA MONITORAMENTO DE: chegou nulo → 2026-10-23",
+            "~ material OS-00112 CENTRAL DE CONTROLE CERBO GX VICTRON ENERGY. - UTILIZADO PARA MONITORAMENTO DE: fonte nulo → dono",
+            "~ material OS-00112 Orion-Tr Smart 12/12-30A Victron (USADO): situacao falta → na_mao",
+            "~ material OS-00112 Orion-Tr Smart 12/12-30A Victron (USADO): na_mao 0 → 1",
+            "~ material OS-00112 Orion-Tr Smart 12/12-30A Victron (USADO): chegou nulo → 2026-10-23",
+            "~ material OS-00112 Orion-Tr Smart 12/12-30A Victron (USADO): fonte nulo → dono",
+            "~ material OS-00112 KIT Cabos Comunicação e Energia para Lítio: situacao falta → na_mao",
+            "~ material OS-00112 KIT Cabos Comunicação e Energia para Lítio: na_mao 0 → 1",
+            "~ material OS-00112 KIT Cabos Comunicação e Energia para Lítio: chegou nulo → 2026-10-23",
+            "~ material OS-00112 KIT Cabos Comunicação e Energia para Lítio: fonte nulo → dono",
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": situacao falta → a_caminho",
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": prev_ate nulo → 2026-11-03",
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": prev_orig nulo → 2026-11-03",
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": prev_fonte nulo → dono",
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": fonte nulo → dono",
+            "~ material OS-00069 Kit Cabos/ Conectores/ Terminais do Novo Sistema: fonte nulo → dono",
+            "~ material OS-00069 Kit Cabos/ Conectores/ Terminais do Novo Sistema: fornecedor nulo → PREMEL MAT. ELETRICOS LTDA",
+            "~ material OS-00069 Kit Cabos/ Conectores/ Terminais do Novo Sistema: compra nulo → 2026-10-27",
+            "~ material OS-00069 Porta Fusível MIDI c/ Capa Proteção: fonte nulo → dono",
+            "~ material OS-00069 Porta Fusível MIDI c/ Capa Proteção: fornecedor nulo → PREMEL MAT. ELETRICOS LTDA",
+            "~ material OS-00069 Porta Fusível MIDI c/ Capa Proteção: compra nulo → 2026-10-27",
+            "~ material OS-00069 KIT CABOS ELETRICOS P/ DC-DC 12V 60A: fonte nulo → dono",
+            "~ material OS-00069 KIT CABOS ELETRICOS P/ DC-DC 12V 60A: fornecedor nulo → PREMEL MAT. ELETRICOS LTDA",
+            "~ material OS-00069 KIT CABOS ELETRICOS P/ DC-DC 12V 60A: compra nulo → 2026-10-27",
+            "~ material OS-00069 Cabos Elétricos Diversos (2,5mm / 4,0mm / 6,0mm): fonte nulo → dono",
+            "~ material OS-00069 Cabos Elétricos Diversos (2,5mm / 4,0mm / 6,0mm): fornecedor nulo → PREMEL MAT. ELETRICOS LTDA",
+            "~ material OS-00069 Cabos Elétricos Diversos (2,5mm / 4,0mm / 6,0mm): compra nulo → 2026-10-27",
+            "+ disponibilidade Gustavo dono {1,2,3,4,5} dia todo disponivel",
+            "+ disponibilidade Gustavo dono {5} tarde indisponivel"
+          ]
+        }
+      }
+    },
+    {
+      "id": "R02",
+      "grupo": "rodada",
+      "entrada": "o do Lenine é dois dias, eu e o Roberto",
+      "estado": "inicial",
+      "depois": "grava",
+      "espera": {
+        "ferramentas": [{ "nome": "os_planejar", "argumentos": { "os": { "um_de": ["Lenine", "OS-00074"] }, "dias": 2 } }],
+        "texto_contem": ["Entendi assim, confere?", "*grava*"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": [
+            "+ planejamento OS-00074: dias=2 fonte=dono",
+            "+ equipe OS-00074 Gustavo: turnos=dia",
+            "+ equipe OS-00074 Roberto: turnos=dia"
+          ]
+        }
+      }
+    },
+    {
+      "id": "R03",
+      "grupo": "rodada",
+      "entrada": "o compressor do Flávio chegou dia 14",
+      "estado": "inicial",
+      "depois": "grava",
+      "espera": {
+        "ferramentas": [{ "nome": "material_informar", "argumentos": {
+          "os": { "um_de": ["Flávio", "OS-00104"] }, "situacao": "na_mao", "quando": { "um_de": ["dia 14", "14", "14/10"] } } }],
+        "texto_contem": ["Entendi assim, confere?", "*grava*"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": [
+            "~ material OS-00104 Compressor 12V de geladeira SS65: situacao a_caminho → na_mao",
+            "~ material OS-00104 Compressor 12V de geladeira SS65: na_mao 0 → 1",
+            "~ material OS-00104 Compressor 12V de geladeira SS65: chegou nulo → 2026-10-14",
+            "~ material OS-00104 Compressor 12V de geladeira SS65: fonte oc → dono"
+          ]
+        }
+      }
+    },
+    {
+      "id": "R04",
+      "grupo": "rodada",
+      "entrada": "o painel do Nelson chega dia 3",
+      "estado": "inicial",
+      "depois": "grava",
+      "espera": {
+        "ferramentas": [{ "nome": "material_informar", "argumentos": {
+          "os": { "um_de": ["Nelson", "OS-00112"] }, "situacao": "a_caminho", "quando": { "um_de": ["dia 3", "3", "03/11", "3/11"] } } }],
+        "texto_contem": ["Entendi assim, confere?", "*grava*"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": [
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": situacao falta → a_caminho",
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": prev_ate nulo → 2026-11-03",
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": prev_orig nulo → 2026-11-03",
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": prev_fonte nulo → dono",
+            "~ material OS-00112 Painel Touch de Monitoramento e Controle de Energia – HBR 7\": fonte nulo → dono"
+          ],
+          "consultas": [
+            {
+              "o_que": "o painel do Nelson na prontidão: nível C (previsão dita pelo dono)",
+              "sql": "select e ->> 'nivel' from jsonb_array_elements(public.os_prontidao('05000000-0000-4000-8000-000000000112', date '2026-10-23') #> '{material,itens}') e where e ->> 'linha' = md5('peca:112:4')::uuid::text",
+              "igual": "C"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "R05",
+      "grupo": "rodada",
+      "entrada": "o do Rodrigo é meio dia, só eu",
+      "estado": "inicial",
+      "depois": "grava",
+      "espera": {
+        "ferramentas": [{ "nome": "os_planejar", "argumentos": { "os": { "um_de": ["Rodrigo", "o do Rodrigo"] } } }],
+        "texto_contem": ["Qual Rodrigo", "OS-00076", "OS-00096"],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": { "rascunho_aberto": 0, "diff": [] }
+      }
+    }
+  ]
+}

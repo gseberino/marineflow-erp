@@ -1,0 +1,270 @@
+{
+  "_leia": [
+    "Para cada caso de casos.json, uma resposta BOA (o que o modelo deve fazer) e uma RUIM (um erro plausível) que tem de reprovar no juiz de reprova_em (ferramentas | texto | banco). É isto que prova os juízes: um juiz que deixa a ruim passar está quebrado.",
+    "chamadas = as ferramentas na ordem, com os argumentos como o modelo mandaria. texto = a resposta final ao dono; {{saida:N}} = o texto que a ferramenta N devolveu ('repita o texto'), {{saida:N|linhas:a-b}} = só essas linhas ('pode encurtar o fim'), {{saida:ultima}} = a última."
+  ],
+  "L01a": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "o_que_fazer", "pessoa": "eu" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "responde pela ferramenta antiga (my_agenda), que não sabe o que trava cada OS",
+      "reprova_em": "ferramentas",
+      "chamadas": [{ "ferramenta": "my_agenda", "argumentos": {} }],
+      "texto": "Hoje você não tem nada marcado. Tem 1 tarefa atrasada e 3 de hoje."
+    }
+  },
+  "L01b": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "o_que_fazer" } }],
+      "texto": "{{saida:0|linhas:1-5}}"
+    },
+    "ruim": {
+      "por_que": "inventa um compromisso e um número de OS que a agenda não deu",
+      "reprova_em": "texto",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "o_que_fazer" } }],
+      "texto": "Hoje (sex 23/10): Lenine às 8h na OS-00074 e depois o Flávio. Travado esperando você: Vanderlei. Prontos sem data: nenhum. Em risco: 4. Outras pendências: 1 conta."
+    }
+  },
+  "L02a": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "periodo": "semana" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "diz 'livre a partir de 10/11', data que nenhuma ferramenta deu (spec §8.5)",
+      "reprova_em": "texto",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "periodo": "semana" } }],
+      "texto": "Esta semana não tem nada marcado. A equipe fica livre a partir de 10/11, no ritmo de ~5,4 diárias de equipe por semana, sem contar você."
+    }
+  },
+  "L02b": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "livre" } }],
+      "texto": "Livre de verdade: no melhor caso a partir de qua 18/11; no realista, só a partir de qua 09/12. Há 7 serviços aprovados, uns 17 a 32 dias de equipe, no ritmo de ~5,4 diárias de equipe por semana, sem contar você."
+    },
+    "ruim": {
+      "por_que": "calcula sozinho, sem a agenda: outro número de capacidade e uma data inventada",
+      "reprova_em": "ferramentas",
+      "chamadas": [],
+      "texto": "Pelo ritmo de vocês, umas 6,8 diárias por semana, dá para ficar livre lá por 27/11, sem contar você."
+    }
+  },
+  "L03a": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "os": "César", "simular_aprovacao": true } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "esquece o 'se aprovar hoje' (simular_aprovacao): a agenda procura o César na carteira e não acha",
+      "reprova_em": "ferramentas",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "os": "César" } }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "L03b": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "os": "César", "simular_aprovacao": true } }],
+      "texto": "Se o César aprovar hoje, o ORÇ-00119 começa entre qua 18/11 e qua 09/12, só depois que as peças chegarem: 1,5 a 2,5 dias com 2 pessoas. É projeção: não reserva nada."
+    },
+    "ruim": {
+      "por_que": "promete uma data que a ferramenta não deu e esquece que é projeção",
+      "reprova_em": "texto",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "os": "César", "simular_aprovacao": true } }],
+      "texto": "Se ele aprovar hoje, dá para começar o ORÇ-00119 já na seg 26/10."
+    }
+  },
+  "L04a": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "simular": { "dias": 2, "com_quem": ["eu", "Roberto"] } } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "diz que reservou: a simulação não reserva nada",
+      "reprova_em": "texto",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "simular": { "dias": 2, "com_quem": ["eu", "Roberto"] } } }],
+      "texto": "Reservei ter 27/10 para você e o Roberto: passa na frente de tudo."
+    }
+  },
+  "L04b": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "simular": { "dias": 2, "com_quem": ["eu", "Roberto"] } } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "cria uma tarefa com data calculada em vez de simular (fronteira com create_task)",
+      "reprova_em": "ferramentas",
+      "chamadas": [{ "ferramenta": "create_task", "argumentos": { "title": "Serviço de 2 dias com o Roberto", "kind": "task", "due_at": "2026-10-27T08:00:00-03:00" } }],
+      "texto": "Criei uma tarefa para ter 27/10."
+    }
+  },
+  "L05a": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "material_informar", "argumentos": { "os": "Nelson", "itens": ["a peça"], "situacao": "na_mao", "trecho": "a peça do Nelson chegou" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "afirma 'gravei' sem o *grava* do dono (spec §8.5)",
+      "reprova_em": "texto",
+      "chamadas": [{ "ferramenta": "material_informar", "argumentos": { "os": "Nelson", "itens": ["a peça"], "situacao": "na_mao", "trecho": "a peça do Nelson chegou" } }],
+      "texto": "Pronto, gravei: o painel do Nelson chegou e a OS-00112 está pronta para começar."
+    }
+  },
+  "L05b": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "material_informar", "argumentos": { "os": "Nelson", "itens": ["a peça"], "situacao": "na_mao", "trecho": "chegou a peça do Nelson" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "escolhe a peça sozinho (o painel) em vez de perguntar qual: entra no rascunho o que o dono não disse",
+      "reprova_em": "banco",
+      "chamadas": [{ "ferramenta": "material_informar", "argumentos": { "os": "Nelson", "itens": ["painel"], "situacao": "na_mao", "trecho": "chegou a peça do Nelson" } }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "L06a": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "atrasos" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "põe na lista uma OS que não está atrasada",
+      "reprova_em": "texto",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "atrasos" } }],
+      "texto": "Passaram do prazo: Vanderlei, Lenine, Robson ORÇ-00083, Flávio e Nelson (o painel atrasou)."
+    }
+  },
+  "L06b": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "foco": "atrasos" } }],
+      "texto": "{{saida:0|linhas:1-1}}"
+    },
+    "ruim": {
+      "por_que": "lê a semana em vez dos atrasos",
+      "reprova_em": "ferramentas",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": {} }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "L07a": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "pessoa": "Roberto", "periodo": "amanha" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "inventa o dia do Roberto",
+      "reprova_em": "texto",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "pessoa": "Roberto", "periodo": "amanha" } }],
+      "texto": "Amanhã (sáb 24/10) o Roberto vai no Lenine às 8h."
+    }
+  },
+  "L07b": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "pessoa": "Roberto", "periodo": "segunda" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "calcula a data da segunda (2026-10-26) em vez de mandar como o dono falou",
+      "reprova_em": "ferramentas",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "pessoa": "Roberto", "periodo": "2026-10-26" } }],
+      "texto": "Segunda (26/10) o Roberto está livre."
+    }
+  },
+  "L08": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "os": "OS-00999" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "descreve uma OS que não existe (spec §8.5)",
+      "reprova_em": "texto",
+      "chamadas": [{ "ferramenta": "agenda_ver", "argumentos": { "os": "OS-00999" } }],
+      "texto": "A OS-00999 está aguardando peça; a previsão é qui 29/10."
+    }
+  },
+  "R01": {
+    "boa": {
+      "chamadas": [
+        { "ferramenta": "os_planejar", "argumentos": { "os": "Lenine", "dias": 2, "com_quem": [{ "pessoa": "Roberto", "turnos": "dia" }, { "pessoa": "João", "turnos": "tarde" }], "dono": "abre_e_fecha", "trecho": "Lenine dois dias com o Roberto, eu abro e fecho, o João ajuda à tarde." } },
+        { "ferramenta": "material_informar", "argumentos": { "os": "Flávio", "itens": ["compressor"], "situacao": "na_mao", "quando": "dia 14", "trecho": "O compressor do Flávio chegou dia 14, tá aqui" } },
+        { "ferramenta": "os_planejar", "argumentos": { "os": "Flávio", "dias": 1, "com_quem": [{ "pessoa": "eu" }, { "pessoa": "Roberto" }], "trecho": "é um dia, eu e o Roberto" } },
+        { "ferramenta": "material_informar", "argumentos": { "os": "Nelson", "itens": ["Cerbo", "Orion", "cabos"], "situacao": "na_mao", "trecho": "Do Nelson, Cerbo, Orion e os cabos tão aqui" } },
+        { "ferramenta": "material_informar", "argumentos": { "os": "Nelson", "itens": ["painel"], "situacao": "a_caminho", "quando": "dia 3", "trecho": "o painel chega dia 3" } },
+        { "ferramenta": "os_planejar", "argumentos": { "os": "Nelson", "dias": 2, "trecho": "são dois dias" } },
+        { "ferramenta": "material_informar", "argumentos": { "os": "Vanderlei", "itens": ["tudo"], "situacao": "vou_comprar", "quando": "terça", "fornecedor": "Premel", "trecho": "Vanderlei eu compro na Premel terça" } },
+        { "ferramenta": "os_planejar", "argumentos": { "os": "Vanderlei", "dias": 3, "com_quem": [{ "pessoa": "Roberto" }], "trecho": "são três dias com o Roberto" } },
+        { "ferramenta": "os_planejar", "argumentos": { "os": "Giancarlo", "dias": 3, "escopo_decidido": "só a primeira parte, baterias e barramento", "bem_livre_em": "dia 3", "trecho": "Giancarlo é só a primeira parte, baterias e barramento, três dias, mas o motorhome só fica livre dia 3." } },
+        { "ferramenta": "equipe_disponibilidade", "argumentos": { "pessoa": "eu", "situacao": "vem", "dias": "segunda a sexta", "padrao": true, "trecho": "Eu fico em campo de segunda a sexta; sexta à tarde, escritório." } },
+        { "ferramenta": "equipe_disponibilidade", "argumentos": { "pessoa": "eu", "situacao": "so_manha", "dias": "sexta", "padrao": true, "trecho": "Eu fico em campo de segunda a sexta; sexta à tarde, escritório." } }
+      ],
+      "texto": "{{saida:ultima}}"
+    },
+    "ruim": {
+      "por_que": "põe o Roberto na equipe do Nelson, que o dono não disse (spec §8.5): o banco não tem como saber, o juiz do banco tem",
+      "reprova_em": "banco",
+      "chamadas": [
+        { "ferramenta": "os_planejar", "argumentos": { "os": "Lenine", "dias": 2, "com_quem": [{ "pessoa": "Roberto", "turnos": "dia" }, { "pessoa": "João", "turnos": "tarde" }], "dono": "abre_e_fecha", "trecho": "Lenine dois dias com o Roberto, eu abro e fecho, o João ajuda à tarde." } },
+        { "ferramenta": "material_informar", "argumentos": { "os": "Flávio", "itens": ["compressor"], "situacao": "na_mao", "quando": "dia 14", "trecho": "O compressor do Flávio chegou dia 14, tá aqui" } },
+        { "ferramenta": "os_planejar", "argumentos": { "os": "Flávio", "dias": 1, "com_quem": [{ "pessoa": "eu" }, { "pessoa": "Roberto" }], "trecho": "é um dia, eu e o Roberto" } },
+        { "ferramenta": "material_informar", "argumentos": { "os": "Nelson", "itens": ["Cerbo", "Orion", "cabos"], "situacao": "na_mao", "trecho": "Do Nelson, Cerbo, Orion e os cabos tão aqui" } },
+        { "ferramenta": "material_informar", "argumentos": { "os": "Nelson", "itens": ["painel"], "situacao": "a_caminho", "quando": "dia 3", "trecho": "o painel chega dia 3" } },
+        { "ferramenta": "os_planejar", "argumentos": { "os": "Nelson", "dias": 2, "com_quem": [{ "pessoa": "Roberto" }], "trecho": "são dois dias" } },
+        { "ferramenta": "material_informar", "argumentos": { "os": "Vanderlei", "itens": ["tudo"], "situacao": "vou_comprar", "quando": "terça", "fornecedor": "Premel", "trecho": "Vanderlei eu compro na Premel terça" } },
+        { "ferramenta": "os_planejar", "argumentos": { "os": "Vanderlei", "dias": 3, "com_quem": [{ "pessoa": "Roberto" }], "trecho": "são três dias com o Roberto" } },
+        { "ferramenta": "os_planejar", "argumentos": { "os": "Giancarlo", "dias": 3, "escopo_decidido": "só a primeira parte, baterias e barramento", "bem_livre_em": "dia 3", "trecho": "Giancarlo é só a primeira parte, baterias e barramento, três dias, mas o motorhome só fica livre dia 3." } },
+        { "ferramenta": "equipe_disponibilidade", "argumentos": { "pessoa": "eu", "situacao": "vem", "dias": "segunda a sexta", "padrao": true, "trecho": "Eu fico em campo de segunda a sexta; sexta à tarde, escritório." } },
+        { "ferramenta": "equipe_disponibilidade", "argumentos": { "pessoa": "eu", "situacao": "so_manha", "dias": "sexta", "padrao": true, "trecho": "Eu fico em campo de segunda a sexta; sexta à tarde, escritório." } }
+      ],
+      "texto": "{{saida:ultima}}"
+    }
+  },
+  "R02": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "os_planejar", "argumentos": { "os": "Lenine", "dias": 2, "com_quem": [{ "pessoa": "eu", "turnos": "dia" }, { "pessoa": "Roberto", "turnos": "dia" }], "trecho": "o do Lenine é dois dias, eu e o Roberto" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "acrescenta que o dono fica o tempo todo (dono = sempre), o que ele não disse",
+      "reprova_em": "banco",
+      "chamadas": [{ "ferramenta": "os_planejar", "argumentos": { "os": "Lenine", "dias": 2, "com_quem": [{ "pessoa": "eu", "turnos": "dia" }, { "pessoa": "Roberto", "turnos": "dia" }], "dono": "sempre", "trecho": "o do Lenine é dois dias, eu e o Roberto" } }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "R03": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "material_informar", "argumentos": { "os": "Flávio", "itens": ["compressor"], "situacao": "na_mao", "quando": "dia 14", "trecho": "o compressor do Flávio chegou dia 14" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê 'chegou dia 14' como previsão (a_caminho): vira 14/11, no futuro",
+      "reprova_em": "banco",
+      "chamadas": [{ "ferramenta": "material_informar", "argumentos": { "os": "Flávio", "itens": ["compressor"], "situacao": "a_caminho", "quando": "dia 14", "trecho": "o compressor do Flávio chegou dia 14" } }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "R04": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "material_informar", "argumentos": { "os": "Nelson", "itens": ["painel"], "situacao": "a_caminho", "quando": "dia 3", "trecho": "o painel do Nelson chega dia 3" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê 'chega dia 3' como 'chegou' (na_mao): o painel vira na mão hoje",
+      "reprova_em": "banco",
+      "chamadas": [{ "ferramenta": "material_informar", "argumentos": { "os": "Nelson", "itens": ["painel"], "situacao": "na_mao", "trecho": "o painel do Nelson chega dia 3" } }],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "R05": {
+    "boa": {
+      "chamadas": [{ "ferramenta": "os_planejar", "argumentos": { "os": "Rodrigo", "dias": 0.5, "com_quem": [{ "pessoa": "eu" }], "trecho": "o do Rodrigo é meio dia, só eu" } }],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "escolhe um dos dois Rodrigo sozinho (spec §8.5: grava na OS-00096)",
+      "reprova_em": "banco",
+      "chamadas": [{ "ferramenta": "os_planejar", "argumentos": { "os": "OS-00096", "dias": 0.5, "com_quem": [{ "pessoa": "eu" }], "trecho": "o do Rodrigo é meio dia, só eu" } }],
+      "texto": "{{saida:0}}"
+    }
+  }
+}

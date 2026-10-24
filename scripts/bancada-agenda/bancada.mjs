@@ -12,8 +12,9 @@
 //      CHECK (sem as FKs do snapshot), mais as colunas que migrations posteriores ao snapshot acrescentaram;
 //   3. a view product_availability e as funções reais do snapshot (05-funcoes.sql) COM a ACL de produção;
 //   4. as migrations do worktree a partir de 20261024150000, em ordem, DUAS vezes (prova de idempotência),
-//      menos a faxina 20261024153000 (é dado de produção, não estrutura). `ate` corta a lista (cada pacote
-//      testa até a sua);
+//      menos a faxina 20261024153000 (é dado de produção, não estrutura), cada versão registrada em
+//      supabase_migrations.schema_migrations como em produção. A semente 20261024161000 entra: na bancada vazia ela
+//      não acha diária e não semeia (a fixture semeia o dia 23/10). `ate` corta a lista (cada pacote testa até a sua);
 //   5. com `fixture`, scripts/bancada-agenda/fixture-2310.sql (a carteira sintética de 23/10).
 //
 // O PGlite vem da bancada dos comprovantes (0.5.8), fora do repo: PGLITE_DIR troca a pasta.
@@ -43,6 +44,8 @@ export const TABELAS = [
   'service_orders', 'service_order_parts', 'service_order_services', 'service_order_technicians',
   'purchase_orders', 'purchase_order_items', 'payees', 'work_profiles', 'work_shifts', 'work_shift_os',
   'receivables', 'payables', 'agenda_tasks',
+  // P7: o SQL pós-deploy confere que a agenda não deixou erro aberto (supabase/tests/agenda_fase1_pos_deploy.sql)
+  'app_error_logs',
 ];
 
 /** Colunas que migrations DEPOIS do snapshot (06/10) acrescentaram e que a agenda lê. */
@@ -127,6 +130,11 @@ create function auth.uid() returns uuid language sql stable as $$
                   (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub'))::uuid
 $$;
 grant execute on function auth.uid() to anon, authenticated, service_role;
+
+-- O registro das versões aplicadas, como o do Supabase (o db query --linked + o insert da spec §10, passo 1): o SQL
+-- pós-deploy (P7) confere que as versões da Fase 1 estão registradas.
+create schema if not exists supabase_migrations;
+create table supabase_migrations.schema_migrations (version text primary key, name text);
 `;
 
 const ESTOQUE_DE_MENTIRA = `
@@ -179,6 +187,10 @@ export async function criarBancada({ ate, fixture = true, log = () => {} } = {})
     for (const m of migrations) {
       try {
         await db.exec(ler(join(MIG, m)));
+        await db.query(
+          `insert into supabase_migrations.schema_migrations (version, name) values ($1, $2) on conflict (version) do nothing`,
+          [m.slice(0, 14), m.slice(15, -4)],
+        );
         log(true, `migration ${m} (rodada ${rodada})`);
       } catch (e) {
         log(false, `migration ${m} (rodada ${rodada}): ${String(e.message).split('\n')[0]}`);

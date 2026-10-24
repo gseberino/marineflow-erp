@@ -23,13 +23,14 @@
 // do execute é lido — texto montado num helper de outra função não aparece aqui.
 // Rodar com:
 //   deno test --allow-all supabase/functions/_shared/ai/prompt-ferramentas_test.ts
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { buildSystemBlocks } from "./prompt.ts";
 import { PERFIL_OPERACAO, SO_PELA_REDE } from "./perfil-operacao.ts";
 import { allTools } from "./tools/index.ts";
 import { STATUS_OS } from "../service-order-status.ts";
 import { registryCrudTools } from "./tools/registry-crud.ts";
 import { clientTools } from "./tools/clients.ts";
+import { lerComandoDaAgenda } from "../agenda/comandos.ts";
 
 /**
  * Identificadores snake_case que o prompt cita e que NÃO são ferramentas: campos e argumentos
@@ -102,6 +103,10 @@ NAO_SAO_TOOLS.add("a_caminho");
 // check_technician_availability (OS de vários dias que cobre o horário proposto)
 NAO_SAO_TOOLS.add("os_sem_responsavel");
 NAO_SAO_TOOLS.add("os_de_varios_dias_no_horario");
+// Agenda de Produção (24/10/2026, Fase 1, P7): valores da situação de material_informar que a seção AGENDA DE
+// PRODUÇÃO ensina ("chegou" = na_mao, "compro terça" = vou_comprar; a_caminho já está acima)
+NAO_SAO_TOOLS.add("na_mao");
+NAO_SAO_TOOLS.add("vou_comprar");
 
 /** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
 const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };
@@ -253,4 +258,74 @@ Deno.test("prompt: as linhas dos comprovantes só entram com a conversa ligada",
   assertEquals(ligada.includes("COMPROVANTES (CMP"), true);
   assertEquals(ligada.includes("*cancelar cmp N*"), true);
   assertEquals(ligada.includes("[image]/[document] do dono é do fluxo de comprovantes"), true);
+});
+
+// Agenda de Produção (24/10/2026, Fase 1, P7): a seção que ENSINA as 4 ferramentas da agenda. "Tool registrada não é
+// tool ensinada": sem estas linhas o modelo calcula data, grava sem a releitura ou responde "gravei". Cada regra da
+// seção é amarrada aqui ao que ela cita de verdade (o enum da ferramenta, a palavra que o comando lê).
+const SECAO_AGENDA = "════ AGENDA DE PRODUÇÃO (só o dono) ════";
+
+function secaoDaAgenda(): string {
+  const estavel = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[0].text;
+  const i = estavel.indexOf(SECAO_AGENDA);
+  assertEquals(i >= 0, true, "a seção AGENDA DE PRODUÇÃO sumiu do bloco estável");
+  const fim = estavel.indexOf("\n════", i + SECAO_AGENDA.length);
+  return estavel.slice(i, fim < 0 ? undefined : fim).trim();
+}
+
+Deno.test("agenda de produção: a seção é curta (≤ 12 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
+  const secao = secaoDaAgenda();
+  const linhas = secao.split("\n");
+  assertEquals(linhas.length <= 12, true, `a seção tem ${linhas.length} linhas`);
+  // Estável = em cache. O volátil muda a cada turno e não pode carregar a seção.
+  const volatil = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[1].text;
+  assertEquals(volatil.includes(SECAO_AGENDA), false);
+});
+
+Deno.test("agenda de produção: o dono vai para agenda_ver; my_agenda fica para técnico e financeiro", () => {
+  const texto = textoDoPrompt();
+  const linhaDaAgenda = texto.split("\n").find((l) => l.includes("\"minha agenda\"") && l.includes("my_agenda"))!;
+  assertEquals(!!linhaDaAgenda, true, "a linha de \"minha agenda\" sumiu");
+  assertEquals(/\(dono\)[^()]*"o que eu tenho que fazer"[^→]*→ agenda_ver/.test(linhaDaAgenda), true, linhaDaAgenda);
+  assertEquals(/\(técnico e financeiro\) "minha agenda"[^→]*→ my_agenda/.test(linhaDaAgenda), true, linhaDaAgenda);
+  // check_technician_availability sozinho: my_agenda saiu da vista do admin (d14), ensinar os dois juntos manda o dono
+  // para a ferramenta escondida.
+  assertEquals(texto.includes("check_technician_availability/my_agenda"), false);
+  assertEquals(texto.includes("(use check_technician_availability)"), true);
+});
+
+Deno.test("agenda de produção: só agenda_ver dá data; nada é gravado sem *grava*; as fronteiras com as vizinhas", () => {
+  const secao = secaoDaAgenda();
+  assertStringIncludes(secao, "vêm SÓ de agenda_ver: nunca calcule, some dias nem estime");
+  assertStringIncludes(secao, "nunca mude número, data ou nome");
+  assertStringIncludes(secao, "nunca mande mensagem por conta própria");
+  assertStringIncludes(secao, "agenda_ver foco aprontar");
+  for (const t of ["os_planejar", "material_informar", "equipe_disponibilidade"]) assertStringIncludes(secao, t);
+  assertStringIncludes(secao, "trecho = as palavras dele");
+  assertStringIncludes(secao, "aqui não converta para ISO");
+  assertStringIncludes(secao, "nunca diz \"gravei\"");
+  // Fronteiras: cada vizinha citada por nome (e o nome é tool de verdade, ao alcance — os testes acima cobram).
+  for (const t of ["create_task", "schedule_service_order", "get_purchase_needs"]) assertStringIncludes(secao, t);
+});
+
+Deno.test("agenda de produção: o que a seção ensina existe na ferramenta e no comando", () => {
+  const secao = secaoDaAgenda();
+  // "foco aprontar" e as situações ditas ("chega dia 3" = a_caminho, "chegou" = na_mao, "compro terça" = vou_comprar)
+  // são valores do enum de verdade: renomear lá sem mudar aqui quebra.
+  const agendaVer = porNome.get("agenda_ver")!;
+  const material = porNome.get("material_informar")!;
+  const enumDe = (t: { input_schema: unknown }, campo: string) =>
+    ((t.input_schema as { properties: Record<string, { enum?: string[] }> }).properties[campo].enum ?? []);
+  assertEquals(enumDe(agendaVer, "foco").includes("aprontar"), true);
+  for (const s of ["a_caminho", "na_mao", "vou_comprar"]) {
+    assertStringIncludes(secao, ` ${s}`);
+    assertEquals(enumDe(material, "situacao").includes(s), true, `${s} não é situação de material_informar`);
+  }
+  // A frase que o modelo diz ao "sim" da releitura manda uma palavra que o comando sem IA LÊ (senão o dono manda
+  // *grava* e cai de novo no modelo).
+  const frase = /"Para gravar, mande só (\*grava\*)\."/.exec(secao);
+  assertEquals(!!frase, true, "a frase do sim/ok à releitura sumiu");
+  assertEquals(lerComandoDaAgenda(frase![1])?.comando, "gravar");
+  // E o "sim"/"ok" que ela responde NÃO é o comando (é por isso que a frase existe).
+  for (const s of ["sim", "ok", "grava aí"]) assertEquals(lerComandoDaAgenda(s), null, s);
 });
