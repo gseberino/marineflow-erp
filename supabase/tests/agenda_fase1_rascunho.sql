@@ -22,6 +22,7 @@
 --   J  descartar
 --   K  material: parcial, novo (fora do orçamento), fornecedor não cadastrado, dispensar, "pode começar sem"
 --   L  planejar: "não tem peça a comprar", "não antes de", espera, escopo, campo que não existe, estimativa aceita
+--   M  agenda desligada (modo_leitura): as três escritas recusam e nada entra; o *grava* do rascunho de antes grava
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs --ate 20261024160600
@@ -794,6 +795,30 @@ begin
     end;
     v_res := pg_temp.ok(v_res, 'L5 campo que não existe é erro de quem chamou (22023), não pergunta ao dono',
       v_cod = '22023' and v_msg = 'agenda_rascunho_planejar: o campo "horas" não existe', v_cod || ' ' || v_msg);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- ── M. A agenda desligada não anota; o rascunho que ficou aberto ainda grava ──
+  begin
+    perform pg_temp.plan('Lenine', '{"dias": 2}', 'Lenine dois dias');
+    update public.agenda_config set modo_leitura = 'desligado';
+    v_antes := pg_temp.foto();
+    r := pg_temp.plan('Nelson', '{"dias": 2}', 'Nelson dois dias');
+    v_a := pg_temp.mat('Flávio', array['compressor'], 'na_mao', null, 'o compressor tá aqui');
+    v_b := pg_temp.disp('Roberto', 'nao_vem', 'terça', false, 'o Roberto não vem terça');
+    v_res := pg_temp.ok(v_res, 'M1 desligada: as três escritas recusam ("não anotei nada", sem *grava*) e nada entra no rascunho',
+      not (r ->> 'ok')::boolean and r ->> 'motivo' = 'desligada'
+      and r ->> 'pergunta' = 'A agenda de produção está desligada agora: não anotei nada.'
+      and not (v_a ->> 'ok')::boolean and v_a ->> 'motivo' = 'desligada'
+      and not (v_b ->> 'ok')::boolean and v_b ->> 'motivo' = 'desligada'
+      and pg_temp.abertos() = 1,
+      r::text || ' | ' || v_a::text || ' | ' || v_b::text);
+    r := pg_temp.grava();
+    v_res := pg_temp.ok(v_res, 'M2 desligada: o *grava* do rascunho aberto de antes ainda grava (tem saída)',
+      (r ->> 'ok')::boolean and (r ->> 'gravados')::int = 1
+      and exists (select 1 from public.os_planejamento where service_order_id = pg_temp.os('74') and dias = 2),
+      r::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;

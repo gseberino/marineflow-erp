@@ -112,7 +112,7 @@ comment on column public.agenda_config.dia_do_plano is 'Dia da semana ISO (1 = s
 comment on column public.agenda_config.medicao_semanas is 'Semanas de diárias que a semente de agenda_disponibilidade mede (até a última diária lançada).';
 comment on column public.agenda_config.equipe_recente_dias is 'Só entra na semente quem teve diária nesses dias corridos até a última diária lançada (tira quem saiu da equipe pela regra, não pelo nome).';
 comment on column public.agenda_config.frequencia_minima is 'Frequência mínima (fração dos dias úteis trabalhados naquele dia da semana) para a semente criar o padrão.';
-comment on column public.agenda_config.modo_leitura is 'desligado = sem comandos, fechamento nem sincronização; sombra (nasce) = ferramenta e comandos respondem, o fechamento só registra em resumo_tarde.detalhe; ligado = o fechamento fala.';
+comment on column public.agenda_config.modo_leitura is 'desligado = sem comandos, fechamento, sincronização nem rascunho novo (o *grava*/*descarta* do rascunho que ficou aberto ainda responde; agenda_ver devolve desligada e a ferramenta volta à my_agenda); sombra (nasce) = ferramenta e comandos respondem, o fechamento só registra em resumo_tarde.detalhe; ligado = o fechamento fala.';
 comment on column public.agenda_config.versao_plano is 'Contador do plano publicado (Fase 2). Na Fase 1 fica em 0.';
 
 insert into public.agenda_config default values on conflict (id) do nothing;

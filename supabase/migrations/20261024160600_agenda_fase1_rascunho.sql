@@ -47,6 +47,8 @@
 --      {em, autor, trecho, antes, depois}. Devolve "Gravado. Agora:" com uma linha por OS (o estado da prontidão) e
 --      por pessoa. Item que não passa desfaz o lote inteiro e diz qual ("Não gravei nada: …").
 --   7. agenda_rascunho_descartar(p_autor): "Descartei. Nada foi gravado."
+--   Com agenda_config.modo_leitura desligado, as três escritas não anotam nada ("A agenda de produção está desligada
+--   agora: não anotei nada."); o *grava* e o *descarta* continuam respondendo o rascunho que ficou aberto de antes.
 --   Auxiliares (só service_role): _agenda_trecho_tem, _agenda_trecho_tem_numero, _agenda_data_conferida, _agenda_recusa,
 --   _agenda_recusa_da_os, _agenda_os_do_rascunho, _agenda_dias_citados, _agenda_dias_semana_texto, _agenda_quando_texto,
 --   _agenda_resolver_fornecedor, _agenda_rotulo_do_item, _agenda_rascunho_frase, _agenda_rascunho_salvar.
@@ -668,6 +670,10 @@ begin
   if p_canal is null or p_canal not in ('whatsapp', 'painel') then
     raise exception 'agenda_rascunho_planejar: canal "%" inválido (whatsapp ou painel)', p_canal using errcode = '22023';
   end if;
+  -- A agenda desligada (agenda_config.modo_leitura) não anota: sem o *grava* ligado, o rascunho não teria saída.
+  if (public._agenda_cfg()).modo_leitura = 'desligado' then
+    return public._agenda_recusa('A agenda de produção está desligada agora: não anotei nada.', 'desligada');
+  end if;
   if jsonb_typeof(d) <> 'object' then
     raise exception 'agenda_rascunho_planejar: p_dados tem de ser um objeto' using errcode = '22023';
   end if;
@@ -887,6 +893,9 @@ declare
 begin
   if p_canal is null or p_canal not in ('whatsapp', 'painel') then
     raise exception 'agenda_rascunho_material: canal "%" inválido (whatsapp ou painel)', p_canal using errcode = '22023';
+  end if;
+  if (public._agenda_cfg()).modo_leitura = 'desligado' then
+    return public._agenda_recusa('A agenda de produção está desligada agora: não anotei nada.', 'desligada');
   end if;
   v_acao := case lower(btrim(coalesce(p_situacao, '')))
     when 'comprei' then 'comprado' when 'comprado' then 'comprado'
@@ -1117,6 +1126,9 @@ declare
 begin
   if p_canal is null or p_canal not in ('whatsapp', 'painel') then
     raise exception 'agenda_rascunho_disponibilidade: canal "%" inválido (whatsapp ou painel)', p_canal using errcode = '22023';
+  end if;
+  if (public._agenda_cfg()).modo_leitura = 'desligado' then
+    return public._agenda_recusa('A agenda de produção está desligada agora: não anotei nada.', 'desligada');
   end if;
   select x.turno, x.sit into v_turno, v_sit
     from (values ('vem', null, 'disponivel'), ('nao_vem', null, 'indisponivel'),

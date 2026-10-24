@@ -78,6 +78,8 @@
 --   · "o que o João faz segunda?": quem tem padrão em outros dias ouve "às segundas não costuma vir"; o "não sei se
 --     vem" fica para quem não tem padrão nenhum.
 --   · agenda_simular: só de manhã ou só à tarde = 1 meio-dia por dia ocupado (a mesma conta de os_prontidao).
+--   · agenda_ver com modo_leitura desligado devolve {ok:false, desligada:true}: a ferramenta manda o modelo voltar à
+--     my_agenda (desligar devolve a agenda de antes).
 --
 -- O QUE NÃO MUDA: nenhuma tabela, nenhum dado, nenhuma função de P1–P3, my_agenda, o Secretário, as telas.
 --
@@ -2031,6 +2033,12 @@ begin
   end if;
   if p_hoje is null then
     raise exception 'agenda_ver: sem o dia de hoje' using errcode = '22004';
+  end if;
+  -- Desligada (agenda_config.modo_leitura), a agenda de produção não responde: o assistente volta à agenda de antes
+  -- (my_agenda: tarefas e compromissos do dono). Quem não lê agenda_config continua recebendo erro (nunca "livre").
+  if (public._agenda_cfg()).modo_leitura = 'desligado' then
+    return jsonb_build_object('ok', false, 'rota', 'desligada', 'desligada', true,
+                              'texto', 'A agenda de produção está desligada agora.');
   end if;
 
   -- Pessoa: "eu" ou o nome. Quem não existe ou é ambíguo volta a frase do resolvedor (nunca um erro cru).

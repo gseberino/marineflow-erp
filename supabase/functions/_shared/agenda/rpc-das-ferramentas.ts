@@ -45,6 +45,9 @@ export const INSTRUCAO_LEITURA_SEM_RESPOSTA =
 export const INSTRUCAO_RASCUNHO = "Nada foi gravado: mostre a releitura ao dono. Só o *grava* dele grava.";
 export const INSTRUCAO_RASCUNHO_RECUSA =
   "Nada entrou no rascunho. Faça esta pergunta ao dono como está e, com a resposta, chame a ferramenta de novo.";
+/** agenda_config.modo_leitura desligado: a agenda de produção sai do caminho e volta a agenda de antes. */
+export const INSTRUCAO_AGENDA_DESLIGADA =
+  "A agenda de produção está desligada. Para a agenda do dono (tarefas e compromissos), chame my_agenda pela ferramenta_extra e responda com ela; não fale da agenda de produção.";
 
 /** O ctx.canal das ferramentas ("panel" | "whatsapp" | ausente) → o canal da RPC. Ausente = WhatsApp. */
 export function canalDaRpc(canal?: string | null): CanalDaRpc {
@@ -305,12 +308,17 @@ export interface ResultadoParaOModelo {
   opcoes?: string[];
   rota?: string;
   item?: string;
+  /** agenda_config.modo_leitura desligado (só a leitura): a instrução manda o modelo à my_agenda */
+  desligada?: boolean;
   instrucao: string;
 }
 
 /** A resposta de agenda_ver → o modelo: o texto pronto e a instrução; nada de `dados`. */
 export function resultadoDaLeitura(data: unknown): ResultadoParaOModelo {
   const r = respostaDoBanco(data, RPC_AGENDA_VER);
+  if (r.ok === false && r.desligada === true) {
+    return { ok: false, texto: String(r.texto ?? ""), desligada: true, instrucao: INSTRUCAO_AGENDA_DESLIGADA };
+  }
   if (r.ok === false) {
     const pergunta = typeof r.pergunta === "string" && r.pergunta ? r.pergunta : undefined;
     return {

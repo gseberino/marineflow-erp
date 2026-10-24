@@ -364,6 +364,10 @@ begin
     r := public.agenda_textos_do_fechamento(c_hoje, null);
     v_res := pg_temp.ok(v_res, 'B6 modo_leitura desligado: o fechamento não recebe nada da agenda',
       r ->> 'modo' = 'desligado' and r ->> 'cauda_amanha' is null and r -> 'semana_que_vem' = '[]'::jsonb, r::text);
+    r := public.agenda_ver(c_admin, null, null, 'o_que_fazer', null, null, false, c_hoje);
+    v_res := pg_temp.ok(v_res, 'B6c modo_leitura desligado: agenda_ver não responde a agenda (desligada: a ferramenta volta à my_agenda)',
+      r = '{"ok": false, "rota": "desligada", "desligada": true, "texto": "A agenda de produção está desligada agora."}'::jsonb,
+      r::text);
     update public.agenda_config set modo_leitura = 'ligado';
     r := public.agenda_textos_do_fechamento(date '2026-10-22', null);
     v_res := pg_temp.ok(v_res, 'B6b ligado: o mesmo texto da sombra, com o modo dito', r ->> 'modo' = 'ligado'

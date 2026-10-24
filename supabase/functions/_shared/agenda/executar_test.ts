@@ -11,6 +11,7 @@ import {
   executarComandoDaAgenda,
   lerModoDaLeitura,
   modoDaLeituraNoBanco,
+  rascunhoAbertoNoBanco,
   RPC_DESCARTAR,
   RPC_GRAVAR,
   TEXTO_SEM_AGENDA,
@@ -52,12 +53,27 @@ Deno.test("lerModoDaLeitura: sombra e ligado; qualquer outra coisa é desligado"
   for (const v of ["desligado", "", "on", null, undefined, 1, { modo: "ligado" }]) assertEquals(lerModoDaLeitura(v), "desligado", String(v));
 });
 
-function adminDoModo(r: { data?: unknown; error?: unknown; lanca?: boolean }) {
+function adminDoModo(
+  r: { data?: unknown; error?: unknown; lanca?: boolean },
+  rascunho: { linhas?: unknown[]; error?: unknown; lanca?: boolean } = {},
+) {
   const lidas: string[] = [];
+  const filtros: string[] = [];
   return {
     lidas,
+    filtros,
     from(t: string) {
       lidas.push(t);
+      if (t === "agenda_rascunho") {
+        if (rascunho.lanca) throw new Error("rede");
+        const q = {
+          select: () => q,
+          eq: (c: string, v: unknown) => (filtros.push(`${c}=${v}`), q),
+          gt: (c: string) => (filtros.push(`${c}>agora`), q),
+          limit: () => Promise.resolve({ data: rascunho.error ? null : rascunho.linhas ?? [], error: rascunho.error ?? null }),
+        };
+        return q;
+      }
       if (r.lanca) throw new Error("rede");
       const q = { select: () => q, maybeSingle: () => Promise.resolve({ data: r.data ?? null, error: r.error ?? null }) };
       return q;
@@ -86,6 +102,31 @@ Deno.test("ehComandoDaAgendaLigada (webhook): a chave só é lida quando o texto
   assertEquals(a.lidas, ["agenda_config"]);
   assertEquals(await ehComandoDaAgendaLigada(adminDoModo({ data: { modo_leitura: "desligado" } }), "grava"), false);
   assertEquals(await ehComandoDaAgendaLigada(adminDoModo({ error: { code: "XX000" } }), "agenda"), false);
+});
+
+Deno.test("ehComandoDaAgendaLigada: desligada, só o grava/descarta com rascunho aberto vai à agenda (o resto, como antes)", async () => {
+  const desligado = { data: { modo_leitura: "desligado" } };
+  const comRascunho = { linhas: [{ id: "r1" }] };
+  assertEquals(await ehComandoDaAgendaLigada(adminDoModo(desligado, comRascunho), "grava"), true);
+  assertEquals(await ehComandoDaAgendaLigada(adminDoModo(desligado, comRascunho), "descarta"), true);
+  // a leitura não passa: desligada, "agenda" segue ao modelo (que volta à my_agenda)
+  const a = adminDoModo(desligado, comRascunho);
+  assertEquals(await ehComandoDaAgendaLigada(a, "agenda"), false);
+  assertEquals(a.lidas, ["agenda_config"], "sem grava/descarta o rascunho nem é lido");
+  // sem rascunho (ou erro ao ler), o "grava" segue como antes (o "sim" do CMP continua dele)
+  assertEquals(await ehComandoDaAgendaLigada(adminDoModo(desligado, { linhas: [] }), "grava"), false);
+  assertEquals(await ehComandoDaAgendaLigada(adminDoModo(desligado, { error: { code: "42P01" } }), "grava"), false);
+  assertEquals(await ehComandoDaAgendaLigada(adminDoModo(desligado, { lanca: true }), "grava"), false);
+});
+
+Deno.test("rascunhoAbertoNoBanco: aberto, dentro da validade e do autor; erro ou exceção = false", async () => {
+  const a = adminDoModo({}, { linhas: [{ id: "r1" }] });
+  assertEquals(await rascunhoAbertoNoBanco(a, AUTOR), true);
+  assertEquals(a.lidas, ["agenda_rascunho"]);
+  assertEquals(a.filtros, ["estado=aberto", "expira_em>agora", `autor=${AUTOR}`]);
+  assertEquals(await rascunhoAbertoNoBanco(adminDoModo({}, { linhas: [] }), AUTOR), false);
+  assertEquals(await rascunhoAbertoNoBanco(adminDoModo({}, { error: { code: "XX000" } }), AUTOR), false);
+  assertEquals(await rascunhoAbertoNoBanco(adminDoModo({}, { lanca: true }), AUTOR), false);
 });
 
 Deno.test("chamadaDoComando: cada palavra vira a RPC certa, com o mesmo mapeamento da ferramenta agenda_ver", () => {
@@ -175,8 +216,13 @@ Deno.test("executar: sem cliente de log, registra no próprio cliente; frase de 
 
 // ─── A camada (o que o ai-agent chama) ───────────────────────────────────────────────────────────
 
-function deps(p: { dono?: boolean | "lanca"; modo?: "desligado" | "sombra" | "ligado" | "lanca"; texto?: string }) {
-  const c = { dono: 0, modo: 0, executar: [] as string[] };
+function deps(p: {
+  dono?: boolean | "lanca";
+  modo?: "desligado" | "sombra" | "ligado" | "lanca";
+  texto?: string;
+  rascunho?: boolean | "lanca";
+}) {
+  const c = { dono: 0, modo: 0, executar: [] as string[], rascunho: 0 };
   const d: DependenciasDaCamada = {
     ehDoDono: () => {
       c.dono++;
@@ -192,6 +238,13 @@ function deps(p: { dono?: boolean | "lanca"; modo?: "desligado" | "sombra" | "li
       c.executar.push(cmd.comando);
       return Promise.resolve({ ok: true, texto: p.texto ?? "texto do banco" });
     },
+    ...(p.rascunho === undefined ? {} : {
+      rascunhoAberto: () => {
+        c.rascunho++;
+        if (p.rascunho === "lanca") return Promise.reject(new Error("rede"));
+        return Promise.resolve(p.rascunho === true);
+      },
+    }),
   };
   return { d, c };
 }
@@ -223,6 +276,24 @@ Deno.test("camada: quem não é o dono segue ao modelo (nem a chave é lida); de
     assertEquals(await camadaDaAgenda("o que eu tenho que fazer", d), null, modo);
     assertEquals(c.executar.length, 0);
   }
+});
+
+Deno.test("camada: desligada, o grava/descarta do rascunho que ficou aberto ainda responde (sem laço com o modelo)", async () => {
+  for (const t of ["grava", "descarta"]) {
+    const { d, c } = deps({ modo: "desligado", rascunho: true, texto: "Descartei. Nada foi gravado." });
+    assertEquals((await camadaDaAgenda(t, d))?.ok, true, t);
+    assertEquals([c.rascunho, c.executar.length], [1, 1], t);
+  }
+  // sem rascunho aberto (ou sem como saber), desligada continua sem interceptar
+  for (const rascunho of [false, "lanca", undefined] as const) {
+    const { d, c } = deps({ modo: "desligado", rascunho });
+    assertEquals(await camadaDaAgenda("grava", d), null, String(rascunho));
+    assertEquals(c.executar.length, 0);
+  }
+  // a leitura não passa (nem pergunta pelo rascunho)
+  const { d, c } = deps({ modo: "desligado", rascunho: true });
+  assertEquals(await camadaDaAgenda("agenda", d), null);
+  assertEquals([c.rascunho, c.executar.length], [0, 0]);
 });
 
 Deno.test("camada: um executar que lance ainda vira a frase ao dono (o turno não cai)", async () => {

@@ -68,7 +68,12 @@ import { executarComandoDoSecretario } from "../_shared/secretario/executar.ts";
 import { abrirConfirmacaoDoSecretario } from "../_shared/secretario/confirmar.ts";
 import { lerFormatoDoResumo } from "../_shared/secretario/formato.ts";
 import { type Dono, donoDoWhatsApp } from "../_shared/whatsapp/dono.ts";
-import { camadaDaAgenda, executarComandoDaAgenda, modoDaLeituraNoBanco } from "../_shared/agenda/executar.ts";
+import {
+  camadaDaAgenda,
+  executarComandoDaAgenda,
+  modoDaLeituraNoBanco,
+  rascunhoAbertoNoBanco,
+} from "../_shared/agenda/executar.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -683,6 +688,8 @@ async function handleWhatsAppTurn(req: Request, internalSecret: string): Promise
       },
       modo: () => modoDaLeituraNoBanco(admin),
       executar: (cmd) => executarComandoDaAgenda(admin, cmd, { autor: appUser.id, log: admin, canal: "whatsapp" }),
+      // agenda desligada: o *grava*/*descarta* do rascunho que ficou aberto ainda responde
+      rascunhoAberto: () => rascunhoAbertoNoBanco(admin, appUser.id),
     })
     : null;
   if (doAgenda) {
@@ -1342,6 +1349,7 @@ servirComCors(async (req) => {
         ehDoDono: () => userRole === "admin",
         modo: () => modoDaLeituraNoBanco(admin),
         executar: (cmd) => executarComandoDaAgenda(sb, cmd, { autor: userId, log: admin, canal: "painel" }),
+        rascunhoAberto: () => rascunhoAbertoNoBanco(admin, userId),
       })
       : null;
     if (doAgendaNoPainel) {

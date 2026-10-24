@@ -117,6 +117,35 @@ Deno.test("{ok:false, pergunta} passa adiante: o modelo faz a pergunta; opções
   assertStringIncludes(String(r.instrucao), "Nada entrou no rascunho");
 });
 
+Deno.test("agenda desligada (modo_leitura): agenda_ver manda à my_agenda; as três de escrita repassam a recusa, sem *grava*", async () => {
+  // A resposta de agenda_ver com a agenda desligada (supabase/tests/agenda_fase1_leituras.sql, B6b).
+  const { sb: sbVer } = sbFalso(() => ({
+    data: { ok: false, rota: "desligada", desligada: true, texto: "A agenda de produção está desligada agora." },
+    error: null,
+  }));
+  const ver = await porNome("agenda_ver").execute({ foco: "o_que_fazer" }, ctx(sbVer)) as Record<string, unknown>;
+  assertEquals(ver.ok, false);
+  assertEquals(ver.desligada, true);
+  assertStringIncludes(String(ver.instrucao), "my_agenda pela ferramenta_extra");
+  // A recusa das RPCs de rascunho com a agenda desligada (supabase/tests/agenda_fase1_rascunho.sql, M1).
+  const recusa = "A agenda de produção está desligada agora: não anotei nada.";
+  const casos: Array<[string, Record<string, unknown>]> = [
+    ["os_planejar", { os: "Lenine", dias: 2, trecho: "Lenine dois dias" }],
+    ["material_informar", { os: "Nelson", itens: ["painel"], situacao: "na_mao", trecho: "o painel chegou" }],
+    ["equipe_disponibilidade", { pessoa: "Roberto", situacao: "nao_vem", dias: "terça", trecho: "o Roberto não vem terça" }],
+  ];
+  for (const [nome, args] of casos) {
+    const { sb, chamadas } = sbFalso(() => ({
+      data: { ok: false, motivo: "desligada", texto: recusa, pergunta: recusa, opcoes: [] },
+      error: null,
+    }));
+    const r = await porNome(nome).execute(args, ctx(sb)) as Record<string, unknown>;
+    assertEquals(chamadas.length, 1, nome);
+    assertEquals([r.ok, r.texto], [false, recusa], nome);
+    assertEquals(String(r.texto).includes("*grava*"), false, nome);
+  }
+});
+
 Deno.test("argumento errado volta como { error } e NADA é chamado (trecho, enum, id, data calculada)", async () => {
   const casos: Array<[string, Record<string, unknown>, string]> = [
     ["os_planejar", { os: "Lenine", dias: 2 }, "falta 'trecho'"],

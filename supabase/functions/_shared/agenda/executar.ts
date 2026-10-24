@@ -5,7 +5,9 @@
 //   1. lê a palavra (lerComandoDaAgenda, puro) — o que não é comando volta null sem tocar no banco;
 //   2. confere que é o dono (WhatsApp: o mesmo dono do resumo; painel: o administrador);
 //   3. lê agenda_config.modo_leitura (erro, tabela ausente ou 'desligado' = a camada não existe: o texto segue ao
-//      modelo como sempre). A chave só é lida quando o texto É comando;
+//      modelo como sempre). A chave só é lida quando o texto É comando. Exceção: com a agenda desligada, o *grava* e o
+//      *descarta* ainda respondem quando há rascunho aberto do dono (o que ficou de antes de desligar tem saída;
+//      sem rascunho, o "grava" segue como antes, inclusive para o "sim" do CMP);
 //   4. chama UMA RPC: agenda_ver (o texto pronto do banco), agenda_rascunho_gravar (o *grava*) ou
 //      agenda_rascunho_descartar. O texto que o dono lê sai do banco; aqui nada é calculado.
 // Nunca lança: erro vira uma frase ao dono e uma linha em app_error_logs (context 'agenda', action 'comando:<x>').
@@ -47,12 +49,36 @@ export async function modoDaLeituraNoBanco(admin: Cliente): Promise<ModoDaLeitur
 }
 
 /**
+ * Há rascunho da agenda aberto e dentro da validade (do autor, se vier)? Só para o *grava* ou *descarta* com a agenda
+ * desligada. Nunca lança: erro, tabela ausente ou exceção = false (o caminho de hoje).
+ */
+export async function rascunhoAbertoNoBanco(admin: Cliente, autor?: string): Promise<boolean> {
+  try {
+    let q = admin.from("agenda_rascunho").select("id").eq("estado", "aberto").gt("expira_em", new Date().toISOString());
+    if (autor) q = q.eq("autor", autor);
+    const { data, error } = await q.limit(1);
+    if (error) return false;
+    return Array.isArray(data) && data.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Com a agenda desligada, só o *grava* e o *descarta* do rascunho que ficou aberto passam. */
+function passaDesligada(cmd: ComandoDaAgenda): boolean {
+  return cmd.comando === "gravar" || cmd.comando === "descartar";
+}
+
+/**
  * Para o webhook (roteamento do texto do dono): o texto é uma palavra da agenda E a agenda está ligada (sombra ou
- * ligado)? A chave só é lida quando o texto é comando. Nunca lança (erro = false: o caminho de hoje).
+ * ligado)? Desligada, só o *grava* ou *descarta* com rascunho aberto. A chave só é lida quando o texto é comando. Nunca
+ * lança (erro = false: o caminho de hoje).
  */
 export async function ehComandoDaAgendaLigada(admin: Cliente, texto: string): Promise<boolean> {
-  if (lerComandoDaAgenda(texto) === null) return false;
-  return (await modoDaLeituraNoBanco(admin)) !== "desligado";
+  const cmd = lerComandoDaAgenda(texto);
+  if (cmd === null) return false;
+  if ((await modoDaLeituraNoBanco(admin)) !== "desligado") return true;
+  return passaDesligada(cmd) && (await rascunhoAbertoNoBanco(admin));
 }
 
 export type ChamadaDoComando = { rpc: string; params: Record<string, unknown> };
@@ -143,6 +169,11 @@ export interface DependenciasDaCamada {
   modo(): Promise<ModoDaLeitura>;
   /** executarComandoDaAgenda com o cliente do canal. */
   executar(cmd: ComandoDaAgenda): Promise<RespostaDoComando>;
+  /**
+   * Há rascunho aberto do dono (rascunhoAbertoNoBanco)? Só é chamado com a agenda desligada e o *grava* ou *descarta*.
+   * Ausente = não há (desligada, nada passa).
+   */
+  rascunhoAberto?(): Promise<boolean>;
 }
 
 export interface RespostaDaCamada {
@@ -153,9 +184,9 @@ export interface RespostaDaCamada {
 }
 
 /**
- * A camada inteira. null = não é comando da agenda, não é o dono ou a agenda está desligada: o turno segue (secretário
- * já passou; vem o atalho do PDF e o modelo). Nada é lido no banco quando o texto não é comando, e o modo só é lido
- * quando é o dono. Nunca lança.
+ * A camada inteira. null = não é comando da agenda, não é o dono ou a agenda está desligada (salvo o *grava* ou *descarta*
+ * com rascunho aberto): o turno segue (secretário já passou; vem o atalho do PDF e o modelo). Nada é lido no banco
+ * quando o texto não é comando, e o modo só é lido quando é o dono. Nunca lança.
  */
 export async function camadaDaAgenda(texto: string, deps: DependenciasDaCamada): Promise<RespostaDaCamada | null> {
   const comando = lerComandoDaAgenda(texto);
@@ -173,7 +204,16 @@ export async function camadaDaAgenda(texto: string, deps: DependenciasDaCamada):
   } catch {
     modo = "desligado";
   }
-  if (modo === "desligado") return null;
+  if (modo === "desligado") {
+    if (!passaDesligada(comando)) return null;
+    let aberto = false;
+    try {
+      aberto = (await deps.rascunhoAberto?.()) === true;
+    } catch {
+      aberto = false;
+    }
+    if (!aberto) return null;
+  }
   let r: RespostaDoComando;
   try {
     r = await deps.executar(comando);

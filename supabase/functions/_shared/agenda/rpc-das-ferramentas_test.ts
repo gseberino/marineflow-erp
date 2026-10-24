@@ -5,6 +5,7 @@
 import { assert, assertEquals, assertThrows } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   canalDaRpc,
+  INSTRUCAO_AGENDA_DESLIGADA,
   INSTRUCAO_LEITURA,
   INSTRUCAO_RASCUNHO,
   INSTRUCAO_RASCUNHO_RECUSA,
@@ -189,6 +190,16 @@ Deno.test("resultadoDaLeitura: referência que não existe e pergunta passam adi
   assertEquals(r.pergunta, "Qual Rodrigo: OS-00076 (…) ou OS-00096 (…)?");
   assertEquals(r.opcoes, ["OS-00076 (Starlink, esperando o cliente)"]);
   assertEquals(JSON.stringify(r).includes(UUID_QUALQUER), false);
+});
+
+Deno.test("resultadoDaLeitura: agenda desligada = a instrução de voltar à my_agenda (a agenda de antes)", () => {
+  const r = resultadoDaLeitura({ ok: false, rota: "desligada", desligada: true, texto: "A agenda de produção está desligada agora." });
+  assertEquals(r, {
+    ok: false, texto: "A agenda de produção está desligada agora.", desligada: true, instrucao: INSTRUCAO_AGENDA_DESLIGADA,
+  });
+  assert(INSTRUCAO_AGENDA_DESLIGADA.includes("my_agenda pela ferramenta_extra"));
+  // sem a marca, o ok:false continua sendo o aviso/pergunta de sempre
+  assertEquals(resultadoDaLeitura({ ok: false, texto: "Não encontrei a OS-00999." }).desligada, undefined);
 });
 
 Deno.test("resultadoDaLeitura: resposta sem texto LANÇA (nunca vira agenda vazia)", () => {
