@@ -218,6 +218,10 @@ Deno.test("as descrições dizem o que NÃO fazem e ensinam a fronteira com as v
   assertStringIncludes(d("material_informar"), "get_purchase_needs");
   assertStringIncludes(d("material_informar"), "ordem de compra");
   assertStringIncludes(d("os_planejar"), "Não agenda OS");
+  // As vizinhas que parecem a mesma coisa: o dia que já aconteceu (registrar_diaria) e a peça que entra na OS
+  // (add_service_order_item).
+  assertStringIncludes(d("equipe_disponibilidade"), "registrar_diaria");
+  assertStringIncludes(d("material_informar"), "add_service_order_item");
 });
 
 Deno.test("cada execute chama UMA RPC e não lê tabela (o texto é do banco)", () => {

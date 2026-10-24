@@ -902,7 +902,8 @@ export const diariasTools: ToolDef[] = [
     name: "registrar_diaria",
     description:
       "Registra o DIA de um freelancer de diária já cadastrado: 'o Roberto não veio hoje' (faltou), 'Mickael fez meio período " +
-      "ontem', 'Roberto trabalhou dia inteiro na OS 1234'. Um dia por pessoa: repetir a mesma data CORRIGE o dia, não duplica. " +
+      "ontem', 'Roberto trabalhou dia inteiro na OS 1234'. É o dia que já aconteceu; quem VAI vir ('o Roberto não vem amanhã', " +
+      "'só de manhã na terça') é equipe_disponibilidade. Um dia por pessoa: repetir a mesma data CORRIGE o dia, não duplica. " +
       "'faltou' grava a ausência (valor zero); 'apagar' só para dia lançado por ENGANO. A diária vem do cadastro — não pergunte " +
       "valor nem horário; valor_diaria só quando a pessoa DISSER outro valor para o dia ('na quarta foram 130'). Freelancer que " +
       "ainda não existe: cadastrar_freelancer antes. Não é pagamento (pagamento vem do extrato; em dinheiro é lancar_no_caixa) nem hora de OS " +

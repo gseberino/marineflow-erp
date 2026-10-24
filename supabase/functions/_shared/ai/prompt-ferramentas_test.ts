@@ -305,7 +305,15 @@ Deno.test("agenda de produção: só agenda_ver dá data; nada é gravado sem *g
   assertStringIncludes(secao, "aqui não converta para ISO");
   assertStringIncludes(secao, "nunca diz \"gravei\"");
   // Fronteiras: cada vizinha citada por nome (e o nome é tool de verdade, ao alcance — os testes acima cobram).
-  for (const t of ["create_task", "schedule_service_order", "get_purchase_needs"]) assertStringIncludes(secao, t);
+  for (const t of ["create_task", "schedule_service_order", "get_purchase_needs", "registrar_diaria", "add_service_order_item"]) {
+    assertStringIncludes(secao, t);
+    assertEquals(porNome.has(t), true, `${t} não é ferramenta`);
+  }
+  // equipe_disponibilidade (quem VAI vir) × registrar_diaria (o dia que já aconteceu: a falta mexe no pagamento) e
+  // material_informar com novo (só avisa a agenda) × add_service_order_item (a peça que entra na OS e na compra).
+  assertStringIncludes(secao, "equipe_disponibilidade é quem VAI vir");
+  assertStringIncludes(secao, "(\"não veio hoje\", \"faltou ontem\") é registrar_diaria");
+  assertStringIncludes(secao, "material_informar com novo só avisa a agenda e não põe a peça na OS nem na compra");
 });
 
 Deno.test("agenda de produção: o que a seção ensina existe na ferramenta e no comando", () => {

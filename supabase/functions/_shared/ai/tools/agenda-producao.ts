@@ -160,7 +160,8 @@ export const agendaProducaoTools: ToolDef[] = [
       "3\"); na_mao (\"chegou\", \"tá aqui\"); vou_comprar (\"compro terça na Premel\"); falta; sem_previsao; " +
       "pode_comecar_sem; dispensar; ou peça fora do orçamento (novo). Uma chamada por situação; itens = o que ele citou " +
       "(\"compressor\", \"painel\") ou [\"tudo\"]. NÃO grava de fato nem cria ordem de compra ou cotação: devolve a " +
-      "releitura, e só o *grava* do dono grava. A lista do que comprar continua sendo get_purchase_needs.",
+      "releitura, e só o *grava* do dono grava. A lista do que comprar continua sendo get_purchase_needs. Peça nova (novo) " +
+      "só avisa a agenda: não entra na OS, no orçamento nem na compra; para cobrar e comprar, add_service_order_item.",
     input_schema: {
       type: "object",
       properties: {
@@ -188,8 +189,9 @@ export const agendaProducaoTools: ToolDef[] = [
     name: "equipe_disponibilidade",
     description:
       "Anota num RASCUNHO quem vem quando: vem, nao_vem, so_manha ou so_tarde, numa data (\"terça\") ou toda semana " +
-      "(padrao = true: \"segunda a sexta\"). pessoa \"eu\" = o dono (\"fico em campo de segunda a sexta\"). NÃO grava de " +
-      "fato nem avisa ninguém: devolve a releitura, e só o *grava* do dono grava.",
+      "(padrao = true: \"segunda a sexta\"). pessoa \"eu\" = o dono (\"fico em campo de segunda a sexta\"). É quem VAI vir; o " +
+      "dia que já aconteceu (\"não veio hoje\", \"faltou ontem\") é registrar_diaria. NÃO grava de fato nem avisa ninguém: " +
+      "devolve a releitura, e só o *grava* do dono grava.",
     input_schema: {
       type: "object",
       properties: {
