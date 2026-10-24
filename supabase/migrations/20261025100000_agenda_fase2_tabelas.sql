@@ -324,7 +324,7 @@ create table if not exists public.agenda_alocacoes (
   publicada_em     timestamptz,
   cancelada_em     timestamptz,
   cancelada_motivo text check (cancelada_motivo in ('replanejado','desfeito','os_saiu','pessoa','material','cliente','clima',
-                                                    'condicao_vencida','promovida','dono')),
+                                                    'condicao_vencida','promovida','dono','espera')),
   motivos          jsonb not null default '[]' check (jsonb_typeof(motivos) = 'array'),
   historico        jsonb not null default '[]'
                      check (case when jsonb_typeof(historico) = 'array' then jsonb_array_length(historico) <= 20 else false end),

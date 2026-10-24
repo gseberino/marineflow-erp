@@ -63,8 +63,11 @@
 --   · A numeração das propostas e das decisões nasce aqui (agenda_propostas_abertas, agenda_decisoes_abertas), porque o
 --     rascunho precisa resolver "a 1" antes de existir o agenda_ver da Fase 2 (P5).
 --   · agenda_propor_dito aceita os escopos da ferramenta (semana e proxima_semana → a semana que o motor publica, a
---     seguinte à de hoje; os; replano) e não confere as datas no trecho: a simulação não grava, e a proposta aberta
---     (simular = false) não vale para ninguém até o *grava* de agenda_rascunho_aplicar, que confere a releitura.
+--     seguinte à de hoje; os; replano). Revisão da Fase 2: com fixar ou só depois de, confere cada dia nas palavras do
+--     dono (p_trecho, no fim da assinatura; sem ele, "Me diga com as suas palavras…") — a proposta aberta (simular =
+--     false) segue para o *grava* de agenda_rascunho_aplicar, e o dia dela não pode ser um que o modelo calculou.
+--   · O dia pedido antes de o material estar garantido (revisão da Fase 2, o caso da OS-00104): marcar não recusa (é a
+--     decisão do dono), mas a releitura traz o aviso do material e "Marco mesmo assim?"; o *grava* é o sim.
 --
 -- O QUE NÃO MUDA: nenhuma tabela além do CHECK; o motor, a porta e a conferência (P1–P3); o rascunho da Fase 1 (os
 -- tipos planejar, material e disponibilidade gravam exatamente como antes — agenda_fase1_rascunho.sql continua passando).
@@ -701,18 +704,20 @@ comment on function public._agenda_pedido_recusa(text, text, text) is
   'Agenda de Produção (Fase 2, P4): as guardas dos pedidos da conversa (marcar, aplicar, desfazer, andamento) — canal whatsapp/painel (senão 22023), a agenda de produção desligada ("não anotei nada"), a automática fora de ligado ("ainda está em teste: mostro como ficaria, mas não marco nada.") e o trecho do dono. null = segue.';
 
 -- A frase da OS que o motor encaixou, para a releitura: "Lenine (OS-00074), qui 29 e sex 30/10, você abre e fecha,
--- Roberto os 2 dias" (o item do motor sem o ponto, com a vírgula depois do nome), e "(sai de …)" quando ela já tinha dia.
+-- Roberto os 2 dias" (o item do motor sem o ponto, com a vírgula depois do nome), "(sai de …)" quando ela já tinha dia e,
+-- no fim, o aviso do material quando o dia pedido vem antes dele ("— mas "Compressor" só chega por volta de …").
 create or replace function public._agenda_frase_do_encaixe(p_sim jsonb, p_os uuid)
  returns text
  language sql
  stable
  set search_path to 'public'
 as $function$
-  select regexp_replace(rtrim(i ->> 'texto', '.'), '^([^:]*): ', '\1, ')
+  select regexp_replace(regexp_replace(rtrim(i ->> 'texto', '.'), ' — mas .*$', ''), '^([^:]*): ', '\1, ')
          || coalesce(' (sai de ' || nullif(public._agenda_dias_texto(array(
               select distinct (a ->> 'dia')::date
                 from jsonb_array_elements(p_sim -> 'itens') c, jsonb_array_elements(c -> 'alocacoes') a
                where c ->> 'op' = 'cancelar' and (c ->> 'os')::uuid = p_os)), '') || ')', '')
+         || coalesce(' — mas ' || (i ->> 'aviso_material'), '')
     from jsonb_array_elements(p_sim -> 'itens') with ordinality t(i, k)
    where i ->> 'op' = 'criar' and (i ->> 'os')::uuid = p_os and i ->> 'tipo' <> 'reserva'
    order by k
@@ -720,7 +725,7 @@ as $function$
 $function$;
 
 comment on function public._agenda_frase_do_encaixe(jsonb, uuid) is
-  'Agenda de Produção (Fase 2, P4): o encaixe de uma OS numa proposta do motor, em texto de releitura — "Lenine (OS-00074), qui 29 e sex 30/10, você abre e fecha, Roberto os 2 dias (sai de qua 04/11)". null = a OS não entrou.';
+  'Agenda de Produção (Fase 2, P4): o encaixe de uma OS numa proposta do motor, em texto de releitura — "Lenine (OS-00074), qui 29 e sex 30/10, você abre e fecha, Roberto os 2 dias (sai de qua 04/11)", com o aviso do material no fim quando o dia pedido vem antes dele ("— mas "Compressor 12V SS65" só chega por volta de ter 06/10 (pronto qua 07/10)"). null = a OS não entrou.';
 
 -- "Não cabe seg 02/11: o Roberto já está no Vanderlei. O primeiro dia que dá é sex 30/10." — quando o pedido não cabe.
 create or replace function public._agenda_nao_cabe(p_sim jsonb, p_os uuid, p_de date, p_autor uuid, p_hoje date,
@@ -841,20 +846,29 @@ begin
     return public._agenda_recusa(public._agenda_nao_cabe(v_s, v_os, v_de, v_autor, p_hoje, p_agora, true), 'nao_cabe');
   end if;
 
+  -- O dia pedido antes de o material estar garantido (o caso da OS-00104): a decisão é do dono, mas a releitura vira a
+  -- pergunta — o aviso do material e "Marco mesmo assim?"; o *grava* é o sim.
   v_txt := public._agenda_rascunho_salvar(v_autor, p_canal, 'marcar', 'marcar:' || v_os::text, v_os,
              jsonb_build_object('grupo', 'marcar:' || v_os::text, 'rotulo_grupo', 'Marco na agenda', 'os', v_os,
                                 'numero', v_ro ->> 'numero', 'curto', v_ro ->> 'cliente_curto', 'de', v_de, 'ate', v_ate,
                                 'pessoa', v_pessoa, 'pessoa_nome', v_rp ->> 'nome_curto',
                                 'simulado', jsonb_build_object('de', v_item ->> 'de', 'ate', v_item ->> 'ate'),
-                                'frase_pronta', v_frase),
+                                'aviso_material', v_item ->> 'aviso_material',
+                                'frase_pronta', v_frase || case when v_item ->> 'aviso_material' is not null
+                                                                then '. Marco mesmo assim?' else '' end),
              p_trecho, p_hoje);
   return jsonb_build_object('ok', true, 'item', v_txt,
-                            'releitura', public.agenda_rascunho_ler(v_autor, p_hoje) ->> 'texto');
+                            'releitura', public.agenda_rascunho_ler(v_autor, p_hoje) ->> 'texto')
+         || case when v_item ->> 'aviso_material' is not null
+                 then jsonb_build_object('aviso_material', v_item ->> 'aviso_material',
+                                         'pergunta', format('%s: %s. Marco mesmo assim? Se sim, mande *grava*.',
+                                                            public._agenda_rotulo_da_os(v_os), v_item ->> 'aviso_material'))
+                 else '{}'::jsonb end;
 end;
 $function$;
 
 comment on function public.agenda_rascunho_marcar(uuid, text, text, text, text, text, text, date, timestamptz) is
-  'Agenda de Produção (Fase 2, P4): "marca o Lenine pra quinta", "passa o Nelson para segunda" vira RASCUNHO (nada na agenda). OS por agenda_resolver_os, o dia (e o até) por agenda_data_dita e dito no trecho, a pessoa por agenda_resolver_pessoa; o encaixe simulado agora pelo motor (agenda_propor os + fixar, sem gravar). Cabe → rascunho marcar:<os> {os, de, ate, pessoa, simulado} com a releitura ("Marco na agenda: Lenine (OS-00074), qui 29 e sex 30/10, você abre e fecha, Roberto os 2 dias."). Não cabe → {ok:false, pergunta "… O primeiro dia que dá é sex 30/10. Marco nesse dia?"}. Fora de modo_proposta ligado: só a simulação ("ainda está em teste… Ficaria assim: …"), nada no rascunho. O *grava* chama agenda_marcar_os (via dono).';
+  'Agenda de Produção (Fase 2, P4): "marca o Lenine pra quinta", "passa o Nelson para segunda" vira RASCUNHO (nada na agenda). OS por agenda_resolver_os, o dia (e o até) por agenda_data_dita e dito no trecho, a pessoa por agenda_resolver_pessoa; o encaixe simulado agora pelo motor (agenda_propor os + fixar, sem gravar). Cabe → rascunho marcar:<os> {os, de, ate, pessoa, simulado} com a releitura ("Marco na agenda: Lenine (OS-00074), qui 29 e sex 30/10, você abre e fecha, Roberto os 2 dias."); o dia antes de o material estar garantido entra com o aviso e a pergunta ("… — mas "Compressor 12V SS65" só chega por volta de ter 06/10 (pronto qua 07/10). Marco mesmo assim?"; o *grava* é o sim), e a resposta traz aviso_material e pergunta. Não cabe → {ok:false, pergunta "… O primeiro dia que dá é sex 30/10. Marco nesse dia?"}. Fora de modo_proposta ligado: só a simulação ("ainda está em teste… Ficaria assim: …"), nada no rascunho. O *grava* chama agenda_marcar_os (via dono).';
 
 create or replace function public.agenda_rascunho_aplicar(p_autor uuid, p_canal text, p_proposta text default null,
                                                           p_os text[] default null, p_decisao text default null,
@@ -1000,7 +1014,7 @@ begin
   -- ── Publicar uma proposta aberta ──
   v_lista := public.agenda_propostas_abertas(p_agora);
   if jsonb_array_length(v_lista) = 0 then
-    return public._agenda_recusa('Não tenho proposta aberta para publicar. Peça para eu montar (por exemplo, "monta a semana que vem").',
+    return public._agenda_recusa('Não tenho plano montado para publicar. Peça para eu montar (por exemplo, "monta a semana que vem").',
                                  'sem_proposta');
   end if;
   v_ref := public._agenda_normal(p_proposta);
@@ -1008,17 +1022,17 @@ begin
               then 1
               when v_ref ~ '^\d{1,3}$' then v_ref::int end;
   if v_n is null then
-    return public._agenda_recusa(format('Qual proposta? %s.',
-      (select string_agg((p ->> 'n') || ') ' || coalesce(p ->> 'titulo', 'proposta'), '; ' order by (p ->> 'n')::int)
+    return public._agenda_recusa(format('Qual plano? %s.',
+      (select string_agg((p ->> 'n') || ') ' || coalesce(p ->> 'titulo', 'plano'), '; ' order by (p ->> 'n')::int)
          from jsonb_array_elements(v_lista) p)), 'proposta_ambigua');
   end if;
   select pr.* into v_p from public.agenda_propostas pr
    where pr.id = (select (p ->> 'id')::uuid from jsonb_array_elements(v_lista) p where (p ->> 'n')::int = v_n);
   if not found then
-    return public._agenda_recusa(format('Não tenho a proposta %s aberta.', v_n), 'proposta_nao_existe');
+    return public._agenda_recusa(format('Não tenho o plano %s montado.', v_n), 'proposta_nao_existe');
   end if;
   if v_p.versao_base <> cf.versao_plano then
-    return public._agenda_recusa('A agenda mudou desde essa proposta: peça de novo que eu refaço.', 'proposta_obsoleta');
+    return public._agenda_recusa('A agenda mudou desde que eu montei: peça de novo que eu refaço.', 'proposta_obsoleta');
   end if;
 
   -- só as OS ditas ("publica só o Lenine e o Flávio"), e só se estão na proposta
@@ -1030,7 +1044,7 @@ begin
         return public._agenda_recusa_da_os(v_ro);
       end if;
       if not exists (select 1 from jsonb_array_elements(v_p.itens) i where i ->> 'os' = v_ro ->> 'id') then
-        return public._agenda_recusa(format('%s não está nessa proposta.', v_ro ->> 'cliente_curto'), 'os_fora_da_proposta');
+        return public._agenda_recusa(format('%s não está nesse plano.', v_ro ->> 'cliente_curto'), 'os_fora_da_proposta');
       end if;
       v_os := v_os || (v_ro ->> 'id')::uuid;
     end loop;
@@ -1044,7 +1058,7 @@ begin
   end if;
   v_sel := public._agenda_itens_escolhidos(v_p.itens, v_os, null);
   if not exists (select 1 from jsonb_array_elements(v_sel) i where i ->> 'op' = 'criar') and jsonb_array_length(v_sel) = 0 then
-    return public._agenda_recusa('Nessa proposta não há nada para publicar sem a sua decisão: veja o que a agenda precisa de você.',
+    return public._agenda_recusa('No plano que eu montei não há nada para publicar sem a sua decisão: veja o que a agenda precisa de você.',
                                  'so_critico');
   end if;
   v_ncanc := (select count(*) from jsonb_array_elements(v_sel) i where i ->> 'op' = 'cancelar');
@@ -1322,13 +1336,17 @@ comment on function public.agenda_rascunho_andamento(uuid, text, text, text, tex
 
 -- A entrada da ferramenta agenda_propor (P6): as referências do dono resolvidas pelo banco e o motor. Simular (padrão)
 -- não grava nada; simular = false grava só a proposta aberta, que não vale para ninguém até o *grava* de
--- agenda_rascunho_aplicar.
+-- agenda_rascunho_aplicar. Revisão da Fase 2: o dia de "fixar" e de "só depois de" tem de estar nas palavras do dono
+-- (p_trecho, _agenda_data_conferida), como no marcar — o modelo nunca escolhe o dia.
+-- (a versão sem p_trecho sai: a nova não pode conviver com ela, o PostgREST não saberia qual chamar)
+drop function if exists public.agenda_propor_dito(uuid, text, text, text[], jsonb, text[], jsonb, boolean, boolean, date, timestamptz);
 create or replace function public.agenda_propor_dito(p_autor uuid, p_canal text, p_escopo text, p_os text[] default null,
                                                      p_fixar jsonb default null, p_tirar text[] default null,
                                                      p_so_depois_de jsonb default null, p_acima_da_carga boolean default false,
                                                      p_simular boolean default true,
                                                      p_hoje date default public._hoje_brt(),
-                                                     p_agora timestamptz default now())
+                                                     p_agora timestamptz default now(),
+                                                     p_trecho text default null)
  returns jsonb
  language plpgsql
  volatile
@@ -1356,6 +1374,12 @@ begin
   if (public._agenda_cfg()).modo_leitura = 'desligado' then
     return public._agenda_recusa('A agenda de produção está desligada agora.', 'desligada');
   end if;
+  -- o dia de "fixar" e de "só depois de" é conferido nas palavras do dono
+  if (case when jsonb_typeof(p_fixar) = 'array' then jsonb_array_length(p_fixar) else 0 end
+      + case when jsonb_typeof(p_so_depois_de) = 'array' then jsonb_array_length(p_so_depois_de) else 0 end) > 0
+     and nullif(btrim(coalesce(p_trecho, '')), '') is null then
+    return public._agenda_recusa('Me diga com as suas palavras o que você quer na agenda.', 'sem_trecho');
+  end if;
   v_escopo := case lower(btrim(coalesce(p_escopo, ''))) when 'semana' then 'semana' when 'proxima_semana' then 'semana'
                                                          when 'os' then 'os' when 'replano' then 'replano' end;
   if v_escopo is null then
@@ -1379,13 +1403,13 @@ begin
   for v_e in select e from jsonb_array_elements(coalesce(p_fixar, '[]'::jsonb)) with ordinality t(e, o) order by o loop
     v_ro := public.agenda_resolver_os(v_e ->> 'os', p_hoje, false);
     if v_ro ->> 'status' <> 'ok' then return public._agenda_recusa_da_os(v_ro); end if;
-    begin
-      v_de := public.agenda_data_dita(v_e ->> 'quando', p_hoje, 'futuro');
-      v_ate := case when nullif(btrim(coalesce(v_e ->> 'ate', '')), '') is null then v_de
-                    else public.agenda_data_dita(v_e ->> 'ate', p_hoje, 'futuro') end;
-    exception when sqlstate '22007' then
-      return public._agenda_recusa(sqlerrm, 'data');
-    end;
+    v_de := public._agenda_data_conferida(v_e ->> 'quando', p_trecho, p_hoje, 'futuro');
+    if not (v_de ->> 'ok')::boolean then return v_de; end if;
+    v_ate := v_de;
+    if nullif(btrim(coalesce(v_e ->> 'ate', '')), '') is not null then
+      v_ate := public._agenda_data_conferida(v_e ->> 'ate', p_trecho, p_hoje, 'futuro');
+      if not (v_ate ->> 'ok')::boolean then return v_ate; end if;
+    end if;
     v_rp := null;
     if nullif(btrim(coalesce(v_e ->> 'pessoa', '')), '') is not null then
       v_rp := public.agenda_resolver_pessoa(v_e ->> 'pessoa', v_autor, p_hoje);
@@ -1401,11 +1425,8 @@ begin
   for v_e in select e from jsonb_array_elements(coalesce(p_so_depois_de, '[]'::jsonb)) with ordinality t(e, o) order by o loop
     v_ro := public.agenda_resolver_os(v_e ->> 'os', p_hoje, false);
     if v_ro ->> 'status' <> 'ok' then return public._agenda_recusa_da_os(v_ro); end if;
-    begin
-      v_de := public.agenda_data_dita(v_e ->> 'quando', p_hoje, 'futuro');
-    exception when sqlstate '22007' then
-      return public._agenda_recusa(sqlerrm, 'data');
-    end;
+    v_de := public._agenda_data_conferida(v_e ->> 'quando', p_trecho, p_hoje, 'futuro');
+    if not (v_de ->> 'ok')::boolean then return v_de; end if;
     v_depois := v_depois || jsonb_build_array(jsonb_build_object('os', v_ro ->> 'id', 'dia', v_de ->> 'de'));
     v_ids := v_ids || (v_ro ->> 'id')::uuid;
   end loop;
@@ -1424,8 +1445,8 @@ begin
 end;
 $function$;
 
-comment on function public.agenda_propor_dito(uuid, text, text, text[], jsonb, text[], jsonb, boolean, boolean, date, timestamptz) is
-  'Agenda de Produção (Fase 2, P4): a entrada da ferramenta agenda_propor — escopo semana/proxima_semana (a semana que o motor publica: a seguinte à de hoje), os ou replano; as OS por agenda_resolver_os, as datas por agenda_data_dita, a pessoa por agenda_resolver_pessoa (ambíguo ou não achado = a pergunta, nada calculado); chama agenda_propor (origem dono). simular (padrão true) não grava nada e o texto termina com "É simulação: não muda nada."; simular = false grava só a proposta ABERTA (nunca publica: publicar é o *grava* de agenda_rascunho_aplicar). Admin pelo _autor_da_agenda.';
+comment on function public.agenda_propor_dito(uuid, text, text, text[], jsonb, text[], jsonb, boolean, boolean, date, timestamptz, text) is
+  'Agenda de Produção (Fase 2, P4): a entrada da ferramenta agenda_propor — escopo semana/proxima_semana (a semana que o motor publica: a seguinte à de hoje), os ou replano; as OS por agenda_resolver_os, as datas por agenda_data_dita conferidas nas palavras do dono (p_trecho, obrigatório com fixar ou só depois de: "Não achei "quinta" no que você disse"), a pessoa por agenda_resolver_pessoa (ambíguo ou não achado = a pergunta, nada calculado); chama agenda_propor (origem dono). simular (padrão true) não grava nada e o texto termina com "É simulação: não muda nada."; simular = false grava só a proposta ABERTA (nunca publica: publicar é o *grava* de agenda_rascunho_aplicar). Admin pelo _autor_da_agenda.';
 
 -- ── 6. O que o *grava* faz com cada pedido ──────────────────────────────────────────────────────────────
 -- Recusa de qualquer função do motor = exceção P0097 com a frase dela: o *grava* desfaz o lote inteiro.
@@ -1733,7 +1754,7 @@ revoke all on function
   public.agenda_rascunho_aplicar(uuid, text, text, text[], text, text, text, date, timestamptz),
   public.agenda_rascunho_desfazer(uuid, text, text, text, date, timestamptz),
   public.agenda_rascunho_andamento(uuid, text, text, text, text, text[], text, text, date, timestamptz),
-  public.agenda_propor_dito(uuid, text, text, text[], jsonb, text[], jsonb, boolean, boolean, date, timestamptz),
+  public.agenda_propor_dito(uuid, text, text, text[], jsonb, text[], jsonb, boolean, boolean, date, timestamptz, text),
   public.agenda_rascunho_planejar(uuid, text, text, jsonb, text, date), public.agenda_rascunho_gravar(uuid, date)
   from public, anon;
 grant execute on function
@@ -1741,7 +1762,7 @@ grant execute on function
   public.agenda_rascunho_aplicar(uuid, text, text, text[], text, text, text, date, timestamptz),
   public.agenda_rascunho_desfazer(uuid, text, text, text, date, timestamptz),
   public.agenda_rascunho_andamento(uuid, text, text, text, text, text[], text, text, date, timestamptz),
-  public.agenda_propor_dito(uuid, text, text, text[], jsonb, text[], jsonb, boolean, boolean, date, timestamptz),
+  public.agenda_propor_dito(uuid, text, text, text[], jsonb, text[], jsonb, boolean, boolean, date, timestamptz, text),
   public.agenda_rascunho_planejar(uuid, text, text, jsonb, text, date), public.agenda_rascunho_gravar(uuid, date)
   to authenticated, service_role;
 

@@ -931,6 +931,72 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
 
+  -- ── Revisão da Fase 2 ──
+  -- R20–R23: *choveu* às 08:30 de qua 04/11 com a conferência de ter 03/11 sem resposta: hoje ou ontem? O banco não
+  -- escolhe (a mudança executa direto e replaneja); pergunta, e nada muda.
+  begin
+    perform pg_temp.publicado();
+    r := pg_temp.vigiar(date '2026-11-03', '14:00');
+    v_res := pg_temp.ok(v_res, 'R20 (pré) a conferência de ter 03/11 está aberta (o dono não respondeu)',
+      exists (select 1 from public.agenda_perguntas q where q.tipo = 'conferencia' and q.dia = date '2026-11-03' and q.estado = 'aberta'), null);
+    r := public.agenda_choveu(c_admin, null, 'whatsapp', date '2026-11-04', pg_temp.em(date '2026-11-04', '08:30'));
+    v_res := pg_temp.ok(v_res, 'R21 *choveu* às 08:30 de qua 04/11 (hoje tem plano): "Hoje ou ontem?" com as duas palavras, e nada muda',
+      not (r ->> 'ok')::boolean and not (r ->> 'mudou')::boolean and r ->> 'pede' = 'dia'
+      and r ->> 'texto' = 'Hoje (qua 04/11) ou ontem (ter 03/11)? Diga *choveu hoje* ou *choveu ontem*.'
+      and not exists (select 1 from public.agenda_alocacoes a where a.resultado is not null)
+      and (select q.estado from public.agenda_perguntas q where q.tipo = 'conferencia' and q.dia = date '2026-11-03') = 'aberta', r::text);
+    r := public.agenda_conferir_dia(c_admin, 'nao_cumprido', 'cliente_ou_bem', null, 'whatsapp', date '2026-11-04',
+                                    pg_temp.em(date '2026-11-04', '08:30'));
+    r2 := public.agenda_conferir_dia(c_admin, 'cumprido', null, null, 'whatsapp', date '2026-11-04', pg_temp.em(date '2026-11-04', '10:00'));
+    v_res := pg_temp.ok(v_res, 'R22 *dia não cliente* às 08:30 e *dia feito* às 10:00 (a manhã de hoje já começou): a mesma pergunta, com a palavra de cada um',
+      r ->> 'texto' = 'Hoje (qua 04/11) ou ontem (ter 03/11)? Diga *dia não cliente hoje* ou *dia não cliente ontem*.'
+      and r2 ->> 'texto' = 'Hoje (qua 04/11) ou ontem (ter 03/11)? Diga *dia feito hoje* ou *dia feito ontem*.'
+      and not (r2 ->> 'ok')::boolean
+      and not exists (select 1 from public.agenda_alocacoes a where a.resultado is not null), r ->> 'texto' || ' / ' || (r2 ->> 'texto'));
+    r := public.agenda_choveu(c_admin, 'ontem', 'whatsapp', date '2026-11-04', pg_temp.em(date '2026-11-04', '08:31'));
+    v_res := pg_temp.ok(v_res, 'R23 *choveu ontem* (dito): anota ter 03/11, e qua 04/11 fica como estava',
+      (r ->> 'ok')::boolean and r ->> 'dia' = '2026-11-03'
+      and exists (select 1 from public.agenda_alocacoes a where a.dia = date '2026-11-03' and a.resultado = 'nao_cumprido' and a.motivo = 'clima')
+      and not exists (select 1 from public.agenda_alocacoes a where a.dia = date '2026-11-04' and a.resultado is not null), r ->> 'texto');
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- V40–V43: o dia que o dono marcou antes de o material chegar (o replay da OS-00104): nada sai da agenda, mas na
+  -- véspera a vigia pergunta "chegou?"; passado o dia, a pergunta se resolve.
+  begin
+    execute current_setting('agenda_teste.replay_0104');
+    insert into public.agenda_disponibilidade (payee_id, dias_semana, turno, situacao, origem, nota, criado_por, criado_em)
+    values (c_dono, '{1,2,3,4,5}', null, 'disponivel', 'dono', 'você disse', c_admin, timestamptz '2026-10-01 18:00-03'),
+           (c_roberto, '{1,2,3,4,5}', null, 'disponivel', 'dono', 'você disse', c_admin, timestamptz '2026-10-01 18:00-03');
+    perform pg_temp.modos('ligado', 'ligado');
+    r := public.agenda_marcar_os(c_admin, pg_temp.os('104'), date '2026-10-06', date '2026-10-06', null, 'tela', 'dono',
+                                 date '2026-10-02', pg_temp.em(date '2026-10-02', '10:00'));
+    r2 := pg_temp.vigiar(date '2026-10-02', '10:30');
+    v_res := pg_temp.ok(v_res, 'V40 na sex 02/10 (o dia marcado ainda não é o próximo dia útil) não há pergunta',
+      (r ->> 'ok')::boolean
+      and not exists (select 1 from public.agenda_perguntas q where q.chave like 'chegou:fixado:%'), (r2 -> 'contagens' -> 'chegou')::text);
+    r2 := pg_temp.vigiar(date '2026-10-05', '10:00');
+    x := (select to_jsonb(q) from public.agenda_perguntas q
+           where q.chave = format('chegou:fixado:%s:2026-10-06', pg_temp.os('104')));
+    v_res := pg_temp.ok(v_res, 'V41 na véspera (seg 05/10) a vigia pergunta "chegou?" — e o Flávio continua marcado na ter 06/10 (a decisão é do dono)',
+      x ->> 'tipo' = 'chegou' and x ->> 'estado' = 'aberta' and x ->> 'dia' = '2026-10-06'
+      and x ->> 'texto' like 'Flávio (OS-00104): você marcou ter 06/10, mas %"Compressor 12V SS65"%. Chegou?'
+      and (r2 #>> '{contagens,chegou,fixadas}')::int = 1
+      and (select count(*) from public.agenda_alocacoes a where a.service_order_id = pg_temp.os('104') and a.dia = date '2026-10-06'
+             and a.estado = 'fixada' and a.fixado_por = 'dono') = 4, coalesce(x::text, (r2 -> 'contagens' -> 'chegou')::text));
+    r2 := pg_temp.vigiar(date '2026-10-05', '10:15');
+    v_res := pg_temp.ok(v_res, 'V42 a pergunta da véspera não abre duas vezes (o tique seguinte não repete)',
+      (select count(*) from public.agenda_perguntas q where q.chave like 'chegou:fixado:%') = 1, null);
+    r2 := pg_temp.vigiar(date '2026-10-07', '07:30');
+    v_res := pg_temp.ok(v_res, 'V43 qua 07/10: a pergunta da véspera fica resolvida ("o dia passou")',
+      (select q.estado = 'resolvida' and q.resolvida_motivo = 'o dia passou' from public.agenda_perguntas q
+        where q.chave = format('chegou:fixado:%s:2026-10-06', pg_temp.os('104'))),
+      (select q.estado || ' ' || coalesce(q.resolvida_motivo, '-') from public.agenda_perguntas q where q.chave like 'chegou:fixado:%'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
   perform pg_temp.gravar(v_res);
 end
 $conf$;

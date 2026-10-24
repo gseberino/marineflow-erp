@@ -1234,6 +1234,42 @@ $function$;
 comment on function public._agenda_classe_da_os(jsonb, jsonb, date, boolean, boolean) is
   'Agenda de Produção (Fase 2, P2): a classe da OS para o motor, pelas restrições de os_prontidao e o molde de agenda_meios_da_os — 1 = em execução/parada ou com meio-dia fixado (compromisso, primeiro); 2 = pronta: dias ditos ou aceitos, sem orçamento/sinal/cliente/escopo travando e todo crítico em A, B ou C (compromisso); 3 = o que falta é só compra (D falta, o "compre até"), material comprado sem previsão ou compra combinada sem prazo, conferir o material (zero linhas ou peça embutida) ou dias só sugeridos (só reserva condicionada; condicao_tipo na ordem compra > material > conferir_material > duracao); 4 = nunca: fora da carteira, em espera, material atrasado ou sem previsão, orçamento, sinal, cliente, escopo, o bem ou o "não antes de" além do horizonte, sem base para os dias. {classe, motivo, texto (quem trava), condicao_tipo}.';
 
+-- O aviso de quando o dono marca a OS num dia em que o material ainda não está garantido (o caso da OS-00104: marcada
+-- para ter 06/10 com o compressor chegando nesse mesmo dia). A decisão é dele e fica; o aviso vai junto na frase do
+-- item, no "Mudei:", na releitura ("Marco mesmo assim?") e na pergunta "chegou?" da véspera (vigia). p_condicao e
+-- p_texto são os da classe (_agenda_classe_da_os: condicao_tipo e texto). null = o material dá para o dia.
+create or replace function public._agenda_aviso_do_material(p_pront jsonb, p_condicao text, p_texto text, p_dia date)
+ returns text
+ language sql
+ stable
+ set search_path to 'public'
+as $function$
+  with m as (select p_pront -> 'material' as mat),
+  g as (
+    -- o item que chega por último (o da data do material), como na prontidão
+    select e from m, jsonb_array_elements(coalesce(m.mat -> 'itens', '[]'::jsonb)) with ordinality t(e, o)
+     where coalesce((e ->> 'critico')::boolean, true) and e ->> 'nivel' is distinct from 'A'
+       and (e ->> 'data')::date = (m.mat ->> 'dpm')::date
+     order by o limit 1)
+  select case
+    when p_dia is null then null
+    when (m.mat ->> 'inicio_mat')::date > p_dia then
+      case when (select g.e ->> 'situacao' from g) = 'falta'
+           then format('falta comprar %s: comprando hoje, chega por volta de %s (pronto %s)',
+                       coalesce('"' || (select g.e ->> 'curto' from g) || '"', 'o material'),
+                       public._dia_curto((m.mat ->> 'dpm')::date), public._dia_curto((m.mat ->> 'inicio_mat')::date))
+           else format('%s só chega por volta de %s (pronto %s)',
+                       coalesce('"' || (select g.e ->> 'curto' from g) || '"', 'o material'),
+                       public._dia_curto((m.mat ->> 'dpm')::date), public._dia_curto((m.mat ->> 'inicio_mat')::date)) end
+    when p_condicao in ('compra', 'material') and nullif(btrim(coalesce(p_texto, '')), '') is not null then
+      'o material ainda não está garantido: ' || rtrim(btrim(p_texto), '.')
+  end
+  from m;
+$function$;
+
+comment on function public._agenda_aviso_do_material(jsonb, text, text, date) is
+  'Agenda de Produção (Fase 2, revisão): o aviso do material para um dia que o dono escolheu — "Compressor 12V SS65" só chega por volta de ter 06/10 (pronto qua 07/10)" quando o início pelo material (inicio_mat) é depois do dia; "falta comprar …: comprando hoje, chega por volta de …" quando o item ainda é falta; "o material ainda não está garantido: <o que trava>" na classe 3 de compra ou material. null = o material dá para o dia.';
+
 -- ── 3. Textos curtos do motor ──────────────────────────────────────────────────────────────────────────
 
 -- "ter 03" (sem o mês).
@@ -1249,7 +1285,8 @@ $function$;
 comment on function public._agenda_dia_sem_mes(date) is 'Agenda de Produção (Fase 2, P2): o dia curto sem o mês ("ter 03").';
 
 -- Uma lista de dias: "ter 03/11", "ter 03 e qua 04/11", "ter 03 a qui 05/11" (3 ou mais dias úteis seguidos),
--- "sex 30/10 e ter 03/11".
+-- "sex 30/10 e ter 03/11". O feriado de semana entre dois dias seguidos vai dito no fim ("seg 14 a qui 17/06 (ter 15 é
+-- aniversário de Itajaí)"), como no título da semana: sem isso "seg 14 a qua 16/06" parece incluir o dia 15.
 create or replace function public._agenda_dias_texto(p_dias date[])
  returns text
  language plpgsql
@@ -1261,28 +1298,40 @@ declare
   n       int := cardinality(array(select distinct d from unnest(coalesce(p_dias, '{}'::date[])) d where d is not null));
   v_seg   boolean := true;
   v_itens text[] := '{}';
+  v_fer   text[] := '{}';
+  v_txt   text;
   i       int;
 begin
   if n = 0 then return ''; end if;
   if n = 1 then return public._dia_curto(v[1]); end if;
   for i in 1 .. n - 1 loop
-    if public.agenda_du_entre(v[i], v[i + 1]) <> 1 then v_seg := false; end if;
+    if public.agenda_du_entre(v[i], v[i + 1]) <> 1 then
+      v_seg := false;
+    else
+      -- dois dias seguidos com feriado de semana entre eles (Finados, 15/06 de Itajaí): o feriado é dito
+      v_fer := v_fer || array(select format('%s é %s', public._agenda_dia_sem_mes(g::date), public.agenda_feriado(g::date))
+                                from generate_series(v[i] + 1, v[i + 1] - 1, interval '1 day') g
+                               where extract(isodow from g)::int <= 5 and public.agenda_feriado(g::date) is not null
+                               order by g);
+    end if;
   end loop;
   if v_seg and n >= 3 then
-    return format('%s a %s',
-                  case when to_char(v[1], 'MM') = to_char(v[n], 'MM') then public._agenda_dia_sem_mes(v[1]) else public._dia_curto(v[1]) end,
-                  public._dia_curto(v[n]));
+    v_txt := format('%s a %s',
+                    case when to_char(v[1], 'MM') = to_char(v[n], 'MM') then public._agenda_dia_sem_mes(v[1]) else public._dia_curto(v[1]) end,
+                    public._dia_curto(v[n]));
+  else
+    for i in 1 .. n - 1 loop
+      v_itens := v_itens || case when to_char(v[i], 'MM') = to_char(v[n], 'MM') then public._agenda_dia_sem_mes(v[i])
+                                 else public._dia_curto(v[i]) end;
+    end loop;
+    v_txt := public._agenda_lista(v_itens || public._dia_curto(v[n]), null);
   end if;
-  for i in 1 .. n - 1 loop
-    v_itens := v_itens || case when to_char(v[i], 'MM') = to_char(v[n], 'MM') then public._agenda_dia_sem_mes(v[i])
-                               else public._dia_curto(v[i]) end;
-  end loop;
-  return public._agenda_lista(v_itens || public._dia_curto(v[n]), null);
+  return v_txt || coalesce(' (' || nullif(array_to_string(v_fer, ', '), '') || ')', '');
 end;
 $function$;
 
 comment on function public._agenda_dias_texto(date[]) is
-  'Agenda de Produção (Fase 2, P2): os dias em texto curto — "ter 03/11", "ter 03 e qua 04/11", "ter 03 a qui 05/11" (3+ dias úteis seguidos: o feriado no meio não quebra a sequência), "sex 30/10 e ter 03/11".';
+  'Agenda de Produção (Fase 2, P2): os dias em texto curto — "ter 03/11", "ter 03 e qua 04/11", "ter 03 a qui 05/11" (3+ dias úteis seguidos: o feriado no meio não quebra a sequência), "sex 30/10 e ter 03/11". O feriado de seg a sex entre dois dias seguidos vai dito no fim, como no título da semana: "seg 14 a qui 17/06 (ter 15 é aniversário de Itajaí)", "sex 30/10 e ter 03/11 (seg 02 é Finados)".';
 
 -- "ter 03/11 de manhã", "ter 03/11 à tarde".
 create or replace function public._agenda_meio_texto(p_dia date, p_turno text)
@@ -1501,8 +1550,11 @@ begin
   v_np := cardinality(v_pes);
   if v_padrao then v_dono := 1; end if;
 
+  -- O esperado só conta dia útil: o sábado combinado ("o Roberto vem sábado") a agenda automática não marca, e contá-lo
+  -- subiria o teto dos dias úteis (10 meios + 2 do sábado = teto de 9, 90% da semana útil).
   select coalesce(array_agg(case when e ->> 'situacao' = 'livre' then 1 else 0 end order by o), '{}'::int[]),
-         coalesce(array_agg((e ->> 'meios_esperados')::numeric order by o), '{}'::numeric[])
+         coalesce(array_agg(case when public.agenda_dia_util((e ->> 'dia')::date) then (e ->> 'meios_esperados')::numeric else 0 end
+                            order by o), '{}'::numeric[])
     into v_cap, v_esp
     from jsonb_array_elements(v_g) with ordinality t(e, o);
   if coalesce(cardinality(v_cap), 0) <> v_np * v_nh then
@@ -1608,7 +1660,7 @@ end;
 $function$;
 
 comment on function public._agenda_contexto(date, date, date, uuid[], uuid[]) is
-  'Agenda de Produção (Fase 2, P2): a grade do motor em arrays (agenda_grade de p_d_ini a p_d_fim, sem as alocações de p_ignorar): pessoas (você primeiro), dias úteis, semana ISO de cada dia, quem está livre em cada meio-dia (cap), as pontas livres do dono (curta: 1 abertura, 2 fechamento), o que o vigente ocupa (ocup, frentes: o índice da OS em oss, negativo = reserva), o uso por pessoa e semana (compromisso e reserva) e os tetos floor(carga_max × esperado) e floor(esperado). As OS de p_fila vêm primeiro em oss.';
+  'Agenda de Produção (Fase 2, P2): a grade do motor em arrays (agenda_grade de p_d_ini a p_d_fim, sem as alocações de p_ignorar): pessoas (você primeiro), dias úteis, semana ISO de cada dia, quem está livre em cada meio-dia (cap), as pontas livres do dono (curta: 1 abertura, 2 fechamento), o que o vigente ocupa (ocup, frentes: o índice da OS em oss, negativo = reserva), o uso por pessoa e semana (compromisso e reserva) e os tetos floor(carga_max × esperado) e floor(esperado) — o esperado só de dia útil (o sábado combinado não sobe o teto). As OS de p_fila vêm primeiro em oss.';
 
 -- Um início (d0) para uma OS: percorre os meios-dias desde a manhã de d0; o bloco começa no 1º meio-dia de d0 em que o
 -- 1º passo sai inteiro (dono e equipe); pula dia não útil e dia em que o bem está fora (não conta interrupção); um dia
@@ -2183,7 +2235,11 @@ begin
   end if;
   v_dia := (p_ctx ->> 'd_ini')::date + p_d0 - 1;
   if not public.agenda_dia_util(v_dia) then
-    return coalesce(public._dia_curto(v_dia) || ' é ' || public.agenda_feriado(v_dia), public._dia_curto(v_dia) || ' não é dia útil');
+    -- O fim de semana combinado direto com a equipe ("o Roberto vem sábado") a agenda automática não marca.
+    return coalesce(public._dia_curto(v_dia) || ' é ' || public.agenda_feriado(v_dia),
+                    format('a agenda automática não marca %s (%s é só combinando direto com a equipe)',
+                           case when extract(isodow from v_dia) = 6 then 'sábado' else 'domingo' end,
+                           case when extract(isodow from v_dia) = 6 then 'sábado' else 'domingo' end));
   end if;
   if p_d0 = any (public._agenda_ints(p_o -> 'bem')) then
     return 'o bem está fora nesse dia';
@@ -2226,7 +2282,7 @@ end;
 $function$;
 
 comment on function public._agenda_por_que_nao(jsonb, jsonb, integer, integer) is
-  'Agenda de Produção (Fase 2, P2): o motivo, em palavras, de a OS não caber no dia pedido (a manhã do dia): feriado ou fim de semana, o bem fora, você ocupado ou fora de campo, quem o dono disse ocupado ("o Roberto já está no Vanderlei"), fora ou com a semana cheia, as frentes cheias; senão "falta gente nesse dia".';
+  'Agenda de Produção (Fase 2, P2): o motivo, em palavras, de a OS não caber no dia pedido (a manhã do dia): feriado, fim de semana ("a agenda automática não marca sábado (sábado é só combinando direto com a equipe)"), o bem fora, você ocupado ou fora de campo, quem o dono disse ocupado ("o Roberto já está no Vanderlei"), fora ou com a semana cheia, as frentes cheias; senão "falta gente nesse dia".';
 
 -- ── 5. A regra única do que é crítico ──────────────────────────────────────────────────────────────────
 create or replace function public._agenda_criticidade(p_os uuid, p_fim_antes date, p_inicio_antes date, p_fim_depois date,
@@ -2465,8 +2521,10 @@ begin
        group by n.payee_id, 3
     ),
     esp as (
+      -- (só dia útil, como o teto do motor: o sábado combinado não sobe o teto da semana)
       select k.payee_id, k.dia - (extract(isodow from k.dia)::int - 1) as seg, sum(k.meios_esperados) as e
         from jsonb_to_recordset(v_cap) as k(payee_id uuid, dia date, meios_esperados numeric)
+       where public.agenda_dia_util(k.dia)
        group by 1, 2
     ),
     vig as (
@@ -2513,7 +2571,7 @@ begin
   v_v := v_v || coalesce((
     select jsonb_agg(jsonb_build_object('regra', 8, 'os', i ->> 'os', 'numero', i ->> 'numero', 'dia', a.dia, 'turno', a.turno,
              'texto', case when a.estado not in ('publicada', 'fixada') or a.resultado is not null
-                           then format('%s %s: esse meio-dia mudou desde a proposta.', i ->> 'numero', public._agenda_meio_texto(a.dia, a.turno))
+                           then format('%s %s: esse meio-dia mudou desde que eu montei.', i ->> 'numero', public._agenda_meio_texto(a.dia, a.turno))
                            else format('%s %s: está fixado e só sai com a sua decisão.', i ->> 'numero', public._agenda_meio_texto(a.dia, a.turno)) end)
              order by a.dia, a.turno, a.id)
       from jsonb_array_elements(coalesce(p_itens, '[]'::jsonb)) i
@@ -2593,7 +2651,7 @@ declare
 begin
   select * into v_p from public.agenda_propostas where id = p_proposta;
   if not found then
-    raise exception 'Não encontrei essa proposta.' using errcode = 'P0002';
+    raise exception 'Não encontrei esse plano.' using errcode = 'P0002';
   end if;
   return public._agenda_validar_itens(public._agenda_itens_escolhidos(v_p.itens, p_os, p_pergunta), v_p.parametros,
                                       p_hoje, p_agora, true);
@@ -2642,7 +2700,9 @@ begin
            case
              when not (a.service_order_id = any (p_cart)) then 'os_saiu'
              when so.status = 'awaiting_client' then 'cliente'
-             when (p_info -> a.service_order_id::text -> 'pront' ->> 'estado') in ('congelada', 'concluida', 'fora_da_carteira') then 'os_saiu'
+             when (p_info -> a.service_order_id::text -> 'pront' ->> 'estado') in ('concluida', 'fora_da_carteira') then 'os_saiu'
+             -- a espera que o dono pôs ("deixa parada até sexta") só tira os dias DENTRO dela; o que vem depois fica
+             when (p_info -> a.service_order_id::text -> 'pront' ->> 'estado') = 'congelada' and a.dia <= pl.congelada_ate then 'espera'
              when not py.active then 'pessoa'
              when a.presenca = 'turno' and k.situacao is distinct from 'livre' then 'pessoa'
              when a.presenca <> 'turno'
@@ -2670,7 +2730,9 @@ begin
       left join cap k on k.payee_id = a.payee_id and k.dia = a.dia and k.turno = a.turno
   ),
   violadas as (select * from av where av.por_que is not null),
-  os_v as (select v.service_order_id, bool_or(v.tipo <> 'reserva') as comp from violadas v group by 1),
+  -- (a espera não replaneja o depois: os dias que caem depois dela ficam como estão, e o que faltar o motor completa
+  -- depois do último dia marcado, quando a espera acabar)
+  os_v as (select v.service_order_id, bool_or(v.tipo <> 'reserva') as comp from violadas v where v.por_que <> 'espera' group by 1),
   mesmo_meio as (
     select av.* from av
      where av.por_que is null and av.tipo <> 'reserva' and av.fixado_por is distinct from 'dono'
@@ -2703,7 +2765,7 @@ end;
 $function$;
 
 comment on function public._agenda_violacoes(uuid[], uuid[], boolean, jsonb, date, date) is
-  'Agenda de Produção (Fase 2, P2): a etapa da estabilidade — cada alocação vigente de hoje em diante, sem resultado, das OS do escopo (e, na semana, das que saíram da carteira) que não pode mais acontecer: a OS saiu da carteira, está esperando o cliente, em espera ou concluída (os_saiu/cliente); a pessoa não está mais livre ou a ponta do dono ficou ocupada por compromisso com hora (pessoa); o bem fora ou o "não antes de" (cliente); o material atrasado, sem previsão ou chegando depois do dia (material); a reserva condicionada vencida sem a condição (condicao_vencida). O fixado pelo dono só pelas duas primeiras. Junto vão o resto do meio-dia quebrado e os meios-dias publicados da OS depois do congelado (replanejado). [{alocacao_id, os, motivo, violada, congelado, tipo, estado, fixado_por, reserva_de, payee_id, dia, turno, presenca}].';
+  'Agenda de Produção (Fase 2, P2): a etapa da estabilidade — cada alocação vigente de hoje em diante, sem resultado, das OS do escopo (e, na semana, das que saíram da carteira) que não pode mais acontecer: a OS saiu da carteira, está esperando o cliente ou concluída (os_saiu/cliente); o dia dentro da espera que o dono pôs (espera: só até congelada_ate, o depois fica); a pessoa não está mais livre ou a ponta do dono ficou ocupada por compromisso com hora (pessoa); o bem fora ou o "não antes de" (cliente); o material atrasado, sem previsão ou chegando depois do dia (material); a reserva condicionada vencida sem a condição (condicao_vencida). O fixado pelo dono só pelas três primeiras (a espera é dele também). Junto vão o resto do meio-dia quebrado e os meios-dias publicados da OS depois do congelado (replanejado). [{alocacao_id, os, motivo, violada, congelado, tipo, estado, fixado_por, reserva_de, payee_id, dia, turno, presenca}].';
 
 -- A alocação de um bloco, para o item: [{payee_id, nome, dia, turno, presenca}].
 create or replace function public._agenda_alocs_do_bloco(p_ctx jsonb, p_b jsonb)
@@ -2861,6 +2923,7 @@ declare
   v_feriados text[];
   v_q       jsonb;
   v_n       int;
+  v_aviso   text;
 begin
   -- ── 0. Entrada ──
   if p_escopo is null or p_escopo not in ('semana', 'os', 'replano') then
@@ -2870,10 +2933,10 @@ begin
     raise exception 'Origem desconhecida: "%".', coalesce(p_origem, '') using errcode = '22023';
   end if;
   if p_hoje is null or p_agora is null or jsonb_typeof(v_r) <> 'object' then
-    raise exception 'Faltam o dia, a hora ou as restrições da proposta.' using errcode = '22023';
+    raise exception 'Faltam o dia, a hora ou as restrições do plano.' using errcode = '22023';
   end if;
   if p_escopo in ('os', 'replano') and coalesce(cardinality(p_os), 0) = 0 then
-    raise exception 'Diga de que OS é a proposta.' using errcode = '22023';
+    raise exception 'Diga de que OS é o plano.' using errcode = '22023';
   end if;
   perform set_config('agenda.hoje', p_hoje::text, true);
   if p_persistir then
@@ -2882,7 +2945,7 @@ begin
   cf := public._agenda_cfg();
   v_modo := cf.modo_proposta;
   if p_persistir and v_modo = 'desligado' then
-    return jsonb_build_object('ok', false, 'simulacao', false, 'texto', 'A agenda automática está desligada: não monto proposta.');
+    return jsonb_build_object('ok', false, 'simulacao', false, 'texto', 'A agenda automática está desligada: não monto o plano.');
   end if;
   v0 := cf.versao_plano;
   v_cong := public.agenda_somar_du(p_hoje, cf.congelamento_du);
@@ -2897,7 +2960,7 @@ begin
     v_ate := coalesce(p_ate, v_de + 7 * cf.horizonte_semanas);
   end if;
   if v_ate < v_de then
-    raise exception 'O período da proposta termina antes de começar (% a %).', v_de, v_ate using errcode = '22023';
+    raise exception 'O período do plano termina antes de começar (% a %).', v_de, v_ate using errcode = '22023';
   end if;
   v_hor := greatest(p_hoje + 7 * cf.horizonte_semanas, v_ate);
   v_ini := v_seg;
@@ -3296,6 +3359,9 @@ begin
                              case g.motivo when 'pessoa' then 'quem ia não está mais livre' when 'material' then 'o material não chega a tempo'
                                            when 'cliente' then 'o cliente ou o bem não está liberado' when 'os_saiu' then 'a OS saiu da carteira'
                                            when 'condicao_vencida' then 'a condição da reserva venceu' when 'dono' then 'você pediu outro dia'
+                                           when 'espera' then coalesce('você pôs em espera até ' || public._dia_curto(
+                                             (select pl.congelada_ate from public.os_planejamento pl where pl.service_order_id = g.os)),
+                                             'você pôs em espera')
                                            else 'replanejado junto' end))
              order by g.numero, g.os, g.motivo)
       from (select (c ->> 'os')::uuid as os, min(v_info -> (c ->> 'os') -> 'pront' ->> 'numero') as numero,
@@ -3361,6 +3427,9 @@ begin
       -- crítico sem pergunta (não deveria acontecer: a pergunta foi feita acima); fica esperando
       v_chave := format('%s:%s:%s', v_tipo, v_os, v0);
     end if;
+    -- O pedido do dono num dia antes de o material estar garantido: fica (a decisão é dele), com o aviso na frase.
+    v_aviso := case when v_e ? 'fixar_de' and v_b ->> 'tipo' <> 'reserva'
+                    then public._agenda_aviso_do_material(v_info -> v_os::text -> 'pront', v_e ->> 'condicao_tipo', v_e ->> 'texto', v_ini_x) end;
     v_txt := case
       when v_b ->> 'tipo' = 'reserva' then
         format('%s: %s, %s%s.',
@@ -3370,11 +3439,12 @@ begin
                                           v_fim_x, case when (v_b ->> 'fim')::int % 2 = 1 then 'manha' else 'tarde' end),
                public._agenda_pessoas_texto(public._agenda_alocs_do_bloco(v_ctx, v_b), v_dono), '')
       else
-        format('%s%s: %s, %s.', public._agenda_rotulo_da_os(v_os),
+        format('%s%s: %s, %s%s.', public._agenda_rotulo_da_os(v_os),
                case v_e ->> 'tipo_os' when 'diagnostico' then ', diagnóstico' when 'comissionamento' then ', comissionamento' else '' end,
                public._agenda_dias_texto(array(select distinct (a ->> 'dia')::date
                                                  from jsonb_array_elements(public._agenda_alocs_do_bloco(v_ctx, v_b)) a)),
-               public._agenda_pessoas_texto(public._agenda_alocs_do_bloco(v_ctx, v_b), v_dono)) end;
+               public._agenda_pessoas_texto(public._agenda_alocs_do_bloco(v_ctx, v_b), v_dono),
+               coalesce(' — mas ' || v_aviso, '')) end;
     v_itens := v_itens || jsonb_build_object(
       'op', 'criar', 'os', v_os, 'numero', v_e ->> 'numero', 'cliente_curto', v_e ->> 'cliente_curto',
       'tipo', case when v_b ->> 'tipo' = 'reserva' then 'reserva' else v_e ->> 'tipo_os' end,
@@ -3385,7 +3455,7 @@ begin
       'condicao_tipo', case when v_b ->> 'reserva_de' = 'condicionada' then v_e ->> 'condicao_tipo' end,
       'critica', v_tipo, 'pergunta_chave', v_chave, 'decisao', v_decisao, 'espera', (v_b ->> 'espera')::boolean,
       'interrupcoes', (v_b ->> 'int')::int, 'meios_do_dono', (v_b ->> 'md')::int, 'fonte', v_e ->> 'fonte', 'dias', v_e -> 'dias',
-      'evento_real', (v_e ->> 'evento_real')::boolean, 'fixar_dono', v_e ? 'fixar_de',
+      'evento_real', (v_e ->> 'evento_real')::boolean, 'fixar_dono', v_e ? 'fixar_de', 'aviso_material', v_aviso,
       'abre', (v_e ->> 'abre')::boolean and v_b ->> 'tipo' <> 'reserva', 'fecha', (v_e ->> 'fecha')::boolean and v_b ->> 'tipo' <> 'reserva',
       'motivos', to_jsonb(array_remove(array[
          case when v_e ->> 'classe' = '1' and not v_e ? 'fixar_de' then 'em andamento ou fixada' end,
@@ -3707,20 +3777,20 @@ begin
   cf := public._agenda_cfg();
   select * into v_p from public.agenda_propostas where id = p_proposta for update;
   if not found then
-    raise exception 'Não encontrei essa proposta.' using errcode = 'P0002';
+    raise exception 'Não encontrei esse plano.' using errcode = 'P0002';
   end if;
   if cf.modo_proposta <> 'ligado' or v_p.modo <> 'ligado' then
     return jsonb_build_object('ok', false, 'texto', 'A agenda automática ainda está em teste: mostro como ficaria, mas não marco nada.');
   end if;
   if v_p.estado <> 'aberta' then
-    return jsonb_build_object('ok', false, 'texto', format('Essa proposta já foi %s.', case v_p.estado
-      when 'aplicada' then 'aplicada' when 'expirada' then 'expirada' when 'obsoleta' then 'trocada por outra'
-      else 'descartada' end));
+    return jsonb_build_object('ok', false, 'texto', case v_p.estado
+      when 'aplicada' then 'Esse plano já foi publicado.' when 'expirada' then 'Esse plano venceu. Peça de novo que eu monto outro.'
+      when 'obsoleta' then 'Esse plano foi trocado por outro.' else 'Esse plano foi descartado.' end);
   end if;
   if p_agora > v_p.expira_em then
     update public.agenda_propostas set estado = 'expirada', motivo_fim = 'passou da validade' where id = p_proposta;
     delete from public.agenda_alocacoes where proposta_id = p_proposta and estado = 'proposta';
-    return jsonb_build_object('ok', false, 'texto', 'Essa proposta expirou. Peça de novo que eu monto outra.');
+    return jsonb_build_object('ok', false, 'texto', 'Esse plano venceu. Peça de novo que eu monto outro.');
   end if;
   if v_p.versao_base <> cf.versao_plano then
     update public.agenda_propostas set estado = 'obsoleta', motivo_fim = 'a agenda mudou' where id = p_proposta;
@@ -3736,7 +3806,7 @@ begin
       perform set_config('agenda.reaplicando', 'off', true);
       return v_nova || jsonb_build_object('refeita', true);
     end if;
-    return jsonb_build_object('ok', false, 'texto', 'A agenda mudou desde a proposta: peça de novo que eu refaço.');
+    return jsonb_build_object('ok', false, 'texto', 'A agenda mudou desde que eu montei: peça de novo que eu refaço.');
   end if;
   if p_pergunta is not null and not exists (select 1 from public.agenda_perguntas q
                                              where q.id = p_pergunta and q.critica and q.estado = 'respondida'
@@ -3843,7 +3913,11 @@ begin
                public._agenda_dias_texto(array(select (x ->> 'dia')::date from jsonb_array_elements(v_sel) e, jsonb_array_elements(e -> 'alocacoes') x
                                                 where (e ->> 'os')::uuid = v_os and e ->> 'op' = 'criar')),
                coalesce(' — ' || (select regexp_replace(e ->> 'texto', '^.* — ', '') from jsonb_array_elements(v_sel) e
-                                   where (e ->> 'os')::uuid = v_os and e ->> 'op' = 'cancelar' and (e ->> 'violada')::boolean limit 1), ''))
+                                   where (e ->> 'os')::uuid = v_os and e ->> 'op' = 'cancelar' and (e ->> 'violada')::boolean limit 1), '')
+               -- o dia pedido pelo dono antes de o material estar garantido: o aviso vai junto
+               || coalesce(' — mas ' || (select e ->> 'aviso_material' from jsonb_array_elements(v_sel) e
+                                          where (e ->> 'os')::uuid = v_os and e ->> 'op' = 'criar' and e ->> 'aviso_material' is not null
+                                          limit 1), ''))
       else (select string_agg(rtrim(e ->> 'texto', '.'), '; ' order by e ->> 'op' = 'cancelar', e ->> 'de')
               from jsonb_array_elements(v_sel) e where (e ->> 'os')::uuid = v_os) || '.' end;
     v_txt := regexp_replace(v_txt, '\.\.$', '.');
@@ -3921,16 +3995,16 @@ begin
   perform pg_advisory_xact_lock(hashtext('agenda_plano'));
   select estado into v_estado from public.agenda_propostas where id = p_proposta for update;
   if not found then
-    raise exception 'Não encontrei essa proposta.' using errcode = 'P0002';
+    raise exception 'Não encontrei esse plano.' using errcode = 'P0002';
   end if;
   if v_estado <> 'aberta' then
-    return jsonb_build_object('ok', false, 'texto', 'Essa proposta já está fechada.');
+    return jsonb_build_object('ok', false, 'texto', 'Esse plano já está fechado.');
   end if;
   update public.agenda_propostas
      set estado = 'descartada', decidida_em = now(), decidida_por = p_autor, motivo_fim = left(coalesce(p_motivo, 'descartada'), 200)
    where id = p_proposta;
   delete from public.agenda_alocacoes where proposta_id = p_proposta and estado = 'proposta';
-  return jsonb_build_object('ok', true, 'texto', 'Descartei essa proposta: nada mudou na agenda.');
+  return jsonb_build_object('ok', true, 'texto', 'Descartei esse plano: nada mudou na agenda.');
 end;
 $function$;
 
@@ -4207,7 +4281,11 @@ begin
   if exists (select 1 from jsonb_array_elements(v_r -> 'itens') i
               where i ->> 'op' = 'criar' and (i ->> 'os')::uuid = p_os and i ->> 'tipo' <> 'reserva') then
     v_ap := public.agenda_aplicar((v_r ->> 'proposta_id')::uuid, null, p_via, v_autor, null, p_hoje, p_agora);
-    return v_ap || jsonb_build_object('proposta_id', v_r ->> 'proposta_id');
+    -- o dia pedido antes de o material estar garantido fica (é a decisão do dono); o aviso já está no texto ("— mas …")
+    -- e vai à parte para a tela
+    return v_ap || jsonb_build_object('proposta_id', v_r ->> 'proposta_id',
+      'aviso_material', (select i ->> 'aviso_material' from jsonb_array_elements(v_r -> 'itens') i
+                          where i ->> 'op' = 'criar' and (i ->> 'os')::uuid = p_os and i ->> 'aviso_material' is not null limit 1));
   end if;
   -- Não cabe no dia pedido: o motivo e o 1º dia que o motor acha sem o pedido.
   perform public.agenda_descartar((v_r ->> 'proposta_id')::uuid, v_autor, 'não coube no dia pedido');
@@ -4224,7 +4302,7 @@ end;
 $function$;
 
 comment on function public.agenda_marcar_os(uuid, uuid, date, date, uuid, text, text, date, timestamptz) is
-  'Agenda de Produção (Fase 2, P2): o "marcar para tal dia" do dono — da tela (Agendar OS), da aprovação com PIN e do *grava* de um pedido no chat. Só com modo_proposta ligado. agenda_propor(os, fixar: começo entre p_de e p_ate, com p_pessoa se dito) + agenda_aplicar (fixada pelo dono; não é crítico: é a decisão dele). Não cabe → "Não cabe qui 29/10: o Roberto já está no Vanderlei. O primeiro dia que dá é sex 30/10." (o dia que o motor acha sem o pedido). Admin pelo _autor_da_agenda.';
+  'Agenda de Produção (Fase 2, P2): o "marcar para tal dia" do dono — da tela (Agendar OS), da aprovação com PIN e do *grava* de um pedido no chat. Só com modo_proposta ligado. agenda_propor(os, fixar: começo entre p_de e p_ate, com p_pessoa se dito) + agenda_aplicar (fixada pelo dono; não é crítico: é a decisão dele). O dia antes de o material estar garantido é marcado, com o aviso no texto ("— mas "Compressor" só chega por volta de ter 06/10 (pronto qua 07/10)") e em aviso_material. Não cabe →"Não cabe qui 29/10: o Roberto já está no Vanderlei. O primeiro dia que dá é sex 30/10." (o dia que o motor acha sem o pedido). Admin pelo _autor_da_agenda.';
 
 create or replace function public.agenda_decidir(p_pergunta uuid, p_opcao smallint, p_autor uuid default null,
                                                  p_via text default 'whatsapp', p_trecho text default null,
@@ -4351,7 +4429,8 @@ revoke all on function
   public._agenda_rotulo_da_os(uuid), public._agenda_pessoas_texto(jsonb, uuid), public._agenda_criticidade(uuid, date, date, date, date, date, uuid[], uuid[]),
   public._agenda_itens_escolhidos(jsonb, uuid[], uuid), public._agenda_validar_itens(jsonb, jsonb, date, timestamptz, boolean, jsonb),
   public.agenda_validar(uuid, uuid[], date, timestamptz, uuid), public.agenda_acao_desfazivel(text, date, timestamptz),
-  public.agenda_os_do_dia(uuid, date), public._agenda_condicao_da_reserva(uuid, text, date, jsonb, date)
+  public.agenda_os_do_dia(uuid, date), public._agenda_condicao_da_reserva(uuid, text, date, jsonb, date),
+  public._agenda_aviso_do_material(jsonb, text, text, date)
   from public, anon;
 grant execute on function
   public._agenda_ultima_evidencia(uuid, date), public._agenda_plano_da_os(uuid, date), public.os_prontidao(uuid, date),
@@ -4361,7 +4440,8 @@ grant execute on function
   public._agenda_rotulo_da_os(uuid), public._agenda_pessoas_texto(jsonb, uuid), public._agenda_criticidade(uuid, date, date, date, date, date, uuid[], uuid[]),
   public._agenda_itens_escolhidos(jsonb, uuid[], uuid), public._agenda_validar_itens(jsonb, jsonb, date, timestamptz, boolean, jsonb),
   public.agenda_validar(uuid, uuid[], date, timestamptz, uuid), public.agenda_acao_desfazivel(text, date, timestamptz),
-  public.agenda_os_do_dia(uuid, date), public._agenda_condicao_da_reserva(uuid, text, date, jsonb, date)
+  public.agenda_os_do_dia(uuid, date), public._agenda_condicao_da_reserva(uuid, text, date, jsonb, date),
+  public._agenda_aviso_do_material(jsonb, text, text, date)
   to authenticated, service_role;
 
 revoke all on function

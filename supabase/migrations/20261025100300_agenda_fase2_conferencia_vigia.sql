@@ -211,7 +211,7 @@ declare
 begin
   select * into v_p from public.agenda_propostas where id = p_proposta;
   if not found then
-    raise exception 'Não encontrei essa proposta.' using errcode = 'P0002';
+    raise exception 'Não encontrei esse plano.' using errcode = 'P0002';
   end if;
   v_sel := public._agenda_itens_escolhidos(v_p.itens, null, null);
   for v_os in select distinct (e ->> 'os')::uuid from jsonb_array_elements(v_sel) e order by 1 loop
@@ -562,6 +562,8 @@ declare
   v_autor uuid := public._autor_da_agenda(p_autor);
   v_d     jsonb;
   v_dia   date;
+  v_pal   text;
+  v_qdo   text;
 begin
   if p_resultado is null or p_resultado not in ('cumprido', 'parcial', 'nao_cumprido') then
     raise exception 'Resultado desconhecido: "%" (cumprido, parcial ou nao_cumprido).', coalesce(p_resultado, '') using errcode = '22023';
@@ -588,6 +590,28 @@ begin
     select q.dia into v_dia from public.agenda_perguntas q
      where q.tipo = 'conferencia' and q.estado = 'aberta' and q.dia <= p_hoje
      order by q.dia desc, q.criada_em desc, q.id desc limit 1;
+    -- A conferência de um dia anterior ficou sem resposta e hoje também tem plano: *choveu* às 08:30 é de hoje ou de
+    -- ontem? O banco não escolhe (a mudança executa direto e replaneja): pergunta, sem mudar nada. Para cumprido e
+    -- parcial, só quando algum meio-dia de hoje já começou (às 07:00 o "dia feito" ainda é o de ontem, d19).
+    if v_dia is not null and v_dia < p_hoje
+       and exists (select 1 from public.agenda_alocacoes a
+                    where a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva' and a.dia = p_hoje
+                      and (p_resultado = 'nao_cumprido' or lower(a.periodo) <= p_agora)) then
+      v_pal := case
+        when p_resultado = 'cumprido' then 'dia feito'
+        when p_resultado = 'nao_cumprido' and public._agenda_motivo_dito(p_motivo) = 'clima' then 'choveu'
+        else (case p_resultado when 'parcial' then 'dia parcial ' else 'dia não ' end)
+             || case public._agenda_motivo_dito(p_motivo)
+                  when 'material' then 'material' when 'cliente_ou_bem' then 'cliente' when 'equipe_faltou' then 'equipe'
+                  when 'trabalho_anterior' then 'anterior' when 'informacao' then 'informação' when 'clima' then 'clima'
+                  when 'estimativa' then 'estimativa' when 'imprevisto_tecnico' then 'imprevisto'
+                  when 'urgencia_outra_os' then 'urgência' when 'esqueci' then 'esqueci' else 'imprevisto' end end;
+      v_qdo := case when v_dia = p_hoje - 1 then 'ontem' when v_dia = p_hoje - 2 then 'anteontem' else to_char(v_dia, 'DD/MM') end;
+      return jsonb_build_object('ok', false, 'mudou', false, 'pede', 'dia', 'dias', jsonb_build_array(p_hoje, v_dia),
+        'texto', format('Hoje (%s) ou %s? Diga *%s hoje* ou *%s %s*.', public._dia_curto(p_hoje),
+                        case when v_dia = p_hoje - 1 then 'ontem (' || public._dia_curto(v_dia) || ')' else public._dia_curto(v_dia) end,
+                        v_pal, v_pal, v_qdo));
+    end if;
     if v_dia is null then
       if exists (select 1 from public.agenda_alocacoes a
                   where a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva' and a.dia = p_hoje and lower(a.periodo) <= p_agora) then
@@ -602,7 +626,7 @@ end;
 $function$;
 
 comment on function public.agenda_conferir_dia(uuid, text, text, text, text, date, timestamptz) is
-  'Agenda de Produção (Fase 2, P3): a entrada das palavras *dia feito*, *dia parcial <motivo>*, *dia não <motivo>* — o dia é o dito (p_quando, agenda_data_dita passado: "ontem", "segunda", "dd/mm"), senão a conferência aberta mais recente (d19), senão hoje se algum meio-dia já começou ("Hoje ainda não começou nada do plano."). Fora de modo_proposta ligado: "Ainda não tenho plano publicado: a agenda automática está em teste." (nada muda). Chama agenda_registrar_dia com todas as alocações do dia. Admin pelo _autor_da_agenda.';
+  'Agenda de Produção (Fase 2, P3): a entrada das palavras *dia feito*, *dia parcial <motivo>*, *dia não <motivo>* — o dia é o dito (p_quando, agenda_data_dita passado: "ontem", "segunda", "dd/mm"), senão a conferência aberta mais recente (d19) — mas se ela é de um dia anterior e hoje também tem plano (para não cumprido, qualquer meio-dia; para cumprido e parcial, um que já começou), nada muda e a pergunta volta: "Hoje (qua 04/11) ou ontem (ter 03/11)? Diga *choveu hoje* ou *choveu ontem*." —, senão hoje se algum meio-dia já começou ("Hoje ainda não começou nada do plano."). Fora de modo_proposta ligado: "Ainda não tenho plano publicado: a agenda automática está em teste." (nada muda). Chama agenda_registrar_dia com todas as alocações do dia. Admin pelo _autor_da_agenda.';
 
 create or replace function public.agenda_choveu(p_autor uuid, p_quando text default null, p_canal text default 'whatsapp',
                                                 p_hoje date default public._hoje_brt(), p_agora timestamptz default now())
@@ -826,6 +850,23 @@ begin
       end if;
       if v_pront ->> 'estado' in ('concluida', 'fora_da_carteira') then
         v_mot := 'a OS saiu da carteira';
+      elsif r.tipo = 'chegou' and split_part(r.chave, ':', 2) = 'fixado' then
+        -- a véspera do dia marcado pelo dono (chegou:fixado:<os>:<dia>)
+        if r.dia < p_hoje then
+          v_mot := 'o dia passou';
+        elsif not exists (select 1 from public.agenda_alocacoes a
+                           where a.service_order_id = r.service_order_id and a.dia = r.dia and a.estado in ('publicada', 'fixada')
+                             and a.tipo <> 'reserva' and a.fixado_por = 'dono') then
+          v_mot := 'o dia saiu do plano';
+        else
+          v_item := public._agenda_classe_da_os(v_pront, public.agenda_meios_da_os(r.service_order_id, p_hoje), p_hoje, false, false);
+          if public._agenda_aviso_do_material(v_pront,
+               coalesce(v_item ->> 'condicao_tipo',
+                        case when v_item ->> 'motivo' = 'material' and v_pront #>> '{material,estado}' = 'sem_previsao' then 'material' end),
+               v_item ->> 'texto', r.dia) is null then
+            v_mot := 'o material ficou garantido para o dia';
+          end if;
+        end if;
       elsif r.tipo = 'chegou' then
         select e into v_item from jsonb_array_elements(coalesce(v_pront #> '{material,itens}', '[]'::jsonb)) e
          where coalesce(e ->> 'id', e ->> 'linha') = split_part(r.chave, ':', 2) limit 1;
@@ -1218,7 +1259,10 @@ declare
   v_p   jsonb;
   e     jsonb;
   v_n   int := 0;
+  v_nf  int := 0;
   v_ref text;
+  v_cl  jsonb;
+  v_av  text;
 begin
   for r in select k.service_order_id as os from public.os_carteira(p_hoje) k order by k.numero collate "C", k.service_order_id loop
     v_p := public.os_prontidao(r.os, p_hoje);
@@ -1235,7 +1279,27 @@ begin
       end if;
     end loop;
   end loop;
-  return jsonb_build_object('criadas', v_n);
+  -- O dia que o dono marcou antes de o material estar garantido (o caso da OS-00104): nada sai da agenda (a decisão é
+  -- dele), mas na véspera — o dia marcado é hoje ou o próximo dia útil — a pergunta "chegou?", uma vez por OS e dia.
+  for r in select a.service_order_id as os, a.dia
+             from public.agenda_alocacoes a
+            where a.estado in ('publicada', 'fixada') and a.fixado_por = 'dono' and a.tipo <> 'reserva' and a.resultado is null
+              and a.dia between p_hoje and public.agenda_somar_du(p_hoje, 1)
+            group by 1, 2 order by 2, 1 loop
+    v_p := public.os_prontidao(r.os, p_hoje);
+    v_cl := public._agenda_classe_da_os(v_p, public.agenda_meios_da_os(r.os, p_hoje), p_hoje, false, false);
+    v_av := public._agenda_aviso_do_material(v_p,
+              coalesce(v_cl ->> 'condicao_tipo',
+                       case when v_cl ->> 'motivo' = 'material' and v_p #>> '{material,estado}' = 'sem_previsao' then 'material' end),
+              v_cl ->> 'texto', r.dia);
+    continue when v_av is null;
+    if public._agenda_vigia_perguntar('chegou', format('chegou:fixado:%s:%s', r.os, r.dia), r.os, null, r.dia, r.dia,
+         format('%s: você marcou %s, mas %s. Chegou?', public._agenda_rotulo_da_os(r.os), public._dia_curto(r.dia), v_av),
+         cf.modo_vigia, p_agora) then
+      v_nf := v_nf + 1;
+    end if;
+  end loop;
+  return jsonb_build_object('criadas', v_n + v_nf, 'fixadas', v_nf);
 end;
 $function$;
 
@@ -1451,7 +1515,7 @@ comment on function public._agenda_vigia_material(date, timestamptz) is 'Agenda 
 comment on function public._agenda_vigia_dia_nao_cumprido(date, timestamptz) is 'Agenda de Produção (Fase 2, P3), vigia passo 6 (só ligado): meio-dia parcial ou não cumprido dos últimos 7 dias gravado depois do último replano da OS → agenda_replanejar.';
 comment on function public._agenda_vigia_publicacao(date, timestamptz) is 'Agenda de Produção (Fase 2, P3), vigia passo 7: no dia_do_plano, a partir de hora_do_plano, a semana seguinte uma vez só (por período e modo): ligado publica os não críticos; sombra grava a proposta e as ações que faria.';
 comment on function public._agenda_vigia_conferencia(date, timestamptz) is 'Agenda de Produção (Fase 2, P3), vigia passo 8 (com plano publicado): o último meio-dia de hoje começou e falta resultado → pergunta conferencia:<hoje> ("Agenda de hoje: … Foi isso? Responda *dia feito* ou conte o que mudou."). Uma por dia.';
-comment on function public._agenda_vigia_chegou(date, timestamptz) is 'Agenda de Produção (Fase 2, P3), vigia passo 9: item crítico atrasado (a previsão passou sem chegada) → pergunta chegou:<item>:<previsão>, uma vez por previsão.';
+comment on function public._agenda_vigia_chegou(date, timestamptz) is 'Agenda de Produção (Fase 2, P3), vigia passo 9: item crítico atrasado (a previsão passou sem chegada) → pergunta chegou:<item>:<previsão>, uma vez por previsão. E o dia que o dono marcou antes de o material estar garantido (_agenda_aviso_do_material): na véspera (o dia marcado é hoje ou o próximo dia útil) → pergunta chegou:fixado:<os>:<dia> ("Flávio (OS-00104): você marcou ter 06/10, mas … Chegou?"), uma vez; nada sai da agenda. A limpeza resolve quando o dia passa, sai do plano ou o material fica garantido.';
 comment on function public._agenda_vigia_parada(date, timestamptz) is 'Agenda de Produção (Fase 2, P3), vigia passo 10: os_prontidao parada (em andamento, sem evidência há parada_du dias úteis, sem dia no plano) → pergunta parada:<os>:<última evidência>. Substitui a R2.';
 comment on function public._agenda_vigia_estouro(date, timestamptz) is 'Agenda de Produção (Fase 2, P3), vigia passo 11: em andamento com os dias ditos e os meios-dias feitos acima de estouro_fator × o combinado → pergunta estouro:<os>:<total> ("o que falta?").';
 comment on function public._agenda_vigia_duracao_material(date, timestamptz) is 'Agenda de Produção (Fase 2, P3), vigia passo 12: reserva condicionada nas próximas 2 semanas (vigente, ou da proposta aberta em sombra) de OS na classe 3 por material não conferido ou dias só sugeridos → pergunta material_conferir:<os> / duracao:<os>, uma por OS.';
@@ -1590,10 +1654,11 @@ begin
       return 'remarcar_confirmado';
     end if;
   end if;
-  -- 3. saiu um meio-dia fixado pelo dono sem ter ficado impossível (a pessoa ou a OS)
+  -- 3. saiu um meio-dia fixado pelo dono sem ter ficado impossível (a pessoa, a OS ou a espera que ele mesmo pôs)
   if exists (select 1 from public.agenda_alocacoes x
               where x.id = any (a.alocacoes_canceladas) and x.fixado_por = 'dono'
-                and x.cancelada_motivo is distinct from 'pessoa' and x.cancelada_motivo is distinct from 'os_saiu') then
+                and x.cancelada_motivo is distinct from 'pessoa' and x.cancelada_motivo is distinct from 'os_saiu'
+                and x.cancelada_motivo is distinct from 'espera') then
     return 'fixada_pelo_dono';
   end if;
   return null;

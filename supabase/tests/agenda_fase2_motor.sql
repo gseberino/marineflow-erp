@@ -677,7 +677,7 @@ begin
       not (r2 ->> 'ok')::boolean and (select estado from public.agenda_propostas where id = (r ->> 'proposta_id')::uuid) = 'expirada'
       and not exists (select 1 from public.agenda_alocacoes where estado in ('publicada', 'fixada')), r2 ->> 'texto');
     r2 := public.agenda_aplicar((r ->> 'proposta_id')::uuid, null, 'motor', null, null, c_hoje, c_agora);
-    v_res := pg_temp.ok(v_res, 'V6 aplicar de novo: "Essa proposta já foi expirada."', r2 ->> 'texto' = 'Essa proposta já foi expirada.', r2 ->> 'texto');
+    v_res := pg_temp.ok(v_res, 'V6 aplicar de novo: "Esse plano venceu…" (nunca "proposta": no negócio é o orçamento)', r2 ->> 'texto' = 'Esse plano venceu. Peça de novo que eu monto outro.', r2 ->> 'texto');
     r := pg_temp.propor('semana', c_hoje, '{}'::jsonb, null, true);
     r2 := public.agenda_descartar((r ->> 'proposta_id')::uuid, c_admin, 'não quero');
     v_res := pg_temp.ok(v_res, 'V7 descartar: a proposta fica (descartada, com o motivo) e as alocações dela saem; nada publicado',
@@ -902,6 +902,95 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
 
+  -- ── Revisão da Fase 2 ──
+  -- R4–R6: o replay da OS-00104 com o padrão do dono e o pedido dele ("marca o Flávio pra terça 06/10"), sem o
+  -- compressor: a decisão é dele e fica, mas o aviso vai junto (o incidente que a fase existe para evitar).
+  begin
+    execute current_setting('agenda_teste.replay_0104');
+    insert into public.agenda_disponibilidade (payee_id, dias_semana, turno, situacao, origem, nota, criado_por, criado_em)
+    values (c_dono, '{1,2,3,4,5}', null, 'disponivel', 'dono', 'você disse', c_admin, timestamptz '2026-10-01 18:00-03'),
+           (c_roberto, '{1,2,3,4,5}', null, 'disponivel', 'dono', 'você disse', c_admin, timestamptz '2026-10-01 18:00-03');
+    perform pg_temp.modo('ligado');
+    r := public.agenda_propor('os', null, null, array[pg_temp.os('104')],
+           jsonb_build_object('fixar', jsonb_build_array(jsonb_build_object('os', pg_temp.os('104'), 'de', '2026-10-06', 'ate', '2026-10-06'))),
+           false, 'dono', c_admin, date '2026-10-02', timestamptz '2026-10-02 10:00-03');
+    x := pg_temp.item(r, 'OS-00104');
+    v_res := pg_temp.ok(v_res, 'R4 o pedido do dono antes do material (ter 06/10): fica no dia pedido, com o aviso do compressor na frase e no texto',
+      x ->> 'de' = '2026-10-06' and (x ->> 'fixar_dono')::boolean
+      and x ->> 'aviso_material' = 'falta comprar "Compressor 12V SS65": comprando hoje, chega por volta de ter 06/10 (pronto qua 07/10)'
+      and x ->> 'texto' = 'Flávio (OS-00104): ter 06/10, você, Roberto o dia todo — mas falta comprar "Compressor 12V SS65": comprando hoje, chega por volta de ter 06/10 (pronto qua 07/10).'
+      and r ->> 'texto' like '%• Flávio (OS-00104): ter 06/10, você, Roberto o dia todo — mas falta comprar "Compressor 12V SS65"%', x::text);
+    r := public.agenda_marcar_os(c_admin, pg_temp.os('104'), date '2026-10-06', date '2026-10-06', null, 'tela', 'dono',
+                                 date '2026-10-02', timestamptz '2026-10-02 10:00-03');
+    v_res := pg_temp.ok(v_res, 'R5 marcar pela tela: marca (fixado pelo dono), e o "Mudei:" e o aviso_material dizem que o compressor não chegou',
+      (r ->> 'ok')::boolean
+      and r ->> 'texto' = 'Mudei: Flávio (OS-00104): ter 06/10, você, Roberto o dia todo — mas falta comprar "Compressor 12V SS65": comprando hoje, chega por volta de ter 06/10 (pronto qua 07/10).'
+      and r ->> 'aviso_material' like 'falta comprar "Compressor 12V SS65"%'
+      and (select count(*) filter (where estado = 'fixada' and fixado_por = 'dono' and dia = date '2026-10-06') = 4 and count(*) = 4
+             from public.agenda_alocacoes where service_order_id = pg_temp.os('104') and estado in ('publicada', 'fixada')),
+      r ->> 'texto');
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    perform pg_temp.cenario();
+    perform pg_temp.modo('ligado');
+    r := public.agenda_marcar_os(c_admin, pg_temp.os('201'), date '2026-11-05', null, null, 'tela', 'dono', c_hoje, c_agora);
+    v_res := pg_temp.ok(v_res, 'R6 com o material na mão (o A na qui 05), nada de aviso: o texto fica como era',
+      (r ->> 'ok')::boolean and r ->> 'aviso_material' is null and r ->> 'texto' not like '%— mas%', r ->> 'texto');
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- G1–G2: a espera que o dono pôs ("deixa parada até sexta") só tira os dias dentro dela.
+  begin
+    perform pg_temp.cenario();
+    perform pg_temp.modo('ligado');
+    r := pg_temp.publicar('semana', c_hoje);
+    update public.os_planejamento set congelada_ate = date '2026-10-30', revisar_em = date '2026-10-30'
+     where service_order_id = pg_temp.os('201');
+    r := pg_temp.propor('os', c_hoje, '{}'::jsonb, array[pg_temp.os('201')]);
+    v_res := pg_temp.ok(v_res, 'G1 em espera até sex 30/10 (antes dos dias do A, ter 03 e qua 04/11): nada sai',
+      not exists (select 1 from jsonb_array_elements(r -> 'itens') i where i ->> 'numero' = 'OS-00201' and i ->> 'op' = 'cancelar')
+      and pg_temp.vigentes(pg_temp.os('201')) like '03/11 manha Gustavo abertura%', (r -> 'itens')::text);
+    update public.os_planejamento set congelada_ate = date '2026-11-03', revisar_em = date '2026-11-03'
+     where service_order_id = pg_temp.os('201');
+    r := pg_temp.propor('os', c_hoje, '{}'::jsonb, array[pg_temp.os('201')]);
+    x := (select i from jsonb_array_elements(r -> 'itens') i
+           where i ->> 'numero' = 'OS-00201' and i ->> 'op' = 'cancelar' and i ->> 'motivo' = 'espera');
+    v_res := pg_temp.ok(v_res, 'G2 em espera até ter 03/11: sai só a ter 03 ("você pôs em espera até ter 03/11"), nunca "saiu da carteira"',
+      x is not null
+      and (select array_agg(distinct a ->> 'dia') from jsonb_array_elements(x -> 'alocacoes') a) = array['2026-11-03']
+      and x ->> 'texto' = 'Antônio (OS-00201): sai ter 03/11 — você pôs em espera até ter 03/11.'
+      and not exists (select 1 from jsonb_array_elements(r -> 'itens') i where i ->> 'motivo' = 'os_saiu'), (r -> 'itens')::text);
+    v_res := pg_temp.ok(v_res, 'G3 a qua 04/11, depois da espera, fica marcada: nada dela é replanejado (o que faltar o motor completa depois)',
+      not exists (select 1 from jsonb_array_elements(r -> 'itens') i, jsonb_array_elements(i -> 'alocacoes') a
+                   where i ->> 'numero' = 'OS-00201' and i ->> 'op' = 'cancelar' and a ->> 'dia' = '2026-11-04'), (r -> 'itens')::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- W1–W2: o sábado combinado ("o Roberto e eu vimos sábado") a agenda automática não marca, e não sobe o teto.
+  begin
+    perform pg_temp.cenario();
+    insert into public.agenda_disponibilidade (payee_id, periodo, turno, situacao, origem, nota, criado_por, criado_em) values
+      (c_roberto, '[2026-11-07,2026-11-08)', null, 'confirmada', 'dono', 'sábado combinado', c_admin, c_agora),
+      (c_dono, '[2026-11-07,2026-11-08)', null, 'confirmada', 'dono', 'sábado combinado', c_admin, c_agora);
+    r := pg_temp.propor('semana', c_hoje);
+    x := (select s from jsonb_array_elements(r -> 'carga' -> c_roberto::text -> 'semanas') s where s ->> 'semana' = '2026-11-02');
+    v_res := pg_temp.ok(v_res, 'W1 o sábado combinado não entra no esperado da semana: o teto do Roberto continua 6 de 8 (80% dos dias úteis)',
+      (x ->> 'esperado')::numeric = 8 and (x ->> 'teto80')::int = 6, x::text);
+    r := pg_temp.propor('os', c_hoje,
+           jsonb_build_object('fixar', jsonb_build_array(jsonb_build_object('os', pg_temp.os('201'), 'de', '2026-11-07', 'ate', '2026-11-07'))),
+           array[pg_temp.os('201')]);
+    v_res := pg_temp.ok(v_res, 'W2 "marca o Antônio pra sábado": recusa dizendo que a agenda automática não marca sábado (combine direto)',
+      exists (select 1 from jsonb_array_elements(r -> 'fora') f
+               where f ->> 'texto' = 'Antônio (OS-00201): não cabe sáb 07/11: a agenda automática não marca sábado (sábado é só combinando direto com a equipe).'),
+      (r -> 'fora')::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
   perform pg_temp.gravar(v_res);
 end
 $motor$;
@@ -957,6 +1046,18 @@ begin
              where v_a[i] is distinct from v_b[i])));
 end
 $copia$;
+
+-- ── T. O feriado no meio dos dias (revisão da Fase 2; sem fixture) ──────────────────────────────────────
+insert into _resultado
+select 'T1 os dias em texto dizem o feriado de semana no meio: "seg 14 a qui 17/06 (ter 15 é aniversário de Itajaí)", "sex 30/10 e ter 03/11 (seg 02 é Finados)"; o fim de semana e o dia que não é seguido, nada',
+       string_agg(t, ' | ' order by o) = 'seg 14 a qui 17/06 (ter 15 é aniversário de Itajaí) | sex 30/10 e ter 03/11 (seg 02 é Finados)'
+                                          || ' | sex 06 e seg 09/11 | ter 03 e qui 05/11 | ter 03 a qui 05/11',
+       string_agg(t, ' | ' order by o)
+  from (values (1, public._agenda_dias_texto(array[date '2027-06-14', date '2027-06-16', date '2027-06-17'])),
+               (2, public._agenda_dias_texto(array[date '2026-10-30', date '2026-11-03'])),
+               (3, public._agenda_dias_texto(array[date '2026-11-06', date '2026-11-09'])),
+               (4, public._agenda_dias_texto(array[date '2026-11-03', date '2026-11-05'])),
+               (5, public._agenda_dias_texto(array[date '2026-11-03', date '2026-11-04', date '2026-11-05']))) v(o, t);
 
 -- ── J. Portas ───────────────────────────────────────────────────────────────────────────────────────────
 with f(assinatura, leitura) as (values

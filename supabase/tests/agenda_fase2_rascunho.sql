@@ -278,15 +278,15 @@ begin
     r3 := pg_temp.grava(c_admin, d29, '17:02');
     v_res := pg_temp.ok(v_res, 'P4 a agenda mudou desde a releitura: não grava nada e diz por quê; a linha continua aberta',
       (r2 ->> 'ok')::boolean and not (r3 ->> 'ok')::boolean and (r3 ->> 'gravados')::int = 0
-      and r3 ->> 'texto' = 'Não gravei nada. A agenda mudou desde a releitura: A agenda mudou desde a proposta: peça de novo que eu refaço. Me peça de novo.'
+      and r3 ->> 'texto' = 'Não gravei nada. A agenda mudou desde a releitura: A agenda mudou desde que eu montei: peça de novo que eu refaço. Me peça de novo.'
       and pg_temp.foto() = v_foto and (select estado from public.agenda_propostas where id = v_id) = 'aberta'
       and (select estado from public.agenda_rascunho where chave = 'aplicar:' || v_id) = 'aberto', r3 ->> 'texto');
     r := public.agenda_rascunho_aplicar(c_admin, 'whatsapp', 'a última', null, null, null, 'pode publicar', d29, pg_temp.em(d29, '17:03'));
     v_res := pg_temp.ok(v_res, 'P5 a proposta velha também é recusada na releitura ("peça de novo que eu refaço")',
-      not (r ->> 'ok')::boolean and r ->> 'pergunta' = 'A agenda mudou desde essa proposta: peça de novo que eu refaço.', r::text);
+      not (r ->> 'ok')::boolean and r ->> 'pergunta' = 'A agenda mudou desde que eu montei: peça de novo que eu refaço.', r::text);
     r := public.agenda_rascunho_aplicar(c_admin, 'whatsapp', '7', null, null, null, 'publica a 7', d29, pg_temp.em(d29, '17:03'));
     v_res := pg_temp.ok(v_res, 'P6 proposta que não existe: diz quais existem',
-      not (r ->> 'ok')::boolean and r ->> 'pergunta' = 'Não tenho a proposta 7 aberta.', r::text);
+      not (r ->> 'ok')::boolean and r ->> 'pergunta' = 'Não tenho o plano 7 montado.', r::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
@@ -605,6 +605,53 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
 
+  -- ── Revisão da Fase 2: "marca o Flávio pra terça" antes de o compressor chegar (o replay da OS-00104) ──
+  begin
+    execute current_setting('agenda_teste.replay_0104');
+    insert into public.agenda_disponibilidade (payee_id, dias_semana, turno, situacao, origem, nota, criado_por, criado_em)
+    values ('bb000000-0000-4000-8000-000000000001', '{1,2,3,4,5}', null, 'disponivel', 'dono', 'você disse', c_admin,
+            timestamptz '2026-10-01 18:00-03'),
+           (c_roberto, '{1,2,3,4,5}', null, 'disponivel', 'dono', 'você disse', c_admin, timestamptz '2026-10-01 18:00-03');
+    perform pg_temp.modos('ligado', 'ligado');
+    v_foto := pg_temp.foto();
+    r := public.agenda_rascunho_marcar(c_admin, 'whatsapp', 'Flávio', 'terça', null, null, 'marca o Flávio pra terça',
+                                       date '2026-10-02', timestamptz '2026-10-02 10:00-03');
+    v_res := pg_temp.ok(v_res, 'M9 o dia pedido antes do material: a releitura vira a pergunta (o aviso do compressor e "Marco mesmo assim?"); nada muda',
+      (r ->> 'ok')::boolean
+      and r ->> 'releitura' = E'Entendi assim, confere?\n• Marco na agenda: Flávio (OS-00104), ter 06/10, você, Roberto o dia todo — mas falta comprar "Compressor 12V SS65": comprando hoje, chega por volta de ter 06/10 (pronto qua 07/10). Marco mesmo assim?\nResponda *grava* ou corrija o que estiver errado.'
+      and r ->> 'pergunta' = 'Flávio (OS-00104): falta comprar "Compressor 12V SS65": comprando hoje, chega por volta de ter 06/10 (pronto qua 07/10). Marco mesmo assim? Se sim, mande *grava*.'
+      and r ->> 'aviso_material' like 'falta comprar "Compressor 12V SS65"%'
+      and pg_temp.foto() = v_foto and pg_temp.vigentes(pg_temp.os('104')) = '', r::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- ── Revisão da Fase 2: agenda_propor_dito confere o dia de fixar e de "só depois de" nas palavras do dono ──
+  begin
+    v_os := pg_temp.publicado_com_daniel();
+    r := public.agenda_propor_dito(c_admin, 'whatsapp', 'os', null,
+           jsonb_build_array(jsonb_build_object('os', 'Daniel', 'quando', 'sexta')), null, null, false, false, d29, pg_temp.em(d29, '17:00'));
+    r2 := public.agenda_propor_dito(c_admin, 'whatsapp', 'os', null,
+           jsonb_build_array(jsonb_build_object('os', 'Daniel', 'quando', '30/10')), null, null, false, false, d29, pg_temp.em(d29, '17:00'),
+           'marca o Daniel pra quinta');
+    r3 := public.agenda_propor_dito(c_admin, 'whatsapp', 'os', null, null, null,
+           jsonb_build_array(jsonb_build_object('os', 'Daniel', 'quando', '2026-11-05')), false, true, d29, pg_temp.em(d29, '17:00'),
+           'o Daniel só depois de quinta');
+    v_res := pg_temp.ok(v_res, 'S5 fixar sem as palavras do dono, com um dia que ele não disse, ou "só depois de" com data calculada: recusa, nada aberto',
+      not (r ->> 'ok')::boolean and r ->> 'motivo' = 'sem_trecho'
+      and not (r2 ->> 'ok')::boolean and r2 ->> 'pergunta' = 'Não achei "30/10" no que você disse; me diga de novo.'
+      and not (r3 ->> 'ok')::boolean and r3 ->> 'motivo' = 'fora_do_trecho'
+      and not exists (select 1 from public.agenda_propostas p where p.estado = 'aberta' and v_os = any (p.os_alvo)),
+      r::text || ' / ' || r2::text || ' / ' || r3::text);
+    r := public.agenda_propor_dito(c_admin, 'whatsapp', 'os', null,
+           jsonb_build_array(jsonb_build_object('os', 'Daniel', 'quando', 'sexta')), null, null, false, true, d29, pg_temp.em(d29, '17:00'),
+           'marca o Daniel pra sexta');
+    v_res := pg_temp.ok(v_res, 'S6 com o dia nas palavras do dono, a simulação sai (sex 30/10)',
+      (r ->> 'ok')::boolean and r ->> 'texto' like '%Daniel (OS-00204): sex 30/10%', r ->> 'texto');
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
   perform pg_temp.gravar(v_res);
 end $rasc$;
 
@@ -619,7 +666,7 @@ select format('J1 %s: authenticated e service_role executam; anon não', f),
     'public.agenda_rascunho_aplicar(uuid, text, text, text[], text, text, text, date, timestamptz)',
     'public.agenda_rascunho_desfazer(uuid, text, text, text, date, timestamptz)',
     'public.agenda_rascunho_andamento(uuid, text, text, text, text, text[], text, text, date, timestamptz)',
-    'public.agenda_propor_dito(uuid, text, text, text[], jsonb, text[], jsonb, boolean, boolean, date, timestamptz)',
+    'public.agenda_propor_dito(uuid, text, text, text[], jsonb, text[], jsonb, boolean, boolean, date, timestamptz, text)',
     'public.agenda_decisoes_abertas(timestamptz)', 'public.agenda_propostas_abertas(timestamptz)',
     'public.agenda_rascunho_planejar(uuid, text, text, jsonb, text, date)', 'public.agenda_rascunho_gravar(uuid, date)']) f;
 

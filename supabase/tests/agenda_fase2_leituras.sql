@@ -465,6 +465,23 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
 
+  -- ── Revisão da Fase 2: o "dia n de N" não conta o dia que não aconteceu ──
+  begin
+    perform pg_temp.fase2();
+    r := public.agenda_conferir_dia(c_admin, 'nao_cumprido', 'cliente_ou_bem', null, 'whatsapp', date '2026-11-03',
+                                    (date '2026-11-03' + time '17:40') at time zone 'America/Sao_Paulo');
+    v_res := pg_temp.ok(v_res, 'N1 depois de *dia não cliente* na ter 03/11 (o replano pôs seg 09 e ter 10/11), o Vanderlei na qua 04/11 é "dia 1 de 4", nunca "dia 2 de 5"; a ter 03 fica sem dia n',
+      (r ->> 'ok')::boolean
+      and (select v.dia_n = 1 and v.dias_total = 4 from public.v_agenda_dia v where v.dia = date '2026-11-04' and v.numero = 'OS-00069')
+      and (select v.dia_n is null from public.v_agenda_dia v where v.dia = date '2026-11-03' and v.numero = 'OS-00069'),
+      (select string_agg(to_char(v.dia, 'DD/MM') || ' ' || coalesce(v.dia_n::text, '-') || '/' || coalesce(v.dias_total::text, '-'), ', ' order by v.dia)
+         from public.v_agenda_dia v where v.numero = 'OS-00069') || ' | ' || coalesce(r ->> 'texto', ''));
+    v_res := pg_temp.ok(v_res, 'N2 as linhas do dia (o "Hoje"/"Amanhã") seguem o mesmo dia n de N',
+      pg_temp.linhas(date '2026-11-04', null, date '2026-11-03') like '08:00 Vanderlei (OS-00069), dia 1 de 4%', pg_temp.linhas(date '2026-11-04', null, date '2026-11-03'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
   perform pg_temp.gravar(v_res);
 end
 $leituras$;

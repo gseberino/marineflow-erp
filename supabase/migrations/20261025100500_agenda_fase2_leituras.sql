@@ -139,10 +139,14 @@ a as (
   select x.* from public.agenda_alocacoes x where x.estado in ('publicada', 'fixada')
 ),
 dias as (
+  -- o dia que não aconteceu (choveu, o cliente desmarcou: todas as alocações dele não cumpridas) não conta no "dia n de
+  -- N", como em _agenda_plano_da_os; depois de um *dia não*, a OS de 3 dias continua "dia 2 de 3", não "dia 3 de 4"
   select d.service_order_id, d.dia,
          (row_number() over (partition by d.service_order_id order by d.dia))::int as dia_n,
          (count(*) over (partition by d.service_order_id))::int as dias_total
-    from (select distinct a.service_order_id, a.dia from a where a.tipo <> 'reserva') d
+    from (select a.service_order_id, a.dia from a where a.tipo <> 'reserva'
+           group by a.service_order_id, a.dia
+          having bool_or(a.resultado is distinct from 'nao_cumprido')) d
 ),
 pp as (
   select a.dia, a.service_order_id, a.payee_id,
@@ -192,7 +196,7 @@ select g.dia, g.service_order_id, so.service_order_number as numero, public._age
   left join dias d on d.service_order_id = g.service_order_id and d.dia = g.dia;
 
 comment on view public.v_agenda_dia is
-  'Agenda de Produção (Fase 2, P5): o plano vigente (publicada/fixada) por dia e OS — numero, cliente_curto, unidade, tipo (execucao, diagnostico… ou reserva), reserva (o dia só tem reserva), reserva_de, condicao/condicao_ate (da reserva), primeiro_inicio e ultimo_fim, pessoas [{payee_id, nome, eh_dono, turnos, presenca (turno|abertura|fechamento|abre_e_fecha)}] (o dono primeiro), dia_n/dias_total (dias distintos com alocação que não é reserva), fixada, confirmado_cliente (client_confirmed_for no dia), local (marina, senão a cidade do cliente). security_invoker: a RLS de agenda_alocacoes de quem lê vale (o técnico vê só o próprio payee, e o dia n de N dele).';
+  'Agenda de Produção (Fase 2, P5): o plano vigente (publicada/fixada) por dia e OS — numero, cliente_curto, unidade, tipo (execucao, diagnostico… ou reserva), reserva (o dia só tem reserva), reserva_de, condicao/condicao_ate (da reserva), primeiro_inicio e ultimo_fim, pessoas [{payee_id, nome, eh_dono, turnos, presenca (turno|abertura|fechamento|abre_e_fecha)}] (o dono primeiro), dia_n/dias_total (dias distintos com alocação que não é reserva, fora o dia em que nada foi cumprido — choveu, o cliente desmarcou —, que fica sem dia_n), fixada, confirmado_cliente (client_confirmed_for no dia), local (marina, senão a cidade do cliente). security_invoker: a RLS de agenda_alocacoes de quem lê vale (o técnico vê só o próprio payee, e o dia n de N dele).';
 
 -- "você abre, Roberto o dia todo, João à tarde": quem vai num dia de uma OS (as pessoas de v_agenda_dia). O turno só
 -- aparece quando a pessoa não está em todos os meios-dias da OS no dia.
@@ -329,7 +333,8 @@ as $function$
     select v.service_order_id, min(v.dia) as de, max(v.dia) as ate,
            array_agg(v.dia order by v.dia) as dias, bool_and(v.reserva) as reserva,
            (array_agg(to_char(v.primeiro_inicio at time zone 'America/Sao_Paulo', 'HH24:MI') order by v.dia))[1] as hora,
-           (array_agg(v.dia_n order by v.dia))[1] as dia_n, max(v.dias_total) as dias_total,
+           -- (o dia que não aconteceu não tem dia_n: vale o 1º que tem)
+           (array_agg(v.dia_n order by v.dia) filter (where v.dia_n is not null))[1] as dia_n, max(v.dias_total) as dias_total,
            (array_agg(v.pessoas order by v.dia))[1] as pessoas,
            (array_agg(v.condicao order by v.dia))[1] as condicao,
            min(v.numero) as numero, min(v.cliente_curto) as curto
@@ -371,7 +376,8 @@ as $function$
                   x.nome || ' às ' || pl.hora || ', reserva'
                   || coalesce(' ' || pl.condicao, ' (' || nullif(public._agenda_pessoas_do_dia(pl.pessoas), '') || ')', '')
                 else x.nome || ' às ' || pl.hora
-                     || case when coalesce(pl.dias_total, 1) > 1 then format(', dia %s de %s', pl.dia_n, pl.dias_total) else '' end
+                     || case when coalesce(pl.dias_total, 1) > 1 and pl.dia_n is not null
+                             then format(', dia %s de %s', pl.dia_n, pl.dias_total) else '' end
                      || coalesce(' (' || nullif(public._agenda_pessoas_do_dia(pl.pessoas), '') || ')', '') end
       from pl
       left join k kk on kk.service_order_id = pl.service_order_id
