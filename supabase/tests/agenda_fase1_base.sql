@@ -725,7 +725,9 @@ insert into _resultado values
 -- conferem o cargo em _autor_da_agenda; as _agenda_aplicar_* e o salvar são só de service_role). Leitura nunca.
 -- A Fase 2 acrescenta as suas (cada pacote põe aqui as que criar; agenda_fase2_base.sql prova as portas delas):
 --   20261025100000 — _agenda_payees_do_login (a policy do técnico atravessa payees, que é fechada para ele);
---   20261025100100 — _agenda_escrever_os (a única que liga a chave das datas) e _agenda_espelhar_datas.
+--   20261025100100 — _agenda_escrever_os (a única que liga a chave das datas) e _agenda_espelhar_datas;
+--   20261025100200 — o motor que grava: agenda_propor, agenda_aplicar, agenda_descartar, agenda_desfazer,
+--                    agenda_marcar_os (confere o administrador dentro) e agenda_decidir. As leituras do motor não.
 create temp table _definer_da_agenda (nome text primary key) on commit drop;
 insert into _definer_da_agenda values
   ('agenda_disponibilidade_semear'), ('agenda_rascunho_planejar'), ('agenda_rascunho_material'),
@@ -733,7 +735,8 @@ insert into _definer_da_agenda values
   ('_agenda_rascunho_salvar'), ('_agenda_aplicar_planejar'), ('_agenda_aplicar_material'),
   ('_agenda_aplicar_disponibilidade'),
   -- Fase 2
-  ('_agenda_payees_do_login'), ('_agenda_escrever_os'), ('_agenda_espelhar_datas');
+  ('_agenda_payees_do_login'), ('_agenda_escrever_os'), ('_agenda_espelhar_datas'),
+  ('agenda_propor'), ('agenda_aplicar'), ('agenda_descartar'), ('agenda_desfazer'), ('agenda_marcar_os'), ('agenda_decidir');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

@@ -39,6 +39,9 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.fase2', 'fixture-fase2.sql'],
   ['agenda_teste.cenario_motor', 'cenario-motor.sql'],
   ['agenda_teste.replay_0104', 'fixture-replay-0104.sql'],
+  // Fase 2 (P2): a migration da prontidão da Fase 1, para o teste do motor conferir que a cópia de os_prontidao só
+  // muda nos pontos "-- FASE 2:".
+  ['agenda_teste.mig_prontidao_fase1', '../../supabase/migrations/20261024160400_agenda_fase1_prontidao.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
