@@ -3,6 +3,11 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 // A porta única de status (Agenda de Produção, Fase 2, P4): de quais status a OC move a OS.
 import { STATUS_QUE_A_OC_MOVE } from '../../supabase/functions/_shared/agenda-modo';
+// O plano B da porta (revisão da Fase 2): sem a função publicada, o caminho de antes.
+import { ehPortaAusente, statusSemAPorta } from '../../supabase/functions/_shared/porta-ausente';
+
+/** Sem a porta, a OC só move a OS destes status (em andamento fica: NOVO-agenda-10). */
+const STATUS_QUE_A_OC_MOVE_SEM_A_PORTA = ['open', 'approved', 'scheduled'] as const;
 
 export type POStatus = 'draft' | 'sent' | 'partial' | 'received' | 'cancelled';
 
@@ -272,6 +277,12 @@ export async function osDepoisDaOC(serviceOrderId: string): Promise<OsDepoisDaOC
       p_para: 'awaiting_parts',
       p_via: 'oc',
     });
+    // Revisão da Fase 2 (plano B): a tela publicada antes da migration da porta volta ao caminho de antes, só de
+    // aberta, aprovada ou agendada (em andamento segue em andamento, como a porta faz).
+    if (portaErr && ehPortaAusente(portaErr)) {
+      const mudou = await statusSemAPorta(supabase, serviceOrderId, 'awaiting_parts', STATUS_QUE_A_OC_MOVE_SEM_A_PORTA);
+      return { mudou, texto: null, aviso: null };
+    }
     if (portaErr) throw portaErr;
     const porta = (data ?? {}) as { ok?: boolean; mudou?: boolean; texto?: string };
     return {

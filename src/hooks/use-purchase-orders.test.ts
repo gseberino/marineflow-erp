@@ -15,7 +15,7 @@ const h = vi.hoisted(() => {
   const estado = {
     statusDaOs: 'open' as string,
     porta: { ok: true, mudou: true, de: 'open', para: 'awaiting_parts', texto: 'Lenine (OS-00074): de aberta para aguardando peças.' } as any,
-    erroPorta: null as { message: string } | null,
+    erroPorta: null as { message: string; code?: string } | null,
     chamadas: [] as { tabela: string; ops: any[][] }[],
   };
   const builder = (tabela: string): any => {
@@ -30,6 +30,11 @@ const h = vi.hoisted(() => {
     o.then = (ok: any, erro: any) => {
       if (tabela === 'purchase_orders') return Promise.resolve({ data: [{ po_number: 'OC-00009' }], error: null }).then(ok, erro);
       if (tabela === 'products') return Promise.resolve({ data: [{ id: 'p1', supplier_id: 's1' }], error: null }).then(ok, erro);
+      // o UPDATE do status do plano B (statusSemAPorta): devolve a OS quando o filtro .in('status') a pega
+      const doIn = reg.ops.find((op) => op[0] === 'in' && op[1] === 'status');
+      if (tabela === 'service_orders' && doIn) {
+        return Promise.resolve({ data: doIn[2].includes(estado.statusDaOs) ? [{ id: 'os-1' }] : [], error: null }).then(ok, erro);
+      }
       return Promise.resolve({ data: null, error: null }).then(ok, erro);
     };
     return o;
@@ -112,6 +117,28 @@ describe.each([
     expect(h.toast.warning).toHaveBeenCalledWith(
       'A ordem de compra foi criada, mas a OS não mudou de status: Você não pode mudar o status desta OS.');
     expect(h.toast.error).not.toHaveBeenCalled();
+  });
+
+  // Revisão da Fase 2 (plano B): a tela publicada antes da migration da porta volta ao caminho de antes — de aberta,
+  // aprovada ou agendada para aguardando peças; em andamento fica (NOVO-agenda-10).
+  it('porta ausente (PGRST202): o UPDATE de antes, só de aberta/aprovada/agendada, e o toast diz que a OS foi para aguardando peças', async () => {
+    h.estado.erroPorta = { code: 'PGRST202', message: 'Could not find the function public.os_transicionar_status' };
+    const r: any = await criar();
+    expect(updatesNaOs()).toEqual([['update', { status: 'awaiting_parts' }]]);
+    const filtro = h.estado.chamadas.filter((c) => c.tabela === 'service_orders').flatMap((c) => c.ops).find((op) => op[0] === 'in');
+    expect(filtro).toEqual(['in', 'status', ['open', 'approved', 'scheduled']]);
+    expect(r.os).toEqual({ mudou: true, texto: null, aviso: null });
+    expect(h.toast.success).toHaveBeenCalledWith(`${base} OS movida para "Aguardando Peças".`);
+    expect(h.toast.warning).not.toHaveBeenCalled();
+  });
+
+  it('porta ausente com a OS em andamento: ela segue em andamento, sem aviso', async () => {
+    h.estado.statusDaOs = 'in_progress';
+    h.estado.erroPorta = { code: '42883', message: 'function public.os_transicionar_status does not exist' };
+    const r: any = await criar();
+    expect(r.os).toEqual({ mudou: false, texto: null, aviso: null });
+    expect(h.toast.success).toHaveBeenCalledWith(base);
+    expect(h.toast.warning).not.toHaveBeenCalled();
   });
 });
 

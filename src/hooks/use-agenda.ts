@@ -22,6 +22,12 @@ import {
   favorecidoDoLogin,
   modoDaPropostaNoBanco,
 } from '../../supabase/functions/_shared/agenda-modo';
+// O plano B da porta (revisão da Fase 2): a tela publicada antes da migration da porta volta ao caminho de antes.
+import {
+  ehPortaAusente,
+  ehSemDireitoNaPorta,
+  statusSemAPorta,
+} from '../../supabase/functions/_shared/porta-ausente';
 
 // Tipos de entidade vinculável a uma tarefa. A lista vivia copiada aqui e as duas tabelas
 // já divergiram uma vez — agora vem do mesmo arquivo que as Edge Functions usam, com teste
@@ -312,6 +318,35 @@ export function mensagemAoAgendar(anterior: string, porta: ResultadoDaPorta | nu
     : 'Data gravada';
 }
 
+/** A frase da tela quando quem agenda não pode mudar o status (vendedor, técnico fora da OS). */
+export const TEXTO_STATUS_E_DO_ADMINISTRADOR = 'O status quem muda é o administrador.';
+
+/**
+ * A resposta da porta ao agendar, com os dois casos que não são erro (revisão da Fase 2), depois que a data já foi gravada:
+ *   · a porta ainda não publicada (a tela saiu antes da migration 20261025100100): o caminho de antes da porta —
+ *     statusAoAgendar e o UPDATE do status (statusSemAPorta, o plano B);
+ *   · quem agenda não pode mudar o status (42501: vendedor ou técnico fora da OS, que a /agenda aceita): a data fica e
+ *     o toast diz "Data gravada. O status quem muda é o administrador." em vez de erro.
+ * Qualquer outro erro sobe.
+ */
+async function portaAoAgendar(
+  serviceOrderId: string,
+  statusAnterior: string,
+  resposta: unknown,
+  portaErr: unknown,
+): Promise<ResultadoDaPorta | null> {
+  if (!portaErr) return (resposta ?? null) as ResultadoDaPorta | null;
+  if (ehPortaAusente(portaErr)) {
+    const novo = statusAoAgendar(statusAnterior);
+    const mudou = novo ? await statusSemAPorta(supabase, serviceOrderId, novo, [statusAnterior]) : false;
+    return { ok: true, mudou, de: statusAnterior, para: mudou && novo ? novo : statusAnterior, texto: '' };
+  }
+  if (ehSemDireitoNaPorta(portaErr)) {
+    return { ok: false, mudou: false, de: statusAnterior, para: statusAnterior, texto: TEXTO_STATUS_E_DO_ADMINISTRADOR };
+  }
+  throw portaErr;
+}
+
 /** agenda_config.modo_proposta, para o diálogo de agendar avisar quando a agenda automática está ligada. */
 export function useModoDaProposta() {
   return useQuery({
@@ -449,8 +484,7 @@ export function useQuickSchedule() {
         p_para: 'scheduled',
         p_via: 'tela_agendar',
       });
-      if (portaErr) throw portaErr;
-      const porta = (resposta ?? null) as ResultadoDaPorta | null;
+      const porta = await portaAoAgendar(input.service_order_id, statusAnterior, resposta, portaErr);
       return {
         warning,
         statusAnterior,

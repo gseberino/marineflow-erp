@@ -260,6 +260,55 @@ Deno.test("check-in (P4): concluída não passa pela porta (só a hora, como ant
   assertEquals(r2.error, "Você não pode mudar o status desta OS.");
 });
 
+// Revisão da Fase 2: a chegada nunca se perde. A porta ainda não publicada (o código antes da migration) volta ao patch de
+// antes; quem chega sem estar na OS (42501) tem a hora gravada e o status fica com o administrador; outro erro sobe.
+function portaComErro(db: ReturnType<typeof bancoFalso>, erro: { code: string; message: string }) {
+  // deno-lint-ignore no-explicit-any
+  (db as any).rpc = (nome: string) =>
+    Promise.resolve(nome === "os_transicionar_status" ? { data: null, error: erro } : { data: [], error: null });
+}
+
+Deno.test("check-in (revisão): sem a porta publicada (PGRST202/42883), a hora e o em andamento como antes", async () => {
+  for (const code of ["PGRST202", "42883"]) {
+    const db = bancoFalso({ service_orders: [{ ...OS_112, status: "scheduled", check_in_at: null }] });
+    portaComErro(db, { code, message: "Could not find the function public.os_transicionar_status" });
+    const r = await tool(fieldOpsTools, "check_in_service_order").execute({ os: "OS-00112", horario: "2026-10-06T08:00" }, ctxCom(db)) as any;
+    assert(r.ok, JSON.stringify(r));
+    assertEquals(r.status, "in_progress", code);
+    assertEquals(db.tabelas.service_orders[0].check_in_at, "2026-10-06T11:00:00.000Z", code);
+    assertEquals(db.tabelas.service_orders[0].status, "in_progress", code);
+  }
+  // concluída nem passa pela porta; aguardando o cliente sem a porta fica como era antes (o patch de antes não a mexia)
+  const db = bancoFalso({ service_orders: [{ ...OS_112, status: "awaiting_client", check_in_at: null }] });
+  portaComErro(db, { code: "PGRST202", message: "x" });
+  const r = await tool(fieldOpsTools, "check_in_service_order").execute({ os: "OS-00112" }, ctxCom(db)) as any;
+  assertEquals([r.ok, r.status, db.tabelas.service_orders[0].status], [true, "awaiting_client", "awaiting_client"]);
+  assert(db.tabelas.service_orders[0].check_in_at);
+});
+
+Deno.test("check-in (revisão): o técnico fora da OS (42501) tem a chegada gravada e o aviso; o status fica", async () => {
+  const db = bancoFalso({ service_orders: [{ ...OS_112, status: "scheduled", check_in_at: null }] });
+  portaComErro(db, { code: "42501", message: "Você não pode mudar o status desta OS." });
+  const r = await tool(fieldOpsTools, "check_in_service_order").execute({ os: "OS-00112", horario: "2026-10-06T08:00" }, ctxCom(db, "technician", "tec-1")) as any;
+  assert(r.ok, JSON.stringify(r));
+  assertEquals(db.tabelas.service_orders[0].check_in_at, "2026-10-06T11:00:00.000Z");
+  assertEquals([r.status, db.tabelas.service_orders[0].status], ["scheduled", "scheduled"]);
+  assertEquals(r.aviso, "A chegada ficou registrada; o status da OS quem muda é o administrador.");
+});
+
+Deno.test("check-in (revisão): outro erro da porta sobe e nada é gravado", async () => {
+  const db = bancoFalso({ service_orders: [{ ...OS_112, status: "scheduled", check_in_at: null }] });
+  portaComErro(db, { code: "XX000", message: "conexão caiu" });
+  let lancou = false;
+  try {
+    await tool(fieldOpsTools, "check_in_service_order").execute({ os: "OS-00112" }, ctxCom(db));
+  } catch {
+    lancou = true;
+  }
+  assertEquals(lancou, true);
+  assertEquals(db.tabelas.service_orders[0].check_in_at, null);
+});
+
 // ─── 3. Tarefa que se repete ─────────────────────────────────────────────────────────────────
 const QUARTA_10H = new Date("2026-10-07T13:00:00Z"); // quarta-feira, 10h em Brasília
 

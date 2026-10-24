@@ -48,6 +48,11 @@ const h = vi.hoisted(() => {
       const leVinculos = tabela === 'service_order_technicians' && reg.ops.some((op) => op[0] === 'select');
       if (leVinculos) return Promise.resolve({ data: estado.erroVinculos ? null : estado.vinculos, error: estado.erroVinculos }).then(ok, erro);
       if (tabela === 'payees') return Promise.resolve({ data: estado.favorecidos, error: null }).then(ok, erro);
+      // o UPDATE do status do plano B (statusSemAPorta): devolve a OS quando o filtro .in('status') a pega
+      const doIn = reg.ops.find((op) => op[0] === 'in' && op[1] === 'status');
+      if (tabela === 'service_orders' && doIn) {
+        return Promise.resolve({ data: doIn[2].includes(estado.status) ? [{ id: 'os-1' }] : [], error: null }).then(ok, erro);
+      }
       return Promise.resolve({ data: tabela === 'app_users' ? estado.usuarios : [], error: null }).then(ok, erro);
     };
     return o;
@@ -167,6 +172,35 @@ describe('useQuickSchedule fora da agenda automática — só a data no update, 
   it('erro da porta vira o erro do toast (nunca "OS agendada" calado)', async () => {
     h.estado.erroPorta = { message: 'Você não pode mudar o status desta OS.' };
     await expect(agendar('open')).rejects.toMatchObject({ message: 'Você não pode mudar o status desta OS.' });
+  });
+
+  // Revisão da Fase 2: a tela publicada antes da migration da porta (20261025100100) volta ao caminho de antes; e quem
+  // agenda sem poder mudar o status (vendedor, técnico fora da OS) fica com a data gravada e a frase, sem erro.
+  it.each(['PGRST202', '42883'])("porta ausente (%s): o caminho de antes — 'open' vira agendada pelo UPDATE do status", async (code) => {
+    h.estado.erroPorta = { code, message: 'Could not find the function public.os_transicionar_status' } as any;
+    const r = await agendar('open');
+    expect(updates()).toEqual([
+      { scheduled_start_at: '2026-10-27T09:00:00-03:00', scheduled_end_at: '2026-10-27T11:00:00-03:00' },
+      { status: 'scheduled' },
+    ]);
+    expect(r.mensagem).toBe('OS agendada');
+    expect(r.status).toBe('scheduled');
+  });
+
+  it("porta ausente: 'awaiting_parts' só ganha a data (o caminho de antes não a mexia)", async () => {
+    h.estado.erroPorta = { code: 'PGRST202', message: 'x' } as any;
+    const r = await agendar('awaiting_parts');
+    expect(updates()).toHaveLength(1);
+    expect(r.status).toBe('awaiting_parts');
+    expect(r.mensagem).toBe('Data gravada; a OS continua aguardando peças');
+  });
+
+  it('quem não pode mudar o status (42501): a data fica e o toast diz que o status é do administrador', async () => {
+    h.estado.erroPorta = { code: '42501', message: 'Você não pode mudar o status desta OS.' } as any;
+    const r = await agendar('open');
+    expect(updates()).toHaveLength(1);
+    expect(r.mensagem).toBe('Data gravada. O status quem muda é o administrador.');
+    expect(r.status).toBe('open');
   });
 });
 

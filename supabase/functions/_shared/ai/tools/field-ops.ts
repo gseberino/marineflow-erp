@@ -4,6 +4,7 @@ import { acharOS } from "./os-referencia.ts";
 import { ehErro } from "./caixa.ts";
 import { dayRangeBRT } from "./agenda.ts";
 import { filtroQueCruza } from "../../agenda-dia.ts";
+import { ehPortaAusente, ehSemDireitoNaPorta, statusSemAPorta } from "../../porta-ausente.ts";
 
 // Operação de campo + agenda inteligente (Fase 2) — SEM schema novo.
 // O schema já tinha o necessário: service_orders.check_in_at / check_out_at / technician_notes,
@@ -139,6 +140,8 @@ function juntarNotas(atuais: unknown, registro: string): string {
 /** Os status em que a chegada do técnico passa a OS a "em andamento" pela porta (Fase 2, P4). Aguardando o cliente
  *  entra: o técnico chegou, o serviço começou. */
 const STATUS_QUE_COMECAM = ["open", "approved", "scheduled", "awaiting_parts", "awaiting_client", "in_progress"];
+/** Sem a porta publicada (plano B), os status de onde o check-in de antes passava a OS a em andamento. */
+const STATUS_QUE_COMECAVAM_SEM_A_PORTA = ["open", "scheduled", "approved", "awaiting_parts"] as const;
 
 const horaBR = (iso: string) =>
   new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -185,19 +188,39 @@ export const fieldOpsTools: ToolDef[] = [
       // não passam pela porta: só a hora, como antes.
       let statusFinal = String(so.status);
       const passaPelaPorta = STATUS_QUE_COMECAM.includes(statusFinal);
+      // Revisão da Fase 2: a chegada é fato e nunca se perde. Sem a porta publicada (o código antes da migration) ou
+      // com quem chega fora da OS (42501), a hora é gravada mesmo assim; o status segue o caminho de antes ou fica com o
+      // administrador.
+      let gravaAHora = !!so.check_in_at || !passaPelaPorta;
+      let semPorta = false;
+      let aviso: string | null = null;
       if (passaPelaPorta) {
         const { data: porta, error: erroPorta } = await sb.rpc("os_transicionar_status", {
           p_os: so.id, p_para: "in_progress", p_via: "check_in", p_autor: ctx.userId ?? null, p_check_in: quando,
         });
-        if (erroPorta) throw erroPorta;
-        if (porta?.ok === false) return { error: String(porta.texto ?? "O status da OS não mudou.") };
-        statusFinal = String(porta?.para ?? statusFinal);
+        if (erroPorta && ehPortaAusente(erroPorta)) {
+          gravaAHora = true;
+          semPorta = true;
+        } else if (erroPorta && ehSemDireitoNaPorta(erroPorta)) {
+          gravaAHora = true;
+          aviso = "A chegada ficou registrada; o status da OS quem muda é o administrador.";
+        } else if (erroPorta) {
+          throw erroPorta;
+        } else {
+          if (porta?.ok === false) return { error: String(porta.texto ?? "O status da OS não mudou.") };
+          statusFinal = String(porta?.para ?? statusFinal);
+        }
       }
       // A hora dita corrige a chegada já registrada (a porta não sobrescreve), e a OS que não passa pela
       // porta grava só a hora.
-      if (so.check_in_at || !passaPelaPorta) {
+      if (gravaAHora) {
         const { error } = await sb.from("service_orders").update({ check_in_at: quando }).eq("id", so.id);
         if (error) throw error;
+      }
+      // PLANO B (porta-ausente.ts): o patch de antes da porta — de aberta, agendada, aprovada ou aguardando peças
+      // para em andamento.
+      if (semPorta && (await statusSemAPorta(sb, so.id, "in_progress", STATUS_QUE_COMECAVAM_SEM_A_PORTA))) {
+        statusFinal = "in_progress";
       }
 
       const hora = dito ? ` (chegada às ${horaBR(quando)})` : "";
@@ -207,6 +230,7 @@ export const fieldOpsTools: ToolDef[] = [
       return {
         ok: true, os: so.service_order_number, check_in_em: quando, status: statusFinal,
         ...(so.check_in_at ? { corrigido_de: so.check_in_at } : {}),
+        ...(aviso ? { aviso } : {}),
       };
     },
   },

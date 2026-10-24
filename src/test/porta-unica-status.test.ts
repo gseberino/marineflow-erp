@@ -55,6 +55,9 @@ const LISTA_CONHECIDA: Record<string, string> = {
   "supabase/functions/_shared/ai/tools/service-orders.ts": "updatePayload",
   // a assinatura do cliente conclui a OS (o status de depois vem de app_settings.signature_status_after) — Fase 3.
   "supabase/functions/submit-signature/index.ts": "newStatus",
+  // PLANO B (revisão da Fase 2): só quando os_transicionar_status ainda não existe no banco (o código publicado antes da
+  // migration 20261025100100), a tela, a OC e o check-in voltam ao caminho de antes. SAI quando a Fase 2 estiver aplicada.
+  "supabase/functions/_shared/porta-ausente.ts": "para",
 };
 
 const FROM = String.raw`\.from\(\s*['"]service_orders['"]\s*(?:as\s+\w+\s*)?\)`;
