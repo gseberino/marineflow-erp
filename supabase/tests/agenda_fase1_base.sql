@@ -100,12 +100,17 @@ insert into _resultado
 select 'A5 agenda_config tem exatamente 1 linha', (select count(*) from public.agenda_config) = 1,
        (select count(*) from public.agenda_config)::text;
 
+-- modo_proposta e modo_vigia: a Fase 2 (20261025100000, a migration que cria agenda_alocacoes) os faz nascer 'sombra'.
 insert into _resultado
 select format('A6 agenda_config nasce com %s = %s', x.coluna, x.esperado),
        pg_get_expr(d.adbin, d.adrelid) = x.esperado,
        pg_get_expr(d.adbin, d.adrelid)
-  from (values ('modo_leitura', '''sombra''::text'), ('modo_proposta', '''desligado''::text'),
-               ('modo_vigia', '''desligado''::text'), ('modo_equipe', '''desligado''::text'),
+  from (values ('modo_leitura', '''sombra''::text'),
+               ('modo_proposta', case when to_regclass('public.agenda_alocacoes') is null then '''desligado''::text'
+                                      else '''sombra''::text' end),
+               ('modo_vigia', case when to_regclass('public.agenda_alocacoes') is null then '''desligado''::text'
+                                   else '''sombra''::text' end),
+               ('modo_equipe', '''desligado''::text'),
                ('modo_cliente', '''desligado''::text'), ('versao_plano', '0'), ('dia_do_plano', '4'),
                ('medicao_semanas', '8'), ('equipe_recente_dias', '14'), ('frequencia_minima', '0.25'),
                ('carga_max', '0.80')) as x(coluna, esperado)
@@ -357,7 +362,8 @@ begin
       case when v = r.esperado then r.esperado else format('esperava %s, veio %s', r.esperado, v) end);
   end loop;
 
-  -- Nenhum CHECK das 6 tabelas ficou sem caso (um CHECK novo sem teste reprova aqui).
+  -- Nenhum CHECK das 6 tabelas ficou sem caso (um CHECK novo sem teste reprova aqui). Os que a Fase 2 acrescentou a
+  -- agenda_config e os_planejamento (20261025100000) têm o caso deles em agenda_fase2_base.sql, que cobra a lista.
   select string_agg(c.conname, ', ' order by c.conname) into v_sem_caso
     from pg_constraint c
     join pg_class t on t.oid = c.conrelid
@@ -365,7 +371,13 @@ begin
    where n.nspname = 'public' and c.contype = 'c'
      and t.relname in ('agenda_config', 'agenda_disponibilidade', 'os_planejamento', 'os_planejamento_equipe',
                        'os_material', 'agenda_rascunho')
-     and not (c.conname = any (v_testados));
+     and not (c.conname = any (v_testados))
+     and not (c.conname = any (array[
+       'agenda_config_hora_do_plano_check', 'agenda_config_presenca_curta_check', 'agenda_config_desfazer_validade_check',
+       'agenda_config_interrupcoes_max_check', 'agenda_config_inicios_tentados_du_check',
+       'agenda_config_atraso_longo_dias_check', 'agenda_config_remarcar_confirmado_du_check',
+       'agenda_config_sem_registro_du_check', 'agenda_config_backlog_minimo_semanas_check',
+       'agenda_config_perguntas_vezes_max_check', 'adiantavel_coerente']));
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;
@@ -711,20 +723,23 @@ insert into _resultado values
 
 -- Security definer só quem ESCREVE: a semente (P1) e, a partir do P5 (20261024160600), o rascunho e o *grava* (as RPCs
 -- conferem o cargo em _autor_da_agenda; as _agenda_aplicar_* e o salvar são só de service_role). Leitura nunca.
+-- A Fase 2 acrescenta as suas (cada pacote põe aqui as que criar; agenda_fase2_base.sql prova as portas delas):
+--   20261025100000 — _agenda_payees_do_login (a policy do técnico atravessa payees, que é fechada para ele);
+--   20261025100100 — _agenda_escrever_os (a única que liga a chave das datas) e _agenda_espelhar_datas.
+create temp table _definer_da_agenda (nome text primary key) on commit drop;
+insert into _definer_da_agenda values
+  ('agenda_disponibilidade_semear'), ('agenda_rascunho_planejar'), ('agenda_rascunho_material'),
+  ('agenda_rascunho_disponibilidade'), ('agenda_rascunho_ler'), ('agenda_rascunho_gravar'), ('agenda_rascunho_descartar'),
+  ('_agenda_rascunho_salvar'), ('_agenda_aplicar_planejar'), ('_agenda_aplicar_material'),
+  ('_agenda_aplicar_disponibilidade'),
+  -- Fase 2
+  ('_agenda_payees_do_login'), ('_agenda_escrever_os'), ('_agenda_espelhar_datas');
+
 insert into _resultado
-select 'E5 security definer só a semente e as escritas do rascunho (P5); todas com search_path fixo',
-       bool_and(p.prosecdef = (p.proname in ('agenda_disponibilidade_semear', 'agenda_rascunho_planejar',
-                                             'agenda_rascunho_material', 'agenda_rascunho_disponibilidade',
-                                             'agenda_rascunho_ler', 'agenda_rascunho_gravar', 'agenda_rascunho_descartar',
-                                             '_agenda_rascunho_salvar', '_agenda_aplicar_planejar',
-                                             '_agenda_aplicar_material', '_agenda_aplicar_disponibilidade')))
+select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',
+       bool_and(p.prosecdef = (p.proname in (select nome from _definer_da_agenda)))
        and bool_and(coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=%'),
-       string_agg(p.proname, ', ') filter (where p.prosecdef <> (p.proname in ('agenda_disponibilidade_semear',
-                                             'agenda_rascunho_planejar', 'agenda_rascunho_material',
-                                             'agenda_rascunho_disponibilidade', 'agenda_rascunho_ler',
-                                             'agenda_rascunho_gravar', 'agenda_rascunho_descartar',
-                                             '_agenda_rascunho_salvar', '_agenda_aplicar_planejar',
-                                             '_agenda_aplicar_material', '_agenda_aplicar_disponibilidade'))
+       string_agg(p.proname, ', ') filter (where p.prosecdef <> (p.proname in (select nome from _definer_da_agenda))
                                               or p.proconfig is null)
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
  where n.nspname = 'public' and p.proname ~ '^_?agenda_';

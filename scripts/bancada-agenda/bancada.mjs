@@ -10,11 +10,15 @@
 //      com auth.uid() lendo o claim (request.jwt.claim.sub), extensões unaccent e btree_gist;
 //   2. as tabelas reais do snapshot (supabase/schemas/producao/02-tabelas.sql), só com colunas, PK, UNIQUE e
 //      CHECK (sem as FKs do snapshot), mais as colunas que migrations posteriores ao snapshot acrescentaram;
-//   3. a view product_availability e as funções reais do snapshot (05-funcoes.sql) COM a ACL de produção;
+//   3. a view product_availability e as funções reais do snapshot (05-funcoes.sql) COM a ACL de produção, as
+//      sequências e os índices únicos de que essas funções dependem (01-sequencias.sql, 04-indices.sql) e a RLS de
+//      produção das tabelas que as policies da agenda atravessam (08-politicas-rls.sql: payees é fechada para o
+//      técnico — sem isso, uma policy que lesse payees direto passaria aqui e nunca casaria em produção);
 //   4. as migrations do worktree a partir de 20261024150000, em ordem, DUAS vezes (prova de idempotência),
-//      menos a faxina 20261024153000 (é dado de produção, não estrutura), cada versão registrada em
-//      supabase_migrations.schema_migrations como em produção. A semente 20261024161000 entra: na bancada vazia ela
-//      não acha diária e não semeia (a fixture semeia o dia 23/10). `ate` corta a lista (cada pacote testa até a sua);
+//      menos o que é dado de produção e não estrutura (a faxina 20261024153000 e os modos em sombra 20261025101000:
+//      na bancada quem liga os modos é cada teste), cada versão registrada em supabase_migrations.schema_migrations
+//      como em produção. A semente 20261024161000 entra: na bancada vazia ela não acha diária e não semeia (a fixture
+//      semeia o dia 23/10). `ate` corta a lista (cada pacote testa até a sua);
 //   5. com `fixture`, scripts/bancada-agenda/fixture-2310.sql (a carteira sintética de 23/10).
 //
 // O PGlite vem da bancada dos comprovantes (0.5.8), fora do repo: PGLITE_DIR troca a pasta.
@@ -34,7 +38,11 @@ const PGLITE_DIR = process.env.PGLITE_DIR ?? 'D:/IA-HBR/comprovantes-bancada/pgl
 /** A 1ª migration da Agenda de Produção (Fase 0). As anteriores já estão no snapshot (ou não importam aqui). */
 export const PRIMEIRA = '20261024150000';
 /** Dado de produção: não entra na bancada (a fixture faz o papel do dado). */
-export const FORA_DA_BANCADA = new Set(['20261024153000_faxina_agenda_fase0.sql']);
+export const FORA_DA_BANCADA = new Set([
+  '20261024153000_faxina_agenda_fase0.sql',
+  // Fase 2 (P6): os modos de desligado para sombra. Na bancada cada teste liga o modo que precisa.
+  '20261025101000_agenda_fase2_sombra.sql',
+]);
 
 export const ler = (p) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
 
@@ -46,7 +54,23 @@ export const TABELAS = [
   'receivables', 'payables', 'agenda_tasks',
   // P7: o SQL pós-deploy confere que a agenda não deixou erro aberto (supabase/tests/agenda_fase1_pos_deploy.sql)
   'app_error_logs',
+  // Fase 2: o registro do gatilho de status de produção (a porta não escreve nele; o teste confere) e a fila de
+  // envio do WhatsApp (os evals provam que nada sai para cliente nem equipe).
+  'ai_lifecycle_events', 'whatsapp_send_queue',
 ];
+
+/** Sequências do snapshot que as funções da lista abaixo usam (next_document_number). */
+const SEQUENCIAS = ['document_number_seq'];
+
+/** Índices do snapshot de que as funções dependem (o ON CONFLICT do log_app_error; o dedupe da fila). */
+const INDICES = ['uq_app_error_logs_open', 'whatsapp_send_queue_dedupe_key_uq'];
+
+/**
+ * Tabelas com a RLS de produção ligada na bancada (as policies vêm de 08-politicas-rls.sql). Só as que uma policy
+ * da agenda atravessa: a leitura de agenda_alocacoes deixa o técnico ver o próprio payee, e payees é fechada para
+ * ele (só admin/financeiro) — por isso a policy lê por _agenda_payees_do_login() (security definer).
+ */
+const RLS_DE_PRODUCAO = ['payees'];
 
 /** Colunas que migrations DEPOIS do snapshot (06/10) acrescentaram e que a agenda lê. */
 const COLUNAS_DEPOIS_DO_SNAPSHOT = `
@@ -66,16 +90,42 @@ export const FUNCOES = [
   'stock_model_v2_on', 'recompute_product_reservations', 'trg_parts_reservation', 'classify_service_text',
   'free_text_is_material', 'classify_free_text_materials', 'compute_purchase_needs', 'get_os_purchase_needs',
   'count_purchase_shortages',
+  // Fase 2: o erro consultável em SQL (a vigia), o conflito de agenda que a Fase 2 recria e o número de documento
+  // que o update_service_order_status do eval usa.
+  'log_app_error', 'get_agenda_conflicts', 'next_document_number',
 ];
 
 let snapshot;
 function arquivosDoSnapshot() {
   snapshot ??= {
+    sequencias: ler(join(SNAP, '01-sequencias.sql')),
     tabelas: ler(join(SNAP, '02-tabelas.sql')),
+    indices: ler(join(SNAP, '04-indices.sql')),
     funcoes: ler(join(SNAP, '05-funcoes.sql')),
     views: ler(join(SNAP, '06-views.sql')),
+    politicas: ler(join(SNAP, '08-politicas-rls.sql')),
   };
   return snapshot;
+}
+
+/** A linha do snapshot que cria a sequência ou o índice `nome` (uma por linha nos dois arquivos). */
+function linhaDoSnapshot(arquivo, nome, marca) {
+  const linha = arquivosDoSnapshot()[arquivo].split('\n').find((l) => l.includes(marca));
+  if (!linha) throw new Error(`${nome} não está em ${arquivo} do snapshot`);
+  return linha;
+}
+export const sequencia = (nome) => linhaDoSnapshot('sequencias', nome, ` public.${nome} `);
+export const indice = (nome) => linhaDoSnapshot('indices', nome, ` INDEX ${nome} ON `);
+
+/** A RLS de produção da tabela: liga a RLS e cria as policies do snapshot (o bloco "-- ── public.<nome> ──"). */
+export function rls(nome) {
+  const { politicas } = arquivosDoSnapshot();
+  const cabeca = `-- ── public.${nome} ──\n`;
+  const i = politicas.indexOf(cabeca);
+  if (i < 0) throw new Error(`as policies de ${nome} não estão no snapshot`);
+  const fim = politicas.indexOf('\n\n', i);
+  const bloco = politicas.slice(i + cabeca.length, fim < 0 ? undefined : fim);
+  return `alter table public.${nome} enable row level security;\n${bloco}\n`;
 }
 
 export function tabela(nome) {
@@ -176,10 +226,13 @@ export async function criarBancada({ ate, fixture = true, log = () => {} } = {})
   const { PGlite, extensions } = await carregarPglite();
   const db = await PGlite.create({ extensions });
   await db.exec(SHIM);
+  await db.exec(SEQUENCIAS.map(sequencia).join('\n'));
   await db.exec(TABELAS.map(tabela).join('\n'));
   await db.exec(COLUNAS_DEPOIS_DO_SNAPSHOT);
+  await db.exec(INDICES.map(indice).join('\n'));
   await db.exec(view('product_availability'));
   await db.exec(FUNCOES.map(funcao).join('\n'));
+  await db.exec(RLS_DE_PRODUCAO.map(rls).join('\n'));
   await db.exec(ESTOQUE_DE_MENTIRA);
 
   const migrations = migracoesAte(ate);

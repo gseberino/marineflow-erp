@@ -5,14 +5,15 @@
 //   node scripts/bancada-agenda/rodar.mjs --ate 20261024160200    # corta na migration do pacote
 //
 // Sobe a bancada (snapshot + migrations duas vezes + fixture-2310.sql), passa o JSON de paridade dos feriados em
-// agenda_teste.feriados e o estado pós-rodada (fixture-2310-pos-rodada.sql) em agenda_teste.pos_rodada, e roda, cada
-// um no seu begin/rollback:
+// agenda_teste.feriados e as fixtures que os testes executam por dentro como texto (FIXTURES_COMO_TEXTO: o estado
+// pós-rodada da Fase 1 e os cenários da Fase 2, cada um no seu agenda_teste.<nome>), e roda, cada um no seu
+// begin/rollback:
 //   · supabase/tests/agenda_*.sql cuja linha "-- bancada: depende de <versão>" cabe no corte;
 //   · supabase/tests/purchase_needs_*.sql (a Fase 0 de compras continua passando).
 // Uma linha com ok = false, resultado <> 'PASS' ou detalhe "PULADO" reprova (na bancada nada pode ser pulado).
 // Sai com código 1 se algo falhar.
 
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { criarBancada, ler, RAIZ, TESTES } from './bancada.mjs';
 
@@ -25,6 +26,20 @@ if (ate !== undefined && !/^\d{14}$/.test(ate)) {
   console.error(`--ate espera a versão da migration (14 dígitos), veio "${ate}"`);
   process.exit(2);
 }
+
+/**
+ * Fixtures que os testes executam por dentro, com `execute (select current_setting('agenda_teste.<nome>'))`, no seu
+ * begin/rollback: [configuração, arquivo em scripts/bancada-agenda/]. Arquivo que ainda não existe (um cenário que o
+ * pacote seguinte cria) fica de fora e é dito na saída; o teste que precisar dele quebra com o nome do que faltou.
+ */
+const FIXTURES_COMO_TEXTO = [
+  // O estado esperado depois do *grava* do áudio R01 (Fase 1, P5): o teste do rascunho roda o R01 e compara.
+  ['agenda_teste.pos_rodada', 'fixture-2310-pos-rodada.sql'],
+  // Fase 2 (P2): a carteira até qua 28/10 com as respostas do dono, o cenário do motor à mão e o replay da OS-00104.
+  ['agenda_teste.fase2', 'fixture-fase2.sql'],
+  ['agenda_teste.cenario_motor', 'cenario-motor.sql'],
+  ['agenda_teste.replay_0104', 'fixture-replay-0104.sql'],
+];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
 const DEPENDENCIA_CONHECIDA = {
@@ -80,9 +95,14 @@ console.log(`bancada até ${ate ?? migrations.at(-1)?.slice(0, 14)} (${migration
 
 const feriados = ler(join(RAIZ, 'supabase', 'tests', 'agenda', 'feriados_2026_2035.json'));
 await db.query(`select set_config('agenda_teste.feriados', $1, false)`, [feriados]);
-// O estado esperado depois do *grava* do áudio R01 (P5): o teste do rascunho roda o R01 e compara com este arquivo.
-const posRodada = ler(join(RAIZ, 'scripts', 'bancada-agenda', 'fixture-2310-pos-rodada.sql'));
-await db.query(`select set_config('agenda_teste.pos_rodada', $1, false)`, [posRodada]);
+for (const [nome, arquivo] of FIXTURES_COMO_TEXTO) {
+  const caminho = join(RAIZ, 'scripts', 'bancada-agenda', arquivo);
+  if (!existsSync(caminho)) {
+    console.log(`       ${nome}: ${arquivo} ainda não existe`);
+    continue;
+  }
+  await db.query(`select set_config($1, $2, false)`, [nome, ler(caminho)]);
+}
 
 for (const { arquivo, depende } of testesDoCorte()) {
   if (ate && depende > ate) {

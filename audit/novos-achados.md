@@ -2636,3 +2636,41 @@ porque só o dono pode preenchê-las.
 - **Corrigido no P5 da Fase 1:** `if (erroReceber) throw erroReceber;` e `if (erroPagar) throw erroPagar;`. Testes em
   `supabase/functions/_shared/ai/tools/field-ops-agenda_test.ts` (erro em `receivables` e em `payables`, para admin e
   financeiro, lança; sem erro, os vencimentos saem com o saldo).
+
+### [NOVO-agenda-11] O formulário da OS devolve a data cortada no minuto: com a agenda automática ligada, uma data com segundos travaria o salvar
+
+- **Encontrado em:** Agenda de Produção, Fase 2, pacote P1 (conferência de 24/10/2026 no código, HEAD 133d4838; SELECT
+  `p1f2_segundos` em produção, 24/10).
+- **Onde:** `src/components/ServiceOrderForm.tsx:713-714` (a carga: `isoParaInputLocal`) e `:899-900`/`:928-929` (o salvar e o
+  salvamento automático `montarPayload`: `inputLocalParaIso`), com `src/lib/datetime-local.ts:15-28`. O campo é
+  `datetime-local` (`general-sections.tsx:352-355`), que só guarda até o minuto.
+- **O quê:** o formulário SEMPRE manda `scheduled_start_at`/`scheduled_end_at` no payload, inclusive no salvamento automático a
+  cada campo digitado. Uma data gravada com segundos ou milésimos (08:00:30) volta como 08:00:00: para o banco o valor MUDOU.
+  Com `modo_proposta = 'ligado'`, o gatilho `trg_so_datas_pela_agenda` (migration `20261025100100`) recusa mudar a data fora da
+  porta — e o salvar da OS falharia sem o dono ter mexido na data.
+- **Hoje:** nenhuma OS em produção tem data com segundos (0 em 15 OS com data, de todos os status). O espelho da agenda só
+  grava hora cheia de turno (08:00, 12:00, 13:00, 17:00), que faz a ida e volta sem perda. O risco é um caminho antigo gravar
+  data com segundos antes de passar pela porta (o `schedule_service_order` e a `approve_quote_full` recebem ISO de fora; P4
+  os leva para a porta).
+- **Não corrigido** (só registro, como pede a spec): o formulário é da sessão da ficha do cliente (não editar
+  `ServiceOrderForm.tsx` nem `general-sections.tsx`). A frase do gatilho diz ao dono o que fazer ("diga na conversa… ou use
+  Agendar na tela da Agenda"). O certo, na Fase 3 com a sessão da ficha: o formulário deixa as datas só leitura em `ligado` e
+  não as manda no payload.
+
+### [NOVO-agenda-12] `get_agenda_conflicts` não enxerga a equipe da agenda: o Roberto tem login desativado e o João não tem login
+
+- **Encontrado em:** Agenda de Produção, Fase 2, pacote P1 (conferência de 24/10/2026; SELECT `p1f2_logins_equipe` em produção,
+  24/10).
+- **Onde:** `supabase/schemas/producao/05-funcoes.sql:7112-7136` (`get_agenda_conflicts`): procura o choque pelo login
+  (`agenda_tasks.assignee_user_id` e `service_order_technicians.user_id`).
+- **O quê:** a equipe que trabalha é cadastro de pessoa (`payees`), não login. Em produção: o Roberto (27 diárias desde 01/09)
+  tem um login de técnico ligado ao cadastro, mas DESATIVADO; o João (12 diárias) não tem login; o Mickael, idem ao Roberto.
+  A tela de agendar só oferece login ativo como técnico (`src/hooks/use-agenda.ts:141-144`, `.eq('active', true)`), então o
+  choque do Roberto e do João nunca aparece ali. (A spec dizia
+  que o Roberto "não tem login"; tem, desativado — o efeito é o mesmo.)
+- **Com a Fase 2:** o choque de quem trabalha é barrado no banco pela EXCLUDE `sem_choque_vigente` de `agenda_alocacoes`, por
+  `payee_id`, com ou sem login (migration `20261025100000`, provada em `agenda_fase2_base.sql`, seção E). A policy de leitura
+  das alocações deixa o técnico ver os próprios meio-dias pelo cadastro ligado ao login ATIVO (`_agenda_payees_do_login`): o
+  Roberto passa a ver os dele quando o dono reativar o login.
+- **Não corrigido no P1** (só registro): `get_agenda_conflicts` ganha o ramo das alocações e do dono (`payees.app_user_id`) no
+  P5 (migration `20261025100500`, mesma assinatura). Reativar o login do Roberto é decisão do dono.
