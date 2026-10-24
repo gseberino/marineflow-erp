@@ -266,7 +266,7 @@ Deno.test("paraPropor: todos os parâmetros, simular true por padrão, nulos no 
   assertEquals(r.rpc, "agenda_propor_dito");
   assertEquals(r.params, {
     p_autor: CTX.autor, p_canal: "whatsapp", p_escopo: "semana", p_os: null, p_fixar: null, p_tirar: null, p_so_depois_de: null,
-    p_acima_da_carga: false, p_simular: true,
+    p_acima_da_carga: false, p_simular: true, p_trecho: null,
   });
   assertEquals(params(paraPropor({ escopo: "semana" }, { ...CTX, hoje: "2026-10-29" })).params.p_hoje, "2026-10-29");
   assertEquals(params(paraPropor({ escopo: "semana", simular: false }, CTX)).params.p_simular, false);
@@ -275,9 +275,10 @@ Deno.test("paraPropor: todos os parâmetros, simular true por padrão, nulos no 
 Deno.test("paraPropor: fixar/tirar/só depois de como o dono disse; OS repetida conta uma vez", () => {
   const r = params(paraPropor({
     escopo: "replano", os: ["Lenine", "Lenine"], fixar: [{ os: "Lenine", quando: "quinta", ate: "sexta", pessoa: "Roberto" }],
-    tirar: "Rodrigo", so_depois_de: [{ os: "Nelson", quando: "dia 10" }],
+    tirar: "Rodrigo", so_depois_de: [{ os: "Nelson", quando: "dia 10" }], trecho: "e se o Lenine for quinta e sexta com o Roberto, o Nelson só depois do dia 10",
   }, CTX));
   assertEquals(r.params.p_os, ["Lenine"]);
+  assertEquals(r.params.p_trecho, "e se o Lenine for quinta e sexta com o Roberto, o Nelson só depois do dia 10");
   assertEquals(r.params.p_fixar, [{ os: "Lenine", quando: "quinta", ate: "sexta", pessoa: "Roberto" }]);
   assertEquals(r.params.p_tirar, ["Rodrigo"]);
   assertEquals(r.params.p_so_depois_de, [{ os: "Nelson", quando: "dia 10" }]);
@@ -287,7 +288,10 @@ Deno.test("paraPropor: recusa escopo fora da lista, OS/replano sem OS, data calc
   assertEquals(erro(paraPropor({}, CTX)).startsWith("falta 'escopo'"), true);
   assertEquals(erro(paraPropor({ escopo: "mes" }, CTX)).includes("'escopo' aceita só: semana, proxima_semana, os, replano"), true);
   assertEquals(erro(paraPropor({ escopo: "os" }, CTX)).includes("diga de qual serviço"), true);
-  assertEquals(erro(paraPropor({ escopo: "replano", fixar: [{ os: "Lenine", quando: "2026-11-05" }] }, CTX)).includes("sem calcular"), true);
+  assertEquals(erro(paraPropor({ escopo: "replano", fixar: [{ os: "Lenine", quando: "2026-11-05" }], trecho: "x" }, CTX)).includes("sem calcular"), true);
+  // (revisão da Fase 2) com fixar ou só depois de, o trecho é obrigatório: o banco confere nele cada dia
+  assertEquals(erro(paraPropor({ escopo: "replano", fixar: [{ os: "Lenine", quando: "quinta" }] }, CTX)).startsWith("falta 'trecho'"), true);
+  assertEquals(erro(paraPropor({ escopo: "replano", so_depois_de: [{ os: "Nelson", quando: "dia 10" }] }, CTX)).startsWith("falta 'trecho'"), true);
   assertEquals(erro(paraPropor({ escopo: "semana", tirar: [UUID_QUALQUER] }, CTX)).includes("não o id"), true);
   assertEquals(erro(paraPropor({ escopo: "semana", fixar: [{ os: UUID_QUALQUER, quando: "quinta" }] }, CTX)).includes("não o id"), true);
   assertEquals(erro(paraPropor({ escopo: "semana", simular: "não" }, CTX)).includes("true ou false"), true);

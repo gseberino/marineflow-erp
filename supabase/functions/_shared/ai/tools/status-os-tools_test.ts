@@ -5,7 +5,7 @@
 // "aguardando peças" virava waiting_parts e devolvia 0 OS quando havia 2; status desconhecido ia cru
 // para o filtro e respondia "nenhuma OS" sem erro. A ficha 360 escondia as OS em awaiting_client.
 import { assertEquals, assertMatch } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { filtroDaListagem, serviceOrderTools } from "./service-orders.ts";
+import { filtroDaListagem, serviceOrderTools, TEXTO_PAROU_PELO_ANDAMENTO } from "./service-orders.ts";
 import { entity360Tools } from "./entity-360.ts";
 import { STATUS_OS } from "../../service-order-status.ts";
 
@@ -104,7 +104,7 @@ Deno.test("ficha 360: OS aguardando cliente conta como em andamento", async () =
 const mudarStatus = serviceOrderTools.find((t) => t.name === "update_service_order_status")!;
 
 /** service_orders falso: a leitura do status atual e o update, gravados. Sem .catch, como o real. */
-function osFalsa(statusAtual: string, porta: Record<string, unknown> | null = null) {
+function osFalsa(statusAtual: string, porta: Record<string, unknown> | null = null, opcoes: { leitura?: string; cargo?: string } = {}) {
   const updates: Record<string, unknown>[] = [];
   const rpcs: Array<{ nome: string; params: Record<string, unknown> }> = [];
   let leituras = 0;
@@ -128,8 +128,19 @@ function osFalsa(statusAtual: string, porta: Record<string, unknown> | null = nu
       return Promise.resolve({ data: porta ?? { ok: true, mudou: true, de: statusAtual, para: params.p_para, texto: "OS-00104: mudou." }, error: null });
     },
   };
-  const admin = { rpc: () => Promise.resolve({ data: 120, error: null }) };
-  return { ctx: { sb, admin, settings: {}, userId: "u-dono" } as never, updates, rpcs, leituras: () => leituras };
+  // agenda_config.modo_leitura (revisão da Fase 2: em andamento → aguardando depende dela); sem a opção, a tabela falta
+  const admin = {
+    rpc: () => Promise.resolve({ data: 120, error: null }),
+    from: (t: string) => {
+      const b: Record<string, unknown> = {};
+      b.select = () => b;
+      b.maybeSingle = () => Promise.resolve(t === "agenda_config" && opcoes.leitura
+        ? { data: { modo_leitura: opcoes.leitura }, error: null }
+        : { data: null, error: { code: "42P01" } });
+      return b;
+    },
+  };
+  return { ctx: { sb, admin, settings: {}, userId: "u-dono", userRole: opcoes.cargo ?? "admin" } as never, updates, rpcs, leituras: () => leituras };
 }
 
 Deno.test("D7: preValidar recusa concluir (manda para a tela) e cancelar (manda para cancel_service_order)", () => {
@@ -188,11 +199,56 @@ Deno.test("P4: a porta que não muda nada (em andamento não volta) responde com
   assertEquals(r.status_da_os, "Em andamento");
   assertEquals(fica.updates, []);
 
-  const recusa = osFalsa("in_progress", { ok: false, mudou: false, de: "in_progress", para: "in_progress",
-    texto: "A OS já começou: só volta a aguardar quando você diz que parou e por quê." });
-  const r2 = await mudarStatus.execute({ id: "so1", status: "awaiting_parts" }, recusa.ctx) as Record<string, any>;
-  assertEquals(r2.error, "A OS já começou: só volta a aguardar quando você diz que parou e por quê.");
+  const recusa = osFalsa("scheduled", { ok: false, mudou: false, de: "scheduled", para: "scheduled",
+    texto: "A OS está agendada: para tirar da agenda, desmarque o dia." });
+  const r2 = await mudarStatus.execute({ id: "so1", status: "open" }, recusa.ctx) as Record<string, any>;
+  assertEquals(r2.error, "A OS está agendada: para tirar da agenda, desmarque o dia.");
   assertEquals(recusa.updates, []);
+});
+
+// Revisão da Fase 2: em andamento → aguardando peças/cliente. A porta só aceita com via dono e o motivo; com a agenda
+// de produção ligada o caminho é os_registrar_andamento; desligada, é aqui, com o motivo dito pelo administrador.
+Deno.test("revisão: em andamento → aguardando com a agenda de produção ligada aponta os_registrar_andamento, nada chamado", async () => {
+  for (const leitura of ["sombra", "ligado"]) {
+    const os = osFalsa("in_progress", null, { leitura });
+    const r = await mudarStatus.execute({ id: "so1", status: "awaiting_parts", motivo: "falta a peça" }, os.ctx) as Record<string, any>;
+    assertEquals(r.error, TEXTO_PAROU_PELO_ANDAMENTO, leitura);
+    assertEquals(r.caminho, "os_registrar_andamento", leitura);
+    assertEquals([os.rpcs, os.updates], [[], []], leitura);
+  }
+});
+
+Deno.test("revisão: em andamento → aguardando com a agenda desligada: o motivo do administrador vai à porta com via dono", async () => {
+  const os = osFalsa("in_progress", { ok: true, mudou: true, de: "in_progress", para: "awaiting_parts", texto: "Nelson (OS-00112): de em andamento para aguardando peças — falta a peça." },
+    { leitura: "desligado" });
+  const r = await mudarStatus.execute({ id: "so1", status: "awaiting_parts", motivo: "  falta a peça " }, os.ctx) as Record<string, any>;
+  assertEquals(r.ok, true);
+  assertEquals(os.rpcs, [{ nome: "os_transicionar_status", params: { p_os: "so1", p_para: "awaiting_parts", p_via: "dono", p_autor: "u-dono", p_motivo: "falta a peça" } }]);
+  assertEquals(r.status_da_os, "Aguardando peças");
+  // a tabela da agenda que ainda não existe (produção hoje) é o mesmo que desligada
+  const semTabela = osFalsa("in_progress", null, {});
+  await mudarStatus.execute({ id: "so1", status: "awaiting_client", motivo: "o cliente pediu para esperar" }, semTabela.ctx);
+  assertEquals(semTabela.rpcs.map((c) => c.params.p_via), ["dono"]);
+});
+
+Deno.test("revisão: em andamento → aguardando sem motivo, ou por quem não é o administrador: recusa com o caminho, nada chamado", async () => {
+  const sem = osFalsa("in_progress", null, { leitura: "desligado" });
+  const r = await mudarStatus.execute({ id: "so1", status: "awaiting_parts" }, sem.ctx) as Record<string, any>;
+  assertMatch(String(r.error), /passe em motivo o porquê que o dono disse/);
+  assertEquals(sem.rpcs, []);
+  const tec = osFalsa("in_progress", null, { leitura: "desligado", cargo: "technician" });
+  const r2 = await mudarStatus.execute({ id: "so1", status: "awaiting_parts", motivo: "falta a peça" }, tec.ctx) as Record<string, any>;
+  assertMatch(String(r2.error), /só o administrador/);
+  assertEquals(tec.rpcs, []);
+  // os outros caminhos seguem pela via assistente (agendada → aguardando peças, por exemplo)
+  const ag = osFalsa("scheduled", null, { leitura: "ligado" });
+  await mudarStatus.execute({ id: "so1", status: "awaiting_parts" }, ag.ctx);
+  assertEquals(ag.rpcs.map((c) => c.params.p_via), ["assistente"]);
+});
+
+Deno.test("revisão: a descrição traça a fronteira com os_registrar_andamento e o esquema aceita o motivo", () => {
+  assertMatch(mudarStatus.description, /os_registrar_andamento/);
+  assertEquals(typeof (mudarStatus.input_schema as any).properties.motivo, "object");
 });
 
 Deno.test("P4: a conversão do orçamento (draft → OS) segue como antes: o UPDATE com o número novo, sem a porta", async () => {

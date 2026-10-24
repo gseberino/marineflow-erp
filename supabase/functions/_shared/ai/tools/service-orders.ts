@@ -6,15 +6,43 @@ import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
 import { acharOS } from "./os-referencia.ts";
 import { ehErro } from "./caixa.ts";
 import { ROTULOS_STATUS_OS, STATUS_OS, statusAoAgendar, type StatusOS } from "../../service-order-status.ts";
-import { diaBR } from "../../agenda-dia.ts";
 import { modoDaPropostaNoBanco } from "../../agenda-modo.ts";
-import { canalDaRpc, resultadoDoRascunho } from "../../agenda/rpc-das-ferramentas.ts";
+import { canalDaRpc, ehDataCalculada, type ResultadoParaOModelo, resultadoDoRascunho } from "../../agenda/rpc-das-ferramentas.ts";
+import { modoDaLeituraNoBanco } from "../../agenda/executar.ts";
 
 /** Os status que a porta única de status do banco decide (Agenda de Produção, Fase 2, P4). */
 const STATUS_DE_AGENDA = ["open", "approved", "scheduled", "in_progress", "awaiting_parts", "awaiting_client"];
 
-/** "2026-10-29" → "29/10" (o jeito que agenda_data_dita lê; o banco resolve o ano). */
-const ddmm = (dia: string) => `${dia.slice(8, 10)}/${dia.slice(5, 7)}`;
+/**
+ * (Revisão da Fase 2) O pedido de marcar com a agenda automática ligada: o dia como o dono disse (quando, e o até se ele
+ * disse) e as palavras dele (trecho), em que o banco confere o dia. Data ISO é o modelo calculando: volta. O trecho nunca
+ * vira o próprio quando. Nada é chamado quando falta algo.
+ */
+export function pedidoDeMarcar(args: Record<string, unknown>): { quando: string; ate: string | null; trecho: string } | { error: string } {
+  const txt = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "");
+  const quando = txt(args.quando);
+  const ate = txt(args.ate);
+  const trecho = txt(args.trecho);
+  if (!quando) {
+    return { error: "Com a agenda automática ligada, passe em quando o dia como o dono disse (\"quinta\", \"dia 5\") e em trecho as palavras dele. Nada foi chamado." };
+  }
+  if (ehDataCalculada(quando) || ehDataCalculada(ate)) {
+    return { error: "Passe o dia como o dono falou (\"quinta\", \"dia 5\", \"03/11\"), sem calcular: com a agenda automática ligada o dia vem do banco. Nada foi chamado." };
+  }
+  if (!trecho) {
+    return { error: "Falta trecho: copie as palavras do dono sobre este pedido (é nelas que o banco confere o dia). Nada foi chamado." };
+  }
+  return { quando, ate: ate || null, trecho };
+}
+
+/**
+ * (Revisão da Fase 2) A resposta do marcar com a agenda ligada. A recusa do banco ("Não cabe qui 29/10…") vira error,
+ * para o "sim" do cartão nunca dizer "executado"; a releitura vai marcada como só rascunho (so_rascunho), e o "sim"
+ * mostra a releitura com o pedido de *grava* (textoDoSim, agent.ts) — nada foi marcado ainda.
+ */
+export function resultadoDeMarcar(r: ResultadoParaOModelo): ResultadoParaOModelo & { error?: string; so_rascunho?: true } {
+  return r.ok ? { ...r, so_rascunho: true } : { ...r, error: r.texto || "A agenda não aceitou o pedido." };
+}
 
 /**
  * Recalcula os totais da OS após inserir/alterar item — best-effort, não deve derrubar a
@@ -382,6 +410,35 @@ export function recusaDoStatusPeloAssistente(status: unknown): { error: string; 
 }
 
 /**
+ * (Revisão da Fase 2) A OS que já começou e parou, com a agenda de produção ligada: o caminho é os_registrar_andamento.
+ * A instrução vai ao modelo (não ao dono): é ela que diz o que chamar.
+ */
+export const TEXTO_PAROU_PELO_ANDAMENTO =
+  "A OS já começou: tirar de em andamento é com os_registrar_andamento (evento parou, motivo material ou cliente, " +
+  "trecho = as palavras do dono), que deixa a releitura para o *grava* dele. Nada foi mudado aqui.";
+
+/**
+ * (Revisão da Fase 2) Em andamento → aguardando peças/cliente pelo assistente. null = não é esse caso (a porta via
+ * 'assistente' decide). { motivo } = o administrador disse o porquê: a porta vai com via 'dono' e o motivo (é o "parou e
+ * por quê" que ela exige). { erro } = falta o motivo, ou quem pede não é o administrador.
+ */
+export function paraAguardarComMotivo(
+  statusAtual: string,
+  args: Record<string, unknown>,
+  cargo?: string | null,
+): { motivo: string } | { erro: string } | null {
+  if (statusAtual !== "in_progress" || (args.status !== "awaiting_parts" && args.status !== "awaiting_client")) return null;
+  if (cargo !== "admin") {
+    return { erro: "A OS já começou: só o administrador a tira de em andamento (quando diz que parou e por quê). Nada foi mudado." };
+  }
+  const motivo = typeof args.motivo === "string" ? args.motivo.replace(/\s+/g, " ").trim().slice(0, 200) : "";
+  if (!motivo) {
+    return { erro: "A OS já começou: para voltar a aguardar, passe em motivo o porquê que o dono disse (\"falta a peça\"). Nada foi mudado." };
+  }
+  return { motivo };
+}
+
+/**
  * Vincula o técnico à OS (service_order_technicians). Devolve o aviso para a resposta, ou null.
  *
  * D8b (23/10/2026): schedule_service_order e approve_quote_full faziam
@@ -684,7 +741,8 @@ export const serviceOrderTools: ToolDef[] = [
     name: "update_service_order_status",
     description:
       "Altera o status de uma OS/orçamento. IMPORTANTE: ao aprovar um orçamento (draft → outro status), o sistema automaticamente renomeia o número de ORÇ-XXXXX para OS-XXXXX. " +
-      "O que ela NÃO faz: NÃO conclui (concluir é pela tela, no botão Concluir da OS, que grava a saída e lança as cobranças da conclusão), NÃO cancela (cancelar é cancel_service_order, que estorna estoque, cobranças e pagamentos) e NÃO fatura OS que ainda não foi concluída. Pedir completed ou cancelled aqui é recusado.",
+      "O que ela NÃO faz: NÃO conclui (concluir é pela tela, no botão Concluir da OS, que grava a saída e lança as cobranças da conclusão), NÃO cancela (cancelar é cancel_service_order, que estorna estoque, cobranças e pagamentos) e NÃO fatura OS que ainda não foi concluída. Pedir completed ou cancelled aqui é recusado. " +
+      "Fronteira com os_registrar_andamento: a OS que JÁ COMEÇOU e parou (\"o Nelson parou, falta a peça\") é os_registrar_andamento (evento parou, motivo material ou cliente, trecho) quando a agenda de produção está ligada; com ela desligada, é aqui, com status awaiting_parts ou awaiting_client e motivo = o porquê que o dono disse.",
     input_schema: {
       type: "object",
       properties: {
@@ -703,6 +761,7 @@ export const serviceOrderTools: ToolDef[] = [
         // Fica no esquema para o pedido de cancelar chegar à recusa que aponta cancel_service_order
         // (sem ele, a rede recusaria por "campo que não existe"). Não é gravado.
         cancellation_reason: { type: "string", description: "Não usado: cancelar é cancel_service_order (o motivo vai no reason dela)." },
+        motivo: { type: "string", description: "Por que a OS que já começou parou (\"falta a peça\", \"o cliente pediu para esperar\"), com as palavras do dono. Só para tirar de em andamento para aguardando." },
       },
       required: ["id", "status"],
     },
@@ -742,8 +801,19 @@ export const serviceOrderTools: ToolDef[] = [
       // sai com o material na mão, e com a agenda automática ligada "agendada" só com dia no plano.
       // A conversão do orçamento (draft → …) e o faturar seguem como antes.
       if (current && current.status !== "draft" && STATUS_DE_AGENDA.includes(String(args.status))) {
+        // Revisão da Fase 2: a OS que já começou só volta a aguardar quando o dono diz que parou e por quê (a porta só
+        // aceita via 'dono' com o motivo). Com a agenda de produção ligada, o caminho é os_registrar_andamento (o
+        // rascunho com a releitura); desligada, é aqui mesmo, com o motivo dito e pelo administrador.
+        const parou = paraAguardarComMotivo(String(current.status), args, ctx.userRole);
+        if (parou) {
+          if ((await modoDaLeituraNoBanco(ctx.admin ?? sb)) !== "desligado") {
+            return { error: TEXTO_PAROU_PELO_ANDAMENTO, caminho: "os_registrar_andamento" };
+          }
+          if ("erro" in parou) return { error: parou.erro };
+        }
         const { data: porta, error: erroPorta } = await sb.rpc("os_transicionar_status", {
-          p_os: args.id, p_para: args.status, p_via: "assistente", p_autor: ctx.userId ?? null,
+          p_os: args.id, p_para: args.status, p_via: parou ? "dono" : "assistente", p_autor: ctx.userId ?? null,
+          ...(parou && "motivo" in parou ? { p_motivo: parou.motivo } : {}),
         });
         if (erroPorta) throw erroPorta;
         if (!porta?.ok) return { error: String(porta?.texto ?? "A agenda não mudou o status desta OS.") };
@@ -1036,18 +1106,20 @@ export const serviceOrderTools: ToolDef[] = [
     name: "schedule_service_order",
     description:
       "Agenda uma OS definindo data/hora de início, fim e técnico responsável (opcional). O status quem decide é o sistema: a OS aprovada ou aberta passa a Agendada; em andamento, aguardando peça (sem a peça na mão) ou cliente e orçamento ficam como estão — a data é gravada. OS concluída, faturada ou cancelada não se agenda. " +
-      "Com a agenda automática ligada, NÃO grava: passe em quando o dia como o dono disse (\"quinta\", \"dia 5\") e em trecho as palavras dele; a resposta é a releitura do encaixe que a agenda acha, e só o *grava* do dono marca (a agenda escolhe os turnos e a equipe).",
+      "Passe SEMPRE quando (o dia como o dono disse: \"quinta\", \"dia 5\") e trecho (as palavras dele), além de scheduled_start_at. Com a agenda automática ligada, NÃO grava e não usa a data ISO: o banco confere o dia nas palavras do dono, a resposta é a releitura do encaixe que a agenda acha, e só o *grava* do dono marca (a agenda escolhe os turnos e a equipe).",
     input_schema: {
       type: "object",
       properties: {
         service_order_id: { type: "string" },
-        scheduled_start_at: { type: "string", description: "ISO datetime" },
+        scheduled_start_at: { type: "string", description: "ISO datetime. Obrigatório fora da agenda automática; com ela ligada, não é usado." },
         scheduled_end_at: { type: "string", description: "ISO datetime" },
         technician_user_id: { type: "string", description: "Opcional. Sem técnico a OS também é agendada." },
-        quando: { type: "string", description: "O dia como o dono disse (\"quinta\", \"dia 5\", \"semana que vem\"). Com a agenda automática ligada, é ele que vale." },
-        trecho: { type: "string", description: "As palavras do dono sobre este pedido, sem resumir (o banco confere nelas o dia)." },
+        quando: { type: "string", description: "O dia como o dono disse (\"quinta\", \"dia 5\", \"semana que vem\"), sem calcular. Com a agenda automática ligada, é ele que vale (obrigatório)." },
+        ate: { type: "string", description: "Até quando, como o dono disse (\"até sexta\"), se ele disse." },
+        trecho: { type: "string", description: "As palavras do dono sobre este pedido, sem resumir (o banco confere nelas o dia). Obrigatório com a agenda automática ligada." },
       },
-      required: ["service_order_id", "scheduled_start_at"],
+      // scheduled_start_at é conferido no execute: com a agenda automática ligada a data ISO não vale (o dia vem do banco)
+      required: ["service_order_id"],
     },
     risk: "low",
     async execute(argsCrus, ctx) {
@@ -1076,19 +1148,24 @@ export const serviceOrderTools: ToolDef[] = [
       // Com a agenda automática ligada, a data é da agenda: vira o rascunho do pedido do dono
       // (agenda_rascunho_marcar), com a releitura do encaixe; só o *grava* dele marca.
       if ((await modoDaPropostaNoBanco(ctx.admin ?? sb)) === "ligado") {
-        const inicio = diaBR(String(args.scheduled_start_at));
-        const fim = args.scheduled_end_at ? diaBR(String(args.scheduled_end_at)) : inicio;
+        // Revisão da Fase 2: o dia é o que o dono disse (quando), conferido pelo banco nas palavras dele (trecho). A data
+        // ISO é o modelo calculando: não vale, nem como reserva (o trecho nunca vira o próprio quando).
+        const pedido = pedidoDeMarcar(args);
+        if ("error" in pedido) return pedido;
         const { data: rascunho, error: erroRascunho } = await sb.rpc("agenda_rascunho_marcar", {
           p_autor: ctx.userId ?? null,
           p_canal: canalDaRpc(ctx.canal),
           p_os: String(args.service_order_id),
-          p_quando: typeof args.quando === "string" && args.quando.trim() ? args.quando.trim() : ddmm(inicio),
-          p_ate: !args.quando && fim > inicio ? ddmm(fim) : null,
+          p_quando: pedido.quando,
+          p_ate: pedido.ate,
           p_pessoa: null,
-          p_trecho: typeof args.trecho === "string" && args.trecho.trim() ? args.trecho.trim() : (typeof args.quando === "string" ? args.quando : null),
+          p_trecho: pedido.trecho,
         });
         if (erroRascunho) throw erroRascunho;
-        return resultadoDoRascunho(rascunho, "agenda_rascunho_marcar");
+        return resultadoDeMarcar(resultadoDoRascunho(rascunho, "agenda_rascunho_marcar"));
+      }
+      if (typeof args.scheduled_start_at !== "string" || !args.scheduled_start_at.trim()) {
+        return { error: "Falta scheduled_start_at: a data e a hora de início em ISO (com o fuso de Brasília). Nada foi gravado." };
       }
 
       // Conflito de agenda (tarefas + OS) via RPC única — mesma checagem da UI

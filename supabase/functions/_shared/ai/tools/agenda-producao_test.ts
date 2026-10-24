@@ -308,6 +308,7 @@ Deno.test("agenda_propor: o que o dono testa vira o parâmetro como ele disse (f
   await porNome("agenda_propor").execute({
     escopo: "os", os: ["Lenine"], fixar: [{ os: "Lenine", quando: "quinta que vem" }], tirar: "Rodrigo",
     so_depois_de: [{ os: "Nelson", quando: "dia 10" }], acima_da_carga: true,
+    trecho: "e se o Lenine for quinta que vem, sem o Rodrigo, e o Nelson só depois do dia 10, mesmo acima da carga?",
   }, ctx(sb));
   const p = chamadas[0].params;
   assertEquals(p.p_os, ["Lenine"]);
@@ -315,6 +316,14 @@ Deno.test("agenda_propor: o que o dono testa vira o parâmetro como ele disse (f
   assertEquals(p.p_tirar, ["Rodrigo"]);
   assertEquals(p.p_so_depois_de, [{ os: "Nelson", quando: "dia 10" }]);
   assertEquals(p.p_acima_da_carga, true);
+  assertEquals(p.p_trecho, "e se o Lenine for quinta que vem, sem o Rodrigo, e o Nelson só depois do dia 10, mesmo acima da carga?");
+});
+
+Deno.test("agenda_propor (revisão da Fase 2): fixar ou só depois de sem o trecho do dono = recusa, nada chamado", async () => {
+  const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, texto: "x", simulacao: true }, error: null }));
+  const r = await porNome("agenda_propor").execute({ escopo: "os", fixar: [{ os: "Lenine", quando: "quinta" }] }, ctx(sb)) as Record<string, unknown>;
+  assertEquals(String(r.error).startsWith("falta 'trecho'"), true);
+  assertEquals(chamadas.length, 0);
 });
 
 Deno.test("agenda_aplicar: sem opção dita, NADA é escolhido aqui — vai nulo e a pergunta do banco volta", async () => {

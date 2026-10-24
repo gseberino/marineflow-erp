@@ -247,10 +247,10 @@ export const agendaProducaoTools: ToolDef[] = [
       "o replano de algumas (replano), com o que o dono quer testar: \"e se eu tirar o Rodrigo da semana?\" (tirar), \"e se " +
       "o Lenine for na quinta?\" (fixar com quando), \"o Nelson só depois do dia 10\" (so_depois_de), \"mesmo acima da " +
       "carga\" (acima_da_carga). simular = true (o padrão) não grava nada; simular = false, só quando o dono pede para " +
-      "montar de verdade (\"monta a semana que vem\"), deixa a proposta em aberto, que não vale para ninguém. NÃO publica, " +
+      "montar de verdade (\"monta a semana que vem\"), deixa o plano montado, que não vale para ninguém. NÃO publica, " +
       "NÃO marca, não escolhe dia nem pessoa (quem escolhe é o sistema) e não decide qual OS atrasa: se não couber, a " +
       "pergunta volta no texto. Publicar é agenda_aplicar e o *grava* do dono; marcar uma OS num dia é " +
-      "schedule_service_order. Datas e nomes como o dono disse.",
+      "schedule_service_order. Datas e nomes como o dono disse; com fixar ou so_depois_de, trecho = as palavras dele.",
     input_schema: {
       type: "object",
       properties: {
@@ -272,6 +272,7 @@ export const agendaProducaoTools: ToolDef[] = [
         },
         acima_da_carga: { type: "boolean", description: "true = o dono aceita passar da carga da equipe." },
         simular: { type: "boolean", description: "Padrão true (não grava nada). false só com \"monta\"/\"prepara\" dito pelo dono." },
+        trecho: { ...TRECHO, description: TRECHO.description + " Obrigatório com fixar ou so_depois_de (o banco confere nele cada dia)." },
       },
       required: ["escopo"],
     },

@@ -80,8 +80,9 @@ export const INSTRUCAO_SIMULACAO =
   "moveu ou publicou. Para valer, o dono pede e a releitura sai pelo agenda_aplicar.";
 /** (Fase 2) A proposta em aberto (simular = false): existe, mas não vale para ninguém até o *grava* do dono. */
 export const INSTRUCAO_PROPOSTA_ABERTA =
-  "A proposta ficou em aberto e não vale para ninguém: repita o texto. Para publicar, o dono pede, agenda_aplicar deixa a " +
-  "releitura e só o *grava* dele publica.";
+  "O plano ficou montado e ainda não vale para ninguém: repita o texto. Para publicar, o dono pede, agenda_aplicar deixa a " +
+  "releitura e só o *grava* dele publica. Ao dono, diga \"o plano que eu montei\", nunca \"proposta\" (no negócio, " +
+  "proposta é o orçamento).";
 /** agenda_config.modo_leitura desligado: a agenda de produção sai do caminho e volta a agenda de antes. */
 export const INSTRUCAO_AGENDA_DESLIGADA =
   "A agenda de produção está desligada. Para a agenda do dono (tarefas e compromissos), chame my_agenda pela ferramenta_extra e responda com ela; não fale da agenda de produção.";
@@ -94,6 +95,11 @@ export function canalDaRpc(canal?: string | null): CanalDaRpc {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATA_CALCULADA = /^\s*\d{4}-\d{2}-\d{2}/;
 const TRECHO_MAX = 1500;
+
+/** AAAA-MM-DD (com ou sem hora) é data que o modelo calculou, não a que o dono disse. */
+export function ehDataCalculada(v: unknown): boolean {
+  return typeof v === "string" && DATA_CALCULADA.test(v);
+}
 
 class Recusa extends Error {}
 
@@ -345,7 +351,11 @@ function listaDeOs(v: unknown, campo: string, max = 12): string[] | null {
   return lista.length ? [...new Set(lista)] : null;
 }
 
-/** agenda_propor → agenda_propor_dito: escopo, os, fixar [{os, quando, ate, pessoa}], tirar, so_depois_de, simular. */
+/**
+ * agenda_propor → agenda_propor_dito: escopo, os, fixar [{os, quando, ate, pessoa}], tirar, so_depois_de, simular e o
+ * trecho. Revisão da Fase 2: com fixar ou so_depois_de o trecho é obrigatório — o banco confere nele cada dia (a proposta
+ * aberta segue para o *grava*, e o dia dela não pode ser um que o modelo calculou).
+ */
 export function paraPropor(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
   return mapear(RPC_PROPOR, () => {
     const a = objeto(args);
@@ -383,6 +393,8 @@ export function paraPropor(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
     if ((escopo === "os" || escopo === "replano") && !os && !fixar && !depois) {
       recusar("com escopo os ou replano, diga de qual serviço (os, fixar ou so_depois_de)");
     }
+    // o dia de fixar e de "só depois de" é conferido nas palavras do dono
+    const t = fixar || depois ? trecho(a.trecho) : texto(a.trecho, "trecho", TRECHO_MAX);
     return comHoje({
       p_autor: ctx.autor,
       p_canal: ctx.canal,
@@ -394,6 +406,7 @@ export function paraPropor(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
       p_acima_da_carga: booleano(a.acima_da_carga, "acima_da_carga") ?? false,
       // Padrão: simular. Só um false explícito grava a proposta (em aberto: não vale para ninguém).
       p_simular: booleano(a.simular, "simular") ?? true,
+      p_trecho: t,
     }, ctx);
   });
 }

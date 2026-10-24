@@ -710,6 +710,21 @@ export function ressalvaDoResultado(resultado: unknown): string {
   return partes.length ? ` ${partes.join(" ")}` : "";
 }
 
+/**
+ * A mensagem do "sim" (painel e WhatsApp) quando a ação aprovada deu certo. (Revisão da Fase 2) A tool que só deixou o
+ * rascunho da agenda (so_rascunho: o schedule_service_order com a agenda automática ligada) não marcou nada: "executado"
+ * seria mentira, então a mensagem diz isso e traz a releitura, com o pedido de *grava*.
+ */
+export function textoDoSim(titulo: string, resultado: unknown): string {
+  const r = resultado && typeof resultado === "object" ? resultado as Record<string, unknown> : {};
+  if (r.so_rascunho === true && typeof r.texto === "string" && r.texto.trim()) {
+    const releitura = r.texto.trim();
+    const grava = /\*grava\*/.test(releitura) ? "" : "\nPara gravar, mande só *grava*.";
+    return `📝 ${titulo}: ainda não mudou nada na agenda.\n${releitura}${grava}`;
+  }
+  return `✅ ${titulo} — executado.${ressalvaDoResultado(resultado)}`;
+}
+
 /** Auditoria best-effort — nunca derruba o turno se falhar. */
 async function writeAudit(
   toolCtx: ToolCtx,

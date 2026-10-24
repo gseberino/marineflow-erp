@@ -20,6 +20,7 @@ import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import { serviceOrderTools } from "./service-orders.ts";
 import { fieldOpsTools } from "./field-ops.ts";
 import { agendaTools, dayOverloadNotice } from "./agenda.ts";
+import { textoDoSim } from "../agent.ts";
 
 type Chamada = { metodo: string; args: unknown[] };
 type Resultado = { data: unknown; error: unknown };
@@ -186,17 +187,61 @@ Deno.test("schedule_service_order com a agenda automática ligada: vira o rascun
   assertMatch(String(r.instrucao), /Só o \*grava\* dele grava/);
 });
 
-Deno.test("schedule_service_order ligado sem o dia dito: o dia do ISO vai como dd/mm, sem trecho (o banco pede as palavras do dono)", async () => {
-  const { sb, rpcsChamadas } = bancoFalso({
-    service_orders: osComStatus("open"),
-    agenda_config: () => ({ data: { modo_proposta: "ligado" }, error: null }),
-  }, { agenda_rascunho_marcar: () => ({ data: { ok: false, motivo: "sem_trecho", pergunta: "Me diga com as suas palavras o que você quer na agenda." }, error: null }) });
-  const r = await agendar.execute({ service_order_id: "so1", scheduled_start_at: "2026-10-29T08:00:00-03:00", scheduled_end_at: "2026-10-30T17:00:00-03:00" },
+// Revisão da Fase 2: com a agenda ligada, o dia é o que o dono disse (quando + trecho, conferido pelo banco); a data ISO
+// é o modelo calculando e nunca vai à agenda, nem como reserva.
+const AGENDA_LIGADA = { agenda_config: () => ({ data: { modo_proposta: "ligado" }, error: null }) };
+
+Deno.test("schedule_service_order ligado (revisão): sem quando, com quando ISO ou sem trecho = recusa e nenhuma RPC chamada", async () => {
+  const casos: Array<[Record<string, unknown>, RegExp]> = [
+    [{ scheduled_start_at: "2026-10-29T08:00:00-03:00", scheduled_end_at: "2026-10-30T17:00:00-03:00" }, /passe em quando o dia como o dono disse/],
+    [{ scheduled_start_at: "2026-11-05T08:00:00-03:00", quando: "2026-11-05", trecho: "marca o Lenine pra quinta" }, /sem calcular/],
+    [{ quando: "quinta", ate: "2026-11-06", trecho: "marca o Lenine de quinta a sexta" }, /sem calcular/],
+    [{ scheduled_start_at: "2026-10-29T08:00:00-03:00", quando: "quinta" }, /Falta trecho/],
+  ];
+  for (const [extra, esperado] of casos) {
+    const { sb, porTabela, rpcsChamadas } = bancoFalso({ service_orders: osComStatus("open"), ...AGENDA_LIGADA },
+      { agenda_rascunho_marcar: () => ({ data: { ok: true, releitura: "x" }, error: null }) });
+    const r = await agendar.execute({ service_order_id: "so1", ...extra }, { sb, userId: "u-dono" } as never) as Record<string, any>;
+    assertMatch(String(r.error), esperado, JSON.stringify(extra));
+    assertEquals(rpcsChamadas, [], JSON.stringify(extra));
+    assertEquals(payloadDoUpdate(porTabela), []);
+  }
+});
+
+Deno.test("schedule_service_order ligado (revisão): sem scheduled_start_at também serve (o dia vem do banco) e o até dito vai junto", async () => {
+  const { sb, rpcsChamadas } = bancoFalso({ service_orders: osComStatus("open"), ...AGENDA_LIGADA },
+    { agenda_rascunho_marcar: () => ({ data: { ok: true, releitura: "Entendi assim, confere?\n• Marco na agenda: …\nResponda *grava* ou corrija o que estiver errado." }, error: null }) });
+  const r = await agendar.execute({ service_order_id: "so1", quando: "quinta", ate: "sexta", trecho: "marca o Lenine de quinta a sexta" },
     { sb, userId: "u-dono" } as never) as Record<string, any>;
   const p = rpcsChamadas.find((c) => c.nome === "agenda_rascunho_marcar")!.params;
-  assertEquals([p.p_quando, p.p_ate, p.p_trecho, p.p_canal], ["29/10", "30/10", null, "whatsapp"]);
-  assertEquals(r.ok, false);
-  assertEquals(r.pergunta, "Me diga com as suas palavras o que você quer na agenda.");
+  assertEquals([p.p_quando, p.p_ate, p.p_trecho], ["quinta", "sexta", "marca o Lenine de quinta a sexta"]);
+  assertEquals([r.ok, r.so_rascunho, r.error], [true, true, undefined]);
+});
+
+Deno.test("schedule_service_order ligado (revisão): a recusa do banco vira error (o \"sim\" nunca diz executado)", async () => {
+  const naoCabe = "Não cabe qui 29/10: o Roberto já está no Vanderlei. O primeiro dia que dá é sex 30/10. Marco nesse dia?";
+  const { sb } = bancoFalso({ service_orders: osComStatus("open"), ...AGENDA_LIGADA },
+    { agenda_rascunho_marcar: () => ({ data: { ok: false, motivo: "nao_cabe", pergunta: naoCabe }, error: null }) });
+  const r = await agendar.execute({ service_order_id: "so1", quando: "quinta", trecho: "marca o Lenine pra quinta" }, { sb, userId: "u-dono" } as never) as Record<string, any>;
+  assertEquals([r.ok, r.error, r.pergunta, r.so_rascunho], [false, naoCabe, naoCabe, undefined]);
+});
+
+Deno.test("schedule_service_order fora da agenda ligada: sem scheduled_start_at é recusa, nada gravado", async () => {
+  const { sb, porTabela, rpcsChamadas } = bancoFalso({ service_orders: osComStatus("open") });
+  const r = await agendar.execute({ service_order_id: "so1", quando: "quinta", trecho: "marca pra quinta" }, { sb } as never) as Record<string, any>;
+  assertMatch(String(r.error), /Falta scheduled_start_at/);
+  assertEquals(payloadDoUpdate(porTabela), []);
+  assertEquals(rpcsChamadas, []);
+});
+
+Deno.test("textoDoSim (revisão): o rascunho da agenda diz que nada mudou e traz a releitura; o resto segue \"executado\"", () => {
+  const releitura = "Entendi assim, confere?\n• Marco na agenda: Flávio (OS-00104), qui 29/10, Roberto o dia todo.\nResponda *grava* ou corrija o que estiver errado.";
+  assertEquals(textoDoSim("Agendar OS", { ok: true, so_rascunho: true, texto: releitura }),
+    `📝 Agendar OS: ainda não mudou nada na agenda.\n${releitura}`);
+  assertEquals(textoDoSim("Agendar OS", { ok: true, so_rascunho: true, texto: "Marco na agenda: Flávio." }),
+    "📝 Agendar OS: ainda não mudou nada na agenda.\nMarco na agenda: Flávio.\nPara gravar, mande só *grava*.");
+  assertEquals(textoDoSim("Registrar diária", { ok: true, aviso: "Sem OS." }), "✅ Registrar diária — executado. Sem OS.");
+  assertEquals(textoDoSim("Registrar diária", null), "✅ Registrar diária — executado.");
 });
 
 Deno.test("schedule_service_order: OS concluída é recusada e nada é gravado", async () => {
