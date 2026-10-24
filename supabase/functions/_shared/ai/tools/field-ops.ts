@@ -136,6 +136,10 @@ function juntarNotas(atuais: unknown, registro: string): string {
   return antes ? `${antes}\n\n${registro}` : registro;
 }
 
+/** Os status em que a chegada do técnico passa a OS a "em andamento" pela porta (Fase 2, P4). Aguardando o cliente
+ *  entra: o técnico chegou, o serviço começou. */
+const STATUS_QUE_COMECAM = ["open", "approved", "scheduled", "awaiting_parts", "awaiting_client", "in_progress"];
+
 const horaBR = (iso: string) =>
   new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
@@ -175,20 +179,33 @@ export const fieldOpsTools: ToolDef[] = [
       }
 
       const quando = dito ? dito.iso : new Date().toISOString();
-      const patch: Record<string, unknown> = { check_in_at: quando };
-      // Só promove para "em andamento" a partir de estados de trabalho — não mexe em concluída/faturada.
-      if (["open", "scheduled", "approved", "awaiting_parts"].includes(so.status)) {
-        patch.status = "in_progress";
+      // Agenda de Produção, Fase 2 (P4, 24/10/2026): o status vai pela porta única do banco
+      // (os_transicionar_status, via 'check_in'), com o início = a hora resolvida — ela grava o
+      // check_in_at junto quando ele estava vazio e nunca o sobrescreve. Concluída, faturada e orçamento
+      // não passam pela porta: só a hora, como antes.
+      let statusFinal = String(so.status);
+      const passaPelaPorta = STATUS_QUE_COMECAM.includes(statusFinal);
+      if (passaPelaPorta) {
+        const { data: porta, error: erroPorta } = await sb.rpc("os_transicionar_status", {
+          p_os: so.id, p_para: "in_progress", p_via: "check_in", p_autor: ctx.userId ?? null, p_check_in: quando,
+        });
+        if (erroPorta) throw erroPorta;
+        if (porta?.ok === false) return { error: String(porta.texto ?? "O status da OS não mudou.") };
+        statusFinal = String(porta?.para ?? statusFinal);
       }
-      const { error } = await sb.from("service_orders").update(patch).eq("id", so.id);
-      if (error) throw error;
+      // A hora dita corrige a chegada já registrada (a porta não sobrescreve), e a OS que não passa pela
+      // porta grava só a hora.
+      if (so.check_in_at || !passaPelaPorta) {
+        const { error } = await sb.from("service_orders").update({ check_in_at: quando }).eq("id", so.id);
+        if (error) throw error;
+      }
 
       const hora = dito ? ` (chegada às ${horaBR(quando)})` : "";
       if (args.note) await anexarNota(sb, so.id, `${carimbo()} Check-in${hora}: ${args.note}`);
       else await anexarNota(sb, so.id, `${carimbo()} Check-in do técnico${hora}.`);
 
       return {
-        ok: true, os: so.service_order_number, check_in_em: quando, status: patch.status || so.status,
+        ok: true, os: so.service_order_number, check_in_em: quando, status: statusFinal,
         ...(so.check_in_at ? { corrigido_de: so.check_in_at } : {}),
       };
     },

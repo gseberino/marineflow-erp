@@ -6,6 +6,8 @@ import { descreverSaldo, parcelasDoSaldo } from "./saldo-do-sinal.ts";
 import { registrarEnvioDaCobranca } from "./cobrancas.ts";
 import { vincularTecnico } from "./service-orders.ts";
 import { statusAoAgendar } from "../../service-order-status.ts";
+import { diaBR } from "../../agenda-dia.ts";
+import { favorecidoDoLogin, modoDaPropostaNoBanco } from "../../agenda-modo.ts";
 
 // Macros de FLUXO (Onda 2b) — "o LLM orquestra, o código executa".
 // Cada uma colapsa um procedimento de vários passos numa única tool de risco alto:
@@ -197,28 +199,60 @@ export const flowMacroTools: ToolDef[] = [
       }
 
       // 3) Agendamento da OS (opcional) — espelha schedule_service_order.
-      // D8/D8b (Agenda de Produção, Fase 0, 23/10/2026): o status sai da regra única
-      // (statusAoAgendar), sobre o status lido depois da conversão, e não depende do técnico — a
-      // conversão costuma deixar a OS 'open', que agora vira 'scheduled' com ou sem técnico. O
-      // vínculo do técnico não tem mais .catch() (o builder não tem: lançava TypeError com o status
-      // já gravado e o passo saía ✖); erro nele vira aviso no passo, que fica ✔.
+      // D8/D8b (Agenda de Produção, Fase 0, 23/10/2026): o status não depende do técnico, e o vínculo
+      // do técnico não tem .catch() (o builder não tem); erro nele vira aviso no passo, que fica ✔.
+      // Fase 2 (P4, 24/10/2026): o status nunca vai no update — quem decide é a porta única do banco
+      // (os_transicionar_status, via 'aprovacao'): a conversão costuma deixar a OS 'open', que vira
+      // 'scheduled'. Com a agenda automática ligada, a data é da agenda: agenda_marcar_os (via
+      // 'aprovacao') a partir do dia de Brasília pedido — o dono confirmou com PIN o resumo que já tinha
+      // a data. Este passo nunca sai ✔ calado: leva a frase da porta ou da agenda (✔ ou ✖).
       if (args.scheduled_start_at && (soErr || !so?.status)) {
         // Sem o status relido não há como decidir o status da OS: nada é gravado e o passo diz por quê.
         passos.push({ passo: "agendamento", status: "✖", erro: "não consegui ler o status da OS depois da conversão; a data não foi gravada" });
       } else if (args.scheduled_start_at) {
         try {
-          const novoStatus = statusAoAgendar(String(so?.status ?? ""));
-          const update: Record<string, unknown> = { scheduled_start_at: args.scheduled_start_at };
-          if (args.scheduled_end_at) update.scheduled_end_at = args.scheduled_end_at;
-          if (novoStatus) update.status = novoStatus;
-          const { error: schErr } = await sb.from("service_orders").update(update).eq("id", args.service_order_id);
-          if (schErr) {
-            passos.push({ passo: "agendamento", status: "✖", erro: schErr.message });
+          // A encerrada recusa antes de gravar (a leitura da porta); o status quem decide é a porta.
+          statusAoAgendar(String(so?.status ?? ""));
+          const aoVincular = async () => args.technician_user_id
+            ? await vincularTecnico(sb, String(args.service_order_id), String(args.technician_user_id))
+            : null;
+          if ((await modoDaPropostaNoBanco(admin)) === "ligado") {
+            const de = diaBR(String(args.scheduled_start_at));
+            const fim = args.scheduled_end_at ? diaBR(String(args.scheduled_end_at)) : de;
+            const pessoa = await favorecidoDoLogin(admin, args.technician_user_id ? String(args.technician_user_id) : null);
+            const { data: marcado, error: mErr } = await admin.rpc("agenda_marcar_os", {
+              p_autor: userId, p_os: args.service_order_id, p_de: de, p_ate: fim < de ? de : fim, p_pessoa: pessoa, p_via: "aprovacao",
+            });
+            if (mErr) {
+              passos.push({ passo: "agendamento", status: "✖", erro: `a agenda não marcou: ${mErr.message}` });
+            } else if (!marcado?.ok) {
+              passos.push({ passo: "agendamento", status: "✖", erro: String(marcado?.texto ?? "a agenda não marcou") });
+            } else {
+              const aviso = await aoVincular();
+              passos.push({ passo: "agendamento", status: "✔", agenda: String(marcado.texto ?? ""), ...(aviso ? { aviso } : {}) });
+            }
           } else {
-            const aviso = args.technician_user_id
-              ? await vincularTecnico(sb, String(args.service_order_id), String(args.technician_user_id))
-              : null;
-            passos.push({ passo: "agendamento", status: "✔", ...(novoStatus ? { status_da_os: novoStatus } : {}), ...(aviso ? { aviso } : {}) });
+            const update: Record<string, unknown> = { scheduled_start_at: args.scheduled_start_at };
+            if (args.scheduled_end_at) update.scheduled_end_at = args.scheduled_end_at;
+            const { error: schErr } = await sb.from("service_orders").update(update).eq("id", args.service_order_id);
+            if (schErr) {
+              passos.push({ passo: "agendamento", status: "✖", erro: schErr.message });
+            } else {
+              const aviso = await aoVincular();
+              const { data: porta, error: pErr } = await sb.rpc("os_transicionar_status", {
+                p_os: args.service_order_id, p_para: "scheduled", p_via: "aprovacao", p_autor: userId,
+              });
+              if (pErr) {
+                passos.push({ passo: "agendamento", status: "✖", erro: `a data foi gravada, mas o status não mudou: ${pErr.message}`, ...(aviso ? { aviso } : {}) });
+              } else if (porta?.ok === false) {
+                passos.push({ passo: "agendamento", status: "✖", erro: `a data foi gravada, mas o status não mudou: ${porta?.texto ?? "recusado"}`, ...(aviso ? { aviso } : {}) });
+              } else {
+                passos.push({
+                  passo: "agendamento", status: "✔", status_da_os: String(porta?.para ?? so?.status ?? ""),
+                  ...(porta?.texto ? { texto: String(porta.texto) } : {}), ...(aviso ? { aviso } : {}),
+                });
+              }
+            }
           }
         } catch (e) {
           passos.push({ passo: "agendamento", status: "✖", erro: (e as Error).message });

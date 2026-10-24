@@ -87,10 +87,16 @@ function osComStatus(status: string, numero = "OS-00104"): Responder {
 const payloadDoUpdate = (porTabela: Record<string, Chamada[][]>) =>
   (porTabela.service_orders ?? []).flatMap((c) => args(c, "update")).map((a) => a[0] as Record<string, unknown>);
 
-// ───────── schedule_service_order (D8 / D8b) ─────────
+/** A porta única de status (Fase 2, P4): o que ela responde ao agendar. */
+const porta = (de: string, para: string, mudou: boolean, texto = "x") =>
+  ({ os_transicionar_status: () => ({ data: { ok: true, mudou, de, para, texto }, error: null }) });
+const chamadasDaPorta = (rpcs: Array<{ nome: string; params: any }>) => rpcs.filter((r) => r.nome === "os_transicionar_status").map((r) => r.params);
 
-Deno.test("schedule_service_order: OS aguardando peça ganha a data e NÃO volta a Agendada (com técnico)", async () => {
-  const { sb, porTabela } = bancoFalso({ service_orders: osComStatus("awaiting_parts") });
+// ───────── schedule_service_order (D8 / D8b; Fase 2, P4: o status pela porta) ─────────
+
+Deno.test("schedule_service_order: OS aguardando peça ganha a data e NÃO volta a Agendada (a porta diz por quê)", async () => {
+  const { sb, porTabela, rpcsChamadas } = bancoFalso({ service_orders: osComStatus("awaiting_parts") },
+    porta("awaiting_parts", "awaiting_parts", false, "Ainda falta \"Cabo\" na mão: a OS continua aguardando peças."));
   const r = await agendar.execute(
     { service_order_id: "so1", scheduled_start_at: "2026-10-27T08:00:00-03:00", technician_user_id: "t1" },
     { sb } as never,
@@ -98,48 +104,99 @@ Deno.test("schedule_service_order: OS aguardando peça ganha a data e NÃO volta
   assertEquals(r.ok, true);
   const [upd] = payloadDoUpdate(porTabela);
   assertEquals(upd.scheduled_start_at, "2026-10-27T08:00:00-03:00");
-  assertEquals("status" in upd, false, "não pode mandar status: regrediria awaiting_parts");
+  assertEquals("status" in upd, false, "não pode mandar status: quem decide é a porta");
+  assertEquals(chamadasDaPorta(rpcsChamadas), [{ p_os: "so1", p_para: "scheduled", p_via: "assistente", p_autor: null }]);
   assertEquals(r.status_da_os, "Aguardando peças");
-  assertMatch(String(r.nota_status), /continua Aguardando peças/);
+  assertEquals(r.nota_status, "A data foi gravada e o status ficou Aguardando peças: Ainda falta \"Cabo\" na mão: a OS continua aguardando peças.");
 });
 
 Deno.test("schedule_service_order: OS em andamento também não regride", async () => {
-  const { sb, porTabela } = bancoFalso({ service_orders: osComStatus("in_progress") });
-  await agendar.execute({ service_order_id: "so1", scheduled_start_at: "2026-10-27T08:00:00-03:00", technician_user_id: "t1" }, { sb } as never);
+  const { sb, porTabela } = bancoFalso({ service_orders: osComStatus("in_progress") },
+    porta("in_progress", "in_progress", false, "A OS já começou: não volta para agendada."));
+  const r = await agendar.execute({ service_order_id: "so1", scheduled_start_at: "2026-10-27T08:00:00-03:00", technician_user_id: "t1" }, { sb } as never) as Record<string, any>;
   assertEquals("status" in payloadDoUpdate(porTabela)[0], false);
+  assertMatch(String(r.nota_status), /A OS já começou/);
 });
 
-Deno.test("schedule_service_order: OS aberta vira Agendada COM técnico e vincula o técnico", async () => {
-  const { sb, porTabela } = bancoFalso({ service_orders: osComStatus("open") });
+Deno.test("schedule_service_order: OS aberta vira Agendada (pela porta) COM técnico e vincula o técnico", async () => {
+  const { sb, porTabela } = bancoFalso({ service_orders: osComStatus("open") }, porta("open", "scheduled", true));
   const r = await agendar.execute(
     { service_order_id: "so1", scheduled_start_at: "2026-10-27T08:00:00-03:00", technician_user_id: "t1" },
-    { sb } as never,
+    { sb, userId: "u-dono" } as never,
   ) as Record<string, any>;
-  assertEquals(payloadDoUpdate(porTabela)[0].status, "scheduled");
+  assertEquals("status" in payloadDoUpdate(porTabela)[0], false);
   const upsert = (porTabela.service_order_technicians ?? []).flatMap((c) => args(c, "upsert"));
   assertEquals(upsert[0][0], { service_order_id: "so1", user_id: "t1" });
   assertEquals(r.status_da_os, "Agendada");
+  assertEquals(r.service_order.status, "scheduled");
+  assertEquals(r.nota_status, undefined);
   assertEquals(r.aviso_tecnico, undefined);
 });
 
 Deno.test("schedule_service_order: OS aberta vira Agendada SEM técnico (o status não depende dele)", async () => {
-  const { sb, porTabela } = bancoFalso({ service_orders: osComStatus("open") });
+  const { sb, porTabela, rpcsChamadas } = bancoFalso({ service_orders: osComStatus("open") }, porta("open", "scheduled", true));
   const r = await agendar.execute({ service_order_id: "so1", scheduled_start_at: "2026-10-27T08:00:00" }, { sb } as never) as Record<string, any>;
   const [upd] = payloadDoUpdate(porTabela);
-  assertEquals(upd.status, "scheduled");
+  assertEquals("status" in upd, false);
   // Hora sem fuso é hora de Brasília (fuso.ts), como antes.
   assertEquals(upd.scheduled_start_at, "2026-10-27T08:00:00-03:00");
   assertEquals(porTabela.service_order_technicians, undefined, "sem técnico não há vínculo a gravar");
+  assertEquals(chamadasDaPorta(rpcsChamadas).length, 1);
   assertEquals(r.ok, true);
+  assertEquals(r.status_da_os, "Agendada");
 });
 
-Deno.test("schedule_service_order: aprovada vira Agendada; orçamento ganha a data sem mudar de status", async () => {
-  const a = bancoFalso({ service_orders: osComStatus("approved") });
-  await agendar.execute({ service_order_id: "so1", scheduled_start_at: "2026-10-27T08:00:00-03:00" }, { sb: a.sb } as never);
-  assertEquals(payloadDoUpdate(a.porTabela)[0].status, "scheduled");
-  const d = bancoFalso({ service_orders: osComStatus("draft", "ORÇ-00083") });
-  await agendar.execute({ service_order_id: "so1", scheduled_start_at: "2026-10-27T08:00:00-03:00" }, { sb: d.sb } as never);
+Deno.test("schedule_service_order: aprovada vira Agendada; orçamento ganha a data e a porta recusa o status (fica orçamento)", async () => {
+  const a = bancoFalso({ service_orders: osComStatus("approved") }, porta("approved", "scheduled", true));
+  const ra = await agendar.execute({ service_order_id: "so1", scheduled_start_at: "2026-10-27T08:00:00-03:00" }, { sb: a.sb } as never) as Record<string, any>;
+  assertEquals(ra.status_da_os, "Agendada");
+  const d = bancoFalso({ service_orders: osComStatus("draft", "ORÇ-00083") },
+    { os_transicionar_status: () => ({ data: { ok: false, mudou: false, de: "draft", para: "draft", texto: "Isso ainda é orçamento: converta antes." }, error: null }) });
+  const rd = await agendar.execute({ service_order_id: "so1", scheduled_start_at: "2026-10-27T08:00:00-03:00" }, { sb: d.sb } as never) as Record<string, any>;
   assertEquals("status" in payloadDoUpdate(d.porTabela)[0], false);
+  assertEquals(rd.status_da_os, "Orçamento");
+  assertMatch(String(rd.nota_status), /converta antes/);
+});
+
+Deno.test("schedule_service_order: erro da porta → diz que a data ficou e o status não (nunca 'agendada' calado)", async () => {
+  const { sb } = bancoFalso({ service_orders: osComStatus("open") },
+    { os_transicionar_status: () => ({ data: null, error: { message: "Você não pode mudar o status desta OS." } }) });
+  const r = await agendar.execute({ service_order_id: "so1", scheduled_start_at: "2026-10-27T08:00:00-03:00" }, { sb } as never) as Record<string, any>;
+  assertEquals(r.ok, false);
+  assertEquals(r.error, "A data foi gravada, mas o status da OS-00104 não mudou: Você não pode mudar o status desta OS.");
+});
+
+Deno.test("schedule_service_order com a agenda automática ligada: vira o rascunho do pedido (a releitura), nenhum update nem porta", async () => {
+  const releitura = "Entendi assim, confere?\n• Marco na agenda: Flávio (OS-00104), qui 29/10, Roberto o dia todo.\nResponda *grava* ou corrija o que estiver errado.";
+  const { sb, porTabela, rpcsChamadas } = bancoFalso({
+    service_orders: osComStatus("open"),
+    agenda_config: () => ({ data: { modo_proposta: "ligado" }, error: null }),
+  }, { agenda_rascunho_marcar: () => ({ data: { ok: true, item: "Marco na agenda: …", releitura }, error: null }) });
+  const r = await agendar.execute(
+    { service_order_id: "so1", scheduled_start_at: "2026-10-29T08:00:00-03:00", quando: "quinta", trecho: "marca o Flávio pra quinta" },
+    { sb, userId: "u-dono", canal: "whatsapp" } as never,
+  ) as Record<string, any>;
+  assertEquals(payloadDoUpdate(porTabela), []);
+  assertEquals(chamadasDaPorta(rpcsChamadas), []);
+  assertEquals(rpcsChamadas.filter((c) => c.nome === "agenda_rascunho_marcar").map((c) => c.params), [{
+    p_autor: "u-dono", p_canal: "whatsapp", p_os: "so1", p_quando: "quinta", p_ate: null, p_pessoa: null, p_trecho: "marca o Flávio pra quinta",
+  }]);
+  assertEquals(r.ok, true);
+  assertEquals(r.texto, releitura);
+  assertMatch(String(r.instrucao), /Só o \*grava\* dele grava/);
+});
+
+Deno.test("schedule_service_order ligado sem o dia dito: o dia do ISO vai como dd/mm, sem trecho (o banco pede as palavras do dono)", async () => {
+  const { sb, rpcsChamadas } = bancoFalso({
+    service_orders: osComStatus("open"),
+    agenda_config: () => ({ data: { modo_proposta: "ligado" }, error: null }),
+  }, { agenda_rascunho_marcar: () => ({ data: { ok: false, motivo: "sem_trecho", pergunta: "Me diga com as suas palavras o que você quer na agenda." }, error: null }) });
+  const r = await agendar.execute({ service_order_id: "so1", scheduled_start_at: "2026-10-29T08:00:00-03:00", scheduled_end_at: "2026-10-30T17:00:00-03:00" },
+    { sb, userId: "u-dono" } as never) as Record<string, any>;
+  const p = rpcsChamadas.find((c) => c.nome === "agenda_rascunho_marcar")!.params;
+  assertEquals([p.p_quando, p.p_ate, p.p_trecho, p.p_canal], ["29/10", "30/10", null, "whatsapp"]);
+  assertEquals(r.ok, false);
+  assertEquals(r.pergunta, "Me diga com as suas palavras o que você quer na agenda.");
 });
 
 Deno.test("schedule_service_order: OS concluída é recusada e nada é gravado", async () => {

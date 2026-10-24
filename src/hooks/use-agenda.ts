@@ -11,11 +11,17 @@ import {
 // O dia de Brasília e a carga por dia (Agenda de Produção, Fase 0): a mesma regra que as
 // ferramentas do assistente e o Secretário usam. A OS guarda uma janela corrida, não horas.
 import {
+  diaBR,
   filtroQueCruza,
   horasNoDia,
   JORNADA_PADRAO_HORAS,
   limitesDoDiaBR,
 } from '../../supabase/functions/_shared/agenda-dia';
+// A agenda automática (Agenda de Produção, Fase 2, P4): ligada, a data da OS é da agenda.
+import {
+  favorecidoDoLogin,
+  modoDaPropostaNoBanco,
+} from '../../supabase/functions/_shared/agenda-modo';
 
 // Tipos de entidade vinculável a uma tarefa. A lista vivia copiada aqui e as duas tabelas
 // já divergiram uma vez — agora vem do mesmo arquivo que as Edge Functions usam, com teste
@@ -250,11 +256,13 @@ async function fetchConflicts(params: {
 
 /**
  * O aviso de conflito. O `label` da OS em get_agenda_conflicts é o service_order_number, que já
- * traz o prefixo ("OS-00060", "ORÇ-00112"): vai como vem. Exportada para o teste.
+ * traz o prefixo ("OS-00060", "ORÇ-00112"): vai como vem — também o da alocação da agenda de
+ * produção (source 'alocacao', Fase 2), que é o número da OS em que a pessoa está. Exportada para o
+ * teste.
  */
 export function conflictMessage(conflicts: any[]): string {
   const labels = conflicts.map((c: any) =>
-    c.source === 'service_order' ? c.label : `"${c.label}"`).join(', ');
+    c.source === 'service_order' || c.source === 'alocacao' ? c.label : `"${c.label}"`).join(', ');
   return `Conflito de agenda: o responsável já tem ${labels} nesse horário.`;
 }
 
@@ -280,20 +288,63 @@ export async function overloadWarning(
     : null;
 }
 
+/** O que a porta única de status (os_transicionar_status) devolve. */
+export type ResultadoDaPorta = { ok?: boolean; mudou?: boolean; de?: string; para?: string; texto?: string };
+
 /**
  * O que o toast diz depois de agendar: o status RESULTANTE, para ninguém achar que a OS que
- * aguarda peça "foi agendada" e virou outra coisa. Exportada para o teste.
+ * aguarda peça "foi agendada" e virou outra coisa. Desde a Fase 2 (P4) quem decide o status é a
+ * porta do banco: quando ela não muda nada, o toast traz a frase dela ("Ainda falta … na mão: a OS
+ * continua aguardando peças."). Exportada para o teste.
  */
-export function mensagemAoAgendar(anterior: string, novo: StatusOS | null): string {
-  if (novo === 'scheduled') return 'OS agendada';
+export function mensagemAoAgendar(anterior: string, porta: ResultadoDaPorta | null): string {
+  if (porta?.mudou && porta.para === 'scheduled') return 'OS agendada';
   if (anterior === 'scheduled') return 'Agendamento atualizado';
   if (anterior === 'draft') return 'Data gravada; continua como orçamento (ainda não é OS)';
+  const texto = String(porta?.texto ?? '').trim();
+  if (texto) return `Data gravada. ${texto}`;
   const rotulo = ROTULOS_STATUS_OS[anterior as StatusOS];
   return rotulo
     ? `Data gravada; a OS continua ${rotulo.toLowerCase()}`
     : 'Data gravada';
 }
 
+/** agenda_config.modo_proposta, para o diálogo de agendar avisar quando a agenda automática está ligada. */
+export function useModoDaProposta() {
+  return useQuery({
+    queryKey: ['agenda-modo-proposta'],
+    queryFn: () => modoDaPropostaNoBanco(supabase),
+    staleTime: 60_000,
+  });
+}
+
+/** Vincula o técnico escolhido à OS (upsert: o vínculo que já existe fica). */
+async function vincularTecnicoNaOs(serviceOrderId: string, tecnico: string | null) {
+  if (!tecnico) return;
+  // Use upsert to safely assign the technician — avoids unique-constraint
+  // errors when the technician is already linked to this OS
+  const { error: techErr } = await supabase
+    .from('service_order_technicians')
+    .upsert(
+      {
+        service_order_id: serviceOrderId,
+        user_id: tecnico,
+        role_in_order: 'technician',
+      },
+      { onConflict: 'service_order_id,user_id', ignoreDuplicates: true }
+    );
+  if (techErr) throw techErr;
+}
+
+/**
+ * "Agendar OS" da Agenda (o diálogo e o botão da R1). Agenda de Produção, Fase 2 (P4, 24/10/2026):
+ *   · fora da agenda automática (modo_proposta desligado ou sombra): grava SÓ a data (scheduled_*) e
+ *     manda o status pela porta única do banco (os_transicionar_status, via 'tela_agendar') — é ela
+ *     que decide se a OS passa a agendada; o toast diz o que ela disse;
+ *   · com a agenda automática ligada: a data é da agenda — agenda_marcar_os (via 'tela') marca a OS
+ *     a partir do dia escolhido, com a pessoa escolhida se ela tiver favorecido; nenhum update direto
+ *     (o gatilho do banco o recusaria). Não cabe = o erro com a frase do banco.
+ */
 export function useQuickSchedule() {
   const qc = useQueryClient();
   return useMutation({
@@ -312,12 +363,38 @@ export function useQuickSchedule() {
         .single();
       if (getErr) throw getErr;
       const statusAnterior = String(current?.status ?? '');
-      // Regra única dos três caminhos que agendam (tela, schedule_service_order e
-      // approve_quote_full): open/approved → scheduled; trabalho andando não regride; encerrada
-      // lança. Até 23/10/2026 a tela comparava com 'pending', que não existe: nunca agendava (D1).
-      const novoStatus = statusAoAgendar(statusAnterior);
+      // A leitura da porta para a tela (statusAoAgendar): encerrada lança aqui, antes de qualquer
+      // gravação. Quem decide o status é a porta (abaixo). Até 23/10/2026 a tela comparava com
+      // 'pending', que não existe: nunca agendava (D1).
+      statusAoAgendar(statusAnterior);
 
       const tecnico = input.technician_user_id || null;
+
+      // Com a agenda automática ligada, a agenda escolhe os turnos e a equipe dentro dos dias.
+      if ((await modoDaPropostaNoBanco(supabase)) === 'ligado') {
+        const de = diaBR(input.scheduled_start_at);
+        const fim = input.scheduled_end_at ? diaBR(input.scheduled_end_at) : de;
+        const pessoa = await favorecidoDoLogin(supabase, tecnico);
+        const { data, error } = await supabase.rpc('agenda_marcar_os', {
+          p_autor: null, // com login, o banco confere quem está logado
+          p_os: input.service_order_id,
+          p_de: de,
+          p_ate: fim < de ? de : fim,
+          p_pessoa: pessoa,
+          p_via: 'tela',
+        });
+        if (error) throw error;
+        const marcado = (data ?? {}) as { ok?: boolean; texto?: string };
+        if (!marcado.ok) throw new Error(marcado.texto || 'Não consegui marcar na agenda.');
+        await vincularTecnicoNaOs(input.service_order_id, tecnico);
+        return {
+          warning: null,
+          statusAnterior,
+          mensagem: marcado.texto || 'Marcado na agenda.',
+          semResponsavel: false,
+          agendaAutomatica: true,
+        };
+      }
       // Sem técnico escolhido, a OS pode já ter técnico vinculado (revisão de 23/10/2026): o vínculo
       // fica como está, então é a agenda DELE que se confere. Até então, reagendar a OS-00104
       // (Roberto) com o campo vazio não checava conflito nem sobrecarga de ninguém, e o toast
@@ -353,38 +430,29 @@ export function useQuickSchedule() {
         warning = avisos.length ? avisos.join(' ') : null;
       }
 
-      const updatePayload: { scheduled_start_at: string; scheduled_end_at: string | null; status?: StatusOS } = {
-        scheduled_start_at: input.scheduled_start_at,
-        scheduled_end_at: input.scheduled_end_at,
-      };
-      if (novoStatus) updatePayload.status = novoStatus;
-
+      // Só a data: o status não vai no update (a porta decide).
       const { error: updateErr } = await supabase
         .from('service_orders')
-        .update(updatePayload)
+        .update({ scheduled_start_at: input.scheduled_start_at, scheduled_end_at: input.scheduled_end_at })
         .eq('id', input.service_order_id);
       if (updateErr) throw updateErr;
 
-      // Use upsert to safely assign the technician — avoids unique-constraint
-      // errors when the technician is already linked to this OS
-      if (tecnico) {
-        const { error: techErr } = await supabase
-          .from('service_order_technicians')
-          .upsert(
-            {
-              service_order_id: input.service_order_id,
-              user_id: tecnico,
-              role_in_order: 'technician',
-            },
-            { onConflict: 'service_order_id,user_id', ignoreDuplicates: true }
-          );
-        if (techErr) throw techErr;
-      }
+      await vincularTecnicoNaOs(input.service_order_id, tecnico);
+
+      // O status pela porta única (via tela_agendar): aberta/aprovada e o cliente liberado viram
+      // agendada; aguardando peças só com o material na mão; o que começou não regride.
+      const { data: resposta, error: portaErr } = await supabase.rpc('os_transicionar_status', {
+        p_os: input.service_order_id,
+        p_para: 'scheduled',
+        p_via: 'tela_agendar',
+      });
+      if (portaErr) throw portaErr;
+      const porta = (resposta ?? null) as ResultadoDaPorta | null;
       return {
         warning,
         statusAnterior,
-        status: novoStatus ?? statusAnterior,
-        mensagem: mensagemAoAgendar(statusAnterior, novoStatus),
+        status: porta?.para ?? statusAnterior,
+        mensagem: mensagemAoAgendar(statusAnterior, porta),
         /** A OS terminou sem técnico nenhum vinculado: só aí o toast diz "(sem responsável)". */
         semResponsavel: pessoas.length === 0,
       };

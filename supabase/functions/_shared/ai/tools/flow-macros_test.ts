@@ -164,15 +164,22 @@ Deno.test("approve: técnico é bloqueado", async () => {
 // PostgREST não tem .catch: a linha lançava TypeError com o status já gravado e o passo saía ✖.
 // O banco falso daqui grava as chamadas e, como o real, NÃO tem .catch.
 
+// Fase 2 (P4, 24/10/2026): o status não vai mais no update — vai pela porta única do banco
+// (os_transicionar_status, via 'aprovacao'); com a agenda automática ligada, a data também não: é
+// agenda_marcar_os (via 'aprovacao'). O passo leva a frase da porta ou da agenda, ✔ ou ✖, nunca calado.
+
 function bancoQueGrava(
   statusDepoisDaConversao: string,
   erroNoVinculo: string | null = null,
   /** a releitura da OS depois da conversão falha (erro) ou não acha a linha (null) */
   releitura: "ok" | "erro" | "vazia" = "ok",
+  /** agenda_config.modo_proposta e as respostas da porta e de agenda_marcar_os */
+  agenda: { modo?: string; porta?: Record<string, unknown>; erroPorta?: string; marcar?: Record<string, unknown> } = {},
 ) {
   const updates: Record<string, unknown>[] = [];
   const upserts: Record<string, unknown>[] = [];
   const builders: Record<string, unknown>[] = [];
+  const rpcs: Array<{ nome: string; params: Record<string, unknown> }> = [];
   const from = (tabela: string) => {
     let upd: Record<string, unknown> | null = null;
     let ups: Record<string, unknown> | null = null;
@@ -183,6 +190,8 @@ function bancoQueGrava(
     b.update = (p: Record<string, unknown>) => { upd = p; updates.push(p); return b; };
     b.upsert = (p: Record<string, unknown>) => { ups = p; upserts.push(p); return b; };
     b.then = (ok: (v: unknown) => unknown) => {
+      if (tabela === "agenda_config") return Promise.resolve({ data: { modo_proposta: agenda.modo ?? "desligado" }, error: null }).then(ok);
+      if (tabela === "payees") return Promise.resolve({ data: [{ id: "payee-t1" }], error: null }).then(ok);
       if (ups && erroNoVinculo) return Promise.resolve({ data: null, error: { message: erroNoVinculo } }).then(ok);
       if (tabela === "service_orders" && !upd) {
         // Só a releitura de depois da conversão (a que traz o status) falha; a leitura do saldo, antes, não.
@@ -196,9 +205,28 @@ function bancoQueGrava(
     builders.push(b);
     return b;
   };
-  const client = { from, rpc: () => Promise.resolve({ data: { converted: true }, error: null }) };
-  return { client, updates, upserts, builders };
+  const client = {
+    from,
+    rpc: (nome: string, params: Record<string, unknown>) => {
+      rpcs.push({ nome, params });
+      if (nome === "os_transicionar_status") {
+        if (agenda.erroPorta) return Promise.resolve({ data: null, error: { message: agenda.erroPorta } });
+        return Promise.resolve({
+          data: agenda.porta ?? { ok: true, mudou: true, de: statusDepoisDaConversao, para: "scheduled", texto: "OS-00120: de aberta para agendada." },
+          error: null,
+        });
+      }
+      if (nome === "agenda_marcar_os") {
+        return Promise.resolve({ data: agenda.marcar ?? { ok: true, texto: "Mudei: OS-00120: ter 27/10, Roberto o dia todo." }, error: null });
+      }
+      return Promise.resolve({ data: { converted: true }, error: null });
+    },
+  };
+  return { client, updates, upserts, builders, rpcs };
 }
+
+const daPorta = (b: { rpcs: Array<{ nome: string; params: Record<string, unknown> }> }) =>
+  b.rpcs.filter((r) => r.nome === "os_transicionar_status").map((r) => r.params);
 
 const pedido = (extra: Record<string, unknown>) => ({
   service_order_id: "so1", deposit_amount: 1000, payment_date: "2026-10-23", payment_method: "pix",
@@ -207,22 +235,62 @@ const pedido = (extra: Record<string, unknown>) => ({
 
 const agendamento = (out: any) => out.passos.find((p: any) => p.passo === "agendamento");
 
-Deno.test("approve: OS convertida 'open' vira Agendada no passo 3, mesmo sem técnico", async () => {
+Deno.test("approve: OS convertida 'open' vira Agendada no passo 3 pela porta (via aprovacao), mesmo sem técnico", async () => {
   const b = bancoQueGrava("open");
   const out: any = await approve.execute(pedido({}), ctx(b.client));
   assertEquals(agendamento(out).status, "✔");
+  assertEquals(agendamento(out).status_da_os, "scheduled");
   const upd = b.updates.find((u) => "scheduled_start_at" in u)!;
-  assertEquals(upd.status, "scheduled");
+  assertEquals("status" in upd, false, "o status não vai no update: quem decide é a porta");
   assertEquals(upd.scheduled_start_at, "2026-10-27T08:00:00-03:00");
+  assertEquals(daPorta(b), [{ p_os: "so1", p_para: "scheduled", p_via: "aprovacao", p_autor: "u1" }]);
   assertEquals(b.upserts, []);
 });
 
-Deno.test("approve: o status relido depois da conversão manda — OS aguardando peça não regride", async () => {
-  const b = bancoQueGrava("awaiting_parts");
+Deno.test("approve: o status relido depois da conversão manda — OS aguardando peça não regride (a porta diz por quê)", async () => {
+  const b = bancoQueGrava("awaiting_parts", null, "ok", {
+    porta: { ok: true, mudou: false, de: "awaiting_parts", para: "awaiting_parts", texto: "Ainda falta \"Cabo\" na mão: a OS continua aguardando peças." },
+  });
   const out: any = await approve.execute(pedido({ technician_user_id: "t1" }), ctx(b.client));
-  assertEquals(agendamento(out).status, "✔");
+  const passo = agendamento(out);
+  assertEquals(passo.status, "✔");
+  assertEquals(passo.status_da_os, "awaiting_parts");
+  assertEquals(passo.texto, "Ainda falta \"Cabo\" na mão: a OS continua aguardando peças.");
   const upd = b.updates.find((u) => "scheduled_start_at" in u)!;
   assertEquals("status" in upd, false);
+});
+
+Deno.test("approve: erro da porta → passo ✖ que diz que a data ficou e o status não (nunca ✔ calado)", async () => {
+  const b = bancoQueGrava("open", null, "ok", { erroPorta: "Você não pode mudar o status desta OS." });
+  const out: any = await approve.execute(pedido({}), ctx(b.client));
+  const passo = agendamento(out);
+  assertEquals(passo.status, "✖");
+  assertEquals(passo.erro, "a data foi gravada, mas o status não mudou: Você não pode mudar o status desta OS.");
+  assertEquals(out.passos[0].status, "✔");
+});
+
+Deno.test("approve com a agenda automática ligada: agenda_marcar_os (via aprovacao, o dia de Brasília), nenhum update nem porta", async () => {
+  const b = bancoQueGrava("open", null, "ok", { modo: "ligado" });
+  const out: any = await approve.execute(pedido({ technician_user_id: "t1" }), ctx(b.client));
+  const passo = agendamento(out);
+  assertEquals(passo.status, "✔");
+  assertEquals(passo.agenda, "Mudei: OS-00120: ter 27/10, Roberto o dia todo.");
+  assertEquals(b.updates.filter((u) => "scheduled_start_at" in u), []);
+  assertEquals(daPorta(b), []);
+  assertEquals(b.rpcs.filter((r) => r.nome === "agenda_marcar_os").map((r) => r.params), [{
+    p_autor: "u1", p_os: "so1", p_de: "2026-10-27", p_ate: "2026-10-27", p_pessoa: "payee-t1", p_via: "aprovacao",
+  }]);
+});
+
+Deno.test("approve com a agenda automática ligada: não cabe → passo ✖ com a frase da agenda", async () => {
+  const b = bancoQueGrava("open", null, "ok", {
+    modo: "ligado", marcar: { ok: false, texto: "Não cabe ter 27/10: o Roberto já está no Vanderlei. O primeiro dia que dá é qua 28/10." },
+  });
+  const out: any = await approve.execute(pedido({}), ctx(b.client));
+  const passo = agendamento(out);
+  assertEquals(passo.status, "✖");
+  assertEquals(passo.erro, "Não cabe ter 27/10: o Roberto já está no Vanderlei. O primeiro dia que dá é qua 28/10.");
+  assertEquals(b.upserts, []);
 });
 
 Deno.test("approve: erro ao vincular o técnico → passo ✔ com aviso (sem TypeError; builder sem .catch)", async () => {

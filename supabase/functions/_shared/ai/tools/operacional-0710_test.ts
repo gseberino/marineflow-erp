@@ -213,6 +213,53 @@ Deno.test("check-in com hora dita grava a hora dita e corrige a que já estava",
   assertStringIncludes(out.error, "antes da chegada");
 });
 
+// ─── Check-in pela porta única (Agenda de Produção, Fase 2, P4) ────────────────────────────────
+// O status da chegada vai por os_transicionar_status (via check_in, com o início = a hora resolvida); a porta grava o
+// check_in_at junto quando estava vazio e nunca o sobrescreve. A hora dita que corrige a chegada continua indo direto.
+function comPorta(db: ReturnType<typeof bancoFalso>, resposta?: Record<string, unknown>) {
+  const chamadas: Array<Record<string, any>> = [];
+  // deno-lint-ignore no-explicit-any
+  (db as any).rpc = (nome: string, p: Record<string, any>) => {
+    if (nome !== "os_transicionar_status") return Promise.resolve({ data: [], error: null });
+    chamadas.push(p);
+    if (resposta) return Promise.resolve({ data: resposta, error: null });
+    const so = db.tabelas.service_orders.find((l) => l.id === p.p_os)!;
+    const de = so.status;
+    so.status = p.p_para;
+    so.check_in_at = so.check_in_at ?? p.p_check_in;
+    return Promise.resolve({ data: { ok: true, mudou: de !== p.p_para, de, para: p.p_para, texto: "ok" }, error: null });
+  };
+  return chamadas;
+}
+
+Deno.test("check-in (P4): agendada → em andamento pela porta (via check_in, com a hora dita); nenhum UPDATE de status", async () => {
+  const db = bancoFalso({ service_orders: [{ ...OS_112, status: "scheduled", check_in_at: null }] });
+  const porta = comPorta(db);
+  const r = await tool(fieldOpsTools, "check_in_service_order").execute({ os: "OS-00112", horario: "2026-10-06T08:00" }, ctxCom(db)) as any;
+  assert(r.ok, JSON.stringify(r));
+  assertEquals(porta, [{ p_os: OS_112.id, p_para: "in_progress", p_via: "check_in", p_autor: "dono-1", p_check_in: "2026-10-06T11:00:00.000Z" }]);
+  assertEquals(r.status, "in_progress");
+  assertEquals(db.tabelas.service_orders[0].check_in_at, "2026-10-06T11:00:00.000Z");
+  assertEquals(db.gravacoes.some((g) => g.tabela === "service_orders" && (g.valor as any)?.status), false);
+  assertEquals(db.gravacoes.some((g) => g.tabela === "service_orders" && "check_in_at" in ((g.valor as any) ?? {})), false,
+    "a porta já gravou a hora (estava vazia)");
+});
+
+Deno.test("check-in (P4): concluída não passa pela porta (só a hora, como antes); a recusa da porta vira erro", async () => {
+  const db = bancoFalso({ service_orders: [{ ...OS_112, status: "completed", check_in_at: null }] });
+  const porta = comPorta(db);
+  const r = await tool(fieldOpsTools, "check_in_service_order").execute({ os: "OS-00112", horario: "2026-10-06T08:00" }, ctxCom(db)) as any;
+  assert(r.ok, JSON.stringify(r));
+  assertEquals(porta, []);
+  assertEquals(r.status, "completed");
+  assertEquals(db.tabelas.service_orders[0].check_in_at, "2026-10-06T11:00:00.000Z");
+
+  const db2 = bancoFalso({ service_orders: [{ ...OS_112, status: "scheduled", check_in_at: null }] });
+  comPorta(db2, { ok: false, mudou: false, de: "scheduled", para: "scheduled", texto: "Você não pode mudar o status desta OS." });
+  const r2 = await tool(fieldOpsTools, "check_in_service_order").execute({ os: "OS-00112" }, ctxCom(db2)) as any;
+  assertEquals(r2.error, "Você não pode mudar o status desta OS.");
+});
+
 // ─── 3. Tarefa que se repete ─────────────────────────────────────────────────────────────────
 const QUARTA_10H = new Date("2026-10-07T13:00:00Z"); // quarta-feira, 10h em Brasília
 

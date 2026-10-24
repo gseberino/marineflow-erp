@@ -185,6 +185,54 @@ Deno.test("create_purchase_order_from_so: mesma correção — item que falha n�
   assertEquals(amb.escritas.some((e) => e.tabela === "service_orders"), false);
 });
 
+// Agenda de Produção, Fase 2 (P4, NOVO-agenda-10): o status da OS vai pela porta única (os_transicionar_status, via
+// 'oc'), nunca por UPDATE — a OS em andamento segue em andamento (antes regredia para "aguardando peças").
+Deno.test("create_purchase_order_from_so: a OS passa a aguardando peças pela porta (via oc); nenhum UPDATE na OS", async () => {
+  for (const status of ["open", "approved", "scheduled", "in_progress"]) {
+    const amb = ambiente();
+    amb.tabelas.service_orders.push({ id: "os-104", service_order_number: "OS-00104", status });
+    const r = await rodar("create_purchase_order_from_so", { service_order_id: "os-104", product_id: "p-bat", product_name: "Bateria", quantity: 1, unit_cost: 900 }, amb);
+    assertEquals(r.ok, true, JSON.stringify(r));
+    assertEquals(amb.rpcs.filter((c) => c.nome === "os_transicionar_status").map((c) => c.args),
+      [{ p_os: "os-104", p_para: "awaiting_parts", p_via: "oc", p_autor: "u-admin" }], status);
+    assertEquals(amb.escritas.some((e) => e.tabela === "service_orders"), false, status);
+  }
+});
+
+Deno.test("create_purchase_order_from_so: aguardando o cliente fica como está (a porta nem é chamada); a frase da porta vai na resposta", async () => {
+  const amb = ambiente();
+  amb.tabelas.service_orders.push({ id: "os-32", service_order_number: "OS-00032", status: "awaiting_client" });
+  const r = await rodar("create_purchase_order_from_so", { service_order_id: "os-32", product_id: "p-bat", product_name: "Bateria", quantity: 1, unit_cost: 900 }, amb);
+  assertEquals(r.ok, true);
+  assertEquals(amb.rpcs.some((c) => c.nome === "os_transicionar_status"), false);
+
+  const emAndamento = ambiente();
+  emAndamento.tabelas.service_orders.push({ id: "os-74", service_order_number: "OS-00074", status: "in_progress" });
+  // deno-lint-ignore no-explicit-any
+  (emAndamento.db as any).rpc = (nome: string, args: Record<string, unknown>) => {
+    emAndamento.rpcs.push({ nome, args });
+    return Promise.resolve({ data: { ok: true, mudou: false, de: "in_progress", para: "in_progress", texto: "A OS segue em andamento; a compra foi registrada." }, error: null });
+  };
+  const r2 = await rodar("create_purchase_order_from_so", { service_order_id: "os-74", product_id: "p-bat", product_name: "Bateria", quantity: 1, unit_cost: 900 }, emAndamento);
+  assertEquals(r2.ok, true);
+  assertEquals(r2.status_da_os, "A OS segue em andamento; a compra foi registrada.");
+  assertEquals(emAndamento.tabelas.service_orders.find((s) => s.id === "os-74")!.status, "in_progress");
+});
+
+Deno.test("create_purchase_order_from_so: erro na porta não desfaz a OC — vira aviso_status (repetir duplicaria a OC)", async () => {
+  const amb = ambiente();
+  amb.tabelas.service_orders.push({ id: "os-104", service_order_number: "OS-00104", status: "open" });
+  // deno-lint-ignore no-explicit-any
+  (amb.db as any).rpc = (nome: string, args: Record<string, unknown>) => {
+    amb.rpcs.push({ nome, args });
+    return Promise.resolve({ data: null, error: { message: "Você não pode mudar o status desta OS." } });
+  };
+  const r = await rodar("create_purchase_order_from_so", { service_order_id: "os-104", product_id: "p-bat", product_name: "Bateria", quantity: 1, unit_cost: 900 }, amb);
+  assertEquals(r.ok, true);
+  assertEquals(r.aviso_status, "A OC foi criada, mas a OS não mudou de status: Você não pode mudar o status desta OS.");
+  assertEquals(amb.tabelas.purchase_orders.length, 4);
+});
+
 Deno.test("create_purchase_order_from_quote: gera a OC com os escolhidos e FECHA a cotação", async () => {
   const amb = ambiente();
   const r = await rodar("create_purchase_order_from_quote", { code: "COT-00005", supplier_id: "s-victron" }, amb);

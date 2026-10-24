@@ -26,6 +26,7 @@ import {
   montarExtratoHtml, montarReciboHtml, nomeDoArquivo, numeroDoRecibo, ROTULO_REEMBOLSO, ROTULO_REEMBOLSOS, type ContaDoExtrato,
 } from "../../diarias/extrato.ts";
 import { codigoDoCmp } from "./comprovantes.ts";
+import { logEdgeError } from "../../log-error.ts";
 
 const CARGOS: Role[] = ["admin", "financial"];
 const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -129,7 +130,39 @@ export interface PedidoDeDiaria {
   descontos: number | null;
   /** O dia já lançado, quando a jornada dita foi "manter". */
   atual?: DiaLancado | null;
+  /** O que a agenda tinha para a pessoa no dia (Agenda de Produção, Fase 2; só com a agenda automática ligada). */
+  plano?: OsDoPlano[];
+  /** Sem OS dita, a OS veio do plano. */
+  osDoPlano?: boolean;
 }
+
+/** Uma OS do plano da agenda de uma pessoa num dia. */
+export interface OsDoPlano { id: string; numero: string; cliente: string | null }
+
+/**
+ * As OS do plano da agenda daquela pessoa no dia (agenda_os_do_dia — Agenda de Produção, Fase 2, P4). Só com a agenda
+ * automática ligada; fora dela o banco devolve [] e a diária segue como sempre. Reserva não entra (não é compromisso).
+ * Erro de leitura = sem sugestão (a diária segue só com a OS dita, como antes da agenda) e fica em app_error_logs: a
+ * sugestão nunca é inventada.
+ */
+async function osDoPlanoNoDia(ctx: ToolCtx, payeeId: string, dia: string): Promise<OsDoPlano[]> {
+  try {
+    const { data, error } = await ctx.admin.rpc("agenda_os_do_dia", { p_payee: payeeId, p_dia: dia });
+    if (error) throw error;
+    return ((Array.isArray(data) ? data : []) as any[])
+      .filter((o) => o && o.os && !o.reserva)
+      .map((o) => ({ id: String(o.os), numero: String(o.numero ?? ""), cliente: o.cliente_curto ? String(o.cliente_curto) : null }));
+  } catch (e) {
+    await logEdgeError(ctx.admin, {
+      context: "agenda", action: "diaria:plano", level: "warn", error: e,
+      message: `agenda_os_do_dia falhou; a diária segue sem a sugestão do plano: ${(e as { message?: string })?.message ?? e}`,
+    });
+    return [];
+  }
+}
+
+/** "OS-00069 (Vanderlei)". */
+const osComCliente = (o: OsDoPlano) => `${o.numero}${o.cliente ? ` (${o.cliente})` : ""}`;
 
 /** "130", "130,00", "R$ 1.300,50", 130 → número; o resto, nulo. */
 export function numeroDito(v: unknown): number | null {
@@ -174,6 +207,17 @@ export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>
     if (achada && "error" in achada) return achada;
     if (achada) os.push(achada);
   }
+  // Agenda de Produção, Fase 2 (P4): num dia de trabalho (inteiro ou meio, um dia só), sem OS dita a diária vai na OS
+  // do plano daquela pessoa no dia; com OS dita diferente do plano, o "sim" mostra a divergência.
+  let plano: OsDoPlano[] = [];
+  let osDoPlano = false;
+  if (!intervalo && (jornada === "inteiro" || jornada === "meio")) {
+    plano = await osDoPlanoNoDia(ctx, f.id, data);
+    if (!os.length && plano.length) {
+      os.push(...plano.map((o) => ({ id: o.id, numero: o.numero })));
+      osDoPlano = true;
+    }
+  }
   const observacao = typeof args.observacao === "string" && args.observacao.trim() ? args.observacao.trim() : null;
   // Valor do dia só vale para quem trabalhou; numa falta (ou ao apagar) não há o que valer.
   let valorDiaria: number | null = null;
@@ -195,7 +239,26 @@ export async function resolverDiaria(ctx: ToolCtx, args: Record<string, unknown>
     }
   }
   const resolvida: Jornada = atual ? (atual.fracao === 1 ? "inteiro" : atual.fracao === 0.5 ? "meio" : "faltou") : jornada;
-  return { freelancer: f, data, datas, intervalo, fimDeSemana, jornada: resolvida, os, observacao, valorDiaria, extras, descontos, atual };
+  return {
+    freelancer: f, data, datas, intervalo, fimDeSemana, jornada: resolvida, os, observacao, valorDiaria, extras, descontos, atual,
+    plano, osDoPlano,
+  };
+}
+
+/** A OS da diária na linha do "sim": "OS-00069 (Vanderlei), pelo plano" quando veio do plano. */
+function osDaLinha(p: PedidoDeDiaria): string {
+  if (p.osDoPlano && p.plano?.length) return ` · ${p.plano.map(osComCliente).join(", ")}, pelo plano`;
+  return p.os.length ? ` · ${p.os.map((o) => o.numero).join(", ")}` : "";
+}
+
+/** A OS dita não é a do plano: a divergência é a pergunta do "sim". null = bate (ou não há plano). */
+export function divergenciaDoPlano(p: PedidoDeDiaria): string | null {
+  if (p.osDoPlano || !p.plano?.length || !p.os.length) return null;
+  const doPlano = new Set(p.plano.map((o) => o.id));
+  const ditas = new Set(p.os.map((o) => o.id));
+  if (doPlano.size === ditas.size && [...ditas].every((id) => doPlano.has(id))) return null;
+  return `Pelo plano, ${p.freelancer.nome} estava na ${p.plano.map(osComCliente).join(" e ")} nesse dia; vai na ` +
+    `${p.os.map((o) => o.numero).join(" e ")}, como você disse.`;
 }
 
 /** Extra/desconto dito: nulo = não disse; undefined = disse algo que não é valor (vira pergunta). */
@@ -265,7 +328,10 @@ export async function resumirDiaria(ctx: ToolCtx, args: Record<string, unknown>)
   const base = (p.jornada === "faltou" ? 0 : (p.valorDiaria ?? (atual?.valorDiaria || null) ?? perfil?.valor_diaria ?? 0) * FRACAO[p.jornada]);
   const valor = Math.round((base + extras - descontos) * 100) / 100;
   const linhas = [`Registrar diária: ${quem} · *${ROTULO[p.jornada]}*${p.jornada === "faltou" && !extras ? " (sem diária)" : ` · ${brl.format(valor)}`}` +
-    (p.os.length ? ` · ${p.os.map((o) => o.numero).join(", ")}` : "")];
+    osDaLinha(p)];
+  // A OS dita não é a do plano da agenda: a divergência vai no "sim" (Agenda de Produção, Fase 2).
+  const divergencia = divergenciaDoPlano(p);
+  if (divergencia) linhas.push(divergencia);
   linhas.push(...linhaDoValorDito(p, perfil));
   linhas.push(...linhasDosExtras(p, atual));
   if (p.os.length > 1) linhas.push("O valor do dia se divide em partes iguais entre as OS.");

@@ -30,8 +30,10 @@ import {
   useUndoAutoCreated,
   useOpenLoops,
   useResponsaveisDaOs,
+  useModoDaProposta,
   type OpenLoop,
 } from '@/hooks/use-agenda';
+import { TEXTO_AGENDA_AUTOMATICA_LIGADA } from '../../supabase/functions/_shared/agenda-modo';
 // O dia de Brasília e a carga por dia: a mesma regra das ferramentas do assistente (D4/D5).
 import {
   diaBR,
@@ -1531,6 +1533,9 @@ function QuickScheduleDialog({
   // técnico é opcional.
   const { data: responsaveis = [] } = useResponsaveisDaOs();
   const quickSchedule = useQuickSchedule();
+  // Agenda de Produção, Fase 2 (P4): com a agenda automática ligada, o dia escolhido é o pedido do dono
+  // e a agenda escolhe os turnos e a equipe.
+  const { data: modoDaProposta } = useModoDaProposta();
 
   const [orderId, setOrderId] = useState('');
   const [technicianId, setTechnicianId] = useState('');
@@ -1675,6 +1680,9 @@ function QuickScheduleDialog({
               <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
             </div>
           </div>
+          {modoDaProposta === 'ligado' && (
+            <p className="text-sm text-muted-foreground">{TEXTO_AGENDA_AUTOMATICA_LIGADA}</p>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isBusy}>

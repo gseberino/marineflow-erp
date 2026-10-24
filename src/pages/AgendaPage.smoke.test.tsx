@@ -12,7 +12,7 @@ import AgendaPage from './AgendaPage';
 import { AgendaV2 } from '@/v2/pages/wrapped';
 
 // vi.mock é içado para o topo do módulo — helpers/fixtures precisam de vi.hoisted
-const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem, semana, ordensDaSemana, agendarOs } = vi.hoisted(() => {
+const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem, semana, ordensDaSemana, agendarOs, modo } = vi.hoisted(() => {
   const queryBuilder = (): any => {
     const o: any = {};
     for (const k of ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'lt', 'gt', 'order',
@@ -123,7 +123,9 @@ const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, cont
     },
   ];
   const agendarOs = vi.fn(async (_input: any) => ({ warning: null, mensagem: 'OS agendada', status: 'scheduled' }));
-  return { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem, semana, ordensDaSemana, agendarOs };
+  // agenda_config.modo_proposta (Agenda de Produção, Fase 2, P4): o diálogo avisa quando a agenda automática está ligada.
+  return { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem, semana, ordensDaSemana, agendarOs,
+           modo: { proposta: 'desligado' as string } };
 });
 
 vi.mock('@/integrations/supabase/client', () => ({
@@ -178,6 +180,7 @@ vi.mock('@/hooks/use-agenda', () => ({
   useEntityTasks: () => q([]),
   useTaskReminders: () => q([]),
   useQuickSchedule: () => ({ mutate: () => {}, mutateAsync: agendarOs, isPending: false }),
+  useModoDaProposta: () => q(modo.proposta),
   useSaveAgendaTask: mut,
   useCompleteTask: mut,
   useRescheduleTask: mut,
@@ -344,6 +347,23 @@ describe('AgendaPage — smoke de render (todas as visões)', () => {
       service_order_id: 'so-agendar',
       technician_user_id: null,
     });
+    // fora da agenda automática, o diálogo não fala dela
+    expect(within(dialogo).queryByText(/agenda automática/)).toBeNull();
+  });
+
+  it('com a agenda automática ligada, o diálogo diz que a agenda escolhe os turnos e a equipe (Fase 2, P4)', async () => {
+    modo.proposta = 'ligado';
+    try {
+      const user = userEvent.setup();
+      renderPage();
+      await user.click(screen.getByRole('button', { name: 'Agendar' }));
+      await user.click(await screen.findByRole('menuitem', { name: /Ordem de serviço/ }));
+      const dialogo = await screen.findByRole('dialog');
+      expect(within(dialogo).getByText(
+        'Com a agenda automática ligada, a agenda escolhe os turnos e a equipe dentro destes dias.')).toBeTruthy();
+    } finally {
+      modo.proposta = 'desligado';
+    }
   });
 
   // Revisão de 23/10/2026: o diálogo abria com "Sem responsável" mesmo quando a OS já tinha técnico.

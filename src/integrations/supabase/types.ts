@@ -13862,6 +13862,36 @@ export type Database = {
       }
     }
     Functions: {
+      // ── Agenda de Produção, Fase 2 (P4): as RPCs que a tela chama (migrations 20261025100100 e 100200). Trecho
+      // escrito à mão até o próximo "gen types" depois de aplicar; o retorno é o jsonb pronto do banco.
+      agenda_marcar_os: {
+        Args: {
+          p_autor: string | null
+          p_os: string
+          p_de: string
+          p_ate?: string | null
+          p_pessoa?: string | null
+          p_via?: string
+          p_origem?: string
+          p_hoje?: string
+          p_agora?: string
+        }
+        Returns: Json
+      }
+      os_transicionar_status: {
+        Args: {
+          p_os: string
+          p_para: string
+          p_via: string
+          p_motivo?: string | null
+          p_autor?: string | null
+          p_check_in?: string | null
+          p_hoje?: string
+          p_agora?: string
+        }
+        Returns: Json
+      }
+      // ── fim do trecho da Agenda de Produção
       _ai_gateway_auth: {
         Args: { p_token: string; p_worker_id: string }
         Returns: {

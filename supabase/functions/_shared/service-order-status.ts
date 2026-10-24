@@ -84,12 +84,18 @@ export const ROTULOS_STATUS_OS: Record<StatusOS, string> = {
 };
 
 /**
- * O que agendar faz com o status, para cada status. Um `Record` completo de propósito: um status
- * novo no CHECK não compila aqui até alguém decidir o que acontece com ele ao ganhar data.
+ * O que agendar PELA TELA faz com o status, para cada status. Um `Record` completo de propósito: um
+ * status novo no CHECK não compila aqui até alguém decidir o que acontece com ele ao ganhar data.
  *
  *  · 'scheduled' → passa a agendada;
  *  · null        → a data é gravada e o status fica como está (nunca regride);
  *  · 'encerrada' → recusa: OS encerrada não se agenda.
+ *
+ * Desde a Fase 2 (P4, 24/10/2026) QUEM DECIDE é a porta única do banco (os_transicionar_status, via
+ * 'tela_agendar'); esta tabela é a leitura dela, para a tela antecipar a mensagem e recusar a
+ * encerrada antes de conferir a agenda de alguém. A paridade é cobrada por teste: a lista marcada em
+ * supabase/tests/agenda_fase2_rascunho.sql (a porta, status a status, na bancada) e
+ * src/test/porta-unica-status.test.ts (esta tabela contra aquela lista).
  */
 const AO_AGENDAR: Record<StatusOS, "scheduled" | null | "encerrada"> = {
   approved: "scheduled",
@@ -100,19 +106,23 @@ const AO_AGENDAR: Record<StatusOS, "scheduled" | null | "encerrada"> = {
   draft: null,
   // Trabalho já andando: voltar para 'scheduled' apagaria o progresso.
   in_progress: null,
+  // Só sai com todo item crítico na mão: quem confere o material é a porta; a tela não sabe e lê "fica".
   awaiting_parts: null,
-  awaiting_client: null,
+  // Quem agenda pela tela é o dono dizendo que o cliente liberou: a porta aceita (via tela_agendar).
+  awaiting_client: "scheduled",
   completed: "encerrada",
   invoiced: "encerrada",
   cancelled: "encerrada",
 };
 
 /**
- * O status que a OS passa a ter ao ganhar data. null = fica como está (nunca regride).
+ * O status que a OS passa a ter ao ganhar data pela tela. null = fica como está (nunca regride).
  *
- * É a regra única dos três caminhos que agendam — o diálogo "Agendar OS" da Agenda
- * (useQuickSchedule), a tool `schedule_service_order` e a macro `approve_quote_full` — e a
- * semente da porta única de status da Fase 2. Até 23/10/2026 cada caminho decidia sozinho: a
+ * Foi a regra única dos três caminhos que agendam (Fase 0) e a semente da porta única de status.
+ * Desde a Fase 2 (P4) os três — o diálogo "Agendar OS" (useQuickSchedule), a tool
+ * `schedule_service_order` e a macro `approve_quote_full` — gravam só a data e mandam o status pela
+ * porta (os_transicionar_status). Aqui fica a LEITURA da porta para a tela (via tela_agendar) e a
+ * recusa da encerrada antes de qualquer gravação. Até 23/10/2026 cada caminho decidia sozinho: a
  * tela só passava a 'scheduled' a partir de 'pending' (status que não existe, então nunca), e o
  * assistente forçava 'scheduled' por cima de 'in_progress' e 'awaiting_parts'.
  *

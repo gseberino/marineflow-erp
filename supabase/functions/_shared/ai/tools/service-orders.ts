@@ -6,6 +6,15 @@ import { validadePadraoDoOrcamento } from "../validade-orcamento.ts";
 import { acharOS } from "./os-referencia.ts";
 import { ehErro } from "./caixa.ts";
 import { ROTULOS_STATUS_OS, STATUS_OS, statusAoAgendar, type StatusOS } from "../../service-order-status.ts";
+import { diaBR } from "../../agenda-dia.ts";
+import { modoDaPropostaNoBanco } from "../../agenda-modo.ts";
+import { canalDaRpc, resultadoDoRascunho } from "../../agenda/rpc-das-ferramentas.ts";
+
+/** Os status que a porta única de status do banco decide (Agenda de Produção, Fase 2, P4). */
+const STATUS_DE_AGENDA = ["open", "approved", "scheduled", "in_progress", "awaiting_parts", "awaiting_client"];
+
+/** "2026-10-29" → "29/10" (o jeito que agenda_data_dita lê; o banco resolve o ano). */
+const ddmm = (dia: string) => `${dia.slice(8, 10)}/${dia.slice(5, 7)}`;
 
 /**
  * Recalcula os totais da OS após inserir/alterar item — best-effort, não deve derrubar a
@@ -701,7 +710,8 @@ export const serviceOrderTools: ToolDef[] = [
     // Recusa antes de a pendência nascer (quando a tool chega pela rede e pede o "sim"): o dono não
     // aprova uma conclusão que a execução vai recusar.
     preValidar: (args) => recusaDoStatusPeloAssistente(args?.status),
-    async execute(args, { sb, admin }) {
+    async execute(args, ctx) {
+      const { sb, admin } = ctx;
       // D7 (Agenda de Produção, Fase 0, 23/10/2026): a mesma recusa do preValidar (defesa dupla —
       // no perfil a tool é low e roda direto, sem passar pelo preValidar).
       const recusa = recusaDoStatusPeloAssistente(args.status);
@@ -725,6 +735,27 @@ export const serviceOrderTools: ToolDef[] = [
       // A trava do levantamento (D11, dono, 17/09/2026: concluir exige o levantamento respondido)
       // morava aqui e ficou só na tela, que agora é o único caminho de concluir. A porta única de
       // status (Fase 3) a traz de volta junto com a conclusão.
+
+      // Fase 2 (P4, 24/10/2026): os status de agenda (aberta, aprovada, agendada, em andamento,
+      // aguardando peças/cliente) de uma OS que já não é orçamento vão pela porta única do banco
+      // (os_transicionar_status, via 'assistente'): em andamento nunca regride, aguardando peças só
+      // sai com o material na mão, e com a agenda automática ligada "agendada" só com dia no plano.
+      // A conversão do orçamento (draft → …) e o faturar seguem como antes.
+      if (current && current.status !== "draft" && STATUS_DE_AGENDA.includes(String(args.status))) {
+        const { data: porta, error: erroPorta } = await sb.rpc("os_transicionar_status", {
+          p_os: args.id, p_para: args.status, p_via: "assistente", p_autor: ctx.userId ?? null,
+        });
+        if (erroPorta) throw erroPorta;
+        if (!porta?.ok) return { error: String(porta?.texto ?? "A agenda não mudou o status desta OS.") };
+        const ficou = String(porta.para ?? current.status);
+        return {
+          ok: true,
+          mudou: !!porta.mudou,
+          mensagem: String(porta.texto ?? ""),
+          status_da_os: ROTULOS_STATUS_OS[ficou as StatusOS] ?? ficou,
+          service_order: { id: args.id, service_order_number: current.service_order_number, status: ficou },
+        };
+      }
 
       const updatePayload: Record<string, any> = { status: args.status };
 
@@ -1004,7 +1035,8 @@ export const serviceOrderTools: ToolDef[] = [
   {
     name: "schedule_service_order",
     description:
-      "Agenda uma OS definindo data/hora de início, fim e técnico responsável (opcional). Só põe Agendada a OS aprovada ou aberta: não muda o status de OS em andamento, aguardando peça ou cliente, nem de orçamento — grava a data e o status fica como está. OS concluída, faturada ou cancelada não se agenda.",
+      "Agenda uma OS definindo data/hora de início, fim e técnico responsável (opcional). O status quem decide é o sistema: a OS aprovada ou aberta passa a Agendada; em andamento, aguardando peça (sem a peça na mão) ou cliente e orçamento ficam como estão — a data é gravada. OS concluída, faturada ou cancelada não se agenda. " +
+      "Com a agenda automática ligada, NÃO grava: passe em quando o dia como o dono disse (\"quinta\", \"dia 5\") e em trecho as palavras dele; a resposta é a releitura do encaixe que a agenda acha, e só o *grava* do dono marca (a agenda escolhe os turnos e a equipe).",
     input_schema: {
       type: "object",
       properties: {
@@ -1012,17 +1044,22 @@ export const serviceOrderTools: ToolDef[] = [
         scheduled_start_at: { type: "string", description: "ISO datetime" },
         scheduled_end_at: { type: "string", description: "ISO datetime" },
         technician_user_id: { type: "string", description: "Opcional. Sem técnico a OS também é agendada." },
+        quando: { type: "string", description: "O dia como o dono disse (\"quinta\", \"dia 5\", \"semana que vem\"). Com a agenda automática ligada, é ele que vale." },
+        trecho: { type: "string", description: "As palavras do dono sobre este pedido, sem resumir (o banco confere nelas o dia)." },
       },
       required: ["service_order_id", "scheduled_start_at"],
     },
     risk: "low",
-    async execute(argsCrus, { sb }) {
+    async execute(argsCrus, ctx) {
+      const { sb } = ctx;
       // Hora sem fuso vira hora de Brasília (fuso.ts): 09:00 não pode virar 06:00.
       const args = horariosDeBrasilia(argsCrus);
 
-      // D8 (Agenda de Produção, Fase 0, 23/10/2026): o status ao agendar é a regra única dos três
-      // caminhos (statusAoAgendar). Até aqui, com técnico, a tool forçava 'scheduled' por cima de
-      // qualquer status — uma OS aguardando peça ou já em andamento voltava a "Agendada".
+      // D8 (Agenda de Produção, Fase 0, 23/10/2026): até então, com técnico, a tool forçava
+      // 'scheduled' por cima de qualquer status — uma OS aguardando peça ou já em andamento voltava a
+      // "Agendada". Fase 2 (P4, 24/10/2026): o status não vai no update; vai pela porta única do banco
+      // (os_transicionar_status, via 'assistente'). statusAoAgendar fica só para recusar a encerrada
+      // antes de gravar qualquer coisa.
       const { data: atual, error: erroAtual } = await sb
         .from("service_orders")
         .select("status, service_order_number")
@@ -1030,11 +1067,28 @@ export const serviceOrderTools: ToolDef[] = [
         .maybeSingle();
       if (erroAtual) throw erroAtual;
       if (!atual) return { error: "OS não encontrada." };
-      let novoStatus: string | null;
       try {
-        novoStatus = statusAoAgendar(String(atual.status));
+        statusAoAgendar(String(atual.status));
       } catch (e) {
         return { error: `${(e as Error).message} A ${atual.service_order_number ?? "OS"} não foi agendada.` };
+      }
+
+      // Com a agenda automática ligada, a data é da agenda: vira o rascunho do pedido do dono
+      // (agenda_rascunho_marcar), com a releitura do encaixe; só o *grava* dele marca.
+      if ((await modoDaPropostaNoBanco(ctx.admin ?? sb)) === "ligado") {
+        const inicio = diaBR(String(args.scheduled_start_at));
+        const fim = args.scheduled_end_at ? diaBR(String(args.scheduled_end_at)) : inicio;
+        const { data: rascunho, error: erroRascunho } = await sb.rpc("agenda_rascunho_marcar", {
+          p_autor: ctx.userId ?? null,
+          p_canal: canalDaRpc(ctx.canal),
+          p_os: String(args.service_order_id),
+          p_quando: typeof args.quando === "string" && args.quando.trim() ? args.quando.trim() : ddmm(inicio),
+          p_ate: !args.quando && fim > inicio ? ddmm(fim) : null,
+          p_pessoa: null,
+          p_trecho: typeof args.trecho === "string" && args.trecho.trim() ? args.trecho.trim() : (typeof args.quando === "string" ? args.quando : null),
+        });
+        if (erroRascunho) throw erroRascunho;
+        return resultadoDoRascunho(rascunho, "agenda_rascunho_marcar");
       }
 
       // Conflito de agenda (tarefas + OS) via RPC única — mesma checagem da UI
@@ -1053,12 +1107,20 @@ export const serviceOrderTools: ToolDef[] = [
           };
         }
       }
+      // Só a data. O status independe do técnico e quem decide é a porta (abaixo).
       const update: any = { scheduled_start_at: args.scheduled_start_at };
       if (args.scheduled_end_at) update.scheduled_end_at = args.scheduled_end_at;
-      // O status independe do técnico: só muda se a regra mandar (aprovada/aberta → agendada).
-      if (novoStatus) update.status = novoStatus;
       const { data, error } = await sb.from("service_orders").update(update).eq("id", args.service_order_id).select().single();
       if (error) throw error;
+      const { data: porta, error: erroPorta } = await sb.rpc("os_transicionar_status", {
+        p_os: args.service_order_id, p_para: "scheduled", p_via: "assistente", p_autor: ctx.userId ?? null,
+      });
+      if (erroPorta) {
+        return {
+          ok: false,
+          error: `A data foi gravada, mas o status da ${atual.service_order_number ?? "OS"} não mudou: ${erroPorta.message ?? erroPorta}`,
+        };
+      }
       // D8b: o builder do PostgREST não tem .catch() — o `.upsert(...).catch(() => null)` de antes
       // lançava TypeError DEPOIS de gravar a data e o status, e o técnico nunca era vinculado. O erro
       // vem em { error }; aqui ele vira aviso, porque a data já está gravada.
@@ -1067,13 +1129,15 @@ export const serviceOrderTools: ToolDef[] = [
       if (args.technician_user_id && args.scheduled_end_at) {
         aviso_carga = await dayOverloadNotice(sb, args.technician_user_id, args.scheduled_start_at, args.scheduled_end_at, { excludeSo: args.service_order_id });
       }
-      const ficou = String(data?.status ?? novoStatus ?? atual.status);
+      const ficou = String(porta?.para ?? atual.status);
       return {
         ok: true,
-        service_order: data,
+        service_order: data ? { ...data, status: ficou } : data,
         status_da_os: ROTULOS_STATUS_OS[ficou as StatusOS] ?? ficou,
-        ...(!novoStatus && atual.status !== "scheduled"
-          ? { nota_status: `A data foi gravada e a OS continua ${ROTULOS_STATUS_OS[atual.status as StatusOS] ?? atual.status}: agendar não muda o status de OS em andamento, aguardando peça ou cliente, nem de orçamento.` }
+        // A porta não mudou o status: a frase dela diz por quê ("Ainda falta … na mão: a OS continua
+        // aguardando peças.", "A OS já começou: não volta para agendada.").
+        ...(!porta?.mudou && atual.status !== "scheduled"
+          ? { nota_status: `A data foi gravada e o status ficou ${ROTULOS_STATUS_OS[ficou as StatusOS] ?? ficou}: ${String(porta?.texto ?? "agendar não muda o status desta OS.")}` }
           : {}),
         ...(aviso_tecnico ? { aviso_tecnico } : {}),
         ...(aviso_carga ? { aviso_carga } : {}),

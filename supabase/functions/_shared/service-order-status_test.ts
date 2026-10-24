@@ -69,6 +69,9 @@ Deno.test("todo status tem rótulo, e todo rótulo tem status", () => {
 // Até 23/10/2026 a tela só passava a 'scheduled' a partir de 'pending' (inexistente: nunca) e o
 // assistente forçava 'scheduled' por cima de trabalho em andamento. A tabela abaixo é a decisão
 // para CADA status do CHECK: se entrar um status novo sem linha aqui, o primeiro teste falha.
+// Fase 2 (P4, 24/10/2026): a decisão passou para a porta do banco (via tela_agendar); aguardando o
+// cliente vira agendada pela tela (o dono que agenda é quem diz que o cliente liberou). A paridade com
+// a porta é cobrada em src/test/porta-unica-status.test.ts.
 const ESPERADO_AO_AGENDAR: Record<string, "scheduled" | null | "lança"> = {
   approved: "scheduled",
   open: "scheduled",
@@ -76,7 +79,7 @@ const ESPERADO_AO_AGENDAR: Record<string, "scheduled" | null | "lança"> = {
   draft: null,
   in_progress: null,
   awaiting_parts: null,
-  awaiting_client: null,
+  awaiting_client: "scheduled",
   completed: "lança",
   invoiced: "lança",
   cancelled: "lança",

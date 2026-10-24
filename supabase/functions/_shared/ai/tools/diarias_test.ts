@@ -16,6 +16,8 @@ import { buildPendingSummary } from "../agent.ts";
 type Opcoes = {
   diaLancado?: boolean; cargo?: string; semTelefone?: boolean; semAcerto?: boolean; acertoReaberto?: boolean;
   simulacao?: { data?: unknown; error?: { message: string } };
+  /** Agenda de Produção, Fase 2 (P4): o que agenda_os_do_dia devolve (o plano da pessoa no dia), ou o erro dela. */
+  plano?: unknown[]; erroDoPlano?: string;
 };
 function admin(opcoes: Opcoes = {}) {
   const tabelas: Record<string, any[]> = {
@@ -61,6 +63,12 @@ function admin(opcoes: Opcoes = {}) {
   const simuladas: Record<string, unknown>[] = [];
   const rpc = (n: string, a: Record<string, unknown>) => {
     simuladas.push({ n, ...a });
+    if (n === "agenda_os_do_dia") {
+      return Promise.resolve(opcoes.erroDoPlano
+        ? { data: null, error: { message: opcoes.erroDoPlano } }
+        : { data: opcoes.plano ?? [], error: null });
+    }
+    if (n === "log_app_error") return Promise.resolve({ data: null, error: null });
     return Promise.resolve({ data: opcoes.simulacao?.data ?? null, error: opcoes.simulacao?.error ?? null });
   };
   return { from: consulta, rpc, simuladas };
@@ -713,4 +721,71 @@ Deno.test("dividir_pagamento_freelancer: acha o Pix do banco, divide pela propos
   const rt = await tool("dividir_pagamento_freelancer").execute({ freelancer: "roberto" }, { ...tec.c, userRole: "technician" } as never) as { error?: string };
   assertEquals(typeof rt.error, "string");
   assertEquals(tec.chamadas.length, 0);
+});
+
+// ─── Agenda de Produção, Fase 2 (P4): a diária sugere a OS do plano ───────────────────────────────────
+// Com a agenda automática ligada, agenda_os_do_dia diz em que OS a pessoa estava no plano naquele dia. Sem OS dita, a
+// diária vai nela (e o "sim" diz "pelo plano"); com OS dita diferente, o "sim" mostra a divergência. Sem plano (agenda
+// fora de ligado: o banco devolve []), tudo como antes. A leitura que falha não inventa OS: segue sem sugestão e vai
+// para app_error_logs.
+const PLANO_DO_DIA = [{ os: "os69", numero: "OS-00069", cliente_curto: "Vanderlei", turnos: ["manha", "tarde"], tipo: "execucao", reserva: false }];
+
+Deno.test("plano: sem OS dita, a diária do dia vai na OS do plano daquela pessoa (agenda_os_do_dia com o favorecido e o dia)", async () => {
+  const { c, chamadas } = ctx({ plano: PLANO_DO_DIA });
+  await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro" }, c as never);
+  const reg = chamadas.find((x) => x.n === "registrar_diaria")!;
+  assertEquals(reg.a.p_os_ids, ["os69"]);
+  const pedido = (c.admin as any).simuladas.find((s: any) => s.n === "agenda_os_do_dia");
+  assertEquals([pedido.p_payee, pedido.p_dia], ["p-rob", "2026-09-24"]);
+});
+
+Deno.test("plano: o \"sim\" diz a OS e o cliente, pelo plano", async () => {
+  const txt = String(await resumirDiaria(ctx({ plano: PLANO_DO_DIA }).c as never, { freelancer: "roberto", data: "24/09/2026", jornada: "inteiro" }))
+    .replace(/ /g, " ");
+  assertStringIncludes(txt, "*Roberto Daniel Rodrigues Correa* · qui 24/09 · *dia inteiro* · R$ 160,00 · OS-00069 (Vanderlei), pelo plano");
+  assertEquals(txt.includes("Pelo plano,"), false);
+});
+
+Deno.test("plano: OS dita diferente do plano → a divergência vai no \"sim\" e vale a OS dita", async () => {
+  const txt = String(await resumirDiaria(ctx({ plano: PLANO_DO_DIA }).c as never, { freelancer: "roberto", data: "24/09/2026", jornada: "inteiro", os: "60" }))
+    .replace(/ /g, " ");
+  assertStringIncludes(txt, "R$ 160,00 · OS-00060");
+  assertStringIncludes(txt, "Pelo plano, Roberto Daniel Rodrigues Correa estava na OS-00069 (Vanderlei) nesse dia; vai na OS-00060, como você disse.");
+  const { c, chamadas } = ctx({ plano: PLANO_DO_DIA });
+  await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro", os: "60" }, c as never);
+  assertEquals(chamadas.find((x) => x.n === "registrar_diaria")!.a.p_os_ids, ["os60"]);
+});
+
+Deno.test("plano: a OS dita que É a do plano não vira divergência; duas OS no dia vão as duas", async () => {
+  const igual = String(await resumirDiaria(ctx({ plano: [{ ...PLANO_DO_DIA[0], os: "os60", numero: "OS-00060" }] }).c as never,
+    { freelancer: "roberto", data: "24/09/2026", jornada: "inteiro", os: "60" }));
+  assertEquals(igual.includes("Pelo plano,"), false);
+  const duas = [{ ...PLANO_DO_DIA[0], turnos: ["manha"] }, { os: "os60", numero: "OS-00060", cliente_curto: "Lenine", turnos: ["tarde"], tipo: "execucao", reserva: false }];
+  const { c, chamadas } = ctx({ plano: duas });
+  await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro" }, c as never);
+  assertEquals(chamadas.find((x) => x.n === "registrar_diaria")!.a.p_os_ids, ["os69", "os60"]);
+});
+
+Deno.test("plano: sem plano (agenda fora de ligado), falta, intervalo e reserva ficam como antes", async () => {
+  const semPlano = ctx();
+  await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro" }, semPlano.c as never);
+  assertEquals(semPlano.chamadas.find((x) => x.n === "registrar_diaria")!.a.p_os_ids, null);
+  const falta = ctx({ plano: PLANO_DO_DIA });
+  await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "faltou" }, falta.c as never);
+  assertEquals(falta.chamadas.find((x) => x.n === "registrar_diaria")!.a.p_os_ids, null);
+  assertEquals((falta.c.admin as any).simuladas.some((s: any) => s.n === "agenda_os_do_dia"), false);
+  const reserva = ctx({ plano: [{ ...PLANO_DO_DIA[0], reserva: true }] });
+  await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro" }, reserva.c as never);
+  assertEquals(reserva.chamadas.find((x) => x.n === "registrar_diaria")!.a.p_os_ids, null);
+  const p = await resolverDiaria(ctx({ plano: PLANO_DO_DIA }).c as never, { freelancer: "roberto", data: "21/09/2026", data_ate: "24/09/2026", jornada: "inteiro" });
+  if ("error" in p) throw new Error(p.error);
+  assertEquals(p.os, []);
+});
+
+Deno.test("plano: a leitura do plano que falha não inventa OS — segue como antes e vai para app_error_logs", async () => {
+  const { c, chamadas } = ctx({ erroDoPlano: "function agenda_os_do_dia does not exist" });
+  await tool("registrar_diaria").execute({ freelancer: "Roberto", data: "24/09/2026", jornada: "inteiro" }, c as never);
+  assertEquals(chamadas.find((x) => x.n === "registrar_diaria")!.a.p_os_ids, null);
+  const log = (c.admin as any).simuladas.find((s: any) => s.n === "log_app_error");
+  assertEquals([log.p_context, log.p_action, log.p_level], ["agenda", "diaria:plano", "warn"]);
 });

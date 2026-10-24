@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+// A porta única de status (Agenda de Produção, Fase 2, P4): de quais status a OC move a OS.
+import { STATUS_QUE_A_OC_MOVE } from '../../supabase/functions/_shared/agenda-modo';
 
 export type POStatus = 'draft' | 'sent' | 'partial' | 'received' | 'cancelled';
 
@@ -244,6 +246,51 @@ export function useReceivePO() {
   });
 }
 
+// ── A OS depois da OC (Agenda de Produção, Fase 2, P4) ─────────────────────────
+
+/** O que a OC criada a partir da OS fez com a OS. */
+export type OsDepoisDaOC = { mudou: boolean; texto: string | null; aviso: string | null };
+
+/**
+ * Depois de criar a OC a partir da OS, a OS passa a "aguardando peças" pela porta única de status
+ * (os_transicionar_status, via 'oc') — de aberta, aprovada ou agendada. Em andamento SEGUE em
+ * andamento (NOVO-agenda-10: até 24/10/2026 a OC regredia a OS que já tinha começado; a porta diz "A OS
+ * segue em andamento; a compra foi registrada."); aguardando o cliente fica como estava. A OC já foi
+ * criada: um erro aqui vira aviso, nunca "erro ao criar a OC" (que levaria a criar outra).
+ */
+export async function osDepoisDaOC(serviceOrderId: string): Promise<OsDepoisDaOC> {
+  try {
+    const { data: so, error } = await supabase
+      .from('service_orders')
+      .select('status')
+      .eq('id', serviceOrderId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!so || !STATUS_QUE_A_OC_MOVE.includes(String(so.status))) return { mudou: false, texto: null, aviso: null };
+    const { data, error: portaErr } = await supabase.rpc('os_transicionar_status', {
+      p_os: serviceOrderId,
+      p_para: 'awaiting_parts',
+      p_via: 'oc',
+    });
+    if (portaErr) throw portaErr;
+    const porta = (data ?? {}) as { ok?: boolean; mudou?: boolean; texto?: string };
+    return {
+      mudou: !!porta.mudou,
+      texto: porta.texto ?? null,
+      aviso: porta.ok === false ? `A ordem de compra foi criada, mas a OS não mudou de status: ${porta.texto ?? 'recusado'}` : null,
+    };
+  } catch (e: any) {
+    return { mudou: false, texto: null, aviso: `A ordem de compra foi criada, mas a OS não mudou de status: ${e?.message ?? e}` };
+  }
+}
+
+/** O toast da OC com o que aconteceu com a OS. Exportada para o teste. */
+export function mensagemDaOC(base: string, os: OsDepoisDaOC): string {
+  if (os.mudou) return `${base} OS movida para "Aguardando Peças".`;
+  if (os.texto && !os.aviso) return `${base} ${os.texto}`;
+  return base;
+}
+
 // ── Create PO directly from a service order (sob encomenda) ───────────────────
 
 export function useCreatePOFromOS() {
@@ -288,19 +335,15 @@ export function useCreatePOFromOS() {
         });
       if (itemErr) throw itemErr;
 
-      // Move OS to awaiting_parts if not already there
-      await supabase
-        .from('service_orders')
-        .update({ status: 'awaiting_parts' })
-        .eq('id', params.serviceOrderId)
-        .in('status', ['open', 'in_progress', 'approved', 'scheduled']);
-
-      return po;
+      // A OS passa a esperar peça pela porta única (via 'oc'); em andamento segue em andamento.
+      const os = await osDepoisDaOC(params.serviceOrderId);
+      return { po, os };
     },
-    onSuccess: () => {
+    onSuccess: ({ os }) => {
       qc.invalidateQueries({ queryKey: ['purchase-orders'] });
       qc.invalidateQueries({ queryKey: ['service-orders'] });
-      toast.success('Ordem de compra criada. OS movida para "Aguardando Peças".');
+      toast.success(mensagemDaOC('Ordem de compra criada.', os));
+      if (os.aviso) toast.warning(os.aviso);
     },
     onError: (e: any) => toast.error(e.message || 'Erro ao criar PO'),
   });
@@ -383,25 +426,20 @@ export function useCreatePOsFromShortages() {
         created.push(po as any);
       }
 
-      // A OS passa a esperar peça — só avança de estados em que isso faz sentido.
-      await supabase
-        .from('service_orders')
-        .update({ status: 'awaiting_parts' })
-        .eq('id', params.serviceOrderId)
-        .in('status', ['open', 'in_progress', 'approved', 'scheduled']);
-
-      return created;
+      // A OS passa a esperar peça pela porta única (via 'oc'); em andamento segue em andamento.
+      const os = await osDepoisDaOC(params.serviceOrderId);
+      return { created, os };
     },
-    onSuccess: (created) => {
+    onSuccess: ({ created, os }) => {
       qc.invalidateQueries({ queryKey: ['purchase-orders'] });
       qc.invalidateQueries({ queryKey: ['service-orders'] });
       qc.invalidateQueries({ queryKey: ['purchase-needs'] });
       const nums = created.map(p => p.po_number).join(', ');
-      toast.success(
-        created.length > 1
-          ? `${created.length} ordens de compra criadas (${nums}). OS movida para "Aguardando Peças".`
-          : `Ordem de compra ${nums} criada. OS movida para "Aguardando Peças".`,
-      );
+      toast.success(mensagemDaOC(
+        created.length > 1 ? `${created.length} ordens de compra criadas (${nums}).` : `Ordem de compra ${nums} criada.`,
+        os,
+      ));
+      if (os.aviso) toast.warning(os.aviso);
     },
     onError: (e: any) => toast.error(e.message || 'Erro ao gerar as ordens de compra'),
   });

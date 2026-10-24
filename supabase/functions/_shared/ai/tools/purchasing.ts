@@ -2,11 +2,36 @@ import { blockTechnician, NON_TECHNICIAN_ROLES, type Role, type ToolDef } from "
 import { buscarCadastro } from "../busca-cadastro.ts";
 import { CARGOS_DE_COMPRAS, criarOC, itensDitos } from "./compras-base.ts";
 import { resolverRecebimento } from "./compras-ciclo.ts";
+import { STATUS_QUE_A_OC_MOVE } from "../../agenda-modo.ts";
 
 // O número da OC (mesmo esquema não-atômico de useCreatePOFromOS, "OC-00001") mora em
 // compras-base.ts desde 07/10/2026, junto de criarOC, que as três tools de criar OC usam.
 // Continua saindo daqui para quem já importava.
 export { generatePONumber } from "./compras-base.ts";
+
+/**
+ * Depois da OC criada a partir da OS: a OS passa a "aguardando peças" pela porta (via 'oc') — de aberta,
+ * aprovada ou agendada; em andamento a porta mantém e diz; aguardando o cliente (e o resto) fica como está.
+ * Nunca lança: a OC já existe; erro vira aviso_status.
+ */
+async function osDepoisDaOC(
+  ctx: { admin: any; userId?: string | null },
+  serviceOrderId: string,
+): Promise<{ status_da_os?: string; aviso_status?: string }> {
+  try {
+    const { data: so, error } = await ctx.admin.from("service_orders").select("status").eq("id", serviceOrderId).maybeSingle();
+    if (error) throw error;
+    if (!so || !STATUS_QUE_A_OC_MOVE.includes(String(so.status))) return {};
+    const { data: porta, error: erroPorta } = await ctx.admin.rpc("os_transicionar_status", {
+      p_os: serviceOrderId, p_para: "awaiting_parts", p_via: "oc", p_autor: ctx.userId ?? null,
+    });
+    if (erroPorta) throw erroPorta;
+    if (porta?.ok === false) return { aviso_status: `A OC foi criada, mas a OS não mudou de status: ${porta?.texto ?? "recusado"}` };
+    return porta?.texto ? { status_da_os: String(porta.texto) } : {};
+  } catch (e) {
+    return { aviso_status: `A OC foi criada, mas a OS não mudou de status: ${(e as Error)?.message ?? e}` };
+  }
+}
 
 /** Compras é do admin e do financeiro (policies de purchase_orders); revalida no execute. */
 function cargoDeCompras(ctx: { userRole: string }) {
@@ -164,7 +189,7 @@ export const purchasingTools: ToolDef[] = [
   },
   {
     name: "create_purchase_order_from_so",
-    description: "Cria uma ordem de compra com um item, vinculada a uma OS específica (peça sob encomenda), e move a OS para 'Aguardando peças'.",
+    description: "Cria uma ordem de compra com um item, vinculada a uma OS específica (peça sob encomenda), e move a OS para 'Aguardando peças' (aberta, aprovada ou agendada). OS em andamento segue em andamento; aguardando o cliente fica como está — a resposta diz o que aconteceu com a OS.",
     input_schema: {
       type: "object",
       properties: {
@@ -201,13 +226,12 @@ export const purchasingTools: ToolDef[] = [
       if ("erro" in criada) return { error: criada.erro };
       const po = criada.po;
 
-      await admin
-        .from("service_orders")
-        .update({ status: "awaiting_parts" })
-        .eq("id", args.service_order_id)
-        .in("status", ["open", "in_progress", "approved", "scheduled"]);
-
-      return { ok: true, purchase_order: po };
+      // Agenda de Produção, Fase 2 (P4, 24/10/2026): o status vai pela porta única do banco
+      // (os_transicionar_status, via 'oc'). Até aqui o UPDATE direto passava a OS EM ANDAMENTO para
+      // "aguardando peças" (NOVO-agenda-10); a porta a mantém em andamento e diz. A OC já foi criada:
+      // erro aqui vira aviso na resposta (repetir a ferramenta duplicaria a OC).
+      const os = await osDepoisDaOC(ctx, String(args.service_order_id));
+      return { ok: true, purchase_order: po, ...os };
     },
   },
   {

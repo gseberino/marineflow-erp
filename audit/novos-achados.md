@@ -2650,6 +2650,27 @@ porque só o dono pode preenchê-las.
   pergunta "parou?" é a vigia da agenda, pela última evidência (diária, dia feito ou início), uma vez só. Testes em
   `supabase/functions/task-automations/rules_test.ts` ("R2: erro de leitura lança no find e no isResolved").
 
+### [NOVO-agenda-10] A OC criada a partir da OS passava a OS EM ANDAMENTO para "aguardando peças"
+
+- **Encontrado em:** Agenda de Produção, Fase 2 (conferência de 24/10/2026 no código, HEAD 133d4838).
+- **Onde:** os três caminhos que criam OC a partir da OS — `supabase/functions/_shared/ai/tools/purchasing.ts`
+  (`create_purchase_order_from_so`, antigo `:204-208`), `src/hooks/use-purchase-orders.ts` (`useCreatePOFromOS`, antigo
+  `:291-296`, no alerta de estoque da OS; `useCreatePOsFromShortages`, antigo `:386-391`, nas necessidades de compra). Os três
+  faziam `update({ status: 'awaiting_parts' })` com `.in('status', ['open', 'in_progress', 'approved', 'scheduled'])`.
+- **O quê:** comprar uma peça que faltou no meio do serviço regredia a OS que já tinha começado: "em andamento" virava
+  "aguardando peças", o check-in ficava, e a tela, a R2 ("OS parada") e o Secretário passavam a tratar a OS como se não tivesse
+  começado. Pela regra do plano (§4.7) "em andamento" só sai por "parou" dito pelo dono (com o motivo) ou pela conclusão. Os
+  hooks da tela também não olhavam o erro do UPDATE: se ele falhasse, o toast dizia "OS movida para Aguardando Peças" assim
+  mesmo.
+- **Corrigido no P4 da Fase 2:** os três passam pela porta única de status (`os_transicionar_status`, via `oc`, migration
+  `20261025100100`): de aberta, aprovada ou agendada a OS vai para "aguardando peças"; em andamento ela SEGUE em andamento (a
+  porta responde "A OS segue em andamento; a compra foi registrada.", ok e sem mudar) e a OC é criada do mesmo jeito; aguardando
+  o cliente fica como estava (era assim antes). A OC já criada nunca vira "erro ao criar a OC" por causa do status: falha na
+  porta vira aviso (o toast de aviso na tela, `aviso_status` no assistente). Testes em `src/hooks/use-purchase-orders.test.ts` e
+  `supabase/functions/_shared/ai/tools/compras-ciclo_test.ts`; o grep de `src/test/porta-unica-status.test.ts` impede a volta do
+  UPDATE direto. **Muda o que o dono vê:** a OC de uma OS em andamento não a move mais para "aguardando peças" (vai no
+  `fase2-oks.md`).
+
 ### [NOVO-agenda-11] O formulário da OS devolve a data cortada no minuto: com a agenda automática ligada, uma data com segundos travaria o salvar
 
 - **Encontrado em:** Agenda de Produção, Fase 2, pacote P1 (conferência de 24/10/2026 no código, HEAD 133d4838; SELECT
