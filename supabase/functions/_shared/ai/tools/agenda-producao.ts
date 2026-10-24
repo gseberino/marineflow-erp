@@ -17,6 +17,7 @@ import {
   canalDaRpc,
   type ChamadaDaRpc,
   FOCOS,
+  LIMPAVEIS,
   paraAgendaVer,
   paraDisponibilidade,
   paraMaterial,
@@ -102,7 +103,8 @@ export const agendaProducaoTools: ToolDef[] = [
       "Anota num RASCUNHO o que o dono disse de um serviço: quantos dias, quem vai e em que turno, se ele abre e fecha, " +
       "até quando o cliente precisa, quando o barco/motorhome está fora (bem_fora) ou volta (bem_livre_em), \"não antes " +
       "de\", escopo, espera, prioridade, \"não tem peça a comprar\" (sem_material) ou \"aceito a sua estimativa\" " +
-      "(aceitar_sugestao). NÃO grava de fato: devolve a releitura para o dono conferir, e só o *grava* dele grava. Passe " +
+      "(aceitar_sugestao); o que ele desfaz (\"pode voltar\", \"tira da espera\", \"o cliente não tem mais prazo\") vai em " +
+      "limpar. NÃO grava de fato: devolve a releitura para o dono conferir, e só o *grava* dele grava. Passe " +
       "só números e datas que ele disse, como disse (\"dia 3\", \"terça\"), e em trecho as palavras dele. Correção = chame " +
       "de novo para o mesmo serviço. Não agenda OS nem cria tarefa.",
     input_schema: {
@@ -131,6 +133,13 @@ export const agendaProducaoTools: ToolDef[] = [
         prioridade: { type: "integer", enum: [1, 2, 3], description: "1 = passa na frente." },
         sem_material: { type: "boolean", description: "true = \"não tem peça a comprar\"." },
         aceitar_sugestao: { type: "boolean", description: "true = o dono aceitou a duração estimada pelo sistema." },
+        limpar: {
+          type: "array",
+          items: { type: "string", enum: [...LIMPAVEIS] },
+          description:
+            "O que o dono desfez: espera (\"pode voltar\", \"tira da espera\"), nao_antes (\"não tem mais data mínima\"), " +
+            "prazo (\"o cliente não tem mais prazo\"), escopo (\"o escopo está resolvido\").",
+        },
         trecho: TRECHO,
       },
       required: ["os", "trecho"],

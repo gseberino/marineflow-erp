@@ -85,6 +85,8 @@
 --     resumo do material e na restrição curta.
 --   · orçamento aprovado que nunca virou OS: o material dele diz "converter em OS ou arquivar antes de comprar (2
 --     itens a comprar)" (a lista de material e a visão da OS), em vez de mandar comprar.
+--   · a prioridade que o dono deu (os_planejamento.prioridade_manual: 1 = passa na frente) é a 1ª chave da ordem de
+--     trabalho do painel (bloco 2, rodada, listas); sem prioridade, depois de todas.
 --
 -- O QUE NÃO MUDA: nenhuma tabela, nenhum dado, nenhuma função de P1–P3, my_agenda, o Secretário, as telas.
 --
@@ -457,7 +459,7 @@ begin
   ),
   b as (
     select pr.p, pr.ord, so.signed_at, so.status as st, so.quote_status as qs,
-           k.sinal_pago, k.aprovada_em, k.agendada_de, k.agendada_ate,
+           k.sinal_pago, k.aprovada_em, k.agendada_de, k.agendada_ate, pl.prioridade_manual as prioridade,
            count(*) over (partition by public._agenda_normal(pr.p ->> 'cliente_curto')) as n_nome,
            (select e from jsonb_array_elements(pr.p -> 'restricoes') with ordinality t(e, o)
              where (e ->> 'bloqueia')::boolean and e ->> 'quem' = 'dono' order by o limit 1) as principal,
@@ -469,10 +471,14 @@ begin
       from pr
       join public.os_carteira(p_hoje) k on k.service_order_id = (pr.p ->> 'os')::uuid
       join public.service_orders so on so.id = k.service_order_id
+      left join public.os_planejamento pl on pl.service_order_id = k.service_order_id
   ),
   o as (
+    -- A ordem de trabalho: a prioridade que o dono deu ("passa na frente" = 1; sem prioridade, depois de todas), depois
+    -- sinal pago, orçamento aprovado e a aprovação mais antiga.
     select b.*,
-           row_number() over (order by (b.sinal_pago > 0) desc, (b.st = 'draft' and b.qs = 'approved') desc,
+           row_number() over (order by coalesce(b.prioridade, 9), (b.sinal_pago > 0) desc,
+                                       (b.st = 'draft' and b.qs = 'approved') desc,
                                        b.aprovada_em, b.p ->> 'numero' collate "C") as ordem,
            row_number() over (order by b.aprovada_em, b.p ->> 'numero' collate "C") as ordem_aprov
       from b
@@ -494,7 +500,7 @@ begin
                       when 'parada' then 'andamento'
                       when 'congelada' then 'espera'
                       else 'fora' end,
-           'executavel', o.exe, 'ordem', o.ordem, 'ordem_aprov', o.ordem_aprov,
+           'executavel', o.exe, 'ordem', o.ordem, 'ordem_aprov', o.ordem_aprov, 'prioridade', o.prioridade,
            'aprovada_em', o.aprovada_em, 'assinado', o.signed_at is not null, 'sinal_pago', o.sinal_pago,
            'prazo', o.p -> 'prazo_efetivo', 'prazo_fonte', o.p ->> 'prazo_fonte', 'razao', o.p -> 'razao_critica',
            'atrasada', o.exe and (o.p ->> 'prazo_efetivo')::date < p_hoje,
@@ -553,7 +559,7 @@ begin
 end;
 $function$;
 
-comment on function public._agenda_painel(date) is 'Agenda de Produção (Fase 1, P4): o insumo de todos os textos, lido uma vez — capacidade (agenda_capacidade_semanal), prontidão de cada OS da carteira com grupo (pronto/quase/travado/esperando/parado/marcado/andamento/espera), ordem de trabalho (sinal pago → orçamento aprovado → resto, aprovação mais antiga primeiro), restrição principal do dono, atrasada, em risco, data marcada vencida; a fila executável em diárias-pessoa e o livre de verdade (ceil(fila ÷ capacidade diária) + 1 dias úteis). Não é texto.';
+comment on function public._agenda_painel(date) is 'Agenda de Produção (Fase 1, P4): o insumo de todos os textos, lido uma vez — capacidade (agenda_capacidade_semanal), prontidão de cada OS da carteira com grupo (pronto/quase/travado/esperando/parado/marcado/andamento/espera), ordem de trabalho (a prioridade do dono → sinal pago → orçamento aprovado → resto, aprovação mais antiga primeiro), restrição principal do dono, atrasada, em risco, data marcada vencida; a fila executável em diárias-pessoa e o livre de verdade (ceil(fila ÷ capacidade diária) + 1 dias úteis). Não é texto.';
 
 -- As OS do painel que valem um filtro, na ordem pedida, no formato de _agenda_nomes.
 create or replace function public._agenda_lista_de(p_pn jsonb, p_grupo text, p_ordem text default 'ordem')

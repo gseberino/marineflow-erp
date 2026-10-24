@@ -22,7 +22,8 @@
 --   J  descartar
 --   K  material: parcial (e o texto "3 de 8 na mão"), novo (fora do orçamento), fornecedor não cadastrado, dispensar,
 --      "pode começar sem", "tá a caminho" sem data que vence, compra combinada que não volta a perguntar
---   L  planejar: "não tem peça a comprar", "não antes de", espera, escopo, campo que não existe, estimativa aceita
+--   L  planejar: "não tem peça a comprar", "não antes de", espera, escopo, campo que não existe, estimativa aceita;
+--      desfazer (sai da espera, sem prazo, sem "não antes de", escopo resolvido); a prioridade muda a ordem do bloco 2
 --   M  agenda desligada (modo_leitura): as três escritas recusam e nada entra; o *grava* do rascunho de antes grava
 --
 -- ═══ COMO RODAR ═══
@@ -856,6 +857,67 @@ begin
     end;
     v_res := pg_temp.ok(v_res, 'L5 campo que não existe é erro de quem chamou (22023), não pergunta ao dono',
       v_cod = '22023' and v_msg = 'agenda_rascunho_planejar: o campo "horas" não existe', v_cod || ' ' || v_msg);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- ── L (cont.). Desfazer (sai da espera, sem prazo, sem "não antes de", escopo resolvido) e a prioridade ──
+  begin
+    perform pg_temp.plan('Lenine', '{"congelar_ate": "dia 30"}', 'o Lenine fica parado até dia 30');
+    r := pg_temp.grava();
+    v_txt := public.os_prontidao(pg_temp.os('74'), date '2026-10-23') ->> 'estado';
+    r := pg_temp.plan('Lenine', '{"limpar": ["espera"]}', 'o Lenine pode voltar hoje');
+    r2 := pg_temp.grava();
+    v_res := pg_temp.ok(v_res, 'L6 "pode voltar" (limpar espera): a releitura diz "sai da espera" e a OS deixa de estar congelada',
+      v_txt = 'congelada'
+      and r ->> 'item' = 'Lenine (OS-00074): sai da espera'
+      and (r2 ->> 'ok')::boolean
+      and (select p.congelada_ate is null and p.revisar_em is null from public.os_planejamento p where p.service_order_id = pg_temp.os('74'))
+      and public.os_prontidao(pg_temp.os('74'), date '2026-10-23') ->> 'estado' <> 'congelada',
+      r::text || ' | ' || (r2 ->> 'texto'));
+    perform pg_temp.plan('Lenine', '{"precisa_ate": "dia 20", "nao_antes_de": "dia 5", "escopo_em_aberto": "troca o painel ou só o disjuntor?"}',
+                         'o Lenine precisa até dia 20, não antes do dia 5; troca o painel ou só o disjuntor?');
+    r := pg_temp.grava();
+    r := pg_temp.plan('Lenine', '{"limpar": ["prazo", "nao_antes", "escopo"]}',
+                      'o Lenine não tem mais prazo, pode começar quando quiser e o escopo está resolvido');
+    r2 := pg_temp.grava();
+    v_res := pg_temp.ok(v_res, 'L7 limpar prazo, "não antes de" e escopo: as frases e os campos vazios',
+      r ->> 'item' = 'Lenine (OS-00074): o cliente não tem mais prazo; pode começar sem esperar data; nada mais a decidir no escopo'
+      and (select p.precisa_ate is null and p.nao_antes_de is null and p.nao_antes_motivo is null and p.escopo_em_aberto is null
+             from public.os_planejamento p where p.service_order_id = pg_temp.os('74')),
+      r::text || ' | ' || (r2 ->> 'texto'));
+    v_cod := null;
+    begin
+      perform pg_temp.plan('Lenine', '{"limpar": ["tudo"]}', 'tira tudo');
+    exception when others then
+      get stacked diagnostics v_cod = returned_sqlstate, v_msg = message_text;
+    end;
+    v_txt2 := v_cod || ' ' || v_msg;
+    v_cod := null;
+    begin
+      perform pg_temp.plan('Lenine', '{"limpar": ["espera"], "congelar_ate": "dia 30"}', 'tira da espera e espera até dia 30');
+    exception when others then
+      get stacked diagnostics v_cod = returned_sqlstate, v_msg = message_text;
+    end;
+    v_res := pg_temp.ok(v_res, 'L8 limpar com valor que não existe, ou com o mesmo campo, é erro de quem chamou (22023)',
+      v_txt2 = '22023 agenda_rascunho_planejar: limpar "tudo" não existe (espera, nao_antes, prazo ou escopo)'
+      and v_cod = '22023' and v_msg = 'agenda_rascunho_planejar: limpar e o mesmo campo na mesma chamada',
+      v_txt2 || ' | ' || v_cod || ' ' || v_msg);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    v_txt := (select string_agg(e ->> 'numero', ' ' order by o)
+                from jsonb_array_elements(public.agenda_o_que_fazer(null, date '2026-10-23') #> '{dados,travados}') with ordinality t(e, o));
+    r := pg_temp.plan('Giancarlo', '{"prioridade": 1}', 'o do Giancarlo passa na frente');
+    perform pg_temp.grava();
+    v_txt2 := (select string_agg(e ->> 'numero', ' ' order by o)
+                 from jsonb_array_elements(public.agenda_o_que_fazer(null, date '2026-10-23') #> '{dados,travados}') with ordinality t(e, o));
+    v_res := pg_temp.ok(v_res, 'L9 "passa na frente" (prioridade 1) no Giancarlo: a OS-00100 vai para o 1º lugar do bloco 2',
+      r ->> 'item' = 'Giancarlo (OS-00100): passa na frente (prioridade 1)'
+      and v_txt = 'OS-00069 OS-00074 OS-00104 OS-00112 OS-00100 ORÇ-00083 OS-00096'
+      and v_txt2 = 'OS-00100 OS-00069 OS-00074 OS-00104 OS-00112 ORÇ-00083 OS-00096',
+      v_txt || ' → ' || v_txt2);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;

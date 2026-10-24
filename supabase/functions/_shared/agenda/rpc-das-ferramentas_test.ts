@@ -117,6 +117,17 @@ Deno.test("os_planejar: sem trecho, sem nada a mudar, data calculada, id, turno 
   assert(erro(paraPlanejar({ os: "Lenine", dias: 2, trecho: "x".repeat(1600) }, CTX)).includes("passa de 1500"));
 });
 
+Deno.test("os_planejar: limpar (o que o dono desfez) vai como lista sem repetição; valor fora da lista volta ao modelo", () => {
+  assertEquals(params(paraPlanejar({ os: "Lenine", limpar: ["espera", "espera"], trecho: "o Lenine pode voltar" }, CTX)).params.p_dados,
+    { limpar: ["espera"] });
+  assertEquals(params(paraPlanejar({ os: "Lenine", limpar: "prazo", trecho: "o cliente não tem mais prazo" }, CTX)).params.p_dados,
+    { limpar: ["prazo"] });
+  assertEquals(params(paraPlanejar({ os: "Lenine", limpar: ["nao_antes", "escopo"], trecho: "x" }, CTX)).params.p_dados,
+    { limpar: ["nao_antes", "escopo"] });
+  assert(erro(paraPlanejar({ os: "Lenine", limpar: ["tudo"], trecho: "x" }, CTX)).includes("aceita só: espera, nao_antes, prazo, escopo"));
+  assert(erro(paraPlanejar({ os: "Lenine", limpar: { espera: true }, trecho: "x" }, CTX)).includes("'limpar' tem de ser a lista"));
+});
+
 // ───────── material_informar ─────────
 
 Deno.test("material_informar: itens, situação, quando, fornecedor, quantidade e novo", () => {

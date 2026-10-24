@@ -430,6 +430,8 @@ begin
     end if;
     if p_d ->> 'precisa_ate' is not null then
       v_partes := v_partes || ('o cliente precisa até ' || public._dia_curto((p_d ->> 'precisa_ate')::date));
+    elsif p_d ? 'precisa_ate' then
+      v_partes := v_partes || 'o cliente não tem mais prazo'::text;
     end if;
     if p_d ? 'bem' then
       v_partes := v_partes || case p_d #>> '{bem,modo}'
@@ -442,14 +444,20 @@ begin
       v_partes := v_partes || ('não antes de ' || public._dia_curto((p_d ->> 'nao_antes_de')::date)
                                || case when coalesce(p_d ->> 'nao_antes_motivo', 'você disse') = 'você disse' then ''
                                        else ' (' || (p_d ->> 'nao_antes_motivo') || ')' end);
+    elsif p_d ? 'nao_antes_de' then
+      v_partes := v_partes || 'pode começar sem esperar data'::text;
     end if;
     if nullif(p_d ->> 'escopo_em_aberto', '') is not null then
       v_partes := v_partes || ('falta decidir: ' || (p_d ->> 'escopo_em_aberto'));
+    elsif p_d ? 'escopo_em_aberto' and nullif(p_d ->> 'escopo_decidido', '') is null then
+      v_partes := v_partes || 'nada mais a decidir no escopo'::text;
     end if;
     if p_d ->> 'congelada_ate' is not null then
       v_partes := v_partes || ('em espera até ' || public._dia_curto((p_d ->> 'congelada_ate')::date)
                                || case when p_d ->> 'revisar_em' is distinct from p_d ->> 'congelada_ate'
                                        then ' (rever ' || public._dia_curto((p_d ->> 'revisar_em')::date) || ')' else '' end);
+    elsif p_d ? 'congelada_ate' then
+      v_partes := v_partes || 'sai da espera'::text;
     end if;
     if p_d ->> 'prioridade' is not null then
       v_partes := v_partes || case when (p_d ->> 'prioridade')::int = 1 then 'passa na frente (prioridade 1)'
@@ -653,7 +661,11 @@ declare
   d        jsonb := coalesce(p_dados, '{}'::jsonb);
   c_campos constant text[] := array['dias', 'com_quem', 'dono', 'precisa_ate', 'bem_fora', 'bem_livre_em', 'nao_antes_de',
                                     'nao_antes_motivo', 'escopo_em_aberto', 'escopo_decidido', 'congelar_ate', 'revisar_em',
-                                    'prioridade', 'sem_material', 'aceitar_sugestao'];
+                                    'prioridade', 'sem_material', 'aceitar_sugestao', 'limpar'];
+  -- O que o dono desfaz ("pode voltar", "tira da espera", "não tem mais data mínima", "o cliente não tem mais prazo",
+  -- "o escopo está resolvido"): o campo volta a vazio.
+  c_limpar constant text[] := array['espera', 'nao_antes', 'prazo', 'escopo'];
+  v_limpar text[] := '{}';
   v_k      text;
   v_ro     jsonb;
   v_os     uuid;
@@ -684,6 +696,23 @@ begin
     raise exception 'agenda_rascunho_planejar: o campo "%" não existe', v_k using errcode = '22023';
   end if;
   d := jsonb_strip_nulls(d);
+  if d ? 'limpar' then
+    if jsonb_typeof(d -> 'limpar') <> 'array' then
+      raise exception 'agenda_rascunho_planejar: limpar tem de ser uma lista (espera, nao_antes, prazo ou escopo)' using errcode = '22023';
+    end if;
+    v_limpar := array(select distinct x from jsonb_array_elements_text(d -> 'limpar') x order by 1);
+    select x into v_k from unnest(v_limpar) x where x <> all (c_limpar) order by 1 limit 1;
+    if v_k is not null then
+      raise exception 'agenda_rascunho_planejar: limpar "%" não existe (espera, nao_antes, prazo ou escopo)', v_k using errcode = '22023';
+    end if;
+    -- Pôr e tirar a mesma coisa na mesma chamada é erro de quem chamou.
+    if ('espera' = any (v_limpar) and (d ? 'congelar_ate' or d ? 'revisar_em'))
+       or ('nao_antes' = any (v_limpar) and (d ? 'nao_antes_de' or d ? 'nao_antes_motivo'))
+       or ('prazo' = any (v_limpar) and d ? 'precisa_ate')
+       or ('escopo' = any (v_limpar) and d ? 'escopo_em_aberto') then
+      raise exception 'agenda_rascunho_planejar: limpar e o mesmo campo na mesma chamada' using errcode = '22023';
+    end if;
+  end if;
   if nullif(btrim(p_trecho), '') is null then
     return public._agenda_recusa('Me diga com as suas palavras o que mudou nesse serviço.', 'sem_trecho');
   end if;
@@ -828,6 +857,20 @@ begin
 
   if d ? 'sem_material' then
     v_out := v_out || jsonb_build_object('sem_material', (d ->> 'sem_material')::boolean);
+  end if;
+
+  -- O que o dono desfez: o campo vai como nulo (o *grava* grava vazio; a correção na mesma releitura também apaga).
+  if 'espera' = any (v_limpar) then
+    v_out := v_out || jsonb_build_object('congelada_ate', null, 'revisar_em', null);
+  end if;
+  if 'nao_antes' = any (v_limpar) then
+    v_out := v_out || jsonb_build_object('nao_antes_de', null, 'nao_antes_motivo', null);
+  end if;
+  if 'prazo' = any (v_limpar) then
+    v_out := v_out || jsonb_build_object('precisa_ate', null);
+  end if;
+  if 'escopo' = any (v_limpar) then
+    v_out := v_out || jsonb_build_object('escopo_em_aberto', null);
   end if;
 
   if v_out = '{}'::jsonb then

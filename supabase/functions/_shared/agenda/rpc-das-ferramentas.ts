@@ -37,6 +37,8 @@ export const SITUACOES_DO_MATERIAL = [
 export const SITUACOES_DA_EQUIPE = ["vem", "nao_vem", "so_manha", "so_tarde"] as const;
 export const TURNOS = ["dia", "manha", "tarde"] as const;
 export const PRESENCAS_DO_DONO = ["abre_e_fecha", "sempre", "nunca"] as const;
+/** O que o dono desfaz no serviço: espera, "não antes de", prazo do cliente, escopo em aberto. */
+export const LIMPAVEIS = ["espera", "nao_antes", "prazo", "escopo"] as const;
 
 /** O que vai junto do resultado ao modelo. */
 export const INSTRUCAO_LEITURA = "Repita o texto; pode encurtar o fim, nunca mude número, data ou nome.";
@@ -223,9 +225,17 @@ export function paraPlanejar(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
     if (semMaterial !== null) dados.sem_material = semMaterial;
     const aceitar = booleano(a.aceitar_sugestao, "aceitar_sugestao");
     if (aceitar) dados.aceitar_sugestao = true;
+    if (a.limpar !== undefined && a.limpar !== null) {
+      const bruto = typeof a.limpar === "string" ? [a.limpar] : a.limpar;
+      if (!Array.isArray(bruto) || bruto.length > LIMPAVEIS.length) {
+        recusar(`'limpar' tem de ser a lista do que o dono desfez (${LIMPAVEIS.join(", ")})`);
+      }
+      const limpar = [...new Set((bruto as unknown[]).map((x, i) => umDe(x, `limpar[${i}]`, LIMPAVEIS, true) as string))];
+      if (limpar.length) dados.limpar = limpar;
+    }
     if (Object.keys(dados).length === 0) {
       recusar("diga o que mudou no serviço (dias, com_quem, dono, precisa_ate, bem_fora, bem_livre_em, nao_antes_de, " +
-        "escopo_em_aberto, escopo_decidido, congelar_ate, prioridade, sem_material ou aceitar_sugestao)");
+        "escopo_em_aberto, escopo_decidido, congelar_ate, prioridade, sem_material, aceitar_sugestao ou limpar)");
     }
     return comHoje({ p_autor: ctx.autor, p_canal: ctx.canal, p_os: os, p_dados: dados, p_trecho: t }, ctx);
   });

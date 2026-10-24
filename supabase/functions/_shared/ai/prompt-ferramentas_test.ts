@@ -321,6 +321,11 @@ Deno.test("agenda de produção: o que a seção ensina existe na ferramenta e n
     assertStringIncludes(secao, ` ${s}`);
     assertEquals(enumDe(material, "situacao").includes(s), true, `${s} não é situação de material_informar`);
   }
+  // "Pode voltar" = os_planejar com limpar espera: o valor existe no enum de verdade (sem ele, a espera não tem saída).
+  assertStringIncludes(secao, "\"pode voltar\" ou \"tira da espera\" é os_planejar com limpar espera");
+  const planejar = porNome.get("os_planejar")!;
+  const limpar = (planejar.input_schema as { properties: Record<string, { items?: { enum?: string[] } }> }).properties.limpar;
+  assertEquals(limpar?.items?.enum?.includes("espera"), true, "espera não é valor de os_planejar.limpar");
   // A frase que o modelo diz ao "sim" da releitura manda uma palavra que o comando sem IA LÊ (senão o dono manda
   // *grava* e cai de novo no modelo).
   const frase = /"Para gravar, mande só (\*grava\*)\."/.exec(secao);
