@@ -66,6 +66,8 @@
 --     comprar: de quem e quando?": vira a restrição compra_sem_prazo, que pergunta só o que falta ("quando chega a
 --     compra de ter 27/10?" com fornecedor; "de quem é a compra de ter 27/10?" sem).
 --   · item parcial: o texto começa por "3 de 8 na mão, faltam 5: ".
+--   · orçamento aprovado e nunca convertido (ou sinal pendente): as restrições de material deixam de travar (bloqueia
+--     false) até a conversão e o sinal; a principal do dono passa a ser "converter ou arquivar?".
 --
 -- O QUE NÃO MUDA: nenhuma tabela, nenhum dado, get_os_purchase_needs, count_purchase_shortages, as leituras do
 -- Secretário e da tela.
@@ -1284,6 +1286,17 @@ begin
       'compre_ate', null, 'pergunta', 'parou?',
       'texto', case when v_ult_diaria is null then 'em andamento e sem diária lançada: parou?'
                     else format('em andamento sem diária desde %s: parou?', to_char(v_ult_diaria, 'DD/MM')) end);
+  end if;
+
+  -- Orçamento aprovado que nunca virou OS, ou sinal pendente: quem destrava é a conversão (o dono) ou o sinal (o
+  -- cliente), não a compra — comprar peça de um orçamento que pode ser arquivado não é o próximo passo. As perguntas do
+  -- material continuam na lista (a visão da OS e a rodada mostram), sem travar até a conversão e o sinal.
+  if exists (select 1 from jsonb_array_elements(v_r) e where e ->> 'tipo' in ('orcamento', 'sinal')) then
+    select coalesce(jsonb_agg(case when e ->> 'tipo' in ('atrasado', 'sem_previsao', 'compra_sem_prazo', 'comprado_sem_previsao',
+                                                         'compre_ate', 'peca_embutida', 'material_nao_conferido')
+                                   then jsonb_set(e, '{bloqueia}', 'false'::jsonb) else e end order by o), '[]'::jsonb)
+      into v_r
+      from jsonb_array_elements(v_r) with ordinality t(e, o);
   end if;
 
   -- A mais forte primeiro: o que trava antes do que só informa, e na ordem do bloco "travado" (spec §5.4).

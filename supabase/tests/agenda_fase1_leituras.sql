@@ -262,7 +262,7 @@ Travado esperando você: Vanderlei, Lenine, Flávio, Nelson, Giancarlo e mais 2 
 • Flávio (OS-00104): "Compressor 12V de…" (pedido em 13/10) chegou?
 • Nelson (OS-00112): 4 itens sem compra registrada (comprando hoje, "Central de controle…" chega por volta de qui 29/10)
 • Giancarlo (OS-00100): tem peça embutida em "Barramento e proteções…" ou "Realocação do banco…" (e mais 1)?
-• Robson (ORÇ-00083): 2 itens a comprar: de quem e quando?
+• Robson (ORÇ-00083): converter em OS ou arquivar antes de comprar (2 itens a comprar)
 • Rodrigo (OS-00096): tem peça a comprar? (o orçamento não tem nenhuma)
 Não conto 4 parados no cliente.$e$);
   v_res := pg_temp.igual(v_res, 'A12b material do Nelson (OS-00112): cada item, o Cerbo "se comprar hoje", o início',
@@ -282,14 +282,28 @@ Duração: 1 a 2 dias com 2 pessoas (estimativa minha, pelo valor).
 Presença: você abre e fecha (não fica o dia todo).
 Material: 4 itens sem compra registrada (comprando hoje, "Central de controle…" chega por volta de qui 29/10).
 Prazo: qui 05/11 (o meu padrão: 20 dias úteis desde a aprovação).$e$);
-  v_res := pg_temp.igual(v_res, 'A13b agenda_ver(os "Robson"): o que trava, quando há mais de uma coisa',
+  v_res := pg_temp.igual(v_res, 'A13b agenda_ver(os "Robson"): orçamento nunca convertido — converter ou arquivar antes de comprar',
     public.agenda_ver(c_admin, null, null, null, 'Robson', null, false, c_hoje) ->> 'texto',
     $e$Robson (ORÇ-00083): assinado em 23/08 e nunca virou OS.
-O que trava: 2 itens a comprar: de quem e quando?; assinado em 23/08 e nunca virou OS: converter ou arquivar?
 Duração: meio dia a 1 dia com 2 pessoas (estimativa minha, pelo valor).
 Presença: você abre e fecha (não fica o dia todo).
-Material: 2 itens a comprar: de quem e quando?
+Material: converter em OS ou arquivar antes de comprar (2 itens a comprar).
 Prazo: passou em seg 21/09 (o meu padrão: 20 dias úteis desde a aprovação).$e$);
+  v_res := pg_temp.ok(v_res, 'A13b2 Robson: a principal do dono é "converter ou arquivar?" e o material não trava até a conversão',
+    (select string_agg(format('%s:%s', e ->> 'tipo', e ->> 'bloqueia'), ' ' order by o)
+       from jsonb_array_elements(public.os_prontidao(pg_temp.os('83'), c_hoje) -> 'restricoes') with ordinality t(e, o))
+      = 'orcamento:true sem_previsao:false duracao:false'
+    and (select e #>> '{principal,tipo}' from jsonb_array_elements(public._agenda_painel(c_hoje) -> 'oss') e
+          where e ->> 'numero' = 'ORÇ-00083') = 'orcamento',
+    (public.os_prontidao(pg_temp.os('83'), c_hoje) -> 'restricoes')::text);
+  v_res := pg_temp.igual(v_res, 'A13e agenda_ver(os "Flávio"): o que trava, quando há mais de uma coisa',
+    public.agenda_ver(c_admin, null, null, null, 'Flávio', null, false, c_hoje) ->> 'texto',
+    $e$Flávio (OS-00104): falta você dizer se "Compressor 12V de…" (pedido em 13/10) chegou.
+O que trava: "Compressor 12V de…" (pedido em 13/10) chegou?; tem peça embutida em "Conversão do sistema…" ou "Substituição da tampa…"?
+Duração: 1 a 2 dias com 2 pessoas (estimativa minha, pelo valor).
+Presença: você abre e fecha (não fica o dia todo).
+Material: "Compressor 12V de…" (pedido em 13/10) chegou?
+Prazo: passou em qui 22/10 (o meu padrão: 20 dias úteis desde a aprovação).$e$);
   v_res := pg_temp.igual(v_res, 'A13c "se o Nelson aprovar" com a OS já aprovada: diz o estado, sem projeção',
     public.agenda_ver(c_admin, null, null, null, 'Nelson', null, true, c_hoje) ->> 'texto',
     $e$OS-00112 (Nelson) já está aprovada: falta você dizer o que já está na mão e o que falta (4 itens sem compra registrada).$e$);

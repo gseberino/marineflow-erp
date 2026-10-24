@@ -83,6 +83,8 @@
 --   · "você disse em DD/MM" do material sai de os_material.conferido_em (quando o dono informou), não de
 --     atualizado_em (que a sincronização também regrava). A compra combinada sem prazo (compra_sem_prazo) entra no
 --     resumo do material e na restrição curta.
+--   · orçamento aprovado que nunca virou OS: o material dele diz "converter em OS ou arquivar antes de comprar (2
+--     itens a comprar)" (a lista de material e a visão da OS), em vez de mandar comprar.
 --
 -- O QUE NÃO MUDA: nenhuma tabela, nenhum dado, nenhuma função de P1–P3, my_agenda, o Secretário, as telas.
 --
@@ -1249,6 +1251,14 @@ create or replace function public._agenda_material_resumo(p_p jsonb)
  set search_path to 'public'
 as $function$
   select coalesce(
+    -- Orçamento que nunca virou OS: antes de comprar, converter ou arquivar (o material fica entre parênteses).
+    (select 'converter em OS ou arquivar antes de comprar'
+            || coalesce(' (' || (select public._agenda_restricao_curta(m) from jsonb_array_elements(p_p -> 'restricoes')
+                                   with ordinality t2(m, o2)
+                                  where m ->> 'tipo' in ('atrasado', 'sem_previsao', 'compra_sem_prazo', 'comprado_sem_previsao',
+                                                         'compre_ate', 'peca_embutida', 'material_nao_conferido')
+                                  order by o2 limit 1) || ')', '')
+       where exists (select 1 from jsonb_array_elements(p_p -> 'restricoes') e where e ->> 'tipo' = 'orcamento')),
     (select e ->> 'texto' from jsonb_array_elements(p_p -> 'restricoes') with ordinality t(e, o)
       where e ->> 'tipo' in ('atrasado', 'sem_previsao', 'compra_sem_prazo', 'comprado_sem_previsao', 'compre_ate',
                              'peca_embutida', 'material_nao_conferido')
