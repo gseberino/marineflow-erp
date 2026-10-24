@@ -4,9 +4,10 @@ import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, entityIdFromKey, keyOf, fmtBRL, fmtDate, dueAt,
   isManualDismissal, dismissCooldownDays, businessDaysBetween, vencimentoDoOrcamento, notaDoVencimento,
   cobrancaMinima, dispensaSemFatoNovo, paraAgendar, paraComprar, FILTRO_PARA_AGENDAR, FILTRO_PARA_COMPRAR,
-  FONTES_INFORMADAS_DO_MATERIAL,
+  FONTES_INFORMADAS_DO_MATERIAL, motivoDaAgenda, candidatosDaRegra, resolucaoDaTarefa,
 } from "./rules.ts";
 import { STATUS_OS } from "../_shared/service-order-status.ts";
+import { lerModo, lerModosDaAgenda } from "./agenda-modos.ts";
 
 Deno.test("isManualDismissal: conclusão MANUAL recente bloqueia recriação", () => {
   const cutoff = "2026-07-17T00:00:00Z";
@@ -201,7 +202,8 @@ Deno.test("dispensaSemFatoNovo: concluída à mão não volta enquanto falta a m
 // O motor (index.ts sobe o servidor ao ser importado): pelo texto da fonte.
 Deno.test("motor: lê só as fechadas À MÃO, com o título, e dispensa sem fato novo", async () => {
   const fonte = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
-  const bloco = fonte.slice(fonte.indexOf("let candidates = await rule.find(db);"), fonte.indexOf("for (const c of candidates) {"));
+  // (Fase 2, P3: o find passa pelos modos da agenda — candidatosDaRegra)
+  const bloco = fonte.slice(fonte.indexOf("let candidates = await candidatosDaRegra(db, rule, modos);"), fonte.indexOf("for (const c of candidates) {"));
   // As 1.142 fechadas sozinhas da OS-00104 passavam do teto de 1.000 linhas do PostgREST.
   assertEquals(bloco.includes('.or("status.eq.cancelled,completed_by.not.is.null")'), true);
   assertEquals(bloco.includes('.select("automation_key, title, status, completed_by, completed_at, updated_at")'), true);
@@ -1112,7 +1114,124 @@ Deno.test("motor: R9 e R13 aposentadas; o responsável vem de responsavel.ts", a
     assertEquals(fonte.includes(proibido), false, `index.ts ainda tem ${proibido}`);
   }
   // Agenda de Produção, Fase 1 (P2): o passo do material entra no resumo, e nada que fale com cliente.
-  assertEquals(fonte.includes("const summary = { identidade, fios, agenda_material: agendaMaterial, rules, r10, reminders, recurrence };"), true);
+  // Fase 2 (P3): a vigia também entra no resumo.
+  assertEquals(fonte.includes("const summary = { identidade, fios, agenda_material: agendaMaterial, agenda_vigia: agendaVigia, rules, r10, reminders, recurrence };"), true);
   assertEquals(fonte.includes('import { resolveAssignee } from "./responsavel.ts";'), true);
   assertEquals(/async function resolveAssignee/.test(fonte), false);
+});
+
+// ── Agenda de Produção, Fase 2 (P3, 24/10/2026): a regra antiga sai pelo mesmo interruptor da substituta (d13) ──────
+// R1 e R16 com modo_proposta = 'ligado' (a agenda marca e diz o que comprar); R2 com modo_vigia = 'ligado' (a vigia
+// pergunta "parou?"). O find não roda (nem lê o banco) e a tarefa viva se resolve com o motivo da agenda. Modos ilegíveis
+// = desligado: as regras de hoje.
+
+/** Um banco que reprova se for lido (a regra desligada pela agenda não pode nem perguntar). */
+const bancoProibido = {
+  from() { throw new Error("a regra desligada pela agenda leu o banco"); },
+  rpc() { throw new Error("a regra desligada pela agenda chamou o banco"); },
+};
+
+Deno.test("agenda: com a proposta ligada a R1 e a R16 não procuram nada e se resolvem com o motivo da agenda", async () => {
+  const modos = { proposta: "ligado" as const, vigia: "sombra" as const };
+  for (const [id, motivo] of [
+    ["r1", "a agenda automática marca as OS"],
+    ["r16", "a agenda automática diz o que comprar e até quando"],
+  ] as const) {
+    const rule = ruleById(id)!;
+    assertEquals(motivoDaAgenda(rule, modos), motivo);
+    assertEquals(await candidatosDaRegra(bancoProibido, rule, modos), []);
+    assertEquals(await resolucaoDaTarefa(bancoProibido, rule, { automation_key: `${id}:so:os-1` }, modos), motivo);
+  }
+  // a R2 segue (quem a desliga é a vigia)
+  assertEquals(motivoDaAgenda(ruleById("r2")!, modos), null);
+});
+
+Deno.test("agenda: com a vigia ligada a R2 sai (a vigia pergunta parou?); a R1 e a R16 seguem com a proposta em sombra", async () => {
+  const modos = { proposta: "sombra" as const, vigia: "ligado" as const };
+  const r2 = ruleById("r2")!;
+  assertEquals(motivoDaAgenda(r2, modos), "a agenda pergunta quando a OS para");
+  assertEquals(await candidatosDaRegra(bancoProibido, r2, modos), []);
+  assertEquals(await resolucaoDaTarefa(bancoProibido, r2, { automation_key: "r2:so:os-1" }, modos), "a agenda pergunta quando a OS para");
+  assertEquals(motivoDaAgenda(ruleById("r1")!, modos), null);
+  assertEquals(motivoDaAgenda(ruleById("r16")!, modos), null);
+});
+
+Deno.test("agenda: em sombra ou desligado (e sem modos) as regras são as de hoje; só R1, R2 e R16 respondem à agenda", async () => {
+  for (const modos of [
+    { proposta: "sombra" as const, vigia: "sombra" as const },
+    { proposta: "desligado" as const, vigia: "desligado" as const },
+  ]) {
+    for (const rule of RULES) assertEquals(motivoDaAgenda(rule, modos), null, rule.id);
+  }
+  // sem modos (quem chama sem ler a agenda) = desligado
+  assertEquals(motivoDaAgenda(ruleById("r1")!), null);
+  // com tudo ligado, só as três
+  const tudo = { proposta: "ligado" as const, vigia: "ligado" as const };
+  assertEquals(RULES.filter((r) => motivoDaAgenda(r, tudo)).map((r) => r.id).sort(), ["r1", "r16", "r2"]);
+  // a regra de hoje roda o find de sempre
+  const os = { id: "so-60", service_order_number: "OS-00060", client_id: "c-1", status: "in_progress", updated_at: "2026-10-01T12:00:00Z",
+               clients: { name: "Marina Azul" } };
+  const lista = await candidatosDaRegra(bancoDeOs([os]), ruleById("r2")!, { proposta: "desligado", vigia: "sombra" });
+  assertEquals(lista.map((c) => c.automation_key), ["r2:so:so-60"]);
+});
+
+Deno.test("agenda: modos ilegíveis (erro, sem a linha, valor estranho) = desligado — as regras ficam como hoje", async () => {
+  const banco = (resp: unknown) => ({
+    from: (t: string) => {
+      assertEquals(t, "agenda_config");
+      return { select: (c: string) => { assertEquals(c, "modo_proposta, modo_vigia"); return { maybeSingle: async () => resp }; } };
+    },
+  });
+  const erro = await lerModosDaAgenda(banco({ data: null, error: { code: "PGRST205", message: "Could not find the table" } }));
+  assertEquals([erro.proposta, erro.vigia, typeof erro.erro], ["desligado", "desligado", "string"]);
+  const semLinha = await lerModosDaAgenda(banco({ data: null, error: null }));
+  assertEquals([semLinha.proposta, semLinha.vigia, typeof semLinha.erro], ["desligado", "desligado", "string"]);
+  const estranho = await lerModosDaAgenda(banco({ data: { modo_proposta: "LIGADÍSSIMO", modo_vigia: 7 }, error: null }));
+  assertEquals(estranho, { proposta: "desligado", vigia: "desligado" });
+  const ok = await lerModosDaAgenda(banco({ data: { modo_proposta: " Ligado ", modo_vigia: "sombra" }, error: null }));
+  assertEquals(ok, { proposta: "ligado", vigia: "sombra" });
+  const lancou = await lerModosDaAgenda({ from: () => { throw new Error("conexão caiu"); } });
+  assertEquals([lancou.proposta, lancou.vigia, lancou.erro], ["desligado", "desligado", "conexão caiu"]);
+  assertEquals(motivoDaAgenda(ruleById("r1")!, erro), null);
+  assertEquals([lerModo("ligado"), lerModo('"sombra"'), lerModo(null), lerModo("ligada")], ["ligado", "sombra", "desligado", "desligado"]);
+});
+
+// NOVO-agenda-09: a R2 não olhava o erro — falha de leitura virava "nenhuma OS parada" e a tarefa sumia.
+Deno.test("R2: erro de leitura lança no find e no isResolved (nunca vira 'nenhuma OS parada' nem 'não existe mais')", async () => {
+  const r2 = ruleById("r2")!;
+  const comErro = {
+    from() {
+      // deno-lint-ignore no-explicit-any
+      const q: any = {};
+      for (const m of ["select", "eq", "is", "lt", "lte", "gt", "gte", "in", "order", "or"]) q[m] = () => q;
+      q.limit = async () => ({ data: null, error: { code: "57014", message: "statement timeout" } });
+      q.maybeSingle = async () => ({ data: null, error: { code: "57014", message: "statement timeout" } });
+      return q;
+    },
+  };
+  let lancouFind = false;
+  try { await r2.find(comErro); } catch { lancouFind = true; }
+  let lancouResolve = false;
+  try { await r2.isResolved(comErro, { automation_key: "r2:so:os-1" }); } catch { lancouResolve = true; }
+  assertEquals([lancouFind, lancouResolve], [true, true]);
+  // e pela agenda desligada também lança (o erro chega ao motor, que registra a falha da regra)
+  let lancouPelaAgenda = false;
+  try { await resolucaoDaTarefa(comErro, r2, { automation_key: "r2:so:os-1" }, { proposta: "ligado", vigia: "sombra" }); } catch { lancouPelaAgenda = true; }
+  assertEquals(lancouPelaAgenda, true);
+});
+
+// O motor (index.ts sobe o servidor ao ser importado): pelo texto da fonte.
+Deno.test("motor: a vigia roda depois do material e antes das regras, com try/catch próprio; as regras leem os modos", async () => {
+  const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
+  const material = fonte.indexOf("agendaMaterial = await sincronizarMaterialDaAgenda(db);");
+  const vigia = fonte.indexOf("agendaVigia = await vigiarAgenda(db, new Date());");
+  const regras = fonte.indexOf("const rules = await runRules(db, settings);");
+  assertEquals(material > 0 && vigia > material && regras > vigia, true);
+  const bloco = fonte.slice(fonte.lastIndexOf("let agendaVigia", vigia), regras);
+  assertEquals(bloco.includes("try {") && bloco.includes("} catch (e) {"), true);
+  // o find e a auto-resolução passam pelos modos (nunca rule.find / rule.isResolved direto)
+  assertEquals(fonte.includes("const modos = await lerModosDaAgenda(db);"), true);
+  assertEquals(fonte.includes("await candidatosDaRegra(db, rule, modos)"), true);
+  assertEquals(fonte.includes("await resolucaoDaTarefa(db, rule, task, modos)"), true);
+  assertEquals(/rule\.find\(db\)|rule\.isResolved\(db/.test(fonte), false);
 });

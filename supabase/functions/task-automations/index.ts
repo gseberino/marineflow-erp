@@ -3,8 +3,13 @@
 //   0. Conferência do material da Agenda de Produção (material-da-agenda.ts, Fase 1 P2): guarda em
 //      os_material o que o estoque e as OCs dizem de cada item de compra da carteira, antes de a R16 ler
 //      a conta. Passo à parte: erro vai para app_error_logs (agenda:material) e não derruba o resto.
+//   0b. A vigia da Agenda de Produção (agenda-vigia.ts, Fase 2 P3): agenda_vigiar publica a semana na quinta,
+//      replaneja quando algo muda, promove e solta reservas, pergunta o que só o dono sabe e devolve os acordes
+//      (a perda de hoje ou amanhã), que vão ao dono pelo portão. Passo à parte: nunca lança (agenda:vigia).
 //   1. Regras de rules.ts (RULES): criam tarefas (dedupe por automation_key) e auto-resolvem
-//      as que a condição sumiu ("Resolvido automaticamente: ...").
+//      as que a condição sumiu ("Resolvido automaticamente: ..."). A R1 e a R16 saem com a agenda automática
+//      ligada (agenda_config.modo_proposta) e a R2 com a vigia ligada (modo_vigia) — o mesmo interruptor da
+//      substituta (agenda-modos.ts); as tarefas vivas delas se resolvem com o motivo da agenda.
 //   2. R10: lembrete interno (WhatsApp equipe) de OS agendada para amanhã.
 //   3. Processa task_reminders vencidos → app_notifications + WhatsApp interno.
 //   4. Materializa recorrências (rrule) para os próximos 30 dias.
@@ -15,10 +20,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, isManualDismissal, dismissCooldownDays,
-  dispensaSemFatoNovo, textoDoLembreteDaOs, type RuleCandidate,
+  dispensaSemFatoNovo, textoDoLembreteDaOs, type RuleCandidate, candidatosDaRegra, resolucaoDaTarefa,
 } from "./rules.ts";
 import { resolveAssignee } from "./responsavel.ts";
 import { sincronizarMaterialDaAgenda } from "./material-da-agenda.ts";
+import { lerModosDaAgenda } from "./agenda-modos.ts";
+import { vigiarAgenda } from "./agenda-vigia.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
@@ -77,6 +84,9 @@ async function runRules(db: Db, settings: Record<string, string>) {
   // gatilho, e o cron reportava 200. Foi assim que a R17 passou dias sem efeito.
   const falhas: { rule: string; code?: string; msg: string }[] = [];
   const assigneeCache = new Map<string, string | null>();
+  // Os modos da Agenda de Produção (Fase 2): com a substituta ligada, a regra antiga sai (rules.ts,
+  // desligadaPelaAgenda). Ilegíveis = desligado: as regras ficam como hoje.
+  const modos = await lerModosDaAgenda(db);
 
   const cooldownDays = dismissCooldownDays(settings);
   const cutoffISO = new Date(Date.now() - cooldownDays * 86400000).toISOString();
@@ -84,7 +94,7 @@ async function runRules(db: Db, settings: Record<string, string>) {
   for (const rule of RULES) {
     if (!isRuleEnabled(settings, rule)) continue;
     try {
-      let candidates = await rule.find(db);
+      let candidates = await candidatosDaRegra(db, rule, modos);
 
       // Dispensa manual: não recriar o que um humano concluiu/cancelou há pouco
       // com a condição ainda de pé (senão a tarefa "volta do nada" a cada 15min).
@@ -180,7 +190,7 @@ async function runRules(db: Db, settings: Record<string, string>) {
     const rule = ruleById(ruleIdFromKey(task.automation_key));
     if (!rule) continue;
     try {
-      const reason = await rule.isResolved(db, task);
+      const reason = await resolucaoDaTarefa(db, rule, task, modos);
       if (reason) {
         await db.from("agenda_tasks").update({
           status: "done",
@@ -194,7 +204,7 @@ async function runRules(db: Db, settings: Record<string, string>) {
     }
   }
 
-  return { created, resolved, falhas };
+  return { created, resolved, falhas, agenda_modos: modos };
 }
 
 /** R10 — lembrete interno de OS (equipe, nunca cliente) em DUAS janelas BRT:
@@ -403,12 +413,23 @@ servirComCors(async (req) => {
       agendaMaterial = { erro: String((e as any)?.message ?? e) };
     }
 
+    // A vigia da Agenda de Produção (Fase 2, P3): depois do material (lê a conta em dia) e antes das regras (a R1, a
+    // R2 e a R16 leem o que ela fez). Tem o próprio try/catch (vigiarAgenda nunca lança: devolve { erro } e grava em
+    // app_error_logs); o de fora é a segunda trava, para nada daqui parar as regras.
+    let agendaVigia: unknown = null;
+    try {
+      agendaVigia = await vigiarAgenda(db, new Date());
+    } catch (e) {
+      console.error("agenda:vigia:", e);
+      agendaVigia = { erro: String((e as any)?.message ?? e) };
+    }
+
     const rules = await runRules(db, settings);
     const r10 = await runTechnicianReminders(db, settings);
     const reminders = await processReminders(db);
     const recurrence = await materializeRecurrences(db);
 
-    const summary = { identidade, fios, agenda_material: agendaMaterial, rules, r10, reminders, recurrence };
+    const summary = { identidade, fios, agenda_material: agendaMaterial, agenda_vigia: agendaVigia, rules, r10, reminders, recurrence };
     // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as
     // regras quebraram não deixaria registro nenhum (created e resolved vazios).
     if (rules.created.length || rules.resolved.length || recurrence.created || rules.falhas.length) {

@@ -727,7 +727,10 @@ insert into _resultado values
 --   20261025100000 — _agenda_payees_do_login (a policy do técnico atravessa payees, que é fechada para ele);
 --   20261025100100 — _agenda_escrever_os (a única que liga a chave das datas) e _agenda_espelhar_datas;
 --   20261025100200 — o motor que grava: agenda_propor, agenda_aplicar, agenda_descartar, agenda_desfazer,
---                    agenda_marcar_os (confere o administrador dentro) e agenda_decidir. As leituras do motor não.
+--                    agenda_marcar_os (confere o administrador dentro) e agenda_decidir. As leituras do motor não;
+--   20261025100300 — a conferência e a vigia: agenda_registrar_dia, agenda_conferir_dia, agenda_choveu,
+--                    agenda_desfazer_dito (conferem o administrador dentro), agenda_replanejar, agenda_vigiar,
+--                    agenda_fechamento_registrar e agenda_acorde_registrado. Os passos da vigia e a agenda_saude não.
 create temp table _definer_da_agenda (nome text primary key) on commit drop;
 insert into _definer_da_agenda values
   ('agenda_disponibilidade_semear'), ('agenda_rascunho_planejar'), ('agenda_rascunho_material'),
@@ -736,7 +739,9 @@ insert into _definer_da_agenda values
   ('_agenda_aplicar_disponibilidade'),
   -- Fase 2
   ('_agenda_payees_do_login'), ('_agenda_escrever_os'), ('_agenda_espelhar_datas'),
-  ('agenda_propor'), ('agenda_aplicar'), ('agenda_descartar'), ('agenda_desfazer'), ('agenda_marcar_os'), ('agenda_decidir');
+  ('agenda_propor'), ('agenda_aplicar'), ('agenda_descartar'), ('agenda_desfazer'), ('agenda_marcar_os'), ('agenda_decidir'),
+  ('agenda_registrar_dia'), ('agenda_conferir_dia'), ('agenda_choveu'), ('agenda_desfazer_dito'), ('agenda_replanejar'),
+  ('agenda_vigiar'), ('agenda_fechamento_registrar'), ('agenda_acorde_registrado');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

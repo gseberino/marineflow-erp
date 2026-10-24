@@ -215,3 +215,31 @@ export function avisoDaNfe(n: { id: string; numero: string | number | null; clie
     dados: { sinal: "nfe_rejeitada", nota_id: n.id, ...(n.numero != null ? { numero: String(n.numero) } : {}), ...(n.cliente ? { cliente: n.cliente } : {}) },
   };
 }
+
+// ── a agenda de produção (task-automations, a vigia de 15 min) ─────────────────────────────────────
+
+/**
+ * (24/10/2026, Agenda de Produção Fase 2, P3) A mudança que a agenda fez sozinha e que perde hoje ou o próximo dia útil
+ * (o Roberto avisou que não vem amanhã e o Vanderlei foi para outro dia): acorda, uma vez por ação (chave
+ * agenda:<ação>), e o assunto é a OS (duas mudanças na mesma OS no dia são um acorde só). O resto das mudanças vai na
+ * linha da agenda do fechamento das 17:30 — por isso, se o portão guardar, quem chama resolve na hora.
+ */
+export function avisoDaAgenda(a: {
+  acao_id: string;
+  os: string | null;
+  texto: string;
+  perda_em?: string | null;
+  /** a chave e o assunto que o banco montou (agenda_vigiar); ausentes = os de sempre */
+  chave?: string;
+  assunto?: string;
+}): AvisoDaFonte {
+  return {
+    fonte: "agenda",
+    chave: a.chave || `agenda:${a.acao_id}`,
+    assunto: a.assunto || (a.os ? `os:${a.os}` : `agenda:${a.acao_id}`),
+    destino: "acorde",
+    texto: a.texto,
+    referencia: `agenda:${a.acao_id}`,
+    dados: { acao_id: a.acao_id, ...(a.os ? { os: a.os } : {}), ...(a.perda_em ? { perda_em: a.perda_em } : {}) },
+  };
+}

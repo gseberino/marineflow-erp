@@ -5,11 +5,11 @@
 // leva a referência do freio (acomp:<id>:<última recebida>).
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  avisoDaNfe, avisoDaVoltaDoWhatsApp, avisoDoAcompanhamento, avisoDoCertificado, avisoDoConsentimento, avisoDoEmail, avisoDoLeadDoSite,
+  avisoDaAgenda, avisoDaNfe, avisoDaVoltaDoWhatsApp, avisoDoAcompanhamento, avisoDoCertificado, avisoDoConsentimento, avisoDoEmail, avisoDoLeadDoSite,
   avisoDosLembretesDeRevisao, avisoDosSaldos, avisoDoVigia, avisoResumoNaoChegou, DESTINO_DO_VIGIA, pedeHojeOuUrgente,
   referenciaDoAcompanhamento,
 } from "./fontes.ts";
-import { REGRAS_PADRAO } from "./portao.ts";
+import { pedidoAoPortao, REGRAS_PADRAO } from "./portao.ts";
 
 const DIA = "2026-10-21"; // quarta
 
@@ -116,4 +116,22 @@ Deno.test("NF-e rejeitada (16/10): um aviso por nota, acorda uma vez (chave nfe:
   const n = avisoDaNfe({ id: "nota-1", numero: 123, cliente: "MP MOTOR HOMES" }, "t");
   assertEquals([n.chave, n.assunto, n.destino, n.referencia], ["nfe:nota-1", "fiscal:nfe_rejeitada", "acorde", "nfe:nota-1"]);
   assertEquals(n.dados, { sinal: "nfe_rejeitada", nota_id: "nota-1", numero: "123", cliente: "MP MOTOR HOMES" });
+});
+
+// (24/10/2026, Agenda de Produção Fase 2, P3) A mudança que a agenda fez sozinha e perde hoje ou amanhã acorda; uma por
+// ação, e a OS é o assunto (duas mudanças na mesma OS no dia = um acorde só).
+Deno.test("agenda: avisoDaAgenda acorda, uma vez por ação, com a OS como assunto", () => {
+  const a = avisoDaAgenda({ acao_id: "acao-1", os: "os-69", texto: "Mudei a agenda de amanhã: …", perda_em: "2026-10-30" });
+  assertEquals([a.fonte, a.chave, a.assunto, a.destino, a.referencia], ["agenda", "agenda:acao-1", "os:os-69", "acorde", "agenda:acao-1"]);
+  assertEquals(a.dados, { acao_id: "acao-1", os: "os-69", perda_em: "2026-10-30" });
+  assertEquals(a.texto, "Mudei a agenda de amanhã: …");
+  // a chave e o assunto que o banco montou valem; sem OS, o assunto é a própria ação
+  const b = avisoDaAgenda({ acao_id: "acao-2", os: null, texto: "x", chave: "agenda:acao-2", assunto: "os:outra" });
+  assertEquals([b.chave, b.assunto], ["agenda:acao-2", "os:outra"]);
+  assertEquals(avisoDaAgenda({ acao_id: "acao-3", os: null, texto: "x" }).assunto, "agenda:acao-3");
+  assertEquals(avisoDaAgenda({ acao_id: "acao-3", os: null, texto: "x" }).dados, { acao_id: "acao-3" });
+  // a fonte cabe no CHECK de avisos_do_dono (fonte ~ '^[a-z][a-z_]{2,39}$') e o pedido vai inteiro ao portão
+  assert(/^[a-z][a-z_]{2,39}$/.test(a.fonte));
+  const p = pedidoAoPortao("5547999990000", "ligado", a);
+  assertEquals([p.fonte, p.chave, p.assunto, p.destino, p.modo], ["agenda", "agenda:acao-1", "os:os-69", "acorde", "ligado"]);
 });

@@ -2637,6 +2637,19 @@ porque só o dono pode preenchê-las.
   `supabase/functions/_shared/ai/tools/field-ops-agenda_test.ts` (erro em `receivables` e em `payables`, para admin e
   financeiro, lança; sem erro, os vencimentos saem com o saldo).
 
+### [NOVO-agenda-09] A R2 ("OS em andamento parada") engolia o erro de leitura: falha virava "nenhuma OS parada" e a tarefa sumia
+
+- **Encontrado em:** Agenda de Produção, Fase 2 (conferência de 24/10/2026 no código, HEAD 133d4838).
+- **Onde:** `supabase/functions/task-automations/rules.ts`, `r2.find` (antigo `:241-247`) e `r2.isResolved` (antigo
+  `:263-266`): `const { data } = await db.from('service_orders')…` sem olhar o `error`.
+- **O quê:** com o PostgREST respondendo erro (tempo esgotado, permissão, coluna), o `find` devolvia `[]` — "nenhuma OS
+  parada", indistinguível do caso legítimo — e o `isResolved` lia `data` nulo e devolvia "OS não existe mais": a tarefa viva
+  era FECHADA sozinha com a OS parada de pé. A R1 e a R16 já lançavam desde 23/10 (Fase 0); a R2 tinha ficado para trás.
+- **Corrigido no P3 da Fase 2:** `if (error) throw error;` no `find` e no `isResolved` (o motor registra a falha da regra na
+  rodada e mantém a tarefa viva). Junto, a R2 passa a sair com a vigia ligada (`agenda_config.modo_vigia = 'ligado'`): quem
+  pergunta "parou?" é a vigia da agenda, pela última evidência (diária, dia feito ou início), uma vez só. Testes em
+  `supabase/functions/task-automations/rules_test.ts` ("R2: erro de leitura lança no find e no isResolved").
+
 ### [NOVO-agenda-11] O formulário da OS devolve a data cortada no minuto: com a agenda automática ligada, uma data com segundos travaria o salvar
 
 - **Encontrado em:** Agenda de Produção, Fase 2, pacote P1 (conferência de 24/10/2026 no código, HEAD 133d4838; SELECT

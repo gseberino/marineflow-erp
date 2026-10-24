@@ -6,6 +6,7 @@ import { ultimoDiaDaValidade, validadeDoOrcamento, vencimentoDoOrcamento } from 
 import { diaBR, somarDiasAoDia } from '../_shared/pdf/datas.ts';
 import { nomeDaUnidade, TERMO_GERAL } from '../_shared/unidade.ts';
 import { ROTULOS_STATUS_OS, type StatusOS } from '../_shared/service-order-status.ts';
+import { MODOS_DESLIGADOS, type ModosDaAgenda } from './agenda-modos.ts';
 
 export interface RuleCandidate {
   automation_key: string;
@@ -39,6 +40,13 @@ export interface Rule {
    * (quando o dono a fechou), mesmo com o título igual? true = a dispensa não vale e a tarefa volta.
    */
   mudouDesde?(db: any, automationKey: string, desdeISO: string): Promise<boolean>;
+  /**
+   * Agenda de Produção, Fase 2 (P3, 24/10/2026; decisão d13): a regra sai no mesmo instante em que a substituta entra —
+   * pelo MESMO interruptor (agenda_config). Devolve o motivo ("a agenda automática marca as OS") quando a agenda já
+   * faz o trabalho desta regra: o motor não procura candidatos e as tarefas vivas dela se resolvem com esse motivo.
+   * null = a regra vale como sempre.
+   */
+  desligadaPelaAgenda?(m: ModosDaAgenda): string | null;
 }
 
 export const fmtBRL = (v: number) =>
@@ -232,6 +240,8 @@ const r1: Rule = {
     if (data.scheduled_start_at) return 'OS foi agendada';
     return `OS mudou para ${data.status}`;
   },
+  // Com a agenda automática ligada quem marca a OS é a agenda (publica na quinta, encaixa a que ficou pronta).
+  desligadaPelaAgenda: (m) => (m.proposta === 'ligado' ? 'a agenda automática marca as OS' : null),
 };
 
 const r2: Rule = {
@@ -239,12 +249,14 @@ const r2: Rule = {
   label: 'OS em andamento parada (3 dias)',
   defaultEnabled: true,
   async find(db) {
-    const { data } = await db
+    const { data, error } = await db
       .from('service_orders')
       .select('id, service_order_number, client_id, updated_at, clients(name)')
       .eq('status', 'in_progress')
       .lt('updated_at', daysAgoISO(3))
       .limit(50);
+    // Erro não pode virar "nenhuma OS parada" (era engolido até 24/10/2026: NOVO-agenda-09).
+    if (error) throw error;
     return (data || []).map((o: any) => {
       const dias = Math.floor((Date.now() - new Date(o.updated_at).getTime()) / 86400000);
       return {
@@ -261,13 +273,17 @@ const r2: Rule = {
   },
   async isResolved(db, task) {
     const id = entityIdFromKey(task.automation_key);
-    const { data } = await db.from('service_orders')
+    const { data, error } = await db.from('service_orders')
       .select('status, updated_at').eq('id', id).maybeSingle();
+    // Erro não pode virar "OS não existe mais": a tarefa sumiria com a OS parada de pé (NOVO-agenda-09).
+    if (error) throw error;
     if (!data) return 'OS não existe mais';
     if (data.status !== 'in_progress') return `OS mudou para ${data.status}`;
     if (new Date(data.updated_at) > new Date(daysAgoISO(3))) return 'OS voltou a andar';
     return null;
   },
+  // Com a vigia ligada a pergunta "parou?" é dela (pela última evidência: diária, dia feito ou início), uma vez só.
+  desligadaPelaAgenda: (m) => (m.vigia === 'ligado' ? 'a agenda pergunta quando a OS para' : null),
 };
 
 /**
@@ -893,6 +909,8 @@ const r16: Rule = {
     if (informado.error) throw informado.error;
     return (pecas.data?.length ?? 0) > 0 || (materiais.data?.length ?? 0) > 0 || (informado.data?.length ?? 0) > 0;
   },
+  // Com a agenda automática ligada o que comprar e até quando sai do plano (o "compre até" da reserva condicionada).
+  desligadaPelaAgenda: (m) => (m.proposta === 'ligado' ? 'a agenda automática diz o que comprar e até quando' : null),
 };
 
 /** De onde vem o fato de os_material que conta (o mesmo where de aplicar_os_material, 20261024160300). */
@@ -1222,6 +1240,31 @@ export function isRuleEnabled(settings: Record<string, string>, rule: Rule): boo
   const v = settings[`task_rule_${rule.id}_enabled`];
   if (v === undefined || v === null || v === '') return rule.defaultEnabled;
   return v === 'true';
+}
+
+/**
+ * Agenda de Produção, Fase 2 (P3): por que a agenda desligou esta regra agora (o motivo vai para o notes da tarefa que
+ * se resolve), ou null quando a regra vale como sempre. Modos ilegíveis chegam como 'desligado' (agenda-modos.ts): a
+ * regra antiga continua.
+ */
+export function motivoDaAgenda(rule: Rule, modos: ModosDaAgenda = MODOS_DESLIGADOS): string | null {
+  return rule.desligadaPelaAgenda?.(modos) ?? null;
+}
+
+/** Os candidatos da regra nesta rodada: nenhum quando a agenda faz o trabalho dela; senão o find de sempre. */
+export async function candidatosDaRegra(db: any, rule: Rule, modos: ModosDaAgenda = MODOS_DESLIGADOS): Promise<RuleCandidate[]> {
+  if (motivoDaAgenda(rule, modos)) return [];
+  return await rule.find(db);
+}
+
+/**
+ * Se a tarefa viva da regra se resolveu: com a agenda fazendo o trabalho dela, sim, com o motivo da agenda (as tarefas
+ * antigas não ficam penduradas); senão o isResolved de sempre (que lança no erro de leitura).
+ */
+export async function resolucaoDaTarefa(
+  db: any, rule: Rule, task: { automation_key: string }, modos: ModosDaAgenda = MODOS_DESLIGADOS,
+): Promise<string | null> {
+  return motivoDaAgenda(rule, modos) ?? await rule.isResolved(db, task);
 }
 
 /**
