@@ -14,11 +14,14 @@
 //      sequências e os índices únicos de que essas funções dependem (01-sequencias.sql, 04-indices.sql) e a RLS de
 //      produção das tabelas que as policies da agenda atravessam (08-politicas-rls.sql: payees é fechada para o
 //      técnico — sem isso, uma policy que lesse payees direto passaria aqui e nunca casaria em produção);
+//   3b. (Fase 3) os gatilhos de produção que a conclusão atravessa (07-triggers.sql: recebíveis e OS concluída) e as
+//      migrations POSTERIORES ao snapshot que a Fase 3 lê, aplicadas inteiras e uma vez só, como estão em produção
+//      (MIGRATIONS_DEPOIS_DO_SNAPSHOT: o acerto de diárias de 06/10, que trava o dia pago);
 //   4. as migrations do worktree a partir de 20261024150000, em ordem, DUAS vezes (prova de idempotência),
-//      menos o que é dado de produção e não estrutura (a faxina 20261024153000 e os modos em sombra 20261025101000:
-//      na bancada quem liga os modos é cada teste), cada versão registrada em supabase_migrations.schema_migrations
-//      como em produção. A semente 20261024161000 entra: na bancada vazia ela não acha diária e não semeia (a fixture
-//      semeia o dia 23/10). `ate` corta a lista (cada pacote testa até a sua);
+//      menos o que é dado de produção e não estrutura (a faxina 20261024153000 e os modos em sombra 20261025101000 e
+//      20261026101000: na bancada quem liga os modos é cada teste), cada versão registrada em
+//      supabase_migrations.schema_migrations como em produção. A semente 20261024161000 entra: na bancada vazia ela não
+//      acha diária e não semeia (a fixture semeia o dia 23/10). `ate` corta a lista (cada pacote testa até a sua);
 //   5. com `fixture`, scripts/bancada-agenda/fixture-2310.sql (a carteira sintética de 23/10).
 //
 // O PGlite vem da bancada dos comprovantes (0.5.8), fora do repo: PGLITE_DIR troca a pasta.
@@ -42,7 +45,19 @@ export const FORA_DA_BANCADA = new Set([
   '20261024153000_faxina_agenda_fase0.sql',
   // Fase 2 (P6): os modos de desligado para sombra. Na bancada cada teste liga o modo que precisa.
   '20261025101000_agenda_fase2_sombra.sql',
+  // Fase 3 (P7): modo_equipe e modo_diaria em sombra e a semente de agenda_equipe_contato (a fixture-fase3 faz o papel).
+  '20261026101000_agenda_fase3_sombra.sql',
 ]);
+
+/**
+ * Migrations de ANTES da agenda e DEPOIS do snapshot (06/10 19:51 UTC) que a Fase 3 lê: aplicadas inteiras, uma vez,
+ * antes das da agenda (em produção já estão aplicadas). Precisam só do que o snapshot e a lista abaixo trazem: o corpo
+ * PL/pgSQL não é validado ao criar, e o que ele chama (conta_corrente_freelancer, _autor_do_financeiro) a bancada não
+ * usa — a fixture-fase3 grava o acerto direto na tabela.
+ *   · 20261006220000: acertos_diarias, a trava trg_dia_em_acerto_fechado em work_shifts ("dia de acerto fechado não
+ *     entra, não muda e não sai") e registrar_conferencia_do_freelancer (o "ok" do recibo: NOVO-agenda-17).
+ */
+export const MIGRATIONS_DEPOIS_DO_SNAPSHOT = ['20261006220000_diarias_acerto_e_recibo.sql'];
 
 export const ler = (p) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
 
@@ -57,13 +72,35 @@ export const TABELAS = [
   // Fase 2: o registro do gatilho de status de produção (a porta não escreve nele; o teste confere) e a fila de
   // envio do WhatsApp (os evals provam que nada sai para cliente nem equipe).
   'ai_lifecycle_events', 'whatsapp_send_queue',
+  // Fase 3 (P1): a conclusão e os recebíveis (paridade com ensureCompletionReceivables: condição de pagamento,
+  // pagamentos, o vencimento "na entrega" que também acerta as cobranças em collections, o período fechado), a comissão
+  // (despesas da OS, nota emitida e a alíquota; commissions e payables só para provar que nada é inserido) e as
+  // mensagens do WhatsApp (a resposta da equipe).
+  'payments', 'payment_condition_presets', 'service_order_expenses', 'issued_fiscal_documents', 'company_fiscal_settings',
+  'commissions', 'collections', 'periodos_fechados', 'whatsapp_messages',
 ];
 
 /** Sequências do snapshot que as funções da lista abaixo usam (next_document_number). */
 const SEQUENCIAS = ['document_number_seq'];
 
-/** Índices do snapshot de que as funções dependem (o ON CONFLICT do log_app_error; o dedupe da fila). */
-const INDICES = ['uq_app_error_logs_open', 'whatsapp_send_queue_dedupe_key_uq'];
+/**
+ * Índices do snapshot de que as funções dependem (o ON CONFLICT do log_app_error; o dedupe da fila). Fase 3: um dia
+ * por perfil em work_shifts (a diária automática só insere quando a pessoa não tem turno no dia) e o id único da
+ * mensagem do WhatsApp (a resposta da equipe não é lida duas vezes).
+ */
+const INDICES = ['uq_app_error_logs_open', 'whatsapp_send_queue_dedupe_key_uq', 'work_shifts_um_dia_por_perfil',
+  'whatsapp_messages_wa_message_id_unique'];
+
+/**
+ * Gatilhos de produção (07-triggers.sql, um por linha) que a conclusão e o sinal atravessam (Fase 3, P1). O so_status_stock
+ * (a baixa de estoque na conclusão e o estorno na reabertura) fica fora: ele grava em inventory_movements, que a bancada
+ * não tem. A spec dizia "stock_model_v2_on() falso na bancada", mas a fixture-2310 LIGA o v2 (para a reserva das peças):
+ * com o gatilho, toda conclusão da bancada cairia na tabela que falta. Quem precisar provar a baixa ou o estorno traz
+ * inventory_movements e o gatilho juntos. on_quote_deposit_paid entra além da lista da spec: é ele que converte o
+ * orçamento pelo sinal pago (handle_quote_deposit_payment, NOVO-agenda-15), e sem ele a conversão nunca rodaria aqui.
+ */
+const GATILHOS = ['on_quote_deposit_paid', 'receivables_coerencia', 'trg_receivables_periodo_fechado', 'trg_sync_payment_status',
+  'trg_sync_balance_due_on_completion', 'trg_sync_commission_on_complete'];
 
 /**
  * Tabelas com a RLS de produção ligada na bancada (as policies vêm de 08-politicas-rls.sql). Só as que uma policy
@@ -93,6 +130,15 @@ export const FUNCOES = [
   // Fase 2: o erro consultável em SQL (a vigia), o conflito de agenda que a Fase 2 recria e o número de documento
   // que o update_service_order_status do eval usa.
   'log_app_error', 'get_agenda_conflicts', 'next_document_number',
+  // Fase 3 (P1): a concordância ("ok") e o telefone normalizado (a resposta da equipe); a diária de hoje
+  // (registrar_diaria: a diária automática nunca a chama, e o teste do P4 prova contra ela); os gatilhos dos recebíveis
+  // e da OS concluída (o período fechado, a coerência do recebível, o estado do pagamento da OS, o vencimento "na
+  // entrega", a comissão de vendedor) e a conversão pelo sinal pago. Todas com o corpo do snapshot: nenhuma foi
+  // redefinida por migration depois de 06/10 (conferido em 24/10; a mais nova de handle_quote_deposit_payment é
+  // 20261003210000, igual ao snapshot).
+  '_e_concordancia', 'wa_normalize_phone', 'registrar_diaria', 'periodo_esta_fechado', 'bloqueia_lancamento_em_periodo_fechado',
+  'valida_recebivel_coerente', 'sync_service_order_payment_status', 'sync_balance_due_on_completion',
+  'sync_commission_on_so_complete', 'handle_quote_deposit_payment',
 ];
 
 let snapshot;
@@ -103,6 +149,7 @@ function arquivosDoSnapshot() {
     indices: ler(join(SNAP, '04-indices.sql')),
     funcoes: ler(join(SNAP, '05-funcoes.sql')),
     views: ler(join(SNAP, '06-views.sql')),
+    gatilhos: ler(join(SNAP, '07-triggers.sql')),
     politicas: ler(join(SNAP, '08-politicas-rls.sql')),
   };
   return snapshot;
@@ -116,6 +163,7 @@ function linhaDoSnapshot(arquivo, nome, marca) {
 }
 export const sequencia = (nome) => linhaDoSnapshot('sequencias', nome, ` public.${nome} `);
 export const indice = (nome) => linhaDoSnapshot('indices', nome, ` INDEX ${nome} ON `);
+export const gatilho = (nome) => linhaDoSnapshot('gatilhos', nome, `CREATE TRIGGER ${nome} `);
 
 /** A RLS de produção da tabela: liga a RLS e cria as policies do snapshot (o bloco "-- ── public.<nome> ──"). */
 export function rls(nome) {
@@ -234,6 +282,16 @@ export async function criarBancada({ ate, fixture = true, log = () => {} } = {})
   await db.exec(FUNCOES.map(funcao).join('\n'));
   await db.exec(RLS_DE_PRODUCAO.map(rls).join('\n'));
   await db.exec(ESTOQUE_DE_MENTIRA);
+  await db.exec(GATILHOS.map(gatilho).join('\n'));
+  for (const m of MIGRATIONS_DEPOIS_DO_SNAPSHOT) {
+    try {
+      await db.exec(ler(join(MIG, m)));
+      log(true, `migration ${m} (depois do snapshot, uma vez)`);
+    } catch (e) {
+      log(false, `migration ${m} (depois do snapshot): ${String(e.message).split('\n')[0]}`);
+      throw e;
+    }
+  }
 
   const migrations = migracoesAte(ate);
   for (const rodada of [1, 2]) {

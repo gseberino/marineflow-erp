@@ -6,7 +6,7 @@
 //
 // Sobe a bancada (snapshot + migrations duas vezes + fixture-2310.sql), passa o JSON de paridade dos feriados em
 // agenda_teste.feriados e as fixtures que os testes executam por dentro como texto (FIXTURES_COMO_TEXTO: o estado
-// pós-rodada da Fase 1 e os cenários da Fase 2, cada um no seu agenda_teste.<nome>), e roda, cada um no seu
+// pós-rodada da Fase 1 e os cenários das Fases 2 e 3, cada um no seu agenda_teste.<nome>), e roda, cada um no seu
 // begin/rollback:
 //   · supabase/tests/agenda_*.sql cuja linha "-- bancada: depende de <versão>" cabe no corte;
 //   · supabase/tests/purchase_needs_*.sql (a Fase 0 de compras continua passando).
@@ -42,6 +42,12 @@ const FIXTURES_COMO_TEXTO = [
   // Fase 2 (P2): a migration da prontidão da Fase 1, para o teste do motor conferir que a cópia de os_prontidao só
   // muda nos pontos "-- FASE 2:".
   ['agenda_teste.mig_prontidao_fase1', '../../supabase/migrations/20261024160400_agenda_fase1_prontidao.sql'],
+  // Fase 3 (P1): a carteira da Fase 2 com a semana de 03 a 06/11 publicada, a equipe da rotina, as condições de
+  // pagamento e o acerto fechado do João. (P2) as 21 conclusões reais, só números, e os casos de paridade dos recebíveis
+  // com o esperado gerado pelo TS de hoje (JSON, lido pelo teste como texto).
+  ['agenda_teste.fase3', 'fixture-fase3.sql'],
+  ['agenda_teste.replay_conclusoes', 'fixture-replay-conclusoes.sql'],
+  ['agenda_teste.recebiveis_casos', 'recebiveis-casos.json'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

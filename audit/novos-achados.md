@@ -2715,3 +2715,38 @@ porque só o dono pode preenchê-las.
   aparece, pelo payee sócio). O "o que o Roberto faz amanhã?" (`agenda_dia_da_pessoa`) e a `my_agenda` leem o plano pelo payee,
   com ou sem login. Provado em `supabase/tests/agenda_fase2_leituras.sql` (C1–C4). O aviso da tela (`conflictMessage`) cita a
   OS uma vez só quando ela ocupa dois turnos.
+
+### [NOVO-agenda-20] O snapshot de produção é de 06/10: corpo de função copiado dele pode estar velho
+
+- **Encontrado em:** Agenda de Produção, Fase 3 (conferência de 24/10/2026 no código, HEAD 195a73f5).
+- **Onde:** `supabase/schemas/producao/README.md:3` (gerado em 2026-10-06 19:51 UTC); a bancada da agenda
+  (`scripts/bancada-agenda/bancada.mjs`) sobe as tabelas e as funções de produção a partir dele.
+- **O quê:** tudo o que uma migration aplicada depois de 06/10 mudou não está no snapshot. Uma função recriada a partir do
+  snapshot desfaria em silêncio a correção mais nova (e a bancada passaria, porque ela também lê o snapshot).
+- **Regra da Fase 3:** todo corpo copiado sai da **definição mais nova** — a migration de maior timestamp que define a função —
+  e a mudança é marcada `-- FASE 3:`. Conferido no P1 (24/10) para as funções que a Fase 3 recria ou que a bancada passa a
+  carregar: `_agenda_perguntas_antes` e `_agenda_acoes_so_desfaz` só existem em `20261025100000` (de lá saiu o corpo);
+  `_e_concordancia`, `wa_normalize_phone`, `registrar_diaria`, `periodo_esta_fechado`, `bloqueia_lancamento_em_periodo_fechado`,
+  `valida_recebivel_coerente`, `sync_service_order_payment_status`, `sync_balance_due_on_completion`,
+  `sync_commission_on_so_complete` e `handle_quote_deposit_payment` não têm migration depois do snapshot (a mais nova da
+  última é `20261003210000`, igual ao snapshot). O acerto de diárias (`20261006220000`, posterior ao snapshot) entra na bancada
+  aplicado inteiro, uma vez, como está em produção (`MIGRATIONS_DEPOIS_DO_SNAPSHOT`).
+- **Só registro.** Regenerar o snapshot (`node scripts/snapshot-producao.mjs`) depois de aplicar as Fases 1 a 3 tira a dúvida
+  para as próximas fases.
+
+### [NOVO-agenda-22] Concluir uma OS que só tem o sinal não cobra o saldo da condição
+
+- **Encontrado em:** Agenda de Produção, Fase 3, pacote P1 (SELECT `p1_presets` e `p1_sinal_sem_saldo` em produção, 24/10/2026).
+- **Onde:** a regra dos recebíveis da conclusão, `src/lib/completion-receivables.ts:46-51` (idempotência: "se a OS já tem
+  QUALQUER recebível vivo, o financeiro dela já existe"), que o P2 porta para o banco com paridade.
+- **O quê:** o caminho do sinal de hoje (`register_deposit_and_convert`) grava a entrada E o saldo; mas há OS com o sinal
+  lançado sem o saldo (sinal antigo ou lançado à mão). Na conclusão, o sinal conta como "recebível vivo" e nada mais nasce: o
+  saldo da condição nunca vira cobrança. Em produção, em 24/10, duas OS ativas estão assim:
+  - **OS-00069 (Vanderlei):** condição "50% mão de obra + 100% materiais antecipados" (saldo = 50% do serviço na entrega),
+    sinal pago R$ 4.500,00, total R$ 9.008,99, nenhum outro recebível;
+  - **OS-00104 (Flávio):** sinal pago R$ 2.070,00, total R$ 2.760,00, condição com parcela na entrega, nenhum outro recebível.
+  Concluídas assim, só a OS-00110 (o sinal de R$ 5.600,00 cobriu o total: nada ficou sem cobrar).
+- **Não corrigido no P1** (só registro). É do P2 decidir com a paridade: a regra da tela é a de hoje e o replay das 21
+  conclusões é por classe; mudar a idempotência ("o sinal sozinho não é o financeiro inteiro quando a condição tem saldo") muda
+  o que a tela faz e precisa do OK do dono. Enquanto isso, a fixture da Fase 3 dá ao Vanderlei o saldo na entrega que o
+  caminho do sinal de hoje gravaria. **Para o dono:** conferir o saldo do Vanderlei e do Flávio antes de concluir.

@@ -17,6 +17,10 @@
 //     o TS novo (_shared/agenda-modo.ts, task-automations/agenda-modos.ts e agenda-vigia.ts) e as partes do Secretário
 //     que leem o plano (linhasDaAgendaQueCabem, comprasDoPlano, linhasDaAgenda, osDoPlano, planosDasOs). Os pesos da
 //     pontuação do motor são inteiros (estrutura de ordem, não parâmetro do dono) e ficam nas constantes c_peso_*.
+//   · (Fase 3, P1) também as funções das migrations 2026102610* (a base: os gatilhos da entrega, das mensagens à equipe e
+//     os da Fase 2 recriados; os pacotes seguintes da fase entram aqui sozinhos pelo prefixo). Os DEFAULTs novos de
+//     agenda_config (a janela e as horas da equipe, a validade do "ok", a meta do PPC…) ficam em 20261026100000, fora de
+//     função.
 // E cobra:
 //   1. nenhum valor de parâmetro de agenda_config (carga 0,8, R$ 1.600 e R$ 764 por diária, fator 1,5, frequência
 //      mínima 0,25, 1.000 de texto e de peça embutida, validade de 24/72 horas, horário dos turnos, municípios
@@ -151,7 +155,7 @@ export function corposDasFuncoes(sql: string, arquivo: string): Trecho[] {
 
 function funcoesDasMigrations(): Trecho[] {
   return fs.readdirSync(MIGRATIONS)
-    .filter((f) => /^(2026102416|2026102510)\d{4}_.+\.sql$/.test(f))
+    .filter((f) => /^(2026102416|2026102510|2026102610)\d{4}_.+\.sql$/.test(f))
     .sort()
     .flatMap((f) => corposDasFuncoes(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8').replace(/\r\n/g, '\n'), f));
 }
@@ -257,6 +261,8 @@ describe('agenda: parâmetro só em agenda_config', () => {
       // Fase 2 (P6): o motor, a porta, a vigia, a saúde, o rascunho dos pedidos e as leituras do plano
       'agenda_propor', 'os_transicionar_status', 'agenda_vigiar', 'agenda_saude', 'agenda_rascunho_andamento',
       'agenda_propor_dito', 'agenda_linhas_do_dia',
+      // Fase 3 (P1): a base (o gatilho da entrega e o das mensagens à equipe)
+      '_so_entrega_pela_porta', '_agenda_equipe_mensagens_so_responde',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),

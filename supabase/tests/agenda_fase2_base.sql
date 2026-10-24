@@ -398,7 +398,13 @@ begin
                            'agenda_config_remarcar_confirmado_du_check', 'agenda_config_sem_registro_du_check',
                            'agenda_config_backlog_minimo_semanas_check', 'agenda_config_perguntas_vezes_max_check',
                            'adiantavel_coerente'))
-     and not (c.conname = any (v_testados));
+     and not (c.conname = any (v_testados))
+     -- FASE 3: os 3 que a Fase 3 pôs em agenda_vigia_rodadas (20261026100000: a rotina e os modos da equipe e da diária)
+     -- têm o caso deles em agenda_fase3_base.sql, que cobra a lista; sem esta linha, este teste reprovaria por um CHECK
+     -- que não é da Fase 2. As listas fechadas que a Fase 3 ampliou (tipo e origem da ação, tipo da pergunta, resultado_via
+     -- da alocação) continuam com o mesmo nome e o caso daqui continua valendo.
+     and not (c.conname = any (array['agenda_vigia_rodadas_rotina_check', 'agenda_vigia_rodadas_modo_equipe_check',
+                                     'agenda_vigia_rodadas_modo_diaria_check']));
   insert into _resultado values ('B todo CHECK e EXCLUDE da Fase 2 tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;
