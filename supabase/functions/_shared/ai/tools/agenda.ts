@@ -431,12 +431,16 @@ export const agendaTools: ToolDef[] = [
       };
 
       if (userRole === "admin" || userRole === "financial") {
-        const { data: recv } = await sb.from("receivables")
+        // NOVO-agenda-08 (24/10/2026): os vencimentos também sobem o erro. Engolido, virava "nada a receber/pagar
+        // hoje" — e o 5º bloco da agenda de produção (agenda_o_que_fazer, "Outras pendências") lê a mesma regra.
+        const { data: recv, error: erroReceber } = await sb.from("receivables")
           .select("id, amount, balance_amount, due_date, clients(name)")
           .in("status", ["pending", "partially_paid"]).eq("due_date", day).limit(20);
-        const { data: pay } = await sb.from("payables")
+        if (erroReceber) throw erroReceber;
+        const { data: pay, error: erroPagar } = await sb.from("payables")
           .select("id, amount, balance_amount, due_date, supplier_name")
           .in("status", ["pending", "partially_paid"]).eq("due_date", day).limit(20);
+        if (erroPagar) throw erroPagar;
         result.vencimentos_do_dia = {
           a_receber: (recv || []).map((r: any) => ({ cliente: r.clients?.name, valor: r.balance_amount ?? r.amount })),
           a_pagar: (pay || []).map((p: any) => ({ fornecedor: mascararCpfNoTexto(p.supplier_name ?? null), valor: p.balance_amount ?? p.amount })),

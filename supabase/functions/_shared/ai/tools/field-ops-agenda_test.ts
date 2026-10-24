@@ -377,6 +377,31 @@ for (const tabela of ["agenda_tasks", "service_order_technicians", "service_orde
   });
 }
 
+// NOVO-agenda-08 (Agenda de Produção, Fase 1, P5, 24/10/2026): os vencimentos do dia (admin e financeiro) também.
+// Engolido, o erro virava "a receber hoje: nada" — e o 5º bloco da agenda de produção lê a mesma regra.
+for (const tabela of ["receivables", "payables"]) {
+  for (const cargo of ["admin", "financial"]) {
+    Deno.test(`my_agenda (${cargo}): erro em ${tabela} lança (não vira "nada a receber/pagar hoje")`, async () => {
+      const { sb } = bancoFalso({ [tabela]: falha(`falha em ${tabela}`) });
+      await assertRejects(
+        () => minhaAgenda.execute({ date: "2026-10-23" }, { sb, userId: "u1", userRole: cargo } as never),
+      );
+    });
+  }
+}
+
+Deno.test("my_agenda (admin): sem erro, os vencimentos do dia continuam saindo com o saldo", async () => {
+  const { sb } = bancoFalso({
+    receivables: () => ({ data: [{ id: "r1", amount: 500, balance_amount: 200, due_date: "2026-10-23", clients: { name: "Nelson" } }], error: null }),
+    payables: () => ({ data: [{ id: "p1", amount: 312.4, balance_amount: null, due_date: "2026-10-23", supplier_name: "Celesc" }], error: null }),
+  });
+  const r = await minhaAgenda.execute({ date: "2026-10-23" }, { sb, userId: "u1", userRole: "admin" } as never) as Record<string, any>;
+  assertEquals(r.vencimentos_do_dia, {
+    a_receber: [{ cliente: "Nelson", valor: 200 }],
+    a_pagar: [{ fornecedor: "Celesc", valor: 312.4 }],
+  });
+});
+
 for (const tabela of ["app_users", "agenda_tasks", "service_orders"]) {
   Deno.test(`list_team_agenda: erro em ${tabela} lança (não vira "equipe sem nada")`, async () => {
     const { sb } = bancoFalso({ [tabela]: falha(`falha em ${tabela}`) });

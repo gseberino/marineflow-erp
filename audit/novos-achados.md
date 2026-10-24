@@ -2622,3 +2622,17 @@ porque só o dono pode preenchê-las.
   Itajaí, chega antes. Com dois cadastros da mesma empresa, a data depende de qual dos dois está no produto.
 - **Não corrigido** (só registro, como pede a spec): é dado de cadastro e decisão do dono (juntar os dois, ou trocar o fornecedor do
   produto). Quando o dono disser "compro na Kamell daqui" (P5, `material_informar` com fornecedor), o fato dele vence o do produto.
+
+### [NOVO-agenda-08] `my_agenda` engolia o erro dos vencimentos: falha virava "nada a receber/pagar hoje"
+
+- **Encontrado em:** Agenda de Produção, Fase 1 (conferência de 23/10/2026; a spec da fase o chamou de "NOVO-agenda-04",
+  número que já era do achado do `condicao-pagamento_test.ts`, da Fase 0 — por isso 08).
+- **Onde:** `supabase/functions/_shared/ai/tools/agenda.ts`, `my_agenda`, bloco de admin e financeiro (antigo `:431-437`): as
+  leituras de `receivables` e `payables` com vencimento no dia não olhavam o `error`.
+- **O quê:** com o PostgREST respondendo erro (permissão, coluna, tempo esgotado), `data` vem nulo e a resposta dizia
+  `a_receber: []` e `a_pagar: []` — "nada vence hoje" sem ter lido nada. As outras três leituras da mesma tool já subiam o
+  erro desde a revisão de 23/10. E o 5º bloco da agenda de produção ("Outras pendências", `agenda_o_que_fazer`, migration
+  `20261024160500`) conta pela MESMA regra: as duas respostas têm de concordar, e uma delas não pode mentir em silêncio.
+- **Corrigido no P5 da Fase 1:** `if (erroReceber) throw erroReceber;` e `if (erroPagar) throw erroPagar;`. Testes em
+  `supabase/functions/_shared/ai/tools/field-ops-agenda_test.ts` (erro em `receivables` e em `payables`, para admin e
+  financeiro, lança; sem erro, os vencimentos saem com o saldo).

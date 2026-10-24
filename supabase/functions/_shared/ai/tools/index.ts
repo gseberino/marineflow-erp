@@ -68,6 +68,9 @@ import { comprovanteTools } from "./comprovantes.ts";
 import { agruparOrcamentosTools } from "./agrupar-orcamentos.ts";
 // O lote semanal da papelada (16/10/2026, secretário Passo 5): só pela pendência do comando *lote*.
 import { papeladaTools } from "./papelada.ts";
+// Agenda de Produção, Fase 1 (24/10/2026): agenda_ver (a leitura com o texto pronto do banco) e as três que anotam o
+// rascunho da conversa (os_planejar, material_informar, equipe_disponibilidade) — só o *grava* do dono grava.
+import { agendaProducaoTools } from "./agenda-producao.ts";
 
 export type { ToolDef, ToolCtx, RiskLevel, Role } from "./registry.ts";
 
@@ -139,6 +142,8 @@ export const allTools: ToolDef[] = [
   ...comprovanteTools,
   // agrupar orçamentos (15/10/2026)
   ...agruparOrcamentosTools,
+  // agenda de produção (24/10/2026)
+  ...agendaProducaoTools,
 ].sort((a, b) => a.name.localeCompare(b.name));
 
 /**

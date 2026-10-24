@@ -709,11 +709,22 @@ insert into _resultado values
    has_function_privilege('authenticated', 'public._dia_curto(date)', 'execute')
    and not has_function_privilege('anon', 'public._dia_curto(date)', 'execute'), null);
 
+-- Security definer só quem ESCREVE: a semente (P1) e, a partir do P5 (20261024160600), o rascunho e o *grava* (as RPCs
+-- conferem o cargo em _autor_da_agenda; as _agenda_aplicar_* e o salvar são só de service_role). Leitura nunca.
 insert into _resultado
-select 'E5 só a semente é security definer; todas com search_path fixo',
-       bool_and(p.prosecdef = (p.proname = 'agenda_disponibilidade_semear'))
+select 'E5 security definer só a semente e as escritas do rascunho (P5); todas com search_path fixo',
+       bool_and(p.prosecdef = (p.proname in ('agenda_disponibilidade_semear', 'agenda_rascunho_planejar',
+                                             'agenda_rascunho_material', 'agenda_rascunho_disponibilidade',
+                                             'agenda_rascunho_ler', 'agenda_rascunho_gravar', 'agenda_rascunho_descartar',
+                                             '_agenda_rascunho_salvar', '_agenda_aplicar_planejar',
+                                             '_agenda_aplicar_material', '_agenda_aplicar_disponibilidade')))
        and bool_and(coalesce(array_to_string(p.proconfig, ','), '') like '%search_path=%'),
-       string_agg(p.proname, ', ') filter (where p.prosecdef <> (p.proname = 'agenda_disponibilidade_semear')
+       string_agg(p.proname, ', ') filter (where p.prosecdef <> (p.proname in ('agenda_disponibilidade_semear',
+                                             'agenda_rascunho_planejar', 'agenda_rascunho_material',
+                                             'agenda_rascunho_disponibilidade', 'agenda_rascunho_ler',
+                                             'agenda_rascunho_gravar', 'agenda_rascunho_descartar',
+                                             '_agenda_rascunho_salvar', '_agenda_aplicar_planejar',
+                                             '_agenda_aplicar_material', '_agenda_aplicar_disponibilidade'))
                                               or p.proconfig is null)
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
  where n.nspname = 'public' and p.proname ~ '^_?agenda_';

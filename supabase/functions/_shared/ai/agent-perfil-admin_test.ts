@@ -144,6 +144,52 @@ Deno.test("ferramenta_extra: gravação vira pendência com o nome real, sem exe
   assertEquals(pendingRows[0]?.action_name, "check_in_service_order");
 });
 
+// ───────── Agenda de Produção, Fase 1 (P5, 24/10/2026; decisão d14 do dono) ─────────
+
+Deno.test("agenda de produção: agenda_ver à vista no lugar de my_agenda, e o teto de 113 continua", async () => {
+  assert(PERFIL_ADMIN.has("agenda_ver"), "agenda_ver fora do PERFIL_ADMIN");
+  assertEquals(PERFIL_ADMIN.has("my_agenda"), false, "my_agenda continua no PERFIL_ADMIN (d14: troca, não soma)");
+  for (const n of ["os_planejar", "material_informar", "equipe_disponibilidade"]) {
+    assertEquals(PERFIL_ADMIN.has(n), false, `${n} à vista: só agenda_ver fica no perfil (d14)`);
+  }
+  zerarCacheDoPerfilDeTools();
+  const { p } = params("admin_enxuto", "admin", porCargo("admin"));
+  const r = await prepararFerramentasDoTurno(p as any);
+  const visiveis = r.tools.map((t) => t.name);
+  assert(visiveis.includes("agenda_ver"));
+  assertEquals(visiveis.includes("my_agenda"), false);
+  assert(visiveis.length <= 113, `admin vê ${visiveis.length}`);
+  for (const n of ["my_agenda", "os_planejar", "material_informar", "equipe_disponibilidade"]) {
+    assert(r.alcancaveisPelaRede[n], `${n} devia estar ao alcance da ferramenta_extra`);
+  }
+});
+
+Deno.test("agenda de produção: as três que anotam o rascunho rodam DIRETO pela ferramenta_extra (sem pendência, sem 'sim')", async () => {
+  for (const n of ["os_planejar", "material_informar", "equipe_disponibilidade"]) {
+    execucoes.length = 0;
+    const { amb, pendingRows, auditRows } = await ambienteDoAdmin({ [n]: comExecuteFalso });
+    const argumentos = n === "equipe_disponibilidade"
+      ? { pessoa: "eu", situacao: "vem", dias: "segunda a sexta", padrao: true, trecho: "fico em campo de segunda a sexta" }
+      : n === "material_informar"
+      ? { os: "Nelson", itens: ["painel"], situacao: "a_caminho", quando: "dia 3", trecho: "o painel chega dia 3" }
+      : { os: "Lenine", dias: 2, trecho: "Lenine dois dias" };
+    const r = await executarChamadaDeTool({ name: NOME_DA_FERRAMENTA_EXTRA, input: { nome: n, argumentos } }, amb);
+    assertEquals(execucoes, [n], `${n} não rodou direto`);
+    assertEquals(r.toolResult, { ok: true });
+    assertEquals(pendingRows.length, 0, `${n} virou pendência`);
+    assert(auditRows.some((a) => a.event_type === `fora_do_perfil:${n}`));
+  }
+});
+
+Deno.test("agenda de produção: my_agenda fora da vista continua sendo leitura pela rede (roda direto)", async () => {
+  execucoes.length = 0;
+  const { amb, pendingRows } = await ambienteDoAdmin({ my_agenda: comExecuteFalso });
+  const r = await executarChamadaDeTool({ name: NOME_DA_FERRAMENTA_EXTRA, input: { nome: "my_agenda", argumentos: {} } }, amb);
+  assertEquals(execucoes, ["my_agenda"]);
+  assertEquals(r.toolResult, { ok: true });
+  assertEquals(pendingRows.length, 0);
+});
+
 Deno.test("ferramenta_extra com nome fora do alcance recusa", async () => {
   const { amb } = await ambienteDoAdmin();
   const r = await executarChamadaDeTool({ name: NOME_DA_FERRAMENTA_EXTRA, input: { nome: "nao_existe" } }, amb);

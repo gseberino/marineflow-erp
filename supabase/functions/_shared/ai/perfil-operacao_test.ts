@@ -82,6 +82,9 @@ ACRESCENTADAS.push(
 );
 // agrupar orçamentos (15/10/2026, pedido do dono): listar os candidatos, agrupar e desagrupar conversando.
 ACRESCENTADAS.push("listar_orcamentos_para_agrupar", "agrupar_orcamentos", "desagrupar_orcamento");
+// agenda de produção (24/10/2026, Fase 1, P5): a leitura da agenda de produção do dono (só admin, pelos roles). As três
+// que anotam o rascunho ficam em SO_PELA_REDE (rodam direto: ESCRITAS_VERIFICADAS_DA_REDE).
+ACRESCENTADAS.push("agenda_ver");
 // 06/10/2026: levantamento e roteiro de execução — escondidos da tela em 05/10 (chave
 // roteiro_execucao_visivel); o prompt deixou de ensinar as duas seções.
 const REMOVIDAS = ["registrar_jornada", "fechar_jornada", "minhas_horas", "apurar_pagamento",
@@ -113,8 +116,10 @@ Deno.test("SO_PELA_REDE: pela rede, roda direto só leitura e escrita de sugest�
   // ESCRITAS_VERIFICADAS_DA_REDE vira pendência, mesmo de risco low. Se este teste acusar
   // diferença: nome novo em SO_PELA_REDE cai do lado "pede confirmação" sozinho — confira se é
   // isso mesmo; acrescentar a ESCRITAS_VERIFICADAS_DA_REDE só depois de ler o execute.
-  for (const n of ["get_x", "list_x", "read_x", "check_x", "search_x"]) assertEquals(ehLeituraPeloNome(n), true, n);
-  for (const n of ["update_x", "interpret_customer_reply", "remember_about_entity", "xget_x"]) assertEquals(ehLeituraPeloNome(n), false, n);
+  for (const n of ["get_x", "list_x", "read_x", "check_x", "search_x", "my_agenda"]) assertEquals(ehLeituraPeloNome(n), true, n);
+  for (const n of ["update_x", "interpret_customer_reply", "remember_about_entity", "xget_x", "os_planejar"]) {
+    assertEquals(ehLeituraPeloNome(n), false, n);
+  }
   // Nome herdado do protótipo de objeto não é "verificado".
   for (const n of ["constructor", "toString", "hasOwnProperty"]) assertEquals(rodaDiretoPelaRede({ name: n, risk: "low" }), false, n);
 
@@ -123,7 +128,12 @@ Deno.test("SO_PELA_REDE: pela rede, roda direto só leitura e escrita de sugest�
   const escritasDiretas = diretas.filter((n) => !ehLeituraPeloNome(n)).sort();
   // enviar_arquivo_do_dropbox (08/10/2026): só para o próprio WhatsApp de quem pede, como send_document_pdf_to_self.
   // completar_comprovante (11/10/2026): só anota no CMP do próprio dono pelas RPCs do fluxo; quem grava é o sim dele.
-  assertEquals(escritasDiretas, ["completar_comprovante", "enviar_arquivo_do_dropbox", "interpret_customer_reply", "remember_about_entity"]);
+  // os_planejar, material_informar, equipe_disponibilidade (24/10/2026, Agenda de Produção): só anotam o rascunho da
+  // releitura; quem grava é o *grava* do dono (comando sem IA), que o modelo não alcança.
+  assertEquals(escritasDiretas, [
+    "completar_comprovante", "enviar_arquivo_do_dropbox", "equipe_disponibilidade", "interpret_customer_reply",
+    "material_informar", "os_planejar", "remember_about_entity",
+  ]);
   assertEquals(escritasDiretas, Object.keys(ESCRITAS_VERIFICADAS_DA_REDE).sort(), "lista verificada com nome que não é escrita low de SO_PELA_REDE");
 
   // As escritas de risco low que, pela rede, pedem confirmação (conferência de 26/09/2026).

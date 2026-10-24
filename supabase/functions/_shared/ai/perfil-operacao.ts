@@ -117,6 +117,9 @@ export const PERFIL_OPERACAO: ReadonlySet<string> = new Set([
 
   // — Agenda, tarefas e lembretes —
   "my_agenda",
+  // 24/10/2026 (Agenda de Produção, Fase 1): a agenda de produção do dono com o texto pronto do banco. Os `roles`
+  // (só admin) a escondem dos outros cargos; my_agenda continua para técnico e financeiro.
+  "agenda_ver",
   "list_team_agenda",
   "list_tasks",
   "create_task",
@@ -314,6 +317,13 @@ export const SO_PELA_REDE: ReadonlySet<string> = new Set([
   //   tudo ou nada (12/10/2026), e o fluxo pergunta; quem grava é o sim do dono. O perfil do admin
   //   está no teto: fica na rede (roda direto: ESCRITAS_VERIFICADAS_DA_REDE).
   "completar_comprovante",
+  // — Agenda de Produção, Fase 1 (24/10/2026): o que o dono conta da agenda vira RASCUNHO com a releitura pronta do
+  //   banco (agenda_rascunho_*). Ninguém grava fato por aqui: só o *grava* do dono, comando lido antes do modelo. O perfil
+  //   do admin está no teto (113, decisão d14 do dono: só agenda_ver à vista): ficam na rede e rodam direto
+  //   (ESCRITAS_VERIFICADAS_DA_REDE). agenda_ver as ensina. —
+  "os_planejar",
+  "material_informar",
+  "equipe_disponibilidade",
   // — E-mail (08/10/2026): silenciar um remetente é gesto raro e pede confirmação. —
   "silenciar_remetente_email",
   // — Memória por entidade: as notas APROVADAS já chegam prontas no contexto (ai-agent), então
@@ -512,7 +522,10 @@ export const PERFIL_ADMIN: ReadonlySet<string> = new Set([
   // — (B) agenda —
   "create_task",
   "schedule_self_reminder",
-  "my_agenda",
+  // 24/10/2026 (Agenda de Produção, Fase 1; decisão d14 do dono): agenda_ver no lugar de my_agenda — o teto de 113 não
+  // sobe. my_agenda continua alcançável pela ferramenta_extra (roda direto: é leitura, ehLeituraPeloNome), e as três que
+  // anotam o rascunho (os_planejar, material_informar, equipe_disponibilidade) também, sem pendência.
+  "agenda_ver",
 
   // cadastros (07/10/2026): update_marina, add_vessel_contact e update_vessel_contact ficam na
   // rede (ferramenta_extra) — uso raro; o perfil enxuto tem teto de tokens (agent-perfil-admin_test.ts).
@@ -578,20 +591,36 @@ export const ESCRITAS_VERIFICADAS_DA_REDE: Readonly<Record<string, string>> = {
     "sugestão: a nota nasce 'candidate' e só entra no contexto do agente depois que o dono aprova (review_entity_note, que pela rede pede confirmação)",
   interpret_customer_reply:
     "análise: classifica o texto; com entity_id, só marca responded_at/reply_intent no último toque de ai_comms_log",
+  // 24/10/2026 (Agenda de Produção, Fase 1): pela rede, cada item da rodada viraria uma pendência — o dono daria um "sim"
+  // por item e depois o *grava*. As três só escrevem o rascunho.
+  os_planejar:
+    "só grava o rascunho da releitura (agenda_rascunho, pela RPC agenda_rascunho_planejar, que confere o cargo e confere " +
+    "no trecho do dono cada número e data); o fato em os_planejamento só é gravado pelo *grava* do dono, comando lido " +
+    "antes do modelo (agenda_rascunho_gravar), que o modelo não alcança",
+  material_informar:
+    "só grava o rascunho da releitura (agenda_rascunho, pela RPC agenda_rascunho_material, sem sincronizar nada); o fato " +
+    "em os_material só é gravado pelo *grava* do dono, comando lido antes do modelo (agenda_rascunho_gravar), que o " +
+    "modelo não alcança; não cria OC nem cotação",
+  equipe_disponibilidade:
+    "só grava o rascunho da releitura (agenda_rascunho, pela RPC agenda_rascunho_disponibilidade); o fato em " +
+    "agenda_disponibilidade só é gravado pelo *grava* do dono, comando lido antes do modelo (agenda_rascunho_gravar), " +
+    "que o modelo não alcança; não avisa ninguém",
 };
 
 /**
  * Leitura pelo nome (get_, list_, read_, check_ menos check_in_/check_out_, search_ e, desde
- * 05/10/2026, listar_, consultar_, verificar_, buscar_, resultado_). O executor usa em rodaDiretoPelaRede;
- * perfil-operacao_test.ts confere que nenhuma "leitura pelo nome" de SO_PELA_REDE tem
+ * 05/10/2026, listar_, consultar_, verificar_, buscar_, resultado_; desde 24/10/2026, my_). O executor usa em
+ * rodaDiretoPelaRede; perfil-operacao_test.ts confere que nenhuma "leitura pelo nome" de SO_PELA_REDE tem
  * insert/update/upsert/delete/rpc no execute — senão o nome estaria mentindo.
  */
 export function ehLeituraPeloNome(nome: string): boolean {
   // check_in_/check_out_ começam com check_ mas GRAVAM (entrada e saída do técnico na OS): a
   // rede do admin (05/10/2026) passou a alcançá-las, então saem daqui. As leituras em português
   // (listar_, consultar_, verificar_, buscar_, resultado_) entraram pelo mesmo motivo.
+  // my_ (24/10/2026): my_agenda saiu da vista do admin (agenda_ver no lugar, decisão d14) e continua alcançável pela
+  // ferramenta_extra; sem o prefixo, a leitura dele viraria um cartão de "confirma?" no meio da conversa.
   if (/^check_(in|out)_/.test(nome)) return false;
-  return /^(get_|list_|read_|check_|search_|listar_|consultar_|verificar_|buscar_|resultado_)/.test(nome);
+  return /^(get_|list_|read_|check_|search_|listar_|consultar_|verificar_|buscar_|resultado_|my_)/.test(nome);
 }
 
 /**
