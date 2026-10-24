@@ -2750,3 +2750,67 @@ porque só o dono pode preenchê-las.
   conclusões é por classe; mudar a idempotência ("o sinal sozinho não é o financeiro inteiro quando a condição tem saldo") muda
   o que a tela faz e precisa do OK do dono. Enquanto isso, a fixture da Fase 3 dá ao Vanderlei o saldo na entrega que o
   caminho do sinal de hoje gravaria. **Para o dono:** conferir o saldo do Vanderlei e do Flávio antes de concluir.
+
+### [NOVO-agenda-14] O técnico que conclui pela tela não gera cobrança: a RLS barra e o erro é engolido
+
+- **Encontrado em:** Agenda de Produção, Fase 3 (conferência de 24/10/2026 no código, HEAD 195a73f5).
+- **Onde:** `src/hooks/use-service-orders.ts:327-348` (a conclusão chama `ensureCompletionReceivables` num `try/catch` que só
+  faz `console.error`); `supabase/schemas/producao/08-politicas-rls.sql:667-678` (INSERT em `receivables` só para
+  admin/financeiro).
+- **O quê:** quando quem conclui é o técnico, o INSERT das cobranças da condição é recusado pela RLS, o erro some e o UPDATE do
+  status segue: a OS fica concluída sem nada a receber (o D7 por outro caminho).
+- **Corrigido no banco (P2, migration `20261026100100`, NÃO APLICADA):** a porta (`os_transicionar_status`, security definer)
+  cria as cobranças e grava a saída na mesma transação, para admin/financeiro e para o técnico da OS; erro = nada muda e o texto
+  diz por quê. Provado em `supabase/tests/agenda_fase3_conclusao.sql` (C05). A tela passa a chamar a porta no P3.
+
+### [NOVO-agenda-15] A conversão ORÇ→OS não mantém o número fora da tela
+
+- **Encontrado em:** Agenda de Produção, Fase 3 (conferência de 24/10/2026).
+- **Onde:** `handle_quote_deposit_payment` (corpo mais novo em `20261003210000_sinal_pago_aprova_orcamento.sql`, igual ao
+  snapshot): converte o orçamento pelo sinal pago sem trocar o prefixo; `supabase/functions/_shared/ai/tools/service-orders.ts:830-840`:
+  o assistente converte com um número NOVO (`next_document_number`). A tela (`use-service-orders.ts:296-317`) e
+  `register_deposit_and_convert` trocam só o prefixo.
+- **Corrigido (P2, migration `20261026100100`, NÃO APLICADA):** a porta converte trocando só o prefixo (ORÇ-00119 → OS-00119),
+  com `converted_to_os_at` e `original_quote_amount` gravados uma vez, e aplica aprovada → X na mesma chamada;
+  `handle_quote_deposit_payment` recriada troca o prefixo (se o número novo já for de outra OS, fica o de agora: o pagamento
+  nunca quebra) e guarda o valor orçado. O assistente passa pela porta no P3. O dado da ORÇ-00070 fica com o dono (ver
+  NOVO-agenda-23: foi a assinatura, não o sinal, que a tirou do rascunho).
+
+### [NOVO-agenda-19] `receivables` não tem índice único por OS: a idempotência da conclusão era só do app
+
+- **Encontrado em:** Agenda de Produção, Fase 3 (conferência de 24/10/2026).
+- **Onde:** `supabase/schemas/producao/04-indices.sql` (nenhum único em `receivables(service_order_id, …)`);
+  `src/lib/completion-receivables.ts` (a checagem "já tem recebível vivo" é uma leitura antes do INSERT, sem trava).
+- **O quê:** duas conclusões ao mesmo tempo (dois cliques, duas abas) podiam criar o plano duas vezes.
+- **Corrigido na porta (P2):** `os_transicionar_status` trava a OS (`for update`) antes de conferir e criar; a segunda chamada
+  espera e encontra a OS concluída ("já está concluída"). Concluir duas vezes = um conjunto de cobranças (teste C02). A tela
+  antiga continua sem trava até o P3 trocá-la pela porta.
+
+### [NOVO-agenda-21] A parcela "na entrega" vence no dia UTC da saída
+
+- **Encontrado em:** Agenda de Produção, Fase 3 (conferência de 24/10/2026).
+- **Onde:** `sync_balance_due_on_completion` (`supabase/schemas/producao/05-funcoes.sql:11313-11338`):
+  `v_due := COALESCE(NEW.check_out_at::date, CURRENT_DATE)` no fuso da sessão (UTC no Supabase).
+- **O quê:** uma conclusão depois das 21h de Brasília faz a parcela "na entrega" (e a cobrança dela em `collections`) vencer
+  no dia seguinte. A emissão fica no dia certo.
+- **Só registro (paridade intencional com a tela):** a porta não mexe no gatilho; o teste C10 de
+  `agenda_fase3_conclusao.sql` documenta o comportamento (concluída às 21h30 de qui 29/10, o saldo vence sex 30/10) e o texto
+  ao dono diz a data verdadeira (lida depois do gatilho). Corrigir muda vencimentos de cobranças já existentes: é decisão do
+  dono (lista dele).
+
+### [NOVO-agenda-23] Em produção a assinatura do cliente APROVA, não conclui — e aprova sem converter
+
+- **Encontrado em:** Agenda de Produção, Fase 3, pacote P2 (SELECT `i07_assinatura_status` e `i08_assinatura_conversao` em
+  produção, 24/10/2026).
+- **Onde:** `supabase/functions/submit-signature/index.ts:174-193` (o status depois de assinar vem de
+  `app_settings.signature_status_after`, padrão `completed`). Em produção o valor é **`approved`**.
+- **O quê:** a spec da Fase 3 (NOVO-agenda-13) supunha que a assinatura concluía sem saída e sem cobrança. Com `approved`, o
+  que acontece é outra coisa: a assinatura de um orçamento muda o status para aprovada **sem converter** (o número fica ORÇ- e
+  `converted_to_os_at` fica nulo, e a tela, que só converte "na 1ª saída do rascunho", nunca mais converte). É o caso da
+  **ORÇ-00070**: assinada em 29/07 às 11:45, nunca convertida, sem sinal, concluída com o número de orçamento (o "saldo final"
+  foi lançado à mão um minuto depois da assinatura). E numa OS em andamento, a assinatura a voltaria para aprovada.
+- **Encaminhado no P2:** a porta aceita a assinatura (via `assinatura`, sem login, sem autor) também como **conversão**:
+  orçamento → aprovada troca o prefixo e grava a conversão (teste V07); numa OS em andamento a regra de sempre vale (não volta
+  para aprovada). O P3 passa `submit-signature` pela porta. Ver também NOVO-agenda-15 (o sinal pago).
+- **Para o dono:** trocar o número da ORÇ-00070 para OS-00070 é dado (operacional); e confirmar se `signature_status_after`
+  deve continuar `approved` (a assinatura do cliente vale como aprovação do orçamento, não como conclusão).

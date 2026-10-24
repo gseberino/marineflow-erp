@@ -48,6 +48,9 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.fase3', 'fixture-fase3.sql'],
   ['agenda_teste.replay_conclusoes', 'fixture-replay-conclusoes.sql'],
   ['agenda_teste.recebiveis_casos', 'recebiveis-casos.json'],
+  // Fase 3 (P2): a migration do motor da Fase 2, para o teste da conclusão conferir que a cópia de agenda_desfazer só muda
+  // no bloco "-- FASE 3:".
+  ['agenda_teste.mig_motor_fase2', '../../supabase/migrations/20261025100200_agenda_fase2_motor.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

@@ -147,25 +147,39 @@ $m$;
 do $p$
 declare
   v_via text;
+  -- FASE 3: com 20261026100100 aplicada, a porta conclui, fatura (só concluída), reabre e recusa cancelar com o texto do
+  -- botão (os testes dela: agenda_fase3_conclusao.sql). Este arquivo roda nos dois cortes (--ate 20261025100100 e a fase toda).
+  v_f3  boolean := exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace
+                                                    and p.proname = 'os_transicionar_status' and p.pronargs = 9);
 begin
   -- Encerrada e orçamento: a agenda não mexe.
   perform pg_temp.confere('P01 concluída → agendada: recusa', pg_temp.passa(1, 'scheduled', 'dono'), false, false, 'completed', 0,
     'A OS-TESTE-AG3-01 está concluída: a agenda não muda o status dela.');
+  -- FASE 3: a faturada diz onde reabrir (o desfaturar é do financeiro).
   perform pg_temp.confere('P01 faturada → em andamento: recusa', pg_temp.passa(2, 'in_progress', 'check_in'), false, false, 'invoiced', 0,
-    'A OS-TESTE-AG3-02 está faturada: a agenda não muda o status dela.');
+    case when v_f3 then 'A OS-TESTE-AG3-02 está faturada: reabrir é pelo financeiro.'
+         else 'A OS-TESTE-AG3-02 está faturada: a agenda não muda o status dela.' end);
   perform pg_temp.confere('P01 cancelada → agendada: recusa', pg_temp.passa(3, 'scheduled', 'motor', null, null), false, false, 'cancelled', 0,
     'A OS-TESTE-AG3-03 está cancelada: a agenda não muda o status dela.');
   perform pg_temp.confere('P01 orçamento → agendada: recusa', pg_temp.passa(4, 'scheduled', 'tela_agendar'), false, false, 'draft', 0,
     'Isso ainda é orçamento: converta antes.');
   -- Concluir, faturar, cancelar e voltar a orçamento não são pela porta.
-  perform pg_temp.confere('P02 aberta → concluída: recusa', pg_temp.passa(5, 'completed', 'dono'), false, false, 'open', 0,
-    'Concluir é pela tela (botão Concluir da OS); cancelar é Cancelar OS.');
+  -- FASE 3: a ordem mudou (concluir por último: na Fase 3 ele conclui a OS 05 de verdade) e os textos de faturar, cancelar e
+  -- concluir são os da porta completa (20261026100100): "Fature depois de concluir.", "Cancelar é pelo botão Cancelar OS." e a
+  -- conclusão com a saída (a OS 05 não tem condição nem total: "Sem cobrança").
   perform pg_temp.confere('P02 aberta → faturada: recusa', pg_temp.passa(5, 'invoiced', 'assistente'), false, false, 'open', 0,
-    'Concluir é pela tela (botão Concluir da OS); cancelar é Cancelar OS.');
+    case when v_f3 then 'Fature depois de concluir.' else 'Concluir é pela tela (botão Concluir da OS); cancelar é Cancelar OS.' end);
   perform pg_temp.confere('P02 aberta → cancelada: recusa', pg_temp.passa(5, 'cancelled', 'dono'), false, false, 'open', 0,
-    'Concluir é pela tela (botão Concluir da OS); cancelar é Cancelar OS.');
+    case when v_f3 then 'Cancelar é pelo botão Cancelar OS.' else 'Concluir é pela tela (botão Concluir da OS); cancelar é Cancelar OS.' end);
   perform pg_temp.confere('P02 aberta → orçamento: recusa', pg_temp.passa(5, 'draft', 'dono'), false, false, 'open', 0,
     'Uma OS não volta a ser orçamento pela agenda.');
+  if v_f3 then
+    perform pg_temp.confere('P02 aberta → concluída (FASE 3: a porta conclui)', pg_temp.passa(5, 'completed', 'dono'), true, true,
+      'completed', 1, 'Flávio (OS-TESTE-AG3-05): concluída — saída qui 29/10 16:30. Sem cobrança: o total da OS está zerado.');
+  else
+    perform pg_temp.confere('P02 aberta → concluída: recusa', pg_temp.passa(5, 'completed', 'dono'), false, false, 'open', 0,
+      'Concluir é pela tela (botão Concluir da OS); cancelar é Cancelar OS.');
+  end if;
 
   -- Agendar de aberta/aprovada (fora de ligado não precisa de dia no plano).
   perform pg_temp.confere('P03 aberta → agendada (dono)', pg_temp.passa(6, 'scheduled', 'dono'), true, true, 'scheduled', 1,
@@ -341,7 +355,10 @@ select format('R3 o caminho %s fica como origem %s', x.via, x.origem),
 
 insert into _resultado
 select 'R4 só motor e vigia ganham prazo de desfazer',
-       bool_and((a.desfazivel_ate is not null) = (a.origem in ('motor', 'vigia'))),
+       -- FASE 3: a conclusão pedida pelo dono (palavra, conversa) também se desfaz em desfazer_validade (20261026100100); a
+       -- P02 da Fase 3 conclui a OS 05 pelo dono. Os status continuam só do motor e da vigia.
+       bool_and((a.desfazivel_ate is not null) = (a.origem in ('motor', 'vigia')
+                                                  or (a.tipo in ('concluir', 'entregar') and a.origem in ('dono', 'equipe')))),
        string_agg(a.origem || ':' || coalesce(a.desfazivel_ate::text, '-'), ', ')
   from public.agenda_acoes a join public.service_orders so on so.id = a.service_order_id
  where so.service_order_number like 'OS-TESTE-AG3-%';
@@ -470,11 +487,16 @@ end
 $d$;
 
 -- ── J. Portas das funções e o gatilho ───────────────────────────────────────────────────────────────────
-insert into _resultado values
-  ('J1 a porta: authenticated e service_role executam; anon nunca',
-   has_function_privilege('authenticated', 'public.os_transicionar_status(uuid, text, text, text, uuid, timestamptz, date, timestamptz)', 'execute')
-   and has_function_privilege('service_role', 'public.os_transicionar_status(uuid, text, text, text, uuid, timestamptz, date, timestamptz)', 'execute')
-   and not has_function_privilege('anon', 'public.os_transicionar_status(uuid, text, text, text, uuid, timestamptz, date, timestamptz)', 'execute'), null);
+-- FASE 3: pela função de nome os_transicionar_status, não pela assinatura de 8 argumentos — 20261026100100 a troca pela de
+-- 9 (p_check_out no fim); continua uma só.
+insert into _resultado
+select 'J1 a porta: authenticated e service_role executam; anon nunca',
+       count(*) = 1
+       and bool_and(has_function_privilege('authenticated', p.oid, 'execute') and has_function_privilege('service_role', p.oid, 'execute')
+                    and not has_function_privilege('anon', p.oid, 'execute')),
+       string_agg(pg_get_function_identity_arguments(p.oid), ' | ')
+  from pg_proc p
+ where p.pronamespace = 'public'::regnamespace and p.proname = 'os_transicionar_status';
 
 insert into _resultado
 select 'J2 a chave das datas: _agenda_escrever_os e _agenda_espelhar_datas sem grant a ninguém (nem service_role)',

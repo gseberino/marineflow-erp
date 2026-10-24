@@ -2,14 +2,109 @@
 // (mesma conta do sinal: categoria × discountRatio), em vez de um único título do total. Deixa o
 // financeiro coerente com o fluxo do sinal (aging/cobrança por parcela). Idempotente: não recria se
 // já houver recebível (o fluxo do sinal já cria entrada+saldo). Sem condição → cai no total único.
+//
+// Agenda de Produção, Fase 3 (P2): a regra mora em recebiveisDaConclusao (pura, sem banco), e o banco tem o
+// espelho dela, _os_recebiveis_da_conclusao (migration 20261026100100), que a porta única de status usa ao
+// concluir. As duas são provadas iguais caso a caso: completion-receivables.paridade.test.ts (aqui) e
+// supabase/tests/agenda_fase3_recebiveis.sql (lá), sobre o mesmo scripts/bancada-agenda/recebiveis-casos.json.
+// Mudar a regra aqui sem mudar lá (ou o contrário) reprova os dois.
 import { supabase } from '@/integrations/supabase/client';
-import { depositBaseFromOrder, computeAllInstallments } from '@/lib/quote-deposit';
+import {
+  depositBaseFromOrder,
+  computeAllInstallments,
+  type DepositInstallment,
+  type DepositOrderLike,
+} from '@/lib/quote-deposit';
 import { addDays, format, parseISO } from 'date-fns';
 
 interface EnsureInput {
   serviceOrderId: string;
   /** data da conclusão, ISO 'yyyy-MM-dd' (fuso local). */
   completionDate: string;
+}
+
+/** O que a regra lê da OS: os totais de depositBaseFromOrder, o total e o número. */
+export interface OsDaConclusao extends DepositOrderLike {
+  service_order_number: string;
+  grand_total?: number | null;
+}
+
+/** Um recebível que a conclusão lança (os campos que mudam de OS para OS). */
+export interface LinhaDaConclusao {
+  description: string;
+  issue_date: string;
+  due_date: string;
+  amount: number;
+  due_on_completion: boolean;
+}
+
+/**
+ * Por que a conclusão lança o que lança:
+ *   ja_tem       — a OS já tem recebível vivo (o sinal conta): nada nasce;
+ *   parcelas     — um título por parcela da condição com valor;
+ *   titulo_unico — sem parcela com valor: um título do total, em 30 dias;
+ *   total_zero   — sem parcela com valor e o total da OS é zero: nada nasce.
+ */
+export type MotivoDaConclusao = 'ja_tem' | 'parcelas' | 'titulo_unico' | 'total_zero';
+
+export interface RecebiveisDaConclusao {
+  motivo: MotivoDaConclusao;
+  linhas: LinhaDaConclusao[];
+}
+
+/** As parcelas da condição: as do preset, se forem lista; senão as personalizadas da OS, se forem lista; senão nenhuma. */
+export function parcelasDaCondicao(doPreset: unknown, personalizadas: unknown): DepositInstallment[] | null {
+  if (Array.isArray(doPreset)) return doPreset as DepositInstallment[];
+  if (Array.isArray(personalizadas)) return personalizadas as DepositInstallment[];
+  return null;
+}
+
+/**
+ * A regra dos recebíveis da conclusão, sem banco. `existentes` são os recebíveis que a OS já tem (só o status importa:
+ * qualquer um fora de 'cancelled' — o sinal incluído — é o financeiro dela; status nulo não conta, como o `.neq` do
+ * PostgREST). `data` é o dia da conclusão ('yyyy-MM-dd').
+ */
+export function recebiveisDaConclusao(
+  o: OsDaConclusao,
+  parcelas: DepositInstallment[] | null | undefined,
+  data: string,
+  existentes: ReadonlyArray<{ status?: string | null }> = [],
+): RecebiveisDaConclusao {
+  if (existentes.some((r) => r.status != null && r.status !== 'cancelled')) return { motivo: 'ja_tem', linhas: [] };
+
+  const b = depositBaseFromOrder(o);
+  const rows = computeAllInstallments(b.laborCost, b.partsCost, b.expensesTotal, b.discountRatio, parcelas);
+  const base = parseISO(data);
+
+  if (rows.length > 0) {
+    // Um título por parcela. "na entrega" e a entrada vencem na conclusão; "em X dias" em conclusão+X.
+    return {
+      motivo: 'parcelas',
+      linhas: rows.map((r) => ({
+        description: `${r.label} — ${o.service_order_number}`,
+        issue_date: data,
+        due_date: r.dueBasis === 'delivery' ? data : format(addDays(base, r.days || 0), 'yyyy-MM-dd'),
+        amount: r.amount,
+        due_on_completion: r.dueBasis === 'delivery',
+      })),
+    };
+  }
+
+  // Sem condição de parcelamento → título único do total (comportamento anterior).
+  // O número já vem com o prefixo ("OS-00075"/"ORÇ-00112"): sem "OS " na frente, que
+  // gravava "OS OS-00075" na descrição do recebível.
+  const total = Number(o.grand_total || 0);
+  if (total <= 0) return { motivo: 'total_zero', linhas: [] };
+  return {
+    motivo: 'titulo_unico',
+    linhas: [{
+      description: o.service_order_number,
+      issue_date: data,
+      due_date: format(addDays(base, 30), 'yyyy-MM-dd'),
+      amount: total,
+      due_on_completion: false,
+    }],
+  };
 }
 
 export async function ensureCompletionReceivables(
@@ -51,61 +146,34 @@ export async function ensureCompletionReceivables(
   if (existing && existing.length > 0) return { created: 0, skipped: true };
 
   // Resolve as parcelas da condição (preset ou custom).
-  let installments: any[] | null = null;
+  let doPreset: unknown = null;
   if (o.payment_condition_preset_id) {
     const { data: preset } = await supabase
       .from('payment_condition_presets')
       .select('installments')
       .eq('id', o.payment_condition_preset_id)
       .maybeSingle();
-    if (Array.isArray((preset as any)?.installments)) installments = (preset as any).installments;
+    doPreset = (preset as any)?.installments;
   }
-  if (!installments && Array.isArray(o.custom_payment_installments)) {
-    installments = o.custom_payment_installments;
-  }
+  const installments = parcelasDaCondicao(doPreset, o.custom_payment_installments);
 
-  const b = depositBaseFromOrder(o);
-  const rows = computeAllInstallments(b.laborCost, b.partsCost, b.expensesTotal, b.discountRatio, installments);
-  const base = parseISO(input.completionDate);
+  const r = recebiveisDaConclusao(o, installments, input.completionDate);
+  if (r.linhas.length === 0) return { created: 0, skipped: true };
 
-  let toInsert: Record<string, unknown>[];
-  if (rows.length > 0) {
-    // Um título por parcela. "na entrega" e a entrada vencem na conclusão; "em X dias" em conclusão+X.
-    toInsert = rows.map((r) => {
-      const due = r.dueBasis === 'delivery' ? input.completionDate : format(addDays(base, r.days || 0), 'yyyy-MM-dd');
-      return {
-        service_order_id: o.id,
-        client_id: o.client_id,
-        description: `${r.label} — ${o.service_order_number}`,
-        issue_date: input.completionDate,
-        due_date: due,
-        amount: r.amount,
-        balance_amount: r.amount,
-        paid_amount: 0,
-        status: 'pending',
-        is_deposit: false,
-        due_on_completion: r.dueBasis === 'delivery',
-      };
-    });
-  } else {
-    // Sem condição de parcelamento → título único do total (comportamento anterior).
-    // O número já vem com o prefixo ("OS-00075"/"ORÇ-00112"): sem "OS " na frente, que
-    // gravava "OS OS-00075" na descrição do recebível.
-    const total = Number(o.grand_total || 0);
-    if (total <= 0) return { created: 0, skipped: true };
-    toInsert = [{
-      service_order_id: o.id,
-      client_id: o.client_id,
-      description: o.service_order_number,
-      issue_date: input.completionDate,
-      due_date: format(addDays(base, 30), 'yyyy-MM-dd'),
-      amount: total,
-      balance_amount: total,
-      paid_amount: 0,
-      status: 'pending',
-      is_deposit: false,
-    }];
-  }
+  const toInsert: Record<string, unknown>[] = r.linhas.map((l) => ({
+    service_order_id: o.id,
+    client_id: o.client_id,
+    description: l.description,
+    issue_date: l.issue_date,
+    due_date: l.due_date,
+    amount: l.amount,
+    balance_amount: l.amount,
+    paid_amount: 0,
+    status: 'pending',
+    is_deposit: false,
+    // O título único sempre foi inserido sem a coluna (o padrão do banco é false): a carga continua a mesma.
+    ...(r.motivo === 'parcelas' ? { due_on_completion: l.due_on_completion } : {}),
+  }));
 
   const { error } = await supabase.from('receivables').insert(toInsert as never);
   if (error) throw error;

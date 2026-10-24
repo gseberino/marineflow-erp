@@ -13888,6 +13888,30 @@ export type Database = {
           p_check_in?: string | null
           p_hoje?: string
           p_agora?: string
+          // Fase 3 (P2, migration 20261026100100): a saída da conclusão (sem ela: a que já existe, senão agora).
+          p_check_out?: string | null
+        }
+        Returns: Json
+      }
+      // Fase 3 (P2, migration 20261026100100): o marco da OS (conclusão = a porta; entrega = conclui antes se preciso) e os 4
+      // marcos com o texto pronto.
+      os_registrar_marco: {
+        Args: {
+          p_os: string
+          p_marco: string
+          p_via: string
+          p_quando?: string | null
+          p_autor?: string | null
+          p_trecho?: string | null
+          p_hoje?: string
+          p_agora?: string
+        }
+        Returns: Json
+      }
+      agenda_marcos_da_os: {
+        Args: {
+          p_os: string
+          p_hoje?: string
         }
         Returns: Json
       }

@@ -1,0 +1,2041 @@
+{
+  "nota": "Paridade dos recebíveis da conclusão (Agenda de Produção, Fase 3, P2): cada caso é uma OS (os totais de depositBaseFromOrder, o total e o número), as parcelas do preset (preset_installments; sem a chave = OS sem preset) e as personalizadas, o dia da conclusão e os recebíveis que a OS já tem. O esperado é o que o TS de hoje dá (recebiveisDaConclusao em src/lib/completion-receivables.ts), gravado por REGERAR_RECEBIVEIS_CASOS=1 npx vitest run src/lib/completion-receivables.paridade.test.ts; sem a variável, o vitest confere o TS e supabase/tests/agenda_fase3_recebiveis.sql confere o banco (_os_recebiveis_da_conclusao) contra o mesmo esperado. Os casos replay=true saem das conclusões reais (scripts/bancada-agenda/gerar-replay-conclusoes.mjs).",
+  "casos": [
+    {
+      "nome": "50% do serviço na aprovação (100% material e despesas) + saldo do serviço na entrega",
+      "os": {
+        "service_order_number": "OS-90001",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "Entrada",
+          "tipo": "aprovacao",
+          "services_pct": 50,
+          "parts_pct": 100,
+          "expenses_pct": 100,
+          "days_after_approval": 0
+        },
+        {
+          "label": "Saldo na entrega",
+          "tipo": "entrega",
+          "services_pct": 50,
+          "parts_pct": 0,
+          "expenses_pct": 0,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Entrada — OS-90001",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 5000,
+            "due_on_completion": false
+          },
+          {
+            "description": "Saldo na entrega — OS-90001",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 2000,
+            "due_on_completion": true
+          }
+        ]
+      }
+    },
+    {
+      "nome": "à vista na entrega (tudo vence na conclusão)",
+      "os": {
+        "service_order_number": "OS-90002",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "À vista na entrega",
+          "tipo": "entrega",
+          "services_pct": 100,
+          "parts_pct": 100,
+          "expenses_pct": 100,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "À vista na entrega — OS-90002",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 7000,
+            "due_on_completion": true
+          }
+        ]
+      }
+    },
+    {
+      "nome": "30/60/90 dias",
+      "os": {
+        "service_order_number": "OS-90003",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "30 dias",
+          "tipo": "prazo",
+          "services_pct": 33.33,
+          "parts_pct": 33.33,
+          "expenses_pct": 33.33,
+          "days_after_approval": 30
+        },
+        {
+          "label": "60 dias",
+          "tipo": "prazo",
+          "services_pct": 33.33,
+          "parts_pct": 33.33,
+          "expenses_pct": 33.33,
+          "days_after_approval": 60
+        },
+        {
+          "label": "90 dias",
+          "tipo": "prazo",
+          "services_pct": 33.34,
+          "parts_pct": 33.34,
+          "expenses_pct": 33.34,
+          "days_after_approval": 90
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "30 dias — OS-90003",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-11-26",
+            "amount": 2333.1,
+            "due_on_completion": false
+          },
+          {
+            "description": "60 dias — OS-90003",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-12-26",
+            "amount": 2333.1,
+            "due_on_completion": false
+          },
+          {
+            "description": "90 dias — OS-90003",
+            "issue_date": "2026-10-27",
+            "due_date": "2027-01-25",
+            "amount": 2333.8,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "percent antigo (sem tipo e sem expenses_pct: as despesas ficam de fora)",
+      "os": {
+        "service_order_number": "OS-90004",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "À vista",
+          "percent": 100,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "À vista — OS-90004",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 6000,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "tipo aprovacao em dia 0 + saldo em 15 dias",
+      "os": {
+        "service_order_number": "OS-90005",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "Sinal",
+          "tipo": "aprovacao",
+          "services_pct": 30,
+          "parts_pct": 30,
+          "expenses_pct": 30,
+          "days_after_approval": 0
+        },
+        {
+          "label": "Saldo",
+          "tipo": "prazo",
+          "services_pct": 70,
+          "parts_pct": 70,
+          "expenses_pct": 70,
+          "days_after_approval": 15
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Sinal — OS-90005",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 2100,
+            "due_on_completion": false
+          },
+          {
+            "description": "Saldo — OS-90005",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-11-11",
+            "amount": 4900,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "todas as parcelas zeradas: cai no título único do total",
+      "os": {
+        "service_order_number": "OS-90006",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "Nada",
+          "tipo": "aprovacao",
+          "services_pct": 0,
+          "parts_pct": 0,
+          "expenses_pct": 0,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "titulo_unico",
+        "linhas": [
+          {
+            "description": "OS-90006",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-11-26",
+            "amount": 7000,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "total zero e sem condição: total_zero",
+      "os": {
+        "service_order_number": "OS-90007",
+        "grand_total": 0,
+        "labor_cost_total": 0,
+        "parts_cost_total": 0,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "total_zero",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "deslocamento não faturável fica fora das despesas",
+      "os": {
+        "service_order_number": "OS-90008",
+        "grand_total": 6800,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": false,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "Despesas",
+          "tipo": "aprovacao",
+          "services_pct": 0,
+          "parts_pct": 0,
+          "expenses_pct": 100,
+          "days_after_approval": 0
+        },
+        {
+          "label": "Resto",
+          "tipo": "entrega",
+          "services_pct": 100,
+          "parts_pct": 100,
+          "expenses_pct": 0,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Despesas — OS-90008",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 800,
+            "due_on_completion": false
+          },
+          {
+            "description": "Resto — OS-90008",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 6000,
+            "due_on_completion": true
+          }
+        ]
+      }
+    },
+    {
+      "nome": "desconto + imposto entram pelo discountRatio",
+      "os": {
+        "service_order_number": "OS-90009",
+        "grand_total": 6650,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 700,
+        "tax_amount": 350
+      },
+      "preset_installments": [
+        {
+          "label": "Entrada",
+          "tipo": "aprovacao",
+          "services_pct": 50,
+          "parts_pct": 50,
+          "expenses_pct": 50,
+          "days_after_approval": 0
+        },
+        {
+          "label": "Saldo",
+          "tipo": "entrega",
+          "services_pct": 50,
+          "parts_pct": 50,
+          "expenses_pct": 50,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Entrada — OS-90009",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 3325,
+            "due_on_completion": false
+          },
+          {
+            "description": "Saldo — OS-90009",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 3325,
+            "due_on_completion": true
+          }
+        ]
+      }
+    },
+    {
+      "nome": "subtotal zero: as parcelas dão zero e cai no título único",
+      "os": {
+        "service_order_number": "OS-90010",
+        "grand_total": 500,
+        "labor_cost_total": 0,
+        "parts_cost_total": 0,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "À vista",
+          "tipo": "aprovacao",
+          "services_pct": 100,
+          "parts_pct": 100,
+          "expenses_pct": 100,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "titulo_unico",
+        "linhas": [
+          {
+            "description": "OS-90010",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-11-26",
+            "amount": 500,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "arredondamento de 1,005: o JavaScript dá 1,00 (o round do numeric daria 1,01)",
+      "os": {
+        "service_order_number": "OS-90011",
+        "grand_total": 2.01,
+        "labor_cost_total": 2.01,
+        "parts_cost_total": 0,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "Sinal",
+          "tipo": "aprovacao",
+          "services_pct": 50,
+          "parts_pct": 0,
+          "expenses_pct": 0,
+          "days_after_approval": 0
+        },
+        {
+          "label": "Saldo",
+          "tipo": "entrega",
+          "services_pct": 50,
+          "parts_pct": 0,
+          "expenses_pct": 0,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Sinal — OS-90011",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 1,
+            "due_on_completion": false
+          },
+          {
+            "description": "Saldo — OS-90011",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 1,
+            "due_on_completion": true
+          }
+        ]
+      }
+    },
+    {
+      "nome": "arredondamento de 1,015: o JavaScript dá 1,01 (o round do numeric daria 1,02)",
+      "os": {
+        "service_order_number": "OS-90012",
+        "grand_total": 2.03,
+        "labor_cost_total": 2.03,
+        "parts_cost_total": 0,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "Sinal",
+          "tipo": "aprovacao",
+          "services_pct": 50,
+          "parts_pct": 0,
+          "expenses_pct": 0,
+          "days_after_approval": 0
+        },
+        {
+          "label": "Saldo",
+          "tipo": "entrega",
+          "services_pct": 50,
+          "parts_pct": 0,
+          "expenses_pct": 0,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Sinal — OS-90012",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 1.01,
+            "due_on_completion": false
+          },
+          {
+            "description": "Saldo — OS-90012",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 1.01,
+            "due_on_completion": true
+          }
+        ]
+      }
+    },
+    {
+      "nome": "rótulo vazio vira \"Parcela 2\"",
+      "os": {
+        "service_order_number": "OS-90013",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "Sinal",
+          "tipo": "aprovacao",
+          "services_pct": 50,
+          "parts_pct": 50,
+          "expenses_pct": 50,
+          "days_after_approval": 0
+        },
+        {
+          "label": "",
+          "tipo": "entrega",
+          "services_pct": 50,
+          "parts_pct": 50,
+          "expenses_pct": 50,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Sinal — OS-90013",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 3500,
+            "due_on_completion": false
+          },
+          {
+            "description": "Parcela 2 — OS-90013",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 3500,
+            "due_on_completion": true
+          }
+        ]
+      }
+    },
+    {
+      "nome": "rótulo ausente vira \"Parcela 1\"",
+      "os": {
+        "service_order_number": "OS-90014",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "tipo": "entrega",
+          "services_pct": 100,
+          "parts_pct": 100,
+          "expenses_pct": 100
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Parcela 1 — OS-90014",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 7000,
+            "due_on_completion": true
+          }
+        ]
+      }
+    },
+    {
+      "nome": "parcela zerada no meio não entra, e a numeração segue a posição na lista",
+      "os": {
+        "service_order_number": "OS-90015",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "A",
+          "tipo": "aprovacao",
+          "services_pct": 50,
+          "parts_pct": 50,
+          "expenses_pct": 50,
+          "days_after_approval": 0
+        },
+        {
+          "label": "B",
+          "tipo": "prazo",
+          "services_pct": 0,
+          "parts_pct": 0,
+          "expenses_pct": 0,
+          "days_after_approval": 10
+        },
+        {
+          "label": "",
+          "tipo": "prazo",
+          "services_pct": 50,
+          "parts_pct": 50,
+          "expenses_pct": 50,
+          "days_after_approval": 20
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "A — OS-90015",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 3500,
+            "due_on_completion": false
+          },
+          {
+            "description": "Parcela 3 — OS-90015",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-11-16",
+            "amount": 3500,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "sinal existente (pago): ja_tem — paridade intencional do NOVO-agenda-22 (o saldo da condição não nasce)",
+      "os": {
+        "service_order_number": "OS-90016",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "Sinal",
+          "tipo": "aprovacao",
+          "services_pct": 50,
+          "parts_pct": 100,
+          "expenses_pct": 100,
+          "days_after_approval": 0
+        },
+        {
+          "label": "Saldo",
+          "tipo": "entrega",
+          "services_pct": 50,
+          "parts_pct": 0,
+          "expenses_pct": 0,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": true,
+          "amount": 4500
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "só recebível cancelado: gera o plano",
+      "os": {
+        "service_order_number": "OS-90017",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "À vista",
+          "tipo": "aprovacao",
+          "services_pct": 100,
+          "parts_pct": 100,
+          "expenses_pct": 100,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [
+        {
+          "status": "cancelled",
+          "is_deposit": false,
+          "amount": 7000
+        }
+      ],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "À vista — OS-90017",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 7000,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "recebível pendente que não é sinal: ja_tem",
+      "os": {
+        "service_order_number": "OS-90018",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "À vista",
+          "tipo": "aprovacao",
+          "services_pct": 100,
+          "parts_pct": 100,
+          "expenses_pct": 100,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [
+        {
+          "status": "pending",
+          "is_deposit": false,
+          "amount": 100
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "recebível com status nulo não conta (o .neq do PostgREST não o devolve)",
+      "os": {
+        "service_order_number": "OS-90019",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "À vista",
+          "tipo": "aprovacao",
+          "services_pct": 100,
+          "parts_pct": 100,
+          "expenses_pct": 100,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [
+        {
+          "status": null,
+          "is_deposit": false,
+          "amount": 100
+        }
+      ],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "À vista — OS-90019",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 7000,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "preset que não é lista: valem as parcelas personalizadas da OS",
+      "os": {
+        "service_order_number": "OS-90020",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": {
+        "label": "quebrado"
+      },
+      "custom_payment_installments": [
+        {
+          "label": "Personalizada",
+          "tipo": "prazo",
+          "services_pct": 100,
+          "parts_pct": 100,
+          "expenses_pct": 100,
+          "days_after_approval": 45
+        }
+      ],
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Personalizada — OS-90020",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-12-11",
+            "amount": 7000,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "preset com lista vazia: título único (as personalizadas não entram)",
+      "os": {
+        "service_order_number": "OS-90021",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [],
+      "custom_payment_installments": [
+        {
+          "label": "Personalizada",
+          "tipo": "prazo",
+          "services_pct": 100,
+          "parts_pct": 100,
+          "expenses_pct": 100,
+          "days_after_approval": 45
+        }
+      ],
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "titulo_unico",
+        "linhas": [
+          {
+            "description": "OS-90021",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-11-26",
+            "amount": 7000,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "sem preset: parcelas personalizadas",
+      "os": {
+        "service_order_number": "OS-90022",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": [
+        {
+          "label": "Metade",
+          "tipo": "aprovacao",
+          "services_pct": 50,
+          "parts_pct": 50,
+          "expenses_pct": 50,
+          "days_after_approval": 0
+        },
+        {
+          "label": "Metade",
+          "tipo": "prazo",
+          "services_pct": 50,
+          "parts_pct": 50,
+          "expenses_pct": 50,
+          "days_after_approval": 28
+        }
+      ],
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Metade — OS-90022",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 3500,
+            "due_on_completion": false
+          },
+          {
+            "description": "Metade — OS-90022",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-11-24",
+            "amount": 3500,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "percentual como texto (\"50\") vale como número",
+      "os": {
+        "service_order_number": "OS-90023",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "Texto",
+          "tipo": "aprovacao",
+          "services_pct": "50",
+          "parts_pct": "50",
+          "expenses_pct": "50"
+        },
+        {
+          "label": "Resto",
+          "tipo": "entrega",
+          "services_pct": 50,
+          "parts_pct": 50,
+          "expenses_pct": 50,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Texto — OS-90023",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 3500,
+            "due_on_completion": false
+          },
+          {
+            "description": "Resto — OS-90023",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 3500,
+            "due_on_completion": true
+          }
+        ]
+      }
+    },
+    {
+      "nome": "dias fracionados: 10,7 dias vencem em 10",
+      "os": {
+        "service_order_number": "OS-90024",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "Prazo",
+          "tipo": "prazo",
+          "services_pct": 100,
+          "parts_pct": 100,
+          "expenses_pct": 100,
+          "days_after_approval": 10.7
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Prazo — OS-90024",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-11-06",
+            "amount": 7000,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "tipo entrega com dias: vence na conclusão mesmo assim",
+      "os": {
+        "service_order_number": "OS-90025",
+        "grand_total": 7000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "Na entrega",
+          "tipo": "entrega",
+          "services_pct": 100,
+          "parts_pct": 100,
+          "expenses_pct": 100,
+          "days_after_approval": 10
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "Na entrega — OS-90025",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-10-27",
+            "amount": 7000,
+            "due_on_completion": true
+          }
+        ]
+      }
+    },
+    {
+      "nome": "desconto maior que o subtotal: parcelas negativas não entram e o total negativo dá total_zero",
+      "os": {
+        "service_order_number": "OS-90026",
+        "grand_total": -1000,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 8000,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "label": "À vista",
+          "tipo": "aprovacao",
+          "services_pct": 100,
+          "parts_pct": 100,
+          "expenses_pct": 100,
+          "days_after_approval": 0
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "total_zero",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "título único de orçamento ainda com ORÇ-: a descrição é o número como está",
+      "os": {
+        "service_order_number": "ORÇ-90027",
+        "grand_total": 1234.56,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-10-27",
+      "existentes": [],
+      "esperado": {
+        "motivo": "titulo_unico",
+        "linhas": [
+          {
+            "description": "ORÇ-90027",
+            "issue_date": "2026-10-27",
+            "due_date": "2026-11-26",
+            "amount": 1234.56,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "título único no fim do mês: os 30 dias atravessam o mês",
+      "os": {
+        "service_order_number": "OS-90028",
+        "grand_total": 999.99,
+        "labor_cost_total": 4000,
+        "parts_cost_total": 2000,
+        "operational_cost_total": 300,
+        "travel_cost_total": 200,
+        "subcontract_cost_total": 500,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-10-31",
+      "existentes": [],
+      "esperado": {
+        "motivo": "titulo_unico",
+        "linhas": [
+          {
+            "description": "OS-90028",
+            "issue_date": "2026-10-31",
+            "due_date": "2026-11-30",
+            "amount": 999.99,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "replay OS-00001 (2026-04-08)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00001",
+        "grand_total": 30398.73,
+        "labor_cost_total": 130,
+        "parts_cost_total": 29852.63,
+        "operational_cost_total": 0,
+        "travel_cost_total": 16.1,
+        "subcontract_cost_total": 400,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-04-08",
+      "existentes": [],
+      "esperado": {
+        "motivo": "titulo_unico",
+        "linhas": [
+          {
+            "description": "OS-00001",
+            "issue_date": "2026-04-08",
+            "due_date": "2026-05-08",
+            "amount": 30398.73,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "replay OS-00016 (2026-06-22)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00016",
+        "grand_total": 0,
+        "labor_cost_total": 0,
+        "parts_cost_total": 0,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-06-22",
+      "existentes": [],
+      "esperado": {
+        "motivo": "total_zero",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay OS-00048 (2026-06-22)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00048",
+        "grand_total": 250,
+        "labor_cost_total": 310,
+        "parts_cost_total": 0,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 60,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-06-22",
+      "existentes": [],
+      "esperado": {
+        "motivo": "titulo_unico",
+        "linhas": [
+          {
+            "description": "OS-00048",
+            "issue_date": "2026-06-22",
+            "due_date": "2026-07-22",
+            "amount": 250,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "replay OS-00047 (2026-06-22)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00047",
+        "grand_total": 756,
+        "labor_cost_total": 575,
+        "parts_cost_total": 181,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-06-22",
+      "existentes": [],
+      "esperado": {
+        "motivo": "titulo_unico",
+        "linhas": [
+          {
+            "description": "OS-00047",
+            "issue_date": "2026-06-22",
+            "due_date": "2026-07-22",
+            "amount": 756,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "replay OS-00046 (2026-06-22)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00046",
+        "grand_total": 520,
+        "labor_cost_total": 520,
+        "parts_cost_total": 0,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-06-22",
+      "existentes": [],
+      "esperado": {
+        "motivo": "titulo_unico",
+        "linhas": [
+          {
+            "description": "OS-00046",
+            "issue_date": "2026-06-22",
+            "due_date": "2026-07-22",
+            "amount": 520,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "replay OS-00045 (2026-06-22)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00045",
+        "grand_total": 1650,
+        "labor_cost_total": 1650,
+        "parts_cost_total": 0,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-06-22",
+      "existentes": [],
+      "esperado": {
+        "motivo": "titulo_unico",
+        "linhas": [
+          {
+            "description": "OS-00045",
+            "issue_date": "2026-06-22",
+            "due_date": "2026-07-22",
+            "amount": 1650,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "replay OS-00044 (2026-06-22)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00044",
+        "grand_total": 3000,
+        "labor_cost_total": 1950,
+        "parts_cost_total": 1173.4,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 123.4,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-06-22",
+      "existentes": [],
+      "esperado": {
+        "motivo": "titulo_unico",
+        "linhas": [
+          {
+            "description": "OS-00044",
+            "issue_date": "2026-06-22",
+            "due_date": "2026-07-22",
+            "amount": 3000,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "replay OS-00034 (2026-07-29)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00034",
+        "grand_total": 29000,
+        "labor_cost_total": 5500,
+        "parts_cost_total": 27139.73,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 3639.73,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 100,
+          "label": "Sinal",
+          "parts_pct": 100,
+          "services_pct": 50,
+          "tipo": "aprovacao"
+        },
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 0,
+          "label": "Saldo",
+          "parts_pct": 0,
+          "services_pct": 50,
+          "tipo": "entrega"
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-07-29",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": false,
+          "amount": 29000
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay OS-00041 (2026-07-29)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00041",
+        "grand_total": 8573.18,
+        "labor_cost_total": 3500,
+        "parts_cost_total": 4973.18,
+        "operational_cost_total": 0,
+        "travel_cost_total": 100,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 100,
+          "label": "Sinal",
+          "parts_pct": 100,
+          "services_pct": 50,
+          "tipo": "aprovacao"
+        },
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 0,
+          "label": "Saldo",
+          "parts_pct": 0,
+          "services_pct": 50,
+          "tipo": "entrega"
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-07-29",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": false,
+          "amount": 8573.18
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay OS-00073 (2026-08-04)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00073",
+        "grand_total": 1865.47,
+        "labor_cost_total": 0,
+        "parts_cost_total": 1865.47,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "days_after_approval": 0,
+          "label": "À vista",
+          "percent": 100
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-08-04",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": true,
+          "amount": 1866
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay ORÇ-00070 (2026-08-04)",
+      "replay": true,
+      "os": {
+        "service_order_number": "ORÇ-00070",
+        "grand_total": 5321.36,
+        "labor_cost_total": 1685,
+        "parts_cost_total": 3636.36,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 100,
+          "label": "Sinal",
+          "parts_pct": 100,
+          "services_pct": 50,
+          "tipo": "aprovacao"
+        },
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 0,
+          "label": "Saldo",
+          "parts_pct": 0,
+          "services_pct": 50,
+          "tipo": "entrega"
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-08-04",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": false,
+          "amount": 5321.36
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay OS-00060 (2026-08-13)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00060",
+        "grand_total": 20000,
+        "labor_cost_total": 2500,
+        "parts_cost_total": 18060.67,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 560.67,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 100,
+          "label": "Sinal",
+          "parts_pct": 100,
+          "services_pct": 50,
+          "tipo": "aprovacao"
+        },
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 0,
+          "label": "Saldo",
+          "parts_pct": 0,
+          "services_pct": 50,
+          "tipo": "entrega"
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-08-13",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": true,
+          "amount": 18001.04
+        },
+        {
+          "status": "paid",
+          "is_deposit": false,
+          "amount": 1998.96
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay OS-00075 (2026-08-13)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00075",
+        "grand_total": 500,
+        "labor_cost_total": 538.33,
+        "parts_cost_total": 192.01,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 230.34,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 100,
+          "label": "À vista",
+          "parts_pct": 100,
+          "services_pct": 100,
+          "tipo": "aprovacao"
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-08-13",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": true,
+          "amount": 500
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay OS-00084 (2026-08-21)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00084",
+        "grand_total": 591.41,
+        "labor_cost_total": 400,
+        "parts_cost_total": 191.41,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-08-21",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": true,
+          "amount": 591.41
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay OS-00105 (2026-09-05)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00105",
+        "grand_total": 0,
+        "labor_cost_total": 0,
+        "parts_cost_total": 0,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-09-05",
+      "existentes": [],
+      "esperado": {
+        "motivo": "total_zero",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay OS-00094 (2026-10-03)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00094",
+        "grand_total": 1080,
+        "labor_cost_total": 730,
+        "parts_cost_total": 477.02,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 127.02,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 100,
+          "label": "À vista",
+          "parts_pct": 100,
+          "services_pct": 100,
+          "tipo": "aprovacao"
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-03",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": true,
+          "amount": 1080
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay OS-00077 (2026-10-13)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00077",
+        "grand_total": 2520,
+        "labor_cost_total": 0,
+        "parts_cost_total": 2843.24,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 323.24,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-10-13",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": true,
+          "amount": 2520
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay OS-00051 (2026-10-13)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00051",
+        "grand_total": 8303.74,
+        "labor_cost_total": 3420,
+        "parts_cost_total": 4883.74,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 100,
+          "label": "Sinal",
+          "parts_pct": 100,
+          "services_pct": 50,
+          "tipo": "aprovacao"
+        },
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 0,
+          "label": "Saldo",
+          "parts_pct": 0,
+          "services_pct": 50,
+          "tipo": "entrega"
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-13",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": true,
+          "amount": 6593.74
+        },
+        {
+          "status": "pending",
+          "is_deposit": false,
+          "amount": 1710
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay OS-00038 (2026-10-13)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00038",
+        "grand_total": 16890,
+        "labor_cost_total": 16890,
+        "parts_cost_total": 0,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 0,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "days_after_approval": 0,
+          "label": "À vista",
+          "percent": 100
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-13",
+      "existentes": [],
+      "esperado": {
+        "motivo": "parcelas",
+        "linhas": [
+          {
+            "description": "À vista — OS-00038",
+            "issue_date": "2026-10-13",
+            "due_date": "2026-10-13",
+            "amount": 16890,
+            "due_on_completion": false
+          }
+        ]
+      }
+    },
+    {
+      "nome": "replay OS-00061 (2026-10-13)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00061",
+        "grand_total": 5640,
+        "labor_cost_total": 5450,
+        "parts_cost_total": 410,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 220,
+        "tax_amount": 0
+      },
+      "custom_payment_installments": null,
+      "data": "2026-10-13",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": true,
+          "amount": 5000
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    },
+    {
+      "nome": "replay OS-00110 (2026-10-13)",
+      "replay": true,
+      "os": {
+        "service_order_number": "OS-00110",
+        "grand_total": 5600,
+        "labor_cost_total": 3320,
+        "parts_cost_total": 2795,
+        "operational_cost_total": 0,
+        "travel_cost_total": 0,
+        "subcontract_cost_total": 0,
+        "is_travel_billable": true,
+        "discount_amount": 515,
+        "tax_amount": 0
+      },
+      "preset_installments": [
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 50,
+          "label": "Entrada 50%",
+          "parts_pct": 50,
+          "services_pct": 50,
+          "tipo": "aprovacao"
+        },
+        {
+          "days_after_approval": 0,
+          "expenses_pct": 50,
+          "label": "Saldo 50%",
+          "parts_pct": 50,
+          "services_pct": 50,
+          "tipo": "entrega"
+        }
+      ],
+      "custom_payment_installments": null,
+      "data": "2026-10-13",
+      "existentes": [
+        {
+          "status": "paid",
+          "is_deposit": true,
+          "amount": 5600
+        }
+      ],
+      "esperado": {
+        "motivo": "ja_tem",
+        "linhas": []
+      }
+    }
+  ]
+}
