@@ -1,8 +1,9 @@
 // Agenda de Produção, Fase 1 (P6): as palavras curtas da agenda, lidas ANTES da IA — leitor puro, sem banco.
 // Spec: scratchpad agenda-pesquisa/spec-fase1.md §7.2 (decisão d03 do dono: a conversa é o canal, as palavras são atalho).
 //
-//   agenda · a agenda · minha agenda · agenda da semana · agenda dessa/desta semana        → a semana
-//   agenda hoje · agenda de hoje · agenda pra/para hoje                                    → hoje
+//   agenda · a agenda · agenda da semana · agenda dessa/desta semana                       → a semana
+//   minha agenda · agenda hoje · agenda de hoje · agenda pra/para hoje                     → hoje (como a my_agenda:
+//                                                     o marcado, as tarefas do dia e as atrasadas, pelo título)
 //   agenda amanhã · agenda de amanhã · agenda pra/para amanhã · o que tem pra/para amanhã   → amanhã
 //   agenda semana que vem · agenda da semana que vem · agenda (da) próxima semana          → a semana que vem
 //   livre · quando fica livre · quando fico livre · quando a gente fica livre              → quando fica livre
@@ -47,8 +48,9 @@ function frases(lista: string[], cmd: ComandoDaAgenda): void {
   for (const f of lista) FRASES.set(f, cmd);
 }
 
-frases(["agenda", "a agenda", "minha agenda", "agenda da semana", "agenda dessa semana", "agenda desta semana"], ver("semana"));
-frases(["agenda hoje", "agenda de hoje", "agenda pra hoje", "agenda para hoje"], ver("hoje"));
+frases(["agenda", "a agenda", "agenda da semana", "agenda dessa semana", "agenda desta semana"], ver("semana"));
+// "minha agenda" era a my_agenda (o dia: tarefas atrasadas, as do dia e os compromissos): vai ao dia, não à semana.
+frases(["minha agenda", "agenda hoje", "agenda de hoje", "agenda pra hoje", "agenda para hoje"], ver("hoje"));
 frases(
   ["agenda amanha", "agenda de amanha", "agenda pra amanha", "agenda para amanha", "o que tem pra amanha", "o que tem para amanha"],
   ver("amanha"),

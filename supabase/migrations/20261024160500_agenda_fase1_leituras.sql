@@ -88,6 +88,9 @@
 --   · a prioridade que o dono deu (os_planejamento.prioridade_manual: 1 = passa na frente) é a 1ª chave da ordem de
 --     trabalho do painel (bloco 2, rodada, listas); sem prioridade, depois de todas.
 --   · a visão da OS: "Duração: sem base para estimar: quantos dias?" sem o ponto depois do "?".
+--   · o dia do dono (agenda hoje/amanhã, minha agenda) lista as tarefas do dia pelo título e, hoje, as atrasadas — a
+--     regra de my_agenda (âncora due_at, senão scheduled_start_at), sem repetir o compromisso com hora que já está no
+--     marcado. A semana conta as tarefas do período e as atrasadas quando a contagem cabe no teto.
 --
 -- O QUE NÃO MUDA: nenhuma tabela, nenhum dado, nenhuma função de P1–P3, my_agenda, o Secretário, as telas.
 --
@@ -861,6 +864,11 @@ declare
   v_marc jsonb;
   v_lim  jsonb := '{}'::jsonb;
   v_novo jsonb;
+  v_lin  text[];
+  v_tar  text;
+  v_n    int;
+  v_atr  int;
+  v_usu  uuid;
 begin
   if p_hoje is null then
     raise exception 'agenda_semana: sem o dia de hoje' using errcode = '22004';
@@ -881,9 +889,39 @@ begin
     exit when v_novo is null;
     v_lim := v_novo;
   end loop;
+  -- As tarefas do dono no período (a regra de my_agenda; sem as que já estão no marcado) e, se o período inclui
+  -- hoje, as atrasadas: só a contagem, depois do marcado, quando cabe no teto (a semana é a da produção; o título de
+  -- cada tarefa está no dia: *agenda hoje*).
+  v_lin := public._agenda_linhas(v_r);
+  v_usu := (v_pn ->> 'dono_usuario')::uuid;
+  if v_usu is not null then
+    -- Com hoje no período, o "com prazo" conta de hoje em diante (o que ficou para trás é a atrasada: não conta duas vezes).
+    select count(*) filter (where x.ancora >= ((case when p_hoje between v_de and v_ate then p_hoje else v_de end)::timestamp
+                                               at time zone 'America/Sao_Paulo')
+                              and x.ancora < ((v_ate + 1)::timestamp at time zone 'America/Sao_Paulo')
+                              and not x.no_marcado),
+           count(*) filter (where p_hoje between v_de and v_ate
+                              and x.ancora < (p_hoje::timestamp at time zone 'America/Sao_Paulo'))
+      into v_n, v_atr
+      from (select coalesce(t.due_at, t.scheduled_start_at) as ancora,
+                   coalesce(t.scheduled_start_at >= (v_de::timestamp at time zone 'America/Sao_Paulo')
+                            and t.scheduled_start_at < ((v_ate + 1)::timestamp at time zone 'America/Sao_Paulo'), false)
+                     as no_marcado
+              from public.agenda_tasks t
+             where t.assignee_user_id = v_usu and t.status in ('pending', 'in_progress')) x;
+    if v_n > 0 or v_atr > 0 then
+      v_tar := 'Tarefas: ' || concat_ws(' e ',
+                 case when v_n > 0 then public._agenda_plural(v_n, 'com prazo no período', 'com prazo no período') end,
+                 case when v_atr > 0 then public._agenda_plural(v_atr, 'atrasada', 'atrasadas') end) || '.';
+      if char_length(public._agenda_juntar(v_lin, null)) + 1 + char_length(v_tar) <= v_max then
+        v_lin := v_lin[1:1] || v_tar || v_lin[2:];
+      end if;
+    end if;
+  end if;
   return jsonb_build_object('ok', true,
-    'texto', public._agenda_juntar(public._agenda_linhas(v_r), v_max),
-    'dados', (v_r -> 'dados') || jsonb_build_object('textos', v_r -> 'textos'));
+    'texto', public._agenda_juntar(v_lin, v_max),
+    'dados', (v_r -> 'dados') || jsonb_build_object('textos', v_r -> 'textos', 'tarefas_no_periodo', v_n,
+                                                    'tarefas_atrasadas', v_atr));
 end;
 $function$;
 
@@ -1949,23 +1987,50 @@ create or replace function public._agenda_dia_de(p_pn jsonb, p_dia date, p_k int
  set search_path to 'public'
 as $function$
 declare
-  v_hoje date := (p_pn ->> 'hoje')::date;
-  v_marc jsonb := public._agenda_marcados(p_dia, p_dia, v_hoje, null, (p_pn ->> 'dono_usuario')::uuid);
-  v_trav jsonb;
+  v_hoje    date := (p_pn ->> 'hoje')::date;
+  v_usuario uuid := (p_pn ->> 'dono_usuario')::uuid;
+  v_marc    jsonb := public._agenda_marcados(p_dia, p_dia, v_hoje, null, v_usuario);
+  v_trav    jsonb;
+  v_ini     timestamptz := (p_dia::timestamp at time zone 'America/Sao_Paulo');
+  v_fim     timestamptz := ((p_dia + 1)::timestamp at time zone 'America/Sao_Paulo');
+  v_do_dia  text[];
+  v_atr     text[];
 begin
   select coalesce(jsonb_agg(jsonb_build_object('o', e) order by (e ->> 'ordem')::int), '[]'::jsonb)
     into v_trav from jsonb_array_elements(p_pn -> 'oss') e where (e ->> 'dono_trava')::boolean;
+  -- As tarefas do dono, pela MESMA regra de my_agenda e de _agenda_outras (pending/in_progress do login; âncora
+  -- due_at, senão scheduled_start_at): as do dia — fora as que já estão no marcado (compromisso com hora no dia) — e,
+  -- no dia de hoje, as atrasadas. Pelo título.
+  if v_usuario is not null then
+    v_do_dia := array(
+      select public._agenda_corta(t.title, 60) from public.agenda_tasks t
+       where t.assignee_user_id = v_usuario and t.status in ('pending', 'in_progress')
+         and coalesce(t.due_at, t.scheduled_start_at) >= v_ini and coalesce(t.due_at, t.scheduled_start_at) < v_fim
+         and not coalesce(t.scheduled_start_at >= v_ini and t.scheduled_start_at < v_fim, false)
+       order by coalesce(t.due_at, t.scheduled_start_at), t.title, t.id);
+    if p_dia = v_hoje then
+      v_atr := array(
+        select public._agenda_corta(t.title, 60) from public.agenda_tasks t
+         where t.assignee_user_id = v_usuario and t.status in ('pending', 'in_progress')
+           and coalesce(t.due_at, t.scheduled_start_at) < v_ini
+         order by coalesce(t.due_at, t.scheduled_start_at), t.title, t.id);
+    end if;
+  end if;
   return array[
     public._agenda_dia_rotulo(p_dia, v_hoje) || ': '
       || coalesce(nullif(public._agenda_lista(array(select e ->> 'texto_dia' from jsonb_array_elements(v_marc)
                                                      with ordinality t(e, o) order by o), p_k), ''), 'nada marcado') || '.',
+    case when cardinality(v_do_dia) > 0 then
+      case when p_dia = v_hoje then 'Tarefas de hoje: ' when p_dia = v_hoje + 1 then 'Tarefas de amanhã: ' else 'Tarefas do dia: ' end
+      || public._agenda_lista(v_do_dia, p_k) || '.' end,
+    case when cardinality(v_atr) > 0 then 'Tarefas atrasadas: ' || public._agenda_lista(v_atr, p_k) || '.' end,
     case when jsonb_array_length(v_trav) = 0 then 'Nada travado esperando você.'
          else 'Travado esperando você: ' || public._agenda_nomes(v_trav, p_k)
               || ' (o que falta em cada um: *o que eu tenho que fazer*).' end];
 end;
 $function$;
 
-comment on function public._agenda_dia_de(jsonb, date, integer) is 'Agenda de Produção (Fase 1, P4): o dia do dono (hoje/amanhã) — o marcado e o bloco "travado esperando você" resumido.';
+comment on function public._agenda_dia_de(jsonb, date, integer) is 'Agenda de Produção (Fase 1, P4): o dia do dono (hoje/amanhã) — o marcado, as tarefas do dia pelo título (a regra de my_agenda: âncora due_at, senão scheduled_start_at; sem as que já estão no marcado) e, hoje, as atrasadas, e o bloco "travado esperando você" resumido.';
 
 -- A visão de uma OS: o estado, o que trava, a duração, a presença do dono, o material e o prazo.
 create or replace function public._agenda_ver_os(p_so_id uuid, p_hoje date)

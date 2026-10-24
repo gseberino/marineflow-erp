@@ -35,7 +35,7 @@ const TABELA: Array<[string, ComandoDaAgenda]> = [
   ["Agenda", semana],
   ["*agenda*", semana],
   ["A agenda", semana],
-  ["Minha agenda", semana],
+  ["Minha agenda", hoje],
   ["agenda da semana", semana],
   ["Agenda dessa semana?", semana],
   ["agenda desta semana", semana],

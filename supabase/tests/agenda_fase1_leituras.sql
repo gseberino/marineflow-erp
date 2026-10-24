@@ -248,10 +248,16 @@ Livre de verdade: no melhor caso a partir de ter 17/11; no realista, só a parti
     null);
 
   -- O dia do dono (hoje/amanhã sem pessoa): o marcado + o bloco 2 resumido.
-  v_res := pg_temp.igual(v_res, 'A11 agenda_ver(hoje): o dia e o "travado esperando você" resumido',
+  v_res := pg_temp.igual(v_res, 'A11 agenda_ver(hoje): o dia, as tarefas de hoje e as atrasadas pelo título (a regra de my_agenda) e o "travado" resumido',
     public.agenda_ver(c_admin, 'hoje', null, null, null, null, false, c_hoje) ->> 'texto',
     $e$Hoje (sex 23/10): nada marcado.
+Tarefas de hoje: Agendar OS-00069 — Vanderlei, Agendar OS-00074 — LENINE e Agendar OS-00100 — Giancarlo.
+Tarefas atrasadas: Ligar para a marina sobre a vaga do Kalmar.
 Travado esperando você: Vanderlei, Lenine, Flávio, Nelson, Giancarlo e mais 2 (o que falta em cada um: *o que eu tenho que fazer*).$e$);
+  v_res := pg_temp.ok(v_res, 'A11b a semana no teto (993 de 1000) fica como está: a contagem das tarefas só entra quando cabe',
+    strpos(public.agenda_semana(null, null, c_hoje) ->> 'texto', 'Tarefas:') = 0
+    and (public.agenda_semana(null, null, c_hoje) #>> '{dados,tarefas_no_periodo}')::int = 3
+    and (public.agenda_semana(null, null, c_hoje) #>> '{dados,tarefas_atrasadas}')::int = 1, null);
 
   -- O material: sem OS (uma linha por serviço) e de uma OS (cada item, a situação e o início).
   v_res := pg_temp.igual(v_res, 'A12 material sem OS: uma linha por serviço da fila, os parados no cliente contados à parte',
@@ -523,6 +529,13 @@ Pelo material, começa a partir de qua 04/11 (1 dia útil depois de o último ch
       split_part(v_t, E'\n', 1) = 'Hoje (sex 23/10): Reunião na marina com o síndico às 14:00.'
       and split_part(v_t, E'\n', 3) = 'Prontos sem data: nenhum. Próximos 7 dias: Lenine de ter 27/10 a qua 28/10.'
       and strpos(v_t, 'Outras pendências: 1 tarefa atrasada e 4 de hoje;') > 0, v_t);
+    v_res := pg_temp.ok(v_res, 'C2b2 agenda de hoje: o compromisso com hora fica no marcado e não se repete em "Tarefas de hoje"',
+      split_part(public.agenda_ver(c_admin, 'hoje', null, null, null, null, false, c_hoje) ->> 'texto', E'\n', 1)
+        = 'Hoje (sex 23/10): Reunião na marina com o síndico às 14:00.'
+      and strpos(public.agenda_ver(c_admin, 'hoje', null, null, null, null, false, c_hoje) ->> 'texto', 'Tarefas de hoje: Reunião') = 0
+      and strpos(public.agenda_ver(c_admin, 'hoje', null, null, null, null, false, c_hoje) ->> 'texto',
+                 'Tarefas de hoje: Agendar OS-00069 — Vanderlei, Agendar OS-00074 — LENINE e Agendar OS-00100 — Giancarlo.') > 0,
+      public.agenda_ver(c_admin, 'hoje', null, null, null, null, false, c_hoje) ->> 'texto');
     v_res := pg_temp.igual(v_res, 'C2c Roberto na terça: a OS em que ele é técnico, com a hora',
       public.agenda_dia_da_pessoa(c_rob, date '2026-10-27', c_hoje) ->> 'texto',
       $e$Ter 27/10, Roberto tem Lenine às 08:00 (até qua 28/10). Costuma vir de seg a sex (pelas diárias das últimas 8 semanas: 5 de 6 terças).$e$);
@@ -540,6 +553,25 @@ Pelo material, começa a partir de qua 04/11 (1 dia útil depois de o último ch
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'C2 (o cenário quebrou)', false, sqlerrm);
+  end;
+
+  -- C2f: tarefa só com prazo (sem hora) amanhã: a agenda de amanhã mostra pelo título (antes: "nada marcado" e mais nada).
+  begin
+    insert into public.agenda_tasks (title, assignee_user_id, status, kind, due_at)
+    values ('Cobrar o sinal do MP', c_admin, 'pending', 'task', '2026-10-24 18:00-03');
+    v_res := pg_temp.igual(v_res, 'C2f agenda amanhã com tarefa só com prazo: "Tarefas de amanhã: Cobrar o sinal do MP."',
+      public.agenda_ver(c_admin, 'amanha', null, null, null, null, false, c_hoje) ->> 'texto',
+      $e$Amanhã (sáb 24/10): nada marcado.
+Tarefas de amanhã: Cobrar o sinal do MP.
+Travado esperando você: Vanderlei, Lenine, Flávio, Nelson, Giancarlo e mais 2 (o que falta em cada um: *o que eu tenho que fazer*).$e$);
+    -- Com teto maior, a semana conta as tarefas (de hoje em diante no período, e as atrasadas à parte).
+    update public.agenda_config set texto_max = 2000;
+    v_res := pg_temp.ok(v_res, 'C2g semana com espaço: "Tarefas: 4 com prazo no período e 1 atrasada." logo depois do marcado',
+      split_part(public.agenda_semana(null, null, c_hoje) ->> 'texto', E'\n', 2) = 'Tarefas: 4 com prazo no período e 1 atrasada.',
+      public.agenda_semana(null, null, c_hoje) ->> 'texto');
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+            when others then v_res := pg_temp.ok(v_res, 'C2f (o cenário quebrou)', false, sqlerrm);
   end;
 
   -- C3: "Outras pendências" = a regra de my_agenda (agenda.ts: status pending/in_progress do login; âncora due_at,
