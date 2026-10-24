@@ -304,6 +304,23 @@ export function controlesDosJuizes() {
       !gradeTexto(caso, 'chega 04/11', [{ texto: 'chega ter 03/11' }]).ok && !gradeTexto(caso, 'OS-00113', [{ texto: 'OS-00112' }]).ok
       && gradeTexto(caso, 'chega 3/11 (OS 112)', [{ texto: 'chega ter 03/11 — Nelson (OS-00112)' }]).ok],
     ['texto: "3/11" = "03/11" e "orc 119" = "ORÇ-00119"', datasDe('3/11')[0] === '03/11' && numerosDeOsDe('orc 119')[0] === 'ORÇ-00119'],
+    // A resposta ruim com a data por extenso: o juiz lê "18 de novembro" e "quarta 18" como data, e reprova a que nenhuma
+    // ferramenta deu; a mesma data por extenso que o banco deu passa.
+    ['texto: data por extenso fora das saídas reprova ("18 de novembro", "quarta 18"); a do banco passa',
+      !gradeTexto(caso, 'A equipe fica livre a partir de 18 de novembro.', [{ texto: 'livre a partir de ter 10/11' }]).ok
+      && !gradeTexto(caso, 'Dá para começar quarta 18.', [{ texto: 'livre a partir de ter 10/11' }]).ok
+      && gradeTexto(caso, 'O painel chega 3 de novembro.', [{ texto: 'chega ter 03/11' }]).ok
+      && gradeTexto(caso, 'O painel chega terça, dia 3.', [{ texto: 'chega ter 03/11' }]).ok
+      && datasDe('1º de dezembro')[0] === '01/12'],
+    ['ferramentas: período de agenda_ver com data que o dono não disse reprova ("terça" virou "27/10"); a dita passa',
+      !gradeFerramentas({ entrada: 'o que o Roberto faz terça?' },
+        [{ ferramenta: 'agenda_ver', argumentos: { pessoa: 'Roberto', periodo: '27/10' } }]).ok
+      && !gradeFerramentas({ entrada: 'o que o Roberto faz terça?' },
+        [{ ferramenta: 'agenda_ver', argumentos: { pessoa: 'Roberto', periodo: '27 de outubro' } }]).ok
+      && gradeFerramentas({ entrada: 'e de 26/10 a 30/10?' },
+        [{ ferramenta: 'agenda_ver', argumentos: { periodo: '26/10 a 30/10' } }]).ok
+      && gradeFerramentas({ entrada: 'o que o Roberto faz terça?' },
+        [{ ferramenta: 'agenda_ver', argumentos: { pessoa: 'Roberto', periodo: 'terça' } }]).ok],
     ['ferramentas: trecho que o dono não disse reprova',
       !gradeFerramentas(caso, [{ ferramenta: 'material_informar', argumentos: { trecho: 'o painel chegou' } }]).ok],
     ['ferramentas: data calculada reprova',

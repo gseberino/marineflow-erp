@@ -6,7 +6,8 @@
 //     (criar tarefa, agendar OS, comprar…); nas três de rascunho, o trecho saiu das palavras do dono e nenhuma data
 //     foi calculada ("2026-11-03");
 //   · gradeTexto — o que o dono leria: contém o que tem de conter, não diz o que não pode ("gravei"), e toda data
-//     "dd/mm" e todo número de OS/ORÇ do texto veio de alguma saída de ferramenta do caso (nada inventado);
+//     ("dd/mm", "18 de novembro", "quarta 18") e todo número de OS/ORÇ do texto veio de alguma saída de ferramenta do
+//     caso (nada inventado);
 //   · gradeBanco — a fotografia das 4 tabelas de fato (os_planejamento, os_planejamento_equipe, os_material,
 //     agenda_disponibilidade): antes do *grava* nada mudou; depois, o diff é EXATAMENTE o esperado (nenhuma linha,
 //     número ou data a mais); o rascunho aberto tem o tamanho esperado.
@@ -97,6 +98,14 @@ export function gradeFerramentas(caso, chamadas) {
       falhas.push(`chamou ${c.ferramenta}, fora das esperadas`);
     }
     for (const d of datasCalculadas(c.argumentos ?? {})) falhas.push(`${c.ferramenta}: data calculada (${d}); a data vai como o dono falou`);
+    // A leitura não tem a conferência de trecho das escritas: a data do período tem de estar nas palavras do dono
+    // ("terça" virar "27/10" é data calculada pelo modelo).
+    if (c.ferramenta === 'agenda_ver' && typeof c.argumentos?.periodo === 'string') {
+      const ditas = new Set(datasDe(caso.entrada));
+      for (const d of datasDe(c.argumentos.periodo)) {
+        if (!ditas.has(d)) falhas.push(`agenda_ver: o período "${c.argumentos.periodo}" tem ${d}, que o dono não disse; passe como ele falou`);
+      }
+    }
     if (DE_RASCUNHO.includes(c.ferramenta)) {
       const trecho = normalizar(c.argumentos?.trecho);
       if (!trecho) falhas.push(`${c.ferramenta} sem trecho`);
@@ -111,10 +120,35 @@ export function gradeFerramentas(caso, chamadas) {
   return { ok: falhas.length === 0, falhas };
 }
 
-/** "3/11", "03/11", "03/11/2026" → "03/11". */
+const MESES = ['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro',
+  'novembro', 'dezembro'];
+/** "18 de novembro", "1º de dezembro" (no texto já sem acento e minúsculo). */
+const RE_DIA_DE_MES =
+  /(?<![\d/])(\d{1,2})(?:º|o)? de (janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b/g;
+/** "quarta 18", "terça-feira, dia 3" — o dia da semana com o número e sem o mês (nem "/mês" nem "de mês" depois). */
+const RE_DIA_DA_SEMANA_COM_NUMERO =
+  /\b(?:segunda|terca|quarta|quinta|sexta|sabado|domingo)(?:-feira)?,? (?:dia )?(\d{1,2})(?![\d/]| de (?:janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\b)/g;
+
+/**
+ * As datas de um texto, normalizadas: "3/11", "03/11", "03/11/2026" e "3 de novembro" → "03/11"; o dia da semana com
+ * o número e sem o mês ("quarta 18", "qua dia 18", "terça-feira, 3") → "18/??" (só o dia: o juiz compara pelo dia).
+ */
 export function datasDe(texto) {
-  return [...String(texto ?? '').matchAll(/(?<![\d/])(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?(?![\d/])/g)]
+  const t = String(texto ?? '');
+  const n = t.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const barra = [...t.matchAll(/(?<![\d/])(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?(?![\d/])/g)]
     .map((m) => `${m[1].padStart(2, '0')}/${m[2].padStart(2, '0')}`);
+  const extenso = [...n.matchAll(RE_DIA_DE_MES)]
+    .map((m) => `${m[1].padStart(2, '0')}/${String(MESES.indexOf(m[2]) + 1).padStart(2, '0')}`);
+  // Só o nome inteiro do dia ("ter 2 pessoas" é o verbo, "quantos 2" não é dia).
+  const semana = [...n.matchAll(RE_DIA_DA_SEMANA_COM_NUMERO)].map((m) => `${m[1].padStart(2, '0')}/??`);
+  return [...barra, ...extenso, ...semana];
+}
+
+/** A data do texto veio do banco? "18/??" (dia da semana com o número) vale se o banco deu alguma data no dia 18. */
+function dataDoBanco(d, doBanco) {
+  if (!d.endsWith('/??')) return doBanco.has(d);
+  return [...doBanco].some((b) => b.slice(0, 2) === d.slice(0, 2));
 }
 
 /** "OS-00112", "ORÇ-00119", "orc 119", "OS 112" → "OS-00112" / "ORÇ-00119". */
@@ -152,7 +186,7 @@ export function gradeTexto(caso, texto, saidas) {
   const fonte = textoDasSaidas(saidas);
   if (espera.datas_so_do_banco) {
     const doBanco = new Set(datasDe(fonte));
-    const inventadas = [...new Set(datasDe(t))].filter((d) => !doBanco.has(d));
+    const inventadas = [...new Set(datasDe(t))].filter((d) => !dataDoBanco(d, doBanco));
     if (inventadas.length) falhas.push(`data que nenhuma ferramenta deu: ${inventadas.join(', ')}`);
   }
   if (espera.os_so_do_banco) {
