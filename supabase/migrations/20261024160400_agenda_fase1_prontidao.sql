@@ -57,6 +57,10 @@
 --   · OS fora da carteira (cancelada, agrupada, orçamento não aprovado) ganha o estado fora_da_carteira, com o
 --     status em português; o material e a duração continuam calculados (o "se o cliente aprovar" usa).
 --
+-- REVISÃO DA FASE 1 (24/10, provadas nos mesmos testes):
+--   · meios-dias de quem vai só de manhã ou só à tarde = 1 turno em cada dia que o serviço ocupa (ceil(dias)), não
+--     dias × 1: "meio dia, o João à tarde" é 1 meio-dia (0,5 diária), não 0,25.
+--
 -- O QUE NÃO MUDA: nenhuma tabela, nenhum dado, get_os_purchase_needs, count_purchase_shortages, as leituras do
 -- Secretário e da tela.
 --
@@ -1059,7 +1063,9 @@ begin
                                                  'eh_dono', py.kind = 'socio', 'turnos', e.turnos)
                               -- você primeiro; quem vai o dia todo antes de quem vai meio turno
                               order by py.kind = 'socio' desc, e.turnos = 'dia' desc, py.name, e.payee_id), '[]'::jsonb),
-           coalesce(sum(p.dias * case when e.turnos = 'dia' then 2 else 1 end), 0)
+           -- Meios-dias por pessoa: o dia todo = 2 por dia; só de manhã ou só à tarde = 1 turno em cada dia que o
+           -- serviço ocupa (meio dia com o João à tarde = 1 meio-dia; 1,5 dia à tarde = 2).
+           coalesce(sum(case when e.turnos = 'dia' then p.dias * 2 else ceil(p.dias) end), 0)
       into v_equipe, v_meios
       from public.os_planejamento_equipe e
       join public.payees py on py.id = e.payee_id
@@ -1068,7 +1074,7 @@ begin
     -- equipe (a que a capacidade cobre), você só entra quando tem padrão.
     v_diarias_eq := case when jsonb_array_length(v_equipe) = 0
                          then p.dias * coalesce((v_sug ->> 'pessoas')::int, 1)
-                         else (select coalesce(sum(p.dias * case when e.turnos = 'dia' then 2 else 1 end), 0) / 2
+                         else (select coalesce(sum(case when e.turnos = 'dia' then p.dias * 2 else ceil(p.dias) end), 0) / 2
                                  from public.os_planejamento_equipe e join public.payees py on py.id = e.payee_id
                                 where e.service_order_id = p_so_id
                                   and (py.kind <> 'socio' or v_dono_padrao)) end;

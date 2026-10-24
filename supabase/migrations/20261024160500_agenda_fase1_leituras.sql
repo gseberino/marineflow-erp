@@ -74,6 +74,11 @@
 --   · "você ainda não me disse que chegou" só quando a data prevista já chegou (hoje ou antes): antes disso a
 --     previsão do dono não está vencida e a frase seria cobrança fora de hora.
 --
+-- REVISÃO DA FASE 1 (24/10, provadas nos mesmos testes):
+--   · "o que o João faz segunda?": quem tem padrão em outros dias ouve "às segundas não costuma vir"; o "não sei se
+--     vem" fica para quem não tem padrão nenhum.
+--   · agenda_simular: só de manhã ou só à tarde = 1 meio-dia por dia ocupado (a mesma conta de os_prontidao).
+--
 -- O QUE NÃO MUDA: nenhuma tabela, nenhum dado, nenhuma função de P1–P3, my_agenda, o Secretário, as telas.
 --
 -- ORDEM DE LIGAR: depois de 20261024160000..160400; antes das ferramentas (P5), dos comandos e do fechamento (P6).
@@ -1638,11 +1643,14 @@ begin
     end if;
     v_gente := v_gente || jsonb_build_object('payee_id', v_rp ->> 'payee_id', 'nome', v_rp ->> 'nome_curto',
                                              'eh_dono', (v_rp ->> 'eh_dono')::boolean, 'turnos', v_turnos,
-                                             'diarias', trim_scale(p_dias * case when v_turnos = 'dia' then 2 else 1 end / 2));
+                                             -- a mesma conta de os_prontidao: só um turno = 1 meio-dia por dia ocupado
+                                             'diarias', trim_scale(case when v_turnos = 'dia' then p_dias * 2
+                                                                        else ceil(p_dias) end / 2));
   end loop;
   v_com_dono := exists (select 1 from jsonb_array_elements(v_gente) g where (g ->> 'eh_dono')::boolean);
 
-  -- As diárias da equipe: dias × meios-dias ÷ 2 de quem é equipe (você só entra quando tem padrão). Sem ninguém dito,
+  -- As diárias da equipe: os meios-dias ÷ 2 de quem é equipe (o dia todo = dias × 2; só um turno = 1 por dia ocupado;
+  -- você só entra quando tem padrão). Sem ninguém dito,
   -- a equipe sugerida.
   if jsonb_array_length(v_gente) = 0 then
     v_eq := p_dias * (v_pn ->> 'equipe_sugerida')::int;
@@ -1709,7 +1717,7 @@ begin
 end;
 $function$;
 
-comment on function public.agenda_simular(numeric, jsonb, text, uuid, date) is 'Agenda de Produção (Fase 1, P4): serviço hipotético sem orçamento ("um serviço de 2 dias, eu e o Roberto") — as diárias da equipe (dias × meios-dias ÷ 2 de quem é equipe; o dono fora da conta enquanto não tem padrão), no fim da fila (a faixa do livre de verdade) e passando na frente (agenda_somar_du(p_hoje, congelamento_du + 1); o resto atrasa ceil(diárias ÷ capacidade diária) dias úteis). "É projeção: não reserva nada." Pessoa que não existe = {ok:false, texto do resolvedor}.';
+comment on function public.agenda_simular(numeric, jsonb, text, uuid, date) is 'Agenda de Produção (Fase 1, P4): serviço hipotético sem orçamento ("um serviço de 2 dias, eu e o Roberto") — as diárias da equipe (meios-dias ÷ 2 de quem é equipe: o dia todo = dias × 2, só de manhã ou só à tarde = 1 por dia ocupado; o dono fora da conta enquanto não tem padrão), no fim da fila (a faixa do livre de verdade) e passando na frente (agenda_somar_du(p_hoje, congelamento_du + 1); o resto atrasa ceil(diárias ÷ capacidade diária) dias úteis). "É projeção: não reserva nada." Pessoa que não existe = {ok:false, texto do resolvedor}.';
 
 create or replace function public.agenda_ctp(p_so_id uuid, p_hoje date default public._hoje_brt())
  returns jsonb

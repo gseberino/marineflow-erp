@@ -766,6 +766,19 @@ begin
     v_res := pg_temp.ok(v_res, 'H3 "são dois dias" sem dizer quem: as diárias usam as pessoas da sugestão (2 × 2 = 4)',
       r #>> '{duracao,diarias}' = '4' and not (r #>> '{duracao,equipe_dita}')::boolean,
       ((r -> 'duracao') - 'sugestao')::text);
+    -- Quem vai só de manhã ou só à tarde vai a UM turno de cada dia que o serviço ocupa (meio dia à tarde = 1 meio-dia).
+    insert into public.os_planejamento_equipe (service_order_id, payee_id, turnos) values (pg_temp.os('74'), c_joao, 'tarde');
+    update public.os_planejamento set dias = 0.5 where service_order_id = pg_temp.os('74');
+    r := pg_temp.pr('74');
+    v_txt := format('%s %s %s', r #>> '{duracao,meios_dias}', r #>> '{duracao,diarias}', r #>> '{duracao,dp_realista}');
+    update public.os_planejamento set dias = 1.5 where service_order_id = pg_temp.os('74');
+    r := pg_temp.pr('74');
+    v_txt := v_txt || format(' | %s %s', r #>> '{duracao,meios_dias}', r #>> '{duracao,diarias}');
+    update public.os_planejamento set dias = 2 where service_order_id = pg_temp.os('74');
+    r := pg_temp.pr('74');
+    v_txt := v_txt || format(' | %s %s', r #>> '{duracao,meios_dias}', r #>> '{duracao,diarias}');
+    v_res := pg_temp.ok(v_res, 'H4 só à tarde: meio dia = 1 meio-dia (0,5 diária); 1,5 dia = 2 meios-dias; 2 dias = 2 meios-dias',
+      v_txt = '1 0.5 0.5 | 2 1 | 2 1', v_txt);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'H (o cenário quebrou)', false, sqlerrm);

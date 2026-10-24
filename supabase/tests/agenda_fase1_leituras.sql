@@ -575,7 +575,11 @@ Pelo material, começa a partir de qua 04/11 (1 dia útil depois de o último ch
       $e$Sex 30/10, você não tem nada marcado — só de manhã. Você costuma ficar em campo de seg a sex (você disse).$e$);
     v_res := pg_temp.igual(v_res, 'C4d simulação com o João à tarde e você (com padrão, você entra na conta)',
       public.agenda_simular(1.5, '[{"pessoa": "João", "turnos": "tarde"}, "eu"]'::jsonb, null, c_admin, c_hoje) ->> 'texto',
-      $e$Um serviço de 1,5 dia com você e João (à tarde) (são 2,25 diárias de equipe: você 1,5 e João 0,75): no fim da fila, começa entre ter 10/11 e seg 23/11. Passando na frente de tudo, dá para começar ter 27/10, e o resto atrasa uns 2 dias úteis. É projeção: não reserva nada.$e$);
+      $e$Um serviço de 1,5 dia com você e João (à tarde) (são 2,5 diárias de equipe: você 1,5 e João 1): no fim da fila, começa entre ter 10/11 e seg 23/11. Passando na frente de tudo, dá para começar ter 27/10, e o resto atrasa uns 2 dias úteis. É projeção: não reserva nada.$e$);
+    -- Só à tarde = um turno em cada dia ocupado: meio dia com o João à tarde é meio dia dele (0,5 diária), não 0,25.
+    v_t := public.agenda_simular(0.5, '[{"pessoa": "João", "turnos": "tarde"}]'::jsonb, null, c_admin, c_hoje) ->> 'texto';
+    v_res := pg_temp.ok(v_res, 'C4e simulação de meio dia com o João à tarde: 0,5 diária de equipe (era 0,25)',
+      v_t like 'Um serviço de meio dia com João (à tarde) (são 0,5 diárias de equipe): %', v_t);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
             when others then v_res := pg_temp.ok(v_res, 'C4 (o cenário quebrou)', false, sqlerrm);
