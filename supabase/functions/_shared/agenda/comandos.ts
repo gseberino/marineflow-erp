@@ -29,6 +29,14 @@
 //   mesma resolução da Fase 1; ambíguo = pergunta; o nome que não acha nada vai ao modelo).
 //   Estas palavras da Fase 2 só valem com a agenda automática fora de 'desligado' (ehPalavraDaFase2).
 //
+// Fase 3 (P3, 24/10/2026; spec-fase3.md §11) — concluir e entregar (executam direto: agenda_concluir_dito e
+// agenda_entregar_dito, pela porta; a saída e as cobranças da condição na mesma transação, desfazível):
+//   concluiu · concluiu <alvo> · concluido <alvo> · concluida <alvo>      → conclui (sem alvo: a OS do plano de hoje)
+//   entreguei <alvo> · entregue <alvo>                                    → marca a entrega (conclui antes se faltava)
+//   O alvo segue a régua do *desfaz*: o nome do cliente (até 3 palavras, sem conectivo nem palavra de outra ferramenta:
+//   "concluiu o pagamento" vai ao modelo) ou o número, nunca uma letra ("concluiu b" não é palavra). "entregue" e
+//   "entreguei" sozinhos não são palavra (precisa do alvo). Também só com a agenda automática fora de 'desligado'.
+//
 // Só a frase inteira vale (normalizada pelo MESMO normalizarComando do secretário: sem acento, sem negrito, sem
 // pontuação no fim, sem o 🎤 do áudio). Qualquer palavra a mais é conversa e vai ao modelo como sempre.
 //
@@ -61,7 +69,11 @@ export type ComandoDaAgenda =
   /** (Fase 2) agenda_choveu */
   | { comando: "choveu"; quando: string | null }
   /** (Fase 2) agenda_desfazer_dito: o alvo como o dono disse (null = o que a agenda contou por último) */
-  | { comando: "desfazer"; alvo: string | null };
+  | { comando: "desfazer"; alvo: string | null }
+  /** (Fase 3) agenda_concluir_dito: o alvo como o dono disse (null = a OS do plano de hoje, se for uma só) */
+  | { comando: "concluir"; alvo: string | null }
+  /** (Fase 3) agenda_entregar_dito: o alvo como o dono disse */
+  | { comando: "entregar"; alvo: string };
 
 const ver = (periodo: PeriodoDoComando | null, foco: FocoDoComando = "tudo", pessoa: "eu" | null = null): ComandoDaAgenda =>
   ({ comando: "ver", periodo, foco, pessoa });
@@ -160,6 +172,16 @@ function quandoDito(s: string | undefined): string | null | undefined {
   return QUANDO.test(s) ? s : undefined;
 }
 
+/**
+ * O alvo de *desfaz*, *concluiu* e *entreguei*: até 40 caracteres, nunca uma letra; "o/a/do/da" na frente sai; o nome
+ * passa pela régua de alvoDeOs. undefined = não serve (a frase vai ao modelo).
+ */
+function alvoDito(alvo: string): string | undefined {
+  if (alvo.length > ALVO_MAX || ALVO_DE_LETRA.test(alvo)) return undefined;
+  const nome = alvo.replace(/^(?:o|a|do|da) /, "");
+  return alvoDeOs(nome) ? nome : undefined;
+}
+
 /** "dia feito [quando]", "dia nao|parcial [motivo] [quando]", "choveu [quando]", "desfaz [alvo]" → o comando, ou null. */
 function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
   let m = /^dia feito(?: (.+))?$/.exec(t);
@@ -197,8 +219,21 @@ function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
     if (alvo.length > ALVO_MAX || ALVO_DE_LETRA.test(alvo)) return null;
     // "desfaz a semana", "desfaz semana" → "semana"; "desfaz o Nelson" → "nelson" (o banco resolve o nome)
     if (/^(?:a |da )?semana$/.test(alvo)) return { comando: "desfazer", alvo: "semana" };
-    const nome = alvo.replace(/^(?:o|a|do|da) /, "");
-    return alvoDeOs(nome) ? { comando: "desfazer", alvo: nome } : null;
+    const nome = alvoDito(alvo);
+    return nome === undefined ? null : { comando: "desfazer", alvo: nome };
+  }
+  // Fase 3: concluir (sem alvo só "concluiu") e entregar (sempre com alvo)
+  m = /^(concluiu|concluido|concluida)(?: (.+))?$/.exec(t);
+  if (m) {
+    const alvo = (m[2] ?? "").trim();
+    if (!alvo) return m[1] === "concluiu" ? { comando: "concluir", alvo: null } : null;
+    const nome = alvoDito(alvo);
+    return nome === undefined ? null : { comando: "concluir", alvo: nome };
+  }
+  m = /^(?:entreguei|entregue) (.+)$/.exec(t);
+  if (m) {
+    const nome = alvoDito(m[1].trim());
+    return nome === undefined ? null : { comando: "entregar", alvo: nome };
   }
   return null;
 }
@@ -207,9 +242,11 @@ function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
  * (Fase 2) As palavras da agenda que se monta sozinha: a conferência do dia, o *choveu*, o *desfaz* e os focos novos
  * ("o que mudou", "agenda pendências", "agenda plano"). Só valem com a agenda automática (modo_proposta ou modo_vigia)
  * fora de 'desligado': antes disso não há plano nem mudança dela, e "desfaz …" é de outras ferramentas.
+ * (Fase 3) *concluiu* e *entreguei* também (spec-fase3 §11: "lida com modo_proposta ou modo_vigia ≠ desligado").
  */
 export function ehPalavraDaFase2(cmd: ComandoDaAgenda): boolean {
   if (cmd.comando === "dia" || cmd.comando === "choveu" || cmd.comando === "desfazer") return true;
+  if (cmd.comando === "concluir" || cmd.comando === "entregar") return true;
   return cmd.comando === "ver" && (cmd.foco === "mudancas" || cmd.foco === "decisoes" || cmd.foco === "plano");
 }
 

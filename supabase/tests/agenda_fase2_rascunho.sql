@@ -414,10 +414,23 @@ begin
     v_foto := pg_temp.foto();
     r := public.agenda_rascunho_andamento(c_admin, 'whatsapp', 'Antônio', 'concluiu', null, null, null, 'o Antônio terminou hoje',
                                           date '2026-11-04', pg_temp.em(date '2026-11-04', '17:40'));
-    v_res := pg_temp.ok(v_res, 'A4 "terminou": concluir é pela tela; nada no rascunho',
-      not (r ->> 'ok')::boolean
-      and r ->> 'pergunta' = 'Concluir ainda é pela tela (botão Concluir da OS): é lá que saem a saída e as cobranças.'
-      and not exists (select 1 from public.agenda_rascunho where tipo = 'andamento'), r::text);
+    -- FASE 3: com 20261026100200 (agenda_concluir_dito existe), concluir deixa de ser recusado e vira rascunho com a
+    -- releitura da saída e das cobranças (os testes dela: agenda_fase3_caminhos.sql). Este arquivo roda nos dois cortes.
+    if exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = 'agenda_concluir_dito') then
+      v_res := pg_temp.ok(v_res, 'A4 "terminou" (Fase 3): vira o rascunho de concluir, com a releitura da saída e das cobranças',
+        (r ->> 'ok')::boolean
+        and r ->> 'releitura' like E'Entendi assim, confere?
+• Concluo o Antônio (OS-00201) hoje (qua 04/11): fica registrada a saída, e %'
+        and (select count(*) from public.agenda_rascunho where tipo = 'andamento' and estado = 'aberto' and dados ->> 'evento' = 'concluiu') = 1
+        and (select status from public.service_orders where id = pg_temp.os('201')) <> 'completed', r::text);
+      -- (o A5 abaixo confere que o "não foi" sem motivo não entra no rascunho: o de concluir sai antes)
+      delete from public.agenda_rascunho where tipo = 'andamento';
+    else
+      v_res := pg_temp.ok(v_res, 'A4 "terminou": concluir é pela tela; nada no rascunho',
+        not (r ->> 'ok')::boolean
+        and r ->> 'pergunta' = 'Concluir ainda é pela tela (botão Concluir da OS): é lá que saem a saída e as cobranças.'
+        and not exists (select 1 from public.agenda_rascunho where tipo = 'andamento'), r::text);
+    end if;
     r := public.agenda_rascunho_andamento(c_admin, 'whatsapp', 'Antônio', 'nao_foi', null, array['João'], null, 'o João não foi',
                                           date '2026-11-03', pg_temp.em(date '2026-11-03', '17:40'));
     v_res := pg_temp.ok(v_res, 'A5 "não foi" sem o motivo: pede o motivo (da lista), nada no rascunho',

@@ -2,7 +2,7 @@
 // certos, o texto do banco repassado sem mexer, nunca lança (erro vira frase + app_error_logs), o modo desligado não
 // intercepta e o que não é do dono segue ao modelo.
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { frasesDaAgenda, lerComandoDaAgenda } from "./comandos.ts";
+import { type ComandoDaAgenda, frasesDaAgenda, lerComandoDaAgenda } from "./comandos.ts";
 import {
   camadaDaAgenda,
   chamadaDoComando,
@@ -15,14 +15,18 @@ import {
   modoDaPropostaNoBanco,
   modosDaAgendaNoBanco,
   RPC_CHOVEU,
+  RPC_CONCLUIR_DITO,
   RPC_CONFERIR_DIA,
   RPC_DESCARTAR,
   RPC_DESFAZER_DITO,
+  RPC_ENTREGAR_DITO,
   RPC_GRAVAR,
   TEXTO_SEM_AGENDA,
   TEXTO_SEM_ANOTAR,
+  TEXTO_SEM_CONCLUIR,
   TEXTO_SEM_DESCARTAR,
   TEXTO_SEM_DESFAZER,
+  TEXTO_SEM_ENTREGAR,
   TEXTO_SEM_GRAVAR,
   TEXTO_SO_ADMIN,
 } from "./executar.ts";
@@ -481,4 +485,67 @@ Deno.test("Fase 2 (revisão) — ehComandoDaAgendaLigada: as palavras da Fase 2 
   const a = leitura({ modo_proposta: "desligado" });
   assertEquals(await ehComandoDaAgendaLigada(a, "grava"), true);
   assertEquals(a.lidas, ["agenda_config"]);
+});
+
+// ─── Fase 3 (P3): *concluiu* e *entreguei* ────────────────────────────────────────────────────────────────────────
+
+Deno.test("Fase 3 — chamadaDoComando: *concluiu* e *entreguei* vão às RPCs delas, com o alvo como o dono disse e o canal", () => {
+  assertEquals(chamadaDoComando({ comando: "concluir", alvo: "lenine" }, AUTOR, "2026-10-29", "painel"), {
+    rpc: RPC_CONCLUIR_DITO, params: { p_autor: AUTOR, p_alvo: "lenine", p_canal: "painel", p_hoje: "2026-10-29" },
+  });
+  assertEquals(chamadaDoComando({ comando: "concluir", alvo: null }, AUTOR), {
+    rpc: RPC_CONCLUIR_DITO, params: { p_autor: AUTOR, p_alvo: null, p_canal: "whatsapp" },
+  });
+  assertEquals(chamadaDoComando({ comando: "entregar", alvo: "os-00074" }, AUTOR), {
+    rpc: RPC_ENTREGAR_DITO, params: { p_autor: AUTOR, p_alvo: "os-00074", p_canal: "whatsapp" },
+  });
+});
+
+Deno.test("Fase 3 — executar: o texto do banco volta como veio; nao_achei com alvo segue ao modelo; o resto fica", async () => {
+  const concluiu = "Concluí o Lenine (OS-00074) hoje (qui 29/10, 16:30). Saíram as cobranças da condição: Entrada 50% R$ 2.280,00 " +
+    "(vence hoje) · Saldo 50% R$ 2.280,00 (vence hoje). *desfaz OS-00074* volta como estava.";
+  const c1 = cliente({ [RPC_CONCLUIR_DITO]: { data: { ok: true, mudou: true, status: "ok", texto: concluiu } } });
+  assertEquals(await executarComandoDaAgenda(c1, { comando: "concluir", alvo: "lenine" }, { autor: AUTOR }), { ok: true, texto: concluiu });
+  // alvo que o banco não acha ("concluiu a instalação"): nada mudou e o pedido é de outra coisa — o turno segue ao modelo
+  const naoAchei = { ok: false, mudou: false, status: "nao_achei", texto: "Não encontrei \"Instalação\" entre os serviços da carteira." };
+  const c2 = cliente({ [RPC_CONCLUIR_DITO]: { data: naoAchei } });
+  assertEquals((await executarComandoDaAgenda(c2, { comando: "concluir", alvo: "instalacao" }, { autor: AUTOR })).seguirAoModelo, true);
+  const c3 = cliente({ [RPC_ENTREGAR_DITO]: { data: naoAchei } });
+  assertEquals((await executarComandoDaAgenda(c3, { comando: "entregar", alvo: "pedido" }, { autor: AUTOR })).seguirAoModelo, true);
+  // ambíguo, já concluída, orçamento, levantamento e a recusa da porta são a resposta: ficam com a agenda
+  for (const status of ["ambiguo", "ja_concluida", "orcamento", "recusada", "levantamento"]) {
+    const c = cliente({ [RPC_CONCLUIR_DITO]: { data: { ok: status === "ja_concluida", mudou: false, status, texto: `texto ${status}` } } });
+    const r = await executarComandoDaAgenda(c, { comando: "concluir", alvo: "lenine" }, { autor: AUTOR });
+    assertEquals([r.texto, r.seguirAoModelo], [`texto ${status}`, undefined], status);
+  }
+  // sem alvo, "nenhuma" no plano de hoje também é a resposta (a palavra sozinha é só da agenda)
+  const c4 = cliente({ [RPC_CONCLUIR_DITO]: { data: { ok: false, mudou: false, status: "nenhuma",
+    texto: "Hoje não tem serviço no plano para concluir. Diga *concluiu* e o nome do cliente." } } });
+  assertEquals((await executarComandoDaAgenda(c4, { comando: "concluir", alvo: null }, { autor: AUTOR })).seguirAoModelo, undefined);
+});
+
+Deno.test("Fase 3 — executar nunca lança: o erro do *concluiu* e do *entreguei* vira a frase certa e o log", async () => {
+  const casos: Array<[ComandoDaAgenda, string, string]> = [
+    [{ comando: "concluir", alvo: "lenine" }, RPC_CONCLUIR_DITO, TEXTO_SEM_CONCLUIR],
+    [{ comando: "entregar", alvo: "lenine" }, RPC_ENTREGAR_DITO, TEXTO_SEM_ENTREGAR],
+  ];
+  for (const [cmd, rpc, frase] of casos) {
+    const c = cliente({ [rpc]: { error: { message: "rede", code: "XX000" } } });
+    const r = await executarComandoDaAgenda(c, cmd, { autor: AUTOR });
+    assertEquals([r.ok, r.texto], [false, frase], rpc);
+    assertEquals(c.logs().length, 1, rpc);
+  }
+});
+
+Deno.test("Fase 3 — camada: *concluiu Lenine* só com a agenda automática fora de 'desligado'; nao_achei segue ao modelo", async () => {
+  const deps = (proposta: "desligado" | "sombra", data: unknown): DependenciasDaCamada => ({
+    ehDoDono: () => true,
+    modo: () => Promise.resolve("sombra"),
+    modosDaFase2: () => Promise.resolve({ proposta, vigia: "desligado" }),
+    executar: (cmd) => executarComandoDaAgenda(cliente({ [RPC_CONCLUIR_DITO]: { data } }), cmd, { autor: AUTOR }),
+  });
+  const ok = { ok: true, mudou: true, status: "ok", texto: "Concluí o Lenine (OS-00074) hoje." };
+  assertEquals((await camadaDaAgenda("concluiu Lenine", deps("sombra", ok)))?.texto, "Concluí o Lenine (OS-00074) hoje.");
+  assertEquals(await camadaDaAgenda("concluiu Lenine", deps("desligado", ok)), null);
+  assertEquals(await camadaDaAgenda("concluiu instalação", deps("sombra", { ok: false, status: "nao_achei", texto: "Não encontrei." })), null);
 });

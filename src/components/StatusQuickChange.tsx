@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useUpdateServiceOrderStatus, useCancelServiceOrder, useReopenServiceOrder, STATUS_TRANSITIONS, STATUS_BACKWARD_TRANSITIONS } from '@/hooks/use-service-orders';
+import { avisarSeNaoMudou } from '@/lib/status-pela-tela';
 import { statusConfig } from '@/lib/constants';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -115,11 +116,15 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
 
   const handleTransition = async (target: ServiceOrderStatus) => {
     try {
-      await updateStatus.mutateAsync({ id: orderId, status: target });
-      toast({ title: `Status atualizado para "${(t.status as Record<string, string>)[target]}"` });
+      // Fase 3 (P3): a porta decide. Sem mudança ("A OS já começou: não volta para aprovada."), a frase dela e nada mais;
+      // com mudança, a frase dela vai junto (na conclusão, a saída e as cobranças da condição).
+      const r = await updateStatus.mutateAsync({ id: orderId, status: target });
+      if (avisarSeNaoMudou(r)) return;
+      const ficou = (r?.status ?? target) as ServiceOrderStatus;
+      toast({ title: `Status atualizado para "${(t.status as Record<string, string>)[ficou]}"`, description: r?.texto || undefined });
 
       // Conclusão pela lista → mesmo prompt opt-in de "avisar o cliente + saldo" do formulário.
-      if (target === 'completed') {
+      if (ficou === 'completed') {
         const [{ data: so }, { data: recRows }] = await Promise.all([
           supabase.from('service_orders')
             .select('service_order_number, clients(name, whatsapp, phone)')

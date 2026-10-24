@@ -5,6 +5,7 @@ import { QuoteStatusQuickChange } from '@/components/QuoteStatusQuickChange';
 import { PurchaseNeedsDialog } from '@/components/purchasing/PurchaseNeedsDialog';
 import { useI18n } from '@/i18n';
 import { useServiceOrders, useDuplicateServiceOrder, useUpdateServiceOrderStatus } from '@/hooks/use-service-orders';
+import { avisarSeNaoMudou } from '@/lib/status-pela-tela';
 import { priorityConfig } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -119,9 +120,11 @@ export default function QuoteList() {
   // ── Actions ────────────────────────────────────────────────────────────────
   const handleConvertToOS = async (so: any) => {
     try {
-      await convertToOS.mutateAsync({ id: so.id, status: 'approved' });
+      // Fase 3 (P3): a conversão é da porta (o número troca só o prefixo); sem mudança, a frase dela.
+      const r = await convertToOS.mutateAsync({ id: so.id, status: 'approved' });
+      if (avisarSeNaoMudou(r)) return;
       toast.success(`${so.service_order_number} convertido em OS`);
-      setStockConfirm({ id: so.id, number: so.service_order_number });
+      setStockConfirm({ id: so.id, number: r?.numero ?? so.service_order_number });
     } catch (e: any) {
       toast.error(e?.message || 'Erro ao converter em OS');
     }

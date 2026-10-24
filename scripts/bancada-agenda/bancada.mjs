@@ -78,6 +78,8 @@ export const TABELAS = [
   // mensagens do WhatsApp (a resposta da equipe).
   'payments', 'payment_condition_presets', 'service_order_expenses', 'issued_fiscal_documents', 'company_fiscal_settings',
   'commissions', 'collections', 'periodos_fechados', 'whatsapp_messages',
+  // Fase 3 (P3): a trava do levantamento (D11) da conversa e das palavras que concluem (_os_levantamentos_pendentes).
+  'service_surveys',
 ];
 
 /** Sequências do snapshot que as funções da lista abaixo usam (next_document_number). */

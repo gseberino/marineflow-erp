@@ -9,6 +9,7 @@ import { ROTULOS_STATUS_OS, STATUS_OS, statusAoAgendar, type StatusOS } from "..
 import { modoDaPropostaNoBanco } from "../../agenda-modo.ts";
 import { canalDaRpc, ehDataCalculada, type ResultadoParaOModelo, resultadoDoRascunho } from "../../agenda/rpc-das-ferramentas.ts";
 import { modoDaLeituraNoBanco } from "../../agenda/executar.ts";
+import { argumentosDaPortaCompleta, ehPortaAusente, ehSemDireitoNaPorta, statusPelaTelaSemAPorta } from "../../porta-ausente.ts";
 
 /** Os status que a porta única de status do banco decide (Agenda de Produção, Fase 2, P4). */
 const STATUS_DE_AGENDA = ["open", "approved", "scheduled", "in_progress", "awaiting_parts", "awaiting_client"];
@@ -387,19 +388,12 @@ export async function adicionarPecaNaOS(
  * O que update_service_order_status recusa, com o caminho certo (D7, Agenda de Produção, Fase 0,
  * 23/10/2026). null = pode seguir.
  *
- * A tool fazia um UPDATE cru do status. Concluir por ela pulava o que a tela faz junto
- * (use-service-orders.ts: grava a saída em check_out_at e lança as cobranças da conclusão, uma por
- * parcela) — a OS ficava "Concluída" sem nada a receber. Cancelar pulava o estorno de estoque,
- * cobranças e pagamentos que cancel_service_order faz (a tela também recusa: "Use o botão
- * Cancelar OS"). Concluir pelo assistente volta com a porta única de status (Fase 3).
+ * Cancelar pulava o estorno de estoque, cobranças e pagamentos que cancel_service_order faz (a tela também recusa: "Use o
+ * botão Cancelar OS"). Fase 3 (P3, 24/10/2026): concluir saiu daqui — não é recusa, é a instrução
+ * TEXTO_CONCLUIR_PELO_ANDAMENTO (o execute a devolve): a conclusão pela conversa é os_registrar_andamento, que deixa a
+ * releitura da saída e das cobranças para o *grava* do dono.
  */
 export function recusaDoStatusPeloAssistente(status: unknown): { error: string; caminho: string } | null {
-  if (status === "completed") {
-    return {
-      error: "Concluir a OS é pela tela (abra a OS e use Concluir): é a tela que grava a saída e lança as cobranças da conclusão. Concluir por aqui volta numa das próximas etapas da agenda.",
-      caminho: "tela: botão Concluir da OS",
-    };
-  }
   if (status === "cancelled") {
     return {
       error: "Cancelar é com cancel_service_order: ele estorna estoque, cobranças e pagamentos.",
@@ -416,6 +410,14 @@ export function recusaDoStatusPeloAssistente(status: unknown): { error: string; 
 export const TEXTO_PAROU_PELO_ANDAMENTO =
   "A OS já começou: tirar de em andamento é com os_registrar_andamento (evento parou, motivo material ou cliente, " +
   "trecho = as palavras do dono), que deixa a releitura para o *grava* dele. Nada foi mudado aqui.";
+
+/**
+ * (Fase 3, P3) Concluir pela conversa: a instrução ao modelo (não ao dono) quando ele pede completed a
+ * update_service_order_status. A conclusão grava a saída e lança as cobranças da condição, e isso é pela porta com a
+ * releitura e o *grava* do dono (os_registrar_andamento, evento concluiu) — nunca por aqui, num passo só.
+ */
+export const TEXTO_CONCLUIR_PELO_ANDAMENTO =
+  "Para concluir, use os_registrar_andamento com evento concluiu e o trecho do dono: o dono confirma com *grava*.";
 
 /**
  * (Revisão da Fase 2) Em andamento → aguardando peças/cliente pelo assistente. null = não é esse caso (a porta via
@@ -741,7 +743,7 @@ export const serviceOrderTools: ToolDef[] = [
     name: "update_service_order_status",
     description:
       "Altera o status de uma OS/orçamento. IMPORTANTE: ao aprovar um orçamento (draft → outro status), o sistema automaticamente renomeia o número de ORÇ-XXXXX para OS-XXXXX. " +
-      "O que ela NÃO faz: NÃO conclui (concluir é pela tela, no botão Concluir da OS, que grava a saída e lança as cobranças da conclusão), NÃO cancela (cancelar é cancel_service_order, que estorna estoque, cobranças e pagamentos) e NÃO fatura OS que ainda não foi concluída. Pedir completed ou cancelled aqui é recusado. " +
+      "O que ela NÃO faz: NÃO conclui (concluir grava a saída e lança as cobranças da condição: é os_registrar_andamento, evento concluiu, com o trecho do dono, que deixa a releitura para o *grava* dele; pedir completed aqui devolve essa instrução e nada muda), NÃO cancela (cancelar é cancel_service_order, que estorna estoque, cobranças e pagamentos; pedir cancelled aqui é recusado) e NÃO fatura OS que ainda não foi concluída (faturar é só do administrador). " +
       "Fronteira com os_registrar_andamento: a OS que JÁ COMEÇOU e parou (\"o Nelson parou, falta a peça\") é os_registrar_andamento (evento parou, motivo material ou cliente, trecho) quando a agenda de produção está ligada; com ela desligada, é aqui, com status awaiting_parts ou awaiting_client e motivo = o porquê que o dono disse.",
     input_schema: {
       type: "object",
@@ -749,14 +751,14 @@ export const serviceOrderTools: ToolDef[] = [
         id: { type: "string", description: "UUID da OS/orçamento" },
         // Mesma fonte do prompt e do CHECK do banco: pending/waiting_parts/waiting_approval/reopened
         // eram recusados com 23514, e awaiting_parts/awaiting_client faltavam (11/10/2026).
-        // completed e cancelled continuam na lista (é a lista do banco) e o execute os recusa com o
-        // caminho certo — fora do enum, o modelo receberia só "aceita só: …", sem saber para onde ir.
+        // completed e cancelled continuam na lista (é a lista do banco) e o execute devolve o caminho
+        // certo — fora do enum, o modelo receberia só "aceita só: …", sem saber para onde ir.
         status: {
           type: "string",
           enum: [...STATUS_OS],
           description:
             "Novo status. " + STATUS_OS.map((s) => `'${s}'=${ROTULOS_STATUS_OS[s]}`).join(", ") +
-            ". Aguardando aprovação/sinal é situação do orçamento (quote_status) → use update_quote_status. completed e cancelled são recusados (ver a descrição da ferramenta).",
+            ". Aguardando aprovação/sinal é situação do orçamento (quote_status) → use update_quote_status. completed devolve a instrução de concluir (os_registrar_andamento) e cancelled é recusado (ver a descrição da ferramenta).",
         },
         // Fica no esquema para o pedido de cancelar chegar à recusa que aponta cancel_service_order
         // (sem ele, a rede recusaria por "campo que não existe"). Não é gravado.
@@ -766,15 +768,18 @@ export const serviceOrderTools: ToolDef[] = [
       required: ["id", "status"],
     },
     risk: "low",
-    // Recusa antes de a pendência nascer (quando a tool chega pela rede e pede o "sim"): o dono não
-    // aprova uma conclusão que a execução vai recusar.
+    // Recusa antes de a pendência nascer (quando a tool chega pela rede e pede o "sim"): cancelar é
+    // cancel_service_order. Concluir não é recusa: o execute devolve a instrução (nada é escrito).
     preValidar: (args) => recusaDoStatusPeloAssistente(args?.status),
     async execute(args, ctx) {
-      const { sb, admin } = ctx;
+      const { sb } = ctx;
       // D7 (Agenda de Produção, Fase 0, 23/10/2026): a mesma recusa do preValidar (defesa dupla —
       // no perfil a tool é low e roda direto, sem passar pelo preValidar).
       const recusa = recusaDoStatusPeloAssistente(args.status);
       if (recusa) return recusa;
+      // Fase 3 (P3): concluir pela conversa é os_registrar_andamento (a releitura da saída e das cobranças e o *grava* do
+      // dono), nunca num passo só por aqui. A instrução vai ao modelo; nada é lido nem escrito.
+      if (args.status === "completed") return { instrucao: TEXTO_CONCLUIR_PELO_ANDAMENTO, caminho: "os_registrar_andamento" };
 
       const { data: current, error: erroAtual } = await sb
         .from("service_orders")
@@ -782,24 +787,24 @@ export const serviceOrderTools: ToolDef[] = [
         .eq("id", args.id)
         .maybeSingle();
       if (erroAtual) throw erroAtual;
+      if (!current) return { error: "Não encontrei essa OS." };
 
       // Faturar é o passo DEPOIS de concluir: faturada sem conclusão pularia a saída e as cobranças
-      // da conclusão do mesmo jeito.
-      if (args.status === "invoiced" && current && current.status !== "completed") {
+      // da conclusão do mesmo jeito (a porta também recusa: "Fature depois de concluir.").
+      if (args.status === "invoiced" && current.status !== "completed") {
         return {
-          error: `Faturar vem depois de concluir, e a ${current.service_order_number ?? "OS"} está ${ROTULOS_STATUS_OS[current.status as keyof typeof ROTULOS_STATUS_OS] ?? current.status}. Conclua pela tela (abra a OS e use Concluir) e fature depois.`,
+          error: `Faturar vem depois de concluir, e a ${current.service_order_number ?? "OS"} está ${ROTULOS_STATUS_OS[current.status as keyof typeof ROTULOS_STATUS_OS] ?? current.status}. Para concluir, use os_registrar_andamento com evento concluiu e o trecho do dono (ele confirma com *grava*); fature depois.`,
         };
       }
 
-      // A trava do levantamento (D11, dono, 17/09/2026: concluir exige o levantamento respondido)
-      // morava aqui e ficou só na tela, que agora é o único caminho de concluir. A porta única de
-      // status (Fase 3) a traz de volta junto com a conclusão.
+      // A trava do levantamento (D11, dono, 17/09/2026: concluir exige o levantamento respondido) veio junto com a
+      // conclusão pela conversa (Fase 3, P3): o banco recusa no rascunho e nas palavras (_os_levantamentos_pendentes).
 
       // Fase 2 (P4, 24/10/2026): os status de agenda (aberta, aprovada, agendada, em andamento,
       // aguardando peças/cliente) de uma OS que já não é orçamento vão pela porta única do banco
       // (os_transicionar_status, via 'assistente'): em andamento nunca regride, aguardando peças só
       // sai com o material na mão, e com a agenda automática ligada "agendada" só com dia no plano.
-      // A conversão do orçamento (draft → …) e o faturar seguem como antes.
+      // A conversão do orçamento (draft → …) e o faturar vêm logo abaixo, pela porta completa (Fase 3).
       if (current && current.status !== "draft" && STATUS_DE_AGENDA.includes(String(args.status))) {
         // Revisão da Fase 2: a OS que já começou só volta a aguardar quando o dono diz que parou e por quê (a porta só
         // aceita via 'dono' com o motivo). Com a agenda de produção ligada, o caminho é os_registrar_andamento (o
@@ -827,21 +832,35 @@ export const serviceOrderTools: ToolDef[] = [
         };
       }
 
-      const updatePayload: Record<string, any> = { status: args.status };
-
-      if (current?.status === "draft" && args.status !== "draft") {
-        try {
-          const { data: seqVal } = await admin.rpc("next_document_number");
-          if (seqVal !== null) {
-            updatePayload.service_order_number = `OS-${String(seqVal as number).padStart(5, "0")}`;
-            updatePayload.converted_to_os_at = new Date().toISOString();
-          }
-        } catch { /* mantém número atual se RPC falhar */ }
+      // Fase 3 (P3, 24/10/2026): a conversão do orçamento (draft → …), o faturar e o resto também vão pela porta (via
+      // 'assistente', com quem pediu): o número troca SÓ o prefixo (ORÇ-00119 → OS-00119) — acabou o número novo de
+      // next_document_number (NOVO-agenda-15) —, faturar só a concluída e só o administrador, e a OS não volta a ser
+      // orçamento. A chamada leva p_check_out (argumentosDaPortaCompleta): sem a porta da Fase 3 no banco, o caminho de
+      // antes da porta, com o número mantido (PLANO B, _shared/porta-ausente.ts).
+      const { data: porta, error: erroPorta } = await sb.rpc("os_transicionar_status",
+        argumentosDaPortaCompleta(args.id, String(args.status), "assistente", { p_autor: ctx.userId ?? null }));
+      if (erroPorta) {
+        if (ehSemDireitoNaPorta(erroPorta)) return { error: String(erroPorta.message ?? "Você não pode mudar o status desta OS.") };
+        if (!ehPortaAusente(erroPorta)) throw erroPorta;
+        const antes = await statusPelaTelaSemAPorta(sb, args.id, String(args.status));
+        return {
+          ok: true,
+          mudou: antes.mudou,
+          convertido: antes.convertido,
+          status_da_os: ROTULOS_STATUS_OS[args.status as StatusOS] ?? args.status,
+          service_order: { id: args.id, service_order_number: antes.numero ?? current.service_order_number, status: args.status },
+        };
       }
-
-      const { data, error } = await sb.from("service_orders").update(updatePayload).eq("id", args.id).select().single();
-      if (error) throw error;
-      return { ok: true, service_order: data };
+      if (!porta?.ok) return { error: String(porta?.texto ?? "O sistema não mudou o status desta OS.") };
+      const ficou = String(porta.para ?? current.status);
+      return {
+        ok: true,
+        mudou: !!porta.mudou,
+        mensagem: String(porta.texto ?? ""),
+        convertido: porta.convertido === true,
+        status_da_os: ROTULOS_STATUS_OS[ficou as StatusOS] ?? ficou,
+        service_order: { id: args.id, service_order_number: porta.numero ?? current.service_order_number, status: ficou },
+      };
     },
   },
   {

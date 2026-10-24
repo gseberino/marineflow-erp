@@ -8,6 +8,10 @@
 // concluir. As duas são provadas iguais caso a caso: completion-receivables.paridade.test.ts (aqui) e
 // supabase/tests/agenda_fase3_recebiveis.sql (lá), sobre o mesmo scripts/bancada-agenda/recebiveis-casos.json.
 // Mudar a regra aqui sem mudar lá (ou o contrário) reprova os dois.
+//
+// Fase 3 (P3): a tela conclui pela porta (useUpdateServiceOrderStatus → os_transicionar_status, via 'tela'). Este arquivo
+// é o espelho da porta (_os_recebiveis_da_conclusao) e só é chamado pelo plano B (statusPelaTelaSemAPorta, com a migration
+// 20261026100100 ainda não aplicada) e pelos testes de paridade: ensureCompletionReceivables sai com o plano B.
 import { supabase } from '@/integrations/supabase/client';
 import {
   depositBaseFromOrder,

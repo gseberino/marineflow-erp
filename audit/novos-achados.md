@@ -2814,3 +2814,44 @@ porque só o dono pode preenchê-las.
   para aprovada). O P3 passa `submit-signature` pela porta. Ver também NOVO-agenda-15 (o sinal pago).
 - **Para o dono:** trocar o número da ORÇ-00070 para OS-00070 é dado (operacional); e confirmar se `signature_status_after`
   deve continuar `approved` (a assinatura do cliente vale como aprovação do orçamento, não como conclusão).
+
+### [NOVO-agenda-13] A assinatura do cliente mudava o status da OS por fora da porta
+
+- **Encontrado em:** Agenda de Produção, Fase 3 (conferência de 24/10/2026; o que acontece em produção está no NOVO-agenda-23).
+- **Onde:** `supabase/functions/submit-signature/index.ts:174-193` — o status de `app_settings.signature_status_after` (padrão
+  `completed`; em produção `approved`) ia no mesmo UPDATE da assinatura.
+- **O quê:** com `completed`, a OS ficava concluída sem a saída e sem as cobranças da condição (o D7 por outro caminho); com
+  `approved`, o orçamento ficava aprovado sem converter (o número de orçamento, como a ORÇ-00070) e uma OS em andamento voltava
+  para aprovada.
+- **Corrigido (P3, código; depende das migrations 20261026100100 e 100200, NÃO APLICADAS):** a assinatura grava só os campos
+  dela e o status vai depois pela porta (`os_transicionar_status`, via `assinatura`, sem autor — `status-da-assinatura.ts`):
+  orçamento → aprovada converte trocando só o prefixo, em andamento não volta, concluir lança a saída e as cobranças. A porta
+  que recusa, o erro e a exceção vão a `app_error_logs` (context `submit-signature`) e nunca derrubam a assinatura. Plano B:
+  sem a porta completa, o caminho de antes da porta (com a conversão mantendo o número). Testes:
+  `supabase/functions/submit-signature/index_test.ts`.
+
+### [NOVO-agenda-24] A trava do levantamento (D11) só existia no formulário da OS
+
+- **Encontrado em:** Agenda de Produção, Fase 3, pacote P3 (24/10/2026).
+- **Onde:** `src/lib/levantamento-gate.ts` (`levantamentosPendentesParaConcluir`), chamada só por
+  `src/components/ServiceOrderForm.tsx:1202`. O comentário de lá dizia que a porta traria a regra junto quando o assistente
+  voltasse a concluir.
+- **O quê:** a decisão do dono de 17/09 (concluir exige o levantamento respondido nos serviços marcados "exige levantamento")
+  valia só no botão do formulário. A lista rápida (`StatusQuickChange`), os dois kanbans e a lista de orçamentos concluíam sem
+  ela — antes e depois do P3 (eles passam pela porta, que não confere).
+- **Corrigido em parte (P3, migration `20261026100200`, NÃO APLICADA):** a conversa (`os_registrar_andamento` concluiu/entregou)
+  e as palavras *concluiu*/*entreguei* recusam com a frase do formulário (`_os_levantamentos_pendentes`; teste P8 de
+  `supabase/tests/agenda_fase3_caminhos.sql`).
+- **Para o dono:** a lista rápida e os kanbans também devem exigir o levantamento? Se sim, a regra entra na porta (vale para todo
+  caminho) num pacote seguinte.
+
+### [NOVO-agenda-25] O *desfaz* não achava a OS concluída (ela sai da carteira)
+
+- **Encontrado em:** Agenda de Produção, Fase 3, pacote P3 (24/10/2026, na bancada).
+- **Onde:** `agenda_acao_desfazivel` (`20261025100200_agenda_fase2_motor.sql`) resolvia a OS por `agenda_resolver_os`, que só
+  devolve "ok" para a carteira. A OS concluída (ou entregue) sai dela.
+- **O quê:** "desfaz Lenine" logo depois de concluir respondia "A OS-00074 já foi concluída." e o turno ia ao modelo — a
+  conclusão pela palavra ou pela conversa (desfazível por 24 h, P2) não tinha como ser desfeita pela palavra.
+- **Corrigido (P3, migration `20261026100200`, NÃO APLICADA):** `agenda_acao_desfazivel` recriada aceita a OS fora da carteira
+  quando ela tem mudança da agenda ainda desfazível; sem isso, a resposta é a de antes. A dica das palavras usa o número
+  (*desfaz OS-00074*): com outra OS do mesmo cliente na carteira, o nome acharia aquela.

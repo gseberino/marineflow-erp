@@ -14,6 +14,7 @@
 //   · agenda_propor — a simulação do motor ("e se…"; simular = true por padrão: nada é gravado). Com simular = false
 //     grava só a proposta EM ABERTO (agenda_propostas e alocações em estado proposta), que não vale para ninguém;
 //   · agenda_aplicar, agenda_desfazer, os_registrar_andamento — o pedido vira RASCUNHO com a releitura do efeito
+//     (Fase 3, P3: os_registrar_andamento também conclui e entrega — a releitura diz a saída e as cobranças da condição)
 //     calculado agora pelo banco (agenda_rascunho_aplicar/_desfazer/_andamento, migration 20261025100400); só o *grava*
 //     do dono executa (publica, decide, desfaz, anota o dia). Rodam direto pela rede como as da Fase 1.
 //   As quatro: só o admin, risco low, nenhuma recebe id nem data calculada, e ficam fora da vista (d14: só agenda_ver
@@ -341,10 +342,13 @@ export const agendaProducaoTools: ToolDef[] = [
     name: "os_registrar_andamento",
     description:
       "Anota num RASCUNHO o que aconteceu numa OS num dia do plano: trabalhou (quem trabalhou), parcial (andou em parte, " +
-      "com motivo), nao_foi (quem não foi, ou a OS não andou, com motivo), comecou (a OS começou) ou parou (parou por " +
-      "material ou cliente). Uma chamada por fato, com o trecho do dono. NÃO conclui nem entrega (concluir é pela tela, " +
-      "botão Concluir da OS), não lança nem aprova diária (quanto pagar ao diarista é registrar_diaria) e não é a chegada " +
-      "dita pelo técnico (check_in_service_order). Só o *grava* do dono grava.",
+      "com motivo), nao_foi (quem não foi, ou a OS não andou, com motivo), comecou (a OS começou), parou (parou por " +
+      "material ou cliente), concluiu (o dono disse que o serviço terminou: concluir gera a saída e as cobranças da " +
+      "condição, e a releitura diz quais) ou entregou (o barco ou o bem foi entregue ao cliente; se a OS ainda não estava " +
+      "concluída, conclui junto). Concluir e entregar ficam com a data de hoje. Uma chamada por fato, com o trecho do " +
+      "dono; nada sai sem o *grava* do dono. Não lança nem aprova diária (quanto pagar ao diarista é registrar_diaria), não " +
+      "é a chegada dita pelo técnico (check_in_service_order) nem o check-out dele (que não conclui); update_service_order_status " +
+      "não conclui.",
     input_schema: {
       type: "object",
       properties: {

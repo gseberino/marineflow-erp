@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/i18n';
 import { supabase } from '@/integrations/supabase/client';
 import { useServiceOrders, useDuplicateServiceOrder, useUpdateServiceOrderStatus } from '@/hooks/use-service-orders';
+import { avisarSeNaoMudou } from '@/lib/status-pela-tela';
 import { useWhatsAppSendStatusMap } from '@/hooks/use-whatsapp-send-log';
 import { useMultiFilter } from '@/hooks/use-multi-filter';
 import { usePDFData, fetchPDFData } from '@/hooks/use-pdf';
@@ -291,9 +292,11 @@ export default function OrdersListV2({ mode }: { mode: Mode }) {
 
   const handleConvertToOS = async (so: SORow) => {
     try {
-      await convertToOS.mutateAsync({ id: so.id, status: 'approved' });
+      // Fase 3 (P3): a conversão é da porta (o número troca só o prefixo); sem mudança, a frase dela.
+      const r = await convertToOS.mutateAsync({ id: so.id, status: 'approved' });
+      if (avisarSeNaoMudou(r)) return;
       toast.success(`${so.service_order_number} convertido em OS`);
-      setStockConfirm({ id: so.id, number: so.service_order_number });
+      setStockConfirm({ id: so.id, number: r?.numero ?? so.service_order_number });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Erro ao converter em OS');
     }

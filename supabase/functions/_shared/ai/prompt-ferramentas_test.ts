@@ -375,7 +375,8 @@ Deno.test("agenda de produção (Fase 2): autonomia, pedidos viram releitura, de
   for (const campo of ["decisao", "opcao", "proposta"]) assertEquals(campo in aplicar.properties, true, `agenda_aplicar sem ${campo}`);
   // 4. andamento × diária × check-in × concluir: cada vizinha citada por nome (e é ferramenta de verdade)
   assertStringIncludes(secao, "os_registrar_andamento, uma chamada por fato, com trecho e motivo da lista");
-  assertStringIncludes(secao, "concluir continua pela tela (botão Concluir da OS)");
+  // FASE 3 (P3): concluir e entregar são eventos do andamento (o teste da Fase 3, abaixo, cobra a linha nova).
+  assertStringIncludes(secao, "é evento concluiu ou entregou");
   assertStringIncludes(secao, "é registrar_diaria, que já usa a OS do plano");
   assertStringIncludes(secao, "a chegada que o técnico diz é check_in_service_order");
   for (const t of ["agenda_propor", "agenda_aplicar", "agenda_desfazer", "os_registrar_andamento", "check_in_service_order"]) {
@@ -389,4 +390,29 @@ Deno.test("agenda de produção (Fase 2): autonomia, pedidos viram releitura, de
   // 6. nunca data fora das ferramentas, e nada de "marquei/publiquei/desfiz" sem o *grava*
   assertStringIncludes(secao, "Nunca diga data, dia livre ou pessoa que não veio de uma ferramenta da agenda");
   assertStringIncludes(secao, "\"marquei\", \"publiquei\" nem \"desfiz\"");
+});
+
+// Agenda de Produção (24/10/2026, Fase 3, P3): concluir e entregar voltaram ao assistente pela porta — o andamento com a
+// releitura da saída e das cobranças e o *grava* do dono, as palavras *concluiu* e *entreguei*. As 3 linhas que diziam
+// "concluir é pela tela" foram reescritas juntas (sem isso o prompt se contradiz): aqui cada uma é amarrada ao que cita.
+Deno.test("agenda de produção (Fase 3): concluir e entregar pelo andamento e pelas palavras; update_service_order_status não conclui", () => {
+  const estavel = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[0].text;
+  // 1. a regra geral (fora da seção da agenda): o caminho de concluir e de entregar, e o que não conclui
+  assertStringIncludes(estavel, "Concluir e entregar: os_registrar_andamento (concluiu/entregou) com o trecho; o dono confirma com *grava*. update_service_order_status não conclui; cancelar é cancel_service_order.");
+  assertEquals(estavel.includes("Concluir é pela tela"), false, "sobrou a regra antiga");
+  assertEquals(estavel.includes("concluir continua pela tela"), false, "sobrou a regra antiga");
+  // 2. os eventos citados existem no enum da ferramenta
+  const andamento = porNome.get("os_registrar_andamento")!.input_schema as { properties: { evento: { enum: string[] } } };
+  for (const e of ["concluiu", "entregou"]) assertEquals(andamento.properties.evento.enum.includes(e), true, e);
+  // 3. as palavras que o dono manda direto: o comando sem IA LÊ cada uma
+  const secao = secaoDaAgenda();
+  assertStringIncludes(secao, "*concluiu* + nome e *entreguei* + nome o dono manda direto, sem você");
+  assertEquals(lerComandoDaAgenda("concluiu Lenine")?.comando, "concluir");
+  assertEquals(lerComandoDaAgenda("entreguei Lenine")?.comando, "entregar");
+  // 4. o técnico: o check-out continua não concluindo, e o "terminou" do DONO aponta o andamento
+  assertStringIncludes(estavel, "check-out NÃO conclui nem fatura a OS");
+  assertStringIncludes(estavel, "quando o DONO diz que o serviço terminou, é os_registrar_andamento com evento concluiu");
+  // 5. update_service_order_status devolve a instrução (não recusa): o texto dela cita a ferramenta certa
+  const status = porNome.get("update_service_order_status")!;
+  assertStringIncludes(status.description, "os_registrar_andamento, evento concluiu");
 });

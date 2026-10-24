@@ -25,7 +25,7 @@ import {
   resultadoDaLeitura,
   resultadoDaProposta,
   resultadoDoRascunho,
-  TEXTO_CONCLUIR_PELA_TELA,
+  SINONIMOS_DO_ANDAMENTO,
 } from "./rpc-das-ferramentas.ts";
 
 const CTX = { autor: "aa000000-0000-4000-8000-000000000001", canal: "whatsapp" as const };
@@ -322,16 +322,12 @@ Deno.test("paraDesfazer: o alvo como o dono disse; sem alvo vai nulo (o banco pe
   assertEquals(erro(paraDesfazer({ alvo: UUID_QUALQUER, trecho: "x" }, CTX)).includes("não o id"), true);
 });
 
-Deno.test("paraAndamento: os, evento, dia como dito, quem e motivo da lista; concluir é pela tela", () => {
+Deno.test("paraAndamento: os, evento, dia como dito, quem e motivo da lista", () => {
   assertEquals(params(paraAndamento({ os: "Vanderlei", evento: "nao_foi", quem: "João", motivo: "equipe", dia: "hoje", trecho: "hoje o João não foi" }, CTX)).params, {
     p_autor: CTX.autor, p_canal: "whatsapp", p_os: "Vanderlei", p_evento: "nao_foi", p_dia: "hoje", p_quem: ["João"], p_motivo: "equipe",
     p_trecho: "hoje o João não foi",
   });
   assertEquals(params(paraAndamento({ os: "Vanderlei", evento: "comecou", trecho: "o Vanderlei começou" }, CTX)).params.p_quem, null);
-  for (const concluir of ["concluiu", "terminou", "entregou", "pronto"]) {
-    assertEquals(erro(paraAndamento({ os: "Vanderlei", evento: concluir, trecho: "terminou" }, CTX)).startsWith(TEXTO_CONCLUIR_PELA_TELA.slice(0, 30)),
-      true, concluir);
-  }
   assertEquals(erro(paraAndamento({ os: "Vanderlei", evento: "faltou", trecho: "x" }, CTX)).includes("'evento' aceita só"), true);
   assertEquals(erro(paraAndamento({ os: "Vanderlei", evento: "parou", motivo: "chuva", trecho: "x" }, CTX)).includes("'motivo' aceita só"), true);
   assertEquals(erro(paraAndamento({ os: "Vanderlei", evento: "trabalhou", dia: "2026-11-03", trecho: "x" }, CTX)).includes("sem calcular"), true);
@@ -339,8 +335,27 @@ Deno.test("paraAndamento: os, evento, dia como dito, quem e motivo da lista; con
   assertEquals(erro(paraAndamento({ os: "Vanderlei", evento: "trabalhou" }, CTX)).startsWith("falta 'trecho'"), true);
 });
 
+// Fase 3 (P3): concluir e entregar pelo andamento — a releitura da saída e das cobranças, e o *grava* do dono. Os
+// sinônimos que o modelo manda viram o evento (o banco aceita os mesmos: agenda_rascunho_andamento).
+Deno.test("Fase 3: paraAndamento aceita concluiu e entregou; terminou/acabou/finalizou/pronto viram concluiu e entregue, entregou", () => {
+  assertEquals(params(paraAndamento({ os: "Lenine", evento: "concluiu", trecho: "o Lenine terminou hoje" }, CTX)).params, {
+    p_autor: CTX.autor, p_canal: "whatsapp", p_os: "Lenine", p_evento: "concluiu", p_dia: null, p_quem: null, p_motivo: null,
+    p_trecho: "o Lenine terminou hoje",
+  });
+  for (const [dito, evento] of [["terminou", "concluiu"], ["acabou", "concluiu"], ["finalizou", "concluiu"], ["pronto", "concluiu"],
+    ["Terminou", "concluiu"], ["concluido", "concluiu"], ["entregue", "entregou"], ["entregou", "entregou"]] as const) {
+    assertEquals(params(paraAndamento({ os: "Lenine", evento: dito, trecho: "o Lenine terminou" }, CTX)).params.p_evento, evento, dito);
+  }
+  // o resto continua: trecho obrigatório, data calculada recusada, evento fora da lista
+  assertEquals(erro(paraAndamento({ os: "Lenine", evento: "concluiu" }, CTX)).startsWith("falta 'trecho'"), true);
+  assertEquals(erro(paraAndamento({ os: "Lenine", evento: "concluiu", dia: "2026-10-29", trecho: "x" }, CTX)).includes("sem calcular"), true);
+  assertEquals(erro(paraAndamento({ os: "Lenine", evento: "faturou", trecho: "x" }, CTX)).includes("'evento' aceita só"), true);
+});
+
 Deno.test("os enums das ferramentas são os que o banco aceita (spec §8: eventos e motivos do andamento)", () => {
-  assertEquals([...EVENTOS_DO_ANDAMENTO], ["trabalhou", "parcial", "nao_foi", "comecou", "parou"]);
+  // FASE 3 (P3): concluiu e entregou entram (a releitura e o *grava* concluem pela porta).
+  assertEquals([...EVENTOS_DO_ANDAMENTO], ["trabalhou", "parcial", "nao_foi", "comecou", "parou", "concluiu", "entregou"]);
+  for (const evento of Object.values(SINONIMOS_DO_ANDAMENTO)) assertEquals(EVENTOS_DO_ANDAMENTO.includes(evento), true, evento);
   assertEquals([...ESCOPOS_DA_PROPOSTA], ["semana", "proxima_semana", "os", "replano"]);
   assertEquals([...MOTIVOS_DO_ANDAMENTO].sort(), [
     "anterior", "cliente", "clima", "equipe", "esqueci", "estimativa", "imprevisto", "informacao", "material", "urgencia",

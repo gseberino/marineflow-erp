@@ -54,18 +54,23 @@ export const PRESENCAS_DO_DONO = ["abre_e_fecha", "sempre", "nunca"] as const;
 export const LIMPAVEIS = ["espera", "nao_antes", "prazo", "escopo", "patio"] as const;
 /** (Fase 2) O que o motor monta: a semana (= a que ele publica, a seguinte), uma OS ou o replano de algumas. */
 export const ESCOPOS_DA_PROPOSTA = ["semana", "proxima_semana", "os", "replano"] as const;
-/** (Fase 2) O que aconteceu na OS num dia do plano. Concluir e entregar não estão aqui: é pela tela. */
-export const EVENTOS_DO_ANDAMENTO = ["trabalhou", "parcial", "nao_foi", "comecou", "parou"] as const;
+/**
+ * (Fase 2) O que aconteceu na OS num dia do plano. (Fase 3, P3) Mais concluiu e entregou: a releitura diz a saída e as
+ * cobranças da condição, e o *grava* do dono conclui e entrega pela porta (agenda_rascunho_andamento, 20261026100200).
+ */
+export const EVENTOS_DO_ANDAMENTO = ["trabalhou", "parcial", "nao_foi", "comecou", "parou", "concluiu", "entregou"] as const;
 /** (Fase 2) O motivo, na palavra do dono (o banco traduz para o código: _agenda_motivo_dito). */
 export const MOTIVOS_DO_ANDAMENTO = [
   "material", "cliente", "equipe", "anterior", "informacao", "clima", "estimativa", "imprevisto", "urgencia", "esqueci",
 ] as const;
-/** As palavras de concluir: o andamento não conclui (a conclusão grava a saída e as cobranças, e é pela tela). */
-const EVENTOS_DE_CONCLUIR = new Set([
-  "concluiu", "concluida", "concluido", "terminou", "acabou", "finalizou", "entregou", "entregue", "pronto", "pronta",
-]);
-/** A mesma frase do banco (agenda_rascunho_andamento) para quando o modelo tenta concluir pelo andamento. */
-export const TEXTO_CONCLUIR_PELA_TELA = "Concluir ainda é pela tela (botão Concluir da OS): é lá que saem a saída e as cobranças.";
+/**
+ * (Fase 3, P3) Os sinônimos que o modelo manda em evento: "terminou", "acabou", "finalizou", "pronto" são concluiu;
+ * "entregue" é entregou (o banco aceita os mesmos). Antes eram recusados ("concluir é pela tela").
+ */
+export const SINONIMOS_DO_ANDAMENTO: Readonly<Record<string, (typeof EVENTOS_DO_ANDAMENTO)[number]>> = Object.freeze({
+  concluida: "concluiu", concluido: "concluiu", terminou: "concluiu", acabou: "concluiu", finalizou: "concluiu",
+  pronto: "concluiu", pronta: "concluiu", entregue: "entregou",
+});
 
 /** O que vai junto do resultado ao modelo. */
 export const INSTRUCAO_LEITURA = "Repita o texto; pode encurtar o fim, nunca mude número, data ou nome.";
@@ -448,13 +453,15 @@ export function paraDesfazer(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
   });
 }
 
-/** os_registrar_andamento → agenda_rascunho_andamento: os, evento, dia, quem, motivo. Concluir não é andamento. */
+/**
+ * os_registrar_andamento → agenda_rascunho_andamento: os, evento, dia, quem, motivo. (Fase 3) concluiu e entregou também
+ * (os sinônimos viram o evento: "terminou" é concluiu, "entregue" é entregou).
+ */
 export function paraAndamento(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
   return mapear(RPC_ANDAMENTO, () => {
     const a = objeto(args);
     const bruto = texto(a.evento, "evento", 40);
-    if (bruto && EVENTOS_DE_CONCLUIR.has(bruto.toLowerCase())) recusar(TEXTO_CONCLUIR_PELA_TELA.replace(/\.$/, ""));
-    const evento = umDe(bruto, "evento", EVENTOS_DO_ANDAMENTO, true);
+    const evento = umDe(bruto ? (SINONIMOS_DO_ANDAMENTO[bruto.toLowerCase()] ?? bruto) : bruto, "evento", EVENTOS_DO_ANDAMENTO, true);
     const os = referenciaDaOs(a.os, true);
     let quem: string[] | null = null;
     if (a.quem !== undefined && a.quem !== null) {

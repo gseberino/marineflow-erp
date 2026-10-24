@@ -2,9 +2,12 @@
 // Recebe assinatura (desenho + nome) do cliente via link público,
 // valida share_token, faz upload da imagem e registra a assinatura.
 // Atualiza status da OS e cria notificação para a equipe.
+// Fase 3 (P3, 24/10/2026): o status depois de assinar vai pela porta única (status-da-assinatura.ts, via 'assinatura'),
+// depois de a assinatura estar gravada: a porta que recusa só vai ao registro, nunca derruba a assinatura.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { statusDepoisDaAssinatura } from "./status-da-assinatura.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ORIGEM_PADRAO,
@@ -176,9 +179,9 @@ servirComCors(async (req) => {
       .select('value')
       .eq('key', 'signature_status_after')
       .maybeSingle();
-    const newStatus = settingRow?.value || 'completed';
+    const statusPedido = settingRow?.value || 'completed';
 
-    // ---- atualizar OS ----
+    // ---- atualizar OS (os campos da assinatura; o status vai pela porta, logo abaixo) ----
     const { error: updErr } = await admin
       .from('service_orders')
       .update({
@@ -188,13 +191,16 @@ servirComCors(async (req) => {
         client_signature_url: signatureUrl,
         requires_resignature: false,
         resignature_requested_at: null,
-        status: newStatus,
       })
       .eq('id', order.id);
 
     if (updErr) {
       return jsonResponse({ error: 'Assinatura salva, mas falhou ao atualizar OS.', detail: updErr.message }, 500);
     }
+
+    // ---- o status pela porta (orçamento → aprovada converte mantendo o número; em andamento não volta) ----
+    const status = await statusDepoisDaAssinatura(admin, order, statusPedido);
+    const newStatus = status.status;
 
     // ---- audit log ----
     await admin.from('audit_log').insert({
@@ -209,6 +215,9 @@ servirComCors(async (req) => {
         user_agent: userAgent,
         document_hash: body.document_hash,
         new_status: newStatus,
+        status_pedido: statusPedido,
+        status_caminho: status.caminho,
+        status_texto: status.texto,
       },
       reason: 'Assinatura digital recebida via link público',
     });

@@ -9,6 +9,11 @@ import { supabase } from '@/integrations/supabase/client';
  * update_service_order_status recusa e manda concluir pela tela, então esta é a única cópia da
  * regra. A porta única de status (Fase 3), quando trouxer a conclusão pelo assistente, traz esta
  * regra junto.
+ *
+ * Fase 3 (P3): o assistente e as palavras do dono voltaram a concluir (os_registrar_andamento,
+ * *concluiu*, *entreguei*), e o banco tem o espelho desta regra: _os_levantamentos_pendentes
+ * (migration 20261026100200), com a mesma frase. A porta em si não confere: a lista rápida e os
+ * kanbans continuam sem a trava (NOVO-agenda-24, decisão do dono).
  */
 export async function levantamentosPendentesParaConcluir(serviceOrderId: string): Promise<string[]> {
   const { data: linhas, error } = await supabase

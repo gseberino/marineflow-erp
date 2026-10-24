@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Calendar, MessageCircle, Pencil, Plus } from 'lucide-react';
 import { useI18n } from '@/i18n';
 import { useServiceOrders, useUpdateServiceOrderStatus } from '@/hooks/use-service-orders';
+import { avisarSeNaoMudou } from '@/lib/status-pela-tela';
 import type { ServiceOrderStatus } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -74,7 +75,8 @@ export default function CRMKanbanV2() {
   // O hook não avisa erro; sem o catch a falha sumia e o cartão só não mudava de coluna.
   const moveOrder = async (orderId: string, newStatus: ServiceOrderStatus) => {
     try {
-      await updateStatus.mutateAsync({ id: orderId, status: newStatus });
+      // Fase 3 (P3): a porta que não muda nada responde com a frase dela.
+      avisarSeNaoMudou(await updateStatus.mutateAsync({ id: orderId, status: newStatus }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Não foi possível mudar a etapa.');
     }

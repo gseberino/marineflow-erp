@@ -749,6 +749,8 @@ insert into _resultado values
 -- FASE 3: a Fase 3 acrescenta as suas (agenda_fase3_conclusao.sql prova as portas delas):
 --   20261026100100 — _agenda_escrever_conclusao (a segunda que liga a chave agenda.porta) e _agenda_desfazer_marco (o
 --                    desfazer da conclusão e da entrega). A leitura dos marcos (agenda_marcos_da_os) não.
+--   20261026100200 — as palavras *concluiu* e *entreguei*: agenda_concluir_dito e agenda_entregar_dito (conferem o
+--                    administrador dentro). A releitura (_agenda_rascunho_marco), a OS da entrega e os textos não.
 create temp table _definer_da_agenda (nome text primary key) on commit drop;
 insert into _definer_da_agenda values
   ('agenda_disponibilidade_semear'), ('agenda_rascunho_planejar'), ('agenda_rascunho_material'),
@@ -764,7 +766,8 @@ insert into _definer_da_agenda values
   ('agenda_propor_dito'),
   ('_agenda_pessoa'), ('_agenda_payees_do_usuario'),
   -- FASE 3
-  ('_agenda_escrever_conclusao'), ('_agenda_desfazer_marco');
+  ('_agenda_escrever_conclusao'), ('_agenda_desfazer_marco'),
+  ('agenda_concluir_dito'), ('agenda_entregar_dito');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

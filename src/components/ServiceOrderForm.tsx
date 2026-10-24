@@ -102,6 +102,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowLeft, Plus, Trash2, AlertTriangle, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Copy, Download, Loader2, DollarSign, Percent, Hash, MoreHorizontal, ClipboardPen, ClipboardCheck } from 'lucide-react';
 import { toast } from 'sonner';
+import { avisarSeNaoMudou } from '@/lib/status-pela-tela';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
@@ -1208,7 +1209,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           return;
         }
       }
-      await updateStatus.mutateAsync({ id: orderId, status: newStatus });
+      if (avisarSeNaoMudou(await updateStatus.mutateAsync({ id: orderId, status: newStatus }))) return; // Fase 3: a porta não mudou nada
       toast.success(`Status alterado para ${(t.status as Record<string, string>)[newStatus]}`);
 
       // Deposit alert: when completing/invoicing, check if a deposit was already paid

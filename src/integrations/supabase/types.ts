@@ -13915,6 +13915,27 @@ export type Database = {
         }
         Returns: Json
       }
+      // Fase 3 (P3, migration 20261026100200): as palavras *concluiu* e *entreguei* (o WhatsApp e o painel do assistente).
+      agenda_concluir_dito: {
+        Args: {
+          p_autor: string
+          p_alvo?: string | null
+          p_canal?: string
+          p_hoje?: string
+          p_agora?: string
+        }
+        Returns: Json
+      }
+      agenda_entregar_dito: {
+        Args: {
+          p_autor: string
+          p_alvo: string
+          p_canal?: string
+          p_hoje?: string
+          p_agora?: string
+        }
+        Returns: Json
+      }
       // ── fim do trecho da Agenda de Produção
       _ai_gateway_auth: {
         Args: { p_token: string; p_worker_id: string }

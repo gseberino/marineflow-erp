@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { useServiceOrders } from '@/hooks/use-service-orders';
 import { useUpdateServiceOrderStatus } from '@/hooks/use-service-orders';
+import { avisarSeNaoMudou } from '@/lib/status-pela-tela';
+import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -42,8 +44,13 @@ export default function CRMKanbanPage() {
     );
   });
 
+  // Fase 3 (P3): a porta decide; a recusa vira aviso de erro (antes sumia) e a que não muda nada, a frase dela.
   const moveOrder = async (orderId: string, newStatus: string) => {
-    await updateStatus.mutateAsync({ id: orderId, status: newStatus as any });
+    try {
+      avisarSeNaoMudou(await updateStatus.mutateAsync({ id: orderId, status: newStatus as any }));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Não foi possível mudar a etapa.');
+    }
   };
 
   return (

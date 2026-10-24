@@ -3,6 +3,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { cancelServiceOrderCascade, reopenServiceOrder, updateReceivableFromSO } from '@/lib/cascade-updates';
+import type { ResultadoDoStatusPelaTela } from '@/lib/status-pela-tela';
+// (Fase 3) o aviso da porta que não mudou nada mora fora do hook (os testes de tela trocam este módulo inteiro)
+export { avisarSeNaoMudou, type ResultadoDoStatusPelaTela } from '@/lib/status-pela-tela';
+import {
+  argumentosDaPortaCompleta, ehPortaAusente, statusPelaTelaSemAPorta,
+} from '../../supabase/functions/_shared/porta-ausente';
 import type { QueryData } from '@supabase/supabase-js';
 import { useOptionalAuth } from '@/hooks/use-auth';
 import {
@@ -279,89 +285,60 @@ export function useUpdateServiceOrder() {
   });
 }
 
+/**
+ * A mudança de status pela tela, pela porta única do banco (Agenda de Produção, Fase 3, P3 — 24/10/2026).
+ *
+ * Até aqui a tela fazia o UPDATE dela: a conversão do orçamento, o início, a saída e as cobranças da conclusão
+ * (ensureCompletionReceivables) com o erro ENGOLIDO e o dia do navegador — a OS ficava "Concluída" sem nada a receber
+ * quando a cobrança falhava ou quando quem concluía era o técnico (a RLS de receivables barrava: NOVO-agenda-14). Agora é
+ * os_transicionar_status (via 'tela'): a conversão troca só o prefixo do número; concluir lança a saída e as cobranças da
+ * condição na mesma transação, ou nada muda e a frase diz por quê; faturar só a concluída e só o administrador; o vendedor
+ * não conclui; a OS em andamento não volta. Recusa (ok = false) e quem não pode (42501) viram erro com a frase da porta; a
+ * porta que não muda nada (mudou = false) volta em `semMudanca` (avisarSeNaoMudou, src/lib/status-pela-tela.ts).
+ *
+ * PLANO B (_shared/porta-ausente.ts): com a porta completa ainda não aplicada (PGRST202/42883), o caminho de antes
+ * (statusPelaTelaSemAPorta, com ensureCompletionReceivables) — só nesse caso; qualquer outro erro continua erro.
+ * Exportada para o teste.
+ */
+export async function mudarStatusPelaTela(id: string, status: string): Promise<ResultadoDoStatusPelaTela> {
+  if (status === 'cancelled') {
+    throw new Error('Use o botão "Cancelar OS" para cancelar com estorno completo.');
+  }
+  const { data, error } = await supabase.rpc('os_transicionar_status', argumentosDaPortaCompleta(id, status, 'tela') as any);
+  if (error) {
+    if (!ehPortaAusente(error)) throw new Error((error as { message?: string }).message || 'O banco não mudou o status desta OS.');
+    const antes = await statusPelaTelaSemAPorta(supabase, id, status, {
+      cobrancasDaConclusao: async (osId, dia) => {
+        const { ensureCompletionReceivables } = await import('@/lib/completion-receivables');
+        await ensureCompletionReceivables({ serviceOrderId: osId, completionDate: dia });
+      },
+    });
+    return { mudou: antes.mudou, status, texto: '', justConverted: antes.convertido, numero: antes.numero, semAPorta: true };
+  }
+  const r = (data ?? {}) as { ok?: boolean; mudou?: boolean; para?: string; de?: string; texto?: string; convertido?: boolean; numero?: string };
+  const texto = String(r.texto ?? '').trim();
+  if (r.ok !== true) throw new Error(texto || 'O banco não mudou o status desta OS.');
+  const ficou = String(r.para ?? status);
+  if (r.mudou !== true) {
+    return { mudou: false, status: ficou, texto, justConverted: false, numero: null, semMudanca: texto || 'Nada mudou.' };
+  }
+  return { mudou: true, status: ficou, texto, justConverted: r.convertido === true, numero: r.numero ?? null };
+}
+
 export function useUpdateServiceOrderStatus() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      if (status === 'cancelled') {
-        throw new Error('Use o botão "Cancelar OS" para cancelar com estorno completo.');
+      const r = await mudarStatusPelaTela(id, status);
+      if (r.mudou) {
+        await writeAuditLog({
+          table_name: 'service_orders',
+          record_id: id,
+          action: 'update',
+          new_value: { status: r.status, via: r.semAPorta ? 'tela (sem a porta)' : 'tela' },
+        });
       }
-
-      const updates: Record<string, any> = { status };
-      // Vira true na PRIMEIRA saída de rascunho — é o instante em que o orçamento
-      // passa a ser trabalho comprometido e faz sentido perguntar sobre compra.
-      // Quem chama usa isso para abrir o aviso de necessidade de compra.
-      let justConverted = false;
-
-      // On first transition out of draft: mark conversion + swap prefix ORÇ→OS
-      if (status !== 'draft') {
-        const { data: current } = await supabase
-          .from('service_orders')
-          .select('status, converted_to_os_at, service_order_number, grand_total, original_quote_amount')
-          .eq('id', id)
-          .single();
-        if (current?.status === 'draft' && !current?.converted_to_os_at) {
-          justConverted = true;
-          updates.converted_to_os_at = new Date().toISOString();
-          // Preserva o grand_total do orçamento aprovado para comparação futura (valor orçado vs realizado)
-          if (!current?.original_quote_amount && current?.grand_total) {
-            updates.original_quote_amount = current.grand_total;
-          }
-          // Keep the same sequence number — only swap the prefix.
-          // ORÇ-00042 → OS-00042 (unified sequence: quote and OS share the counter).
-          const currentNum = current.service_order_number ?? '';
-          updates.service_order_number = currentNum.startsWith('ORÇ-')
-            ? currentNum.replace('ORÇ-', 'OS-')
-            : currentNum; // already has OS- prefix (legacy records)
-        }
-      }
-
-      if (status === 'in_progress') {
-        const { data: current } = await supabase
-          .from('service_orders')
-          .select('check_in_at')
-          .eq('id', id)
-          .single();
-        if (!current?.check_in_at) updates.check_in_at = new Date().toISOString();
-      }
-      if (status === 'completed') {
-        const { data: current } = await supabase
-          .from('service_orders')
-          .select('check_out_at')
-          .eq('id', id)
-          .maybeSingle();
-        if (!current?.check_out_at) updates.check_out_at = new Date().toISOString();
-
-        // Recebíveis da conclusão: UM título PENDENTE por parcela da condição (idempotente — pula
-        // se o fluxo do sinal já lançou entrada+saldo). Substitui o título único do total, deixando
-        // o financeiro coerente com o fluxo do sinal (aging/cobrança por parcela). Roda antes do
-        // UPDATE do status abaixo; o trigger sync_balance_due_on_completion depois só reconfirma o
-        // vencimento das parcelas "na entrega" (mesma data). Não-fatal.
-        try {
-          const now = new Date();
-          const completionDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-          const { ensureCompletionReceivables } = await import('@/lib/completion-receivables');
-          await ensureCompletionReceivables({ serviceOrderId: id, completionDate });
-        } catch (e) {
-          console.error('ensureCompletionReceivables failed', e);
-        }
-      }
-      const { data, error } = await supabase
-        .from('service_orders')
-        .update(updates as any)
-        .eq('id', id)
-        .select()
-        .single();
-      if (error) throw error;
-
-      await writeAuditLog({
-        table_name: 'service_orders',
-        record_id: id,
-        action: 'update',
-        new_value: { status },
-      });
-
-      return { ...(data as any), justConverted } as any;
+      return r;
     },
     onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['service-orders'] });

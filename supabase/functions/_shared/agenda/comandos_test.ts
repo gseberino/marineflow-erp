@@ -460,3 +460,86 @@ Deno.test("Fase 2 — webhook: com a agenda em sombra ou ligada, 'dia feito' e '
     }
   }
 });
+
+// ─── Fase 3 (P3): *concluiu* e *entreguei* (spec-fase3.md §11) ────────────────────────────────────────────────────
+
+const concluir = (alvo: string | null): ComandoDaAgenda => ({ comando: "concluir", alvo });
+const entregar = (alvo: string): ComandoDaAgenda => ({ comando: "entregar", alvo });
+
+const TABELA_FASE3: Array<[string, ComandoDaAgenda]> = [
+  ["concluiu", concluir(null)],
+  ["Concluiu.", concluir(null)],
+  ["*concluiu*", concluir(null)],
+  ["concluiu Lenine", concluir("lenine")],
+  ["Concluiu o Lenine", concluir("lenine")],
+  ["concluiu o Vanderlei!", concluir("vanderlei")],
+  ["concluído Lenine", concluir("lenine")],
+  ["concluida a Maria", concluir("maria")],
+  ["concluiu OS-00074", concluir("os-00074")],
+  ["concluiu a OS-00074", concluir("os-00074")],
+  ["🎤 Concluiu o Lenine.", concluir("lenine")],
+  ["entreguei Lenine", entregar("lenine")],
+  ["Entreguei o Lenine", entregar("lenine")],
+  ["entregue Vanderlei", entregar("vanderlei")],
+  ["entreguei OS-00074", entregar("os-00074")],
+];
+
+Deno.test("Fase 3 — lerComandoDaAgenda: *concluiu* (com ou sem alvo) e *entreguei <alvo>*", () => {
+  for (const [texto, esperado] of TABELA_FASE3) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+});
+
+// Conversa: palavra a mais, o alvo de outra ferramenta, a letra do secretário, "entregue"/"entreguei" sozinhos.
+const CONVERSA_FASE3 = [
+  "concluido", "concluida", "entregue", "entreguei", "concluiu o pagamento", "concluiu o pagamento?", "concluiu a cobrança",
+  "concluiu b", "concluiu a", "concluiu o item c", "entreguei b", "concluiu o serviço do Lenine", "concluiu a instalação do inversor",
+  "entreguei o barco do Lenine", "o Lenine concluiu", "já concluiu?", "concluiu " + "x".repeat(45), "entreguei a nota fiscal",
+  "concluiu tudo", "concluiu isso", "entregue o pedido", "concluiu o lançamento",
+];
+
+Deno.test("Fase 3 — conversa (alvo de outra ferramenta, letra, sem alvo, palavra a mais) não é comando", () => {
+  for (const t of CONVERSA_FASE3) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+function formasFase3(): string[] {
+  const base = TABELA_FASE3.map(([t]) => t);
+  return [...base, ...base.map((t) => `*${t}*`), ...base.map((t) => `${t}.`)];
+}
+
+Deno.test("Fase 3 — *concluiu*/*entreguei* não são do secretário, da confirmação, do menu, do PDF nem dos comprovantes", () => {
+  for (const t of formasFase3()) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+  }
+});
+
+Deno.test("Fase 3 — *concluiu*/*entreguei* não são sim/não/ok, número de menu nem resposta curta à pergunta ativa", () => {
+  for (const t of formasFase3()) {
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+});
+
+Deno.test("Fase 3 — o secretário continua dono do '<letra> feito/pronto'; a agenda não lê o 'concluiu <letra>'", () => {
+  for (const t of ["b feito", "B pronto", "c resolvido"]) {
+    assert(lerComandoDoSecretario(t) !== null, `deixou de ser do secretário: ${t}`);
+    assertEquals(lerComandoDaAgenda(t), null, t);
+  }
+  for (const t of ["concluiu b", "concluiu c", "entreguei d"]) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 3 — webhook: com a agenda em sombra ou ligada, *concluiu Lenine* e *entreguei Lenine* vão ao assistente", async () => {
+  for (const modo of ["sombra", "ligado"]) {
+    for (const t of ["concluiu Lenine", "concluiu", "entreguei Lenine"]) {
+      const { d, c } = depsDoWebhook(modo, undefined, "sombra");
+      assertEquals(await rotearTextoDoDono(TEXTO(t), d), "assistente", `${modo}: ${t}`);
+      assertEquals(c.chamar.length, 0, t);
+    }
+  }
+});

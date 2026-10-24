@@ -21,6 +21,11 @@
 // o motivo (sem ele, a frase que pede). *o que mudou*, *agenda pendências* e *agenda plano* são agenda_ver. E os modos da
 // Fase 2 para quem lê o plano (o secretário, a my_agenda, o panorama): modoDaPropostaNoBanco e modosDaAgendaNoBanco
 // (erro = 'desligado', o caminho de hoje).
+//
+// Fase 3 (P3, 24/10/2026; spec-fase3.md §11): *concluiu [<alvo>]* e *entreguei <alvo>* executam direto
+// (agenda_concluir_dito, agenda_entregar_dito): a conclusão e a entrega pela porta, com a saída e as cobranças da
+// condição na mesma transação, e o texto do banco ("Concluí o Lenine (OS-00074) hoje … *desfaz OS-00074* volta como
+// estava."). O alvo que o banco não acha (nao_achei: "concluiu a instalação") segue ao modelo, como o *desfaz <nome>*.
 
 import { logEdgeError } from "../log-error.ts";
 import { lerModoDaProposta, type ModoDaProposta, modoDaPropostaNoBanco } from "../agenda-modo.ts";
@@ -36,6 +41,9 @@ export const RPC_DESCARTAR = "agenda_rascunho_descartar";
 export const RPC_CONFERIR_DIA = "agenda_conferir_dia";
 export const RPC_CHOVEU = "agenda_choveu";
 export const RPC_DESFAZER_DITO = "agenda_desfazer_dito";
+/** Fase 3: as palavras de concluir e de entregar. */
+export const RPC_CONCLUIR_DITO = "agenda_concluir_dito";
+export const RPC_ENTREGAR_DITO = "agenda_entregar_dito";
 
 export { modoDaPropostaNoBanco };
 export type { ModoDaProposta };
@@ -152,6 +160,13 @@ export function chamadaDoComando(
   if (cmd.comando === "desfazer") {
     return { rpc: RPC_DESFAZER_DITO, params: comHoje({ p_autor: autor, p_alvo: cmd.alvo, p_canal: canal }) };
   }
+  // Fase 3: concluir e entregar, com o alvo como o dono disse (o banco resolve a OS)
+  if (cmd.comando === "concluir") {
+    return { rpc: RPC_CONCLUIR_DITO, params: comHoje({ p_autor: autor, p_alvo: cmd.alvo, p_canal: canal }) };
+  }
+  if (cmd.comando === "entregar") {
+    return { rpc: RPC_ENTREGAR_DITO, params: comHoje({ p_autor: autor, p_alvo: cmd.alvo, p_canal: canal }) };
+  }
   const args: Record<string, unknown> = { foco: cmd.foco };
   if (cmd.periodo) args.periodo = cmd.periodo;
   if (cmd.pessoa) args.pessoa = cmd.pessoa;
@@ -172,6 +187,11 @@ export const TEXTO_SO_ADMIN = "Só o administrador mexe na agenda.";
 export const TEXTO_SEM_ANOTAR =
   "Não consegui anotar o dia agora. Mande de novo em alguns minutos: se já tiver anotado, eu digo que está anotado.";
 export const TEXTO_SEM_DESFAZER = "Não consegui desfazer agora. Mande *desfaz* de novo em alguns minutos.";
+/** Fase 3: quando o banco falha no *concluiu* / *entreguei* (concluir duas vezes não lança nada em dobro). */
+export const TEXTO_SEM_CONCLUIR =
+  "Não consegui concluir agora. Mande *concluiu* de novo em alguns minutos: se já tiver concluído, eu digo que está concluída.";
+export const TEXTO_SEM_ENTREGAR =
+  "Não consegui marcar a entrega agora. Mande *entreguei* de novo em alguns minutos: se já tiver marcado, eu digo que já foi entregue.";
 
 function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
   if ((e as { code?: unknown })?.code === "42501") return TEXTO_SO_ADMIN;
@@ -185,6 +205,10 @@ function textoDoErro(cmd: ComandoDaAgenda, e: unknown): string {
       return TEXTO_SEM_ANOTAR;
     case "desfazer":
       return TEXTO_SEM_DESFAZER;
+    case "concluir":
+      return TEXTO_SEM_CONCLUIR;
+    case "entregar":
+      return TEXTO_SEM_ENTREGAR;
     default:
       return TEXTO_SEM_AGENDA;
   }
@@ -203,6 +227,10 @@ function rpcDoComando(cmd: ComandoDaAgenda): string {
       return RPC_CHOVEU;
     case "desfazer":
       return RPC_DESFAZER_DITO;
+    case "concluir":
+      return RPC_CONCLUIR_DITO;
+    case "entregar":
+      return RPC_ENTREGAR_DITO;
     default:
       return RPC_AGENDA_VER;
   }
@@ -215,8 +243,13 @@ function rpcDoComando(cmd: ComandoDaAgenda): string {
  */
 const NAO_E_DA_AGENDA = new Set(["nao_achei", "nenhuma", "fora_da_carteira"]);
 function seguirAoModelo(cmd: ComandoDaAgenda, data: unknown): boolean {
-  if (cmd.comando !== "desfazer" || cmd.alvo === null || cmd.alvo === "semana") return false;
   const r = data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : null;
+  // (Fase 3) *concluiu <alvo>* / *entreguei <alvo>* que não acha OS nenhuma ("concluiu a instalação"): não é da agenda.
+  // Ambíguo, já concluída, orçamento e a recusa da porta ficam: são a resposta do banco sobre uma OS que existe.
+  if ((cmd.comando === "concluir" || cmd.comando === "entregar") && cmd.alvo !== null) {
+    return !!r && r.ok !== true && String(r.status) === "nao_achei";
+  }
+  if (cmd.comando !== "desfazer" || cmd.alvo === null || cmd.alvo === "semana") return false;
   return !!r && r.ok !== true && NAO_E_DA_AGENDA.has(String(r.status));
 }
 

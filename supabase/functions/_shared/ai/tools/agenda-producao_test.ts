@@ -355,7 +355,8 @@ Deno.test("Fase 2: argumento errado volta como { error } e NADA é chamado", asy
     ["agenda_aplicar", { proposta: "a última", decisao: "1", trecho: "x" }, "a proposta OU a decisão"],
     ["agenda_aplicar", { decisao: "df23fd81-0d86-4a86-ae86-5ad982b07ef9", opcao: "1", trecho: "x" }, "não o id"],
     ["agenda_desfazer", { alvo: "Nelson" }, "falta 'trecho'"],
-    ["os_registrar_andamento", { os: "Vanderlei", evento: "concluiu", trecho: "terminou hoje" }, "Concluir ainda é pela tela"],
+    // FASE 3 (P3): concluir deixou de ser recusa (vira rascunho com a releitura); sem o trecho, continua recusado aqui.
+    ["os_registrar_andamento", { os: "Vanderlei", evento: "concluiu" }, "falta 'trecho'"],
     ["os_registrar_andamento", { os: "Vanderlei", evento: "faltou", trecho: "x" }, "'evento' aceita só"],
     ["os_registrar_andamento", { os: "Vanderlei", evento: "nao_foi", motivo: "doença", trecho: "x" }, "'motivo' aceita só"],
     ["os_registrar_andamento", { os: "Vanderlei", evento: "trabalhou", dia: "2026-11-03", trecho: "x" }, "sem calcular"],
@@ -396,16 +397,45 @@ Deno.test("Fase 2: as descrições dizem o que NÃO fazem e a fronteira com as v
   assertStringIncludes(d("agenda_aplicar"), "NÃO grava");
   assertStringIncludes(d("agenda_aplicar"), "Nunca escolha a opção pelo dono");
   assertStringIncludes(d("agenda_desfazer"), "NÃO desfaz");
-  assertStringIncludes(d("os_registrar_andamento"), "NÃO conclui");
+  // FASE 3 (P3): o andamento conclui e entrega (a releitura diz a saída e as cobranças); a descrição diz o que ele não é.
+  assertStringIncludes(d("os_registrar_andamento"), "concluir gera a saída e as cobranças da");
+  assertStringIncludes(d("os_registrar_andamento"), "nada sai sem o *grava* do dono");
+  assertStringIncludes(d("os_registrar_andamento"), "update_service_order_status");
   // As vizinhas que parecem a mesma coisa (spec §12, riscos): marcar num dia, a diária e a chegada do técnico.
   const fronteiras: Array<[string, string]> = [
     ["agenda_propor", "schedule_service_order"], ["agenda_propor", "agenda_aplicar"], ["agenda_aplicar", "schedule_service_order"],
     ["agenda_aplicar", "agenda_ver foco decisoes"], ["os_registrar_andamento", "registrar_diaria"],
-    ["os_registrar_andamento", "check_in_service_order"], ["os_registrar_andamento", "Concluir"],
+    ["os_registrar_andamento", "check_in_service_order"], ["os_registrar_andamento", "concluiu"],
   ];
   for (const [nome, vizinha] of fronteiras) assertStringIncludes(d(nome), vizinha, `${nome} → ${vizinha}`);
   // E as vizinhas citadas existem de verdade.
   for (const t of ["schedule_service_order", "registrar_diaria", "check_in_service_order"]) {
     assert(allTools.some((x) => x.name === t), `${t} não é ferramenta`);
   }
+});
+
+// ───────── Fase 3 (P3): os_registrar_andamento conclui e entrega (rascunho + *grava*) ─────────
+Deno.test("Fase 3: os_registrar_andamento concluiu/entregou vai ao rascunho com o evento (sinônimo → concluiu) e devolve a releitura", async () => {
+  const releitura = "Entendi assim, confere?\n• Concluo o Lenine (OS-00074) hoje (qui 29/10): fica registrada a saída, e saem as " +
+    "cobranças da condição: Entrada 50% R$ 2.280,00 (vence hoje) · Saldo 50% R$ 2.280,00 (vence hoje).\n" +
+    "Responda *grava* ou corrija o que estiver errado.";
+  for (const [dito, evento] of [["terminou", "concluiu"], ["concluiu", "concluiu"], ["entregue", "entregou"]] as const) {
+    const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, item: "x", releitura }, error: null }));
+    const r = await porNome("os_registrar_andamento").execute({ os: "Lenine", evento: dito, trecho: "o Lenine terminou hoje" }, ctx(sb)) as Record<string, unknown>;
+    assertEquals(chamadas.map((c) => c.nome), ["agenda_rascunho_andamento"], dito);
+    assertEquals(chamadas[0].params.p_evento, evento, dito);
+    assertEquals(chamadas[0].params.p_trecho, "o Lenine terminou hoje", dito);
+    assertEquals([r.ok, r.texto], [true, releitura], dito);
+    assertStringIncludes(String(r.instrucao), "Só o *grava* dele grava", dito);
+  }
+  const enumDoEvento = (porNome("os_registrar_andamento").input_schema as { properties: { evento: { enum: string[] } } }).properties.evento.enum;
+  for (const e of ["concluiu", "entregou"]) assertEquals(enumDoEvento.includes(e), true, e);
+});
+
+Deno.test("Fase 3: a recusa do banco ao concluir (orçamento, levantamento, dia que não é hoje) passa adiante como pergunta", async () => {
+  const pergunta = "Para concluir, responda o levantamento de: Revisão do sistema elétrico. Esses serviços estão marcados como \"exige levantamento\".";
+  const { sb } = sbFalso(() => ({ data: { ok: false, motivo: "levantamento", texto: pergunta, pergunta, opcoes: [] }, error: null }));
+  const r = await porNome("os_registrar_andamento").execute({ os: "Lenine", evento: "concluiu", trecho: "o Lenine terminou" }, ctx(sb)) as Record<string, unknown>;
+  assertEquals([r.ok, r.texto, r.pergunta], [false, pergunta, pergunta]);
+  assertEquals(String(r.texto).includes("*grava*"), false);
 });

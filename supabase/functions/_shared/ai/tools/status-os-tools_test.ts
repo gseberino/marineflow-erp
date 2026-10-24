@@ -5,7 +5,7 @@
 // "aguardando peças" virava waiting_parts e devolvia 0 OS quando havia 2; status desconhecido ia cru
 // para o filtro e respondia "nenhuma OS" sem erro. A ficha 360 escondia as OS em awaiting_client.
 import { assertEquals, assertMatch } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { filtroDaListagem, serviceOrderTools, TEXTO_PAROU_PELO_ANDAMENTO } from "./service-orders.ts";
+import { filtroDaListagem, serviceOrderTools, TEXTO_CONCLUIR_PELO_ANDAMENTO, TEXTO_PAROU_PELO_ANDAMENTO } from "./service-orders.ts";
 import { entity360Tools } from "./entity-360.ts";
 import { STATUS_OS } from "../../service-order-status.ts";
 
@@ -143,10 +143,10 @@ function osFalsa(statusAtual: string, porta: Record<string, unknown> | null = nu
   return { ctx: { sb, admin, settings: {}, userId: "u-dono", userRole: opcoes.cargo ?? "admin" } as never, updates, rpcs, leituras: () => leituras };
 }
 
-Deno.test("D7: preValidar recusa concluir (manda para a tela) e cancelar (manda para cancel_service_order)", () => {
-  const concluir = mudarStatus.preValidar!({ id: "so1", status: "completed" }, {} as never)!;
-  assertMatch(concluir.error, /Concluir a OS é pela tela \(abra a OS e use Concluir\)/);
-  assertMatch(concluir.error, /grava a saída e lança as cobranças da conclusão/);
+// FASE 3 (P3): concluir deixou de ser recusa — o execute devolve a instrução de os_registrar_andamento (a releitura e o
+// *grava* do dono) e nada é lido nem escrito. Cancelar continua recusado.
+Deno.test("D7: preValidar recusa cancelar (manda para cancel_service_order); concluir passa (o execute devolve a instrução)", () => {
+  assertEquals(mudarStatus.preValidar!({ id: "so1", status: "completed" }, {} as never), null);
   const cancelar = mudarStatus.preValidar!({ id: "so1", status: "cancelled", cancellation_reason: "desistiu" }, {} as never)!;
   assertMatch(cancelar.error, /cancel_service_order/);
   assertMatch(cancelar.error, /estorna estoque, cobranças e pagamentos/);
@@ -154,27 +154,41 @@ Deno.test("D7: preValidar recusa concluir (manda para a tela) e cancelar (manda 
   assertEquals(mudarStatus.preValidar!({ id: "so1", status: "in_progress" }, {} as never), null);
 });
 
-Deno.test("D7: execute repete a recusa (no perfil a tool é low e roda sem o preValidar) e não toca no banco", async () => {
-  for (const status of ["completed", "cancelled"]) {
-    const os = osFalsa("in_progress");
-    const r = await mudarStatus.execute({ id: "so1", status }, os.ctx) as Record<string, any>;
-    assertMatch(String(r.error), status === "completed" ? /pela tela/ : /cancel_service_order/);
-    assertEquals(os.updates, [], status);
-    assertEquals(os.leituras(), 0, `${status}: recusa antes de ler`);
-  }
+Deno.test("D7: execute repete a recusa de cancelar (no perfil a tool é low e roda sem o preValidar) e não toca no banco", async () => {
+  const os = osFalsa("in_progress");
+  const r = await mudarStatus.execute({ id: "so1", status: "cancelled" }, os.ctx) as Record<string, any>;
+  assertMatch(String(r.error), /cancel_service_order/);
+  assertEquals([os.updates, os.rpcs, os.leituras()], [[], [], 0]);
 });
 
-Deno.test("D7: faturar OS que não foi concluída é recusado; concluída pode faturar", async () => {
+Deno.test("Fase 3: completed devolve a instrução de concluir pelo andamento (não erro) e não toca no banco", async () => {
+  const os = osFalsa("in_progress");
+  const r = await mudarStatus.execute({ id: "so1", status: "completed" }, os.ctx) as Record<string, any>;
+  assertEquals(r, { instrucao: TEXTO_CONCLUIR_PELO_ANDAMENTO, caminho: "os_registrar_andamento" });
+  assertEquals(TEXTO_CONCLUIR_PELO_ANDAMENTO,
+    "Para concluir, use os_registrar_andamento com evento concluiu e o trecho do dono: o dono confirma com *grava*.");
+  assertEquals([os.updates, os.rpcs, os.leituras()], [[], [], 0]);
+});
+
+Deno.test("D7: faturar OS que não foi concluída é recusado; concluída fatura pela porta (Fase 3: via assistente, sem UPDATE)", async () => {
   const emAndamento = osFalsa("in_progress");
   const r = await mudarStatus.execute({ id: "so1", status: "invoiced" }, emAndamento.ctx) as Record<string, any>;
   assertMatch(String(r.error), /Faturar vem depois de concluir/);
   assertMatch(String(r.error), /Em andamento/);
-  assertEquals(emAndamento.updates, []);
+  assertMatch(String(r.error), /os_registrar_andamento com evento concluiu/);
+  assertEquals([emAndamento.updates, emAndamento.rpcs], [[], []]);
 
-  const concluida = osFalsa("completed");
+  const concluida = osFalsa("completed", { ok: true, mudou: true, de: "completed", para: "invoiced", texto: "Lenine (OS-00104): faturada." });
   const ok = await mudarStatus.execute({ id: "so1", status: "invoiced" }, concluida.ctx) as Record<string, any>;
-  assertEquals(ok.ok, true);
-  assertEquals(concluida.updates, [{ status: "invoiced" }]);
+  assertEquals([ok.ok, ok.mensagem, ok.status_da_os], [true, "Lenine (OS-00104): faturada.", "Faturada"]);
+  assertEquals(concluida.updates, []);
+  assertEquals(concluida.rpcs, [{ nome: "os_transicionar_status",
+    params: { p_os: "so1", p_para: "invoiced", p_via: "assistente", p_check_out: null, p_autor: "u-dono" } }]);
+  // faturar é só do administrador: o 42501 da porta volta como erro com a frase dela
+  const semDireito = osFalsa("completed");
+  (semDireito.ctx as any).sb.rpc = () => Promise.resolve({ data: null, error: { code: "42501", message: "Faturar e reabrir são com o administrador." } });
+  const r3 = await mudarStatus.execute({ id: "so1", status: "invoiced" }, semDireito.ctx) as Record<string, any>;
+  assertEquals(r3.error, "Faturar e reabrir são com o administrador.");
 });
 
 // Fase 2 (P4, 24/10/2026): os status de agenda vão pela porta única do banco (os_transicionar_status, via
@@ -251,18 +265,44 @@ Deno.test("revisão: a descrição traça a fronteira com os_registrar_andamento
   assertEquals(typeof (mudarStatus.input_schema as any).properties.motivo, "object");
 });
 
-Deno.test("P4: a conversão do orçamento (draft → OS) segue como antes: o UPDATE com o número novo, sem a porta", async () => {
-  const orc = osFalsa("draft");
+// Fase 3 (P3): a conversão do orçamento vai pela porta (via assistente) e o número troca SÓ o prefixo — acabou o número
+// novo de next_document_number (NOVO-agenda-15). Sem a porta da Fase 3 no banco, o caminho de antes da tela, que também
+// mantém o número (o plano B).
+Deno.test("Fase 3: a conversão do orçamento (draft → OS) é da porta: o número troca só o prefixo, nenhum UPDATE", async () => {
+  const orc = osFalsa("draft", { ok: true, mudou: true, de: "draft", para: "approved", convertido: true, numero: "OS-00104",
+    numero_antes: "ORÇ-00104", texto: "Orçamento ORÇ-00104 virou a OS-00104 (aprovada)." });
   const r = await mudarStatus.execute({ id: "so1", status: "approved" }, orc.ctx) as Record<string, any>;
-  assertEquals(r.ok, true);
-  assertEquals(orc.rpcs, []);
-  assertEquals(orc.updates.length, 1);
-  assertEquals(orc.updates[0].status, "approved");
-  assertEquals(orc.updates[0].service_order_number, "OS-00120");
+  assertEquals([r.ok, r.convertido, r.mensagem], [true, true, "Orçamento ORÇ-00104 virou a OS-00104 (aprovada)."]);
+  assertEquals(r.service_order, { id: "so1", service_order_number: "OS-00104", status: "approved" });
+  assertEquals(orc.updates, []);
+  assertEquals(orc.rpcs, [{ nome: "os_transicionar_status",
+    params: { p_os: "so1", p_para: "approved", p_via: "assistente", p_check_out: null, p_autor: "u-dono" } }]);
+});
+
+Deno.test("Fase 3: PLANO B — sem a porta completa (PGRST202), a conversão do caminho de antes mantém o número", async () => {
+  const orc = osFalsa("draft");
+  const atual = { status: "draft", converted_to_os_at: null, service_order_number: "ORÇ-00120", grand_total: 500, original_quote_amount: null,
+    check_in_at: null, check_out_at: null };
+  const updates: Record<string, unknown>[] = [];
+  const b: Record<string, unknown> = {};
+  let upd: Record<string, unknown> | null = null;
+  for (const m of ["select", "eq"]) b[m] = () => b;
+  b.update = (p: Record<string, unknown>) => { upd = p; updates.push(p); return b; };
+  b.maybeSingle = () => Promise.resolve({ data: upd ? null : { ...atual, service_order_number: "ORÇ-00120" }, error: null });
+  b.single = () => Promise.resolve({ data: { id: "so1", ...atual, ...(upd ?? {}) }, error: null });
+  (orc.ctx as any).sb = {
+    from: () => b,
+    rpc: () => Promise.resolve({ data: null, error: { code: "PGRST202", message: "Could not find the function" } }),
+  };
+  const r = await mudarStatus.execute({ id: "so1", status: "approved" }, orc.ctx) as Record<string, any>;
+  assertEquals([r.ok, r.convertido, r.service_order.service_order_number], [true, true, "OS-00120"]);
+  assertEquals(updates.length, 1);
+  assertEquals([updates[0].status, updates[0].service_order_number, updates[0].original_quote_amount], ["approved", "OS-00120", 500]);
 });
 
 Deno.test("D7: a descrição diz o que a tool NÃO faz, e o enum continua sendo a lista do banco", () => {
   assertMatch(mudarStatus.description, /NÃO conclui/);
+  assertMatch(mudarStatus.description, /os_registrar_andamento, evento concluiu/);
   assertMatch(mudarStatus.description, /NÃO cancela/);
   assertMatch(mudarStatus.description, /cancel_service_order/);
   assertEquals(ordenado((mudarStatus.input_schema as any).properties.status.enum), ordenado(STATUS_OS));
