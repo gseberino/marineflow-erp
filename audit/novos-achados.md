@@ -2844,6 +2844,13 @@ porque só o dono pode preenchê-las.
   `supabase/tests/agenda_fase3_caminhos.sql`).
 - **Para o dono:** a lista rápida e os kanbans também devem exigir o levantamento? Se sim, a regra entra na porta (vale para todo
   caminho) num pacote seguinte.
+- **Corrigido (P7b, migration `20261026100700`, NÃO APLICADA; decisão do coordenador: é a mesma decisão do dono de 17/09
+  estendida):** a porta (`os_transicionar_status`, corpo de `20261026100600`, bloco `-- FASE 3 (P7b):`) confere o levantamento no
+  começo da conclusão e recusa com a frase do formulário em todo caminho — a lista rápida, os kanbans, o formulário, a
+  assinatura, o gestor (via equipe), o dono (palavra e *grava*), o assistente, a entrega que conclui junto e o orçamento que
+  converteria e concluiria (a conversão também não fica). A tela mostra a recusa da porta; a cópia do formulário
+  (`levantamento-gate.ts`) fica só para o plano B. Faturar, reabrir e desfazer não olham o levantamento. Testes:
+  `supabase/tests/agenda_fase3_levantamento_na_porta.sql` (19).
 
 ### [NOVO-agenda-25] O *desfaz* não achava a OS concluída (ela sai da carteira)
 
@@ -2891,6 +2898,16 @@ porque só o dono pode preenchê-las.
 - **Sobra:** se o worker e a rotina voltarem juntos depois das 20:00 e o worker ler a linha antes da rotina, ela sai. A
   correção de verdade é o worker não mandar `source = 'agenda-equipe'` fora de 07:30–20:00 (5 linhas, mexe no envio de todo o
   WhatsApp): **pendência para decidir antes de ligar modo_equipe**.
+- **Corrigido (P7b, código do `whatsapp-queue-worker`, NÃO PUBLICADO; decisão do coordenador depois do P4):** o laço do envio
+  saiu do `index.ts` para `whatsapp-queue-worker/enviar.ts` (`enviarLote`, igual ao de antes para toda origem) e, antes de mandar
+  uma linha de origem da agenda, confere a janela NA HORA (`_shared/agenda/janela-da-fila.ts`, o helper único: hoje só
+  `agenda-equipe`; as origens de cliente da Fase 5 entram na mesma lista, com a janela delas): o mesmo dia de Brasília em que
+  estava marcada, de `equipe_janela_inicio` a `equipe_janela_fim` (lidos de `agenda_config`), nunca no domingo e com
+  `modo_equipe = 'ligado'`. Fora disso a linha vira `failed` com o motivo, nada sai, e o registro em `agenda_equipe_mensagens` fica
+  `recusada` (janela, domingo ou modo). A leitura da configuração que falha não deixa a linha da agenda sair. As outras origens não
+  mudam: nem a configuração é lida (teste). O teto do dia continua garantido na entrada da fila (o gatilho conta toda linha do
+  dia, de qualquer status: o que foi enviado nunca passa do que entrou). Testes: `supabase/functions/whatsapp-queue-worker/enviar_test.ts`
+  (10).
 
 ### [NOVO-agenda-18] A conta de mão de obra por OS não separa as pessoas, e nenhuma diária está ligada a uma OS
 

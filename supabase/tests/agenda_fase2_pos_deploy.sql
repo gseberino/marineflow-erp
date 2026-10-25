@@ -9,7 +9,7 @@
 --   M  as 6 versões de estrutura da Fase 2 estão registradas em supabase_migrations.schema_migrations; a de dado
 --      (101000, os modos em sombra) é mostrada
 --   C  agenda_config: uma linha; as 10 colunas novas existem; modo_proposta/modo_vigia: com a 101000 registrada, sombra
---      (ou ligado, depois dos passos 6–7); sem ela, desligado; equipe e cliente desligados (Fases 3 e 5)
+--      (ou ligado, depois dos passos 6–7); sem ela, desligado; equipe e cliente desligados (Fases 3 e 5; a equipe só até a 20261026101000)
 --   T  as 5 tabelas novas: RLS ligada, policies só de leitura e TO authenticated, anon sem nada, authenticated só lê
 --   G  os gatilhos das invariantes ligados (12 nas tabelas da agenda e o das datas em service_orders)
 --   F  funções: o contrato existe; nenhuma agenda_*/_agenda_*/os_* executável por anon; v_agenda_dia com
@@ -66,9 +66,14 @@ select 'C2 os modos da Fase 2: com a 101000 registrada, sombra (ou ligado com o 
        string_agg(format('proposta %s, vigia %s, leitura %s', c.modo_proposta, c.modo_vigia, c.modo_leitura), '; ')
   from public.agenda_config c;
 
+-- FASE 3 (P7b): depois da migration de dado 20261026101000 (passos 4–9 de fila-do-dono/fase3-oks.md) a equipe sai de
+-- desligado: C3 passa a valer para ela só antes dessa migration, e quem confere a equipe e a diária depois é
+-- supabase/tests/agenda_fase3_pos_deploy.sql (C3, N1–N3). Sem isto, este SQL acusaria defeito no caminho combinado.
 insert into _resultado
-select 'C3 o que é das Fases 3 e 5 continua desligado (equipe, cliente)',
-       coalesce(bool_and(c.modo_equipe = 'desligado' and c.modo_cliente = 'desligado'), false),
+select 'C3 o que é das Fases 3 e 5 continua desligado (equipe: até a migration de dado da Fase 3; cliente)',
+       coalesce(bool_and((c.modo_equipe = 'desligado'
+                          or exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261026101000'))
+                         and c.modo_cliente = 'desligado'), false),
        string_agg(format('equipe %s, cliente %s', c.modo_equipe, c.modo_cliente), '; ')
   from public.agenda_config c;
 

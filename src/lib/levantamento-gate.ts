@@ -12,8 +12,14 @@ import { supabase } from '@/integrations/supabase/client';
  *
  * Fase 3 (P3): o assistente e as palavras do dono voltaram a concluir (os_registrar_andamento,
  * *concluiu*, *entreguei*), e o banco tem o espelho desta regra: _os_levantamentos_pendentes
- * (migration 20261026100200), com a mesma frase. A porta em si não confere: a lista rápida e os
- * kanbans continuam sem a trava (NOVO-agenda-24, decisão do dono).
+ * (migration 20261026100200), com a mesma frase.
+ *
+ * Fase 3 (P7b, NOVO-agenda-24): a FONTE da regra passa a ser a porta (os_transicionar_status,
+ * migration 20261026100700): toda conclusão — a lista rápida, os kanbans, este formulário, a
+ * assinatura, a equipe, as palavras e o assistente — recusa com a mesma frase ("Para concluir,
+ * responda o levantamento de: …"), e a tela mostra a recusa dela. Esta cópia fica só no botão do
+ * formulário, para o front publicado antes daquela migration (o plano B da porta,
+ * statusPelaTelaSemAPorta): quem tirar o plano B tira esta conferência junto.
  */
 export async function levantamentosPendentesParaConcluir(serviceOrderId: string): Promise<string[]> {
   const { data: linhas, error } = await supabase

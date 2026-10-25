@@ -13,6 +13,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
+import { enviarLote } from "./enviar.ts";
 
 // O tipo de createClient sem o esquema gerado não casa com o cliente criado aqui (TS2345).
 // deno-lint-ignore no-explicit-any
@@ -39,8 +40,6 @@ async function getSetting(
   const { data } = await admin.from("app_settings").select("value").eq("key", key).maybeSingle();
   return ((data?.value as string) ?? "") || fallback;
 }
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 servirComCors(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -111,52 +110,9 @@ servirComCors(async (req) => {
       .eq("status", "pending");
 
     const provider = createWhatsAppProvider();
-    const results: any[] = [];
-
-    for (let i = 0; i < batch.length; i++) {
-      const item: any = batch[i];
-      try {
-        const result = await provider.sendText(item.phone_normalized, item.message);
-
-        if (result.ok) {
-          await admin.from("whatsapp_send_queue").update({
-            status: "sent",
-            sent_at: new Date().toISOString(),
-            // Coluna correta é zapi_message_id (não wa_message_id, que não existe na
-            // tabela) — com o nome errado o UPDATE inteiro falhava silenciosamente e a
-            // linha ficava presa em 'sending' apesar do envio ter dado certo. Bug latente
-            // até a fila ser ligada (Fase 4).
-            zapi_message_id: result.providerMessageId || null,
-            attempts: (item.attempts || 0) + 1,
-          }).eq("id", item.id);
-          results.push({ id: item.id, ok: true });
-        } else {
-          const newAttempts = (item.attempts || 0) + 1;
-          const giveUp = newAttempts >= (item.max_attempts || 3);
-          await admin.from("whatsapp_send_queue").update({
-            status: giveUp ? "failed" : "pending",
-            attempts: newAttempts,
-            failed_reason: result.error || "send failed",
-            scheduled_for: giveUp ? item.scheduled_for : new Date(Date.now() + 5 * 60_000).toISOString(),
-            processing_started_at: null,
-          }).eq("id", item.id);
-          results.push({ id: item.id, ok: false, error: result.error, give_up: giveUp });
-        }
-      } catch (e) {
-        const newAttempts = (item.attempts || 0) + 1;
-        const giveUp = newAttempts >= (item.max_attempts || 3);
-        await admin.from("whatsapp_send_queue").update({
-          status: giveUp ? "failed" : "pending",
-          attempts: newAttempts,
-          failed_reason: e instanceof Error ? e.message : String(e),
-          scheduled_for: giveUp ? item.scheduled_for : new Date(Date.now() + 5 * 60_000).toISOString(),
-          processing_started_at: null,
-        }).eq("id", item.id);
-        results.push({ id: item.id, ok: false, error: e instanceof Error ? e.message : String(e), give_up: giveUp });
-      }
-
-      if (i < batch.length - 1 && delayMs > 0) await sleep(delayMs);
-    }
+    // O laço do envio mora em enviar.ts (Agenda de Produção, Fase 3, P7b): o mesmo de antes para toda origem, e a janela
+    // da agenda conferida na hora para as linhas da agenda (NOVO-agenda-26).
+    const results = await enviarLote(admin, provider, batch, { delayMs });
 
     return jr({
       ok: true,

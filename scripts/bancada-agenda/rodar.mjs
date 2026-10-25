@@ -55,6 +55,11 @@ const FIXTURES_COMO_TEXTO = [
   // as 56 diárias de i09, só números).
   ['agenda_teste.cenario_comissao', 'cenario-comissao.sql'],
   ['agenda_teste.cenario_comissao_2410', 'cenario-comissao-2410.sql'],
+  // Fase 3 (P7b): a migration das telas, para o teste do D11 conferir que a cópia da porta só muda no bloco
+  // "-- FASE 3 (P7b):"; e a migration de dado da sombra da Fase 3 (fora da bancada), que o teste dela roda numa
+  // subtransação desfeita (desligado → sombra, idempotência, a semente pela regra e o DESFAZER do cabeçalho).
+  ['agenda_teste.mig_telas_fase3', '../../supabase/migrations/20261026100600_agenda_fase3_telas.sql'],
+  ['agenda_teste.mig_sombra_fase3', '../../supabase/migrations/20261026101000_agenda_fase3_sombra.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

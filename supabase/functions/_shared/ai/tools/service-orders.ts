@@ -799,6 +799,9 @@ export const serviceOrderTools: ToolDef[] = [
 
       // A trava do levantamento (D11, dono, 17/09/2026: concluir exige o levantamento respondido) veio junto com a
       // conclusão pela conversa (Fase 3, P3): o banco recusa no rascunho e nas palavras (_os_levantamentos_pendentes).
+      // Fase 3 (P7b, NOVO-agenda-24): a fonte passa a ser a porta (migration 20261026100700) — toda conclusão que chega a
+      // ela (o *grava* da conversa, as palavras, a tela, a assinatura, a equipe) recusa com a frase "Para concluir, responda
+      // o levantamento de: …" e nada muda. Concluir não passa por esta ferramenta (a instrução acima).
 
       // Fase 2 (P4, 24/10/2026): os status de agenda (aberta, aprovada, agendada, em andamento,
       // aguardando peças/cliente) de uma OS que já não é orçamento vão pela porta única do banco

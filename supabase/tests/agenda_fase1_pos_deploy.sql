@@ -9,7 +9,8 @@
 --   M  as 8 versões da Fase 1 estão registradas em supabase_migrations.schema_migrations (sem isso o próximo
 --      db push tenta aplicar de novo)
 --   C  agenda_config: uma linha; modo_leitura válido (mostra qual); o que é das Fases 2–5 (proposta, vigia, equipe,
---      cliente) continua desligado; nenhum plano publicado (versao_plano 0)
+--      cliente) continua desligado até a migration de dado de cada fase (101000 da Fase 2 e da Fase 3); nenhum plano
+--      publicado (versao_plano 0)
 --   T  as 6 tabelas: RLS ligada, policies só de leitura e TO authenticated, anon sem nada, authenticated só lê
 --   F  funções: as RPCs do contrato existem; nenhuma agenda_*/os_*/_agenda_* executável por anon; as internas
 --      (aplicar, sincronizar, semear) sem authenticated; as leituras são STABLE ou IMMUTABLE
@@ -55,9 +56,13 @@ select 'C2 modo_leitura é um dos três (nasce sombra; ligado só com o OK depoi
 -- a proposta e a vigia saem de desligado e o plano pode ter versão: C3 e C4 passam a valer só antes dela, e quem
 -- confere os modos e o plano depois é supabase/tests/agenda_fase2_pos_deploy.sql (C2, N1–N3). Sem isto, este SQL
 -- acusaria defeito no que é o caminho combinado.
+-- FASE 3 (P7b): o mesmo para a equipe depois da migration de dado 20261026101000 (modo_equipe em sombra; passos 4–9 de
+-- fila-do-dono/fase3-oks.md): quem confere a equipe e a diária depois dela é supabase/tests/agenda_fase3_pos_deploy.sql (C3).
 insert into _resultado
-select 'C3 o que é das Fases 2–5 continua desligado (proposta e vigia: até a Fase 2 ligar a sombra; equipe e cliente)',
-       coalesce(bool_and(c.modo_equipe = 'desligado' and c.modo_cliente = 'desligado'
+select 'C3 o que é das Fases 2–5 continua desligado (proposta e vigia: até a Fase 2 ligar a sombra; equipe: até a Fase 3; cliente)',
+       coalesce(bool_and((c.modo_equipe = 'desligado'
+                          or exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261026101000'))
+                         and c.modo_cliente = 'desligado'
                          and ((c.modo_proposta = 'desligado' and c.modo_vigia = 'desligado')
                               or exists (select 1 from supabase_migrations.schema_migrations m where m.version = '20261025101000'))), false),
        string_agg(format('proposta %s, vigia %s, equipe %s, cliente %s', c.modo_proposta, c.modo_vigia, c.modo_equipe,
