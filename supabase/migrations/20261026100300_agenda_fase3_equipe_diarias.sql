@@ -72,6 +72,7 @@
 --   · item 3: o "não vou" ao "como foi hoje?" vale para o dia da ficha que ele levava (senão o próximo dia útil); o "como
 --     foi" de hoje continua esperando a resposta de hoje (sem a pergunta da diária de hoje).
 --   · item 7: o "ok" com turnos diferentes do plano ("ok, só de manhã") não confirma o dia: vai ao dono (equipe_resposta).
+--   · item 8: o turno que já existe é QUALQUER turno do dia (também por hora, folga, atestado, feriado): a pergunta crítica.
 --   · R5: o teto contado num lugar só (_agenda_equipe_no_dia, a função e a trava da fila); o 23514 da trava vira a recusa
 --     da mensagem, sem desfazer o resto.
 --   · NOVO-agenda-28: a resposta direta a uma mensagem do técnico sai na hora entre equipe_resposta_direta_inicio e _fim
@@ -1183,22 +1184,33 @@ declare
   v_rtxt  text;
   v_id    uuid;
   v_trecho text := public._agenda_corta(coalesce(p_conf ->> 'trecho', ''), 120);
+  -- (revisão C1, item 8) o turno que existe sem fração (por hora, folga, atestado, feriado): não é diária
+  v_semf  boolean := coalesce((p_turno ->> 'sem_fracao')::boolean, false);
 begin
   if p_motivo in ('turno_existente') then
     v_opc := jsonb_build_array(
-      jsonb_build_object('n', 1, 'texto', format('deixar como está (%s, %s)', p_turno ->> 'jornada_texto', public._brl((p_turno ->> 'valor')::numeric)),
+      jsonb_build_object('n', 1, 'texto', format('deixar como está (%s)', (p_turno ->> 'jornada_texto')
+                                                   || case when p_turno ->> 'valor' is not null
+                                                           then ', ' || public._brl((p_turno ->> 'valor')::numeric) else '' end),
                          'efeito', jsonb_build_object('diaria', 'manter')),
-      jsonb_build_object('n', 2, 'texto', format('trocar para %s no %s, como %s', case when v_dito = 1 then 'meia diária' else 'dia inteiro' end,
+      jsonb_build_object('n', 2, 'texto', format('%s %s no %s, como %s', case when v_semf then 'lançar também' else 'trocar para' end,
+                                                 case when v_dito = 1 then 'meia diária' else 'dia inteiro' end,
                                                  v_oss, case p_conf ->> 'fonte' when 'equipe' then 'o ' || v_nome || ' disse' else 'você conferiu' end),
                          'efeito', jsonb_build_object('diaria', jsonb_build_object('jornada', case when v_dito = 1 then 'meio' else 'inteiro' end,
                                                                                    'os', to_jsonb(p_os)))));
     v_rec := 1;
-    v_rtxt := 'Recomendo a 1: a diária já lançada fica como está, até você dizer outra coisa.';
-    v_txt := format('A diária de %s do %s já estava lançada (%s, %s%s) e o dia %s foi %s no %s.', public._dia_curto(p_dia), v_nome,
-                    p_turno ->> 'jornada_texto', public._brl((p_turno ->> 'valor')::numeric),
-                    coalesce(', ' || nullif(p_turno ->> 'os_texto', ''), ', sem OS'),
-                    case p_conf ->> 'fonte' when 'equipe' then 'que ele confirmou' else 'conferido' end,
-                    case when v_dito = 1 then 'meio dia' else 'o dia todo' end, v_oss);
+    v_rtxt := case when v_semf then 'Recomendo a 1: o que já está lançado no dia fica como está, até você dizer outra coisa.'
+                   else 'Recomendo a 1: a diária já lançada fica como está, até você dizer outra coisa.' end;
+    v_txt := case when v_semf
+      then format('O %s já tem lançado em %s: %s (%s), e o dia %s foi %s no %s.', v_nome, public._dia_curto(p_dia),
+                  p_turno ->> 'jornada_texto', coalesce(nullif(p_turno ->> 'os_texto', ''), 'sem OS'),
+                  case p_conf ->> 'fonte' when 'equipe' then 'que ele confirmou' else 'conferido' end,
+                  case when v_dito = 1 then 'meio dia' else 'o dia todo' end, v_oss)
+      else format('A diária de %s do %s já estava lançada (%s, %s%s) e o dia %s foi %s no %s.', public._dia_curto(p_dia), v_nome,
+                  p_turno ->> 'jornada_texto', public._brl((p_turno ->> 'valor')::numeric),
+                  coalesce(', ' || nullif(p_turno ->> 'os_texto', ''), ', sem OS'),
+                  case p_conf ->> 'fonte' when 'equipe' then 'que ele confirmou' else 'conferido' end,
+                  case when v_dito = 1 then 'meio dia' else 'o dia todo' end, v_oss) end;
   elsif p_motivo = 'acerto_fechado' then
     v_opc := jsonb_build_array(
       jsonb_build_object('n', 1, 'texto', 'não lançar (o acerto desse período já foi fechado)', 'efeito', jsonb_build_object('diaria', null)),
@@ -1249,7 +1261,7 @@ end;
 $function$;
 
 comment on function public._agenda_perguntar_diaria(uuid, date, text, jsonb, uuid[], date, timestamptz, jsonb) is
-  'Agenda de Produção (Fase 3, P4): a pergunta CRÍTICA da diária (tipo diaria, chave diaria:<pessoa>:<dia>, no modo da diária) — divergente/não entendida/sem login do dono: 1) meia diária, 2) dia inteiro, 3) não lançar, recomendando o que a pessoa disse (sem o dito, o plano); turno que já existe: 1) deixar como está, 2) trocar; acerto fechado: 1) não lançar, 2) lançar depois de reabrir. Sem grant.';
+  'Agenda de Produção (Fase 3, P4; revisão C1): a pergunta CRÍTICA da diária (tipo diaria, chave diaria:<pessoa>:<dia>, no modo da diária) — divergente/não entendida/sem login do dono: 1) meia diária, 2) dia inteiro, 3) não lançar, recomendando o que a pessoa disse (sem o dito, o plano); turno que já existe: 1) deixar como está, 2) trocar (o turno sem fração — por hora, folga, atestado, feriado —: 2) lançar também); acerto fechado: 1) não lançar, 2) lançar depois de reabrir. Sem grant.';
 
 -- O lançamento (sem turno no dia; nunca sobrescreve): o turno, os vínculos às OS, a alocação e a ação desfazível.
 create or replace function public._agenda_lancar_diaria(p_payee uuid, p_dia date, p_fracao numeric, p_os uuid[], p_origem text,
@@ -1301,6 +1313,13 @@ begin
   if v_dono is null then
     return public._agenda_perguntar_diaria(p_payee, p_dia, 'sem_dono', coalesce(p_conf, '{}'::jsonb), v_os, p_hoje, p_agora);
   end if;
+  -- (revisão C1, item 8) sozinha, a agenda nunca lança num dia em que a pessoa já tem QUALQUER turno — também o sem fração
+  -- (por hora, folga, atestado, feriado), que o índice de um dia por perfil não pega. A regra do turno que já existe
+  -- (_agenda_diaria_do_dia) decide: a pergunta crítica. A decisão do dono (p_pergunta) lança mesmo assim.
+  if p_pergunta is null and exists (select 1 from public.work_shifts ws join public.work_profiles wp on wp.id = ws.work_profile_id
+                                     where wp.payee_id = p_payee and ws.data = p_dia) then
+    return jsonb_build_object('status', 'corrida');
+  end if;
   begin
     insert into public.work_shifts (work_profile_id, data, tipo, origem, status, observacao, registrado_por, aprovado_por,
                                     aprovado_em, fracao, valor_diaria, extras, descontos)
@@ -1336,7 +1355,7 @@ end;
 $function$;
 
 comment on function public._agenda_lancar_diaria(uuid, date, numeric, uuid[], text, text, uuid, date, timestamptz, jsonb) is
-  'Agenda de Produção (Fase 3, P4): lança a diária pela agenda — só INSERT (on conflict do índice de um dia por perfil: nunca sobrescreve; corrida = status corrida), tipo diaria, origem agente, status aprovado (a regra de hoje), assinado pelo login do dono (sem ele: a pergunta crítica), valor do perfil vigente; work_shift_os das OS do plano (meio dia em duas OS = uma diária ligada às duas); agenda_alocacoes.work_shift_id; ação diaria desfazível ("Roberto, ter 03/11: dia inteiro no Vanderlei (OS-00069), R$ 180,00 — ele confirmou às 17:12."). Em sombra só a ação executada = false. Acerto fechado (trg_dia_em_acerto_fechado) = a pergunta crítica. Sem grant.';
+  'Agenda de Produção (Fase 3, P4; revisão C1): lança a diária pela agenda — só INSERT (sozinha, nunca com QUALQUER turno da pessoa no dia, também sem fração; on conflict do índice de um dia por perfil: nunca sobrescreve; corrida = status corrida), tipo diaria, origem agente, status aprovado (a regra de hoje), assinado pelo login do dono (sem ele: a pergunta crítica), valor do perfil vigente; work_shift_os das OS do plano (meio dia em duas OS = uma diária ligada às duas); agenda_alocacoes.work_shift_id; ação diaria desfazível ("Roberto, ter 03/11: dia inteiro no Vanderlei (OS-00069), R$ 180,00 — ele confirmou às 17:12."). Em sombra só a ação executada = false. Acerto fechado (trg_dia_em_acerto_fechado) = a pergunta crítica. Sem grant.';
 
 -- A diária de uma pessoa num dia: pula, confere, compara com o plano e com o turno que existe, e lança ou pergunta.
 create or replace function public._agenda_diaria_do_dia(p_payee uuid, p_dia date, p_origem text, p_hoje date, p_agora timestamptz)
@@ -1357,6 +1376,7 @@ declare
   v_fonte text;
   v_txt   text;
   v_r     jsonb;
+  v_jtxt  text;
 begin
   if p_origem is null or p_origem not in ('equipe', 'conferencia', 'rotina') then
     raise exception 'Quem pede a diária: "%" (equipe, conferencia ou rotina).', coalesce(p_origem, '') using errcode = '22023';
@@ -1414,10 +1434,12 @@ begin
   v_txt := case when v_fonte = 'equipe'
                 then 'ele confirmou' || coalesce(' às ' || to_char((v_conf ->> 'quando')::timestamptz at time zone 'America/Sao_Paulo', 'HH24:MI'), '')
                 else 'você conferiu o dia' end;
-  -- o turno que já existe: a agenda nunca muda fração, valor ou OS dele
-  select ws.id, ws.fracao, ws.valor_dia into v_ws
+  -- o turno que já existe: a agenda nunca muda fração, valor ou OS dele. (Revisão C1, item 8) QUALQUER turno da pessoa no
+  -- dia conta — também o sem fração (por hora, folga, atestado, feriado): esse vai sempre para a pergunta crítica
+  select ws.id, ws.fracao, ws.valor_dia, ws.tipo into v_ws
     from public.work_shifts ws join public.work_profiles wp on wp.id = ws.work_profile_id
-   where wp.payee_id = p_payee and ws.data = p_dia and ws.fracao is not null
+   where wp.payee_id = p_payee and ws.data = p_dia
+   order by ws.fracao is null, ws.created_at, ws.id
    limit 1;
   if v_ws.id is not null then
     v_wsos := array(select wo.service_order_id from public.work_shift_os wo where wo.shift_id = v_ws.id order by 1);
@@ -1440,8 +1462,12 @@ begin
           jsonb_build_object('n', 2, 'texto', 'deixar sem OS', 'efeito', jsonb_build_object('diaria', 'manter'))), 1::smallint);
       return jsonb_build_object('status', 'pergunta_ligar');
     end if;
+    v_jtxt := case when v_ws.fracao is not null then public._rotulo_jornada(v_ws.fracao)
+                   else case v_ws.tipo when 'normal' then 'turno por hora' when 'folga' then 'folga' when 'atestado' then 'atestado'
+                                       when 'feriado' then 'feriado' when 'falta' then 'falta' else 'turno sem diária' end end;
     return public._agenda_perguntar_diaria(p_payee, p_dia, 'turno_existente', v_conf, v_os, p_hoje, p_agora,
-      jsonb_build_object('jornada_texto', public._rotulo_jornada(v_ws.fracao), 'valor', v_ws.valor_dia,
+      jsonb_build_object('jornada_texto', v_jtxt, 'valor', case when v_ws.fracao is not null then v_ws.valor_dia end,
+                         'sem_fracao', v_ws.fracao is null,
                          'os_texto', public._agenda_lista(array(select so.service_order_number from unnest(v_wsos) x
                                                                  join public.service_orders so on so.id = x order by 1), null)));
   end if;
@@ -1455,7 +1481,7 @@ end;
 $function$;
 
 comment on function public._agenda_diaria_do_dia(uuid, date, text, date, timestamptz) is
-  'Agenda de Produção (Fase 3, P4): a diária automática de uma pessoa num dia (chamada pela resposta da equipe, pelo agenda_registrar_dia e pela rotina; idempotente pela chave diaria:<pessoa>:<dia>). Nada com modo_diaria desligado, dia futuro ou além de diaria_janela_dias. Pula o dono (sócio) e quem não tem perfil de diária vigente. Sem plano = nada (a diária fora do plano é do dono). _agenda_confirmacao_do_dia: aguardando = nada; não foi = nada; divergente = a pergunta crítica. Confirmada: com turno no dia igual (fração e OS) só liga a alocação; igual sem OS = a pergunta de ligar (não crítica); diferente = a pergunta crítica (o turno nunca muda); sem turno = _agenda_lancar_diaria (fração do plano, somando os meios-dias). {status, …}. Sem grant.';
+  'Agenda de Produção (Fase 3, P4): a diária automática de uma pessoa num dia (chamada pela resposta da equipe, pelo agenda_registrar_dia e pela rotina; idempotente pela chave diaria:<pessoa>:<dia>). Nada com modo_diaria desligado, dia futuro ou além de diaria_janela_dias. Pula o dono (sócio) e quem não tem perfil de diária vigente. Sem plano = nada (a diária fora do plano é do dono). _agenda_confirmacao_do_dia: aguardando = nada; não foi = nada; divergente = a pergunta crítica. Confirmada: com turno no dia igual (fração e OS) só liga a alocação; igual sem OS = a pergunta de ligar (não crítica); diferente — ou QUALQUER turno sem fração (por hora, folga, atestado, feriado; revisão C1) — = a pergunta crítica (o turno nunca muda); sem turno = _agenda_lancar_diaria (fração do plano, somando os meios-dias). {status, …}. Sem grant.';
 
 -- A resposta do dono à pergunta da diária (crítica ou de ligar), pelo modo da diária.
 create or replace function public._agenda_decidir_diaria(p_pergunta uuid, p_opcao smallint, p_autor uuid, p_via text, p_trecho text,

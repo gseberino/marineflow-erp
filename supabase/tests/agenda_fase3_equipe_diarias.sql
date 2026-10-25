@@ -25,7 +25,8 @@
 --
 -- Revisão da Fase 3 (C1): L ganhou o atraso, o meio período e o "não dá pra terminar" (item 2); A30–A31 o teto contado igual
 -- e o 23514 que vira recusa (R5); B2b e B16–B19 a resposta direta (NOVO-agenda-28); B10–B11 o "amanhã não vou" ao "como
--- foi" (item 3); B12–B13 o atraso que não é falta (item 2); B14–B15 o "ok, só de manhã" (item 7).
+-- foi" (item 3); B12–B13 o atraso que não é falta (item 2); B14–B15 o "ok, só de manhã" (item 7); C19–C21 o turno sem
+-- fração (item 8).
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs --ate 20261026100300
@@ -971,6 +972,47 @@ begin
     v_res := pg_temp.ok(v_res, 'C18 *diária <nome> …* sem nada da agenda: nao_achei (o turno segue ao modelo e ao registrar_diaria)',
       r ->> 'status' = 'nao_achei' and r2 ->> 'status' = 'nao_achei' and pg_temp.turno(c_roberto, d03) is null,
       r::text || ' ' || r2::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- C19–C21 (revisão C1, item 8): o turno que já existe é QUALQUER turno do dia (também o sem fração).
+  begin
+    perform pg_temp.modos('ligado', 'ligado');
+    perform pg_temp.rodar(d03, '17:00');
+    insert into public.work_shifts (work_profile_id, data, tipo, origem, status, inicio, fim)
+    values (c_perfil_roberto, d03, 'normal', 'painel', 'rascunho', pg_temp.em(d03, '08:00'), pg_temp.em(d03, '12:00'));
+    r := pg_temp.resp('ok', d03, '17:12');
+    v_res := pg_temp.ok(v_res, 'C19 turno por hora já lançado no dia: nenhuma diária e a pergunta crítica do turno que já existe, com "lançar também"',
+      pg_temp.turno(c_roberto, d03) is null
+      and (select count(*) from public.work_shifts ws where ws.work_profile_id = c_perfil_roberto and ws.data = d03) = 1
+      and exists (select 1 from public.agenda_perguntas q
+                   where q.tipo = 'diaria' and q.critica and q.estado = 'aberta' and q.payee_id = c_roberto and q.dia = d03
+                     and q.texto = 'O Roberto já tem lançado em ter 03/11: turno por hora (sem OS), e o dia que ele confirmou foi o dia todo no Vanderlei (OS-00069).'
+                     and q.opcoes -> 0 ->> 'texto' = 'deixar como está (turno por hora)'
+                     and q.opcoes -> 1 ->> 'texto' = 'lançar também dia inteiro no Vanderlei (OS-00069), como o Roberto disse'
+                     and q.recomendacao = 1),
+      (select jsonb_agg(jsonb_build_object('texto', q.texto, 'opcoes', q.opcoes))::text from public.agenda_perguntas q
+        where q.tipo = 'diaria'));
+    r := public.agenda_decidir((select q.id from public.agenda_perguntas q where q.tipo = 'diaria' and q.estado = 'aberta'), 2::smallint,
+                               c_admin, 'whatsapp', 'lança também', d03, pg_temp.em(d03, '17:40'));
+    v_res := pg_temp.ok(v_res, 'C20 o dono escolhe "lançar também": a diária inteira entra ao lado do turno por hora',
+      (r ->> 'ok')::boolean and (pg_temp.turno(c_roberto, d03) ->> 'fracao')::numeric = 1
+      and (select count(*) from public.work_shifts ws where ws.work_profile_id = c_perfil_roberto and ws.data = d03) = 2, r::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    perform pg_temp.modos('ligado', 'ligado');
+    insert into public.work_shifts (work_profile_id, data, tipo, origem, status)
+    values (c_perfil_roberto, d03, 'folga', 'painel', 'rascunho');
+    r := public.agenda_conferir_dia(c_admin, 'cumprido', null, null, 'whatsapp', d03, pg_temp.em(d03, '17:30'));
+    v_res := pg_temp.ok(v_res, 'C21 *dia feito* com uma folga do Roberto lançada no dia: a dele vira a pergunta crítica (nada por cima); a do João entra',
+      pg_temp.turno(c_roberto, d03) is null and (pg_temp.turno(c_joao, d03) ->> 'fracao')::numeric = 0.5
+      and exists (select 1 from public.agenda_perguntas q
+                   where q.tipo = 'diaria' and q.critica and q.estado = 'aberta' and q.payee_id = c_roberto
+                     and q.texto like 'O Roberto já tem lançado em ter 03/11: folga (sem OS), e o dia conferido foi o dia todo%'),
+      r ->> 'texto');
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
