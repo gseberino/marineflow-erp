@@ -1,7 +1,9 @@
 // Detector de promessas do dono (06/10/2026). O que se protege: acha as promessas comuns, ignora
 // pergunta e conversa sem compromisso, e marca o lembrete dentro da janela (8h–20h, seg–sáb).
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { dentroDaJanela, detectarPromessa, quandoLembrar } from "./promessa.ts";
+import {
+  dentroDaJanela, detectarPrazoDeFornecedor, detectarPromessa, type PrazoDoFornecedor, quandoLembrar,
+} from "./promessa.ts";
 
 // Terça 06/10/2026, 18:40 em Brasília.
 const TER_1840 = new Date("2026-10-06T21:40:00.000Z");
@@ -43,4 +45,122 @@ Deno.test("janela: madrugada, noite e domingo vão para 09:00 do próximo dia ú
   assertEquals(new Date(dentroDaJanela(Date.parse("2026-10-10T23:30:00Z"))).toISOString(), "2026-10-12T12:00:00.000Z"); // sáb 20:30 → seg 09:00
   assertEquals(new Date(dentroDaJanela(Date.parse("2026-10-11T15:00:00Z"))).toISOString(), "2026-10-12T12:00:00.000Z"); // domingo → seg
   assertEquals(new Date(dentroDaJanela(Date.parse("2026-10-07T17:00:00Z"))).toISOString(), "2026-10-07T17:00:00.000Z"); // 14:00 fica
+});
+
+// ── O prazo do fornecedor (Agenda de Produção, Fase 4, P4) ─────────────────────────────────────────────────────────
+// O que se protege: o detector acha o prazo que o fornecedor (ou a HBR) disse e devolve só a EXPRESSÃO (a data sai do
+// banco); erra para o lado de não achar — pergunta, negação, cobrança, "vou ver o prazo" e o que não é material são nada.
+// Os 20 trechos de int-compras-prazos §4.7 (a conversa real do compressor da OS-00104, a do fornecedor de fabricação, a
+// cobrança da Kamell e a pergunta à Marine Center) com o resultado esperado de cada um; depois os padrões da spec §5.4.1 e
+// 15 negativos. A detectarPromessa não muda (os testes de cima continuam).
+
+const TER_13_1719 = new Date("2026-10-13T20:19:00.000Z");
+type Esperado = Pick<PrazoDoFornecedor, "tipo" | "expressao" | "condicional"> | null;
+const sem = (r: PrazoDoFornecedor | null): Esperado => (r ? { tipo: r.tipo, expressao: r.expressao, condicional: r.condicional } : null);
+
+Deno.test("prazo do fornecedor: os 20 trechos reais de int-compras §4.7", () => {
+  const casos: Array<[number, "recebida" | "enviada", string, Esperado]> = [
+    [1, "recebida", "Faça a R$900,00", null],
+    [2, "recebida", "Para a geladeira de 230 litros tem que usar o SS65, custo que consigo fazer para vc é de R$900,00", null],
+    [3, "enviada", "vamos fechar então", null],
+    [3, "enviada", "voce consegue deixar separado para a transportadora retirar?", null],
+    [4, "enviada", "chega aqui amanha se eles retirarem hoje", { tipo: "chegada", expressao: "amanhã", condicional: true }],
+    [5, "recebida", "Estou confirmando se tenho disponivel no estoque", null],
+    [6, "recebida", "Tenho disponivel", null],
+    [7, "recebida", "Vamos emitir a NFe", null],
+    [7, "recebida", "Em breve esta pronto para coleta", null],
+    [8, "recebida", "NF 1810- HBR.pdf", null],
+    [8, "recebida", "[document]", null],
+    [9, "recebida", "Já foi coletado", { tipo: "despacho", expressao: null, condicional: false }],
+    [10, "recebida", "Recebeu o compressor?", { tipo: "perguntou_chegou", expressao: null, condicional: false }],
+    [10, "recebida", "Deu tudo certo?", null],
+    [11, "recebida",
+      "é para bater certinho ali com o prazo que eu te passei, mais ou menos final do mês. Final do mês ali é para nós estar entregando ele",
+      null],
+    [12, "recebida", "vou tentar dar uma olhada aqui… se daria para tentar acelerar aí na parte de pintura", null],
+    [13, "recebida", "eu teria que pintar e entregar ele pronto, sair daqui tudo prontinho já", null],
+    [14, "recebida", "dava para entregar na sexta ou no sábado, que é mais tranquilo",
+      { tipo: "chegada", expressao: "sexta ou sábado", condicional: false }],
+    [15, "recebida", "Se você quiser eu posso jogar para amanhã de manhã… Agora hoje não dá mais", null],
+    [16, "recebida", "já chegou um aqui já para carregar e estamos aguardando o outro. Mas daí vai chegar ali perto das 5", null],
+    [17, "recebida", "O outro ali ele é mais de boa, espera até segunda", null],
+    [18, "recebida", "podemos contar com o pagamento para hoje desse boleto?", null],
+    [19, "recebida", "Consegue enviar o comprovante de pagamento para verificar junto ao banco", null],
+    [20, "enviada", "Vc tem kit flap em estoque?", null],
+  ];
+  for (const [n, direcao, texto, esperado] of casos) {
+    assertEquals(sem(detectarPrazoDeFornecedor(texto, TER_13_1719, direcao)), esperado, `#${n}: ${texto}`);
+  }
+  // o trecho é a frase como foi escrita
+  assertEquals(detectarPrazoDeFornecedor("Já foi coletado", TER_13_1719, "recebida")?.trecho, "Já foi coletado");
+  assertEquals(detectarPrazoDeFornecedor("Recebeu o compressor? Deu tudo certo?", TER_13_1719, "recebida")?.trecho,
+    "Recebeu o compressor?");
+});
+
+Deno.test("prazo do fornecedor: os padrões da spec §5.4.1", () => {
+  const casos: Array<["recebida" | "enviada", string, Esperado]> = [
+    // despacho: a data é a da mensagem (expressão nula)
+    ["recebida", "Foi coletado agora há pouco", { tipo: "despacho", expressao: null, condicional: false }],
+    ["recebida", "Coletaram hoje cedo", { tipo: "despacho", expressao: null, condicional: false }],
+    ["recebida", "Despachado!", { tipo: "despacho", expressao: null, condicional: false }],
+    ["recebida", "Foi postado hoje", { tipo: "despacho", expressao: null, condicional: false }],
+    ["recebida", "Postei agora", { tipo: "despacho", expressao: null, condicional: false }],
+    ["recebida", "Saiu hoje pela transportadora", { tipo: "despacho", expressao: null, condicional: false }],
+    ["recebida", "Enviado hoje", { tipo: "despacho", expressao: null, condicional: false }],
+    ["recebida", "Nota emitida e já enviada", { tipo: "despacho", expressao: null, condicional: false }],
+    // chegada: a expressão de data como foi dita
+    ["recebida", "Chega amanhã", { tipo: "chegada", expressao: "amanhã", condicional: false }],
+    ["recebida", "Chega aí dia 14", { tipo: "chegada", expressao: "dia 14", condicional: false }],
+    ["recebida", "chega 14/10", { tipo: "chegada", expressao: "14/10", condicional: false }],
+    ["recebida", "Entrega prevista para sexta-feira", { tipo: "chegada", expressao: "sexta-feira", condicional: false }],
+    ["recebida", "Previsão de entrega: 16/10", { tipo: "chegada", expressao: "16/10", condicional: false }],
+    ["recebida", "Deve chegar até sexta", { tipo: "chegada", expressao: "até sexta", condicional: false }],
+    ["recebida", "Deve chegar terça se a transportadora passar hoje", { tipo: "chegada", expressao: "terça", condicional: true }],
+    ["recebida", "Já foi despachado e chega amanhã", { tipo: "chegada", expressao: "amanhã", condicional: false }],
+    // prazo em dias
+    ["recebida", "O prazo é de 5 dias úteis", { tipo: "prazo", expressao: "5 dias úteis", condicional: false }],
+    ["recebida", "De 3 a 5 dias úteis depois que sai", { tipo: "prazo", expressao: "3 a 5 dias úteis", condicional: false }],
+    ["recebida", "Prazo de 5 dias", { tipo: "prazo", expressao: "5 dias", condicional: false }],
+    ["recebida", "Chega em dois dias", { tipo: "prazo", expressao: "2 dias", condicional: false }],
+    ["recebida", "um dia útil", { tipo: "prazo", expressao: "1 dia útil", condicional: false }],
+    ["recebida", "em 10 dias corridos", { tipo: "prazo", expressao: "10 dias corridos", condicional: false }],
+    // atraso, com a data nova ou sem ela
+    ["recebida", "Vai atrasar, só chega sexta", { tipo: "atraso", expressao: "sexta", condicional: false }],
+    ["recebida", "Só vai chegar dia 20", { tipo: "atraso", expressao: "dia 20", condicional: false }],
+    ["recebida", "Não vai dar pra enviar hoje, só amanhã", { tipo: "atraso", expressao: "amanhã", condicional: false }],
+    ["recebida", "Atrasou", { tipo: "atraso", expressao: null, condicional: false }],
+    // a pergunta do fornecedor
+    ["recebida", "Chegou?", { tipo: "perguntou_chegou", expressao: null, condicional: false }],
+    ["recebida", "Bom dia! Já recebeu o material?", { tipo: "perguntou_chegou", expressao: null, condicional: false }],
+    // o áudio transcrito vale como texto
+    ["recebida", "🎤 olha, já foi coletado, deve chegar amanhã aí", { tipo: "chegada", expressao: "amanhã", condicional: false }],
+  ];
+  for (const [direcao, texto, esperado] of casos) {
+    assertEquals(sem(detectarPrazoDeFornecedor(texto, TER_13_1719, direcao)), esperado, texto);
+  }
+});
+
+Deno.test("prazo do fornecedor: 15 negativos (pergunta, negação, cobrança, 'vou ver o prazo', o que não é material)", () => {
+  const casos: Array<["recebida" | "enviada", string | null]> = [
+    ["recebida", "Já foi coletado?"],
+    ["recebida", "Chega amanhã?"],
+    ["recebida", "Ainda não foi coletado"],
+    ["recebida", "Não chega amanhã, infelizmente"],
+    ["recebida", "Vou ver o prazo e te falo"],
+    ["recebida", "Qual o prazo de entrega?"],
+    ["recebida", "O boleto vence dia 14"],
+    ["recebida", "O pagamento atrasou, consegue ver?"],
+    ["recebida", "Recebeu o boleto?"],
+    ["recebida", "Recebeu meu e-mail?"],
+    ["recebida", "Chegou a ver o orçamento?"],
+    ["recebida", "Vai ser despachado amanhã"],
+    ["recebida", "Faz 5 dias que pedi"],
+    ["enviada", "Recebeu o compressor?"],
+    ["recebida", "[audio]"],
+    ["recebida", ""],
+    ["recebida", null],
+  ];
+  for (const [direcao, texto] of casos) {
+    assertEquals(detectarPrazoDeFornecedor(texto, TER_13_1719, direcao), null, String(texto));
+  }
 });

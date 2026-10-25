@@ -117,3 +117,20 @@ Deno.test("domingo: só o detector; promessas e avisos seguem seg–sáb; voz de
   assertStringIncludes(h, "const avisos = rodada.avisos ? await avisar(");
   assertStringIncludes(h, "const acordes = rodada.acordes && doAcorde && portao.modo");
 });
+
+// (25/10/2026, Agenda de Produção, Fase 4, P4) O prazo do fornecedor. O que se protege, na ordem do handler:
+//   1. só na rodada de avisos (seg–sáb 08–20h), DEPOIS das promessas do dono e antes dos avisos;
+//   2. fora de qualquer try próprio: o passo nunca lança (fornecedores_test.ts), então não derruba a rodada;
+//   3. o resumo da rodada leva o resultado ({ lidas, sinais, modelo }).
+Deno.test("prazo do fornecedor: na rodada de avisos, depois das promessas e antes dos avisos", () => {
+  const ini = fonte.indexOf("servirComCors(");
+  const h = fonte.slice(ini);
+  const promessas = h.indexOf("await detectarPromessas(");
+  const fornecedores = h.indexOf("await vigiarPrazosDosFornecedores(admin, agora)");
+  const avisos = h.indexOf("await avisar(");
+  assert(promessas > 0 && fornecedores > promessas && avisos > fornecedores,
+    `ordem: promessas ${promessas}, fornecedores ${fornecedores}, avisos ${avisos}`);
+  assertStringIncludes(h, "const fornecedores = rodada.avisos ? await vigiarPrazosDosFornecedores(admin, agora) : null;");
+  assertStringIncludes(h, "...(fornecedores ? { fornecedores } : {})");
+  assertStringIncludes(fonte, 'import { vigiarPrazosDosFornecedores } from "./fornecedores.ts";');
+});
