@@ -12,7 +12,8 @@
 --   N  nada sai nem muda fora disso: a fila do WhatsApp, as mensagens ao fornecedor, as remessas, os sinais, as ações e as
 --      perguntas iguais
 --   D  o DESFAZER do cabeçalho: os três modos de volta a desligado e o original herdado tirado só das linhas marcadas
---      (nada apagado; o original de verdade fica)
+--      (nada apagado; o original de verdade fica); é UM comando (um bloco do $desfaz$): linha por linha, o update do
+--      original sem a chave local é revertido calado pelo gatilho (revisão C2, R7)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -164,6 +165,23 @@ begin
       and (select previsao_original = date '2026-11-04' from public.os_material where service_order_part_id = c_painel)
       and coalesce(current_setting('agenda.desfazer_material', true), '') = ''
       and pg_temp.contagens() = v_cont, concat_ws(' | ', pg_temp.modos(), v_m));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- ── D2: por que um bloco só — o update do original rodado sozinho (sem a chave local) ───────────────────────
+  begin
+    update public.agenda_config set modo_material = 'desligado', modo_detector = 'desligado', modo_fornecedor = 'desligado' where id;
+    perform pg_temp.linha_antiga(c_kit, date '2026-11-05', 'dono');
+    execute v_mig;
+    update public.os_material set previsao_original = null, previsao_original_fonte = null, evidencia = evidencia - 'original_herdado'
+     where evidencia ->> 'original_herdado' = '20261027101000' and previsao_original_em is null;
+    v_m := (select to_jsonb(m) from public.os_material m where m.service_order_part_id = c_kit);
+    v_res := pg_temp.res(v_res, 'D2 linha por linha não serve: sem a chave local, o original fica e a marca some (o gatilho); o DESFAZER é um bloco só (do $desfaz$ … $desfaz$;)',
+      v_m ->> 'previsao_original' = '2026-11-05' and not (v_m -> 'evidencia') ? 'original_herdado'
+      and v_desf ~ '^\s*do \$desfaz\$' and v_desf ~ '\$desfaz\$;\s*$'
+      and (length(v_desf) - length(replace(v_desf, '$desfaz$', ''))) / length('$desfaz$') = 2,
+      concat_ws(' | ', v_m, v_desf));
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;

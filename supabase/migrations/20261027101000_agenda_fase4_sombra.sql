@@ -64,14 +64,22 @@
 -- sombra; de novo não muda nada; ligado fica ligado; o original herdado; o DESFAZER abaixo).
 --
 -- DESFAZER (só se o dono pedir; o que a sombra gravou — remessas, perguntas em teste, sinais e mensagens registradas — fica
--- como rastro e não vale para ninguém; o original herdado sai das linhas que esta migration marcou, e só delas):
---   update public.agenda_config set modo_material = 'desligado', modo_detector = 'desligado', modo_fornecedor = 'desligado', atualizado_em = now(), atualizado_por = null where id and modo_material = 'sombra' and modo_detector = 'sombra' and modo_fornecedor = 'sombra';
---   select set_config('agenda.desfazer_material', 'on', true);
---   update public.os_material set previsao_original = null, previsao_original_fonte = null, evidencia = evidencia - 'original_herdado' where evidencia ->> 'original_herdado' = '20261027101000' and previsao_original_em is null;
---   select set_config('agenda.desfazer_material', '', true);
+-- como rastro e não vale para ninguém; o original herdado sai das linhas que esta migration marcou, e só delas). É UM
+-- comando só (o bloco do $desfaz$ abaixo, inteiro): copie-o para um arquivo e rode com
+-- npx supabase db query --linked -f <arquivo>. Linha por linha NÃO serve (revisão da Fase 4, C2, R7): a chave local
+-- agenda.desfazer_material morre no fim da linha que a ligou, e o update do original, sozinho, é revertido calado pelo
+-- gatilho do original (o original fica e a marca some).
+--   do $desfaz$
+--   begin
+--     update public.agenda_config set modo_material = 'desligado', modo_detector = 'desligado', modo_fornecedor = 'desligado', atualizado_em = now(), atualizado_por = null where id and modo_material = 'sombra' and modo_detector = 'sombra' and modo_fornecedor = 'sombra';
+--     perform set_config('agenda.desfazer_material', 'on', true);
+--     update public.os_material set previsao_original = null, previsao_original_fonte = null, evidencia = evidencia - 'original_herdado' where evidencia ->> 'original_herdado' = '20261027101000' and previsao_original_em is null;
+--     perform set_config('agenda.desfazer_material', '', true);
+--   end
+--   $desfaz$;
 --
 -- (A chave local agenda.desfazer_material é a do desfazer do material: só ela deixa o gatilho do original apagar um
--- original. Ela vale até o fim da transação e é desligada na última linha.)
+-- original. Ela vale até o fim da transação e é desligada no fim do bloco.)
 
 -- 1. Os modos: de desligado para sombra (nunca rebaixa ligado).
 update public.agenda_config
