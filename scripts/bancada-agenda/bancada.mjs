@@ -9,7 +9,8 @@
 //      public (tabela e função novas nascem com anon — é isso que prova os REVOKEs das migrations), schema auth
 //      com auth.uid() lendo o claim (request.jwt.claim.sub), extensões unaccent e btree_gist;
 //   2. as tabelas reais do snapshot (supabase/schemas/producao/02-tabelas.sql), só com colunas, PK, UNIQUE e
-//      CHECK (sem as FKs do snapshot), mais as colunas que migrations posteriores ao snapshot acrescentaram;
+//      CHECK (sem as FKs do snapshot), mais as colunas que migrations posteriores ao snapshot acrescentaram e (Fase 4)
+//      as tabelas de depois do snapshot em DDL mínima (TABELAS_DEPOIS_DO_SNAPSHOT: comprovantes);
 //   3. a view product_availability e as funções reais do snapshot (05-funcoes.sql) COM a ACL de produção, as
 //      sequências e os índices únicos de que essas funções dependem (01-sequencias.sql, 04-indices.sql) e a RLS de
 //      produção das tabelas que as policies da agenda atravessam (08-politicas-rls.sql: payees é fechada para o
@@ -21,7 +22,8 @@
 //      menos o que é dado de produção e não estrutura (a faxina 20261024153000 e os modos em sombra 20261025101000 e
 //      20261026101000: na bancada quem liga os modos é cada teste), cada versão registrada em
 //      supabase_migrations.schema_migrations como em produção. A semente 20261024161000 entra: na bancada vazia ela não
-//      acha diária e não semeia (a fixture semeia o dia 23/10). `ate` corta a lista (cada pacote testa até a sua);
+//      acha diária e não semeia (a fixture semeia o dia 23/10). `ate` corta a lista (cada pacote testa até a sua). Na 2ª
+//      rodada, a view que uma migration mais nova recriou com colunas a mais sai antes da antiga (VIEWS_RECRIADAS_DEPOIS);
 //   5. com `fixture`, scripts/bancada-agenda/fixture-2310.sql (a carteira sintética de 23/10).
 //
 // O PGlite vem da bancada dos comprovantes (0.5.8), fora do repo: PGLITE_DIR troca a pasta.
@@ -48,6 +50,19 @@ export const FORA_DA_BANCADA = new Set([
   // Fase 3 (P7): modo_equipe e modo_diaria em sombra e a semente de agenda_equipe_contato (a fixture-fase3 faz o papel).
   '20261026101000_agenda_fase3_sombra.sql',
 ]);
+
+/**
+ * Views que uma migration MAIS NOVA recriou com colunas a mais no fim: na 2ª rodada, a migration antiga que as define
+ * (create or replace view com menos colunas) esbarraria em "cannot drop columns from view" (42P16) — o Postgres só deixa
+ * o create or replace ACRESCENTAR colunas. Em produção cada migration roda uma vez, na ordem, e isso não acontece; aqui,
+ * só na 2ª rodada e só antes daquele arquivo, a view sai e a migration antiga a recria (com os grants dela), e a mais
+ * nova, logo depois na mesma rodada, volta a acrescentar as colunas. [arquivo antigo]: [views].
+ *   · Fase 4 (P1): 20261027100000 acrescenta service_order_part_id e service_order_service_id a v_oc_itens_a_caminho
+ *     (Fase 0, 20261024150100).
+ */
+export const VIEWS_RECRIADAS_DEPOIS = {
+  '20261024150100_compras_reserva_propria_e_ja_pedido.sql': ['v_oc_itens_a_caminho'],
+};
 
 /**
  * Migrations de ANTES da agenda e DEPOIS do snapshot (06/10 19:51 UTC) que a Fase 3 lê: aplicadas inteiras, uma vez,
@@ -80,7 +95,36 @@ export const TABELAS = [
   'commissions', 'collections', 'periodos_fechados', 'whatsapp_messages',
   // Fase 3 (P3): a trava do levantamento (D11) da conversa e das palavras que concluem (_os_levantamentos_pendentes).
   'service_surveys',
+  // Fase 4 (P1): o que o material lê sem escrever — a NF-e do e-mail (a remessa aponta para a mensagem, o anexo e a nota
+  // importada), o Pix (o extrato e a fila financeira), a cotação (o vínculo de linha que a OC copia) e o movimento de
+  // estoque (o recebimento de texto livre não pode gerar um).
+  'email_accounts', 'email_messages', 'email_attachments', 'fiscal_notes', 'fiscal_note_items', 'bank_transactions',
+  'finance_review_queue', 'quote_requests', 'quote_request_items', 'inventory_movements',
 ];
+
+/**
+ * Tabelas de DEPOIS do snapshot (06/10) que a agenda lê, em DDL mínima: só as colunas que ela usa, sem FK. Não é a tabela
+ * de produção — é o espelho do que a Fase 4 lê dela.
+ *   · comprovantes (20261011100000 + 20261011200000): espelho mínimo de 20261011100000; a Fase 4 só lê (o CMP de
+ *     fornecedor com destino a OS é candidato forte da pergunta do Pix).
+ */
+const TABELAS_DEPOIS_DO_SNAPSHOT = `
+create table if not exists public.comprovantes (
+  id              uuid primary key default gen_random_uuid(),
+  numero          integer unique,
+  codigo          text generated always as (case when numero is null then null
+                                                 when numero < 100000 then 'CMP-' || lpad(numero::text, 5, '0')
+                                                 else 'CMP-' || numero::text end) stored,
+  supplier_id     uuid,
+  fornecedor_nome text,
+  valor           numeric(12,2),
+  data_compra     date,
+  destino         text,
+  destino_os_id   uuid,
+  situacao        text not null default 'recebido',
+  recebido_em     timestamptz not null default now()
+);
+`;
 
 /** Sequências do snapshot que as funções da lista abaixo usam (next_document_number). */
 const SEQUENCIAS = ['document_number_seq'];
@@ -281,6 +325,7 @@ export async function criarBancada({ ate, fixture = true, log = () => {} } = {})
   await db.exec(SHIM);
   await db.exec(SEQUENCIAS.map(sequencia).join('\n'));
   await db.exec(TABELAS.map(tabela).join('\n'));
+  await db.exec(TABELAS_DEPOIS_DO_SNAPSHOT);
   await db.exec(COLUNAS_DEPOIS_DO_SNAPSHOT);
   await db.exec(INDICES.map(indice).join('\n'));
   await db.exec(view('product_availability'));
@@ -302,6 +347,9 @@ export async function criarBancada({ ate, fixture = true, log = () => {} } = {})
   for (const rodada of [1, 2]) {
     for (const m of migrations) {
       try {
+        if (rodada === 2) {
+          for (const v of VIEWS_RECRIADAS_DEPOIS[m] ?? []) await db.exec(`drop view if exists public.${v}`);
+        }
         await db.exec(ler(join(MIG, m)));
         await db.query(
           `insert into supabase_migrations.schema_migrations (version, name) values ($1, $2) on conflict (version) do nothing`,

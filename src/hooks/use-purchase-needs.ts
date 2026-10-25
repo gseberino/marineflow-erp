@@ -20,7 +20,8 @@ const TABELA_AUSENTE = new Set(['PGRST205', '42P01']);
  *
  * O "já pedido" e o que vem a caminho por OC de texto livre saem da view
  * `v_oc_itens_a_caminho`, a mesma que a RPC lê. O "já pedido" de catálogo só conta a
- * linha com `conta_como_ja_pedido` (OC aberta há menos de 60 dias e sem OS encerrada):
+ * linha com `conta_como_ja_pedido` (OC aberta há menos de `agenda_config.oc_viva_dias` — 60 por
+ * padrão; Agenda de Produção, Fase 4 — e sem OS encerrada):
  * a regra de "OC viva" fica num lugar só (antes, aqui, toda OC draft/sent/partial
  * contava, de qualquer idade e de OS já faturada). O que vem a caminho para a própria
  * OS não tem idade: a linha não abate falta, e cortá-la só a esconderia (revisão de

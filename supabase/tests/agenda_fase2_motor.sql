@@ -1008,6 +1008,23 @@ declare
   v_bloco boolean := false;
   l       text;
   v_tirada int := 0;
+  -- FASE 4: os_prontidao foi recriada de novo em 20261027100100 (o prazo do fornecedor), com oito blocos
+  -- "-- FASE 4: … -- FASE 4: fim"; as linhas da Fase 1 que eles trocaram (cada uma uma vez) saem do corpo antigo, e os
+  -- blocos saem do novo (o mesmo do B7 de agenda_fase4_base.sql).
+  v_trocadas_f4 text[] := array[
+    '    select q.*, public._agenda_classe_do_fornecedor(q.forn_id) as classe',
+    '    select q.*, public._agenda_prazo_da_classe(q.classe) as prazo',
+    $l$             when q.prazo is not null then 'D'$l$,
+    $l$             when q.sit in ('comprado', 'a_caminho') and q.prazo is not null then$l$,
+    '               public.agenda_somar_du(coalesce(q.comprado_em, p_hoje), q.prazo)',
+    $l$             when q.sit = 'falta' and q.prazo is not null then$l$,
+    '               -- "Se comprar hoje" (ou no dia combinado): calculado, nunca gravado.',
+    '               public.agenda_somar_du(greatest(coalesce(q.compra_prevista_em, p_hoje), p_hoje), q.prazo)',
+    $l$           case when q.sit = 'falta' and q.prazo is not null and q.compra_prevista_em is null then$l$,
+    '             public.agenda_somar_du(v_est_sm, -(c.folga_material_du + q.prazo)) end as compre_ate,',
+    $l$                            public._dia_curto(public.agenda_somar_du(p_hoje, (v_compra ->> 'prazo_du')::int)))$l$];
+  v_achadas_f4 text[] := '{}';
+  -- FASE 4: fim
 begin
   if coalesce(v_mig, '') = '' then
     insert into _resultado values ('Q5 a cópia de os_prontidao só muda nos pontos "-- FASE 2:"', true,
@@ -1025,22 +1042,30 @@ begin
       v_tirada := 1;
       continue;
     end if;
+    -- FASE 4: e sem as linhas que a Fase 4 trocou (cada uma uma vez)
+    if l = any (v_trocadas_f4) and not (l = any (v_achadas_f4)) then
+      v_achadas_f4 := v_achadas_f4 || l;
+      continue;
+    end if;
+    -- FASE 4: fim
     v_a := v_a || l;
   end loop;
-  -- o de agora, sem os blocos "-- FASE 2: … -- FASE 2: fim"
+  -- o de agora, sem os blocos "-- FASE 2: … -- FASE 2: fim" (FASE 4: e sem os "-- FASE 4: … -- FASE 4: fim")
   foreach l in array string_to_array(v_novo, E'\n') loop
-    if not v_bloco and l ~ '^\s*-- FASE 2:' and l !~ '^\s*-- FASE 2: fim' then
+    if not v_bloco and l ~ '^\s*-- FASE [24]:' and l !~ '^\s*-- FASE [24]: fim' then
       v_bloco := true;
       continue;
     end if;
     if v_bloco then
-      if l ~ '^\s*-- FASE 2: fim' then v_bloco := false; end if;
+      if l ~ '^\s*-- FASE [24]: fim' then v_bloco := false; end if;
       continue;
     end if;
     v_b := v_b || l;
   end loop;
-  insert into _resultado values ('Q5 a cópia de os_prontidao só muda nos pontos "-- FASE 2:" (fora deles, linha a linha igual à da Fase 1)',
-    v_a = v_b and v_tirada = 1 and (select count(*) from regexp_matches(v_novo, '-- FASE 2: fim', 'g')) = 5,
+  insert into _resultado values ('Q5 a cópia de os_prontidao só muda nos pontos "-- FASE 2:" e "-- FASE 4:" (fora deles, linha a linha igual à da Fase 1)',
+    v_a = v_b and v_tirada = 1 and (select count(*) from regexp_matches(v_novo, '-- FASE 2: fim', 'g')) = 5
+    and cardinality(v_achadas_f4) = cardinality(v_trocadas_f4)
+    and (select count(*) from regexp_matches(v_novo, '-- FASE 4: fim', 'g')) = 8,
     format('linhas Fase 1 %s, cópia sem os blocos %s; 1ª diferente: %s', cardinality(v_a), cardinality(v_b),
            (select coalesce(min(i)::text, '-') from generate_series(1, greatest(cardinality(v_a), cardinality(v_b))) i
              where v_a[i] is distinct from v_b[i])));

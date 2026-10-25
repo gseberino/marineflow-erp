@@ -2949,3 +2949,67 @@ porque só o dono pode preenchê-las.
 - **Não muda no P6 (só registro):** o eval A21 usa 07:40. A correção é a resposta (tipo `resposta`) nascer para o início da
   janela quando chega antes dela (`greatest(recebida, dia + equipe_janela_inicio)`), com o mesmo teto. **Decidir antes de
   ligar modo_equipe.**
+
+### [NOVO-agenda-30] Cidade do fornecedor com caractere quebrado ("Itaja�"): a agenda contava o prazo errado
+
+- **Encontrado em:** Agenda de Produção, Fase 4, conferência da spec (25/10/2026, SELECTs `j06b`, `j06c`).
+- **O quê:** 197 fornecedores (16 ativos) têm U+FFFD na cidade ("Itaja�", "Balne�rio Cambori�", "S�o Paulo"…), todos criados em
+  12/04/2026 (a importação). 19 nomes e 25 endereços também. A regra da Fase 1 (`_agenda_classe_do_fornecedor`) não
+  reconhecia "Itaja�" como Itajaí: Premel, Fachini, Souper, Tamoyo e Inovaccar caíam em "transportadora de SC/PR" (2 dias
+  úteis) em vez de "entrega local" (1).
+- **Corrigido na comparação (P1, 20261027100100):** `_agenda_lugar_casa` faz cada U+FFFD valer uma letra ("Itaja�" casa
+  Itajaí; "S�o Paulo" não casa nenhum município local), e `_agenda_lugar_texto` mostra ao dono a grafia de
+  `agenda_config.municipios_locais`. **O dado não muda:** corrigir as 24 cidades da lista fechada é a migration opcional
+  20261027102000 (P6), com OK nomeado. Os 19 nomes e 25 endereços ficam com o dono (fora do que a agenda lê).
+
+### [NOVO-agenda-31] Importar a NF-e do e-mail pela agenda esconderia a nota da tela do dono
+
+- **Encontrado em:** Agenda de Produção, Fase 4, conferência da spec (25/10/2026).
+- **O quê:** `process-nfe-xml` exige login de admin e cria `fiscal_notes` pendente; a tela "Notas recebidas por e-mail"
+  (`NotasRecebidasPorEmail.tsx:51-58`) esconde toda chave que já existe em `fiscal_notes`, pendente ou não. Se a agenda chamasse
+  a importação sozinha, a nota sumiria da lista do dono antes de ele conferir.
+- **Decisão (spec d1):** a agenda não chama `process-nfe-xml`; lê a nota pelo leitor do e-mail (`nfe-identify.ts`) e grava só
+  `material_remessas` (P3). A importação continua pela tela.
+
+### [NOVO-agenda-32] (dinheiro) Receber uma OC já paga por Pix cria uma conta a pagar nova
+
+- **Encontrado em:** Agenda de Produção, Fase 4, conferência da spec (25/10/2026).
+- **O quê:** `receive_po` (20261007160000:105-122) cria a conta a pagar, pendente, ao completar o recebimento — também quando a
+  compra já foi paga por Pix no balcão. Isso já acontece hoje com qualquer OC.
+- **Não muda na Fase 4 (dinheiro é do dono):** registrado em `fila-do-dono` (§13, item 8): perguntar "já está paga?" no
+  recebimento é decisão dele.
+
+### [NOVO-agenda-33] Nenhum Pix de saída está ligado a uma OS
+
+- **Encontrado em:** Agenda de Produção, Fase 4, conferência da spec (25/10/2026, `j04`, `j04b`).
+- **O quê:** dos 86 Pix de saída em 60 dias (todos na fila financeira), 15 têm fornecedor sugerido e 0 têm OS sugerida. A
+  compra de balcão nunca chega à OS: a agenda não sabe que o material foi comprado.
+- **Na Fase 4 (P3):** o Pix a fornecedor de material, recente e com OS de início próximo em falta, vira pergunta curta ao dono
+  (`pix_material`, no máximo 1 por semana). Nada é ligado sem a resposta.
+
+### [NOVO-agenda-34] Telefone de fornecedor repetido no de cliente (e o do dono)
+
+- **Encontrado em:** Agenda de Produção, Fase 4, conferência da spec (25/10/2026, `j01c`).
+- **O quê:** 348 fornecedores têm o mesmo telefone de um cliente: 315 são o mesmo documento (cadastro duplo do mesmo ente) e 5
+  são clientes com OS ("Cliente Final", "Fornecedor Teste", o próprio dono e dois clientes de barco). O dono está cadastrado
+  como fornecedor (inativo).
+- **Na Fase 4 (P4):** o detector exclui pelo telefone de quem tem OS e da equipe/dono, não pelo de qualquer cliente (a
+  fixture-fase4 traz o dono como fornecedor e a Souper com o telefone do Rodrigo, para o teste D1).
+
+### [NOVO-agenda-35] A conversa do contador aparece entre as de fornecedor
+
+- **Encontrado em:** Agenda de Produção, Fase 4, conferência da spec (25/10/2026, `j05`).
+- **O quê:** a SR Contabilidade aparece entre os "fornecedores que conversam" (27 mensagens em 60 dias): a categoria
+  "fornecedor" da conversa casa qualquer cadastro de fornecedor.
+- **Na Fase 4 (P4):** o detector só lê o fornecedor que tem compra viva (OC aberta, linha comprada/a caminho, remessa).
+
+### [NOVO-agenda-36] A Kamell de Itajaí já está inativa (a spec a tratava como cadastro repetido ativo)
+
+- **Encontrado em:** Agenda de Produção, Fase 4, pacote P1 (25/10/2026, SELECT `k01_kamell`).
+- **O quê:** "Kamell Comercio Global" (Itajaí/SC, sem CNPJ, 1 produto, 0 contas) está com `active = false`; a de Vila Velha/ES
+  (CNPJ, 31 produtos, 42 contas) é a ativa. Pela regra da spec ("outro fornecedor ATIVO com o mesmo nome"), a de Vila Velha nem
+  teria cadastro repetido e a de Itajaí ficaria sem classe — gerando a pergunta "é a mesma?" que o dono já respondeu ao
+  desativá-la. O resolvedor de fornecedor só olha os ativos: em produção "a Kamell" já é a de Vila Velha, sem pergunta.
+- **Corrigido no P1:** o cadastro inativo com um ativo do mesmo nome vale como o ativo que ficou (`_agenda_prazo_do_fornecedor`,
+  com `principal_id`). A fixture de 23/10 tem as duas ativas (o caso da spec), e o B5 de `agenda_fase4_base.sql` prova os dois.
+  A pergunta "a Kamell está cadastrada duas vezes" (P5) e os evals C43/C44 (P6) só acontecem com as duas ativas.

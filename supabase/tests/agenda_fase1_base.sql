@@ -390,7 +390,24 @@ begin
        'agenda_config_carteira_laranja_du_check', 'agenda_config_carteira_vermelho_du_check', 'agenda_config_ppc_meta_check',
        -- (revisão da Fase 3, C1) a janela da resposta direta (NOVO-agenda-28)
        'agenda_config_equipe_resposta_direta_inicio_check', 'agenda_config_equipe_resposta_direta_fim_check',
-       'agenda_config_equipe_resposta_direta_prazo_check']));
+       'agenda_config_equipe_resposta_direta_prazo_check']))
+     -- FASE 4: os 25 que a Fase 4 pôs em agenda_config e os 3 de os_material (20261027100000) têm o caso deles em
+     -- agenda_fase4_base.sql (B1, que cobra os de agenda_config pelo nome).
+     and not (c.conname = any (array[
+       'agenda_config_modo_material_check', 'agenda_config_modo_detector_check', 'agenda_config_modo_fornecedor_check',
+       'agenda_config_oc_viva_dias_check', 'agenda_config_remessa_dias_check', 'agenda_config_material_inicio_dias_check',
+       'agenda_config_material_pergunta_validade_check', 'agenda_config_nfe_opcoes_max_check',
+       'agenda_config_pix_janela_dias_check', 'agenda_config_pix_valor_minimo_check',
+       'agenda_config_pix_perguntas_semana_max_check', 'agenda_config_pix_categorias_check',
+       'agenda_config_prazo_longo_du_check', 'agenda_config_detector_janela_horas_check',
+       'agenda_config_detector_lote_max_check', 'agenda_config_detector_precisao_minima_check',
+       'agenda_config_detector_minimo_julgados_check', 'agenda_config_detector_tolerancia_du_check',
+       'agenda_config_fornecedor_janela_inicio_check', 'agenda_config_fornecedor_janela_fim_check',
+       'agenda_config_fornecedor_dia_max_check', 'agenda_config_fornecedor_semana_max_check',
+       'agenda_config_fornecedor_total_dia_max_check', 'agenda_config_fornecedor_conversa_dias_check',
+       'agenda_config_fornecedores_principais_max_check',
+       'os_material_comprado_fonte_check', 'os_material_previsao_original_fonte_check', 'os_material_original_coerente']));
+     -- FASE 4: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;
@@ -785,7 +802,9 @@ insert into _definer_da_agenda values
   -- Desfazer da tela (chama agenda_desfazer, que é só do service_role)
   ('agenda_tela_semana'), ('agenda_tela_carteira'), ('agenda_equipe_da_grade'), ('agenda_desfazer_pela_tela'),
   -- FASE 3 (revisão, R3): o modo da agenda automática para qualquer login (agenda_config é fechada ao técnico e ao vendedor)
-  ('agenda_modo_da_proposta');
+  ('agenda_modo_da_proposta'),
+  -- FASE 4 (P1): o rascunho do prazo do fornecedor e o *grava* dele (escreve em suppliers e resolve as perguntas)
+  ('agenda_rascunho_fornecedor'), ('_agenda_aplicar_fornecedor');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

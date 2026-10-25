@@ -60,6 +60,16 @@ const FIXTURES_COMO_TEXTO = [
   // subtransação desfeita (desligado → sombra, idempotência, a semente pela regra e o DESFAZER do cabeçalho).
   ['agenda_teste.mig_telas_fase3', '../../supabase/migrations/20261026100600_agenda_fase3_telas.sql'],
   ['agenda_teste.mig_sombra_fase3', '../../supabase/migrations/20261026101000_agenda_fase3_sombra.sql'],
+  // Fase 4 (P1): a carteira de sex 30/10 com os fornecedores da Fase 4 (por cima da fixture-fase3); o replay da conversa do
+  // fornecedor da OS-00104 (P4); a migration da conferência e da vigia da Fase 2 (as cópias de agenda_saude e o molde da
+  // fila, P5); e as dos caminhos da Fase 3 e do rascunho da Fase 2, para o B8 conferir que as cópias de
+  // agenda_rascunho_gravar e _agenda_rascunho_frase só mudam nos blocos "-- FASE 4:" (a do motor da Fase 2,
+  // mig_motor_fase2, já está acima: o B7 confere a de os_prontidao contra ela).
+  ['agenda_teste.fase4', 'fixture-fase4.sql'],
+  ['agenda_teste.replay_fornecedor_0104', 'fixture-replay-fornecedor-0104.sql'],
+  ['agenda_teste.mig_conferencia_fase2', '../../supabase/migrations/20261025100300_agenda_fase2_conferencia_vigia.sql'],
+  ['agenda_teste.mig_caminhos_fase3', '../../supabase/migrations/20261026100200_agenda_fase3_caminhos.sql'],
+  ['agenda_teste.mig_rascunho_fase2', '../../supabase/migrations/20261025100400_agenda_fase2_rascunho.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

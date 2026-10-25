@@ -263,10 +263,14 @@ begin
     and r ->> 'estado_texto' = 'falta você dizer de quem e quando comprar 4 itens'
     and jsonb_array_length(r #> '{material,itens}') = 4,
     pg_temp.restr(r, 'sem_previsao')::text);
-  v_res := pg_temp.ok(v_res, 'E9 classes: Premel local (1 du), Kamell ES outro estado (4), Kamell SC local, Mateus desconhecida',
+  -- FASE 4 (P1): com o prazo do fornecedor numa fonte só (20261027100100), as duas Kamell ATIVAS com o mesmo nome e classe
+  -- diferente são cadastro repetido: só a principal (a de Vila Velha, que tem o produto do Cerbo) tem classe; a de Itajaí
+  -- fica sem classe até o dono dizer (a pergunta é do P5). Antes da Fase 4 (corte --ate), a de Itajaí era local.
+  v_res := pg_temp.ok(v_res, 'E9 classes: Premel local (1 du), Kamell ES outro estado (4), Kamell SC local (Fase 4: cadastro repetido, sem classe), Mateus desconhecida',
     public._agenda_classe_do_fornecedor('dd000000-0000-4000-8000-000000000001') = 'entrega_local'
     and public._agenda_classe_do_fornecedor('dd000000-0000-4000-8000-000000000002') = 'outro_estado'
-    and public._agenda_classe_do_fornecedor('dd000000-0000-4000-8000-000000000003') = 'entrega_local'
+    and public._agenda_classe_do_fornecedor('dd000000-0000-4000-8000-000000000003') is not distinct from
+        case when to_regprocedure('public._agenda_prazo_do_fornecedor(uuid)') is null then 'entrega_local' end
     and public._agenda_classe_do_fornecedor('dd000000-0000-4000-8000-000000000004') is null
     and public._agenda_classe_do_fornecedor(null) is null
     and public._agenda_prazo_da_classe('entrega_local') = 1 and public._agenda_prazo_da_classe('outro_estado') = 4

@@ -34,6 +34,10 @@
 //   2. número com casa decimal só os ESTRUTURAIS listados (0,5 = meio dia, a unidade da duração);
 //   3. as exceções (valor proibido usado como estrutura, não como parâmetro) são listadas uma a uma, com o porquê, e
 //      somem daqui quando somem do código.
+//   · (Fase 4, P1) também as funções das migrations 2026102710* (o prazo do fornecedor, a prontidão recriada, o rascunho
+//     do fornecedor e os pacotes seguintes da fase, pelo prefixo). Os DEFAULTs novos de agenda_config (oc_viva_dias, os da
+//     nota, do Pix, do detector e da mensagem ao fornecedor) ficam em 20261027100000, fora de função; o prazo de cada classe
+//     continua só em prazo_classe_du/importacao_dias (20261024160000).
 // Os inteiros pequenos (0, 1, 2, 7: meios-dias por dia, dias da semana…) e os limites de tamanho de texto dos CHECKs
 // são estrutura e não entram na regra.
 import { describe, expect, it } from 'vitest';
@@ -185,7 +189,7 @@ export function corposDasFuncoes(sql: string, arquivo: string): Trecho[] {
 
 function funcoesDasMigrations(): Trecho[] {
   return fs.readdirSync(MIGRATIONS)
-    .filter((f) => /^(2026102416|2026102510|2026102610)\d{4}_.+\.sql$/.test(f))
+    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710)\d{4}_.+\.sql$/.test(f))
     .sort()
     .flatMap((f) => corposDasFuncoes(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8').replace(/\r\n/g, '\n'), f));
 }
@@ -339,6 +343,8 @@ describe('agenda: parâmetro só em agenda_config', () => {
       'comissao_tecnicos_do_mes', 'comissao_resumo_do_mes',
       // Fase 3 (P7a): as telas e a regra da porta que a tela lê
       'agenda_tela_semana', 'agenda_tela_carteira', 'os_plano_da_os', 'os_status_da_tela', '_os_porta_regra',
+      // Fase 4 (P1): o prazo do fornecedor, o gatilho do original da previsão e o rascunho do fornecedor
+      '_agenda_prazo_do_fornecedor', '_agenda_chegada_pela_classe', '_os_material_previsao_original', 'agenda_rascunho_fornecedor',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),
