@@ -109,7 +109,9 @@ export function PurchaseNeedsBanner({
                     {' — falta '}
                     {new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 3 }).format(item.shortage)}
                     {item.available > 0 && ` (tem ${new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 3 }).format(item.available)} disponível)`}
-                    {item.status === 'uncatalogued' && ' · sem cadastro'}
+                    {item.origin === 'dono'
+                      ? ' · citado por você (sem preço)'
+                      : item.status === 'uncatalogued' && ' · sem cadastro'}
                   </li>
                 ))}
                 {needs.shortages.length > 4 && (

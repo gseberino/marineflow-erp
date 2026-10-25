@@ -6,8 +6,11 @@
 //     edição só de rascunho/enviada, exclusão só de rascunho, fechar/cancelar/reabrir cotação,
 //     frete e desconto por upsert.
 //  3. RECEBER EM PARTE CERTO: "só 2 das 4 baterias" chega à rotina do banco como 2; mais do que
-//     falta, item de outra OC, item de texto livre e OC cancelada são recusados antes.
+//     falta, item de outra OC e OC cancelada são recusados antes. Item de texto livre recebe desde a
+//     Agenda de Produção, Fase 4 (P2): a rotina sobe o recebido sem movimento de estoque.
 //  4. LEITURA QUE FALHA não vira "não achei" nem "lista vazia".
+//  5. (Fase 4, P2) O VÍNCULO DE LINHA: a OC da cotação copia a linha da OS de quote_request_items; a OC pela
+//     OS liga à peça quando a OS tem uma só peça daquele produto (pelo id); sem vínculo, a linha é a de antes.
 import { assert, assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import { comprasCicloTools, resumirExclusaoDeOC, resumirRecebimento } from "./compras-ciclo.ts";
@@ -368,12 +371,10 @@ Deno.test("receber em parte: 'a OC-00012 chegou incompleta, recebe só 2 das 4 b
   assertStringIncludes(r.conta_a_pagar, "quando a OC fica completa");
 });
 
-Deno.test("receber: mais do que falta, item de texto livre, OC cancelada e item de outra OC são recusados ANTES da rotina", async () => {
+Deno.test("receber: mais do que falta, OC cancelada e item de outra OC são recusados ANTES da rotina", async () => {
   const amb = ambiente();
   const demais = await rodar("receive_purchase_order", { ordem_de_compra: "OC-00014", itens: [{ n: 1, quantidade: 25 }] }, amb);
   assertStringIncludes(demais.error, "só faltam 20");
-  const texto = await rodar("receive_purchase_order", { ordem_de_compra: "OC-00013", receber_tudo: true }, amb);
-  assertStringIncludes(texto.error, "texto livre");
   const deOutra = await rodar("receive_purchase_order", { po_id: "po-12", items: [{ po_item_id: "i-cabo", received_qty: 1 }] }, amb);
   assertStringIncludes(deOutra.error, "não é desta ordem de compra");
   amb.tabelas.purchase_orders.find((p) => p.id === "po-12")!.status = "cancelled";
@@ -382,6 +383,93 @@ Deno.test("receber: mais do que falta, item de texto livre, OC cancelada e item 
   assertEquals(amb.rpcs.length, 0);
   const lida = await rodar("receive_purchase_order", { ordem_de_compra: "OC-00012", receber_tudo: true }, ambiente({ falham: ["purchase_order_items"] }));
   assertStringIncludes(lida.error, "Não consegui ler os itens");
+});
+
+// Agenda de Produção, Fase 4 (P2): receive_po (20261027100200) recebe item de texto livre sem movimento de estoque. A
+// recusa de antes ("não é produto do catálogo… recusa item sem produto") saiu; o que chega e o resumo dizem que ele fica
+// só recebido.
+Deno.test("receber: item de texto livre chega à rotina; a resposta e o resumo dizem que fica sem estoque", async () => {
+  const amb = ambiente();
+  const r = await rodar("receive_purchase_order", { ordem_de_compra: "OC-00013", receber_tudo: true }, amb);
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(amb.rpcs.map((c) => [c.nome, c.args.p_items]), [["receive_po", [{ po_item_id: "i-cabo", received_qty: 10 }]]]);
+  assertStringIncludes(r.estoque, "sem entrada no estoque");
+  const resumo = await resumirRecebimento(amb.db, { ordem_de_compra: "OC-00013", receber_tudo: true });
+  assertStringIncludes(resumo, "Fica recebido, sem estoque");
+  assert(!resumo.includes("Entra no estoque agora"), resumo);
+  // Catálogo e texto livre juntos: os dois chegam; o resumo separa.
+  amb.tabelas.purchase_order_items.push({ id: "i-term", purchase_order_id: "po-13", product_id: "p-term", description: "Terminal M8", quantity: 5, unit_cost: 2, received_qty: 0, created_at: "2026-10-02T10:00:02Z" });
+  const misto = await resumirRecebimento(amb.db, { ordem_de_compra: "OC-00013", receber_tudo: true });
+  assertStringIncludes(misto, "O que é do catálogo entra no estoque agora");
+  assertStringIncludes(misto, "o de texto livre só fica recebido");
+  // Só catálogo: como antes.
+  const soCatalogo = await resumirRecebimento(amb.db, { ordem_de_compra: "OC-00012", receber_tudo: true });
+  assertStringIncludes(soCatalogo, "Entra no estoque agora (movimento de compra).");
+});
+
+// ─── O vínculo de linha (Agenda de Produção, Fase 4, P2) ──────────────────────────────────────────
+Deno.test("OC da cotação: copia a linha da OS de quote_request_items (peça ou texto livre); sem vínculo, a linha de antes", async () => {
+  const amb = ambiente();
+  const qi = amb.tabelas.quote_request_items;
+  qi.find((i) => i.id === "qi-1")!.service_order_part_id = "sop-bat";
+  qi.find((i) => i.id === "qi-2")!.service_order_service_id = "sos-inv";
+  const r = await rodar("close_quote_request", { cotacao: "5", acao: "fechar", fornecedor: "Victron", gerar_oc: true }, amb);
+  assertEquals(r.ok, true, JSON.stringify(r));
+  const po = amb.tabelas.purchase_orders.find((p) => p.po_number === "OC-00015")!;
+  const linhas = amb.tabelas.purchase_order_items.filter((i) => i.purchase_order_id === po.id);
+  assertEquals(linhas.map((l) => [l.description, l.service_order_part_id ?? null, l.service_order_service_id ?? null]), [
+    ["Bateria Lítio 100Ah", "sop-bat", null],
+    ["Inversor 3000W", null, "sos-inv"],
+  ]);
+  // A resposta da ferramenta mostra os itens como antes (sem o vínculo).
+  assertEquals(Object.keys(r.itens[0]).includes("service_order_part_id"), false, JSON.stringify(r.itens[0]));
+  // Sem vínculo na cotação, a linha da OC nasce sem as chaves (grava também antes da migration).
+  const sem = ambiente();
+  await rodar("create_purchase_order_from_quote", { code: "COT-00005", supplier_id: "s-victron" }, sem);
+  const ins = sem.escritas.find((e) => e.tabela === "purchase_order_items" && e.op === "insert")!;
+  for (const l of ins.valores as Linha[]) {
+    assertEquals("service_order_part_id" in l || "service_order_service_id" in l, false, JSON.stringify(l));
+  }
+});
+
+Deno.test("OC pela OS: liga à peça quando a OS tem UMA só peça do produto (pelo id); duas ou nenhuma, sem vínculo", async () => {
+  // itensDitos só aceita product_id em uuid.
+  const BAT = "aaaaaaaa-0000-4000-8000-0000000000b1";
+  const INV = "aaaaaaaa-0000-4000-8000-0000000000b2";
+  const comPecas = (pecas: Linha[]) => {
+    const amb = ambiente();
+    amb.tabelas.service_orders.push({ id: "os-104", service_order_number: "OS-00104", status: "awaiting_client" });
+    amb.tabelas.service_order_parts = pecas;
+    return amb;
+  };
+  const args = { service_order_id: "os-104", product_id: BAT, product_name: "Bateria", quantity: 1, unit_cost: 900 };
+  const linhaDaOc = (amb: ReturnType<typeof ambiente>) =>
+    amb.tabelas.purchase_order_items.find((i) => i.purchase_order_id === amb.tabelas.purchase_orders.at(-1)!.id)!;
+
+  const uma = comPecas([
+    { id: "sop-1", service_order_id: "os-104", product_id: BAT },
+    { id: "sop-2", service_order_id: "os-104", product_id: INV },
+    { id: "sop-3", service_order_id: "os-outra", product_id: BAT },
+  ]);
+  assertEquals((await rodar("create_purchase_order_from_so", args, uma)).ok, true);
+  assertEquals(linhaDaOc(uma).service_order_part_id, "sop-1");
+
+  const duas = comPecas([
+    { id: "sop-1", service_order_id: "os-104", product_id: BAT },
+    { id: "sop-4", service_order_id: "os-104", product_id: BAT },
+  ]);
+  assertEquals((await rodar("create_purchase_order_from_so", args, duas)).ok, true);
+  assertEquals("service_order_part_id" in linhaDaOc(duas), false);
+
+  const nenhuma = comPecas([{ id: "sop-2", service_order_id: "os-104", product_id: INV }]);
+  assertEquals((await rodar("create_purchase_order_from_so", args, nenhuma)).ok, true);
+  assertEquals("service_order_part_id" in linhaDaOc(nenhuma), false);
+
+  // A leitura da peça falha: nada é criado (nem a OC sem vínculo às cegas).
+  const falha = ambiente({ falham: ["service_order_parts"] });
+  const r = await rodar("create_purchase_order_from_so", args, falha);
+  assertStringIncludes(r.error, "Não consegui conferir a peça da OS");
+  assertEquals(falha.tabelas.purchase_orders.length, 3);
 });
 
 Deno.test("resumo do recebimento: o que chega, de quanto faltava, e quando nasce a conta a pagar", async () => {

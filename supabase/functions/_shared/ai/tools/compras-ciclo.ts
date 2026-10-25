@@ -83,8 +83,10 @@ export type LinhaDoRecebimento = { item: ItemDaOC; n: number; quantidade: number
 
 /**
  * Confere o recebimento ANTES da rotina do banco (receive_po), que não confere: se o item é da
- * OC, se a OC pode receber, se a quantidade cabe no que falta. E recusa item de texto livre — o
- * movimento de estoque exige produto, e um item assim derruba o recebimento inteiro.
+ * OC, se a OC pode receber, se a quantidade cabe no que falta. Item de texto livre recebe desde a
+ * Agenda de Produção, Fase 4 (P2): receive_po (20261027100200) sobe o recebido dele sem movimento
+ * de estoque (não há estoque de texto livre); até ali ele derrubava o recebimento inteiro e era
+ * recusado aqui.
  */
 // deno-lint-ignore no-explicit-any
 export async function resolverRecebimento(admin: any, args: Record<string, unknown>): Promise<
@@ -132,13 +134,15 @@ export async function resolverRecebimento(admin: any, args: Record<string, unkno
       return { erro: `Do item ${l.n} (${l.item.description}) só faltam ${l.faltava} (pedido ${l.item.quantity}, já recebido ${l.item.received_qty}). Confira a quantidade.` };
     }
   }
-  const semProduto = linhas.filter((l) => !l.item.product_id);
-  if (semProduto.length) {
-    return {
-      erro: `${semProduto.map((l) => `"${l.item.description}"`).join(", ")} não ${semProduto.length > 1 ? "são produtos" : "é produto"} do catálogo (item de texto livre): a rotina de recebimento dá entrada no estoque e recusa item sem produto — inclusive o resto do recebimento. Vincule o item a um produto (edite a OC na tela) ou receba os outros itens separadamente.`,
-    };
-  }
   return { oc, linhas };
+}
+
+/** O que acontece com o estoque no recebimento: o item do catálogo entra; o de texto livre só fica recebido. */
+export function estoqueDoRecebimento(linhas: LinhaDoRecebimento[]): string {
+  const doCatalogo = linhas.filter((l) => l.item.product_id).length;
+  if (doCatalogo === linhas.length) return "Entra no estoque agora (movimento de compra).";
+  if (!doCatalogo) return "Fica recebido, sem estoque: é item de texto livre (não tem cadastro de produto).";
+  return "O que é do catálogo entra no estoque agora (movimento de compra); o de texto livre só fica recebido (não tem cadastro de produto).";
 }
 
 /** Resumo da confirmação de receive_purchase_order: a OC, o que chega, e o que acontece depois. */
@@ -160,7 +164,7 @@ export async function resumirRecebimento(admin: any, args: Record<string, unknow
   return [
     `Receber na *${oc.po_number}* — ${oc.suppliers?.trade_name || oc.suppliers?.name || "sem fornecedor"}:`,
     ...linhas.map((l) => `- ${l.quantidade} de ${l.faltava} que faltavam — ${l.n}. ${l.item.description}`),
-    "Entra no estoque agora (movimento de compra).",
+    estoqueDoRecebimento(linhas),
     completa
       ? (oc.supplier_id ? `Com isso a OC fica COMPLETA: gera conta a pagar de *${brl(total)}*, vencendo em ${prazo} dias.` : "Com isso a OC fica completa (sem fornecedor: não gera conta a pagar).")
       : "A OC fica *recebida em parte*: a conta a pagar só nasce quando tudo chegar.",

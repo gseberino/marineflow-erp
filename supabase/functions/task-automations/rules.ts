@@ -464,6 +464,24 @@ const osDaOcEncerrada = (p: { service_orders?: { status?: string | null } | null
   return st && OS_ENCERRADAS.includes(st) ? st : null;
 };
 
+/**
+ * Agenda de Produção, Fase 4 (P2): as OCs cujo material a agenda já acompanha — a pergunta "chegou?" aberta em ligado,
+ * ou tudo na mão — não se cobram (agenda_ocs_com_material_vivo, 20261027100200): {<po_id>: motivo}. A função ausente
+ * (a migration ainda não aplicada: PGRST202 do PostgREST, 42883 do Postgres) = nenhuma, como antes; outro erro lança
+ * (viraria "cobrar tudo" ou "nada a cobrar" calado).
+ */
+// deno-lint-ignore no-explicit-any
+async function ocsComMaterialVivo(db: any, ids: string[]): Promise<Record<string, string>> {
+  if (!ids.length) return {};
+  const { data, error } = await db.rpc('agenda_ocs_com_material_vivo', { p_po_ids: ids });
+  if (error) {
+    const code = String((error as { code?: unknown }).code ?? '');
+    if (code === 'PGRST202' || code === '42883') return {};
+    throw error;
+  }
+  return (data ?? {}) as Record<string, string>;
+}
+
 const r7: Rule = {
   id: 'r7',
   label: 'OC não recebida no prazo',
@@ -477,11 +495,15 @@ const r7: Rule = {
     // Com o embed novo, um erro de consulta viraria "nenhuma OC atrasada" calado: lança.
     if (error) throw error;
     const now = Date.now();
-    return (data || [])
+    const atrasadas = (data || [])
       .filter((p: any) => !osDaOcEncerrada(p))
       .filter((p: any) => p.expected_date
         ? p.expected_date < todayISO()
-        : new Date(p.created_at).getTime() < now - 7 * 86400000)
+        : new Date(p.created_at).getTime() < now - 7 * 86400000);
+    // O material que a agenda já acompanha (Fase 4, P2): ela pergunta ao dono se chegou, ou já registrou a chegada.
+    const vivas = await ocsComMaterialVivo(db, atrasadas.map((p: any) => p.id));
+    return atrasadas
+      .filter((p: any) => !vivas[p.id])
       .map((p: any) => ({
         automation_key: keyOf('r7', 'po', p.id),
         title: `Cobrar entrega da OC ${p.po_number} — ${p.suppliers?.name || 'fornecedor'}`,
@@ -502,6 +524,9 @@ const r7: Rule = {
     if (['received', 'cancelled'].includes(data.status)) return `OC ${data.status === 'received' ? 'recebida' : 'cancelada'}`;
     const encerrada = osDaOcEncerrada(data);
     if (encerrada) return `A OS da OC foi ${ROTULOS_STATUS_OS[encerrada as StatusOS].toLowerCase()}`;
+    // Fase 4 (P2): o motivo da agenda ("a agenda já pergunta se chegou" / "a agenda registrou que chegou").
+    const vivas = await ocsComMaterialVivo(db, [id]);
+    if (vivas[id]) return vivas[id];
     return null;
   },
 };

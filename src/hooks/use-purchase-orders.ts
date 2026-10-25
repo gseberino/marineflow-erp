@@ -367,6 +367,20 @@ export interface ShortageForPO {
   description: string;
   quantity: number;
   unitCost: number;
+  /**
+   * A linha da OS que este item compra (Agenda de Produção, Fase 4, P2): a peça (service_order_parts.id) ou a linha
+   * de texto livre (service_order_services.id). Vai para purchase_order_items: com ela, a OC cobre a falta daquela
+   * linha. O material citado pelo dono não tem vínculo (spec d9).
+   */
+  serviceOrderPartId?: string | null;
+  serviceOrderServiceId?: string | null;
+}
+
+/** O vínculo de linha da falta, só quando existe (a linha da OC sem vínculo continua a mesma de antes). */
+export function vinculoDaLinha(i: Pick<ShortageForPO, 'serviceOrderPartId' | 'serviceOrderServiceId'>) {
+  if (i.serviceOrderPartId) return { service_order_part_id: i.serviceOrderPartId };
+  if (i.serviceOrderServiceId) return { service_order_service_id: i.serviceOrderServiceId };
+  return {};
 }
 
 /**
@@ -425,12 +439,14 @@ export function useCreatePOsFromShortages() {
           .single();
         if (error) throw error;
 
+        // Fase 4 (P2): a linha da OC leva a linha da OS que ela compra (no máximo uma: o CHECK poi_um_vinculo_de_linha).
         const rows = items.map(i => ({
           purchase_order_id: (po as any).id,
           product_id: i.productId,
           description: i.description,
           quantity: i.quantity,
           unit_cost: i.unitCost,
+          ...vinculoDaLinha(i),
         }));
         const { error: itemsErr } = await supabase.from('purchase_order_items').insert(rows as any);
         if (itemsErr) throw itemsErr;

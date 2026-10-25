@@ -38,6 +38,25 @@ function cargoDeCompras(ctx: { userRole: string }) {
   return CARGOS_DE_COMPRAS.includes(ctx.userRole as Role) ? null : { error: "Ordem de compra é do administrador e do financeiro." };
 }
 
+/**
+ * A peça da OS que a OC pela OS compra (Agenda de Produção, Fase 4, P2): a ÚNICA linha de service_order_parts daquele
+ * produto na OS (pelo id do produto, nunca pelo nome). Duas ou nenhuma = sem vínculo ({id: null}), como antes.
+ * Leitura que falha devolve o erro (a OC não é criada às cegas).
+ */
+export async function pecaUnicaDoProduto(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  serviceOrderId: string,
+  productId: string | null,
+): Promise<{ id: string | null } | { erro: string }> {
+  if (!productId) return { id: null };
+  const { data, error } = await admin.from("service_order_parts").select("id")
+    .eq("service_order_id", serviceOrderId).eq("product_id", productId).limit(2);
+  if (error) return { erro: `Não consegui conferir a peça da OS (${error.message}). Nada foi criado.` };
+  const pecas = (data ?? []) as Array<{ id: string }>;
+  return { id: pecas.length === 1 ? pecas[0].id : null };
+}
+
 export const purchasingTools: ToolDef[] = [
   {
     name: "create_purchase_order",
@@ -102,7 +121,8 @@ export const purchasingTools: ToolDef[] = [
       "'informado' (no item e na lista 'informados') é o que o dono disse daquela linha, e já está na conta: " +
       "'comprado' ou 'a_caminho' conta como já pedido, 'na_mao' como disponível, 'parcial' = parte na mão e o " +
       "resto ainda falta; o item que ele dispensou não aparece. Repita como ele disse ('você disse que comprou'), " +
-      "sem inventar data de chegada.",
+      "sem inventar data de chegada. 'citado_pelo_dono' é material que o dono citou e não está no orçamento: " +
+      "entra em 'faltando' SEM PREÇO (o custo 0 não é preço; 'itens_sem_preco' diz quantos ficaram fora do custo estimado).",
     input_schema: {
       type: "object",
       properties: {
@@ -127,6 +147,8 @@ export const purchasingTools: ToolDef[] = [
         precisa_comprar: !!r.needsPurchase,
         itens_em_falta: faltando.length,
         custo_estimado: r.estimatedCost ?? 0,
+        // Agenda de Produção, Fase 4 (P2): o material citado pelo dono entra sem preço e fica fora do custo.
+        ...(r.semPreco ? { itens_sem_preco: r.semPreco } : {}),
         // Só o que falta, que é o que interessa para cotar. A lista completa fica
         // em `todos_os_itens` para quando a pergunta for sobre o que já tem.
         faltando: faltando.map((i) => ({
@@ -139,13 +161,16 @@ export const purchasingTools: ToolDef[] = [
           product_id: i.productId,
           custo_unitario_conhecido: i.unitCost,
           informado: i.informado ?? null,
+          ...(i.origin === "dono" ? { citado_pelo_dono: true } : {}),
         })),
         // Pedido em OC de texto livre desta OS e ainda não recebido (24/10/2026). Fica fora de
         // `faltando` (a RPC dá shortage 0), mas sem isto o assistente diria "não falta nada" com o
         // compressor da OS-00104 ainda na OC-00004. Só o que ainda está a caminho: se o dono disse
-        // que chegou (Fase 1, P2), o item vira 'ok' e sai daqui (fica em `informados`).
+        // que chegou (Fase 1, P2), o item vira 'ok' e sai daqui (fica em `informados`). Fase 4 (P2): o
+        // item de texto livre com OC ligada a ele, a caminho, também (com o número da OC).
         a_caminho: ((r.items ?? []) as any[])
-          .filter((i) => i.origin === "purchase_order" && i.status === "on_order")
+          .filter((i) => i.status === "on_order"
+            && (i.origin === "purchase_order" || (i.origin === "free_text" && i.purchaseOrderNumber)))
           .map((i) => ({
             descricao: i.description,
             quantidade: i.onOrder,
@@ -216,6 +241,11 @@ export const purchasingTools: ToolDef[] = [
       // desfaz a OC (antes ficava uma OC vazia de pé e a OS ia para "Aguardando peças" à toa).
       const lidos = itensDitos([{ product_id: args.product_id, descricao: args.product_name, quantidade: args.quantity, custo_unitario: args.unit_cost }]);
       if ("erro" in lidos) return { error: lidos.erro };
+      // Agenda de Produção, Fase 4 (P2): a OC liga à peça da OS quando a OS tem UMA só peça daquele produto (pelo id do
+      // produto, nunca pelo nome); duas ou nenhuma, sem vínculo (como antes). Leitura que falha não cria a OC.
+      const ligada = await pecaUnicaDoProduto(admin, String(args.service_order_id), lidos.itens[0]?.product_id ?? null);
+      if ("erro" in ligada) return { error: ligada.erro };
+      if (ligada.id && lidos.itens[0]) lidos.itens[0].service_order_part_id = ligada.id;
       const criada = await criarOC(admin, admin, {
         service_order_id: args.service_order_id,
         supplier_id: args.supplier_id ?? null,
@@ -237,7 +267,7 @@ export const purchasingTools: ToolDef[] = [
   {
     name: "receive_purchase_order",
     description:
-      "Registra o que CHEGOU de uma ordem de compra (tudo ou só parte) — a mesma rotina do 'Receber itens' da tela: dá entrada no estoque e, quando a OC fica completa, gera a conta a pagar. Ache a OC pelo número (ordem_de_compra: OC-00012 ou 12), pelo fornecedor ou pela OS. Diga os itens que chegaram em itens [{n (o número do item em get_purchase_order) ou descricao, quantidade}] — ex.: 'chegou incompleta, recebe só 2 das 4 baterias' = itens [{descricao:'bateria', quantidade:2}]; ou receber_tudo=true para tudo o que falta. Não recebe mais do que falta, nem OC cancelada.",
+      "Registra o que CHEGOU de uma ordem de compra (tudo ou só parte) — a mesma rotina do 'Receber itens' da tela: dá entrada no estoque (o item de texto livre só fica recebido: não tem estoque) e, quando a OC fica completa, gera a conta a pagar. Ache a OC pelo número (ordem_de_compra: OC-00012 ou 12), pelo fornecedor ou pela OS. Diga os itens que chegaram em itens [{n (o número do item em get_purchase_order) ou descricao, quantidade}] — ex.: 'chegou incompleta, recebe só 2 das 4 baterias' = itens [{descricao:'bateria', quantidade:2}]; ou receber_tudo=true para tudo o que falta. Não recebe mais do que falta, nem OC cancelada.",
     input_schema: {
       type: "object",
       properties: {
@@ -282,8 +312,8 @@ export const purchasingTools: ToolDef[] = [
       // Tudo conferido ANTES da rotina do banco (07/10/2026): receive_po não confere se o item é
       // da OC, nem a situação dela, e grava o movimento de estoque com a quantidade PEDIDA mesmo
       // quando corta o recebido no que faltava — receber 5 de um item que só faltavam 2 punha 5
-      // no estoque. Item de texto livre (sem produto) derruba a rotina inteira (o movimento de
-      // estoque exige produto): sai recusado aqui, com o motivo.
+      // no estoque. Item de texto livre (sem produto) recebe desde a Agenda de Produção, Fase 4 (P2):
+      // receive_po (20261027100200) sobe o received_qty dele sem movimento de estoque.
       const pedido = await resolverRecebimento(admin, args);
       if ("erro" in pedido) return { error: pedido.erro, ...(pedido.opcoes ? { opcoes: pedido.opcoes } : {}) };
       const { oc, linhas } = pedido;
@@ -304,7 +334,12 @@ export const purchasingTools: ToolDef[] = [
           : r.all_received
           ? (oc.supplier_id ? "já existia" : "não gerada: a OC não tem fornecedor")
           : "ainda não: a conta a pagar nasce quando a OC fica completa (é a mesma regra da tela)",
-        estoque: "entrada registrada pelo movimento de compra",
+        // Fase 4 (P2): o item de texto livre fica recebido, sem estoque (não tem cadastro de produto).
+        estoque: linhas.every((l) => l.item.product_id)
+          ? "entrada registrada pelo movimento de compra"
+          : linhas.some((l) => l.item.product_id)
+          ? "entrada registrada pelo movimento de compra; o item de texto livre só ficou recebido (não tem estoque)"
+          : "sem entrada no estoque: item de texto livre (não tem cadastro de produto); ficou recebido",
       };
     },
   },

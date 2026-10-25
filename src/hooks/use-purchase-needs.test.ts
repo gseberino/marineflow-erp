@@ -11,6 +11,10 @@
 //     chegar (revisão de 23/10);
 //  6. (Fase 1, P2) a 5ª leitura, os_material: o que o dono disse entra na conta DEPOIS de comItensACaminho,
 //     com os MESMOS números de supabase/tests/agenda_fase1_material.sql (OS M, casos B); erro lança.
+//  7. (Fase 4, P2) a 6ª leitura, as linhas de OC desta OS ligadas a uma linha de serviço (purchase_order_items, com a
+//     OC embutida; fora de cancelada): o texto livre com OC ligada vira UM item, com os MESMOS números do caso L de
+//     purchase_needs_reserva_e_a_caminho.sql; o material citado pelo dono entra sem preço (caso O); a coluna ausente
+//     (42703, o front antes da migration) é "sem vínculo"; outro erro lança.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type Linha = Record<string, any>;
@@ -21,13 +25,19 @@ const banco = vi.hoisted(() => ({
   /** erro com código por tabela (o que o PostgREST devolve de verdade: PGRST205 = a tabela não existe) */
   erros: {} as Record<string, { code: string; message: string }>,
   lidas: [] as string[],
+  /** cada leitura com os filtros que levou ("eq purchase_orders.service_order_id L", "not service_order_service_id is null") */
+  consultas: [] as Array<{ tabela: string; filtros: string[] }>,
   classificacao: {} as Record<string, boolean>,
   classificacaoFalha: false,
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
+  /** "purchase_orders.status" lê o embed (como o PostgREST faz com o filtro na tabela embutida). */
+  const campo = (l: Linha, c: string) => c.split('.').reduce<any>((v, k) => (v == null ? v : v[k]), l);
   const from = (tabela: string) => {
     banco.lidas.push(tabela);
+    const consulta = { tabela, filtros: [] as string[] };
+    banco.consultas.push(consulta);
     const filtros: Array<(l: Linha) => boolean> = [];
     const ordens: Array<[string, boolean]> = [];
     let unico = false;
@@ -42,10 +52,17 @@ vi.mock('@/integrations/supabase/client', () => {
     };
     const q: any = {
       select: () => q,
-      eq: (c: string, v: unknown) => { filtros.push((l) => l[c] === v); return q; },
-      in: (c: string, vs: unknown[]) => { filtros.push((l) => vs.includes(l[c])); return q; },
-      is: (c: string, v: unknown) => { filtros.push((l) => (l[c] ?? null) === v); return q; },
-      gt: (c: string, v: number) => { filtros.push((l) => Number(l[c]) > v); return q; },
+      eq: (c: string, v: unknown) => { consulta.filtros.push(`eq ${c} ${v}`); filtros.push((l) => campo(l, c) === v); return q; },
+      neq: (c: string, v: unknown) => { consulta.filtros.push(`neq ${c} ${v}`); filtros.push((l) => campo(l, c) !== v); return q; },
+      not: (c: string, op: string, v: unknown) => {
+        consulta.filtros.push(`not ${c} ${op} ${v}`);
+        if (op !== 'is') throw new Error(`not ${op} não simulado`);
+        filtros.push((l) => (campo(l, c) ?? null) !== v);
+        return q;
+      },
+      in: (c: string, vs: unknown[]) => { filtros.push((l) => vs.includes(campo(l, c))); return q; },
+      is: (c: string, v: unknown) => { filtros.push((l) => (campo(l, c) ?? null) === v); return q; },
+      gt: (c: string, v: number) => { filtros.push((l) => Number(campo(l, c)) > v); return q; },
       order: (c: string, o?: { ascending?: boolean }) => { ordens.push([c, o?.ascending !== false]); return q; },
       maybeSingle: () => { unico = true; return q; },
       then: (ok: any, erro: any) => Promise.resolve(resultado()).then(ok, erro),
@@ -86,6 +103,35 @@ function material(id: string, so: string, over: Linha): Linha {
   };
 }
 
+// A OS L (Fase 4, P2): o caso L de purchase_needs_reserva_e_a_caminho.sql — uma linha de OC ligada, com a OC embutida
+// como o PostgREST devolve no purchase_orders!inner.
+const CONVERSAO_L = 'Conversão do sistema de refrigeração para 12V — TESTE L';
+function ligadaL(id: string, linha: string, numero: string, status: string, minuto: number, qtd: string, recebido: string): Linha {
+  return {
+    id, product_id: null, quantity: qtd, received_qty: recebido, service_order_service_id: linha,
+    purchase_orders: { po_number: numero, status, service_order_id: 'L', created_at: `2026-10-25T10:0${minuto}:00+00:00` },
+  };
+}
+function livreL(id: string, nome: string, qtd: number, preco: number, segundo: number): Linha {
+  return {
+    id, service_order_id: 'L', service_id: null, name_snapshot: nome, billing_unit_snapshot: 'unit', quantity: qtd,
+    unit_price_snapshot: preco, created_at: `2026-10-25T09:00:0${segundo}Z`,
+  };
+}
+function aCaminhoL(id: string, numero: string, descricao: string, qtd: number, pendente: number, custo: number, minuto: number): Linha {
+  return {
+    purchase_order_item_id: id, po_number: numero, service_order_id: 'L', product_id: null, description: descricao,
+    quantity: qtd, received_qty: qtd - pendente, pendente, unit_cost: custo, po_criada_em: `2026-10-25T10:0${minuto}:00+00:00`,
+    conta_como_ja_pedido: true,
+  };
+}
+// A OS O (Fase 4, P2): o caso O — o material citado pelo dono, com os ids em ordem (a conta lê por id).
+function donoO(n: number, descricao: string, qtd: string, situacao: string, naMao = '0.000'): Linha {
+  return material(`f5000000-0000-4000-8000-00000000000${n}`, 'O', {
+    descricao, origem: 'dono', situacao, quantidade_necessaria: qtd, quantidade_na_mao: naMao,
+  });
+}
+
 function montarBanco() {
   banco.tabelas = {
     service_orders: [
@@ -95,6 +141,8 @@ function montarBanco() {
       { id: 'E', status: 'open' },
       { id: 'G', status: 'awaiting_parts' },
       { id: 'M', status: 'open' },
+      { id: 'L', status: 'awaiting_parts' },
+      { id: 'O', status: 'open' },
     ],
     service_order_parts: [
       peca('a1', 'A', P1, 1, 'TESTE P5 — Cerbo GX', '2026-10-24T10:00:00Z'),
@@ -107,6 +155,7 @@ function montarBanco() {
       { ...peca('m2', 'M', 'pm2', 8, 'TESTE AG2 — Fusível', '2026-10-24T11:00:01Z'), unit_cost_snapshot: 25 },
       { ...peca('m3', 'M', 'pm3', 1, 'TESTE AG2 — Cabo', '2026-10-24T11:00:02Z'), unit_cost_snapshot: 210 },
       { ...peca('m4', 'M', 'pm4', 1, 'TESTE AG2 — Painel', '2026-10-24T11:00:03Z'), unit_cost_snapshot: 1250 },
+      { ...peca('o1', 'O', 'p-o', 1, 'TESTE P5 — Cabo O', '2026-10-25T11:00:00Z'), unit_cost_snapshot: 100 },
     ],
     service_order_services: [
       {
@@ -117,12 +166,17 @@ function montarBanco() {
         id: 'm5', service_order_id: 'M', service_id: null, name_snapshot: 'Conector de cabo de dados AG2',
         billing_unit_snapshot: 'unit', quantity: 2, unit_price_snapshot: 120, created_at: '2026-10-24T11:00:04Z',
       },
+      livreL('l1', 'Cabo PP 2x2,5mm (caso L)', 10, 12, 1),
+      livreL('l2', 'Terminal olhal 6mm (caso L)', 4, 3, 2),
+      livreL('l3', CONVERSAO_L, 1, 2500, 3),
+      livreL('l4', 'Bomba de porão 12V (caso L)', 2, 300, 4),
+      livreL('l5', 'Fusível MIDI 100A (caso L)', 3, 40, 5),
     ],
     product_availability: [
       { id: P1, stock_quantity: 1, reserved_quantity: 1 },
       { id: P2, stock_quantity: 2, reserved_quantity: 2 },
       { id: P3, stock_quantity: 0, reserved_quantity: 0 },
-      ...['pm1', 'pm2', 'pm3', 'pm4'].map((id) => ({ id, stock_quantity: 0, reserved_quantity: 0 })),
+      ...['pm1', 'pm2', 'pm3', 'pm4', 'p-o'].map((id) => ({ id, stock_quantity: 0, reserved_quantity: 0 })),
     ],
     // O que a VIEW devolve: toda OC draft/sent/partial. A da OS faturada (E1) e a de 61 dias (E2) vêm
     // com conta_como_ja_pedido = false — não abatem a falta, e o hook tem de filtrar isso.
@@ -157,9 +211,24 @@ function montarBanco() {
         description: 'Compressor 12V TESTE', quantity: 1, received_qty: 0, pendente: 1, unit_cost: 0,
         po_criada_em: '2026-10-24T09:02:00Z', conta_como_ja_pedido: true,
       },
+      // OS L: a view só traz as OCs abertas (a L4 recebida e a L5 cancelada não); a L6 é sem vínculo.
+      aCaminhoL('i-l1', 'OC-TESTE-P5-L1', 'Cabo PP 2x2,5mm', 6, 6, 12, 1),
+      aCaminhoL('i-l2', 'OC-TESTE-P5-L2', 'Terminal olhal 6mm', 4, 3, 3, 2),
+      aCaminhoL('i-l3', 'OC-TESTE-P5-L3', 'Compressor TESTE L', 1, 1, 0, 3),
+      aCaminhoL('i-l6', 'OC-TESTE-P5-L6', 'Suporte TESTE L', 1, 1, 5, 6),
     ],
-    // Se o hook voltar a ler a tabela crua, o teste acusa (ver "nunca lê purchase_order_items").
-    purchase_order_items: [{ product_id: P3, quantity: 50, received_qty: 0, purchase_orders: { status: 'sent' } }],
+    // Se o hook voltar a ler a tabela crua para o "já pedido", o teste acusa (ver "o já pedido não vem de
+    // purchase_order_items"): a 1ª linha é uma OC enviada de 50 cabos, sem vínculo de linha. As outras são as linhas
+    // ligadas da OS L (Fase 4, P2) — o caso L de purchase_needs_reserva_e_a_caminho.sql —, com a OC embutida.
+    purchase_order_items: [
+      { id: 'poi-armadilha', product_id: P3, quantity: 50, received_qty: 0, service_order_service_id: null,
+        purchase_orders: { po_number: 'OC-ARMADILHA', status: 'sent', service_order_id: 'E', created_at: '2026-10-24T08:00:00+00:00' } },
+      ligadaL('i-l1', 'l1', 'OC-TESTE-P5-L1', 'sent', 1, '6.000', '0.000'),
+      ligadaL('i-l2', 'l2', 'OC-TESTE-P5-L2', 'partial', 2, '4.000', '1.000'),
+      ligadaL('i-l3', 'l3', 'OC-TESTE-P5-L3', 'draft', 3, '1.000', '0.000'),
+      ligadaL('i-l4', 'l4', 'OC-TESTE-P5-L4', 'received', 4, '2.000', '0.000'),
+      ligadaL('i-l5', 'l1', 'OC-TESTE-P5-L5', 'cancelled', 5, '5.000', '0.000'),
+    ],
     // O que o PostgREST devolve de os_material (numeric como string). As linhas da OS M são as do dono;
     // a da OS A foi copiada pela sincronização (fonte estoque) e não muda nada.
     os_material: [
@@ -170,9 +239,15 @@ function montarBanco() {
       material('om5', 'M', { service_order_service_id: 'm5', origem: 'texto_livre', situacao: 'comprado', quantidade_necessaria: '2.000' }),
       material('om6', 'M', { service_order_service_id: 'm5', origem: 'dono', situacao: 'dispensado', quantidade_necessaria: '4.000' }),
       material('oa1', 'A', { service_order_part_id: 'a1', situacao: 'na_mao', fonte: 'estoque', quantidade_na_mao: '1.000' }),
+      donoO(1, 'Parafuso inox M6 (citado)', '8.000', 'falta'),
+      donoO(2, 'Abraçadeira (citada)', '2.000', 'comprado'),
+      donoO(3, 'Fita de autofusão (citada)', '3.000', 'a_caminho', '1.000'),
+      donoO(4, 'Graxa (citada)', '1.000', 'dispensado'),
+      donoO(5, 'Silicone (citado)', '1.000', 'na_mao', '1.000'),
+      donoO(6, 'Lixa (citada)', '5.000', 'falta', '2.000'),
     ],
   };
-  banco.classificacao = { [CONVERSAO]: false };
+  banco.classificacao = { [CONVERSAO]: false, [CONVERSAO_L]: false };
 }
 
 beforeEach(() => {
@@ -180,6 +255,7 @@ beforeEach(() => {
   banco.falham = new Set();
   banco.erros = {};
   banco.lidas = [];
+  banco.consultas = [];
   banco.classificacaoFalha = false;
 });
 
@@ -259,16 +335,74 @@ describe('fetchPurchaseNeeds — já pedido e a caminho pela view', () => {
     expect(r.items[0]).toMatchObject({ origin: 'purchase_order', status: 'on_order', purchaseOrderNumber: 'OC-TESTE-P5-6' });
   });
 
-  it('nunca lê purchase_order_items (o "já pedido" com status no código saiu)', async () => {
+  it('o já pedido não vem de purchase_order_items: a única leitura dela é a das linhas ligadas desta OS (Fase 4)', async () => {
     for (const os of ['A', 'B', 'D', 'E', 'G']) await fetchPurchaseNeeds(os);
-    expect(banco.lidas).not.toContain('purchase_order_items');
     expect(banco.lidas).toContain('v_oc_itens_a_caminho');
     expect(banco.lidas).toContain('service_orders');
+    const leituras = banco.consultas.filter((c) => c.tabela === 'purchase_order_items');
+    expect(leituras).toHaveLength(5);
+    for (const c of leituras) {
+      expect(c.filtros).toContain('not service_order_service_id is null');
+      expect(c.filtros).toContain('neq purchase_orders.status cancelled');
+      expect(c.filtros.some((f) => f.startsWith('eq purchase_orders.service_order_id '))).toBe(true);
+    }
+    // A armadilha (OC de 50 cabos sem vínculo, da OS E) não entrou: o cabo da E segue com 1 já pedido.
+    const r = await fetchPurchaseNeeds('E');
+    expect(r.items.find((i) => i.origin === 'part')).toMatchObject({ onOrder: 1, shortage: 1 });
+  });
+});
+
+describe('fetchPurchaseNeeds — a OC ligada e o material citado (Fase 4, P2)', () => {
+  it('OS L: os MESMOS números do caso L de purchase_needs_reserva_e_a_caminho.sql (L1, L2)', async () => {
+    const r = await fetchPurchaseNeeds('L');
+    expect(r.items.map((i) => [i.sourceId, i.origin, i.status, i.available, i.onOrder, i.shortage, i.purchaseOrderNumber ?? null])).toEqual([
+      ['l1', 'free_text', 'uncatalogued', 0, 6, 4, 'OC-TESTE-P5-L1'],
+      ['l2', 'free_text', 'on_order', 1, 3, 0, 'OC-TESTE-P5-L2'],
+      ['l4', 'free_text', 'ok', 2, 0, 0, 'OC-TESTE-P5-L4'],
+      ['l5', 'free_text', 'uncatalogued', 0, 0, 3, null],
+      ['i-l3', 'purchase_order', 'on_order', 0, 1, 0, 'OC-TESTE-P5-L3'],
+      ['i-l6', 'purchase_order', 'on_order', 0, 1, 0, 'OC-TESTE-P5-L6'],
+    ]);
+    expect(r.shortages.map((s) => s.sourceId)).toEqual(['l1', 'l5']);
+    expect(r.shortageCount).toBe(2);
+    expect(r.estimatedCost).toBe(168);
+  });
+
+  it('OS O: os MESMOS números do caso O (O1, O2): o material citado no fim, sem preço; semPreco 2', async () => {
+    const r = await fetchPurchaseNeeds('O');
+    const id = (n: number) => `f5000000-0000-4000-8000-00000000000${n}`;
+    expect(r.items.map((i) => [i.sourceId, i.origin, i.status, i.available, i.onOrder, i.shortage, i.unitCost])).toEqual([
+      ['o1', 'part', 'missing', 0, 0, 1, 100],
+      [id(1), 'dono', 'uncatalogued', 0, 0, 8, 0],
+      [id(2), 'dono', 'on_order', 0, 2, 0, 0],
+      [id(3), 'dono', 'on_order', 1, 2, 0, 0],
+      [id(6), 'dono', 'uncatalogued', 2, 0, 3, 0],
+    ]);
+    expect(r.items.find((i) => i.sourceId === id(1))).toMatchObject({ description: 'Parafuso inox M6 (citado)', semPreco: true });
+    expect(r.shortages.map((s) => s.sourceId)).toEqual(['o1', id(1), id(6)]);
+    expect(r.shortageCount).toBe(3);
+    expect(r.estimatedCost).toBe(100);
+    expect(r.semPreco).toBe(2);
+  });
+
+  it('o vínculo ainda não existe (42703, o front publicado antes da migration): a conta de antes, sem vínculo', async () => {
+    banco.erros = { purchase_order_items: { code: '42703', message: 'column purchase_order_items.service_order_service_id does not exist' } };
+    const r = await fetchPurchaseNeeds('L');
+    // Sem o vínculo: os 4 textos livres pedem compra inteiros e as 4 linhas da view ficam a caminho, como antes.
+    expect(r.shortageCount).toBe(4);
+    expect(r.items.filter((i) => i.origin === 'purchase_order').map((i) => i.sourceId)).toEqual(['i-l1', 'i-l2', 'i-l3', 'i-l6']);
+  });
+
+  it('as linhas ligadas com outro erro (permissão, rede, timeout) lançam', async () => {
+    for (const code of ['42501', '57014', 'PGRST301']) {
+      banco.erros = { purchase_order_items: { code, message: `falha ${code}` } };
+      await expect(fetchPurchaseNeeds('L'), code).rejects.toMatchObject({ code });
+    }
   });
 });
 
 describe('fetchPurchaseNeeds — leitura com erro lança', () => {
-  for (const tabela of ['service_orders', 'service_order_parts', 'service_order_services', 'product_availability', 'v_oc_itens_a_caminho', 'os_material']) {
+  for (const tabela of ['service_orders', 'service_order_parts', 'service_order_services', 'product_availability', 'v_oc_itens_a_caminho', 'os_material', 'purchase_order_items']) {
     it(`erro em ${tabela} lança (não vira "nada a comprar")`, async () => {
       banco.falham.add(tabela);
       await expect(fetchPurchaseNeeds('E')).rejects.toMatchObject({ message: `falha em ${tabela}` });

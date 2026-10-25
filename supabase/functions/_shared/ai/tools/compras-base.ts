@@ -45,7 +45,28 @@ export async function generatePONumber(admin: any): Promise<string> {
   return `OC-${String(seq).padStart(5, "0")}`;
 }
 
-export type ItemNovoDaOC = { product_id?: string | null; description: string; quantity: number; unit_cost: number };
+export type ItemNovoDaOC = {
+  product_id?: string | null;
+  description: string;
+  quantity: number;
+  unit_cost: number;
+  /**
+   * A linha da OS que o item compra (Agenda de Produção, Fase 4, P2): a peça ou a linha de texto livre. Copiada da
+   * cotação (quote_request_items) ou da peça da OS; com ela, a OC cobre a falta daquela linha. No máximo uma.
+   */
+  service_order_part_id?: string | null;
+  service_order_service_id?: string | null;
+};
+
+/**
+ * O vínculo de linha do item, só quando existe (sem ele, a linha da OC é a mesma de antes, e grava antes da migration
+ * 20261027100000 também); a peça vence (o CHECK poi_um_vinculo_de_linha aceita um só).
+ */
+function vinculoDoItem(it: ItemNovoDaOC): Record<string, string> {
+  if (it.service_order_part_id) return { service_order_part_id: it.service_order_part_id };
+  if (it.service_order_service_id) return { service_order_service_id: it.service_order_service_id };
+  return {};
+}
 
 /**
  * Cria a OC com número e itens — o que a tela faz em useCreatePurchaseOrder. Duas correções
@@ -90,6 +111,7 @@ export async function criarOC(
       description: it.description,
       quantity: it.quantity,
       unit_cost: it.unit_cost,
+      ...vinculoDoItem(it),
     })));
     if (itemErr) {
       const { error: delErr } = await db.from("purchase_orders").delete().eq("id", po.id);
@@ -427,19 +449,28 @@ export async function gerarOCDaCotacao(
         : "Esse fornecedor não tem preço registrado nesta cotação — registre os preços dele antes de gerar a OC.",
     };
   }
+  // Agenda de Produção, Fase 4 (P2): + a linha da OS de cada item (a peça ou a linha de texto livre), copiada para a OC.
   const { data: itens, error: iErr } = await db.from("quote_request_items")
-    .select("id, product_id, description, quantity, position")
+    .select("id, product_id, description, quantity, position, service_order_part_id, service_order_service_id")
     .in("id", [...porItem.keys()]);
   if (iErr) return { erro: `Não consegui ler os itens da cotação (${iErr.message}).` };
-  const linhas = ((itens ?? []) as Array<{ id: string; product_id: string | null; description: string; quantity: number; position: number }>)
-    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-    .map((it) => {
-      const quantity = Number(it.quantity) || 1;
-      const unit_cost = porItem.get(it.id)!.unit_price;
-      return { product_id: it.product_id ?? null, description: it.description, quantity, unit_cost, subtotal: Math.round(quantity * unit_cost * 100) / 100 };
-    });
+  type ItemDaCotacao = {
+    id: string; product_id: string | null; description: string; quantity: number; position: number;
+    service_order_part_id?: string | null; service_order_service_id?: string | null;
+  };
+  const ordenados = ((itens ?? []) as ItemDaCotacao[]).sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  const linhas = ordenados.map((it) => {
+    const quantity = Number(it.quantity) || 1;
+    const unit_cost = porItem.get(it.id)!.unit_price;
+    return { product_id: it.product_id ?? null, description: it.description, quantity, unit_cost, subtotal: Math.round(quantity * unit_cost * 100) / 100 };
+  });
   if (!linhas.length) return { erro: "Não consegui montar os itens da OC a partir da cotação." };
   const total = Math.round(linhas.reduce((a, l) => a + l.subtotal, 0) * 100) / 100;
+  // O vínculo vai só para a OC (a resposta da ferramenta mostra os itens como antes); criarOC grava um só, a peça antes.
+  const itensDaOC: ItemNovoDaOC[] = ordenados.map((it, k) => {
+    const { subtotal: _s, ...l } = linhas[k];
+    return { ...l, service_order_part_id: it.service_order_part_id ?? null, service_order_service_id: it.service_order_service_id ?? null };
+  });
 
   const criada = await criarOC(db, admin, {
     supplier_id: p.supplierId,
@@ -449,7 +480,7 @@ export async function gerarOCDaCotacao(
     status: "draft",
     total_amount: total,
     ...(p.userId ? { created_by: p.userId } : {}),
-  }, linhas.map(({ subtotal: _s, ...l }) => l));
+  }, itensDaOC);
   if ("erro" in criada) return { erro: criada.erro };
 
   const { error: fErr } = await db.from("quote_requests")

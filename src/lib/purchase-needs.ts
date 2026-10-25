@@ -25,9 +25,15 @@
  * (`comItensACaminho`): não pede compra, mas não deixa a OS parecer pronta. Esse não
  * tem corte de idade: a linha não abate nada, então cortá-la só a esconderia.
  *
+ * A OC que diz de qual linha da OS ela compra (Agenda de Produção, Fase 4, P2 — a linha de OC
+ * com service_order_service_id, `comOcLigada`): o item de texto livre passa a ser UM item — a
+ * caminho enquanto a OC está aberta, na mão quando ela é recebida — e a linha da OC não se
+ * repete como item "a caminho". É o espelho da CTE `ligadas` de os_necessidade_bruta.
+ *
  * Por último entra o que o DONO disse de cada linha (os_material, Agenda de Produção,
  * 24/10/2026 — `aplicarSituacaoDoMaterial`): comprado ou a caminho conta como já pedido, na
- * mão como disponível, dispensado sai. É o espelho de aplicar_os_material, a última camada
+ * mão como disponível, dispensado sai; e (Fase 4, P2) o material que ele CITOU e não está no
+ * orçamento entra na lista, sem preço. É o espelho de aplicar_os_material, a última camada
  * de get_os_purchase_needs.
  *
  * O que entra na conta (decisão do dono, 29/07/2026):
@@ -55,15 +61,16 @@ export type NeedStatus =
   | 'uncatalogued';
 
 /**
- * De onde vem a linha: peça do catálogo, material de texto livre da OS ou item de
- * texto livre de OC da própria OS que ainda não chegou ('purchase_order').
+ * De onde vem a linha: peça do catálogo, material de texto livre da OS, item de texto
+ * livre de OC da própria OS que ainda não chegou ('purchase_order') ou material que o
+ * dono citou e não está no orçamento ('dono', Agenda de Produção, Fase 4, P2: sem preço).
  */
-export type NeedOrigin = 'part' | 'free_text' | 'purchase_order';
+export type NeedOrigin = 'part' | 'free_text' | 'purchase_order' | 'dono';
 
 export interface PurchaseNeedItem {
   /**
-   * id da linha de origem (service_order_parts.id, service_order_services.id ou,
-   * para 'purchase_order', purchase_order_items.id)
+   * id da linha de origem (service_order_parts.id, service_order_services.id, para
+   * 'purchase_order' purchase_order_items.id e, para 'dono', os_material.id)
    */
   sourceId: string;
   origin: NeedOrigin;
@@ -81,8 +88,13 @@ export interface PurchaseNeedItem {
   status: NeedStatus;
   /** custo unitário conhecido, para estimar o investimento */
   unitCost: number;
-  /** só em origin 'purchase_order': a OC em que o item foi pedido ("OC-00004") */
+  /**
+   * a OC em que o item foi pedido ("OC-00004"): em origin 'purchase_order' e, desde a Fase 4 (P2),
+   * no item de texto livre com OC ligada a ele (a aberta mais antiga; sem aberta, a mais antiga)
+   */
   purchaseOrderNumber?: string;
+  /** só em origin 'dono': o material citado pelo dono não tem preço (unitCost 0, fora do custo estimado) */
+  semPreco?: boolean;
   /**
    * O que o dono (ou o fornecedor, a nota, o Pix) disse da linha em os_material, quando isso mudou
    * a conta do item (`aplicarSituacaoDoMaterial`): 'comprado' e 'a_caminho' contam como já pedido,
@@ -105,6 +117,11 @@ export interface PurchaseNeeds {
   estimatedCost: number;
   /** true quando há qualquer item a comprar — é o gatilho do aviso e da regra R16 */
   needsPurchase: boolean;
+  /**
+   * quantos itens a comprar não têm preço (o material citado pelo dono, Fase 4, P2) — o custo
+   * estimado não os conta. Só vem quando há linha do dono na lista.
+   */
+  semPreco?: number;
 }
 
 // ── Entradas (o hook/RPC preenche; a lib não busca nada) ─────────────────────
@@ -327,6 +344,11 @@ export interface ItemACaminhoInput {
   /** quantidade − recebido */
   pendente: number | string;
   unit_cost?: number | string | null;
+  /**
+   * A linha de serviço/texto livre da OS que esta linha da OC compra (purchase_order_items.service_order_service_id,
+   * Fase 4). Ligada a um item de texto livre da conta, ela já está nele (`comOcLigada`) e não entra aqui.
+   */
+  service_order_service_id?: string | null;
 }
 
 /**
@@ -335,10 +357,16 @@ export interface ItemACaminhoInput {
  * estimatedCost e needsPurchase NÃO mudam: nada disso pede compra. Mas a OS também não
  * fica com a lista vazia — o que a faria parecer pronta com o compressor ainda no
  * fornecedor (OS-00104, OC-00004). A ordem é a de quem chama (OC mais antiga primeiro).
+ *
+ * Fase 4 (P2): a linha ligada a um item de texto livre da conta não entra (o item já a conta:
+ * `comOcLigada`); a ligada a uma linha que não está na conta (a "Conversão…" que o classificador
+ * lê como serviço) continua a caminho, como antes — a mesma regra da CTE a_caminho do banco.
  */
 export function comItensACaminho(needs: PurchaseNeeds, linhas: ItemACaminhoInput[]): PurchaseNeeds {
+  const livres = new Set(needs.items.filter((i) => i.origin === 'free_text').map((i) => i.sourceId));
   const aCaminho: PurchaseNeedItem[] = linhas
     .filter((l) => num(l.pendente) > 0)
+    .filter((l) => !l.service_order_service_id || !livres.has(l.service_order_service_id))
     .map((l) => ({
       sourceId: l.purchase_order_item_id,
       origin: 'purchase_order',
@@ -357,6 +385,85 @@ export function comItensACaminho(needs: PurchaseNeeds, linhas: ItemACaminhoInput
   return { ...needs, items: [...needs.items, ...aCaminho] };
 }
 
+// ── A OC ligada à linha de texto livre (Agenda de Produção, Fase 4, P2 — 25/10/2026) ────────────────
+
+/**
+ * Uma linha de OC DESTA OS ligada a uma linha de serviço/texto livre (purchase_order_items com
+ * service_order_service_id), com a situação e o número da OC dela. OC cancelada não conta (quem lê
+ * pode mandar; ela é ignorada aqui também).
+ */
+export interface LinhaDeOcLigadaInput {
+  purchase_order_item_id: string;
+  service_order_service_id: string;
+  po_number: string;
+  po_status: string;
+  /** purchase_orders.created_at: a ordem (a OC mais antiga primeiro) */
+  po_criada_em: string;
+  quantity: number | string;
+  received_qty: number | string | null;
+}
+
+const OC_ABERTA = new Set(['draft', 'sent', 'partial']);
+
+/**
+ * Espelho da CTE `ligadas` de os_necessidade_bruta (20261027100200): o item de texto livre com OC
+ * desta OS ligada a ele é refeito — disponível = o recebido (a OC recebida conta inteira, mesmo sem
+ * received_qty), já pedido = o pendente das OCs abertas, falta = o resto; status ok / on_order /
+ * uncatalogued e o número da OC (a aberta mais antiga com pendente; sem ela, a mais antiga). Depois
+ * refaz shortages (rank, falta desc, posição), shortageCount, estimatedCost e needsPurchase. Sem linha
+ * ligada a um item de texto livre da conta, devolve o MESMO objeto.
+ */
+export function comOcLigada(needs: PurchaseNeeds, linhas: LinhaDeOcLigadaInput[]): PurchaseNeeds {
+  const livres = new Set(needs.items.filter((i) => i.origin === 'free_text').map((i) => i.sourceId));
+  const porLinha = new Map<string, LinhaDeOcLigadaInput[]>();
+  for (const l of linhas) {
+    if (l.po_status === 'cancelled' || !livres.has(l.service_order_service_id)) continue;
+    porLinha.set(l.service_order_service_id, [...(porLinha.get(l.service_order_service_id) ?? []), l]);
+  }
+  if (!porLinha.size) return needs;
+
+  // A ordem do banco (po.created_at, poi.id), por ponto de código: localeCompare poderia pesar o hífen do uuid diferente.
+  const cmp = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+  const ordem = (a: LinhaDeOcLigadaInput, b: LinhaDeOcLigadaInput) =>
+    cmp(a.po_criada_em, b.po_criada_em) || cmp(a.purchase_order_item_id, b.purchase_order_item_id);
+  const itens = needs.items.map((item, idx) => {
+    const daLinha = item.origin === 'free_text' ? porLinha.get(item.sourceId) : undefined;
+    if (!daLinha) return { item, idx };
+    const ordenadas = [...daLinha].sort(ordem);
+    let pendente = 0;
+    let recebido = 0;
+    for (const l of ordenadas) {
+      const q = num(l.quantity);
+      const rcv = num(l.received_qty);
+      if (OC_ABERTA.has(l.po_status)) pendente += Math.max(q - rcv, 0);
+      recebido += l.po_status === 'received' ? Math.max(q, rcv) : rcv;
+    }
+    const aberta = ordenadas.find((l) => OC_ABERTA.has(l.po_status) && num(l.quantity) > num(l.received_qty));
+    const r = item.required;
+    const available = Math.min(r, recebido);
+    const onOrder = Math.min(r - available, pendente);
+    const shortage = Math.max(r - available - onOrder, 0);
+    const status: NeedStatus = shortage === 0 && r - available === 0 ? 'ok' : shortage === 0 ? 'on_order' : 'uncatalogued';
+    return {
+      item: { ...item, available, onOrder, shortage, status, purchaseOrderNumber: (aberta ?? ordenadas[0]).po_number },
+      idx,
+    };
+  });
+  const shortages = itens
+    .filter(({ item }) => item.shortage > 0)
+    .sort((a, b) => RANK_DA_FALTA[a.item.status] - RANK_DA_FALTA[b.item.status]
+      || b.item.shortage - a.item.shortage || a.idx - b.idx)
+    .map(({ item }) => item);
+  return {
+    ...needs,
+    items: itens.map(({ item }) => item),
+    shortages,
+    shortageCount: shortages.length,
+    estimatedCost: shortages.reduce((s, i) => s + i.shortage * i.unitCost, 0),
+    needsPurchase: shortages.length > 0,
+  };
+}
+
 // ── O que o dono informou (Agenda de Produção, Fase 1, P2 — 24/10/2026) ──────────────────────────────
 
 /**
@@ -373,6 +480,10 @@ export interface LinhaDeMaterialInput {
   fonte: string | null;
   quantidade_necessaria: number | string;
   quantidade_na_mao: number | string;
+  /** os_material.id: o sourceId do material citado pelo dono (origem 'dono', Fase 4, P2) */
+  id?: string;
+  /** a descrição do material citado pelo dono */
+  descricao?: string | null;
 }
 
 /**
@@ -404,12 +515,18 @@ function linhaDoItem(item: PurchaseNeedItem, linhas: LinhaDeMaterialInput[]): Li
  *   • falta e status pela régua de computePurchaseNeeds (texto livre com falta segue 'uncatalogued';
  *     o item a caminho por OC nunca pede compra) e `informado` no item que o fato mudou.
  * Depois refaz shortages (rank, falta desc, posição original), shortageCount, estimatedCost e
- * needsPurchase. Sem fato que mude algum item, devolve o MESMO objeto. A linha que o dono citou
- * (origem 'dono') não entra na compra nesta fase.
+ * needsPurchase. Sem fato que mude algum item e sem material citado pelo dono, devolve o MESMO objeto.
+ *
+ * Fase 4 (P2, spec d9): a linha que o dono CITOU (origem 'dono') em falta, comprada ou a caminho entra
+ * no fim de items — origin 'dono', sem produto, unitCost 0 e semPreco; comprado/a caminho conta como já
+ * pedido (necessário − na mão), falta é 'uncatalogued'. Entra em shortages e em shortageCount (a R16
+ * herda), não soma no custo estimado; `semPreco` no topo conta os itens a comprar sem preço. Dispensado
+ * e na mão não entram. Qualquer fonte: a linha do dono só nasce do que ele disse.
  */
 export function aplicarSituacaoDoMaterial(needs: PurchaseNeeds, linhas: LinhaDeMaterialInput[]): PurchaseNeeds {
   const informadas = linhas.filter((l) => (FONTES_INFORMADAS as readonly string[]).includes(l.fonte ?? ''));
-  if (!informadas.length) return needs;
+  const doDono = itensDoDono(linhas);
+  if (!informadas.length && !doDono.length) return needs;
 
   let mudouAlgo = false;
   const itens: Array<{ item: PurchaseNeedItem; idx: number }> = [];
@@ -449,8 +566,10 @@ export function aplicarSituacaoDoMaterial(needs: PurchaseNeeds, linhas: LinhaDeM
     const informado = (l.situacao === 'falta' ? 'parcial' : l.situacao) as SituacaoInformada;
     itens.push({ item: { ...item, available, onOrder, shortage, status, informado }, idx });
   });
-  if (!mudouAlgo) return needs;
+  if (!mudouAlgo && !doDono.length) return needs;
 
+  // O material citado pelo dono vem depois de todos os itens da conta (a posição na ordem dos shortages).
+  doDono.forEach((item, k) => itens.push({ item, idx: needs.items.length + k }));
   const shortages = itens
     .filter(({ item }) => item.shortage > 0)
     .sort((a, b) => RANK_DA_FALTA[a.item.status] - RANK_DA_FALTA[b.item.status]
@@ -463,7 +582,39 @@ export function aplicarSituacaoDoMaterial(needs: PurchaseNeeds, linhas: LinhaDeM
     shortageCount: shortages.length,
     estimatedCost: shortages.reduce((s, i) => s + i.shortage * i.unitCost, 0),
     needsPurchase: shortages.length > 0,
+    ...(doDono.length ? { semPreco: doDono.filter((i) => i.shortage > 0).length } : {}),
   };
+}
+
+/** As situações em que o material citado pelo dono entra na lista de compra (a CTE do_dono_base). */
+const SITUACOES_DO_DONO_NA_COMPRA = new Set(['falta', 'comprado', 'a_caminho']);
+
+/** Espelho das CTEs do_dono_base/do_dono de aplicar_os_material (20261027100200), na ordem das linhas. */
+function itensDoDono(linhas: LinhaDeMaterialInput[]): PurchaseNeedItem[] {
+  return linhas
+    .filter((l) => l.origem === 'dono' && SITUACOES_DO_DONO_NA_COMPRA.has(l.situacao) && num(l.quantidade_necessaria) > 0)
+    .map((l) => {
+      const required = Math.max(num(l.quantidade_necessaria), 0);
+      const available = Math.min(Math.max(num(l.quantidade_na_mao), 0), required);
+      const onOrder = l.situacao === 'comprado' || l.situacao === 'a_caminho' ? required - available : 0;
+      const shortage = Math.max(required - available - onOrder, 0);
+      const status: NeedStatus = shortage === 0 && required - available === 0 ? 'ok'
+        : shortage === 0 ? 'on_order' : 'uncatalogued';
+      return {
+        sourceId: l.id ?? '',
+        origin: 'dono' as const,
+        productId: null,
+        description: (l.descricao ?? '').trim() || 'Material',
+        unit: null,
+        required,
+        available,
+        onOrder,
+        shortage,
+        status,
+        unitCost: 0,
+        semPreco: true,
+      };
+    });
 }
 
 /** Rótulo curto para chip/selo na UI. */

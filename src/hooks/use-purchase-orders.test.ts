@@ -47,7 +47,7 @@ const h = vi.hoisted(() => {
 vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: (t: string) => h.builder(t), rpc: h.rpc } }));
 vi.mock('sonner', () => ({ toast: h.toast }));
 
-import { mensagemDaOC, useCreatePOFromOS, useCreatePOsFromShortages } from './use-purchase-orders';
+import { mensagemDaOC, useCreatePOFromOS, useCreatePOsFromShortages, vinculoDaLinha } from './use-purchase-orders';
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -145,5 +145,37 @@ describe.each([
 describe('mensagemDaOC', () => {
   it('com aviso, só a base (o aviso vai em outro toast)', () => {
     expect(mensagemDaOC('Ordem de compra criada.', { mudou: false, texto: 'x', aviso: 'erro' })).toBe('Ordem de compra criada.');
+  });
+});
+
+// Agenda de Produção, Fase 4 (P2): a OC gerada das faltas leva a linha da OS que cada item compra (a peça ou a linha de
+// texto livre); o material citado pelo dono vai sem vínculo — e a linha sem vínculo nasce como antes, sem as chaves.
+describe('useCreatePOsFromShortages — o vínculo de linha', () => {
+  it('grava service_order_part_id / service_order_service_id por item; sem vínculo, a linha de antes', async () => {
+    const { result } = renderHook(() => useCreatePOsFromShortages(), { wrapper });
+    await result.current.mutateAsync({
+      serviceOrderId: 'os-1',
+      items: [
+        { productId: 'p1', description: 'Bateria', quantity: 1, unitCost: 900, serviceOrderPartId: 'sop-1' },
+        { productId: null, description: 'Cabo 35mm', quantity: 3, unitCost: 45, serviceOrderServiceId: 'sos-1' },
+        { productId: null, description: 'Parafusos (citado por você)', quantity: 12, unitCost: 0, serviceOrderPartId: null, serviceOrderServiceId: null },
+      ],
+    });
+    const linhas = h.estado.chamadas
+      .filter((c) => c.tabela === 'purchase_order_items')
+      .flatMap((c) => c.ops.filter((op) => op[0] === 'insert').flatMap((op) => op[1] as any[]));
+    expect(linhas.map((l) => [l.description, l.service_order_part_id ?? null, l.service_order_service_id ?? null])).toEqual([
+      ['Bateria', 'sop-1', null],
+      ['Cabo 35mm', null, 'sos-1'],
+      ['Parafusos (citado por você)', null, null],
+    ]);
+    const semVinculo = linhas.find((l) => l.description.startsWith('Parafusos'))!;
+    expect('service_order_part_id' in semVinculo || 'service_order_service_id' in semVinculo).toBe(false);
+  });
+
+  it('vinculoDaLinha: a peça vence; nenhum = {}', () => {
+    expect(vinculoDaLinha({ serviceOrderPartId: 'p', serviceOrderServiceId: 's' })).toEqual({ service_order_part_id: 'p' });
+    expect(vinculoDaLinha({ serviceOrderServiceId: 's' })).toEqual({ service_order_service_id: 's' });
+    expect(vinculoDaLinha({})).toEqual({});
   });
 });

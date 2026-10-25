@@ -109,3 +109,55 @@ describe('diálogo de compras', () => {
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 });
+
+// Agenda de Produção, Fase 4 (P2): o texto livre com OC ligada (um item só: a caminho pela OC, ou já recebido) e o
+// material que o dono citou e não está no orçamento (sem preço).
+const LIGADO_E_CITADO: PurchaseNeeds = {
+  serviceOrderId: 'os-l',
+  items: [
+    {
+      sourceId: 'sos-1', origin: 'free_text', productId: null, description: 'Cabo PP 2x2,5mm', unit: null, required: 10,
+      available: 0, onOrder: 10, shortage: 0, status: 'on_order', unitCost: 12, purchaseOrderNumber: 'OC-00020',
+    },
+    {
+      sourceId: 'sos-2', origin: 'free_text', productId: null, description: 'Bomba de porão 12V', unit: null, required: 2,
+      available: 2, onOrder: 0, shortage: 0, status: 'ok', unitCost: 300, purchaseOrderNumber: 'OC-00021',
+    },
+    {
+      sourceId: 'om-1', origin: 'dono', productId: null, description: 'Parafusos inox do suporte', unit: null, required: 12,
+      available: 0, onOrder: 0, shortage: 12, status: 'uncatalogued', unitCost: 0, semPreco: true,
+    },
+    {
+      sourceId: 'sop-1', origin: 'part', productId: 'p1', description: 'Fusível MIDI 100A', unit: 'un', required: 2,
+      available: 0, onOrder: 0, shortage: 2, status: 'missing', unitCost: 30,
+    },
+  ],
+  shortages: [],
+  shortageCount: 2,
+  estimatedCost: 60,
+  needsPurchase: true,
+  semPreco: 1,
+};
+LIGADO_E_CITADO.shortages = [LIGADO_E_CITADO.items[3], LIGADO_E_CITADO.items[2]];
+
+describe('Fase 4 (P2): OC ligada ao texto livre e o material citado pelo dono', () => {
+  it('diálogo: o texto livre ligado diz a OC (a caminho ou chegou), sem "disponível"; o citado diz "sem preço"; o custo diz quantos ficaram fora', () => {
+    estado.needs = LIGADO_E_CITADO;
+    comRota(<PurchaseNeedsDialog open onOpenChange={() => {}} serviceOrderId="os-l" serviceOrderNumber="OS-00120" />);
+    expect(screen.getByText('2 itens precisam de compra')).toBeTruthy();
+    expect(screen.getByText(/pedido na OC-00020 — chegou\?/)).toBeTruthy();
+    expect(screen.getByText(/chegou pela OC-00021/)).toBeTruthy();
+    expect(screen.getByText(/citado por você \(sem preço\)/)).toBeTruthy();
+    expect(screen.getByText(/Fora 1 item citado por você, sem preço\./)).toBeTruthy();
+    // O texto livre ligado não mostra "disponível 0" (diria que falta).
+    expect(screen.queryByText(/precisa 10 · disponível/)).toBeNull();
+  });
+
+  it('faixa: o citado na lista do que falta diz "citado por você (sem preço)"; o ligado aparece a caminho com a OC', () => {
+    estado.needs = LIGADO_E_CITADO;
+    comRota(<PurchaseNeedsBanner serviceOrderId="os-l" serviceOrderNumber="OS-00120" status="awaiting_parts" />);
+    expect(screen.getByText('2 itens precisam de compra')).toBeTruthy();
+    expect(screen.getByText(/citado por você \(sem preço\)/)).toBeTruthy();
+    expect(screen.getByText(/pedido na OC-00020, chegou\?/)).toBeTruthy();
+  });
+});

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  aplicarSituacaoDoMaterial, comItensACaminho, computePurchaseNeeds, descontarReservaDaPropriaOs,
+  aplicarSituacaoDoMaterial, comItensACaminho, comOcLigada, computePurchaseNeeds, descontarReservaDaPropriaOs,
   isPurchasableFreeText, osReservaEstoque, STATUS_QUE_RESERVAM,
-  type ComputeInput, type FreeTextInput, type LinhaDeMaterialInput, type PartInput, type PurchaseNeeds,
+  type ComputeInput, type FreeTextInput, type ItemACaminhoInput, type LinhaDeMaterialInput, type LinhaDeOcLigadaInput,
+  type PartInput, type PurchaseNeeds,
 } from './purchase-needs';
 
 /* Pina a regra de necessidade LÍQUIDA. Se alguém voltar a comparar
@@ -454,5 +455,157 @@ describe('aplicarSituacaoDoMaterial — o que o dono disse entra na conta', () =
     expect(r.shortageCount).toBe(5);
     // Mesma entrada, mesma saída.
     expect(aplicarSituacaoDoMaterial(puro, [linha({ service_order_part_id: 'x5', quantidade_necessaria: 4, quantidade_na_mao: 1 })])).toEqual(r);
+  });
+});
+
+// ── A OC ligada ao item de texto livre e o material citado pelo dono (Agenda de Produção, Fase 4, P2) ──────
+// Os MESMOS cenários dos casos L e O de supabase/tests/purchase_needs_reserva_e_a_caminho.sql e de
+// src/hooks/use-purchase-needs.test.ts (OS L e OS O): o espelho de os_necessidade_bruta (CTE ligadas) e de
+// aplicar_os_material (CTE do_dono) da migration 20261027100200.
+describe('comOcLigada — a OC desta OS ligada ao item de texto livre (caso L)', () => {
+  const livre = (id: string, nome: string, quantity: number, preco: number, material = true): FreeTextInput => ({
+    id, service_id: null, name_snapshot: nome, billing_unit_snapshot: 'unit', quantity, unit_price_snapshot: preco,
+    is_material: material,
+  });
+  const bruto = (): PurchaseNeeds => computePurchaseNeeds(input({
+    serviceOrderId: 'os-l',
+    freeTextItems: [
+      livre('l1', 'Cabo PP 2x2,5mm (caso L)', 10, 12),
+      livre('l2', 'Terminal olhal 6mm (caso L)', 4, 3),
+      livre('l3', 'Conversão do sistema de refrigeração para 12V — TESTE L', 1, 2500, false),
+      livre('l4', 'Bomba de porão 12V (caso L)', 2, 300),
+      livre('l5', 'Fusível MIDI 100A (caso L)', 3, 40),
+    ],
+  }));
+  const ligada = (purchase_order_item_id: string, service_order_service_id: string, po_number: string, po_status: string,
+    minuto: number, quantity: number | string, received_qty: number | string | null): LinhaDeOcLigadaInput => ({
+    purchase_order_item_id, service_order_service_id, po_number, po_status,
+    po_criada_em: `2026-10-25T10:0${minuto}:00+00:00`, quantity, received_qty,
+  });
+  // OC-L1 enviada: 6 do cabo; OC-L2 recebida em parte: 1 de 4 terminais; OC-L3: o compressor ligado à Conversão (serviço);
+  // OC-L4 marcada recebida à mão (received_qty 0): as 2 bombas; OC-L5 cancelada: 5 do cabo. O PostgREST manda numeric
+  // como string.
+  const LIGADAS: LinhaDeOcLigadaInput[] = [
+    ligada('i-l1', 'l1', 'OC-TESTE-P5-L1', 'sent', 1, '6.000', '0.000'),
+    ligada('i-l2', 'l2', 'OC-TESTE-P5-L2', 'partial', 2, '4.000', '1.000'),
+    ligada('i-l3', 'l3', 'OC-TESTE-P5-L3', 'draft', 3, 1, 0),
+    ligada('i-l4', 'l4', 'OC-TESTE-P5-L4', 'received', 4, 2, 0),
+    ligada('i-l5', 'l1', 'OC-TESTE-P5-L5', 'cancelled', 5, 5, 0),
+  ];
+  // O que a view v_oc_itens_a_caminho devolve (draft/sent/partial, pendente > 0, OC mais antiga primeiro), com a linha
+  // da OS que cada uma compra; a OC-L6 é sem vínculo.
+  const A_CAMINHO: ItemACaminhoInput[] = [
+    { purchase_order_item_id: 'i-l1', po_number: 'OC-TESTE-P5-L1', description: 'Cabo PP 2x2,5mm', quantity: 6, pendente: 6, unit_cost: 12, service_order_service_id: 'l1' },
+    { purchase_order_item_id: 'i-l2', po_number: 'OC-TESTE-P5-L2', description: 'Terminal olhal 6mm', quantity: 4, pendente: 3, unit_cost: 3, service_order_service_id: 'l2' },
+    { purchase_order_item_id: 'i-l3', po_number: 'OC-TESTE-P5-L3', description: 'Compressor TESTE L', quantity: 1, pendente: 1, unit_cost: 0, service_order_service_id: 'l3' },
+    { purchase_order_item_id: 'i-l6', po_number: 'OC-TESTE-P5-L6', description: 'Suporte TESTE L', quantity: 1, pendente: 1, unit_cost: 5, service_order_service_id: null },
+  ];
+  const linhaDoItem = (r: PurchaseNeeds) => r.items.map((i) =>
+    [i.sourceId, i.origin, i.status, i.available, i.onOrder, i.shortage, i.purchaseOrderNumber ?? null]);
+
+  it('L1 items: cabo falta 4 (OC-L1), terminal 1 na mão + 3 pedidos (OC-L2), bomba ok (OC-L4), fusível falta 3; a caminho só o compressor e o suporte', () => {
+    const r = comItensACaminho(comOcLigada(bruto(), LIGADAS), A_CAMINHO);
+    expect(linhaDoItem(r)).toEqual([
+      ['l1', 'free_text', 'uncatalogued', 0, 6, 4, 'OC-TESTE-P5-L1'],
+      ['l2', 'free_text', 'on_order', 1, 3, 0, 'OC-TESTE-P5-L2'],
+      ['l4', 'free_text', 'ok', 2, 0, 0, 'OC-TESTE-P5-L4'],
+      ['l5', 'free_text', 'uncatalogued', 0, 0, 3, null],
+      ['i-l3', 'purchase_order', 'on_order', 0, 1, 0, 'OC-TESTE-P5-L3'],
+      ['i-l6', 'purchase_order', 'on_order', 0, 1, 0, 'OC-TESTE-P5-L6'],
+    ]);
+  });
+
+  it('L2 shortages [cabo (4), fusível (3)], contagem 2, custo 168, precisa comprar', () => {
+    const r = comItensACaminho(comOcLigada(bruto(), LIGADAS), A_CAMINHO);
+    expect(r.shortages.map((s) => s.sourceId)).toEqual(['l1', 'l5']);
+    expect(r.shortageCount).toBe(2);
+    expect(r.estimatedCost).toBe(168);
+    expect(r.needsPurchase).toBe(true);
+  });
+
+  it('sem linha ligada a um item da conta (só a da Conversão, só cancelada, ou nenhuma): o MESMO objeto', () => {
+    const b = bruto();
+    expect(comOcLigada(b, [])).toBe(b);
+    expect(comOcLigada(b, [LIGADAS[2], LIGADAS[4]])).toBe(b);
+    expect(comOcLigada(b, [ligada('i-x', 'linha-de-outra-os', 'OC-X', 'sent', 6, 1, 0)])).toBe(b);
+  });
+
+  it('a ordem das OCs não depende de quem chama: a aberta mais antiga dá o número; sem aberta, a mais antiga', () => {
+    const b = bruto();
+    const duas = [ligada('i-b', 'l1', 'OC-B', 'sent', 8, 2, 0), ligada('i-a', 'l1', 'OC-A', 'sent', 7, 2, 0)];
+    expect(comOcLigada(b, duas).items[0]).toMatchObject({ onOrder: 4, shortage: 6, purchaseOrderNumber: 'OC-A' });
+    const recebidas = [ligada('i-b', 'l1', 'OC-B', 'received', 8, 6, 6), ligada('i-a', 'l1', 'OC-A', 'received', 7, 4, 4)];
+    expect(comOcLigada(b, recebidas).items[0]).toMatchObject({ available: 10, status: 'ok', purchaseOrderNumber: 'OC-A' });
+    // A aberta já toda recebida não é "a aberta com pendente": vale a outra aberta.
+    const parcial = [ligada('i-a', 'l1', 'OC-A', 'partial', 7, 2, 2), ligada('i-b', 'l1', 'OC-B', 'sent', 8, 3, 0)];
+    expect(comOcLigada(b, parcial).items[0]).toMatchObject({ available: 2, onOrder: 3, shortage: 5, purchaseOrderNumber: 'OC-B' });
+  });
+
+  it('comItensACaminho sem a linha da OS (antes da Fase 4): tudo a caminho, como antes', () => {
+    const semVinculo = A_CAMINHO.map(({ service_order_service_id: _s, ...l }) => l);
+    expect(comItensACaminho(bruto(), semVinculo).items.filter((i) => i.origin === 'purchase_order')).toHaveLength(4);
+  });
+});
+
+describe('aplicarSituacaoDoMaterial — o material citado pelo dono entra na compra (caso O)', () => {
+  const bruto = (): PurchaseNeeds => computePurchaseNeeds(input({
+    serviceOrderId: 'os-o',
+    parts: [{ id: 'o1', product_id: 'p-o', quantity: 1, unit_cost_snapshot: 100, product_name: 'TESTE P5 — Cabo O' }],
+  }));
+  const id = (n: number) => `f5000000-0000-4000-8000-00000000000${n}`;
+  const dono = (n: number, descricao: string, quantidade_necessaria: number, situacao: string, quantidade_na_mao = 0): LinhaDeMaterialInput => ({
+    id: id(n), descricao, service_order_part_id: null, service_order_service_id: null,
+    purchase_order_item_id: null, origem: 'dono', situacao, fonte: 'dono',
+    quantidade_necessaria: `${quantidade_necessaria}.000`, quantidade_na_mao: `${quantidade_na_mao}.000`,
+  });
+  const DO_DONO: LinhaDeMaterialInput[] = [
+    dono(1, 'Parafuso inox M6 (citado)', 8, 'falta'),
+    dono(2, 'Abraçadeira (citada)', 2, 'comprado'),
+    dono(3, 'Fita de autofusão (citada)', 3, 'a_caminho', 1),
+    dono(4, 'Graxa (citada)', 1, 'dispensado'),
+    dono(5, 'Silicone (citado)', 1, 'na_mao', 1),
+    dono(6, 'Lixa (citada)', 5, 'falta', 2),
+  ];
+
+  it('O1 items: a peça; parafuso falta 8; abraçadeira e fita já pedidas; lixa 2 na mão e falta 3 — sem preço; graxa e silicone fora', () => {
+    const r = aplicarSituacaoDoMaterial(bruto(), DO_DONO);
+    expect(r.items.map((i) => [i.sourceId, i.origin, i.status, i.required, i.available, i.onOrder, i.shortage, i.unitCost, i.semPreco ?? null]))
+      .toEqual([
+        ['o1', 'part', 'missing', 1, 0, 0, 1, 100, null],
+        [id(1), 'dono', 'uncatalogued', 8, 0, 0, 8, 0, true],
+        [id(2), 'dono', 'on_order', 2, 0, 2, 0, 0, true],
+        [id(3), 'dono', 'on_order', 3, 1, 2, 0, 0, true],
+        [id(6), 'dono', 'uncatalogued', 5, 2, 0, 3, 0, true],
+      ]);
+    const doDono = r.items.filter((i) => i.origin === 'dono');
+    expect(doDono.every((i) => i.productId === null && i.unit === null && /\(citad/.test(i.description))).toBe(true);
+  });
+
+  it('O2 shortages [peça, parafuso, lixa], contagem 3, custo 100 (o do dono fora), semPreco 2', () => {
+    const r = aplicarSituacaoDoMaterial(bruto(), DO_DONO);
+    expect(r.shortages.map((s) => s.sourceId)).toEqual(['o1', id(1), id(6)]);
+    expect(r.shortageCount).toBe(3);
+    expect(r.estimatedCost).toBe(100);
+    expect(r.semPreco).toBe(2);
+    expect(r.needsPurchase).toBe(true);
+  });
+
+  it('só dispensado e na mão (ou nenhuma linha do dono): o MESMO objeto, sem semPreco', () => {
+    const b = bruto();
+    expect(aplicarSituacaoDoMaterial(b, [DO_DONO[3], DO_DONO[4]])).toBe(b);
+    expect(aplicarSituacaoDoMaterial(b, [])).toBe(b);
+    expect('semPreco' in aplicarSituacaoDoMaterial(b, [DO_DONO[1]])).toBe(true);
+  });
+
+  it('o citado vem depois dos itens da conta, também com um fato informado na peça (a ordem do banco)', () => {
+    const b = bruto();
+    const r = aplicarSituacaoDoMaterial(b, [
+      DO_DONO[0],
+      { service_order_part_id: 'o1', service_order_service_id: null, purchase_order_item_id: null, origem: 'peca',
+        situacao: 'comprado', fonte: 'dono', quantidade_necessaria: 1, quantidade_na_mao: 0 },
+    ]);
+    expect(r.items.map((i) => [i.sourceId, i.status, i.informado ?? null])).toEqual([['o1', 'on_order', 'comprado'], [id(1), 'uncatalogued', null]]);
+    expect(r.shortages.map((s) => s.sourceId)).toEqual([id(1)]);
+    expect(r.semPreco).toBe(1);
   });
 });

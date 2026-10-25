@@ -8,6 +8,8 @@
 //  4. erro da RPC lança (não vira "nada a comprar");
 //  5. (Fase 1, P2) o que o dono disse em os_material chega como `informado` (no item e em `informados`), a
 //     descrição ensina o que cada valor quer dizer, e o item que ele disse que chegou sai de a_caminho.
+//  6. (Fase 4, P2) o texto livre com OC ligada a caminho sai em a_caminho com a OC; o material citado pelo dono vai em
+//     faltando com citado_pelo_dono, sem preço, e itens_sem_preco conta quantos ficaram fora do custo.
 import { assertEquals, assertRejects, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { purchasingTools } from "./purchasing.ts";
 
@@ -152,6 +154,44 @@ Deno.test("get_purchase_needs: o compressor que o dono disse que chegou sai de a
   // deno-lint-ignore no-explicit-any
   const s: any = await tool.execute({ service_order_id: OS_00104 }, ctxCom({ data: semFato, error: null }).ctx);
   assertEquals(s.a_caminho, [{ descricao: "Compressor", quantidade: 1, ordem_de_compra: "OC-00004", informado: null }]);
+});
+
+// ── Fase 4 (P2): a OC ligada ao texto livre e o material citado pelo dono ─────────────────────────────
+// Os formatos que a RPC devolve nos casos L e O de supabase/tests/purchase_needs_reserva_e_a_caminho.sql.
+Deno.test("get_purchase_needs: o texto livre com OC ligada a caminho sai em a_caminho com a OC; recebido, não", async () => {
+  const ligado = {
+    sourceId: "sos-1", origin: "free_text", productId: null, description: "Cabo PP 2x2,5", unit: null, required: 10,
+    available: 0, onOrder: 10, shortage: 0, status: "on_order", unitCost: 12, purchaseOrderNumber: "OC-00020",
+  };
+  const data = { ...OS104_DEPOIS, items: [ligado] };
+  // deno-lint-ignore no-explicit-any
+  const r: any = await tool.execute({ service_order_id: OS_00104 }, ctxCom({ data, error: null }).ctx);
+  assertEquals(r.a_caminho, [{ descricao: "Cabo PP 2x2,5", quantidade: 10, ordem_de_compra: "OC-00020", informado: null }]);
+  assertEquals(r.faltando, []);
+  const recebido = { ...data, items: [{ ...ligado, available: 10, onOrder: 0, status: "ok" }] };
+  // deno-lint-ignore no-explicit-any
+  const s: any = await tool.execute({ service_order_id: OS_00104 }, ctxCom({ data: recebido, error: null }).ctx);
+  assertEquals(s.a_caminho, []);
+});
+
+Deno.test("get_purchase_needs: o material citado pelo dono vai em faltando marcado, sem preço, e itens_sem_preco conta", async () => {
+  const doDono = {
+    sourceId: "om-1", origin: "dono", productId: null, description: "parafusos inox do suporte", unit: null, required: 4,
+    available: 0, onOrder: 0, shortage: 4, status: "uncatalogued", unitCost: 0, semPreco: true,
+  };
+  const data = { ...OS104_DEPOIS, items: [doDono], shortages: [doDono], shortageCount: 1, needsPurchase: true, semPreco: 1 };
+  // deno-lint-ignore no-explicit-any
+  const r: any = await tool.execute({ service_order_id: OS_00104 }, ctxCom({ data, error: null }).ctx);
+  assertEquals(r.itens_em_falta, 1);
+  assertEquals(r.itens_sem_preco, 1);
+  assertEquals(r.faltando[0].citado_pelo_dono, true);
+  assertEquals(r.faltando[0].custo_unitario_conhecido, 0);
+  // Sem linha do dono, a resposta de antes (sem as chaves novas).
+  // deno-lint-ignore no-explicit-any
+  const sem: any = await tool.execute({ service_order_id: OS_00104 }, ctxCom({ data: OS104_DEPOIS, error: null }).ctx);
+  assertEquals("itens_sem_preco" in sem, false);
+  assertStringIncludes(tool.description, "'citado_pelo_dono'");
+  assertStringIncludes(tool.description, "SEM PREÇO");
 });
 
 Deno.test("get_purchase_needs: a descrição ensina o campo informado (tool registrada ≠ tool ensinada)", () => {

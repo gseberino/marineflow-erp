@@ -72,6 +72,14 @@ describe('status que reservam estoque', () => {
     expect(lista(m![1])).toEqual([...STATUS_QUE_RESERVAM].sort());
   });
 
+  // Fase 4 (P2): a conta bruta foi recriada em 20261027100200 (a OC ligada ao texto livre); a CTE `os` veio junto.
+  it('o TS = a CTE `os` de os_necessidade_bruta da Fase 4 (20261027100200)', () => {
+    const m = /so\.status\s+in\s*\(([^)]*)\)\s+as\s+reserva/i.exec(
+      corpo('20261027100200_agenda_fase4_compras.sql', 'os_necessidade_bruta'));
+    expect(m, 'a lista da reserva própria não foi encontrada na conta bruta da Fase 4').not.toBeNull();
+    expect(lista(m![1])).toEqual([...STATUS_QUE_RESERVAM].sort());
+  });
+
   it('os_necessidade_bruta é o corpo de get_os_purchase_needs de 150100, sem mudar uma linha', () => {
     expect(corpo('20261024160300_agenda_fase1_material.sql', 'os_necessidade_bruta'))
       .toBe(corpo('20261024150100_compras_reserva_propria_e_ja_pedido.sql', 'get_os_purchase_needs'));

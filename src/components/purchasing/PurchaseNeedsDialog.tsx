@@ -210,7 +210,10 @@ export function PurchaseNeedsDialog({
                 <p className="text-sm text-muted-foreground">
                   Investimento estimado no que falta:{' '}
                   <strong className="tabular-nums text-foreground">{fmtBRL(needs.estimatedCost)}</strong>
-                  <span className="block text-xs">pelo último custo conhecido — a cotação dá o número real.</span>
+                  <span className="block text-xs">
+                    pelo último custo conhecido — a cotação dá o número real.
+                    {!!needs.semPreco && ` Fora ${needs.semPreco === 1 ? '1 item citado por você, sem preço' : `${needs.semPreco} itens citados por você, sem preço`}.`}
+                  </span>
                 </p>
               )}
             </div>
@@ -237,6 +240,9 @@ export function PurchaseNeedsDialog({
                         description: s.description,
                         quantity: s.shortage,
                         unitCost: s.unitCost,
+                        // Fase 4 (P2): a linha da OS que a OC compra; o material citado pelo dono vai sem vínculo.
+                        serviceOrderPartId: s.origin === 'part' ? s.sourceId : null,
+                        serviceOrderServiceId: s.origin === 'free_text' ? s.sourceId : null,
                       })),
                     });
                     onOpenChange(false);
@@ -277,10 +283,19 @@ function NeedRow({ item }: { item: PurchaseNeedItem }) {
           {item.description}
         </p>
         {/* Item de texto livre pedido em OC da própria OS: não há estoque a mostrar
-            ("disponível 0" diria que falta), só a OC e a pergunta que importa. */}
-        {item.origin === 'purchase_order' ? (
+            ("disponível 0" diria que falta), só a OC e a pergunta que importa. Desde a Fase 4 (P2) o
+            item de texto livre com OC ligada a ele também: a caminho ("chegou?") ou já recebido. */}
+        {item.origin === 'purchase_order' || (item.origin === 'free_text' && item.purchaseOrderNumber && item.shortage === 0) ? (
           <p className="mt-0.5 text-xs text-muted-foreground">
-            precisa {fmtQty(item.required)} · pedido na {item.purchaseOrderNumber ?? 'OC'} — chegou?
+            precisa {fmtQty(item.required)} · {item.status === 'ok'
+              ? `chegou pela ${item.purchaseOrderNumber ?? 'OC'}`
+              : `pedido na ${item.purchaseOrderNumber ?? 'OC'} — chegou?`}
+          </p>
+        ) : item.origin === 'dono' ? (
+          /* Material que o dono citou e não está no orçamento (Fase 4, P2): sem cadastro e sem preço. */
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            precisa {fmtQty(item.required)} · citado por você (sem preço)
+            {item.onOrder > 0 && ` · pedido ${fmtQty(item.onOrder)}`}
           </p>
         ) : (
           <p className="mt-0.5 text-xs text-muted-foreground">

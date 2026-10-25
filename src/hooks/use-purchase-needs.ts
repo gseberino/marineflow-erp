@@ -1,12 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import {
-  aplicarSituacaoDoMaterial, comItensACaminho, computePurchaseNeeds, descontarReservaDaPropriaOs,
-  type ItemACaminhoInput, type LinhaDeMaterialInput, type PurchaseNeeds,
+  aplicarSituacaoDoMaterial, comItensACaminho, comOcLigada, computePurchaseNeeds, descontarReservaDaPropriaOs,
+  type ItemACaminhoInput, type LinhaDeMaterialInput, type LinhaDeOcLigadaInput, type PurchaseNeeds,
 } from '@/lib/purchase-needs';
 
 /** Os códigos de "a tabela não existe": PGRST205 (cache do PostgREST) e 42P01 (Postgres). */
 const TABELA_AUSENTE = new Set(['PGRST205', '42P01']);
+/** O código de "a coluna não existe" (Postgres 42703): o vínculo de linha da OC antes da migration 20261027100000. */
+const COLUNA_AUSENTE = '42703';
 
 /**
  * Necessidade de compra de uma OS. Busca os insumos e delega o cálculo para a lib
@@ -27,9 +29,16 @@ const TABELA_AUSENTE = new Set(['PGRST205', '42P01']);
  * OS não tem idade: a linha não abate falta, e cortá-la só a esconderia (revisão de
  * 23/10: a OC-00004 da OS-00104 sairia da conta em 12/12 com o compressor no fornecedor).
  *
+ * A OC que diz de qual linha da OS ela compra (Agenda de Produção, Fase 4, P2): as linhas de OC
+ * desta OS ligadas a uma linha de serviço (purchase_order_items.service_order_service_id), inclusive
+ * as já recebidas, refazem o item de texto livre (`comOcLigada`, o espelho da CTE `ligadas` de
+ * os_necessidade_bruta) e saem do "a caminho". Enquanto a coluna não existe (o front publicado antes
+ * da migration 20261027100000), a leitura conta como sem vínculo: a conta de antes.
+ *
  * Por último, o que o dono disse de cada linha (os_material, Agenda de Produção, 24/10/2026):
  * comprado ou a caminho conta como já pedido, na mão como disponível, dispensado sai — a
- * mesma camada final da RPC (aplicar_os_material). O técnico não lê os_material (RLS): a
+ * mesma camada final da RPC (aplicar_os_material) —, e (Fase 4, P2) o material que ele citou
+ * entra na lista, sem preço. O técnico não lê os_material (RLS): a
  * leitura volta vazia, sem erro, e ele vê a conta bruta, como na RPC. Enquanto a tabela não
  * existe (o front sai pela Vercel no push; a migration 20261024160000 espera o OK do dono), a
  * leitura conta como sem linhas: a conta bruta, a mesma da RPC que está no ar.
@@ -39,7 +48,7 @@ const TABELA_AUSENTE = new Set(['PGRST205', '42P01']);
  * o material na conta.
  */
 export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<PurchaseNeeds> {
-  const [osRes, partsRes, servicesRes, aCaminhoRes, materialRes] = await Promise.all([
+  const [osRes, partsRes, servicesRes, aCaminhoRes, materialRes, ligadasRes] = await Promise.all([
     // Só o status: decide se a OS reserva estoque (STATUS_QUE_RESERVAM).
     supabase
       .from('service_orders')
@@ -75,11 +84,20 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
       .order('purchase_order_item_id', { ascending: true }),
     // O que o dono disse de cada linha. A mesma ordem da RPC (por id): ela decide quem casa
     // primeiro se duas linhas apontarem para o mesmo item.
+    // Fase 4 (P2): + o id e a descrição (o material citado pelo dono entra na lista com eles).
     supabase
       .from('os_material')
-      .select('service_order_part_id, service_order_service_id, purchase_order_item_id, origem, situacao, fonte, quantidade_necessaria, quantidade_na_mao')
+      .select('id, descricao, service_order_part_id, service_order_service_id, purchase_order_item_id, origem, situacao, fonte, quantidade_necessaria, quantidade_na_mao')
       .eq('service_order_id', serviceOrderId)
       .order('id', { ascending: true }),
+    // Fase 4 (P2): as linhas de OC desta OS ligadas a uma linha de serviço, de OC fora de cancelada e de
+    // qualquer situação (a recebida também: é ela que põe o material na mão). A mesma CTE `ligadas` do banco.
+    supabase
+      .from('purchase_order_items')
+      .select('id, service_order_service_id, quantity, received_qty, purchase_orders!inner(po_number, status, service_order_id, created_at)')
+      .eq('purchase_orders.service_order_id', serviceOrderId)
+      .neq('purchase_orders.status', 'cancelled')
+      .not('service_order_service_id', 'is', null),
   ]);
   if (osRes.error) throw osRes.error;
   if (partsRes.error) throw partsRes.error;
@@ -89,6 +107,11 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
   // linhas" — a conta bruta, igual à RPC em produção antes da migration. Qualquer outro erro lança.
   if (materialRes.error && !TABELA_AUSENTE.has(String((materialRes.error as { code?: unknown }).code ?? ''))) {
     throw materialRes.error;
+  }
+  // O vínculo de linha: só a coluna que ainda não existe (42703) vira "sem vínculo" — a conta de antes. Qualquer
+  // outro erro lança.
+  if (ligadasRes.error && String((ligadasRes.error as { code?: unknown }).code ?? '') !== COLUNA_AUSENTE) {
+    throw ligadasRes.error;
   }
 
   const parts = (partsRes.data ?? []).map((p: any) => ({
@@ -165,8 +188,23 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
     availability,
     onOrder,
   });
+  // As linhas de OC ligadas (Fase 4, P2). O embed !inner vem como objeto (a FK é de muitos para um).
+  const ligadas: LinhaDeOcLigadaInput[] = (ligadasRes.error ? [] : (ligadasRes.data ?? []) as any[])
+    .flatMap((l: any) => (l.service_order_service_id && l.purchase_orders
+      ? [{
+          purchase_order_item_id: l.id,
+          service_order_service_id: l.service_order_service_id,
+          po_number: l.purchase_orders.po_number ?? '',
+          po_status: l.purchase_orders.status ?? '',
+          po_criada_em: l.purchase_orders.created_at ?? '',
+          quantity: l.quantity ?? 0,
+          received_qty: l.received_qty ?? 0,
+        }]
+      : []));
+  const linhaDaOc = new Map(ligadas.map((l) => [l.purchase_order_item_id, l.service_order_service_id]));
   // A view tipa toda coluna como anulável; na origem (purchase_order_items/purchase_orders)
-  // nenhuma destas é nula.
+  // nenhuma destas é nula. A linha da OS que cada linha da OC compra vem da leitura acima (a view não precisa
+  // da coluna nova: o front publicado antes da migration continua lendo).
   const aCaminho: ItemACaminhoInput[] = (aCaminhoRes.data ?? []).map((l) => ({
     purchase_order_item_id: l.purchase_order_item_id ?? '',
     po_number: l.po_number ?? '',
@@ -174,9 +212,10 @@ export async function fetchPurchaseNeeds(serviceOrderId: string): Promise<Purcha
     quantity: l.quantity ?? 0,
     pendente: l.pendente ?? 0,
     unit_cost: l.unit_cost,
+    service_order_service_id: linhaDaOc.get(l.purchase_order_item_id ?? '') ?? null,
   }));
   const linhas: LinhaDeMaterialInput[] = materialRes.data ?? [];
-  return aplicarSituacaoDoMaterial(comItensACaminho(needs, aCaminho), linhas);
+  return aplicarSituacaoDoMaterial(comItensACaminho(comOcLigada(needs, ligadas), aCaminho), linhas);
 }
 
 export function usePurchaseNeeds(serviceOrderId: string | undefined, enabled = true) {

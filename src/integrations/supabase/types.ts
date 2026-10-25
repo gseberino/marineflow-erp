@@ -7698,6 +7698,8 @@ export type Database = {
           purchase_order_id: string
           quantity: number
           received_qty: number
+          service_order_part_id: string | null
+          service_order_service_id: string | null
           unit_cost: number
         }
         Insert: {
@@ -7708,6 +7710,8 @@ export type Database = {
           purchase_order_id: string
           quantity?: number
           received_qty?: number
+          service_order_part_id?: string | null
+          service_order_service_id?: string | null
           unit_cost?: number
         }
         Update: {
@@ -7718,6 +7722,8 @@ export type Database = {
           purchase_order_id?: string
           quantity?: number
           received_qty?: number
+          service_order_part_id?: string | null
+          service_order_service_id?: string | null
           unit_cost?: number
         }
         Relationships: [
@@ -7747,6 +7753,20 @@ export type Database = {
             columns: ["purchase_order_id"]
             isOneToOne: false
             referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_service_order_part_id_fkey"
+            columns: ["service_order_part_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_service_order_service_id_fkey"
+            columns: ["service_order_service_id"]
+            isOneToOne: false
+            referencedRelation: "service_order_services"
             referencedColumns: ["id"]
           },
         ]
@@ -13671,6 +13691,8 @@ export type Database = {
           quantity: number | null
           received_qty: number | null
           service_order_id: string | null
+          service_order_part_id: string | null
+          service_order_service_id: string | null
           unit_cost: number | null
         }
         Relationships: []

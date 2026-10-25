@@ -548,7 +548,16 @@ export function useCreatePOsFromQuote() {
         bySupplier.set(c.supplierId, list);
       }
 
-      const { generatePONumber } = await import('@/hooks/use-purchase-orders');
+      // Agenda de Produção, Fase 4 (P2): a linha da OC leva a linha da OS que o item da cotação compra (a peça ou a
+      // linha de texto livre de quote_request_items). Lido ANTES de criar qualquer OC: leitura que falha não cria nada.
+      const { data: vinculos, error: vinculosErr } = await supabase
+        .from('quote_request_items')
+        .select('id, service_order_part_id, service_order_service_id')
+        .in('id', [...new Set(params.choices.map(c => c.itemId))]);
+      if (vinculosErr) throw vinculosErr;
+      const vinculoDoItem = new Map((vinculos ?? []).map(v => [v.id, v]));
+
+      const { generatePONumber, vinculoDaLinha } = await import('@/hooks/use-purchase-orders');
       const created: { id: string; po_number: string }[] = [];
 
       for (const [supplierId, choices] of bySupplier) {
@@ -572,6 +581,10 @@ export function useCreatePOsFromQuote() {
           description: c.description,
           quantity: c.quantity,
           unit_cost: c.unitPrice,
+          ...vinculoDaLinha({
+            serviceOrderPartId: vinculoDoItem.get(c.itemId)?.service_order_part_id ?? null,
+            serviceOrderServiceId: vinculoDoItem.get(c.itemId)?.service_order_service_id ?? null,
+          }),
         }));
         const { error: itemsErr } = await supabase.from('purchase_order_items').insert(rows as any);
         if (itemsErr) throw itemsErr;

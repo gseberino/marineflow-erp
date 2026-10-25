@@ -1038,11 +1038,22 @@ Deno.test("isResolved r16: orçamento aprovado com falta não resolve; se deixar
     "Compra resolvida (em estoque ou já pedida)");
 });
 
-/** Banco de mentira das OCs: `.eq('id', x)` e `.in('status', ...)` filtram; o embed da OS vem pronto em cada linha. */
-function bancoDeOcs(linhas: unknown[], erro?: unknown) {
+/**
+ * Banco de mentira das OCs: `.eq('id', x)` e `.in('status', ...)` filtram; o embed da OS vem pronto em cada linha.
+ * Fase 4 (P2): a RPC agenda_ocs_com_material_vivo devolve `vivas` (por padrão, nenhuma) ou `erroRpc`; as chamadas ficam
+ * em `rpcs`.
+ */
+function bancoDeOcs(linhas: unknown[], erro?: unknown, rpc: { vivas?: Record<string, string>; erroRpc?: unknown } = {}) {
   const selects: string[] = [];
+  const rpcs: Array<{ nome: string; args: Record<string, unknown> }> = [];
   return {
     selects,
+    rpcs,
+    rpc(nome: string, args: Record<string, unknown>) {
+      rpcs.push({ nome, args });
+      if (nome !== "agenda_ocs_com_material_vivo") throw new Error(`rpc inesperada: ${nome}`);
+      return Promise.resolve(rpc.erroRpc ? { data: null, error: rpc.erroRpc } : { data: rpc.vivas ?? {}, error: null });
+    },
     from(tabela: string) {
       if (tabela !== "purchase_orders") throw new Error(`não devia ler ${tabela}`);
       // deno-lint-ignore no-explicit-any
@@ -1100,6 +1111,70 @@ Deno.test("isResolved r7: a OS da OC encerrou → resolve; OS viva segue; erro l
   assertEquals(await r7.isResolved(bancoDeOcs([]), k("x")), "OC não existe mais");
   let lancou = false;
   try { await r7.isResolved(bancoDeOcs([], { code: "57014", message: "timeout" }), k("x")); } catch { lancou = true; }
+  assertEquals(lancou, true);
+});
+
+// Agenda de Produção, Fase 4 (P2): a OC cujo material a agenda já acompanha (a pergunta "chegou?" aberta em ligado, ou
+// tudo na mão) não se cobra — agenda_ocs_com_material_vivo. A função ausente (a migration 20261027100200 ainda não
+// aplicada) é como hoje; outro erro lança.
+Deno.test("find r7: pula a OC cujo material a agenda acompanha; a RPC recebe só as atrasadas", async () => {
+  const linhas = [
+    oc("oc-perguntada", "awaiting_parts"),
+    oc("oc-na-mao", "awaiting_parts"),
+    oc("oc-cobrar", "awaiting_parts"),
+    oc("oc-no-prazo", "awaiting_parts", { expected_date: "2999-01-01" }),
+    oc("oc-os-faturada", "invoiced"),
+  ];
+  const db = bancoDeOcs(linhas, undefined, {
+    vivas: { "oc-perguntada": "a agenda já pergunta se chegou", "oc-na-mao": "a agenda registrou que chegou" },
+  });
+  const tarefas = await ruleById("r7")!.find(db);
+  assertEquals(tarefas.map((t) => t.automation_key), ["r7:po:oc-cobrar"]);
+  assertEquals(db.rpcs, [{
+    nome: "agenda_ocs_com_material_vivo",
+    args: { p_po_ids: ["oc-perguntada", "oc-na-mao", "oc-cobrar"] },
+  }]);
+  // Nenhuma atrasada: nem chama a RPC.
+  const semAtraso = bancoDeOcs([oc("oc-no-prazo", "awaiting_parts", { expected_date: "2999-01-01" })]);
+  assertEquals(await ruleById("r7")!.find(semAtraso), []);
+  assertEquals(semAtraso.rpcs, []);
+});
+
+Deno.test("find r7: a RPC ausente (PGRST202, 42883) é como hoje; outro erro lança", async () => {
+  for (const code of ["PGRST202", "42883"]) {
+    const db = bancoDeOcs([oc("oc-a", "awaiting_parts"), oc("oc-b", null)], undefined,
+      { erroRpc: { code, message: "Could not find the function public.agenda_ocs_com_material_vivo" } });
+    const tarefas = await ruleById("r7")!.find(db);
+    assertEquals(tarefas.map((t) => t.automation_key).sort(), ["r7:po:oc-a", "r7:po:oc-b"], code);
+  }
+  for (const code of ["57014", "42501", "PGRST301"]) {
+    let lancou = false;
+    try {
+      await ruleById("r7")!.find(bancoDeOcs([oc("oc-a", "awaiting_parts")], undefined, { erroRpc: { code, message: `falha ${code}` } }));
+    } catch { lancou = true; }
+    assertEquals(lancou, true, code);
+  }
+});
+
+Deno.test("isResolved r7: o motivo da agenda fecha a tarefa; sem motivo segue; ausente é como hoje; erro lança", async () => {
+  const r7 = ruleById("r7")!;
+  const k = (id: string) => ({ automation_key: `r7:po:${id}` });
+  assertEquals(await r7.isResolved(bancoDeOcs([oc("x", "awaiting_parts")], undefined, { vivas: { x: "a agenda já pergunta se chegou" } }), k("x")),
+    "a agenda já pergunta se chegou");
+  assertEquals(await r7.isResolved(bancoDeOcs([oc("x", "awaiting_parts")], undefined, { vivas: { x: "a agenda registrou que chegou" } }), k("x")),
+    "a agenda registrou que chegou");
+  assertEquals(await r7.isResolved(bancoDeOcs([oc("x", "awaiting_parts")], undefined, { vivas: { y: "a agenda registrou que chegou" } }), k("x")),
+    null);
+  assertEquals(await r7.isResolved(bancoDeOcs([oc("x", "awaiting_parts")], undefined,
+    { erroRpc: { code: "PGRST202", message: "ausente" } }), k("x")), null);
+  // A OC recebida e a OS encerrada continuam vencendo antes (a RPC nem é chamada).
+  const recebida = bancoDeOcs([oc("x", "awaiting_parts", { status: "received" })], undefined, { vivas: { x: "a agenda registrou que chegou" } });
+  assertEquals(await r7.isResolved(recebida, k("x")), "OC recebida");
+  assertEquals(recebida.rpcs, []);
+  let lancou = false;
+  try {
+    await r7.isResolved(bancoDeOcs([oc("x", "awaiting_parts")], undefined, { erroRpc: { code: "57014", message: "timeout" } }), k("x"));
+  } catch { lancou = true; }
   assertEquals(lancou, true);
 });
 
