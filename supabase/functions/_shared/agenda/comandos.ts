@@ -55,6 +55,8 @@
 //
 // Só a frase inteira vale (normalizada pelo MESMO normalizarComando do secretário: sem acento, sem negrito, sem
 // pontuação no fim, sem o 🎤 do áudio). Qualquer palavra a mais é conversa e vai ao modelo como sempre.
+// (Revisão da Fase 3, C1) A palavra que AGE (concluiu, entreguei, diária, desfaz, dia feito/não/parcial, choveu) dita com
+// "?" no fim é pergunta, não ordem: "Concluiu o Lenine?" vai ao modelo. As de ver valem com "?" ("agenda?", "livre?").
 //
 // NÃO PODE COLIDIR (provado em comandos_test.ts):
 //   · a confirmação do assistente (whatsapp-channel.ts: sim/s/ok/confirmar/1 · não/nao/n/cancelar/2): nenhum comando
@@ -313,17 +315,36 @@ export function ehPalavraDaFase2(cmd: ComandoDaAgenda): boolean {
   return cmd.comando === "ver" && (cmd.foco === "mudancas" || cmd.foco === "decisoes" || cmd.foco === "plano");
 }
 
+/**
+ * (Revisão da Fase 3, C1) As palavras que AGEM — concluem, entregam, lançam ou apagam diária, desfazem, anotam o dia ou a
+ * chuva. Dita como pergunta ("Concluiu o Lenine?", "concluiu?", "Diária Roberto meia?", "desfaz?") ela não é ordem: vai ao
+ * modelo, que responde. As palavras de VER continuam valendo com "?" ("agenda?", "livre?", "comissão?"). O *grava* e o
+ * *descarta* ficam como na Fase 1 (só gravam o rascunho que o próprio dono acabou de conferir).
+ */
+const PALAVRAS_QUE_AGEM: ReadonlySet<ComandoDaAgenda["comando"]> = new Set([
+  "concluir", "entregar", "diaria", "desfazer", "dia", "choveu",
+]);
+
+/** O texto termina em pergunta? O "?" final que o normalizarComando tira (também com negrito, espaço ou aspas depois). */
+function terminaEmPergunta(texto: string): boolean {
+  const fim = /[\s.!?,;:"'“”‘’«»]+$/u.exec(String(texto ?? "").replace(/[*_~]/g, "").trim());
+  return fim !== null && fim[0].includes("?");
+}
+
 /** O comando, ou null (não é comando: segue para o assistente como sempre). */
 export function lerComandoDaAgenda(texto: string): ComandoDaAgenda | null {
   if (typeof texto !== "string" || texto.length > 200) return null;
   const t = normalizarComando(texto);
   if (!t) return null;
+  let cmd: ComandoDaAgenda | null = null;
   if (t.length <= MAIOR) {
-    const cmd = FRASES.get(t);
+    const fixo = FRASES.get(t);
     // cópia: quem chama não muda a tabela
-    if (cmd) return { ...cmd };
+    if (fixo) cmd = { ...fixo };
   }
   // Fase 2: as palavras com complemento (curtas: "desfaz" + até 40 caracteres é a maior)
-  if (t.length > ALVO_MAX + 12) return null;
-  return lerPalavraComplemento(t);
+  if (!cmd && t.length <= ALVO_MAX + 12) cmd = lerPalavraComplemento(t);
+  // (C1) a pergunta do dono nunca vira ordem
+  if (cmd && PALAVRAS_QUE_AGEM.has(cmd.comando) && terminaEmPergunta(texto)) return null;
+  return cmd;
 }

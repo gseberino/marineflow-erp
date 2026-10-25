@@ -640,3 +640,36 @@ Deno.test("Fase 3 (P6) — as palavras novas não são do secretário, da confir
     assertEquals(trava.travar, false, `trava do CMP: ${t}`);
   }
 });
+
+// ─── Revisão da Fase 3 (C1): a pergunta do dono nunca vira ordem ────────────────────────────────────────────────────
+// O "?" final sai no normalizarComando; sem esta regra "Concluiu o Lenine?" concluía a OS sem *grava*. As palavras que
+// AGEM (concluir, entregar, diária, desfazer, dia, choveu) com "?" vão ao modelo; as de ver continuam valendo.
+const PERGUNTAS_QUE_NAO_SAO_ORDEM = [
+  "Concluiu o Lenine?", "Concluída a OS-00074?", "concluiu?", "Concluiu?", "*concluiu?*", "concluiu ?", "concluiu?!",
+  "Concluido o Lenine?", "concluiu OS-00074?", "entregue o Lenine?", "Entreguei o Lenine?", "Diária Roberto meia?",
+  "diária do Roberto inteira?", "diaria joao nao?", "Desfaz o Lenine?", "desfaz?", "desfazer?", "dia feito?",
+  "dia não cliente?", "dia parcial material ontem?", "choveu?", "Choveu ontem?", "🎤 Concluiu o Lenine?",
+  "concluiu o Lenine?\"",
+];
+
+Deno.test("C1 — a palavra que age dita como pergunta não é palavra (vai ao modelo)", () => {
+  for (const t of PERGUNTAS_QUE_NAO_SAO_ORDEM) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("C1 — a mesma palavra sem o \"?\" continua valendo (o ponto e o ! não são pergunta)", () => {
+  assertEquals(lerComandoDaAgenda("Concluiu o Lenine."), concluir("lenine"));
+  assertEquals(lerComandoDaAgenda("concluiu!"), concluir(null));
+  assertEquals(lerComandoDaAgenda("entreguei o Lenine"), entregar("lenine"));
+  assertEquals(lerComandoDaAgenda("Diária Roberto meia"), { comando: "diaria", nome: "roberto", jornada: "meia", quando: null });
+  assertEquals(lerComandoDaAgenda("desfaz"), { comando: "desfazer", alvo: null });
+  assertEquals(lerComandoDaAgenda("choveu ontem"), { comando: "choveu", quando: "ontem" });
+  assertEquals(lerComandoDaAgenda("dia feito"), { comando: "dia", resultado: "cumprido", motivo: null, quando: null });
+});
+
+Deno.test("C1 — as palavras de ver valem com \"?\" (agenda, livre, o que mudou, comissão)", () => {
+  assertEquals(lerComandoDaAgenda("Agenda dessa semana?"), semana);
+  assertEquals(lerComandoDaAgenda("Livre?"), livre);
+  assertEquals(lerComandoDaAgenda("o que mudou?")?.comando, "ver");
+  assertEquals(lerComandoDaAgenda("Comissão?"), verP6("comissao"));
+  assertEquals(lerComandoDaAgenda("comissão outubro?"), verP6("comissao", "outubro"));
+});
