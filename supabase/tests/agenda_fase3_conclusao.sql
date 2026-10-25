@@ -14,11 +14,14 @@
 --      assinatura); número que já é de outra OS; o sinal pago converte mantendo o número (handle_quote_deposit_payment)
 --   F  faturar só concluída e só o administrador; faturada não reabre pela porta; reabrir pela tela mantém a saída e as
 --      cobranças; concluída → outro status / cancelar recusados com o texto; a porta via desfazer sem o desfazer da agenda
---   D  desfazer em 24 h: cancela as cobranças da conclusão e a comissão de vendedor, volta o status e a saída e devolve os
---      vencimentos "na entrega"; com pagamento, fora do prazo, entregue ou pela tela: recusa e nada muda
+--   D  desfazer em 24 h: cancela as cobranças da conclusão e apaga a comissão de vendedor pendente (a conclusão de novo a
+--      recria: revisão da Fase 3, item 4), volta o status e a saída e devolve os vencimentos "na entrega"; com pagamento, fora
+--      do prazo, entregue ou pela tela: recusa e nada muda
 --   E  a entrega: numa OS em andamento conclui e entrega (duas ações); já entregue = nada; nunca antes da saída; o
 --      vendedor não registra; o desfazer da entrega que concluiu junto volta tudo
---   M  os marcos e o texto deles
+--   W  com login, a via não é de quem chama (revisão da Fase 3, R6): motor, vigia, equipe e assinatura só sem login; dono e
+--      conferência só do administrador ou do financeiro (na porta e na entrega)
+--   M  os marcos e o texto deles ("(24 dias úteis)", sem "du")
 --   J  portas: só _agenda_escrever_os e _agenda_escrever_conclusao ligam agenda.porta; anon sem execute; quem executa o quê;
 --      security definer; a cópia de agenda_desfazer só muda no bloco -- FASE 3:; a porta com 8 e com 9 argumentos
 --   L  (só na bancada, com fixture-fase3.sql) o Lenine (OS-00074, sem sinal: as duas parcelas nascem) e o Vanderlei
@@ -486,17 +489,20 @@ begin
     and exists (select 1 from public.commissions cm where cm.service_order_id = pg_temp.os(11) and cm.status = 'pending'),
     a.depois::text);
   r := public.agenda_desfazer(a.id, c_admin, 'dono', date '2026-10-29', c_agora);
-  insert into _resultado values ('D01 …desfeito: volta para em andamento, sem a saída, as 2 cobranças e a comissão canceladas',
+  insert into _resultado values ('D01 …desfeito: volta para em andamento, sem a saída, as 2 cobranças canceladas e a comissão pendente apagada',
     (r ->> 'ok')::boolean
     and r ->> 'texto' = 'Desfeito: o Lenine (OS-93011) voltou para em andamento; cancelei as 2 cobranças da conclusão (R$ 4.560,00) e a comissão de vendedor que ela gerou.'
     and pg_temp.estado(11) ->> 'status' = 'in_progress' and pg_temp.estado(11) ->> 'check_out_banco' is null
     and (pg_temp.estado(11) ->> 'n_rec')::int = 0
     and (select bool_and(status = 'cancelled' and balance_amount = 0) from public.receivables where id = any (v_ids))
-    and (select status from public.commissions where service_order_id = pg_temp.os(11)) = 'cancelled',
+    -- revisão da Fase 3 (item 4): a comissão pendente que nasceu com a conclusão sai (cancelada, ficava para sempre)
+    and not exists (select 1 from public.commissions where service_order_id = pg_temp.os(11)),
     r ->> 'texto');
   insert into _resultado values ('D01 …o registro: a conclusão desfeita, a ação desfazer apontando para ela, e o status pela porta (via desfazer)',
     (select desfeita_em = c_agora and desfeita_pela is not null from public.agenda_acoes where id = a.id)
-    and exists (select 1 from public.agenda_acoes d where d.desfaz_a = a.id and d.tipo = 'desfazer' and d.receivable_ids @> v_ids)
+    and exists (select 1 from public.agenda_acoes d where d.desfaz_a = a.id and d.tipo = 'desfazer' and d.receivable_ids @> v_ids
+                                                     and jsonb_array_length(d.depois -> 'comissoes_apagadas') = 1
+                                                     and (d.depois -> 'comissoes_apagadas' -> 0 ->> 'amount')::numeric = 100)
     and exists (select 1 from public.agenda_acoes s where s.service_order_id = pg_temp.os(11) and s.tipo = 'status'
                                                      and s.status_antes = 'completed' and s.status_depois = 'in_progress'
                                                      and s.depois ->> 'via' = 'desfazer'),
@@ -504,6 +510,18 @@ begin
   r := public.agenda_desfazer(a.id, c_admin, 'dono', date '2026-10-29', c_agora);
   insert into _resultado values ('D01 …desfazer de novo: "Isso já foi desfeito."',
     not (r ->> 'ok')::boolean and r ->> 'texto' = 'Isso já foi desfeito.', r::text);
+
+  -- D06 (revisão da Fase 3, item 4) concluir de novo depois do desfazer: a comissão de vendedor volta pendente. O gatilho de
+  -- produção (sync_commission_on_so_complete) insere com ON CONFLICT (service_order_id, user_id) DO NOTHING: se o desfazer
+  -- só a cancelasse, ela ficaria cancelada para sempre.
+  r := public.os_transicionar_status(pg_temp.os(11), 'completed', 'dono', null, c_admin, null, date '2026-10-29',
+                                     timestamptz '2026-10-29 17:30-03', null);
+  insert into _resultado values ('D06 conclui → desfaz → conclui: a comissão de vendedor está pendente de novo (uma só) e a conclusão nova a guarda',
+    (r ->> 'ok')::boolean
+    and (select count(*) from public.commissions cm where cm.service_order_id = pg_temp.os(11)) = 1
+    and (select cm.status from public.commissions cm where cm.service_order_id = pg_temp.os(11)) = 'pending'
+    and jsonb_array_length((pg_temp.acao(11, 'concluir')).depois -> 'comissoes') = 1,
+    (select string_agg(cm.status || ' ' || cm.amount, ', ') from public.commissions cm where cm.service_order_id = pg_temp.os(11)));
 
   -- D02 o "já tinha": desfazer devolve o vencimento do saldo na entrega e o da cobrança dele.
   a := pg_temp.acao(2, 'concluir');
@@ -619,10 +637,75 @@ begin
 end
 $e$;
 
+-- ── W. Com login, a via não é de quem chama (revisão da Fase 3, R6) ─────────────────────────────────────
+-- O motor, a vigia, o gestor (equipe) e a assinatura são só do banco (sem login); o dono e a conferência, só do
+-- administrador ou do financeiro. Antes, o técnico da OS chamava a porta com 'dono' e a conclusão saía como do dono (com o
+-- desfazer da agenda), e qualquer login dizia 'equipe' ou 'motor'.
+do $w$
+declare
+  v text; v2 text;
+  c_admin constant uuid := 'a3200000-0000-4000-8000-000000000001';
+  c_tec   constant uuid := 'a3200000-0000-4000-8000-000000000002';
+  c_fin   constant uuid := 'a3200000-0000-4000-8000-000000000005';
+begin
+  insert into public.service_orders (id, client_id, vessel_id, service_order_number, status, quote_status, labor_cost_total,
+                                     parts_cost_total, grand_total, check_in_at, converted_to_os_at)
+  select pg_temp.os(n), 'c3200000-0000-4000-8000-000000000001', 'c3210000-0000-4000-8000-000000000001', 'OS-930' || n,
+         'in_progress', 'approved', 0, 0, 0, timestamptz '2026-10-27 08:00-03', timestamptz '2026-09-22 10:00-03'
+    from unnest(array[45, 46, 47]) n;
+  insert into public.service_order_technicians (service_order_id, user_id) values (pg_temp.os(45), c_tec);
+
+  -- W01 a porta: o técnico da OS com a via do dono, da conferência ou do gestor = 42501, e nada muda.
+  v := pg_temp.como(c_tec, 'authenticated', pg_temp.porta_sql(45, 'completed', 'dono'))
+       || ' | ' || pg_temp.como(c_tec, 'authenticated', pg_temp.porta_sql(45, 'completed', 'conferencia'))
+       || ' | ' || pg_temp.como(c_tec, 'authenticated', pg_temp.porta_sql(45, 'completed', 'equipe'));
+  insert into _resultado values ('W01 o técnico da OS, com login, pela via do dono, da conferência ou do gestor: 42501, nada muda',
+    v = 'erro 42501: Você não pode mudar o status desta OS. | erro 42501: Você não pode mudar o status desta OS.'
+        || ' | erro 42501: Você não pode mudar o status desta OS.'
+    and pg_temp.estado(45) ->> 'status' = 'in_progress' and (pg_temp.estado(45) ->> 'n_acoes')::int = 0, v);
+
+  -- W02 o administrador com login também não diz que é o motor, a vigia ou o gestor.
+  v := pg_temp.como(c_admin, 'authenticated', pg_temp.porta_sql(46, 'awaiting_parts', 'motor'))
+       || ' | ' || pg_temp.como(c_admin, 'authenticated', pg_temp.porta_sql(46, 'completed', 'vigia'))
+       || ' | ' || pg_temp.como(c_admin, 'authenticated', pg_temp.porta_sql(46, 'completed', 'equipe'));
+  insert into _resultado values ('W02 o administrador com login, pela via do motor, da vigia ou do gestor: 42501, nada muda',
+    v = 'erro 42501: Você não pode mudar o status desta OS. | erro 42501: Você não pode mudar o status desta OS.'
+        || ' | erro 42501: Você não pode mudar o status desta OS.'
+    and pg_temp.estado(46) ->> 'status' = 'in_progress' and (pg_temp.estado(46) ->> 'n_acoes')::int = 0, v);
+
+  -- W03 o marco: o técnico da OS com a via do dono e o administrador com a do gestor = 42501 (a entrega não sai).
+  v := pg_temp.como(c_tec, 'authenticated',
+         format($s$select (public.os_registrar_marco(%L, 'entrega', 'dono', null, null, null, date '2026-10-29',
+                                                     timestamptz '2026-10-29 16:30-03') ->> 'texto')$s$, pg_temp.os(45)))
+       || ' | ' || pg_temp.como(c_admin, 'authenticated',
+         format($s$select (public.os_registrar_marco(%L, 'entrega', 'equipe', null, null, null, date '2026-10-29',
+                                                     timestamptz '2026-10-29 16:30-03') ->> 'texto')$s$, pg_temp.os(46)));
+  insert into _resultado values ('W03 a entrega com login: o técnico pela via do dono e o administrador pela do gestor = 42501',
+    v = 'erro 42501: Você não pode registrar a entrega por este caminho. | erro 42501: Você não pode registrar a entrega por este caminho.'
+    and pg_temp.estado(45) ->> 'delivered_banco' is null and pg_temp.estado(46) ->> 'delivered_banco' is null, v);
+
+  -- W04 o certo continua: o técnico da OS pela tela conclui (origem tela); o financeiro pela via do dono conclui.
+  v := pg_temp.como(c_tec, 'authenticated', pg_temp.porta_sql(45, 'completed', 'tela', 'ok'));
+  v2 := pg_temp.como(c_fin, 'authenticated', pg_temp.porta_sql(47, 'completed', 'dono', 'ok'));
+  insert into _resultado values ('W04 o técnico da OS pela tela e o financeiro pela via do dono concluem',
+    v = 'true' and v2 = 'true'
+    and (pg_temp.acao(45, 'concluir')).origem = 'tela' and (pg_temp.acao(45, 'concluir')).autor = c_tec
+    and (pg_temp.acao(47, 'concluir')).origem = 'dono' and (pg_temp.acao(47, 'concluir')).autor = c_fin,
+    v || ' | ' || v2);
+
+  -- W05 sem login (o WhatsApp, a rotina), as vias do banco continuam: o gestor conclui sem autor.
+  v := pg_temp.como(null, 'service_role',
+         format($s$select (public.os_transicionar_status(%L, 'completed', 'equipe', null, null, null, date '2026-10-29',
+                                                         timestamptz '2026-10-29 16:30-03') ->> 'ok')$s$, pg_temp.os(46)));
+  insert into _resultado values ('W05 sem login (service_role), o gestor (equipe) conclui como antes', v = 'true', v);
+end
+$w$;
+
 -- ── M. Os marcos ────────────────────────────────────────────────────────────────────────────────────────
 insert into _resultado
 select 'M01 os 4 marcos da OS-93001: entrada (conversão), início, conclusão e entrega, com os dias úteis entre eles',
-       m ->> 'texto' = format('Entrada ter 22/09 · início ter 27/10 (%s du) · conclusão qui 29/10 (2 du) · entrega qui 29/10',
+       -- revisão da Fase 3 (item 9): sem o jargão "du"
+       m ->> 'texto' = format('Entrada ter 22/09 · início ter 27/10 (%s dias úteis) · conclusão qui 29/10 (2 dias úteis) · entrega qui 29/10',
                               public.agenda_du_entre(date '2026-09-22', date '2026-10-27'))
        and m -> 'entrada' ->> 'fonte' = 'conversao' and (m -> 'conclusao' ->> 'du')::int = 2 and (m -> 'entrega' ->> 'du')::int = 0
        and m ->> 'sem_entrega_du' is null,
@@ -631,7 +714,7 @@ select 'M01 os 4 marcos da OS-93001: entrada (conversão), início, conclusão e
 insert into _resultado
 select 'M02 marco sem data = "—"; concluída sem entrega conta os dias úteis',
        a ->> 'texto' = 'Entrada ter 22/09 · início — · conclusão — · entrega —'
-       and b ->> 'texto' = format('Entrada ter 22/09 · início ter 27/10 (%s du) · conclusão qui 29/10 (2 du) · entrega —',
+       and b ->> 'texto' = format('Entrada ter 22/09 · início ter 27/10 (%s dias úteis) · conclusão qui 29/10 (2 dias úteis) · entrega —',
                                   public.agenda_du_entre(date '2026-09-22', date '2026-10-27'))
        and (b ->> 'sem_entrega_du')::int = public.agenda_du_entre(date '2026-10-29', date '2026-11-03'),
        a ->> 'texto' || ' | ' || (b ->> 'texto')

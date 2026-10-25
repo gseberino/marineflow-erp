@@ -42,7 +42,8 @@
 --      vendedor (tela, assistente), a assinatura; concluir = admin/financeiro, técnico da OS, a assinatura, o gestor (equipe);
 --      faturar, reabrir e desfazer a conclusão = admin/financeiro.
 --   4. agenda_desfazer recriada (corpo de 20261025100200, um bloco -- FASE 3:) + _agenda_desfazer_marco: o desfazer da
---      conclusão volta o status e a saída, cancela as cobranças que ela criou e a comissão de vendedor que nasceu com ela, e
+--      conclusão volta o status e a saída, cancela as cobranças que ela criou e APAGA a comissão de vendedor pendente que nasceu
+--      com ela (revisão da Fase 3, item 4: a conclusão de novo a recria pelo gatilho de produção), e
 --      devolve os vencimentos "na entrega" que o gatilho tinha movido; recusa com pagamento, com a OS entregue, fora do prazo ou
 --      com a OS já fora de concluída. O desfazer da entrega tira a entrega (e, se ela concluiu junto, a conclusão também).
 --   5. os_registrar_marco(OS, conclusao|entrega, via, …): conclusão = a porta; entrega = conclui antes se preciso (na mesma
@@ -493,8 +494,11 @@ begin
   -- Quem pede: com login, o próprio login; sem login (service role, o próprio banco), p_autor — motor e vigia podem
   -- vir sem. Um JWT de outro papel sem login não ganha o direito de dizer quem é.
   if v_uid is not null then
-    -- FASE 3: a assinatura do cliente vem só pela service_role (submit-signature), nunca com login.
-    if p_via = 'assinatura' then
+    -- FASE 3: a assinatura do cliente vem só pela service_role (submit-signature), nunca com login. Revisão da Fase 3 (R6):
+    -- com login, quem chama não escolhe a via — o motor, a vigia e o gestor (equipe) também são só do banco, e o dono e a
+    -- conferência, só do administrador ou do financeiro.
+    if p_via in ('assinatura', 'equipe', 'motor', 'vigia')
+       or (p_via in ('dono', 'conferencia') and not public.is_admin_or_financial(v_uid)) then
       raise exception 'Você não pode mudar o status desta OS.' using errcode = '42501';
     end if;
     v_autor := v_uid;
@@ -876,6 +880,7 @@ declare
   v_valor numeric := 0;
   v_canc  uuid[] := '{}';
   v_coms  int := 0;
+  v_coms_apag jsonb := '[]'::jsonb;
   v_cob   text;
   v_txt   text;
   v_acao  uuid;
@@ -954,13 +959,16 @@ begin
        where r.id = any (v_a.receivable_ids) and r.status is distinct from 'cancelled'
       returning r.id, r.amount)
     select count(*), coalesce(sum(x.amount), 0), coalesce(array_agg(x.id), '{}') into v_n, v_valor, v_canc from x;
-    -- A comissão de vendedor que nasceu com ela, se ainda pendente e sem conta a pagar.
+    -- A comissão de vendedor que nasceu com ela, se ainda pendente e sem conta a pagar, SAI (revisão da Fase 3, item 4):
+    -- o gatilho de produção (sync_commission_on_so_complete) insere com ON CONFLICT (service_order_id, user_id) DO NOTHING,
+    -- então uma comissão só cancelada ficaria cancelada para sempre e a conclusão de novo não teria comissão. O que saiu
+    -- fica no registro do desfazer (comissoes_apagadas).
     with m as (
-      update public.commissions cm set status = 'cancelled', updated_at = p_agora
+      delete from public.commissions cm
        where cm.id in (select (x #>> '{}')::uuid from jsonb_array_elements(coalesce(v_a.depois -> 'comissoes', '[]'::jsonb)) x)
          and cm.status = 'pending' and cm.payable_id is null
-      returning 1)
-    select count(*) into v_coms from m;
+      returning cm.id, cm.user_id, cm.payee_id, cm.amount, cm.base_value, cm.percentage)
+    select count(*), coalesce(jsonb_agg(to_jsonb(m) order by m.id), '[]'::jsonb) into v_coms, v_coms_apag from m;
     -- Os vencimentos "na entrega" que o gatilho tinha posto no dia da saída voltam ao que eram.
     update public.receivables r set due_date = (x ->> 'due_date')::date
       from jsonb_array_elements(coalesce(v_a.antes -> 'vencimentos', '[]'::jsonb)) x
@@ -981,7 +989,8 @@ begin
                                    autor, desfaz_a, receivable_ids)
   values (clock_timestamp(), p_hoje, true, case when p_via in ('motor', 'vigia') then p_via else 'dono' end, 'desfazer',
           v_os.id, array[v_os.id], jsonb_build_object('acao', v_a.id, 'tipo', v_a.tipo),
-          jsonb_build_object('cobrancas_canceladas', to_jsonb(v_canc), 'comissoes_canceladas', v_coms), left(v_txt, 400),
+          jsonb_build_object('cobrancas_canceladas', to_jsonb(v_canc), 'comissoes_canceladas', v_coms,
+                             'comissoes_apagadas', v_coms_apag), left(v_txt, 400),
           p_autor, v_a.id, v_canc)
   returning id into v_acao;
   update public.agenda_acoes set desfeita_em = p_agora, desfeita_por = p_autor, desfeita_pela = v_acao where id = v_a.id;
@@ -1205,6 +1214,11 @@ begin
 
   -- Quem pede: a régua de concluir da porta (admin/financeiro ativo ou técnico ativo da OS; o gestor, sem autor).
   if v_uid is not null then
+    -- Revisão da Fase 3 (R6): com login, quem chama não escolhe a via — o gestor (equipe) é só do banco, e o dono e a
+    -- conferência, só do administrador ou do financeiro (a mesma régua da porta).
+    if p_via = 'equipe' or (p_via in ('dono', 'conferencia') and not public.is_admin_or_financial(v_uid)) then
+      raise exception 'Você não pode registrar a entrega por este caminho.' using errcode = '42501';
+    end if;
     v_autor := v_uid;
   else
     begin
@@ -1291,7 +1305,6 @@ declare
   du_ini  int;
   du_con  int;
   du_ent  int;
-  v_du    text := ' (%s du)';
 begin
   select so.converted_to_os_at, so.signed_at, so.created_at, so.check_in_at, so.check_out_at, so.delivered_at into v
     from public.service_orders so where so.id = p_os;
@@ -1316,14 +1329,15 @@ begin
     'entrega',   jsonb_build_object('em', v.delivered_at, 'dia', d_ent2, 'du', du_ent),
     'sem_entrega_du', case when d_con is not null and d_ent2 is null then public.agenda_du_entre(d_con, p_hoje) end,
     'texto', 'Entrada ' || public._dia_curto(d_ent)
-      || ' · início '    || coalesce(public._dia_curto(d_ini)  || case when du_ini > 0 then format(v_du, du_ini) else '' end, '—')
-      || ' · conclusão ' || coalesce(public._dia_curto(d_con)  || case when du_con > 0 then format(v_du, du_con) else '' end, '—')
-      || ' · entrega '   || coalesce(public._dia_curto(d_ent2) || case when du_ent > 0 then format(v_du, du_ent) else '' end, '—'));
+      -- Revisão da Fase 3 (item 9): sem o jargão "du" — "(24 dias úteis)", "(1 dia útil)".
+      || ' · início '    || coalesce(public._dia_curto(d_ini)  || case when du_ini > 0 then ' (' || public._agenda_plural(du_ini, 'dia útil', 'dias úteis') || ')' else '' end, '—')
+      || ' · conclusão ' || coalesce(public._dia_curto(d_con)  || case when du_con > 0 then ' (' || public._agenda_plural(du_con, 'dia útil', 'dias úteis') || ')' else '' end, '—')
+      || ' · entrega '   || coalesce(public._dia_curto(d_ent2) || case when du_ent > 0 then ' (' || public._agenda_plural(du_ent, 'dia útil', 'dias úteis') || ')' else '' end, '—'));
 end;
 $function$;
 
 comment on function public.agenda_marcos_da_os(uuid, date) is
-  'Agenda de Produção (Fase 3, P2): os 4 marcos da OS — entrada (conversão, senão assinatura, senão criação, com a fonte), início (check_in_at), conclusão (check_out_at), entrega (delivered_at) —, cada um com o dia de Brasília e os dias úteis desde o marco anterior que existe; sem_entrega_du = concluída e ainda não entregue há N du; e o texto pronto: "Entrada qua 22/09 · início ter 27/10 (24 du) · conclusão ter 27/10 · entrega sex 30/10 (3 du)" (marco sem data = "—"). Invoker: lê agenda_config pelo dia útil (admin/financeiro, ou as funções definer).';
+  'Agenda de Produção (Fase 3, P2): os 4 marcos da OS — entrada (conversão, senão assinatura, senão criação, com a fonte), início (check_in_at), conclusão (check_out_at), entrega (delivered_at) —, cada um com o dia de Brasília e os dias úteis desde o marco anterior que existe; sem_entrega_du = concluída e ainda não entregue há N du; e o texto pronto: "Entrada qua 22/09 · início ter 27/10 (24 dias úteis) · conclusão ter 27/10 · entrega sex 30/10 (3 dias úteis)" (marco sem data = "—"; 1 = "(1 dia útil)"). Invoker: lê agenda_config pelo dia útil (admin/financeiro, ou as funções definer).';
 
 -- ── 8. O sinal pago também mantém o número (corpo de 20261003210000, a definição mais nova) ───────────────
 create or replace function public.handle_quote_deposit_payment()
