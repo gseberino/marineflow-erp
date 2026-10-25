@@ -26,6 +26,10 @@
 --      palavra do técnico), ppc (o último dia útil da semana) e comissao (o 1º dia útil do mês).
 --   4. agenda_ver recriada (corpo de 20261025100500, -- FASE 3:): focos ppc, diarias, marcos, comissao e equipe; o foco
 --      livre e a frase do livre da semana pela simulação em 'ligado'.
+--   0. Revisão da Fase 3 (item 5): _agenda_vence_no_dia(texto, dia, hoje) — o texto gravado num dia ("Saldo R$ 2.280,00
+--      (vence hoje)", "passa a vencer hoje") relido noutro dia diz a data ("vence ter 03/11"). Um ajudante só: as mudanças
+--      (_agenda_mudancas: o foco mudancas, o fechamento e a tela Semana), a linha da conclusão no fechamento e a tela Semana
+--      (_agenda_tela_mudancas, 20261026100600).
 --   5. agenda_carona(p_autor, p_os, p_canal, p_hoje, p_agora): no fim de uma resposta do assistente ao dono sobre UMA OS,
 --      no máximo uma pergunta aberta dela ("Aproveitando: …"), uma vez por OS a cada carona_por_os_dias.
 --   6. ai_job_registrar_os(p_job_id, p_os): o erp-mcp guarda no job do Claude Max as OS que as ferramentas do turno
@@ -76,6 +80,23 @@
 --
 -- IDEMPOTENTE: só create or replace function, revoke/grant e comment.
 
+-- ── 0. O texto gravado num dia, relido noutro (revisão da Fase 3, item 5) ───────────────────────────────────
+-- As cobranças da conclusão dizem "(vence hoje)" e "passa a vencer hoje" no dia em que a ação foi gravada (o p_hoje dela).
+-- Lido noutro dia, "hoje" vira a data daquele dia: "(vence ter 03/11)". No mesmo dia, o texto não muda.
+create or replace function public._agenda_vence_no_dia(p_texto text, p_dia date, p_hoje date)
+ returns text
+ language sql
+ immutable
+ set search_path to 'public'
+as $function$
+  select case when p_texto is null or p_dia is null or p_hoje is null or p_dia = p_hoje then p_texto
+              else replace(replace(p_texto, 'vencer hoje', 'vencer ' || public._dia_curto(p_dia)),
+                           'vence hoje', 'vence ' || public._dia_curto(p_dia)) end;
+$function$;
+
+comment on function public._agenda_vence_no_dia(text, date, date) is
+  'Agenda de Produção (Fase 3, revisão item 5): o texto gravado no dia p_dia (as cobranças da conclusão: "vence hoje", "passa a vencer hoje") relido em p_hoje — em outro dia, "hoje" vira a data de p_dia ("vence ter 03/11"); no mesmo dia, igual.';
+
 -- ── 0. O que a agenda mudou sozinha: a ordem de gravação (o G10 instável da Fase 2) ─────────────────────────
 -- Corpo de 20261025100500 copiado; as mudanças estão marcadas "-- FASE 3:".
 create or replace function public._agenda_mudancas(p_de date, p_ate date, p_executada boolean, p_fechamento boolean,
@@ -87,7 +108,10 @@ create or replace function public._agenda_mudancas(p_de date, p_ate date, p_exec
 as $function$
   with
   b as (
-    select a.id, a.tipo, a.service_order_id as os, a.dia, a.proposta_id, a.texto, a.criada_em as em,
+    -- FASE 3 (revisão, item 5): o texto gravado noutro dia diz a data no lugar de "vence hoje" (p_ate é o hoje de quem lê:
+    -- o foco mudancas, o fechamento e a tela passam p_hoje).
+    select a.id, a.tipo, a.service_order_id as os, a.dia, a.proposta_id,
+           public._agenda_vence_no_dia(a.texto, a.dia, p_ate) as texto, a.criada_em as em,
            a.desfazivel_ate is not null and a.desfeita_em is null and (p_agora is null or a.desfazivel_ate >= p_agora) as desfazivel,
            a.desfeita_em is not null as desfeita,
            coalesce(public._agenda_nome_curto(cl.name), so.service_order_number) as nome, so.service_order_number as numero
@@ -825,10 +849,8 @@ begin
                 join public.payees py on py.id = em.payee_id where em.acao_id = q.id
                order by em.resposta_em desc nulls last limit 1);
     if q.executada then
-      v_cob := regexp_replace(q.texto, '^[^—]* — saída [^.]*\.\s*', '');
-      if q.dia <> p_hoje then
-        v_cob := replace(replace(v_cob, 'vencer hoje', 'vencer ' || public._dia_curto(q.dia)), 'vence hoje', 'vence ' || public._dia_curto(q.dia));
-      end if;
+      -- revisão da Fase 3 (item 5): o "vence hoje" de outro dia pelo ajudante único
+      v_cob := public._agenda_vence_no_dia(regexp_replace(q.texto, '^[^—]* — saída [^.]*\.\s*', ''), q.dia, p_hoje);
       v_txt := format('Concluí o %s%s: o %s disse que terminou e era o último dia do plano.%s *desfaz %s* reabre.',
                       public._agenda_rotulo_da_os(q.service_order_id),
                       case when q.dia <> p_hoje then ' ' || public._dia_curto(q.dia) else '' end,
@@ -1100,7 +1122,7 @@ end;
 $function$;
 
 comment on function public._agenda_ver_marcos(uuid, date) is
-  'Agenda de Produção (Fase 3, P6): agenda_ver foco marcos (com a OS) — "Lenine (OS-00074): Entrada qua 22/09 · início ter 03/11 (29 du) · conclusão — · entrega —." (agenda_marcos_da_os). {ok, texto, dados}.';
+  'Agenda de Produção (Fase 3, P6): agenda_ver foco marcos (com a OS) — "Lenine (OS-00074): Entrada qua 22/09 · início ter 03/11 (29 dias úteis) · conclusão — · entrega —." (agenda_marcos_da_os). {ok, texto, dados}.';
 
 -- "a comissão de outubro": o resumo do mês (só a conta: nada é pago). Só administrador e financeiro (o resto, 42501).
 create or replace function public._agenda_ver_comissao(p_mes date, p_hoje date)
@@ -1530,6 +1552,7 @@ comment on function public.ai_job_registrar_os(uuid, text[]) is
 -- Leituras e textos (invoker, STABLE/IMMUTABLE) e a definer que só lê (agenda_livre_de_verdade, que confere quem vê):
 -- authenticated (o painel) e service_role (o WhatsApp, o fechamento); nunca anon.
 revoke all on function
+  public._agenda_vence_no_dia(text, date, date),
   public._agenda_mudancas(date, date, boolean, boolean, timestamptz),
   public._agenda_titulo_da_semana(date), public.agenda_ppc(date, date),
   public._agenda_texto_da_diaria(uuid),
@@ -1540,6 +1563,7 @@ revoke all on function
   public._agenda_ver_equipe(date), public.agenda_ver(uuid, text, text, text, text, jsonb, boolean, date)
   from public, anon;
 grant execute on function
+  public._agenda_vence_no_dia(text, date, date),
   public._agenda_mudancas(date, date, boolean, boolean, timestamptz),
   public._agenda_titulo_da_semana(date), public.agenda_ppc(date, date),
   public._agenda_texto_da_diaria(uuid),

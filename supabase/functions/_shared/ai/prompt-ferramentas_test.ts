@@ -442,7 +442,10 @@ Deno.test("agenda de produção (Fase 3, P6): a equipe sozinha, os focos ppc/dia
   assertEquals(lerComandoDaAgenda("diária Roberto meia")?.comando, "diaria");
   assertEquals(lerComandoDaAgenda("diária Roberto inteira")?.comando, "diaria");
   assertEquals(lerComandoDaAgenda("diária Roberto não")?.comando, "diaria");
-  for (const [palavra, foco] of [["agenda ppc", "ppc"], ["agenda equipe", "equipe"], ["comissão outubro", "comissao"]]) {
+  // revisão da Fase 3: a palavra ensinada é *como foi a semana* (sem o jargão "PPC"); *agenda ppc* continua aceita
+  assertStringIncludes(secao, "*como foi a semana*");
+  assertEquals(secao.includes("*agenda ppc*"), false, "o prompt não ensina *agenda ppc*");
+  for (const [palavra, foco] of [["como foi a semana", "ppc"], ["agenda ppc", "ppc"], ["agenda equipe", "equipe"], ["comissão outubro", "comissao"]]) {
     const c = lerComandoDaAgenda(palavra);
     assertEquals(c?.comando === "ver" ? c.foco : null, foco, palavra);
   }
