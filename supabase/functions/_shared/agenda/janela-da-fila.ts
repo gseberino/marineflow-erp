@@ -16,6 +16,14 @@
 // lugar do número). Na janela: o mesmo dia de Brasília em que a mensagem estava marcada, de [início, fim), nunca no domingo,
 // e com o modo da agenda ligado (a equipe fora de 'ligado' = nada à equipe, como o gatilho da nova tentativa e a rotina).
 // Leitura que falha = a mensagem da agenda NÃO sai (o lado seguro), com o erro no motivo.
+//
+// Revisão da Fase 3 (C1 — NOVO-agenda-28 e R7): a resposta DIRETA a uma mensagem que o técnico acabou de mandar ("Tá bom,
+// aviso o Gustavo." ao "não vou" das 07:10; a ficha ao "o que tem pra amanhã") tem uma janela própria, também aqui: de
+// agenda_config.equipe_resposta_direta_inicio até antes de equipe_resposta_direta_fim, no dia dela, nunca no domingo, com a
+// equipe ligada e só até equipe_resposta_direta_prazo depois da mensagem dele. A linha é reconhecida pela chave (a
+// dedupe_key da mensagem, "agenda-equipe:resposta:…"; a trava da fila no banco recusa a linha com outra chave). Fora disso
+// o banco põe a resposta no início da janela da equipe (_agenda_equipe_quando_responder): aí ela é uma linha como as
+// outras. A regra é a mesma do banco (_agenda_equipe_fora_da_janela).
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -27,21 +35,37 @@ export interface JanelaDeEnvio {
   fim: string;
 }
 
+/** (C1) A janela da resposta direta: o horário de Brasília e o prazo depois da mensagem do técnico. */
+export interface JanelaDaRespostaDireta {
+  inicio: string;
+  fim: string;
+  /** agenda_config.equipe_resposta_direta_prazo, em segundos */
+  prazoSegundos: number;
+}
+
 /** As janelas que as origens da agenda usam (a Fase 5 acrescenta a do cliente). */
 export interface JanelasDaAgenda {
   equipe: JanelaDeEnvio;
+  /** (C1, NOVO-agenda-28) a resposta direta à equipe */
+  respostaDireta: JanelaDaRespostaDireta;
 }
 
 interface OrigemDaAgenda {
   /** qual janela vale para a origem */
-  janela: keyof JanelasDaAgenda;
+  janela: "equipe";
   /** a tabela do registro da mensagem (a linha da fila aponta para ela em source_ref_id / fila_id) */
   registro: "agenda_equipe_mensagens";
+  /** (C1) a resposta direta da origem: a linha cuja chave começa por este prefixo tem também a janela respostaDireta */
+  respostaDireta?: { prefixoDaChave: string };
 }
 
 /** As origens da fila que só saem dentro da janela da agenda. Origem fora daqui: o worker manda como sempre. */
 const ORIGENS_DA_AGENDA: Readonly<Record<string, OrigemDaAgenda>> = Object.freeze({
-  "agenda-equipe": { janela: "equipe", registro: "agenda_equipe_mensagens" },
+  "agenda-equipe": {
+    janela: "equipe",
+    registro: "agenda_equipe_mensagens",
+    respostaDireta: { prefixoDaChave: "agenda-equipe:resposta:" },
+  },
 });
 
 /** A linha da fila tem a janela da agenda? (só as origens de ORIGENS_DA_AGENDA) */
@@ -52,7 +76,7 @@ export function origemComJanelaDaAgenda(source: unknown): boolean {
 /** Um SELECT em agenda_config. Erro, sem a linha ou horário ilegível = lança (quem chama não deixa a mensagem sair). */
 export async function lerJanelasDaAgenda(db: Db): Promise<JanelasDaAgenda> {
   const { data, error } = await db.from("agenda_config")
-    .select("modo_equipe, equipe_janela_inicio, equipe_janela_fim")
+    .select(COLUNAS_DA_JANELA)
     .maybeSingle();
   if (error) throw new Error(String(error.message ?? error.code ?? "erro na leitura de agenda_config"));
   if (!data) throw new Error("agenda_config sem a linha de parâmetros");
@@ -61,8 +85,40 @@ export async function lerJanelasDaAgenda(db: Db): Promise<JanelasDaAgenda> {
   if (segundosDoDia(inicio) === null || segundosDoDia(fim) === null) {
     throw new Error(`a janela da equipe está ilegível (${inicio || "—"} a ${fim || "—"})`);
   }
+  const rInicio = String(data.equipe_resposta_direta_inicio ?? "");
+  const rFim = String(data.equipe_resposta_direta_fim ?? "");
+  const prazo = intervaloEmSegundos(data.equipe_resposta_direta_prazo);
+  if (segundosDoDia(rInicio) === null || segundosDoDia(rFim) === null || prazo === null) {
+    throw new Error(`a janela da resposta direta está ilegível (${rInicio || "—"} a ${rFim || "—"}, prazo ${
+      String(data.equipe_resposta_direta_prazo ?? "—")})`);
+  }
   const modo = typeof data.modo_equipe === "string" ? data.modo_equipe.trim().toLowerCase() : "";
-  return { equipe: { ligado: modo === "ligado", inicio, fim } };
+  return {
+    equipe: { ligado: modo === "ligado", inicio, fim },
+    respostaDireta: { inicio: rInicio, fim: rFim, prazoSegundos: prazo },
+  };
+}
+
+/** As colunas que a janela lê (um SELECT por lote). */
+export const COLUNAS_DA_JANELA =
+  "modo_equipe, equipe_janela_inicio, equipe_janela_fim, equipe_resposta_direta_inicio, equipe_resposta_direta_fim, " +
+  "equipe_resposta_direta_prazo";
+
+/** O interval do Postgres como o PostgREST devolve ("00:10:00", "10 minutes", "PT10M") → segundos; outra coisa → null. */
+export function intervaloEmSegundos(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v) && v >= 0) return v;
+  if (typeof v !== "string") return null;
+  const t = v.trim().toLowerCase();
+  let m = /^(\d{1,3}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/.exec(t);
+  if (m) {
+    const h = Number(m[1]), min = Number(m[2]), s = Number(m[3] ?? "0");
+    return min > 59 || s > 59 ? null : (h * 60 + min) * 60 + s;
+  }
+  m = /^(\d+) ?(?:min|mins|minute|minutes)$/.exec(t);
+  if (m) return Number(m[1]) * 60;
+  m = /^pt(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(t);
+  if (m && (m[1] || m[2] || m[3])) return (Number(m[1] ?? 0) * 60 + Number(m[2] ?? 0)) * 60 + Number(m[3] ?? 0);
+  return null;
 }
 
 /** "07:30" / "07:30:00" → segundos desde a meia-noite; outra coisa → null. */
@@ -103,11 +159,21 @@ export interface RecusaDaJanela {
 }
 
 /**
+ * (C1) A linha é a resposta direta da origem? Pela chave da mensagem (a trava da fila no banco garante que a chave da linha
+ * é a da mensagem registrada).
+ */
+export function ehRespostaDireta(item: { source?: unknown; dedupe_key?: unknown }): boolean {
+  if (!origemComJanelaDaAgenda(item.source)) return false;
+  const rd = ORIGENS_DA_AGENDA[String(item.source)].respostaDireta;
+  return !!rd && typeof item.dedupe_key === "string" && item.dedupe_key.startsWith(rd.prefixoDaChave);
+}
+
+/**
  * A mensagem de uma origem da agenda pode sair AGORA? null = pode (ou a origem não é da agenda). `janelas` null = a leitura
  * falhou (`erroDaLeitura` diz por quê): não sai.
  */
 export function recusaNaHoraDeEnviar(
-  item: { source?: unknown; scheduled_for?: unknown },
+  item: { source?: unknown; scheduled_for?: unknown; dedupe_key?: unknown; created_at?: unknown },
   agora: Date,
   janelas: JanelasDaAgenda | null,
   erroDaLeitura?: string,
@@ -128,10 +194,24 @@ export function recusaNaHoraDeEnviar(
     return { motivo: "janela", texto: `${origem}: era para ${dia.slice(8, 10)}/${dia.slice(5, 7)} e não saiu no dia dela` };
   }
   const ini = segundosDoDia(j.inicio)!, fim = segundosDoDia(j.fim)!;
-  if (ag.segundos < ini || ag.segundos >= fim) {
-    return { motivo: "janela", texto: `${origem}: fora da janela na hora de enviar (${horaCurta(j.inicio)}–${horaCurta(j.fim)}): não saiu` };
+  if (ag.segundos >= ini && ag.segundos < fim) return null;
+  // (C1, NOVO-agenda-28) a resposta direta a uma mensagem do técnico: a janela dela, e só até o prazo depois da mensagem
+  // (a hora mais cedo entre a marcada e a de quando a linha entrou na fila)
+  if (ehRespostaDireta(item)) {
+    const r = janelas.respostaDireta;
+    const rIni = segundosDoDia(r.inicio)!, rFim = segundosDoDia(r.fim)!;
+    const entrou = new Date(String(item.created_at ?? ""));
+    const desde = Math.min(marcada.getTime(), isNaN(entrou.getTime()) ? marcada.getTime() : entrou.getTime());
+    const limite = new Date(desde);
+    limite.setSeconds(limite.getSeconds() + r.prazoSegundos);
+    if (ag.segundos >= rIni && ag.segundos < rFim && agora.getTime() >= desde && agora.getTime() <= limite.getTime()) return null;
+    return {
+      motivo: "janela",
+      texto: `${origem}: a resposta direta só sai até ${Math.round(r.prazoSegundos / 60)} min depois da mensagem dele, de ${
+        horaCurta(r.inicio)} a ${horaCurta(r.fim)}: não saiu`,
+    };
   }
-  return null;
+  return { motivo: "janela", texto: `${origem}: fora da janela na hora de enviar (${horaCurta(j.inicio)}–${horaCurta(j.fim)}): não saiu` };
 }
 
 /**

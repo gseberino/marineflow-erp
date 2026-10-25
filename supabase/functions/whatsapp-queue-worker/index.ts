@@ -13,7 +13,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createWhatsAppProvider } from "../_shared/whatsapp/factory.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
-import { enviarLote } from "./enviar.ts";
+import { enviarLote, travarLote } from "./enviar.ts";
 
 // O tipo de createClient sem o esquema gerado não casa com o cliente criado aqui (TS2345).
 // deno-lint-ignore no-explicit-any
@@ -101,18 +101,18 @@ servirComCors(async (req) => {
       return jr({ ok: true, processed: 0, remaining_hourly: remainingHourly });
     }
 
-    // Marca todos como 'sending' (lock otimista)
-    const ids = batch.map((b: any) => b.id);
-    await admin
-      .from("whatsapp_send_queue")
-      .update({ status: "sending", processing_started_at: nowIso })
-      .in("id", ids)
-      .eq("status", "pending");
+    // Marca como 'sending' (lock otimista) e manda SÓ as linhas que este disparo travou (revisão da Fase 3, C1, item 10):
+    // a que outro disparo pegou no meio tempo não sai duas vezes. Erro na trava = nada sai agora.
+    const { lote, erro: erroDaTrava } = await travarLote(admin, batch, nowIso);
+    if (erroDaTrava) return jr({ error: `lock: ${erroDaTrava}` }, 500);
+    if (lote.length === 0) {
+      return jr({ ok: true, processed: 0, skipped: "lock_lost", remaining_hourly: remainingHourly });
+    }
 
     const provider = createWhatsAppProvider();
     // O laço do envio mora em enviar.ts (Agenda de Produção, Fase 3, P7b): o mesmo de antes para toda origem, e a janela
-    // da agenda conferida na hora para as linhas da agenda (NOVO-agenda-26).
-    const results = await enviarLote(admin, provider, batch, { delayMs });
+    // da agenda conferida na hora para as linhas da agenda (NOVO-agenda-26; a resposta direta, NOVO-agenda-28).
+    const results = await enviarLote(admin, provider, lote, { delayMs });
 
     return jr({
       ok: true,

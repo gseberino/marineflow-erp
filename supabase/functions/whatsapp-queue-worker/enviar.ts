@@ -6,6 +6,10 @@
 // 'agenda-equipe'; as de cliente da Fase 5 entram pelo mesmo helper, _shared/agenda/janela-da-fila.ts), confere a janela da
 // agenda NA HORA: fora dela a linha vira 'failed' com o motivo, o registro da mensagem fica recusado e nada sai. A
 // configuração da agenda só é lida se o lote tiver alguma linha dessas (uma vez por lote); as outras origens não mudam.
+//
+// Revisão da Fase 3 (C1): a resposta direta à equipe tem a janela dela (R7, NOVO-agenda-28: o helper reconhece a linha pela
+// chave) e o lote só leva as linhas que ESTE disparo travou em 'sending' (item 10, travarLote): dois disparos do cron
+// juntos não mandam a mesma ficha duas vezes ao Roberto.
 
 import {
   type JanelasDaAgenda,
@@ -33,6 +37,10 @@ export interface ItemDaFila {
   scheduled_for?: string | null;
   attempts?: number | null;
   max_attempts?: number | null;
+  /** (C1) a chave: a resposta direta da agenda é reconhecida por ela */
+  dedupe_key?: string | null;
+  /** (C1) quando a linha entrou na fila (o prazo da resposta direta conta daqui) */
+  created_at?: string | null;
 }
 
 export interface ResultadoDoItem {
@@ -54,6 +62,27 @@ export interface OpcoesDoLote {
 }
 
 const dormirDeVerdade = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * (Revisão C1, item 10) A trava do lote: UPDATE de 'pending' para 'sending' só das linhas que AINDA estão pendentes,
+ * devolvendo quais este disparo travou (.select('id')). Só elas vão ao enviarLote: a linha que outro disparo pegou no meio
+ * tempo não sai duas vezes. Erro na trava = nada sai (as linhas seguem pendentes para o próximo minuto).
+ */
+export async function travarLote(
+  admin: DbClient,
+  batch: ItemDaFila[],
+  agoraIso: string,
+): Promise<{ lote: ItemDaFila[]; erro?: string }> {
+  if (batch.length === 0) return { lote: [] };
+  const { data, error } = await admin.from("whatsapp_send_queue")
+    .update({ status: "sending", processing_started_at: agoraIso })
+    .in("id", batch.map((b) => b.id))
+    .eq("status", "pending")
+    .select("id");
+  if (error) return { lote: [], erro: String(error.message ?? error.code ?? error) };
+  const travadas = new Set(((data ?? []) as Array<{ id: unknown }>).map((r) => String(r.id)));
+  return { lote: batch.filter((b) => travadas.has(String(b.id))) };
+}
 
 export async function enviarLote(
   admin: DbClient,

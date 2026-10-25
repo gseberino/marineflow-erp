@@ -7,10 +7,26 @@
 //     domingo e só com a equipe ligada; fora disso vira 'failed' com o motivo, nada é enviado e o registro da mensagem fica
 //     recusado pelo mesmo motivo; a leitura que falha não deixa sair (o lado seguro);
 //  3. a hora conferida é a de cada envio (a pausa entre um e outro pode passar do fim da janela);
-//  4. o index.ts manda só pelo enviarLote.
+//  4. o index.ts manda só pelo enviarLote;
+//  5. (revisão da Fase 3, C1 — R7, NOVO-agenda-28) a resposta DIRETA à equipe (a chave "agenda-equipe:resposta:…") sai
+//     também fora da janela da equipe, dentro da janela dela (06:00–22:00 do banco) e só até o prazo (10 min) depois da
+//     mensagem do técnico; nunca no domingo nem com a equipe fora de ligado; a outra linha da agenda segue a janela de sempre;
+//  6. (C1, item 10) o lote só leva as linhas que este disparo travou em 'sending' (a outra não sai duas vezes).
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { enviarLote, type ItemDaFila } from "./enviar.ts";
-import { origemComJanelaDaAgenda, recusaNaHoraDeEnviar } from "../_shared/agenda/janela-da-fila.ts";
+import { enviarLote, type ItemDaFila, travarLote } from "./enviar.ts";
+import {
+  COLUNAS_DA_JANELA,
+  ehRespostaDireta,
+  intervaloEmSegundos,
+  origemComJanelaDaAgenda,
+  recusaNaHoraDeEnviar,
+} from "../_shared/agenda/janela-da-fila.ts";
+
+/** A linha de agenda_config como o PostgREST devolve (os horários do DEFAULT de 20261026100000). */
+const CONFIG = {
+  modo_equipe: "ligado", equipe_janela_inicio: "07:30:00", equipe_janela_fim: "20:00:00",
+  equipe_resposta_direta_inicio: "06:00:00", equipe_resposta_direta_fim: "22:00:00", equipe_resposta_direta_prazo: "00:10:00",
+};
 
 // ── O banco e o provedor de mentira ─────────────────────────────────────────────────────────────────────
 interface Escrita {
@@ -20,7 +36,7 @@ interface Escrita {
 }
 
 function bancoDeMentira(config: { data?: unknown; error?: unknown } = {
-  data: { modo_equipe: "ligado", equipe_janela_inicio: "07:30:00", equipe_janela_fim: "20:00:00" },
+  data: CONFIG,
   error: null,
 }) {
   const escritas: Escrita[] = [];
@@ -67,6 +83,9 @@ function provedorDeMentira(resposta: (fone: string) => { ok: boolean; providerMe
     },
   };
 }
+
+/** A janela da resposta direta do DEFAULT (06:00–22:00, 10 min). */
+const RD = { inicio: "06:00:00", fim: "22:00:00", prazoSegundos: 600 };
 
 /** Brasília é UTC−3 (sem horário de verão desde 2019). */
 const brt = (diaHora: string) => new Date(`${diaHora}-03:00`);
@@ -141,7 +160,9 @@ Deno.test("agenda-equipe dentro da janela, no dia dela e com a equipe ligada: sa
     { delayMs: 0, agora: () => brt("2026-11-03T19:31:00") });
   assertEquals(r, [{ id: "1", ok: true }]);
   assertEquals(enviados.length, 1);
-  assertEquals(leituras, ["agenda_config: modo_equipe, equipe_janela_inicio, equipe_janela_fim"]);
+  assertEquals(leituras, [`agenda_config: ${COLUNAS_DA_JANELA}`]);
+  assertEquals(COLUNAS_DA_JANELA, "modo_equipe, equipe_janela_inicio, equipe_janela_fim, equipe_resposta_direta_inicio, " +
+    "equipe_resposta_direta_fim, equipe_resposta_direta_prazo");
   assertEquals(daFila(escritas, "1")[0].valores.status, "sent");
 });
 
@@ -175,7 +196,7 @@ Deno.test("agenda-equipe: domingo, o dia de antes, a equipe fora de ligado — c
   ];
   for (const [marcada, agora, motivo, modo, trecho] of casos) {
     const { db, escritas } = bancoDeMentira({
-      data: { modo_equipe: modo, equipe_janela_inicio: "07:30:00", equipe_janela_fim: "20:00:00" }, error: null,
+      data: { ...CONFIG, modo_equipe: modo }, error: null,
     });
     const { provider, enviados } = provedorDeMentira();
     const r = await enviarLote(db, provider, [item("1", "agenda-equipe", marcada)], { delayMs: 0, agora: () => brt(agora) });
@@ -190,7 +211,10 @@ Deno.test("agenda-equipe: a configuração que não se lê (erro ou horário est
   for (const config of [
     { data: null, error: { message: "column agenda_config.equipe_janela_inicio does not exist" } },
     { data: null, error: null },
-    { data: { modo_equipe: "ligado", equipe_janela_inicio: "sete e meia", equipe_janela_fim: "20:00:00" }, error: null },
+    { data: { ...CONFIG, equipe_janela_inicio: "sete e meia" }, error: null },
+    // (C1) a janela da resposta direta que não se lê também não deixa sair nada da agenda
+    { data: { ...CONFIG, equipe_resposta_direta_prazo: "dez minutos" }, error: null },
+    { data: { ...CONFIG, equipe_resposta_direta_fim: null }, error: null },
   ]) {
     const { db, escritas } = bancoDeMentira(config);
     const { provider, enviados } = provedorDeMentira();
@@ -222,7 +246,7 @@ Deno.test("agenda-equipe: a hora é a de cada envio — a pausa leva o 2º para 
 });
 
 Deno.test("a janela: o início fechado e o fim aberto (07:30:00 sai, 20:00:00 não); só 'agenda-equipe' tem janela", () => {
-  const j = { equipe: { ligado: true, inicio: "07:30:00", fim: "20:00:00" } };
+  const j = { equipe: { ligado: true, inicio: "07:30:00", fim: "20:00:00" }, respostaDireta: RD };
   const l = (marcada: string, agora: string) => ({ source: "agenda-equipe", scheduled_for: brt(marcada).toISOString(), agora: brt(agora) });
   const a = l("2026-11-03T07:30:00", "2026-11-03T07:30:00");
   assertEquals(recusaNaHoraDeEnviar(a, a.agora, j), null);
@@ -237,7 +261,7 @@ Deno.test("a janela: o início fechado e o fim aberto (07:30:00 sai, 20:00:00 n�
   assertEquals(recusaNaHoraDeEnviar(s, s.agora, j), null);
   // os horários são os do banco: com a janela até 21:00, as 20:30 saem
   assertEquals(recusaNaHoraDeEnviar(l("2026-11-03T20:30:00", "2026-11-03T20:30:00"), brt("2026-11-03T20:30:00"),
-    { equipe: { ligado: true, inicio: "07:30", fim: "21:00" } }), null);
+    { equipe: { ligado: true, inicio: "07:30", fim: "21:00" }, respostaDireta: RD }), null);
   for (const o of [null, undefined, "", "reply-router", "quote-reminders", "agenda-cliente", "agenda-equipe ", 7]) {
     assertEquals(origemComJanelaDaAgenda(o), false);
     assertEquals(recusaNaHoraDeEnviar({ source: o, scheduled_for: "x" }, brt("2026-11-01T23:00:00"), null), null);
@@ -245,11 +269,134 @@ Deno.test("a janela: o início fechado e o fim aberto (07:30:00 sai, 20:00:00 n�
   assertEquals(origemComJanelaDaAgenda("agenda-equipe"), true);
 });
 
+// ── 5. (C1) A resposta direta à equipe ────────────────────────────────────────────────────────────────────
+const resposta = (id: string, marcada: string, extra: Partial<ItemDaFila> = {}): ItemDaFila =>
+  item(id, "agenda-equipe", marcada, { dedupe_key: `agenda-equipe:resposta:bb000000-0000-4000-8000-000000000002:WA-${id}`, ...extra });
+
+Deno.test("C1 resposta direta: o \"Tá bom\" das 07:10 e das 21:00 sai até 10 min depois; aos 11 min não sai (janela, com o motivo)", async () => {
+  const casos: Array<[string, string, boolean]> = [
+    ["2026-11-03T07:10:00", "2026-11-03T07:11:00", true],
+    ["2026-11-03T07:10:00", "2026-11-03T07:20:00", true],
+    ["2026-11-03T07:10:00", "2026-11-03T07:21:00", false],
+    ["2026-11-03T21:00:00", "2026-11-03T21:05:00", true],
+    ["2026-11-03T21:00:00", "2026-11-03T21:11:00", false],
+    ["2026-11-03T21:58:00", "2026-11-03T22:00:00", false], // o fim da janela da resposta é aberto
+    ["2026-11-03T05:59:00", "2026-11-03T06:00:00", true], // a hora dela vale (o banco nunca marca antes das 06:00)
+    ["2026-11-03T05:50:00", "2026-11-03T05:55:00", false],
+    // de manhã, dentro da janela da equipe, é uma linha como as outras (o prazo não corta)
+    ["2026-11-03T07:31:00", "2026-11-03T09:00:00", true],
+  ];
+  for (const [marcada, agora, sai] of casos) {
+    const { db, escritas } = bancoDeMentira();
+    const { provider, enviados } = provedorDeMentira();
+    const r = await enviarLote(db, provider, [resposta("1", marcada)], { delayMs: 0, agora: () => brt(agora) });
+    assertEquals([enviados.length === 1, r[0].ok], [sai, sai], `${marcada} → ${agora}`);
+    if (!sai) {
+      assertEquals(r[0].janela_da_agenda, "janela", `${marcada} → ${agora}`);
+      assertEquals(escritas.find((e) => e.tabela === "agenda_equipe_mensagens")?.valores, { estado: "recusada", recusa_motivo: "janela" });
+    }
+  }
+  const { db } = bancoDeMentira();
+  const { provider } = provedorDeMentira();
+  const r = await enviarLote(db, provider, [resposta("1", "2026-11-03T21:00:00")], { delayMs: 0, agora: () => brt("2026-11-03T21:11:00") });
+  assertEquals(r[0].error, "agenda-equipe: a resposta direta só sai até 10 min depois da mensagem dele, de 06:00 a 22:00: não saiu");
+});
+
+Deno.test("C1 resposta direta: nunca no domingo, nem com a equipe fora de ligado, nem noutro dia; o prazo conta de quando entrou na fila", async () => {
+  const casos: Array<[Partial<ItemDaFila>, string, string, Record<string, unknown>, string]> = [
+    [{}, "2026-11-01T10:00:00", "2026-11-01T10:01:00", CONFIG, "domingo"],
+    [{}, "2026-11-03T21:00:00", "2026-11-03T21:01:00", { ...CONFIG, modo_equipe: "sombra" }, "modo"],
+    [{}, "2026-11-02T21:55:00", "2026-11-03T07:00:00", CONFIG, "janela"],
+    // a linha marcada às 21:00 que entrou às 20:45 (a mensagem dele foi às 20:45): às 21:00 já passou o prazo
+    [{ created_at: brt("2026-11-03T20:45:00").toISOString() }, "2026-11-03T21:00:00", "2026-11-03T21:00:30", CONFIG, "janela"],
+  ];
+  for (const [extra, marcada, agora, config, motivo] of casos) {
+    const { db } = bancoDeMentira({ data: config, error: null });
+    const { provider, enviados } = provedorDeMentira();
+    const r = await enviarLote(db, provider, [resposta("1", marcada, extra)], { delayMs: 0, agora: () => brt(agora) });
+    assertEquals([enviados.length, r[0].janela_da_agenda], [0, motivo], `${marcada} → ${agora}`);
+  }
+});
+
+Deno.test("C1 resposta direta: só a chave de resposta da agenda-equipe; a ficha, a confirmação e outra origem às 21:00 não ganham a janela dela", async () => {
+  const { db } = bancoDeMentira();
+  const { provider, enviados } = provedorDeMentira();
+  const as21 = "2026-11-03T21:00:00";
+  const r = await enviarLote(db, provider, [
+    item("1", "agenda-equipe", as21, { dedupe_key: "agenda-equipe:ficha:bb000000-0000-4000-8000-000000000002:2026-11-04" }),
+    item("2", "agenda-equipe", as21, { dedupe_key: "agenda-equipe:confirmar:bb000000-0000-4000-8000-000000000002:2026-11-04" }),
+    item("3", "agenda-equipe", as21, { dedupe_key: null }),
+    resposta("4", as21),
+  ], { delayMs: 0, agora: () => brt("2026-11-03T21:01:00") });
+  assertEquals(r.map((x) => [x.id, x.ok]), [["1", false], ["2", false], ["3", false], ["4", true]]);
+  assertEquals(enviados, ["5547900000004"]);
+  assertEquals(ehRespostaDireta({ source: "agenda-equipe", dedupe_key: "agenda-equipe:resposta:x:y" }), true);
+  assertEquals(ehRespostaDireta({ source: "reply-router", dedupe_key: "agenda-equipe:resposta:x:y" }), false);
+  assertEquals(ehRespostaDireta({ source: "agenda-equipe", dedupe_key: "agenda-equipe:resposta:x:y:sombra".slice(0, 10) }), false);
+  // outra origem com a mesma chave sai como sempre (nem é da agenda)
+  assertEquals(recusaNaHoraDeEnviar({ source: "reply-router", scheduled_for: brt(as21).toISOString(), dedupe_key: "agenda-equipe:resposta:x" },
+    brt("2026-11-01T23:59:00"), null), null);
+});
+
+Deno.test("C1 intervaloEmSegundos: o interval do banco nos três jeitos que o PostgREST devolve; o resto é ilegível", () => {
+  assertEquals(intervaloEmSegundos("00:10:00"), 600);
+  assertEquals(intervaloEmSegundos("00:10"), 600);
+  assertEquals(intervaloEmSegundos("01:00:30"), 3630);
+  assertEquals(intervaloEmSegundos("10 minutes"), 600);
+  assertEquals(intervaloEmSegundos("10 mins"), 600);
+  assertEquals(intervaloEmSegundos("PT10M"), 600);
+  assertEquals(intervaloEmSegundos("PT1H30S"), 3630);
+  assertEquals(intervaloEmSegundos(600), 600);
+  for (const x of ["dez minutos", "", null, undefined, "00:61:00", "PT", -5, "1 day"]) assertEquals(intervaloEmSegundos(x), null, String(x));
+});
+
+// ── 6. (C1, item 10) A trava do lote ──────────────────────────────────────────────────────────────────────
+function bancoDaTrava(resp: { data: unknown; error: unknown }) {
+  const chamadas: Array<[string, unknown]> = [];
+  const cadeia = {
+    update(v: unknown) { chamadas.push(["update", v]); return cadeia; },
+    in(c: string, v: unknown) { chamadas.push([`in ${c}`, v]); return cadeia; },
+    eq(c: string, v: unknown) { chamadas.push([`eq ${c}`, v]); return cadeia; },
+    select(c: string) { chamadas.push(["select", c]); return Promise.resolve(resp); },
+  };
+  return { db: { from(t: string) { chamadas.push(["from", t]); return cadeia; } }, chamadas };
+}
+
+Deno.test("C1 travarLote: só as linhas que o UPDATE devolveu vão ao envio (a que outro disparo pegou não sai duas vezes)", async () => {
+  const lote = [item("1", "agenda-equipe", "2026-11-03T19:30:00"), item("2", null, "2026-11-03T19:30:00"), item("3", null, "2026-11-03T19:30:00")];
+  const { db, chamadas } = bancoDaTrava({ data: [{ id: "1" }, { id: "3" }], error: null });
+  const r = await travarLote(db, lote, "2026-11-03T22:30:00.000Z");
+  assertEquals(r.lote.map((x) => x.id), ["1", "3"]);
+  assertEquals(r.erro, undefined);
+  assertEquals(chamadas, [
+    ["from", "whatsapp_send_queue"],
+    ["update", { status: "sending", processing_started_at: "2026-11-03T22:30:00.000Z" }],
+    ["in id", ["1", "2", "3"]],
+    ["eq status", "pending"],
+    ["select", "id"],
+  ]);
+  // nenhuma travada (outro disparo levou todas): nada vai ao envio
+  assertEquals((await travarLote(bancoDaTrava({ data: [], error: null }).db, lote, "x")).lote, []);
+  assertEquals((await travarLote(bancoDaTrava({ data: null, error: null }).db, lote, "x")).lote, []);
+  // erro na trava: nada sai (seguem pendentes para o próximo minuto)
+  const e = await travarLote(bancoDaTrava({ data: null, error: { message: "timeout" } }).db, lote, "x");
+  assertEquals([e.lote, e.erro], [[], "timeout"]);
+  // lote vazio nem chama o banco
+  const v = bancoDaTrava({ data: [], error: null });
+  assertEquals((await travarLote(v.db, [], "x")).lote, []);
+  assertEquals(v.chamadas, []);
+});
+
 // ── 4. O index.ts manda só pelo enviarLote ──────────────────────────────────────────────────────────────
 // (o index.ts sobe o servidor ao ser importado: pelo texto da fonte)
 Deno.test("index.ts: o lote vai pelo enviarLote, sem outro sendText", async () => {
   const fonte = (await Deno.readTextFile(new URL("./index.ts", import.meta.url))).replace(/\r\n/g, "\n");
-  assertEquals(fonte.includes('import { enviarLote } from "./enviar.ts";'), true);
-  assertEquals(fonte.includes("await enviarLote(admin, provider, batch, { delayMs })"), true);
+  assertEquals(fonte.includes('import { enviarLote, travarLote } from "./enviar.ts";'), true);
+  // (C1, item 10) a trava conferida: o lote do envio é o que travarLote devolveu, nunca o batch lido
+  const trava = fonte.indexOf("await travarLote(admin, batch, nowIso)");
+  const envio = fonte.indexOf("await enviarLote(admin, provider, lote, { delayMs })");
+  assertEquals(trava > 0 && envio > trava, true);
+  assertEquals(fonte.includes("enviarLote(admin, provider, batch"), false);
+  assertEquals(fonte.includes('.update({ status: "sending"'), false);
   assertEquals(fonte.includes("sendText("), false);
 });
