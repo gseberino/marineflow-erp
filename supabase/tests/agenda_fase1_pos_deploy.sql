@@ -119,7 +119,6 @@ select format('F1 %s existe', f), to_regprocedure('public.' || f) is not null, n
   from unnest(array[
     'agenda_ver(uuid,text,text,text,text,jsonb,boolean,date)',
     'agenda_rascunho_planejar(uuid,text,text,jsonb,text,date)',
-    'agenda_rascunho_material(uuid,text,text,text[],text,text,text,numeric,boolean,text,date)',
     'agenda_rascunho_disponibilidade(uuid,text,text,text,text,boolean,text,date)',
     'agenda_rascunho_ler(uuid,date)',
     'agenda_rascunho_gravar(uuid,date)',
@@ -130,6 +129,13 @@ select format('F1 %s existe', f), to_regprocedure('public.' || f) is not null, n
     'agenda_disponibilidade_semear(date)',
     'agenda_capacidade_semanal(date)',
     'os_prontidao(uuid,date)']) f;
+-- Fase 4 (P3): agenda_rascunho_material ganhou p_aviso no fim (drop + create em 20261027100300): vale a de 11 argumentos
+-- (só a Fase 1 no ar) ou a de 12 (com a Fase 4).
+insert into _resultado
+select 'F1 agenda_rascunho_material(uuid,text,text,text[],text,text,text,numeric,boolean,text,date[,text]) existe',
+       to_regprocedure('public.agenda_rascunho_material(uuid,text,text,text[],text,text,text,numeric,boolean,text,date)') is not null
+       or to_regprocedure('public.agenda_rascunho_material(uuid,text,text,text[],text,text,text,numeric,boolean,text,date,text)') is not null,
+       null;
 
 -- O padrão de nomes da Fase 1 (em produção, antes dela, só _os_tecnico_nao_troca_cliente casava, sem anon).
 insert into _resultado

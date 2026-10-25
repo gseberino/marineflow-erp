@@ -146,7 +146,9 @@ $f$;
 create temp table _rpcs_p5 (f text) on commit drop;
 insert into _rpcs_p5 values
   ('public.agenda_rascunho_planejar(uuid, text, text, jsonb, text, date)'),
-  ('public.agenda_rascunho_material(uuid, text, text, text[], text, text, text, numeric, boolean, text, date)'),
+  -- Fase 4 (P3): a assinatura ganhou p_aviso no fim (drop + create em 20261027100300); antes dela, a de 11 argumentos.
+  ((coalesce(to_regprocedure('public.agenda_rascunho_material(uuid, text, text, text[], text, text, text, numeric, boolean, text, date, text)')::text,
+             'public.agenda_rascunho_material(uuid, text, text, text[], text, text, text, numeric, boolean, text, date)'))),
   ('public.agenda_rascunho_disponibilidade(uuid, text, text, text, text, boolean, text, date)'),
   ('public.agenda_rascunho_ler(uuid, date)'), ('public.agenda_rascunho_gravar(uuid, date)'),
   ('public.agenda_rascunho_descartar(uuid)');

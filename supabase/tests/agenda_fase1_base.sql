@@ -806,7 +806,11 @@ insert into _definer_da_agenda values
   -- FASE 4 (P1): o rascunho do prazo do fornecedor e o *grava* dele (escreve em suppliers e resolve as perguntas)
   ('agenda_rascunho_fornecedor'), ('_agenda_aplicar_fornecedor'),
   -- FASE 4 (P2): as OCs cujo material a agenda já acompanha (a R7 lê os_material e agenda_perguntas: só service_role)
-  ('agenda_ocs_com_material_vivo');
+  ('agenda_ocs_com_material_vivo'),
+  -- FASE 4 (P3): o *grava* do "não é de serviço" (a nota fica sem serviço, a pergunta respondida). A remessa do e-mail
+  -- (material_remessas_do_email) também é definer, mas o nome não é da agenda (o E5 não a vê: agenda_fase4_notas_pix.sql
+  -- prova as portas dela); os passos notas e pix, o resolvedor do aviso e a pergunta não.
+  ('_agenda_aplicar_aviso');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

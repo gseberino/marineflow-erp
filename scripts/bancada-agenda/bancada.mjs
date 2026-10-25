@@ -159,6 +159,8 @@ const RLS_DE_PRODUCAO = ['payees'];
 const COLUNAS_DEPOIS_DO_SNAPSHOT = `
 alter table public.service_orders add column if not exists merged_into_id uuid;   -- 20261015180000
 alter table public.marinas add column if not exists neighborhood text;            -- 20261007161000
+-- Fase 4 (P3): o que o leitor do e-mail extraiu (as NF-e com a saída, o frete, o lugar e os itens); a remessa lê daqui.
+alter table public.email_messages add column if not exists dados_extraidos jsonb;  -- 20261008110000
 `;
 
 /**

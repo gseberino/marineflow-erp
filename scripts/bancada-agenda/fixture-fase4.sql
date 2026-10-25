@@ -76,3 +76,70 @@ begin
   end if;
 end
 $confere$;
+
+-- ══ P3 (25/10) — as notas do e-mail e o Pix ════════════════════════════════════════════════════════════
+-- (a) O material de volta a faltar, como a amostra da spec §6.5 pede ("Vanderlei: 4 itens a comprar"; "Nelson: Cerbo GX …
+--     pela nota 51038; 2 itens sem fornecedor") e o P3 precisa (as perguntas da nota e do Pix só falam de OS com falta):
+--     · o Vanderlei (OS-00069) não recebeu: os 4 itens faltam, e o dono disse que compra da Premel (fonte dono, sem data);
+--     · o Nelson (OS-00112): o KIT, o Cerbo GX (Kamell de Vila Velha, pelo produto) e o Orion voltam a faltar (a linha do
+--       sistema: fonte nula); o painel continua comprado na AliExpress (a seção do P1).
+update public.os_material
+   set situacao = 'falta', quantidade_na_mao = 0, chegou_em = null, compra_prevista_em = null, fonte = 'dono',
+       fornecedor_id = 'dd000000-0000-4000-8000-000000000001', fornecedor_nome = null,
+       trecho = 'o material do Vanderlei eu compro na Premel', conferido_em = timestamptz '2026-10-27 18:00-03'
+ where service_order_id = '05000000-0000-4000-8000-000000000069';
+update public.os_material
+   set situacao = 'falta', quantidade_na_mao = 0, chegou_em = null, compra_prevista_em = null, fonte = null,
+       previsao_de = null, previsao_ate = null, previsao_fonte = null, trecho = null, conferido_em = null
+ where service_order_part_id in (md5('peca:112:1')::uuid, md5('peca:112:2')::uuid, md5('peca:112:3')::uuid);
+
+-- (b) O e-mail com as NF-e (o que o leitor do email-imap grava em dados_extraidos, já com os campos da Fase 4):
+--     · Kamell (Vila Velha/ES, CNPJ da fixture) nota 51038, emitida e saída seg 26/10, modFrete 0, o Cerbo GX; o e-mail
+--       chegou ter 27/10 08:10 (0,6 dia depois, como os de produção);
+--     · Correa (Balneário Camboriú/SC) nota 812, qui 29/10, modFrete 9 (sem transporte: retirada), fita e abraçadeiras
+--       (material de estoque, não de serviço).
+--     As chaves têm o dígito verificador certo e são inventadas; nenhuma das duas foi importada (fiscal_notes vazia).
+insert into public.email_accounts (id, address, label) values
+  ('d4000000-0000-4000-8000-0000000003e0', 'financeiro@exemplo-ag4.test', 'Financeiro (teste)');
+insert into public.email_messages (id, account_id, dedup_key, from_name, from_address, subject, received_at, has_attachments,
+                                   supplier_id, match_confidence, match_reason, dados_extraidos)
+values
+  ('d4000000-0000-4000-8000-0000000003e1', 'd4000000-0000-4000-8000-0000000003e0', 'teste-ag4:nfe-51038', 'Kamell',
+   'nfe@kamell-ag4.test', 'NF-e 51038', timestamptz '2026-10-27 08:10-03', true, 'dd000000-0000-4000-8000-000000000002', 1,
+   'nfe_cnpj',
+   '{"nfes": [{"anexo_indice": 0, "chave": "32261011222333000144550010000510381000000014",
+               "emitente": "KAMELL COMERCIO GLOBAL LTDA", "emitente_cnpj": "11222333000144", "numero": "51038",
+               "serie": "1", "valor": 3054.44, "data": "2026-10-26", "para_empresa": true, "saida": "2026-10-26",
+               "mod_frete": "0", "uf": "ES", "municipio": "Vila Velha",
+               "itens": [{"n": 1, "descricao": "CENTRAL DE CONTROLE CERBO GX VICTRON ENERGY", "qtd": 1, "un": "UN"}],
+               "anexo_id": "d4000000-0000-4000-8000-0000000003a1"}],
+     "boletos": []}'),
+  ('d4000000-0000-4000-8000-0000000003e2', 'd4000000-0000-4000-8000-0000000003e0', 'teste-ag4:nfe-812', 'Correa',
+   'nfe@correa-ag4.test', 'NF-e 812', timestamptz '2026-10-29 18:20-03', true, 'dd000000-0000-4000-8000-000000000008', 1,
+   'nfe_cnpj',
+   '{"nfes": [{"anexo_indice": 0, "chave": "42261044555666000177550010000008121000000023",
+               "emitente": "CORREA MATERIAIS ELETRICOS L3 BALNEARIO", "emitente_cnpj": "44555666000177", "numero": "812",
+               "serie": "1", "valor": 187.30, "data": "2026-10-29", "para_empresa": true, "saida": null,
+               "mod_frete": "9", "uf": "SC", "municipio": "Balneario Camboriu",
+               "itens": [{"n": 1, "descricao": "FITA ISOLANTE 3M 20M", "qtd": 2, "un": "UN"},
+                         {"n": 2, "descricao": "ABRACADEIRA NYLON 200MM", "qtd": 100, "un": "UN"}],
+               "anexo_id": "d4000000-0000-4000-8000-0000000003a2"}],
+     "boletos": []}');
+insert into public.email_attachments (id, message_id, filename, mime_type, size_bytes, storage_path, kind) values
+  ('d4000000-0000-4000-8000-0000000003a1', 'd4000000-0000-4000-8000-0000000003e1',
+   '32261011222333000144550010000510381000000014-nfe.xml', 'application/xml', 9000,
+   'd4000000-0000-4000-8000-0000000003e1/0-32261011222333000144550010000510381000000014-nfe.xml', 'nfe_xml'),
+  ('d4000000-0000-4000-8000-0000000003a2', 'd4000000-0000-4000-8000-0000000003e2',
+   '42261044555666000177550010000008121000000023-nfe.xml', 'application/xml', 7000,
+   'd4000000-0000-4000-8000-0000000003e2/0-42261044555666000177550010000008121000000023-nfe.xml', 'nfe_xml');
+
+-- (c) O Pix de R$ 480,00 à Premel, seg 26/10, no extrato (Pluggy), com a fila financeira sugerindo a Premel em "Peças e
+--     materiais" (pendente: o dono ainda não decidiu). Ninguém ligou a OS (como os 86 Pix de produção, NOVO-agenda-33).
+insert into public.bank_transactions (id, transaction_date, description, amount, transaction_type, payment_method,
+                                      counterparty_name, provider, source_type)
+values ('d4000000-0000-4000-8000-0000000003b1', date '2026-10-26', 'PIX ENVIADO PREMEL MAT ELETRICOS', -480.00, 'debit', 'PIX',
+        'PREMEL MAT ELETRICOS LTDA', 'pluggy', 'bank');
+insert into public.finance_review_queue (id, kind, status, bank_transaction_id, title, confidence, suggested_amount,
+                                         suggested_date, suggested_category, suggested_supplier_id)
+values ('d4000000-0000-4000-8000-0000000003b2', 'create_payable', 'pending', 'd4000000-0000-4000-8000-0000000003b1',
+        'Pix à PREMEL MAT ELETRICOS', 60, 480.00, date '2026-10-26', 'Peças e materiais', 'dd000000-0000-4000-8000-000000000001');

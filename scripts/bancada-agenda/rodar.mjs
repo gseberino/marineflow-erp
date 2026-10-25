@@ -77,6 +77,11 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_material_fase1', '../../supabase/migrations/20261024160300_agenda_fase1_material.sql'],
   ['agenda_teste.mig_receive_po', '../../supabase/migrations/20261007160000_receive_po_confere_a_oc.sql'],
   ['agenda_teste.mig_fornecedores_fase4', '../../supabase/migrations/20261027100100_agenda_fase4_fornecedores.sql'],
+  // Fase 4 (P3): as migrations de onde a 20261027100300 copiou agenda_rascunho_material e _agenda_aplicar_material (o
+  // rascunho da Fase 1) e agenda_carona e _agenda_mudancas (o acompanhamento da Fase 3), para o N9 conferir que as cópias
+  // só acrescentam os blocos "-- FASE 4:" (_agenda_rascunho_frase e agenda_rascunho_gravar: contra mig_fornecedores_fase4).
+  ['agenda_teste.mig_rascunho_fase1', '../../supabase/migrations/20261024160600_agenda_fase1_rascunho.sql'],
+  ['agenda_teste.mig_acompanhamento_fase3', '../../supabase/migrations/20261026100500_agenda_fase3_acompanhamento.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */
