@@ -78,6 +78,8 @@
 --   · NOVO-agenda-28: a resposta direta a uma mensagem do técnico sai na hora entre equipe_resposta_direta_inicio e _fim
 --     (06:00–22:00, até 10 min depois, nunca no domingo); fora disso, no início da janela. A janela de uma tentativa é a
 --     regra única _agenda_equipe_fora_da_janela (a função, a trava, o passo "fila" da rotina, a saúde; o worker tem a mesma).
+--   · NOVO-agenda-27: a falta ("não vou", silêncio) é evento real — o replano refaz o resto da OS num bloco só, amanhã
+--     incluído (_agenda_violacoes recriada, com agenda.replano_da_falta), com desfazer.
 --
 -- O QUE NÃO MUDA: com modo_equipe e modo_diaria em 'desligado' (como nascem; produção hoje), a rotina devolve
 -- {rodou: false}, a resposta da equipe {consumiu: false} e a diária {status: desligado}: nada é gravado e o webhook segue
@@ -904,9 +906,14 @@ begin
     end if;
     if cf.modo_proposta = 'ligado' and cardinality(v_os) > 0 then
       begin
+        -- (C1, NOVO-agenda-27) a falta é evento real: o replano refaz os meios-dias que sobram da OS num bloco só, amanhã
+        -- incluído (_agenda_violacoes lê agenda.replano_da_falta); o *desfaz* volta tudo
+        perform set_config('agenda.replano_da_falta', 'on', true);
         v_rep := public.agenda_replanejar(v_os, 'equipe_faltou', 'vigia', v_hoje, p_recebida_em, null);
+        perform set_config('agenda.replano_da_falta', '', true);
       exception when others then
         get stacked diagnostics v_estado = returned_sqlstate, v_msg = message_text;
+        perform set_config('agenda.replano_da_falta', '', true);
         perform public.log_app_error('db', 'agenda: replanejar depois do "não vou" da equipe falhou: ' || v_msg, 'agenda',
                                      'equipe:replanejar', 'error',
                                      jsonb_build_object('os', to_jsonb(v_os), 'sqlstate', v_estado, 'payee', v_payee));
@@ -2014,9 +2021,13 @@ begin
     end if;
     if cf.modo_proposta = 'ligado' and cardinality(v_os) > 0 then
       begin
+        -- (C1, NOVO-agenda-27) a falta é evento real: o resto da OS volta num bloco só, amanhã incluído
+        perform set_config('agenda.replano_da_falta', 'on', true);
         v_rep := public.agenda_replanejar(v_os, 'equipe_faltou', 'vigia', p_hoje, p_agora, null);
+        perform set_config('agenda.replano_da_falta', '', true);
       exception when others then
         get stacked diagnostics v_estado = returned_sqlstate, v_msg = message_text;
+        perform set_config('agenda.replano_da_falta', '', true);
         perform public.log_app_error('db', 'agenda: replanejar pelo silêncio da equipe falhou: ' || v_msg, 'agenda',
                                      'rotina:silencio', 'error', jsonb_build_object('os', to_jsonb(v_os), 'sqlstate', v_estado));
       end;
@@ -3483,6 +3494,135 @@ $function$;
 
 comment on function public.agenda_rascunho_andamento(uuid, text, text, text, text, text[], text, text, date, timestamptz) is
   'Agenda de Produção (Fase 2, P4): o que aconteceu na OS vira RASCUNHO (nada muda) — trabalhou · parcial · nao_foi (o resultado do meio-dia no plano: as pessoas ditas têm de estar no plano do dia; feito e em parte só no que já começou; parcial e não foi pedem o motivo LCI) · comecou (em andamento, com o início na manhã do dia dito) · parou (material → aguardando peças; cliente → aguardando o cliente; sai da agenda o que ainda não começou). Fase 3: concluiu (terminou, acabou, finalizou, pronto) e entregou (entregue) viram rascunho pela _agenda_rascunho_marco, em todos os modos ("Concluo o Lenine (OS-00074) hoje (qui 29/10): fica registrada a saída, e saem as cobranças da condição: …"; o *grava* conclui e entrega pela porta, via dono). O dia por agenda_data_dita (passado, dito no trecho; sem dia = hoje). Chave andamento:<os>:<dia>:<quem> (começou/parou: :status); a releitura junta os fatos da OS no dia ("Hoje (ter 03/11), Vanderlei (OS-00069): Roberto trabalhou o dia todo; João não foi (equipe)."). O *grava* chama agenda_registrar_dia (via conversa) ou a porta (via dono). Fase 3 (P4): "eu fui" do dono numa OS em que ele não estava no plano do dia vira a intervenção dele ("você foi sem estar no plano: anoto a sua presença…"; o *grava* grava agenda_intervencoes_do_dono).';
+
+-- ── 7. A falta refaz o bloco da OS (revisão da Fase 3, C1 — NOVO-agenda-27) ──────────────────────────────────
+
+-- Recriada do corpo de 20261025100200 (a única que a define), com os blocos "-- FASE 3 (C1):" (quem recriar de novo copia
+-- DESTA): com agenda.replano_da_falta = on (o "não vou" e o silêncio da equipe põem antes de agenda_replanejar e tiram
+-- depois), o que a OS com a falta tinha publicado amanhã (dentro do congelado, sem violação) também sai, como o que já saía
+-- depois do congelado: o resto da OS volta à fila como um bloco só e o encaixe do evento real pode usar o que ainda não
+-- começou. Sem a marca, nada muda (a vigia, a conferência e a semana são como na Fase 2).
+create or replace function public._agenda_violacoes(p_escopo uuid[], p_cart uuid[], p_semana boolean, p_info jsonb,
+                                                    p_hoje date, p_cong date)
+ returns jsonb
+ language plpgsql
+ stable
+ set search_path to 'public'
+as $function$
+declare
+  v_ate   date;
+  v_login uuid;
+  v_res   jsonb;
+  -- FASE 3 (C1): a falta da equipe (NOVO-agenda-27; quem replaneja pelo "não vou" ou pelo silêncio põe
+  -- agenda.replano_da_falta = on na transação)
+  v_falta boolean := coalesce(current_setting('agenda.replano_da_falta', true), '') = 'on';
+  -- FASE 3 (C1): fim
+begin
+  select max(a.dia) into v_ate
+    from public.agenda_alocacoes a
+   where a.estado in ('publicada', 'fixada') and a.dia >= p_hoje and a.resultado is null
+     and (a.service_order_id = any (p_escopo) or (p_semana and not (a.service_order_id = any (p_cart))));
+  if v_ate is null then
+    return '[]'::jsonb;
+  end if;
+  select py.app_user_id into v_login from public.payees py where py.id = public._agenda_dono(null);
+
+  with
+  alvo as (
+    select a.*, a.dia <= p_cong as congelado
+      from public.agenda_alocacoes a
+     where a.estado in ('publicada', 'fixada') and a.dia >= p_hoje and a.resultado is null
+       and (a.service_order_id = any (p_escopo) or (p_semana and not (a.service_order_id = any (p_cart))))
+  ),
+  cap as (select * from public.agenda_capacidade(p_hoje, v_ate, p_hoje)),
+  av as (
+    select a.*,
+           case
+             when not (a.service_order_id = any (p_cart)) then 'os_saiu'
+             when so.status = 'awaiting_client' then 'cliente'
+             when (p_info -> a.service_order_id::text -> 'pront' ->> 'estado') in ('concluida', 'fora_da_carteira') then 'os_saiu'
+             -- a espera que o dono pôs ("deixa parada até sexta") só tira os dias DENTRO dela; o que vem depois fica
+             when (p_info -> a.service_order_id::text -> 'pront' ->> 'estado') = 'congelada' and a.dia <= pl.congelada_ate then 'espera'
+             when not py.active then 'pessoa'
+             when a.presenca = 'turno' and k.situacao is distinct from 'livre' then 'pessoa'
+             when a.presenca <> 'turno'
+                  and (k.situacao is null or k.situacao in ('indisponivel', 'feriado', 'fim_de_semana') or not public.agenda_dia_util(a.dia)
+                       or exists (select 1 from public.agenda_tasks t
+                                   where t.kind = 'appointment' and v_login is not null and t.assignee_user_id = v_login
+                                     and t.status not in ('cancelled', 'done') and t.scheduled_start_at is not null
+                                     and tstzrange(t.scheduled_start_at, coalesce(t.scheduled_end_at, t.scheduled_start_at), '[]') && a.periodo))
+               then 'pessoa'
+             when a.fixado_por = 'dono' then null
+             when coalesce(pl.bem_indisponivel @> a.dia, false) then 'cliente'
+             when a.tipo <> 'reserva'
+                  and ((p_info -> a.service_order_id::text -> 'pront' #>> '{material,estado}') in ('atrasado', 'sem_previsao')
+                       or a.dia < (p_info -> a.service_order_id::text -> 'pront' #>> '{material,inicio_mat}')::date) then 'material'
+             when a.tipo <> 'reserva' and a.dia < pl.nao_antes_de then 'cliente'
+             when a.tipo = 'reserva' and a.reserva_de = 'condicionada' and a.condicao_ate < p_hoje
+                  and (public._agenda_classe_da_os(p_info -> a.service_order_id::text -> 'pront',
+                                                   p_info -> a.service_order_id::text -> 'meios', p_hoje) ->> 'classe')::int not in (1, 2)
+               then 'condicao_vencida'
+           end as por_que
+      from alvo a
+      join public.service_orders so on so.id = a.service_order_id
+      join public.payees py on py.id = a.payee_id
+      left join public.os_planejamento pl on pl.service_order_id = a.service_order_id
+      left join cap k on k.payee_id = a.payee_id and k.dia = a.dia and k.turno = a.turno
+  ),
+  violadas as (select * from av where av.por_que is not null),
+  -- (a espera não replaneja o depois: os dias que caem depois dela ficam como estão, e o que faltar o motor completa
+  -- depois do último dia marcado, quando a espera acabar)
+  os_v as (select v.service_order_id, bool_or(v.tipo <> 'reserva') as comp from violadas v where v.por_que <> 'espera' group by 1),
+  mesmo_meio as (
+    select av.* from av
+     where av.por_que is null and av.tipo <> 'reserva' and av.fixado_por is distinct from 'dono'
+       and exists (select 1 from violadas v where v.service_order_id = av.service_order_id and v.dia = av.dia
+                                             and v.turno = av.turno and v.tipo <> 'reserva')
+  ),
+  depois as (
+    select av.* from av join os_v on os_v.service_order_id = av.service_order_id and os_v.comp
+     where av.por_que is null and av.tipo <> 'reserva' and av.estado = 'publicada' and av.dia > p_cong
+  ),
+  -- FASE 3 (C1): a falta é evento real (decisões de 23/10: hoje e amanhã congelados SALVO evento real) — o que a OS tinha
+  -- publicado depois de hoje e dentro do congelado (amanhã) sai junto, para os meios-dias que sobram voltarem num bloco só
+  -- (sem isso o dia de amanhã ficava e o resto ia para depois: 2 interrupções). O desfazer do replano volta tudo.
+  depois_da_falta as (
+    select av.* from av join os_v on os_v.service_order_id = av.service_order_id and os_v.comp
+     where v_falta and av.por_que is null and av.tipo <> 'reserva' and av.estado = 'publicada'
+       and av.dia > p_hoje and av.dia <= p_cong
+  ),
+  -- FASE 3 (C1): fim
+  tudo as (
+    select v.id, v.service_order_id, v.por_que, true as violada, v.congelado, v.tipo, v.estado, v.fixado_por, v.reserva_de,
+           v.payee_id, v.dia, v.turno, v.presenca from violadas v
+    union
+    select m.id, m.service_order_id, 'replanejado', false, m.congelado, m.tipo, m.estado, m.fixado_por, m.reserva_de,
+           m.payee_id, m.dia, m.turno, m.presenca from mesmo_meio m
+    union
+    select d.id, d.service_order_id, 'replanejado', false, d.congelado, d.tipo, d.estado, d.fixado_por, d.reserva_de,
+           d.payee_id, d.dia, d.turno, d.presenca from depois d
+  -- FASE 3 (C1): o que a falta solta do congelado
+    union
+    select f.id, f.service_order_id, 'replanejado', false, f.congelado, f.tipo, f.estado, f.fixado_por, f.reserva_de,
+           f.payee_id, f.dia, f.turno, f.presenca from depois_da_falta f
+  -- FASE 3 (C1): fim
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'alocacao_id', t.id, 'os', t.service_order_id, 'motivo', t.por_que, 'violada', t.violada, 'congelado', t.congelado,
+           'tipo', t.tipo, 'estado', t.estado, 'fixado_por', t.fixado_por, 'reserva_de', t.reserva_de,
+           'payee_id', t.payee_id, 'dia', t.dia, 'turno', t.turno, 'presenca', t.presenca)
+           order by t.service_order_id, t.dia, t.turno = 'tarde', t.payee_id, t.id), '[]'::jsonb)
+    into v_res
+    from tudo t;
+  return v_res;
+end;
+$function$;
+
+comment on function public._agenda_violacoes(uuid[], uuid[], boolean, jsonb, date, date) is
+  'Agenda de Produção (Fase 2, P2; Fase 3, revisão C1): a etapa da estabilidade — cada alocação vigente de hoje em diante, sem resultado, das OS do escopo (e, na semana, das que saíram da carteira) que não pode mais acontecer: a OS saiu da carteira, está esperando o cliente ou concluída (os_saiu/cliente); o dia dentro da espera que o dono pôs (espera: só até congelada_ate, o depois fica); a pessoa não está mais livre ou a ponta do dono ficou ocupada por compromisso com hora (pessoa); o bem fora ou o "não antes de" (cliente); o material atrasado, sem previsão ou chegando depois do dia (material); a reserva condicionada vencida sem a condição (condicao_vencida). O fixado pelo dono só pelas três primeiras (a espera é dele também). Junto vão o resto do meio-dia quebrado e os meios-dias publicados da OS depois do congelado (replanejado); com agenda.replano_da_falta = on (a falta da equipe, NOVO-agenda-27), também os publicados de depois de hoje dentro do congelado. [{alocacao_id, os, motivo, violada, congelado, tipo, estado, fixado_por, reserva_de, payee_id, dia, turno, presenca}].';
+
+revoke all on function public._agenda_violacoes(uuid[], uuid[], boolean, jsonb, date, date) from public, anon, authenticated;
+grant execute on function public._agenda_violacoes(uuid[], uuid[], boolean, jsonb, date, date) to service_role;
 
 -- ── Portas ───────────────────────────────────────────────────────────────────────────────────────────────
 -- As leituras e os textos (invoker; a RLS de quem lê vale): authenticated e service_role, nunca anon.

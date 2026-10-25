@@ -21,12 +21,12 @@
 --   F  a intervenção do dono ("eu fui no Lenine" sem estar no plano)
 --   G  a saúde (os zeros na fixture; a diária forçada sem confirmação e a fila forçada fora da janela aparecem)
 --   H  o acorde avisa quem já recebeu a ficha
---   J  portas
+--   J  portas (e a cópia de _agenda_violacoes, que a revisão C1 recriou)
 --
 -- Revisão da Fase 3 (C1): L ganhou o atraso, o meio período e o "não dá pra terminar" (item 2); A30–A31 o teto contado igual
 -- e o 23514 que vira recusa (R5); B2b e B16–B19 a resposta direta (NOVO-agenda-28); B10–B11 o "amanhã não vou" ao "como
--- foi" (item 3); B12–B13 o atraso que não é falta (item 2); B14–B15 o "ok, só de manhã" (item 7); C19–C21 o turno sem
--- fração (item 8).
+-- foi" (item 3); B12–B13 o atraso que não é falta (item 2); B14–B15 o "ok, só de manhã" (item 7); B20–B22 a falta que
+-- refaz o bloco da OS (NOVO-agenda-27); C19–C21 o turno sem fração (item 8).
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs --ate 20261026100300
@@ -783,6 +783,69 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
 
+  -- B20–B22 (revisão C1, NOVO-agenda-27): a falta no meio da OS refaz o resto num bloco só, amanhã incluído, com desfazer.
+  begin
+    perform pg_temp.modos('ligado', 'ligado');
+    v_txt := (select string_agg(a.dia || ' ' || a.turno || ' ' || a.payee_id, ' | ' order by a.dia, a.turno, a.payee_id)
+                from public.agenda_alocacoes a where a.service_order_id = c_vand and a.estado in ('publicada', 'fixada'));
+    perform pg_temp.rodar(d03, '07:45');
+    update public.whatsapp_send_queue set status = 'sent', sent_at = pg_temp.em(d03, '07:46') where source = 'agenda-equipe';
+    r := pg_temp.resp('hoje não vou, tô doente', d03, '07:50');
+    -- os dias úteis parados entre o 1º e o último dia do Vanderlei no plano
+    v_n := (select count(*) from generate_series(
+               (select min(a.dia) from public.agenda_alocacoes a where a.service_order_id = c_vand and a.estado in ('publicada', 'fixada')
+                                                                 and a.tipo <> 'reserva'),
+               (select max(a.dia) from public.agenda_alocacoes a where a.service_order_id = c_vand and a.estado in ('publicada', 'fixada')
+                                                                 and a.tipo <> 'reserva'), interval '1 day') g
+             where public.agenda_dia_util(g::date)
+               and not exists (select 1 from public.agenda_alocacoes a where a.service_order_id = c_vand and a.dia = g::date
+                                                                 and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva'));
+    v_res := pg_temp.ok(v_res, 'B20 "não vou" às 07:50 no 1º dia do Vanderlei: o replano soltou também amanhã (qua 04/11) e o resto da OS voltou num bloco só (nenhum dia útil parado); a marca da falta não fica na transação',
+      (r ->> 'consumiu')::boolean and v_n = 0
+      and not exists (select 1 from public.agenda_alocacoes a where a.service_order_id = c_vand and a.payee_id = c_roberto and a.dia = d03
+                                                            and a.estado in ('publicada', 'fixada'))
+      and exists (select 1 from public.agenda_acoes a
+                   where a.tipo = 'mover' and a.service_order_id = c_vand and a.executada
+                     and exists (select 1 from public.agenda_alocacoes x where x.id = any (a.alocacoes_canceladas) and x.dia = d04))
+      and coalesce(current_setting('agenda.replano_da_falta', true), '') = '',
+      format('%s dia(s) parado(s); plano: %s', v_n,
+             (select string_agg(a.dia || ' ' || a.turno, ' | ' order by a.dia, a.turno) from public.agenda_alocacoes a
+               where a.service_order_id = c_vand and a.estado in ('publicada', 'fixada'))));
+    -- o *desfaz* do replano (a ação que o acorde cita): também tira a ausência
+    r2 := public.agenda_desfazer((select a.id from public.agenda_acoes a
+                                   where a.tipo = 'mover' and a.service_order_id = c_vand and a.executada and a.desfeita_em is null),
+                                 c_admin, 'dono', d03, pg_temp.em(d03, '07:55'));
+    v_res := pg_temp.ok(v_res, 'B21 *desfaz* da falta às 07:55 (antes de começar o dia): o Vanderlei volta como estava (amanhã incluído) e a ausência sai',
+      (r2 ->> 'ok')::boolean
+      and v_txt = (select string_agg(a.dia || ' ' || a.turno || ' ' || a.payee_id, ' | ' order by a.dia, a.turno, a.payee_id)
+                     from public.agenda_alocacoes a where a.service_order_id = c_vand and a.estado in ('publicada', 'fixada'))
+      and not exists (select 1 from public.agenda_disponibilidade d where d.payee_id = c_roberto and d.situacao = 'indisponivel'
+                                                                and d.periodo @> d03 and d.substituida_em is null),
+      r2::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    perform pg_temp.modos('ligado', 'ligado');
+    perform pg_temp.rodar(d03, '07:45');
+    update public.whatsapp_send_queue set status = 'sent', sent_at = pg_temp.em(d03, '07:46') where source = 'agenda-equipe';
+    r := pg_temp.rodar(d03, '09:00');
+    v_n := (select count(*) from generate_series(
+               (select min(a.dia) from public.agenda_alocacoes a where a.service_order_id = c_vand and a.estado in ('publicada', 'fixada')
+                                                                 and a.tipo <> 'reserva'),
+               (select max(a.dia) from public.agenda_alocacoes a where a.service_order_id = c_vand and a.estado in ('publicada', 'fixada')
+                                                                 and a.tipo <> 'reserva'), interval '1 day') g
+             where public.agenda_dia_util(g::date)
+               and not exists (select 1 from public.agenda_alocacoes a where a.service_order_id = c_vand and a.dia = g::date
+                                                                 and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva'));
+    v_res := pg_temp.ok(v_res, 'B22 o silêncio das 9h no 1º dia do Vanderlei também refaz o resto num bloco só (nenhum dia útil parado)',
+      jsonb_array_length(r -> 'acordes') = 1 and v_n = 0
+      and coalesce(current_setting('agenda.replano_da_falta', true), '') = '',
+      format('%s dia(s) parado(s); %s', v_n, r -> 'acordes'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
   -- ── C. A diária ────────────────────────────────────────────────────────────────────────────────────────
   begin
     perform pg_temp.modos('ligado', 'ligado');
@@ -1173,7 +1236,9 @@ select format('J1 %s: só service_role', f),
     'public.agenda_resposta_da_equipe(text, text, text, timestamptz)',
     'public.agenda_rotina_rodar(date, timestamptz)',
     'public.agenda_decidir(uuid, smallint, uuid, text, text, date, timestamptz)',
-    'public.agenda_desfazer(uuid, uuid, text, date, timestamptz)']) f;
+    'public.agenda_desfazer(uuid, uuid, text, date, timestamptz)',
+    -- (revisão C1) recriada para a falta (NOVO-agenda-27): a porta de 20261025100200
+    'public._agenda_violacoes(uuid[], uuid[], boolean, jsonb, date, date)']) f;
 
 insert into _resultado
 select format('J2 %s: authenticated e service_role; anon não', f),
@@ -1217,6 +1282,40 @@ select 'J4 os gatilhos novos: a trava da fila só para agenda-equipe (INSERT e a
                                            and pg_get_triggerdef(t.oid) like '%agenda-equipe%') = 2
        and exists (select 1 from pg_trigger t where t.tgrelid = 'public.agenda_acoes'::regclass
                                              and t.tgname = 'agenda_acoes_diaria_confirmada'), null;
+
+-- (revisão C1) A cópia de _agenda_violacoes (corpo de 20261025100200): fora dos blocos "-- FASE 3 (C1): … -- FASE 3 (C1):
+-- fim", igual.
+do $copia$
+declare
+  v_mig   text := current_setting('agenda_teste.mig_motor_fase2', true);
+  v_ini   int;
+  v_fim   int;
+  v_corpo text;
+  v_novo  text := (select p.prosrc from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = '_agenda_violacoes');
+begin
+  if coalesce(v_mig, '') = '' then
+    insert into _resultado values ('J5 a cópia de _agenda_violacoes só muda nos blocos "-- FASE 3 (C1):"', true,
+      'PULADO: sem agenda_teste.mig_motor_fase2 (rode pela bancada)');
+    return;
+  end if;
+  v_mig := replace(v_mig, E'\r\n', E'\n');
+  v_ini := position('create or replace function public._agenda_violacoes(' in v_mig);
+  v_corpo := substr(v_mig, v_ini);
+  v_corpo := substr(v_corpo, position(E'as $function$\n' in v_corpo) + length(E'as $function$'));
+  v_corpo := left(v_corpo, position(E'\n$function$;' in v_corpo));
+  v_novo := replace(v_novo, E'\r\n', E'\n');
+  loop
+    v_ini := position('  -- FASE 3 (C1):' in v_novo);
+    exit when v_ini = 0;
+    v_fim := position(E'  -- FASE 3 (C1): fim\n' in substr(v_novo, v_ini));
+    exit when v_fim = 0;
+    v_novo := left(v_novo, v_ini - 1) || substr(v_novo, v_ini + v_fim - 1 + length(E'  -- FASE 3 (C1): fim\n'));
+  end loop;
+  insert into _resultado values ('J5 a cópia de _agenda_violacoes só muda nos blocos "-- FASE 3 (C1):" (o resto é o corpo de 20261025100200)',
+    v_novo = v_corpo and position('replano_da_falta' in v_novo) = 0,
+    case when v_novo = v_corpo then null else format('%s × %s caracteres', length(v_novo), length(v_corpo)) end);
+end
+$copia$;
 
 select teste, ok, detalhe from _resultado order by teste;
 
