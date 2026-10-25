@@ -16,8 +16,9 @@
 -- faturar e reabrir para quem não é administrador): o dono clicava e lia a recusa. Agora a tela pergunta à porta antes.
 --
 -- O QUE MUDA:
---   1. _os_porta_regra(de, para, via, gestor, técnico da OS, vendedor, com autor, com motivo): a parte da porta que só
---      depende do cargo, do status de agora, do pedido e do caminho — o tipo do pedido (conversão, conclusão, encerrada,
+--   1. _os_porta_regra(de, para, via, gestor, técnico da OS, vendedor, com autor, com motivo, agenda ligada): a parte da
+--      porta que só depende do cargo, do status de agora, do pedido, do caminho e do modo da agenda automática (que a porta e
+--      a tela passam) — o tipo do pedido (conversão, conclusão, encerrada,
 --      agenda), quem pode (42501 com a frase de sempre) e as passagens recusadas sem olhar dado (cancelada, faturada,
 --      cancelar, concluída, orçamento sem converter, voltar a orçamento, faturar antes de concluir, "já está", a OS que já
 --      começou, a agendada pela tela, o cliente que não liberou), com a frase em modelo (1 = número, 2 = nome, 3 = status de
@@ -33,7 +34,7 @@
 --        · agenda_tela_semana(de, hoje, agora): a semana dia a dia — a carga por pessoa (meios-dias usados × esperados,
 --          a cor pela carga_max), os blocos ("OS · cliente · bem · pessoas · dia n de N · o cliente confirmou"), a
 --          reserva "a confirmar", "livre: Roberto tarde", o que o gestor mudou sozinho (com o desfazer), as decisões
---          críticas abertas, o PPC da semana anterior e, em ligado, o livre de verdade. Em sombra: a última semana
+--          críticas abertas, o quanto da semana passada foi cumprido e, em ligado, o livre de verdade. Em sombra: a última semana
 --          montada pela sombra ("Em teste: eu montaria assim");
 --        · agenda_tela_carteira(hoje): o quadro de exceções por estado (9 grupos com o número), cada cartão com a idade em
 --          dias úteis e a cor (carteira_laranja_du / carteira_vermelho_du sem data), a próxima ação e quem trava;
@@ -47,6 +48,18 @@
 --          (_agenda_aplicar_planejar: o histórico guarda o antes e o depois);
 --        · agenda_desfazer_pela_tela(ação): agenda_desfazer (via 'tela'); a publicação da semana desfaz tudo ou nada.
 --      O botão Entregue chama os_registrar_marco(OS, 'entrega', 'tela') (já existe, P2).
+--
+-- REVISÃO DA FASE 3 (C2, 25/10; o arquivo ainda não foi aplicado em lugar nenhum, então foi editado na origem):
+--   · R2: a tela (o administrador, o financeiro, o técnico da OS) passa a OS em andamento a aguardando peças ou o cliente
+--     COM o motivo (a janela "Parar a OS" pede antes de chamar a porta); sem o motivo, a porta devolve pede_motivo.
+--     os_status_da_tela diz quais passagens pedem o motivo ("<id>:motivo"). Em andamento → aberta continua proibido, e a
+--     frase diz o caminho certo. Agendada → aberta/aprovada pela tela: o administrador ou o financeiro, com a agenda
+--     automática fora de ligado (a regra recebe o modo: p_agenda_ligada).
+--   · R3: agenda_modo_da_proposta() — o modo para qualquer login (agenda_config é fechada ao técnico e ao vendedor).
+--   · R6: com login, a porta recusa as vias motor, vigia, equipe e assinatura; dono e conferência só admin/financeiro.
+--   · Item 5: a tela Semana relê o texto de ontem com o ajudante único _agenda_vence_no_dia (20261026100500).
+--   · Item 6: a assinatura do cliente libera a OS que aguardava o cliente (antes da Fase 3 ela a punha em aprovada).
+--   · "PPC" é jargão: o resumo da Semana diz "semana passada: 5 de 6 dias cumpridos".
 --
 -- CORREÇÕES SOBRE A SPEC:
 --   · agenda_desfazer não ganha a via 'tela' por recriação: ela não confere a via (só a usa para a origem do registro,
@@ -79,7 +92,8 @@
 -- false = recusado) e a frase em modelo do format (1 = o número, 2 = o nome, 3 = o status de agora, 4 = o pedido); null =
 -- segue (o resto depende de dado e é da porta).
 create or replace function public._os_porta_regra(p_de text, p_para text, p_via text, p_gestor boolean, p_tecnico boolean,
-                                                  p_vendedor boolean, p_com_autor boolean, p_com_motivo boolean default false)
+                                                  p_vendedor boolean, p_com_autor boolean, p_com_motivo boolean default false,
+                                                  p_agenda_ligada boolean default false)
  returns jsonb
  language plpgsql
  immutable
@@ -150,25 +164,36 @@ begin
       then null   -- em andamento: o início que falta é dado
     when p_para = 'scheduled' and p_de = 'in_progress'
       then jsonb_build_object('recusa', 'passagem', 'fica', true, 'texto', 'A OS já começou: não volta para agendada.')
-    when p_para = 'scheduled' and p_de = 'awaiting_client' and p_via not in ('dono', 'tela_agendar', 'aprovacao')
+    -- Revisão da Fase 3 (item 6): a assinatura do cliente também libera (é o cliente dizendo que sim).
+    when p_para = 'scheduled' and p_de = 'awaiting_client' and p_via not in ('dono', 'tela_agendar', 'aprovacao', 'assinatura')
       then jsonb_build_object('recusa', 'passagem', 'fica', true, 'texto', 'O cliente ainda não liberou: a OS continua aguardando o cliente.')
     when p_para in ('awaiting_parts', 'awaiting_client') and p_de = 'in_progress' and p_via = 'oc'
       then jsonb_build_object('recusa', 'passagem', 'fica', true, 'texto', 'A OS segue em andamento; a compra foi registrada.')
-    when p_para in ('awaiting_parts', 'awaiting_client') and p_de = 'in_progress' and (p_via <> 'dono' or not p_com_motivo)
+    -- Revisão da Fase 3 (R2): a OS que já começou volta a aguardar só com o motivo — pelo dono (a conversa, as palavras) ou
+    -- pela tela (o administrador, o financeiro ou o técnico da OS; a tela abre a janela do motivo antes de chamar a porta).
+    -- pede_motivo = só faltou o motivo: a tela oferece a passagem e pergunta (os_status_da_tela).
+    when p_para in ('awaiting_parts', 'awaiting_client') and p_de = 'in_progress'
+         and not (p_com_motivo and (p_via = 'dono' or (p_via = 'tela' and (p_gestor or p_tecnico))))
       then jsonb_build_object('recusa', 'passagem', 'fica', false,
+                              'pede_motivo', not p_com_motivo and (p_via = 'dono' or (p_via = 'tela' and (p_gestor or p_tecnico))),
                               'texto', 'A OS já começou: só volta a aguardar quando você diz que parou e por quê.')
+    -- Revisão da Fase 3 (R2): nunca regride; a frase diz o caminho certo.
     when p_para in ('open', 'approved') and p_de = 'in_progress'
-      then jsonb_build_object('recusa', 'passagem', 'fica', true, 'texto', 'A OS já começou: não volta para %4$s.')
+      then jsonb_build_object('recusa', 'passagem', 'fica', true,
+                              'texto', 'A OS já começou: não volta para %4$s. Se ela parou, passe para aguardando peças ou aguardando o cliente e diga o motivo.')
+    -- Revisão da Fase 3 (R2): pela tela, o administrador ou o financeiro tira a OS de agendada só com a agenda automática
+    -- fora de ligado (aí a data é dele; em ligado, quem marca é a agenda: desmarque o dia).
     when p_para in ('open', 'approved') and p_de = 'scheduled' and p_via not in ('motor', 'vigia', 'desfazer', 'dono')
+         and not (p_via = 'tela' and p_gestor and not p_agenda_ligada)
       then jsonb_build_object('recusa', 'passagem', 'fica', false, 'texto', 'A OS está agendada: para tirar da agenda, desmarque o dia.')
-    when p_para in ('open', 'approved') and p_de = 'awaiting_client' and p_via not in ('dono', 'tela_agendar', 'aprovacao')
+    when p_para in ('open', 'approved') and p_de = 'awaiting_client' and p_via not in ('dono', 'tela_agendar', 'aprovacao', 'assinatura')
       then jsonb_build_object('recusa', 'passagem', 'fica', true, 'texto', 'O cliente ainda não liberou: a OS continua aguardando o cliente.')
     end, jsonb_build_object('recusa', null));
 end;
 $function$;
 
-comment on function public._os_porta_regra(text, text, text, boolean, boolean, boolean, boolean, boolean) is
-  'Agenda de Produção (Fase 3, P7a): a parte da porta única (os_transicionar_status) que só depende do cargo, do status de agora, do pedido e do caminho — {tipo (conversao|concluir|encerrada|agenda), recusa (null | quem: 42501 com a frase | passagem: nada muda, com fica = o ok da porta), texto (a frase; na passagem, modelo do format: 1 = número, 2 = nome, 3 = status de agora, 4 = pedido)}. A porta e a tela (os_status_da_tela) leem a MESMA função: a lista rápida e os kanbans escondem o que ela recusa. IMMUTABLE, sem dado; o que depende de dado (o material, o dia no plano, o início que falta, as cobranças, o número da conversão) é da porta. Sem grant: só as funções definer a chamam.';
+comment on function public._os_porta_regra(text, text, text, boolean, boolean, boolean, boolean, boolean, boolean) is
+  'Agenda de Produção (Fase 3, P7a; revisão da Fase 3: R2 e item 6): a parte da porta única (os_transicionar_status) que só depende do cargo, do status de agora, do pedido, do caminho e do modo da agenda automática (p_agenda_ligada, que quem chama passa) — {tipo (conversao|concluir|encerrada|agenda), recusa (null | quem: 42501 com a frase | passagem: nada muda, com fica = o ok da porta), pede_motivo (true = só faltou o motivo: em andamento → aguardando pelo dono ou pela tela), texto (a frase; na passagem, modelo do format: 1 = número, 2 = nome, 3 = status de agora, 4 = pedido)}. Em andamento → aguardando com o motivo: pelo dono ou pela tela (admin/financeiro, técnico da OS); agendada → aberta/aprovada pela tela: admin/financeiro com a agenda fora de ligado; a assinatura libera a OS que aguardava o cliente. A porta e a tela (os_status_da_tela) leem a MESMA função: a lista rápida e os kanbans escondem o que ela recusa. IMMUTABLE, sem dado; o que depende de dado (o material, o dia no plano, o início que falta, as cobranças, o número da conversão) é da porta. Sem grant: só as funções definer a chamam.';
 
 -- ── 2. A porta, lendo a regra (corpo de 20261026100100; as mudanças marcadas "-- FASE 3 (P7a):") ──────────
 
@@ -262,8 +287,11 @@ begin
   -- Quem pede: com login, o próprio login; sem login (service role, o próprio banco), p_autor — motor e vigia podem
   -- vir sem. Um JWT de outro papel sem login não ganha o direito de dizer quem é.
   if v_uid is not null then
-    -- FASE 3: a assinatura do cliente vem só pela service_role (submit-signature), nunca com login.
-    if p_via = 'assinatura' then
+    -- FASE 3: a assinatura do cliente vem só pela service_role (submit-signature), nunca com login. Revisão da Fase 3 (R6):
+    -- com login, quem chama não escolhe a via — o motor, a vigia e o gestor (equipe) também são só do banco, e o dono e a
+    -- conferência, só do administrador ou do financeiro.
+    if p_via in ('assinatura', 'equipe', 'motor', 'vigia')
+       or (p_via in ('dono', 'conferencia') and not public.is_admin_or_financial(v_uid)) then
       raise exception 'Você não pode mudar o status desta OS.' using errcode = '42501';
     end if;
     v_autor := v_uid;
@@ -294,7 +322,7 @@ begin
   -- FASE 3 (P7a): o tipo do pedido, quem pode e as passagens que não dependem de dado vêm de _os_porta_regra — a mesma
   -- função que a tela (os_status_da_tela) lê para esconder da lista rápida e dos kanbans o que a porta recusa.
   v_regra := public._os_porta_regra(v_os.status, v_para, p_via, v_gestor, v_tecnico, v_vendedor, v_autor is not null,
-                                    v_motivo is not null);
+                                    v_motivo is not null, c.modo_proposta = 'ligado');
   v_tipo := v_regra ->> 'tipo';
   if v_regra ->> 'recusa' = 'quem' then
     raise exception '%', v_regra ->> 'texto' using errcode = '42501';
@@ -318,7 +346,10 @@ begin
   -- (1 = o número, 2 = o nome, 3 = o status de agora, 4 = o pedido).
   if v_regra ->> 'recusa' = 'passagem' then
     return public._agenda_porta_fica((v_regra ->> 'fica')::boolean, v_de,
-      format(v_regra ->> 'texto', v_os.numero, v_nome, public._agenda_status_texto(v_de), public._agenda_status_texto(v_para)));
+      format(v_regra ->> 'texto', v_os.numero, v_nome, public._agenda_status_texto(v_de), public._agenda_status_texto(v_para)))
+      -- Revisão da Fase 3 (R2): só faltou o motivo (em andamento → aguardando, pelo dono ou pela tela): quem chama pede.
+      || case when coalesce((v_regra ->> 'pede_motivo')::boolean, false) then jsonb_build_object('pede_motivo', true)
+              else '{}'::jsonb end;
   end if;
   -- FASE 3 (P7a): fim
 
@@ -530,13 +561,17 @@ begin
       if public._agenda_os_tem_dia(p_os, p_hoje) then
         return public._agenda_porta_fica(false, v_de, 'A OS ainda tem dia no plano: tire o dia antes.');
       end if;
-      -- Volta ao que era antes de agendar (aberta ou aprovada); sem registro, aprovada.
-      select a.status_antes into v_antes
-        from public.agenda_acoes a
-       where a.service_order_id = p_os and a.tipo = 'status' and a.executada and a.status_depois = 'scheduled'
-       order by a.criada_em desc, a.id desc
-       limit 1;
-      v_para := case when v_antes in ('open', 'approved') then v_antes else 'approved' end;
+      -- Volta ao que era antes de agendar (aberta ou aprovada); sem registro, aprovada. Revisão da Fase 3 (R2): pela tela
+      -- (o administrador ou o financeiro, com a agenda automática fora de ligado: _os_porta_regra), o status que ele
+      -- escolheu.
+      if p_via <> 'tela' then
+        select a.status_antes into v_antes
+          from public.agenda_acoes a
+         where a.service_order_id = p_os and a.tipo = 'status' and a.executada and a.status_depois = 'scheduled'
+         order by a.criada_em desc, a.id desc
+         limit 1;
+        v_para := case when v_antes in ('open', 'approved') then v_antes else 'approved' end;
+      end if;
     elsif v_de = 'awaiting_parts' then
       v_falta := public._agenda_falta_material(p_os, p_hoje);
       if v_falta is not null then
@@ -577,14 +612,16 @@ $function$;
 
 
 comment on function public.os_transicionar_status(uuid, text, text, text, uuid, timestamptz, date, timestamptz, timestamptz) is
-  'Agenda de Produção (Fase 2; Fase 3: conclusão, faturamento, reabertura, conversão e p_check_out; Fase 3, P7a: as regras que só dependem do cargo, do status, do pedido e do caminho moram em _os_porta_regra, a mesma função que a tela lê): a porta única de status da OS. Vias: tela, tela_agendar, aprovacao, assistente, check_in, oc, motor, vigia, equipe, conferencia, dono, assinatura, desfazer. Status de agenda (todos os modos): em andamento nunca volta (agendada/aberta/aprovada) e só volta a aguardar com "parou" do dono e o motivo (a OC: ok, nada muda); aguardando peças só sai com o material completo; aguardando o cliente só sai pelo dono, a tela de agendar ou a aprovação; agendada só volta (para o status de antes) pela agenda ou pelo dono e sem dia no plano; em modo_proposta ligado, agendada só com dia no plano; check_in_at uma vez. Fase 3: concluir (ativo → concluída) cria as cobranças da condição (_os_criar_recebiveis_da_conclusao, paridade com a tela) ANTES do status e grava a saída num UPDATE só, tudo ou nada ({ok false} com o texto); faturar só concluída; reabrir concluída (tela, dono) mantém saída e cobranças; orçamento → X (tela, assistente, dono, aprovação, assinatura) converte trocando só o prefixo do número e aplica aprovada → X na mesma chamada; cancelar é Cancelar OS. Quem pode: status de agenda = admin/financeiro, técnico da OS, vendedor pela tela; converter = admin/financeiro, vendedor (tela, assistente), assinatura; concluir = admin/financeiro, técnico da OS, assinatura, equipe; faturar/reabrir/desfazer a conclusão = admin/financeiro. Toda mudança: linha em agenda_acoes (status; concluir com receivable_ids; desfazível quando foi motor/vigia/equipe, e a conclusão pela equipe ou pelo dono). Devolve {ok, mudou, de, para, texto, acao_id, check_in_at, check_out_at; na conclusão cobrancas e cobrancas_texto; na conversão convertido, numero, numero_antes}.';
+  'Agenda de Produção (Fase 2; Fase 3: conclusão, faturamento, reabertura, conversão e p_check_out; Fase 3, P7a: as regras que só dependem do cargo, do status, do pedido e do caminho moram em _os_porta_regra, a mesma função que a tela lê): a porta única de status da OS. Vias: tela, tela_agendar, aprovacao, assistente, check_in, oc, motor, vigia, equipe, conferencia, dono, assinatura, desfazer. Status de agenda (todos os modos): em andamento nunca volta (agendada/aberta/aprovada) e só volta a aguardar com o motivo, pelo dono ou pela tela (admin/financeiro, técnico da OS; sem o motivo {ok false, pede_motivo true}) (a OC: ok, nada muda); aguardando peças só sai com o material completo; aguardando o cliente só sai pelo dono, a tela de agendar, a aprovação ou a assinatura do cliente; agendada só volta (para o status de antes) pela agenda ou pelo dono e sem dia no plano, e pela tela (para o status escolhido) só o admin/financeiro com a agenda automática fora de ligado; com login, as vias motor, vigia, equipe e assinatura são recusadas (42501), e dono e conferência só valem para admin/financeiro; em modo_proposta ligado, agendada só com dia no plano; check_in_at uma vez. Fase 3: concluir (ativo → concluída) cria as cobranças da condição (_os_criar_recebiveis_da_conclusao, paridade com a tela) ANTES do status e grava a saída num UPDATE só, tudo ou nada ({ok false} com o texto); faturar só concluída; reabrir concluída (tela, dono) mantém saída e cobranças; orçamento → X (tela, assistente, dono, aprovação, assinatura) converte trocando só o prefixo do número e aplica aprovada → X na mesma chamada; cancelar é Cancelar OS. Quem pode: status de agenda = admin/financeiro, técnico da OS, vendedor pela tela; converter = admin/financeiro, vendedor (tela, assistente), assinatura; concluir = admin/financeiro, técnico da OS, assinatura, equipe; faturar/reabrir/desfazer a conclusão = admin/financeiro. Toda mudança: linha em agenda_acoes (status; concluir com receivable_ids; desfazível quando foi motor/vigia/equipe, e a conclusão pela equipe ou pelo dono). Devolve {ok, mudou, de, para, texto, acao_id, check_in_at, check_out_at; na conclusão cobrancas e cobrancas_texto; na conversão convertido, numero, numero_antes}.';
 
 -- ── 3. O que a porta aceita pela tela (a lista rápida e os kanbans) ──────────────────────────────────────
 
 -- Por OS, os status que a porta aceita pela tela para o login: {"<id>": ["in_progress", "completed", ...]}. A régua é a de
--- _os_porta_regra (a mesma da porta); o orçamento converte e, na mesma chamada, passa por aprovada → o pedido, como a porta.
--- O que depende de dado (material, dia no plano, cobranças) fica de fora: a porta decide na hora e diz por quê. Cancelar não
--- entra (é o botão Cancelar OS, outro caminho). OS que não existe não aparece.
+-- _os_porta_regra (a mesma da porta, com o modo da agenda automática); o orçamento converte e, na mesma chamada, passa por
+-- aprovada → o pedido, como a porta. Revisão da Fase 3 (R2): o que a porta aceita só com o motivo (em andamento → aguardando)
+-- entra na lista E em "<id>:motivo" ({"<id>:motivo": ["awaiting_parts", "awaiting_client"]}): a tela pede o motivo antes de
+-- chamar a porta. O que depende de dado (material, dia no plano, cobranças) fica de fora: a porta decide na hora e diz por
+-- quê. Cancelar não entra (é o botão Cancelar OS, outro caminho). OS que não existe não aparece.
 create or replace function public.os_status_da_tela(p_os uuid[])
  returns jsonb
  language plpgsql
@@ -600,6 +637,8 @@ declare
   s          text;
   v_reg      jsonb;
   v_lista    text[];
+  v_motivo   text[];
+  v_ligada   boolean;
   v_out      jsonb := '{}'::jsonb;
 begin
   if v_uid is null then
@@ -610,6 +649,7 @@ begin
   end if;
   v_gestor   := public.is_admin_or_financial(v_uid);
   v_vendedor := exists (select 1 from public.app_users u where u.id = v_uid and u.active and u.role = 'seller');
+  v_ligada   := (public._agenda_cfg()).modo_proposta = 'ligado';
   for r in select so.id, so.status,
                   exists (select 1 from public.service_order_technicians t
                             join public.app_users u on u.id = t.user_id
@@ -617,25 +657,50 @@ begin
              from public.service_orders so
             where so.id = any (coalesce(p_os, '{}'::uuid[])) loop
     v_lista := '{}';
+    v_motivo := '{}';
     foreach s in array array['draft', 'approved', 'scheduled', 'open', 'in_progress', 'awaiting_parts', 'awaiting_client',
                              'completed', 'invoiced'] loop
       continue when s = r.status;
-      v_reg := public._os_porta_regra(r.status, s, 'tela', v_gestor, r.tecnico, v_vendedor, true, false);
+      v_reg := public._os_porta_regra(r.status, s, 'tela', v_gestor, r.tecnico, v_vendedor, true, false, v_ligada);
       if v_reg ->> 'recusa' is null and v_reg ->> 'tipo' = 'conversao' and s <> 'approved' then
-        v_reg := public._os_porta_regra('approved', s, 'tela', v_gestor, r.tecnico, v_vendedor, true, false);
+        v_reg := public._os_porta_regra('approved', s, 'tela', v_gestor, r.tecnico, v_vendedor, true, false, v_ligada);
       end if;
       if v_reg ->> 'recusa' is null then
         v_lista := v_lista || s;
+      elsif coalesce((v_reg ->> 'pede_motivo')::boolean, false) then
+        -- Revisão da Fase 3 (R2): a porta aceita com o motivo — a tela oferece e pergunta antes.
+        v_lista := v_lista || s;
+        v_motivo := v_motivo || s;
       end if;
     end loop;
     v_out := v_out || jsonb_build_object(r.id::text, to_jsonb(v_lista));
+    if cardinality(v_motivo) > 0 then
+      v_out := v_out || jsonb_build_object(r.id::text || ':motivo', to_jsonb(v_motivo));
+    end if;
   end loop;
   return v_out;
 end;
 $function$;
 
 comment on function public.os_status_da_tela(uuid[]) is
-  'Agenda de Produção (Fase 3, P7a): para o login, por OS, os status que a porta aceita pela tela ({"<id>": [status]}), pela MESMA régua da porta (_os_porta_regra, via tela; o orçamento converte e passa por aprovada → o pedido). A lista rápida de status e os kanbans escondem o que não estiver aqui ("Corrigir para Orçamento", "aguardando o cliente → aberta", concluir para quem não pode, faturar e reabrir para quem não é administrador). O que depende de dado fica com a porta, que decide na hora. Cancelar não entra (botão Cancelar OS). Só com login; até 500 OS por chamada.';
+  'Agenda de Produção (Fase 3, P7a; revisão da Fase 3, R2): para o login, por OS, os status que a porta aceita pela tela ({"<id>": [status]}), pela MESMA régua da porta (_os_porta_regra, via tela, com o modo da agenda automática; o orçamento converte e passa por aprovada → o pedido); os que ela aceita só com o motivo (em andamento → aguardando) também em {"<id>:motivo": [status]}: a tela abre a janela do motivo antes de chamar a porta. A lista rápida de status e os kanbans escondem o que não estiver aqui ("Corrigir para Orçamento", "aguardando o cliente → aberta", concluir para quem não pode, faturar e reabrir para quem não é administrador). O que depende de dado fica com a porta, que decide na hora. Cancelar não entra (botão Cancelar OS). Só com login; até 500 OS por chamada.';
+
+-- Revisão da Fase 3 (R3): o modo da agenda automática para QUALQUER login. agenda_config só é lida pelo administrador e pelo
+-- financeiro: para o técnico e o vendedor a leitura da tabela voltava vazia (= "desligado"), o formulário da OS deixava as
+-- datas editáveis com a agenda ligada e o gatilho recusava o salvamento inteiro (as outras mudanças também se perdiam). Só
+-- o modo sai daqui; sem a linha, 'desligado' (o caminho de antes).
+create or replace function public.agenda_modo_da_proposta()
+ returns text
+ language sql
+ stable
+ security definer
+ set search_path to 'public'
+as $function$
+  select coalesce((select c.modo_proposta from public.agenda_config c where c.id), 'desligado');
+$function$;
+
+comment on function public.agenda_modo_da_proposta() is
+  'Agenda de Produção (Fase 3, revisão R3): agenda_config.modo_proposta (desligado | sombra | ligado) para qualquer login — o formulário da OS deixa as datas só leitura com a agenda ligada também para o técnico e o vendedor (a tabela é fechada para eles). Só o modo; sem a linha, desligado.';
 
 -- ── 4. As leituras das telas ────────────────────────────────────────────────────────────────────────────
 
@@ -676,7 +741,9 @@ as $function$
   m2 as (
     select a.criada_em as em, row_number() over (order by a.criada_em, a.service_order_id, a.id) as ord, jsonb_build_object(
              'acao_id', a.id, 'tipo', a.tipo, 'os', a.service_order_id, 'numero', so.service_order_number,
-             'texto', a.texto || case when a.desfeita_em is not null then ' (já desfeito)' else '' end,
+             -- revisão da Fase 3 (item 5): a ação de ontem não diz "vence hoje" (o ajudante único de 20261026100500)
+             'texto', public._agenda_vence_no_dia(a.texto, a.dia, p_hoje)
+                      || case when a.desfeita_em is not null then ' (já desfeito)' else '' end,
              'desfazivel', a.desfazivel_ate is not null and a.desfeita_em is null and a.desfazivel_ate >= p_agora,
              'desfeita', a.desfeita_em is not null,
              'desfazivel_ate', a.desfazivel_ate,
@@ -714,6 +781,8 @@ declare
   v_comp   int;
   v_livre  numeric;
   v_ppc    numeric;
+  v_sem    jsonb;
+  v_den    int;
   v_lv     jsonb;
   v_titulo text;
   v_dec    jsonb;
@@ -863,7 +932,9 @@ begin
     into v_dias, v_comp, v_livre
     from dia;
 
-  v_ppc := (public.agenda_ppc(v_seg - 7, p_hoje) ->> 'ppc')::numeric;
+  v_sem := public.agenda_ppc(v_seg - 7, p_hoje);
+  v_ppc := (v_sem ->> 'ppc')::numeric;
+  v_den := (v_sem ->> 'cumpridos')::int + jsonb_array_length(coalesce(v_sem -> 'nao_cumpridos', '[]'::jsonb));
   if cf.modo_proposta = 'ligado' then
     v_lv := public.agenda_livre_de_verdade(p_hoje, p_agora);
   end if;
@@ -889,7 +960,11 @@ begin
                 case when v_comp is not null then format('comprometido %s%%', v_comp) end,
                 case when v_livre is not null then 'livre ' || replace(trim_scale(v_livre)::text, '.', ',')
                                                    || case when v_livre = 1 then ' diária' else ' diárias' end end,
-                'PPC da semana anterior ' || coalesce(round(100 * v_ppc)::int || '%', '—')),
+                -- revisão da Fase 3: sem o jargão "PPC" — "semana passada: 5 de 6 dias cumpridos" (sem dia conferido, nada)
+                case when v_den > 0
+                     then format('semana passada: %s de %s %s', (v_sem ->> 'cumpridos')::int,
+                                 public._agenda_plural(v_den, 'dia', 'dias'),
+                                 case when (v_sem ->> 'cumpridos')::int = 1 then 'cumprido' else 'cumpridos' end) end),
     'livre_de_verdade', case when v_lv ->> 'fonte' = 'simulacao' then v_lv ->> 'texto' end,
     'dias', v_dias,
     'mudancas', public._agenda_tela_mudancas(p_hoje, p_agora),
@@ -900,7 +975,7 @@ end;
 $function$;
 
 comment on function public.agenda_tela_semana(date, date, timestamptz) is
-  'Agenda de Produção (Fase 3, P7a): a tela Agenda › Semana da semana ISO de p_de (sem ele, a de p_hoje), seg a sex (o sábado só com plano ou sabado_util) — {modo, em_teste, de, ate, titulo ("Semana de 03 a 06/11 (seg 02 é Finados)"; em sombra "Em teste: eu montaria assim — …", com os blocos da última semana montada pela sombra), comprometido_pct, livre_diarias, ppc_anterior, resumo ("comprometido 54% · livre 5,5 diárias · PPC da semana anterior —"), livre_de_verdade (a simulação, só em ligado), dias:[{dia, rotulo "TER 03/11", hoje, feriado, pessoas:[{payee_id, nome, eh_dono, meios_usados, meios_esperados, pct, cor (verde ≤ carga_max, ambar ≤ 100%, vermelho acima; esperado zero com uso = vermelho), texto "Roberto 2/2"}], blocos:[{os, numero, cliente, bem, local, hora, pessoas_texto, dia_n, dias_total, dia_texto "dia 1 de 3", confirmado_cliente, reserva, reserva_texto "Reserva, a confirmar", condicao, tipo, fixada, resultado, resultado_texto}], livre_texto "livre: Roberto tarde"}], mudancas (_agenda_tela_mudancas), decisoes:[{pergunta_id, n, tipo, texto}], como_responder}. Desligado: só o título. Administrador e financeiro (com login) ou service_role; senão 42501.';
+  'Agenda de Produção (Fase 3, P7a): a tela Agenda › Semana da semana ISO de p_de (sem ele, a de p_hoje), seg a sex (o sábado só com plano ou sabado_util) — {modo, em_teste, de, ate, titulo ("Semana de 03 a 06/11 (seg 02 é Finados)"; em sombra "Em teste: eu montaria assim — …", com os blocos da última semana montada pela sombra), comprometido_pct, livre_diarias, ppc_anterior, resumo ("comprometido 54% · livre 5,5 diárias · semana passada: 5 de 6 dias cumpridos"; sem dia conferido na semana passada, sem essa parte), livre_de_verdade (a simulação, só em ligado), dias:[{dia, rotulo "TER 03/11", hoje, feriado, pessoas:[{payee_id, nome, eh_dono, meios_usados, meios_esperados, pct, cor (verde ≤ carga_max, ambar ≤ 100%, vermelho acima; esperado zero com uso = vermelho), texto "Roberto 2/2"}], blocos:[{os, numero, cliente, bem, local, hora, pessoas_texto, dia_n, dias_total, dia_texto "dia 1 de 3", confirmado_cliente, reserva, reserva_texto "Reserva, a confirmar", condicao, tipo, fixada, resultado, resultado_texto}], livre_texto "livre: Roberto tarde"}], mudancas (_agenda_tela_mudancas), decisoes:[{pergunta_id, n, tipo, texto}], como_responder}. Desligado: só o título. Administrador e financeiro (com login) ou service_role; senão 42501.';
 
 -- A carteira de produção (Agenda › Carteira): o quadro de exceções por estado.
 create or replace function public.agenda_tela_carteira(p_hoje date default public._hoje_brt())
@@ -1316,9 +1391,9 @@ comment on function public.agenda_desfazer_pela_tela(uuid, date, timestamptz) is
   'Agenda de Produção (Fase 3, P7a): o Desfazer da tela Semana — agenda_desfazer(ação, o administrador, via tela) (a conclusão, a entrega e a diária têm o desfazer delas); a publicação da semana desfaz todas as ações desfazíveis dela, tudo ou nada, como o *desfaz semana*. Só o administrador (_autor_da_agenda). {ok, mudou, acoes, texto}; recusado = {ok false, texto} e nada muda.';
 
 -- ── 6. Portas ────────────────────────────────────────────────────────────────────────────────────────────
-revoke all on function public._os_porta_regra(text, text, text, boolean, boolean, boolean, boolean, boolean)
+revoke all on function public._os_porta_regra(text, text, text, boolean, boolean, boolean, boolean, boolean, boolean)
   from public, anon, authenticated;
-grant execute on function public._os_porta_regra(text, text, text, boolean, boolean, boolean, boolean, boolean) to service_role;
+grant execute on function public._os_porta_regra(text, text, text, boolean, boolean, boolean, boolean, boolean, boolean) to service_role;
 
 revoke all on function public.os_transicionar_status(uuid, text, text, text, uuid, timestamptz, date, timestamptz, timestamptz)
   from public, anon;
@@ -1327,6 +1402,9 @@ grant execute on function public.os_transicionar_status(uuid, text, text, text, 
 
 revoke all on function public.os_status_da_tela(uuid[]) from public, anon;
 grant execute on function public.os_status_da_tela(uuid[]) to authenticated, service_role;
+
+revoke all on function public.agenda_modo_da_proposta() from public, anon;
+grant execute on function public.agenda_modo_da_proposta() to authenticated, service_role;
 
 revoke all on function public._agenda_tela_mudancas(date, timestamptz) from public, anon, authenticated;
 grant execute on function public._agenda_tela_mudancas(date, timestamptz) to service_role;

@@ -151,6 +151,10 @@ declare
   -- botão (os testes dela: agenda_fase3_conclusao.sql). Este arquivo roda nos dois cortes (--ate 20261025100100 e a fase toda).
   v_f3  boolean := exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace
                                                     and p.proname = 'os_transicionar_status' and p.pronargs = 9);
+  -- FASE 3 (revisão, R2): a recusa de "em andamento → aberta/aprovada" diz o caminho certo (_os_porta_regra, 20261026100600).
+  v_cam text := case when exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace
+                                                and p.proname = '_os_porta_regra' and p.prosrc like '%Se ela parou%')
+                     then ' Se ela parou, passe para aguardando peças ou aguardando o cliente e diga o motivo.' else '' end;
 begin
   -- Encerrada e orçamento: a agenda não mexe.
   perform pg_temp.confere('P01 concluída → agendada: recusa', pg_temp.passa(1, 'scheduled', 'dono'), false, false, 'completed', 0,
@@ -226,9 +230,9 @@ begin
     perform pg_temp.confere(format('P08 em andamento → agendada (%s): continua', v_via), pg_temp.passa(12, 'scheduled', v_via), true, false, 'in_progress', 0,
       'A OS já começou: não volta para agendada.');
     perform pg_temp.confere(format('P08 em andamento → aprovada (%s): continua', v_via), pg_temp.passa(12, 'approved', v_via), true, false, 'in_progress', 0,
-      'A OS já começou: não volta para aprovada.');
+      'A OS já começou: não volta para aprovada.' || v_cam);
     perform pg_temp.confere(format('P08 em andamento → aberta (%s): continua', v_via), pg_temp.passa(12, 'open', v_via), true, false, 'in_progress', 0,
-      'A OS já começou: não volta para aberta.');
+      'A OS já começou: não volta para aberta.' || v_cam);
   end loop;
 
   -- Começar: de aberta, aprovada, agendada e das duas esperas.

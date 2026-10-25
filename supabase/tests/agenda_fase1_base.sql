@@ -783,7 +783,9 @@ insert into _definer_da_agenda values
   ('agenda_livre_de_verdade'), ('agenda_carona'),
   -- FASE 3 (P7a): as leituras das telas (conferem o administrador e leem o plano, as alocações e a equipe inteiros) e o
   -- Desfazer da tela (chama agenda_desfazer, que é só do service_role)
-  ('agenda_tela_semana'), ('agenda_tela_carteira'), ('agenda_equipe_da_grade'), ('agenda_desfazer_pela_tela');
+  ('agenda_tela_semana'), ('agenda_tela_carteira'), ('agenda_equipe_da_grade'), ('agenda_desfazer_pela_tela'),
+  -- FASE 3 (revisão, R3): o modo da agenda automática para qualquer login (agenda_config é fechada ao técnico e ao vendedor)
+  ('agenda_modo_da_proposta');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

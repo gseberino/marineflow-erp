@@ -26,6 +26,10 @@
 --   mesma frase e ficam: o formulário cobre o front publicado antes desta migration (o plano B), e a conversa e as palavras
 --   recusam antes de montar o rascunho (a releitura não oferece o que a porta recusaria).
 --
+-- REVISÃO DA FASE 3 (C2, 25/10): a cópia acompanha as trocas da 20261026100600 fora do bloco do D11 (o C1 do teste confere):
+-- com login, a via não é de quem chama (R6); a regra recebe o modo da agenda automática e a recusa só por falta do motivo
+-- devolve pede_motivo (R2); agendada → aberta pela tela vai para o status escolhido (R2).
+--
 -- O QUE NÃO MUDA: quem pode e as passagens (_os_porta_regra), as cobranças e a saída da conclusão, reabrir, faturar,
 -- desfazer, a conversão sem conclusão, os status de agenda. A lista rápida e os kanbans continuam oferecendo "Concluída"
 -- (o levantamento é dado: a porta decide na hora e o aviso traz a frase). Nenhuma frase das Fases 2 e 3 muda.
@@ -136,8 +140,11 @@ begin
   -- Quem pede: com login, o próprio login; sem login (service role, o próprio banco), p_autor — motor e vigia podem
   -- vir sem. Um JWT de outro papel sem login não ganha o direito de dizer quem é.
   if v_uid is not null then
-    -- FASE 3: a assinatura do cliente vem só pela service_role (submit-signature), nunca com login.
-    if p_via = 'assinatura' then
+    -- FASE 3: a assinatura do cliente vem só pela service_role (submit-signature), nunca com login. Revisão da Fase 3 (R6):
+    -- com login, quem chama não escolhe a via — o motor, a vigia e o gestor (equipe) também são só do banco, e o dono e a
+    -- conferência, só do administrador ou do financeiro.
+    if p_via in ('assinatura', 'equipe', 'motor', 'vigia')
+       or (p_via in ('dono', 'conferencia') and not public.is_admin_or_financial(v_uid)) then
       raise exception 'Você não pode mudar o status desta OS.' using errcode = '42501';
     end if;
     v_autor := v_uid;
@@ -168,7 +175,7 @@ begin
   -- FASE 3 (P7a): o tipo do pedido, quem pode e as passagens que não dependem de dado vêm de _os_porta_regra — a mesma
   -- função que a tela (os_status_da_tela) lê para esconder da lista rápida e dos kanbans o que a porta recusa.
   v_regra := public._os_porta_regra(v_os.status, v_para, p_via, v_gestor, v_tecnico, v_vendedor, v_autor is not null,
-                                    v_motivo is not null);
+                                    v_motivo is not null, c.modo_proposta = 'ligado');
   v_tipo := v_regra ->> 'tipo';
   if v_regra ->> 'recusa' = 'quem' then
     raise exception '%', v_regra ->> 'texto' using errcode = '42501';
@@ -192,7 +199,10 @@ begin
   -- (1 = o número, 2 = o nome, 3 = o status de agora, 4 = o pedido).
   if v_regra ->> 'recusa' = 'passagem' then
     return public._agenda_porta_fica((v_regra ->> 'fica')::boolean, v_de,
-      format(v_regra ->> 'texto', v_os.numero, v_nome, public._agenda_status_texto(v_de), public._agenda_status_texto(v_para)));
+      format(v_regra ->> 'texto', v_os.numero, v_nome, public._agenda_status_texto(v_de), public._agenda_status_texto(v_para)))
+      -- Revisão da Fase 3 (R2): só faltou o motivo (em andamento → aguardando, pelo dono ou pela tela): quem chama pede.
+      || case when coalesce((v_regra ->> 'pede_motivo')::boolean, false) then jsonb_build_object('pede_motivo', true)
+              else '{}'::jsonb end;
   end if;
   -- FASE 3 (P7a): fim
 
@@ -413,13 +423,17 @@ begin
       if public._agenda_os_tem_dia(p_os, p_hoje) then
         return public._agenda_porta_fica(false, v_de, 'A OS ainda tem dia no plano: tire o dia antes.');
       end if;
-      -- Volta ao que era antes de agendar (aberta ou aprovada); sem registro, aprovada.
-      select a.status_antes into v_antes
-        from public.agenda_acoes a
-       where a.service_order_id = p_os and a.tipo = 'status' and a.executada and a.status_depois = 'scheduled'
-       order by a.criada_em desc, a.id desc
-       limit 1;
-      v_para := case when v_antes in ('open', 'approved') then v_antes else 'approved' end;
+      -- Volta ao que era antes de agendar (aberta ou aprovada); sem registro, aprovada. Revisão da Fase 3 (R2): pela tela
+      -- (o administrador ou o financeiro, com a agenda automática fora de ligado: _os_porta_regra), o status que ele
+      -- escolheu.
+      if p_via <> 'tela' then
+        select a.status_antes into v_antes
+          from public.agenda_acoes a
+         where a.service_order_id = p_os and a.tipo = 'status' and a.executada and a.status_depois = 'scheduled'
+         order by a.criada_em desc, a.id desc
+         limit 1;
+        v_para := case when v_antes in ('open', 'approved') then v_antes else 'approved' end;
+      end if;
     elsif v_de = 'awaiting_parts' then
       v_falta := public._agenda_falta_material(p_os, p_hoje);
       if v_falta is not null then
@@ -459,7 +473,7 @@ end;
 $function$;
 
 comment on function public.os_transicionar_status(uuid, text, text, text, uuid, timestamptz, date, timestamptz, timestamptz) is
-  'Agenda de Produção (Fase 2; Fase 3: conclusão, faturamento, reabertura, conversão e p_check_out; Fase 3, P7a: as regras que só dependem do cargo, do status, do pedido e do caminho moram em _os_porta_regra, a mesma função que a tela lê; Fase 3, P7b: o D11 — concluir exige o levantamento respondido nos serviços marcados "exige levantamento", em todo caminho, com a frase do formulário): a porta única de status da OS. Vias: tela, tela_agendar, aprovacao, assistente, check_in, oc, motor, vigia, equipe, conferencia, dono, assinatura, desfazer. Status de agenda (todos os modos): em andamento nunca volta (agendada/aberta/aprovada) e só volta a aguardar com "parou" do dono e o motivo (a OC: ok, nada muda); aguardando peças só sai com o material completo; aguardando o cliente só sai pelo dono, a tela de agendar ou a aprovação; agendada só volta (para o status de antes) pela agenda ou pelo dono e sem dia no plano; em modo_proposta ligado, agendada só com dia no plano; check_in_at uma vez. Fase 3: concluir (ativo → concluída) exige o levantamento respondido (_os_levantamentos_pendentes vazio; senão nada muda e {ok false} com "Para concluir, responda o levantamento de: …"), cria as cobranças da condição (_os_criar_recebiveis_da_conclusao, paridade com a tela) ANTES do status e grava a saída num UPDATE só, tudo ou nada ({ok false} com o texto); faturar só concluída; reabrir concluída (tela, dono) mantém saída e cobranças; orçamento → X (tela, assistente, dono, aprovação, assinatura) converte trocando só o prefixo do número e aplica aprovada → X na mesma chamada (se X recusar, a conversão também não fica); cancelar é Cancelar OS. Quem pode: status de agenda = admin/financeiro, técnico da OS, vendedor pela tela; converter = admin/financeiro, vendedor (tela, assistente), assinatura; concluir = admin/financeiro, técnico da OS, assinatura, equipe; faturar/reabrir/desfazer a conclusão = admin/financeiro. Toda mudança: linha em agenda_acoes (status; concluir com receivable_ids; desfazível quando foi motor/vigia/equipe, e a conclusão pela equipe ou pelo dono). Devolve {ok, mudou, de, para, texto, acao_id, check_in_at, check_out_at; na conclusão cobrancas e cobrancas_texto; na conversão convertido, numero, numero_antes}.';
+  'Agenda de Produção (Fase 2; Fase 3: conclusão, faturamento, reabertura, conversão e p_check_out; Fase 3, P7a: as regras que só dependem do cargo, do status, do pedido e do caminho moram em _os_porta_regra, a mesma função que a tela lê; Fase 3, P7b: o D11 — concluir exige o levantamento respondido nos serviços marcados "exige levantamento", em todo caminho, com a frase do formulário): a porta única de status da OS. Vias: tela, tela_agendar, aprovacao, assistente, check_in, oc, motor, vigia, equipe, conferencia, dono, assinatura, desfazer. Status de agenda (todos os modos): em andamento nunca volta (agendada/aberta/aprovada) e só volta a aguardar com o motivo, pelo dono ou pela tela (admin/financeiro, técnico da OS; sem o motivo {ok false, pede_motivo true}) (a OC: ok, nada muda); aguardando peças só sai com o material completo; aguardando o cliente só sai pelo dono, a tela de agendar, a aprovação ou a assinatura do cliente; agendada só volta (para o status de antes) pela agenda ou pelo dono e sem dia no plano, e pela tela (para o status escolhido) só o admin/financeiro com a agenda automática fora de ligado; com login, as vias motor, vigia, equipe e assinatura são recusadas (42501), e dono e conferência só valem para admin/financeiro; em modo_proposta ligado, agendada só com dia no plano; check_in_at uma vez. Fase 3: concluir (ativo → concluída) exige o levantamento respondido (_os_levantamentos_pendentes vazio; senão nada muda e {ok false} com "Para concluir, responda o levantamento de: …"), cria as cobranças da condição (_os_criar_recebiveis_da_conclusao, paridade com a tela) ANTES do status e grava a saída num UPDATE só, tudo ou nada ({ok false} com o texto); faturar só concluída; reabrir concluída (tela, dono) mantém saída e cobranças; orçamento → X (tela, assistente, dono, aprovação, assinatura) converte trocando só o prefixo do número e aplica aprovada → X na mesma chamada (se X recusar, a conversão também não fica); cancelar é Cancelar OS. Quem pode: status de agenda = admin/financeiro, técnico da OS, vendedor pela tela; converter = admin/financeiro, vendedor (tela, assistente), assinatura; concluir = admin/financeiro, técnico da OS, assinatura, equipe; faturar/reabrir/desfazer a conclusão = admin/financeiro. Toda mudança: linha em agenda_acoes (status; concluir com receivable_ids; desfazível quando foi motor/vigia/equipe, e a conclusão pela equipe ou pelo dono). Devolve {ok, mudou, de, para, texto, acao_id, check_in_at, check_out_at; na conclusão cobrancas e cobrancas_texto; na conversão convertido, numero, numero_antes}.';
 
 -- ── Portas (as mesmas de 20261026100600) ───────────────────────────────────────────────────────────────
 revoke all on function public.os_transicionar_status(uuid, text, text, text, uuid, timestamptz, date, timestamptz, timestamptz)
