@@ -74,6 +74,12 @@
 --     conta como fora da janela só o que está na fila, saindo ou saiu — o que falhou não saiu.
 --   · A agenda_saude não lê a precisão do detector para quem não é administrador nem financeiro (ela lançaria 42501).
 --
+-- CORREÇÃO C1 DA REVISÃO DA FASE 4 (25/10/2026; a migration não estava aplicada, foi editada aqui): o passo da fila
+-- (_agenda_material_fila) também falha a pergunta que ficou velha antes de sair — a linha de material sumiu, chegou,
+-- saiu de comprado/a caminho, a OS saiu da carteira ou o texto de agora (_agenda_fornecedor_texto) não é o da fila — e a
+-- mensagem fica recusada/desatualizada (motivo novo na lista fechada da 20261027100000). x5: a pergunta marcada para qui
+-- 08:00 sairia depois que o painel chegou.
+--
 -- ORDEM DE LIGAR: depois de 20261027100000..100400; ANTES do deploy do task-automations (que chama agenda_material_vigiar —
 -- sem ela, com os modos desligados, o passo nem chama a função) e do whatsapp-queue-worker (a 3ª trava). Com os três modos
 -- desligados (a linha nasce assim), nada é gravado e nada sai.
@@ -609,8 +615,10 @@ create trigger trg_agenda_fila_do_fornecedor_linha
 -- ── 6. Os passos do material: a fila velha, os terços, os cadastros ─────────────────────────────────────
 
 -- A fila velha do fornecedor (roda SEMPRE, em qualquer modo): o que não saiu dentro da janela da mensagem, ou ficou na fila
--- com modo_fornecedor fora de ligado, vira falha e a mensagem fica recusada (janela / modo). O que está marcado para
--- depois fica. Só mexe em linha source agenda-fornecedor.
+-- com modo_fornecedor fora de ligado, vira falha e a mensagem fica recusada (janela / modo). A pergunta que ficou velha
+-- antes de sair (C1 da revisão: o material chegou, saiu de comprado/a caminho, mudou de previsão ou a OS saiu da carteira)
+-- também falha e fica recusada (desatualizada): ninguém pergunta ao fornecedor pela peça que já chegou. O que está marcado
+-- para depois e continua valendo fica. Só mexe em linha source agenda-fornecedor.
 create or replace function public._agenda_material_fila(p_hoje date, p_agora timestamptz)
  returns jsonb
  language plpgsql
@@ -621,6 +629,7 @@ declare
   cf     public.agenda_config := public._agenda_cfg();
   v_ids  uuid[];
   v_modo uuid[] := '{}';
+  v_velh uuid[] := '{}';
 begin
   if cf.modo_fornecedor <> 'ligado' then
     with x as (
@@ -632,6 +641,22 @@ begin
     update public.agenda_fornecedor_mensagens m set estado = 'recusada', recusa_motivo = 'modo'
      where m.fila_id = any (v_modo) and m.estado = 'enfileirada';
   end if;
+  -- A pergunta desatualizada (x5: marcada para qui 08:00, o painel chegou qua 20:00): a linha de material sumiu, chegou
+  -- (chegou_em), saiu de comprado/a caminho, a OS saiu da carteira, ou o texto de agora (_agenda_fornecedor_texto: a
+  -- previsão, a nota, o contato) não é mais o que está na fila.
+  with x as (
+    update public.whatsapp_send_queue q
+       set status = 'failed', failed_reason = 'agenda-fornecedor: o material mudou antes de a pergunta sair'
+      from public.agenda_fornecedor_mensagens m0
+     where q.source = 'agenda-fornecedor' and q.status = 'pending' and m0.id = q.source_ref_id
+       and not exists (select 1 from public.os_material l
+                        where l.id = m0.os_material_id and l.chegou_em is null and l.situacao in ('comprado', 'a_caminho')
+                          and l.service_order_id in (select k.service_order_id from public.os_carteira(p_hoje) k)
+                          and public._agenda_fornecedor_texto(l.id) is not distinct from m0.texto)
+    returning q.id)
+  select coalesce(array_agg(x.id), '{}') into v_velh from x;
+  update public.agenda_fornecedor_mensagens m set estado = 'recusada', recusa_motivo = 'desatualizada'
+   where m.fila_id = any (v_velh) and m.estado = 'enfileirada';
   with x as (
     update public.whatsapp_send_queue q
        set status = 'failed', failed_reason = 'agenda-fornecedor: não saiu dentro da janela'
@@ -644,12 +669,13 @@ begin
   select coalesce(array_agg(x.id), '{}') into v_ids from x;
   update public.agenda_fornecedor_mensagens m set estado = 'recusada', recusa_motivo = 'janela'
    where m.fila_id = any (v_ids) and m.estado = 'enfileirada';
-  return jsonb_build_object('canceladas', cardinality(v_ids) + cardinality(v_modo), 'pelo_modo', cardinality(v_modo));
+  return jsonb_build_object('canceladas', cardinality(v_ids) + cardinality(v_modo) + cardinality(v_velh),
+                            'pelo_modo', cardinality(v_modo), 'desatualizadas', cardinality(v_velh));
 end;
 $function$;
 
 comment on function public._agenda_material_fila(date, timestamptz) is
-  'Agenda de Produção (Fase 4, P5), passo do material "fila" (roda sempre, até com tudo desligado): a linha source agenda-fornecedor pendente vira failed quando modo_fornecedor saiu de ligado (a mensagem fica recusada/modo) ou quando já devia ter saído e agora está fora da janela dela (_agenda_fornecedor_fora_da_janela; recusada/janela). O que está marcado para depois fica. {canceladas, pelo_modo}.';
+  'Agenda de Produção (Fase 4, P5), passo do material "fila" (roda sempre, até com tudo desligado): a linha source agenda-fornecedor pendente vira failed quando modo_fornecedor saiu de ligado (a mensagem fica recusada/modo), quando a pergunta ficou velha antes de sair (C1 da revisão: a linha de material sumiu, chegou, saiu de comprado/a caminho, a OS saiu da carteira ou _agenda_fornecedor_texto da linha não é mais o texto da fila; recusada/desatualizada) ou quando já devia ter saído e agora está fora da janela dela (_agenda_fornecedor_fora_da_janela; recusada/janela). O que está marcado para depois e continua valendo fica. {canceladas, pelo_modo, desatualizadas}.';
 
 -- Os terços: a pergunta ao fornecedor no meio de um prazo longo.
 create or replace function public._agenda_material_tercos(p_hoje date, p_agora timestamptz)

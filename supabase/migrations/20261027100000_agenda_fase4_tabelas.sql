@@ -351,8 +351,9 @@ create table if not exists public.agenda_fornecedor_mensagens (
   texto            text not null check (char_length(texto) between 3 and 600),
   enviar_em        timestamptz not null,
   estado           text not null default 'registrada' check (estado in ('registrada', 'enfileirada', 'recusada')),
+  -- desatualizada (C1 da revisão): a pergunta ficou velha antes de sair (a peça chegou, mudou a previsão, saiu da carteira)
   recusa_motivo    text check (recusa_motivo in ('teto', 'janela', 'fim_de_semana', 'domingo', 'sem_telefone', 'opt_out',
-                                                 'sem_conversa', 'modo')),
+                                                 'sem_conversa', 'modo', 'desatualizada')),
   fila_id          uuid,
   dedupe_key       text not null unique,
   criada_em        timestamptz not null default now(),

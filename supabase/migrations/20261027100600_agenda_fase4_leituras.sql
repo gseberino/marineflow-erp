@@ -56,6 +56,9 @@
 -- 22023 na agenda_ver (a ferramenta devolve o erro ao modelo; a palavra responde "Não consegui ler a agenda agora" e registra
 -- em app_error_logs).
 --
+-- C1 DA REVISÃO DA FASE 4 (25/10/2026): _agenda_fornecedor_frase lê o motivo novo desatualizada ("o material mudou antes de
+-- a pergunta sair").
+--
 -- PROVA: supabase/tests/agenda_fase4_leituras.sql (L1–L6). Na bancada:
 --   node scripts/bancada-agenda/rodar.mjs
 --
@@ -443,6 +446,8 @@ begin
       when 'opt_out' then 'ele pediu para não receber mensagem'
       when 'sem_conversa' then format('sem conversa com a HBR nos últimos %s dias', cf.fornecedor_conversa_dias)
       when 'modo' then 'a pergunta ao fornecedor foi desligada'
+      -- C1 da revisão: a pergunta que ficou velha antes de sair (a peça chegou, mudou a previsão, a OS saiu da carteira)
+      when 'desatualizada' then 'o material mudou antes de a pergunta sair'
       else x.recusa_motivo end;
     return format('não perguntei à %s, %s, %s (%s)', v_quem, public._dia_curto(v_dia), v_se, v_mot);
   end if;

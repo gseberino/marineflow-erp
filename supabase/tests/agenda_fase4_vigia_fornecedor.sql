@@ -19,7 +19,9 @@
 --   T3 a 2ª trava (o gatilho da fila): a inserção por fora sem a mensagem, em sombra, já decidida, com outro texto, outra
 --      chave, outro telefone, fora da janela (e a última tentativa), no sábado, acima do teto; a nova tentativa fora da
 --      janela falha e volta à hora de antes; a linha não muda de texto, telefone nem origem; as outras origens não mudam;
---      a fila velha (o que não saiu na janela; o modo que saiu de ligado)
+--      a fila velha (o que não saiu na janela; o modo que saiu de ligado); (C1 da revisão) a pergunta que ficou velha antes de
+--      sair — a peça chegou (x5), a compra voltou a faltar, o dono mudou a previsão, a OS saiu da carteira — falha e fica
+--      recusada/desatualizada; sem mudança, fica
 --   T4 idempotência: o tique seguinte não duplica a mensagem, a linha da fila nem a ação; o enfileirar de novo não refaz
 --   T5 o texto: a mensagem-modelo exata; nenhuma mensagem gerada tem valor, pagamento, OS, link ou o cliente; o registro
 --      recusa (22023) cada um deles
@@ -736,6 +738,7 @@ declare
   v_reg uuid;
   v_som uuid;
   v_e jsonb;
+  v_caso text;
   v_ins text := $q$insert into public.whatsapp_send_queue (phone_normalized, message, source, source_ref_id, scheduled_for,
                                                          max_attempts, dedupe_key) values (%L, %L, 'agenda-fornecedor', %L, %L, %s, %L)$q$;
 begin
@@ -876,6 +879,59 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
+  -- (C1 da revisão, item 7; x5) A pergunta registrada qua 28/10 às 19:00 (fora da janela) sai qui 29/10 às 08:00. Antes da
+  -- rodada das 07:45 de qui: o painel chega; a compra volta a faltar; o dono muda a previsão; a OS sai da carteira — ou
+  -- nada muda (o controle). A que ficou velha falha e a mensagem fica recusada/desatualizada; a de controle fica.
+  foreach v_caso in array array['chegou', 'falta', 'previsao', 'fora_da_carteira', 'nada'] loop
+    begin
+      execute current_setting('agenda_teste.fase4');
+      update public.suppliers set phone = '5547900000205', contact_name = 'Lia Souza' where id = c_ali;
+      perform pg_temp.wa('5547900000205', 'inbound', timestamptz '2026-10-15 11:00-03');
+      perform pg_temp.modos('desligado', 'desligado', 'ligado');
+      r := pg_temp.vig(d28, '19:00');
+      select x.* into q from public.whatsapp_send_queue x where x.source = 'agenda-fornecedor';
+      case v_caso
+        when 'chegou' then
+          update public.os_material set situacao = 'na_mao', quantidade_na_mao = quantidade_necessaria, chegou_em = d28,
+                                        fonte = 'dono', atualizado_em = pg_temp.em(d28, '20:00')
+           where id = pg_temp.painel();
+        when 'falta' then
+          update public.os_material set situacao = 'falta', comprado_em = null, comprado_fonte = null, previsao_de = null,
+                                        previsao_ate = null, previsao_fonte = null, fonte = 'dono'
+           where id = pg_temp.painel();
+        when 'previsao' then
+          update public.os_material set previsao_ate = date '2026-11-06', previsao_fonte = 'dono', fonte = 'dono'
+           where id = pg_temp.painel();
+        when 'fora_da_carteira' then
+          update public.service_orders set status = 'cancelled'
+           where id = (select m.service_order_id from public.os_material m where m.id = pg_temp.painel());
+        else null;
+      end case;
+      r := pg_temp.vig(d28 + 1, '07:45');
+      if v_caso = 'nada' then
+        v_res := pg_temp.ok(v_res, 'T3p (C1, controle) nada mudou: a pergunta de qui 08:00 continua na fila',
+          (select x.status from public.whatsapp_send_queue x where x.id = q.id) = 'pending'
+          and (select m.estado from public.agenda_fornecedor_mensagens m where m.fila_id = q.id) = 'enfileirada'
+          and coalesce((r #>> '{contagens,fila,desatualizadas}')::int, -1) = 0, r -> 'contagens' ->> 'fila');
+      else
+        v_res := pg_temp.ok(v_res, format('T3%s (C1, item 7) %s antes de a pergunta sair: a linha da fila falha e a mensagem fica recusada/desatualizada (o dono lê "o material mudou antes de a pergunta sair")',
+            case v_caso when 'chegou' then 'l' when 'falta' then 'm' when 'previsao' then 'n' else 'o' end,
+            case v_caso when 'chegou' then 'o painel chegou (x5)' when 'falta' then 'a compra voltou a faltar'
+                        when 'previsao' then 'o dono mudou a previsão' else 'a OS saiu da carteira' end),
+          q.status = 'pending' and q.scheduled_for = pg_temp.em(d28 + 1, '08:00')
+          and (select x.status = 'failed' and x.failed_reason = 'agenda-fornecedor: o material mudou antes de a pergunta sair'
+                 from public.whatsapp_send_queue x where x.id = q.id)
+          and (select m.estado || '/' || m.recusa_motivo from public.agenda_fornecedor_mensagens m where m.fila_id = q.id)
+              = 'recusada/desatualizada'
+          and (r #>> '{contagens,fila,desatualizadas}')::int = 1
+          and public._agenda_fornecedor_frase((select m.id from public.agenda_fornecedor_mensagens m where m.fila_id = q.id), d28 + 1)
+              like '%(o material mudou antes de a pergunta sair)',
+          coalesce(r -> 'contagens' ->> 'fila', r::text));
+      end if;
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
   perform pg_temp.gravar(v_res);
 end
 $t3$;
