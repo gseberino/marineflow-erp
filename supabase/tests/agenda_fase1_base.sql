@@ -815,7 +815,10 @@ insert into _definer_da_agenda values
   -- service_role) e o desfazer do material (volta os_material e abre o gatilho do original). O registro do sinal
   -- (material_sinal_registrar) também é definer, mas o nome não é da agenda (agenda_fase4_detector.sql prova as portas);
   -- o passo "sinais", a precisão e as auxiliares não.
-  ('agenda_mensagens_de_fornecedor'), ('_agenda_desfazer_material');
+  ('agenda_mensagens_de_fornecedor'), ('_agenda_desfazer_material'),
+  -- FASE 4 (P5): a rodada do material (chama os passos e a mensagem ao fornecedor: só service_role), o registro da mensagem
+  -- ao fornecedor, a 1ª trava (o enfileirar) e a 2ª (o gatilho da fila). Os passos, a janela, o texto e os principais não.
+  ('agenda_material_vigiar'), ('_agenda_fornecedor_registrar'), ('_agenda_fornecedor_enfileirar'), ('_agenda_fila_do_fornecedor');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',
