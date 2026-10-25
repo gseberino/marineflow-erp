@@ -407,6 +407,86 @@ Deno.test("receber: item de texto livre chega à rotina; a resposta e o resumo d
   assertStringIncludes(soCatalogo, "Entra no estoque agora (movimento de compra).");
 });
 
+// Revisão da Fase 4, C2 (item 2, decisão do coordenador): a OC com item sem cadastro de produto NÃO ganha conta a pagar
+// ao completar (o resultado de hoje: antes desta fase ela nem recebia). O banco diz por quê (sem_conta_a_pagar); o resumo
+// e a ferramenta dizem ao dono que a conta é decisão dele. A OC só de catálogo continua gerando a conta.
+Deno.test("receber a OC com item sem cadastro de produto: o resumo e a ferramenta dizem que não há conta a pagar e que a conta é do dono", async () => {
+  const amb = ambiente();
+  // deno-lint-ignore no-explicit-any
+  (amb.db as any).rpc = (nome: string, args: Record<string, unknown>) => {
+    amb.rpcs.push({ nome, args });
+    return Promise.resolve({ data: { status: "received", payable_id: null, all_received: true, sem_conta_a_pagar: "item_sem_produto" }, error: null });
+  };
+  const resumo = await resumirRecebimento(amb.db, { ordem_de_compra: "OC-00013", receber_tudo: true });
+  assertStringIncludes(resumo, "Com isso a OC fica COMPLETA. Não gero conta a pagar: a OC tem item sem cadastro de produto, e a conta dela é decisão sua.");
+  assert(!resumo.includes("gera conta a pagar de"), resumo);
+  const r = await rodar("receive_purchase_order", { ordem_de_compra: "OC-00013", receber_tudo: true }, amb);
+  assertEquals(r.ok, true, JSON.stringify(r));
+  assertEquals(r.conta_a_pagar, "Não gerei conta a pagar: a OC tem item sem cadastro de produto, e a conta dela é decisão sua.");
+
+  // Em parte (catálogo + texto livre, chega só o catálogo): nem completa ela gera.
+  const misto = ambiente();
+  misto.tabelas.purchase_order_items.push({ id: "i-term", purchase_order_id: "po-13", product_id: "p-term", description: "Terminal M8", quantity: 5, unit_cost: 2, received_qty: 0, created_at: "2026-10-02T10:00:02Z" });
+  const parte = await resumirRecebimento(misto.db, { ordem_de_compra: "OC-00013", itens: [{ descricao: "terminal", quantidade: 5 }] });
+  assertStringIncludes(parte, "A OC fica *recebida em parte*. Nem completa ela gera conta a pagar: a OC tem item sem cadastro de produto, e a conta dela é decisão sua.");
+  const rp = await rodar("receive_purchase_order", { ordem_de_compra: "OC-00013", itens: [{ descricao: "terminal", quantidade: 5 }] }, misto);
+  assertEquals(rp.conta_a_pagar, "ainda não, e nem completa ela gera: a OC tem item sem cadastro de produto, e a conta dela é decisão sua.");
+
+  // Só catálogo: a conta de antes, no resumo e na ferramenta.
+  const cat = ambiente();
+  const tudo = await resumirRecebimento(cat.db, { ordem_de_compra: "OC-00012", receber_tudo: true });
+  assertStringIncludes(tudo, "Com isso a OC fica COMPLETA: gera conta a pagar de *R$");
+  // deno-lint-ignore no-explicit-any
+  (cat.db as any).rpc = () => Promise.resolve({ data: { status: "received", payable_id: "pa-1", all_received: true }, error: null });
+  const rc = await rodar("receive_purchase_order", { ordem_de_compra: "OC-00012", receber_tudo: true }, cat);
+  assertEquals(rc.conta_a_pagar, "gerada (veja em Contas a pagar)");
+});
+
+// Revisão da Fase 4, C2 (R4): a função publicada antes da migration 20261027100000 (sem as colunas do vínculo) grava a OC
+// sem o vínculo, em vez de desfazê-la; outro erro desfaz como antes.
+Deno.test("OC com vínculo e o banco sem as colunas (PGRST204/42703): grava de novo sem o vínculo; outro erro desfaz a OC", async () => {
+  const semColunas = (amb: ReturnType<typeof ambiente>, erro: Erro) => {
+    // deno-lint-ignore no-explicit-any
+    const db: any = amb.db;
+    const from = db.from;
+    db.from = (t: string) => {
+      const q = from(t);
+      if (t !== "purchase_order_items") return q;
+      const insert = q.insert;
+      q.insert = (v: unknown) => {
+        const linhas = (Array.isArray(v) ? v : [v]) as Linha[];
+        if (linhas.some((l) => "service_order_part_id" in l || "service_order_service_id" in l)) {
+          return { then: (ok: (x: unknown) => unknown, e?: (x: unknown) => unknown) => Promise.resolve({ data: null, error: erro }).then(ok, e) };
+        }
+        return insert(v);
+      };
+      return q;
+    };
+    return amb;
+  };
+  for (const erro of [
+    { code: "PGRST204", message: "Could not find the 'service_order_part_id' column of 'purchase_order_items' in the schema cache" },
+    { code: "42703", message: 'column "service_order_service_id" of relation "purchase_order_items" does not exist' },
+  ]) {
+    const amb = semColunas(ambiente(), erro);
+    const qi = amb.tabelas.quote_request_items;
+    qi.find((i) => i.id === "qi-1")!.service_order_part_id = "sop-bat";
+    qi.find((i) => i.id === "qi-2")!.service_order_service_id = "sos-inv";
+    const r = await rodar("close_quote_request", { cotacao: "5", acao: "fechar", fornecedor: "Victron", gerar_oc: true }, amb);
+    assertEquals(r.ok, true, JSON.stringify(r));
+    const po = amb.tabelas.purchase_orders.find((p) => p.po_number === "OC-00015")!;
+    const linhas = amb.tabelas.purchase_order_items.filter((i) => i.purchase_order_id === po.id);
+    assertEquals(linhas.map((l) => l.description), ["Bateria Lítio 100Ah", "Inversor 3000W"], erro.code);
+    for (const l of linhas) assertEquals("service_order_part_id" in l || "service_order_service_id" in l, false, JSON.stringify(l));
+  }
+  // Outro erro: a OC é desfeita, como antes (não grava de novo).
+  const outro = semColunas(ambiente(), { code: "23514", message: 'violates check constraint "poi_um_vinculo_de_linha"' });
+  outro.tabelas.quote_request_items.find((i) => i.id === "qi-1")!.service_order_part_id = "sop-bat";
+  const ruim = await rodar("close_quote_request", { cotacao: "5", acao: "fechar", fornecedor: "Victron", gerar_oc: true }, outro);
+  assertStringIncludes(String(ruim.error ?? ""), "Os itens não entraram na ordem de compra");
+  assertEquals(outro.tabelas.purchase_orders.some((p) => p.po_number === "OC-00015"), false);
+});
+
 // ─── O vínculo de linha (Agenda de Produção, Fase 4, P2) ──────────────────────────────────────────
 Deno.test("OC da cotação: copia a linha da OS de quote_request_items (peça ou texto livre); sem vínculo, a linha de antes", async () => {
   const amb = ambiente();

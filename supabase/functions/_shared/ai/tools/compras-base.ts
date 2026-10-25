@@ -59,13 +59,25 @@ export type ItemNovoDaOC = {
 };
 
 /**
- * O vínculo de linha do item, só quando existe (sem ele, a linha da OC é a mesma de antes, e grava antes da migration
- * 20261027100000 também); a peça vence (o CHECK poi_um_vinculo_de_linha aceita um só).
+ * O vínculo de linha do item, só quando existe (sem ele, a linha da OC é a mesma de antes); a peça vence (o CHECK
+ * poi_um_vinculo_de_linha aceita um só). COM ele, o banco sem as colunas (a função publicada antes da migration
+ * 20261027100000) recusa o insert inteiro com PGRST204/42703: criarOC grava de novo sem o vínculo
+ * (semAColunaDoVinculo).
  */
 function vinculoDoItem(it: ItemNovoDaOC): Record<string, string> {
   if (it.service_order_part_id) return { service_order_part_id: it.service_order_part_id };
   if (it.service_order_service_id) return { service_order_service_id: it.service_order_service_id };
   return {};
+}
+
+/**
+ * O banco ainda não tem as colunas do vínculo de linha (a migration 20261027100000 não aplicada): PGRST204 do PostgREST
+ * ("Could not find the 'service_order_part_id' column…") ou 42703 do Postgres. Revisão da Fase 4, C2 (R4).
+ */
+export function semAColunaDoVinculo(erro: { code?: string; message?: string } | null | undefined): boolean {
+  if (!["PGRST204", "42703"].includes(String(erro?.code ?? ""))) return false;
+  const msg = String(erro?.message ?? "");
+  return !msg || /service_order_(part|service)_id/.test(msg);
 }
 
 /**
@@ -105,14 +117,20 @@ export async function criarOC(
   }
   if (!po) return { erro: "Não consegui criar a ordem de compra: número repetido três vezes seguidas. Tente de novo." };
   if (itens.length) {
-    const { error: itemErr } = await db.from("purchase_order_items").insert(itens.map((it) => ({
+    const linha = (it: ItemNovoDaOC, comVinculo: boolean) => ({
       purchase_order_id: po.id,
       product_id: it.product_id ?? null,
       description: it.description,
       quantity: it.quantity,
       unit_cost: it.unit_cost,
-      ...vinculoDoItem(it),
-    })));
+      ...(comVinculo ? vinculoDoItem(it) : {}),
+    });
+    let { error: itemErr } = await db.from("purchase_order_items").insert(itens.map((it) => linha(it, true)));
+    // O banco sem as colunas do vínculo (antes da migration 20261027100000): o insert inteiro foi recusado, então grava
+    // de novo sem o vínculo — a OC de antes, que a conta da OS não liga à linha (revisão da Fase 4, C2, R4).
+    if (itemErr && semAColunaDoVinculo(itemErr) && itens.some((it) => Object.keys(vinculoDoItem(it)).length)) {
+      ({ error: itemErr } = await db.from("purchase_order_items").insert(itens.map((it) => linha(it, false))));
+    }
     if (itemErr) {
       const { error: delErr } = await db.from("purchase_orders").delete().eq("id", po.id);
       return {

@@ -52,6 +52,8 @@ export function NewQuoteRequestDialog({
   const [notes, setNotes] = useState('');
   const [supplierSearch, setSupplierSearch] = useState('');
   const [loadingNeeds, setLoadingNeeds] = useState(false);
+  /** Quantos itens citados pelo dono ficaram fora (revisão da Fase 4, C2, R1). */
+  const [citadosFora, setCitadosFora] = useState(0);
 
   // Reabrir o diálogo sempre parte de um estado limpo — vazamento de estado entre
   // aberturas já causou bug neste repo (import de XML, 22/07).
@@ -60,6 +62,7 @@ export function NewQuoteRequestDialog({
     setSupplierIds([]);
     setNotes('');
     setSupplierSearch('');
+    setCitadosFora(0);
     if (prefilledItems?.length) {
       setItems(prefilledItems.map(i => ({ ...i, key: newKey() })));
       return;
@@ -69,8 +72,12 @@ export function NewQuoteRequestDialog({
       setLoadingNeeds(true);
       fetchPurchaseNeeds(serviceOrderId)
         .then(needs => {
-          if (!needs.shortages.length) return;
-          setItems(needs.shortages.map(s => ({
+          // O material que o dono citou e não está no orçamento não se cota (revisão da Fase 4, C2, R1): sem linha da
+          // OS a que ligar, a OC da cotação nasceria sem vínculo e a falta continuaria. Ele compra e diz "comprei".
+          const compraveis = needs.shortages.filter(s => s.origin !== 'dono');
+          setCitadosFora(needs.shortages.length - compraveis.length);
+          if (!compraveis.length) return;
+          setItems(compraveis.map(s => ({
             key: newKey(),
             description: s.description,
             quantity: s.shortage,
@@ -186,6 +193,14 @@ export function NewQuoteRequestDialog({
             >
               <Plus className="h-3.5 w-3.5" /> Adicionar item
             </Button>
+            {citadosFora > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {citadosFora === 1
+                  ? 'O item citado por você ficou fora: ele não está no orçamento.'
+                  : `Os ${citadosFora} itens citados por você ficaram fora: eles não estão no orçamento.`}
+                {' '}Quando comprar, diga “comprei” ao assistente, ou ponha no orçamento.
+              </p>
+            )}
           </section>
 
           <section className="space-y-2">

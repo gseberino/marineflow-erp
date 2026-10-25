@@ -557,7 +557,7 @@ export function useCreatePOsFromQuote() {
       if (vinculosErr) throw vinculosErr;
       const vinculoDoItem = new Map((vinculos ?? []).map(v => [v.id, v]));
 
-      const { generatePONumber, vinculoDaLinha } = await import('@/hooks/use-purchase-orders');
+      const { generatePONumber, vinculoDaLinha, inserirItensDaOC } = await import('@/hooks/use-purchase-orders');
       const created: { id: string; po_number: string }[] = [];
 
       for (const [supplierId, choices] of bySupplier) {
@@ -586,8 +586,8 @@ export function useCreatePOsFromQuote() {
             serviceOrderServiceId: vinculoDoItem.get(c.itemId)?.service_order_service_id ?? null,
           }),
         }));
-        const { error: itemsErr } = await supabase.from('purchase_order_items').insert(rows as any);
-        if (itemsErr) throw itemsErr;
+        // O banco sem as colunas do vínculo (antes da migration 20261027100000): grava sem ele (revisão da Fase 4, C2, R4).
+        await inserirItensDaOC(rows);
 
         created.push(po as any);
       }

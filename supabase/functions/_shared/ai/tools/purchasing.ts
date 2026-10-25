@@ -1,7 +1,7 @@
 import { blockTechnician, NON_TECHNICIAN_ROLES, type Role, type ToolDef } from "./registry.ts";
 import { buscarCadastro } from "../busca-cadastro.ts";
 import { CARGOS_DE_COMPRAS, criarOC, itensDitos } from "./compras-base.ts";
-import { resolverRecebimento } from "./compras-ciclo.ts";
+import { resolverRecebimento, SEM_CONTA_ITEM_SEM_PRODUTO } from "./compras-ciclo.ts";
 import { STATUS_QUE_A_OC_MOVE } from "../../agenda-modo.ts";
 
 // O número da OC (mesmo esquema não-atômico de useCreatePOFromOS, "OC-00001") mora em
@@ -267,7 +267,7 @@ export const purchasingTools: ToolDef[] = [
   {
     name: "receive_purchase_order",
     description:
-      "Registra o que CHEGOU de uma ordem de compra (tudo ou só parte) — a mesma rotina do 'Receber itens' da tela: dá entrada no estoque (o item de texto livre só fica recebido: não tem estoque) e, quando a OC fica completa, gera a conta a pagar. Ache a OC pelo número (ordem_de_compra: OC-00012 ou 12), pelo fornecedor ou pela OS. Diga os itens que chegaram em itens [{n (o número do item em get_purchase_order) ou descricao, quantidade}] — ex.: 'chegou incompleta, recebe só 2 das 4 baterias' = itens [{descricao:'bateria', quantidade:2}]; ou receber_tudo=true para tudo o que falta. Não recebe mais do que falta, nem OC cancelada.",
+      "Registra o que CHEGOU de uma ordem de compra (tudo ou só parte) — a mesma rotina do 'Receber itens' da tela: dá entrada no estoque (o item de texto livre só fica recebido: não tem estoque) e, quando a OC fica completa, gera a conta a pagar (a OC com item de texto livre não gera: a conta dela é decisão do dono). Ache a OC pelo número (ordem_de_compra: OC-00012 ou 12), pelo fornecedor ou pela OS. Diga os itens que chegaram em itens [{n (o número do item em get_purchase_order) ou descricao, quantidade}] — ex.: 'chegou incompleta, recebe só 2 das 4 baterias' = itens [{descricao:'bateria', quantidade:2}]; ou receber_tudo=true para tudo o que falta. Não recebe mais do que falta, nem OC cancelada.",
     input_schema: {
       type: "object",
       properties: {
@@ -316,23 +316,28 @@ export const purchasingTools: ToolDef[] = [
       // receive_po (20261027100200) sobe o received_qty dele sem movimento de estoque.
       const pedido = await resolverRecebimento(admin, args);
       if ("erro" in pedido) return { error: pedido.erro, ...(pedido.opcoes ? { opcoes: pedido.opcoes } : {}) };
-      const { oc, linhas } = pedido;
+      const { oc, linhas, temItemSemProduto } = pedido;
       const { data, error } = await admin.rpc("receive_po", {
         p_po_id: oc.id,
         p_items: linhas.map((l) => ({ po_item_id: l.item.id, received_qty: l.quantidade })),
         p_due_days: Number(args.due_days) > 0 ? Number(args.due_days) : 30,
       });
       if (error) return { error: `O recebimento não foi registrado: ${error.message}` };
-      const r = (data ?? {}) as { status?: string; payable_id?: string | null; all_received?: boolean };
+      const r = (data ?? {}) as { status?: string; payable_id?: string | null; all_received?: boolean; sem_conta_a_pagar?: string };
       return {
         ok: true,
         ordem_de_compra: oc.po_number,
         recebido: linhas.map((l) => ({ item: `${l.n}. ${l.item.description}`, chegou: l.quantidade, faltava: l.faltava, falta_agora: l.faltava - l.quantidade })),
         situacao: r.all_received ? "recebida (completa)" : "recebida em parte",
+        // Revisão da Fase 4, C2 (item 2): a OC com item sem cadastro de produto não ganha conta a pagar (o banco diz por quê).
         conta_a_pagar: r.payable_id
           ? "gerada (veja em Contas a pagar)"
+          : r.sem_conta_a_pagar === "item_sem_produto"
+          ? SEM_CONTA_ITEM_SEM_PRODUTO
           : r.all_received
           ? (oc.supplier_id ? "já existia" : "não gerada: a OC não tem fornecedor")
+          : oc.supplier_id && temItemSemProduto
+          ? `ainda não, e nem completa ela gera: ${SEM_CONTA_ITEM_SEM_PRODUTO.replace("Não gerei conta a pagar: ", "")}`
           : "ainda não: a conta a pagar nasce quando a OC fica completa (é a mesma regra da tela)",
         // Fase 4 (P2): o item de texto livre fica recebido, sem estoque (não tem cadastro de produto).
         estoque: linhas.every((l) => l.item.product_id)

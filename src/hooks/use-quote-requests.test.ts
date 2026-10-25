@@ -5,7 +5,8 @@
 // na linha da OC (a peça vence; no máximo um, o CHECK poi_um_vinculo_de_linha). O que estes testes protegem:
 //  1. o vínculo copiado por item, em cada OC (uma por fornecedor);
 //  2. o item sem vínculo nasce como antes (sem as chaves: grava também antes da migration 20261027100000);
-//  3. a leitura dos vínculos que falha não cria OC nenhuma.
+//  3. a leitura dos vínculos que falha não cria OC nenhuma;
+//  4. o banco sem as colunas do vínculo (a tela antes da migration: PGRST204) grava a OC sem ele (revisão C2, R4).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement, type ReactNode } from 'react';
 import { renderHook } from '@testing-library/react';
@@ -15,6 +16,7 @@ const h = vi.hoisted(() => {
   const estado = {
     itensDaCotacao: [] as Array<Record<string, unknown>>,
     falhaNosItens: false,
+    errosNosItensDaOc: [] as Array<{ message: string; code?: string }>,
     chamadas: [] as { tabela: string; ops: any[][] }[],
     seq: 0,
   };
@@ -30,6 +32,9 @@ const h = vi.hoisted(() => {
       return { data: { id: `po-${estado.seq}`, po_number: `OC-0002${estado.seq}` }, error: null };
     };
     o.then = (ok: any, erro: any) => {
+      if (tabela === 'purchase_order_items' && reg.ops.some((op) => op[0] === 'insert') && estado.errosNosItensDaOc.length) {
+        return Promise.resolve({ data: null, error: estado.errosNosItensDaOc.shift() }).then(ok, erro);
+      }
       if (tabela === 'quote_request_items') {
         return Promise.resolve(estado.falhaNosItens
           ? { data: null, error: { message: 'falha nos itens da cotação' } }
@@ -66,6 +71,7 @@ beforeEach(() => {
   h.estado.chamadas.length = 0;
   h.estado.seq = 0;
   h.estado.falhaNosItens = false;
+  h.estado.errosNosItensDaOc = [];
   h.estado.itensDaCotacao = [
     { id: 'qi-1', service_order_part_id: 'sop-1', service_order_service_id: null },
     { id: 'qi-2', service_order_part_id: null, service_order_service_id: 'sos-2' },
@@ -112,5 +118,21 @@ describe('useCreatePOsFromQuote — o vínculo de linha copiado da cotação', (
     })).rejects.toMatchObject({ message: 'falha nos itens da cotação' });
     expect(h.estado.chamadas.some((c) => c.tabela === 'purchase_orders' && c.ops.some((op) => op[0] === 'insert'))).toBe(false);
     expect(linhasDaOc()).toEqual([]);
+  });
+
+  it('o banco sem as colunas do vínculo (PGRST204): a OC sai, com as linhas gravadas de novo sem as chaves de vínculo', async () => {
+    h.estado.errosNosItensDaOc = [{ code: 'PGRST204', message: "Could not find the 'service_order_part_id' column of 'purchase_order_items' in the schema cache" }];
+    const { result } = renderHook(() => useCreatePOsFromQuote(), { wrapper });
+    await result.current.mutateAsync({
+      quoteRequestId: 'q-1', quoteCode: 'COT-00005', serviceOrderId: 'os-1',
+      choices: [escolha('qi-1', 's-victron', 'Bateria Lítio 100Ah', 'p-bat')],
+    });
+    const inserts = h.estado.chamadas.filter((c) => c.tabela === 'purchase_order_items')
+      .map((c) => c.ops.filter((op) => op[0] === 'insert').flatMap((op) => op[1] as any[])).filter((l) => l.length);
+    expect(inserts).toHaveLength(2);
+    expect(inserts[0][0].service_order_part_id).toBe('sop-1');
+    expect(inserts[1].map((l) => l.description)).toEqual(['Bateria Lítio 100Ah']);
+    expect('service_order_part_id' in inserts[1][0]).toBe(false);
+    expect(h.toast.success).toHaveBeenCalled();
   });
 });

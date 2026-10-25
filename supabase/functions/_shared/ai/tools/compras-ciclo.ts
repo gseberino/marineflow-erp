@@ -86,11 +86,12 @@ export type LinhaDoRecebimento = { item: ItemDaOC; n: number; quantidade: number
  * OC, se a OC pode receber, se a quantidade cabe no que falta. Item de texto livre recebe desde a
  * Agenda de Produção, Fase 4 (P2): receive_po (20261027100200) sobe o recebido dele sem movimento
  * de estoque (não há estoque de texto livre); até ali ele derrubava o recebimento inteiro e era
- * recusado aqui.
+ * recusado aqui. temItemSemProduto: a OC tem item sem cadastro de produto — completa, ela não ganha
+ * conta a pagar (revisão da Fase 4, C2, item 2).
  */
 // deno-lint-ignore no-explicit-any
 export async function resolverRecebimento(admin: any, args: Record<string, unknown>): Promise<
-  { oc: OC; linhas: LinhaDoRecebimento[] } | { erro: string; opcoes?: string[] }
+  { oc: OC; linhas: LinhaDoRecebimento[]; temItemSemProduto: boolean } | { erro: string; opcoes?: string[] }
 > {
   const achada = await localizarOC(admin, args, ["draft", "sent", "partial"]);
   if ("erro" in achada) return achada;
@@ -134,8 +135,15 @@ export async function resolverRecebimento(admin: any, args: Record<string, unkno
       return { erro: `Do item ${l.n} (${l.item.description}) só faltam ${l.faltava} (pedido ${l.item.quantity}, já recebido ${l.item.received_qty}). Confira a quantidade.` };
     }
   }
-  return { oc, linhas };
+  return { oc, linhas, temItemSemProduto: itens.some((it) => !it.product_id) };
 }
+
+/**
+ * A OC com item sem cadastro de produto (texto livre) não ganha conta a pagar ao completar: hoje nenhuma conta nasce dela,
+ * e a conta é decisão do dono (receive_po devolve sem_conta_a_pagar = 'item_sem_produto'; revisão da Fase 4, C2, item 2).
+ */
+export const SEM_CONTA_ITEM_SEM_PRODUTO =
+  "Não gerei conta a pagar: a OC tem item sem cadastro de produto, e a conta dela é decisão sua.";
 
 /** O que acontece com o estoque no recebimento: o item do catálogo entra; o de texto livre só fica recebido. */
 export function estoqueDoRecebimento(linhas: LinhaDoRecebimento[]): string {
@@ -161,12 +169,20 @@ export async function resumirRecebimento(admin: any, args: Record<string, unknow
     return a + (it.received_qty + (l?.quantidade ?? 0)) * it.unit_cost;
   }, 0);
   const prazo = Number(args.due_days) > 0 ? Number(args.due_days) : 30;
+  // Revisão da Fase 4, C2 (item 2): a OC com item sem cadastro de produto não ganha conta a pagar (receive_po).
+  const semProduto = !("erro" in lidos) && lidos.itens.some((it) => !it.product_id);
   return [
     `Receber na *${oc.po_number}* — ${oc.suppliers?.trade_name || oc.suppliers?.name || "sem fornecedor"}:`,
     ...linhas.map((l) => `- ${l.quantidade} de ${l.faltava} que faltavam — ${l.n}. ${l.item.description}`),
     estoqueDoRecebimento(linhas),
     completa
-      ? (oc.supplier_id ? `Com isso a OC fica COMPLETA: gera conta a pagar de *${brl(total)}*, vencendo em ${prazo} dias.` : "Com isso a OC fica completa (sem fornecedor: não gera conta a pagar).")
+      ? (!oc.supplier_id
+        ? "Com isso a OC fica completa (sem fornecedor: não gera conta a pagar)."
+        : semProduto
+        ? "Com isso a OC fica COMPLETA. Não gero conta a pagar: a OC tem item sem cadastro de produto, e a conta dela é decisão sua."
+        : `Com isso a OC fica COMPLETA: gera conta a pagar de *${brl(total)}*, vencendo em ${prazo} dias.`)
+      : oc.supplier_id && semProduto
+      ? "A OC fica *recebida em parte*. Nem completa ela gera conta a pagar: a OC tem item sem cadastro de produto, e a conta dela é decisão sua."
       : "A OC fica *recebida em parte*: a conta a pagar só nasce quando tudo chegar.",
   ].join("\n");
 }

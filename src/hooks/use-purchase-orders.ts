@@ -216,6 +216,24 @@ export function useRemovePOItem() {
 
 // ── receive_po() — atomic: stock in + payable + status ────────────────────────
 
+/** O retorno de receive_po. sem_conta_a_pagar vem quando a OC completou sem conta (revisão da Fase 4, C2). */
+export type RecebimentoDaOC = {
+  status: string;
+  payable_id: string | null;
+  all_received: boolean;
+  sem_conta_a_pagar?: string;
+};
+
+/** A frase do recebimento: a conta só é dita quando nasceu; a OC com item sem cadastro de produto diz por que não. */
+export function mensagemDoRecebimento(r: RecebimentoDaOC | null | undefined): string {
+  if (!r?.all_received) return 'Recebimento parcial registrado.';
+  if (r.payable_id) return 'Recebimento registrado. Estoque atualizado e conta a pagar gerada.';
+  if (r.sem_conta_a_pagar === 'item_sem_produto') {
+    return 'Recebimento registrado. Não gerei conta a pagar: a OC tem item sem cadastro de produto, e a conta dela é decisão sua.';
+  }
+  return 'Recebimento registrado.';
+}
+
 export function useReceivePO() {
   const qc = useQueryClient();
   return useMutation({
@@ -234,18 +252,14 @@ export function useReceivePO() {
         p_due_days: dueDays,
       });
       if (error) throw error;
-      return data as { status: string; payable_id: string | null; all_received: boolean };
+      return data as RecebimentoDaOC;
     },
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['purchase-orders'] });
       qc.invalidateQueries({ queryKey: ['products'] });
       qc.invalidateQueries({ queryKey: ['payables'] });
       qc.invalidateQueries({ queryKey: ['service-orders'] });
-      if (result?.all_received) {
-        toast.success('Recebimento registrado. Estoque atualizado e conta a pagar gerada.');
-      } else {
-        toast.success('Recebimento parcial registrado.');
-      }
+      toast.success(mensagemDoRecebimento(result));
     },
     onError: (e: any) => toast.error(e.message || 'Erro ao registrar recebimento'),
   });
@@ -384,6 +398,31 @@ export function vinculoDaLinha(i: Pick<ShortageForPO, 'serviceOrderPartId' | 'se
 }
 
 /**
+ * O banco ainda não tem as colunas do vínculo de linha (a tela publicada antes da migration 20261027100000): PGRST204 do
+ * PostgREST ("Could not find the 'service_order_part_id' column…") ou 42703 do Postgres.
+ */
+export function semAColunaDoVinculo(erro: { code?: string; message?: string } | null | undefined): boolean {
+  if (!['PGRST204', '42703'].includes(String(erro?.code ?? ''))) return false;
+  const msg = String(erro?.message ?? '');
+  return !msg || /service_order_(part|service)_id/.test(msg);
+}
+
+/**
+ * Grava as linhas de uma OC. Com o vínculo de linha e o banco sem as colunas dele, o insert inteiro é recusado: grava de
+ * novo sem as chaves de vínculo — a OC de antes, que a conta da OS não liga à linha (revisão da Fase 4, C2, R4). Outro
+ * erro lança, como antes.
+ */
+export async function inserirItensDaOC(rows: Record<string, unknown>[]): Promise<void> {
+  const { error } = await supabase.from('purchase_order_items').insert(rows as any);
+  if (!error) return;
+  const comVinculo = rows.some(r => 'service_order_part_id' in r || 'service_order_service_id' in r);
+  if (!comVinculo || !semAColunaDoVinculo(error)) throw error;
+  const semVinculo = rows.map(({ service_order_part_id: _p, service_order_service_id: _s, ...resto }) => resto);
+  const { error: denovo } = await supabase.from('purchase_order_items').insert(semVinculo as any);
+  if (denovo) throw denovo;
+}
+
+/**
  * Gera as ordens de compra dos itens em falta de uma OS, UMA POR FORNECEDOR.
  *
  * Substitui o laço que criava uma OC por item (o fluxo antigo do diálogo de estoque):
@@ -448,8 +487,7 @@ export function useCreatePOsFromShortages() {
           unit_cost: i.unitCost,
           ...vinculoDaLinha(i),
         }));
-        const { error: itemsErr } = await supabase.from('purchase_order_items').insert(rows as any);
-        if (itemsErr) throw itemsErr;
+        await inserirItensDaOC(rows);
         created.push(po as any);
       }
 

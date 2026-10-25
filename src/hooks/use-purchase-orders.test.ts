@@ -16,6 +16,8 @@ const h = vi.hoisted(() => {
     statusDaOs: 'open' as string,
     porta: { ok: true, mudou: true, de: 'open', para: 'awaiting_parts', texto: 'Lenine (OS-00074): de aberta para aguardando peças.' } as any,
     erroPorta: null as { message: string; code?: string } | null,
+    /** os erros dos próximos inserts em purchase_order_items, um por insert (revisão da Fase 4, C2, R4) */
+    errosNosItens: [] as Array<{ message: string; code?: string }>,
     chamadas: [] as { tabela: string; ops: any[][] }[],
   };
   const builder = (tabela: string): any => {
@@ -28,6 +30,9 @@ const h = vi.hoisted(() => {
     o.single = async () => ({ data: { id: 'po-1', po_number: 'OC-00010' }, error: null });
     o.maybeSingle = async () => ({ data: tabela === 'service_orders' ? { status: estado.statusDaOs } : null, error: null });
     o.then = (ok: any, erro: any) => {
+      if (tabela === 'purchase_order_items' && reg.ops.some((op) => op[0] === 'insert') && estado.errosNosItens.length) {
+        return Promise.resolve({ data: null, error: estado.errosNosItens.shift() }).then(ok, erro);
+      }
       if (tabela === 'purchase_orders') return Promise.resolve({ data: [{ po_number: 'OC-00009' }], error: null }).then(ok, erro);
       if (tabela === 'products') return Promise.resolve({ data: [{ id: 'p1', supplier_id: 's1' }], error: null }).then(ok, erro);
       // o UPDATE do status do plano B (statusSemAPorta): devolve a OS quando o filtro .in('status') a pega
@@ -47,7 +52,9 @@ const h = vi.hoisted(() => {
 vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: (t: string) => h.builder(t), rpc: h.rpc } }));
 vi.mock('sonner', () => ({ toast: h.toast }));
 
-import { mensagemDaOC, useCreatePOFromOS, useCreatePOsFromShortages, vinculoDaLinha } from './use-purchase-orders';
+import {
+  mensagemDaOC, mensagemDoRecebimento, semAColunaDoVinculo, useCreatePOFromOS, useCreatePOsFromShortages, vinculoDaLinha,
+} from './use-purchase-orders';
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -76,6 +83,7 @@ beforeEach(() => {
   h.estado.statusDaOs = 'open';
   h.estado.porta = { ok: true, mudou: true, de: 'open', para: 'awaiting_parts', texto: 'Lenine (OS-00074): de aberta para aguardando peças.' };
   h.estado.erroPorta = null;
+  h.estado.errosNosItens = [];
   h.rpc.mockClear();
   h.toast.success.mockClear();
   h.toast.warning.mockClear();
@@ -177,5 +185,58 @@ describe('useCreatePOsFromShortages — o vínculo de linha', () => {
     expect(vinculoDaLinha({ serviceOrderPartId: 'p', serviceOrderServiceId: 's' })).toEqual({ service_order_part_id: 'p' });
     expect(vinculoDaLinha({ serviceOrderServiceId: 's' })).toEqual({ service_order_service_id: 's' });
     expect(vinculoDaLinha({})).toEqual({});
+  });
+
+  // Revisão da Fase 4, C2 (R4): a tela publicada antes da migration 20261027100000 grava sem o vínculo, em vez de falhar.
+  const linhasGravadas = () => h.estado.chamadas
+    .filter((c) => c.tabela === 'purchase_order_items')
+    .map((c) => c.ops.filter((op) => op[0] === 'insert').flatMap((op) => op[1] as any[]))
+    .filter((l) => l.length);
+  const comVinculo = [
+    { productId: 'p1', description: 'Bateria', quantity: 1, unitCost: 900, serviceOrderPartId: 'sop-1' },
+    // o mesmo fornecedor (p1 → s1): uma OC só, um insert de linhas
+    { productId: 'p1', description: 'Cabo 35mm', quantity: 3, unitCost: 45, serviceOrderServiceId: 'sos-1' },
+  ];
+
+  it('o banco sem as colunas do vínculo (PGRST204): grava de novo, as mesmas linhas sem as chaves de vínculo', async () => {
+    h.estado.errosNosItens = [{ code: 'PGRST204', message: "Could not find the 'service_order_part_id' column of 'purchase_order_items' in the schema cache" }];
+    const { result } = renderHook(() => useCreatePOsFromShortages(), { wrapper });
+    await result.current.mutateAsync({ serviceOrderId: 'os-1', items: comVinculo });
+    const [primeira, segunda] = linhasGravadas();
+    expect(primeira.map((l) => l.service_order_part_id ?? l.service_order_service_id)).toEqual(['sop-1', 'sos-1']);
+    expect(segunda.map((l) => l.description)).toEqual(['Bateria', 'Cabo 35mm']);
+    for (const l of segunda) expect('service_order_part_id' in l || 'service_order_service_id' in l).toBe(false);
+    expect(h.toast.success).toHaveBeenCalled();
+  });
+
+  it('42703 também; outro erro (ou sem vínculo) lança, sem gravar de novo', async () => {
+    h.estado.errosNosItens = [{ code: '42703', message: 'column "service_order_service_id" of relation "purchase_order_items" does not exist' }];
+    const um = renderHook(() => useCreatePOsFromShortages(), { wrapper });
+    await um.result.current.mutateAsync({ serviceOrderId: 'os-1', items: comVinculo });
+    expect(linhasGravadas()).toHaveLength(2);
+
+    h.estado.chamadas.length = 0;
+    h.estado.errosNosItens = [{ code: '23514', message: 'violates check constraint "poi_um_vinculo_de_linha"' }];
+    const dois = renderHook(() => useCreatePOsFromShortages(), { wrapper });
+    await expect(dois.result.current.mutateAsync({ serviceOrderId: 'os-1', items: comVinculo }))
+      .rejects.toMatchObject({ code: '23514' });
+    expect(linhasGravadas()).toHaveLength(1);
+
+    expect(semAColunaDoVinculo({ code: 'PGRST204', message: "Could not find the 'notes' column" })).toBe(false);
+    expect(semAColunaDoVinculo({ code: 'PGRST204' })).toBe(true);
+    expect(semAColunaDoVinculo(null)).toBe(false);
+  });
+});
+
+// Revisão da Fase 4, C2 (item 2): a OC com item sem cadastro de produto completa sem conta a pagar, e a tela diz por quê.
+describe('mensagemDoRecebimento', () => {
+  it('a conta só é dita quando nasceu; a OC com item sem cadastro de produto diz que a conta é decisão do dono', () => {
+    expect(mensagemDoRecebimento({ status: 'partial', payable_id: null, all_received: false })).toBe('Recebimento parcial registrado.');
+    expect(mensagemDoRecebimento({ status: 'received', payable_id: 'pa-1', all_received: true }))
+      .toBe('Recebimento registrado. Estoque atualizado e conta a pagar gerada.');
+    expect(mensagemDoRecebimento({ status: 'received', payable_id: null, all_received: true, sem_conta_a_pagar: 'item_sem_produto' }))
+      .toBe('Recebimento registrado. Não gerei conta a pagar: a OC tem item sem cadastro de produto, e a conta dela é decisão sua.');
+    // Sem fornecedor (ou a conta que já existia): não diz "conta a pagar gerada".
+    expect(mensagemDoRecebimento({ status: 'received', payable_id: null, all_received: true })).toBe('Recebimento registrado.');
   });
 });

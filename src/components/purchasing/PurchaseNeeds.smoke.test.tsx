@@ -5,7 +5,7 @@
 // Revisão de 23/10/2026: com a leitura em erro (ex.: o front publicado antes da view v_oc_itens_a_caminho),
 // o diálogo dizia "Tudo disponível para executar" e a faixa sumia. Agora os dois dizem que não conferiram.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import type { PurchaseNeeds } from '@/lib/purchase-needs';
@@ -14,6 +14,7 @@ const estado = vi.hoisted(() => ({
   needs: undefined as PurchaseNeeds | undefined,
   erro: false,
   refetch: (() => {}) as () => void,
+  criarOCs: vi.fn(async (_p: unknown) => {}),
 }));
 
 vi.mock('@/hooks/use-purchase-needs', () => ({
@@ -25,10 +26,11 @@ vi.mock('@/hooks/use-purchase-needs', () => ({
 beforeEach(() => {
   estado.erro = false;
   estado.refetch = () => {};
+  estado.criarOCs.mockClear();
 });
 vi.mock('@/hooks/use-quote-requests', () => ({ useSOLinkedQuotes: () => ({ data: [] }) }));
 vi.mock('@/hooks/use-purchase-orders', () => ({
-  useCreatePOsFromShortages: () => ({ mutateAsync: async () => {}, isPending: false }),
+  useCreatePOsFromShortages: () => ({ mutateAsync: estado.criarOCs, isPending: false }),
 }));
 vi.mock('@/components/purchasing/NewQuoteRequestDialog', () => ({ NewQuoteRequestDialog: () => null }));
 
@@ -151,6 +153,31 @@ describe('Fase 4 (P2): OC ligada ao texto livre e o material citado pelo dono', 
     expect(screen.getByText(/Fora 1 item citado por você, sem preço\./)).toBeTruthy();
     // O texto livre ligado não mostra "disponível 0" (diria que falta).
     expect(screen.queryByText(/precisa 10 · disponível/)).toBeNull();
+  });
+
+  // Revisão da Fase 4, C2 (R1): o citado não tem linha da OS a que ligar — na OC ele nasceria sem vínculo e com R$ 0, e a
+  // falta continuaria (o botão geraria outra OC). Fica fora de "Gerar ordem de compra" e de "Cotar", com o aviso.
+  it('diálogo: o citado pelo dono fica fora de "Gerar ordem de compra" e de "Cotar", com o aviso de dizer "comprei"', async () => {
+    estado.needs = LIGADO_E_CITADO;
+    comRota(<PurchaseNeedsDialog open onOpenChange={() => {}} serviceOrderId="os-l" serviceOrderNumber="OS-00120" />);
+    expect(screen.getByText('Cotar 1 item')).toBeTruthy();
+    expect(screen.getByText(/O item citado por você fica fora da ordem de compra e da cotação: ele não está no orçamento\./)).toBeTruthy();
+    expect(screen.getByText(/Quando comprar, diga “comprei” ao assistente, ou ponha no orçamento\./)).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByText('Gerar ordem de compra')); });
+    expect(estado.criarOCs).toHaveBeenCalledTimes(1);
+    const pedido = estado.criarOCs.mock.calls[0][0] as { items: Array<{ description: string; serviceOrderPartId: string | null }> };
+    expect(pedido.items.map((i) => i.description)).toEqual(['Fusível MIDI 100A']);
+    expect(pedido.items[0].serviceOrderPartId).toBe('sop-1');
+  });
+
+  it('diálogo: só o citado em falta — sem "Gerar ordem de compra" nem "Cotar"; o título ainda diz que precisa de compra', () => {
+    const so = LIGADO_E_CITADO.items[2];
+    estado.needs = { ...LIGADO_E_CITADO, items: [so], shortages: [so], shortageCount: 1, estimatedCost: 0 };
+    comRota(<PurchaseNeedsDialog open onOpenChange={() => {}} serviceOrderId="os-l" serviceOrderNumber="OS-00120" />);
+    expect(screen.getByText('1 item precisa de compra')).toBeTruthy();
+    expect(screen.queryByText('Gerar ordem de compra')).toBeNull();
+    expect(screen.queryByText(/^Cotar/)).toBeNull();
+    expect(screen.getByText(/O item citado por você fica fora da ordem de compra e da cotação/)).toBeTruthy();
   });
 
   it('faixa: o citado na lista do que falta diz "citado por você (sem preço)"; o ligado aparece a caminho com a OC', () => {

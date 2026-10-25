@@ -85,15 +85,22 @@ export function PurchaseNeedsDialog({
     };
   }, [openQuote]);
 
+  /* O material que o dono citou e não está no orçamento (origem 'dono') NÃO vai para a OC nem para a cotação (revisão da
+     Fase 4, C2, R1): sem linha da OS a que ligar, a OC nasceria sem vínculo e com R$ 0, a falta continuaria (aparecendo
+     duas vezes, falta e a caminho), a R16 nunca resolveria e o botão geraria outra OC. Quem compra diz "comprei" ao
+     assistente (a linha vira comprada) ou põe no orçamento. */
+  const compraveis = useMemo(() => (needs?.shortages ?? []).filter(s => s.origin !== 'dono'), [needs]);
+  const citados = (needs?.shortages ?? []).length - compraveis.length;
+
   const prefilled = useMemo(
-    () => (needs?.shortages ?? []).map(s => ({
+    () => compraveis.map(s => ({
       description: s.description,
       quantity: s.shortage,
       product_id: s.productId,
       service_order_part_id: s.origin === 'part' ? s.sourceId : null,
       service_order_service_id: s.origin === 'free_text' ? s.sourceId : null,
     })),
-    [needs],
+    [compraveis],
   );
 
   const label = serviceOrderNumber
@@ -216,6 +223,15 @@ export function PurchaseNeedsDialog({
                   </span>
                 </p>
               )}
+
+              {citados > 0 && (
+                <p className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-muted-foreground">
+                  {citados === 1
+                    ? 'O item citado por você fica fora da ordem de compra e da cotação: ele não está no orçamento.'
+                    : `Os ${citados} itens citados por você ficam fora da ordem de compra e da cotação: eles não estão no orçamento.`}
+                  {' '}Quando comprar, diga “comprei” ao assistente, ou ponha no orçamento.
+                </p>
+              )}
             </div>
           )}
 
@@ -223,11 +239,11 @@ export function PurchaseNeedsDialog({
             <Button variant="ghost" onClick={() => onOpenChange(false)} className="sm:mr-auto">
               {needs?.shortageCount ? 'Depois' : 'Fechar'}
             </Button>
-            {!!needs?.shortageCount && (
+            {compraveis.length > 0 && (
               <>
                 <Button variant="outline" className="gap-1" onClick={() => setQuoteOpen(true)}>
                   <ClipboardList className="h-4 w-4" />
-                  {openQuote ? 'Nova cotação' : `Cotar ${needs.shortageCount} ${needs.shortageCount === 1 ? 'item' : 'itens'}`}
+                  {openQuote ? 'Nova cotação' : `Cotar ${compraveis.length} ${compraveis.length === 1 ? 'item' : 'itens'}`}
                 </Button>
                 <Button
                   className="gap-1"
@@ -235,12 +251,12 @@ export function PurchaseNeedsDialog({
                   onClick={async () => {
                     await createPOs.mutateAsync({
                       serviceOrderId,
-                      items: (needs?.shortages ?? []).map(s => ({
+                      items: compraveis.map(s => ({
                         productId: s.productId,
                         description: s.description,
                         quantity: s.shortage,
                         unitCost: s.unitCost,
-                        // Fase 4 (P2): a linha da OS que a OC compra; o material citado pelo dono vai sem vínculo.
+                        // Fase 4 (P2): a linha da OS que a OC compra (o material citado pelo dono não entra: C2, R1).
                         serviceOrderPartId: s.origin === 'part' ? s.sourceId : null,
                         serviceOrderServiceId: s.origin === 'free_text' ? s.sourceId : null,
                       })),
