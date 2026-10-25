@@ -82,6 +82,11 @@ const FIXTURES_COMO_TEXTO = [
   // só acrescentam os blocos "-- FASE 4:" (_agenda_rascunho_frase e agenda_rascunho_gravar: contra mig_fornecedores_fase4).
   ['agenda_teste.mig_rascunho_fase1', '../../supabase/migrations/20261024160600_agenda_fase1_rascunho.sql'],
   ['agenda_teste.mig_acompanhamento_fase3', '../../supabase/migrations/20261026100500_agenda_fase3_acompanhamento.sql'],
+  // Fase 4 (P4): as migrations de onde a 20261027100400 copiou agenda_desfazer (a equipe e as diárias da Fase 3, a mais
+  // nova) e o gatilho do original da previsão (as tabelas da Fase 4), para o D8 conferir que as cópias só acrescentam os
+  // blocos "-- FASE 4:" (_agenda_vigia_limpeza e _agenda_vigia_chegou: contra mig_conferencia_fase2, acima).
+  ['agenda_teste.mig_equipe_fase3', '../../supabase/migrations/20261026100300_agenda_fase3_equipe_diarias.sql'],
+  ['agenda_teste.mig_tabelas_fase4', '../../supabase/migrations/20261027100000_agenda_fase4_tabelas.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

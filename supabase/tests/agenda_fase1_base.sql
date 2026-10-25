@@ -810,7 +810,12 @@ insert into _definer_da_agenda values
   -- FASE 4 (P3): o *grava* do "não é de serviço" (a nota fica sem serviço, a pergunta respondida). A remessa do e-mail
   -- (material_remessas_do_email) também é definer, mas o nome não é da agenda (o E5 não a vê: agenda_fase4_notas_pix.sql
   -- prova as portas dela); os passos notas e pix, o resolvedor do aviso e a pergunta não.
-  ('_agenda_aplicar_aviso');
+  ('_agenda_aplicar_aviso'),
+  -- FASE 4 (P4): a leitura das mensagens dos fornecedores (lê whatsapp_messages, suppliers, clientes e a carteira: só
+  -- service_role) e o desfazer do material (volta os_material e abre o gatilho do original). O registro do sinal
+  -- (material_sinal_registrar) também é definer, mas o nome não é da agenda (agenda_fase4_detector.sql prova as portas);
+  -- o passo "sinais", a precisão e as auxiliares não.
+  ('agenda_mensagens_de_fornecedor'), ('_agenda_desfazer_material');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

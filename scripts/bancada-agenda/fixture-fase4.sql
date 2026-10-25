@@ -143,3 +143,11 @@ insert into public.finance_review_queue (id, kind, status, bank_transaction_id, 
                                          suggested_date, suggested_category, suggested_supplier_id)
 values ('d4000000-0000-4000-8000-0000000003b2', 'create_payable', 'pending', 'd4000000-0000-4000-8000-0000000003b1',
         'Pix à PREMEL MAT ELETRICOS', 60, 480.00, date '2026-10-26', 'Peças e materiais', 'dd000000-0000-4000-8000-000000000001');
+
+-- ══ P4 (25/10) — a conversa do Mateus ══════════════════════════════════════════════════════════════════
+-- "Recebeu o compressor? Deu tudo certo?" ter 20/10 09:58 (int-compras-prazos §4.7, trecho #10), numa mensagem só. Em
+-- 30/10 ela já está fora da janela do detector (detector_janela_horas); o teste do detector a lê em 20/10, quando o
+-- compressor já estava na mão (desde qua 14/10): não vira pergunta.
+insert into public.whatsapp_messages (id, direction, phone_normalized, message_type, body, occurred_at, delivery_status)
+values ('d4000000-0000-4000-8000-000000000420', 'inbound', '5547900000201', 'text', 'Recebeu o compressor? Deu tudo certo?',
+        timestamptz '2026-10-20 09:58-03', 'received');

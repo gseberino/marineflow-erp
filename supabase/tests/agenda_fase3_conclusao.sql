@@ -23,7 +23,8 @@
 --      conferência só do administrador ou do financeiro (na porta e na entrega)
 --   M  os marcos e o texto deles ("(24 dias úteis)", sem "du")
 --   J  portas: só _agenda_escrever_os e _agenda_escrever_conclusao ligam agenda.porta; anon sem execute; quem executa o quê;
---      security definer; a cópia de agenda_desfazer só muda no bloco -- FASE 3:; a porta com 8 e com 9 argumentos
+--      security definer; a cópia de agenda_desfazer só muda nos blocos -- FASE 3: (e -- FASE 4:, do P4 da Fase 4); a porta
+--      com 8 e com 9 argumentos
 --   L  (só na bancada, com fixture-fase3.sql) o Lenine (OS-00074, sem sinal: as duas parcelas nascem) e o Vanderlei
 --      (OS-00069, sinal pago: nada nasce e o saldo na entrega passa a vencer hoje), os textos da spec
 --
@@ -807,8 +808,17 @@ begin
     v_novo := left(v_novo, v_ini - 1)
               || substr(v_novo, position(E'  -- FASE 3: fim\n' in v_novo) + length(E'  -- FASE 3: fim\n'));
   end loop;
-  insert into _resultado values ('J5 a cópia de agenda_desfazer só muda nos blocos "-- FASE 3:" (o resto é o corpo de 20261025100200)',
-    v_novo = v_corpo and position('_agenda_desfazer_marco' in v_novo) = 0 and position('_agenda_desfazer_diaria' in v_novo) = 0,
+  -- FASE 4 (P4): recriada de novo em 20261027100400 (a ação material vai a _agenda_desfazer_material), com um bloco
+  -- "-- FASE 4: … -- FASE 4: fim" depois dos da Fase 3: sai do mesmo jeito (cada um é só acréscimo).
+  loop
+    v_ini := position('  -- FASE 4: ' in v_novo);
+    exit when v_ini = 0 or position(E'  -- FASE 4: fim\n' in v_novo) < v_ini;
+    v_novo := left(v_novo, v_ini - 1)
+              || substr(v_novo, position(E'  -- FASE 4: fim\n' in v_novo) + length(E'  -- FASE 4: fim\n'));
+  end loop;
+  insert into _resultado values ('J5 a cópia de agenda_desfazer só muda nos blocos "-- FASE 3:" e "-- FASE 4:" (o resto é o corpo de 20261025100200)',
+    v_novo = v_corpo and position('_agenda_desfazer_marco' in v_novo) = 0 and position('_agenda_desfazer_diaria' in v_novo) = 0
+    and position('_agenda_desfazer_material' in v_novo) = 0,
     case when v_novo = v_corpo then null else format('%s × %s caracteres', length(v_novo), length(v_corpo)) end);
 end
 $copia$;
