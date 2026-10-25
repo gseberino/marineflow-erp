@@ -25,7 +25,13 @@
 --   D7 o desfazer: *desfaz OS-00104* volta a linha inteira (o original junto) e julga o sinal errado; a linha que mudou depois
 --      recusa e nada muda; passou o prazo recusa; a chegada pela nota (P3) volta e a nota deixa de valer para a linha
 --   D8 as cópias só acrescentam os blocos "-- FASE 4:" (agenda_desfazer × 20261026100300; _agenda_vigia_limpeza e
---      _agenda_vigia_chegou × 20261025100300; _os_material_previsao_original × 20261027100000)
+--      _agenda_vigia_chegou × 20261025100300; _os_material_previsao_original × 20261027100000; _agenda_data_um ×
+--      20261024160100, C1)
+--   D9 C1 da revisão da Fase 4: a única compra de verdade (a OC de estoque, a nota sem resposta e o Pix aberto do
+--      fornecedor rebaixam unico para nenhum); o pedido da HBR descartado (a chegada que ela afirma continua); o despacho
+--      com o prazo chutado pela cidade vira pergunta (nunca o nível B, nem pela resposta do dono) e não entra na precisão;
+--      com o prazo do dono, a previsão vale. (D1h/D1i: o WhatsApp do cliente e outras_vivas; D2k–D2n: o dia útil e o dia da
+--      semana com o número; D6d: a previsão do dono não julga)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -132,7 +138,7 @@ declare
     'public._agenda_chave_telefone(text)', 'public._agenda_fones_que_nao_sao_fornecedor()',
     'public._agenda_compras_vivas(date)', 'public.agenda_mensagens_de_fornecedor(date, timestamptz)',
     'public.material_sinal_registrar(uuid, uuid, text, text, boolean, text, jsonb, uuid, text, numeric, date, timestamptz)',
-    'public._agenda_material_sinais(date, timestamptz)'];
+    'public._agenda_material_sinais(date, timestamptz)', 'public._agenda_fornecedor_outras_vivas(uuid, date, timestamptz)'];
   v_definer text[] := array[
     'public.agenda_mensagens_de_fornecedor(date, timestamptz)',
     'public.material_sinal_registrar(uuid, uuid, text, text, boolean, text, jsonb, uuid, text, numeric, date, timestamptz)',
@@ -141,6 +147,7 @@ declare
   v_invoker text[] := array[
     'public._agenda_chave_telefone(text)', 'public._agenda_fones_que_nao_sao_fornecedor()',
     'public._agenda_compras_vivas(date)', 'public._agenda_material_sinais(date, timestamptz)',
+    'public._agenda_fornecedor_outras_vivas(uuid, date, timestamptz)', 'public._agenda_data_um(text, date, text, boolean, date, date)',
     'public.agenda_detector_precisao(date, date)', 'public._agenda_vigia_limpeza(date, timestamptz)',
     'public._agenda_vigia_chegou(date, timestamptz)'];
   v_ruins text := '';
@@ -246,6 +253,15 @@ begin
     perform pg_temp.msg('d4000000-0000-4000-8000-0000000004a9', '5547900000201', 'inbound', 'Chega amanhã', timestamptz '2026-10-30 11:00-03');
     perform pg_temp.msg('d4000000-0000-4000-8000-0000000004aa', '5547900000201', 'outbound', 'chega aqui sexta?', timestamptz '2026-10-29 16:00-03');
     perform pg_temp.msg('d4000000-0000-4000-8000-0000000004ab', '5541900000206', 'inbound', 'Chega amanhã', timestamptz '2026-10-29 15:00-03');
+    -- (C1 da revisão, item 10) o WhatsApp do cliente com OS (clients.whatsapp, diferente do telefone dele) num fornecedor
+    -- ativo com OC aberta: também nunca é lido.
+    update public.clients set whatsapp = '5547900000244' where id = 'c1000000-0000-4000-8000-000000000001';
+    insert into public.suppliers (id, name, phone, active, opt_out_whatsapp) values
+      ('dd000000-0000-4000-8000-0000000004f4', 'WHATS DO CLIENTE (AG4D)', '5547900000244', true, false);
+    insert into public.purchase_orders (id, po_number, status, supplier_id, created_at, updated_at)
+    values ('d4000000-0000-4000-8000-0000000004b5', 'OC-AG4D-5', 'draft', 'dd000000-0000-4000-8000-0000000004f4',
+            timestamptz '2026-10-29 10:00-03', timestamptz '2026-10-29 10:00-03');
+    perform pg_temp.msg('d4000000-0000-4000-8000-0000000004ac', '5547900000244', 'inbound', 'Chega amanhã', timestamptz '2026-10-29 15:00-03');
 
     v_l := public.agenda_mensagens_de_fornecedor(c_hoje, c_agora);
     v_ids := array(select e ->> 'msg_id' from jsonb_array_elements(v_l) e);
@@ -267,6 +283,17 @@ begin
       and (select e ->> 'fornecedor' || '/' || (e ->> 'direcao') from jsonb_array_elements(v_l) e
             where e ->> 'msg_id' = 'd4000000-0000-4000-8000-0000000004aa') = 'Mateus/enviada'
       and position('R$' in v_l::text) = 0,
+      v_l::text);
+    v_res := pg_temp.ok(v_res, 'D1h (C1) o WhatsApp do cliente com OS (clients.whatsapp) nunca é lido nem recebe a pergunta ao fornecedor',
+      not (v_ids && array['d4000000-0000-4000-8000-0000000004ac'])
+      and public._agenda_fornecedor_telefone('dd000000-0000-4000-8000-0000000004f4') is null
+      and exists (select 1 from public._agenda_fones_que_nao_sao_fornecedor() k where k = '00000244'),
+      array_to_string(v_ids, ', '));
+    v_res := pg_temp.ok(v_res, 'D1i (C1) outras_vivas: o Mateus tem a OC-00004 aberta sem linha viva (o compressor está na mão) = 1; a Kamell, só o Cerbo = 0',
+      (select (e ->> 'outras_vivas')::int from jsonb_array_elements(v_l) e
+        where e ->> 'msg_id' = 'd4000000-0000-4000-8000-0000000004a1') = 1
+      and (select (e ->> 'outras_vivas')::int from jsonb_array_elements(v_l) e
+            where e ->> 'msg_id' = 'd4000000-0000-4000-8000-0000000004a2') = 0,
       v_l::text);
     -- A mensagem que já virou sinal sai da lista.
     perform pg_temp.reg('d4000000-0000-4000-8000-0000000004a2', c_kes, 'chegada', 'amanhã', false, 'Chega amanhã', '{}', 'nenhum',
@@ -348,8 +375,9 @@ begin
                         timestamptz '2026-10-28 09:00-03');
     r := pg_temp.reg('d4000000-0000-4000-8000-0000000004c3', c_mateus, 'chegada', 'sexta ou sábado', false,
                      'dava para entregar na sexta ou no sábado', '{}', 'nenhum', null, c_hoje, c_agora);
-    v_res := pg_temp.ok(v_res, 'D2d a faixa "sexta ou sábado" dita qua 28/10 = sex 30/10 a sáb 31/10',
-      r ->> 'data_de' = '2026-10-30' and r ->> 'data_ate' = '2026-10-31', r::text);
+    -- (C1 da revisão, item 12) o sábado vai ao próximo dia útil: seg 02/11 é Finados, então ter 03/11
+    v_res := pg_temp.ok(v_res, 'D2d a faixa "sexta ou sábado" dita qua 28/10 = sex 30/10 a ter 03/11 (o sábado vai ao dia útil; seg 02/11 é Finados)',
+      r ->> 'data_de' = '2026-10-30' and r ->> 'data_ate' = '2026-11-03', r::text);
     perform pg_temp.msg('d4000000-0000-4000-8000-0000000004c4', '5541900000206', 'inbound', 'De 3 a 5 dias úteis', timestamptz '2026-10-30 09:00-03');
     r := pg_temp.reg('d4000000-0000-4000-8000-0000000004c4', c_toli, 'prazo', '3 a 5 dias úteis', false, 'De 3 a 5 dias úteis', '{}',
                      'nenhum', null, c_hoje, c_agora);
@@ -365,6 +393,41 @@ begin
     v_res := pg_temp.ok(v_res, 'D2f "5 dias" conta como dias úteis (seg 09/11); "10 dias corridos" = seg 09/11 pelo calendário',
       r ->> 'data_ate' = public.agenda_somar_du(c_hoje, 5)::text and r2 ->> 'data_ate' = (c_hoje + 10)::text,
       r::text || ' ' || r2::text);
+    -- (C1 da revisão, item 12) a data do sinal nunca cai em sábado, domingo ou feriado: vai ao próximo dia útil.
+    perform pg_temp.msg('d4000000-0000-4000-8000-0000000004cb', '5547900000201', 'inbound', 'Chega amanhã', timestamptz '2026-10-30 08:00-03');
+    r := pg_temp.reg('d4000000-0000-4000-8000-0000000004cb', c_mateus, 'chegada', 'amanhã', false, 'Chega amanhã', '{}', 'nenhum', null,
+                     c_hoje, c_agora);
+    perform pg_temp.msg('d4000000-0000-4000-8000-0000000004cc', '5547900000201', 'inbound', 'Chega dia 2', timestamptz '2026-10-29 08:00-03');
+    r2 := pg_temp.reg('d4000000-0000-4000-8000-0000000004cc', c_mateus, 'chegada', 'dia 2', false, 'Chega dia 2', '{}', 'nenhum', null,
+                      c_hoje, c_agora);
+    v_res := pg_temp.ok(v_res, 'D2k (C1) "amanhã" dito na sex 30/10 (sábado) e "dia 2" dito qui 29/10 (Finados) = ter 03/11, o próximo dia útil',
+      r ->> 'data_de' = '2026-11-03' and r ->> 'data_ate' = '2026-11-03' and r2 ->> 'data_ate' = '2026-11-03'
+      and public.agenda_data_dita('amanhã', c_hoje, 'futuro') ->> 'ate' = '2026-10-31'
+      and public.agenda_feriado(date '2026-11-02') is not null,
+      r::text || ' ' || r2::text);
+    perform pg_temp.msg('d4000000-0000-4000-8000-0000000004cd', '5541900000206', 'inbound', 'em 10 dias corridos', timestamptz '2026-10-22 09:00-03');
+    r := pg_temp.reg('d4000000-0000-4000-8000-0000000004cd', c_toli, 'prazo', '10 dias corridos', false, 'em 10 dias corridos', '{}',
+                     'nenhum', null, c_hoje, c_agora);
+    v_res := pg_temp.ok(v_res, 'D2l (C1) "10 dias corridos" dito qui 22/10 cai no dom 01/11 (e seg 02/11 é Finados) = ter 03/11',
+      r ->> 'data_ate' = '2026-11-03' and r ->> 'data_de' = '2026-11-03', r::text);
+    -- (C1 da revisão, item 3) o dia da semana com a data: o parser manda só a data ("chega quarta dia 04/11" → "dia 04/11",
+    -- "entrega na quarta 04/11" → "04/11", "quarta dia 4" → "dia 4"); o banco, quando recebe os dois, fica com o número.
+    perform pg_temp.msg('d4000000-0000-4000-8000-0000000004ce', '5547900000201', 'inbound', 'chega quarta dia 04/11', timestamptz '2026-10-26 10:00-03');
+    r := pg_temp.reg('d4000000-0000-4000-8000-0000000004ce', c_mateus, 'chegada', 'dia 04/11', false, 'chega quarta dia 04/11', '{}',
+                     'nenhum', null, c_hoje, c_agora);
+    perform pg_temp.msg('d4000000-0000-4000-8000-0000000004cf', '5547900000201', 'inbound', 'entrega na quarta 04/11', timestamptz '2026-10-26 10:05-03');
+    r2 := pg_temp.reg('d4000000-0000-4000-8000-0000000004cf', c_mateus, 'chegada', '04/11', false, 'entrega na quarta 04/11', '{}',
+                      'nenhum', null, c_hoje, c_agora);
+    v_res := pg_temp.ok(v_res, 'D2m (C1) "chega quarta dia 04/11" e "entrega na quarta 04/11" ditos seg 26/10 = qua 04/11 (não qua 28/10)',
+      r ->> 'data_ate' = '2026-11-04' and r2 ->> 'data_ate' = '2026-11-04', r::text || ' ' || r2::text);
+    v_res := pg_temp.ok(v_res, 'D2n (C1) no banco o dia da semana com o número vale o número: "quarta dia 4", "quarta, dia 4", "quarta 4" (seg 26/10) = qua 04/11; "quarta" sozinha = qua 28/10',
+      public.agenda_data_dita('quarta dia 4', date '2026-10-26', 'futuro') ->> 'ate' = '2026-11-04'
+      and public.agenda_data_dita('quarta, dia 4', date '2026-10-26', 'futuro') ->> 'ate' = '2026-11-04'
+      and public.agenda_data_dita('quarta 4', date '2026-10-26', 'futuro') ->> 'ate' = '2026-11-04'
+      and public.agenda_data_dita('quarta dia 04/11', date '2026-10-26', 'futuro') ->> 'ate' = '2026-11-04'
+      and public.agenda_data_dita('quarta', date '2026-10-26', 'futuro') ->> 'ate' = '2026-10-28'
+      and public.agenda_data_dita('terça da semana que vem', date '2026-10-26', 'futuro') ->> 'ate' = '2026-11-03',
+      public.agenda_data_dita('quarta dia 4', date '2026-10-26', 'futuro')::text);
     perform pg_temp.msg('d4000000-0000-4000-8000-0000000004c7', '5547900000201', 'inbound', 'Já foi coletado', timestamptz '2026-10-30 09:30-03');
     r := pg_temp.reg('d4000000-0000-4000-8000-0000000004c7', c_mateus, 'despacho', null, false, 'Já foi coletado', '{}', 'nenhum', null,
                      c_hoje, c_agora);
@@ -785,6 +848,11 @@ begin
         update public.os_material set previsao_ate = date '2026-10-15', previsao_fonte = 'dono', fonte = 'dono', atualizado_por = c_admin
          where id = v_l;
         perform public._agenda_material_sinais(date '2026-10-15', timestamptz '2026-10-15 10:00-03');
+        -- (C1 da revisão, item 6) a previsão do dono não é chegada: nenhum veredito ainda; quem julga é a chegada (qui 15/10)
+        v_j := (select coalesce(julgamento, '-') from public.material_sinais where id = v_sinal);
+        update public.os_material set situacao = 'na_mao', quantidade_na_mao = quantidade_necessaria, chegou_em = date '2026-10-15'
+         where id = v_l;
+        perform public._agenda_material_sinais(date '2026-10-16', timestamptz '2026-10-16 10:00-03');
       else
         perform public.os_material_sincronizar('05000000-0000-4000-8000-000000000112', date '2026-10-13');
         update public.material_sinais set os_material_id = (select m.id from public.os_material m
@@ -797,12 +865,12 @@ begin
           when 'chegou_no_dia' then 'a chegou qui 15/10 (qua 14/10 ± 1 dia útil): certo, pelo fato'
           when 'chegou_tarde' then 'b chegou ter 20/10: errado'
           when 'sem_fato' then 'c 15 dias úteis depois da data, sem fato: sem como saber (antes, nada)'
-          when 'previsao_do_dono' then 'd o dono disse qui 15/10 (na faixa): certo'
+          when 'previsao_do_dono' then 'd (C1) o dono disse qui 15/10: não julga (não é chegada); a chegada qui 15/10 julga certo'
           else 'e o dono ligou a mensagem a outra compra: errado' end,
         (select julgamento || ' ' || julgado_por from public.material_sinais where id = v_sinal)
           = case v_caso when 'chegou_no_dia' then 'certo fato' when 'chegou_tarde' then 'errado fato'
                         when 'sem_fato' then 'sem_como_saber fato' when 'previsao_do_dono' then 'certo fato' else 'errado fato' end
-        and (v_caso <> 'sem_fato' or v_j = '-')
+        and (v_caso not in ('sem_fato', 'previsao_do_dono') or v_j = '-')
         and not exists (select 1 from public.material_sinais where whatsapp_message_id = 'd4000000-0000-4000-8000-000000000403'
                          and julgamento is not null),
         (select coalesce(julgamento, '-') || ' ' || coalesce(julgado_por, '-') from public.material_sinais where id = v_sinal));
@@ -963,25 +1031,199 @@ begin
 end
 $d7$;
 
+-- ── D9. C1 da revisão da Fase 4: a única compra de verdade, o pedido da HBR e o despacho chutado ─────────
+do $d9$
+declare
+  v_res jsonb := '[]'::jsonb;
+  c_mateus constant uuid := 'dd000000-0000-4000-8000-000000000004';
+  c_admin  constant uuid := 'aa000000-0000-4000-8000-000000000001';
+  c_os     constant uuid := '05000000-0000-4000-8000-000000000104';
+  v_caso text;
+  v_l uuid;
+  v_lista jsonb;
+  v_foto text;
+  r jsonb;
+  s public.material_sinais;
+  q public.agenda_perguntas;
+  m public.os_material;
+  v_item jsonb;
+  v_t text;
+  k int := 0;
+begin
+  if coalesce(current_setting('agenda_teste.replay_fornecedor_0104', true), '') = ''
+     or coalesce(current_setting('agenda_teste.fase4', true), '') = '' then
+    insert into _resultado values ('D9 C1 da revisão', true, 'PULADO: sem agenda_teste.replay_fornecedor_0104/fase4 (rode pela bancada)');
+    return;
+  end if;
+  -- (a/b) x1 e x1b: o Mateus tem OUTRA compra viva além da linha do compressor — uma OC de estoque aberta (sem linha de OS)
+  -- ou a nota de outra compra a caminho sem resposta. O TS manda unico (1 compra); o banco rebaixa para nenhum e pergunta.
+  foreach v_caso in array array['oc_de_estoque', 'nota_sem_resposta'] loop
+    begin
+      execute current_setting('agenda_teste.replay_fornecedor_0104');
+      update public.agenda_config set modo_detector = 'ligado', modo_material = 'ligado' where id;
+      if v_caso = 'oc_de_estoque' then
+        insert into public.purchase_orders (id, po_number, status, supplier_id, service_order_id, expected_date, created_at, updated_at)
+        values ('70000000-0000-4000-8000-0000000000f1', 'OC-00099', 'sent', c_mateus, null, null, '2026-10-12 10:00-03', '2026-10-12 10:00-03');
+        insert into public.purchase_order_items (id, purchase_order_id, product_id, description, quantity, unit_cost, received_qty, created_at)
+        values ('71000000-0000-4000-8000-0000000000f1', '70000000-0000-4000-8000-0000000000f1', null, 'Gás R134a 13kg (estoque)', 1, 0, 0,
+                '2026-10-12 10:00-03');
+      else
+        insert into public.material_remessas (id, nfe_chave, fornecedor_id, emitente, numero, emitida_em, estado, vinculo)
+        values ('d4000000-0000-4000-8000-0000000004f9', '42261000000000000000550010000018991000000019', c_mateus, 'MATEUS HONORIO',
+                '1899', date '2026-10-12', 'a_caminho', 'sem_resposta');
+      end if;
+      v_l := pg_temp.compressor();
+      v_foto := pg_temp.foto_material();
+      v_lista := public.agenda_mensagens_de_fornecedor(date '2026-10-13', timestamptz '2026-10-13 18:00-03');
+      perform pg_temp.reg('d4000000-0000-4000-8000-000000000403', c_mateus, 'chegada', 'amanhã', true,
+                          'chega aqui amanha se eles retirarem hoje', array[v_l], 'unico', v_l, date '2026-10-13', timestamptz '2026-10-13 14:15-03');
+      r := pg_temp.reg('d4000000-0000-4000-8000-000000000409', c_mateus, 'despacho', null, false, 'Já foi coletado', array[v_l],
+                       'unico', v_l, date '2026-10-13', timestamptz '2026-10-13 17:30-03');
+      perform public._agenda_material_sinais(date '2026-10-13', timestamptz '2026-10-13 17:30-03');
+      select * into s from public.material_sinais where id = (r ->> 'id')::uuid;
+      select * into q from public.agenda_perguntas where chave = 'sinal:' || s.id;
+      v_res := pg_temp.ok(v_res, format('D9%s (C1, item 1) %s: o TS recebe 1 compra e outras_vivas = 1; o banco rebaixa unico para nenhum (a linha de dica), pergunta e não grava',
+                                        case v_caso when 'oc_de_estoque' then 'a' else 'b' end,
+                                        case v_caso when 'oc_de_estoque' then 'a OC de estoque aberta' else 'a nota de outra compra a caminho' end),
+        (select bool_and(jsonb_array_length(e -> 'compras') = 1 and (e ->> 'outras_vivas')::int = 1) from jsonb_array_elements(v_lista) e)
+        and s.casou_por = 'nenhum' and s.os_material_id = v_l and s.estado = 'perguntado'
+        and q.texto = 'Mateus escreveu "Já foi coletado" (ter 13/10, 17:19). É do Flávio ("Compressor 12V de…")? Se for, chega por volta de qua 14/10.'
+        and pg_temp.foto_material() = v_foto and not exists (select 1 from public.agenda_acoes where tipo = 'material'),
+        coalesce(q.texto, s.estado || ' ' || s.casou_por));
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
+  -- (c) o Pix aberto também é outra compra viva (fixture-fase4: o Pix de R$ 480,00 à Premel, seg 26/10)
+  begin
+    execute current_setting('agenda_teste.fase4');
+    update public.agenda_config set modo_material = 'sombra' where id;
+    v_t := public._agenda_fornecedor_outras_vivas('dd000000-0000-4000-8000-000000000001', date '2026-10-26', timestamptz '2026-10-26 10:00-03')::text;
+    perform public._agenda_material_pix(date '2026-10-26', timestamptz '2026-10-26 10:00-03');
+    v_res := pg_temp.ok(v_res, 'D9c (C1, item 1) a pergunta do Pix aberta à Premel é outra compra viva dela (0 → 1); as 4 linhas do Vanderlei não contam',
+      v_t = '0'
+      and public._agenda_fornecedor_outras_vivas('dd000000-0000-4000-8000-000000000001', date '2026-10-26', timestamptz '2026-10-26 10:00-03') = 1
+      and public._agenda_fornecedor_outras_vivas(null, date '2026-10-26', timestamptz '2026-10-26 10:00-03') = 0, v_t);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  -- (d) x3: a HBR PEDE, com a compra ligada e única — nunca vira previsão (antes: "você escreveu para Mateus …", gravado)
+  foreach v_t in array array['preciso que chegue em 3 dias uteis', 'consegue entregar amanhã', 'chega amanhã então'] loop
+    k := k + 1;
+    begin
+      execute current_setting('agenda_teste.replay_fornecedor_0104');
+      update public.agenda_config set modo_detector = 'ligado', modo_material = 'ligado' where id;
+      v_l := pg_temp.compressor();
+      v_foto := pg_temp.foto_material();
+      perform pg_temp.msg(('d4000000-0000-4000-8000-0000000005a' || k)::uuid, '5547900000201', 'outbound', v_t, timestamptz '2026-10-13 14:30-03');
+      r := pg_temp.reg(('d4000000-0000-4000-8000-0000000005a' || k)::uuid, c_mateus,
+                       case k when 1 then 'prazo' else 'chegada' end, case k when 1 then '3 dias úteis' else 'amanhã' end, false, v_t,
+                       array[v_l], 'unico', v_l, date '2026-10-13', timestamptz '2026-10-13 14:45-03');
+      perform public._agenda_material_sinais(date '2026-10-13', timestamptz '2026-10-13 14:45-03');
+      select * into s from public.material_sinais where id = (r ->> 'id')::uuid;
+      if k < 3 then
+        v_res := pg_temp.ok(v_res, format('D9d%s (C1, item 4) a HBR escreveu "%s": descartado, a linha igual, nenhuma ação', k, v_t),
+          s.estado = 'descartado'
+          and s.motivo = case k when 1 then 'dito pela HBR: só a chegada que ela afirma conta'
+                                else 'dito pela HBR: é o pedido dela, não a palavra do fornecedor' end
+          and pg_temp.foto_material() = v_foto and not exists (select 1 from public.agenda_acoes where tipo = 'material')
+          and not exists (select 1 from public.agenda_perguntas where chave = 'sinal:' || s.id),
+          s.estado || ' / ' || coalesce(s.motivo, '-'));
+      else
+        -- (controle) a chegada que a HBR AFIRMA, com a compra ligada e única, continua a previsão do dono (C)
+        v_res := pg_temp.ok(v_res, 'D9d3 (C1, controle) a HBR afirma "chega amanhã então": a previsão qua 14/10, fonte dono',
+          s.estado = 'aplicado'
+          and (select previsao_ate = date '2026-10-14' and previsao_fonte = 'dono' from public.os_material where id = v_l),
+          s.estado || ' / ' || coalesce(s.motivo, '-'));
+      end if;
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
+  -- (e/f/g/h) x8: o "Já foi coletado" sozinho do Mateus com a cidade no cadastro (Blumenau/SC = entrega local, o CHUTE pela
+  -- cidade): a data é a conta da agenda, não a palavra dele. Vira pergunta (nunca o nível B); com o prazo que o dono disse,
+  -- a previsão vale.
+  foreach v_caso in array array['chute', 'resposta', 'dono_disse'] loop
+    begin
+      execute current_setting('agenda_teste.replay_fornecedor_0104');
+      update public.agenda_config set modo_detector = 'ligado', modo_material = 'ligado' where id;
+      update public.suppliers set city = 'Blumenau', state = 'SC' where id = c_mateus;
+      if v_caso = 'dono_disse' then
+        update public.suppliers set modalidade = 'entrega_local', prazo_dias_uteis = 1, prazo_fonte = 'dono' where id = c_mateus;
+      end if;
+      v_l := pg_temp.compressor();
+      v_foto := pg_temp.foto_material();
+      r := pg_temp.reg('d4000000-0000-4000-8000-000000000409', c_mateus, 'despacho', null, false, 'Já foi coletado', array[v_l],
+                       'unico', v_l, date '2026-10-13', timestamptz '2026-10-13 17:30-03');
+      perform public._agenda_material_sinais(date '2026-10-13', timestamptz '2026-10-13 17:30-03');
+      select * into s from public.material_sinais where id = (r ->> 'id')::uuid;
+      select * into q from public.agenda_perguntas where chave = 'sinal:' || s.id;
+      if v_caso = 'chute' then
+        v_item := (select e from jsonb_array_elements(public.os_prontidao(c_os, date '2026-10-13') #> '{material,itens}') e
+                    where e ->> 'id' = v_l::text);
+        v_res := pg_temp.ok(v_res, 'D9e (C1, item 5) o despacho com o prazo chutado pela cidade: a pergunta "… Se for, chega por volta de qua 14/10.", nada gravado, a prontidão não diz "o fornecedor disse"',
+          s.data_ate = date '2026-10-14' and s.estado = 'perguntado' and (s.faria ->> 'chute')::boolean
+          and q.texto = 'Mateus escreveu "Já foi coletado" (ter 13/10, 17:19). É do Flávio ("Compressor 12V de…")? Se for, chega por volta de qua 14/10.'
+          and pg_temp.foto_material() = v_foto and not exists (select 1 from public.agenda_acoes where tipo = 'material')
+          and v_item ->> 'nivel' = 'D' and position('o fornecedor disse' in v_item ->> 'data_texto') = 0,
+          coalesce(q.texto, s.estado) || ' / ' || coalesce(v_item::text, '-'));
+        -- a chegada não julga o chute (a data não foi dita pelo fornecedor)
+        update public.os_material set situacao = 'na_mao', quantidade_na_mao = quantidade_necessaria, chegou_em = date '2026-10-14',
+                                      fonte = 'dono'
+         where id = v_l;
+        perform public._agenda_material_sinais(date '2026-10-15', timestamptz '2026-10-15 10:00-03');
+        v_res := pg_temp.ok(v_res, 'D9g (C1, item 6) o despacho chutado não entra na precisão: a chegada não o julga',
+          (select julgamento is null from public.material_sinais where id = s.id));
+      elsif v_caso = 'resposta' then
+        -- o dono responde pelo aviso ("é do Flávio"): a linha fica a caminho SEM a previsão do fornecedor (nível D)
+        r := public.agenda_rascunho_material(c_admin, 'whatsapp', 'OS-00104', array['Compressor'], 'a_caminho', null, null, null, false,
+                                             'é do Flávio', date '2026-10-13', 'a mensagem do Mateus');
+        r := public.agenda_rascunho_gravar(c_admin, date '2026-10-13');
+        select * into m from public.os_material where id = v_l;
+        v_item := (select e from jsonb_array_elements(public.os_prontidao(c_os, date '2026-10-13') #> '{material,itens}') e
+                    where e ->> 'id' = v_l::text);
+        v_res := pg_temp.ok(v_res, 'D9f (C1, item 5) o dono confirma pelo aviso: a linha a caminho sem previsão do fornecedor (nível D, não B), o sinal aplicado',
+          coalesce((r ->> 'ok')::boolean, false) and m.situacao = 'a_caminho' and m.previsao_ate is null
+          and m.previsao_fonte is null and v_item ->> 'nivel' = 'D'
+          and (select estado from public.material_sinais where id = s.id) = 'aplicado'
+          and (select estado from public.agenda_perguntas where id = q.id) = 'respondida',
+          r::text || ' / ' || coalesce(v_item::text, '-'));
+      else
+        v_res := pg_temp.ok(v_res, 'D9h (C1, controle) com o prazo que o dono disse (entrega local, 1 dia útil), o despacho grava a previsão qua 14/10 do fornecedor',
+          s.estado = 'aplicado' and not coalesce((s.faria ->> 'chute')::boolean, false)
+          and (select previsao_ate = date '2026-10-14' and previsao_fonte = 'fornecedor' from public.os_material where id = v_l),
+          s.estado || ' / ' || coalesce(s.motivo, '-'));
+      end if;
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
+  perform pg_temp.gravar(v_res);
+end
+$d9$;
+
 -- ── D8. As cópias: fora dos blocos "-- FASE 4:", iguais às da migration de onde vieram ─────────────────
 do $d8$
 declare
   v_f3 text := current_setting('agenda_teste.mig_equipe_fase3', true);
   v_f2 text := current_setting('agenda_teste.mig_conferencia_fase2', true);
   v_p1 text := current_setting('agenda_teste.mig_tabelas_fase4', true);
+  v_f1 text := current_setting('agenda_teste.mig_calendario_fase1', true);
   v_ruins text := '';
   f record;
 begin
-  if coalesce(v_f3, '') = '' or coalesce(v_f2, '') = '' or coalesce(v_p1, '') = '' then
+  if coalesce(v_f3, '') = '' or coalesce(v_f2, '') = '' or coalesce(v_p1, '') = '' or coalesce(v_f1, '') = '' then
     insert into _resultado values ('D8 as cópias só acrescentam os blocos "-- FASE 4:"', true,
-      'PULADO: sem agenda_teste.mig_equipe_fase3/mig_conferencia_fase2/mig_tabelas_fase4 (rode pela bancada)');
+      'PULADO: sem agenda_teste.mig_equipe_fase3/mig_conferencia_fase2/mig_tabelas_fase4/mig_calendario_fase1 (rode pela bancada)');
     return;
   end if;
   for f in select * from (values
       ('agenda_desfazer', 'public.agenda_desfazer(uuid, uuid, text, date, timestamptz)', v_f3, '_agenda_desfazer_material'),
       ('_agenda_vigia_limpeza', 'public._agenda_vigia_limpeza(date, timestamptz)', v_f2, 'chegou:fornecedor'),
       ('_agenda_vigia_chegou', 'public._agenda_vigia_chegou(date, timestamptz)', v_f2, 'chegou:fornecedor:'),
-      ('_os_material_previsao_original', 'public._os_material_previsao_original()', v_p1, 'agenda.desfazer_material')) as x(nome, sig, mig, marca) loop
+      ('_os_material_previsao_original', 'public._os_material_previsao_original()', v_p1, 'agenda.desfazer_material'),
+      -- C1 da revisão: a data dita da Fase 1, com o dia da semana e o número
+      ('_agenda_data_um', 'public._agenda_data_um(text, date, text, boolean, date, date)', v_f1, 'v_num_dito')) as x(nome, sig, mig, marca) loop
     if pg_temp.sem_fase4(pg_temp.corpo(f.mig, f.nome))
          is distinct from pg_temp.sem_fase4((select p.prosrc from pg_proc p where p.oid = f.sig::regprocedure))
        or position(f.marca in (select p.prosrc from pg_proc p where p.oid = f.sig::regprocedure)) = 0
@@ -990,7 +1232,7 @@ begin
       v_ruins := v_ruins || f.nome || ' ';
     end if;
   end loop;
-  insert into _resultado values ('D8 as 4 cópias só acrescentam os blocos "-- FASE 4:" (e têm o bloco do P4)', v_ruins = '',
+  insert into _resultado values ('D8 as 5 cópias só acrescentam os blocos "-- FASE 4:" (e têm o bloco do P4 e o da C1)', v_ruins = '',
     nullif(v_ruins, ''));
 end
 $d8$;

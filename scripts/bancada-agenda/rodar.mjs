@@ -87,6 +87,9 @@ const FIXTURES_COMO_TEXTO = [
   // blocos "-- FASE 4:" (_agenda_vigia_limpeza e _agenda_vigia_chegou: contra mig_conferencia_fase2, acima).
   ['agenda_teste.mig_equipe_fase3', '../../supabase/migrations/20261026100300_agenda_fase3_equipe_diarias.sql'],
   ['agenda_teste.mig_tabelas_fase4', '../../supabase/migrations/20261027100000_agenda_fase4_tabelas.sql'],
+  // Fase 4 (C1 da revisão): o calendário da Fase 1, de onde a 20261027100400 copiou _agenda_data_um (o D8 confere que a
+  // cópia só acrescenta os blocos "-- FASE 4:").
+  ['agenda_teste.mig_calendario_fase1', '../../supabase/migrations/20261024160100_agenda_fase1_calendario.sql'],
   // Fase 4 (P6): as migrations de dado da Fase 4 (fora da bancada), que os testes delas rodam numa subtransação desfeita (a
   // sombra: desligado → sombra, o original herdado, idempotência e o DESFAZER; o acento das cidades: só a lista fechada e o
   // DESFAZER). A cópia de agenda_ver (L6) confere contra mig_acompanhamento_fase3, acima.

@@ -8,7 +8,7 @@
 -- parâmetros do detector), 100100 (o prazo do fornecedor), 100200 (a sincronização) e 100300 (a pergunta do material, o
 -- aviso que lê a pergunta previsao_fornecedor e a ação material da nota).
 --
--- ═══ FUNÇÕES — OK NOMEADO ═══ (9 funções novas; 4 recriadas; nenhuma tabela, nenhuma lista fechada, nenhum dado)
+-- ═══ FUNÇÕES — OK NOMEADO ═══ (10 funções novas; 5 recriadas; nenhuma tabela, nenhuma lista fechada, nenhum dado)
 -- NÃO APLICADA. Este arquivo foi MONTADO por scratchpad/agenda-pesquisa/f4p4/montar-migration.mjs: as partes escritas à mão
 -- e os corpos copiados da migration MAIS NOVA de cada função recriada, com cada troca "-- FASE 4:" conferida (uma vez só;
 -- todas só ACRESCENTAM: nenhuma linha antiga sai do corpo).
@@ -44,7 +44,24 @@
 --   7. _agenda_vigia_limpeza e _agenda_vigia_chegou (recriadas da Fase 2, blocos -- FASE 4:): o chegou? que o fornecedor
 --      abriu se resolve quando a linha chega (a limpeza da Fase 2 o resolveria na hora, pela chave), e a vigia não pergunta
 --      de novo enquanto ele está aberto (sem duplicar, d14).
---   8. Auxiliares: _agenda_chave_telefone, _agenda_fones_que_nao_sao_fornecedor, _agenda_compras_vivas.
+--   8. Auxiliares: _agenda_chave_telefone, _agenda_fones_que_nao_sao_fornecedor, _agenda_compras_vivas e (C1)
+--      _agenda_fornecedor_outras_vivas.
+--
+-- CORREÇÃO C1 DA REVISÃO DA FASE 4 (25/10/2026; a migration não estava aplicada em lugar nenhum, foi editada aqui):
+--   · "unico" só com UMA compra viva de verdade: a OC aberta do fornecedor sem linha de OS, a nota dele a caminho fora de
+--     toda linha e o Pix aberto dele contam (_agenda_fornecedor_outras_vivas; agenda_mensagens_de_fornecedor devolve
+--     outras_vivas e material_sinal_registrar rebaixa unico para nenhum, com a linha de dica);
+--   · da HBR só a chegada que ela afirma: o pedido (consegue, pode, preciso, quero, chegue…), o prazo, o atraso e o
+--     despacho escritos pela HBR são descartados (a defesa do que o parser já faz);
+--   · o despacho sozinho com o prazo que não veio do dono (o chute pela cidade/nome) vira a pergunta "Se for, chega por
+--     volta de …" e nunca é gravado como previsão do fornecedor (nível B); faria.chute = true;
+--   · a precisão julga só pela chegada real (chegou_em), dos dois lados; a previsão que o dono disse não fixa veredito;
+--     o chute não é julgado;
+--   · as datas do sinal vão ao dia útil (agenda_somar_du(x, 0)): "amanhã" na sexta, "dia 2" (Finados), corridos no
+--     domingo;
+--   · o WhatsApp do cliente com OS (clients.whatsapp) também nunca é fornecedor;
+--   · _agenda_data_um (Fase 1) recriada com um bloco -- FASE 4: o dia da semana com o número ("quarta dia 4") vale o
+--     número.
 --
 -- DINHEIRO: nada aqui cria, muda ou liga pagamento, compra, OC ou cotação. A frase de dinheiro (boleto, Pix, pagamento)
 -- nunca vira sinal (o parser a descarta); nenhuma mensagem sai para o fornecedor (isso é do P5, atrás de modo_fornecedor).
@@ -59,8 +76,8 @@
 --     material_pergunta_validade), não por _agenda_vigia_perguntar: o modo é o do material de qualquer jeito, e a da vigia
 --     não é executável pelo service_role.
 --   · O que a HBR escreveu sem condição e sem compra ligada ("vou ver se chega amanhã" ao fornecedor) não vira pergunta
---     ao dono (seria perguntar a ele o que ele mesmo disse): fica descartado com o motivo. Com a compra ligada, vira a
---     previsão com fonte dono (C), como a spec.
+--     ao dono (seria perguntar a ele o que ele mesmo disse): fica descartado com o motivo. Com a compra ligada, a chegada
+--     que a HBR AFIRMA vira a previsão com fonte dono (C), como a spec; o pedido dela nunca (C1).
 --   · "Desfazer": a linha volta se NENHUMA coluna mudou depois (a linha toda, menos o histórico, igual ao "depois"), e não só
 --     a hora da última mudança: numa transação now() se repete. A chegada pela nota desfeita tira a nota da linha
 --     (remessa_id nulo): sem isso a próxima sincronização a poria na mão de novo.
@@ -68,6 +85,8 @@
 --     sem data), a sincronização refaria a linha do sistema e apagaria a previsão no tique seguinte.
 --   · agenda_detector_precisao sem datas = os últimos 14 dias; julgados = certo + errado (o "sem como saber" fica fora da
 --     conta); o sinal que foi junto com o despacho não conta duas vezes.
+--   · (C1) A spec julgava "certo" também pela previsão que o dono informou: sai — ela não é chegada, só dava "certo" (nunca
+--     "errado") e inflava o portão de ligar. Só a chegada real julga.
 --
 -- O QUE NÃO MUDA: detectarPromessa (a promessa do dono); a conversa e o envio do WhatsApp; a vigia da Fase 2 fora dos dois
 -- blocos; o desfazer das Fases 2 e 3; o financeiro inteiro. Nenhum cron: o passo "sinais" roda pelo agenda_material_vigiar
@@ -106,8 +125,9 @@ comment on function public._agenda_chave_telefone(text) is
   'Agenda de Produção (Fase 4, P4): a chave de um telefone — os 8 últimos dígitos (a mesma de read_supplier_messages e da categoria fornecedor do acompanhar-conversas); menos de 8 dígitos = null.';
 
 -- Os telefones que NUNCA são de fornecedor, mesmo cadastrados como fornecedor (NOVO-agenda-34): o dono e a equipe
--- (app_users, o telefone e o normalizado), quem recebe diária (payees) e o cliente que tem OS. 315 dos 348 fornecedores
--- com telefone de cliente são o mesmo ente (cadastro duplo): só o cliente COM OS sai, como a spec mediu.
+-- (app_users, o telefone e o normalizado), quem recebe diária (payees) e o cliente que tem OS — o telefone E o WhatsApp
+-- dele (C1 da revisão: clients.whatsapp também é o cliente). 315 dos 348 fornecedores com telefone de cliente são o mesmo
+-- ente (cadastro duplo): só o cliente COM OS sai, como a spec mediu.
 create or replace function public._agenda_fones_que_nao_sao_fornecedor()
  returns setof text
  language sql
@@ -123,12 +143,15 @@ as $function$
     union
     select public._agenda_chave_telefone(cl.phone) from public.clients cl
      where exists (select 1 from public.service_orders so where so.client_id = cl.id)
+    union
+    select public._agenda_chave_telefone(cl.whatsapp) from public.clients cl
+     where exists (select 1 from public.service_orders so where so.client_id = cl.id)
   ) x
   where k is not null;
 $function$;
 
 comment on function public._agenda_fones_que_nao_sao_fornecedor() is
-  'Agenda de Produção (Fase 4, P4): as chaves (8 últimos dígitos) dos telefones que nunca são lidos como fornecedor — o dono e a equipe (app_users.phone e phone_normalized), os payees e os clientes que têm alguma OS (NOVO-agenda-34: o dono está cadastrado como fornecedor; o Rodrigo também).';
+  'Agenda de Produção (Fase 4, P4): as chaves (8 últimos dígitos) dos telefones que nunca são lidos como fornecedor — o dono e a equipe (app_users.phone e phone_normalized), os payees e os clientes que têm alguma OS, pelo telefone e pelo WhatsApp (clients.phone e clients.whatsapp; NOVO-agenda-34: o dono está cadastrado como fornecedor; o Rodrigo também).';
 
 -- As linhas de material VIVAS de cada fornecedor (falta, comprado ou a caminho, de OS da carteira): a do fornecedor da
 -- linha, a da OC dele (linha origem oc) e a da nota dele (remessa_id). Uma linha por (fornecedor, linha).
@@ -161,6 +184,40 @@ $function$;
 
 comment on function public._agenda_compras_vivas(date) is
   'Agenda de Produção (Fase 4, P4): as linhas de material vivas (falta, comprado, a caminho) das OS da carteira, por fornecedor — o da linha, o da OC da linha (origem oc) e o da nota ligada (remessa_id). As candidatas da mensagem do fornecedor.';
+
+-- As OUTRAS compras vivas do fornecedor, as que não são linha de material de OS (C1 da revisão da Fase 4, item 1): a OC
+-- aberta e recente dele sem nenhuma linha viva ligada (a de estoque, a de escritório), a nota dele a caminho que não está
+-- em nenhuma linha viva (sem resposta, "não é de serviço") e a pergunta do Pix aberta dele. Com alguma delas, a mensagem
+-- do fornecedor pode ser dessa outra compra: a única linha viva deixa de ser "a única compra" (unico → nenhum).
+create or replace function public._agenda_fornecedor_outras_vivas(p_fornecedor uuid, p_hoje date, p_agora timestamptz)
+ returns integer
+ language sql
+ stable
+ set search_path to 'public'
+as $function$
+  with c as (select x.oc_viva_dias from public._agenda_cfg() x),
+  linhas as (select l.os_material_id from public._agenda_compras_vivas(p_hoje) l where l.fornecedor_id = p_fornecedor)
+  select case when p_fornecedor is null then 0 else (
+    (select count(*)::int from public.purchase_orders po, c
+      where po.supplier_id = p_fornecedor and po.status in ('draft', 'sent', 'partial')
+        and po.created_at >= p_agora - make_interval(days => c.oc_viva_dias)
+        and not exists (select 1 from public.purchase_order_items poi
+                          join public.os_material m on m.purchase_order_item_id = poi.id
+                          join linhas li on li.os_material_id = m.id
+                         where poi.purchase_order_id = po.id))
+    + (select count(*)::int from public.material_remessas r
+        where r.fornecedor_id = p_fornecedor and r.estado = 'a_caminho'
+          and not exists (select 1 from public.os_material m join linhas li on li.os_material_id = m.id
+                           where m.remessa_id = r.id))
+    + (select count(*)::int from public.agenda_perguntas q
+        where q.tipo = 'pix_material' and q.estado = 'aberta' and q.chave ~ '^pix:(tx|cmp):[0-9a-f-]{36}$'
+          and (public._agenda_pix_fonte(split_part(q.chave, ':', 2), split_part(q.chave, ':', 3)::uuid) ->> 'fornecedor_id')
+              = p_fornecedor::text)
+  ) end;
+$function$;
+
+comment on function public._agenda_fornecedor_outras_vivas(uuid, date, timestamptz) is
+  'Agenda de Produção (Fase 4, C1 da revisão): quantas compras vivas do fornecedor NÃO são linha viva de material de OS — OC aberta (draft, sent, partial) criada nos últimos oc_viva_dias sem nenhuma linha viva ligada, nota a caminho (material_remessas) fora de toda linha viva e pergunta pix_material aberta dele. Com 1 ou mais, a única linha viva não é "a única compra": agenda_mensagens_de_fornecedor devolve outras_vivas e material_sinal_registrar rebaixa unico para nenhum.';
 
 -- ── 2. O que o detector lê: as mensagens dos fornecedores com compra viva ──────────────────────────────
 
@@ -228,6 +285,9 @@ begin
            'msg_id', l.id, 'fornecedor_id', l.fornecedor, 'fornecedor', public._agenda_fornecedor_curto(l.fornecedor),
            'direcao', case l.direction when 'inbound' then 'recebida' else 'enviada' end,
            'texto', left(l.body, 4000), 'em', l.occurred_at,
+           -- C1 da revisão: as outras compras vivas dele (OC sem linha, nota sem linha, Pix aberto). Com alguma, a única
+           -- linha não é "a única compra" e o TS não marca unico.
+           'outras_vivas', public._agenda_fornecedor_outras_vivas(l.fornecedor, p_hoje, p_agora),
            'compras', coalesce((
              select jsonb_agg(jsonb_build_object('n', z.n, 'os', z.service_order_id, 'os_material_id', z.os_material_id,
                                                  'rotulo', z.rotulo, 'situacao', z.situacao, 'comprado_em', z.comprado_em,
@@ -249,7 +309,7 @@ end;
 $function$;
 
 comment on function public.agenda_mensagens_de_fornecedor(date, timestamptz) is
-  'Agenda de Produção (Fase 4, P4): as mensagens (as duas direções) das últimas detector_janela_horas dos fornecedores ELEGÍVEIS que ainda não viraram sinal, até detector_lote_max (as mais novas), em ordem de occurred_at — [{msg_id, fornecedor_id, fornecedor, direcao recebida|enviada, texto, em, compras:[{n, os, os_material_id, rotulo "Flávio: Compressor 12V de… (comprado 13/10)", situacao, comprado_em, previsao_ate}]}], sem valor. Elegível: ativo, sem opt-out, telefone com 10+ dígitos cujos 8 últimos não são do dono, da equipe, de payee nem de cliente com OS (NOVO-agenda-34), e com COMPRA VIVA — linha viva da carteira, OC aberta recente, nota a caminho ou pergunta do Pix aberta dele (NOVO-agenda-35: o contador não entra). modo_detector desligado = []. Só lê. Só service_role (o acompanhar-conversas).';
+  'Agenda de Produção (Fase 4, P4): as mensagens (as duas direções) das últimas detector_janela_horas dos fornecedores ELEGÍVEIS que ainda não viraram sinal, até detector_lote_max (as mais novas), em ordem de occurred_at — [{msg_id, fornecedor_id, fornecedor, direcao recebida|enviada, texto, em, outras_vivas (as compras vivas dele que não são linha de OS: _agenda_fornecedor_outras_vivas; com alguma, a única linha não é unico), compras:[{n, os, os_material_id, rotulo "Flávio: Compressor 12V de… (comprado 13/10)", situacao, comprado_em, previsao_ate}]}], sem valor. Elegível: ativo, sem opt-out, telefone com 10+ dígitos cujos 8 últimos não são do dono, da equipe, de payee nem de cliente com OS (NOVO-agenda-34), e com COMPRA VIVA — linha viva da carteira, OC aberta recente, nota a caminho ou pergunta do Pix aberta dele (NOVO-agenda-35: o contador não entra). modo_detector desligado = []. Só lê. Só service_role (o acompanhar-conversas).';
 
 -- ── 3. O sinal: a expressão dita vira data no banco, com o dia da mensagem ──────────────────────────────
 
@@ -308,7 +368,10 @@ begin
      and exists (select 1 from jsonb_array_elements(v_cand) e where e ->> 'os_material_id' = p_os_material::text) then
     select m.id, m.service_order_id into v_lin, v_os from public.os_material m where m.id = p_os_material;
   end if;
-  v_casou := case when p_casou_por = 'unico' and jsonb_array_length(v_cand) = 1 and v_lin is not null then 'unico'
+  -- unico só com UMA candidata e nenhuma outra compra viva do fornecedor (OC sem linha, nota sem linha, Pix aberto: C1 da
+  -- revisão, a defesa no banco do que o TS já faz); senão nenhum, e a linha fica como dica para a pergunta.
+  v_casou := case when p_casou_por = 'unico' and jsonb_array_length(v_cand) = 1 and v_lin is not null
+                       and public._agenda_fornecedor_outras_vivas(p_fornecedor, p_hoje, p_agora) = 0 then 'unico'
                   when p_casou_por = 'modelo' and v_lin is not null then 'modelo'
                   else 'nenhum' end;
 
@@ -344,6 +407,10 @@ begin
     v_ate := null;
     v_motivo := 'não entendi a data';
   end;
+  -- A previsão nunca cai em sábado, domingo, feriado ou recesso (C1 da revisão, item 12): "amanhã" dito na sexta, "dia 2"
+  -- (Finados), os dias corridos que caem no domingo vão ao próximo dia útil — o dia em que a agenda conta com o material.
+  v_de := public.agenda_somar_du(v_de, 0);
+  v_ate := public.agenda_somar_du(v_ate, 0);
 
   insert into public.material_sinais (whatsapp_message_id, fornecedor_id, direcao, ocorreu_em, dia, tipo, expressao, condicional,
                                       trecho, data_de, data_ate, candidatos, os_material_id, service_order_id, casou_por,
@@ -365,7 +432,7 @@ end;
 $function$;
 
 comment on function public.material_sinal_registrar(uuid, uuid, text, text, boolean, text, jsonb, uuid, text, numeric, date, timestamptz) is
-  'Agenda de Produção (Fase 4, P4): registra o que o detector achou numa mensagem do fornecedor (material_sinais, uma por mensagem e tipo; on conflict nada). A data sai da EXPRESSÃO dita, no dia da mensagem em Brasília: chegada/atraso → agenda_data_dita (faixa = data_de/data_ate); prazo ("5 dias úteis", "3 a 5 dias úteis", "5 dias" = úteis, "N dias corridos") a partir do despacho do mesmo dia; despacho → _agenda_chegada_estimada (classe desconhecida = sem data, "não sei em quantos dias chega dele"); perguntou_chegou sem data; expressão que o banco não entende = sem data, "não entendi a data". A escolhida só vale se for uma das candidatas; unico só com uma candidata. O modo é o de agora (desligado = {pulado}). {id, data_de, data_ate, novo}. Só service_role.';
+  'Agenda de Produção (Fase 4, P4): registra o que o detector achou numa mensagem do fornecedor (material_sinais, uma por mensagem e tipo; on conflict nada). A data sai da EXPRESSÃO dita, no dia da mensagem em Brasília: chegada/atraso → agenda_data_dita (faixa = data_de/data_ate); prazo ("5 dias úteis", "3 a 5 dias úteis", "5 dias" = úteis, "N dias corridos") a partir do despacho do mesmo dia; despacho → _agenda_chegada_estimada (classe desconhecida = sem data, "não sei em quantos dias chega dele"); perguntou_chegou sem data; expressão que o banco não entende = sem data, "não entendi a data". As datas vão ao dia útil (agenda_somar_du(x, 0): sábado, domingo, feriado e recesso passam ao próximo dia útil). A escolhida só vale se for uma das candidatas; unico só com uma candidata e nenhuma outra compra viva do fornecedor (_agenda_fornecedor_outras_vivas; senão nenhum, com a linha de dica). O modo é o de agora (desligado = {pulado}). {id, data_de, data_ate, novo}. Só service_role.';
 
 -- ── 4. O passo do material "sinais": o que o gestor faz (ligado) ou faria (sombra) ──────────────────────
 
@@ -412,6 +479,7 @@ declare
   v_lo      date;
   v_hi      date;
   v_k       int;
+  v_chute   boolean;
   n_prev    int := 0;
   n_perg    int := 0;
   n_cheg    int := 0;
@@ -449,6 +517,24 @@ begin
     v_txt := null;
     v_opc := '[]'::jsonb;
     v_os_ids := '{}';
+    v_chute := false;
+
+    -- (0) Da HBR só vale a chegada que ela AFIRMA (C1 da revisão, item 4; o parser já descarta, aqui é a defesa no banco): o
+    -- pedido ("consegue entregar amanhã", "preciso que chegue em 3 dias úteis") e o prazo, o atraso ou o despacho escritos
+    -- pela HBR nunca viram previsão nem pergunta.
+    if s.direcao = 'enviada'
+       and (s.tipo <> 'chegada'
+            or public._agenda_normal(s.trecho) ~ ('\m(consegue|conseguem|consegues|conseguiria|pode|podem|poderia|poderiam'
+                                                  || '|tem como|da pra|da para|preciso|precisa|precisamos|quero|queria'
+                                                  || '|queremos|chegue|cheguem|entregue|entreguem)\M')) then
+      update public.material_sinais
+         set estado = 'descartado', faria = jsonb_build_object('acao', 'nada'),
+             motivo = case when s.tipo <> 'chegada' then 'dito pela HBR: só a chegada que ela afirma conta'
+                           else 'dito pela HBR: é o pedido dela, não a palavra do fornecedor' end
+       where id = s.id;
+      n_desc := n_desc + 1;
+      continue;
+    end if;
 
     -- (a) A chegada que depende de uma condição ("chega aqui amanhã se eles retirarem hoje", d8): espera o despacho do
     -- fornecedor até o fim do dia útil seguinte; o despacho a leva junto (b); vencida sem despacho, sai.
@@ -498,6 +584,15 @@ begin
       end if;
     end if;
     v_fonte := case when s.direcao = 'enviada' and v_junto is null then 'dono' else 'fornecedor' end;
+    -- O despacho sozinho ("Já foi coletado") com o prazo que NÃO veio do dono (o chute pela cidade ou pelo nome): a data é
+    -- a conta da agenda, não a palavra do fornecedor — nunca vira previsão gravada (nível B); vira a pergunta com o "Se
+    -- for, chega por volta de …" (C1 da revisão, item 5). Com o prazo que o dono disse (suppliers.prazo_fonte = 'dono',
+    -- deste cadastro ou do principal de que ele herda), a previsão vale.
+    v_chute := s.tipo = 'despacho' and v_junto is null and v_ate is not null
+               and not coalesce((select y.pf ->> 'fonte' = 'dono'
+                                        and (select x.prazo_fonte from public.suppliers x
+                                              where x.id = coalesce((y.pf ->> 'principal_id')::uuid, s.fornecedor_id)) = 'dono'
+                                   from (select public._agenda_prazo_do_fornecedor(s.fornecedor_id) as pf) y), false);
 
     -- (c) A compra: a escolhida (a única viva do fornecedor, ou a que o modelo apontou), como está agora. Ligada = comprada
     -- ou a caminho com ESSE fornecedor (da linha, da OC dela ou da nota dela) e a mensagem não é de antes da compra.
@@ -551,7 +646,7 @@ begin
       else
         v_acao := 'perguntar';
       end if;
-    elsif v_ligada and s.casou_por = 'unico' then
+    elsif v_ligada and s.casou_por = 'unico' and not v_chute then
       v_acao := 'previsao';
     elsif s.direcao = 'enviada' then
       v_acao := 'nada'; v_motivo := 'dito pela HBR, sem compra ligada: não pergunto';
@@ -592,7 +687,9 @@ begin
                       coalesce(v_numero, 'isso'));
     end if;
     v_faria := jsonb_build_object('acao', v_acao, 'data_de', v_de, 'data_ate', v_ate, 'fonte', v_fonte, 'texto', v_txt,
-                                  'trecho', v_trecho, 'os_material_id', case when v_tem_l then l.id end, 'junto', v_junto);
+                                  'trecho', v_trecho, 'os_material_id', case when v_tem_l then l.id end, 'junto', v_junto)
+               -- a data do despacho é o chute da agenda (o aviso não a grava como do fornecedor; a precisão não a julga)
+               || case when v_chute then jsonb_build_object('chute', true) else '{}'::jsonb end;
 
     if v_acao = 'nada' then
       update public.material_sinais set estado = 'descartado', faria = v_faria, motivo = left(v_motivo, 200) where id = s.id;
@@ -671,11 +768,15 @@ begin
   end loop;
 
   -- (2) O julgamento pelo fato (a precisão do detector): os sinais de até 30 dias com a compra e a data, ainda sem julgamento.
-  -- certo = a linha chegou na faixa ± detector_tolerancia_du, ou o dono disse uma previsão nessa faixa; errado = chegou fora
-  -- dela, ou o dono ligou a mensagem a outra compra; sem como saber = 15 dias úteis depois da data, sem fato.
+  -- Só a CHEGADA REAL julga a data, dos dois lados (C1 da revisão, item 6): certo = a linha chegou (chegou_em) na faixa ±
+  -- detector_tolerancia_du; errado = chegou fora dela. A previsão que o dono disse não é chegada: não fixa veredito nenhum
+  -- (antes ela dava "certo" e nunca "errado", e a precisão que libera o detector subia sozinha). O vínculo que o dono deu a
+  -- OUTRA compra é fato, não previsão: errado. Sem como saber = 15 dias úteis depois da data, sem chegada. O despacho com a
+  -- data do chute da agenda (faria.chute) não é julgado: a data não foi dita pelo fornecedor.
   for s in select x.* from public.material_sinais x
             where x.julgamento is null and x.os_material_id is not null and x.data_ate is not null and x.dia >= p_hoje - 30
               and x.faria ->> 'acao' in ('previsao', 'perguntar')
+              and coalesce((x.faria ->> 'chute')::boolean, false) = false
             order by x.ocorreu_em, x.id
             for update loop
     select m.* into l from public.os_material m where m.id = s.os_material_id;
@@ -688,7 +789,6 @@ begin
       when s.faria ->> 'os_material_id' is not null and s.faria ->> 'os_material_id' <> s.os_material_id::text then 'errado'
       when l.situacao = 'na_mao' and l.chegou_em is not null then
         case when l.chegou_em between v_lo and v_hi then 'certo' else 'errado' end
-      when l.previsao_fonte = 'dono' and l.atualizado_por is not null and l.previsao_ate between v_lo and v_hi then 'certo'
       when p_hoje > public.agenda_somar_du(s.data_ate, 15) then 'sem_como_saber'
     end;
     if v_j is not null then
@@ -703,7 +803,7 @@ end;
 $function$;
 
 comment on function public._agenda_material_sinais(date, timestamptz) is
-  'Agenda de Produção (Fase 4, P4), passo do material "sinais" (o P5 o chama em agenda_material_vigiar): cada sinal sem decisão, na ordem dita — a chegada condicional ("chega amanhã se retirarem hoje") espera o despacho do fornecedor até o dia útil seguinte e vai junto com ele (d8: previsão = a data da chegada, fonte fornecedor, os dois trechos), vencida = descartada; a previsão da compra JÁ LIGADA e única do fornecedor (casou_por unico; comprada ou a caminho com ele, da OC dele ou da nota dele; a mensagem não é de antes da compra) é aplicada sozinha em ligado — os_material a caminho, previsão e fonte fornecedor (a HBR sem condição = dono), evidência vinculo_por compra_ligada, ação material origem fornecedor com antes/depois {linhas, remessa_id} e o *desfaz* —; o resto (sem data, mais de uma compra, linha em falta, modelo, nenhum) vira a pergunta previsao_fornecedor (sinal:<id>); o "Recebeu o compressor?" vira o "chegou?" (chegou:fornecedor:<linha>:<dia>) uma vez, sem duplicar o da vigia; o que a HBR disse sem compra ligada não pergunta. As perguntas vão no modo do material. Em sombra só o que faria (faria, motivo "em teste: …"), e o teste de mais de 7 dias sai da fila. Depois, o julgamento pelo fato (certo, errado, sem_como_saber) dos sinais de até 30 dias. {aplicados, perguntados, chegou, esperando, descartados, em_teste, julgados, vencidos, modo}; desligado = {pulado}.';
+  'Agenda de Produção (Fase 4, P4), passo do material "sinais" (o P5 o chama em agenda_material_vigiar): cada sinal sem decisão, na ordem dita — a chegada condicional ("chega amanhã se retirarem hoje") espera o despacho do fornecedor até o dia útil seguinte e vai junto com ele (d8: previsão = a data da chegada, fonte fornecedor, os dois trechos), vencida = descartada; a previsão da compra JÁ LIGADA e única do fornecedor (casou_por unico; comprada ou a caminho com ele, da OC dele ou da nota dele; a mensagem não é de antes da compra) é aplicada sozinha em ligado — os_material a caminho, previsão e fonte fornecedor (a HBR sem condição = dono), evidência vinculo_por compra_ligada, ação material origem fornecedor com antes/depois {linhas, remessa_id} e o *desfaz* —; o resto (sem data, mais de uma compra, linha em falta, modelo, nenhum) vira a pergunta previsao_fornecedor (sinal:<id>); o "Recebeu o compressor?" vira o "chegou?" (chegou:fornecedor:<linha>:<dia>) uma vez, sem duplicar o da vigia; o que a HBR disse sem compra ligada não pergunta. C1 da revisão: da HBR só vale a chegada que ela afirma (o pedido — consegue, pode, preciso, quero, chegue… — e o prazo, o atraso ou o despacho escritos por ela = descartados); o despacho sozinho com o prazo que não veio do dono (o chute pela cidade ou pelo nome) nunca é gravado como previsão: vira a pergunta "… Se for, chega por volta de …" (faria.chute). As perguntas vão no modo do material. Em sombra só o que faria (faria, motivo "em teste: …"), e o teste de mais de 7 dias sai da fila. Depois, o julgamento dos sinais de até 30 dias SÓ pela chegada real (chegou_em na faixa ± a tolerância = certo, fora = errado; o vínculo do dono a outra compra = errado; 15 dias úteis sem chegada = sem_como_saber; a previsão do dono não julga; o chute não é julgado). {aplicados, perguntados, chegou, esperando, descartados, em_teste, julgados, vencidos, modo}; desligado = {pulado}.';
 
 -- ── 5. A precisão do detector (o portão para ligar) ─────────────────────────────────────────────────────
 
@@ -1304,17 +1404,165 @@ comment on function public.agenda_desfazer(uuid, uuid, text, date, timestamptz) 
   'Agenda de Produção (Fase 2, P2): desfaz uma ação executada — recusa (nada muda) se foi sombra, já foi desfeita, não é desfazível (pedido do dono pela tela ou aprovação), passou o desfazivel_ate, algum meio-dia criado já começou ou tem resultado, ou recriar o que saiu bateria em quem já está no lugar ("Não dá para desfazer: o Roberto já está no Giancarlo…"). Faz: o que ela criou → cancelada (desfeito); o que ela tirou volta igual (substitui_id, mesmo estado/fixado); o status pela porta (via desfazer; o que começou não regride); o espelho; nova ação tipo desfazer (desfaz_a) e a original ganha desfeita_*. Desfazer uma decisão crítica cria a pergunta de novo ("A decisão sobre o Nelson volta a ficar com você."). Fase 3: concluir e entregar vão a _agenda_desfazer_marco (as cobranças da conclusão, a saída, a comissão de vendedor e a entrega); a diária da agenda a _agenda_desfazer_diaria (apaga o turno que ela criou, com o acerto aberto); desfazer o replano da ausência da equipe tira a ausência do dia (agenda_disponibilidade substituída). Fase 4 (P4): a ação material (a previsão pela mensagem do fornecedor, a chegada pela nota) vai a _agenda_desfazer_material (as linhas voltam se ninguém mexeu nelas depois).';
 
 
+-- ── 8c. A data dita (Fase 1): o dia da semana com o número vale o número (C1 da revisão da Fase 4) ───────
+-- Corpo de 20261024160100 (a única que a define) copiado; as mudanças estão marcadas "-- FASE 4:".
+
+create or replace function public._agenda_data_um(p_s text, p_hoje date, p_sentido text, p_lado boolean,
+                                                  p_mes_de date, p_depois_de date)
+ returns date
+ language plpgsql
+ stable
+ set search_path to 'public'
+as $function$
+-- UMA data do texto já preparado. null = não entendi (quem chama decide o erro).
+--   p_lado:      é um lado de faixa ("3" em "entre 3 e 5/11"): aceita número solto em qualquer posição;
+--   p_mes_de:    o lado esquerdo herda mês e ano do direito ("3" de "3 a 5/11" = 03/11);
+--   p_depois_de: o lado direito é o primeiro dia >= o esquerdo ("segunda a sexta").
+declare
+  s text := btrim(coalesce(p_s, ''));
+  m text[];
+  v_sentido text := p_sentido;
+  v_dow int;
+  v_n int;
+  v_ano int;
+  v_d date;
+  v_fut date;
+  v_pas date;
+  v_base date;
+  k int;
+  -- FASE 4: o número dito junto com o dia da semana ("quarta dia 4", "quarta 4")
+  v_num_dito text;
+  -- FASE 4: fim
+begin
+  if s = '' or p_hoje is null then return null; end if;
+
+  -- dd/mm e dd/mm/aa(aa): sem ano, o que deixa a data entre hoje − 180 e hoje + 185 (o mais perto de hoje).
+  m := regexp_match(s, '(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?');
+  if m is not null then
+    if m[3] is not null then
+      v_ano := m[3]::int;
+      if v_ano < 100 then v_ano := 2000 + v_ano; end if;
+      return public._agenda_data_valida(v_ano, m[2]::int, m[1]::int);
+    end if;
+    for v_ano in extract(year from p_hoje)::int - 1 .. extract(year from p_hoje)::int + 1 loop
+      v_d := public._agenda_data_valida(v_ano, m[2]::int, m[1]::int);
+      if v_d is not null and v_d between p_hoje - 180 and p_hoje + 185
+         and (v_fut is null or abs(v_d - p_hoje) < abs(v_fut - p_hoje)) then
+        v_fut := v_d;
+      end if;
+    end loop;
+    return v_fut;
+  end if;
+
+  -- "daqui a N dias úteis" e "daqui a N dias" (corridos).
+  m := regexp_match(s, '\mdu:(\d{1,3})\M');
+  if m is not null then return public.agenda_somar_du(p_hoje, m[1]::int); end if;
+  m := regexp_match(s, '\mdc:(\d{1,3})\M');
+  if m is not null then return p_hoje + m[1]::int; end if;
+
+  if s ~ '\mdepoisdeamanha\M' then return p_hoje + 2; end if;
+  if s ~ '\manteontem\M' then return p_hoje - 2; end if;
+  if s ~ '\mamanha\M' then return p_hoje + 1; end if;
+  if s ~ '\montem\M' then return p_hoje - 1; end if;
+  if s ~ '\mhoje\M' then return p_hoje; end if;
+
+  -- Dia da semana. Abreviado ("qui") só quando é o texto inteiro: "ter" também é verbo.
+  m := regexp_match(s, '\m(segunda|terca|quarta|quinta|sexta|sabado|domingo)\M');
+  if m is null and s ~ '^(seg|ter|qua|qui|sex|sab|dom)$' then m := array[s]; end if;
+  -- FASE 4: o dia da semana com o número ("chega quarta dia 4", "quarta 4"): vale o número — quem diz os dois quer dizer
+  -- a data, e o dia da semana sozinho errava por uma semana (C1 da revisão da Fase 4). O dd/mm já valeu antes daqui.
+  if m is not null and (s ~ '\mdia \d{1,2}\M' or s ~ '\m(segunda|terca|quarta|quinta|sexta|sabado|domingo) \d{1,2}$') then
+    v_num_dito := coalesce((regexp_match(s, '\mdia (\d{1,2})\M'))[1], (regexp_match(s, ' (\d{1,2})$'))[1]);
+    m := null;
+  end if;
+  -- FASE 4: fim
+  if m is not null then
+    v_dow := public._agenda_isodow_dito(m[1]);
+    if s ~ '\msemanaquevem\M' then  -- "terça da semana que vem": a terça da próxima semana ISO
+      return p_hoje + (8 - extract(isodow from p_hoje)::int) + (v_dow - 1);
+    end if;
+    if p_depois_de is not null then
+      return p_depois_de + ((v_dow - extract(isodow from p_depois_de)::int + 7) % 7);
+    end if;
+    if s ~ '\m(passada|passado)\M' then v_sentido := 'passado';
+    elsif s ~ '\m(que vem|proxima|proximo)\M' then v_sentido := 'futuro';
+    end if;
+    -- Estritamente depois / antes de hoje: hoje se diz "hoje".
+    v_fut := p_hoje + (((v_dow - extract(isodow from p_hoje)::int + 6) % 7) + 1);
+    v_pas := p_hoje - (((extract(isodow from p_hoje)::int - v_dow + 6) % 7) + 1);
+    return case v_sentido
+      when 'passado' then v_pas
+      when 'futuro'  then v_fut
+      else case when v_fut - p_hoje <= p_hoje - v_pas then v_fut else v_pas end
+    end;
+  end if;
+
+  -- "dia N"; "N" sozinho (ou, num lado de faixa, o número em qualquer posição).
+  m := regexp_match(s, '\mdia (\d{1,2})\M');
+  -- FASE 4: o número que veio com o dia da semana (acima)
+  if m is null and v_num_dito is not null then
+    m := array[v_num_dito];
+  end if;
+  -- FASE 4: fim
+  if m is null then
+    if p_lado then
+      m := regexp_match(s, '\m(\d{1,2})\M');
+    else
+      m := regexp_match(s, '^(?:(?:o|no|na|em|pro|pra|para) )?(\d{1,2})$');
+    end if;
+  end if;
+  if m is null then return null; end if;
+  v_n := m[1]::int;
+  if v_n not between 1 and 31 then return null; end if;
+
+  if p_mes_de is not null then
+    v_d := public._agenda_data_valida(extract(year from p_mes_de)::int, extract(month from p_mes_de)::int, v_n);
+    if v_d is null or v_d > p_mes_de then
+      v_base := (p_mes_de - interval '1 month')::date;
+      v_d := public._agenda_data_valida(extract(year from v_base)::int, extract(month from v_base)::int, v_n);
+    end if;
+    return v_d;
+  end if;
+
+  v_base := coalesce(p_depois_de, p_hoje);
+  v_fut := null;
+  for k in 0..12 loop                     -- o 1º dia >= a base com esse dia do mês
+    v_d := (date_trunc('month', v_base::timestamp) + make_interval(months => k))::date;
+    v_d := public._agenda_data_valida(extract(year from v_d)::int, extract(month from v_d)::int, v_n);
+    if v_d is not null and v_d >= v_base then v_fut := v_d; exit; end if;
+  end loop;
+  if p_depois_de is not null then return v_fut; end if;
+  v_pas := null;
+  for k in 0..12 loop                     -- o último dia <= hoje com esse dia do mês
+    v_d := (date_trunc('month', p_hoje::timestamp) - make_interval(months => k))::date;
+    v_d := public._agenda_data_valida(extract(year from v_d)::int, extract(month from v_d)::int, v_n);
+    if v_d is not null and v_d <= p_hoje then v_pas := v_d; exit; end if;
+  end loop;
+  return case v_sentido
+    when 'passado' then v_pas
+    when 'futuro'  then v_fut
+    else case when v_pas is null or (v_fut is not null and v_fut - p_hoje <= p_hoje - v_pas) then v_fut else v_pas end
+  end;
+end;
+$function$;
+
+comment on function public._agenda_data_um(text, date, text, boolean, date, date) is
+  'Uma data do texto já preparado por _agenda_preparar_data; null quando não entende. Interna de agenda_data_dita. Fase 4 (C1 da revisão): o dia da semana com o número ("quarta dia 4", "quarta 4") vale o número.';
+
+
 -- ── 9. Portas ───────────────────────────────────────────────────────────────────────────────────────────
 -- A leitura das mensagens, o registro do sinal, o passo e as auxiliares: só service_role (o acompanhar-conversas e o
 -- agenda_material_vigiar do P5). Nunca anon, nunca authenticated.
 revoke all on function
   public._agenda_chave_telefone(text), public._agenda_fones_que_nao_sao_fornecedor(), public._agenda_compras_vivas(date),
+  public._agenda_fornecedor_outras_vivas(uuid, date, timestamptz),
   public.agenda_mensagens_de_fornecedor(date, timestamptz),
   public.material_sinal_registrar(uuid, uuid, text, text, boolean, text, jsonb, uuid, text, numeric, date, timestamptz),
   public._agenda_material_sinais(date, timestamptz)
   from public, anon, authenticated;
 grant execute on function
   public._agenda_chave_telefone(text), public._agenda_fones_que_nao_sao_fornecedor(), public._agenda_compras_vivas(date),
+  public._agenda_fornecedor_outras_vivas(uuid, date, timestamptz),
   public.agenda_mensagens_de_fornecedor(date, timestamptz),
   public.material_sinal_registrar(uuid, uuid, text, text, boolean, text, jsonb, uuid, text, numeric, date, timestamptz),
   public._agenda_material_sinais(date, timestamptz)
@@ -1334,3 +1582,6 @@ grant execute on function public.agenda_desfazer(uuid, uuid, text, date, timesta
 revoke all on function public._agenda_vigia_limpeza(date, timestamptz), public._agenda_vigia_chegou(date, timestamptz)
   from public, anon, authenticated, service_role;
 revoke all on function public._os_material_previsao_original() from public, anon, authenticated;
+-- C1 da revisão: _agenda_data_um (Fase 1) recriada fica com as portas do calendário (authenticated e service_role).
+revoke all on function public._agenda_data_um(text, date, text, boolean, date, date) from public, anon;
+grant execute on function public._agenda_data_um(text, date, text, boolean, date, date) to authenticated, service_role;

@@ -866,7 +866,10 @@ begin
     union all
     select jsonb_build_object('pergunta_id', q.id, 'tipo', 'sinal', 'sinal_id', s.id, 'fornecedor_id', s.fornecedor_id,
              'whatsapp_message_id', s.whatsapp_message_id, 'trecho', s.trecho, 'dia', s.dia, 'data_de', s.data_de,
-             'data_ate', s.data_ate, 'os_ids', to_jsonb(q.os_ids), 'em', q.criada_em)
+             'data_ate', s.data_ate, 'os_ids', to_jsonb(q.os_ids), 'em', q.criada_em,
+             -- C1 da revisão da Fase 4: a data do despacho que é o chute da agenda (o prazo pela cidade/nome) não vira
+             -- previsão do fornecedor no *grava*
+             'chute', coalesce((s.faria ->> 'chute')::boolean, false))
       from q join public.material_sinais s on q.chave = 'sinal:' || s.id
      where q.tipo = 'previsao_fornecedor'
   )
@@ -1242,7 +1245,10 @@ begin
       if not (v_acao = 'comprado' and v_dt is not null) then
         v_sit := v_sit || jsonb_build_object('comprado_em', (v_av ->> 'dia')::date, 'comprado_fonte', 'pix');
       end if;
-    elsif v_av ->> 'tipo' = 'sinal' and v_acao = 'a_caminho' and v_dt is null and v_av ->> 'data_ate' is not null then
+    -- (C1 da revisão da Fase 4) o despacho com a data do chute da agenda (v_av.chute): a linha fica a caminho sem
+    -- previsão (a prontidão conta pelo prazo do fornecedor, nível D); nunca a previsão do fornecedor (B).
+    elsif v_av ->> 'tipo' = 'sinal' and v_acao = 'a_caminho' and v_dt is null and v_av ->> 'data_ate' is not null
+          and not coalesce((v_av ->> 'chute')::boolean, false) then
       v_sit := v_sit || jsonb_build_object('previsao_de', case when v_av ->> 'data_de' <> v_av ->> 'data_ate' then v_av ->> 'data_de' end,
                                            'previsao_ate', v_av ->> 'data_ate', 'previsao_fonte', 'fornecedor');
     end if;

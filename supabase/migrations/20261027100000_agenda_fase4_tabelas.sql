@@ -172,7 +172,7 @@ comment on column public.agenda_config.detector_janela_horas is 'Quanto da conve
 comment on column public.agenda_config.detector_lote_max is 'Mensagens por passada do detector.';
 comment on column public.agenda_config.detector_precisao_minima is 'O detector só liga com pelo menos esta fração de acertos (julgados pelo fato) …';
 comment on column public.agenda_config.detector_minimo_julgados is '… em pelo menos estes casos julgados.';
-comment on column public.agenda_config.detector_tolerancia_du is 'A previsão do detector está certa se o fato (a chegada real ou a previsão que o dono informou) ficou a até estes dias úteis dela.';
+comment on column public.agenda_config.detector_tolerancia_du is 'A previsão do detector está certa se a chegada real (chegou_em) ficou a até estes dias úteis dela, para mais ou para menos (C1 da revisão: a previsão que o dono informou não julga).';
 comment on column public.agenda_config.fornecedor_janela_inicio is 'Mensagem ao fornecedor: a 1ª hora em que sai (seg a sex; sábado só com fornecedor_sabado; nunca domingo).';
 comment on column public.agenda_config.fornecedor_janela_fim is 'Mensagem ao fornecedor: nada sai desta hora em diante.';
 comment on column public.agenda_config.fornecedor_sabado is 'A mensagem ao fornecedor pode sair no sábado (na mesma janela).';
