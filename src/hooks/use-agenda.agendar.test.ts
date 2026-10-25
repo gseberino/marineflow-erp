@@ -24,6 +24,8 @@ const h = vi.hoisted(() => {
     erroVinculos: null as { message: string } | null,
     /** agenda_config.modo_proposta */
     modo: 'desligado' as string,
+    /** a função agenda_modo_da_proposta ainda não está no banco (o modo vem da tabela, como antes) */
+    semFuncaoDoModo: false,
     /** os favorecidos (payees) do login do técnico */
     favorecidos: [] as any[],
     /** a resposta da porta e a de agenda_marcar_os */
@@ -60,6 +62,10 @@ const h = vi.hoisted(() => {
   const rpc = vi.fn(async (nome: string, _args: any) => {
     if (nome === 'os_transicionar_status') return { data: estado.erroPorta ? null : estado.porta, error: estado.erroPorta };
     if (nome === 'agenda_marcar_os') return { data: estado.marcar, error: null };
+    // revisão da Fase 3 (R3): o modo pela função que todo login lê; sem ela (PGRST202), a tabela de antes
+    if (nome === 'agenda_modo_da_proposta') {
+      return estado.semFuncaoDoModo ? { data: null, error: { code: 'PGRST202', message: 'sem a função' } } : { data: estado.modo, error: null };
+    }
     return { data: estado.conflitos, error: null };
   });
   return { estado, builder, rpc };
@@ -111,6 +117,7 @@ beforeEach(() => {
   h.estado.vinculos = [];
   h.estado.erroVinculos = null;
   h.estado.modo = 'desligado';
+  h.estado.semFuncaoDoModo = false;
   h.estado.favorecidos = [];
   h.estado.porta = { ok: true, mudou: true, de: 'open', para: 'scheduled', texto: 'Lenine (OS-00074): de aberta para agendada.' };
   h.estado.erroPorta = null;
@@ -235,6 +242,24 @@ describe('useQuickSchedule com a agenda automática ligada — só agenda_marcar
     await expect(agendar('open', null)).rejects.toThrow('Não cabe ter 27/10: o Roberto já está no Vanderlei. O primeiro dia que dá é qua 28/10.');
     expect(updates()).toEqual([]);
     expect(upserts()).toHaveLength(0);
+  });
+
+  // Revisão da Fase 3 (R3): o modo vem de agenda_modo_da_proposta (todo login lê); a tabela agenda_config é fechada ao
+  // técnico e ao vendedor, e para eles a agenda parecia desligada.
+  it('o modo vem da função que todo login lê (agenda_modo_da_proposta), não da tabela', async () => {
+    h.estado.modo = 'ligado';
+    await agendar('approved', null);
+    expect(chamadasDa('agenda_modo_da_proposta')).toHaveLength(1);
+    expect(h.estado.chamadas.some((c) => c.tabela === 'agenda_config')).toBe(false);
+    expect(chamadasDa('agenda_marcar_os')).toHaveLength(1);
+  });
+
+  it('sem a função ainda no banco (PGRST202), o modo vem da tabela, como antes', async () => {
+    h.estado.modo = 'ligado';
+    h.estado.semFuncaoDoModo = true;
+    await agendar('approved', null);
+    expect(h.estado.chamadas.some((c) => c.tabela === 'agenda_config')).toBe(true);
+    expect(chamadasDa('agenda_marcar_os')).toHaveLength(1);
   });
 
   it('a encerrada recusa antes de perguntar à agenda', async () => {

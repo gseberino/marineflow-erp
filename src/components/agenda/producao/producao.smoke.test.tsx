@@ -51,7 +51,7 @@ describe('Agenda › Semana de produção', () => {
 
     expect(await screen.findByText('Semana de 03 a 06/11 (seg 02 é Finados)')).toBeInTheDocument();
     expect(h.rpc).toHaveBeenCalledWith('agenda_tela_semana', { p_de: '2026-11-02' });
-    expect(screen.getByText('comprometido 79% · livre 3 diárias · PPC da semana anterior —')).toBeInTheDocument();
+    expect(screen.getByText('comprometido 79% · livre 3 diárias')).toBeInTheDocument();
     // a carga nunca só pela cor: o texto e, no vermelho, a palavra
     expect(screen.getByText('Roberto 1/2')).toBeInTheDocument();
     expect(within(screen.getByTestId('carga-p3')).getByText('acima')).toBeInTheDocument();

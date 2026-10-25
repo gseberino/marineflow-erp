@@ -23,7 +23,7 @@ import { jornadaDaAgenda } from './use-agenda-producao';
 // A agenda automática (Agenda de Produção, Fase 2, P4): ligada, a data da OS é da agenda.
 import {
   favorecidoDoLogin,
-  modoDaPropostaNoBanco,
+  modoDaPropostaParaTodoLogin,
 } from '../../supabase/functions/_shared/agenda-modo';
 // O plano B da porta (revisão da Fase 2): a tela publicada antes da migration da porta volta ao caminho de antes.
 import {
@@ -353,11 +353,15 @@ async function portaAoAgendar(
   throw portaErr;
 }
 
-/** agenda_config.modo_proposta, para o diálogo de agendar avisar quando a agenda automática está ligada. */
+/**
+ * agenda_config.modo_proposta, para o diálogo de agendar avisar quando a agenda automática está ligada e para o formulário da
+ * OS deixar as datas só leitura. Revisão da Fase 3 (R3): pela função que todo login lê (agenda_modo_da_proposta) — a tabela é
+ * fechada ao técnico e ao vendedor, e para eles a agenda parecia desligada.
+ */
 export function useModoDaProposta() {
   return useQuery({
     queryKey: ['agenda-modo-proposta'],
-    queryFn: () => modoDaPropostaNoBanco(supabase),
+    queryFn: () => modoDaPropostaParaTodoLogin(supabase),
     staleTime: 60_000,
   });
 }
@@ -414,8 +418,9 @@ export function useQuickSchedule() {
 
       const tecnico = input.technician_user_id || null;
 
-      // Com a agenda automática ligada, a agenda escolhe os turnos e a equipe dentro dos dias.
-      if ((await modoDaPropostaNoBanco(supabase)) === 'ligado') {
+      // Com a agenda automática ligada, a agenda escolhe os turnos e a equipe dentro dos dias. Revisão da Fase 3 (R3): o modo
+      // pela função que todo login lê (para o técnico, a tabela dizia "desligado" e a data ia direto, recusada pelo gatilho).
+      if ((await modoDaPropostaParaTodoLogin(supabase)) === 'ligado') {
         const de = diaBR(input.scheduled_start_at);
         const fim = input.scheduled_end_at ? diaBR(input.scheduled_end_at) : de;
         const pessoa = await favorecidoDoLogin(supabase, tecnico);

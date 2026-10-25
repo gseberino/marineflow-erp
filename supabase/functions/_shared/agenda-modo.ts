@@ -37,6 +37,25 @@ export async function modoDaPropostaNoBanco(db: Cliente): Promise<ModoDaProposta
 }
 
 /**
+ * O modo para QUALQUER login (Agenda de Produção, revisão da Fase 3, R3). agenda_config só é lida pelo administrador e pelo
+ * financeiro: para o técnico e o vendedor a leitura da tabela volta vazia (= 'desligado'), e o formulário da OS deixava as
+ * datas editáveis com a agenda ligada — o gatilho recusava e o salvamento das outras mudanças também se perdia. A função
+ * agenda_modo_da_proposta() (migration 20261026100600) devolve só o modo, para todo login. Sem a função ainda no banco
+ * (PGRST202/42883), a leitura da tabela de antes. Nunca lança: outro erro = 'desligado' (o caminho de hoje).
+ */
+export async function modoDaPropostaParaTodoLogin(db: Cliente): Promise<ModoDaProposta> {
+  try {
+    const { data, error } = await db.rpc("agenda_modo_da_proposta");
+    if (!error) return lerModoDaProposta(data);
+    const code = (error as { code?: unknown }).code;
+    if (code === "PGRST202" || code === "42883") return await modoDaPropostaNoBanco(db);
+    return "desligado";
+  } catch {
+    return "desligado";
+  }
+}
+
+/**
  * O favorecido (payees) ligado ao login do técnico: é a "pessoa" da agenda (a alocação é por favorecido, com ou sem
  * login). null = o login não tem favorecido ativo (a agenda escolhe a equipe). Erro de leitura lança: escolher "ninguém"
  * por engano mudaria quem vai.

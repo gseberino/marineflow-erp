@@ -6,7 +6,8 @@ import type { CarteiraDeProducao, PlanoDaOsDados, SemanaDeProducao } from '@/hoo
 export const SEMANA_DE_EXEMPLO: SemanaDeProducao = {
   modo: 'ligado', em_teste: false, de: '2026-11-02', ate: '2026-11-07',
   titulo: 'Semana de 03 a 06/11 (seg 02 é Finados)',
-  resumo: 'comprometido 79% · livre 3 diárias · PPC da semana anterior —',
+  // revisão da Fase 3: sem o PPC — a semana passada (26 a 30/10) não tinha dia conferido, então o resumo não fala dela
+  resumo: 'comprometido 79% · livre 3 diárias',
   comprometido_pct: 79, livre_diarias: 3, ppc_anterior: null,
   livre_de_verdade: 'Livre de verdade (pela simulação da agenda): a partir da semana de 07/12. É simulação: não muda nada.',
   dias: [
@@ -43,8 +44,9 @@ export const SEMANA_DE_EXEMPLO: SemanaDeProducao = {
     },
     {
       acao_id: 'a2', tipo: 'concluir', os: 'os-74', numero: 'OS-00074',
-      texto: 'Lenine (OS-00074): concluída — saída ter 10/11 16:30. Cobrança: Saldo R$ 2.280,00 (vence hoje).',
-      desfazivel: true, desfeita: false, desfazivel_ate: '2026-11-11T19:30:00Z', perda: 'cobranca',
+      // revisão da Fase 3 (item 5): concluída hoje (ter 03/11), então "vence hoje" é hoje mesmo; de outro dia, o banco diz a data
+      texto: 'Lenine (OS-00074): concluída — saída ter 03/11 16:30. Cobrança: Saldo R$ 2.280,00 (vence hoje).',
+      desfazivel: true, desfeita: false, desfazivel_ate: '2026-11-04T19:30:00Z', perda: 'cobranca',
     },
   ],
   decisoes: [{ pergunta_id: 'q1', n: 1, tipo: 'nao_cabe', texto: 'Decisão 1: Não cabe tudo até qui 05/11. Qual aceita atrasar? 1) Nelson (OS-00112) atrasa; 2) Deixo o Nelson fora do plano por enquanto. Recomendo a 1.' }],
@@ -85,7 +87,7 @@ export const CARTEIRA_DE_EXEMPLO: CarteiraDeProducao = {
 
 export const PLANO_DE_EXEMPLO: PlanoDaOsDados = {
   os: 'os-69', numero: 'OS-00069', status: 'completed', estado: 'concluído',
-  marcos: { texto: 'Entrada qua 29/07 · início ter 03/11 (68 du) · conclusão qui 05/11 (2 du) · entrega —', sem_entrega_du: 1 },
+  marcos: { texto: 'Entrada qua 29/07 · início ter 03/11 (68 dias úteis) · conclusão qui 05/11 (2 dias úteis) · entrega —', sem_entrega_du: 1 },
   pode_entregar: true,
   duracao: {
     dias: 3, fonte: 'dono', fonte_texto: 'você disse', faixa: { otimista: 2, realista: 3.5 }, faixa_texto: 'faixa 2 a 3,5 dias',
