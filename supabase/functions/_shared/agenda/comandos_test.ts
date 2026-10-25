@@ -587,3 +587,56 @@ Deno.test("Fase 3 (P4) — *diária …* não é do secretário, da confirmaçã
     assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
   }
 });
+
+// ─── Fase 3 (P6): *agenda ppc*, *como foi a semana*, *agenda equipe*, *comissão [mês]* ──────────────────────────────
+
+const verP6 = (foco: "ppc" | "equipe" | "comissao", mes?: string): ComandoDaAgenda =>
+  ({ comando: "ver", periodo: null, foco, pessoa: null, ...(mes ? { mes } : {}) });
+const TABELA_P6: Array<[string, ComandoDaAgenda]> = [
+  ["agenda ppc", verP6("ppc")],
+  ["Agenda PPC", verP6("ppc")],
+  ["como foi a semana?", verP6("ppc")],
+  ["Como foi a semana", verP6("ppc")],
+  ["agenda equipe", verP6("equipe")],
+  ["*agenda equipe*", verP6("equipe")],
+  ["comissão", verP6("comissao")],
+  ["Comissão?", verP6("comissao")],
+  ["comissão do mês", verP6("comissao")],
+  ["*comissão outubro*", verP6("comissao", "outubro")],
+  ["comissão de setembro", verP6("comissao", "setembro")],
+  ["comissão março", verP6("comissao", "marco")],
+  ["comissão do mês passado", verP6("comissao", "mes passado")],
+  ["comissão mês passado.", verP6("comissao", "mes passado")],
+];
+
+Deno.test("Fase 3 (P6) — lerComandoDaAgenda: *agenda ppc*, *como foi a semana*, *agenda equipe* e *comissão [mês]*", () => {
+  for (const [texto, esperado] of TABELA_P6) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+});
+
+// Conversa: a pergunta com mais palavras vai ao modelo (que chama agenda_ver com o foco e o mês como o dono disse).
+const CONVERSA_P6 = [
+  "qual a comissão do Roberto em outubro?", "comissão do vendedor", "comissão outubro 2026", "comissão banana",
+  "como foi a semana do Roberto", "agenda ppc da semana passada", "agenda da equipe", "como foi a semana passada",
+  "comissão de outubro do Roberto", "paga a comissão", "comissão paga",
+];
+
+Deno.test("Fase 3 (P6) — conversa (pessoa, ano, mês que não existe, pagamento) não é a palavra", () => {
+  for (const t of CONVERSA_P6) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 3 (P6) — as palavras novas não são do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  const formas = TABELA_P6.map(([t]) => t);
+  for (const t of [...formas, ...formas.map((x) => `*${x.replace(/^\*|\*$/g, "")}*`)]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+});

@@ -45,6 +45,14 @@
 //   (ehPalavraDaDiaria). "lança a diária do João", "registra a diária do Roberto" e "o João trabalhou meio dia" NÃO são
 //   palavra (vão ao modelo e ao registrar_diaria); a agenda não usa "corrige" ("corrigir …" é dos comprovantes).
 //
+// Fase 3 (P6, 24/10/2026; spec-fase3.md §11) — o acompanhamento, pela agenda_ver (com a leitura fora de 'desligado', como as
+// da Fase 1):
+//   agenda ppc · como foi a semana                          → foco ppc (a semana medida: o quanto do plano foi cumprido)
+//   agenda equipe                                           → foco equipe (o que a equipe respondeu hoje e no próximo dia útil)
+//   comissao · comissao do mes · comissao <mês> · comissao mes passado → foco comissao (só a conta, nada é pago); o mês
+//   vai como o dono disse (outubro), o banco resolve (_agenda_mes_dito). É a palavra que a linha do fechamento do 1º dia
+//   útil do mês cita (*comissão outubro*).
+//
 // Só a frase inteira vale (normalizada pelo MESMO normalizarComando do secretário: sem acento, sem negrito, sem
 // pontuação no fim, sem o 🎤 do áudio). Qualquer palavra a mais é conversa e vai ao modelo como sempre.
 //
@@ -62,12 +70,18 @@
 import { normalizarComando } from "../secretario/comandos.ts";
 
 export type PeriodoDoComando = "semana" | "hoje" | "amanha" | "proxima_semana";
-export type FocoDoComando = "tudo" | "livre" | "atrasos" | "o_que_fazer" | "mudancas" | "decisoes" | "plano";
+export type FocoDoComando =
+  | "tudo" | "livre" | "atrasos" | "o_que_fazer" | "mudancas" | "decisoes" | "plano"
+  // (Fase 3, P6) a semana medida, o que a equipe respondeu e a comissão do mês
+  | "ppc" | "equipe" | "comissao";
 export type ResultadoDoDia = "cumprido" | "parcial" | "nao_cumprido";
 
 export type ComandoDaAgenda =
-  /** agenda_ver com o período, o foco e a pessoa ("eu" no "o que eu tenho que fazer") */
-  | { comando: "ver"; periodo: PeriodoDoComando | null; foco: FocoDoComando; pessoa: "eu" | null }
+  /**
+   * agenda_ver com o período, o foco e a pessoa ("eu" no "o que eu tenho que fazer"). (Fase 3, P6) mes: o mês da comissão
+   * como o dono disse ("outubro", "mes passado"); só no foco comissao, e só quando ele disse.
+   */
+  | { comando: "ver"; periodo: PeriodoDoComando | null; foco: FocoDoComando; pessoa: "eu" | null; mes?: string }
   /** agenda_rascunho_gravar: o rascunho que o dono conferiu vira fato */
   | { comando: "gravar" }
   /** agenda_rascunho_descartar */
@@ -127,6 +141,10 @@ frases(["descarta", "descartar", "descarte", "descarta tudo"], { comando: "desca
 frases(["o que mudou", "o que voce mudou", "agenda mudancas", "agenda mudou"], ver(null, "mudancas"));
 frases(["agenda pendencias", "o que voce precisa de mim"], ver(null, "decisoes"));
 frases(["agenda plano", "plano da semana"], ver(null, "plano"));
+// Fase 3 (P6): a semana medida, o que a equipe respondeu e a comissão do mês (o mês dito vai pelas palavras com complemento)
+frases(["agenda ppc", "como foi a semana"], ver(null, "ppc"));
+frases(["agenda equipe"], ver(null, "equipe"));
+frases(["comissao", "comissao do mes"], ver(null, "comissao"));
 
 /** A maior frase da tabela: texto maior do que isto nunca é comando da tabela (custo zero na conversa comum). */
 const MAIOR = Math.max(...[...FRASES.keys()].map((f) => f.length));
@@ -248,6 +266,9 @@ function lerPalavraComplemento(t: string): ComandoDaAgenda | null {
     const nome = alvoDito(m[1].trim());
     return nome === undefined ? null : { comando: "entregar", alvo: nome };
   }
+  // Fase 3 (P6): *comissão <mês>* ("comissão outubro", "comissão de setembro", "comissão do mês passado")
+  m = /^comissao (?:de |do |em )?(janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|mes passado)$/.exec(t);
+  if (m) return { comando: "ver", periodo: null, foco: "comissao", pessoa: null, mes: m[1] };
   // Fase 3 (P4): *diária <nome> inteira|meia|não [quando]* (também "dia inteiro" e "diária do/da <nome> …")
   m = /^diaria (.+?) (inteira|meia|nao|dia inteiro)(?: (.+))?$/.exec(t);
   if (m) {

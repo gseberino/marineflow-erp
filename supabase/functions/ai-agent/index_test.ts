@@ -225,3 +225,47 @@ Deno.test("aprovação (WhatsApp e painel): a mensagem do sim sai de textoDoSim,
   assertEquals((fonte.match(/textoDoSim\(pending\.title, execResult\)/g) ?? []).length, 2);
   assertEquals(fonte.includes("— executado.${"), false, "a mensagem de executado montada à mão voltou");
 });
+
+// Fase 3 (P6): a carona da agenda (_shared/agenda/carona.ts; a decisão é do banco, agenda_carona). Nos quatro caminhos do
+// turno do dono — WhatsApp pelo OpenRouter e pelo Claude Max, painel pelo OpenRouter e pelo Claude Max —, depois da
+// resposta do modelo e ANTES de gravar e de mandar: o texto do turno ganha a carona no fim, uma vez, e o histórico também.
+const modeloWa = fonte.slice(fonte.indexOf("async function turnoDoModeloNoWhatsApp("), fonte.indexOf("async function handleEntregaDoMax("));
+const entregaMax = fonte.slice(fonte.indexOf("async function handleEntregaDoMax("), fonte.indexOf("async function gravarTurnoDoMax("));
+const painelMax = fonte.slice(fonte.indexOf("async function turnoDoPainelPeloMax("), fonte.indexOf("// ---------------- HANDLER ----------------"));
+const painelLoop = fonte.slice(fonte.indexOf("const peloMax = await turnoDoPainelPeloMax("));
+
+Deno.test("carona (WhatsApp pelo OpenRouter): depois do loop, antes de gravar as mensagens e de montar a resposta; só o admin", () => {
+  const c = modeloWa.indexOf('caronaDoTurno(admin, appUser.id, osDoTurno(result.toolEvents), result, { canal: "whatsapp" })');
+  assert(c > 0, "carona ausente");
+  assert(modeloWa.indexOf("const result = await runAgentLoop(loopParams);") < c, "depois do loop");
+  assert(c < modeloWa.indexOf("const newNativeSlice = result.messages.slice(alreadyPersistedCount);"), "antes de gravar (o histórico leva a carona)");
+  assert(c < modeloWa.indexOf("respostaDoTurnoNoWhatsApp("), "antes da resposta ao WhatsApp");
+  assertStringIncludes(modeloWa, 'if (appUser.role === "admin") {');
+  assertStringIncludes(modeloWa, "if (carona) aplicarCarona(result, carona);");
+});
+
+Deno.test("carona (WhatsApp pelo Claude Max): pelas OS que o erp-mcp guardou no job, antes de gravar e de responder", () => {
+  const c = entregaMax.indexOf('comCarona(admin, appUser.id, osDoJob(job.metadata), respostaDoMax, interrupcao, { canal: "whatsapp" })');
+  assert(c > 0, "carona ausente");
+  assert(c < entregaMax.indexOf('await gravarTurnoDoMax(admin, sessionId, texto, resposta, job, "whatsapp");'), "antes de gravar");
+  assert(c < entregaMax.indexOf("respostaDoTurnoNoWhatsApp("), "antes da resposta ao WhatsApp");
+  assertStringIncludes(entregaMax, 'appUser.role === "admin" && job.status === "completed"');
+});
+
+Deno.test("carona (painel): pelo OpenRouter depois do loop e antes de gravar; pelo Claude Max antes de gravar e devolver", () => {
+  const c = painelLoop.indexOf('caronaDoTurno(admin, userId, osDoTurno(result.toolEvents), result, { canal: "painel" })');
+  assert(c > 0, "carona do painel ausente");
+  assert(painelLoop.indexOf("const result = await runAgentLoop({ ...loopParams") < c, "depois do loop");
+  assert(c < painelLoop.indexOf("const newNativeSlice = result.messages.slice(alreadyPersistedCount);"), "antes de gravar");
+  assertStringIncludes(painelLoop, 'if (userRole === "admin") {');
+  const m = painelMax.indexOf('comCarona(p.admin, p.userId, osDoJob((job as any).metadata), respostaDoMax, interrupcao, { canal: "painel" })');
+  assert(m > 0, "carona do painel pelo Max ausente");
+  assert(m < painelMax.indexOf('await gravarTurnoDoMax(p.admin, p.loopParams.sessionId, p.texto, resposta, job as any, "web")'), "antes de gravar");
+  assert(m < painelMax.indexOf("const message = { role: \"assistant\", content: resposta };"), "antes de devolver");
+});
+
+Deno.test("carona: uma vez por turno (um caminho cada) e nunca na camada das palavras nem na confirmação", () => {
+  assertEquals((fonte.match(/aplicarCarona\(result, carona\)/g) ?? []).length, 2);
+  assertEquals((fonte.match(/await comCarona\(/g) ?? []).length, 2);
+  assert(!turno.includes("caronaDoTurno(") && !turno.includes("comCarona("), "a carona não entra antes do modelo (palavras, sim, secretário)");
+});

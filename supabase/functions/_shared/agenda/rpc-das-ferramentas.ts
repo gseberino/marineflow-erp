@@ -43,7 +43,15 @@ export const RPC_ANDAMENTO = "agenda_rascunho_andamento";
 // (Fase 2, P5) decisoes (o que a agenda precisa do dono), mudancas (o que ela mudou sozinha) e plano (o publicado): a
 // agenda_ver do banco (20261025100500) aceita, e as palavras *agenda pendências*, *o que mudou* e *agenda plano* vêm por
 // aqui. O prompt que ensina os focos novos ao modelo é do P6.
-export const FOCOS = ["tudo", "livre", "o_que_fazer", "riscos", "material", "atrasos", "aprontar", "decisoes", "mudancas", "plano"] as const;
+/**
+ * Os focos de agenda_ver. (Fase 3, P6) Mais ppc (a semana medida), diarias (as que a agenda lançou e as perguntas),
+ * marcos (com a OS: entrada, início, conclusão e entrega), comissao (o resumo do mês dito em periodo; só a conta, nada é
+ * pago) e equipe (o que a equipe respondeu hoje e no próximo dia útil).
+ */
+export const FOCOS = [
+  "tudo", "livre", "o_que_fazer", "riscos", "material", "atrasos", "aprontar", "decisoes", "mudancas", "plano",
+  "ppc", "diarias", "marcos", "comissao", "equipe",
+] as const;
 export const SITUACOES_DO_MATERIAL = [
   "comprei", "a_caminho", "na_mao", "vou_comprar", "falta", "sem_previsao", "pode_comecar_sem", "dispensar",
 ] as const;

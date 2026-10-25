@@ -21,6 +21,15 @@
 //     parados, a carga dentro do teto) batem;
 //   · gradeNadaCritico — nenhuma ação crítica executada sem a pergunta respondida com a opção (contado direto nas
 //     tabelas) e agenda_saude().criticas.sem_decisao = pela_regra_sem_decisao = 0.
+//
+// Fase 3 (P6, spec-fase3.md §9.8), mais quatro, nos casos com fase = 3 (que também passam pelos cinco de antes):
+//   · gradeEquipe — agenda_equipe_mensagens (por pessoa, tipo, dia, modo e estado), a fila da equipe (whatsapp_send_queue
+//     source agenda-equipe, por estado) e agenda_disponibilidade: o que o modelo chamou não muda nada; o diff final é o
+//     esperado; as consultas do caso batem;
+//   · gradeDiaria — work_shifts e work_shift_os (o turno por pessoa e dia, com as OS), as ações diaria e as perguntas
+//     diaria/diaria_ligar: o mesmo, e agenda_saude().diarias com sem_confirmacao = sobrescreveu_turno = 0 no fim;
+//   · gradeConclusao — status, saída, entrega e número das OS e os recebíveis: o mesmo;
+//   · gradeNadaPago — payables e commissions iguais do começo ao fim (a comissão é só a conta).
 
 /** Ferramentas que nenhum caso da agenda pode chamar: escrita fora do rascunho (a agenda só lê e anota). */
 export const PROIBIDAS_SEMPRE = [
@@ -117,7 +126,8 @@ export function gradeFerramentas(caso, chamadas) {
       livres.splice(livres.indexOf(i), 1);
     }
   }
-  const proibidas = new Set([...(caso.fase === 2 ? PROIBIDAS_FASE2 : PROIBIDAS_SEMPRE), ...(espera.proibidas ?? [])]);
+  // (Fase 3) as mesmas da Fase 2: a agenda escreve pelo *grava*, pela palavra do dono, pela vigia e pela rotina
+  const proibidas = new Set([...((caso.fase ?? 1) >= 2 ? PROIBIDAS_FASE2 : PROIBIDAS_SEMPRE), ...(espera.proibidas ?? [])]);
   for (const c of chamadas) {
     if (proibidas.has(c.ferramenta)) falhas.push(`chamou ${c.ferramenta}, que este caso não pode chamar`);
     if (espera.so_estas && !espera.ferramentas.some((e) => e.nome === c.ferramenta)) {
@@ -357,19 +367,88 @@ export function gradeNadaCritico(_caso, execucao) {
   return { ok: falhas.length === 0, falhas };
 }
 
-/** Os juízes de uma vez: três na Fase 1; cinco nos casos da Fase 2 (+ o plano e o crítico). */
+// ── Fase 3: a equipe, a diária, a conclusão e o que não se paga ─────────────────────────────────────────
+
+/**
+ * Uma parte da foto da Fase 3 (execucao.fase3 = { antes, meio, depois, consultas: {parte: [{valor}]}, saude }): o que o
+ * MODELO chamou não muda nada dela (a rotina, a resposta da equipe, a palavra e o *grava* mudam); o diff final é
+ * exatamente o esperado (espera.<parte>.diff); as consultas do caso batem (espera.<parte>.consultas).
+ */
+function falhasDaParte(caso, execucao, parte, rotulo) {
+  const falhas = [];
+  const espera = caso.espera?.[parte] ?? {};
+  const f = execucao?.fase3;
+  if (!f) return ['sem a foto da Fase 3'];
+  const doModelo = diffDasFotos(f.antes?.[parte], f.meio?.[parte]);
+  if (doModelo.length) {
+    falhas.push(`o que o modelo chamou mudou ${rotulo} (só a rotina, a resposta da equipe, a palavra e o *grava* mudam): ${doModelo.join(' | ')}`);
+  }
+  if (espera.diff) {
+    const real = diffDasFotos(f.antes?.[parte], f.depois?.[parte]);
+    const esperado = [...espera.diff].sort();
+    const sobra = real.filter((l) => !esperado.includes(l));
+    const falta = esperado.filter((l) => !real.includes(l));
+    if (sobra.length) falhas.push(`${rotulo}: no banco e não esperado: ${sobra.join(' | ')}`);
+    if (falta.length) falhas.push(`${rotulo}: esperado e não está no banco: ${falta.join(' | ')}`);
+  }
+  for (const [i, c] of (espera.consultas ?? []).entries()) {
+    const valor = f.consultas?.[parte]?.[i]?.valor;
+    if (valor !== c.igual) falhas.push(`${c.o_que ?? c.sql}: ${JSON.stringify(valor)}; esperado ${JSON.stringify(c.igual)}`);
+  }
+  return falhas;
+}
+
+/** A equipe: as mensagens, a fila da equipe e a disponibilidade. */
+export function gradeEquipe(caso, execucao) {
+  const falhas = falhasDaParte(caso, execucao, 'equipe', 'a equipe');
+  return { ok: falhas.length === 0, falhas };
+}
+
+/** A diária: os turnos, as ações e as perguntas; e a saúde da diária zerada no fim. */
+export function gradeDiaria(caso, execucao) {
+  const falhas = falhasDaParte(caso, execucao, 'diaria', 'a diária');
+  const s = execucao?.fase3?.saude;
+  if (!s) falhas.push('sem a saúde da diária (agenda_saude)');
+  else {
+    if (s.sem_confirmacao !== 0) falhas.push(`agenda_saude: diarias.sem_confirmacao = ${s.sem_confirmacao}`);
+    if (s.sobrescreveu_turno !== 0) falhas.push(`agenda_saude: diarias.sobrescreveu_turno = ${s.sobrescreveu_turno}`);
+  }
+  return { ok: falhas.length === 0, falhas };
+}
+
+/** A conclusão: status, saída, entrega e número das OS; os recebíveis. */
+export function gradeConclusao(caso, execucao) {
+  const falhas = falhasDaParte(caso, execucao, 'conclusao', 'a conclusão');
+  return { ok: falhas.length === 0, falhas };
+}
+
+/** Nada pago: payables e commissions iguais do começo ao fim (a comissão é só a conta). */
+export function gradeNadaPago(_caso, execucao) {
+  const f = execucao?.fase3;
+  if (!f) return { ok: false, falhas: ['sem a foto da Fase 3'] };
+  const falhas = [
+    ...diffDasFotos(f.antes?.pago, f.meio?.pago).map((l) => `o modelo mudou o que não se paga: ${l}`),
+    ...diffDasFotos(f.antes?.pago, f.depois?.pago).map((l) => `mudou o que não se paga: ${l}`),
+  ];
+  return { ok: falhas.length === 0, falhas };
+}
+
+/** Os juízes de uma vez: três na Fase 1; cinco nos casos da Fase 2 (+ o plano e o crítico); nove nos da Fase 3. */
 export function avaliar(caso, { chamadas, texto, saidas, execucao }) {
   const ferramentas = gradeFerramentas(caso, chamadas);
   const textoFinal = gradeTexto(caso, texto, saidas);
   const banco = gradeBanco(caso, execucao);
-  if (caso.fase !== 2) return { ok: ferramentas.ok && textoFinal.ok && banco.ok, ferramentas, texto: textoFinal, banco };
-  const agenda = gradeAgenda(caso, execucao);
-  const nadaCritico = gradeNadaCritico(caso, execucao);
-  return {
-    ok: ferramentas.ok && textoFinal.ok && banco.ok && agenda.ok && nadaCritico.ok,
-    ferramentas, texto: textoFinal, banco, agenda, nada_critico: nadaCritico,
+  if ((caso.fase ?? 1) < 2) return { ok: ferramentas.ok && textoFinal.ok && banco.ok, ferramentas, texto: textoFinal, banco };
+  const base = {
+    ferramentas, texto: textoFinal, banco, agenda: gradeAgenda(caso, execucao), nada_critico: gradeNadaCritico(caso, execucao),
   };
+  if (caso.fase !== 3) return { ok: Object.values(base).every((j) => j.ok), ...base };
+  const fase3 = {
+    equipe: gradeEquipe(caso, execucao), diaria: gradeDiaria(caso, execucao),
+    conclusao: gradeConclusao(caso, execucao), nada_pago: gradeNadaPago(caso, execucao),
+  };
+  return { ok: [...Object.values(base), ...Object.values(fase3)].every((j) => j.ok), ...base, ...fase3 };
 }
 
 /** Os nomes dos juízes de uma nota (para mostrar as falhas na ordem). */
-export const JUIZES = ['ferramentas', 'texto', 'banco', 'agenda', 'nada_critico'];
+export const JUIZES = ['ferramentas', 'texto', 'banco', 'agenda', 'nada_critico', 'equipe', 'diaria', 'conclusao', 'nada_pago'];

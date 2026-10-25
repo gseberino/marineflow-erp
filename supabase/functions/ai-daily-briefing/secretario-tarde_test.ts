@@ -537,3 +537,53 @@ Deno.test("Fase 2: com a agenda automática ligada, o 'Amanhã' pede as OS do pl
   assertEquals(pedidos, [{ p_dia: HOJE, p_max: 40, p_hoje: HOJE }, { p_dia: "2026-10-16", p_max: 50, p_hoje: HOJE }]);
   assert(f.chamadas.some((c) => c.nome === "agenda_estado_das_os"));
 });
+
+// ─── (24/10/2026) Agenda de Produção, Fase 3 (P6): as linhas novas do fechamento ─────────────────────────────────────
+// A RPC passa a mandar diaria, conclusao, ppc e comissao (agenda_fase3_acompanhamento.sql). O Secretário as aceita pela
+// lista fechada, publica as ligadas nas vagas pela perda e registra o que saiu (a pergunta da diária e a ação da
+// conclusão ficam contadas); um tipo que ele não conhece fica de fora (nunca uma linha pela metade).
+const DIARIA_DO_BANCO = "Diária, preciso de você: O Roberto respondeu \"fiquei só de manhã\" e o plano de ter 03/11 era o dia todo no " +
+  "Vanderlei (OS-00069). 1) meia diária no Vanderlei (OS-00069) (R$ 90,00), como o Roberto disse; 2) dia inteiro no Vanderlei " +
+  "(OS-00069) (R$ 180,00), como estava no plano; 3) não lançar. Recomendo a 1: é o que o Roberto respondeu às 17:12. " +
+  "*diária Roberto meia* · *diária Roberto inteira* · *diária Roberto não*.";
+const CONCLUSAO_DO_BANCO = "Concluí o Vanderlei (OS-00069): o Roberto disse que terminou e era o último dia do plano. As cobranças já " +
+  "existiam (sinal pago); o saldo na entrega (R$ 2.800,00) passa a vencer hoje. *desfaz OS-00069* reabre.";
+const COMISSAO_DO_BANCO = "Comissão de outubro (teste, nada pago): Roberto — diárias R$ 2.400,00 × comissão R$ 0,00; João — diárias " +
+  "R$ 1.200,00 × comissão R$ 0,00. *comissão outubro* mostra a conta.";
+
+Deno.test("Fase 3: diária, conclusão e comissão chegam do banco; as que cabem saem e são registradas; tipo desconhecido fica de fora", async () => {
+  const agenda = {
+    ...daAgenda("ligado"), cauda_amanha: null, semana_que_vem: [],
+    linhas: [
+      { tipo: "diaria", texto: DIARIA_DO_BANCO, perda: 50, pergunta_id: "q-diaria", acao_ids: [], modo: "ligado" },
+      { tipo: "conclusao", texto: CONCLUSAO_DO_BANCO, perda: 45, pergunta_id: null, acao_ids: ["a-concluir"], modo: "ligado" },
+      { tipo: "comissao", texto: COMISSAO_DO_BANCO, perda: 20, pergunta_id: null, acao_ids: [], modo: "ligado" },
+      { tipo: "inventado", texto: "Uma linha que o Secretário não conhece.", perda: 99, pergunta_id: null, acao_ids: [], modo: "ligado" },
+    ],
+  };
+  const { p, chamadas } = await tardeComPlano(agenda, { formato: "ligado", modo: "novo", enviado: true });
+  const linhas = String(p.texto).split("\n");
+  const i = linhas.findIndex((l) => l.startsWith("Amanhã (sexta, 16/10)"));
+  assertEquals(linhas.slice(i + 1, i + 4), [DIARIA_DO_BANCO, CONCLUSAO_DO_BANCO, COMISSAO_DO_BANCO]);
+  assert(!String(p.texto).includes("Secretário não conhece"), "o tipo desconhecido entrou");
+  const reg = chamadas.find((c) => c.nome === "agenda_fechamento_registrar");
+  assertEquals(reg?.args, {
+    p_hoje: HOJE, p_via: "fechamento",
+    p_linhas: [{ pergunta_id: "q-diaria", acao_ids: [] }, { pergunta_id: null, acao_ids: ["a-concluir"] }, { pergunta_id: null, acao_ids: [] }],
+  });
+});
+
+Deno.test("Fase 3: as linhas novas em sombra: o texto é o de antes byte a byte e o que diria vai ao detalhe", async () => {
+  const antes = await tardeComPlano({ ...daAgenda("ligado"), cauda_amanha: null, semana_que_vem: [] }, { formato: "ligado", modo: "novo", enviado: true });
+  const sombra = await tardeComPlano({
+    ...daAgenda("ligado"), cauda_amanha: null, semana_que_vem: [],
+    linhas: [
+      { tipo: "diaria", texto: DIARIA_DO_BANCO, perda: 50, pergunta_id: "q-diaria", acao_ids: [], modo: "sombra" },
+      { tipo: "comissao", texto: COMISSAO_DO_BANCO, perda: 20, pergunta_id: null, acao_ids: [], modo: "sombra" },
+    ],
+  }, { formato: "ligado", modo: "novo", enviado: true });
+  assertEquals(sombra.p.texto, antes.p.texto);
+  assert(!sombra.chamadas.some((c) => c.nome === "agenda_fechamento_registrar"));
+  const ag = (sombra.p.detalhe as { agenda: Record<string, unknown> }).agenda;
+  assertEquals((ag.linhas_diria as Array<{ tipo: string }>).map((l) => l.tipo), ["diaria", "comissao"]);
+});

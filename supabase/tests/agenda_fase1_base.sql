@@ -775,7 +775,9 @@ insert into _definer_da_agenda values
   ('agenda_concluir_dito'), ('agenda_entregar_dito'),
   ('agenda_equipe_ficha'), ('agenda_resposta_da_equipe'), ('agenda_rotina_rodar'), ('agenda_diaria_dita'),
   ('_agenda_equipe_registrar'), ('_agenda_equipe_enfileirar'), ('_agenda_fila_da_equipe'),
-  ('_agenda_diaria_do_dia'), ('_agenda_lancar_diaria'), ('_agenda_decidir_diaria'), ('_agenda_desfazer_diaria');
+  ('_agenda_diaria_do_dia'), ('_agenda_lancar_diaria'), ('_agenda_decidir_diaria'), ('_agenda_desfazer_diaria'),
+  -- FASE 3 (P6): a simulação do livre de verdade (chama o motor, que é só do service_role) e a carona (marca carona_em)
+  ('agenda_livre_de_verdade'), ('agenda_carona');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

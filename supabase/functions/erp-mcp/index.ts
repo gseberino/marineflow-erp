@@ -11,6 +11,7 @@
 // do JOB — nunca do corpo da requisição.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { executarChamadaDeTool, interrupcaoDaTool } from "../_shared/ai/agent.ts";
+import { osDoTurno } from "../_shared/agenda/carona.ts";
 import type { Role } from "../_shared/ai/tools/index.ts";
 import { ferramentasDoJob } from "../_shared/ai/max/ferramentas-do-job.ts";
 import { responderMcp, type ServidorDoTurno } from "../_shared/ai/max/mcp.ts";
@@ -90,6 +91,16 @@ export async function handler(req: Request): Promise<Response> {
       const interrupcao = interrupcaoDaTool(tc, r, true);
       // Registro atômico no job (duas chamadas em paralelo não apagam a interrupção uma da outra).
       await admin.rpc("ai_job_registrar_ferramenta", { p_job_id: jobId, p_nome: nome, p_interrupcao: interrupcao });
+      // (Fase 3, P6) as OS que a ferramenta citou, para a carona da agenda na entrega do turno (ai-agent). Diagnóstico de
+      // enriquecimento: nunca derruba a ferramenta (a migration 20261026100500 ainda não aplicada = sem carona).
+      const os = osDoTurno([{ name: nome, args: argumentos ?? {}, result: r.toolResult }]);
+      if (os.length) {
+        try {
+          await admin.rpc("ai_job_registrar_os", { p_job_id: jobId, p_os: os });
+        } catch (_e) {
+          // sem carona neste turno
+        }
+      }
       return { resultado: r.toolResult, interrompe: !!interrupcao };
     },
   };

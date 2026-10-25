@@ -618,3 +618,16 @@ Deno.test("Fase 3 (P4) — ehComandoDaAgendaLigada: *diária* só com modo_diari
   assertEquals(await ehComandoDaAgendaLigada(adminDoModo({ data: { modo_leitura: "desligado", modo_diaria: "ligado" } }), "diária Roberto meia"),
                false);
 });
+
+// Fase 3 (P6): *agenda ppc*, *agenda equipe* e *comissão [mês]* são agenda_ver (o mesmo mapeamento da ferramenta); o mês
+// vai em p_periodo como o dono disse (o banco resolve: _agenda_mes_dito).
+Deno.test("Fase 3 (P6) — chamadaDoComando: ppc, equipe e comissão vão à agenda_ver; o mês da comissão em p_periodo, como dito", () => {
+  const ver = (t: string) => chamadaDoComando(lerComandoDaAgenda(t)!, AUTOR);
+  const base = { p_autor: AUTOR, p_os: null, p_simular: null, p_simular_aprovacao: false, p_pessoa: null };
+  assertEquals(ver("agenda ppc"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "ppc" } });
+  assertEquals(ver("como foi a semana?"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "ppc" } });
+  assertEquals(ver("agenda equipe"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "equipe" } });
+  assertEquals(ver("comissão"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "comissao" } });
+  assertEquals(ver("*comissão outubro*"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: "outubro", p_foco: "comissao" } });
+  assertEquals(ver("comissão do mês passado"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: "mes passado", p_foco: "comissao" } });
+});

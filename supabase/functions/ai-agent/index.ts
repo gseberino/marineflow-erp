@@ -58,6 +58,7 @@ import {
   resolveOrCreateWhatsAppSession,
 } from "../_shared/ai/whatsapp-channel.ts";
 import { verifyPin } from "../_shared/ai/whatsapp-pin.ts";
+import { aplicarCarona, caronaDoTurno, comCarona, osDoJob, osDoTurno } from "../_shared/agenda/carona.ts";
 import { STATUS_INJETAVEL, colunaDaEntidade } from "../_shared/ai/memory-scope.ts";
 import { podarHistoricoParaLLM } from "../_shared/ai/context-pruning.ts";
 import { filtrarPorCanal } from "../_shared/ai/channel-scope.ts";
@@ -853,6 +854,12 @@ async function turnoDoModeloNoWhatsApp(turno: TurnoDoModelo): Promise<Response> 
 
   // ---- OpenRouter (loop aqui na edge) ----
   const result = await runAgentLoop(loopParams);
+  // (Fase 3, P6) a carona da agenda: no fim da resposta ao dono sobre UMA OS, no máximo uma pergunta aberta dela
+  // (agenda_carona decide; nunca com cartão de sim, opções ou fluxo). Entra também no histórico (aplicarCarona).
+  if (appUser.role === "admin") {
+    const carona = await caronaDoTurno(admin, appUser.id, osDoTurno(result.toolEvents), result, { canal: "whatsapp" });
+    if (carona) aplicarCarona(result, carona);
+  }
 
   try {
     const newNativeSlice = result.messages.slice(alreadyPersistedCount);
@@ -935,7 +942,11 @@ async function handleEntregaDoMax(body: Record<string, any>): Promise<Response> 
   // rodou e a pergunta do CMP já saiu). Refazer pelo OpenRouter chamaria a tool de novo e o dono
   // receberia a pergunta duas vezes: o turno fecha como o concluído, sem mensagem do assistente.
   if (job.status === "completed" || interrupcao.fluxo) {
-    const resposta = job.status === "completed" ? String((job.response as any)?.text ?? "") : "";
+    const respostaDoMax = job.status === "completed" ? String((job.response as any)?.text ?? "") : "";
+    // (Fase 3, P6) a carona da agenda, pelas OS que as ferramentas do turno tocaram (o erp-mcp guardou no job)
+    const resposta = appUser.role === "admin" && job.status === "completed"
+      ? await comCarona(admin, appUser.id, osDoJob(job.metadata), respostaDoMax, interrupcao, { canal: "whatsapp" })
+      : respostaDoMax;
     await gravarTurnoDoMax(admin, sessionId, texto, resposta, job, "whatsapp");
     // fluxo (11/10/2026): a frase curta do Max fica só no histórico; a mensagem ao dono é a do fluxo.
     const { replyText, metadata: novo } = respostaDoTurnoNoWhatsApp(
@@ -1102,8 +1113,12 @@ async function turnoDoPainelPeloMax(p: {
     }
 
     // pronto
-    const resposta = String((job as any).response?.text ?? "");
     const interrupcao = ((job as any).metadata?.interrupcao ?? {}) as Record<string, any>;
+    // (Fase 3, P6) a carona da agenda, pelas OS que as ferramentas do turno tocaram (o erp-mcp guardou no job)
+    const respostaDoMax = String((job as any).response?.text ?? "");
+    const resposta = p.userRole === "admin"
+      ? await comCarona(p.admin, p.userId, osDoJob((job as any).metadata), respostaDoMax, interrupcao, { canal: "painel" })
+      : respostaDoMax;
     const { data: primeiraVez } = await p.admin.rpc("ai_job_marcar_entregue", { p_job_id: jobId });
     if (primeiraVez === true) await gravarTurnoDoMax(p.admin, p.loopParams.sessionId, p.texto, resposta, job as any, "web");
     const message = { role: "assistant", content: resposta };
@@ -1446,6 +1461,12 @@ servirComCors(async (req) => {
     if (peloMax) return peloMax;
 
     const result = await runAgentLoop({ ...loopParams, timeBudgetMs: Math.max(25_000, 100_000 - (Date.now() - inicioDoTurno)) });
+    // (Fase 3, P6) a carona da agenda: no fim da resposta ao dono sobre UMA OS, no máximo uma pergunta aberta dela
+    // (agenda_carona decide; nunca com cartão de sim, opções ou fluxo). Entra também no histórico (aplicarCarona).
+    if (userRole === "admin") {
+      const carona = await caronaDoTurno(admin, userId, osDoTurno(result.toolEvents), result, { canal: "painel" });
+      if (carona) aplicarCarona(result, carona);
+    }
 
     // ---- Persiste as mensagens novas deste turno (best-effort — não derruba a resposta) ----
     try {

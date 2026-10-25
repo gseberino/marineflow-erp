@@ -108,14 +108,23 @@ export interface AgendaDoFechamento {
   linhas?: LinhaDaAgenda[];
 }
 
-export const TIPOS_DE_LINHA_DA_AGENDA = ["decisao", "dia", "semana", "mudancas", "pergunta"] as const;
+/**
+ * Os tipos de linha que a agenda manda (lista fechada: o que vier fora dela fica de fora, nunca pela metade). (24/10/2026,
+ * Fase 3, P6, migration 20261026100500) Mais diaria (a pergunta crítica da diária), conclusao (o que o gestor concluiu pela
+ * palavra do técnico), ppc (a semana medida, no último dia útil) e comissao (o 1º dia útil do mês). A regra não muda: as
+ * ligadas disputam as mesmas vagas de REGRAS.maxManha, pela perda; sem letra e sem tipo novo em resumo_itens.
+ */
+export const TIPOS_DE_LINHA_DA_AGENDA = ["decisao", "dia", "semana", "mudancas", "pergunta", "diaria", "conclusao", "ppc", "comissao"] as const;
 
-/** Uma linha da agenda no fechamento (decisão crítica, o dia de hoje, a semana publicada, o que mudou sozinho, uma pergunta). */
+/**
+ * Uma linha da agenda no fechamento (decisão crítica, o dia de hoje, a semana publicada, o que mudou sozinho, uma pergunta;
+ * Fase 3: a diária que espera o dono, a conclusão do gestor, a semana medida, a comissão do mês).
+ */
 export interface LinhaDaAgenda {
   tipo: (typeof TIPOS_DE_LINHA_DA_AGENDA)[number];
   /** o texto pronto do banco ("Agenda, preciso de você. …", "Agenda de hoje: …", "Agenda: publiquei a semana …") */
   texto: string;
-  /** 0–100: o que se perde sem a linha (decisão 100/80/50, dia 70, semana 60, mudanças 40, pergunta 30) */
+  /** 0–100: o que se perde sem a linha (decisão 100/80/50, dia 70, semana 60, ppc 55, diária 50/80, conclusão 45, mudanças 40, pergunta 30, comissão 20) */
   perda: number;
   /** a pergunta que a linha mostra (a mostrada_vezes sobe quando o fechamento sai) */
   pergunta_id: string | null;

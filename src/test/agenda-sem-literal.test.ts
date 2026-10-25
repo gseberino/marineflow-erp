@@ -98,6 +98,19 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 1,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_vigiar); não é texto_max nem peca_embutida_acima',
   },
+  // Fase 3 (P6): o custo da simulação do livre de verdade e a ordem das OS do turno no job do Claude Max.
+  {
+    onde: 'agenda_livre_de_verdade',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (o custo da simulação no resultado, ms; a meta < 2 s é do teste); não é texto_max nem peca_embutida_acima',
+  },
+  {
+    onde: 'ai_job_registrar_os',
+    casou: '1000',
+    vezes: 1,
+    porque: 'ordenação: as OS novas do turno vêm depois das que o job já tinha (1000 + posição); não é texto_max nem peca_embutida_acima',
+  },
 ];
 
 /** As partes do Secretário que leem a agenda (o resto do arquivo é do Secretário e tem os números dele). */

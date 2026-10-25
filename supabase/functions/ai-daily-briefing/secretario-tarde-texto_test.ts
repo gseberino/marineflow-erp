@@ -516,3 +516,75 @@ Deno.test("Fase 2: com as linhas do plano a projeção da semana (Fase 1) só en
   const so1 = textoDaTarde(quinta({}, { ...ag, linhas: [l2("dia", DIA_F2, 70)] }));
   assertEquals([so1.agenda?.linhas?.length, so1.agenda?.semana], [1, 3]);
 });
+
+// ─── (24/10/2026) Agenda de Produção, Fase 3 (P6): as linhas novas (diaria, conclusao, ppc, comissao) ─────────────
+// Os textos são os do banco de verdade (supabase/tests/agenda_fase3_acompanhamento.sql: D1, X1, C1, P3, F1). A regra do
+// Secretário não muda: as linhas são genéricas e disputam as mesmas vagas de REGRAS.maxManha pela perda, sem letra; na
+// sombra o texto é o de antes byte a byte; o corte de 1.000 tira linha inteira.
+const DIA_F3 = "Agenda de hoje: Vanderlei (OS-00069) — você abre, Roberto o dia todo; Flávio (OS-00104) — você, João. O Roberto " +
+  "confirmou o dia todo e lancei a diária dele (R$ 180,00). Foi isso para o João? *dia feito* lança a meia diária dele, ou conte o que mudou.";
+const DIARIA_F3 = "Diária, preciso de você: O Roberto respondeu \"fiquei só de manhã\" e o plano de ter 03/11 era o dia todo no " +
+  "Vanderlei (OS-00069). 1) meia diária no Vanderlei (OS-00069) (R$ 90,00), como o Roberto disse; 2) dia inteiro no Vanderlei " +
+  "(OS-00069) (R$ 180,00), como estava no plano; 3) não lançar. Recomendo a 1: é o que o Roberto respondeu às 17:12. " +
+  "*diária Roberto meia* · *diária Roberto inteira* · *diária Roberto não*.";
+const CONCLUSAO_F3 = "Concluí o Vanderlei (OS-00069): o Roberto disse que terminou e era o último dia do plano. As cobranças já " +
+  "existiam (sinal pago); o saldo na entrega (R$ 2.800,00) passa a vencer hoje. *desfaz OS-00069* reabre.";
+const PPC_F3 = "Semana de 03 a 06/11 (seg 02 é Finados): 5 de 6 dias de serviço cumpridos (83%). Não cumprido: Vanderlei qua " +
+  "04/11 (imprevisto). Sem conferência: qua 04/11 (Flávio) — *dia feito 04/11* confirma.";
+const COMISSAO_F3 = "Comissão de outubro (teste, nada pago): Roberto — diárias R$ 2.400,00 × comissão R$ 0,00; João — diárias " +
+  "R$ 1.200,00 × comissão R$ 0,00. *comissão outubro* mostra a conta.";
+const SEIS = [
+  l2("comissao", COMISSAO_F3, 20), l2("conclusao", CONCLUSAO_F3, 45, "ligado", { acao_ids: ["c1"] }),
+  l2("diaria", DIARIA_F3, 50, "ligado", { pergunta_id: "q-diaria" }), l2("ppc", PPC_F3, 55), l2("dia", DIA_F3, 70),
+  l2("pergunta", PERGUNTA_F2, 30),
+];
+
+Deno.test("Fase 3: as linhas novas entram pela perda nas mesmas vagas (dia 70, ppc 55, diária 50, conclusão 45, comissão 20)", () => {
+  const tipos = (ficaram: number) => linhasDaAgendaQueCabem(ficaram, comLinhas(SEIS)).map((l) => l.tipo);
+  assertEquals(tipos(0), ["dia", "ppc", "diaria"]);
+  assertEquals(tipos(1), ["dia", "ppc"]);
+  assertEquals(tipos(2), ["dia"]);
+  assertEquals(tipos(3), []);
+  // sem o dia e o PPC, a diária e a conclusão; a comissão (20) só com vaga sobrando
+  const semDia = SEIS.filter((l) => l.tipo !== "dia" && l.tipo !== "ppc");
+  assertEquals(linhasDaAgendaQueCabem(0, comLinhas(semDia)).map((l) => l.tipo), ["diaria", "conclusao", "pergunta"]);
+  assertEquals(linhasDaAgendaQueCabem(0, comLinhas([l2("comissao", COMISSAO_F3, 20)])).map((l) => l.tipo), ["comissao"]);
+  // as de sombra nunca entram
+  assertEquals(linhasDaAgendaQueCabem(0, comLinhas(emSombra(SEIS))), []);
+});
+
+Deno.test("Fase 3: a sexta (PPC + papelada + o que ficou de hoje) respeita REGRAS.maxManha e os 1.000, com linhas inteiras", () => {
+  const sexta = (extra: Partial<DadosDaTarde>, ag: AgendaDoFechamento) =>
+    dados({ hoje: "2026-11-06", amanha: { dia: "2026-11-07", itens: [], carteira: { semData: 6 }, agenda: ag }, pergunta: true, ...extra });
+  // nada ficou e sem a papelada: as 3 vagas são da agenda (dia, ppc, diária), logo depois do "Amanhã", inteiras
+  const limpo = textoDaTarde(sexta({ escritorio: null, pergunta: false }, comLinhas(SEIS)));
+  assertEquals(limpo.agenda?.linhas?.map((l) => l.tipo), ["dia", "ppc", "diaria"]);
+  for (const l of limpo.agenda!.linhas!) assertStringIncludes(limpo.texto!, l.texto);
+  assert(limpo.texto!.length <= LIMITE_DA_TARDE, `${limpo.texto!.length}`);
+  // com a papelada e a pergunta da sexta, os 1.000 não comportam as 3: a de menor perda (a diária) sai inteira
+  const t = textoDaTarde(sexta({}, comLinhas(SEIS)));
+  assertEquals(t.agenda?.linhas?.map((l) => l.tipo), ["dia", "ppc"]);
+  for (const l of t.agenda!.linhas!) assertStringIncludes(t.texto!, l.texto);
+  assert(!t.texto!.includes(DIARIA_F3.slice(0, 40)), "a diária entrou pela metade");
+  assertStringIncludes(t.texto!, "Escritório:");
+  assert(t.texto!.length <= LIMITE_DA_TARDE, `${t.texto!.length}`);
+  // com 2 que ficaram (as letras do Secretário vêm antes) só cabe a de maior perda
+  const t2 = textoDaTarde(sexta({ ficaram: ["B", "C"].map((l) => linha(l, `${l} cobrança`)) }, comLinhas(SEIS)));
+  assertEquals(t2.agenda?.linhas?.map((l) => l.tipo), ["dia"]);
+  assert(!t2.texto!.includes(PPC_F3) && !t2.texto!.includes(DIARIA_F3));
+  assert(t2.texto!.length <= LIMITE_DA_TARDE, `${t2.texto!.length}`);
+  // muito longo: as linhas da agenda saem inteiras (nunca no meio) até caber
+  const t3 = textoDaTarde(sexta({ ficaram: [linha("B", `B ${"y".repeat(300)}`)], fornecedores: ["SR Contabilidade", "Kamell"] }, comLinhas(SEIS)));
+  assert(t3.texto!.length <= LIMITE_DA_TARDE, `${t3.texto!.length}`);
+  for (const l of SEIS) {
+    if (t3.texto!.includes(l.texto.slice(0, 40))) assertStringIncludes(t3.texto!, l.texto, `cortou no meio: ${l.tipo}`);
+  }
+  assert(!PROIBIDAS.test(t.texto!.replace("agenda pendências", "")), "sem jargão no que a agenda manda");
+});
+
+Deno.test("Fase 3: na sombra (as linhas novas com modo 'sombra') o fechamento é o de antes, byte a byte", () => {
+  for (const extra of [{}, { ficaram: ["B"].map((l) => linha(l, `${l} cobrança`)) }, { fornecedores: [] as string[] }]) {
+    const antes = textoDaTarde(quinta(extra)).texto;
+    assertEquals(textoDaTarde(quinta(extra, comLinhas(emSombra(SEIS)))).texto, antes, JSON.stringify(extra));
+  }
+});

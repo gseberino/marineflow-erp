@@ -199,6 +199,8 @@ export function chamadaDoComando(
   }
   const args: Record<string, unknown> = { foco: cmd.foco };
   if (cmd.periodo) args.periodo = cmd.periodo;
+  // (Fase 3, P6) o mês da comissão como o dono disse ("outubro"): o banco resolve (_agenda_mes_dito)
+  if (cmd.mes) args.periodo = cmd.mes;
   if (cmd.pessoa) args.pessoa = cmd.pessoa;
   // (agenda_ver não recebe o canal: o "whatsapp" aqui não muda parâmetro nenhum, vale também para o painel)
   const c = paraAgendaVer(args, { autor, canal: "whatsapp", ...(hoje ? { hoje } : {}) });

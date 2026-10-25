@@ -2904,3 +2904,31 @@ porque só o dono pode preenchê-las.
   `v_dias_por_os_e_pessoa` (mesma divisão por `n_os`, agrupada por OS e pessoa, só perfil de diária, sem o sócio), e a conta
   manda a comissão das OS sem dia ligado para "sem dia lançado na OS para dividir" e diz quantas diárias do mês estão sem OS.
   As diárias passam a nascer ligadas à OS quando a diária automática da agenda (P4) ligar; o passado só se liga à mão.
+
+
+### [NOVO-agenda-27] O replano da falta de hoje deixa a OS com duas interrupções (o dia de amanhã fica, o resto vai para a semana seguinte)
+
+- **Encontrado em:** Agenda de Produção, Fase 3, pacote P6 (24/10/2026, nos evals A21/A22: as invariantes do plano que o
+  runner confere no fim de todo caso).
+- **O quê:** na carteira da fixture-fase3, o Roberto falta na qua 04/11 (o "não vou" das 07:10 ou o silêncio até as 9h). O
+  replano (a vigia, evento real) tira o 04/11 do Vanderlei e o põe em seg 09 e ter 10/11, mas mantém o qui 05/11 (amanhã:
+  dentro do congelamento). A OS fica 03 · 05 · 09–10/11: duas interrupções no meio, e `agenda_config.interrupcoes_max` é 1
+  (a invariante "até interrupcoes_max dias úteis parados no meio da OS" reprova). Com a falta na qui 05/11 (o último dia) o
+  replano fica 03–04 · 09–10/11, uma interrupção só, e passa.
+- **Onde:** o motor (`agenda_propor` 'replano', 20261025100200), chamado pelo passo do silêncio e pelo "não vou" da rotina
+  (`_agenda_rotina_silencio`, `agenda_resposta_da_equipe`, 20261026100300): o congelado mantido não entra na conta das
+  interrupções do bloco novo.
+- **Não muda no P6 (só registro):** os evals A21 e A22 usam a falta da qui 05/11; a do meio da OS fica para o motor decidir
+  (mover também o dia congelado quando o evento real é da mesma pessoa, ou perguntar ao dono). **Pendência antes de ligar
+  modo_equipe.**
+
+### [NOVO-agenda-28] O "não vou" antes das 07:30 fica sem o "Tá bom, aviso o Gustavo."
+
+- **Encontrado em:** Agenda de Produção, Fase 3, pacote P6 (24/10/2026, no eval A21 com o "hoje não vou conseguir" às 07:10).
+- **O quê:** a resposta do técnico é lida e vale (indisponível no dia, o replano e o acorde ao dono saem), mas a resposta da
+  agenda a ele nasce com `enviar_em` = a hora em que ele escreveu; antes da janela da equipe (07:30) a régua única de envio
+  (`_agenda_equipe_registrar`, 20261026100300) a recusa (`recusada/janela`) e ela nunca sai. Ele fica sem saber que foi
+  entendido.
+- **Não muda no P6 (só registro):** o eval A21 usa 07:40. A correção é a resposta (tipo `resposta`) nascer para o início da
+  janela quando chega antes dela (`greatest(recebida, dia + equipe_janela_inicio)`), com o mesmo teto. **Decidir antes de
+  ligar modo_equipe.**

@@ -68,9 +68,12 @@ create function pg_temp.linhas(p_dia date, p_max int, p_hoje date) returns text 
     from jsonb_array_elements(public.agenda_linhas_do_dia(p_dia, p_max, p_hoje)) with ordinality t(x, o)
 $f$;
 -- As linhas do fechamento em texto: "semana/60/ligado: … || decisao/50/ligado: …".
+-- FASE 3: sem as linhas ppc e comissao (a 20261026100500 as põe no último dia útil da semana e no 1º dia útil do mês, e
+-- ter 03/11 é o 1º dia útil de novembro): elas são provadas em agenda_fase3_acompanhamento.sql. O resto fica igual.
 create function pg_temp.fechamento(p_hoje date) returns text language sql as $f$
   select coalesce(string_agg((x ->> 'tipo') || '/' || (x ->> 'perda') || '/' || (x ->> 'modo') || ': ' || (x ->> 'texto'), ' || ' order by o), '')
     from jsonb_array_elements(public.agenda_textos_do_fechamento(p_hoje, null) -> 'linhas') with ordinality t(x, o)
+   where x ->> 'tipo' not in ('ppc', 'comissao')
 $f$;
 -- Executa p_sql (que devolve um valor) como o papel p_papel com o login p_uid: o resultado em texto, ou o erro.
 create function pg_temp.como(p_uid uuid, p_papel text, p_sql text) returns text language plpgsql as $f$

@@ -274,10 +274,11 @@ function secaoDaAgenda(): string {
 }
 
 // Fase 1: 7 linhas (o título + 6). Fase 2 (P6): no máximo 10 a mais (spec-fase2.md §12.2) — entraram 6. Teto 17.
-Deno.test("agenda de produção: a seção é curta (≤ 17 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
+// Fase 3 (P6): no máximo 8 a mais sobre as 13 (spec-fase3.md §9.6) — entraram 5. Teto 21.
+Deno.test("agenda de produção: a seção é curta (≤ 21 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
-  assertEquals(linhas.length <= 17, true, `a seção tem ${linhas.length} linhas`);
+  assertEquals(linhas.length <= 21, true, `a seção tem ${linhas.length} linhas`);
   // Estável = em cache. O volátil muda a cada turno e não pode carregar a seção.
   const volatil = buildSystemBlocks(CONVERSA_LIGADA, { userName: "Teste", userRole: "admin", channel: "whatsapp" })[1].text;
   assertEquals(volatil.includes(SECAO_AGENDA), false);
@@ -415,4 +416,36 @@ Deno.test("agenda de produção (Fase 3): concluir e entregar pelo andamento e p
   // 5. update_service_order_status devolve a instrução (não recusa): o texto dela cita a ferramenta certa
   const status = porNome.get("update_service_order_status")!;
   assertStringIncludes(status.description, "os_registrar_andamento, evento concluiu");
+});
+
+// Agenda de Produção (24/10/2026, Fase 3, P6): o acompanhamento — a rotina da equipe é sozinha (o modelo não manda nem
+// lança), os focos novos de agenda_ver (cada um existe no enum), a comissão que é só a conta, a resposta à pergunta da
+// diária pela decisão (sem escolher pelo dono), as palavras que o dono manda direto (o comando sem IA lê cada uma) e a
+// carona ("Aproveitando: …" é da agenda). Nenhuma ferramenta nova (o teto do perfil continua): só o ensino delas.
+Deno.test("agenda de produção (Fase 3, P6): a equipe sozinha, os focos ppc/diarias/equipe/marcos/comissao, a diária pela decisão e a carona", () => {
+  const secao = secaoDaAgenda();
+  // 1. a rotina da equipe e a diária automática não são do modelo
+  assertStringIncludes(secao, "Você nunca manda mensagem à equipe nem lança diária por conta própria.");
+  // 2. os focos citados existem no enum de agenda_ver
+  const agendaVer = porNome.get("agenda_ver")!;
+  const focos = (agendaVer.input_schema as { properties: Record<string, { enum?: string[] }> }).properties.foco.enum ?? [];
+  for (const foco of ["ppc", "diarias", "equipe", "marcos", "comissao"]) {
+    assertStringIncludes(secao, `foco ${foco}`);
+    assertEquals(focos.includes(foco), true, `${foco} não é foco de agenda_ver`);
+  }
+  // 3. a comissão é só a conta, nunca pagamento (o texto do banco diz "nada foi pago"; o modelo repete)
+  assertStringIncludes(secao, "diga sempre que é só a conta e que nada foi pago");
+  assertStringIncludes(agendaVer.description, "só a conta, nada é pago");
+  // 4. a pergunta da diária: a decisão pela agenda_aplicar, sem escolher; fora disso, registrar_diaria
+  assertStringIncludes(secao, "agenda_ver foco decisoes e agenda_aplicar com decisao e opcao; nunca escolha a opção");
+  // 5. as palavras que o dono manda direto: o comando sem IA LÊ cada uma
+  assertEquals(lerComandoDaAgenda("diária Roberto meia")?.comando, "diaria");
+  assertEquals(lerComandoDaAgenda("diária Roberto inteira")?.comando, "diaria");
+  assertEquals(lerComandoDaAgenda("diária Roberto não")?.comando, "diaria");
+  for (const [palavra, foco] of [["agenda ppc", "ppc"], ["agenda equipe", "equipe"], ["comissão outubro", "comissao"]]) {
+    const c = lerComandoDaAgenda(palavra);
+    assertEquals(c?.comando === "ver" ? c.foco : null, foco, palavra);
+  }
+  // 6. a carona: o modelo não a repete nem responde por ele
+  assertStringIncludes(secao, "Se a sua resposta anterior terminou com \"Aproveitando: …\", foi a agenda que perguntou");
 });

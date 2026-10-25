@@ -547,5 +547,567 @@
         "scheduled_end_at": "2026-10-08T17:00:00-03:00", "quando": "terça", "trecho": "monta a semana que vem" } }],
       "texto": "{{saida:0}}"
     }
+  },
+  "S20": {
+    "boa": {
+      "passos": [
+        {
+          "rotina": "2026-10-30 19:30"
+        },
+        {
+          "rotina": "2026-11-03 07:45"
+        },
+        {
+          "rotina": "2026-11-03 09:00"
+        },
+        {
+          "rotina": "2026-11-03 17:00"
+        }
+      ],
+      "texto": ""
+    },
+    "ruim": {
+      "por_que": "a equipe ligada (o modo errado): a ficha e a confirmação vão para a fila do WhatsApp",
+      "reprova_em": "equipe",
+      "passos": [
+        {
+          "modos": {
+            "equipe": "ligado"
+          }
+        },
+        {
+          "rotina": "2026-10-30 19:30"
+        },
+        {
+          "rotina": "2026-11-03 07:45"
+        },
+        {
+          "rotina": "2026-11-03 09:00"
+        },
+        {
+          "rotina": "2026-11-03 17:00"
+        }
+      ],
+      "texto": ""
+    }
+  },
+  "S21": {
+    "boa": {
+      "passos": [
+        {
+          "forcar_proativa": {
+            "tipo": "ficha",
+            "dia": "2026-11-05",
+            "texto": "Roberto, quinta (05/11): teste do teto.",
+            "agora": "2026-11-03 18:00"
+          }
+        }
+      ],
+      "texto": ""
+    },
+    "ruim": {
+      "por_que": "o teto de 2 subiu para 3 (o defeito imitado): a 3ª do dia vai para a fila",
+      "reprova_em": "equipe",
+      "passos": [
+        {
+          "sql": "update public.agenda_config set equipe_proativas_dia_max = 3 where id"
+        },
+        {
+          "forcar_proativa": {
+            "tipo": "ficha",
+            "dia": "2026-11-05",
+            "texto": "Roberto, quinta (05/11): teste do teto.",
+            "agora": "2026-11-03 18:00"
+          }
+        }
+      ],
+      "texto": ""
+    }
+  },
+  "S22": {
+    "boa": {
+      "passos": [
+        {
+          "rotina": "2026-11-08 19:30"
+        },
+        {
+          "rotina": "2026-11-03 20:10"
+        }
+      ],
+      "texto": ""
+    },
+    "ruim": {
+      "por_que": "o tique da sexta 06/11 às 19:30 (o dia útil antes da segunda): aí a ficha sai, e a fila não fica vazia",
+      "reprova_em": "equipe",
+      "passos": [
+        {
+          "rotina": "2026-11-06 19:30"
+        }
+      ],
+      "texto": ""
+    }
+  },
+  "S23": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "escolhe pelo dono a opção recomendada (meia) sem ele dizer qual",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        },
+        {
+          "ferramenta": "agenda_aplicar",
+          "argumentos": {
+            "decisao": "1",
+            "opcao": "1",
+            "trecho": "resolve aí a diária do Roberto"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    }
+  },
+  "S24": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        },
+        {
+          "ferramenta": "agenda_aplicar",
+          "argumentos": {
+            "decisao": "1",
+            "opcao": "1",
+            "trecho": "lança meia pro Roberto"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    },
+    "ruim": {
+      "por_que": "a opção errada (dia inteiro) em vez da meia que o dono disse: o turno sai com a fração errada depois do *grava*",
+      "reprova_em": "diaria",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "decisoes"
+          }
+        },
+        {
+          "ferramenta": "agenda_aplicar",
+          "argumentos": {
+            "decisao": "1",
+            "opcao": "2",
+            "trecho": "lança meia pro Roberto"
+          }
+        }
+      ],
+      "texto": "{{saida:1}}"
+    }
+  },
+  "S25": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_registrar_andamento",
+          "argumentos": {
+            "os": "Vanderlei",
+            "evento": "concluiu",
+            "trecho": "o Vanderlei terminou hoje"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "conclui pela mudança de status, sem o andamento (sem a releitura das cobranças e sem o *grava*)",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "update_service_order_status",
+          "argumentos": {
+            "service_order_id": "OS-00069",
+            "status": "completed"
+          }
+        }
+      ],
+      "texto": "Pronto, deixei o Vanderlei (OS-00069) como concluído."
+    }
+  },
+  "S26": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "comissao",
+            "periodo": "outubro"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "diz que já pode pagar (a comissão é só a conta: o pagamento depende do OK do dono)",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "comissao",
+            "periodo": "outubro"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}\nJá pode pagar: é só lançar a pagar para o Roberto."
+    }
+  },
+  "S27": {
+    "boa": {
+      "passos": [
+        {
+          "resposta": "só de manhã",
+          "agora": "2026-11-03 17:12"
+        }
+      ],
+      "texto": ""
+    },
+    "ruim": {
+      "por_que": "o \"ok\" (o dia todo): a diária inteira é lançada, e não a pergunta da que diverge",
+      "reprova_em": "diaria",
+      "passos": [
+        {
+          "resposta": "ok",
+          "agora": "2026-11-03 17:12"
+        }
+      ],
+      "texto": ""
+    }
+  },
+  "A20": {
+    "boa": {
+      "passos": [
+        {
+          "resposta": "ok",
+          "agora": "2026-10-30 19:42"
+        }
+      ],
+      "texto": ""
+    },
+    "ruim": {
+      "por_que": "\"não vou\" no lugar do ok: a agenda tira o Roberto do dia e responde a ele",
+      "reprova_em": "equipe",
+      "passos": [
+        {
+          "resposta": "não vou",
+          "agora": "2026-10-30 19:42"
+        }
+      ],
+      "texto": ""
+    }
+  },
+  "A21": {
+    "boa": {
+      "passos": [
+        {
+          "resposta": "hoje não vou conseguir, tô ruim",
+          "agora": "2026-11-05 07:40"
+        },
+        {
+          "rotina": "2026-11-05 07:41"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "\"cheguei\" (presença) no lugar do não vou: ninguém sai do plano",
+      "reprova_em": "equipe",
+      "passos": [
+        {
+          "resposta": "cheguei",
+          "agora": "2026-11-05 07:40"
+        },
+        {
+          "rotina": "2026-11-05 07:41"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "A22": {
+    "boa": {
+      "passos": [
+        {
+          "rotina": "2026-11-05 07:45"
+        },
+        {
+          "worker": "2026-11-05 07:46"
+        },
+        {
+          "rotina": "2026-11-05 09:00"
+        }
+      ],
+      "texto": ""
+    },
+    "ruim": {
+      "por_que": "o Roberto responde \"bom dia to na MP\" às 08:10 (presença): o silêncio das 9h não vale",
+      "reprova_em": "equipe",
+      "passos": [
+        {
+          "rotina": "2026-11-05 07:45"
+        },
+        {
+          "worker": "2026-11-05 07:46"
+        },
+        {
+          "resposta": "bom dia to na MP",
+          "agora": "2026-11-05 08:10"
+        },
+        {
+          "rotina": "2026-11-05 09:00"
+        }
+      ],
+      "texto": ""
+    }
+  },
+  "A23": {
+    "boa": {
+      "passos": [
+        {
+          "resposta": "oque tem pra fazer amanhã",
+          "agora": "2026-11-03 18:00"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "a pergunta na sexta 06/11: amanhã é sábado (outro dia), e a resposta não é a ficha de qua 04/11",
+      "reprova_em": "texto",
+      "passos": [
+        {
+          "resposta": "oque tem pra fazer amanhã",
+          "agora": "2026-11-06 18:00"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "A24": {
+    "boa": {
+      "passos": [
+        {
+          "palavra": "dia feito"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "\"dia não cliente\": o dia não andou, e nenhuma diária é lançada",
+      "reprova_em": "diaria",
+      "passos": [
+        {
+          "palavra": "dia nao cliente"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "A25": {
+    "boa": {
+      "passos": [
+        {
+          "palavra": "diária Roberto meia"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "\"diária Roberto não\": apaga a diária em vez de corrigir para meia",
+      "reprova_em": "diaria",
+      "passos": [
+        {
+          "palavra": "diária Roberto não"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "A26": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "os_registrar_andamento",
+          "argumentos": {
+            "os": "Lenine",
+            "evento": "entregou",
+            "trecho": "entreguei o Lenine hoje"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "marca a entrega pela mudança de status (sem a releitura e sem o *grava*)",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "update_service_order_status",
+          "argumentos": {
+            "service_order_id": "OS-00074",
+            "status": "completed"
+          }
+        }
+      ],
+      "texto": "Pronto, o Lenine (OS-00074) está entregue."
+    }
+  },
+  "A27": {
+    "boa": {
+      "passos": [
+        {
+          "palavra": "concluiu Lenine"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "conclui o Vanderlei (a OS errada) em vez do Lenine",
+      "reprova_em": "conclusao",
+      "passos": [
+        {
+          "palavra": "concluiu Vanderlei"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "L20": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "ppc"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o plano publicado em vez da semana medida",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "plano"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "L21": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "livre"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "inventa a data em vez de repetir a da simulação",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "livre"
+          }
+        }
+      ],
+      "texto": "Pela simulação, vocês ficam livres a partir de 18 de novembro. É simulação: não muda nada."
+    }
+  },
+  "L22": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "Nelson"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "o turno fala de duas OS (o Nelson e o Lenine): a carona não cabe, e a pergunta da agenda não vai junto",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "Nelson"
+          }
+        },
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "os": "Lenine"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "L23": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "equipe"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o dia do Roberto (o plano) em vez do que ele respondeu",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "pessoa": "Roberto",
+            "periodo": "hoje"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
   }
 }

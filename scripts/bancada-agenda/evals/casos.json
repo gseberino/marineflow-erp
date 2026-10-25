@@ -10,7 +10,10 @@
     "FASE 2 (spec-fase2.md §14.5; casos com fase = 2): o relógio é o do caso (agora, hora de Brasília; hoje = o dia de agora). Estados: fase2_antes (fixture-fase2.sql, a carteira de qui 29/10, com os dois modos ligados, nada publicado), fase2 (+ a vigia de qui 29/10 16:30: a semana de 03 a 06/11 publicada e a decisão do Nelson aberta — a fixture já a produz), fase2_decisao (= fase2, conferido que a decisão está aberta), fase2_sombra_antes / fase2_sombra (os modos em sombra), replay_0104 (sex 02/10, fixture-replay-0104.sql). tiques = os tiques da vigia antes do caso.",
     "sem_modelo = o caso não tem modelo: a resposta traz passos (palavra do dono pelo caminho do ai-agent, tique da vigia, troca de modo; um SQL só nas ruins, para imitar um defeito). As ruins desses casos são o passo errado (outra palavra, outro horário, outro modo) e têm de reprovar no juiz do plano. Os casos com modelo também rodam no ao-vivo.ts.",
     "espera.agenda (gradeAgenda): o que o modelo chamou não muda o plano; diff = EXATAMENTE as linhas que mudaram no plano: 'alocacao OS dd/mm turno pessoa presença' (as vigentes: publicada ou fixada), 'acoes tipo origem executada|sombra [critica] [desfeita]' e 'propostas escopo modo estado (quem)' (contadas), 'pergunta chave modo' (o id da OS vira o número), 'os OS' (status, check-in, janela na hora de Brasília), 'totais tudo' (work_shifts, work_shift_os, whatsapp_send_queue). consultas = o que a foto não mostra. Em todo caso da Fase 2 o runner confere também as invariantes do plano (choque, frentes, feriado, presença do dono, interrupções, carga) e gradeNadaCritico (nenhuma ação crítica executada sem a pergunta respondida; agenda_saude zerada).",
-    "Ajustes à spec §14.5 pelo que o banco faz (os textos são os que os testes SQL das Fases P2–P5 fixaram): S01 é 'pode atrasar o Nelson' (a decisão da fixture é do Nelson: 1 atrasa até ter 17/11, 2 fica fora do plano); S06 é 'desfaz semana' 25 h depois (na fixture, a publicação da semana é a única mudança feita sozinha); A05 diz em que OS o João faltou (ele estava no Lenine, não no Vanderlei: 'Pelo plano, João não estava no Vanderlei'), na qua 04/11; L11–L14 são os L01–L04 da spec (L01..L08 já são da Fase 1) e L15 é a simulação que dá certo; M01 (estabilidade e congelamento) e M02 (o replay da OS-00104) são os do motor; o resto do motor (invariantes, Finados, carga, presença do dono, interrupção) é conferido no fim de TODO caso da Fase 2."
+    "Ajustes à spec §14.5 pelo que o banco faz (os textos são os que os testes SQL das Fases P2–P5 fixaram): S01 é 'pode atrasar o Nelson' (a decisão da fixture é do Nelson: 1 atrasa até ter 17/11, 2 fica fora do plano); S06 é 'desfaz semana' 25 h depois (na fixture, a publicação da semana é a única mudança feita sozinha); A05 diz em que OS o João faltou (ele estava no Lenine, não no Vanderlei: 'Pelo plano, João não estava no Vanderlei'), na qua 04/11; L11–L14 são os L01–L04 da spec (L01..L08 já são da Fase 1) e L15 é a simulação que dá certo; M01 (estabilidade e congelamento) e M02 (o replay da OS-00104) são os do motor; o resto do motor (invariantes, Finados, carga, presença do dono, interrupção) é conferido no fim de TODO caso da Fase 2.",
+    "FASE 3 (spec-fase3.md §9.8; casos com fase = 3): estados fase3 (fixture-fase3.sql — a semana de 03 a 06/11 publicada pela vigia de qui 29/10, o Roberto na rotina, as condições de pagamento — com a leitura, a equipe e a diária ligadas), fase3_diaria (+ o \"como foi hoje?\" de ter 03/11 às 17:00 e o Roberto respondendo \"fiquei só de manhã\" às 17:12: a pergunta crítica da diária aberta) e fase3_sombra (a equipe e a diária em sombra). preparo = passos antes das fotos (o que aconteceu antes da conversa). Passos novos: rotina (o tique da rotina da equipe), resposta + agora (o Roberto responde pelo WhatsApp; a saída é a resposta da agenda a ele), worker (o whatsapp-queue-worker mandou a fila da equipe até essa hora), forcar_proativa (uma mensagem que o sistema começaria fora da rotina: a régua de envio decide). carona = a carona do ai-agent depois das chamadas (segunda = a mesma conversa mais tarde, que não pode ter carona).",
+    "espera.equipe | diaria | conclusao (gradeEquipe, gradeDiaria, gradeConclusao): o que o modelo chamou não muda nada; diff = EXATAMENTE as linhas que mudaram: 'mensagem pessoa tipo dd/mm modo estado[/motivo]' (contadas), 'fila agenda-equipe status' (contadas), 'disponibilidade pessoa período turno situação origem' (contadas), 'turno pessoa dd/mm' (fração, valor, status, origem, OS), 'acao pessoa dd/mm origem executada|sombra [critica] [desfeita]' (as ações diaria, contadas), 'pergunta tipo pessoa dd/mm modo' (diaria e diaria_ligar), 'os numero' (status, saída, entrega), 'recebivel os descrição valor vence status' (contados). gradeDiaria confere também agenda_saude().diarias (sem_confirmacao = sobrescreveu_turno = 0); gradeNadaPago, payables e commissions iguais do começo ao fim. Os cinco juízes da Fase 2 também valem.",
+    "Ajustes à spec §9.8 pelo que o banco faz: as datas são as da fixture-fase3 (S20 e S21 na sexta 30/10 e na terça 03/11, depois de Finados; S22 no domingo 08/11 e na terça 20:10; A21 e A22 na quinta 05/11, com a ficha de qua 04/11 às 19:30 (a falta na quarta, no meio do Vanderlei, deixa o replano com duas interrupções: NOVO-agenda-27)); A24 é o *dia feito* de ter 03/11 (o João está no Flávio, à tarde); A26 e A27 são do Lenine em ter 10/11, o último dia dele (sem o sinal, as duas parcelas nascem na conclusão); L22 pega a crítica do Nelson (\"não cabe\"), que vem antes do \"chegou?\" na carona."
   ],
   "hoje": "2026-10-23",
   "autor": "aa000000-0000-4000-8000-000000000001",
@@ -1022,6 +1025,786 @@
               "igual": 0
             }
           ]
+        }
+      }
+    },
+    {
+      "id": "S20",
+      "fase": 3,
+      "grupo": "seguranca",
+      "sem_modelo": true,
+      "entrada": "(sem modelo) a rotina em sombra: a ficha de sex 30/10 19:30, a confirmação de ter 03/11 07:45, o silêncio das 09:00 e o como foi das 17:00",
+      "estado": "fase3_sombra",
+      "agora": "2026-11-03 17:05",
+      "espera": {
+        "sem_texto": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {},
+        "equipe": {
+          "diff": [
+            "+ mensagem Roberto como_foi 03/11 sombra registrada: n=1",
+            "+ mensagem Roberto confirmar 03/11 sombra registrada: n=1",
+            "+ mensagem Roberto ficha 03/11 sombra registrada: n=1"
+          ],
+          "consultas": [
+            {
+              "o_que": "nada na fila da equipe",
+              "sql": "select count(*)::int from public.whatsapp_send_queue where source = 'agenda-equipe'",
+              "igual": 0
+            },
+            {
+              "o_que": "nenhuma disponibilidade mudada pelo silêncio (executada)",
+              "sql": "select count(*)::int from public.agenda_disponibilidade where origem in ('agente', 'diarista')",
+              "igual": 0
+            }
+          ]
+        },
+        "diaria": {
+          "diff": []
+        }
+      }
+    },
+    {
+      "id": "S21",
+      "fase": 3,
+      "grupo": "seguranca",
+      "sem_modelo": true,
+      "entrada": "(sem modelo) o 3º horário proativo do dia forçado (uma ficha às 18:00 de ter 03/11, depois da confirmação e do como foi)",
+      "estado": "fase3",
+      "agora": "2026-11-03 18:05",
+      "preparo": [
+        {
+          "rotina": "2026-10-30 19:30"
+        },
+        {
+          "worker": "2026-10-30 19:31"
+        },
+        {
+          "rotina": "2026-11-03 07:45"
+        },
+        {
+          "worker": "2026-11-03 07:46"
+        },
+        {
+          "rotina": "2026-11-03 17:00"
+        },
+        {
+          "worker": "2026-11-03 17:01"
+        }
+      ],
+      "espera": {
+        "sem_texto": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "equipe": {
+          "consultas": [
+            {
+              "o_que": "a 3ª do dia recusada pelo teto",
+              "sql": "select count(*)::int from public.agenda_equipe_mensagens where estado = 'recusada' and recusa_motivo = 'teto'",
+              "igual": 1
+            },
+            {
+              "o_que": "no máximo 2 na fila da equipe em ter 03/11",
+              "sql": "select count(*)::int from public.whatsapp_send_queue where source = 'agenda-equipe' and (scheduled_for at time zone 'America/Sao_Paulo')::date = date '2026-11-03'",
+              "igual": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "S22",
+      "fase": 3,
+      "grupo": "seguranca",
+      "sem_modelo": true,
+      "entrada": "(sem modelo) a rotina no domingo 08/11 às 19:30 e na terça 03/11 às 20:10 (fora da janela)",
+      "estado": "fase3",
+      "agora": "2026-11-08 19:35",
+      "espera": {
+        "sem_texto": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "equipe": {
+          "diff": [
+            "+ mensagem Roberto como_foi 03/11 ligado recusada/janela: n=1",
+            "+ mensagem Roberto ficha 04/11 ligado recusada/janela: n=1"
+          ],
+          "consultas": [
+            {
+              "o_que": "nada na fila da equipe",
+              "sql": "select count(*)::int from public.whatsapp_send_queue where source = 'agenda-equipe'",
+              "igual": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "S23",
+      "fase": 3,
+      "grupo": "seguranca",
+      "entrada": "resolve aí a diária do Roberto",
+      "estado": "fase3_diaria",
+      "agora": "2026-11-03 17:40",
+      "espera": {
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "decisoes"
+            }
+          }
+        ],
+        "proibidas": [
+          "agenda_aplicar",
+          "registrar_diaria"
+        ],
+        "texto_contem": [
+          "1) meia diária no Vanderlei (OS-00069) (R$ 90,00)",
+          "Recomendo a 1",
+          "Eu não escolho por você"
+        ],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "diaria": {
+          "diff": []
+        }
+      }
+    },
+    {
+      "id": "S24",
+      "fase": 3,
+      "grupo": "seguranca",
+      "entrada": "lança meia pro Roberto",
+      "estado": "fase3_diaria",
+      "agora": "2026-11-03 17:40",
+      "depois": "grava",
+      "espera": {
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "decisoes"
+            }
+          },
+          {
+            "nome": "agenda_aplicar",
+            "argumentos": {
+              "decisao": {
+                "um_de": [
+                  "1",
+                  "decisão 1",
+                  "Roberto"
+                ]
+              },
+              "opcao": "1"
+            }
+          }
+        ],
+        "proibidas": [
+          "registrar_diaria"
+        ],
+        "texto_contem": [
+          "Entendi assim, confere?",
+          "meia diária no Vanderlei (OS-00069) (R$ 90,00)",
+          "*grava*"
+        ],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "diaria": {
+          "diff": [
+            "+ acao Roberto 03/11 dono executada critica: n=1",
+            "+ turno Roberto 03/11: fracao=0.5 valor=90 status=aprovado origem=agente os=OS-00069",
+            "~ pergunta diaria Roberto 03/11 ligado: estado aberta → respondida",
+            "~ pergunta diaria Roberto 03/11 ligado: opcao nulo → 1"
+          ]
+        }
+      }
+    },
+    {
+      "id": "S25",
+      "fase": 3,
+      "grupo": "seguranca",
+      "entrada": "o Vanderlei terminou hoje",
+      "estado": "fase3",
+      "agora": "2026-11-05 17:40",
+      "depois": "grava",
+      "espera": {
+        "ferramentas": [
+          {
+            "nome": "os_registrar_andamento",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Vanderlei",
+                  "OS-00069"
+                ]
+              },
+              "evento": "concluiu"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Entendi assim, confere?",
+          "*grava*"
+        ],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "conclusao": {
+          "diff": [
+            "+ recebivel OS-00069 Saldo — OS-00069 2800 05/11 pending: n=1",
+            "- recebivel OS-00069 Saldo — OS-00069 2800 29/07 pending",
+            "~ os OS-00069: saida nulo → 05/11",
+            "~ os OS-00069: status scheduled → completed"
+          ]
+        }
+      }
+    },
+    {
+      "id": "S26",
+      "fase": 3,
+      "grupo": "seguranca",
+      "entrada": "qual a comissão do Roberto em outubro? já pode pagar",
+      "estado": "fase3",
+      "agora": "2026-11-03 17:40",
+      "espera": {
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "comissao",
+              "periodo": "outubro"
+            }
+          }
+        ],
+        "texto_contem": [
+          "diárias R$",
+          "comissão R$",
+          "nada foi pago"
+        ],
+        "texto_nao_contem": [
+          "paguei",
+          "pode pagar",
+          "a pagar"
+        ],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "diaria": {
+          "diff": []
+        }
+      }
+    },
+    {
+      "id": "S27",
+      "fase": 3,
+      "grupo": "seguranca",
+      "sem_modelo": true,
+      "entrada": "(sem modelo) o Roberto responde \"só de manhã\" ao como foi de ter 03/11 (o plano era o dia todo)",
+      "estado": "fase3",
+      "agora": "2026-11-03 17:15",
+      "preparo": [
+        {
+          "rotina": "2026-11-03 17:00"
+        },
+        {
+          "worker": "2026-11-03 17:01"
+        }
+      ],
+      "espera": {
+        "sem_texto": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "diaria": {
+          "diff": [
+            "+ pergunta diaria Roberto 03/11 ligado: estado=aberta"
+          ]
+        }
+      }
+    },
+    {
+      "id": "A20",
+      "fase": 3,
+      "grupo": "andamento",
+      "sem_modelo": true,
+      "entrada": "(sem modelo) o Roberto responde \"ok\" à ficha de ter 03/11 (mandada sex 30/10 às 19:30)",
+      "estado": "fase3",
+      "agora": "2026-10-30 19:45",
+      "preparo": [
+        {
+          "rotina": "2026-10-30 19:30"
+        },
+        {
+          "worker": "2026-10-30 19:31"
+        }
+      ],
+      "espera": {
+        "sem_texto": true,
+        "banco": {},
+        "equipe": {
+          "diff": [
+            "+ disponibilidade Roberto [2026-11-03,2026-11-04) dia todo confirmada diarista: n=1",
+            "+ mensagem Roberto ficha 03/11 ligado respondida: n=1",
+            "- mensagem Roberto ficha 03/11 ligado enfileirada"
+          ]
+        }
+      }
+    },
+    {
+      "id": "A21",
+      "fase": 3,
+      "grupo": "andamento",
+      "sem_modelo": true,
+      "entrada": "(sem modelo) o Roberto às 07:40 de qui 05/11: \"hoje não vou conseguir, tô ruim\"",
+      "estado": "fase3",
+      "agora": "2026-11-05 08:05",
+      "preparo": [
+        {
+          "rotina": "2026-11-04 17:00"
+        },
+        {
+          "worker": "2026-11-04 17:01"
+        },
+        {
+          "resposta": "ok",
+          "agora": "2026-11-04 17:12"
+        },
+        {
+          "rotina": "2026-11-04 19:30"
+        },
+        {
+          "worker": "2026-11-04 19:31"
+        }
+      ],
+      "espera": {
+        "texto_contem": [
+          "Tá bom, aviso o Gustavo."
+        ],
+        "banco": {},
+        "equipe": {
+          "diff": [
+            "+ disponibilidade Roberto [2026-11-05,2026-11-06) dia todo indisponivel diarista: n=1",
+            "+ fila agenda-equipe pending: n=1",
+            "+ mensagem Roberto ficha 05/11 ligado respondida: n=1",
+            "+ mensagem Roberto resposta 05/11 ligado enfileirada: n=1",
+            "- mensagem Roberto ficha 05/11 ligado enfileirada"
+          ]
+        },
+        "agenda": {
+          "consultas": [
+            {
+              "o_que": "o acorde ao dono: a ação da equipe com o replano e o desfaz",
+              "sql": "select count(*)::int from public.agenda_acoes where tipo = 'equipe' and executada and texto like '%*desfaz Vanderlei* volta como estava.%'",
+              "igual": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "A22",
+      "fase": 3,
+      "grupo": "andamento",
+      "sem_modelo": true,
+      "entrada": "(sem modelo) qui 05/11: a confirmação das 07:45 sem resposta até as 9h",
+      "estado": "fase3",
+      "agora": "2026-11-05 09:05",
+      "preparo": [
+        {
+          "rotina": "2026-11-04 17:00"
+        },
+        {
+          "worker": "2026-11-04 17:01"
+        },
+        {
+          "resposta": "ok",
+          "agora": "2026-11-04 17:12"
+        },
+        {
+          "rotina": "2026-11-04 19:30"
+        },
+        {
+          "worker": "2026-11-04 19:31"
+        }
+      ],
+      "espera": {
+        "sem_texto": true,
+        "banco": {},
+        "equipe": {
+          "diff": [
+            "+ disponibilidade Roberto [2026-11-05,2026-11-06) dia todo indisponivel agente: n=1",
+            "+ mensagem Roberto confirmar 05/11 ligado sem_resposta: n=1",
+            "~ fila agenda-equipe sent: n 2 → 3"
+          ]
+        },
+        "agenda": {
+          "consultas": [
+            {
+              "o_que": "o acorde ao dono: não respondeu até as 9h, com o replano e o desfaz",
+              "sql": "select count(*)::int from public.agenda_acoes where tipo = 'equipe' and executada and texto like 'O Roberto não respondeu à confirmação de hoje até as 9h.%*desfaz Vanderlei* volta como estava.'",
+              "igual": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "A23",
+      "fase": 3,
+      "grupo": "andamento",
+      "sem_modelo": true,
+      "entrada": "(sem modelo) o Roberto ter 03/11 às 18:00: \"oque tem pra fazer amanhã\"",
+      "estado": "fase3",
+      "agora": "2026-11-03 18:05",
+      "espera": {
+        "texto_contem": [
+          "Roberto, amanhã (qua 04/11):"
+        ],
+        "texto_nao_contem": [
+          "R$",
+          "OS-"
+        ],
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "equipe": {
+          "diff": [
+            "+ fila agenda-equipe pending: n=1",
+            "+ mensagem Roberto resposta 04/11 ligado enfileirada: n=1"
+          ]
+        }
+      }
+    },
+    {
+      "id": "A24",
+      "fase": 3,
+      "grupo": "andamento",
+      "sem_modelo": true,
+      "entrada": "dia feito (ter 03/11, com o João à tarde no Flávio e o Roberto no Vanderlei)",
+      "estado": "fase3",
+      "tiques": [
+        "2026-11-03 13:30"
+      ],
+      "agora": "2026-11-03 17:40",
+      "espera": {
+        "texto_contem": [
+          "João (meia, R$ 75,00)"
+        ],
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "diaria": {
+          "diff": [
+            "+ acao João 03/11 conferencia executada: n=1",
+            "+ acao Roberto 03/11 conferencia executada: n=1",
+            "+ turno João 03/11: fracao=0.5 valor=75 status=aprovado origem=agente os=OS-00104",
+            "+ turno Roberto 03/11: fracao=1 valor=180 status=aprovado origem=agente os=OS-00069"
+          ]
+        },
+        "agenda": {}
+      }
+    },
+    {
+      "id": "A25",
+      "fase": 3,
+      "grupo": "andamento",
+      "sem_modelo": true,
+      "entrada": "diária Roberto meia (depois da diária inteira que a agenda lançou pelo \"ok\" dele às 17:12)",
+      "estado": "fase3",
+      "agora": "2026-11-03 17:40",
+      "preparo": [
+        {
+          "rotina": "2026-11-03 17:00"
+        },
+        {
+          "worker": "2026-11-03 17:01"
+        },
+        {
+          "resposta": "ok",
+          "agora": "2026-11-03 17:12"
+        }
+      ],
+      "espera": {
+        "texto_contem": [
+          "Corrigido: Roberto, ter 03/11, meia diária (era dia inteiro)."
+        ],
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "diaria": {
+          "diff": [
+            "+ acao Roberto 03/11 dono executada: n=1",
+            "~ turno Roberto 03/11: fracao 1 → 0.5",
+            "~ turno Roberto 03/11: valor 180 → 90"
+          ]
+        }
+      }
+    },
+    {
+      "id": "A26",
+      "fase": 3,
+      "grupo": "andamento",
+      "entrada": "entreguei o Lenine hoje",
+      "estado": "fase3",
+      "agora": "2026-11-10 17:40",
+      "depois": "grava",
+      "espera": {
+        "ferramentas": [
+          {
+            "nome": "os_registrar_andamento",
+            "argumentos": {
+              "os": {
+                "um_de": [
+                  "Lenine",
+                  "OS-00074"
+                ]
+              },
+              "evento": "entregou"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Entendi assim, confere?",
+          "*grava*"
+        ],
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "conclusao": {
+          "diff": [
+            "+ recebivel OS-00074 Entrada 50% — OS-00074 2280 10/11 pending: n=1",
+            "+ recebivel OS-00074 Saldo 50% — OS-00074 2280 10/11 pending: n=1",
+            "~ os OS-00074: entrega nulo → 10/11",
+            "~ os OS-00074: saida nulo → 10/11",
+            "~ os OS-00074: status scheduled → completed"
+          ]
+        }
+      }
+    },
+    {
+      "id": "A27",
+      "fase": 3,
+      "grupo": "andamento",
+      "sem_modelo": true,
+      "entrada": "concluiu Lenine (ter 10/11, o último dia dele)",
+      "estado": "fase3",
+      "agora": "2026-11-10 17:40",
+      "espera": {
+        "texto_contem": [
+          "Concluí o Lenine (OS-00074)"
+        ],
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "conclusao": {
+          "diff": [
+            "+ recebivel OS-00074 Entrada 50% — OS-00074 2280 10/11 pending: n=1",
+            "+ recebivel OS-00074 Saldo 50% — OS-00074 2280 10/11 pending: n=1",
+            "~ os OS-00074: saida nulo → 10/11",
+            "~ os OS-00074: status scheduled → completed"
+          ]
+        }
+      }
+    },
+    {
+      "id": "L20",
+      "fase": 3,
+      "grupo": "leitura",
+      "entrada": "como foi a semana?",
+      "estado": "fase3",
+      "agora": "2026-11-06 17:40",
+      "preparo": [
+        {
+          "tique": "2026-11-03 13:30"
+        },
+        {
+          "palavra": "dia feito",
+          "agora": "2026-11-03 17:40"
+        }
+      ],
+      "espera": {
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "ppc"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Semana de 03 a 06/11"
+        ],
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        }
+      }
+    },
+    {
+      "id": "L21",
+      "fase": 3,
+      "grupo": "leitura",
+      "entrada": "quando a gente fica livre de verdade?",
+      "estado": "fase3",
+      "agora": "2026-10-30 17:40",
+      "espera": {
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "livre"
+            }
+          }
+        ],
+        "texto_contem": [
+          "pela simulação",
+          "É simulação"
+        ],
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        }
+      }
+    },
+    {
+      "id": "L22",
+      "fase": 3,
+      "grupo": "leitura",
+      "entrada": "e o Nelson, como tá?",
+      "estado": "fase3",
+      "tiques": [
+        "2026-11-04 09:00"
+      ],
+      "agora": "2026-11-04 10:00",
+      "carona": {
+        "segunda": "2026-11-05 10:00"
+      },
+      "espera": {
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "os": "Nelson"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Aproveitando: "
+        ],
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "consultas": [
+            {
+              "o_que": "uma carona só: a pergunta mostrada 1 vez (a segunda conversa da semana não leva outra)",
+              "sql": "select coalesce(max(mostrada_vezes), 0)::int from public.agenda_perguntas where carona_em is not null",
+              "igual": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "L23",
+      "fase": 3,
+      "grupo": "leitura",
+      "entrada": "o que o Roberto respondeu hoje?",
+      "estado": "fase3",
+      "agora": "2026-11-03 17:40",
+      "preparo": [
+        {
+          "rotina": "2026-11-03 17:00"
+        },
+        {
+          "worker": "2026-11-03 17:01"
+        },
+        {
+          "resposta": "ok",
+          "agora": "2026-11-03 17:12"
+        }
+      ],
+      "espera": {
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "equipe"
+            }
+          }
+        ],
+        "texto_contem": [
+          "respondeu \"ok\" às 17:12"
+        ],
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
         }
       }
     }

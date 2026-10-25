@@ -1,10 +1,10 @@
-// Evals da Agenda de Produção (Fase 1, P7; Fase 2, P6), na bancada local: as respostas-modelo contra os graders, pelo
-// MESMO caminho das ferramentas de verdade. Spec Fase 1 §8.5 e Fase 2 §14.5. Nada vai para produção; não lê .env nem
-// credencial; não chama modelo nenhum.
+// Evals da Agenda de Produção (Fase 1, P7; Fase 2, P6; Fase 3, P6), na bancada local: as respostas-modelo contra os
+// graders, pelo MESMO caminho das ferramentas de verdade. Spec Fase 1 §8.5, Fase 2 §14.5 e Fase 3 §9.8. Nada vai para
+// produção; não lê .env nem credencial; não chama modelo nenhum.
 //
 //   node scripts/bancada-agenda/evals/rodar-evals.mjs                 # todos os casos, boa e ruim
 //   node scripts/bancada-agenda/evals/rodar-evals.mjs --caso R01      # um caso só
-//   node scripts/bancada-agenda/evals/rodar-evals.mjs --fase 2        # só os da Fase 2 (ou --fase 1)
+//   node scripts/bancada-agenda/evals/rodar-evals.mjs --fase 2        # só os da Fase 2 (ou --fase 1, --fase 3)
 //   node scripts/bancada-agenda/evals/rodar-evals.mjs --ponte 8787    # serve a bancada para o ao-vivo.ts (Deno)
 //
 // O que roda, para cada caso de casos.json e cada resposta de respostas-modelo.json (a boa e a ruim):
@@ -24,6 +24,11 @@
 //      consultas do caso, as invariantes do plano e a contagem do crítico;
 //   5. os juízes de graders.mjs (três na Fase 1; cinco na Fase 2). A boa tem de passar em todos; a ruim tem de
 //      reprovar no juiz que ela diz (reprova_em). Sai com 1 se uma boa reprovar ou uma ruim passar.
+// Fase 3 (casos com fase = 3): o estado é fixture-fase3.sql (a semana de 03 a 06/11 publicada, o Roberto na rotina),
+// com os modos da equipe e da diária do estado; o preparo do caso (a rotina, a resposta do Roberto, o worker da fila)
+// roda antes das fotos; os passos ganham rotina, resposta (do Roberto), worker e forcar_proativa; a carona sai depois
+// das chamadas (caso.carona), pelo mesmo carona.ts do ai-agent; e quatro juízes a mais (equipe, diária, conclusão, nada
+// pago), sobre a foto da Fase 3.
 // Sem modelo, isto prova os juízes e o caminho das RPCs, não o modelo: o ao-vivo.ts faz a parte do modelo.
 
 import { readFileSync } from 'node:fs';
@@ -32,8 +37,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { criarBancada, ler, RAIZ } from '../bancada.mjs';
 import {
-  avaliar, datasDe, diffDasFotos, gradeAgenda, gradeBanco, gradeFerramentas, gradeNadaCritico, gradeTexto, JUIZES, montarTexto,
-  numerosDeOsDe,
+  avaliar, datasDe, diffDasFotos, gradeAgenda, gradeBanco, gradeConclusao, gradeDiaria, gradeEquipe, gradeFerramentas,
+  gradeNadaCritico, gradeNadaPago, gradeTexto, JUIZES, montarTexto, numerosDeOsDe,
 } from './graders.mjs';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +48,8 @@ const { serviceOrderTools } = await importar('_shared/ai/tools/service-orders.ts
 const { resolverDiaria, resumirDiaria } = await importar('_shared/ai/tools/diarias.ts');
 const { lerComandoDaAgenda } = await importar('_shared/agenda/comandos.ts');
 const { chamadaDoComando } = await importar('_shared/agenda/executar.ts');
+// (Fase 3) a carona: o mesmo leitor das OS do turno e a mesma junção do texto do ai-agent
+const { juntarCarona, osDoTurno } = await importar('_shared/agenda/carona.ts');
 /** As que rodam de verdade: as 8 da agenda e o marcar (com a agenda automática ligada, ele só deixa o rascunho). */
 const FERRAMENTAS = new Map(
   [...agendaProducaoTools, ...serviceOrderTools.filter((t) => t.name === 'schedule_service_order')].map((t) => [t.name, t]),
@@ -54,6 +61,10 @@ const FIXTURES = join(RAIZ, 'scripts', 'bancada-agenda');
 const POS_RODADA = ler(join(FIXTURES, 'fixture-2310-pos-rodada.sql'));
 const FASE2 = ler(join(FIXTURES, 'fixture-fase2.sql'));
 const REPLAY_0104 = ler(join(FIXTURES, 'fixture-replay-0104.sql'));
+// (Fase 3) a carteira de qui 29/10 com a semana de 03 a 06/11 publicada, a equipe da rotina e as condições de pagamento
+const FASE3 = ler(join(FIXTURES, 'fixture-fase3.sql'));
+/** O Roberto (o único da rotina na fixture-fase3) e o telefone sintético dele. */
+const ROBERTO = { payee: 'bb000000-0000-4000-8000-000000000002', fone: '5547900000001' };
 const MIGRATION_DOS_MODOS = ler(join(RAIZ, 'supabase', 'migrations', '20261025101000_agenda_fase2_sombra.sql'));
 
 function argumento(nome) {
@@ -79,6 +90,8 @@ export function relogioDe(caso, agora) {
 /** A hora de agora para o que o banco lê de now() (o *grava*, a agenda_ver): agenda.agora, local à transação. */
 async function fixarAgora(db, relogio) {
   if (relogio.agora) await db.query(`select set_config('agenda.agora', $1::timestamptz::text, true)`, [relogio.agora]);
+  // (Fase 3) o _hoje_brt de mentira do estado fase3 lê agenda_teste.hoje (a decisão da diária recusa "dia no futuro")
+  await db.query(`select set_config('agenda_teste.hoje', $1, true)`, [relogio.hoje]);
 }
 
 /**
@@ -355,6 +368,90 @@ export async function fotoDaAgenda(db) {
   };
 }
 
+// ── A fotografia da Fase 3 (gradeEquipe, gradeDiaria, gradeConclusao, gradeNadaPago) ─────────────────────
+
+/**
+ * A equipe, a diária, a conclusão e o que não se paga, em linhas legíveis, sem id: as mensagens à equipe contadas por
+ * pessoa, tipo, dia, modo e estado; a fila da equipe por estado; a disponibilidade por pessoa, dia, situação e origem; o
+ * turno por pessoa e dia (fração, valor, status, origem e as OS); as ações diaria contadas por pessoa, dia, origem e
+ * execução; as perguntas diaria/diaria_ligar por tipo, pessoa, dia e modo; status, saída, entrega e número das OS; os
+ * recebíveis contados por OS, descrição, valor, vencimento e status; e o total de payables e commissions.
+ */
+export async function fotoDaFase3(db) {
+  const q = async (sql) => (await db.query(sql)).rows;
+  const msgs = await q(`
+    select py.name pessoa, m.tipo, to_char(m.dia, 'DD/MM') dia, m.modo, m.estado, coalesce(m.recusa_motivo, '') motivo, count(*)::int n
+      from public.agenda_equipe_mensagens m join public.payees py on py.id = m.payee_id group by 1, 2, 3, 4, 5, 6`);
+  const fila = await q(`select q.status, count(*)::int n from public.whatsapp_send_queue q where q.source = 'agenda-equipe' group by 1`);
+  const disp = await q(`
+    select coalesce(py.name, 'todos') pessoa, coalesce(d.periodo::text, d.dias_semana::text) quando, coalesce(d.turno, 'dia todo') turno,
+           d.situacao, d.origem, (d.substituida_em is null) vigente, count(*)::int n
+      from public.agenda_disponibilidade d left join public.payees py on py.id = d.payee_id group by 1, 2, 3, 4, 5, 6`);
+  const turnos = await q(`
+    select py.name pessoa, to_char(ws.data, 'DD/MM') dia, ws.fracao::text fracao, ws.valor_dia::text valor, ws.status, ws.origem,
+           coalesce((select string_agg(so.service_order_number, ',' order by so.service_order_number) from public.work_shift_os wo
+                       join public.service_orders so on so.id = wo.service_order_id where wo.shift_id = ws.id), '') os
+      from public.work_shifts ws join public.work_profiles wp on wp.id = ws.work_profile_id join public.payees py on py.id = wp.payee_id
+     where ws.fracao is not null`);
+  const acoes = await q(`
+    select coalesce(py.name, '?') pessoa, coalesce(to_char((a.depois ->> 'dia')::date, 'DD/MM'), '?') dia, a.origem, a.executada, a.critica,
+           (a.desfeita_em is not null) desfeita, count(*)::int n
+      from public.agenda_acoes a left join public.payees py on py.id = a.payee_id where a.tipo = 'diaria' group by 1, 2, 3, 4, 5, 6`);
+  const perg = await q(`
+    select q.tipo, coalesce(py.name, '?') pessoa, coalesce(to_char(q.dia, 'DD/MM'), '?') dia, q.modo, q.estado, q.opcao_escolhida::text opcao
+      from public.agenda_perguntas q left join public.payees py on py.id = q.payee_id where q.tipo in ('diaria', 'diaria_ligar')`);
+  const oss = await q(`
+    select so.service_order_number numero, so.status,
+           to_char(so.check_out_at at time zone 'America/Sao_Paulo', 'DD/MM') saida,
+           to_char(so.delivered_at at time zone 'America/Sao_Paulo', 'DD/MM') entrega
+      from public.service_orders so`);
+  const rec = await q(`
+    select coalesce(so.service_order_number, '?') os, r.description, r.amount::text valor, to_char(r.due_date, 'DD/MM') vence, r.status,
+           count(*)::int n
+      from public.receivables r left join public.service_orders so on so.id = r.service_order_id group by 1, 2, 3, 4, 5`);
+  const pago = (await q(`select (select count(*) from public.payables)::int payables, (select count(*) from public.commissions)::int commissions`))[0];
+  return {
+    equipe: {
+      mensagem: porChave(msgs, (l) => `${l.pessoa} ${l.tipo} ${l.dia} ${l.modo} ${l.estado}${l.motivo ? `/${l.motivo}` : ''}`,
+        (l) => ({ n: String(l.n) }), 'mensagem'),
+      fila: porChave(fila, (l) => `agenda-equipe ${l.status}`, (l) => ({ n: String(l.n) }), 'fila'),
+      disponibilidade: porChave(disp, (l) => `${l.pessoa} ${l.quando} ${l.turno} ${l.situacao} ${l.origem}${l.vigente ? '' : ' (substituída)'}`,
+        (l) => ({ n: String(l.n) }), 'disponibilidade'),
+    },
+    diaria: {
+      turno: porChave(turnos, (l) => `${l.pessoa} ${l.dia}`, (l) => ({
+        fracao: num(l.fracao), valor: num(l.valor), status: l.status, origem: l.origem, os: l.os || null,
+      }), 'turno'),
+      acao: porChave(acoes, (l) => `${l.pessoa} ${l.dia} ${l.origem} ${l.executada ? 'executada' : 'sombra'}${l.critica ? ' critica' : ''}${l.desfeita ? ' desfeita' : ''}`,
+        (l) => ({ n: String(l.n) }), 'acao'),
+      pergunta: porChave(perg, (l) => `${l.tipo} ${l.pessoa} ${l.dia} ${l.modo}`, (l) => ({ estado: l.estado, opcao: l.opcao }), 'pergunta'),
+    },
+    conclusao: {
+      os: porChave(oss, (l) => l.numero, (l) => ({ status: l.status, saida: l.saida, entrega: l.entrega }), 'os'),
+      recebivel: porChave(rec, (l) => `${l.os} ${l.description} ${num(l.valor)} ${l.vence} ${l.status}`, (l) => ({ n: String(l.n) }), 'recebivel'),
+    },
+    pago: { totais: { tudo: { payables: String(pago.payables), commissions: String(pago.commissions) } } },
+  };
+}
+
+/** O que a foto não mostra, por parte (espera.<parte>.consultas), e a saúde da diária no estado final. */
+async function consultasDaFase3(db, caso, relogio) {
+  const consultas = {};
+  for (const parte of ['equipe', 'diaria', 'conclusao']) {
+    consultas[parte] = [];
+    for (const c of caso.espera?.[parte]?.consultas ?? []) {
+      const r = await db.query(c.sql);
+      consultas[parte].push({ valor: r.rows[0] ? Object.values(r.rows[0])[0] ?? null : null });
+    }
+  }
+  const s = await rpc(db, 'agenda_saude', {}, relogio);
+  if (s.error) throw new Error(`agenda_saude: ${s.error.message}`);
+  return {
+    consultas,
+    saude: { sem_confirmacao: Number(s.data?.diarias?.sem_confirmacao), sobrescreveu_turno: Number(s.data?.diarias?.sobrescreveu_turno) },
+  };
+}
+
 /**
  * As invariantes do plano (spec Fase 2 §17), conferidas no estado final de TODO caso da Fase 2 — o motor do
  * agenda_fase2_motor.sql repetido aqui sobre o que cada caso deixou: nenhum choque de pessoa; até wip_max frentes por
@@ -447,6 +544,8 @@ export async function bancadaDosEvals(log = () => {}) {
   await db.query(`select public.os_material_sincronizar_carteira($1::date)`, [CASOS.hoje]);
   // fixture-fase2.sql roda o pós-rodada por dentro (agenda_teste.pos_rodada), como na bancada dos testes SQL
   await db.query(`select set_config('agenda_teste.pos_rodada', $1, false)`, [POS_RODADA]);
+  // (Fase 3) fixture-fase3.sql executa a da Fase 2 por dentro (agenda_teste.fase2)
+  await db.query(`select set_config('agenda_teste.fase2', $1, false)`, [FASE2]);
   return db;
 }
 
@@ -470,6 +569,7 @@ const vigiar = (db, quando) => rpc(db, 'agenda_vigiar', {}, relogioDe(null, quan
  */
 async function aplicarEstado(db, estado) {
   if (estado === 'inicial') return;
+  if (estado.startsWith('fase3')) return void await aplicarEstadoDaFase3(db, estado);
   if (estado === 'pos_rodada') return void await db.exec(POS_RODADA);
   if (estado === 'replay_0104') {
     await db.exec(REPLAY_0104);
@@ -489,8 +589,54 @@ async function aplicarEstado(db, estado) {
   }
 }
 
+/**
+ * Os estados da Fase 3 (fixture-fase3.sql: a semana de 03 a 06/11 publicada pela vigia de qui 29/10, o Roberto na rotina,
+ * as condições de pagamento; a proposta e a vigia ligadas pela fixture):
+ *   fase3         a leitura, a equipe e a diária ligadas;
+ *   fase3_diaria  = fase3 + o "como foi hoje?" de ter 03/11 às 17:00 e o Roberto respondendo "fiquei só de manhã" às 17:12
+ *                 (a pergunta crítica da diária aberta);
+ *   fase3_sombra  a equipe e a diária em sombra (a leitura ligada).
+ * O _hoje_brt do banco passa a ler agenda_teste.hoje (o dia do caso; fixarAgora): a decisão da diária vai ao
+ * registrar_diaria, que recusa "dia no futuro" pelo relógio de verdade (como no agenda_fase3_equipe_diarias.sql).
+ */
+async function aplicarEstadoDaFase3(db, estado) {
+  if (!['fase3', 'fase3_diaria', 'fase3_sombra'].includes(estado)) throw new Error(`estado "${estado}" não existe`);
+  await db.exec(FASE3);
+  await db.exec(`create or replace function public._hoje_brt() returns date language sql stable set search_path to 'public' as $h$
+    select coalesce(nullif(current_setting('agenda_teste.hoje', true), '')::date, (now() at time zone 'America/Sao_Paulo')::date) $h$`);
+  const m = estado === 'fase3_sombra' ? 'sombra' : 'ligado';
+  await db.query(`update public.agenda_config set modo_leitura = 'ligado', modo_equipe = $1, modo_diaria = $1 where id`, [m]);
+  if (estado === 'fase3_diaria') {
+    await rotina(db, '2026-11-03 17:00');
+    await respostaDoRoberto(db, 'fiquei só de manhã', '2026-11-03 17:12');
+    const n = (await db.query(`select count(*)::int n from public.agenda_perguntas where tipo = 'diaria' and critica and estado = 'aberta'`)).rows[0].n;
+    if (n !== 1) throw new Error(`fase3_diaria: esperava 1 pergunta crítica de diária aberta, há ${n}`);
+  }
+}
+
+/** Um tique da rotina da equipe (o task-automations a chama logo antes da vigia). */
+async function rotina(db, quando) {
+  const r = await rpc(db, 'agenda_rotina_rodar', {}, relogioDe(null, quando));
+  if (r.error) throw new Error(`a rotina de ${quando} falhou: ${r.error.message}`);
+  return r.data;
+}
+
+/** O Roberto responde pelo WhatsApp (o whatsapp-webhook chama agenda_resposta_da_equipe antes de tudo). */
+async function respostaDoRoberto(db, texto, quando) {
+  const relogio = relogioDe(null, quando);
+  const r = await rpc(db, 'agenda_resposta_da_equipe', {
+    p_phone: ROBERTO.fone, p_body: texto, p_message_id: `WA-${quando}-${texto}`.slice(0, 80), p_recebida_em: relogio.agora,
+  }, relogio);
+  if (r.error) throw new Error(`a resposta "${texto}" de ${quando} falhou: ${r.error.message}`);
+  return r.data;
+}
+
 async function fotosDoCaso(db, caso) {
-  return { banco: await foto(db), agenda: caso.fase === 2 ? await fotoDaAgenda(db) : null };
+  return {
+    banco: await foto(db),
+    agenda: (caso.fase ?? 1) >= 2 ? await fotoDaAgenda(db) : null,
+    fase3: caso.fase === 3 ? await fotoDaFase3(db) : null,
+  };
 }
 
 /** A foto de um estado nomeado (o igual_ao_estado do caso), tirada numa transação desfeita. */
@@ -509,6 +655,11 @@ export async function iniciarCaso(db, caso) {
   await db.exec('begin');
   await aplicarEstado(db, caso.estado ?? 'inicial');
   for (const t of caso.tiques ?? []) await vigiar(db, t);
+  // (Fase 3) o que aconteceu antes da conversa (a rotina, a resposta do Roberto, o worker da fila), pelos passos de sempre
+  for (const p of caso.preparo ?? []) {
+    const r = await executarPasso(db, caso, p);
+    if (r?.error) throw new Error(`preparo ${JSON.stringify(p)}: ${r.error}`);
+  }
   await fixarAgora(db, relogioDe(caso));
   return { antes: await fotosDoCaso(db, caso) };
 }
@@ -556,9 +707,33 @@ async function executarPasso(db, caso, passo) {
     await vigiar(db, passo.tique);
     return { texto: '' };
   }
+  // (Fase 3) a rotina da equipe, a resposta do Roberto, o worker da fila e o envio proativo forçado (o teto)
+  if (passo.rotina) {
+    await rotina(db, passo.rotina);
+    return { texto: '' };
+  }
+  if (passo.resposta !== undefined) {
+    const r = await respostaDoRoberto(db, passo.resposta, passo.agora);
+    return { texto: String(r?.resposta ?? '') };
+  }
+  if (passo.worker) {
+    // o whatsapp-queue-worker mandou o que estava na fila da equipe até essa hora (na bancada ninguém manda)
+    await db.query(`update public.whatsapp_send_queue set status = 'sent', sent_at = $1::timestamptz, attempts = attempts + 1
+                     where source = 'agenda-equipe' and status = 'pending' and scheduled_for <= $1::timestamptz`,
+      [relogioDe(null, passo.worker).agora]);
+    return null;
+  }
+  if (passo.forcar_proativa) {
+    // uma mensagem que o sistema começaria fora do horário da rotina (o 3º do dia): a regra única de envio decide
+    const f = passo.forcar_proativa;
+    const r = await db.query(`select public._agenda_equipe_registrar($1::uuid, $2::date, $3, $4, $5::timestamptz) as r`,
+      [ROBERTO.payee, f.dia, f.tipo, f.texto, relogioDe(null, f.agora).agora]);
+    return { texto: String(r.rows[0].r?.estado ?? '') };
+  }
   if (passo.modos) {
-    await db.query(`update public.agenda_config set modo_proposta = coalesce($1, modo_proposta), modo_vigia = coalesce($2, modo_vigia) where id`,
-      [passo.modos.proposta ?? null, passo.modos.vigia ?? null]);
+    await db.query(`update public.agenda_config set modo_proposta = coalesce($1, modo_proposta), modo_vigia = coalesce($2, modo_vigia),
+                            modo_equipe = coalesce($3, modo_equipe), modo_diaria = coalesce($4, modo_diaria) where id`,
+      [passo.modos.proposta ?? null, passo.modos.vigia ?? null, passo.modos.equipe ?? null, passo.modos.diaria ?? null]);
     return null;
   }
   if (passo.sql) {
@@ -593,7 +768,10 @@ export async function terminarCaso(db, caso, inicio, passos = []) {
       consultas.push({ sql: c.sql, valor: r.rows[0] ? Object.values(r.rows[0])[0] ?? null : null });
     }
     const execucao = { antes: inicio.antes.banco, meio: meio.banco, depois: depois.banco, rascunho_aberto: aberto, grava, consultas };
-    if (caso.fase === 2) {
+    if (caso.fase === 3) {
+      execucao.fase3 = { antes: inicio.antes.fase3, meio: meio.fase3, depois: depois.fase3, ...(await consultasDaFase3(db, caso, relogioDe(caso))) };
+    }
+    if ((caso.fase ?? 1) >= 2) {
       const consultasDaAgenda = [];
       for (const c of caso.espera?.agenda?.consultas ?? []) {
         const r = await db.query(c.sql);
@@ -611,19 +789,46 @@ export async function terminarCaso(db, caso, inicio, passos = []) {
   }
 }
 
+/** A carona do turno (e, com caso.carona.segunda, a de outra conversa sobre a mesma OS mais tarde). */
+async function caronaDoCaso(db, caso, chamadas, saidas) {
+  const eventos = chamadas.map((c, i) => ({ name: c.ferramenta, args: c.argumentos ?? {}, result: saidas[i] ?? null }));
+  const refs = osDoTurno(eventos);
+  const uma = async (quando) => {
+    if (!refs.length) return null;
+    const relogio = relogioDe(caso, quando);
+    const r = await rpc(db, 'agenda_carona', { p_autor: CASOS.autor, p_os: refs, p_canal: 'whatsapp' }, relogio);
+    if (r.error) throw new Error(`agenda_carona: ${r.error.message}`);
+    return typeof r.data?.texto === 'string' ? r.data.texto : null;
+  };
+  const primeira = await uma(caso.agora);
+  const segunda = caso.carona.segunda ? await uma(caso.carona.segunda) : undefined;
+  return { refs, primeira, ...(segunda !== undefined ? { segunda } : {}) };
+}
+
 async function rodarResposta(db, caso, resposta, estados) {
   const inicio = await iniciarCaso(db, caso);
   const saidas = [];
   let fim;
+  let carona = null;
   try {
     for (const c of resposta.chamadas ?? []) saidas.push(await executarChamada(db, caso, c));
+    // (Fase 3) a carona: as OS que as chamadas citaram (o mesmo osDoTurno do ai-agent), pela RPC agenda_carona do dono;
+    // com segunda, a mesma conversa outra vez (a semana não pode ter outra carona da OS)
+    if (caso.carona) carona = await caronaDoCaso(db, caso, resposta.chamadas ?? [], saidas);
   } finally {
     fim = await terminarCaso(db, caso, inicio, resposta.passos ?? []);
   }
+  fim.carona = carona;
   const { execucao } = fim;
   saidas.push(...fim.saidasDosPassos);
   if (caso.espera?.banco?.igual_ao_estado) execucao.estado_esperado = estados.get(caso.espera.banco.igual_ao_estado);
-  const texto = montarTexto(resposta.texto, saidas);
+  let texto = montarTexto(resposta.texto, saidas);
+  // a carona é texto do banco (agenda_carona): entra no fim da resposta e nas saídas (as datas e OS dela vieram de lá)
+  if (fim.carona?.primeira) {
+    texto = juntarCarona(texto, fim.carona.primeira);
+    saidas.push({ texto: fim.carona.primeira });
+  }
+  execucao.carona = fim.carona ?? null;
   return { saidas, texto, execucao, nota: avaliar(caso, { chamadas: resposta.chamadas ?? [], texto, saidas, execucao }) };
 }
 
@@ -691,6 +896,17 @@ export function controlesDosJuizes() {
     agenda: { antes: plano('publicada'), meio: plano(meio), depois: plano(depois), consultas: [], invariantes: [{ o_que: 'x', ok: true }], ...extra },
   });
   const caso2 = { fase: 2, entrada: 'pode atrasar o Nelson', espera: { agenda: { diff: [] } } };
+  // Fase 3: a foto de mentira (equipe, diária, conclusão, pago) antes/meio/depois e a saúde da diária
+  const caso3 = { fase: 3, entrada: 'o que o Roberto respondeu hoje?', espera: {} };
+  const equipe = (estado) => ({ fila: estado ? { [`agenda-equipe ${estado}`]: { n: '1' } } : {} });
+  const pago = (p, c) => ({ totais: { tudo: { payables: String(p), commissions: String(c) } } });
+  const base3 = () => ({ equipe: equipe(null), diaria: {}, conclusao: { os: { 'OS-00069': { status: 'scheduled' } } }, pago: pago(0, 0) });
+  const fase3 = ({ meio, depois, saude, consultas }) => ({
+    fase3: {
+      antes: base3(), meio: { ...base3(), ...(meio ?? {}) }, depois: { ...base3(), ...(depois ?? {}) },
+      consultas: consultas ?? {}, saude: saude === undefined ? { sem_confirmacao: 0, sobrescreveu_turno: 0 } : saude,
+    },
+  });
   const controles = [
     ['banco: o que mudou ANTES do *grava* reprova, mesmo com o diff final certo',
       !gradeBanco({ espera: { banco: { diff: [] } } }, { antes: foto('falta'), meio: foto('na_mao'), depois: foto('falta') }).ok],
@@ -747,6 +963,23 @@ export function controlesDosJuizes() {
       && !gradeNadaCritico(caso2, { nada_critico: { sem_pergunta_respondida: 0, sem_decisao: 1, pela_regra: 0 } }).ok
       && !gradeNadaCritico(caso2, { nada_critico: { sem_pergunta_respondida: 0, sem_decisao: 0, pela_regra: 1 } }).ok
       && gradeNadaCritico(caso2, { nada_critico: { sem_pergunta_respondida: 0, sem_decisao: 0, pela_regra: 0 } }).ok],
+    // Fase 3: os quatro juízes novos sabem reprovar
+    ['equipe: o que o MODELO chamou e mudou a fila reprova; o diff final diferente reprova; o igual passa',
+      !gradeEquipe(caso3, fase3({ meio: { equipe: equipe('pending') } })).ok
+      && !gradeEquipe({ ...caso3, espera: { equipe: { diff: [] } } }, fase3({ depois: { equipe: equipe('pending') } })).ok
+      && gradeEquipe({ ...caso3, espera: { equipe: { diff: ['+ fila agenda-equipe pending: n=1'] } } }, fase3({ depois: { equipe: equipe('pending') } })).ok],
+    ['diária: agenda_saude com sem_confirmacao ou sobrescreveu_turno diferente de 0 reprova; sem a saúde reprova; zero passa',
+      !gradeDiaria(caso3, fase3({ saude: { sem_confirmacao: 1, sobrescreveu_turno: 0 } })).ok
+      && !gradeDiaria(caso3, fase3({ saude: { sem_confirmacao: 0, sobrescreveu_turno: 1 } })).ok
+      && !gradeDiaria(caso3, fase3({ saude: null })).ok
+      && gradeDiaria(caso3, fase3({})).ok],
+    ['conclusão: a OS concluída sem estar esperada reprova; a consulta que não bate reprova',
+      !gradeConclusao({ ...caso3, espera: { conclusao: { diff: [] } } }, fase3({ depois: { conclusao: { os: { 'OS-00069': { status: 'completed' } } } } })).ok
+      && !gradeConclusao({ ...caso3, espera: { conclusao: { consultas: [{ sql: 'x', igual: 1 }] } } }, fase3({ consultas: { conclusao: [{ valor: 0 }] } })).ok],
+    ['nada pago: payables ou commissions que mudaram (pelo modelo ou no fim) reprovam; iguais passam',
+      !gradeNadaPago(caso3, fase3({ depois: { pago: pago(1, 0) } })).ok
+      && !gradeNadaPago(caso3, fase3({ meio: { pago: pago(0, 1) } })).ok
+      && gradeNadaPago(caso3, fase3({})).ok],
     ['diff do plano: linha nova, linha que sumiu e campo que mudou',
       JSON.stringify(diffDasFotos({ os: { 'OS-00069': { status: 'scheduled' } } }, { os: { 'OS-00069': { status: 'in_progress' } } }))
         === JSON.stringify(['~ os OS-00069: status scheduled → in_progress'])],
@@ -818,7 +1051,7 @@ if (ehPrincipal) {
         mostrar(false, `${caso.id}: falta a resposta boa ou a ruim em respostas-modelo.json`);
         continue;
       }
-      const juizes = caso.fase === 2 ? 'cinco' : 'três';
+      const juizes = caso.fase === 3 ? 'nove' : caso.fase === 2 ? 'cinco' : 'três';
       const boa = await rodarResposta(db, caso, r.boa, estados);
       mostrar(boa.nota.ok, `${caso.id} boa passa nos ${juizes} juízes`);
       if (!boa.nota.ok) {
@@ -837,7 +1070,7 @@ if (ehPrincipal) {
     const porFase = (n) => casos.filter((c) => (c.fase ?? 1) === n).length;
     console.log(falhas
       ? `\n${falhas} falha(s)`
-      : `\ntudo ok (${casos.length} casos × boa e ruim: ${porFase(1)} da Fase 1, ${porFase(2)} da Fase 2; ${Math.round((Date.now() - t0) / 1000)} s)`);
+      : `\ntudo ok (${casos.length} casos × boa e ruim: ${porFase(1)} da Fase 1, ${porFase(2)} da Fase 2, ${porFase(3)} da Fase 3; ${Math.round((Date.now() - t0) / 1000)} s)`);
     process.exit(falhas ? 1 : 0);
   }
 }

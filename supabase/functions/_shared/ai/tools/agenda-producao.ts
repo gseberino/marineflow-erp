@@ -21,6 +21,10 @@
 //   à vista; o resto pela ferramenta_extra). Marcar uma OS num dia continua sendo schedule_service_order (com a agenda
 //   automática ligada, ela também só deixa o rascunho).
 //
+// Fase 3 (P6, 24/10/2026; spec-fase3.md §9.4): agenda_ver ganha os focos ppc (a semana medida), diarias (as que a agenda
+// lançou e as perguntas), marcos (com a OS), comissao (o mês dito em periodo; só a conta, nada é pago) e equipe (o que o
+// Roberto respondeu). Nenhuma ferramenta nova: o teto de 113 do perfil do admin continua (só agenda_ver à vista).
+//
 // Cada execute chama UMA RPC com ctx.sb (painel: o JWT do dono; WhatsApp: service role), p_autor = ctx.userId e
 // p_canal pelo ctx.canal. O mapeamento argumento → parâmetro é o de _shared/agenda/rpc-das-ferramentas.ts (puro), o
 // mesmo dos evals. `if (error) throw`: leitura que falha nunca vira "nada marcado".
@@ -84,6 +88,10 @@ export const agendaProducaoTools: ToolDef[] = [
       "semana (periodo), quando fica livre (foco livre), o que está atrasado (foco atrasos), o material (foco material), " +
       "as perguntas para montar a semana (foco aprontar), o que a agenda mudou sozinha (foco mudancas), o que ela precisa " +
       "do dono (foco decisoes: as decisões numeradas, com as opções e a recomendação), o publicado dia a dia (foco plano), " +
+      "como foi a semana, quanto do plano foi cumprido (foco ppc), as diárias que a agenda lançou e as perguntas de diária " +
+      "(foco diarias), o que a equipe respondeu hoje e no próximo dia útil (foco equipe), os marcos de uma OS (os + foco " +
+      "marcos: entrada, início, conclusão e entrega), a comissão dos técnicos de um mês (foco comissao com o mês em periodo, " +
+      "como o dono disse: só a conta, nada é pago), " +
       "o dia de alguém da equipe (pessoa + periodo), uma OS (os), " +
       "\"se o cliente aprovar hoje, quando dá\" (os + simular_aprovacao) ou um serviço que ainda não existe (simular). " +
       "Datas, dias livres, capacidade e duração vêm SÓ daqui: repita o texto, sem calcular nem mudar número, data ou nome. " +
@@ -95,7 +103,9 @@ export const agendaProducaoTools: ToolDef[] = [
       properties: {
         periodo: {
           type: "string",
-          description: "hoje, amanha, semana, proxima_semana ou o que o dono disse (\"segunda\", \"26/10 a 30/10\"). Sem = a semana.",
+          description:
+            "hoje, amanha, semana, proxima_semana ou o que o dono disse (\"segunda\", \"26/10 a 30/10\"). Sem = a semana. " +
+            "No foco comissao, o mês como ele disse (\"outubro\", \"mês passado\").",
         },
         pessoa: { type: "string", description: "\"eu\" ou o nome (Roberto). Sem = o dono." },
         foco: { type: "string", enum: [...FOCOS] },
