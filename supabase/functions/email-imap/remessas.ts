@@ -8,8 +8,8 @@
 //     e-mail não pode cair por causa da agenda: o erro vai para app_error_logs (context email-imap, action
 //     agenda:remessas). A função ausente (a migration 20261027100300 ainda não aplicada) é silêncio, não erro.
 //   · relerRemessas(admin, cnpj): ?remessas=1 — até 15 mensagens dos últimos agenda_config.remessa_dias com NF-e para a
-//     HBR que ainda não viraram remessa: a de extração antiga (sem itens) baixa o XML do bucket e regrava as NF-e (os
-//     boletos ficam como estavam); depois registra. Repetir até "faltam 0".
+//     HBR que ainda não viraram remessa: a de extração antiga (sem itens) baixa o XML do bucket e troca as NF-e relidas
+//     pela chave (a que não baixou fica como estava; os boletos também); depois registra. Repetir até "faltam 0".
 
 import { logEdgeError } from "../_shared/log-error.ts";
 import { extrairDados, type NFeDoEmail } from "../_shared/email/dados.ts";
@@ -82,6 +82,26 @@ export function notasPendentes(m: MensagemComNotas, comRemessa: Set<string>, cor
   );
 }
 
+/**
+ * As NF-e da mensagem depois da releitura: cada nota relida troca a de antes com a mesma chave; a que não foi relida (o XML
+ * dela não baixou do bucket, ou não leu) FICA como estava; a relida que não estava antes entra no fim. Antes, a releitura
+ * regravava só as relidas e apagava as outras calada — as notas que NotasRecebidasPorEmail e a conciliação de comprovantes
+ * leem (revisão da Fase 4, C2, R2).
+ */
+export function juntarNotasRelidas(antigas: NFeDoEmail[], relidas: NFeDoEmail[]): NFeDoEmail[] {
+  const porChave = new Map<string, NFeDoEmail>();
+  for (const n of relidas) if (n.chave && !porChave.has(n.chave)) porChave.set(n.chave, n);
+  const usadas = new Set<string>();
+  const saida = antigas.map((n) => {
+    const r = n.chave ? porChave.get(n.chave) : undefined;
+    if (!r) return n;
+    usadas.add(n.chave);
+    return { ...n, ...r };   // o que a releitura leu vale; uma chave que só a de antes tinha fica
+  });
+  for (const [k, r] of porChave) if (!usadas.has(k)) saida.push(r);
+  return saida;
+}
+
 /** Relê o XML das NF-e da mensagem (extração de antes de 25/10) e devolve as NF-e novas com o anexo_id; os boletos ficam. */
 async function relerNotas(admin: Db, m: MensagemComNotas, cnpjEmpresa: string | null): Promise<NFeDoEmail[] | null> {
   const anexos: InboundEmail["attachments"] = [];
@@ -138,8 +158,10 @@ export async function relerRemessas(admin: Db, cnpjEmpresa: string | null, agora
     if (notasPendentes(m, comRemessa, corte).some((n) => !("itens" in n))) {
       const novas = await relerNotas(admin, m, cnpjEmpresa);
       if (novas) {
+        // Só as relidas mudam: a nota cujo XML não baixou fica como estava (C2, R2).
+        const nfes = juntarNotasRelidas(m.dados_extraidos?.nfes ?? [], novas);
         const { error: uErr } = await admin.from("email_messages")
-          .update({ dados_extraidos: { ...(m.dados_extraidos ?? {}), nfes: novas } }).eq("id", m.id);
+          .update({ dados_extraidos: { ...(m.dados_extraidos ?? {}), nfes } }).eq("id", m.id);
         if (uErr) throw new Error(`não regravei as NF-e de ${m.id}: ${uErr.message}`);
         relidas++;
       }

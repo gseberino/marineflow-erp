@@ -3,7 +3,8 @@
 // corte de remessa_dias e as notas que já viraram remessa, relê o XML só da extração antiga e não perde os boletos.
 import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
-  corteDaRemessa, LOTE_DA_RELEITURA, notasPendentes, registrarRemessas, relerRemessas, RPC_REMESSAS, temNotaParaEmpresa,
+  corteDaRemessa, juntarNotasRelidas, LOTE_DA_RELEITURA, notasPendentes, registrarRemessas, relerRemessas, RPC_REMESSAS,
+  temNotaParaEmpresa,
 } from "./remessas.ts";
 import { dvChaveAcesso } from "../_shared/email/nfe-identify.ts";
 
@@ -153,6 +154,50 @@ Deno.test("relerRemessas: a extração antiga relê o XML e regrava as NF-e (os 
   assertEquals([dados.nfes[0].saida, dados.nfes[0].uf, dados.nfes[0].anexo_id], ["2026-10-26", "ES", "a1"]);
   assertEquals((dados.nfes[0].itens as unknown[]).length, 1);
   assertEquals(db.rpcs.filter((x) => x[0] === RPC_REMESSAS).map((x) => x[1]), [{ p_email_message_id: "m1" }]);
+});
+
+// Revisão da Fase 4, C2 (R2): a mensagem com duas NF-e, uma cujo XML sumiu do bucket. Antes, a releitura regravava só a que
+// leu e apagava a outra calada (NotasRecebidasPorEmail e a conciliação de comprovantes leem dados_extraidos.nfes).
+Deno.test("relerRemessas: só a nota relida muda; a que não baixou fica como estava (não some)", async () => {
+  const K3 = chave("42261044555666000177550010000009991000000003");
+  const duas = {
+    id: "m3", received_at: "2026-10-26T12:00:00Z", subject: "NFs", body_text: null,
+    dados_extraidos: {
+      nfes: [{ ...nfe(K3, { numero: "999" }), anexo_id: "b2", conferida: true }, { ...nfe(K1), anexo_id: "b1" }],
+      boletos: [],
+    },
+    email_attachments: [{ id: "b1", filename: "kamell.xml", mime_type: "application/xml", storage_path: "m3/0-kamell.xml" },
+                        { id: "b2", filename: "correa.xml", mime_type: "application/xml", storage_path: "m3/1-correa.xml" }],
+  };
+  const db = bancoFalso({
+    tabelas: {
+      agenda_config: { data: { modo_material: "sombra", remessa_dias: 30 }, error: null },
+      email_messages: { data: [duas], error: null },
+      material_remessas: { data: [], error: null },
+    },
+    arquivos: { "m3/0-kamell.xml": xmlDaKamell },   // o da Correa sumiu do bucket
+    rpc: () => ({ data: { criadas: 1 }, error: null }),
+  });
+  const r = await relerRemessas(db, "50057049000159", new Date("2026-10-30T15:00:00Z"));
+  assertEquals(r.relidas, 1);
+  assertEquals(db.downloads, ["m3/0-kamell.xml", "m3/1-correa.xml"]);
+  const nfes = (db.updates[0][1].dados_extraidos as { nfes: Record<string, unknown>[] }).nfes;
+  assertEquals(nfes.map((n) => n.chave), [K3, K1]);   // a ordem de antes; nenhuma some
+  assertEquals([nfes[0].numero, nfes[0].anexo_id, nfes[0].conferida, "itens" in nfes[0]], ["999", "b2", true, false]);
+  assertEquals([nfes[1].uf, nfes[1].anexo_id, (nfes[1].itens as unknown[]).length], ["ES", "b1", 1]);
+});
+
+Deno.test("juntarNotasRelidas: troca pela chave, mantém a não relida, acrescenta a nova no fim, a relida repetida conta uma vez", () => {
+  const a = nfe(K1, { numero: "1" });
+  const b = nfe(K2, { numero: "2" });
+  const novaK1 = nfe(K1, { numero: "1", uf: "ES", itens: [] });
+  const K4 = chave("42261044555666000177550010000004441000000004");
+  const nova = nfe(K4, { numero: "4", itens: [] });
+  // deno-lint-ignore no-explicit-any
+  const r = juntarNotasRelidas([a, b] as any, [novaK1, nova, { ...novaK1, numero: "repetida" }] as any);
+  assertEquals(r.map((n) => [n.chave, n.numero, n.uf ?? null]), [[K1, "1", "ES"], [K2, "2", null], [K4, "4", null]]);
+  // deno-lint-ignore no-explicit-any
+  assertEquals(juntarNotasRelidas([a, b] as any, []), [a, b]);
 });
 
 Deno.test("relerRemessas: no máximo LOTE_DA_RELEITURA mensagens por chamada, e diz quantas faltam", async () => {
