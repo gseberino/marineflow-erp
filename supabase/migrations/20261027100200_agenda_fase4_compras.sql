@@ -37,17 +37,27 @@
 --      (fonte nfe, o dia da chegada, a quantidade toda) — só com modo_material ligado (em sombra a linha fica igual).
 --   5. receive_po (corpo de 20261007160000): item de texto livre (product_id nulo) recebe — received_qty sobe — sem tocar
 --      products nem inventory_movements (product_id é NOT NULL lá: não há estoque de texto livre). Antes, um item assim
---      derrubava o recebimento inteiro.
+--      derrubava o recebimento inteiro. Revisão da Fase 4 (C2): a OC com item de texto livre NÃO ganha conta a pagar ao
+--      completar (item 2 — ver DINHEIRO); com login, só o administrador e o financeiro recebem (R8: a função é definer e
+--      recebia para qualquer login; a service_role, o assistente, continua).
 --   6. os_prontidao (corpo de 20261027100100): a linha de OC recebida ligada a um item de texto livre da conta não entra de
 --      novo como "item de OC que já chegou" (grupo 2) — ela já está no item (sem isto, o material apareceria duas vezes).
 --   7. agenda_ocs_com_material_vivo (nova, só service_role): para a R7, as OCs cujo material a agenda já acompanha —
---      alguma linha com a pergunta "chegou?" aberta em ligado ("a agenda já pergunta se chegou"), ou todas na mão ("a
---      agenda registrou que chegou"). As linhas de uma OC: a do item de texto livre (origem oc) e a da linha da OS que o
---      item compra (o vínculo).
+--      cada item da OC recebido ou acompanhado pela agenda (as linhas dele na mão, ou uma com a pergunta "chegou?" aberta
+--      em ligado): "a agenda já pergunta se chegou" ou "a agenda registrou que chegou". As linhas de um item: a do item de
+--      texto livre (origem oc) e a da linha da OS que o item compra (o vínculo). Revisão da Fase 4 (C2, item 13): o item
+--      da OC sem linha nenhuma, ainda não recebido, deixa a OC fora — antes, a parte que chegou parava a cobrança da OC
+--      inteira.
 --
--- DINHEIRO — NÃO MUDA (NOVO-agenda-32, decisão do dono, spec §13 item 8): a OC já paga por Pix ganha conta a pagar ao ser
--- recebida. receive_po cria a conta a pagar ao completar EXATAMENTE como hoje: a mesma soma (recebido × custo de todos os
--- itens, os de texto livre inclusive) e o mesmo vencimento. A Fase 4 não corrige; só registra.
+-- DINHEIRO — o resultado de hoje (revisão da Fase 4, C2, item 2; decisão do coordenador):
+--   · a OC só de catálogo cria a conta a pagar ao completar EXATAMENTE como hoje: a mesma soma (recebido × custo) e o mesmo
+--     vencimento. NOVO-agenda-32 (a OC de catálogo já paga por Pix ganha conta a pagar ao ser recebida) continua com o
+--     dono: a Fase 4 não corrige, só registra;
+--   · a OC com item de texto livre (sem product_id) NÃO cria a conta a pagar ao ser recebida: hoje nenhuma conta nasce dela
+--     (o recebimento de 07/10 derrubava tudo com o movimento sem produto). A OC-00004 (o compressor, "Compra já paga (R$
+--     900,00)") ganharia, só por ser recebida, uma conta de uma compra já paga. Ela fica recebida, sem conta, e o retorno
+--     diz o porquê (sem_conta_a_pagar = 'item_sem_produto'): "Não gerei conta a pagar: a OC tem item sem cadastro de
+--     produto, e a conta dela é decisão sua." (a tela e o assistente).
 --
 -- CORREÇÕES SOBRE A SPEC (provadas em supabase/tests/agenda_fase4_compras.sql e purchase_needs_reserva_e_a_caminho.sql):
 --   · OC marcada "recebida" sem received_qty (a tela muda a situação à mão, useUpdatePurchaseOrder) conta como recebida
@@ -64,7 +74,7 @@
 --     ação com desfaz é o caminho da nota (P3); aqui é a rede idempotente.
 --
 -- O QUE NÃO MUDA: compute_purchase_needs (a fórmula pura), count_purchase_shortages (herda), v_oc_itens_a_caminho (P1), a
--- conta a pagar do recebimento, as OCs sem vínculo (a OC-00004 da OS-00104 continua igual) e as telas e ferramentas que não
+-- conta a pagar do recebimento da OC só de catálogo, as OCs sem vínculo (a OC-00004 da OS-00104 continua igual) e as telas e ferramentas que não
 -- criam OC. O espelho TS (src/lib/purchase-needs.ts + src/hooks/use-purchase-needs.ts) muda junto, com os mesmos casos nos
 -- dois lados (src/lib/purchase-needs.test.ts × supabase/tests/purchase_needs_reserva_e_a_caminho.sql, casos L e O).
 --
@@ -844,8 +854,9 @@ revoke all on function public.os_material_sincronizar(uuid, date) from public, a
 grant execute on function public.os_material_sincronizar(uuid, date) to service_role;
 
 -- ── 5. O recebimento do item de texto livre ──────────────────────────────────────────────────────────────
--- Corpo de 20261007160000 copiado; a mudança está marcada "-- FASE 4:". A conta a pagar ao completar NÃO muda
--- (NOVO-agenda-32: a OC já paga por Pix ganha conta a pagar ao ser recebida — decisão do dono).
+-- Corpo de 20261007160000 copiado; as mudanças estão marcadas "-- FASE 4:" (só acréscimo). A conta a pagar da OC só de
+-- catálogo NÃO muda (NOVO-agenda-32: a OC já paga por Pix ganha conta a pagar ao ser recebida — decisão do dono); a OC
+-- com item de texto livre fica sem conta, como hoje (revisão da Fase 4, C2, item 2); com login, só admin e financeiro (R8).
 
 create or replace function public.receive_po(p_po_id uuid, p_items jsonb, p_due_days integer default 30)
 returns json
@@ -865,6 +876,13 @@ DECLARE
   v_payable_id  uuid;
   v_total       numeric;
 BEGIN
+  -- FASE 4: com login, só o administrador e o financeiro recebem OC — a regra das policies de purchase_orders e das
+  -- ferramentas de compras (revisão da Fase 4, C2, R8: a função é security definer e recebia para qualquer login). Sem
+  -- login (a service_role: o assistente, que confere o cargo antes) passa como antes.
+  IF auth.uid() IS NOT NULL AND NOT public.is_admin_or_financial(auth.uid()) THEN
+    RAISE EXCEPTION 'Receber ordem de compra é do administrador e do financeiro.' USING ERRCODE = '42501';
+  END IF;
+  -- FASE 4: fim
   -- A OC primeiro, travada: só rascunho, enviada ou recebida em parte recebem.
   SELECT * INTO v_po FROM public.purchase_orders WHERE id = p_po_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Ordem de compra não encontrada.'; END IF;
@@ -937,6 +955,26 @@ BEGIN
     ELSE v_po.status
   END;
 
+  -- FASE 4: a OC com item de texto livre (sem produto) NÃO ganha conta a pagar ao completar — o resultado de hoje: antes
+  -- desta fase o recebimento dela nem passava (o movimento sem produto derrubava tudo), e nenhuma conta nascia dela. A
+  -- OC-00004 (o compressor, "Compra já paga (R$ 900,00)") ganharia uma conta de uma compra já paga. A conta dessa OC é
+  -- decisão do dono: fica recebida, sem conta, e o retorno diz o porquê (revisão da Fase 4, C2, item 2). A OC só de
+  -- catálogo segue abaixo, igual (NOVO-agenda-32 continua com o dono).
+  IF v_new_status = 'received' AND v_po.payable_id IS NULL AND v_po.supplier_id IS NOT NULL
+     AND EXISTS (SELECT 1 FROM public.purchase_order_items i
+                  WHERE i.purchase_order_id = p_po_id AND i.product_id IS NULL) THEN
+    UPDATE public.purchase_orders
+       SET status        = v_new_status,
+           received_date = CURRENT_DATE
+     WHERE id = p_po_id;
+    RETURN json_build_object(
+      'status',            v_new_status,
+      'payable_id',        NULL,
+      'all_received',      v_all_done,
+      'sem_conta_a_pagar', 'item_sem_produto'
+    );
+  END IF;
+  -- FASE 4: fim
   -- Create payable when fully received and no payable yet
   IF v_new_status = 'received' AND v_po.payable_id IS NULL AND v_po.supplier_id IS NOT NULL THEN
     SELECT COALESCE(SUM(received_qty * unit_cost), 0)
@@ -977,7 +1015,7 @@ $function$;
 
 
 comment on function public.receive_po(uuid, jsonb, integer) is
-  'Recebe itens de uma OC (draft/sent/partial; confere que o item é desta OC e que a quantidade é maior que zero): received_qty sobe até o pedido; item com produto dá entrada no estoque pelo movimento (purchase) e marca a data da última entrada; item de texto livre (sem produto) só sobe o received_qty (Agenda de Produção, Fase 4, P2: antes derrubava o recebimento). A OC fica partial ou received; ao completar, com fornecedor e sem conta, cria a conta a pagar (recebido × custo de todos os itens; vencimento hoje + p_due_days) — NOVO-agenda-32: a OC já paga por Pix também ganha a conta; é decisão do dono, a Fase 4 não muda.';
+  'Recebe itens de uma OC (draft/sent/partial; confere que o item é desta OC e que a quantidade é maior que zero): received_qty sobe até o pedido; item com produto dá entrada no estoque pelo movimento (purchase) e marca a data da última entrada; item de texto livre (sem produto) só sobe o received_qty (Agenda de Produção, Fase 4, P2: antes derrubava o recebimento). A OC fica partial ou received; ao completar, com fornecedor e sem conta, cria a conta a pagar (recebido × custo de todos os itens; vencimento hoje + p_due_days) — NOVO-agenda-32: a OC já paga por Pix também ganha a conta; é decisão do dono, a Fase 4 não muda. A OC com item de texto livre NÃO ganha conta ao completar (revisão da Fase 4, C2: hoje nenhuma conta nasce dela; a conta é decisão do dono): received, sem conta, e o retorno leva sem_conta_a_pagar = item_sem_produto. Com login, só administrador e financeiro (senão 42501); sem login (service_role), como antes. Devolve {status, payable_id, all_received[, sem_conta_a_pagar]}.';
 
 -- create or replace mantém os privilégios; reafirmados para a migration valer sozinha.
 revoke all on function public.receive_po(uuid, jsonb, integer) from public, anon;
@@ -1781,15 +1819,21 @@ as $function$
   ocs as (
     select distinct x.po_id from unnest(coalesce(p_po_ids, '{}'::uuid[])) as x(po_id) where x.po_id is not null
   ),
-  -- As linhas de material de cada OC: a do item de texto livre da própria OC (origem oc) e a da linha da OS que o item
+  -- Os itens de cada OC (o recebido inteiro conta como chegado).
+  itens as (
+    select o.po_id, poi.id as item_id, coalesce(poi.received_qty, 0) >= poi.quantity as recebido
+      from ocs o
+      join public.purchase_order_items poi on poi.purchase_order_id = o.po_id
+  ),
+  -- As linhas de material de cada item: a do item de texto livre da própria OC (origem oc) e a da linha da OS que o item
   -- compra (o vínculo de linha da Fase 4: texto livre ou peça).
   linhas as (
-    select distinct o.po_id, m.id, m.situacao,
+    select distinct i.item_id, m.id, m.situacao,
            exists (select 1 from public.agenda_perguntas p
                     where p.tipo = 'chegou' and p.estado = 'aberta' and p.modo = 'ligado' and p.os_material_id = m.id)
              as pergunta_viva
-      from ocs o
-      join public.purchase_order_items poi on poi.purchase_order_id = o.po_id
+      from itens i
+      join public.purchase_order_items poi on poi.id = i.item_id
       join public.os_material m
         on (m.origem = 'oc' and m.purchase_order_item_id = poi.id)
         or (m.origem = 'texto_livre' and poi.service_order_service_id is not null
@@ -1797,19 +1841,31 @@ as $function$
         or (m.origem = 'peca' and poi.service_order_part_id is not null
             and m.service_order_part_id = poi.service_order_part_id)
   ),
+  -- Cada item: recebido; acompanhado na mão (tem linha e todas na mão); ou com a pergunta "chegou?" viva numa linha dele.
+  -- O item sem linha nenhuma e não recebido NÃO é acompanhado pela agenda: a OC continua da R7 (revisão da Fase 4, C2,
+  -- item 13 — antes, a parte que chegou parava a cobrança da OC inteira).
+  por_item as (
+    select i.po_id, i.recebido,
+           count(l.id) > 0 and coalesce(bool_and(l.situacao = 'na_mao'), false) as na_mao,
+           coalesce(bool_or(l.pergunta_viva), false) as pergunta
+      from itens i
+      left join linhas l on l.item_id = i.item_id
+     group by i.po_id, i.item_id, i.recebido
+  ),
   motivos as (
-    select l.po_id,
-           case when bool_or(l.pergunta_viva) then 'a agenda já pergunta se chegou'
-                when bool_and(l.situacao = 'na_mao') then 'a agenda registrou que chegou' end as motivo
-      from linhas l
-     group by l.po_id
+    select p.po_id,
+           case when not bool_and(p.recebido or p.na_mao or p.pergunta) then null
+                when bool_or(p.pergunta) then 'a agenda já pergunta se chegou'
+                when bool_or(p.na_mao) then 'a agenda registrou que chegou' end as motivo
+      from por_item p
+     group by p.po_id
   )
   select coalesce(jsonb_object_agg(m.po_id, m.motivo) filter (where m.motivo is not null), '{}'::jsonb)
     from motivos m;
 $function$;
 
 comment on function public.agenda_ocs_com_material_vivo(uuid[]) is
-  'Agenda de Produção (Fase 4, P2): para a R7 (cobrar a entrega da OC), {<po_id>: motivo} das OCs cujo material a agenda já acompanha: alguma linha de material da OC com a pergunta "chegou?" aberta em ligado ("a agenda já pergunta se chegou") ou todas as linhas na mão ("a agenda registrou que chegou"). As linhas de uma OC: a do item de texto livre (os_material origem oc) e a da linha da OS que o item compra (purchase_order_items.service_order_service_id/service_order_part_id). OC sem linha de material não entra. Só service_role (o motor).';
+  'Agenda de Produção (Fase 4, P2; revisão C2, item 13): para a R7 (cobrar a entrega da OC), {<po_id>: motivo} das OCs cujo material a agenda já acompanha: TODO item da OC recebido ou acompanhado — as linhas de material dele na mão, ou uma com a pergunta "chegou?" aberta em ligado. Alguma pergunta viva = "a agenda já pergunta se chegou"; senão, com algum item na mão pela agenda, "a agenda registrou que chegou". As linhas de um item: a do item de texto livre (os_material origem oc) e a da linha da OS que o item compra (purchase_order_items.service_order_service_id/service_order_part_id). Item sem linha e não recebido deixa a OC fora (a R7 cobra); OC sem linha de material não entra. Só service_role (o motor).';
 
 revoke all on function public.agenda_ocs_com_material_vivo(uuid[]) from public, anon, authenticated;
 grant execute on function public.agenda_ocs_com_material_vivo(uuid[]) to service_role;

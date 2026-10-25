@@ -10,15 +10,19 @@
 --      em ligado (em sombra a linha fica igual)
 --   C3 sem vínculo e sem linha do dono, a conta é a da Fase 1 (md5 em toda OS da carteira, antes e depois da
 --      sincronização); a linha do dono entra na lista e na count_purchase_shortages (a R16); dispensado sai
---   C4 receive_po com texto livre: recebe sem movimento de estoque; a conta a pagar é a de hoje (a mesma soma: recebido ×
---      custo de todos os itens); OC só de catálogo = a mesma saída da versão de 07/10; a de 07/10 derrubava o recebimento
---      com o texto livre (product_id NOT NULL)
+--   C4 receive_po com texto livre: recebe sem movimento de estoque; a OC com item de texto livre NÃO ganha conta a pagar
+--      (o resultado de hoje: a de 07/10 nem recebia; revisão C2, item 2), e a OC-00004 "já paga" também não (x7); OC só de
+--      catálogo = a mesma saída e a mesma conta da versão de 07/10; a de 07/10 derrubava o recebimento com o texto livre
+--      (product_id NOT NULL); com login, só administrador e financeiro recebem (R8), sem login como antes
 --   C5 agenda_ocs_com_material_vivo: só a pergunta "chegou?" aberta em ligado conta (sombra e resolvida não); tudo na
---      mão; a linha da peça ligada; meio na mão e OC sem linha de material ficam de fora; portas (só service_role)
+--      mão; a linha da peça ligada; meio na mão e OC sem linha de material ficam de fora; o item sem linha e não recebido
+--      deixa a OC fora — a OC-00004 com o compressor na mão e uma peça de catálogo por receber (x9; revisão C2, item 13);
+--      portas (só service_role)
 --   C6 a OS-00104 da carteira (a OC-00004 sem vínculo) igual à Fase 1, com o "comprado em" da OC (13/10) a mais
 --   C7 a prontidão: a OC ligada a caminho é B pela OC; recebida, o item aparece UMA vez (antes, duas)
 --   C8 as cópias só mudam nos blocos "-- FASE 4:" (os_necessidade_bruta, aplicar_os_material, get_os_purchase_needs e
---      os_material_sincronizar × 20261024160300; receive_po × 20261007160000; os_prontidao × 20261027100100)
+--      os_material_sincronizar × 20261024160300; receive_po × 20261007160000, só acréscimo: o "só com produto", o "só
+--      admin e financeiro" e o "sem conta a pagar"; os_prontidao × 20261027100100)
 --
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs
@@ -141,7 +145,8 @@ declare
   v_rem uuid; v_m public.os_material; v_m2 public.os_material;
   r jsonb; b jsonb; x jsonb; v_ok boolean; v_n int; v_txt text; v_md5 text;
   v_ret_novo json; v_ret_velho json; v_pa_novo record; v_pa_velho record;
-  v_ocs uuid[]; v_vivas jsonb;
+  v_ocs uuid[]; v_vivas jsonb; v_contas int; v_movs int;
+  v_guarda jsonb := '[]'::jsonb;  -- o resultado de dentro de uma subtransação desfeita (gravado depois dela)
 begin
   set constraints all immediate;
   if v_barco is null then raise exception 'FALHOU: nenhum barco cadastrado para montar as OS de teste'; end if;
@@ -387,13 +392,78 @@ begin
     and (select product_id = v_p1 and quantity_delta = 2 and movement_type = 'purchase'
            from public.inventory_movements where reference_id = v_oc),
     v_ret_novo::text);
-  select pa.amount, pa.balance_amount, pa.status, pa.origin, pa.description, pa.due_date - pa.issue_date as prazo, pa.supplier_id
-    into v_pa_novo
-    from public.payables pa join public.purchase_orders po on po.payable_id = pa.id where po.id = v_oc;
-  insert into _resultado values ('C4b a conta a pagar é a de hoje: recebido × custo de TODOS os itens (2 × 900 + 3 × 40 = 1.920), pendente, 30 dias (NOVO-agenda-32 não muda)',
-    v_pa_novo.amount = 1920 and v_pa_novo.balance_amount = 1920 and v_pa_novo.status = 'pending'
-    and v_pa_novo.origin = 'purchase_order' and v_pa_novo.description = 'Recebimento OC-TESTE-AG4C-4' and v_pa_novo.prazo = 30
-    and v_pa_novo.supplier_id = v_forn, to_jsonb(v_pa_novo)::text);
+  insert into _resultado values ('C4b a OC com item de texto livre NÃO ganha conta a pagar (o resultado de hoje: a de 07/10 nem recebia): recebida, com a data, sem conta, e o retorno diz o porquê',
+    v_ret_novo ->> 'payable_id' is null and v_ret_novo ->> 'sem_conta_a_pagar' = 'item_sem_produto'
+    and (select po.payable_id is null and po.status = 'received' and po.received_date = current_date
+           from public.purchase_orders po where po.id = v_oc)
+    and not exists (select 1 from public.payables pa where pa.description = 'Recebimento OC-TESTE-AG4C-4'),
+    v_ret_novo::text);
+
+  -- x7 da revisão: a OC-00004 da carteira como está em produção (rascunho, o compressor em texto livre, R$ 900, "Compra
+  -- já paga (R$ 900,00)"), recebida pela tela ou pelo assistente: nenhuma conta nasce (antes desta correção, uma conta
+  -- de R$ 900 de uma compra já paga). Desfeito no fim.
+  begin
+    update public.purchase_order_items set unit_cost = 900 where id = '71000000-0000-4000-8000-000000000001';
+    update public.purchase_orders set notes = 'Compra já paga (R$ 900,00). Compressor 12V de geladeira SS65'
+     where id = '70000000-0000-4000-8000-000000000004';
+    v_contas := (select count(*) from public.payables);
+    v_ret_novo := public.receive_po('70000000-0000-4000-8000-000000000004',
+                                    '[{"po_item_id": "71000000-0000-4000-8000-000000000001", "received_qty": 1}]'::jsonb, 30);
+    v_guarda := v_guarda || jsonb_build_array(jsonb_build_array('C4e x7: a OC-00004 "já paga" recebida fica recebida e sem conta a pagar (antes, uma conta de R$ 900)',
+      v_ret_novo ->> 'status' = 'received' and v_ret_novo ->> 'payable_id' is null
+      and v_ret_novo ->> 'sem_conta_a_pagar' = 'item_sem_produto'
+      and (select count(*) from public.payables) = v_contas
+      and (select po.payable_id is null from public.purchase_orders po where po.id = '70000000-0000-4000-8000-000000000004')
+      and (select received_qty = 1 from public.purchase_order_items where id = '71000000-0000-4000-8000-000000000001'),
+      v_ret_novo::text));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  insert into _resultado select e ->> 0, (e ->> 1)::boolean, e ->> 2 from jsonb_array_elements(v_guarda) e;
+  v_guarda := '[]'::jsonb;
+
+  -- R8 da revisão: com login, só administrador e financeiro recebem; sem login (service_role, o assistente) como antes.
+  insert into public.purchase_orders (po_number, status, supplier_id) values ('OC-TESTE-AG4C-R8', 'sent', v_forn)
+  returning id into v_oc2;
+  insert into public.purchase_order_items (purchase_order_id, product_id, description, quantity, unit_cost)
+  values (v_oc2, v_p2, 'Terminal TESTE AG4C', 2, 2) returning id into i3;
+  insert into public.app_users (id, full_name, email, role, active) values
+    (md5('ag4c:financeiro')::uuid, 'Financeiro TESTE AG4C', 'financeiro@ag4c.invalid', 'financial', true),
+    (md5('ag4c:vendedor')::uuid, 'Vendedor TESTE AG4C', 'vendedor@ag4c.invalid', 'seller', true);
+  v_movs := (select count(*) from public.inventory_movements where reference_id = v_oc2);
+  perform set_config('request.jwt.claim.sub', md5('ag4c:vendedor')::uuid::text, true);
+  perform set_config('request.jwt.claims', json_build_object('sub', md5('ag4c:vendedor')::uuid, 'role', 'authenticated')::text, true);
+  begin
+    perform public.receive_po(v_oc2, jsonb_build_array(jsonb_build_object('po_item_id', i3, 'received_qty', 1)), 30);
+    v_txt := 'recebeu';
+  exception when others then
+    v_txt := sqlstate || ': ' || sqlerrm;
+  end;
+  perform set_config('request.jwt.claim.sub', 'aa000000-0000-4000-8000-000000000002', true);
+  perform set_config('request.jwt.claims', '{"sub": "aa000000-0000-4000-8000-000000000002", "role": "authenticated"}', true);
+  begin
+    perform public.receive_po(v_oc2, jsonb_build_array(jsonb_build_object('po_item_id', i3, 'received_qty', 1)), 30);
+    v_txt := v_txt || ' | recebeu';
+  exception when others then
+    v_txt := v_txt || ' | ' || sqlstate;
+  end;
+  insert into _resultado values ('C4f R8: com login de vendedor ou de técnico, receive_po recusa (42501, "Receber ordem de compra é do administrador e do financeiro.") e nada é recebido',
+    v_txt = '42501: Receber ordem de compra é do administrador e do financeiro. | 42501'
+    and (select received_qty from public.purchase_order_items where id = i3) = 0
+    and (select status from public.purchase_orders where id = v_oc2) = 'sent'
+    and (select count(*) from public.inventory_movements where reference_id = v_oc2) = v_movs, v_txt);
+  perform set_config('request.jwt.claim.sub', md5('ag4c:financeiro')::uuid::text, true);
+  perform set_config('request.jwt.claims', json_build_object('sub', md5('ag4c:financeiro')::uuid, 'role', 'authenticated')::text, true);
+  v_ret_novo := public.receive_po(v_oc2, jsonb_build_array(jsonb_build_object('po_item_id', i3, 'received_qty', 1)), 30);
+  perform set_config('request.jwt.claim.sub', 'aa000000-0000-4000-8000-000000000001', true);
+  perform set_config('request.jwt.claims', '{"sub": "aa000000-0000-4000-8000-000000000001", "role": "authenticated"}', true);
+  v_ret_velho := public.receive_po(v_oc2, jsonb_build_array(jsonb_build_object('po_item_id', i3, 'received_qty', 1)), 30);
+  perform set_config('request.jwt.claim.sub', '', true);
+  perform set_config('request.jwt.claims', '', true);
+  insert into _resultado values ('C4g R8: o financeiro e o administrador recebem (1 + 1 = completa, com a conta a pagar da OC de catálogo); sem login também (C4a)',
+    v_ret_novo ->> 'status' = 'partial' and v_ret_velho ->> 'status' = 'received' and v_ret_velho ->> 'payable_id' is not null
+    and (select amount from public.payables where id = (v_ret_velho ->> 'payable_id')::uuid) = 4,
+    v_ret_novo::text || ' | ' || v_ret_velho::text);
 
   if not v_antigas then
     insert into _resultado values ('C4c a OC só de catálogo: a saída da versão de 07/10', true,
@@ -500,6 +570,57 @@ begin
     public.agenda_ocs_com_material_vivo('{}') = '{}'::jsonb and public.agenda_ocs_com_material_vivo(null) = '{}'::jsonb
     and public.agenda_ocs_com_material_vivo(array[null::uuid]) = '{}'::jsonb, null);
 
+  -- x9 da revisão (item 13): a OC-00004 da carteira com o compressor (texto livre, linha origem oc) JÁ NA MÃO e uma peça de
+  -- catálogo sem linha de material, ainda não recebida. Antes: "a agenda registrou que chegou" e a R7 parava de cobrar a OC
+  -- inteira. Agora a OC fica com a R7 até a peça chegar (recebida, ela sai). Desfeito no fim.
+  begin
+    perform public.os_material_sincronizar('05000000-0000-4000-8000-000000000104', c_hoje);
+    insert into public.purchase_order_items (id, purchase_order_id, product_id, description, quantity, unit_cost, received_qty, created_at)
+    values ('71000000-0000-4000-8000-0000000000f2', '70000000-0000-4000-8000-000000000004', v_p2,
+            'Porta Fusível MIDI (estoque)', 4, 25, 0, '2026-10-13 12:00-03');
+    update public.os_material set situacao = 'na_mao', quantidade_na_mao = quantidade_necessaria, chegou_em = date '2026-10-14',
+                                  fonte = 'dono'
+     where purchase_order_item_id = '71000000-0000-4000-8000-000000000001';
+    v_vivas := public.agenda_ocs_com_material_vivo(array['70000000-0000-4000-8000-000000000004'::uuid]);
+    update public.purchase_order_items set received_qty = 4 where id = '71000000-0000-4000-8000-0000000000f2';
+    r := public.agenda_ocs_com_material_vivo(array['70000000-0000-4000-8000-000000000004'::uuid]);
+    v_guarda := v_guarda || jsonb_build_array(jsonb_build_array('C5e x9: a OC-00004 com o compressor na mão e a peça de catálogo por receber fica com a R7 (antes, "a agenda registrou que chegou"); com a peça recebida, sai',
+      (select count(*) = 1 from public.os_material
+        where purchase_order_item_id = '71000000-0000-4000-8000-000000000001' and situacao = 'na_mao')
+      and v_vivas = '{}'::jsonb
+      and r ->> '70000000-0000-4000-8000-000000000004' = 'a agenda registrou que chegou',
+      v_vivas::text || ' | ' || r::text));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  insert into _resultado select e ->> 0, (e ->> 1)::boolean, e ->> 2 from jsonb_array_elements(v_guarda) e;
+  v_guarda := '[]'::jsonb;
+
+  -- A pergunta "chegou?" de um item também não para a cobrança dos outros: a chave (t6) com a pergunta aberta em ligado,
+  -- numa OC com uma bateria de catálogo sem linha (OC-I, não recebida; OC-J, já recebida). Desfeito no fim.
+  begin
+    insert into public.agenda_perguntas (tipo, chave, service_order_id, os_material_id, texto, modo)
+    values ('chegou', 'chegou:teste-ag4c-t6', v_c5, (pg_temp.linha(t6)).id, 'A chave geral chegou?', 'ligado');
+    insert into public.purchase_orders (po_number, status, service_order_id) values ('OC-TESTE-AG4C-I', 'partial', v_c5)
+    returning id into v_oc2;
+    insert into public.purchase_order_items (purchase_order_id, product_id, description, quantity, unit_cost, received_qty,
+                                             service_order_service_id)
+    values (v_oc2, null, 'Chave geral 300A', 1, 200, 0, t6), (v_oc2, v_p1, 'Bateria TESTE AG4C', 1, 900, 0, null);
+    insert into public.purchase_orders (po_number, status, service_order_id) values ('OC-TESTE-AG4C-J', 'partial', v_c5)
+    returning id into v_oc3;
+    insert into public.purchase_order_items (purchase_order_id, product_id, description, quantity, unit_cost, received_qty,
+                                             service_order_service_id)
+    values (v_oc3, null, 'Chave geral 300A', 1, 200, 0, t6), (v_oc3, v_p1, 'Bateria TESTE AG4C', 1, 900, 1, null);
+    v_vivas := public.agenda_ocs_com_material_vivo(array[v_oc2, v_oc3]);
+    v_guarda := v_guarda || jsonb_build_array(jsonb_build_array('C5f a pergunta "chegou?" de um item não para a cobrança do outro: com a bateria por receber, a OC fica com a R7; recebida, "a agenda já pergunta se chegou"',
+      not (v_vivas ? v_oc2::text) and v_vivas ->> v_oc3::text = 'a agenda já pergunta se chegou'
+      and (select count(*) from jsonb_object_keys(v_vivas)) = 1, v_vivas::text));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  insert into _resultado select e ->> 0, (e ->> 1)::boolean, e ->> 2 from jsonb_array_elements(v_guarda) e;
+  v_guarda := '[]'::jsonb;
+
   -- ── C6: a OS-00104 da carteira (OC-00004 sem vínculo) ──────────────────────────────────────────────────
   perform public.os_material_sincronizar('05000000-0000-4000-8000-000000000104', c_hoje);
   v_m := pg_temp.linha('71000000-0000-4000-8000-000000000001');
@@ -592,7 +713,7 @@ begin
 
   v_res := pg_temp.copia(string_to_array(pg_temp.corpo(v_r, 'receive_po'), E'\n'),
     (select prosrc from pg_proc where oid = 'public.receive_po(uuid, jsonb, integer)'::regprocedure), '{}'::text[]);
-  insert into _resultado values ('C8e receive_po: só acréscimo (o "só com produto"); fora dos blocos, a de 20261007160000', v_res = 'ok', v_res);
+  insert into _resultado values ('C8e receive_po: só acréscimo (o "só com produto", o "só admin e financeiro" e o "sem conta a pagar"); fora dos blocos, a de 20261007160000', v_res = 'ok', v_res);
 
   -- os_prontidao já vem da Fase 4 (P1): os dois sem os blocos "-- FASE 4:" (o do P2 é só acréscimo), e um bloco a mais.
   v_novo := (select prosrc from pg_proc where oid = 'public.os_prontidao(uuid, date)'::regprocedure);
