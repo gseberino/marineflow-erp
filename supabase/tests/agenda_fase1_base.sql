@@ -804,7 +804,9 @@ insert into _definer_da_agenda values
   -- FASE 3 (revisão, R3): o modo da agenda automática para qualquer login (agenda_config é fechada ao técnico e ao vendedor)
   ('agenda_modo_da_proposta'),
   -- FASE 4 (P1): o rascunho do prazo do fornecedor e o *grava* dele (escreve em suppliers e resolve as perguntas)
-  ('agenda_rascunho_fornecedor'), ('_agenda_aplicar_fornecedor');
+  ('agenda_rascunho_fornecedor'), ('_agenda_aplicar_fornecedor'),
+  -- FASE 4 (P2): as OCs cujo material a agenda já acompanha (a R7 lê os_material e agenda_perguntas: só service_role)
+  ('agenda_ocs_com_material_vivo');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

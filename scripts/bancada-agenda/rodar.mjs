@@ -70,6 +70,13 @@ const FIXTURES_COMO_TEXTO = [
   ['agenda_teste.mig_conferencia_fase2', '../../supabase/migrations/20261025100300_agenda_fase2_conferencia_vigia.sql'],
   ['agenda_teste.mig_caminhos_fase3', '../../supabase/migrations/20261026100200_agenda_fase3_caminhos.sql'],
   ['agenda_teste.mig_rascunho_fase2', '../../supabase/migrations/20261025100400_agenda_fase2_rascunho.sql'],
+  // Fase 4 (P2): as migrations de onde a 20261027100200 copiou os corpos — o material da Fase 1 (a conta bruta, o que o
+  // dono informou, get_os_purchase_needs e a sincronização), o recebimento de 07/10 e a prontidão do P1 —, para o
+  // agenda_fase4_compras.sql conferir que as cópias só mudam nos blocos "-- FASE 4:" e rodar as versões de antes (a
+  // saída idêntica sem vínculo e sem linha do dono; a conta a pagar do recebimento igual à de hoje).
+  ['agenda_teste.mig_material_fase1', '../../supabase/migrations/20261024160300_agenda_fase1_material.sql'],
+  ['agenda_teste.mig_receive_po', '../../supabase/migrations/20261007160000_receive_po_confere_a_oc.sql'],
+  ['agenda_teste.mig_fornecedores_fase4', '../../supabase/migrations/20261027100100_agenda_fase4_fornecedores.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

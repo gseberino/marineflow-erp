@@ -1009,8 +1009,9 @@ declare
   l       text;
   v_tirada int := 0;
   -- FASE 4: os_prontidao foi recriada de novo em 20261027100100 (o prazo do fornecedor), com oito blocos
-  -- "-- FASE 4: … -- FASE 4: fim"; as linhas da Fase 1 que eles trocaram (cada uma uma vez) saem do corpo antigo, e os
-  -- blocos saem do novo (o mesmo do B7 de agenda_fase4_base.sql).
+  -- "-- FASE 4: … -- FASE 4: fim", e em 20261027100200 (P2: a OC recebida ligada ao texto livre não conta duas vezes),
+  -- com mais um, só acréscimo — nove; as linhas da Fase 1 que eles trocaram (cada uma uma vez) saem do corpo antigo, e
+  -- os blocos saem do novo (o mesmo do B7 de agenda_fase4_base.sql).
   v_trocadas_f4 text[] := array[
     '    select q.*, public._agenda_classe_do_fornecedor(q.forn_id) as classe',
     '    select q.*, public._agenda_prazo_da_classe(q.classe) as prazo',
@@ -1065,7 +1066,7 @@ begin
   insert into _resultado values ('Q5 a cópia de os_prontidao só muda nos pontos "-- FASE 2:" e "-- FASE 4:" (fora deles, linha a linha igual à da Fase 1)',
     v_a = v_b and v_tirada = 1 and (select count(*) from regexp_matches(v_novo, '-- FASE 2: fim', 'g')) = 5
     and cardinality(v_achadas_f4) = cardinality(v_trocadas_f4)
-    and (select count(*) from regexp_matches(v_novo, '-- FASE 4: fim', 'g')) = 8,
+    and (select count(*) from regexp_matches(v_novo, '-- FASE 4: fim', 'g')) = 9,
     format('linhas Fase 1 %s, cópia sem os blocos %s; 1ª diferente: %s', cardinality(v_a), cardinality(v_b),
            (select coalesce(min(i)::text, '-') from generate_series(1, greatest(cardinality(v_a), cardinality(v_b))) i
              where v_a[i] is distinct from v_b[i])));

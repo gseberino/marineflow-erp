@@ -614,10 +614,12 @@ begin
       v_a := v_a || l;
     end loop;
     v_b := pg_temp.sem_fase4((select p.prosrc from pg_proc p where p.oid = 'public.os_prontidao(uuid, date)'::regprocedure));
-    insert into _resultado values ('B7z a cópia de os_prontidao só muda nos 8 blocos "-- FASE 4:" (fora deles, linha a linha a de 20261025100200)',
+    -- Os 8 blocos do P1 e o 9º do P2 (20261027100200: a OC recebida ligada ao texto livre não conta duas vezes; só
+    -- acréscimo, sem linha trocada).
+    insert into _resultado values ('B7z a cópia de os_prontidao só muda nos 9 blocos "-- FASE 4:" (fora deles, linha a linha a de 20261025100200)',
       v_a = v_b and cardinality(v_achadas) = cardinality(v_trocadas)
       and (select count(*) from regexp_matches((select p.prosrc from pg_proc p where p.oid = 'public.os_prontidao(uuid, date)'::regprocedure),
-                                               '-- FASE 4: fim', 'g')) = 8,
+                                               '-- FASE 4: fim', 'g')) = 9,
       format('linhas Fase 2 %s, cópia sem os blocos %s, trocadas achadas %s de %s; 1ª diferente: %s', cardinality(v_a),
              cardinality(v_b), cardinality(v_achadas), cardinality(v_trocadas),
              (select coalesce(min(i)::text, '-') from generate_series(1, greatest(cardinality(v_a), cardinality(v_b))) i
