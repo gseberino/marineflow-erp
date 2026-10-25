@@ -220,7 +220,19 @@ async function runRules(db: Db, settings: Record<string, string>) {
  *  receberia as duas. O resumo diz "desligada: a ficha da agenda substitui" (agenda-modos.ts, R10_DESLIGADA). */
 async function runTechnicianReminders(db: Db, settings: Record<string, string>) {
   if ((settings["task_rule_r10_enabled"] ?? "true") !== "true") return { sent: 0 };
-  const desligada = r10DesligadaPelaAgenda(await lerModosDaEquipe(db));
+  const modosDaEquipe = await lerModosDaEquipe(db);
+  // (revisão da Fase 3, C1 — R4) a falha da leitura não é engolida: vai a app_error_logs; fora a Fase 3 ausente, a R10
+  // pula este tique (r10DesligadaPelaAgenda devolve R10_PULADA)
+  if (modosDaEquipe.erro !== undefined) {
+    await logEdgeError(db, {
+      context: "task-automations",
+      action: "agenda:r10",
+      level: r10DesligadaPelaAgenda(modosDaEquipe) ? "error" : "warn",
+      message: `R10: não li o modo da equipe (${modosDaEquipe.codigo ?? "?"}): ${modosDaEquipe.erro}`,
+      details: { codigo: modosDaEquipe.codigo ?? null },
+    });
+  }
+  const desligada = r10DesligadaPelaAgenda(modosDaEquipe);
   if (desligada) return desligada;
 
   const nowBRT = new Date(Date.now() - 3 * 3600000); // relógio deslocado p/ ler hora BRT em UTC

@@ -45,16 +45,22 @@ export async function lerModosDaAgenda(db: Db): Promise<ModosDaAgenda> {
 
 // ── Fase 3 (P4, 24/10/2026): os modos da equipe e da diária ─────────────────────────────────────────────
 // Lidos num SELECT à parte: a coluna modo_diaria só existe com a migration 20261026100000, e um SELECT que falhasse por
-// ela não pode derrubar os modos da Fase 2 (a R1, a R2 e a R16 voltariam com a agenda ligada). Ilegível = desligado: a
-// R10 continua como hoje (o lado seguro: no máximo o técnico recebe o lembrete antigo) e a rotina não roda.
+// ela não pode derrubar os modos da Fase 2 (a R1, a R2 e a R16 voltariam com a agenda ligada). Ilegível = desligado e a
+// rotina não roda.
+// Revisão da Fase 3 (C1, R4): para a R10 o lado seguro depende do erro. Coluna ou tabela que ainda não existe (PGRST204,
+// 42703, PGRST205, 42P01: a migration da Fase 3 não foi aplicada, a ficha não existe) ou a linha que falta = a R10 segue
+// como hoje. Qualquer outro erro (a rede, o tempo, a permissão) = a R10 PULA aquele tique: com a ficha talvez ligada, o
+// técnico receberia as duas. Nos dois casos o erro vai a app_error_logs (index.ts, action agenda:r10).
 
 export interface ModosDaEquipe {
   /** agenda_config.modo_equipe: a ficha, a confirmação e o "como foi hoje?" (em ligado a R10 para). */
   equipe: ModoDaAgenda;
   /** agenda_config.modo_diaria: a diária automática. */
   diaria: ModoDaAgenda;
-  /** A leitura falhou (a R10 fica como hoje). */
+  /** A leitura falhou (o motivo). */
   erro?: string;
+  /** (C1, R4) o código do erro da leitura (PostgREST/Postgres), ou SEM_LINHA / EXCECAO */
+  codigo?: string;
 }
 
 export const EQUIPE_DESLIGADA: Readonly<ModosDaEquipe> = Object.freeze({ equipe: "desligado", diaria: "desligado" });
@@ -63,13 +69,25 @@ export const EQUIPE_DESLIGADA: Readonly<ModosDaEquipe> = Object.freeze({ equipe:
 export async function lerModosDaEquipe(db: Db): Promise<ModosDaEquipe> {
   try {
     const { data, error } = await db.from("agenda_config").select("modo_equipe, modo_diaria").maybeSingle();
-    if (error) return { ...EQUIPE_DESLIGADA, erro: String(error.message ?? error.code ?? "erro na leitura") };
-    if (!data) return { ...EQUIPE_DESLIGADA, erro: "agenda_config sem a linha de parâmetros" };
+    if (error) {
+      return {
+        ...EQUIPE_DESLIGADA,
+        erro: String(error.message ?? error.code ?? "erro na leitura"),
+        codigo: String(error.code ?? "") || "SEM_CODIGO",
+      };
+    }
+    if (!data) return { ...EQUIPE_DESLIGADA, erro: "agenda_config sem a linha de parâmetros", codigo: "SEM_LINHA" };
     return { equipe: lerModo(data.modo_equipe), diaria: lerModo(data.modo_diaria) };
   } catch (e) {
-    return { ...EQUIPE_DESLIGADA, erro: String((e as Error)?.message ?? e) };
+    return { ...EQUIPE_DESLIGADA, erro: String((e as Error)?.message ?? e), codigo: "EXCECAO" };
   }
 }
+
+/** (C1, R4) Os códigos de "a coluna ou a tabela ainda não existe" (a Fase 3 não foi aplicada) e a linha que falta. */
+const LEITURA_SEM_A_FASE_3: ReadonlySet<string> = new Set(["PGRST204", "42703", "PGRST205", "42P01", "SEM_LINHA"]);
+
+/** (C1, R4) O texto do resumo quando a R10 pula o tique porque o modo da equipe não foi lido. */
+export const R10_PULADA = "pulada: não consegui ler o modo da equipe (a ficha pode estar ligada)";
 
 /** O texto do resumo quando a R10 sai (spec-fase3 §7.6, d15): a ficha das 19:30 a substitui no instante em que liga. */
 export const R10_DESLIGADA = "desligada: a ficha da agenda substitui";
@@ -78,6 +96,9 @@ export const R10_DESLIGADA = "desligada: a ficha da agenda substitui";
  * A R10 (o lembrete interno de OS agendada) sai no mesmo instante em que a ficha da agenda liga (modo_equipe = 'ligado';
  * decisão d13 do dono: a regra antiga sai no dia em que a substituta entra). Sombra e desligado = a R10 continua.
  */
-export function r10DesligadaPelaAgenda(m: Pick<ModosDaEquipe, "equipe">): string | null {
-  return m.equipe === "ligado" ? R10_DESLIGADA : null;
+export function r10DesligadaPelaAgenda(m: Pick<ModosDaEquipe, "equipe" | "erro" | "codigo">): string | null {
+  if (m.equipe === "ligado") return R10_DESLIGADA;
+  // (C1, R4) a leitura que falhou por outro motivo que não a Fase 3 ausente: a R10 pula este tique
+  if (m.erro !== undefined && !LEITURA_SEM_A_FASE_3.has(m.codigo ?? "")) return R10_PULADA;
+  return null;
 }
