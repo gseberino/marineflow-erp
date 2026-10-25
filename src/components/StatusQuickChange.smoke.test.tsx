@@ -10,6 +10,7 @@ import { I18nProvider } from '@/i18n';
 const h = vi.hoisted(() => ({
   // Fase 3 (P7a): o que a porta aceita pela tela (undefined = sem resposta: tudo, como antes)
   porta: { resposta: undefined as undefined | Record<string, string[]>, carregando: false },
+  // (revisão da Fase 3, R2) as passagens que pedem o motivo vêm em "<id>:motivo"
   mudar: vi.fn(),
   toastDaTela: vi.fn(),
   aviso: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
@@ -40,6 +41,7 @@ vi.mock('@/integrations/supabase/client', () => {
 });
 
 import { StatusQuickChange } from './StatusQuickChange';
+import { PortaPedeMotivo } from '@/lib/status-pela-tela';
 
 function renderizar(status: 'in_progress' | 'approved' | 'completed' | 'awaiting_client') {
   return render(
@@ -134,5 +136,50 @@ describe('StatusQuickChange — só o que a porta aceita', () => {
     expect(await screen.findByText('Conferindo o que dá para mudar…')).toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: /Concluída/ })).not.toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /Cancelada/ })).toBeInTheDocument();
+  });
+});
+
+// Revisão da Fase 3 (R2): a OS em andamento volta a aguardar com o motivo. A lista pergunta ANTES de chamar a porta quando o
+// banco diz que a passagem pede o motivo ("<id>:motivo"); sem a resposta do banco, pergunta quando a porta recusa por isso.
+describe('StatusQuickChange — em andamento → aguardando, com o motivo', () => {
+  it('a porta pede o motivo: a janela abre antes, e o status e o motivo escolhidos vão juntos', async () => {
+    const user = userEvent.setup();
+    h.porta.resposta = { 'os-1': ['awaiting_parts', 'awaiting_client', 'completed'], 'os-1:motivo': ['awaiting_parts', 'awaiting_client'] };
+    h.mudar.mockResolvedValue({ mudou: true, status: 'awaiting_client', texto: 'Lenine (OS-00074): de em andamento para aguardando o cliente — esperando o cliente: a cor do estofado.', justConverted: false, numero: null });
+    renderizar('in_progress');
+    await escolher(user, 'Em Andamento', 'Aguardando Peças');
+    expect(await screen.findByRole('dialog', { name: 'Parar a OS' })).toBeInTheDocument();
+    expect(h.mudar).not.toHaveBeenCalled();
+    // rótulo acima de cada campo; troca de peças para o cliente
+    expect(screen.getByText('Por que parou?')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('Esperando o cliente'));
+    await user.type(screen.getByLabelText('O que aconteceu (se quiser)'), 'a cor do estofado');
+    await user.click(screen.getByRole('button', { name: 'Parar a OS' }));
+    expect(h.mudar).toHaveBeenCalledWith({ id: 'os-1', status: 'awaiting_client', motivo: 'esperando o cliente: a cor do estofado' });
+    expect(h.toastDaTela).toHaveBeenCalledWith(expect.objectContaining({ title: 'Status atualizado para "Aguardando Cliente"' }));
+  });
+
+  it('Voltar fecha a janela sem chamar a porta', async () => {
+    const user = userEvent.setup();
+    h.porta.resposta = { 'os-1': ['awaiting_parts', 'awaiting_client', 'completed'], 'os-1:motivo': ['awaiting_parts', 'awaiting_client'] };
+    renderizar('in_progress');
+    await escolher(user, 'Em Andamento', 'Aguardando Peças');
+    await user.click(await screen.findByRole('button', { name: 'Voltar' }));
+    expect(screen.queryByRole('dialog', { name: 'Parar a OS' })).not.toBeInTheDocument();
+    expect(h.mudar).not.toHaveBeenCalled();
+  });
+
+  it('sem a resposta do banco: a porta recusa só pelo motivo, a janela abre e manda de novo com ele', async () => {
+    const user = userEvent.setup();
+    h.mudar
+      .mockRejectedValueOnce(new PortaPedeMotivo('A OS já começou: só volta a aguardar quando você diz que parou e por quê.', 'awaiting_parts'))
+      .mockResolvedValueOnce({ mudou: true, status: 'awaiting_parts', texto: 'x', justConverted: false, numero: null });
+    renderizar('in_progress');
+    await escolher(user, 'Em Andamento', 'Aguardando Peças');
+    expect(await screen.findByRole('dialog', { name: 'Parar a OS' })).toBeInTheDocument();
+    expect(h.toastDaTela).not.toHaveBeenCalled();
+    expect(screen.getByText('Falta material')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Parar a OS' }));
+    expect(h.mudar).toHaveBeenLastCalledWith({ id: 'os-1', status: 'awaiting_parts', motivo: 'falta material' });
   });
 });

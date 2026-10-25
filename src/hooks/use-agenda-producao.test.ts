@@ -22,7 +22,7 @@ import { supabase } from '@/integrations/supabase/client';
 import {
   CONFIG_DE_ANTES, jornadaDaAgenda, lerAgendaConfig, lerEquipeDaGrade, useSemanaProducao, usePlanoDaOs,
 } from './use-agenda-producao';
-import { lerStatusQueAPortaAceita, opcoesQueAPortaAceita } from './use-status-da-porta';
+import { lerStatusQueAPortaAceita, motivoQueAPortaPede, opcoesQueAPortaAceita } from './use-status-da-porta';
 import { JORNADA_PADRAO_HORAS } from '../../supabase/functions/_shared/agenda-dia';
 
 function envoltorio() {
@@ -103,6 +103,13 @@ describe('as leituras das telas', () => {
 });
 
 describe('o que a porta aceita pela tela', () => {
+  it('revisão da Fase 3 (R2): o que a porta só aceita com o motivo vem em "<id>:motivo"; sem resposta, nenhum', () => {
+    const aceitos = { 'os-1': ['awaiting_parts', 'completed'], 'os-1:motivo': ['awaiting_parts'] };
+    expect(motivoQueAPortaPede(aceitos, 'os-1')).toEqual(['awaiting_parts']);
+    expect(opcoesQueAPortaAceita(['awaiting_parts', 'open'], aceitos, 'os-1')).toEqual(['awaiting_parts']);
+    expect(motivoQueAPortaPede({ 'os-1': ['completed'] }, 'os-1')).toEqual([]);
+    expect(motivoQueAPortaPede(null, 'os-1')).toEqual([]);
+  });
   it('sem resposta do banco, todas as opções (como antes); com resposta, só as aceitas — e Cancelar fica', () => {
     const lista = ['in_progress', 'completed', 'cancelled'];
     expect(opcoesQueAPortaAceita(lista, null, 'os-1')).toEqual(lista);

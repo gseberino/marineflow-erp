@@ -26,6 +26,31 @@ export interface ResultadoDoStatusPelaTela {
 }
 
 /**
+ * A porta recusou só porque faltou o motivo (Agenda de Produção, revisão da Fase 3, R2): a OS em andamento volta a aguardar
+ * (peças ou o cliente) só quando quem pede diz por quê. Quem chama abre a janela do motivo (JanelaDoMotivo) e manda de novo.
+ */
+export class PortaPedeMotivo extends Error {
+  /** o status que a pessoa pediu */
+  readonly para: string;
+  constructor(texto: string, para: string) {
+    super(texto);
+    this.name = 'PortaPedeMotivo';
+    this.para = para;
+  }
+}
+
+export function ehPortaPedeMotivo(e: unknown): e is PortaPedeMotivo {
+  return e instanceof PortaPedeMotivo;
+}
+
+/** O motivo que vai à porta e fica no registro da OS: "falta material: o inversor não chegou", "esperando o cliente". */
+export function motivoDaParada(para: string, oQueAconteceu: string): string {
+  const base = para === 'awaiting_client' ? 'esperando o cliente' : 'falta material';
+  const texto = oQueAconteceu.trim().replace(/\s+/g, ' ');
+  return texto ? `${base}: ${texto}` : base;
+}
+
+/**
  * A porta não mudou nada? Mostra a frase dela (aviso, não erro) e devolve true — quem chama não diz "Status atualizado"
  * nem abre o que vem depois da mudança (o aviso de compra, o faturar, o saldo ao cliente).
  */

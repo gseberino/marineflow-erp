@@ -14,8 +14,17 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { ehPortaAusente } from '../../supabase/functions/_shared/porta-ausente';
 
-/** {id da OS: status que a porta aceita pela tela}. */
+/**
+ * {id da OS: status que a porta aceita pela tela}. Revisão da Fase 3 (R2): os que ela aceita só com o motivo (em andamento →
+ * aguardando peças / o cliente) também em "<id>:motivo" — a tela pede o motivo antes de chamar a porta (motivoQueAPortaPede).
+ */
 export type StatusQueAPortaAceita = Record<string, string[]>;
+
+/** Os status desta OS que a porta só aceita com o motivo (a tela abre a janela do motivo). Sem resposta do banco = nenhum. */
+export function motivoQueAPortaPede(aceitos: StatusQueAPortaAceita | null | undefined, osId: string): string[] {
+  const lista = aceitos?.[`${osId}:motivo`];
+  return Array.isArray(lista) ? [...lista] : [];
+}
 
 export async function lerStatusQueAPortaAceita(ids: string[]): Promise<StatusQueAPortaAceita | null> {
   if (ids.length === 0) return {};

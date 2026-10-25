@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useUpdateServiceOrderStatus, useCancelServiceOrder, useReopenServiceOrder, STATUS_TRANSITIONS, STATUS_BACKWARD_TRANSITIONS } from '@/hooks/use-service-orders';
-import { avisarSeNaoMudou } from '@/lib/status-pela-tela';
-import { opcoesQueAPortaAceita, useStatusQueAPortaAceita } from '@/hooks/use-status-da-porta';
+import { avisarSeNaoMudou, ehPortaPedeMotivo } from '@/lib/status-pela-tela';
+import { motivoQueAPortaPede, opcoesQueAPortaAceita, useStatusQueAPortaAceita } from '@/hooks/use-status-da-porta';
+import { JanelaDoMotivo } from '@/components/JanelaDoMotivo';
 import { statusConfig } from '@/lib/constants';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -58,6 +59,9 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
   const adiante = conferindo ? validTransitions.filter((s) => s === 'cancelled')
     : opcoesQueAPortaAceita(validTransitions, porta.data, orderId);
   const corrigir = conferindo ? [] : opcoesQueAPortaAceita(backwardTransitions, porta.data, orderId);
+  // Revisão da Fase 3 (R2): o que a porta só aceita com o motivo (em andamento → aguardando) abre a janela do motivo antes.
+  const pedemMotivo = motivoQueAPortaPede(porta.data, orderId);
+  const [parada, setParada] = useState<string | null>(null);
   const isTerminal = currentStatus === 'invoiced' || currentStatus === 'cancelled';
   const isBusy = updateStatus.isPending || cancelOrder.isPending || reopenOrder.isPending;
 
@@ -125,11 +129,12 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
     );
   }
 
-  const handleTransition = async (target: ServiceOrderStatus) => {
+  const handleTransition = async (target: ServiceOrderStatus, motivo?: string) => {
     try {
       // Fase 3 (P3): a porta decide. Sem mudança ("A OS já começou: não volta para aprovada."), a frase dela e nada mais;
       // com mudança, a frase dela vai junto (na conclusão, a saída e as cobranças da condição).
-      const r = await updateStatus.mutateAsync({ id: orderId, status: target });
+      const r = await updateStatus.mutateAsync({ id: orderId, status: target, motivo });
+      setParada(null);
       if (avisarSeNaoMudou(r)) return;
       const ficou = (r?.status ?? target) as ServiceOrderStatus;
       toast({ title: `Status atualizado para "${(t.status as Record<string, string>)[ficou]}"`, description: r?.texto || undefined });
@@ -169,6 +174,11 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
         }
       }
     } catch (err: any) {
+      // Revisão da Fase 3 (R2): a porta recusou só por falta do motivo (a lista não sabia: o banco sem a resposta) — pergunta.
+      if (ehPortaPedeMotivo(err)) {
+        setParada(err.para);
+        return;
+      }
       toast({ title: 'Erro ao atualizar status', description: err.message, variant: 'destructive' });
     }
   };
@@ -229,6 +239,8 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
                 onClick={() => {
                   if (isCancelTarget) {
                     setCancelOpen(true);
+                  } else if (pedemMotivo.includes(target)) {
+                    setParada(target);
                   } else {
                     handleTransition(target as ServiceOrderStatus);
                   }
@@ -278,6 +290,15 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* Revisão da Fase 3 (R2): em andamento → aguardando, com o motivo */}
+      <JanelaDoMotivo
+        para={parada}
+        opcoes={pedemMotivo}
+        ocupado={updateStatus.isPending}
+        onFechar={() => setParada(null)}
+        onConfirmar={(para, motivo) => handleTransition(para as ServiceOrderStatus, motivo)}
+      />
 
       {/* Cancel dialog */}
       <Dialog open={cancelOpen} onOpenChange={v => { setCancelOpen(v); if (!v) setReason(''); }}>

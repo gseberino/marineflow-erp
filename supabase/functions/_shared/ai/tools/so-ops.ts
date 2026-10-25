@@ -555,6 +555,9 @@ export const soOpsTools: ToolDef[] = [
       const {
         id: _id, created_at: _c, updated_at: _u, service_order_number: _n,
         scheduled_start_at: _s1, scheduled_end_at: _s2, check_in_at: _ci, check_out_at: _co,
+        // Agenda de Produção (revisão da Fase 3, R1): a entrega fica na original (sem a saída, o CHECK e o gatilho da entrega
+        // recusavam a cópia de uma OS já entregue).
+        delivered_at: _da,
         client_signature_url: _sig, signed_at: _sa, signed_by_name: _sb, signed_document_hash: _sh,
         requires_resignature: _rr, resignature_requested_at: _rra, share_token: _st,
         payment_status: _ps, payment_method: _pm, payment_condition_preset_id: _pp,

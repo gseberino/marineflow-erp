@@ -115,6 +115,8 @@ Deno.test("register_payment manda quem pediu — sem isso o banco respondia 'ace
 Deno.test("duplicar: número do contador, peças com o preço de venda e, se algo falhar, nada fica gravado", async () => {
   const origem = {
     id: "orc-1", service_order_number: "ORÇ-00100", client_id: "c1", vessel_id: "v1", status: "invoiced",
+    // revisão da Fase 3 (R1): a OS de origem já foi entregue — a cópia não leva a entrega (o banco recusaria)
+    check_out_at: "2026-10-20T20:00:00Z", delivered_at: "2026-10-21T13:00:00Z",
     problem_description: "Trocar baterias", quote_validity_date: "2026-09-01", share_token: "tok", grand_total: 999,
     service_order_parts: [{ product_id: "p1", quantity: 2, unit_cost_snapshot: 10, unit_sale_snapshot: 15, line_total_cost: 20, line_total_sale: 30, currency_snapshot: "BRL", notes: null }],
     service_order_services: [{ service_id: "s1", name_snapshot: "Instalação", quantity: 1, unit_price_snapshot: 300, line_total: 300 }],
@@ -127,7 +129,9 @@ Deno.test("duplicar: número do contador, peças com o preço de venda e, se alg
   assertEquals(cabecalho.status, "draft");
   assertEquals(cabecalho.problem_description, "Trocar baterias");
   assertEquals(cabecalho.created_by, "dono-1");
-  for (const fora of ["share_token", "grand_total", "quote_validity_date", "service_order_parts"]) assertEquals(fora in cabecalho, false, fora);
+  for (const fora of ["share_token", "grand_total", "quote_validity_date", "service_order_parts", "check_out_at", "delivered_at"]) {
+    assertEquals(fora in cabecalho, false, fora);
+  }
   const [, pecas] = db.chamadas.insert.find(([t]) => t === "service_order_parts")!;
   assertEquals(pecas[0].unit_sale_snapshot, 15);
   // O serviço falhou: a cópia inteira é desfeita e a resposta não diz que copiou.

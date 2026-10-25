@@ -103,7 +103,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowLeft, Plus, Trash2, AlertTriangle, Receipt, Lock, RotateCcw, Ban, FileText, Printer, ChevronDown, MessageCircle, Copy, Download, Loader2, DollarSign, Percent, Hash, MoreHorizontal, ClipboardPen, ClipboardCheck } from 'lucide-react';
 import { toast } from 'sonner';
-import { avisarSeNaoMudou } from '@/lib/status-pela-tela';
+import { avisarSeNaoMudou, ehPortaPedeMotivo } from '@/lib/status-pela-tela';
+import { JanelaDoMotivo } from '@/components/JanelaDoMotivo';
 import { normalizePhoneE164 } from '@/lib/masks';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { recordWhatsAppEvent } from '@/lib/diagnostics';
@@ -600,6 +601,8 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   // Card installments
   const [selectedInstallments, setSelectedInstallments] = useState(1);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  // Revisão da Fase 3 (R2): a OS em andamento volta a aguardar com o motivo (a porta pede; a janela pergunta).
+  const [paradaDaOs, setParadaDaOs] = useState<string | null>(null);
   const [showReopenDialog, setShowReopenDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [reopenReason, setReopenReason] = useState('');
@@ -1205,7 +1208,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
     }
   };
 
-  const handleStatusChange = async (newStatus: string) => {
+  const handleStatusChange = async (newStatus: string, motivo?: string) => {
     if (!orderId) return;
     try {
       // D11 (decisão do dono, 17/09/2026): concluir exige levantamento RESPONDIDO nos
@@ -1221,7 +1224,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           return;
         }
       }
-      if (avisarSeNaoMudou(await updateStatus.mutateAsync({ id: orderId, status: newStatus }))) return; // Fase 3: a porta não mudou nada
+      const mudanca = await updateStatus.mutateAsync({ id: orderId, status: newStatus, motivo });
+      setParadaDaOs(null);
+      if (avisarSeNaoMudou(mudanca)) return; // Fase 3: a porta não mudou nada
       toast.success(`Status alterado para ${(t.status as Record<string, string>)[newStatus]}`);
 
       // Deposit alert: when completing/invoicing, check if a deposit was already paid
@@ -1283,6 +1288,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       }
     } catch (e: any) {
       if (tratarRecusaDeAgrupamento(e)) return;
+      if (ehPortaPedeMotivo(e)) { setParadaDaOs(e.para); return; } // revisão da Fase 3 (R2): pergunta o motivo
       toast.error(e.message || 'Erro ao alterar status');
     }
   };
@@ -2146,6 +2152,9 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
           }}
         />
       )}
+
+      <JanelaDoMotivo para={paradaDaOs} ocupado={updateStatus.isPending} onFechar={() => setParadaDaOs(null)}
+        onConfirmar={(para, motivo) => handleStatusChange(para, motivo)} />
 
       {/* Prompt opt-in de conclusão (avisar cliente + saldo) */}
       {!isNew && orderId && (

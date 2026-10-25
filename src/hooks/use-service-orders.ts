@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { writeAuditLog } from '@/hooks/use-audit-log';
 import { cancelServiceOrderCascade, reopenServiceOrder, updateReceivableFromSO } from '@/lib/cascade-updates';
-import type { ResultadoDoStatusPelaTela } from '@/lib/status-pela-tela';
+import { PortaPedeMotivo, type ResultadoDoStatusPelaTela } from '@/lib/status-pela-tela';
 // (Fase 3) o aviso da porta que não mudou nada mora fora do hook (os testes de tela trocam este módulo inteiro)
 export { avisarSeNaoMudou, type ResultadoDoStatusPelaTela } from '@/lib/status-pela-tela';
 import {
@@ -298,13 +298,16 @@ export function useUpdateServiceOrder() {
  *
  * PLANO B (_shared/porta-ausente.ts): com a porta completa ainda não aplicada (PGRST202/42883), o caminho de antes
  * (statusPelaTelaSemAPorta, com ensureCompletionReceivables) — só nesse caso; qualquer outro erro continua erro.
+ * Revisão da Fase 3 (R2): `motivo` vai à porta (p_motivo) — a OS em andamento volta a aguardar só com ele; a recusa só por
+ * falta dele vira PortaPedeMotivo (quem chama abre a janela do motivo).
  * Exportada para o teste.
  */
-export async function mudarStatusPelaTela(id: string, status: string): Promise<ResultadoDoStatusPelaTela> {
+export async function mudarStatusPelaTela(id: string, status: string, motivo?: string | null): Promise<ResultadoDoStatusPelaTela> {
   if (status === 'cancelled') {
     throw new Error('Use o botão "Cancelar OS" para cancelar com estorno completo.');
   }
-  const { data, error } = await supabase.rpc('os_transicionar_status', argumentosDaPortaCompleta(id, status, 'tela') as any);
+  const comMotivo = motivo?.trim() ? { p_motivo: motivo.trim() } : {};
+  const { data, error } = await supabase.rpc('os_transicionar_status', argumentosDaPortaCompleta(id, status, 'tela', comMotivo) as any);
   if (error) {
     if (!ehPortaAusente(error)) throw new Error((error as { message?: string }).message || 'O banco não mudou o status desta OS.');
     const antes = await statusPelaTelaSemAPorta(supabase, id, status, {
@@ -315,9 +318,15 @@ export async function mudarStatusPelaTela(id: string, status: string): Promise<R
     });
     return { mudou: antes.mudou, status, texto: '', justConverted: antes.convertido, numero: antes.numero, semAPorta: true };
   }
-  const r = (data ?? {}) as { ok?: boolean; mudou?: boolean; para?: string; de?: string; texto?: string; convertido?: boolean; numero?: string };
+  const r = (data ?? {}) as {
+    ok?: boolean; mudou?: boolean; para?: string; de?: string; texto?: string; convertido?: boolean; numero?: string;
+    pede_motivo?: boolean;
+  };
   const texto = String(r.texto ?? '').trim();
-  if (r.ok !== true) throw new Error(texto || 'O banco não mudou o status desta OS.');
+  if (r.ok !== true) {
+    if (r.pede_motivo === true) throw new PortaPedeMotivo(texto || 'Diga o motivo para a OS voltar a aguardar.', status);
+    throw new Error(texto || 'O banco não mudou o status desta OS.');
+  }
   const ficou = String(r.para ?? status);
   if (r.mudou !== true) {
     return { mudou: false, status: ficou, texto, justConverted: false, numero: null, semMudanca: texto || 'Nada mudou.' };
@@ -328,14 +337,14 @@ export async function mudarStatusPelaTela(id: string, status: string): Promise<R
 export function useUpdateServiceOrderStatus() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const r = await mudarStatusPelaTela(id, status);
+    mutationFn: async ({ id, status, motivo }: { id: string; status: string; motivo?: string | null }) => {
+      const r = await mudarStatusPelaTela(id, status, motivo);
       if (r.mudou) {
         await writeAuditLog({
           table_name: 'service_orders',
           record_id: id,
           action: 'update',
-          new_value: { status: r.status, via: r.semAPorta ? 'tela (sem a porta)' : 'tela' },
+          new_value: { status: r.status, via: r.semAPorta ? 'tela (sem a porta)' : 'tela', ...(motivo?.trim() ? { motivo: motivo.trim() } : {}) },
         });
       }
       return r;
@@ -866,6 +875,9 @@ export function useDuplicateServiceOrder() {
         id, created_at, updated_at, service_order_number,
         scheduled_start_at, scheduled_end_at,
         check_in_at, check_out_at,
+        // Agenda de Produção (revisão da Fase 3, R1): a entrega é da OS de origem. Copiada sem a saída, o CHECK
+        // so_entrega_depois_da_conclusao e o gatilho da entrega (trg_so_entrega_pela_porta, também no INSERT) recusavam a cópia.
+        delivered_at,
         client_signature_url, signed_at, signed_by_name, signed_document_hash,
         requires_resignature, resignature_requested_at,
         share_token,

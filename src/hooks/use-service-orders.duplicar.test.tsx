@@ -58,6 +58,18 @@ describe('duplicar OS', () => {
     expect(copiadas[0]).toMatchObject({ service_order_id: 'nova' });
   });
 
+  // Agenda de Produção (revisão da Fase 3, R1): duplicar uma OS já entregue falhava — a cópia levava delivered_at sem
+  // check_out_at, e o CHECK so_entrega_depois_da_conclusao (e o gatilho da entrega, também no INSERT) recusavam.
+  it('duplicar uma OS já entregue: a cópia não leva a saída nem a entrega', async () => {
+    Object.assign(fonte, { check_in_at: '2026-10-20T11:00:00Z', check_out_at: '2026-10-20T20:00:00Z', delivered_at: '2026-10-21T13:00:00Z' });
+    const { result } = renderHook(() => useDuplicateServiceOrder(), { wrapper });
+    result.current.mutate({ sourceId: 'os1', mode: 'order' });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const cabecalho = (gravacoes.service_orders ?? [])[0] as Record<string, unknown>;
+    for (const campo of ['check_in_at', 'check_out_at', 'delivered_at']) expect(cabecalho, campo).not.toHaveProperty(campo);
+    expect(cabecalho).toMatchObject({ status: 'open' });
+  });
+
   it('só despesa de comprovante: nenhuma despesa é gravada na OS nova', async () => {
     fonte.service_order_expenses = [despesa({ id: 'cmp', billable_to_client: false, origem_codigo: 'CMP-00124' })];
     const { result } = renderHook(() => useDuplicateServiceOrder(), { wrapper });

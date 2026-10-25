@@ -47,7 +47,7 @@ vi.mock('@/lib/completion-receivables', () => ({ ensureCompletionReceivables: h.
 vi.mock('sonner', () => ({ toast: h.toast }));
 
 import { mudarStatusPelaTela, useUpdateServiceOrderStatus } from './use-service-orders';
-import { avisarSeNaoMudou } from '@/lib/status-pela-tela';
+import { avisarSeNaoMudou, ehPortaPedeMotivo, motivoDaParada } from '@/lib/status-pela-tela';
 
 function wrapper({ children }: { children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -163,5 +163,36 @@ describe('avisarSeNaoMudou', () => {
     expect(avisarSeNaoMudou({})).toBe(false);
     expect(avisarSeNaoMudou(undefined)).toBe(false);
     expect(h.toast).not.toHaveBeenCalled();
+  });
+});
+
+// Revisão da Fase 3 (R2): a OS em andamento volta a aguardar pela tela com o motivo; a recusa só por falta dele é PortaPedeMotivo.
+describe('o motivo da parada pela tela', () => {
+  it('com o motivo: vai à porta em p_motivo (via tela) e fica na auditoria', async () => {
+    h.estado.porta = { ok: true, mudou: true, de: 'in_progress', para: 'awaiting_parts', texto: 'Lenine (OS-00074): de em andamento para aguardando peças — falta material.' };
+    const { result } = renderHook(() => useUpdateServiceOrderStatus(), { wrapper });
+    await result.current.mutateAsync({ id: 'os-1', status: 'awaiting_parts', motivo: ' falta material ' });
+    expect(portas()).toEqual([{ p_os: 'os-1', p_para: 'awaiting_parts', p_via: 'tela', p_check_out: null, p_motivo: 'falta material' }]);
+    expect(h.auditoria).toHaveBeenCalledWith(expect.objectContaining({ new_value: { status: 'awaiting_parts', via: 'tela', motivo: 'falta material' } }));
+  });
+
+  it('a porta recusa só por falta do motivo (pede_motivo): PortaPedeMotivo com a frase e o status pedido', async () => {
+    h.estado.porta = { ok: false, mudou: false, de: 'in_progress', para: 'in_progress', pede_motivo: true,
+      texto: 'A OS já começou: só volta a aguardar quando você diz que parou e por quê.' };
+    const erro = await mudarStatusPelaTela('os-1', 'awaiting_client').catch((e) => e);
+    expect(ehPortaPedeMotivo(erro)).toBe(true);
+    expect(erro).toMatchObject({ para: 'awaiting_client', message: 'A OS já começou: só volta a aguardar quando você diz que parou e por quê.' });
+  });
+
+  it('a recusa sem pede_motivo continua erro comum', async () => {
+    h.estado.porta = { ok: false, mudou: false, de: 'in_progress', para: 'in_progress', texto: 'A OS já começou: só volta a aguardar quando você diz que parou e por quê.' };
+    const erro = await mudarStatusPelaTela('os-1', 'awaiting_parts').catch((e) => e);
+    expect(ehPortaPedeMotivo(erro)).toBe(false);
+    expect(erro).toBeInstanceOf(Error);
+  });
+
+  it('o texto do motivo: o porquê e o que aconteceu, sem espaço sobrando', () => {
+    expect(motivoDaParada('awaiting_parts', '')).toBe('falta material');
+    expect(motivoDaParada('awaiting_client', '  a cor   do estofado ')).toBe('esperando o cliente: a cor do estofado');
   });
 });
