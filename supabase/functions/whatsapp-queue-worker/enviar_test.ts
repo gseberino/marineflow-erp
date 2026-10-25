@@ -11,11 +11,16 @@
 //  5. (revisão da Fase 3, C1 — R7, NOVO-agenda-28) a resposta DIRETA à equipe (a chave "agenda-equipe:resposta:…") sai
 //     também fora da janela da equipe, dentro da janela dela (06:00–22:00 do banco) e só até o prazo (10 min) depois da
 //     mensagem do técnico; nunca no domingo nem com a equipe fora de ligado; a outra linha da agenda segue a janela de sempre;
-//  6. (C1, item 10) o lote só leva as linhas que este disparo travou em 'sending' (a outra não sai duas vezes).
+//  6. (C1, item 10) o lote só leva as linhas que este disparo travou em 'sending' (a outra não sai duas vezes);
+//  7. (Fase 4, P5) a linha 'agenda-fornecedor' (a 3ª trava da mensagem ao fornecedor) só sai no dia dela, dentro de
+//     [fornecedor_janela_inicio, fornecedor_janela_fim), de segunda a sexta (o sábado só com fornecedor_sabado), com o
+//     fornecedor ligado; fora disso vira 'failed' e o registro em agenda_fornecedor_mensagens fica recusado; a janela dele é
+//     lida à parte (a que não se lê não segura a equipe); e NENHUMA outra origem muda de comportamento com ela no lote.
 import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { enviarLote, type ItemDaFila, travarLote } from "./enviar.ts";
 import {
   COLUNAS_DA_JANELA,
+  COLUNAS_DA_JANELA_DO_FORNECEDOR,
   ehRespostaDireta,
   intervaloEmSegundos,
   origemComJanelaDaAgenda,
@@ -399,4 +404,143 @@ Deno.test("index.ts: o lote vai pelo enviarLote, sem outro sendText", async () =
   assertEquals(fonte.includes("enviarLote(admin, provider, batch"), false);
   assertEquals(fonte.includes('.update({ status: "sending"'), false);
   assertEquals(fonte.includes("sendText("), false);
+});
+
+// ── 7. (Fase 4, P5) A mensagem ao fornecedor: a 3ª trava ────────────────────────────────────────────────
+/** A linha de agenda_config por colunas pedidas (cada janela é um SELECT à parte). */
+const CONFIG_FORNECEDOR = {
+  modo_fornecedor: "ligado", fornecedor_janela_inicio: "08:00:00", fornecedor_janela_fim: "18:00:00", fornecedor_sabado: false,
+};
+function bancoPorColunas(respostas: Record<string, { data?: unknown; error?: unknown }> = {
+  [COLUNAS_DA_JANELA]: { data: CONFIG },
+  [COLUNAS_DA_JANELA_DO_FORNECEDOR]: { data: CONFIG_FORNECEDOR },
+}) {
+  const escritas: Escrita[] = [];
+  const leituras: string[] = [];
+  const db = {
+    from(tabela: string) {
+      return {
+        select(colunas: string) {
+          leituras.push(`${tabela}: ${colunas}`);
+          const r = respostas[colunas] ?? { data: null, error: { message: `coluna não esperada: ${colunas}` } };
+          return { maybeSingle: async () => ({ data: r.data ?? null, error: r.error ?? null }) };
+        },
+        update(valores: Record<string, unknown>) {
+          const e: Escrita = { tabela, valores, filtros: [] };
+          escritas.push(e);
+          const cadeia = {
+            eq(col: string, v: unknown) {
+              e.filtros.push([col, v]);
+              return cadeia;
+            },
+            then(ok: (r: { error: null }) => unknown) {
+              return Promise.resolve({ error: null }).then(ok);
+            },
+          };
+          return cadeia;
+        },
+      };
+    },
+  };
+  return { db, escritas, leituras };
+}
+const forn = (id: string, marcada: string, extra: Partial<ItemDaFila> = {}) =>
+  item(id, "agenda-fornecedor", marcada, { dedupe_key: `agenda-fornecedor:terco:linha-${id}:2`, ...extra });
+
+Deno.test("P5 agenda-fornecedor na janela (qua 10:00) com o fornecedor ligado: sai; só a configuração do fornecedor é lida, uma vez", async () => {
+  const { db, escritas, leituras } = bancoPorColunas();
+  const { provider, enviados } = provedorDeMentira();
+  const r = await enviarLote(db, provider, [forn("1", "2026-10-28T10:00:00"), forn("2", "2026-10-28T10:00:00")],
+    { delayMs: 0, agora: () => brt("2026-10-28T10:01:00") });
+  assertEquals(r, [{ id: "1", ok: true }, { id: "2", ok: true }]);
+  assertEquals(enviados.length, 2);
+  assertEquals(leituras, [`agenda_config: ${COLUNAS_DA_JANELA_DO_FORNECEDOR}`]);
+  assertEquals(daFila(escritas, "1")[0].valores.status, "sent");
+});
+
+Deno.test("P5 agenda-fornecedor às 19:00 (o worker voltou depois do fim): failed com o motivo, nada sai, o registro do fornecedor recusado/janela; a outra origem sai", async () => {
+  const { db, escritas } = bancoPorColunas();
+  const { provider, enviados } = provedorDeMentira();
+  const r = await enviarLote(db, provider, [
+    forn("1", "2026-10-28T10:00:00"),
+    item("2", "reply-router", "2026-10-28T18:59:00"),
+  ], { delayMs: 0, agora: () => brt("2026-10-28T19:00:00") });
+  assertEquals(enviados, ["5547900000002"]);
+  assertEquals(r[0], {
+    id: "1", ok: false, give_up: true, janela_da_agenda: "janela",
+    error: "agenda-fornecedor: fora da janela na hora de enviar (08:00–18:00): não saiu",
+  });
+  assertEquals(daFila(escritas, "1")[0].valores, { status: "failed", failed_reason: r[0].error, processing_started_at: null });
+  const reg = escritas.filter((e) => e.tabela === "agenda_fornecedor_mensagens");
+  assertEquals(reg.length, 1);
+  assertEquals(reg[0].valores, { estado: "recusada", recusa_motivo: "janela" });
+  assertEquals(reg[0].filtros, [["fila_id", "1"], ["estado", "enfileirada"]]);
+  assertEquals(escritas.some((e) => e.tabela === "agenda_equipe_mensagens"), false);
+});
+
+Deno.test("P5 agenda-fornecedor: sábado (fim_de_semana), domingo, o fornecedor fora de ligado — cada um com o seu motivo; com fornecedor_sabado o sábado sai", async () => {
+  const casos: Array<[string, string, Record<string, unknown>, string | null]> = [
+    ["2026-10-31T10:00:00", "2026-10-31T10:00:00", CONFIG_FORNECEDOR, "fim_de_semana"],
+    ["2026-11-01T10:00:00", "2026-11-01T10:00:00", { ...CONFIG_FORNECEDOR, fornecedor_sabado: true }, "domingo"],
+    ["2026-10-28T10:00:00", "2026-10-28T10:00:00", { ...CONFIG_FORNECEDOR, modo_fornecedor: "sombra" }, "modo"],
+    ["2026-10-31T10:00:00", "2026-10-31T10:00:00", { ...CONFIG_FORNECEDOR, fornecedor_sabado: true }, null],
+  ];
+  for (const [marcada, agora, config, motivo] of casos) {
+    const { db, escritas } = bancoPorColunas({ [COLUNAS_DA_JANELA_DO_FORNECEDOR]: { data: config } });
+    const { provider, enviados } = provedorDeMentira();
+    const r = await enviarLote(db, provider, [forn("1", marcada)], { delayMs: 0, agora: () => brt(agora) });
+    assertEquals([enviados.length, r[0].janela_da_agenda ?? null], [motivo ? 0 : 1, motivo], `${marcada} ${JSON.stringify(config)}`);
+    if (motivo) {
+      assertEquals(escritas.find((e) => e.tabela === "agenda_fornecedor_mensagens")?.valores.recusa_motivo, motivo);
+    }
+  }
+});
+
+Deno.test("P5 a janela do fornecedor que não se lê (a migration da Fase 4 ainda não aplicada) não segura a equipe nem as outras origens", async () => {
+  const { db, leituras } = bancoPorColunas({
+    [COLUNAS_DA_JANELA]: { data: CONFIG },
+    [COLUNAS_DA_JANELA_DO_FORNECEDOR]: { error: { message: "column agenda_config.modo_fornecedor does not exist", code: "42703" } },
+  });
+  const { provider, enviados } = provedorDeMentira();
+  const r = await enviarLote(db, provider, [
+    item("1", "agenda-equipe", "2026-10-28T10:00:00"),
+    forn("2", "2026-10-28T10:00:00"),
+    item("3", "reply-router", "2026-10-28T10:00:00"),
+    forn("4", "2026-10-28T10:00:00"),
+  ], { delayMs: 0, agora: () => brt("2026-10-28T10:01:00") });
+  assertEquals(r.map((x) => [x.id, x.ok, x.janela_da_agenda ?? null]),
+    [["1", true, null], ["2", false, "janela"], ["3", true, null], ["4", false, "janela"]]);
+  assertEquals(enviados, ["5547900000001", "5547900000003"]);
+  assertStringIncludes(String(r[1].error), "não consegui ler a janela da agenda (column agenda_config.modo_fornecedor does not exist)");
+  // uma leitura por janela, cada uma só das colunas dela
+  assertEquals(leituras, [`agenda_config: ${COLUNAS_DA_JANELA}`, `agenda_config: ${COLUNAS_DA_JANELA_DO_FORNECEDOR}`]);
+});
+
+Deno.test("P5 nenhuma outra origem muda: com ou sem a linha do fornecedor no lote, as mesmas escritas e os mesmos envios (sábado às 23:00)", async () => {
+  const outras = () => [
+    item("1", null, "2026-10-31T22:59:00"),
+    item("2", "reply-router", "2026-10-31T03:00:00"),
+    item("3", "quote-reminders", "2026-10-30T23:59:00"),
+    item("4", "agenda-cliente", "2026-10-31T23:00:00"),
+    item("5", "comprovantes", "2026-10-31T23:00:00"),
+  ];
+  const sem = bancoPorColunas();
+  const p1 = provedorDeMentira();
+  const r1 = await enviarLote(sem.db, p1.provider, outras(), { delayMs: 0, agora: () => brt("2026-10-31T23:00:00") });
+  const com = bancoPorColunas();
+  const p2 = provedorDeMentira();
+  const r2 = await enviarLote(com.db, p2.provider, [...outras(), forn("9", "2026-10-31T10:00:00")],
+    { delayMs: 0, agora: () => brt("2026-10-31T23:00:00") });
+  assertEquals(sem.leituras, []);
+  assertEquals(r2.slice(0, 5), r1);
+  assertEquals(p2.enviados, p1.enviados);
+  assertEquals(p1.enviados.length, 5);
+  for (const id of ["1", "2", "3", "4", "5"]) {
+    const a = daFila(sem.escritas, id).map((e) => ({ ...e.valores, sent_at: "x" }));
+    const b = daFila(com.escritas, id).map((e) => ({ ...e.valores, sent_at: "x" }));
+    assertEquals(b, a, id);
+  }
+  // a do fornecedor (sábado, sem fornecedor_sabado) não saiu
+  assertEquals(r2[5].janela_da_agenda, "fim_de_semana");
+  assertEquals(com.leituras, [`agenda_config: ${COLUNAS_DA_JANELA_DO_FORNECEDOR}`]);
 });

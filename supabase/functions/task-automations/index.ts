@@ -32,6 +32,7 @@ import { sincronizarMaterialDaAgenda } from "./material-da-agenda.ts";
 import { lerModosDaAgenda, lerModosDaEquipe, r10DesligadaPelaAgenda } from "./agenda-modos.ts";
 import { vigiarAgenda } from "./agenda-vigia.ts";
 import { rodarRotinaDaAgenda } from "./agenda-rotina.ts";
+import { vigiarMaterialDaAgenda } from "./agenda-material.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
@@ -435,6 +436,19 @@ servirComCors(async (req) => {
       agendaMaterial = { erro: String((e as any)?.message ?? e) };
     }
 
+    // A vigia do material (Fase 4, P5): depois do material (as linhas em dia) e antes da rotina e da vigia (a vigia lê a
+    // previsão que a nota ou o fornecedor atualizou no mesmo tique). A nota, o Pix, a conversa do fornecedor, a pergunta ao
+    // fornecedor nos terços e os cadastros, tudo no banco (agenda_material_vigiar); nada é enviado daqui. Tem o próprio
+    // try/catch (vigiarMaterialDaAgenda nunca lança: devolve { erro } e grava em app_error_logs); o de fora é a segunda
+    // trava, para nada daqui parar a rotina, a vigia e as regras.
+    let agendaMaterialVigia: unknown = null;
+    try {
+      agendaMaterialVigia = await vigiarMaterialDaAgenda(db, new Date());
+    } catch (e) {
+      console.error("agenda:material-vigia:", e);
+      agendaMaterialVigia = { erro: String((e as any)?.message ?? e) };
+    }
+
     // A rotina da equipe e da diária (Fase 3, P4): logo antes da vigia (o "não vou" e o silêncio replanejam, e a vigia
     // lê o plano já mudado). Tem o próprio try/catch (rodarRotinaDaAgenda nunca lança: devolve { erro } e grava em
     // app_error_logs); o de fora é a segunda trava, para nada daqui parar a vigia e as regras.
@@ -462,7 +476,10 @@ servirComCors(async (req) => {
     const reminders = await processReminders(db);
     const recurrence = await materializeRecurrences(db);
 
-    const summary = { identidade, fios, agenda_material: agendaMaterial, agenda_rotina: agendaRotina, agenda_vigia: agendaVigia, rules, r10, reminders, recurrence };
+    const summary = {
+      identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,
+      agenda_vigia: agendaVigia, rules, r10, reminders, recurrence,
+    };
     // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as
     // regras quebraram não deixaria registro nenhum (created e resolved vazios).
     if (rules.created.length || rules.resolved.length || recurrence.created || rules.falhas.length) {

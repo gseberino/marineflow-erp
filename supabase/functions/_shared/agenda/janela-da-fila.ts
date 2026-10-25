@@ -7,7 +7,8 @@
 // item por item e na hora do envio, a mensagem de uma origem da agenda que está fora da janela dela vira FALHA com o motivo
 // e não sai.
 //
-// SÓ as origens listadas em ORIGENS_DA_AGENDA. Hoje é só 'agenda-equipe' (a rotina da equipe). As mensagens ao cliente da
+// SÓ as origens listadas em ORIGENS_DA_AGENDA: 'agenda-equipe' (a rotina da equipe) e, desde a Fase 4 (P5),
+// 'agenda-fornecedor' (a pergunta ao fornecedor nos terços do prazo; a janela dela está abaixo). As mensagens ao cliente da
 // Fase 5 entram aqui, cada uma com a janela dela (seg–sex e sáb com fim próprio; as colunas nascem em agenda_config na Fase
 // 5) e a tabela do registro dela. Toda outra origem (o lembrete, a cobrança, a resposta ao cliente, o comprovante…) o
 // worker manda como sempre: nem a configuração da agenda é lida (provado em whatsapp-queue-worker/enviar_test.ts).
@@ -24,6 +25,13 @@
 // dedupe_key da mensagem, "agenda-equipe:resposta:…"; a trava da fila no banco recusa a linha com outra chave). Fora disso
 // o banco põe a resposta no início da janela da equipe (_agenda_equipe_quando_responder): aí ela é uma linha como as
 // outras. A regra é a mesma do banco (_agenda_equipe_fora_da_janela).
+//
+// Fase 4 (P5): a mensagem-modelo ao FORNECEDOR ("a entrega continua prevista para qua 04/11?", source 'agenda-fornecedor',
+// registro agenda_fornecedor_mensagens) é a 2ª origem. A janela dela é outra: agenda_config.fornecedor_janela_inicio /
+// fornecedor_janela_fim, segunda a sexta (o sábado só com fornecedor_sabado; nunca o domingo) e modo_fornecedor = 'ligado'
+// — a mesma regra do banco (_agenda_fornecedor_fora_da_janela), nas três travas. A configuração de cada janela é lida num
+// SELECT À PARTE, só quando o lote tem linha daquela origem: o worker publicado antes da migration da Fase 4 continua
+// mandando a ficha da equipe (a leitura da equipe não pede coluna nova), e a linha do fornecedor, sem as colunas, não sai.
 
 // deno-lint-ignore no-explicit-any
 type Db = any;
@@ -35,6 +43,11 @@ export interface JanelaDeEnvio {
   fim: string;
 }
 
+/** (Fase 4, P5) A janela do fornecedor: a de envio + o sábado (agenda_config.fornecedor_sabado). */
+export interface JanelaDoFornecedor extends JanelaDeEnvio {
+  sabado: boolean;
+}
+
 /** (C1) A janela da resposta direta: o horário de Brasília e o prazo depois da mensagem do técnico. */
 export interface JanelaDaRespostaDireta {
   inicio: string;
@@ -43,18 +56,28 @@ export interface JanelaDaRespostaDireta {
   prazoSegundos: number;
 }
 
-/** As janelas que as origens da agenda usam (a Fase 5 acrescenta a do cliente). */
+/**
+ * As janelas que as origens da agenda usam (a Fase 5 acrescenta a do cliente). Cada uma vem da sua leitura
+ * (lerJanelasDaAgenda com o nome dela): a que não foi lida falta, e a linha que precisa dela não sai.
+ */
 export interface JanelasDaAgenda {
-  equipe: JanelaDeEnvio;
-  /** (C1, NOVO-agenda-28) a resposta direta à equipe */
-  respostaDireta: JanelaDaRespostaDireta;
+  equipe?: JanelaDeEnvio;
+  /** (C1, NOVO-agenda-28) a resposta direta à equipe (lida junto com a da equipe) */
+  respostaDireta?: JanelaDaRespostaDireta;
+  /** (Fase 4, P5) a mensagem ao fornecedor */
+  fornecedor?: JanelaDoFornecedor;
 }
+
+/** O nome de uma janela (a chave em JanelasDaAgenda e o que lerJanelasDaAgenda lê). */
+export type NomeDaJanela = "equipe" | "fornecedor";
 
 interface OrigemDaAgenda {
   /** qual janela vale para a origem */
-  janela: "equipe";
+  janela: NomeDaJanela;
+  /** a coluna do modo (o texto do motivo quando ele saiu de ligado) */
+  modo: "modo_equipe" | "modo_fornecedor";
   /** a tabela do registro da mensagem (a linha da fila aponta para ela em source_ref_id / fila_id) */
-  registro: "agenda_equipe_mensagens";
+  registro: "agenda_equipe_mensagens" | "agenda_fornecedor_mensagens";
   /** (C1) a resposta direta da origem: a linha cuja chave começa por este prefixo tem também a janela respostaDireta */
   respostaDireta?: { prefixoDaChave: string };
 }
@@ -63,8 +86,15 @@ interface OrigemDaAgenda {
 const ORIGENS_DA_AGENDA: Readonly<Record<string, OrigemDaAgenda>> = Object.freeze({
   "agenda-equipe": {
     janela: "equipe",
+    modo: "modo_equipe",
     registro: "agenda_equipe_mensagens",
     respostaDireta: { prefixoDaChave: "agenda-equipe:resposta:" },
+  },
+  // Fase 4 (P5): a pergunta ao fornecedor nos terços de um prazo longo (agenda_material_vigiar). Sem resposta direta.
+  "agenda-fornecedor": {
+    janela: "fornecedor",
+    modo: "modo_fornecedor",
+    registro: "agenda_fornecedor_mensagens",
   },
 });
 
@@ -73,8 +103,17 @@ export function origemComJanelaDaAgenda(source: unknown): boolean {
   return typeof source === "string" && Object.prototype.hasOwnProperty.call(ORIGENS_DA_AGENDA, source);
 }
 
-/** Um SELECT em agenda_config. Erro, sem a linha ou horário ilegível = lança (quem chama não deixa a mensagem sair). */
-export async function lerJanelasDaAgenda(db: Db): Promise<JanelasDaAgenda> {
+/** (Fase 4, P5) Qual janela vale para a linha da fila (null = a origem não é da agenda: sai como sempre). */
+export function janelaDaOrigem(source: unknown): NomeDaJanela | null {
+  return origemComJanelaDaAgenda(source) ? ORIGENS_DA_AGENDA[String(source)].janela : null;
+}
+
+/**
+ * Um SELECT em agenda_config, só das colunas da janela pedida (a da equipe, por padrão, como antes da Fase 4). Erro, sem a
+ * linha ou horário ilegível = lança (quem chama não deixa a mensagem sair).
+ */
+export async function lerJanelasDaAgenda(db: Db, qual: NomeDaJanela = "equipe"): Promise<JanelasDaAgenda> {
+  if (qual === "fornecedor") return { fornecedor: await lerJanelaDoFornecedor(db) };
   const { data, error } = await db.from("agenda_config")
     .select(COLUNAS_DA_JANELA)
     .maybeSingle();
@@ -99,10 +138,33 @@ export async function lerJanelasDaAgenda(db: Db): Promise<JanelasDaAgenda> {
   };
 }
 
-/** As colunas que a janela lê (um SELECT por lote). */
+/** As colunas que a janela da equipe lê (um SELECT por lote). */
 export const COLUNAS_DA_JANELA =
   "modo_equipe, equipe_janela_inicio, equipe_janela_fim, equipe_resposta_direta_inicio, equipe_resposta_direta_fim, " +
   "equipe_resposta_direta_prazo";
+
+/** (Fase 4, P5) As colunas que a janela do fornecedor lê (um SELECT à parte, só com linha do fornecedor no lote). */
+export const COLUNAS_DA_JANELA_DO_FORNECEDOR =
+  "modo_fornecedor, fornecedor_janela_inicio, fornecedor_janela_fim, fornecedor_sabado";
+
+/** (Fase 4, P5) A janela do fornecedor. Erro, sem a linha, horário ilegível ou o sábado que não é sim/não = lança. */
+async function lerJanelaDoFornecedor(db: Db): Promise<JanelaDoFornecedor> {
+  const { data, error } = await db.from("agenda_config")
+    .select(COLUNAS_DA_JANELA_DO_FORNECEDOR)
+    .maybeSingle();
+  if (error) throw new Error(String(error.message ?? error.code ?? "erro na leitura de agenda_config"));
+  if (!data) throw new Error("agenda_config sem a linha de parâmetros");
+  const inicio = String(data.fornecedor_janela_inicio ?? "");
+  const fim = String(data.fornecedor_janela_fim ?? "");
+  if (segundosDoDia(inicio) === null || segundosDoDia(fim) === null) {
+    throw new Error(`a janela do fornecedor está ilegível (${inicio || "—"} a ${fim || "—"})`);
+  }
+  if (typeof data.fornecedor_sabado !== "boolean") {
+    throw new Error(`o sábado do fornecedor está ilegível (${String(data.fornecedor_sabado ?? "—")})`);
+  }
+  const modo = typeof data.modo_fornecedor === "string" ? data.modo_fornecedor.trim().toLowerCase() : "";
+  return { ligado: modo === "ligado", inicio, fim, sabado: data.fornecedor_sabado };
+}
 
 /** O interval do Postgres como o PostgREST devolve ("00:10:00", "10 minutes", "PT10M") → segundos; outra coisa → null. */
 export function intervaloEmSegundos(v: unknown): number | null {
@@ -152,9 +214,12 @@ export function instanteEmBrasilia(quando: Date): { dia: string; diaSemana: numb
   };
 }
 
-/** Por que a mensagem não sai: o motivo (a lista fechada de agenda_equipe_mensagens.recusa_motivo) e o texto da fila. */
+/**
+ * Por que a mensagem não sai: o motivo (as listas fechadas de agenda_equipe_mensagens.recusa_motivo e
+ * agenda_fornecedor_mensagens.recusa_motivo; fim_de_semana só no fornecedor) e o texto da fila.
+ */
 export interface RecusaDaJanela {
-  motivo: "janela" | "domingo" | "modo";
+  motivo: "janela" | "domingo" | "modo" | "fim_de_semana";
   texto: string;
 }
 
@@ -180,13 +245,21 @@ export function recusaNaHoraDeEnviar(
 ): RecusaDaJanela | null {
   if (!origemComJanelaDaAgenda(item.source)) return null;
   const origem = String(item.source);
-  if (!janelas) {
-    return { motivo: "janela", texto: `${origem}: não consegui ler a janela da agenda (${erroDaLeitura ?? "sem resposta"}): não saiu` };
+  const def = ORIGENS_DA_AGENDA[origem];
+  const j = janelas?.[def.janela];
+  if (!janelas || !j) {
+    return {
+      motivo: "janela",
+      texto: `${origem}: não consegui ler a janela da agenda (${erroDaLeitura ?? `sem a janela ${def.janela}`}): não saiu`,
+    };
   }
-  const j = janelas[ORIGENS_DA_AGENDA[origem].janela];
-  if (!j.ligado) return { motivo: "modo", texto: `${origem}: modo_equipe saiu de ligado` };
+  if (!j.ligado) return { motivo: "modo", texto: `${origem}: ${def.modo} saiu de ligado` };
   const ag = instanteEmBrasilia(agora);
   if (ag.diaSemana === 0) return { motivo: "domingo", texto: `${origem}: domingo, não sai (nunca no domingo)` };
+  // (Fase 4, P5) o fornecedor: segunda a sexta; o sábado só com fornecedor_sabado
+  if (def.janela === "fornecedor" && ag.diaSemana === 6 && !(j as JanelaDoFornecedor).sabado) {
+    return { motivo: "fim_de_semana", texto: `${origem}: sábado, não sai (só de segunda a sexta)` };
+  }
   const marcada = new Date(String(item.scheduled_for ?? ""));
   if (isNaN(marcada.getTime())) return { motivo: "janela", texto: `${origem}: sem a hora marcada: não saiu` };
   const dia = instanteEmBrasilia(marcada).dia;
@@ -197,7 +270,7 @@ export function recusaNaHoraDeEnviar(
   if (ag.segundos >= ini && ag.segundos < fim) return null;
   // (C1, NOVO-agenda-28) a resposta direta a uma mensagem do técnico: a janela dela, e só até o prazo depois da mensagem
   // (a hora mais cedo entre a marcada e a de quando a linha entrou na fila)
-  if (ehRespostaDireta(item)) {
+  if (ehRespostaDireta(item) && janelas.respostaDireta) {
     const r = janelas.respostaDireta;
     const rIni = segundosDoDia(r.inicio)!, rFim = segundosDoDia(r.fim)!;
     const entrou = new Date(String(item.created_at ?? ""));

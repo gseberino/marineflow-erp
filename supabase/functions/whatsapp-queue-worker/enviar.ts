@@ -10,11 +10,16 @@
 // Revisão da Fase 3 (C1): a resposta direta à equipe tem a janela dela (R7, NOVO-agenda-28: o helper reconhece a linha pela
 // chave) e o lote só leva as linhas que ESTE disparo travou em 'sending' (item 10, travarLote): dois disparos do cron
 // juntos não mandam a mesma ficha duas vezes ao Roberto.
+//
+// Fase 4 (P5): a mensagem ao fornecedor ('agenda-fornecedor') passa pelo mesmo helper, com a janela dela (segunda a sexta,
+// fornecedor_janela_inicio a fornecedor_janela_fim, modo_fornecedor). Cada janela é lida à parte, uma vez por lote e só se
+// o lote tiver linha daquela origem: a leitura de uma não segura a outra, e as outras origens continuam sem ler nada.
 
 import {
+  janelaDaOrigem,
   type JanelasDaAgenda,
   lerJanelasDaAgenda,
-  origemComJanelaDaAgenda,
+  type NomeDaJanela,
   recusaNaHoraDeEnviar,
   recusarNaFila,
 } from "../_shared/agenda/janela-da-fila.ts";
@@ -93,25 +98,27 @@ export async function enviarLote(
   const agora = opcoes.agora ?? (() => new Date());
   const dormir = opcoes.dormir ?? dormirDeVerdade;
   const results: ResultadoDoItem[] = [];
-  // A janela da agenda: lida só se o lote tiver linha da agenda, uma vez (undefined = ainda não lida; null = falhou).
-  let janelas: JanelasDaAgenda | null | undefined;
-  let erroDaJanela: string | undefined;
+  // A janela da agenda: cada uma lida só se o lote tiver linha dela, uma vez (sem a chave = ainda não lida; janelas null =
+  // falhou, com o erro).
+  const lidas = new Map<NomeDaJanela, { janelas: JanelasDaAgenda | null; erro?: string }>();
 
   for (let i = 0; i < batch.length; i++) {
     const item = batch[i];
 
-    // Fase 3 (P7b): a linha da agenda fora da janela, na hora do envio, não sai.
-    if (origemComJanelaDaAgenda(item.source)) {
-      if (janelas === undefined) {
+    // Fase 3 (P7b): a linha da agenda fora da janela, na hora do envio, não sai. Fase 4 (P5): a do fornecedor também.
+    const qual = janelaDaOrigem(item.source);
+    if (qual) {
+      let lida = lidas.get(qual);
+      if (!lida) {
         try {
-          janelas = await lerJanelasDaAgenda(admin);
+          lida = { janelas: await lerJanelasDaAgenda(admin, qual) };
         } catch (e) {
-          janelas = null;
-          erroDaJanela = e instanceof Error ? e.message : String(e);
-          console.error("whatsapp-queue-worker: a janela da agenda não foi lida", erroDaJanela);
+          lida = { janelas: null, erro: e instanceof Error ? e.message : String(e) };
+          console.error(`whatsapp-queue-worker: a janela da agenda (${qual}) não foi lida`, lida.erro);
         }
+        lidas.set(qual, lida);
       }
-      const recusa = recusaNaHoraDeEnviar(item, agora(), janelas, erroDaJanela);
+      const recusa = recusaNaHoraDeEnviar(item, agora(), lida.janelas, lida.erro);
       if (recusa) {
         const erroAoMarcar = await recusarNaFila(admin, item, recusa);
         if (erroAoMarcar) console.error("whatsapp-queue-worker: a recusa da janela não foi gravada", item.id, erroAoMarcar);

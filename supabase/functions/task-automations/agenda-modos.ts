@@ -102,3 +102,50 @@ export function r10DesligadaPelaAgenda(m: Pick<ModosDaEquipe, "equipe" | "erro" 
   if (m.erro !== undefined && !LEITURA_SEM_A_FASE_3.has(m.codigo ?? "")) return R10_PULADA;
   return null;
 }
+
+// ── Fase 4 (P5, 25/10/2026): os modos do material (a nota, o Pix, o detector e a mensagem ao fornecedor) ─────────────
+// Lidos num SELECT à parte, como os da equipe: as colunas só existem com a migration 20261027100000, e um SELECT que
+// falhasse por elas não pode derrubar os modos das Fases 2 e 3. Ilegível = desligado e o passo do material não chama o
+// banco (o lado seguro: nada é gravado e nada sai ao fornecedor).
+
+export interface ModosDoMaterial {
+  /** agenda_config.modo_material: a nota, o Pix, as perguntas de material e de cadastro. */
+  material: ModoDaAgenda;
+  /** agenda_config.modo_detector: a leitura da conversa do fornecedor. */
+  detector: ModoDaAgenda;
+  /** agenda_config.modo_fornecedor: a mensagem-modelo ao fornecedor nos terços do prazo. */
+  fornecedor: ModoDaAgenda;
+  /** A leitura falhou (o motivo). */
+  erro?: string;
+  /** O código do erro da leitura (PostgREST/Postgres), ou SEM_LINHA / EXCECAO. */
+  codigo?: string;
+}
+
+export const MATERIAL_DESLIGADO: Readonly<ModosDoMaterial> = Object.freeze({
+  material: "desligado",
+  detector: "desligado",
+  fornecedor: "desligado",
+});
+
+/** Um SELECT em agenda_config (modo_material, modo_detector, modo_fornecedor). Nunca lança: erro = desligado. */
+export async function lerModosDoMaterial(db: Db): Promise<ModosDoMaterial> {
+  try {
+    const { data, error } = await db.from("agenda_config").select("modo_material, modo_detector, modo_fornecedor").maybeSingle();
+    if (error) {
+      return {
+        ...MATERIAL_DESLIGADO,
+        erro: String(error.message ?? error.code ?? "erro na leitura"),
+        codigo: String(error.code ?? "") || "SEM_CODIGO",
+      };
+    }
+    if (!data) return { ...MATERIAL_DESLIGADO, erro: "agenda_config sem a linha de parâmetros", codigo: "SEM_LINHA" };
+    return { material: lerModo(data.modo_material), detector: lerModo(data.modo_detector), fornecedor: lerModo(data.modo_fornecedor) };
+  } catch (e) {
+    return { ...MATERIAL_DESLIGADO, erro: String((e as Error)?.message ?? e), codigo: "EXCECAO" };
+  }
+}
+
+/** (P5) A leitura falhou porque a Fase 4 ainda não está no banco: a coluna ou a tabela que não existe, a linha que falta. */
+export function leituraSemAFase4(m: Pick<ModosDoMaterial, "erro" | "codigo">): boolean {
+  return m.erro !== undefined && LEITURA_SEM_A_FASE_3.has(m.codigo ?? "");
+}
