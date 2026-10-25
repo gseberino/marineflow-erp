@@ -809,7 +809,8 @@ as $function$
     select pa.supplier_id as f, count(*)::int as n
       from public.payables pa, c
      where pa.supplier_id is not null and pa.issue_date > p_hoje - 365 and pa.issue_date <= p_hoje
-       and coalesce(pa.status, '') <> 'cancelled' and pa.expense_category = any (c.pix_categorias)
+       and coalesce(pa.status, '') <> 'cancelled'
+       and public._agenda_categoria_de_material(pa.expense_category, c.pix_categorias)  -- sem maiúscula nem acento (C2, R6)
      group by 1
   ),
   top as (
@@ -836,7 +837,7 @@ as $function$
 $function$;
 
 comment on function public._agenda_fornecedores_principais(date) is
-  'Agenda de Produção (Fase 4, P5): os fornecedores que importam para a agenda — os de mais contas a pagar nas categorias de material (agenda_config.pix_categorias) nos últimos 365 dias, até fornecedores_principais_max, e todos os de compra viva (_agenda_compras_vivas, OC aberta dos últimos oc_viva_dias, nota a caminho); só ativos. {fornecedor_id, contas, vivo}, mais contas primeiro. As perguntas de cadastro e a pergunta dos principais leem daqui (o foco fornecedores do P6 pode ler também).';
+  'Agenda de Produção (Fase 4, P5): os fornecedores que importam para a agenda — os de mais contas a pagar nas categorias de material (agenda_config.pix_categorias, sem maiúscula nem acento) nos últimos 365 dias, até fornecedores_principais_max, e todos os de compra viva (_agenda_compras_vivas, OC aberta dos últimos oc_viva_dias, nota a caminho); só ativos. {fornecedor_id, contas, vivo}, mais contas primeiro. As perguntas de cadastro e a pergunta dos principais leem daqui (o foco fornecedores do P6 pode ler também).';
 
 -- As perguntas de cadastro: o cadastro repetido de classe diferente e o fornecedor sem lugar (fornecedor_cadastro:<id>),
 -- e a pergunta única dos principais (fornecedores_prazo). As chaves são as do P1: o *grava* do prazo do fornecedor

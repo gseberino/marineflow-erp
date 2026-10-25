@@ -315,7 +315,7 @@ insert into _funcoes_f4 values
   ('public._agenda_classe_texto(text, integer, integer)', 'leitura'), ('public._agenda_prazo_do_fornecedor(uuid)', 'leitura'),
   ('public._agenda_chegada_pela_classe(text, integer, integer, date)', 'leitura'),
   ('public._agenda_chegada_estimada(uuid, date)', 'leitura'), ('public._agenda_classe_do_fornecedor(uuid)', 'leitura'),
-  ('public.os_prontidao(uuid, date)', 'leitura'),
+  ('public.os_prontidao(uuid, date)', 'leitura'), ('public._agenda_categoria_de_material(text, text[])', 'leitura'),
   ('public.agenda_rascunho_fornecedor(uuid, text, text, text, numeric, text, text, text, date)', 'rpc'),
   ('public.agenda_rascunho_gravar(uuid, date)', 'rpc'),
   ('public._agenda_aplicar_fornecedor(uuid, jsonb, text, date)', 'interna'), ('public._agenda_fornecedor_dito(text)', 'interna'),
@@ -343,6 +343,22 @@ select 'B2d security definer só o rascunho, o *grava* e o gatilho do original; 
        and bool_and(p.provolatile in ('s', 'i') or k.quem <> 'leitura'),
        string_agg(p.proname || ':' || p.provolatile::text || ':' || p.prosecdef::text, ', ')
   from _funcoes_f4 k join pg_proc p on p.oid = k.f::regprocedure;
+
+-- Revisão da Fase 4, C2 (R6): a categoria de material compara sem maiúscula nem acento (produção tem 3 "Compras de
+-- Mercadorias" com M maiúsculo na fila financeira).
+insert into _resultado
+select 'B2f _agenda_categoria_de_material: "Compras de Mercadorias", "PEÇAS E MATERIAIS" e "Pecas e materiais" valem; "Alimentação", vazia e nula não',
+       public._agenda_categoria_de_material('Compras de Mercadorias', c.pix_categorias)
+       and public._agenda_categoria_de_material('PEÇAS E MATERIAIS', c.pix_categorias)
+       and public._agenda_categoria_de_material(' Pecas e materiais ', c.pix_categorias)
+       and public._agenda_categoria_de_material('Materiais e insumos operacionais', c.pix_categorias)
+       and not public._agenda_categoria_de_material('Alimentação', c.pix_categorias)
+       and not public._agenda_categoria_de_material('', c.pix_categorias)
+       and not public._agenda_categoria_de_material(null, c.pix_categorias)
+       and not public._agenda_categoria_de_material('Compras de mercadorias', null)
+       and (select provolatile = 'i' from pg_proc where oid = 'public._agenda_categoria_de_material(text, text[])'::regprocedure),
+       null
+  from public.agenda_config c;
 
 insert into _resultado
 select 'B2e o técnico: o rascunho do fornecedor recusa 42501 e as tabelas voltam vazias; anon não lê',

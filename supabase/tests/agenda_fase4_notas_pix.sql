@@ -569,7 +569,7 @@ declare
   c_ven     constant uuid := '05000000-0000-4000-8000-000000000069';
   c_premel  constant uuid := 'dd000000-0000-4000-8000-000000000001';
   c_tx      constant uuid := 'd4000000-0000-4000-8000-0000000003b1';
-  r jsonb; r2 jsonb; v_din text;
+  r jsonb; r2 jsonb; v_din text; v_cat text;
 begin
   if coalesce(current_setting('agenda_teste.fase4', true), '') = '' then
     insert into _resultado values ('N7 o Pix (fixture-fase4)', true, 'PULADO: sem agenda_teste.fase4 (rode pela bancada)');
@@ -634,6 +634,24 @@ begin
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
+
+  -- Revisão da Fase 4, C2 (R6): a Premel não tem produto nem conta de material — só a categoria da fila diz que o Pix é
+  -- material. Com "PEÇAS E MATERIAIS" (ou "Compras de Mercadorias", como 3 da fila em produção) ele é; com "Alimentação",
+  -- não. Antes, a comparação exata deixava o de maiúscula de fora.
+  v_din := '';
+  foreach v_cat in array array['PEÇAS E MATERIAIS', 'Compras de Mercadorias', 'Alimentação'] loop
+    begin
+      execute current_setting('agenda_teste.fase4');
+      update public.agenda_config set modo_material = 'ligado' where id;
+      update public.finance_review_queue set suggested_category = v_cat where id = 'd4000000-0000-4000-8000-0000000003b2';
+      r := public._agenda_material_pix(c_hoje, c_agora);
+      v_din := v_din || v_cat || '=' || coalesce(r ->> 'candidatas', '?') || '/' || coalesce(r ->> 'perguntas', '?') || ';';
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+  end loop;
+  v_res := pg_temp.ok(v_res, 'N7k a categoria da fila sem maiúscula nem acento: "PEÇAS E MATERIAIS" e "Compras de Mercadorias" fazem do Pix da Premel material (1 candidata, 1 pergunta); "Alimentação", não',
+    v_din = 'PEÇAS E MATERIAIS=1/1;Compras de Mercadorias=1/1;Alimentação=0/0;', v_din);
 
   -- O CMP com o destino que o dono deu: a pergunta só pergunta se está na mão; o Pix do mesmo dinheiro não pergunta de novo.
   begin

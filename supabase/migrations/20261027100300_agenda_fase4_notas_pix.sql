@@ -741,9 +741,11 @@ begin
              public._agenda_prazo_do_fornecedor((fo.f ->> 'fornecedor_id')::uuid) ->> 'classe' in ('balcao', 'entrega_local') as local
         from fontes fo
        where fo.f ->> 'fornecedor_id' is not null
-         and (fo.tipo = 'cmp' or coalesce(fo.f ->> 'categoria', '') = any (c.pix_categorias)
+         -- A categoria compara sem maiúscula nem acento ("Compras de Mercadorias" = "Compras de mercadorias"; C2, R6).
+         and (fo.tipo = 'cmp' or public._agenda_categoria_de_material(fo.f ->> 'categoria', c.pix_categorias)
               or exists (select 1 from public.payables pa where pa.supplier_id = (fo.f ->> 'fornecedor_id')::uuid
-                            and pa.expense_category = any (c.pix_categorias) and pa.issue_date >= p_hoje - 365)
+                            and public._agenda_categoria_de_material(pa.expense_category, c.pix_categorias)
+                            and pa.issue_date >= p_hoje - 365)
               or exists (select 1 from public.products p where p.supplier_id = (fo.f ->> 'fornecedor_id')::uuid))
          and not (fo.tipo = 'tx' and exists (
                select 1 from fontes o
@@ -794,7 +796,7 @@ end;
 $function$;
 
 comment on function public._agenda_material_pix(date, timestamptz) is
-  'Agenda de Produção (Fase 4, P3), passo do material "pix": o Pix de saída do extrato (débito PIX, nos últimos pix_janela_dias, não dispensado, de pix_valor_minimo para cima) e o comprovante (CMP com fornecedor, fora de cancelado/nao_comprovante/falhou) a fornecedor de MATERIAL (categoria da fila financeira em pix_categorias, conta de material em 365 dias ou produto do fornecedor; o mesmo dinheiro nas duas fontes conta pelo CMP) viram a pergunta pix_material (chave pix:tx:<id> | pix:cmp:<id>, uma vez) sobre UMA OS — o destino que o dono deu ao CMP, senão a que tem item crítico em falta do mesmo fornecedor, senão (Pix a fornecedor local) a que tem item sem fornecedor ou de balcão/entrega local; só OS com início nas próximas material_inicio_dias; nada se a OS já tem linha pelo Pix desse fornecedor nos últimos 7 dias. Teto: pix_perguntas_semana_max por semana ISO, no TOTAL. Limpeza: a pergunta cuja OS não tem mais falta crítica se resolve. Só LÊ o Pix: nada aqui cria, muda ou liga pagamento; a resposta (agenda_rascunho_material com o aviso + *grava*) grava só comprado/na mão em os_material. {perguntas, resolvidas, candidatas, teto, modo}; desligado = {pulado}.';
+  'Agenda de Produção (Fase 4, P3), passo do material "pix": o Pix de saída do extrato (débito PIX, nos últimos pix_janela_dias, não dispensado, de pix_valor_minimo para cima) e o comprovante (CMP com fornecedor, fora de cancelado/nao_comprovante/falhou) a fornecedor de MATERIAL (categoria da fila financeira em pix_categorias — sem maiúscula nem acento, _agenda_categoria_de_material —, conta de material em 365 dias ou produto do fornecedor; o mesmo dinheiro nas duas fontes conta pelo CMP) viram a pergunta pix_material (chave pix:tx:<id> | pix:cmp:<id>, uma vez) sobre UMA OS — o destino que o dono deu ao CMP, senão a que tem item crítico em falta do mesmo fornecedor, senão (Pix a fornecedor local) a que tem item sem fornecedor ou de balcão/entrega local; só OS com início nas próximas material_inicio_dias; nada se a OS já tem linha pelo Pix desse fornecedor nos últimos 7 dias. Teto: pix_perguntas_semana_max por semana ISO, no TOTAL. Limpeza: a pergunta cuja OS não tem mais falta crítica se resolve. Só LÊ o Pix: nada aqui cria, muda ou liga pagamento; a resposta (agenda_rascunho_material com o aviso + *grava*) grava só comprado/na mão em os_material. {perguntas, resolvidas, candidatas, teto, modo}; desligado = {pulado}.';
 
 -- ── 7. O aviso: a que pergunta (ou nota) o dono se refere ───────────────────────────────────────────────
 

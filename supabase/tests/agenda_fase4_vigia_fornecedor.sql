@@ -458,6 +458,21 @@ begin
       raise exception 'desfaz' using errcode = 'P0098';
     exception when sqlstate 'P0098' then null;
     end;
+    begin
+      -- Revisão da Fase 4, C2 (R6): a conta a pagar de material conta sem maiúscula nem acento — 2 contas da Toli em
+      -- "Compras de Mercadorias" (como na fila de produção) fazem dela principal com 2; a de "Alimentação" não conta.
+      insert into public.payables (description, expense_category, issue_date, due_date, amount, status, supplier_id) values
+        ('TESTE C2 Toli 1', 'Compras de Mercadorias', date '2026-09-10', date '2026-10-10', 100, 'paid', 'dd000000-0000-4000-8000-000000000006'),
+        ('TESTE C2 Toli 2', 'COMPRAS DE MERCADORIAS', date '2026-10-01', date '2026-10-31', 100, 'pending', 'dd000000-0000-4000-8000-000000000006'),
+        ('TESTE C2 Toli 3', 'Alimentação', date '2026-10-02', date '2026-10-31', 100, 'pending', 'dd000000-0000-4000-8000-000000000006');
+      v_txt := (select string_agg(pr.fornecedor_id::text || ':' || pr.contas, ',')
+                  from public._agenda_fornecedores_principais(date '2026-10-30') pr
+                 where pr.fornecedor_id = 'dd000000-0000-4000-8000-000000000006');
+      v_res := pg_temp.ok(v_res, 'V4h os principais pela conta a pagar de material sem maiúscula nem acento: a Toli com 2 ("Compras de Mercadorias", "COMPRAS DE MERCADORIAS"; "Alimentação" fora)',
+        v_txt = 'dd000000-0000-4000-8000-000000000006:2', v_txt);
+      raise exception 'desfaz' using errcode = 'P0098';
+    exception when sqlstate 'P0098' then null;
+    end;
 
     -- ── V2: a carona (vigia ligada na fixture): o Pix do Vanderlei vai; a de cadastro nunca
     begin

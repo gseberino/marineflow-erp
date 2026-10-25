@@ -168,7 +168,7 @@ select format('F1 %s existe', f), exists (select 1 from pg_proc p where p.pronam
     'material_sinal_registrar', 'agenda_mensagens_de_fornecedor', 'agenda_detector_precisao', '_agenda_desfazer_material',
     'agenda_material_vigiar', '_agenda_fornecedor_registrar', '_agenda_fornecedor_enfileirar', '_agenda_fila_do_fornecedor',
     '_agenda_fornecedores_principais', '_agenda_espera_linhas', 'agenda_espera_de_peca', '_agenda_ver_compras',
-    '_agenda_ver_fornecedores']) f;
+    '_agenda_ver_fornecedores', '_agenda_categoria_de_material']) f;
 
 insert into _resultado
 select 'F2 nenhuma função da agenda e do material (agenda_*, _agenda_*, os_*, _os_*, material_*) executável por anon',

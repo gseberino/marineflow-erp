@@ -17,7 +17,8 @@
 -- O QUE MUDA:
 --   1. agenda_config: modo_material, modo_detector e modo_fornecedor (a linha nasce 'desligado'; o DEFAULT da coluna vira
 --      'sombra', como as Fases 2 e 3 fizeram) e 23 parâmetros da nota, do Pix, do prazo longo, do detector e da mensagem ao
---      fornecedor, cada um com CHECK por nome. O DEFAULT é o único lugar do número. oc_viva_dias é o "60 dias" que estava
+--      fornecedor, cada um com CHECK por nome. A lista de categorias de material (pix_categorias) compara sem maiúscula
+--      nem acento: _agenda_categoria_de_material (revisão C2, R6). O DEFAULT é o único lugar do número. oc_viva_dias é o "60 dias" que estava
 --      escrito no corpo da view (Fase 0). Nenhum prazo novo: os prazos por classe continuam em prazo_classe_du e
 --      importacao_dias (Fase 1).
 --   2. suppliers: modalidade, prazo_dias_uteis, prazo_dias_corridos, prazo_fonte ('dono'; Fase 6: 'medido'),
@@ -168,7 +169,7 @@ comment on column public.agenda_config.nfe_opcoes_max is 'Quantas OS a pergunta 
 comment on column public.agenda_config.pix_janela_dias is 'O Pix a fornecedor de material dos últimos estes dias pode virar pergunta.';
 comment on column public.agenda_config.pix_valor_minimo is 'Pix abaixo deste valor (R$) não vira pergunta.';
 comment on column public.agenda_config.pix_perguntas_semana_max is 'Perguntas de Pix por semana ISO, no total (não por OS). 0 = nenhuma.';
-comment on column public.agenda_config.pix_categorias is 'As categorias da fila financeira (finance_review_queue.suggested_category) que são compra de material.';
+comment on column public.agenda_config.pix_categorias is 'As categorias da fila financeira (finance_review_queue.suggested_category) e das contas a pagar (payables.expense_category) que são compra de material. Comparadas sem maiúscula nem acento (_agenda_categoria_de_material): "Compras de Mercadorias" vale como "Compras de mercadorias".';
 comment on column public.agenda_config.prazo_longo_du is 'Compra com prazo acima destes dias úteis ganha a pergunta ao fornecedor nos terços do prazo.';
 comment on column public.agenda_config.detector_janela_horas is 'Quanto da conversa do fornecedor o detector relê a cada passada.';
 comment on column public.agenda_config.detector_lote_max is 'Mensagens por passada do detector.';
@@ -184,6 +185,26 @@ comment on column public.agenda_config.fornecedor_semana_max is 'Mensagens ao ME
 comment on column public.agenda_config.fornecedor_total_dia_max is 'Mensagens a fornecedores por dia, somando todos.';
 comment on column public.agenda_config.fornecedor_conversa_dias is 'Só pergunta ao fornecedor que conversou com a HBR pelo WhatsApp nestes dias. 0 = sem essa exigência.';
 comment on column public.agenda_config.fornecedores_principais_max is 'Quantos fornecedores o foco "fornecedores" mostra (os principais de material).';
+
+-- A categoria (da fila financeira ou da conta a pagar) é de material? Comparada com a lista sem maiúscula nem acento dos
+-- dois lados (_agenda_normal, Fase 1): em produção a fila tem "Compras de Mercadorias" e "Compras de mercadorias", e o
+-- texto exato deixava as de M maiúsculo de fora (revisão da Fase 4, C2, R6). Vazia ou nula = não.
+create or replace function public._agenda_categoria_de_material(p_categoria text, p_lista text[])
+ returns boolean
+ language sql
+ immutable
+ set search_path to 'public'
+as $function$
+  select public._agenda_normal(p_categoria) <> ''
+     and public._agenda_normal(p_categoria) = any (array(select public._agenda_normal(x)
+                                                           from unnest(coalesce(p_lista, '{}'::text[])) x));
+$function$;
+
+comment on function public._agenda_categoria_de_material(text, text[]) is
+  'Agenda de Produção (Fase 4; revisão C2, R6): a categoria da fila financeira ou da conta a pagar está em p_lista (agenda_config.pix_categorias)? Sem maiúscula nem acento dos dois lados (_agenda_normal). Vazia ou nula = false.';
+
+revoke all on function public._agenda_categoria_de_material(text, text[]) from public, anon;
+grant execute on function public._agenda_categoria_de_material(text, text[]) to authenticated, service_role;
 
 -- ── 2. O prazo dito por fornecedor ──────────────────────────────────────────────────────────────────────
 alter table public.suppliers
