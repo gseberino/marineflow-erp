@@ -164,3 +164,81 @@ Deno.test("prazo do fornecedor: 15 negativos (pergunta, negação, cobrança, 'v
     assertEquals(detectarPrazoDeFornecedor(texto, TER_13_1719, direcao), null, String(texto));
   }
 });
+
+// ── C1 da revisão da Fase 4 (25/10/2026) ────────────────────────────────────────────────────────────────────────────
+// O que se protege: (3) o dia da semana com a data não joga a data fora (errava por uma semana); (4) o pedido da HBR
+// nunca vira previsão — do lado da HBR só a chegada que ela afirma; (9) "não vai atrasar" não é atraso, e "sem falta" e
+// "sem problema" não são negação. Os casos são os de rev-f4/parser.ts e parser2.ts (seg 26/10 e ter 13/10).
+
+Deno.test("prazo do fornecedor (C1): o dia da semana com a data — vale a data", () => {
+  const casos: Array<[string, Esperado]> = [
+    ["chega quarta dia 04/11", { tipo: "chegada", expressao: "dia 04/11", condicional: false }],
+    ["entrega na quarta 04/11", { tipo: "chegada", expressao: "04/11", condicional: false }],
+    ["chega quarta, dia 4", { tipo: "chegada", expressao: "dia 4", condicional: false }],
+    ["Chega quarta dia 4", { tipo: "chegada", expressao: "dia 4", condicional: false }],
+    ["previsão de entrega quarta-feira 04/11", { tipo: "chegada", expressao: "04/11", condicional: false }],
+    ["chega sexta 30/10", { tipo: "chegada", expressao: "30/10", condicional: false }],
+    ["chega na sexta, dia 30", { tipo: "chegada", expressao: "dia 30", condicional: false }],
+    ["só vai chegar na quarta dia 04/11", { tipo: "atraso", expressao: "dia 04/11", condicional: false }],
+    // sem a data, o dia da semana continua valendo; o número solto ("4 caixas") não é data
+    ["chega quarta que vem", { tipo: "chegada", expressao: "quarta que vem", condicional: false }],
+    ["chega quarta 4 caixas", { tipo: "chegada", expressao: "quarta", condicional: false }],
+    ["chega dia 4/11", { tipo: "chegada", expressao: "dia 4/11", condicional: false }],
+  ];
+  for (const [texto, esperado] of casos) {
+    assertEquals(sem(detectarPrazoDeFornecedor(texto, TER_13_1719, "recebida")), esperado, texto);
+  }
+});
+
+Deno.test("prazo do fornecedor (C1): do lado da HBR, só a chegada que ela afirma (o pedido nunca)", () => {
+  const nulos = [
+    "consegue entregar amanhã",
+    "precisa entregar amanhã",
+    "preciso que chegue em 3 dias uteis",
+    "preciso em 5 dias",
+    "Preciso que chegue até sexta",
+    "pode mandar amanhã",
+    "você poderia entregar sexta",
+    "tem como chegar amanhã",
+    "dá pra entregar na sexta",
+    "quero que chegue amanhã",
+    "queria que entregue sexta",
+    // prazo, atraso e despacho escritos pela HBR não contam
+    "o prazo é de 5 dias úteis",
+    "vai atrasar então",
+    "já foi coletado então",
+  ];
+  for (const texto of nulos) {
+    assertEquals(detectarPrazoDeFornecedor(texto, TER_13_1719, "enviada"), null, texto);
+  }
+  // a chegada que a HBR afirma continua (a do replay da OS-00104)
+  assertEquals(sem(detectarPrazoDeFornecedor("chega aqui amanha se eles retirarem hoje", TER_13_1719, "enviada")),
+    { tipo: "chegada", expressao: "amanhã", condicional: true });
+  assertEquals(sem(detectarPrazoDeFornecedor("chega amanhã então", TER_13_1719, "enviada")),
+    { tipo: "chegada", expressao: "amanhã", condicional: false });
+  // do lado do fornecedor o "pode" é dele: "pode deixar, entregamos na sexta" não é pedido da HBR
+  assertEquals(sem(detectarPrazoDeFornecedor("pode deixar, entregamos na sexta", TER_13_1719, "recebida")),
+    { tipo: "chegada", expressao: "sexta", condicional: false });
+});
+
+Deno.test("prazo do fornecedor (C1): 'não vai atrasar' não é atraso; 'sem falta' e 'sem problema' não negam", () => {
+  const casos: Array<[string, Esperado]> = [
+    ["Fica tranquilo, não vai atrasar", null],
+    ["não vai atrasar", null],
+    ["Não atrasou não, saiu ontem", null],
+    ["nao vai atrasar, chega amanha", { tipo: "chegada", expressao: "amanhã", condicional: false }],
+    ["sem falta chega amanhã", { tipo: "chegada", expressao: "amanhã", condicional: false }],
+    ["sem problema chega amanhã", { tipo: "chegada", expressao: "amanhã", condicional: false }],
+    ["sem problemas, chega amanhã", { tipo: "chegada", expressao: "amanhã", condicional: false }],
+    // o atraso de verdade continua
+    ["Vai atrasar, só chega sexta", { tipo: "atraso", expressao: "sexta", condicional: false }],
+    ["Não vai dar pra enviar hoje, só amanhã", { tipo: "atraso", expressao: "amanhã", condicional: false }],
+    ["Não atrasou, mas só chega sexta", { tipo: "atraso", expressao: "sexta", condicional: false }],
+    // a negação de verdade continua negando
+    ["Não chega amanhã, infelizmente", null],
+    ["sem previsão de chegar amanhã", null],
+  ];
+  for (const [texto, esperado] of casos) {
+    assertEquals(sem(detectarPrazoDeFornecedor(texto, TER_13_1719, "recebida")), esperado, texto);
+  }
+});

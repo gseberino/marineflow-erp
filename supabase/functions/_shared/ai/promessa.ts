@@ -105,9 +105,14 @@ export function detectarPromessa(texto: string | null | undefined, enviadaEm: Da
 // Regras (por frase, sem acento e minúsculo):
 //   · frase que termina em "?" não conta, menos a pergunta "recebeu/chegou?" do fornecedor (perguntou_chegou);
 //   · frase de dinheiro (boleto, pagamento, Pix, R$…) nunca é prazo de material: a Kamell só cobra pelo WhatsApp;
-//   · negação antes do verbo, na mesma oração ("não chega amanhã", "ainda não foi coletado") = nada; o futuro do
-//     despacho ("vai ser despachado") também;
+//   · negação antes do verbo, na mesma oração ("não chega amanhã", "ainda não foi coletado", "não vai atrasar") = nada;
+//     o futuro do despacho ("vai ser despachado") também; "sem falta" e "sem problema" não negam ("sem falta chega
+//     amanhã");
 //   · condicional = a frase tem "se", "caso" ou "desde que" ("chega aqui amanhã se eles retirarem hoje");
+//   · o dia da semana com a data ("chega quarta dia 04/11", "entrega na quarta 04/11"): vale a data (só ela vai ao banco);
+//   · do lado da HBR (enviada) só conta a chegada que ela AFIRMA ("chega aqui amanhã se eles retirarem hoje"): o pedido
+//     ("consegue entregar amanhã", "preciso que chegue em 3 dias úteis"), o prazo, o atraso e o despacho = nada (C1 da
+//     revisão da Fase 4, 25/10/2026);
 //   · numa mensagem com mais de um achado vale o de mais informação: atraso com data, chegada, prazo, atraso sem data,
 //     despacho, a pergunta "recebeu?".
 
@@ -123,9 +128,19 @@ export interface PrazoDoFornecedor {
 }
 
 const DIA_DA_SEMANA = "(?:segunda|terca|quarta|quinta|sexta)(?:[- ]feira)?|sabado|domingo";
-/** Uma data dita, já sem acento: "amanha", "sexta", "dia 14", "14/10", "semana que vem". */
+/**
+ * A data que vem logo depois do dia da semana ("quarta dia 04/11", "quarta 04/11", "na sexta, dia 30"). O número sozinho
+ * sem "dia" e sem barra ("quarta 4 caixas") não entra: na dúvida, vale o dia da semana.
+ */
+const DATA_DEPOIS_DO_DIA = ",? (?:dia \\d{1,2}(?:/\\d{1,2}(?:/\\d{2,4})?)?|\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?)\\b";
+/** Uma data dita, já sem acento: "amanha", "sexta", "dia 14", "14/10", "semana que vem", "quarta dia 04/11". */
 const UMA_DATA = "(?:depois de amanha|amanha|hoje|semana que vem|proxima semana|(?:proxima |proximo )?(?:" + DIA_DA_SEMANA +
-  ")(?: que vem| da semana que vem)?|\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?|dia \\d{1,2}(?:/\\d{1,2})?)";
+  ")(?:" + DATA_DEPOIS_DO_DIA + "| que vem| da semana que vem)?|\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?|dia \\d{1,2}(?:/\\d{1,2})?)";
+/** O dia da semana seguido da data: na expressão fica só a data ("quarta dia 04/11" → "dia 04/11"; "quarta 04/11" → "04/11"). */
+const DIA_COM_DATA = new RegExp(
+  "(?:proxima |proximo )?(?:" + DIA_DA_SEMANA + "),? (dia )?(\\d{1,2}(?:/\\d{1,2}(?:/\\d{2,4})?)?)\\b",
+  "g",
+);
 /** A data dita, com "até" (a faixa a partir do dia da mensagem) e a segunda data da faixa ("sexta ou sábado"). */
 const DATA = "((?:ate )?" + UMA_DATA + "(?: (?:ou|a|e) (?:(?:na|no|o|a) )?" + UMA_DATA + ")?)";
 /** O que vem entre o verbo e a data e não entra na expressão. */
@@ -174,6 +189,14 @@ const NAO_E_MATERIAL =
   /\b(?:e-?mail|mensage(?:m|ns)|msg|orcamentos?|propostas?|cotac(?:ao|oes)|audios?|fotos?|arquivos?|pdf|links?|documentos?|notas?|nf|nfe|contratos?|planilhas?)\b/;
 const RECEBEU = /\b(?:recebeu|recebeste|receberam|recebido|chegou|chegaram)\b/;
 const NEGACAO = /\b(?:nao|nunca|sem)\b/;
+/** "Sem falta" e "sem problema" afirmam ("sem falta chega amanhã"): não são negação. */
+const SEM_QUE_AFIRMA = /\bsem (?:falta|problemas?)\b/g;
+/**
+ * O pedido da HBR ao fornecedor ("consegue entregar amanhã", "preciso que chegue em 3 dias úteis", "dá pra mandar
+ * sexta"): é o que a HBR quer, não o que ele prometeu. Só vale do lado da HBR (enviada).
+ */
+const PEDIDO_DA_HBR =
+  /\b(?:consegue|conseguem|consegues|conseguiria|pode|podem|poderia|poderiam|tem como|da pra|da para|preciso|precisa|precisamos|quero|queria|queremos|chegue|cheguem|entregue|entreguem)\b/;
 const FUTURO_DO_DESPACHO = /\b(?:nao|nunca|vai|vao|sera|serao|vamos|vou|iremos|assim que|quando|antes de|precisa|preciso|se)\b/;
 const CONDICIONAL = /\b(?:se|caso|desde que)\b/;
 const POR_EXTENSO: Record<string, number> = {
@@ -184,11 +207,20 @@ const ACENTOS_DA_DATA: Array<[RegExp, string]> = [
   [/\bproxima\b/g, "próxima"], [/\bproximo\b/g, "próximo"],
 ];
 
-/** A expressão de data para guardar: com os acentos de volta e sem o "no"/"na" do meio da faixa ("sexta ou sábado"). */
+/**
+ * A expressão de data para guardar: o dia da semana com a data vira só a data ("quarta dia 04/11" → "dia 04/11";
+ * "quarta 04/11" → "04/11"), com os acentos de volta e sem o "no"/"na" do meio da faixa ("sexta ou sábado").
+ */
 function expressaoDaData(bruta: string): string {
-  let e = bruta.replace(/ (ou|a|e) (?:na|no|o|a) /, " $1 ").trim();
+  let e = bruta.replace(DIA_COM_DATA, (_m, dia: string | undefined, num: string) => (dia || !num.includes("/") ? `dia ${num}` : num));
+  e = e.replace(/ (ou|a|e) (?:na|no|o|a) /, " $1 ").trim();
   for (const [re, com] of ACENTOS_DA_DATA) e = e.replace(re, com);
   return e;
+}
+
+/** A negação vale no trecho? ("não", "nunca", "sem"; "sem falta" e "sem problema" não contam.) */
+function negado(trecho: string): boolean {
+  return NEGACAO.test(trecho.replace(SEM_QUE_AFIRMA, " "));
 }
 
 function numeroDito(n: string | undefined): number | null {
@@ -219,10 +251,16 @@ function achadoDaFrase(n: string, pergunta: boolean, direcao: "recebida" | "envi
     if (/\bchegou a [a-z]+r\b/.test(n) || NAO_E_MATERIAL.test(n)) return null;
     return { tipo: "perguntou_chegou", expressao: null, prioridade: 1 };
   }
-  // 1. atraso (com a data nova, se disse: "só vai chegar dia 20", "atrasou, chega sexta")
+  // Do lado da HBR, o pedido ("consegue entregar amanhã", "preciso que chegue…") nunca é a palavra do fornecedor.
+  const daHbr = direcao === "enviada";
+  if (daHbr && PEDIDO_DA_HBR.test(n)) return null;
+  // 1. atraso (com a data nova, se disse: "só vai chegar dia 20", "atrasou, chega sexta"); negado na mesma oração ("não
+  //    vai atrasar", "não atrasou não") não é atraso. Do lado da HBR, o atraso nunca conta (só a chegada que ela afirma).
   for (const re of ATRASO) {
     const m = re.exec(n);
     if (!m) continue;
+    if (negado(antesNaMesmaOracao(n, m.index))) continue;
+    if (daHbr) return null;
     const resto = n.slice(m.index + m[0].length);
     const datas = [...resto.matchAll(new RegExp("(?:^|\\s)" + ANTES_DA_DATA + DATA, "g"))]
       .map((x) => x[1])
@@ -234,14 +272,16 @@ function achadoDaFrase(n: string, pergunta: boolean, direcao: "recebida" | "envi
   for (const re of CHEGADA) {
     const m = re.exec(n);
     if (!m) continue;
-    if (NEGACAO.test(antesNaMesmaOracao(n, m.index))) return null;
+    if (negado(antesNaMesmaOracao(n, m.index))) return null;
     return { tipo: "chegada", expressao: expressaoDaData(m[1]), prioridade: 5 };
   }
+  // Do lado da HBR, o prazo e o despacho nunca contam.
+  if (daHbr) return null;
   // 3. prazo em dias ("5 dias úteis", "3 a 5 dias úteis", "prazo de 5 dias")
   for (const { re, unidade } of PRAZO) {
     const m = re.exec(n);
     if (!m) continue;
-    if (NEGACAO.test(antesNaMesmaOracao(n, m.index))) return null;
+    if (negado(antesNaMesmaOracao(n, m.index))) return null;
     const a = numeroDito(m[1]);
     const b = numeroDito(m[2]);
     if (a === null) continue;
