@@ -13,10 +13,29 @@ const AGORA = new Date("2026-10-13T21:00:00.000Z"); // ter 13/10, 18:00 em Bras�
 
 interface Chamada { fn: string; args: Record<string, unknown> }
 
-function banco(lista: MensagemDeFornecedor[] | { error: { code?: string; message: string } }, falhaNo?: string) {
+function banco(
+  lista: MensagemDeFornecedor[] | { error: { code?: string; message: string } },
+  falhaNo?: string,
+  // agenda_config.detector_modelo_max (C1 da revisão, R5); { erro } = a leitura falha
+  tetoDoModelo: number | { erro: string } = 5,
+) {
   const chamadas: Chamada[] = [];
   return {
     chamadas,
+    from(tabela: string) {
+      return {
+        select(colunas: string) {
+          return {
+            maybeSingle() {
+              chamadas.push({ fn: `from:${tabela}`, args: { colunas } });
+              return Promise.resolve(typeof tetoDoModelo === "number"
+                ? { data: { detector_modelo_max: tetoDoModelo }, error: null }
+                : { data: null, error: { message: tetoDoModelo.erro } });
+            },
+          };
+        },
+      };
+    },
     rpc(fn: string, args: Record<string, unknown>) {
       chamadas.push({ fn, args });
       if (fn === "agenda_mensagens_de_fornecedor") {
@@ -99,6 +118,58 @@ Deno.test("mais de uma compra: o modelo escolhe (modelo); sem compra nenhuma: ne
   await vigiarPrazosDosFornecedores(db2, AGORA, { ...d, escolher: () => Promise.resolve({ n: null, confianca: 0.3 }) });
   const r2 = db2.chamadas.find((c) => c.fn === "material_sinal_registrar")!.args;
   assertEquals([r2.p_casou_por, r2.p_os_material, r2.p_confianca], ["nenhum", null, 0.3]);
+});
+
+// ── C1 da revisão da Fase 4 (25/10/2026) ────────────────────────────────────────────────────────────────────────────
+// (item 1) a única linha viva com OUTRA compra viva do fornecedor (outras_vivas: a OC de estoque, a nota sem resposta, o
+// Pix aberto) não é unico: a linha vai como dica, nenhum, e o modelo não é chamado. (R5) o modelo pago tem teto por rodada
+// (agenda_config.detector_modelo_max): passou dele, a mensagem vai sem o modelo (nenhum); teto 0 = nunca; a leitura do teto
+// que falha = nenhum modelo, com log. O teto só é lido quando alguma mensagem precisa do modelo.
+
+Deno.test("C1: uma linha e outra compra viva do fornecedor = nenhum, com a linha de dica e sem o modelo", async () => {
+  const db = banco([{ ...msg("w409", "Já foi coletado"), outras_vivas: 1 }, msg("w410", "Chega amanhã")]);
+  const d = deps();
+  const r = await vigiarPrazosDosFornecedores(db, AGORA, d);
+  assertEquals(r, { lidas: 2, sinais: 2, modelo: 0 });
+  assertEquals(d.escolhas.length, 0);
+  const regs = db.chamadas.filter((c) => c.fn === "material_sinal_registrar").map((c) => c.args);
+  assertEquals(regs.map((a) => [a.p_msg, a.p_casou_por, a.p_os_material]), [["w409", "nenhum", "m104"], ["w410", "unico", "m104"]]);
+  assert(!db.chamadas.some((c) => c.fn.startsWith("from:")), "sem mensagem de duas compras, o teto nem é lido");
+});
+
+Deno.test("C1 (R5): o modelo pago no teto da rodada — passou dele, nenhum; teto 0 = nunca", async () => {
+  const lista = [
+    msg("w1", "O painel foi postado hoje", [COMPRESSOR, PAINEL]),
+    msg("w2", "Coletaram hoje", [COMPRESSOR, PAINEL]),
+    msg("w3", "Despachado!", [COMPRESSOR, PAINEL]),
+  ];
+  const db = banco(lista, undefined, 2);
+  const d = deps();
+  const r = await vigiarPrazosDosFornecedores(db, AGORA, d);
+  assertEquals(r, { lidas: 3, sinais: 3, modelo: 2, sem_modelo_pelo_teto: 1 });
+  assertEquals(d.escolhas, ["O painel foi postado hoje", "Coletaram hoje"]);
+  const regs = db.chamadas.filter((c) => c.fn === "material_sinal_registrar").map((c) => c.args);
+  assertEquals(regs.map((a) => [a.p_msg, a.p_casou_por, a.p_os_material]), [
+    ["w1", "modelo", "m112"], ["w2", "modelo", "m112"], ["w3", "nenhum", null],
+  ]);
+  assertEquals(db.chamadas.filter((c) => c.fn === "from:agenda_config").length, 1, "o teto é lido uma vez por rodada");
+
+  const db0 = banco(lista, undefined, 0);
+  const d0 = deps();
+  const r0 = await vigiarPrazosDosFornecedores(db0, AGORA, d0);
+  assertEquals([r0.modelo, r0.sem_modelo_pelo_teto, r0.sinais], [0, 3, 3]);
+  assertEquals(d0.escolhas.length, 0);
+});
+
+Deno.test("C1 (R5): a leitura do teto que falha = nenhum modelo nesta rodada, com log; as mensagens seguem", async () => {
+  const db = banco([msg("w1", "O painel foi postado hoje", [COMPRESSOR, PAINEL])], undefined, { erro: "caiu" });
+  const d = deps();
+  const r = await vigiarPrazosDosFornecedores(db, AGORA, d);
+  assertEquals(r, { lidas: 1, sinais: 1, modelo: 0, sem_modelo_pelo_teto: 1 });
+  assertEquals(d.escolhas.length, 0);
+  assertEquals(d.logs.length, 1);
+  assertEquals(d.logs[0].action, "agenda:fornecedor");
+  assert(String(d.logs[0].message).includes("teto do modelo"), String(d.logs[0].message));
 });
 
 Deno.test("nunca lança: a leitura que falha, a mensagem que falha sozinha, a função ausente", async () => {

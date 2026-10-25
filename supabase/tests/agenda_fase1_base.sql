@@ -391,8 +391,8 @@ begin
        -- (revisão da Fase 3, C1) a janela da resposta direta (NOVO-agenda-28)
        'agenda_config_equipe_resposta_direta_inicio_check', 'agenda_config_equipe_resposta_direta_fim_check',
        'agenda_config_equipe_resposta_direta_prazo_check']))
-     -- FASE 4: os 25 que a Fase 4 pôs em agenda_config e os 3 de os_material (20261027100000) têm o caso deles em
-     -- agenda_fase4_base.sql (B1, que cobra os de agenda_config pelo nome).
+     -- FASE 4: os 26 que a Fase 4 pôs em agenda_config (o detector_modelo_max veio na C1 da revisão) e os 3 de
+     -- os_material (20261027100000) têm o caso deles em agenda_fase4_base.sql (B1, que cobra os de agenda_config pelo nome).
      and not (c.conname = any (array[
        'agenda_config_modo_material_check', 'agenda_config_modo_detector_check', 'agenda_config_modo_fornecedor_check',
        'agenda_config_oc_viva_dias_check', 'agenda_config_remessa_dias_check', 'agenda_config_material_inicio_dias_check',
@@ -402,6 +402,7 @@ begin
        'agenda_config_prazo_longo_du_check', 'agenda_config_detector_janela_horas_check',
        'agenda_config_detector_lote_max_check', 'agenda_config_detector_precisao_minima_check',
        'agenda_config_detector_minimo_julgados_check', 'agenda_config_detector_tolerancia_du_check',
+       'agenda_config_detector_modelo_max_check',
        'agenda_config_fornecedor_janela_inicio_check', 'agenda_config_fornecedor_janela_fim_check',
        'agenda_config_fornecedor_dia_max_check', 'agenda_config_fornecedor_semana_max_check',
        'agenda_config_fornecedor_total_dia_max_check', 'agenda_config_fornecedor_conversa_dias_check',

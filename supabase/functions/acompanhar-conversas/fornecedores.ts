@@ -7,6 +7,14 @@
 // só, ela é a escolhida (unico); com mais, o modelo leve escolhe QUAL (escolherCompra: modelo, ou nenhum) — nunca a data:
 // a data sai do banco pela expressão dita.
 //
+// C1 da revisão da Fase 4 (25/10/2026):
+//   · "uma compra viva só" = uma linha E nenhuma outra compra viva dele (outras_vivas: a OC de estoque aberta, a nota sem
+//     resposta, o Pix aberto). Com outra, a linha vai como dica e o casamento é nenhum (o banco rebaixa do mesmo jeito);
+//   · o modelo pago é chamado no máximo agenda_config.detector_modelo_max vezes por rodada (padrão 5; 0 = nunca): passou
+//     disso, a mensagem é registrada sem o modelo (nenhum) e a pergunta ao dono lista as compras. A leitura do teto que
+//     falha = 0 (nenhum modelo) e vai para o log;
+//   · o passo roda DEPOIS dos avisos ao dono e do "me acorde se" (index.ts): o dono vem primeiro.
+//
 // Aqui só se REGISTRA. O que o gestor faz com o sinal (a previsão da compra já ligada, com *desfaz*; a pergunta ao dono; o
 // "chegou?") é do passo do material no banco (_agenda_material_sinais), atrás de agenda_config.modo_detector: desligado =
 // a lista vem vazia e nada é chamado; sombra = só o que faria.
@@ -36,6 +44,8 @@ export interface MensagemDeFornecedor {
   direcao: "recebida" | "enviada";
   texto: string | null;
   em: string;
+  /** As outras compras vivas dele que não são linha de OS (OC sem linha, nota sem linha, Pix aberto). */
+  outras_vivas?: number;
   compras?: CompraViva[];
 }
 
@@ -44,6 +54,8 @@ export interface ResultadoDosFornecedores {
   sinais: number;
   /** Quantas vezes o modelo leve foi chamado (mais de uma compra viva). */
   modelo: number;
+  /** Mensagens que precisavam do modelo e foram sem ele (o teto da rodada, detector_modelo_max). */
+  sem_modelo_pelo_teto?: number;
   /** A RPC ainda não existe (migration não aplicada). */
   pulado?: string;
   /** Mensagens que falharam sozinhas (o detalhe vai para app_error_logs). */
@@ -59,6 +71,17 @@ export interface DepsDosFornecedores {
 
 /** A função ausente (migration não aplicada): o PostgREST diz PGRST202; o Postgres, 42883. */
 const FUNCAO_AUSENTE = new Set(["PGRST202", "42883"]);
+
+/**
+ * Quantas vezes o modelo pago pode ser chamado nesta rodada (agenda_config.detector_modelo_max). Erro na leitura = 0
+ * (nenhum modelo: a mensagem vai sem ele e a pergunta ao dono lista as compras) e o motivo para o log.
+ */
+async function lerTetoDoModelo(admin: Db): Promise<{ teto: number; erro?: string }> {
+  const { data, error } = await admin.from("agenda_config").select("detector_modelo_max").maybeSingle();
+  if (error) return { teto: 0, erro: `agenda_config.detector_modelo_max: ${String(error.message ?? error)}` };
+  const n = Number(data?.detector_modelo_max);
+  return Number.isInteger(n) && n >= 0 ? { teto: n } : { teto: 0, erro: "agenda_config.detector_modelo_max ilegível" };
+}
 
 export async function vigiarPrazosDosFornecedores(
   admin: Db,
@@ -78,23 +101,44 @@ export async function vigiarPrazosDosFornecedores(
     }
     const mensagens = (Array.isArray(data) ? data : []) as MensagemDeFornecedor[];
     resultado.lidas = mensagens.length;
+    let teto: number | null = null;
     for (const m of mensagens) {
       try {
         const p = detectarPrazoDeFornecedor(m.texto, new Date(m.em), m.direcao);
         if (!p) continue;
         const compras = Array.isArray(m.compras) ? m.compras : [];
+        const outras = Number(m.outras_vivas ?? 0);
         let escolhida: CompraViva | undefined;
         let casouPor: "unico" | "modelo" | "nenhum" = "nenhum";
         let confianca: number | null = null;
         if (compras.length === 1) {
+          // Uma linha só — mas com outra compra viva dele (a OC de estoque, a nota sem resposta, o Pix aberto) a mensagem
+          // pode ser dessa outra: a linha vai como dica e o casamento é nenhum (vira pergunta, nunca grava sozinho).
           escolhida = compras[0];
-          casouPor = "unico";
+          casouPor = outras > 0 ? "nenhum" : "unico";
         } else if (compras.length > 1) {
-          resultado.modelo++;
-          const r = await escolher(p.trecho, compras.map((c) => ({ n: c.n, rotulo: c.rotulo })));
-          confianca = r.confianca;
-          escolhida = r.n === null ? undefined : compras.find((c) => c.n === r.n);
-          casouPor = escolhida ? "modelo" : "nenhum";
+          if (teto === null) {
+            const t = await lerTetoDoModelo(admin);
+            teto = t.teto;
+            if (t.erro) {
+              await log(admin, {
+                context: "acompanhar-conversas",
+                action: "agenda:fornecedor",
+                message: `prazo do fornecedor: o teto do modelo não foi lido (${t.erro}); nesta rodada, nenhum modelo`,
+                details: { teto: 0 },
+              });
+            }
+          }
+          if (resultado.modelo < teto) {
+            resultado.modelo++;
+            const r = await escolher(p.trecho, compras.map((c) => ({ n: c.n, rotulo: c.rotulo })));
+            confianca = r.confianca;
+            escolhida = r.n === null ? undefined : compras.find((c) => c.n === r.n);
+            casouPor = escolhida ? "modelo" : "nenhum";
+          } else {
+            // o teto da rodada: sem o modelo, a pergunta ao dono lista as compras
+            resultado.sem_modelo_pelo_teto = (resultado.sem_modelo_pelo_teto ?? 0) + 1;
+          }
         }
         const { error: e2 } = await admin.rpc("material_sinal_registrar", {
           p_msg: m.msg_id,

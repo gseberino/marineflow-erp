@@ -33,9 +33,11 @@
 //    como sempre;
 //  * o "me acorde se" passa a ENVIAR o acorde liberado (./acordes.ts), com o cartão (sim <PIN> = o PDF) só com o dono
 //    livre e depois das 09:30.
-// Agenda de Produção, Fase 4, P4 (25/10/2026) — o prazo do FORNECEDOR (./fornecedores.ts), na rodada de avisos, depois
-// das promessas: as mensagens dos fornecedores com compra viva viram sinal no banco (material_sinais). Atrás de
-// agenda_config.modo_detector (nasce desligado: a RPC devolve a lista vazia); nunca derruba a rodada.
+// Agenda de Produção, Fase 4, P4 (25/10/2026) — o prazo do FORNECEDOR (./fornecedores.ts), na rodada de avisos, por
+// último (C1 da revisão: depois dos avisos ao dono e do "me acorde se", com o modelo pago no teto de
+// agenda_config.detector_modelo_max por rodada): as mensagens dos fornecedores com compra viva viram sinal no banco
+// (material_sinais). Atrás de agenda_config.modo_detector (nasce desligado: a RPC devolve a lista vazia); nunca derruba a
+// rodada.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
@@ -282,9 +284,6 @@ servirComCors(async (req) => {
     const donoDaVoz = portao.modo === "ligado" ? await lerDonoDaVoz(admin) : null;
     const promessas = !rodada.avisos ? null
       : dono ? await detectarPromessas(admin, dono, internos, settings, agora) : { lidas: 0, criadas: 0, sem_dono: true };
-    // (25/10/2026, Agenda Fase 4, P4) o prazo do fornecedor: só registra o sinal (o que fazer com ele é do banco, atrás de
-    // modo_detector). Nunca lança.
-    const fornecedores = rodada.avisos ? await vigiarPrazosDosFornecedores(admin, agora) : null;
     const avisos = rodada.avisos ? await avisar(admin, agora, conversaDosComprovantesLigada(settings), portao, donoDaVoz) : null;
     // "Me acorde se" (P4.2, 16/10/2026): só com a voz única em sombra/ligado (desligado = nada lido); em sombra só
     // REGISTRA no portão o texto que sairia — nada é enviado; (20/10/2026) ligada, ENVIA o acorde liberado, ao dono da
@@ -293,6 +292,10 @@ servirComCors(async (req) => {
     const acordes = rodada.acordes && doAcorde && portao.modo
       ? await vigiarAcordes(admin, { agora, dono: doAcorde, portao, settings, internos, conversaLigada: conversaDosComprovantesLigada(settings) })
       : null;
+    // (25/10/2026, Agenda Fase 4, P4) o prazo do fornecedor: só registra o sinal (o que fazer com ele é do banco, atrás de
+    // modo_detector). Nunca lança. (C1 da revisão da Fase 4) DEPOIS dos avisos ao dono e do "me acorde se": o dono vem
+    // primeiro, e o modelo pago tem teto por rodada (agenda_config.detector_modelo_max).
+    const fornecedores = rodada.avisos ? await vigiarPrazosDosFornecedores(admin, agora) : null;
     return jr({
       ok: true, ...(promessas ? { promessas } : {}), ...(fornecedores ? { fornecedores } : {}), ...(avisos ? { avisos } : {}),
       ...(acordes ? { acordes } : {}),

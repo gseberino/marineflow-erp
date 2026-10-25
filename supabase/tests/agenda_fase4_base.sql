@@ -108,7 +108,7 @@ end $f$;
 
 -- ── B1. Colunas, DEFAULTs e CHECKs ──────────────────────────────────────────────────────────────────────
 insert into _resultado
-select 'B1a agenda_config: os 3 modos nascem desligado na linha e o DEFAULT da coluna é sombra; os 23 parâmetros com o valor da spec',
+select 'B1a agenda_config: os 3 modos nascem desligado na linha e o DEFAULT da coluna é sombra; os 24 parâmetros com o valor da spec (e o detector_modelo_max da C1, 5)',
        c.modo_material = 'desligado' and c.modo_detector = 'desligado' and c.modo_fornecedor = 'desligado'
        and (select count(*) from pg_attribute a join pg_attrdef d on d.adrelid = a.attrelid and d.adnum = a.attnum
              where a.attrelid = 'public.agenda_config'::regclass
@@ -120,6 +120,7 @@ select 'B1a agenda_config: os 3 modos nascem desligado na linha e o DEFAULT da c
        and c.pix_categorias = array['Peças e materiais', 'Compras de mercadorias', 'Materiais e Insumos Operacionais']
        and c.prazo_longo_du = 10 and c.detector_janela_horas = 48 and c.detector_lote_max = 100
        and c.detector_precisao_minima = 0.70 and c.detector_minimo_julgados = 5 and c.detector_tolerancia_du = 1
+       and c.detector_modelo_max = 5
        and c.fornecedor_janela_inicio = time '08:00' and c.fornecedor_janela_fim = time '18:00' and not c.fornecedor_sabado
        and c.fornecedor_dia_max = 1 and c.fornecedor_semana_max = 2 and c.fornecedor_total_dia_max = 5
        and c.fornecedor_conversa_dias = 90 and c.fornecedores_principais_max = 15
@@ -149,6 +150,7 @@ insert into _casos values
   ('config', 'detector_precisao_minima 0,96', $q$update public.agenda_config set detector_precisao_minima = 0.96$q$, 'agenda_config_detector_precisao_minima_check'),
   ('config', 'detector_minimo_julgados 2', $q$update public.agenda_config set detector_minimo_julgados = 2$q$, 'agenda_config_detector_minimo_julgados_check'),
   ('config', 'detector_tolerancia_du 4', $q$update public.agenda_config set detector_tolerancia_du = 4$q$, 'agenda_config_detector_tolerancia_du_check'),
+  ('config', 'detector_modelo_max 21', $q$update public.agenda_config set detector_modelo_max = 21$q$, 'agenda_config_detector_modelo_max_check'),
   ('config', 'fornecedor_janela_inicio 06:59', $q$update public.agenda_config set fornecedor_janela_inicio = '06:59'$q$, 'agenda_config_fornecedor_janela_inicio_check'),
   ('config', 'fornecedor_janela_fim 19:01', $q$update public.agenda_config set fornecedor_janela_fim = '19:01'$q$, 'agenda_config_fornecedor_janela_fim_check'),
   ('config', 'fornecedor_dia_max 3', $q$update public.agenda_config set fornecedor_dia_max = 3$q$, 'agenda_config_fornecedor_dia_max_check'),

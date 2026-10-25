@@ -95,6 +95,7 @@ alter table public.agenda_config
   add column if not exists detector_precisao_minima    numeric(3,2)  not null default 0.70,
   add column if not exists detector_minimo_julgados    smallint      not null default 5,
   add column if not exists detector_tolerancia_du      smallint      not null default 1,
+  add column if not exists detector_modelo_max         smallint      not null default 5,
   add column if not exists fornecedor_janela_inicio    time          not null default '08:00',
   add column if not exists fornecedor_janela_fim       time          not null default '18:00',
   add column if not exists fornecedor_sabado           boolean       not null default false,
@@ -128,6 +129,7 @@ begin
       ('agenda_config_detector_precisao_minima_check',    'check (detector_precisao_minima between 0.5 and 0.95)'),
       ('agenda_config_detector_minimo_julgados_check',    'check (detector_minimo_julgados between 3 and 30)'),
       ('agenda_config_detector_tolerancia_du_check',      'check (detector_tolerancia_du between 0 and 3)'),
+      ('agenda_config_detector_modelo_max_check',         'check (detector_modelo_max between 0 and 20)'),
       ('agenda_config_fornecedor_janela_inicio_check',    'check (fornecedor_janela_inicio between time ''07:00'' and time ''10:00'')'),
       ('agenda_config_fornecedor_janela_fim_check',       'check (fornecedor_janela_fim between time ''16:00'' and time ''19:00'')'),
       ('agenda_config_fornecedor_dia_max_check',          'check (fornecedor_dia_max between 1 and 2)'),
@@ -173,6 +175,7 @@ comment on column public.agenda_config.detector_lote_max is 'Mensagens por passa
 comment on column public.agenda_config.detector_precisao_minima is 'O detector só liga com pelo menos esta fração de acertos (julgados pelo fato) …';
 comment on column public.agenda_config.detector_minimo_julgados is '… em pelo menos estes casos julgados.';
 comment on column public.agenda_config.detector_tolerancia_du is 'A previsão do detector está certa se a chegada real (chegou_em) ficou a até estes dias úteis dela, para mais ou para menos (C1 da revisão: a previsão que o dono informou não julga).';
+comment on column public.agenda_config.detector_modelo_max is 'Quantas vezes por rodada (15 min) o acompanhar-conversas chama o modelo pago para escolher de qual compra o fornecedor fala; passou disso, a mensagem vai sem o modelo e a pergunta ao dono lista as compras. 0 = nunca (C1 da revisão da Fase 4).';
 comment on column public.agenda_config.fornecedor_janela_inicio is 'Mensagem ao fornecedor: a 1ª hora em que sai (seg a sex; sábado só com fornecedor_sabado; nunca domingo).';
 comment on column public.agenda_config.fornecedor_janela_fim is 'Mensagem ao fornecedor: nada sai desta hora em diante.';
 comment on column public.agenda_config.fornecedor_sabado is 'A mensagem ao fornecedor pode sair no sábado (na mesma janela).';

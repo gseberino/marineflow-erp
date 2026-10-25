@@ -119,17 +119,19 @@ Deno.test("domingo: só o detector; promessas e avisos seguem seg–sáb; voz de
 });
 
 // (25/10/2026, Agenda de Produção, Fase 4, P4) O prazo do fornecedor. O que se protege, na ordem do handler:
-//   1. só na rodada de avisos (seg–sáb 08–20h), DEPOIS das promessas do dono e antes dos avisos;
+//   1. só na rodada de avisos (seg–sáb 08–20h), por ÚLTIMO (C1 da revisão da Fase 4, R5): depois das promessas, dos avisos
+//      ao dono e do "me acorde se" — o dono vem primeiro;
 //   2. fora de qualquer try próprio: o passo nunca lança (fornecedores_test.ts), então não derruba a rodada;
 //   3. o resumo da rodada leva o resultado ({ lidas, sinais, modelo }).
-Deno.test("prazo do fornecedor: na rodada de avisos, depois das promessas e antes dos avisos", () => {
+Deno.test("prazo do fornecedor: na rodada de avisos, por último (depois dos avisos ao dono e do 'me acorde se')", () => {
   const ini = fonte.indexOf("servirComCors(");
   const h = fonte.slice(ini);
   const promessas = h.indexOf("await detectarPromessas(");
   const fornecedores = h.indexOf("await vigiarPrazosDosFornecedores(admin, agora)");
   const avisos = h.indexOf("await avisar(");
-  assert(promessas > 0 && fornecedores > promessas && avisos > fornecedores,
-    `ordem: promessas ${promessas}, fornecedores ${fornecedores}, avisos ${avisos}`);
+  const acordes = h.indexOf("await vigiarAcordes(");
+  assert(promessas > 0 && avisos > promessas && acordes > avisos && fornecedores > acordes,
+    `ordem: promessas ${promessas}, avisos ${avisos}, acordes ${acordes}, fornecedores ${fornecedores}`);
   assertStringIncludes(h, "const fornecedores = rodada.avisos ? await vigiarPrazosDosFornecedores(admin, agora) : null;");
   assertStringIncludes(h, "...(fornecedores ? { fornecedores } : {})");
   assertStringIncludes(fonte, 'import { vigiarPrazosDosFornecedores } from "./fornecedores.ts";');

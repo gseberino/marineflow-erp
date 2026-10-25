@@ -72,7 +72,7 @@ select format('C1 agenda_config.%s existe (o DEFAULT é o único lugar do númer
   from unnest(array['modo_material', 'modo_detector', 'modo_fornecedor', 'oc_viva_dias', 'remessa_dias', 'material_inicio_dias',
                     'material_pergunta_validade', 'nfe_opcoes_max', 'pix_janela_dias', 'pix_valor_minimo',
                     'pix_perguntas_semana_max', 'pix_categorias', 'prazo_longo_du', 'detector_janela_horas', 'detector_lote_max',
-                    'detector_precisao_minima', 'detector_minimo_julgados', 'detector_tolerancia_du',
+                    'detector_precisao_minima', 'detector_minimo_julgados', 'detector_tolerancia_du', 'detector_modelo_max',
                     'fornecedor_janela_inicio', 'fornecedor_janela_fim', 'fornecedor_sabado', 'fornecedor_dia_max',
                     'fornecedor_semana_max', 'fornecedor_total_dia_max', 'fornecedor_conversa_dias',
                     'fornecedores_principais_max']) c;
