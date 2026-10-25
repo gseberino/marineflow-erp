@@ -25,6 +25,10 @@
 // lançou e as perguntas), marcos (com a OS), comissao (o mês dito em periodo; só a conta, nada é pago) e equipe (o que o
 // Roberto respondeu). Nenhuma ferramenta nova: o teto de 113 do perfil do admin continua (só agenda_ver à vista).
 //
+// Fase 4 (P1, 25/10/2026; spec-fase4.md §7.1): fornecedor_prazo — como o dono compra de um fornecedor e em quantos dias
+// chega vira RASCUNHO (agenda_rascunho_fornecedor, migration 20261027100100), com a releitura pronta; só o *grava* do dono
+// grava em suppliers. Fora da vista como as outras escritas da agenda (pela ferramenta_extra, d14): o teto de 113 não muda.
+//
 // Cada execute chama UMA RPC com ctx.sb (painel: o JWT do dono; WhatsApp: service role), p_autor = ctx.userId e
 // p_canal pelo ctx.canal. O mapeamento argumento → parâmetro é o de _shared/agenda/rpc-das-ferramentas.ts (puro), o
 // mesmo dos evals. `if (error) throw`: leitura que falha nunca vira "nada marcado".
@@ -36,12 +40,14 @@ import {
   EVENTOS_DO_ANDAMENTO,
   FOCOS,
   LIMPAVEIS,
+  MODALIDADES_DO_FORNECEDOR,
   MOTIVOS_DO_ANDAMENTO,
   paraAgendaVer,
   paraAndamento,
   paraAplicar,
   paraDesfazer,
   paraDisponibilidade,
+  paraFornecedor,
   paraMaterial,
   paraPlanejar,
   paraPropor,
@@ -52,6 +58,7 @@ import {
   SITUACOES_DA_EQUIPE,
   SITUACOES_DO_MATERIAL,
   TURNOS,
+  UNIDADES_DO_PRAZO,
 } from "../../agenda/rpc-das-ferramentas.ts";
 
 const SO_ADMIN: Role[] = ["admin"];
@@ -376,6 +383,48 @@ export const agendaProducaoTools: ToolDef[] = [
     async execute(args, ctx) {
       if (ctx.userRole !== "admin") return SO_O_ADMINISTRADOR;
       const chamada = paraAndamento(args, contexto(ctx));
+      if (!chamada.ok) return { error: chamada.error };
+      return resultadoDoRascunho(await chamar(ctx, chamada), chamada.rpc);
+    },
+  },
+  // ── Fase 4 (P1): o prazo do fornecedor ──
+  {
+    name: "fornecedor_prazo",
+    description:
+      "Anota num RASCUNHO como o dono compra de um fornecedor e em quantos dias chega (\"a Premel eu pego no balcão\", " +
+      "\"a Kamell chega em 4 dias úteis depois que sai\", \"a Toli chega em 5 dias\", \"a Kamell de SC é a mesma do ES\": " +
+      "mesmo_que). Só a modalidade e os números que ele disse: nunca invente prazo nem modalidade. NÃO grava, não muda o " +
+      "cadastro e não manda mensagem ao fornecedor: devolve a releitura, e só o *grava* do dono grava. O prazo de uma peça " +
+      "de uma OS (\"o compressor chega dia 14\") é material_informar.",
+    input_schema: {
+      type: "object",
+      properties: {
+        fornecedor: { type: "string", description: "O fornecedor como o dono falou (\"Premel\", \"Kamell de Vila Velha\"). Nunca o id." },
+        modalidade: {
+          type: "string",
+          enum: [...MODALIDADES_DO_FORNECEDOR],
+          description: "balcao = ele pega na loja; entrega_local = entregam aqui; distribuidor_sc_pr = transportadora de SC/PR; " +
+            "outro_estado; marketplace = loja pela internet; importacao = importado. Só se ele disse.",
+        },
+        prazo: { type: "number", description: "Os dias que o dono disse, inteiro. Sem número (\"no balcão\", \"na hora\") = não passe." },
+        unidade: {
+          type: "string",
+          enum: [...UNIDADES_DO_PRAZO],
+          description: "uteis (o padrão: \"4 dias úteis\") ou corridos (\"chega em 5 dias\", \"em 20 dias\"). Só com prazo.",
+        },
+        mesmo_que: {
+          type: "string",
+          description: "\"É a mesma de …\": o outro cadastro do mesmo fornecedor, como o dono falou. Sem modalidade nem prazo.",
+        },
+        trecho: TRECHO,
+      },
+      required: ["fornecedor", "trecho"],
+    },
+    risk: "low",
+    roles: SO_ADMIN,
+    async execute(args, ctx) {
+      if (ctx.userRole !== "admin") return SO_O_ADMINISTRADOR;
+      const chamada = paraFornecedor(args, contexto(ctx));
       if (!chamada.ok) return { error: chamada.error };
       return resultadoDoRascunho(await chamar(ctx, chamada), chamada.rpc);
     },

@@ -107,6 +107,8 @@ NAO_SAO_TOOLS.add("os_de_varios_dias_no_horario");
 // PRODUÇÃO ensina ("chegou" = na_mao, "compro terça" = vou_comprar; a_caminho já está acima)
 NAO_SAO_TOOLS.add("na_mao");
 NAO_SAO_TOOLS.add("vou_comprar");
+// Agenda de Produção (25/10/2026, Fase 4, P1): argumento de fornecedor_prazo ("a Kamell de SC é a mesma do ES")
+NAO_SAO_TOOLS.add("mesmo_que");
 
 /** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
 const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };

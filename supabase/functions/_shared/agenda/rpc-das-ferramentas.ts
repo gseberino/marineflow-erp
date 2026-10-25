@@ -15,6 +15,11 @@
 // paraAplicar (publicar a proposta aberta OU responder a decisão da agenda), paraDesfazer e paraAndamento. As três
 // últimas também exigem o trecho e só deixam rascunho; nenhuma escolhe dia, pessoa ou opção pelo dono (a opção da
 // decisão só vai se o modelo a mandou, e o banco devolve a pergunta quando falta).
+//
+// Fase 4 (P1, 25/10/2026; spec-fase4.md §5.1, §7.1): paraFornecedor (agenda_rascunho_fornecedor: como o dono compra de um
+// fornecedor e em quantos dias chega). Também exige o trecho (o banco confere nele o prazo) e só deixa rascunho; o
+// fornecedor é o nome como o dono disse (nunca o id), e com mesmo_que (o outro cadastro do mesmo fornecedor) não vai
+// modalidade nem prazo: o banco copia do outro.
 
 export type CanalDaRpc = "whatsapp" | "painel";
 
@@ -39,6 +44,18 @@ export const RPC_PROPOR = "agenda_propor_dito";
 export const RPC_APLICAR = "agenda_rascunho_aplicar";
 export const RPC_DESFAZER = "agenda_rascunho_desfazer";
 export const RPC_ANDAMENTO = "agenda_rascunho_andamento";
+// Fase 4 (P1): o prazo do fornecedor que o dono diz vira rascunho (migration 20261027100100).
+export const RPC_FORNECEDOR = "agenda_rascunho_fornecedor";
+/**
+ * (Fase 4) Como o dono compra do fornecedor: as chaves de agenda_config.prazo_classe_du + importacao (o CHECK
+ * suppliers_modalidade_check). balcao = pega na loja; entrega_local = entregam aqui; distribuidor_sc_pr = transportadora de
+ * SC/PR; outro_estado; marketplace = loja pela internet; importacao = importado (conta em dias corridos).
+ */
+export const MODALIDADES_DO_FORNECEDOR = [
+  "balcao", "entrega_local", "distribuidor_sc_pr", "outro_estado", "marketplace", "importacao",
+] as const;
+/** (Fase 4) O prazo dito: dias úteis (o padrão) ou corridos (o banco converte; o importado é sempre corridos). */
+export const UNIDADES_DO_PRAZO = ["uteis", "corridos"] as const;
 
 // (Fase 2, P5) decisoes (o que a agenda precisa do dono), mudancas (o que ela mudou sozinha) e plano (o publicado): a
 // agenda_ver do banco (20261025100500) aceita, e as palavras *agenda pendências*, *o que mudou* e *agenda plano* vêm por
@@ -488,6 +505,48 @@ export function paraAndamento(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
       p_dia: dataDita(a.dia, "dia"),
       p_quem: quem,
       p_motivo: motivo,
+      p_trecho: t,
+    }, ctx);
+  });
+}
+
+// ── Fase 4 (P1): o prazo do fornecedor ──────────────────────────────────────────────────────────────────
+
+/**
+ * fornecedor_prazo → agenda_rascunho_fornecedor: fornecedor (o nome como o dono disse), modalidade, prazo (dias inteiros,
+ * como ele disse), unidade (uteis | corridos), mesmo_que (o outro cadastro do mesmo fornecedor) e o trecho. Com mesmo_que,
+ * nem modalidade nem prazo (o banco copia do outro); sem mesmo_que, ao menos a modalidade ou o prazo.
+ */
+export function paraFornecedor(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
+  return mapear(RPC_FORNECEDOR, () => {
+    const a = objeto(args);
+    const fornecedor = texto(a.fornecedor, "fornecedor", 80);
+    if (!fornecedor) recusar("falta 'fornecedor': o nome como o dono falou (\"Premel\", \"Kamell de Vila Velha\")");
+    if (UUID.test(fornecedor as string)) recusar("'fornecedor' é o nome como o dono falou, não o id");
+    const mesmoQue = texto(a.mesmo_que, "mesmo_que", 80);
+    if (mesmoQue && UUID.test(mesmoQue)) recusar("'mesmo_que' é o nome do outro cadastro como o dono falou, não o id");
+    const modalidade = umDe(a.modalidade, "modalidade", MODALIDADES_DO_FORNECEDOR, false);
+    const prazo = numero(a.prazo, "prazo");
+    if (prazo !== null && (!Number.isInteger(prazo) || prazo < 0 || prazo > 120)) {
+      recusar("'prazo' tem de ser os dias que o dono disse, inteiro (de 0 a 120)");
+    }
+    const unidade = umDe(a.unidade, "unidade", UNIDADES_DO_PRAZO, false);
+    if (unidade && prazo === null) recusar("'unidade' só vai junto do 'prazo'");
+    if (mesmoQue && (modalidade || prazo !== null)) {
+      recusar("com 'mesmo_que' não passe modalidade nem prazo: o banco copia como o outro cadastro entrega");
+    }
+    if (!mesmoQue && !modalidade && prazo === null) {
+      recusar("diga como o dono compra (modalidade), em quantos dias chega (prazo) ou de qual cadastro é o mesmo (mesmo_que)");
+    }
+    const t = trecho(a.trecho);
+    return comHoje({
+      p_autor: ctx.autor,
+      p_canal: ctx.canal,
+      p_fornecedor: fornecedor,
+      p_modalidade: modalidade,
+      p_prazo: prazo,
+      p_unidade: unidade,
+      p_mesmo_que: mesmoQue,
       p_trecho: t,
     }, ctx);
   });

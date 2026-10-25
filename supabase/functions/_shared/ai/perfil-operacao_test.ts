@@ -133,10 +133,12 @@ Deno.test("SO_PELA_REDE: pela rede, roda direto só leitura e escrita de sugest�
   // agenda_propor, agenda_aplicar, agenda_desfazer, os_registrar_andamento (24/10/2026, Agenda de Produção, Fase 2): a
   // simulação grava no máximo a proposta em aberto (não vale para ninguém); as outras três só anotam o rascunho, e quem
   // executa é o *grava* do dono.
+  // fornecedor_prazo (25/10/2026, Agenda de Produção, Fase 4): só anota o rascunho do prazo do fornecedor; quem grava em
+  // suppliers é o *grava* do dono.
   assertEquals(escritasDiretas, [
     "agenda_aplicar", "agenda_desfazer", "agenda_propor", "completar_comprovante", "enviar_arquivo_do_dropbox",
-    "equipe_disponibilidade", "interpret_customer_reply", "material_informar", "os_planejar", "os_registrar_andamento",
-    "remember_about_entity",
+    "equipe_disponibilidade", "fornecedor_prazo", "interpret_customer_reply", "material_informar", "os_planejar",
+    "os_registrar_andamento", "remember_about_entity",
   ]);
   assertEquals(escritasDiretas, Object.keys(ESCRITAS_VERIFICADAS_DA_REDE).sort(), "lista verificada com nome que não é escrita low de SO_PELA_REDE");
 

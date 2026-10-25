@@ -13,12 +13,14 @@ import {
   INSTRUCAO_RASCUNHO,
   INSTRUCAO_RASCUNHO_RECUSA,
   INSTRUCAO_SIMULACAO,
+  MODALIDADES_DO_FORNECEDOR,
   MOTIVOS_DO_ANDAMENTO,
   paraAgendaVer,
   paraAndamento,
   paraAplicar,
   paraDesfazer,
   paraDisponibilidade,
+  paraFornecedor,
   paraMaterial,
   paraPlanejar,
   paraPropor,
@@ -26,6 +28,7 @@ import {
   resultadoDaProposta,
   resultadoDoRascunho,
   SINONIMOS_DO_ANDAMENTO,
+  UNIDADES_DO_PRAZO,
 } from "./rpc-das-ferramentas.ts";
 
 const CTX = { autor: "aa000000-0000-4000-8000-000000000001", canal: "whatsapp" as const };
@@ -377,6 +380,47 @@ Deno.test("resultadoDaProposta: o texto e as perguntas em texto; simulação × 
   assertEquals(recusa, { ok: false, texto: "Qual Rodrigo?", pergunta: "Qual Rodrigo?", opcoes: ["OS-00076", "OS-00096"], instrucao: INSTRUCAO_RASCUNHO_RECUSA });
   assertThrows(() => resultadoDaProposta({ ok: true }));
   assertThrows(() => resultadoDaProposta(null));
+});
+
+// Fase 4 (P1): o prazo do fornecedor — o nome como o dono disse, só o que ele disse, e o banco confere o número no trecho.
+Deno.test("Fase 4: paraFornecedor — modalidade, prazo inteiro, unidade e mesmo_que; nulos no que não veio", () => {
+  const r = params(paraFornecedor({ fornecedor: "Premel", modalidade: "balcao", trecho: "a Premel eu pego no balcão" }, CTX));
+  assertEquals(r.rpc, "agenda_rascunho_fornecedor");
+  assertEquals(r.params, {
+    p_autor: CTX.autor, p_canal: "whatsapp", p_fornecedor: "Premel", p_modalidade: "balcao", p_prazo: null, p_unidade: null,
+    p_mesmo_que: null, p_trecho: "a Premel eu pego no balcão",
+  });
+  // "5 dias" vira o número; a unidade só como o dono disse (o banco converte os corridos).
+  assertEquals(params(paraFornecedor({ fornecedor: "Toli", prazo: "5", unidade: "corridos", trecho: "a Toli chega em 5 dias" }, CTX)).params,
+    { p_autor: CTX.autor, p_canal: "whatsapp", p_fornecedor: "Toli", p_modalidade: null, p_prazo: 5, p_unidade: "corridos",
+      p_mesmo_que: null, p_trecho: "a Toli chega em 5 dias" });
+  // "É a mesma de …": nem modalidade nem prazo (o banco copia do outro cadastro).
+  assertEquals(params(paraFornecedor({ fornecedor: "Kamell de SC", mesmo_que: "Kamell do ES", trecho: "a Kamell de SC é a mesma do ES" },
+    CTX)).params.p_mesmo_que, "Kamell do ES");
+  // No painel o canal é o painel; com o dia fixo dos evals, p_hoje vai junto.
+  assertEquals(params(paraFornecedor({ fornecedor: "Mateus", modalidade: "entrega_local", prazo: 1, trecho: "o Mateus entrega em 1 dia" },
+    { ...CTX, canal: "painel", hoje: "2026-10-30" })).params.p_hoje, "2026-10-30");
+});
+
+Deno.test("Fase 4: paraFornecedor recusa sem trecho, sem fornecedor, id, modalidade e unidade fora da lista, prazo quebrado e mesmo_que com prazo", () => {
+  assertEquals(erro(paraFornecedor({ fornecedor: "Premel", modalidade: "balcao" }, CTX)).startsWith("falta 'trecho'"), true);
+  assertEquals(erro(paraFornecedor({ modalidade: "balcao", trecho: "x" }, CTX)).startsWith("falta 'fornecedor'"), true);
+  assertEquals(erro(paraFornecedor({ fornecedor: UUID_QUALQUER, modalidade: "balcao", trecho: "x" }, CTX)).includes("não o id"), true);
+  assertEquals(erro(paraFornecedor({ fornecedor: "Kamell", mesmo_que: UUID_QUALQUER, trecho: "x" }, CTX)).includes("não o id"), true);
+  assertEquals(erro(paraFornecedor({ fornecedor: "Premel", modalidade: "loja", trecho: "x" }, CTX)).includes("'modalidade' aceita só"), true);
+  assertEquals(erro(paraFornecedor({ fornecedor: "Toli", prazo: 2.5, trecho: "x" }, CTX)).includes("inteiro"), true);
+  assertEquals(erro(paraFornecedor({ fornecedor: "Toli", prazo: -1, trecho: "x" }, CTX)).includes("inteiro"), true);
+  assertEquals(erro(paraFornecedor({ fornecedor: "Toli", prazo: "dois", trecho: "x" }, CTX)).includes("tem de ser número"), true);
+  assertEquals(erro(paraFornecedor({ fornecedor: "Toli", prazo: 3, unidade: "semanas", trecho: "x" }, CTX)).includes("'unidade' aceita só"), true);
+  assertEquals(erro(paraFornecedor({ fornecedor: "Toli", unidade: "uteis", trecho: "x" }, CTX)).includes("só vai junto do 'prazo'"), true);
+  assertEquals(erro(paraFornecedor({ fornecedor: "Kamell", mesmo_que: "Kamell do ES", modalidade: "outro_estado", trecho: "x" }, CTX))
+    .includes("não passe modalidade nem prazo"), true);
+  assertEquals(erro(paraFornecedor({ fornecedor: "Premel", trecho: "x" }, CTX)).includes("diga como o dono compra"), true);
+});
+
+Deno.test("Fase 4: as modalidades e as unidades são as que o banco aceita (suppliers_modalidade_check)", () => {
+  assertEquals([...MODALIDADES_DO_FORNECEDOR], ["balcao", "entrega_local", "distribuidor_sc_pr", "outro_estado", "marketplace", "importacao"]);
+  assertEquals([...UNIDADES_DO_PRAZO], ["uteis", "corridos"]);
 });
 
 Deno.test("paraPlanejar (Fase 2): adiantavel_patio como o dono disse e limpar patio; fora do intervalo volta", () => {

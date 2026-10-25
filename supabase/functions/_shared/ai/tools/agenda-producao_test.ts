@@ -36,10 +36,12 @@ function sbFalso(resposta: (c: Chamada) => { data: unknown; error: unknown }) {
 const ctx = (sb: unknown, extra: Record<string, unknown> = {}) =>
   ({ sb, admin: sb, userId: ADMIN, userRole: "admin", jwt: "", appOrigin: "", settings: {}, ...extra }) as never;
 
-Deno.test("as 8 estão em allTools, risco low, só admin", () => {
+Deno.test("as 9 estão em allTools, risco low, só admin", () => {
   for (const nome of [
     "agenda_ver", "os_planejar", "material_informar", "equipe_disponibilidade",
     "agenda_propor", "agenda_aplicar", "agenda_desfazer", "os_registrar_andamento",
+    // Fase 4 (P1)
+    "fornecedor_prazo",
   ]) {
     const t = allTools.find((x) => x.name === nome);
     assert(t, `${nome} fora de allTools`);
@@ -89,7 +91,7 @@ Deno.test("as três de escrita: a RPC do rascunho, p_canal = painel no painel e 
   }
 });
 
-Deno.test("erro do banco LANÇA nas oito (nunca vira agenda vazia nem 'anotado')", async () => {
+Deno.test("erro do banco LANÇA nas nove (nunca vira agenda vazia nem 'anotado')", async () => {
   const args: Record<string, Record<string, unknown>> = {
     agenda_ver: { foco: "atrasos" },
     os_planejar: { os: "Lenine", dias: 2, trecho: "dois dias" },
@@ -99,6 +101,7 @@ Deno.test("erro do banco LANÇA nas oito (nunca vira agenda vazia nem 'anotado')
     agenda_aplicar: { decisao: "1", opcao: "1", trecho: "pode atrasar o Nelson" },
     agenda_desfazer: { alvo: "Nelson", trecho: "desfaz o Nelson" },
     os_registrar_andamento: { os: "Vanderlei", evento: "trabalhou", quem: ["Roberto"], dia: "hoje", trecho: "hoje o Roberto trabalhou" },
+    fornecedor_prazo: { fornecedor: "Kamell", prazo: 4, unidade: "uteis", trecho: "a Kamell chega em 4 dias úteis" },
   };
   for (const t of agendaProducaoTools) {
     const { sb } = sbFalso(() => ({ data: null, error: { message: "permission denied", code: "42501" } }));
@@ -202,8 +205,9 @@ Deno.test("nenhuma recebe id nem data/hora calculada: sem campo *_id/id, sem for
   }
 });
 
-Deno.test("as seis de rascunho exigem o trecho; a leitura não exige nada; a simulação só o escopo", () => {
-  for (const nome of ["os_planejar", "material_informar", "equipe_disponibilidade", "agenda_aplicar", "agenda_desfazer", "os_registrar_andamento"]) {
+Deno.test("as sete de rascunho exigem o trecho; a leitura não exige nada; a simulação só o escopo", () => {
+  for (const nome of ["os_planejar", "material_informar", "equipe_disponibilidade", "agenda_aplicar", "agenda_desfazer", "os_registrar_andamento",
+    "fornecedor_prazo"]) {
     assert((porNome(nome).input_schema.required as string[]).includes("trecho"), nome);
   }
   assertEquals(porNome("agenda_ver").input_schema.required, undefined);
@@ -438,4 +442,64 @@ Deno.test("Fase 3: a recusa do banco ao concluir (orçamento, levantamento, dia 
   const r = await porNome("os_registrar_andamento").execute({ os: "Lenine", evento: "concluiu", trecho: "o Lenine terminou" }, ctx(sb)) as Record<string, unknown>;
   assertEquals([r.ok, r.texto, r.pergunta], [false, pergunta, pergunta]);
   assertEquals(String(r.texto).includes("*grava*"), false);
+});
+
+// ───────── Fase 4 (P1): fornecedor_prazo (rascunho + *grava*) ─────────
+Deno.test("Fase 4: fornecedor_prazo chama agenda_rascunho_fornecedor com p_autor e p_canal e devolve a releitura", async () => {
+  const releitura = "Entendi assim, confere?\n• Premel (Itajaí/SC): balcão, na mão no mesmo dia (você disse).\n" +
+    "Responda *grava* ou corrija o que estiver errado.";
+  for (const [canal, esperado] of [["panel", "painel"], ["whatsapp", "whatsapp"]] as const) {
+    const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, item: "x", releitura }, error: null }));
+    const r = await porNome("fornecedor_prazo").execute(
+      { fornecedor: "Premel", modalidade: "balcao", trecho: "a Premel eu pego no balcão" }, ctx(sb, { canal })) as Record<string, unknown>;
+    assertEquals(chamadas.map((c) => c.nome), ["agenda_rascunho_fornecedor"]);
+    assertEquals(chamadas[0].params, {
+      p_autor: ADMIN, p_canal: esperado, p_fornecedor: "Premel", p_modalidade: "balcao", p_prazo: null, p_unidade: null,
+      p_mesmo_que: null, p_trecho: "a Premel eu pego no balcão",
+    });
+    assertEquals([r.ok, r.texto], [true, releitura]);
+    assertEquals(r.instrucao, "Nada foi gravado: mostre a releitura ao dono. Só o *grava* dele grava.");
+  }
+  // A pergunta do banco (dois cadastros com o mesmo nome) passa adiante, sem id.
+  const pergunta = "Qual Kamell: Kamell (Vila Velha/ES) ou Kamell (Itajaí/SC)?";
+  const { sb } = sbFalso(() => ({
+    data: { ok: false, motivo: "fornecedor_ambiguo", texto: pergunta, pergunta, opcoes: ["Kamell (Vila Velha/ES)", "Kamell (Itajaí/SC)"] },
+    error: null,
+  }));
+  const r = await porNome("fornecedor_prazo").execute({ fornecedor: "Kamell", prazo: 4, trecho: "a Kamell chega em 4 dias úteis" }, ctx(sb)) as
+    Record<string, unknown>;
+  assertEquals([r.ok, r.pergunta, r.opcoes], [false, pergunta, ["Kamell (Vila Velha/ES)", "Kamell (Itajaí/SC)"]]);
+  assertStringIncludes(String(r.instrucao), "Nada entrou no rascunho");
+});
+
+Deno.test("Fase 4: fornecedor_prazo — argumento errado volta como { error } e NADA é chamado", async () => {
+  const casos: Array<[Record<string, unknown>, string]> = [
+    [{ fornecedor: "Premel", modalidade: "balcao" }, "falta 'trecho'"],
+    [{ modalidade: "balcao", trecho: "no balcão" }, "falta 'fornecedor'"],
+    [{ fornecedor: "dd000000-0000-4000-8000-000000000001", modalidade: "balcao", trecho: "x" }, "não o id"],
+    [{ fornecedor: "Premel", modalidade: "loja", trecho: "x" }, "'modalidade' aceita só"],
+    [{ fornecedor: "Toli", prazo: 2.5, trecho: "dois dias e meio" }, "inteiro"],
+    [{ fornecedor: "Toli", prazo: 3, unidade: "semanas", trecho: "3 semanas" }, "'unidade' aceita só"],
+    [{ fornecedor: "Toli", unidade: "corridos", trecho: "x" }, "só vai junto do 'prazo'"],
+    [{ fornecedor: "Kamell de SC", mesmo_que: "Kamell do ES", prazo: 4, trecho: "é a mesma, 4 dias" }, "não passe modalidade nem prazo"],
+    [{ fornecedor: "Premel", trecho: "a Premel" }, "diga como o dono compra"],
+  ];
+  for (const [args, trecho] of casos) {
+    const { sb, chamadas } = sbFalso(() => ({ data: { ok: true, texto: "x" }, error: null }));
+    const r = await porNome("fornecedor_prazo").execute(args, ctx(sb)) as Record<string, unknown>;
+    assertEquals(chamadas.length, 0, `chamou o banco com ${JSON.stringify(args)}`);
+    assertStringIncludes(String(r.error), trecho, JSON.stringify(args));
+  }
+});
+
+Deno.test("Fase 4: a descrição de fornecedor_prazo diz o que NÃO faz e a fronteira com material_informar", () => {
+  const d = porNome("fornecedor_prazo").description;
+  for (const t of ["RASCUNHO", "NÃO grava", "não muda o cadastro", "não manda mensagem ao fornecedor", "*grava*",
+    "nunca invente prazo nem modalidade", "material_informar"]) {
+    assertStringIncludes(d, t);
+  }
+  const props = (porNome("fornecedor_prazo").input_schema as { properties: Record<string, { enum?: string[] }> }).properties;
+  assertEquals(props.modalidade.enum, ["balcao", "entrega_local", "distribuidor_sc_pr", "outro_estado", "marketplace", "importacao"]);
+  assertEquals(props.unidade.enum, ["uteis", "corridos"]);
+  assertEquals(porNome("fornecedor_prazo").input_schema.required, ["fornecedor", "trecho"]);
 });
