@@ -532,6 +532,39 @@ Deno.test("dayOverloadNotice: dois compromissos de 5 h no mesmo dia avisam (10 h
   assertMatch(String(aviso), /10\.0h ocupadas/);
 });
 
+// Fase 3 (P7a): a jornada é agenda_config.jornada_horas; JORNADA_PADRAO_HORAS só quando a tabela não responde.
+const conflitoDe5h = () => ({
+  data: [{ source: "task", label: "Visita", starts_at: "2026-10-07T12:00:00.000Z", ends_at: "2026-10-07T17:00:00.000Z" }],
+  error: null,
+});
+
+Deno.test("dayOverloadNotice: a jornada vem de agenda_config (10 h no dia de 10 h não avisa)", async () => {
+  const { sb, rpcsChamadas } = bancoFalso(
+    { agenda_config: () => ({ data: [{ jornada_horas: "10.00" }], error: null }) },
+    { get_agenda_conflicts: conflitoDe5h },
+  );
+  assertEquals(await dayOverloadNotice(sb, "t1", "2026-10-07T14:00:00-03:00", "2026-10-07T19:00:00-03:00"), null);
+  assertEquals(rpcsChamadas.map((r) => r.nome), ["get_agenda_conflicts"]);
+});
+
+Deno.test("dayOverloadNotice: agenda_config ainda não aplicada (PGRST205) = a jornada padrão, calado", async () => {
+  const { sb, rpcsChamadas } = bancoFalso(
+    { agenda_config: () => ({ data: null, error: { code: "PGRST205", message: "Could not find the table" } }) },
+    { get_agenda_conflicts: conflitoDe5h },
+  );
+  assertMatch(String(await dayOverloadNotice(sb, "t1", "2026-10-07T14:00:00-03:00", "2026-10-07T19:00:00-03:00")), /10\.0h ocupadas/);
+  assertEquals(rpcsChamadas.map((r) => r.nome), ["get_agenda_conflicts"]);
+});
+
+Deno.test("dayOverloadNotice: erro de verdade em agenda_config = a jornada padrão e o erro em app_error_logs", async () => {
+  const { sb, rpcsChamadas } = bancoFalso(
+    { agenda_config: () => ({ data: null, error: { code: "57014", message: "tempo esgotado" } }) },
+    { get_agenda_conflicts: conflitoDe5h },
+  );
+  assertMatch(String(await dayOverloadNotice(sb, "t1", "2026-10-07T14:00:00-03:00", "2026-10-07T19:00:00-03:00")), /10\.0h ocupadas/);
+  assertEquals(rpcsChamadas.some((r) => r.nome === "log_app_error"), true);
+});
+
 Deno.test("dayOverloadNotice: o dia é o de Brasília (às 22 h ainda é hoje), não o de UTC", async () => {
   const { sb, rpcsChamadas } = bancoFalso({}, { get_agenda_conflicts: () => ({ data: [], error: null }) });
   await dayOverloadNotice(sb, "t1", "2026-10-23T22:00:00-03:00", "2026-10-23T23:00:00-03:00");

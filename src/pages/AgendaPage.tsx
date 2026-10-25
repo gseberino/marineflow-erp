@@ -39,8 +39,12 @@ import {
   diaBR,
   diasDaJanela,
   horasNoDia,
-  JORNADA_PADRAO_HORAS,
 } from '../../supabase/functions/_shared/agenda-dia';
+// Agenda de Produção, Fase 3 (P7a): a Semana e a Carteira de produção, as linhas da grade como a equipe (payees) e a
+// jornada do dia lida de agenda_config (JORNADA_PADRAO_HORAS só enquanto a migration não foi aplicada).
+import { useAgendaConfig, useEquipeDaGrade, type PessoaDaGrade } from '@/hooks/use-agenda-producao';
+import { SemanaProducao } from '@/components/agenda/producao/SemanaProducao';
+import { CarteiraProducao } from '@/components/agenda/producao/CarteiraProducao';
 import { TaskCard } from '@/components/agenda/TaskCard';
 import { AgendaTaskDialog, type ExistingTask } from '@/components/AgendaTaskDialog';
 import { FocusMode } from '@/components/agenda/FocusMode';
@@ -64,7 +68,8 @@ import { downloadCSV } from '@/lib/download';
 import { useFollowupSwitch } from '@/hooks/use-followup-missions';
 
 // 'revisoes' (07/10/2026): planos de manutenção vencendo, vencidos, adiados e quem respondeu ao lembrete.
-type ViewMode = 'today' | 'week' | 'month' | 'done' | 'inbox' | 'esperando' | 'revisoes';
+// 'producao' e 'carteira' (Fase 3, P7a): a Semana e a Carteira de produção (admin/financeiro, agenda de produção ligada).
+type ViewMode = 'today' | 'week' | 'month' | 'done' | 'inbox' | 'esperando' | 'revisoes' | 'producao' | 'carteira';
 
 function startOfWeek(d: Date): Date {
   const date = new Date(d);
@@ -128,7 +133,7 @@ export default function AgendaPage() {
     const v = searchParams.get('view');
     // Esta lista tem de andar junto com o ViewMode: um valor que exista lá e falte aqui
     // cai em 'today' sem erro nenhum — e o link salvo no celular abre a tela errada.
-    return (['today', 'week', 'month', 'done', 'inbox', 'esperando', 'revisoes'] as const).includes(v as any)
+    return (['today', 'week', 'month', 'done', 'inbox', 'esperando', 'revisoes', 'producao', 'carteira'] as const).includes(v as any)
       ? (v as ViewMode) : 'today';
   });
   const [cursor, setCursor] = useState(() => new Date());
@@ -137,6 +142,13 @@ export default function AgendaPage() {
   // Revisões mostram valor estimado (dinheiro): técnico não vê a aba (07/10/2026).
   const { user: usuario } = useAuth();
   const veRevisoes = usuario?.role !== 'technician';
+  // Fase 3 (P7a): a Semana e a Carteira de produção — só administrador e financeiro, com a agenda de produção ligada
+  // (modo_leitura) e as telas no banco (agenda_equipe_da_grade responde). Fora disso, as visões de antes. Com elas, o
+  // botão "Semana" abre a de produção e a grade antiga vira "Grade".
+  const gestor = usuario?.role === 'admin' || usuario?.role === 'financial';
+  const { config: agendaConfig } = useAgendaConfig();
+  const { data: equipeDaGrade } = useEquipeDaGrade(gestor);
+  const producaoVisivel = gestor && agendaConfig.modo_leitura !== 'desligado' && Array.isArray(equipeDaGrade);
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
   const [osDialogOpen, setOsDialogOpen] = useState(false);
@@ -154,7 +166,7 @@ export default function AgendaPage() {
       from.setHours(0, 0, 0, 0);
       return { from, to: addDays(from, 1) };
     }
-    if (view === 'week') {
+    if (view === 'week' || view === 'producao' || view === 'carteira') {
       const from = startOfWeek(cursor);
       const to = addDays(from, 7);
       return { from, to };
@@ -304,6 +316,7 @@ export default function AgendaPage() {
     : view === 'done' ? loadingDone
     : view === 'inbox' ? loadingSuggestions
     : view === 'revisoes' ? false // o painel tem o próprio carregando
+    : view === 'producao' || view === 'carteira' ? false // as telas de produção têm o próprio carregando
     : (loadingOrders || loadingTasks);
 
 
@@ -318,7 +331,7 @@ export default function AgendaPage() {
   const filteredTasks = useMemo(() => applyTaskFilters(tasks || []), [tasks, techFilter, prioFilter, sourceFilter]);
 
   const handleNav = (delta: number) => {
-    if (view === 'week') setCursor(addDays(cursor, delta * 7));
+    if (view === 'week' || view === 'producao') setCursor(addDays(cursor, delta * 7));
     else setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + delta, 1));
   };
 
@@ -396,9 +409,23 @@ export default function AgendaPage() {
             <Button size="sm" variant={view === 'today' ? 'default' : 'ghost'} onClick={() => setView('today')}>
               Hoje
             </Button>
-            <Button size="sm" variant={view === 'week' ? 'default' : 'ghost'} onClick={() => setView('week')}>
-              Semana
-            </Button>
+            {producaoVisivel ? (
+              <>
+                <Button size="sm" variant={view === 'producao' ? 'default' : 'ghost'} onClick={() => setView('producao')}>
+                  Semana
+                </Button>
+                <Button size="sm" variant={view === 'carteira' ? 'default' : 'ghost'} onClick={() => setView('carteira')}>
+                  Carteira
+                </Button>
+                <Button size="sm" variant={view === 'week' ? 'default' : 'ghost'} onClick={() => setView('week')}>
+                  Grade
+                </Button>
+              </>
+            ) : (
+              <Button size="sm" variant={view === 'week' ? 'default' : 'ghost'} onClick={() => setView('week')}>
+                Semana
+              </Button>
+            )}
             <Button size="sm" variant={view === 'month' ? 'default' : 'ghost'} onClick={() => setView('month')}>
               Mês
             </Button>
@@ -450,15 +477,15 @@ export default function AgendaPage() {
                 </SelectContent>
               </Select>
             )}
-            {view !== 'today' && view !== 'done' && view !== 'revisoes' && (
+            {view !== 'today' && view !== 'done' && view !== 'revisoes' && view !== 'carteira' && (
               <>
                 <Button size="sm" variant="outline" onClick={() => handleNav(-1)}>
                   <ChevronLeft className="h-4 w-4" />
-                  <span className="hidden sm:inline">{view === 'week' ? 'Semana anterior' : 'Mês anterior'}</span>
+                  <span className="hidden sm:inline">{view === 'week' || view === 'producao' ? 'Semana anterior' : 'Mês anterior'}</span>
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => setCursor(new Date())}>Hoje</Button>
                 <Button size="sm" variant="outline" onClick={() => handleNav(1)}>
-                  <span className="hidden sm:inline">{view === 'week' ? 'Semana seguinte' : 'Mês seguinte'}</span>
+                  <span className="hidden sm:inline">{view === 'week' || view === 'producao' ? 'Semana seguinte' : 'Mês seguinte'}</span>
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </>
@@ -532,6 +559,13 @@ export default function AgendaPage() {
               completeTask.mutate({ id, done }, { onError: (e: any) => toast.error(e?.message || 'Erro ao concluir') })}
             onScheduleOs={(t) => { setScheduleOsId(t.related_entity_id); setOsDialogOpen(true); }}
           />
+        ) : view === 'producao' && producaoVisivel ? (
+          <SemanaProducao
+            de={toLocalDateInput(startOfWeek(cursor))}
+            onAbrirOs={(id) => navigate(`/service-orders/${id}`)}
+          />
+        ) : view === 'carteira' && producaoVisivel ? (
+          <CarteiraProducao onAbrirOs={(id) => navigate(`/service-orders/${id}`)} />
         ) : view === 'revisoes' && veRevisoes ? (
           <RevisoesPanel />
         ) : view === 'esperando' ? (
@@ -546,12 +580,14 @@ export default function AgendaPage() {
             onToggleDone={(id, done) =>
               completeTask.mutate({ id, done }, { onError: (e: any) => toast.error(e?.message || 'Erro') })}
           />
-        ) : view === 'week' ? (
+        ) : view === 'week' || view === 'producao' || view === 'carteira' ? (
           <WeekView
             weekStart={range.from}
             orders={filteredOrders}
             tasks={filteredTasks}
             technicians={technicians}
+            equipe={gestor && Array.isArray(equipeDaGrade) ? equipeDaGrade : null}
+            jornada={agendaConfig.jornada_horas}
             onCardClick={(id) => navigate(`/service-orders/${id}`)}
             onCellClick={openTaskDialog}
             onTaskClick={(t) => openTaskDialog(undefined, undefined, t)}
@@ -1011,12 +1047,16 @@ function TodayView({
 // WEEK VIEW
 // ============================================================
 function WeekView({
-  weekStart, orders, tasks, technicians, onCardClick, onCellClick, onTaskClick, onTaskDrop,
+  weekStart, orders, tasks, technicians, equipe, jornada, onCardClick, onCellClick, onTaskClick, onTaskDrop,
 }: {
   weekStart: Date;
   orders: any[];
   tasks: any[];
   technicians: { id: string; full_name: string }[];
+  /** Fase 3 (P7a): a equipe da agenda (payees) como as linhas; null = as linhas de antes (os técnicos). */
+  equipe: PessoaDaGrade[] | null;
+  /** Fase 3 (P7a): a jornada do dia, de agenda_config. */
+  jornada: number;
   onCardClick: (id: string) => void;
   onCellClick: (technicianId: string, date: Date) => void;
   onTaskClick: (task: ExistingTask) => void;
@@ -1076,7 +1116,16 @@ function WeekView({
   // linha e sumia da grade — no desktop e no celular, que percorre as mesmas linhas. Agora o
   // técnico de OS visível ganha linha mesmo inativo, com o nome do próprio embed da OS. Linhas =
   // equipe (payees) é da Fase 1; aqui só se garante que nenhuma OS some.
+  // Fase 3 (P7a): com a equipe da agenda (payees), as linhas são as pessoas dela — a OS e a tarefa casam pelo login do
+  // payee (app_user_id); a pessoa sem login (o João) tem linha própria, sem OS nem tarefa para casar; o técnico sem payee
+  // continua como linha extra. Sem a equipe (técnico, vendedor, ou a migration ainda não aplicada), as linhas de antes.
   const rows = useMemo(() => {
+    const base: { id: string; full_name: string; semLogin?: boolean }[] = equipe
+      ? [
+          ...equipe.map((p) => ({ id: p.app_user_id ?? `payee:${p.payee_id}`, full_name: p.nome, semLogin: !p.app_user_id })),
+          ...technicians.filter((t) => !equipe.some((p) => p.app_user_id === t.id)),
+        ]
+      : technicians;
     const extra = new Map<string, string>();
     const deDia = toLocalDateInput(days[0]);
     const ateDia = toLocalDateInput(days[days.length - 1]);
@@ -1084,7 +1133,7 @@ function WeekView({
       if (diasDaJanela(o.scheduled_start_at, o.scheduled_end_at, deDia, ateDia).length === 0) continue;
       for (const st of o.service_order_technicians || []) {
         if (st.user_id && !extra.has(st.user_id)
-            && !technicians.some((x) => x.id === st.user_id)) {
+            && !base.some((x) => x.id === st.user_id)) {
           // Sem o nome (a RLS de app_users só mostra outro usuário ao admin), a linha vem
           // genérica — mas vem: a OS não pode sumir por falta de nome.
           extra.set(st.user_id, st.app_users?.full_name || 'Técnico sem nome');
@@ -1093,16 +1142,16 @@ function WeekView({
     }
     for (const t of tasks) {
       if (t.assignee_user_id && t.app_users?.full_name
-          && !technicians.some((x) => x.id === t.assignee_user_id)) {
+          && !base.some((x) => x.id === t.assignee_user_id)) {
         extra.set(t.assignee_user_id, t.app_users.full_name);
       }
     }
     return [
-      ...technicians,
+      ...base,
       ...Array.from(extra.entries()).map(([id, full_name]) => ({ id, full_name })),
       { id: '__unassigned__', full_name: 'Sem responsável' },
     ];
-  }, [technicians, tasks, orders, days]);
+  }, [technicians, equipe, tasks, orders, days]);
 
   // Mobile (< lg): dias empilhados — zero scroll horizontal (Princípio 0)
   const mobileDays = days.map((d) => {
@@ -1200,8 +1249,8 @@ function WeekView({
                 // só a parte da janela que cai neste dia, com teto na jornada (D5): uma OS antiga
                 // de 72 h dá 8h aqui, e não "72h ⚠" num dia só.
                 const loadH = [...cellOrders, ...cellTasks].reduce((s: number, it: any) =>
-                  s + horasNoDia(it.scheduled_start_at, it.scheduled_end_at, dayKey), 0);
-                const sobrecarga = loadH > JORNADA_PADRAO_HORAS;
+                  s + horasNoDia(it.scheduled_start_at, it.scheduled_end_at, dayKey, jornada), 0);
+                const sobrecarga = loadH > jornada;
                 return (
                   <div
                     key={`${tech.id}-${i}`}
@@ -1211,7 +1260,8 @@ function WeekView({
                     )}
                     onClick={(e) => {
                       if ((e.target as HTMLElement).closest('[data-card]')) return;
-                      if (tech.id === '__unassigned__') return;
+                      // sem login (a pessoa da equipe que não usa o sistema) não recebe tarefa pela grade
+                      if (tech.id === '__unassigned__' || ('semLogin' in tech && tech.semLogin)) return;
                       onCellClick(tech.id, d);
                     }}
                     onDragOver={(e) => e.preventDefault()}
@@ -1219,7 +1269,7 @@ function WeekView({
                       e.preventDefault();
                       try {
                         const payload = JSON.parse(e.dataTransfer.getData('application/x-agenda-task'));
-                        if (payload?.id) onTaskDrop(payload, tech.id, dayKey);
+                        if (payload?.id && !('semLogin' in tech && tech.semLogin)) onTaskDrop(payload, tech.id, dayKey);
                       } catch { /* drop de algo que não é tarefa */ }
                     }}
                   >
@@ -1230,7 +1280,7 @@ function WeekView({
                           'text-[10px] font-semibold text-right pr-1 tabular-nums',
                           // Dia cheio (= jornada) é âmbar; vermelho só quando passa dela.
                           sobrecarga ? 'text-destructive'
-                            : loadH >= 0.75 * JORNADA_PADRAO_HORAS ? 'text-amber-600 dark:text-amber-400'
+                            : loadH >= 0.75 * jornada ? 'text-amber-600 dark:text-amber-400'
                             : 'text-muted-foreground',
                         )}
                       >

@@ -10,16 +10,22 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nProvider } from '@/i18n';
 import AgendaPage from './AgendaPage';
 import { AgendaV2 } from '@/v2/pages/wrapped';
+import { CARTEIRA_DE_EXEMPLO, SEMANA_DE_EXEMPLO } from '@/components/agenda/producao/dados-de-exemplo';
 
 // vi.mock é içado para o topo do módulo — helpers/fixtures precisam de vi.hoisted
-const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem, semana, ordensDaSemana, agendarOs, modo } = vi.hoisted(() => {
-  const queryBuilder = (): any => {
+const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem, semana, ordensDaSemana, agendarOs, modo, producao } = vi.hoisted(() => {
+  // Fase 3 (P7a): a linha de agenda_config e as RPCs das telas de produção (sem nada = a tela de antes).
+  const producao = {
+    config: { data: null as unknown, error: null as unknown },
+    rpcs: {} as Record<string, () => { data: unknown; error: unknown }>,
+  };
+  const queryBuilder = (tabela?: string): any => {
     const o: any = {};
     for (const k of ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'lt', 'gt', 'order',
       'limit', 'is', 'not', 'like', 'update', 'insert', 'delete', 'upsert', 'filter']) {
       o[k] = () => o;
     }
-    o.maybeSingle = async () => ({ data: null, error: null });
+    o.maybeSingle = async () => (tabela === 'agenda_config' ? producao.config : { data: null, error: null });
     o.single = async () => ({ data: null, error: null });
     o.then = (res: any) => Promise.resolve({ data: [], error: null }).then(res);
     return o;
@@ -125,13 +131,13 @@ const { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, cont
   const agendarOs = vi.fn(async (_input: any) => ({ warning: null, mensagem: 'OS agendada', status: 'scheduled' }));
   // agenda_config.modo_proposta (Agenda de Produção, Fase 2, P4): o diálogo avisa quando a agenda automática está ligada.
   return { queryBuilder, q, mut, liveTasks, doneTasks, suggestions, openLoops, contagem, semana, ordensDaSemana, agendarOs,
-           modo: { proposta: 'desligado' as string } };
+           modo: { proposta: 'desligado' as string }, producao };
 });
 
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
-    from: () => queryBuilder(),
-    rpc: async () => ({ data: [], error: null }),
+    from: (tabela: string) => queryBuilder(tabela),
+    rpc: async (nome: string) => producao.rpcs[nome]?.() ?? { data: [], error: null },
     auth: { getUser: async () => ({ data: { user: { id: 'u1' } } }) },
     channel: () => ({ on() { return this; }, subscribe() { return this; } }),
     removeChannel: () => {},
@@ -387,6 +393,59 @@ describe('AgendaPage — smoke de render (todas as visões)', () => {
     await user.click(within(dialogo).getByRole('button', { name: 'Agendar' }));
     expect(agendarOs).toHaveBeenCalledTimes(1);
     expect(agendarOs.mock.calls[0][0]).toMatchObject({ service_order_id: id, technician_user_id: userId });
+  });
+
+  // ─── Agenda de Produção, Fase 3 (P7a): a Semana e a Carteira de produção, a grade com a equipe, a jornada do banco ───
+
+  describe('com a agenda de produção ligada (administrador)', () => {
+    const ligar = (jornada = 8) => {
+      producao.config = { data: { jornada_horas: jornada, carga_max: '0.80', modo_leitura: 'sombra', modo_proposta: 'ligado' }, error: null };
+      producao.rpcs = {
+        agenda_equipe_da_grade: () => ({ data: [
+          { payee_id: 'p1', nome: 'Gustavo', nome_curto: 'Gustavo', eh_dono: true, app_user_id: 'u1' },
+          { payee_id: 'p3', nome: 'João Sem Login', nome_curto: 'João', eh_dono: false, app_user_id: null },
+        ], error: null }),
+        agenda_tela_semana: () => ({ data: SEMANA_DE_EXEMPLO, error: null }),
+        agenda_tela_carteira: () => ({ data: CARTEIRA_DE_EXEMPLO, error: null }),
+      };
+    };
+    const desligar = () => { producao.config = { data: null, error: null }; producao.rpcs = {}; };
+
+    it('"Semana" abre a de produção; "Carteira" o quadro de exceções; a grade antiga vira "Grade"', async () => {
+      ligar();
+      try {
+        const user = userEvent.setup();
+        renderPage();
+        // os botões de produção aparecem quando a config e a equipe chegam
+        await screen.findByRole('button', { name: 'Carteira' });
+        await user.click(screen.getByRole('button', { name: 'Semana' }));
+        expect(await screen.findByTestId('semana-producao')).toBeTruthy();
+        expect(screen.getByText('Semana de 03 a 06/11 (seg 02 é Finados)')).toBeTruthy();
+        await user.click(screen.getByRole('button', { name: 'Carteira' }));
+        expect(await screen.findByTestId('carteira-producao')).toBeTruthy();
+        await user.click(screen.getByRole('button', { name: 'Grade' }));
+        // a grade antiga, com as linhas da equipe: o dono (pelo login), a pessoa sem login e o técnico sem payee
+        expect(screen.getAllByText('João Sem Login').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Gustavo').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Felipe').length).toBeGreaterThan(0);
+        // e as OS de antes continuam lá (nenhuma some)
+        expect(screen.getAllByText('OS-00104')).toHaveLength(2);
+      } finally {
+        desligar();
+      }
+    });
+
+    it('a jornada vem de agenda_config: com 10 h, a OS de janela longa dá 10h por dia', async () => {
+      ligar(10);
+      try {
+        const user = userEvent.setup();
+        renderPage();
+        await user.click(await screen.findByRole('button', { name: 'Grade' }));
+        expect(screen.getByTestId(`carga-u8-${semana(5)}`).textContent).toBe('10h');
+      } finally {
+        desligar();
+      }
+    });
   });
 
   it('a rota /v2/agenda renderiza a MESMA agenda dentro da casca de tema', async () => {

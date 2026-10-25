@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useUpdateServiceOrderStatus, useCancelServiceOrder, useReopenServiceOrder, STATUS_TRANSITIONS, STATUS_BACKWARD_TRANSITIONS } from '@/hooks/use-service-orders';
 import { avisarSeNaoMudou } from '@/lib/status-pela-tela';
+import { opcoesQueAPortaAceita, useStatusQueAPortaAceita } from '@/hooks/use-status-da-porta';
 import { statusConfig } from '@/lib/constants';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
@@ -44,9 +45,19 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
   // [NOVO-nfse-03] Navegação pedida pelo assistente, adiada até o aviso de saldo fechar.
   const [navegarDepois, setNavegarDepois] = useState<(() => void) | null>(null);
 
+  // Fase 3 (P7a): o menu mostra só o que a porta aceita para este cargo e esta OS (os_status_da_tela, a MESMA regra da
+  // porta). A pergunta vai ao banco quando o menu abre; até a resposta, "Conferindo…"; sem resposta (a função ainda não
+  // está no banco, erro), tudo como antes — a porta continua recusando o que não pode.
+  const [menuAberto, setMenuAberto] = useState(false);
+  const porta = useStatusQueAPortaAceita([orderId], menuAberto, currentStatus);
+  const conferindo = menuAberto && porta.isLoading;
+
   const cfg = statusConfig[currentStatus];
   const validTransitions = STATUS_TRANSITIONS[currentStatus] ?? [];
   const backwardTransitions = STATUS_BACKWARD_TRANSITIONS[currentStatus] ?? [];
+  const adiante = conferindo ? validTransitions.filter((s) => s === 'cancelled')
+    : opcoesQueAPortaAceita(validTransitions, porta.data, orderId);
+  const corrigir = conferindo ? [] : opcoesQueAPortaAceita(backwardTransitions, porta.data, orderId);
   const isTerminal = currentStatus === 'invoiced' || currentStatus === 'cancelled';
   const isBusy = updateStatus.isPending || cancelOrder.isPending || reopenOrder.isPending;
 
@@ -176,7 +187,7 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={setMenuAberto}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
@@ -199,7 +210,17 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
             Mover para
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {validTransitions.map(target => {
+          {conferindo && (
+            <DropdownMenuItem disabled className="gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" /> Conferindo o que dá para mudar…
+            </DropdownMenuItem>
+          )}
+          {!conferindo && adiante.length === 0 && corrigir.length === 0 && (
+            <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+              Nada que você possa mudar nesta OS.
+            </DropdownMenuItem>
+          )}
+          {adiante.map(target => {
             const targetCfg = statusConfig[target as ServiceOrderStatus];
             const isCancelTarget = target === 'cancelled';
             return (
@@ -229,13 +250,13 @@ export function StatusQuickChange({ orderId, currentStatus }: Props) {
           })}
 
           {/* Backward corrections — visually separated */}
-          {backwardTransitions.length > 0 && (
+          {corrigir.length > 0 && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuLabel className="text-[10px] font-semibold text-amber-600 uppercase tracking-wide flex items-center gap-1">
                 <Undo2 className="h-3 w-3" /> Corrigir para
               </DropdownMenuLabel>
-              {backwardTransitions.map(target => {
+              {corrigir.map(target => {
                 const targetCfg = statusConfig[target as ServiceOrderStatus];
                 return (
                   <DropdownMenuItem

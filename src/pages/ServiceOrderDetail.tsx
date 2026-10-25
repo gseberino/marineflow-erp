@@ -15,6 +15,8 @@ import { ServiceRoutePanel } from '@/components/service-orders/ServiceRoutePanel
 import { viaHeaderFromOrder } from '@/hooks/use-via-do-tecnico';
 import { SurveyPanel } from '@/components/service-orders/SurveyPanel';
 import { useRoteiroVisivel } from '@/hooks/use-roteiro-visivel';
+// Agenda de Produção, Fase 3 (P7a): o cartão "Plano" acima das abas (admin/financeiro, fora de orçamento, agenda ligada).
+import { PlanoDaOsNaOs } from '@/components/service-order/PlanoDaOs';
 
 function TimelineTab({ id }: { id: string }) {
   const { data: history } = useRecordHistory('service_orders', id);
@@ -90,6 +92,11 @@ export default function ServiceOrderDetail() {
   };
 
   return (
+    <>
+    {/* Fora do formulário (que outras frentes também editam): o cartão decide sozinho se aparece. */}
+    {id && order && order.status !== 'draft' && (
+      <PlanoDaOsNaOs osId={id} status={order.status} className="mx-4 mt-4 lg:mx-6" />
+    )}
     <Tabs defaultValue="details" className="flex flex-col gap-0">
       <div className="border-b bg-background px-4 lg:px-6 sticky top-0 z-10 flex items-center justify-between">
         <TabsList className="h-10 bg-transparent p-0 gap-4">
@@ -182,5 +189,6 @@ export default function ServiceOrderDetail() {
         </div>
       </TabsContent>
     </Tabs>
+    </>
   );
 }

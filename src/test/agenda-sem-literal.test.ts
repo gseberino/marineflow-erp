@@ -23,6 +23,10 @@
 //     função.
 //   · (Fase 3, P5) a comissão: o pct (20%) só existe no DEFAULT de comissao_config (20261026100000); o corpo de
 //     comissao_tecnicos_do_mes e comissao_resumo_do_mes lê a linha (o "20%" do texto sai de comissao_config.pct).
+//   · (Fase 3, P7a) as telas: as funções de 20261026100600 entram pelo prefixo (a cor da carga é c.carga_max, a da idade
+//     é carteira_laranja_du/carteira_vermelho_du), e os hooks novos da tela (use-agenda-producao.ts, use-status-da-porta.ts)
+//     entram no TS varrido. A jornada do dia é agenda_config.jornada_horas: JORNADA_PADRAO_HORAS (_shared/agenda-dia.ts)
+//     só existe como o valor de quando a migration ainda não foi aplicada, nos lugares listados em USOS_DA_JORNADA_PADRAO.
 // E cobra:
 //   1. nenhum valor de parâmetro de agenda_config (carga 0,8, R$ 1.600 e R$ 764 por diária, fator 1,5, frequência
 //      mínima 0,25, 1.000 de texto e de peça embutida, validade de 24/72 horas, horário dos turnos, municípios
@@ -217,6 +221,9 @@ function tsDaAgenda(): Trecho[] {
     path.join(FUNCOES, '_shared', 'agenda-modo.ts'),
     path.join(FUNCOES, 'task-automations', 'agenda-modos.ts'),
     path.join(FUNCOES, 'task-automations', 'agenda-vigia.ts'),
+    // Fase 3 (P7a): os hooks das telas (a Semana, a Carteira, o cartão Plano e o que a porta aceita pela tela).
+    path.join(RAIZ, 'src', 'hooks', 'use-agenda-producao.ts'),
+    path.join(RAIZ, 'src', 'hooks', 'use-status-da-porta.ts'),
   ];
   const trechos = inteiros.map((a) => trechoDoTs(fonte(a), path.relative(RAIZ, a)));
   for (const { arquivo, funcoes } of PARTES_DO_SECRETARIO) {
@@ -234,6 +241,45 @@ function tsDaAgenda(): Trecho[] {
     }
   }
   return trechos;
+}
+
+// ── Fase 3 (P7a): JORNADA_PADRAO_HORAS só como reserva ──────────────────────────────────────────────────
+
+/** Onde o código (não o comentário) usa JORNADA_PADRAO_HORAS, e por quê: todos são o valor de quando agenda_config não
+ *  responde (a migration ainda não aplicada, o login que não lê a tabela). Arquivo novo usando = falha; arquivo que
+ *  deixou de usar = falha (a entrada tem de sair). */
+const USOS_DA_JORNADA_PADRAO: Record<string, string> = {
+  'supabase/functions/_shared/agenda-dia.ts': 'a definição e o padrão do parâmetro jornada de horasNoDia',
+  'src/hooks/use-agenda-producao.ts': 'CONFIG_DE_ANTES e jornadaDaAgenda: a tela antes da migration',
+  'src/hooks/use-agenda.ts': 'o padrão do parâmetro jornada de overloadWarning (quem chama passa jornadaDaAgenda)',
+  'supabase/functions/_shared/ai/tools/agenda.ts': 'dayOverloadNotice: agenda_config sem resposta (o erro vai a app_error_logs)',
+};
+
+function usosDaJornadaPadrao(): string[] {
+  const achados: string[] = [];
+  const andar = (pasta: string) => {
+    for (const nome of fs.readdirSync(pasta)) {
+      const p = path.join(pasta, nome);
+      if (fs.statSync(p).isDirectory()) {
+        if (nome !== 'node_modules') andar(p);
+        continue;
+      }
+      if (!/\.(ts|tsx)$/.test(nome) || /(_test|\.test|\.smoke\.test)\.tsx?$/.test(nome)) continue;
+      const texto = fs.readFileSync(p, 'utf8');
+      if (!texto.includes('JORNADA_PADRAO_HORAS')) continue;
+      const sf = ts.createSourceFile(p, texto, ts.ScriptTarget.ESNext, true);
+      let usa = false;
+      const visitar = (n: ts.Node) => {
+        if (ts.isIdentifier(n) && n.text === 'JORNADA_PADRAO_HORAS') usa = true;
+        ts.forEachChild(n, visitar);
+      };
+      visitar(sf);
+      if (usa) achados.push(path.relative(RAIZ, p).split(path.sep).join('/'));
+    }
+  };
+  andar(path.join(RAIZ, 'src'));
+  andar(FUNCOES);
+  return achados.sort();
 }
 
 // ── A regra ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -291,6 +337,8 @@ describe('agenda: parâmetro só em agenda_config', () => {
       '_so_entrega_pela_porta', '_agenda_equipe_mensagens_so_responde',
       // Fase 3 (P5): a comissão (só a conta)
       'comissao_tecnicos_do_mes', 'comissao_resumo_do_mes',
+      // Fase 3 (P7a): as telas e a regra da porta que a tela lê
+      'agenda_tela_semana', 'agenda_tela_carteira', 'os_plano_da_os', 'os_status_da_tela', '_os_porta_regra',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),
@@ -311,6 +359,13 @@ describe('agenda: parâmetro só em agenda_config', () => {
   it('nenhum literal de parâmetro nem número da carteira no TS da agenda (e nas partes do Secretário que a leem)', () => {
     const achados = achadosDe(tsAgenda);
     expect(achados.map(linha), `literal de parâmetro no TS da agenda (o número vem do banco):\n${achados.map(linha).join('\n')}`).toEqual([]);
+  });
+
+  it('JORNADA_PADRAO_HORAS só como o valor de quando agenda_config não responde (Fase 3, P7a)', () => {
+    expect(usosDaJornadaPadrao(), 'a jornada do dia é agenda_config.jornada_horas; a constante é só a reserva listada')
+      .toEqual(Object.keys(USOS_DA_JORNADA_PADRAO).sort());
+    // a grade da Agenda lê a jornada da config (useAgendaConfig), não a constante
+    expect(usosDaJornadaPadrao()).not.toContain('src/pages/AgendaPage.tsx');
   });
 
   it('a regra acusa o que deve e deixa passar o que é estrutura (sem isto, um regex quebrado passaria tudo)', () => {

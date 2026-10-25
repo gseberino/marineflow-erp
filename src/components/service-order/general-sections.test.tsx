@@ -46,8 +46,8 @@ const todosOsBarcos = [barco, ...barcosDaMaria, ventoSul];
 const marinheiro = { id: 'k1', vessel_id: 'v1', full_name: 'Pedro Marinheiro', role: 'captain', phone: '(47) 98888-7777', email: null, active: true };
 
 /** A seção com o formulário em estado de verdade: o que a tela muda, a tela mostra. */
-function Tela({ inicial, orderData = null, aoMudar }: {
-  inicial: Record<string, unknown>; orderData?: unknown; aoMudar?: (f: Record<string, any>) => void;
+function Tela({ inicial, orderData = null, aoMudar, datasDaAgenda }: {
+  inicial: Record<string, unknown>; orderData?: unknown; aoMudar?: (f: Record<string, any>) => void; datasDaAgenda?: boolean;
 }) {
   const [form, setForm] = useState<Record<string, any>>({
     status: 'draft', priority: 'normal', service_type: 'repair', requested_by_name: '', marina_id: '', site_access: '', ...inicial,
@@ -69,6 +69,7 @@ function Tela({ inicial, orderData = null, aoMudar }: {
           selectedTechnicians={[]} setSelectedTechnicians={nada}
           setQuickMarinaOpen={nada} setQuickMarinaName={nada}
           isOptimizing={false} optimizeText={nada}
+          datasDaAgenda={datasDaAgenda}
         />
       </MemoryRouter>
     </I18nProvider>
@@ -231,5 +232,25 @@ describe('GeneralSections — cliente, embarcação e solicitante', () => {
     )).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Manter a atual' }));
     expect(form).toMatchObject({ vessel_id: 'v1', requested_by_contact_id: 'k9', requested_by_name: 'Ana Antiga' });
+  });
+});
+
+// Agenda de Produção, Fase 3 (P7a, d24): com a agenda automática ligada, a data é da agenda.
+describe('GeneralSections — datas da agenda', () => {
+  it('com a agenda ligada, início e fim só de leitura, com a ajuda acima do campo dizendo onde mudar', () => {
+    render(<Tela inicial={{ client_id: 'c1', vessel_id: 'v1', scheduled_start_at: '2026-11-03T08:00', scheduled_end_at: '2026-11-05T17:00' }}
+                 datasDaAgenda />);
+    for (const id of ['os-inicio', 'os-fim']) {
+      const campo = document.getElementById(id) as HTMLInputElement;
+      expect(campo).toBeDisabled();
+      expect(campo).toHaveAttribute('readonly');
+      expect(campo).toHaveAccessibleDescription('A data é da agenda: diga na conversa ou use a Agenda.');
+    }
+  });
+
+  it('sem a agenda ligada, as datas continuam editáveis e sem a ajuda', () => {
+    render(<Tela inicial={{ client_id: 'c1', vessel_id: 'v1', scheduled_start_at: '', scheduled_end_at: '' }} />);
+    expect(document.getElementById('os-inicio')).not.toBeDisabled();
+    expect(screen.queryByText('A data é da agenda: diga na conversa ou use a Agenda.')).not.toBeInTheDocument();
   });
 });

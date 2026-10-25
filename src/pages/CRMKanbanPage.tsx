@@ -3,6 +3,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { useServiceOrders } from '@/hooks/use-service-orders';
 import { useUpdateServiceOrderStatus } from '@/hooks/use-service-orders';
 import { avisarSeNaoMudou } from '@/lib/status-pela-tela';
+import { opcoesQueAPortaAceita, useStatusQueAPortaAceita } from '@/hooks/use-status-da-porta';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +31,12 @@ export default function CRMKanbanPage() {
 
   const [whatsAppTarget, setWhatsAppTarget] = useState<any>(null);
   const [search, setSearch] = useState('');
+  // Fase 3 (P7a): o botão que avança a etapa só aparece quando a porta aceita para este cargo e esta OS
+  // (os_status_da_tela, a MESMA regra da porta). Sem resposta do banco, todos, como antes.
+  const noFunil = (orders || []).filter((o) => COLUMNS.some((c) => c.id === o.status));
+  const { data: aceitos } = useStatusQueAPortaAceita(
+    noFunil.map((o) => o.id), true, noFunil.map((o) => `${o.id}:${o.status}`).sort().join(','));
+  const portaAceita = (id: string, para: string) => opcoesQueAPortaAceita([para], aceitos, id).length > 0;
 
   if (isLoading) return <div className="p-6 space-y-4"><Skeleton className="h-10 w-64" /><Skeleton className="h-[600px] w-full" /></div>;
 
@@ -127,11 +134,11 @@ export default function CRMKanbanPage() {
                         </div>
 
                         <div className="pt-2 border-t flex justify-end">
-                          {col.id === 'draft'       && <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-blue-700 hover:text-blue-800 hover:bg-blue-50" onClick={() => moveOrder(order.id, 'approved')}>Converter em OS <ArrowRight className="h-3 w-3 ml-1"/></Button>}
-                          {col.id === 'approved'    && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'scheduled')}>Agendar <ArrowRight className="h-3 w-3 ml-1"/></Button>}
-                          {col.id === 'scheduled'   && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'in_progress')}>Iniciar <ArrowRight className="h-3 w-3 ml-1"/></Button>}
-                          {col.id === 'in_progress' && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'completed')}>Concluir <ArrowRight className="h-3 w-3 ml-1"/></Button>}
-                          {col.id === 'completed'   && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'invoiced')}>Faturar <ArrowRight className="h-3 w-3 ml-1"/></Button>}
+                          {col.id === 'draft'       && portaAceita(order.id, 'approved') && <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-blue-700 hover:text-blue-800 hover:bg-blue-50" onClick={() => moveOrder(order.id, 'approved')}>Converter em OS <ArrowRight className="h-3 w-3 ml-1"/></Button>}
+                          {col.id === 'approved'    && portaAceita(order.id, 'scheduled') && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'scheduled')}>Agendar <ArrowRight className="h-3 w-3 ml-1"/></Button>}
+                          {col.id === 'scheduled'   && portaAceita(order.id, 'in_progress') && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'in_progress')}>Iniciar <ArrowRight className="h-3 w-3 ml-1"/></Button>}
+                          {col.id === 'in_progress' && portaAceita(order.id, 'completed') && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'completed')}>Concluir <ArrowRight className="h-3 w-3 ml-1"/></Button>}
+                          {col.id === 'completed'   && portaAceita(order.id, 'invoiced') && <Button size="sm" variant="ghost" className="h-6 text-xs px-2" onClick={() => moveOrder(order.id, 'invoiced')}>Faturar <ArrowRight className="h-3 w-3 ml-1"/></Button>}
                         </div>
                       </CardContent>
                     </Card>

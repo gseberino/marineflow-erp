@@ -4,6 +4,7 @@ import { ArrowRight, Calendar, MessageCircle, Pencil, Plus } from 'lucide-react'
 import { useI18n } from '@/i18n';
 import { useServiceOrders, useUpdateServiceOrderStatus } from '@/hooks/use-service-orders';
 import { avisarSeNaoMudou } from '@/lib/status-pela-tela';
+import { opcoesQueAPortaAceita, useStatusQueAPortaAceita } from '@/hooks/use-status-da-porta';
 import type { ServiceOrderStatus } from '@/types/domain';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -71,6 +72,12 @@ export default function CRMKanbanV2() {
   });
 
   const { pedir, dialogo } = useConfirmacao();
+  // Fase 3 (P7a): o botão que avança a etapa só aparece quando a porta aceita para este cargo e esta OS
+  // (os_status_da_tela, a MESMA regra da porta). Sem resposta do banco, todos, como antes.
+  const noFunil = orders.filter((o) => COLUMNS.some((c) => c.id === o.status));
+  const { data: aceitos } = useStatusQueAPortaAceita(
+    noFunil.map((o) => o.id), true, noFunil.map((o) => `${o.id}:${o.status}`).sort().join(','));
+  const portaAceita = (id: string, para: string) => opcoesQueAPortaAceita([para], aceitos, id).length > 0;
 
   // O hook não avisa erro; sem o catch a falha sumia e o cartão só não mudava de coluna.
   const moveOrder = async (orderId: string, newStatus: ServiceOrderStatus) => {
@@ -119,7 +126,7 @@ export default function CRMKanbanV2() {
           </span>
         )}
       </div>
-      {col.next && (
+      {col.next && portaAceita(order.id, col.next.to) && (
         <div className="flex justify-end border-t pt-1.5">
           <Button size="sm" variant="ghost" className="h-6 gap-1 px-2 text-xs text-accent" onClick={() => pedir({
               titulo: `${col.next!.label} — #${order.service_order_number}?`,

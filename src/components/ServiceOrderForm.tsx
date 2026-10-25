@@ -42,6 +42,7 @@ import {
   recalcTotals,
 } from '@/hooks/use-service-orders';
 import { useAppUsers, useCommissionableUsers } from '@/hooks/use-app-users';
+import { useModoDaProposta } from '@/hooks/use-agenda';
 import { usePaymentConditionPresets } from '@/hooks/use-payment-conditions';
 import { useCollectionsByOS } from '@/hooks/use-collections';
 import { useReceivablesByServiceOrder, usePaymentsByServiceOrder, useCreateReceivable } from '@/hooks/use-financial';
@@ -281,6 +282,11 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const createSO = useCreateServiceOrder();
   const updateSO = useUpdateServiceOrder();
   const updateStatus = useUpdateServiceOrderStatus();
+  // Agenda de Produção, Fase 3 (P7a, d24): com a agenda automática ligada, a data da OS é da agenda — os dois campos ficam
+  // só de leitura e o salvar não manda scheduled_* (o gatilho do banco recusaria; e o minuto do campo contra o segundo do
+  // banco fazia o salvamento automático regravar a data: NOVO-agenda-11). Leitura que falha = desligado (o de antes).
+  const { data: modoDaProposta } = useModoDaProposta();
+  const datasDaAgenda = modoDaProposta === 'ligado';
   const cancelSO = useCancelServiceOrder();
   const reopenSO = useReopenServiceOrder();
   const duplicate = useDuplicateServiceOrder();
@@ -893,12 +899,15 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
    * digitado deixaria a OS sem técnico por instantes, várias vezes por minuto.
    */
   const montarPayload = () => {
-    const { signed_at: _signedAt, ...formForSave } = form;
+    const { signed_at: _signedAt, scheduled_start_at: _inicio, scheduled_end_at: _fim, ...formForSave } = form;
     const uuidOrNull = (v: string | null | undefined) => (v && v.trim() !== '' ? v : null);
     return {
       ...formForSave,
-      scheduled_start_at: inputLocalParaIso(form.scheduled_start_at),
-      scheduled_end_at: inputLocalParaIso(form.scheduled_end_at),
+      // Fase 3 (P7a): com a agenda automática ligada, as datas são da agenda e não vão no payload.
+      ...(datasDaAgenda ? {} : {
+        scheduled_start_at: inputLocalParaIso(form.scheduled_start_at),
+        scheduled_end_at: inputLocalParaIso(form.scheduled_end_at),
+      }),
       commissioned_user_id: uuidOrNull(form.commissioned_user_id),
       requested_by_contact_id: uuidOrNull(form.requested_by_contact_id),
       marina_id: uuidOrNull(form.marina_id),
@@ -920,14 +929,17 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       return;
     }
     try {
-      const { signed_at: _signedAt, ...formForSave } = form;
+      const { signed_at: _signedAt, scheduled_start_at: _inicio, scheduled_end_at: _fim, ...formForSave } = form;
       // Helper: convert empty string to null for UUID fields
       const uuidOrNull = (v: string | null | undefined) => (v && v.trim() !== '' ? v : null);
 
       const payload = {
         ...formForSave,
-        scheduled_start_at: inputLocalParaIso(form.scheduled_start_at),
-        scheduled_end_at: inputLocalParaIso(form.scheduled_end_at),
+        // Fase 3 (P7a): com a agenda automática ligada, as datas são da agenda e não vão no payload.
+        ...(datasDaAgenda ? {} : {
+          scheduled_start_at: inputLocalParaIso(form.scheduled_start_at),
+          scheduled_end_at: inputLocalParaIso(form.scheduled_end_at),
+        }),
         commissioned_user_id: uuidOrNull(form.commissioned_user_id),
         requested_by_contact_id: uuidOrNull(form.requested_by_contact_id),
         marina_id: uuidOrNull(form.marina_id),
@@ -2395,6 +2407,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
       <GeneralSections
         isNew={isNew}
         isLocked={isLocked}
+        datasDaAgenda={datasDaAgenda}
         orderData={orderData}
         form={form}
         set={set}

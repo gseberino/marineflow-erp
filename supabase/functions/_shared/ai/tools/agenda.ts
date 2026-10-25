@@ -5,7 +5,8 @@ import { ehTipoDeEntidadeValido, RELATED_ENTITY_TYPES } from "../../agenda-entit
 // LGPD (leva 8): o nome livre da conta a pagar pode trazer o CPF que o banco escreve nele — sai mascarado.
 import { nomeSemCpf as mascararCpfNoTexto } from "../../banking/contraparte.ts";
 import { diaBR, filtroQueCruza, horasNoDia, JORNADA_PADRAO_HORAS, limitesDoDiaBR } from "../../agenda-dia.ts";
-import { modoDaPropostaNoBanco } from "../../agenda-modo.ts";
+import { jornadaHorasNoBanco, modoDaPropostaNoBanco } from "../../agenda-modo.ts";
+import { logEdgeError } from "../../log-error.ts";
 
 // Agenda & Tarefas 2.0 — tool set completo (Fase 3 do plano
 // plans/marineflow-agenda-tarefas.md §8). O agente é operador da agenda:
@@ -362,19 +363,30 @@ export { getConflicts };
  * O dia é o de BRASÍLIA em que o item começa (até 23/10/2026 era o dia UTC, e um compromisso das
  * 22 h caía no dia seguinte). Cada item conta só a parte da janela que cai no dia, com teto na
  * jornada (horasNoDia): uma OS de 72 h ocupa 8 h, e não 72 — o aviso disparava em toda OS longa.
+ *
+ * Fase 3 (P7a): a jornada é agenda_config.jornada_horas; a tabela ainda ausente cai em JORNADA_PADRAO_HORAS calada, e o
+ * erro de leitura de verdade também cai nele, mas fica em app_error_logs.
  */
 export async function dayOverloadNotice(
   sb: any, userId: string, startISO: string, endISO: string,
   excl?: { excludeTask?: string; excludeSo?: string },
 ): Promise<string | null> {
   const { de, ate, dia } = limitesDoDiaBR(diaBR(new Date(startISO)));
+  const lida = await jornadaHorasNoBanco(sb);
+  if (lida.erro) {
+    void logEdgeError(sb, {
+      context: "ai-agent", action: "dayOverloadNotice", level: "warn",
+      message: "agenda_config.jornada_horas não foi lida; o aviso de sobrecarga usou a jornada padrão", error: lida.erro,
+    });
+  }
+  const jornada = lida.jornada ?? JORNADA_PADRAO_HORAS;
   const { data } = await sb.rpc("get_agenda_conflicts", {
     p_user_id: userId, p_start: de, p_end: ate,
     p_exclude_task: excl?.excludeTask ?? null, p_exclude_so: excl?.excludeSo ?? null,
   });
-  const ocupadas = ((data as any[]) || []).reduce((s, c) => s + horasNoDia(c.starts_at, c.ends_at, dia), 0);
-  const totalH = ocupadas + horasNoDia(startISO, endISO, dia);
-  return totalH > JORNADA_PADRAO_HORAS
+  const ocupadas = ((data as any[]) || []).reduce((s, c) => s + horasNoDia(c.starts_at, c.ends_at, dia, jornada), 0);
+  const totalH = ocupadas + horasNoDia(startISO, endISO, dia, jornada);
+  return totalH > jornada
     ? `Aviso: com este item o dia do responsável fica com ${totalH.toFixed(1)}h ocupadas — considere outro dia ou avise o usuário.`
     : null;
 }

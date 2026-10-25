@@ -17,6 +17,9 @@ import {
   JORNADA_PADRAO_HORAS,
   limitesDoDiaBR,
 } from '../../supabase/functions/_shared/agenda-dia';
+// A jornada do dia vem de agenda_config.jornada_horas (Agenda de Produção, Fase 3, P7a); JORNADA_PADRAO_HORAS só enquanto a
+// migration não foi aplicada (jornadaDaAgenda cai nele).
+import { jornadaDaAgenda } from './use-agenda-producao';
 // A agenda automática (Agenda de Produção, Fase 2, P4): ligada, a data da OS é da agenda.
 import {
   favorecidoDoLogin,
@@ -282,17 +285,20 @@ export function conflictMessage(conflicts: any[]): string {
  * Cada item conta a parte da janela que cai no dia, com teto na jornada (horasNoDia). Até
  * 23/10/2026 somava a janela corrida inteira: agendar uma OS de 06/10 a 09/10 avisava "o dia
  * fica com 72h ocupadas" (D5). O dia também era o do navegador, não o de Brasília.
+ *
+ * Fase 3 (P7a): a jornada é a de agenda_config (quem chama passa jornadaDaAgenda); sem ela, o padrão de antes.
  */
 export async function overloadWarning(
   userId: string, startISO: string, endISO: string,
   excl?: { excludeTask?: string; excludeSo?: string },
+  jornada: number = JORNADA_PADRAO_HORAS,
 ): Promise<string | null> {
   const { de, ate, dia } = limitesDoDiaBR(startISO);
   const items = await fetchConflicts({ userId, startISO: de, endISO: ate, ...excl });
   const ocupadas = items.reduce(
-    (s: number, c: any) => s + horasNoDia(c.starts_at, c.ends_at, dia), 0);
-  const totalH = ocupadas + horasNoDia(startISO, endISO, dia);
-  return totalH > JORNADA_PADRAO_HORAS
+    (s: number, c: any) => s + horasNoDia(c.starts_at, c.ends_at, dia, jornada), 0);
+  const totalH = ocupadas + horasNoDia(startISO, endISO, dia, jornada);
+  return totalH > jornada
     ? `Atenção: com este agendamento o dia fica com ${totalH.toFixed(1).replace('.0', '')}h ocupadas.`
     : null;
 }
@@ -451,6 +457,7 @@ export function useQuickSchedule() {
       // Conflito e sobrecarga são da agenda de uma PESSOA: sem ninguém na OS, não há o que checar.
       if (pessoas.length && input.scheduled_end_at) {
         const avisos: string[] = [];
+        const jornada = await jornadaDaAgenda(qc);
         for (const pessoa of pessoas) {
           const conflicts = await fetchConflicts({
             userId: pessoa,
@@ -461,7 +468,7 @@ export function useQuickSchedule() {
           if (conflicts.length > 0) throw new Error(conflictMessage(conflicts));
           const aviso = await overloadWarning(
             pessoa, input.scheduled_start_at, input.scheduled_end_at,
-            { excludeSo: input.service_order_id },
+            { excludeSo: input.service_order_id }, jornada,
           );
           if (aviso && !avisos.includes(aviso)) avisos.push(aviso);
         }
@@ -553,7 +560,7 @@ export function useSaveAgendaTask() {
         if (conflicts.length > 0) throw new Error(conflictMessage(conflicts));
         warning = await overloadWarning(
           input.assignee_user_id, input.scheduled_start_at, input.scheduled_end_at,
-          { excludeTask: input.id },
+          { excludeTask: input.id }, await jornadaDaAgenda(qc),
         );
       }
 

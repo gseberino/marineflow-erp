@@ -13936,6 +13936,36 @@ export type Database = {
         }
         Returns: Json
       }
+      // Fase 3 (P7a, migration 20261026100600): as telas — a Semana, a Carteira, o cartão Plano, as linhas da grade, o que a
+      // porta aceita pela tela (a lista rápida e os kanbans), o Corrigir dias e o Desfazer.
+      agenda_tela_semana: {
+        Args: { p_de?: string | null; p_hoje?: string; p_agora?: string }
+        Returns: Json
+      }
+      agenda_tela_carteira: {
+        Args: { p_hoje?: string }
+        Returns: Json
+      }
+      os_plano_da_os: {
+        Args: { p_os: string; p_hoje?: string }
+        Returns: Json
+      }
+      agenda_equipe_da_grade: {
+        Args: { p_hoje?: string }
+        Returns: Json
+      }
+      os_status_da_tela: {
+        Args: { p_os: string[] }
+        Returns: Json
+      }
+      os_planejar_pela_tela: {
+        Args: { p_os: string; p_dias: number; p_hoje?: string }
+        Returns: Json
+      }
+      agenda_desfazer_pela_tela: {
+        Args: { p_acao: string; p_hoje?: string; p_agora?: string }
+        Returns: Json
+      }
       // ── fim do trecho da Agenda de Produção
       _ai_gateway_auth: {
         Args: { p_token: string; p_worker_id: string }

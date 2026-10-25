@@ -777,7 +777,10 @@ insert into _definer_da_agenda values
   ('_agenda_equipe_registrar'), ('_agenda_equipe_enfileirar'), ('_agenda_fila_da_equipe'),
   ('_agenda_diaria_do_dia'), ('_agenda_lancar_diaria'), ('_agenda_decidir_diaria'), ('_agenda_desfazer_diaria'),
   -- FASE 3 (P6): a simulação do livre de verdade (chama o motor, que é só do service_role) e a carona (marca carona_em)
-  ('agenda_livre_de_verdade'), ('agenda_carona');
+  ('agenda_livre_de_verdade'), ('agenda_carona'),
+  -- FASE 3 (P7a): as leituras das telas (conferem o administrador e leem o plano, as alocações e a equipe inteiros) e o
+  -- Desfazer da tela (chama agenda_desfazer, que é só do service_role)
+  ('agenda_tela_semana'), ('agenda_tela_carteira'), ('agenda_equipe_da_grade'), ('agenda_desfazer_pela_tela');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

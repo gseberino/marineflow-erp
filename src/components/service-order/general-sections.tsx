@@ -36,6 +36,9 @@ const STATUSES = [
   'awaiting_client', 'approved', 'completed', 'invoiced', 'cancelled',
 ] as const;
 
+/** A ajuda dos campos de data com a agenda automática ligada (Fase 3, P7a). */
+export const TEXTO_DATA_DA_AGENDA = 'A data é da agenda: diga na conversa ou use a Agenda.';
+
 interface GeneralSectionsProps {
   isNew: boolean;
   isLocked: boolean;
@@ -64,6 +67,9 @@ interface GeneralSectionsProps {
   semTrocaDeCliente?: string | true;
   /** Por que a embarcação/veículo não pode ser trocada (OS concluída, agrupamento). */
   semTrocaDeEmbarcacao?: string | true;
+  /** Agenda de Produção, Fase 3 (P7a, d24): com a agenda automática ligada, a data é da agenda — os campos de início e fim
+      ficam só de leitura (e o salvar não os manda). */
+  datasDaAgenda?: boolean;
 }
 
 export function GeneralSections(props: GeneralSectionsProps) {
@@ -73,7 +79,7 @@ export function GeneralSections(props: GeneralSectionsProps) {
     selectedTechnicians, setSelectedTechnicians,
     setQuickMarinaOpen, setQuickMarinaName,
     isOptimizing, optimizeText, onAnalisarDescricao, analisandoDescricao, semTrocaDeCliente,
-    semTrocaDeEmbarcacao,
+    semTrocaDeEmbarcacao, datasDaAgenda,
   } = props;
   const { t } = useI18n();
   // Levantamento da OS: trocar a unidade o deixa na antiga. Erro na consulta = "não deu para
@@ -348,11 +354,15 @@ export function GeneralSections(props: GeneralSectionsProps) {
         <h2 className="font-semibold text-sm">{t.serviceOrders.schedule}</h2>
         <div className="space-y-6">
           <div className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
-            <Campo rotulo={t.serviceOrders.scheduledStart} htmlFor="os-inicio">
-              <Input id="os-inicio" type="datetime-local" value={form.scheduled_start_at} onChange={(e) => set('scheduled_start_at', e.target.value)} />
+            <Campo rotulo={t.serviceOrders.scheduledStart} htmlFor="os-inicio"
+              ajuda={datasDaAgenda ? TEXTO_DATA_DA_AGENDA : undefined} idAjuda={datasDaAgenda ? 'os-inicio-ajuda' : undefined}>
+              <Input id="os-inicio" type="datetime-local" value={form.scheduled_start_at} onChange={(e) => set('scheduled_start_at', e.target.value)}
+                readOnly={datasDaAgenda} disabled={datasDaAgenda} aria-describedby={datasDaAgenda ? 'os-inicio-ajuda' : undefined} />
             </Campo>
-            <Campo rotulo={t.serviceOrders.scheduledEnd} htmlFor="os-fim">
-              <Input id="os-fim" type="datetime-local" value={form.scheduled_end_at} onChange={(e) => set('scheduled_end_at', e.target.value)} />
+            <Campo rotulo={t.serviceOrders.scheduledEnd} htmlFor="os-fim"
+              ajuda={datasDaAgenda ? TEXTO_DATA_DA_AGENDA : undefined} idAjuda={datasDaAgenda ? 'os-fim-ajuda' : undefined}>
+              <Input id="os-fim" type="datetime-local" value={form.scheduled_end_at} onChange={(e) => set('scheduled_end_at', e.target.value)}
+                readOnly={datasDaAgenda} disabled={datasDaAgenda} aria-describedby={datasDaAgenda ? 'os-fim-ajuda' : undefined} />
             </Campo>
           </div>
           {/* Grupo de caixas: fieldset/legend, não Label (o rótulo é do grupo, não de um campo). */}

@@ -9,7 +9,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { I18nProvider } from '@/i18n';
 import CRMKanbanV2 from './CRMKanbanV2';
 
-const { mudarStatus, ordens } = vi.hoisted(() => ({
+const { mudarStatus, ordens, porta } = vi.hoisted(() => ({
+  // Fase 3 (P7a): o que a porta aceita pela tela (undefined = sem resposta: tudo, como antes)
+  porta: { resposta: undefined as undefined | Record<string, string[]> },
   mudarStatus: vi.fn(),
   ordens: [
     {
@@ -25,6 +27,10 @@ vi.mock('@/hooks/use-service-orders', () => ({
   useUpdateServiceOrderStatus: () => ({ mutateAsync: mudarStatus, isPending: false }),
 }));
 vi.mock('@/components/SendViaWhatsAppDialog', () => ({ SendViaWhatsAppDialog: () => null }));
+vi.mock('@/hooks/use-status-da-porta', async (original) => ({
+  ...(await original<typeof import('@/hooks/use-status-da-porta')>()),
+  useStatusQueAPortaAceita: () => ({ data: porta.resposta }),
+}));
 
 function renderFunil() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -40,7 +46,7 @@ function renderFunil() {
 }
 
 describe('CRMKanbanV2 — avançar etapa', () => {
-  beforeEach(() => mudarStatus.mockReset());
+  beforeEach(() => { mudarStatus.mockReset(); porta.resposta = undefined; });
 
   it('"Concluir" pergunta antes e diz que lança as contas a receber', async () => {
     renderFunil();
@@ -58,5 +64,11 @@ describe('CRMKanbanV2 — avançar etapa', () => {
     await userEvent.click(screen.getByRole('button', { name: /Concluir/ }));
     await userEvent.click(await screen.findByRole('button', { name: 'Concluir' }));
     expect(mudarStatus).toHaveBeenCalledWith({ id: 'os1', status: 'completed' });
+  });
+
+  it('Fase 3 (P7a): quando a porta recusa concluir para o cargo (o vendedor), o botão nem aparece', () => {
+    porta.resposta = { os1: ['awaiting_parts', 'awaiting_client'] };
+    renderFunil();
+    expect(screen.queryByRole('button', { name: /Concluir/ })).not.toBeInTheDocument();
   });
 });

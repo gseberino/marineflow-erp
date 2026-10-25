@@ -48,6 +48,27 @@ export async function favorecidoDoLogin(db: Cliente, userId: string | null | und
   return Array.isArray(data) && data[0]?.id ? String(data[0].id) : null;
 }
 
+/**
+ * agenda_config.jornada_horas (Agenda de Produção, Fase 3, P7a): a jornada do dia de trabalho, que o aviso de sobrecarga
+ * usa. Nunca lança. Tabela ausente (as migrations da Fase 1 ainda não aplicadas: PGRST205/42P01), sem linha ou valor
+ * estranho = jornada null e erro null (quem chama usa JORNADA_PADRAO_HORAS, de _shared/agenda-dia.ts); outro erro vem em
+ * `erro` para quem chama registrar.
+ */
+export async function jornadaHorasNoBanco(db: Cliente): Promise<{ jornada: number | null; erro: unknown }> {
+  try {
+    const { data, error } = await db.from("agenda_config").select("jornada_horas").limit(1);
+    if (error) {
+      const code = (error as { code?: unknown }).code;
+      return { jornada: null, erro: code === "PGRST205" || code === "42P01" ? null : error };
+    }
+    const linha = Array.isArray(data) ? data[0] : data;
+    const n = Number(linha?.jornada_horas);
+    return { jornada: Number.isFinite(n) && n > 0 ? n : null, erro: null };
+  } catch (e) {
+    return { jornada: null, erro: e };
+  }
+}
+
 /** A frase do diálogo de agendar com a agenda automática ligada. */
 export const TEXTO_AGENDA_AUTOMATICA_LIGADA =
   "Com a agenda automática ligada, a agenda escolhe os turnos e a equipe dentro destes dias.";
