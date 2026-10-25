@@ -23,6 +23,10 @@
 --   H  o acorde avisa quem já recebeu a ficha
 --   J  portas
 --
+-- Revisão da Fase 3 (C1): L ganhou o atraso, o meio período e o "não dá pra terminar" (item 2); A30–A31 o teto contado igual
+-- e o 23514 que vira recusa (R5); B2b e B16–B19 a resposta direta (NOVO-agenda-28); B10–B11 o "amanhã não vou" ao "como
+-- foi" (item 3); B12–B13 o atraso que não é falta (item 2); B14–B15 o "ok, só de manhã" (item 7).
+--
 -- ═══ COMO RODAR ═══
 --   Na bancada (sempre):  node scripts/bancada-agenda/rodar.mjs --ate 20261026100300
 --   Em produção, só DEPOIS de aplicar a migration, com o OK nomeado do dono:
@@ -106,6 +110,19 @@ select format('L %s → %s', x.frase, x.esperado),
     ('to doente', '{"tipo":"nao_vou"}'),
     ('não vai dar hoje', '{"tipo":"nao_vou"}'),
     ('tô no hospital', '{"tipo":"nao_vou"}'),
+    ('amanhã não vou, tô doente', '{"tipo":"nao_vou"}'),
+    ('ok amanhã não vou', '{"tipo":"nao_vou"}'),
+    -- (C1, item 2) hora, atraso, turno ou "ficar": não é falta do dia inteiro (vai ao dono, nada é remanejado)
+    ('não consigo chegar às 8, chego às 9', '{"tipo":"nao_entendi"}'),
+    ('vou atrasar, não consigo chegar 8h', '{"tipo":"nao_entendi"}'),
+    ('não vou conseguir chegar cedo, chego 9h', '{"tipo":"nao_entendi"}'),
+    ('não vou poder ficar a tarde', '{"tipo":"nao_entendi"}'),
+    ('não posso amanhã à tarde', '{"tipo":"nao_entendi"}'),
+    ('hoje não posso de manhã', '{"tipo":"nao_entendi"}'),
+    ('não posso às 10, só depois', '{"tipo":"nao_entendi"}'),
+    ('não vou conseguir, só depois do almoço', '{"tipo":"nao_entendi"}'),
+    ('não dá pra terminar hoje', '{"tipo":"turnos","terminou":false}'),
+    ('não vou conseguir terminar hoje', '{"tipo":"turnos","terminou":false}'),
     -- presença
     ('bom dia to na MP', '{"tipo":"presenca"}'),
     ('cheguei', '{"tipo":"presenca"}'),
@@ -488,6 +505,48 @@ begin
   exception when sqlstate 'P0099' then null;
   end;
 
+  -- A30–A31 (revisão C1, R5): o teto contado igual na função e na trava da fila; o 23514 da trava vira a recusa.
+  begin
+    perform pg_temp.modos('ligado', 'ligado');
+    perform pg_temp.rodar(d30, '19:30');
+    -- a ficha das 19:30 entrou na fila e falhou (o worker parado): ela conta no teto do dia, como a trava da fila conta
+    update public.whatsapp_send_queue set status = 'failed', failed_reason = 'teste' where source = 'agenda-equipe';
+    update public.agenda_equipe_mensagens set estado = 'recusada', recusa_motivo = 'janela' where tipo = 'ficha';
+    r := public._agenda_equipe_registrar(c_roberto, d04, 'confirmar', 'Roberto, teste do teto 1.', pg_temp.em(d30, '19:40'));
+    r2 := public._agenda_equipe_registrar(c_roberto, d05, 'confirmar', 'Roberto, teste do teto 2.', pg_temp.em(d30, '19:45'));
+    v_res := pg_temp.ok(v_res, 'A30 a ficha que entrou na fila e falhou conta no teto: a 2ª do dia entra; a 3ª é recusada/teto, sem erro (antes a trava da fila estourava 23514)',
+      r ->> 'estado' = 'enfileirada' and r2 ->> 'estado' = 'recusada' and r2 ->> 'motivo' = 'teto'
+      and not exists (select 1 from public.whatsapp_send_queue q where q.source_ref_id = (r2 ->> 'id')::uuid),
+      r::text || ' ' || r2::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    perform pg_temp.modos('ligado', 'ligado');
+    perform pg_temp.rodar(d03, '07:45');
+    update public.whatsapp_send_queue set status = 'sent', sent_at = pg_temp.em(d03, '07:46') where source = 'agenda-equipe';
+    -- a trava da fila recusando tudo (23514, como no teto): uma trava de teste depois da de verdade, desfeita no fim
+    create function public._teste_fila_cheia() returns trigger language plpgsql as $t$
+    begin
+      raise exception 'Teto de mensagens à equipe no dia (teste).' using errcode = '23514', detail = 'teto';
+    end
+    $t$;
+    create trigger trg_teste_fila_cheia before insert on public.whatsapp_send_queue
+      for each row when (new.source = 'agenda-equipe') execute function public._teste_fila_cheia();
+    r := pg_temp.resp('hoje não vou, tô doente', d03, '07:50');
+    v_res := pg_temp.ok(v_res, 'A31 a trava da fila recusa a resposta (23514): ela fica recusada/teto e a falta, a ação e o replano ficam (nada é desfeito)',
+      (r ->> 'consumiu')::boolean and r ->> 'envio' = 'recusada' and r ->> 'resposta' is null
+      and exists (select 1 from public.agenda_equipe_mensagens m where m.tipo = 'resposta' and m.estado = 'recusada'
+                                                                and m.recusa_motivo = 'teto')
+      and exists (select 1 from public.agenda_disponibilidade d where d.payee_id = c_roberto and d.situacao = 'indisponivel'
+                                                            and d.periodo @> d03 and d.substituida_em is null)
+      and exists (select 1 from public.agenda_acoes a where a.tipo = 'equipe' and a.depois ->> 'motivo' = 'nao_vou')
+      and not exists (select 1 from public.agenda_alocacoes a where a.payee_id = c_roberto and a.dia = d03
+                                                            and a.estado in ('publicada', 'fixada')), r::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
   -- ── B. A resposta ──────────────────────────────────────────────────────────────────────────────────────
   begin
     perform pg_temp.modos('ligado', 'ligado');
@@ -504,13 +563,24 @@ begin
       and exists (select 1 from public.agenda_equipe_mensagens m where m.tipo = 'resposta' and m.estado = 'enfileirada'
                                                                 and m.texto = 'Tá bom, aviso o Gustavo.'), r::text);
     r2 := pg_temp.resp('amanhã não vou, tô doente', d30, '19:50', 'WA-NAO-VOU');
-    -- e a resposta às 20:00 (fim da janela) não sairia: a janela vale também para a resposta
-    v_txt := (public._agenda_equipe_registrar(c_roberto, d03, 'resposta', 'Tá bom, teste da janela.', pg_temp.em(d30, '20:00'), null,
-                                              'WA-JANELA') ->> 'motivo');
-    v_res := pg_temp.ok(v_res, 'B2 a mesma mensagem de novo: nada muda (1 resposta enfileirada, 1 ação); às 20:00 a resposta seria recusada/janela',
-      (r2 ->> 'repetida')::boolean and v_txt = 'janela'
+    v_res := pg_temp.ok(v_res, 'B2 a mesma mensagem de novo: nada muda (1 resposta enfileirada, 1 ação)',
+      (r2 ->> 'repetida')::boolean
       and (select count(*) from public.agenda_equipe_mensagens m where m.tipo = 'resposta' and m.estado = 'enfileirada') = 1
       and (select count(*) from public.agenda_acoes a where a.tipo = 'equipe') = 1, r2::text);
+    -- (C1, NOVO-agenda-28) a resposta direta a uma mensagem dele às 20:00 (o fim da janela da equipe) sai na hora, com as
+    -- tentativas até 10 min depois; a das 22:30 fica para o início da janela de sábado (07:30)
+    r := public._agenda_equipe_registrar(c_roberto, d03, 'resposta', 'Tá bom, teste da janela.', pg_temp.em(d30, '20:00'), null,
+                                         'WA-JANELA');
+    r2 := public._agenda_equipe_registrar(c_roberto, d03, 'resposta', 'Tá bom, teste da noite.', pg_temp.em(d30, '22:30'), null,
+                                          'WA-NOITE');
+    v_res := pg_temp.ok(v_res, 'B2b a resposta direta das 20:00 sai na hora (3 tentativas, até 20:10); a das 22:30 vai às 07:30 de sábado',
+      r ->> 'estado' = 'enfileirada' and r2 ->> 'estado' = 'enfileirada'
+      and (select q.scheduled_for = pg_temp.em(d30, '20:00') and q.max_attempts = 3 from public.whatsapp_send_queue q
+            where q.source_ref_id = (r ->> 'id')::uuid)
+      and (select q.scheduled_for = pg_temp.em(d31, '07:30') and m.enviar_em = pg_temp.em(d31, '07:30')
+             from public.whatsapp_send_queue q join public.agenda_equipe_mensagens m on m.id = q.source_ref_id
+            where q.source_ref_id = (r2 ->> 'id')::uuid),
+      r::text || ' ' || r2::text);
     -- o acorde sai pela rotina (sábado 31/10, o próximo dia útil é terça)
     r := pg_temp.rodar(d31, '08:00');
     v_res := pg_temp.ok(v_res, 'B3 o acorde do "não vou" sai pela rotina no tique seguinte',
@@ -565,6 +635,149 @@ begin
     v_res := pg_temp.ok(v_res, 'B9 "ok" com o recibo de diárias mandado depois da ficha: consumiu false (é do recibo); a ficha segue enfileirada',
       not (r ->> 'consumiu')::boolean and r ->> 'motivo' = 'recibo' and pg_temp.msgs() -> 0 ->> 'estado' = 'enfileirada'
       and not exists (select 1 from public.agenda_disponibilidade d where d.payee_id = c_roberto and d.situacao = 'confirmada'), r::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- B10–B11 (revisão C1, item 3): o "amanhã não vou" respondido ao "como foi" que levava a ficha de amanhã.
+  begin
+    perform pg_temp.modos('ligado', 'ligado');
+    perform pg_temp.rodar(d30, '19:30');
+    update public.whatsapp_send_queue set status = 'sent', sent_at = pg_temp.em(d30, '19:31') where source = 'agenda-equipe';
+    perform pg_temp.rodar(d03, '07:45');
+    update public.whatsapp_send_queue set status = 'sent', sent_at = pg_temp.em(d03, '07:46')
+     where source = 'agenda-equipe' and status = 'pending';
+    perform pg_temp.resp('cheguei', d03, '08:05');
+    perform pg_temp.rodar(d03, '17:00');
+    update public.whatsapp_send_queue set status = 'sent', sent_at = pg_temp.em(d03, '17:01')
+     where source = 'agenda-equipe' and status = 'pending';
+    r := pg_temp.resp('amanhã não vou', d03, '18:10');
+    v_res := pg_temp.ok(v_res, 'B10 "amanhã não vou" ao "como foi" que levava a ficha de qua 04/11: indisponível qua 04/11 (não hoje), a ação e "Tá bom, aviso o Gustavo."; o "como foi" de hoje segue esperando e nenhuma pergunta da diária de hoje',
+      (r ->> 'consumiu')::boolean and r ->> 'tipo' = 'nao_vou' and r ->> 'dia' = '2026-11-04'
+      and r ->> 'resposta' = 'Tá bom, aviso o Gustavo.'
+      and exists (select 1 from public.agenda_disponibilidade d where d.payee_id = c_roberto and d.situacao = 'indisponivel'
+                                                            and d.origem = 'diarista' and d.periodo @> d04 and d.substituida_em is null)
+      and not exists (select 1 from public.agenda_disponibilidade d where d.payee_id = c_roberto and d.situacao = 'indisponivel'
+                                                                and d.periodo @> d03 and d.substituida_em is null)
+      and exists (select 1 from public.agenda_acoes a where a.tipo = 'equipe' and a.depois ->> 'motivo' = 'nao_vou'
+                                                    and (a.depois ->> 'dia')::date = d04)
+      and (select m.estado = 'enfileirada' and m.resposta_em is null from public.agenda_equipe_mensagens m
+            where m.tipo = 'como_foi' and m.dia = d03)
+      and not exists (select 1 from public.agenda_perguntas q where q.tipo = 'diaria' and q.payee_id = c_roberto and q.dia = d03),
+      r::text);
+    -- o "ok" de depois responde o "como foi" de hoje: a diária de hoje entra e amanhã não vira confirmado
+    r := pg_temp.resp('ok', d03, '18:20');
+    v_res := pg_temp.ok(v_res, 'B11 o "ok" de depois é a resposta do "como foi" de hoje (a diária de ter 03/11 entra) e não confirma qua 04/11',
+      (r ->> 'consumiu')::boolean and (pg_temp.turno(c_roberto, d03) ->> 'fracao')::numeric = 1
+      and not exists (select 1 from public.agenda_disponibilidade d where d.payee_id = c_roberto and d.situacao = 'confirmada'
+                                                                and d.periodo @> d04 and d.substituida_em is null),
+      r::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- B12–B13 (revisão C1, item 2): o atraso não é falta.
+  begin
+    perform pg_temp.modos('ligado', 'ligado');
+    perform pg_temp.rodar(d03, '07:45');
+    update public.whatsapp_send_queue set status = 'sent', sent_at = pg_temp.em(d03, '07:46') where source = 'agenda-equipe';
+    v_txt := (select string_agg(a.id::text, ',' order by a.id) from public.agenda_alocacoes a
+               where a.payee_id = c_roberto and a.dia = d03 and a.estado in ('publicada', 'fixada'));
+    r := pg_temp.resp('não consigo chegar às 8, chego às 9', d03, '07:50');
+    v_res := pg_temp.ok(v_res, 'B12 "não consigo chegar às 8, chego às 9" à confirmação: nada fica indisponível, o plano de hoje fica, nenhuma resposta a ele e a pergunta ao dono com o trecho',
+      (r ->> 'consumiu')::boolean and r ->> 'tipo' = 'nao_entendi' and r ->> 'resposta' is null
+      and not exists (select 1 from public.agenda_disponibilidade d where d.payee_id = c_roberto and d.situacao = 'indisponivel'
+                                                                and d.periodo @> d03 and d.substituida_em is null)
+      and v_txt = (select string_agg(a.id::text, ',' order by a.id) from public.agenda_alocacoes a
+                    where a.payee_id = c_roberto and a.dia = d03 and a.estado in ('publicada', 'fixada'))
+      and not exists (select 1 from public.agenda_equipe_mensagens m where m.tipo = 'resposta')
+      and not exists (select 1 from public.agenda_acoes a where a.tipo = 'equipe')
+      and exists (select 1 from public.agenda_perguntas q
+                   where q.tipo = 'equipe_resposta' and q.estado = 'aberta'
+                     and q.texto = 'O Roberto respondeu "não consigo chegar às 8, chego às 9" à confirmação de ter 03/11.'),
+      r::text);
+    r := pg_temp.rodar(d03, '09:00');
+    v_res := pg_temp.ok(v_res, 'B13 e às 09:00 não é silêncio (ele respondeu)',
+      (r #>> '{contagens,silencio,silencio}')::int = 0
+      and not exists (select 1 from public.agenda_disponibilidade d where d.payee_id = c_roberto and d.situacao = 'indisponivel'),
+      r::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- B14–B15 (revisão C1, item 7): "ok, só de manhã" com o dia todo no plano não confirma o dia.
+  begin
+    perform pg_temp.modos('ligado', 'ligado');
+    perform pg_temp.rodar(d30, '19:30');
+    update public.whatsapp_send_queue set status = 'sent', sent_at = pg_temp.em(d30, '19:31') where source = 'agenda-equipe';
+    r := pg_temp.resp('ok, só de manhã', d30, '20:10');
+    v_res := pg_temp.ok(v_res, 'B14 "ok, só de manhã" à ficha de terça (o plano é o dia todo): não confirma; a pergunta ao dono "…, e o plano é o dia todo."',
+      (r ->> 'consumiu')::boolean and pg_temp.msgs() -> 0 ->> 'estado' = 'respondida'
+      and not exists (select 1 from public.agenda_disponibilidade d where d.payee_id = c_roberto and d.situacao = 'confirmada'
+                                                                and d.periodo @> d03)
+      and exists (select 1 from public.agenda_perguntas q
+                   where q.tipo = 'equipe_resposta' and q.estado = 'aberta'
+                     and q.texto = 'O Roberto respondeu "ok, só de manhã" à ficha de ter 03/11, e o plano é o dia todo.'),
+      (select string_agg(q.texto, ' | ') from public.agenda_perguntas q where q.tipo = 'equipe_resposta'));
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    perform pg_temp.modos('ligado', 'ligado');
+    perform pg_temp.rodar(d30, '19:30');
+    update public.whatsapp_send_queue set status = 'sent', sent_at = pg_temp.em(d30, '19:31') where source = 'agenda-equipe';
+    r := pg_temp.resp('ok, o dia todo', d30, '20:10');
+    v_res := pg_temp.ok(v_res, 'B15 "ok, o dia todo" (igual ao plano): confirma terça, sem pergunta ao dono',
+      (r ->> 'consumiu')::boolean
+      and exists (select 1 from public.agenda_disponibilidade d where d.payee_id = c_roberto and d.situacao = 'confirmada'
+                                                            and d.periodo @> d03 and d.substituida_em is null)
+      and not exists (select 1 from public.agenda_perguntas q where q.tipo = 'equipe_resposta'), r::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+
+  -- B16–B19 (revisão C1, NOVO-agenda-28): a resposta direta a uma mensagem do técnico.
+  v_res := pg_temp.ok(v_res, 'B16 a hora da resposta: 07:10 e 21:59 na hora; 05:40 às 07:30 do dia; 22:00 às 07:30 de amanhã; sáb 23:00 e dom 10:00 às 07:30 de segunda',
+    public._agenda_equipe_quando_responder(pg_temp.em(d03, '07:10')) = pg_temp.em(d03, '07:10')
+    and public._agenda_equipe_quando_responder(pg_temp.em(d03, '21:59')) = pg_temp.em(d03, '21:59')
+    and public._agenda_equipe_quando_responder(pg_temp.em(d03, '05:40')) = pg_temp.em(d03, '07:30')
+    and public._agenda_equipe_quando_responder(pg_temp.em(d03, '22:00')) = pg_temp.em(d04, '07:30')
+    and public._agenda_equipe_quando_responder(pg_temp.em(d31, '23:00')) = pg_temp.em(d02, '07:30')
+    and public._agenda_equipe_quando_responder(pg_temp.em(d01, '10:00')) = pg_temp.em(d02, '07:30'),
+    null);
+  begin
+    perform pg_temp.modos('ligado', 'ligado');
+    r := pg_temp.resp('hoje não vou, tô doente', d03, '07:10');
+    v_id := (select m.id from public.agenda_equipe_mensagens m where m.tipo = 'resposta');
+    v_res := pg_temp.ok(v_res, 'B17 "não vou" às 07:10 (antes da janela): o "Tá bom, aviso o Gustavo." sai na hora (07:10, 3 tentativas até 07:20)',
+      (r ->> 'consumiu')::boolean and r ->> 'resposta' = 'Tá bom, aviso o Gustavo.' and r ->> 'envio' = 'enfileirada'
+      and (select q.scheduled_for = pg_temp.em(d03, '07:10') and q.max_attempts = 3 and q.status = 'pending'
+             from public.whatsapp_send_queue q where q.source_ref_id = v_id), r::text);
+    -- a linha de fora com outra chave é recusada (o worker reconhece a resposta direta pela chave da mensagem)
+    v_txt := pg_temp.erro_de(format($q$insert into public.whatsapp_send_queue (phone_normalized, message, source, source_ref_id,
+                                                                              scheduled_for, max_attempts, dedupe_key)
+                                       values ('5547900000001', 'teste', 'agenda-equipe', %L, %L, 1, 'outra-chave')$q$,
+                                    v_id, pg_temp.em(d03, '07:10')));
+    -- a nova tentativa (+5 min) dentro do prazo segue; a que passaria dos 10 min (ainda antes das 07:30) vira falha
+    update public.whatsapp_send_queue set scheduled_for = pg_temp.em(d03, '07:15'), attempts = 1 where source_ref_id = v_id;
+    r2 := jsonb_build_object('chave', v_txt, 'as_07_15', (select q.status from public.whatsapp_send_queue q where q.source_ref_id = v_id));
+    update public.whatsapp_send_queue set scheduled_for = pg_temp.em(d03, '07:21'), attempts = 2 where source_ref_id = v_id;
+    r2 := r2 || jsonb_build_object('as_07_21', (select q.status from public.whatsapp_send_queue q where q.source_ref_id = v_id));
+    v_res := pg_temp.ok(v_res, 'B18 a linha de fora com outra chave é recusada (42501); a nova tentativa às 07:15 segue; a das 07:21 (fora da janela e passados os 10 min) vira falha',
+      r2 ->> 'chave' like '42501 A fila da equipe só aceita a mensagem com a chave dela%' and r2 ->> 'as_07_15' = 'pending'
+      and r2 ->> 'as_07_21' = 'failed', r2::text);
+    raise exception 'desfaz' using errcode = 'P0099';
+  exception when sqlstate 'P0099' then null;
+  end;
+  begin
+    perform pg_temp.modos('ligado', 'ligado');
+    r := pg_temp.resp('hoje não vou, tô doente', d03, '05:40');
+    v_id := (select m.id from public.agenda_equipe_mensagens m where m.tipo = 'resposta');
+    r2 := pg_temp.rodar(d03, '06:00');
+    v_res := pg_temp.ok(v_res, 'B19 "não vou" às 05:40: o "Tá bom" fica para as 07:30 do dia, e a rotina das 06:00 não derruba a linha marcada para depois',
+      (r ->> 'consumiu')::boolean and r ->> 'envio' = 'enfileirada'
+      and (select q.scheduled_for = pg_temp.em(d03, '07:30') and q.status = 'pending'
+             from public.whatsapp_send_queue q where q.source_ref_id = v_id), r::text || ' ' || r2::text);
     raise exception 'desfaz' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;
   end;
@@ -933,7 +1146,9 @@ select format('J2 %s: authenticated e service_role; anon não', f),
     'public._agenda_payee_do_telefone(text, date)',
     'public.agenda_registrar_dia(uuid, date, text, text, uuid, uuid[], text, text, date, timestamptz, text)',
     'public.agenda_saude(date, timestamptz)',
-    'public._agenda_texto_do_acorde(uuid, date, date)']) f;
+    'public._agenda_texto_do_acorde(uuid, date, date)',
+    -- (revisão C1) a janela de uma tentativa: a saúde (invoker) lê
+    'public._agenda_equipe_fora_da_janela(text, timestamptz, timestamptz)']) f;
 
 insert into _resultado
 select format('J3 %s: ninguém de fora', f),
@@ -948,7 +1163,10 @@ select format('J3 %s: ninguém de fora', f),
     'public._agenda_decidir_diaria(uuid, smallint, uuid, text, text, date, timestamptz)',
     'public._agenda_desfazer_diaria(uuid, uuid, date, timestamptz, boolean)',
     'public._agenda_rotina_ficha(date, timestamptz)',
-    'public._agenda_rotina_silencio(date, timestamptz)']) f;
+    'public._agenda_rotina_silencio(date, timestamptz)',
+    -- (revisão C1) a hora da resposta e o teto contado num lugar só
+    'public._agenda_equipe_quando_responder(timestamptz)',
+    'public._agenda_equipe_no_dia(uuid, date, boolean, uuid)']) f;
 
 insert into _resultado
 select 'J4 os gatilhos novos: a trava da fila só para agenda-equipe (INSERT e a nova tentativa) e a diária sem confirmação',

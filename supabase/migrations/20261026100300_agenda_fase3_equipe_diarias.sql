@@ -66,6 +66,18 @@
 --     aprendida), registrado.
 --   · O que a rotina conclui (técnico disse que terminou, último dia) exige UMA OS dele no dia: com duas, ninguém sabe qual.
 --
+-- REVISÃO DA FASE 3 (C1 — equipe, palavras e fila; as marcas "(C1" no corpo):
+--   · item 2: "não vou" com hora, atraso, turno ou "ficar" ("chego às 9", "vou atrasar", "não posso à tarde") é não
+--     entendi — vai ao dono com o trecho e nada é remanejado; com terminar/acabar é sobre o serviço.
+--   · item 3: o "não vou" ao "como foi hoje?" vale para o dia da ficha que ele levava (senão o próximo dia útil); o "como
+--     foi" de hoje continua esperando a resposta de hoje (sem a pergunta da diária de hoje).
+--   · item 7: o "ok" com turnos diferentes do plano ("ok, só de manhã") não confirma o dia: vai ao dono (equipe_resposta).
+--   · R5: o teto contado num lugar só (_agenda_equipe_no_dia, a função e a trava da fila); o 23514 da trava vira a recusa
+--     da mensagem, sem desfazer o resto.
+--   · NOVO-agenda-28: a resposta direta a uma mensagem do técnico sai na hora entre equipe_resposta_direta_inicio e _fim
+--     (06:00–22:00, até 10 min depois, nunca no domingo); fora disso, no início da janela. A janela de uma tentativa é a
+--     regra única _agenda_equipe_fora_da_janela (a função, a trava, o passo "fila" da rotina, a saúde; o worker tem a mesma).
+--
 -- O QUE NÃO MUDA: com modo_equipe e modo_diaria em 'desligado' (como nascem; produção hoje), a rotina devolve
 -- {rodou: false}, a resposta da equipe {consumiu: false} e a diária {status: desligado}: nada é gravado e o webhook segue
 -- exatamente como hoje. Em 'sombra' nada vai a ninguém e nenhuma diária é lançada: só as mensagens registradas e as ações
@@ -316,6 +328,99 @@ comment on function public.agenda_equipe_ficha(uuid, date, date) is
 
 -- ── 2. O envio à equipe: modo, lista, domingo, janela, teto, telefone, modo de teste e a fila ──────────────
 
+-- (Revisão da Fase 3, C1) A janela de UMA tentativa de envio à equipe — a regra única: o _agenda_equipe_enfileirar (a 1ª
+-- tentativa e quantas cabem), o gatilho da fila (o INSERT e a nova tentativa), o passo "fila" da rotina e a saúde leem
+-- daqui; o worker confere o mesmo na hora de mandar (whatsapp-queue-worker, _shared/agenda/janela-da-fila.ts). null = pode
+-- sair; senão o motivo (domingo ou janela). Pode sair: nunca no domingo; no mesmo dia (Brasília) da hora marcada; dentro de
+-- [equipe_janela_inicio, equipe_janela_fim) — ou, SÓ para a resposta direta a uma mensagem que o técnico acabou de mandar
+-- (tipo resposta, NOVO-agenda-28), dentro de [equipe_resposta_direta_inicio, equipe_resposta_direta_fim), nunca antes da
+-- hora marcada (a da mensagem dele) e só até equipe_resposta_direta_prazo depois dela.
+create or replace function public._agenda_equipe_fora_da_janela(p_tipo text, p_marcada timestamptz, p_quando timestamptz)
+ returns text
+ language plpgsql
+ stable
+ set search_path to 'public'
+as $function$
+declare
+  cf  public.agenda_config := public._agenda_cfg();
+  v_q timestamp := p_quando at time zone 'America/Sao_Paulo';
+begin
+  if p_quando is null or p_marcada is null then
+    return 'janela';
+  end if;
+  if extract(isodow from v_q) = 7 then
+    return 'domingo';
+  end if;
+  if v_q::date <> (p_marcada at time zone 'America/Sao_Paulo')::date then
+    return 'janela';
+  end if;
+  if v_q::time >= cf.equipe_janela_inicio and v_q::time < cf.equipe_janela_fim then
+    return null;
+  end if;
+  if p_tipo = 'resposta' and v_q::time >= cf.equipe_resposta_direta_inicio and v_q::time < cf.equipe_resposta_direta_fim
+     and p_quando >= p_marcada and p_quando <= p_marcada + cf.equipe_resposta_direta_prazo then
+    return null;
+  end if;
+  return 'janela';
+end;
+$function$;
+
+comment on function public._agenda_equipe_fora_da_janela(text, timestamptz, timestamptz) is
+  'Agenda de Produção (Fase 3, revisão C1): a janela de uma tentativa de envio à equipe, a regra única do banco (o worker tem a mesma em _shared/agenda/janela-da-fila.ts) — null = pode sair; ''domingo''; ''janela''. Nunca domingo; o mesmo dia de Brasília da hora marcada; [equipe_janela_inicio, equipe_janela_fim); ou, só para tipo resposta (a resposta direta a uma mensagem do técnico, NOVO-agenda-28), [equipe_resposta_direta_inicio, equipe_resposta_direta_fim) entre a hora marcada e a hora marcada + equipe_resposta_direta_prazo.';
+
+-- (C1, NOVO-agenda-28) Quando sai a resposta a uma mensagem que o técnico acabou de mandar: na hora (a resposta direta), se
+-- a mensagem dele chegou entre equipe_resposta_direta_inicio e equipe_resposta_direta_fim de um dia que não é domingo;
+-- senão no início da janela da equipe — no mesmo dia, se a janela ainda não começou e não é domingo; senão no do próximo
+-- dia que não é domingo. O "não vou" das 06:40 tem o "Tá bom" na hora; o das 05:30, às 07:30; o das 23:00 de sábado, às
+-- 07:30 de segunda.
+create or replace function public._agenda_equipe_quando_responder(p_recebida timestamptz)
+ returns timestamptz
+ language plpgsql
+ stable
+ set search_path to 'public'
+as $function$
+declare
+  cf  public.agenda_config := public._agenda_cfg();
+  v_l timestamp := p_recebida at time zone 'America/Sao_Paulo';
+  v_d date := (p_recebida at time zone 'America/Sao_Paulo')::date;
+begin
+  if extract(isodow from v_l) <> 7 and v_l::time >= cf.equipe_resposta_direta_inicio
+     and v_l::time < cf.equipe_resposta_direta_fim then
+    return p_recebida;
+  end if;
+  if extract(isodow from v_l) = 7 or v_l::time >= cf.equipe_janela_inicio then
+    v_d := v_d + 1;
+  end if;
+  if extract(isodow from v_d) = 7 then
+    v_d := v_d + 1;
+  end if;
+  return (v_d + cf.equipe_janela_inicio) at time zone 'America/Sao_Paulo';
+end;
+$function$;
+
+comment on function public._agenda_equipe_quando_responder(timestamptz) is
+  'Agenda de Produção (Fase 3, revisão C1 — NOVO-agenda-28): a hora de envio da resposta a uma mensagem do técnico — a própria hora dela entre equipe_resposta_direta_inicio e equipe_resposta_direta_fim (não domingo); senão o início da janela da equipe (equipe_janela_inicio) do mesmo dia, se ainda não chegou e não é domingo, ou do próximo dia que não é domingo.';
+
+-- (C1, R5) Quantas mensagens à equipe da pessoa ENTRARAM na fila no dia (Brasília, pelo scheduled_for), das que o sistema
+-- começa ou das respostas: a contagem única do teto. O _agenda_equipe_enfileirar e o gatilho da fila contam igual — a linha
+-- que entrou conta em qualquer estado (saindo ou não), e o que nunca entrou (recusado antes) não conta. p_exceto = a
+-- mensagem que está entrando.
+create or replace function public._agenda_equipe_no_dia(p_payee uuid, p_dia date, p_resposta boolean, p_exceto uuid)
+ returns integer
+ language sql
+ stable
+ set search_path to 'public'
+as $function$
+  select count(*)::int
+    from public.whatsapp_send_queue q join public.agenda_equipe_mensagens x on x.id = q.source_ref_id
+   where q.source = 'agenda-equipe' and q.source_ref_id is distinct from p_exceto and x.payee_id = p_payee
+     and (x.tipo = 'resposta') = p_resposta
+     and (q.scheduled_for at time zone 'America/Sao_Paulo')::date = p_dia;
+$function$;
+
+comment on function public._agenda_equipe_no_dia(uuid, date, boolean, uuid) is
+  'Agenda de Produção (Fase 3, revisão C1 — R5): o teto do dia, contado num lugar só — as linhas de whatsapp_send_queue (source agenda-equipe, qualquer estado) das mensagens da pessoa no dia de Brasília do scheduled_for, das respostas (p_resposta) ou das que o sistema começa, sem p_exceto.';
+
 -- Uma mensagem à equipe: decide se vai à fila (e marca enfileirada) ou fica registrada (sombra) ou recusada (o motivo).
 -- A ordem é a da spec (§7.2). A janela vale para TODA tentativa: o max_attempts é cortado para a última (+5 min cada)
 -- não passar do fim da janela; o gatilho da fila (abaixo) confere tudo de novo no INSERT.
@@ -335,10 +440,10 @@ declare
   v_fone  text;
   v_teste boolean;
   v_fteste text;
-  v_fim   timestamptz;
   v_tent  int;
   v_fila  uuid;
   v_motivo text;
+  v_det   text;
 begin
   select * into m from public.agenda_equipe_mensagens where id = p_msg for update;
   if not found then
@@ -358,20 +463,14 @@ begin
     -- 2. a lista da rotina (só a semente ou o dono põem; "para de mandar" tira)
     when not exists (select 1 from public.agenda_equipe_contato c
                       where c.payee_id = m.payee_id and c.recebe_rotina and c.parou_em is null) then 'parou'
-    -- 3. domingo
-    when extract(isodow from v_local) = 7 then 'domingo'
-    -- 4. a janela em Brasília: [início, fim)
-    when v_local::time < cf.equipe_janela_inicio or v_local::time >= cf.equipe_janela_fim then 'janela'
+    -- 3. domingo; 4. a janela em Brasília (a regra única; a resposta direta tem a dela — C1, NOVO-agenda-28)
+    else public._agenda_equipe_fora_da_janela(m.tipo, m.enviar_em, m.enviar_em)
   end;
-  -- 5. o teto do dia (pelo dia do envio): as que o sistema começa e as respostas, cada uma com o seu
+  -- 5. o teto do dia (pelo dia do envio): as que o sistema começa e as respostas, cada uma com o seu. (C1, R5) contado
+  -- como o gatilho da fila conta (_agenda_equipe_no_dia): as duas contagens são a mesma
   if v_motivo is null then
     v_max := case when m.tipo = 'resposta' then cf.equipe_respostas_dia_max else cf.equipe_proativas_dia_max end;
-    select count(*) into v_n
-      from public.agenda_equipe_mensagens x
-     where x.payee_id = m.payee_id and x.id <> m.id and x.modo = 'ligado'
-       and (x.tipo = 'resposta') = (m.tipo = 'resposta')
-       and x.estado in ('enfileirada', 'respondida', 'sem_resposta')
-       and (x.enviar_em at time zone 'America/Sao_Paulo')::date = v_local::date;
+    v_n := public._agenda_equipe_no_dia(m.payee_id, v_local::date, m.tipo = 'resposta', m.id);
     if v_n >= v_max then
       v_motivo := 'teto';
     end if;
@@ -398,14 +497,24 @@ begin
     return jsonb_build_object('estado', 'recusada', 'motivo', v_motivo);
   end if;
 
-  -- 8. a fila: as tentativas (+5 min cada) acabam antes do fim da janela
-  v_fim := (v_local::date + cf.equipe_janela_fim) at time zone 'America/Sao_Paulo';
-  v_tent := greatest(1, least(3, floor(extract(epoch from (v_fim - m.enviar_em)) / 300)::int));
-  insert into public.whatsapp_send_queue (phone_normalized, message, source, source_ref_id, priority, scheduled_for,
-                                          max_attempts, dedupe_key)
-  values (v_fone, m.texto, 'agenda-equipe', m.id, 3, m.enviar_em, v_tent, m.dedupe_key)
-  on conflict do nothing
-  returning id into v_fila;
+  -- 8. a fila: as tentativas (+5 min cada) que cabem na janela da mensagem (a regra única; a 1ª já cabe)
+  v_tent := greatest(1, (select count(*)::int from generate_series(0, 2) k
+                          where public._agenda_equipe_fora_da_janela(m.tipo, m.enviar_em,
+                                                                      m.enviar_em + make_interval(mins => 5 * k)) is null));
+  -- (C1, R5) a trava da fila (o gatilho) recusa com 23514 o que passaria da janela ou do teto: aqui isso vira a recusa da
+  -- mensagem com o motivo, sem desfazer o que veio antes na mesma transação (a resposta lida, a ausência, o replano)
+  begin
+    insert into public.whatsapp_send_queue (phone_normalized, message, source, source_ref_id, priority, scheduled_for,
+                                            max_attempts, dedupe_key)
+    values (v_fone, m.texto, 'agenda-equipe', m.id, 3, m.enviar_em, v_tent, m.dedupe_key)
+    on conflict do nothing
+    returning id into v_fila;
+  exception when sqlstate '23514' then
+    get stacked diagnostics v_det = pg_exception_detail;
+    v_motivo := case when v_det in ('teto', 'janela', 'domingo') then v_det else 'teto' end;
+    update public.agenda_equipe_mensagens set estado = 'recusada', recusa_motivo = v_motivo where id = m.id;
+    return jsonb_build_object('estado', 'recusada', 'motivo', v_motivo, 'pela_fila', true);
+  end;
   if v_fila is null then
     -- a mesma chave já estava na fila (o gatilho de idempotência de produção devolve nada): é a mesma mensagem
     select q.id into v_fila from public.whatsapp_send_queue q where q.dedupe_key = m.dedupe_key;
@@ -416,7 +525,7 @@ end;
 $function$;
 
 comment on function public._agenda_equipe_enfileirar(uuid) is
-  'Agenda de Produção (Fase 3, P4): a decisão do envio de uma mensagem registrada à equipe, na ordem — modo_equipe fora de ligado (ou a mensagem em sombra) = fica registrada; fora de agenda_equipe_contato.recebe_rotina = recusada/parou; domingo; fora de [equipe_janela_inicio, equipe_janela_fim) em Brasília = janela; o teto do dia (equipe_proativas_dia_max para ficha/confirmar/como_foi, equipe_respostas_dia_max para as respostas, contando as enfileiradas/respondidas/sem resposta) = teto; sem telefone (ou wa_test_mode sem número de teste) = sem_telefone. Senão whatsapp_send_queue (source agenda-equipe, source_ref_id = a mensagem, dedupe_key da mensagem, max_attempts cortado para a última tentativa caber na janela) e enfileirada. Idempotente. Sem grant.';
+  'Agenda de Produção (Fase 3, P4; revisão C1): a decisão do envio de uma mensagem registrada à equipe, na ordem — modo_equipe fora de ligado (ou a mensagem em sombra) = fica registrada; fora de agenda_equipe_contato.recebe_rotina = recusada/parou; domingo e janela pela _agenda_equipe_fora_da_janela ([equipe_janela_inicio, equipe_janela_fim) de Brasília; a resposta direta, a dela); o teto do dia (equipe_proativas_dia_max para ficha/confirmar/como_foi, equipe_respostas_dia_max para as respostas, contado pela _agenda_equipe_no_dia, como o gatilho) = teto; sem telefone (ou wa_test_mode sem número de teste) = sem_telefone. Senão whatsapp_send_queue (source agenda-equipe, source_ref_id = a mensagem, dedupe_key da mensagem, max_attempts = as tentativas que cabem na janela) e enfileirada; o 23514 da trava da fila vira recusada com o motivo (o detail do gatilho), sem desfazer o que veio antes. Idempotente. Sem grant.';
 
 -- Registra a mensagem no modo de agora (sombra: a chave termina em :sombra) e decide o envio. Desligado = nada.
 create or replace function public._agenda_equipe_registrar(p_payee uuid, p_dia date, p_tipo text, p_texto text,
@@ -433,6 +542,7 @@ declare
   v_modo text;
   v_id   uuid;
   v_r    jsonb;
+  v_enviar timestamptz;
 begin
   if cf.modo_equipe = 'desligado' then
     return jsonb_build_object('criada', false, 'modo', 'desligado');
@@ -444,9 +554,12 @@ begin
     raise exception 'A mensagem à equipe veio sem texto.' using errcode = '22023';
   end if;
   v_modo := case when cf.modo_equipe = 'ligado' then 'ligado' else 'sombra' end;
+  -- (C1, NOVO-agenda-28) a resposta a uma mensagem dele: na hora entre equipe_resposta_direta_inicio e _fim (fora do
+  -- domingo); senão no início da janela da equipe (a mensagem registrada nunca muda: a hora entra certa)
+  v_enviar := case when p_tipo = 'resposta' then public._agenda_equipe_quando_responder(p_enviar_em) else p_enviar_em end;
   insert into public.agenda_equipe_mensagens (payee_id, dia, tipo, leva_ficha_de, modo, texto, enviar_em, dedupe_key,
                                               responde_wa_id, criada_em)
-  values (p_payee, p_dia, p_tipo, p_leva_ficha_de, v_modo, left(p_texto, 600), p_enviar_em,
+  values (p_payee, p_dia, p_tipo, p_leva_ficha_de, v_modo, left(p_texto, 600), v_enviar,
           case when p_tipo = 'resposta'
                then format('agenda-equipe:resposta:%s:%s', p_payee, coalesce(p_responde, md5(p_texto || p_enviar_em::text)))
                else format('agenda-equipe:%s:%s:%s', p_tipo, p_payee, p_dia) end
@@ -463,7 +576,7 @@ end;
 $function$;
 
 comment on function public._agenda_equipe_registrar(uuid, date, text, text, timestamptz, date, text) is
-  'Agenda de Produção (Fase 3, P4): grava a mensagem à equipe no modo de agora (desligado = nada; sombra = estado registrada e a chave agenda-equipe:<tipo>:<pessoa>:<dia> com ":sombra"; ligado = a chave sem sufixo, a mesma da fila) e chama _agenda_equipe_enfileirar. Uma por pessoa, dia, tipo e modo (as respostas pela mensagem dele). Sem grant.';
+  'Agenda de Produção (Fase 3, P4; revisão C1): grava a mensagem à equipe no modo de agora (desligado = nada; sombra = estado registrada e a chave agenda-equipe:<tipo>:<pessoa>:<dia> com ":sombra"; ligado = a chave sem sufixo, a mesma da fila) e chama _agenda_equipe_enfileirar. Uma por pessoa, dia, tipo e modo (as respostas pela mensagem dele). A resposta (NOVO-agenda-28) entra com a hora de _agenda_equipe_quando_responder: na hora, entre equipe_resposta_direta_inicio e _fim; senão no início da janela. Sem grant.';
 
 -- A trava da fila no banco (a segunda, depois do _agenda_equipe_enfileirar): nada com source agenda-equipe entra na fila
 -- sem a mensagem registrada em ligado, fora da janela (nenhuma tentativa depois do fim), no domingo ou acima do teto do
@@ -478,47 +591,55 @@ declare
   cf      public.agenda_config := public._agenda_cfg();
   m       record;
   v_local timestamp;
-  v_ult   timestamp;
+  v_fora  text;
   v_max   int;
   v_n     int;
 begin
   if tg_op = 'UPDATE' then
-    -- a nova tentativa que o worker marca (+5 min) depois do fim da janela (ou com a equipe fora de ligado) não sai: falha
-    v_local := new.scheduled_for at time zone 'America/Sao_Paulo';
-    if extract(isodow from v_local) = 7 or v_local::time < cf.equipe_janela_inicio or v_local::time >= cf.equipe_janela_fim
-       or v_local::date <> (old.scheduled_for at time zone 'America/Sao_Paulo')::date or cf.modo_equipe <> 'ligado' then
+    -- a nova tentativa que o worker marca (+5 min) fora da janela da mensagem (ou com a equipe fora de ligado) não sai:
+    -- falha. (C1) A janela é a regra única (_agenda_equipe_fora_da_janela): a resposta direta tem a dela e o prazo.
+    select x.tipo, x.enviar_em into m from public.agenda_equipe_mensagens x where x.id = new.source_ref_id;
+    if not found or cf.modo_equipe <> 'ligado'
+       or public._agenda_equipe_fora_da_janela(m.tipo, m.enviar_em, new.scheduled_for) is not null then
       new.status := 'failed';
       new.failed_reason := 'agenda-equipe: a nova tentativa passaria do fim da janela';
     end if;
     return new;
   end if;
-  select x.id, x.payee_id, x.tipo, x.modo into m from public.agenda_equipe_mensagens x where x.id = new.source_ref_id;
+  select x.id, x.payee_id, x.tipo, x.modo, x.enviar_em, x.dedupe_key into m
+    from public.agenda_equipe_mensagens x where x.id = new.source_ref_id;
   if not found or m.modo <> 'ligado' or cf.modo_equipe <> 'ligado' then
     raise exception 'A fila da equipe só aceita a mensagem registrada pela agenda com modo_equipe ligado.' using errcode = '42501';
   end if;
   v_local := new.scheduled_for at time zone 'America/Sao_Paulo';
-  v_ult := v_local + make_interval(mins => 5 * greatest(coalesce(new.max_attempts, 3) - 1, 0));
-  if extract(isodow from v_local) = 7 or v_local::time < cf.equipe_janela_inicio or v_ult::time >= cf.equipe_janela_fim
-     or v_ult::date <> v_local::date then
+  -- (C1) cada tentativa (+5 min) dentro da janela da mensagem, pela regra única; o motivo vai no detail (quem enfileira
+  -- recusa a mensagem com ele)
+  select t.f into v_fora
+    from (select public._agenda_equipe_fora_da_janela(m.tipo, m.enviar_em, new.scheduled_for + make_interval(mins => 5 * k)) as f
+            from generate_series(0, greatest(coalesce(new.max_attempts, 3) - 1, 0)) k) t
+   where t.f is not null
+   limit 1;
+  if v_fora is not null then
     raise exception 'Mensagem à equipe fora da janela (% às %, nunca no domingo): %.',
       to_char(cf.equipe_janela_inicio, 'HH24:MI'), to_char(cf.equipe_janela_fim, 'HH24:MI'), to_char(v_local, 'DD/MM HH24:MI')
-      using errcode = '23514';
+      using errcode = '23514', detail = v_fora;
   end if;
   v_max := case when m.tipo = 'resposta' then cf.equipe_respostas_dia_max else cf.equipe_proativas_dia_max end;
-  select count(*) into v_n
-    from public.whatsapp_send_queue q join public.agenda_equipe_mensagens x on x.id = q.source_ref_id
-   where q.source = 'agenda-equipe' and q.source_ref_id is distinct from new.source_ref_id and x.payee_id = m.payee_id
-     and (x.tipo = 'resposta') = (m.tipo = 'resposta')
-     and (q.scheduled_for at time zone 'America/Sao_Paulo')::date = v_local::date;
+  -- (C1, R5) a mesma contagem do _agenda_equipe_enfileirar
+  v_n := public._agenda_equipe_no_dia(m.payee_id, v_local::date, m.tipo = 'resposta', new.source_ref_id);
   if v_n >= v_max then
-    raise exception 'Teto de mensagens à equipe no dia (%): não entra mais nenhuma.', v_max using errcode = '23514';
+    raise exception 'Teto de mensagens à equipe no dia (%): não entra mais nenhuma.', v_max using errcode = '23514', detail = 'teto';
+  end if;
+  -- (C1, R7) a chave da linha é a da mensagem: o worker reconhece a resposta direta por ela (agenda-equipe:resposta:…)
+  if new.dedupe_key is distinct from m.dedupe_key then
+    raise exception 'A fila da equipe só aceita a mensagem com a chave dela.' using errcode = '42501';
   end if;
   return new;
 end;
 $function$;
 
 comment on function public._agenda_fila_da_equipe() is
-  'Agenda de Produção (Fase 3, P4): gatilho de whatsapp_send_queue só para source agenda-equipe. INSERT: recusa (23514/42501) a linha sem a mensagem registrada em ligado, fora da janela da equipe em Brasília (a última tentativa incluída), no domingo ou acima do teto do dia por pessoa (proativas e respostas, cada uma com o seu). UPDATE com status pending: a nova tentativa que cairia fora da janela (ou com modo_equipe fora de ligado) vira failed.';
+  'Agenda de Produção (Fase 3, P4; revisão C1): gatilho de whatsapp_send_queue só para source agenda-equipe. INSERT: recusa (23514/42501) a linha sem a mensagem registrada em ligado, com chave diferente da dela, com alguma tentativa fora da janela da mensagem (_agenda_equipe_fora_da_janela: a da equipe; a resposta direta, a dela), no domingo ou acima do teto do dia por pessoa (proativas e respostas, cada uma com o seu, pela _agenda_equipe_no_dia); o 23514 leva o motivo no detail (janela, domingo, teto). UPDATE com status pending: a nova tentativa que cairia fora da janela da mensagem (ou com modo_equipe fora de ligado) vira failed.';
 
 drop trigger if exists trg_agenda_fila_da_equipe on public.whatsapp_send_queue;
 create trigger trg_agenda_fila_da_equipe before insert on public.whatsapp_send_queue
@@ -567,10 +688,18 @@ begin
     return jsonb_build_object('tipo', 'pergunta', 'turnos', null, 'terminou', null,
                               'dia', case when t ~ '\mamanha\M' then 'amanha' else 'hoje' end, 'ok', false);
   end if;
-  -- 2. não vou
+  -- 2. não vou (o dia inteiro). (Revisão da Fase 3, C1 — item 2) Com hora, atraso, turno ou "ficar" é outra coisa ("não
+  -- consigo chegar às 8, chego às 9", "vou atrasar", "não vou poder ficar a tarde", "não posso amanhã à tarde"): não
+  -- entendi — vai ao dono com o trecho e nada é remanejado. Com terminar/acabar é sobre o serviço (segue para o 4).
   if t ~ '\mnao (vou|posso|consigo|vai dar|da)\M' or t ~ '^(hoje|amanha) nao\M'
      or t ~ '\m(to|estou|tou|fiquei) (doente|ruim|mal)\M' or t ~ '\m(hospital|atestado)\M' then
-    return jsonb_build_object('tipo', 'nao_vou', 'turnos', null, 'terminou', null, 'dia', null, 'ok', false);
+    if t ~ '\m(cheg[a-z]*|atras[a-z]*|cedo|manha|tarde|ficar|fico|almoco|metade|meio (dia|periodo))\M'
+       or t ~ '\mas [0-9]' or t ~ '\m[0-9]+ ?(h|hs|hr|hrs|hora|horas)\M' then
+      return jsonb_build_object('tipo', 'nao_entendi', 'turnos', null, 'terminou', null, 'dia', null, 'ok', false);
+    end if;
+    if t !~ '\m(termin|acab|finaliz)[a-z]*\M' then
+      return jsonb_build_object('tipo', 'nao_vou', 'turnos', null, 'terminou', null, 'dia', null, 'ok', false);
+    end if;
   end if;
   -- 3. presença (conta como confirmação: nunca é silêncio)
   if t ~ '\m(cheguei|ja cheguei|to na|to no|tou na|tou no|ja to|ja tou|ja estou|estou aqui|to aqui|to chegando|chegando|a caminho)\M' then
@@ -582,7 +711,9 @@ begin
   v_tar := t ~ '\mso (a |de |pela )?tarde\M';
   v_dia := t ~ '\m(dia (todo|inteiro)|manha e tarde|o dia)\M';
   v_meio := not v_man and not v_tar and t ~ '\mmeio (dia|periodo)\M';
-  v_tnao := t ~ '\m(nao (terminei|terminou|terminamos|acabei|acabou|acabamos|finalizei|finalizou|deu (pra|para) terminar|ficou pronto|ficou pronta)|falta|faltou|faltam|amanha (termino|terminamos|continua|continuo|continuamos)|ainda nao)\M';
+  v_tnao := t ~ '\m(nao (terminei|terminou|terminamos|acabei|acabou|acabamos|finalizei|finalizou|deu (pra|para) terminar|ficou pronto|ficou pronta)|falta|faltou|faltam|amanha (termino|terminamos|continua|continuo|continuamos)|ainda nao)\M'
+            -- (C1) "não dá pra terminar hoje", "não vou conseguir terminar": o serviço não terminou
+            or t ~ '\mnao (da|vai dar|vou|consigo|vou conseguir)( (pra|para))? (terminar|acabar|finalizar)\M';
   v_tsim := t ~ '\m(terminei|terminou|terminamos|terminado|acabei|acabou|acabamos|finalizei|finalizou|finalizamos|ficou pronto|ficou pronta|ta pronto|esta pronto|tudo pronto|concluido|concluimos)\M';
   v_term := case when v_tnao then false when v_tsim then true end;
   v_ok := v_conc
@@ -607,7 +738,7 @@ end;
 $function$;
 
 comment on function public._agenda_ler_resposta_da_equipe(text) is
-  'Agenda de Produção (Fase 3, P4): a resposta do técnico pela gramática fixa (sem IA), na ordem: pergunta ("o que tem pra amanhã" → dia amanha/hoje) · nao_vou ("não vou", "hoje não", "tô doente") · presenca ("cheguei", "tô na…", "já tô") · turnos (dia todo/manhã e tarde → [manha, tarde]; só de manhã/até o meio dia → [manha]; só à tarde → [tarde]; não fui/faltei → []; meio dia → [meio]) com terminou (terminei/acabou/ficou pronto = true; não terminei/falta/ainda não = false) · ok (_e_concordancia, ou ok/beleza/certo no começo) · nao_entendi. Dois turnos ditos juntos = nao_entendi. {tipo, turnos, terminou, dia, ok}.';
+  'Agenda de Produção (Fase 3, P4; revisão C1): a resposta do técnico pela gramática fixa (sem IA), na ordem: pergunta ("o que tem pra amanhã" → dia amanha/hoje) · nao_vou ("não vou", "hoje não", "tô doente"; com hora, atraso, turno ou "ficar" — "chego às 9", "vou atrasar", "não posso à tarde" — é nao_entendi, e com terminar/acabar é sobre o serviço) · presenca ("cheguei", "tô na…", "já tô") · turnos (dia todo/manhã e tarde → [manha, tarde]; só de manhã/até o meio dia → [manha]; só à tarde → [tarde]; não fui/faltei → []; meio dia → [meio]) com terminou (terminei/acabou/ficou pronto = true; não terminei/falta/ainda não = false) · ok (_e_concordancia, ou ok/beleza/certo no começo) · nao_entendi. Dois turnos ditos juntos = nao_entendi. {tipo, turnos, terminou, dia, ok}.';
 
 -- Pergunta ao dono que nasce da equipe (não crítica), no modo da equipe.
 create or replace function public._agenda_equipe_perguntar(p_tipo text, p_chave text, p_payee uuid, p_os uuid, p_dia date,
@@ -675,6 +806,7 @@ declare
   v_estado text;
   v_msg    text;
   v_resp   text;
+  v_div    boolean;
 begin
   if v_trecho = '' or p_recebida_em is null then
     return jsonb_build_object('consumiu', false);
@@ -742,9 +874,12 @@ begin
   end if;
 
   -- ── não vou (à ficha ou à confirmação; sem nada pendente: hoje antes do meio-dia, senão o próximo dia útil) ─
-  if v_tipo = 'nao_vou' and (m.id is null or m.tipo in ('ficha', 'confirmar')) then
+  -- (Revisão C1, item 3) também ao "como foi hoje?": aí o dia é o da ficha que ele levava (senão o próximo dia útil), e o
+  -- "como foi" de hoje continua esperando a resposta de hoje (não vira a pergunta da diária de hoje)
+  if v_tipo = 'nao_vou' and (m.id is null or m.tipo in ('ficha', 'confirmar', 'como_foi')) then
     -- (antes do fim da manhã, hoje; depois, o próximo dia útil)
-    v_dia := coalesce(m.dia, case when v_hora < cf.manha_fim then v_hoje else public.agenda_somar_du(v_hoje, 1) end);
+    v_dia := case when m.tipo = 'como_foi' then coalesce(m.leva_ficha_de, public.agenda_somar_du(m.dia, 1))
+                  else coalesce(m.dia, case when v_hora < cf.manha_fim then v_hoje else public.agenda_somar_du(v_hoje, 1) end) end;
     v_os := array(select distinct a.service_order_id from public.agenda_alocacoes a
                    where a.payee_id = v_payee and a.dia = v_dia and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva'
                    order by 1);
@@ -784,7 +919,8 @@ begin
             left(format('O %s avisou que não vem %s.', v_nome, public._agenda_dia_da_equipe(v_dia, v_hoje))
                  || coalesce(' ' || nullif(v_rep ->> 'texto', ''), ''), 400))
     returning id into v_acao;
-    if m.id is not null then
+    -- (C1, item 3) o "como foi" de hoje não é respondido pelo "não vou" de amanhã: ele segue esperando a resposta de hoje
+    if m.id is not null and m.tipo <> 'como_foi' then
       update public.agenda_equipe_mensagens
          set estado = 'respondida', resposta_texto = v_trecho, resposta_em = p_recebida_em, resposta_wa_id = v_wa, leitura = v_l,
              acao_id = v_acao
@@ -794,7 +930,7 @@ begin
                                                               where p.id = public._agenda_dono(null)), 'o responsável'));
     v_r := public._agenda_equipe_registrar(v_payee, v_dia, 'resposta', v_resp, p_recebida_em, null,
                                            coalesce(v_wa, md5(v_trecho || p_recebida_em::text)));
-    return jsonb_build_object('consumiu', true, 'tipo', v_tipo, 'acao_id', v_acao,
+    return jsonb_build_object('consumiu', true, 'tipo', v_tipo, 'acao_id', v_acao, 'dia', v_dia,
                               'resposta', case when v_r ->> 'estado' = 'enfileirada' then v_resp end, 'envio', v_r ->> 'estado');
   end if;
 
@@ -805,7 +941,17 @@ begin
 
   -- ── à ficha ou à confirmação ────────────────────────────────────────────────────────────────────────
   if m.tipo in ('ficha', 'confirmar') then
-    if v_tipo in ('ok', 'presenca') or (v_tipo = 'turnos' and coalesce((v_l ->> 'ok')::boolean, false)) then
+    -- (Revisão C1, item 7) o "ok" com os turnos ditos diferentes do plano ("ok, só de manhã" com o dia todo no plano) não
+    -- confirma o dia: vai ao dono, como o não entendido (com o plano no texto)
+    v_plano := array(select distinct a.turno from public.agenda_alocacoes a
+                      where a.payee_id = v_payee and a.dia = m.dia and a.estado in ('publicada', 'fixada') and a.tipo <> 'reserva'
+                      order by 1);
+    v_ditos := case when jsonb_typeof(v_l -> 'turnos') = 'array'
+                    then array(select x from jsonb_array_elements_text(v_l -> 'turnos') x order by 1) end;
+    v_div := v_tipo = 'turnos' and v_ditos is not null
+             and not (v_ditos = v_plano or (v_ditos = array['meio'] and cardinality(v_plano) = 1));
+    if not v_div
+       and (v_tipo in ('ok', 'presenca') or (v_tipo = 'turnos' and coalesce((v_l ->> 'ok')::boolean, false))) then
       if not exists (select 1 from public.agenda_disponibilidade d
                       where d.payee_id = v_payee and d.substituida_em is null and d.situacao = 'confirmada'
                         and d.turno is null and d.periodo @> m.dia) then
@@ -817,8 +963,14 @@ begin
     else
       -- não entendi (ou turnos sem ok): vai ao dono com o trecho, e nada muda (nem remaneja: não é silêncio)
       perform public._agenda_equipe_perguntar('equipe_resposta', format('equipe_resposta:%s:%s:%s', v_payee, m.dia, m.tipo), v_payee,
-        null, m.dia, format('O %s respondeu "%s" à %s de %s.', v_nome, public._agenda_corta(v_trecho, 120),
-                            case m.tipo when 'ficha' then 'ficha' else 'confirmação' end, public._dia_curto(m.dia)),
+        null, m.dia, format('O %s respondeu "%s" à %s de %s', v_nome, public._agenda_corta(v_trecho, 120),
+                            case m.tipo when 'ficha' then 'ficha' else 'confirmação' end, public._dia_curto(m.dia))
+                     || case when v_div
+                             then ', e o plano é ' || case when v_plano = array['manha', 'tarde'] then 'o dia todo'
+                                                           when v_plano = array['manha'] then 'a manhã'
+                                                           when v_plano = array['tarde'] then 'a tarde'
+                                                           else 'sem nada para ele' end || '.'
+                             else '.' end,
         'ligado', p_recebida_em);
     end if;
     update public.agenda_equipe_mensagens
@@ -870,10 +1022,11 @@ begin
       perform public.log_app_error('db', 'agenda: anotar o dia pela resposta da equipe falhou: ' || v_msg, 'agenda',
                                    'equipe:dia', 'error', jsonb_build_object('payee', v_payee, 'dia', m.dia, 'sqlstate', v_estado));
     end;
-    -- o "ok" ao "como foi" que levava a ficha de amanhã confirma amanhã também
+    -- o "ok" ao "como foi" que levava a ficha de amanhã confirma amanhã também — (C1, item 3) salvo se ele já disse que
+    -- não vem amanhã (o "ok" depois do "amanhã não vou" é sobre hoje)
     if v_tipo = 'ok' and m.leva_ficha_de is not null
        and not exists (select 1 from public.agenda_disponibilidade d
-                        where d.payee_id = v_payee and d.substituida_em is null and d.situacao = 'confirmada'
+                        where d.payee_id = v_payee and d.substituida_em is null and d.situacao in ('confirmada', 'indisponivel')
                           and d.turno is null and d.periodo @> m.leva_ficha_de) then
       insert into public.agenda_disponibilidade (payee_id, periodo, situacao, origem, nota, trecho, criado_em)
       values (v_payee, daterange(m.leva_ficha_de, m.leva_ficha_de, '[]'), 'confirmada', 'diarista',
@@ -1688,12 +1841,16 @@ begin
     update public.agenda_equipe_mensagens m set estado = 'recusada', recusa_motivo = 'modo'
      where m.fila_id = any (v_modo) and m.estado = 'enfileirada';
   end if;
+  -- (C1) o que já devia ter saído e agora não sai mais (a regra única da janela, com a da resposta direta); o que está
+  -- marcado para depois (a resposta que vai no início da janela de amanhã) fica
   with x as (
     update public.whatsapp_send_queue q
        set status = 'failed', failed_reason = 'agenda-equipe: não saiu dentro da janela'
-     where q.source = 'agenda-equipe' and q.status = 'pending'
-       and ((q.scheduled_for at time zone 'America/Sao_Paulo')::date < v_local::date
-            or v_local::time >= cf.equipe_janela_fim or extract(isodow from v_local) = 7)
+     where q.source = 'agenda-equipe' and q.status = 'pending' and q.scheduled_for <= p_agora
+       and (not exists (select 1 from public.agenda_equipe_mensagens x0 where x0.id = q.source_ref_id)
+            or exists (select 1 from public.agenda_equipe_mensagens x0
+                        where x0.id = q.source_ref_id
+                          and public._agenda_equipe_fora_da_janela(x0.tipo, x0.enviar_em, p_agora) is not null))
     returning q.id)
   select coalesce(array_agg(x.id), '{}') into v_ids from x;
   update public.agenda_equipe_mensagens m set estado = 'recusada', recusa_motivo = 'janela'
@@ -3010,17 +3167,15 @@ begin
            where m.modo = 'ligado' and m.estado in ('enfileirada', 'respondida', 'sem_resposta')
            group by 1, 2, 3) t
    where t.n > case when t.resp then cf.equipe_respostas_dia_max else cf.equipe_proativas_dia_max end;
+  -- (revisão C1) pela regra única da janela (_agenda_equipe_fora_da_janela): a resposta direta tem a dela
   select count(*) into v_janela
     from public.whatsapp_send_queue q
+    left join public.agenda_equipe_mensagens x on x.id = q.source_ref_id
    where q.source = 'agenda-equipe'
-     and (extract(isodow from q.scheduled_for at time zone 'America/Sao_Paulo') = 7
-          or (q.scheduled_for at time zone 'America/Sao_Paulo')::time < cf.equipe_janela_inicio
-          or (q.scheduled_for at time zone 'America/Sao_Paulo')::time >= cf.equipe_janela_fim
+     and (x.id is null
+          or public._agenda_equipe_fora_da_janela(x.tipo, x.enviar_em, q.scheduled_for) is not null
           -- o que SAIU fora da janela (o worker atrasado): também conta
-          or (q.sent_at is not null
-              and (extract(isodow from q.sent_at at time zone 'America/Sao_Paulo') = 7
-                   or (q.sent_at at time zone 'America/Sao_Paulo')::time < cf.equipe_janela_inicio
-                   or (q.sent_at at time zone 'America/Sao_Paulo')::time >= cf.equipe_janela_fim)));
+          or (q.sent_at is not null and public._agenda_equipe_fora_da_janela(x.tipo, x.enviar_em, q.sent_at) is not null));
   v_eq := jsonb_build_object(
     'mensagens_hoje_por_tipo', coalesce((select jsonb_object_agg(t.tipo, t.n) from (
         select m.tipo, count(*) as n from public.agenda_equipe_mensagens m
@@ -3311,7 +3466,7 @@ revoke all on function
   public._agenda_dia_da_equipe(date, date), public._agenda_hora_curta(timestamptz),
   public._agenda_ler_resposta_da_equipe(text), public._agenda_confirmacao_do_dia(uuid, date),
   public._agenda_modo_da_equipe(), public._agenda_contatos_com_plano(date),
-  public.agenda_diaria_da_agenda(uuid, date)
+  public.agenda_diaria_da_agenda(uuid, date), public._agenda_equipe_fora_da_janela(text, timestamptz, timestamptz)
   from public, anon;
 grant execute on function
   public._agenda_payees_do_telefone(text, date), public._agenda_payee_do_telefone(text, date),
@@ -3319,7 +3474,7 @@ grant execute on function
   public._agenda_dia_da_equipe(date, date), public._agenda_hora_curta(timestamptz),
   public._agenda_ler_resposta_da_equipe(text), public._agenda_confirmacao_do_dia(uuid, date),
   public._agenda_modo_da_equipe(), public._agenda_contatos_com_plano(date),
-  public.agenda_diaria_da_agenda(uuid, date)
+  public.agenda_diaria_da_agenda(uuid, date), public._agenda_equipe_fora_da_janela(text, timestamptz, timestamptz)
   to authenticated, service_role;
 
 -- A palavra do dono: o painel (authenticated, com o administrador conferido dentro) e o WhatsApp (service_role).
@@ -3351,7 +3506,8 @@ revoke all on function
   public._agenda_rotina_como_foi(date, timestamptz), public._agenda_rotina_sem_resposta(date, timestamptz),
   public._agenda_rotina_acordes_da_equipe(date, timestamptz), public._agenda_rotina_diarias(date, timestamptz),
   public._agenda_rotina_resultado_pela_diaria(date, timestamptz), public._agenda_rotina_conclusao(date, timestamptz),
-  public._agenda_rotina_entrega(date, timestamptz)
+  public._agenda_rotina_entrega(date, timestamptz),
+  public._agenda_equipe_quando_responder(timestamptz), public._agenda_equipe_no_dia(uuid, date, boolean, uuid)
   from public, anon, authenticated, service_role;
 
 -- As recriadas mantêm as portas delas (create or replace não muda a ACL; repetidas aqui para a migration se bastar):

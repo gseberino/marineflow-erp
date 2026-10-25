@@ -92,6 +92,10 @@ alter table public.agenda_config
   add column if not exists equipe_proativas_dia_max smallint     not null default 2,
   add column if not exists equipe_respostas_dia_max smallint     not null default 4,
   add column if not exists equipe_resposta_validade interval     not null default '14 hours',
+  -- (revisão da Fase 3, C1 — NOVO-agenda-28) a resposta direta a uma mensagem que o técnico acabou de mandar
+  add column if not exists equipe_resposta_direta_inicio time     not null default '06:00',
+  add column if not exists equipe_resposta_direta_fim    time     not null default '22:00',
+  add column if not exists equipe_resposta_direta_prazo  interval not null default '10 minutes',
   add column if not exists diaria_janela_dias       smallint     not null default 7,
   add column if not exists entrega_aviso_du         smallint     not null default 5,
   add column if not exists carona_por_os_dias       smallint     not null default 7,
@@ -115,6 +119,9 @@ begin
       ('agenda_config_equipe_proativas_dia_max_check', 'check (equipe_proativas_dia_max between 1 and 3)'),
       ('agenda_config_equipe_respostas_dia_max_check', 'check (equipe_respostas_dia_max between 1 and 6)'),
       ('agenda_config_equipe_resposta_validade_check', 'check (equipe_resposta_validade between interval ''2 hours'' and interval ''24 hours'')'),
+      ('agenda_config_equipe_resposta_direta_inicio_check', 'check (equipe_resposta_direta_inicio between time ''05:00'' and equipe_janela_inicio)'),
+      ('agenda_config_equipe_resposta_direta_fim_check',    'check (equipe_resposta_direta_fim between equipe_janela_fim and time ''23:00'')'),
+      ('agenda_config_equipe_resposta_direta_prazo_check',  'check (equipe_resposta_direta_prazo between interval ''1 minute'' and interval ''30 minutes'')'),
       ('agenda_config_diaria_janela_dias_check',       'check (diaria_janela_dias between 1 and 14)'),
       ('agenda_config_entrega_aviso_du_check',         'check (entrega_aviso_du between 1 and 15)'),
       ('agenda_config_carona_por_os_dias_check',       'check (carona_por_os_dias between 1 and 14)'),
@@ -148,6 +155,9 @@ comment on column public.agenda_config.equipe_hora_como_foi is 'O "como foi hoje
 comment on column public.agenda_config.equipe_proativas_dia_max is 'Mensagens que o SISTEMA começa, por técnico e por dia.';
 comment on column public.agenda_config.equipe_respostas_dia_max is 'Respostas do sistema a perguntas do técnico, por dia.';
 comment on column public.agenda_config.equipe_resposta_validade is 'Até quanto tempo depois de mandada uma mensagem o "ok" do técnico responde a ela (decide a última mandada).';
+comment on column public.agenda_config.equipe_resposta_direta_inicio is 'A resposta direta a uma mensagem que o técnico acabou de mandar ("Tá bom, aviso o Gustavo.", a ficha do "o que tem pra amanhã") pode sair a partir desta hora, mesmo antes da janela da equipe (nunca no domingo). Fora disso ela vai para o início da janela. A janela vale para o que o sistema começa; esta é só para a resposta.';
+comment on column public.agenda_config.equipe_resposta_direta_fim is 'A resposta direta não sai desta hora em diante (vai para o início da janela do próximo dia que não é domingo).';
+comment on column public.agenda_config.equipe_resposta_direta_prazo is 'A resposta direta sai até este tempo depois da mensagem do técnico; fora da janela da equipe, a nova tentativa e o envio atrasado depois disso não saem (o banco e o worker conferem).';
 comment on column public.agenda_config.diaria_janela_dias is 'Até quantos dias corridos atrás a agenda lança a diária sozinha.';
 comment on column public.agenda_config.entrega_aviso_du is 'OS concluída sem entrega há estes dias úteis vira pergunta (não crítica) ao dono.';
 comment on column public.agenda_config.carona_por_os_dias is 'A pergunta que pega carona no turno da conversa: no máximo 1 por OS a cada estes dias.';

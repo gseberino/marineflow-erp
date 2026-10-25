@@ -73,7 +73,9 @@ select format('C2 agenda_config.%s existe (o DEFAULT é o único lugar do númer
   from unnest(array['modo_diaria', 'equipe_janela_inicio', 'equipe_janela_fim', 'equipe_hora_ficha', 'equipe_hora_confirmar',
                     'equipe_silencio_ate', 'equipe_hora_como_foi', 'equipe_proativas_dia_max', 'equipe_respostas_dia_max',
                     'equipe_resposta_validade', 'diaria_janela_dias', 'entrega_aviso_du', 'carona_por_os_dias',
-                    'carteira_laranja_du', 'carteira_vermelho_du', 'ppc_meta']) c;
+                    'carteira_laranja_du', 'carteira_vermelho_du', 'ppc_meta',
+                    -- (C1, NOVO-agenda-28) a janela da resposta direta
+                    'equipe_resposta_direta_inicio', 'equipe_resposta_direta_fim', 'equipe_resposta_direta_prazo']) c;
 
 insert into _resultado
 select 'C3 os modos da Fase 3: com a 101000 registrada, sombra (ou ligado com o OK dos passos 7–8); sem ela, desligado',

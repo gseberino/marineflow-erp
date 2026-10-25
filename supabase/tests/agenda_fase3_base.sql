@@ -3,10 +3,10 @@
 -- bancada: depende de 20261026100000
 --
 --   A  estrutura e portas: as 4 tabelas com RLS; policies só de leitura e TO authenticated; anon sem privilégio;
---      authenticated só lê; service_role escreve; os 16 DEFAULTs de agenda_config (modo_diaria nascendo 'sombra') e a
+--      authenticated só lê; service_role escreve; os 19 DEFAULTs de agenda_config (modo_diaria nascendo 'sombra') e a
 --      linha com modo_diaria 'desligado' enquanto a migration de dado não veio; comissao_config com o pagamento
 --      desligado; os gatilhos; critica gerada com 'diaria', no mesmo lugar e com as duas constraints; as colunas e as FKs
---   B  cada CHECK (e índice único, PK, FK) das 4 tabelas, os 16 de agenda_config, os 3 de agenda_vigia_rodadas, o da
+--   B  cada CHECK (e índice único, PK, FK) das 4 tabelas, os 19 de agenda_config, os 3 de agenda_vigia_rodadas, o da
 --      entrega e as 4 listas fechadas ampliadas recusam uma linha errada; os valores novos entram; a cobrança de que
 --      nenhum ficou sem caso
 --   C  a diária que diverge é crítica: critica por tipo; ação crítica de diária só com a pergunta respondida em ligado
@@ -335,6 +335,9 @@ select format('A5 agenda_config nasce com %s = %s', x.coluna, x.esperado),
                ('equipe_hora_como_foi', '''17:00:00''::time without time zone'),
                ('equipe_proativas_dia_max', '2'), ('equipe_respostas_dia_max', '4'),
                ('equipe_resposta_validade', '''14:00:00''::interval'),
+               ('equipe_resposta_direta_inicio', '''06:00:00''::time without time zone'),
+               ('equipe_resposta_direta_fim', '''22:00:00''::time without time zone'),
+               ('equipe_resposta_direta_prazo', '''00:10:00''::interval'),
                ('diaria_janela_dias', '7'), ('entrega_aviso_du', '5'), ('carona_por_os_dias', '7'),
                ('carteira_laranja_du', '5'), ('carteira_vermelho_du', '20'), ('ppc_meta', '0.70')) as x(coluna, esperado)
   left join pg_attribute a on a.attrelid = 'public.agenda_config'::regclass and a.attname = x.coluna and not a.attisdropped
@@ -343,11 +346,13 @@ select format('A5 agenda_config nasce com %s = %s', x.coluna, x.esperado),
 -- A linha ganha os parâmetros pelo DEFAULT e o modo da diária DESLIGADO (o DEFAULT 'sombra' vem depois do add column):
 -- a estrutura não muda comportamento. Depois da migration de dado (20261026101000) a linha é dela.
 insert into _resultado
-select 'A6 a linha de agenda_config ganhou os 15 parâmetros com o DEFAULT e modo_diaria desligado (até a migration de dado)',
+select 'A6 a linha de agenda_config ganhou os 18 parâmetros com o DEFAULT e modo_diaria desligado (até a migration de dado)',
        c.equipe_janela_inicio = time '07:30' and c.equipe_janela_fim = time '20:00' and c.equipe_hora_ficha = time '19:30'
        and c.equipe_hora_confirmar = time '07:45' and c.equipe_silencio_ate = time '09:00'
        and c.equipe_hora_como_foi = time '17:00' and c.equipe_proativas_dia_max = 2 and c.equipe_respostas_dia_max = 4
        and c.equipe_resposta_validade = interval '14 hours' and c.diaria_janela_dias = 7 and c.entrega_aviso_du = 5
+       and c.equipe_resposta_direta_inicio = time '06:00' and c.equipe_resposta_direta_fim = time '22:00'
+       and c.equipe_resposta_direta_prazo = interval '10 minutes'
        and c.carona_por_os_dias = 7 and c.carteira_laranja_du = 5 and c.carteira_vermelho_du = 20 and c.ppc_meta = 0.70
        and (c.modo_diaria = 'desligado'
             or exists (select 1 from supabase_migrations.schema_migrations s where s.version = '20261026101000')),
@@ -449,7 +454,7 @@ declare
   c_perg text := $q$insert into public.agenda_perguntas (tipo, chave, texto, modo, opcoes, recomendacao, estado, respondida_em, opcao_escolhida) values $q$;
   c_rod  text := $q$insert into public.agenda_vigia_rodadas (p_hoje, p_agora, modo_proposta, modo_vigia, rotina, modo_equipe, modo_diaria) values $q$;
   c_aloc text := $q$insert into public.agenda_alocacoes (service_order_id, payee_id, dia, turno, estado, resultado, resultado_via) values $q$;
-  -- os 16 CHECKs da Fase 3 em agenda_config e os 3 de agenda_vigia_rodadas (a cobrança abaixo e as das Fases 1 e 2)
+  -- os 19 CHECKs da Fase 3 em agenda_config e os 3 de agenda_vigia_rodadas (a cobrança abaixo e as das Fases 1 e 2)
   c_cfg  text[] := array['agenda_config_modo_diaria_check', 'agenda_config_equipe_janela_inicio_check',
     'agenda_config_equipe_janela_fim_check', 'agenda_config_equipe_hora_ficha_check', 'agenda_config_equipe_hora_confirmar_check',
     'agenda_config_equipe_hora_como_foi_check', 'agenda_config_equipe_silencio_ate_check',
@@ -457,11 +462,13 @@ declare
     'agenda_config_equipe_resposta_validade_check', 'agenda_config_diaria_janela_dias_check',
     'agenda_config_entrega_aviso_du_check', 'agenda_config_carona_por_os_dias_check', 'agenda_config_carteira_laranja_du_check',
     'agenda_config_carteira_vermelho_du_check', 'agenda_config_ppc_meta_check',
+    'agenda_config_equipe_resposta_direta_inicio_check', 'agenda_config_equipe_resposta_direta_fim_check',
+    'agenda_config_equipe_resposta_direta_prazo_check',
     'agenda_vigia_rodadas_rotina_check', 'agenda_vigia_rodadas_modo_equipe_check', 'agenda_vigia_rodadas_modo_diaria_check'];
 begin
   for r in
     select * from (values
-      -- agenda_config: os 16 parâmetros pelos limites
+      -- agenda_config: os 19 parâmetros pelos limites
       ('agenda_config_modo_diaria_check', 'modo talvez', $q$update public.agenda_config set modo_diaria = 'talvez'$q$),
       ('agenda_config_equipe_janela_inicio_check', 'janela às 05:30', $q$update public.agenda_config set equipe_janela_inicio = '05:30'$q$),
       ('agenda_config_equipe_janela_inicio_check', 'janela às 09:30', $q$update public.agenda_config set equipe_janela_inicio = '09:30', equipe_hora_confirmar = '09:45', equipe_silencio_ate = '10:30'$q$),
@@ -486,6 +493,14 @@ begin
       ('agenda_config_carteira_vermelho_du_check', 'vermelho em 61 du', $q$update public.agenda_config set carteira_vermelho_du = 61$q$),
       ('agenda_config_ppc_meta_check', 'meta 0,4', $q$update public.agenda_config set ppc_meta = 0.4$q$),
       ('agenda_config_ppc_meta_check', 'meta 0,96', $q$update public.agenda_config set ppc_meta = 0.96$q$),
+      -- (C1, NOVO-agenda-28) a resposta direta: nunca antes das 05:00 nem depois do começo da janela da equipe; nunca
+      -- antes do fim da janela nem depois das 23:00; o prazo de 1 a 30 min
+      ('agenda_config_equipe_resposta_direta_inicio_check', 'resposta direta às 04:30', $q$update public.agenda_config set equipe_resposta_direta_inicio = '04:30'$q$),
+      ('agenda_config_equipe_resposta_direta_inicio_check', 'resposta direta só depois da janela', $q$update public.agenda_config set equipe_resposta_direta_inicio = '08:00'$q$),
+      ('agenda_config_equipe_resposta_direta_fim_check', 'resposta direta até 19:00 (antes do fim da janela)', $q$update public.agenda_config set equipe_resposta_direta_fim = '19:00'$q$),
+      ('agenda_config_equipe_resposta_direta_fim_check', 'resposta direta até 23:30', $q$update public.agenda_config set equipe_resposta_direta_fim = '23:30'$q$),
+      ('agenda_config_equipe_resposta_direta_prazo_check', 'prazo de 0 s', $q$update public.agenda_config set equipe_resposta_direta_prazo = '0 seconds'$q$),
+      ('agenda_config_equipe_resposta_direta_prazo_check', 'prazo de 1 h', $q$update public.agenda_config set equipe_resposta_direta_prazo = '1 hour'$q$),
       ('aceitou', 'janela 06:00–21:00, ficha 20:59, silêncio 08:15, vermelho 6, meta 0,95, diária ligada',
        $q$update public.agenda_config set equipe_janela_inicio = '06:00', equipe_janela_fim = '21:00', equipe_hora_ficha = '20:59', equipe_silencio_ate = '08:15', carteira_vermelho_du = 6, ppc_meta = 0.95, modo_diaria = 'ligado'$q$),
       -- service_orders: a entrega só depois da saída (pela porta, para o gatilho deixar passar e o CHECK responder)
@@ -608,8 +623,8 @@ begin
   insert into _resultado values ('B todo CHECK da Fase 3 (novo ou ampliado) tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 
   insert into _resultado
-  select 'B os 19 CHECKs da Fase 3 em agenda_config e agenda_vigia_rodadas existem com o nome', count(*) = 19,
-         count(*)::text || ' de 19'
+  select 'B os 22 CHECKs da Fase 3 em agenda_config e agenda_vigia_rodadas existem com o nome', count(*) = 22,
+         count(*)::text || ' de 22'
     from pg_constraint c where c.conname = any (c_cfg) and c.contype = 'c' and c.connamespace = 'public'::regnamespace;
 end
 $b$;

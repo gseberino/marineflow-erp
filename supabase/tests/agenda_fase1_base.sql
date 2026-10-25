@@ -378,7 +378,7 @@ begin
        'agenda_config_atraso_longo_dias_check', 'agenda_config_remarcar_confirmado_du_check',
        'agenda_config_sem_registro_du_check', 'agenda_config_backlog_minimo_semanas_check',
        'agenda_config_perguntas_vezes_max_check', 'adiantavel_coerente']))
-     -- FASE 3: os 16 que a Fase 3 pôs em agenda_config (20261026100000) têm o caso deles em agenda_fase3_base.sql, que
+     -- FASE 3: os 19 que a Fase 3 pôs em agenda_config (20261026100000) têm o caso deles em agenda_fase3_base.sql, que
      -- cobra a lista; sem esta linha, este teste reprovaria por um CHECK que não é da Fase 1.
      and not (c.conname = any (array[
        'agenda_config_modo_diaria_check', 'agenda_config_equipe_janela_inicio_check', 'agenda_config_equipe_janela_fim_check',
@@ -387,7 +387,10 @@ begin
        'agenda_config_equipe_proativas_dia_max_check', 'agenda_config_equipe_respostas_dia_max_check',
        'agenda_config_equipe_resposta_validade_check', 'agenda_config_diaria_janela_dias_check',
        'agenda_config_entrega_aviso_du_check', 'agenda_config_carona_por_os_dias_check',
-       'agenda_config_carteira_laranja_du_check', 'agenda_config_carteira_vermelho_du_check', 'agenda_config_ppc_meta_check']));
+       'agenda_config_carteira_laranja_du_check', 'agenda_config_carteira_vermelho_du_check', 'agenda_config_ppc_meta_check',
+       -- (revisão da Fase 3, C1) a janela da resposta direta (NOVO-agenda-28)
+       'agenda_config_equipe_resposta_direta_inicio_check', 'agenda_config_equipe_resposta_direta_fim_check',
+       'agenda_config_equipe_resposta_direta_prazo_check']));
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;
