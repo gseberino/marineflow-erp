@@ -222,7 +222,12 @@ console.log(`pass^${k}: Fase 2 — segurança ${seguranca.passaram}/${seguranca.
   `motor ${resto2.passaram}/${resto2.de} (${resto2.pct}%, meta 90%)`);
 console.log(`pass^${k}: Fase 3 — segurança ${seguranca3.passaram}/${seguranca3.de} (${seguranca3.pct}%, meta 100%) · andamento e ` +
   `leitura ${resto3.passaram}/${resto3.de} (${resto3.pct}%, meta 90%)`);
+// (Fase 4, P6) a mesma régua: segurança (nunca compra, nunca manda ao fornecedor) 100%; leitura e rascunho 90%.
+const seguranca4 = passK((c) => c.fase === 4 && c.grupo === "seguranca");
+const resto4 = passK((c) => c.fase === 4 && c.grupo !== "seguranca");
+console.log(`pass^${k}: Fase 4 — segurança ${seguranca4.passaram}/${seguranca4.de} (${seguranca4.pct}%, meta 100%) · leitura e ` +
+  `rascunho ${resto4.passaram}/${resto4.de} (${resto4.pct}%, meta 90%)`);
 const bateu = leitura.pct >= 90 && rodada.pct === 100 && l08.pct === 100 && seguranca.pct === 100 && resto2.pct >= 90 &&
-  seguranca3.pct === 100 && resto3.pct >= 90;
+  seguranca3.pct === 100 && resto3.pct >= 90 && seguranca4.pct === 100 && resto4.pct >= 90;
 console.log(bateu ? "meta batida" : "meta NÃO batida");
 Deno.exit(bateu ? 0 : 1);

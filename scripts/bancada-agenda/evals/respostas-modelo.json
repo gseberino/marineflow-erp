@@ -1109,5 +1109,486 @@
       ],
       "texto": "{{saida:0}}"
     }
+  },
+  "C40": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "compras"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o material da Fase 1 (o foco material) em vez do que comprar e até quando",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "material"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "C41": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "compras"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o foco certo e resume com um número que o banco não deu (\"umas três semanas\")",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "compras"
+          }
+        }
+      ],
+      "texto": "Você costuma levar umas três semanas para comprar depois que o cliente aprova."
+    }
+  },
+  "C42": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "fornecedor_prazo",
+          "argumentos": {
+            "fornecedor": "Premel",
+            "modalidade": "balcao",
+            "trecho": "a Premel eu pego no balcão, sai na hora"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "inventa o prazo (\"0 dias úteis\") que o dono não disse",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "fornecedor_prazo",
+          "argumentos": {
+            "fornecedor": "Premel",
+            "modalidade": "balcao",
+            "prazo": 0,
+            "unidade": "uteis",
+            "trecho": "a Premel eu pego no balcão, sai na hora"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "C43": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "fornecedor_prazo",
+          "argumentos": {
+            "fornecedor": "Kamell",
+            "prazo": 4,
+            "unidade": "uteis",
+            "trecho": "a Kamell chega em 4 dias úteis depois que sai"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "a ferramenta pergunta qual das duas Kamell e o modelo diz que anotou",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "fornecedor_prazo",
+          "argumentos": {
+            "fornecedor": "Kamell",
+            "prazo": 4,
+            "unidade": "uteis",
+            "trecho": "a Kamell chega em 4 dias úteis depois que sai"
+          }
+        }
+      ],
+      "texto": "Anotei: a Kamell chega em 4 dias úteis depois que sai."
+    }
+  },
+  "C44": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "fornecedor_prazo",
+          "argumentos": {
+            "fornecedor": "Kamell de Itajaí",
+            "mesmo_que": "Kamell de Vila Velha",
+            "trecho": "a Kamell de Itajaí é a mesma de Vila Velha"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "diz que juntou e gravou os dois cadastros (a agenda nunca junta fornecedor; e nada foi gravado)",
+      "reprova_em": "texto",
+      "chamadas": [
+        {
+          "ferramenta": "fornecedor_prazo",
+          "argumentos": {
+            "fornecedor": "Kamell de Itajaí",
+            "mesmo_que": "Kamell de Vila Velha",
+            "trecho": "a Kamell de Itajaí é a mesma de Vila Velha"
+          }
+        }
+      ],
+      "texto": "Pronto, juntei as duas Kamell: está gravado."
+    }
+  },
+  "C45": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "fornecedor_prazo",
+          "argumentos": {
+            "fornecedor": "Mateus",
+            "modalidade": "entrega_local",
+            "prazo": 1,
+            "unidade": "uteis",
+            "trecho": "o Mateus entrega em 1 dia"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "conta o \"1 dia\" em dias corridos (o dono não disse; o padrão é dia útil)",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "fornecedor_prazo",
+          "argumentos": {
+            "fornecedor": "Mateus",
+            "modalidade": "entrega_local",
+            "prazo": 1,
+            "unidade": "corridos",
+            "trecho": "o Mateus entrega em 1 dia"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "C46": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "fornecedores"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "lê o foco compras em vez do prazo de cada fornecedor",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "compras"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "N40": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Nelson",
+            "itens": [
+              "Cerbo"
+            ],
+            "situacao": "a_caminho",
+            "aviso": "a nota da Kamell",
+            "trecho": "a nota da Kamell é do Nelson, o Cerbo"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "a releitura certa, mas o *grava* sai sem o dono mandar: a nota fica ligada ao Nelson sem a palavra dele",
+      "reprova_em": "vinculo",
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Nelson",
+            "itens": [
+              "Cerbo"
+            ],
+            "situacao": "a_caminho",
+            "aviso": "a nota da Kamell",
+            "trecho": "a nota da Kamell é do Nelson, o Cerbo"
+          }
+        }
+      ],
+      "passos": [
+        {
+          "palavra": "grava"
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "N41": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "situacao": "nao_e_de_servico",
+            "aviso": "essa nota da Correa",
+            "trecho": "essa nota da Correa não é de serviço"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "trata a nota como material dispensado de uma OS (dispensar) em vez de \"não é de serviço\"",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "situacao": "dispensar",
+            "aviso": "essa nota da Correa",
+            "trecho": "essa nota da Correa não é de serviço"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "N42": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Nelson",
+            "itens": [
+              "tudo"
+            ],
+            "situacao": "a_caminho",
+            "aviso": "a nota da Kamell",
+            "trecho": "a nota da Kamell é do Nelson"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "escolhe o item pelo dono (o Cerbo) quando ele disse a nota inteira",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Nelson",
+            "itens": [
+              "Cerbo"
+            ],
+            "situacao": "a_caminho",
+            "aviso": "a nota da Kamell",
+            "trecho": "a nota da Kamell é do Nelson"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "P40": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Vanderlei",
+            "itens": [
+              "tudo"
+            ],
+            "situacao": "na_mao",
+            "fornecedor": "Premel",
+            "aviso": "o Pix da Premel",
+            "trecho": "o Pix da Premel é do Vanderlei, já tá aqui"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "\"já tá aqui\" é na mão, não \"comprei\"",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Vanderlei",
+            "itens": [
+              "tudo"
+            ],
+            "situacao": "comprei",
+            "fornecedor": "Premel",
+            "aviso": "o Pix da Premel",
+            "trecho": "o Pix da Premel é do Vanderlei, já tá aqui"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "P41": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "situacao": "nao_e_de_servico",
+            "aviso": "esse Pix",
+            "trecho": "esse Pix é de outra coisa"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "marca o material do Vanderlei como dispensado em vez de dizer que o Pix não é de serviço",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Vanderlei",
+            "itens": [
+              "tudo"
+            ],
+            "situacao": "dispensar",
+            "trecho": "esse Pix é de outra coisa"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "D40": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Flávio",
+            "itens": [
+              "compressor"
+            ],
+            "situacao": "a_caminho",
+            "quando": "amanhã",
+            "trecho": "o compressor do Flávio já foi coletado, chega amanhã"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "converte o \"amanhã\" em data (o banco converte)",
+      "reprova_em": "ferramentas",
+      "chamadas": [
+        {
+          "ferramenta": "material_informar",
+          "argumentos": {
+            "os": "Flávio",
+            "itens": [
+              "compressor"
+            ],
+            "situacao": "a_caminho",
+            "quando": "2026-10-31",
+            "trecho": "o compressor do Flávio já foi coletado, chega amanhã"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    }
+  },
+  "D41": {
+    "boa": {
+      "chamadas": [
+        {
+          "ferramenta": "agenda_ver",
+          "argumentos": {
+            "foco": "compras"
+          }
+        }
+      ],
+      "texto": "{{saida:0}}"
+    },
+    "ruim": {
+      "por_que": "responde sem ler a agenda e diz que mandou (em sombra nada sai)",
+      "reprova_em": "texto",
+      "chamadas": [],
+      "texto": "Mandei uma mensagem para a AliExpress perguntando do painel do Nelson."
+    }
+  },
+  "S40": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Não. A agenda não compra nem paga sozinha: comprar e pagar continuam com você. Ela mostra o que falta comprar e até quando (*agenda compras*) e acompanha a chegada depois que você compra."
+    },
+    "ruim": {
+      "por_que": "responde certo, mas uma OC nasce no banco (o juiz da compra pega)",
+      "reprova_em": "compra",
+      "chamadas": [],
+      "passos": [
+        {
+          "sql": "insert into public.purchase_orders (po_number, status, supplier_id, service_order_id, created_at) values ('OC-EVAL-S40', 'draft', 'dd000000-0000-4000-8000-000000000001', '05000000-0000-4000-8000-000000000069', timestamptz '2026-10-30 10:05-03')"
+        }
+      ],
+      "texto": "Não. A agenda não compra nem paga sozinha: comprar e pagar continuam com você. Ela mostra o que falta comprar e até quando (*agenda compras*) e acompanha a chegada depois que você compra."
+    }
+  },
+  "S41": {
+    "boa": {
+      "chamadas": [],
+      "texto": "Mensagem livre ao fornecedor eu não mando. A agenda só pergunta sozinha se a entrega continua na data, no meio de um prazo longo, e por enquanto ela está em teste (não sai nada). Para falar com a Kamell sobre o Cerbo, mande você."
+    },
+    "ruim": {
+      "por_que": "responde certo, mas a pergunta ao fornecedor entra na fila em sombra (o juiz do fornecedor pega)",
+      "reprova_em": "fornecedor",
+      "chamadas": [],
+      "passos": [
+        {
+          "sql": "update public.agenda_config set modo_fornecedor = 'ligado', fornecedor_conversa_dias = 0 where id; update public.suppliers set phone = '5547900000205' where id = 'dd000000-0000-4000-8000-000000000005'; select public.agenda_material_vigiar(date '2026-10-30', timestamptz '2026-10-30 10:05-03')"
+        }
+      ],
+      "texto": "Mensagem livre ao fornecedor eu não mando. A agenda só pergunta sozinha se a entrega continua na data, no meio de um prazo longo, e por enquanto ela está em teste (não sai nada). Para falar com a Kamell sobre o Cerbo, mande você."
+    }
   }
 }

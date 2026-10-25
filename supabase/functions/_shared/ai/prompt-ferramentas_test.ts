@@ -109,6 +109,8 @@ NAO_SAO_TOOLS.add("na_mao");
 NAO_SAO_TOOLS.add("vou_comprar");
 // Agenda de Produção (25/10/2026, Fase 4, P1): argumento de fornecedor_prazo ("a Kamell de SC é a mesma do ES")
 NAO_SAO_TOOLS.add("mesmo_que");
+// Agenda de Produção (25/10/2026, Fase 4, P6): valor da situação de material_informar ("essa nota não é de serviço")
+NAO_SAO_TOOLS.add("nao_e_de_servico");
 
 /** A conversa dos comprovantes ligada (F2): as linhas dos CMPs só entram no prompt assim. */
 const CONVERSA_LIGADA = { comprovante_fluxo: "dono", comprovante_conversa: "on" };
@@ -277,6 +279,10 @@ function secaoDaAgenda(): string {
 
 // Fase 1: 7 linhas (o título + 6). Fase 2 (P6): no máximo 10 a mais (spec-fase2.md §12.2) — entraram 6. Teto 17.
 // Fase 3 (P6): no máximo 8 a mais sobre as 13 (spec-fase3.md §9.6) — entraram 5. Teto 21.
+// Fase 4: no máximo 5 a mais (spec-fase4.md §7.3) — entraram 3 (P1: o prazo do fornecedor; P6: a resposta à nota, ao Pix e à
+// mensagem do fornecedor, e os focos compras/fornecedores com a pergunta ao fornecedor que é só da agenda). Os outros 2
+// itens da spec viraram trechos de linhas que já existiam (a fronteira do *novo*, as palavras que o dono manda direto). O
+// teto continua 21: a seção fica em 21.
 Deno.test("agenda de produção: a seção é curta (≤ 21 linhas: custa tokens em toda mensagem) e fica no bloco estável", () => {
   const secao = secaoDaAgenda();
   const linhas = secao.split("\n");
@@ -314,10 +320,12 @@ Deno.test("agenda de produção: só agenda_ver dá data; nada é gravado sem *g
     assertEquals(porNome.has(t), true, `${t} não é ferramenta`);
   }
   // equipe_disponibilidade (quem VAI vir) × registrar_diaria (o dia que já aconteceu: a falta mexe no pagamento) e
-  // material_informar com novo (só avisa a agenda) × add_service_order_item (a peça que entra na OS e na compra).
+  // material_informar com novo × add_service_order_item (a peça que entra no orçamento). FASE 4 (P6): o *novo* entra na
+  // lista do que comprar, sem preço (P2: a linha do dono na compra e na R16) — a fronteira é o orçamento, não a compra.
   assertStringIncludes(secao, "equipe_disponibilidade é quem VAI vir");
   assertStringIncludes(secao, "(\"não veio hoje\", \"faltou ontem\") é registrar_diaria");
-  assertStringIncludes(secao, "material_informar com novo só avisa a agenda e não põe a peça na OS nem na compra");
+  assertStringIncludes(secao, "material_informar com novo põe a peça na lista do que comprar (sem preço), não no orçamento: para cobrar, add_service_order_item");
+  assertEquals(secao.includes("só avisa a agenda e não põe a peça na OS nem na compra"), false, "sobrou a fronteira antiga do novo");
 });
 
 Deno.test("agenda de produção: o que a seção ensina existe na ferramenta e no comando", () => {
@@ -453,4 +461,40 @@ Deno.test("agenda de produção (Fase 3, P6): a equipe sozinha, os focos ppc/dia
   }
   // 6. a carona: o modelo não a repete nem responde por ele
   assertStringIncludes(secao, "Se a sua resposta anterior terminou com \"Aproveitando: …\", foi a agenda que perguntou");
+});
+
+// Agenda de Produção (25/10/2026, Fase 4, P6): o material em sincronia com o fornecedor — a resposta do dono à pergunta da
+// nota, do Pix ou da mensagem do fornecedor (material_informar com aviso; "não é de serviço"), os focos compras e
+// fornecedores (cada um existe no enum), a pergunta ao fornecedor que é só da agenda (o modelo nunca manda, nunca compra
+// nem paga) e as palavras *agenda compras* e *agenda fornecedores* (o comando sem IA lê cada uma). Nenhuma ferramenta nova
+// à vista: o teto do perfil continua.
+Deno.test("agenda de produção (Fase 4, P6): o aviso da nota/Pix/mensagem, os focos compras e fornecedores, o fornecedor só pela agenda e as palavras", () => {
+  const secao = secaoDaAgenda();
+  // 1. a resposta à pergunta da agenda: material_informar com aviso; "não é de serviço" é a situação, com o aviso
+  assertStringIncludes(secao, "material_informar com aviso = como ele chamou a nota, o Pix ou a mensagem");
+  assertStringIncludes(secao, "\"essa nota não é de serviço\" é situacao nao_e_de_servico com o aviso, sem OS");
+  const material = porNome.get("material_informar")!.input_schema as {
+    properties: Record<string, { enum?: string[] }>;
+  };
+  assertEquals("aviso" in material.properties, true, "material_informar sem aviso");
+  assertEquals(material.properties.situacao.enum?.includes("nao_e_de_servico"), true, "nao_e_de_servico não é situação");
+  // 2. os focos novos existem no enum de agenda_ver, e a descrição da ferramenta cita os dois
+  const agendaVer = porNome.get("agenda_ver")!;
+  const focos = (agendaVer.input_schema as { properties: Record<string, { enum?: string[] }> }).properties.foco.enum ?? [];
+  for (const foco of ["compras", "fornecedores"]) {
+    assertStringIncludes(secao, `foco ${foco}`);
+    assertEquals(focos.includes(foco), true, `${foco} não é foco de agenda_ver`);
+    assertStringIncludes(agendaVer.description, `(foco ${foco}`);
+  }
+  // 3. a pergunta ao fornecedor é só da agenda; o modelo nunca manda, nunca compra nem paga
+  assertStringIncludes(secao, "A agenda pergunta sozinha ao fornecedor se a entrega continua na data");
+  assertStringIncludes(secao, "você nunca manda mensagem ao fornecedor por conta própria e nunca compra, paga nem cria OC ou cotação");
+  // 4. as palavras que o dono manda direto: o comando sem IA LÊ cada uma (e são de ver: não agem)
+  assertStringIncludes(secao, "*agenda compras* e *agenda fornecedores* o dono manda direto, sem você");
+  for (const [palavra, foco] of [["agenda compras", "compras"], ["agenda fornecedores", "fornecedores"]]) {
+    const c = lerComandoDaAgenda(palavra);
+    assertEquals(c?.comando === "ver" ? c.foco : null, foco, palavra);
+  }
+  // 5. a pergunta dos principais (P5, no banco) cita a palavra que existe
+  assertEquals(lerComandoDaAgenda("*agenda fornecedores*")?.comando, "ver");
 });

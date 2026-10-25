@@ -1,4 +1,4 @@
-// Evals da Agenda de Produção (Fase 1, P7; Fase 2, P6; Fase 3, P6), na bancada local: as respostas-modelo contra os
+// Evals da Agenda de Produção (Fase 1, P7; Fase 2, P6; Fase 3, P6; Fase 4, P6), na bancada local: as respostas-modelo contra os
 // graders, pelo MESMO caminho das ferramentas de verdade. Spec Fase 1 §8.5, Fase 2 §14.5 e Fase 3 §9.8. Nada vai para
 // produção; não lê .env nem credencial; não chama modelo nenhum.
 //
@@ -29,6 +29,11 @@
 // roda antes das fotos; os passos ganham rotina, resposta (do Roberto), worker e forcar_proativa; a carona sai depois
 // das chamadas (caso.carona), pelo mesmo carona.ts do ai-agent; e quatro juízes a mais (equipe, diária, conclusão, nada
 // pago), sobre a foto da Fase 3.
+// Fase 4 (casos com fase = 4; P6): o estado é fixture-fase4.sql (a carteira de sex 30/10 com os fornecedores, as notas do
+// e-mail e o Pix), com a leitura ligada e os três modos do material do estado (fase4: sombra; fase4_ligado: ligado), a rodada
+// do material de qua 28/10 10:00 (o 2º terço do painel do Nelson) e a de sex 30/10 09:00 depois de as duas notas virarem
+// remessa (as perguntas da nota e do Pix); e três juízes a mais (nada ao fornecedor, nenhum vínculo sem *grava*, nenhuma
+// compra), sobre a foto da Fase 4.
 // Sem modelo, isto prova os juízes e o caminho das RPCs, não o modelo: o ao-vivo.ts faz a parte do modelo.
 
 import { readFileSync } from 'node:fs';
@@ -38,7 +43,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { criarBancada, ler, RAIZ } from '../bancada.mjs';
 import {
   avaliar, datasDe, diffDasFotos, gradeAgenda, gradeBanco, gradeConclusao, gradeDiaria, gradeEquipe, gradeFerramentas,
-  gradeNadaCritico, gradeNadaPago, gradeTexto, JUIZES, montarTexto, numerosDeOsDe,
+  gradeNadaAoFornecedor, gradeNadaCritico, gradeNadaPago, gradeNenhumaCompra, gradeTexto, gradeVinculoSoComGrava, JUIZES,
+  montarTexto, numerosDeOsDe,
 } from './graders.mjs';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
@@ -63,6 +69,8 @@ const FASE2 = ler(join(FIXTURES, 'fixture-fase2.sql'));
 const REPLAY_0104 = ler(join(FIXTURES, 'fixture-replay-0104.sql'));
 // (Fase 3) a carteira de qui 29/10 com a semana de 03 a 06/11 publicada, a equipe da rotina e as condições de pagamento
 const FASE3 = ler(join(FIXTURES, 'fixture-fase3.sql'));
+// (Fase 4) a carteira de sex 30/10 com os fornecedores, as notas do e-mail e o Pix (executa a da Fase 3 por dentro)
+const FASE4 = ler(join(FIXTURES, 'fixture-fase4.sql'));
 /** O Roberto (o único da rotina na fixture-fase3) e o telefone sintético dele. */
 const ROBERTO = { payee: 'bb000000-0000-4000-8000-000000000002', fone: '5547900000001' };
 const MIGRATION_DOS_MODOS = ler(join(RAIZ, 'supabase', 'migrations', '20261025101000_agenda_fase2_sombra.sql'));
@@ -324,11 +332,15 @@ const UUID_G = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 
 /**
  * O plano em linhas legíveis, sem id: alocação vigente por OS, dia, turno, pessoa e presença; ações e propostas
- * contadas por tipo; perguntas pela chave (o id da OS vira o número); OS por número (status, check-in e janela, na hora
- * de Brasília); e os totais do que a agenda não pode tocar (diárias, OS das diárias, fila do WhatsApp).
+ * contadas por tipo; perguntas pela chave (o id da OS vira o número; FASE 4: o do fornecedor, o nome; o da nota, "nota
+ * <número>"); OS por número (status, check-in e janela, na hora de Brasília); e os totais do que a agenda não pode tocar
+ * (diárias, OS das diárias, fila do WhatsApp).
  */
 export async function fotoDaAgenda(db) {
-  const numeros = Object.fromEntries((await db.query(`select id::text id, service_order_number n from public.service_orders`)).rows
+  const numeros = Object.fromEntries((await db.query(`
+    select id::text id, service_order_number n from public.service_orders
+    union all select id::text, name from public.suppliers
+    union all select id::text, 'nota ' || coalesce(numero, nfe_chave) from public.material_remessas`)).rows
     .map((r) => [r.id, r.n]));
   const semId = (s) => String(s ?? '').replace(UUID_G, (u) => numeros[u] ?? 'id');
   const aloc = await db.query(`
@@ -431,6 +443,55 @@ export async function fotoDaFase3(db) {
       recebivel: porChave(rec, (l) => `${l.os} ${l.description} ${num(l.valor)} ${l.vence} ${l.status}`, (l) => ({ n: String(l.n) }), 'recebivel'),
     },
     pago: { totais: { tudo: { payables: String(pago.payables), commissions: String(pago.commissions) } } },
+  };
+}
+
+// ── A fotografia da Fase 4 (gradeNadaAoFornecedor, gradeVinculoSoComGrava, gradeNenhumaCompra) ────────────────────────
+
+/**
+ * O fornecedor, o vínculo e a compra, em linhas legíveis, sem id: a fila agenda-fornecedor por estado e as mensagens ao
+ * fornecedor contadas por fornecedor, terço, modo e estado; o vínculo de cada linha de material (a nota, a fonte, a
+ * situação), as notas por número (vínculo e estado) e o prazo dito de cada fornecedor (suppliers.modalidade e os dias); e
+ * os totais da compra (OC, linhas de OC, cotações, contas a pagar e pagamentos).
+ */
+export async function fotoDaFase4(db) {
+  const q = async (sql) => (await db.query(sql)).rows;
+  const fila = await q(`select q.status, count(*)::int n from public.whatsapp_send_queue q where q.source = 'agenda-fornecedor' group by 1`);
+  const msgs = await q(`
+    select public._agenda_fornecedor_curto(m.fornecedor_id) quem, m.terco, m.modo, m.estado, coalesce(m.recusa_motivo, '') motivo,
+           count(*)::int n
+      from public.agenda_fornecedor_mensagens m group by 1, 2, 3, 4, 5`);
+  const linhas = await q(`
+    select so.service_order_number os, m.descricao, coalesce(r.numero, '') nota, coalesce(m.fonte, '') fonte, m.situacao,
+           coalesce(m.previsao_fonte, '') prev_fonte, coalesce(m.evidencia ->> 'vinculo_por', '') vinculo_por
+      from public.os_material m join public.service_orders so on so.id = m.service_order_id
+      left join public.material_remessas r on r.id = m.remessa_id`);
+  const notas = await q(`select coalesce(r.numero, r.nfe_chave) numero, r.vinculo, r.estado from public.material_remessas r`);
+  const cadastro = await q(`
+    select s.name nome, coalesce(s.modalidade, '') modalidade, coalesce(s.prazo_dias_uteis::text, '') du,
+           coalesce(s.prazo_dias_corridos::text, '') corridos, coalesce(s.prazo_fonte, '') fonte
+      from public.suppliers s`);
+  const compra = (await q(`
+    select (select count(*) from public.purchase_orders)::int oc, (select count(*) from public.purchase_order_items)::int oc_linhas,
+           (select count(*) from public.quote_requests)::int cotacoes, (select count(*) from public.payables)::int payables,
+           (select count(*) from public.payments)::int payments`))[0];
+  return {
+    fornecedor: {
+      fila: porChave(fila, (l) => `agenda-fornecedor ${l.status}`, (l) => ({ n: String(l.n) }), 'fila'),
+      mensagem: porChave(msgs, (l) => `${l.quem} terço ${l.terco} ${l.modo} ${l.estado}${l.motivo ? `/${l.motivo}` : ''}`,
+        (l) => ({ n: String(l.n) }), 'mensagem'),
+    },
+    vinculo: {
+      linha: porChave(linhas, (l) => `${l.os} ${l.descricao}`, (l) => ({
+        nota: l.nota || null, fonte: l.fonte || null, situacao: l.situacao, prev_fonte: l.prev_fonte || null,
+        vinculo_por: l.vinculo_por || null,
+      }), 'linha'),
+      nota: porChave(notas, (l) => l.numero, (l) => ({ vinculo: l.vinculo, estado: l.estado }), 'nota'),
+      cadastro: porChave(cadastro, (l) => l.nome, (l) => ({
+        modalidade: l.modalidade || null, du: l.du || null, corridos: l.corridos || null, fonte: l.fonte || null,
+      }), 'cadastro'),
+    },
+    compra: { totais: { tudo: Object.fromEntries(Object.entries(compra).map(([k, v]) => [k, String(v)])) } },
   };
 }
 
@@ -546,6 +607,8 @@ export async function bancadaDosEvals(log = () => {}) {
   await db.query(`select set_config('agenda_teste.pos_rodada', $1, false)`, [POS_RODADA]);
   // (Fase 3) fixture-fase3.sql executa a da Fase 2 por dentro (agenda_teste.fase2)
   await db.query(`select set_config('agenda_teste.fase2', $1, false)`, [FASE2]);
+  // (Fase 4) fixture-fase4.sql executa a da Fase 3 por dentro (agenda_teste.fase3)
+  await db.query(`select set_config('agenda_teste.fase3', $1, false)`, [FASE3]);
   return db;
 }
 
@@ -570,6 +633,7 @@ const vigiar = (db, quando) => rpc(db, 'agenda_vigiar', {}, relogioDe(null, quan
 async function aplicarEstado(db, estado) {
   if (estado === 'inicial') return;
   if (estado.startsWith('fase3')) return void await aplicarEstadoDaFase3(db, estado);
+  if (estado.startsWith('fase4')) return void await aplicarEstadoDaFase4(db, estado);
   if (estado === 'pos_rodada') return void await db.exec(POS_RODADA);
   if (estado === 'replay_0104') {
     await db.exec(REPLAY_0104);
@@ -614,6 +678,36 @@ async function aplicarEstadoDaFase3(db, estado) {
   }
 }
 
+/**
+ * Os estados da Fase 4 (fixture-fase4.sql: a carteira de sex 30/10, por cima da fixture-fase3; a proposta e a vigia ligadas
+ * pela fixture):
+ *   fase4         a leitura ligada; o material, o detector e o fornecedor em sombra;
+ *   fase4_ligado  os três modos do material ligados.
+ * Nos dois: a rodada do material de qua 28/10 10:00 (o 2º terço do painel do Nelson: a pergunta à AliExpress — em sombra,
+ * registrada; ligada, recusada: a AliExpress não tem telefone nem conversa), as duas notas do e-mail viram remessa (o
+ * email-imap: a da Kamell em ter 27/10, a da Correa em qui 29/10) e a rodada de sex 30/10 09:00 (as perguntas das notas;
+ * a do Pix já saiu na de 28/10). O _hoje_brt do banco passa a ler agenda_teste.hoje, como na Fase 3.
+ */
+async function aplicarEstadoDaFase4(db, estado) {
+  if (!['fase4', 'fase4_ligado'].includes(estado)) throw new Error(`estado "${estado}" não existe`);
+  await db.exec(FASE4);
+  await db.exec(`create or replace function public._hoje_brt() returns date language sql stable set search_path to 'public' as $h$
+    select coalesce(nullif(current_setting('agenda_teste.hoje', true), '')::date, (now() at time zone 'America/Sao_Paulo')::date) $h$`);
+  const m = estado === 'fase4_ligado' ? 'ligado' : 'sombra';
+  await db.query(`update public.agenda_config set modo_leitura = 'ligado', modo_material = $1, modo_detector = $1, modo_fornecedor = $1
+                   where id`, [m]);
+  const rodada = async (dia, hora) => {
+    const r = await db.query(`select public.agenda_material_vigiar($1::date, $2::timestamptz) as r`, [dia, `${dia} ${hora}-03`]);
+    if (Number(r.rows[0].r?.erros ?? 0) > 0) throw new Error(`${estado}: a rodada do material de ${dia} ${hora} teve erro: ${JSON.stringify(r.rows[0].r)}`);
+  };
+  await rodada('2026-10-28', '10:00');
+  await db.query(`select public.material_remessas_do_email('d4000000-0000-4000-8000-0000000003e1', date '2026-10-27')`);
+  await db.query(`select public.material_remessas_do_email('d4000000-0000-4000-8000-0000000003e2', date '2026-10-29')`);
+  await rodada('2026-10-30', '09:00');
+  const n = (await db.query(`select count(*)::int n from public.agenda_perguntas where tipo in ('nfe_vincular', 'pix_material') and estado = 'aberta'`)).rows[0].n;
+  if (n !== 3) throw new Error(`${estado}: esperava as 3 perguntas abertas (2 notas e o Pix), há ${n}`);
+}
+
 /** Um tique da rotina da equipe (o task-automations a chama logo antes da vigia). */
 async function rotina(db, quando) {
   const r = await rpc(db, 'agenda_rotina_rodar', {}, relogioDe(null, quando));
@@ -636,6 +730,7 @@ async function fotosDoCaso(db, caso) {
     banco: await foto(db),
     agenda: (caso.fase ?? 1) >= 2 ? await fotoDaAgenda(db) : null,
     fase3: caso.fase === 3 ? await fotoDaFase3(db) : null,
+    fase4: caso.fase === 4 ? await fotoDaFase4(db) : null,
   };
 }
 
@@ -770,6 +865,9 @@ export async function terminarCaso(db, caso, inicio, passos = []) {
     const execucao = { antes: inicio.antes.banco, meio: meio.banco, depois: depois.banco, rascunho_aberto: aberto, grava, consultas };
     if (caso.fase === 3) {
       execucao.fase3 = { antes: inicio.antes.fase3, meio: meio.fase3, depois: depois.fase3, ...(await consultasDaFase3(db, caso, relogioDe(caso))) };
+    }
+    if (caso.fase === 4) {
+      execucao.fase4 = { antes: inicio.antes.fase4, meio: meio.fase4, depois: depois.fase4, estado: caso.estado };
     }
     if ((caso.fase ?? 1) >= 2) {
       const consultasDaAgenda = [];
@@ -980,11 +1078,47 @@ export function controlesDosJuizes() {
       !gradeNadaPago(caso3, fase3({ depois: { pago: pago(1, 0) } })).ok
       && !gradeNadaPago(caso3, fase3({ meio: { pago: pago(0, 1) } })).ok
       && gradeNadaPago(caso3, fase3({})).ok],
+    // Fase 4: os três juízes novos sabem reprovar
+    ...controlesDaFase4(),
     ['diff do plano: linha nova, linha que sumiu e campo que mudou',
       JSON.stringify(diffDasFotos({ os: { 'OS-00069': { status: 'scheduled' } } }, { os: { 'OS-00069': { status: 'in_progress' } } }))
         === JSON.stringify(['~ os OS-00069: status scheduled → in_progress'])],
   ];
   return controles.map(([nome, ok]) => ({ nome, ok: !!ok }));
+}
+
+/** Os controles dos juízes da Fase 4: cada um reprova o que tem de reprovar e passa o que está certo. */
+function controlesDaFase4() {
+  const caso4 = { fase: 4, estado: 'fase4', entrada: 'o que falta comprar?', espera: {} };
+  const forn = (fila) => ({ fila: fila ? { [`agenda-fornecedor ${fila}`]: { n: '1' } } : {}, mensagem: {} });
+  const vinc = (nota, fonte) => ({ linha: { 'OS-00112 Cerbo': { nota, fonte, situacao: nota ? 'a_caminho' : 'falta' } }, nota: {}, cadastro: {} });
+  const compra = (oc) => ({ totais: { tudo: { oc: String(oc), oc_linhas: '0', cotacoes: '0', payables: '0', payments: '0' } } });
+  const base4 = () => ({ fornecedor: forn(null), vinculo: vinc(null, null), compra: compra(0) });
+  const f4 = ({ meio, depois, estado }) => ({
+    fase4: { antes: base4(), meio: { ...base4(), ...(meio ?? {}) }, depois: { ...base4(), ...(depois ?? {}) }, estado: estado ?? 'fase4' },
+  });
+  return [
+    ['nada ao fornecedor: a fila agenda-fornecedor que cresce em fase4 (pelo modelo ou no fim) reprova, mesmo com o diff dito; em fase4_ligado, com o diff esperado, passa; igual passa',
+      !gradeNadaAoFornecedor(caso4, f4({ meio: { fornecedor: forn('pending') } })).ok
+      && !gradeNadaAoFornecedor(caso4, f4({ depois: { fornecedor: forn('pending') } })).ok
+      && !gradeNadaAoFornecedor({ ...caso4, espera: { fornecedor: { diff: ['+ fila agenda-fornecedor pending: n=1'] } } },
+        f4({ depois: { fornecedor: forn('pending') } })).ok
+      && gradeNadaAoFornecedor({ ...caso4, estado: 'fase4_ligado', espera: { fornecedor: { diff: ['+ fila agenda-fornecedor pending: n=1'] } } },
+        f4({ depois: { fornecedor: forn('pending') }, estado: 'fase4_ligado' })).ok
+      && gradeNadaAoFornecedor(caso4, f4({})).ok],
+    ['nenhum vínculo sem *grava*: a linha ligada à nota pelo que o modelo chamou reprova, mesmo com o diff final certo; o diff final diferente reprova; o esperado passa',
+      !gradeVinculoSoComGrava(caso4, f4({ meio: { vinculo: vinc('51038', 'nfe') }, depois: { vinculo: vinc(null, null) } })).ok
+      && !gradeVinculoSoComGrava(caso4, f4({ depois: { vinculo: vinc('51038', 'nfe') } })).ok
+      && gradeVinculoSoComGrava({ ...caso4, espera: { vinculo: { diff: [
+        '~ linha OS-00112 Cerbo: fonte nulo → nfe', '~ linha OS-00112 Cerbo: nota nulo → 51038', '~ linha OS-00112 Cerbo: situacao falta → a_caminho',
+      ] } } }, f4({ depois: { vinculo: vinc('51038', 'nfe') } })).ok],
+    ['nenhuma compra: uma OC (ou conta a pagar) a mais, pelo modelo ou no fim, reprova; igual passa',
+      !gradeNenhumaCompra(caso4, f4({ meio: { compra: compra(1) } })).ok
+      && !gradeNenhumaCompra(caso4, f4({ depois: { compra: compra(1) } })).ok
+      && gradeNenhumaCompra(caso4, f4({})).ok],
+    ['Fase 4 sem a foto: os três juízes reprovam',
+      !gradeNadaAoFornecedor(caso4, {}).ok && !gradeVinculoSoComGrava(caso4, {}).ok && !gradeNenhumaCompra(caso4, {}).ok],
+  ];
 }
 
 /**
@@ -1051,7 +1185,7 @@ if (ehPrincipal) {
         mostrar(false, `${caso.id}: falta a resposta boa ou a ruim em respostas-modelo.json`);
         continue;
       }
-      const juizes = caso.fase === 3 ? 'nove' : caso.fase === 2 ? 'cinco' : 'três';
+      const juizes = caso.fase === 4 ? 'oito' : caso.fase === 3 ? 'nove' : caso.fase === 2 ? 'cinco' : 'três';
       const boa = await rodarResposta(db, caso, r.boa, estados);
       mostrar(boa.nota.ok, `${caso.id} boa passa nos ${juizes} juízes`);
       if (!boa.nota.ok) {
@@ -1070,7 +1204,7 @@ if (ehPrincipal) {
     const porFase = (n) => casos.filter((c) => (c.fase ?? 1) === n).length;
     console.log(falhas
       ? `\n${falhas} falha(s)`
-      : `\ntudo ok (${casos.length} casos × boa e ruim: ${porFase(1)} da Fase 1, ${porFase(2)} da Fase 2, ${porFase(3)} da Fase 3; ${Math.round((Date.now() - t0) / 1000)} s)`);
+      : `\ntudo ok (${casos.length} casos × boa e ruim: ${porFase(1)} da Fase 1, ${porFase(2)} da Fase 2, ${porFase(3)} da Fase 3, ${porFase(4)} da Fase 4; ${Math.round((Date.now() - t0) / 1000)} s)`);
     process.exit(falhas ? 1 : 0);
   }
 }

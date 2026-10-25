@@ -67,11 +67,13 @@ export const UNIDADES_DO_PRAZO = ["uteis", "corridos"] as const;
 /**
  * Os focos de agenda_ver. (Fase 3, P6) Mais ppc (a semana medida), diarias (as que a agenda lançou e as perguntas),
  * marcos (com a OS: entrada, início, conclusão e entrega), comissao (o resumo do mês dito em periodo; só a conta, nada é
- * pago) e equipe (o que a equipe respondeu hoje e no próximo dia útil).
+ * pago) e equipe (o que a equipe respondeu hoje e no próximo dia útil). (Fase 4, P6) Mais compras (o que comprar e até
+ * quando, as notas sem serviço dito, o tempo até comprar e a pergunta ao fornecedor; com a OS, a espera de peça dela) e
+ * fornecedores (como a agenda conta o prazo de cada fornecedor). A agenda_ver do banco (20261027100600) aceita os 17.
  */
 export const FOCOS = [
   "tudo", "livre", "o_que_fazer", "riscos", "material", "atrasos", "aprontar", "decisoes", "mudancas", "plano",
-  "ppc", "diarias", "marcos", "comissao", "equipe",
+  "ppc", "diarias", "marcos", "comissao", "equipe", "compras", "fornecedores",
 ] as const;
 /**
  * As situações de material_informar. (Fase 4, P3) Mais nao_e_de_servico: a nota, o Pix ou a mensagem que a agenda perguntou

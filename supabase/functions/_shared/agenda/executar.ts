@@ -31,6 +31,10 @@
 // pergunta da diária aberta ou corrige/apaga a que a agenda lançou. Só com agenda_config.modo_diaria fora de 'desligado'
 // (modoDaDiariaNoBanco, lido num SELECT à parte: a coluna é da Fase 3 e a falta dela não pode calar as palavras da Fase 2).
 // Sem nada da agenda (nao_achei) o turno segue ao modelo e ao registrar_diaria de sempre.
+//
+// Fase 4 (P6, 25/10/2026; spec-fase4.md §7.2): *agenda compras* e *agenda fornecedores* são agenda_ver (foco compras e foco
+// fornecedores), pelo mesmo caminho das de ver da Fase 1 (só com modo_leitura fora de 'desligado'; o banco diz "em teste"
+// do que é da sombra do material). Nenhuma delas age; nada novo aqui além do foco que o mapeamento já aceita (FOCOS).
 
 import { logEdgeError } from "../log-error.ts";
 import { lerModoDaProposta, type ModoDaProposta, modoDaPropostaNoBanco } from "../agenda-modo.ts";

@@ -631,3 +631,11 @@ Deno.test("Fase 3 (P6) — chamadaDoComando: ppc, equipe e comissão vão à age
   assertEquals(ver("*comissão outubro*"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: "outubro", p_foco: "comissao" } });
   assertEquals(ver("comissão do mês passado"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: "mes passado", p_foco: "comissao" } });
 });
+
+Deno.test("Fase 4 (P6) — chamadaDoComando: *agenda compras* e *agenda fornecedores* vão à agenda_ver, foco compras e fornecedores", () => {
+  const ver = (t: string) => chamadaDoComando(lerComandoDaAgenda(t)!, AUTOR);
+  const base = { p_autor: AUTOR, p_os: null, p_simular: null, p_simular_aprovacao: false, p_pessoa: null };
+  assertEquals(ver("agenda compras"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "compras" } });
+  assertEquals(ver("Agenda compras?"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "compras" } });
+  assertEquals(ver("*agenda fornecedores*"), { rpc: RPC_AGENDA_VER, params: { ...base, p_periodo: null, p_foco: "fornecedores" } });
+});

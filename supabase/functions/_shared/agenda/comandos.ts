@@ -53,6 +53,15 @@
 //   vai como o dono disse (outubro), o banco resolve (_agenda_mes_dito). É a palavra que a linha do fechamento do 1º dia
 //   útil do mês cita (*comissão outubro*).
 //
+// Fase 4 (P6, 25/10/2026; spec-fase4.md §7.2) — o material, pela agenda_ver (com a leitura fora de 'desligado', como as da
+// Fase 1; o banco diz "em teste" do que é da sombra):
+//   agenda compras                                          → foco compras (o que comprar e até quando, as notas sem serviço
+//                                                             dito, o tempo até comprar e a pergunta ao fornecedor)
+//   agenda fornecedores                                     → foco fornecedores (como a agenda conta o prazo de cada
+//                                                             fornecedor; é a palavra que a pergunta dos principais cita)
+//   As duas são de VER (valem com "?"); nenhuma age. "compras" sozinho, "o que falta comprar" e "agenda do fornecedor" são
+//   conversa (vão ao modelo, que chama agenda_ver foco compras).
+//
 // Só a frase inteira vale (normalizada pelo MESMO normalizarComando do secretário: sem acento, sem negrito, sem
 // pontuação no fim, sem o 🎤 do áudio). Qualquer palavra a mais é conversa e vai ao modelo como sempre.
 // (Revisão da Fase 3, C1) A palavra que AGE (concluiu, entreguei, diária, desfaz, dia feito/não/parcial, choveu) dita com
@@ -75,7 +84,9 @@ export type PeriodoDoComando = "semana" | "hoje" | "amanha" | "proxima_semana";
 export type FocoDoComando =
   | "tudo" | "livre" | "atrasos" | "o_que_fazer" | "mudancas" | "decisoes" | "plano"
   // (Fase 3, P6) a semana medida, o que a equipe respondeu e a comissão do mês
-  | "ppc" | "equipe" | "comissao";
+  | "ppc" | "equipe" | "comissao"
+  // (Fase 4, P6) o que comprar e até quando; como a agenda conta o prazo de cada fornecedor
+  | "compras" | "fornecedores";
 export type ResultadoDoDia = "cumprido" | "parcial" | "nao_cumprido";
 
 export type ComandoDaAgenda =
@@ -147,6 +158,9 @@ frases(["agenda plano", "plano da semana"], ver(null, "plano"));
 frases(["agenda ppc", "como foi a semana"], ver(null, "ppc"));
 frases(["agenda equipe"], ver(null, "equipe"));
 frases(["comissao", "comissao do mes"], ver(null, "comissao"));
+// Fase 4 (P6): o material e o prazo dos fornecedores
+frases(["agenda compras"], ver(null, "compras"));
+frases(["agenda fornecedores"], ver(null, "fornecedores"));
 
 /** A maior frase da tabela: texto maior do que isto nunca é comando da tabela (custo zero na conversa comum). */
 const MAIOR = Math.max(...[...FRASES.keys()].map((f) => f.length));

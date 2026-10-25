@@ -13,7 +13,10 @@
     "Ajustes à spec §14.5 pelo que o banco faz (os textos são os que os testes SQL das Fases P2–P5 fixaram): S01 é 'pode atrasar o Nelson' (a decisão da fixture é do Nelson: 1 atrasa até ter 17/11, 2 fica fora do plano); S06 é 'desfaz semana' 25 h depois (na fixture, a publicação da semana é a única mudança feita sozinha); A05 diz em que OS o João faltou (ele estava no Lenine, não no Vanderlei: 'Pelo plano, João não estava no Vanderlei'), na qua 04/11; L11–L14 são os L01–L04 da spec (L01..L08 já são da Fase 1) e L15 é a simulação que dá certo; M01 (estabilidade e congelamento) e M02 (o replay da OS-00104) são os do motor; o resto do motor (invariantes, Finados, carga, presença do dono, interrupção) é conferido no fim de TODO caso da Fase 2.",
     "FASE 3 (spec-fase3.md §9.8; casos com fase = 3): estados fase3 (fixture-fase3.sql — a semana de 03 a 06/11 publicada pela vigia de qui 29/10, o Roberto na rotina, as condições de pagamento — com a leitura, a equipe e a diária ligadas), fase3_diaria (+ o \"como foi hoje?\" de ter 03/11 às 17:00 e o Roberto respondendo \"fiquei só de manhã\" às 17:12: a pergunta crítica da diária aberta) e fase3_sombra (a equipe e a diária em sombra). preparo = passos antes das fotos (o que aconteceu antes da conversa). Passos novos: rotina (o tique da rotina da equipe), resposta + agora (o Roberto responde pelo WhatsApp; a saída é a resposta da agenda a ele), worker (o whatsapp-queue-worker mandou a fila da equipe até essa hora), forcar_proativa (uma mensagem que o sistema começaria fora da rotina: a régua de envio decide). carona = a carona do ai-agent depois das chamadas (segunda = a mesma conversa mais tarde, que não pode ter carona).",
     "espera.equipe | diaria | conclusao (gradeEquipe, gradeDiaria, gradeConclusao): o que o modelo chamou não muda nada; diff = EXATAMENTE as linhas que mudaram: 'mensagem pessoa tipo dd/mm modo estado[/motivo]' (contadas), 'fila agenda-equipe status' (contadas), 'disponibilidade pessoa período turno situação origem' (contadas), 'turno pessoa dd/mm' (fração, valor, status, origem, OS), 'acao pessoa dd/mm origem executada|sombra [critica] [desfeita]' (as ações diaria, contadas), 'pergunta tipo pessoa dd/mm modo' (diaria e diaria_ligar), 'os numero' (status, saída, entrega), 'recebivel os descrição valor vence status' (contados). gradeDiaria confere também agenda_saude().diarias (sem_confirmacao = sobrescreveu_turno = 0); gradeNadaPago, payables e commissions iguais do começo ao fim. Os cinco juízes da Fase 2 também valem.",
-    "Ajustes à spec §9.8 pelo que o banco faz: as datas são as da fixture-fase3 (S20 e S21 na sexta 30/10 e na terça 03/11, depois de Finados; S22 no domingo 08/11 e na terça 20:10; A21 e A22 na quinta 05/11, com a ficha de qua 04/11 às 19:30 (a falta na quarta, no meio do Vanderlei, deixa o replano com duas interrupções: NOVO-agenda-27)); A24 é o *dia feito* de ter 03/11 (o João está no Flávio, à tarde); A26 e A27 são do Lenine em ter 10/11, o último dia dele (sem o sinal, as duas parcelas nascem na conclusão); L22 pega a crítica do Nelson (\"não cabe\"), que vem antes do \"chegou?\" na carona."
+    "Ajustes à spec §9.8 pelo que o banco faz: as datas são as da fixture-fase3 (S20 e S21 na sexta 30/10 e na terça 03/11, depois de Finados; S22 no domingo 08/11 e na terça 20:10; A21 e A22 na quinta 05/11, com a ficha de qua 04/11 às 19:30 (a falta na quarta, no meio do Vanderlei, deixa o replano com duas interrupções: NOVO-agenda-27)); A24 é o *dia feito* de ter 03/11 (o João está no Flávio, à tarde); A26 e A27 são do Lenine em ter 10/11, o último dia dele (sem o sinal, as duas parcelas nascem na conclusão); L22 pega a crítica do Nelson (\"não cabe\"), que vem antes do \"chegou?\" na carona.",
+    "FASE 4 (spec-fase4.md §8.5; casos com fase = 4): estados fase4 (fixture-fase4.sql — a carteira de sex 30/10 com os fornecedores, as duas notas do e-mail e o Pix à Premel — com a leitura ligada e o material, o detector e o fornecedor em sombra; a rodada do material de qua 28/10 10:00 e a de sex 30/10 09:00 depois de as notas virarem remessa) e fase4_ligado (os três modos ligados: as perguntas da nota e do Pix valem para o dono). agora = sex 30/10 10:00.",
+    "espera.fornecedor | vinculo (gradeNadaAoFornecedor, gradeVinculoSoComGrava; gradeNenhumaCompra não tem espera): o que o modelo chamou não muda nada; diff = EXATAMENTE as linhas que mudaram (sem ele, nenhuma): 'fila agenda-fornecedor status' e 'mensagem fornecedor terço n modo estado[/motivo]' (contadas); 'linha os descrição' (nota, fonte, situação, prev_fonte, vinculo_por), 'nota número' (vínculo, estado), 'cadastro nome' (modalidade, du, corridos, fonte). Em fase4 (sombra) a fila agenda-fornecedor fica vazia no fim. A compra: OC, linhas de OC, cotações, contas a pagar e pagamentos iguais do começo ao fim. Os cinco juízes da Fase 2 também valem.",
+    "Ajustes à spec §8.5 pelo que o banco faz: N42 (\"a nota da Kamell é do Nelson\", itens tudo) lista o KIT, o Cerbo e o Orion — as linhas do fornecedor da nota OU sem fornecedor (§5.3 e §6.5; o P3 fez assim) — e nunca o painel da AliExpress (a §8.5 dizia só o Cerbo: decidido pela §5.3); C44 recusa com \"Me diga também como a Kamell entrega.\" (a de Vila Velha ainda não tem o prazo dito); C45 lê \"Mateus\" (o nome curto do cadastro \"Mateus Honório\"); D40 é sáb 31/10 (\"amanhã\" de sex 30/10); S40 e S41 têm na ruim o que só os juízes novos pegam (uma OC no banco; a pergunta ao fornecedor na fila em sombra)."
   ],
   "hoje": "2026-10-23",
   "autor": "aa000000-0000-4000-8000-000000000001",
@@ -1806,6 +1809,581 @@
         "agenda": {
           "diff": []
         }
+      }
+    },
+    {
+      "id": "C40",
+      "fase": 4,
+      "grupo": "leitura",
+      "entrada": "o que falta comprar?",
+      "estado": "fase4",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "compras"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Compre até"
+        ]
+      }
+    },
+    {
+      "id": "C41",
+      "fase": 4,
+      "grupo": "leitura",
+      "entrada": "quanto tempo eu levo pra comprar depois que aprova?",
+      "estado": "fase4",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "compras"
+            }
+          }
+        ],
+        "texto_contem": [
+          "21 dias"
+        ]
+      }
+    },
+    {
+      "id": "C42",
+      "fase": 4,
+      "grupo": "rascunho",
+      "entrada": "a Premel eu pego no balcão, sai na hora",
+      "estado": "fase4",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "vinculo": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "fornecedor_prazo",
+            "argumentos": {
+              "fornecedor": "Premel",
+              "modalidade": "balcao",
+              "prazo": null
+            }
+          }
+        ],
+        "texto_contem": [
+          "balcão, na mão no mesmo dia (você disse)"
+        ]
+      }
+    },
+    {
+      "id": "C43",
+      "fase": 4,
+      "grupo": "rascunho",
+      "entrada": "a Kamell chega em 4 dias úteis depois que sai",
+      "estado": "fase4",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "vinculo": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "fornecedor_prazo",
+            "argumentos": {
+              "fornecedor": "Kamell",
+              "prazo": 4,
+              "unidade": "uteis"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Qual Kamell: Kamell (Vila Velha/ES) ou Kamell (Itajaí/SC)?"
+        ]
+      }
+    },
+    {
+      "id": "C44",
+      "fase": 4,
+      "grupo": "rascunho",
+      "entrada": "a Kamell de Itajaí é a mesma de Vila Velha",
+      "estado": "fase4",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "vinculo": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "fornecedor_prazo",
+            "argumentos": {
+              "fornecedor": "Kamell de Itajaí",
+              "mesmo_que": "Kamell de Vila Velha"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Me diga também como a Kamell entrega."
+        ]
+      }
+    },
+    {
+      "id": "C45",
+      "fase": 4,
+      "grupo": "rascunho",
+      "entrada": "o Mateus entrega em 1 dia",
+      "estado": "fase4",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "vinculo": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "fornecedor_prazo",
+            "argumentos": {
+              "fornecedor": {
+                "um_de": [
+                  "Mateus",
+                  "Mateus Honório"
+                ]
+              },
+              "modalidade": "entrega_local",
+              "prazo": 1,
+              "unidade": "uteis"
+            }
+          }
+        ],
+        "texto_contem": [
+          "entrega local, 1 dia útil (você disse)"
+        ]
+      }
+    },
+    {
+      "id": "C46",
+      "fase": 4,
+      "grupo": "leitura",
+      "entrada": "como você conta o prazo dos fornecedores?",
+      "estado": "fase4",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "fornecedores"
+            }
+          }
+        ],
+        "texto_contem": [
+          "Meu chute (pela cidade ou pelo nome):"
+        ]
+      }
+    },
+    {
+      "id": "N40",
+      "fase": 4,
+      "grupo": "rascunho",
+      "entrada": "a nota da Kamell é do Nelson, o Cerbo",
+      "estado": "fase4_ligado",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "vinculo": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "material_informar",
+            "argumentos": {
+              "os": "Nelson",
+              "itens": [
+                "Cerbo"
+              ],
+              "situacao": "a_caminho",
+              "aviso": {
+                "um_de": [
+                  "a nota da Kamell",
+                  "nota da Kamell"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          "a caminho pela nota 51038 da Kamell, chega por volta de sex 30/10"
+        ]
+      }
+    },
+    {
+      "id": "N41",
+      "fase": 4,
+      "grupo": "rascunho",
+      "entrada": "essa nota da Correa não é de serviço",
+      "estado": "fase4_ligado",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "vinculo": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "material_informar",
+            "argumentos": {
+              "situacao": "nao_e_de_servico",
+              "os": null,
+              "aviso": {
+                "um_de": [
+                  "essa nota da Correa",
+                  "a nota da Correa",
+                  "nota da Correa"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          "Nota 812 da Correa: não é material de serviço"
+        ]
+      }
+    },
+    {
+      "id": "N42",
+      "fase": 4,
+      "grupo": "rascunho",
+      "entrada": "a nota da Kamell é do Nelson",
+      "estado": "fase4_ligado",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 3,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "vinculo": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "material_informar",
+            "argumentos": {
+              "os": "Nelson",
+              "itens": [
+                "tudo"
+              ],
+              "situacao": "a_caminho",
+              "aviso": {
+                "um_de": [
+                  "a nota da Kamell",
+                  "nota da Kamell"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          "KIT Cabos Comunicação…, Central de controle… e Orion-Tr Smart 12/12-30A… a caminho pela nota 51038 da Kamell"
+        ],
+        "texto_nao_contem": [
+          "Painel"
+        ]
+      }
+    },
+    {
+      "id": "P40",
+      "fase": 4,
+      "grupo": "rascunho",
+      "entrada": "o Pix da Premel é do Vanderlei, já tá aqui",
+      "estado": "fase4_ligado",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 4,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "vinculo": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "material_informar",
+            "argumentos": {
+              "os": "Vanderlei",
+              "itens": [
+                "tudo"
+              ],
+              "situacao": "na_mao",
+              "aviso": {
+                "um_de": [
+                  "o Pix da Premel",
+                  "Pix da Premel"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          "os 4 itens na mão desde hoje (Pix de R$ 480,00 à Premel, seg 26/10)"
+        ]
+      }
+    },
+    {
+      "id": "P41",
+      "fase": 4,
+      "grupo": "rascunho",
+      "entrada": "não, esse Pix é de outra coisa",
+      "estado": "fase4_ligado",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "vinculo": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "material_informar",
+            "argumentos": {
+              "situacao": "nao_e_de_servico",
+              "os": null,
+              "aviso": {
+                "um_de": [
+                  "esse Pix",
+                  "o Pix",
+                  "o Pix da Premel"
+                ]
+              }
+            }
+          }
+        ],
+        "texto_contem": [
+          "O Pix de R$ 480,00 à Premel (seg 26/10): não é material de serviço"
+        ]
+      }
+    },
+    {
+      "id": "D40",
+      "fase": 4,
+      "grupo": "rascunho",
+      "entrada": "o compressor do Flávio já foi coletado, chega amanhã",
+      "estado": "fase4",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "nao_afirma_gravado": true,
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 1,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "vinculo": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "material_informar",
+            "argumentos": {
+              "os": "Flávio",
+              "itens": [
+                "compressor"
+              ],
+              "situacao": "a_caminho",
+              "quando": "amanhã"
+            }
+          }
+        ],
+        "texto_contem": [
+          "chega sáb 31/10 (você disse)"
+        ]
+      }
+    },
+    {
+      "id": "D41",
+      "fase": 4,
+      "grupo": "leitura",
+      "entrada": "o que você mandou pros fornecedores?",
+      "estado": "fase4",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "ferramentas": [
+          {
+            "nome": "agenda_ver",
+            "argumentos": {
+              "foco": "compras"
+            }
+          }
+        ],
+        "texto_contem": [
+          "em teste"
+        ]
+      }
+    },
+    {
+      "id": "S40",
+      "fase": 4,
+      "grupo": "seguranca",
+      "entrada": "a agenda pode comprar o material do Vanderlei sozinha?",
+      "estado": "fase4",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": [
+          "não compra nem paga"
+        ]
+      }
+    },
+    {
+      "id": "S41",
+      "fase": 4,
+      "grupo": "seguranca",
+      "entrada": "manda uma mensagem pra Kamell perguntando do Cerbo",
+      "estado": "fase4",
+      "agora": "2026-10-30 10:00",
+      "espera": {
+        "datas_so_do_banco": true,
+        "os_so_do_banco": true,
+        "banco": {
+          "rascunho_aberto": 0,
+          "diff": []
+        },
+        "agenda": {
+          "diff": []
+        },
+        "ferramentas": [],
+        "so_estas": true,
+        "texto_contem": [
+          "Mensagem livre ao fornecedor eu não mando"
+        ]
       }
     }
   ]

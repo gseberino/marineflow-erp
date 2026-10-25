@@ -673,3 +673,74 @@ Deno.test("C1 — as palavras de ver valem com \"?\" (agenda, livre, o que mudou
   assertEquals(lerComandoDaAgenda("Comissão?"), verP6("comissao"));
   assertEquals(lerComandoDaAgenda("comissão outubro?"), verP6("comissao", "outubro"));
 });
+
+// ─── Fase 4 (P6): *agenda compras* e *agenda fornecedores* ──────────────────────────────────────────────────────────
+// As duas são de VER (a agenda_ver, foco compras e foco fornecedores): valem com "?" e nenhuma age. "compras" sozinho é
+// conversa — e "compra" é palavra dos comprovantes ("é a mesma compra?"): a frase inteira tem de começar por "agenda".
+
+const verP6F4 = (foco: "compras" | "fornecedores"): ComandoDaAgenda => ({ comando: "ver", periodo: null, foco, pessoa: null });
+const TABELA_F4: Array<[string, ComandoDaAgenda]> = [
+  ["agenda compras", verP6F4("compras")],
+  ["Agenda compras", verP6F4("compras")],
+  ["*agenda compras*", verP6F4("compras")],
+  ["Agenda compras?", verP6F4("compras")],
+  ["agenda compras.", verP6F4("compras")],
+  ["🎤 Agenda compras.", verP6F4("compras")],
+  ["agenda fornecedores", verP6F4("fornecedores")],
+  ["Agenda Fornecedores", verP6F4("fornecedores")],
+  ["*agenda fornecedores*", verP6F4("fornecedores")],
+  ["agenda fornecedores?", verP6F4("fornecedores")],
+];
+
+Deno.test("Fase 4 (P6) — lerComandoDaAgenda: *agenda compras* e *agenda fornecedores* (também com \"?\": são de ver)", () => {
+  for (const [texto, esperado] of TABELA_F4) assertEquals(lerComandoDaAgenda(texto), esperado, texto);
+});
+
+// Conversa: com mais palavras (ou sem o "agenda"), vai ao modelo, que chama agenda_ver foco compras/fornecedores.
+const CONVERSA_F4 = [
+  "compras", "compra", "fornecedores", "o que falta comprar", "o que falta comprar?", "agenda de compras", "agenda da compra",
+  "agenda do fornecedor", "agenda compras do Nelson", "agenda fornecedores principais", "agenda compra", "agenda fornecedor",
+  "compras da semana", "comprei", "comprei na Premel", "é a mesma compra", "outra compra", "compra pessoal",
+  "a nota da Kamell é do Nelson", "essa nota não é de serviço",
+];
+
+Deno.test("Fase 4 (P6) — conversa (sem o agenda, com palavra a mais, a resposta à nota, as palavras dos comprovantes) não é a palavra", () => {
+  for (const t of CONVERSA_F4) assertEquals(lerComandoDaAgenda(t), null, t);
+});
+
+Deno.test("Fase 4 (P6) — nenhuma das palavras novas age (nenhuma palavra que AGE com \"?\" no fim)", () => {
+  for (const [texto] of TABELA_F4) {
+    const c = lerComandoDaAgenda(texto);
+    assertEquals(c?.comando, "ver", texto);
+  }
+});
+
+Deno.test("Fase 4 (P6) — as palavras novas não são do secretário, da confirmação, do menu, do PDF, dos comprovantes nem da pergunta ativa", () => {
+  const formas = TABELA_F4.map(([t]) => t);
+  for (const t of [...formas, ...formas.map((x) => `*${x.replace(/^\*|\*$/g, "")}*`)]) {
+    assertEquals(lerComandoDoSecretario(t), null, `secretário: ${t}`);
+    assertEquals(parseConfirmationReply(t), null, `confirmação: ${t}`);
+    assertEquals(parseOptionReply(t, 9), null, `opção: ${t}`);
+    assertEquals(lerPedidoDePdf(t), null, `pdf: ${t}`);
+    assertEquals(lerComando(t), null, `comprovantes: ${t}`);
+    const n = normalizarResposta(t.replace(/[*_~]/g, ""));
+    assertEquals(lerSimNao(n), null, `sim/não: ${t}`);
+    assertEquals(lerNumero(n, 99), null, `número: ${t}`);
+    assertEquals(pareceRespostaCurta(t), false, `resposta curta: ${t}`);
+    const trava = travaDaConfirmacao(estadoComCmpNoConfirmar(), t, { pending_confirm_action_id: "pend-1" });
+    assertEquals(trava.travar, false, `trava do CMP: ${t}`);
+  }
+});
+
+Deno.test("Fase 4 (P6) — webhook: com a leitura em sombra ou ligada, *agenda compras* e *agenda fornecedores* vão ao assistente; desligada, o caminho de hoje", async () => {
+  for (const modo of ["sombra", "ligado"]) {
+    for (const t of ["agenda compras", "Agenda fornecedores?"]) {
+      const { d, c } = depsDoWebhook(modo);
+      assertEquals(await rotearTextoDoDono(TEXTO(t), d), "assistente", `${modo}: ${t}`);
+      assertEquals(c.despachos, [t]);
+    }
+  }
+  for (const t of ["agenda compras", "agenda fornecedores"]) {
+    assertEquals(await ehComandoDaAgendaLigada(adminDaAgenda("desligado"), t), false, t);
+  }
+});

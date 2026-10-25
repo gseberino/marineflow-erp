@@ -103,6 +103,10 @@ export const agendaProducaoTools: ToolDef[] = [
       "(foco diarias), o que a equipe respondeu hoje e no próximo dia útil (foco equipe), os marcos de uma OS (os + foco " +
       "marcos: entrada, início, conclusão e entrega), a comissão dos técnicos de um mês (foco comissao com o mês em periodo, " +
       "como o dono disse: só a conta, nada é pago), " +
+      "o que comprar e até quando, as notas que chegaram sem serviço dito, quanto tempo ele leva para comprar depois que o " +
+      "cliente aprova e a pergunta da agenda ao fornecedor (foco compras; com os, a espera de peça daquela OS: da aprovação " +
+      "até a compra, do fornecedor e o parado com o material na mão), como a agenda conta o prazo de cada fornecedor " +
+      "(foco fornecedores), " +
       "o dia de alguém da equipe (pessoa + periodo), uma OS (os), " +
       "\"se o cliente aprovar hoje, quando dá\" (os + simular_aprovacao) ou um serviço que ainda não existe (simular). " +
       "Datas, dias livres, capacidade e duração vêm SÓ daqui: repita o texto, sem calcular nem mudar número, data ou nome. " +
