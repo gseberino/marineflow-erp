@@ -66,3 +66,27 @@ Deno.test("P4.5: o dono pergunta antes da fila; só o acorde sai (chave aviso:<i
   assertStringIncludes(fn, "const rows = comoSempre.map((phone) => ({ phone_normalized: phone, message: texto, source: \"email_urgente\", priority: 2 }));");
   assertStringIncludes(fonte, 'const dono = portao.modo === "ligado" ? await lerDonoDaVoz(admin) : null;');
 });
+
+// Agenda de Produção, Fase 4 (P3, 25/10/2026). O que se protege: a remessa da NF-e é registrada DEPOIS de gravar
+// dados_extraidos (o banco lê de lá), nos dois caminhos (a leitura da caixa e o ?reextrair=1), e nunca derruba a leitura
+// (registrarRemessas não lança: remessas_test.ts); ?remessas=1 é a releitura das notas de antes de 25/10.
+Deno.test("Fase 4: a remessa vem depois do update de dados_extraidos, na leitura da caixa e no reextrair", () => {
+  const ini = fonte.indexOf("// Etapa 4 (08/10/2026)");
+  assert(ini > 0);
+  const bloco = fonte.slice(ini, fonte.indexOf("// Triagem só do que é recente", ini));
+  const grava = bloco.indexOf('await admin.from("email_messages").update({ dados_extraidos: { ...dados, nfes }, ...ligar }).eq("id", id);');
+  const remessa = bloco.indexOf("if (temNotaParaEmpresa(dados)) await registrarRemessas(admin, id);");
+  assert(grava > 0 && remessa > grava, `ordem: ${grava} ${remessa}`);
+
+  const r = fonte.indexOf("async function reextrair(");
+  const fn = fonte.slice(r, fonte.indexOf("\n}\n", r));
+  const g2 = fn.indexOf('await admin.from("email_messages").update({ dados_extraidos: gravar, ...ligar }).eq("id", m.id);');
+  const r2 = fn.indexOf("if (temNotaParaEmpresa(dados)) await registrarRemessas(admin, m.id);");
+  assert(g2 > 0 && r2 > g2, `reextrair: ${g2} ${r2}`);
+});
+
+Deno.test("Fase 4: ?remessas=1 chama a releitura e responde 500 só com erro de leitura (o modo desligado é pulado)", () => {
+  assertStringIncludes(fonte, 'if (new URL(req.url).searchParams.get("remessas") === "1") {');
+  assertStringIncludes(fonte, "return jr({ ok: true, ...(await relerRemessas(admin, cnpjEmpresa)), ms: Date.now() - inicio });");
+  assertStringIncludes(fonte, 'import { registrarRemessas, relerRemessas, temNotaParaEmpresa } from "./remessas.ts";');
+});

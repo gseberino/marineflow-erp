@@ -12,6 +12,26 @@
 //
 // Com a chave validada dá para deduplicar importação sem depender de nome de arquivo,
 // que fornecedor nenhum padroniza.
+//
+// Agenda de Produção, Fase 4 (P3, 25/10/2026; spec-fase4.md §5.3, d1): o que a agenda precisa para prever a chegada no
+// nível da NOTA, sem importar nada — a saída (dhSaiEnt, que vence a emissão: revisão item 16), o frete (modFrete; 9 = sem
+// transporte, retirada), a UF e o município do emitente (o prazo pelo lugar quando o CNPJ não casa com o cadastro) e até
+// 40 itens (xProd, qCom, uCom, cProd), cada descrição cortada em 120. Continua só lendo: a importação é pela tela
+// (process-nfe-xml), e a ligação item ↔ OS é sempre pergunta ao dono.
+
+/** Item da NF-e, o mínimo para o dono reconhecer a peça (nunca casa sozinho com a OS). */
+export interface ItemDaNFe {
+  n: number;
+  codigo: string | null;       // cProd (o código do fornecedor)
+  descricao: string;           // xProd, até 120
+  quantidade: number | null;   // qCom
+  unidade: string | null;      // uCom
+}
+
+/** Teto de itens lidos por nota (o leitor do e-mail tem 2 s de CPU; a tabela material_remessas aceita até 40). */
+export const MAX_ITENS_NFE = 40;
+/** Teto de cada descrição de item. */
+export const MAX_DESCRICAO_ITEM = 120;
 
 export interface NFeIdentificada {
   chave: string;               // 44 dígitos
@@ -27,6 +47,16 @@ export interface NFeIdentificada {
   tipoOperacao: "0" | "1" | null;
   /** true quando o XML é o evento de cancelamento/CC-e, não a nota em si. */
   ehEvento: boolean;
+  /** (Fase 4) dhSaiEnt (ou dSaiEnt), YYYY-MM-DD: o dia da saída, que vence a emissão para contar o prazo. */
+  dataSaida: string | null;
+  /** (Fase 4) modFrete, um dígito: 0 emitente, 1 destinatário, 2 terceiros, 3/4 próprio, 9 sem transporte. */
+  modFrete: string | null;
+  /** (Fase 4) UF do emitente (enderEmit/UF), duas letras. */
+  emitenteUf: string | null;
+  /** (Fase 4) município do emitente (enderEmit/xMun). */
+  emitenteMunicipio: string | null;
+  /** (Fase 4) até MAX_ITENS_NFE itens, na ordem do XML. */
+  itens: ItemDaNFe[];
 }
 
 /**
@@ -83,6 +113,34 @@ function bloco(xml: string, nome: string): string {
   return xml.match(new RegExp(`<${nome}[^>]*>([\\s\\S]*?)<\\/${nome}>`, "i"))?.[1] ?? "";
 }
 
+/** (Fase 4) "2026-10-26T09:10:00-03:00" → "2026-10-26" (o mesmo corte de dhEmi); o que não é data fica null. */
+function dia(dh: string | null): string | null {
+  const d = dh?.slice(0, 10) ?? null;
+  return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+}
+
+/** (Fase 4) Os itens (det/prod), até MAX_ITENS_NFE: o laço para no teto, sem ler o resto do XML. */
+function itensDaNota(xml: string): ItemDaNFe[] {
+  const itens: ItemDaNFe[] = [];
+  const det = /<det\b([^>]*)>([\s\S]*?)<\/det>/gi;
+  let m: RegExpExecArray | null;
+  while (itens.length < MAX_ITENS_NFE && (m = det.exec(xml)) !== null) {
+    const prod = bloco(m[2], "prod");
+    const descricao = (tag(prod, "xProd") ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_DESCRICAO_ITEM);
+    if (!descricao) continue;
+    const n = Number(/\bnItem="(\d+)"/i.exec(m[1])?.[1] ?? itens.length + 1);
+    const q = Number(tag(prod, "qCom"));
+    itens.push({
+      n: Number.isFinite(n) && n > 0 ? n : itens.length + 1,
+      codigo: tag(prod, "cProd")?.slice(0, 60) ?? null,
+      descricao,
+      quantidade: Number.isFinite(q) && q > 0 ? q : null,
+      unidade: tag(prod, "uCom")?.slice(0, 10) ?? null,
+    });
+  }
+  return itens;
+}
+
 /**
  * Extrai o mínimo identificável de um XML de NF-e.
  * Devolve null quando o conteúdo não é NF-e — o chamador trata como anexo comum.
@@ -112,6 +170,11 @@ export function identificarNFe(xmlText: string): NFeIdentificada | null {
   const vNF = total ? Number(tag(total, "vNF")) : NaN;
   const tp = tag(ide, "tpNF");
 
+  // Fase 4: a saída, o frete, o lugar do emitente e os itens (evento não tem nenhum deles).
+  const ender = emit ? bloco(emit, "enderEmit") : "";
+  const uf = (tag(ender, "UF") ?? "").toUpperCase();
+  const frete = tag(bloco(xml, "transp"), "modFrete");
+
   return {
     chave,
     chaveValida: validarChaveAcesso(chave),
@@ -124,6 +187,11 @@ export function identificarNFe(xmlText: string): NFeIdentificada | null {
     valorTotal: Number.isFinite(vNF) && vNF > 0 ? vNF : null,
     tipoOperacao: tp === "0" || tp === "1" ? tp : null,
     ehEvento,
+    dataSaida: dia(tag(ide, "dhSaiEnt") ?? tag(ide, "dSaiEnt")),
+    modFrete: frete && /^\d$/.test(frete) ? frete : null,
+    emitenteUf: /^[A-Z]{2}$/.test(uf) ? uf : null,
+    emitenteMunicipio: tag(ender, "xMun")?.slice(0, 80) ?? null,
+    itens: ehEvento ? [] : itensDaNota(xml),
   };
 }
 

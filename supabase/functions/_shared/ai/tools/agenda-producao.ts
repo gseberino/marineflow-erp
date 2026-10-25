@@ -29,6 +29,10 @@
 // chega vira RASCUNHO (agenda_rascunho_fornecedor, migration 20261027100100), com a releitura pronta; só o *grava* do dono
 // grava em suppliers. Fora da vista como as outras escritas da agenda (pela ferramenta_extra, d14): o teto de 113 não muda.
 //
+// Fase 4 (P3, 25/10/2026; spec-fase4.md §5.3, §7.1): material_informar ganha o aviso (a nota, o Pix ou a mensagem do
+// fornecedor que a agenda perguntou, como o dono disse) e a situação nao_e_de_servico (só com o aviso, sem OS nem itens).
+// A ligação nota/Pix ↔ OS continua sendo do dono: a ferramenta só deixa o rascunho, e só o *grava* liga.
+//
 // Cada execute chama UMA RPC com ctx.sb (painel: o JWT do dono; WhatsApp: service role), p_autor = ctx.userId e
 // p_canal pelo ctx.canal. O mapeamento argumento → parâmetro é o de _shared/agenda/rpc-das-ferramentas.ts (puro), o
 // mesmo dos evals. `if (error) throw`: leitura que falha nunca vira "nada marcado".
@@ -204,9 +208,12 @@ export const agendaProducaoTools: ToolDef[] = [
       "Anota num RASCUNHO o que o dono disse do material de uma OS: comprei; a_caminho (\"chega dia 3\": quando = \"dia " +
       "3\"); na_mao (\"chegou\", \"tá aqui\"); vou_comprar (\"compro terça na Premel\"); falta; sem_previsao; " +
       "pode_comecar_sem; dispensar; ou peça fora do orçamento (novo). Uma chamada por situação; itens = o que ele citou " +
-      "(\"compressor\", \"painel\") ou [\"tudo\"]. NÃO grava de fato nem cria ordem de compra ou cotação: devolve a " +
+      "(\"compressor\", \"painel\") ou [\"tudo\"]. Resposta a uma nota, Pix ou mensagem de fornecedor que a agenda " +
+      "perguntou (\"a nota da Kamell é do Nelson, o Cerbo\", \"o Pix da Premel é do Vanderlei, já tá aqui\"): passe aviso " +
+      "como ele disse, com a OS, os itens e a situação; \"não é de serviço\" é situacao nao_e_de_servico com o aviso (sem OS " +
+      "nem itens). NÃO grava de fato nem cria ordem de compra ou cotação, e não liga a nota ou o Pix sozinho: devolve a " +
       "releitura, e só o *grava* do dono grava. A lista do que comprar continua sendo get_purchase_needs. Peça nova (novo) " +
-      "só avisa a agenda: não entra na OS, no orçamento nem na compra; para cobrar e comprar, add_service_order_item.",
+      "entra na lista do que comprar, sem preço, mas não no orçamento: para cobrar, add_service_order_item.",
     input_schema: {
       type: "object",
       properties: {
@@ -217,9 +224,15 @@ export const agendaProducaoTools: ToolDef[] = [
         fornecedor: { type: "string", description: "Onde compra/comprou, como o dono disse." },
         quantidade: { type: "number", description: "Só se o dono disse quantas chegaram (parcial)." },
         novo: { type: "boolean", description: "true = peça que não está no orçamento." },
+        aviso: {
+          type: "string",
+          description: "Só na resposta a uma pergunta da agenda: a nota, o Pix ou a mensagem como o dono disse (\"a nota da " +
+            "Kamell\", \"o Pix da Premel\", \"a mensagem do Mateus\", \"a nota 812\"). Nunca o número que você inventou.",
+        },
         trecho: TRECHO,
       },
-      required: ["os", "itens", "situacao", "trecho"],
+      // os e itens: obrigatórios fora de nao_e_de_servico (o mapeamento recusa sem eles).
+      required: ["situacao", "trecho"],
     },
     risk: "low",
     roles: SO_ADMIN,

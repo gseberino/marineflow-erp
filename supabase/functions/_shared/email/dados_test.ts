@@ -79,3 +79,30 @@ Deno.test("fornecedorPelaNota: CNPJ do emitente identifica; ambíguo ou de terce
   assertEquals(fornecedorPelaNota({ nfes: [nfe(null)], boletos: [] }, mapa), null);
   assertEquals(fornecedorPelaNota(null, mapa), null);
 });
+
+// ── Agenda de Produção, Fase 4 (P3): a NF-e do e-mail leva o que a remessa precisa ───────────────────────
+Deno.test("Fase 4: a NF-e do e-mail leva saída, frete, UF, município e os itens (n, descricao, qtd, un)", async () => {
+  const comItens = xml("50057049000159")
+    .replace("<dhEmi>2026-10-07T10:00:00-03:00</dhEmi>", "<dhEmi>2026-10-07T10:00:00-03:00</dhEmi><dhSaiEnt>2026-10-08T09:00:00-03:00</dhSaiEnt>")
+    .replace("<xNome>Coremma Pecas</xNome>", "<xNome>Coremma Pecas</xNome><enderEmit><xMun>Blumenau</xMun><UF>SC</UF></enderEmit>")
+    .replace("<total>", `<det nItem="1"><prod><cProd>A1</cProd><xProd>CABO 6MM</xProd><uCom>M</uCom><qCom>10.0000</qCom></prod></det><total>`)
+    .replace("</total>", "</total><transp><modFrete>9</modFrete></transp>");
+  const d = await extrairDados(
+    email("", [{ filename: "nfe.xml", mimeType: "application/xml", size: null, content: new TextEncoder().encode(comItens) }]),
+    "50057049000159", null,
+  );
+  const n = d!.nfes[0];
+  assertEquals([n.data, n.saida, n.mod_frete, n.uf, n.municipio], ["2026-10-07", "2026-10-08", "9", "SC", "Blumenau"]);
+  assertEquals(n.itens, [{ n: 1, descricao: "CABO 6MM", qtd: 10, un: "M" }]);
+});
+
+Deno.test("Fase 4: a NF-e sem os campos novos no XML leva null e itens vazios (a chave itens existe: não é extração antiga)", async () => {
+  const d = await extrairDados(
+    email("", [{ filename: "nfe.xml", mimeType: "application/xml", size: null, content: new TextEncoder().encode(xml("50057049000159")) }]),
+    "50057049000159", null,
+  );
+  const n = d!.nfes[0];
+  assertEquals([n.saida, n.mod_frete, n.uf, n.municipio], [null, null, null, null]);
+  assertEquals(n.itens, []);
+  assertEquals("itens" in n, true);
+});

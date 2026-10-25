@@ -503,3 +503,19 @@ Deno.test("Fase 4: a descrição de fornecedor_prazo diz o que NÃO faz e a fron
   assertEquals(props.unidade.enum, ["uteis", "corridos"]);
   assertEquals(porNome("fornecedor_prazo").input_schema.required, ["fornecedor", "trecho"]);
 });
+
+// Fase 4 (P3): material_informar com o aviso. O que se protege: o campo existe (texto, nunca id), nao_e_de_servico está no
+// enum, a OS e os itens deixam de ser obrigatórios no esquema (o mapeamento cobra fora de nao_e_de_servico) e a descrição
+// diz que a ferramenta não liga a nota nem o Pix sozinha; a frase do novo é a da Fase 4 (entra na lista do que comprar).
+Deno.test("Fase 4: material_informar ensina o aviso e o nao_e_de_servico, e não liga nada sozinha", () => {
+  const t = porNome("material_informar");
+  const props = (t.input_schema as { properties: Record<string, { type?: string; enum?: string[] }> }).properties;
+  assertEquals(props.aviso?.type, "string");
+  assertEquals(props.situacao.enum?.includes("nao_e_de_servico"), true);
+  assertEquals(t.input_schema.required, ["situacao", "trecho"]);
+  for (const f of ["aviso", "nao_e_de_servico", "não liga a nota ou o Pix sozinho", "entra na lista do que comprar, sem preço",
+    "add_service_order_item"]) {
+    assertStringIncludes(t.description, f);
+  }
+  assertEquals(t.description.includes("só avisa a agenda"), false);
+});

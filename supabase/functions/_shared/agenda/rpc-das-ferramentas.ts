@@ -20,6 +20,10 @@
 // fornecedor e em quantos dias chega). Também exige o trecho (o banco confere nele o prazo) e só deixa rascunho; o
 // fornecedor é o nome como o dono disse (nunca o id), e com mesmo_que (o outro cadastro do mesmo fornecedor) não vai
 // modalidade nem prazo: o banco copia do outro.
+//
+// Fase 4 (P3, 25/10/2026; spec-fase4.md §5.3, §7.1): paraMaterial ganha o aviso (p_aviso: a nota, o Pix ou a mensagem do
+// fornecedor que a agenda perguntou, como o dono disse) e a situação nao_e_de_servico (só com o aviso; a OS e os itens
+// ficam de fora). Sem o aviso, os parâmetros são os da Fase 1 (p_aviso nem vai).
 
 export type CanalDaRpc = "whatsapp" | "painel";
 
@@ -69,8 +73,13 @@ export const FOCOS = [
   "tudo", "livre", "o_que_fazer", "riscos", "material", "atrasos", "aprontar", "decisoes", "mudancas", "plano",
   "ppc", "diarias", "marcos", "comissao", "equipe",
 ] as const;
+/**
+ * As situações de material_informar. (Fase 4, P3) Mais nao_e_de_servico: a nota, o Pix ou a mensagem que a agenda perguntou
+ * não é material de serviço (estoque, escritório, outra coisa) — só com o aviso, sem OS nem itens.
+ */
 export const SITUACOES_DO_MATERIAL = [
   "comprei", "a_caminho", "na_mao", "vou_comprar", "falta", "sem_previsao", "pode_comecar_sem", "dispensar",
+  "nao_e_de_servico",
 ] as const;
 export const SITUACOES_DA_EQUIPE = ["vem", "nao_vem", "so_manha", "so_tarde"] as const;
 export const TURNOS = ["dia", "manha", "tarde"] as const;
@@ -323,8 +332,24 @@ export function paraPlanejar(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
 export function paraMaterial(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
   return mapear(RPC_MATERIAL, () => {
     const a = objeto(args);
-    const os = referenciaDaOs(a.os, true);
     const situacao = umDe(a.situacao, "situacao", SITUACOES_DO_MATERIAL, true);
+    // Fase 4 (P3): o aviso — a nota, o Pix ou a mensagem do fornecedor que a agenda perguntou, como o dono disse ("a nota
+    // da Kamell", "o Pix da Premel"). O banco acha a pergunta; o modelo nunca passa id. "Não é de serviço"
+    // (nao_e_de_servico) só existe com o aviso e dispensa a OS e os itens.
+    const aviso = texto(a.aviso, "aviso", 120);
+    if (situacao === "nao_e_de_servico") {
+      if (!aviso) recusar("'nao_e_de_servico' precisa do 'aviso': a nota, o Pix ou a mensagem, como o dono disse (\"a nota da Correa\")");
+      return comHoje({
+        p_autor: ctx.autor,
+        p_canal: ctx.canal,
+        p_os: referenciaDaOs(a.os, false),
+        p_itens: null,
+        p_situacao: situacao,
+        p_trecho: trecho(a.trecho),
+        p_aviso: aviso,
+      }, ctx);
+    }
+    const os = referenciaDaOs(a.os, true);
     const t = trecho(a.trecho);
     const bruto = typeof a.itens === "string" ? [a.itens] : a.itens;
     if (!Array.isArray(bruto) || bruto.length === 0 || bruto.length > 20) {
@@ -345,6 +370,8 @@ export function paraMaterial(args: unknown, ctx: ContextoDaRpc): ChamadaDaRpc {
       p_quantidade: quantidade,
       p_novo: booleano(a.novo, "novo") ?? false,
       p_trecho: t,
+      // Fase 4: só quando dito — sem o aviso, a chamada é a da Fase 1 (a RPC antiga, antes da migration, continua servindo).
+      ...(aviso ? { p_aviso: aviso } : {}),
     }, ctx);
   });
 }

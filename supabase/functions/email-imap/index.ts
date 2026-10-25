@@ -21,6 +21,11 @@
 // o golpe que acorda sai com o texto do acorde (pela fila, chave aviso:<id>); o urgente sem golpe fica para a próxima
 // mensagem fixa; o mesmo remetente de golpe não volta a avisar. Portão ilegível = o aviso de sempre. Outros admins com
 // o canal ligado recebem o de sempre.
+//
+// Agenda de Produção, Fase 4 (P3, 25/10/2026): a NF-e para a HBR vira remessa no nível da nota (material_remessas_do_email,
+// pelo modo_material) DEPOIS de gravar dados_extraidos — e também no ?reextrair=1. Nunca derruba a leitura (remessas.ts:
+// o erro vai para app_error_logs, action agenda:remessas). `?remessas=1` relê o XML das NF-e dos últimos remessa_dias que
+// ainda não viraram remessa (as extraídas antes de 25/10 não têm os itens nem a saída), até 15 por chamada.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { ORIGEM_PADRAO, servirComCors } from "../_shared/cors.ts";
@@ -34,6 +39,7 @@ import { MAX_URGENTES_PADRAO } from "../_shared/email/digest.ts";
 import { displaySender, normalizeAddress } from "../_shared/email/normalize.ts";
 import { extrairDados, fornecedorPelaNota } from "../_shared/email/dados.ts";
 import type { InboundEmail } from "../_shared/email/types.ts";
+import { registrarRemessas, relerRemessas, temNotaParaEmpresa } from "./remessas.ts";
 import { avisoDoEmail } from "../_shared/uma-voz/fontes.ts";
 import { textoDoGolpe } from "../_shared/uma-voz/acorde.ts";
 import {
@@ -208,6 +214,8 @@ async function reextrair(admin: Db, cnpjEmpresa: string | null): Promise<Record<
     const gravar = dados ? { ...dados, nfes: dados.nfes.map((n) => ({ ...n, anexo_id: idDoIndice[n.anexo_indice] ?? null })) } : {};
     const ligar = m.client_id || m.supplier_id ? {} : ligacaoPelaNota(dados, porCnpj);
     await admin.from("email_messages").update({ dados_extraidos: gravar, ...ligar }).eq("id", m.id);
+    // Fase 4 (P3): a remessa da NF-e, depois de gravar (nunca lança).
+    if (temNotaParaEmpresa(dados)) await registrarRemessas(admin, m.id);
     lidos++;
     if (dados) comDados++;
   }
@@ -235,6 +243,14 @@ servirComCors(async (req) => {
   if (new URL(req.url).searchParams.get("reextrair") === "1") {
     try {
       return jr({ ok: true, ...(await reextrair(admin, cnpjEmpresa)), ms: Date.now() - inicio });
+    } catch (e) {
+      return jr({ error: String((e as Error)?.message ?? e) }, 500);
+    }
+  }
+  // Fase 4 (P3): as NF-e dos últimos remessa_dias que ainda não viraram remessa (repetir até "nada a reler").
+  if (new URL(req.url).searchParams.get("remessas") === "1") {
+    try {
+      return jr({ ok: true, ...(await relerRemessas(admin, cnpjEmpresa)), ms: Date.now() - inicio });
     } catch (e) {
       return jr({ error: String((e as Error)?.message ?? e) }, 500);
     }
@@ -316,6 +332,8 @@ servirComCors(async (req) => {
             }));
             const ligar = match ? {} : ligacaoPelaNota(dados, porCnpj);
             await admin.from("email_messages").update({ dados_extraidos: { ...dados, nfes }, ...ligar }).eq("id", id);
+            // Fase 4 (P3): a NF-e para a HBR vira remessa no nível da nota, DEPOIS de gravar (nunca lança: a leitura segue).
+            if (temNotaParaEmpresa(dados)) await registrarRemessas(admin, id);
           }
         } catch (e) {
           console.warn("[email-imap] extração de NF-e/boleto falhou:", (e as Error)?.message ?? e);

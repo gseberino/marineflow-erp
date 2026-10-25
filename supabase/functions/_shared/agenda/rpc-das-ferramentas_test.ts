@@ -176,6 +176,38 @@ Deno.test("material_informar: situação fora da lista, sem itens, data calculad
   assert(erro(paraMaterial({ os: "Nelson", itens: ["painel"], situacao: "na_mao" }, CTX)).includes("falta 'trecho'"));
 });
 
+// Fase 4 (P3): o aviso — a nota, o Pix ou a mensagem que a agenda perguntou, como o dono disse.
+Deno.test("material_informar (Fase 4): com aviso, p_aviso vai junto; sem ele, os parâmetros da Fase 1 (p_aviso nem aparece)", () => {
+  const r = params(paraMaterial({ os: "Nelson", itens: ["Cerbo"], situacao: "a_caminho", aviso: " a nota  da Kamell ",
+    trecho: "a nota da Kamell é do Nelson, o Cerbo" }, CTX));
+  assertEquals(r.params, {
+    p_autor: CTX.autor, p_canal: "whatsapp", p_os: "Nelson", p_itens: ["Cerbo"], p_situacao: "a_caminho", p_quando: null,
+    p_fornecedor: null, p_quantidade: null, p_novo: false, p_trecho: "a nota da Kamell é do Nelson, o Cerbo",
+    p_aviso: "a nota da Kamell",
+  });
+  assertEquals("p_aviso" in params(paraMaterial({ os: "Nelson", itens: ["painel"], situacao: "na_mao", trecho: "chegou" }, CTX)).params,
+    false);
+});
+
+Deno.test("material_informar (Fase 4): nao_e_de_servico só com o aviso; dispensa a OS e os itens (nunca manda itens)", () => {
+  const r = params(paraMaterial({ situacao: "nao_e_de_servico", aviso: "a nota da Correa", itens: ["tudo"],
+    trecho: "essa nota da Correa não é de serviço" }, CTX));
+  assertEquals(r.rpc, "agenda_rascunho_material");
+  assertEquals(r.params, {
+    p_autor: CTX.autor, p_canal: "whatsapp", p_os: null, p_itens: null, p_situacao: "nao_e_de_servico",
+    p_trecho: "essa nota da Correa não é de serviço", p_aviso: "a nota da Correa",
+  });
+  assert(erro(paraMaterial({ situacao: "nao_e_de_servico", trecho: "não é de serviço" }, CTX)).includes("precisa do 'aviso'"));
+  assert(erro(paraMaterial({ situacao: "nao_e_de_servico", aviso: "o Pix" }, CTX)).includes("falta 'trecho'"));
+  // Fora de nao_e_de_servico, a OS e os itens continuam obrigatórios.
+  assert(erro(paraMaterial({ situacao: "na_mao", aviso: "o Pix da Premel", itens: ["tudo"], trecho: "já tá aqui" }, CTX))
+    .includes("falta 'os'"));
+  assert(erro(paraMaterial({ os: "Vanderlei", situacao: "na_mao", aviso: "o Pix da Premel", trecho: "já tá aqui" }, CTX))
+    .includes("'itens'"));
+  assert(erro(paraMaterial({ os: "Vanderlei", itens: ["tudo"], situacao: "na_mao", aviso: "x".repeat(121), trecho: "t" }, CTX))
+    .includes("'aviso' passa de 120"));
+});
+
 // ───────── equipe_disponibilidade ─────────
 
 Deno.test("equipe_disponibilidade: pessoa, situação, dias, padrão (falso por padrão) e trecho", () => {

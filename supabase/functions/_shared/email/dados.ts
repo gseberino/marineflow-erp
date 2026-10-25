@@ -4,11 +4,22 @@
 // número e valor — via nfe-identify.ts. Boleto: linha digitável com DV, valor e vencimento — via
 // boleto.ts, no texto do e-mail e no PDF anexo. Sem IA: um modelo que "quase acerta" o valor a
 // pagar é pior que nenhum. Nada aqui lança conta nem mexe em estoque — só informa.
+//
+// Agenda de Produção, Fase 4 (P3, 25/10/2026): a NF-e leva também a saída, o frete, a UF e o município do emitente e até
+// 40 itens — o que material_remessas_do_email precisa para prever a chegada no nível da nota. Continua só informando.
 
 import { ehEventoNFe, ehParaEmpresa, identificarNFe, pareceNFe } from "./nfe-identify.ts";
 import { extractBoletos } from "./boleto.ts";
 import { classifyAttachment } from "./normalize.ts";
 import type { InboundEmail } from "./types.ts";
+
+/** (Agenda de Produção, Fase 4) Um item da nota, como vai para material_remessas.itens. */
+export interface ItemDaNFeDoEmail {
+  n: number;
+  descricao: string;
+  qtd: number | null;
+  un: string | null;
+}
 
 export interface NFeDoEmail {
   anexo_indice: number;
@@ -20,6 +31,18 @@ export interface NFeDoEmail {
   valor: number | null;
   data: string | null;
   para_empresa: boolean;
+  // Agenda de Produção, Fase 4 (P3): o que a remessa precisa (material_remessas_do_email). A nota extraída antes de 25/10
+  // não tem estas chaves — a releitura email-imap?remessas=1 refaz.
+  /** dhSaiEnt (YYYY-MM-DD); vence data (dhEmi) para contar o prazo. */
+  saida?: string | null;
+  /** modFrete (um dígito; 9 = sem transporte). */
+  mod_frete?: string | null;
+  /** UF do emitente. */
+  uf?: string | null;
+  /** município do emitente. */
+  municipio?: string | null;
+  /** até 40 itens. */
+  itens?: ItemDaNFeDoEmail[];
 }
 
 export interface BoletoDoEmail {
@@ -83,6 +106,9 @@ export async function extrairDados(
         anexo_indice: i, chave: n.chave, emitente: n.emitenteNome, emitente_cnpj: n.emitenteCnpj,
         numero: n.numero, serie: n.serie, valor: n.valorTotal, data: n.dataEmissao,
         para_empresa: ehParaEmpresa(n, cnpjEmpresa),
+        // Fase 4 (P3): a saída, o frete, o lugar do emitente e os itens (a remessa da agenda).
+        saida: n.dataSaida, mod_frete: n.modFrete, uf: n.emitenteUf, municipio: n.emitenteMunicipio,
+        itens: n.itens.map((x) => ({ n: x.n, descricao: x.descricao, qtd: x.quantidade, un: x.unidade })),
       });
     } else if (lerPdf && (tipo === "boleto_pdf" || (a.mimeType ?? "").includes("pdf")) && a.content.length <= MAX_PDF_BYTES) {
       try {
