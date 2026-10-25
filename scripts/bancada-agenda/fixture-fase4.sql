@@ -151,3 +151,10 @@ values ('d4000000-0000-4000-8000-0000000003b2', 'create_payable', 'pending', 'd4
 insert into public.whatsapp_messages (id, direction, phone_normalized, message_type, body, occurred_at, delivery_status)
 values ('d4000000-0000-4000-8000-000000000420', 'inbound', '5547900000201', 'text', 'Recebeu o compressor? Deu tudo certo?',
         timestamptz '2026-10-20 09:58-03', 'received');
+
+-- ══ P6 (25/10) — a aprovação da OS-00104 como em produção ═════════════════════════════════════════════
+-- A OS-00104 (Flávio) foi aprovada ter 22/09 às 22:27 de Brasília (sql/j08_os104: qua 23/09 01:27 UTC). O dia que vale é o
+-- de Brasília (a régua de os_carteira): 22/09, e a OC-00004 é de 13/10 — os 21 dias "da aprovação até a compra" do KPI
+-- (spec §2 e §11, aceite 7). O ::date direto daria 23/09 (20 dias): o teste das leituras prova que não é.
+update public.service_orders set converted_to_os_at = timestamptz '2026-09-22 22:27-03'
+ where id = '05000000-0000-4000-8000-000000000104';

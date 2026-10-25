@@ -19,8 +19,9 @@
 //      migrations POSTERIORES ao snapshot que a Fase 3 lê, aplicadas inteiras e uma vez só, como estão em produção
 //      (MIGRATIONS_DEPOIS_DO_SNAPSHOT: o acerto de diárias de 06/10, que trava o dia pago);
 //   4. as migrations do worktree a partir de 20261024150000, em ordem, DUAS vezes (prova de idempotência),
-//      menos o que é dado de produção e não estrutura (a faxina 20261024153000 e os modos em sombra 20261025101000 e
-//      20261026101000: na bancada quem liga os modos é cada teste), cada versão registrada em
+//      menos o que é dado de produção e não estrutura (a faxina 20261024153000, os modos em sombra 20261025101000,
+//      20261026101000 e 20261027101000 e o acento das cidades 20261027102000: na bancada quem liga os modos é cada teste),
+//      cada versão registrada em
 //      supabase_migrations.schema_migrations como em produção. A semente 20261024161000 entra: na bancada vazia ela não
 //      acha diária e não semeia (a fixture semeia o dia 23/10). `ate` corta a lista (cada pacote testa até a sua). Na 2ª
 //      rodada, a view que uma migration mais nova recriou com colunas a mais sai antes da antiga (VIEWS_RECRIADAS_DEPOIS);
@@ -49,6 +50,10 @@ export const FORA_DA_BANCADA = new Set([
   '20261025101000_agenda_fase2_sombra.sql',
   // Fase 3 (P7): modo_equipe e modo_diaria em sombra e a semente de agenda_equipe_contato (a fixture-fase3 faz o papel).
   '20261026101000_agenda_fase3_sombra.sql',
+  // Fase 4 (P6): os três modos do material em sombra e o original herdado das linhas antigas; e a correção opcional do
+  // acento das cidades dos fornecedores (NOVO-agenda-30, OK à parte). Os testes de cada uma as rodam numa subtransação.
+  '20261027101000_agenda_fase4_sombra.sql',
+  '20261027102000_fornecedores_cidade_com_acento.sql',
 ]);
 
 /**

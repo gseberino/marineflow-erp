@@ -818,7 +818,10 @@ insert into _definer_da_agenda values
   ('agenda_mensagens_de_fornecedor'), ('_agenda_desfazer_material'),
   -- FASE 4 (P5): a rodada do material (chama os passos e a mensagem ao fornecedor: só service_role), o registro da mensagem
   -- ao fornecedor, a 1ª trava (o enfileirar) e a 2ª (o gatilho da fila). Os passos, a janela, o texto e os principais não.
-  ('agenda_material_vigiar'), ('_agenda_fornecedor_registrar'), ('_agenda_fornecedor_enfileirar'), ('_agenda_fila_do_fornecedor');
+  ('agenda_material_vigiar'), ('_agenda_fornecedor_registrar'), ('_agenda_fornecedor_enfileirar'), ('_agenda_fila_do_fornecedor'),
+  -- FASE 4 (P6): as leituras do foco compras e do foco fornecedores (conferem quem vê antes de tudo e leem o que só o
+  -- service_role lê: os fornecedores principais, as compras vivas, a fila do WhatsApp). A espera de peça e os textos não.
+  ('_agenda_ver_compras'), ('_agenda_ver_fornecedores');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

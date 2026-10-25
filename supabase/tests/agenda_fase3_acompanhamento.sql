@@ -476,7 +476,8 @@ begin
     v_res := pg_temp.ok(v_res, 'V11 foco fora da lista lança 22023 (e a mensagem cita os focos novos)',
       (select pg_temp.como(null, 'service_role',
          $q$select public.agenda_ver(null, null, null, 'comissoes', null, null, false, '2026-11-03') ->> 'texto'$q$))
-      like 'erro 22023: agenda_ver: foco "comissoes" não existe (%ppc, diarias, marcos, comissao ou equipe)', null);
+      -- FASE 4 (P6): a lista ganhou compras e fornecedores (os 17)
+      like 'erro 22023: agenda_ver: foco "comissoes" não existe (%ppc, diarias, marcos, comissao, equipe, compras ou fornecedores)', null);
     -- em sombra e desligada
     perform pg_temp.modos('sombra', 'sombra');
     v_res := pg_temp.ok(v_res, 'V12 equipe em sombra: "Em teste (nada foi mandado à equipe)"; diária em sombra: "Em teste (nada foi lançado)" ou nada',
