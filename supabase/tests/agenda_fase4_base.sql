@@ -16,8 +16,9 @@
 --   B7 os_prontidao com o prazo dito (Premel balcão → "se comprar hoje" = hoje), o importado e a cópia que só muda nos
 --      blocos "-- FASE 4:" (contra a 20261025100200)
 --   B8 o rascunho do fornecedor (número não dito recusa; ambíguo pergunta; o lugar desfaz a ambiguidade; mesmo_que copia;
---      corridos convertidos; o *grava* aplica e resolve as perguntas de cadastro) e as cópias de agenda_rascunho_gravar e
---      _agenda_rascunho_frase
+--      corridos convertidos por uma conta fixa — o mesmo dito, em qualquer dia, grava o mesmo prazo (x6 da revisão, C2) —
+--      e "1 dia", não "1 dias"; o *grava* aplica e resolve as perguntas de cadastro) e as cópias de agenda_rascunho_gravar
+--      e _agenda_rascunho_frase
 --   B9 a view das OCs vivas com oc_viva_dias (59 dias abate, 61 não)
 --
 -- ═══ COMO RODAR ═══
@@ -698,6 +699,7 @@ declare
   c_mateus constant uuid := 'dd000000-0000-4000-8000-000000000004';
   c_toli   constant uuid := 'dd000000-0000-4000-8000-000000000006';
   r jsonb; g jsonb; s public.suppliers;
+  d date; v_txt text; v_ok boolean;
 begin
   if coalesce(current_setting('agenda_teste.fase4', true), '') = '' then
     insert into _resultado values ('B8 o rascunho do fornecedor (fixture-fase4)', true, 'PULADO: sem agenda_teste.fase4 (rode pela bancada)');
@@ -750,9 +752,43 @@ begin
       and r ->> 'item' = 'Kamell (Itajaí/SC): é a mesma Kamell de Vila Velha — conto 4 dias úteis para as duas. Para tirar o cadastro repetido, desative a de Itajaí na tela de fornecedores',
       r::text);
 
+    -- x6 da revisão (C2, item 8): o mesmo dito em dias diferentes grava o mesmo prazo. Antes, os dias úteis entre o dia em
+    -- que o dono falou e + 5 davam 4 (seg 26/10), 3 (ter 27/10) e 2 (sex 30/10, Finados no meio); o "1 dia" dito na sexta
+    -- dava 0. A conta agora é fixa: a semana tem 5 dias úteis em 7, arredondado para cima. Cada dito num lote desfeito.
+    for d in select x from unnest(array[date '2026-10-26', date '2026-10-27', date '2026-10-30']) x loop
+      begin
+        r := public.agenda_rascunho_fornecedor(c_admin, 'whatsapp', 'Toli', null, 5, 'corridos', null, 'a Toli chega em 5 dias', d);
+        v_txt := coalesce(v_txt || ' | ', '') || coalesce(r ->> 'item', r::text);
+        r := public.agenda_rascunho_fornecedor(c_admin, 'whatsapp', 'Mateus', 'entrega_local', 1, 'corridos', null,
+                                               'o Mateus entrega em 1 dia', d);
+        v_txt := v_txt || ' | ' || coalesce(r ->> 'item', r::text);
+        v_txt := v_txt || ' | ' || (select string_agg(concat_ws(':', rr.dados ->> 'nome', rr.dados ->> 'prazo_dias_uteis'), ',' order by rr.dados ->> 'nome')
+                                      from public.agenda_rascunho rr
+                                     where rr.autor = c_admin and rr.estado = 'aberto'
+                                       and rr.chave in ('fornecedor:' || c_toli, 'fornecedor:' || c_mateus));
+        raise exception 'desfaz' using errcode = 'P0099';
+      exception when sqlstate 'P0099' then null;
+      end;
+    end loop;
+    v_res := pg_temp.ok(v_res, 'B8h2 x6: "a Toli chega em 5 dias" e "o Mateus entrega em 1 dia" (corridos) ditos seg 26/10, ter 27/10 e sex 30/10 gravam o mesmo prazo (4 e 1 dias úteis) e "1 dia", não "1 dias"',
+      v_txt = repeat('Toli (Curitiba/PR): 5 dias (conto 4 dias úteis) (você disse) | Mateus: 1 dia (conto 1 dia útil) (você disse). A cidade continua em branco no cadastro | Mateus:1,Toli:4 | ', 2)
+              || 'Toli (Curitiba/PR): 5 dias (conto 4 dias úteis) (você disse) | Mateus: 1 dia (conto 1 dia útil) (você disse). A cidade continua em branco no cadastro | Mateus:1,Toli:4',
+      v_txt);
+    begin
+      v_ok := public.agenda_rascunho_fornecedor(c_admin, 'whatsapp', 'Mateus', 'entrega_local', 7, 'corridos', null, 'chega em 7 dias', c_hoje) ->> 'item'
+        = 'Mateus: 7 dias (conto 5 dias úteis) (você disse). A cidade continua em branco no cadastro'
+      and public.agenda_rascunho_fornecedor(c_admin, 'whatsapp', 'Mateus', 'entrega_local', 84, 'corridos', null, 'chega em 84 dias', c_hoje) ->> 'item'
+        = 'Mateus: 84 dias (conto 60 dias úteis) (você disse). A cidade continua em branco no cadastro'
+      and public.agenda_rascunho_fornecedor(c_admin, 'whatsapp', 'Mateus', 'entrega_local', 85, 'corridos', null, 'chega em 85 dias', c_hoje) ->> 'motivo'
+        = 'prazo_longo';
+      raise exception 'desfaz' using errcode = 'P0099';
+    exception when sqlstate 'P0099' then null;
+    end;
+    v_res := pg_temp.ok(v_res, 'B8h3 a conta fixa (ceil(n × 5 / 7)): 7 dias = 5 úteis, 84 = 60; 85 passa do teto de 60 dias úteis', v_ok, null);
+
     r := public.agenda_rascunho_fornecedor(c_admin, 'whatsapp', 'Toli', null, 5, 'corridos', null, 'a Toli chega em 5 dias', c_hoje);
-    v_res := pg_temp.ok(v_res, 'B8h "a Toli chega em 5 dias" (corridos, não importado): conta os dias úteis do intervalo (Finados no meio: 2)',
-      (r ->> 'ok')::boolean and r ->> 'item' = 'Toli (Curitiba/PR): 5 dias (conto 2 dias úteis) (você disse)', r::text);
+    v_res := pg_temp.ok(v_res, 'B8h "a Toli chega em 5 dias" (corridos, não importado): a conta fixa, 4 dias úteis (não depende de hoje)',
+      (r ->> 'ok')::boolean and r ->> 'item' = 'Toli (Curitiba/PR): 5 dias (conto 4 dias úteis) (você disse)', r::text);
 
     r := public.agenda_rascunho_fornecedor(c_admin, 'whatsapp', 'Mateus', 'entrega_local', 1, 'uteis', null,
                                            'o Mateus entrega em 1 dia', c_hoje);
@@ -771,7 +807,7 @@ begin
         || E'• Premel (Itajaí/SC): balcão, na mão no mesmo dia (você disse).\n'
         || E'• Kamell (Vila Velha/ES): outro estado, 4 dias úteis depois do despacho (você disse).\n'
         || E'• Kamell (Itajaí/SC): é a mesma Kamell de Vila Velha — conto 4 dias úteis para as duas. Para tirar o cadastro repetido, desative a de Itajaí na tela de fornecedores.\n'
-        || E'• Toli (Curitiba/PR): 5 dias (conto 2 dias úteis) (você disse).\n'
+        || E'• Toli (Curitiba/PR): 5 dias (conto 4 dias úteis) (você disse).\n'
         || E'• Mateus: entrega local, 1 dia útil (você disse). A cidade continua em branco no cadastro.\n'
         || 'Responda *grava* ou corrija o que estiver errado.',
       public.agenda_rascunho_ler(c_admin, c_hoje) ->> 'texto');
@@ -788,7 +824,7 @@ begin
         || E'• Premel: balcão, na mão no mesmo dia (você disse).\n'
         || E'• Kamell: outro estado, 4 dias úteis depois do despacho (você disse).\n'
         || E'• Kamell: a mesma de Vila Velha, outro estado, 4 dias úteis (você disse).\n'
-        || E'• Toli: 5 dias (conto 2 dias úteis) (você disse).\n'
+        || E'• Toli: 5 dias (conto 4 dias úteis) (você disse).\n'
         || '• Mateus: entrega local, 1 dia útil (você disse).',
       g::text);
     v_res := pg_temp.ok(v_res, 'B8m o cadastro: o que o dono disse, com a fonte, o dia e o trecho; a de Itajaí com o prazo da de Vila Velha',
@@ -796,7 +832,7 @@ begin
               and prazo_trecho = 'a Premel eu pego no balcão, sai na hora' from public.suppliers where id = c_premel)
       and (select modalidade = 'outro_estado' and prazo_dias_uteis = 4 from public.suppliers where id = c_kes)
       and (select modalidade = 'outro_estado' and prazo_dias_uteis = 4 and prazo_fonte = 'dono' from public.suppliers where id = c_ksc)
-      and (select modalidade = 'distribuidor_sc_pr' and prazo_dias_uteis = 2 from public.suppliers where id = c_toli)
+      and (select modalidade = 'distribuidor_sc_pr' and prazo_dias_uteis = 4 from public.suppliers where id = c_toli)
       and (select modalidade = 'entrega_local' and prazo_dias_uteis = 1 and city is null from public.suppliers where id = c_mateus),
       (select string_agg(concat_ws(':', name, modalidade, prazo_dias_uteis), ' | ') from public.suppliers
         where id in (c_premel, c_kes, c_ksc, c_toli, c_mateus)));

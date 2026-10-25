@@ -1571,8 +1571,11 @@ begin
           v_corr := v_n;
         else
           if v_uni = 'corridos' then
-            -- "Chega em 5 dias" (corridos) de quem não é importado: o banco conta os dias úteis desse intervalo.
-            v_du := public.agenda_du_entre(p_hoje, p_hoje + v_n);
+            -- "Chega em 5 dias" (corridos) de quem não é importado: o banco converte por uma conta FIXA — a semana tem 5
+            -- dias úteis em 7, arredondado para cima (5 dias = 4 dias úteis; 1 dia = 1; 7 dias = 5). Não depende do dia em
+            -- que o dono falou: antes, os dias úteis entre hoje e hoje + n gravavam 4, 3 ou 2 para o mesmo dito (revisão da
+            -- Fase 4, C2, item 8).
+            v_du := ceil(v_n * 5 / 7.0)::int;
             v_conv := true;
           else
             v_du := v_n;
@@ -1607,7 +1610,8 @@ begin
                      public._agenda_classe_texto(v_mod, v_du_ef, v_co_ef));
   else
     v_frase := case when v_conv
-                    then format('%s dias (conto %s)', v_n, public._agenda_plural(v_du, 'dia útil', 'dias úteis'))
+                    then format('%s (conto %s)', public._agenda_plural(v_n, 'dia', 'dias'),
+                                public._agenda_plural(v_du, 'dia útil', 'dias úteis'))
                     else public._agenda_classe_texto(v_mod, v_du_ef, v_co_ef)
                          || case when v_dito and v_mod = any (c_viajam) then ' depois do despacho' else '' end end
                || ' (você disse)';
@@ -1632,7 +1636,7 @@ end;
 $function$;
 
 comment on function public.agenda_rascunho_fornecedor(uuid, text, text, text, numeric, text, text, text, date) is
-  'Agenda de Produção (Fase 4, P1): como o dono compra de um fornecedor e em quantos dias chega vira RASCUNHO (nada em suppliers). Fornecedor pelo nome (ambíguo = a pergunta com a cidade de cada um; não cadastrado = recusa, o cadastro é pela tela). modalidade (balcao, entrega_local, distribuidor_sc_pr, outro_estado, marketplace, importacao; sem ela, a da correção aberta ou a que vale hoje), prazo (inteiro, tem de estar no trecho; "no balcão" sem número = o da classe), unidade (uteis | corridos; importado sempre em corridos; os corridos de quem não é importado viram dias úteis por agenda_du_entre), mesmo_que (o outro cadastro do mesmo fornecedor: copia como ele entrega, dito no mesmo lote ou já gravado). Chave fornecedor:<id> (a correção substitui). Devolve {ok, item, itens, releitura}.';
+  'Agenda de Produção (Fase 4, P1): como o dono compra de um fornecedor e em quantos dias chega vira RASCUNHO (nada em suppliers). Fornecedor pelo nome (ambíguo = a pergunta com a cidade de cada um; não cadastrado = recusa, o cadastro é pela tela). modalidade (balcao, entrega_local, distribuidor_sc_pr, outro_estado, marketplace, importacao; sem ela, a da correção aberta ou a que vale hoje), prazo (inteiro, tem de estar no trecho; "no balcão" sem número = o da classe), unidade (uteis | corridos; importado sempre em corridos; os corridos de quem não é importado viram dias úteis por uma conta fixa, ceil(n × 5 / 7) — "5 dias (conto 4 dias úteis)" —, que não depende do dia em que o dono falou), mesmo_que (o outro cadastro do mesmo fornecedor: copia como ele entrega, dito no mesmo lote ou já gravado). Chave fornecedor:<id> (a correção substitui). Devolve {ok, item, itens, releitura}.';
 
 -- O *grava* do prazo do fornecedor: o cadastro passa a dizer como o dono compra dele (prazo_fonte 'dono'), e as perguntas
 -- de cadastro desse fornecedor e a pergunta única dos principais se resolvem.
