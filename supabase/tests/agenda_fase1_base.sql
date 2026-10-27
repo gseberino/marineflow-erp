@@ -845,7 +845,11 @@ insert into _definer_da_agenda values
   ('_agenda_fila_do_cliente'), ('_agenda_cliente_enviada'),
   -- FASE 5 (P3): a rodada do cliente (chama os passos e o registro: só service_role) e a decisão do dono sobre a mensagem
   -- (aprova, segura, enfileira; agenda_decidir a chama). Os passos, as horas, o risco, o acorde e o cancelar não.
-  ('agenda_cliente_vigiar'), ('_agenda_cliente_decidir');
+  ('agenda_cliente_vigiar'), ('_agenda_cliente_decidir'),
+  -- FASE 5 (P4): a resposta do cliente (lê o cliente pelo telefone em clients, app_users e payees, e escreve a resposta, o
+  -- plano, o campo de acesso e a confirmação: só service_role). Os efeitos, a data, o restaurar e o desfazer do cliente não
+  -- (agenda_desfazer, que já está acima, os chama).
+  ('agenda_resposta_do_cliente');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

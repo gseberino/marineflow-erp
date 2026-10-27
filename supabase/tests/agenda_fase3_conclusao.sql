@@ -816,9 +816,17 @@ begin
     v_novo := left(v_novo, v_ini - 1)
               || substr(v_novo, position(E'  -- FASE 4: fim\n' in v_novo) + length(E'  -- FASE 4: fim\n'));
   end loop;
-  insert into _resultado values ('J5 a cópia de agenda_desfazer só muda nos blocos "-- FASE 3:" e "-- FASE 4:" (o resto é o corpo de 20261025100200)',
+  -- FASE 5 (P4): recriada de novo em 20261028100400 (a resposta do cliente vai a _agenda_desfazer_cliente; o replano do
+  -- pedido do cliente desfeito direto tira o pedido), com dois blocos "-- FASE 5: … -- FASE 5: fim": saem do mesmo jeito.
+  loop
+    v_ini := position('  -- FASE 5: ' in v_novo);
+    exit when v_ini = 0 or position(E'  -- FASE 5: fim\n' in v_novo) < v_ini;
+    v_novo := left(v_novo, v_ini - 1)
+              || substr(v_novo, position(E'  -- FASE 5: fim\n' in v_novo) + length(E'  -- FASE 5: fim\n'));
+  end loop;
+  insert into _resultado values ('J5 a cópia de agenda_desfazer só muda nos blocos "-- FASE 3:", "-- FASE 4:" e "-- FASE 5:" (o resto é o corpo de 20261025100200)',
     v_novo = v_corpo and position('_agenda_desfazer_marco' in v_novo) = 0 and position('_agenda_desfazer_diaria' in v_novo) = 0
-    and position('_agenda_desfazer_material' in v_novo) = 0,
+    and position('_agenda_desfazer_material' in v_novo) = 0 and position('_agenda_desfazer_cliente' in v_novo) = 0,
     case when v_novo = v_corpo then null else format('%s × %s caracteres', length(v_novo), length(v_corpo)) end);
 end
 $copia$;

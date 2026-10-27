@@ -101,6 +101,21 @@ begin
   end loop;
   return v_b;
 end $f$;
+-- (Fase 5, P4) o corpo sem os blocos "-- FASE 5: … -- FASE 5: fim" (agenda_desfazer recriada em 20261028100400).
+create function pg_temp.sem_fase5(p_corpo text) returns text[] language plpgsql as $f$
+declare
+  v_b text[] := '{}'; v_bloco boolean := false; l text;
+begin
+  foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    if not v_bloco and l ~ '^\s*-- FASE 5:' and l !~ '^\s*-- FASE 5: fim' then v_bloco := true; continue; end if;
+    if v_bloco then
+      if l ~ '^\s*-- FASE 5: fim' then v_bloco := false; end if;
+      continue;
+    end if;
+    v_b := v_b || l;
+  end loop;
+  return v_b;
+end $f$;
 
 -- Uma mensagem do WhatsApp (o que o webhook grava).
 create function pg_temp.msg(p_id uuid, p_fone text, p_dir text, p_texto text, p_em timestamptz) returns uuid language sql as $f$
@@ -1224,8 +1239,11 @@ begin
       ('_os_material_previsao_original', 'public._os_material_previsao_original()', v_p1, 'agenda.desfazer_material'),
       -- C1 da revisão: a data dita da Fase 1, com o dia da semana e o número
       ('_agenda_data_um', 'public._agenda_data_um(text, date, text, boolean, date, date)', v_f1, 'v_num_dito')) as x(nome, sig, mig, marca) loop
+    -- (Fase 5, P4) agenda_desfazer foi recriada de novo em 20261028100400, só com blocos "-- FASE 5:" fora dos da Fase 4:
+    -- tira-os antes (o agenda_fase5_respostas.sql, A10, confere a cópia da Fase 5 contra a de 20261027100400).
     if pg_temp.sem_fase4(pg_temp.corpo(f.mig, f.nome))
-         is distinct from pg_temp.sem_fase4((select p.prosrc from pg_proc p where p.oid = f.sig::regprocedure))
+         is distinct from pg_temp.sem_fase4(array_to_string(pg_temp.sem_fase5(
+                            (select p.prosrc from pg_proc p where p.oid = f.sig::regprocedure)), E'\n'))
        or position(f.marca in (select p.prosrc from pg_proc p where p.oid = f.sig::regprocedure)) = 0
        or position(f.marca in pg_temp.corpo(f.mig, f.nome)) > 0
     then
