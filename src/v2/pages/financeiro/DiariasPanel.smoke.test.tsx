@@ -112,8 +112,8 @@ beforeEach(() => {
     switch (nome) {
       case 'resumo_freelancers':
         if (args.p_atalho === 'em_aberto') {
-          return { data: { pessoas: [{ ...pessoas[0], de: '2026-09-23', ate: null, pago_aguardando_banco: 100 }],
-            trabalhado: 160, pago: 100, dias: 1, deve: 60, adiantado: 0 }, error: null };
+          return { data: { pessoas: [{ ...pessoas[0], de: '2026-09-23', ate: null, pago_aguardando_banco: 100, pago_falta_aprovar: 50 }],
+            trabalhado: 160, pago: 150, dias: 1, deve: 10, adiantado: 0 }, error: null };
         }
         if (comReembolso) {
           return { data: { pessoas: [{ ...pessoas[0], reembolsos: 62, saldo_final: 512 }, pessoas[1]],
@@ -122,9 +122,13 @@ beforeEach(() => {
         return { data: { pessoas, trabalhado: 2560, pago: 2130, dias: 16, deve: 450, adiantado: 20 }, error: null };
       case 'conta_corrente_freelancer':
         if (args.p_atalho === 'em_aberto') {
-          return { data: { ...contaDoRoberto, de: '2026-09-23', ate: null, saldo_anterior: 0, pago: 100, pago_aguardando_banco: 100,
+          return { data: { ...contaDoRoberto, de: '2026-09-23', ate: null, saldo_anterior: 0, pago: 150, pago_aguardando_banco: 100,
+            pago_falta_aprovar: 50,
             linhas: [{ ...contaDoRoberto.linhas[1], id: 'a1', data: '2026-10-06', conta: 'Anotado — aguardando o banco',
-              descricao: 'Adiantamento diarias', aguardando: true }] }, error: null };
+              descricao: 'Adiantamento diarias', aguardando: true },
+              // 27/10/2026: o Pix que o banco já trouxe e espera a fila (por CPF, ou anotado e já casado)
+              { ...contaDoRoberto.linhas[1], id: 'b1', data: '2026-10-10', pago: 50, conta: 'No banco — falta aprovar na fila',
+                descricao: 'Pix enviado para Roberto', categoria: null, aguardando: true }] }, error: null };
         }
         if (args.p_favorecido_id === 'r') {
           return { data: pagamentoJaDividido ? contaComPagamentoDividido() : comReembolso ? contaComReembolso() : contaDoRoberto, error: null };
@@ -316,6 +320,18 @@ describe('DiariasPanel', () => {
     expect(await screen.findByText('Anotado')).toBeInTheDocument();
     expect(screen.getByText('Anotado — aguardando o banco')).toBeInTheDocument();
     expect(chamadas('conta_corrente_freelancer')).toContainEqual({ p_favorecido_id: 'r', p_de: null, p_ate: null, p_atalho: 'em_aberto' });
+  });
+
+  it('o Pix que já saiu do banco e espera a fila aparece como "Falta aprovar", à parte do anotado', async () => {
+    renderizar('resumo', vi.fn(), { periodo: 'em_aberto' });
+    expect(await screen.findByText(/em Pix que já saiu do banco para ele e falta aprovar na fila/)).toBeInTheDocument();
+  });
+
+  it('extrato: o Pix da fila tem selo próprio e não vira "Anotado"', async () => {
+    renderizar('extrato', vi.fn(), { periodo: 'em_aberto' });
+    expect(await screen.findByText('Falta aprovar')).toBeInTheDocument();
+    expect(screen.getByText('No banco — falta aprovar na fila')).toBeInTheDocument();
+    expect(screen.getByText('Anotado')).toBeInTheDocument();
   });
 
   it('"Escolher datas…": De/Até vão para o banco; datas invertidas não consultam', async () => {

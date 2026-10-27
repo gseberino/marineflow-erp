@@ -2,7 +2,8 @@
 //
 // O saldo vem pronto do banco (saldo inicial + trabalhado − pago). O "pago" é o que já veio do
 // extrato no nome dele (Pix, Caixa), o que um sócio pagou do próprio bolso para ele e — desde
-// 06/10/2026 — o Pix lançado à mão que o banco ainda não confirmou ("Anotado"). Aqui se lança o
+// 06/10/2026 — o Pix lançado à mão que o banco ainda não confirmou ("Anotado") e, desde 27/10, o Pix
+// que o banco já trouxe e espera a aprovação na fila ("Falta aprovar"). Aqui se lança o
 // DIA e, por "Registrar pagamento", o que foi pago (as mesmas funções do "Lançar" e do assistente).
 //
 // Reembolso (F2b dos comprovantes, 11/10/2026): a despesa da empresa que ele pagou do bolso, com o
@@ -30,7 +31,7 @@ import {
   type PedidoDePeriodo, type PeriodoDasDiarias,
 } from '@/lib/diarias';
 import {
-  acertoQueTrava, comoTirarOReembolso, diaParaEditar, pagamentoDividido, pagamentoQueSeDivide, useAcertos, useContaCorrente,
+  acertoQueTrava, comoTirarOReembolso, diaParaEditar, pagamentoDividido, pagamentoNaFila, pagamentoQueSeDivide, useAcertos, useContaCorrente,
   useDividirPagamentoDoFreelancer, useExcluirDiaComDesfazer, usePropostaDeDivisao, useResumoFreelancers,
   type Acerto, type DiaParaEditar, type FreelancerNoResumo,
 } from '@/hooks/use-diarias';
@@ -269,6 +270,11 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
                   Inclui <span className="tabular-nums">{formatCurrency(p.pago_aguardando_banco)}</span> lançado(s) à mão, aguardando o banco confirmar.
                 </p>
               )}
+              {p.pago_falta_aprovar > 0 && (
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+                  Inclui <span className="tabular-nums">{formatCurrency(p.pago_falta_aprovar)}</span> em Pix que já saiu do banco para ele e falta aprovar na fila de lançamentos.
+                </p>
+              )}
               <AcoesDaLinha
                 className="mt-3 justify-start"
                 rotulo={p.nome}
@@ -288,7 +294,8 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
       <p className="text-xs text-muted-foreground">
         Saldo = saldo inicial + dias trabalhados (diária + extras − descontos) + reembolso de despesas pagas pelo técnico (com comprovante) − o que ele recebeu. Os pagamentos vêm do
         extrato do banco; o Pix registrado à mão ("Registrar pagamento" ou "Lançar") aparece na hora como "aguardando o
-        banco" e já desconta — não lance de novo quando a linha do banco chegar.
+        banco" e já desconta — não lance de novo quando a linha do banco chegar. O Pix que saiu do banco para o CPF dele
+        também desconta, como "falta aprovar", até ser aprovado na fila.
       </p>
     </div>
   );
@@ -403,7 +410,12 @@ function Extrato({ favorecidoId, periodo, onEditar, onRecibo, gerandoPdf }: {
                 ) : (
                   <>
                     <div className="flex flex-wrap items-center gap-x-2 text-sm">
-                      {l.aguardando ? (
+                      {pagamentoNaFila(l) ? (
+                        <Badge variant="outline" className="text-amber-700 dark:text-amber-400"
+                               title="Já saiu do banco para ele; vira o pagamento quando for aprovado na fila de lançamentos">
+                          Falta aprovar
+                        </Badge>
+                      ) : l.aguardando ? (
                         <Badge variant="outline" className="text-amber-700 dark:text-amber-400"
                                title="Lançado à mão; vira o pagamento do banco quando a linha chegar e for aprovada">
                           Anotado

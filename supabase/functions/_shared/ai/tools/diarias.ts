@@ -23,7 +23,7 @@ import { chaveDeEnvio, liberarEnvio } from "../../whatsapp/idempotencia.ts";
 import { desviadoPorTeste } from "../../whatsapp/marcar-enviado.ts";
 import { guardarEEntregar, limitarNomeDoArquivo } from "../../pdf/gerar-e-guardar.ts";
 import {
-  montarExtratoHtml, montarReciboHtml, nomeDoArquivo, numeroDoRecibo, ROTULO_REEMBOLSO, ROTULO_REEMBOLSOS, type ContaDoExtrato,
+  CONTA_FALTA_APROVAR, montarExtratoHtml, montarReciboHtml, nomeDoArquivo, numeroDoRecibo, ROTULO_REEMBOLSO, ROTULO_REEMBOLSOS, type ContaDoExtrato,
 } from "../../diarias/extrato.ts";
 import { codigoDoCmp } from "./comprovantes.ts";
 
@@ -1006,6 +1006,8 @@ export const diariasTools: ToolDef[] = [
           ...(Number(x.reembolsos) > 0 ? { reembolsos: Number(x.reembolsos) } : {}),
           pago: Number(x.pago),
           ...(Number(x.pago_aguardando_banco) > 0 ? { pago_lancado_a_mao_aguardando_banco: Number(x.pago_aguardando_banco) } : {}),
+          // 27/10/2026: o Pix que já saiu do banco para ele e espera a fila — já está no "pago"
+          ...(Number(x.pago_falta_aprovar) > 0 ? { pago_no_banco_falta_aprovar_na_fila: Number(x.pago_falta_aprovar) } : {}),
           saldo: Number(x.saldo_final), situacao: ESTADO[x.estado] ?? x.estado, ultimo_pagamento: x.ultimo_pagamento,
         }));
         return { pessoas };
@@ -1033,7 +1035,11 @@ export const diariasTools: ToolDef[] = [
             ...(l.observacao ? { observacao: l.observacao } : {}),
           };
         }
-        return { data: l.data, pagamento: Number(l.pago), de_onde: l.aguardando ? "lançado à mão, aguardando o banco" : l.conta };
+        return {
+          data: l.data, pagamento: Number(l.pago),
+          de_onde: l.conta === CONTA_FALTA_APROVAR ? "Pix já no banco, falta aprovar na fila de lançamentos"
+            : l.aguardando ? "lançado à mão, aguardando o banco" : l.conta,
+        };
       });
       const dias = todas.filter((l) => l.tipo === "dia");
       const soma = (k: string) => Math.round(dias.reduce((s, l) => s + (Number(l[k]) || 0), 0) * 100) / 100;
@@ -1045,6 +1051,7 @@ export const diariasTools: ToolDef[] = [
         // F2b: as despesas da empresa que ele pagou (comprovante), que entram no próximo acerto
         reembolsos: Number(c.reembolsos ?? 0) || 0,
         pago: Number(c.pago),
+        ...(Number(c.pago_falta_aprovar) > 0 ? { pago_no_banco_falta_aprovar_na_fila: Number(c.pago_falta_aprovar) } : {}),
         extras_no_periodo: soma("extras"), descontos_no_periodo: soma("descontos"),
         saldo: Number(c.saldo_final), situacao: ESTADO[c.estado] ?? c.estado,
         ultimos_lancamentos: linhas,

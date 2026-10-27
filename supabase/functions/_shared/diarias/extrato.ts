@@ -46,9 +46,14 @@ export interface LinhaDoExtrato {
   observacao: string | null;
   os: { id: string; numero: string }[];
   saldo: number;
-  /** Pagamento lançado à mão que o banco ainda não confirmou (já desconta). */
+  /** Pagamento ainda sem lançamento (já desconta): anotado à mão, ou já no banco esperando a fila. */
   aguardando?: boolean;
 }
+
+/** O Pix que o banco já trouxe e espera a aprovação na fila (a frase vem do banco na coluna "conta"). */
+export const CONTA_FALTA_APROVAR = 'No banco — falta aprovar na fila';
+/** Só o anotado à mão é "ainda não confirmado pelo banco"; o que já está na fila saiu de fato. */
+const lancadoAMao = (l: Pick<LinhaDoExtrato, 'aguardando' | 'conta'>) => !!l.aguardando && l.conta !== CONTA_FALTA_APROVAR;
 
 export interface ContaDoExtrato {
   favorecido: { id: string; nome: string; desde: string | null; saldo_inicial: number; diaria: number | null };
@@ -166,7 +171,7 @@ export function montarExtratoHtml(p: {
   const { empresa, freelancer, conta } = p;
   const dias = conta.linhas.filter((l) => l.tipo === 'dia');
   const pagamentos = conta.linhas.filter((l) => l.tipo === 'pagamento');
-  const aguardando = pagamentos.some((l) => l.aguardando);
+  const aguardando = pagamentos.some(lancadoAMao);
   // Reembolso de comprovante (F2b): coluna no total e seção própria SÓ quando há — sem ele, o
   // documento é byte a byte o de antes (teste em src/lib/extrato-diarias.test.ts).
   const reembolsos = reembolsosDe(conta.linhas);
@@ -186,7 +191,7 @@ export function montarExtratoHtml(p: {
       </tr>`;
   const linhaDoPagamento = (l: LinhaDoExtrato) => `
       <tr>
-        <td>${dataBR(l.data)}</td><td>${esc(l.aguardando ? 'Pix lançado à mão *' : l.conta ?? '')}</td><td>${esc(l.descricao ?? '')}</td>
+        <td>${dataBR(l.data)}</td><td>${esc(lancadoAMao(l) ? 'Pix lançado à mão *' : l.aguardando ? 'Pix (extrato do banco)' : l.conta ?? '')}</td><td>${esc(l.descricao ?? '')}</td>
         <td class="n b">${brl(l.pago)}</td>
       </tr>`;
   const linhaDoReembolso = (l: LinhaDoExtrato) => `
@@ -391,7 +396,7 @@ export function montarReciboHtml(p: {
       <tr><td>${dataBR(l.data)}</td><td>${diaDaSemana(l.data)}</td><td>${esc(tipoDoDia(l.jornada))}</td>
         <td>${esc(l.os.map((o) => o.numero).join(', '))}</td><td class="n">${brl(l.trabalhado)}</td></tr>`;
   const linhaDoVale = (l: LinhaDoExtrato) => `
-      <tr><td>${dataBR(l.data)}</td><td>${esc(l.descricao ?? '')}${l.aguardando ? ' *' : ''}</td><td class="n">${brl(l.pago)}</td></tr>`;
+      <tr><td>${dataBR(l.data)}</td><td>${esc(l.descricao ?? '')}${lancadoAMao(l) ? ' *' : ''}</td><td class="n">${brl(l.pago)}</td></tr>`;
   const linhaDoReembolso = (l: LinhaDoExtrato) => `
       <tr><td>${dataBR(l.data)}</td><td>${esc(l.conta ?? '')}</td><td>${esc(descricaoDoReembolso(l))}</td><td class="n">${brl(l.trabalhado)}</td></tr>`;
   // O recibo é a declaração do prestador ("Recebi…"), mas quem mais lê é a contadora: o reembolso
@@ -471,7 +476,7 @@ export function montarReciboHtml(p: {
     <tr><td>(−) Vales e adiantamentos já pagos</td><td class="n">${brl(acerto.pago_no_periodo)}</td></tr>
     <tr class="total"><td>${aReceber ? 'Valor deste recibo' : 'Saldo'}</td><td class="n">${brl(acerto.valor_do_acerto)}</td></tr>
   </table>
-  ${vales.some((l) => l.aguardando) ? '<p class="nota">* Pix lançado à mão, ainda não confirmado pelo extrato do banco quando o acerto foi fechado.</p>' : ''}
+  ${vales.some(lancadoAMao) ? '<p class="nota">* Pix lançado à mão, ainda não confirmado pelo extrato do banco quando o acerto foi fechado.</p>' : ''}
   ${freelancer.pix ? `<p class="nota">Chave Pix do prestador: ${esc(freelancer.pix)}</p>` : ''}
 
   <p class="local">${esc(empresa.cidade || '')}${empresa.cidade ? ', ' : ''}${dataPorExtenso(p.geradoEm)}.</p>
@@ -523,7 +528,7 @@ export function linhasDoCsv(contas: Array<{ conta: ContaDoExtrato; documento: st
       linhas.push({
         _ordem: `${l.data}|${ORDEM_NO_DIA[l.tipo] ?? 2}|${conta.favorecido.nome}`,
         data: dataBR(l.data),
-        tipo: dia ? 'Diária' : reembolso ? ROTULO_REEMBOLSO : l.aguardando ? 'Pagamento (aguardando o banco)' : 'Pagamento',
+        tipo: dia ? 'Diária' : reembolso ? ROTULO_REEMBOLSO : lancadoAMao(l) ? 'Pagamento (aguardando o banco)' : l.aguardando ? 'Pagamento (falta aprovar na fila)' : 'Pagamento',
         freelancer: conta.favorecido.nome,
         cpf: documentoFormatado(documento),
         jornada: dia ? tipoDoDia(l.jornada) : '',

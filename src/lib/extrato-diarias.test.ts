@@ -87,6 +87,17 @@ describe('extrato de diárias em PDF', () => {
     expect(html).not.toContain('ainda não confirmado');
     expect(linhasDoCsv([{ conta: c, documento: null }]).filter((l) => l.tipo === 'Pagamento (aguardando o banco)')).toHaveLength(1);
   });
+
+  it('Pix que o banco já trouxe e espera a fila: saiu de fato, sem a marca de "lançado à mão"', () => {
+    const c = conta();
+    c.linhas = [...c.linhas, { ...c.linhas[2], id: 'b1', aguardando: true, conta: 'No banco — falta aprovar na fila' }];
+    const h = montarExtratoHtml({ empresa: { nome: 'HBR', cnpj: null, cidade: null },
+      freelancer: { nome: 'Roberto', documento: null, pix: null }, conta: c, geradoEm: new Date() });
+    expect(h).toContain('Pix (extrato do banco)');
+    expect(h).not.toContain('Pix lançado à mão');
+    expect(h).not.toContain('ainda não confirmado');
+    expect(linhasDoCsv([{ conta: c, documento: null }]).filter((l) => l.tipo === 'Pagamento (falta aprovar na fila)')).toHaveLength(1);
+  });
 });
 
 describe('CSV do contador', () => {

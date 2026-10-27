@@ -5,7 +5,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import type { EstadoDoSaldo, Jornada } from '@/lib/diarias';
-import { ROTULO_REEMBOLSOS } from '@/lib/extrato-diarias';
+import { CONTA_FALTA_APROVAR, ROTULO_REEMBOLSOS } from '@/lib/extrato-diarias';
 import { mensagemDoErro, recarregarFinanceiro } from '@/hooks/use-lancamentos';
 
 export interface FreelancerNoResumo {
@@ -27,6 +27,8 @@ export interface FreelancerNoResumo {
   ate: string | null;
   /** Pix anotado à mão que o banco ainda não confirmou — já está no "pago". */
   pago_aguardando_banco: number;
+  /** Pix que o banco já trouxe e espera a aprovação na fila — já está no "pago". */
+  pago_falta_aprovar: number;
 }
 
 export interface ResumoDosFreelancers {
@@ -81,6 +83,7 @@ export interface ContaCorrente {
   pago: number;
   reembolsos: number;
   pago_aguardando_banco: number;
+  pago_falta_aprovar: number;
   saldo_final: number;
   estado: EstadoDoSaldo;
 }
@@ -99,7 +102,8 @@ export function useResumoFreelancers(de: string | null, ate: string | null, atal
         pessoas: (r.pessoas ?? []).map((p) => ({
           ...p, diaria: numOuNulo(p.diaria), dias: num(p.dias), trabalhado: num(p.trabalhado),
           pago: num(p.pago), reembolsos: num(p.reembolsos), saldo_final: num(p.saldo_final),
-          pago_aguardando_banco: num(p.pago_aguardando_banco), de: p.de ?? null, ate: p.ate ?? null,
+          pago_aguardando_banco: num(p.pago_aguardando_banco), pago_falta_aprovar: num(p.pago_falta_aprovar),
+          de: p.de ?? null, ate: p.ate ?? null,
         })),
         trabalhado: num(r.trabalhado), pago: num(r.pago), reembolsos: num(r.reembolsos), dias: num(r.dias),
         deve: num(r.deve), adiantado: num(r.adiantado),
@@ -126,7 +130,7 @@ export async function lerContaCorrente(
     atalho: c.atalho ?? null,
     saldo_anterior: num(c.saldo_anterior), dias: num(c.dias), trabalhado: num(c.trabalhado),
     pago: num(c.pago), reembolsos: num(c.reembolsos), saldo_final: num(c.saldo_final),
-    pago_aguardando_banco: num(c.pago_aguardando_banco),
+    pago_aguardando_banco: num(c.pago_aguardando_banco), pago_falta_aprovar: num(c.pago_falta_aprovar),
     favorecido: { ...c.favorecido, saldo_inicial: num(c.favorecido.saldo_inicial), diaria: numOuNulo(c.favorecido.diaria) },
     linhas: (c.linhas ?? []).map((l) => ({
       ...l, trabalhado: num(l.trabalhado), pago: num(l.pago), saldo: num(l.saldo),
@@ -611,6 +615,13 @@ export function divisaoEscolhida(emAberto: ReembolsoEmAberto[], ids: readonly st
 
 /** O sufixo que o banco põe no pagamento já dividido ("… (inclui reembolso de despesas pagas pelo técnico: R$ 92,00)"). */
 const SUFIXO_DA_DIVISAO = `(inclui ${ROTULO_REEMBOLSOS.toLowerCase()}`;
+
+/**
+ * O Pix que já saiu do banco para ele e espera a aprovação na fila de lançamentos (27/10/2026): já desconta,
+ * como o anotado, mas não está "aguardando o banco". O banco devolve esta frase na coluna "conta".
+ */
+export const pagamentoNaFila = (l: Pick<LinhaDaContaCorrente, 'tipo' | 'aguardando' | 'conta'>) =>
+  l.tipo === 'pagamento' && l.aguardando && l.conta === CONTA_FALTA_APROVAR;
 
 /** O pagamento da conta corrente já foi dividido entre diárias e reembolso? */
 export const pagamentoDividido = (l: Pick<LinhaDaContaCorrente, 'tipo' | 'aguardando' | 'descricao'>) =>
