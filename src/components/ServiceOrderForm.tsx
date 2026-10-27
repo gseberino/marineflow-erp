@@ -68,6 +68,7 @@ import { printPDF } from '@/lib/pdf-print';
 import type { PDFOptions } from '@/lib/pdf-generator';
 import { PDFOptionsDialog } from '@/components/PDFOptionsDialog';
 import { RegisterDepositDialog } from '@/components/RegisterDepositDialog';
+import { useConverterSemSinal } from '@/components/ConverterSemSinal';
 import { CompletionSendDialog } from '@/components/CompletionSendDialog';
 import { FaturarOsDialog } from '@/components/fiscal/FaturarOsDialog';
 import { useOptionalAuth } from '@/hooks/use-auth';
@@ -82,7 +83,7 @@ import { ServiceOrderSignatures } from '@/components/ServiceOrderSignatures';
 import { WhatsAppSendHistoryDialog } from '@/components/WhatsAppSendHistoryDialog';
 import { SendViaWhatsAppDialog, type SendViaWhatsAppTarget } from '@/components/SendViaWhatsAppDialog';
 import { useWhatsAppSendHistory } from '@/hooks/use-whatsapp-send-log';
-import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles } from 'lucide-react';
+import { CheckCircle2, XCircle, History as HistoryIcon, Send, Sparkles, ArrowRightCircle } from 'lucide-react';
 import { decideAutosave } from '@/lib/autosave-guard';
 import { manterSeMexeu, mesclarReleitura, mesmoValor } from '@/lib/releitura-da-os';
 import { trocarEmbarcacaoNoForm } from '@/lib/troca-de-cliente';
@@ -280,6 +281,7 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
   const createSO = useCreateServiceOrder();
   const updateSO = useUpdateServiceOrder();
   const updateStatus = useUpdateServiceOrderStatus();
+  const semSinal = useConverterSemSinal();
   const cancelSO = useCancelServiceOrder();
   const reopenSO = useReopenServiceOrder();
   const duplicate = useDuplicateServiceOrder();
@@ -2067,24 +2069,44 @@ export function ServiceOrderForm({ orderId, orderData, isLoading }: Props) {
 
       {/* Deposit pending banner */}
       {!isNew && (orderData as any)?.quote_status === 'awaiting_deposit' && form.status === 'draft' && (
-        <div className="flex items-center justify-between rounded-lg border border-orange-200 bg-orange-50 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4">
           <div className="flex items-center gap-2">
             <DollarSign className="h-5 w-5 text-orange-600 shrink-0" />
             <div>
               <p className="text-sm font-medium text-orange-800">Aguardando pagamento do sinal</p>
-              <p className="text-xs text-orange-600 mt-0.5">O orçamento será convertido em OS automaticamente após o registro.</p>
+              <p className="text-xs text-orange-600 mt-0.5">
+                O orçamento será convertido em OS automaticamente após o registro — ou converta sem
+                sinal, com o valor inteiro na conclusão.
+              </p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-orange-300 text-orange-700 hover:bg-orange-100 gap-1 shrink-0"
-            onClick={() => setDepositDialogOpen(true)}
-          >
-            <DollarSign className="h-4 w-4" /> Registrar sinal
-          </Button>
+          <div className="flex gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-orange-300 text-orange-700 hover:bg-orange-100 gap-1"
+              onClick={() => setDepositDialogOpen(true)}
+            >
+              <DollarSign className="h-4 w-4" /> Registrar sinal
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              disabled={semSinal.convertendo}
+              onClick={() => semSinal.pedir({
+                id: orderId!,
+                number: orderData?.service_order_number,
+                client: clienteDaOs?.name ?? null,
+                grandTotal,
+              })}
+            >
+              <ArrowRightCircle className="h-4 w-4" /> Converter sem sinal
+            </Button>
+          </div>
         </div>
       )}
+      {semSinal.dialogo}
 
       {/* Deposit dialog */}
       {!isNew && orderId && (

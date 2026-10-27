@@ -102,9 +102,23 @@ export function calcInstallmentAmount(
   return round2(gross * ctx.discountRatio);
 }
 
-/** Sinal (depósito): primeira linha com tipo 'aprovacao' OU days=0. */
+/**
+ * A parcela é o SINAL quando é `tipo='aprovacao'`, ou — em condições antigas sem tipo — quando cai
+ * no dia 0. Mesma regra de `isSignalInstallment` em quote-deposit.ts.
+ *
+ * O tipo vem ANTES do dia: uma parcela "na entrega" também tem days=0 e não é sinal. Com a checagem
+ * só por dia, a condição "100% na entrega" aparecia na OS como "● sinal" e oferecia "Registrar
+ * sinal" do valor inteiro — o contrário do combinado (tudo na conclusão).
+ */
+export function isSignalRow(r: Pick<InstallmentRow, 'tipo' | 'days_after_approval'>): boolean {
+  if (r.tipo === 'aprovacao') return true;
+  if (r.tipo === 'entrega' || r.tipo === 'prazo') return false;
+  return r.days_after_approval === 0;
+}
+
+/** Sinal (depósito): primeira linha que é sinal (ver isSignalRow). */
 export function findSignalRow(rows: InstallmentRow[]): InstallmentRow | undefined {
-  return rows.find((r) => r.tipo === 'aprovacao' || r.days_after_approval === 0);
+  return rows.find(isSignalRow);
 }
 
 /** Simulador de Recebimento no cartão: bruto a cobrar para líquido = base. */

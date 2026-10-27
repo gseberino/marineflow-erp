@@ -134,6 +134,19 @@ describe('findSignalRow', () => {
     ]);
     expect(findSignalRow(rows)?.label).toBe('b');
   });
+  it("'na entrega' com days=0 NÃO é sinal (condição 100% na entrega)", () => {
+    const rows = normalizeInstallmentRows([
+      { label: 'Total', services_pct: 100, parts_pct: 100, expenses_pct: 100, days_after_approval: 0, tipo: 'entrega' },
+    ]);
+    expect(findSignalRow(rows)).toBeUndefined();
+  });
+  it('acha a entrada mesmo depois de uma parcela na entrega', () => {
+    const rows = normalizeInstallmentRows([
+      { label: 'Saldo', services_pct: 50, parts_pct: 50, days_after_approval: 0, tipo: 'entrega' },
+      { label: 'Entrada', services_pct: 50, parts_pct: 50, days_after_approval: 0, tipo: 'aprovacao' },
+    ]);
+    expect(findSignalRow(rows)?.label).toBe('Entrada');
+  });
 });
 
 describe('simulateCardReceipt', () => {
