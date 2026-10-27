@@ -3013,3 +3013,60 @@ porque só o dono pode preenchê-las.
 - **Corrigido no P1:** o cadastro inativo com um ativo do mesmo nome vale como o ativo que ficou (`_agenda_prazo_do_fornecedor`,
   com `principal_id`). A fixture de 23/10 tem as duas ativas (o caso da spec), e o B5 de `agenda_fase4_base.sql` prova os dois.
   A pergunta "a Kamell está cadastrada duas vezes" (P5) e os evals C43/C44 (P6) só acontecem com as duas ativas.
+
+### [NOVO-agenda-37] OS sem telefone do cliente
+
+- **Encontrado em:** Agenda de Produção, Fase 5, conferência da spec (27/10/2026, `m5_03`, `m5_05`).
+- **O quê:** das 9 OS ativas, 3 são de clientes sem nenhum número no cadastro: Lenine (OS-00074) e Rodrigo (OS-00076 e
+  OS-00096). Nenhuma mensagem automática chega a eles.
+- **Na Fase 5:** `_agenda_cliente_telefone` (P1) devolve nulo, o contexto diz `telefone_ok = false`, o envio recusa
+  `sem_telefone` (P2) e o foco `clientes` mostra "sem telefone no cadastro" (P5). O cadastro do número é do dono (operacional).
+
+### [NOVO-agenda-38] Nenhum acesso registrado
+
+- **Encontrado em:** Agenda de Produção, Fase 5, conferência da spec (27/10/2026, `m5_05`).
+- **O quê:** nenhuma das 9 OS ativas tem `site_access`, e nenhum barco nem marina tem `access_notes`. Hoje, toda véspera seria a
+  variante com a pergunta de acesso (M4).
+- **Na Fase 5:** o contexto (P1) tem `acesso_conhecido` (a OS, o bem, a marina ou o acesso dito há até
+  `cliente_acesso_validade_dias`); a véspera sem acesso é o tipo `acesso` (P3) e a resposta do cliente com o acesso é anotada no
+  campo "Acesso ao local" da OS, só acrescentando e com *desfaz* (P4).
+
+### [NOVO-agenda-39] A data dita ao cliente só existe no áudio
+
+- **Encontrado em:** Agenda de Produção, Fase 5, conferência da spec (27/10/2026, `m5_14`, `m5_15`).
+- **O quê:** em 60 dias o dono mandou 12 mensagens com palavra de data a 3 clientes (Flávio 5, Giancarlo 6, Nelson 1); 11 em
+  áudio, três numa rodada entre 07:51 e 07:56 de 15/10 e duas depois das 21h (Flávio, 24/10 às 21:14 e 21:42). O sistema não
+  guarda nenhuma: 0 OS `scheduled`, 0 confirmações pedidas e 0 R15 na história.
+- **Na Fase 5:** `os_planejamento.prometido_*` (P1) guarda o que foi DITO (≠ o plano), com o 1º em `prometido_original_ate`; é
+  gravado quando a mensagem com data sai (P2), pelo botão antigo de confirmação (P2) e pelo *grava* do dono ("falei pro Flávio
+  que é dia 3", P5). Começa vazio.
+
+### [NOVO-agenda-40] Nenhuma foto ligada à OS
+
+- **Encontrado em:** Agenda de Produção, Fase 5, conferência da spec (27/10/2026, `m5_16`–`m5_18`).
+- **O quê:** `service_order_photos` tem 0 linhas, e das 277 imagens do WhatsApp em 60 dias nenhuma tem `service_order_id`. A
+  fila (`whatsapp_send_queue`) não tem coluna de mídia.
+- **Na Fase 5:** o M5 (andamento) e o M8 (pronto) saem só com texto (d6). A foto fica para depois (decisão do dono).
+
+### [NOVO-agenda-41] O leitor de respostas nunca leu nada
+
+- **Encontrado em:** Agenda de Produção, Fase 5, conferência da spec (27/10/2026, `m5_04`).
+- **O quê:** `ai_comms_log` tem 9 linhas desde 23/07, nenhuma com `reply_intent`. O "fecha o loop" do webhook só marca o que a
+  agenda e o assistente registraram ali.
+- **Na Fase 5:** a resposta do cliente à mensagem da agenda é lida à parte (`agenda_resposta_do_cliente`, P4) e registrada em
+  `agenda_cliente_respostas` (P1); o `manejarRespostaAutomatica` não muda.
+
+### [NOVO-agenda-42] Contato "MP" domina a conversa com clientes — conferido: NÃO é número interno
+
+- **Encontrado em:** Agenda de Produção, Fase 5, conferência da spec (27/10/2026, `m5_13`, `m5_14`).
+- **O quê:** um cliente com OS ativa ou concluída em 90 dias tem 427 mensagens recebidas e 272 enviadas em 60 dias e domina as
+  contagens da conversa com clientes (596 recebidas com ele, 169 sem ele).
+- **Conferido no P1 (27/10/2026, SELECT `m5p1_01_mp`, só contagens, nenhum telefone lido):** é o cadastro "MP MOTOR HOMES"
+  (empresa, ativo, 6 OS, nenhuma ativa; a última atualizada em 20/10), com UM número (o mesmo em `phone` e `whatsapp`). Os 8
+  últimos dígitos NÃO batem com nenhum login (`app_users.phone`/`phone_normalized`), nenhum payee (dono, equipe, diarista) nem
+  nenhum fornecedor, e nenhum outro cliente usa o número. É um cliente de verdade (uma empresa de motorhomes) que conversa muito
+  com a HBR, não o dono nem a equipe.
+- **Na Fase 5:** fica como cliente comum. A regra continua valendo para todos: `_agenda_cliente_telefone` (P1) devolve nulo para
+  o número do dono, da equipe ou de quem recebe diária, e o leitor da resposta (P4) não lê esses números como cliente. Como o
+  volume dele é alto, a "conversa viva" (d19) e o teto por cliente vão segurar mensagens dele mais que a média: a medição da
+  Fase 5 deve olhar o MP à parte.
