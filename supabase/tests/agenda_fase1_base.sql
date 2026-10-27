@@ -111,7 +111,11 @@ select format('A6 agenda_config nasce com %s = %s', x.coluna, x.esperado),
                ('modo_vigia', case when to_regclass('public.agenda_alocacoes') is null then '''desligado''::text'
                                    else '''sombra''::text' end),
                ('modo_equipe', '''desligado''::text'),
-               ('modo_cliente', '''desligado''::text'), ('versao_plano', '0'), ('dia_do_plano', '4'),
+               -- FASE 5: a Fase 5 (20261028100000, a migration que cria agenda_cliente_mensagens) o faz nascer 'sombra'.
+               ('modo_cliente', case when to_regclass('public.agenda_cliente_mensagens') is null then '''desligado''::text'
+                                     else '''sombra''::text' end),
+               -- FASE 5: fim
+               ('versao_plano', '0'), ('dia_do_plano', '4'),
                ('medicao_semanas', '8'), ('equipe_recente_dias', '14'), ('frequencia_minima', '0.25'),
                ('carga_max', '0.80')) as x(coluna, esperado)
   left join pg_attribute a on a.attrelid = 'public.agenda_config'::regclass and a.attname = x.coluna
@@ -407,8 +411,16 @@ begin
        'agenda_config_fornecedor_dia_max_check', 'agenda_config_fornecedor_semana_max_check',
        'agenda_config_fornecedor_total_dia_max_check', 'agenda_config_fornecedor_conversa_dias_check',
        'agenda_config_fornecedores_principais_max_check',
-       'os_material_comprado_fonte_check', 'os_material_previsao_original_fonte_check', 'os_material_original_coerente']));
+       'os_material_comprado_fonte_check', 'os_material_previsao_original_fonte_check', 'os_material_original_coerente']))
      -- FASE 4: fim
+     -- FASE 5: os 24 que a Fase 5 pôs em agenda_config (agenda_config_cliente_*; o de modo_cliente é da Fase 1 e tem caso
+     -- aqui) e os 6 de os_planejamento (20261028100000) têm o caso deles em agenda_fase5_base.sql (B1z cobra os de
+     -- agenda_config pelo nome e conta 25 com o de modo_cliente; o outro B1z, os 6 de os_planejamento).
+     and c.conname !~ '^agenda_config_cliente_'
+     and not (c.conname = any (array[
+       'prometido_coerente', 'prometido_faixa', 'prometido_original', 'os_planejamento_prometido_tipo_check',
+       'os_planejamento_prometido_fonte_check', 'os_planejamento_servico_cliente_check']));
+     -- FASE 5: fim
   insert into _resultado values ('B todo CHECK das 6 tabelas tem um caso que ele recusa', v_sem_caso is null, v_sem_caso);
 end
 $b$;
@@ -822,7 +834,10 @@ insert into _definer_da_agenda values
   ('agenda_material_vigiar'), ('_agenda_fornecedor_registrar'), ('_agenda_fornecedor_enfileirar'), ('_agenda_fila_do_fornecedor'),
   -- FASE 4 (P6): as leituras do foco compras e do foco fornecedores (conferem quem vê antes de tudo e leem o que só o
   -- service_role lê: os fornecedores principais, as compras vivas, a fila do WhatsApp). A espera de peça e os textos não.
-  ('_agenda_ver_compras'), ('_agenda_ver_fornecedores');
+  ('_agenda_ver_compras'), ('_agenda_ver_fornecedores'),
+  -- FASE 5 (P1): a gravação do que foi dito ao cliente (escreve os_planejamento.prometido_*: o envio, o botão antigo e o
+  -- *grava* do dono a chamam por dentro; sem grant a ninguém). O contexto, os textos e o proibido não.
+  ('_agenda_cliente_gravar_prometido'), ('_agenda_cliente_prometer'), ('_agenda_cliente_prometer_confirmacao');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

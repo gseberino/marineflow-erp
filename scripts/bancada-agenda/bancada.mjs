@@ -20,7 +20,8 @@
 //      (MIGRATIONS_DEPOIS_DO_SNAPSHOT: o acerto de diárias de 06/10, que trava o dia pago);
 //   4. as migrations do worktree a partir de 20261024150000, em ordem, DUAS vezes (prova de idempotência),
 //      menos o que é dado de produção e não estrutura (a faxina 20261024153000, os modos em sombra 20261025101000,
-//      20261026101000 e 20261027101000 e o acento das cidades 20261027102000: na bancada quem liga os modos é cada teste),
+//      20261026101000, 20261027101000 e 20261028101000 e o acento das cidades 20261027102000: na bancada quem liga os modos
+//      é cada teste),
 //      cada versão registrada em
 //      supabase_migrations.schema_migrations como em produção. A semente 20261024161000 entra: na bancada vazia ela não
 //      acha diária e não semeia (a fixture semeia o dia 23/10). `ate` corta a lista (cada pacote testa até a sua). Na 2ª
@@ -54,6 +55,8 @@ export const FORA_DA_BANCADA = new Set([
   // acento das cidades dos fornecedores (NOVO-agenda-30, OK à parte). Os testes de cada uma as rodam numa subtransação.
   '20261027101000_agenda_fase4_sombra.sql',
   '20261027102000_fornecedores_cidade_com_acento.sql',
+  // Fase 5 (P6, nome fixado pelo P1): modo_cliente em sombra. O teste dela a roda numa subtransação.
+  '20261028101000_agenda_fase5_sombra.sql',
 ]);
 
 /**
@@ -105,6 +108,10 @@ export const TABELAS = [
   // estoque (o recebimento de texto livre não pode gerar um).
   'email_accounts', 'email_messages', 'email_attachments', 'fiscal_notes', 'fiscal_note_items', 'bank_transactions',
   'finance_review_queue', 'quote_requests', 'quote_request_items', 'inventory_movements',
+  // Fase 5 (P1): o que a mensagem ao cliente lê e o leitor da resposta atravessa — o registro do assistente na conversa (o
+  // "fecha o loop" do webhook marca ali) e os números bloqueados (o opt-out que existe além de clients.opt_out_whatsapp).
+  // vessels, marinas, whatsapp_messages e whatsapp_send_queue já estão acima.
+  'ai_comms_log', 'whatsapp_blocked_numbers',
 ];
 
 /**

@@ -95,6 +95,20 @@ const FIXTURES_COMO_TEXTO = [
   // DESFAZER). A cópia de agenda_ver (L6) confere contra mig_acompanhamento_fase3, acima.
   ['agenda_teste.mig_sombra_fase4', '../../supabase/migrations/20261027101000_agenda_fase4_sombra.sql'],
   ['agenda_teste.mig_acento_fase4', '../../supabase/migrations/20261027102000_fornecedores_cidade_com_acento.sql'],
+  // Fase 5 (P1): a carteira de sex 30/10 com os clientes e a conversa (por cima da fixture-fase4) e as migrations de onde a
+  // Fase 5 copia os corpos que recria (spec-fase5 §5.7), para os testes de cada pacote conferirem que as cópias só mudam nos
+  // blocos "-- FASE 5:": a confirmação do agendamento de 30/09 e a de 12/10 (D9, P2), a vigia do fornecedor
+  // (agenda_saude, P3), o detector (agenda_desfazer, P4), as leituras da Fase 4 (agenda_ver, P5) e as notas e o Pix
+  // (_agenda_rascunho_frase, P5). As outras fontes da §5.7 já estão acima: mig_equipe_fase3 (agenda_decidir),
+  // mig_acompanhamento_fase3 (_agenda_linhas_do_fechamento), mig_rascunho_fase2 (agenda_rascunho_planejar e
+  // _agenda_aplicar_planejar) e mig_telas_fase3 (os_plano_da_os).
+  ['agenda_teste.fase5', 'fixture-fase5.sql'],
+  ['agenda_teste.mig_confirmacao', '../../supabase/migrations/20260930130000_confirmacao_do_agendamento.sql'],
+  ['agenda_teste.mig_confirmacao_1012', '../../supabase/migrations/20261012101000_numero_da_os_sem_prefixo_repetido.sql'],
+  ['agenda_teste.mig_vigia_fornecedor_fase4', '../../supabase/migrations/20261027100500_agenda_fase4_vigia_fornecedor.sql'],
+  ['agenda_teste.mig_detector_fase4', '../../supabase/migrations/20261027100400_agenda_fase4_detector.sql'],
+  ['agenda_teste.mig_leituras_fase4', '../../supabase/migrations/20261027100600_agenda_fase4_leituras.sql'],
+  ['agenda_teste.mig_notas_pix_fase4', '../../supabase/migrations/20261027100300_agenda_fase4_notas_pix.sql'],
 ];
 
 /** Testes sem a linha "bancada: depende de": de qual migration eles precisam. */

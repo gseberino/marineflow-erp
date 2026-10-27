@@ -38,6 +38,10 @@
 //     do fornecedor e os pacotes seguintes da fase, pelo prefixo). Os DEFAULTs novos de agenda_config (oc_viva_dias, os da
 //     nota, do Pix, do detector e da mensagem ao fornecedor) ficam em 20261027100000, fora de função; o prazo de cada classe
 //     continua só em prazo_classe_du/importacao_dias (20261024160000).
+//   · (Fase 5, P1) também as funções das migrations 2026102810* (os textos ao cliente, o contexto, o proibido, o prometido e
+//     os pacotes seguintes da fase, pelo prefixo). Os DEFAULTs novos de agenda_config (a janela, o teto, o intervalo, a
+//     aprovação dos primeiros dias, as horas do toque e do preparo, as validades e a conversa) ficam em 20261028100000, fora
+//     de função; o atraso longo e o remarcar confirmado são os da Fase 2 (reusados).
 // Os inteiros pequenos (0, 1, 2, 7: meios-dias por dia, dias da semana…) e os limites de tamanho de texto dos CHECKs
 // são estrutura e não entram na regra.
 import { describe, expect, it } from 'vitest';
@@ -204,7 +208,7 @@ export function corposDasFuncoes(sql: string, arquivo: string): Trecho[] {
 
 function funcoesDasMigrations(): Trecho[] {
   return fs.readdirSync(MIGRATIONS)
-    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710)\d{4}_.+\.sql$/.test(f))
+    .filter((f) => /^(2026102416|2026102510|2026102610|2026102710|2026102810)\d{4}_.+\.sql$/.test(f))
     .sort()
     .flatMap((f) => corposDasFuncoes(fs.readFileSync(path.join(MIGRATIONS, f), 'utf8').replace(/\r\n/g, '\n'), f));
 }
@@ -362,6 +366,8 @@ describe('agenda: parâmetro só em agenda_config', () => {
       'agenda_tela_semana', 'agenda_tela_carteira', 'os_plano_da_os', 'os_status_da_tela', '_os_porta_regra',
       // Fase 4 (P1): o prazo do fornecedor, o gatilho do original da previsão e o rascunho do fornecedor
       '_agenda_prazo_do_fornecedor', '_agenda_chegada_pela_classe', '_os_material_previsao_original', 'agenda_rascunho_fornecedor',
+      // Fase 5 (P1): o contexto e os textos ao cliente, o proibido e a gravação do prometido
+      '_agenda_cliente_contexto', '_agenda_cliente_texto', '_agenda_cliente_texto_proibido', '_agenda_cliente_gravar_prometido',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),
