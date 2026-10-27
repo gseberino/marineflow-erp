@@ -138,6 +138,14 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 1,
     porque: 'a semana: "N dias corridos" vira ceil(N × 5 / 7.0) dias úteis (5 úteis em 7 corridos), conversão fixa que não depende de hoje; não é parâmetro do dono',
   },
+  // Fase 5 (P2): o nome de um motivo de recusa da mensagem ao cliente (a lista fechada de
+  // agenda_cliente_mensagens.recusa_motivo, criada no P1). As horas são agenda_config.cliente_mesmo_tipo_horas.
+  ...['_agenda_cliente_revalidar', '_agenda_cliente_enfileirar', 'pedir_confirmacao_do_agendamento'].map((onde) => ({
+    onde,
+    casou: '24h',
+    vezes: 1,
+    porque: 'o nome do motivo mesmo_tipo_24h (a lista fechada de recusa_motivo); as horas vêm de cliente_mesmo_tipo_horas, não é rascunho_validade',
+  })),
 ];
 
 /** As partes do Secretário que leem a agenda (o resto do arquivo é do Secretário e tem os números dele). */
@@ -368,6 +376,9 @@ describe('agenda: parâmetro só em agenda_config', () => {
       '_agenda_prazo_do_fornecedor', '_agenda_chegada_pela_classe', '_os_material_previsao_original', 'agenda_rascunho_fornecedor',
       // Fase 5 (P1): o contexto e os textos ao cliente, o proibido e a gravação do prometido
       '_agenda_cliente_contexto', '_agenda_cliente_texto', '_agenda_cliente_texto_proibido', '_agenda_cliente_gravar_prometido',
+      // Fase 5 (P2): o envio (a hora, a revalidação, o registro, as travas, o passo da fila) e o D9 recriado
+      '_agenda_cliente_quando', '_agenda_cliente_revalidar', '_agenda_cliente_registrar', '_agenda_cliente_enfileirar',
+      '_agenda_fila_do_cliente', '_agenda_cliente_fila', 'pedir_confirmacao_do_agendamento', 'registrar_confirmacao_do_cliente',
     ]));
     expect(tsAgenda.map((t) => t.onde)).toEqual(expect.arrayContaining([
       path.join('supabase', 'functions', 'task-automations', 'agenda-vigia.ts'),

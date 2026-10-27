@@ -112,6 +112,8 @@ export const TABELAS = [
   // "fecha o loop" do webhook marca ali) e os números bloqueados (o opt-out que existe além de clients.opt_out_whatsapp).
   // vessels, marinas, whatsapp_messages e whatsapp_send_queue já estão acima.
   'ai_comms_log', 'whatsapp_blocked_numbers',
+  // Fase 5 (P2): o aviso do sino do "sim" ao pedido de confirmação (registrar_confirmacao_do_cliente, recriada no D9).
+  'app_notifications',
 ];
 
 /**

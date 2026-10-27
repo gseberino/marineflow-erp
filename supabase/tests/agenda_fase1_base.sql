@@ -837,7 +837,12 @@ insert into _definer_da_agenda values
   ('_agenda_ver_compras'), ('_agenda_ver_fornecedores'),
   -- FASE 5 (P1): a gravação do que foi dito ao cliente (escreve os_planejamento.prometido_*: o envio, o botão antigo e o
   -- *grava* do dono a chamam por dentro; sem grant a ninguém). O contexto, os textos e o proibido não.
-  ('_agenda_cliente_gravar_prometido'), ('_agenda_cliente_prometer'), ('_agenda_cliente_prometer_confirmacao');
+  ('_agenda_cliente_gravar_prometido'), ('_agenda_cliente_prometer'), ('_agenda_cliente_prometer_confirmacao'),
+  -- FASE 5 (P2): o envio ao cliente — a revalidação (lê a OS, o cliente e o plano para o pode_sair e as travas), a pergunta do
+  -- worker (agenda_cliente_pode_sair, só service_role), o registro, a 1ª trava (o enfileirar), a 2ª (o gatilho da fila) e o
+  -- gatilho do envio (o prometido e a ação). A janela, a hora, o teto, os textos ao dono e o passo "fila" não.
+  ('_agenda_cliente_revalidar'), ('agenda_cliente_pode_sair'), ('_agenda_cliente_registrar'), ('_agenda_cliente_enfileirar'),
+  ('_agenda_fila_do_cliente'), ('_agenda_cliente_enviada');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',
