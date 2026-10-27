@@ -127,6 +127,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     vezes: 1,
     porque: 'ordenação: as OS novas do turno vêm depois das que o job já tinha (1000 + posição); não é texto_max nem peca_embutida_acima',
   },
+  // Fase 4 (revisão, item 8): o prazo do cadastro guarda dias úteis por uma conversão fixa.
+  {
+    onde: 'agenda_rascunho_fornecedor',
+    casou: '7.0',
+    vezes: 1,
+    porque: 'a semana: "N dias corridos" vira ceil(N × 5 / 7.0) dias úteis (5 úteis em 7 corridos), conversão fixa que não depende de hoje; não é parâmetro do dono',
+  },
 ];
 
 /** As partes do Secretário que leem a agenda (o resto do arquivo é do Secretário e tem os números dele). */
