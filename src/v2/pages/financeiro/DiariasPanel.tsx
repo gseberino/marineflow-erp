@@ -3,7 +3,8 @@
 // O saldo vem pronto do banco (saldo inicial + trabalhado − pago). O "pago" é o que já veio do
 // extrato no nome dele (Pix, Caixa), o que um sócio pagou do próprio bolso para ele e — desde
 // 06/10/2026 — o Pix lançado à mão que o banco ainda não confirmou ("Anotado") e, desde 27/10, o Pix
-// que o banco já trouxe e espera a aprovação na fila ("Falta aprovar"). Aqui se lança o
+// que o banco já trouxe e espera a aprovação na fila ("Falta aprovar"). Só da categoria "Diárias
+// de freelancers" ou ainda sem categoria (fase 1b, 27/10: almoço e peças não abatem). Aqui se lança o
 // DIA e, por "Registrar pagamento", o que foi pago (as mesmas funções do "Lançar" e do assistente).
 //
 // Reembolso (F2b dos comprovantes, 11/10/2026): a despesa da empresa que ele pagou do bolso, com o
@@ -295,7 +296,8 @@ function Resumo({ pessoas, total, onVerExtrato, onRegistrar, onPagar, onPdf, ger
         Saldo = saldo inicial + dias trabalhados (diária + extras − descontos) + reembolso de despesas pagas pelo técnico (com comprovante) − o que ele recebeu. Os pagamentos vêm do
         extrato do banco; o Pix registrado à mão ("Registrar pagamento" ou "Lançar") aparece na hora como "aguardando o
         banco" e já desconta — não lance de novo quando a linha do banco chegar. O Pix que saiu do banco para o CPF dele
-        também desconta, como "falta aprovar", até ser aprovado na fila.
+        também desconta, como "falta aprovar", até ser aprovado na fila. Só desconta o que é da categoria "Diárias de
+        freelancers" (ou ainda sem categoria): um Pix de almoço ou de peças para ele não entra aqui.
       </p>
     </div>
   );
