@@ -99,6 +99,21 @@ begin
 end $f$;
 
 -- O corpo sem os blocos "-- FASE 4: … -- FASE 4: fim" (linhas).
+-- (Fase 5, P5) o corpo sem os blocos "-- FASE 5: … -- FASE 5: fim" (P5 recriou _agenda_rascunho_frase e _agenda_mudancas em 20261028100500).
+create function pg_temp.sem_fase5(p_corpo text) returns text[] language plpgsql as $f$
+declare
+  v_b text[] := '{}'; v_bloco boolean := false; l text;
+begin
+  foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    if not v_bloco and l ~ '^\s*-- FASE 5:' and l !~ '^\s*-- FASE 5: fim' then v_bloco := true; continue; end if;
+    if v_bloco then
+      if l ~ '^\s*-- FASE 5: fim' then v_bloco := false; end if;
+      continue;
+    end if;
+    v_b := v_b || l;
+  end loop;
+  return v_b;
+end $f$;
 create function pg_temp.sem_fase4(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
@@ -732,7 +747,10 @@ begin
       ('agenda_carona', 'public.agenda_carona(uuid, text[], text, date, timestamptz)', v_f3),
       ('_agenda_mudancas', 'public._agenda_mudancas(date, date, boolean, boolean, timestamptz)', v_f3)) as x(nome, sig, mig) loop
     if pg_temp.sem_fase4(pg_temp.corpo(f.mig, f.nome))
-         is distinct from pg_temp.sem_fase4((select p.prosrc from pg_proc p where p.oid = f.sig::regprocedure))
+         -- (Fase 5, P5) _agenda_rascunho_frase e _agenda_mudancas recriadas de novo em 20261028100500: os blocos da Fase 5
+         -- saem antes (o L8 do agenda_fase5_leituras.sql confere as cópias da Fase 5)
+         is distinct from pg_temp.sem_fase4(array_to_string(pg_temp.sem_fase5(
+                            (select p.prosrc from pg_proc p where p.oid = f.sig::regprocedure)), E'\n'))
        or (select p.prosrc from pg_proc p where p.oid = f.sig::regprocedure) !~ '-- FASE 4: \(P3\)|-- FASE 4: o aviso|-- FASE 4: "não é de serviço"|-- FASE 4: o que o aviso|-- FASE 4: \(P3\) sem pergunta'
     then
       v_ruins := v_ruins || f.nome || ' ';

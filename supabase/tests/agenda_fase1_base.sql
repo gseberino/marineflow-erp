@@ -849,7 +849,11 @@ insert into _definer_da_agenda values
   -- FASE 5 (P4): a resposta do cliente (lê o cliente pelo telefone em clients, app_users e payees, e escreve a resposta, o
   -- plano, o campo de acesso e a confirmação: só service_role). Os efeitos, a data, o restaurar e o desfazer do cliente não
   -- (agenda_desfazer, que já está acima, os chama).
-  ('agenda_resposta_do_cliente');
+  ('agenda_resposta_do_cliente'),
+  -- FASE 5 (P5): as palavras *manda cliente* / *segura cliente* e a ferramenta cliente_avisar (conferem o administrador e
+  -- escrevem a decisão e a mensagem preparada) e o foco clientes (confere quem vê; lê a fila e as respostas). A linha do
+  -- fechamento e os textos não.
+  ('agenda_cliente_decidir_dito'), ('agenda_cliente_preparar'), ('_agenda_ver_clientes');
 
 insert into _resultado
 select 'E5 security definer só a semente e as escritas do rascunho (P5) e as da Fase 2; todas com search_path fixo',

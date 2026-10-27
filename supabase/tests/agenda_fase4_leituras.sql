@@ -86,6 +86,21 @@ begin
 end $f$;
 
 -- O corpo sem os blocos "-- FASE 4: … -- FASE 4: fim" (linhas).
+-- (Fase 5, P5) o corpo sem os blocos "-- FASE 5: … -- FASE 5: fim" (P5 recriou agenda_ver em 20261028100500).
+create function pg_temp.sem_fase5(p_corpo text) returns text[] language plpgsql as $f$
+declare
+  v_b text[] := '{}'; v_bloco boolean := false; l text;
+begin
+  foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    if not v_bloco and l ~ '^\s*-- FASE 5:' and l !~ '^\s*-- FASE 5: fim' then v_bloco := true; continue; end if;
+    if v_bloco then
+      if l ~ '^\s*-- FASE 5: fim' then v_bloco := false; end if;
+      continue;
+    end if;
+    v_b := v_b || l;
+  end loop;
+  return v_b;
+end $f$;
 create function pg_temp.sem_fase4(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
@@ -435,8 +450,9 @@ begin
     end;
     v_t := pg_temp.como(null, 'service_role',
       $q$select public.agenda_ver(null, null, null, 'comprar', null, null, false, '2026-10-30') ->> 'texto'$q$);
-    v_res := pg_temp.ok(v_res, 'L3c o foco que não existe lança 22023 e a mensagem cita os 17',
-      v_t = 'erro 22023: agenda_ver: foco "comprar" não existe (tudo, livre, o_que_fazer, riscos, material, atrasos, aprontar, decisoes, mudancas, plano, ppc, diarias, marcos, comissao, equipe, compras ou fornecedores)', v_t);
+    -- (Fase 5, P5) a lista ganhou clientes (os 18)
+    v_res := pg_temp.ok(v_res, 'L3c o foco que não existe lança 22023 e a mensagem cita os 18 (com compras e fornecedores)',
+      v_t = 'erro 22023: agenda_ver: foco "comprar" não existe (tudo, livre, o_que_fazer, riscos, material, atrasos, aprontar, decisoes, mudancas, plano, ppc, diarias, marcos, comissao, equipe, compras, fornecedores ou clientes)', v_t);
     begin
       update public.agenda_config set modo_leitura = 'desligado' where id;
       r := pg_temp.ver('compras');
@@ -527,7 +543,9 @@ begin
       v_saiu := v_saiu + 1;
     end if;
   end loop;
-  v_novo := pg_temp.sem_fase4(v_src);
+  -- (Fase 5, P5) agenda_ver foi recriada de novo em 20261028100500, só com um bloco "-- FASE 5:" fora dos da Fase 4: sai antes
+  -- (o L8 do agenda_fase5_leituras.sql confere a cópia da Fase 5 contra a de 20261027100600).
+  v_novo := pg_temp.sem_fase4(array_to_string(pg_temp.sem_fase5(v_src), E'\n'));
   insert into _resultado values ('L6 a cópia de agenda_ver só muda nos blocos "-- FASE 4:" (3 blocos) e nas 5 linhas da conferência do foco (× 20261026100500)',
     v_saiu = 5 and v_novo = v_velho
     and (select count(*) from regexp_matches(v_src, '-- FASE 4: fim', 'g')) = 3,

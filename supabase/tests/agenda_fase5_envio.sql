@@ -1259,15 +1259,30 @@ begin
     begin
       perform pg_temp.ligar();
       delete from public.whatsapp_messages where phone_normalized = '5547900000304';
-      e := e || jsonb_build_object('sem_conversa', pg_temp.erro_de(format('select public.pedir_confirmacao_do_agendamento(%L, %L)', c_os, c_admin)),
-                                   'nada_gravado', not exists (select 1 from public.agenda_cliente_mensagens m where m.service_order_id = c_os));
+      -- (Fase 5, P5) o botão lê now(): fora da janela do cliente (depois das 19:00 de Brasília, domingo, feriado) a mensagem
+      -- fica registrada para a próxima manhã e a recusa sem_conversa só vem no enfileirar (o passo fila), sem erro no clique.
+      -- O teste era dependente da hora em que a bancada roda; agora confere cada caso no seu horário.
+      if public._agenda_cliente_fora_da_janela(now(), now()) is null then
+        e := e || jsonb_build_object('dentro_da_janela', true,
+          'sem_conversa', pg_temp.erro_de(format('select public.pedir_confirmacao_do_agendamento(%L, %L)', c_os, c_admin)),
+          'nada_gravado', not exists (select 1 from public.agenda_cliente_mensagens m where m.service_order_id = c_os));
+      else
+        r := public.pedir_confirmacao_do_agendamento(c_os, c_admin);
+        e := e || jsonb_build_object('dentro_da_janela', false, 'resposta', r ->> 'message',
+          'recusa_na_fila', (select public._agenda_cliente_enfileirar(m.id, m.enviar_em) ->> 'motivo'
+                               from public.agenda_cliente_mensagens m where m.service_order_id = c_os
+                              order by m.criada_em desc limit 1));
+      end if;
       raise exception 'desfaz' using errcode = 'P0096';
     exception when sqlstate 'P0096' then null;
     end;
     v_res := pg_temp.ok(v_res, 'E9f com a confirmação fora das ondas, o botão faz como hoje; a recusa da agenda (o Flávio nunca escreveu) vira o erro com o motivo, e nada fica gravado',
       (e ->> 'fora_das_ondas')::boolean
-      and e ->> 'sem_conversa' = 'P0001 Flávio não escreveu para a HBR nos últimos 365 dias: mensagem automática a quem não escreve arrisca o número. Confirme por telefone.'
-      and (e ->> 'nada_gravado')::boolean, e::text);
+      and case when (e ->> 'dentro_da_janela')::boolean
+               then e ->> 'sem_conversa' = 'P0001 Flávio não escreveu para a HBR nos últimos 365 dias: mensagem automática a quem não escreve arrisca o número. Confirme por telefone.'
+                    and (e ->> 'nada_gravado')::boolean
+               else e ->> 'resposta' like 'Pedido de confirmação a Flávio registrado: sai % (fora do horário de mensagens agora).'
+                    and e ->> 'recusa_na_fila' = 'sem_conversa' end, e::text);
 
     raise exception 'desfaz tudo' using errcode = 'P0099';
   exception when sqlstate 'P0099' then null;

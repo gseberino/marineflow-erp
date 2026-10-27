@@ -92,6 +92,21 @@ begin
 end $f$;
 
 -- O corpo de agora sem os blocos "-- FASE 4: … -- FASE 4: fim" (linhas).
+-- (Fase 5, P5) o corpo sem os blocos "-- FASE 5: … -- FASE 5: fim" (P5 recriou _agenda_rascunho_frase em 20261028100500).
+create function pg_temp.sem_fase5(p_corpo text) returns text[] language plpgsql as $f$
+declare
+  v_b text[] := '{}'; v_bloco boolean := false; l text;
+begin
+  foreach l in array string_to_array(replace(p_corpo, E'\r\n', E'\n'), E'\n') loop
+    if not v_bloco and l ~ '^\s*-- FASE 5:' and l !~ '^\s*-- FASE 5: fim' then v_bloco := true; continue; end if;
+    if v_bloco then
+      if l ~ '^\s*-- FASE 5: fim' then v_bloco := false; end if;
+      continue;
+    end if;
+    v_b := v_b || l;
+  end loop;
+  return v_b;
+end $f$;
 create function pg_temp.sem_fase4(p_corpo text) returns text[] language plpgsql as $f$
 declare
   v_b text[] := '{}'; v_bloco boolean := false; l text;
@@ -890,7 +905,8 @@ begin
     string_to_array(pg_temp.corpo(v_caminhos, 'agenda_rascunho_gravar'), E'\n')
       = pg_temp.sem_fase4((select prosrc from pg_proc where oid = 'public.agenda_rascunho_gravar(uuid, date)'::regprocedure))
     and string_to_array(pg_temp.corpo(v_rascunho, '_agenda_rascunho_frase'), E'\n')
-      = pg_temp.sem_fase4((select prosrc from pg_proc where oid = 'public._agenda_rascunho_frase(text, jsonb)'::regprocedure))
+      -- (Fase 5, P5) _agenda_rascunho_frase recriada de novo em 20261028100500: os blocos da Fase 5 saem antes
+      = pg_temp.sem_fase4(array_to_string(pg_temp.sem_fase5((select prosrc from pg_proc where oid = 'public._agenda_rascunho_frase(text, jsonb)'::regprocedure)), E'\n'))
     and (select prosrc from pg_proc where oid = 'public.agenda_rascunho_gravar(uuid, date)'::regprocedure) ~ '-- FASE 4: fim'
     and (select prosrc from pg_proc where oid = 'public._agenda_rascunho_frase(text, jsonb)'::regprocedure) ~ '-- FASE 4: fim',
     null);
