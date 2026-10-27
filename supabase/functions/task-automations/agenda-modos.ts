@@ -21,6 +21,8 @@ export interface ModosDaAgenda {
   vigia: ModoDaAgenda;
   /** A leitura falhou (as regras ficam como hoje). */
   erro?: string;
+  /** (Fase 5, P3) o modo da mensagem ao cliente, lido à parte (lerModosDoCliente): a R15 sai com a confirmação ligada. */
+  cliente?: ModosDoCliente;
 }
 
 export const MODOS_DESLIGADOS: Readonly<ModosDaAgenda> = Object.freeze({ proposta: "desligado", vigia: "desligado" });
@@ -148,4 +150,56 @@ export async function lerModosDoMaterial(db: Db): Promise<ModosDoMaterial> {
 /** (P5) A leitura falhou porque a Fase 4 ainda não está no banco: a coluna ou a tabela que não existe, a linha que falta. */
 export function leituraSemAFase4(m: Pick<ModosDoMaterial, "erro" | "codigo">): boolean {
   return m.erro !== undefined && LEITURA_SEM_A_FASE_3.has(m.codigo ?? "");
+}
+
+// ── Fase 5 (P3, 27/10/2026): o modo da mensagem ao cliente e a R15 ──────────────────────────────────────────────────
+// Lido num SELECT à parte, como os da equipe e do material: as colunas (cliente_tipos_ligados) só existem com a migration
+// 20261028100000, e um SELECT que falhasse por elas não pode derrubar os modos das Fases 2 a 4. Ilegível = desligado: a
+// R15 (a tarefa "Confirmar com fulano", que só envia com o clique do dono) continua como hoje — o lado seguro, porque
+// sem ela ninguém confirmaria com o cliente.
+
+export interface ModosDoCliente {
+  /** agenda_config.modo_cliente: a agenda manda ao cliente as mensagens-modelo (desligado | sombra | ligado). */
+  cliente: ModoDaAgenda;
+  /** agenda_config.cliente_tipos_ligados: os tipos das ondas que já saem (os outros ficam em teste). */
+  tipos: string[];
+  /** A leitura falhou (o motivo). */
+  erro?: string;
+  /** O código do erro da leitura (PostgREST/Postgres), ou SEM_LINHA / EXCECAO. */
+  codigo?: string;
+}
+
+export const CLIENTE_DESLIGADO: Readonly<ModosDoCliente> = Object.freeze({ cliente: "desligado", tipos: [] as string[] });
+
+/** Um SELECT em agenda_config (modo_cliente, cliente_tipos_ligados). Nunca lança: erro = desligado (com o motivo). */
+export async function lerModosDoCliente(db: Db): Promise<ModosDoCliente> {
+  try {
+    const { data, error } = await db.from("agenda_config").select("modo_cliente, cliente_tipos_ligados").maybeSingle();
+    if (error) {
+      return {
+        cliente: "desligado", tipos: [],
+        erro: String(error.message ?? error.code ?? "erro na leitura"),
+        codigo: String(error.code ?? "") || "SEM_CODIGO",
+      };
+    }
+    if (!data) return { cliente: "desligado", tipos: [], erro: "agenda_config sem a linha de parâmetros", codigo: "SEM_LINHA" };
+    const tipos = Array.isArray(data.cliente_tipos_ligados)
+      ? data.cliente_tipos_ligados.filter((t: unknown): t is string => typeof t === "string").map((t: string) => t.trim())
+      : [];
+    return { cliente: lerModo(data.modo_cliente), tipos };
+  } catch (e) {
+    return { cliente: "desligado", tipos: [], erro: String((e as Error)?.message ?? e), codigo: "EXCECAO" };
+  }
+}
+
+/** O motivo da R15 resolvida pela agenda (vai para o notes da tarefa viva que se resolve). */
+export const R15_DESLIGADA = "a confirmação com o cliente agora é da agenda";
+
+/**
+ * A R15 sai no mesmo instante em que a confirmação da agenda liga — a onda 2 (modo_cliente = 'ligado' E 'confirmar' em
+ * cliente_tipos_ligados; decisão d13 do dono: a regra antiga sai no dia em que a substituta entra). Sombra, desligado, a
+ * confirmação fora das ondas ou o modo ilegível = a R15 continua (o dono confirma pelo botão, como hoje).
+ */
+export function r15DesligadaPelaAgenda(m: Pick<ModosDoCliente, "cliente" | "tipos"> | null | undefined): boolean {
+  return !!m && m.cliente === "ligado" && Array.isArray(m.tipos) && m.tipos.includes("confirmar");
 }

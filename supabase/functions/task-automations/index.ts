@@ -10,17 +10,24 @@
 //   0c. A vigia da Agenda de Produção (agenda-vigia.ts, Fase 2 P3): agenda_vigiar publica a semana na quinta,
 //      replaneja quando algo muda, promove e solta reservas, pergunta o que só o dono sabe e devolve os acordes
 //      (a perda de hoje ou amanhã), que vão ao dono pelo portão. Passo à parte: nunca lança (agenda:vigia).
+//   0d. A rodada da mensagem ao cliente (agenda-cliente.ts, Fase 5 P3): agenda_cliente_vigiar roda SEMPRE o passo "fila"
+//      (o que ficou velho na fila do cliente não sai) e, com agenda_config.modo_cliente fora de desligado, decide qual
+//      mensagem-modelo vai a quem e quando (o banco escreve o texto e confere a janela, o teto e a aprovação dos 3
+//      primeiros dias). Depois da vigia (lê o plano já replanejado) e antes das regras. Passo à parte: nunca lança
+//      (agenda:cliente-vigia).
 //   1. Regras de rules.ts (RULES): criam tarefas (dedupe por automation_key) e auto-resolvem
 //      as que a condição sumiu ("Resolvido automaticamente: ..."). A R1 e a R16 saem com a agenda automática
 //      ligada (agenda_config.modo_proposta) e a R2 com a vigia ligada (modo_vigia) — o mesmo interruptor da
-//      substituta (agenda-modos.ts); as tarefas vivas delas se resolvem com o motivo da agenda.
+//      substituta (agenda-modos.ts); as tarefas vivas delas se resolvem com o motivo da agenda. A R15 sai com a
+//      confirmação da agenda ligada (modo_cliente = 'ligado' e 'confirmar' nas ondas: a onda 2).
 //   2. R10: lembrete interno (WhatsApp equipe) de OS agendada para amanhã. Sai com a ficha da agenda ligada
 //      (modo_equipe = 'ligado', decisão d13): o resumo diz "desligada: a ficha da agenda substitui".
 //   3. Processa task_reminders vencidos → app_notifications + WhatsApp interno.
 //   4. Materializa recorrências (rrule) para os próximos 30 dias.
-// O motor não manda nada a cliente. O lembrete automático de agendamento (R9) e a pesquisa
+// As regras não mandam nada a cliente. O lembrete automático de agendamento (R9) e a pesquisa
 // pós-serviço (R13), que nasciam desligados, foram aposentados em 23/10/2026 (decisão d13): a
-// confirmação com o cliente é a R15, uma tarefa que só envia com o clique do dono.
+// confirmação com o cliente é a R15, uma tarefa que só envia com o clique do dono — até a onda 2 da
+// Agenda de Produção (Fase 5), quando ela passa a ser a mensagem-modelo da agenda (0d, decidida no banco).
 // Plano: plans/marineflow-agenda-tarefas.md §6-§7.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import {
@@ -29,10 +36,11 @@ import {
 } from "./rules.ts";
 import { resolveAssignee } from "./responsavel.ts";
 import { sincronizarMaterialDaAgenda } from "./material-da-agenda.ts";
-import { lerModosDaAgenda, lerModosDaEquipe, r10DesligadaPelaAgenda } from "./agenda-modos.ts";
+import { lerModosDaAgenda, lerModosDaEquipe, lerModosDoCliente, r10DesligadaPelaAgenda } from "./agenda-modos.ts";
 import { vigiarAgenda } from "./agenda-vigia.ts";
 import { rodarRotinaDaAgenda } from "./agenda-rotina.ts";
 import { vigiarMaterialDaAgenda } from "./agenda-material.ts";
+import { vigiarClienteDaAgenda } from "./agenda-cliente.ts";
 import { expandOccurrences } from "../_shared/recurrence.ts";
 import { verificarCronSecret } from "../_shared/cron-auth.ts";
 import { logEdgeError } from "../_shared/log-error.ts";
@@ -94,6 +102,9 @@ async function runRules(db: Db, settings: Record<string, string>) {
   // Os modos da Agenda de Produção (Fase 2): com a substituta ligada, a regra antiga sai (rules.ts,
   // desligadaPelaAgenda). Ilegíveis = desligado: as regras ficam como hoje.
   const modos = await lerModosDaAgenda(db);
+  // (Fase 5, P3) o modo da mensagem ao cliente, num SELECT à parte (as colunas da Fase 5): a R15 sai com a confirmação da
+  // agenda ligada. Ilegível = desligado: a R15 fica como hoje.
+  modos.cliente = await lerModosDoCliente(db);
 
   const cooldownDays = dismissCooldownDays(settings);
   const cutoffISO = new Date(Date.now() - cooldownDays * 86400000).toISOString();
@@ -471,6 +482,18 @@ servirComCors(async (req) => {
       agendaVigia = { erro: String((e as any)?.message ?? e) };
     }
 
+    // A rodada da mensagem ao cliente (Fase 5, P3): depois da vigia (lê o plano já replanejado: a mudança no dia, o aviso de
+    // atraso) e antes das regras. Roda SEMPRE (o passo "fila" do banco vale até com tudo desligado); nada é enviado daqui.
+    // Tem o próprio try/catch (vigiarClienteDaAgenda nunca lança: devolve { erro } e grava em app_error_logs); o de fora é a
+    // segunda trava, para nada daqui parar as regras.
+    let agendaClienteVigia: unknown = null;
+    try {
+      agendaClienteVigia = await vigiarClienteDaAgenda(db, new Date());
+    } catch (e) {
+      console.error("agenda:cliente-vigia:", e);
+      agendaClienteVigia = { erro: String((e as any)?.message ?? e) };
+    }
+
     const rules = await runRules(db, settings);
     const r10 = await runTechnicianReminders(db, settings);
     const reminders = await processReminders(db);
@@ -478,7 +501,7 @@ servirComCors(async (req) => {
 
     const summary = {
       identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,
-      agenda_vigia: agendaVigia, rules, r10, reminders, recurrence,
+      agenda_vigia: agendaVigia, agenda_cliente_vigia: agendaClienteVigia, rules, r10, reminders, recurrence,
     };
     // Regra que falhou também é motivo para auditar: sem isto, um tick em que TODAS as
     // regras quebraram não deixaria registro nenhum (created e resolved vazios).

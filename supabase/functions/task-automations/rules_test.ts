@@ -1,4 +1,4 @@
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assertEquals, assertStringIncludes } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { FakeTime } from "https://deno.land/std@0.224.0/testing/time.ts";
 import {
   RULES, isRuleEnabled, ruleById, ruleIdFromKey, entityIdFromKey, keyOf, fmtBRL, fmtDate, dueAt,
@@ -1190,10 +1190,11 @@ Deno.test("motor: R9 e R13 aposentadas; o responsável vem de responsavel.ts", a
   }
   // Agenda de Produção, Fase 1 (P2): o passo do material entra no resumo, e nada que fale com cliente.
   // Fase 2 (P3): a vigia também entra no resumo. Fase 3 (P4): e a rotina da equipe, antes da vigia. Fase 4 (P5): e a vigia
-  // do material, depois do material.
+  // do material, depois do material. Fase 5 (P3): e a rodada do cliente, depois da vigia (o banco decide e enfileira; o
+  // TS só leva os acordes ao dono).
   assertEquals(fonte.replace(/\r\n/g, "\n").includes(
     "const summary = {\n      identidade, fios, agenda_material: agendaMaterial, agenda_material_vigia: agendaMaterialVigia, agenda_rotina: agendaRotina,\n" +
-      "      agenda_vigia: agendaVigia, rules, r10, reminders, recurrence,\n    };"), true);
+      "      agenda_vigia: agendaVigia, agenda_cliente_vigia: agendaClienteVigia, rules, r10, reminders, recurrence,\n    };"), true);
   assertEquals(fonte.includes('import { resolveAssignee } from "./responsavel.ts";'), true);
   assertEquals(/async function resolveAssignee/.test(fonte), false);
 });
@@ -1312,4 +1313,42 @@ Deno.test("motor: a vigia roda depois do material e antes das regras, com try/ca
   assertEquals(fonte.includes("await candidatosDaRegra(db, rule, modos)"), true);
   assertEquals(fonte.includes("await resolucaoDaTarefa(db, rule, task, modos)"), true);
   assertEquals(/rule\.find\(db\)|rule\.isResolved\(db/.test(fonte), false);
+});
+
+// ── Agenda de Produção, Fase 5 (P3, 27/10/2026): a R15 sai quando a confirmação da agenda liga (a onda 2) ─────────────
+// O mesmo molde da R1/R16 (o interruptor da substituta): com modo_cliente = 'ligado' e 'confirmar' em
+// cliente_tipos_ligados, a R15 não procura nada (nem lê o banco) e a tarefa viva se resolve com o motivo da agenda. Sombra,
+// desligado, a onda 1 só ou o modo ilegível = a R15 de hoje.
+Deno.test("agenda (Fase 5): com a confirmação ligada a R15 não procura nada e se resolve com o motivo da agenda", async () => {
+  const r15 = ruleById("r15")!;
+  const modos = { proposta: "ligado" as const, vigia: "ligado" as const,
+                  cliente: { cliente: "ligado" as const, tipos: ["material_chegou", "nova_data", "pode_atrasar", "confirmar", "vespera"] } };
+  assertEquals(motivoDaAgenda(r15, modos), "a confirmação com o cliente agora é da agenda");
+  assertEquals(await candidatosDaRegra(bancoProibido, r15, modos), []);
+  assertEquals(await resolucaoDaTarefa(bancoProibido, r15, { automation_key: "r15:so:os-1:2026-11-03" }, modos),
+               "a confirmação com o cliente agora é da agenda");
+  // com tudo ligado, são quatro as que a agenda tira
+  assertEquals(RULES.filter((r) => motivoDaAgenda(r, modos)).map((r) => r.id).sort(), ["r1", "r15", "r16", "r2"]);
+});
+
+Deno.test("agenda (Fase 5): a R15 continua em sombra, desligado, na onda 1 e com o modo do cliente ilegível", async () => {
+  const r15 = ruleById("r15")!;
+  for (const cliente of [
+    { cliente: "sombra" as const, tipos: ["confirmar"] },
+    { cliente: "desligado" as const, tipos: ["confirmar"] },
+    { cliente: "ligado" as const, tipos: ["material_chegou", "nova_data", "pode_atrasar"] },
+    { cliente: "desligado" as const, tipos: [], erro: "timeout", codigo: "57014" },
+    undefined,
+  ]) {
+    const modos = { proposta: "ligado" as const, vigia: "ligado" as const, cliente };
+    assertEquals(motivoDaAgenda(r15, modos), null, JSON.stringify(cliente));
+  }
+  // e o find de sempre roda (a OS agendada de amanhã vira a tarefa "Confirmar com …")
+  const amanha = new Date(Date.now() + 20 * 3600000).toISOString();
+  const os = { id: "so-104", service_order_number: "OS-00104", scheduled_start_at: amanha, client_id: "c-4",
+               client_confirmed_for: null, clients: { name: "Flávio", phone: null, whatsapp: "5547900000304", opt_out_whatsapp: false } };
+  const lista = await candidatosDaRegra(bancoDeOs([os]), r15,
+    { proposta: "ligado", vigia: "ligado", cliente: { cliente: "sombra", tipos: ["confirmar"] } });
+  assertEquals(lista.length, 1);
+  assertStringIncludes(lista[0].title, "Confirmar com Flávio a OS-00104");
 });

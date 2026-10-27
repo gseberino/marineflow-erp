@@ -100,9 +100,10 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     casou: '24h',
     // Fase 3 (P4): 2 na versão da Fase 2 (20261025100300) + 3 na recriada (20261026100300: as mesmas 2 e o erros_24h da
     // rotina da equipe). Fase 4 (P5): + 6 na recriada (20261027100500: as mesmas 3 e o erros_24h da rodada do material,
-    // contado e posto no bloco material).
-    vezes: 11,
-    porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h: a janela de um dia da conferência); não é rascunho_validade',
+    // contado e posto no bloco material). Fase 5 (P3): + 9 na recriada (20261028100300: as mesmas 6, o erros_24h da rodada do
+    // cliente, contado e posto no bloco cliente, e a métrica resposta_24h_pct).
+    vezes: 20,
+    porque: 'nomes das chaves do resultado (rodadas_24h, erros_24h, resposta_24h_pct: a janela de um dia da conferência); não é rascunho_validade',
   },
   // Fase 3 (P4): a rotina da equipe grava a rodada como a vigia.
   {
@@ -117,6 +118,13 @@ const EXCECOES: Array<{ onde: string; casou: string; vezes: number; porque: stri
     casou: '1000',
     vezes: 1,
     porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_vigiar e agenda_rotina_rodar); não é texto_max nem peca_embutida_acima',
+  },
+  // Fase 5 (P3): a rodada do cliente grava a rodada como a vigia, a rotina e o material.
+  {
+    onde: 'agenda_cliente_vigiar',
+    casou: '1000',
+    vezes: 1,
+    porque: 'segundos → milissegundos (a duração da rodada em agenda_vigia_rodadas, como agenda_vigiar, agenda_rotina_rodar e agenda_material_vigiar); não é texto_max nem peca_embutida_acima',
   },
   // Fase 3 (P6): o custo da simulação do livre de verdade e a ordem das OS do turno no job do Claude Max.
   {
@@ -254,6 +262,8 @@ function tsDaAgenda(): Trecho[] {
     path.join(FUNCOES, 'task-automations', 'agenda-vigia.ts'),
     // Fase 4 (P5): o passo da vigia do material no motor de 15 min.
     path.join(FUNCOES, 'task-automations', 'agenda-material.ts'),
+    // Fase 5 (P3): o passo da rodada do cliente no motor de 15 min.
+    path.join(FUNCOES, 'task-automations', 'agenda-cliente.ts'),
     // Fase 3 (P7a): os hooks das telas (a Semana, a Carteira, o cartão Plano e o que a porta aceita pela tela).
     path.join(RAIZ, 'src', 'hooks', 'use-agenda-producao.ts'),
     path.join(RAIZ, 'src', 'hooks', 'use-status-da-porta.ts'),

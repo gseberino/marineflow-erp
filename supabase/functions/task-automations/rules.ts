@@ -6,7 +6,7 @@ import { ultimoDiaDaValidade, validadeDoOrcamento, vencimentoDoOrcamento } from 
 import { diaBR, somarDiasAoDia } from '../_shared/pdf/datas.ts';
 import { nomeDaUnidade, TERMO_GERAL } from '../_shared/unidade.ts';
 import { ROTULOS_STATUS_OS, type StatusOS } from '../_shared/service-order-status.ts';
-import { MODOS_DESLIGADOS, type ModosDaAgenda } from './agenda-modos.ts';
+import { MODOS_DESLIGADOS, type ModosDaAgenda, R15_DESLIGADA, r15DesligadaPelaAgenda } from './agenda-modos.ts';
 
 export interface RuleCandidate {
   automation_key: string;
@@ -746,10 +746,16 @@ export function confirmadoParaAData(confirmadoPara: string | null | undefined, a
 // Por que assim: disparo automático para quem não escreveu primeiro é o principal motivo de
 // bloqueio do número no WhatsApp, e o número da HBR carrega todo o histórico de conversa.
 // Volume baixo e humano decidindo é o que reduz o risco — não o texto da mensagem.
+//
+// Agenda de Produção, Fase 5 (P3, 27/10/2026): quando a onda 2 liga (modo_cliente = 'ligado' com 'confirmar' em
+// cliente_tipos_ligados), a confirmação com o cliente passa a ser a mensagem-modelo da agenda (D-3 e a véspera, só a quem
+// já escreveu para a HBR, na janela e no teto, com a aprovação dos 3 primeiros dias). A R15 sai no mesmo instante, pelo
+// mesmo interruptor (o molde da R1/R16): não procura nada e as tarefas vivas se resolvem com o motivo da agenda.
 const r15: Rule = {
   id: 'r15',
   label: 'Confirmar agendamento com o cliente (tarefa, não envio)',
   defaultEnabled: true,
+  desligadaPelaAgenda: (m) => (r15DesligadaPelaAgenda(m.cliente) ? R15_DESLIGADA : null),
   async find(db) {
     // Janela: OS agendadas para as próximas 48h. A chave inclui o DIA do atendimento, então
     // remarcar para outra data gera uma tarefa nova em vez de reaproveitar a antiga.

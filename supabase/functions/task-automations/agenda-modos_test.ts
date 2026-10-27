@@ -79,3 +79,48 @@ Deno.test("motor: a rotina roda antes da vigia, com try/catch próprio; a R10 l�
   const log = r10.indexOf('action: "agenda:r10"');
   assertEquals(log > leitura && log < gate, true);
 });
+
+// ── Fase 5 (P3, 27/10/2026): o modo da mensagem ao cliente e a R15 ─────────────────────────────────────────────────
+// O que estes testes protegem:
+//  1. modo_cliente e cliente_tipos_ligados num SELECT à parte: a coluna que ainda não existe (a Fase 5 não aplicada) não
+//     toca os modos das Fases 2 a 4; ilegível (erro, sem a linha, valor estranho, exceção) = desligado e sem tipos;
+//  2. a R15 sai SÓ com modo_cliente = 'ligado' E 'confirmar' nas ondas (a onda 2); sombra, desligado, a confirmação fora
+//     da lista ou o modo ilegível = a R15 continua (o dono confirma pelo botão, como hoje).
+import { CLIENTE_DESLIGADO, lerModosDoCliente, R15_DESLIGADA, r15DesligadaPelaAgenda } from "./agenda-modos.ts";
+
+const bancoDoCliente = (resp: unknown) => ({
+  from: (t: string) => {
+    assertEquals(t, "agenda_config");
+    return { select: (c: string) => { assertEquals(c, "modo_cliente, cliente_tipos_ligados"); return { maybeSingle: async () => resp }; } };
+  },
+});
+
+Deno.test("modos do cliente: lidos num SELECT à parte; ilegível = desligado e sem tipos (com o código do erro)", async () => {
+  const erro = await lerModosDoCliente(bancoDoCliente({ data: null, error: { code: "42703", message: "column agenda_config.cliente_tipos_ligados does not exist" } }));
+  assertEquals([erro.cliente, erro.tipos, typeof erro.erro, erro.codigo], ["desligado", [], "string", "42703"]);
+  const semLinha = await lerModosDoCliente(bancoDoCliente({ data: null, error: null }));
+  assertEquals([semLinha.cliente, semLinha.tipos, semLinha.codigo], ["desligado", [], "SEM_LINHA"]);
+  const estranho = await lerModosDoCliente(bancoDoCliente({ data: { modo_cliente: "LIGADÍSSIMO", cliente_tipos_ligados: "confirmar" }, error: null }));
+  assertEquals(estranho, { cliente: "desligado", tipos: [] });
+  const ok = await lerModosDoCliente(bancoDoCliente({ data: { modo_cliente: " Ligado ", cliente_tipos_ligados: ["material_chegou", 3, "confirmar"] }, error: null }));
+  assertEquals(ok, { cliente: "ligado", tipos: ["material_chegou", "confirmar"] });
+  const lancou = await lerModosDoCliente({ from: () => { throw new Error("conexão caiu"); } });
+  assertEquals([lancou.cliente, lancou.tipos, lancou.erro, lancou.codigo], ["desligado", [], "conexão caiu", "EXCECAO"]);
+  assertEquals(CLIENTE_DESLIGADO, { cliente: "desligado", tipos: [] });
+});
+
+Deno.test("R15: sai só com a confirmação da agenda ligada (modo_cliente ligado e 'confirmar' nas ondas)", async () => {
+  assertEquals(r15DesligadaPelaAgenda({ cliente: "ligado", tipos: ["material_chegou", "confirmar"] }), true);
+  assertEquals(R15_DESLIGADA, "a confirmação com o cliente agora é da agenda");
+  // a onda 1 (peça chegou e atraso) não tira a R15
+  assertEquals(r15DesligadaPelaAgenda({ cliente: "ligado", tipos: ["material_chegou", "nova_data", "pode_atrasar"] }), false);
+  // sombra e desligado = a R15 continua, mesmo com a confirmação na lista
+  assertEquals(r15DesligadaPelaAgenda({ cliente: "sombra", tipos: ["confirmar"] }), false);
+  assertEquals(r15DesligadaPelaAgenda({ cliente: "desligado", tipos: ["confirmar"] }), false);
+  assertEquals(r15DesligadaPelaAgenda(CLIENTE_DESLIGADO), false);
+  assertEquals(r15DesligadaPelaAgenda(undefined), false);
+  assertEquals(r15DesligadaPelaAgenda(null), false);
+  // a leitura que falhou = desligado = a R15 continua
+  const m = await lerModosDoCliente(bancoDoCliente({ data: null, error: { code: "57014", message: "timeout" } }));
+  assertEquals(r15DesligadaPelaAgenda(m), false);
+});
